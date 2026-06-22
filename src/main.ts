@@ -1,4 +1,5 @@
 import * as OBC from '@thatopen/components';
+import * as OBCF from '@thatopen/fragments';
 import * as THREE from 'three';
 import { Archive } from 'libarchive.js';
 
@@ -129,6 +130,20 @@ async function buildCbmTree(files: Map<string, File>): Promise<CbmNode | null> {
   return build('CBM/project.cbm');
 }
 
+/** 构建 IFCGUID → CbmNode 反向索引 */
+function buildIfcGuidIndex(node: CbmNode | null): Map<string, CbmNode> {
+  const index = new Map<string, CbmNode>();
+  function walk(n: CbmNode) {
+    if (n.ifcGuid && n.ifcFile) {
+      // 以 "ifcFile:ifcGuid" 为键，支持同一 GUID 在不同 IFC 文件中出现
+      index.set(`${n.ifcFile}:${n.ifcGuid}`, n);
+    }
+    for (const child of n.children) walk(child);
+  }
+  if (node) walk(node);
+  return index;
+}
+
 async function extractGimFile(arrayBuffer: ArrayBuffer): Promise<Map<string, File>> {
   const offset = findArchiveOffset(arrayBuffer);
   const ab = offset > 0 ? arrayBuffer.slice(offset) : arrayBuffer;
@@ -191,7 +206,17 @@ let hasFittedCamera = false;
 let currentFiles: Map<string, File> | null = null;
 let currentIfcEntries: IfcEntry[] = [];
 let currentCbmTree: CbmNode | null = null;
+let ifcGuidIndex = new Map<string, CbmNode>(); // "ifcFile:ifcGuid" → CbmNode
 const loadedModels = new Map<string, { modelId: string; visible: boolean }>();
+
+// 高亮状态
+let highlightedItems: OBC.ModelIdMap | null = null;
+const HIGHLIGHT_STYLE: OBCF.MaterialDefinition = {
+  color: new THREE.Color(0x00ccff),
+  renderedFaces: OBCF.RenderedFaces.TWO,
+  opacity: 0.6,
+  transparent: true,
+};
 
 // ── 工具函数 ──────────────────────────────────────────────
 
@@ -214,6 +239,14 @@ function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/** 重置当前高亮 */
+async function resetHighlight() {
+  if (highlightedItems) {
+    await fragments.resetHighlight(highlightedItems);
+    highlightedItems = null;
+  }
+}
+
 // ── 标签页切换 ─────────────────────────────────────────────
 
 document.querySelectorAll('.tab-btn').forEach((btn) => {
@@ -231,9 +264,7 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 function openPropsDrawer() { propsDrawer.classList.remove('collapsed'); }
 function closePropsDrawer() { propsDrawer.classList.add('collapsed'); }
 
-btnToggleProps.addEventListener('click', () => {
-  propsDrawer.classList.toggle('collapsed');
-});
+btnToggleProps.addEventListener('click', () => { propsDrawer.classList.toggle('collapsed'); });
 btnCloseProps.addEventListener('click', closePropsDrawer);
 
 // ── 模型列表 UI ────────────────────────────────────────────
@@ -381,7 +412,7 @@ function buildAndRenderCbmTree() {
 // ── 属性面板 ───────────────────────────────────────────────
 
 async function showNodeProperties(node: CbmNode) {
-  let html = `<div class="props-header">${node.name}</div>`;
+  let html = `<div class="props-header">${escHtml(node.name)}</div>`;
   html += '<div class="props-section"><div class="props-section-title">基本信息</div><table class="props-table">';
   const bp: [string, string][] = [
     ['实体类型', node.entityName],
@@ -424,6 +455,136 @@ async function showNodeProperties(node: CbmNode) {
   propsDrawerBody.innerHTML = html;
 }
 
+/** 展示 IFC 构件属性（从 3D 点击触发） */
+async function showIfcElementProperties(modelId: string, localId: number) {
+  const model = fragments.list.get(modelId);
+  if (!model) return;
+
+  let html = '<div class="props-header">IFC 构件</div>';
+
+  // 基本信息
+  html += '<div class="props-section"><div class="props-section-title">基本信息</div><table class="props-table">';
+  html += `<tr><td class="prop-key">模型</td><td class="prop-val">${escHtml(modelId)}</td></tr>`;
+  html += `<tr><td class="prop-key">LocalId</td><td class="prop-val">${localId}</td></tr>`;
+
+  // 获取 GUID
+  try {
+    const guids = await model.getGuidsByLocalIds([localId]);
+    if (guids[0]) {
+      html += `<tr><td class="prop-key">GUID</td><td class="prop-val">${escHtml(guids[0])}</td></tr>`;
+
+      // 尝试通过 GUID 反向索引找到 GIM 设备
+      const ifcFile = `${modelId}.ifc`;
+      const gimNode = ifcGuidIndex.get(`${ifcFile}:${guids[0]}`);
+      if (gimNode) {
+        html += `<tr><td class="prop-key">GIM 设备</td><td class="prop-val">${escHtml(gimNode.name)}</td></tr>`;
+        html += `<tr><td class="prop-key">GIM 分类</td><td class="prop-val">${escHtml(gimNode.classifyName)}</td></tr>`;
+      }
+    }
+  } catch { /* GUID 获取失败 */ }
+
+  // 获取类别
+  try {
+    const item = model.getItem(localId);
+    if (item) {
+      const category = await item.getCategory();
+      if (category) html += `<tr><td class="prop-key">类别</td><td class="prop-val">${escHtml(category)}</td></tr>`;
+    }
+  } catch { /* category 获取失败 */ }
+
+  html += '</table></div>';
+
+  // 读取 IFC 属性集
+  try {
+    const itemsData = await model.getItemsData([localId], {
+      attributesDefault: true,
+      relations: {
+        IsDefinedBy: { attributes: true, relations: true },
+      },
+    });
+    if (itemsData.length > 0) {
+      html += renderItemData(itemsData[0]);
+    }
+  } catch (err) {
+    console.warn('读取 IFC 属性失败:', err);
+  }
+
+  // 如果关联到 GIM 设备，展示设备属性
+  try {
+    const guids = await model.getGuidsByLocalIds([localId]);
+    if (guids[0]) {
+      const ifcFile = `${modelId}.ifc`;
+      const gimNode = ifcGuidIndex.get(`${ifcFile}:${guids[0]}`);
+      if (gimNode) {
+        html += '<div class="props-section"><div class="props-section-title">GIM 设备属性</div></div>';
+        // 读取 GIM 设备属性
+        if (gimNode.famPath && currentFiles) {
+          const f = currentFiles.get(`CBM/${gimNode.famPath}`);
+          if (f) html += renderFamSections(parseFamSections(await f.text()));
+        }
+        if (gimNode.devPath && currentFiles) {
+          const f = currentFiles.get(`DEV/${gimNode.devPath}`);
+          if (f) {
+            const kv = parseKeyValue(await f.text());
+            const famRef = kv['BASEFAMILY'];
+            if (famRef) {
+              const famFile = currentFiles.get(`DEV/${famRef}`);
+              if (famFile) html += renderFamSections(parseFamSections(await famFile.text()));
+            }
+          }
+        }
+      }
+    }
+  } catch { /* GIM 设备属性读取失败 */ }
+
+  propsDrawerBody.innerHTML = html;
+}
+
+/** 递归渲染 ItemData 为属性表 */
+function renderItemData(data: OBCF.ItemData, depth = 0): string {
+  let html = '';
+  if (!data || typeof data !== 'object') return html;
+
+  for (const [key, value] of Object.entries(data)) {
+    if (value === null || value === undefined) continue;
+
+    // 数组类型 → 子级（如属性集）
+    if (Array.isArray(value)) {
+      for (const subItem of value) {
+        if (subItem && typeof subItem === 'object' && !('value' in subItem)) {
+          html += renderItemData(subItem as OBCF.ItemData, depth + 1);
+        }
+      }
+      continue;
+    }
+
+    // 属性值类型
+    if (value && typeof value === 'object' && 'value' in value) {
+      const attr = value as OBCF.ItemAttribute;
+      const val = attr.value;
+      if (val === null || val === undefined || val === '') continue;
+      const displayVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
+      // 跳过内部 ID 和空值
+      if (key.startsWith('_') || displayVal === '0' && key.toLowerCase().includes('id')) continue;
+
+      if (depth === 0) {
+        // 顶层属性直接显示（不分组）
+        if (!html.includes('IFC 属性')) {
+          html = '<div class="props-section"><div class="props-section-title">IFC 属性</div><table class="props-table">' + html;
+        }
+      }
+      html += `<tr><td class="prop-key">${escHtml(key)}</td><td class="prop-val">${escHtml(displayVal)}</td></tr>`;
+    }
+  }
+
+  // 关闭顶层表格
+  if (depth === 0 && html.includes('IFC 属性') && !html.endsWith('</table></div>')) {
+    html += '</table></div>';
+  }
+
+  return html;
+}
+
 function renderFamSections(sections: Map<string, Map<string, string>>): string {
   let html = '';
   for (const [secName, props] of sections) {
@@ -435,12 +596,50 @@ function renderFamSections(sections: Map<string, Map<string, string>>): string {
   return html;
 }
 
+// ── 3D 点击拾取 ────────────────────────────────────────────
+
+container.addEventListener('click', async (e) => {
+  if (!initialized || fragments.list.size === 0) return;
+
+  // 传屏幕像素坐标，OBC 内部会自行转换为 NDC
+  const mouse = new THREE.Vector2(e.clientX, e.clientY);
+
+  try {
+    const result = await fragments.raycast({
+      camera: world.camera.three,
+      mouse,
+      dom: (container.querySelector('canvas') as HTMLCanvasElement) || container,
+    });
+
+    if (!result) {
+      // 点击空白处，取消高亮
+      await resetHighlight();
+      return;
+    }
+
+    const { localId, fragments: hitModel } = result;
+    const modelId = hitModel.modelId;
+
+    // 高亮选中构件
+    await resetHighlight();
+    const items: OBC.ModelIdMap = { [modelId]: new Set([localId]) };
+    await fragments.highlight(HIGHLIGHT_STYLE, items);
+    highlightedItems = items;
+
+    // 展示属性
+    await showIfcElementProperties(modelId, localId);
+    openPropsDrawer();
+  } catch (err) {
+    console.warn('射线拾取失败:', err);
+  }
+});
+
 // ── 引擎初始化 ────────────────────────────────────────────
 
 async function initEngine() {
   if (initialized) return;
   showLoading('初始化 IFC 引擎...');
-  await ifcLoader.setup({ autoSetWasm: false, wasm: { path: 'https://unpkg.com/web-ifc@0.0.77/', absolute: true } });
+  await ifcLoader.setup({ autoSetWasm: false, wasm: { path: '/', absolute: true } });
   const workerUrl = await OBC.FragmentsManager.getWorker();
   fragments.init(workerUrl);
   world.camera.controls.addEventListener('update', () => fragments.core.update());
@@ -486,6 +685,9 @@ async function onGimExtracted(extracted: Map<string, File>) {
   if (entries.length === 0) entries = scanIfcFiles(extracted);
   currentIfcEntries = entries;
   currentCbmTree = await buildCbmTree(extracted);
+  // 构建 IFCGUID 反向索引
+  ifcGuidIndex = buildIfcGuidIndex(currentCbmTree);
+  console.log(`IFCGUID 反向索引: ${ifcGuidIndex.size} 条记录`);
   buildAndRenderCbmTree();
   return entries;
 }
@@ -572,12 +774,14 @@ btnLoadDemo.addEventListener('click', async () => {
   } finally { btnLoadDemo.disabled = false; hideLoading(); }
 });
 
-btnClear.addEventListener('click', () => {
+btnClear.addEventListener('click', async () => {
+  await resetHighlight();
   for (const [modelId] of fragments.list) fragments.core.disposeModel(modelId);
   loadedModels.clear();
   currentCbmTree = null;
+  ifcGuidIndex.clear();
   cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>';
-  propsDrawerBody.innerHTML = '<div class="props-empty">选择层级树节点查看属性</div>';
+  propsDrawerBody.innerHTML = '<div class="props-empty">选择层级树节点或点击 3D 构件查看属性</div>';
 });
 
 window.addEventListener('resize', () => { world.renderer?.resize(); });

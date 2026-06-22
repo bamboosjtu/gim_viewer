@@ -65,4 +65,4 @@ npm run build    # TypeScript 编译 + Vite 构建
 
 - `demo/` 目录包含大型二进制文件（.gim, .ifc），已在 .gitignore 中排除
 - `public/worker-bundle.js` 和 `public/libarchive.wasm` 是 libarchive.js 的运行时文件，需随项目提交
-- web-ifc 的 WASM 文件通过 CDN 加载（`https://unpkg.com/web-ifc@0.0.77/`），不在本地
+- web-ifc 的 WASM 文件在 `public/web-ifc.wasm` 和 `public/web-ifc-mt.wasm`，从 `node_modules/web-ifc/` 复制而来，需随项目提交
