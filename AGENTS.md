@@ -43,7 +43,7 @@ CBM 文件构成树形层级，入口为 `CBM/project.cbm`：
 ## 关键依赖版本
 
 - `@thatopen/components`: ^3.4.x
-- `web-ifc`: ^0.0.77（WASM 从 unpkg CDN 加载）
+- `web-ifc`: ^0.0.77（WASM 在 `public/` 目录，离线运行）
 - `libarchive.js`: ^2.0.2（Worker 和 WASM 在 `public/` 目录）
 
 ## 代码约定
@@ -53,6 +53,17 @@ CBM 文件构成树形层级，入口为 `CBM/project.cbm`：
 - UI：原生 DOM 操作，无框架
 - 样式：内联在 `index.html` 的 `<style>` 中
 - GIM 解析流程：读取文件 → 检测 GIMPKGS 头部 → 定位压缩数据偏移 → libarchive.js 解压 → 展平为 `Map<path, File>` → CBM 遍历发现 IFC → 用户选择 → 加载渲染
+
+## 已实现功能
+
+- **GIM 文件解析**：GIMPKGS 头部检测 + 7z/ZIP 解压 + 文件展平
+- **IFC 模型加载**：通过模态框选择 IFC 文件，web-ifc 解析渲染
+- **CBM 层级树**：递归解析 CBM 文件构建树形 UI，支持展开/折叠
+- **文件设备面板**：基于 FileDevRelation.cbm 的 IFC 文件↔设备双向浏览
+- **3D 点击拾取**：raycast 高亮构件 + 展示 IFC 原生属性 + 关联 GIM 设备
+- **层级树→3D 联动**：选中设备节点 → 高亮对应 IFC 构件 + 相机定位
+- **IFC 名称索引**：模型加载后批量查询 GUID→Name，替代 CBM 中的 `&其他` 占位符
+- **属性面板**：右侧可折叠抽屉，展示 FAM 设计参数、DEV 设备信息、IFC 属性集
 
 ## 开发命令
 

@@ -706,7 +706,7 @@ function renderFileDevPanel() {
 // ── 属性面板 ───────────────────────────────────────────────
 
 async function showNodeProperties(node: CbmNode) {
-  let html = `<div class="props-header">${escHtml(node.name)}</div>`;
+  let html = `<div class="props-header">${escHtml(getNodeDisplayName(node))}</div>`;
   html += '<div class="props-section"><div class="props-section-title">基本信息</div><table class="props-table">';
   const bp: [string, string][] = [
     ['实体类型', node.entityName],
@@ -790,30 +790,31 @@ async function showIfcElementProperties(modelId: string, localId: number) {
 
   let html = '<div class="props-header">IFC 构件</div>';
 
-  // 基本信息
-  html += '<div class="props-section"><div class="props-section-title">基本信息</div><table class="props-table">';
-  html += `<tr><td class="prop-key">模型</td><td class="prop-val">${escHtml(modelId)}</td></tr>`;
-  html += `<tr><td class="prop-key">LocalId</td><td class="prop-val">${localId}</td></tr>`;
-
-  // 获取 GUID
+  // 基本信息 + GUID 查找（只调用一次 getGuidsByLocalIds）
+  let guid: string | null = null;
+  let gimNode: CbmNode | null = null;
   try {
     const guids = await model.getGuidsByLocalIds([localId]);
-    if (guids[0]) {
-      html += `<tr><td class="prop-key">GUID</td><td class="prop-val">${escHtml(guids[0])}</td></tr>`;
-
-      // 尝试通过 GUID 反向索引找到 GIM 设备
+    guid = guids[0] || null;
+    if (guid) {
       const ifcFile = `${modelId}.ifc`;
-      const gimNode = ifcGuidIndex.get(`${ifcFile}:${guids[0]}`);
-      if (gimNode) {
-        html += `<tr><td class="prop-key">GIM 设备</td><td class="prop-val">${escHtml(gimNode.name)}</td></tr>`;
-        html += `<tr><td class="prop-key">GIM 分类</td><td class="prop-val">${escHtml(gimNode.classifyName)}</td></tr>`;
-      }
+      gimNode = ifcGuidIndex.get(`${ifcFile}:${guid}`) || null;
     }
   } catch { /* GUID 获取失败 */ }
 
+  html += '<div class="props-section"><div class="props-section-title">基本信息</div><table class="props-table">';
+  html += `<tr><td class="prop-key">模型</td><td class="prop-val">${escHtml(modelId)}</td></tr>`;
+  html += `<tr><td class="prop-key">LocalId</td><td class="prop-val">${localId}</td></tr>`;
+  if (guid) {
+    html += `<tr><td class="prop-key">GUID</td><td class="prop-val">${escHtml(guid)}</td></tr>`;
+    if (gimNode) {
+      html += `<tr><td class="prop-key">GIM 设备</td><td class="prop-val">${escHtml(getNodeDisplayName(gimNode))}</td></tr>`;
+      html += `<tr><td class="prop-key">GIM 分类</td><td class="prop-val">${escHtml(gimNode.classifyName)}</td></tr>`;
+    }
+  }
   html += '</table></div>';
 
-  // 读取 IFC 属性（使用 getItemsData 最简配置）
+  // 读取 IFC 属性
   try {
     const itemsData = await model.getItemsData([localId], { attributesDefault: true });
     if (itemsData.length > 0) {
@@ -824,69 +825,59 @@ async function showIfcElementProperties(modelId: string, localId: number) {
   }
 
   // 如果关联到 GIM 设备，展示设备属性
-  try {
-    const guids = await model.getGuidsByLocalIds([localId]);
-    if (guids[0]) {
-      const ifcFile = `${modelId}.ifc`;
-      const gimNode = ifcGuidIndex.get(`${ifcFile}:${guids[0]}`);
-      if (gimNode) {
-        html += '<div class="props-section"><div class="props-section-title">GIM 设备属性</div></div>';
-        // 读取 GIM 设备属性
-        if (gimNode.famPath && currentFiles) {
-          const f = currentFiles.get(`CBM/${gimNode.famPath}`);
-          if (f) html += renderFamSections(parseFamSections(await f.text()));
-        }
-        if (gimNode.devPath && currentFiles) {
-          const f = currentFiles.get(`DEV/${gimNode.devPath}`);
-          if (f) {
-            const kv = parseKeyValue(await f.text());
-            const famRef = kv['BASEFAMILY'];
-            if (famRef) {
-              const famFile = currentFiles.get(`DEV/${famRef}`);
-              if (famFile) html += renderFamSections(parseFamSections(await famFile.text()));
-            }
-          }
+  if (gimNode) {
+    html += '<div class="props-section"><div class="props-section-title">GIM 设备属性</div></div>';
+    if (gimNode.famPath && currentFiles) {
+      const f = currentFiles.get(`CBM/${gimNode.famPath}`);
+      if (f) html += renderFamSections(parseFamSections(await f.text()));
+    }
+    if (gimNode.devPath && currentFiles) {
+      const f = currentFiles.get(`DEV/${gimNode.devPath}`);
+      if (f) {
+        const kv = parseKeyValue(await f.text());
+        const famRef = kv['BASEFAMILY'];
+        if (famRef) {
+          const famFile = currentFiles.get(`DEV/${famRef}`);
+          if (famFile) html += renderFamSections(parseFamSections(await famFile.text()));
         }
       }
     }
-  } catch { /* GIM 设备属性读取失败 */ }
+  }
 
   propsDrawerBody.innerHTML = html;
 }
 
-/** 渲染 Item.getData() 返回的属性数据为 HTML */
+/** 渲染 getItemsData 返回的属性数据为 HTML */
 function renderIfcItemData(data: Record<string, unknown>, depth = 0): string {
   if (!data || typeof data !== 'object') return '';
   let html = '';
   let tableOpen = false;
+  let wrapperOpen = false;
 
   for (const [key, value] of Object.entries(data)) {
     if (value === null || value === undefined || value === '') continue;
-    // 跳过内部字段
     if (key.startsWith('_')) continue;
 
     if (typeof value === 'object' && !Array.isArray(value)) {
-      // 嵌套对象 → 递归渲染为子分区
       const subHtml = renderIfcItemData(value as Record<string, unknown>, depth + 1);
       if (subHtml) {
-        if (tableOpen) { html += '</table></div>'; tableOpen = false; }
-        html += `<div class="props-section"><div class="props-section-title">${escHtml(key)}</div>`;
+        if (tableOpen) { html += '</table>'; tableOpen = false; }
+        if (depth === 0 && !wrapperOpen) { html += '<div class="props-section">'; wrapperOpen = true; }
+        html += `<div class="props-section-title">${escHtml(key)}</div>`;
         html += subHtml;
-        html += '</div>';
       }
       continue;
     }
 
     if (Array.isArray(value)) {
-      // 数组 → 尝试渲染每个元素
       for (const elem of value) {
         if (elem && typeof elem === 'object') {
           const subHtml = renderIfcItemData(elem as Record<string, unknown>, depth + 1);
           if (subHtml) {
-            if (tableOpen) { html += '</table></div>'; tableOpen = false; }
-            html += `<div class="props-section"><div class="props-section-title">${escHtml(key)}</div>`;
+            if (tableOpen) { html += '</table>'; tableOpen = false; }
+            if (depth === 0 && !wrapperOpen) { html += '<div class="props-section">'; wrapperOpen = true; }
+            html += `<div class="props-section-title">${escHtml(key)}</div>`;
             html += subHtml;
-            html += '</div>';
           }
         }
       }
@@ -895,9 +886,11 @@ function renderIfcItemData(data: Record<string, unknown>, depth = 0): string {
 
     // 基本类型值
     if (!tableOpen) {
-      html += depth === 0
-        ? '<div class="props-section"><div class="props-section-title">IFC 属性</div><table class="props-table">'
-        : '<table class="props-table">';
+      if (depth === 0 && !wrapperOpen) {
+        html += '<div class="props-section"><div class="props-section-title">IFC 属性</div>';
+        wrapperOpen = true;
+      }
+      html += '<table class="props-table">';
       tableOpen = true;
     }
     const displayVal = String(value);
@@ -906,7 +899,7 @@ function renderIfcItemData(data: Record<string, unknown>, depth = 0): string {
   }
 
   if (tableOpen) html += '</table>';
-  if (depth === 0 && html) html += '</div>';
+  if (depth === 0 && wrapperOpen) html += '</div>';
   return html;
 }
 
@@ -925,6 +918,9 @@ function renderFamSections(sections: Map<string, Map<string, string>>): string {
 
 container.addEventListener('click', async (e) => {
   if (!initialized || fragments.list.size === 0) return;
+  // 只响应 canvas 点击，忽略 UI 覆盖层
+  const canvas = container.querySelector('canvas');
+  if (e.target !== container && e.target !== canvas) return;
 
   // 传屏幕像素坐标，OBC 内部会自行转换为 NDC
   const mouse = new THREE.Vector2(e.clientX, e.clientY);
