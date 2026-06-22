@@ -124,7 +124,7 @@ async function buildCbmTree(files: Map<string, File>): Promise<CbmNode | null> {
     for (let i = 0; i < sn; i++) { const s = kv[`SUBSYSTEM${i}`]; if (s) { const c = await build(`CBM/${s}`); if (c) children.push(c); } }
     const dn2 = parseInt(kv['SUBDEVICES.NUM'] || '0', 10);
     for (let i = 0; i < dn2; i++) { const s = kv[`SUBDEVICE${i}`]; if (s) { const c = await build(`CBM/${s}`); if (c) children.push(c); } }
-    return { path: p, name: dn, entityName: en, children, famPath: kv['BASEFAMILY'] || '', devPath: kv['OBJECTMODELPOINTER'] || '', ifcFile: kv['IFCFILE'] || '', ifcGuid: kv['IFCGUID'] || '', classifyName: cn, transformMatrix: kv['TRANSFORMMATRIX'] || '' };
+    return { path: p, name: dn, entityName: en, children, famPath: kv['BASEFAMILY'] || '', devPath: kv['OBJECTMODELPOINTER'] || '', ifcFile: kv['IFCFILE'] || '', ifcGuid: (kv['IFCGUID'] || '').replace(/\$+$/, '').trim(), classifyName: cn, transformMatrix: kv['TRANSFORMMATRIX'] || '' };
   }
   if (!files.has('CBM/project.cbm')) return null;
   return build('CBM/project.cbm');
@@ -142,6 +142,119 @@ function buildIfcGuidIndex(node: CbmNode | null): Map<string, CbmNode> {
   }
   if (node) walk(node);
   return index;
+}
+
+/** 获取节点显示名称：优先 IFC 名称，其次分类名称 */
+function getNodeDisplayName(node: CbmNode): string {
+  if (node.ifcFile && node.ifcGuid) {
+    const modelId = node.ifcFile.replace(/\.ifc$/i, '');
+    const ifcName = ifcGuidToName.get(`${modelId}:${node.ifcGuid}`);
+    if (ifcName) return ifcName;
+  }
+  return node.name;
+}
+
+/** IFC 模型加载后，构建 GUID → 名称索引 */
+async function buildIfcNameIndex() {
+  // 按 modelId 分组收集 GUID
+  const byModel = new Map<string, { guid: string; node: CbmNode }[]>();
+  for (const [, node] of ifcGuidIndex) {
+    const modelId = node.ifcFile.replace(/\.ifc$/i, '');
+    if (!byModel.has(modelId)) byModel.set(modelId, []);
+    byModel.get(modelId)!.push({ guid: node.ifcGuid, node });
+  }
+
+  for (const [modelId, entries] of byModel) {
+    const model = fragments.list.get(modelId);
+    if (!model) continue;
+    const guids = entries.map(e => e.guid);
+    try {
+      const localIds = await model.getLocalIdsByGuids(guids);
+      const validEntries = entries.filter((_, i) => localIds[i] !== null);
+      const validLocalIds = localIds.filter((id): id is number => id !== null);
+      if (validLocalIds.length === 0) continue;
+      const itemsData = await model.getItemsData(validLocalIds, { attributesDefault: true });
+      for (let i = 0; i < validEntries.length; i++) {
+        const data = itemsData[i] as unknown as Record<string, unknown>;
+        if (!data) continue;
+        // 查找 Name 属性
+        let name: string | null = null;
+        for (const [k, v] of Object.entries(data)) {
+          if (k === 'Name' && v && typeof v === 'object' && 'value' in v) {
+            const val = (v as { value: unknown }).value;
+            if (val) name = String(val);
+            break;
+          }
+        }
+        if (name) {
+          ifcGuidToName.set(`${modelId}:${validEntries[i].guid}`, name);
+          validEntries[i].node.name = name; // 更新节点名称
+        }
+      }
+    } catch (err) {
+      console.warn(`构建名称索引失败 (${modelId}):`, err);
+    }
+  }
+  console.log(`IFC 名称索引: ${ifcGuidToName.size} 条记录`);
+}
+
+/** 构建 CBM 文件名 → CbmNode 索引 */
+function buildCbmNodeIndex(node: CbmNode | null): Map<string, CbmNode> {
+  const index = new Map<string, CbmNode>();
+  function walk(n: CbmNode) {
+    const fileName = n.path.split('/').pop() || '';
+    if (fileName) index.set(fileName, n);
+    for (const child of n.children) walk(child);
+  }
+  if (node) walk(node);
+  return index;
+}
+
+/** 收集节点及其后代的所有 IFC 引用 → Map<modelId, Set<ifcGuid>> */
+function collectIfcRefs(node: CbmNode): Map<string, Set<string>> {
+  const refs = new Map<string, Set<string>>();
+  function walk(n: CbmNode) {
+    if (n.ifcFile && n.ifcGuid) {
+      const modelId = n.ifcFile.replace(/\.ifc$/i, '');
+      if (!refs.has(modelId)) refs.set(modelId, new Set());
+      refs.get(modelId)!.add(n.ifcGuid);
+    }
+    for (const child of n.children) walk(child);
+  }
+  walk(node);
+  return refs;
+}
+
+/** FileDevRelation 条目 */
+interface FileDevEntry {
+  ifcName: string;
+  ifcFile: string;
+  modelId: string;
+  deviceCount: number;
+  deviceCbms: string[];
+}
+
+/** 解析 FileDevRelation.cbm */
+async function parseFileDevRelation(files: Map<string, File>): Promise<FileDevEntry[]> {
+  const f = files.get('CBM/FileDevRelation.cbm');
+  if (!f) return [];
+  const kv = parseKeyValue(await f.text());
+  const num = parseInt(kv['FILE.NUM'] || '0', 10);
+  const entries: FileDevEntry[] = [];
+  for (let i = 0; i < num; i += 2) {
+    const ifcName = kv[`FILE${i}.NAME`] || '';
+    const devNum = parseInt(kv[`FILE${i}.DEV.NUM`] || '0', 10);
+    const deviceCbms: string[] = [];
+    for (let j = 0; j < devNum; j++) {
+      const dev = kv[`FILE${i}.DEV${j}`];
+      if (dev) deviceCbms.push(dev);
+    }
+    // 奇数条目含实际 IFC 文件名
+    const ifcFile = kv[`FILE${i + 1}.IFC`] || `${ifcName}.ifc`;
+    const modelId = ifcFile.replace(/\.ifc$/i, '');
+    entries.push({ ifcName, ifcFile, modelId, deviceCount: devNum, deviceCbms });
+  }
+  return entries;
 }
 
 async function extractGimFile(arrayBuffer: ArrayBuffer): Promise<Map<string, File>> {
@@ -168,6 +281,7 @@ const btnLoadGim = document.getElementById('btn-load-gim') as HTMLButtonElement;
 const btnLoadDemo = document.getElementById('btn-load-demo') as HTMLButtonElement;
 const btnClear = document.getElementById('btn-clear') as HTMLButtonElement;
 const cbmTreePanel = document.getElementById('cbm-tree-panel') as HTMLElement;
+const fileDevPanel = document.getElementById('file-dev-panel') as HTMLElement;
 const propsDrawerBody = document.getElementById('props-drawer-body') as HTMLElement;
 const propsDrawer = document.getElementById('props-drawer') as HTMLElement;
 const btnToggleProps = document.getElementById('btn-toggle-props') as HTMLButtonElement;
@@ -207,6 +321,10 @@ let currentFiles: Map<string, File> | null = null;
 let currentIfcEntries: IfcEntry[] = [];
 let currentCbmTree: CbmNode | null = null;
 let ifcGuidIndex = new Map<string, CbmNode>(); // "ifcFile:ifcGuid" → CbmNode
+let cbmNodeIndex = new Map<string, CbmNode>(); // cbmFileName → CbmNode
+let ifcGuidToName = new Map<string, string>(); // "modelId:guid" → displayName
+let fileDevRelations: FileDevEntry[] = [];
+let deviceToIfcFile = new Map<string, string>(); // deviceCbmName → ifcModelId
 const loadedModels = new Map<string, { modelId: string; visible: boolean }>();
 
 // 高亮状态
@@ -222,6 +340,24 @@ const HIGHLIGHT_STYLE: OBCF.MaterialDefinition = {
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
 function hideLoading() { loadingEl.style.display = 'none'; }
+
+/** 显示临时消息提醒（3秒后自动消失） */
+let messageTimer: ReturnType<typeof setTimeout> | null = null;
+function showMessage(text: string) {
+  console.log(text);
+  const msgEl = document.getElementById('message-tip') || (() => {
+    const el = document.createElement('div');
+    el.id = 'message-tip';
+    el.style.cssText = 'position:absolute;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 20px;background:rgba(0,0,0,0.8);color:#fff;border-radius:8px;font-size:13px;z-index:100;max-width:80%;text-align:center;pointer-events:none;transition:opacity 0.3s';
+    container.appendChild(el);
+    return el;
+  })();
+  msgEl.textContent = text;
+  msgEl.style.opacity = '1';
+  msgEl.style.display = 'block';
+  if (messageTimer) clearTimeout(messageTimer);
+  messageTimer = setTimeout(() => { msgEl.style.opacity = '0'; }, 3000);
+}
 
 function fitCameraToScene() {
   if (hasFittedCamera) return;
@@ -244,6 +380,82 @@ async function resetHighlight() {
   if (highlightedItems) {
     await fragments.resetHighlight(highlightedItems);
     highlightedItems = null;
+  }
+}
+
+/** 将相机定位到指定包围盒 */
+async function frameBox(box: THREE.Box3) {
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z, 1);
+  const distance = maxDim * 2.5;
+  await world.camera.controls.setLookAt(
+    center.x + distance, center.y + distance * 0.8, center.z + distance,
+    center.x, center.y, center.z,
+  );
+}
+
+/** 从 CbmNode 高亮对应的 IFC 构件 */
+async function highlightIfcFromNode(node: CbmNode) {
+  const refs = collectIfcRefs(node);
+
+  if (refs.size > 0) {
+    // IFCGUID 精确高亮
+    await resetHighlight();
+    const items: OBC.ModelIdMap = {};
+    let totalHighlighted = 0;
+    const highlightBoxes: THREE.Box3[] = [];
+
+    for (const [modelId, guids] of refs) {
+      const model = fragments.list.get(modelId);
+      if (!model) {
+        console.log(`模型 ${modelId} 未加载，跳过 ${guids.size} 个 GUID`);
+        continue;
+      }
+      try {
+        const localIds = await model.getLocalIdsByGuids(Array.from(guids));
+        const validIds = localIds.filter((id): id is number => id !== null);
+        if (validIds.length > 0) {
+          items[modelId] = new Set(validIds);
+          totalHighlighted += validIds.length;
+          // 获取构件包围盒用于相机定位
+          try {
+            const box = await model.getMergedBox(validIds);
+            if (box && !box.isEmpty()) highlightBoxes.push(box);
+          } catch { /* 包围盒获取失败 */ }
+        } else {
+          console.log(`模型 ${modelId} 中未找到匹配的 GUID (尝试了 ${guids.size} 个)`);
+        }
+      } catch (err) {
+        console.warn(`GUID 转换失败 (${modelId}):`, err);
+      }
+    }
+
+    if (Object.keys(items).length > 0) {
+      await fragments.highlight(HIGHLIGHT_STYLE, items);
+      highlightedItems = items;
+      console.log(`已高亮 ${totalHighlighted} 个 IFC 构件`);
+      // 用构件包围盒定位相机
+      if (highlightBoxes.length > 0) {
+        const unionBox = highlightBoxes.reduce((acc, b) => acc.union(b), highlightBoxes[0].clone());
+        await frameBox(unionBox);
+      }
+      return;
+    }
+  }
+
+  // 回退：无 IFCGUID，不飞视角（TRANSFORMMATRIX 是测量坐标系，与 IFC 模型坐标系不同）
+  const cbmFileName = node.path.split('/').pop() || '';
+  const ifcModelId = node.ifcFile ? node.ifcFile.replace(/\.ifc$/i, '') : deviceToIfcFile.get(cbmFileName);
+  if (ifcModelId) {
+    const loaded = fragments.list.has(ifcModelId);
+    if (loaded) {
+      showMessage(`设备 "${getNodeDisplayName(node)}" 属于 ${ifcModelId}.ifc，但无 IFCGUID 映射到具体构件`);
+    } else {
+      showMessage(`设备 "${getNodeDisplayName(node)}" 属于 ${ifcModelId}.ifc，该 IFC 文件未加载`);
+    }
+  } else {
+    showMessage(`设备 "${getNodeDisplayName(node)}" 无 IFC 关联`);
   }
 }
 
@@ -346,6 +558,11 @@ modalLoad.addEventListener('click', async () => {
       const buffer = new Uint8Array(await file.arrayBuffer());
       await loadIfcBuffer(`${entry.name}.ifc`, buffer);
     }
+    // 模型加载完成后，构建 IFC 名称索引并重新渲染树
+    showLoading('正在构建名称索引...');
+    await buildIfcNameIndex();
+    buildAndRenderCbmTree();
+    renderFileDevPanel();
   } catch (err) {
     console.error(err);
     showLoading(`加载失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -375,7 +592,7 @@ function renderCbmTree(node: CbmNode, parentEl: HTMLElement) {
   icon.textContent = ENTITY_ICONS[node.entityName] || '📁';
   const label = document.createElement('span');
   label.className = 'tree-label';
-  label.textContent = node.name;
+  label.textContent = getNodeDisplayName(node);
   label.title = node.path;
   row.appendChild(toggle); row.appendChild(icon); row.appendChild(label);
   nodeEl.appendChild(row);
@@ -390,6 +607,8 @@ function renderCbmTree(node: CbmNode, parentEl: HTMLElement) {
     row.classList.add('selected');
     showNodeProperties(node);
     openPropsDrawer();
+    // 层级树选中 → 3D 高亮对应 IFC 构件
+    highlightIfcFromNode(node);
     if (node.children.length > 0) {
       expanded = !expanded;
       toggle.classList.toggle('expanded', expanded);
@@ -409,6 +628,81 @@ function buildAndRenderCbmTree() {
   renderCbmTree(currentCbmTree, cbmTreePanel);
 }
 
+// ── 文件-设备面板 UI ────────────────────────────────────────
+
+function renderFileDevPanel() {
+  fileDevPanel.innerHTML = '';
+  if (fileDevRelations.length === 0) {
+    fileDevPanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示文件-设备关系</div>';
+    return;
+  }
+  for (const entry of fileDevRelations) {
+    const nodeEl = document.createElement('div');
+    nodeEl.className = 'tree-node';
+    const row = document.createElement('div');
+    row.className = 'tree-row';
+    const toggle = document.createElement('span');
+    toggle.className = 'tree-toggle';
+    toggle.textContent = '▶';
+    const icon = document.createElement('span');
+    icon.className = 'tree-icon';
+    icon.textContent = '📄';
+    const label = document.createElement('span');
+    label.className = 'tree-label';
+    label.textContent = `${entry.ifcName} (${entry.deviceCount})`;
+    row.appendChild(toggle); row.appendChild(icon); row.appendChild(label);
+    nodeEl.appendChild(row);
+    const childrenEl = document.createElement('div');
+    childrenEl.className = 'tree-children';
+    nodeEl.appendChild(childrenEl);
+
+    let expanded = false;
+    let childrenRendered = false;
+    row.addEventListener('click', () => {
+      expanded = !expanded;
+      toggle.classList.toggle('expanded', expanded);
+      childrenEl.classList.toggle('expanded', expanded);
+      if (expanded && !childrenRendered) {
+        for (const devCbm of entry.deviceCbms) {
+          const devNode = cbmNodeIndex.get(devCbm);
+          const devRow = document.createElement('div');
+          devRow.className = 'tree-row';
+          devRow.style.paddingLeft = '24px';
+          const devIcon = document.createElement('span');
+          devIcon.className = 'tree-icon';
+          devIcon.textContent = devNode ? (ENTITY_ICONS[devNode.entityName] || '📁') : '🔩';
+          const devLabel = document.createElement('span');
+          devLabel.className = 'tree-label';
+          devLabel.textContent = devNode ? getNodeDisplayName(devNode) : devCbm.replace(/\.cbm$/i, '');
+          devRow.appendChild(devIcon); devRow.appendChild(devLabel);
+          devRow.addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.querySelectorAll('.tree-row.selected').forEach(r => r.classList.remove('selected'));
+            devRow.classList.add('selected');
+            if (devNode) {
+              showNodeProperties(devNode);
+              highlightIfcFromNode(devNode);
+            } else {
+              // devNode 不在索引中，创建临时节点用于位置飞行
+              const tempNode: CbmNode = {
+                path: `CBM/${devCbm}`, name: devCbm.replace(/\.cbm$/i, ''),
+                entityName: '', children: [], famPath: '', devPath: '',
+                ifcFile: '', ifcGuid: '', classifyName: '', transformMatrix: '',
+              };
+              showNodeProperties(tempNode);
+              highlightIfcFromNode(tempNode);
+            }
+            openPropsDrawer();
+          });
+          childrenEl.appendChild(devRow);
+        }
+        childrenRendered = true;
+      }
+    });
+    fileDevPanel.appendChild(nodeEl);
+  }
+}
+
 // ── 属性面板 ───────────────────────────────────────────────
 
 async function showNodeProperties(node: CbmNode) {
@@ -421,6 +715,10 @@ async function showNodeProperties(node: CbmNode) {
   ];
   if (node.ifcFile) bp.push(['IFC 文件', node.ifcFile]);
   if (node.ifcGuid) bp.push(['IFC GUID', node.ifcGuid]);
+  // FileDevRelation 反向索引：显示设备所属 IFC 文件
+  const cbmFileName = node.path.split('/').pop() || '';
+  const ifcModelId = deviceToIfcFile.get(cbmFileName);
+  if (ifcModelId && !node.ifcFile) bp.push(['所属 IFC 文件', `${ifcModelId}.ifc`]);
   if (node.children.length > 0) bp.push(['子节点数', String(node.children.length)]);
   for (const [k, v] of bp) { if (v) html += `<tr><td class="prop-key">${k}</td><td class="prop-val">${escHtml(v)}</td></tr>`; }
   html += '</table></div>';
@@ -450,6 +748,36 @@ async function showNodeProperties(node: CbmNode) {
     html += '<div class="props-section"><div class="props-section-title">变换矩阵</div><table class="props-table">';
     html += `<tr><td class="prop-val" colspan="2" style="font-family:monospace;font-size:11px;color:#888;word-break:break-all">${escHtml(node.transformMatrix)}</td></tr>`;
     html += '</table></div>';
+  }
+
+  // 如果设备有 IFCGUID，读取并展示 IFC 构件原生属性
+  if (node.ifcFile && node.ifcGuid) {
+    const modelId = node.ifcFile.replace(/\.ifc$/i, '');
+    const model = fragments.list.get(modelId);
+    if (model) {
+      try {
+        const localIds = await model.getLocalIdsByGuids([node.ifcGuid]);
+        const localId = localIds[0];
+        if (localId !== null && localId !== undefined) {
+          html += '<div class="props-section"><div class="props-section-title">IFC 构件属性</div><table class="props-table">';
+          html += `<tr><td class="prop-key">模型</td><td class="prop-val">${escHtml(modelId)}</td></tr>`;
+          html += `<tr><td class="prop-key">LocalId</td><td class="prop-val">${localId}</td></tr>`;
+          html += `<tr><td class="prop-key">GUID</td><td class="prop-val">${escHtml(node.ifcGuid)}</td></tr>`;
+          html += '</table></div>';
+          // 读取 IFC 属性（使用 getItemsData 最简配置）
+          try {
+            const itemsData = await model.getItemsData([localId], { attributesDefault: true });
+            if (itemsData.length > 0) {
+              html += renderIfcItemData(itemsData[0] as unknown as Record<string, unknown>);
+            }
+          } catch (err) {
+            console.warn('读取 IFC 属性失败:', err);
+          }
+        }
+      } catch (err) {
+        console.warn(`IFC GUID 查找失败 (${node.ifcGuid}):`, err);
+      }
+    }
   }
 
   propsDrawerBody.innerHTML = html;
@@ -483,27 +811,13 @@ async function showIfcElementProperties(modelId: string, localId: number) {
     }
   } catch { /* GUID 获取失败 */ }
 
-  // 获取类别
-  try {
-    const item = model.getItem(localId);
-    if (item) {
-      const category = await item.getCategory();
-      if (category) html += `<tr><td class="prop-key">类别</td><td class="prop-val">${escHtml(category)}</td></tr>`;
-    }
-  } catch { /* category 获取失败 */ }
-
   html += '</table></div>';
 
-  // 读取 IFC 属性集
+  // 读取 IFC 属性（使用 getItemsData 最简配置）
   try {
-    const itemsData = await model.getItemsData([localId], {
-      attributesDefault: true,
-      relations: {
-        IsDefinedBy: { attributes: true, relations: true },
-      },
-    });
+    const itemsData = await model.getItemsData([localId], { attributesDefault: true });
     if (itemsData.length > 0) {
-      html += renderItemData(itemsData[0]);
+      html += renderIfcItemData(itemsData[0] as unknown as Record<string, unknown>);
     }
   } catch (err) {
     console.warn('读取 IFC 属性失败:', err);
@@ -540,48 +854,59 @@ async function showIfcElementProperties(modelId: string, localId: number) {
   propsDrawerBody.innerHTML = html;
 }
 
-/** 递归渲染 ItemData 为属性表 */
-function renderItemData(data: OBCF.ItemData, depth = 0): string {
+/** 渲染 Item.getData() 返回的属性数据为 HTML */
+function renderIfcItemData(data: Record<string, unknown>, depth = 0): string {
+  if (!data || typeof data !== 'object') return '';
   let html = '';
-  if (!data || typeof data !== 'object') return html;
+  let tableOpen = false;
 
   for (const [key, value] of Object.entries(data)) {
-    if (value === null || value === undefined) continue;
+    if (value === null || value === undefined || value === '') continue;
+    // 跳过内部字段
+    if (key.startsWith('_')) continue;
 
-    // 数组类型 → 子级（如属性集）
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      // 嵌套对象 → 递归渲染为子分区
+      const subHtml = renderIfcItemData(value as Record<string, unknown>, depth + 1);
+      if (subHtml) {
+        if (tableOpen) { html += '</table></div>'; tableOpen = false; }
+        html += `<div class="props-section"><div class="props-section-title">${escHtml(key)}</div>`;
+        html += subHtml;
+        html += '</div>';
+      }
+      continue;
+    }
+
     if (Array.isArray(value)) {
-      for (const subItem of value) {
-        if (subItem && typeof subItem === 'object' && !('value' in subItem)) {
-          html += renderItemData(subItem as OBCF.ItemData, depth + 1);
+      // 数组 → 尝试渲染每个元素
+      for (const elem of value) {
+        if (elem && typeof elem === 'object') {
+          const subHtml = renderIfcItemData(elem as Record<string, unknown>, depth + 1);
+          if (subHtml) {
+            if (tableOpen) { html += '</table></div>'; tableOpen = false; }
+            html += `<div class="props-section"><div class="props-section-title">${escHtml(key)}</div>`;
+            html += subHtml;
+            html += '</div>';
+          }
         }
       }
       continue;
     }
 
-    // 属性值类型
-    if (value && typeof value === 'object' && 'value' in value) {
-      const attr = value as OBCF.ItemAttribute;
-      const val = attr.value;
-      if (val === null || val === undefined || val === '') continue;
-      const displayVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
-      // 跳过内部 ID 和空值
-      if (key.startsWith('_') || displayVal === '0' && key.toLowerCase().includes('id')) continue;
-
-      if (depth === 0) {
-        // 顶层属性直接显示（不分组）
-        if (!html.includes('IFC 属性')) {
-          html = '<div class="props-section"><div class="props-section-title">IFC 属性</div><table class="props-table">' + html;
-        }
-      }
-      html += `<tr><td class="prop-key">${escHtml(key)}</td><td class="prop-val">${escHtml(displayVal)}</td></tr>`;
+    // 基本类型值
+    if (!tableOpen) {
+      html += depth === 0
+        ? '<div class="props-section"><div class="props-section-title">IFC 属性</div><table class="props-table">'
+        : '<table class="props-table">';
+      tableOpen = true;
     }
+    const displayVal = String(value);
+    if (displayVal === '0' && key.toLowerCase().includes('id')) continue;
+    html += `<tr><td class="prop-key">${escHtml(key)}</td><td class="prop-val">${escHtml(displayVal)}</td></tr>`;
   }
 
-  // 关闭顶层表格
-  if (depth === 0 && html.includes('IFC 属性') && !html.endsWith('</table></div>')) {
-    html += '</table></div>';
-  }
-
+  if (tableOpen) html += '</table>';
+  if (depth === 0 && html) html += '</div>';
   return html;
 }
 
@@ -685,10 +1010,48 @@ async function onGimExtracted(extracted: Map<string, File>) {
   if (entries.length === 0) entries = scanIfcFiles(extracted);
   currentIfcEntries = entries;
   currentCbmTree = await buildCbmTree(extracted);
-  // 构建 IFCGUID 反向索引
+  // 构建索引
   ifcGuidIndex = buildIfcGuidIndex(currentCbmTree);
-  console.log(`IFCGUID 反向索引: ${ifcGuidIndex.size} 条记录`);
+  cbmNodeIndex = buildCbmNodeIndex(currentCbmTree);
+  console.log(`IFCGUID 反向索引: ${ifcGuidIndex.size} 条记录, CBM节点索引: ${cbmNodeIndex.size} 条`);
+  // 解析 FileDevRelation
+  fileDevRelations = await parseFileDevRelation(extracted);
+  deviceToIfcFile.clear();
+  for (const entry of fileDevRelations) {
+    for (const devCbm of entry.deviceCbms) {
+      deviceToIfcFile.set(devCbm, entry.modelId);
+    }
+  }
+  // 补充 FileDevRelation 引用但不在 CBM 树中的设备节点
+  let supplemented = 0;
+  for (const entry of fileDevRelations) {
+    for (const devCbm of entry.deviceCbms) {
+      if (cbmNodeIndex.has(devCbm)) continue;
+      const f = extracted.get(`CBM/${devCbm}`);
+      if (!f) continue;
+      try {
+        const kv = parseKeyValue(await f.text());
+        const en = kv['ENTITYNAME'] || '';
+        const cn = kv['SYSCLASSIFYNAME'] || kv['PARTNAME'] || '';
+        const dn = cn || en || devCbm.replace(/\.cbm$/i, '');
+        const ifcFile = kv['IFCFILE'] || '';
+        const ifcGuid = (kv['IFCGUID'] || '').replace(/\$+$/, '').trim();
+        const node: CbmNode = {
+          path: `CBM/${devCbm}`, name: dn, entityName: en, children: [],
+          famPath: kv['BASEFAMILY'] || '', devPath: kv['OBJECTMODELPOINTER'] || '',
+          ifcFile, ifcGuid, classifyName: cn,
+          transformMatrix: kv['TRANSFORMMATRIX'] || '',
+        };
+        cbmNodeIndex.set(devCbm, node);
+        if (ifcFile && ifcGuid) ifcGuidIndex.set(`${ifcFile}:${ifcGuid}`, node);
+        supplemented++;
+      } catch { /* 读取 CBM 失败 */ }
+    }
+  }
+  if (supplemented > 0) console.log(`补充了 ${supplemented} 个不在 CBM 树中的设备节点`);
+  console.log(`FileDevRelation: ${fileDevRelations.length} 个 IFC 文件, ${deviceToIfcFile.size} 个设备映射`);
   buildAndRenderCbmTree();
+  renderFileDevPanel();
   return entries;
 }
 
@@ -706,6 +1069,9 @@ fileInput.addEventListener('change', async () => {
       showLoading(`正在读取 ${file.name}...`);
       await loadIfcBuffer(file.name, new Uint8Array(await file.arrayBuffer()));
     }
+    await buildIfcNameIndex();
+    buildAndRenderCbmTree();
+    renderFileDevPanel();
   } catch (err) {
     console.error(err);
     showLoading(`加载失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -780,7 +1146,12 @@ btnClear.addEventListener('click', async () => {
   loadedModels.clear();
   currentCbmTree = null;
   ifcGuidIndex.clear();
+  cbmNodeIndex.clear();
+  ifcGuidToName.clear();
+  fileDevRelations = [];
+  deviceToIfcFile.clear();
   cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>';
+  fileDevPanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示文件-设备关系</div>';
   propsDrawerBody.innerHTML = '<div class="props-empty">选择层级树节点或点击 3D 构件查看属性</div>';
 });
 
