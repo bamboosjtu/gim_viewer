@@ -1,0 +1,754 @@
+import type { CbmNode } from '../gim/types.js';
+import type { AppState, ProjectLoadSession } from '../app/state.js';
+import type { ViewerContext } from '../viewer/viewerEngine.js';
+import * as THREE from 'three';
+import { collectIfcRefs } from '../gim/cbmParser.js';
+import { DEBUG_IFC_LOAD } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
+import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
+import { getFileByPath, hasFileByPath } from '../gim/fileLookup.js';
+
+/**
+ * 节点点击交互服务（用于缓存命中、无 Viewer 场景）。
+ *
+ * 行为：
+ * 1. 立即显示基础属性 + 打开属性面板（纯 UI，无 Viewer）
+ * 2. 如果节点有 ifcFile/ifcGuid：
+ *    a. 检查对应 IFC 模型是否已加载
+ *    b. 未加载 → getViewerRuntimeWithUI() → ensureEngineReady() → loadIfcBuffer() → buildIfcNameIndex()
+ *    c. 已加载 → getViewerRuntimeWithUI()
+ *    d. highlightIfcFromNode() + 刷新完整属性
+ * 3. 如果节点无 IFC 关联，只显示基础属性
+ */
+export async function handleNodeClick(
+  state: AppState,
+  node: CbmNode,
+  showMessage: (text: string) => void,
+): Promise<void> {
+  // 点击回调可能来自旧工程的树；固定会话身份，所有 await 前后都验证它。
+  const session = state.captureProjectSession();
+  const isCurrent = () => state.isCurrentSession(session);
+
+  // 1. 立即显示基础属性（无 Viewer）
+  const { showNodePropertiesBasic, openPropsDrawerUI } = await import('../ui/propsDrawer.js');
+  if (!isCurrent()) return;
+  showNodePropertiesBasic(state, node);
+  openPropsDrawerUI();
+
+  // 1.5 阶段 4：CBM → SLD 反向联动（在所有分支前执行，确保 MOD/STL/IFC 路径都能联动）
+  // 通过 CBM 节点路径查找对应的 gridId，高亮 SLD SVG 元素和拓扑列表项
+  // 失败时仅 warn，不影响主流程
+  try {
+    if (state.currentStdSldIndex && node.path) {
+      const { getGridIdByCbmPath } = await import('../gim/stdSldIndex.js');
+      const { highlightSldByGridId } = await import('../ui/sldView.js');
+      const gridId = getGridIdByCbmPath(state.currentStdSldIndex, node.path);
+      if (gridId) {
+        highlightSldByGridId(gridId);
+      }
+    }
+  } catch (err) {
+    console.warn('[CBM→SLD] 联动高亮失败:', err);
+  }
+
+  // 2. 收集节点引用的 IFC 模型
+  const refs = collectIfcRefs(node);
+  const cbmFileName = node.path.split('/').pop() || '';
+  const ifcModelId = node.ifcFile
+    ? node.ifcFile.replace(/\.ifc$/i, '')
+    : state.deviceToIfcFile.get(cbmFileName);
+
+  // 无 IFC GUID 映射但有 devPath → 走 MOD/STL 加载路径
+  // （设备有 IFC 文件引用但无构件级 GUID，MOD/STL 是其可视化主体）
+  if (refs.size === 0 && node.devPath) {
+    await loadModStlForNode(state, node, showMessage, session);
+    return;
+  }
+
+  // 需要加载的 IFC modelId 集合
+  const modelsToLoad = new Set<string>();
+  for (const modelId of refs.keys()) {
+    if (!state.loadedModels.has(modelId)) {
+      modelsToLoad.add(modelId);
+    }
+  }
+  // 如果节点本身有 ifcFile 但没有 ifcGuid，也确保对应 IFC 加载
+  if (ifcModelId && !state.loadedModels.has(ifcModelId) && !modelsToLoad.has(ifcModelId)) {
+    modelsToLoad.add(ifcModelId);
+  }
+
+  // 3. 如果没有需要加载的 IFC 且没有需要高亮的，直接返回
+  if (modelsToLoad.size === 0 && refs.size === 0) {
+    if (ifcModelId && state.loadedModels.has(ifcModelId)) {
+      // IFC 已加载但无 GUID → 只定位
+      const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+      const runtime = await getViewerRuntimeWithUI(state, showMessage);
+      if (!isCurrent()) return;
+      const { highlightIfcFromNode } = await import('../viewer/highlight.js');
+      if (!isCurrent()) return;
+      await highlightIfcFromNode(runtime.ctx, state, node, showMessage);
+      if (!isCurrent()) return;
+    }
+    return;
+  }
+
+  // 4. 需要加载 IFC 或高亮 → 获取 ViewerRuntime
+  const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+  const runtime = await getViewerRuntimeWithUI(state, showMessage);
+  if (!isCurrent()) return;
+  const { ctx, modelCallbacks } = runtime;
+
+  // 5. 加载未加载的 IFC 模型
+  if (modelsToLoad.size > 0) {
+    const { ensureEngineReady } = await import('../viewer/ifcLoader.js');
+    const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
+    await ensureEngineReady(ctx, state, modelCallbacks);
+    if (!isCurrent()) return;
+
+    for (const modelId of modelsToLoad) {
+      if (!isCurrent()) return;
+      const entry = state.currentIfcEntries.find((e) => e.modelId === modelId);
+      if (!entry) {
+        console.warn(`[懒加载] 找不到 IFC entry: ${modelId}`);
+        continue;
+      }
+      showMessage(`正在加载 ${entry.name}...`);
+      try {
+        await loadIfcEntry(
+          ctx,
+          state,
+          entry,
+          () => getIfcBufferForEntry(entry, state, session),
+          (p) => showMessage(`${entry.name}: ${Math.round(p * 100)}%`),
+        );
+        if (!isCurrent()) return;
+        debugLog(DEBUG_IFC_LOAD, `[懒加载] IFC 已加载: ${modelId}`);
+      } catch (err) {
+        console.error(`[懒加载] IFC 加载失败 (${modelId}):`, err);
+      }
+    }
+
+    // 构建 IFC 名称索引
+    const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
+    await buildIfcNameIndex(ctx, state);
+    if (!isCurrent()) return;
+
+    // 刷新树显示（更新名称）— 统一使用 handleNodeClick 作为点击回调
+    const { buildAndRenderCbmTree } = await import('../ui/cbmTreeView.js');
+    const { renderFileDevPanel } = await import('../ui/fileDevView.js');
+    const clickHandler = (n: CbmNode) => {
+      if (isCurrent()) void handleNodeClick(state, n, showMessage);
+    };
+    buildAndRenderCbmTree(state, clickHandler);
+    renderFileDevPanel(state, clickHandler);
+  }
+
+  // 6. 高亮 + 显示完整属性
+  const { highlightIfcFromNode } = await import('../viewer/highlight.js');
+  const { showNodeProperties, openPropsDrawer } = await import('../ui/propsDrawer.js');
+  if (!isCurrent()) return;
+  await highlightIfcFromNode(ctx, state, node, showMessage);
+  if (!isCurrent()) return;
+  await showNodeProperties(ctx, state, node);
+  if (!isCurrent()) return;
+  openPropsDrawer(ctx);
+}
+
+/**
+ * 获取 IFC 文件内容。
+ * 1. 优先从完整解压流程的 currentFiles 读取
+ * 2. 缓存命中时从 cachedIfcPaths + readCachedIfc 读取
+ * 3. 找不到返回 null
+ */
+async function getIfcBufferForEntry(
+  entry: { name: string; path: string; modelId: string },
+  state: AppState,
+  session: ProjectLoadSession = state.captureProjectSession(),
+): Promise<Uint8Array | null> {
+  if (!state.isCurrentSession(session)) return null;
+  // 1. 完整解压流程
+  if (state.currentFiles) {
+    const file = state.currentFiles.get(entry.path);
+    if (file) {
+      debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用 GIM 解压内存文件:', { name: entry.name, path: entry.path });
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      return state.isCurrentSession(session) ? bytes : null;
+    }
+  }
+
+  // 2. Tauri 缓存命中
+  const { isTauri } = await import('@desktop/runtime.js');
+  if (isTauri() && state.cachedIfcPaths.has(entry.path)) {
+    const projectId = session.projectId;
+    if (projectId != null) {
+      const cachePath = state.cachedIfcPaths.get(entry.path)!;
+      debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用本地 IFC 缓存:', { name: entry.name, path: entry.path, cachePath });
+      const { readCachedIfc } = await import('@desktop/database.js');
+      const bytes = await readCachedIfc(projectId, entry.path);
+      return state.isCurrentSession(session) ? bytes : null;
+    }
+  }
+
+  console.warn('[IFC Buffer] 找不到 IFC 文件内容或缓存:', entry);
+  return null;
+}
+
+/**
+ * 确保 MOD/STL 图层根节点存在。
+ * 与 modAutoLoadService 的图层机制一致。
+ */
+function ensureModStlLayer(
+  state: AppState,
+  scene: THREE.Scene,
+  layer: 'mod' | 'stl',
+): THREE.Group {
+  if (layer === 'mod') {
+    if (!state.modRootGroup) {
+      state.modRootGroup = new THREE.Group();
+      state.modRootGroup.name = '__GIM_MOD_LAYER__';
+      state.modRootGroup.visible = true;
+      scene.add(state.modRootGroup);
+    }
+    return state.modRootGroup;
+  } else {
+    if (!state.stlRootGroup) {
+      state.stlRootGroup = new THREE.Group();
+      state.stlRootGroup.name = '__GIM_STL_LAYER__';
+      state.stlRootGroup.visible = true;
+      scene.add(state.stlRootGroup);
+    }
+    return state.stlRootGroup;
+  }
+}
+
+/**
+ * 将 devPath 归一化为可比较的形式（去除 DEV/ 前缀，小写）。
+ *
+ * 用于 collectDeviceGroups 匹配：
+ * - geometryNode.devPath 形如 "abc.dev"（无 DEV/ 前缀）
+ * - group.userData.devPath 形如 "DEV/abc.dev"（glbCacheService / modAutoLoadService 标记）
+ * 归一化后两者可正确比较。
+ */
+function normalizeDevPathForCompare(devPath: string | undefined): string {
+  if (!devPath) return '';
+  const p = devPath.replace(/\\/g, '/').toLowerCase();
+  return p.startsWith('dev/') ? p.slice(4) : p;
+}
+
+/**
+ * 收集指定 devPath 对应的所有已加载 Group（MOD + STL）。
+ *
+ * 遍历 state.loadedXmlModGroups 和 state.loadedStlGroups，查找
+ * userData.devPath 匹配的 group。用于相机定位和高亮。
+ */
+function collectDeviceGroups(state: AppState, devPath: string): THREE.Group[] {
+  const normalized = normalizeDevPathForCompare(devPath);
+  if (!normalized) return [];
+  const result: THREE.Group[] = [];
+  for (const group of state.loadedXmlModGroups.values()) {
+    const groupDevPath = normalizeDevPathForCompare(group.userData.devPath as string | undefined);
+    if (groupDevPath === normalized) result.push(group);
+  }
+  for (const group of state.loadedStlGroups.values()) {
+    const groupDevPath = normalizeDevPathForCompare(group.userData.devPath as string | undefined);
+    if (groupDevPath === normalized) result.push(group);
+  }
+  return result;
+}
+
+/**
+ * 将相机定位到指定 devPath 对应的已加载几何并高亮。
+ *
+ * 流程：
+ * 1. collectDeviceGroups 收集匹配的 Group
+ * 2. 合并包围盒，调用 frameBox 定位相机
+ * 3. resetHighlight 清除旧高亮（IFC + MOD）
+ * 4. highlightModGroups 高亮该设备的所有 MOD/STL Group
+ *
+ * 设计动机：
+ * - 替代旧的 fitCameraToScene（仅首次加载时定位整个场景）
+ * - 用户每次点击 MOD 设备节点都应将视点聚焦到该设备并高亮
+ */
+async function frameAndHighlightDevice(
+  ctx: ViewerContext,
+  state: AppState,
+  devPath: string,
+): Promise<void> {
+  const groups = collectDeviceGroups(state, devPath);
+  if (groups.length === 0) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] frameAndHighlightDevice 未找到匹配几何:', devPath);
+    return;
+  }
+
+  // 合并包围盒并定位相机
+  const box = new THREE.Box3();
+  for (const group of groups) {
+    box.expandByObject(group);
+  }
+  if (!box.isEmpty()) {
+    const { frameBox } = await import('../viewer/camera.js');
+    await frameBox(ctx, box);
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] frameAndHighlightDevice 已定位到设备:', devPath);
+  }
+
+  // 高亮该设备的所有 Group（先清除 IFC + MOD 旧高亮）
+  const { resetHighlight, highlightModGroups } = await import('../viewer/highlight.js');
+  await resetHighlight(ctx, state);
+  highlightModGroups(state, groups);
+  debugLog(DEBUG_IFC_LOAD, `[xml-mod] frameAndHighlightDevice 已高亮 ${groups.length} 个 Group:`, devPath);
+}
+
+/**
+ * 节点点击时加载 MOD/STL 几何（变电工程无 IFC 设备的回退路径）。
+ *
+ * 流程：
+ * 1. discoverGeometriesFromNode 走 CBM → DEV → PHM → MOD/STL 引用链
+ * 2. 对每个未加载的 MOD，loadXmlModFromFiles 转 Three.js Group
+ * 3. 对每个未加载的 STL，parseStlBinary 转 Three.js Group
+ * 4. applyPlacementTransformToSceneUnits 应用 CBM/DEV/SUBDEVICE/PHM 累积放置矩阵
+ * 5. 加入 scene 并跟踪到 state.loadedXmlModGroups / loadedStlGroups
+ * 6. frameAndHighlightDevice 将相机定位到该设备并高亮所有 MOD/STL
+ *
+ * 文件来源（v6 起）：
+ * - currentFiles 非空（首次打开）：直接从内存 Map 读取
+ * - currentFiles=null（缓存命中）：按需从磁盘 readCachedIfc 读取 DEV/PHM/MOD 文件
+ *
+ * @param state 全局 AppState
+ * @param node CBM 节点（必须带 devPath）
+ * @param showMessage 消息回调
+ */
+async function loadModStlForNode(
+  state: AppState,
+  node: CbmNode,
+  showMessage: (text: string) => void,
+  session: ProjectLoadSession = state.captureProjectSession(),
+): Promise<void> {
+  if (!state.isCurrentSession(session)) return;
+  // PARTINDEX 是父设备 DEV SUBDEVICE 的 CBM 语义别名。它自身没有
+  // SUBDEVICE 局部矩阵，直接从它发现几何会得到错误 placement。
+  // 回退到最近的真实设备祖先，由 DEV 递归一次性计算该设备及部件的正确矩阵。
+  const geometryNode = resolveGeometryLoadNode(state.currentCbmTree, node);
+  if (geometryNode !== node) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] PARTINDEX 使用设备祖先作为几何入口:', {
+      partIndex: node.path,
+      geometryRoot: geometryNode.path,
+    });
+  }
+
+  // 准备文件读取适配器：currentFiles 优先，缓存命中时回退磁盘
+  const files = state.currentFiles;
+  const projectId = session.projectId;
+
+  if (!files && projectId == null) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 无文件来源可用（currentFiles=null 且 projectId=null）:', node.devPath);
+    return;
+  }
+
+  // 获取 ViewerRuntime（懒加载，与 IFC 路径共用同一引擎）
+  const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+  const runtime = await getViewerRuntimeWithUI(state, showMessage);
+  if (!state.isCurrentSession(session)) return;
+  const { ctx } = runtime;
+  const scene = (ctx.world.scene as any).three as import('three').Scene;
+
+  // 方案 C v2：优先尝试 DEV 粒度 GLB 快速路径
+  // 如果 DEV.glb 命中，直接加载整个 DEV 的几何，跳过 MOD 逐个解析
+  if (projectId != null && geometryNode.devPath) {
+    const devGlbLoaded = await tryLoadDevGlbForNode(state, scene, geometryNode, projectId, showMessage, session);
+    if (!state.isCurrentSession(session)) return;
+    if (devGlbLoaded) {
+      await frameAndHighlightDevice(ctx, state, geometryNode.devPath);
+      if (!state.isCurrentSession(session)) return;
+      return;
+    }
+  }
+
+  // 回退：MOD 粒度加载（XML 解析 + 方案 C 旧路径）
+  const { discoverGeometriesFromNode, computeCbmParentTransform } = await import('./modGeometryDiscovery.js');
+  // discoverGeometriesFromNode 在 files=null 时返回空，因此缓存命中场景需要先构建临时 Map
+  const discoveryFiles = files ?? await buildGeometryFilesMapFromCache(projectId!, geometryNode, state, session);
+  if (!state.isCurrentSession(session)) return;
+  if (!discoveryFiles || discoveryFiles.size === 0) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 无法获取 DEV/PHM/MOD 文件:', geometryNode.devPath);
+    return;
+  }
+
+  // DEV_SUBDEVICE 虚拟节点的 transformMatrix 仅含 SUBDEVICE 局部变换，
+  // 需补上乘以父 CBM 链累积矩阵，否则点击加载的 MOD 会丢失父级位置。
+  const parentCbmTransform = geometryNode.entityName === 'DEV_SUBDEVICE'
+    ? computeCbmParentTransform(state.currentCbmTree, geometryNode.path)
+    : undefined;
+  const { mods, stls } = await discoverGeometriesFromNode(geometryNode, discoveryFiles, parentCbmTransform);
+  if (!state.isCurrentSession(session)) return;
+
+  if (mods.length === 0 && stls.length === 0) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 未发现 MOD/STL 几何来源:', geometryNode.devPath);
+    return;
+  }
+
+  // 缓存命中场景下，确保所有需要的 MOD/STL 文件也在 discoveryFiles 中
+  if (!files) {
+    await ensureModFilesInCacheMap(projectId!, mods, discoveryFiles, state, session);
+    if (!state.isCurrentSession(session)) return;
+    await ensureStlFilesInCacheMap(projectId!, stls, discoveryFiles, state, session);
+    if (!state.isCurrentSession(session)) return;
+  }
+
+  const {
+    loadXmlModFromFiles,
+    applyPlacementTransformToSceneUnits,
+  } = await import('../viewer/xmlModLoader.js');
+
+  let loadedCount = 0;
+  let stlLoadedCount = 0;
+
+  // ── 加载 MOD（XML 解析） ──
+  for (const geo of mods) {
+    if (state.loadedXmlModGroups.has(geo.instanceKey)) {
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] MOD 实例已加载，跳过:', geo.instanceKey);
+      continue;
+    }
+
+    const group = await loadXmlModFromFiles(geo.modPath, discoveryFiles, geo.phmColor, geo.phmColorMaxA);
+    if (!state.isCurrentSession(session)) {
+      group?.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
+      return;
+    }
+    if (!group) continue;
+
+    applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+    applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
+    const modRoot = ensureModStlLayer(state, scene, 'mod');
+    group.userData.devPath = geo.devPath;
+    modRoot.add(group);
+    state.loadedXmlModGroups.set(geo.instanceKey, group);
+    loadedCount++;
+  }
+
+  // ── 加载 STL（直接解析） ──
+  const { parseStlBinary } = await import('../viewer/stlLoader.js');
+  const { applyPhmColorOverride } = await import('../viewer/xmlModGeometry.js');
+  for (const geo of stls) {
+    if (state.loadedStlGroups.has(geo.instanceKey)) {
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] STL 实例已加载，跳过:', geo.instanceKey);
+      continue;
+    }
+
+    const stlFile = getFileByPath(discoveryFiles, geo.stlPath);
+    if (!stlFile) {
+      console.warn(`[xml-mod] STL 文件不存在: ${geo.stlPath}`);
+      continue;
+    }
+    const buffer = await stlFile.arrayBuffer();
+    if (!state.isCurrentSession(session)) return;
+    const group = parseStlBinary(buffer, geo.stlPath);
+    if (!group) continue;
+    applyPhmColorOverride(group, geo.phmColor, geo.phmColorMaxA);
+
+    applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+    applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
+    const stlRoot = ensureModStlLayer(state, scene, 'stl');
+    group.userData.devPath = geo.devPath;
+    stlRoot.add(group);
+    state.loadedStlGroups.set(geo.instanceKey, group);
+    stlLoadedCount++;
+  }
+
+  const totalLoaded = loadedCount + stlLoadedCount;
+  if (totalLoaded > 0) {
+    const parts: string[] = [];
+    if (loadedCount > 0) parts.push(`${loadedCount} 个 MOD`);
+    if (stlLoadedCount > 0) parts.push(`${stlLoadedCount} 个 STL`);
+    showMessage(`已加载 ${parts.join(' + ')} 模型`);
+  }
+  // 无论是否新加载，都将相机定位到该设备并高亮（支持重复点击重新聚焦）
+  if (!state.isCurrentSession(session)) return;
+  await frameAndHighlightDevice(ctx, state, geometryNode.devPath);
+}
+
+/**
+ * 方案 C v2：节点点击时尝试 DEV 粒度 GLB 快速路径。
+ *
+ * 如果 DEV.glb 命中，加载整个 DEV 的几何并应用 CBM 矩阵，返回 true。
+ * 如果未命中，返回 false，调用方回退到 MOD 粒度加载。
+ */
+async function tryLoadDevGlbForNode(
+  state: AppState,
+  scene: THREE.Scene,
+  geometryNode: CbmNode,
+  projectId: number,
+  showMessage: (text: string) => void,
+  session: ProjectLoadSession,
+): Promise<boolean> {
+  if (!state.isCurrentSession(session)) return false;
+  if (!geometryNode.devPath) return false;
+
+  const normalized = geometryNode.devPath.replace(/\\/g, '/');
+  const devPath = normalized.toLowerCase().startsWith('dev/')
+    ? normalized
+    : `DEV/${normalized}`;
+
+  // 读取 DEV.glb
+  let glbBytes: Uint8Array | null = null;
+  try {
+    const { readGlbFile } = await import('@desktop/database.js');
+    glbBytes = await readGlbFile(projectId, devPath);
+    if (!state.isCurrentSession(session)) return false;
+  } catch {
+    return false;
+  }
+  if (!glbBytes || glbBytes.byteLength === 0) return false;
+
+  // 检查是否已加载
+  const instanceKey = `dev:${devPath}#${geometryNode.path}`;
+  if (state.loadedXmlModGroups.has(instanceKey)) {
+    debugLog(DEBUG_IFC_LOAD, `[xml-mod] DEV GLB 实例已加载，跳过: ${instanceKey}`);
+    return true;
+  }
+
+  // 加载 DEV.glb
+  const { loadDevGlb } = await import('./glbCacheService.js');
+  const group = await loadDevGlb(devPath, glbBytes);
+  if (!state.isCurrentSession(session)) {
+    group?.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
+    return false;
+  }
+  if (!group) return false;
+
+  // 应用 CBM 累积矩阵
+  const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
+  const { computeCbmParentTransform } = await import('./modGeometryDiscovery.js');
+
+  // DEV_SUBDEVICE 虚拟节点需要父链矩阵
+  const parentCbmTransform = geometryNode.entityName === 'DEV_SUBDEVICE'
+    ? computeCbmParentTransform(state.currentCbmTree, geometryNode.path)
+    : undefined;
+
+  // 计算 CBM 累积矩阵（parent × node.transformMatrix）
+  const localTransform = parseMatrixFromString(geometryNode.transformMatrix);
+  const cbmTransform = parentCbmTransform
+    ? multiplyMatrices(parentCbmTransform, localTransform)
+    : localTransform;
+
+  applyPlacementTransformToSceneUnits(group, cbmTransform);
+  if (!state.isCurrentSession(session)) {
+    group.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
+    return false;
+  }
+  applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
+
+  const modRoot = ensureModStlLayer(state, scene, 'mod');
+  if (!state.isCurrentSession(session)) {
+    group.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
+    return false;
+  }
+  modRoot.add(group);
+  state.loadedXmlModGroups.set(instanceKey, group);
+
+  debugLog(DEBUG_IFC_LOAD, `[xml-mod] DEV GLB 命中: ${devPath} (instance: ${instanceKey})`);
+  showMessage(`已加载 DEV 几何模型: ${devPath}`);
+
+  return true;
+}
+
+const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+function parseMatrixFromString(raw: string | undefined): number[] {
+  if (!raw) return IDENTITY_MATRIX.slice();
+  const parts = raw.split(',').map((s) => s.trim());
+  if (parts.length !== 16) return IDENTITY_MATRIX.slice();
+  const values = parts.map(Number);
+  return values.some((n) => !Number.isFinite(n)) ? IDENTITY_MATRIX.slice() : values;
+}
+
+function multiplyMatrices(a: number[], b: number[]): number[] {
+  const am = new THREE.Matrix4().fromArray(a.length === 16 ? a : IDENTITY_MATRIX);
+  const bm = new THREE.Matrix4().fromArray(b.length === 16 ? b : IDENTITY_MATRIX);
+  return am.multiply(bm).toArray();
+}
+
+/**
+ * 为节点点击选择可用于发现几何的 CBM 节点。
+ *
+ * PARTINDEX 只描述父设备的一个组成部件，并不保存其 DEV SUBDEVICE
+ * transform。选择最近的带 DEV 的祖先可复用完整 DEV 递归链，避免生成
+ * 缺失局部矩阵的重复实例。
+ */
+export function resolveGeometryLoadNode(root: CbmNode | null, node: CbmNode): CbmNode {
+  if (node.entityName !== 'PARTINDEX' || !root) return node;
+
+  function walk(current: CbmNode, nearestDevAncestor: CbmNode | null): CbmNode | null {
+    if (current.path === node.path) return nearestDevAncestor;
+    const nextAncestor = current.devPath ? current : nearestDevAncestor;
+    for (const child of current.children) {
+      const found = walk(child, nextAncestor);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  return walk(root, null) ?? node;
+}
+
+/**
+ * 缓存命中场景下，从磁盘读取 DEV/PHM/MOD 文件构建临时 Map<string, File>。
+ *
+ * 读取范围：
+ * - DEV/{node.devPath}（必需）
+ * - PHM/{devDoc.solidModels[].solidModelPath}（必需）
+ * - MOD/{phmDoc.solidModels[].solidModelPath}（延迟到 ensureModFilesInCacheMap 补充）
+ *
+ * 一次点击只读取该节点引用链需要的文件，避免一次性读取全部 DEV/PHM/MOD。
+ *
+ * @param projectId 数据库 gim_project.id
+ * @param node CBM 节点（必须带 devPath）
+ * @returns 包含 DEV + PHM 文件的 Map；找不到时返回空 Map
+ */
+async function buildGeometryFilesMapFromCache(
+  projectId: number,
+  node: CbmNode,
+  state?: AppState,
+  session?: ProjectLoadSession,
+): Promise<Map<string, File>> {
+  const result = new Map<string, File>();
+  const { readCachedIfc } = await import('@desktop/database.js');
+  const { parseDev } = await import('../gim/geometry/devParser.js');
+
+  if (!node.devPath) return result;
+  const visitedDevs = new Set<string>();
+
+  async function readFileIntoMap(path: string, label: string): Promise<File | null> {
+    if (state && session && !state.isCurrentSession(session)) return null;
+    if (result.has(path)) return result.get(path)!;
+    try {
+      const bytes = await readCachedIfc(projectId, path);
+      if (state && session && !state.isCurrentSession(session)) return null;
+      const file = bytesToFile(bytes, path);
+      result.set(path, file);
+      debugLog(DEBUG_IFC_LOAD, `[xml-mod] 从磁盘读取 ${label}:`, path, `(${bytes.byteLength} bytes)`);
+      return file;
+    } catch (err) {
+      console.warn(`[xml-mod] ${label} 文件读取失败: ${path}`, err);
+      return null;
+    }
+  }
+
+  async function visitDev(devPathInput: string): Promise<void> {
+    if (state && session && !state.isCurrentSession(session)) return;
+    const devPath = normalizeCachedDevPath(devPathInput);
+    if (visitedDevs.has(devPath)) return;
+    visitedDevs.add(devPath);
+
+    const devFile = await readFileIntoMap(devPath, 'DEV');
+    if (!devFile) return;
+
+    const devBuffer = await devFile.arrayBuffer();
+    const devText = new TextDecoder().decode(devBuffer);
+    const devDoc = parseDev(devText, devPath);
+
+    for (const solid of devDoc.solidModels) {
+      if (state && session && !state.isCurrentSession(session)) return;
+      const solidPath = solid.solidModelPath;
+      const lower = solidPath.toLowerCase();
+      if (lower.endsWith('.dev')) {
+        await visitDev(solidPath);
+      } else if (lower.endsWith('.phm')) {
+        await readFileIntoMap(normalizeCachedPhmPath(solidPath), 'PHM');
+      }
+    }
+
+    for (const sub of devDoc.subDevices) {
+      if (state && session && !state.isCurrentSession(session)) return;
+      await visitDev(sub.devPath);
+    }
+  }
+
+  await visitDev(node.devPath);
+
+  return result;
+}
+
+function normalizeCachedDevPath(path: string): string {
+  const p = path.replace(/\\/g, '/');
+  return p.toLowerCase().startsWith('dev/') ? p : `DEV/${p}`;
+}
+
+function normalizeCachedPhmPath(path: string): string {
+  const p = path.replace(/\\/g, '/');
+  return p.toLowerCase().startsWith('phm/') ? p : `PHM/${p}`;
+}
+
+/**
+ * 补充 discovery Map 中缺失的 MOD 文件（缓存命中场景专用）。
+ *
+ * discoverGeometriesFromNode 返回的 DiscoveredModGeometry.mods 包含 modPath，
+ * 但 discoveryFiles Map 中可能尚未包含 MOD 文件（buildGeometryFilesMapFromCache 只读 DEV/PHM）。
+ * 本函数遍历 discovered 列表，按需读取 MOD 文件并加入 discoveryFiles。
+ *
+ * @param projectId 数据库 gim_project.id
+ * @param discovered discoverGeometriesFromNode 返回的 mods 列表
+ * @param files 文件 Map（会被原地修改）
+ */
+async function ensureModFilesInCacheMap(
+  projectId: number,
+  discovered: Array<{ modPath: string }>,
+  files: Map<string, File>,
+  state?: AppState,
+  session?: ProjectLoadSession,
+): Promise<void> {
+  const { readCachedIfc } = await import('@desktop/database.js');
+  for (const geo of discovered) {
+    if (state && session && !state.isCurrentSession(session)) return;
+    if (hasFileByPath(files, geo.modPath)) continue;
+    try {
+      const bytes = await readCachedIfc(projectId, geo.modPath);
+      if (state && session && !state.isCurrentSession(session)) return;
+      const file = bytesToFile(bytes, geo.modPath);
+      files.set(geo.modPath, file);
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] 从磁盘读取 MOD:', geo.modPath, `(${bytes.byteLength} bytes)`);
+    } catch (err) {
+      console.warn(`[xml-mod] MOD 文件读取失败: ${geo.modPath}`, err);
+    }
+  }
+}
+
+/**
+ * 补充 discovery Map 中缺失的 STL 文件（缓存命中场景专用）。
+ *
+ * @param projectId 数据库 gim_project.id
+ * @param discovered discoverGeometriesFromNode 返回的 STL 列表
+ * @param files 文件 Map（会被原地修改）
+ */
+async function ensureStlFilesInCacheMap(
+  projectId: number,
+  discovered: Array<{ stlPath: string }>,
+  files: Map<string, File>,
+  state?: AppState,
+  session?: ProjectLoadSession,
+): Promise<void> {
+  const { readCachedIfc } = await import('@desktop/database.js');
+  for (const geo of discovered) {
+    if (state && session && !state.isCurrentSession(session)) return;
+    if (hasFileByPath(files, geo.stlPath)) continue;
+    try {
+      const bytes = await readCachedIfc(projectId, geo.stlPath);
+      if (state && session && !state.isCurrentSession(session)) return;
+      const file = bytesToFile(bytes, geo.stlPath);
+      files.set(geo.stlPath, file);
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] 从磁盘读取 STL:', geo.stlPath, `(${bytes.byteLength} bytes)`);
+    } catch (err) {
+      console.warn(`[xml-mod] STL 文件读取失败: ${geo.stlPath}`, err);
+    }
+  }
+}
+
+/**
+ * 把 Uint8Array 转换为 File 对象。
+ *
+ * 通过 slice 复制到一个独立的 ArrayBuffer，避免 Uint8Array<ArrayBufferLike>
+ * 与 BlobPart 类型不兼容（SharedArrayBuffer 不被 Blob 接受）。
+ */
+function bytesToFile(bytes: Uint8Array, path: string): File {
+  const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return new File([ab], path, { type: 'application/octet-stream' });
+}

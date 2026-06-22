@@ -4,8 +4,16 @@ node_modules/
 # Build output
 dist/
 
+# Test coverage
+coverage/
+
 # Demo data (large binary files)
 demo/
+docs/schema/_generated
+
+# PMTiles offline tile data (M4-A2 第 2 轮，不提交大文件)
+desktop/public/tiles/*.pmtiles
+
 
 # IDE
 .vscode/
@@ -30,3 +38,12 @@ npm-debug.log*
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Tauri
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+# WebView2 Fixed Runtime 由构建脚本从微软下载，体积约 250-300MB，不提交仓库
+desktop/src-tauri/webview2-fixed-runtime/
+# Tauri CLI 临时目录（重定向到工作区内，避免污染系统盘 %TEMP%\.tauri）
+.tmp/
+.playwright-cli/

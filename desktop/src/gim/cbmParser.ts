@@ -1,0 +1,470 @@
+import type { CbmNode } from './types.js';
+import { parseDev } from './geometry/devParser.js';
+import { normalizeEntityName } from './entityName.js';
+import { PARSER_LIMITS, parseBoundedCount } from './parserLimits.js';
+import { getFileByPath } from './fileLookup.js';
+
+/** 解析 KEY=VALUE 格式文本 */
+export function parseKeyValue(text: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of text.split(/\r?\n/)) {
+    const idx = line.indexOf('=');
+    if (idx > 0) result[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+  }
+  return result;
+}
+
+/**
+ * 判断 SYSTEMNAME 值是否为无意义占位符（应跳过，不参与名称拼接）。
+ *
+ * GIM CBM 中常见的占位符：
+ * - "其它" / "其他"（未分类）
+ * - "-"（无值占位）
+ * - "NULL" / "NULL1"（Bentley 导出空值占位，docs/schema/04）
+ * - "&GN" 等 & 前缀占位（Bentley 导出未映射参数名）
+ * - 空字符串
+ */
+function isPlaceholderSystemName(s: string): boolean {
+  const t = s.trim();
+  if (!t) return true;
+  if (t === '其它' || t === '其他' || t === '-') return true;
+  if (t.startsWith('&')) return true;
+  if (/^null\d*$/i.test(t)) return true;
+  return false;
+}
+
+/**
+ * 从 CBM kv 提取可读名称（按优先级回退）。
+ *
+ * 优先级链（变电工程）：
+ * 1. SYSTEMNAME1..4 拼接（过滤占位符"-"/"其它"/空值后，用 " / " 拼接）
+ * 2. PARTNAME（部件名）
+ * 3. SYSCLASSIFYNAME（系统分类编码，如 0AFD*002）— 编码可读性差，作为回退
+ * 4. ENTITYNAME（如 F1System/F2System/F3System/F4System/PARTINDEX）
+ * 5. 文件名（去 .cbm 后缀）
+ *
+ * 注意：F4System/PARTINDEX 设备层节点的名称会在 build() 中被 DEV SYMBOLNAME 覆盖。
+ *
+ * @param kv 已解析的键值表
+ * @param path CBM 文件路径（用于提取文件名回退）
+ */
+function extractDisplayName(kv: Record<string, string>, path: string): { name: string; systemNames: string[] } {
+  const systemNames: string[] = [];
+  for (let i = 1; i <= 4; i++) {
+    const sn = kv[`SYSTEMNAME${i}`];
+    if (sn && !isPlaceholderSystemName(sn)) systemNames.push(sn.trim());
+  }
+
+  const rawPartName = kv['PARTNAME'] || '';
+  // PARTNAME 占位符（如 Bentley 导出的 "&GN"）不参与名称回退
+  const partName = isPlaceholderSystemName(rawPartName) ? '' : rawPartName.trim();
+  const sysClassifyName = kv['SYSCLASSIFYNAME'] || '';
+  // ENTITYNAME 大小写三态实证（PartIndex/F4SYSTEM 等），统一归一化（docs/schema/04）
+  const entityName = normalizeEntityName(kv['ENTITYNAME'] || '');
+  const fileName = path.split('/').pop()!.replace(/\.cbm$/i, '');
+
+  let name: string;
+  if (systemNames.length > 0) {
+    name = systemNames.join(' / ');
+  } else if (partName) {
+    name = partName;
+  } else if (sysClassifyName) {
+    name = sysClassifyName;
+  } else if (entityName) {
+    name = entityName;
+  } else {
+    name = fileName;
+  }
+
+  return { name, systemNames };
+}
+
+/**
+ * 判断节点是否为设备层节点（F4System 或 PARTINDEX），其名称应优先用 DEV SYMBOLNAME。
+ *
+ * - F4System：变电设备层（一次/二次设备）
+ * - PARTINDEX：部件索引层（最底层，设备内部件）
+ * - DEV_SUBDEVICE：DEV SUBDEVICES 展开的虚拟子设备节点
+ */
+function isDeviceLayer(entityName: string): boolean {
+  return entityName === 'F4System' || entityName === 'PARTINDEX' || entityName === 'DEV_SUBDEVICE';
+}
+
+/**
+ * 将 F2System 的 SYSCLASSIFYNAME 单字符代码映射为工程专业名称。
+ *
+ * 变电工程内部的专业分项（CBM 中 F2System 的 SYSCLASSIFYNAME 为单字符）：
+ * - U → 建筑工程
+ * - A → 安装工程
+ * - S → 暖通工程
+ * - G → 给排水工程
+ */
+function mapF2ClassifyName(code: string): string {
+  switch (code) {
+    case 'U': return '建筑工程';
+    case 'A': return '安装工程';
+    case 'S': return '暖通工程';
+    case 'G': return '给排水工程';
+    default: return '';
+  }
+}
+
+/** 解析 DEV 文件获取 SYMBOLNAME 和 TYPE（失败返回空值） */
+async function readDevInfo(
+  devPath: string,
+  files: Map<string, File>,
+): Promise<{ symbolName: string; type: string } | null> {
+  const normalized = devPath.startsWith('DEV/') ? devPath : `DEV/${devPath}`;
+  const devFile = getFileByPath(files, normalized);
+  if (!devFile) return null;
+  try {
+    const doc = parseDev(await devFile.text(), normalized);
+    return { symbolName: doc.symbolName || '', type: doc.type || '' };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 为 F3System 节点生成区分性后缀（方案 B：F4 子节点信息反推）。
+ *
+ * 当 F3 的方案 A 名称（过滤占位符后的 SYSTEMNAME 拼接）缺乏区分度时，
+ * 遍历其 F4 子节点收集设备名/IFC 文件名，生成 `（含XXX等）` 后缀。
+ *
+ * 规则：
+ * - 设备入口优先：收集 F4 子节点的 devSymbolName
+ * - 无设备名时用 IFC 文件名：去 `.ifc` 后缀，去重
+ * - 取前 3 个，用 `、` 连接，末尾加 `等`
+ * - 若方案 A 名称已含足够信息（SYSTEMNAME3 非"其它"），不追加后缀
+ *
+ * @param baseName 方案 A 过滤后的名称
+ * @param children F3 的子节点列表（已构建完成）
+ * @returns 追加后缀后的名称，或原名称（无需追加时）
+ */
+function enhanceF3Name(baseName: string, children: CbmNode[]): string {
+  // 判断是否需要增强：SYSTEMNAME 拼接结果末尾含"其它"或名称较短时需要
+  // 方案 A 已过滤"其它"，所以 baseName 中不包含"其它"
+  // 但如果 systemNames 过滤后为空（全是占位符），baseName 会回退到 SYSCLASSIFYNAME 编码，此时需要增强
+  // 或者 baseName 是编码格式（如 0SAZ*001），也需要增强
+  // 简单判断：如果 baseName 含 "*"（编码特征）或长度较短，则尝试增强
+  const isCodeLike = /\*/.test(baseName) || /^[\d]/.test(baseName);
+  if (!isCodeLike && baseName.length > 6) {
+    // 名称已足够可读（如"交流电气系统 / 跨电压等级系统 / 调度数据网"），不追加
+    return baseName;
+  }
+
+  // 收集子节点信息
+  const deviceNames: string[] = [];
+  const ifcNames: string[] = [];
+  const ifcNameSet = new Set<string>();
+
+  for (const child of children) {
+    // 跳过 DEV_SUBDEVICE 虚拟子节点（非 F4 原生子节点）
+    if (child.entityName === 'DEV_SUBDEVICE') continue;
+
+    if (child.devSymbolName) {
+      deviceNames.push(child.devSymbolName);
+    } else if (child.ifcFile) {
+      const ifcName = child.ifcFile.replace(/\.ifc$/i, '');
+      if (!ifcNameSet.has(ifcName)) {
+        ifcNameSet.add(ifcName);
+        ifcNames.push(ifcName);
+      }
+    }
+  }
+
+  // 设备名优先
+  const suffixes = deviceNames.length > 0 ? deviceNames : ifcNames;
+  if (suffixes.length === 0) return baseName;
+
+  // 取前 3 个
+  const top = suffixes.slice(0, 3);
+  const suffix = top.join('、') + (suffixes.length > 3 ? '等' : '');
+  return `${baseName}（含${suffix}）`;
+}
+
+/** 从文件集合递归构建 CBM 层级树（含 DEV SYMBOLNAME 回填与 SUBDEVICES 展开） */
+export async function buildCbmTree(files: Map<string, File>, projectTypeName?: string): Promise<CbmNode | null> {
+  const visited = new Set<string>();
+  const fileByLowerPath = new Map<string, File>();
+  for (const [path, file] of files) fileByLowerPath.set(path.replace(/\\/g, '/').toLowerCase(), file);
+  const nodeBudget = { count: 0 };
+  // DEV 文件缓存（同一 DEV 可能被多个 CBM 节点引用，避免重复解析）
+  const devInfoCache = new Map<string, { symbolName: string; type: string } | null>();
+
+  async function readDevCached(devPath: string): Promise<{ symbolName: string; type: string } | null> {
+    const normalized = devPath.startsWith('DEV/') ? devPath : `DEV/${devPath}`;
+    if (devInfoCache.has(normalized)) return devInfoCache.get(normalized)!;
+    const info = await readDevInfo(devPath, files);
+    devInfoCache.set(normalized, info);
+    return info;
+  }
+
+  async function build(p: string, depth = 0): Promise<CbmNode | null> {
+    if (depth > PARSER_LIMITS.maxRecursionDepth) {
+      throw new Error(`CBM 引用递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
+    }
+    const normalizedPath = p.replace(/\\/g, '/');
+    const visitKey = normalizedPath.toLowerCase();
+    if (visited.has(visitKey)) return null;
+    visited.add(visitKey);
+    const f = getFileByPath(files, p) ?? fileByLowerPath.get(visitKey);
+    if (!f) return null;
+    nodeBudget.count++;
+    if (nodeBudget.count > PARSER_LIMITS.maxCbmNodes) {
+      throw new Error(`CBM 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
+    }
+    const kv = parseKeyValue(await f.text());
+    const en = kv['ENTITYNAME'] || '';
+    let { name, systemNames } = extractDisplayName(kv, p);
+    const cn = kv['SYSCLASSIFYNAME'] || kv['PARTNAME'] || '';
+    const devPath = kv['OBJECTMODELPOINTER'] || '';
+
+    // 读取 DEV SYMBOLNAME/TYPE（回填到节点，供 getNodeDisplayName 使用）
+    let devSymbolName = '';
+    let devType = '';
+    if (devPath) {
+      const info = await readDevCached(devPath);
+      if (info) {
+        devSymbolName = info.symbolName;
+        devType = info.type;
+        // 设备层节点（F4System/PARTINDEX）优先用 DEV SYMBOLNAME 作为节点名称
+        // 这比 SYSCLASSIFYNAME 编码（如 CAH*006）可读得多
+        if (isDeviceLayer(en) && devSymbolName) {
+          name = devSymbolName;
+        }
+      }
+    }
+
+    // F1System 根节点：显示工程类型名（如"变电工程"/"建筑工程"）
+    if (en === 'F1System' && projectTypeName) {
+      name = projectTypeName;
+    }
+
+    // F2System：将 SYSCLASSIFYNAME 单字符代码（U/A/S/G）映射为工程专业名
+    if (en === 'F2System') {
+      const f2Name = mapF2ClassifyName(cn);
+      if (f2Name) name = f2Name;
+    }
+
+    const children: CbmNode[] = [];
+
+    // 1. SUBSYSTEM 单值引用
+    const sg = kv['SUBSYSTEM'];
+    if (sg) {
+      const c = await build(`CBM/${sg}`, depth + 1);
+      if (c) children.push(c);
+    }
+
+    // 2. SUBSYSTEMS.NUM + SUBSYSTEMi 数组引用
+    const sn = parseBoundedCount(kv['SUBSYSTEMS.NUM'], 'SUBSYSTEMS.NUM');
+    for (let i = 0; i < sn; i++) {
+      const s = kv[`SUBSYSTEM${i}`];
+      if (s) {
+        const c = await build(`CBM/${s}`, depth + 1);
+        if (c) children.push(c);
+      }
+    }
+
+    // 3. SUBDEVICES.NUM + SUBDEVICEi 数组引用（F4System 内部子设备分组）
+    const dn2 = parseBoundedCount(kv['SUBDEVICES.NUM'], 'SUBDEVICES.NUM');
+    for (let i = 0; i < dn2; i++) {
+      const s = kv[`SUBDEVICE${i}`];
+      if (s) {
+        const c = await build(`CBM/${s}`, depth + 1);
+        if (c) children.push(c);
+      }
+    }
+
+    // 4. 方向 B：若此节点有 devPath，展开 DEV SUBDEVICES 块为虚拟子节点
+    let devExpanded = false;
+    if (devPath) {
+      const devChildren = await expandDevSubDevices(devPath, files, p, devInfoCache, undefined, depth + 1, nodeBudget);
+      if (devChildren.length > 0) {
+        children.push(...devChildren);
+        devExpanded = true;
+      }
+    }
+
+    // F1System 子节点（F2System）按 U→A→S→G 顺序排列
+    if (en === 'F1System') {
+      const f2Order: Record<string, number> = { U: 0, A: 1, S: 2, G: 3 };
+      children.sort((a, b) => {
+        const ai = f2Order[a.classifyName] ?? 99;
+        const bi = f2Order[b.classifyName] ?? 99;
+        return ai - bi;
+      });
+    }
+
+    // F3System：方案 B — 收集 F4 子节点信息生成区分性后缀
+    // 子节点（F4）已在上方构建完成，可直接读取 devSymbolName / ifcFile
+    if (en === 'F3System' && children.length > 0) {
+      name = enhanceF3Name(name, children);
+    }
+
+    return {
+      path: p,
+      name,
+      entityName: en,
+      children,
+      famPath: kv['BASEFAMILY'] || '',
+      devPath,
+      ifcFile: kv['IFCFILE'] || '',
+      ifcGuid: (kv['IFCGUID'] || '').replace(/\$+$/, '').trim(),
+      classifyName: cn,
+      transformMatrix: kv['TRANSFORMMATRIX'] || '',
+      systemNames,
+      devSymbolName,
+      devType,
+      devExpanded,
+    };
+  }
+
+  const entryPath = files.has('CBM/project.cbm')
+    ? 'CBM/project.cbm'
+    : Array.from(files.keys()).find((path) => path.replace(/\\/g, '/').toLowerCase() === 'cbm/project.cbm');
+  if (!entryPath) return null;
+  return build(entryPath);
+}
+
+/**
+ * 解析 DEV 文件，展开 SUBDEVICES 块为 CBM 子节点（方向 B）。
+ *
+ * @param devPath 当前节点的 OBJECTMODELPOINTER（DEV 文件名）
+ * @param files GIM 解压文件集合
+ * @param parentCbmPath 父 CBM 节点路径（用于生成虚拟子节点 path）
+ * @param devInfoCache DEV 信息缓存（避免重复解析同一 DEV 文件）
+ * @param devVisited 循环引用防护
+ * @returns 虚拟 CbmNode 列表
+ */
+async function expandDevSubDevices(
+  devPath: string,
+  files: Map<string, File>,
+  parentCbmPath: string,
+  devInfoCache: Map<string, { symbolName: string; type: string } | null>,
+  devVisited?: Set<string>,
+  depth = 0,
+  nodeBudget: { count: number } = { count: 0 },
+): Promise<CbmNode[]> {
+  if (depth > PARSER_LIMITS.maxRecursionDepth) {
+    throw new Error(`DEV 子设备递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
+  }
+  if (!devVisited) devVisited = new Set<string>();
+
+  const normalizedDevPath = devPath.startsWith('DEV/') ? devPath : `DEV/${devPath}`;
+  if (devVisited.has(normalizedDevPath)) return [];
+  devVisited.add(normalizedDevPath);
+
+  // 从缓存读取 DEV 文档（若已解析过）
+  const devFile = getFileByPath(files, normalizedDevPath);
+  if (!devFile) return [];
+
+  let devDoc;
+  try {
+    devDoc = parseDev(await devFile.text(), normalizedDevPath);
+  } catch {
+    return [];
+  }
+
+  const children: CbmNode[] = [];
+  for (let i = 0; i < devDoc.subDevices.length; i++) {
+    nodeBudget.count++;
+    if (nodeBudget.count > PARSER_LIMITS.maxCbmNodes) {
+      throw new Error(`CBM 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
+    }
+    const subDevice = devDoc.subDevices[i];
+    const childDevPath = subDevice.devPath;
+    const normalizedChildDevPath = childDevPath.startsWith('DEV/') ? childDevPath : `DEV/${childDevPath}`;
+    const virtualPath = `${parentCbmPath}#dev:${i}:${childDevPath}`;
+
+    // 从缓存获取子 DEV 的 SYMBOLNAME/TYPE
+    let childSymbolName = '';
+    let childType = '';
+    let grandChildren: CbmNode[] = [];
+    try {
+      // 优先查缓存
+      let childInfo = devInfoCache.get(normalizedChildDevPath);
+      if (childInfo === undefined) {
+        const childFile = getFileByPath(files, normalizedChildDevPath);
+        if (childFile) {
+          const childDoc = parseDev(await childFile.text(), normalizedChildDevPath);
+          childInfo = { symbolName: childDoc.symbolName || '', type: childDoc.type || '' };
+        } else {
+          childInfo = null;
+        }
+        devInfoCache.set(normalizedChildDevPath, childInfo);
+      }
+      if (childInfo) {
+        childSymbolName = childInfo.symbolName;
+        childType = childInfo.type;
+      }
+      // 递归展开孙 SUBDEVICES。
+      // 每个 sibling 需要独立 visited 分支；同一个 child DEV 可被多次实例化，
+      // 但矩阵不同，不能因为同名 DEV 被前一个 sibling 访问过就跳过。
+      grandChildren = await expandDevSubDevices(childDevPath, files, virtualPath, devInfoCache, new Set(devVisited), depth + 1, nodeBudget);
+    } catch {
+      // 子 DEV 解析失败，跳过
+    }
+
+    // 虚拟子节点名称：SYMBOLNAME > TYPE > devPath 文件名
+    const childName = childSymbolName || childType || childDevPath.replace(/\.dev$/i, '');
+
+    // 关键：虚拟子节点的 transformMatrix 必须携带 SUBDEVICE.transformMatrix，
+    // 否则 collectCbmDeviceInstances 累积 CBM 树变换时会丢失 SUBDEVICE 变换，
+    // 导致嵌套 DEV 中的 MOD 位置错误（跑到建筑之外）。
+    // 此前为空字符串，会在以下三条路径同时出错：
+    // 1. 自动加载：collectCbmDeviceInstances → discoverGeometriesFromNode → rootTransform 缺失 SUBDEVICE
+    // 2. DB 直通：cbm_node.transform_matrix=NULL → cumulative_cbm_matrix 缺失 SUBDEVICE
+    //    （BFS 路径会补充正确实例，但同一 DEV 会得到两个不同 placement，产生重复几何）
+    // 3. 节点点击：loadModStlForNode → discoverGeometriesFromNode → rootTransform 缺失 SUBDEVICE
+    const childTransformMatrix = subDevice.transformMatrix.length === 16
+      ? subDevice.transformMatrix.join(',')
+      : '';
+
+    children.push({
+      path: virtualPath,
+      name: childName,
+      entityName: 'DEV_SUBDEVICE',
+      children: grandChildren,
+      famPath: '',
+      devPath: childDevPath,
+      ifcFile: '',
+      ifcGuid: '',
+      classifyName: '',
+      transformMatrix: childTransformMatrix,
+      systemNames: [],
+      devSymbolName: childSymbolName,
+      devType: childType,
+      devExpanded: true,
+    });
+  }
+
+  return children;
+}
+
+/** 构建 CBM 文件名 → CbmNode 索引 */
+export function buildCbmNodeIndex(node: CbmNode | null): Map<string, CbmNode> {
+  const index = new Map<string, CbmNode>();
+  function walk(n: CbmNode) {
+    const fileName = n.path.split('/').pop() || '';
+    if (fileName) index.set(fileName, n);
+    for (const child of n.children) walk(child);
+  }
+  if (node) walk(node);
+  return index;
+}
+
+/** 收集节点及其后代的所有 IFC 引用 → Map<modelId, Set<ifcGuid>> */
+export function collectIfcRefs(node: CbmNode): Map<string, Set<string>> {
+  const refs = new Map<string, Set<string>>();
+  function walk(n: CbmNode) {
+    if (n.ifcFile && n.ifcGuid) {
+      const modelId = n.ifcFile.replace(/\.ifc$/i, '');
+      if (!refs.has(modelId)) refs.set(modelId, new Set());
+      refs.get(modelId)!.add(n.ifcGuid);
+    }
+    for (const child of n.children) walk(child);
+  }
+  walk(node);
+  return refs;
+}

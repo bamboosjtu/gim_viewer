@@ -1,0 +1,100 @@
+# GIM Schema Research 目录
+
+本目录用于沉淀 GIM 文件格式研究、样本实证结论和后续解析器实现边界。
+
+当前文档分为两类：
+
+1. **研究分析文档**：按分析顺序编号，记录样本事实、统计结果、引用链、异常分型和实现边界。
+2. **格式说明文档**：按文件类型命名，记录单类文件的字段结构和解析约定。
+
+研究结论只代表当前样本实证结果，不直接等同于完整 GIM 标准。新增样本后，应优先复跑编号文档中的脚本，再决定是否更新解析器。
+
+> **2026-07-17 复核**：三个登记样本的 SHA-256、容器头、目录清单、MOD 格式族和 STL 二进制统计已重新核对。当前实现状态与历史研究结论的分界见 [21-schema-conclusion-review-0717.md](21-schema-conclusion-review-0717.md)。
+
+---
+
+## 1. 研究主线
+
+完整解析 GIM 可以拆成三层：
+
+```text
+文件容器层
+  -> 工程语义层
+     -> 几何 / 图纸展示层
+```
+
+当前建议的阅读与研究顺序如下。
+
+| 顺序 | 文档 | 关注问题 | 状态 |
+| ---: | ---- | -------- | ---- |
+| 00 | [00-sample-corpus.md](00-sample-corpus.md) | 样本台账、样本边界、后续样本登记规则 | 持续维护 |
+| 01 | [01-gim-container-analysis.md](01-gim-container-analysis.md) | `.gim` 外壳、GIMPKG 魔数、压缩格式、payload offset | 已纳入 3 个样本 |
+| 02 | [02-gim-file-inventory.md](02-gim-file-inventory.md) | 解压后文件清单、目录大小写、文本/二进制粗判 | 已纳入 3 个样本 |
+| 03 | [03-gim-file-role-matrix.md](03-gim-file-role-matrix.md) | CBM/FAM/DEV/PHM/MOD/STL/IFC/SCH/STD/SLD 文件角色 | 待随新样本复核 |
+| 04 | [04-cbm-field-dictionary.md](04-cbm-field-dictionary.md) | CBM 字段、线路/变电差异、CBM 下游引用 | 待随新样本复核 |
+| 05 | [05-gim-reference-integrity.md](05-gim-reference-integrity.md) | CBM/DEV/PHM 文件级引用完整性、IFCGUID 命中分型 | 待随新样本复核 |
+| 06 | [06-cbm-fam-consistency.md](06-cbm-fam-consistency.md) | CBM -> FAM 覆盖关系、FAM 字段形态、属性 sidecar 判断 | 待随新样本复核 |
+| 07 | [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) | DEV/PHM 递归、MOD/STL 几何目标可达性、无几何装配节点 | 待随新样本复核 |
+| 08 | [08-mod-static-survey.md](08-mod-static-survey.md) | MOD 静态分型、线路/变电 MOD 格式边界、可解析性边界 | 待随新样本复核 |
+| 09 | [09-transform-chain-analysis.md](09-transform-chain-analysis.md) | PHM 与 MOD 变换链分析、矩阵存储约定、两级变换验证 | 待随新样本复核 |
+| 10 | [10-substation-mod-grammar.md](10-substation-mod-grammar.md) | 变电 XML primitive 字段范围、强类型 schema 判定、Color/StretchedBody 深度分析 | 待随新样本复核 |
+| 11 | [11-line-mod-grammar.md](11-line-mod-grammar.md) | 线路 MOD 4 类文本格式族 grammar、层级关系、parser 草案边界 | Parser 已实现并由属性面板运行时消费；不启用独立线路 3D |
+| 12 | [12-stl-static-survey.md](12-stl-static-survey.md) | STL 格式检测、PHM 引用扫描、entityName 映射、STL 与 MOD 关系判定、§9 STL 设备类型分析（三样本）、§10 MOD 设备类型对比分析（三样本：变电 XML primitive vs 线路 4 类文本格式族） | 待随新样本复核 |
+| 13 | [13-geometry-ir-schema.md](13-geometry-ir-schema.md) | 统一 Geometry IR 草案、5 种 kind schema、解析管道分层、缺陷对照 | 设计文档；§1/§6 是历史实现基线 |
+| 14 | [14-line-catenary-study.md](14-line-catenary-study.md) | 线路悬链线参数研究方法论、审计流程、样本证据与决策路径（M4-B1/B2/B3/B3A/B3B/B3C 沉淀） | 样本研究有效；当前仅保留地图上的实验性 2D 曲线和审计导出，独立线路 3D 未启用 |
+| 15 | [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) | demo-line 全量静态分析证据（5460 WIRE / 327 TOWER），KVALUE / MATRIX0 / BLHA / 拓扑分类字段语义确认 | 样本证据文档（demo-line） |
+| 17 | [17-batch-load-schema.md](17-batch-load-schema.md) | MOD/STL 批量加载、共享几何、GLB 中间态缓存设计与演进 | 方案 B 与 DEV 粒度方案 C 已实现；Worker/SQLite 几何表未实现 |
+| 18c | [18c-experiment-mod-to-gltf-cache.md](18c-experiment-mod-to-gltf-cache.md) | MOD/STL → GLB 缓存实验及 MOD 粒度到 DEV 粒度的设计变更 | DEV 粒度方案已实现并纳入构建/样本回归验证；Worker/SQLite 几何表仍是长期路线 |
+| 20 | [20-substation-partindex-alias-correction.md](20-substation-partindex-alias-correction.md) | demo-substation PARTINDEX 与 DEV SUBDEVICE 别名关系、几何实例基线更正 | 已落实到渲染入口 |
+| 21 | [21-schema-conclusion-review-0717.md](21-schema-conclusion-review-0717.md) | 2026-07-17 样本事实与当前实现状态复核 | 本轮复核基线 |
+| 22 | [22-ten-sample-verification-0824.md](22-ten-sample-verification-0824.md) | **2026-08-24 十样本（4 变电 + 6 线路）全量复核**：结论外推性判定、导出软件混杂变量、实现影响清单 | 当前最新基线 |
+
+---
+
+## 2. 文件类型说明文档
+
+以下文档更接近“格式说明 / parser 设计输入”，不承担样本统计主线。
+
+| 文档 | 角色 |
+| ---- | ---- |
+| [cbm.md](cbm.md) | CBM 工程骨架与层级关系说明 |
+| [fam.md](fam.md) | FAM 属性文件说明 |
+| [dev.md](dev.md) | DEV 物理模型与设备组合说明 |
+| [phm.md](phm.md) | PHM 组合模型与 MOD/STL 引用说明 |
+| [mod.md](mod.md) | MOD 基础几何/参数化模型说明 |
+| [sch.md](sch.md) | SCH 逻辑模型入口；parser、首次打开和缓存恢复已实现 |
+| [std.md](std.md) | STD 逻辑定义；parser 与 gridId 索引已实现 |
+| [sld.md](sld.md) | SLD 主接线图；parser/视图/联动已实现，安全化仍有 P0 风险 |
+
+---
+
+## 3. 新样本接入顺序
+
+新增 GIM 样本时，先只更新文件层研究，不直接改 parser。
+
+推荐顺序：
+
+```text
+Step 00: 更新 00-sample-corpus.md 样本台账
+Step 01: 复核 01-gim-container-analysis.md 的魔数、压缩格式、offset
+Step 02: 复核 02-gim-file-inventory.md 的文件清单、目录分布、文本/二进制粗判
+Step 03: 复核 03/04/05 的文件角色、CBM 字段、引用完整性
+Step 04: 复核 07/08 的 DEV/PHM 几何可达性与 MOD 静态分型
+Step 05: 复核 09 的 PHM 与 MOD 变换链
+Step 06: 复核 10 的变电 XML primitive 字段范围与强类型 schema
+Step 07: 复核 11 的线路 MOD 文本格式族 grammar 与 parser 草案边界
+Step 08: 复核 12 的 STL 角色与 MOD 关系（互斥/并列/fallback）
+Step 09: 参考 13 的 Geometry IR 草案，并对照 21 复核已落地与未落地部分
+Step 10: 线路工程参考 14/15 的样本证据，并对照 21 验证当前悬链线实现是否满足语义边界
+```
+
+---
+
+## 4. 文档维护规则
+
+- 编号文档按研究流程排序，不按文件类型排序。
+- 文件类型说明文档按扩展名命名，不加编号。
+- `_generated/` 仅存放临时 CSV、诊断表和可复跑输出，不作为人工维护文档。
+- 任何结论都要区分“当前样本事实”和“候选通用规则”。
+- 遇到 demo 实证与背景规范不一致时，优先记录实证结果，并标注边界。
+- 在解析器实现前，先完成样本复核和诊断分型，避免把单一样本特征写死。

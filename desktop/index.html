@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GIM BIM 浏览器</title>
+    <style>
+      /* ══════════════════════════════════════════════════════
+         GIM BIM 浏览器设计系统（Graphite BIM，design/design_system.md）
+         ══════════════════════════════════════════════════════ */
+      :root {
+        --shell: #0b1016;
+        --surface-1: #111923;
+        --surface-2: #182330;
+        --surface-3: #202c3a;
+        --border: #263342;
+        --canvas: #e6eaee;
+        --primary: #3a8dff;
+        --selection: #49c6ff;
+        --success: #31c48d;
+        --warning: #f5b94c;
+        --danger: #f36f6f;
+        --text-1: #f1f5f9;
+        --text-2: #a9b5c3;
+        --text-3: #7d8b9b;
+        --mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+        font-family: "Segoe UI", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
+        font-size: 13px; background: var(--shell); color: var(--text-1);
+      }
+      button, input { font: inherit; }
+      #app { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; }
+
+      /* ── 顶部项目栏（48px）── */
+      #topbar {
+        height: 48px; flex-shrink: 0; display: flex; align-items: center; gap: 18px;
+        padding: 0 16px; border-bottom: 1px solid var(--border);
+        background: linear-gradient(180deg, #101824 0%, #0b1119 100%);
+        box-shadow: 0 2px 12px rgba(0,0,0,.24); z-index: 5;
+      }
+      .brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 650; letter-spacing: .2px; }
+      .brand-mark {
+        width: 20px; height: 20px; border: 2px solid var(--primary); border-radius: 4px; position: relative;
+        box-shadow: inset 0 0 0 3px rgba(58,141,255,.14);
+      }
+      .brand-mark:after { content: ""; position: absolute; inset: 5px; border: 1px solid var(--selection); transform: rotate(45deg); }
+      .project-select {
+        display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 11px;
+        border-radius: 5px; background: #151f2b; border: 1px solid #263646;
+      }
+      #project-title { font-size: 13px; font-weight: 600; color: var(--text-1); }
+      .project-select .caret { color: #718295; font-size: 10px; }
+      .badge {
+        display: inline-flex; align-items: center; height: 21px; padding: 0 8px; border-radius: 11px;
+        color: #a9d1ff; background: rgba(58,141,255,.14); border: 1px solid rgba(58,141,255,.35); font-size: 11px;
+      }
+      .badge.hidden { display: none; }
+      .top-spacer { flex: 1; }
+      .top-action {
+        display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px;
+        border: 1px solid #263646; border-radius: 5px; color: var(--text-2);
+        background: #151f2b; cursor: pointer; font-size: 12px;
+      }
+      .top-action:hover { background: var(--surface-3); color: var(--text-1); }
+      .top-action.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+      .top-action.primary:hover { background: #2f7de6; }
+
+      /* ── 主区：rail + navigator + viewport + inspector ── */
+      #main { flex: 1; display: grid; grid-template-columns: 52px 304px 1fr 352px; min-height: 0; }
+
+      /* 工作区导航轨 */
+      #workspace-rail {
+        background: #0d141d; border-right: 1px solid var(--border); padding: 8px 0;
+        display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+      }
+      .rail-item {
+        height: 64px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 4px; color: var(--text-3); font-size: 11px; cursor: pointer;
+        border-left: 3px solid transparent; border-top: 0; border-right: 0; border-bottom: 0;
+        background: transparent; width: 100%;
+      }
+      .rail-item .rail-icon { font-size: 17px; line-height: 1; }
+      .rail-item:hover { color: var(--text-2); background: rgba(255,255,255,.03); }
+      .rail-item.active { color: #d9ecff; border-left-color: var(--primary); background: rgba(58,141,255,.14); }
+      .rail-item.active .rail-icon { color: var(--selection); }
+      .rail-item.hidden { display: none; }
+
+      /* ── 导航器（左侧面板）── */
+      #navigator {
+        background: var(--surface-1); border-right: 1px solid var(--border); min-width: 0;
+        overflow: hidden; display: flex; flex-direction: column;
+      }
+      .panel-head {
+        height: 48px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+        padding: 0 14px; border-bottom: 1px solid var(--border);
+      }
+      .panel-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
+      .panel-count { color: var(--text-3); font-size: 11px; }
+
+      /* ── 按钮（全局）── */
+      .btn { display: inline-flex; align-items: center; justify-content: center; padding: 8px 12px; border: none; border-radius: 5px; background: var(--primary); color: #fff; font-size: 13px; cursor: pointer; transition: background 0.2s; }
+      .btn:hover { background: #2f7de6; }
+      .btn:disabled { background: #3a4553; cursor: not-allowed; }
+      .btn-secondary { background: var(--surface-3); color: var(--text-1); margin-top: 6px; }
+      .btn-secondary:hover { background: #2a3846; }
+      .btn-small { padding: 5px 9px; font-size: 12px; width: auto; }
+      .hidden-input { position: fixed; top: -9999px; left: -9999px; }
+
+      /* 导航器内容面板（复用现有 tab-panel 机制） */
+      .tab-panel { display: none; flex: 1; overflow-y: auto; min-height: 0; }
+      .tab-panel.active { display: flex; flex-direction: column; }
+
+      /* ── 模型列表（图层管理）── */
+      #model-list { padding: 8px 12px; }
+      .model-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; margin-bottom: 5px; background: var(--surface-2); border-radius: 5px; font-size: 12px; }
+      .model-item .model-checkbox { margin-right: 8px; accent-color: var(--primary); cursor: pointer; }
+      .model-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; color: var(--text-1); }
+      .model-item .count-badge { font-size: 11px; background: var(--surface-3); color: var(--text-3); padding: 2px 6px; border-radius: 10px; margin-right: 8px; }
+      .model-item .actions { display: flex; gap: 6px; }
+      .icon-btn { width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-3); color: var(--text-2); cursor: pointer; font-size: 12px; line-height: 1; }
+      .icon-btn:hover { background: #2a3846; color: var(--text-1); }
+
+      /* ── CBM 层级树 ── */
+      #cbm-tree-panel { padding: 8px 0; }
+      .tree-node { user-select: none; }
+      .tree-row { display: flex; align-items: center; height: 30px; padding: 0 8px; cursor: pointer; font-size: 13px; transition: background 0.15s; color: #c8d1dc; border-radius: 4px; }
+      .tree-row:hover { background: var(--surface-2); }
+      .tree-row:focus-visible { outline: 1px solid var(--primary); outline-offset: -1px; }
+      .tree-row.selected { background: rgba(58,141,255,.18); color: #e8f3ff; }
+      .tree-toggle { width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #8796a8; flex-shrink: 0; transition: transform 0.15s; }
+      .tree-toggle.expanded { transform: rotate(90deg); }
+      .tree-toggle.leaf { visibility: hidden; }
+      .tree-icon { margin-right: 6px; font-size: 13px; flex-shrink: 0; }
+      .tree-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tree-children { display: none; padding-left: 15px; }
+      .tree-children.expanded { display: block; }
+      .tree-view-host { min-height: 0; }
+      .substation-nav-mode { display: flex; align-items: center; gap: 4px; padding: 6px 8px 2px; border-bottom: 1px solid rgba(38,51,66,.72); }
+      .substation-nav-mode-btn { border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; background: var(--surface-2); color: var(--text-3); font-size: 11px; cursor: pointer; }
+      .substation-nav-mode-btn:hover { color: var(--text-1); background: var(--surface-3); }
+      .substation-nav-mode-btn:focus-visible { outline: 1px solid var(--primary); outline-offset: 1px; }
+      .substation-nav-mode-btn.active { color: #fff; border-color: var(--primary); background: var(--primary); }
+      .substation-nav-mode-btn:disabled { opacity: .55; cursor: not-allowed; }
+      .substation-nav-quality { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 10px; margin-left: 4px; }
+      .spatial-tree-row { min-width: 0; }
+      .spatial-tree-row .tree-label { flex: 1; min-width: 0; }
+      .spatial-badge { flex: 0 0 auto; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 6px; color: var(--text-3); font-size: 10px; }
+      .functional-tree-row { min-width: 0; }
+      .functional-tree-row .tree-label { flex: 1; min-width: 0; }
+      .functional-badge { flex: 0 0 auto; max-width: 86px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 6px; color: var(--text-3); font-size: 10px; }
+      .functional-tree-row .tree-toggle { border: 0; padding: 0; background: transparent; cursor: pointer; }
+      .functional-tree-row .tree-toggle:focus-visible { outline: 1px solid var(--primary); outline-offset: 1px; border-radius: 2px; }
+      /* 线路业务导航树：只显示业务标签；详细元数据保留在 tooltip/属性面板。 */
+      .line-navigation-row { min-width: 0; gap: 2px; }
+      .line-navigation-row .tree-toggle { border: 0; padding: 0; background: transparent; cursor: pointer; }
+      .line-navigation-row .tree-toggle:focus-visible { outline: 1px solid var(--primary); outline-offset: 1px; border-radius: 2px; }
+      .line-navigation-row .line-navigation-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .line-navigation-meta { display: none; }
+      .line-navigation-section > .line-navigation-row,
+      .line-navigation-strain-section > .line-navigation-row { color: #dbeafe; }
+      .line-navigation-unassociated-crossings > .line-navigation-row { color: #fbbf24; }
+      .spatial-leaf-row { height: 27px; font-size: 12px; }
+      .spatial-load-more-row { color: #8fb9e8; border: 1px dashed rgba(58,141,255,.35); margin: 2px 8px 2px 22px; justify-content: center; }
+      .spatial-load-more-row:hover { background: rgba(58,141,255,.12); color: #dceeff; }
+
+      /* ── 中央视口 ── */
+      #center { min-width: 0; display: flex; flex-direction: column; position: relative; background: var(--canvas); }
+      #viewport { flex: 1 1 auto; min-width: 0; overflow: hidden; position: relative; background: var(--canvas); }
+      /* ── 主视口一次图叠加层：仅覆盖显示，不销毁底层 3D 场景 ── */
+      .sld-overlay {
+        position: absolute; inset: 12px; z-index: 6; display: none; flex-direction: column;
+        min-width: 0; min-height: 0; overflow: hidden; border: 1px solid #c8d3df;
+        border-radius: 8px; background: rgba(250,252,255,.96);
+        box-shadow: 0 12px 32px rgba(15,23,42,.22); color: #1f2937;
+      }
+      .sld-overlay.visible { display: flex; }
+      .sld-overlay-header {
+        flex: 0 0 40px; display: flex; align-items: center; gap: 9px; padding: 0 12px;
+        border-bottom: 1px solid #d8e0e8; background: rgba(244,248,252,.96);
+      }
+      .sld-overlay-title { font-size: 13px; font-weight: 650; color: #172033; }
+      .sld-overlay-hint { color: #64748b; font-size: 11px; }
+      .sld-overlay-spacer { flex: 1; }
+      .sld-overlay-close {
+        height: 26px; padding: 0 9px; border: 1px solid #cbd5e1; border-radius: 4px;
+        background: #fff; color: #475569; cursor: pointer; font-size: 11px;
+      }
+      .sld-overlay-close:hover { border-color: #3a8dff; color: #1d4ed8; background: #f8fbff; }
+      .sld-overlay-close:focus-visible { outline: 1px solid #3a8dff; outline-offset: 1px; }
+      .sld-overlay-content { flex: 1; min-height: 0; overflow: hidden; padding: 8px; }
+      .sld-overlay-content .sld-svg-wrap {
+        width: 100%; height: 100%; min-height: 0; overflow: auto; padding: 10px;
+        align-items: flex-start; justify-content: center; background: #fff;
+      }
+      .sld-overlay-content .sld-svg-wrap img { max-width: 100%; height: auto; }
+      .sld-overlay-empty { display: grid; place-items: center; height: 100%; color: #64748b; font-size: 13px; }
+      #loading {
+        position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+        padding: 7px 16px; background: rgba(11,16,22,.92); color: var(--text-1);
+        border: 1px solid rgba(255,255,255,.14); border-radius: 6px; font-size: 12px;
+        display: none; z-index: 10; max-width: 70%; text-align: center;
+      }
+      #empty-tip {
+        position: absolute; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; color: var(--text-3); pointer-events: none;
+        background: var(--shell); z-index: 4;
+      }
+      #empty-tip h2 { margin: 0 0 8px; font-weight: 500; font-size: 16px; color: var(--text-2); }
+      #empty-tip p { margin: 0; font-size: 13px; }
+
+      /* ── 右侧对象检查器（352px）── */
+      #props-drawer {
+        flex: 0 0 352px; width: 352px; min-width: 0; flex-shrink: 0;
+        background: var(--surface-1); color: var(--text-1);
+        display: flex; flex-direction: column; border-left: 1px solid var(--border);
+        transition: flex-basis 0.25s ease, width 0.25s ease; overflow: hidden;
+      }
+      #props-drawer.collapsed { flex-basis: 0; width: 0; border-left: none; }
+      #props-drawer-header {
+        height: 48px; display: flex; align-items: center; justify-content: space-between;
+        padding: 0 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+      }
+      #props-drawer-header h3 { margin: 0; font-size: 14px; font-weight: 650; color: var(--text-1); }
+      #props-drawer-header .header-actions { display: flex; gap: 6px; }
+      #props-drawer-body { flex: 1; overflow-y: auto; padding: 12px 14px; }
+      /* 检查器四页签（概览/参数/关系/来源）*/
+      .itabs { display: grid; grid-template-columns: repeat(4, 1fr); height: 38px; margin-bottom: 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+      .itab { display: grid; place-items: center; border: none; background: transparent; color: var(--text-3); font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; }
+      .itab:hover { color: var(--text-2); }
+      .itab.active { color: var(--selection); border-bottom-color: var(--primary); }
+      .itab-pane { display: none; }
+      .itab-pane.active { display: block; }
+      .mono-val { font-family: var(--mono); font-size: 11px; }
+      .props-empty { color: var(--text-3); font-size: 12px; text-align: center; padding: 32px 0; }
+      .props-header { margin: 0 0 10px; font-size: 15px; font-weight: 650; color: var(--selection); padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+      .props-section { margin-bottom: 12px; }
+      .props-section-title { font-size: 11px; color: var(--text-3); font-weight: 600; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.6px; }
+      .props-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .props-table tr { border-bottom: 1px solid rgba(38,51,66,.72); }
+      .props-table td { padding: 5px 6px; vertical-align: top; }
+      .props-table .prop-key { color: var(--text-3); width: 40%; white-space: nowrap; }
+      .props-table .prop-val { color: #d3dbe4; word-break: break-all; }
+      .props-table th { color: var(--text-3); font-size: 10px; font-weight: 600; text-align: left; padding: 5px 4px; white-space: nowrap; border-bottom: 1px solid rgba(38,51,66,.72); }
+      .props-bolt-table { table-layout: fixed; font-size: 10px; }
+      .props-bolt-table th, .props-bolt-table td { padding: 4px 3px; }
+      .props-bolt-table th:nth-child(1), .props-bolt-table td:nth-child(1) { width: 11%; }
+      .props-bolt-table th:nth-child(2), .props-bolt-table td:nth-child(2) { width: 18%; }
+      .props-bolt-table th:nth-child(3), .props-bolt-table td:nth-child(3) { width: 14%; }
+      .props-bolt-table th:nth-child(4), .props-bolt-table td:nth-child(4) { width: 17%; }
+      .props-bolt-table th:nth-child(5), .props-bolt-table td:nth-child(5) { width: 12%; }
+      .props-bolt-table th:nth-child(n+6), .props-bolt-table td:nth-child(n+6) { width: 9.5%; }
+      .props-table .prop-val.prop-technical { color: var(--text-3); }
+      .prop-coordinate { display: grid; gap: 2px; line-height: 1.45; white-space: normal; }
+      .prop-coordinate-row { white-space: nowrap; }
+      .prop-ref-link { border: 1px solid rgba(58,141,255,.45); background: rgba(58,141,255,.08); color: #8bbcff; border-radius: 4px; padding: 2px 7px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+      .prop-ref-link:hover { border-color: var(--primary); background: rgba(58,141,255,.18); color: #d6e8ff; }
+      .prop-ref-link:focus-visible { outline: 1px solid var(--primary); outline-offset: 1px; }
+      .prop-ref-separator { display: inline-block; width: 4px; }
+      .props-advanced { margin: 0 0 12px; border: 1px solid rgba(38,51,66,.72); border-radius: 5px; padding: 5px 7px; }
+      .props-advanced > summary { color: var(--text-3); font-size: 11px; cursor: pointer; user-select: none; }
+      .props-advanced[open] > summary { color: var(--text-2); margin-bottom: 4px; }
+      .props-note { color: var(--text-3); font-size: 11px; line-height: 1.5; padding: 5px 2px; }
+      .props-note.warning { color: #f5b971; }
+      .line-mod-preview { margin: 0 0 12px; padding: 8px; border: 1px solid rgba(38,51,66,.72); border-radius: 5px; background: rgba(18,27,39,.55); }
+      .line-mod-preview svg { display: block; width: 100%; height: auto; aspect-ratio: 1 / 1; max-width: 280px; max-height: 280px; margin: 0 auto; }
+      .line-mod-preview .line-mod-rods { stroke: #67a7ff; stroke-width: 0.8; fill: none; opacity: .9; }
+      .line-mod-preview .line-mod-points { fill: #f3b34c; }
+      .line-mod-preview > span { display: block; margin-top: 3px; color: var(--text-3); font-size: 10px; text-align: center; }
+
+      /* 属性面板切换按钮（浮动在视口右侧） */
+      #btn-toggle-props {
+        position: fixed; top: 12px; right: 364px; z-index: 9999;
+        width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border);
+        background: rgba(13,19,28,.9); color: var(--text-2); font-size: 15px;
+        cursor: pointer; display: flex; align-items: center; justify-content: center;
+        transition: background 0.2s, right 0.25s ease;
+      }
+      #btn-toggle-props:hover { background: var(--surface-3); color: var(--text-1); }
+
+      /* ── SLD 电气单线图 ── */
+      #sld-panel { display: flex; flex-direction: column; min-height: 0; }
+      .sld-header { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-2); flex-shrink: 0; }
+      .sld-header .sld-title { font-size: 13px; color: var(--text-1); font-weight: 600; margin-bottom: 4px; }
+      .sld-header .sld-meta { font-size: 11px; color: var(--text-3); }
+      .sld-toolbar { padding: 6px 12px; border-bottom: 1px solid var(--border); display: flex; gap: 6px; flex-shrink: 0; }
+      .sld-toolbar button { padding: 4px 10px; font-size: 11px; background: var(--surface-3); color: var(--text-2); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+      .sld-toolbar button:hover { background: #2a3846; }
+      .sld-toolbar button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+      .sld-svg-wrap {
+        flex: 1; min-height: 0; overflow: auto; padding: 8px;
+        background: #fafafa; position: relative;
+        display: flex; align-items: flex-start; justify-content: center;
+      }
+      .sld-svg-wrap img { max-width: 100%; height: auto; display: block; }
+      .sld-svg-wrap .sld-empty { color: #666; font-size: 13px; text-align: center; padding: 32px 0; }
+      .sld-topo-list { padding: 6px 0; font-size: 12px; color: var(--text-2); }
+      .sld-topo-item { padding: 4px 8px; cursor: pointer; transition: background 0.15s; border-left: 2px solid transparent; }
+      .sld-topo-item:hover { background: var(--surface-2); }
+      .sld-topo-item.selected { background: rgba(58,141,255,.18); border-left-color: var(--primary); }
+      .sld-topo-item .sld-topo-tag { color: var(--text-3); font-size: 10px; margin-right: 6px; }
+      .sld-topo-item .sld-topo-name { color: var(--text-1); }
+      .sld-topo-item .sld-topo-grid { color: var(--primary); font-size: 10px; margin-left: 6px; font-family: var(--mono); }
+      .sld-empty-full { color: var(--text-3); font-size: 13px; text-align: center; padding: 32px 12px; }
+
+      /* ── 底部状态栏（28px）── */
+      #status-bar {
+        height: 28px; flex-shrink: 0; display: grid; grid-template-columns: 1fr auto 1fr;
+        align-items: center; border-top: 1px solid var(--border); background: #0c131c;
+        color: var(--text-3); font-size: 11px;
+      }
+      .status-left { padding-left: 14px; display: flex; align-items: center; gap: 7px; min-width: 0; }
+      .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
+      .status-dot.loading { background: var(--warning); }
+      .status-dot.error { background: var(--danger); }
+      #status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .status-mid { display: flex; gap: 16px; color: var(--text-3); }
+      .status-right { padding-right: 14px; text-align: right; color: #b9c6d2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <!-- 顶部项目栏 -->
+      <header id="topbar">
+        <div class="brand"><span class="brand-mark"></span><span>GIM BIM 浏览器</span></div>
+        <div class="project-select">
+          <span id="project-title">未打开工程</span>
+          <span class="caret">⌄</span>
+        </div>
+        <span id="project-type-badge" class="badge hidden"></span>
+        <div class="top-spacer"></div>
+        <button id="btn-load-gim" class="top-action primary">打开 GIM</button>
+        <input id="gim-file-input" class="hidden-input" type="file" accept=".gim" />
+        <button id="btn-load-local" class="top-action">附加 IFC</button>
+        <input id="file-input" class="hidden-input" type="file" accept=".ifc" multiple />
+        <button id="btn-clear" class="top-action">关闭工程</button>
+        <button id="btn-cache-manager" class="top-action" title="缓存管理">缓存</button>
+      </header>
+
+      <!-- 主区 -->
+      <div id="main">
+        <!-- 工作区导航轨 -->
+        <nav id="workspace-rail" aria-label="工作区">
+          <button class="rail-item active" data-tab="tab-tree" title="模型层级">
+            <span class="rail-icon">▦</span><span>模型</span>
+          </button>
+          <button class="rail-item" data-tab="tab-filedev" title="文件与设备">
+            <span class="rail-icon">⚙</span><span>设备</span>
+          </button>
+          <button class="rail-item" data-tab="tab-models" title="模型列表与图层">
+            <span class="rail-icon">▤</span><span>图层</span>
+          </button>
+          <button class="rail-item" data-tab="tab-sld" title="电气单线图">
+            <span class="rail-icon">⚡</span><span>图纸</span>
+          </button>
+        </nav>
+
+        <!-- 导航器 -->
+        <aside id="navigator">
+          <div class="panel-head"><h2 id="navigator-title">模型</h2><span class="panel-count" id="navigator-count"></span></div>
+          <div id="tab-tree" class="tab-panel active">
+            <div id="cbm-tree-panel"></div>
+          </div>
+          <div id="tab-filedev" class="tab-panel">
+            <div id="file-dev-panel"></div>
+          </div>
+          <div id="tab-models" class="tab-panel">
+            <div id="model-list"></div>
+          </div>
+          <div id="tab-sld" class="tab-panel">
+            <div id="sld-panel"></div>
+          </div>
+        </aside>
+
+        <!-- 中央视口 -->
+        <div id="center">
+          <div id="viewport">
+            <div id="loading">准备中...</div>
+            <div id="empty-tip">
+              <h2>尚未打开工程</h2>
+              <p>点击顶部「打开 GIM」加载工程文件，支持变电与线路两类工程</p>
+            </div>
+            <div id="sld-overlay" class="sld-overlay" aria-hidden="true">
+              <div class="sld-overlay-header">
+                <span class="sld-overlay-title">一次图 · 主接线图</span>
+                <span class="sld-overlay-hint">叠加显示，三维模型保持加载</span>
+                <span class="sld-overlay-spacer"></span>
+                <button id="sld-overlay-close" class="sld-overlay-close" type="button">关闭叠加</button>
+              </div>
+              <div id="sld-overlay-content" class="sld-overlay-content"></div>
+            </div>
+          </div>
+          <button id="btn-toggle-props" title="属性面板">☰</button>
+        </div>
+
+        <!-- 右侧对象检查器 -->
+        <aside id="props-drawer">
+          <div id="props-drawer-header">
+            <h3>属性</h3>
+            <div class="header-actions">
+              <button id="btn-export-props" class="icon-btn" title="导出属性 CSV">⇩</button>
+              <button id="btn-close-props" class="icon-btn" title="收起">✕</button>
+            </div>
+          </div>
+          <div id="props-drawer-body">
+            <div class="props-empty">选择层级树节点查看属性</div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- 底部状态栏 -->
+      <footer id="status-bar">
+        <div class="status-left"><span id="status-dot" class="status-dot"></span><span id="status-text">就绪</span></div>
+        <div class="status-mid"><span id="status-selection">未选中</span></div>
+        <div class="status-right" id="status-right">GIM BIM 浏览器</div>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

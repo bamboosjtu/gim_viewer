@@ -1,0 +1,229 @@
+/**
+ * 统一项目切换清理服务。
+ *
+ * 解决问题：ViewerRuntime 是懒加载单例，AppState.resetGimState() 只清 state
+ * 而不清 ctx.fragments / scene 中已加载的模型；线路地图 canvas 也不在 reset 范围内。
+ * 这导致线路 ↔ 变电切换时，AppState 与 ViewerRuntime 状态不同步：
+ *   - 切到变电后，旧线路 canvas 残留覆盖 IFC viewer
+ *   - 切回变电后，旧 fragments 模型仍在 scene 中（可能与新模型重复或冲突）
+ *   - hasFittedCamera 未重置，新模型加载后相机不重新 fit，导致中间只有网格
+ *
+ * 本服务在「打开新 GIM 前」和「清空场景」时统一执行：
+ *   1. 销毁线路地图（canvas/tooltip/图层控件/事件监听）
+ *   2. dispose ViewerRuntime 中所有 fragments 模型（合并 state.loadedModels 与 ctx.fragments.list）
+ *   3. 重置高亮
+ *   4. 清空 model-list UI
+ *   5. 重置 state（resetGimState 集中 mutator，含 loadedModels/highlightedItems/hasFittedCamera）
+ *
+ * 关键顺序：必须先 dispose runtime 中的模型，再 resetGimState（resetGimState 会清空 loadedModels 索引，
+ * 但 ctx.fragments.list 中的实际 Three.js 对象不会随之消失）。
+ *
+ * 分层边界：属于 services 编排层，可 dynamic import viewer/ 与 ui/ 模块。
+ */
+
+import type { AppState } from '../app/state.js';
+import * as THREE from 'three';
+import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
+import { container } from '../ui/dom.js';
+
+/**
+ * 在打开新 GIM 项目前 / 清空场景时执行统一清理。
+ *
+ * 幂等：ViewerRuntime 未创建时跳过 fragments 清理；无线路地图时跳过地图销毁。
+ *
+ * @param state 全局 AppState
+ */
+export async function cleanupBeforeOpenNewProject(
+  state: AppState,
+  /**
+   * 可选的打开请求代次。传入后，若请求已被更新的打开动作取代，
+   * 清理会在任何可能覆盖新状态的步骤前停止并返回 false。
+   */
+  expectedGeneration?: number,
+): Promise<boolean> {
+  if (expectedGeneration !== undefined && state.projectGeneration !== expectedGeneration) {
+    return false;
+  }
+  // P1 安全评审：清理开始时立即递增 geometry token，同步失效所有在途几何任务
+  // （渐进 GLB 管线 / MOD 自动加载），防止旧项目任务把 GLB、版本标记或
+  // UI 状态写入新项目。必须在任何 await 之前执行——后续新增逻辑不得移到本行之前。
+  state.invalidatePendingLoads();
+  const cleanupGeneration = state.projectGeneration;
+  const isCurrentCleanup = () => state.projectGeneration === cleanupGeneration;
+
+  // M0 设计系统：清理即重置顶栏工程身份与状态栏（纯 UI，位于 token 递增之后）
+  try {
+    const { setProjectIdentity } = await import('../ui/shell/projectBar.js');
+    if (!isCurrentCleanup()) return false;
+    setProjectIdentity(null, null);
+  } catch { /* UI 模块不可用不影响清理 */ }
+
+  // ---- 1. 销毁线路地图 canvas / tooltip / 图层控件 / 事件监听 ----
+  // 即使 ViewerRuntime 未创建，线路地图也可能存在（线路工程不创建 Viewer）
+  try {
+    const { destroyLineMapView } = await import('../ui/lineProjectView.js');
+    if (!isCurrentCleanup()) return false;
+    destroyLineMapView();
+  } catch (err) {
+    console.warn('[Cleanup] destroyLineMapView failed:', err);
+  }
+
+  // ---- 2. dispose ViewerRuntime 中所有 fragments 模型 ----
+  // 必须在 resetGimState 之前执行：resetGimState 会清空 state.loadedModels 索引，
+  // 但 ctx.fragments.list 中的 Three.js 对象仍残留，需要显式 dispose
+  let disposedCount = 0;
+  let attemptedCount = 0;
+  let xmlModDisposedCount = 0;
+  let stlDisposedCount = 0;
+  const { isViewerRuntimeCreated, getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+  if (!isCurrentCleanup()) return false;
+  if (isViewerRuntimeCreated()) {
+    try {
+      const runtime = await getViewerRuntime(container);
+      if (!isCurrentCleanup()) return false;
+      const ctx = runtime.ctx;
+
+      // 合并 state.loadedModels 与 ctx.fragments.list 的 modelId
+      // - state.loadedModels 可能比 ctx 多（dispose 失败的残留索引）
+      // - ctx.fragments.list 可能比 state 多（state 被外部 reset 但 ctx 未清）
+      const ids = new Set<string>();
+      for (const [modelId] of state.loadedModels) ids.add(modelId);
+      for (const modelId of ctx.fragments.list.keys()) ids.add(modelId);
+
+      attemptedCount = ids.size;
+      for (const modelId of ids) {
+        try {
+          ctx.fragments.core.disposeModel(modelId);
+          disposedCount++;
+        } catch (err) {
+          console.warn('[Cleanup] dispose model failed:', modelId, err);
+        }
+      }
+
+      // dispose MOD/STL 图层根节点 + 所有子 Group
+      // v6: MOD/STL 挂在独立图层 __GIM_MOD_LAYER__ / __GIM_STL_LAYER__ 下，
+      // 移除根节点即可级联移除所有子节点
+      // v7: Material 全部共享（xmlModGeometry），逐 mesh dispose 会破坏同色 Mesh；
+      //     traverse 只 dispose geometry，Material 由 disposeSharedXmlModMaterials 统一释放
+      // v8: Geometry 也共享（方案 A），traverse 不再 dispose geometry；
+      //     Geometry 由 disposeSharedXmlModGeometries 统一释放
+      // v9（方案 B）: merged geometry 不再共享（每 MOD Group 独立），
+      //              traverse 逐 mesh dispose merged geometry；Material 仍共享
+      const scene = (ctx.world.scene as any).three as import('three').Scene;
+      const { disposeXmlModGroup, disposeOwnedXmlModMaterials, disposeSharedXmlModMaterials, disposeSharedXmlModGeometries } = await import('../viewer/xmlModLoader.js');
+      const { disposeStlGroup } = await import('../viewer/stlLoader.js');
+      if (!isCurrentCleanup()) return false;
+
+      // 遍历 MOD 图层中的子 Group
+      if (state.modRootGroup) {
+        // 方案 B：merged geometry 不共享，需逐 mesh dispose
+        state.modRootGroup.traverse((obj) => {
+          const mesh = obj as THREE.Mesh;
+          mesh.geometry?.dispose?.();
+        });
+        disposeOwnedXmlModMaterials(state.modRootGroup);
+        scene.remove(state.modRootGroup);
+        xmlModDisposedCount = state.loadedXmlModGroups.size;
+      } else {
+        // 回退：旧版本没有图层根节点，逐个移除
+        for (const [modPath, group] of state.loadedXmlModGroups) {
+          try {
+            scene.remove(group);
+            disposeXmlModGroup(group);
+            xmlModDisposedCount++;
+          } catch (err) {
+            console.warn('[Cleanup] dispose xml-mod group failed:', modPath, err);
+          }
+        }
+      }
+
+      // 统一释放共享 Geometry + Material 缓存（所有 MOD Group 已移除后才能安全释放）
+      disposeSharedXmlModGeometries();
+      disposeSharedXmlModMaterials();
+
+      // 遍历 STL 图层中的子 Group 并 dispose
+      if (state.stlRootGroup) {
+        state.stlRootGroup.traverse((obj) => {
+          const mesh = obj as THREE.Mesh;
+          mesh.geometry?.dispose?.();
+          const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+          if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+          else mat?.dispose?.();
+        });
+        scene.remove(state.stlRootGroup);
+        stlDisposedCount = state.loadedStlGroups.size;
+      } else {
+        for (const [stlPath, group] of state.loadedStlGroups) {
+          try {
+            scene.remove(group);
+            disposeStlGroup(group);
+            stlDisposedCount++;
+          } catch (err) {
+            console.warn('[Cleanup] dispose stl group failed:', stlPath, err);
+          }
+        }
+      }
+
+      // ---- 3. 重置高亮 ----
+      try {
+        const { resetHighlight } = await import('../viewer/highlight.js');
+        if (!isCurrentCleanup()) return false;
+        await resetHighlight(ctx, state);
+        if (!isCurrentCleanup()) return false;
+      } catch (err) {
+        console.warn('[Cleanup] resetHighlight failed:', err);
+      }
+    } catch (err) {
+      console.warn('[Cleanup] ViewerRuntime cleanup failed:', err);
+    }
+  }
+  debugLog(DEBUG_RUNTIME_LOGS, '[Cleanup] disposed viewer models:', disposedCount, '(attempted:', attemptedCount, '), xml-mod groups:', xmlModDisposedCount, ', stl groups:', stlDisposedCount);
+
+  // ---- 4. 清空 UI 残留 ----
+  // disposeModel 会触发 onItemDeleted → removeModelFromUI，但保险起见再清一次
+  // 同步清空其他面板，避免上一个工程（如线路 TOWER 属性）残留到下一个工程
+  const uiClearTargets: { id: string; html?: string; styleDisplay?: string }[] = [
+    { id: 'model-list', html: '' },
+    { id: 'cbm-tree-panel', html: '' },
+    { id: 'file-dev-panel', html: '' },
+    { id: 'sld-panel', html: '' },
+    { id: 'props-drawer-body', html: '<div class="props-empty">选择层级树节点查看属性</div>' },
+    { id: 'empty-tip', styleDisplay: '' },
+  ];
+  for (const t of uiClearTargets) {
+    try {
+      const el = document.getElementById(t.id);
+      if (!el) continue;
+      if (t.html !== undefined) el.innerHTML = t.html;
+      if (t.styleDisplay !== undefined) el.style.display = t.styleDisplay;
+    } catch (err) {
+      console.warn(`[Cleanup] clear UI ${t.id} failed:`, err);
+    }
+  }
+
+  // 重置 SLD 视图模块内单例状态（selectedGridId / activeMode）
+  try {
+    const { clearSldView } = await import('../ui/sldView.js');
+    if (!isCurrentCleanup()) return false;
+    clearSldView();
+  } catch (err) {
+    console.warn('[Cleanup] clearSldView failed:', err);
+  }
+
+  // 恢复左侧 tab 可见性（lineProjectView.hideTabs 隐藏的 tab 在切换工程时需恢复）
+  try {
+    const { showAllTabs } = await import('../ui/tabs.js');
+    if (!isCurrentCleanup()) return false;
+    showAllTabs();
+  } catch (err) {
+    console.warn('[Cleanup] showAllTabs failed:', err);
+  }
+
+  // ---- 5. 重置 state ----
+  // 必须在 dispose 之后执行：resetGimState 会清空 state.loadedModels 索引
+  // resetGimState 是集中 mutator，已包含 loadedModels.clear / highlightedItems=null / hasFittedCamera=false
+  if (!isCurrentCleanup()) return false;
+  state.resetGimState();
+  return true;
+}

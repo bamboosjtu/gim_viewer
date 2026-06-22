@@ -1,0 +1,293 @@
+# PHM 文件格式
+
+## 文件概述
+
+> **2026-08-24 P0 深挖：PHM 嵌套矩阵组合语义**（`desktop/scripts/gim_survey/phm_nesting_semantics.py`，变电站03 全图数值分析）：
+>
+> | 引用类型 | 边数 | IDENTITY | det=-1（镜像） | 平移非零 | 平移量级 |
+> |---|---:|---:|---:|---:|---|
+> | PHM → `.phm`（嵌套边） | 2289 | 340 | **191** | **1931** | 中位 49.9，max 3681（mm） |
+> | PHM → `.mod`/`.gl`（叶） | 2570 | **2570** | 0 | 0 | - |
+> | PHM → `.stl`（叶） | 556 | 553 | 0 | 3 | ~3326-3752 |
+>
+> 结论：
+> 1. **BIMBase 的层级放置语义**：平移与旋转全部承载在**中间嵌套边**上（实测存在每级
+>    +125mm 的阶梯平移叠层链）；叶级引用恒为单位阵。组合语义为标准层级级联
+>    `世界变换 = CBM/DEV 矩阵 × ∏(各级 PHM 边矩阵)`。
+> 2. **镜像变换实证**：191 条嵌套边 det=-1 且正交误差为 0（纯镜像，用于对称塔身左右复制）。
+>    渲染端必须处理负行列式：翻转法线或改双面材质，否则镜像件会以反面渲染消失。
+> 3. **当前实现影响**：maxDepth=1 的遍历在该样本会丢弃全部中间层平移 → 装配体整体错位；
+>    必须改为递归 + 逐边乘矩阵 + visited 防环。
+> **2026-08-24 十样本复核**：① PHM SOLIDMODELn 目标新增 `.phm`（BIMBase 嵌套，最深 4 层，
+> 必须递归+防环）；② PHM TRANSFORMMATRIXn 不再恒为单位阵——BIMBase/SDDP 含大量平移+旋转矩阵，
+> 渲染必须应用；③ SOLIDMODELn 与 TRANSFORMMATRIXn 一一对应在 10/10 样本成立。
+> 详见 [22](22-ten-sample-verification-0824.md)。
+
+PHM（Physical Model / Assembly）文件是 GIM 工程中描述组合模型的文件，采用键值对文本格式。PHM 文件将多个基础几何模型（MOD 文件）或 STL 网格模型组装在一起，每个引用的模型通过独立的变换矩阵定义其在组合体中的空间位置，并可指定颜色。
+
+PHM 位于 GIM 解压后的 `Phm/` 目录（线路工程）或 `PHM/` 目录（变电工程），文件名采用 UUID 格式（如 `006bb6e9-ed4d-47e1-9b8c-3d323f1367c2.phm`）。PHM 是 DEV 与 MOD/STL 之间的中间层，被 DEV 文件的 `SOLIDMODELn` 字段引用，承担"组合模型 / 装配体"角色。
+
+### 变电工程与线路工程的差异
+
+PHM 文件在两类工程中存在显著差异：
+
+| 维度         | 变电工程                                       | 线路工程                                  |
+| ------------ | ---------------------------------------------- | ----------------------------------------- |
+| `SOLIDMODELS.NUM` 取值 | 范围广：0、1、2、~75（14 个文件 NUM=0）       | 集中在 1、2（无 NUM=0 文件）              |
+| `COLOR` 字段 | MOD 引用必为空；STL 引用必为非空（`R,G,B,A`） | 全部非空（`R,G,B,A`）                     |
+| 引用组合     | 单个 PHM 常混合 MOD 与 STL 引用               | 单个 PHM 要么全是 MOD，要么全是 STL        |
+| 变换矩阵精度 | 整数形式（`1,0,0,0,...`）                      | 浮点形式（`1.000000000,0.000000000,...`） |
+| 无目标 PHM   | 存在 14 个 `NUM=0` 的装配节点                  | 无                                        |
+
+## 文件格式
+
+- **编码**：UTF-8
+- **行分隔符**：换行符
+- **键值分隔符**：`=`
+- **列表索引**：从 0 开始（如 `SOLIDMODEL0`、`COLOR0`）
+- **字段顺序**：`SOLIDMODELS.NUM` → `SOLIDMODELn` → `TRANSFORMMATRIXn` → `COLORn`
+
+## 字段说明
+
+PHM 文件仅包含以下 4 类字段（实证样本中无其他键）：
+
+| 字段                            | 格式                                  | 说明                                            |
+| ------------------------------- | ------------------------------------- | ----------------------------------------------- |
+| `SOLIDMODELS.NUM`               | `<N>`                                 | 引用的几何模型数量                              |
+| `SOLIDMODEL0` ~ `SOLIDMODELN`   | `<uuid>.mod` 或 `<uuid>.stl`          | 引用几何模型文件（MOD 或 STL）                  |
+| `TRANSFORMMATRIX0` ~ `TRANSFORMMATRIXN` | `<16个浮点数>`                 | 对应 `SOLIDMODELn` 的 4×4 变换矩阵              |
+| `COLOR0` ~ `COLORN`             | `<R,G,B,A>` 或空                      | 对应 `SOLIDMODELn` 的颜色覆盖值（可为空）      |
+
+`SOLIDMODEL<i>`、`TRANSFORMMATRIX<i>` 和 `COLOR<i>` 三者通过索引 `i` 一一对应。
+
+### COLOR 字段
+
+`COLOR` 字段格式为 `R,G,B,A`，其中：
+
+- `R`/`G`/`B`：0~255 整数（红/绿/蓝通道）
+- `A`：0~100 整数（透明度百分比，100 表示不透明）
+
+颜色字段的使用规则存在工程差异：
+
+| 场景                                 | demo-line / demo-line1 | demo-substation |
+| ------------------------------------ | ---------------------- | --------------- |
+| `SOLIDMODEL` 指向 `.mod` 的 COLOR 字段 | 全部非空               | 全部空          |
+| `SOLIDMODEL` 指向 `.stl` 的 COLOR 字段 | 全部非空               | 全部非空        |
+
+变电工程中，MOD 文件本身已通过 `<Color>` 元素自带颜色信息，PHM 不再覆盖；STL 文件无颜色信息，由 PHM 的 `COLOR` 字段补充。线路工程中所有引用均显式指定 COLOR。
+
+### 变电站常见 COLOR 取值（基于 demo-substation 1803 个 STL 引用）
+
+| COLOR 值          |   数量 | 含义           |
+| ----------------- | -----: | -------------- |
+| `138,149,151,100` |   1769 | 灰色（主导值） |
+| `30,30,30,100`    |     34 | 深灰色         |
+
+### 线路常见 COLOR 取值（基于 demo-line + demo-line1 实证）
+
+| COLOR 值          | 含义           |
+| ----------------- | -------------- |
+| `255,255,255,100` | 白色           |
+| `195,195,195,100` | 浅灰色         |
+| `215,215,215,100` | 浅灰色（STL）  |
+
+## 变换矩阵格式
+
+与 DEV 文件中的变换矩阵格式相同，4×4 矩阵按**列主序**展开为 16 个浮点数（与 Three.js / OpenGL `Matrix4.elements` 布局一致），平移分量在 m[12]/m[13]/m[14]。单位矩阵为 `1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`。
+
+> **存储约定**（详见 [09-transform-chain-analysis.md](09-transform-chain-analysis.md) §8）：GIM 16 浮点数采用列主序存储，平移在 m[12..14]，与 Three.js `Matrix4.elements` 布局一致。早期版本曾误记为"行优先"，已修正。
+
+数值精度因工程而异：
+
+- 变电工程常见整数形式：`1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`
+- 线路工程常见浮点形式：`1.000000000,0.000000000,0.000000000,0.000000000,...`
+
+## 引用关系
+
+```text
+DEV 文件
+└── SOLIDMODELn → <uuid>.phm   → PHM 文件
+    └── SOLIDMODELS
+        ├── SOLIDMODEL0 → <uuid>.mod    → MOD 几何模型
+        │   └── TRANSFORMMATRIX0、COLOR0
+        ├── SOLIDMODEL1 → <uuid>.stl    → STL 三角网格
+        │   └── TRANSFORMMATRIX1、COLOR1
+        └── ...
+```
+
+PHM 仅引用两类几何文件：
+
+- **MOD 文件**：基础几何模型，XML 格式，含几何图元定义
+- **STL 文件**：标准三角网格模型，binary-like
+
+> **重要纠正**：早期版本曾提到 PHM 可引用同级 PHM 文件实现嵌套组合。基于三个样本（demo-line / demo-line1 / demo-substation）的全量实证，**未发现任何 `SOLIDMODEL` → `.phm` 引用**（均为 0）。PHM 不嵌套引用同级 PHM，几何叶子层固定为 MOD/STL。
+
+## 示例
+
+### 线路工程：单 STL 模型（NUM=1）
+
+```
+SOLIDMODELS.NUM=1
+SOLIDMODEL0=83ebec7e-7e02-4154-9807-1c59d7f7af45.stl
+TRANSFORMMATRIX0=1.000000000,0.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.000000000,0.000000000,1.000000000
+COLOR0=215,215,215,100
+```
+
+### 线路工程：双 MOD 模型（NUM=2）
+
+```
+SOLIDMODELS.NUM=2
+SOLIDMODEL0=7c6cf87e-9d8c-443f-af96-ad0f81d83291.mod
+SOLIDMODEL1=66d18b7e-0a1c-456a-b150-8d3d09288d24.mod
+TRANSFORMMATRIX0=1.000000000,0.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.000000000,0.000000000,1.000000000
+TRANSFORMMATRIX1=1.000000000,0.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.000000000,0.000000000,1.000000000,0.000000000,0.000000000,0.000000000,0.000000000,1.000000000
+COLOR0=195,195,195,100
+COLOR1=255,255,255,100
+```
+
+### 变电工程：无几何装配节点（NUM=0）
+
+```
+SOLIDMODELS.NUM=0
+```
+
+> demo-substation 中存在 14 个 `NUM=0` 的 PHM 文件，对应 F4System 装配节点，其几何位于 SUBDEVICE 子 DEV 的 PHM 中（参见 [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) 第 8 节）。
+
+### 变电工程：单 MOD 模型（NUM=1，COLOR 为空）
+
+```
+SOLIDMODELS.NUM=1
+SOLIDMODEL0=f0da98cf-841b-4a14-937c-56d9b1e08303.mod
+TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1
+COLOR0=
+```
+
+### 变电工程：MOD + STL 混合（NUM=2）
+
+```
+SOLIDMODELS.NUM=2
+SOLIDMODEL0=8f46293e-5712-469c-a953-c4b31038ea4d.mod
+TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1
+COLOR0=
+SOLIDMODEL1=4846c08f-5304-4ed5-af57-be3a3ea40568.stl
+TRANSFORMMATRIX1=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1
+COLOR1=30,30,30,100
+```
+
+### 变电工程：大组合件（NUM=17，1 MOD + 16 STL）
+
+```
+SOLIDMODELS.NUM=17
+SOLIDMODEL0=8ae3ef56-4616-4570-95a5-2464124788f9.mod
+TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1
+COLOR0=
+SOLIDMODEL1=1b09376b-7b7c-4ba1-80a9-6edfe52ea6c6.stl
+TRANSFORMMATRIX1=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1
+COLOR1=138,149,151,100
+SOLIDMODEL2=a30a6c55-0c28-4e24-9c07-fa35da9adeeb.stl
+TRANSFORMMATRIX2=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1
+COLOR2=138,149,151,100
+...（SOLIDMODEL3~SOLIDMODEL16 均为 .stl，COLOR 均为 138,149,151,100）
+```
+
+> demo-substation 最大组合件 `SOLIDMODELS.NUM=75`（6 个文件），单 PHM 同时引用大量 STL 是变电工程的典型装配模式。
+
+## 统计数据
+
+### 数量统计
+
+| 指标                          | demo-line（线路） | demo-line1（线路） | demo-substation（变电） |
+| ----------------------------- | ----------------: | ----------------: | ----------------------: |
+| PHM 文件总数                  |              1836 |               563 |                    4179 |
+| 含 `SOLIDMODELS.NUM` 的文件数 |              1836 |               563 |                    4179 |
+| `NUM=0` 文件数                |                 0 |                 0 |                      14 |
+| `NUM=1` 文件数                |               536 |               407 |                    4079 |
+| `NUM=2` 文件数                |              1300 |               156 |                      16 |
+| `NUM>2` 文件数                |                 0 |                 0 |                      70 |
+| `NUM` 最大值                  |                 2 |                 2 |                      75 |
+
+### 引用统计
+
+| 引用类型                | demo-line（线路） | demo-line1（线路） | demo-substation（变电） |
+| ----------------------- | ----------------: | ----------------: | ----------------------: |
+| `SOLIDMODEL` → `.mod`   |              2955 |               637 |                    4135 |
+| `SOLIDMODEL` → `.stl`   |               181 |                82 |                    1803 |
+| `SOLIDMODEL` → `.phm`   |                 0 |                 0 |                       0 |
+| 总引用数                |              3136 |               719 |                    5938 |
+
+> 三个样本中均**未发现 PHM 引用同级 PHM 的现象**，PHM 不存在嵌套引用关系。
+
+### COLOR 字段分布
+
+| 指标              | demo-line（线路） | demo-line1（线路） | demo-substation（变电） |
+| ----------------- | ----------------: | ----------------: | ----------------------: |
+| 空 COLOR 字段数   |                 0 |                 0 |                    4135 |
+| 非空 COLOR 字段数 |              3136 |               719 |                    1803 |
+| 非空率            |             100 % |             100 % |                   30.4 % |
+
+### 引用完整性
+
+| 指标              | demo-line（线路） | demo-line1（线路） | demo-substation（变电） |
+| ----------------- | ----------------: | ----------------: | ----------------------: |
+| 缺失 MOD/STL 数   |                 0 |                 0 |                       0 |
+| 孤立 MOD/STL 数   |                 0 |                 0 |                       0 |
+
+> 几何文件复用模式详见 [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) 第 9 节。
+
+## 工程类型差异对比
+
+| 维度             | 线路工程（demo-line / demo-line1）              | 变电工程（demo-substation）                       |
+| ---------------- | ----------------------------------------------- | ------------------------------------------------- |
+| PHM 复杂度       | 简单：仅 1~2 个 SOLIDMODEL 引用                 | 复杂：1~75 个 SOLIDMODEL 引用，分布广泛           |
+| 引用文件类型    | 单一：单个 PHM 要么全是 MOD，要么全是 STL       | 混合：单个 PHM 常同时引用 MOD 和 STL              |
+| COLOR 字段策略   | 全部非空（MOD 和 STL 引用都显式指定颜色）       | 仅 STL 引用非空，MOD 引用为空（依赖 MOD 自带颜色） |
+| 主导 COLOR 值    | `255,255,255,100`、`195,195,195,100`、`215,215,215,100` | `138,149,151,100`（占 98%）                        |
+| 变换矩阵精度     | 浮点形式（9 位小数）                            | 整数形式                                          |
+| 无目标 PHM       | 无                                              | 14 个 `NUM=0` 装配节点                            |
+| 几何复用模式     | 高复用：少量 MOD/STL 被大量 PHM 引用            | 低复用：MOD/STL 与 PHM 接近 1:1                   |
+
+差异原因：线路工程构件同质化程度高（如绝缘子串、金具），同一 PHM 模板被大量复用；变电工程设备异质性强，每个 PHM 组合更复杂但独占几何资源。详见 [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) 第 9 节。
+
+> STL 格式（全部 binary）、PHM 引用率（100%）、entityName 映射、STL 与 MOD 关系（线路 PHM 级互斥、变电部分并列）详见 [12-stl-static-survey.md](12-stl-static-survey.md)。
+
+## 实现对照
+
+> P0 已落地实现；早期 `docs/plans/substation-geometry-impl.md` 计划文件已不在仓库中，当前实现以本节列出的源码与测试为准。
+
+### 解析器
+
+- **实现位置**：`src/gim/geometry/phmParser.ts`
+- **核心函数**：`export function parsePhm(text: string, phmPath: string): PhmDocument`
+- **测试**：`src/gim/geometry/__tests__/phmParser.test.ts`（25 测试通过）
+
+### IR 类型（`src/gim/geometry/ir.ts`）
+
+```typescript
+export interface PhmSolidModelEntry {
+  solidModelPath: string;
+  transformMatrix: number[];  // 列主序 / Three.js Matrix4.elements 布局，长度 16
+  color?: XmlModColor;       // MOD 引用为空 → undefined
+}
+
+export interface PhmDocument {
+  phmPath: string;
+  solidModels: PhmSolidModelEntry[];
+  isEmpty: boolean;           // SOLIDMODELS.NUM=0 或全无效引用
+}
+```
+
+### 关键约束实现
+
+| 约束 | 实现策略 |
+|---|---|
+| PHM 不分节，无 `[section] 语法` | 内联 `parsePhmKeyValue`，与 cbmParser.parseKeyValue 行为一致 |
+| `COLORn` 为空字符串 → `color` 字段为 `undefined` | `parseColor` 在 `raw === ''` 时返回 `undefined` |
+| `TRANSFORMMATRIXn` 缺失 → 回退单位矩阵 | `parseTransformMatrix` 在 `undefined` 或长度异常时返回 `IDENTITY_MATRIX` |
+| PHM 不嵌套引用同级 PHM | 解析器不处理（实证已确认 0 引用） |
+| 数值范围：R/G/B 0-255，A 0-100 | `parseColor` 校验，超出范围返回 `undefined` |
+
+### 集成点
+
+- **`src/services/modGeometryDiscovery.ts`**：`discoverModGeometriesFromNode` 调用 `parsePhm` 解析 PHM 文件，遍历 `solidModels` 收集 `.mod` 引用（`.stl` P1 跳过）
+- **`src/viewer/xmlModLoader.ts`**：`applyExternalTransforms` 应用 `phmTransformMatrix`（列主序，直接 `Matrix4.fromArray`）
+- **`src/app/state.ts`**：`loadedXmlModGroups` 跟踪已加载 MOD Group
