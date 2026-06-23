@@ -6,7 +6,7 @@
 
 ## 一、FileDevRelation.cbm 格式与 IFC-设备映射
 
-**文件路径**: `demo/CBM/FileDevRelation.cbm`
+**文件路径**: `demo/demo-substation/CBM/FileDevRelation.cbm`
 
 ### 1.1 整体结构
 
