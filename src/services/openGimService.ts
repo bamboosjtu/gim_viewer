@@ -2,7 +2,6 @@ import type { IfcEntry } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { ModelEventCallbacks } from '../viewer/ifcLoader.js';
-import { extractGimFile } from '../gim/gimExtractor.js';
 import { scanIfcFiles, discoverIfcFromCBM, buildIfcGuidIndex } from '../gim/gimIndexer.js';
 import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
 import { parseFileDevRelation } from '../gim/fileDevParser.js';
@@ -86,6 +85,8 @@ export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMes
     if (files.length === 0) return;
     btnLoadGim.disabled = true;
     try {
+      showLoading('正在加载 GIM 解压模块...');
+      const { extractGimFile } = await import('../gim/gimExtractor.js');
       showLoading('正在解压 GIM 文件...');
       const ab = await files[0].arrayBuffer();
       const extracted = await extractGimFile(ab);

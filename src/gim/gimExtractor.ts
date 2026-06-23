@@ -1,7 +1,13 @@
-import { Archive } from 'libarchive.js';
+let archiveInitialized = false;
 
-// 初始化 libarchive.js Worker
-Archive.init({ workerUrl: 'worker-bundle.js' });
+async function getArchive() {
+  const mod = await import('libarchive.js');
+  if (!archiveInitialized) {
+    mod.Archive.init({ workerUrl: 'worker-bundle.js' });
+    archiveInitialized = true;
+  }
+  return mod.Archive;
+}
 
 /** 在 ArrayBuffer 中搜索 7z 或 ZIP 签名的偏移量 */
 export function findArchiveOffset(buffer: ArrayBuffer): number {
@@ -37,6 +43,7 @@ export async function extractGimFile(arrayBuffer: ArrayBuffer): Promise<Map<stri
   const ab = offset > 0 ? arrayBuffer.slice(offset) : arrayBuffer;
   const blob = new Blob([ab]);
   const file = new File([blob], 'archive', { type: 'application/octet-stream' });
+  const Archive = await getArchive();
   const archive = await Archive.open(file);
   const extracted = await archive.extractFiles();
   await archive.close();
