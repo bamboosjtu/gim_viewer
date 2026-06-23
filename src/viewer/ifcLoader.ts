@@ -2,6 +2,11 @@ import * as OBC from '@thatopen/components';
 import type { ViewerContext } from './viewerEngine.js';
 import type { AppState } from '../app/state.js';
 
+export type ModelEventCallbacks = {
+  onModelAdded: (modelId: string) => void;
+  onModelRemoved: (modelId: string) => void;
+};
+
 /** 初始化 IFC 引擎（仅首次调用生效） */
 export async function initEngine(ctx: ViewerContext, state: AppState): Promise<void> {
   if (state.initialized) return;
@@ -12,14 +17,11 @@ export async function initEngine(ctx: ViewerContext, state: AppState): Promise<v
   state.initialized = true;
 }
 
-/** 注册模型生命周期事件（在 initEngine 后调用） */
+/** 注册模型生命周期事件（在 initEngine 后调用，仅首次生效） */
 export function registerModelEvents(
   ctx: ViewerContext,
   state: AppState,
-  callbacks: {
-    onModelAdded: (modelId: string) => void;
-    onModelRemoved: (modelId: string) => void;
-  },
+  callbacks: ModelEventCallbacks,
 ): void {
   ctx.fragments.list.onItemSet.add(({ value: model }) => {
     model.useCamera((ctx.world.camera as any).three);
@@ -40,6 +42,19 @@ export function registerModelEvents(
       material.polygonOffset = true; material.polygonOffsetUnits = 1; material.polygonOffsetFactor = Math.random();
     }
   });
+}
+
+/** 确保引擎已初始化并注册事件（幂等，可在多处调用） */
+export async function ensureEngineReady(
+  ctx: ViewerContext,
+  state: AppState,
+  callbacks: ModelEventCallbacks,
+): Promise<void> {
+  await initEngine(ctx, state);
+  if (!state.eventsRegistered) {
+    registerModelEvents(ctx, state, callbacks);
+    state.eventsRegistered = true;
+  }
 }
 
 /** 加载 IFC Buffer */

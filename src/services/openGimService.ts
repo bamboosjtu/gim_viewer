@@ -1,14 +1,14 @@
 import type { IfcEntry } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
+import type { ModelEventCallbacks } from '../viewer/ifcLoader.js';
 import { extractGimFile } from '../gim/gimExtractor.js';
 import { scanIfcFiles, discoverIfcFromCBM, buildIfcGuidIndex } from '../gim/gimIndexer.js';
 import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
 import { parseFileDevRelation } from '../gim/fileDevParser.js';
-import { initEngine, loadIfcBuffer } from '../viewer/ifcLoader.js';
+import { ensureEngineReady, loadIfcBuffer } from '../viewer/ifcLoader.js';
 import { buildIfcNameIndex } from '../viewer/ifcNameIndex.js';
 import { fitCameraToScene } from '../viewer/camera.js';
-import { addModelToUI } from '../ui/modelList.js';
 import { openIfcModal, getModalSelectedEntries, closeIfcModal } from '../ui/ifcSelectModal.js';
 import { buildAndRenderCbmTree } from '../ui/cbmTreeView.js';
 import { renderFileDevPanel } from '../ui/fileDevView.js';
@@ -49,13 +49,13 @@ export async function onGimExtracted(ctx: ViewerContext, state: AppState, files:
 }
 
 /** 加载选中的 IFC 文件 */
-export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState): Promise<void> {
+export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, modelCallbacks: ModelEventCallbacks): Promise<void> {
   const selected = getModalSelectedEntries(state.currentIfcEntries);
   if (selected.length === 0) return;
   closeIfcModal();
   showLoading('正在加载 IFC 模型...');
   try {
-    await initEngine(ctx, state);
+    await ensureEngineReady(ctx, state, modelCallbacks);
     for (const entry of selected) {
       if (!state.currentFiles) break;
       const file = state.currentFiles.get(entry.path);
@@ -63,7 +63,6 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState):
       const buffer = new Uint8Array(await file.arrayBuffer());
       showLoading(`正在加载 ${entry.name}...`);
       await loadIfcBuffer(ctx, entry.name, buffer, state, (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`));
-      addModelToUI(ctx, state, entry.modelId);
     }
     await buildIfcNameIndex(ctx, state);
     buildAndRenderCbmTree(ctx, state, (text) => showLoading(text));

@@ -1,6 +1,6 @@
 import { AppState } from './state.js';
 import { createViewerEngine } from '../viewer/viewerEngine.js';
-import { registerModelEvents } from '../viewer/ifcLoader.js';
+import { ensureEngineReady } from '../viewer/ifcLoader.js';
 import { setupSelection } from '../viewer/selection.js';
 import { setupTabs } from '../ui/tabs.js';
 import { setupPropsDrawer, showIfcElementProperties } from '../ui/propsDrawer.js';
@@ -10,38 +10,36 @@ import { setupOpenGimService, loadSelectedIfcFiles } from '../services/openGimSe
 import { setupOpenIfcService } from '../services/openIfcService.js';
 import { resetHighlight } from '../viewer/highlight.js';
 import { container, btnClear, loadingEl } from '../ui/dom.js';
+import type { ModelEventCallbacks } from '../viewer/ifcLoader.js';
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
+function hideLoading() { loadingEl.style.display = 'none'; }
 
-/** 应用启动入口 */
-export function bootstrap(): void {
+/** 异步启动逻辑 */
+async function bootstrapAsync(): Promise<void> {
   // 创建状态
   const state = new AppState();
 
-  // 初始化 3D 引擎
+  // 初始化 3D 引擎（同步部分，不依赖 worker/wasm）
   const ctx = createViewerEngine(container);
 
-  // 注册模型事件
-  registerModelEvents(ctx, state, {
+  // 模型事件回调（供 ensureEngineReady 使用）
+  const modelCallbacks: ModelEventCallbacks = {
     onModelAdded: (modelId) => addModelToUI(ctx, state, modelId),
     onModelRemoved: (modelId) => removeModelFromUI(modelId),
-  });
+  };
 
-  // 设置 3D 点击拾取
-  setupSelection(ctx, state, container, (modelId, localId) => {
-    showIfcElementProperties(ctx, state, modelId, localId);
-  });
-
-  // 设置 UI
+  // 1. 先绑定所有 UI 事件（不依赖 fragments.init）
   setupTabs();
   setupPropsDrawer(ctx);
   setupIfcSelectModal({
-    onLoadSelected: () => loadSelectedIfcFiles(ctx, state),
+    onLoadSelected: () => loadSelectedIfcFiles(ctx, state, modelCallbacks),
   });
-
-  // 设置文件打开服务
+  setupSelection(ctx, state, container, (modelId, localId) => {
+    showIfcElementProperties(ctx, state, modelId, localId);
+  });
   setupOpenGimService(ctx, state, (text) => showLoading(text));
-  setupOpenIfcService(ctx, state);
+  setupOpenIfcService(ctx, state, modelCallbacks);
 
   // 清空场景
   btnClear.addEventListener('click', async () => {
@@ -56,4 +54,19 @@ export function bootstrap(): void {
     document.getElementById('empty-tip')!.style.display = '';
     await resetHighlight(ctx, state);
   });
+
+  // 2. 异步初始化 FragmentsManager + 注册模型事件
+  //    放在 UI 绑定之后，避免 WASM/Worker 加载阻塞 UI 交互
+  try {
+    await ensureEngineReady(ctx, state, modelCallbacks);
+  } catch (err) {
+    console.error('引擎初始化失败，将在首次加载 IFC 时重试:', err);
+  }
+
+  hideLoading();
+}
+
+/** 应用启动入口（同步包装） */
+export function bootstrap(): void {
+  bootstrapAsync();
 }

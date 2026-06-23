@@ -25,6 +25,7 @@ export class AppState {
 
   // 引擎
   initialized = false;
+  eventsRegistered = false;
   hasFittedCamera = false;
 
   /** 重置所有 GIM 相关状态（保留引擎初始化状态） */

@@ -1,6 +1,10 @@
 # GIM 文件分析报告
 
 > 基于 `demo/` 目录下的真实 GIM 数据，对 FileDevRelation、CBM 层级、DEV/FAM 属性、IFC 文件内容的系统分析。
+>
+> **覆盖范围**：
+> - 第一~四章基于 `demo/demo-substation`（变电工程）得出
+> - 第五章基于 `demo/demo-line`（线路工程）补充，对比两类工程的差异
 
 ---
 
@@ -301,3 +305,288 @@ FileDevRelation → FILE.DEV0..N → 设备 CBM → DEV → FAM
 2. **两条可行路径**: 路径 A（IFCGUID 精确桥接，覆盖率低）和路径 B（FileDevRelation 全量索引，覆盖 4695 个设备）
 3. **IFC 名称索引**: IFC 构件的 Name 属性（格式 `族:类型:实例ID`）可用于在层级树中显示有意义的设备名称，替代 CBM 中的 `&其他` 占位符
 4. **坐标系差异**: CBM 的 TRANSFORMMATRIX 使用测量坐标系（大数值），IFC 模型使用局部坐标系，两者不能直接混用
+
+---
+
+## 五、线路工程（demo-line）分析
+
+> 基于 `demo/demo-line`（衡阳西（喜阳）—苏耽Ⅱ回 500kV 线路工程，138.59km，327 基杆塔）的补充分析，对比变电工程的差异。
+
+### 5.1 整体结构对比
+
+| 维度 | 变电工程（demo-substation） | 线路工程（demo-line） |
+|---|---|---|
+| 目录名 | `CBM/DEV/MOD/PHM`（大写） | `Cbm/Dev/Mod/Phm`（首字母大写） |
+| IFC 文件 | 12 个，~120MB | **无 IFC 文件** |
+| FileDevRelation.cbm | 有（4695 设备） | **无** |
+| project.cbm 字段 | BLHA/TYPE/SCH/SUBSYSTEM | **仅 SUBSYSTEM**（52 字节） |
+| 几何表达 | IFC (STEP 物理格式) | **.mod（自定义文本）+ .stl（二进制）** |
+| 文件总数 | 36113 | ~60652 |
+| 数据规模 | ~230 MB | ~142 MB |
+
+**文件分布**（demo-line）：
+
+| 目录 | 文件数 | 大小 | 主要扩展名 |
+|---|---|---|---|
+| Cbm | 49796 | 21.5 MB | .cbm (27829), .fam (26485) |
+| Dev | 9036 | 32.7 MB | .dev (4518), .fam (4518) |
+| Mod | 1988 | 86.5 MB | .mod (1807), .stl (181) |
+| Phm | 1836 | 0.9 MB | .phm (1836) |
+
+### 5.2 CBM 层级结构（与变电工程完全不同）
+
+变电工程使用 `SUBSYSTEMS.NUM`+`SUBSYSTEM0..N` 统一的子节点引用方式，线路工程则**每一级使用不同的引用键**：
+
+```
+project.cbm (工程入口，仅 SUBSYSTEM 字段)
+└── F1System (1个，线路工程级)
+    ├── BASEFAMILY → FAM (线路工程属性)
+    ├── SECTIONS.NUM + SECTION0..N → F2System (1个，线路系统级)
+    │   ├── BASEFAMILY → FAM (线路系统属性)
+    │   └── STRAINSECTIONS.NUM + STRAINSECTION0..N → F3System (108个，耐张段)
+    │       ├── BASEFAMILY → FAM (耐张段电气参数)
+    │       └── GROUPS.NUM + GROUP0..N → F4System (5861个，设备组)
+    │           ├── GROUPTYPE=TOWER (327个，杆塔组)
+    │           │   ├── BLHA (杆塔经纬度)
+    │           │   ├── TOWERS.NUM + TOWER0..N → Tower_Device (杆塔实体)
+    │           │   ├── STRINGS.NUM + STRING<i>.STRING + STRING<i>.GPOINT → Tower_Device (绝缘子串)
+    │           │   └── BASES.NUM + BASE0..N → Tower_Device (基础)
+    │           ├── GROUPTYPE=WIRE (5460个，导地线段)
+    │           │   ├── WIRETYPE=CONDUCTOR|GROUNDWIRE|OPGW
+    │           │   ├── BACKSTRING / FRONTSTRING → Tower_Device (两端绝缘子串)
+    │           │   └── SUBDEVICES.NUM + SUBDEVICE0..N → Wire_Device (线段实体)
+    │           └── GROUPTYPE=CROSS (74个，交叉跨越)
+    │               └── SUBDEVICES.NUM + SUBDEVICE0..N → CROSS (跨越实体)
+    └── MATERIALSHEET (空)
+```
+
+**各层级引用键对照**：
+
+| 层级 | ENTITYNAME | 子节点引用键 | 数量 |
+|---|---|---|---|
+| 工程入口 | (project.cbm) | `SUBSYSTEM` (单值) | 1 |
+| 工程级 | F1System | `SECTIONS.NUM` + `SECTION<i>` | 1 |
+| 系统级 | F2System | `STRAINSECTIONS.NUM` + `STRAINSECTION<i>` | 1 |
+| 耐张段级 | F3System | `GROUPS.NUM` + `GROUP<i>` | 108 |
+| 设备组级 | F4System | 因 GROUPTYPE 而异（见下表） | 5861 |
+| 叶节点 | Tower_Device / Wire_Device / WIRE / CROSS | `OBJECTMODELPOINTER` → DEV | 21857 |
+
+**F4System 的 GROUPTYPE 差异**：
+
+| GROUPTYPE | 数量 | 子节点引用方式 | 特有字段 |
+|---|---|---|---|
+| TOWER | 327 | `TOWERS.NUM`+`TOWER<i>`、`STRINGS.NUM`+`STRING<i>.STRING`+`STRING<i>.GPOINT`、`BASES.NUM`+`BASE<i>` | `BLHA`、`MODLEG` |
+| WIRE | 5460 | `SUBDEVICES.NUM`+`SUBDEVICE<i>`、`BACKSTRING`、`FRONTSTRING` | `WIRETYPE`、`ISJUMPER` |
+| CROSS | 74 | `SUBDEVICES.NUM`+`SUBDEVICE<i>` | — |
+
+### 5.3 ENTITYNAME 分布对比
+
+| 变电工程 | 数量 | 线路工程 | 数量 |
+|---|---|---|---|
+| F1System | 1 | F1System | 1 |
+| F2System | 4 | F2System | 1 |
+| F3System | 85 | F3System | 108 |
+| F4System | 2682 | F4System | 5861 |
+| PARTINDEX | 2228 | — | — |
+| — | — | Tower_Device | 4309 |
+| — | — | Wire_Device | 11773 |
+| — | — | WIRE | 5460 |
+| — | — | CROSS | 315 |
+
+**关键差异**：
+- 线路工程**无 PARTINDEX** 叶节点，改用 `Tower_Device`/`Wire_Device`/`WIRE`/`CROSS` 四种设备实体
+- 线路工程的叶节点数量（21857）远多于变电工程（2228），因为每基杆塔有多个绝缘子串、每段线有多个线段实体
+
+### 5.4 WIRE 实体的特殊结构（导地线悬链线）
+
+WIRE 实体是线路工程独有的，用于描述导地线的悬链线段，**不通过 TRANSFORMMATRIX 定位，而是通过多点经纬度定义**：
+
+```
+ENTITYNAME=WIRE
+BASEFAMILY=<uuid>.fam
+OBJECTMODELPOINTER=<uuid>.dev
+KVALUE=0.0003450882          # K 值（应力参数）
+SPLIT=1                       # 分裂根数
+POINT0.BLHA=26.62254011,112.60955074,106.200,322.080817   # 起点：纬度,经度,高程,方位角
+POINT0.MATRIX0=<16个浮点数>                                # 起点变换矩阵
+POINT1.BLHA=26.62060670,112.61237487,91.470,322.080459    # 终点
+POINT1.MATRIX0=<16个浮点数>                                # 终点变换矩阵
+```
+
+**特征**：
+- `POINT<i>.BLHA` = 纬度,经度,高程,方位角（4 个值，变电工程 BLHA 是 3 值）
+- `POINT<i>.MATRIX0` = 该点的局部坐标系变换矩阵
+- 一根导线段通常有 2 个 POINT（起终点），悬链线由 web-ifc 之外的算法计算
+
+### 5.5 FAM 属性文件格式
+
+**变电工程 FAM**：分节格式 `[节名]`，属性行为 `中文键名=englishKey=值`
+**线路工程 FAM**：**无分节**，直接 `中文键名=ENGLISH_KEY=值`（扁平结构）
+
+**典型 FAM 内容示例**：
+
+| FAM 类型 | 关键属性 |
+|---|---|
+| F1System（工程级） | 设计阶段工程名称、工程编号(1316A023000109)、设计电压(AC500kV)、线路长度(138.59km)、杆塔基数(327)、导线用量、塔材量 |
+| F2System（系统级） | 电压等级、导线分裂数(4)、气象条件(15、20、30)、回路数 |
+| F3System（耐张段） | 导线型号(JL/G1A-630/45)、地线型号(OPGW-17-150-5)、K 值、代表档距、各工况温度(低温/大风/覆冰/高温/雷电/操作/安装) |
+| F4System-TOWER（杆塔） | 呼高(26m)、杆塔高(46.5m)、塔重(15740kg)、杆塔编号(N0)、档距(75.248m)、转角、Kv值、配腿 |
+| Tower_Device-DEV（杆塔设计参数） | 塔型(LMJ)、杆塔结构类型(钢管杆)、杆塔类型(耐张塔)、回路数(2)、设计风速(27m/s)、设计覆冰(15mm)、呼高范围 |
+| Tower_Device-STRING（绝缘子串） | 是否绝缘、放电间隙、物资编码 |
+| Wire_Device（线段） | 最大使用张力、年平均运行张力、最大设计应力、安全系数 |
+| CROSS（交叉跨越） | 电压等级(AC220V)、各工况K值、名称(电力线)、权属、里程信息 |
+
+### 5.6 DEV 文件结构
+
+线路工程 DEV 文件用 `DEVICETYPE` 字段（变电工程用 `TYPE`）分类：
+
+| DEVICETYPE | 数量 | 说明 |
+|---|---|---|
+| STRING | 2682 | 绝缘子串 |
+| BASE | 1300 | 基础 |
+| CROSS | 315 | 交叉跨越物 |
+| FITTINGS | 159 | 金具 |
+| TOWER | 31 | 杆塔（仅 31 种塔型模板，327 基杆塔复用） |
+| INSULATOR | 14 | 绝缘子 |
+| DAMPER | 5 | 防振锤 |
+| GROUNDWIRE | 3 | 地线 |
+| SPACER | 3 | 间隔棒 |
+| OPGW | 3 | 光纤复合架空地线 |
+| CONDUCTOR | 3 | 导线 |
+
+**DEV 文件字段**（以 TOWER 为例）：
+```
+DEVICETYPE=TOWER
+SYMBOLNAME=TOWER
+BASEFAMILY=<uuid>.fam
+SOLIDMODELS.NUM=1
+SOLIDMODEL0=<uuid>.phm
+TRANSFORMMATRIX0=<16个浮点数>
+```
+
+**与变电工程 DEV 的差异**：
+- 用 `DEVICETYPE` 替代 `TYPE`，值域完全不同（变电工程是 OTHERS/HVSwitchCabinet 等）
+- 无 `SUBDEVICES.NUM`（线路工程的子设备关系在 CBM 层表达）
+- `SYMBOLNAME` 值为英文（TOWER/WIRE/EQUIPMENT），变电工程为中文（土建接口等）
+
+### 5.7 几何模型（.mod 文件）格式
+
+线路工程的 .mod 文件**不是 XML**（与变电工程完全不同），而是按用途分为 4 种文本格式：
+
+#### 5.7.1 杆塔几何（HNum 格式，31 个文件）
+
+```
+HNum,1
+H,26000.000,Body1
+Body1
+HBody1,46500.000
+P,1,-27000.000,-0.000,46500.000     # 点定义：编号,x,y,z
+P,2,-27000.000,-0.000,34000.000
+...
+R,1,2,,Q235,100.000000,500.000000,8.000000,0   # 杆件：起点,终点,规格,材质,...
+R,2,3,φ325.000000X6.000000,Q235
+...
+G,G,前地1,-27000.000,-2.000,34000.000  # 挂点：类型(G=挂点),子类型(G=地线/C=导线),名称,x,y,z
+G,C,前导1,-21000.000,-500.000,26000.000
+```
+
+**字段说明**：
+- `HNum` / `H` / `Body` / `HBody`：高度分段定义
+- `P,<id>,<x>,<y>,<z>`：节点坐标（332 个点）
+- `R,<from>,<to>,<spec>,<material>,...`：杆件记录（638 条），定义钢结构成员
+- `G,<type>,<name>,<x>,<y>,<z>`：绝缘子串挂点（24 个），`前导`/`后导`为导线挂点，`前地`/`后地`为地线挂点
+
+#### 5.7.2 交叉跨越几何（CODE 格式，315 个文件）
+
+```
+CODE=201
+POINTNUM=4
+POINT1=1,26.57769030,112.62875108,81.959975,13    # 点：编号,纬度,经度,高程,?
+POINT2=2,26.57775523,112.62872826,81.959975,13
+POINT3=3,26.57769941,112.62853199,81.959975,13
+POINT4=4,26.57763453,112.62855482,81.959975,13
+LINENUM=4
+LINE1=1,2    # 线段：起点,终点
+LINE2=2,3
+LINE3=3,4
+LINE4=4,1
+```
+
+**特征**：用经纬度+高程定义跨越物（如电力线、公路、河流）的多边形轮廓。
+
+#### 5.7.3 导地线参数（type 格式，161 个文件）
+
+```
+TYPE=OPGW-17-150-5
+SECTIONALAREA=145.90          # 截面积
+OUTSIDEDIAMETER=16.60         # 外径
+WIREWEIGHT=853.00             # 单位长度重量
+COEFFICIENTOFELASTICITY=132000.00    # 弹性系数
+EXPANSIONCOEFFICIENTOFWIRE=13.80     # 线膨胀系数
+RATEDSTRENGTH=122000.00       # 额定拉断力
+```
+
+**特征**：无几何，仅物理参数。导线/地线/OPGW 的几何由悬链线算法根据两端挂点和张力参数实时计算。
+
+#### 5.7.4 基础螺栓（Bolt 格式，1300 个文件）
+
+```
+Bolt
+BoltNum=4
+Bolt1=M64,232.000000,2,49.100000,104.860000,2,1,150.000000,20.000000,2160.000000,1,30;210,165.000000,165.000000,0.000000
+Bolt2=M64,...
+```
+
+**特征**：定义基础地脚螺栓的规格和位置。
+
+#### 5.7.5 STL 文件（181 个）
+
+二进制 STL 格式，用于复杂曲面几何（如绝缘子串、金具）。示例文件 320584 字节 = 84 头 + 6410 三角形 × 50 字节。
+
+### 5.8 坐标系统
+
+线路工程**全程使用 BLHA（经纬度+高程+方位角）地理坐标系**，而非变电工程的局部测量坐标系：
+
+| 出现位置 | 格式 | 示例 |
+|---|---|---|
+| F4System-TOWER 的 `BLHA` | 纬度,经度,高程,方位角 | `26.84596049,112.43415192,63.880,420.507943` |
+| Wire_Device 的 `BLHA` | 纬度,经度,高程,方位角 | `26.50945790,112.64429204,113.100000,269.822044` |
+| WIRE 的 `POINT<i>.BLHA` | 纬度,经度,高程,方位角 | `26.62254011,112.60955074,106.200,322.080817` |
+| CROSS 的 .mod POINT | 编号,纬度,经度,高程,? | `1,26.57769030,112.62875108,81.959975,13` |
+
+**关键差异**：变电工程 BLHA 仅出现在 project.cbm（3 值：经纬度高程），线路工程 BLHA 出现在每个杆塔/线段（4 值，多一个方位角），用于还原线路走向。
+
+### 5.9 线路工程无 IFC 的渲染策略
+
+变电工程依赖 web-ifc 解析 IFC 渲染，线路工程**完全无 IFC**，渲染需另辟蹊径：
+
+| 几何类型 | 数据来源 | 渲染方式 |
+|---|---|---|
+| 杆塔钢结构 | .mod (HNum 格式) 的 P/R 记录 | 自定义解析 → Three.js BufferGeometry（钢梁圆柱/方管） |
+| 绝缘子串/金具 | .stl 二进制 | Three.js STLLoader |
+| 导地线悬链线 | WIRE CBM 的 POINT.BLHA + KVALUE + .mod 物理参数 | 悬链线公式计算 → Three.js Line/CatmullRomCurve3 |
+| 交叉跨越 | .mod (CODE 格式) 的 POINT/LINE | Three.js LineSegments |
+| 基础螺栓 | .mod (Bolt 格式) | 可选渲染（通常隐藏） |
+
+### 5.10 线路工程的需求与可行性
+
+| 功能 | 可行性 | 难度 | 依赖 |
+|---|---|---|---|
+| CBM 层级树展示 | 高 | 中 | 解析多种子节点引用键（SECTION/STRAINSECTION/GROUP/TOWER/STRING/...） |
+| 杆塔 3D 渲染 | 高 | 高 | 自定义 .mod (HNum) 解析器 |
+| 导地线悬链线渲染 | 高 | 高 | BLHA→局部坐标转换 + 悬链线算法 |
+| 绝缘子串渲染 | 高 | 低 | STLLoader |
+| 交叉跨越渲染 | 高 | 中 | .mod (CODE) 解析 |
+| 属性面板（FAM） | 高 | 低 | 解析扁平 KEY=VALUE |
+| 杆塔点击→属性 | 高 | 中 | raycast + BLHA 定位 |
+| 无 FileDevRelation | — | — | 线路工程无此文件，设备浏览通过 CBM 树 |
+
+### 5.11 核心结论（线路工程补充）
+
+1. **两类工程本质不同**：变电工程是"建筑+设备"模型（IFC + 实体），线路工程是"路径+杆塔+导线"模型（地理坐标 + 参数化几何）
+2. **无 IFC 依赖**：线路工程完全脱离 web-ifc，需自定义 .mod 解析器和悬链线计算
+3. **层级引用键多样化**：变电工程统一用 `SUBSYSTEMS.NUM`+`SUBSYSTEM<i>`，线路工程每层不同（SECTION/STRAINSECTION/GROUP/TOWER/STRING/BASE/SUBDEVICE）
+4. **地理坐标系**：线路工程全程使用 BLHA（经纬度+方位角），需墨卡托/UTM 投影转换到 3D 场景坐标
+5. **.mod 格式分裂**：变电工程 .mod 统一为 XML，线路工程 .mod 按用途分 4 种文本格式（HNum/CODE/type/Bolt），无统一解析器
+6. **无 FileDevRelation**：线路工程无文件-设备索引，设备浏览完全依赖 CBM 树遍历
+7. **FAM 无分节**：线路工程 FAM 是扁平 `中文=ENGLISH=value`，无 `[节名]` 头
