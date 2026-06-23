@@ -472,13 +472,22 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 
 // ── 右侧属性面板折叠 ──────────────────────────────────────
 
+function refreshViewportLayout() {
+  requestAnimationFrame(() => {
+    world.renderer?.resize();
+    world.camera?.updateAspect();
+  });
+}
+
 function openPropsDrawer() {
   propsDrawer.classList.remove('collapsed');
   btnToggleProps.style.right = '332px';
+  refreshViewportLayout();
 }
 function closePropsDrawer() {
   propsDrawer.classList.add('collapsed');
   btnToggleProps.style.right = '12px';
+  refreshViewportLayout();
 }
 
 btnToggleProps.addEventListener('click', () => {
