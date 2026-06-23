@@ -278,7 +278,6 @@ const fileInput = document.getElementById('file-input') as HTMLInputElement;
 const gimFileInput = document.getElementById('gim-file-input') as HTMLInputElement;
 const btnLoadLocal = document.getElementById('btn-load-local') as HTMLButtonElement;
 const btnLoadGim = document.getElementById('btn-load-gim') as HTMLButtonElement;
-const btnLoadDemo = document.getElementById('btn-load-demo') as HTMLButtonElement;
 const btnClear = document.getElementById('btn-clear') as HTMLButtonElement;
 const cbmTreePanel = document.getElementById('cbm-tree-panel') as HTMLElement;
 const fileDevPanel = document.getElementById('file-dev-panel') as HTMLElement;
@@ -473,10 +472,22 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 
 // ── 右侧属性面板折叠 ──────────────────────────────────────
 
-function openPropsDrawer() { propsDrawer.classList.remove('collapsed'); }
-function closePropsDrawer() { propsDrawer.classList.add('collapsed'); }
+function openPropsDrawer() {
+  propsDrawer.classList.remove('collapsed');
+  btnToggleProps.style.right = '332px';
+}
+function closePropsDrawer() {
+  propsDrawer.classList.add('collapsed');
+  btnToggleProps.style.right = '12px';
+}
 
-btnToggleProps.addEventListener('click', () => { propsDrawer.classList.toggle('collapsed'); });
+btnToggleProps.addEventListener('click', () => {
+  if (propsDrawer.classList.contains('collapsed')) {
+    openPropsDrawer();
+  } else {
+    closePropsDrawer();
+  }
+});
 btnCloseProps.addEventListener('click', closePropsDrawer);
 
 // ── 模型列表 UI ────────────────────────────────────────────
@@ -1094,46 +1105,6 @@ gimFileInput.addEventListener('change', async () => {
     showLoading(`GIM 解析失败: ${err instanceof Error ? err.message : String(err)}`);
     setTimeout(hideLoading, 3000);
   } finally { gimFileInput.value = ''; btnLoadGim.disabled = false; }
-});
-
-btnLoadDemo.addEventListener('click', async () => {
-  btnLoadDemo.disabled = true;
-  try {
-    await initEngine();
-    const demoGimPath = 'demo/demo-substation.gim';
-    try {
-      const res = await fetch(demoGimPath);
-      if (res.ok) {
-        const ab = await res.arrayBuffer();
-        const extracted = await extractGimFile(ab);
-        const entries = await onGimExtracted(extracted);
-        if (entries.length === 0) { showLoading('未找到 IFC 文件'); setTimeout(hideLoading, 2000); return; }
-        hideLoading();
-        openIfcModal(entries);
-        return;
-      }
-    } catch { /* fallback */ }
-
-    const DEMO_IFC_FILES = [
-      'demo/DEV/总图0317.ifc', 'demo/DEV/一次设备0402其他.ifc',
-      'demo/DEV/室内给排水0317.ifc', 'demo/DEV/暖通布置0317.ifc',
-      'demo/DEV/警卫室建筑0317.ifc', 'demo/DEV/结构0317.ifc',
-      'demo/DEV/接地0317其他.ifc', 'demo/DEV/建筑部分0317.ifc',
-      'demo/DEV/基础0317.ifc', 'demo/DEV/给排水消防及排油添加主变水喷淋0401.ifc',
-      'demo/DEV/动力照明0317.ifc', 'demo/DEV/电气二次0317其他.ifc',
-    ];
-    for (const path of DEMO_IFC_FILES) {
-      const name = path.split('/').pop()!;
-      showLoading(`正在读取 ${name}...`);
-      const res = await fetch(path);
-      if (!res.ok) throw new Error(`无法获取 ${name}: ${res.status}`);
-      await loadIfcBuffer(name, new Uint8Array(await res.arrayBuffer()));
-    }
-  } catch (err) {
-    console.error(err);
-    showLoading(`加载失败: ${err instanceof Error ? err.message : String(err)}`);
-    setTimeout(hideLoading, 3000);
-  } finally { btnLoadDemo.disabled = false; hideLoading(); }
 });
 
 btnClear.addEventListener('click', async () => {
