@@ -44,6 +44,7 @@ function flattenCbmTree(
  * @param ifcEntries 发现的 IFC 文件条目
  * @param cbmTree CBM 层级树根节点（可为 null）
  * @param fileDevRelations FileDevRelation 解析结果
+ * @param localCachePathMap IFC 文件的本地缓存路径映射（entry_path -> local_cache_path）
  */
 export function buildGimIndexPayload(
   projectId: number,
@@ -51,6 +52,7 @@ export function buildGimIndexPayload(
   ifcEntries: IfcEntry[],
   cbmTree: CbmNode | null,
   fileDevRelations: FileDevEntry[],
+  localCachePathMap?: Map<string, string>,
 ): GimIndexPayload {
   // 1. entries
   const entries: GimEntryPayload[] = [];
@@ -60,6 +62,7 @@ export function buildGimIndexPayload(
       file_name: entryPath.split('/').pop() || entryPath,
       entry_type: classifyEntryType(entryPath),
       file_size: file.size,
+      local_cache_path: localCachePathMap?.get(entryPath) ?? null,
     });
   }
 

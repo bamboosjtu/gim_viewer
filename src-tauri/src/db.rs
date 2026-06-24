@@ -125,6 +125,9 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
     )
     .map_err(|e| format!("初始化数据库表失败: {}", e))?;
 
+    // 兼容旧库：给 gim_entry 增加 local_cache_path 列（已存在则忽略）
+    let _ = conn.execute("ALTER TABLE gim_entry ADD COLUMN local_cache_path TEXT", []);
+
     Ok(conn)
 }
 
@@ -280,6 +283,7 @@ pub struct GimEntryPayload {
     pub file_name: String,
     pub entry_type: String,
     pub file_size: u64,
+    pub local_cache_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -348,9 +352,9 @@ pub fn save_gim_index(
     // gim_entry
     for e in &payload.entries {
         tx.execute(
-            "INSERT INTO gim_entry (project_id, entry_path, file_name, entry_type, file_size, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![pid, e.entry_path, e.file_name, e.entry_type, e.file_size, now],
+            "INSERT INTO gim_entry (project_id, entry_path, file_name, entry_type, file_size, created_at_ms, local_cache_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![pid, e.entry_path, e.file_name, e.entry_type, e.file_size, now, e.local_cache_path],
         )
         .map_err(|e| format!("插入 gim_entry 失败: {}", e))?;
     }
@@ -557,4 +561,56 @@ pub fn list_cbm_nodes(
         out.push(r.map_err(|e| format!("读取 cbm_node 失败: {}", e))?);
     }
     Ok(out)
+}
+
+// ===== 缓存文件落盘 =====
+
+use std::io::Write as _;
+
+/// 计算缓存文件路径：app_data_dir/extracted/{project_id}/{entry_path}
+/// entry_path 只作为相对路径处理，防止 ../ 穿越
+fn cache_file_path(app_handle: &tauri::AppHandle, project_id: i64, entry_path: &str) -> Result<PathBuf, String> {
+    let base = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    // 规范化 entry_path：去掉前导 / 和 ../
+    let safe_rel = entry_path
+        .split('/')
+        .filter(|s| !s.is_empty() && *s != ".." && *s != ".")
+        .collect::<Vec<_>>()
+        .join("/");
+    if safe_rel.is_empty() {
+        return Err("entry_path 无效".to_string());
+    }
+    let full = base.join("extracted").join(project_id.to_string()).join(&safe_rel);
+    // 校验最终路径仍在 base 之下
+    let canonical_base = base.canonicalize().unwrap_or(base.clone());
+    let parent = full.parent().ok_or("无法获取父目录")?;
+    let _ = stdfs::create_dir_all(parent).map_err(|e| format!("创建缓存目录失败: {}", e))?;
+    let _ = full.canonicalize().unwrap_or(full.clone());
+    if !full.starts_with(&canonical_base) {
+        return Err("路径越界".to_string());
+    }
+    Ok(full)
+}
+
+/// Tauri command：写入缓存文件
+#[tauri::command]
+pub fn write_cache_file(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_path: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    let path = cache_file_path(&app_handle, project_id, &entry_path)?;
+    let mut file = stdfs::File::create(&path).map_err(|e| format!("创建缓存文件失败: {}", e))?;
+    file.write_all(&bytes).map_err(|e| format!("写入缓存文件失败: {}", e))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Tauri command：读取缓存文件
+#[tauri::command]
+pub fn read_cache_file(path: String) -> Result<Vec<u8>, String> {
+    stdfs::read(&path).map_err(|e| format!("读取缓存文件失败: {}", e))
 }

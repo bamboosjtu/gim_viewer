@@ -79,6 +79,8 @@ pub fn run() {
             db::get_gim_index_stats,
             db::list_ifc_models,
             db::list_cbm_nodes,
+            db::write_cache_file,
+            db::read_cache_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

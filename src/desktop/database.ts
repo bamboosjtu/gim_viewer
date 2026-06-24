@@ -53,6 +53,7 @@ export interface GimEntryPayload {
   file_name: string;
   entry_type: string;
   file_size: number;
+  local_cache_path?: string | null;
 }
 
 export interface CbmNodePayload {
@@ -161,4 +162,28 @@ export async function listIfcModels(projectId: number): Promise<IfcModelRecord[]
 export async function listCbmNodes(projectId: number, limit = 50): Promise<CbmNodeRecord[]> {
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<CbmNodeRecord[]>('list_cbm_nodes', { projectId, limit });
+}
+
+// ===== 缓存文件落盘 =====
+
+/**
+ * 在 Tauri 环境下写入缓存文件到 app_data_dir/extracted/{projectId}/{entryPath}。
+ * 返回本地缓存路径 local_cache_path。
+ */
+export async function writeCacheFile(projectId: number, entryPath: string, bytes: Uint8Array): Promise<string> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('write_cache_file', {
+    projectId,
+    entryPath,
+    bytes: Array.from(bytes),
+  });
+}
+
+/**
+ * 在 Tauri 环境下从 local_cache_path 读取缓存文件。
+ */
+export async function readCacheFile(path: string): Promise<Uint8Array> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  const bytes = await invoke<number[]>('read_cache_file', { path });
+  return new Uint8Array(bytes);
 }

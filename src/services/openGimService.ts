@@ -97,6 +97,17 @@ async function openGimFromArrayBuffer(
 
   // Tauri 模式：写入 GIM 索引到 SQLite
   if (options?.persistIndex && options.projectId != null && isTauri()) {
+    // 先缓存 IFC 文件到本地磁盘
+    showLoading('正在缓存 IFC 文件...');
+    let localCachePathMap: Map<string, string> | undefined;
+    try {
+      const { cacheExtractedIfcFiles } = await import('./gimExtractedCacheService.js');
+      localCachePathMap = await cacheExtractedIfcFiles(options.projectId, state.currentFiles ?? new Map<string, File>());
+      console.log('[Tauri] IFC 文件已缓存:', localCachePathMap.size);
+    } catch (err) {
+      console.error('[Tauri] IFC 文件缓存失败:', err);
+    }
+
     showLoading('正在写入 GIM 索引...');
     try {
       const { buildGimIndexPayload } = await import('./gimIndexPersistenceService.js');
@@ -107,6 +118,7 @@ async function openGimFromArrayBuffer(
         state.currentIfcEntries,
         state.currentCbmTree,
         state.fileDevRelations,
+        localCachePathMap,
       );
       await saveGimIndex(payload);
       console.log('[Tauri] GIM 索引已写入:', {
