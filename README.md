@@ -46,6 +46,8 @@
 ```bash
 # 安装依赖
 npm install
+winget install Rustlang.Rustup --accept-package-agreements --accept-source-agreements
+$env:PATH += ";$env:USERPROFILE\.cargo\bin"; rustup install 1.95.0
 
 # 启动开发服务器
 npm run dev

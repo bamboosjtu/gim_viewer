@@ -30,3 +30,7 @@ npm-debug.log*
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
