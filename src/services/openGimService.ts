@@ -59,18 +59,29 @@ async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<U
   // 1. 完整解压流程
   if (state.currentFiles) {
     const file = state.currentFiles.get(entry.path);
-    if (file) return new Uint8Array(await file.arrayBuffer());
+    if (file) {
+      console.log('[IFC Buffer] 使用 GIM 解压内存文件:', {
+        name: entry.name,
+        path: entry.path,
+      });
+      return new Uint8Array(await file.arrayBuffer());
+    }
   }
 
   // 2. Tauri 缓存命中
   if (isTauri() && state.cachedIfcPaths.has(entry.path)) {
     const cachePath = state.cachedIfcPaths.get(entry.path)!;
+    console.log('[IFC Buffer] 使用本地 IFC 缓存:', {
+      name: entry.name,
+      path: entry.path,
+      cachePath,
+    });
     const { readCacheFile } = await import('../desktop/database.js');
     return await readCacheFile(cachePath);
   }
 
   // 3. 找不到
-  console.warn('[Tauri] 找不到 IFC 文件内容或缓存:', entry);
+  console.warn('[IFC Buffer] 找不到 IFC 文件内容或缓存:', entry);
   return null;
 }
 
@@ -299,6 +310,7 @@ export async function openGimWithDialog(
 
           hideLoading();
           openIfcModal(state.currentIfcEntries);
+          console.log('[Tauri] 缓存短路生效：未读取原始 GIM，未执行解压');
           return; // 缓存命中，短路完成
         } catch (err) {
           console.warn('[Tauri] 缓存恢复失败，回退完整解压流程:', err);
@@ -308,6 +320,7 @@ export async function openGimWithDialog(
       }
 
       // 4. 回退：完整解压流程（3D 引擎与文件读取并行）
+      console.log('[Tauri] 缓存短路未生效：进入完整解压流程');
       showLoading('正在读取 GIM 文件...');
       const [{ getViewerRuntime }] = await Promise.all([
         import('../viewer/viewerRuntime.js'),
