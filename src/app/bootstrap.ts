@@ -78,6 +78,28 @@ async function bootstrapAsync(): Promise<void> {
     } catch (err) {
       console.warn('[Tauri] 显示窗口失败:', err);
     }
+
+    // 诊断快捷键：Ctrl+Shift+D → 复制诊断 JSON 到剪贴板
+    document.addEventListener('keydown', async (e) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+        e.preventDefault();
+        try {
+          showLoading('正在生成数据库诊断...');
+          const { getDbPath, getLatestProjectCacheDiagnostic } = await import('../desktop/database.js');
+          const dbPath = await getDbPath();
+          const diagnostic = await getLatestProjectCacheDiagnostic();
+          const payload = JSON.stringify({ dbPath, diagnostic }, null, 2);
+          await navigator.clipboard.writeText(payload);
+          console.log('[诊断] 数据库诊断信息已复制到剪贴板:\n', payload);
+          showLoading('数据库诊断信息已复制到剪贴板');
+          setTimeout(hideLoading, 2000);
+        } catch (err) {
+          console.error('[诊断] 生成诊断信息失败:', err);
+          showLoading(`诊断失败: ${err instanceof Error ? err.message : String(err)}`);
+          setTimeout(hideLoading, 3000);
+        }
+      }
+    });
   }
 }
 

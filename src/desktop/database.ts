@@ -245,3 +245,51 @@ export async function validateGimCache(projectId: number): Promise<GimCacheValid
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<GimCacheValidation>('validate_gim_cache', { projectId });
 }
+
+// ==================== 诊断 ====================
+
+export interface IfcCacheFileDiagnostic {
+  entry_path: string;
+  local_cache_path: string | null;
+  exists: boolean;
+  file_size: number | null;
+}
+
+export interface ProjectCacheDiagnostic {
+  project_id: number;
+  path: string;
+  name: string;
+  size: number;
+  modified_ms: number;
+  sha256: string;
+
+  entries_count: number;
+  cbm_nodes_count: number;
+  ifc_models_count: number;
+  file_dev_entries_count: number;
+
+  ifc_entry_count: number;
+  cached_ifc_count: number;
+  missing_cache_paths: string[];
+  valid: boolean;
+
+  ifc_cache_files: IfcCacheFileDiagnostic[];
+}
+
+/** 返回当前 SQLite 文件路径 */
+export async function getDbPath(): Promise<string> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('get_db_path');
+}
+
+/** 获取指定项目的缓存诊断 */
+export async function getProjectCacheDiagnostic(projectId: number): Promise<ProjectCacheDiagnostic> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<ProjectCacheDiagnostic>('get_project_cache_diagnostic', { projectId });
+}
+
+/** 获取最近打开项目的缓存诊断 */
+export async function getLatestProjectCacheDiagnostic(): Promise<ProjectCacheDiagnostic | null> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<ProjectCacheDiagnostic | null>('get_latest_project_cache_diagnostic');
+}

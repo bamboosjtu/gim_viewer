@@ -838,3 +838,176 @@ pub fn validate_gim_cache(
         valid,
     })
 }
+
+// ==================== 诊断 command ====================
+
+/// 单个 IFC 缓存文件诊断
+#[derive(Debug, Serialize)]
+pub struct IfcCacheFileDiagnostic {
+    pub entry_path: String,
+    pub local_cache_path: Option<String>,
+    pub exists: bool,
+    pub file_size: Option<u64>,
+}
+
+/// 项目缓存完整诊断
+#[derive(Debug, Serialize)]
+pub struct ProjectCacheDiagnostic {
+    pub project_id: i64,
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub modified_ms: u64,
+    pub sha256: String,
+
+    pub entries_count: u64,
+    pub cbm_nodes_count: u64,
+    pub ifc_models_count: u64,
+    pub file_dev_entries_count: u64,
+
+    pub ifc_entry_count: u64,
+    pub cached_ifc_count: u64,
+    pub missing_cache_paths: Vec<String>,
+    pub valid: bool,
+
+    pub ifc_cache_files: Vec<IfcCacheFileDiagnostic>,
+}
+
+/// 返回当前 SQLite 文件路径
+#[tauri::command]
+pub fn get_db_path(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let path = db_path(&app_handle)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 获取指定项目的缓存诊断
+#[tauri::command]
+pub fn get_project_cache_diagnostic(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+) -> Result<ProjectCacheDiagnostic, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+    // 1. 查询 gim_project 基本信息
+    let project = conn
+        .query_row(
+            "SELECT id, path, name, size, modified_ms, sha256 FROM gim_project WHERE id = ?1",
+            params![project_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, u64>(3)?,
+                    row.get::<_, u64>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
+        )
+        .map_err(|e| format!("查询项目失败: {}", e))?;
+
+    // 2. 统计四张索引表数量
+    let entries_count = count_rows(&conn, "gim_entry", project_id)?;
+    let cbm_nodes_count = count_rows(&conn, "cbm_node", project_id)?;
+    let ifc_models_count = count_rows(&conn, "ifc_model", project_id)?;
+    let file_dev_entries_count = count_rows(&conn, "file_dev_entry", project_id)?;
+    let has_index = cbm_nodes_count > 0 || ifc_models_count > 0;
+
+    // 3. 查询 IFC entry 并诊断每个缓存文件
+    let mut stmt = conn
+        .prepare(
+            "SELECT entry_path, local_cache_path
+             FROM gim_entry
+             WHERE project_id = ?1 AND entry_type = 'IFC'",
+        )
+        .map_err(|e| format!("预处理 IFC entry 失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![project_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .map_err(|e| format!("查询 IFC entry 失败: {}", e))?;
+
+    let mut ifc_entry_count: u64 = 0;
+    let mut cached_ifc_count: u64 = 0;
+    let mut missing_cache_paths: Vec<String> = Vec::new();
+    let mut ifc_cache_files: Vec<IfcCacheFileDiagnostic> = Vec::new();
+
+    for r in rows {
+        let (entry_path, local_cache_path) = r.map_err(|e| format!("读取 IFC entry 失败: {}", e))?;
+        ifc_entry_count += 1;
+
+        let (exists, file_size) = match &local_cache_path {
+            Some(p) if !p.is_empty() => {
+                let path = std::path::Path::new(p);
+                if path.exists() {
+                    let size = stdfs::metadata(path).map(|m| m.len()).ok();
+                    cached_ifc_count += 1;
+                    (true, size)
+                } else {
+                    missing_cache_paths.push(entry_path.clone());
+                    (false, None)
+                }
+            }
+            _ => {
+                missing_cache_paths.push(entry_path.clone());
+                (false, None)
+            }
+        };
+
+        ifc_cache_files.push(IfcCacheFileDiagnostic {
+            entry_path,
+            local_cache_path,
+            exists,
+            file_size,
+        });
+    }
+
+    let valid = has_index
+        && ifc_models_count > 0
+        && ifc_entry_count > 0
+        && cached_ifc_count == ifc_entry_count
+        && missing_cache_paths.is_empty();
+
+    Ok(ProjectCacheDiagnostic {
+        project_id: project.0,
+        path: project.1,
+        name: project.2,
+        size: project.3,
+        modified_ms: project.4,
+        sha256: project.5,
+        entries_count: entries_count as u64,
+        cbm_nodes_count: cbm_nodes_count as u64,
+        ifc_models_count: ifc_models_count as u64,
+        file_dev_entries_count: file_dev_entries_count as u64,
+        ifc_entry_count,
+        cached_ifc_count,
+        missing_cache_paths,
+        valid,
+        ifc_cache_files,
+    })
+}
+
+/// 获取最近打开项目的缓存诊断
+#[tauri::command]
+pub fn get_latest_project_cache_diagnostic(
+    state: tauri::State<'_, DbState>,
+) -> Result<Option<ProjectCacheDiagnostic>, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+    let latest_id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM gim_project ORDER BY last_opened_at_ms DESC LIMIT 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .ok();
+
+    match latest_id {
+        Some(id) => {
+            drop(conn);
+            // 重新获取锁调用 get_project_cache_diagnostic
+            get_project_cache_diagnostic(state, id).map(Some)
+        }
+        None => Ok(None),
+    }
+}
