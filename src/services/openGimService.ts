@@ -216,3 +216,95 @@ export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMes
     } finally { gimFileInput.value = ''; btnLoadGim.disabled = false; }
   });
 }
+
+/**
+ * 打开 GIM 文件的动作函数（供 bootstrap 懒加载调用）。
+ * - Tauri：走原生对话框 + getFileInfo + 缓存校验 + readFileBytes + 解压
+ * - 浏览器：触发 input.click()，通过一次性 change 监听处理选中文件
+ */
+export async function openGimWithDialog(
+  ctx: ViewerContext,
+  state: AppState,
+  showMessage: (text: string) => void,
+): Promise<void> {
+  if (isTauri()) {
+    const filePath = await openGimFilePath();
+    if (!filePath) return;
+    btnLoadGim.disabled = true;
+    try {
+      showLoading('正在读取 GIM 文件信息...');
+      const { getFileInfo, readFileBytes } = await import('../desktop/fileReader.js');
+      const info = await getFileInfo(filePath);
+      console.log('[Tauri] GIM 文件信息:', info);
+      showLoading('正在写入本地项目索引...');
+      const { upsertGimProject, listGimProjects, getGimProjectsBySha256, getGimIndexStats } = await import('../desktop/database.js');
+      const record = await upsertGimProject(info);
+      console.log('[Tauri] GIM 项目记录:', record);
+      console.log('[Tauri] 最近 GIM 项目:', await listGimProjects(10));
+      console.log('[Tauri] 相同 sha256 项目:', await getGimProjectsBySha256(info.sha256));
+      const stats = await getGimIndexStats(record.id);
+      console.log('[Tauri] GIM 索引状态:', stats);
+      if (stats.has_index) {
+        console.log('[Tauri] 已存在 GIM 索引，但本轮仍继续走解压流程');
+      }
+      showLoading('正在检查本地缓存...');
+      const { validateGimCache, getGimIndex } = await import('../desktop/database.js');
+      const validation = await validateGimCache(record.id);
+      console.log('[Tauri] GIM 缓存校验:', validation);
+      if (validation.valid) {
+        try {
+          const index = await getGimIndex(record.id);
+          const { restoreGimIndexToState } = await import('./gimIndexRestoreService.js');
+          restoreGimIndexToState(state, index);
+          console.log('[Tauri] GIM 索引已恢复到 AppState:', {
+            ifc_entries: state.currentIfcEntries.length,
+            cbm_root: state.currentCbmTree?.path || null,
+            cached_ifc_paths: state.cachedIfcPaths.size,
+            file_dev_relations: state.fileDevRelations.length,
+          });
+          console.log('[Tauri] 第 2 轮仅验证恢复结果，仍继续完整解压流程');
+        } catch (err) {
+          console.warn('[Tauri] GIM 索引恢复验证失败，继续完整解压流程:', err);
+        }
+      } else {
+        console.log('[Tauri] 缓存无效或不完整，第 1 轮继续完整解压流程:', validation);
+      }
+      showLoading('正在读取 GIM 文件...');
+      const ab = await readFileBytes(filePath);
+      const fileName = filePath.split(/[\\/]/).pop() || 'project.gim';
+      await openGimFromArrayBuffer(ctx, state, fileName, ab, showMessage, {
+        projectId: record.id,
+        persistIndex: true,
+      });
+    } catch (err) {
+      console.error(err);
+      showLoading(`GIM 解析失败: ${err instanceof Error ? err.message : String(err)}`);
+      setTimeout(hideLoading, 3000);
+    } finally { btnLoadGim.disabled = false; }
+    return;
+  }
+
+  // 浏览器模式：触发 input，一次性 change 监听
+  return new Promise<void>((resolve) => {
+    const handler = async () => {
+      gimFileInput.removeEventListener('change', handler);
+      const files = Array.from(gimFileInput.files || []);
+      if (files.length === 0) { resolve(); return; }
+      btnLoadGim.disabled = true;
+      try {
+        const ab = await files[0].arrayBuffer();
+        await openGimFromArrayBuffer(ctx, state, files[0].name, ab, showMessage);
+      } catch (err) {
+        console.error(err);
+        showLoading(`GIM 解析失败: ${err instanceof Error ? err.message : String(err)}`);
+        setTimeout(hideLoading, 3000);
+      } finally {
+        gimFileInput.value = '';
+        btnLoadGim.disabled = false;
+        resolve();
+      }
+    };
+    gimFileInput.addEventListener('change', handler);
+    gimFileInput.click();
+  });
+}

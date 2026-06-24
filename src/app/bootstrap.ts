@@ -1,60 +1,78 @@
 import { AppState } from './state.js';
-import { createViewerEngine } from '../viewer/viewerEngine.js';
-import { setupSelection } from '../viewer/selection.js';
 import { setupTabs } from '../ui/tabs.js';
-import { setupPropsDrawer, showIfcElementProperties } from '../ui/propsDrawer.js';
-import { addModelToUI, removeModelFromUI } from '../ui/modelList.js';
 import { setupIfcSelectModal } from '../ui/ifcSelectModal.js';
-import { setupOpenGimService, loadSelectedIfcFiles } from '../services/openGimService.js';
-import { setupOpenIfcService } from '../services/openIfcService.js';
-import { resetHighlight } from '../viewer/highlight.js';
-import { container, btnClear, loadingEl } from '../ui/dom.js';
-import type { ModelEventCallbacks } from '../viewer/ifcLoader.js';
+import { btnLoadGim, btnLoadLocal, btnClear, loadingEl } from '../ui/dom.js';
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
 function hideLoading() { loadingEl.style.display = 'none'; }
 
-/** 异步启动逻辑 */
+/** 异步启动逻辑（轻量，不加载 3D 引擎） */
 async function bootstrapAsync(): Promise<void> {
-  // 创建状态
   const state = new AppState();
 
-  // 初始化 3D 引擎（同步部分，不依赖 worker/wasm）
-  const ctx = createViewerEngine(container);
-
-  // 模型事件回调（供 ensureEngineReady 使用）
-  const modelCallbacks: ModelEventCallbacks = {
-    onModelAdded: (modelId) => addModelToUI(ctx, state, modelId),
-    onModelRemoved: (modelId) => removeModelFromUI(modelId),
-  };
-
-  // 1. 先绑定所有 UI 事件（不依赖 fragments.init）
+  // 仅绑定轻量 UI
   setupTabs();
-  setupPropsDrawer(ctx);
   setupIfcSelectModal({
-    onLoadSelected: () => loadSelectedIfcFiles(ctx, state, modelCallbacks),
+    onLoadSelected: async () => {
+      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+      const { loadSelectedIfcFiles } = await import('../services/openGimService.js');
+      const runtime = await getViewerRuntime(state, (text) => showLoading(text));
+      await loadSelectedIfcFiles(runtime.ctx, state, runtime.modelCallbacks);
+    },
   });
-  setupSelection(ctx, state, container, (modelId, localId) => {
-    showIfcElementProperties(ctx, state, modelId, localId);
+
+  // 打开 GIM：首次点击时才加载 3D 引擎
+  btnLoadGim.addEventListener('click', async () => {
+    showLoading('正在加载 3D 引擎...');
+    try {
+      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+      const { openGimWithDialog } = await import('../services/openGimService.js');
+      const runtime = await getViewerRuntime(state, (text) => showLoading(text));
+      await openGimWithDialog(runtime.ctx, state, (text) => showLoading(text));
+    } catch (err) {
+      console.error(err);
+      showLoading(`加载失败: ${err instanceof Error ? err.message : String(err)}`);
+      setTimeout(hideLoading, 3000);
+    }
   });
-  setupOpenGimService(ctx, state, (text) => showLoading(text));
-  setupOpenIfcService(ctx, state, modelCallbacks);
+
+  // 打开 IFC：首次点击时才加载 3D 引擎
+  btnLoadLocal.addEventListener('click', async () => {
+    showLoading('正在加载 3D 引擎...');
+    try {
+      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+      const { openIfcWithDialog } = await import('../services/openIfcService.js');
+      const runtime = await getViewerRuntime(state, (text) => showLoading(text));
+      await openIfcWithDialog(runtime.ctx, state, runtime.modelCallbacks);
+    } catch (err) {
+      console.error(err);
+      showLoading(`加载失败: ${err instanceof Error ? err.message : String(err)}`);
+      setTimeout(hideLoading, 3000);
+    }
+  });
 
   // 清空场景
   btnClear.addEventListener('click', async () => {
-    for (const [modelId] of state.loadedModels) {
-      ctx.fragments.core.disposeModel(modelId);
+    // 如果 viewer runtime 已创建，先清理 fragments 和高亮（reset 前读取 loadedModels）
+    const { isViewerRuntimeCreated, getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+    if (isViewerRuntimeCreated()) {
+      const runtime = await getViewerRuntime(state, () => {});
+      for (const [modelId] of state.loadedModels) {
+        runtime.ctx.fragments.core.disposeModel(modelId);
+      }
+      const { resetHighlight } = await import('../viewer/highlight.js');
+      await resetHighlight(runtime.ctx, state);
     }
+    // 再清空 state 和 UI
     state.reset();
     document.getElementById('model-list')!.innerHTML = '';
     document.getElementById('cbm-tree-panel')!.innerHTML = '';
     document.getElementById('file-dev-panel')!.innerHTML = '';
     document.getElementById('props-drawer-body')!.innerHTML = '<div class="props-empty">选择层级树节点查看属性</div>';
     document.getElementById('empty-tip')!.style.display = '';
-    await resetHighlight(ctx, state);
   });
 
-  // 引擎初始化延迟到首次加载 IFC 时执行（ensureEngineReady）
+  // 首屏立即显示，3D 引擎延迟到首次用户操作
   hideLoading();
 }
 
