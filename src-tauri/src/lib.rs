@@ -75,6 +75,7 @@ pub fn run() {
             db::list_gim_projects,
             db::get_gim_project_by_path,
             db::get_gim_project_by_sha256,
+            db::save_gim_index,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

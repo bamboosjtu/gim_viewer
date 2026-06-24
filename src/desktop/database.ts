@@ -45,3 +45,58 @@ export async function getGimProjectsBySha256(sha256: string): Promise<GimProject
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<GimProjectRecord[]>('get_gim_project_by_sha256', { sha256 });
 }
+
+// ===== GIM 索引入库 =====
+
+export interface GimEntryPayload {
+  entry_path: string;
+  file_name: string;
+  entry_type: string;
+  file_size: number;
+}
+
+export interface CbmNodePayload {
+  node_key: string;
+  parent_key: string | null;
+  path: string;
+  name: string;
+  entity_name: string | null;
+  classify_name: string | null;
+  fam_path: string | null;
+  dev_path: string | null;
+  ifc_file: string | null;
+  ifc_guid: string | null;
+  transform_matrix: string | null;
+  sort_order: number;
+}
+
+export interface IfcModelPayload {
+  model_id: string;
+  name: string;
+  entry_path: string;
+}
+
+export interface FileDevEntryPayload {
+  model_id: string;
+  ifc_name: string;
+  ifc_file: string;
+  device_count: number;
+  device_cbm: string;
+  sort_order: number;
+}
+
+export interface GimIndexPayload {
+  project_id: number;
+  entries: GimEntryPayload[];
+  cbm_nodes: CbmNodePayload[];
+  ifc_models: IfcModelPayload[];
+  file_dev_entries: FileDevEntryPayload[];
+}
+
+/**
+ * 在 Tauri 环境下保存 GIM 索引（事务：先删后插）。
+ */
+export async function saveGimIndex(payload: GimIndexPayload): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke<void>('save_gim_index', { payload });
+}

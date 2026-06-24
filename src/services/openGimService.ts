@@ -86,6 +86,7 @@ async function openGimFromArrayBuffer(
   _fileName: string,
   ab: ArrayBuffer,
   showMessage: (text: string) => void,
+  options?: { projectId?: number; persistIndex?: boolean },
 ): Promise<void> {
   showLoading('正在加载 GIM 解压模块...');
   const { extractGimFile } = await import('../gim/gimExtractor.js');
@@ -93,6 +94,32 @@ async function openGimFromArrayBuffer(
   const extracted = await extractGimFile(ab);
   showLoading('正在解析 GIM 层级结构...');
   const entries = await onGimExtracted(ctx, state, extracted, showMessage);
+
+  // Tauri 模式：写入 GIM 索引到 SQLite
+  if (options?.persistIndex && options.projectId != null && isTauri()) {
+    showLoading('正在写入 GIM 索引...');
+    try {
+      const { buildGimIndexPayload } = await import('./gimIndexPersistenceService.js');
+      const { saveGimIndex } = await import('../desktop/database.js');
+      const payload = buildGimIndexPayload(
+        options.projectId,
+        state.currentFiles ?? new Map<string, File>(),
+        state.currentIfcEntries,
+        state.currentCbmTree,
+        state.fileDevRelations,
+      );
+      await saveGimIndex(payload);
+      console.log('[Tauri] GIM 索引已写入:', {
+        entries: payload.entries.length,
+        cbm_nodes: payload.cbm_nodes.length,
+        ifc_models: payload.ifc_models.length,
+        file_dev_entries: payload.file_dev_entries.length,
+      });
+    } catch (err) {
+      console.error('[Tauri] GIM 索引写入失败:', err);
+    }
+  }
+
   if (entries.length === 0) {
     showLoading('未在 GIM 文件中找到 IFC 文件');
     setTimeout(hideLoading, 2000);
@@ -123,7 +150,10 @@ export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMes
         showLoading('正在读取 GIM 文件...');
         const ab = await readFileBytes(filePath);
         const fileName = filePath.split(/[\\/]/).pop() || 'project.gim';
-        await openGimFromArrayBuffer(ctx, state, fileName, ab, showMessage);
+        await openGimFromArrayBuffer(ctx, state, fileName, ab, showMessage, {
+          projectId: record.id,
+          persistIndex: true,
+        });
       } catch (err) {
         console.error(err);
         showLoading(`GIM 解析失败: ${err instanceof Error ? err.message : String(err)}`);
