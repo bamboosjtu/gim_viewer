@@ -131,13 +131,25 @@ async function openGimFromArrayBuffer(
 
   // Tauri 模式：写入 GIM 索引到 SQLite
   if (options?.persistIndex && options.projectId != null && isTauri()) {
-    // 先缓存 IFC 文件到本地磁盘
+    // 缓存 IFC 文件到本地磁盘（以 ifcEntries 为准，逐个 try/catch）
     showLoading('正在缓存 IFC 文件...');
-    let localCachePathMap: Map<string, string> | undefined;
+    let localCachePathMap = new Map<string, string>();
     try {
-      const { cacheExtractedIfcFiles } = await import('./gimExtractedCacheService.js');
-      localCachePathMap = await cacheExtractedIfcFiles(options.projectId, state.currentFiles ?? new Map<string, File>());
-      console.log('[Tauri] IFC 文件已缓存:', localCachePathMap.size);
+      const { cacheIfcEntries } = await import('./gimExtractedCacheService.js');
+      const cacheResult = await cacheIfcEntries(
+        options.projectId,
+        state.currentFiles ?? new Map<string, File>(),
+        state.currentIfcEntries,
+      );
+      localCachePathMap = cacheResult.pathMap;
+      console.log('[Tauri] IFC 缓存结果:', {
+        expected: state.currentIfcEntries.length,
+        cached: localCachePathMap.size,
+        errors: cacheResult.errors,
+      });
+      if (cacheResult.errors.length > 0) {
+        console.warn('[Tauri] 部分 IFC 缓存失败:', cacheResult.errors);
+      }
     } catch (err) {
       console.error('[Tauri] IFC 文件缓存失败:', err);
     }
@@ -154,6 +166,14 @@ async function openGimFromArrayBuffer(
         state.fileDevRelations,
         localCachePathMap,
       );
+
+      // 校验：即将写入的 IFC local_cache_path 数量
+      const payloadIfcEntries = payload.entries.filter((e) => e.entry_type === 'IFC');
+      console.log('[Tauri] 即将写入 SQLite 的 IFC local_cache_path:', {
+        ifc_entries: payloadIfcEntries.length,
+        with_cache_path: payloadIfcEntries.filter((e) => !!e.local_cache_path).length,
+      });
+
       await saveGimIndex(payload);
       console.log('[Tauri] GIM 索引已写入:', {
         entries: payload.entries.length,
