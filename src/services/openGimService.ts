@@ -110,8 +110,11 @@ export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMes
       if (!filePath) return;
       btnLoadGim.disabled = true;
       try {
+        showLoading('正在读取 GIM 文件信息...');
+        const { getFileInfo, readFileBytes } = await import('../desktop/fileReader.js');
+        const info = await getFileInfo(filePath);
+        console.log('[Tauri] GIM 文件信息:', info);
         showLoading('正在读取 GIM 文件...');
-        const { readFileBytes } = await import('../desktop/fileReader.js');
         const ab = await readFileBytes(filePath);
         const fileName = filePath.split(/[\\/]/).pop() || 'project.gim';
         await openGimFromArrayBuffer(ctx, state, fileName, ab, showMessage);
