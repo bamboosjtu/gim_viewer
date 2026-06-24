@@ -1,6 +1,6 @@
 # GIM 阅读器
 
-基于 Web 的 GIM（Grid Information Model，电网信息模型）文件浏览器，支持从 `.gim` 压缩包中提取并可视化 IFC 模型。
+基于 Tauri 的 GIM（Grid Information Model，电网信息模型）文件浏览器，支持从 `.gim` 压缩包中提取并可视化 IFC 模型。
 
 ![alt text](static/image.png)
 
