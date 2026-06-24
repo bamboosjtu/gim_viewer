@@ -20,6 +20,12 @@ export class AppState {
   // 缓存命中时的 IFC 本地缓存路径（entry_path → local_cache_path）
   cachedIfcPaths = new Map<string, string>();
 
+  // 缓存命中时的 FAM/DEV 基础属性（currentFiles = null 时使用）
+  // cachedFamProperties: sourcePath → sectionName → key → value
+  cachedFamProperties = new Map<string, Map<string, Map<string, string>>>();
+  // cachedDevProperties: devPath → key → value
+  cachedDevProperties = new Map<string, Record<string, string>>();
+
   // 当前 GIM 项目数据库 ID（Tauri 缓存命中时使用）
   currentProjectId: number | null = null;
 
@@ -45,6 +51,8 @@ export class AppState {
     this.fileDevRelations = [];
     this.deviceToIfcFile.clear();
     this.cachedIfcPaths.clear();
+    this.cachedFamProperties.clear();
+    this.cachedDevProperties.clear();
     this.currentProjectId = null;
   }
 

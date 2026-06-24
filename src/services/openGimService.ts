@@ -2,6 +2,7 @@ import type { IfcEntry } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { ModelEventCallbacks } from '../viewer/ifcLoader.js';
+import type { CbmNode } from '../gim/types.js';
 import { scanIfcFiles, discoverIfcFromCBM, buildIfcGuidIndex } from '../gim/gimIndexer.js';
 import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
 import { parseFileDevRelation } from '../gim/fileDevParser.js';
@@ -18,8 +19,17 @@ import { openGimFilePath } from '../desktop/fileDialog.js';
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
 function hideLoading() { loadingEl.style.display = 'none'; }
 
+/** 创建统一的节点点击回调 */
+function createNodeClickHandler(state: AppState, showMessage: (text: string) => void): (node: CbmNode) => void {
+  return (node: CbmNode) => {
+    import('./nodeInteractionService.js').then(({ handleNodeClick }) => {
+      handleNodeClick(state, node, showMessage);
+    });
+  };
+}
+
 /** GIM 文件解压后的处理流程 */
-export async function onGimExtracted(ctx: ViewerContext, state: AppState, files: Map<string, File>, showMessage: (text: string) => void): Promise<IfcEntry[]> {
+export async function onGimExtracted(_ctx: ViewerContext, state: AppState, files: Map<string, File>, showMessage: (text: string) => void): Promise<IfcEntry[]> {
   state.currentFiles = files;
 
   // 发现 IFC 文件
@@ -42,9 +52,10 @@ export async function onGimExtracted(ctx: ViewerContext, state: AppState, files:
     }
   }
 
-  // 渲染层级树和文件设备面板
-  buildAndRenderCbmTree(ctx, state, showMessage);
-  renderFileDevPanel(ctx, state, showMessage);
+  // 渲染层级树和文件设备面板（统一使用 handleNodeClick）
+  const clickHandler = createNodeClickHandler(state, showMessage);
+  buildAndRenderCbmTree(state, clickHandler);
+  renderFileDevPanel(state, clickHandler);
 
   return ifcEntries;
 }
@@ -103,8 +114,10 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
       await loadIfcBuffer(ctx, entry.name, buffer, state, (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`));
     }
     await buildIfcNameIndex(ctx, state);
-    buildAndRenderCbmTree(ctx, state, (text) => showLoading(text));
-    renderFileDevPanel(ctx, state, (text) => showLoading(text));
+    // 统一使用 handleNodeClick 作为点击回调
+    const clickHandler = createNodeClickHandler(state, (text) => showLoading(text));
+    buildAndRenderCbmTree(state, clickHandler);
+    renderFileDevPanel(state, clickHandler);
     emptyTipEl.style.display = 'none';
     fitCameraToScene(ctx, state);
   } catch (err) {
@@ -161,7 +174,7 @@ async function openGimFromArrayBuffer(
     try {
       const { buildGimIndexPayload } = await import('./gimIndexPersistenceService.js');
       const { saveGimIndex } = await import('../desktop/database.js');
-      const payload = buildGimIndexPayload(
+      const payload = await buildGimIndexPayload(
         options.projectId,
         state.currentFiles ?? new Map<string, File>(),
         state.currentIfcEntries,
@@ -183,6 +196,8 @@ async function openGimFromArrayBuffer(
         cbm_nodes: payload.cbm_nodes.length,
         ifc_models: payload.ifc_models.length,
         file_dev_entries: payload.file_dev_entries.length,
+        fam_properties: payload.fam_properties.length,
+        dev_properties: payload.dev_properties.length,
       });
     } catch (err) {
       console.error('[Tauri] GIM 索引写入失败:', err);
@@ -196,83 +211,6 @@ async function openGimFromArrayBuffer(
   }
   hideLoading();
   openIfcModal(entries);
-}
-
-/** 绑定 GIM 文件打开事件 */
-export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMessage: (text: string) => void): void {
-  btnLoadGim.addEventListener('click', async () => {
-    if (isTauri()) {
-      const filePath = await openGimFilePath();
-      if (!filePath) return;
-      btnLoadGim.disabled = true;
-      try {
-        showLoading('正在读取 GIM 文件信息...');
-        const { getFileInfo, readFileBytes } = await import('../desktop/fileReader.js');
-        const info = await getFileInfo(filePath);
-        console.log('[Tauri] GIM 文件信息:', info);
-        showLoading('正在写入本地项目索引...');
-        const { upsertGimProject, listGimProjects, getGimProjectsBySha256, getGimIndexStats } = await import('../desktop/database.js');
-        const record = await upsertGimProject(info);
-        console.log('[Tauri] GIM 项目记录:', record);
-        console.log('[Tauri] 最近 GIM 项目:', await listGimProjects(10));
-        console.log('[Tauri] 相同 sha256 项目:', await getGimProjectsBySha256(info.sha256));
-        const stats = await getGimIndexStats(record.id);
-        console.log('[Tauri] GIM 索引状态:', stats);
-        if (stats.has_index) {
-          console.log('[Tauri] 已存在 GIM 索引，但本轮仍继续走解压流程');
-        }
-        showLoading('正在检查本地缓存...');
-        const { validateGimCache, getGimIndex } = await import('../desktop/database.js');
-        const validation = await validateGimCache(record.id);
-        console.log('[Tauri] GIM 缓存校验:', validation);
-        if (validation.valid) {
-          try {
-            const index = await getGimIndex(record.id);
-            const { restoreGimIndexToState } = await import('./gimIndexRestoreService.js');
-            restoreGimIndexToState(state, index);
-            state.currentProjectId = record.id;
-            console.log('[Tauri] GIM 索引已恢复到 AppState:', {
-              ifc_entries: state.currentIfcEntries.length,
-              cbm_root: state.currentCbmTree?.path || null,
-              cached_ifc_paths: state.cachedIfcPaths.size,
-              file_dev_relations: state.fileDevRelations.length,
-            });
-            console.log('[Tauri] 第 2 轮仅验证恢复结果，仍继续完整解压流程');
-          } catch (err) {
-            console.warn('[Tauri] GIM 索引恢复验证失败，继续完整解压流程:', err);
-          }
-        } else {
-          console.log('[Tauri] 缓存无效或不完整，第 1 轮继续完整解压流程:', validation);
-        }
-        showLoading('正在读取 GIM 文件...');
-        const ab = await readFileBytes(filePath);
-        const fileName = filePath.split(/[\\/]/).pop() || 'project.gim';
-        await openGimFromArrayBuffer(ctx, state, fileName, ab, showMessage, {
-          projectId: record.id,
-          persistIndex: true,
-        });
-      } catch (err) {
-        console.error(err);
-        showLoading(`GIM 解析失败: ${err instanceof Error ? err.message : String(err)}`);
-        setTimeout(hideLoading, 3000);
-      } finally { btnLoadGim.disabled = false; }
-      return;
-    }
-    gimFileInput.click();
-  });
-  gimFileInput.addEventListener('change', async () => {
-    const files = Array.from(gimFileInput.files || []);
-    if (files.length === 0) return;
-    btnLoadGim.disabled = true;
-    try {
-      const ab = await files[0].arrayBuffer();
-      await openGimFromArrayBuffer(ctx, state, files[0].name, ab, showMessage);
-    } catch (err) {
-      console.error(err);
-      showLoading(`GIM 解析失败: ${err instanceof Error ? err.message : String(err)}`);
-      setTimeout(hideLoading, 3000);
-    } finally { gimFileInput.value = ''; btnLoadGim.disabled = false; }
-  });
 }
 
 /**
@@ -297,16 +235,11 @@ export async function openGimWithDialog(
       const info = await getFileInfo(filePath);
       console.log('[Tauri] GIM 文件信息:', info);
       showLoading('正在写入本地项目索引...');
-      const { upsertGimProject, listGimProjects, getGimProjectsBySha256, getGimIndexStats } = await import('../desktop/database.js');
+      const { upsertGimProject, validateGimCache, getGimIndex } = await import('../desktop/database.js');
       const record = await upsertGimProject(info);
       console.log('[Tauri] GIM 项目记录:', record);
-      console.log('[Tauri] 最近 GIM 项目:', await listGimProjects(10));
-      console.log('[Tauri] 相同 sha256 项目:', await getGimProjectsBySha256(info.sha256));
-      const stats = await getGimIndexStats(record.id);
-      console.log('[Tauri] GIM 索引状态:', stats);
 
       showLoading('正在检查本地缓存...');
-      const { validateGimCache, getGimIndex } = await import('../desktop/database.js');
       const validation = await validateGimCache(record.id);
       console.log('[Tauri] GIM 缓存校验:', validation);
 
@@ -334,17 +267,15 @@ export async function openGimWithDialog(
 
           // 立即渲染 CBM 层级树和文件设备面板（无 Viewer）
           // 点击节点时由 nodeInteractionService 懒加载 Viewer + IFC
-          const { buildAndRenderCbmTreeNoViewer } = await import('../ui/cbmTreeView.js');
-          const { renderFileDevPanelNoViewer } = await import('../ui/fileDevView.js');
-          const { handleNodeClick } = await import('./nodeInteractionService.js');
-          const nodeClickHandler = (node: import('../gim/types.js').CbmNode) => {
-            handleNodeClick(state, node, showMessage);
-          };
-          buildAndRenderCbmTreeNoViewer(state, nodeClickHandler);
-          renderFileDevPanelNoViewer(state, nodeClickHandler);
+          const clickHandler = createNodeClickHandler(state, showMessage);
+          buildAndRenderCbmTree(state, clickHandler);
+          renderFileDevPanel(state, clickHandler);
           emptyTipEl.style.display = 'none';
 
           hideLoading();
+          // 轻量状态提示
+          showLoading('已从本地缓存恢复，可点击节点按需加载 IFC');
+          setTimeout(hideLoading, 3000);
           console.log('[Tauri] 缓存短路生效：未读取原始 GIM，未执行解压');
           return; // 缓存命中，短路完成
         } catch (err) {

@@ -15,6 +15,7 @@ import { buildCbmNodeIndex } from '../gim/cbmParser.js';
  * - ifcGuidIndex / cbmNodeIndex
  * - fileDevRelations
  * - deviceToIfcFile
+ * - cachedFamProperties / cachedDevProperties（基础属性缓存）
  */
 export function restoreGimIndexToState(state: AppState, index: GimIndexResult): void {
   // 1. currentFiles = null
@@ -52,6 +53,33 @@ export function restoreGimIndexToState(state: AppState, index: GimIndexResult): 
     for (const devCbm of entry.deviceCbms) {
       state.deviceToIfcFile.set(devCbm, entry.modelId);
     }
+  }
+
+  // 8. 恢复 cachedFamProperties: sourcePath → sectionName → key → value
+  state.cachedFamProperties.clear();
+  for (const fp of index.fam_properties) {
+    let bySection = state.cachedFamProperties.get(fp.source_path);
+    if (!bySection) {
+      bySection = new Map();
+      state.cachedFamProperties.set(fp.source_path, bySection);
+    }
+    let byKey = bySection.get(fp.section_name);
+    if (!byKey) {
+      byKey = new Map();
+      bySection.set(fp.section_name, byKey);
+    }
+    if (fp.prop_value) byKey.set(fp.prop_key, fp.prop_value);
+  }
+
+  // 9. 恢复 cachedDevProperties: devPath → key → value
+  state.cachedDevProperties.clear();
+  for (const dp of index.dev_properties) {
+    let kv = state.cachedDevProperties.get(dp.dev_path);
+    if (!kv) {
+      kv = {};
+      state.cachedDevProperties.set(dp.dev_path, kv);
+    }
+    if (dp.prop_value) kv[dp.prop_key] = dp.prop_value;
   }
 }
 

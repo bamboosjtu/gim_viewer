@@ -1,10 +1,7 @@
 import type { CbmNode } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
-import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { cbmTreePanel } from './dom.js';
 import { getNodeDisplayName } from '../gim/gimIndexer.js';
-import { showNodeProperties, openPropsDrawer } from './propsDrawer.js';
-import { highlightIfcFromNode } from '../viewer/highlight.js';
 
 const ENTITY_ICONS: Record<string, string> = {
   F1System: '🏗️', F2System: '🏢', F3System: '⚡', F4System: '🔧', PARTINDEX: '🔩',
@@ -59,19 +56,11 @@ export function renderCbmTreeUI(
   parentEl.appendChild(nodeEl);
 }
 
-/** 构建并渲染 CBM 层级树（交互层，需要 ViewerContext） */
-export function buildAndRenderCbmTree(ctx: ViewerContext, state: AppState, showMessage: (text: string) => void): void {
-  cbmTreePanel.innerHTML = '';
-  if (!state.currentCbmTree) { cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>'; return; }
-  renderCbmTreeUI(state, state.currentCbmTree, cbmTreePanel, (node) => {
-    showNodeProperties(ctx, state, node);
-    openPropsDrawer(ctx);
-    highlightIfcFromNode(ctx, state, node, showMessage);
-  });
-}
-
-/** 构建并渲染 CBM 层级树（纯 UI，不需要 ViewerContext，用于缓存命中） */
-export function buildAndRenderCbmTreeNoViewer(
+/**
+ * 构建并渲染 CBM 层级树。
+ * 统一入口：无论首次打开还是缓存命中，都使用 onNodeClick 回调处理交互。
+ */
+export function buildAndRenderCbmTree(
   state: AppState,
   onNodeClick: (node: CbmNode) => void,
 ): void {

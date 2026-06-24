@@ -88,11 +88,12 @@ export async function handleNodeClick(
     const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
     await buildIfcNameIndex(ctx, state);
 
-    // 刷新树显示（更新名称）
+    // 刷新树显示（更新名称）— 统一使用 handleNodeClick 作为点击回调
     const { buildAndRenderCbmTree } = await import('../ui/cbmTreeView.js');
     const { renderFileDevPanel } = await import('../ui/fileDevView.js');
-    buildAndRenderCbmTree(ctx, state, showMessage);
-    renderFileDevPanel(ctx, state, showMessage);
+    const clickHandler = (n: CbmNode) => { handleNodeClick(state, n, showMessage); };
+    buildAndRenderCbmTree(state, clickHandler);
+    renderFileDevPanel(state, clickHandler);
   }
 
   // 6. 高亮 + 显示完整属性

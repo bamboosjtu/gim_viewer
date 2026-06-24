@@ -1,5 +1,7 @@
 import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
-import type { GimIndexPayload, GimEntryPayload, CbmNodePayload, IfcModelPayload, FileDevEntryPayload } from '../desktop/database.js';
+import type { GimIndexPayload, GimEntryPayload, CbmNodePayload, IfcModelPayload, FileDevEntryPayload, FamPropertyPayload, DevPropertyPayload } from '../desktop/database.js';
+import { parseFamSections } from '../gim/famParser.js';
+import { parseKeyValue } from '../gim/cbmParser.js';
 
 /** 根据路径判断 entry_type */
 function classifyEntryType(path: string): string {
@@ -36,8 +38,20 @@ function flattenCbmTree(
   }
 }
 
+/** 递归遍历 CBM 树，收集所有非空的 famPath / devPath 引用 */
+function collectFamDevRefs(node: CbmNode | null, out: { famPaths: Set<string>; devPaths: Set<string> }): void {
+  if (!node) return;
+  if (node.famPath) out.famPaths.add(`CBM/${node.famPath}`);
+  if (node.devPath) out.devPaths.add(`DEV/${node.devPath}`);
+  for (const child of node.children) collectFamDevRefs(child, out);
+}
+
 /**
  * 构造 GIM 索引 payload，用于 save_gim_index。
+ *
+ * 包含 CBM/FAM/DEV 基础属性缓存（不缓存 IFC 原生属性）：
+ * - fam_property：FAM 分节属性（CBM/{famPath} 和 DEV/{BASEFAMILY}）
+ * - dev_property：DEV 关键属性（DEV/{devPath} 的全部键值对）
  *
  * @param projectId 数据库 gim_project.id
  * @param files GIM 解压后的文件集合
@@ -46,14 +60,14 @@ function flattenCbmTree(
  * @param fileDevRelations FileDevRelation 解析结果
  * @param localCachePathMap IFC 文件的本地缓存路径映射（entry_path -> local_cache_path）
  */
-export function buildGimIndexPayload(
+export async function buildGimIndexPayload(
   projectId: number,
   files: Map<string, File>,
   ifcEntries: IfcEntry[],
   cbmTree: CbmNode | null,
   fileDevRelations: FileDevEntry[],
   localCachePathMap?: Map<string, string>,
-): GimIndexPayload {
+): Promise<GimIndexPayload> {
   // 1. entries
   const entries: GimEntryPayload[] = [];
   for (const [entryPath, file] of files) {
@@ -94,11 +108,69 @@ export function buildGimIndexPayload(
     }
   }
 
+  // 5. fam_properties + dev_properties：遍历 CBM 树收集引用，读取并解析文件
+  const famProperties: FamPropertyPayload[] = [];
+  const devProperties: DevPropertyPayload[] = [];
+
+  const refs = { famPaths: new Set<string>(), devPaths: new Set<string>() };
+  collectFamDevRefs(cbmTree, refs);
+
+  // 5a. 读取 DEV 文件，解析键值对 → dev_property，同时收集 BASEFAMILY 引用
+  const devFamRefs = new Set<string>();
+  for (const devPath of refs.devPaths) {
+    const f = files.get(devPath);
+    if (!f) continue;
+    let kv: Record<string, string>;
+    try {
+      kv = parseKeyValue(await f.text());
+    } catch {
+      continue;
+    }
+    for (const [key, val] of Object.entries(kv)) {
+      if (val) devProperties.push({ dev_path: devPath, prop_key: key, prop_value: val });
+    }
+    // 收集 BASEFAMILY 引用
+    const baseFamily = kv['BASEFAMILY'];
+    if (baseFamily) devFamRefs.add(`DEV/${baseFamily}`);
+  }
+
+  // 5b. 合并 FAM 引用：CBM FAM + DEV BASEFAMILY FAM
+  for (const p of devFamRefs) refs.famPaths.add(p);
+
+  // 5c. 读取 FAM 文件，解析分节 → fam_property
+  for (const famPath of refs.famPaths) {
+    const f = files.get(famPath);
+    if (!f) continue;
+    let sections: Map<string, Map<string, string>>;
+    try {
+      sections = parseFamSections(await f.text());
+    } catch {
+      continue;
+    }
+    let sortOrder = 0;
+    for (const [secName, props] of sections) {
+      for (const [key, val] of props) {
+        if (val) {
+          famProperties.push({
+            source_path: famPath,
+            section_name: secName,
+            prop_key: key,
+            prop_value: val,
+            sort_order: sortOrder,
+          });
+        }
+      }
+      sortOrder++;
+    }
+  }
+
   return {
     project_id: projectId,
     entries,
     cbm_nodes: cbmNodes,
     ifc_models: ifcModels,
     file_dev_entries: fileDevEntries,
+    fam_properties: famProperties,
+    dev_properties: devProperties,
   };
 }

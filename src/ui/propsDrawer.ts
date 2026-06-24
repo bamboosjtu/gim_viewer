@@ -61,6 +61,58 @@ function renderFamSections(sections: Map<string, Map<string, string>>): string {
   return html;
 }
 
+/**
+ * 渲染节点的 FAM/DEV 属性为 HTML。
+ * 优先从 currentFiles 读取（首次打开），回退到 cachedFamProperties/cachedDevProperties（缓存命中）。
+ */
+async function renderNodeFamDevProperties(state: AppState, node: CbmNode): Promise<string> {
+  let html = '';
+
+  // FAM 属性（CBM/{famPath}）
+  if (node.famPath) {
+    const famKey = `CBM/${node.famPath}`;
+    if (state.currentFiles) {
+      const f = state.currentFiles.get(famKey);
+      if (f) html += renderFamSections(parseFamSections(await f.text()));
+    } else {
+      const cached = state.cachedFamProperties.get(famKey);
+      if (cached) html += renderFamSections(cached);
+    }
+  }
+
+  // DEV 属性（DEV/{devPath}）
+  if (node.devPath) {
+    const devKey = `DEV/${node.devPath}`;
+    let kv: Record<string, string> | null = null;
+    if (state.currentFiles) {
+      const f = state.currentFiles.get(devKey);
+      if (f) kv = parseKeyValue(await f.text());
+    } else {
+      kv = state.cachedDevProperties.get(devKey) ?? null;
+    }
+    if (kv) {
+      html += '<div class="props-section"><div class="props-section-title">设备信息</div><table class="props-table">';
+      if (kv['SYMBOLNAME']) html += `<tr><td class="prop-key">设备名称</td><td class="prop-val">${escHtml(kv['SYMBOLNAME'])}</td></tr>`;
+      if (kv['TYPE']) html += `<tr><td class="prop-key">设备类型</td><td class="prop-val">${escHtml(kv['TYPE'])}</td></tr>`;
+      html += '</table></div>';
+      // DEV BASEFAMILY 引用的 FAM 属性
+      const famRef = kv['BASEFAMILY'];
+      if (famRef) {
+        const famKey = `DEV/${famRef}`;
+        if (state.currentFiles) {
+          const famFile = state.currentFiles.get(famKey);
+          if (famFile) html += renderFamSections(parseFamSections(await famFile.text()));
+        } else {
+          const cached = state.cachedFamProperties.get(famKey);
+          if (cached) html += renderFamSections(cached);
+        }
+      }
+    }
+  }
+
+  return html;
+}
+
 /** 渲染 getItemsData 返回的属性数据为 HTML */
 function renderIfcItemData(data: Record<string, unknown>, depth = 0): string {
   if (!data || typeof data !== 'object') return '';
@@ -134,26 +186,8 @@ export async function showNodePropertiesBasic(state: AppState, node: CbmNode): P
   for (const [k, v] of bp) { if (v) html += `<tr><td class="prop-key">${k}</td><td class="prop-val">${escHtml(v)}</td></tr>`; }
   html += '</table></div>';
 
-  if (node.famPath && state.currentFiles) {
-    const f = state.currentFiles.get(`CBM/${node.famPath}`);
-    if (f) html += renderFamSections(parseFamSections(await f.text()));
-  }
-
-  if (node.devPath && state.currentFiles) {
-    const f = state.currentFiles.get(`DEV/${node.devPath}`);
-    if (f) {
-      const kv = parseKeyValue(await f.text());
-      html += '<div class="props-section"><div class="props-section-title">设备信息</div><table class="props-table">';
-      if (kv['SYMBOLNAME']) html += `<tr><td class="prop-key">设备名称</td><td class="prop-val">${escHtml(kv['SYMBOLNAME'])}</td></tr>`;
-      if (kv['TYPE']) html += `<tr><td class="prop-key">设备类型</td><td class="prop-val">${escHtml(kv['TYPE'])}</td></tr>`;
-      html += '</table></div>';
-      const famRef = kv['BASEFAMILY'];
-      if (famRef) {
-        const famFile = state.currentFiles.get(`DEV/${famRef}`);
-        if (famFile) html += renderFamSections(parseFamSections(await famFile.text()));
-      }
-    }
-  }
+  // FAM/DEV 属性：优先 currentFiles，回退缓存
+  html += await renderNodeFamDevProperties(state, node);
 
   if (node.transformMatrix && node.transformMatrix !== '1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1') {
     html += '<div class="props-section"><div class="props-section-title">变换矩阵</div><table class="props-table">';
@@ -182,26 +216,8 @@ export async function showNodeProperties(ctx: ViewerContext, state: AppState, no
   for (const [k, v] of bp) { if (v) html += `<tr><td class="prop-key">${k}</td><td class="prop-val">${escHtml(v)}</td></tr>`; }
   html += '</table></div>';
 
-  if (node.famPath && state.currentFiles) {
-    const f = state.currentFiles.get(`CBM/${node.famPath}`);
-    if (f) html += renderFamSections(parseFamSections(await f.text()));
-  }
-
-  if (node.devPath && state.currentFiles) {
-    const f = state.currentFiles.get(`DEV/${node.devPath}`);
-    if (f) {
-      const kv = parseKeyValue(await f.text());
-      html += '<div class="props-section"><div class="props-section-title">设备信息</div><table class="props-table">';
-      if (kv['SYMBOLNAME']) html += `<tr><td class="prop-key">设备名称</td><td class="prop-val">${escHtml(kv['SYMBOLNAME'])}</td></tr>`;
-      if (kv['TYPE']) html += `<tr><td class="prop-key">设备类型</td><td class="prop-val">${escHtml(kv['TYPE'])}</td></tr>`;
-      html += '</table></div>';
-      const famRef = kv['BASEFAMILY'];
-      if (famRef) {
-        const famFile = state.currentFiles.get(`DEV/${famRef}`);
-        if (famFile) html += renderFamSections(parseFamSections(await famFile.text()));
-      }
-    }
-  }
+  // FAM/DEV 属性：优先 currentFiles，回退缓存
+  html += await renderNodeFamDevProperties(state, node);
 
   if (node.transformMatrix && node.transformMatrix !== '1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1') {
     html += '<div class="props-section"><div class="props-section-title">变换矩阵</div><table class="props-table">';
@@ -283,21 +299,7 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
   // GIM 设备属性
   if (gimNode) {
     html += '<div class="props-section"><div class="props-section-title">GIM 设备属性</div></div>';
-    if (gimNode.famPath && state.currentFiles) {
-      const f = state.currentFiles.get(`CBM/${gimNode.famPath}`);
-      if (f) html += renderFamSections(parseFamSections(await f.text()));
-    }
-    if (gimNode.devPath && state.currentFiles) {
-      const f = state.currentFiles.get(`DEV/${gimNode.devPath}`);
-      if (f) {
-        const kv = parseKeyValue(await f.text());
-        const famRef = kv['BASEFAMILY'];
-        if (famRef) {
-          const famFile = state.currentFiles.get(`DEV/${famRef}`);
-          if (famFile) html += renderFamSections(parseFamSections(await famFile.text()));
-        }
-      }
-    }
+    html += await renderNodeFamDevProperties(state, gimNode);
   }
 
   propsDrawerBody.innerHTML = html;

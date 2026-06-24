@@ -6,7 +6,8 @@ use std::sync::Mutex;
 use tauri::Manager;
 
 /// 当前解析器版本（变更解析逻辑时递增，用于缓存失效）
-pub const PARSER_VERSION: &str = "gim-parser-v1";
+/// v2: 增加 fam_property / dev_property 表，缓存 CBM/FAM/DEV 基础属性
+pub const PARSER_VERSION: &str = "gim-parser-v2";
 
 /// GIM 文件元信息（从前端传入，需 Deserialize）
 #[derive(Debug, Deserialize)]
@@ -124,7 +125,31 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
         );
         CREATE INDEX IF NOT EXISTS idx_file_dev_project ON file_dev_entry(project_id);
         CREATE INDEX IF NOT EXISTS idx_file_dev_model ON file_dev_entry(project_id, model_id);
-        CREATE INDEX IF NOT EXISTS idx_file_dev_device ON file_dev_entry(project_id, device_cbm);",
+        CREATE INDEX IF NOT EXISTS idx_file_dev_device ON file_dev_entry(project_id, device_cbm);
+
+        CREATE TABLE IF NOT EXISTS fam_property (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            source_path TEXT NOT NULL,
+            section_name TEXT NOT NULL,
+            prop_key TEXT NOT NULL,
+            prop_value TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at_ms INTEGER NOT NULL,
+            UNIQUE(project_id, source_path, section_name, prop_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_fam_property_source ON fam_property(project_id, source_path);
+
+        CREATE TABLE IF NOT EXISTS dev_property (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            dev_path TEXT NOT NULL,
+            prop_key TEXT NOT NULL,
+            prop_value TEXT,
+            created_at_ms INTEGER NOT NULL,
+            UNIQUE(project_id, dev_path, prop_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dev_property_path ON dev_property(project_id, dev_path);",
     )
     .map_err(|e| format!("初始化数据库表失败: {}", e))?;
 
@@ -326,12 +351,30 @@ pub struct FileDevEntryPayload {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct FamPropertyPayload {
+    pub source_path: String,
+    pub section_name: String,
+    pub prop_key: String,
+    pub prop_value: Option<String>,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DevPropertyPayload {
+    pub dev_path: String,
+    pub prop_key: String,
+    pub prop_value: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct GimIndexPayload {
     pub project_id: i64,
     pub entries: Vec<GimEntryPayload>,
     pub cbm_nodes: Vec<CbmNodePayload>,
     pub ifc_models: Vec<IfcModelPayload>,
     pub file_dev_entries: Vec<FileDevEntryPayload>,
+    pub fam_properties: Vec<FamPropertyPayload>,
+    pub dev_properties: Vec<DevPropertyPayload>,
 }
 
 /// Tauri command：保存 GIM 索引（事务：先删后插）
@@ -354,6 +397,10 @@ pub fn save_gim_index(
         .map_err(|e| format!("清理 ifc_model 失败: {}", e))?;
     tx.execute("DELETE FROM file_dev_entry WHERE project_id = ?1", params![pid])
         .map_err(|e| format!("清理 file_dev_entry 失败: {}", e))?;
+    tx.execute("DELETE FROM fam_property WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 fam_property 失败: {}", e))?;
+    tx.execute("DELETE FROM dev_property WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 dev_property 失败: {}", e))?;
 
     // gim_entry
     for e in &payload.entries {
@@ -408,6 +455,26 @@ pub fn save_gim_index(
             params![pid, f.model_id, f.ifc_name, f.ifc_file, f.device_count, f.device_cbm, f.sort_order, now],
         )
         .map_err(|e| format!("插入 file_dev_entry 失败: {}", e))?;
+    }
+
+    // fam_property
+    for fp in &payload.fam_properties {
+        tx.execute(
+            "INSERT INTO fam_property (project_id, source_path, section_name, prop_key, prop_value, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![pid, fp.source_path, fp.section_name, fp.prop_key, fp.prop_value, fp.sort_order, now],
+        )
+        .map_err(|e| format!("插入 fam_property 失败: {}", e))?;
+    }
+
+    // dev_property
+    for dp in &payload.dev_properties {
+        tx.execute(
+            "INSERT INTO dev_property (project_id, dev_path, prop_key, prop_value, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![pid, dp.dev_path, dp.prop_key, dp.prop_value, now],
+        )
+        .map_err(|e| format!("插入 dev_property 失败: {}", e))?;
     }
 
     tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
@@ -655,6 +722,30 @@ pub struct FileDevEntryRecord {
     pub created_at_ms: u64,
 }
 
+/// fam_property 表完整记录
+#[derive(Debug, Serialize)]
+pub struct FamPropertyRecord {
+    pub id: i64,
+    pub project_id: i64,
+    pub source_path: String,
+    pub section_name: String,
+    pub prop_key: String,
+    pub prop_value: Option<String>,
+    pub sort_order: i64,
+    pub created_at_ms: u64,
+}
+
+/// dev_property 表完整记录
+#[derive(Debug, Serialize)]
+pub struct DevPropertyRecord {
+    pub id: i64,
+    pub project_id: i64,
+    pub dev_path: String,
+    pub prop_key: String,
+    pub prop_value: Option<String>,
+    pub created_at_ms: u64,
+}
+
 /// get_gim_index 返回结构
 #[derive(Debug, Serialize)]
 pub struct GetGimIndexResult {
@@ -662,6 +753,8 @@ pub struct GetGimIndexResult {
     pub cbm_nodes: Vec<CbmNodeRecord>,
     pub ifc_models: Vec<IfcModelRecord>,
     pub file_dev_entries: Vec<FileDevEntryRecord>,
+    pub fam_properties: Vec<FamPropertyRecord>,
+    pub dev_properties: Vec<DevPropertyRecord>,
 }
 
 /// 缓存校验结果
@@ -701,6 +794,30 @@ fn row_to_file_dev_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileDevEnt
         device_cbm: row.get(6)?,
         sort_order: row.get(7)?,
         created_at_ms: row.get(8)?,
+    })
+}
+
+fn row_to_fam_property(row: &rusqlite::Row<'_>) -> rusqlite::Result<FamPropertyRecord> {
+    Ok(FamPropertyRecord {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        source_path: row.get(2)?,
+        section_name: row.get(3)?,
+        prop_key: row.get(4)?,
+        prop_value: row.get(5)?,
+        sort_order: row.get(6)?,
+        created_at_ms: row.get(7)?,
+    })
+}
+
+fn row_to_dev_property(row: &rusqlite::Row<'_>) -> rusqlite::Result<DevPropertyRecord> {
+    Ok(DevPropertyRecord {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        dev_path: row.get(2)?,
+        prop_key: row.get(3)?,
+        prop_value: row.get(4)?,
+        created_at_ms: row.get(5)?,
     })
 }
 
@@ -780,11 +897,47 @@ pub fn get_gim_index(
         file_dev_entries.push(r.map_err(|e| format!("读取 file_dev_entry 失败: {}", e))?);
     }
 
+    // 5. fam_property
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, source_path, section_name, prop_key, prop_value, sort_order, created_at_ms
+             FROM fam_property
+             WHERE project_id = ?1
+             ORDER BY source_path ASC, sort_order ASC, id ASC",
+        )
+        .map_err(|e| format!("预处理 fam_property 失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![project_id], row_to_fam_property)
+        .map_err(|e| format!("查询 fam_property 失败: {}", e))?;
+    let mut fam_properties = Vec::new();
+    for r in rows {
+        fam_properties.push(r.map_err(|e| format!("读取 fam_property 失败: {}", e))?);
+    }
+
+    // 6. dev_property
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, dev_path, prop_key, prop_value, created_at_ms
+             FROM dev_property
+             WHERE project_id = ?1
+             ORDER BY dev_path ASC, id ASC",
+        )
+        .map_err(|e| format!("预处理 dev_property 失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![project_id], row_to_dev_property)
+        .map_err(|e| format!("查询 dev_property 失败: {}", e))?;
+    let mut dev_properties = Vec::new();
+    for r in rows {
+        dev_properties.push(r.map_err(|e| format!("读取 dev_property 失败: {}", e))?);
+    }
+
     Ok(GetGimIndexResult {
         entries,
         cbm_nodes,
         ifc_models,
         file_dev_entries,
+        fam_properties,
+        dev_properties,
     })
 }
 

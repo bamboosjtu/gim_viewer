@@ -86,12 +86,28 @@ export interface FileDevEntryPayload {
   sort_order: number;
 }
 
+export interface FamPropertyPayload {
+  source_path: string;
+  section_name: string;
+  prop_key: string;
+  prop_value: string | null;
+  sort_order: number;
+}
+
+export interface DevPropertyPayload {
+  dev_path: string;
+  prop_key: string;
+  prop_value: string | null;
+}
+
 export interface GimIndexPayload {
   project_id: number;
   entries: GimEntryPayload[];
   cbm_nodes: CbmNodePayload[];
   ifc_models: IfcModelPayload[];
   file_dev_entries: FileDevEntryPayload[];
+  fam_properties: FamPropertyPayload[];
+  dev_properties: DevPropertyPayload[];
 }
 
 /**
@@ -213,11 +229,33 @@ export interface FileDevEntryRecord {
   created_at_ms: number;
 }
 
+export interface FamPropertyRecord {
+  id: number;
+  project_id: number;
+  source_path: string;
+  section_name: string;
+  prop_key: string;
+  prop_value: string | null;
+  sort_order: number;
+  created_at_ms: number;
+}
+
+export interface DevPropertyRecord {
+  id: number;
+  project_id: number;
+  dev_path: string;
+  prop_key: string;
+  prop_value: string | null;
+  created_at_ms: number;
+}
+
 export interface GimIndexResult {
   entries: GimEntryRecord[];
   cbm_nodes: CbmNodeRecord[];
   ifc_models: IfcModelRecord[];
   file_dev_entries: FileDevEntryRecord[];
+  fam_properties: FamPropertyRecord[];
+  dev_properties: DevPropertyRecord[];
 }
 
 export interface GimCacheValidation {

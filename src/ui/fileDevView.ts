@@ -1,10 +1,7 @@
 import type { CbmNode } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
-import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { fileDevPanel } from './dom.js';
 import { getNodeDisplayName } from '../gim/gimIndexer.js';
-import { showNodeProperties, openPropsDrawer } from './propsDrawer.js';
-import { highlightIfcFromNode } from '../viewer/highlight.js';
 
 const ENTITY_ICONS: Record<string, string> = {
   F1System: '🏗️', F2System: '🏢', F3System: '⚡', F4System: '🔧', PARTINDEX: '🔩',
@@ -86,21 +83,11 @@ export function renderFileDevPanelUI(
   }
 }
 
-/** 渲染文件-设备面板（交互层，需要 ViewerContext） */
+/**
+ * 渲染文件-设备面板。
+ * 统一入口：无论首次打开还是缓存命中，都使用 onNodeClick 回调处理交互。
+ */
 export function renderFileDevPanel(
-  ctx: ViewerContext,
-  state: AppState,
-  showMessage: (text: string) => void,
-): void {
-  renderFileDevPanelUI(state, (node) => {
-    showNodeProperties(ctx, state, node);
-    highlightIfcFromNode(ctx, state, node, showMessage);
-    openPropsDrawer(ctx);
-  });
-}
-
-/** 渲染文件-设备面板（纯 UI，不需要 ViewerContext，用于缓存命中） */
-export function renderFileDevPanelNoViewer(
   state: AppState,
   onNodeClick: (node: CbmNode) => void,
 ): void {
