@@ -164,6 +164,22 @@ export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMes
         if (stats.has_index) {
           console.log('[Tauri] 已存在 GIM 索引，但本轮仍继续走解压流程');
         }
+        showLoading('正在检查本地缓存...');
+        const { validateGimCache, getGimIndex } = await import('../desktop/database.js');
+        const validation = await validateGimCache(record.id);
+        console.log('[Tauri] GIM 缓存校验:', validation);
+        if (validation.valid) {
+          const index = await getGimIndex(record.id);
+          console.log('[Tauri] GIM 缓存索引读取成功:', {
+            entries: index.entries.length,
+            cbm_nodes: index.cbm_nodes.length,
+            ifc_models: index.ifc_models.length,
+            file_dev_entries: index.file_dev_entries.length,
+          });
+          console.log('[Tauri] 缓存有效，但第 1 轮不启用短路，仍继续完整解压流程');
+        } else {
+          console.log('[Tauri] 缓存无效或不完整，第 1 轮继续完整解压流程:', validation);
+        }
         showLoading('正在读取 GIM 文件...');
         const ab = await readFileBytes(filePath);
         const fileName = filePath.split(/[\\/]/).pop() || 'project.gim';

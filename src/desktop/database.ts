@@ -187,3 +187,60 @@ export async function readCacheFile(path: string): Promise<Uint8Array> {
   const bytes = await invoke<number[]>('read_cache_file', { path });
   return new Uint8Array(bytes);
 }
+
+// ===== GIM 索引完整读取 + 缓存校验 =====
+
+export interface GimEntryRecord {
+  id: number;
+  project_id: number;
+  entry_path: string;
+  file_name: string;
+  entry_type: string;
+  file_size: number;
+  local_cache_path: string | null;
+  created_at_ms: number;
+}
+
+export interface FileDevEntryRecord {
+  id: number;
+  project_id: number;
+  model_id: string;
+  ifc_name: string;
+  ifc_file: string;
+  device_count: number;
+  device_cbm: string;
+  sort_order: number;
+  created_at_ms: number;
+}
+
+export interface GimIndexResult {
+  entries: GimEntryRecord[];
+  cbm_nodes: CbmNodeRecord[];
+  ifc_models: IfcModelRecord[];
+  file_dev_entries: FileDevEntryRecord[];
+}
+
+export interface GimCacheValidation {
+  project_id: number;
+  has_index: boolean;
+  ifc_models_count: number;
+  cached_ifc_count: number;
+  missing_cache_paths: string[];
+  valid: boolean;
+}
+
+/**
+ * 完整读取 GIM 索引（只读）。
+ */
+export async function getGimIndex(projectId: number): Promise<GimIndexResult> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<GimIndexResult>('get_gim_index', { projectId });
+}
+
+/**
+ * 校验 GIM 缓存完整性（只读，不修复）。
+ */
+export async function validateGimCache(projectId: number): Promise<GimCacheValidation> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<GimCacheValidation>('validate_gim_cache', { projectId });
+}

@@ -614,3 +614,221 @@ pub fn write_cache_file(
 pub fn read_cache_file(path: String) -> Result<Vec<u8>, String> {
     stdfs::read(&path).map_err(|e| format!("读取缓存文件失败: {}", e))
 }
+
+// ===== GIM 索引完整读取 + 缓存校验 =====
+
+/// gim_entry 表完整记录
+#[derive(Debug, Serialize)]
+pub struct GimEntryRecord {
+    pub id: i64,
+    pub project_id: i64,
+    pub entry_path: String,
+    pub file_name: String,
+    pub entry_type: String,
+    pub file_size: u64,
+    pub local_cache_path: Option<String>,
+    pub created_at_ms: u64,
+}
+
+/// file_dev_entry 表完整记录
+#[derive(Debug, Serialize)]
+pub struct FileDevEntryRecord {
+    pub id: i64,
+    pub project_id: i64,
+    pub model_id: String,
+    pub ifc_name: String,
+    pub ifc_file: String,
+    pub device_count: i64,
+    pub device_cbm: String,
+    pub sort_order: i64,
+    pub created_at_ms: u64,
+}
+
+/// get_gim_index 返回结构
+#[derive(Debug, Serialize)]
+pub struct GetGimIndexResult {
+    pub entries: Vec<GimEntryRecord>,
+    pub cbm_nodes: Vec<CbmNodeRecord>,
+    pub ifc_models: Vec<IfcModelRecord>,
+    pub file_dev_entries: Vec<FileDevEntryRecord>,
+}
+
+/// 缓存校验结果
+#[derive(Debug, Serialize)]
+pub struct GimCacheValidation {
+    pub project_id: i64,
+    pub has_index: bool,
+    pub ifc_models_count: u64,
+    pub cached_ifc_count: u64,
+    pub missing_cache_paths: Vec<String>,
+    pub valid: bool,
+}
+
+fn row_to_gim_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<GimEntryRecord> {
+    Ok(GimEntryRecord {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        entry_path: row.get(2)?,
+        file_name: row.get(3)?,
+        entry_type: row.get(4)?,
+        file_size: row.get(5)?,
+        local_cache_path: row.get(6)?,
+        created_at_ms: row.get(7)?,
+    })
+}
+
+fn row_to_file_dev_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileDevEntryRecord> {
+    Ok(FileDevEntryRecord {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        model_id: row.get(2)?,
+        ifc_name: row.get(3)?,
+        ifc_file: row.get(4)?,
+        device_count: row.get(5)?,
+        device_cbm: row.get(6)?,
+        sort_order: row.get(7)?,
+        created_at_ms: row.get(8)?,
+    })
+}
+
+/// Tauri command：完整读取 GIM 索引（只读）
+#[tauri::command]
+pub fn get_gim_index(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+) -> Result<GetGimIndexResult, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+    // 1. gim_entry
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, entry_path, file_name, entry_type, file_size, local_cache_path, created_at_ms
+             FROM gim_entry
+             WHERE project_id = ?1
+             ORDER BY entry_path ASC",
+        )
+        .map_err(|e| format!("预处理 gim_entry 失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![project_id], row_to_gim_entry)
+        .map_err(|e| format!("查询 gim_entry 失败: {}", e))?;
+    let mut entries = Vec::new();
+    for r in rows {
+        entries.push(r.map_err(|e| format!("读取 gim_entry 失败: {}", e))?);
+    }
+
+    // 2. cbm_node
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, node_key, parent_key, path, name, entity_name, classify_name, fam_path, dev_path, ifc_file, ifc_guid, transform_matrix, sort_order, created_at_ms
+             FROM cbm_node
+             WHERE project_id = ?1
+             ORDER BY COALESCE(parent_key, ''), sort_order ASC, id ASC",
+        )
+        .map_err(|e| format!("预处理 cbm_node 失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![project_id], row_to_cbm_node)
+        .map_err(|e| format!("查询 cbm_node 失败: {}", e))?;
+    let mut cbm_nodes = Vec::new();
+    for r in rows {
+        cbm_nodes.push(r.map_err(|e| format!("读取 cbm_node 失败: {}", e))?);
+    }
+
+    // 3. ifc_model
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, model_id, name, entry_path, created_at_ms
+             FROM ifc_model
+             WHERE project_id = ?1
+             ORDER BY model_id ASC",
+        )
+        .map_err(|e| format!("预处理 ifc_model 失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![project_id], row_to_ifc_model)
+        .map_err(|e| format!("查询 ifc_model 失败: {}", e))?;
+    let mut ifc_models = Vec::new();
+    for r in rows {
+        ifc_models.push(r.map_err(|e| format!("读取 ifc_model 失败: {}", e))?);
+    }
+
+    // 4. file_dev_entry
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, model_id, ifc_name, ifc_file, device_count, device_cbm, sort_order, created_at_ms
+             FROM file_dev_entry
+             WHERE project_id = ?1
+             ORDER BY model_id ASC, sort_order ASC, id ASC",
+        )
+        .map_err(|e| format!("预处理 file_dev_entry 失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![project_id], row_to_file_dev_entry)
+        .map_err(|e| format!("查询 file_dev_entry 失败: {}", e))?;
+    let mut file_dev_entries = Vec::new();
+    for r in rows {
+        file_dev_entries.push(r.map_err(|e| format!("读取 file_dev_entry 失败: {}", e))?);
+    }
+
+    Ok(GetGimIndexResult {
+        entries,
+        cbm_nodes,
+        ifc_models,
+        file_dev_entries,
+    })
+}
+
+/// Tauri command：校验 GIM 缓存完整性（只读，不修复）
+#[tauri::command]
+pub fn validate_gim_cache(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+) -> Result<GimCacheValidation, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+    let cbm_nodes_count = count_rows(&conn, "cbm_node", project_id)?;
+    let ifc_models_count = count_rows(&conn, "ifc_model", project_id)?;
+    let has_index = cbm_nodes_count > 0 || ifc_models_count > 0;
+
+    // 查询 entry_type='IFC' 的记录
+    let mut stmt = conn
+        .prepare(
+            "SELECT entry_path, local_cache_path
+             FROM gim_entry
+             WHERE project_id = ?1 AND entry_type = 'IFC'",
+        )
+        .map_err(|e| format!("预处理 IFC entry 失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![project_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .map_err(|e| format!("查询 IFC entry 失败: {}", e))?;
+
+    let mut cached_ifc_count: u64 = 0;
+    let mut missing_cache_paths: Vec<String> = Vec::new();
+    for r in rows {
+        let (entry_path, local_cache_path) = r.map_err(|e| format!("读取 IFC entry 失败: {}", e))?;
+        match local_cache_path {
+            Some(p) if !p.is_empty() => {
+                if std::path::Path::new(&p).exists() {
+                    cached_ifc_count += 1;
+                } else {
+                    missing_cache_paths.push(entry_path);
+                }
+            }
+            _ => {
+                missing_cache_paths.push(entry_path);
+            }
+        }
+    }
+
+    let valid = has_index
+        && ifc_models_count > 0
+        && missing_cache_paths.is_empty();
+
+    Ok(GimCacheValidation {
+        project_id,
+        has_index,
+        ifc_models_count: ifc_models_count as u64,
+        cached_ifc_count,
+        missing_cache_paths,
+        valid,
+    })
+}

@@ -81,6 +81,8 @@ pub fn run() {
             db::list_cbm_nodes,
             db::write_cache_file,
             db::read_cache_file,
+            db::get_gim_index,
+            db::validate_gim_cache,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
