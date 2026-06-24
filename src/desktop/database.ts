@@ -100,3 +100,65 @@ export async function saveGimIndex(payload: GimIndexPayload): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke<void>('save_gim_index', { payload });
 }
+
+// ===== GIM 索引读取 =====
+
+export interface GimIndexStats {
+  project_id: number;
+  entries_count: number;
+  cbm_nodes_count: number;
+  ifc_models_count: number;
+  file_dev_entries_count: number;
+  has_index: boolean;
+}
+
+export interface IfcModelRecord {
+  id: number;
+  project_id: number;
+  model_id: string;
+  name: string;
+  entry_path: string;
+  created_at_ms: number;
+}
+
+export interface CbmNodeRecord {
+  id: number;
+  project_id: number;
+  node_key: string;
+  parent_key: string | null;
+  path: string;
+  name: string;
+  entity_name: string | null;
+  classify_name: string | null;
+  fam_path: string | null;
+  dev_path: string | null;
+  ifc_file: string | null;
+  ifc_guid: string | null;
+  transform_matrix: string | null;
+  sort_order: number;
+  created_at_ms: number;
+}
+
+/**
+ * 获取 GIM 索引统计信息。
+ */
+export async function getGimIndexStats(projectId: number): Promise<GimIndexStats> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<GimIndexStats>('get_gim_index_stats', { projectId });
+}
+
+/**
+ * 列出 ifc_model 表记录。
+ */
+export async function listIfcModels(projectId: number): Promise<IfcModelRecord[]> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<IfcModelRecord[]>('list_ifc_models', { projectId });
+}
+
+/**
+ * 列出 cbm_node 表记录（默认 limit = 50，仅调试用）。
+ */
+export async function listCbmNodes(projectId: number, limit = 50): Promise<CbmNodeRecord[]> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<CbmNodeRecord[]>('list_cbm_nodes', { projectId, limit });
+}

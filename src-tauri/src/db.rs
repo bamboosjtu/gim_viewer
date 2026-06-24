@@ -403,3 +403,158 @@ pub fn save_gim_index(
     tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
 }
+
+// ===== GIM 索引读取 =====
+
+/// 索引统计信息
+#[derive(Debug, Serialize)]
+pub struct GimIndexStats {
+    pub project_id: i64,
+    pub entries_count: i64,
+    pub cbm_nodes_count: i64,
+    pub ifc_models_count: i64,
+    pub file_dev_entries_count: i64,
+    pub has_index: bool,
+}
+
+/// ifc_model 表完整记录
+#[derive(Debug, Serialize)]
+pub struct IfcModelRecord {
+    pub id: i64,
+    pub project_id: i64,
+    pub model_id: String,
+    pub name: String,
+    pub entry_path: String,
+    pub created_at_ms: u64,
+}
+
+/// cbm_node 表完整记录
+#[derive(Debug, Serialize)]
+pub struct CbmNodeRecord {
+    pub id: i64,
+    pub project_id: i64,
+    pub node_key: String,
+    pub parent_key: Option<String>,
+    pub path: String,
+    pub name: String,
+    pub entity_name: Option<String>,
+    pub classify_name: Option<String>,
+    pub fam_path: Option<String>,
+    pub dev_path: Option<String>,
+    pub ifc_file: Option<String>,
+    pub ifc_guid: Option<String>,
+    pub transform_matrix: Option<String>,
+    pub sort_order: i64,
+    pub created_at_ms: u64,
+}
+
+fn count_rows(conn: &Connection, table: &str, project_id: i64) -> Result<i64, String> {
+    let sql = format!("SELECT COUNT(*) FROM {} WHERE project_id = ?1", table);
+    conn.query_row(&sql, params![project_id], |row| row.get(0))
+        .map_err(|e| format!("统计 {} 失败: {}", table, e))
+}
+
+/// Tauri command：获取 GIM 索引统计
+#[tauri::command]
+pub fn get_gim_index_stats(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+) -> Result<GimIndexStats, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let entries_count = count_rows(&conn, "gim_entry", project_id)?;
+    let cbm_nodes_count = count_rows(&conn, "cbm_node", project_id)?;
+    let ifc_models_count = count_rows(&conn, "ifc_model", project_id)?;
+    let file_dev_entries_count = count_rows(&conn, "file_dev_entry", project_id)?;
+    let has_index = cbm_nodes_count > 0 || ifc_models_count > 0;
+    Ok(GimIndexStats {
+        project_id,
+        entries_count,
+        cbm_nodes_count,
+        ifc_models_count,
+        file_dev_entries_count,
+        has_index,
+    })
+}
+
+fn row_to_ifc_model(row: &rusqlite::Row<'_>) -> rusqlite::Result<IfcModelRecord> {
+    Ok(IfcModelRecord {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        model_id: row.get(2)?,
+        name: row.get(3)?,
+        entry_path: row.get(4)?,
+        created_at_ms: row.get(5)?,
+    })
+}
+
+fn row_to_cbm_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<CbmNodeRecord> {
+    Ok(CbmNodeRecord {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        node_key: row.get(2)?,
+        parent_key: row.get(3)?,
+        path: row.get(4)?,
+        name: row.get(5)?,
+        entity_name: row.get(6)?,
+        classify_name: row.get(7)?,
+        fam_path: row.get(8)?,
+        dev_path: row.get(9)?,
+        ifc_file: row.get(10)?,
+        ifc_guid: row.get(11)?,
+        transform_matrix: row.get(12)?,
+        sort_order: row.get(13)?,
+        created_at_ms: row.get(14)?,
+    })
+}
+
+/// Tauri command：列出 ifc_model 表记录
+#[tauri::command]
+pub fn list_ifc_models(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+) -> Result<Vec<IfcModelRecord>, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, model_id, name, entry_path, created_at_ms
+             FROM ifc_model
+             WHERE project_id = ?1",
+        )
+        .map_err(|e| format!("预处理查询失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![project_id], row_to_ifc_model)
+        .map_err(|e| format!("查询 ifc_model 失败: {}", e))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("读取 ifc_model 失败: {}", e))?);
+    }
+    Ok(out)
+}
+
+/// Tauri command：列出 cbm_node 表记录（默认 limit = 50，仅调试用）
+#[tauri::command]
+pub fn list_cbm_nodes(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+    limit: Option<u32>,
+) -> Result<Vec<CbmNodeRecord>, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let limit = limit.unwrap_or(50);
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, node_key, parent_key, path, name, entity_name, classify_name, fam_path, dev_path, ifc_file, ifc_guid, transform_matrix, sort_order, created_at_ms
+             FROM cbm_node
+             WHERE project_id = ?1
+             ORDER BY sort_order ASC
+             LIMIT ?2",
+        )
+        .map_err(|e| format!("预处理查询失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![project_id, limit], row_to_cbm_node)
+        .map_err(|e| format!("查询 cbm_node 失败: {}", e))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("读取 cbm_node 失败: {}", e))?);
+    }
+    Ok(out)
+}
