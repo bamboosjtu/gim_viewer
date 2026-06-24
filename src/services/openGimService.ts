@@ -169,14 +169,20 @@ export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMes
         const validation = await validateGimCache(record.id);
         console.log('[Tauri] GIM 缓存校验:', validation);
         if (validation.valid) {
-          const index = await getGimIndex(record.id);
-          console.log('[Tauri] GIM 缓存索引读取成功:', {
-            entries: index.entries.length,
-            cbm_nodes: index.cbm_nodes.length,
-            ifc_models: index.ifc_models.length,
-            file_dev_entries: index.file_dev_entries.length,
-          });
-          console.log('[Tauri] 缓存有效，但第 1 轮不启用短路，仍继续完整解压流程');
+          try {
+            const index = await getGimIndex(record.id);
+            const { restoreGimIndexToState } = await import('./gimIndexRestoreService.js');
+            restoreGimIndexToState(state, index);
+            console.log('[Tauri] GIM 索引已恢复到 AppState:', {
+              ifc_entries: state.currentIfcEntries.length,
+              cbm_root: state.currentCbmTree?.path || null,
+              cached_ifc_paths: state.cachedIfcPaths.size,
+              file_dev_relations: state.fileDevRelations.length,
+            });
+            console.log('[Tauri] 第 2 轮仅验证恢复结果，仍继续完整解压流程');
+          } catch (err) {
+            console.warn('[Tauri] GIM 索引恢复验证失败，继续完整解压流程:', err);
+          }
         } else {
           console.log('[Tauri] 缓存无效或不完整，第 1 轮继续完整解压流程:', validation);
         }

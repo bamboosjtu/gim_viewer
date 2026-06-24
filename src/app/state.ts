@@ -17,6 +17,9 @@ export class AppState {
   fileDevRelations: FileDevEntry[] = [];
   deviceToIfcFile = new Map<string, string>(); // deviceCbmName → ifcModelId
 
+  // 缓存命中时的 IFC 本地缓存路径（entry_path → local_cache_path）
+  cachedIfcPaths = new Map<string, string>();
+
   // 模型
   loadedModels = new Map<string, { modelId: string; visible: boolean }>();
 
@@ -38,6 +41,7 @@ export class AppState {
     this.ifcGuidToName.clear();
     this.fileDevRelations = [];
     this.deviceToIfcFile.clear();
+    this.cachedIfcPaths.clear();
   }
 
   /** 重置全部状态 */

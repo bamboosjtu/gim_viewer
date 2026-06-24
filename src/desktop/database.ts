@@ -224,6 +224,7 @@ export interface GimCacheValidation {
   project_id: number;
   has_index: boolean;
   ifc_models_count: number;
+  ifc_entry_count: number;
   cached_ifc_count: number;
   missing_cache_paths: string[];
   valid: boolean;

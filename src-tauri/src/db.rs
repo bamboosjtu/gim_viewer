@@ -659,6 +659,7 @@ pub struct GimCacheValidation {
     pub project_id: i64,
     pub has_index: bool,
     pub ifc_models_count: u64,
+    pub ifc_entry_count: u64,
     pub cached_ifc_count: u64,
     pub missing_cache_paths: Vec<String>,
     pub valid: bool,
@@ -802,9 +803,11 @@ pub fn validate_gim_cache(
         .map_err(|e| format!("查询 IFC entry 失败: {}", e))?;
 
     let mut cached_ifc_count: u64 = 0;
+    let mut ifc_entry_count: u64 = 0;
     let mut missing_cache_paths: Vec<String> = Vec::new();
     for r in rows {
         let (entry_path, local_cache_path) = r.map_err(|e| format!("读取 IFC entry 失败: {}", e))?;
+        ifc_entry_count += 1;
         match local_cache_path {
             Some(p) if !p.is_empty() => {
                 if std::path::Path::new(&p).exists() {
@@ -821,12 +824,15 @@ pub fn validate_gim_cache(
 
     let valid = has_index
         && ifc_models_count > 0
+        && ifc_entry_count > 0
+        && cached_ifc_count == ifc_entry_count
         && missing_cache_paths.is_empty();
 
     Ok(GimCacheValidation {
         project_id,
         has_index,
         ifc_models_count: ifc_models_count as u64,
+        ifc_entry_count,
         cached_ifc_count,
         missing_cache_paths,
         valid,
