@@ -12,6 +12,8 @@ import { openIfcModal, getModalSelectedEntries, closeIfcModal } from '../ui/ifcS
 import { buildAndRenderCbmTree } from '../ui/cbmTreeView.js';
 import { renderFileDevPanel } from '../ui/fileDevView.js';
 import { loadingEl, emptyTipEl, gimFileInput, btnLoadGim } from '../ui/dom.js';
+import { isTauri } from '../desktop/runtime.js';
+import { openGimFilePath } from '../desktop/fileDialog.js';
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
 function hideLoading() { loadingEl.style.display = 'none'; }
@@ -79,7 +81,16 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
 
 /** 绑定 GIM 文件打开事件 */
 export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMessage: (text: string) => void): void {
-  btnLoadGim.addEventListener('click', () => gimFileInput.click());
+  btnLoadGim.addEventListener('click', async () => {
+    if (isTauri()) {
+      const filePath = await openGimFilePath();
+      if (filePath) {
+        console.log('[Tauri] GIM 文件路径:', filePath);
+      }
+      return;
+    }
+    gimFileInput.click();
+  });
   gimFileInput.addEventListener('change', async () => {
     const files = Array.from(gimFileInput.files || []);
     if (files.length === 0) return;
