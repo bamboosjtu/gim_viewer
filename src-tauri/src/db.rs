@@ -120,19 +120,94 @@ fn query_record(conn: &Connection, id: i64) -> Result<GimProjectRecord, String> 
     conn.query_row(
         "SELECT id, path, name, size, modified_ms, sha256, created_at_ms, updated_at_ms, last_opened_at_ms FROM gim_project WHERE id = ?1",
         params![id],
-        |row| {
-            Ok(GimProjectRecord {
-                id: row.get(0)?,
-                path: row.get(1)?,
-                name: row.get(2)?,
-                size: row.get(3)?,
-                modified_ms: row.get(4)?,
-                sha256: row.get(5)?,
-                created_at_ms: row.get(6)?,
-                updated_at_ms: row.get(7)?,
-                last_opened_at_ms: row.get(8)?,
-            })
-        },
+        row_to_record,
     )
     .map_err(|e| format!("查询项目记录失败: {}", e))
+}
+
+/// 从行解析为 GimProjectRecord
+fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<GimProjectRecord> {
+    Ok(GimProjectRecord {
+        id: row.get(0)?,
+        path: row.get(1)?,
+        name: row.get(2)?,
+        size: row.get(3)?,
+        modified_ms: row.get(4)?,
+        sha256: row.get(5)?,
+        created_at_ms: row.get(6)?,
+        updated_at_ms: row.get(7)?,
+        last_opened_at_ms: row.get(8)?,
+    })
+}
+
+/// Tauri command：查询最近打开的项目（默认 limit = 20）
+#[tauri::command]
+pub fn list_gim_projects(
+    state: tauri::State<'_, DbState>,
+    limit: Option<u32>,
+) -> Result<Vec<GimProjectRecord>, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let limit = limit.unwrap_or(20);
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, path, name, size, modified_ms, sha256, created_at_ms, updated_at_ms, last_opened_at_ms
+             FROM gim_project
+             ORDER BY last_opened_at_ms DESC
+             LIMIT ?1",
+        )
+        .map_err(|e| format!("预处理查询失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![limit], row_to_record)
+        .map_err(|e| format!("查询项目列表失败: {}", e))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("读取项目记录失败: {}", e))?);
+    }
+    Ok(out)
+}
+
+/// Tauri command：按 path 查询项目
+#[tauri::command]
+pub fn get_gim_project_by_path(
+    state: tauri::State<'_, DbState>,
+    path: String,
+) -> Result<Option<GimProjectRecord>, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let res = conn
+        .query_row(
+            "SELECT id, path, name, size, modified_ms, sha256, created_at_ms, updated_at_ms, last_opened_at_ms
+             FROM gim_project
+             WHERE path = ?1",
+            params![path],
+            row_to_record,
+        );
+    match res {
+        Ok(r) => Ok(Some(r)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(format!("按 path 查询失败: {}", e)),
+    }
+}
+
+/// Tauri command：按 sha256 查询项目（返回数组，同一内容可能在不同路径）
+#[tauri::command]
+pub fn get_gim_project_by_sha256(
+    state: tauri::State<'_, DbState>,
+    sha256: String,
+) -> Result<Vec<GimProjectRecord>, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, path, name, size, modified_ms, sha256, created_at_ms, updated_at_ms, last_opened_at_ms
+             FROM gim_project
+             WHERE sha256 = ?1",
+        )
+        .map_err(|e| format!("预处理查询失败: {}", e))?;
+    let rows = stmt
+        .query_map(params![sha256], row_to_record)
+        .map_err(|e| format!("按 sha256 查询失败: {}", e))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| format!("读取项目记录失败: {}", e))?);
+    }
+    Ok(out)
 }

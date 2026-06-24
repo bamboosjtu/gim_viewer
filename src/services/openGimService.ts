@@ -115,9 +115,11 @@ export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMes
         const info = await getFileInfo(filePath);
         console.log('[Tauri] GIM 文件信息:', info);
         showLoading('正在写入本地项目索引...');
-        const { upsertGimProject } = await import('../desktop/database.js');
+        const { upsertGimProject, listGimProjects, getGimProjectsBySha256 } = await import('../desktop/database.js');
         const record = await upsertGimProject(info);
         console.log('[Tauri] GIM 项目记录:', record);
+        console.log('[Tauri] 最近 GIM 项目:', await listGimProjects(10));
+        console.log('[Tauri] 相同 sha256 项目:', await getGimProjectsBySha256(info.sha256));
         showLoading('正在读取 GIM 文件...');
         const ab = await readFileBytes(filePath);
         const fileName = filePath.split(/[\\/]/).pop() || 'project.gim';

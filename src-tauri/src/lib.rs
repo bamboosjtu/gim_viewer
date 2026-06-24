@@ -72,6 +72,9 @@ pub fn run() {
             read_file_bytes,
             get_file_info,
             db::upsert_gim_project,
+            db::list_gim_projects,
+            db::get_gim_project_by_path,
+            db::get_gim_project_by_sha256,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
