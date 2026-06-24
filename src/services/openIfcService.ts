@@ -46,30 +46,36 @@ export function setupOpenIfcService(ctx: ViewerContext, state: AppState, modelCa
 
 /**
  * 打开本地 IFC 文件的动作函数（供 bootstrap 懒加载调用）。
- * - Tauri：走原生对话框 + readFileBytes + loadIfcBuffer
- * - 浏览器：触发 input.click()，通过一次性 change 监听处理选中文件
+ * - 对话框立即打开，不等待 3D 引擎
+ * - 文件选中后才加载 3D 引擎并渲染
  */
 export async function openIfcWithDialog(
-  ctx: ViewerContext,
   state: AppState,
-  modelCallbacks: ModelEventCallbacks,
+  showMessage: (text: string) => void,
 ): Promise<void> {
   if (isTauri()) {
+    // 1. 对话框立即打开（无 3D 依赖）
     const filePaths = await openIfcFilePaths();
     if (!filePaths || filePaths.length === 0) return;
     btnLoadLocal.disabled = true;
     try {
-      await ensureEngineReady(ctx, state, modelCallbacks);
+      // 2. 加载 3D 引擎
+      showLoading('正在加载 3D 引擎...');
+      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+      const runtime = await getViewerRuntime(state, showMessage);
       const { readFileBytes } = await import('../desktop/fileReader.js');
+
+      // 3. 逐个加载 IFC
+      await ensureEngineReady(runtime.ctx, state, runtime.modelCallbacks);
       for (const fp of filePaths) {
         showLoading(`正在加载 ${fp}...`);
         const ab = await readFileBytes(fp);
         const buffer = new Uint8Array(ab);
         const name = (fp.split(/[\\/]/).pop() || 'model.ifc').replace(/\.ifc$/i, '');
-        await loadIfcBuffer(ctx, name, buffer, state, (p) => showLoading(`${name}: ${Math.round(p * 100)}%`));
+        await loadIfcBuffer(runtime.ctx, name, buffer, state, (p) => showLoading(`${name}: ${Math.round(p * 100)}%`));
       }
       emptyTipEl.style.display = 'none';
-      fitCameraToScene(ctx, state);
+      fitCameraToScene(runtime.ctx, state);
     } catch (err) {
       console.error(err);
       showLoading(`IFC 加载失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -81,7 +87,7 @@ export async function openIfcWithDialog(
     return;
   }
 
-  // 浏览器模式：触发 input，一次性 change 监听
+  // 浏览器模式：input.click() 立即触发，change 后加载 3D
   return new Promise<void>((resolve) => {
     const handler = async () => {
       fileInput.removeEventListener('change', handler);
@@ -89,15 +95,18 @@ export async function openIfcWithDialog(
       if (files.length === 0) { resolve(); return; }
       btnLoadLocal.disabled = true;
       try {
-        await ensureEngineReady(ctx, state, modelCallbacks);
+        showLoading('正在加载 3D 引擎...');
+        const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+        const runtime = await getViewerRuntime(state, showMessage);
+        await ensureEngineReady(runtime.ctx, state, runtime.modelCallbacks);
         for (const file of files) {
           showLoading(`正在加载 ${file.name}...`);
           const buffer = new Uint8Array(await file.arrayBuffer());
           const name = file.name.replace(/\.ifc$/i, '');
-          await loadIfcBuffer(ctx, name, buffer, state, (p) => showLoading(`${file.name}: ${Math.round(p * 100)}%`));
+          await loadIfcBuffer(runtime.ctx, name, buffer, state, (p) => showLoading(`${file.name}: ${Math.round(p * 100)}%`));
         }
         emptyTipEl.style.display = 'none';
-        fitCameraToScene(ctx, state);
+        fitCameraToScene(runtime.ctx, state);
       } catch (err) {
         console.error(err);
         showLoading(`IFC 加载失败: ${err instanceof Error ? err.message : String(err)}`);

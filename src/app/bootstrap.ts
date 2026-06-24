@@ -2,6 +2,7 @@ import { AppState } from './state.js';
 import { setupTabs } from '../ui/tabs.js';
 import { setupIfcSelectModal } from '../ui/ifcSelectModal.js';
 import { btnLoadGim, btnLoadLocal, btnClear, loadingEl } from '../ui/dom.js';
+import { isTauri } from '../desktop/runtime.js';
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
 function hideLoading() { loadingEl.style.display = 'none'; }
@@ -21,14 +22,11 @@ async function bootstrapAsync(): Promise<void> {
     },
   });
 
-  // 打开 GIM：首次点击时才加载 3D 引擎
+  // 打开 GIM：对话框立即弹出，3D 延迟到需要时
   btnLoadGim.addEventListener('click', async () => {
-    showLoading('正在加载 3D 引擎...');
     try {
-      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
       const { openGimWithDialog } = await import('../services/openGimService.js');
-      const runtime = await getViewerRuntime(state, (text) => showLoading(text));
-      await openGimWithDialog(runtime.ctx, state, (text) => showLoading(text));
+      await openGimWithDialog(state, (text) => showLoading(text));
     } catch (err) {
       console.error(err);
       showLoading(`加载失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -36,14 +34,11 @@ async function bootstrapAsync(): Promise<void> {
     }
   });
 
-  // 打开 IFC：首次点击时才加载 3D 引擎
+  // 打开 IFC：对话框立即弹出，3D 延迟到需要时
   btnLoadLocal.addEventListener('click', async () => {
-    showLoading('正在加载 3D 引擎...');
     try {
-      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
       const { openIfcWithDialog } = await import('../services/openIfcService.js');
-      const runtime = await getViewerRuntime(state, (text) => showLoading(text));
-      await openIfcWithDialog(runtime.ctx, state, runtime.modelCallbacks);
+      await openIfcWithDialog(state, (text) => showLoading(text));
     } catch (err) {
       console.error(err);
       showLoading(`加载失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -72,8 +67,18 @@ async function bootstrapAsync(): Promise<void> {
     document.getElementById('empty-tip')!.style.display = '';
   });
 
-  // 首屏立即显示，3D 引擎延迟到首次用户操作
+  // 首屏 UI 就绪，隐藏 loading
   hideLoading();
+
+  // Tauri 模式：显示窗口（配置了 visible:false，消除白屏）
+  if (isTauri()) {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().show();
+    } catch (err) {
+      console.warn('[Tauri] 显示窗口失败:', err);
+    }
+  }
 }
 
 /** 应用启动入口（同步包装） */
