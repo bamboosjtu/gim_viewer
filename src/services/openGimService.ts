@@ -49,6 +49,31 @@ export async function onGimExtracted(ctx: ViewerContext, state: AppState, files:
   return ifcEntries;
 }
 
+/**
+ * 获取 IFC 文件内容。
+ * 1. 优先从完整解压流程的 currentFiles 读取
+ * 2. 缓存命中时从 cachedIfcPaths + readCacheFile 读取
+ * 3. 找不到返回 null（调用方跳过）
+ */
+async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<Uint8Array | null> {
+  // 1. 完整解压流程
+  if (state.currentFiles) {
+    const file = state.currentFiles.get(entry.path);
+    if (file) return new Uint8Array(await file.arrayBuffer());
+  }
+
+  // 2. Tauri 缓存命中
+  if (isTauri() && state.cachedIfcPaths.has(entry.path)) {
+    const cachePath = state.cachedIfcPaths.get(entry.path)!;
+    const { readCacheFile } = await import('../desktop/database.js');
+    return await readCacheFile(cachePath);
+  }
+
+  // 3. 找不到
+  console.warn('[Tauri] 找不到 IFC 文件内容或缓存:', entry);
+  return null;
+}
+
 /** 加载选中的 IFC 文件 */
 export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, modelCallbacks: ModelEventCallbacks): Promise<void> {
   const selected = getModalSelectedEntries(state.currentIfcEntries);
@@ -58,10 +83,8 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
   try {
     await ensureEngineReady(ctx, state, modelCallbacks);
     for (const entry of selected) {
-      if (!state.currentFiles) break;
-      const file = state.currentFiles.get(entry.path);
-      if (!file) continue;
-      const buffer = new Uint8Array(await file.arrayBuffer());
+      const buffer = await getIfcBufferForEntry(entry, state);
+      if (!buffer) continue;
       showLoading(`正在加载 ${entry.name}...`);
       await loadIfcBuffer(ctx, entry.name, buffer, state, (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`));
     }
@@ -246,40 +269,54 @@ export async function openGimWithDialog(
       console.log('[Tauri] 相同 sha256 项目:', await getGimProjectsBySha256(info.sha256));
       const stats = await getGimIndexStats(record.id);
       console.log('[Tauri] GIM 索引状态:', stats);
-      if (stats.has_index) {
-        console.log('[Tauri] 已存在 GIM 索引，但本轮仍继续走解压流程');
-      }
+
       showLoading('正在检查本地缓存...');
       const { validateGimCache, getGimIndex } = await import('../desktop/database.js');
       const validation = await validateGimCache(record.id);
       console.log('[Tauri] GIM 缓存校验:', validation);
+
+      // 3. 缓存命中短路：不 readFileBytes、不 extractGimFile、不创建 Viewer
       if (validation.valid) {
         try {
-          const index = await getGimIndex(record.id);
+          showLoading('正在从本地缓存恢复 GIM 索引...');
           const { restoreGimIndexToState } = await import('./gimIndexRestoreService.js');
+          const { openIfcModal } = await import('../ui/ifcSelectModal.js');
+
+          const index = await getGimIndex(record.id);
           restoreGimIndexToState(state, index);
-          console.log('[Tauri] GIM 索引已恢复到 AppState:', {
+
+          console.log('[Tauri] 已从缓存恢复 GIM:', {
+            project_id: record.id,
             ifc_entries: state.currentIfcEntries.length,
             cbm_root: state.currentCbmTree?.path || null,
             cached_ifc_paths: state.cachedIfcPaths.size,
             file_dev_relations: state.fileDevRelations.length,
           });
-          console.log('[Tauri] 第 2 轮仅验证恢复结果，仍继续完整解压流程');
+
+          if (state.currentIfcEntries.length === 0) {
+            throw new Error('缓存索引中没有 IFC 文件');
+          }
+
+          hideLoading();
+          openIfcModal(state.currentIfcEntries);
+          return; // 缓存命中，短路完成
         } catch (err) {
-          console.warn('[Tauri] GIM 索引恢复验证失败，继续完整解压流程:', err);
+          console.warn('[Tauri] 缓存恢复失败，回退完整解压流程:', err);
         }
       } else {
-        console.log('[Tauri] 缓存无效或不完整，第 1 轮继续完整解压流程:', validation);
+        console.log('[Tauri] 缓存无效或不完整，继续完整解压流程:', validation);
       }
 
-      // 3. 3D 引擎与文件读取并行（隐藏 3D 加载时间在文件 I/O 之后）
+      // 4. 回退：完整解压流程（3D 引擎与文件读取并行）
       showLoading('正在读取 GIM 文件...');
-      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+      const [{ getViewerRuntime }] = await Promise.all([
+        import('../viewer/viewerRuntime.js'),
+        Promise.resolve(),
+      ]);
       const runtimePromise = getViewerRuntime(state, showMessage);
       const ab = await readFileBytes(filePath);
       const runtime = await runtimePromise;
 
-      // 4. 解压 + 渲染（需要 ctx）
       const fileName = filePath.split(/[\\/]/).pop() || 'project.gim';
       await openGimFromArrayBuffer(runtime.ctx, state, fileName, ab, showMessage, {
         projectId: record.id,
