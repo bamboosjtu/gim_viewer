@@ -10,13 +10,15 @@ const ENTITY_ICONS: Record<string, string> = {
   F1System: '🏗️', F2System: '🏢', F3System: '⚡', F4System: '🔧', PARTINDEX: '🔩',
 };
 
-/** 渲染 CBM 层级树 */
-export function renderCbmTree(
-  ctx: ViewerContext,
+/**
+ * 纯 UI 渲染层：渲染 CBM 层级树节点，不依赖 ViewerContext。
+ * @param onNodeClick 节点点击回调（由交互层提供）
+ */
+export function renderCbmTreeUI(
   state: AppState,
   node: CbmNode,
   parentEl: HTMLElement,
-  showMessage: (text: string) => void,
+  onNodeClick: (node: CbmNode) => void,
 ): void {
   const nodeEl = document.createElement('div');
   nodeEl.className = 'tree-node';
@@ -43,15 +45,13 @@ export function renderCbmTree(
   row.addEventListener('click', () => {
     document.querySelectorAll('.tree-row.selected').forEach(r => r.classList.remove('selected'));
     row.classList.add('selected');
-    showNodeProperties(ctx, state, node);
-    openPropsDrawer(ctx);
-    highlightIfcFromNode(ctx, state, node, showMessage);
+    onNodeClick(node);
     if (node.children.length > 0) {
       expanded = !expanded;
       toggle.classList.toggle('expanded', expanded);
       childrenEl.classList.toggle('expanded', expanded);
       if (expanded && !childrenRendered) {
-        for (const child of node.children) renderCbmTree(ctx, state, child, childrenEl, showMessage);
+        for (const child of node.children) renderCbmTreeUI(state, child, childrenEl, onNodeClick);
         childrenRendered = true;
       }
     }
@@ -59,9 +59,23 @@ export function renderCbmTree(
   parentEl.appendChild(nodeEl);
 }
 
-/** 构建并渲染 CBM 层级树 */
+/** 构建并渲染 CBM 层级树（交互层，需要 ViewerContext） */
 export function buildAndRenderCbmTree(ctx: ViewerContext, state: AppState, showMessage: (text: string) => void): void {
   cbmTreePanel.innerHTML = '';
   if (!state.currentCbmTree) { cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>'; return; }
-  renderCbmTree(ctx, state, state.currentCbmTree, cbmTreePanel, showMessage);
+  renderCbmTreeUI(state, state.currentCbmTree, cbmTreePanel, (node) => {
+    showNodeProperties(ctx, state, node);
+    openPropsDrawer(ctx);
+    highlightIfcFromNode(ctx, state, node, showMessage);
+  });
+}
+
+/** 构建并渲染 CBM 层级树（纯 UI，不需要 ViewerContext，用于缓存命中） */
+export function buildAndRenderCbmTreeNoViewer(
+  state: AppState,
+  onNodeClick: (node: CbmNode) => void,
+): void {
+  cbmTreePanel.innerHTML = '';
+  if (!state.currentCbmTree) { cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>'; return; }
+  renderCbmTreeUI(state, state.currentCbmTree, cbmTreePanel, onNodeClick);
 }

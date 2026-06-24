@@ -10,11 +10,13 @@ const ENTITY_ICONS: Record<string, string> = {
   F1System: '🏗️', F2System: '🏢', F3System: '⚡', F4System: '🔧', PARTINDEX: '🔩',
 };
 
-/** 渲染文件-设备面板 */
-export function renderFileDevPanel(
-  ctx: ViewerContext,
+/**
+ * 纯 UI 渲染层：渲染文件-设备面板，不依赖 ViewerContext。
+ * @param onNodeClick 设备节点点击回调（由交互层提供）
+ */
+export function renderFileDevPanelUI(
   state: AppState,
-  showMessage: (text: string) => void,
+  onNodeClick: (node: CbmNode) => void,
 ): void {
   fileDevPanel.innerHTML = '';
   if (state.fileDevRelations.length === 0) {
@@ -65,18 +67,15 @@ export function renderFileDevPanel(
             document.querySelectorAll('.tree-row.selected').forEach(r => r.classList.remove('selected'));
             devRow.classList.add('selected');
             if (devNode) {
-              showNodeProperties(ctx, state, devNode);
-              highlightIfcFromNode(ctx, state, devNode, showMessage);
+              onNodeClick(devNode);
             } else {
               const tempNode: CbmNode = {
                 path: `CBM/${devCbm}`, name: devCbm.replace(/\.cbm$/i, ''),
                 entityName: '', children: [], famPath: '', devPath: '',
                 ifcFile: '', ifcGuid: '', classifyName: '', transformMatrix: '',
               };
-              showNodeProperties(ctx, state, tempNode);
-              highlightIfcFromNode(ctx, state, tempNode, showMessage);
+              onNodeClick(tempNode);
             }
-            openPropsDrawer(ctx);
           });
           childrenEl.appendChild(devRow);
         }
@@ -85,4 +84,25 @@ export function renderFileDevPanel(
     });
     fileDevPanel.appendChild(nodeEl);
   }
+}
+
+/** 渲染文件-设备面板（交互层，需要 ViewerContext） */
+export function renderFileDevPanel(
+  ctx: ViewerContext,
+  state: AppState,
+  showMessage: (text: string) => void,
+): void {
+  renderFileDevPanelUI(state, (node) => {
+    showNodeProperties(ctx, state, node);
+    highlightIfcFromNode(ctx, state, node, showMessage);
+    openPropsDrawer(ctx);
+  });
+}
+
+/** 渲染文件-设备面板（纯 UI，不需要 ViewerContext，用于缓存命中） */
+export function renderFileDevPanelNoViewer(
+  state: AppState,
+  onNodeClick: (node: CbmNode) => void,
+): void {
+  renderFileDevPanelUI(state, onNodeClick);
 }

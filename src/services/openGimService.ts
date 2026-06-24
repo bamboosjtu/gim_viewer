@@ -52,7 +52,7 @@ export async function onGimExtracted(ctx: ViewerContext, state: AppState, files:
 /**
  * 获取 IFC 文件内容。
  * 1. 优先从完整解压流程的 currentFiles 读取
- * 2. 缓存命中时从 cachedIfcPaths + readCacheFile 读取
+ * 2. 缓存命中时从 cachedIfcPaths + readCachedIfc 读取
  * 3. 找不到返回 null（调用方跳过）
  */
 async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<Uint8Array | null> {
@@ -70,14 +70,17 @@ async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<U
 
   // 2. Tauri 缓存命中
   if (isTauri() && state.cachedIfcPaths.has(entry.path)) {
-    const cachePath = state.cachedIfcPaths.get(entry.path)!;
-    console.log('[IFC Buffer] 使用本地 IFC 缓存:', {
-      name: entry.name,
-      path: entry.path,
-      cachePath,
-    });
-    const { readCacheFile } = await import('../desktop/database.js');
-    return await readCacheFile(cachePath);
+    const projectId = state.currentProjectId;
+    if (projectId != null) {
+      const cachePath = state.cachedIfcPaths.get(entry.path)!;
+      console.log('[IFC Buffer] 使用本地 IFC 缓存:', {
+        name: entry.name,
+        path: entry.path,
+        cachePath,
+      });
+      const { readCachedIfc } = await import('../desktop/database.js');
+      return await readCachedIfc(projectId, entry.path);
+    }
   }
 
   // 3. 找不到
@@ -227,6 +230,7 @@ export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMes
             const index = await getGimIndex(record.id);
             const { restoreGimIndexToState } = await import('./gimIndexRestoreService.js');
             restoreGimIndexToState(state, index);
+            state.currentProjectId = record.id;
             console.log('[Tauri] GIM 索引已恢复到 AppState:', {
               ifc_entries: state.currentIfcEntries.length,
               cbm_root: state.currentCbmTree?.path || null,
@@ -311,10 +315,10 @@ export async function openGimWithDialog(
         try {
           showLoading('正在从本地缓存恢复 GIM 索引...');
           const { restoreGimIndexToState } = await import('./gimIndexRestoreService.js');
-          const { openIfcModal } = await import('../ui/ifcSelectModal.js');
 
           const index = await getGimIndex(record.id);
           restoreGimIndexToState(state, index);
+          state.currentProjectId = record.id;
 
           console.log('[Tauri] 已从缓存恢复 GIM:', {
             project_id: record.id,
@@ -328,8 +332,19 @@ export async function openGimWithDialog(
             throw new Error('缓存索引中没有 IFC 文件');
           }
 
+          // 立即渲染 CBM 层级树和文件设备面板（无 Viewer）
+          // 点击节点时由 nodeInteractionService 懒加载 Viewer + IFC
+          const { buildAndRenderCbmTreeNoViewer } = await import('../ui/cbmTreeView.js');
+          const { renderFileDevPanelNoViewer } = await import('../ui/fileDevView.js');
+          const { handleNodeClick } = await import('./nodeInteractionService.js');
+          const nodeClickHandler = (node: import('../gim/types.js').CbmNode) => {
+            handleNodeClick(state, node, showMessage);
+          };
+          buildAndRenderCbmTreeNoViewer(state, nodeClickHandler);
+          renderFileDevPanelNoViewer(state, nodeClickHandler);
+          emptyTipEl.style.display = 'none';
+
           hideLoading();
-          openIfcModal(state.currentIfcEntries);
           console.log('[Tauri] 缓存短路生效：未读取原始 GIM，未执行解压');
           return; // 缓存命中，短路完成
         } catch (err) {

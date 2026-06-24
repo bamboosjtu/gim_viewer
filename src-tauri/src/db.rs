@@ -5,6 +5,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
 
+/// 当前解析器版本（变更解析逻辑时递增，用于缓存失效）
+pub const PARSER_VERSION: &str = "gim-parser-v1";
+
 /// GIM 文件元信息（从前端传入，需 Deserialize）
 #[derive(Debug, Deserialize)]
 pub struct FileInfoInput {
@@ -128,6 +131,9 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
     // 兼容旧库：给 gim_entry 增加 local_cache_path 列（已存在则忽略）
     let _ = conn.execute("ALTER TABLE gim_entry ADD COLUMN local_cache_path TEXT", []);
 
+    // 兼容旧库：给 gim_project 增加 parser_version 列（已存在则忽略）
+    let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN parser_version TEXT", []);
+
     Ok(conn)
 }
 
@@ -160,8 +166,8 @@ pub fn upsert_gim_project(
     if let Some(id) = existing {
         // 更新已有记录
         conn.execute(
-            "UPDATE gim_project SET name = ?1, size = ?2, modified_ms = ?3, sha256 = ?4, updated_at_ms = ?5, last_opened_at_ms = ?6 WHERE id = ?7",
-            params![info.name, info.size, info.modified_ms, info.sha256, now, now, id],
+            "UPDATE gim_project SET name = ?1, size = ?2, modified_ms = ?3, sha256 = ?4, parser_version = ?5, updated_at_ms = ?6, last_opened_at_ms = ?7 WHERE id = ?8",
+            params![info.name, info.size, info.modified_ms, info.sha256, PARSER_VERSION, now, now, id],
         )
         .map_err(|e| format!("更新项目记录失败: {}", e))?;
 
@@ -169,8 +175,8 @@ pub fn upsert_gim_project(
     } else {
         // 插入新记录
         conn.execute(
-            "INSERT INTO gim_project (path, name, size, modified_ms, sha256, created_at_ms, updated_at_ms, last_opened_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![info.path, info.name, info.size, info.modified_ms, info.sha256, now, now, now],
+            "INSERT INTO gim_project (path, name, size, modified_ms, sha256, parser_version, created_at_ms, updated_at_ms, last_opened_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![info.path, info.name, info.size, info.modified_ms, info.sha256, PARSER_VERSION, now, now, now],
         )
         .map_err(|e| format!("插入项目记录失败: {}", e))?;
 
@@ -609,9 +615,14 @@ pub fn write_cache_file(
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Tauri command：读取缓存文件
+/// Tauri command：读取缓存的 IFC 文件（路径由 project_id + entry_path 计算，不接受任意路径）
 #[tauri::command]
-pub fn read_cache_file(path: String) -> Result<Vec<u8>, String> {
+pub fn read_cached_ifc(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_path: String,
+) -> Result<Vec<u8>, String> {
+    let path = cache_file_path(&app_handle, project_id, &entry_path)?;
     stdfs::read(&path).map_err(|e| format!("读取缓存文件失败: {}", e))
 }
 
@@ -662,6 +673,7 @@ pub struct GimCacheValidation {
     pub ifc_entry_count: u64,
     pub cached_ifc_count: u64,
     pub missing_cache_paths: Vec<String>,
+    pub parser_version_match: bool,
     pub valid: bool,
 }
 
@@ -788,17 +800,34 @@ pub fn validate_gim_cache(
     let ifc_models_count = count_rows(&conn, "ifc_model", project_id)?;
     let has_index = cbm_nodes_count > 0 || ifc_models_count > 0;
 
-    // 查询 entry_type='IFC' 的记录
+    // 校验 parser_version
+    let stored_parser_version: Option<String> = conn
+        .query_row(
+            "SELECT parser_version FROM gim_project WHERE id = ?1",
+            params![project_id],
+            |row| row.get(0),
+        )
+        .ok();
+    let parser_version_match = stored_parser_version
+        .as_deref()
+        .map(|v| v == PARSER_VERSION)
+        .unwrap_or(false);
+
+    // 查询 entry_type='IFC' 的记录（含 file_size 用于校验缓存文件大小）
     let mut stmt = conn
         .prepare(
-            "SELECT entry_path, local_cache_path
+            "SELECT entry_path, local_cache_path, file_size
              FROM gim_entry
              WHERE project_id = ?1 AND entry_type = 'IFC'",
         )
         .map_err(|e| format!("预处理 IFC entry 失败: {}", e))?;
     let rows = stmt
         .query_map(params![project_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         })
         .map_err(|e| format!("查询 IFC entry 失败: {}", e))?;
 
@@ -806,12 +835,19 @@ pub fn validate_gim_cache(
     let mut ifc_entry_count: u64 = 0;
     let mut missing_cache_paths: Vec<String> = Vec::new();
     for r in rows {
-        let (entry_path, local_cache_path) = r.map_err(|e| format!("读取 IFC entry 失败: {}", e))?;
+        let (entry_path, local_cache_path, expected_size) = r.map_err(|e| format!("读取 IFC entry 失败: {}", e))?;
         ifc_entry_count += 1;
         match local_cache_path {
             Some(p) if !p.is_empty() => {
-                if std::path::Path::new(&p).exists() {
-                    cached_ifc_count += 1;
+                let path = std::path::Path::new(&p);
+                if path.exists() {
+                    // 校验文件大小一致
+                    let actual_size = stdfs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                    if actual_size as i64 == expected_size {
+                        cached_ifc_count += 1;
+                    } else {
+                        missing_cache_paths.push(format!("{} (大小不匹配: 期望 {}, 实际 {})", entry_path, expected_size, actual_size));
+                    }
                 } else {
                     missing_cache_paths.push(entry_path);
                 }
@@ -826,7 +862,8 @@ pub fn validate_gim_cache(
         && ifc_models_count > 0
         && ifc_entry_count > 0
         && cached_ifc_count == ifc_entry_count
-        && missing_cache_paths.is_empty();
+        && missing_cache_paths.is_empty()
+        && parser_version_match;
 
     Ok(GimCacheValidation {
         project_id,
@@ -835,6 +872,7 @@ pub fn validate_gim_cache(
         ifc_entry_count,
         cached_ifc_count,
         missing_cache_paths,
+        parser_version_match,
         valid,
     })
 }
@@ -868,6 +906,7 @@ pub struct ProjectCacheDiagnostic {
     pub ifc_entry_count: u64,
     pub cached_ifc_count: u64,
     pub missing_cache_paths: Vec<String>,
+    pub parser_version_match: bool,
     pub valid: bool,
 
     pub ifc_cache_files: Vec<IfcCacheFileDiagnostic>,
@@ -888,10 +927,10 @@ pub fn get_project_cache_diagnostic(
 ) -> Result<ProjectCacheDiagnostic, String> {
     let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
 
-    // 1. 查询 gim_project 基本信息
+    // 1. 查询 gim_project 基本信息（含 parser_version）
     let project = conn
         .query_row(
-            "SELECT id, path, name, size, modified_ms, sha256 FROM gim_project WHERE id = ?1",
+            "SELECT id, path, name, size, modified_ms, sha256, parser_version FROM gim_project WHERE id = ?1",
             params![project_id],
             |row| {
                 Ok((
@@ -901,10 +940,13 @@ pub fn get_project_cache_diagnostic(
                     row.get::<_, u64>(3)?,
                     row.get::<_, u64>(4)?,
                     row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
                 ))
             },
         )
         .map_err(|e| format!("查询项目失败: {}", e))?;
+
+    let parser_version_match = project.6.as_deref() == Some(PARSER_VERSION);
 
     // 2. 统计四张索引表数量
     let entries_count = count_rows(&conn, "gim_entry", project_id)?;
@@ -966,7 +1008,8 @@ pub fn get_project_cache_diagnostic(
         && ifc_models_count > 0
         && ifc_entry_count > 0
         && cached_ifc_count == ifc_entry_count
-        && missing_cache_paths.is_empty();
+        && missing_cache_paths.is_empty()
+        && parser_version_match;
 
     Ok(ProjectCacheDiagnostic {
         project_id: project.0,
@@ -982,6 +1025,7 @@ pub fn get_project_cache_diagnostic(
         ifc_entry_count,
         cached_ifc_count,
         missing_cache_paths,
+        parser_version_match,
         valid,
         ifc_cache_files,
     })

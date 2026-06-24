@@ -14,11 +14,17 @@ function refreshViewportLayout(ctx: ViewerContext) {
   });
 }
 
-/** 打开属性面板 */
+/** 打开属性面板（需要 Viewer 刷新视口） */
 export function openPropsDrawer(ctx: ViewerContext): void {
   propsDrawer.classList.remove('collapsed');
   btnToggleProps.style.right = '332px';
   refreshViewportLayout(ctx);
+}
+
+/** 打开属性面板（纯 UI，不刷新视口，用于无 Viewer 场景） */
+export function openPropsDrawerUI(): void {
+  propsDrawer.classList.remove('collapsed');
+  btnToggleProps.style.right = '332px';
 }
 
 /** 关闭属性面板 */
@@ -110,7 +116,55 @@ function renderIfcItemData(data: Record<string, unknown>, depth = 0): string {
   return html;
 }
 
-/** 显示 CbmNode 属性 */
+/** 显示 CbmNode 属性（基础版，不需要 Viewer，不含 IFC 原生属性） */
+export async function showNodePropertiesBasic(state: AppState, node: CbmNode): Promise<void> {
+  let html = `<div class="props-header">${escHtml(getNodeDisplayName(node, state.ifcGuidToName))}</div>`;
+  html += '<div class="props-section"><div class="props-section-title">基本信息</div><table class="props-table">';
+  const bp: [string, string][] = [
+    ['实体类型', node.entityName],
+    ['分类名称', node.classifyName],
+    ['CBM 文件', node.path.split('/').pop() || ''],
+  ];
+  if (node.ifcFile) bp.push(['IFC 文件', node.ifcFile]);
+  if (node.ifcGuid) bp.push(['IFC GUID', node.ifcGuid]);
+  const cbmFileName = node.path.split('/').pop() || '';
+  const ifcModelId = state.deviceToIfcFile.get(cbmFileName);
+  if (ifcModelId && !node.ifcFile) bp.push(['所属 IFC 文件', `${ifcModelId}.ifc`]);
+  if (node.children.length > 0) bp.push(['子节点数', String(node.children.length)]);
+  for (const [k, v] of bp) { if (v) html += `<tr><td class="prop-key">${k}</td><td class="prop-val">${escHtml(v)}</td></tr>`; }
+  html += '</table></div>';
+
+  if (node.famPath && state.currentFiles) {
+    const f = state.currentFiles.get(`CBM/${node.famPath}`);
+    if (f) html += renderFamSections(parseFamSections(await f.text()));
+  }
+
+  if (node.devPath && state.currentFiles) {
+    const f = state.currentFiles.get(`DEV/${node.devPath}`);
+    if (f) {
+      const kv = parseKeyValue(await f.text());
+      html += '<div class="props-section"><div class="props-section-title">设备信息</div><table class="props-table">';
+      if (kv['SYMBOLNAME']) html += `<tr><td class="prop-key">设备名称</td><td class="prop-val">${escHtml(kv['SYMBOLNAME'])}</td></tr>`;
+      if (kv['TYPE']) html += `<tr><td class="prop-key">设备类型</td><td class="prop-val">${escHtml(kv['TYPE'])}</td></tr>`;
+      html += '</table></div>';
+      const famRef = kv['BASEFAMILY'];
+      if (famRef) {
+        const famFile = state.currentFiles.get(`DEV/${famRef}`);
+        if (famFile) html += renderFamSections(parseFamSections(await famFile.text()));
+      }
+    }
+  }
+
+  if (node.transformMatrix && node.transformMatrix !== '1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1') {
+    html += '<div class="props-section"><div class="props-section-title">变换矩阵</div><table class="props-table">';
+    html += `<tr><td class="prop-val" colspan="2" style="font-family:monospace;font-size:11px;color:#888;word-break:break-all">${escHtml(node.transformMatrix)}</td></tr>`;
+    html += '</table></div>';
+  }
+
+  propsDrawerBody.innerHTML = html;
+}
+
+/** 显示 CbmNode 属性（完整版，包含 IFC 原生属性，需要 Viewer） */
 export async function showNodeProperties(ctx: ViewerContext, state: AppState, node: CbmNode): Promise<void> {
   let html = `<div class="props-header">${escHtml(getNodeDisplayName(node, state.ifcGuidToName))}</div>`;
   html += '<div class="props-section"><div class="props-section-title">基本信息</div><table class="props-table">';

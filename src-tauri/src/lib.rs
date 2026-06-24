@@ -80,7 +80,7 @@ pub fn run() {
             db::list_ifc_models,
             db::list_cbm_nodes,
             db::write_cache_file,
-            db::read_cache_file,
+            db::read_cached_ifc,
             db::get_gim_index,
             db::validate_gim_cache,
             db::get_db_path,

@@ -180,11 +180,11 @@ export async function writeCacheFile(projectId: number, entryPath: string, bytes
 }
 
 /**
- * 在 Tauri 环境下从 local_cache_path 读取缓存文件。
+ * 在 Tauri 环境下从缓存读取 IFC 文件（路径由 projectId + entryPath 计算，不接受任意路径）。
  */
-export async function readCacheFile(path: string): Promise<Uint8Array> {
+export async function readCachedIfc(projectId: number, entryPath: string): Promise<Uint8Array> {
   const { invoke } = await import('@tauri-apps/api/core');
-  const bytes = await invoke<number[]>('read_cache_file', { path });
+  const bytes = await invoke<number[]>('read_cached_ifc', { projectId, entryPath });
   return new Uint8Array(bytes);
 }
 
@@ -227,6 +227,7 @@ export interface GimCacheValidation {
   ifc_entry_count: number;
   cached_ifc_count: number;
   missing_cache_paths: string[];
+  parser_version_match: boolean;
   valid: boolean;
 }
 
@@ -271,6 +272,7 @@ export interface ProjectCacheDiagnostic {
   ifc_entry_count: number;
   cached_ifc_count: number;
   missing_cache_paths: string[];
+  parser_version_match: boolean;
   valid: boolean;
 
   ifc_cache_files: IfcCacheFileDiagnostic[];
