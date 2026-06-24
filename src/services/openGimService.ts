@@ -79,14 +79,47 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
   hideLoading();
 }
 
+/** 从 ArrayBuffer 加载 GIM 文件的完整流程（浏览器和 Tauri 共用） */
+async function openGimFromArrayBuffer(
+  ctx: ViewerContext,
+  state: AppState,
+  _fileName: string,
+  ab: ArrayBuffer,
+  showMessage: (text: string) => void,
+): Promise<void> {
+  showLoading('正在加载 GIM 解压模块...');
+  const { extractGimFile } = await import('../gim/gimExtractor.js');
+  showLoading('正在解压 GIM 文件...');
+  const extracted = await extractGimFile(ab);
+  showLoading('正在解析 GIM 层级结构...');
+  const entries = await onGimExtracted(ctx, state, extracted, showMessage);
+  if (entries.length === 0) {
+    showLoading('未在 GIM 文件中找到 IFC 文件');
+    setTimeout(hideLoading, 2000);
+    return;
+  }
+  hideLoading();
+  openIfcModal(entries);
+}
+
 /** 绑定 GIM 文件打开事件 */
 export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMessage: (text: string) => void): void {
   btnLoadGim.addEventListener('click', async () => {
     if (isTauri()) {
       const filePath = await openGimFilePath();
-      if (filePath) {
-        console.log('[Tauri] GIM 文件路径:', filePath);
-      }
+      if (!filePath) return;
+      btnLoadGim.disabled = true;
+      try {
+        showLoading('正在读取 GIM 文件...');
+        const { readFileBytes } = await import('../desktop/fileReader.js');
+        const ab = await readFileBytes(filePath);
+        const fileName = filePath.split(/[\\/]/).pop() || 'project.gim';
+        await openGimFromArrayBuffer(ctx, state, fileName, ab, showMessage);
+      } catch (err) {
+        console.error(err);
+        showLoading(`GIM 解析失败: ${err instanceof Error ? err.message : String(err)}`);
+        setTimeout(hideLoading, 3000);
+      } finally { btnLoadGim.disabled = false; }
       return;
     }
     gimFileInput.click();
@@ -96,15 +129,8 @@ export function setupOpenGimService(ctx: ViewerContext, state: AppState, showMes
     if (files.length === 0) return;
     btnLoadGim.disabled = true;
     try {
-      showLoading('正在加载 GIM 解压模块...');
-      const { extractGimFile } = await import('../gim/gimExtractor.js');
-      showLoading('正在解压 GIM 文件...');
       const ab = await files[0].arrayBuffer();
-      const extracted = await extractGimFile(ab);
-      const entries = await onGimExtracted(ctx, state, extracted, showMessage);
-      if (entries.length === 0) { showLoading('未在 GIM 文件中找到 IFC 文件'); setTimeout(hideLoading, 2000); return; }
-      hideLoading();
-      openIfcModal(entries);
+      await openGimFromArrayBuffer(ctx, state, files[0].name, ab, showMessage);
     } catch (err) {
       console.error(err);
       showLoading(`GIM 解析失败: ${err instanceof Error ? err.message : String(err)}`);

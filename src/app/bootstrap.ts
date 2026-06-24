@@ -1,6 +1,5 @@
 import { AppState } from './state.js';
 import { createViewerEngine } from '../viewer/viewerEngine.js';
-import { ensureEngineReady } from '../viewer/ifcLoader.js';
 import { setupSelection } from '../viewer/selection.js';
 import { setupTabs } from '../ui/tabs.js';
 import { setupPropsDrawer, showIfcElementProperties } from '../ui/propsDrawer.js';
@@ -55,14 +54,7 @@ async function bootstrapAsync(): Promise<void> {
     await resetHighlight(ctx, state);
   });
 
-  // 2. 异步初始化 FragmentsManager + 注册模型事件
-  //    放在 UI 绑定之后，避免 WASM/Worker 加载阻塞 UI 交互
-  try {
-    await ensureEngineReady(ctx, state, modelCallbacks);
-  } catch (err) {
-    console.error('引擎初始化失败，将在首次加载 IFC 时重试:', err);
-  }
-
+  // 引擎初始化延迟到首次加载 IFC 时执行（ensureEngineReady）
   hideLoading();
 }
 
