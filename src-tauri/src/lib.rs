@@ -1,8 +1,11 @@
+mod db;
+
 use std::fs;
 use std::io::{BufReader, Read};
 use std::path::Path;
 use serde::Serialize;
 use sha2::{Sha256, Digest};
+use tauri::Manager;
 
 #[derive(Serialize)]
 struct FileInfo {
@@ -58,7 +61,18 @@ fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![read_file_bytes, get_file_info])
+        .setup(|app| {
+            let conn = db::init_db(app.handle()).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, e)
+            })?;
+            app.manage(db::DbState(std::sync::Mutex::new(conn)));
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            read_file_bytes,
+            get_file_info,
+            db::upsert_gim_project,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
