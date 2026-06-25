@@ -208,6 +208,8 @@ export interface GimCacheValidation {
   ifc_entry_count: number;
   cached_ifc_count: number;
   missing_cache_paths: string[];
+  stored_parser_version: string | null;
+  current_parser_version: string;
   parser_version_match: boolean;
   valid: boolean;
 }
@@ -249,10 +251,14 @@ export interface ProjectCacheDiagnostic {
   cbm_nodes_count: number;
   ifc_models_count: number;
   file_dev_entries_count: number;
+  fam_properties_count: number;
+  dev_properties_count: number;
 
   ifc_entry_count: number;
   cached_ifc_count: number;
   missing_cache_paths: string[];
+  stored_parser_version: string | null;
+  current_parser_version: string;
   parser_version_match: boolean;
   valid: boolean;
 

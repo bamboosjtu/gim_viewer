@@ -29,7 +29,7 @@ function createNodeClickHandler(state: AppState, showMessage: (text: string) => 
 }
 
 /** GIM 文件解压后的处理流程 */
-export async function onGimExtracted(_ctx: ViewerContext, state: AppState, files: Map<string, File>, showMessage: (text: string) => void): Promise<IfcEntry[]> {
+export async function onGimExtracted(state: AppState, files: Map<string, File>, showMessage: (text: string) => void): Promise<IfcEntry[]> {
   state.currentFiles = files;
 
   // 发现 IFC 文件
@@ -129,9 +129,8 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
   hideLoading();
 }
 
-/** 从 ArrayBuffer 加载 GIM 文件的完整流程（浏览器和 Tauri 共用） */
+/** 从 ArrayBuffer 加载 GIM 文件的完整流程（浏览器和 Tauri 共用，不创建 Viewer） */
 async function openGimFromArrayBuffer(
-  ctx: ViewerContext,
   state: AppState,
   _fileName: string,
   ab: ArrayBuffer,
@@ -143,7 +142,7 @@ async function openGimFromArrayBuffer(
   showLoading('正在解压 GIM 文件...');
   const extracted = await extractGimFile(ab);
   showLoading('正在解析 GIM 层级结构...');
-  const entries = await onGimExtracted(ctx, state, extracted, showMessage);
+  const entries = await onGimExtracted(state, extracted, showMessage);
 
   // Tauri 模式：写入 GIM 索引到 SQLite
   if (options?.persistIndex && options.projectId != null && isTauri()) {
@@ -217,7 +216,8 @@ async function openGimFromArrayBuffer(
  * 打开 GIM 文件的动作函数（供 bootstrap 懒加载调用）。
  * - 对话框立即打开，不等待 3D 引擎
  * - FileInfo / 缓存校验不需要 3D
- * - 3D 引擎与文件读取并行加载，仅在 openGimFromArrayBuffer 前 await
+ * - 完整解压路径也不创建 Viewer，只做读取+解压+索引+渲染树
+ * - Viewer 仅在节点点击 / IFC 弹窗加载 / 本地 IFC 打开时按需创建
  */
 export async function openGimWithDialog(
   state: AppState,
@@ -285,19 +285,13 @@ export async function openGimWithDialog(
         console.log('[Tauri] 缓存无效或不完整，继续完整解压流程:', validation);
       }
 
-      // 4. 回退：完整解压流程（3D 引擎与文件读取并行）
+      // 4. 回退：完整解压流程（不创建 Viewer，只读取+解压+索引+渲染树）
       console.log('[Tauri] 缓存短路未生效：进入完整解压流程');
       showLoading('正在读取 GIM 文件...');
-      const [{ getViewerRuntime }] = await Promise.all([
-        import('../viewer/viewerRuntime.js'),
-        Promise.resolve(),
-      ]);
-      const runtimePromise = getViewerRuntime(state, showMessage);
       const ab = await readFileBytes(filePath);
-      const runtime = await runtimePromise;
 
       const fileName = filePath.split(/[\\/]/).pop() || 'project.gim';
-      await openGimFromArrayBuffer(runtime.ctx, state, fileName, ab, showMessage, {
+      await openGimFromArrayBuffer(state, fileName, ab, showMessage, {
         projectId: record.id,
         persistIndex: true,
       });
@@ -309,7 +303,7 @@ export async function openGimWithDialog(
     return;
   }
 
-  // 浏览器模式：input.click() 立即触发，change 后并行加载 3D
+  // 浏览器模式：input.click() 立即触发，change 后读取+解压（不创建 Viewer）
   return new Promise<void>((resolve) => {
     const handler = async () => {
       gimFileInput.removeEventListener('change', handler);
@@ -317,12 +311,8 @@ export async function openGimWithDialog(
       if (files.length === 0) { resolve(); return; }
       btnLoadGim.disabled = true;
       try {
-        // 3D 引擎与 arrayBuffer 并行
-        const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-        const runtimePromise = getViewerRuntime(state, showMessage);
         const ab = await files[0].arrayBuffer();
-        const runtime = await runtimePromise;
-        await openGimFromArrayBuffer(runtime.ctx, state, files[0].name, ab, showMessage);
+        await openGimFromArrayBuffer(state, files[0].name, ab, showMessage);
       } catch (err) {
         console.error(err);
         showLoading(`GIM 解析失败: ${err instanceof Error ? err.message : String(err)}`);

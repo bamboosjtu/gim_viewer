@@ -189,19 +189,19 @@ pub fn upsert_gim_project(
         .ok();
 
     if let Some(id) = existing {
-        // 更新已有记录
+        // 更新已有记录（不更新 parser_version —— 它只表示已持久化索引的版本，由 save_gim_index 维护）
         conn.execute(
-            "UPDATE gim_project SET name = ?1, size = ?2, modified_ms = ?3, sha256 = ?4, parser_version = ?5, updated_at_ms = ?6, last_opened_at_ms = ?7 WHERE id = ?8",
-            params![info.name, info.size, info.modified_ms, info.sha256, PARSER_VERSION, now, now, id],
+            "UPDATE gim_project SET name = ?1, size = ?2, modified_ms = ?3, sha256 = ?4, updated_at_ms = ?5, last_opened_at_ms = ?6 WHERE id = ?7",
+            params![info.name, info.size, info.modified_ms, info.sha256, now, now, id],
         )
         .map_err(|e| format!("更新项目记录失败: {}", e))?;
 
         query_record(&conn, id)
     } else {
-        // 插入新记录
+        // 插入新记录（parser_version = NULL，表示尚无索引）
         conn.execute(
-            "INSERT INTO gim_project (path, name, size, modified_ms, sha256, parser_version, created_at_ms, updated_at_ms, last_opened_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![info.path, info.name, info.size, info.modified_ms, info.sha256, PARSER_VERSION, now, now, now],
+            "INSERT INTO gim_project (path, name, size, modified_ms, sha256, parser_version, created_at_ms, updated_at_ms, last_opened_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8)",
+            params![info.path, info.name, info.size, info.modified_ms, info.sha256, now, now, now],
         )
         .map_err(|e| format!("插入项目记录失败: {}", e))?;
 
@@ -404,6 +404,14 @@ pub fn save_gim_index(
         )
         .map_err(|e| format!("插入 dev_property 失败: {}", e))?;
     }
+
+    // 索引完整写入后，更新 gim_project.parser_version 为当前版本
+    // 只有事务成功提交后，缓存版本才会升级
+    tx.execute(
+        "UPDATE gim_project SET parser_version = ?1, updated_at_ms = ?2 WHERE id = ?3",
+        params![PARSER_VERSION, now, pid],
+    )
+    .map_err(|e| format!("更新 parser_version 失败: {}", e))?;
 
     tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
@@ -609,6 +617,8 @@ pub struct GimCacheValidation {
     pub ifc_entry_count: u64,
     pub cached_ifc_count: u64,
     pub missing_cache_paths: Vec<String>,
+    pub stored_parser_version: Option<String>,
+    pub current_parser_version: String,
     pub parser_version_match: bool,
     pub valid: bool,
 }
@@ -868,6 +878,8 @@ pub fn validate_gim_cache(
         ifc_entry_count,
         cached_ifc_count,
         missing_cache_paths,
+        stored_parser_version,
+        current_parser_version: PARSER_VERSION.to_string(),
         parser_version_match,
         valid,
     })
@@ -898,10 +910,14 @@ pub struct ProjectCacheDiagnostic {
     pub cbm_nodes_count: u64,
     pub ifc_models_count: u64,
     pub file_dev_entries_count: u64,
+    pub fam_properties_count: u64,
+    pub dev_properties_count: u64,
 
     pub ifc_entry_count: u64,
     pub cached_ifc_count: u64,
     pub missing_cache_paths: Vec<String>,
+    pub stored_parser_version: Option<String>,
+    pub current_parser_version: String,
     pub parser_version_match: bool,
     pub valid: bool,
 
@@ -943,11 +959,13 @@ pub fn get_project_cache_diagnostic(
 
     let parser_version_match = project.6.as_deref() == Some(PARSER_VERSION);
 
-    // 2. 统计四张索引表数量
+    // 2. 统计索引表数量
     let entries_count = count_rows(&conn, "gim_entry", project_id)?;
     let cbm_nodes_count = count_rows(&conn, "cbm_node", project_id)?;
     let ifc_models_count = count_rows(&conn, "ifc_model", project_id)?;
     let file_dev_entries_count = count_rows(&conn, "file_dev_entry", project_id)?;
+    let fam_properties_count = count_rows(&conn, "fam_property", project_id)?;
+    let dev_properties_count = count_rows(&conn, "dev_property", project_id)?;
     let has_index = cbm_nodes_count > 0 || ifc_models_count > 0;
 
     // 3. 查询 IFC entry 并诊断每个缓存文件
@@ -1017,9 +1035,13 @@ pub fn get_project_cache_diagnostic(
         cbm_nodes_count: cbm_nodes_count as u64,
         ifc_models_count: ifc_models_count as u64,
         file_dev_entries_count: file_dev_entries_count as u64,
+        fam_properties_count: fam_properties_count as u64,
+        dev_properties_count: dev_properties_count as u64,
         ifc_entry_count,
         cached_ifc_count,
         missing_cache_paths,
+        stored_parser_version: project.6.clone(),
+        current_parser_version: PARSER_VERSION.to_string(),
         parser_version_match,
         valid,
         ifc_cache_files,
