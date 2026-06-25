@@ -7,7 +7,8 @@ use tauri::Manager;
 
 /// 当前解析器版本（变更解析逻辑时递增，用于缓存失效）
 /// v2: 增加 fam_property / dev_property 表，缓存 CBM/FAM/DEV 基础属性
-pub const PARSER_VERSION: &str = "gim-parser-v2";
+/// v3: validate cache requires cbm_node index; rebuild incomplete v2 cache
+pub const PARSER_VERSION: &str = "gim-parser-v3";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
@@ -897,6 +898,8 @@ pub struct GimCacheValidation {
     pub ifc_models_count: u64,
     pub ifc_entry_count: u64,
     pub cached_ifc_count: u64,
+    pub cbm_nodes_count: u64,
+    pub file_dev_entries_count: u64,
     pub missing_cache_paths: Vec<String>,
     pub stored_parser_version: Option<String>,
     pub current_parser_version: String,
@@ -1085,6 +1088,7 @@ pub fn validate_gim_cache(
 
     let cbm_nodes_count = count_rows(&conn, "cbm_node", project_id)?;
     let ifc_models_count = count_rows(&conn, "ifc_model", project_id)?;
+    let file_dev_entries_count = count_rows(&conn, "file_dev_entry", project_id)?;
     let has_index = cbm_nodes_count > 0 || ifc_models_count > 0;
 
     // 校验 parser_version
@@ -1148,6 +1152,7 @@ pub fn validate_gim_cache(
     let valid = has_index
         && ifc_models_count > 0
         && ifc_entry_count > 0
+        && cbm_nodes_count > 0
         && cached_ifc_count == ifc_entry_count
         && missing_cache_paths.is_empty()
         && parser_version_match;
@@ -1158,6 +1163,8 @@ pub fn validate_gim_cache(
         ifc_models_count: ifc_models_count as u64,
         ifc_entry_count,
         cached_ifc_count,
+        cbm_nodes_count: cbm_nodes_count as u64,
+        file_dev_entries_count: file_dev_entries_count as u64,
         missing_cache_paths,
         stored_parser_version,
         current_parser_version: PARSER_VERSION.to_string(),

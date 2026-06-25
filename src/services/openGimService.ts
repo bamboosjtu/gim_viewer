@@ -276,6 +276,25 @@ export async function openGimWithDialog(
           restoreGimIndexToState(state, index);
           state.currentProjectId = record.id;
 
+          console.log('[Restore Debug]', {
+            indexCounts: {
+              entries: index.entries.length,
+              cbmNodes: index.cbm_nodes.length,
+              ifcModels: index.ifc_models.length,
+              fileDevEntries: index.file_dev_entries.length,
+              famProperties: index.fam_properties.length,
+              devProperties: index.dev_properties.length,
+            },
+            stateCounts: {
+              currentIfcEntries: state.currentIfcEntries.length,
+              currentCbmTree: state.currentCbmTree?.path || null,
+              cachedIfcPaths: state.cachedIfcPaths.size,
+              fileDevRelations: state.fileDevRelations.length,
+              cbmNodeIndex: state.cbmNodeIndex.size,
+              deviceToIfcFile: state.deviceToIfcFile.size,
+            },
+          });
+
           console.log('[Tauri] 已从缓存恢复 GIM:', {
             project_id: record.id,
             ifc_entries: state.currentIfcEntries.length,
@@ -284,8 +303,16 @@ export async function openGimWithDialog(
             file_dev_relations: state.fileDevRelations.length,
           });
 
+          if (!state.currentCbmTree) {
+            throw new Error('缓存索引中没有 CBM 层级树');
+          }
+
           if (state.currentIfcEntries.length === 0) {
             throw new Error('缓存索引中没有 IFC 文件');
+          }
+
+          if (state.fileDevRelations.length === 0) {
+            console.warn('[Tauri] 缓存索引中没有文件设备关系');
           }
 
           // 立即渲染 CBM 层级树和文件设备面板（无 Viewer）

@@ -207,6 +207,8 @@ export interface GimCacheValidation {
   ifc_models_count: number;
   ifc_entry_count: number;
   cached_ifc_count: number;
+  cbm_nodes_count: number;
+  file_dev_entries_count: number;
   missing_cache_paths: string[];
   stored_parser_version: string | null;
   current_parser_version: string;
