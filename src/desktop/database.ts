@@ -289,6 +289,13 @@ export interface ProjectCacheDiagnostic {
   missing_fragment_cache_paths: string[];
   current_fragments_cache_version: string;
   fragment_cache_files: FragmentCacheFileDiagnostic[];
+
+  // v4: 线路工程图缓存诊断
+  project_type: string | null;
+  line_cbm_node_count: number;
+  line_cbm_child_count: number;
+  line_cbm_ref_count: number;
+  line_file_stat_count: number;
 }
 
 /** 返回当前 SQLite 文件路径 */

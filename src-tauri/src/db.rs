@@ -245,6 +245,13 @@ fn now_ms() -> u64 {
 }
 
 /// Tauri command：upsert GIM 项目记录
+///
+/// 缓存失效策略（同一路径 GIM 文件变化检测）：
+/// - 更新前读取旧 size / modified_ms / sha256
+/// - 若三者任一变化：更新元信息并 SET parser_version = NULL, project_type = NULL，
+///   使 validate_gim_cache 返回 invalid，触发完整重建。
+///   不删除旧索引表数据；save_gim_index / save_line_gim_graph 会覆盖旧索引。
+/// - 若三者完全一致：仅更新访问时间，不碰 parser_version / project_type。
 #[tauri::command]
 pub fn upsert_gim_project(
     state: tauri::State<'_, DbState>,
@@ -253,22 +260,41 @@ pub fn upsert_gim_project(
     let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
     let now = now_ms();
 
-    // 检查是否已存在
-    let existing: Option<i64> = conn
+    // 检查是否已存在，同时读取旧元信息判断源 GIM 文件是否变化
+    let existing: Option<(i64, u64, u64, String)> = conn
         .query_row(
-            "SELECT id FROM gim_project WHERE path = ?1",
+            "SELECT id, size, modified_ms, sha256 FROM gim_project WHERE path = ?1",
             params![info.path],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .ok();
 
-    if let Some(id) = existing {
-        // 更新已有记录（不更新 parser_version —— 它只表示已持久化索引的版本，由 save_gim_index 维护）
-        conn.execute(
-            "UPDATE gim_project SET name = ?1, size = ?2, modified_ms = ?3, sha256 = ?4, updated_at_ms = ?5, last_opened_at_ms = ?6 WHERE id = ?7",
-            params![info.name, info.size, info.modified_ms, info.sha256, now, now, id],
-        )
-        .map_err(|e| format!("更新项目记录失败: {}", e))?;
+    if let Some((id, old_size, old_modified_ms, old_sha256)) = existing {
+        // 源 GIM 文件是否变化：size / modified_ms / sha256 任一不同即视为变化
+        let file_changed = old_size != info.size
+            || old_modified_ms != info.modified_ms
+            || old_sha256 != info.sha256;
+
+        if file_changed {
+            // 源 GIM 文件变化：更新元信息，同时清空 parser_version / project_type，
+            // 使 validate_gim_cache 返回 invalid，触发完整重建（不删除旧索引表数据）
+            conn.execute(
+                "UPDATE gim_project SET name = ?1, size = ?2, modified_ms = ?3, sha256 = ?4, parser_version = NULL, project_type = NULL, updated_at_ms = ?5, last_opened_at_ms = ?6 WHERE id = ?7",
+                params![info.name, info.size, info.modified_ms, info.sha256, now, now, id],
+            )
+            .map_err(|e| format!("更新项目记录失败: {}", e))?;
+            println!(
+                "[GIM] 源 GIM 文件变化，旧索引失效（path={}, old_size={}, new_size={}, old_sha256={}...）",
+                info.path, old_size, info.size, &old_sha256[..old_sha256.len().min(12)]
+            );
+        } else {
+            // 源文件未变化：仅更新元信息和访问时间，不碰 parser_version / project_type
+            conn.execute(
+                "UPDATE gim_project SET name = ?1, size = ?2, modified_ms = ?3, sha256 = ?4, updated_at_ms = ?5, last_opened_at_ms = ?6 WHERE id = ?7",
+                params![info.name, info.size, info.modified_ms, info.sha256, now, now, id],
+            )
+            .map_err(|e| format!("更新项目记录失败: {}", e))?;
+        }
 
         query_record(&conn, id)
     } else {
@@ -1563,6 +1589,13 @@ pub struct ProjectCacheDiagnostic {
     pub missing_fragment_cache_paths: Vec<String>,
     pub current_fragments_cache_version: String,
     pub fragment_cache_files: Vec<FragmentCacheFileDiagnostic>,
+
+    // v4: 线路工程图缓存诊断
+    pub project_type: Option<String>,
+    pub line_cbm_node_count: u64,
+    pub line_cbm_child_count: u64,
+    pub line_cbm_ref_count: u64,
+    pub line_file_stat_count: u64,
 }
 
 /// 返回当前 SQLite 文件路径
@@ -1580,10 +1613,10 @@ pub fn get_project_cache_diagnostic(
 ) -> Result<ProjectCacheDiagnostic, String> {
     let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
 
-    // 1. 查询 gim_project 基本信息（含 parser_version）
+    // 1. 查询 gim_project 基本信息（含 parser_version、project_type）
     let project = conn
         .query_row(
-            "SELECT id, path, name, size, modified_ms, sha256, parser_version FROM gim_project WHERE id = ?1",
+            "SELECT id, path, name, size, modified_ms, sha256, parser_version, project_type FROM gim_project WHERE id = ?1",
             params![project_id],
             |row| {
                 Ok((
@@ -1594,12 +1627,14 @@ pub fn get_project_cache_diagnostic(
                     row.get::<_, u64>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             },
         )
         .map_err(|e| format!("查询项目失败: {}", e))?;
 
     let parser_version_match = project.6.as_deref() == Some(PARSER_VERSION);
+    let project_type = project.7.clone();
 
     // 2. 统计索引表数量
     let entries_count = count_rows(&conn, "gim_entry", project_id)?;
@@ -1608,7 +1643,12 @@ pub fn get_project_cache_diagnostic(
     let file_dev_entries_count = count_rows(&conn, "file_dev_entry", project_id)?;
     let fam_properties_count = count_rows(&conn, "fam_property", project_id)?;
     let dev_properties_count = count_rows(&conn, "dev_property", project_id)?;
-    let has_index = cbm_nodes_count > 0 || ifc_models_count > 0;
+    // v4: 线路工程图缓存表统计
+    let line_cbm_node_count = count_rows(&conn, "line_cbm_node", project_id)?;
+    let line_cbm_child_count = count_rows(&conn, "line_cbm_child", project_id)?;
+    let line_cbm_ref_count = count_rows(&conn, "line_cbm_ref", project_id)?;
+    let line_file_stat_count = count_rows(&conn, "line_file_stat", project_id)?;
+    let has_index = cbm_nodes_count > 0 || ifc_models_count > 0 || line_cbm_node_count > 0;
 
     // 3. 查询 IFC entry 并诊断每个缓存文件
     let mut stmt = conn
@@ -1720,12 +1760,20 @@ pub fn get_project_cache_diagnostic(
         });
     }
 
-    let valid = has_index
-        && ifc_models_count > 0
-        && ifc_entry_count > 0
-        && cached_ifc_count == ifc_entry_count
-        && missing_cache_paths.is_empty()
-        && parser_version_match;
+    // v4: 根据 project_type 分支 valid 判断
+    // - transmission_line：只需 parser_version 匹配 + line_cbm_node_count > 0
+    // - substation（或 null/unknown）：保持原有 IFC 缓存校验逻辑
+    let is_line = project_type.as_deref() == Some("transmission_line");
+    let valid = if is_line {
+        parser_version_match && line_cbm_node_count > 0
+    } else {
+        has_index
+            && ifc_models_count > 0
+            && ifc_entry_count > 0
+            && cached_ifc_count == ifc_entry_count
+            && missing_cache_paths.is_empty()
+            && parser_version_match
+    };
 
     Ok(ProjectCacheDiagnostic {
         project_id: project.0,
@@ -1753,6 +1801,12 @@ pub fn get_project_cache_diagnostic(
         missing_fragment_cache_paths,
         current_fragments_cache_version: FRAGMENTS_CACHE_VERSION.to_string(),
         fragment_cache_files,
+        // v4: 线路工程图缓存诊断
+        project_type,
+        line_cbm_node_count: line_cbm_node_count as u64,
+        line_cbm_child_count: line_cbm_child_count as u64,
+        line_cbm_ref_count: line_cbm_ref_count as u64,
+        line_file_stat_count: line_file_stat_count as u64,
     })
 }
 

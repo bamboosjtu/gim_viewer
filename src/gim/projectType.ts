@@ -54,7 +54,7 @@ const EXACT_KEY_SIGNALS: readonly string[] = [
 ];
 
 /**
- * 实体值型信号：检查 ENTITYNAME / GROUPTYPE 的值是否等于信号。
+ * 实体值型信号：检查 ENTITYNAME / GROUPTYPE / DEVICETYPE 的值是否等于信号。
  * 避免裸子串匹配（WIREWEIGHT 包含 WIRE、CROSSSECTION 包含 CROSS）。
  */
 const ENTITY_VALUE_SIGNALS: readonly string[] = [
@@ -189,13 +189,14 @@ export async function detectGimProjectType(
           if (!hasLineArtifacts) hasLineArtifacts = true;
         }
       }
-      // 实体值型：检查 ENTITYNAME / GROUPTYPE 的值是否等于信号
+      // 实体值型：检查 ENTITYNAME / GROUPTYPE / DEVICETYPE 的值是否等于信号
       // 避免 WIREWEIGHT 包含 WIRE、CROSSSECTION 包含 CROSS 等裸子串误判
       const entityName = kv['ENTITYNAME'];
       const groupType = kv['GROUPTYPE'];
+      const deviceType = kv['DEVICETYPE'];
       for (const sig of ENTITY_VALUE_SIGNALS) {
         if (lineSignals.has(sig)) continue;
-        if (entityName === sig || groupType === sig) {
+        if (entityName === sig || groupType === sig || deviceType === sig) {
           lineSignals.add(sig);
           if (!hasLineArtifacts) hasLineArtifacts = true;
         }
