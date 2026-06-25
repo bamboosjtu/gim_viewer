@@ -174,6 +174,30 @@ async function openGimFromArrayBuffer(
   const projectTypeResult = await detectGimProjectType(extracted);
   state.currentProjectType = projectTypeResult.type;
 
+  // 运行时诊断：打印识别结果与解压路径样本，便于排查真实解压结构
+  console.log('[GIM Runtime Detect]', {
+    type: projectTypeResult.type,
+    details: projectTypeResult.details,
+    samplePaths: Array.from(extracted.keys()).slice(0, 80),
+  });
+  // 非 transmission_line 时打印若干 cbm 文本样本，确认真实路径与 KEY
+  if (projectTypeResult.type !== 'transmission_line') {
+    const cbmSamples = Array.from(extracted.entries())
+      .filter(([p]) => /\.cbm$/i.test(p))
+      .slice(0, 5);
+    for (const [p, f] of cbmSamples) {
+      console.log('[GIM Runtime Detect] cbm sample', p, (await f.text()).slice(0, 500));
+    }
+  }
+
+  // 无法识别工程类型：既未检测到 IFC，也未检测到线路工程特征。
+  // 不进入变电流程，不调用 saveGimIndex，避免 project_type=substation 污染数据库。
+  if (projectTypeResult.type === 'unknown') {
+    showLoading('无法识别 GIM 工程类型：既未检测到 IFC，也未检测到线路工程特征');
+    setTimeout(hideLoading, 4000);
+    return;
+  }
+
   if (projectTypeResult.type === 'transmission_line') {
     // 线路工程流程：构建 GimGraph + 渲染面板，不走 IFC/Viewer 流程
     showLoading('正在解析线路 CBM 层级...');
@@ -212,7 +236,15 @@ async function openGimFromArrayBuffer(
   showLoading('正在解析 GIM 层级结构...');
   const entries = await onGimExtracted(state, extracted, showMessage);
 
-  // Tauri 模式：写入 GIM 索引到 SQLite
+  // 无 IFC entry：可能是线路工程被误识别为 substation。
+  // 不写入 saveGimIndex（避免 project_type=substation 污染），提示检查识别日志。
+  if (entries.length === 0) {
+    showLoading('该工程未检测到 IFC 文件；如果这是线路工程，请检查工程类型识别日志');
+    setTimeout(hideLoading, 4000);
+    return;
+  }
+
+  // Tauri 模式：写入 GIM 索引到 SQLite（仅当存在 IFC entry 时才允许写入）
   if (options?.persistIndex && options.projectId != null && isTauri()) {
     // 缓存 IFC 文件到本地磁盘（以 ifcEntries 为准，逐个 try/catch）
     showLoading('正在缓存 IFC 文件...');
@@ -271,11 +303,6 @@ async function openGimFromArrayBuffer(
     }
   }
 
-  if (entries.length === 0) {
-    showLoading('未在 GIM 文件中找到 IFC 文件');
-    setTimeout(hideLoading, 2000);
-    return;
-  }
   hideLoading();
   openIfcModal(entries);
 }

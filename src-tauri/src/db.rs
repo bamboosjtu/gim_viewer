@@ -406,11 +406,28 @@ pub struct GimIndexPayload {
 }
 
 /// Tauri command：保存 GIM 索引（事务：先删后插）
+///
+/// 防御：拒绝为空 IFC 索引打 parser_version=v4。
+/// 变电工程索引必须包含 IFC 模型与 IFC entry；
+/// 否则可能是线路工程被误识别为 substation，应走 save_line_gim_graph 而非本命令。
 #[tauri::command]
 pub fn save_gim_index(
     state: tauri::State<'_, DbState>,
     payload: GimIndexPayload,
 ) -> Result<(), String> {
+    // 防御校验：变电工程索引必须包含 IFC 模型或 IFC entry
+    if payload.ifc_models.is_empty()
+        || !payload
+            .entries
+            .iter()
+            .any(|e| e.entry_type == "IFC")
+    {
+        return Err(
+            "拒绝写入 substation 索引：未发现 IFC 模型或 IFC entry（可能为线路工程被误识别，应走 save_line_gim_graph）"
+                .to_string(),
+        );
+    }
+
     let mut conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
     let tx = conn.transaction().map_err(|e| format!("开启事务失败: {}", e))?;
     let now = now_ms();

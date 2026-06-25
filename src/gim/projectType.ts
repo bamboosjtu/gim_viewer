@@ -26,6 +26,16 @@ export interface GimProjectTypeDetails {
   phmCount: number;
   modCount: number;
   stlCount: number;
+  /** 位于 PascalCase Cbm/ 目录下的文件数 */
+  lineCbmDirCount: number;
+  /** 位于 PascalCase Dev/ 目录下的文件数 */
+  lineDevDirCount: number;
+  /** 位于 PascalCase Mod/ 目录下的文件数 */
+  lineModDirCount: number;
+  /** 位于 PascalCase Phm/ 目录下的文件数 */
+  linePhmDirCount: number;
+  /** 位于全大写 CBM/DEV/MOD/PHM 目录下的文件数（变电工程特征，便于排查 hybrid） */
+  substationDirCount: number;
   /** 命中的线路信号字段列表，便于排查 */
   lineSignals: string[];
 }
@@ -77,14 +87,33 @@ function extOf(path: string): string {
 }
 
 /**
- * 判断文件是否位于线路工程的 PascalCase 目录（Cbm/Dev/Mod/Phm/Fam）。
- * 变电工程使用全大写目录（CBM/DEV/MOD/PHM），线路工程使用首字母大写目录。
- * spec 第三章：线路工程使用 Cbm/Dev/Mod/Phm 首字母大写目录。
+ * 将路径按 \ 和 / 切分为 segment 数组（兼容 Windows 反斜杠与解压后的正斜杠）。
+ * 这样无论路径是 Cbm/project.cbm、demo-line/Cbm/project.cbm 还是 Cbm\project.cbm，
+ * 都能正确识别其中的 Cbm 段。
+ */
+function pathSegments(path: string): string[] {
+  return path.split(/[\\/]+/).filter(Boolean);
+}
+
+/** 路径中是否包含任一指定 segment（区分大小写） */
+function hasSegment(path: string, names: readonly string[]): boolean {
+  const segs = pathSegments(path);
+  return segs.some((s) => names.includes(s));
+}
+
+/**
+ * 线路工程目录：路径中任意 segment 为 PascalCase 目录（Cbm/Dev/Mod/Phm/Fam）。
+ * 变电工程使用全大写目录，因此 Cbm 不会匹配 CBM（区分大小写）。
  */
 function isLineDir(path: string): boolean {
-  // 顶层目录名（区分大小写）
-  const top = path.split('/')[0] || '';
-  return top === 'Cbm' || top === 'Dev' || top === 'Mod' || top === 'Phm' || top === 'Fam';
+  return hasSegment(path, ['Cbm', 'Dev', 'Mod', 'Phm', 'Fam']);
+}
+
+/**
+ * 变电工程目录：路径中任意 segment 为全大写目录（CBM/DEV/MOD/PHM）。
+ */
+function isSubstationDir(path: string): boolean {
+  return hasSegment(path, ['CBM', 'DEV', 'MOD', 'PHM']);
 }
 
 /**
@@ -118,12 +147,28 @@ export async function detectGimProjectType(
   // 位于 PascalCase Mod/ 目录下的 .mod/.stl 数量（线路工程特征）
   let lineModCount = 0;
   let lineStlCount = 0;
+  // PascalCase 目录布局统计（兜底用：即使文本信号未命中也能识别线路工程）
+  let lineCbmDirCount = 0;
+  let lineDevDirCount = 0;
+  let lineModDirCount = 0;
+  let linePhmDirCount = 0;
+  // 全大写目录文件数（变电工程特征，用于排查 hybrid 与误分类）
+  let substationDirCount = 0;
 
   const textFilesToScan: { path: string; file: File }[] = [];
 
   for (const [path, file] of files) {
     const ext = extOf(path);
     const lineDir = isLineDir(path);
+    if (isSubstationDir(path)) substationDirCount++;
+    // 按路径 segment 统计 PascalCase 目录命中（兼容外层包裹目录，如 demo-line/Cbm/...）
+    if (lineDir) {
+      const segs = pathSegments(path);
+      if (segs.includes('Cbm')) lineCbmDirCount++;
+      if (segs.includes('Dev')) lineDevDirCount++;
+      if (segs.includes('Mod')) lineModDirCount++;
+      if (segs.includes('Phm')) linePhmDirCount++;
+    }
     // 统计（按扩展名归类；IFC/STL 大文件不读全文，仅计数）
     if (ext === 'cbm') cbmCount++;
     else if (ext === 'dev') devCount++;
@@ -209,6 +254,15 @@ export async function detectGimProjectType(
     }
   }
 
+  // 兜底：即使文本信号未命中（如 .cbm 文件超 256KB 未扫描、或 KEY 未覆盖），
+  // 只要存在 PascalCase 布局（Cbm/Dev/Mod 三类目录均有文件）且无 IFC，
+  // 即判定为线路工程，避免误走变电流程污染 project_type=substation。
+  if (!hasIfc && !hasLineArtifacts
+    && lineCbmDirCount > 0 && lineDevDirCount > 0 && lineModDirCount > 0) {
+    hasLineArtifacts = true;
+    lineSignals.add('PascalCaseLayout:Cbm/Dev/Mod');
+  }
+
   let type: GimProjectType;
   if (hasIfc && hasLineArtifacts) type = 'hybrid';
   else if (hasIfc) type = 'substation';
@@ -227,6 +281,11 @@ export async function detectGimProjectType(
       phmCount,
       modCount,
       stlCount,
+      lineCbmDirCount,
+      lineDevDirCount,
+      lineModDirCount,
+      linePhmDirCount,
+      substationDirCount,
       lineSignals: Array.from(lineSignals).sort(),
     },
   };
