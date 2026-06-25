@@ -1,6 +1,7 @@
 import * as OBC from '@thatopen/components';
 import type { ViewerContext } from './viewerEngine.js';
 import type { AppState } from '../app/state.js';
+import { getWebIfcWasmBaseUrl, assertWebIfcWasmAvailable } from './wasmAssets.js';
 
 export type ModelEventCallbacks = {
   onModelAdded: (modelId: string) => void;
@@ -10,11 +11,29 @@ export type ModelEventCallbacks = {
 /** 初始化 IFC 引擎（仅首次调用生效） */
 export async function initEngine(ctx: ViewerContext, state: AppState): Promise<void> {
   if (state.initialized) return;
-  await ctx.ifcLoader.setup({ autoSetWasm: false, wasm: { path: '/', absolute: true } });
-  const workerUrl = await OBC.FragmentsManager.getWorker();
-  ctx.fragments.init(workerUrl);
+
+  // 1. web-ifc WASM 校验 + ifcLoader.setup
+  const wasmBase = getWebIfcWasmBaseUrl();
+  try {
+    await assertWebIfcWasmAvailable();
+    await ctx.ifcLoader.setup({ autoSetWasm: false, wasm: { path: wasmBase, absolute: true } });
+  } catch (err) {
+    console.error('[IFC Engine] ifcLoader.setup failed', { wasmBase, error: err });
+    throw err;
+  }
+
+  // 2. Fragments worker
+  try {
+    const workerUrl = await OBC.FragmentsManager.getWorker();
+    ctx.fragments.init(workerUrl);
+  } catch (err) {
+    console.error('[IFC Engine] fragments worker init failed', { error: err });
+    throw err;
+  }
+
   ctx.world.camera.controls?.addEventListener('update', () => ctx.fragments.core.update());
   state.initialized = true;
+  console.log('[IFC Engine] ready');
 }
 
 /** 注册模型生命周期事件（在 initEngine 后调用，仅首次生效） */

@@ -4,10 +4,14 @@
   "description": "GIM 浏览器",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/copy-web-ifc-wasm.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/copy-web-ifc-wasm.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "pretauri:dev": "node scripts/copy-web-ifc-wasm.mjs",
     "tauri:dev": "tauri dev",
+    "pretauri:build": "node scripts/copy-web-ifc-wasm.mjs",
     "tauri:build": "tauri build"
   },
   "author": "bamboosjtu",
