@@ -79,6 +79,11 @@ pub fn run() {
             db::validate_gim_cache,
             db::get_db_path,
             db::get_latest_project_cache_diagnostic,
+            db::write_fragment_cache_file,
+            db::read_fragment_cache_file,
+            db::upsert_fragment_cache_record,
+            db::get_fragment_cache_record,
+            db::validate_fragment_cache,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

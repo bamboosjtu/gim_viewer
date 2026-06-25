@@ -75,8 +75,13 @@ export async function handleNodeClick(
       if (!buffer) continue;
       showMessage(`正在加载 ${entry.name}...`);
       try {
-        await loadIfcBuffer(ctx, entry.name, buffer, state, (p) =>
-          showMessage(`${entry.name}: ${Math.round(p * 100)}%`),
+        await loadIfcBuffer(
+          ctx,
+          entry.name,
+          buffer,
+          state,
+          (p) => showMessage(`${entry.name}: ${Math.round(p * 100)}%`),
+          entry.path,
         );
         console.log(`[懒加载] IFC 已加载: ${modelId}`);
       } catch (err) {

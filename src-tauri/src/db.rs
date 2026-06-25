@@ -9,6 +9,9 @@ use tauri::Manager;
 /// v2: 增加 fam_property / dev_property 表，缓存 CBM/FAM/DEV 基础属性
 pub const PARSER_VERSION: &str = "gim-parser-v2";
 
+/// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
+pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v1";
+
 /// GIM 文件元信息（从前端传入，需 Deserialize）
 #[derive(Debug, Deserialize)]
 pub struct FileInfoInput {
@@ -149,7 +152,22 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
             created_at_ms INTEGER NOT NULL,
             UNIQUE(project_id, dev_path, prop_key)
         );
-        CREATE INDEX IF NOT EXISTS idx_dev_property_path ON dev_property(project_id, dev_path);",
+        CREATE INDEX IF NOT EXISTS idx_dev_property_path ON dev_property(project_id, dev_path);
+
+        CREATE TABLE IF NOT EXISTS fragment_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            entry_path TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            source_ifc_size INTEGER NOT NULL,
+            fragment_file_size INTEGER NOT NULL,
+            fragments_version TEXT NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL,
+            UNIQUE(project_id, entry_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_fragment_cache_project ON fragment_cache(project_id);
+        CREATE INDEX IF NOT EXISTS idx_fragment_cache_entry ON fragment_cache(project_id, entry_path);",
     )
     .map_err(|e| format!("初始化数据库表失败: {}", e))?;
 
@@ -544,6 +562,216 @@ pub fn read_cached_ifc(
     stdfs::read(&path).map_err(|e| format!("读取缓存文件失败: {}", e))
 }
 
+// ===== Fragments 缓存 =====
+
+/// 计算 Fragments 缓存文件路径：app_data_dir/fragments/{project_id}/{safe_entry_path}.frag
+/// entry_path 只作为相对路径处理，防止 ../ 穿越
+fn fragment_cache_file_path(app_handle: &tauri::AppHandle, project_id: i64, entry_path: &str) -> Result<PathBuf, String> {
+    let base = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    let safe_rel = entry_path
+        .split('/')
+        .filter(|s| !s.is_empty() && *s != ".." && *s != ".")
+        .collect::<Vec<_>>()
+        .join("/");
+    if safe_rel.is_empty() {
+        return Err("entry_path 无效".to_string());
+    }
+    let full = base.join("fragments").join(project_id.to_string()).join(format!("{}.frag", safe_rel));
+    let canonical_base = base.canonicalize().unwrap_or(base.clone());
+    let parent = full.parent().ok_or("无法获取父目录")?;
+    let _ = stdfs::create_dir_all(parent).map_err(|e| format!("创建 fragments 缓存目录失败: {}", e))?;
+    let _ = full.canonicalize().unwrap_or(full.clone());
+    if !full.starts_with(&canonical_base) {
+        return Err("路径越界".to_string());
+    }
+    Ok(full)
+}
+
+/// fragment_cache 表记录
+#[derive(Debug, Serialize)]
+pub struct FragmentCacheRecord {
+    pub id: i64,
+    pub project_id: i64,
+    pub entry_path: String,
+    pub model_id: String,
+    pub source_ifc_size: i64,
+    pub fragment_file_size: i64,
+    pub fragments_version: String,
+    pub created_at_ms: u64,
+    pub updated_at_ms: u64,
+}
+
+/// Fragments 缓存校验结果
+#[derive(Debug, Serialize)]
+pub struct FragmentCacheValidation {
+    pub project_id: i64,
+    pub entry_path: String,
+    pub has_record: bool,
+    pub stored_fragments_version: Option<String>,
+    pub current_fragments_version: String,
+    pub fragments_version_match: bool,
+    pub source_ifc_size_match: bool,
+    pub fragment_file_exists: bool,
+    pub fragment_file_size: u64,
+    pub valid: bool,
+}
+
+/// Tauri command：写入 Fragments 缓存文件
+#[tauri::command]
+pub fn write_fragment_cache_file(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_path: String,
+    bytes: Vec<u8>,
+) -> Result<serde_json::Value, String> {
+    let path = fragment_cache_file_path(&app_handle, project_id, &entry_path)?;
+    let size = bytes.len();
+    let mut file = stdfs::File::create(&path).map_err(|e| format!("创建 fragments 缓存文件失败: {}", e))?;
+    file.write_all(&bytes).map_err(|e| format!("写入 fragments 缓存文件失败: {}", e))?;
+    Ok(serde_json::json!({ "path": path.to_string_lossy(), "size": size }))
+}
+
+/// Tauri command：读取 Fragments 缓存文件
+#[tauri::command]
+pub fn read_fragment_cache_file(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_path: String,
+) -> Result<Vec<u8>, String> {
+    let path = fragment_cache_file_path(&app_handle, project_id, &entry_path)?;
+    stdfs::read(&path).map_err(|e| format!("读取 fragments 缓存文件失败: {}", e))
+}
+
+/// Tauri command：upsert fragment_cache 记录
+#[tauri::command]
+pub fn upsert_fragment_cache_record(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+    entry_path: String,
+    model_id: String,
+    source_ifc_size: i64,
+    fragment_file_size: i64,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let now = now_ms();
+    conn.execute(
+        "INSERT INTO fragment_cache (project_id, entry_path, model_id, source_ifc_size, fragment_file_size, fragments_version, created_at_ms, updated_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(project_id, entry_path) DO UPDATE SET
+           model_id = ?3, source_ifc_size = ?4, fragment_file_size = ?5, fragments_version = ?6, updated_at_ms = ?8",
+        params![project_id, entry_path, model_id, source_ifc_size, fragment_file_size, FRAGMENTS_CACHE_VERSION, now, now],
+    )
+    .map_err(|e| format!("upsert fragment_cache 失败: {}", e))?;
+    Ok(())
+}
+
+/// Tauri command：查询 fragment_cache 记录
+#[tauri::command]
+pub fn get_fragment_cache_record(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+    entry_path: String,
+) -> Result<Option<FragmentCacheRecord>, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let res = conn.query_row(
+        "SELECT id, project_id, entry_path, model_id, source_ifc_size, fragment_file_size, fragments_version, created_at_ms, updated_at_ms
+         FROM fragment_cache
+         WHERE project_id = ?1 AND entry_path = ?2",
+        params![project_id, entry_path],
+        |row| Ok(FragmentCacheRecord {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            entry_path: row.get(2)?,
+            model_id: row.get(3)?,
+            source_ifc_size: row.get(4)?,
+            fragment_file_size: row.get(5)?,
+            fragments_version: row.get(6)?,
+            created_at_ms: row.get(7)?,
+            updated_at_ms: row.get(8)?,
+        }),
+    );
+    match res {
+        Ok(r) => Ok(Some(r)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(format!("查询 fragment_cache 失败: {}", e)),
+    }
+}
+
+/// Tauri command：校验 Fragments 缓存有效性
+#[tauri::command]
+pub fn validate_fragment_cache(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+    entry_path: String,
+    source_ifc_size: i64,
+) -> Result<FragmentCacheValidation, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+    // 查询记录
+    let res = conn.query_row(
+        "SELECT id, project_id, entry_path, model_id, source_ifc_size, fragment_file_size, fragments_version, created_at_ms, updated_at_ms
+         FROM fragment_cache
+         WHERE project_id = ?1 AND entry_path = ?2",
+        params![project_id, entry_path],
+        |row| Ok(FragmentCacheRecord {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            entry_path: row.get(2)?,
+            model_id: row.get(3)?,
+            source_ifc_size: row.get(4)?,
+            fragment_file_size: row.get(5)?,
+            fragments_version: row.get(6)?,
+            created_at_ms: row.get(7)?,
+            updated_at_ms: row.get(8)?,
+        }),
+    );
+    drop(conn);
+
+    let record = match res {
+        Ok(r) => Some(r),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => return Err(format!("查询 fragment_cache 失败: {}", e)),
+    };
+
+    let has_record = record.is_some();
+    let stored_version = record.as_ref().map(|r| r.fragments_version.clone());
+    let stored_ifc_size = record.as_ref().map(|r| r.source_ifc_size);
+
+    let version_match = stored_version
+        .as_ref()
+        .map(|v| v == FRAGMENTS_CACHE_VERSION)
+        .unwrap_or(false);
+    let size_match = stored_ifc_size.map(|s| s == source_ifc_size).unwrap_or(false);
+
+    // 检查 fragments 文件是否存在且大小 > 0
+    let (file_exists, file_size) = match fragment_cache_file_path(&app_handle, project_id, &entry_path) {
+        Ok(path) => match stdfs::metadata(&path) {
+            Ok(meta) => (true, meta.len()),
+            Err(_) => (false, 0),
+        },
+        Err(_) => (false, 0),
+    };
+
+    let valid = has_record && version_match && size_match && file_exists && file_size > 0;
+
+    Ok(FragmentCacheValidation {
+        project_id,
+        entry_path,
+        has_record,
+        stored_fragments_version: stored_version,
+        current_fragments_version: FRAGMENTS_CACHE_VERSION.to_string(),
+        fragments_version_match: version_match,
+        source_ifc_size_match: size_match,
+        fragment_file_exists: file_exists,
+        fragment_file_size: file_size,
+        valid,
+    })
+}
+
 // ===== GIM 索引完整读取 + 缓存校验 =====
 
 /// gim_entry 表完整记录
@@ -896,6 +1124,21 @@ pub struct IfcCacheFileDiagnostic {
     pub file_size: Option<u64>,
 }
 
+/// 单个 Fragments 缓存文件诊断
+#[derive(Debug, Serialize)]
+pub struct FragmentCacheFileDiagnostic {
+    pub entry_path: String,
+    pub model_id: String,
+    pub source_ifc_size: i64,
+    pub fragment_file_size_stored: i64,
+    pub fragment_file_size_actual: u64,
+    pub stored_fragments_version: String,
+    pub current_fragments_cache_version: String,
+    pub fragments_version_match: bool,
+    pub fragment_file_exists: bool,
+    pub valid: bool,
+}
+
 /// 项目缓存完整诊断
 #[derive(Debug, Serialize)]
 pub struct ProjectCacheDiagnostic {
@@ -922,6 +1165,13 @@ pub struct ProjectCacheDiagnostic {
     pub valid: bool,
 
     pub ifc_cache_files: Vec<IfcCacheFileDiagnostic>,
+
+    // Fragments 缓存诊断
+    pub fragment_cache_count: u64,
+    pub valid_fragment_cache_count: u64,
+    pub missing_fragment_cache_paths: Vec<String>,
+    pub current_fragments_cache_version: String,
+    pub fragment_cache_files: Vec<FragmentCacheFileDiagnostic>,
 }
 
 /// 返回当前 SQLite 文件路径
@@ -933,6 +1183,7 @@ pub fn get_db_path(app_handle: tauri::AppHandle) -> Result<String, String> {
 
 /// 获取指定项目的缓存诊断（内部函数，被 get_latest_project_cache_diagnostic 调用）
 pub fn get_project_cache_diagnostic(
+    app_handle: &tauri::AppHandle,
     state: tauri::State<'_, DbState>,
     project_id: i64,
 ) -> Result<ProjectCacheDiagnostic, String> {
@@ -1017,6 +1268,67 @@ pub fn get_project_cache_diagnostic(
         });
     }
 
+    // 4. 查询 fragment_cache 记录并诊断每个 fragments 缓存文件
+    let mut frag_stmt = conn
+        .prepare(
+            "SELECT entry_path, model_id, source_ifc_size, fragment_file_size, fragments_version
+             FROM fragment_cache
+             WHERE project_id = ?1
+             ORDER BY entry_path ASC",
+        )
+        .map_err(|e| format!("预处理 fragment_cache 失败: {}", e))?;
+    let frag_rows = frag_stmt
+        .query_map(params![project_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .map_err(|e| format!("查询 fragment_cache 失败: {}", e))?;
+
+    let mut fragment_cache_count: u64 = 0;
+    let mut valid_fragment_cache_count: u64 = 0;
+    let mut missing_fragment_cache_paths: Vec<String> = Vec::new();
+    let mut fragment_cache_files: Vec<FragmentCacheFileDiagnostic> = Vec::new();
+
+    for r in frag_rows {
+        let (entry_path, model_id, source_ifc_size, frag_size_stored, stored_version) =
+            r.map_err(|e| format!("读取 fragment_cache 失败: {}", e))?;
+        fragment_cache_count += 1;
+
+        let version_match = stored_version == FRAGMENTS_CACHE_VERSION;
+        let (file_exists, file_size_actual) = match fragment_cache_file_path(app_handle, project_id, &entry_path) {
+            Ok(path) => match stdfs::metadata(&path) {
+                Ok(meta) => (true, meta.len()),
+                Err(_) => (false, 0),
+            },
+            Err(_) => (false, 0),
+        };
+
+        let frag_valid = version_match && file_exists && file_size_actual > 0;
+        if frag_valid {
+            valid_fragment_cache_count += 1;
+        } else {
+            missing_fragment_cache_paths.push(entry_path.clone());
+        }
+
+        fragment_cache_files.push(FragmentCacheFileDiagnostic {
+            entry_path,
+            model_id,
+            source_ifc_size,
+            fragment_file_size_stored: frag_size_stored,
+            fragment_file_size_actual: file_size_actual,
+            stored_fragments_version: stored_version,
+            current_fragments_cache_version: FRAGMENTS_CACHE_VERSION.to_string(),
+            fragments_version_match: version_match,
+            fragment_file_exists: file_exists,
+            valid: frag_valid,
+        });
+    }
+
     let valid = has_index
         && ifc_models_count > 0
         && ifc_entry_count > 0
@@ -1045,12 +1357,18 @@ pub fn get_project_cache_diagnostic(
         parser_version_match,
         valid,
         ifc_cache_files,
+        fragment_cache_count,
+        valid_fragment_cache_count,
+        missing_fragment_cache_paths,
+        current_fragments_cache_version: FRAGMENTS_CACHE_VERSION.to_string(),
+        fragment_cache_files,
     })
 }
 
 /// 获取最近打开项目的缓存诊断
 #[tauri::command]
 pub fn get_latest_project_cache_diagnostic(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, DbState>,
 ) -> Result<Option<ProjectCacheDiagnostic>, String> {
     let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
@@ -1067,7 +1385,7 @@ pub fn get_latest_project_cache_diagnostic(
         Some(id) => {
             drop(conn);
             // 重新获取锁调用 get_project_cache_diagnostic
-            get_project_cache_diagnostic(state, id).map(Some)
+            get_project_cache_diagnostic(&app_handle, state, id).map(Some)
         }
         None => Ok(None),
     }

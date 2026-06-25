@@ -111,7 +111,7 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
       const buffer = await getIfcBufferForEntry(entry, state);
       if (!buffer) continue;
       showLoading(`正在加载 ${entry.name}...`);
-      await loadIfcBuffer(ctx, entry.name, buffer, state, (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`));
+      await loadIfcBuffer(ctx, entry.name, buffer, state, (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`), entry.path);
     }
     await buildIfcNameIndex(ctx, state);
     // 统一使用 handleNodeClick 作为点击回调
