@@ -1,7 +1,7 @@
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::fs as stdfs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::Manager;
 
@@ -509,31 +509,62 @@ fn row_to_cbm_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<CbmNodeRecord> {
 
 use std::io::Write as _;
 
+/// 校验 entry_path：只允许 Normal 组件，拒绝 ParentDir / RootDir / Prefix。
+/// 同时处理 "/" 和 Windows "\" 语义下的路径穿越。
+/// 返回由 Normal 组件拼接的相对 PathBuf。
+fn validate_entry_path(entry_path: &str) -> Result<PathBuf, String> {
+    let path = Path::new(entry_path);
+    let mut components = Vec::new();
+    for comp in path.components() {
+        match comp {
+            Component::Normal(s) => components.push(s),
+            Component::ParentDir => return Err("entry_path 包含 .. 路径穿越".to_string()),
+            Component::RootDir => return Err("entry_path 包含根目录".to_string()),
+            Component::Prefix(_) => return Err("entry_path 包含盘符前缀".to_string()),
+            Component::CurDir => { /* 跳过 . 当前目录 */ }
+        }
+    }
+    if components.is_empty() {
+        return Err("entry_path 无效：无有效路径组件".to_string());
+    }
+    let mut result = PathBuf::new();
+    for c in components {
+        result.push(c);
+    }
+    Ok(result)
+}
+
 /// 计算缓存文件路径：app_data_dir/extracted/{project_id}/{entry_path}
-/// entry_path 只作为相对路径处理，防止 ../ 穿越
+/// entry_path 通过组件级校验（只允许 Normal 组件），防止 ../ 和 \..\ 穿越。
+/// 最终路径必须位于 app_data_dir/extracted/{project_id}/ 下。
 fn cache_file_path(app_handle: &tauri::AppHandle, project_id: i64, entry_path: &str) -> Result<PathBuf, String> {
     let base = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
-    // 规范化 entry_path：去掉前导 / 和 ../
-    let safe_rel = entry_path
-        .split('/')
-        .filter(|s| !s.is_empty() && *s != ".." && *s != ".")
-        .collect::<Vec<_>>()
-        .join("/");
-    if safe_rel.is_empty() {
-        return Err("entry_path 无效".to_string());
-    }
-    let full = base.join("extracted").join(project_id.to_string()).join(&safe_rel);
-    // 校验最终路径仍在 base 之下
-    let canonical_base = base.canonicalize().unwrap_or(base.clone());
-    let parent = full.parent().ok_or("无法获取父目录")?;
-    let _ = stdfs::create_dir_all(parent).map_err(|e| format!("创建缓存目录失败: {}", e))?;
-    let _ = full.canonicalize().unwrap_or(full.clone());
-    if !full.starts_with(&canonical_base) {
+
+    let safe_rel = validate_entry_path(entry_path)?;
+
+    // 构建预期根目录：app_data_dir/extracted/{project_id}
+    let root = base.join("extracted").join(project_id.to_string());
+    stdfs::create_dir_all(&root).map_err(|e| format!("创建缓存目录失败: {}", e))?;
+
+    // 规范化根目录用于 containment 校验（此时 root 已存在，canonicalize 必成功）
+    let canonical_root = root.canonicalize().map_err(|e| format!("规范化缓存根目录失败: {}", e))?;
+
+    // 拼接最终路径（safe_rel 仅含 Normal 组件，join 不会逃逸 canonical_root）
+    let full = canonical_root.join(&safe_rel);
+
+    // defense-in-depth：校验最终路径仍在 canonical_root 之下
+    if !full.starts_with(&canonical_root) {
         return Err("路径越界".to_string());
     }
+
+    // 创建文件父目录（如 DEV/subdir/）
+    if let Some(parent) = full.parent() {
+        stdfs::create_dir_all(parent).map_err(|e| format!("创建缓存子目录失败: {}", e))?;
+    }
+
     Ok(full)
 }
 
@@ -565,28 +596,44 @@ pub fn read_cached_ifc(
 // ===== Fragments 缓存 =====
 
 /// 计算 Fragments 缓存文件路径：app_data_dir/fragments/{project_id}/{safe_entry_path}.frag
-/// entry_path 只作为相对路径处理，防止 ../ 穿越
+/// entry_path 通过组件级校验（只允许 Normal 组件），防止 ../ 和 \..\ 穿越。
+/// 最终路径必须位于 app_data_dir/fragments/{project_id}/ 下。
 fn fragment_cache_file_path(app_handle: &tauri::AppHandle, project_id: i64, entry_path: &str) -> Result<PathBuf, String> {
     let base = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
-    let safe_rel = entry_path
-        .split('/')
-        .filter(|s| !s.is_empty() && *s != ".." && *s != ".")
-        .collect::<Vec<_>>()
-        .join("/");
-    if safe_rel.is_empty() {
-        return Err("entry_path 无效".to_string());
-    }
-    let full = base.join("fragments").join(project_id.to_string()).join(format!("{}.frag", safe_rel));
-    let canonical_base = base.canonicalize().unwrap_or(base.clone());
-    let parent = full.parent().ok_or("无法获取父目录")?;
-    let _ = stdfs::create_dir_all(parent).map_err(|e| format!("创建 fragments 缓存目录失败: {}", e))?;
-    let _ = full.canonicalize().unwrap_or(full.clone());
-    if !full.starts_with(&canonical_base) {
+
+    let safe_rel = validate_entry_path(entry_path)?;
+
+    // 追加 .frag 后缀到文件名（保持与原实现一致：file.ifc → file.ifc.frag）
+    let mut frag_rel = safe_rel;
+    let file_name = frag_rel
+        .file_name()
+        .map(|n| format!("{}.frag", n.to_string_lossy()))
+        .ok_or("无法获取 fragments 文件名")?;
+    frag_rel.set_file_name(file_name);
+
+    // 构建预期根目录：app_data_dir/fragments/{project_id}
+    let root = base.join("fragments").join(project_id.to_string());
+    stdfs::create_dir_all(&root).map_err(|e| format!("创建 fragments 缓存目录失败: {}", e))?;
+
+    // 规范化根目录用于 containment 校验（此时 root 已存在，canonicalize 必成功）
+    let canonical_root = root.canonicalize().map_err(|e| format!("规范化 fragments 根目录失败: {}", e))?;
+
+    // 拼接最终路径（frag_rel 仅含 Normal 组件，join 不会逃逸 canonical_root）
+    let full = canonical_root.join(&frag_rel);
+
+    // defense-in-depth：校验最终路径仍在 canonical_root 之下
+    if !full.starts_with(&canonical_root) {
         return Err("路径越界".to_string());
     }
+
+    // 创建文件父目录（如 DEV/subdir/）
+    if let Some(parent) = full.parent() {
+        stdfs::create_dir_all(parent).map_err(|e| format!("创建 fragments 缓存子目录失败: {}", e))?;
+    }
+
     Ok(full)
 }
 

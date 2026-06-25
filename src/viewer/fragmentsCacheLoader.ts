@@ -38,6 +38,13 @@ export async function loadModelWithFragmentsCache(
 ): Promise<void> {
   const modelId = name.replace(/\.ifc$/i, '');
   const projectId = state.currentProjectId;
+
+  // 防御性短路：模型已加载则直接返回（IFC 弹窗重复选择、节点重复点击等场景）
+  if (state.loadedModels.has(modelId)) {
+    console.log(`[IFC Loader] 模型已加载，跳过: ${modelId}`);
+    return;
+  }
+
   const canUseCache = isTauri() && projectId != null && !!entryPath;
 
   // 1. 尝试命中 Fragments 缓存
