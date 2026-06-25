@@ -20,18 +20,7 @@ import type { AppState } from '../app/state.js';
 import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
 import type { GimProjectType } from '../gim/projectType.js';
 import type { LineGraphResult } from '../desktop/database.js';
-
-/** 数组型引用字段名集合（ref_kind 命中这些时归类到对应 refs 数组） */
-const ARRAY_REF_FIELDS = new Set<string>([
-  'cbmFiles',
-  'devFiles',
-  'famFiles',
-  'phmFiles',
-  'modFiles',
-  'stlFiles',
-  'wireFiles',
-  'ifcFiles',
-]);
+import { LineRefKind, ARRAY_REF_FIELDS } from '../gim/lineRefKind.js';
 
 /** 创建空的 refs 结构 */
 function emptyRefs(): GimGraphNode['refs'] {
@@ -125,7 +114,7 @@ export function restoreLineGraphToState(state: AppState, result: LineGraphResult
   for (const ref of result.refs) {
     const node = nodesByPath.get(ref.node_path);
     if (!node) continue;
-    if (ref.ref_kind === 'rawRefs') {
+    if (ref.ref_kind === LineRefKind.RAW_REFS) {
       const key = ref.ref_key || '';
       if (!node.refs.rawRefs[key]) node.refs.rawRefs[key] = [];
       node.refs.rawRefs[key].push(ref.ref_value);

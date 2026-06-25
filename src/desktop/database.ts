@@ -218,6 +218,18 @@ export interface GimCacheValidation {
   project_type: string | null;
   /** v4: line_cbm_node 表行数（transmission_line 缓存校验用） */
   line_cbm_node_count: number;
+  /** v5: line_fam_property 不同 source_path 的去重数量 */
+  line_fam_source_count: number;
+  /** v5: line_dev_property 不同 source_path 的去重数量 */
+  line_dev_source_count: number;
+  /** v5: line_cbm_ref 中 ref_kind=famFiles 的 normalized_ref_value 去重数量 */
+  line_expected_fam_ref_count: number;
+  /** v5: line_cbm_ref 中 ref_kind=devFiles 的 normalized_ref_value 去重数量 */
+  line_expected_dev_ref_count: number;
+  /** v5: 图引用中存在但 line_fam_property 缺失的 source_path 列表 */
+  missing_line_fam_sources: string[];
+  /** v5: 图引用中存在但 line_dev_property 缺失的 source_path 列表 */
+  missing_line_dev_sources: string[];
 }
 
 /**
@@ -296,6 +308,16 @@ export interface ProjectCacheDiagnostic {
   line_cbm_child_count: number;
   line_cbm_ref_count: number;
   line_file_stat_count: number;
+
+  // v5: 线路工程 FAM/DEV 属性缓存诊断
+  line_fam_property_count: number;
+  line_dev_property_count: number;
+  line_fam_source_count: number;
+  line_dev_source_count: number;
+  line_expected_fam_ref_count: number;
+  line_expected_dev_ref_count: number;
+  missing_line_fam_sources: string[];
+  missing_line_dev_sources: string[];
 }
 
 /** 返回当前 SQLite 文件路径 */
@@ -447,6 +469,10 @@ export interface LineCbmRefPayload {
   ref_key: string | null;
   ref_value: string;
   sort_order: number | null;
+  /** v5: 归一化后的引用值（路径统一为 / 分隔，去空段），用于诊断时匹配 FAM/DEV 文件 */
+  normalized_ref_value: string | null;
+  /** v5: 引用值的文件名小写（如 "x.fam"），用于诊断时的文件名匹配 */
+  file_name_lower: string | null;
 }
 
 /** line_file_stat 写入 payload（文件类型统计） */
@@ -471,6 +497,55 @@ export interface LineGraphPayload {
 export async function saveLineGraph(payload: LineGraphPayload): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke<void>('save_line_gim_graph', { payload });
+}
+
+// ===== v5: 线路工程 FAM/DEV 属性缓存 =====
+
+/** line_fam_property 写入 payload
+ *  FAM 行格式：`中文展示键=ENGLISH_KEY=值`（值可能含 =，前端已 rejoin）
+ */
+export interface LineFamPropertyPayload {
+  source_path: string;
+  normalized_path: string;
+  file_name_lower: string;
+  display_key: string | null;
+  prop_key: string;
+  prop_value: string | null;
+  raw_line: string | null;
+  sort_order: number;
+}
+
+/** line_dev_property 写入 payload（普通 KEY=VALUE） */
+export interface LineDevPropertyPayload {
+  source_path: string;
+  normalized_path: string;
+  file_name_lower: string;
+  prop_key: string;
+  prop_value: string | null;
+  raw_line: string | null;
+  sort_order: number;
+}
+
+/**
+ * v5: 在 Tauri 环境下统一保存线路工程缓存（图 + FAM/DEV 属性，单事务）。
+ *
+ * 生产线路首次导入路径应调用此命令，不得再单独调用 saveLineGraph。
+ * 事务内：删除 6 张表旧数据 → 插入 graph + fam + dev → 更新
+ * parser_version = gim-parser-v5, project_type = transmission_line。
+ */
+export async function saveLineProjectCache(
+  projectId: number,
+  graphPayload: LineGraphPayload,
+  famProps: LineFamPropertyPayload[],
+  devProps: LineDevPropertyPayload[],
+): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke<void>('save_line_project_cache', {
+    projectId,
+    graphPayload,
+    famProps,
+    devProps,
+  });
 }
 
 // ===== 线路工程图读取 =====
@@ -501,6 +576,10 @@ export interface LineCbmRefRecord {
   ref_key: string | null;
   ref_value: string;
   sort_order: number | null;
+  /** v5: 归一化后的引用值 */
+  normalized_ref_value: string | null;
+  /** v5: 引用值的文件名小写 */
+  file_name_lower: string | null;
 }
 
 /** line_file_stat 读取记录 */
@@ -524,4 +603,45 @@ export interface LineGraphResult {
 export async function getLineGraph(projectId: number): Promise<LineGraphResult> {
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<LineGraphResult>('get_line_gim_graph', { projectId });
+}
+
+// ===== v5: 线路工程 FAM/DEV 属性读取 =====
+
+/** line_fam_property 读取记录 */
+export interface LineFamPropertyRecord {
+  source_path: string;
+  normalized_path: string;
+  file_name_lower: string;
+  display_key: string | null;
+  prop_key: string;
+  prop_value: string | null;
+  raw_line: string | null;
+  sort_order: number;
+}
+
+/** line_dev_property 读取记录 */
+export interface LineDevPropertyRecord {
+  source_path: string;
+  normalized_path: string;
+  file_name_lower: string;
+  prop_key: string;
+  prop_value: string | null;
+  raw_line: string | null;
+  sort_order: number;
+}
+
+/** 线路工程 FAM/DEV 属性读取结果 */
+export interface LineAttributeResult {
+  fam_properties: LineFamPropertyRecord[];
+  dev_properties: LineDevPropertyRecord[];
+}
+
+/**
+ * v5: 读取线路工程 FAM/DEV 属性缓存（只读）。
+ *
+ * 二次打开线路 GIM（缓存命中）时调用，配合 getLineGraph 恢复全部状态。
+ */
+export async function getLineAttributes(projectId: number): Promise<LineAttributeResult> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<LineAttributeResult>('get_line_attributes', { projectId });
 }

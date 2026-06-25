@@ -23,20 +23,22 @@ import type {
   LineFileStatPayload,
 } from '../desktop/database.js';
 import { saveLineGraph as saveLineGraphToDb } from '../desktop/database.js';
+import { LineRefKind } from '../gim/lineRefKind.js';
+import { normalizeGimPath, getFileNameLower } from '../gim/linePathNormalize.js';
 
 /** refs 中数组型字段名（对应 GimGraphNode.refs 的 8 个 string[] 字段，排除 rawRefs） */
 type ArrayRefField = 'cbmFiles' | 'devFiles' | 'famFiles' | 'phmFiles' | 'modFiles' | 'stlFiles' | 'wireFiles' | 'ifcFiles';
 
-const ARRAY_REF_FIELDS: readonly ArrayRefField[] = [
-  'cbmFiles',
-  'devFiles',
-  'famFiles',
-  'phmFiles',
-  'modFiles',
-  'stlFiles',
-  'wireFiles',
-  'ifcFiles',
-];
+const ARRAY_REF_FIELDS_LIST: readonly ArrayRefField[] = [
+  LineRefKind.CBM_FILES,
+  LineRefKind.DEV_FILES,
+  LineRefKind.FAM_FILES,
+  LineRefKind.PHM_FILES,
+  LineRefKind.MOD_FILES,
+  LineRefKind.STL_FILES,
+  LineRefKind.WIRE_FILES,
+  LineRefKind.IFC_FILES,
+] as readonly ArrayRefField[];
 
 /** filesByType 字段名 → line_file_stat.file_type 映射（小写） */
 const FILE_TYPE_KEYS: ReadonlyArray<keyof GimGraph['filesByType']> = [
@@ -83,33 +85,41 @@ function flattenLineNode(
   }
 }
 
-/** 收集单个节点的引用清单到 refs */
+/** 收集单个节点的引用清单到 refs（v5: 同步写入 normalized_ref_value / file_name_lower） */
 function collectRefs(node: GimGraphNode, refs: LineCbmRefPayload[]): void {
   const nodePath = node.path;
 
   // 数组型引用：ref_kind = 字段名（如 cbmFiles），ref_key = null
-  for (const field of ARRAY_REF_FIELDS) {
+  // v5: 对引用值做路径归一化，供诊断时匹配 FAM/DEV 文件
+  for (const field of ARRAY_REF_FIELDS_LIST) {
     const arr = node.refs[field];
     for (let i = 0; i < arr.length; i++) {
+      const refValue = arr[i];
       refs.push({
         node_path: nodePath,
         ref_kind: field,
         ref_key: null,
-        ref_value: arr[i],
+        ref_value: refValue,
         sort_order: i,
+        normalized_ref_value: normalizeGimPath(refValue),
+        file_name_lower: getFileNameLower(refValue),
       });
     }
   }
 
   // rawRefs：保留原始引用键（如 SUBSYSTEM / SECTION0 / STRING0.GPOINT）
+  // rawRefs 值不一定是文件路径，但仍统一归一化（无斜杠时原样返回，不影响匹配）
   for (const [rawKey, vals] of Object.entries(node.refs.rawRefs)) {
     for (let i = 0; i < vals.length; i++) {
+      const refValue = vals[i];
       refs.push({
         node_path: nodePath,
-        ref_kind: 'rawRefs',
+        ref_kind: LineRefKind.RAW_REFS,
         ref_key: rawKey,
-        ref_value: vals[i],
+        ref_value: refValue,
         sort_order: i,
+        normalized_ref_value: normalizeGimPath(refValue),
+        file_name_lower: getFileNameLower(refValue),
       });
     }
   }

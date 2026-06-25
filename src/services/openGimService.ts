@@ -199,7 +199,7 @@ async function openGimFromArrayBuffer(
   }
 
   if (projectTypeResult.type === 'transmission_line') {
-    // 线路工程流程：构建 GimGraph + 渲染面板，不走 IFC/Viewer 流程
+    // 线路工程流程：构建 GimGraph + 解析 FAM/DEV 属性 + 渲染面板，不走 IFC/Viewer 流程
     showLoading('正在解析线路 CBM 层级...');
     const { buildLineGimGraph } = await import('../gim/lineCbmParser.js');
     const graph = await buildLineGimGraph(extracted);
@@ -209,14 +209,62 @@ async function openGimFromArrayBuffer(
     const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
     renderLineProjectPanels(state, graph, showMessage);
 
-    // v4: 首次完整解析后写入线路工程图缓存
+    // v5: 首次导入 → 解析 FAM/DEV 属性 → 统一事务写入缓存 → 恢复到 state
+    // 顺序：extract → detect → buildLineGimGraph → parseLineAttributes
+    //       → save_line_project_cache → restore graph → restore attrs → render
     if (options?.persistIndex && options.projectId != null && isTauri()) {
-      showLoading('正在写入线路工程索引...');
       try {
-        const { saveLineGraph } = await import('./lineGraphPersistenceService.js');
-        await saveLineGraph(options.projectId, graph);
+        showLoading('正在解析线路 FAM/DEV 属性...');
+        const { parseLineAttributes, estimatePayloadSizeMB } = await import('./lineAttrPersistenceService.js');
+        const { buildLineGraphPayload } = await import('./lineGraphPersistenceService.js');
+        const { saveLineProjectCache } = await import('../desktop/database.js');
+        const { restoreLineAttributesToState } = await import('./lineAttrRestoreService.js');
+
+        const attrResult = await parseLineAttributes(graph, extracted);
+        const graphPayload = buildLineGraphPayload(options.projectId, graph);
+
+        // 性能日志：payload 统计 + 风险评估
+        const graphPayloadJson = JSON.stringify(graphPayload);
+        const estimatedMB = estimatePayloadSizeMB(
+          graphPayloadJson,
+          attrResult.famPayloads,
+          attrResult.devPayloads,
+        );
+        console.log('[LineCache] save_line_project_cache payload 统计:', {
+          nodes: graphPayload.nodes.length,
+          children: graphPayload.children.length,
+          refs: graphPayload.refs.length,
+          fam_props: attrResult.famPayloads.length,
+          dev_props: attrResult.devPayloads.length,
+          estimatedJsonSizeMB: Math.round(estimatedMB * 100) / 100,
+        });
+        if (estimatedMB > 50) {
+          console.warn(
+            `[LineCache] payload 较大 (${Math.round(estimatedMB * 100) / 100} MB)，一次性 invoke 可能较慢`,
+          );
+        }
+
+        showLoading('正在写入线路工程缓存...');
+        const t0 = performance.now();
+        await saveLineProjectCache(
+          options.projectId,
+          graphPayload,
+          attrResult.famPayloads,
+          attrResult.devPayloads,
+        );
+        const elapsedMs = Math.round(performance.now() - t0);
+        console.log('[LineCache] save_line_project_cache 完成，耗时', elapsedMs, 'ms');
+
+        // 恢复属性到 state（payload 与 record 字段一致，结构兼容可直接传入）
+        restoreLineAttributesToState(
+          {
+            fam_properties: attrResult.famPayloads,
+            dev_properties: attrResult.devPayloads,
+          },
+          state,
+        );
       } catch (err) {
-        console.error('[Tauri] 线路工程图缓存写入失败:', err);
+        console.error('[Tauri] 线路工程缓存写入失败:', err);
       }
     }
 
@@ -344,14 +392,22 @@ export async function openGimWithDialog(
           // 清空上一次 GIM 的状态（含线路工程字段），避免残留
           state.resetGimState();
 
-          // v4: 线路工程缓存命中 → 从 SQLite 恢复 GimGraph，跳过解压
+          // v4: 线路工程缓存命中 → 从 SQLite 恢复 GimGraph + FAM/DEV 属性，跳过解压
+          // v5: 缓存命中顺序：validate → get_line_graph → restoreLineGraphToState
+          //     → get_line_attributes → restoreLineAttributesToState → render
           if (validation.project_type === 'transmission_line') {
             showLoading('正在从本地缓存恢复线路工程索引...');
-            const { getLineGraph } = await import('../desktop/database.js');
+            const { getLineGraph, getLineAttributes } = await import('../desktop/database.js');
             const { restoreLineGraphToState } = await import('./lineGraphRestoreService.js');
+            const { restoreLineAttributesToState } = await import('./lineAttrRestoreService.js');
             const result = await getLineGraph(record.id);
             const graph = restoreLineGraphToState(state, result);
             state.currentProjectId = record.id;
+
+            // v5: 恢复 FAM/DEV 属性（缓存命中，currentFiles 保持 null）
+            showLoading('正在从本地缓存恢复线路 FAM/DEV 属性...');
+            const attrResult = await getLineAttributes(record.id);
+            const attrStats = restoreLineAttributesToState(attrResult, state);
 
             const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
             renderLineProjectPanels(state, graph, showMessage);
@@ -363,6 +419,10 @@ export async function openGimWithDialog(
             console.log('[Tauri] 线路工程缓存短路生效：未读取原始 GIM，未执行解压', {
               project_id: record.id,
               nodes: graph.stats.total,
+              famProperties: attrStats.famCount,
+              devProperties: attrStats.devCount,
+              famSources: attrStats.famSources,
+              devSources: attrStats.devSources,
             });
             return; // 线路工程缓存命中，短路完成
           }

@@ -2,6 +2,10 @@ import type { IfcEntry, CbmNode, FileDevEntry } from '../gim/types.js';
 import type * as OBCF from '@thatopen/fragments';
 import type { GimProjectType } from '../gim/projectType.js';
 import type { GimGraph } from '../gim/gimGraphTypes.js';
+import type {
+  LineFamPropertyRecord,
+  LineDevPropertyRecord,
+} from '../desktop/database.js';
 
 /** 应用全局状态（由 bootstrap.ts 创建唯一实例，通过参数注入各模块） */
 export class AppState {
@@ -32,6 +36,14 @@ export class AppState {
   // cachedDevProperties: devPath → key → value
   cachedDevProperties = new Map<string, Record<string, string>>();
 
+  // v5: 线路工程 FAM/DEV 属性缓存（缓存命中 + 首次导入后均写入）
+  // cachedLineFamProperties: normalizedPath → propKey → LineFamPropertyRecord[]
+  cachedLineFamProperties = new Map<string, Map<string, LineFamPropertyRecord[]>>();
+  // cachedLineFamDisplayKeys: normalizedPath → propKey → displayKey（中文展示键）
+  cachedLineFamDisplayKeys = new Map<string, Map<string, string | null>>();
+  // cachedLineDevProperties: normalizedPath → propKey → LineDevPropertyRecord[]
+  cachedLineDevProperties = new Map<string, Map<string, LineDevPropertyRecord[]>>();
+
   // 当前 GIM 项目数据库 ID（Tauri 缓存命中时使用）
   currentProjectId: number | null = null;
 
@@ -61,6 +73,10 @@ export class AppState {
     this.cachedIfcPaths.clear();
     this.cachedFamProperties.clear();
     this.cachedDevProperties.clear();
+    // v5: 清空线路工程属性缓存
+    this.cachedLineFamProperties.clear();
+    this.cachedLineFamDisplayKeys.clear();
+    this.cachedLineDevProperties.clear();
     this.currentProjectId = null;
   }
 

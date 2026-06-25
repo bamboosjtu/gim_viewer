@@ -9,7 +9,8 @@ use tauri::Manager;
 /// v2: 增加 fam_property / dev_property 表，缓存 CBM/FAM/DEV 基础属性
 /// v3: validate cache requires cbm_node index; rebuild incomplete v2 cache
 /// v4: adds transmission_line graph cache (line_cbm_node/child/ref/file_stat)
-pub const PARSER_VERSION: &str = "gim-parser-v4";
+/// v5: adds transmission_line FAM/DEV attribute cache (line_fam_property / line_dev_property)
+pub const PARSER_VERSION: &str = "gim-parser-v5";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
@@ -232,6 +233,52 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
         );",
     )
     .map_err(|e| format!("初始化线路工程缓存表失败: {}", e))?;
+
+    // v5: line_cbm_ref 补字段（归一化结果，避免诊断时再临时猜路径）
+    // 兼容旧库：已存在则忽略
+    let _ = conn.execute("ALTER TABLE line_cbm_ref ADD COLUMN normalized_ref_value TEXT", []);
+    let _ = conn.execute("ALTER TABLE line_cbm_ref ADD COLUMN file_name_lower TEXT", []);
+
+    // v5: 线路工程 FAM/DEV 属性缓存表
+    // line_fam_property：display_key 为中文展示键，prop_key 为英文键，prop_value 可含 =
+    // line_dev_property：普通 KEY=VALUE，无 display_key
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS line_fam_property (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            source_path TEXT NOT NULL,
+            normalized_path TEXT NOT NULL,
+            file_name_lower TEXT NOT NULL,
+            display_key TEXT,
+            prop_key TEXT NOT NULL,
+            prop_value TEXT,
+            raw_line TEXT,
+            sort_order INTEGER NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            PRIMARY KEY(project_id, normalized_path, prop_key, sort_order)
+        );
+        CREATE INDEX IF NOT EXISTS idx_line_fam_property_project ON line_fam_property(project_id);
+        CREATE INDEX IF NOT EXISTS idx_line_fam_property_source ON line_fam_property(project_id, source_path);
+        CREATE INDEX IF NOT EXISTS idx_line_fam_property_filename ON line_fam_property(project_id, file_name_lower);
+
+        CREATE TABLE IF NOT EXISTS line_dev_property (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            source_path TEXT NOT NULL,
+            normalized_path TEXT NOT NULL,
+            file_name_lower TEXT NOT NULL,
+            prop_key TEXT NOT NULL,
+            prop_value TEXT,
+            raw_line TEXT,
+            sort_order INTEGER NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            PRIMARY KEY(project_id, normalized_path, prop_key, sort_order)
+        );
+        CREATE INDEX IF NOT EXISTS idx_line_dev_property_project ON line_dev_property(project_id);
+        CREATE INDEX IF NOT EXISTS idx_line_dev_property_source ON line_dev_property(project_id, source_path);
+        CREATE INDEX IF NOT EXISTS idx_line_dev_property_filename ON line_dev_property(project_id, file_name_lower);",
+    )
+    .map_err(|e| format!("初始化线路工程 FAM/DEV 属性缓存表失败: {}", e))?;
 
     Ok(conn)
 }
@@ -1006,6 +1053,18 @@ pub struct GimCacheValidation {
     pub project_type: Option<String>,
     /// v4: line_cbm_node 表行数（transmission_line 缓存校验用）
     pub line_cbm_node_count: u64,
+    /// v5: line_fam_property 不同 source_path 的去重数量
+    pub line_fam_source_count: u64,
+    /// v5: line_dev_property 不同 source_path 的去重数量
+    pub line_dev_source_count: u64,
+    /// v5: line_cbm_ref 中 ref_kind=famFiles 的 normalized_ref_value 去重数量
+    pub line_expected_fam_ref_count: u64,
+    /// v5: line_cbm_ref 中 ref_kind=devFiles 的 normalized_ref_value 去重数量
+    pub line_expected_dev_ref_count: u64,
+    /// v5: 图引用中存在但 line_fam_property 缺失的 source_path 列表
+    pub missing_line_fam_sources: Vec<String>,
+    /// v5: 图引用中存在但 line_dev_property 缺失的 source_path 列表
+    pub missing_line_dev_sources: Vec<String>,
 }
 
 fn row_to_gim_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<GimEntryRecord> {
@@ -1207,6 +1266,10 @@ pub struct LineCbmRefPayload {
     pub ref_key: Option<String>,
     pub ref_value: String,
     pub sort_order: Option<i64>,
+    /// v5: 归一化后的引用值（路径统一为 / 分隔，去空段），用于诊断时匹配 FAM/DEV 文件
+    pub normalized_ref_value: Option<String>,
+    /// v5: 引用值的文件名小写（如 "x.fam"），用于诊断时的文件名匹配
+    pub file_name_lower: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1266,12 +1329,12 @@ pub fn save_line_gim_graph(
         .map_err(|e| format!("插入 line_cbm_child 失败: {}", e))?;
     }
 
-    // line_cbm_ref
+    // line_cbm_ref（v5: 同时写入 normalized_ref_value / file_name_lower）
     for r in &payload.refs {
         tx.execute(
-            "INSERT INTO line_cbm_ref (project_id, node_path, ref_kind, ref_key, ref_value, sort_order, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![pid, r.node_path, r.ref_kind, r.ref_key, r.ref_value, r.sort_order, now],
+            "INSERT INTO line_cbm_ref (project_id, node_path, ref_kind, ref_key, ref_value, sort_order, normalized_ref_value, file_name_lower, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![pid, r.node_path, r.ref_kind, r.ref_key, r.ref_value, r.sort_order, r.normalized_ref_value, r.file_name_lower, now],
         )
         .map_err(|e| format!("插入 line_cbm_ref 失败: {}", e))?;
     }
@@ -1293,6 +1356,160 @@ pub fn save_line_gim_graph(
         params![PARSER_VERSION, payload.project_type, now, pid],
     )
     .map_err(|e| format!("更新 project_type 失败: {}", e))?;
+
+    tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
+    Ok(())
+}
+
+// ===== v5: 线路工程 FAM/DEV 属性缓存 =====
+
+/// line_fam_property 写入 payload
+/// FAM 行格式：`中文展示键=ENGLISH_KEY=值`（值可能含 =，前端已 rejoin）
+#[derive(Debug, Deserialize)]
+pub struct LineFamPropertyPayload {
+    pub source_path: String,
+    pub normalized_path: String,
+    pub file_name_lower: String,
+    pub display_key: Option<String>,
+    pub prop_key: String,
+    pub prop_value: Option<String>,
+    pub raw_line: Option<String>,
+    pub sort_order: i64,
+}
+
+/// line_dev_property 写入 payload（普通 KEY=VALUE）
+#[derive(Debug, Deserialize)]
+pub struct LineDevPropertyPayload {
+    pub source_path: String,
+    pub normalized_path: String,
+    pub file_name_lower: String,
+    pub prop_key: String,
+    pub prop_value: Option<String>,
+    pub raw_line: Option<String>,
+    pub sort_order: i64,
+}
+
+/// Tauri command：统一保存线路工程缓存（图 + FAM/DEV 属性，一个事务）
+///
+/// 替代生产环境单独调用 save_line_gim_graph 的做法。事务内：
+/// 1. 删除旧 line_cbm_node / line_cbm_child / line_cbm_ref / line_file_stat
+/// 2. 删除旧 line_fam_property / line_dev_property
+/// 3. 插入 graph payload（nodes / children / refs / file_stats）
+/// 4. 插入 fam_props / dev_props
+/// 5. 更新 gim_project: parser_version = gim-parser-v5, project_type = transmission_line
+///
+/// 使用 prepared statement 批量插入，避免每行重新 prepare。
+#[tauri::command]
+pub fn save_line_project_cache(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+    graph_payload: LineGraphPayload,
+    fam_props: Vec<LineFamPropertyPayload>,
+    dev_props: Vec<LineDevPropertyPayload>,
+) -> Result<(), String> {
+    let mut conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let tx = conn.transaction().map_err(|e| format!("开启事务失败: {}", e))?;
+    let now = now_ms();
+    let pid = project_id;
+
+    // 1. 删除旧索引（6 张表）
+    tx.execute("DELETE FROM line_cbm_node WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 line_cbm_node 失败: {}", e))?;
+    tx.execute("DELETE FROM line_cbm_child WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 line_cbm_child 失败: {}", e))?;
+    tx.execute("DELETE FROM line_cbm_ref WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 line_cbm_ref 失败: {}", e))?;
+    tx.execute("DELETE FROM line_file_stat WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 line_file_stat 失败: {}", e))?;
+    tx.execute("DELETE FROM line_fam_property WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 line_fam_property 失败: {}", e))?;
+    tx.execute("DELETE FROM line_dev_property WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 line_dev_property 失败: {}", e))?;
+
+    // 2. line_cbm_node（prepared statement）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO line_cbm_node (project_id, path, name, entity_name, classify_name, raw_props_json, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+        ).map_err(|e| format!("预处理 line_cbm_node 失败: {}", e))?;
+        for n in &graph_payload.nodes {
+            stmt.execute(params![pid, n.path, n.name, n.entity_name, n.classify_name, n.raw_props_json, n.sort_order, now])
+                .map_err(|e| format!("插入 line_cbm_node 失败: {}", e))?;
+        }
+    }
+
+    // 3. line_cbm_child（prepared statement）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO line_cbm_child (project_id, parent_path, child_path, sort_order, ref_type, extra, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+        ).map_err(|e| format!("预处理 line_cbm_child 失败: {}", e))?;
+        for c in &graph_payload.children {
+            stmt.execute(params![pid, c.parent_path, c.child_path, c.sort_order, c.ref_type, c.extra, now])
+                .map_err(|e| format!("插入 line_cbm_child 失败: {}", e))?;
+        }
+    }
+
+    // 4. line_cbm_ref（v5: 含 normalized_ref_value / file_name_lower，prepared statement）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO line_cbm_ref (project_id, node_path, ref_kind, ref_key, ref_value, sort_order, normalized_ref_value, file_name_lower, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        ).map_err(|e| format!("预处理 line_cbm_ref 失败: {}", e))?;
+        for r in &graph_payload.refs {
+            stmt.execute(params![pid, r.node_path, r.ref_kind, r.ref_key, r.ref_value, r.sort_order, r.normalized_ref_value, r.file_name_lower, now])
+                .map_err(|e| format!("插入 line_cbm_ref 失败: {}", e))?;
+        }
+    }
+
+    // 5. line_file_stat（prepared statement）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO line_file_stat (project_id, file_type, count)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(project_id, file_type) DO UPDATE SET count = ?3"
+        ).map_err(|e| format!("预处理 line_file_stat 失败: {}", e))?;
+        for f in &graph_payload.file_stats {
+            stmt.execute(params![pid, f.file_type, f.count])
+                .map_err(|e| format!("插入 line_file_stat 失败: {}", e))?;
+        }
+    }
+
+    // 6. line_fam_property（prepared statement）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO line_fam_property (project_id, source_path, normalized_path, file_name_lower, display_key, prop_key, prop_value, raw_line, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
+        ).map_err(|e| format!("预处理 line_fam_property 失败: {}", e))?;
+        for p in &fam_props {
+            stmt.execute(params![pid, p.source_path, p.normalized_path, p.file_name_lower, p.display_key, p.prop_key, p.prop_value, p.raw_line, p.sort_order, now])
+                .map_err(|e| format!("插入 line_fam_property 失败: {}", e))?;
+        }
+    }
+
+    // 7. line_dev_property（prepared statement）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO line_dev_property (project_id, source_path, normalized_path, file_name_lower, prop_key, prop_value, raw_line, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        ).map_err(|e| format!("预处理 line_dev_property 失败: {}", e))?;
+        for p in &dev_props {
+            stmt.execute(params![pid, p.source_path, p.normalized_path, p.file_name_lower, p.prop_key, p.prop_value, p.raw_line, p.sort_order, now])
+                .map_err(|e| format!("插入 line_dev_property 失败: {}", e))?;
+        }
+    }
+
+    // 8. 更新 gim_project: parser_version = v5, project_type = transmission_line
+    let project_type = if graph_payload.project_type.is_empty() {
+        "transmission_line".to_string()
+    } else {
+        graph_payload.project_type.clone()
+    };
+    tx.execute(
+        "UPDATE gim_project SET parser_version = ?1, project_type = ?2, updated_at_ms = ?3 WHERE id = ?4",
+        params![PARSER_VERSION, project_type, now, pid],
+    )
+    .map_err(|e| format!("更新 project_type/parser_version 失败: {}", e))?;
 
     tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
     Ok(())
@@ -1326,6 +1543,10 @@ pub struct LineCbmRefRecord {
     pub ref_key: Option<String>,
     pub ref_value: String,
     pub sort_order: Option<i64>,
+    /// v5: 归一化后的引用值
+    pub normalized_ref_value: Option<String>,
+    /// v5: 引用值的文件名小写
+    pub file_name_lower: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1394,9 +1615,9 @@ pub fn get_line_gim_graph(
     let mut children = Vec::new();
     for r in rows { children.push(r.map_err(|e| format!("读取 line_cbm_child 失败: {}", e))?); }
 
-    // 3. line_cbm_ref
+    // 3. line_cbm_ref（v5: 同时读取 normalized_ref_value / file_name_lower）
     let mut stmt = conn
-        .prepare("SELECT node_path, ref_kind, ref_key, ref_value, sort_order FROM line_cbm_ref WHERE project_id = ?1 ORDER BY node_path ASC, ref_kind ASC, sort_order ASC, id ASC")
+        .prepare("SELECT node_path, ref_kind, ref_key, ref_value, sort_order, normalized_ref_value, file_name_lower FROM line_cbm_ref WHERE project_id = ?1 ORDER BY node_path ASC, ref_kind ASC, sort_order ASC, id ASC")
         .map_err(|e| format!("预处理 line_cbm_ref 失败: {}", e))?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(LineCbmRefRecord {
@@ -1405,6 +1626,8 @@ pub fn get_line_gim_graph(
             ref_key: row.get(2)?,
             ref_value: row.get(3)?,
             sort_order: row.get(4)?,
+            normalized_ref_value: row.get(5)?,
+            file_name_lower: row.get(6)?,
         })
     }).map_err(|e| format!("查询 line_cbm_ref 失败: {}", e))?;
     let mut refs = Vec::new();
@@ -1432,11 +1655,227 @@ pub fn get_line_gim_graph(
     })
 }
 
+// ===== v5: 线路工程 FAM/DEV 属性读取 =====
+
+/// line_fam_property 读取记录
+#[derive(Debug, Serialize)]
+pub struct LineFamPropertyRecord {
+    pub source_path: String,
+    pub normalized_path: String,
+    pub file_name_lower: String,
+    pub display_key: Option<String>,
+    pub prop_key: String,
+    pub prop_value: Option<String>,
+    pub raw_line: Option<String>,
+    pub sort_order: i64,
+}
+
+/// line_dev_property 读取记录
+#[derive(Debug, Serialize)]
+pub struct LineDevPropertyRecord {
+    pub source_path: String,
+    pub normalized_path: String,
+    pub file_name_lower: String,
+    pub prop_key: String,
+    pub prop_value: Option<String>,
+    pub raw_line: Option<String>,
+    pub sort_order: i64,
+}
+
+/// 线路工程 FAM/DEV 属性读取结果
+#[derive(Debug, Serialize)]
+pub struct LineAttributeResult {
+    pub fam_properties: Vec<LineFamPropertyRecord>,
+    pub dev_properties: Vec<LineDevPropertyRecord>,
+}
+
+/// Tauri command：读取线路工程 FAM/DEV 属性缓存（只读）
+///
+/// 二次打开线路 GIM（缓存命中）时调用，配合 get_line_gim_graph 恢复全部状态。
+#[tauri::command]
+pub fn get_line_attributes(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+) -> Result<LineAttributeResult, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+    // 1. line_fam_property
+    let mut stmt = conn
+        .prepare("SELECT source_path, normalized_path, file_name_lower, display_key, prop_key, prop_value, raw_line, sort_order FROM line_fam_property WHERE project_id = ?1 ORDER BY normalized_path ASC, sort_order ASC, id ASC")
+        .map_err(|e| format!("预处理 line_fam_property 失败: {}", e))?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(LineFamPropertyRecord {
+            source_path: row.get(0)?,
+            normalized_path: row.get(1)?,
+            file_name_lower: row.get(2)?,
+            display_key: row.get(3)?,
+            prop_key: row.get(4)?,
+            prop_value: row.get(5)?,
+            raw_line: row.get(6)?,
+            sort_order: row.get(7)?,
+        })
+    }).map_err(|e| format!("查询 line_fam_property 失败: {}", e))?;
+    let mut fam_properties = Vec::new();
+    for r in rows { fam_properties.push(r.map_err(|e| format!("读取 line_fam_property 失败: {}", e))?); }
+
+    // 2. line_dev_property
+    let mut stmt = conn
+        .prepare("SELECT source_path, normalized_path, file_name_lower, prop_key, prop_value, raw_line, sort_order FROM line_dev_property WHERE project_id = ?1 ORDER BY normalized_path ASC, sort_order ASC, id ASC")
+        .map_err(|e| format!("预处理 line_dev_property 失败: {}", e))?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(LineDevPropertyRecord {
+            source_path: row.get(0)?,
+            normalized_path: row.get(1)?,
+            file_name_lower: row.get(2)?,
+            prop_key: row.get(3)?,
+            prop_value: row.get(4)?,
+            raw_line: row.get(5)?,
+            sort_order: row.get(6)?,
+        })
+    }).map_err(|e| format!("查询 line_dev_property 失败: {}", e))?;
+    let mut dev_properties = Vec::new();
+    for r in rows { dev_properties.push(r.map_err(|e| format!("读取 line_dev_property 失败: {}", e))?); }
+
+    Ok(LineAttributeResult {
+        fam_properties,
+        dev_properties,
+    })
+}
+
+/// v5: 线路工程 FAM/DEV 属性缓存诊断结果（内部辅助结构，供 validate/diagnostic 共用）
+#[derive(Debug, Clone, Default)]
+struct LineAttrDiagnostic {
+    fam_source_count: u64,
+    dev_source_count: u64,
+    expected_fam_ref_count: u64,
+    expected_dev_ref_count: u64,
+    missing_fam_sources: Vec<String>,
+    missing_dev_sources: Vec<String>,
+}
+
+/// v5: 计算线路工程 FAM/DEV 属性缓存诊断字段
+///
+/// - fam/dev source count：line_fam_property / line_dev_property 中 normalized_path 去重数量
+/// - expected fam/dev ref count：line_cbm_ref 中 ref_kind=famFiles/devFiles 且 normalized_ref_value 非空的去重数量
+/// - missing fam/dev sources：图引用中存在但属性表缺失的 normalized_ref_value 列表
+fn compute_line_attr_diagnostic(conn: &Connection, project_id: i64) -> Result<LineAttrDiagnostic, String> {
+    use std::collections::HashSet;
+
+    // 1. fam source count (DISTINCT normalized_path in line_fam_property)
+    let fam_source_count: u64 = conn
+        .query_row(
+            "SELECT COUNT(DISTINCT normalized_path) FROM line_fam_property WHERE project_id = ?1",
+            params![project_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0i64) as u64;
+
+    // 2. dev source count
+    let dev_source_count: u64 = conn
+        .query_row(
+            "SELECT COUNT(DISTINCT normalized_path) FROM line_dev_property WHERE project_id = ?1",
+            params![project_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0i64) as u64;
+
+    // 3. expected fam refs (DISTINCT normalized_ref_value where ref_kind=famFiles)
+    let mut expected_fam_refs: Vec<String> = Vec::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT normalized_ref_value FROM line_cbm_ref
+                 WHERE project_id = ?1 AND ref_kind = 'famFiles' AND normalized_ref_value IS NOT NULL",
+            )
+            .map_err(|e| format!("预处理 fam refs 失败: {}", e))?;
+        let rows = stmt
+            .query_map(params![project_id], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("查询 fam refs 失败: {}", e))?;
+        for r in rows {
+            expected_fam_refs.push(r.map_err(|e| format!("读取 fam refs 失败: {}", e))?);
+        }
+    }
+
+    // 4. expected dev refs
+    let mut expected_dev_refs: Vec<String> = Vec::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT normalized_ref_value FROM line_cbm_ref
+                 WHERE project_id = ?1 AND ref_kind = 'devFiles' AND normalized_ref_value IS NOT NULL",
+            )
+            .map_err(|e| format!("预处理 dev refs 失败: {}", e))?;
+        let rows = stmt
+            .query_map(params![project_id], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("查询 dev refs 失败: {}", e))?;
+        for r in rows {
+            expected_dev_refs.push(r.map_err(|e| format!("读取 dev refs 失败: {}", e))?);
+        }
+    }
+
+    // 5. fam normalized paths set (for missing detection)
+    let mut fam_paths: HashSet<String> = HashSet::new();
+    {
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT normalized_path FROM line_fam_property WHERE project_id = ?1")
+            .map_err(|e| format!("预处理 fam paths 失败: {}", e))?;
+        let rows = stmt
+            .query_map(params![project_id], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("查询 fam paths 失败: {}", e))?;
+        for r in rows {
+            fam_paths.insert(r.map_err(|e| format!("读取 fam paths 失败: {}", e))?);
+        }
+    }
+
+    // 6. dev normalized paths set
+    let mut dev_paths: HashSet<String> = HashSet::new();
+    {
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT normalized_path FROM line_dev_property WHERE project_id = ?1")
+            .map_err(|e| format!("预处理 dev paths 失败: {}", e))?;
+        let rows = stmt
+            .query_map(params![project_id], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("查询 dev paths 失败: {}", e))?;
+        for r in rows {
+            dev_paths.insert(r.map_err(|e| format!("读取 dev paths 失败: {}", e))?);
+        }
+    }
+
+    // 7. missing fam sources: expected refs not in fam_paths (sorted)
+    let mut missing_fam: Vec<String> = expected_fam_refs
+        .iter()
+        .filter(|r| !fam_paths.contains(*r))
+        .cloned()
+        .collect();
+    missing_fam.sort();
+
+    // 8. missing dev sources
+    let mut missing_dev: Vec<String> = expected_dev_refs
+        .iter()
+        .filter(|r| !dev_paths.contains(*r))
+        .cloned()
+        .collect();
+    missing_dev.sort();
+
+    Ok(LineAttrDiagnostic {
+        fam_source_count,
+        dev_source_count,
+        expected_fam_ref_count: expected_fam_refs.len() as u64,
+        expected_dev_ref_count: expected_dev_refs.len() as u64,
+        missing_fam_sources: missing_fam,
+        missing_dev_sources: missing_dev,
+    })
+}
+
 /// Tauri command：校验 GIM 缓存完整性（只读，不修复）
 ///
 /// v4 增强：根据 project_type 分支校验逻辑
 /// - transmission_line：valid = parser_version_match && line_cbm_node_count > 0
 /// - substation（或 null/unknown）：保持原有 IFC/cache 校验逻辑
+///
+/// v5 增强（transmission_line 分支）：
+/// - valid 增加 line_fam_source_count > 0 条件（FAM 属性必须存在）
+/// - 输出 line_dev_source_count / line_expected_fam_ref_count / missing_* 诊断字段
 #[tauri::command]
 pub fn validate_gim_cache(
     state: tauri::State<'_, DbState>,
@@ -1465,13 +1904,22 @@ pub fn validate_gim_cache(
         .unwrap_or(false);
 
     // v4: 根据 project_type 分支校验
-    // transmission_line：只需 parser_version 匹配 + line_cbm_node_count > 0
+    // v5: transmission_line 增加 line_fam_source_count > 0 条件
     // substation（或 null/unknown）：保持原有 IFC/cache 校验逻辑
     let is_line = project_type.as_deref() == Some("transmission_line");
 
+    // v5: 线路工程计算 FAM/DEV 属性诊断字段（非线路工程返回全零/空，不影响结果）
+    let line_attr_diag = if is_line {
+        compute_line_attr_diagnostic(&conn, project_id)?
+    } else {
+        LineAttrDiagnostic::default()
+    };
+
     let (ifc_entry_count, cached_ifc_count, missing_cache_paths, valid) = if is_line {
-        // 线路工程：不检查 IFC 缓存
-        let valid = parser_version_match && line_cbm_node_count > 0;
+        // 线路工程：不检查 IFC 缓存；v5 要求 FAM 属性源存在
+        let valid = parser_version_match
+            && line_cbm_node_count > 0
+            && line_attr_diag.fam_source_count > 0;
         (0u64, 0u64, Vec::new(), valid)
     } else {
         // 变电工程：保持原有 IFC 缓存校验
@@ -1544,6 +1992,13 @@ pub fn validate_gim_cache(
         valid,
         project_type,
         line_cbm_node_count: line_cbm_node_count as u64,
+        // v5: 线路工程 FAM/DEV 属性诊断字段
+        line_fam_source_count: line_attr_diag.fam_source_count,
+        line_dev_source_count: line_attr_diag.dev_source_count,
+        line_expected_fam_ref_count: line_attr_diag.expected_fam_ref_count,
+        line_expected_dev_ref_count: line_attr_diag.expected_dev_ref_count,
+        missing_line_fam_sources: line_attr_diag.missing_fam_sources,
+        missing_line_dev_sources: line_attr_diag.missing_dev_sources,
     })
 }
 
@@ -1613,6 +2068,16 @@ pub struct ProjectCacheDiagnostic {
     pub line_cbm_child_count: u64,
     pub line_cbm_ref_count: u64,
     pub line_file_stat_count: u64,
+
+    // v5: 线路工程 FAM/DEV 属性缓存诊断
+    pub line_fam_property_count: u64,
+    pub line_dev_property_count: u64,
+    pub line_fam_source_count: u64,
+    pub line_dev_source_count: u64,
+    pub line_expected_fam_ref_count: u64,
+    pub line_expected_dev_ref_count: u64,
+    pub missing_line_fam_sources: Vec<String>,
+    pub missing_line_dev_sources: Vec<String>,
 }
 
 /// 返回当前 SQLite 文件路径
@@ -1665,6 +2130,9 @@ pub fn get_project_cache_diagnostic(
     let line_cbm_child_count = count_rows(&conn, "line_cbm_child", project_id)?;
     let line_cbm_ref_count = count_rows(&conn, "line_cbm_ref", project_id)?;
     let line_file_stat_count = count_rows(&conn, "line_file_stat", project_id)?;
+    // v5: 线路工程 FAM/DEV 属性表统计
+    let line_fam_property_count = count_rows(&conn, "line_fam_property", project_id)?;
+    let line_dev_property_count = count_rows(&conn, "line_dev_property", project_id)?;
     let has_index = cbm_nodes_count > 0 || ifc_models_count > 0 || line_cbm_node_count > 0;
 
     // 3. 查询 IFC entry 并诊断每个缓存文件
@@ -1778,11 +2246,19 @@ pub fn get_project_cache_diagnostic(
     }
 
     // v4: 根据 project_type 分支 valid 判断
-    // - transmission_line：只需 parser_version 匹配 + line_cbm_node_count > 0
+    // v5: transmission_line 增加 line_fam_source_count > 0 条件
     // - substation（或 null/unknown）：保持原有 IFC 缓存校验逻辑
     let is_line = project_type.as_deref() == Some("transmission_line");
+    // v5: 线路工程计算 FAM/DEV 属性诊断字段
+    let line_attr_diag = if is_line {
+        compute_line_attr_diagnostic(&conn, project_id)?
+    } else {
+        LineAttrDiagnostic::default()
+    };
     let valid = if is_line {
-        parser_version_match && line_cbm_node_count > 0
+        parser_version_match
+            && line_cbm_node_count > 0
+            && line_attr_diag.fam_source_count > 0
     } else {
         has_index
             && ifc_models_count > 0
@@ -1824,6 +2300,15 @@ pub fn get_project_cache_diagnostic(
         line_cbm_child_count: line_cbm_child_count as u64,
         line_cbm_ref_count: line_cbm_ref_count as u64,
         line_file_stat_count: line_file_stat_count as u64,
+        // v5: 线路工程 FAM/DEV 属性缓存诊断
+        line_fam_property_count: line_fam_property_count as u64,
+        line_dev_property_count: line_dev_property_count as u64,
+        line_fam_source_count: line_attr_diag.fam_source_count,
+        line_dev_source_count: line_attr_diag.dev_source_count,
+        line_expected_fam_ref_count: line_attr_diag.expected_fam_ref_count,
+        line_expected_dev_ref_count: line_attr_diag.expected_dev_ref_count,
+        missing_line_fam_sources: line_attr_diag.missing_fam_sources,
+        missing_line_dev_sources: line_attr_diag.missing_dev_sources,
     })
 }
 
