@@ -242,9 +242,9 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
     // v5: 线路工程 FAM/DEV 属性缓存表
     // line_fam_property：display_key 为中文展示键，prop_key 为英文键，prop_value 可含 =
     // line_dev_property：普通 KEY=VALUE，无 display_key
+    // 使用复合 PRIMARY KEY（同 line_file_stat 模式），不设自增 id 列
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS line_fam_property (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER NOT NULL,
             source_path TEXT NOT NULL,
             normalized_path TEXT NOT NULL,
@@ -262,7 +262,6 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
         CREATE INDEX IF NOT EXISTS idx_line_fam_property_filename ON line_fam_property(project_id, file_name_lower);
 
         CREATE TABLE IF NOT EXISTS line_dev_property (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER NOT NULL,
             source_path TEXT NOT NULL,
             normalized_path TEXT NOT NULL,
@@ -1701,7 +1700,7 @@ pub fn get_line_attributes(
 
     // 1. line_fam_property
     let mut stmt = conn
-        .prepare("SELECT source_path, normalized_path, file_name_lower, display_key, prop_key, prop_value, raw_line, sort_order FROM line_fam_property WHERE project_id = ?1 ORDER BY normalized_path ASC, sort_order ASC, id ASC")
+        .prepare("SELECT source_path, normalized_path, file_name_lower, display_key, prop_key, prop_value, raw_line, sort_order FROM line_fam_property WHERE project_id = ?1 ORDER BY normalized_path ASC, prop_key ASC, sort_order ASC")
         .map_err(|e| format!("预处理 line_fam_property 失败: {}", e))?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(LineFamPropertyRecord {
@@ -1720,7 +1719,7 @@ pub fn get_line_attributes(
 
     // 2. line_dev_property
     let mut stmt = conn
-        .prepare("SELECT source_path, normalized_path, file_name_lower, prop_key, prop_value, raw_line, sort_order FROM line_dev_property WHERE project_id = ?1 ORDER BY normalized_path ASC, sort_order ASC, id ASC")
+        .prepare("SELECT source_path, normalized_path, file_name_lower, prop_key, prop_value, raw_line, sort_order FROM line_dev_property WHERE project_id = ?1 ORDER BY normalized_path ASC, prop_key ASC, sort_order ASC")
         .map_err(|e| format!("预处理 line_dev_property 失败: {}", e))?;
     let rows = stmt.query_map(params![project_id], |row| {
         Ok(LineDevPropertyRecord {
