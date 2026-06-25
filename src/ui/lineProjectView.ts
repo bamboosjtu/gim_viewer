@@ -89,16 +89,17 @@ function renderLineTreeNode(
 function renderLineFileSummary(graph: GimGraph): void {
   fileDevPanel.innerHTML = '';
   const stats = graph.stats;
-  const fbt = graph.filesByType;
 
+  // 文件计数统一从 stats 读取（与缓存恢复路径一致：
+  // 缓存命中时 filesByType 数组为空，计数仅存在于 stats）
   const summary: [string, string][] = [
-    ['CBM 文件', String(fbt.cbm.length)],
-    ['DEV 文件', String(fbt.dev.length)],
-    ['FAM 文件', String(fbt.fam.length)],
-    ['PHM 文件', String(fbt.phm.length)],
-    ['MOD 文件', String(fbt.mod.length)],
-    ['STL 文件', String(fbt.stl.length)],
-    ['IFC 文件', String(fbt.ifc.length)],
+    ['CBM 文件', String(stats.CBM || 0)],
+    ['DEV 文件', String(stats.DEV || 0)],
+    ['FAM 文件', String(stats.FAM || 0)],
+    ['PHM 文件', String(stats.PHM || 0)],
+    ['MOD 文件', String(stats.MOD || 0)],
+    ['STL 文件', String(stats.STL || 0)],
+    ['IFC 文件', String(stats.IFC || 0)],
     ['—', '—'],
     ['F1System', String(stats.F1System || 0)],
     ['F2System', String(stats.F2System || 0)],

@@ -214,6 +214,10 @@ export interface GimCacheValidation {
   current_parser_version: string;
   parser_version_match: boolean;
   valid: boolean;
+  /** v4: 工程类型（substation / transmission_line / hybrid / unknown），决定缓存校验分支 */
+  project_type: string | null;
+  /** v4: line_cbm_node 表行数（transmission_line 缓存校验用） */
+  line_cbm_node_count: number;
 }
 
 /**
@@ -406,4 +410,111 @@ export async function validateFragmentCache(
     entryPath,
     sourceIfcSize,
   });
+}
+
+// ==================== 线路工程图缓存（v4） ====================
+
+/** line_cbm_node 写入 payload（对应 GimGraphNode） */
+export interface LineCbmNodePayload {
+  path: string;
+  name: string | null;
+  entity_name: string | null;
+  classify_name: string | null;
+  raw_props_json: string;
+  sort_order: number | null;
+}
+
+/** line_cbm_child 写入 payload（父→子关系） */
+export interface LineCbmChildPayload {
+  parent_path: string;
+  child_path: string;
+  sort_order: number | null;
+  ref_type: string;
+  extra: string | null;
+}
+
+/** line_cbm_ref 写入 payload（节点引用清单） */
+export interface LineCbmRefPayload {
+  node_path: string;
+  ref_kind: string;
+  ref_key: string | null;
+  ref_value: string;
+  sort_order: number | null;
+}
+
+/** line_file_stat 写入 payload（文件类型统计） */
+export interface LineFileStatPayload {
+  file_type: string;
+  count: number;
+}
+
+/** 线路工程图完整写入 payload */
+export interface LineGraphPayload {
+  project_id: number;
+  project_type: string;
+  nodes: LineCbmNodePayload[];
+  children: LineCbmChildPayload[];
+  refs: LineCbmRefPayload[];
+  file_stats: LineFileStatPayload[];
+}
+
+/**
+ * 在 Tauri 环境下保存线路工程图缓存（事务：先删后插 + 更新 project_type）。
+ */
+export async function saveLineGraph(payload: LineGraphPayload): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke<void>('save_line_gim_graph', { payload });
+}
+
+// ===== 线路工程图读取 =====
+
+/** line_cbm_node 读取记录 */
+export interface LineCbmNodeRecord {
+  path: string;
+  name: string | null;
+  entity_name: string | null;
+  classify_name: string | null;
+  raw_props_json: string;
+  sort_order: number | null;
+}
+
+/** line_cbm_child 读取记录 */
+export interface LineCbmChildRecord {
+  parent_path: string;
+  child_path: string;
+  sort_order: number | null;
+  ref_type: string;
+  extra: string | null;
+}
+
+/** line_cbm_ref 读取记录 */
+export interface LineCbmRefRecord {
+  node_path: string;
+  ref_kind: string;
+  ref_key: string | null;
+  ref_value: string;
+  sort_order: number | null;
+}
+
+/** line_file_stat 读取记录 */
+export interface LineFileStatRecord {
+  file_type: string;
+  count: number;
+}
+
+/** 线路工程图完整读取结果 */
+export interface LineGraphResult {
+  project_type: string | null;
+  nodes: LineCbmNodeRecord[];
+  children: LineCbmChildRecord[];
+  refs: LineCbmRefRecord[];
+  file_stats: LineFileStatRecord[];
+}
+
+/**
+ * 完整读取线路工程图缓存（只读）。
+ */
+export async function getLineGraph(projectId: number): Promise<LineGraphResult> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<LineGraphResult>('get_line_gim_graph', { projectId });
 }

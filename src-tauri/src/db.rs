@@ -8,7 +8,8 @@ use tauri::Manager;
 /// 当前解析器版本（变更解析逻辑时递增，用于缓存失效）
 /// v2: 增加 fam_property / dev_property 表，缓存 CBM/FAM/DEV 基础属性
 /// v3: validate cache requires cbm_node index; rebuild incomplete v2 cache
-pub const PARSER_VERSION: &str = "gim-parser-v3";
+/// v4: adds transmission_line graph cache (line_cbm_node/child/ref/file_stat)
+pub const PARSER_VERSION: &str = "gim-parser-v4";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
@@ -178,6 +179,59 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
 
     // 兼容旧库：给 gim_project 增加 parser_version 列（已存在则忽略）
     let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN parser_version TEXT", []);
+
+    // v4: 给 gim_project 增加 project_type 列（substation / transmission_line / hybrid / unknown）
+    let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN project_type TEXT", []);
+
+    // v4: 线路工程图缓存表
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS line_cbm_node (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            path TEXT NOT NULL,
+            name TEXT,
+            entity_name TEXT,
+            classify_name TEXT,
+            raw_props_json TEXT NOT NULL,
+            sort_order INTEGER,
+            created_at_ms INTEGER NOT NULL,
+            UNIQUE(project_id, path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_line_cbm_node_project ON line_cbm_node(project_id);
+
+        CREATE TABLE IF NOT EXISTS line_cbm_child (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            parent_path TEXT NOT NULL,
+            child_path TEXT NOT NULL,
+            sort_order INTEGER,
+            ref_type TEXT NOT NULL,
+            extra TEXT,
+            created_at_ms INTEGER NOT NULL,
+            UNIQUE(project_id, parent_path, child_path, ref_type)
+        );
+        CREATE INDEX IF NOT EXISTS idx_line_cbm_child_parent ON line_cbm_child(project_id, parent_path);
+
+        CREATE TABLE IF NOT EXISTS line_cbm_ref (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            node_path TEXT NOT NULL,
+            ref_kind TEXT NOT NULL,
+            ref_key TEXT,
+            ref_value TEXT NOT NULL,
+            sort_order INTEGER,
+            created_at_ms INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_line_cbm_ref_node ON line_cbm_ref(project_id, node_path);
+
+        CREATE TABLE IF NOT EXISTS line_file_stat (
+            project_id INTEGER NOT NULL,
+            file_type TEXT NOT NULL,
+            count INTEGER NOT NULL,
+            PRIMARY KEY(project_id, file_type)
+        );",
+    )
+    .map_err(|e| format!("初始化线路工程缓存表失败: {}", e))?;
 
     Ok(conn)
 }
@@ -425,10 +479,10 @@ pub fn save_gim_index(
         .map_err(|e| format!("插入 dev_property 失败: {}", e))?;
     }
 
-    // 索引完整写入后，更新 gim_project.parser_version 为当前版本
+    // 索引完整写入后，更新 gim_project.parser_version 和 project_type 为当前版本
     // 只有事务成功提交后，缓存版本才会升级
     tx.execute(
-        "UPDATE gim_project SET parser_version = ?1, updated_at_ms = ?2 WHERE id = ?3",
+        "UPDATE gim_project SET parser_version = ?1, project_type = 'substation', updated_at_ms = ?2 WHERE id = ?3",
         params![PARSER_VERSION, now, pid],
     )
     .map_err(|e| format!("更新 parser_version 失败: {}", e))?;
@@ -905,6 +959,10 @@ pub struct GimCacheValidation {
     pub current_parser_version: String,
     pub parser_version_match: bool,
     pub valid: bool,
+    /// v4: 工程类型（substation / transmission_line / hybrid / unknown）
+    pub project_type: Option<String>,
+    /// v4: line_cbm_node 表行数（transmission_line 缓存校验用）
+    pub line_cbm_node_count: u64,
 }
 
 fn row_to_gim_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<GimEntryRecord> {
@@ -1078,7 +1136,264 @@ pub fn get_gim_index(
     })
 }
 
+// ===== 线路工程图缓存（v4） =====
+
+#[derive(Debug, Deserialize)]
+pub struct LineCbmNodePayload {
+    pub path: String,
+    pub name: Option<String>,
+    pub entity_name: Option<String>,
+    pub classify_name: Option<String>,
+    pub raw_props_json: String,
+    pub sort_order: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LineCbmChildPayload {
+    pub parent_path: String,
+    pub child_path: String,
+    pub sort_order: Option<i64>,
+    pub ref_type: String,
+    pub extra: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LineCbmRefPayload {
+    pub node_path: String,
+    pub ref_kind: String,
+    pub ref_key: Option<String>,
+    pub ref_value: String,
+    pub sort_order: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LineFileStatPayload {
+    pub file_type: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LineGraphPayload {
+    pub project_id: i64,
+    pub project_type: String,
+    pub nodes: Vec<LineCbmNodePayload>,
+    pub children: Vec<LineCbmChildPayload>,
+    pub refs: Vec<LineCbmRefPayload>,
+    pub file_stats: Vec<LineFileStatPayload>,
+}
+
+/// Tauri command：保存线路工程图缓存（事务：先删后插 + 更新 project_type）
+#[tauri::command]
+pub fn save_line_gim_graph(
+    state: tauri::State<'_, DbState>,
+    payload: LineGraphPayload,
+) -> Result<(), String> {
+    let mut conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let tx = conn.transaction().map_err(|e| format!("开启事务失败: {}", e))?;
+    let now = now_ms();
+    let pid = payload.project_id;
+
+    // 先删除旧线路索引
+    tx.execute("DELETE FROM line_cbm_node WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 line_cbm_node 失败: {}", e))?;
+    tx.execute("DELETE FROM line_cbm_child WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 line_cbm_child 失败: {}", e))?;
+    tx.execute("DELETE FROM line_cbm_ref WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 line_cbm_ref 失败: {}", e))?;
+    tx.execute("DELETE FROM line_file_stat WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 line_file_stat 失败: {}", e))?;
+
+    // line_cbm_node
+    for n in &payload.nodes {
+        tx.execute(
+            "INSERT INTO line_cbm_node (project_id, path, name, entity_name, classify_name, raw_props_json, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![pid, n.path, n.name, n.entity_name, n.classify_name, n.raw_props_json, n.sort_order, now],
+        )
+        .map_err(|e| format!("插入 line_cbm_node 失败: {}", e))?;
+    }
+
+    // line_cbm_child
+    for c in &payload.children {
+        tx.execute(
+            "INSERT INTO line_cbm_child (project_id, parent_path, child_path, sort_order, ref_type, extra, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![pid, c.parent_path, c.child_path, c.sort_order, c.ref_type, c.extra, now],
+        )
+        .map_err(|e| format!("插入 line_cbm_child 失败: {}", e))?;
+    }
+
+    // line_cbm_ref
+    for r in &payload.refs {
+        tx.execute(
+            "INSERT INTO line_cbm_ref (project_id, node_path, ref_kind, ref_key, ref_value, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![pid, r.node_path, r.ref_kind, r.ref_key, r.ref_value, r.sort_order, now],
+        )
+        .map_err(|e| format!("插入 line_cbm_ref 失败: {}", e))?;
+    }
+
+    // line_file_stat
+    for f in &payload.file_stats {
+        tx.execute(
+            "INSERT INTO line_file_stat (project_id, file_type, count)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(project_id, file_type) DO UPDATE SET count = ?3",
+            params![pid, f.file_type, f.count],
+        )
+        .map_err(|e| format!("插入 line_file_stat 失败: {}", e))?;
+    }
+
+    // 更新 gim_project.parser_version 和 project_type
+    tx.execute(
+        "UPDATE gim_project SET parser_version = ?1, project_type = ?2, updated_at_ms = ?3 WHERE id = ?4",
+        params![PARSER_VERSION, payload.project_type, now, pid],
+    )
+    .map_err(|e| format!("更新 project_type 失败: {}", e))?;
+
+    tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
+    Ok(())
+}
+
+// ===== 线路工程图读取 =====
+
+#[derive(Debug, Serialize)]
+pub struct LineCbmNodeRecord {
+    pub path: String,
+    pub name: Option<String>,
+    pub entity_name: Option<String>,
+    pub classify_name: Option<String>,
+    pub raw_props_json: String,
+    pub sort_order: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LineCbmChildRecord {
+    pub parent_path: String,
+    pub child_path: String,
+    pub sort_order: Option<i64>,
+    pub ref_type: String,
+    pub extra: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LineCbmRefRecord {
+    pub node_path: String,
+    pub ref_kind: String,
+    pub ref_key: Option<String>,
+    pub ref_value: String,
+    pub sort_order: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LineFileStatRecord {
+    pub file_type: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LineGraphResult {
+    pub project_type: Option<String>,
+    pub nodes: Vec<LineCbmNodeRecord>,
+    pub children: Vec<LineCbmChildRecord>,
+    pub refs: Vec<LineCbmRefRecord>,
+    pub file_stats: Vec<LineFileStatRecord>,
+}
+
+/// Tauri command：读取线路工程图缓存
+#[tauri::command]
+pub fn get_line_gim_graph(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+) -> Result<LineGraphResult, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+    // 读取 project_type
+    let project_type: Option<String> = conn
+        .query_row(
+            "SELECT project_type FROM gim_project WHERE id = ?1",
+            params![project_id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+
+    // 1. line_cbm_node
+    let mut stmt = conn
+        .prepare("SELECT path, name, entity_name, classify_name, raw_props_json, sort_order FROM line_cbm_node WHERE project_id = ?1 ORDER BY sort_order ASC, id ASC")
+        .map_err(|e| format!("预处理 line_cbm_node 失败: {}", e))?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(LineCbmNodeRecord {
+            path: row.get(0)?,
+            name: row.get(1)?,
+            entity_name: row.get(2)?,
+            classify_name: row.get(3)?,
+            raw_props_json: row.get(4)?,
+            sort_order: row.get(5)?,
+        })
+    }).map_err(|e| format!("查询 line_cbm_node 失败: {}", e))?;
+    let mut nodes = Vec::new();
+    for r in rows { nodes.push(r.map_err(|e| format!("读取 line_cbm_node 失败: {}", e))?); }
+
+    // 2. line_cbm_child
+    let mut stmt = conn
+        .prepare("SELECT parent_path, child_path, sort_order, ref_type, extra FROM line_cbm_child WHERE project_id = ?1 ORDER BY parent_path ASC, sort_order ASC, id ASC")
+        .map_err(|e| format!("预处理 line_cbm_child 失败: {}", e))?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(LineCbmChildRecord {
+            parent_path: row.get(0)?,
+            child_path: row.get(1)?,
+            sort_order: row.get(2)?,
+            ref_type: row.get(3)?,
+            extra: row.get(4)?,
+        })
+    }).map_err(|e| format!("查询 line_cbm_child 失败: {}", e))?;
+    let mut children = Vec::new();
+    for r in rows { children.push(r.map_err(|e| format!("读取 line_cbm_child 失败: {}", e))?); }
+
+    // 3. line_cbm_ref
+    let mut stmt = conn
+        .prepare("SELECT node_path, ref_kind, ref_key, ref_value, sort_order FROM line_cbm_ref WHERE project_id = ?1 ORDER BY node_path ASC, ref_kind ASC, sort_order ASC, id ASC")
+        .map_err(|e| format!("预处理 line_cbm_ref 失败: {}", e))?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(LineCbmRefRecord {
+            node_path: row.get(0)?,
+            ref_kind: row.get(1)?,
+            ref_key: row.get(2)?,
+            ref_value: row.get(3)?,
+            sort_order: row.get(4)?,
+        })
+    }).map_err(|e| format!("查询 line_cbm_ref 失败: {}", e))?;
+    let mut refs = Vec::new();
+    for r in rows { refs.push(r.map_err(|e| format!("读取 line_cbm_ref 失败: {}", e))?); }
+
+    // 4. line_file_stat
+    let mut stmt = conn
+        .prepare("SELECT file_type, count FROM line_file_stat WHERE project_id = ?1 ORDER BY file_type ASC")
+        .map_err(|e| format!("预处理 line_file_stat 失败: {}", e))?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(LineFileStatRecord {
+            file_type: row.get(0)?,
+            count: row.get(1)?,
+        })
+    }).map_err(|e| format!("查询 line_file_stat 失败: {}", e))?;
+    let mut file_stats = Vec::new();
+    for r in rows { file_stats.push(r.map_err(|e| format!("读取 line_file_stat 失败: {}", e))?); }
+
+    Ok(LineGraphResult {
+        project_type,
+        nodes,
+        children,
+        refs,
+        file_stats,
+    })
+}
+
 /// Tauri command：校验 GIM 缓存完整性（只读，不修复）
+///
+/// v4 增强：根据 project_type 分支校验逻辑
+/// - transmission_line：valid = parser_version_match && line_cbm_node_count > 0
+/// - substation（或 null/unknown）：保持原有 IFC/cache 校验逻辑
 #[tauri::command]
 pub fn validate_gim_cache(
     state: tauri::State<'_, DbState>,
@@ -1089,73 +1404,87 @@ pub fn validate_gim_cache(
     let cbm_nodes_count = count_rows(&conn, "cbm_node", project_id)?;
     let ifc_models_count = count_rows(&conn, "ifc_model", project_id)?;
     let file_dev_entries_count = count_rows(&conn, "file_dev_entry", project_id)?;
-    let has_index = cbm_nodes_count > 0 || ifc_models_count > 0;
+    let line_cbm_node_count = count_rows(&conn, "line_cbm_node", project_id)?;
+    let has_index = cbm_nodes_count > 0 || ifc_models_count > 0 || line_cbm_node_count > 0;
 
-    // 校验 parser_version
-    let stored_parser_version: Option<String> = conn
+    // 读取 parser_version 和 project_type
+    let (stored_parser_version, project_type): (Option<String>, Option<String>) = conn
         .query_row(
-            "SELECT parser_version FROM gim_project WHERE id = ?1",
+            "SELECT parser_version, project_type FROM gim_project WHERE id = ?1",
             params![project_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .ok();
+        .ok()
+        .unwrap_or((None, None));
     let parser_version_match = stored_parser_version
         .as_deref()
         .map(|v| v == PARSER_VERSION)
         .unwrap_or(false);
 
-    // 查询 entry_type='IFC' 的记录（含 file_size 用于校验缓存文件大小）
-    let mut stmt = conn
-        .prepare(
-            "SELECT entry_path, local_cache_path, file_size
-             FROM gim_entry
-             WHERE project_id = ?1 AND entry_type = 'IFC'",
-        )
-        .map_err(|e| format!("预处理 IFC entry 失败: {}", e))?;
-    let rows = stmt
-        .query_map(params![project_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, i64>(2)?,
-            ))
-        })
-        .map_err(|e| format!("查询 IFC entry 失败: {}", e))?;
+    // v4: 根据 project_type 分支校验
+    // transmission_line：只需 parser_version 匹配 + line_cbm_node_count > 0
+    // substation（或 null/unknown）：保持原有 IFC/cache 校验逻辑
+    let is_line = project_type.as_deref() == Some("transmission_line");
 
-    let mut cached_ifc_count: u64 = 0;
-    let mut ifc_entry_count: u64 = 0;
-    let mut missing_cache_paths: Vec<String> = Vec::new();
-    for r in rows {
-        let (entry_path, local_cache_path, expected_size) = r.map_err(|e| format!("读取 IFC entry 失败: {}", e))?;
-        ifc_entry_count += 1;
-        match local_cache_path {
-            Some(p) if !p.is_empty() => {
-                let path = std::path::Path::new(&p);
-                if path.exists() {
-                    // 校验文件大小一致
-                    let actual_size = stdfs::metadata(path).map(|m| m.len()).unwrap_or(0);
-                    if actual_size as i64 == expected_size {
-                        cached_ifc_count += 1;
+    let (ifc_entry_count, cached_ifc_count, missing_cache_paths, valid) = if is_line {
+        // 线路工程：不检查 IFC 缓存
+        let valid = parser_version_match && line_cbm_node_count > 0;
+        (0u64, 0u64, Vec::new(), valid)
+    } else {
+        // 变电工程：保持原有 IFC 缓存校验
+        let mut stmt = conn
+            .prepare(
+                "SELECT entry_path, local_cache_path, file_size
+                 FROM gim_entry
+                 WHERE project_id = ?1 AND entry_type = 'IFC'",
+            )
+            .map_err(|e| format!("预处理 IFC entry 失败: {}", e))?;
+        let rows = stmt
+            .query_map(params![project_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })
+            .map_err(|e| format!("查询 IFC entry 失败: {}", e))?;
+
+        let mut cached_ifc_count: u64 = 0;
+        let mut ifc_entry_count: u64 = 0;
+        let mut missing_cache_paths: Vec<String> = Vec::new();
+        for r in rows {
+            let (entry_path, local_cache_path, expected_size) = r.map_err(|e| format!("读取 IFC entry 失败: {}", e))?;
+            ifc_entry_count += 1;
+            match local_cache_path {
+                Some(p) if !p.is_empty() => {
+                    let path = std::path::Path::new(&p);
+                    if path.exists() {
+                        let actual_size = stdfs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                        if actual_size as i64 == expected_size {
+                            cached_ifc_count += 1;
+                        } else {
+                            missing_cache_paths.push(format!("{} (大小不匹配: 期望 {}, 实际 {})", entry_path, expected_size, actual_size));
+                        }
                     } else {
-                        missing_cache_paths.push(format!("{} (大小不匹配: 期望 {}, 实际 {})", entry_path, expected_size, actual_size));
+                        missing_cache_paths.push(entry_path);
                     }
-                } else {
+                }
+                _ => {
                     missing_cache_paths.push(entry_path);
                 }
             }
-            _ => {
-                missing_cache_paths.push(entry_path);
-            }
         }
-    }
 
-    let valid = has_index
-        && ifc_models_count > 0
-        && ifc_entry_count > 0
-        && cbm_nodes_count > 0
-        && cached_ifc_count == ifc_entry_count
-        && missing_cache_paths.is_empty()
-        && parser_version_match;
+        let valid = has_index
+            && ifc_models_count > 0
+            && ifc_entry_count > 0
+            && cbm_nodes_count > 0
+            && cached_ifc_count == ifc_entry_count
+            && missing_cache_paths.is_empty()
+            && parser_version_match;
+
+        (ifc_entry_count, cached_ifc_count, missing_cache_paths, valid)
+    };
 
     Ok(GimCacheValidation {
         project_id,
@@ -1170,6 +1499,8 @@ pub fn validate_gim_cache(
         current_parser_version: PARSER_VERSION.to_string(),
         parser_version_match,
         valid,
+        project_type,
+        line_cbm_node_count: line_cbm_node_count as u64,
     })
 }
 

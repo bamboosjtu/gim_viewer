@@ -84,6 +84,8 @@ pub fn run() {
             db::upsert_fragment_cache_record,
             db::get_fragment_cache_record,
             db::validate_fragment_cache,
+            db::save_line_gim_graph,
+            db::get_line_gim_graph,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

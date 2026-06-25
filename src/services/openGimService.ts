@@ -185,6 +185,17 @@ async function openGimFromArrayBuffer(
     const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
     renderLineProjectPanels(state, graph, showMessage);
 
+    // v4: 首次完整解析后写入线路工程图缓存
+    if (options?.persistIndex && options.projectId != null && isTauri()) {
+      showLoading('正在写入线路工程索引...');
+      try {
+        const { saveLineGraph } = await import('./lineGraphPersistenceService.js');
+        await saveLineGraph(options.projectId, graph);
+      } catch (err) {
+        console.error('[Tauri] 线路工程图缓存写入失败:', err);
+      }
+    }
+
     hideLoading();
     // 轻量状态提示
     showLoading('线路工程已加载，当前为结构浏览模式');
@@ -305,6 +316,31 @@ export async function openGimWithDialog(
         try {
           // 清空上一次 GIM 的状态（含线路工程字段），避免残留
           state.resetGimState();
+
+          // v4: 线路工程缓存命中 → 从 SQLite 恢复 GimGraph，跳过解压
+          if (validation.project_type === 'transmission_line') {
+            showLoading('正在从本地缓存恢复线路工程索引...');
+            const { getLineGraph } = await import('../desktop/database.js');
+            const { restoreLineGraphToState } = await import('./lineGraphRestoreService.js');
+            const result = await getLineGraph(record.id);
+            const graph = restoreLineGraphToState(state, result);
+            state.currentProjectId = record.id;
+
+            const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
+            renderLineProjectPanels(state, graph, showMessage);
+            emptyTipEl.style.display = 'none';
+
+            hideLoading();
+            showLoading('已从本地缓存恢复线路工程索引');
+            setTimeout(hideLoading, 3000);
+            console.log('[Tauri] 线路工程缓存短路生效：未读取原始 GIM，未执行解压', {
+              project_id: record.id,
+              nodes: graph.stats.total,
+            });
+            return; // 线路工程缓存命中，短路完成
+          }
+
+          // 变电工程缓存命中 → 恢复 GIM 索引（原有逻辑）
           state.currentProjectType = 'substation';
 
           showLoading('正在从本地缓存恢复 GIM 索引...');

@@ -270,12 +270,15 @@ export async function buildLineGimGraph(
 
   const root = await build(entryPath);
 
-  // 5. 补充 MOD/STL 文件数到 stats
-  stats.MOD = filesByType.mod.length;
-  stats.STL = filesByType.stl.length;
-  stats.PHM = filesByType.phm.length;
+  // 5. 补充各类文件数到 stats（与缓存恢复路径保持一致，UI 从 stats 读取计数）
+  stats.CBM = filesByType.cbm.length;
   stats.DEV = filesByType.dev.length;
   stats.FAM = filesByType.fam.length;
+  stats.PHM = filesByType.phm.length;
+  stats.MOD = filesByType.mod.length;
+  stats.STL = filesByType.stl.length;
+  stats.IFC = filesByType.ifc.length;
+  stats.OTHER = filesByType.other.length;
 
   console.log('[GIM] line graph built:', {
     entry: entryPath,

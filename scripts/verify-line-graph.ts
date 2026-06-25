@@ -278,6 +278,173 @@ async function main() {
   console.log('\n=== 验证全部通过（线路工程） ===');
 
   // ============================================================
+  // Line-2 持久化/恢复往返测试：
+  // buildLineGimGraph → buildLineGraphPayload → 模拟 SQLite 读取 → restoreLineGraphToState
+  // 校验 flatten/restore 序列化无损（nodes/children/refs/stats）
+  // ============================================================
+  console.log('\n=== Line-2 持久化/恢复往返测试 ===');
+  const { buildLineGraphPayload } = await import('../src/services/lineGraphPersistenceService.ts');
+  const { restoreLineGraphToState } = await import('../src/services/lineGraphRestoreService.ts');
+  const { AppState } = await import('../src/app/state.ts');
+
+  const payload = buildLineGraphPayload(1, graph);
+  console.log('payload 统计:', {
+    nodes: payload.nodes.length,
+    children: payload.children.length,
+    refs: payload.refs.length,
+    file_stats: payload.file_stats.length,
+    project_type: payload.project_type,
+  });
+
+  // 模拟 get_line_gim_graph 返回（payload 与 record 结构同构）
+  const simulatedResult = {
+    project_type: payload.project_type,
+    nodes: payload.nodes,
+    children: payload.children,
+    refs: payload.refs,
+    file_stats: payload.file_stats,
+  };
+
+  const restoreState = new AppState();
+  const graph2 = restoreLineGraphToState(restoreState, simulatedResult as any);
+
+  // 校验 1：节点总数一致
+  if (graph2.nodesByPath.size !== graph.nodesByPath.size) {
+    console.error(`❌ 节点数不一致：原 ${graph.nodesByPath.size}，恢复 ${graph2.nodesByPath.size}`);
+    process.exit(1);
+  }
+  console.log(`✓ 节点总数一致：${graph2.nodesByPath.size}`);
+
+  // 校验 2：根节点路径一致
+  if (graph2.root?.path !== graph.root?.path) {
+    console.error(`❌ 根节点不一致：原 ${graph.root?.path}，恢复 ${graph2.root?.path}`);
+    process.exit(1);
+  }
+  console.log(`✓ 根节点一致：${graph2.root?.path}`);
+
+  // 校验 3：children 结构一致（递归对比每个节点的子节点路径序列）
+  let childrenMismatch = 0;
+  for (const [path, node1] of graph.nodesByPath) {
+    const node2 = graph2.nodesByPath.get(path);
+    if (!node2) { childrenMismatch++; continue; }
+    const c1 = node1.children.map((c) => c.path).join(',');
+    const c2 = node2.children.map((c) => c.path).join(',');
+    if (c1 !== c2) {
+      childrenMismatch++;
+      if (childrenMismatch <= 3) {
+        console.error(`❌ children 不一致 ${path}：原[${c1}] 恢复[${c2}]`);
+      }
+    }
+  }
+  if (childrenMismatch > 0) {
+    console.error(`❌ children 结构不一致节点数：${childrenMismatch}`);
+    process.exit(1);
+  }
+  console.log('✓ children 结构完全一致');
+
+  // 校验 4：refs 数组字段一致（抽样 cbmFiles/devFiles/famFiles/modFiles）
+  let refsMismatch = 0;
+  const refFields = ['cbmFiles', 'devFiles', 'famFiles', 'phmFiles', 'modFiles', 'stlFiles', 'wireFiles', 'ifcFiles'] as const;
+  for (const [path, node1] of graph.nodesByPath) {
+    const node2 = graph2.nodesByPath.get(path);
+    if (!node2) { refsMismatch++; continue; }
+    for (const f of refFields) {
+      const a1 = node1.refs[f].slice().sort().join('|');
+      const a2 = node2.refs[f].slice().sort().join('|');
+      if (a1 !== a2) {
+        refsMismatch++;
+        if (refsMismatch <= 3) {
+          console.error(`❌ refs.${f} 不一致 ${path}：原[${a1}] 恢复[${a2}]`);
+        }
+      }
+    }
+  }
+  if (refsMismatch > 0) {
+    console.error(`❌ refs 不一致节点数：${refsMismatch}`);
+    process.exit(1);
+  }
+  console.log('✓ refs 数组字段完全一致');
+
+  // 校验 5：rawRefs 一致
+  let rawRefsMismatch = 0;
+  for (const [path, node1] of graph.nodesByPath) {
+    const node2 = graph2.nodesByPath.get(path);
+    if (!node2) { rawRefsMismatch++; continue; }
+    const k1 = Object.keys(node1.refs.rawRefs).sort().join(',');
+    const k2 = Object.keys(node2.refs.rawRefs).sort().join(',');
+    if (k1 !== k2) {
+      rawRefsMismatch++;
+      if (rawRefsMismatch <= 3) console.error(`❌ rawRefs 键不一致 ${path}：原[${k1}] 恢复[${k2}]`);
+      continue;
+    }
+    for (const key of Object.keys(node1.refs.rawRefs)) {
+      const v1 = node1.refs.rawRefs[key].slice().sort().join('|');
+      const v2 = node2.refs.rawRefs[key].slice().sort().join('|');
+      if (v1 !== v2) {
+        rawRefsMismatch++;
+        if (rawRefsMismatch <= 3) console.error(`❌ rawRefs[${key}] 值不一致 ${path}`);
+      }
+    }
+  }
+  if (rawRefsMismatch > 0) {
+    console.error(`❌ rawRefs 不一致节点数：${rawRefsMismatch}`);
+    process.exit(1);
+  }
+  console.log('✓ rawRefs 完全一致');
+
+  // 校验 6：rawProps 一致（抽样第一个节点）
+  const samplePath = graph.root!.path;
+  const sample1 = graph.nodesByPath.get(samplePath)!;
+  const sample2 = graph2.nodesByPath.get(samplePath)!;
+  const props1 = Object.keys(sample1.rawProps).sort();
+  const props2 = Object.keys(sample2.rawProps).sort();
+  if (props1.join(',') !== props2.join(',')) {
+    console.error(`❌ rawProps 键不一致 ${samplePath}`);
+    process.exit(1);
+  }
+  console.log(`✓ rawProps 一致（${props1.length} 键，抽样 ${samplePath}）`);
+
+  // 校验 7：stats 实体计数一致
+  const entityKeys = ['total', 'F1System', 'F2System', 'F3System', 'F4System', 'Tower_Device', 'Wire_Device', 'WIRE', 'CROSS'];
+  let statsMismatch = 0;
+  for (const k of entityKeys) {
+    if (graph.stats[k] !== graph2.stats[k]) {
+      statsMismatch++;
+      console.error(`❌ stats.${k} 不一致：原 ${graph.stats[k]} 恢复 ${graph2.stats[k]}`);
+    }
+  }
+  // 文件统计（CBM/DEV/FAM/PHM/MOD/STL/IFC）应从 line_file_stat 恢复
+  const fileKeys = ['CBM', 'DEV', 'FAM', 'PHM', 'MOD', 'STL', 'IFC'];
+  for (const k of fileKeys) {
+    if (graph.stats[k] !== graph2.stats[k]) {
+      statsMismatch++;
+      console.error(`❌ stats.${k} 不一致：原 ${graph.stats[k]} 恢复 ${graph2.stats[k]}`);
+    }
+  }
+  if (statsMismatch > 0) {
+    console.error(`❌ stats 不一致项数：${statsMismatch}`);
+    process.exit(1);
+  }
+  console.log('✓ stats 完全一致（实体计数 + 文件统计）');
+
+  // 校验 8：state 已正确写入
+  if (restoreState.currentGimGraph !== graph2) {
+    console.error('❌ state.currentGimGraph 未正确写入');
+    process.exit(1);
+  }
+  if (restoreState.currentProjectType !== 'transmission_line') {
+    console.error('❌ state.currentProjectType 不正确');
+    process.exit(1);
+  }
+  if (restoreState.currentFiles !== null) {
+    console.error('❌ state.currentFiles 应为 null（缓存命中）');
+    process.exit(1);
+  }
+  console.log('✓ AppState 已正确写入（currentGimGraph/currentProjectType/currentFiles=null）');
+
+  console.log('\n=== Line-2 持久化/恢复往返测试通过 ===');
+
+  // ============================================================
   // 变电工程回归测试：demo-substation 必须识别为 substation（不能是 hybrid）
   // ============================================================
   console.log('\n=== 变电工程回归测试 ===');
