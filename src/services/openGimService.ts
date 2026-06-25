@@ -164,6 +164,40 @@ async function openGimFromArrayBuffer(
   const { extractGimFile } = await import('../gim/gimExtractor.js');
   showLoading('正在解压 GIM 文件...');
   const extracted = await extractGimFile(ab);
+
+  // 清空上一次 GIM 的状态，避免变电 ↔ 线路切换时残留
+  state.resetGimState();
+
+  // 工程类型识别：线路工程走独立流程，不弹 IFC 模态框，不创建 Viewer
+  showLoading('正在识别工程类型...');
+  const { detectGimProjectType } = await import('../gim/projectType.js');
+  const projectTypeResult = await detectGimProjectType(extracted);
+  state.currentProjectType = projectTypeResult.type;
+
+  if (projectTypeResult.type === 'transmission_line') {
+    // 线路工程流程：构建 GimGraph + 渲染面板，不走 IFC/Viewer 流程
+    showLoading('正在解析线路 CBM 层级...');
+    const { buildLineGimGraph } = await import('../gim/lineCbmParser.js');
+    const graph = await buildLineGimGraph(extracted);
+    state.currentGimGraph = graph;
+    state.currentFiles = extracted; // 保留文件供后续读取
+
+    const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
+    renderLineProjectPanels(state, graph, showMessage);
+
+    hideLoading();
+    // 轻量状态提示
+    showLoading('线路工程已加载，当前为结构浏览模式');
+    setTimeout(hideLoading, 3000);
+    console.log('[GIM] 线路工程已加载（结构浏览模式），跳过 IFC 模态框');
+    return;
+  }
+
+  if (projectTypeResult.type === 'hybrid') {
+    console.warn('[GIM] hybrid project detected, using substation IFC flow first');
+  }
+
+  // 变电工程流程（含 hybrid）：解析 CBM 树 + FileDevRelation + IFC 发现
   showLoading('正在解析 GIM 层级结构...');
   const entries = await onGimExtracted(state, extracted, showMessage);
 
@@ -269,6 +303,10 @@ export async function openGimWithDialog(
       // 3. 缓存命中短路：不 readFileBytes、不 extractGimFile、不创建 Viewer
       if (validation.valid) {
         try {
+          // 清空上一次 GIM 的状态（含线路工程字段），避免残留
+          state.resetGimState();
+          state.currentProjectType = 'substation';
+
           showLoading('正在从本地缓存恢复 GIM 索引...');
           const { restoreGimIndexToState } = await import('./gimIndexRestoreService.js');
 

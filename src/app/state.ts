@@ -1,5 +1,7 @@
 import type { IfcEntry, CbmNode, FileDevEntry } from '../gim/types.js';
 import type * as OBCF from '@thatopen/fragments';
+import type { GimProjectType } from '../gim/projectType.js';
+import type { GimGraph } from '../gim/gimGraphTypes.js';
 
 /** 应用全局状态（由 bootstrap.ts 创建唯一实例，通过参数注入各模块） */
 export class AppState {
@@ -7,6 +9,10 @@ export class AppState {
   currentFiles: Map<string, File> | null = null;
   currentIfcEntries: IfcEntry[] = [];
   currentCbmTree: CbmNode | null = null;
+
+  // 工程类型 + 线路图（线路工程专用；变电工程保持 null）
+  currentProjectType: GimProjectType | null = null;
+  currentGimGraph: GimGraph | null = null;
 
   // 索引
   ifcGuidIndex = new Map<string, CbmNode>(); // "ifcFile:ifcGuid" → CbmNode
@@ -45,6 +51,8 @@ export class AppState {
     this.currentFiles = null;
     this.currentIfcEntries = [];
     this.currentCbmTree = null;
+    this.currentProjectType = null;
+    this.currentGimGraph = null;
     this.ifcGuidIndex.clear();
     this.cbmNodeIndex.clear();
     this.ifcGuidToName.clear();
