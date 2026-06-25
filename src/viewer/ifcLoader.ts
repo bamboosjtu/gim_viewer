@@ -1,7 +1,6 @@
 import * as OBC from '@thatopen/components';
 import type { ViewerContext } from './viewerEngine.js';
 import type { AppState } from '../app/state.js';
-import { loadModelWithFragmentsCache } from './fragmentsCacheLoader.js';
 
 export type ModelEventCallbacks = {
   onModelAdded: (modelId: string) => void;
@@ -59,14 +58,9 @@ export async function ensureEngineReady(
 }
 
 /**
- * 加载 IFC Buffer。
- *
- * @param ctx Viewer 上下文
- * @param name IFC 文件名（用于推导 modelId）
- * @param buffer IFC 文件二进制内容
- * @param state 应用状态
- * @param onProgress IFC 转换进度回调（仅未命中缓存路径会触发）
- * @param entryPath GIM 内部相对路径（作为 Fragments 缓存 key；不传则不启用缓存，走原 IFC load 路径）
+ * 直接加载 IFC Buffer（不启用 Fragments 缓存）。
+ * 用于本地 IFC 打开等无 project_id 的场景。
+ * GIM IFC entry 加载请使用 ifcEntryLoader.loadIfcEntry。
  */
 export async function loadIfcBuffer(
   ctx: ViewerContext,
@@ -74,7 +68,16 @@ export async function loadIfcBuffer(
   buffer: Uint8Array,
   state: AppState,
   onProgress?: (progress: number) => void,
-  entryPath?: string,
 ): Promise<void> {
-  await loadModelWithFragmentsCache(ctx, state, name, buffer, entryPath ?? null, onProgress);
+  const modelId = name.replace(/\.ifc$/i, '');
+
+  if (state.loadedModels.has(modelId)) {
+    console.log(`[IFC Loader] 模型已加载，跳过: ${modelId}`);
+    return;
+  }
+
+  await ctx.ifcLoader.load(buffer, true, modelId, {
+    processData: { progressCallback: (progress) => { onProgress?.(progress); } },
+  });
+  // onItemSet 事件已更新 state.loadedModels
 }

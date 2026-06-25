@@ -6,7 +6,7 @@ import type { CbmNode } from '../gim/types.js';
 import { scanIfcFiles, discoverIfcFromCBM, buildIfcGuidIndex } from '../gim/gimIndexer.js';
 import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
 import { parseFileDevRelation } from '../gim/fileDevParser.js';
-import { ensureEngineReady, loadIfcBuffer } from '../viewer/ifcLoader.js';
+import { ensureEngineReady } from '../viewer/ifcLoader.js';
 import { buildIfcNameIndex } from '../viewer/ifcNameIndex.js';
 import { fitCameraToScene } from '../viewer/camera.js';
 import { openIfcModal, getModalSelectedEntries, closeIfcModal } from '../ui/ifcSelectModal.js';
@@ -107,11 +107,16 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
   showLoading('正在加载 IFC 模型...');
   try {
     await ensureEngineReady(ctx, state, modelCallbacks);
+    const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
     for (const entry of selected) {
-      const buffer = await getIfcBufferForEntry(entry, state);
-      if (!buffer) continue;
       showLoading(`正在加载 ${entry.name}...`);
-      await loadIfcBuffer(ctx, entry.name, buffer, state, (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`), entry.path);
+      await loadIfcEntry(
+        ctx,
+        state,
+        entry,
+        () => getIfcBufferForEntry(entry, state),
+        (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
+      );
     }
     await buildIfcNameIndex(ctx, state);
     // 统一使用 handleNodeClick 作为点击回调

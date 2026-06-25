@@ -10,7 +10,8 @@ use tauri::Manager;
 pub const PARSER_VERSION: &str = "gim-parser-v2";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
-pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v1";
+/// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
+pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v2";
 
 /// GIM 文件元信息（从前端传入，需 Deserialize）
 #[derive(Debug, Deserialize)]
@@ -792,7 +793,12 @@ pub fn validate_fragment_cache(
         .as_ref()
         .map(|v| v == FRAGMENTS_CACHE_VERSION)
         .unwrap_or(false);
-    let size_match = stored_ifc_size.map(|s| s == source_ifc_size).unwrap_or(false);
+    // source_ifc_size = 0 表示跳过大小校验（Fragments 缓存命中路径不读 IFC buffer）
+    let size_match = if source_ifc_size == 0 {
+        true
+    } else {
+        stored_ifc_size.map(|s| s == source_ifc_size).unwrap_or(false)
+    };
 
     // 检查 fragments 文件是否存在且大小 > 0
     let (file_exists, file_size) = match fragment_cache_file_path(&app_handle, project_id, &entry_path) {

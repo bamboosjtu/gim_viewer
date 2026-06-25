@@ -62,7 +62,8 @@ export async function handleNodeClick(
 
   // 5. 加载未加载的 IFC 模型
   if (modelsToLoad.size > 0) {
-    const { ensureEngineReady, loadIfcBuffer } = await import('../viewer/ifcLoader.js');
+    const { ensureEngineReady } = await import('../viewer/ifcLoader.js');
+    const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
     await ensureEngineReady(ctx, state, modelCallbacks);
 
     for (const modelId of modelsToLoad) {
@@ -71,17 +72,14 @@ export async function handleNodeClick(
         console.warn(`[懒加载] 找不到 IFC entry: ${modelId}`);
         continue;
       }
-      const buffer = await getIfcBufferForEntry(entry, state);
-      if (!buffer) continue;
       showMessage(`正在加载 ${entry.name}...`);
       try {
-        await loadIfcBuffer(
+        await loadIfcEntry(
           ctx,
-          entry.name,
-          buffer,
           state,
+          entry,
+          () => getIfcBufferForEntry(entry, state),
           (p) => showMessage(`${entry.name}: ${Math.round(p * 100)}%`),
-          entry.path,
         );
         console.log(`[懒加载] IFC 已加载: ${modelId}`);
       } catch (err) {
