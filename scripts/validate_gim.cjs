@@ -41,11 +41,13 @@ function parseKeyValue(text) {
 function findArchiveOffset(buffer) {
   const v = new Uint8Array(buffer);
   if (v.length < 8) return 0;
-  if (String.fromCharCode(...v.slice(0, 7)) !== 'GIMPKGS') return 0;
-  for (let i = 7; i < Math.min(v.length, 4096) - 5; i++) {
+  const magic = 'GIMPKG';
+  if (String.fromCharCode(...v.slice(0, magic.length)) !== magic) return 0;
+  const limit = Math.min(v.length, 1024 * 1024);
+  for (let i = magic.length; i < limit - 5; i++) {
     if (v[i] === 0x37 && v[i+1] === 0x7a && v[i+2] === 0xbc && v[i+3] === 0xaf && v[i+4] === 0x27 && v[i+5] === 0x1c) return i;
   }
-  for (let i = 7; i < Math.min(v.length, 4096) - 3; i++) {
+  for (let i = magic.length; i < limit - 3; i++) {
     if (v[i] === 0x50 && v[i+1] === 0x4b && v[i+2] === 0x03 && v[i+3] === 0x04) return i;
   }
   return 0;
@@ -104,10 +106,10 @@ async function validate(gimPath) {
   if (offset === 0) {
     const v = new Uint8Array(arrayBuffer);
     const header = String.fromCharCode(...v.slice(0, Math.min(20, v.length)));
-    if (header.startsWith('GIMPKGS')) {
-      addIssue('CRITICAL', '头部', '检测到 GIMPKGS 头部但未找到 7z/ZIP 压缩签名');
+    if (header.startsWith('GIMPKG')) {
+      addIssue('CRITICAL', '头部', '检测到 GIMPKG* 头部但未找到 7z/ZIP 压缩签名');
     } else {
-      addIssue('WARNING', '头部', `未检测到 GIMPKGS 头部，文件前 20 字节: ${header.replace(/[^\x20-\x7E]/g, '.')}`);
+      addIssue('WARNING', '头部', `未检测到 GIMPKG* 头部，文件前 20 字节: ${header.replace(/[^\x20-\x7E]/g, '.')}`);
     }
     printReport();
     return;
@@ -115,7 +117,7 @@ async function validate(gimPath) {
 
   const v = new Uint8Array(arrayBuffer);
   const is7z = v[offset] === 0x37;
-  console.log(`头部: GIMPKGS, 压缩格式: ${is7z ? '7z' : 'ZIP'}, 数据偏移: ${offset}`);
+  console.log(`头部: GIMPKG*, 压缩格式: ${is7z ? '7z' : 'ZIP'}, 数据偏移: ${offset}`);
 
   // ── 3. 提取压缩数据并解压 ──
   console.log('正在解压...');

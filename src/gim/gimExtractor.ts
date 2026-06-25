@@ -9,17 +9,26 @@ async function getArchive() {
   return mod.Archive;
 }
 
+const GIM_PACKAGE_MAGIC = 'GIMPKG';
+const ARCHIVE_SIGNATURE_SEARCH_LIMIT = 1024 * 1024;
+
+function hasGimPackageHeader(v: Uint8Array): boolean {
+  if (v.length < GIM_PACKAGE_MAGIC.length) return false;
+  return String.fromCharCode(...v.slice(0, GIM_PACKAGE_MAGIC.length)) === GIM_PACKAGE_MAGIC;
+}
+
 /** 在 ArrayBuffer 中搜索 7z 或 ZIP 签名的偏移量 */
 export function findArchiveOffset(buffer: ArrayBuffer): number {
   const v = new Uint8Array(buffer);
   if (v.length < 8) return 0;
-  if (String.fromCharCode(...v.slice(0, 7)) !== 'GIMPKGS') return 0;
+  if (!hasGimPackageHeader(v)) return 0;
+  const limit = Math.min(v.length, ARCHIVE_SIGNATURE_SEARCH_LIMIT);
   // 搜索 7z 签名
-  for (let i = 7; i < Math.min(v.length, 4096) - 5; i++) {
+  for (let i = GIM_PACKAGE_MAGIC.length; i < limit - 5; i++) {
     if (v[i] === 0x37 && v[i + 1] === 0x7a && v[i + 2] === 0xbc && v[i + 3] === 0xaf && v[i + 4] === 0x27 && v[i + 5] === 0x1c) return i;
   }
   // 搜索 ZIP 签名
-  for (let i = 7; i < Math.min(v.length, 4096) - 3; i++) {
+  for (let i = GIM_PACKAGE_MAGIC.length; i < limit - 3; i++) {
     if (v[i] === 0x50 && v[i + 1] === 0x4b && v[i + 2] === 0x03 && v[i + 3] === 0x04) return i;
   }
   return 0;
