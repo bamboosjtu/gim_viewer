@@ -48,21 +48,3 @@ export async function cacheIfcEntries(
 
   return { pathMap, errors };
 }
-
-/**
- * 旧函数：遍历 files 中所有 .ifc 文件。
- * @deprecated 请使用 cacheIfcEntries
- */
-export async function cacheExtractedIfcFiles(
-  projectId: number,
-  files: Map<string, File>,
-): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
-  for (const [entryPath, file] of files) {
-    if (!entryPath.toLowerCase().endsWith('.ifc')) continue;
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const localPath = await writeCacheFile(projectId, entryPath, bytes);
-    result.set(entryPath, localPath);
-  }
-  return result;
-}

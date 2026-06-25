@@ -22,30 +22,6 @@ export async function upsertGimProject(info: FileInfo): Promise<GimProjectRecord
   return invoke<GimProjectRecord>('upsert_gim_project', { info });
 }
 
-/**
- * 查询最近打开的 GIM 项目列表（默认 limit = 20）。
- */
-export async function listGimProjects(limit = 20): Promise<GimProjectRecord[]> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<GimProjectRecord[]>('list_gim_projects', { limit });
-}
-
-/**
- * 按 path 查询 GIM 项目记录，不存在返回 null。
- */
-export async function getGimProjectByPath(path: string): Promise<GimProjectRecord | null> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<GimProjectRecord | null>('get_gim_project_by_path', { path });
-}
-
-/**
- * 按 sha256 查询 GIM 项目记录（返回数组，同一内容可能在不同路径）。
- */
-export async function getGimProjectsBySha256(sha256: string): Promise<GimProjectRecord[]> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<GimProjectRecord[]>('get_gim_project_by_sha256', { sha256 });
-}
-
 // ===== GIM 索引入库 =====
 
 export interface GimEntryPayload {
@@ -120,15 +96,6 @@ export async function saveGimIndex(payload: GimIndexPayload): Promise<void> {
 
 // ===== GIM 索引读取 =====
 
-export interface GimIndexStats {
-  project_id: number;
-  entries_count: number;
-  cbm_nodes_count: number;
-  ifc_models_count: number;
-  file_dev_entries_count: number;
-  has_index: boolean;
-}
-
 export interface IfcModelRecord {
   id: number;
   project_id: number;
@@ -154,30 +121,6 @@ export interface CbmNodeRecord {
   transform_matrix: string | null;
   sort_order: number;
   created_at_ms: number;
-}
-
-/**
- * 获取 GIM 索引统计信息。
- */
-export async function getGimIndexStats(projectId: number): Promise<GimIndexStats> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<GimIndexStats>('get_gim_index_stats', { projectId });
-}
-
-/**
- * 列出 ifc_model 表记录。
- */
-export async function listIfcModels(projectId: number): Promise<IfcModelRecord[]> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<IfcModelRecord[]>('list_ifc_models', { projectId });
-}
-
-/**
- * 列出 cbm_node 表记录（默认 limit = 50，仅调试用）。
- */
-export async function listCbmNodes(projectId: number, limit = 50): Promise<CbmNodeRecord[]> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<CbmNodeRecord[]>('list_cbm_nodes', { projectId, limit });
 }
 
 // ===== 缓存文件落盘 =====
@@ -320,12 +263,6 @@ export interface ProjectCacheDiagnostic {
 export async function getDbPath(): Promise<string> {
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<string>('get_db_path');
-}
-
-/** 获取指定项目的缓存诊断 */
-export async function getProjectCacheDiagnostic(projectId: number): Promise<ProjectCacheDiagnostic> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<ProjectCacheDiagnostic>('get_project_cache_diagnostic', { projectId });
 }
 
 /** 获取最近打开项目的缓存诊断 */

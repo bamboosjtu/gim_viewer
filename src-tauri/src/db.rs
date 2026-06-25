@@ -234,78 +234,6 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<GimProjectRecord> 
     })
 }
 
-/// Tauri command：查询最近打开的项目（默认 limit = 20）
-#[tauri::command]
-pub fn list_gim_projects(
-    state: tauri::State<'_, DbState>,
-    limit: Option<u32>,
-) -> Result<Vec<GimProjectRecord>, String> {
-    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    let limit = limit.unwrap_or(20);
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, path, name, size, modified_ms, sha256, created_at_ms, updated_at_ms, last_opened_at_ms
-             FROM gim_project
-             ORDER BY last_opened_at_ms DESC
-             LIMIT ?1",
-        )
-        .map_err(|e| format!("预处理查询失败: {}", e))?;
-    let rows = stmt
-        .query_map(params![limit], row_to_record)
-        .map_err(|e| format!("查询项目列表失败: {}", e))?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(|e| format!("读取项目记录失败: {}", e))?);
-    }
-    Ok(out)
-}
-
-/// Tauri command：按 path 查询项目
-#[tauri::command]
-pub fn get_gim_project_by_path(
-    state: tauri::State<'_, DbState>,
-    path: String,
-) -> Result<Option<GimProjectRecord>, String> {
-    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    let res = conn
-        .query_row(
-            "SELECT id, path, name, size, modified_ms, sha256, created_at_ms, updated_at_ms, last_opened_at_ms
-             FROM gim_project
-             WHERE path = ?1",
-            params![path],
-            row_to_record,
-        );
-    match res {
-        Ok(r) => Ok(Some(r)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(format!("按 path 查询失败: {}", e)),
-    }
-}
-
-/// Tauri command：按 sha256 查询项目（返回数组，同一内容可能在不同路径）
-#[tauri::command]
-pub fn get_gim_project_by_sha256(
-    state: tauri::State<'_, DbState>,
-    sha256: String,
-) -> Result<Vec<GimProjectRecord>, String> {
-    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, path, name, size, modified_ms, sha256, created_at_ms, updated_at_ms, last_opened_at_ms
-             FROM gim_project
-             WHERE sha256 = ?1",
-        )
-        .map_err(|e| format!("预处理查询失败: {}", e))?;
-    let rows = stmt
-        .query_map(params![sha256], row_to_record)
-        .map_err(|e| format!("按 sha256 查询失败: {}", e))?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(|e| format!("读取项目记录失败: {}", e))?);
-    }
-    Ok(out)
-}
-
 // ===== GIM 索引入库 =====
 
 #[derive(Debug, Deserialize)]
@@ -483,17 +411,6 @@ pub fn save_gim_index(
 
 // ===== GIM 索引读取 =====
 
-/// 索引统计信息
-#[derive(Debug, Serialize)]
-pub struct GimIndexStats {
-    pub project_id: i64,
-    pub entries_count: i64,
-    pub cbm_nodes_count: i64,
-    pub ifc_models_count: i64,
-    pub file_dev_entries_count: i64,
-    pub has_index: bool,
-}
-
 /// ifc_model 表完整记录
 #[derive(Debug, Serialize)]
 pub struct IfcModelRecord {
@@ -531,28 +448,6 @@ fn count_rows(conn: &Connection, table: &str, project_id: i64) -> Result<i64, St
         .map_err(|e| format!("统计 {} 失败: {}", table, e))
 }
 
-/// Tauri command：获取 GIM 索引统计
-#[tauri::command]
-pub fn get_gim_index_stats(
-    state: tauri::State<'_, DbState>,
-    project_id: i64,
-) -> Result<GimIndexStats, String> {
-    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    let entries_count = count_rows(&conn, "gim_entry", project_id)?;
-    let cbm_nodes_count = count_rows(&conn, "cbm_node", project_id)?;
-    let ifc_models_count = count_rows(&conn, "ifc_model", project_id)?;
-    let file_dev_entries_count = count_rows(&conn, "file_dev_entry", project_id)?;
-    let has_index = cbm_nodes_count > 0 || ifc_models_count > 0;
-    Ok(GimIndexStats {
-        project_id,
-        entries_count,
-        cbm_nodes_count,
-        ifc_models_count,
-        file_dev_entries_count,
-        has_index,
-    })
-}
-
 fn row_to_ifc_model(row: &rusqlite::Row<'_>) -> rusqlite::Result<IfcModelRecord> {
     Ok(IfcModelRecord {
         id: row.get(0)?,
@@ -582,58 +477,6 @@ fn row_to_cbm_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<CbmNodeRecord> {
         sort_order: row.get(13)?,
         created_at_ms: row.get(14)?,
     })
-}
-
-/// Tauri command：列出 ifc_model 表记录
-#[tauri::command]
-pub fn list_ifc_models(
-    state: tauri::State<'_, DbState>,
-    project_id: i64,
-) -> Result<Vec<IfcModelRecord>, String> {
-    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, project_id, model_id, name, entry_path, created_at_ms
-             FROM ifc_model
-             WHERE project_id = ?1",
-        )
-        .map_err(|e| format!("预处理查询失败: {}", e))?;
-    let rows = stmt
-        .query_map(params![project_id], row_to_ifc_model)
-        .map_err(|e| format!("查询 ifc_model 失败: {}", e))?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(|e| format!("读取 ifc_model 失败: {}", e))?);
-    }
-    Ok(out)
-}
-
-/// Tauri command：列出 cbm_node 表记录（默认 limit = 50，仅调试用）
-#[tauri::command]
-pub fn list_cbm_nodes(
-    state: tauri::State<'_, DbState>,
-    project_id: i64,
-    limit: Option<u32>,
-) -> Result<Vec<CbmNodeRecord>, String> {
-    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    let limit = limit.unwrap_or(50);
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, project_id, node_key, parent_key, path, name, entity_name, classify_name, fam_path, dev_path, ifc_file, ifc_guid, transform_matrix, sort_order, created_at_ms
-             FROM cbm_node
-             WHERE project_id = ?1
-             ORDER BY sort_order ASC
-             LIMIT ?2",
-        )
-        .map_err(|e| format!("预处理查询失败: {}", e))?;
-    let rows = stmt
-        .query_map(params![project_id, limit], row_to_cbm_node)
-        .map_err(|e| format!("查询 cbm_node 失败: {}", e))?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(|e| format!("读取 cbm_node 失败: {}", e))?);
-    }
-    Ok(out)
 }
 
 // ===== 缓存文件落盘 =====
@@ -1072,8 +915,7 @@ pub fn get_db_path(app_handle: tauri::AppHandle) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
-/// 获取指定项目的缓存诊断
-#[tauri::command]
+/// 获取指定项目的缓存诊断（内部函数，被 get_latest_project_cache_diagnostic 调用）
 pub fn get_project_cache_diagnostic(
     state: tauri::State<'_, DbState>,
     project_id: i64,
