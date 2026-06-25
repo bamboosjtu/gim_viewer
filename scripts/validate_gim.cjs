@@ -8,7 +8,7 @@
  * 依赖: 7zip-min (devDependency, 自动安装 7z 二进制)
  *
  * 检查项目:
- *   1. GIM 文件头格式 (GIMPKGS + 压缩签名)
+ *   1. GIM 文件头格式 (GIMPKG* + 压缩签名)
  *   2. 解压后目录结构 (CBM/ DEV/ PHM/ MOD/)
  *   3. CBM 层级完整性 (project.cbm 入口、递归引用无断链)
  *   4. CBM 引用的子文件是否存在 (SUBSYSTEM/SUBDEVICE)

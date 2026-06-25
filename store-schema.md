@@ -17,6 +17,7 @@
 
 ```
 .gim 文件
+  ↓ 检测 GIMPKG* 头部（GIMPKGS=变电 / GIMPKGT=线路）→ 在头部之后 1MB 窗口内搜索 7z/ZIP 签名 → 切到真实压缩数据
   ↓ libarchive.js (WASM) 解压
 Map<path, File> (内存中数万个 File 对象)
   ↓ 递归 await f.text()
