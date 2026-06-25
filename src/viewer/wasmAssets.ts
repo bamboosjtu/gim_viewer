@@ -2,24 +2,85 @@
  * web-ifc WASM 资源路径辅助。
  *
  * WASM 文件由 scripts/copy-web-ifc-wasm.mjs 复制到 public/wasm/，
- * 运行时通过 `${origin}/wasm/web-ifc.wasm` 访问。
+ * 构建后位于 dist/wasm/，通过 document.baseURI 相对路径解析访问。
+ *
+ * 不使用 window.location.origin —— 在 Tauri 生产环境下 origin 可能为空或不可用。
  */
+
+const WEB_IFC_WASM_FILE = 'web-ifc.wasm';
+
+let resolvedWasmBaseUrl: string | null = null;
 
 /** 获取 WASM 基础 URL（始终以 / 结尾） */
 export function getWebIfcWasmBaseUrl(): string {
-  return `${window.location.origin}/wasm/`;
+  if (resolvedWasmBaseUrl) return resolvedWasmBaseUrl;
+  return new URL('./wasm/', document.baseURI).toString();
+}
+
+/** 获取 web-ifc.wasm 完整 URL */
+export function getWebIfcWasmUrl(baseUrl = getWebIfcWasmBaseUrl()): string {
+  return new URL(WEB_IFC_WASM_FILE, baseUrl).toString();
+}
+
+function getWebIfcWasmBaseCandidates(): string[] {
+  const candidates = [
+    new URL('./wasm/', document.baseURI).toString(),
+    new URL('/wasm/', window.location.href).toString(),
+    new URL('./wasm/', window.location.href).toString(),
+  ];
+
+  if (window.location.origin && window.location.origin !== 'null') {
+    candidates.push(`${window.location.origin}/wasm/`);
+  }
+
+  return [...new Set(candidates)];
 }
 
 /**
  * 校验 web-ifc.wasm 是否可访问。
  * 在 initEngine 前调用，提前暴露 fetch 失败问题。
  */
-export async function assertWebIfcWasmAvailable(): Promise<void> {
-  const url = `${getWebIfcWasmBaseUrl()}web-ifc.wasm`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`web-ifc.wasm 不可访问: ${url}, status=${res.status}`);
+export async function resolveWebIfcWasmBaseUrl(): Promise<string> {
+  const candidates = getWebIfcWasmBaseCandidates();
+  let lastError: unknown = null;
+
+  for (const baseUrl of candidates) {
+    const url = getWebIfcWasmUrl(baseUrl);
+    console.log('[WASM] checking web-ifc.wasm:', {
+      url,
+      baseUrl,
+      origin: window.location.origin,
+      href: window.location.href,
+      baseURI: document.baseURI,
+    });
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`status=${res.status}`);
+      }
+
+      const len = Number(res.headers.get('content-length') || '0');
+      console.log('[WASM] web-ifc.wasm 可访问:', { url, baseUrl, status: res.status, contentLength: len });
+      resolvedWasmBaseUrl = baseUrl;
+      return baseUrl;
+    } catch (err) {
+      lastError = err;
+      console.warn('[WASM] web-ifc.wasm 候选路径不可访问:', { url, baseUrl, error: err });
+    }
   }
-  const len = Number(res.headers.get('content-length') || '0');
-  console.log('[WASM] web-ifc.wasm 可访问:', { url, status: res.status, contentLength: len });
+
+  throw new Error(`web-ifc.wasm 不可访问，已尝试: ${candidates.map(getWebIfcWasmUrl).join(', ')}; last=${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+
+export async function assertWebIfcWasmAvailable(): Promise<void> {
+  const baseUrl = await resolveWebIfcWasmBaseUrl();
+  const url = getWebIfcWasmUrl(baseUrl);
+  console.log('[WASM] using web-ifc.wasm:', {
+    url,
+    baseUrl,
+    origin: window.location.origin,
+    href: window.location.href,
+    baseURI: document.baseURI,
+  });
 }

@@ -102,21 +102,35 @@ async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<U
 /** 加载选中的 IFC 文件 */
 export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, modelCallbacks: ModelEventCallbacks): Promise<void> {
   const selected = getModalSelectedEntries(state.currentIfcEntries);
+  console.log('[IFC Modal] loadSelectedIfcFiles start', {
+    selected,
+    currentProjectId: state.currentProjectId,
+    currentFiles: !!state.currentFiles,
+    currentIfcEntries: state.currentIfcEntries,
+    cachedIfcPaths: Array.from(state.cachedIfcPaths.keys()),
+  });
   if (selected.length === 0) return;
   closeIfcModal();
   showLoading('正在加载 IFC 模型...');
   try {
+    console.log('[IFC Modal] before ensureEngineReady');
     await ensureEngineReady(ctx, state, modelCallbacks);
+    console.log('[IFC Modal] after ensureEngineReady');
     const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
     for (const entry of selected) {
       showLoading(`正在加载 ${entry.name}...`);
+      console.log('[IFC Modal] before loadIfcEntry', entry);
       await loadIfcEntry(
         ctx,
         state,
         entry,
-        () => getIfcBufferForEntry(entry, state),
+        async () => {
+          console.log('[IFC Modal] getIfcBuffer called', entry);
+          return getIfcBufferForEntry(entry, state);
+        },
         (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
       );
+      console.log('[IFC Modal] loadIfcEntry done', entry);
     }
     await buildIfcNameIndex(ctx, state);
     // 统一使用 handleNodeClick 作为点击回调
@@ -126,7 +140,11 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
     emptyTipEl.style.display = 'none';
     fitCameraToScene(ctx, state);
   } catch (err) {
-    console.error(err);
+    console.error('[IFC Modal] loadSelectedIfcFiles failed', {
+      error: err,
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : null,
+    });
     showLoading(`IFC 加载失败: ${err instanceof Error ? err.message : String(err)}`);
     setTimeout(hideLoading, 3000);
     return;

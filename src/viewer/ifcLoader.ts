@@ -1,7 +1,7 @@
-import * as OBC from '@thatopen/components';
+import fragmentsWorkerUrl from '@thatopen/fragments/worker?url';
 import type { ViewerContext } from './viewerEngine.js';
 import type { AppState } from '../app/state.js';
-import { getWebIfcWasmBaseUrl, assertWebIfcWasmAvailable } from './wasmAssets.js';
+import { resolveWebIfcWasmBaseUrl } from './wasmAssets.js';
 
 export type ModelEventCallbacks = {
   onModelAdded: (modelId: string) => void;
@@ -12,11 +12,22 @@ export type ModelEventCallbacks = {
 export async function initEngine(ctx: ViewerContext, state: AppState): Promise<void> {
   if (state.initialized) return;
 
+  console.log('[IFC Engine] init start', {
+    href: window.location.href,
+    origin: window.location.origin,
+    baseURI: document.baseURI,
+  });
+
   // 1. web-ifc WASM 校验 + ifcLoader.setup
-  const wasmBase = getWebIfcWasmBaseUrl();
+  let wasmBase = '';
   try {
-    await assertWebIfcWasmAvailable();
+    console.log('[IFC Engine] before wasm assert');
+    wasmBase = await resolveWebIfcWasmBaseUrl();
+    console.log('[IFC Engine] after wasm assert');
+    console.log('[IFC Engine] wasmBase', wasmBase);
+    console.log('[IFC Engine] before ifcLoader.setup');
     await ctx.ifcLoader.setup({ autoSetWasm: false, wasm: { path: wasmBase, absolute: true } });
+    console.log('[IFC Engine] after ifcLoader.setup');
   } catch (err) {
     console.error('[IFC Engine] ifcLoader.setup failed', { wasmBase, error: err });
     throw err;
@@ -24,8 +35,9 @@ export async function initEngine(ctx: ViewerContext, state: AppState): Promise<v
 
   // 2. Fragments worker
   try {
-    const workerUrl = await OBC.FragmentsManager.getWorker();
-    ctx.fragments.init(workerUrl);
+    console.log('[IFC Engine] fragments workerUrl', fragmentsWorkerUrl);
+    ctx.fragments.init(fragmentsWorkerUrl);
+    console.log('[IFC Engine] after fragments.init');
   } catch (err) {
     console.error('[IFC Engine] fragments worker init failed', { error: err });
     throw err;
