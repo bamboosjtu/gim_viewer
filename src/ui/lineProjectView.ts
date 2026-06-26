@@ -13,7 +13,7 @@
 
 import type { AppState } from '../app/state.js';
 import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
-import type { LineMapData } from '../gim/lineMapData.js';
+import type { LineMapData, WireSegment } from '../gim/lineMapData.js';
 import { escHtml } from '../shared/html.js';
 import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, btnToggleProps, emptyTipEl, container } from './dom.js';
 import type { LineMapViewHandle } from './lineMapView.js';
@@ -23,6 +23,8 @@ import { createMapLibreProjection } from './lineMapProjection.js';
 import { renderLineMap } from './lineMapView.js';
 import { extractLineMapData, isLineMapDataValid } from '../gim/lineMapData.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
+import { buildWireSemanticInfo } from '../services/lineWireSemanticService.js';
+import type { WireSemanticInfo } from '../services/lineWireSemanticService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
 import { ENABLE_MAPLIBRE_EXPERIMENT, ENABLE_PMTILES_EXPERIMENT, PMTILES_DEMO_URL, LINE_BASEMAP_MODE } from '../config/features.js';
 import { setBasemapStatus, resetBasemapStatus } from '../services/basemapStatusService.js';
@@ -331,6 +333,115 @@ export function showLineNodeProperties(node: GimGraphNode): void {
   propsDrawerBody.innerHTML = html;
 }
 
+/**
+ * M4-B2：显示导线属性到属性面板。
+ *
+ * 与 showLineNodeProperties 区别：
+ * - 入参是 WireSegment（地图渲染数据），不是 GimGraphNode
+ * - 展示结构化语义信息（WireSemanticInfo）：导线类型、图层、跳线、分裂数、档距、端点 BLHA、
+ *   POINT0/1.MATRIX0、BACK/FRONTSTRING 等
+ * - 缺失字段显示 "—"，不报错
+ * - 档距保留 1 位小数
+ * - 同步展示原始 rawProps（折叠在"原始属性"小节），便于排障
+ *
+ * @param wire 地图渲染的 WireSegment
+ */
+function showWireProperties(wire: WireSegment): void {
+  const info: WireSemanticInfo = buildWireSemanticInfo({ wire });
+  const node = wire.nodeRef;
+  const nodeName = node ? nodeDisplayName(node) : '导线';
+  const fileName = node ? (node.path.split('/').pop() || node.path) : '';
+
+  let html = `<div class="props-header">〰️ ${escHtml(nodeName)}</div>`;
+
+  // 导线语义信息（核心区）
+  const layerLabelMap: Record<string, string> = {
+    conductor: '导线层 (conductor)',
+    groundwire: '地线层 (groundwire)',
+    opgw: 'OPGW 层 (opgw)',
+    unknownWire: '未知导线层 (unknownWire)',
+  };
+  const rows: [string, string][] = [
+    ['导线类型', info.wireType || '—'],
+    ['图层', layerLabelMap[info.layerKey] || info.layerKey],
+    ['是否跳线', info.isJumper ? '是 (ISJUMPER)' : '否'],
+    ['分裂数 (SPLIT)', info.split != null ? String(info.split) : '—'],
+    ['档距 (近似)', info.spanMeters != null ? info.spanMeters.toFixed(1) + ' m' : '—'],
+    ['KVALUE', info.kValue || '—'],
+    ['起点 BLHA (POINT0)', info.point0Blha || '—'],
+    ['终点 BLHA (POINT1)', info.point1Blha || '—'],
+    ['POINT0.MATRIX0', info.point0Matrix0 || '—'],
+    ['POINT1.MATRIX0', info.point1Matrix0 || '—'],
+    ['BACKSTRING', info.backString || '—'],
+    ['FRONTSTRING', info.frontString || '—'],
+  ];
+
+  html += '<div class="props-section"><div class="props-section-title">导线语义</div><table class="props-table">';
+  for (const [k, v] of rows) {
+    const isLongVal = v.length > 40;
+    const valStyle = isLongVal
+      ? 'font-family:monospace;font-size:11px;word-break:break-all'
+      : '';
+    html += `<tr><td class="prop-key">${escHtml(k)}</td><td class="prop-val" style="${valStyle}">${escHtml(v)}</td></tr>`;
+  }
+  html += '</table></div>';
+
+  // 端点坐标（已解析）
+  html += '<div class="props-section"><div class="props-section-title">端点坐标</div><table class="props-table">';
+  html += `<tr><td class="prop-key">起点纬度</td><td class="prop-val">${wire.startLat.toFixed(6)}</td></tr>`;
+  html += `<tr><td class="prop-key">起点经度</td><td class="prop-val">${wire.startLng.toFixed(6)}</td></tr>`;
+  html += `<tr><td class="prop-key">终点纬度</td><td class="prop-val">${wire.endLat.toFixed(6)}</td></tr>`;
+  html += `<tr><td class="prop-key">终点经度</td><td class="prop-val">${wire.endLng.toFixed(6)}</td></tr>`;
+  html += '</table></div>';
+
+  // 告警信息（如果有）
+  if (info.warnings.length > 0) {
+    html += '<div class="props-section"><div class="props-section-title">解析告警</div><table class="props-table">';
+    for (const w of info.warnings) {
+      html += `<tr><td class="prop-val" colspan="2" style="color:#b45309;font-size:11px">⚠ ${escHtml(w)}</td></tr>`;
+    }
+    html += '</table></div>';
+  }
+
+  // 节点基本信息（路径，便于排障）
+  if (node) {
+    html += '<div class="props-section"><div class="props-section-title">基本信息</div><table class="props-table">';
+    html += `<tr><td class="prop-key">路径</td><td class="prop-val" style="font-family:monospace;font-size:11px;word-break:break-all">${escHtml(node.path)}</td></tr>`;
+    if (fileName) html += `<tr><td class="prop-key">文件名</td><td class="prop-val">${escHtml(fileName)}</td></tr>`;
+    html += `<tr><td class="prop-key">实体类型</td><td class="prop-val">${escHtml(node.entityName || '—')}</td></tr>`;
+    html += `<tr><td class="prop-key">分类名称</td><td class="prop-val">${escHtml(node.classifyName || '—')}</td></tr>`;
+    html += '</table></div>';
+  }
+
+  // 原始 rawProps（折叠在末尾，便于排障）
+  if (node && Object.keys(node.rawProps).length > 0) {
+    html += '<div class="props-section"><div class="props-section-title">原始属性 rawProps</div><table class="props-table">';
+    for (const [k, v] of Object.entries(node.rawProps)) {
+      if (!v) continue;
+      html += `<tr><td class="prop-key">${escHtml(k)}</td><td class="prop-val" style="font-family:monospace;font-size:11px;word-break:break-all">${escHtml(v)}</td></tr>`;
+    }
+    html += '</table></div>';
+  }
+
+  propsDrawerBody.innerHTML = html;
+}
+
+/**
+ * M4-B2：地图点击导线回调：显示导线属性面板。
+ *
+ * 与 handleMapTowerClick 区别：
+ * - 不联动左侧树（导线路径在 WIRE 节点，可能不在已渲染的树中）
+ * - 仅显示属性面板
+ * - 不报错、不弹模态框
+ */
+function handleMapWireClick(wire: WireSegment): void {
+  showWireProperties(wire);
+  propsDrawer.classList.remove('collapsed');
+  btnToggleProps.style.right = '332px';
+  // 清除左侧树的选中态（避免误导：导线选中 ≠ 树节点选中）
+  document.querySelectorAll('.tree-row.selected').forEach(r => r.classList.remove('selected'));
+}
+
 // ---------------------------------------------------------------------------
 // 地图视图生命周期管理
 // ---------------------------------------------------------------------------
@@ -539,7 +650,10 @@ export function renderLineProjectPanels(
 
   if (isLineMapDataValid(mapData)) {
     // 地图点击塔位走 handleMapTowerClick：显示属性 + 选中左侧树行
-    lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick);
+    // M4-B2：onWireClick 处理导线点击（命中导线且未命中塔位时触发）
+    lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
+      onWireClick: handleMapWireClick,
+    });
   } else {
     // 塔位坐标缺失：在视口中央显示提示，不抛异常
     const tip = document.createElement('div');
@@ -650,7 +764,10 @@ export function renderLineProjectPanels(
       }
 
       // 重新渲染 Canvas-only（恢复经纬度网格、比例尺、hover/click/tooltip/树联动）
-      lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick);
+      // M4-B2：onWireClick 在 fallback 模式下同样生效
+      lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
+        onWireClick: handleMapWireClick,
+      });
 
       // M4-A2 Finalization：上报回退状态（含可读 reason 供诊断展示）
       // M4-A2 小修：fallback 后 MapLibre probe 已销毁，实际运行模式为 Canvas-only，
@@ -713,6 +830,8 @@ export function renderLineProjectPanels(
         lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
           projection,
           onRequestRedraw: (draw: () => void) => { redrawFn = draw; },
+          // M4-B2：overlay 模式下也支持导线点击
+          onWireClick: handleMapWireClick,
         });
         // MapLibre 视图变化（move/zoom/resize）时触发 Canvas overlay 重绘
         const offView = probe.onViewChange(() => {

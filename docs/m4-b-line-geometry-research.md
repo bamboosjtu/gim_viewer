@@ -248,3 +248,111 @@ export function buildLineGeometryAuditReport(args: {
 - 不影响渲染、不修改 state
 - 样本数量限制（每类最多 10 条）
 - 当前未集成到 Ctrl+Shift+D 诊断（避免诊断体积过大），可在 DevTools Console 手动调用
+
+---
+
+## 8. M4-B2 导线属性增强与样式分层（实现记录）
+
+> 阶段：已完成。本轮 **不实现悬链线**，仅做"导线可点、可看、可解释"。
+
+### 8.1 新增 WireSemanticInfo
+
+文件：`src/services/lineWireSemanticService.ts`
+
+```ts
+export interface WireSemanticInfo {
+  wireType: string;           // CONDUCTOR / GROUNDWIRE / OPGW / UNKNOWN
+  layerKey: string;           // conductor / groundwire / opgw / unknownWire
+  isJumper: boolean;          // ISJUMPER 命中 1/true/TRUE/yes
+  split: number | null;       // SPLIT 转数字
+  kValue: string | null;
+  point0Blha: string | null;  // 起点 BLHA 原始字符串
+  point1Blha: string | null;
+  point0Matrix0: string | null;
+  point1Matrix0: string | null;
+  backString: string | null;  // 端点兜底引用
+  frontString: string | null;
+  spanMeters: number | null;  // Haversine 档距近似（米）
+  warnings: string[];
+}
+
+export function buildWireSemanticInfo(args: {
+  wire: unknown;             // WireSegment
+  rawProps?: Record<string, string>;
+}): WireSemanticInfo;
+```
+
+- 只读 wire + rawProps，不读 DB、不改 schema
+- `spanMeters` 用 Haversine 公式（地球半径 6371000m），端点缺失返回 null + warning
+
+### 8.2 新增导线属性面板字段
+
+文件：`src/ui/lineProjectView.ts` → `showWireProperties(wire)`
+
+点击导线后右侧属性面板展示：
+
+| 字段 | 来源 | 缺失时 |
+|---|---|---|
+| 导线类型 | wire.wireType | — |
+| 图层 | WireSemanticInfo.layerKey | — |
+| 是否跳线 | ISJUMPER | 否 |
+| 分裂数 (SPLIT) | rawProps.SPLIT | — |
+| 档距 (近似) | Haversine 计算 | — |
+| KVALUE | rawProps.KVALUE | — |
+| 起点 BLHA (POINT0) | rawProps.POINT0.BLHA | — |
+| 终点 BLHA (POINT1) | rawProps.POINT1.BLHA | — |
+| POINT0.MATRIX0 | rawProps.POINT0.MATRIX0 | — |
+| POINT1.MATRIX0 | rawProps.POINT1.MATRIX0 | — |
+| BACKSTRING | rawProps.BACKSTRING | — |
+| FRONTSTRING | rawProps.FRONTSTRING | — |
+
+- 端点坐标小节：展示已解析的 startLat/startLng/endLat/endLng（6 位小数）
+- 解析告警小节：warnings 非空时显示 ⚠ 标识
+- 原始 rawProps 小节：折叠展示，便于排障
+- 档距保留 1 位小数（如 `356.2 m`）
+
+### 8.3 新增档距近似计算
+
+- 公式：Haversine（球面三角）
+- 地球半径：6371000 m
+- 输入：wire.startLat/startLng/endLat/endLng
+- 输出：米，保留 1 位小数由 UI 层处理
+- 端点缺失：返回 null + warning `导线端点坐标缺失，无法计算档距`
+
+### 8.4 新增 jumper / split 样式增强
+
+文件：`src/ui/lineMapView.ts` → `drawWireSegment(w, isSelected)`
+
+| 规则 | 样式 |
+|---|---|
+| `isJumper=true` | 虚线 `[6, 4]`（setLineDash） |
+| `SPLIT > 1` | 线宽 2.5px（默认 1.5px） |
+| 选中导线 | 线宽 3.5px + 黄色光晕描边 |
+| UNKNOWN | 保持浅灰弱化样式 |
+
+- 选中态先画一层黄色光晕（`rgba(245,158,11,0.45)`，宽 7.5px），再画主体线
+- 选中态最后绘制，确保位于所有导线最上层
+
+### 8.5 导线 hit-test 与选中态
+
+- 新增 `hitTestWire(sx, sy, threshold)`：点到线段距离（像素）
+- 点击阈值：`WIRE_HIT_DIST = 6px`（严格）
+- Hover 阈值：`WIRE_HIT_DIST_HOVER = 8px`（放宽，仅更新 cursor）
+- 优先级：塔位 > 导线（命中塔位时不触发导线 hit-test）
+- 选中导线后清除塔位选中态，反之亦然（避免双重选中）
+- `fit()` / `destroy()` 时清除导线选中态
+
+### 8.6 仍然保持直线段渲染
+
+- 本轮明确 **不做悬链线、不做弧垂**
+- `drawWires()` 仍使用 `moveTo` + `lineTo` 绘制直线段
+- 样式增强仅影响线宽 / 虚线 / 颜色，不改变线段几何
+
+### 8.7 OSM overlay / Canvas fallback 兼容性
+
+- `onWireClick` 在 3 个 renderLineMap 调用点均接入：
+  1. 初始 Canvas 渲染
+  2. OSM fallback 后的 Canvas-only 重渲染
+  3. OSM overlay 模式（MapLibre 底图 + Canvas overlay）
+- 导线点击在 Canvas-only / overlay 模式下行为一致
+- 不影响 OSM 底图加载、不影响 fallback 触发逻辑

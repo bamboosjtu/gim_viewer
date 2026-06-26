@@ -25,7 +25,7 @@
  * BLHA 已在 M3-4 解析为 lat/lng，此处不再重新解析 BLHA。
  */
 
-import type { LineMapData, TowerMarker } from '../gim/lineMapData.js';
+import type { LineMapData, TowerMarker, WireSegment } from '../gim/lineMapData.js';
 import type { GimGraphNode } from '../gim/gimGraphTypes.js';
 import type { LineMapProjection } from './lineMapProjection.js';
 
@@ -51,12 +51,13 @@ export interface LineMapViewHandle {
 }
 
 /**
- * M4-A2：renderLineMap 可选参数。
+ * M4-A2 / M4-B2：renderLineMap 可选参数。
  *
  * - projection：外部投影接口（MapLibre），传入后 geoToScreen 委托给它
  * - onRequestRedraw：调用方注册 redraw 回调，用于 MapLibre 视图变化时触发 Canvas 重绘
  * - showGrid：是否绘制经纬度网格（overlay 默认 false，Canvas-only 默认 true）
  * - showCanvasScaleBar：是否绘制 Canvas 比例尺（overlay 默认 false，Canvas-only 默认 true）
+ * - onWireClick：M4-B2 点击导线回调（命中导线且未命中塔位时触发）
  *
  * 默认（不传 options）：纯 Canvas 模式，行为完全不变。
  */
@@ -65,6 +66,8 @@ export interface RenderLineMapOptions {
   onRequestRedraw?: (draw: () => void) => void;
   showGrid?: boolean;
   showCanvasScaleBar?: boolean;
+  /** M4-B2：点击导线回调（优先级低于塔位） */
+  onWireClick?: (wire: WireSegment) => void;
 }
 
 /** 图层开关状态（仅内存，不入库） */
@@ -97,6 +100,12 @@ const WIRE_COLORS: Record<string, string> = {
 };
 const WIRE_COLOR_UNKNOWN = '#9ca3af';
 const WIRE_WIDTH = 1.5;
+/** M4-B2：导线样式增强常量 */
+const WIRE_WIDTH_SPLIT = 2.5;          // SPLIT > 1 加粗
+const WIRE_WIDTH_SELECTED = 3.5;      // 选中导线高亮线宽
+const WIRE_DASH_JUMPER: number[] = [6, 4]; // 跳线虚线
+const WIRE_HIT_DIST = 6;               // 导线命中距离阈值（像素）
+const WIRE_HIT_DIST_HOVER = 8;         // hover 容差略放宽
 
 /** 背景 / 网格 / 边框颜色 */
 const COLOR_BG = '#f8fafc';
@@ -149,7 +158,8 @@ const FOCUS_TOWER_ZOOM = 12;
  * @param mapData extractLineMapData 提取结果
  * @param container 宿主 DOM（canvas 将作为子元素填充）
  * @param onTowerClick 点击塔位时的回调，参数为该塔位对应的图节点
- * @param options M4-A2：projection（外部投影）+ onRequestRedraw（注册重绘回调）
+ * @param options M4-A2：projection（外部投影）+ onRequestRedraw（注册重绘回调）；
+ *                M4-B2：onWireClick（点击导线回调）+ selectWirePath（外部选中导线路径）
  * @returns LineMapViewHandle，调用方负责在切换/清空时 destroy()
  */
 export function renderLineMap(
@@ -296,6 +306,11 @@ export function renderLineMap(
   let panX = 0;
   let panY = 0;
   let hoveredTower: TowerMarker | null = null;
+  /** M4-B2：当前选中的导线（点击导线后高亮） */
+  let selectedWire: WireSegment | null = null;
+  /** M4-B2：当前 hover 的导线（光标变化用，不展示 tooltip） */
+  let hoveredWire: WireSegment | null = null;
+  /** M4-B2：导线命中距离阈值（点击严格，hover 放宽） */
   let destroyed = false;
 
   /** 选中塔位的 nodePath 集合（树点击/地图 focus 时高亮） */
@@ -476,21 +491,75 @@ export function renderLineMap(
   }
 
   function drawWires(): void {
-    ctx.lineWidth = WIRE_WIDTH;
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    // M4-B2：先画非选中导线，再画选中导线（确保选中态在最上层）
     for (const w of mapData.wires) {
       if (!layerState[wireLayerKey(w.wireType)]) continue;
-      const s = geoToScreen(w.startLat, w.startLng);
-      const e = geoToScreen(w.endLat, w.endLng);
-      // 视口剔除
-      if ((s.x < 0 && e.x < 0) || (s.x > cssW && e.x > cssW)) continue;
-      if ((s.y < 0 && e.y < 0) || (s.y > cssH && e.y > cssH)) continue;
-      ctx.strokeStyle = WIRE_COLORS[w.wireType] || WIRE_COLOR_UNKNOWN;
+      if (w === selectedWire) continue; // 选中态最后画
+      drawWireSegment(w, false);
+    }
+    if (selectedWire && layerState[wireLayerKey(selectedWire.wireType)]) {
+      drawWireSegment(selectedWire, true);
+    }
+  }
+
+  /**
+   * M4-B2：绘制单条导线段，含样式分层。
+   *
+   * 样式规则：
+   * - isJumper=true → 虚线（setLineDash）
+   * - SPLIT > 1 → 线宽 WIRE_WIDTH_SPLIT
+   * - 选中态 → 线宽 WIRE_WIDTH_SELECTED + 高亮色（黄色描边）
+   * - UNKNOWN → 保持弱化样式（浅灰）
+   *
+   * @param w 导线段
+   * @param isSelected 是否为选中态
+   */
+  function drawWireSegment(w: WireSegment, isSelected: boolean): void {
+    const s = geoToScreen(w.startLat, w.startLng);
+    const e = geoToScreen(w.endLat, w.endLng);
+    // 视口剔除
+    if ((s.x < 0 && e.x < 0) || (s.x > cssW && e.x > cssW)) return;
+    if ((s.y < 0 && e.y < 0) || (s.y > cssH && e.y > cssH)) return;
+
+    // 从 rawProps 提取 isJumper / split（容错，缺失则按默认样式）
+    const raw = w.nodeRef?.rawProps || {};
+    const isJumper = parseWireIsJumper(raw['ISJUMPER']);
+    const split = parseWireSplit(raw['SPLIT']);
+
+    // 选中态：先画一层黄色描边光晕
+    if (isSelected) {
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(245,158,11,0.45)';
+      ctx.lineWidth = WIRE_WIDTH_SELECTED + 4;
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.lineTo(e.x, e.y);
       ctx.stroke();
     }
+
+    // 主体线
+    ctx.strokeStyle = WIRE_COLORS[w.wireType] || WIRE_COLOR_UNKNOWN;
+    if (isSelected) {
+      ctx.lineWidth = WIRE_WIDTH_SELECTED;
+    } else if (split && split > 1) {
+      ctx.lineWidth = WIRE_WIDTH_SPLIT;
+    } else {
+      ctx.lineWidth = WIRE_WIDTH;
+    }
+    if (isJumper) {
+      ctx.setLineDash(WIRE_DASH_JUMPER);
+    } else {
+      ctx.setLineDash([]);
+    }
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y);
+    ctx.lineTo(e.x, e.y);
+    ctx.stroke();
+
+    // 恢复默认
+    ctx.setLineDash([]);
   }
 
   function drawCrosses(): void {
@@ -732,6 +801,63 @@ export function renderLineMap(
     return best;
   }
 
+  /**
+   * M4-B2：点到线段距离（像素）。
+   * 用于导线 hit-test，鼠标点到线段距离小于阈值则命中。
+   */
+  function pointToSegmentDist(
+    px: number, py: number,
+    x1: number, y1: number,
+    x2: number, y2: number,
+  ): number {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) {
+      // 退化情况：线段长度为 0，按点到点处理
+      const dpx = px - x1;
+      const dpy = py - y1;
+      return Math.sqrt(dpx * dpx + dpy * dpy);
+    }
+    // 投影参数 t，限制在 [0, 1] 内（线段，非直线）
+    let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const projX = x1 + t * dx;
+    const projY = y1 + t * dy;
+    const dpx = px - projX;
+    const dpy = py - projY;
+    return Math.sqrt(dpx * dpx + dpy * dpy);
+  }
+
+  /**
+   * M4-B2：导线 hit-test。
+   *
+   * 规则：
+   * - 仅检测图层开启的导线类型
+   * - 优先返回距离最近的导线
+   * - 鼠标点到导线屏幕距离 <= threshold 时命中
+   *
+   * @param threshold 像素阈值，点击用 WIRE_HIT_DIST，hover 用 WIRE_HIT_DIST_HOVER
+   */
+  function hitTestWire(sx: number, sy: number, threshold: number): WireSegment | null {
+    let best: WireSegment | null = null;
+    let bestDist = threshold;
+    for (const w of mapData.wires) {
+      if (!layerState[wireLayerKey(w.wireType)]) continue;
+      const s = geoToScreen(w.startLat, w.startLng);
+      const e = geoToScreen(w.endLat, w.endLng);
+      // 视口剔除（与 drawWires 一致）
+      if ((s.x < 0 && e.x < 0) || (s.x > cssW && e.x > cssW)) continue;
+      if ((s.y < 0 && e.y < 0) || (s.y > cssH && e.y > cssH)) continue;
+      const d = pointToSegmentDist(sx, sy, s.x, s.y, e.x, e.y);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = w;
+      }
+    }
+    return best;
+  }
+
   // ---- tooltip ----
   function showTooltip(t: TowerMarker, sx: number, sy: number): void {
     const famHit = !!t.famSource;
@@ -771,9 +897,12 @@ export function renderLineMap(
    * 处理鼠标移动（hover 命中测试 + tooltip）。
    * Canvas-only：由 onMouseMove 调用（dragging 时走拖拽分支）
    * overlay：由 handlePointerMove → 外部 MapLibre 转发调用
+   *
+   * M4-B2：增加导线 hover 检测，命中导线时 cursor=pointer。
+   * 优先级：塔位 > 导线（hover 时塔位 tooltip 优先）。
    */
   function handlePointerMoveAt(mx: number, my: number): void {
-    // hover 命中测试
+    // hover 命中测试（塔位优先）
     const t = hitTestTower(mx, my);
     if (t !== hoveredTower) {
       hoveredTower = t;
@@ -781,6 +910,21 @@ export function renderLineMap(
     }
     if (t) {
       showTooltip(t, mx, my);
+      canvas.style.cursor = 'pointer';
+      // 命中塔位时清除导线 hover 态
+      if (hoveredWire !== null) {
+        hoveredWire = null;
+      }
+      return;
+    }
+    // 未命中塔位：检测导线 hover（容差放宽到 WIRE_HIT_DIST_HOVER）
+    const w = options?.onWireClick ? hitTestWire(mx, my, WIRE_HIT_DIST_HOVER) : null;
+    if (w !== hoveredWire) {
+      hoveredWire = w;
+      // hover 不重绘（避免频繁 redraw），仅更新 cursor
+    }
+    if (w) {
+      hideTooltip();
       canvas.style.cursor = 'pointer';
     } else {
       hideTooltip();
@@ -792,6 +936,9 @@ export function renderLineMap(
    * 处理鼠标点击（命中塔位 → 选中 + 联动）。
    * Canvas-only：由 onMouseUp 调用（未拖拽时）
    * overlay：由 handlePointerClick → 外部 MapLibre 转发调用
+   *
+   * M4-B2：未命中塔位时尝试命中导线，命中则触发 onWireClick 回调并高亮。
+   * 优先级：塔位 > 导线 > CROSS（CROSS 当前无 hit-test）。
    */
   function handlePointerClickAt(mx: number, my: number): void {
     const t = hitTestTower(mx, my);
@@ -800,11 +947,29 @@ export function renderLineMap(
       if (t.nodeRef && t.nodeRef.path) {
         selectedTowerPaths = new Set([t.nodeRef.path]);
       }
+      // 命中塔位时清除导线选中态
+      selectedWire = null;
       draw();
       try {
         onTowerClick(t.nodeRef);
       } catch (err) {
         console.error('[LineMap] onTowerClick 回调异常:', err);
+      }
+      return;
+    }
+    // 未命中塔位：尝试命中导线（严格阈值 WIRE_HIT_DIST）
+    if (options?.onWireClick) {
+      const w = hitTestWire(mx, my, WIRE_HIT_DIST);
+      if (w) {
+        selectedWire = w;
+        // 选中导线时清除塔位选中态（避免双重选中）
+        selectedTowerPaths = new Set();
+        draw();
+        try {
+          options.onWireClick(w);
+        } catch (err) {
+          console.error('[LineMap] onWireClick 回调异常:', err);
+        }
       }
     }
   }
@@ -897,6 +1062,8 @@ export function renderLineMap(
   // ---- 公开方法 ----
   function fit(): void {
     selectedTowerPaths = new Set();
+    // M4-B2：fit 时清除导线选中态
+    selectedWire = null;
     // M4-A2：overlay 模式下视图由 MapLibre 管理，委托 fitBounds
     if (projection?.fitBounds && valid) {
       projection.fitBounds({
@@ -1018,6 +1185,9 @@ export function renderLineMap(
     if (layerPanel.parentNode) layerPanel.parentNode.removeChild(layerPanel);
     towerScreen = [];
     hoveredTower = null;
+    // M4-B2：清理导线选中/hover 态
+    selectedWire = null;
+    hoveredWire = null;
     selectedTowerPaths.clear();
     pathToTower.clear();
   }
@@ -1105,4 +1275,24 @@ function escapeHtml(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/**
+ * M4-B2：解析 ISJUMPER 真值（兼容 1/true/TRUE/yes/YES）。
+ * 用于 drawWireSegment 样式分层（jumper → 虚线）。
+ */
+function parseWireIsJumper(value: string | undefined): boolean {
+  if (!value) return false;
+  const v = value.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'y';
+}
+
+/**
+ * M4-B2：解析 SPLIT 数字（用于 drawWireSegment 样式分层：SPLIT > 1 加粗）。
+ * 失败返回 null。
+ */
+function parseWireSplit(value: string | undefined): number | null {
+  if (!value) return null;
+  const n = parseInt(value.trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
