@@ -300,3 +300,44 @@ cargo check --manifest-path src-tauri/Cargo.toml
 - flag=false：Canvas-only 行为完全不变
 - flag=true：Canvas 可见，MapLibre 在底层，控件正常，无网络请求
 
+---
+
+## 8. M4-A2 正式版第 1 轮：overlay 交互闭环与控件统一（2026-06-26）
+
+### 8.1 交互桥接
+
+M4-A2-lite 的 overlay 模式下 Canvas `pointer-events:none`，hover/click 不可用。本轮通过事件桥接解决：
+
+- `LineMapViewHandle` 新增 `handlePointerMove` / `handlePointerClick` / `handlePointerLeave`
+- `LineMapBaseLayerHandle` 新增 `onPointerMove` / `onPointerClick` / `onPointerLeave`
+- MapLibre 接收鼠标事件 → 转发 `{ x, y }` → Canvas handle 处理命中测试 + tooltip + 联动
+- 内部逻辑拆分为 `handlePointerMoveAt` / `handlePointerClickAt` / `handlePointerLeaveInternal`，Canvas-only 和 overlay 共用
+
+### 8.2 控件统一
+
+| 控件 | Canvas-only | overlay |
+|---|---|---|
+| 经纬度网格 | Canvas 绘制 | 隐藏（`showGrid` 默认 false） |
+| Canvas 比例尺 | Canvas 绘制 | 隐藏（`showCanvasScaleBar` 默认 false） |
+| MapLibre ScaleControl | — | bottom-right（`maxWidth:100, unit:'metric'`） |
+| 图层面板 / fit 按钮 / tooltip | Canvas 控件 | Canvas 控件（一致） |
+
+`RenderLineMapOptions` 新增 `showGrid?` / `showCanvasScaleBar?`，默认值根据 overlay 模式自动推导。
+
+### 8.3 fitBounds 优化
+
+所有 `fitBounds` 调用添加 `duration: 0`，消除动画延迟，确保 Canvas overlay 立即同步重绘。
+
+### 8.4 生命周期
+
+`lineProjectView.ts` 新增 `maplibreInteractionCleanup: Array<() => void>`，overlay 成功后注册 3 个取消函数，`destroyLineMapView()` 统一清理。
+
+### 8.5 验收
+
+- `npm run build` ✅（86 modules, 14.24s）
+- `cargo check` ✅（1.91s）
+- flag=false：Canvas-only 行为完全不变
+- flag=true：overlay hover/click/联动正常，MapLibre ScaleControl 显示，无网络请求
+
+详见 [地图底图评估 - 第 15 节](map-basemap-evaluation.md#15-m4-a2-正式版第-1-轮maplibre-overlay-交互闭环与控件统一)。
+

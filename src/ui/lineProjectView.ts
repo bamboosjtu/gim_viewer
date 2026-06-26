@@ -344,6 +344,14 @@ let maplibreProbeHandle: LineMapBaseLayerHandle | null = null;
 let maplibreProbeGeneration = 0;
 
 /**
+ * M4-A2：MapLibre pointer 事件取消函数列表。
+ *
+ * overlay 模式下注册的 onPointerMove / onPointerClick / onPointerLeave 回调，
+ * 在销毁时统一调用以防止残留。
+ */
+let maplibreInteractionCleanup: Array<() => void> = [];
+
+/**
  * 销毁当前地图视图。
  *
  * 调用时机（spec 六 清理要求）：
@@ -356,6 +364,11 @@ let maplibreProbeGeneration = 0;
 export function destroyLineMapView(): void {
   // M4-A2-lite：递增代次，取消所有在途的 MapLibre probe 创建
   maplibreProbeGeneration++;
+  // M4-A2：清理 pointer 事件监听（防止残留）
+  for (const fn of maplibreInteractionCleanup) {
+    try { fn(); } catch { /* ignore */ }
+  }
+  maplibreInteractionCleanup = [];
   if (lineMapHandle) {
     lineMapHandle.destroy();
     lineMapHandle = null;
@@ -554,22 +567,27 @@ export function renderLineProjectPanels(
     },
   });
 
-  // 7. M4-A2-lite：MapLibre 底图层 + Canvas overlay（默认关闭）
+  // 7. M4-A2：MapLibre 底图层 + Canvas overlay（默认关闭）
   //    - Canvas-only 已在上方渲染完成，确保地图立即可见
   //    - flag=true 时异步创建 MapLibre probe，成功后切换为 overlay 模式
+  //    - overlay 模式恢复完整交互：hover/click/联动（pointer 事件桥接）
   //    - 失败时保持 Canvas-only，不影响主流程
   //    - 不加载瓦片，仅验证层级桥接
   if (ENABLE_MAPLIBRE_EXPERIMENT && isLineMapDataValid(mapData)) {
-    // 先销毁旧 probe（避免残留）
+    // 先销毁旧 probe + 旧 interaction listeners（避免残留）
     if (maplibreProbeHandle) {
       maplibreProbeHandle.destroy();
       maplibreProbeHandle = null;
     }
+    for (const fn of maplibreInteractionCleanup) {
+      try { fn(); } catch { /* ignore */ }
+    }
+    maplibreInteractionCleanup = [];
     const myGen = ++maplibreProbeGeneration;
     void (async () => {
       try {
         const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
-        // 传入初始 bbox，让 MapLibre 加载后自动 fitBounds
+        // 传入初始 bbox，让 MapLibre 加载后自动 fitBounds（duration:0）
         const initialBounds: [number, number, number, number] = [
           mapData.bbox.minLng, mapData.bbox.minLat, mapData.bbox.maxLng, mapData.bbox.maxLat,
         ];
@@ -591,7 +609,7 @@ export function renderLineProjectPanels(
           },
         };
         // 销毁 Canvas-only handle，用 overlay 模式重新渲染
-        // （Canvas 透明背景 + pointer-events:none，MapLibre 管理视图）
+        // （Canvas 透明背景 + pointer-events:none，MapLibre 管理视图 + 交互）
         if (lineMapHandle) {
           lineMapHandle.destroy();
           lineMapHandle = null;
@@ -605,9 +623,21 @@ export function renderLineProjectPanels(
         probe.onViewChange(() => {
           if (redrawFn) redrawFn();
         });
-        debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2-lite：底图 + Canvas overlay 初始化成功');
+        // M4-A2：pointer 事件桥接（MapLibre → Canvas overlay）
+        // Canvas pointer-events:none，MapLibre 接收鼠标事件并转发给 Canvas handle
+        const offMove = probe.onPointerMove((p) => {
+          lineMapHandle?.handlePointerMove?.(p.x, p.y);
+        });
+        const offClick = probe.onPointerClick((p) => {
+          lineMapHandle?.handlePointerClick?.(p.x, p.y);
+        });
+        const offLeave = probe.onPointerLeave(() => {
+          lineMapHandle?.handlePointerLeave?.();
+        });
+        maplibreInteractionCleanup.push(offMove, offClick, offLeave);
+        debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2：底图 + Canvas overlay + 交互桥接 初始化成功');
       } catch (err) {
-        debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2-lite：初始化失败，保持 Canvas-only', err);
+        debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2：初始化失败，保持 Canvas-only', err);
         // 保持已渲染的 Canvas-only handle，不抛异常
       }
     })();

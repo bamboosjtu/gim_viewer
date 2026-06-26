@@ -42,19 +42,29 @@ export interface LineMapViewHandle {
   focusTowerByNodePath(path: string): boolean;
   /** 定位到一组 nodePath 对应的塔位 bbox（居中+fit），找不到返回 false */
   focusBboxByNodePaths(paths: string[]): boolean;
+  /** M4-A2：overlay 模式下由外部（MapLibre）转发 pointer move 事件 */
+  handlePointerMove?(x: number, y: number): void;
+  /** M4-A2：overlay 模式下由外部（MapLibre）转发 pointer click 事件 */
+  handlePointerClick?(x: number, y: number): void;
+  /** M4-A2：overlay 模式下由外部（MapLibre）转发 pointer leave 事件 */
+  handlePointerLeave?(): void;
 }
 
 /**
- * M4-A2-lite：renderLineMap 可选参数。
+ * M4-A2：renderLineMap 可选参数。
  *
  * - projection：外部投影接口（MapLibre），传入后 geoToScreen 委托给它
  * - onRequestRedraw：调用方注册 redraw 回调，用于 MapLibre 视图变化时触发 Canvas 重绘
+ * - showGrid：是否绘制经纬度网格（overlay 默认 false，Canvas-only 默认 true）
+ * - showCanvasScaleBar：是否绘制 Canvas 比例尺（overlay 默认 false，Canvas-only 默认 true）
  *
  * 默认（不传 options）：纯 Canvas 模式，行为完全不变。
  */
 export interface RenderLineMapOptions {
   projection?: LineMapProjection;
   onRequestRedraw?: (draw: () => void) => void;
+  showGrid?: boolean;
+  showCanvasScaleBar?: boolean;
 }
 
 /** 图层开关状态（仅内存，不入库） */
@@ -151,6 +161,9 @@ export function renderLineMap(
   // ---- M4-A2-lite：投影模式判断 ----
   const projection = options?.projection;
   const overlayMode = !!projection; // MapLibre 底图 + Canvas overlay 模式
+  // M4-A2：overlay 模式默认隐藏网格和 Canvas 比例尺（MapLibre 提供 ScaleControl）
+  const showGrid = options?.showGrid ?? !overlayMode;
+  const showCanvasScaleBar = options?.showCanvasScaleBar ?? !overlayMode;
 
   // ---- DOM：canvas + tooltip + fit 按钮 + 图层面板 ----
   const canvas = document.createElement('canvas');
@@ -383,12 +396,12 @@ export function renderLineMap(
       return;
     }
 
-    drawGrid();
+    if (showGrid) drawGrid();
     drawWires();
     drawCrosses();
     drawTowers();
     if (layerState.label && zoom >= LABEL_SHOW_ZOOM) drawLabels();
-    drawScaleBar();
+    if (showCanvasScaleBar) drawScaleBar();
     drawLegend();
     drawBorder();
   }
@@ -752,7 +765,61 @@ export function renderLineMap(
     tooltip.style.display = 'none';
   }
 
-  // ---- 事件处理 ----
+  // ---- 事件处理（内部可复用逻辑，供 Canvas 事件 + overlay 桥接共用） ----
+
+  /**
+   * 处理鼠标移动（hover 命中测试 + tooltip）。
+   * Canvas-only：由 onMouseMove 调用（dragging 时走拖拽分支）
+   * overlay：由 handlePointerMove → 外部 MapLibre 转发调用
+   */
+  function handlePointerMoveAt(mx: number, my: number): void {
+    // hover 命中测试
+    const t = hitTestTower(mx, my);
+    if (t !== hoveredTower) {
+      hoveredTower = t;
+      draw();
+    }
+    if (t) {
+      showTooltip(t, mx, my);
+      canvas.style.cursor = 'pointer';
+    } else {
+      hideTooltip();
+      canvas.style.cursor = valid ? 'grab' : 'default';
+    }
+  }
+
+  /**
+   * 处理鼠标点击（命中塔位 → 选中 + 联动）。
+   * Canvas-only：由 onMouseUp 调用（未拖拽时）
+   * overlay：由 handlePointerClick → 外部 MapLibre 转发调用
+   */
+  function handlePointerClickAt(mx: number, my: number): void {
+    const t = hitTestTower(mx, my);
+    if (t) {
+      hoveredTower = t;
+      if (t.nodeRef && t.nodeRef.path) {
+        selectedTowerPaths = new Set([t.nodeRef.path]);
+      }
+      draw();
+      try {
+        onTowerClick(t.nodeRef);
+      } catch (err) {
+        console.error('[LineMap] onTowerClick 回调异常:', err);
+      }
+    }
+  }
+
+  /**
+   * 处理鼠标离开（清除 hover + tooltip）。
+   * Canvas-only：由 onMouseLeave 调用
+   * overlay：由 handlePointerLeave → 外部 MapLibre 转发调用
+   */
+  function handlePointerLeaveInternal(): void {
+    hoveredTower = null;
+    hideTooltip();
+    draw();
+  }
+
   function onWheel(e: WheelEvent): void {
     e.preventDefault();
     if (!valid) return;
@@ -794,19 +861,7 @@ export function renderLineMap(
       draw();
       return;
     }
-    // hover 命中测试
-    const t = hitTestTower(mx, my);
-    if (t !== hoveredTower) {
-      hoveredTower = t;
-      draw();
-    }
-    if (t) {
-      showTooltip(t, mx, my);
-      canvas.style.cursor = 'pointer';
-    } else {
-      hideTooltip();
-      canvas.style.cursor = valid ? 'grab' : 'default';
-    }
+    handlePointerMoveAt(mx, my);
   }
 
   function onMouseUp(e: MouseEvent): void {
@@ -819,20 +874,7 @@ export function renderLineMap(
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-      const t = hitTestTower(mx, my);
-      if (t) {
-        hoveredTower = t;
-        // 选中点击的塔位
-        if (t.nodeRef && t.nodeRef.path) {
-          selectedTowerPaths = new Set([t.nodeRef.path]);
-        }
-        draw();
-        try {
-          onTowerClick(t.nodeRef);
-        } catch (err) {
-          console.error('[LineMap] onTowerClick 回调异常:', err);
-        }
-      }
+      handlePointerClickAt(mx, my);
     }
   }
 
@@ -841,9 +883,7 @@ export function renderLineMap(
       dragging = false;
       canvas.style.cursor = 'grab';
     }
-    hoveredTower = null;
-    hideTooltip();
-    draw();
+    handlePointerLeaveInternal();
   }
 
   function onDblClick(): void {
@@ -998,7 +1038,15 @@ export function renderLineMap(
   // 首次绘制
   resize();
 
-  return { fit, destroy, focusTowerByNodePath, focusBboxByNodePaths };
+  return {
+    fit,
+    destroy,
+    focusTowerByNodePath,
+    focusBboxByNodePaths,
+    handlePointerMove: handlePointerMoveAt,
+    handlePointerClick: handlePointerClickAt,
+    handlePointerLeave: handlePointerLeaveInternal,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -493,3 +493,97 @@ export interface RenderLineMapOptions {
 - flag=false 时：纯 Canvas 模式，行为完全不变，maplibre-gl 不进入主 bundle
 - flag=true 时：Canvas 先渲染 → MapLibre 异步加载 → 切换为 overlay 模式
 - MapLibre 失败时自动降级为 Canvas-only
+
+---
+
+## 15. M4-A2 正式版第 1 轮：MapLibre overlay 交互闭环与控件统一
+
+> 阶段：M4-A2 正式版第 1 轮
+> 时间：2026-06-26
+> 前置：M4-A2-lite（底图容器 + Canvas overlay 桥接最小验证）
+
+### 15.1 目标
+
+1. 在 overlay 模式下恢复完整交互：hover、tooltip、click、左侧树联动、右侧属性更新
+2. 统一控件行为：fit 委托 MapLibre、Canvas 网格/比例尺隐藏、MapLibre ScaleControl
+3. fitBounds 使用 `duration:0` 无动画，确保 Canvas overlay 立即同步重绘
+4. 不接入瓦片，不影响 IFC，不影响 Canvas-only
+
+### 15.2 overlay 交互闭环
+
+M4-A2-lite 的问题：overlay 模式下 Canvas `pointer-events:none`，导致 hover/click 不可用。
+
+**解决方案**：MapLibre 接收鼠标事件，通过桥接转发给 Canvas handle。
+
+事件流：
+
+```
+MapLibre mousemove/click → probe.onPointerMove/Click(p) → lineMapHandle.handlePointerMove/Click(x, y)
+MapLibre 容器 mouseleave → probe.onPointerLeave() → lineMapHandle.handlePointerLeave()
+```
+
+**LineMapViewHandle 新增方法**（`lineMapView.ts`）：
+
+| 方法 | 说明 |
+|---|---|
+| `handlePointerMove(x, y)` | hover 命中测试 + tooltip 显示 |
+| `handlePointerClick(x, y)` | 命中塔位 → 选中 + `onTowerClick` 回调 |
+| `handlePointerLeave()` | 清除 hover + tooltip |
+
+内部逻辑拆分为 `handlePointerMoveAt` / `handlePointerClickAt` / `handlePointerLeaveInternal`，Canvas-only 模式和 overlay 模式共用。
+
+**LineMapBaseLayerHandle 新增方法**（`lineMapBaseLayer.ts`）：
+
+| 方法 | MapLibre 事件 | 说明 |
+|---|---|---|
+| `onPointerMove(cb)` | `map.on('mousemove')` | `e.point` → `{ x, y }` |
+| `onPointerClick(cb)` | `map.on('click')` | `e.point` → `{ x, y }` |
+| `onPointerLeave(cb)` | `mountDiv.mouseleave` | 容器离开检测 |
+
+### 15.3 控件职责划分
+
+| 控件 | Canvas-only | overlay | 说明 |
+|---|---|---|---|
+| 经纬度网格 | Canvas 绘制 | 隐藏 | overlay 模式 MapLibre 管理投影，Canvas 网格无意义 |
+| Canvas 比例尺 | Canvas 绘制 | 隐藏 | overlay 模式使用 MapLibre ScaleControl |
+| MapLibre ScaleControl | 不存在 | bottom-right | `maxWidth:100, unit:'metric'` |
+| 图层面板 | Canvas 控件 | Canvas 控件 | 图层开关在两种模式下一致 |
+| fit 按钮 | Canvas 控件 | Canvas 控件 | fit 委托 MapLibre fitBounds |
+| tooltip | Canvas 控件 | Canvas 控件 | 位置基于 `geoToScreen` 投影 |
+
+`RenderLineMapOptions` 新增：
+- `showGrid?: boolean`（overlay 默认 false，Canvas-only 默认 true）
+- `showCanvasScaleBar?: boolean`（overlay 默认 false，Canvas-only 默认 true）
+
+### 15.4 fitBounds 稳定化
+
+M4-A2-lite 的 fitBounds 默认有动画（500ms），导致 Canvas overlay 重绘与 MapLibre 视图不同步。
+
+修复：所有 `fitBounds` 调用添加 `duration: 0`：
+
+```ts
+map.fitBounds(bounds, { padding: 48, duration: 0 });
+```
+
+- 无动画，立即生效
+- `onViewChange` 立即触发 Canvas overlay 重绘
+- 选中状态（`selectedTowerPaths`）和属性面板不受影响
+
+### 15.5 生命周期管理
+
+`lineProjectView.ts` 新增 `maplibreInteractionCleanup: Array<() => void>`：
+
+- overlay 模式成功后注册 3 个取消函数（offMove / offClick / offLeave）
+- `destroyLineMapView()` 统一调用所有取消函数
+- 工程切换 / 清空场景 / 切换到变电 → 全部清理，无残留
+
+### 15.6 不做的事（留给后续）
+
+- 不加载在线瓦片 / PMTiles / MBTiles
+- 不做坐标偏移（WGS84 ↔ GCJ-02）
+- 不做悬链线
+- 不做 MOD 解析
+- 不做真实 3D 线路
+- 不添加 NavigationControl / FullscreenControl 等其他 MapLibre 控件
+- 不修改 SQLite schema
+- 不开启 Fragments 缓存
