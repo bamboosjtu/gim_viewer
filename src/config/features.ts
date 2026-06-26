@@ -9,17 +9,26 @@ export const ENABLE_FRAGMENTS_CACHE = false;
 /**
  * MapLibre 技术验证开关（M4-A1/A2）。
  *
- * 默认 false：线路地图仍走 `src/ui/lineMapView.ts` 纯 Canvas 渲染。
- * 仅当手动改为 true 时，才会动态加载 `src/ui/lineMapBaseLayer.ts` 的 probe 模块。
+ * 开发调试：MapLibre + OSM online（npm run tauri:dev / npm run dev 自动启用）
+ * 生产默认：不启用 MapLibre / 不使用 OSM
+ * 强制开启：可通过 VITE_ENABLE_MAPLIBRE=true 在生产环境启用
  *
  * 已实现（M4-A2 第 1 轮）：
  * - MapLibre 底图 + Canvas overlay + 交互桥接（hover/click/联动）
  * - ScaleControl + fitBounds(duration:0)
  * - 失败自动降级为 Canvas-only
  *
- * 不加载在线瓦片，不访问外网。
+ * 开发模式（DEV=true）：
+ * - 默认启用 MapLibre overlay
+ * - LINE_BASEMAP_MODE 自动 'osm-online'，加载 OSM 在线 raster 瓦片
+ *
+ * 生产模式（DEV=false）：
+ * - 默认不启用 MapLibre
+ * - LINE_BASEMAP_MODE 自动 'empty'，不加载瓦片
+ * - 如需启用，设置环境变量 VITE_ENABLE_MAPLIBRE=true
  */
-export const ENABLE_MAPLIBRE_EXPERIMENT = false;
+export const ENABLE_MAPLIBRE_EXPERIMENT =
+  import.meta.env.DEV || import.meta.env.VITE_ENABLE_MAPLIBRE === 'true';
 
 /**
  * PMTiles 离线瓦片预研开关（M4-A2 第 2 轮）。

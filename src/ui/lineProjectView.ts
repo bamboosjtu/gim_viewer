@@ -567,13 +567,22 @@ export function renderLineProjectPanels(
     },
   });
 
-  // 7. M4-A2：MapLibre 底图层 + Canvas overlay（默认关闭）
+  // 7. M4-A2：MapLibre 底图层 + Canvas overlay
   //    - Canvas-only 已在上方渲染完成，确保地图立即可见
   //    - flag=true 时异步创建 MapLibre probe，成功后切换为 overlay 模式
   //    - overlay 模式恢复完整交互：hover/click/联动（pointer 事件桥接）
   //    - 失败时保持 Canvas-only，不影响主流程
-  //    - 不加载瓦片，仅验证层级桥接
+  //    底图模式（LINE_BASEMAP_MODE）：
+  //    - 'osm-online'：加载 OSM 在线 raster 瓦片，仅用于开发调试
+  //    - 'pmtiles'  ：走 PMTiles 预研路径（默认关闭，需 ENABLE_PMTILES_EXPERIMENT=true）
+  //    - 'empty'    ：不加载瓦片，仅显示纯色背景
+  //    - overlay 失败时回退 Canvas-only
   if (ENABLE_MAPLIBRE_EXPERIMENT && isLineMapDataValid(mapData)) {
+    debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] enabled:', ENABLE_MAPLIBRE_EXPERIMENT);
+    debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] basemap mode:', LINE_BASEMAP_MODE);
+    if (LINE_BASEMAP_MODE === 'osm-online') {
+      debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] using OSM online raster tiles');
+    }
     // 先销毁旧 probe + 旧 interaction listeners（避免残留）
     if (maplibreProbeHandle) {
       maplibreProbeHandle.destroy();

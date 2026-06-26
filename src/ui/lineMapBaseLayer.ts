@@ -8,7 +8,7 @@
  * - maplibre-gl 能在 Tauri + Vite 中被动态 import
  * - 能创建一个空白地图容器（使用本地空 style）
  * - 能销毁（remove() 释放资源）
- * - 不加载在线瓦片、不访问外网
+ * - empty / pmtiles 模式不访问外网；osm-online 模式访问 https://tile.openstreetmap.org
  *
  * M4-A2 第 1 轮（已完成，原 M4-A2 已升级）：
  * - Handle 新增 project(lng, lat) → 屏幕像素（桥接 Canvas overlay）
@@ -176,7 +176,7 @@ export async function createMapLibreProbe(
     attributionControl: isOsmMode ? { compact: false } : false,
     // M4-A2：启用交互（pan/zoom），MapLibre 管理视图
     interactive: true,
-    // 离线：不尝试加载任何在线瓦片
+    // empty/pmtiles 模式不发起瓦片请求；osm-online 模式请求 https://tile.openstreetmap.org
     hash: false,
   });
 
