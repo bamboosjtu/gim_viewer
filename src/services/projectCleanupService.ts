@@ -97,13 +97,25 @@ export async function cleanupBeforeOpenNewProject(
   }
   console.log('[Cleanup] disposed viewer models:', disposedCount, '(attempted:', attemptedCount, ')');
 
-  // ---- 4. 清空 model-list UI ----
+  // ---- 4. 清空 UI 残留 ----
   // disposeModel 会触发 onItemDeleted → removeModelFromUI，但保险起见再清一次
-  try {
-    const modelListEl = document.getElementById('model-list');
-    if (modelListEl) modelListEl.innerHTML = '';
-  } catch (err) {
-    console.warn('[Cleanup] clear model-list UI failed:', err);
+  // 同步清空其他面板，避免上一个工程（如线路 TOWER 属性）残留到下一个工程
+  const uiClearTargets: { id: string; html?: string; styleDisplay?: string }[] = [
+    { id: 'model-list', html: '' },
+    { id: 'cbm-tree-panel', html: '' },
+    { id: 'file-dev-panel', html: '' },
+    { id: 'props-drawer-body', html: '<div class="props-empty">选择层级树节点查看属性</div>' },
+    { id: 'empty-tip', styleDisplay: '' },
+  ];
+  for (const t of uiClearTargets) {
+    try {
+      const el = document.getElementById(t.id);
+      if (!el) continue;
+      if (t.html !== undefined) el.innerHTML = t.html;
+      if (t.styleDisplay !== undefined) el.style.display = t.styleDisplay;
+    } catch (err) {
+      console.warn(`[Cleanup] clear UI ${t.id} failed:`, err);
+    }
   }
 
   // ---- 5. 重置 state ----
@@ -114,5 +126,10 @@ export async function cleanupBeforeOpenNewProject(
     state.resetGimState();
     // 相机状态也重置，确保新模型加载后 fitCameraToScene 能重新执行
     state.hasFittedCamera = false;
+    // 显式清空 loadedModels 和 highlightedItems：
+    // resetGimState 不清这两项，若 dispose 未触发 onItemDeleted，
+    // state.loadedModels 会残留 stale modelId，导致 loadIfcEntry 误判"模型已加载，跳过"
+    state.loadedModels.clear();
+    state.highlightedItems = null;
   }
 }

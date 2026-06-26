@@ -493,11 +493,22 @@ export async function openGimWithDialog(
           renderFileDevPanel(state, clickHandler);
           emptyTipEl.style.display = 'none';
 
+          // 缓存命中后行为对齐完整解压路径：弹出 IFC 选择框，由用户选择加载
+          // 选择 IFC 后走现有 loadSelectedIfcFiles → readCachedIfc，不重新解压 GIM
+          if (state.currentIfcEntries.length > 0) {
+            openIfcModal(state.currentIfcEntries);
+          }
+
           hideLoading();
           // 轻量状态提示
-          showLoading('已从本地缓存恢复，可点击节点按需加载 IFC');
+          showLoading('已从本地缓存恢复，请选择 IFC 文件加载模型');
           setTimeout(hideLoading, 3000);
-          console.log('[Tauri] 缓存短路生效：未读取原始 GIM，未执行解压');
+          console.log('[Tauri] substation cache restored, opening IFC modal', {
+            project_id: record.id,
+            ifc_entries: state.currentIfcEntries.length,
+            cached_ifc_paths: state.cachedIfcPaths.size,
+          });
+          console.log('[Tauri] 变电工程缓存短路生效：未读取原始 GIM，已打开 IFC 选择框');
           return; // 缓存命中，短路完成
         } catch (err) {
           console.warn('[Tauri] 缓存恢复失败，回退完整解压流程:', err);

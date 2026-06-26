@@ -50,14 +50,9 @@ async function bootstrapAsync(): Promise<void> {
   btnClear.addEventListener('click', async () => {
     // 统一走 cleanupBeforeOpenNewProject：销毁线路地图 + dispose 所有 fragments 模型
     // （合并 state.loadedModels 与 ctx.fragments.list，避免 state 与 ctx 不同步）+
-    // 重置高亮 + 清空 model-list UI + resetAll（state.reset 含 loadedModels.clear）
+    // 重置高亮 + 清空所有 UI 面板 + resetAll（state.reset 含 loadedModels.clear）
     const { cleanupBeforeOpenNewProject } = await import('../services/projectCleanupService.js');
     await cleanupBeforeOpenNewProject(state, { resetAll: true });
-    // 清空其他 UI（cleanup 已清 model-list，这里清剩余面板）
-    document.getElementById('cbm-tree-panel')!.innerHTML = '';
-    document.getElementById('file-dev-panel')!.innerHTML = '';
-    document.getElementById('props-drawer-body')!.innerHTML = '<div class="props-empty">选择层级树节点查看属性</div>';
-    document.getElementById('empty-tip')!.style.display = '';
   });
 
   // 首屏 UI 就绪，隐藏 loading
