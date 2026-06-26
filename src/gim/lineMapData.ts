@@ -16,7 +16,7 @@
  */
 
 import type { GimGraph, GimGraphNode } from './gimGraphTypes.js';
-import type { LineAttributeIndex } from '../services/lineAttrRestoreService.js';
+import type { LineAttributeIndex } from './lineAttributeTypes.js';
 import { normalizeGimPath, getFileNameLower } from './linePathNormalize.js';
 
 // ---------------------------------------------------------------------------

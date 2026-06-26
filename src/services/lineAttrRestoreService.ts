@@ -22,6 +22,9 @@ import type {
   LineFamPropertyRecord,
   LineDevPropertyRecord,
 } from '../desktop/database.js';
+// LineAttributeIndex 类型定义已移至 gim/ 层，消除 gim/lineMapData → services 的反向依赖
+import type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
+export type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
 
 /**
  * 将 FAM/DEV 属性恢复到 AppState。
@@ -96,18 +99,6 @@ export function restoreLineAttributesToState(
     famSources: state.cachedLineFamProperties.size,
     devSources: state.cachedLineDevProperties.size,
   };
-}
-
-/** 线路属性查找索引（供 M3-4 地图数据提取使用） */
-export interface LineAttributeIndex {
-  /** FAM 按 source_path 索引 */
-  famBySourcePath: Map<string, Map<string, LineFamPropertyRecord[]>>;
-  /** FAM 按 file_name_lower 索引 */
-  famByFileNameLower: Map<string, Map<string, LineFamPropertyRecord[]>>;
-  /** DEV 按 source_path 索引 */
-  devBySourcePath: Map<string, Map<string, LineDevPropertyRecord[]>>;
-  /** DEV 按 file_name_lower 索引 */
-  devByFileNameLower: Map<string, Map<string, LineDevPropertyRecord[]>>;
 }
 
 /**

@@ -209,12 +209,11 @@ async function openGimFromArrayBuffer(
     state.currentGimGraph = graph;
     state.currentFiles = extracted; // 保留文件供后续读取
 
-    const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
-    renderLineProjectPanels(state, graph, showMessage);
-
-    // v5: 首次导入 → 解析 FAM/DEV 属性 → 统一事务写入缓存 → 恢复到 state
+    // v5: 首次导入 → 解析 FAM/DEV 属性 → 统一事务写入缓存 → 恢复到 state → 渲染面板
     // 顺序：extract → detect → buildLineGimGraph → parseLineAttributes
-    //       → save_line_project_cache → restore graph → restore attrs → render
+    //       → save_line_project_cache → restore attrs → render
+    // 注意：render 必须在 restore attrs 之后，否则 extractLineMapData 拿不到
+    //       FAM/DEV 属性，塔位编号/塔型/呼高/转角等 tooltip 字段会缺失
     if (options?.persistIndex && options.projectId != null && isTauri()) {
       try {
         showLoading('正在解析线路 FAM/DEV 属性...');
@@ -271,11 +270,15 @@ async function openGimFromArrayBuffer(
       }
     }
 
+    // 渲染面板（在属性恢复之后，确保地图 tooltip/标签有完整 FAM/DEV 属性）
+    const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
+    renderLineProjectPanels(state, graph, showMessage);
+
     hideLoading();
     // 轻量状态提示
-    showLoading('线路工程已加载，当前为结构浏览模式');
+    showLoading('线路工程已加载，当前为地图浏览模式');
     setTimeout(hideLoading, 3000);
-    console.log('[GIM] 线路工程已加载（结构浏览模式），跳过 IFC 模态框');
+    console.log('[GIM] 线路工程已加载（地图浏览模式），跳过 IFC 模态框');
     return;
   }
 

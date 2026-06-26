@@ -350,7 +350,7 @@ export function renderLineProjectPanels(
   if (emptyTipEl) emptyTipEl.style.display = 'none';
 
   // 6. 状态提示
-  showMessage('线路工程已加载，当前为结构浏览模式');
+  showMessage('线路工程已加载，当前为地图浏览模式');
   console.log('[GIM] 线路工程面板已渲染:', {
     type: graph.projectType,
     root: graph.root?.path || null,
