@@ -218,17 +218,17 @@ export interface GimCacheValidation {
   project_type: string | null;
   /** v4: line_cbm_node 表行数（transmission_line 缓存校验用） */
   line_cbm_node_count: number;
-  /** v5: line_fam_property 不同 source_path 的去重数量 */
+  /** v5: line_fam_property 不同 file_name_lower 的去重数量 */
   line_fam_source_count: number;
-  /** v5: line_dev_property 不同 source_path 的去重数量 */
+  /** v5: line_dev_property 不同 file_name_lower 的去重数量 */
   line_dev_source_count: number;
-  /** v5: line_cbm_ref 中 ref_kind=famFiles 的 normalized_ref_value 去重数量 */
+  /** v5: line_cbm_ref 中 ref_kind=famFiles 的 file_name_lower 去重数量 */
   line_expected_fam_ref_count: number;
-  /** v5: line_cbm_ref 中 ref_kind=devFiles 的 normalized_ref_value 去重数量 */
+  /** v5: line_cbm_ref 中 ref_kind=devFiles 的 file_name_lower 去重数量 */
   line_expected_dev_ref_count: number;
-  /** v5: 图引用中存在但 line_fam_property 缺失的 source_path 列表 */
+  /** v5: 图引用中存在但 line_fam_property 缺失的 file_name_lower 列表 */
   missing_line_fam_sources: string[];
-  /** v5: 图引用中存在但 line_dev_property 缺失的 source_path 列表 */
+  /** v5: 图引用中存在但 line_dev_property 缺失的 file_name_lower 列表 */
   missing_line_dev_sources: string[];
 }
 
@@ -469,9 +469,9 @@ export interface LineCbmRefPayload {
   ref_key: string | null;
   ref_value: string;
   sort_order: number | null;
-  /** v5: 归一化后的引用值（路径统一为 / 分隔，去空段），用于诊断时匹配 FAM/DEV 文件 */
+  /** v5: 归一化后的引用值（路径统一为 / 分隔，去空段），仅作存储与排查用途 */
   normalized_ref_value: string | null;
-  /** v5: 引用值的文件名小写（如 "x.fam"），用于诊断时的文件名匹配 */
+  /** v5: 引用值的文件名小写（如 "x.fam"），诊断时以此键空间匹配 FAM/DEV 文件 */
   file_name_lower: string | null;
 }
 

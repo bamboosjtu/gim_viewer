@@ -1052,17 +1052,17 @@ pub struct GimCacheValidation {
     pub project_type: Option<String>,
     /// v4: line_cbm_node 表行数（transmission_line 缓存校验用）
     pub line_cbm_node_count: u64,
-    /// v5: line_fam_property 不同 source_path 的去重数量
+    /// v5: line_fam_property 不同 file_name_lower 的去重数量
     pub line_fam_source_count: u64,
-    /// v5: line_dev_property 不同 source_path 的去重数量
+    /// v5: line_dev_property 不同 file_name_lower 的去重数量
     pub line_dev_source_count: u64,
-    /// v5: line_cbm_ref 中 ref_kind=famFiles 的 normalized_ref_value 去重数量
+    /// v5: line_cbm_ref 中 ref_kind=famFiles 的 file_name_lower 去重数量
     pub line_expected_fam_ref_count: u64,
-    /// v5: line_cbm_ref 中 ref_kind=devFiles 的 normalized_ref_value 去重数量
+    /// v5: line_cbm_ref 中 ref_kind=devFiles 的 file_name_lower 去重数量
     pub line_expected_dev_ref_count: u64,
-    /// v5: 图引用中存在但 line_fam_property 缺失的 source_path 列表
+    /// v5: 图引用中存在但 line_fam_property 缺失的 file_name_lower 列表
     pub missing_line_fam_sources: Vec<String>,
-    /// v5: 图引用中存在但 line_dev_property 缺失的 source_path 列表
+    /// v5: 图引用中存在但 line_dev_property 缺失的 file_name_lower 列表
     pub missing_line_dev_sources: Vec<String>,
 }
 
@@ -1754,16 +1754,21 @@ struct LineAttrDiagnostic {
 
 /// v5: 计算线路工程 FAM/DEV 属性缓存诊断字段
 ///
-/// - fam/dev source count：line_fam_property / line_dev_property 中 normalized_path 去重数量
-/// - expected fam/dev ref count：line_cbm_ref 中 ref_kind=famFiles/devFiles 且 normalized_ref_value 非空的去重数量
-/// - missing fam/dev sources：图引用中存在但属性表缺失的 normalized_ref_value 列表
+/// 统一键空间为 file_name_lower（裸文件名小写）。line_cbm_ref 中的引用通常是裸文件名
+/// （如 `43cf81da-...f159.fam`），而 line_fam_property/line_dev_property 中的 normalized_path
+/// 是完整路径（如 `Cbm/43cf81da-...f159.fam`）。若用 normalized_ref_value 与 normalized_path
+/// 做差集会因键空间不一致而误报缺失，故 expected/actual/missing 全部改用 file_name_lower 统一比较。
+///
+/// - fam/dev source count：line_fam_property / line_dev_property 中 file_name_lower 去重数量
+/// - expected fam/dev ref count：line_cbm_ref 中 ref_kind=famFiles/devFiles 且 file_name_lower 非空的去重数量
+/// - missing fam/dev sources：图引用中存在但属性表缺失的 file_name_lower 列表
 fn compute_line_attr_diagnostic(conn: &Connection, project_id: i64) -> Result<LineAttrDiagnostic, String> {
     use std::collections::HashSet;
 
-    // 1. fam source count (DISTINCT normalized_path in line_fam_property)
+    // 1. fam source count (DISTINCT file_name_lower in line_fam_property)
     let fam_source_count: u64 = conn
         .query_row(
-            "SELECT COUNT(DISTINCT normalized_path) FROM line_fam_property WHERE project_id = ?1",
+            "SELECT COUNT(DISTINCT file_name_lower) FROM line_fam_property WHERE project_id = ?1",
             params![project_id],
             |row| row.get::<_, i64>(0),
         )
@@ -1772,19 +1777,19 @@ fn compute_line_attr_diagnostic(conn: &Connection, project_id: i64) -> Result<Li
     // 2. dev source count
     let dev_source_count: u64 = conn
         .query_row(
-            "SELECT COUNT(DISTINCT normalized_path) FROM line_dev_property WHERE project_id = ?1",
+            "SELECT COUNT(DISTINCT file_name_lower) FROM line_dev_property WHERE project_id = ?1",
             params![project_id],
             |row| row.get::<_, i64>(0),
         )
         .unwrap_or(0i64) as u64;
 
-    // 3. expected fam refs (DISTINCT normalized_ref_value where ref_kind=famFiles)
+    // 3. expected fam refs (DISTINCT file_name_lower where ref_kind=famFiles)
     let mut expected_fam_refs: Vec<String> = Vec::new();
     {
         let mut stmt = conn
             .prepare(
-                "SELECT DISTINCT normalized_ref_value FROM line_cbm_ref
-                 WHERE project_id = ?1 AND ref_kind = 'famFiles' AND normalized_ref_value IS NOT NULL",
+                "SELECT DISTINCT file_name_lower FROM line_cbm_ref
+                 WHERE project_id = ?1 AND ref_kind = 'famFiles' AND file_name_lower IS NOT NULL",
             )
             .map_err(|e| format!("预处理 fam refs 失败: {}", e))?;
         let rows = stmt
@@ -1800,8 +1805,8 @@ fn compute_line_attr_diagnostic(conn: &Connection, project_id: i64) -> Result<Li
     {
         let mut stmt = conn
             .prepare(
-                "SELECT DISTINCT normalized_ref_value FROM line_cbm_ref
-                 WHERE project_id = ?1 AND ref_kind = 'devFiles' AND normalized_ref_value IS NOT NULL",
+                "SELECT DISTINCT file_name_lower FROM line_cbm_ref
+                 WHERE project_id = ?1 AND ref_kind = 'devFiles' AND file_name_lower IS NOT NULL",
             )
             .map_err(|e| format!("预处理 dev refs 失败: {}", e))?;
         let rows = stmt
@@ -1812,11 +1817,11 @@ fn compute_line_attr_diagnostic(conn: &Connection, project_id: i64) -> Result<Li
         }
     }
 
-    // 5. fam normalized paths set (for missing detection)
+    // 5. fam file_name_lower set (actual cached sources, for missing detection)
     let mut fam_paths: HashSet<String> = HashSet::new();
     {
         let mut stmt = conn
-            .prepare("SELECT DISTINCT normalized_path FROM line_fam_property WHERE project_id = ?1")
+            .prepare("SELECT DISTINCT file_name_lower FROM line_fam_property WHERE project_id = ?1")
             .map_err(|e| format!("预处理 fam paths 失败: {}", e))?;
         let rows = stmt
             .query_map(params![project_id], |row| row.get::<_, String>(0))
@@ -1826,11 +1831,11 @@ fn compute_line_attr_diagnostic(conn: &Connection, project_id: i64) -> Result<Li
         }
     }
 
-    // 6. dev normalized paths set
+    // 6. dev file_name_lower set
     let mut dev_paths: HashSet<String> = HashSet::new();
     {
         let mut stmt = conn
-            .prepare("SELECT DISTINCT normalized_path FROM line_dev_property WHERE project_id = ?1")
+            .prepare("SELECT DISTINCT file_name_lower FROM line_dev_property WHERE project_id = ?1")
             .map_err(|e| format!("预处理 dev paths 失败: {}", e))?;
         let rows = stmt
             .query_map(params![project_id], |row| row.get::<_, String>(0))
@@ -1840,7 +1845,7 @@ fn compute_line_attr_diagnostic(conn: &Connection, project_id: i64) -> Result<Li
         }
     }
 
-    // 7. missing fam sources: expected refs not in fam_paths (sorted)
+    // 7. missing fam sources: expected file_name_lower not in fam_paths (sorted)
     let mut missing_fam: Vec<String> = expected_fam_refs
         .iter()
         .filter(|r| !fam_paths.contains(*r))
