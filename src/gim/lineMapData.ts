@@ -99,7 +99,7 @@ export interface LineMapData {
 }
 
 /** 拓扑索引（仅在 extractLineMapData 内部构建，不持久化、不回写 state） */
-export interface LineGraphTopoIndex {
+interface LineGraphTopoIndex {
   /** 路径 → 节点 */
   nodeByPath: Map<string, GimGraphNode>;
   /** 子路径 → 父节点 */
@@ -167,7 +167,7 @@ function parseBlha(blha: string | undefined): BlhaCoord | null {
  * GimGraph 是 children 树，想从 WIRE → F4(WIRE) → BACKSTRING/FRONTSTRING →
  * 所属 TOWER F4 → BLHA 稳定反查，必须先建立拓扑索引。
  */
-export function buildLineGraphTopoIndex(graph: GimGraph): LineGraphTopoIndex {
+function buildLineGraphTopoIndex(graph: GimGraph): LineGraphTopoIndex {
   const nodeByPath = new Map<string, GimGraphNode>(graph.nodesByPath);
   const parentByPath = new Map<string, GimGraphNode>();
   const nodeByFileNameLower = new Map<string, GimGraphNode>();

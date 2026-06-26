@@ -18,7 +18,7 @@
 | 3D 渲染 | @thatopen/components (OBC) + web-ifc + Three.js |
 | 压缩包解压 | libarchive.js（WebAssembly，支持 7z/ZIP/RAR） |
 | 本地数据库 | rusqlite（bundled SQLite，Rust 侧管理） |
-| 线路地图 | Canvas 2D + SVG（离线渲染，无地图引擎依赖） |
+| 线路地图 | MapLibre + OpenStreetMap online（Canvas-only 兜底） |
 | 构建 | Vite + TypeScript strict |
 
 ## 核心功能
@@ -31,14 +31,14 @@
 - **工程切换清理**：dispose 旧 Fragments 模型 + 销毁线路地图 + 清空 UI + 重置状态
 - **IFC 异常隔离**：单个 IFC 加载失败不阻断其他 IFC；Fragments "Malformed tile" 异常被 catch
 
-## MVP 范围（线路工程）
+## 线路工程地图
 
-- Canvas 2D 地图（等距投影，无真实底图）
-- 塔位符号（圆形=直线塔，菱形=耐张塔）
-- 折线导线（按类型着色：CONDUCTOR 蓝 / GROUNDWIRE 灰 / OPGW 绿）
-- CROSS 跨越点（三角形，可选显示）
-- 图层开关（导线 / 地线 / OPGW / 未知线 / 塔位 / 跨越点 / 标签）
-- tooltip 展示塔位编号、类型、呼高、转角、坐标、FAM/DEV 命中状态
+- **主底图**：OpenStreetMap online raster（MapLibre GL JS）
+- **失败兜底**：OSM 不可用时（3 次 tile error）自动回退 Canvas-only
+- **Canvas overlay**：塔位符号 + 导线折线 + 跨越点 + 经纬度网格 + 比例尺
+- **图层开关**：导线 / 地线 / OPGW / 未知线 / 塔位 / 跨越点 / 标签
+- **树↔地图联动**：点击树节点定位地图，点击地图塔位选中树行
+- **tooltip**：塔位编号、类型、呼高、转角、坐标、FAM/DEV 命中状态
 
 ## GIM 文件格式
 
@@ -63,7 +63,7 @@
 
 > 变电工程目录为全大写（CBM/DEV/MOD/PHM），线路工程目录为 PascalCase（Cbm/Dev/Mod/Phm）。
 
-详细格式说明见 [docs/schema/](docs/schema/)，Demo 工程分析见 [docs/gim_spec.md](docs/gim_spec.md)。
+详细格式说明见 [docs/schema/](docs/schema/)，工程分析与可视化见 [docs/gim_substation.md](docs/gim_substation.md) 和 [docs/gim_line.md](docs/gim_line.md)。
 
 ## 快速开始
 
@@ -92,13 +92,11 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 | 文档 | 说明 |
 |------|------|
-| [MVP 实现说明](docs/m3-line-gim-mvp.md) | 线路 GIM 可视化 MVP 的架构、数据流、设计决策 |
-| [手动验收清单](docs/manual-acceptance-checklist.md) | 线路/变电首次/二次打开、切换、清空、异常场景验收步骤 |
-| [已知限制](docs/known-limitations.md) | MVP 阶段的地图/塔位/导线/CROSS/IFC/底图/缓存限制 |
-| [地图底图评估](docs/map-basemap-evaluation.md) | MapLibre / Leaflet / Cesium 对比，M4 集成建议 |
-| [M4 路线图](docs/m4-roadmap.md) | 地图增强、悬链线、MOD 几何、工程化改进路线 |
-| [Fragments 缓存设计](docs/fragments-cache-design.md) | .frag 缓存方案（当前默认关闭） |
-| [日志与诊断说明](docs/logging-and-diagnostics.md) | 日志分类、localStorage override、Ctrl+Shift+D 诊断、生产排障 |
+| [技术架构](docs/architecture.md) | 技术选型、源码结构、模块关系、SQLite 表结构、功能开关 |
+| [变电 GIM](docs/gim_substation.md) | 变电站工程文件格式、解析流程、3D 可视化 |
+| [线路 GIM](docs/gim_line.md) | 输电线路工程文件格式、地图渲染、树↔图联动 |
+| [开发者日志](docs/dev-log.md) | 已知限制、技术债务、关键决策、日志系统、诊断工具 |
+| [格式规范](docs/schema/) | CBM/DEV/FAM/MOD/PHM/SCH/SLD/STD 文件格式 |
 
 ## 项目结构
 

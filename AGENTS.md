@@ -33,7 +33,7 @@ CBM 文件构成树形层级，入口为 `CBM/project.cbm`：
 
 所有文本格式文件（.cbm, .dev, .phm, .fam, .sch）使用 `KEY=VALUE` 键值对格式。
 .mod 文件使用 XML 格式，.sld 文件使用 SVG 格式，.std 文件使用 XML 格式。
-详细格式说明见 `doc/schema/` 目录。
+详细格式说明见 `docs/schema/` 目录。
 
 ## 技术栈
 
@@ -141,7 +141,7 @@ src-tauri/
 
 ### parser_version 失效机制
 
-- `PARSER_VERSION` 常量（当前 `gim-parser-v2`）
+- `PARSER_VERSION` 常量（当前 `gim-parser-v5`）
 - `validate_gim_cache` 检查 `parser_version_match`
 - 版本不匹配 → 缓存无效 → 完整解压 → `save_gim_index` 先删后插全部表
 

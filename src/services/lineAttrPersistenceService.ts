@@ -18,7 +18,6 @@ import type {
   LineFamPropertyPayload,
   LineDevPropertyPayload,
 } from '../desktop/database.js';
-import { LineRefKind } from '../gim/lineRefKind.js';
 import { normalizeGimPath, getFileNameLower } from '../gim/linePathNormalize.js';
 import { parseLineFam } from '../gim/lineFamParser.js';
 import { parseLineDev } from '../gim/lineDevParser.js';
@@ -249,9 +248,3 @@ export function estimatePayloadSizeMB(
   }
   return (graphBytes + attrBytes) / (1024 * 1024);
 }
-
-/** LineRefKind 常量引用（避免本文件遗漏使用统一常量） */
-export const ATTR_REF_KIND = {
-  FAM: LineRefKind.FAM_FILES,
-  DEV: LineRefKind.DEV_FILES,
-} as const;

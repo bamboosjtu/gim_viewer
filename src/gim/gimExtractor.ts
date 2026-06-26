@@ -18,7 +18,7 @@ function hasGimPackageHeader(v: Uint8Array): boolean {
 }
 
 /** 在 ArrayBuffer 中搜索 7z 或 ZIP 签名的偏移量 */
-export function findArchiveOffset(buffer: ArrayBuffer): number {
+function findArchiveOffset(buffer: ArrayBuffer): number {
   const v = new Uint8Array(buffer);
   if (v.length < 8) return 0;
   if (!hasGimPackageHeader(v)) return 0;
@@ -35,7 +35,7 @@ export function findArchiveOffset(buffer: ArrayBuffer): number {
 }
 
 /** 将 libarchive.js 解压结果展平为 Map<path, File> */
-export function flattenExtractedFiles(obj: unknown, prefix = ''): Map<string, File> {
+function flattenExtractedFiles(obj: unknown, prefix = ''): Map<string, File> {
   const result = new Map<string, File>();
   if (!obj || typeof obj !== 'object') return result;
   for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {

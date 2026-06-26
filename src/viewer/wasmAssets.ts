@@ -15,13 +15,13 @@ const WEB_IFC_WASM_FILE = 'web-ifc.wasm';
 let resolvedWasmBaseUrl: string | null = null;
 
 /** 获取 WASM 基础 URL（始终以 / 结尾） */
-export function getWebIfcWasmBaseUrl(): string {
+function getWebIfcWasmBaseUrl(): string {
   if (resolvedWasmBaseUrl) return resolvedWasmBaseUrl;
   return new URL('./wasm/', document.baseURI).toString();
 }
 
 /** 获取 web-ifc.wasm 完整 URL */
-export function getWebIfcWasmUrl(baseUrl = getWebIfcWasmBaseUrl()): string {
+function getWebIfcWasmUrl(baseUrl = getWebIfcWasmBaseUrl()): string {
   return new URL(WEB_IFC_WASM_FILE, baseUrl).toString();
 }
 
@@ -74,16 +74,4 @@ export async function resolveWebIfcWasmBaseUrl(): Promise<string> {
   }
 
   throw new Error(`web-ifc.wasm 不可访问，已尝试: ${candidates.map(getWebIfcWasmUrl).join(', ')}; last=${lastError instanceof Error ? lastError.message : String(lastError)}`);
-}
-
-export async function assertWebIfcWasmAvailable(): Promise<void> {
-  const baseUrl = await resolveWebIfcWasmBaseUrl();
-  const url = getWebIfcWasmUrl(baseUrl);
-  debugLog(DEBUG_IFC_LOAD, '[WASM] using web-ifc.wasm:', {
-    url,
-    baseUrl,
-    origin: window.location.origin,
-    href: window.location.href,
-    baseURI: document.baseURI,
-  });
 }

@@ -71,7 +71,7 @@ function parseDebugCategories(): DebugCategory[] | null {
  * 注意：开发模式（import.meta.env.DEV=true）不调用此函数，
  * 由 isDebugOn 统一处理 DEV || override。
  */
-export function isDebugOverrideEnabled(category: DebugCategory): boolean {
+function isDebugOverrideEnabled(category: DebugCategory): boolean {
   if (!isGimDebugEnabled()) return false;
   const cats = parseDebugCategories();
   if (cats === null) return true; // 未指定分类 → 开启全部

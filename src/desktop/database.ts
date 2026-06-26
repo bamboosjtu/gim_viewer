@@ -414,17 +414,6 @@ export async function upsertFragmentCacheRecord(
 }
 
 /**
- * 查询 fragment_cache 记录。
- */
-export async function getFragmentCacheRecord(
-  projectId: number,
-  entryPath: string,
-): Promise<FragmentCacheRecord | null> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<FragmentCacheRecord | null>('get_fragment_cache_record', { projectId, entryPath });
-}
-
-/**
  * 校验 Fragments 缓存有效性（只读，不修复）。
  * 检查项：记录存在、版本匹配、source_ifc_size 匹配、fragments 文件存在且大小 > 0。
  */
