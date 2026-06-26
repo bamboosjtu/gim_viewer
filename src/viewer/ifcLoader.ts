@@ -8,6 +8,34 @@ export type ModelEventCallbacks = {
   onModelRemoved: (modelId: string) => void;
 };
 
+/**
+ * 安全调用 fragments.core.update，确保 Fragments 内部异常（如 "Malformed tile"）
+ * 不会变成 Uncaught promise 并中断加载链路。
+ *
+ * - update() 可能返回 void 或 Promise<void>（不同 OBC 版本），两者都兼容
+ * - 同步抛出 → try/catch 捕获，warn 带 label 定位
+ * - 异步 reject → .catch 捕获，warn 带 label 定位
+ * - 不改变 web-ifc wasm 初始化逻辑
+ * - 不开启 Fragments 缓存
+ *
+ * @param ctx Viewer 上下文
+ * @param label 调用来源标识（如 'camera-controls-update' / 'model-added:<id>'），用于 warn 定位
+ * @param force 是否强制重建（true 用于新模型加入）
+ */
+function safeFragmentsUpdate(ctx: ViewerContext, label: string, force = false): void {
+  try {
+    const result = ctx.fragments.core.update(force);
+    // 不同 OBC 版本 update 可能返回 void 或 Promise<void>
+    if (result && typeof (result as Promise<void>).then === 'function') {
+      void (result as Promise<void>).catch((err) => {
+        console.warn(`[Fragments] update failed (${label})`, err);
+      });
+    }
+  } catch (err) {
+    console.warn(`[Fragments] update threw (${label})`, err);
+  }
+}
+
 /** 初始化 IFC 引擎（仅首次调用生效） */
 export async function initEngine(ctx: ViewerContext, state: AppState): Promise<void> {
   if (state.initialized) return;
@@ -43,7 +71,11 @@ export async function initEngine(ctx: ViewerContext, state: AppState): Promise<v
     throw err;
   }
 
-  ctx.world.camera.controls?.addEventListener('update', () => ctx.fragments.core.update());
+  ctx.world.camera.controls?.addEventListener('update', () => {
+    // 使用 safeFragmentsUpdate：相机移动触发 Fragments 重建 virtual tile 时，
+    // 内部 "Malformed tile" 异常不能变成 Uncaught promise
+    safeFragmentsUpdate(ctx, 'camera-controls-update', false);
+  });
   state.initialized = true;
   console.log('[IFC Engine] ready');
 }
@@ -55,11 +87,22 @@ export function registerModelEvents(
   callbacks: ModelEventCallbacks,
 ): void {
   ctx.fragments.list.onItemSet.add(({ value: model }) => {
-    model.useCamera((ctx.world.camera as any).three);
-    (ctx.world.scene as any).three.add(model.object);
-    ctx.fragments.core.update(true);
-    state.loadedModels.set(model.modelId, { modelId: model.modelId, visible: true });
-    callbacks.onModelAdded(model.modelId);
+    // 顺序：先加入 scene + state + UI（模型生命周期状态可见），再触发 fragments update
+    // 即使 update 报错（如 "Malformed tile"），模型生命周期状态也要可见，便于后续清理
+    // 不让 state 与 ctx.fragments.list 继续不同步
+    try {
+      model.useCamera((ctx.world.camera as any).three);
+      (ctx.world.scene as any).three.add(model.object);
+
+      state.loadedModels.set(model.modelId, { modelId: model.modelId, visible: true });
+      callbacks.onModelAdded(model.modelId);
+
+      // update(true) 强制重建 virtual tiles，最可能抛 "Malformed tile"
+      // warn 中带 modelId，方便定位是哪一个 IFC 出问题
+      safeFragmentsUpdate(ctx, `model-added:${model.modelId}`, true);
+    } catch (err) {
+      console.error(`[IFC Loader] onItemSet failed: ${model.modelId}`, err);
+    }
   });
   ctx.fragments.list.onBeforeDelete.add(({ value: model }) => {
     (ctx.world.scene as any).three.remove(model.object);

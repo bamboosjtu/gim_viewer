@@ -90,7 +90,36 @@ async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<U
         cachePath,
       });
       const { readCachedIfc } = await import('../desktop/database.js');
-      return await readCachedIfc(projectId, entry.path);
+      const bytes = await readCachedIfc(projectId, entry.path);
+
+      // 可疑缓存定位日志：MVP 阶段用于排查缓存 IFC 是否被截断/损坏
+      // IFC 文件应以 "ISO-103021;;" 文本头开头（HEX: 49 53 4F 2D 31 30 33 32 31 3B）
+      // byteLength === 0 或 head 不符 → 缓存损坏，返回 null 让上层回退/报错
+      const byteLength = bytes?.byteLength ?? 0;
+      const head = bytes
+        ? Array.from(bytes.slice(0, 32))
+            .map((b) => b.toString(16).padStart(2, '0'))
+            .join(' ')
+        : '';
+      console.log('[IFC Buffer] cached IFC bytes', {
+        name: entry.name,
+        path: entry.path,
+        byteLength,
+        head,
+      });
+      if (byteLength === 0) {
+        console.warn(`[IFC Buffer] 缓存 IFC 字节为空，缓存损坏: ${entry.path}`);
+        return null;
+      }
+      // IFC 文件头 ASCII "ISO-103021;;" 前 4 字节应为 49 53 4F 2D（"ISO-"）
+      // 不强制校验（部分 IFC 可能含 BOM 或前导空白），仅 warn 提示可疑
+      if (
+        bytes.length >= 4 &&
+        !(bytes[0] === 0x49 && bytes[1] === 0x53 && bytes[2] === 0x4f && bytes[3] === 0x2d)
+      ) {
+        console.warn(`[IFC Buffer] 缓存 IFC 文件头非 'ISO-' 前缀，可能损坏: ${entry.path}`, { head });
+      }
+      return bytes;
     }
   }
 
@@ -112,35 +141,74 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
   if (selected.length === 0) return;
   closeIfcModal();
   showLoading('正在加载 IFC 模型...');
+
+  // 逐个 IFC 隔离加载：某一个 IFC 报 "Malformed tile" 不应阻断其他 IFC
+  // 失败的 modelId 立即清理，避免后续"模型已加载，跳过"误判
+  const failed: Array<{ name: string; message: string }> = [];
+
   try {
     console.log('[IFC Modal] before ensureEngineReady');
     await ensureEngineReady(ctx, state, modelCallbacks);
     console.log('[IFC Modal] after ensureEngineReady');
     const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
+
     for (const entry of selected) {
       showLoading(`正在加载 ${entry.name}...`);
       console.log('[IFC Modal] before loadIfcEntry', entry);
-      await loadIfcEntry(
-        ctx,
-        state,
-        entry,
-        async () => {
-          console.log('[IFC Modal] getIfcBuffer called', entry);
-          return getIfcBufferForEntry(entry, state);
-        },
-        (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
-      );
-      console.log('[IFC Modal] loadIfcEntry done', entry);
+      try {
+        await loadIfcEntry(
+          ctx,
+          state,
+          entry,
+          async () => {
+            console.log('[IFC Modal] getIfcBuffer called', entry);
+            return getIfcBufferForEntry(entry, state);
+          },
+          (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
+        );
+        console.log('[IFC Modal] loadIfcEntry done', entry);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('[IFC Modal] loadIfcEntry failed', { entry, error: err });
+
+        failed.push({ name: entry.name, message });
+
+        // 防御性清理该 modelId：避免 state.loadedModels 残留 stale modelId，
+        // 导致后续"模型已加载，跳过"误判
+        try {
+          const modelId = entry.modelId;
+          if (ctx.fragments.list.has(modelId)) {
+            ctx.fragments.core.disposeModel(modelId);
+          }
+          state.loadedModels.delete(modelId);
+          const modelRow = document.getElementById(`model-${modelId}`);
+          if (modelRow) modelRow.remove();
+        } catch (cleanupErr) {
+          console.warn('[IFC Modal] cleanup failed model after load error', entry, cleanupErr);
+        }
+
+        // 继续加载下一个 IFC，不中断循环
+        continue;
+      }
     }
-    await buildIfcNameIndex(ctx, state);
+
+    // buildIfcNameIndex 失败不应阻断 UI 渲染（仅影响名称查询，模型已加载）
+    await buildIfcNameIndex(ctx, state).catch((err) => {
+      console.warn('[IFC Modal] buildIfcNameIndex failed', err);
+    });
+
     // 统一使用 handleNodeClick 作为点击回调
     const clickHandler = createNodeClickHandler(state, (text) => showLoading(text));
     buildAndRenderCbmTree(state, clickHandler);
     renderFileDevPanel(state, clickHandler);
     emptyTipEl.style.display = 'none';
-    fitCameraToScene(ctx, state);
+
+    // 对成功加载的模型执行 fitCameraToScene（即使部分失败也尝试 fit）
+    const fitted = fitCameraToScene(ctx, state);
+    console.log('[IFC Modal] fitCameraToScene result', { fitted, failed: failed.length, total: selected.length });
   } catch (err) {
-    console.error('[IFC Modal] loadSelectedIfcFiles failed', {
+    // 外层 try 仅捕获 ensureEngineReady 等致命错误
+    console.error('[IFC Modal] loadSelectedIfcFiles failed (outer)', {
       error: err,
       message: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : null,
@@ -149,7 +217,14 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
     setTimeout(hideLoading, 3000);
     return;
   }
-  hideLoading();
+
+  // 根据失败数决定提示文案
+  if (failed.length > 0) {
+    showLoading(`部分 IFC 加载失败：${failed.length}/${selected.length}，详见控制台`);
+    setTimeout(hideLoading, 4000);
+  } else {
+    hideLoading();
+  }
 }
 
 /** 从 ArrayBuffer 加载 GIM 文件的完整流程（浏览器和 Tauri 共用，不创建 Viewer） */

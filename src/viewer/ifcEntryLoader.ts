@@ -92,6 +92,29 @@ export async function loadIfcEntry(
 
   // onItemSet 事件已更新 loadedModels，此处不重复设置
 
+  // 4b. 后置校验：等待一帧让 onItemSet 完成（state.loadedModels + ctx.fragments.list 更新）
+  // 即使 onItemSet 内部 safeFragmentsUpdate 报了 "Malformed tile"（被 catch），
+  // 模型对象本身应该已经进入 scene + fragments.list + loadedModels
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+  const inFragments = ctx.fragments.list.has(modelId);
+  const loaded = state.loadedModels.has(modelId);
+  const fragModel = ctx.fragments.list.get(modelId);
+  const childCount = fragModel?.object?.children?.length ?? 0;
+
+  console.log('[IFC Loader] post-load validation', {
+    modelId,
+    inFragments,
+    loaded,
+    childCount,
+  });
+
+  // 不强制要求 childCount > 0：部分 Fragments 模型可能通过 virtual tiles 延迟显示
+  // 但模型必须进入 fragments.list，否则后续 update / dispose / 高亮都无效
+  if (!inFragments) {
+    throw new Error(`IFC 加载后未进入 fragments.list: ${modelId} (${name})`);
+  }
+
   // 5. 写 .frag 缓存（失败不影响主流程）
   if (canUseCache && entryPath) {
     await tryWriteFragmentsCache(model, projectId as number, entryPath, modelId, ifcBuffer.byteLength).catch((err) => {
