@@ -6,6 +6,7 @@ import { isTauri } from '../desktop/runtime.js';
 import { DEBUG_FRAGMENTS, getDebugConfigSnapshot } from '../config/debug.js';
 import { debugWarn } from '../utils/logger.js';
 import { summarizeDiagnostic } from '../services/diagnosticSummaryService.js';
+import { getBasemapStatusSnapshot, summarizeBasemapStatus } from '../services/basemapStatusService.js';
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
 function hideLoading() { loadingEl.style.display = 'none'; }
@@ -111,13 +112,17 @@ async function bootstrapAsync(): Promise<void> {
           const dbPath = await getDbPath();
           const diagnostic = await getLatestProjectCacheDiagnostic();
           const debug = getDebugConfigSnapshot();
-          const payload = JSON.stringify({ dbPath, diagnostic, debug }, null, 2);
+          // M4-A2 Finalization：附带底图运行状态（仅在线路工程场景有意义，无工程时为初始 'canvas-only'）
+          const basemap = getBasemapStatusSnapshot();
+          const payload = JSON.stringify({ dbPath, diagnostic, debug, basemap }, null, 2);
           await navigator.clipboard.writeText(payload);
           // 完整 JSON 仍输出到控制台（便于排障）
           console.log('[诊断] 数据库诊断信息已复制到剪贴板:\n', payload);
           // 控制台额外输出人类可读摘要（M4-D1 延伸）
           const summary = summarizeDiagnostic({ diagnostic });
           console.log('[诊断摘要]\n' + summary);
+          // M4-A2 Finalization：附加底图状态人类可读摘要
+          console.log('[底图状态]\n' + summarizeBasemapStatus());
           showLoading('数据库诊断信息已复制到剪贴板');
           setTimeout(hideLoading, 2000);
         } catch (err) {

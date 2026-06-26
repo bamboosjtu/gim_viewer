@@ -97,6 +97,7 @@ src/
 │  ├─ lineGraphRestoreService.ts # 线路图恢复
 │  ├─ lineAttrPersistenceService.ts # 线路 FAM/DEV 属性入库
 │  ├─ lineAttrRestoreService.ts # 线路属性恢复
+│  ├─ basemapStatusService.ts   # 底图运行状态（内存单例，供诊断使用）
 │  ├─ diagnosticSummaryService.ts # 诊断摘要（Markdown 风格）
 │  └─ projectCleanupService.ts  # 清空场景
 ├─ desktop/       Tauri 桥接层
@@ -235,3 +236,16 @@ npm run tauri:build  # 构建桌面 portable exe（nsis）
 ### 工程类型检测
 
 通过 `.ifc` 文件存在性 + 线路专属 CBM/DEV/FAM 字段（`ENTITYNAME`/`GROUPTYPE`/`DEVICETYPE` 键值级匹配）区分变电与线路工程。
+
+### 底图运行状态（内存单例）
+
+`src/services/basemapStatusService.ts` 维护当前线路工程底图的运行状态：
+
+- 5 种状态：`canvas-only` / `osm-online` / `osm-unavailable-fallback` / `empty` / `pmtiles`
+- 由 `lineProjectView.ts` 在以下节点上报：
+  - Canvas-only 初始渲染 → `setBasemapStatus('canvas-only', ...)`
+  - MapLibre overlay 成功 → `setBasemapStatus('osm-online', ...)`
+  - OSM 回退 → `setBasemapStatus('osm-unavailable-fallback', { fallbackReason })`
+  - `destroyLineMapView` → `resetBasemapStatus()`
+- 诊断 JSON 包含 `basemap` 字段（Ctrl+Shift+D），控制台额外输出 `[底图状态]` 可读摘要
+- 仅内存状态，不持久化到 SQLite，工程切换时重置

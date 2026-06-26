@@ -25,7 +25,21 @@ import { extractLineMapData, isLineMapDataValid } from '../gim/lineMapData.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
 import { ENABLE_MAPLIBRE_EXPERIMENT, ENABLE_PMTILES_EXPERIMENT, PMTILES_DEMO_URL, LINE_BASEMAP_MODE } from '../config/features.js';
+import { setBasemapStatus, resetBasemapStatus } from '../services/basemapStatusService.js';
+import type { BasemapStatus } from '../services/basemapStatusService.js';
 import { debugLog, debugWarn } from '../utils/logger.js';
+
+/**
+ * 把 LINE_BASEMAP_MODE 映射为成功后的 BasemapStatus。
+ *
+ * MVP 阶段 LINE_BASEMAP_MODE 恒为 'osm-online'，
+ * 'empty' / 'pmtiles' 仅作为内部枚举保留，不进入当前 MVP 范围。
+ */
+function basemapStatusFromMode(mode: string): BasemapStatus {
+  if (mode === 'osm-online') return 'osm-online';
+  if (mode === 'pmtiles') return 'pmtiles';
+  return 'empty';
+}
 
 /** 线路工程实体图标（扩展变电工程的 ENTITY_ICONS） */
 const LINE_ENTITY_ICONS: Record<string, string> = {
@@ -379,6 +393,8 @@ export function destroyLineMapView(): void {
     maplibreProbeHandle = null;
   }
   lineMapData = null;
+  // M4-A2 Finalization：重置底图运行状态（避免下次打开工程时残留旧状态）
+  resetBasemapStatus();
 }
 
 // ---------------------------------------------------------------------------
@@ -547,6 +563,14 @@ export function renderLineProjectPanels(
       focusBboxByNodePaths() { return false; },
     };
   }
+  // M4-A2 Finalization：先报告 Canvas-only 状态
+  // - 无论 ENABLE_MAPLIBRE_EXPERIMENT 是否开启，主视口已先以 Canvas-only 形式就绪
+  // - 后续 MapLibre overlay 成功时状态会被更新为 'osm-online'
+  // - OSM 失败回退时状态会被更新为 'osm-unavailable-fallback'
+  setBasemapStatus('canvas-only', {
+    mode: LINE_BASEMAP_MODE,
+    maplibreEnabled: ENABLE_MAPLIBRE_EXPERIMENT,
+  });
 
   // 5. 隐藏空提示（线路工程使用地图视口，不需要 3D 空提示）
   if (emptyTipEl) emptyTipEl.style.display = 'none';
@@ -628,6 +652,13 @@ export function renderLineProjectPanels(
       // 重新渲染 Canvas-only（恢复经纬度网格、比例尺、hover/click/tooltip/树联动）
       lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick);
 
+      // M4-A2 Finalization：上报回退状态（含可读 reason 供诊断展示）
+      setBasemapStatus('osm-unavailable-fallback', {
+        mode: LINE_BASEMAP_MODE,
+        maplibreEnabled: true,
+        fallbackReason: reason instanceof Error ? reason.message : String(reason),
+      });
+
       // UI 状态提示
       try {
         showMessage('OSM 在线底图不可用，已切换为 Canvas 地图模式');
@@ -697,10 +728,16 @@ export function renderLineProjectPanels(
           lineMapHandle?.handlePointerLeave?.();
         });
         maplibreInteractionCleanup.push(offView, offMove, offClick, offLeave);
+        // M4-A2 Finalization：MapLibre overlay 初始化成功，按当前底图模式上报状态
+        setBasemapStatus(basemapStatusFromMode(LINE_BASEMAP_MODE), {
+          mode: LINE_BASEMAP_MODE,
+          maplibreEnabled: true,
+        });
         debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2：底图 + Canvas overlay + 交互桥接 初始化成功');
       } catch (err) {
         debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2：初始化失败，保持 Canvas-only', err);
-        // 保持已渲染的 Canvas-only handle，不抛异常
+        // M4-A2 Finalization：初始化失败时状态保持为 Canvas-only（已在外层渲染时设置）
+        // 此处不显式 setBasemapStatus，避免覆盖外层的 'canvas-only' 状态
       }
     })();
   }
