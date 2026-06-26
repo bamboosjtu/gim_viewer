@@ -19,18 +19,25 @@
  * - ScaleControl（仅 overlay 模式，bottom-right）
  * - fitBounds 使用 duration:0（无动画，立即同步 Canvas 重绘）
  *
- * M4-A2 第 2 轮（本轮新增）：
+ * M4-A2 第 2 轮（已完成）：
  * - PMTiles 离线瓦片最小预研（默认关闭，ENABLE_PMTILES_EXPERIMENT）
  * - 失败自动回退 empty style
  *
+ * M4-A2 第 3 轮（本轮新增）：
+ * - 支持 basemapMode 选择底图（empty / osm-online / pmtiles）
+ * - OSM online 模式：开发调试用，启用 attributionControl
+ * - OSM tile 加载错误只 warning，不 reject 主流程
+ * - 不影响 empty / pmtiles 模式
+ *
  * 不做的事（留给后续）：
- * - 不加载在线瓦片
- * - 不做坐标偏移
+ * - 不做坐标偏移（GCJ-02）
+ * - 不批量下载瓦片 / 不缓存为离线包
  * - 不添加 NavigationControl / FullscreenControl 等其他控件
  */
 
 import type { Map as MapLibreMap, StyleSpecification, LngLatBoundsLike, ScaleControl, MapMouseEvent } from 'maplibre-gl';
-import { createEmptyLineMapStyle, createPmtilesLineMapStyle } from './lineMapStyle.js';
+import type { LineBasemapMode } from '../config/features.js';
+import { createEmptyLineMapStyle, createPmtilesLineMapStyle, createOsmOnlineRasterStyle } from './lineMapStyle.js';
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -69,6 +76,16 @@ export interface CreateMapLibreProbeOptions {
   initialBounds?: [number, number, number, number];
   /** M4-A2 第 2 轮：PMTiles 瓦片配置（默认不启用，使用 empty style） */
   pmtiles?: PmtilesOptions;
+  /**
+   * M4-A2 第 3 轮：底图模式选择。
+   * - 'empty'（默认）：纯色 background，无瓦片
+   * - 'osm-online'：OpenStreetMap 在线 raster（仅开发调试，启用 attribution）
+   * - 'pmtiles'：本地 PMTiles 矢量瓦片（需配合 pmtiles 选项）
+   *
+   * 优先级：osm-online > pmtiles > empty。
+   * OSM 模式不依赖 PMTiles；PMTiles 模式不影响 OSM 模式。
+   */
+  basemapMode?: LineBasemapMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,10 +115,18 @@ export async function createMapLibreProbe(
   // 动态 import：默认关闭时 maplibre-gl 不会进入主 bundle
   const maplibre = await import('maplibre-gl');
 
-  // ---- M4-A2 第 2 轮：PMTiles protocol 注册（可选） ----
+  // ---- M4-A2 第 3 轮：底图模式选择 ----
+  // 优先级：osm-online > pmtiles > empty
+  const basemapMode: LineBasemapMode = options?.basemapMode ?? 'empty';
+  const isOsmMode = basemapMode === 'osm-online';
+  // OSM 模式启用 attributionControl（© OpenStreetMap contributors）
+  // MapLibre attributionControl 类型：false | AttributionControlOptions（不接受 true）
+  // OSM 模式传 { compact: false } 始终展开 attribution；其他模式传 false 禁用
+
+  // ---- M4-A2 第 2 轮：PMTiles protocol 注册（仅 pmtiles 模式尝试） ----
   let pmtilesProtocolHandle: { destroy(): void } | null = null;
   let usingPmtiles = false;
-  if (options?.pmtiles?.enabled && options.pmtiles.url) {
+  if (basemapMode === 'pmtiles' && options?.pmtiles?.enabled && options.pmtiles.url) {
     try {
       const { setupPmtilesProtocol } = await import('./lineMapPmtiles.js');
       pmtilesProtocolHandle = await setupPmtilesProtocol(maplibre);
@@ -114,10 +139,18 @@ export async function createMapLibreProbe(
     }
   }
 
-  // 选择 style：PMTiles 启用且 protocol 注册成功时用 PMTiles style，否则 empty
-  const style: StyleSpecification = usingPmtiles && options?.pmtiles?.url
-    ? createPmtilesLineMapStyle(options.pmtiles.url)
-    : createEmptyLineMapStyle();
+  // 选择 style：
+  // - osm-online 模式：使用 OSM raster style（不依赖 PMTiles）
+  // - pmtiles 模式：protocol 注册成功时用 PMTiles style，否则回退 empty
+  // - empty / 其他：empty style（最终兜底）
+  let style: StyleSpecification;
+  if (isOsmMode) {
+    style = createOsmOnlineRasterStyle();
+  } else if (usingPmtiles && options?.pmtiles?.url) {
+    style = createPmtilesLineMapStyle(options.pmtiles.url);
+  } else {
+    style = createEmptyLineMapStyle();
+  }
 
   // 挂载点 div（底图层，z-index:0 在 Canvas overlay 之下）
   const mountDiv = document.createElement('div');
@@ -138,7 +171,9 @@ export async function createMapLibreProbe(
       ? [(options.initialBounds[0] + options.initialBounds[2]) / 2, (options.initialBounds[1] + options.initialBounds[3]) / 2]
       : [0, 0],
     zoom: options?.initialBounds ? 10 : 0,
-    attributionControl: false,
+    // M4-A2 第 3 轮：OSM 模式启用 attributionControl（ODbL 许可要求）
+    // empty / pmtiles 模式不显示 attribution
+    attributionControl: isOsmMode ? { compact: false } : false,
     // M4-A2：启用交互（pan/zoom），MapLibre 管理视图
     interactive: true,
     // 离线：不尝试加载任何在线瓦片
@@ -176,11 +211,23 @@ export async function createMapLibreProbe(
       resolve();
     };
     const onError = (e: unknown) => {
+      if (isOsmMode) {
+        // M4-A2 第 3 轮：OSM 模式下瓦片 404 / 网络错误不致命，仅警告
+        // 不 reject 主流程，让 load 事件仍能正常触发
+        console.warn('[MapLibre probe] OSM tile error (non-fatal):', formatMapEvent(e));
+        return;
+      }
       map.off('load', onLoad);
       reject(new Error(`MapLibre probe 初始化失败: ${formatMapEvent(e)}`));
     };
     map.once('load', onLoad);
-    map.once('error', onError);
+    // OSM 模式：可能有多个 tile 错误，用 on 持续监听（仅警告）
+    // empty / pmtiles 模式：仅首个 error 致命，用 once
+    if (isOsmMode) {
+      map.on('error', onError);
+    } else {
+      map.once('error', onError);
+    }
   });
 
   let destroyed = false;

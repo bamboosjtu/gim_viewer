@@ -394,3 +394,90 @@ PMTILES_DEMO_URL = '/tiles/demo.pmtiles';
 
 详见 [地图底图评估 - 第 16 节](map-basemap-evaluation.md#16-m4-a2-第-2-轮cleanup-patch--pmtiles-离线瓦片最小预研)。
 
+---
+
+## 10. M4-A2 第 3 轮：开发环境 OpenStreetMap 在线底图（2026-06-26）
+
+### 10.1 目标
+
+新增开发环境 OSM 在线底图能力，用于调试线路 overlay 与底图对齐。明确底图模式优先级：Canvas-only（默认安全） > OSM online（开发调试） > PMTiles（后续离线） > empty（兜底）。
+
+### 10.2 vibe-Monitor 参考
+
+阶段 1 在 `vibe-Monitor` 仓库搜索地图实现，结论：
+
+- `vibe-Monitor` 仓库在本机不存在
+- 兄弟项目（DataCollectorHub / downloader-dcp / dcp_lite_app / dcp_sdk）均无 MapLibre / OpenStreetMap 实现
+- 采用 spec 中预设的 OSM raster style 模式实现
+
+### 10.3 feature flag
+
+`src/config/features.ts` 新增：
+
+```ts
+export type LineBasemapMode = 'empty' | 'osm-online' | 'pmtiles';
+export const LINE_BASEMAP_MODE: LineBasemapMode =
+  import.meta.env.DEV ? 'osm-online' : 'empty';
+```
+
+- 开发阶段（`import.meta.env.DEV=true`）自动启用 OSM
+- 生产阶段默认 `empty`
+- 仅在 `ENABLE_MAPLIBRE_EXPERIMENT=true` 时生效
+
+### 10.4 style 工厂扩展
+
+`src/ui/lineMapStyle.ts` 新增 `createOsmOnlineRasterStyle()`：
+
+- 使用 `https://tile.openstreetmap.org/{z}/{x}/{y}.png`（HTTPS，不使用 a/b/c 子域）
+- `tileSize: 256`（OSM 标准）
+- `attribution: '© OpenStreetMap contributors'`（ODbL 许可要求）
+- 保留 `createEmptyLineMapStyle()` / `createPmtilesLineMapStyle()`
+
+### 10.5 BaseLayer 扩展
+
+`src/ui/lineMapBaseLayer.ts` 的 `CreateMapLibreProbeOptions` 新增 `basemapMode?: LineBasemapMode`。
+
+底图选择逻辑（优先级 osm-online > pmtiles > empty）：
+
+| basemapMode | pmtiles.enabled | 选择 style |
+|---|---|---|
+| 'osm-online' | * | OSM raster |
+| 'pmtiles' | true | PMTiles（失败回退 empty） |
+| 'pmtiles' | false | empty |
+| 'empty' / undefined | * | empty |
+
+**OSM 模式专属**：
+
+- `attributionControl: true`（启用 attribution）
+- 瓦片加载错误只 `console.warn`，不 `reject` 主流程
+- 使用 `map.on('error', onError)` 持续监听
+- PMTiles protocol 不注册
+
+### 10.6 lineProjectView 接入
+
+`src/ui/lineProjectView.ts` 引入 `LINE_BASEMAP_MODE`，传给 `createMapLibreProbe`：
+
+```ts
+const probe = await createMapLibreProbe(container, {
+  initialBounds,
+  basemapMode: LINE_BASEMAP_MODE,
+  pmtiles: { enabled: ENABLE_PMTILES_EXPERIMENT, url: PMTILES_DEMO_URL },
+});
+```
+
+### 10.7 OSM 使用边界
+
+**允许**：开发调试 overlay 对齐 / 显示 attribution / 瓦片失败降级空底图
+
+**禁止**：生产默认 / 批量下载 / 预取 / 离线缓存 / 下载地图功能 / 天地图 / 高德 / 思极 / GCJ-02 / PMTiles source-layer / MBTiles / 本地 tile server
+
+### 10.8 验收
+
+- `npm run build` ✅
+- `cargo check` ✅
+- Canvas-only：行为完全不变（ENABLE_MAPLIBRE_EXPERIMENT=false）
+- MapLibre + OSM（DEV + flag=true）：OSM 瓦片加载，attribution 显示，overlay 交互正常
+- OSM 瓦片加载失败：仅 warning，不崩溃，overlay 仍可用
+
+详见 [地图底图评估 - 第 17 节](map-basemap-evaluation.md#17-m4-a2-第-3-轮开发环境-openstreetmap-在线底图)。
+

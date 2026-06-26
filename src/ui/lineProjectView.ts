@@ -24,7 +24,7 @@ import { renderLineMap } from './lineMapView.js';
 import { extractLineMapData, isLineMapDataValid } from '../gim/lineMapData.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
-import { ENABLE_MAPLIBRE_EXPERIMENT, ENABLE_PMTILES_EXPERIMENT, PMTILES_DEMO_URL } from '../config/features.js';
+import { ENABLE_MAPLIBRE_EXPERIMENT, ENABLE_PMTILES_EXPERIMENT, PMTILES_DEMO_URL, LINE_BASEMAP_MODE } from '../config/features.js';
 import { debugLog, debugWarn } from '../utils/logger.js';
 
 /** 线路工程实体图标（扩展变电工程的 ENTITY_ICONS） */
@@ -593,6 +593,7 @@ export function renderLineProjectPanels(
         ];
         const probe = await createMapLibreProbe(container, {
           initialBounds,
+          basemapMode: LINE_BASEMAP_MODE,
           pmtiles: {
             enabled: ENABLE_PMTILES_EXPERIMENT,
             url: PMTILES_DEMO_URL,

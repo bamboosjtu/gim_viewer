@@ -40,3 +40,29 @@ export const ENABLE_PMTILES_EXPERIMENT = false;
  * 文件不存在时自动回退 empty style。
  */
 export const PMTILES_DEMO_URL = '/tiles/demo.pmtiles';
+
+/**
+ * M4-A2 第 3 轮：底图模式定义。
+ *
+ * - 'empty'     ：纯色 background，无瓦片（生产默认，离线安全）
+ * - 'osm-online'：OpenStreetMap 在线 raster 底图（仅开发调试用）
+ * - 'pmtiles'   ：本地 PMTiles 矢量瓦片（后续离线方案）
+ */
+export type LineBasemapMode = 'empty' | 'osm-online' | 'pmtiles';
+
+/**
+ * 底图模式选择。
+ *
+ * 开发阶段：LINE_BASEMAP_MODE = 'osm-online'
+ * - 用于快速调试线路 overlay 与底图对齐
+ * - 仅在 ENABLE_MAPLIBRE_EXPERIMENT=true 时生效
+ * - 不影响 Canvas-only 默认行为
+ *
+ * 生产阶段：默认 'empty'
+ * - 不使用 OSM 在线瓦片
+ * - 应切换到正式底图或离线瓦片方案（PMTiles / 内网瓦片服务 / 天地图）
+ *
+ * 注意：LINE_BASEMAP_MODE 只有在 ENABLE_MAPLIBRE_EXPERIMENT=true 时才生效。
+ *       若 ENABLE_MAPLIBRE_EXPERIMENT=false，仍走纯 Canvas 渲染。
+ */
+export const LINE_BASEMAP_MODE: LineBasemapMode = import.meta.env.DEV ? 'osm-online' : 'empty';

@@ -15,7 +15,7 @@
 - [x] 验证 CSP 策略兼容性（`script-src 'self' 'wasm-unsafe-eval'`） — **M4-A1 已验证**：`worker-src 'self' blob:` + `style-src 'unsafe-inline'` 已兼容，无需改 CSP
 - [ ] 验证离线模式 fallback（无网络时降级到 Canvas 2D） — 留给 M4-A2
 
-**M4-A 状态：A1 + A2 第 1/2 轮已完成**
+**M4-A 状态：A1 + A2 第 1/2/3 轮已完成**
 
 - ✅ 引入 `maplibre-gl` 依赖
 - ✅ `ENABLE_MAPLIBRE_EXPERIMENT = false`（默认关闭）
@@ -23,8 +23,18 @@
 - ✅ 集成到 `lineProjectView.ts`（Canvas 主流程不受影响）
 - ✅ M4-A2 第 1 轮：Canvas overlay + 交互桥接（hover/click/联动）+ ScaleControl + fitBounds(duration:0)
 - ✅ M4-A2 第 2 轮：cleanup patch + PMTiles 离线瓦片最小预研（`ENABLE_PMTILES_EXPERIMENT=false`）
+- ✅ M4-A2 第 3 轮：开发环境 OSM 在线底图（`LINE_BASEMAP_MODE`，DEV 自动 osm-online / 生产 empty）
 
-详见 [地图底图评估 - 第 14-16 节](map-basemap-evaluation.md#14-m4-a2-lite底图容器与-canvas-overlay-桥接最小验证)
+**底图模式路线（3 级优先）**：
+
+| 阶段 | 模式 | 用途 | 状态 |
+|---|---|---|---|
+| 开发调试 | `osm-online` | OSM online raster，对齐 overlay | ✅ DEV 自动启用 |
+| 离线/内网 | `pmtiles` / 内网瓦片服务 | PMTiles 离线瓦片 / 内网 tile server | ⏳ PMTiles 预研完成，瓦片待补 |
+| 正式在线 | 天地图 / 思极地图 | 商业许可底图 | 🔜 后续 |
+| 兜底 | `empty` | 安全兜底，无瓦片 | ✅ 生产默认 |
+
+详见 [地图底图评估 - 第 14-17 节](map-basemap-evaluation.md#14-m4-a2-lite底图容器与-canvas-overlay-桥接最小验证)
 
 ### 离线瓦片
 
