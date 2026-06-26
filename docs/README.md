@@ -18,6 +18,12 @@
 |------|------|
 | [Fragments 缓存设计](fragments-cache-design.md) | .frag 缓存方案设计（当前默认关闭） |
 
+## 日志与诊断
+
+| 文档 | 说明 |
+|------|------|
+| [日志与诊断说明](logging-and-diagnostics.md) | 日志分类、localStorage override、Ctrl+Shift+D 诊断、生产排障 |
+
 ## GIM 文件格式
 
 | 文档 | 说明 |

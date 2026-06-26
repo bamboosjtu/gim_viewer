@@ -3,7 +3,7 @@ import { setupTabs } from '../ui/tabs.js';
 import { setupIfcSelectModal } from '../ui/ifcSelectModal.js';
 import { btnLoadGim, btnLoadLocal, btnClear, loadingEl } from '../ui/dom.js';
 import { isTauri } from '../desktop/runtime.js';
-import { DEBUG_FRAGMENTS } from '../config/debug.js';
+import { DEBUG_FRAGMENTS, getDebugConfigSnapshot } from '../config/debug.js';
 import { debugWarn } from '../utils/logger.js';
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
@@ -13,14 +13,15 @@ function hideLoading() { loadingEl.style.display = 'none'; }
 async function bootstrapAsync(): Promise<void> {
   const state = new AppState();
 
-  // 全局 unhandledrejection 诊断（仅 Fragments 相关，避免控制台红屏）
-  // 这不是根本修复，只是确认错误来源；长期应依赖 ifcLoader.ts 里的 safeFragmentsUpdate
-  // 日志策略：生产环境只输出简化 warning（不刷屏），DEBUG 模式输出完整错误便于定位
+  // 全局 unhandledrejection 监听（仅 Fragments 相关）：
+  // - Fragments 内部异常（如 "Malformed tile"）会被 preventDefault() 捕获，避免控制台红屏
+  // - 真实错误仍通过 ifcLoader.ts 的 safeFragmentsUpdate 局部 catch / console.error 处理
+  // - 开发模式（DEBUG_FRAGMENTS=true）：输出完整 warning 堆栈，便于定位
+  // - 生产模式（DEBUG_FRAGMENTS=false）：静默 preventDefault，不刷屏
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason;
     const msg = reason instanceof Error ? reason.message : String(reason);
     if (msg.includes('Malformed tile') || msg.includes('Fragments')) {
-      // DEBUG_FRAGMENTS=true：输出完整 reason；false：仅简短提示
       debugWarn(DEBUG_FRAGMENTS, '[Global] caught fragments unhandled rejection', reason);
       event.preventDefault();
     }
@@ -91,7 +92,8 @@ async function bootstrapAsync(): Promise<void> {
           const { getDbPath, getLatestProjectCacheDiagnostic } = await import('../desktop/database.js');
           const dbPath = await getDbPath();
           const diagnostic = await getLatestProjectCacheDiagnostic();
-          const payload = JSON.stringify({ dbPath, diagnostic }, null, 2);
+          const debug = getDebugConfigSnapshot();
+          const payload = JSON.stringify({ dbPath, diagnostic, debug }, null, 2);
           await navigator.clipboard.writeText(payload);
           console.log('[诊断] 数据库诊断信息已复制到剪贴板:\n', payload);
           showLoading('数据库诊断信息已复制到剪贴板');

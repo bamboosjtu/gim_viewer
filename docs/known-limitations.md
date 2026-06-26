@@ -49,7 +49,7 @@
 |------|------|---------|
 | 未引入地图引擎 | MVP 不使用 MapLibre/Leaflet/Cesium | M4-A: MapLibre 验证 |
 | 无在线瓦片 | 离线运行，无法加载 OSM/卫星瓦片 | M4-A: 离线瓦片方案 |
-| 无 Canvas overlay | 地图与 IFC 3D 视口无法叠加 | M4-A: Canvas overlay 方案 |
+| 无真实底图 overlay | 当前 Canvas 独立绘制线路图，尚未叠加 MapLibre/离线瓦片底图 | M4-A: Canvas overlay 方案 |
 
 ## 缓存
 

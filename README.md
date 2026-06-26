@@ -98,6 +98,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 | [地图底图评估](docs/map-basemap-evaluation.md) | MapLibre / Leaflet / Cesium 对比，M4 集成建议 |
 | [M4 路线图](docs/m4-roadmap.md) | 地图增强、悬链线、MOD 几何、工程化改进路线 |
 | [Fragments 缓存设计](docs/fragments-cache-design.md) | .frag 缓存方案（当前默认关闭） |
+| [日志与诊断说明](docs/logging-and-diagnostics.md) | 日志分类、localStorage override、Ctrl+Shift+D 诊断、生产排障 |
 
 ## 项目结构
 

@@ -81,7 +81,7 @@
 | `lineCbmParser.ts` | 线路 CBM 层级树解析 → GimGraph |
 | `lineMapData.ts` | GimGraph → LineMapData（塔位/导线/跨越点扁平数据） |
 | `lineAttributeTypes.ts` | LineAttributeIndex 类型定义（共享类型） |
-| `lineFamParser.ts` | FAM 分节属性解析 |
+| `lineFamParser.ts` | 线路 FAM 三段式扁平属性解析（中文键=ENGLISH_KEY=值） |
 | `lineDevParser.ts` | DEV 属性解析 |
 | `linePathNormalize.ts` | 路径归一化 + 文件名小写 |
 
