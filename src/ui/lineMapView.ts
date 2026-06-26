@@ -27,6 +27,7 @@
 
 import type { LineMapData, TowerMarker } from '../gim/lineMapData.js';
 import type { GimGraphNode } from '../gim/gimGraphTypes.js';
+import type { LineMapProjection } from './lineMapProjection.js';
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -41,6 +42,19 @@ export interface LineMapViewHandle {
   focusTowerByNodePath(path: string): boolean;
   /** 定位到一组 nodePath 对应的塔位 bbox（居中+fit），找不到返回 false */
   focusBboxByNodePaths(paths: string[]): boolean;
+}
+
+/**
+ * M4-A2-lite：renderLineMap 可选参数。
+ *
+ * - projection：外部投影接口（MapLibre），传入后 geoToScreen 委托给它
+ * - onRequestRedraw：调用方注册 redraw 回调，用于 MapLibre 视图变化时触发 Canvas 重绘
+ *
+ * 默认（不传 options）：纯 Canvas 模式，行为完全不变。
+ */
+export interface RenderLineMapOptions {
+  projection?: LineMapProjection;
+  onRequestRedraw?: (draw: () => void) => void;
 }
 
 /** 图层开关状态（仅内存，不入库） */
@@ -125,13 +139,19 @@ const FOCUS_TOWER_ZOOM = 12;
  * @param mapData extractLineMapData 提取结果
  * @param container 宿主 DOM（canvas 将作为子元素填充）
  * @param onTowerClick 点击塔位时的回调，参数为该塔位对应的图节点
+ * @param options M4-A2-lite：projection（外部投影）+ onRequestRedraw（注册重绘回调）
  * @returns LineMapViewHandle，调用方负责在切换/清空时 destroy()
  */
 export function renderLineMap(
   mapData: LineMapData,
   container: HTMLElement,
   onTowerClick: (node: GimGraphNode) => void,
+  options?: RenderLineMapOptions,
 ): LineMapViewHandle {
+  // ---- M4-A2-lite：投影模式判断 ----
+  const projection = options?.projection;
+  const overlayMode = !!projection; // MapLibre 底图 + Canvas overlay 模式
+
   // ---- DOM：canvas + tooltip + fit 按钮 + 图层面板 ----
   const canvas = document.createElement('canvas');
   canvas.style.display = 'block';
@@ -139,7 +159,12 @@ export function renderLineMap(
   canvas.style.height = '100%';
   canvas.style.position = 'absolute';
   canvas.style.inset = '0';
+  canvas.style.zIndex = '2';
   canvas.style.cursor = 'grab';
+  // M4-A2-lite：overlay 模式下 Canvas 不接收鼠标事件（MapLibre 管理 pan/zoom）
+  if (overlayMode) {
+    canvas.style.pointerEvents = 'none';
+  }
   container.appendChild(canvas);
   const ctx = canvas.getContext('2d')!;
 
@@ -299,6 +324,11 @@ export function renderLineMap(
 
   // ---- 投影 ----
   function geoToScreen(lat: number, lng: number): { x: number; y: number } {
+    // M4-A2-lite：overlay 模式委托给外部投影（MapLibre project）
+    if (projection) {
+      const p = projection.project(lng, lat);
+      return { x: p.x, y: p.y };
+    }
     const wx = (lng - centerLng) * cosLat;
     const wy = lat - centerLat;
     const s = baseScale * zoom;
@@ -309,6 +339,11 @@ export function renderLineMap(
   }
 
   function screenToWorldGeo(sx: number, sy: number): { lat: number; lng: number } {
+    // M4-A2-lite：overlay 模式委托给外部投影（MapLibre unproject）
+    if (projection?.unproject) {
+      const geo = projection.unproject(sx, sy);
+      return { lat: geo.lat, lng: geo.lng };
+    }
     const s = baseScale * zoom;
     const wx = centerWX + (sx - cssW / 2 - panX) / s;
     const wy = centerWY - (sy - cssH / 2 - panY) / s;
@@ -334,9 +369,13 @@ export function renderLineMap(
   function draw(): void {
     if (destroyed) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // 背景
-    ctx.fillStyle = COLOR_BG;
-    ctx.fillRect(0, 0, cssW, cssH);
+    // 背景：overlay 模式下透明（让 MapLibre 底图透出），Canvas-only 模式填色
+    if (overlayMode) {
+      ctx.clearRect(0, 0, cssW, cssH);
+    } else {
+      ctx.fillStyle = COLOR_BG;
+      ctx.fillRect(0, 0, cssW, cssH);
+    }
 
     if (!valid) {
       drawEmptyHint('未提取到可定位塔位');
@@ -352,6 +391,11 @@ export function renderLineMap(
     drawScaleBar();
     drawLegend();
     drawBorder();
+  }
+
+  // M4-A2-lite：向调用方注册 redraw 回调，供 MapLibre 视图变化时触发 Canvas 重绘
+  if (options?.onRequestRedraw) {
+    options.onRequestRedraw(draw);
   }
 
   function drawEmptyHint(text: string): void {
@@ -812,10 +856,21 @@ export function renderLineMap(
 
   // ---- 公开方法 ----
   function fit(): void {
+    selectedTowerPaths = new Set();
+    // M4-A2-lite：overlay 模式下视图由 MapLibre 管理，委托 fitBounds
+    if (projection?.fitBounds && valid) {
+      projection.fitBounds({
+        minLng: bbox.minLng,
+        minLat: bbox.minLat,
+        maxLng: bbox.maxLng,
+        maxLat: bbox.maxLat,
+      });
+      draw();
+      return;
+    }
     zoom = 1;
     panX = 0;
     panY = 0;
-    selectedTowerPaths = new Set();
     draw();
   }
 
@@ -824,14 +879,26 @@ export function renderLineMap(
     if (!valid) return false;
     const t = pathToTower.get(path);
     if (!t) return false;
+    selectedTowerPaths = new Set([path]);
+    hoveredTower = t;
+    // M4-A2-lite：overlay 模式下委托 MapLibre fitBounds（单塔小范围 bbox）
+    if (projection?.fitBounds) {
+      const pad = 0.002;
+      projection.fitBounds({
+        minLng: t.lng - pad,
+        minLat: t.lat - pad,
+        maxLng: t.lng + pad,
+        maxLat: t.lat + pad,
+      });
+      draw();
+      return true;
+    }
     zoom = clamp(FOCUS_TOWER_ZOOM, MIN_ZOOM, MAX_ZOOM);
     const s = baseScale * zoom;
     const wx = (t.lng - centerLng) * cosLat;
     const wy = t.lat - centerLat;
     panX = -(wx - centerWX) * s;
     panY = (wy - centerWY) * s;
-    selectedTowerPaths = new Set([path]);
-    hoveredTower = t;
     draw();
     return true;
   }
@@ -858,6 +925,15 @@ export function renderLineMap(
     minLat -= latSpan * 0.2; maxLat += latSpan * 0.2;
     minLng -= lngSpan * 0.2; maxLng += lngSpan * 0.2;
 
+    selectedTowerPaths = new Set(paths);
+
+    // M4-A2-lite：overlay 模式下委托 MapLibre fitBounds
+    if (projection?.fitBounds) {
+      projection.fitBounds({ minLng, minLat, maxLng, maxLat });
+      draw();
+      return true;
+    }
+
     // 子 bbox（world 坐标）
     const subMinWX = (minLng - centerLng) * cosLat;
     const subMaxWX = (maxLng - centerLng) * cosLat;
@@ -878,7 +954,6 @@ export function renderLineMap(
     panX = -(subCenterWX - centerWX) * s;
     panY = (subCenterWY - centerWY) * s;
 
-    selectedTowerPaths = new Set(paths);
     draw();
     return true;
   }

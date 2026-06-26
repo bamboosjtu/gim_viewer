@@ -223,7 +223,7 @@ function bindEvents(modal: HTMLElement, onRefresh: () => void): void {
     if (target.classList.contains('cache-mgr-delete')) {
       const projectId = Number(target.dataset.projectId);
       const projectName = target.dataset.projectName ?? '';
-      if (!confirm(`确认删除项目 "${projectName}" (ID: ${projectId}) 的全部缓存？\n\n此操作将：\n- 删除数据库中的所有索引记录\n- 尝试删除磁盘缓存文件\n\n不可恢复，删除后重新打开该 GIM 会重新解压。`)) {
+      if (!confirm(`确认删除项目 "${projectName}" (ID: ${projectId}) 的全部缓存？\n\n此操作将：\n- 删除数据库中的所有索引记录\n- 尝试删除磁盘缓存文件\n\n注意：如果删除的是当前正在查看的工程，当前视图不会立即关闭；\n重新打开该 GIM 时会重新解压并重建缓存。\n\n不可恢复。`)) {
         return;
       }
       target.textContent = '删除中...';

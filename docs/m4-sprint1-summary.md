@@ -246,3 +246,57 @@ cargo check --manifest-path src-tauri/Cargo.toml
 3. **M4-B1 WIRE 参数预研**：解析 KVALUE / SPLIT / MATRIX0，为悬链线计算做准备
 
 建议优先级：M4-D2 增强 < M4-A2 < M4-B1（视实际需求）。
+
+---
+
+## 7. M4 Sprint 1 Patch + M4-A2-lite（2026-06-26）
+
+### 7.1 修复项
+
+#### 7.1.1 MapLibre z-index 遮挡问题
+
+**问题**：M4 Sprint 1 中 MapLibre mount div 使用 `z-index:1`，而 Canvas 未设置层级，可能被遮挡。
+
+**修复**：
+
+| 层 | z-index | 元素 |
+|---|---|---|
+| 底图 | 0 | MapLibre mount div |
+| overlay | 2 | Canvas |
+| 控件 | 20 | tooltip / fit 按钮 / 图层面板 |
+
+详见 [地图底图评估 - 第 14.2 节](map-basemap-evaluation.md#142-z-index-层级修复)。
+
+#### 7.1.2 缓存删除提示优化
+
+`src/ui/cacheManagerView.ts` 删除确认提示新增：
+
+> 注意：如果删除的是当前正在查看的工程，当前视图不会立即关闭；重新打开该 GIM 时会重新解压并重建缓存。
+
+### 7.2 M4-A2-lite：底图容器与 Canvas overlay 桥接
+
+在 feature flag 下实现 MapLibre 底图 + Canvas overlay 最小验证：
+
+| 模块 | 变更 |
+|---|---|
+| `src/ui/lineMapProjection.ts` | **新建**：`LineMapProjection` 接口 + `createMapLibreProjection` / `createCanvasProjection` |
+| `src/ui/lineMapBaseLayer.ts` | Handle 新增 `project()` / `onViewChange()` / `fitBounds()`，`interactive: true`，`initialBounds` 支持 |
+| `src/ui/lineMapView.ts` | 新增 `RenderLineMapOptions`（projection + onRequestRedraw），overlay 模式透明背景 + 委托投影 |
+| `src/ui/lineProjectView.ts` | flag=true 时异步创建 probe → 构建投影 → Canvas overlay 重渲染 → onViewChange 重绘 |
+
+**关键设计**：
+
+- Canvas 先渲染（确保地图立即可见），MapLibre 异步加载成功后切换为 overlay 模式
+- 失败时自动降级为 Canvas-only
+- 代次守卫（`maplibreProbeGeneration`）取消过期的异步 probe 创建
+- 默认 `ENABLE_MAPLIBRE_EXPERIMENT=false`，maplibre-gl 不进入主 bundle
+
+详见 [地图底图评估 - 第 14 节](map-basemap-evaluation.md#14-m4-a2-lite底图容器与-canvas-overlay-桥接最小验证)。
+
+### 7.3 验收
+
+- `npm run build` ✅（86 modules, 12.96s）
+- `cargo check` ✅（1.44s）
+- flag=false：Canvas-only 行为完全不变
+- flag=true：Canvas 可见，MapLibre 在底层，控件正常，无网络请求
+

@@ -371,9 +371,125 @@ connect-src 'self' ipc: http://ipc.localhost
 
 ### 13.6 后续步骤（M4-A2）
 
-1. 在 probe 基础上加载 PMTiles source（本地 `asset://` 协议）
-2. Canvas overlay 改用 `map.project([lng, lat])` 重投影
-3. 监听 `map.on('move')` / `map.on('zoom')` 触发 Canvas 重绘
-4. 保留 Canvas 回退路径（PMTiles 不可用时降级）
+> **2026-06-26 更新**：M4-A2-lite（阶段 1~5）已完成，见 [第 14 节](#14-m4-a2-lite-底图容器与-canvas-overlay-桥接最小验证)。完整的 M4-A2（含 PMTiles 瓦片）仍未实现。
+
+1. ~~在 probe 基础上加载 PMTiles source（本地 `asset://` 协议）~~ → 仍留给 M4-A2 正式版
+2. ~~Canvas overlay 改用 `map.project([lng, lat])` 重投影~~ → M4-A2-lite 已完成
+3. ~~监听 `map.on('move')` / `map.on('zoom')` 触发 Canvas 重绘~~ → M4-A2-lite 已完成
+4. 保留 Canvas 回退路径（PMTiles 不可用时降级） → M4-A2-lite 已实现降级
 
 每步必须保留"MapLibre 不可用时回退到 MVP Canvas"的降级。
+
+---
+
+## 14. M4-A2-lite：底图容器与 Canvas overlay 桥接最小验证
+
+> 阶段：M4 Sprint 1 Patch + M4-A2-lite
+> 时间：2026-06-26
+> 前置：M4-A1 技术验证（probe 初始化/销毁）
+
+### 14.1 目标
+
+1. 修复 M4 Sprint 1 评审发现的 MapLibre z-index 遮挡问题
+2. 在 feature flag 下实现 MapLibre 底图 + Canvas overlay 桥接
+3. 不接入真实瓦片、不引入 PMTiles/MBTiles、不做坐标偏移
+4. 默认仍保持 Canvas-only，不影响现有线路/变电流程
+
+### 14.2 z-index 层级修复
+
+M4 Sprint 1 评审发现：MapLibre mount div 使用 `z-index:1`，而 Canvas 未设置层级，可能被遮挡。
+
+修复后的层级方案：
+
+| 层 | z-index | 元素 | 说明 |
+|---|---|---|---|
+| 底图 | 0 | MapLibre mount div | 最底层，承载 MapLibre 渲染 |
+| overlay | 2 | Canvas | 塔位/导线/跨越点/图例/标签 |
+| 控件 | 20 | tooltip / fit 按钮 / 图层面板 | 最顶层，可交互 |
+
+容器 `container` 设置 `position: relative` 以建立 z-index 上下文。
+
+### 14.3 投影接口抽象
+
+新增 `src/ui/lineMapProjection.ts`：
+
+```ts
+export interface LineMapProjection {
+  project(lng: number, lat: number): ScreenPoint;
+  unproject?(x: number, y: number): { lng: number; lat: number };
+  fitBounds?(bbox: GeoBBox): void;
+}
+
+export function createMapLibreProjection(map: MapLibreProjectable): LineMapProjection;
+export function createCanvasProjection(params: CanvasProjectionParams): LineMapProjection;
+```
+
+- `createMapLibreProjection`：包装 MapLibre 的 `map.project({ lng, lat })` / `map.unproject([x, y])`
+- `createCanvasProjection`：包装 lineMapView.ts 内部的等距矩形投影（预留，当前未使用）
+- Canvas-only 模式不需要使用此接口，`geoToScreen` 直接用内部逻辑
+
+### 14.4 MapLibre Handle 扩展
+
+`lineMapBaseLayer.ts` 的 `LineMapBaseLayerHandle` 新增：
+
+| 方法 | 说明 |
+|---|---|
+| `project(lng, lat)` | 调用 `map.project({ lng, lat })`，返回 `{ x, y }` 或 null |
+| `onViewChange(callback)` | 监听 `move` / `zoom` / `resize`，返回取消注册函数 |
+| `fitBounds(bounds)` | 调用 `map.fitBounds(bounds, { padding: 48 })` |
+
+- `interactive: true`（M4-A2-lite 启用交互，MapLibre 管理 pan/zoom）
+- 支持 `initialBounds` 选项（加载后自动 `fitBounds`）
+
+### 14.5 Canvas overlay 模式
+
+`lineMapView.ts` 新增 `RenderLineMapOptions`：
+
+```ts
+export interface RenderLineMapOptions {
+  projection?: LineMapProjection;
+  onRequestRedraw?: (draw: () => void) => void;
+}
+```
+
+当 `projection` 传入时（overlay 模式）：
+
+- `canvas.style.pointerEvents = 'none'` → MapLibre 接收鼠标事件
+- `canvas.style.zIndex = '2'` → 在 MapLibre 之上
+- `draw()` 使用 `ctx.clearRect()` 透明背景（让 MapLibre 透出）
+- `geoToScreen()` 委托给 `projection.project(lng, lat)`
+- `screenToWorldGeo()` 委托给 `projection.unproject(x, y)`
+- `fit()` / `focusTowerByNodePath()` / `focusBboxByNodePaths()` 委托给 `projection.fitBounds(bbox)`
+- `onRequestRedraw(draw)` 注册 draw 函数，供 MapLibre 视图变化时触发重绘
+
+默认（不传 options）：纯 Canvas 模式，行为完全不变。
+
+### 14.6 集成流程
+
+`lineProjectView.ts` 的 `renderLineProjectPanels`：
+
+1. **Canvas-only 先渲染**：立即调用 `renderLineMap(mapData, container, onTowerClick)`，确保地图可见
+2. **flag=true 时异步创建 probe**：
+   - 传入 `initialBounds` = `mapData.bbox`
+   - 成功后构建 `LineMapProjection`（project/unproject 来自 map，fitBounds 委托 probe）
+   - 销毁 Canvas-only handle，用 overlay 模式重新渲染
+   - 注册 `onViewChange` → 触发 Canvas overlay 重绘
+3. **失败时保持 Canvas-only**：catch 后仅 `debugWarn`，不抛异常
+4. **代次守卫**：`maplibreProbeGeneration` 递增取消过期的异步 probe 创建
+
+### 14.7 不做的事（留给 M4-A2 正式版）
+
+- 不加载 PMTiles / MBTiles / 在线瓦片
+- 不引入 `coordtransform`（WGS84 ↔ GCJ-02）
+- 不做悬链线
+- 不做 MOD 解析
+- 不做真实 3D 线路
+- 不修改 SQLite schema
+- 不开启 Fragments 缓存
+
+### 14.8 默认关闭策略
+
+- `ENABLE_MAPLIBRE_EXPERIMENT = false`（`src/config/features.ts`）
+- flag=false 时：纯 Canvas 模式，行为完全不变，maplibre-gl 不进入主 bundle
+- flag=true 时：Canvas 先渲染 → MapLibre 异步加载 → 切换为 overlay 模式
+- MapLibre 失败时自动降级为 Canvas-only

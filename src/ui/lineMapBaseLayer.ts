@@ -1,34 +1,28 @@
 /**
- * M4-A1：MapLibre 技术验证 probe 模块。
+ * M4-A1/A2-lite：MapLibre 底图层模块。
  *
  * 仅在 `ENABLE_MAPLIBRE_EXPERIMENT = true` 时由调用方动态 import 使用。
  * 默认功能关闭，主流程仍走 `lineMapView.ts` 纯 Canvas 渲染。
  *
- * 验证范围（M4-A1）：
+ * M4-A1（已完成）：
  * - maplibre-gl 能在 Tauri + Vite 中被动态 import
  * - 能创建一个空白地图容器（使用本地空 style）
  * - 能销毁（remove() 释放资源）
  * - 不加载在线瓦片、不访问外网
  *
- * 不做的事（M4-A2 才做）：
- * - 不替换 Canvas 主流程
- * - 不改 geoToScreen()
- * - 不做 Canvas overlay 对接
- * - 不加载 PMTiles / MBTiles
+ * M4-A2-lite（本轮新增）：
+ * - Handle 新增 project(lng, lat) → 屏幕像素（桥接 Canvas overlay）
+ * - Handle 新增 onViewChange(callback) → 监听 move/zoom/resize
+ * - 支持交互（pan/zoom），MapLibre 管理视图，Canvas overlay 跟随重绘
+ * - 支持初始 bbox（fitBounds）
  *
- * 使用示例：
- * ```ts
- * import { ENABLE_MAPLIBRE_EXPERIMENT } from '../config/features.js';
- * if (ENABLE_MAPLIBRE_EXPERIMENT) {
- *   const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
- *   const handle = await createMapLibreProbe(container);
- *   // ... 实验性操作 ...
- *   handle.destroy();
- * }
- * ```
+ * 不做的事（留给 M4-A2 正式版）：
+ * - 不加载 PMTiles / MBTiles
+ * - 不做坐标偏移
+ * - 不做 Canvas overlay 内的交互逻辑（Canvas pointer-events: none）
  */
 
-import type { Map as MapLibreMap, StyleSpecification } from 'maplibre-gl';
+import type { Map as MapLibreMap, StyleSpecification, LngLatBoundsLike } from 'maplibre-gl';
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -37,8 +31,20 @@ import type { Map as MapLibreMap, StyleSpecification } from 'maplibre-gl';
 export interface LineMapBaseLayerHandle {
   /** 释放 MapLibre map 实例（remove() + 清空容器 + 解除引用） */
   destroy(): void;
-  /** 返回底层 MapLibre 实例（仅用于实验性调试，M4-A2 后会被封装） */
+  /** 返回底层 MapLibre 实例（仅用于实验性调试） */
   getMap(): MapLibreMap | null;
+  /** 将经纬度投影为屏幕像素坐标（桥接 Canvas overlay 的 geoToScreen） */
+  project(lng: number, lat: number): { x: number; y: number } | null;
+  /** 注册视图变化回调（move/zoom/resize），返回取消注册函数 */
+  onViewChange(callback: () => void): () => void;
+  /** 调整视图以适配指定 bbox（LngLatBoundsLike: [minLng, minLat, maxLng, maxLat]） */
+  fitBounds(bounds: [number, number, number, number]): void;
+}
+
+/** createMapLibreProbe 的可选参数 */
+export interface CreateMapLibreProbeOptions {
+  /** 初始视图 bbox [minLng, minLat, maxLng, maxLat]，加载后自动 fitBounds */
+  initialBounds?: [number, number, number, number];
 }
 
 // ---------------------------------------------------------------------------
@@ -49,7 +55,7 @@ export interface LineMapBaseLayerHandle {
  * 最小空 style：仅一个 background 层，不引入任何 source / 瓦片。
  *
  * 目的：验证 MapLibre 能初始化容器，不依赖网络资源。
- * 后续 M4-A2 才会接入 PMTiles source。
+ * 后续 M4-A2 正式版才会接入 PMTiles source。
  */
 const EMPTY_STYLE: StyleSpecification = {
   version: 8,
@@ -70,12 +76,14 @@ const EMPTY_STYLE: StyleSpecification = {
 // ---------------------------------------------------------------------------
 
 /**
- * 创建一个 MapLibre probe 容器。
+ * 创建一个 MapLibre 底图层容器。
  *
  * 行为：
- * - 在 `container` 内创建一个绝对定位的 div 作为 MapLibre 的挂载点
- * - 初始化 MapLibre map（空 style，中心点 [0, 0]，zoom 0）
+ * - 在 `container` 内创建一个绝对定位的 div（z-index:0）作为 MapLibre 的挂载点
+ * - 初始化 MapLibre map（空 style）
+ * - 如果提供 initialBounds，加载后自动 fitBounds
  * - 等待 `load` 事件后 resolve（证明 WebGL 上下文可用）
+ * - 启用交互（pan/zoom），MapLibre 管理视图
  * - 失败时抛出错误（调用方应 catch 并回退到 Canvas 主流程）
  *
  * 注意：本函数仅在 `ENABLE_MAPLIBRE_EXPERIMENT = true` 时被调用，
@@ -83,18 +91,19 @@ const EMPTY_STYLE: StyleSpecification = {
  */
 export async function createMapLibreProbe(
   container: HTMLElement,
+  options?: CreateMapLibreProbeOptions,
 ): Promise<LineMapBaseLayerHandle> {
   // 动态 import：默认关闭时 maplibre-gl 不会进入主 bundle
   const maplibre = await import('maplibre-gl');
 
-  // 挂载点 div
+  // 挂载点 div（底图层，z-index:0 在 Canvas overlay 之下）
   const mountDiv = document.createElement('div');
   mountDiv.style.cssText = `
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
-    z-index: 1;
+    z-index: 0;
   `;
   container.appendChild(mountDiv);
 
@@ -102,11 +111,13 @@ export async function createMapLibreProbe(
   const map = new maplibre.Map({
     container: mountDiv,
     style: EMPTY_STYLE,
-    center: [0, 0],
-    zoom: 0,
+    center: options?.initialBounds
+      ? [(options.initialBounds[0] + options.initialBounds[2]) / 2, (options.initialBounds[1] + options.initialBounds[3]) / 2]
+      : [0, 0],
+    zoom: options?.initialBounds ? 10 : 0,
     attributionControl: false,
-    // 禁用交互（probe 仅验证初始化，不需要用户交互）
-    interactive: false,
+    // M4-A2-lite：启用交互（pan/zoom），MapLibre 管理视图
+    interactive: true,
     // 离线：不尝试加载任何在线瓦片
     hash: false,
   });
@@ -115,6 +126,20 @@ export async function createMapLibreProbe(
   await new Promise<void>((resolve, reject) => {
     const onLoad = () => {
       map.off('error', onError);
+      // 加载后 fitBounds（如果提供了初始边界）
+      if (options?.initialBounds) {
+        try {
+          const bounds: LngLatBoundsLike = [
+            options.initialBounds[0], // minLng
+            options.initialBounds[1], // minLat
+            options.initialBounds[2], // maxLng
+            options.initialBounds[3], // maxLat
+          ];
+          map.fitBounds(bounds, { padding: 48 });
+        } catch (err) {
+          console.warn('[MapLibre probe] fitBounds 失败:', err);
+        }
+      }
       resolve();
     };
     const onError = (e: unknown) => {
@@ -125,8 +150,12 @@ export async function createMapLibreProbe(
     map.once('error', onError);
   });
 
+  let destroyed = false;
+
   return {
     destroy() {
+      if (destroyed) return;
+      destroyed = true;
       try {
         map.remove();
       } catch (err) {
@@ -137,7 +166,38 @@ export async function createMapLibreProbe(
       }
     },
     getMap() {
-      return map;
+      return destroyed ? null : map;
+    },
+    project(lng: number, lat: number): { x: number; y: number } | null {
+      if (destroyed) return null;
+      try {
+        const p = map.project({ lng, lat });
+        return { x: p.x, y: p.y };
+      } catch {
+        return null;
+      }
+    },
+    onViewChange(callback: () => void): () => void {
+      if (destroyed) return () => {};
+      const events = ['move', 'zoom', 'resize'] as const;
+      for (const ev of events) {
+        map.on(ev, callback);
+      }
+      return () => {
+        if (destroyed) return;
+        for (const ev of events) {
+          map.off(ev, callback);
+        }
+      };
+    },
+    fitBounds(bounds: [number, number, number, number]): void {
+      if (destroyed) return;
+      try {
+        const llb: LngLatBoundsLike = [bounds[0], bounds[1], bounds[2], bounds[3]];
+        map.fitBounds(llb, { padding: 48 });
+      } catch (err) {
+        console.warn('[MapLibre probe] fitBounds 失败:', err);
+      }
     },
   };
 }

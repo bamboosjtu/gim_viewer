@@ -18,6 +18,8 @@ import { escHtml } from '../shared/html.js';
 import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, btnToggleProps, emptyTipEl, container } from './dom.js';
 import type { LineMapViewHandle } from './lineMapView.js';
 import type { LineMapBaseLayerHandle } from './lineMapBaseLayer.js';
+import type { LineMapProjection, GeoBBox } from './lineMapProjection.js';
+import { createMapLibreProjection } from './lineMapProjection.js';
 import { renderLineMap } from './lineMapView.js';
 import { extractLineMapData, isLineMapDataValid } from '../gim/lineMapData.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
@@ -334,6 +336,14 @@ let lineMapData: LineMapData | null = null;
 let maplibreProbeHandle: LineMapBaseLayerHandle | null = null;
 
 /**
+ * M4-A2-lite：probe 创建代次，用于取消过期的异步 probe 创建。
+ *
+ * 每次 renderLineProjectPanels / destroyLineMapView 时递增，
+ * 异步 probe 完成后检查代次是否匹配，不匹配则销毁新建的 probe。
+ */
+let maplibreProbeGeneration = 0;
+
+/**
  * 销毁当前地图视图。
  *
  * 调用时机（spec 六 清理要求）：
@@ -344,6 +354,8 @@ let maplibreProbeHandle: LineMapBaseLayerHandle | null = null;
  * 幂等：handle 为空时直接返回。
  */
 export function destroyLineMapView(): void {
+  // M4-A2-lite：递增代次，取消所有在途的 MapLibre probe 创建
+  maplibreProbeGeneration++;
   if (lineMapHandle) {
     lineMapHandle.destroy();
     lineMapHandle = null;
@@ -542,24 +554,61 @@ export function renderLineProjectPanels(
     },
   });
 
-  // 7. M4-A1：MapLibre 技术验证 probe（默认关闭，不影响 Canvas 主流程）
-  //    仅验证 maplibre-gl 能在 Tauri + Vite 中动态 import / 创建 / 销毁。
-  //    失败时仅 console 警告，不抛异常，不影响 Canvas 地图。
-  if (ENABLE_MAPLIBRE_EXPERIMENT) {
-    // 先销毁旧的 probe（避免重复创建）
+  // 7. M4-A2-lite：MapLibre 底图层 + Canvas overlay（默认关闭）
+  //    - Canvas-only 已在上方渲染完成，确保地图立即可见
+  //    - flag=true 时异步创建 MapLibre probe，成功后切换为 overlay 模式
+  //    - 失败时保持 Canvas-only，不影响主流程
+  //    - 不加载瓦片，仅验证层级桥接
+  if (ENABLE_MAPLIBRE_EXPERIMENT && isLineMapDataValid(mapData)) {
+    // 先销毁旧 probe（避免残留）
     if (maplibreProbeHandle) {
       maplibreProbeHandle.destroy();
       maplibreProbeHandle = null;
     }
-    // 异步创建：不阻塞 Canvas 主流程渲染
+    const myGen = ++maplibreProbeGeneration;
     void (async () => {
       try {
         const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
-        maplibreProbeHandle = await createMapLibreProbe(container);
-        console.log('[MapLibre probe] 技术验证：probe 初始化成功（Canvas 主流程不受影响）');
+        // 传入初始 bbox，让 MapLibre 加载后自动 fitBounds
+        const initialBounds: [number, number, number, number] = [
+          mapData.bbox.minLng, mapData.bbox.minLat, mapData.bbox.maxLng, mapData.bbox.maxLat,
+        ];
+        const probe = await createMapLibreProbe(container, { initialBounds });
+        // 检查代次：若已过期（用户切换工程/清空场景），销毁并放弃
+        if (myGen !== maplibreProbeGeneration) {
+          probe.destroy();
+          return;
+        }
+        maplibreProbeHandle = probe;
+        const map = probe.getMap();
+        if (!map) throw new Error('MapLibre map 实例为 null');
+        // 构建 projection：project/unproject 来自 map，fitBounds 委托给 probe
+        const baseProjection = createMapLibreProjection(map);
+        const projection: LineMapProjection = {
+          ...baseProjection,
+          fitBounds(bbox: GeoBBox) {
+            probe.fitBounds([bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat]);
+          },
+        };
+        // 销毁 Canvas-only handle，用 overlay 模式重新渲染
+        // （Canvas 透明背景 + pointer-events:none，MapLibre 管理视图）
+        if (lineMapHandle) {
+          lineMapHandle.destroy();
+          lineMapHandle = null;
+        }
+        let redrawFn: (() => void) | null = null;
+        lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
+          projection,
+          onRequestRedraw: (draw: () => void) => { redrawFn = draw; },
+        });
+        // MapLibre 视图变化（move/zoom/resize）时触发 Canvas overlay 重绘
+        probe.onViewChange(() => {
+          if (redrawFn) redrawFn();
+        });
+        debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2-lite：底图 + Canvas overlay 初始化成功');
       } catch (err) {
-        debugWarn(DEBUG_LINE_MAP, '[MapLibre probe] 技术验证：probe 初始化失败（已忽略，Canvas 主流程正常）', err);
-        maplibreProbeHandle = null;
+        debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2-lite：初始化失败，保持 Canvas-only', err);
+        // 保持已渲染的 Canvas-only handle，不抛异常
       }
     })();
   }
