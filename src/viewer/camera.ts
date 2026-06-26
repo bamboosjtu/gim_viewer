@@ -3,15 +3,29 @@ import type { ViewerContext } from './viewerEngine.js';
 
 /** 将相机定位到场景包围盒 */
 export function fitCameraToScene(ctx: ViewerContext, state: { hasFittedCamera: boolean }): boolean {
-  if (state.hasFittedCamera) return false;
+  if (state.hasFittedCamera) {
+    console.log('[Camera] fitCameraToScene skipped: hasFittedCamera=true');
+    return false;
+  }
   const box = new THREE.Box3().setFromObject((ctx.world.scene as any).three);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
-  if (maxDim === 0 || !Number.isFinite(maxDim)) return false;
+  console.log('[Camera] fitCameraToScene', {
+    hasFittedCamera: state.hasFittedCamera,
+    maxDim,
+    center: center.toArray(),
+    size: size.toArray(),
+    boxEmpty: box.isEmpty(),
+  });
+  if (maxDim === 0 || !Number.isFinite(maxDim)) {
+    console.warn('[Camera] fitCameraToScene: scene bbox is empty or invalid, skip fit');
+    return false;
+  }
   const distance = maxDim * 1.2;
   void ctx.world.camera.controls?.setLookAt(center.x + distance, center.y + distance * 0.8, center.z + distance, center.x, center.y, center.z);
   state.hasFittedCamera = true;
+  console.log('[Camera] fitCameraToScene done: camera set to', { center, distance });
   return true;
 }
 

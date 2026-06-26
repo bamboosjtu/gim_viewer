@@ -78,6 +78,9 @@ export class AppState {
     this.cachedLineFamDisplayKeys.clear();
     this.cachedLineDevProperties.clear();
     this.currentProjectId = null;
+    // 相机 fit 状态一并重置，确保新项目加载后 fitCameraToScene 能重新执行
+    // （否则切换项目后中间只剩网格，IFC 几何不显示）
+    this.hasFittedCamera = false;
   }
 
   /** 重置全部状态 */

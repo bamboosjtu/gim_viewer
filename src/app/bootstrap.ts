@@ -48,22 +48,12 @@ async function bootstrapAsync(): Promise<void> {
 
   // 清空场景
   btnClear.addEventListener('click', async () => {
-    // 如果 viewer runtime 已创建，先清理 fragments 和高亮（reset 前读取 loadedModels）
-    const { isViewerRuntimeCreated, getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-    if (isViewerRuntimeCreated()) {
-      const runtime = await getViewerRuntime(state, () => {});
-      for (const [modelId] of state.loadedModels) {
-        runtime.ctx.fragments.core.disposeModel(modelId);
-      }
-      const { resetHighlight } = await import('../viewer/highlight.js');
-      await resetHighlight(runtime.ctx, state);
-    }
-    // 再清空 state 和 UI
-    state.reset();
-    // 销毁线路地图 canvas（若存在），清空场景时彻底移除
-    const { destroyLineMapView } = await import('../ui/lineProjectView.js');
-    destroyLineMapView();
-    document.getElementById('model-list')!.innerHTML = '';
+    // 统一走 cleanupBeforeOpenNewProject：销毁线路地图 + dispose 所有 fragments 模型
+    // （合并 state.loadedModels 与 ctx.fragments.list，避免 state 与 ctx 不同步）+
+    // 重置高亮 + 清空 model-list UI + resetAll（state.reset 含 loadedModels.clear）
+    const { cleanupBeforeOpenNewProject } = await import('../services/projectCleanupService.js');
+    await cleanupBeforeOpenNewProject(state, { resetAll: true });
+    // 清空其他 UI（cleanup 已清 model-list，这里清剩余面板）
     document.getElementById('cbm-tree-panel')!.innerHTML = '';
     document.getElementById('file-dev-panel')!.innerHTML = '';
     document.getElementById('props-drawer-body')!.innerHTML = '<div class="props-empty">选择层级树节点查看属性</div>';

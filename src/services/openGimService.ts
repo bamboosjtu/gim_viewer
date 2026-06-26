@@ -166,10 +166,11 @@ async function openGimFromArrayBuffer(
   const extracted = await extractGimFile(ab);
 
   // 清空上一次 GIM 的状态，避免变电 ↔ 线路切换时残留
-  state.resetGimState();
-  // 销毁上一次线路地图 canvas（若存在），避免切换到变电工程时残留在视口
-  const { destroyLineMapView } = await import('../ui/lineProjectView.js');
-  destroyLineMapView();
+  // 统一走 cleanupBeforeOpenNewProject：销毁线路地图 + dispose 旧 fragments 模型 +
+  // 重置高亮 + 清空 model-list UI + resetGimState + hasFittedCamera=false
+  // 关键：必须先 dispose ctx.fragments 中的旧模型，再 resetGimState（否则 ctx 残留）
+  const { cleanupBeforeOpenNewProject } = await import('./projectCleanupService.js');
+  await cleanupBeforeOpenNewProject(state);
 
   // 工程类型识别：线路工程走独立流程，不弹 IFC 模态框，不创建 Viewer
   showLoading('正在识别工程类型...');
@@ -395,13 +396,11 @@ export async function openGimWithDialog(
       // 3. 缓存命中短路：不 readFileBytes、不 extractGimFile、不创建 Viewer
       if (validation.valid) {
         try {
-          // 清空上一次 GIM 的状态（含线路工程字段），避免残留
-          state.resetGimState();
-          // 销毁上一次线路地图 canvas（若存在），避免切换到变电工程时残留在视口
-          {
-            const { destroyLineMapView } = await import('../ui/lineProjectView.js');
-            destroyLineMapView();
-          }
+          // 清空上一次 GIM 的状态，避免残留
+          // 统一走 cleanupBeforeOpenNewProject：销毁线路地图 + dispose 旧 fragments 模型 +
+          // 重置高亮 + 清空 model-list UI + resetGimState + hasFittedCamera=false
+          const { cleanupBeforeOpenNewProject } = await import('./projectCleanupService.js');
+          await cleanupBeforeOpenNewProject(state);
 
           // v4: 线路工程缓存命中 → 从 SQLite 恢复 GimGraph + FAM/DEV 属性，跳过解压
           // v5: 缓存命中顺序：validate → get_line_graph → restoreLineGraphToState
