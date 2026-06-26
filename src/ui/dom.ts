@@ -8,6 +8,7 @@ export const gimFileInput = document.getElementById('gim-file-input') as HTMLInp
 export const btnLoadLocal = document.getElementById('btn-load-local') as HTMLButtonElement;
 export const btnLoadGim = document.getElementById('btn-load-gim') as HTMLButtonElement;
 export const btnClear = document.getElementById('btn-clear') as HTMLButtonElement;
+export const btnCacheManager = document.getElementById('btn-cache-manager') as HTMLButtonElement;
 export const cbmTreePanel = document.getElementById('cbm-tree-panel') as HTMLElement;
 export const fileDevPanel = document.getElementById('file-dev-panel') as HTMLElement;
 export const propsDrawerBody = document.getElementById('props-drawer-body') as HTMLElement;

@@ -1,10 +1,11 @@
 import { AppState } from './state.js';
 import { setupTabs } from '../ui/tabs.js';
 import { setupIfcSelectModal } from '../ui/ifcSelectModal.js';
-import { btnLoadGim, btnLoadLocal, btnClear, loadingEl } from '../ui/dom.js';
+import { btnLoadGim, btnLoadLocal, btnClear, btnCacheManager, loadingEl } from '../ui/dom.js';
 import { isTauri } from '../desktop/runtime.js';
 import { DEBUG_FRAGMENTS, getDebugConfigSnapshot } from '../config/debug.js';
 import { debugWarn } from '../utils/logger.js';
+import { summarizeDiagnostic } from '../services/diagnosticSummaryService.js';
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
 function hideLoading() { loadingEl.style.display = 'none'; }
@@ -71,6 +72,23 @@ async function bootstrapAsync(): Promise<void> {
     await cleanupBeforeOpenNewProject(state, { resetAll: true });
   });
 
+  // 缓存管理（M4-D2）：仅 Tauri 模式可用
+  btnCacheManager.addEventListener('click', async () => {
+    if (!isTauri()) {
+      showLoading('缓存管理仅在桌面版可用');
+      setTimeout(hideLoading, 2000);
+      return;
+    }
+    try {
+      const { openCacheManager } = await import('../ui/cacheManagerView.js');
+      await openCacheManager();
+    } catch (err) {
+      console.error('[缓存管理] 打开失败:', err);
+      showLoading(`打开缓存管理失败: ${err instanceof Error ? err.message : String(err)}`);
+      setTimeout(hideLoading, 3000);
+    }
+  });
+
   // 首屏 UI 就绪，隐藏 loading
   hideLoading();
 
@@ -83,7 +101,7 @@ async function bootstrapAsync(): Promise<void> {
       console.warn('[Tauri] 显示窗口失败:', err);
     }
 
-    // 诊断快捷键：Ctrl+Shift+D → 复制诊断 JSON 到剪贴板
+    // 诊断快捷键：Ctrl+Shift+D → 复制诊断 JSON 到剪贴板 + 控制台输出可读摘要
     document.addEventListener('keydown', async (e) => {
       if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
         e.preventDefault();
@@ -95,7 +113,11 @@ async function bootstrapAsync(): Promise<void> {
           const debug = getDebugConfigSnapshot();
           const payload = JSON.stringify({ dbPath, diagnostic, debug }, null, 2);
           await navigator.clipboard.writeText(payload);
+          // 完整 JSON 仍输出到控制台（便于排障）
           console.log('[诊断] 数据库诊断信息已复制到剪贴板:\n', payload);
+          // 控制台额外输出人类可读摘要（M4-D1 延伸）
+          const summary = summarizeDiagnostic({ diagnostic });
+          console.log('[诊断摘要]\n' + summary);
           showLoading('数据库诊断信息已复制到剪贴板');
           setTimeout(hideLoading, 2000);
         } catch (err) {

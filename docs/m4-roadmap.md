@@ -2,6 +2,8 @@
 
 > 线路 GIM 可视化 MVP 之后的改进路线。
 > 按 A/B/C/D 四个方向组织，优先级从高到低。
+>
+> **M4 Sprint 1 已启动**（工程化收口 + MapLibre 技术验证），详见 [M4 Sprint 1 总结](m4-sprint1-summary.md)。
 
 ## M4-A 地图增强
 
@@ -9,9 +11,19 @@
 
 ### MapLibre 验证
 
-- [ ] 在 Tauri 环境验证 MapLibre GL JS 可用性（Canvas + WebGL）
-- [ ] 验证 CSP 策略兼容性（`script-src 'self' 'wasm-unsafe-eval'`）
-- [ ] 验证离线模式 fallback（无网络时降级到 Canvas 2D）
+- [~] 在 Tauri 环境验证 MapLibre GL JS 可用性（Canvas + WebGL） — **M4-A1 技术验证中**：probe 模块已创建，默认关闭
+- [x] 验证 CSP 策略兼容性（`script-src 'self' 'wasm-unsafe-eval'`） — **M4-A1 已验证**：`worker-src 'self' blob:` + `style-src 'unsafe-inline'` 已兼容，无需改 CSP
+- [ ] 验证离线模式 fallback（无网络时降级到 Canvas 2D） — 留给 M4-A2
+
+**M4-A1 状态：技术验证中**
+
+- ✅ 引入 `maplibre-gl` 依赖
+- ✅ `ENABLE_MAPLIBRE_EXPERIMENT = false`（默认关闭）
+- ✅ `src/ui/lineMapBaseLayer.ts` probe 模块（empty style，不加载瓦片）
+- ✅ 集成到 `lineProjectView.ts`（Canvas 主流程不受影响）
+- ⏳ Canvas overlay 对接留给 M4-A2
+
+详见 [地图底图评估 - M4-A1 技术验证结果](map-basemap-evaluation.md#13-m4-a1-技术验证结果)
 
 ### 离线瓦片
 
@@ -102,15 +114,31 @@
 
 ### 日志等级
 
-- [ ] 引入日志等级（DEBUG / INFO / WARN / ERROR）
-- [ ] 运行时日志等级切换（环境变量 / 设置面板）
-- [ ] 日志文件持久化（app_data_dir/logs/）
+- [x] 引入日志等级（DEBUG / INFO / WARN / ERROR） — **M3-Final 已完成**：`src/config/debug.ts` + `src/utils/logger.ts`
+- [x] 运行时日志等级切换（环境变量 / 设置面板） — **M4-D1 已完成**：localStorage `GIM_DEBUG` / `GIM_DEBUG_CATEGORIES` override
+- [x] 诊断快照（Ctrl+Shift+D） — **M4-D1 已完成**：复制 JSON + 控制台输出可读摘要
+- [ ] 日志文件持久化（app_data_dir/logs/） — 留给后续
+
+**M4-D1 状态：已启动 / 部分完成**
+
+- ✅ debug override（localStorage `GIM_DEBUG=1` / `GIM_DEBUG_CATEGORIES=ifc,fragments`）
+- ✅ diagnostic snapshot（Ctrl+Shift+D 复制 JSON + debug 配置）
+- ✅ diagnostic summary（`summarizeDiagnostic()` 输出可读摘要到 console）
+
+详见 [日志与诊断文档](logging-and-diagnostics.md)
 
 ### 缓存工具
 
-- [ ] 缓存管理 UI（查看 / 清除 / 导出）
+- [x] 缓存管理 UI（查看 / 清除 / 导出） — **M4-D2 已完成（最小可用版）**：`src/ui/cacheManagerView.ts` modal
 - [ ] Fragments 缓存启用验证（ENABLE_FRAGMENTS_CACHE=true 灰度）
 - [ ] 缓存迁移工具（PARSER_VERSION 变更时自动迁移）
+
+**M4-D2 状态：最小可用版已完成**
+
+- ✅ Rust commands：`list_cached_projects` / `delete_project_cache` / `get_project_diagnostic`
+- ✅ 前端 UI：`src/ui/cacheManagerView.ts`（数据库路径 + 项目列表 + 复制诊断 + 删除缓存）
+- ✅ 入口：左侧栏"缓存管理"按钮
+- ⏳ Fragments 缓存灰度 / 缓存迁移工具留给后续
 
 ### 打包发布
 

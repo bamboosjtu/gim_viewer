@@ -645,3 +645,44 @@ export async function getLineAttributes(projectId: number): Promise<LineAttribut
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<LineAttributeResult>('get_line_attributes', { projectId });
 }
+
+/**
+ * 缓存项目摘要（list_cached_projects 返回）。
+ */
+export interface CachedProjectSummary {
+  id: number;
+  name: string;
+  path: string;
+  project_type: string | null;
+  parser_version: string | null;
+  size: number;
+  modified_ms: number;
+  updated_at_ms: number;
+}
+
+/**
+ * 列出所有缓存的项目（只读，按最近打开排序）。
+ * 供缓存管理 UI 使用。
+ */
+export async function listCachedProjects(): Promise<CachedProjectSummary[]> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<CachedProjectSummary[]>('list_cached_projects');
+}
+
+/**
+ * 删除指定项目的全部缓存（DB 记录 + 磁盘文件）。
+ * 返回操作摘要文本。
+ */
+export async function deleteProjectCache(projectId: number): Promise<string> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('delete_project_cache', { projectId });
+}
+
+/**
+ * 获取指定项目的缓存诊断（供缓存管理 UI 的"复制诊断"按钮使用）。
+ * 返回与 getLatestProjectCacheDiagnostic 相同结构的 ProjectCacheDiagnostic。
+ */
+export async function getProjectDiagnostic(projectId: number): Promise<ProjectCacheDiagnostic> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<ProjectCacheDiagnostic>('get_project_diagnostic', { projectId });
+}

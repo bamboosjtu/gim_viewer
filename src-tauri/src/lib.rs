@@ -88,6 +88,9 @@ pub fn run() {
             db::get_line_gim_graph,
             db::save_line_project_cache,
             db::get_line_attributes,
+            db::list_cached_projects,
+            db::delete_project_cache,
+            db::get_project_diagnostic,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

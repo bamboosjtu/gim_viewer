@@ -302,3 +302,78 @@
 - **当前 MVP**：不引入，保留纯 Canvas 渲染，专注线路走向 + 属性联动。
 - **M4 路径**：分 6 步引入，每步保留回退到 Canvas 模式的降级。
 - **不影响现有功能**：所有改造在新文件 `lineMapBaseLayer.ts` 中进行，`lineMapView.ts` 主流程保留。
+
+---
+
+## 13. M4-A1 技术验证结果
+
+> 阶段：M4 Sprint 1（技术验证，默认关闭，不替换主地图）
+
+### 13.1 已完成
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| 引入 `maplibre-gl` 依赖 | ✅ | `package.json` 新增 `maplibre-gl`，~1.2 MB |
+| Feature flag | ✅ | `src/config/features.ts` 新增 `ENABLE_MAPLIBRE_EXPERIMENT = false`（默认关闭） |
+| Probe 模块 | ✅ | `src/ui/lineMapBaseLayer.ts` 导出 `createMapLibreProbe(container)` |
+| 空 style | ✅ | 本地 `EMPTY_STYLE`（仅 background 层，无 source / 瓦片） |
+| 动态 import | ✅ | 仅 flag=true 时 `await import('maplibre-gl')`，默认 false 不进主 bundle |
+| 创建 / 销毁 | ✅ | `createMapLibreProbe` 初始化 map，`handle.destroy()` 调用 `map.remove()` |
+| 集成点 | ✅ | `lineProjectView.ts` 在 Canvas 地图渲染后异步创建 probe，失败仅警告不抛异常 |
+
+### 13.2 默认关闭策略
+
+- `ENABLE_MAPLIBRE_EXPERIMENT = false`（默认）
+- flag=false 时：
+  - `maplibre-gl` 不被 import，不进 Vite 主 bundle
+  - `lineMapBaseLayer.ts` 不被加载
+  - 线路地图完全走 `lineMapView.ts` 纯 Canvas 渲染
+  - 行为与 M3 MVP 完全一致
+- flag=true 时（手动改源码）：
+  - Canvas 地图仍正常渲染（`renderLineMap` 不变）
+  - 额外异步创建 MapLibre probe（空 style 容器）
+  - probe 失败不影响 Canvas 主流程（catch + console.warn）
+
+### 13.3 离线 / 网络策略
+
+- **不加载在线瓦片**：EMPTY_STYLE 无 `sources`，不发起任何瓦片请求
+- **不访问外网**：MapLibre 仅初始化 WebGL 上下文 + 渲染 background 层
+- **Web Worker**：MapLibre 内部使用 blob worker，CSP `worker-src 'self' blob:` 已允许
+
+### 13.4 CSP 兼容性
+
+当前 CSP（`src-tauri/tauri.conf.json`）：
+
+```
+default-src 'self';
+img-src 'self' data: blob:;
+style-src 'self' 'unsafe-inline';
+script-src 'self' 'wasm-unsafe-eval';
+worker-src 'self' blob:;
+connect-src 'self' ipc: http://ipc.localhost
+```
+
+- `worker-src 'self' blob:` → ✅ MapLibre blob worker 允许
+- `style-src 'self' 'unsafe-inline'` → ✅ MapLibre 控件内联样式允许
+- `script-src 'self' 'wasm-unsafe-eval'` → ✅ 不需要 eval（empty style 无表达式）
+- `connect-src 'self' ipc: http://ipc.localhost` → ✅ empty style 无网络请求
+
+**结论：M4-A1 probe 不需要修改 CSP。**
+
+### 13.5 不做的事（留给 M4-A2）
+
+- 不替换 Canvas 主流程
+- 不改 `geoToScreen()`
+- 不做 Canvas overlay 对接（`map.project()` 桥接）
+- 不加载 PMTiles / MBTiles
+- 不引入 `coordtransform`
+- 不做真实底图
+
+### 13.6 后续步骤（M4-A2）
+
+1. 在 probe 基础上加载 PMTiles source（本地 `asset://` 协议）
+2. Canvas overlay 改用 `map.project([lng, lat])` 重投影
+3. 监听 `map.on('move')` / `map.on('zoom')` 触发 Canvas 重绘
+4. 保留 Canvas 回退路径（PMTiles 不可用时降级）
+
+每步必须保留"MapLibre 不可用时回退到 MVP Canvas"的降级。

@@ -17,11 +17,13 @@ import type { LineMapData } from '../gim/lineMapData.js';
 import { escHtml } from '../shared/html.js';
 import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, btnToggleProps, emptyTipEl, container } from './dom.js';
 import type { LineMapViewHandle } from './lineMapView.js';
+import type { LineMapBaseLayerHandle } from './lineMapBaseLayer.js';
 import { renderLineMap } from './lineMapView.js';
 import { extractLineMapData, isLineMapDataValid } from '../gim/lineMapData.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
-import { debugLog } from '../utils/logger.js';
+import { ENABLE_MAPLIBRE_EXPERIMENT } from '../config/features.js';
+import { debugLog, debugWarn } from '../utils/logger.js';
 
 /** 线路工程实体图标（扩展变电工程的 ENTITY_ICONS） */
 const LINE_ENTITY_ICONS: Record<string, string> = {
@@ -324,6 +326,14 @@ let lineMapHandle: LineMapViewHandle | null = null;
 let lineMapData: LineMapData | null = null;
 
 /**
+ * M4-A1：MapLibre probe handle（实验性，默认关闭）。
+ *
+ * 仅在 ENABLE_MAPLIBRE_EXPERIMENT=true 时创建，与 Canvas 主地图并存。
+ * 不替换 Canvas 主流程，仅验证 MapLibre 能在 Tauri + Vite 中初始化/销毁。
+ */
+let maplibreProbeHandle: LineMapBaseLayerHandle | null = null;
+
+/**
  * 销毁当前地图视图。
  *
  * 调用时机（spec 六 清理要求）：
@@ -337,6 +347,11 @@ export function destroyLineMapView(): void {
   if (lineMapHandle) {
     lineMapHandle.destroy();
     lineMapHandle = null;
+  }
+  // M4-A1：同时销毁 MapLibre probe（如果存在）
+  if (maplibreProbeHandle) {
+    maplibreProbeHandle.destroy();
+    maplibreProbeHandle = null;
   }
   lineMapData = null;
 }
@@ -526,4 +541,26 @@ export function renderLineProjectPanels(
       warnings: mapData.warnings.length,
     },
   });
+
+  // 7. M4-A1：MapLibre 技术验证 probe（默认关闭，不影响 Canvas 主流程）
+  //    仅验证 maplibre-gl 能在 Tauri + Vite 中动态 import / 创建 / 销毁。
+  //    失败时仅 console 警告，不抛异常，不影响 Canvas 地图。
+  if (ENABLE_MAPLIBRE_EXPERIMENT) {
+    // 先销毁旧的 probe（避免重复创建）
+    if (maplibreProbeHandle) {
+      maplibreProbeHandle.destroy();
+      maplibreProbeHandle = null;
+    }
+    // 异步创建：不阻塞 Canvas 主流程渲染
+    void (async () => {
+      try {
+        const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
+        maplibreProbeHandle = await createMapLibreProbe(container);
+        console.log('[MapLibre probe] 技术验证：probe 初始化成功（Canvas 主流程不受影响）');
+      } catch (err) {
+        debugWarn(DEBUG_LINE_MAP, '[MapLibre probe] 技术验证：probe 初始化失败（已忽略，Canvas 主流程正常）', err);
+        maplibreProbeHandle = null;
+      }
+    })();
+  }
 }
