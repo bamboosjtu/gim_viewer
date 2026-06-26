@@ -356,3 +356,11 @@ export function buildWireSemanticInfo(args: {
   3. OSM overlay 模式（MapLibre 底图 + Canvas overlay）
 - 导线点击在 Canvas-only / overlay 模式下行为一致
 - 不影响 OSM 底图加载、不影响 fallback 触发逻辑
+
+---
+
+## 9. 后续：M4-B3 悬链线参数语义验证
+
+M4-B2 完成后，进入 [M4-B3 悬链线参数语义验证](m4-b3-catenary-param-validation.md)，对 KVALUE / SPLIT / POINT0/1.MATRIX0 / BLHA 高程等候选字段做覆盖率统计与格式判断，输出语义假设与阻塞问题，作为 M4-B4 悬链线预研的输入。
+
+M4-B3 明确**不实现悬链线渲染、不实现弧垂计算、不改 SQLite schema**，仅做参数语义验证。

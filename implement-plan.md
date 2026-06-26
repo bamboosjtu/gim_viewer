@@ -10,9 +10,10 @@
 |---|---|---|---|
 | **M1** | GIM 浏览器 WEB 版 | ✅ 完成 | 纯 Web 架构：GIM 解压 + CBM 层级树 + IFC 3D 渲染 + 属性面板 |
 | **M2** | Tauri 单机版改造 | ✅ 基本完成 | 桌面化 + SQLite 索引缓存 + 缓存命中短路 + 节点级 IFC 懒加载 |
-| **M3** | 线路 GIM 可视化 | 🚧 进行中 | 线路工程结构浏览（完成）+ 地图视图（待实现） |
+| **M3** | 线路 GIM 可视化 | ✅ 完成 | 线路工程结构浏览 + Canvas 地图视图 + 塔位/导线/跨越点渲染 + 属性联动 |
+| **M4** | 线路地图增强（OSM + 几何审计） | 🚧 进行中 | OSM 在线底图 + Canvas overlay + fallback + 导线属性增强与样式分层 |
 
-**总体优先级**：先重构边界 → 再接 Tauri → 再接 SQLite 索引缓存 → 再做 Fragments 懒加载 → 最后做线路地图可视化。每步都有明确验收点，不容易把现有 GIM 阅读功能改坏。
+**总体优先级**：先重构边界 → 再接 Tauri → 再接 SQLite 索引缓存 → 再做 Fragments 懒加载 → 做线路地图可视化 → OSM 底图收口 → 线路几何审计与导线属性增强。每步都有明确验收点，不容易把现有 GIM 阅读功能改坏。
 
 ---
 
@@ -380,9 +381,9 @@ IFC 首次加载并转换后，将转换结果保存到 AppData/cache/fragments/
 
 ---
 
-# M3：线路 GIM 可视化 🚧 进行中
+# M3：线路 GIM 可视化 ✅ 完成
 
-> GIM 文件分变电工程和线路工程两类，前期按变电工程开发（M1/M2）。线路工程无 IFC 文件，无法复用 web-ifc 3D 渲染。M3 为线路工程建立独立的结构浏览（phase 1，已完成）和地图可视化（phase 2，待实现）。
+> GIM 文件分变电工程和线路工程两类，前期按变电工程开发（M1/M2）。线路工程无 IFC 文件，无法复用 web-ifc 3D 渲染。M3 为线路工程建立独立的结构浏览（phase 1）和地图可视化（phase 2），均已完成。
 
 ## M3 背景
 
@@ -449,7 +450,7 @@ IFC 首次加载并转换后，将转换结果保存到 AppData/cache/fragments/
 
 **验收**：demo-line 首次打开写入 SQLite，二次打开从缓存恢复 27829 节点无丢失，跳过 CBM 重解析。
 
-## M3-3.5：线路 FAM/DEV 属性解析与缓存 ⏳ 待实现
+## M3-3.5：线路 FAM/DEV 属性解析与缓存 ✅
 
 > **背景**：线路工程的杆塔编号、塔型、呼高、转角、导线型号、设备类型等字段不应只依赖 `currentFiles` 临时读取。当前 M3-3 只缓存了 `GimGraph`，二次打开时 `currentFiles=null`，无法再读取 FAM/DEV 原文。因此首次打开线路 GIM 后需把 FAM/DEV 属性持久化到 SQLite；二次打开时，地图数据提取（M3-4）应从 SQLite 恢复的属性缓存读取这些字段，而不是回头读原始 GIM 内文件。
 
@@ -756,7 +757,7 @@ validate_gim_cache → valid=true
    - `line_expected_fam_ref_count > 0`
    - `missing_line_fam_sources`：可为空或少量存在，但**必须输出该字段**（即使空数组也要返回）
 
-## M3-4：地图数据提取层 ⏳ 待实现
+## M3-4：地图数据提取层 ✅
 
 新增 `src/gim/lineMapData.ts`（纯逻辑，无 UI/Viewer 依赖，符合 gim/ 分层边界）。
 
@@ -874,7 +875,7 @@ validate_gim_cache → valid=true
 - `stats` 字段填充完整（`towerTotal`/`towerWithBlha`/`towerWithFam`/`wireTotal`/`wireWithEndpoints`/`crossTotal`/`crossWithCoord`），可用作 Ctrl+Shift+D 之外的运行时覆盖率诊断
 - `npm run build` 通过
 
-## M3-5：地图渲染层 ⏳ 待实现
+## M3-5：地图渲染层 ✅
 
 新增 `src/ui/lineMapView.ts`（纯 UI/DOM，不直接碰 DB）。渲染到现有 `#viewport`（线路工程下原本空置，正好作地图画布）。
 
@@ -938,7 +939,7 @@ validate_gim_cache → valid=true
 - `renderLineMap` 返回 `LineMapViewHandle`，`handle.fit()` 可回到全景、`handle.destroy()` 释放后 DOM 中无残留 canvas/SVG
 - `npm run build` 通过
 
-## M3-6：UI 集成 ⏳ 待实现
+## M3-6：UI 集成 ✅
 
 修改 `src/ui/lineProjectView.ts`。
 
@@ -999,6 +1000,121 @@ M3-4~6 阶段（327 杆塔 + 5460 线段）从 GimGraph 单遍派生即可（ms 
 
 ---
 
+# M4：线路地图增强（OSM + 几何审计） 🚧 进行中
+
+> M3 完成线路 Canvas 地图可视化后，M4 接入 OpenStreetMap 在线底图并增强导线数据展示能力。M4 明确**不做悬链线渲染、不做真实 3D 线路、不做 MOD 解析、不改 SQLite schema**。
+
+## M4 背景
+
+M3-5/6 的 Canvas-only 地图没有底图，缺乏地理参照。M4 引入 MapLibre GL JS 作为底图层，Canvas 作为透明叠加层（保留 hover/click/tooltip/树联动），并固化 OSM 不可用时的 fallback 路径。完成底图后转向导线几何数据审计与属性增强，为后续悬链线预研打基础。
+
+## M4-A1：MapLibre 实验 probe ⏳ 后置评估
+
+> M4-A1 已合入主线代码，但作为实验 probe 保留，后续是否进入默认启用栈由 M4-A2 决定。
+
+**实现内容**：
+- 新增 `src/ui/lineMapBaseLayer.ts`：MapLibre GL JS 动态 import + OSM raster style 工厂 + 销毁
+- 新增 `src/ui/lineMapProjection.ts`：MapLibre project/unproject 适配 `LineMapProjection` 接口
+- 新增 `src/ui/lineMapStyle.ts`：`createOsmOnlineRasterStyle()` 等 style factory
+- 新增 `src/ui/lineMapPmtiles.ts`：PMTiles 实验性适配（默认关闭）
+- `lineProjectView.ts` 接入 feature flag `ENABLE_MAPLIBRE_EXPERIMENT`/`LINE_BASEMAP_MODE`
+- Tauri CSP 放行 `https://tile.openstreetmap.org` 的 img-src 与 connect-src
+- `lineMapView.ts` 增加 `RenderLineMapOptions`：`projection` / `onRequestRedraw` / `showGrid` / `showCanvasScaleBar`
+
+## M4-A2：OSM MVP baseline + fallback + 诊断 ✅ 完成
+
+> 冻结底图路线：主底图 = OpenStreetMap online，叠加层 = Canvas overlay，OSM 不可用回退 Canvas-only。PMTiles / 天地图 / 思极 / 高德 / 离线瓦片包**后续再评估**，本轮不做。
+
+**实现内容**：
+
+1. **底图运行状态服务** `src/services/basemapStatusService.ts`：内存单例，5 种状态枚举（`canvas-only` / `osm-online` / `osm-unavailable-fallback` / `empty` / `pmtiles`），提供 `setBasemapStatus` / `getBasemapStatusSnapshot` / `resetBasemapStatus` / `summarizeBasemapStatus` API
+2. **OSM tile error 阈值化 fallback**：tile error 累计 3 次触发 `onBasemapUnavailable`，销毁 MapLibre probe + overlay Canvas，重绘纯 Canvas 地图。单次 tile error 不致命，需阈值触发
+3. **OSM 模式持续监听**：`onLoad` 不再无条件移除 error listeners，OSM 模式需保留 listeners 监听加载后 tile error，并在 `destroy()` 中显式清理
+4. **lineProjectView.ts 集成**：4 个关键节点设置 basemap status（Canvas 初始渲染 / fallback / MapLibre overlay 成功 / destroy）；fallback 后 `maplibreEnabled=false`（M4-A2 小修，反映"当前是否仍有 MapLibre 在线"而非"曾启用过"）
+5. **bootstrap.ts 诊断集成**：Ctrl+Shift+D JSON 新增 `basemap` 字段，控制台输出 `[底图状态]` 人类可读摘要
+6. **maplibreProbeGeneration 代次计数器**：取消过期异步 probe 创建，避免竞态
+7. **文档更新**：`docs/dev-log.md` 新增 §6 OSM MVP 验收清单（主路径 11 步 / Fallback 路径 9 步 / 边界与约束 7 项）；`docs/architecture.md` 增补 basemapStatusService 设计
+
+**验收**：
+- 主路径：打开线路 GIM → OSM 底图加载 → Canvas overlay 渲染 → hover/click/tooltip/属性面板正常 → Ctrl+Shift+D `basemap.status="osm-online"`
+- Fallback 路径：断网或 OSM 不可用 → 3 次 tile error → 销毁 MapLibre → Canvas-only 重绘 → 提示"OSM 在线底图不可用，已切换为 Canvas 地图模式" → Ctrl+Shift+D `basemap.status="osm-unavailable-fallback"` + `basemap.maplibreEnabled=false`
+- 变电 IFC 流程不受影响
+
+## M4-B1：线路几何与导线语义审计 ✅ 完成
+
+> **本轮是审计与预研，不是几何实现**。对线路 GIM 中与导线几何、导线语义、悬链线相关的数据做审计和整理，不实现悬链线。
+
+**实现内容**：
+
+1. **审计服务** `src/services/lineGeometryAuditService.ts`：`buildLineGeometryAuditReport()` 只读内存数据，输出 `LineGeometryAuditReport`（节点类型计数 / 导线类型计数 / 导线/塔/跨越样本（每类 ≤10）/ 悬链线候选字段统计 / 缺失字段 / 建议）。修复模块级 `wireBuckets` 缓存泄漏 → 闭包 `pickBucket`
+2. **审计发现**：
+   - 已解析节点类型：F1System/F2System/F3System/F4System/Tower_Device/Wire_Device/WIRE/CROSS
+   - 已识别导线类型：CONDUCTOR/GROUNDWIRE/OPGW/UNKNOWN（由 `resolveWireType()` 判定）
+   - 导线端点：优先 POINT0/1.BLHA，兜底 BACKSTRING/FRONTSTRING → STRING → TOWER F4.BLHA
+   - **关键发现**：所有节点 rawProps 已序列化为 JSON 入库（`line_cbm_node.raw_props_json`），数据齐备，**不需要修改 SQLite schema**，缺的只是"提取 + 使用"环节
+3. **悬链线候选字段**：KVALUE / SPLIT / POINT0.MATRIX0 / POINT1.MATRIX0 / POINT0.BLHA 高程分量 / POINT1.BLHA 高程分量 / ISJUMPER / MATERIALSHEET / TRANSFORMMATRIX
+4. **审计文档** `docs/m4-b-line-geometry-research.md`：7 章结构（当前实现 / 已解析字段 / 导线语义 / 悬链线候选字段 / 当前缺口 / M4-B2 建议 / 审计服务 API），已更新 `docs/README.md` 入口
+
+**验收**：`npm run build` + `cargo check` 通过；变电 IFC 不受影响；OSM MVP baseline 不破坏。
+
+## M4-B2：导线属性增强与样式分层 ✅ 完成
+
+> 让导线数据"可点、可看、可解释"。**不做悬链线、不做真实 3D、保持直线段渲染**。
+
+**实现内容**：
+
+1. **导线语义工具** `src/services/lineWireSemanticService.ts`：`WireSemanticInfo` 接口 + `buildWireSemanticInfo()` 函数
+   - 字段：wireType / layerKey / isJumper / split / kValue / point0Blha / point1Blha / point0Matrix0 / point1Matrix0 / backString / frontString / spanMeters / warnings
+   - 档距近似计算：Haversine 公式（地球半径 6371000m），端点缺失返回 null + warning
+   - isJumper 兼容 1/true/TRUE/yes；split 从 SPLIT 转数字
+   - 只读 wire + rawProps，不读 DB、不改 schema
+2. **导线属性面板** `lineProjectView.ts` → `showWireProperties(wire)`：点击导线后右侧属性面板展示 4 小节
+   - 导线语义（12 字段表格）：导线类型 / 图层 / 是否跳线 / 分裂数 / 档距 / KVALUE / POINT0.BLHA / POINT1.BLHA / POINT0.MATRIX0 / POINT1.MATRIX0 / BACKSTRING / FRONTSTRING
+   - 端点坐标：startLat/startLng/endLat/endLng（6 位小数）
+   - 解析告警：warnings 非空显示 ⚠
+   - 基本信息 + 原始 rawProps：折叠展示，便于排障
+   - 缺失字段显示 `—`，档距保留 1 位小数（如 `356.2 m`）
+3. **导线 hit-test 与选中态** `lineMapView.ts`：
+   - 新增 `pointToSegmentDist(px, py, x1, y1, x2, y2)`：点到线段距离
+   - 新增 `hitTestWire(sx, sy, threshold)`：点击 `WIRE_HIT_DIST=6px`，hover `WIRE_HIT_DIST_HOVER=8px`
+   - 优先级：塔位（`HIT_RADIUS=11px`）> 导线；命中塔位时不触发导线 hit-test
+   - 选中态：`selectedWire` 互斥 `selectedTowerPaths`，避免双重选中
+   - `fit()` / `destroy()` 清除选中态
+4. **导线样式分层增强** `lineMapView.ts` → `drawWireSegment(w, isSelected)`：
+   - `isJumper=true` → 虚线 `[6, 4]`（`setLineDash`）
+   - `SPLIT > 1` → 线宽 2.5px（默认 1.5px）
+   - 选中导线 → 线宽 3.5px + 黄色光晕描边（`rgba(245,158,11,0.45)`，宽 7.5px），最后绘制
+   - UNKNOWN → 保持浅灰弱化样式
+5. **三处 `renderLineMap` 接入 onWireClick**：初始 Canvas / OSM fallback 重渲染 / OSM overlay 模式，行为一致
+6. **文档更新**：`docs/m4-b-line-geometry-research.md` 新增 §8 M4-B2 实现记录（7 小节）；`docs/dev-log.md` 导线已知限制新增 2 条（档距近似值未考虑高程差 / KVALUE/SPLIT/MATRIX0 物理含义待 M4-B3 核验）
+
+**验收**：
+- `npm run build` exit 0（92 modules）
+- `cargo check` exit 0
+- OSM MVP baseline 不破坏；塔位/跨越点交互不破坏；不改 SQLite schema；不影响变电 IFC
+
+## M4-B3：悬链线参数语义验证 ⏳ 待实现
+
+> 收集真实线路 GIM 样本工程，对照样本核验 KVALUE/SPLIT/MATRIX0 物理含义，作为悬链线实现（M4-B4）的输入。**M4-B3 仍不实现悬链线渲染、不改 SQLite schema**。
+
+**待办**：
+- 收集 2-3 个真实线路 GIM 样本工程
+- 核验 KVALUE 物理含义（张力系数？弧垂参数？应力？）
+- 核验 SPLIT 是否为分裂导线数（整数）
+- 核验 POINT0/1.MATRIX0 格式（4x4 矩阵行？标量？）
+- 输出字段含义确认报告
+
+## M4-B4：悬链线预研 ⏳ 后置
+
+> 基于 M4-B3 字段确认结果，预研悬链线渲染算法。本轮明确不做实现，仅做算法设计文档。
+
+**待办**：
+- 基于已确认字段（KVALUE/POINT0/1.MATRIX0/BLHA 高程）设计悬链线计算公式
+- 评估性能影响（5460 条导线段 × 每条悬链线分点）
+- 输出算法预研文档
+
+---
+
 # 你应该避免的组织方式
 
 - **不要**继续把所有逻辑写在 `src/main.ts`。UI、GIM 解析、CBM 树、IFC 加载、属性面板、拾取、高亮已混在一起的趋势，再加数据库和桌面能力会迅速失控。
@@ -1024,10 +1140,18 @@ M3-4~6 阶段（327 杆塔 + 5460 线段）从 GimGraph 单遍派生即可（ms 
 打开线路 GIM → 识别为 transmission_line → 构建 GimGraph → 缓存到 SQLite → 显示层级树/文件摘要/属性
 ```
 
-**第三版（M3 地图可视化，当前推进中）**：
+**第三版（M3 地图可视化，已完成）**：
 
 ```txt
 打开线路 GIM → 视口渲染地图 → 杆塔贴图 + 导线折线 + 跨越点 → 点击联动属性面板
 ```
 
-**远期**：Fragments 缓存（M2-5）、离线真实底图（M3 后置）、3D 线路场景（M3 远期）、全文搜索设备、多 GIM 项目管理、批量预转换。
+**第四版（M4 OSM + 导线增强，当前推进中）**：
+
+```txt
+打开线路 GIM → OSM 在线底图 + Canvas overlay → hover/click/tooltip/属性面板正常
+→ OSM 不可用自动 fallback Canvas-only → 导线点击显示端点/档距/KVALUE/SPLIT
+→ 导线样式按 jumper/split 分层 → Ctrl+Shift+D 诊断 basemap 状态
+```
+
+**远期**：Fragments 缓存（M2-5）、离线真实底图（M3 后置）、3D 线路场景（M3 远期）、悬链线参数语义验证（M4-B3）、悬链线预研（M4-B4）、全文搜索设备、多 GIM 项目管理、批量预转换。

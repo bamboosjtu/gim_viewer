@@ -25,6 +25,7 @@ import { extractLineMapData, isLineMapDataValid } from '../gim/lineMapData.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
 import { buildWireSemanticInfo } from '../services/lineWireSemanticService.js';
 import type { WireSemanticInfo } from '../services/lineWireSemanticService.js';
+import { buildLineCatenaryParamAuditReport } from '../services/lineGeometryAuditService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
 import { ENABLE_MAPLIBRE_EXPERIMENT, ENABLE_PMTILES_EXPERIMENT, PMTILES_DEMO_URL, LINE_BASEMAP_MODE } from '../config/features.js';
 import { setBasemapStatus, resetBasemapStatus } from '../services/basemapStatusService.js';
@@ -41,6 +42,37 @@ function basemapStatusFromMode(mode: string): BasemapStatus {
   if (mode === 'osm-online') return 'osm-online';
   if (mode === 'pmtiles') return 'pmtiles';
   return 'empty';
+}
+
+/**
+ * M4-B3：构建悬链线参数审计摘要（精简版，用于 debugLog 输出）。
+ *
+ * 不输出全部样本，只输出：
+ * - wireCount
+ * - 各候选字段覆盖率（KVALUE/SPLIT/MATRIX0/BLHA 等）
+ * - 阻塞问题数量
+ *
+ * 完整报告需调用 lineGeometryAuditService.buildLineCatenaryParamAuditReport。
+ *
+ * @param graph 线路工程图
+ * @param mapData 已提取的地图数据
+ */
+function buildLineCatenaryAuditSummary(graph: unknown, mapData: unknown): {
+  wireCount: number;
+  coverage: Record<string, { count: number; ratio: number }>;
+  blockingQuestionCount: number;
+} {
+  const report = buildLineCatenaryParamAuditReport({ graph, mapData });
+  // 精简 coverage：移除 sampleValues 避免日志过大
+  const coverageSummary: Record<string, { count: number; ratio: number }> = {};
+  for (const [field, stat] of Object.entries(report.coverage)) {
+    coverageSummary[field] = { count: stat.count, ratio: stat.ratio };
+  }
+  return {
+    wireCount: report.wireCount,
+    coverage: coverageSummary,
+    blockingQuestionCount: report.blockingQuestions.length,
+  };
 }
 
 /** 线路工程实体图标（扩展变电工程的 ENTITY_ICONS） */
@@ -644,6 +676,10 @@ export function renderLineProjectPanels(
   const mapData = extractLineMapData(graph, attrs);
   // 模块级保存：供左侧树点击 collectDescendantTowerPaths 反查塔位 path
   lineMapData = mapData;
+
+  // M4-B3：在 debug 模式输出悬链线参数审计摘要（仅摘要，不输出全部样本）
+  // 仅在 DEBUG_LINE_MAP 开启时执行，避免生产环境性能影响
+  debugLog(DEBUG_LINE_MAP, '[M4-B3] catenary param audit summary', buildLineCatenaryAuditSummary(graph, mapData));
 
   // Phase 5：地图数据统计与未解析引用摘要（追加到文件设备面板）
   renderMapStats(mapData);

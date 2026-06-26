@@ -159,7 +159,7 @@ const FOCUS_TOWER_ZOOM = 12;
  * @param container 宿主 DOM（canvas 将作为子元素填充）
  * @param onTowerClick 点击塔位时的回调，参数为该塔位对应的图节点
  * @param options M4-A2：projection（外部投影）+ onRequestRedraw（注册重绘回调）；
- *                M4-B2：onWireClick（点击导线回调）+ selectWirePath（外部选中导线路径）
+ *                M4-B2：onWireClick（点击导线回调，命中导线且未命中塔位时触发）
  * @returns LineMapViewHandle，调用方负责在切换/清空时 destroy()
  */
 export function renderLineMap(
@@ -981,6 +981,8 @@ export function renderLineMap(
    */
   function handlePointerLeaveInternal(): void {
     hoveredTower = null;
+    // M4-B2 cleanup：鼠标离开地图区域时同时清理导线 hover 态
+    hoveredWire = null;
     hideTooltip();
     draw();
   }
@@ -1032,7 +1034,8 @@ export function renderLineMap(
   function onMouseUp(e: MouseEvent): void {
     if (dragging) {
       dragging = false;
-      canvas.style.cursor = hoveredTower ? 'pointer' : 'grab';
+      // M4-B2 cleanup：释放时若仍在导线上，cursor 保持 pointer（塔位优先级不变）
+      canvas.style.cursor = (hoveredTower || hoveredWire) ? 'pointer' : 'grab';
     }
     // 点击（未拖拽）→ 命中塔位
     if (!mouseDownMoved && e.button === 0) {
