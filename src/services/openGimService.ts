@@ -167,6 +167,9 @@ async function openGimFromArrayBuffer(
 
   // 清空上一次 GIM 的状态，避免变电 ↔ 线路切换时残留
   state.resetGimState();
+  // 销毁上一次线路地图 canvas（若存在），避免切换到变电工程时残留在视口
+  const { destroyLineMapView } = await import('../ui/lineProjectView.js');
+  destroyLineMapView();
 
   // 工程类型识别：线路工程走独立流程，不弹 IFC 模态框，不创建 Viewer
   showLoading('正在识别工程类型...');
@@ -391,6 +394,11 @@ export async function openGimWithDialog(
         try {
           // 清空上一次 GIM 的状态（含线路工程字段），避免残留
           state.resetGimState();
+          // 销毁上一次线路地图 canvas（若存在），避免切换到变电工程时残留在视口
+          {
+            const { destroyLineMapView } = await import('../ui/lineProjectView.js');
+            destroyLineMapView();
+          }
 
           // v4: 线路工程缓存命中 → 从 SQLite 恢复 GimGraph + FAM/DEV 属性，跳过解压
           // v5: 缓存命中顺序：validate → get_line_graph → restoreLineGraphToState

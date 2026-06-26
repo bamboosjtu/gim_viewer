@@ -14,7 +14,11 @@
 import type { AppState } from '../app/state.js';
 import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
 import { escHtml } from '../shared/html.js';
-import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, btnToggleProps, emptyTipEl } from './dom.js';
+import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, btnToggleProps, emptyTipEl, container } from './dom.js';
+import type { LineMapViewHandle } from './lineMapView.js';
+import { renderLineMap } from './lineMapView.js';
+import { extractLineMapData, isLineMapDataValid } from '../gim/lineMapData.js';
+import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
 
 /** 线路工程实体图标（扩展变电工程的 ENTITY_ICONS） */
 const LINE_ENTITY_ICONS: Record<string, string> = {
@@ -137,14 +141,10 @@ function renderLineFileSummary(graph: GimGraph): void {
   fileDevPanel.appendChild(wrap);
 }
 
-/** 渲染模型面板提示 */
+/** 渲染模型面板（线路工程无 IFC 模型，清空占位） */
 function renderLineModelPanel(): void {
   if (!modelListEl) return;
   modelListEl.innerHTML = '';
-  const tip = document.createElement('div');
-  tip.className = 'props-empty';
-  tip.textContent = '线路工程当前以结构浏览为主，暂无 IFC 模型。';
-  modelListEl.appendChild(tip);
 }
 
 /** 渲染引用清单为 HTML */
@@ -256,13 +256,44 @@ export function showLineNodeProperties(node: GimGraphNode): void {
   propsDrawerBody.innerHTML = html;
 }
 
+// ---------------------------------------------------------------------------
+// 地图视图生命周期管理
+// ---------------------------------------------------------------------------
+
+/** 当前地图视图 handle（模块级，避免重复打开 GIM 后残留） */
+let lineMapHandle: LineMapViewHandle | null = null;
+
+/**
+ * 销毁当前地图视图。
+ *
+ * 调用时机（spec 六 清理要求）：
+ * - 打开新 GIM 前
+ * - 清空场景
+ * - 切换到变电工程
+ *
+ * 幂等：handle 为空时直接返回。
+ */
+export function destroyLineMapView(): void {
+  if (lineMapHandle) {
+    lineMapHandle.destroy();
+    lineMapHandle = null;
+  }
+}
+
+/** 节点点击 → 展示属性 + 展开属性面板（层级树与地图共用） */
+function handleNodeSelect(node: GimGraphNode): void {
+  showLineNodeProperties(node);
+  propsDrawer.classList.remove('collapsed');
+  btnToggleProps.style.right = '332px';
+}
+
 /**
  * 渲染线路工程面板（统一入口）。
  *
  * - 复用左侧层级树面板显示线路 CBM 树
  * - 文件设备面板显示文件摘要
- * - 模型面板显示提示
- * - 点击节点只展示属性，不创建 ViewerRuntime
+ * - 主视口渲染线路地图（Canvas 2D）
+ * - 点击节点/塔位只展示属性，不创建 ViewerRuntime
  */
 export function renderLineProjectPanels(
   state: AppState,
@@ -277,30 +308,60 @@ export function renderLineProjectPanels(
   if (!graph.root) {
     cbmTreePanel.innerHTML = '<div class="props-empty">线路工程未找到 CBM 层级树</div>';
   } else {
-    renderLineTreeNode(graph.root, cbmTreePanel, (node) => {
-      // 点击节点：只展示属性，不创建 Viewer
-      showLineNodeProperties(node);
-      // 打开属性面板（纯 UI，不刷新视口）
-      propsDrawer.classList.remove('collapsed');
-      btnToggleProps.style.right = '332px';
-    });
+    renderLineTreeNode(graph.root, cbmTreePanel, handleNodeSelect);
   }
 
   // 2. 文件设备面板摘要
   renderLineFileSummary(graph);
 
-  // 3. 模型面板提示
+  // 3. 模型面板（清空占位，不显示 IFC 提示）
   renderLineModelPanel();
 
-  // 4. 隐藏空提示（线路工程不需要 3D 视口提示）
+  // 4. 主视口：渲染线路地图
+  //    先销毁旧 handle，避免重复打开 GIM 后 canvas 残留
+  destroyLineMapView();
+  const attrs = buildLineAttributeIndex(state);
+  const mapData = extractLineMapData(graph, attrs);
+  if (isLineMapDataValid(mapData)) {
+    lineMapHandle = renderLineMap(mapData, container, handleNodeSelect);
+  } else {
+    // 塔位坐标缺失：在视口中央显示提示，不抛异常
+    const tip = document.createElement('div');
+    tip.style.position = 'absolute';
+    tip.style.inset = '0';
+    tip.style.display = 'flex';
+    tip.style.alignItems = 'center';
+    tip.style.justifyContent = 'center';
+    tip.style.color = '#888';
+    tip.style.fontSize = '14px';
+    tip.style.pointerEvents = 'none';
+    tip.textContent = `未提取到可定位塔位（塔位 ${mapData.stats.towerTotal}，有坐标 ${mapData.stats.towerWithBlha}）`;
+    container.appendChild(tip);
+    // 临时 handle：destroy 时移除该提示节点
+    lineMapHandle = {
+      fit() { /* 无地图可 fit */ },
+      destroy() {
+        if (tip.parentNode === container) container.removeChild(tip);
+      },
+    };
+  }
+
+  // 5. 隐藏空提示（线路工程使用地图视口，不需要 3D 空提示）
   if (emptyTipEl) emptyTipEl.style.display = 'none';
 
-  // 5. 状态提示
+  // 6. 状态提示
   showMessage('线路工程已加载，当前为结构浏览模式');
   console.log('[GIM] 线路工程面板已渲染:', {
     type: graph.projectType,
     root: graph.root?.path || null,
     totalNodes: graph.stats.total,
     stats: graph.stats,
+    map: {
+      towers: mapData.stats.towerTotal,
+      towersWithCoords: mapData.stats.towerWithBlha,
+      wires: mapData.stats.wireTotal,
+      crosses: mapData.stats.crossTotal,
+      warnings: mapData.warnings.length,
+    },
   });
 }

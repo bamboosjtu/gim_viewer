@@ -60,6 +60,9 @@ async function bootstrapAsync(): Promise<void> {
     }
     // 再清空 state 和 UI
     state.reset();
+    // 销毁线路地图 canvas（若存在），清空场景时彻底移除
+    const { destroyLineMapView } = await import('../ui/lineProjectView.js');
+    destroyLineMapView();
     document.getElementById('model-list')!.innerHTML = '';
     document.getElementById('cbm-tree-panel')!.innerHTML = '';
     document.getElementById('file-dev-panel')!.innerHTML = '';
