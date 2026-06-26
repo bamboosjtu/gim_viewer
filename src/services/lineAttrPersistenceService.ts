@@ -22,6 +22,8 @@ import { LineRefKind } from '../gim/lineRefKind.js';
 import { normalizeGimPath, getFileNameLower } from '../gim/linePathNormalize.js';
 import { parseLineFam } from '../gim/lineFamParser.js';
 import { parseLineDev } from '../gim/lineDevParser.js';
+import { DEBUG_GIM_CACHE } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 /** 解析结果（供 saveLineProjectCache 使用） */
 export interface LineAttributePayloads {
@@ -212,7 +214,7 @@ export async function parseLineAttributes(
     }
   }
 
-  console.log('[LineAttr] 属性解析完成:', {
+  debugLog(DEBUG_GIM_CACHE, '[LineAttr] 属性解析完成:', {
     famRefs: famRefs.length,
     devRefs: devRefs.length,
     famPayloads: famPayloads.length,

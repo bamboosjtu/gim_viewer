@@ -3,6 +3,8 @@ import { setupTabs } from '../ui/tabs.js';
 import { setupIfcSelectModal } from '../ui/ifcSelectModal.js';
 import { btnLoadGim, btnLoadLocal, btnClear, loadingEl } from '../ui/dom.js';
 import { isTauri } from '../desktop/runtime.js';
+import { DEBUG_FRAGMENTS } from '../config/debug.js';
+import { debugWarn } from '../utils/logger.js';
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
 function hideLoading() { loadingEl.style.display = 'none'; }
@@ -13,11 +15,13 @@ async function bootstrapAsync(): Promise<void> {
 
   // 全局 unhandledrejection 诊断（仅 Fragments 相关，避免控制台红屏）
   // 这不是根本修复，只是确认错误来源；长期应依赖 ifcLoader.ts 里的 safeFragmentsUpdate
+  // 日志策略：生产环境只输出简化 warning（不刷屏），DEBUG 模式输出完整错误便于定位
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event.reason;
     const msg = reason instanceof Error ? reason.message : String(reason);
     if (msg.includes('Malformed tile') || msg.includes('Fragments')) {
-      console.warn('[Global] caught fragments unhandled rejection', reason);
+      // DEBUG_FRAGMENTS=true：输出完整 reason；false：仅简短提示
+      debugWarn(DEBUG_FRAGMENTS, '[Global] caught fragments unhandled rejection', reason);
       event.preventDefault();
     }
   });

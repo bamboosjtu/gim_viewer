@@ -21,6 +21,8 @@ import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
 import type { GimProjectType } from '../gim/projectType.js';
 import type { LineGraphResult } from '../desktop/database.js';
 import { LineRefKind, ARRAY_REF_FIELDS } from '../gim/lineRefKind.js';
+import { DEBUG_GIM_CACHE } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 /** 创建空的 refs 结构 */
 function emptyRefs(): GimGraphNode['refs'] {
@@ -176,7 +178,7 @@ export function restoreLineGraphToState(state: AppState, result: LineGraphResult
   state.currentProjectType = projectType;
   state.currentFiles = null; // 缓存命中，不持有原始文件
 
-  console.log('[Restore] 线路工程图已从 SQLite 恢复:', {
+  debugLog(DEBUG_GIM_CACHE, '[Restore] 线路工程图已从 SQLite 恢复:', {
     project_type: projectType,
     root: root?.path || null,
     totalNodes: stats.total,

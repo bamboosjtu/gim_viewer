@@ -15,6 +15,8 @@ import { renderFileDevPanel } from '../ui/fileDevView.js';
 import { loadingEl, emptyTipEl, gimFileInput, btnLoadGim } from '../ui/dom.js';
 import { isTauri } from '../desktop/runtime.js';
 import { openGimFilePath } from '../desktop/fileDialog.js';
+import { DEBUG_IFC_LOAD, DEBUG_GIM_CACHE, DEBUG_RUNTIME_LOGS } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
 function hideLoading() { loadingEl.style.display = 'none'; }
@@ -71,7 +73,7 @@ async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<U
   if (state.currentFiles) {
     const file = state.currentFiles.get(entry.path);
     if (file) {
-      console.log('[IFC Buffer] 使用 GIM 解压内存文件:', {
+      debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用 GIM 解压内存文件:', {
         name: entry.name,
         path: entry.path,
       });
@@ -84,7 +86,7 @@ async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<U
     const projectId = state.currentProjectId;
     if (projectId != null) {
       const cachePath = state.cachedIfcPaths.get(entry.path)!;
-      console.log('[IFC Buffer] 使用本地 IFC 缓存:', {
+      debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用本地 IFC 缓存:', {
         name: entry.name,
         path: entry.path,
         cachePath,
@@ -101,13 +103,14 @@ async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<U
             .map((b) => b.toString(16).padStart(2, '0'))
             .join(' ')
         : '';
-      console.log('[IFC Buffer] cached IFC bytes', {
+      debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] cached IFC bytes', {
         name: entry.name,
         path: entry.path,
         byteLength,
         head,
       });
       if (byteLength === 0) {
+        // 缓存损坏：始终输出（非 debug），便于用户定位
         console.warn(`[IFC Buffer] 缓存 IFC 字节为空，缓存损坏: ${entry.path}`);
         return null;
       }
@@ -123,7 +126,7 @@ async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<U
     }
   }
 
-  // 3. 找不到
+  // 3. 找不到：始终输出（非 debug），便于定位
   console.warn('[IFC Buffer] 找不到 IFC 文件内容或缓存:', entry);
   return null;
 }
@@ -131,7 +134,7 @@ async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<U
 /** 加载选中的 IFC 文件 */
 export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, modelCallbacks: ModelEventCallbacks): Promise<void> {
   const selected = getModalSelectedEntries(state.currentIfcEntries);
-  console.log('[IFC Modal] loadSelectedIfcFiles start', {
+  debugLog(DEBUG_IFC_LOAD, '[IFC Modal] loadSelectedIfcFiles start', {
     selected,
     currentProjectId: state.currentProjectId,
     currentFiles: !!state.currentFiles,
@@ -147,28 +150,29 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
   const failed: Array<{ name: string; message: string }> = [];
 
   try {
-    console.log('[IFC Modal] before ensureEngineReady');
+    debugLog(DEBUG_IFC_LOAD, '[IFC Modal] before ensureEngineReady');
     await ensureEngineReady(ctx, state, modelCallbacks);
-    console.log('[IFC Modal] after ensureEngineReady');
+    debugLog(DEBUG_IFC_LOAD, '[IFC Modal] after ensureEngineReady');
     const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
 
     for (const entry of selected) {
       showLoading(`正在加载 ${entry.name}...`);
-      console.log('[IFC Modal] before loadIfcEntry', entry);
+      debugLog(DEBUG_IFC_LOAD, '[IFC Modal] before loadIfcEntry', entry);
       try {
         await loadIfcEntry(
           ctx,
           state,
           entry,
           async () => {
-            console.log('[IFC Modal] getIfcBuffer called', entry);
+            debugLog(DEBUG_IFC_LOAD, '[IFC Modal] getIfcBuffer called', entry);
             return getIfcBufferForEntry(entry, state);
           },
           (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
         );
-        console.log('[IFC Modal] loadIfcEntry done', entry);
+        debugLog(DEBUG_IFC_LOAD, '[IFC Modal] loadIfcEntry done', entry);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        // 加载失败：始终输出 error（非 debug），便于用户定位
         console.error('[IFC Modal] loadIfcEntry failed', { entry, error: err });
 
         failed.push({ name: entry.name, message });
@@ -205,7 +209,7 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
 
     // 对成功加载的模型执行 fitCameraToScene（即使部分失败也尝试 fit）
     const fitted = fitCameraToScene(ctx, state);
-    console.log('[IFC Modal] fitCameraToScene result', { fitted, failed: failed.length, total: selected.length });
+    debugLog(DEBUG_IFC_LOAD, '[IFC Modal] fitCameraToScene result', { fitted, failed: failed.length, total: selected.length });
   } catch (err) {
     // 外层 try 仅捕获 ensureEngineReady 等致命错误
     console.error('[IFC Modal] loadSelectedIfcFiles failed (outer)', {
@@ -254,7 +258,7 @@ async function openGimFromArrayBuffer(
   state.currentProjectType = projectTypeResult.type;
 
   // 运行时诊断：打印识别结果与解压路径样本，便于排查真实解压结构
-  console.log('[GIM Runtime Detect]', {
+  debugLog(DEBUG_RUNTIME_LOGS, '[GIM Runtime Detect]', {
     type: projectTypeResult.type,
     details: projectTypeResult.details,
     samplePaths: Array.from(extracted.keys()).slice(0, 80),
@@ -265,7 +269,7 @@ async function openGimFromArrayBuffer(
       .filter(([p]) => /\.cbm$/i.test(p))
       .slice(0, 5);
     for (const [p, f] of cbmSamples) {
-      console.log('[GIM Runtime Detect] cbm sample', p, (await f.text()).slice(0, 500));
+      debugLog(DEBUG_RUNTIME_LOGS, '[GIM Runtime Detect] cbm sample', p, (await f.text()).slice(0, 500));
     }
   }
 
@@ -308,7 +312,7 @@ async function openGimFromArrayBuffer(
           attrResult.famPayloads,
           attrResult.devPayloads,
         );
-        console.log('[LineCache] save_line_project_cache payload 统计:', {
+        debugLog(DEBUG_GIM_CACHE, '[LineCache] save_line_project_cache payload 统计:', {
           nodes: graphPayload.nodes.length,
           children: graphPayload.children.length,
           refs: graphPayload.refs.length,
@@ -331,7 +335,7 @@ async function openGimFromArrayBuffer(
           attrResult.devPayloads,
         );
         const elapsedMs = Math.round(performance.now() - t0);
-        console.log('[LineCache] save_line_project_cache 完成，耗时', elapsedMs, 'ms');
+        debugLog(DEBUG_GIM_CACHE, '[LineCache] save_line_project_cache 完成，耗时', elapsedMs, 'ms');
 
         // 恢复属性到 state（payload 与 record 字段一致，结构兼容可直接传入）
         restoreLineAttributesToState(
@@ -354,7 +358,7 @@ async function openGimFromArrayBuffer(
     // 轻量状态提示
     showLoading('线路工程已加载，当前为地图浏览模式');
     setTimeout(hideLoading, 3000);
-    console.log('[GIM] 线路工程已加载（地图浏览模式），跳过 IFC 模态框');
+    debugLog(DEBUG_RUNTIME_LOGS, '[GIM] 线路工程已加载（地图浏览模式），跳过 IFC 模态框');
     return;
   }
 
@@ -387,7 +391,7 @@ async function openGimFromArrayBuffer(
         state.currentIfcEntries,
       );
       localCachePathMap = cacheResult.pathMap;
-      console.log('[Tauri] IFC 缓存结果:', {
+      debugLog(DEBUG_GIM_CACHE, '[Tauri] IFC 缓存结果:', {
         expected: state.currentIfcEntries.length,
         cached: localCachePathMap.size,
         errors: cacheResult.errors,
@@ -414,13 +418,13 @@ async function openGimFromArrayBuffer(
 
       // 校验：即将写入的 IFC local_cache_path 数量
       const payloadIfcEntries = payload.entries.filter((e) => e.entry_type === 'IFC');
-      console.log('[Tauri] 即将写入 SQLite 的 IFC local_cache_path:', {
+      debugLog(DEBUG_GIM_CACHE, '[Tauri] 即将写入 SQLite 的 IFC local_cache_path:', {
         ifc_entries: payloadIfcEntries.length,
         with_cache_path: payloadIfcEntries.filter((e) => !!e.local_cache_path).length,
       });
 
       await saveGimIndex(payload);
-      console.log('[Tauri] GIM 索引已写入:', {
+      debugLog(DEBUG_GIM_CACHE, '[Tauri] GIM 索引已写入:', {
         entries: payload.entries.length,
         cbm_nodes: payload.cbm_nodes.length,
         ifc_models: payload.ifc_models.length,
@@ -458,15 +462,15 @@ export async function openGimWithDialog(
       showLoading('正在读取 GIM 文件信息...');
       const { getFileInfo, readFileBytes } = await import('../desktop/fileReader.js');
       const info = await getFileInfo(filePath);
-      console.log('[Tauri] GIM 文件信息:', info);
+      debugLog(DEBUG_GIM_CACHE, '[Tauri] GIM 文件信息:', info);
       showLoading('正在写入本地项目索引...');
       const { upsertGimProject, validateGimCache, getGimIndex } = await import('../desktop/database.js');
       const record = await upsertGimProject(info);
-      console.log('[Tauri] GIM 项目记录:', record);
+      debugLog(DEBUG_GIM_CACHE, '[Tauri] GIM 项目记录:', record);
 
       showLoading('正在检查本地缓存...');
       const validation = await validateGimCache(record.id);
-      console.log('[Tauri] GIM 缓存校验:', validation);
+      debugLog(DEBUG_GIM_CACHE, '[Tauri] GIM 缓存校验:', validation);
 
       // 3. 缓存命中短路：不 readFileBytes、不 extractGimFile、不创建 Viewer
       if (validation.valid) {
@@ -501,7 +505,7 @@ export async function openGimWithDialog(
             hideLoading();
             showLoading('已从本地缓存恢复线路工程索引');
             setTimeout(hideLoading, 3000);
-            console.log('[Tauri] 线路工程缓存短路生效：未读取原始 GIM，未执行解压', {
+            debugLog(DEBUG_GIM_CACHE, '[Tauri] 线路工程缓存短路生效：未读取原始 GIM，未执行解压', {
               project_id: record.id,
               nodes: graph.stats.total,
               famProperties: attrStats.famCount,
@@ -522,7 +526,7 @@ export async function openGimWithDialog(
           restoreGimIndexToState(state, index);
           state.currentProjectId = record.id;
 
-          console.log('[Restore Debug]', {
+          debugLog(DEBUG_GIM_CACHE, '[Restore Debug]', {
             indexCounts: {
               entries: index.entries.length,
               cbmNodes: index.cbm_nodes.length,
@@ -541,7 +545,7 @@ export async function openGimWithDialog(
             },
           });
 
-          console.log('[Tauri] 已从缓存恢复 GIM:', {
+          debugLog(DEBUG_GIM_CACHE, '[Tauri] 已从缓存恢复 GIM:', {
             project_id: record.id,
             ifc_entries: state.currentIfcEntries.length,
             cbm_root: state.currentCbmTree?.path || null,
@@ -578,22 +582,22 @@ export async function openGimWithDialog(
           // 轻量状态提示
           showLoading('已从本地缓存恢复，请选择 IFC 文件加载模型');
           setTimeout(hideLoading, 3000);
-          console.log('[Tauri] substation cache restored, opening IFC modal', {
+          debugLog(DEBUG_GIM_CACHE, '[Tauri] substation cache restored, opening IFC modal', {
             project_id: record.id,
             ifc_entries: state.currentIfcEntries.length,
             cached_ifc_paths: state.cachedIfcPaths.size,
           });
-          console.log('[Tauri] 变电工程缓存短路生效：未读取原始 GIM，已打开 IFC 选择框');
+          debugLog(DEBUG_GIM_CACHE, '[Tauri] 变电工程缓存短路生效：未读取原始 GIM，已打开 IFC 选择框');
           return; // 缓存命中，短路完成
         } catch (err) {
           console.warn('[Tauri] 缓存恢复失败，回退完整解压流程:', err);
         }
       } else {
-        console.log('[Tauri] 缓存无效或不完整，继续完整解压流程:', validation);
+        debugLog(DEBUG_GIM_CACHE, '[Tauri] 缓存无效或不完整，继续完整解压流程:', validation);
       }
 
       // 4. 回退：完整解压流程（不创建 Viewer，只读取+解压+索引+渲染树）
-      console.log('[Tauri] 缓存短路未生效：进入完整解压流程');
+      debugLog(DEBUG_GIM_CACHE, '[Tauri] 缓存短路未生效：进入完整解压流程');
       showLoading('正在读取 GIM 文件...');
       const ab = await readFileBytes(filePath);
 

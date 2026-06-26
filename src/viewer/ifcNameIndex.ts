@@ -1,6 +1,8 @@
 import type { CbmNode } from '../gim/types.js';
 import type { ViewerContext } from './viewerEngine.js';
 import type { AppState } from '../app/state.js';
+import { DEBUG_IFC_LOAD } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 /** IFC 模型加载后，构建 GUID → 名称索引 */
 export async function buildIfcNameIndex(ctx: ViewerContext, state: AppState): Promise<void> {
@@ -42,5 +44,5 @@ export async function buildIfcNameIndex(ctx: ViewerContext, state: AppState): Pr
       console.warn(`构建名称索引失败 (${modelId}):`, err);
     }
   }
-  console.log(`IFC 名称索引: ${state.ifcGuidToName.size} 条记录`);
+  debugLog(DEBUG_IFC_LOAD, `IFC 名称索引: ${state.ifcGuidToName.size} 条记录`);
 }

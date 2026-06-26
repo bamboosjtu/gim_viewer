@@ -14,6 +14,8 @@
 
 import type { GimGraph, GimGraphNode } from './gimGraphTypes.js';
 import { parseKeyValue } from './cbmParser.js';
+import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 /** refs 中数组类型的字段名（排除 rawRefs） */
 type ArrayRefField = 'cbmFiles' | 'devFiles' | 'famFiles' | 'phmFiles' | 'modFiles' | 'stlFiles' | 'wireFiles' | 'ifcFiles';
@@ -280,7 +282,7 @@ export async function buildLineGimGraph(
   stats.IFC = filesByType.ifc.length;
   stats.OTHER = filesByType.other.length;
 
-  console.log('[GIM] line graph built:', {
+  debugLog(DEBUG_RUNTIME_LOGS, '[GIM] line graph built:', {
     entry: entryPath,
     totalNodes: stats.total,
     stats,

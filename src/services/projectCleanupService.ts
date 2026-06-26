@@ -22,6 +22,8 @@
  */
 
 import type { AppState } from '../app/state.js';
+import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 export interface CleanupOptions {
   /**
@@ -95,7 +97,7 @@ export async function cleanupBeforeOpenNewProject(
       console.warn('[Cleanup] ViewerRuntime cleanup failed:', err);
     }
   }
-  console.log('[Cleanup] disposed viewer models:', disposedCount, '(attempted:', attemptedCount, ')');
+  debugLog(DEBUG_RUNTIME_LOGS, '[Cleanup] disposed viewer models:', disposedCount, '(attempted:', attemptedCount, ')');
 
   // ---- 4. 清空 UI 残留 ----
   // disposeModel 会触发 onItemDeleted → removeModelFromUI，但保险起见再清一次

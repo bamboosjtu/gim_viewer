@@ -18,6 +18,8 @@
 import type { GimGraph, GimGraphNode } from './gimGraphTypes.js';
 import type { LineAttributeIndex } from './lineAttributeTypes.js';
 import { normalizeGimPath, getFileNameLower } from './linePathNormalize.js';
+import { DEBUG_LINE_MAP } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -592,9 +594,9 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
   const bbox = computeBbox(towers, crosses);
 
   if (warnings.length > 0) {
-    console.log('[LineMapData] 提取完成，含', warnings.length, '条警告');
+    debugLog(DEBUG_LINE_MAP, '[LineMapData] 提取完成，含', warnings.length, '条警告');
   }
-  console.log('[LineMapData] 提取统计:', {
+  debugLog(DEBUG_LINE_MAP, '[LineMapData] 提取统计:', {
     towers: towers.length,
     wires: wires.length,
     crosses: crosses.length,

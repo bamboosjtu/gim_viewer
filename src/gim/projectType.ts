@@ -11,6 +11,8 @@
  */
 
 import { parseKeyValue } from './cbmParser.js';
+import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 /** GIM 工程类型 */
 export type GimProjectType = 'substation' | 'transmission_line' | 'hybrid' | 'unknown';
@@ -290,6 +292,6 @@ export async function detectGimProjectType(
     },
   };
 
-  console.log('[GIM] project type:', result);
+  debugLog(DEBUG_RUNTIME_LOGS, '[GIM] project type:', result);
   return result;
 }

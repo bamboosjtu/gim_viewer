@@ -1,17 +1,19 @@
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
+import { DEBUG_IFC_LOAD } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 /** 将相机定位到场景包围盒 */
 export function fitCameraToScene(ctx: ViewerContext, state: { hasFittedCamera: boolean }): boolean {
   if (state.hasFittedCamera) {
-    console.log('[Camera] fitCameraToScene skipped: hasFittedCamera=true');
+    debugLog(DEBUG_IFC_LOAD, '[Camera] fitCameraToScene skipped: hasFittedCamera=true');
     return false;
   }
   const box = new THREE.Box3().setFromObject((ctx.world.scene as any).three);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
-  console.log('[Camera] fitCameraToScene', {
+  debugLog(DEBUG_IFC_LOAD, '[Camera] fitCameraToScene', {
     hasFittedCamera: state.hasFittedCamera,
     maxDim,
     center: center.toArray(),
@@ -25,7 +27,7 @@ export function fitCameraToScene(ctx: ViewerContext, state: { hasFittedCamera: b
   const distance = maxDim * 1.2;
   void ctx.world.camera.controls?.setLookAt(center.x + distance, center.y + distance * 0.8, center.z + distance, center.x, center.y, center.z);
   state.hasFittedCamera = true;
-  console.log('[Camera] fitCameraToScene done: camera set to', { center, distance });
+  debugLog(DEBUG_IFC_LOAD, '[Camera] fitCameraToScene done: camera set to', { center, distance });
   return true;
 }
 

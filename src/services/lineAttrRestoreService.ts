@@ -24,6 +24,8 @@ import type {
 } from '../desktop/database.js';
 // LineAttributeIndex 类型定义已移至 gim/ 层，消除 gim/lineMapData → services 的反向依赖
 import type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
+import { DEBUG_GIM_CACHE } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 export type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
 
 /**
@@ -86,7 +88,7 @@ export function restoreLineAttributesToState(
     devCount++;
   }
 
-  console.log('[Restore] 线路工程 FAM/DEV 属性已恢复:', {
+  debugLog(DEBUG_GIM_CACHE, '[Restore] 线路工程 FAM/DEV 属性已恢复:', {
     famCount,
     devCount,
     famSources: state.cachedLineFamProperties.size,

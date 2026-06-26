@@ -2,6 +2,8 @@ import fragmentsWorkerUrl from '@thatopen/fragments/worker?url';
 import type { ViewerContext } from './viewerEngine.js';
 import type { AppState } from '../app/state.js';
 import { resolveWebIfcWasmBaseUrl } from './wasmAssets.js';
+import { DEBUG_IFC_LOAD, DEBUG_FRAGMENTS } from '../config/debug.js';
+import { debugLog, debugWarn } from '../utils/logger.js';
 
 export type ModelEventCallbacks = {
   onModelAdded: (modelId: string) => void;
@@ -18,6 +20,10 @@ export type ModelEventCallbacks = {
  * - 不改变 web-ifc wasm 初始化逻辑
  * - 不开启 Fragments 缓存
  *
+ * 日志策略：
+ * - DEBUG_FRAGMENTS=true（开发环境）：输出完整 label + err，便于定位是哪个 IFC 出问题
+ * - DEBUG_FRAGMENTS=false（生产环境）：静默，由全局 unhandledrejection 监听器兜底
+ *
  * @param ctx Viewer 上下文
  * @param label 调用来源标识（如 'camera-controls-update' / 'model-added:<id>'），用于 warn 定位
  * @param force 是否强制重建（true 用于新模型加入）
@@ -28,11 +34,11 @@ function safeFragmentsUpdate(ctx: ViewerContext, label: string, force = false): 
     // 不同 OBC 版本 update 可能返回 void 或 Promise<void>
     if (result && typeof (result as Promise<void>).then === 'function') {
       void (result as Promise<void>).catch((err) => {
-        console.warn(`[Fragments] update failed (${label})`, err);
+        debugWarn(DEBUG_FRAGMENTS, `[Fragments] update failed (${label})`, err);
       });
     }
   } catch (err) {
-    console.warn(`[Fragments] update threw (${label})`, err);
+    debugWarn(DEBUG_FRAGMENTS, `[Fragments] update threw (${label})`, err);
   }
 }
 
@@ -40,7 +46,7 @@ function safeFragmentsUpdate(ctx: ViewerContext, label: string, force = false): 
 export async function initEngine(ctx: ViewerContext, state: AppState): Promise<void> {
   if (state.initialized) return;
 
-  console.log('[IFC Engine] init start', {
+  debugLog(DEBUG_IFC_LOAD, '[IFC Engine] init start', {
     href: window.location.href,
     origin: window.location.origin,
     baseURI: document.baseURI,
@@ -49,13 +55,12 @@ export async function initEngine(ctx: ViewerContext, state: AppState): Promise<v
   // 1. web-ifc WASM 校验 + ifcLoader.setup
   let wasmBase = '';
   try {
-    console.log('[IFC Engine] before wasm assert');
+    debugLog(DEBUG_IFC_LOAD, '[IFC Engine] before wasm assert');
     wasmBase = await resolveWebIfcWasmBaseUrl();
-    console.log('[IFC Engine] after wasm assert');
-    console.log('[IFC Engine] wasmBase', wasmBase);
-    console.log('[IFC Engine] before ifcLoader.setup');
+    debugLog(DEBUG_IFC_LOAD, '[IFC Engine] after wasm assert, wasmBase=', wasmBase);
+    debugLog(DEBUG_IFC_LOAD, '[IFC Engine] before ifcLoader.setup');
     await ctx.ifcLoader.setup({ autoSetWasm: false, wasm: { path: wasmBase, absolute: true } });
-    console.log('[IFC Engine] after ifcLoader.setup');
+    debugLog(DEBUG_IFC_LOAD, '[IFC Engine] after ifcLoader.setup');
   } catch (err) {
     console.error('[IFC Engine] ifcLoader.setup failed', { wasmBase, error: err });
     throw err;
@@ -63,9 +68,9 @@ export async function initEngine(ctx: ViewerContext, state: AppState): Promise<v
 
   // 2. Fragments worker
   try {
-    console.log('[IFC Engine] fragments workerUrl', fragmentsWorkerUrl);
+    debugLog(DEBUG_IFC_LOAD, '[IFC Engine] fragments workerUrl', fragmentsWorkerUrl);
     ctx.fragments.init(fragmentsWorkerUrl);
-    console.log('[IFC Engine] after fragments.init');
+    debugLog(DEBUG_IFC_LOAD, '[IFC Engine] after fragments.init');
   } catch (err) {
     console.error('[IFC Engine] fragments worker init failed', { error: err });
     throw err;
@@ -77,7 +82,7 @@ export async function initEngine(ctx: ViewerContext, state: AppState): Promise<v
     safeFragmentsUpdate(ctx, 'camera-controls-update', false);
   });
   state.initialized = true;
-  console.log('[IFC Engine] ready');
+  debugLog(DEBUG_IFC_LOAD, '[IFC Engine] ready');
 }
 
 /** 注册模型生命周期事件（在 initEngine 后调用，仅首次生效） */
@@ -146,7 +151,7 @@ export async function loadIfcBuffer(
   const modelId = name.replace(/\.ifc$/i, '');
 
   if (state.loadedModels.has(modelId)) {
-    console.log(`[IFC Loader] 模型已加载，跳过: ${modelId}`);
+    debugLog(DEBUG_IFC_LOAD, `[IFC Loader] 模型已加载，跳过: ${modelId}`);
     return;
   }
 

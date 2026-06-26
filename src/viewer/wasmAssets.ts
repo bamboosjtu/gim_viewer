@@ -7,6 +7,9 @@
  * 不使用 window.location.origin —— 在 Tauri 生产环境下 origin 可能为空或不可用。
  */
 
+import { DEBUG_IFC_LOAD } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
+
 const WEB_IFC_WASM_FILE = 'web-ifc.wasm';
 
 let resolvedWasmBaseUrl: string | null = null;
@@ -46,7 +49,7 @@ export async function resolveWebIfcWasmBaseUrl(): Promise<string> {
 
   for (const baseUrl of candidates) {
     const url = getWebIfcWasmUrl(baseUrl);
-    console.log('[WASM] checking web-ifc.wasm:', {
+    debugLog(DEBUG_IFC_LOAD, '[WASM] checking web-ifc.wasm:', {
       url,
       baseUrl,
       origin: window.location.origin,
@@ -61,7 +64,7 @@ export async function resolveWebIfcWasmBaseUrl(): Promise<string> {
       }
 
       const len = Number(res.headers.get('content-length') || '0');
-      console.log('[WASM] web-ifc.wasm 可访问:', { url, baseUrl, status: res.status, contentLength: len });
+      debugLog(DEBUG_IFC_LOAD, '[WASM] web-ifc.wasm 可访问:', { url, baseUrl, status: res.status, contentLength: len });
       resolvedWasmBaseUrl = baseUrl;
       return baseUrl;
     } catch (err) {
@@ -76,7 +79,7 @@ export async function resolveWebIfcWasmBaseUrl(): Promise<string> {
 export async function assertWebIfcWasmAvailable(): Promise<void> {
   const baseUrl = await resolveWebIfcWasmBaseUrl();
   const url = getWebIfcWasmUrl(baseUrl);
-  console.log('[WASM] using web-ifc.wasm:', {
+  debugLog(DEBUG_IFC_LOAD, '[WASM] using web-ifc.wasm:', {
     url,
     baseUrl,
     origin: window.location.origin,

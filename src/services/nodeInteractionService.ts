@@ -1,6 +1,8 @@
 import type { CbmNode } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
 import { collectIfcRefs } from '../gim/cbmParser.js';
+import { DEBUG_IFC_LOAD } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 /**
  * 节点点击交互服务（用于缓存命中、无 Viewer 场景）。
@@ -81,7 +83,7 @@ export async function handleNodeClick(
           () => getIfcBufferForEntry(entry, state),
           (p) => showMessage(`${entry.name}: ${Math.round(p * 100)}%`),
         );
-        console.log(`[懒加载] IFC 已加载: ${modelId}`);
+        debugLog(DEBUG_IFC_LOAD, `[懒加载] IFC 已加载: ${modelId}`);
       } catch (err) {
         console.error(`[懒加载] IFC 加载失败 (${modelId}):`, err);
       }
@@ -121,7 +123,7 @@ async function getIfcBufferForEntry(
   if (state.currentFiles) {
     const file = state.currentFiles.get(entry.path);
     if (file) {
-      console.log('[IFC Buffer] 使用 GIM 解压内存文件:', { name: entry.name, path: entry.path });
+      debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用 GIM 解压内存文件:', { name: entry.name, path: entry.path });
       return new Uint8Array(await file.arrayBuffer());
     }
   }
@@ -132,7 +134,7 @@ async function getIfcBufferForEntry(
     const projectId = state.currentProjectId;
     if (projectId != null) {
       const cachePath = state.cachedIfcPaths.get(entry.path)!;
-      console.log('[IFC Buffer] 使用本地 IFC 缓存:', { name: entry.name, path: entry.path, cachePath });
+      debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用本地 IFC 缓存:', { name: entry.name, path: entry.path, cachePath });
       const { readCachedIfc } = await import('../desktop/database.js');
       return await readCachedIfc(projectId, entry.path);
     }

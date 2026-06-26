@@ -3,6 +3,8 @@ import type { ViewerContext } from './viewerEngine.js';
 import type { AppState } from '../app/state.js';
 import { isTauri } from '../desktop/runtime.js';
 import { ENABLE_FRAGMENTS_CACHE } from '../config/features.js';
+import { DEBUG_IFC_LOAD } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 import {
   validateFragmentCache,
   readFragmentCacheFile,
@@ -24,6 +26,11 @@ import {
  * 3. 缓存无效或加载失败 → 调用 getIfcBuffer() → ctx.ifcLoader.load
  * 4. IFC 加载成功且 ENABLE_FRAGMENTS_CACHE=true → 写 .frag
  * 5. 任何 Fragments 失败回退 IFC；IFC 失败才抛出
+ *
+ * 日志策略（M3-Final 降噪）：
+ * - [Perf] / [IFC Loader] / [Fragments Cache] 命中/未命中 → debugLog（仅开发环境）
+ * - 缓存损坏 / 读取失败 / 校验失败 → console.warn（始终输出）
+ * - 错误抛出 → 上层 try/catch 捕获并 console.error
  */
 
 export interface IfcEntryLike {
@@ -52,7 +59,7 @@ export async function loadIfcEntry(
 
   // 1. 防御性短路
   if (state.loadedModels.has(modelId)) {
-    console.log(`[IFC Loader] 模型已加载，跳过: ${modelId}`);
+    debugLog(DEBUG_IFC_LOAD, `[IFC Loader] 模型已加载，跳过: ${modelId}`);
     return;
   }
 
@@ -60,24 +67,24 @@ export async function loadIfcEntry(
   const canUseCache = ENABLE_FRAGMENTS_CACHE && isTauri() && projectId != null && !!entryPath;
 
   if (!ENABLE_FRAGMENTS_CACHE) {
-    console.log('[Fragments Cache] disabled, using IFC loader');
+    debugLog(DEBUG_IFC_LOAD, '[Fragments Cache] disabled, using IFC loader');
   }
 
   // 2. 尝试 Fragments 缓存（不读 IFC buffer）
   if (canUseCache && entryPath) {
     const cacheHit = await tryLoadFromFragmentsCache(ctx, state, modelId, entryPath);
     if (cacheHit) {
-      console.log(`[Fragments Cache] 命中: ${entryPath} (modelId=${modelId})`);
+      debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 命中: ${entryPath} (modelId=${modelId})`);
       return;
     }
   }
 
   // 3. 缓存无效或未启用 → lazy 读取 IFC buffer
-  console.log(`[Fragments Cache] 未命中: ${entryPath ?? '(无 entryPath)'} (modelId=${modelId})`);
+  debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 未命中: ${entryPath ?? '(无 entryPath)'} (modelId=${modelId})`);
 
   const tIfcRead = performance.now();
   const ifcBuffer = await getIfcBuffer();
-  console.log(`[Perf] ifc read: ${Math.round(performance.now() - tIfcRead)} ms`);
+  debugLog(DEBUG_IFC_LOAD, `[Perf] ifc read: ${Math.round(performance.now() - tIfcRead)} ms`);
 
   if (!ifcBuffer) {
     throw new Error(`IFC buffer 不可用: ${name} (${entryPath})`);
@@ -88,7 +95,7 @@ export async function loadIfcEntry(
   const model = await ctx.ifcLoader.load(ifcBuffer, true, modelId, {
     processData: { progressCallback: (progress) => { onProgress?.(progress); } },
   });
-  console.log(`[Perf] ifc load: ${Math.round(performance.now() - tIfcLoad)} ms`);
+  debugLog(DEBUG_IFC_LOAD, `[Perf] ifc load: ${Math.round(performance.now() - tIfcLoad)} ms`);
 
   // onItemSet 事件已更新 loadedModels，此处不重复设置
 
@@ -102,7 +109,7 @@ export async function loadIfcEntry(
   const fragModel = ctx.fragments.list.get(modelId);
   const childCount = fragModel?.object?.children?.length ?? 0;
 
-  console.log('[IFC Loader] post-load validation', {
+  debugLog(DEBUG_IFC_LOAD, '[IFC Loader] post-load validation', {
     modelId,
     inFragments,
     loaded,
@@ -145,7 +152,7 @@ async function tryLoadFromFragmentsCache(
     console.warn(`[Fragments Cache] 校验失败，回退 IFC: ${entryPath}`, err);
     return false;
   }
-  console.log(`[Perf] fragment validate: ${Math.round(performance.now() - tValidate)} ms`);
+  debugLog(DEBUG_IFC_LOAD, `[Perf] fragment validate: ${Math.round(performance.now() - tValidate)} ms`);
 
   // 注意：sourceIfcSize 传 0 表示不校验 IFC 大小（因为不读 IFC buffer）
   // 仅校验：记录存在 + 版本匹配 + .frag 文件存在 + size > 0
@@ -165,7 +172,7 @@ async function tryLoadFromFragmentsCache(
     console.warn(`[Fragments Cache] 读取失败，回退 IFC: ${entryPath}`, err);
     return false;
   }
-  console.log(`[Perf] fragment read: ${Math.round(performance.now() - tRead)} ms`);
+  debugLog(DEBUG_IFC_LOAD, `[Perf] fragment read: ${Math.round(performance.now() - tRead)} ms`);
 
   if (fragBytes.byteLength === 0) {
     console.warn(`[Fragments Cache] 缓存文件为空，回退 IFC: ${entryPath}`);
@@ -178,7 +185,7 @@ async function tryLoadFromFragmentsCache(
     const camera = (ctx.world.camera as unknown as OBC.SimpleCamera).three;
     await ctx.fragments.core.load(fragBytes, { modelId, camera });
     const loadMs = Math.round(performance.now() - tLoad);
-    console.log(`[Perf] fragment load: ${loadMs} ms`);
+    debugLog(DEBUG_IFC_LOAD, `[Perf] fragment load: ${loadMs} ms`);
 
     // 2d. 运行时校验：确认模型确实进入 loadedModels 和 fragments.list
     const inLoadedModels = state.loadedModels.has(modelId);
@@ -189,7 +196,7 @@ async function tryLoadFromFragmentsCache(
       childCount = model.object.children.length;
     }
 
-    console.log(`[Fragments Cache] 运行时校验: modelId=${modelId}, fragBytes=${fragBytes.byteLength}, inLoadedModels=${inLoadedModels}, inFragmentsList=${inFragmentsList}, children=${childCount}, loadMs=${loadMs}`);
+    debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 运行时校验: modelId=${modelId}, fragBytes=${fragBytes.byteLength}, inLoadedModels=${inLoadedModels}, inFragmentsList=${inFragmentsList}, children=${childCount}, loadMs=${loadMs}`);
 
     if (!inLoadedModels || !inFragmentsList) {
       console.warn(`[Fragments Cache] 运行时校验失败：模型未进入 loadedModels 或 fragments.list，回退 IFC: ${entryPath}`);
@@ -207,7 +214,7 @@ async function tryLoadFromFragmentsCache(
     return true;
   } catch (err) {
     console.warn(`[Fragments Cache] 反序列化失败，回退 IFC: ${entryPath}`, err);
-    console.log(`[Perf] fragment load: ${Math.round(performance.now() - tLoad)} ms (failed)`);
+    debugLog(DEBUG_IFC_LOAD, `[Perf] fragment load: ${Math.round(performance.now() - tLoad)} ms (failed)`);
     return false;
   }
 }
@@ -232,7 +239,7 @@ async function tryWriteFragmentsCache(
     console.warn(`[Fragments Cache] 序列化失败，跳过缓存写入: ${entryPath}`, err);
     return;
   }
-  console.log(`[Perf] fragment serialize: ${Math.round(performance.now() - tSerialize)} ms`);
+  debugLog(DEBUG_IFC_LOAD, `[Perf] fragment serialize: ${Math.round(performance.now() - tSerialize)} ms`);
 
   const bytes = new Uint8Array(buffer);
   if (bytes.byteLength === 0) {
@@ -249,15 +256,15 @@ async function tryWriteFragmentsCache(
     console.warn(`[Fragments Cache] 写入文件失败，不影响当前加载: ${entryPath}`, err);
     return;
   }
-  console.log(`[Perf] fragment write: ${Math.round(performance.now() - tWrite)} ms`);
+  debugLog(DEBUG_IFC_LOAD, `[Perf] fragment write: ${Math.round(performance.now() - tWrite)} ms`);
 
   // 写记录
   const tUpsert = performance.now();
   try {
     await upsertFragmentCacheRecord(projectId, entryPath, modelId, sourceIfcSize, writeResult.size);
-    console.log(`[Fragments Cache] 写入成功: ${entryPath} (size=${writeResult.size})`);
+    debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 写入成功: ${entryPath} (size=${writeResult.size})`);
   } catch (err) {
     console.warn(`[Fragments Cache] 写入记录失败，不影响当前加载: ${entryPath}`, err);
   }
-  console.log(`[Perf] fragment upsert: ${Math.round(performance.now() - tUpsert)} ms`);
+  debugLog(DEBUG_IFC_LOAD, `[Perf] fragment upsert: ${Math.round(performance.now() - tUpsert)} ms`);
 }

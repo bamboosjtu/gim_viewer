@@ -25,6 +25,8 @@ import type {
 import { saveLineGraph as saveLineGraphToDb } from '../desktop/database.js';
 import { LineRefKind } from '../gim/lineRefKind.js';
 import { normalizeGimPath, getFileNameLower } from '../gim/linePathNormalize.js';
+import { DEBUG_GIM_CACHE } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 /** refs 中数组型字段名（对应 GimGraphNode.refs 的 8 个 string[] 字段，排除 rawRefs） */
 type ArrayRefField = 'cbmFiles' | 'devFiles' | 'famFiles' | 'phmFiles' | 'modFiles' | 'stlFiles' | 'wireFiles' | 'ifcFiles';
@@ -177,7 +179,7 @@ export function buildLineGraphPayload(projectId: number, graph: GimGraph): LineG
 export async function saveLineGraph(projectId: number, graph: GimGraph): Promise<void> {
   const payload = buildLineGraphPayload(projectId, graph);
   await saveLineGraphToDb(payload);
-  console.log('[Tauri] 线路工程图已写入 SQLite:', {
+  debugLog(DEBUG_GIM_CACHE, '[Tauri] 线路工程图已写入 SQLite:', {
     project_id: projectId,
     nodes: payload.nodes.length,
     children: payload.children.length,

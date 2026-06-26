@@ -20,6 +20,8 @@ import type { LineMapViewHandle } from './lineMapView.js';
 import { renderLineMap } from './lineMapView.js';
 import { extractLineMapData, isLineMapDataValid } from '../gim/lineMapData.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
+import { DEBUG_LINE_MAP } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 /** 线路工程实体图标（扩展变电工程的 ENTITY_ICONS） */
 const LINE_ENTITY_ICONS: Record<string, string> = {
@@ -511,7 +513,7 @@ export function renderLineProjectPanels(
 
   // 6. 状态提示
   showMessage('线路工程已加载，当前为地图浏览模式');
-  console.log('[GIM] 线路工程面板已渲染:', {
+  debugLog(DEBUG_LINE_MAP, '[GIM] 线路工程面板已渲染:', {
     type: graph.projectType,
     root: graph.root?.path || null,
     totalNodes: graph.stats.total,

@@ -6,6 +6,8 @@ import type { AppState } from '../app/state.js';
 import { collectIfcRefs } from '../gim/cbmParser.js';
 import { getNodeDisplayName } from '../gim/gimIndexer.js';
 import { frameBox } from './camera.js';
+import { DEBUG_IFC_LOAD } from '../config/debug.js';
+import { debugLog } from '../utils/logger.js';
 
 /** 高亮样式 */
 export const HIGHLIGHT_STYLE: OBCF.MaterialDefinition = {
@@ -41,7 +43,7 @@ export async function highlightIfcFromNode(
     for (const [modelId, guids] of refs) {
       const model = ctx.fragments.list.get(modelId);
       if (!model) {
-        console.log(`模型 ${modelId} 未加载，跳过 ${guids.size} 个 GUID`);
+        debugLog(DEBUG_IFC_LOAD, `模型 ${modelId} 未加载，跳过 ${guids.size} 个 GUID`);
         continue;
       }
       try {
@@ -55,7 +57,7 @@ export async function highlightIfcFromNode(
             if (box && !box.isEmpty()) highlightBoxes.push(box);
           } catch { /* 包围盒获取失败 */ }
         } else {
-          console.log(`模型 ${modelId} 中未找到匹配的 GUID (尝试了 ${guids.size} 个)`);
+          debugLog(DEBUG_IFC_LOAD, `模型 ${modelId} 中未找到匹配的 GUID (尝试了 ${guids.size} 个)`);
         }
       } catch (err) {
         console.warn(`GUID 转换失败 (${modelId}):`, err);
@@ -65,7 +67,7 @@ export async function highlightIfcFromNode(
     if (Object.keys(items).length > 0) {
       await ctx.fragments.highlight(HIGHLIGHT_STYLE, items as any);
       state.highlightedItems = items as any;
-      console.log(`已高亮 ${totalHighlighted} 个 IFC 构件`);
+      debugLog(DEBUG_IFC_LOAD, `已高亮 ${totalHighlighted} 个 IFC 构件`);
       if (highlightBoxes.length > 0) {
         const unionBox = highlightBoxes.reduce((acc, b) => acc.union(b), highlightBoxes[0].clone());
         await frameBox(ctx, unionBox);
