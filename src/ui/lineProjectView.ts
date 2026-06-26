@@ -573,10 +573,10 @@ export function renderLineProjectPanels(
   //    - overlay 模式恢复完整交互：hover/click/联动（pointer 事件桥接）
   //    - 失败时保持 Canvas-only，不影响主流程
   //    底图模式（LINE_BASEMAP_MODE）：
-  //    - 'osm-online'：加载 OSM 在线 raster 瓦片，仅用于开发调试
+  //    - 'osm-online'：MVP 默认，加载 OSM 在线 raster 瓦片
   //    - 'pmtiles'  ：走 PMTiles 预研路径（默认关闭，需 ENABLE_PMTILES_EXPERIMENT=true）
   //    - 'empty'    ：不加载瓦片，仅显示纯色背景
-  //    - overlay 失败时回退 Canvas-only
+  //    - OSM 不可用（3 次 tile error）或初始化失败时，自动回退 Canvas-only
   if (ENABLE_MAPLIBRE_EXPERIMENT && isLineMapDataValid(mapData)) {
     debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] enabled:', ENABLE_MAPLIBRE_EXPERIMENT);
     debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] basemap mode:', LINE_BASEMAP_MODE);
@@ -593,6 +593,46 @@ export function renderLineProjectPanels(
     }
     maplibreInteractionCleanup = [];
     const myGen = ++maplibreProbeGeneration;
+    // M4-A2 第 3 轮 Patch：OSM 不可用时回退 Canvas-only
+    //  - 只触发一次（fallbackToCanvasOnlyCalled 守卫）
+    //  - 可能在 probe 创建期间（await 中）或之后触发
+    //  - 创建期间触发时，IIFE 在 await 返回后检查 flag 并放弃 overlay 切换
+    let fallbackToCanvasOnlyCalled = false;
+    function fallbackToCanvasOnly(reason: unknown): void {
+      if (fallbackToCanvasOnlyCalled) return;
+      fallbackToCanvasOnlyCalled = true;
+
+      debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] OSM unavailable, fallback to Canvas-only', reason);
+
+      // 只在当前 generation 有效时执行（避免过期回调污染新工程）
+      if (myGen !== maplibreProbeGeneration) return;
+
+      // 清理 interaction listeners（overlay 模式下注册的 4 个 off*）
+      for (const fn of maplibreInteractionCleanup) {
+        try { fn(); } catch { /* ignore */ }
+      }
+      maplibreInteractionCleanup = [];
+
+      // 销毁 overlay canvas handle（如果已切换到 overlay 模式）
+      if (lineMapHandle) {
+        lineMapHandle.destroy();
+        lineMapHandle = null;
+      }
+
+      // 销毁 MapLibre probe（如果已创建）
+      if (maplibreProbeHandle) {
+        maplibreProbeHandle.destroy();
+        maplibreProbeHandle = null;
+      }
+
+      // 重新渲染 Canvas-only（恢复经纬度网格、比例尺、hover/click/tooltip/树联动）
+      lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick);
+
+      // UI 状态提示
+      try {
+        showMessage('OSM 在线底图不可用，已切换为 Canvas 地图模式');
+      } catch { /* ignore */ }
+    }
     void (async () => {
       try {
         const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
@@ -607,7 +647,13 @@ export function renderLineProjectPanels(
             enabled: ENABLE_PMTILES_EXPERIMENT,
             url: PMTILES_DEMO_URL,
           },
+          onBasemapUnavailable: fallbackToCanvasOnly,
         });
+        // 如果在 probe 创建期间已触发回退（3 次 tile error），销毁 probe 并放弃 overlay 切换
+        if (fallbackToCanvasOnlyCalled) {
+          try { probe.destroy(); } catch { /* ignore */ }
+          return;
+        }
         // 检查代次：若已过期（用户切换工程/清空场景），销毁并放弃
         if (myGen !== maplibreProbeGeneration) {
           probe.destroy();

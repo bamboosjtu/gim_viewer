@@ -25,9 +25,10 @@
  *
  * M4-A2 第 3 轮（本轮新增）：
  * - 支持 basemapMode 选择底图（empty / osm-online / pmtiles）
- * - OSM online 模式：开发调试用，启用 attributionControl
- * - OSM tile 加载错误只 warning，不 reject 主流程
- * - 不影响 empty / pmtiles 模式
+ * - OSM online 模式：MVP 默认，启用 attributionControl
+ * - OSM tile 加载错误计数（阈值 3 次）→ 触发 onBasemapUnavailable 回调
+ * - 调用方（lineProjectView）收到回调后销毁 probe + 回退 Canvas-only
+ * - 不 reject 主流程，不影响 empty / pmtiles 模式
  *
  * 不做的事（留给后续）：
  * - 不做坐标偏移（GCJ-02）
@@ -79,13 +80,24 @@ export interface CreateMapLibreProbeOptions {
   /**
    * M4-A2 第 3 轮：底图模式选择。
    * - 'empty'（默认）：纯色 background，无瓦片
-   * - 'osm-online'：OpenStreetMap 在线 raster（仅开发调试，启用 attribution）
+   * - 'osm-online'：OpenStreetMap 在线 raster（MVP 默认，启用 attribution）
    * - 'pmtiles'：本地 PMTiles 矢量瓦片（需配合 pmtiles 选项）
    *
    * 优先级：osm-online > pmtiles > empty。
    * OSM 模式不依赖 PMTiles；PMTiles 模式不影响 OSM 模式。
    */
   basemapMode?: LineBasemapMode;
+  /**
+   * M4-A2 第 3 轮 Patch：OSM online tile 加载失败回调。
+   *
+   * 只用于判断底图服务不可用（阈值：3 次 tile error），
+   * 不处理普通 MapLibre 初始化失败（仍走 reject 路径）。
+   *
+   * - 只触发一次
+   * - 不 reject 整个 MapLibre 初始化
+   * - 调用方负责销毁 probe + 回退 Canvas-only
+   */
+  onBasemapUnavailable?: (reason: unknown) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +203,21 @@ export async function createMapLibreProbe(
   }
 
   // 等待 map 加载完成（证明 WebGL 上下文 + style 可用）
+  // M4-A2 第 3 轮 Patch：OSM 模式下 tile error 计数 + 阈值触发 onBasemapUnavailable
+  let osmTileErrorCount = 0;
+  let basemapUnavailableNotified = false;
+  const OSM_TILE_ERROR_THRESHOLD = 3;
+
+  function notifyBasemapUnavailable(reason: unknown): void {
+    if (basemapUnavailableNotified) return;
+    basemapUnavailableNotified = true;
+    try {
+      options?.onBasemapUnavailable?.(reason);
+    } catch (err) {
+      console.warn('[MapLibre probe] onBasemapUnavailable 回调抛出异常:', err);
+    }
+  }
+
   await new Promise<void>((resolve, reject) => {
     const onLoad = () => {
       map.off('error', onError);
@@ -212,16 +239,22 @@ export async function createMapLibreProbe(
     };
     const onError = (e: unknown) => {
       if (isOsmMode) {
-        // M4-A2 第 3 轮：OSM 模式下瓦片 404 / 网络错误不致命，仅警告
-        // 不 reject 主流程，让 load 事件仍能正常触发
-        console.warn('[MapLibre probe] OSM tile error (non-fatal):', formatMapEvent(e));
+        // M4-A2 第 3 轮 Patch：OSM 模式下瓦片 404 / 网络错误计数
+        // 达到阈值后触发 onBasemapUnavailable，让调用方回退 Canvas-only
+        osmTileErrorCount++;
+        if (osmTileErrorCount <= OSM_TILE_ERROR_THRESHOLD) {
+          console.warn(`[MapLibre probe] OSM tile error (${osmTileErrorCount}/${OSM_TILE_ERROR_THRESHOLD}, non-fatal):`, formatMapEvent(e));
+        }
+        if (osmTileErrorCount >= OSM_TILE_ERROR_THRESHOLD) {
+          notifyBasemapUnavailable(e);
+        }
         return;
       }
       map.off('load', onLoad);
       reject(new Error(`MapLibre probe 初始化失败: ${formatMapEvent(e)}`));
     };
     map.once('load', onLoad);
-    // OSM 模式：可能有多个 tile 错误，用 on 持续监听（仅警告）
+    // OSM 模式：可能有多个 tile 错误，用 on 持续监听（计数 + 阈值）
     // empty / pmtiles 模式：仅首个 error 致命，用 once
     if (isOsmMode) {
       map.on('error', onError);

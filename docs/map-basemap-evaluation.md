@@ -845,3 +845,203 @@ OSM 仅用于开发调试。生产环境正式底图仍需要：
 - 或 PMTiles / MBTiles 离线方案
 
 详见 [M4 路线图 - M4-A](m4-roadmap.md#m4-a-地图增强)。
+
+---
+
+## 18. M4-A2 第 3 轮 Patch：OSM 不可用时回退 Canvas-only
+
+> 阶段：M4-A2 第 3 轮 Patch
+> 时间：2026-06-26
+> 前置：第 17 节（开发环境 OSM 在线底图）
+> 状态：**已实现**。本节内容**取代**第 17 节的 dev/prod 区分策略。
+
+### 18.1 背景
+
+第 17 节将 OSM 限定为"仅开发调试用"，生产默认 `empty`。实际运行中：
+
+- MapLibre overlay 已可启用，OSM raster style 已接入
+- Tauri CSP 已放开 `https://tile.openstreetmap.org`
+- 但 OSM 瓦片请求失败：`net::ERR_CONNECTION_CLOSED`（网络不可达 / 服务不可用）
+- 旧代码对 OSM tile error 只 `console.warn`，**不会触发 Canvas-only 回退**，用户看到空白底图
+
+### 18.2 MVP 决策调整
+
+- **不再区分开发 / 生产底图**
+- **MVP 阶段全部使用 OpenStreetMap 在线地图**
+- 暂不接入天地图 / 思极地图 / PMTiles 深化
+- 暂不做离线能力
+- **如果 OSM 服务不可用或网络不可达，自动降级到 Canvas-only 线路图**
+
+### 18.3 features.ts 收敛
+
+```ts
+// MVP 阶段默认启用 MapLibre overlay
+export const ENABLE_MAPLIBRE_EXPERIMENT = true;
+
+// MVP 阶段统一使用 OSM online
+export const LINE_BASEMAP_MODE: LineBasemapMode = 'osm-online';
+```
+
+**关键变化**：
+
+- 移除 `import.meta.env.DEV ? 'osm-online' : 'empty'` 的分支
+- 不再依赖 `VITE_ENABLE_MAPLIBRE` 环境变量
+- 生产 build 也使用 OSM online
+
+### 18.4 BaseLayer 提供 OSM 可用性失败信号
+
+`CreateMapLibreProbeOptions` 新增 `onBasemapUnavailable` 回调：
+
+```ts
+export interface CreateMapLibreProbeOptions {
+  initialBounds?: [number, number, number, number];
+  pmtiles?: PmtilesOptions;
+  basemapMode?: LineBasemapMode;
+  onBasemapUnavailable?: (reason: unknown) => void;
+}
+```
+
+**触发逻辑**：
+
+- OSM 模式下监听 `map.on('error', onError)`
+- 计数 tile error，达到阈值 **3 次** 触发 `onBasemapUnavailable`
+- 只触发一次（`basemapUnavailableNotified` 守卫）
+- 不 `reject` 整个 MapLibre 初始化（避免破坏其他路径）
+- 不刷屏（前 3 次 warning，之后静默）
+
+```ts
+if (osmTileErrorCount >= OSM_TILE_ERROR_THRESHOLD) {
+  notifyBasemapUnavailable(e);
+}
+```
+
+**empty / pmtiles 模式行为不变**：首个 error 致命，`reject` 主流程。
+
+### 18.5 lineProjectView 实现 Canvas-only 回退
+
+在 overlay 创建闭包内新增 `fallbackToCanvasOnly` 函数：
+
+```ts
+let fallbackToCanvasOnlyCalled = false;
+function fallbackToCanvasOnly(reason: unknown): void {
+  if (fallbackToCanvasOnlyCalled) return;
+  fallbackToCanvasOnlyCalled = true;
+
+  debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] OSM unavailable, fallback to Canvas-only', reason);
+
+  if (myGen !== maplibreProbeGeneration) return;
+
+  // 清理 interaction listeners
+  for (const fn of maplibreInteractionCleanup) { try { fn(); } catch {} }
+  maplibreInteractionCleanup = [];
+
+  // 销毁 overlay canvas handle
+  if (lineMapHandle) { lineMapHandle.destroy(); lineMapHandle = null; }
+
+  // 销毁 MapLibre probe
+  if (maplibreProbeHandle) { maplibreProbeHandle.destroy(); maplibreProbeHandle = null; }
+
+  // 重新渲染 Canvas-only
+  lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick);
+
+  showMessage('OSM 在线底图不可用，已切换为 Canvas 地图模式');
+}
+```
+
+**创建 probe 时传入回调**：
+
+```ts
+const probe = await createMapLibreProbe(container, {
+  initialBounds,
+  basemapMode: LINE_BASEMAP_MODE,
+  pmtiles: { enabled: ENABLE_PMTILES_EXPERIMENT, url: PMTILES_DEMO_URL },
+  onBasemapUnavailable: fallbackToCanvasOnly,
+});
+```
+
+### 18.6 回退后的行为保证
+
+| 要求 | 实现 |
+|---|---|
+| 恢复 Canvas 经纬度网格 | `renderLineMap` 默认渲染网格 |
+| 恢复 Canvas 比例尺 | `renderLineMap` 默认渲染比例尺 |
+| hover/click/tooltip 正常 | Canvas handle 自带交互，不依赖 MapLibre |
+| 树联动正常 | `handleMapTowerClick` 回调复用 |
+| 不继续刷 OSM tile error | probe 已 destroy，MapLibre map.remove() 已执行 |
+| 工程切换 / 清空场景不残留 | `destroyLineMapView` 统一清理 |
+| MapLibre 初始化直接失败也保持 Canvas-only | catch 分支保持已渲染 Canvas-only |
+
+### 18.7 竞态处理
+
+`onBasemapUnavailable` 可能在两个时机触发：
+
+1. **probe 创建期间**（`await createMapLibreProbe` 未返回）：tile error 在 `load` 事件前累积到阈值
+2. **probe 创建之后**（overlay 模式已切换）：交互过程中 tile 持续失败
+
+**Case 1 处理**：await 返回后检查 `fallbackToCanvasOnlyCalled`，若已触发则销毁 probe 并放弃 overlay 切换：
+
+```ts
+const probe = await createMapLibreProbe(...);
+if (fallbackToCanvasOnlyCalled) {
+  try { probe.destroy(); } catch {}
+  return;
+}
+```
+
+**Case 2 处理**：`fallbackToCanvasOnly` 直接销毁已设置的 `maplibreProbeHandle` + `lineMapHandle`，重新渲染 Canvas-only。
+
+### 18.8 状态日志
+
+**MapLibre 成功**：
+
+```text
+[MapLibre overlay] enabled: true
+[MapLibre overlay] basemap mode: osm-online
+[MapLibre overlay] using OSM online raster tiles
+[MapLibre overlay] M4-A2：底图 + Canvas overlay + 交互桥接 初始化成功
+```
+
+**OSM 不可用并回退**：
+
+```text
+[MapLibre probe] OSM tile error (1/3, non-fatal): ...
+[MapLibre probe] OSM tile error (2/3, non-fatal): ...
+[MapLibre probe] OSM tile error (3/3, non-fatal): ...
+[MapLibre overlay] OSM unavailable, fallback to Canvas-only
+```
+
+**UI 提示**：`OSM 在线底图不可用，已切换为 Canvas 地图模式`
+
+### 18.9 不做的事
+
+- 不做天地图
+- 不做高德
+- 不做思极地图
+- 不做 PMTiles source-layer 自动识别
+- 不做 MBTiles
+- 不做本地 tile server
+- 不做 GCJ-02
+- 不做离线瓦片
+- 不做瓦片下载、缓存、预取
+- 不做悬链线
+- 不做 MOD 解析
+- 不做真实 3D 线路
+- 不修改 SQLite schema
+- 不开启 Fragments 缓存
+
+### 18.10 保留的能力
+
+`empty` / `pmtiles` 代码路径保留，但本轮不扩展：
+
+- `createEmptyLineMapStyle()` 仍可用于纯色背景兜底
+- `createPmtilesLineMapStyle(url)` 仍可用于后续离线方案预研
+- `ENABLE_PMTILES_EXPERIMENT = false` 保持关闭
+
+### 18.11 MVP 地图路线
+
+```
+MVP：
+- 主底图：OpenStreetMap online
+- 失败兜底：Canvas-only
+- 暂不做离线地图
+```

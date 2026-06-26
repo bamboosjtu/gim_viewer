@@ -7,28 +7,20 @@
 export const ENABLE_FRAGMENTS_CACHE = false;
 
 /**
- * MapLibre 技术验证开关（M4-A1/A2）。
+ * MVP 阶段默认启用 MapLibre overlay。
  *
- * 开发调试：MapLibre + OSM online（npm run tauri:dev / npm run dev 自动启用）
- * 生产默认：不启用 MapLibre / 不使用 OSM
- * 强制开启：可通过 VITE_ENABLE_MAPLIBRE=true 在生产环境启用
+ * 当前策略（M4-A2 第 3 轮 Patch）：
+ * - MVP 不区分开发 / 生产；
+ * - 默认使用 OSM online raster；
+ * - OSM 不可用时由 lineProjectView 回退 Canvas-only；
+ * - 如需强制关闭，可临时改为 false 或后续接入 env flag。
  *
  * 已实现（M4-A2 第 1 轮）：
  * - MapLibre 底图 + Canvas overlay + 交互桥接（hover/click/联动）
  * - ScaleControl + fitBounds(duration:0)
  * - 失败自动降级为 Canvas-only
- *
- * 开发模式（DEV=true）：
- * - 默认启用 MapLibre overlay
- * - LINE_BASEMAP_MODE 自动 'osm-online'，加载 OSM 在线 raster 瓦片
- *
- * 生产模式（DEV=false）：
- * - 默认不启用 MapLibre
- * - LINE_BASEMAP_MODE 自动 'empty'，不加载瓦片
- * - 如需启用，设置环境变量 VITE_ENABLE_MAPLIBRE=true
  */
-export const ENABLE_MAPLIBRE_EXPERIMENT =
-  import.meta.env.DEV || import.meta.env.VITE_ENABLE_MAPLIBRE === 'true';
+export const ENABLE_MAPLIBRE_EXPERIMENT = true;
 
 /**
  * PMTiles 离线瓦片预研开关（M4-A2 第 2 轮）。
@@ -53,25 +45,20 @@ export const PMTILES_DEMO_URL = '/tiles/demo.pmtiles';
 /**
  * M4-A2 第 3 轮：底图模式定义。
  *
- * - 'empty'     ：纯色 background，无瓦片（生产默认，离线安全）
- * - 'osm-online'：OpenStreetMap 在线 raster 底图（仅开发调试用）
+ * - 'empty'     ：纯色 background，无瓦片（兜底模式）
+ * - 'osm-online'：OpenStreetMap 在线 raster 底图（MVP 默认）
  * - 'pmtiles'   ：本地 PMTiles 矢量瓦片（后续离线方案）
  */
 export type LineBasemapMode = 'empty' | 'osm-online' | 'pmtiles';
 
 /**
- * 底图模式选择。
+ * MVP 阶段统一使用 OSM online。
  *
- * 开发阶段：LINE_BASEMAP_MODE = 'osm-online'
- * - 用于快速调试线路 overlay 与底图对齐
- * - 仅在 ENABLE_MAPLIBRE_EXPERIMENT=true 时生效
- * - 不影响 Canvas-only 默认行为
+ * - 不区分开发 / 生产环境
+ * - OSM 不可用时由 lineProjectView 回退 Canvas-only
+ * - 后续生产正式底图、内网瓦片、PMTiles 离线方案另行扩展
  *
- * 生产阶段：默认 'empty'
- * - 不使用 OSM 在线瓦片
- * - 应切换到正式底图或离线瓦片方案（PMTiles / 内网瓦片服务 / 天地图）
- *
- * 注意：LINE_BASEMAP_MODE 只有在 ENABLE_MAPLIBRE_EXPERIMENT=true 时才生效。
+ * 注意：LINE_BASEMAP_MODE 仅在 ENABLE_MAPLIBRE_EXPERIMENT=true 时生效。
  *       若 ENABLE_MAPLIBRE_EXPERIMENT=false，仍走纯 Canvas 渲染。
  */
-export const LINE_BASEMAP_MODE: LineBasemapMode = import.meta.env.DEV ? 'osm-online' : 'empty';
+export const LINE_BASEMAP_MODE: LineBasemapMode = 'osm-online';
