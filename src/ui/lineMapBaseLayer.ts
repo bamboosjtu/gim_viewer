@@ -75,11 +75,11 @@ export interface PmtilesOptions {
 export interface CreateMapLibreProbeOptions {
   /** 初始视图 bbox [minLng, minLat, maxLng, maxLat]，加载后自动 fitBounds */
   initialBounds?: [number, number, number, number];
-  /** M4-A2 第 2 轮：PMTiles 瓦片配置（默认不启用，使用 empty style） */
+  /** M4-A2 第 2 轮：PMTiles 瓦片配置（默认不启用，需 basemapMode='pmtiles' 才尝试加载） */
   pmtiles?: PmtilesOptions;
   /**
    * M4-A2 第 3 轮：底图模式选择。
-   * - 'empty'（默认）：纯色 background，无瓦片
+   * - 'empty'：纯色 background，无瓦片（代码兜底）
    * - 'osm-online'：OpenStreetMap 在线 raster（MVP 默认，启用 attribution）
    * - 'pmtiles'：本地 PMTiles 矢量瓦片（需配合 pmtiles 选项）
    *
@@ -109,7 +109,7 @@ export interface CreateMapLibreProbeOptions {
  *
  * 行为：
  * - 在 `container` 内创建一个绝对定位的 div（z-index:0）作为 MapLibre 的挂载点
- * - 初始化 MapLibre map（empty style 或 PMTiles style）
+ * - 初始化 MapLibre map（OSM raster / empty / PMTiles style）
  * - 如果提供 initialBounds，加载后自动 fitBounds（duration:0 无动画）
  * - 等待 `load` 事件后 resolve（证明 WebGL 上下文可用）
  * - 启用交互（pan/zoom），MapLibre 管理视图
@@ -207,6 +207,10 @@ export async function createMapLibreProbe(
   let osmTileErrorCount = 0;
   let basemapUnavailableNotified = false;
   const OSM_TILE_ERROR_THRESHOLD = 3;
+  // M4-A2 第 3 轮 Patch：OSM error listener 引用，destroy 时显式清理
+  // OSM 模式下 onLoad 不移除 error listener（需持续监听 load 后的 tile error），
+  // 因此 destroy() 必须显式 off，避免 map.remove() 之前的回调残留
+  let osmErrorHandler: ((e: unknown) => void) | null = null;
 
   function notifyBasemapUnavailable(reason: unknown): void {
     if (basemapUnavailableNotified) return;
@@ -220,7 +224,14 @@ export async function createMapLibreProbe(
 
   await new Promise<void>((resolve, reject) => {
     const onLoad = () => {
-      map.off('error', onError);
+      // M4-A2 第 3 轮 Patch：OSM 模式下 load 后仍需监听 tile error
+      // 原因：style load 成功 ≠ 瓦片请求成功；OSM 瓦片请求在 load 后才大规模发起
+      // 场景：style JSON 解析完成 → load 事件触发 → 后续 OSM tile 请求失败（net::ERR_CONNECTION_CLOSED）
+      // 若此时移除 error listener，onBasemapUnavailable 永不触发，回退失效
+      // 仅 empty / pmtiles 模式在 load 后移除（首个 error 才致命，load 成功即不再需要）
+      if (!isOsmMode) {
+        map.off('error', onError);
+      }
       // 加载后 fitBounds（如果提供了初始边界），duration:0 无动画
       if (options?.initialBounds) {
         try {
@@ -241,6 +252,7 @@ export async function createMapLibreProbe(
       if (isOsmMode) {
         // M4-A2 第 3 轮 Patch：OSM 模式下瓦片 404 / 网络错误计数
         // 达到阈值后触发 onBasemapUnavailable，让调用方回退 Canvas-only
+        // 注意：load 前后均会触发（onLoad 不移除 OSM error listener）
         osmTileErrorCount++;
         if (osmTileErrorCount <= OSM_TILE_ERROR_THRESHOLD) {
           console.warn(`[MapLibre probe] OSM tile error (${osmTileErrorCount}/${OSM_TILE_ERROR_THRESHOLD}, non-fatal):`, formatMapEvent(e));
@@ -255,9 +267,14 @@ export async function createMapLibreProbe(
     };
     map.once('load', onLoad);
     // OSM 模式：可能有多个 tile 错误，用 on 持续监听（计数 + 阈值）
+    //   - load 前的 error：style/supplier 初始化失败
+    //   - load 后的 error：瓦片请求失败（net::ERR_CONNECTION_CLOSED 等）
+    //   - onLoad 不移除 OSM error listener，保证 load 后仍计数
     // empty / pmtiles 模式：仅首个 error 致命，用 once
     if (isOsmMode) {
       map.on('error', onError);
+      // 保存引用，destroy() 时显式 off（onLoad 不移除，需手动清理）
+      osmErrorHandler = onError;
     } else {
       map.once('error', onError);
     }
@@ -302,6 +319,17 @@ export async function createMapLibreProbe(
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      // M4-A2 第 3 轮 Patch：显式移除 OSM error listener
+      // OSM 模式下 onLoad 不移除该 listener（需持续监听 load 后的 tile error），
+      // 因此 destroy 时必须显式 off，防止 map.remove() 之前的回调残留或重复触发
+      if (osmErrorHandler) {
+        try {
+          map.off('error', osmErrorHandler);
+        } catch (err) {
+          console.warn('[MapLibre probe] OSM error listener 清理失败:', err);
+        }
+        osmErrorHandler = null;
+      }
       try {
         map.remove();
       } catch (err) {

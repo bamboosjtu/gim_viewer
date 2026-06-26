@@ -917,6 +917,46 @@ if (osmTileErrorCount >= OSM_TILE_ERROR_THRESHOLD) {
 
 **empty / pmtiles 模式行为不变**：首个 error 致命，`reject` 主流程。
 
+#### 18.4.1 OSM error listener 生命周期（Patch）
+
+**问题**：初版 `onLoad` 中无条件 `map.off('error', onError)`，导致 OSM 模式下 style load 成功后，后续 tile 请求失败（`net::ERR_CONNECTION_CLOSED`）不再计数，`onBasemapUnavailable` 永不触发，回退失效。
+
+**根因**：style load 成功 ≠ 瓦片请求成功。OSM 瓦片请求在 `load` 事件后才大规模发起。
+
+**修复**：
+
+1. `onLoad` 中仅 empty / pmtiles 模式移除 error listener；OSM 模式保留：
+
+```ts
+const onLoad = () => {
+  if (!isOsmMode) {
+    map.off('error', onError);
+  }
+  // ... fitBounds + resolve
+};
+```
+
+2. OSM error listener 引用保存到外层 `osmErrorHandler`，`destroy()` 时显式 `map.off('error', osmErrorHandler)`：
+
+```ts
+if (isOsmMode) {
+  map.on('error', onError);
+  osmErrorHandler = onError;  // destroy() 时显式清理
+}
+// destroy():
+if (osmErrorHandler) {
+  try { map.off('error', osmErrorHandler); } catch {}
+  osmErrorHandler = null;
+}
+map.remove();
+```
+
+**覆盖场景**：
+
+- Case A：style load 前 tile error 累积到阈值 → 触发回退
+- Case B：style load 成功后 tile error 累积到阈值 → 触发回退（本轮修复）
+- Case C：交互过程中持续 tile error → 触发回退
+
 ### 18.5 lineProjectView 实现 Canvas-only 回退
 
 在 overlay 创建闭包内新增 `fallbackToCanvasOnly` 函数：

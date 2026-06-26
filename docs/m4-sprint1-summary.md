@@ -543,5 +543,17 @@ const probe = await createMapLibreProbe(container, {
 - OSM 可用：MapLibre + OSM raster + overlay 交互正常
 - OSM 不可用：3 次 tile error 后自动回退 Canvas-only，UI 提示，交互正常
 
-详见 [地图底图评估 - 第 18 节](map-basemap-evaluation.md#18-m4-a2-第-3-轮-patchosm-不可用时回退-canvas-only)。
+### 11.7 OSM error listener 生命周期 Patch
+
+**问题**：初版 `onLoad` 无条件 `map.off('error', onError)`，导致 style load 成功后 tile 请求失败不再计数，回退失效（用户实际遇到的 `net::ERR_CONNECTION_CLOSED` 场景）。
+
+**修复**：
+
+1. `onLoad` 中仅 empty / pmtiles 模式移除 error listener；OSM 模式保留（需持续监听 load 后的 tile error）
+2. OSM error listener 引用保存到外层 `osmErrorHandler`，`destroy()` 时显式 `map.off`
+3. 修正 base layer 注释：`empty style 或 PMTiles style` → `OSM raster / empty / PMTiles style`
+
+**覆盖场景**：load 前 tile error（Case A）+ load 后 tile error（Case B，本轮修复）+ 交互过程 tile error（Case C）。
+
+详见 [地图底图评估 - 第 18.4.1 节](map-basemap-evaluation.md#1841-osm-error-listener-生命周期patch)。
 
