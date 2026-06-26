@@ -1,5 +1,5 @@
 /**
- * M4-A1/A2-lite/A2：MapLibre 底图层模块。
+ * M4-A1/A2：MapLibre 底图层模块。
  *
  * 仅在 `ENABLE_MAPLIBRE_EXPERIMENT = true` 时由调用方动态 import 使用。
  * 默认功能关闭，主流程仍走 `lineMapView.ts` 纯 Canvas 渲染。
@@ -10,31 +10,34 @@
  * - 能销毁（remove() 释放资源）
  * - 不加载在线瓦片、不访问外网
  *
- * M4-A2-lite（已完成）：
+ * M4-A2 第 1 轮（已完成，原 M4-A2 已升级）：
  * - Handle 新增 project(lng, lat) → 屏幕像素（桥接 Canvas overlay）
  * - Handle 新增 onViewChange(callback) → 监听 move/zoom/resize
  * - 支持交互（pan/zoom），MapLibre 管理视图，Canvas overlay 跟随重绘
  * - 支持初始 bbox（fitBounds）
- *
- * M4-A2 正式版第 1 轮（本轮新增）：
  * - Handle 新增 onPointerMove / onPointerClick / onPointerLeave → 桥接 Canvas 交互
  * - ScaleControl（仅 overlay 模式，bottom-right）
  * - fitBounds 使用 duration:0（无动画，立即同步 Canvas 重绘）
  *
+ * M4-A2 第 2 轮（本轮新增）：
+ * - PMTiles 离线瓦片最小预研（默认关闭，ENABLE_PMTILES_EXPERIMENT）
+ * - 失败自动回退 empty style
+ *
  * 不做的事（留给后续）：
- * - 不加载 PMTiles / MBTiles
+ * - 不加载在线瓦片
  * - 不做坐标偏移
  * - 不添加 NavigationControl / FullscreenControl 等其他控件
  */
 
 import type { Map as MapLibreMap, StyleSpecification, LngLatBoundsLike, ScaleControl, MapMouseEvent } from 'maplibre-gl';
+import { createEmptyLineMapStyle, createPmtilesLineMapStyle } from './lineMapStyle.js';
 
 // ---------------------------------------------------------------------------
 // 类型
 // ---------------------------------------------------------------------------
 
 export interface LineMapBaseLayerHandle {
-  /** 释放 MapLibre map 实例（remove() + 清空容器 + 解除引用） */
+  /** 释放 MapLibre map 实例（remove() + 清空容器 + 解除引用 + protocol cleanup） */
   destroy(): void;
   /** 返回底层 MapLibre 实例（仅用于实验性调试） */
   getMap(): MapLibreMap | null;
@@ -52,35 +55,21 @@ export interface LineMapBaseLayerHandle {
   onPointerLeave(cb: () => void): () => void;
 }
 
+/** PMTiles 配置（M4-A2 第 2 轮） */
+export interface PmtilesOptions {
+  /** 是否启用 PMTiles 瓦片 */
+  enabled: boolean;
+  /** PMTiles 文件 URL（如 `/tiles/demo.pmtiles`） */
+  url: string;
+}
+
 /** createMapLibreProbe 的可选参数 */
 export interface CreateMapLibreProbeOptions {
   /** 初始视图 bbox [minLng, minLat, maxLng, maxLat]，加载后自动 fitBounds */
   initialBounds?: [number, number, number, number];
+  /** M4-A2 第 2 轮：PMTiles 瓦片配置（默认不启用，使用 empty style） */
+  pmtiles?: PmtilesOptions;
 }
-
-// ---------------------------------------------------------------------------
-// 空 style（本地，不访问外网）
-// ---------------------------------------------------------------------------
-
-/**
- * 最小空 style：仅一个 background 层，不引入任何 source / 瓦片。
- *
- * 目的：验证 MapLibre 能初始化容器，不依赖网络资源。
- * 后续 M4-A2 正式版才会接入 PMTiles source。
- */
-const EMPTY_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {},
-  layers: [
-    {
-      id: 'background',
-      type: 'background',
-      paint: {
-        'background-color': '#f8fafc',
-      },
-    },
-  ],
-};
 
 // ---------------------------------------------------------------------------
 // probe 工厂
@@ -91,11 +80,12 @@ const EMPTY_STYLE: StyleSpecification = {
  *
  * 行为：
  * - 在 `container` 内创建一个绝对定位的 div（z-index:0）作为 MapLibre 的挂载点
- * - 初始化 MapLibre map（空 style）
+ * - 初始化 MapLibre map（empty style 或 PMTiles style）
  * - 如果提供 initialBounds，加载后自动 fitBounds（duration:0 无动画）
  * - 等待 `load` 事件后 resolve（证明 WebGL 上下文可用）
  * - 启用交互（pan/zoom），MapLibre 管理视图
  * - 添加 ScaleControl（bottom-right，metric）
+ * - PMTiles 启用时注册 protocol，失败自动回退 empty style
  * - 失败时抛出错误（调用方应 catch 并回退到 Canvas 主流程）
  *
  * 注意：本函数仅在 `ENABLE_MAPLIBRE_EXPERIMENT = true` 时被调用，
@@ -107,6 +97,27 @@ export async function createMapLibreProbe(
 ): Promise<LineMapBaseLayerHandle> {
   // 动态 import：默认关闭时 maplibre-gl 不会进入主 bundle
   const maplibre = await import('maplibre-gl');
+
+  // ---- M4-A2 第 2 轮：PMTiles protocol 注册（可选） ----
+  let pmtilesProtocolHandle: { destroy(): void } | null = null;
+  let usingPmtiles = false;
+  if (options?.pmtiles?.enabled && options.pmtiles.url) {
+    try {
+      const { setupPmtilesProtocol } = await import('./lineMapPmtiles.js');
+      pmtilesProtocolHandle = await setupPmtilesProtocol(maplibre);
+      usingPmtiles = true;
+      console.log(`[PMTiles] using local demo: ${options.pmtiles.url}`);
+    } catch (err) {
+      console.warn('[PMTiles] unavailable, fallback to empty style:', err);
+      pmtilesProtocolHandle = null;
+      usingPmtiles = false;
+    }
+  }
+
+  // 选择 style：PMTiles 启用且 protocol 注册成功时用 PMTiles style，否则 empty
+  const style: StyleSpecification = usingPmtiles && options?.pmtiles?.url
+    ? createPmtilesLineMapStyle(options.pmtiles.url)
+    : createEmptyLineMapStyle();
 
   // 挂载点 div（底图层，z-index:0 在 Canvas overlay 之下）
   const mountDiv = document.createElement('div');
@@ -122,13 +133,13 @@ export async function createMapLibreProbe(
   // 创建 MapLibre 实例
   const map = new maplibre.Map({
     container: mountDiv,
-    style: EMPTY_STYLE,
+    style,
     center: options?.initialBounds
       ? [(options.initialBounds[0] + options.initialBounds[2]) / 2, (options.initialBounds[1] + options.initialBounds[3]) / 2]
       : [0, 0],
     zoom: options?.initialBounds ? 10 : 0,
     attributionControl: false,
-    // M4-A2-lite：启用交互（pan/zoom），MapLibre 管理视图
+    // M4-A2：启用交互（pan/zoom），MapLibre 管理视图
     interactive: true,
     // 离线：不尝试加载任何在线瓦片
     hash: false,
@@ -218,6 +229,15 @@ export async function createMapLibreProbe(
       }
       if (mountDiv.parentNode) {
         mountDiv.parentNode.removeChild(mountDiv);
+      }
+      // M4-A2 第 2 轮：清理 PMTiles protocol（引用计数 -1，归零时 removeProtocol）
+      if (pmtilesProtocolHandle) {
+        try {
+          pmtilesProtocolHandle.destroy();
+        } catch (err) {
+          console.warn('[MapLibre probe] PMTiles protocol cleanup 失败:', err);
+        }
+        pmtilesProtocolHandle = null;
       }
     },
     getMap() {

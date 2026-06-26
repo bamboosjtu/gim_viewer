@@ -1,5 +1,5 @@
 /**
- * M4-A2-lite：投影接口抽象。
+ * M4-A2：投影接口抽象。
  *
  * 将"经纬度 → 屏幕像素"的投影逻辑抽象为接口，使 Canvas overlay
  * 可以在不关心底图引擎（纯 Canvas 等距矩形 / MapLibre Mercator）的情况下复用。

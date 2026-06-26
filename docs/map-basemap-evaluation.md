@@ -573,13 +573,13 @@ map.fitBounds(bounds, { padding: 48, duration: 0 });
 
 `lineProjectView.ts` 新增 `maplibreInteractionCleanup: Array<() => void>`：
 
-- overlay 模式成功后注册 3 个取消函数（offMove / offClick / offLeave）
+- overlay 模式成功后注册 4 个取消函数（offView / offMove / offClick / offLeave）
 - `destroyLineMapView()` 统一调用所有取消函数
 - 工程切换 / 清空场景 / 切换到变电 → 全部清理，无残留
 
 ### 15.6 不做的事（留给后续）
 
-- 不加载在线瓦片 / PMTiles / MBTiles
+- 不加载在线瓦片
 - 不做坐标偏移（WGS84 ↔ GCJ-02）
 - 不做悬链线
 - 不做 MOD 解析
@@ -587,3 +587,74 @@ map.fitBounds(bounds, { padding: 48, duration: 0 });
 - 不添加 NavigationControl / FullscreenControl 等其他 MapLibre 控件
 - 不修改 SQLite schema
 - 不开启 Fragments 缓存
+
+---
+
+## 16. M4-A2 第 2 轮：cleanup patch + PMTiles 离线瓦片最小预研
+
+> 阶段：M4-A2 cleanup + PMTiles 预研
+> 时间：2026-06-26
+> 前置：M4-A2 第 1 轮（overlay 交互闭环与控件统一）
+
+### 16.1 cleanup patch
+
+- `offView` 加入 `maplibreInteractionCleanup`（原仅 offMove/offClick/offLeave）
+- 注释统一：`M4-A2-lite` → `M4-A2`（涉及 4 个源文件）
+- listener 清理完整：destroy 时 4 个取消函数全部调用
+
+### 16.2 PMTiles 最小预研
+
+引入 PMTiles 离线瓦片能力（默认关闭），验证 MapLibre 可加载本地 PMTiles。
+
+**新依赖**：`pmtiles` npm 包（动态 import，默认关闭时不进入主 bundle）
+
+**feature flag**：
+
+```ts
+export const ENABLE_MAPLIBRE_EXPERIMENT = false;
+export const ENABLE_PMTILES_EXPERIMENT = false;
+export const PMTILES_DEMO_URL = '/tiles/demo.pmtiles';
+```
+
+两个开关同时开启才生效。PMTiles 失败时自动回退 empty style。
+
+### 16.3 style 工厂
+
+新增 `src/ui/lineMapStyle.ts`：
+
+| 函数 | 说明 |
+|---|---|
+| `createEmptyLineMapStyle()` | 纯色背景，不加载瓦片（默认） |
+| `createPmtilesLineMapStyle(url)` | PMTiles vector source + background 层 |
+
+PMTiles style 不强制 source-layer，避免因瓦片元数据不匹配导致渲染失败。
+
+### 16.4 protocol 管理
+
+新增 `src/ui/lineMapPmtiles.ts`：
+
+- `setupPmtilesProtocol(maplibre)`：动态 import pmtiles 包，注册 `pmtiles://` 协议
+- 防重复注册（模块级单例 + 引用计数）
+- 引用计数归零时 `removeProtocol`
+- 失败可回退（catch 后 usingPmtiles=false）
+
+### 16.5 三种路径
+
+| 路径 | flag | 行为 |
+|---|---|---|
+| Canvas-only | MapLibre=false | 纯 Canvas，pmtiles 包不加载 |
+| MapLibre empty | MapLibre=true, PMTiles=false | empty style，无瓦片，无网络请求 |
+| PMTiles 不存在 | MapLibre=true, PMTiles=true, 文件缺失 | protocol 注册成功，source 加载失败，回退 empty background |
+| PMTiles 存在 | MapLibre=true, PMTiles=true, 文件存在 | protocol 注册成功，瓦片按需加载 |
+
+### 16.6 本地文件
+
+- `public/tiles/.gitkeep`：保留目录结构
+- `.gitignore`：`public/tiles/*.pmtiles`（不提交大文件）
+- 实际瓦片文件 `public/tiles/demo.pmtiles` 需手动放入
+
+### 16.7 日志
+
+成功：`[PMTiles] protocol registered` / `[PMTiles] using local demo: /tiles/demo.pmtiles`
+失败：`[PMTiles] unavailable, fallback to empty style`
+销毁：`[PMTiles] protocol removed`

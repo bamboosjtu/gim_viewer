@@ -149,7 +149,7 @@ const FOCUS_TOWER_ZOOM = 12;
  * @param mapData extractLineMapData 提取结果
  * @param container 宿主 DOM（canvas 将作为子元素填充）
  * @param onTowerClick 点击塔位时的回调，参数为该塔位对应的图节点
- * @param options M4-A2-lite：projection（外部投影）+ onRequestRedraw（注册重绘回调）
+ * @param options M4-A2：projection（外部投影）+ onRequestRedraw（注册重绘回调）
  * @returns LineMapViewHandle，调用方负责在切换/清空时 destroy()
  */
 export function renderLineMap(
@@ -158,7 +158,7 @@ export function renderLineMap(
   onTowerClick: (node: GimGraphNode) => void,
   options?: RenderLineMapOptions,
 ): LineMapViewHandle {
-  // ---- M4-A2-lite：投影模式判断 ----
+  // ---- M4-A2：投影模式判断 ----
   const projection = options?.projection;
   const overlayMode = !!projection; // MapLibre 底图 + Canvas overlay 模式
   // M4-A2：overlay 模式默认隐藏网格和 Canvas 比例尺（MapLibre 提供 ScaleControl）
@@ -174,7 +174,7 @@ export function renderLineMap(
   canvas.style.inset = '0';
   canvas.style.zIndex = '2';
   canvas.style.cursor = 'grab';
-  // M4-A2-lite：overlay 模式下 Canvas 不接收鼠标事件（MapLibre 管理 pan/zoom）
+  // M4-A2：overlay 模式下 Canvas 不接收鼠标事件（MapLibre 管理 pan/zoom）
   if (overlayMode) {
     canvas.style.pointerEvents = 'none';
   }
@@ -337,7 +337,7 @@ export function renderLineMap(
 
   // ---- 投影 ----
   function geoToScreen(lat: number, lng: number): { x: number; y: number } {
-    // M4-A2-lite：overlay 模式委托给外部投影（MapLibre project）
+    // M4-A2：overlay 模式委托给外部投影（MapLibre project）
     if (projection) {
       const p = projection.project(lng, lat);
       return { x: p.x, y: p.y };
@@ -352,7 +352,7 @@ export function renderLineMap(
   }
 
   function screenToWorldGeo(sx: number, sy: number): { lat: number; lng: number } {
-    // M4-A2-lite：overlay 模式委托给外部投影（MapLibre unproject）
+    // M4-A2：overlay 模式委托给外部投影（MapLibre unproject）
     if (projection?.unproject) {
       const geo = projection.unproject(sx, sy);
       return { lat: geo.lat, lng: geo.lng };
@@ -406,7 +406,7 @@ export function renderLineMap(
     drawBorder();
   }
 
-  // M4-A2-lite：向调用方注册 redraw 回调，供 MapLibre 视图变化时触发 Canvas 重绘
+  // M4-A2：向调用方注册 redraw 回调，供 MapLibre 视图变化时触发 Canvas 重绘
   if (options?.onRequestRedraw) {
     options.onRequestRedraw(draw);
   }
@@ -897,7 +897,7 @@ export function renderLineMap(
   // ---- 公开方法 ----
   function fit(): void {
     selectedTowerPaths = new Set();
-    // M4-A2-lite：overlay 模式下视图由 MapLibre 管理，委托 fitBounds
+    // M4-A2：overlay 模式下视图由 MapLibre 管理，委托 fitBounds
     if (projection?.fitBounds && valid) {
       projection.fitBounds({
         minLng: bbox.minLng,
@@ -921,7 +921,7 @@ export function renderLineMap(
     if (!t) return false;
     selectedTowerPaths = new Set([path]);
     hoveredTower = t;
-    // M4-A2-lite：overlay 模式下委托 MapLibre fitBounds（单塔小范围 bbox）
+    // M4-A2：overlay 模式下委托 MapLibre fitBounds（单塔小范围 bbox）
     if (projection?.fitBounds) {
       const pad = 0.002;
       projection.fitBounds({
@@ -967,7 +967,7 @@ export function renderLineMap(
 
     selectedTowerPaths = new Set(paths);
 
-    // M4-A2-lite：overlay 模式下委托 MapLibre fitBounds
+    // M4-A2：overlay 模式下委托 MapLibre fitBounds
     if (projection?.fitBounds) {
       projection.fitBounds({ minLng, minLat, maxLng, maxLat });
       draw();

@@ -15,27 +15,31 @@
 - [x] 验证 CSP 策略兼容性（`script-src 'self' 'wasm-unsafe-eval'`） — **M4-A1 已验证**：`worker-src 'self' blob:` + `style-src 'unsafe-inline'` 已兼容，无需改 CSP
 - [ ] 验证离线模式 fallback（无网络时降级到 Canvas 2D） — 留给 M4-A2
 
-**M4-A1 状态：技术验证中**
+**M4-A 状态：A1 + A2 第 1/2 轮已完成**
 
 - ✅ 引入 `maplibre-gl` 依赖
 - ✅ `ENABLE_MAPLIBRE_EXPERIMENT = false`（默认关闭）
 - ✅ `src/ui/lineMapBaseLayer.ts` probe 模块（empty style，不加载瓦片）
 - ✅ 集成到 `lineProjectView.ts`（Canvas 主流程不受影响）
-- ⏳ Canvas overlay 对接留给 M4-A2
+- ✅ M4-A2 第 1 轮：Canvas overlay + 交互桥接（hover/click/联动）+ ScaleControl + fitBounds(duration:0)
+- ✅ M4-A2 第 2 轮：cleanup patch + PMTiles 离线瓦片最小预研（`ENABLE_PMTILES_EXPERIMENT=false`）
 
-详见 [地图底图评估 - M4-A1 技术验证结果](map-basemap-evaluation.md#13-m4-a1-技术验证结果)
+详见 [地图底图评估 - 第 14-16 节](map-basemap-evaluation.md#14-m4-a2-lite底图容器与-canvas-overlay-桥接最小验证)
 
 ### 离线瓦片
 
-- [ ] 确定 MBTiles / 离线瓦片存储方案（app_data_dir）
-- [ ] 实现瓦片下载工具（首次联网下载，后续离线使用）
+- ✅ PMTiles protocol 注册（`pmtiles://` 协议，防重复 + 引用计数 cleanup）
+- ✅ style 工厂（empty + pmtiles，失败回退）
+- ⏳ 实际瓦片文件（需手动放入 `public/tiles/demo.pmtiles`）
+- [ ] 确定瓦片覆盖范围 + source-layer 配置
 - [ ] 瓦片版本管理 + 缓存失效
 
 ### Canvas overlay
 
-- [ ] MapLibre 底图 + Canvas overlay 叠加渲染
-- [ ] 塔位/导线在 overlay 层绘制，跟随地图缩放/平移
-- [ ] 保留现有图层开关逻辑
+- ✅ MapLibre 底图 + Canvas overlay 叠加渲染
+- ✅ 塔位/导线在 overlay 层绘制，跟随地图缩放/平移
+- ✅ 保留现有图层开关逻辑
+- ✅ pointer 事件桥接（hover/click/leave）
 
 ### 坐标偏移
 
