@@ -5,6 +5,11 @@
  * 经纬度网格、图例、比例尺，支持滚轮缩放（光标居中）、拖拽平移、
  * hover tooltip、点击塔位联动。
  *
+ * 收口阶段增强：
+ * - 图层开关（导线/地线/OPGW/未知/塔位/跨越点/标签），关闭图层后仅重绘
+ * - 左侧树↔地图双向联动：focusTowerByNodePath / focusBboxByNodePaths
+ * - 选中塔位高亮（amber 光晕）
+ *
  * 分层边界（强制）：
  * - 属于 UI 层，禁止直接访问数据库
  * - 禁止读取 GIM 文件
@@ -30,9 +35,35 @@ import type { GimGraphNode } from '../gim/gimGraphTypes.js';
 export interface LineMapViewHandle {
   /** 回到全景 bbox（重置 pan/zoom） */
   fit(): void;
-  /** 释放 canvas/tooltip/事件监听，清空内部引用 */
+  /** 释放 canvas/tooltip/事件监听/图层控件，清空内部引用 */
   destroy(): void;
+  /** 定位到指定 nodePath 对应的单个塔位（高亮+居中+放大），找不到返回 false */
+  focusTowerByNodePath(path: string): boolean;
+  /** 定位到一组 nodePath 对应的塔位 bbox（居中+fit），找不到返回 false */
+  focusBboxByNodePaths(paths: string[]): boolean;
 }
+
+/** 图层开关状态（仅内存，不入库） */
+interface LayerState {
+  conductor: boolean;
+  groundwire: boolean;
+  opgw: boolean;
+  unknownWire: boolean;
+  tower: boolean;
+  cross: boolean;
+  label: boolean;
+}
+
+/** 图层配置（供 UI + legend 共用） */
+const LAYER_ITEMS: { key: keyof LayerState; label: string; color: string }[] = [
+  { key: 'conductor', label: '导线 CONDUCTOR', color: '#3b82f6' },
+  { key: 'groundwire', label: '地线 GROUNDWIRE', color: '#6b7280' },
+  { key: 'opgw', label: 'OPGW', color: '#10b981' },
+  { key: 'unknownWire', label: '未知导线', color: '#9ca3af' },
+  { key: 'tower', label: '塔位', color: '#3b82f6' },
+  { key: 'cross', label: '跨越点', color: '#f59e0b' },
+  { key: 'label', label: '标签', color: '#334155' },
+];
 
 /** 导线类型颜色 */
 const WIRE_COLORS: Record<string, string> = {
@@ -69,6 +100,7 @@ const LABEL_SHOW_ZOOM = 1.8; // 缩放达到此倍数以上才显示标签，避
 /** 图例 */
 const LEGEND_PAD = 10;
 const LEGEND_LINE_H = 18;
+const LEGEND_BOTTOM_MARGIN = 16; // 防止图例底部被裁切
 
 /** 比例尺 */
 const COLOR_SCALE = '#475569';
@@ -79,6 +111,9 @@ const FIT_PADDING = 48;
 /** 缩放范围 */
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 200;
+
+/** focus 单塔时的放大倍数 */
+const FOCUS_TOWER_ZOOM = 12;
 
 // ---------------------------------------------------------------------------
 // 渲染主函数
@@ -97,7 +132,7 @@ export function renderLineMap(
   container: HTMLElement,
   onTowerClick: (node: GimGraphNode) => void,
 ): LineMapViewHandle {
-  // ---- DOM：canvas + tooltip + fit 按钮 ----
+  // ---- DOM：canvas + tooltip + fit 按钮 + 图层面板 ----
   const canvas = document.createElement('canvas');
   canvas.style.display = 'block';
   canvas.style.width = '100%';
@@ -125,13 +160,13 @@ export function renderLineMap(
   tooltip.style.whiteSpace = 'nowrap';
   container.appendChild(tooltip);
 
-  // fit 按钮（右上角）
+  // fit 按钮（左上角，避免与右上角 loading 重叠）
   const fitBtn = document.createElement('button');
   fitBtn.textContent = '全景';
   fitBtn.title = '回到全景（双击画布亦可）';
   fitBtn.style.position = 'absolute';
+  fitBtn.style.left = '10px';
   fitBtn.style.top = '10px';
-  fitBtn.style.right = '10px';
   fitBtn.style.zIndex = '20';
   fitBtn.style.padding = '4px 10px';
   fitBtn.style.borderRadius = '4px';
@@ -140,6 +175,52 @@ export function renderLineMap(
   fitBtn.style.cursor = 'pointer';
   fitBtn.style.fontSize = '12px';
   container.appendChild(fitBtn);
+
+  // 图层面板（左上角，fit 按钮下方）
+  const layerPanel = document.createElement('div');
+  layerPanel.style.position = 'absolute';
+  layerPanel.style.left = '10px';
+  layerPanel.style.top = '42px';
+  layerPanel.style.zIndex = '20';
+  layerPanel.style.padding = '8px 10px';
+  layerPanel.style.borderRadius = '6px';
+  layerPanel.style.background = 'rgba(255,255,255,0.92)';
+  layerPanel.style.border = '1px solid #cbd5e1';
+  layerPanel.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+  layerPanel.style.fontSize = '12px';
+  layerPanel.style.maxHeight = 'calc(100% - 60px)';
+  layerPanel.style.overflowY = 'auto';
+  container.appendChild(layerPanel);
+
+  const layerTitle = document.createElement('div');
+  layerTitle.textContent = '图层';
+  layerTitle.style.fontWeight = '600';
+  layerTitle.style.marginBottom = '4px';
+  layerTitle.style.color = '#334155';
+  layerPanel.appendChild(layerTitle);
+
+  const layerCheckboxes: HTMLInputElement[] = [];
+  for (const item of LAYER_ITEMS) {
+    const label = document.createElement('label');
+    label.style.display = 'flex';
+    label.style.alignItems = 'center';
+    label.style.gap = '4px';
+    label.style.cursor = 'pointer';
+    label.style.padding = '1px 0';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.style.accentColor = item.color;
+    cb.style.margin = '0';
+    cb.style.cursor = 'pointer';
+    const span = document.createElement('span');
+    span.textContent = item.label;
+    span.style.color = '#334155';
+    label.appendChild(cb);
+    label.appendChild(span);
+    layerPanel.appendChild(label);
+    layerCheckboxes.push(cb);
+  }
 
   // ---- 投影参数（fit 基准） ----
   const bbox = mapData.bbox;
@@ -160,6 +241,15 @@ export function renderLineMap(
   const centerWY = (minWY + maxWY) / 2;
 
   // ---- 视图状态 ----
+  const layerState: LayerState = {
+    conductor: true,
+    groundwire: true,
+    opgw: true,
+    unknownWire: true,
+    tower: true,
+    cross: true,
+    label: true,
+  };
   let cssW = 0;
   let cssH = 0;
   let dpr = 1;
@@ -169,6 +259,9 @@ export function renderLineMap(
   let panY = 0;
   let hoveredTower: TowerMarker | null = null;
   let destroyed = false;
+
+  /** 选中塔位的 nodePath 集合（树点击/地图 focus 时高亮） */
+  let selectedTowerPaths: Set<string> = new Set();
 
   // 拖拽状态
   let dragging = false;
@@ -180,6 +273,12 @@ export function renderLineMap(
 
   // 预投影塔位屏幕坐标缓存（每次 draw 时更新）
   let towerScreen: { tower: TowerMarker; x: number; y: number }[] = [];
+
+  /** nodePath → TowerMarker 索引（供 focus 查找用） */
+  const pathToTower = new Map<string, TowerMarker>();
+  for (const t of mapData.towers) {
+    if (t.nodeRef && t.nodeRef.path) pathToTower.set(t.nodeRef.path, t);
+  }
 
   // ---- 尺寸 / DPR ----
   function resize(): void {
@@ -216,6 +315,21 @@ export function renderLineMap(
     return { lat: wy + centerLat, lng: wx / cosLat + centerLng };
   }
 
+  // ---- 图层开关事件 ----
+  for (let i = 0; i < LAYER_ITEMS.length; i++) {
+    const item = LAYER_ITEMS[i];
+    const cb = layerCheckboxes[i];
+    cb.addEventListener('change', () => {
+      layerState[item.key] = cb.checked;
+      // 关闭塔位图层时清除 hover，避免 tooltip 残留
+      if (item.key === 'tower' && !cb.checked) {
+        hoveredTower = null;
+        hideTooltip();
+      }
+      draw();
+    });
+  }
+
   // ---- 绘制 ----
   function draw(): void {
     if (destroyed) return;
@@ -234,7 +348,7 @@ export function renderLineMap(
     drawWires();
     drawCrosses();
     drawTowers();
-    if (zoom >= LABEL_SHOW_ZOOM) drawLabels();
+    if (layerState.label && zoom >= LABEL_SHOW_ZOOM) drawLabels();
     drawScaleBar();
     drawLegend();
     drawBorder();
@@ -296,10 +410,19 @@ export function renderLineMap(
     }
   }
 
+  /** 根据 wireType 判断属于哪个图层 */
+  function wireLayerKey(wireType: string): keyof LayerState {
+    if (wireType === 'CONDUCTOR') return 'conductor';
+    if (wireType === 'GROUNDWIRE') return 'groundwire';
+    if (wireType === 'OPGW') return 'opgw';
+    return 'unknownWire';
+  }
+
   function drawWires(): void {
     ctx.lineWidth = WIRE_WIDTH;
     ctx.lineCap = 'round';
     for (const w of mapData.wires) {
+      if (!layerState[wireLayerKey(w.wireType)]) continue;
       const s = geoToScreen(w.startLat, w.startLng);
       const e = geoToScreen(w.endLat, w.endLng);
       // 视口剔除
@@ -314,6 +437,7 @@ export function renderLineMap(
   }
 
   function drawCrosses(): void {
+    if (!layerState.cross) return;
     for (const c of mapData.crosses) {
       if (c.lat == null || c.lng == null) continue;
       const p = geoToScreen(c.lat, c.lng);
@@ -353,6 +477,7 @@ export function renderLineMap(
 
   function drawTowers(): void {
     towerScreen = [];
+    if (!layerState.tower) return;
     for (const t of mapData.towers) {
       const p = geoToScreen(t.lat, t.lng);
       towerScreen.push({ tower: t, x: p.x, y: p.y });
@@ -360,19 +485,23 @@ export function renderLineMap(
 
       const tension = isTensionTower(t);
       const isHover = hoveredTower === t;
-      const r = isHover ? TOWER_RADIUS + 2 : TOWER_RADIUS;
+      const isSelected = !!(t.nodeRef && selectedTowerPaths.has(t.nodeRef.path));
+      const r = isHover || isSelected ? TOWER_RADIUS + 2 : TOWER_RADIUS;
 
-      if (isHover) {
+      if (isHover || isSelected) {
         // 高亮光晕
         ctx.beginPath();
         ctx.arc(p.x, p.y, r + 4, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(245,158,11,0.25)';
+        ctx.fillStyle = isSelected
+          ? 'rgba(245,158,11,0.35)'
+          : 'rgba(245,158,11,0.25)';
         ctx.fill();
       }
 
+      const fillColor = isHover || isSelected ? COLOR_TOWER_SELECTED : undefined;
       if (tension) {
         // 菱形（耐张塔/转角塔）
-        ctx.fillStyle = isHover ? COLOR_TOWER_SELECTED : COLOR_TOWER_TENSION_FILL;
+        ctx.fillStyle = fillColor || COLOR_TOWER_TENSION_FILL;
         ctx.strokeStyle = COLOR_TOWER_TENSION;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -385,7 +514,7 @@ export function renderLineMap(
         ctx.stroke();
       } else {
         // 圆形（直线塔/普通塔）
-        ctx.fillStyle = isHover ? COLOR_TOWER_SELECTED : COLOR_TOWER_STRAIGHT_FILL;
+        ctx.fillStyle = fillColor || COLOR_TOWER_STRAIGHT_FILL;
         ctx.strokeStyle = COLOR_TOWER_STRAIGHT;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -422,28 +551,32 @@ export function renderLineMap(
   }
 
   function drawLegend(): void {
-    const items: [string, string][] = [
-      ['导线 CONDUCTOR', WIRE_COLORS['CONDUCTOR'] || WIRE_COLOR_UNKNOWN],
-      ['地线 GROUNDWIRE', WIRE_COLORS['GROUNDWIRE'] || WIRE_COLOR_UNKNOWN],
-      ['OPGW', WIRE_COLORS['OPGW'] || WIRE_COLOR_UNKNOWN],
-      ['未知导线', WIRE_COLOR_UNKNOWN],
+    // 导线图例项（与图层状态一致：关闭时半透明）
+    const wireItems: [string, string, boolean][] = [
+      ['导线 CONDUCTOR', WIRE_COLORS['CONDUCTOR'] || WIRE_COLOR_UNKNOWN, layerState.conductor],
+      ['地线 GROUNDWIRE', WIRE_COLORS['GROUNDWIRE'] || WIRE_COLOR_UNKNOWN, layerState.groundwire],
+      ['OPGW', WIRE_COLORS['OPGW'] || WIRE_COLOR_UNKNOWN, layerState.opgw],
+      ['未知导线', WIRE_COLOR_UNKNOWN, layerState.unknownWire],
     ];
+    const totalLines = wireItems.length + 3; // +直线塔 +耐张塔 +跨越点
     const x0 = LEGEND_PAD + 4;
-    let y0 = cssH - LEGEND_PAD - (items.length + 2) * LEGEND_LINE_H;
+    let y0 = cssH - LEGEND_PAD - LEGEND_BOTTOM_MARGIN - totalLines * LEGEND_LINE_H;
 
-    // 背板
-    const boxH = (items.length + 2) * LEGEND_LINE_H + LEGEND_PAD;
+    // 背板（增加底部 padding 防裁切）
+    const boxH = totalLines * LEGEND_LINE_H + LEGEND_PAD + LEGEND_BOTTOM_MARGIN;
+    const boxW = 158;
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
     ctx.strokeStyle = COLOR_GRID_MAJOR;
     ctx.lineWidth = 1;
-    ctx.fillRect(LEGEND_PAD, y0 - 4, 150, boxH);
-    ctx.strokeRect(LEGEND_PAD, y0 - 4, 150, boxH);
+    ctx.fillRect(LEGEND_PAD, y0 - 4, boxW, boxH);
+    ctx.strokeRect(LEGEND_PAD, y0 - 4, boxW, boxH);
 
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     // 导线图例
-    for (const [label, color] of items) {
+    for (const [label, color, visible] of wireItems) {
+      ctx.globalAlpha = visible ? 1 : 0.3;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2.5;
       ctx.beginPath();
@@ -454,7 +587,9 @@ export function renderLineMap(
       ctx.fillText(label, x0 + 28, y0 + 6);
       y0 += LEGEND_LINE_H;
     }
+    ctx.globalAlpha = 1;
     // 塔位图例（圆形/菱形）
+    ctx.globalAlpha = layerState.tower ? 1 : 0.3;
     ctx.fillStyle = COLOR_TOWER_STRAIGHT_FILL;
     ctx.strokeStyle = COLOR_TOWER_STRAIGHT;
     ctx.lineWidth = 1.5;
@@ -478,6 +613,9 @@ export function renderLineMap(
     ctx.fillStyle = COLOR_LABEL;
     ctx.fillText('耐张塔（菱）', x0 + 28, y0 + 6);
     y0 += LEGEND_LINE_H;
+    ctx.globalAlpha = 1;
+    // 跨越点图例
+    ctx.globalAlpha = layerState.cross ? 1 : 0.3;
     ctx.fillStyle = COLOR_CROSS;
     ctx.beginPath();
     ctx.moveTo(x0 + 11, y0 + 2);
@@ -487,6 +625,7 @@ export function renderLineMap(
     ctx.fill();
     ctx.fillStyle = COLOR_LABEL;
     ctx.fillText('跨越点', x0 + 28, y0 + 6);
+    ctx.globalAlpha = 1;
   }
 
   function drawScaleBar(): void {
@@ -521,6 +660,7 @@ export function renderLineMap(
 
   // ---- 命中测试 ----
   function hitTestTower(sx: number, sy: number): TowerMarker | null {
+    if (!layerState.tower) return null;
     let best: TowerMarker | null = null;
     let bestDist = HIT_RADIUS;
     for (const ts of towerScreen) {
@@ -638,6 +778,10 @@ export function renderLineMap(
       const t = hitTestTower(mx, my);
       if (t) {
         hoveredTower = t;
+        // 选中点击的塔位
+        if (t.nodeRef && t.nodeRef.path) {
+          selectedTowerPaths = new Set([t.nodeRef.path]);
+        }
         draw();
         try {
           onTowerClick(t.nodeRef);
@@ -671,7 +815,72 @@ export function renderLineMap(
     zoom = 1;
     panX = 0;
     panY = 0;
+    selectedTowerPaths = new Set();
     draw();
+  }
+
+  /** 定位到单个塔位：居中 + 放大 + 高亮 */
+  function focusTowerByNodePath(path: string): boolean {
+    if (!valid) return false;
+    const t = pathToTower.get(path);
+    if (!t) return false;
+    zoom = clamp(FOCUS_TOWER_ZOOM, MIN_ZOOM, MAX_ZOOM);
+    const s = baseScale * zoom;
+    const wx = (t.lng - centerLng) * cosLat;
+    const wy = t.lat - centerLat;
+    panX = -(wx - centerWX) * s;
+    panY = (wy - centerWY) * s;
+    selectedTowerPaths = new Set([path]);
+    hoveredTower = t;
+    draw();
+    return true;
+  }
+
+  /** 定位到一组塔位的 bbox：fit + 高亮 */
+  function focusBboxByNodePaths(paths: string[]): boolean {
+    if (!valid) return false;
+    const towers: TowerMarker[] = [];
+    for (const p of paths) {
+      const t = pathToTower.get(p);
+      if (t) towers.push(t);
+    }
+    if (towers.length === 0) return false;
+
+    // 子 bbox（geo 坐标）
+    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+    for (const t of towers) {
+      minLat = Math.min(minLat, t.lat); maxLat = Math.max(maxLat, t.lat);
+      minLng = Math.min(minLng, t.lng); maxLng = Math.max(maxLng, t.lng);
+    }
+    // 给 bbox 留 padding（避免塔位贴边）
+    const latSpan = maxLat - minLat || 0.002;
+    const lngSpan = maxLng - minLng || 0.002;
+    minLat -= latSpan * 0.2; maxLat += latSpan * 0.2;
+    minLng -= lngSpan * 0.2; maxLng += lngSpan * 0.2;
+
+    // 子 bbox（world 坐标）
+    const subMinWX = (minLng - centerLng) * cosLat;
+    const subMaxWX = (maxLng - centerLng) * cosLat;
+    const subMinWY = minLat - centerLat;
+    const subMaxWY = maxLat - centerLat;
+    const subW = Math.max(subMaxWX - subMinWX, 1e-9);
+    const subH = Math.max(subMaxWY - subMinWY, 1e-9);
+    const subCenterWX = (subMinWX + subMaxWX) / 2;
+    const subCenterWY = (subMinWY + subMaxWY) / 2;
+
+    // 计算 zoom 使子 bbox 填满视口（减去 padding）
+    const availW = Math.max(cssW - 2 * FIT_PADDING, 1);
+    const availH = Math.max(cssH - 2 * FIT_PADDING, 1);
+    zoom = clamp(Math.min(availW / subW, availH / subH) / baseScale, MIN_ZOOM, MAX_ZOOM);
+
+    // pan 使子 bbox 中心居中
+    const s = baseScale * zoom;
+    panX = -(subCenterWX - centerWX) * s;
+    panY = (subCenterWY - centerWY) * s;
+
+    selectedTowerPaths = new Set(paths);
+    draw();
+    return true;
   }
 
   function destroy(): void {
@@ -684,12 +893,18 @@ export function renderLineMap(
     canvas.removeEventListener('mouseleave', onMouseLeave);
     canvas.removeEventListener('dblclick', onDblClick);
     fitBtn.removeEventListener('click', onFitBtnClick);
+    for (const cb of layerCheckboxes) {
+      cb.onchange = null;
+    }
     if (resizeObserver) resizeObserver.disconnect();
     if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
     if (tooltip.parentNode) tooltip.parentNode.removeChild(tooltip);
     if (fitBtn.parentNode) fitBtn.parentNode.removeChild(fitBtn);
+    if (layerPanel.parentNode) layerPanel.parentNode.removeChild(layerPanel);
     towerScreen = [];
     hoveredTower = null;
+    selectedTowerPaths.clear();
+    pathToTower.clear();
   }
 
   // ---- 绑定事件 ----
@@ -708,7 +923,7 @@ export function renderLineMap(
   // 首次绘制
   resize();
 
-  return { fit, destroy };
+  return { fit, destroy, focusTowerByNodePath, focusBboxByNodePaths };
 }
 
 // ---------------------------------------------------------------------------

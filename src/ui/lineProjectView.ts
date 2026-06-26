@@ -13,6 +13,7 @@
 
 import type { AppState } from '../app/state.js';
 import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
+import type { LineMapData } from '../gim/lineMapData.js';
 import { escHtml } from '../shared/html.js';
 import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, btnToggleProps, emptyTipEl, container } from './dom.js';
 import type { LineMapViewHandle } from './lineMapView.js';
@@ -52,6 +53,8 @@ function renderLineTreeNode(
   nodeEl.className = 'tree-node';
   const row = document.createElement('div');
   row.className = 'tree-row';
+  // Phase 4：地图点击塔位后用 data-node-path 反查树行并选中
+  row.dataset.nodePath = node.path;
   const toggle = document.createElement('span');
   toggle.className = `tree-toggle ${node.children.length === 0 ? 'leaf' : ''}`;
   toggle.textContent = '▶';
@@ -145,6 +148,58 @@ function renderLineFileSummary(graph: GimGraph): void {
 function renderLineModelPanel(): void {
   if (!modelListEl) return;
   modelListEl.innerHTML = '';
+}
+
+/**
+ * Phase 5：渲染地图数据统计与未解析引用摘要。
+ *
+ * 数据来源：mapData.stats + mapData.unresolved。
+ * - 不影响原文件摘要（renderLineFileSummary）
+ * - unresolved 数量较大时只显示数量，不展开全部路径
+ * - CROSS 无坐标时不被当成错误，只显示"未定位跨越点数量"
+ */
+function renderMapStats(mapData: LineMapData): void {
+  const s = mapData.stats;
+  const u = mapData.unresolved;
+
+  const rows: [string, string][] = [
+    ['塔位总数', String(s.towerTotal)],
+    ['有坐标塔位', String(s.towerWithBlha)],
+    ['导线段总数', String(s.wireTotal)],
+    ['有端点导线', String(s.wireWithEndpoints)],
+    ['跨越点总数', String(s.crossTotal)],
+    ['有坐标跨越点', String(s.crossWithCoord)],
+    ['FAM 命中塔位', String(s.towerWithFam)],
+    ['—', '—'],
+    ['未定位塔位', String(u.towers.length)],
+    ['未定位导线', String(u.wires.length)],
+    ['未定位跨越点', String(u.crosses.length)],
+    ['FAM 未命中引用', String(u.famSources.length)],
+    ['DEV 未命中引用', String(u.devSources.length)],
+  ];
+
+  const wrap = document.createElement('div');
+  wrap.className = 'props-section';
+  const title = document.createElement('div');
+  title.className = 'props-section-title';
+  title.textContent = '地图数据统计';
+  wrap.appendChild(title);
+  const table = document.createElement('table');
+  table.className = 'props-table';
+  for (const [k, v] of rows) {
+    const tr = document.createElement('tr');
+    const tdK = document.createElement('td');
+    tdK.className = 'prop-key';
+    tdK.textContent = k;
+    const tdV = document.createElement('td');
+    tdV.className = 'prop-val';
+    tdV.textContent = v;
+    tr.appendChild(tdK);
+    tr.appendChild(tdV);
+    table.appendChild(tr);
+  }
+  wrap.appendChild(table);
+  fileDevPanel.appendChild(wrap);
 }
 
 /** 渲染引用清单为 HTML */
@@ -263,6 +318,9 @@ export function showLineNodeProperties(node: GimGraphNode): void {
 /** 当前地图视图 handle（模块级，避免重复打开 GIM 后残留） */
 let lineMapHandle: LineMapViewHandle | null = null;
 
+/** 当前地图数据（供左侧树点击定位地图时反查 TowerMarker nodePath 用） */
+let lineMapData: LineMapData | null = null;
+
 /**
  * 销毁当前地图视图。
  *
@@ -278,13 +336,106 @@ export function destroyLineMapView(): void {
     lineMapHandle.destroy();
     lineMapHandle = null;
   }
+  lineMapData = null;
 }
 
-/** 节点点击 → 展示属性 + 展开属性面板（层级树与地图共用） */
-function handleNodeSelect(node: GimGraphNode): void {
+// ---------------------------------------------------------------------------
+// Phase 4：地图→左侧树选中联动
+// ---------------------------------------------------------------------------
+
+/**
+ * 选中并滚动到指定 nodePath 对应的树行。
+ *
+ * 仅处理已渲染的节点（懒加载未展开的子节点不强求）。
+ * 未找到时静默返回，不抛异常。
+ */
+function selectTreeRow(path: string): void {
+  // CSS.escape 兼容路径中的特殊字符；缺失时回退到双引号字符串选择器
+  const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(path) : path.replace(/"/g, '\\"');
+  const row = document.querySelector<HTMLElement>(`.tree-row[data-node-path="${escaped}"]`);
+  if (!row) return;
+  // 清除旧的 selected
+  document.querySelectorAll('.tree-row.selected').forEach((r) => r.classList.remove('selected'));
+  row.classList.add('selected');
+  // 滚动到可见区域（smooth，避免突兀跳动）
+  row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3：左侧树→地图定位联动
+// ---------------------------------------------------------------------------
+
+/**
+ * 递归收集节点子树中所有"已渲染为塔位"的 nodePath。
+ *
+ * 判断依据：path 与 lineMapData.towers[].nodeRef.path 相同。
+ * 仅收集直接命中，不重复入栈。
+ */
+function collectDescendantTowerPaths(node: GimGraphNode): string[] {
+  if (!lineMapData) return [];
+  const towerPathSet = new Set<string>();
+  for (const t of lineMapData.towers) {
+    if (t.nodeRef && t.nodeRef.path) towerPathSet.add(t.nodeRef.path);
+  }
+  const result: string[] = [];
+  const seen = new Set<string>();
+  function walk(n: GimGraphNode): void {
+    if (towerPathSet.has(n.path) && !seen.has(n.path)) {
+      result.push(n.path);
+      seen.add(n.path);
+    }
+    for (const child of n.children) walk(child);
+  }
+  walk(node);
+  return result;
+}
+
+/**
+ * 左侧树点击回调：先尝试定位地图，再展示属性面板。
+ *
+ * Phase 3 规则：
+ * 1. 节点本身是塔位 → focusTowerByNodePath
+ * 2. 子树含塔位 → focusBboxByNodePaths
+ * 3. 找不到坐标 → 只显示属性面板，不报错
+ */
+function handleTreeNodeClick(node: GimGraphNode): void {
+  // 展开属性面板
   showLineNodeProperties(node);
   propsDrawer.classList.remove('collapsed');
   btnToggleProps.style.right = '332px';
+
+  if (!lineMapHandle || !lineMapData) return;
+
+  // 1. 节点本身是塔位 → 单塔定位
+  const isTower = lineMapData.towers.some(
+    (t) => t.nodeRef && t.nodeRef.path === node.path,
+  );
+  if (isTower) {
+    lineMapHandle.focusTowerByNodePath(node.path);
+    return;
+  }
+
+  // 2. 子树含塔位 → bbox 定位
+  const towerPaths = collectDescendantTowerPaths(node);
+  if (towerPaths.length > 0) {
+    lineMapHandle.focusBboxByNodePaths(towerPaths);
+  }
+  // 3. 找不到坐标 → 只显示属性面板
+}
+
+/**
+ * 地图塔位点击回调：展示属性 + 同步选中左侧树行。
+ *
+ * Phase 4 规则：
+ * 1. 右侧属性面板显示该 TowerMarker 的 nodeRef
+ * 2. 左侧层级树中对应节点行加 selected
+ * 3. 已渲染节点可滚动到可见区域；未渲染的懒加载节点不强求
+ */
+function handleMapTowerClick(node: GimGraphNode): void {
+  showLineNodeProperties(node);
+  propsDrawer.classList.remove('collapsed');
+  btnToggleProps.style.right = '332px';
+  if (node.path) selectTreeRow(node.path);
 }
 
 /**
@@ -303,12 +454,12 @@ export function renderLineProjectPanels(
   // 确保 state 与 graph 同步（调用方可能已设置，此处幂等确认）
   state.currentGimGraph = graph;
 
-  // 1. 层级树
+  // 1. 层级树（左侧树点击走 handleTreeNodeClick：定位地图 + 显示属性）
   cbmTreePanel.innerHTML = '';
   if (!graph.root) {
     cbmTreePanel.innerHTML = '<div class="props-empty">线路工程未找到 CBM 层级树</div>';
   } else {
-    renderLineTreeNode(graph.root, cbmTreePanel, handleNodeSelect);
+    renderLineTreeNode(graph.root, cbmTreePanel, handleTreeNodeClick);
   }
 
   // 2. 文件设备面板摘要
@@ -322,8 +473,15 @@ export function renderLineProjectPanels(
   destroyLineMapView();
   const attrs = buildLineAttributeIndex(state);
   const mapData = extractLineMapData(graph, attrs);
+  // 模块级保存：供左侧树点击 collectDescendantTowerPaths 反查塔位 path
+  lineMapData = mapData;
+
+  // Phase 5：地图数据统计与未解析引用摘要（追加到文件设备面板）
+  renderMapStats(mapData);
+
   if (isLineMapDataValid(mapData)) {
-    lineMapHandle = renderLineMap(mapData, container, handleNodeSelect);
+    // 地图点击塔位走 handleMapTowerClick：显示属性 + 选中左侧树行
+    lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick);
   } else {
     // 塔位坐标缺失：在视口中央显示提示，不抛异常
     const tip = document.createElement('div');
@@ -343,6 +501,8 @@ export function renderLineProjectPanels(
       destroy() {
         if (tip.parentNode === container) container.removeChild(tip);
       },
+      focusTowerByNodePath() { return false; },
+      focusBboxByNodePaths() { return false; },
     };
   }
 
