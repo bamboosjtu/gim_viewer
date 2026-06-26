@@ -653,9 +653,11 @@ export function renderLineProjectPanels(
       lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick);
 
       // M4-A2 Finalization：上报回退状态（含可读 reason 供诊断展示）
+      // M4-A2 小修：fallback 后 MapLibre probe 已销毁，实际运行模式为 Canvas-only，
+      //             因此 maplibreEnabled=false（反映"当前是否仍有 MapLibre 在线"而非"是否曾启用过"）
       setBasemapStatus('osm-unavailable-fallback', {
         mode: LINE_BASEMAP_MODE,
-        maplibreEnabled: true,
+        maplibreEnabled: false,
         fallbackReason: reason instanceof Error ? reason.message : String(reason),
       });
 

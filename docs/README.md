@@ -10,6 +10,7 @@
 | [变电 GIM](gim_substation.md) | 变电站工程（GIMPKGS）文件格式、解析流程、3D 可视化 |
 | [线路 GIM](gim_line.md) | 输电线路工程（GIMPKGT）文件格式、地图渲染、树↔图联动 |
 | [开发者日志](dev-log.md) | 已知限制、技术债务、关键决策、日志系统、诊断工具 |
+| [线路几何审计](m4-b-line-geometry-research.md) | M4-B1 线路几何与导线语义审计：字段清单、悬链线候选字段、缺口与 M4-B2 建议 |
 
 ## GIM 文件格式规范
 
