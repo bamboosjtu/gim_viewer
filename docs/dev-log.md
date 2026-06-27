@@ -193,6 +193,17 @@ debugError(DEBUG_FRAGMENTS, '[Fragments] full stack trace', err);
 
 Tauri 桌面模式下按 `Ctrl+Shift+D`，将诊断 JSON 复制到剪贴板，控制台额外输出可读摘要。
 
+### Ctrl+Shift+C
+
+Tauri 桌面模式下按 `Ctrl+Shift+C`，复制当前线路工程的悬链线参数审计 JSON 到剪贴板，并在 Console 输出 Markdown 摘要（前 5 条样本，便于人工核验 KVALUE / SPLIT / MATRIX0 / BLHA 高程等字段）。
+
+- **触发条件**：仅线路工程成功渲染后有数据；变电工程 / 清空场景按此快捷键会提示"当前没有可导出的线路悬链线参数审计数据"。
+- **JSON 内容**：`generatedAt` + `parserVersion`（可选）+ `projectSummary` + 完整 `LineCatenaryParamAuditReport`（含覆盖率统计 + 4 类样本，每类最多 20 条）。
+- **不覆盖 Ctrl+Shift+D**：两个快捷键独立工作，互不影响。
+- **快捷键冲突**：若与系统或 DevTools 的 Ctrl+Shift+C 冲突，可改为 Ctrl+Alt+C（需同步更新 `src/app/bootstrap.ts` 与本文档）。
+- **OSM fallback 兼容**：fallback 后仍可调用，因为 payload 在 `renderLineProjectPanels` 阶段已构建，与底图模式无关。
+- **文档**：详见 [docs/m4-b3-catenary-param-validation.md](m4-b3-catenary-param-validation.md) §9 用户核验流程。
+
 ### JSON 结构
 
 ```json

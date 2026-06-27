@@ -276,3 +276,78 @@ debugLog(DEBUG_LINE_MAP, '[M4-B3] catenary param audit summary', summary);
 - 不影响渲染、不修改 state
 - 样本数量限制（每类最多 20 条）
 - 默认不集成到 Ctrl+Shift+D 诊断（避免 JSON 体积过大），仅在 `DEBUG_LINE_MAP` 开启时输出到 console
+
+---
+
+## 9. 用户核验流程（M4-B3A 导出包）
+
+### 9.1 导出方式
+
+1. 打开线路 GIM 工程（仅线路工程有数据；变电工程 / 清空场景按 Ctrl+Shift+C 会提示无数据）
+2. 等待地图渲染完成（OSM 底图加载或 Canvas fallback 均可）
+3. 按 `Ctrl + Shift + C`
+4. JSON 自动复制到剪贴板（含 `report.coverage` / `kValueSamples` / `splitSamples` / `matrix0FormatSamples` / `blhaElevationSamples` / `semanticHypotheses` / `blockingQuestions` / `recommendations`）
+5. Console 输出 Markdown 摘要（前 5 条样本，便于快速浏览）
+6. 顶部 loading 显示 `悬链线参数审计 JSON 已复制`（约 2.5 秒）
+
+**实现文件**：
+- `src/services/lineCatenaryAuditExportService.ts`：`buildLineCatenaryAuditExportPayload()` + `formatLineCatenaryAuditMarkdown()`
+- `src/ui/lineProjectView.ts`：`latestCatenaryAuditPayload` 模块级状态 + `getLatestCatenaryAuditPayload()` / `formatLatestCatenaryAuditMarkdown()` 导出
+- `src/app/bootstrap.ts`：`Ctrl+Shift+C` 快捷键处理器（Tauri 模式）
+
+**冲突说明**：若与系统或 DevTools 的 Ctrl+Shift+C 冲突，可改为 Ctrl+Alt+C（需同步更新 `bootstrap.ts` 与 `docs/dev-log.md`）。
+
+### 9.2 KVALUE 核验
+
+检查 JSON 中 `report.coverage.KVALUE` 与 `report.kValueSamples`：
+
+- 是否每条 WIRE 都有 KVALUE（看 `coverage.KVALUE.ratio`，> 0.5 视为高覆盖）
+- KVALUE 是否为数值（看 `kValueSamples[].numericValue !== null` 占比）
+- 数值范围是否像系数、张力、弧垂参数，还是编码（看 `numericValue` 量级）
+- 不同导线类型 KVALUE 是否有明显差异（按 `wireType` 分组对比）
+
+### 9.3 SPLIT 核验
+
+检查 `report.coverage.SPLIT` 与 `report.splitSamples`：
+
+- 是否为正整数（看 `splitSamples[].isInteger`）
+- 是否落在常见分裂数：1 / 2 / 4 / 6 / 8（看 `numericValue` 分布）
+- 是否与导线类型匹配（CONDUCTOR 常见 4 分裂 / 6 分裂；GROUNDWIRE 常见 1；OPGW 常见 1）
+
+### 9.4 MATRIX0 核验
+
+检查 `report.coverage.POINT0.MATRIX0` / `POINT1.MATRIX0` 与 `report.matrix0FormatSamples`：
+
+- 元素数量是 16 / 12 / 9 / 6 / 4 / 3 / 1（看 `parsedLength`）
+- 推断格式是否一致（看 `likelyFormat`，是否全部为 `4x4-matrix` 或 `triplet`）
+- 是否像变换矩阵（4x4 矩阵末行常为 `0,0,0,1`）
+- 是否包含平移量（前 3 行第 4 列）
+- 单位疑似米还是毫米（看数值量级）
+
+### 9.5 BLHA 高程核验
+
+检查 `report.coverage.POINT0.BLHA` / `POINT1.BLHA` 与 `report.blhaElevationSamples`：
+
+- 第 3 段是否稳定表现为高程（看 `point0Elevation` / `point1Elevation` 非 null 比例）
+- 两端高差是否合理（看 `elevationDelta`，应在合理范围如 ±50m）
+- 是否与塔位高程或地形高程相符
+
+### 9.6 核验结论模板
+
+完成核验后，建议填写以下结论模板：
+
+```text
+KVALUE：确认 / 未确认 / 不使用
+  - 含义：_______________
+  - 单位：_______________
+SPLIT：确认 / 未确认 / 不使用
+  - 含义：_______________
+MATRIX0：确认 / 未确认 / 不使用
+  - 含义：_______________
+  - 坐标系：_______________
+  - 单位：_______________
+BLHA 高程：确认 / 未确认 / 不使用
+  - 含义：纬度,经度,高程,方位角（已确认）
+M4-B4 路线：示意悬链线 / 工程语义悬链线 / 暂缓
+  - 理由：_______________
+```

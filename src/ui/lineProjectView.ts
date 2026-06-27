@@ -26,6 +26,9 @@ import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
 import { buildWireSemanticInfo } from '../services/lineWireSemanticService.js';
 import type { WireSemanticInfo } from '../services/lineWireSemanticService.js';
 import { buildLineCatenaryParamAuditReport } from '../services/lineGeometryAuditService.js';
+import { buildLineCatenaryAuditExportPayload } from '../services/lineCatenaryAuditExportService.js';
+import type { LineCatenaryAuditExportPayload } from '../services/lineCatenaryAuditExportService.js';
+import { formatLineCatenaryAuditMarkdown } from '../services/lineCatenaryAuditExportService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
 import { ENABLE_MAPLIBRE_EXPERIMENT, ENABLE_PMTILES_EXPERIMENT, PMTILES_DEMO_URL, LINE_BASEMAP_MODE } from '../config/features.js';
 import { setBasemapStatus, resetBasemapStatus } from '../services/basemapStatusService.js';
@@ -485,6 +488,25 @@ let lineMapHandle: LineMapViewHandle | null = null;
 let lineMapData: LineMapData | null = null;
 
 /**
+ * M4-B3A：最新悬链线参数审计导出 payload（模块级，供 Ctrl+Shift+C 复制使用）。
+ *
+ * 仅线路工程成功渲染后有值；变电工程 / 清空场景时为 null。
+ * 在 renderLineProjectPanels 完成后赋值，destroyLineMapView 中清空。
+ */
+let latestCatenaryAuditPayload: LineCatenaryAuditExportPayload | null = null;
+
+/** M4-B3A：读取最新悬链线审计 payload（供快捷键 Ctrl+Shift+C 调用） */
+export function getLatestCatenaryAuditPayload(): LineCatenaryAuditExportPayload | null {
+  return latestCatenaryAuditPayload;
+}
+
+/** M4-B3A：将 payload 格式化为 Markdown（供快捷键 Ctrl+Shift+C 调用） */
+export function formatLatestCatenaryAuditMarkdown(): string | null {
+  if (!latestCatenaryAuditPayload) return null;
+  return formatLineCatenaryAuditMarkdown(latestCatenaryAuditPayload);
+}
+
+/**
  * M4-A1：MapLibre probe handle（实验性，默认关闭）。
  *
  * 仅在 ENABLE_MAPLIBRE_EXPERIMENT=true 时创建，与 Canvas 主地图并存。
@@ -536,6 +558,8 @@ export function destroyLineMapView(): void {
     maplibreProbeHandle = null;
   }
   lineMapData = null;
+  // M4-B3A：清空悬链线审计 payload（避免变电工程 / 清空场景残留旧线路数据）
+  latestCatenaryAuditPayload = null;
   // M4-A2 Finalization：重置底图运行状态（避免下次打开工程时残留旧状态）
   resetBasemapStatus();
 }
@@ -676,6 +700,13 @@ export function renderLineProjectPanels(
   const mapData = extractLineMapData(graph, attrs);
   // 模块级保存：供左侧树点击 collectDescendantTowerPaths 反查塔位 path
   lineMapData = mapData;
+
+  // M4-B3 / M4-B3A：构建悬链线参数审计导出 payload（模块级保存，供 Ctrl+Shift+C 复制）
+  // parserVersion 当前前端拿不到（在 Rust 侧 PARSER_VERSION 常量），暂省略
+  latestCatenaryAuditPayload = buildLineCatenaryAuditExportPayload({
+    graph,
+    mapData,
+  });
 
   // M4-B3：在 debug 模式输出悬链线参数审计摘要（仅摘要，不输出全部样本）
   // 仅在 DEBUG_LINE_MAP 开启时执行，避免生产环境性能影响

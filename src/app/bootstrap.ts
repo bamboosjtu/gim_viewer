@@ -132,6 +132,40 @@ async function bootstrapAsync(): Promise<void> {
         }
       }
     });
+
+    // M4-B3A：悬链线参数审计导出快捷键 Ctrl+Shift+C
+    // - 复制完整审计 JSON 到剪贴板（含 report.coverage / kValueSamples / splitSamples /
+    //   matrix0FormatSamples / blhaElevationSamples / semanticHypotheses / blockingQuestions）
+    // - 控制台输出 Markdown 摘要（前 5 条样本，便于人工核验）
+    // - 仅线路工程有数据；变电工程 / 清空场景 / OSM fallback 后仍可调用
+    // - 若与系统/DevTools 快捷键冲突，可改为 Ctrl+Alt+C（需同步更新 docs/dev-log.md）
+    document.addEventListener('keydown', async (e) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+        e.preventDefault();
+        try {
+          const { getLatestCatenaryAuditPayload, formatLatestCatenaryAuditMarkdown } =
+            await import('../ui/lineProjectView.js');
+          const payload = getLatestCatenaryAuditPayload();
+          if (!payload) {
+            showLoading('当前没有可导出的线路悬链线参数审计数据');
+            setTimeout(hideLoading, 2500);
+            return;
+          }
+          showLoading('正在复制悬链线参数审计 JSON...');
+          const jsonStr = JSON.stringify(payload, null, 2);
+          await navigator.clipboard.writeText(jsonStr);
+          const markdown = formatLatestCatenaryAuditMarkdown();
+          console.log('[M4-B3A] 悬链线参数审计摘要\n' + (markdown || ''));
+          console.log('[M4-B3A] 完整 JSON 已复制到剪贴板（' + jsonStr.length + ' 字节）');
+          showLoading('悬链线参数审计 JSON 已复制');
+          setTimeout(hideLoading, 2500);
+        } catch (err) {
+          console.error('[M4-B3A] 悬链线参数审计导出失败:', err);
+          showLoading(`导出失败: ${err instanceof Error ? err.message : String(err)}`);
+          setTimeout(hideLoading, 3000);
+        }
+      }
+    });
   }
 }
 
