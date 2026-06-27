@@ -17,12 +17,14 @@
 
 ```plaintext
 CBM
- └─ DEV
-     ├─ PHM
-     │   ├─ MOD
-     │   └─ STL
-     └─ DEV / SUBDEVICE
-         └─ ...
+ ├─ DEV
+ │   ├─ PHM
+ │   │   ├─ MOD
+ │   │   └─ STL
+ │   └─ DEV / SUBDEVICE
+ ├─ IFC
+ ├─ FAM
+ └─ CBM
 ```
 
 ## 2. 规范背景与 demo 实证差异
@@ -525,7 +527,10 @@ CBM -> SUBDEVICE -> CBM -> ...
 
 其中：
 
-- `CBM -> DEV`：已有解析器和既有文档中通过 `OBJECTMODELPOINTER` / `BASEFAMILY` 等字段建立。
+- `CBM -> DEV`：通过 `OBJECTMODELPOINTER=*.dev` 建立。
+- `CBM -> FAM`：通过 `BASEFAMILY=*.fam` 建立。
+- `CBM -> IFC`：通过 `IFCFILE + IFCGUID` 建立，当前只在 demo-substation 中观察到。
+- `CBM -> CBM`：通过 `SUBDEVICEn=*.cbm` 建立递归层级。
 - `DEV -> PHM`：当前 demo 已观察到。
 - `DEV -> DEV`：当前 demo 已观察到。
 - `PHM -> MOD/STL`：当前 demo 已观察到。
@@ -544,3 +549,5 @@ CBM -> SUBDEVICE -> CBM -> ...
 - PHM 通过 `SOLIDMODELn` 引用 `.mod` 或 `.stl`，承担组合模型 / 装配体角色。
 - DEV 可以通过 `SOLIDMODELn` 引用 `.phm` 或 `.dev`。
 - DEV 可以通过 `SUBDEVICEn` 引用子 `.dev`，说明设备物理模型存在递归组合关系。
+- CBM 通过 `OBJECTMODELPOINTER` 指向 `.dev`，并已完成当前两个 demo 的文件存在性校验。
+- CBM 通过 `BASEFAMILY`、`SUBDEVICEn`、`IFCFILE` 建立 FAM / CBM / IFC 引用，当前两个 demo 中引用目标均存在。
