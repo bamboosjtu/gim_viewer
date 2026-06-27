@@ -523,6 +523,14 @@ DEV -> SUBDEVICE -> DEV -> ...
 CBM -> DEV -> PHM -> MOD/STL
 CBM -> IFCFILE + IFCGUID -> IFC
 CBM -> SUBDEVICE -> CBM -> ...
+
+CBM
+ ├─ OBJECTMODELPOINTER -> DEV
+ │   ├─ SOLIDMODEL -> PHM -> SOLIDMODEL -> MOD/STL
+ │   └─ SOLIDMODEL/SUBDEVICE -> DEV
+ ├─ BASEFAMILY -> FAM
+ ├─ SUBDEVICE -> CBM
+ └─ IFCFILE + IFCGUID -> IFC
 ```
 
 其中：
@@ -549,5 +557,7 @@ CBM -> SUBDEVICE -> CBM -> ...
 - PHM 通过 `SOLIDMODELn` 引用 `.mod` 或 `.stl`，承担组合模型 / 装配体角色。
 - DEV 可以通过 `SOLIDMODELn` 引用 `.phm` 或 `.dev`。
 - DEV 可以通过 `SUBDEVICEn` 引用子 `.dev`，说明设备物理模型存在递归组合关系。
+- DEV / PHM 层文件级引用完整性已完成校验，当前两个 demo 中 `DEV -> PHM/DEV`、`PHM -> MOD/STL` 的引用目标均存在。
 - CBM 通过 `OBJECTMODELPOINTER` 指向 `.dev`，并已完成当前两个 demo 的文件存在性校验。
 - CBM 通过 `BASEFAMILY`、`SUBDEVICEn`、`IFCFILE` 建立 FAM / CBM / IFC 引用，当前两个 demo 中引用目标均存在。
+- 当前完整静态链路已可闭合到文件存在性层面，但尚未进入 MOD/STL 几何解析和 IFCGUID 内部构件命中校验。
