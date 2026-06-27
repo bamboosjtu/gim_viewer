@@ -1852,60 +1852,769 @@ CBM
 
 当前只确认文件级引用完整性，不代表已经完成几何解析、属性语义解析或渲染实现。
 
-## 19. Round 2-A：IFCGUID -> IFC 内部命中校验
+## 19. Round 2 定位
 
-Round 2-A 对 `demo-substation` 中 4360 条 `IFCFILE + IFCGUID` 记录进行了 IFC 文本命中校验。
-
-当前结果：
+Round 2 的目标不是进入几何解析或功能开发，而是在 Round 1 文件级引用链闭合的基础上，继续验证两个关键问题：
 
 ```text
-IFCFILE 文件存在：4360 / 4360
-IFCGUID 精确命中声明 IFC 文件：3252 / 4360
-IFCGUID 大小写不敏感命中声明 IFC 文件：3296 / 4360
-任意 IFC 文件均未命中：1064 / 4360
+1. CBM 中的 IFCFILE + IFCGUID 是否真的能定位 IFC 文件内部构件。
+2. CBM 中的 BASEFAMILY -> FAM 是否能解释节点属性、节点类型或异常引用。
 ```
 
-当前判断：
+当前仍保持 analysis 范围：
 
-IFCFILE 文件存在性 100% 通过。
-IFCGUID 不是全部都能在 IFC 文件中命中。
-精确命中的 IFCGUID 可作为强 IFC 构件关联。
-大小写不敏感命中的 IFCGUID 可作为弱关联。
-硬未命中的 IFCGUID 当前不应作为 IFC 构件定位依据。
+```text
+不改 src
+不改 SQLite schema
+不新增 UI
+不实现 IFC 构件高亮
+不实现 MOD/STL 几何解析
+不改变当前 MVP 行为
+```
 
-硬未命中项全部具有以下 CBM 特征：
+Round 2 当前分析对象仍然是：
+
+```text
+demo-line
+demo-substation
+```
+
+Round 2 的核心判断是：
+
+```text
+IFCGUID 应视为可选定位能力，而不是 GIM 浏览器的强制加载前提。
+FAM 应视为 CBM 节点关联的属性 sidecar，而不是先验定义为可复用族模板。
+```
+
+---
+
+## 20. Round 2 总体计划
+
+Round 2 按以下阶段推进：
+
+| 阶段          | 目标                                               | 产出                                                                |
+| ----------- | ------------------------------------------------ | ----------------------------------------------------------------- |
+| Round 2-A   | 校验 `IFCFILE + IFCGUID` 是否能在 IFC 文件文本中命中          | `5-gim-reference-integrity.md` 中 IFCGUID 文本命中与 hard missing 分型    |
+| Round 2-A.1 | 解释 hard missing IFCGUID 的集中模式与浏览器容错策略            | `5-gim-reference-integrity.md` 中 hard missing 解释与浏览器实现影响          |
+| Round 2-B1  | 校验 `CBM -> BASEFAMILY -> FAM` 引用完整性与覆盖关系         | `6-cbm-fam-consistency.md`                                        |
+| Round 2-B2  | 分析不同 CBM 类型关联的 FAM 字段形态                          | `6-cbm-fam-consistency.md`                                        |
+| Round 2-B3  | 验证 hard missing F4System 的 FAM 是否能解释 IFCGUID 未命中 | `5-gim-reference-integrity.md` 与 `6-cbm-fam-consistency.md` 的交叉结论 |
+
+当前已完成到 Round 2-B3。
+
+---
+
+## 21. Round 2 分析思路
+
+Round 2 采用“先定位能力、再属性 sidecar、最后解释异常”的方式推进。
+
+整体顺序是：
+
+```text
+CBM 中的 IFCFILE + IFCGUID
+  -> IFCFILE 文件存在性
+  -> IFCGUID 在声明 IFC 文件中的文本命中
+  -> IFCGUID 在任意 IFC 文件中的文本命中
+  -> 精确命中 / 大小写不敏感命中 / hard missing 分型
+  -> hard missing 的 CBM 上下文分析
+  -> hard missing 的 FAM 对照分析
+  -> 浏览器容错策略
+```
+
+并行检查：
+
+```text
+CBM 中的 BASEFAMILY
+  -> FAM 文件存在性
+  -> CBM 类型与 FAM 覆盖关系
+  -> FAM 字段行解析
+  -> 线路 / 变电 FAM schema 差异
+  -> FAM 是否能解释 hard missing IFCGUID
+```
+
+之所以不直接把 IFCGUID 作为强约束，是因为：
+
+```text
+GIM 浏览器需要面向实际工程文件。
+实际工程文件可能存在 IFC 缺失、IFCGUID 未命中、通用设备不落 IFC、族表达、占位节点或导出残留关联。
+浏览器应尽量加载可用部分，并对不可定位部分发出诊断告警。
+```
+
+---
+
+## 22. Step 1：IFCGUID -> IFC 文本命中校验
+
+### 22.1 目的
+
+验证 `demo-substation` 中 CBM 记录的 `IFCFILE + IFCGUID` 是否真的能在 IFC 文件内部命中。
+
+本步骤只做文本级命中校验：
+
+```text
+不解析 IFC 语义
+不展开 IFC 构件属性
+不做 IFC 构件高亮
+不判断 GIM 是否规范违规
+```
+
+### 22.2 命令
+
+本步骤基于 `demo-substation` 的 CBM 与 IFC 文件生成诊断 CSV：
+
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+# 读取 CBM 中的 IFCFILE + IFCGUID
+# 对声明 IFC 文件进行精确文本命中检查
+# 对声明 IFC 文件进行大小写不敏感文本命中检查
+# 对当前 demo-substation 中全部 IFC 文件进行任意文件命中检查
+# 输出诊断结果
+```
+
+核心输出文件：
+
+```text
+docs/schema/_generated/demo-substation-ifc-guid-text-diagnosis.csv
+```
+
+后续统计基于该 CSV：
+
+```powershell
+Import-Csv ".\docs\schema\_generated\demo-substation-ifc-guid-text-diagnosis.csv" |
+  Group-Object declaredIfcExists, exactInDeclaredIfc, caseInsensitiveInDeclaredIfc, exactInAnyIfc, caseInsensitiveInAnyIfc |
+  Sort-Object Count -Descending |
+  Select-Object Count, Name |
+  Format-Table -AutoSize
+```
+
+### 22.3 当前结果
+
+总体结果：
+
+```text
+IFC 引用总数：4360
+IFCFILE 文件存在：4360
+IFC 文件缺失：0
+
+IFCGUID 精确命中声明 IFC 文件：3252
+IFCGUID 精确未命中声明 IFC 文件：1108
+
+IFCGUID 大小写不敏感命中声明 IFC 文件：3296
+IFCGUID 大小写不敏感未命中声明 IFC 文件：1064
+
+IFCGUID 精确命中任意 IFC 文件：3252
+任意 IFC 文件均未精确命中：1108
+
+IFCGUID 大小写不敏感命中任意 IFC 文件：3296
+任意 IFC 文件均未大小写不敏感命中：1064
+```
+
+分型结果：
+
+```text
+3252 条：精确命中，可作为强 IFC 构件关联
+44 条：精确未命中，但大小写不敏感命中，可作为弱 IFC 构件关联
+1064 条：任意 IFC 文件均未命中，不应直接用于 IFC 构件定位
+```
+
+### 22.4 分析结论
+
+当前 `IFCFILE + IFCGUID` 不能统一视为“可直接定位 IFC 构件”的强关联。
+
+应按三类处理：
+
+| 类型            | 判断                           |
+| ------------- | ---------------------------- |
+| 精确命中          | 可作为强 IFC 构件关联                |
+| 大小写不敏感命中      | 可作为弱 IFC 构件关联，后续实现中需要记录归一化警告 |
+| 任意 IFC 文件均未命中 | 不应直接用于 IFC 构件定位              |
+
+当前只说明 IFCGUID 的定位能力存在差异，不说明 GIM 文件错误，也不说明规范不合规。
+
+---
+
+## 23. Step 2：hard missing IFCGUID 上下文分析
+
+### 23.1 目的
+
+解释 1064 条 hard missing IFCGUID 的上下文特征。
+
+重点回答：
+
+```text
+这些 hard missing 是否是随机缺失？
+是否集中在少数 IFC 文件？
+是否集中在少数 IFCGUID？
+是否与 CBM 字段缺失、FAM 缺失或 SYSCLASSIFYNAME 有关？
+```
+
+### 23.2 命令
+
+统计 hard missing 的 CBM 上下文：
+
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+$diag = Import-Csv ".\docs\schema\_generated\demo-substation-ifc-guid-text-diagnosis.csv"
+
+$diag |
+  Where-Object { $_.caseInsensitiveInAnyIfc -eq "False" } |
+  Group-Object ifcGuid |
+  Sort-Object Count -Descending |
+  Select-Object -First 30 Count, Name |
+  Format-Table -AutoSize
+```
+
+比较命中组与未命中组的字段集合：
+
+```powershell
+$rows |
+  Group-Object caseInsensitiveInAnyIfc, keySignature |
+  Sort-Object Count -Descending |
+  Select-Object Count, Name |
+  Format-Table -AutoSize
+```
+
+比较命中组与未命中组的 GUID 复用情况：
+
+```powershell
+$guidReuse |
+  Group-Object hit |
+  ForEach-Object {
+    $group = $_.Group
+
+    [PSCustomObject]@{
+      hit = $_.Name
+      uniqueGuid = $group.Count
+      maxReuse = ($group | Measure-Object count -Maximum).Maximum
+      reuseGt10 = ($group | Where-Object { $_.count -gt 10 }).Count
+      reuseGt100 = ($group | Where-Object { $_.count -gt 100 }).Count
+    }
+  } |
+  Format-Table -AutoSize
+```
+
+### 23.3 当前结果
+
+hard missing CBM 上下文：
 
 ```text
 ENTITYNAME = F4System
 OBJECTMODELPOINTER = 空
 BASEFAMILY = 有值
 SUBDEVICE = 无
+SUBDEVICES.NUM = 0
 ```
 
-## 20. Round 2-B：CBM -> FAM 基础分析
-
-Round 2-B1 / B2 已形成独立文档：
+hard missing 高度集中在两个 GUID：
 
 ```text
-docs/schema/6-cbm-fam-consistency.md
+3Zu5Bv0LOHrPC10026FoUj：740 条
+3Aw$FV5MbAufEo59pkoNlf：193 条
 ```
 
-当前分析结论：
+这两个 GUID 合计：
 
-1. 当前两个 demo 中，CBM -> BASEFAMILY -> FAM 的文件级引用完整性为 100%。
-2. 凡是 CBM 写了 BASEFAMILY，目标 FAM 文件均存在。
-3. 当前两个 demo 中，BASEFAMILY 基本呈现一 CBM 对一 FAM 的实例级对应关系，暂未观察到多 CBM 复用同一个 FAM。
-4. FAM 更适合作为 CBM 节点的属性 sidecar，而不是先验定义为可复用族模板。
-5. 线路样本中，DEV 型业务对象节点全部有 FAM；F4System 分组节点通常没有 FAM。
-6. 变电样本中，IFC 型和 DEV 型 CBM 全部有 FAM；F4System 既可能是 IFC 关联节点，也可能是 DEV 关联节点。
-7. 不能仅凭 ENTITYNAME=F4System 判断节点是否为分组节点，必须结合 modelKind、IFCFILE、OBJECTMODELPOINTER、BASEFAMILY、SUBDEVICE 等字段。
-8. 线路与变电 FAM 字段 schema 差异显著，后续解析应保持弱 schema / key-value 结构，不宜过早固定 DTO。
+```text
+933 / 1064 = 87.69%
+```
 
-当前仍不能下的结论：
+两个高频 GUID 的分布：
 
-- FAM 是标准族模板
-- FAM 可跨 CBM 复用
-- FAM 字段可以统一映射成固定 DTO
-- F4System 一定是分组节点
-- F4System 一定是具体构件节点
-- CBM 与 FAM 有同名字段必须一致
+```text
+3Zu5Bv0LOHrPC10026FoUj：
+- 740 个 CBM
+- 740 个不同 BASEFAMILY
+- 1 个 TRANSFORMMATRIX
+- 分布在 2 个 IFCFILE
+
+3Aw$FV5MbAufEo59pkoNlf：
+- 193 个 CBM
+- 193 个不同 BASEFAMILY
+- 1 个 TRANSFORMMATRIX
+- 分布在 1 个 IFCFILE
+```
+
+命中组与未命中组的字段集合一致：
+
+```text
+BASEFAMILY
+ENTITYNAME
+IFCFILE
+IFCGUID
+OBJECTMODELPOINTER
+SUBDEVICES.NUM
+SYSCLASSIFYNAME
+TRANSFORMMATRIX
+```
+
+GUID 复用对照：
+
+```text
+命中组：
+uniqueGuid = 2704
+maxReuse = 4
+reuseGt10 = 0
+reuseGt100 = 0
+
+未命中组：
+uniqueGuid = 128
+maxReuse = 740
+reuseGt10 = 2
+reuseGt100 = 2
+```
+
+### 23.4 分析结论
+
+hard missing 的核心特征不是 FAM、不是 CBM 字段集合、也不是 SYSCLASSIFYNAME。
+
+更准确的结论是：
+
+```text
+命中组表现为“构件级 GUID 分散引用”。
+hard missing 组表现为“少数不存在于 IFC 文件中的 GUID 被大量 CBM 节点复用”。
+```
+
+因此，hard missing 更像：
+
+```text
+部分 F4System + IFC 节点记录了不可定位 IFCGUID。
+这些 GUID 不能作为普通构件级 IFCGUID 处理。
+```
+
+但该现象不应直接解释为 GIM 文件错误或规范不合规。
+
+从浏览器角度，应处理为：
+
+```text
+允许加载
+保留 CBM 节点
+不执行 IFC 构件定位
+在诊断结果中提示 IFCGUID 无法定位
+```
+
+---
+
+## 24. Step 3：CBM -> FAM 引用完整性与覆盖关系
+
+### 24.1 目的
+
+验证 CBM 中的 `BASEFAMILY` 是否能找到目标 FAM 文件，并观察 FAM 是否具有复用型族模板特征。
+
+重点回答：
+
+```text
+CBM 写了 BASEFAMILY 时，FAM 文件是否存在？
+一个 FAM 是否被多个 CBM 复用？
+不同 modelKind 的 CBM 是否都有 FAM？
+FAM 更像族模板，还是实例属性 sidecar？
+```
+
+### 24.2 命令
+
+统计 CBM -> FAM 基础关系：
+
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+Show-CbmFamStats ".\docs\schema\_generated\demo-line-cbm-fam-context.csv"
+Show-CbmFamStats ".\docs\schema\_generated\demo-substation-cbm-fam-context.csv"
+```
+
+按 modelKind 汇总：
+
+```powershell
+Show-CbmFamByModelKind ".\docs\schema\_generated\demo-line-cbm-fam-context.csv"
+Show-CbmFamByModelKind ".\docs\schema\_generated\demo-substation-cbm-fam-context.csv"
+```
+
+按 entityName + modelKind 汇总：
+
+```powershell
+Show-CbmFamByEntityAndModel ".\docs\schema\_generated\demo-line-cbm-fam-context.csv"
+Show-CbmFamByEntityAndModel ".\docs\schema\_generated\demo-substation-cbm-fam-context.csv"
+```
+
+核心输出文件：
+
+```text
+docs/schema/_generated/demo-line-cbm-fam-context.csv
+docs/schema/_generated/demo-substation-cbm-fam-context.csv
+```
+
+### 24.3 当前结果
+
+总体统计：
+
+| 样本              | CBM 总数 | 有 BASEFAMILY | 无 BASEFAMILY | FAM 存在 | FAM 缺失 | 唯一 BASEFAMILY |
+| --------------- | -----: | -----------: | -----------: | -----: | -----: | ------------: |
+| demo-line       |  27829 |        21967 |         5862 |  21967 |      0 |         21967 |
+| demo-substation |   8701 |         8554 |          147 |   8554 |      0 |          8554 |
+
+demo-line 按 modelKind：
+
+| modelKind        |    总数 | 有 BASEFAMILY | 无 BASEFAMILY | FAM 存在 | FAM 缺失 |     覆盖率 |
+| ---------------- | ----: | -----------: | -----------: | -----: | -----: | ------: |
+| DEV              | 21857 |        21857 |            0 |  21857 |      0 | 100.00% |
+| CBM_GROUP        |  5534 |            0 |         5534 |      0 |      0 |   0.00% |
+| NO_MODEL_POINTER |   438 |          110 |          328 |    110 |      0 |  25.11% |
+
+demo-substation 按 modelKind：
+
+| modelKind        |   总数 | 有 BASEFAMILY | 无 BASEFAMILY | FAM 存在 | FAM 缺失 |     覆盖率 |
+| ---------------- | ---: | -----------: | -----------: | -----: | -----: | ------: |
+| IFC              | 4360 |         4360 |            0 |   4360 |      0 | 100.00% |
+| DEV              | 4179 |         4179 |            0 |   4179 |      0 | 100.00% |
+| NO_MODEL_POINTER |  162 |           15 |          147 |     15 |      0 |   9.26% |
+
+### 24.4 分析结论
+
+当前两个 demo 中：
+
+```text
+凡是 CBM 写了 BASEFAMILY，目标 FAM 文件均存在。
+CBM -> BASEFAMILY -> FAM 文件级引用完整性为 100%。
+```
+
+同时：
+
+```text
+demo-line:
+hasBaseFamily = 21967
+uniqueBaseFamily = 21967
+
+demo-substation:
+hasBaseFamily = 8554
+uniqueBaseFamily = 8554
+```
+
+因此，当前两个 demo 中，`BASEFAMILY` 呈现一 CBM 对一 FAM 的实例级对应关系。
+
+当前不宜把 FAM 先验定义为“可复用族模板”。更稳妥的表述是：
+
+```text
+FAM 是 CBM 节点关联的属性文件。
+当前两个 demo 中，BASEFAMILY 呈现实例级属性 sidecar 特征。
+```
+
+---
+
+## 25. Step 4：FAM 字段形态分析
+
+### 25.1 目的
+
+观察线路和变电 FAM 的字段形态，判断是否可以设计统一固定 DTO。
+
+重点回答：
+
+```text
+FAM 字段是英文 key 还是中文 key？
+线路和变电 FAM schema 是否相同？
+是否可以提前固定 FAM DTO？
+```
+
+### 25.2 命令
+
+统计 FAM 行类型：
+
+```powershell
+Import-Csv ".\docs\schema\_generated\demo-line-fam-field-rows.csv" |
+  Group-Object rowKind |
+  Sort-Object Count -Descending |
+  Select-Object Count, Name |
+  Format-Table -AutoSize
+
+Import-Csv ".\docs\schema\_generated\demo-substation-fam-field-rows.csv" |
+  Group-Object rowKind |
+  Sort-Object Count -Descending |
+  Select-Object Count, Name |
+  Format-Table -AutoSize
+```
+
+统计 FAM key 分布：
+
+```powershell
+Import-Csv ".\docs\schema\_generated\demo-line-fam-field-rows.csv" |
+  Where-Object { $_.key -ne "" } |
+  Group-Object key |
+  Sort-Object Count -Descending |
+  Select-Object -First 80 Count, Name |
+  Format-Table -AutoSize
+
+Import-Csv ".\docs\schema\_generated\demo-substation-fam-field-rows.csv" |
+  Where-Object { $_.key -ne "" } |
+  Group-Object key |
+  Sort-Object Count -Descending |
+  Select-Object -First 80 Count, Name |
+  Format-Table -AutoSize
+```
+
+核心输出文件：
+
+```text
+docs/schema/_generated/demo-line-fam-field-rows.csv
+docs/schema/_generated/demo-substation-fam-field-rows.csv
+```
+
+### 25.3 当前结果
+
+demo-line FAM 行类型：
+
+| rowKind             |     数量 |
+| ------------------- | -----: |
+| CN_KEY_VALUE        | 179123 |
+| KEY_VALUE           |   3063 |
+| CONTINUATION_OR_RAW |   1330 |
+
+demo-line 主要 key：
+
+```text
+MATERIALCODE
+MANUFACTURER
+BUNDLENUMBER
+TYPE
+SAFETYCOEFFICIENTMAXTENSION
+EVERYDAYTENSION
+MAXTENSION
+PHASE
+VOLTAGE
+WIREPOINT
+TOWERPOINT
+INSULATORTYPE
+TOWERNUMBER
+LINEANGLE
+RULINGSPAN
+SPAN
+```
+
+demo-substation FAM 行类型：
+
+| rowKind             |    数量 |
+| ------------------- | ----: |
+| CN_KEY_VALUE        | 40858 |
+| CONTINUATION_OR_RAW |  6029 |
+| KEY_VALUE           |     9 |
+
+demo-substation 主要 key：
+
+```text
+额定电压
+生产厂家
+单位
+电网工程标识系统编码
+软件版本
+装置名称
+装置型号
+装置编号
+实物ID
+工程中名称
+附件名称
+建设期次
+三维设计模型编码
+设备名称
+电压等级
+调度编码
+```
+
+### 25.4 分析结论
+
+线路 FAM 以英文 KEY 为主，偏线路工程参数：
+
+```text
+导线属性
+杆塔属性
+绝缘子串属性
+基础属性
+张力 / 应力 / 相序 / 电压等级等工程参数
+```
+
+变电 FAM 以中文 KEY 为主，偏设备台账、工程管理和设备参数：
+
+```text
+额定电压
+生产厂家
+装置名称 / 型号 / 编号
+电网工程标识系统编码
+三维设计模型编码
+实物ID
+工程中名称
+```
+
+因此：
+
+```text
+线路与变电 FAM schema 差异显著。
+后续解析应保持弱 schema / key-value 结构。
+不宜过早固定 FAM DTO。
+```
+
+---
+
+## 26. Step 5：hard missing F4System 的 FAM 对照分析
+
+### 26.1 目的
+
+验证 hard missing IFCGUID 是否可以通过 FAM 字段解释。
+
+重点回答：
+
+```text
+hard missing F4System 是否有关联 FAM？
+这些 FAM 是否存在？
+这些 FAM 是否有有效字段？
+命中组和 hard missing 组的 FAM 是否存在差异？
+```
+
+### 26.2 命令
+
+检查 hard missing F4System 的 FAM 文件长度：
+
+```powershell
+$ctx = Import-Csv ".\docs\schema\_generated\demo-substation-ifc-guid-hard-missing-cbm-context.csv"
+
+$rows = foreach ($row in $ctx) {
+  $famName = $row.baseFamily.Trim()
+
+  $file = Get-ChildItem ".\demo\demo-substation" -Recurse -File -Filter $famName |
+    Select-Object -First 1
+
+  [PSCustomObject]@{
+    sourceRelativePath = $row.sourceRelativePath
+    ifcFile = $row.ifcFile
+    ifcGuid = $row.ifcGuid
+    baseFamily = $famName
+    famExists = ($file -ne $null)
+    famLength = if ($file -ne $null) { $file.Length } else { $null }
+  }
+}
+
+$rows |
+  Group-Object famExists, famLength |
+  Sort-Object Count -Descending |
+  Select-Object Count, Name |
+  Format-Table -AutoSize
+```
+
+对照命中组与未命中组的 FAM 是否为空：
+
+```powershell
+$rows |
+  Where-Object { $_.entityName -eq "F4System" -and $_.modelKind -eq "IFC" } |
+  Group-Object caseInsensitiveInAnyIfc, famIsBlank |
+  Sort-Object Count -Descending |
+  Select-Object Count, Name |
+  Format-Table -AutoSize
+```
+
+### 26.3 当前结果
+
+hard missing F4System 的 FAM 文件检查：
+
+```text
+1064 True, 2
+```
+
+汇总：
+
+```text
+total = 1064
+famExists = 1064
+famMissing = 0
+zeroOrBlankFam = 1064
+nonEmptyFam = 0
+```
+
+命中组与未命中组对照：
+
+```text
+3296 True, True
+1064 False, True
+```
+
+含义：
+
+```text
+F4System + IFC 节点一共 4360 条。
+其中 3296 条 IFCGUID 能在 IFC 中命中，FAM 也是空的。
+其中 1064 条 IFCGUID 不能在 IFC 中命中，FAM 也是空的。
+```
+
+### 26.4 分析结论
+
+FAM 不能解释 hard missing IFCGUID。
+
+原因是：
+
+```text
+F4System + IFC 节点的 FAM 基本都是空 sidecar。
+空 FAM 不是 hard missing 的专属特征。
+命中组和未命中组的 FAM 都是空的。
+```
+
+因此，hard missing 的原因不在 FAM 字段，而应回到：
+
+```text
+IFCGUID 是否存在于 IFC 文件
+GUID 复用模式
+CBM 节点是否为可定位构件
+浏览器是否应容错降级
+```
+
+---
+
+## 27. Round 2 当前结论
+
+Round 2 当前形成以下结论：
+
+```text
+1. IFCFILE 文件存在性可以通过，但 IFCGUID 不一定能在 IFC 内部命中。
+2. IFCGUID 应分为强关联、弱关联、不可定位关联三类。
+3. hard missing IFCGUID 不应直接判定为 GIM 文件错误或规范不合规。
+4. hard missing 的核心特征是少数不存在于 IFC 文件中的 GUID 被大量 CBM 节点复用。
+5. FAM 不能解释 hard missing IFCGUID，因为 F4System + IFC 节点的 FAM 基本都是空 sidecar。
+6. CBM -> BASEFAMILY -> FAM 的文件级引用完整性为 100%。
+7. 当前两个 demo 中，FAM 呈现一 CBM 对一 FAM 的实例属性 sidecar 特征。
+8. 线路与变电 FAM schema 差异显著，后续解析应保持弱 schema / key-value 结构。
+9. 浏览器实现应把 IFCGUID 视为可选定位能力，而不是强制加载前提。
+```
+
+浏览器侧建议策略：
+
+| 场景                            | 浏览器策略                             |
+| ----------------------------- | --------------------------------- |
+| IFCFILE 存在 + IFCGUID 精确命中     | 可作为强 IFC 构件关联                     |
+| IFCFILE 存在 + IFCGUID 大小写不敏感命中 | 可作为弱 IFC 构件关联，并记录归一化警告            |
+| IFCFILE 存在 + IFCGUID 未命中      | 不阻断加载，保留 CBM 节点，诊断提示 IFCGUID 无法定位 |
+| IFCFILE 缺失                    | 不阻断加载，保留 CBM 节点，诊断提示 IFC 文件缺失     |
+| FAM 为空                        | 不阻断加载，属性面板显示为空或提示无属性字段            |
+| FAM schema 差异                 | 使用 key-value 弱 schema，不提前固定 DTO   |
+
+---
+
+## 28. Round 2 当前边界
+
+当前已经完成：
+
+```text
+IFCGUID 文本命中校验
+IFCGUID hard missing 分型
+hard missing 高频 GUID 复用分析
+hard missing F4System 的 FAM 对照分析
+CBM -> FAM 引用完整性校验
+CBM 类型与 FAM 覆盖关系分析
+FAM 字段形态分析
+浏览器容错策略收口
+```
+
+当前尚未完成：
+
+```text
+IFC 构件属性语义展开
+IFC GUID 与 IFC 实体类型的映射分析
+DEV / PHM / MOD / STL 递归树审计
+PHM TRANSFORMMATRIX 语义解析
+MOD/STL 几何解析
+多工程样本验证
+```
+
+Round 2 当前仍只属于 schema analysis，不进入几何解析或产品功能实现。
