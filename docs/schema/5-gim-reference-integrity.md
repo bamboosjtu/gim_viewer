@@ -390,7 +390,42 @@ CBM 层存在一批 F4System 节点带 IFCFILE + IFCGUID，
 暂时不能作为可定位 IFC 构件处理。
 ```
 
+hard missing IFCGUID 主要由两个异常高频 GUID 驱动：
+
+1. 3Zu5Bv0LOHrPC10026FoUj：740 条
+2. 3Aw$FV5MbAufEo59pkoNlf：193 条
+
+这两类合计 933 / 1064，占 hard missing 的 87.69%。
+
+命中组与未命中组的 CBM 字段集合一致；
+FAM 都是空 sidecar；
+SYSCLASSIFYNAME 均为 &其他；
+因此 hard missing 不是 FAM 字段问题，也不是 CBM 字段缺失问题。
+
+```text
+更稳妥的解释是：
+部分 F4System + IFC 节点记录了 IFCFILE + IFCGUID，但这些 GUID 不存在于当前 IFC 文件文本中。
+这些节点不能作为可直接定位的 IFC 构件处理，应作为弱关联 / 不可定位关联进入诊断告警。
+```
+
 当前结论只适用于当前 demo-substation，不应直接推广为全部 GIM 工程规则。
+
+### 8.6 对浏览器实现的影响
+
+当前 hard missing IFCGUID 不应直接判定为 GIM 错误或规范不合规。
+
+从浏览器实现角度，应采用容错策略：
+
+1. IFCFILE 存在且 IFCGUID 精确命中时，可作为强 IFC 构件关联。
+2. IFCFILE 存在且 IFCGUID 仅大小写不敏感命中时，可作为弱 IFC 构件关联，并记录归一化警告。
+3. IFCFILE 存在但 IFCGUID 在当前 IFC 文件中未命中时，不应阻断 GIM 加载；应保留 CBM 节点，并在诊断结果中提示该 IFCGUID 无法定位 IFC 构件。
+4. IFCFILE 缺失时，也不应阻断整体加载；应保留 CBM 节点，并提示 IFC 文件缺失。
+
+当前 demo-substation 中的 hard missing IFCGUID 主要由少数高频 GUID 驱动。其中两个 GUID 合计覆盖 933 / 1064 条 hard missing 记录，占 87.69%。
+
+这说明 hard missing 更像“部分 F4System + IFC 节点记录了不可定位 IFCGUID”，而不是普通构件级 GUID 的随机缺失。
+
+因此后续浏览器实现应把 IFCGUID 视为可选定位能力，而不是强制加载前提。
 
 ## 9. 尚未完成的校验
 
