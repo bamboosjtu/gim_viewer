@@ -270,18 +270,22 @@ export function formatLineCatenaryAuditMarkdown(payload: LineCatenaryAuditExport
 }
 
 /**
- * M4-B3B：将档距聚合报告追加到 Markdown 行数组。
+ * M4-B3B / M4-B3C：将档距聚合报告追加到 Markdown 行数组。
  *
  * 新增章节：
- * - §10 档距聚合摘要（唯一档距数 / min/max/avg / Top 5）
- * - §11 MATRIX0 平移样本（每档 zRange 表）
+ * - §10 档距聚合摘要 + WIRE 拓扑分类摘要（M4-B3C）
+ * - §11 inter-point 跨点档距样本（M4-B3C，前 5 档距）
+ *
+ * M4-B3C 收口说明：
+ * - same-point 不应直接进入悬链线渲染（同点内部连接）
+ * - inter-point 才是未来悬链线候选
  */
 function appendSpanGroupingMarkdown(
   lines: string[],
   sg: LineSpanGroupingAuditReport,
 ): void {
-  // §10 档距聚合摘要
-  lines.push('## 10. 档距聚合摘要（M4-B3B）');
+  // §10 档距聚合摘要 + WIRE 拓扑分类
+  lines.push('## 10. 档距聚合摘要 + WIRE 拓扑分类（M4-B3B / M4-B3C）');
   lines.push('');
   lines.push(`- WIRE 总数：${sg.wireCount}`);
   lines.push(`- 唯一档距数：${sg.spanGroupCount}`);
@@ -295,15 +299,27 @@ function appendSpanGroupingMarkdown(
   }
   lines.push('');
 
-  // §11 MATRIX0 平移样本
-  lines.push('## 11. MATRIX0 平移样本（M4-B3B，前 5 档距）');
+  // M4-B3C：WIRE 拓扑分类摘要表
+  lines.push('### 10.1 WIRE 拓扑分类摘要（M4-B3C）');
   lines.push('');
-  if (sg.spanGroupSamples.length === 0) {
-    lines.push('无档距样本。');
+  lines.push('| 类型 | group 数 | WIRE 数 | 说明 |');
+  lines.push('|---|---:|---:|---|');
+  lines.push(`| same-point | ${sg.groupKindCounts['same-point']} | ${sg.groupKindWireCounts['same-point']} | 同点内部连接候选（不应直接进入悬链线） |`);
+  lines.push(`| inter-point | ${sg.groupKindCounts['inter-point']} | ${sg.groupKindWireCounts['inter-point']} | 真实跨点档距候选（未来悬链线候选） |`);
+  lines.push(`| missing-endpoint | ${sg.groupKindCounts['missing-endpoint']} | ${sg.groupKindWireCounts['missing-endpoint']} | 端点缺失 |`);
+  lines.push('');
+  lines.push('> **M4-B3C 收口**：same-point 不应直接进入悬链线渲染；inter-point 才是未来悬链线候选。当前 MVP 不实现悬链线，地图继续保持直线段显示。');
+  lines.push('');
+
+  // §11 inter-point 跨点档距样本
+  lines.push('## 11. inter-point 跨点档距样本（M4-B3C，前 5 档距）');
+  lines.push('');
+  if (sg.interPointSpanSamples.length === 0) {
+    lines.push('无 inter-point 档距样本。');
   } else {
-    lines.push('| 档距 | WIRE 数 | wireTypes | SPLIT | P0 zRange | P1 zRange | KVALUE 0/非0 |');
-    lines.push('|---|---|---|---|---|---|---|');
-    for (const s of sg.spanGroupSamples.slice(0, 5)) {
+    lines.push('| 档距 | WIRE 数 | distance(m) | wireTypes | splitCounts | KVALUE 0/非0 | P0 zRange | P1 zRange |');
+    lines.push('|---|---|---|---|---|---|---|---|');
+    for (const s of sg.interPointSpanSamples.slice(0, 5)) {
       const spanLabel = shortSpanKey(s.spanKey);
       const wireTypes = Object.entries(s.wireTypeCounts)
         .map(([k, v]) => `${k}:${v}`)
@@ -314,7 +330,8 @@ function appendSpanGroupingMarkdown(
       const p0z = formatRange(s.point0TranslationStats.zRange);
       const p1z = formatRange(s.point1TranslationStats.zRange);
       const kStr = `${s.kValueStats.zeroCount}/${s.kValueStats.nonZeroCount}`;
-      lines.push(`| ${spanLabel} | ${s.wireCount} | ${wireTypes} | ${splitStr} | ${p0z} | ${p1z} | ${kStr} |`);
+      const distStr = s.blhaDistanceMeters !== null ? s.blhaDistanceMeters.toFixed(1) : '—';
+      lines.push(`| ${spanLabel} | ${s.wireCount} | ${distStr} | ${wireTypes} | ${splitStr} | ${kStr} | ${p0z} | ${p1z} |`);
     }
   }
   lines.push('');
@@ -337,7 +354,7 @@ function appendSpanGroupingMarkdown(
     lines.push('');
   }
   if (sg.recommendations.length > 0) {
-    lines.push('### 11.3 M4-B4 决策建议');
+    lines.push('### 11.3 M4-B3C 收口建议');
     lines.push('');
     for (const rec of sg.recommendations) {
       lines.push(`- ${rec}`);

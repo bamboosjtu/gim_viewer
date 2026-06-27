@@ -1053,7 +1053,7 @@ M3-5/6 的 Canvas-only 地图没有底图，缺乏地理参照。M4 引入 MapLi
    - 导线端点：优先 POINT0/1.BLHA，兜底 BACKSTRING/FRONTSTRING → STRING → TOWER F4.BLHA
    - **关键发现**：所有节点 rawProps 已序列化为 JSON 入库（`line_cbm_node.raw_props_json`），数据齐备，**不需要修改 SQLite schema**，缺的只是"提取 + 使用"环节
 3. **悬链线候选字段**：KVALUE / SPLIT / POINT0.MATRIX0 / POINT1.MATRIX0 / POINT0.BLHA 高程分量 / POINT1.BLHA 高程分量 / ISJUMPER / MATERIALSHEET / TRANSFORMMATRIX
-4. **审计文档** `docs/m4-b-line-geometry-research.md`：7 章结构（当前实现 / 已解析字段 / 导线语义 / 悬链线候选字段 / 当前缺口 / M4-B2 建议 / 审计服务 API），已更新 `docs/README.md` 入口
+4. **审计文档** `docs/m4-research.md`（M4 系列合并文档）：7 章结构（当前实现 / 已解析字段 / 导线语义 / 悬链线候选字段 / 当前缺口 / M4-B2 建议 / 审计服务 API），已更新 `docs/README.md` 入口
 
 **验收**：`npm run build` + `cargo check` 通过；变电 IFC 不受影响；OSM MVP baseline 不破坏。
 
@@ -1086,27 +1086,108 @@ M3-5/6 的 Canvas-only 地图没有底图，缺乏地理参照。M4 引入 MapLi
    - 选中导线 → 线宽 3.5px + 黄色光晕描边（`rgba(245,158,11,0.45)`，宽 7.5px），最后绘制
    - UNKNOWN → 保持浅灰弱化样式
 5. **三处 `renderLineMap` 接入 onWireClick**：初始 Canvas / OSM fallback 重渲染 / OSM overlay 模式，行为一致
-6. **文档更新**：`docs/m4-b-line-geometry-research.md` 新增 §8 M4-B2 实现记录（7 小节）；`docs/dev-log.md` 导线已知限制新增 2 条（档距近似值未考虑高程差 / KVALUE/SPLIT/MATRIX0 物理含义待 M4-B3 核验）
+6. **文档更新**：`docs/m4-research.md` 新增 §2.5-2.8 M4-B2 实现记录（7 小节）；`docs/dev-log.md` 导线已知限制新增 2 条（档距近似值未考虑高程差 / KVALUE/SPLIT/MATRIX0 物理含义待 M4-B3 核验）
 
 **验收**：
 - `npm run build` exit 0（92 modules）
 - `cargo check` exit 0
 - OSM MVP baseline 不破坏；塔位/跨越点交互不破坏；不改 SQLite schema；不影响变电 IFC
 
-## M4-B3：悬链线参数语义验证 ⏳ 待实现
+## M4-B3：悬链线参数语义验证 ✅ 完成
 
 > 收集真实线路 GIM 样本工程，对照样本核验 KVALUE/SPLIT/MATRIX0 物理含义，作为悬链线实现（M4-B4）的输入。**M4-B3 仍不实现悬链线渲染、不改 SQLite schema**。
 
-**待办**：
-- 收集 2-3 个真实线路 GIM 样本工程
-- 核验 KVALUE 物理含义（张力系数？弧垂参数？应力？）
-- 核验 SPLIT 是否为分裂导线数（整数）
-- 核验 POINT0/1.MATRIX0 格式（4x4 矩阵行？标量？）
-- 输出字段含义确认报告
+**实现内容**：
 
-## M4-B4：悬链线预研 ⏳ 后置
+1. **悬链线参数审计服务** `src/services/lineGeometryAuditService.ts` 扩展：
+   - 新增 `LineCatenaryParamAuditReport` + `buildLineCatenaryParamAuditReport()`
+   - 覆盖率统计（KVALUE/SPLIT/POINT0.BLHA/POINT1.BLHA/POINT0.MATRIX0/POINT1.MATRIX0/ISJUMPER/MATERIALSHEET/TRANSFORMMATRIX）
+   - 4 类样本（KVALUE/SPLIT/MATRIX0 格式/BLHA 高程），每类最多 20 条
+   - 语义假设 / 阻塞问题 / M4-B4 建议
+2. **M4-B2 cleanup patch**（同轮顺带修复）：
+   - `lineMapView.ts` `handlePointerLeaveInternal` 清理 `hoveredWire`
+   - `onMouseUp` cursor 判断改为 `(hoveredTower || hoveredWire)`
+   - 注释清理（鼠标 hover 阈值等遗留 TODO）
+3. **审计文档** `docs/m4-research.md` §3 + §5（M4-B3 合并）：候选字段清单 / 覆盖率统计 / 样本值分析 / 语义假设 / 阻塞问题 / M4-B4 建议 / 审计服务 API
+4. **debugLog 摘要** `lineProjectView.ts` → `buildLineCatenaryAuditSummary()`：渲染完成后输出精简摘要（wireCount / coverage / 阻塞问题数）
 
-> 基于 M4-B3 字段确认结果，预研悬链线渲染算法。本轮明确不做实现，仅做算法设计文档。
+**实际样本结果**：
+- `wireCount = 5460` / `towerCount = 327`
+- KVALUE / SPLIT / POINT0.BLHA / POINT1.BLHA / POINT0.MATRIX0 / POINT1.MATRIX0 覆盖率 100%
+- MATRIX0 为 16 元素 4x4 矩阵
+- SPLIT = 1 / 4（疑似分裂数）
+- KVALUE 为数值但语义未确认
+
+**验收**：`npm run build` + `cargo check` 通过；变电 IFC 不受影响；OSM MVP baseline 不破坏。
+
+## M4-B3A：悬链线参数用户核验导出包 ✅ 完成
+
+> 让用户能拿到可核验的样本证据。**不实现悬链线、不改 schema、不破坏 OSM baseline**。
+
+**实现内容**：
+
+1. **导出服务** `src/services/lineCatenaryAuditExportService.ts`：
+   - `buildLineCatenaryAuditExportPayload()` 构建 payload（`generatedAt` + `parserVersion` + `projectSummary` + 完整 `LineCatenaryParamAuditReport`）
+   - `formatLineCatenaryAuditMarkdown()` 输出 Markdown 摘要（§1-§9：项目摘要 / 覆盖率 / KVALUE 样本 / SPLIT 样本 / MATRIX0 格式 / BLHA 高程 / 语义假设 / 阻塞问题 / M4-B4 建议，前 5 条样本）
+2. **状态保存** `lineProjectView.ts`：
+   - 新增 `latestCatenaryAuditPayload` 模块级状态
+   - `getLatestCatenaryAuditPayload()` / `formatLatestCatenaryAuditMarkdown()` 导出
+   - `destroyLineMapView` 清空 payload
+3. **快捷键** `bootstrap.ts` → `Ctrl+Shift+C`（Tauri 模式）：
+   - 复制完整 JSON 到剪贴板 + Console 输出 Markdown 摘要
+   - 空 payload 提示"当前没有可导出的线路悬链线参数审计数据"
+   - 与 Ctrl+Shift+D 独立工作，互不影响
+   - OSM fallback 后仍可调用
+4. **文档更新** `docs/m4-research.md` §6 用户核验流程（导出方式 / KVALUE/SPLIT/MATRIX0/BLHA 核验要点 / 结论模板）；`docs/dev-log.md` 新增 Ctrl+Shift+C 说明
+
+**验收**：`npm run build` + `cargo check` 通过；Ctrl+Shift+C 在变电工程/清空场景提示无数据；fallback 后仍可导出。
+
+## M4-B3B：档距聚合与 MATRIX0 平移分量验证 ✅ 完成
+
+> 实际线路样本显示多条 WIRE 共用相同 BLHA，必须先按档距聚合才能理解"一档多线"结构。**先理解档距聚合规律，再决定 M4-B4 路线**。本轮**不实现悬链线、不改 schema、不扩展底图**。
+
+**实现内容**：
+
+1. **档距聚合审计服务** `src/services/lineSpanGroupingAuditService.ts`：
+   - `buildLineSpanGroupingAuditReport()` 按 BLHA 端点去方向聚合 WIRE 节点
+   - `parseMatrixTranslation()` 解析 MATRIX0 平移分量（4x4 矩阵 → `values[12]/[13]/[14]`，3x4 矩阵 → `values[3]/[7]/[11]`）
+   - spanKey 规则：`min(p0, p1) + " -> " + max(p0, p1)`，缺失端点 → `'missing-endpoint'`
+   - 每档统计：wireTypeCounts / splitCounts / kValueStats（min/max/zeroCount/nonZeroCount/distinctSampleValues≤20）/ point0/1TranslationStats（xRange/yRange/zRange）
+   - 档距组大小统计：min/max/avg/Top 5
+   - 自动生成观察结论 / 阻塞问题 / M4-B4 决策建议
+   - 样本上限：档距组 ≤20 / 每档 WIRE 样本 ≤20 / distinct KVALUE ≤20
+2. **接入导出服务** `lineCatenaryAuditExportService.ts`：
+   - `LineCatenaryAuditExportPayload` 新增可选字段 `spanGroupingReport?: LineSpanGroupingAuditReport`（向后兼容）
+   - `buildLineCatenaryAuditExportPayload` 调用 `buildLineSpanGroupingAuditReport`
+   - `formatLineCatenaryAuditMarkdown` 新增 §10 档距聚合摘要（WIRE 总数 / 唯一档距数 / min/max/avg / Top 5）+ §11 MATRIX0 平移样本（前 5 档距的 wireTypes / SPLIT / P0/P1 zRange / KVALUE 0/非0 占比 + 观察 + 阻塞 + 建议）
+3. **文档更新**：
+   - `docs/m4-research.md` §4 档距聚合与拓扑分类（M4-B3B 合并）：目标与边界 / 档距聚合必要性 / spanKey 规则 / MATRIX0 解析 / 聚合统计项 / M4-B4 决策条件 / 边界与约束
+   - 更新 `docs/README.md`：总览表加入 M4 线路几何研究入口
+   - `docs/m4-research.md` §1 强调完成本节后**先做 B3B 再决定 M4-B4**
+   - 更新 `docs/dev-log.md`：Ctrl+Shift+C JSON 内容新增 `spanGroupingReport` 字段说明 + Markdown §10/§11 章节说明 + 向后兼容说明
+
+**验收**：
+- `npm run build` exit 0（95 modules transformed）
+- `cargo check` exit 0
+- OSM MVP baseline 不破坏；导线交互不破坏；不改 SQLite schema；不影响变电 IFC
+- Ctrl+Shift+C JSON 包含 `spanGroupingReport` 字段，Console 输出 §10/§11 Markdown 摘要
+
+## M4-B4：悬链线预研 ⏳ 后置（待用户核验 B3B 后决定路线）
+
+> 基于 M4-B3 / M4-B3A / M4-B3B 用户核验结果，预研悬链线渲染算法。本轮明确不做实现，仅做算法设计文档。
+
+**前置条件**（用户对照样本工程核验 `spanGroupingReport`）：
+- 每档 WIRE 数规律已识别（`spanGroupSizeStats.min === max` 或差异原因已识别）
+- MATRIX0 平移分量单位已确认（米/毫米）
+- BLHA 是塔位还是挂点已确认
+- KVALUE=0 含义已确认（未启用 / 直线塔 / 其他）
+- OPGW vs CONDUCTOR 差异已识别
+
+**路线分支**：
+- BLHA=塔位 + MATRIX0=挂点偏移 + KVALUE=张力 → **工程语义悬链线**
+- BLHA=塔位 + MATRIX0=未确认 + KVALUE=未确认 → **示意悬链线**
+- BLHA=挂点 + MATRIX0=未确认 → **示意悬链线**
+- 全部未确认 → **暂缓**
 
 **待办**：
 - 基于已确认字段（KVALUE/POINT0/1.MATRIX0/BLHA 高程）设计悬链线计算公式
