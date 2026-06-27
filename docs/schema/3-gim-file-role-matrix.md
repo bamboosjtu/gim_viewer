@@ -480,7 +480,7 @@ DEV -> DEV -> ...
 
 ```text
 DEV -> PHM
-DEV -> DEV
+DEV -> SUBDEVICE -> DEV
 ```
 
 直接引用 PHM 的样例：
@@ -515,11 +515,12 @@ DEV -> SUBDEVICE -> DEV -> ...
 
 ### 6.5 当前引用链结论
 
-基于当前两个 demo，可以暂定完整物理模型引用链为：
+基于当前两个 demo，CBM 层当前观察到三类下游引用：
 
 ```text
 CBM -> DEV -> PHM -> MOD/STL
-        └-> DEV/SUBDEVICE -> ...
+CBM -> IFCFILE + IFCGUID -> IFC
+CBM -> SUBDEVICE -> CBM -> ...
 ```
 
 其中：
