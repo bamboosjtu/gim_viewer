@@ -6,9 +6,11 @@ dist/
 
 # Demo data (large binary files)
 demo/
+docs/schema/_generated
 
 # PMTiles offline tile data (M4-A2 第 2 轮，不提交大文件)
 public/tiles/*.pmtiles
+
 
 # IDE
 .vscode/
