@@ -1,4 +1,4 @@
-# GIM Analysis Round 1 总结
+# GIM Analysis 总结
 
 ## 1. Round 1 定位
 
@@ -33,7 +33,6 @@ CBM / DEV / PHM 文件级引用完整性
 不做 3D 线路
 不做悬链线
 不做 STL 解析
-不做 IFCGUID 内部构件命中校验
 不递归展开完整设备树
 不改变当前 MVP 行为
 ```
@@ -1674,7 +1673,7 @@ IFCGUID=xxx
 
 说明 CBM 层可通过 `IFCFILE + IFCGUID` 关联 IFC 文件和 IFC 构件。
 
-当前只完成 IFC 文件存在性校验，尚未完成 IFCGUID 内部命中校验。
+Round 1 只完成 IFC 文件存在性校验。Round 2-A 已进一步完成 IFCGUID 文本命中校验，并发现 IFCGUID 需要区分强关联、弱关联和硬未命中三类。
 
 ### 15.4 MOD 结论
 
@@ -1815,7 +1814,7 @@ IFCGUID 内部构件命中
 Round 2 可以考虑：
 
 ```text
-1. IFCGUID -> IFC 内部构件命中校验
+1. IFCGUID 语义级解释与 IFC 构件属性展开
 2. FAM 字段字典与 CBM/DEV 字段一致性分析
 3. DEV/PHM 递归展开的只读树形审计
 4. MOD 静态类型进一步分组
@@ -1853,9 +1852,7 @@ CBM
 
 当前只确认文件级引用完整性，不代表已经完成几何解析、属性语义解析或渲染实现。
 
-# IFCGUID -> IFC 内部构件命中校验 Round 2 分析
-
-### Round 2-A：IFCGUID -> IFC 内部命中校验
+## 19. Round 2-A：IFCGUID -> IFC 内部命中校验
 
 Round 2-A 对 `demo-substation` 中 4360 条 `IFCFILE + IFCGUID` 记录进行了 IFC 文本命中校验。
 
@@ -1884,3 +1881,285 @@ OBJECTMODELPOINTER = 空
 BASEFAMILY = 有值
 SUBDEVICE = 无
 ```
+
+## 20. Round 2-B：CBM -> FAM 基础分析
+
+### 20.1 FAM 文件都能被 CBM 找到
+
+你已经跑出来：
+
+```text
+demo-line:
+totalCbm             = 27829
+hasBaseFamily        = 21967
+noBaseFamily         = 5862
+famExists            = 21967
+missingFam           = 0
+uniqueBaseFamily     = 21967
+uniqueMatchedFamPath = 21967
+
+demo-substation:
+totalCbm             = 8701
+hasBaseFamily        = 8554
+noBaseFamily         = 147
+famExists            = 8554
+missingFam           = 0
+uniqueBaseFamily     = 8554
+uniqueMatchedFamPath = 8554
+```
+
+结论：
+
+```text
+CBM -> BASEFAMILY -> FAM 的文件级引用完整性为 100%。
+凡是 CBM 写了 BASEFAMILY 的，目标 FAM 文件都存在。
+```
+
+这一步可以收口。
+
+---
+
+### 20.2 一个关键发现：FAM 不是复用型族模板，更像实例属性文件
+
+两个样本里：
+
+```text
+demo-line:
+hasBaseFamily = 21967
+uniqueBaseFamily = 21967
+
+demo-substation:
+hasBaseFamily = 8554
+uniqueBaseFamily = 8554
+```
+
+也就是：
+
+```text
+1 个 CBM 基本对应 1 个唯一 FAM
+```
+
+至少在当前两个 demo 中，`BASEFAMILY` 不像传统 BIM 软件里的“可复用族模板”，而更像：
+
+```text
+CBM 节点对应的实例级属性文件 / 设备属性文件 / 家族属性 sidecar
+```
+
+所以后续文档里不要写成：
+
+```text
+FAM 是可复用族模板
+```
+
+更稳妥写法是：
+
+```text
+FAM 是 CBM 节点关联的属性文件。当前两个 demo 中，BASEFAMILY 基本呈现一 CBM 对一 FAM 的实例级对应关系，暂未观察到多 CBM 复用同一 FAM 的情况。
+```
+
+---
+
+### 20.3 覆盖关系
+
+#### demo-line
+
+你跑出来的分布：
+
+```text
+11773 Wire_Device, DEV, True, True
+ 5534 F4System, CBM_GROUP, False, False
+ 5460 WIRE, DEV, True, True
+ 4309 Tower_Device, DEV, True, True
+  327 F4System, NO_MODEL_POINTER, False, False
+  315 CROSS, DEV, True, True
+  108 F3System, NO_MODEL_POINTER, True, True
+    1 F1System, NO_MODEL_POINTER, True, True
+    1 F2System, NO_MODEL_POINTER, True, True
+    1 空 ENTITYNAME, NO_MODEL_POINTER, False, False
+```
+
+结论：
+
+```text
+线路样本中，具体业务对象节点一般都有 FAM：
+- Wire_Device
+- WIRE
+- Tower_Device
+- CROSS
+
+而 F4System 分组节点多数没有 FAM：
+- 5534 个 F4System 是 CBM_GROUP，无 BASEFAMILY
+- 327 个 F4System 是 NO_MODEL_POINTER，无 BASEFAMILY
+```
+
+线路 CBM 的层次可初步理解为：
+
+```text
+F1/F2/F3/F4System：系统/分组层
+Wire_Device / WIRE / Tower_Device / CROSS：业务对象层
+业务对象层通常有 DEV + FAM
+分组层通常没有 FAM，少量 F3/F1/F2 有 FAM
+```
+
+---
+
+#### demo-substation
+
+你跑出来的分布：
+
+```text
+4360 F4System, IFC, True, True
+3894 PARTINDEX, DEV, True, True
+ 285 F4System, DEV, True, True
+ 145 F3System, NO_MODEL_POINTER, False, False
+  14 F2System, NO_MODEL_POINTER, True, True
+   1 F1System, NO_MODEL_POINTER, True, True
+   2 空 ENTITYNAME, NO_MODEL_POINTER, False, False
+```
+
+结论：
+
+```text
+变电样本中，FAM 覆盖更强：
+- IFC 型 F4System 全部有 FAM
+- DEV 型 PARTINDEX 全部有 FAM
+- DEV 型 F4System 全部有 FAM
+```
+
+这和线路不同。线路的 F4System 多数是分组节点，不带 FAM；变电的 F4System 既可能是 IFC 关联节点，也可能是 DEV 关联节点，而且都有 FAM。
+
+这说明：
+
+```text
+不能用 ENTITYNAME=F4System 单独判断节点是否只是分组。
+必须结合 modelKind、BASEFAMILY、OBJECTMODELPOINTER、IFCFILE、SUBDEVICE 一起判断。
+```
+
+---
+
+### 20.4 FAM 字段形态结论
+
+#### demo-line
+
+你跑出的 FAM 行类型：
+
+```text
+179123 CN_KEY_VALUE
+  3063 KEY_VALUE
+  1330 CONTINUATION_OR_RAW
+```
+
+主要 key：
+
+```text
+MATERIALCODE
+MANUFACTURER
+BUNDLENUMBER
+TYPE
+SAFETYCOEFFICIENTMAXTENSION
+EVERYDAYTENSION
+MAXTENSION
+PHASE
+VOLTAGE
+WIREPOINT
+TOWERPOINT
+INSULATORTYPE
+TOWERNUMBER
+LINEANGLE
+RULINGSPAN
+SPAN
+...
+```
+
+结论：
+
+```text
+线路 FAM 以英文 KEY 为主，字段偏线路工程属性：
+- 导线属性
+- 杆塔属性
+- 绝缘子串属性
+- 基础属性
+- 张力 / 应力 / 相序 / 电压等级等工程参数
+```
+
+#### demo-substation
+
+你跑出的 FAM 行类型：
+
+```text
+40858 CN_KEY_VALUE
+ 6029 CONTINUATION_OR_RAW
+    9 KEY_VALUE
+```
+
+主要 key：
+
+```text
+额定电压
+生产厂家
+单位
+电网工程标识系统编码
+软件版本
+装置名称
+装置型号
+装置编号
+实物ID
+工程中名称
+附件名称
+建设期次
+三维设计模型编码
+设备名称
+电压等级
+调度编码
+...
+```
+
+结论：
+
+```text
+变电 FAM 以中文 KEY 为主，字段偏设备台账 / 工程管理 / 设备参数：
+- 额定电压
+- 生产厂家
+- 装置名称 / 型号 / 编号
+- 电网工程标识系统编码
+- 三维设计模型编码
+- 实物ID
+- 工程中名称
+```
+
+这说明线路和变电 FAM schema 差异很大。后续不应设计一个固定 FAM DTO 去覆盖所有工程。
+
+---
+
+### 20.5 当前可以形成的 Round 2-B 阶段性结论
+
+可以先写成：
+
+```text
+Round 2-B1 当前结论：
+
+1. 当前两个 demo 中，CBM -> BASEFAMILY -> FAM 的文件级引用完整性为 100%。
+2. 凡是 CBM 写了 BASEFAMILY，目标 FAM 文件均存在。
+3. 当前两个 demo 中，BASEFAMILY 基本呈现一 CBM 对一 FAM 的实例级对应关系，未观察到多个 CBM 复用同一个 FAM。
+4. FAM 更适合作为 CBM 节点的属性 sidecar，而不是先验定义为可复用族模板。
+5. 线路 FAM 以英文 KEY 为主，偏线路工程参数。
+6. 变电 FAM 以中文 KEY 为主，偏设备台账、工程管理和设备参数。
+7. FAM schema 在线路与变电样本之间差异显著，后续解析应保持弱 schema / key-value 结构，不宜过早固定 DTO。
+```
+
+---
+
+### 20.6 现在还不能下的结论
+
+这些先不要写死：
+
+```text
+FAM 是标准族模板
+FAM 可跨 CBM 复用
+FAM 字段可以统一映射成固定 DTO
+F4System 一定是分组节点
+F4System 一定是具体构件节点
+CBM 与 FAM 有同名字段必须一致
+```
+
+目前证据不支持这些判断。
