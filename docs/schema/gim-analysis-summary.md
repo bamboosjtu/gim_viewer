@@ -1770,7 +1770,7 @@ DEV / PHM 引用完整性
 当前尚未完成：
 
 ```text
-IFCGUID -> IFC 内部构件命中校验
+IFCGUID 语义级解释与 IFC 构件属性展开
 FAM 与 CBM/DEV 的字段一致性分析
 MOD/STL 几何解析
 PHM TRANSFORMMATRIX 语义解析
@@ -1852,3 +1852,35 @@ CBM
 ```
 
 当前只确认文件级引用完整性，不代表已经完成几何解析、属性语义解析或渲染实现。
+
+# IFCGUID -> IFC 内部构件命中校验 Round 2 分析
+
+### Round 2-A：IFCGUID -> IFC 内部命中校验
+
+Round 2-A 对 `demo-substation` 中 4360 条 `IFCFILE + IFCGUID` 记录进行了 IFC 文本命中校验。
+
+当前结果：
+
+```text
+IFCFILE 文件存在：4360 / 4360
+IFCGUID 精确命中声明 IFC 文件：3252 / 4360
+IFCGUID 大小写不敏感命中声明 IFC 文件：3296 / 4360
+任意 IFC 文件均未命中：1064 / 4360
+```
+
+当前判断：
+
+IFCFILE 文件存在性 100% 通过。
+IFCGUID 不是全部都能在 IFC 文件中命中。
+精确命中的 IFCGUID 可作为强 IFC 构件关联。
+大小写不敏感命中的 IFCGUID 可作为弱关联。
+硬未命中的 IFCGUID 当前不应作为 IFC 构件定位依据。
+
+硬未命中项全部具有以下 CBM 特征：
+
+```text
+ENTITYNAME = F4System
+OBJECTMODELPOINTER = 空
+BASEFAMILY = 有值
+SUBDEVICE = 无
+```
