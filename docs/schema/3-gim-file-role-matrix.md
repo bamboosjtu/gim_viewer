@@ -347,18 +347,6 @@ SOLIDMODEL16=aff58f93-a3bb-4b95-befe-3d16a6b5e89a.stl
 DEV -> PHM -> MOD/STL
 ```
 
-其中本轮已确认：
-
-```text
-PHM -> MOD/STL
-```
-
-尚未确认：
-
-```text
-DEV -> PHM
-```
-
 当前结论：
 
 - PHM 是组合模型 / 装配体层。
@@ -512,3 +500,6 @@ CBM -> DEV -> PHM -> MOD/STL
 - MOD 不能统一定义为 XML，也不能统一定义为 CODE/POINTNUM 点线格式。
 - MOD 在变电与线路中表现出不同表层格式。
 - 当前阶段只做格式分型、字段分布、引用链分析，不进入几何解析。
+- PHM 通过 `SOLIDMODELn` 引用 `.mod` 或 `.stl`，承担组合模型 / 装配体角色。
+- DEV 可以通过 `SOLIDMODELn` 引用 `.phm` 或 `.dev`。
+- DEV 可以通过 `SUBDEVICEn` 引用子 `.dev`，说明设备物理模型存在递归组合关系。
