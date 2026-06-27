@@ -3,6 +3,8 @@
 > 阶段：审计与预研。本轮**不实现悬链线渲染、不实现弧垂计算、不改 SQLite schema**。
 >
 > 目标：验证悬链线候选字段语义，为后续 M4-B4 是否实现悬链线提供依据。
+>
+> **后续阶段**：完成本节覆盖率核验后，**先做 [M4-B3B 档距聚合验证](m4-b3b-span-grouping-validation.md)** 再决定 M4-B4 路线。实际线路样本显示多条 WIRE 共用相同 BLHA，必须先按档距聚合才能理解"一档多线"结构。Ctrl+Shift+C 导出的 JSON payload 同时包含 `report`（M4-B3）与 `spanGroupingReport`（M4-B3B）。
 
 ---
 

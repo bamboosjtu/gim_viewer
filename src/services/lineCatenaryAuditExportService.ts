@@ -15,6 +15,8 @@
 
 import { buildLineCatenaryParamAuditReport } from './lineGeometryAuditService.js';
 import type { LineCatenaryParamAuditReport } from './lineGeometryAuditService.js';
+import { buildLineSpanGroupingAuditReport } from './lineSpanGroupingAuditService.js';
+import type { LineSpanGroupingAuditReport } from './lineSpanGroupingAuditService.js';
 import type { GimGraph } from '../gim/gimGraphTypes.js';
 import type { LineMapData } from '../gim/lineMapData.js';
 
@@ -39,6 +41,11 @@ export interface LineCatenaryAuditExportPayload {
   };
   /** 完整审计报告（含样本，受 MAX_CATENARY_SAMPLES 限制） */
   report: LineCatenaryParamAuditReport;
+  /**
+   * M4-B3B：档距聚合审计报告（按 BLHA 端点聚合，分析"一档多线"结构 + MATRIX0 平移分量）。
+   * 向后兼容：旧 payload 无此字段，调用方需判空。
+   */
+  spanGroupingReport?: LineSpanGroupingAuditReport;
 }
 
 /**
@@ -79,6 +86,12 @@ export function buildLineCatenaryAuditExportPayload(args: {
   }
 
   // 3. 组装 payload
+  // M4-B3B：构建档距聚合报告（按 BLHA 端点聚合，分析"一档多线"结构 + MATRIX0 平移分量）
+  const spanGroupingReport = buildLineSpanGroupingAuditReport({
+    graph: args.graph,
+    mapData: args.mapData,
+  });
+
   return {
     generatedAt: new Date().toISOString(),
     parserVersion: args.parserVersion,
@@ -90,6 +103,7 @@ export function buildLineCatenaryAuditExportPayload(args: {
       crossCount,
     },
     report,
+    spanGroupingReport,
   };
 }
 
@@ -241,6 +255,11 @@ export function formatLineCatenaryAuditMarkdown(payload: LineCatenaryAuditExport
   }
   lines.push('');
 
+  // 10/11. M4-B3B 档距聚合摘要 + MATRIX0 平移样本
+  if (payload.spanGroupingReport) {
+    appendSpanGroupingMarkdown(lines, payload.spanGroupingReport);
+  }
+
   // 尾注
   lines.push('---');
   lines.push('');
@@ -248,6 +267,108 @@ export function formatLineCatenaryAuditMarkdown(payload: LineCatenaryAuditExport
   lines.push('> 字段含义全部为"疑似 / 候选 / 待确认"，需用户对照样本工程核验后才能进入 M4-B4。');
 
   return lines.join('\n');
+}
+
+/**
+ * M4-B3B：将档距聚合报告追加到 Markdown 行数组。
+ *
+ * 新增章节：
+ * - §10 档距聚合摘要（唯一档距数 / min/max/avg / Top 5）
+ * - §11 MATRIX0 平移样本（每档 zRange 表）
+ */
+function appendSpanGroupingMarkdown(
+  lines: string[],
+  sg: LineSpanGroupingAuditReport,
+): void {
+  // §10 档距聚合摘要
+  lines.push('## 10. 档距聚合摘要（M4-B3B）');
+  lines.push('');
+  lines.push(`- WIRE 总数：${sg.wireCount}`);
+  lines.push(`- 唯一档距数：${sg.spanGroupCount}`);
+  const stats = sg.spanGroupSizeStats;
+  lines.push(`- 每档 WIRE 数：min=${stats.min}, max=${stats.max}, avg=${stats.avg.toFixed(2)}`);
+  if (stats.topSizes.length > 0) {
+    lines.push('- Top 5 档距（按 WIRE 数）：');
+    for (const t of stats.topSizes) {
+      lines.push(`  - ${shortPath(t.spanKey)}：${t.wireCount} 条`);
+    }
+  }
+  lines.push('');
+
+  // §11 MATRIX0 平移样本
+  lines.push('## 11. MATRIX0 平移样本（M4-B3B，前 5 档距）');
+  lines.push('');
+  if (sg.spanGroupSamples.length === 0) {
+    lines.push('无档距样本。');
+  } else {
+    lines.push('| 档距 | WIRE 数 | wireTypes | SPLIT | P0 zRange | P1 zRange | KVALUE 0/非0 |');
+    lines.push('|---|---|---|---|---|---|---|');
+    for (const s of sg.spanGroupSamples.slice(0, 5)) {
+      const spanLabel = shortSpanKey(s.spanKey);
+      const wireTypes = Object.entries(s.wireTypeCounts)
+        .map(([k, v]) => `${k}:${v}`)
+        .join(', ');
+      const splitStr = Object.entries(s.splitCounts)
+        .map(([k, v]) => `${k}:${v}`)
+        .join(',');
+      const p0z = formatRange(s.point0TranslationStats.zRange);
+      const p1z = formatRange(s.point1TranslationStats.zRange);
+      const kStr = `${s.kValueStats.zeroCount}/${s.kValueStats.nonZeroCount}`;
+      lines.push(`| ${spanLabel} | ${s.wireCount} | ${wireTypes} | ${splitStr} | ${p0z} | ${p1z} | ${kStr} |`);
+    }
+  }
+  lines.push('');
+
+  // 观察 / 阻塞 / 建议
+  if (sg.observations.length > 0) {
+    lines.push('### 11.1 档距聚合观察');
+    lines.push('');
+    for (const o of sg.observations) {
+      lines.push(`- ${o}`);
+    }
+    lines.push('');
+  }
+  if (sg.blockingQuestions.length > 0) {
+    lines.push('### 11.2 阻塞问题');
+    lines.push('');
+    for (const q of sg.blockingQuestions) {
+      lines.push(`- ${q}`);
+    }
+    lines.push('');
+  }
+  if (sg.recommendations.length > 0) {
+    lines.push('### 11.3 M4-B4 决策建议');
+    lines.push('');
+    for (const rec of sg.recommendations) {
+      lines.push(`- ${rec}`);
+    }
+    lines.push('');
+  }
+}
+
+/** 格式化 [min, max] 范围为字符串 */
+function formatRange(range: [number, number] | null): string {
+  if (!range) return '—';
+  return `[${range[0].toFixed(2)}, ${range[1].toFixed(2)}]`;
+}
+
+/** 档距键截断：保留 BLHA 末段，避免表格过宽 */
+function shortSpanKey(spanKey: string): string {
+  if (spanKey === 'missing-endpoint') return 'missing-endpoint';
+  // BLHA 通常为 "lat,lng,h,azimuth"，取末两段
+  const parts = spanKey.split(' -> ');
+  if (parts.length !== 2) return spanKey;
+  const short0 = shortBlha(parts[0]);
+  const short1 = shortBlha(parts[1]);
+  return `${short0} -> ${short1}`;
+}
+
+/** BLHA 截断：仅保留前两段（lat,lng） */
+function shortBlha(blha: string): string {
+  if (!blha) return '—';
+  const parts = blha.split(',');
+  if (parts.length < 2) return blha;
+  return `${parts[0]},${parts[1]}`;
 }
 
 // ---------------------------------------------------------------------------
