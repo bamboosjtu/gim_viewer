@@ -395,7 +395,47 @@ SUBDEVICE1=xxx.dev
 
 当前只确认引用关系，不解释设备专业语义，不递归展开设备组合。
 
-### 6.2 demo-line DEV
+### 6.2 DEV 引用链全量统计
+
+基于 `demo-line` 与 `demo-substation` 的全量 `.dev` 文件统计：
+
+| 样本            | DEV 总数 | 引用 PHM | SOLIDMODEL 引用 DEV | 存在 SUBDEVICE | PHM + SOLIDMODEL DEV 混合 | PHM + SUBDEVICE 混合 | 其他 SOLIDMODEL 目标 |
+| --------------- | -------: | -------: | ------------------: | -------------: | ------------------------: | -------------------: | -------------------: |
+| demo-line       |     4518 |     1836 |                2682 |              0 |                         0 |                    0 |                    0 |
+| demo-substation |     4179 |     4179 |                   0 |            258 |                         0 |                  258 |                    0 |
+
+当前观察：
+
+- demo-line 中，DEV 分为两类：一类直接引用 PHM，一类通过 `SOLIDMODELn` 引用其他 DEV。
+- demo-line 中，`SOLIDMODELn=*.phm` 与 `SOLIDMODELn=*.dev` 没有在同一个 DEV 文件中混合出现。
+- demo-line 中未发现 `SUBDEVICEn` 字段。
+- demo-substation 中，所有 DEV 都直接引用 PHM。
+- demo-substation 中，258 个 DEV 同时存在 `SUBDEVICEn=*.dev`，说明部分设备存在子设备组合。
+- demo-substation 中未发现 `SOLIDMODELn=*.dev`。
+- 两个 demo 中均未发现 `.phm` / `.dev` 之外的 `SOLIDMODELn` 目标。
+
+当前结论：
+
+```text
+demo-line:
+DEV -> PHM
+DEV -> DEV
+
+demo-substation:
+DEV -> PHM
+DEV -> SUBDEVICE -> DEV
+```
+
+因此，DEV 层不能简单建模为单一路径 `DEV -> PHM`。更准确的表达是：
+
+```text
+DEV -> PHM -> MOD/STL
+DEV -> DEV/SUBDEVICE -> ...
+```
+
+当前只确认引用关系，不递归展开设备树，不进入 PHM/MOD/STL 几何解析。
+
+### 6.3 demo-line DEV
 
 线路 DEV 中观察到两类引用：
 
@@ -434,7 +474,7 @@ DEV -> PHM -> MOD/STL
 DEV -> DEV -> ...
 ```
 
-### 6.3 demo-substation DEV
+### 6.4 demo-substation DEV
 
 变电 DEV 中观察到两类引用：
 
@@ -473,7 +513,7 @@ DEV -> PHM -> MOD/STL
 DEV -> SUBDEVICE -> DEV -> ...
 ```
 
-### 6.4 当前引用链结论
+### 6.5 当前引用链结论
 
 基于当前两个 demo，可以暂定完整物理模型引用链为：
 
