@@ -3829,3 +3829,1089 @@ DEV-linked CBM 的文件级几何目标引用链可以闭合。
 ```
 
 但这些仍应保持 schema analysis 范围，不应直接进入几何渲染实现。
+
+## 44. Round 4 定位
+
+Round 4 的目标是对当前两个 demo 中的 `.mod` 文件做静态分型，确认 MOD 的表层格式、结构特征、上游引用关系和浏览器侧解析边界。
+
+Round 4 承接 Round 3：
+
+```text
+Round 3 已确认：
+CBM -> DEV -> PHM -> MOD/STL 文件级几何目标可达。
+
+Round 4 继续确认：
+到达的 MOD 文件本身是什么格式、是否可静态识别、是否存在空 MOD / orphan MOD、是否能形成后续 parser 分支依据。
+```
+
+当前分析对象：
+
+```text
+demo-line
+demo-substation
+```
+
+当前分析范围：
+
+```text
+MOD 文件静态分类
+线路 MOD 文本格式族分析
+变电 MOD XML 结构分析
+MOD 与 PHM 引用关系
+MOD 与 CBM entityName 的上游映射
+EMPTY_DEVICE_XML / orphan MOD 分析
+XML Entity / primitive / TransformMatrix / Color / Visible 字段形态分析
+```
+
+当前不做：
+
+```text
+不改 src
+不改 SQLite schema
+不新增 UI
+不实现 MOD 解析
+不实现 STL 解析
+不做 3D 渲染
+不做悬链线
+不应用 TRANSFORMMATRIX
+不确认 TransformMatrix 行列主序
+不确认坐标系方向
+不改变当前 MVP 行为
+```
+
+Round 4 的核心判断是：
+
+```text
+MOD 不是单一格式。
+当前 demo-line MOD 是多种文本格式族。
+当前 demo-substation MOD 是 XML Device / Entities / Entity / primitive 格式族，另有 44 个未引用的 EMPTY_DEVICE_XML。
+```
+
+---
+
+## 45. Round 4 总体计划
+
+Round 4 按以下阶段推进：
+
+| 阶段        | 目标               | 产出                                              |
+| --------- | ---------------- | ----------------------------------------------- |
+| Round 4.1 | MOD 文件静态画像       | MOD 初步分类                                        |
+| Round 4.2 | 线路 MOD 文本格式细分    | line MOD 格式族                                    |
+| Round 4.3 | 线路 MOD 词汇表分析     | key / token / code 分布                           |
+| Round 4.4 | 变电 MOD XML 结构分析  | XML root / Entity / primitive 结构                |
+| Round 4.5 | XML Entity 一致性检查 | Entity / primitive / TransformMatrix / Color 规则 |
+| Round 4.6 | Visible 与矩阵字段分析  | Visible 分布与矩阵维度                                 |
+| Round 4.7 | MOD 与上游 CBM 映射   | MOD kind 与 entityName 对应关系                      |
+| Round 4.8 | 浏览器实现边界总结        | 解析策略与不能得出的结论                                    |
+
+---
+
+## 46. Step 1：MOD 文件静态画像
+
+### 46.1 目标
+
+确认当前两个 demo 中 `.mod` 文件的基础格式分布，包括：
+
+```text
+是否 XML
+是否空 XML
+是否 key-value 文本
+是否点线记录
+是否 section + key-value 记录
+是否存在暂不能归类的文本形态
+```
+
+### 46.2 命令
+
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+Show-ModStaticProfileV2 ".\demo\demo-line\Mod"
+Show-ModStaticProfileV2 ".\demo\demo-substation\MOD"
+```
+
+### 46.3 结果
+
+demo-line：
+
+| MOD kind               |   数量 |
+| ---------------------- | ---: |
+| TEXT_SECTION_KV_RECORD | 1300 |
+| TEXT_POINT_LINE        |  315 |
+| TEXT_KEY_VALUE         |  161 |
+| TEXT_HNUM_COMMA_RECORD |   31 |
+
+demo-substation：
+
+| MOD kind         |   数量 |
+| ---------------- | ---: |
+| XML              | 4135 |
+| EMPTY_DEVICE_XML |   44 |
+
+### 46.4 分析结论
+
+MOD 不是单一格式。
+
+demo-line 中没有 XML MOD，而是多种文本格式族：
+
+```text
+TEXT_SECTION_KV_RECORD
+TEXT_POINT_LINE
+TEXT_KEY_VALUE
+TEXT_HNUM_COMMA_RECORD
+```
+
+demo-substation 中 MOD 是 XML 格式族：
+
+```text
+XML_WITH_ENTITIES
+EMPTY_DEVICE_XML
+```
+
+这说明后续浏览器如果实现 MOD parser，必须先做格式分流，不能写成单一 MOD schema。
+
+---
+
+## 47. Step 2：demo-line MOD 文本格式细分
+
+### 47.1 目标
+
+进一步确认 demo-line 中各类文本 MOD 的 header、首行、文件大小和文本结构，尤其是原先无法归类的 `TEXT_OR_UNKNOWN` 是否能稳定归类。
+
+### 47.2 命令
+
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+Show-LineModTextDetail ".\demo\demo-line\Mod"
+```
+
+### 47.3 结果
+
+分类结果：
+
+| MOD kind               |   数量 |
+| ---------------------- | ---: |
+| TEXT_SECTION_KV_RECORD | 1300 |
+| TEXT_POINT_LINE        |  315 |
+| TEXT_KEY_VALUE         |  161 |
+| TEXT_HNUM_COMMA_RECORD |   31 |
+
+Top headers by kind：
+
+|   数量 | kind + header                   |
+| ---: | ------------------------------- |
+| 1300 | TEXT_SECTION_KV_RECORD, Bolt    |
+|  161 | TEXT_KEY_VALUE, type            |
+|  128 | TEXT_POINT_LINE, CODE=201       |
+|   74 | TEXT_POINT_LINE, CODE=31        |
+|   63 | TEXT_POINT_LINE, CODE=32        |
+|   19 | TEXT_POINT_LINE, CODE=34        |
+|   13 | TEXT_POINT_LINE, CODE=35        |
+|   10 | TEXT_POINT_LINE, CODE=33        |
+|    8 | TEXT_POINT_LINE, CODE=30        |
+|    8 | TEXT_HNUM_COMMA_RECORD, HNum,8  |
+|    7 | TEXT_HNUM_COMMA_RECORD, HNum,10 |
+|    4 | TEXT_HNUM_COMMA_RECORD, HNum,5  |
+|    3 | TEXT_HNUM_COMMA_RECORD, HNum,3  |
+|    3 | TEXT_HNUM_COMMA_RECORD, HNum,6  |
+|    2 | TEXT_HNUM_COMMA_RECORD, HNum,4  |
+|    2 | TEXT_HNUM_COMMA_RECORD, HNum,7  |
+|    1 | TEXT_HNUM_COMMA_RECORD, HNum,1  |
+|    1 | TEXT_HNUM_COMMA_RECORD, HNum,9  |
+
+最大文件均属于 `TEXT_HNUM_COMMA_RECORD`，最大样本：
+
+```text
+faad2496-75ae-4ad2-bdf1-1522ec5f3df2.mod
+kind = TEXT_HNUM_COMMA_RECORD
+length = 2624664
+lineCount = 44876
+firstLine = HNum,8
+```
+
+`TEXT_HNUM_COMMA_RECORD` 典型片段：
+
+```text
+HNum,8
+H,27000,Body1,Leg1
+H,33000,Body1,Leg2
+H,42000,Body1,Leg3
+Body1
+HBody1,27311.548
+P,1,16828.007242,-368.058352,82530.887012
+P,2,16228.007242,-434.058352,82030.887012
+```
+
+### 47.4 分析结论
+
+原先的 `TEXT_OR_UNKNOWN` 可以进一步稳定归类为：
+
+```text
+TEXT_HNUM_COMMA_RECORD
+```
+
+demo-line MOD 当前可以固定为四类文本格式族：
+
+```text
+TEXT_SECTION_KV_RECORD
+TEXT_POINT_LINE
+TEXT_KEY_VALUE
+TEXT_HNUM_COMMA_RECORD
+```
+
+其中 `TEXT_HNUM_COMMA_RECORD` 具有大文件、高行数、HNum / H / Body / P 等逗号记录特征，暂归类为杆塔主体 / 分段构件文本记录。
+
+但当前不能写成“已经解析塔模型”。
+
+---
+
+## 48. Step 3：demo-line MOD 词汇表分析
+
+### 48.1 目标
+
+分析线路文本 MOD 的字段词汇表，确认不同 MOD kind 的 token / key / CODE 是否稳定。
+
+重点回答：
+
+```text
+TEXT_HNUM_COMMA_RECORD 中有哪些 token？
+TEXT_POINT_LINE 中有哪些 key？
+TEXT_POINT_LINE 的 CODE 分布是什么？
+TEXT_SECTION_KV_RECORD 是否全部是 Bolt 结构？
+TEXT_KEY_VALUE 是否包含杆塔参数和导线参数两类？
+```
+
+### 48.2 命令
+
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+Show-LineModVocabulary ".\demo\demo-line\Mod"
+```
+
+### 48.3 结果
+
+Kind summary：
+
+| MOD kind               |   数量 |
+| ---------------------- | ---: |
+| TEXT_SECTION_KV_RECORD | 1300 |
+| TEXT_POINT_LINE        |  315 |
+| TEXT_KEY_VALUE         |  161 |
+| TEXT_HNUM_COMMA_RECORD |   31 |
+
+#### TEXT_HNUM_COMMA_RECORD token summary
+
+| token          |     数量 |
+| -------------- | -----: |
+| P              | 597854 |
+| R              | 299399 |
+| SECTION_HEADER |   1813 |
+| G              |    646 |
+| H              |    213 |
+| HSubLeg3       |    212 |
+| HSubLeg1       |    212 |
+| HSubLeg4       |    212 |
+| HSubLeg2       |    212 |
+| HSubLeg5       |    152 |
+| HSubLeg6       |    138 |
+| HSubLeg7       |    133 |
+| HSubLeg8       |     81 |
+| HSubLeg9       |     60 |
+| HSubLeg10      |     51 |
+| HSubLeg11      |     32 |
+| HNum           |     31 |
+| HBody1         |     31 |
+| HLeg1          |     30 |
+| HLeg2          |     30 |
+| HLeg3          |     30 |
+| HLeg4          |     27 |
+| HLeg5          |     25 |
+| HBody2         |     25 |
+| HLeg6          |     21 |
+| HLeg7          |     18 |
+| HLeg8          |     16 |
+| HSubLeg12      |     15 |
+| HBody3         |     13 |
+| HSubLeg13      |     13 |
+| HLeg9          |      8 |
+| HLeg10         |      7 |
+| HBody4         |      6 |
+| HBody5         |      2 |
+| HSubLeg14      |      1 |
+
+#### TEXT_POINT_LINE key summary
+
+| key      |  数量 |
+| -------- | --: |
+| LINENUM  | 315 |
+| POINTNUM | 315 |
+| CODE     | 315 |
+| POINT1   | 315 |
+| POINT2   | 315 |
+| POINT3   | 315 |
+| POINT4   | 315 |
+| LINE1    | 315 |
+| LINE2    | 315 |
+| LINE3    | 315 |
+| LINE4    | 171 |
+| POINT5   |  51 |
+| POINT6   |  51 |
+| LINE5    |  51 |
+| LINE6    |  12 |
+| POINT7   |   9 |
+| POINT8   |   9 |
+| LINE7    |   9 |
+| LINE8    |   6 |
+| POINT9   |   5 |
+| POINT10  |   5 |
+| LINE9    |   5 |
+| LINE10   |   5 |
+| POINT11  |   4 |
+| POINT12  |   4 |
+| LINE11   |   4 |
+| LINE12   |   3 |
+
+#### TEXT_POINT_LINE CODE summary
+
+| CODE |  数量 |
+| ---: | --: |
+|  201 | 128 |
+|   31 |  74 |
+|   32 |  63 |
+|   34 |  19 |
+|   35 |  13 |
+|   33 |  10 |
+|   30 |   8 |
+
+#### TEXT_SECTION_KV_RECORD key summary
+
+| key family |   数量 |
+| ---------- | ---: |
+| Boltn      | 5616 |
+| BoltNum    | 1300 |
+
+#### TEXT_KEY_VALUE key summary
+
+| key                        |  数量 |
+| -------------------------- | --: |
+| d                          | 304 |
+| type                       | 161 |
+| e2                         | 152 |
+| e1                         | 152 |
+| H4                         | 152 |
+| H1                         | 152 |
+| H2                         | 152 |
+| H3                         | 152 |
+| COEFFICIENTOFELASTICITY    |   9 |
+| EXPANSIONCOEFFICIENTOFWIRE |   9 |
+| RATEDSTRENGTH              |   9 |
+| SECTIONALAREA              |   9 |
+| OUTSIDEDIAMETER            |   9 |
+| WIREWEIGHT                 |   9 |
+
+### 48.4 分析结论
+
+demo-line MOD 的四类文本格式族各自稳定：
+
+```text
+TEXT_SECTION_KV_RECORD：
+- header 全部是 Bolt
+- key family 是 BoltNum / Boltn
+
+TEXT_POINT_LINE：
+- key 稳定为 CODE / POINTNUM / LINENUM / POINTn / LINEn
+- CODE 包括 201、31、32、34、35、33、30
+
+TEXT_KEY_VALUE：
+- 既包含杆塔参数字段 type、d、e1、e2、H1-H4
+- 也包含导线参数字段 COEFFICIENTOFELASTICITY、SECTIONALAREA 等
+
+TEXT_HNUM_COMMA_RECORD：
+- 包含 HNum / H / Body / HBody / HLeg / HSubLeg / P / R / G 等 token
+- 暂归类为杆塔主体 / 分段构件文本记录
+```
+
+线路 MOD 后续需要多分支 parser，不能强行统一成一个 DTO。
+
+---
+
+## 49. Step 4：demo-substation XML MOD 结构分析
+
+### 49.1 目标
+
+确认变电样本中的 XML MOD 是否可解析，XML root 是否稳定，Entities / Entity / primitive 结构是否稳定。
+
+### 49.2 命令
+
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+Show-SubstationModXmlVocabulary ".\demo\demo-substation\MOD"
+```
+
+### 49.3 结果
+
+File kind summary：
+
+| kind              |   数量 |
+| ----------------- | ---: |
+| XML_WITH_ENTITIES | 4135 |
+| EMPTY_DEVICE_XML  |   44 |
+
+Root summary：
+
+| root   |   数量 |
+| ------ | ---: |
+| Device | 4179 |
+
+Entity child count distribution 摘要：
+
+| Entity 子节点数量 |  文件数 |
+| -----------: | ---: |
+|            1 | 2392 |
+|            5 |  349 |
+|           14 |  167 |
+|            4 |  115 |
+|            2 |  101 |
+|           20 |   89 |
+|            3 |   83 |
+|           30 |   81 |
+|            9 |   63 |
+|            7 |   55 |
+|           21 |   51 |
+|           15 |   46 |
+|            0 |   44 |
+
+Top element paths：
+
+| path                                           |    数量 |
+| ---------------------------------------------- | ----: |
+| /Device/Entities/Entity                        | 46250 |
+| /Device/Entities/Entity/TransformMatrix        | 46250 |
+| /Device/Entities/Entity/Color                  | 46250 |
+| /Device/Entities/Entity/Cylinder               | 20421 |
+| /Device/Entities/Entity/Cuboid                 | 12401 |
+| /Device/Entities/Entity/StretchedBody          | 10263 |
+| /Device/Entities                               |  4179 |
+| /Device                                        |  4179 |
+| /Device/Entities/Entity/PorcelainBushing       |  1506 |
+| /Device/Entities/Entity/TruncatedCone          |   730 |
+| /Device/Entities/Entity/Ring                   |   235 |
+| /Device/Entities/Entity/TerminalBlock          |   201 |
+| /Device/Entities/Entity/Sphere                 |   141 |
+| /Device/Entities/Entity/ChannelSteel           |   129 |
+| /Device/Entities/Entity/Table                  |   109 |
+| /Device/Entities/Entity/CircularGasket         |    80 |
+| /Device/Entities/Entity/RectangularFixedPlate  |    18 |
+| /Device/Entities/Entity/OffsetRectangularTable |    15 |
+| /Device/Entities/Entity/RectangularRing        |     1 |
+
+Entity child names：
+
+| childName |    数量 |
+| --------- | ----: |
+| Entity    | 46250 |
+
+Entity child attribute signatures：
+
+| signature               |    数量 |
+| ----------------------- | ----: |
+| Entity, ID,Type,Visible | 46250 |
+
+### 49.4 分析结论
+
+demo-substation MOD 是稳定 XML 格式族：
+
+```text
+Device
+  Entities
+    Entity
+      TransformMatrix
+      Color
+      primitive
+```
+
+其中：
+
+```text
+root 全部是 Device。
+非空 XML MOD 全部包含 Entity。
+Entity 总数为 46250。
+Entity 基础属性签名稳定为 ID,Type,Visible。
+```
+
+44 个 `EMPTY_DEVICE_XML` 是 `<Device><Entities /></Device>` 结构，不应与 XML 解析错误混淆。
+
+---
+
+## 50. Step 5：demo-substation XML Entity 一致性检查
+
+### 50.1 目标
+
+确认 XML MOD 中每个 Entity 的 TransformMatrix、Color、primitive 子节点是否完整；同时判断 Entity.Type 是否等于 primitive 名称。
+
+### 50.2 命令
+
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+Show-SubstationModEntityConsistency ".\demo\demo-substation\MOD"
+```
+
+### 50.3 结果
+
+Overall：
+
+```text
+totalEntities               : 46250
+missingTransformMatrix      : 0
+missingTransformMatrixValue : 0
+missingColor                : 0
+missingColorArgb            : 0
+primitiveCountNotOne        : 0
+typeNotMatchPrimitive       : 46250
+```
+
+Primitive type distribution：
+
+| primitive              |    数量 |
+| ---------------------- | ----: |
+| Cylinder               | 20421 |
+| Cuboid                 | 12401 |
+| StretchedBody          | 10263 |
+| PorcelainBushing       |  1506 |
+| TruncatedCone          |   730 |
+| Ring                   |   235 |
+| TerminalBlock          |   201 |
+| Sphere                 |   141 |
+| ChannelSteel           |   129 |
+| Table                  |   109 |
+| CircularGasket         |    80 |
+| RectangularFixedPlate  |    18 |
+| OffsetRectangularTable |    15 |
+| RectangularRing        |     1 |
+
+Entity Type distribution：
+
+| Entity.Type |    数量 |
+| ----------- | ----: |
+| simple      | 46250 |
+
+Visible distribution：
+
+| Visible |    数量 |
+| ------- | ----: |
+| True    | 45558 |
+| False   |   692 |
+
+Primitive attribute signatures：
+
+| primitive              | 属性签名                            |    数量 |
+| ---------------------- | ------------------------------- | ----: |
+| Cylinder               | R,H                             | 20421 |
+| Cuboid                 | L,W,H                           | 12401 |
+| StretchedBody          | Array,Normal,L                  | 10263 |
+| PorcelainBushing       | R,R1,R2,N,H                     |  1506 |
+| TruncatedCone          | TR,BR,H                         |   730 |
+| Ring                   | DR,R,Rad                        |   235 |
+| TerminalBlock          | L,W,T,CL,CS,RS,R,CN,RN,BL,Phase |   201 |
+| Sphere                 | R                               |   141 |
+| ChannelSteel           | Model,L                         |    72 |
+| ChannelSteel           | Model,L,B,H,D,T                 |    57 |
+| Table                  | TL1,TL2,LL1,LL2,H               |   109 |
+| CircularGasket         | OR,IR,Rad,H                     |    80 |
+| RectangularFixedPlate  | L,W,T,CS,RS,CN,RN,MH,D          |    18 |
+| OffsetRectangularTable | TL,TW,LL,LW,XOFF,YOFF,H         |    15 |
+| RectangularRing        | DR,R,W,L                        |     1 |
+
+### 50.4 分析结论
+
+这个结果修正了一个关键判断：
+
+```text
+Entity.Type 不等于 primitive 名称。
+Entity.Type 全部是 simple。
+primitive 类型必须从 Entity 子节点名读取。
+```
+
+因此 XML MOD 中的几何类型字段不是：
+
+```text
+/Device/Entities/Entity[@Type]
+```
+
+而是：
+
+```text
+/Device/Entities/Entity/<primitiveName>
+```
+
+当前 demo-substation XML MOD 可以描述为：
+
+```text
+Device
+  Entities
+    Entity(ID, Type=simple, Visible)
+      TransformMatrix(Value)
+      Color(A, R, G, B)
+      Primitive(...)
+```
+
+每个 Entity 都有 TransformMatrix 和 Color，且恰好有一个 primitive 子节点。
+
+---
+
+## 51. Step 6：Visible 与 TransformMatrix.Value 分析
+
+### 51.1 目标
+
+确认 XML MOD 中 `Visible=False` 的 primitive 分布，以及 `TransformMatrix.Value` 是否全部为 16 元矩阵字段。
+
+### 51.2 命令
+
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+Show-SubstationModVisibilityAndMatrix ".\demo\demo-substation\MOD"
+```
+
+### 51.3 结果
+
+Visible by primitive：
+
+| primitive + Visible          |    数量 |
+| ---------------------------- | ----: |
+| Cylinder, True               | 20277 |
+| Cuboid, True                 | 12347 |
+| StretchedBody, True          |  9769 |
+| PorcelainBushing, True       |  1506 |
+| TruncatedCone, True          |   730 |
+| StretchedBody, False         |   494 |
+| Ring, True                   |   235 |
+| TerminalBlock, True          |   201 |
+| Cylinder, False              |   144 |
+| Sphere, True                 |   141 |
+| ChannelSteel, True           |   129 |
+| Table, True                  |   109 |
+| CircularGasket, True         |    80 |
+| Cuboid, False                |    54 |
+| RectangularFixedPlate, True  |    18 |
+| OffsetRectangularTable, True |    15 |
+| RectangularRing, True        |     1 |
+
+Visible=False 分布：
+
+| primitive     | Visible=False 数量 |
+| ------------- | ---------------: |
+| StretchedBody |              494 |
+| Cylinder      |              144 |
+| Cuboid        |               54 |
+| 合计            |              692 |
+
+Matrix value count distribution：
+
+| TransformMatrix.Value 元素数量 | Entity 数量 |
+| -------------------------: | --------: |
+|                         16 |     46250 |
+
+Matrix value count by primitive：
+
+| primitive              | matrixValueCount |
+| ---------------------- | ---------------: |
+| Cylinder               |               16 |
+| Cuboid                 |               16 |
+| StretchedBody          |               16 |
+| PorcelainBushing       |               16 |
+| TruncatedCone          |               16 |
+| Ring                   |               16 |
+| TerminalBlock          |               16 |
+| Sphere                 |               16 |
+| ChannelSteel           |               16 |
+| Table                  |               16 |
+| CircularGasket         |               16 |
+| RectangularFixedPlate  |               16 |
+| OffsetRectangularTable |               16 |
+| RectangularRing        |               16 |
+
+Invisible entity sample 中，多个 `Visible=False` 的 StretchedBody 使用单位矩阵：
+
+```text
+1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1
+```
+
+### 51.4 分析结论
+
+当前 demo-substation 中：
+
+```text
+TransformMatrix.Value 全部是 16 个数。
+Visible 是 Entity 级显示控制字段。
+Visible=False 主要出现在 StretchedBody、Cylinder、Cuboid。
+```
+
+但当前不能直接得出：
+
+```text
+Visible=False 一定应该跳过渲染。
+```
+
+更稳妥的浏览器策略是：
+
+```text
+解析阶段保留 Visible。
+渲染策略阶段再决定是否默认跳过 Visible=False。
+诊断中记录 Visible=False 数量与 primitive 分布。
+```
+
+TransformMatrix.Value 可作为 16 元矩阵字段进入后续设计，但当前仍不能确认矩阵行列主序、坐标系方向和单位。
+
+---
+
+## 52. Step 7：MOD 与上游 CBM entityName 映射
+
+### 52.1 目标
+
+确认不同 MOD kind 与上游业务对象类型之间的关系。
+
+重点回答：
+
+```text
+线路里的 TEXT_HNUM_COMMA_RECORD / TEXT_POINT_LINE / TEXT_SECTION_KV_RECORD 分别服务哪些 CBM entityName？
+变电里的 XML MOD 分别来自 F4System 还是 PARTINDEX？
+44 个 EMPTY_DEVICE_XML 是否确实没有进入 CBM 可达链？
+```
+
+### 52.2 命令
+
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+Show-ModKindUpstreamMapping ".\demo\demo-line" "Cbm" "Dev" "Phm" "Mod"
+Show-ModKindUpstreamMapping ".\demo\demo-substation" "CBM" "DEV" "PHM" "MOD"
+```
+
+### 52.3 结果
+
+#### demo-line：MOD inventory by kind + PHM referenced
+
+|   数量 | kind + PHM referenced        |
+| ---: | ---------------------------- |
+| 1300 | TEXT_SECTION_KV_RECORD, True |
+|  315 | TEXT_POINT_LINE, True        |
+|  161 | TEXT_KEY_VALUE, True         |
+|   31 | TEXT_HNUM_COMMA_RECORD, True |
+
+#### demo-line：CBM resolved MOD references by entityName + modKind
+
+| 引用次数 | entityName + modKind                 |
+| ---: | ------------------------------------ |
+| 5460 | WIRE, TEXT_KEY_VALUE                 |
+| 1300 | Tower_Device, TEXT_SECTION_KV_RECORD |
+| 1300 | Tower_Device, TEXT_KEY_VALUE         |
+|  327 | Tower_Device, TEXT_HNUM_COMMA_RECORD |
+|  315 | CROSS, TEXT_POINT_LINE               |
+
+#### demo-line：Unique MOD files reached by CBM entityName + modKind
+
+| 唯一 MOD 数 | entityName + modKind                 |
+| -------: | ------------------------------------ |
+|     1300 | Tower_Device, TEXT_SECTION_KV_RECORD |
+|      315 | CROSS, TEXT_POINT_LINE               |
+|      152 | Tower_Device, TEXT_KEY_VALUE         |
+|       31 | Tower_Device, TEXT_HNUM_COMMA_RECORD |
+|        9 | WIRE, TEXT_KEY_VALUE                 |
+
+demo-line 中未发现未被 DEV-linked CBM 到达的 MOD kind。
+
+#### demo-substation：MOD inventory by kind + PHM referenced
+
+|   数量 | kind + PHM referenced   |
+| ---: | ----------------------- |
+| 4135 | XML_WITH_ENTITIES, True |
+|   44 | EMPTY_DEVICE_XML, False |
+
+#### demo-substation：CBM resolved MOD references by entityName + modKind
+
+| 引用次数 | entityName + modKind         |
+| ---: | ---------------------------- |
+| 4135 | F4System, XML_WITH_ENTITIES  |
+| 3894 | PARTINDEX, XML_WITH_ENTITIES |
+
+#### demo-substation：Unique MOD files reached by CBM entityName + modKind
+
+| 唯一 MOD 数 | entityName + modKind         |
+| -------: | ---------------------------- |
+|     4135 | F4System, XML_WITH_ENTITIES  |
+|     3894 | PARTINDEX, XML_WITH_ENTITIES |
+
+#### demo-substation：MOD kinds not reached from any DEV-linked CBM
+
+| 数量 | kind + PHM referenced   |
+| -: | ----------------------- |
+| 44 | EMPTY_DEVICE_XML, False |
+
+### 52.4 分析结论
+
+demo-line 中：
+
+```text
+所有 MOD 均被 PHM 引用。
+没有 orphan MOD。
+没有未被 DEV-linked CBM 到达的 MOD kind。
+```
+
+不同 entityName 与 MOD kind 的关系为：
+
+```text
+Tower_Device 使用：
+- TEXT_SECTION_KV_RECORD
+- TEXT_KEY_VALUE
+- TEXT_HNUM_COMMA_RECORD
+
+CROSS 使用：
+- TEXT_POINT_LINE
+
+WIRE 使用：
+- TEXT_KEY_VALUE
+```
+
+其中：
+
+```text
+WIRE 对 9 个 TEXT_KEY_VALUE MOD 形成 5460 次引用，说明导线参数 MOD 高度复用。
+Tower_Device 对 31 个 TEXT_HNUM_COMMA_RECORD MOD 形成 327 次引用，说明杆塔主体 / 分段构件记录也存在复用。
+```
+
+demo-substation 中：
+
+```text
+XML_WITH_ENTITIES 均被 PHM 引用。
+EMPTY_DEVICE_XML 均未被 PHM 引用。
+EMPTY_DEVICE_XML 均未被 DEV-linked CBM 到达。
+```
+
+F4System 与 PARTINDEX 的可达 XML_WITH_ENTITIES 存在重叠：
+
+```text
+F4System 可到达 4135 个 XML_WITH_ENTITIES。
+PARTINDEX 可到达 3894 个 XML_WITH_ENTITIES。
+```
+
+这不是重复文件错误。更合理的解释是：
+
+```text
+F4System 是设备级 / 装配级入口。
+PARTINDEX 是部件级入口。
+同一个下游 MOD 可以从设备级路径和部件级路径同时到达。
+```
+
+---
+
+## 53. Round 4 当前结论
+
+当前可以形成以下结论：
+
+```text
+1. MOD 不是单一格式。
+2. demo-line MOD 是多种文本格式族。
+3. demo-substation MOD 是 XML Device / Entities / Entity / primitive 格式族。
+4. demo-line 没有 orphan MOD。
+5. demo-substation 有 44 个 UNREFERENCED_EMPTY_MOD。
+6. demo-substation 的 EMPTY_DEVICE_XML 未被 PHM 引用，也未被 DEV-linked CBM 到达。
+7. XML MOD 中 Entity.Type 全部为 simple。
+8. XML MOD 的 primitive 类型由 Entity 子节点名称决定，不由 Entity.Type 决定。
+9. XML MOD 每个 Entity 恰好有 1 个 primitive 子节点。
+10. XML MOD 每个 Entity 都有 TransformMatrix.Value。
+11. TransformMatrix.Value 全部是 16 个数。
+12. XML MOD 每个 Entity 都有 Color A/R/G/B。
+13. XML MOD 中 Visible 是 Entity 级字段。
+14. 线路 MOD 需要按文本格式族分支解析。
+15. 变电 XML MOD 可以优先按 Device / Entities / Entity / primitive 结构解析。
+```
+
+---
+
+## 54. Round 4 对浏览器实现的影响
+
+### 54.1 MOD parser 不能按单一格式实现
+
+当前两个 demo 已经证明：
+
+```text
+demo-line MOD：文本格式族
+demo-substation MOD：XML 格式族
+```
+
+因此后续实现不应写成单一路径：
+
+```text
+parseMod(file) -> one schema
+```
+
+而应先做格式分流：
+
+```text
+classifyMod(file)
+  -> XML_WITH_ENTITIES
+  -> EMPTY_DEVICE_XML
+  -> TEXT_SECTION_KV_RECORD
+  -> TEXT_POINT_LINE
+  -> TEXT_KEY_VALUE
+  -> TEXT_HNUM_COMMA_RECORD
+```
+
+### 54.2 线路 MOD 需要文本多分支解析
+
+demo-line 至少需要以下分支：
+
+```text
+TEXT_SECTION_KV_RECORD
+TEXT_POINT_LINE
+TEXT_KEY_VALUE
+TEXT_HNUM_COMMA_RECORD
+```
+
+不同分支的字段结构完全不同，不能强行映射为统一 DTO。
+
+### 54.3 变电 MOD 可优先解析 XML 结构
+
+demo-substation 的 XML MOD 结构稳定：
+
+```text
+Device
+  Entities
+    Entity
+      TransformMatrix
+      Color
+      primitive
+```
+
+可以优先作为结构化解析候选。
+
+但解析时需要注意：
+
+```text
+Entity.Type 不是 primitive 类型。
+primitive 类型要从 Entity 子节点名读取。
+```
+
+### 54.4 EMPTY_DEVICE_XML 不进入主链渲染
+
+44 个 EMPTY_DEVICE_XML：
+
+```text
+未被 PHM 引用
+未被 DEV-linked CBM 到达
+```
+
+因此浏览器策略应为：
+
+```text
+不参与主链解析
+不参与渲染
+不作为 missing reference
+进入诊断报告
+```
+
+### 54.5 Visible 应作为实体级字段保留
+
+当前观察到：
+
+```text
+Visible=True 45558
+Visible=False 692
+```
+
+后续解析模型中应保留 Visible 字段。
+
+但当前还不能直接确定：
+
+```text
+Visible=False 一定应跳过渲染。
+```
+
+更稳妥的策略是解析保留、渲染层再决策。
+
+### 54.6 TransformMatrix.Value 可作为 16 元矩阵字段进入后续设计
+
+当前所有 XML Entity 的 TransformMatrix.Value 都是 16 个数。
+
+但当前不能确认：
+
+```text
+矩阵行主序 / 列主序
+坐标系方向
+单位
+与 PHM TRANSFORMMATRIX 的组合顺序
+```
+
+这些需要后续专门分析。
+
+---
+
+## 55. Round 4 当前不能得出的结论
+
+当前不能得出：
+
+```text
+所有 GIM 的 MOD 都只有这些格式。
+TEXT_HNUM_COMMA_RECORD 已经完成杆塔模型解析。
+TEXT_POINT_LINE 已经可以直接渲染。
+XML primitive 已经可以直接渲染。
+TransformMatrix 的行列主序已经确认。
+坐标系方向已经确认。
+单位已经确认。
+Visible=False 一定应该跳过渲染。
+EMPTY_DEVICE_XML 在所有样本中都必然未引用。
+F4System / PARTINDEX 的关系可以推广为所有变电 GIM 规则。
+```
+
+当前只能确认：
+
+```text
+在当前两个 demo 中，MOD 存在显著格式分型。
+demo-line MOD 是多种文本格式族。
+demo-substation MOD 是 XML primitive 格式族。
+DEV-linked CBM 能到达的 MOD 均属于可静态识别格式。
+```
+
+---
+
+## 56. Round 4 后续建议
+
+后续可以继续做：
+
+```text
+1. PHM TRANSFORMMATRIX 与 XML Entity TransformMatrix 的关系分析。
+2. XML primitive 参数值范围分析。
+3. TEXT_POINT_LINE 坐标字段形态分析。
+4. TEXT_HNUM_COMMA_RECORD P/R/G 记录结构分析。
+5. STL 文件大小、引用对象和用途分析。
+6. MOD parser 草案设计，但仍不进入渲染实现。
+```
+
+建议下一轮优先分析：
+
+```text
+PHM TRANSFORMMATRIX 与 MOD 内部 TransformMatrix 的层级关系。
+```
+
+原因是 Round 3 已经确认：
+
+```text
+DEV -> PHM -> MOD/STL 可达
+```
+
+Round 4 已经确认：
+
+```text
+MOD 内部存在几何 primitive 和 TransformMatrix
+```
+
+下一步应确认：
+
+```text
+PHM.TRANSFORMMATRIX 与 MOD.Entity.TransformMatrix 如何共同构成最终局部 / 全局变换链。
+```
