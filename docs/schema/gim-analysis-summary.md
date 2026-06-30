@@ -2,7 +2,7 @@
 
 ## 1. Round 1 定位
 
-Round 1 的目标不是开发新功能，而是把当前两个 demo 的 GIM 文件结构从“代码经验”整理成“可复查、可复跑、可扩展验证”的 schema analysis 文档。
+Round 1 的目标不是开发新功能，而是把当前 demo 目录下的 GIM 文件结构从“代码经验”整理成“可复查、可复跑、可扩展验证”的 schema analysis 文档。
 
 当前分析对象：
 
@@ -21,20 +21,6 @@ CBM -> DEV / FAM / CBM / IFC 引用链
 DEV -> PHM / DEV 引用链
 PHM -> MOD / STL 引用链
 CBM / DEV / PHM 文件级引用完整性
-```
-
-当前不做：
-
-```text
-不改 src
-不改 SQLite schema
-不新增 UI
-不实现 MOD 解析
-不做 3D 线路
-不做悬链线
-不做 STL 解析
-不递归展开完整设备树
-不改变当前 MVP 行为
 ```
 
 Round 1 的核心判断是：
@@ -110,7 +96,7 @@ CBM
 
 ### 4.1 目的
 
-确认当前分析只基于两个 demo，不把样本事实扩大为 GIM 通用规范。
+确认当前分析只基于 demo 样本，不把样本事实扩大为 GIM 通用规范。
 
 ### 4.2 命令
 
@@ -122,6 +108,8 @@ Get-ChildItem .\demo -Force
 Get-ChildItem .\demo -File -Filter *.gim |
   Select-Object Name, Length, LastWriteTime |
   Format-Table -AutoSize
+  
+Get-FileHash .\demo\demo-line.gim -Algorithm SHA256
 ```
 
 ### 4.3 当前结果
@@ -153,13 +141,13 @@ demo-substation
 
 ### 4.4 结果分析
 
-线路样本使用 PascalCase 目录：
+线路2个样本使用 PascalCase 目录：
 
 ```text
 Cbm / Dev / Phm / Mod
 ```
 
-变电样本使用大写目录：
+变电1个样本使用大写目录：
 
 ```text
 CBM / DEV / PHM / MOD
@@ -197,6 +185,40 @@ function Read-HeaderHex {
 
 Read-HeaderHex ".\demo\demo-line.gim" 128
 Read-HeaderHex ".\demo\demo-substation.gim" 128
+
+# hex2text 分析
+$hex = @"
+47 49 4D 50 4B 47 54 00 00 00 00 00 00 00 00 00
+E9 9B 81 E5 9F 8E 2D E8 88 B9 E5 B1 B1 EF BC 88
+E8 88 B9 E5 B1 B1 E4 BE A7 EF BC 89 E5 8F 8C E5
+9B 9E E6 94 B9 E6 8E A5 E8 A1 A1 E9 98 B3 E8 A5
+BF EF BC 88 E5 96 9C E9 98 B3 EF BC 89 35 30 30
+6B 56 E7 BA BF E8 B7 AF E5 B7 A5 E7 A8 8B 2E 67
+69 6D 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+"@
+
+$bytes = $hex -split '\s+' |
+  Where-Object { $_ -ne "" } |
+  ForEach-Object { [Convert]::ToByte($_, 16) }
+
+# 前 16 字节：magic
+$magicBytes = $bytes[0..15]
+$magic = [Text.Encoding]::ASCII.GetString($magicBytes).Trim([char]0)
+
+# 后 112 字节：文件名
+$nameBytes = $bytes[16..127]
+$nameEnd = [Array]::IndexOf($nameBytes, [byte]0)
+if ($nameEnd -ge 0) {
+    $nameBytes = $nameBytes[0..($nameEnd - 1)]
+}
+
+$name = [Text.Encoding]::UTF8.GetString($nameBytes)
+
+[PSCustomObject]@{
+    Magic    = $magic
+    FileName = $name
+}
 ```
 
 ### 5.3 压缩签名搜索命令
@@ -264,7 +286,7 @@ Find-SignatureOffset ".\demo\demo-substation.gim"
 ### 5.4 当前结果
 
 ```text
-demo-line.gim:
+demo-line.gim、demo-line1.gim:
 GIMPKGT + 7z + offset 784
 
 demo-substation.gim:
@@ -273,7 +295,7 @@ GIMPKGS + 7z + offset 784
 
 ### 5.5 结果分析
 
-当前两个样本均为：
+当前3个样本均为：
 
 ```text
 GIMPKG* 自定义头部 + 7z 压缩数据
@@ -352,17 +374,52 @@ Import-Csv ".\docs\schema\_generated\demo-substation-file-inventory.csv" |
   Format-Table -AutoSize
 ```
 
-### 6.4 当前结果
+### 6.4 生成目录层级统计
 
-demo-line：
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+function Get-TopDirStats($samplePath, $sampleName) {
+  Get-ChildItem $samplePath -Recurse -File |
+    ForEach-Object {
+      $rel = $_.FullName.Replace((Resolve-Path $samplePath).Path + "\", "")
+      $top = $rel.Split("\")[0]
+      [PSCustomObject]@{
+        sample = $sampleName
+        topDir = $top
+        extension = $_.Extension.ToLower()
+        length = $_.Length
+      }
+    } |
+    Group-Object topDir, extension |
+    Sort-Object Count -Descending |
+    Select-Object Count, Name
+}
+
+Get-TopDirStats ".\demo\demo-line" "demo-line" | Format-Table -AutoSize
+Get-TopDirStats ".\demo\demo-substation" "demo-substation" | Format-Table -AutoSize
+```
+
+### 6.5 当前结果
+
+线路工程：
 
 ```text
+#demo-line
 .cbm 27829
 .fam 26485
 .dev 4518
 .phm 1836
 .mod 1807
 .stl 181
+
+#demo-line1
+.fam 5073 
+.cbm 4998
+.dev 1148
+.phm 563
+.mod 508
+.stl 82
 ```
 
 demo-substation：
@@ -380,7 +437,7 @@ demo-substation：
 .sld 1
 ```
 
-### 6.5 结果分析
+### 6.6 结果分析
 
 线路样本规模更偏向 CBM 层级树和线路对象：
 
