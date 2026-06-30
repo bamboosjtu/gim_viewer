@@ -87,7 +87,7 @@ CBM
 
 ## 4. MOD 内部格式初步分型
 
-### 4.1 demo-line
+### 4.1 线路工程
 
 线路 MOD 共 1807 个。
 
@@ -130,7 +130,7 @@ CODE 分布：
 - 大量 MOD 与 `Bolt*` 字段相关，可能描述线路金具 / 塔材局部构件。
 - 暂不进入几何解析，只做字段分型与引用链分析。
 
-### 4.2 demo-substation
+### 4.2 变电工程
 
 变电 MOD 共 4179 个。
 
@@ -561,3 +561,164 @@ CBM
 - CBM 通过 `OBJECTMODELPOINTER` 指向 `.dev`，并已完成当前两个 demo 的文件存在性校验。
 - CBM 通过 `BASEFAMILY`、`SUBDEVICEn`、`IFCFILE` 建立 FAM / CBM / IFC 引用，当前两个 demo 中引用目标均存在。
 - 当前完整静态链路已可闭合到文件存在性层面，但尚未进入 MOD/STL 几何解析和 IFCGUID 内部构件命中校验。
+
+## 脚本
+### Step 1：运行 MOD 静态分型脚本
+```powershell
+cd D:\vibe-coding\gim_viewer
+
+$sampleId = "demo-line1"
+$sampleRoot = ".\demo\$sampleId"
+$outDir = ".\docs\schema\_generated\$sampleId"
+
+New-Item -ItemType Directory -Force $outDir | Out-Null
+
+function Get-GimDir($root, $name) {
+  $dir = Get-ChildItem $root -Directory |
+    Where-Object { $_.Name -ieq $name } |
+    Select-Object -First 1
+
+  if (-not $dir) {
+    throw "Cannot find directory: $name under $root"
+  }
+
+  return $dir.FullName
+}
+
+$modRoot = Get-GimDir $sampleRoot "Mod"
+
+function Read-TextFileLoose($path) {
+  $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $path))
+
+  if ($bytes.Length -eq 0) {
+    return ""
+  }
+
+  try {
+    return [System.Text.Encoding]::UTF8.GetString($bytes)
+  } catch {
+    return [System.Text.Encoding]::Default.GetString($bytes)
+  }
+}
+
+function Classify-ModText($text) {
+  if ($null -eq $text -or $text.Trim().Length -eq 0) {
+    return "EMPTY"
+  }
+
+  $trimmed = $text.TrimStart()
+
+  if ($trimmed -match "^<\?xml" -or $trimmed -match "^<Device") {
+    if ($trimmed -match "<Entities\s*/>") {
+      return "XML_EMPTY_DEVICE"
+    }
+
+    if ($trimmed -match "<Entity") {
+      return "XML_WITH_ENTITIES"
+    }
+
+    return "XML_OTHER"
+  }
+
+  if (
+    $text -match "(?m)^CODE\s*=" -and
+    $text -match "(?m)^POINTNUM\s*=" -and
+    $text -match "(?m)^LINENUM\s*="
+  ) {
+    return "TEXT_POINT_LINE"
+  }
+
+  if ($text -match "(?m)^HNum\s*,") {
+    return "TEXT_HNUM_COMMA_RECORD"
+  }
+
+  $lines = $text -split "`r?`n" |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -ne "" }
+
+  if ($lines.Count -eq 0) {
+    return "EMPTY"
+  }
+
+  $firstLine = $lines[0]
+  $kvLineCount = ($lines | Where-Object { $_ -match "^[A-Za-z0-9_.-]+\s*=" }).Count
+
+  if ($firstLine -notmatch "=" -and $kvLineCount -gt 0) {
+    return "TEXT_SECTION_KV_RECORD"
+  }
+
+  if ($kvLineCount -gt 0) {
+    return "TEXT_KEY_VALUE"
+  }
+
+  if ($text -match "," -and $text -match "[0-9]") {
+    return "TEXT_COMMA_NUMERIC"
+  }
+
+  return "TEXT_UNKNOWN"
+}
+
+$modProfileCsv = "$outDir\$sampleId-mod-static-profile.csv"
+
+Get-ChildItem $modRoot -File -Filter *.mod |
+  ForEach-Object {
+    $file = $_
+    $text = Read-TextFileLoose $file.FullName
+    $kind = Classify-ModText $text
+
+    $firstNonEmptyLine = (
+      $text -split "`r?`n" |
+      ForEach-Object { $_.Trim() } |
+      Where-Object { $_ -ne "" } |
+      Select-Object -First 1
+    )
+
+    [PSCustomObject]@{
+      sample = $sampleId
+      relativePath = $file.FullName.Replace((Resolve-Path $sampleRoot).Path + "\", "")
+      fileName = $file.Name
+      length = $file.Length
+      kind = $kind
+      firstLine = $firstNonEmptyLine
+    }
+  } |
+  Export-Csv $modProfileCsv -NoTypeInformation -Encoding UTF8
+
+$mods = Import-Csv $modProfileCsv
+
+"=== MOD STATIC PROFILE ==="
+$mods |
+  Group-Object kind |
+  Sort-Object Count -Descending |
+  Select-Object Count, Name |
+  Format-Table -AutoSize
+
+"=== MOD SAMPLE BY KIND ==="
+$mods |
+  Group-Object kind |
+  ForEach-Object {
+    $_.Group |
+      Select-Object -First 3 kind, relativePath, length, firstLine
+  } |
+  Format-Table -AutoSize
+```
+
+### Step 2：如果出现 TEXT_UNKNOWN，再看样本内容
+```powershell
+$unknownMods = $mods | Where-Object { $_.kind -eq "TEXT_UNKNOWN" }
+
+"=== UNKNOWN MOD COUNT ==="
+$unknownMods.Count
+
+$unknownMods |
+  Select-Object -First 20 relativePath, length, firstLine |
+  Format-Table -AutoSize
+
+# 如果 TEXT_UNKNOWN > 0，再随机打开几个：
+$unknownMods |
+  Select-Object -First 5 |
+  ForEach-Object {
+    "===== $($_.relativePath) ====="
+    Get-Content ".\demo\$sampleId\$($_.relativePath)" -Encoding UTF8 -TotalCount 40
+  }  
+```

@@ -13,9 +13,9 @@
 当前样本包括：
 
 ```text
-demo-line       线路工程样本
+demo-line       脱敏后的线路工程样本
 demo-line1      脱敏后的线路工程样本
-demo-substation 变电工程样本
+demo-substation 脱敏后的变电工程样本
 ```
 
 当前阶段的目标不是直接完成 GIM 标准定义，而是基于多个实际样本建立可复查、可复跑、可扩展的 schema analysis 流程。
@@ -55,7 +55,7 @@ demo-substation 变电工程样本
 
 ## 脚本
 
-### 1. 计算 GIM 文件哈希
+### 计算 GIM 文件哈希
 
 ```powershell
 $sampleId = "demo-<xxx>"

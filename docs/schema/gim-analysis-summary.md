@@ -2,32 +2,22 @@
 
 ## 1. Round 1 定位
 
-Round 1 的目标不是开发新功能，而是把当前 demo 目录下的 GIM 文件结构从“代码经验”整理成“可复查、可复跑、可扩展验证”的 schema analysis 文档。
-
-当前分析对象：
-
-- `demo-line`
-- `demo-substation`
+把当前 demo 目录下的 GIM 文件结构从“代码经验”整理成“可复查、可复跑、可扩展验证”的 schema analysis 文档。
 
 当前分析范围：
 
 ```text
-GIM 容器结构
-文件清单与目录分布
-文本 / 二进制粗判
-CBM / FAM / DEV / PHM / MOD / STL / IFC 文件角色
-MOD 静态分型
-CBM -> DEV / FAM / CBM / IFC 引用链
-DEV -> PHM / DEV 引用链
-PHM -> MOD / STL 引用链
-CBM / DEV / PHM 文件级引用完整性
-```
+1. GIM 容器结构
+2. 文件清单与目录分布
+3. 文本 / 二进制粗判
+4. MOD 静态分型（MOD 大部分 text-like，少量 unknown-text，其他基本都是 text-like）
 
-Round 1 的核心判断是：
+=> CBM / FAM / DEV / PHM / MOD / STL / IFC 文件角色
 
-```text
-当前两个 demo 的文件级静态引用链已经可以闭合。
-但这只是文件存在性和字段角色层面的闭合，不代表已经完成几何解析、构件语义解析或渲染实现。
+6. CBM -> DEV / FAM / CBM / IFC 引用链
+7. DEV -> PHM / DEV 引用链
+8. PHM -> MOD / STL 引用链
+9. CBM / DEV / PHM 文件级引用完整性
 ```
 
 ---
@@ -36,15 +26,11 @@ Round 1 的核心判断是：
 
 Round 1 按以下阶段推进：
 
-| 阶段      | 目标                                       | 产出                                                                                                        |
-| --------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| Round 1.0 | 样本清单、文件清单、容器结构、文件角色初版 | `0-sample-corpus.md`、`1-gim-file-inventory.md`、`2-gim-container-analysis.md`、`3-gim-file-role-matrix.md` |
-| Round 1.1 | MOD 静态分型                               | `3-gim-file-role-matrix.md` 中 MOD 分型结论                                                                 |
-| Round 1.2 | PHM -> MOD/STL 引用链                      | `3-gim-file-role-matrix.md` 中 PHM 引用链                                                                   |
-| Round 1.3 | DEV -> PHM / DEV / SUBDEVICE 引用链        | `3-gim-file-role-matrix.md` 中 DEV 引用链与全量统计                                                         |
-| Round 1.4 | CBM 字段字典                               | `4-cbm-field-dictionary.md`                                                                                 |
-| Round 1.5 | CBM 引用完整性校验                         | `5-gim-reference-integrity.md`                                                                              |
-| Round 1.6 | DEV / PHM 引用完整性校验                   | `5-gim-reference-integrity.md`                                                                              |
+| 阶段  | 目标                                    |
+| ----- | --------------------------------------- |
+| M1-R0 | 新线路样本的“外壳与文件画像”验证        |
+| M1-R1 | CBM 工程语义骨架 + CBM 文件级引用完整性 |
+| M1-R2 | DEV / PHM / MOD / STL 引用完整性        |
 
 当前已完成到 Round 1.6。
 
@@ -114,15 +100,6 @@ Get-FileHash .\demo\demo-line.gim -Algorithm SHA256
 
 ### 4.3 当前结果
 
-当前样本包括：
-
-```text
-demo-line.gim
-demo-substation.gim
-demo-line/
-demo-substation/
-```
-
 目录结构：
 
 ```text
@@ -166,27 +143,87 @@ CBM / DEV / PHM / MOD
 ### 5.2 Header 查看命令
 
 ```powershell
-function Read-HeaderHex {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Path,
+cd D:\vibe-coding\gim_viewer
 
-    [int]$Length = 128
-  )
+$sampleId = "demo-line1"
+$gimPath = ".\demo\$sampleId.gim"
+$sampleRoot = ".\demo\$sampleId"
+$outDir = ".\docs\schema\_generated\$sampleId"
 
-  $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $Path))
-  $take = [Math]::Min($Length, $bytes.Length)
+New-Item -ItemType Directory -Force $outDir | Out-Null
+
+Get-FileHash $gimPath -Algorithm SHA256
+
+Get-Item $gimPath |
+  Select-Object Name, Length, LastWriteTime |
+  Format-Table -AutoSize
+
+function Read-HeaderHex($path, $bytes = 128) {
+  $data = [System.IO.File]::ReadAllBytes((Resolve-Path $path))
+  $take = [Math]::Min($bytes, $data.Length)
 
   for ($i = 0; $i -lt $take; $i += 16) {
-    $chunk = $bytes[$i..([Math]::Min($i + 15, $take - 1))]
+    $chunk = $data[$i..([Math]::Min($i + 15, $take - 1))]
     ($chunk | ForEach-Object { $_.ToString("X2") }) -join " "
   }
 }
 
-Read-HeaderHex ".\demo\demo-line.gim" 128
-Read-HeaderHex ".\demo\demo-substation.gim" 128
+function Find-SignatureOffset($path) {
+  $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $path))
+  $limit = [Math]::Min($bytes.Length - 6, 1024 * 1024)
 
-# hex2text 分析
+  $sevenZip = [byte[]](0x37,0x7A,0xBC,0xAF,0x27,0x1C)
+  $zip = [byte[]](0x50,0x4B,0x03,0x04)
+
+  for ($i = 0; $i -lt $limit; $i++) {
+    $match7z = $true
+    for ($j = 0; $j -lt $sevenZip.Length; $j++) {
+      if ($bytes[$i + $j] -ne $sevenZip[$j]) {
+        $match7z = $false
+        break
+      }
+    }
+    if ($match7z) {
+      return [PSCustomObject]@{
+        Path = $path
+        Format = "7z"
+        Offset = $i
+      }
+    }
+
+    $matchZip = $true
+    for ($j = 0; $j -lt $zip.Length; $j++) {
+      if ($bytes[$i + $j] -ne $zip[$j]) {
+        $matchZip = $false
+        break
+      }
+    }
+    if ($matchZip) {
+      return [PSCustomObject]@{
+        Path = $path
+        Format = "zip"
+        Offset = $i
+      }
+    }
+  }
+
+  return [PSCustomObject]@{
+    Path = $path
+    Format = "unknown"
+    Offset = $null
+  }
+}
+
+"=== HEADER HEX ==="
+Read-HeaderHex $gimPath 128
+
+"=== ARCHIVE SIGNATURE ==="
+Find-SignatureOffset $gimPath
+```
+
+### 5.3 hex2text 分析
+
+```powershell
 $hex = @"
 47 49 4D 50 4B 47 54 00 00 00 00 00 00 00 00 00
 E9 9B 81 E5 9F 8E 2D E8 88 B9 E5 B1 B1 EF BC 88
@@ -219,68 +256,6 @@ $name = [Text.Encoding]::UTF8.GetString($nameBytes)
     Magic    = $magic
     FileName = $name
 }
-```
-
-### 5.3 压缩签名搜索命令
-
-```powershell
-function Find-SignatureOffset {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Path
-  )
-
-  $resolved = Resolve-Path $Path
-  $bytes = [System.IO.File]::ReadAllBytes($resolved)
-
-  $sevenZip = [byte[]](0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C)
-  $zip = [byte[]](0x50, 0x4B, 0x03, 0x04)
-
-  $limit = [Math]::Min($bytes.Length - 6, 1024 * 1024)
-
-  for ($i = 0; $i -lt $limit; $i++) {
-    $match7z = $true
-    for ($j = 0; $j -lt $sevenZip.Length; $j++) {
-      if ($bytes[$i + $j] -ne $sevenZip[$j]) {
-        $match7z = $false
-        break
-      }
-    }
-
-    if ($match7z) {
-      return [PSCustomObject]@{
-        Path = $Path
-        Format = "7z"
-        Offset = $i
-      }
-    }
-
-    $matchZip = $true
-    for ($j = 0; $j -lt $zip.Length; $j++) {
-      if ($bytes[$i + $j] -ne $zip[$j]) {
-        $matchZip = $false
-        break
-      }
-    }
-
-    if ($matchZip) {
-      return [PSCustomObject]@{
-        Path = $Path
-        Format = "zip"
-        Offset = $i
-      }
-    }
-  }
-
-  return [PSCustomObject]@{
-    Path = $Path
-    Format = "unknown"
-    Offset = $null
-  }
-}
-
-Find-SignatureOffset ".\demo\demo-line.gim"
-Find-SignatureOffset ".\demo\demo-substation.gim"
 ```
 
 ### 5.4 当前结果
@@ -316,91 +291,47 @@ GIMPKGS：变电工程候选标识
 
 ### 6.1 目的
 
-统计两个 demo 解压后的文件类型、数量和目录分布，为后续字段分析提供范围。
+统计 demo 解压后的文件类型、数量和目录分布，为后续字段分析提供范围。
 
-### 6.2 导出文件清单命令
-
-```powershell
-function Export-FileInventory {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Root,
-
-    [Parameter(Mandatory = $true)]
-    [string]$Sample,
-
-    [Parameter(Mandatory = $true)]
-    [string]$Output
-  )
-
-  $base = (Resolve-Path $Root).Path
-
-  Get-ChildItem $Root -Recurse -File |
-    ForEach-Object {
-      $relativePath = $_.FullName.Replace($base + "\", "")
-      $parts = $relativePath -split "\\"
-
-      [PSCustomObject]@{
-        sample = $Sample
-        relativePath = $relativePath
-        topDir = $parts[0]
-        name = $_.Name
-        extension = $_.Extension.ToLower()
-        length = $_.Length
-      }
-    } |
-    Export-Csv $Output -NoTypeInformation -Encoding UTF8
-}
-
-New-Item -ItemType Directory -Force ".\docs\schema\_generated" | Out-Null
-
-Export-FileInventory ".\demo\demo-line" "demo-line" ".\docs\schema\_generated\demo-line-file-inventory.csv"
-Export-FileInventory ".\demo\demo-substation" "demo-substation" ".\docs\schema\_generated\demo-substation-file-inventory.csv"
-```
-
-### 6.3 扩展名统计命令
+### 6.2 导出文件清单与目录分布
 
 ```powershell
-Import-Csv ".\docs\schema\_generated\demo-line-file-inventory.csv" |
+$inventoryCsv = "$outDir\$sampleId-file-inventory.csv"
+
+Get-ChildItem $sampleRoot -Recurse -File |
+  ForEach-Object {
+    $base = (Resolve-Path $sampleRoot).Path
+    $relativePath = $_.FullName.Replace($base + "\", "")
+    $parts = $relativePath -split "\\"
+
+    [PSCustomObject]@{
+      sample = $sampleId
+      relativePath = $relativePath
+      topDir = $parts[0]
+      name = $_.Name
+      extension = $_.Extension.ToLower()
+      length = $_.Length
+      lastWriteTime = $_.LastWriteTime
+    }
+  } |
+  Export-Csv $inventoryCsv -NoTypeInformation -Encoding UTF8
+
+"=== EXTENSION STATS ==="
+Import-Csv $inventoryCsv |
   Group-Object extension |
   Sort-Object Count -Descending |
   Select-Object Count, Name |
   Format-Table -AutoSize
 
-Import-Csv ".\docs\schema\_generated\demo-substation-file-inventory.csv" |
-  Group-Object extension |
+"=== TOP DIR + EXTENSION STATS ==="
+Import-Csv $inventoryCsv |
+  Group-Object topDir, extension |
   Sort-Object Count -Descending |
   Select-Object Count, Name |
   Format-Table -AutoSize
 ```
 
-### 6.4 生成目录层级统计
-
-```powershell
-cd D:\vibe-coding\gim_viewer
-
-function Get-TopDirStats($samplePath, $sampleName) {
-  Get-ChildItem $samplePath -Recurse -File |
-    ForEach-Object {
-      $rel = $_.FullName.Replace((Resolve-Path $samplePath).Path + "\", "")
-      $top = $rel.Split("\")[0]
-      [PSCustomObject]@{
-        sample = $sampleName
-        topDir = $top
-        extension = $_.Extension.ToLower()
-        length = $_.Length
-      }
-    } |
-    Group-Object topDir, extension |
-    Sort-Object Count -Descending |
-    Select-Object Count, Name
-}
-
-Get-TopDirStats ".\demo\demo-line" "demo-line" | Format-Table -AutoSize
-Get-TopDirStats ".\demo\demo-substation" "demo-substation" | Format-Table -AutoSize
-```
-
-### 6.5 当前结果
+### 6.3 当前结果
 
 线路工程：
 
@@ -412,14 +343,6 @@ Get-TopDirStats ".\demo\demo-substation" "demo-substation" | Format-Table -AutoS
 .phm 1836
 .mod 1807
 .stl 181
-
-#demo-line1
-.fam 5073 
-.cbm 4998
-.dev 1148
-.phm 563
-.mod 508
-.stl 82
 ```
 
 demo-substation：
@@ -437,7 +360,7 @@ demo-substation：
 .sld 1
 ```
 
-### 6.6 结果分析
+### 6.4 结果分析
 
 线路样本规模更偏向 CBM 层级树和线路对象：
 
@@ -465,7 +388,7 @@ STL 文件为 1803
 
 ### 7.2 命令
 
-```powershell
+````powershell
 function Test-TextLikeFile {
   param(
     [Parameter(Mandatory = $true)]
@@ -489,7 +412,7 @@ function Test-TextLikeFile {
   try {
     $text = [System.Text.Encoding]::UTF8.GetString($sample)
 
-    if ($text -match "<\?xml|<\w+|=|;") {
+    if ($text -match "<\?xml|<\w+|=|;|,") {
       return "text-like"
     }
 
@@ -499,49 +422,28 @@ function Test-TextLikeFile {
   }
 }
 
-function Export-TextBinarySurvey {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Root,
+$textBinaryCsv = "$outDir\$sampleId-text-binary-survey.csv"
 
-    [Parameter(Mandatory = $true)]
-    [string]$Sample,
+Get-ChildItem $sampleRoot -Recurse -File |
+  ForEach-Object {
+    $base = (Resolve-Path $sampleRoot).Path
+    [PSCustomObject]@{
+      sample = $sampleId
+      relativePath = $_.FullName.Replace($base + "\", "")
+      extension = $_.Extension.ToLower()
+      length = $_.Length
+      kind = Test-TextLikeFile $_.FullName
+    }
+  } |
+  Export-Csv $textBinaryCsv -NoTypeInformation -Encoding UTF8
 
-    [Parameter(Mandatory = $true)]
-    [string]$Output
-  )
-
-  $base = (Resolve-Path $Root).Path
-
-  Get-ChildItem $Root -Recurse -File |
-    ForEach-Object {
-      $relativePath = $_.FullName.Replace($base + "\", "")
-
-      [PSCustomObject]@{
-        sample = $Sample
-        relativePath = $relativePath
-        extension = $_.Extension.ToLower()
-        kind = Test-TextLikeFile $_.FullName
-      }
-    } |
-    Export-Csv $Output -NoTypeInformation -Encoding UTF8
-}
-
-Export-TextBinarySurvey ".\demo\demo-line" "demo-line" ".\docs\schema\_generated\demo-line-text-binary-survey.csv"
-Export-TextBinarySurvey ".\demo\demo-substation" "demo-substation" ".\docs\schema\_generated\demo-substation-text-binary-survey.csv"
-
-Import-Csv ".\docs\schema\_generated\demo-line-text-binary-survey.csv" |
-  Group-Object extension, kind |
-  Sort-Object Count -Descending |
-  Select-Object Count, Name |
-  Format-Table -AutoSize
-
-Import-Csv ".\docs\schema\_generated\demo-substation-text-binary-survey.csv" |
+Import-Csv $textBinaryCsv |
   Group-Object extension, kind |
   Sort-Object Count -Descending |
   Select-Object Count, Name |
   Format-Table -AutoSize
 ```
+````
 
 ### 7.3 当前结果分析
 
@@ -738,14 +640,26 @@ Import-Csv ".\docs\schema\_generated\demo-substation-mod-code-survey.csv" |
 
 ### 8.5 结果分析
 
-MOD 不能统一定义为 XML，也不能统一定义为 CODE/POINTNUM 点线格式。
+MOD 不能统一定义为 XML，也不能统一定义为 CODE/POINTNUM 点线格式。分析得出的首要结论是 MOD 并非单一格式。在当前两个样本中，线路与变电的 MOD 表现出截然不同的表层格式，因此**解析器不能按单一模式实现，必须先进行格式分流**。
 
-当前更准确的表述是：
+**线路 MOD (demo-line) 的结论**
+线路样本中没有 XML 格式，全部分布为多种**文本格式族** [49.3, 158]：
+*   **TEXT_SECTION_KV_RECORD：** 主要是 `Bolt`（螺栓/金具）类结构化记录，全部映射到杆塔设备（`Tower_Device`） [50.4, 162]。
+*   **TEXT_POINT_LINE：** 包含 `CODE`、`POINTNUM`、`LINENUM` 等字段，描述点线几何与拓扑，全部映射到跨越（`CROSS`）对象 [51.4, 162]。
+*   **TEXT_KEY_VALUE：** 属于参数型 MOD。其中导线（`WIRE`）对该类 MOD 的引用表现出**高复用模板特征**（9 个文件被引用 5460 次） [52.4, 162]。
+*   **TEXT_HNUM_COMMA_RECORD：** 具备大文件、高行数的特征，记录了杆塔主体或分段构件（包含 `HSubLeg`、`P`、`R`、`G` 等 token） [53.4, 160]。
 
-```text
-MOD 是底层几何 / 参数化模型候选文件。
-其内部格式在变电和线路样本之间存在明显差异。
-```
+**变电 MOD (demo-substation) 的结论**
+变电样本主要由**稳定的 XML 格式族**组成 [55.3, 163]：
+*   **结构高度一致：** 每个 Entity 实体通常包含一个 `TransformMatrix`（变换矩阵）、一个 `Color`（颜色）以及**恰好一个几何子节点（Primitive）**。
+*   **几何类型识别：** 修正了一个重要判断——几何类型应通过**子节点的标签名称**（如 `Cylinder`、`Cuboid` 等）读取，而非属性中的 `Entity.Type`（该属性通常固定为 "simple"） [56.3, 166]。
+*   **矩阵特征：** 所有的变换矩阵 `Value` 均为 **16 元矩阵字段**，但目前尚不能确认其行列主序和坐标系方向 [58.3, 167, 172]。
+*   **存在空 XML：** 样本中包含 44 个 `EMPTY_DEVICE_XML`（仅含 `<Device><Entities /></Device>`），这些是未被引用的孤儿文件，不应视为解析错误 [60.2, 172]。
+
+对开发实现的建议
+*   **解析策略：** 变电 XML MOD 结构稳定，可优先作为结构化解析对象；而线路 MOD 需要针对四种文本分支独立设计解析器。
+*   **容错处理：** `Visible=False` 的实体在样本中确实存在（如 StretchedBody），解析时应保留此属性，由渲染层决策是否显示 [59.3, 168]。
+*   **不阻断加载：** 孤儿 MOD 文件不参与主链渲染，不应影响整体模型的加载逻辑。
 
 当前阶段只做 MOD 静态分型，不进入几何解析。
 
