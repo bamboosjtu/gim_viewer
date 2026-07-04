@@ -35,7 +35,8 @@
 | 07 | [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) | DEV/PHM 递归、MOD/STL 几何目标可达性、无几何装配节点 | 待随新样本复核 |
 | 08 | [08-mod-static-survey.md](08-mod-static-survey.md) | MOD 静态分型、线路/变电 MOD 格式边界、可解析性边界 | 待随新样本复核 |
 | 09 | [09-transform-chain-analysis.md](09-transform-chain-analysis.md) | PHM 与 MOD 变换链分析、矩阵存储约定、两级变换验证 | 待随新样本复核 |
-| 10 | [10-substation-xml-primitive.md](10-substation-xml-primitive.md) | 变电 XML primitive 字段范围、强类型 schema 判定、Color/StretchedBody 深度分析 | 待随新样本复核 |
+| 10 | [10-substation-mod-grammar.md](10-substation-mod-grammar.md) | 变电 XML primitive 字段范围、强类型 schema 判定、Color/StretchedBody 深度分析 | 待随新样本复核 |
+| 11 | [11-line-mod-grammar.md](11-line-mod-grammar.md) | 线路 MOD 4 类文本格式族 grammar、层级关系、parser 草案边界 | 待随新样本复核 |
 
 ---
 
@@ -70,7 +71,8 @@ Step 03: 复核 03/04/05 的文件角色、CBM 字段、引用完整性
 Step 04: 复核 07/08 的 DEV/PHM 几何可达性与 MOD 静态分型
 Step 05: 复核 09 的 PHM 与 MOD 变换链
 Step 06: 复核 10 的变电 XML primitive 字段范围与强类型 schema
-Step 07: 再决定是否进入 STL/MOD 渲染实现
+Step 07: 复核 11 的线路 MOD 文本格式族 grammar 与 parser 草案边界
+Step 08: 再决定是否进入 STL/MOD 渲染实现
 ```
 
 ---

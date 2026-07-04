@@ -82,6 +82,8 @@ MOD 不是单一格式，而是按工程类型分为两大格式族：
 | `TEXT_HNUM_COMMA_RECORD` | 第一行 `HNum,n`，后续为逗号分隔记录（`H`/`Body`/`P`/`R`/`G` 等） | 杆塔主体 / 分段构件文本记录          | Tower_Device         |
 
 > 线路 MOD 的详细分型、字段统计、CODE 分布、HNum 分布、token 分布及上游 CBM→MOD 映射详见 [08-mod-static-survey.md](08-mod-static-survey.md)。
+>
+> 4 类文本格式族的字段语义、层级关系（H/Body/Leg/SubLeg）、R 记录三变体对比、Bolt 字段拆解、Tower_Device/WIRE 签名判别、TypeScript schema 草案详见 [11-line-mod-grammar.md](11-line-mod-grammar.md)。
 
 ## 引用关系
 

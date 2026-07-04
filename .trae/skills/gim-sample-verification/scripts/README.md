@@ -15,6 +15,7 @@
 | `xml-primitive-survey.ps1` | Round 6.1 + 6.2 | 变电 XML primitive 类型分布 + 数值字段范围 |
 | `color-analysis.ps1` | Round 6.3 | Color 节点 R/G/B/A 4 通道分布分析 |
 | `stretched-body-deep.ps1` | Round 6.4 | StretchedBody.Array 点序列 + Normal 向量深度分析 |
+| `line-mod-grammar-deep.ps1` | Round 7 | 线路 MOD 4 类文本格式族深度分析（grammar 与 parser 边界） |
 
 ## 通用约定
 
@@ -74,6 +75,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   ".trae/skills/gim-sample-verification/scripts/stretched-body-deep.ps1" `
   -SampleId $sampleId -SampleRoot $sampleRoot
+
+# Round 7（仅线路样本）
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  ".trae/skills/gim-sample-verification/scripts/line-mod-grammar-deep.ps1" `
+  -SampleId $sampleId -SampleRoot $sampleRoot
 ```
 
 ## 输出产物
@@ -96,12 +102,17 @@ scripts/
     <SampleId>-primitive-summary.csv         （仅变电，Round 6.1+6.2）
     <SampleId>-color-attrs.csv               （仅变电，Round 6.3）
     <SampleId>-stretched-body-summary.csv     （仅变电，Round 6.4）
+    <SampleId>-text-hnum-summary.csv            （仅线路，Round 7.1）
+    <SampleId>-text-point-line-summary.csv     （仅线路，Round 7.2）
+    <SampleId>-text-section-kv-summary.csv      （仅线路，Round 7.3）
+    <SampleId>-text-key-value-summary.csv       （仅线路，Round 7.4）
 ```
 
 ## 注意事项
 
 - 脚本运行需要 PowerShell 5.1+（Windows 自带）
 - 变电样本（含 IFCFILE 的 CBM）会触发 Round 6 primitive 分析
+- 线路样本会触发 Round 7 文本格式族深度分析
 - 线路样本在 Round 5 会自动跳过 MOD XML Entity 分析，转而检测是否含 TransformMatrix 字段
 - 大型样本（如 demo-line 27829 个 CBM）单次执行可能耗时 1-3 分钟
 - 所有脚本不修改源文件、不写 SQLite、不创建 Viewer

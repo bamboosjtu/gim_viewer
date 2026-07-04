@@ -44,7 +44,8 @@ demo-substation 脱敏后的变电工程样本
 | Step 07 | 分析 DEV/PHM/MOD/STL 几何目标可达性 | `07-dev-phm-geometry-reachability.md` |
 | Step 08 | 分析 MOD 静态格式族和 parser 边界 | `08-mod-static-survey.md` |
 | Step 09 | 分析 PHM 与 MOD 变换链 | `09-transform-chain-analysis.md` |
-| Step 10 | 分析变电 XML primitive 字段值范围 | `10-substation-xml-primitive.md` |
+| Step 10 | 分析变电 XML primitive 字段值范围 | `10-substation-mod-grammar.md` |
+| Step 11 | 分析线路 MOD 文本格式族 grammar 与 parser 草案边界 | `11-line-mod-grammar.md` |
 
 详细目录入口见 `README.md`。
 
