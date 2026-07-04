@@ -1,4 +1,6 @@
-# GIM 引用完整性校验
+# GIM 引用完整性
+
+目标：确认 CBM/DEV/PHM 层引用是否闭合。
 
 ## 1. 范围与方法
 
@@ -200,7 +202,7 @@ CBM 通过 `IFCFILE + IFCGUID` 指向 IFC 内部构件。本节校验这些 GUID
 
 ## 3. DEV 层
 
-### 3.1 字段结构
+### 字段结构
 
 `.dev` 文件为 plain text key-value 格式。核心字段模式：
 
@@ -221,7 +223,7 @@ SUBDEVICE1=xxx.dev
 | `SOLIDMODELn`     | 第 n 个实体模型引用，目标可为 `.phm` 或 `.dev` | 高     |
 | `SUBDEVICEn`      | 第 n 个子设备引用，目标为 `.dev`               | 高     |
 
-### 3.2 全量统计
+### 全量统计
 
 | 样本            | DEV 总数 | 引用 PHM | SOLIDMODEL 引用 DEV | 存在 SUBDEVICE | PHM + SUBDEVICE 混合 | 其他 SOLIDMODEL 目标 |
 | --------------- | -------: | -------: | ------------------: | -------------: | -------------------: | -------------------: |
@@ -236,7 +238,7 @@ SUBDEVICE1=xxx.dev
 - demo-substation 中未发现 `SOLIDMODELn=*.dev`。
 - 两个 demo 中均未发现 `.phm` / `.dev` 之外的 `SOLIDMODELn` 目标。
 
-### 3.3 线路工程 DEV
+### 线路工程 DEV
 
 两类引用模式：
 
@@ -259,7 +261,7 @@ SOLIDMODEL41=782f183f-6242-456b-aba6-ff95000cbd62.dev
 
 线路 DEV 中 `SOLIDMODELn` 既可指向 PHM 也可指向 DEV，因此不能简单写成 `DEV → PHM` 单一路径。
 
-### 3.4 变电工程 DEV
+### 变电工程 DEV
 
 两类引用模式：
 
@@ -283,11 +285,29 @@ SOLIDMODEL0=1e90f88c-f2c4-4a98-9e67-88e78a68ef2e.phm
 
 变电 DEV 通过 `SOLIDMODELn` 引用 PHM，通过 `SUBDEVICEn` 引用子 DEV。`SUBDEVICEn` 比线路中的 `SOLIDMODELn=xxx.dev` 更明确地表达子设备组合语义。
 
+### DEV → DEV / SUBDEVICE 引用完整性
+
+| 样本            | 引用类型         | 引用数 | 缺失 |
+| --------------- | ---------------- | -----: | ---: |
+| demo-line       | SOLIDMODEL → DEV |   2682 |    0 |
+| demo-substation | SUBDEVICE → DEV  |   3894 |    0 |
+
+线路样本通过 `SOLIDMODELn=*.dev` 引用子 DEV（无 SUBDEVICE 字段），变电样本通过 `SUBDEVICEn=*.dev` 引用子 DEV（无 SOLIDMODEL→DEV）。两个样本的 DEV 内部引用完整性均为 100%。
+
+### DEV → PHM 引用完整性
+
+| 样本            | DEV→PHM 引用数 | 缺失 |
+| --------------- | -------------: | ---: |
+| demo-line       |           1836 |    0 |
+| demo-substation |           4179 |    0 |
+
+两个样本的 DEV→PHM 引用完整性均为 100%。
+
 ---
 
 ## 4. PHM 层
 
-### 4.1 字段结构
+### 字段结构
 
 `.phm` 文件为 plain text key-value 格式。核心字段模式：
 
@@ -311,7 +331,7 @@ COLOR1=...
 
 当前只确认字段角色，不解析矩阵语义，不进行几何渲染。
 
-### 4.2 线路工程 PHM
+### 线路工程 PHM
 
 线路 PHM 共 1836 个。
 
@@ -344,7 +364,7 @@ SOLIDMODEL0=83ebec7e-7e02-4154-9807-1c59d7f7af45.stl
 
 线路 PHM 稳定承担组合模型引用角色，大部分引用 1~2 个实体模型，目标可以是 `.mod` 或 `.stl`。
 
-### 4.3 变电工程 PHM
+### 变电工程 PHM
 
 变电 PHM 共 4179 个。
 
@@ -378,29 +398,7 @@ SOLIDMODEL16=aff58f93-a3bb-4b95-befe-3d16a6b5e89a.stl
 
 变电 PHM 同样稳定承担 `PHM → MOD/STL` 的组合模型引用角色。以单实体 `.mod` 引用为主，少量复杂 PHM 组合 1 个 `.mod` 与多个 `.stl`。`TRANSFORMMATRIXn` 与 `COLORn` 和 `SOLIDMODELn` 成组出现。当前变电 3D 查看已有 IFC 主路径，PHM/MOD/STL 暂不进入渲染实现。
 
----
-
-## 5. 跨层引用完整性
-
-### 5.1 DEV → PHM
-
-| 样本            | DEV→PHM 引用数 | 缺失 |
-| --------------- | -------------: | ---: |
-| demo-line       |           1836 |    0 |
-| demo-substation |           4179 |    0 |
-
-两个样本的 DEV→PHM 引用完整性均为 100%。
-
-### 5.2 DEV → DEV / SUBDEVICE
-
-| 样本            | 引用类型         | 引用数 | 缺失 |
-| --------------- | ---------------- | -----: | ---: |
-| demo-line       | SOLIDMODEL → DEV |   2682 |    0 |
-| demo-substation | SUBDEVICE → DEV  |   3894 |    0 |
-
-线路样本通过 `SOLIDMODELn=*.dev` 引用子 DEV（无 SUBDEVICE 字段），变电样本通过 `SUBDEVICEn=*.dev` 引用子 DEV（无 SOLIDMODEL→DEV）。两个样本的 DEV 内部引用完整性均为 100%。
-
-### 5.3 PHM → MOD/STL
+### PHM → MOD/STL 引用完整性
 
 | 样本            | 引用类型 | 引用数 | 缺失 |
 | --------------- | -------- | -----: | ---: |
@@ -411,7 +409,9 @@ SOLIDMODEL16=aff58f93-a3bb-4b95-befe-3d16a6b5e89a.stl
 
 两个样本的 PHM→MOD/STL 引用完整性均为 100%。`SOLIDMODELn` 指向的 `.mod` 和 `.stl` 文件全部存在。
 
-### 5.4 完整跨层汇总
+---
+
+## 5. 跨层引用链图
 
 | 来源 | 目标 | 线路数量 | 变电数量 | 缺失 |
 | ---- | ---- | -------: | -------: | ---: |
@@ -419,8 +419,6 @@ SOLIDMODEL16=aff58f93-a3bb-4b95-befe-3d16a6b5e89a.stl
 | DEV  | DEV  |     2682 |     3894 |    0 |
 | PHM  | MOD  |     2955 |     4135 |    0 |
 | PHM  | STL  |      181 |     1803 |    0 |
-
-### 5.5 统一引用链图
 
 基于当前两个 demo，CBM 层向下游的三条引用链如下：
 
