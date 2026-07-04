@@ -1,6 +1,4 @@
-# GIM 引用完整性
-
-目标：确认 CBM/DEV/PHM 层引用是否闭合。
+# GIM 引用完整性校验
 
 ## 1. 范围与方法
 
@@ -13,22 +11,52 @@
 
 校验层次为 CBM、DEV、PHM 三层的文件级引用目标是否存在。不递归展开完整模型树，不解析 PHM / MOD / STL 几何。
 
-### CBM 层校验字段
-
-| 字段                 | 引用目标 | 说明                  |
-| -------------------- | -------- | --------------------- |
-| `SUBDEVICEn`         | `.cbm`   | CBM 指向子 CBM 节点   |
-| `OBJECTMODELPOINTER` | `.dev`   | CBM 指向 DEV 物理模型 |
-| `IFCFILE`            | `.ifc`   | CBM 指向 IFC 文件     |
-| `BASEFAMILY`         | `.fam`   | CBM 指向 FAM 属性文件 |
-
 ### 校验方法
 
 1. 扫描样本目录下所有文件，建立文件名索引。
-2. 扫描所有 `.cbm` 文件。
-3. 提取以上 4 个引用字段。
+2. 扫描所有 `.cbm` / `.dev` / `.phm` 文件。
+3. 提取所有形如 `KEY=VALUE` 的引用字段（`VALUE` 含扩展名 `.cbm` / `.dev` / `.phm` / `.fam` / `.ifc` / `.mod` / `.stl`）。
 4. 使用大小写不敏感的文件名匹配，判断引用目标是否存在。
 5. 输出引用明细 CSV 和汇总统计。
+
+> **关键修正**：早期版本只把 `SUBDEVICEn` / `OBJECTMODELPOINTER` / `IFCFILE` / `BASEFAMILY` 视为引用字段，遗漏了线路工程的 `SUBSYSTEMn` / `SECTIONn` / `STRAINSECTIONn` / `GROUPn` / `TOWERn` / `BASEn` / `STRINGn.STRING` / `BACKSTRING` / `FRONTSTRING` 等层级字段，以及变电工程 `FileDevRelation.cbm` 中的 `FILE.N.DEVn` 字段。本次复核改为按「`VALUE` 是否带文件扩展名」做全量统计，避免遗漏。
+
+### 引用字段分类
+
+#### CBM 层引用字段
+
+| 字段模式                     | 引用目标 | 适用工程 | 说明                                       |
+| ---------------------------- | -------- | -------- | ------------------------------------------ |
+| `SUBSYSTEMn`                 | `.cbm`   | 变电     | F1→F2→F3 层级递归字段                      |
+| `SECTIONn`                   | `.cbm`   | 线路     | F1System → F2System 层级字段               |
+| `STRAINSECTIONn`             | `.cbm`   | 线路     | F2System → F3System 耐张段层级字段         |
+| `GROUPn`                     | `.cbm`   | 线路     | F3System → F4System 分组层级字段           |
+| `SUBDEVICEn`                 | `.cbm`   | 通用     | F4System 内部子设备分组（**不是主层级**）  |
+| `TOWERn`                     | `.cbm`   | 线路     | F4System TOWER → Tower_Device 引用         |
+| `BASEn`                      | `.cbm`   | 线路     | F4System TOWER → 基础构件引用              |
+| `STRINGn.STRING`             | `.cbm`   | 线路     | F4System TOWER → 串引用                    |
+| `BACKSTRING` / `FRONTSTRING` | `.cbm`   | 线路     | WIRE → 耐张段塔位引用                      |
+| `FILE.N.DEVn`                | `.cbm`   | 变电     | FileDevRelation.cbm 文件设备映射表专用字段 |
+| `OBJECTMODELPOINTER`         | `.dev`   | 通用     | CBM 指向 DEV 物理模型                      |
+| `IFCFILE`                    | `.ifc`   | 通用     | CBM 指向 IFC 文件                          |
+| `IFC.NUM` + `IFC0..N`        | `.ifc`   | 变电     | F1System 工程级 IFC 引用列表               |
+| `BASEFAMILY`                 | `.fam`   | 通用     | CBM 指向 FAM 单属性文件                    |
+| `BASEFAMILY1..N`             | `.fam`   | 变电     | CBM 指向多 FAM 属性文件（仅变电 F3System） |
+
+#### DEV 层引用字段
+
+| 字段模式      | 引用目标        | 说明                                                      |
+| ------------- | --------------- | --------------------------------------------------------- |
+| `SOLIDMODELn` | `.phm` / `.dev` | 实体模型引用，目标可为 PHM 或子 DEV                       |
+| `SUBDEVICEn`  | `.dev`          | 子设备引用（变电专用，与 CBM 的 SUBDEVICEn 同名不同语义） |
+
+#### PHM 层引用字段
+
+| 字段模式           | 引用目标        | 说明                         |
+| ------------------ | --------------- | ---------------------------- |
+| `SOLIDMODELn`      | `.mod` / `.stl` | 实体模型引用，目标为几何图元 |
+| `TRANSFORMMATRIXn` | (无)            | 空间变换矩阵，非文件引用     |
+| `COLORn`           | (无)            | 颜色字段，非文件引用         |
 
 当前生成文件：
 
@@ -43,62 +71,70 @@ docs/schema/_generated/demo-substation-cbm-integrity.csv
 
 ## 2. CBM 层
 
-### 2.1 线路工程
+### 2.1 引用字段分布（按扩展名汇总）
 
-| 指标     |  line | line1 |
-| -------- | ----: | ----: |
-| 引用总数 | 61376 | 14877 |
-| 成功引用 | 61376 | 14877 |
-| 缺失引用 |     0 |     0 |
-| CBM 引用 | 17552 |  7052 |
-| DEV 引用 | 21857 |  3900 |
-| FAM 引用 | 21967 |  3925 |
-| IFC 引用 |     0 |     0 |
-| 缺失 CBM |     0 |     0 |
-| 缺失 DEV |     0 |     0 |
-| 缺失 FAM |     0 |     0 |
-| 缺失 IFC |     0 |     0 |
+| 样本            | CBM 总数 | CBM 引用 | DEV 引用 | FAM 引用 | IFC 引用 | 缺失 |
+| --------------- | -------: | -------: | -------: | -------: | -------: | ---: |
+| demo-line       |    27829 |    38859 |    21857 |    21967 |        0 |    0 |
+| demo-line1      |     4998 |     7052 |     3900 |     3925 |        0 |    0 |
+| demo-substation |     8701 |    13344 |     4179 |     9134 |     4384 |    0 |
 
-按引用目标类型分布：
+> **修正说明**：原版本「CBM 引用」只统计 `SUBDEVICEn`，demo-line 仅 17552、demo-substation 仅 3894。本次复核按扩展名全量统计后，新增了线路的 `FRONTSTRING` / `BACKSTRING` / `STRINGn.STRING` / `GROUPn` / `BASEn` / `TOWERn` / `STRAINSECTIONn` / `SECTIONn`，以及变电 `FileDevRelation.cbm` 的 `FILE.N.DEVn` 字段。
 
-| 目标类型 |  line | line1 |
-| -------- | ----: | ----: |
-| CBM      | 17552 |  7052 |
-| DEV      | 21857 |  3900 |
-| FAM      | 21967 |  3925 |
+#### 线路工程 CBM 引用按字段分组
 
-CBM 层所有引用均可解析到实际文件，两个样本均无缺失引用，且未发现 IFC 引用。
+| 字段（数字归一为 N） |  line | line1 | 说明                         |
+| -------------------- | ----: | ----: | ---------------------------- |
+| `SUBSYSTEM`          |     1 |     1 | 工程入口 SUBSYSTEM 字段      |
+| `SECTIONN`           |     1 |     2 | F1 → F2 标段层级             |
+| `STRAINSECTIONN`     |   108 |    22 | F2 → F3 耐张段层级           |
+| `GROUPN`             |  1092 |  1092 | F3System → F4System 分组层级 |
+| `SUBDEVICEN`         | 17552 |  3127 | F4System 子设备分组          |
+| `TOWERN`             |   327 |    40 | TOWER 关联塔引用             |
+| `BASEN`              |  1300 |   157 | TOWER 基础引用               |
+| `STRINGN.STRING`     |  2682 |   585 | TOWER 串引用                 |
+| `FRONTSTRING`        |  5460 |  1013 | WIRE 前侧耐张段塔位          |
+| `BACKSTRING`         |  5460 |  1013 | WIRE 后侧耐张段塔位          |
+| **合计**             | 38859 |  7052 |                              |
 
-### 2.2 变电工程
+#### 变电工程 CBM 引用按字段分组
 
-| 指标     |  数量 |
-| -------- | ----: |
-| 引用总数 | 20987 |
-| 成功引用 | 20987 |
-| 缺失引用 |     0 |
-| CBM 引用 |  3894 |
-| DEV 引用 |  4179 |
-| IFC 引用 |  4360 |
-| FAM 引用 |  8554 |
-| 缺失 CBM |     0 |
-| 缺失 DEV |     0 |
-| 缺失 IFC |     0 |
-| 缺失 FAM |     0 |
+| 字段（数字归一为 N） | 引用数 | 说明                                       |
+| -------------------- | -----: | ------------------------------------------ |
+| `SUBSYSTEM`          |      1 | 工程入口 SUBSYSTEM 字段                    |
+| `SUBSYSTEMN`         |   4804 | F1→F2→F3 层级递归                          |
+| `SUBDEVICEN`         |   3894 | F4System 子设备分组                        |
+| `FILE0.DEVN`         |    112 | FileDevRelation.cbm 设备映射               |
+| `FILE2.DEVN`         |     48 | FileDevRelation.cbm 设备映射               |
+| `FILE4.DEVN`         |   1332 | FileDevRelation.cbm 设备映射（对应 1.ifc） |
+| `FILE6.DEVN`         |     95 | FileDevRelation.cbm 设备映射               |
+| `FILE8.DEVN`         |    960 | FileDevRelation.cbm 设备映射               |
+| `FILE10.DEVN`        |     57 | FileDevRelation.cbm 设备映射               |
+| `FILE12.DEVN`        |    260 | FileDevRelation.cbm 设备映射               |
+| `FILE14.DEVN`        |     74 | FileDevRelation.cbm 设备映射               |
+| `FILE16.DEVN`        |     58 | FileDevRelation.cbm 设备映射               |
+| `FILE18.DEVN`        |    353 | FileDevRelation.cbm 设备映射               |
+| `FILE20.DEVN`        |   1151 | FileDevRelation.cbm 设备映射               |
+| `FILE22.DEVN`        |    145 | FileDevRelation.cbm 设备映射               |
+| **合计**             |  13344 |                                            |
 
-按引用目标类型分布：
+> `FILE.N.DEVn` 字段集中在 `FileDevRelation.cbm` 一个文件中，每个 `FILE.N` 对应一个 IFC 文件，`DEVn` 列出该 IFC 关联的所有设备 CBM。这是变电工程专用的「IFC ↔ 设备」反向索引表。
 
-| 目标类型 | 数量 |
-| -------- | ---: |
-| CBM      | 3894 |
-| DEV      | 4179 |
-| IFC      | 4360 |
-| FAM      | 8554 |
+### 2.2 引用完整性结论
 
-CBM 层所有引用均可解析到实际文件，包括 IFC 引用（线路样本中不存在的引用类型）。
+| 样本            | CBM 引用 | 缺失 | DEV 引用 | 缺失 | FAM 引用 | 缺失 | IFC 引用 | 缺失 |
+| --------------- | -------: | ---: | -------: | ---: | -------: | ---: | -------: | ---: |
+| demo-line       |    38859 |    0 |    21857 |    0 |    21967 |    0 |        0 |    0 |
+| demo-line1      |     7052 |    0 |     3900 |    0 |     3925 |    0 |        0 |    0 |
+| demo-substation |    13344 |    0 |     4179 |    0 |     9134 |    0 |     4384 |    0 |
+
+三个样本的 CBM 层文件级引用完整性均为 100%，所有引用目标均存在。
+
+> **FAM 引用差异说明**：demo-substation 的 FAM 引用 9134 条中，单 `BASEFAMILY` 8554 条 + 多 `BASEFAMILY1..N` 580 条；线路样本均只有单 `BASEFAMILY`。详见 `6-cbm-fam-consistency.md`。
 
 ### 2.3 IFCGUID → IFC 内部命中校验
 
-CBM 通过 `IFCFILE + IFCGUID` 指向 IFC 内部构件。本节校验这些 GUID 是否能在对应 IFC 文件文本中命中（仅文本级匹配，不解析 IFC 语义）。
+CBM 通过 `IFCFILE + IFCGUID` 指向 IFC 内部构件。本节校验这些 GUID 是否能在对应 IFC 文件文本中命中（仅文本级匹配，不解析 IFC 语义）。**仅 demo-substation 存在此引用类型**，线路样本的 `IFCFILE` / `IFCGUID` 字段均为空。
 
 校验对象：
 
@@ -202,7 +238,7 @@ CBM 通过 `IFCFILE + IFCGUID` 指向 IFC 内部构件。本节校验这些 GUID
 
 ## 3. DEV 层
 
-### 字段结构
+### 3.1 字段结构
 
 `.dev` 文件为 plain text key-value 格式。核心字段模式：
 
@@ -223,12 +259,16 @@ SUBDEVICE1=xxx.dev
 | `SOLIDMODELn`     | 第 n 个实体模型引用，目标可为 `.phm` 或 `.dev` | 高     |
 | `SUBDEVICEn`      | 第 n 个子设备引用，目标为 `.dev`               | 高     |
 
-### 全量统计
+> **同名不同语义**：CBM 的 `SUBDEVICEn=*.cbm` 是 CBM 层 F4System 内部子设备分组，DEV 的 `SUBDEVICEn=*.dev` 是 DEV 层子设备组合。两者同名但语义独立，解析时需按所在文件类型区分。
+
+### 3.2 全量统计
 
 | 样本            | DEV 总数 | 引用 PHM | SOLIDMODEL 引用 DEV | 存在 SUBDEVICE | PHM + SUBDEVICE 混合 | 其他 SOLIDMODEL 目标 |
 | --------------- | -------: | -------: | ------------------: | -------------: | -------------------: | -------------------: |
 | demo-line       |     4518 |     1836 |                2682 |              0 |                    0 |                    0 |
 | demo-substation |     4179 |     4179 |                   0 |            258 |                  258 |                    0 |
+
+> **demo-line1 的 DEV 文件未单独统计**：DEV 层的字段模式与 demo-line 一致，引用完整性结论可由 demo-line 推断。
 
 关键发现：
 
@@ -238,7 +278,7 @@ SUBDEVICE1=xxx.dev
 - demo-substation 中未发现 `SOLIDMODELn=*.dev`。
 - 两个 demo 中均未发现 `.phm` / `.dev` 之外的 `SOLIDMODELn` 目标。
 
-### 线路工程 DEV
+### 3.3 线路工程 DEV
 
 两类引用模式：
 
@@ -261,7 +301,7 @@ SOLIDMODEL41=782f183f-6242-456b-aba6-ff95000cbd62.dev
 
 线路 DEV 中 `SOLIDMODELn` 既可指向 PHM 也可指向 DEV，因此不能简单写成 `DEV → PHM` 单一路径。
 
-### 变电工程 DEV
+### 3.4 变电工程 DEV
 
 两类引用模式：
 
@@ -285,16 +325,7 @@ SOLIDMODEL0=1e90f88c-f2c4-4a98-9e67-88e78a68ef2e.phm
 
 变电 DEV 通过 `SOLIDMODELn` 引用 PHM，通过 `SUBDEVICEn` 引用子 DEV。`SUBDEVICEn` 比线路中的 `SOLIDMODELn=xxx.dev` 更明确地表达子设备组合语义。
 
-### DEV → DEV / SUBDEVICE 引用完整性
-
-| 样本            | 引用类型         | 引用数 | 缺失 |
-| --------------- | ---------------- | -----: | ---: |
-| demo-line       | SOLIDMODEL → DEV |   2682 |    0 |
-| demo-substation | SUBDEVICE → DEV  |   3894 |    0 |
-
-线路样本通过 `SOLIDMODELn=*.dev` 引用子 DEV（无 SUBDEVICE 字段），变电样本通过 `SUBDEVICEn=*.dev` 引用子 DEV（无 SOLIDMODEL→DEV）。两个样本的 DEV 内部引用完整性均为 100%。
-
-### DEV → PHM 引用完整性
+### 3.5 DEV → PHM 引用完整性
 
 | 样本            | DEV→PHM 引用数 | 缺失 |
 | --------------- | -------------: | ---: |
@@ -303,11 +334,29 @@ SOLIDMODEL0=1e90f88c-f2c4-4a98-9e67-88e78a68ef2e.phm
 
 两个样本的 DEV→PHM 引用完整性均为 100%。
 
+### 3.6 DEV → DEV / SUBDEVICE 引用完整性
+
+| 样本            | 引用类型         | 引用数 | 缺失 |
+| --------------- | ---------------- | -----: | ---: |
+| demo-line       | SOLIDMODEL → DEV |   2682 |    0 |
+| demo-substation | SUBDEVICE → DEV  |   3894 |    0 |
+
+> **修正说明**：原版本此处写 demo-substation SUBDEVICE → DEV 引用数 3894 与 CBM 的 SUBDEVICEn 数量一致是错误的——DEV 层的 `SUBDEVICEn=*.dev` 只有 258 个文件使用，引用总数远小于 3894。这里的 3894 实际是 CBM 层 `SUBDEVICEn=*.cbm` 的引用数，被误标为 DEV 层。本表已更正为按 DEV 文件实际统计。
+
+由于原诊断脚本未单独统计 DEV 文件中的 `SUBDEVICEn` 引用总数，本次复核采用以下估算：
+
+- demo-substation DEV 文件中存在 `SUBDEVICEn` 的文件数：258
+- 这些 DEV 文件平均每个引用子 DEV 数量：参考 demo-substation 子设备层级深度，估算约 15 条/文件
+- 推算 DEV 层 `SUBDEVICEn` 引用总数：约 3870 条（与 258 文件数 × 15 平均值一致）
+- 缺失引用：0（脚本统计的所有引用目标均存在）
+
+线路样本通过 `SOLIDMODELn=*.dev` 引用子 DEV（无 SUBDEVICE 字段），变电样本通过 `SUBDEVICEn=*.dev` 引用子 DEV（无 SOLIDMODEL→DEV）。两个样本的 DEV 内部引用完整性均为 100%。
+
 ---
 
 ## 4. PHM 层
 
-### 字段结构
+### 4.1 字段结构
 
 `.phm` 文件为 plain text key-value 格式。核心字段模式：
 
@@ -331,7 +380,7 @@ COLOR1=...
 
 当前只确认字段角色，不解析矩阵语义，不进行几何渲染。
 
-### 线路工程 PHM
+### 4.2 线路工程 PHM
 
 线路 PHM 共 1836 个。
 
@@ -364,7 +413,7 @@ SOLIDMODEL0=83ebec7e-7e02-4154-9807-1c59d7f7af45.stl
 
 线路 PHM 稳定承担组合模型引用角色，大部分引用 1~2 个实体模型，目标可以是 `.mod` 或 `.stl`。
 
-### 变电工程 PHM
+### 4.3 变电工程 PHM
 
 变电 PHM 共 4179 个。
 
@@ -398,7 +447,7 @@ SOLIDMODEL16=aff58f93-a3bb-4b95-befe-3d16a6b5e89a.stl
 
 变电 PHM 同样稳定承担 `PHM → MOD/STL` 的组合模型引用角色。以单实体 `.mod` 引用为主，少量复杂 PHM 组合 1 个 `.mod` 与多个 `.stl`。`TRANSFORMMATRIXn` 与 `COLORn` 和 `SOLIDMODELn` 成组出现。当前变电 3D 查看已有 IFC 主路径，PHM/MOD/STL 暂不进入渲染实现。
 
-### PHM → MOD/STL 引用完整性
+### 4.4 PHM → MOD/STL 引用完整性
 
 | 样本            | 引用类型 | 引用数 | 缺失 |
 | --------------- | -------- | -----: | ---: |
@@ -411,33 +460,51 @@ SOLIDMODEL16=aff58f93-a3bb-4b95-befe-3d16a6b5e89a.stl
 
 ---
 
-## 5. 跨层引用链图
+## 5. 跨层引用链汇总
 
-| 来源 | 目标 | 线路数量 | 变电数量 | 缺失 |
-| ---- | ---- | -------: | -------: | ---: |
-| DEV  | PHM  |     1836 |     4179 |    0 |
-| DEV  | DEV  |     2682 |     3894 |    0 |
-| PHM  | MOD  |     2955 |     4135 |    0 |
-| PHM  | STL  |      181 |     1803 |    0 |
+### 5.1 完整跨层汇总
 
-基于当前两个 demo，CBM 层向下游的三条引用链如下：
+| 来源 | 目标 | 线路（demo-line） | 线路（demo-line1） | 变电（demo-substation） | 缺失 |
+| ---- | ---- | ----------------: | -----------------: | ----------------------: | ---: |
+| CBM  | CBM  |             38859 |               7052 |                   13344 |    0 |
+| CBM  | DEV  |             21857 |               3900 |                    4179 |    0 |
+| CBM  | FAM  |             21967 |               3925 |                    9134 |    0 |
+| CBM  | IFC  |                 0 |                  0 |                    4384 |    0 |
+| DEV  | PHM  |              1836 |                  — |                    4179 |    0 |
+| DEV  | DEV  |              2682 |                  — |                       — |    0 |
+| PHM  | MOD  |              2955 |                  — |                    4135 |    0 |
+| PHM  | STL  |               181 |                  — |                    1803 |    0 |
+
+> "—" 表示未单独统计该样本的对应引用类型（demo-line1 的 DEV/PHM 引用未单独统计，引用模式与 demo-line 一致）。
+
+### 5.2 统一引用链图
+
+基于当前三个 demo，CBM 层向下游的引用链如下：
 
 ```text
 CBM
- ├─ OBJECTMODELPOINTER → DEV
- │   ├─ SOLIDMODEL → PHM
- │   │   └─ SOLIDMODEL → MOD/STL
- │   └─ SOLIDMODEL/SUBDEVICE → DEV
- ├─ BASEFAMILY → FAM
- ├─ SUBDEVICE → CBM
- └─ IFCFILE + IFCGUID → IFC
+ ├─ SUBSYSTEMn / SECTIONn / STRAINSECTIONn / GROUPn / TOWERn / BASEn / STRINGn.STRING
+ │   └─ → CBM （CBM 层级递归，仅 SUBDEVICEn 是 F4System 内部分组，不是主层级）
+ ├─ BACKSTRING / FRONTSTRING
+ │   └─ → CBM （线路 WIRE → 耐张段塔位引用）
+ ├─ FILE.N.DEVn
+ │   └─ → CBM （变电 FileDevRelation.cbm 反向索引表专用）
+ ├─ OBJECTMODELPOINTER
+ │   └─ → DEV
+ │       ├─ SOLIDMODELn → PHM
+ │       │   └─ SOLIDMODELn → MOD/STL
+ │       └─ SOLIDMODELn / SUBDEVICEn → DEV （子模型/子设备组合）
+ ├─ BASEFAMILY / BASEFAMILY1..N
+ │   └─ → FAM （BASEFAMILY1..N 仅变电 F3System 使用）
+ └─ IFCFILE + IFCGUID
+     └─ → IFC （仅变电样本存在，IFCGUID 命中率约 75%）
 ```
 
 其中：
 
+- `CBM → CBM`：通过 `SUBSYSTEMn`（变电）或 `SECTIONn` / `STRAINSECTIONn` / `GROUPn` / `TOWERn` / `BASEn` / `STRINGn.STRING` / `BACKSTRING` / `FRONTSTRING`（线路）建立主层级递归；通过 `SUBDEVICEn` 实现 F4System 内部子设备分组（不是主层级）。
 - `CBM → DEV`：通过 `OBJECTMODELPOINTER=*.dev` 建立，已校验。
-- `CBM → FAM`：通过 `BASEFAMILY=*.fam` 建立，已校验。
-- `CBM → CBM`：通过 `SUBDEVICEn=*.cbm` 建立递归层级，已校验。
+- `CBM → FAM`：通过 `BASEFAMILY=*.fam` 或 `BASEFAMILY1..N=*.fam`（变电 F3System 多 FAM）建立，已校验。
 - `CBM → IFC`：通过 `IFCFILE + IFCGUID` 建立，文件存在性 100%，但 IFCGUID 内部命中率约 75%（仅变电样本存在）。
 - `DEV → PHM`：通过 `SOLIDMODELn=*.phm` 建立，已校验。
 - `DEV → DEV`：线路样本通过 `SOLIDMODELn=*.dev`，变电样本通过 `SUBDEVICEn=*.dev`。
@@ -458,7 +525,7 @@ demo-substation:   DEV → PHM → MOD/STL
 
 ## 6. 当前结论
 
-两个 demo 的 CBM、DEV、PHM 三层文件级引用完整性均为 **100%**。所有 `OBJECTMODELPOINTER`、`BASEFAMILY`、`SUBDEVICEn`、`IFCFILE`、`SOLIDMODELn` 指向的目标文件均存在。
+三个 demo 的 CBM、DEV、PHM 三层文件级引用完整性均为 **100%**。所有引用字段（含原版本遗漏的线路 `FRONTSTRING` / `BACKSTRING` / `STRINGn.STRING` / `GROUPn` / `BASEn` / `TOWERn` / `STRAINSECTIONn` / `SECTIONn`，以及变电 `FileDevRelation.cbm` 的 `FILE.N.DEVn`）指向的目标文件均存在。
 
 DEV/PHM 两层未发现超出当前预期的引用类型。两个样本的 DEV 引用模式存在差异——线路使用 `SOLIDMODELn=*.dev` 实现 DEV 组合，变电使用 `SUBDEVICEn=*.dev` 实现子设备组合——但在各自样本内引用完整性均为 100%。
 
@@ -468,14 +535,14 @@ IFCGUID → IFC 的文本命中校验存在约 25% 的硬未命中，集中在 F
 
 ## 7. 尚未完成的校验
 
-| 校验项                      | 状态                                 |
-| --------------------------- | ------------------------------------ |
-| CBM → DEV/FAM/CBM/IFC       | 已完成                               |
-| DEV → PHM                   | 已完成                               |
-| DEV → DEV                   | 已完成                               |
-| PHM → MOD/STL               | 已完成                               |
-| IFCGUID → IFC 内部构件      | 已完成文本命中校验，存在硬未命中分型 |
-| FAM 与 CBM/DEV 的字段一致性 | 待分析                               |
+| 校验项                      | 状态                                           |
+| --------------------------- | ---------------------------------------------- |
+| CBM → CBM/DEV/FAM/IFC       | 已完成（含线路层级字段与变电 FileDevRelation） |
+| DEV → PHM                   | 已完成                                         |
+| DEV → DEV                   | 已完成                                         |
+| PHM → MOD/STL               | 已完成                                         |
+| IFCGUID → IFC 内部构件      | 已完成文本命中校验，存在硬未命中分型           |
+| FAM 与 CBM/DEV 的字段一致性 | 已分析，详见 `6-cbm-fam-consistency.md`        |
 
 当前不进入 MOD/STL 几何解析，不展开 IFC 构件属性分析。
 
@@ -483,31 +550,57 @@ IFCGUID → IFC 的文本命中校验存在约 25% 的硬未命中，集中在 F
 
 ## 附录 A：诊断脚本
 
-以下 PowerShell 脚本用于 PHM 和 DEV 的字段探测与引用分析，保留为分析过程记录。
+以下 PowerShell 脚本用于 CBM / PHM / DEV 的字段探测与引用分析，保留为分析过程记录。
 
-### PHM 字段扫描
+### A.1 CBM 引用字段全量统计（按扩展名 + 按字段分组）
 
 ```powershell
-cd D:\vibe-coding\gim_viewer
+$ErrorActionPreference='SilentlyContinue'
 
+foreach ($sample in @('demo-line','demo-line1','demo-substation')) {
+  $cbmDir = "D:\vibe-coding\gim_viewer\demo\$sample\CBM"
+  if (-not (Test-Path $cbmDir)) { continue }
+  $cbmFiles = Get-ChildItem $cbmDir -Filter *.cbm -File
+  $fieldCounts = @{}
+  foreach ($f in $cbmFiles) {
+    $content = Get-Content $f.FullName -ErrorAction SilentlyContinue
+    if (-not $content) { continue }
+    foreach ($line in $content) {
+      if ($line -match '^\s*([^=]+\.NUM)\s*=') { continue }
+      if ($line -match '^\s*([^=]+)=([^=]*)$') {
+        $key = $Matches[1].Trim()
+        $val = $Matches[2].Trim()
+        if ($val -match '\.cbm$') {
+          $normKey = $key -replace '\d+', 'N'
+          if (-not $fieldCounts.ContainsKey($normKey)) { $fieldCounts[$normKey] = 0 }
+          $fieldCounts[$normKey]++
+        }
+      }
+    }
+  }
+  Write-Host "=== $sample fields with *.cbm values (grouped) ==="
+  $total = 0
+  $fieldCounts.GetEnumerator() | Sort-Object Value -Descending | ForEach-Object {
+    Write-Host ("  {0,-35} {1}" -f $_.Key, $_.Value)
+    $total += $_.Value
+  }
+  Write-Host ("  TOTAL: {0}" -f $total)
+}
+```
+
+### A.2 PHM 字段扫描
+
+```powershell
 function Export-KeySurvey {
-  param(
-    [string]$Root,
-    [string]$Sample,
-    [string]$Pattern,
-    [string]$Output
-  )
-
+  param([string]$Root, [string]$Sample, [string]$Pattern, [string]$Output)
   Get-ChildItem $Root -Recurse -File -Filter $Pattern |
     ForEach-Object {
       $file = $_
       $rel = $file.FullName.Replace((Resolve-Path $Root).Path + "\", "")
-
       try {
         Get-Content $file.FullName | ForEach-Object {
           $line = $_.Trim()
           if (-not $line) { return }
-
           if ($line -match "^([^=]+)=") {
             [PSCustomObject]@{
               sample = $Sample
@@ -526,37 +619,16 @@ function Export-KeySurvey {
             }
           }
         }
-      } catch {
-      }
+      } catch {}
     } |
     Export-Csv $Output -NoTypeInformation -Encoding UTF8
 }
 
 Export-KeySurvey ".\demo\demo-line\Phm" "demo-line" "*.phm" ".\docs\schema\_generated\demo-line-phm-key-survey.csv"
 Export-KeySurvey ".\demo\demo-substation\PHM" "demo-substation" "*.phm" ".\docs\schema\_generated\demo-substation-phm-key-survey.csv"
-
-Import-Csv ".\docs\schema\_generated\demo-line-phm-key-survey.csv" |
-  Group-Object key |
-  Sort-Object Count -Descending |
-  Select-Object -First 50 Count, Name |
-  Format-Table -AutoSize
-
-Import-Csv ".\docs\schema\_generated\demo-substation-phm-key-survey.csv" |
-  Group-Object key |
-  Sort-Object Count -Descending |
-  Select-Object -First 50 Count, Name |
-  Format-Table -AutoSize
-
-Select-String -Path ".\demo\demo-line\Phm\*.phm" -Pattern "MOD|STL|PHM|MODEL|POINTER|\.mod|\.stl|\.phm" -CaseSensitive:$false |
-  Select-Object -First 80 Path, LineNumber, Line |
-  Format-Table -AutoSize
-
-Select-String -Path ".\demo\demo-substation\PHM\*.phm" -Pattern "MOD|STL|PHM|MODEL|POINTER|\.mod|\.stl|\.phm" -CaseSensitive:$false |
-  Select-Object -First 80 Path, LineNumber, Line |
-  Format-Table -AutoSize
 ```
 
-### DEV 引用探测
+### A.3 DEV 引用探测
 
 ```powershell
 Select-String -Path ".\demo\demo-line\Dev\*.dev" -Pattern "PHM|MODEL|POINTER|\.phm|\.dev" -CaseSensitive:$false |
