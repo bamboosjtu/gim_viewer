@@ -128,7 +128,7 @@ COLOR1=255,255,255,100
 SOLIDMODELS.NUM=0
 ```
 
-> demo-substation 中存在 14 个 `NUM=0` 的 PHM 文件，对应 F4System 装配节点，其几何位于 SUBDEVICE 子 DEV 的 PHM 中（参见 [7-dev-phm-geometry-reachability.md](7-dev-phm-geometry-reachability.md) 第 8 节）。
+> demo-substation 中存在 14 个 `NUM=0` 的 PHM 文件，对应 F4System 装配节点，其几何位于 SUBDEVICE 子 DEV 的 PHM 中（参见 [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) 第 8 节）。
 
 ### 变电工程：单 MOD 模型（NUM=1，COLOR 为空）
 
@@ -209,7 +209,7 @@ COLOR2=138,149,151,100
 | 缺失 MOD/STL 数   |                 0 |                 0 |                       0 |
 | 孤立 MOD/STL 数   |                 0 |                 0 |                       0 |
 
-> 几何文件复用模式详见 [7-dev-phm-geometry-reachability.md](7-dev-phm-geometry-reachability.md) 第 9 节。
+> 几何文件复用模式详见 [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) 第 9 节。
 
 ## 工程类型差异对比
 
@@ -223,4 +223,4 @@ COLOR2=138,149,151,100
 | 无目标 PHM       | 无                                              | 14 个 `NUM=0` 装配节点                            |
 | 几何复用模式     | 高复用：少量 MOD/STL 被大量 PHM 引用            | 低复用：MOD/STL 与 PHM 接近 1:1                   |
 
-差异原因：线路工程构件同质化程度高（如绝缘子串、金具），同一 PHM 模板被大量复用；变电工程设备异质性强，每个 PHM 组合更复杂但独占几何资源。详见 [7-dev-phm-geometry-reachability.md](7-dev-phm-geometry-reachability.md) 第 9 节。
+差异原因：线路工程构件同质化程度高（如绝缘子串、金具），同一 PHM 模板被大量复用；变电工程设备异质性强，每个 PHM 组合更复杂但独占几何资源。详见 [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) 第 9 节。

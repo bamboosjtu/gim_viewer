@@ -25,16 +25,17 @@
 
 | 顺序 | 文档 | 关注问题 | 状态 |
 | ---: | ---- | -------- | ---- |
-| 0 | [0-sample-corpus.md](0-sample-corpus.md) | 样本台账、样本边界、后续样本登记规则 | 持续维护 |
-| 1 | [1-gim-container-analysis.md](1-gim-container-analysis.md) | `.gim` 外壳、GIMPKG 魔数、压缩格式、payload offset | 已纳入 3 个样本 |
-| 2 | [2-gim-file-inventory.md](2-gim-file-inventory.md) | 解压后文件清单、目录大小写、文本/二进制粗判 | 已纳入 3 个样本 |
-| 3 | [3-gim-file-role-matrix.md](3-gim-file-role-matrix.md) | CBM/FAM/DEV/PHM/MOD/STL/IFC/SCH/STD/SLD 文件角色 | 待随新样本复核 |
-| 4 | [4-cbm-field-dictionary.md](4-cbm-field-dictionary.md) | CBM 字段、线路/变电差异、CBM 下游引用 | 待随新样本复核 |
-| 5 | [5-gim-reference-integrity.md](5-gim-reference-integrity.md) | CBM/DEV/PHM 文件级引用完整性、IFCGUID 命中分型 | 待随新样本复核 |
-| 6 | [6-cbm-fam-consistency.md](6-cbm-fam-consistency.md) | CBM -> FAM 覆盖关系、FAM 字段形态、属性 sidecar 判断 | 待随新样本复核 |
-| 7 | [7-dev-phm-geometry-reachability.md](7-dev-phm-geometry-reachability.md) | DEV/PHM 递归、MOD/STL 几何目标可达性、无几何装配节点 | 待随新样本复核 |
-| 8 | [8-mod-static-survey.md](8-mod-static-survey.md) | MOD 静态分型、线路/变电 MOD 格式边界、可解析性边界 | 待随新样本复核 |
-| 汇总 | [gim-analysis-summary.md](gim-analysis-summary.md) | 历史阶段性总览与长文汇总 | 后续宜逐步瘦身 |
+| 00 | [00-sample-corpus.md](00-sample-corpus.md) | 样本台账、样本边界、后续样本登记规则 | 持续维护 |
+| 01 | [01-gim-container-analysis.md](01-gim-container-analysis.md) | `.gim` 外壳、GIMPKG 魔数、压缩格式、payload offset | 已纳入 3 个样本 |
+| 02 | [02-gim-file-inventory.md](02-gim-file-inventory.md) | 解压后文件清单、目录大小写、文本/二进制粗判 | 已纳入 3 个样本 |
+| 03 | [03-gim-file-role-matrix.md](03-gim-file-role-matrix.md) | CBM/FAM/DEV/PHM/MOD/STL/IFC/SCH/STD/SLD 文件角色 | 待随新样本复核 |
+| 04 | [04-cbm-field-dictionary.md](04-cbm-field-dictionary.md) | CBM 字段、线路/变电差异、CBM 下游引用 | 待随新样本复核 |
+| 05 | [05-gim-reference-integrity.md](05-gim-reference-integrity.md) | CBM/DEV/PHM 文件级引用完整性、IFCGUID 命中分型 | 待随新样本复核 |
+| 06 | [06-cbm-fam-consistency.md](06-cbm-fam-consistency.md) | CBM -> FAM 覆盖关系、FAM 字段形态、属性 sidecar 判断 | 待随新样本复核 |
+| 07 | [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) | DEV/PHM 递归、MOD/STL 几何目标可达性、无几何装配节点 | 待随新样本复核 |
+| 08 | [08-mod-static-survey.md](08-mod-static-survey.md) | MOD 静态分型、线路/变电 MOD 格式边界、可解析性边界 | 待随新样本复核 |
+| 09 | [09-transform-chain-analysis.md](09-transform-chain-analysis.md) | PHM 与 MOD 变换链分析、矩阵存储约定、两级变换验证 | 待随新样本复核 |
+| 10 | [10-substation-xml-primitive.md](10-substation-xml-primitive.md) | 变电 XML primitive 字段范围、强类型 schema 判定、Color/StretchedBody 深度分析 | 待随新样本复核 |
 
 ---
 
@@ -62,12 +63,14 @@
 推荐顺序：
 
 ```text
-Step 0: 更新 0-sample-corpus.md 样本台账
-Step 1: 复核 1-gim-container-analysis.md 的魔数、压缩格式、offset
-Step 2: 复核 2-gim-file-inventory.md 的文件清单、目录分布、文本/二进制粗判
-Step 3: 复核 3/4/5 的文件角色、CBM 字段、引用完整性
-Step 4: 复核 7/8 的 DEV/PHM 几何可达性与 MOD 静态分型
-Step 5: 再决定是否进入 STL/MOD 渲染实现
+Step 00: 更新 00-sample-corpus.md 样本台账
+Step 01: 复核 01-gim-container-analysis.md 的魔数、压缩格式、offset
+Step 02: 复核 02-gim-file-inventory.md 的文件清单、目录分布、文本/二进制粗判
+Step 03: 复核 03/04/05 的文件角色、CBM 字段、引用完整性
+Step 04: 复核 07/08 的 DEV/PHM 几何可达性与 MOD 静态分型
+Step 05: 复核 09 的 PHM 与 MOD 变换链
+Step 06: 复核 10 的变电 XML primitive 字段范围与强类型 schema
+Step 07: 再决定是否进入 STL/MOD 渲染实现
 ```
 
 ---

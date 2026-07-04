@@ -8,7 +8,7 @@ MOD 不是单一格式，而是按工程类型分为两大格式族：
 
 ```text
 变电工程：XML 格式族（Device / Entities / Entity / primitive）
-线路工程：文本格式族（4 类，详见 8-mod-static-survey.md）
+线路工程：文本格式族（4 类，详见 08-mod-static-survey.md）
 ```
 
 ### 变电工程与线路工程的差异
@@ -81,7 +81,7 @@ MOD 不是单一格式，而是按工程类型分为两大格式族：
 | `TEXT_KEY_VALUE`       | 主要由 key=value 行构成，无独立 section header                  | `type`/`d`/`e1`/`e2`/`H1-H4` 或导线参数 | Tower_Device / WIRE  |
 | `TEXT_HNUM_COMMA_RECORD` | 第一行 `HNum,n`，后续为逗号分隔记录（`H`/`Body`/`P`/`R`/`G` 等） | 杆塔主体 / 分段构件文本记录          | Tower_Device         |
 
-> 线路 MOD 的详细分型、字段统计、CODE 分布、HNum 分布、token 分布及上游 CBM→MOD 映射详见 [8-mod-static-survey.md](8-mod-static-survey.md)。
+> 线路 MOD 的详细分型、字段统计、CODE 分布、HNum 分布、token 分布及上游 CBM→MOD 映射详见 [08-mod-static-survey.md](08-mod-static-survey.md)。
 
 ## 引用关系
 
@@ -330,7 +330,7 @@ primitive 分布（demo-substation）：
 
 ## 分析脚本
 
-MOD 静态分型、各 kind 详细统计、上游 CBM→MOD 映射与孤儿诊断的脚本入口与说明见 [8-mod-static-survey.md](8-mod-static-survey.md) 附录 A。
+MOD 静态分型、各 kind 详细统计、上游 CBM→MOD 映射与孤儿诊断的脚本入口与说明见 [08-mod-static-survey.md](08-mod-static-survey.md) 附录 A。
 
 主要脚本：
 
