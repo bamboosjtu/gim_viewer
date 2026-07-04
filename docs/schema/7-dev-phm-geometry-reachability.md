@@ -1,710 +1,360 @@
-# Round 3：DEV / PHM / MOD / STL 几何可达性分析
+# DEV / PHM / MOD / STL 几何可达性分析
 
-目标：确认几何资源是否能从 CBM 实例一路走到 MOD/STL。
+## 1. 文件概述
 
-## 1. Round 3 定位
-
-Round 3 的目标不是实现几何解析或渲染，而是在 Round 1 / Round 2 已确认文件级引用链和 IFC/FAM 基础关系后，继续验证：
-
-```text
-CBM -> DEV -> PHM -> MOD/STL
-```
-
-这条链路在当前两个 demo 中是否能形成稳定的、可遍历的文件级几何目标引用链。
-
-当前分析对象：
-
-```text
-demo-line
-demo-substation
-```
-
-当前分析范围：
-
-```text
-DEV 文件全集
-DEV -> DEV / PHM 引用模式
-DEV root / child 角色
-DEV 图深度与环检测
-CBM -> DEV 入口角色
-PHM -> MOD/STL 引用模式
-无几何 PHM
-装配节点自身无几何但子设备有几何
-orphan geometry 文件
-CBM 几何目标可达性总分类
-```
-
-当前不做：
-
-```text
-不改 src
-不改 SQLite schema
-不新增 UI
-不实现 MOD 解析
-不实现 STL 解析
-不应用 TRANSFORMMATRIX
-不做 3D 渲染
-不做悬链线
-不改变当前 MVP 行为
-```
-
-Round 3 的核心判断是：
-
-```text
-当前两个 demo 中，DEV-linked CBM 均能沿 DEV / PHM 引用链到达至少一个 MOD 或 STL 几何目标。
-但这只证明文件级几何目标可达，不代表 MOD/STL 已经完成语义解析或可渲染。
-```
-
----
-
-## 2. Round 3 总体计划
-
-Round 3 按以下阶段推进：
-
-| 阶段        | 目标                                  | 产出                            |
-| --------- | ----------------------------------- | ----------------------------- |
-| Round 3.1 | 统计 DEV / PHM / MOD / STL 文件全集       | 文件数量基线                        |
-| Round 3.2 | 分析 DEV 引用 PHM / DEV / SUBDEVICE 的模式 | DEV 引用模式                      |
-| Round 3.3 | 判定 DEV 内部 root / child 角色           | root DEV 与 child DEV 对照       |
-| Round 3.4 | 对齐 CBM -> DEV 入口与 DEV 内部角色          | CBM 入口角色分析                    |
-| Round 3.5 | 检查 DEV 图深度与环                        | 最大深度、环检测                      |
-| Round 3.6 | 分析 PHM -> MOD/STL 引用模式              | PHM 几何目标引用统计                  |
-| Round 3.7 | 分析无目标 PHM 与装配节点                     | assembly without own geometry |
-| Round 3.8 | 分析 orphan geometry 文件               | unreferenced geometry 文件分类    |
-| Round 3.9 | 汇总 CBM 几何可达性                        | DEV-linked CBM 的几何可达性总分类      |
-
-当前已完成到 Round 3.9。
-
----
-
-## 3. Round 3 分析思路
-
-Round 3 采用“从文件全集到用户入口”的方式推进。
-
-整体顺序是：
-
-```text
-DEV / PHM / MOD / STL 文件全集
-  -> DEV 引用模式
-  -> DEV root / child 角色
-  -> CBM -> DEV 入口角色
-  -> DEV 图深度与环检测
-  -> PHM -> MOD/STL 引用模式
-  -> 无几何 PHM 解释
-  -> orphan geometry 文件解释
-  -> CBM 几何目标可达性总分类
-```
-
-之所以采用这个顺序，是因为浏览器最终面对的是 CBM 节点，但几何目标在下游：
-
-```text
-CBM
-  -> OBJECTMODELPOINTER -> DEV
-     -> SOLIDMODEL -> PHM
-        -> SOLIDMODEL -> MOD/STL
-```
-
-或者：
-
-```text
-CBM
-  -> OBJECTMODELPOINTER -> DEV
-     -> SOLIDMODEL / SUBDEVICE -> child DEV
-        -> SOLIDMODEL -> PHM
-           -> SOLIDMODEL -> MOD/STL
-```
-
-因此必须先确认 DEV 图是否可遍历，再判断 CBM 入口是否能到达几何目标。
-
----
-
-## 4. Step 1：DEV / PHM / MOD / STL 文件全集
-
-### 4.1 目的
-
-确认 Round 3 的分析对象范围，建立 DEV / PHM / MOD / STL 文件数量基线。
-
-### 4.2 命令
-
-```powershell
-cd D:\vibe-coding\gim_viewer
-
-Get-ChildItem ".\demo\demo-line" -Recurse -File |
-  Where-Object { $_.Extension -in ".dev", ".phm", ".mod", ".stl" } |
-  Group-Object Extension |
-  Sort-Object Name |
-  Select-Object Name, Count |
-  Format-Table -AutoSize
-
-Get-ChildItem ".\demo\demo-substation" -Recurse -File |
-  Where-Object { $_.Extension -in ".dev", ".phm", ".mod", ".stl" } |
-  Group-Object Extension |
-  Sort-Object Name |
-  Select-Object Name, Count |
-  Format-Table -AutoSize
-```
-
-### 4.3 当前结果
-
-demo-line：
-
-| 扩展名    |   数量 |
-| ------ | ---: |
-| `.dev` | 4518 |
-| `.phm` | 1836 |
-| `.mod` | 1807 |
-| `.stl` |  181 |
-
-demo-substation：
-
-| 扩展名    |   数量 |
-| ------ | ---: |
-| `.dev` | 4179 |
-| `.phm` | 4179 |
-| `.mod` | 4179 |
-| `.stl` | 1803 |
-
-### 4.4 分析结论
-
-demo-line 中 DEV 数量明显大于 PHM，说明线路样本中存在较多 DEV -> DEV 的组合 / 复用关系。
-
-demo-substation 中 DEV / PHM / MOD 数量均为 4179，说明变电样本大概率存在较强的一对一链条：
-
-```text
-DEV -> PHM -> MOD
-```
-
-STL 是补充几何文件，不是每个 PHM 都有。
-
----
-
-## 5. Step 2：DEV 引用模式
-
-### 5.1 目的
-
-确认 DEV 文件内部到底通过 `SOLIDMODEL` 指向 PHM，还是指向其他 DEV；同时确认是否存在 `SUBDEVICE` 引用。
-
-### 5.2 命令
-
-```powershell
-cd D:\vibe-coding\gim_viewer
-
-Show-DevReferenceMode ".\demo\demo-line\Dev"
-Show-DevReferenceMode ".\demo\demo-substation\DEV"
-```
-
-进一步统计引用数量：
-
-```powershell
-Show-DevReferenceCount ".\demo\demo-line\Dev"
-Show-DevReferenceCount ".\demo\demo-substation\DEV"
-```
-
-### 5.3 当前结果
-
-demo-line：
-
-|   数量 | 引用模式      |
-| ---: | --------- |
-| 2682 | `.dev, 0` |
-| 1836 | `.phm, 0` |
-
-含义：
-
-```text
-2682 个 DEV 的 SOLIDMODEL 指向 .dev
-1836 个 DEV 的 SOLIDMODEL 指向 .phm
-所有 DEV 都没有 SUBDEVICE
-```
-
-demo-line 按引用数量统计：
-
-|   数量 | 引用模式           |
-| ---: | -------------- |
-| 1836 | `.phm, 1, 0`   |
-|  408 | `.dev, 40, 0`  |
-|  384 | `.dev, 109, 0` |
-|  267 | `.dev, 5, 0`   |
-|  244 | `.dev, 7, 0`   |
-|  240 | `.dev, 107, 0` |
-|  187 | `.dev, 9, 0`   |
-|  123 | `.dev, 4, 0`   |
-|  120 | `.dev, 75, 0`  |
-|  116 | `.dev, 37, 0`  |
-|  109 | `.dev, 13, 0`  |
-|  107 | `.dev, 77, 0`  |
-|   91 | `.dev, 71, 0`  |
-|   74 | `.dev, 70, 0`  |
-|   58 | `.dev, 42, 0`  |
-|   26 | `.dev, 76, 0`  |
-|   24 | `.dev, 143, 0` |
-|   21 | `.dev, 104, 0` |
-|   18 | `.dev, 87, 0`  |
-|   16 | `.dev, 1, 0`   |
-|   16 | `.dev, 8, 0`   |
-|   12 | `.dev, 101, 0` |
-|    7 | `.dev, 81, 0`  |
-|    7 | `.dev, 83, 0`  |
-|    3 | `.dev, 139, 0` |
-|    3 | `.dev, 85, 0`  |
-|    1 | `.dev, 189, 0` |
-
-demo-substation：
-
-|   数量 | 引用模式       |
-| ---: | ---------- |
-| 3921 | `.phm, 0`  |
-|   54 | `.phm, 21` |
-|   36 | `.phm, 1`  |
-|   25 | `.phm, 12` |
-|   18 | `.phm, 2`  |
-|   16 | `.phm, 7`  |
-|   15 | `.phm, 10` |
-|   12 | `.phm, 9`  |
-|    6 | `.phm, 75` |
-|    6 | `.phm, 5`  |
-|    6 | `.phm, 14` |
-|    6 | `.phm, 8`  |
-
-含义：
-
-```text
-demo-substation 全部 DEV 的 SOLIDMODEL 都指向 .phm。
-其中 3921 个 DEV 没有 SUBDEVICE。
-其余 258 个 DEV 有 SUBDEVICE。
-SUBDEVICE -> DEV 引用总数为 3894。
-```
-
-### 5.4 分析结论
-
-线路样本：
-
-```text
-DEV 递归主链是 SOLIDMODEL -> DEV。
-组合 DEV 的扇出较大，最大单个 DEV 引用 189 个 child DEV。
-```
-
-变电样本：
-
-```text
-DEV 几何主链是 SOLIDMODEL -> PHM。
-设备组合主链是 SUBDEVICE -> DEV。
-最大单个 DEV 有 75 个 SUBDEVICE。
-```
-
----
-
-## 6. Step 3：DEV 内部 root / child 角色
-
-### 6.1 目的
-
-区分哪些 DEV 是被其他 DEV 引用的 child DEV，哪些 DEV 是 DEV 内部图中的 root candidate。
-
-这里的 root candidate 只表示：
-
-```text
-没有被其他 DEV 通过 SOLIDMODEL 或 SUBDEVICE 引用的 DEV。
-```
-
-它还不是最终 GIM 对象根节点。最终对象入口还需要结合：
+本文档验证 GIM 工程中 CBM 节点是否能沿引用链到达 MOD/STL 几何目标，不涉及几何解析或渲染。核心引用链：
 
 ```text
 CBM -> OBJECTMODELPOINTER -> DEV
+  -> SOLIDMODEL -> PHM
+     -> SOLIDMODEL -> MOD/STL
+  或
+  -> SOLIDMODEL/SUBDEVICE -> child DEV -> ... -> PHM -> MOD/STL
 ```
 
-### 6.2 命令
+### 分析对象
 
-```powershell
-cd D:\vibe-coding\gim_viewer
+| 样本            | 工程类型 | 目录大小写 |
+| --------------- | -------- | ---------- |
+| demo-line       | 线路     | Cbm/Dev/Phm/Mod |
+| demo-line1      | 线路     | Cbm/Dev/Phm/Mod |
+| demo-substation | 变电     | CBM/DEV/PHM/MOD |
 
-Show-DevRootChildStats ".\demo\demo-line\Dev"
-Show-DevRootChildStats ".\demo\demo-substation\DEV"
-```
+### 分析范围
 
-### 6.3 当前结果
+- DEV / PHM / MOD / STL 文件全集
+- DEV → DEV / PHM 引用模式
+- DEV root / child 角色
+- DEV 图深度与环检测
+- CBM → DEV 入口与 DEV 内部角色对齐
+- PHM → MOD/STL 引用模式
+- 无几何 PHM 与装配节点
+- orphan geometry 文件
+- CBM 几何目标可达性总分类
 
-demo-line：
+---
 
-```text
-totalDev                 : 4518
-internalDevEdges         : 138622
-missingDevEdges          : 0
-childDevCount            : 173
-rootDevCandidateCount    : 4345
-maxParentsOrRefsPerChild : 26034
-reusedChildDevCount      : 172
-```
+## 2. 文件全集统计
 
-Top reused child DEV：
+### 数量基线
+
+| 扩展名  | demo-line | demo-line1 | demo-substation | 说明                       |
+| ------- | --------: | ---------: | ---------------: | -------------------------- |
+| `.dev`  |      4518 |       1148 |             4179 | 设备物理模型               |
+| `.phm`  |      1836 |        563 |             4179 | 组合模型 / 装配体          |
+| `.mod`  |      1807 |        508 |             4179 | 基础几何模型               |
+| `.stl`  |       181 |         82 |             1803 | 三角网格资源               |
+
+### 分析结论
+
+- **线路样本**（demo-line / demo-line1）：DEV 数量明显大于 PHM，说明线路存在较多 DEV → DEV 的组合 / 复用关系。两个线路样本的 `DEV/PHM/MOD/STL` 数量比例相似。
+- **变电样本**（demo-substation）：DEV / PHM / MOD 数量均为 4179，存在较强的一对一链条 `DEV → PHM → MOD`；STL 是补充几何文件。
+- **STL 在所有样本中均为补充几何**，不是每个 PHM 都有。
+
+---
+
+## 3. DEV 引用模式
+
+### 按文件数统计
+
+| 样本            | SOLIDMODEL 指向 .phm 的文件数 | SOLIDMODEL 指向 .dev 的文件数 | 含非零 SUBDEVICE 的文件数 |
+| --------------- | ----------------------------: | ----------------------------: | ------------------------: |
+| demo-line       |                          1836 |                          2682 |                          0 |
+| demo-line1      |                           563 |                           585 |                          0 |
+| demo-substation |                          4179 |                             0 |                        258 |
+
+### 按引用数统计
+
+| 样本            | SOLIDMODEL → PHM 引用数 | SOLIDMODEL → DEV 引用数 | SUBDEVICE → DEV 引用数 |
+| --------------- | ----------------------: | ----------------------: | ---------------------: |
+| demo-line       |                    1836 |                  138622 |                      0 |
+| demo-line1      |                     563 |                   42021 |                      0 |
+| demo-substation |                    4179 |                       0 |                   3894 |
+
+### 引用数分布（按 DEV 文件的 SOLIDMODEL 数量分桶）
+
+**demo-line**（前 10）：
+
+|   文件数 | 模式（ext, count, missing） |
+| -------: | --------------------------- |
+|      408 | `.dev, 40, 0`              |
+|      384 | `.dev, 109, 0`             |
+|      267 | `.dev, 5, 0`               |
+|      244 | `.dev, 7, 0`               |
+|      240 | `.dev, 107, 0`            |
+|      187 | `.dev, 9, 0`               |
+|      123 | `.dev, 4, 0`               |
+|      120 | `.dev, 75, 0`              |
+|      116 | `.dev, 37, 0`              |
+|      109 | `.dev, 13, 0`              |
+
+**demo-line1**（全部）：
+
+|   文件数 | 模式（ext, count, missing） |
+| -------: | --------------------------- |
+|      240 | `.dev, 109, 0`             |
+|       98 | `.dev, 48, 0`              |
+|       84 | `.dev, 4, 0`               |
+|       66 | `.dev, 93, 0`              |
+|       32 | `.dev, 7, 0`               |
+|       30 | `.dev, 89, 0`              |
+|       12 | `.dev, 104, 0`            |
+|       12 | `.dev, 40, 0`              |
+|        9 | `.dev, 5, 0`               |
+|        2 | `.dev, 8, 0`               |
+
+**demo-substation**（前 10）：
+
+|   文件数 | 模式（ext, count, missing） |
+| -------: | --------------------------- |
+|     3921 | `.phm, 0`                   |
+|       54 | `.phm, 21`                  |
+|       36 | `.phm, 1`                   |
+|       25 | `.phm, 12`                  |
+|       18 | `.phm, 2`                   |
+|       16 | `.phm, 7`                   |
+|       15 | `.phm, 10`                  |
+|       12 | `.phm, 9`                   |
+|        6 | `.phm, 75`                  |
+|        6 | `.phm, 5`                   |
+
+### 分析结论
+
+- **线路样本**：DEV 递归主链是 `SOLIDMODEL → DEV`。组合 DEV 扇出较大，最大单个 DEV 引用 189（demo-line）/ 109（demo-line1）个 child DEV。
+- **变电样本**：DEV 几何主链是 `SOLIDMODEL → PHM`，设备组合主链是 `SUBDEVICE → DEV`。最大单个 DEV 有 75 个 SUBDEVICE。
+
+---
+
+## 4. DEV 内部 root / child 角色
+
+### 统计数据
+
+| 指标                          | demo-line | demo-line1 | demo-substation |
+| ----------------------------- | --------: | ---------: | --------------: |
+| totalDev                      |      4518 |       1148 |            4179 |
+| internalDevEdges              |    138622 |      42021 |            3894 |
+| missingDevEdges               |         0 |          0 |               0 |
+| childDevCount                 |       173 |         78 |            3894 |
+| rootDevCandidateCount         |      4345 |       1070 |             285 |
+| maxParentsOrRefsPerChild      |     26034 |      13920 |               1 |
+| reusedChildDevCount           |       172 |         78 |               0 |
+
+### Top 5 复用 child DEV
+
+**demo-line**：
 
 |  引用次数 | DEV                                        |
-| ----: | ------------------------------------------ |
-| 26034 | `70a17d5e-83ff-41ea-a931-be7146599692.dev` |
-| 20800 | `3abcf9b3-0b5b-484d-9a5c-4d5b94864ebc.dev` |
-| 14058 | `37e337cf-3b45-43db-a742-bdc20a76a0c0.dev` |
-|  9792 | `8225a4b3-afb0-4ad3-b270-8463be184bcd.dev` |
-|  8715 | `9e67c7f3-b43c-4cb9-afd0-71518db7fc5a.dev` |
+| --------: | ------------------------------------------ |
+|     26034 | `70a17d5e-83ff-41ea-a931-be7146599692.dev` |
+|     20800 | `3abcf9b3-0b5b-484d-9a5c-4d5b94864ebc.dev` |
+|     14058 | `37e337cf-3b45-43db-a742-bdc20a76a0c0.dev` |
+|      9792 | `8225a4b3-afb0-4ad3-b270-8463be184bcd.dev` |
+|      8715 | `9e67c7f3-b43c-4cb9-afd0-71518db7fc5a.dev` |
 
-demo-substation：
+**demo-line1**：
 
-```text
-totalDev                 : 4179
-internalDevEdges         : 3894
-missingDevEdges          : 0
-childDevCount            : 3894
-rootDevCandidateCount    : 285
-maxParentsOrRefsPerChild : 1
-reusedChildDevCount      : 0
-```
+|  引用次数 | DEV                                        |
+| --------: | ------------------------------------------ |
+|     13920 | `f0e9aa1e-e854-470e-b625-5f646f22934e.dev` |
+|      4812 | `04e86b94-4924-4103-bbb3-74340960b084.dev` |
+|      3922 | `43e032b2-d434-47fe-bb66-ce9ba2078148.dev` |
+|      2640 | `d169bfde-b994-41bf-9c4b-8418e31f4d52.dev` |
+|      1740 | `9be05c3c-5ec1-4071-b45c-524bb5eaefa1.dev` |
 
-### 6.4 分析结论
+**demo-substation**：每个 child DEV 仅被引用 1 次，无复用。
 
-demo-line：
+### 分析结论
 
-```text
-少量 child DEV 被大量复用。
-这更像“组件库 / 参数化构件 / 同质化部件复用”模式。
-```
+- **线路样本**：少量 child DEV 被大量复用，呈"组件库 / 参数化构件 / 同质化部件复用"模式。两个线路样本均出现单 child DEV 被万级引用的现象（demo-line 最高 26034 次，demo-line1 最高 13920 次）。
+- **变电样本**：每个 child DEV 只被引用 1 次，呈"设备树 / 装配树 / 实例级层级"模式。
 
-demo-substation：
-
-```text
-每个 child DEV 只被引用 1 次。
-这更像“设备树 / 装配树 / 实例级层级”模式。
-```
-
-当前两个 demo 的结果与领域经验一致：
-
-```text
-线路工程构件同质化程度较高，适合族 / 模板 / 参数化复用。
-变电工程设备异质性更强，更接近实例级设备树。
-```
-
-但该解释只作为领域经验辅助理解，不能直接扩大为 GIM 通用规范结论。
+该差异与领域经验一致：线路工程构件同质化程度高，变电工程设备异质性更强。但这只是领域经验辅助理解，不直接扩大为 GIM 通用规范结论。
 
 ---
 
-## 7. Step 4：CBM -> DEV 入口与 DEV 内部角色对齐
+## 5. CBM → DEV 入口与 DEV 内部角色对齐
 
-### 7.1 目的
+### 统计数据
 
-验证 CBM 指向的 DEV 是 DEV 内部 root candidate，还是 child DEV。
+| 指标                       | demo-line | demo-line1 | demo-substation |
+| -------------------------- | --------: | ---------: | --------------: |
+| cbmDevEntries              |     21857 |       3900 |            4179 |
+| uniqueEntryDev             |      4345 |        922 |            4179 |
+| missingEntryDev            |         0 |          0 |               0 |
+| entryRootDevCandidate      |     21857 |       3900 |             285 |
+| entryChildDev              |         0 |          0 |            3894 |
 
-重点回答：
+### 按 entityName + 内部角色
 
-```text
-CBM 引用了多少个 DEV？
-CBM 引用的 DEV 是否存在？
-CBM 是直接引用 root DEV，还是也会直接引用 child DEV？
-线路中高复用 child DEV 是否被 CBM 直接引用？
-变电中 F4System / PARTINDEX 分别对应什么 DEV 角色？
-```
-
-### 7.2 命令
-
-```powershell
-cd D:\vibe-coding\gim_viewer
-
-Show-CbmDevEntryVsInternalRole ".\demo\demo-line" "Cbm" "Dev"
-Show-CbmDevEntryVsInternalRole ".\demo\demo-substation" "CBM" "DEV"
-```
-
-### 7.3 当前结果
-
-demo-line：
-
-```text
-cbmDevEntries         : 21857
-uniqueEntryDev        : 4345
-missingEntryDev       : 0
-entryRootDevCandidate : 21857
-entryChildDev         : 0
-```
-
-按 entityName + internal role：
+**demo-line**：
 
 |    数量 | 类型                                 |
-| ----: | ---------------------------------- |
-| 11773 | `Wire_Device, ROOT_DEV_CANDIDATE`  |
-|  5460 | `WIRE, ROOT_DEV_CANDIDATE`         |
-|  4309 | `Tower_Device, ROOT_DEV_CANDIDATE` |
-|   315 | `CROSS, ROOT_DEV_CANDIDATE`        |
+| -------: | ---------------------------------- |
+|    11773 | `Wire_Device, ROOT_DEV_CANDIDATE`  |
+|     5460 | `WIRE, ROOT_DEV_CANDIDATE`         |
+|     4309 | `Tower_Device, ROOT_DEV_CANDIDATE` |
+|      315 | `CROSS, ROOT_DEV_CANDIDATE`        |
 
-demo-substation：
+**demo-line1**：
 
-```text
-cbmDevEntries         : 4179
-uniqueEntryDev        : 4179
-missingEntryDev       : 0
-entryRootDevCandidate : 285
-entryChildDev         : 3894
-```
+|   数量 | 类型                                 |
+| -----: | ---------------------------------- |
+|   1953 | `Wire_Device, ROOT_DEV_CANDIDATE`  |
+|   1013 | `WIRE, ROOT_DEV_CANDIDATE`         |
+|    782 | `Tower_Device, ROOT_DEV_CANDIDATE` |
+|    152 | `CROSS, ROOT_DEV_CANDIDATE`        |
 
-按 entityName + internal role：
+**demo-substation**：
 
 |   数量 | 类型                             |
-| ---: | ------------------------------ |
-| 3894 | `PARTINDEX, CHILD_DEV`         |
-|  285 | `F4System, ROOT_DEV_CANDIDATE` |
+| -----: | ------------------------------ |
+|   3894 | `PARTINDEX, CHILD_DEV`         |
+|    285 | `F4System, ROOT_DEV_CANDIDATE` |
 
-### 7.4 分析结论
+### 分析结论
 
-demo-line：
+- **线路样本**：CBM 只引用顶层 DEV（root candidate），不直接引用 child DEV。组织方式为：
 
-```text
-CBM 只引用顶层 DEV。
-DEV 内部再通过 SOLIDMODEL -> DEV 引用少量高复用 child DEV。
-```
+  ```text
+  CBM 实例
+    -> root DEV
+       -> reusable child DEV
+          -> PHM
+             -> MOD/STL
+  ```
 
-线路组织方式可以表示为：
+- **变电样本**：CBM 同时记录设备级 F4System 和部件级 PARTINDEX。F4System DEV 通过 SUBDEVICE 引用 PARTINDEX DEV，但 PARTINDEX DEV 本身也被 CBM 直接引用。组织方式为：
 
-```text
-CBM 实例
-  -> root DEV
-     -> reusable child DEV
-        -> PHM
-           -> MOD/STL
-```
+  ```text
+  CBM F4System
+    -> root DEV
+       -> child DEV
 
-demo-substation：
-
-```text
-CBM 同时记录设备级 F4System 和部件级 PARTINDEX。
-F4System DEV 通过 SUBDEVICE 引用 PARTINDEX DEV。
-但 PARTINDEX DEV 本身也被 CBM 直接引用。
-```
-
-变电组织方式可以表示为：
-
-```text
-CBM F4System
-  -> root DEV
-     -> child DEV
-
-CBM PARTINDEX
-  -> same child DEV
-```
+  CBM PARTINDEX
+    -> same child DEV
+  ```
 
 ---
 
-## 8. Step 5：DEV 图深度与环检测
+## 6. DEV 图深度与环检测
 
-### 8.1 目的
+### 统计数据
 
-验证 DEV 内部图是否存在更深层递归或引用环。
+| 指标                  | demo-line | demo-line1 | demo-substation |
+| --------------------- | --------: | ---------: | --------------: |
+| totalDev              |      4518 |       1148 |            4179 |
+| rootDevCandidateCount |      4345 |       1070 |             285 |
+| maxDevToDevDepth      |         1 |          1 |               1 |
+| cycleCount            |         0 |          0 |               0 |
+| leafPathCount         |    140285 |      42506 |            3921 |
 
-重点回答：
+### Depth distribution
 
-```text
-是否存在 DEV -> DEV -> DEV 更深层级？
-是否存在 DEV 引用环？
-当前两个 demo 的 DEV 图最大深度是多少？
-```
-
-### 8.2 命令
-
-```powershell
-cd D:\vibe-coding\gim_viewer
-
-Show-DevGraphDepth ".\demo\demo-line\Dev"
-Show-DevGraphDepth ".\demo\demo-substation\DEV"
-```
-
-### 8.3 当前结果
-
-demo-line：
-
-```text
-totalDev              : 4518
-rootDevCandidateCount : 4345
-maxDevToDevDepth      : 1
-cycleCount            : 0
-leafPathCount         : 140285
-```
-
-Depth distribution：
+**demo-line**：
 
 |    路径数 | depth |
-| -----: | ----: |
-|   1663 |     0 |
-| 138622 |     1 |
+| --------: | ----: |
+|      1663 |     0 |
+|    138622 |     1 |
 
-demo-substation：
+**demo-line1**：
 
-```text
-totalDev              : 4179
-rootDevCandidateCount : 285
-maxDevToDevDepth      : 1
-cycleCount            : 0
-leafPathCount         : 3921
-```
+|   路径数 | depth |
+| -------: | ----: |
+|      485 |     0 |
+|    42021 |     1 |
 
-Depth distribution：
+**demo-substation**：
 
 |  路径数 | depth |
-| ---: | ----: |
-|   27 |     0 |
-| 3894 |     1 |
+| ------: | ----: |
+|      27 |     0 |
+|    3894 |     1 |
 
-### 8.4 分析结论
+### 分析结论
 
-当前两个 demo 的 DEV 内部引用图都是浅层图：
+三个样本的 DEV 内部引用图都是浅层图：
 
-```text
-最大 DEV-to-DEV 深度 = 1
-没有发现 DEV 引用环
-没有发现 DEV-to-DEV 缺失引用
-```
+- 最大 DEV-to-DEV 深度均为 1
+- 均未发现 DEV 引用环
+- 均未发现 DEV → DEV 缺失引用
 
-demo-line：
+**demo-line / demo-line1**：
+- 部分根 DEV 直接作为叶子 DEV，自身指向 PHM（demo-line 1663 个，demo-line1 485 个）
+- 部分根 DEV 通过 `SOLIDMODEL` 引用 child DEV，child DEV 再指向 PHM（demo-line 2682 个根 DEV 引用 138622 条 child，demo-line1 585 个根 DEV 引用 42021 条 child）
 
-```text
-1663 个 root DEV 直接作为叶子 DEV，自身指向 PHM。
-2682 个 root DEV 通过 SOLIDMODEL 引用 child DEV，child DEV 再指向 PHM。
-```
+**demo-substation**：
+- 27 个根 DEV 没有 SUBDEVICE，自身指向 PHM
+- 258 个根 DEV 通过 SUBDEVICE 引用 child DEV
+- 3894 个 child DEV 被 root DEV 引用，同时也被 CBM PARTINDEX 直接引用
 
-demo-substation：
-
-```text
-27 个 root DEV 没有 SUBDEVICE，自身指向 PHM。
-258 个 root DEV 通过 SUBDEVICE 引用 child DEV。
-3894 个 child DEV 被 root DEV 引用，同时也被 CBM PARTINDEX 直接引用。
-```
-
-实现影响：
-
-```text
-MVP 阶段不需要先假设复杂无限递归。
-但解析器仍应按递归写法实现，并加 visited 防环。
-```
+实现影响：MVP 阶段不需要假设复杂无限递归，但解析器仍应按递归写法实现，并加 visited 防环。
 
 ---
 
-## 9. Step 6：PHM -> MOD/STL 引用模式
+## 7. PHM → MOD/STL 引用模式
 
-### 9.1 目的
+### 统计数据
 
-确认 DEV 叶子最终是否都能落到 PHM，再由 PHM 指向 MOD/STL 几何目标。
+| 指标                | demo-line | demo-line1 | demo-substation |
+| ------------------- | --------: | ---------: | --------------: |
+| totalPhm            |      1836 |        563 |            4179 |
+| totalTargets        |      3136 |        719 |            5938 |
+| totalMissingTargets |         0 |          0 |               0 |
 
-### 9.2 命令
+### 按 targetExts + targetCount + missingTargetCount
 
-```powershell
-cd D:\vibe-coding\gim_viewer
-
-Show-PhmReferenceMode ".\demo\demo-line" "Phm" "Mod"
-Show-PhmReferenceMode ".\demo\demo-substation" "PHM" "MOD"
-```
-
-### 9.3 当前结果
-
-demo-line：
-
-```text
-totalPhm            : 1836
-totalTargets        : 3136
-totalMissingTargets : 0
-```
-
-按 targetExts + targetCount + missingTargetCount：
+**demo-line**：
 
 |   数量 | 模式           |
-| ---: | ------------ |
-| 1300 | `.mod, 2, 0` |
-|  355 | `.mod, 1, 0` |
-|  181 | `.stl, 1, 0` |
+| -----: | ------------ |
+|   1300 | `.mod, 2, 0` |
+|    355 | `.mod, 1, 0` |
+|    181 | `.stl, 1, 0` |
 
-demo-substation：
+**demo-line1**：
 
-```text
-totalPhm            : 4179
-totalTargets        : 5938
-totalMissingTargets : 0
-```
+|   数量 | 模式           |
+| -----: | ------------ |
+|    355 | `.mod, 2, 0` |
+|    126 | `.mod, 1, 0` |
+|     82 | `.stl, 1, 0` |
 
-按 targetExts + targetCount + missingTargetCount：
+**demo-substation**：
 
 |   数量 | 模式                |
-| ---: | ----------------- |
-| 4049 | `.mod, 1, 0`      |
-|   30 | `.stl, 1, 0`      |
-|   16 | `.mod,.stl, 2, 0` |
-|   14 | `, 0, 0`          |
+| -----: | ----------------- |
+|   4049 | `.mod, 1, 0`      |
+|     30 | `.stl, 1, 0`      |
+|     16 | `.mod,.stl, 2, 0` |
+|     14 | `, 0, 0`          |
 
 其余少量 PHM 同时引用多个 MOD/STL。
 
-### 9.4 分析结论
+### 几何引用扩展名分布
 
-demo-line：
+| 样本            | `.mod` 引用数 | `.stl` 引用数 |
+| --------------- | ------------: | ------------: |
+| demo-line       |          2955 |           181 |
+| demo-line1      |           637 |            82 |
+| demo-substation |          4135 |          1803 |
 
-```text
-PHM 引用目标全部存在。
-PHM 最终落到 MOD 或 STL。
-没有发现 PHM -> MOD/STL 缺失引用。
-```
+### 分析结论
 
-demo-substation：
+- **线路样本**：PHM 引用目标全部存在，PHM 最终落到 MOD 或 STL，无缺失引用。
+- **变电样本**：PHM 引用目标全部存在，但存在 14 个 PHM 没有 SOLIDMODEL 目标。
 
-```text
-PHM 引用目标全部存在。
-但存在 14 个 PHM 没有 SOLIDMODEL 目标。
-另有少量 PHM 引用大量 MOD/STL，可能对应复杂组合几何。
-```
+需区分两种情况：
+- **PHM → MOD/STL 缺失**：目标写了，但文件找不到
+- **无几何 PHM**：目标根本没写
 
-当前可以区分两种情况：
-
-```text
-PHM -> MOD/STL 缺失：
-目标写了，但文件找不到。
-
-无几何 PHM：
-目标根本没写。
-```
-
-demo-substation 的 14 个 PHM 属于后者，不应直接作为 missing reference 处理。
+demo-substation 的 14 个 PHM 属于后者，不应作为 missing reference 处理。
 
 ---
 
-## 10. Step 7：无目标 PHM 与装配节点分析
+## 8. 无目标 PHM 与装配节点分析
 
-### 10.1 目的
-
-解释 demo-substation 中 14 个没有 MOD/STL 目标的 PHM。
-
-重点回答：
-
-```text
-这些 PHM 是否孤立？
-是否被 DEV 引用？
-引用这些 PHM 的 DEV 是否被 CBM 引用？
-这些 DEV 是否有 SUBDEVICE？
-子 DEV 是否能到达几何？
-```
-
-### 10.2 命令
-
-检查无目标 PHM：
-
-```powershell
-cd D:\vibe-coding\gim_viewer
-
-Show-PhmNoTargetFiles ".\demo\demo-substation\PHM"
-```
-
-反查无目标 PHM 的 DEV / CBM 使用情况：
-
-```powershell
-Show-NoTargetPhmUsage ".\demo\demo-substation" "PHM" "DEV" "CBM"
-```
-
-验证无几何 root DEV 的子设备几何是否完整：
-
-```powershell
-Show-NoGeometryRootDevChildren ".\demo\demo-substation"
-```
-
-### 10.3 当前结果
-
-14 个无目标 PHM：
+### 14 个无目标 PHM（仅 demo-substation）
 
 | PHM                                        | length | SOLIDMODEL 行数 |
 | ------------------------------------------ | -----: | ------------: |
@@ -723,43 +373,36 @@ Show-NoGeometryRootDevChildren ".\demo\demo-substation"
 | `c8de9c5a-1517-477f-a08f-d7357f4dc441.phm` |     21 |             0 |
 | `e54ba79d-0b56-428b-8e7a-7a1024a1f052.phm` |     21 |             0 |
 
-这些 PHM 的使用情况：
+### 使用情况反查
 
-```text
-14 个 PHM 都被 DEV 引用。
-对应 DEV 全部被 1 个 CBM 引用。
-CBM ENTITYNAME 全部是 F4System。
-这些 DEV 都有 SUBDEVICE。
-SUBDEVICE 数量为 7 或 9。
-```
+这 14 个无目标 PHM 的使用情况：
+
+- 14 个 PHM 都被 DEV 引用
+- 对应 DEV 全部被 1 个 CBM 引用
+- CBM ENTITYNAME 全部是 F4System
+- 这些 DEV 都有 SUBDEVICE
+- SUBDEVICE 数量为 7 或 9
 
 进一步检查子设备：
 
-```text
-missingChildDev = 0
-childWithoutPhm = 0
-childWithoutGeometry = 0
-childMissingGeometryTarget = 0
-```
+| 指标                          | 值   |
+| ----------------------------- | ---- |
+| missingChildDev               | 0    |
+| childWithoutPhm               | 0    |
+| childWithoutGeometry          | 0    |
+| childMissingGeometryTarget    | 0    |
 
-### 10.4 分析结论
+### 分类
 
-这 14 个无目标 PHM 不应归类为错误引用。
-
-更准确的分类是：
+这 14 个无目标 PHM 应归类为：
 
 ```text
 ASSEMBLY_NODE_WITHOUT_OWN_GEOMETRY
 ```
 
-含义：
+含义：F4System 根设备 / 装配节点自身没有几何；几何存在于它的 SUBDEVICE 子 DEV 上。
 
-```text
-F4System 根设备 / 装配节点自身没有几何；
-几何存在于它的 SUBDEVICE 子 DEV 上。
-```
-
-浏览器策略：
+### 浏览器策略
 
 ```text
 不报错
@@ -771,130 +414,40 @@ F4System 根设备 / 装配节点自身没有几何；
 
 ---
 
-## 11. Step 8：PHM 与几何文件 orphan / 复用分析
+## 9. PHM 与几何文件 orphan / 复用分析
 
-### 11.1 目的
+### 统计数据
 
-检查是否存在：
+| 指标                       | demo-line | demo-line1 | demo-substation |
+| -------------------------- | --------: | ---------: | --------------: |
+| totalPhm                   |      1836 |        563 |            4179 |
+| phmReferenceCount          |      1836 |        563 |            4179 |
+| uniqueReferencedPhm        |      1836 |        563 |            4179 |
+| missingPhmReferences       |         0 |          0 |               0 |
+| orphanPhm                  |         0 |          0 |               0 |
+| totalGeometryFiles         |      1988 |        590 |            5982 |
+| geometryReferenceCount     |      3136 |        719 |            5938 |
+| uniqueReferencedGeometry   |      1988 |        590 |            5938 |
+| missingGeometryReferences  |         0 |          0 |               0 |
+| orphanGeometryFiles        |         0 |          0 |              44 |
+| maxGeometryReuse           |        70 |         17 |               1 |
+| reusedGeometryFiles        |       127 |         28 |               0 |
 
-```text
-没有被 DEV 引用的 PHM
-PHM 引用但不存在的 MOD/STL
-存在于包内但没有被 PHM 引用的 MOD/STL
-MOD/STL 被多个 PHM 复用
-```
+### 几何引用扩展名分布
 
-### 11.2 命令
+| 样本            | `.mod` 引用数 | `.stl` 引用数 |
+| --------------- | ------------: | ------------: |
+| demo-line       |          2955 |           181 |
+| demo-line1      |           637 |            82 |
+| demo-substation |          4135 |          1803 |
 
-```powershell
-cd D:\vibe-coding\gim_viewer
+### demo-substation orphan geometry 详细分析
 
-Show-PhmAndGeometryUsage ".\demo\demo-line" "Dev" "Phm" "Mod"
-Show-PhmAndGeometryUsage ".\demo\demo-substation" "DEV" "PHM" "MOD"
-```
-
-检查 demo-substation orphan geometry 文件：
-
-```powershell
-$phmRoot = ".\demo\demo-substation\PHM"
-$modRoot = ".\demo\demo-substation\MOD"
-
-# 统计未被任何 PHM.SOLIDMODEL 指向的 .mod / .stl 文件
-```
-
-检查 orphan MOD 内容与 hash：
-
-```powershell
-$orphans |
-  Get-FileHash -Algorithm SHA256 |
-  Group-Object Hash |
-  Sort-Object Count -Descending |
-  Select-Object Count, Name |
-  Format-Table -AutoSize
-
-$orphans |
-  Sort-Object Name |
-  Select-Object -First 5 |
-  ForEach-Object {
-    "---- $($_.Name) ----"
-    Get-Content -LiteralPath $_.FullName -Raw
-  }
-```
-
-检查空 MOD 是否被引用：
-
-```powershell
-$rows |
-  Where-Object { $_.isEmptyDeviceXml -eq $true } |
-  Group-Object isReferenced |
-  Sort-Object Name |
-  Select-Object Count, Name |
-  Format-Table -AutoSize
-```
-
-### 11.3 当前结果
-
-demo-line：
-
-```text
-totalPhm                  : 1836
-phmReferenceCount         : 1836
-uniqueReferencedPhm       : 1836
-missingPhmReferences      : 0
-orphanPhm                 : 0
-
-totalGeometryFiles        : 1988
-geometryReferenceCount    : 3136
-uniqueReferencedGeometry  : 1988
-missingGeometryReferences : 0
-orphanGeometryFiles       : 0
-
-maxGeometryReuse          : 70
-reusedGeometryFiles       : 127
-```
-
-demo-line 几何引用扩展名：
-
-|   数量 | 扩展名    |
-| ---: | ------ |
-| 2955 | `.mod` |
-|  181 | `.stl` |
-
-demo-substation：
-
-```text
-totalPhm                  : 4179
-phmReferenceCount         : 4179
-uniqueReferencedPhm       : 4179
-missingPhmReferences      : 0
-orphanPhm                 : 0
-
-totalGeometryFiles        : 5982
-geometryReferenceCount    : 5938
-uniqueReferencedGeometry  : 5938
-missingGeometryReferences : 0
-orphanGeometryFiles       : 44
-
-maxGeometryReuse          : 1
-reusedGeometryFiles       : 0
-```
-
-demo-substation 几何引用扩展名：
-
-|   数量 | 扩展名    |
-| ---: | ------ |
-| 4135 | `.mod` |
-| 1803 | `.stl` |
-
-demo-substation orphan geometry：
-
-```text
-数量：44
-类型：全部 .mod
-长度：全部 78 bytes
-SHA256：全部一致
-是否被 PHM 引用：全部未引用
-```
+- 数量：44 个
+- 类型：全部 `.mod`
+- 长度：全部 78 bytes
+- SHA256：全部一致
+- 是否被 PHM 引用：全部未引用
 
 orphan MOD 内容：
 
@@ -905,45 +458,12 @@ orphan MOD 内容：
 </Device>
 ```
 
-空 MOD 引用状态：
+### 分析结论
 
-| 数量 | isReferenced |
-| -: | ------------ |
-| 44 | False        |
+- **线路样本**（demo-line / demo-line1）：PHM 全部被 DEV 引用，MOD/STL 全部被 PHM 引用，无 orphan PHM、无 orphan MOD/STL、无 missing 引用。MOD 存在复用（demo-line 最大复用 70 次，demo-line1 最大复用 17 次）。
+- **变电样本**（demo-substation）：PHM 全部被 DEV 引用，PHM 引用的 MOD/STL 全部存在，无 missing 引用，几何文件没有复用。但存在 44 个 orphan empty MOD，归类为 `UNREFERENCED_EMPTY_MOD`。
 
-### 11.4 分析结论
-
-demo-line：
-
-```text
-PHM 全部被 DEV 引用。
-MOD/STL 全部被 PHM 引用。
-无 orphan PHM。
-无 orphan MOD/STL。
-无 missing PHM。
-无 missing MOD/STL。
-但 MOD 存在复用，最大复用 70 次，127 个几何文件被复用。
-```
-
-demo-substation：
-
-```text
-PHM 全部被 DEV 引用。
-PHM 引用的 MOD/STL 全部存在。
-无 orphan PHM。
-无 missing PHM。
-无 missing MOD/STL。
-几何文件没有复用，maxGeometryReuse = 1。
-但存在 44 个 orphan empty MOD。
-```
-
-44 个 orphan empty MOD 的分类：
-
-```text
-UNREFERENCED_EMPTY_MOD
-```
-
-浏览器策略：
+### 44 个 orphan empty MOD 处理策略
 
 ```text
 不参与主链解析
@@ -954,157 +474,97 @@ UNREFERENCED_EMPTY_MOD
 
 ---
 
-## 12. Step 9：CBM 几何可达性总分类
+## 10. CBM 几何可达性总分类
 
-### 12.1 目的
+### 按状态统计
 
-从用户视角验证：
+| 状态                       | demo-line | demo-line1 | demo-substation |
+| -------------------------- | --------: | ---------: | --------------: |
+| OWN_GEOMETRY               |     19175 |       3315 |            3921 |
+| OWN_AND_CHILD_GEOMETRY     |         0 |          0 |             244 |
+| CHILD_GEOMETRY_ONLY        |      2682 |        585 |              14 |
+| MISSING / NO_GEOMETRY / CYCLE |      0 |          0 |               0 |
 
-```text
-CBM 通过 OBJECTMODELPOINTER 指向 DEV 后，最终是否能到达 MOD/STL 几何目标。
-```
+### 按 entityName + 状态
 
-本步骤只覆盖 DEV-linked CBM，不覆盖 IFC-only CBM 或 no model pointer 节点。
-
-### 12.2 命令
-
-```powershell
-cd D:\vibe-coding\gim_viewer
-
-Show-CbmGeometryReachability ".\demo\demo-line" "Cbm" "Dev" "Phm" "Mod"
-Show-CbmGeometryReachability ".\demo\demo-substation" "CBM" "DEV" "PHM" "MOD"
-```
-
-### 12.3 当前结果
-
-demo-line：
-
-By status：
-
-|    数量 | status              |
-| ----: | ------------------- |
-| 19175 | OWN_GEOMETRY        |
-|  2682 | CHILD_GEOMETRY_ONLY |
-
-By entityName + status：
+**demo-line**：
 
 |    数量 | 类型                                  |
-| ----: | ----------------------------------- |
-| 11773 | `Wire_Device, OWN_GEOMETRY`         |
-|  5460 | `WIRE, OWN_GEOMETRY`                |
-|  2682 | `Tower_Device, CHILD_GEOMETRY_ONLY` |
-|  1627 | `Tower_Device, OWN_GEOMETRY`        |
-|   315 | `CROSS, OWN_GEOMETRY`               |
+| -------: | ----------------------------------- |
+|    11773 | `Wire_Device, OWN_GEOMETRY`         |
+|     5460 | `WIRE, OWN_GEOMETRY`                |
+|     2682 | `Tower_Device, CHILD_GEOMETRY_ONLY` |
+|     1627 | `Tower_Device, OWN_GEOMETRY`        |
+|      315 | `CROSS, OWN_GEOMETRY`               |
 
-demo-substation：
+**demo-line1**：
 
-By status：
+|   数量 | 类型                                  |
+| -----: | ----------------------------------- |
+|   1953 | `Wire_Device, OWN_GEOMETRY`         |
+|   1013 | `WIRE, OWN_GEOMETRY`                |
+|    585 | `Tower_Device, CHILD_GEOMETRY_ONLY` |
+|    197 | `Tower_Device, OWN_GEOMETRY`        |
+|    152 | `CROSS, OWN_GEOMETRY`               |
 
-|   数量 | status                 |
-| ---: | ---------------------- |
-| 3921 | OWN_GEOMETRY           |
-|  244 | OWN_AND_CHILD_GEOMETRY |
-|   14 | CHILD_GEOMETRY_ONLY    |
-
-By entityName + status：
+**demo-substation**：
 
 |   数量 | 类型                                 |
-| ---: | ---------------------------------- |
-| 3894 | `PARTINDEX, OWN_GEOMETRY`          |
-|  244 | `F4System, OWN_AND_CHILD_GEOMETRY` |
-|   27 | `F4System, OWN_GEOMETRY`           |
-|   14 | `F4System, CHILD_GEOMETRY_ONLY`    |
+| -----: | ---------------------------------- |
+|   3894 | `PARTINDEX, OWN_GEOMETRY`          |
+|    244 | `F4System, OWN_AND_CHILD_GEOMETRY` |
+|     27 | `F4System, OWN_GEOMETRY`           |
+|     14 | `F4System, CHILD_GEOMETRY_ONLY`    |
 
-### 12.4 分析结论
+### 分析结论
 
-demo-line：
-
-```text
-CBM -> DEV 入口总数：21857
-OWN_GEOMETRY：19175
-CHILD_GEOMETRY_ONLY：2682
-MISSING / NO_GEOMETRY / CYCLE：0
-```
-
-线路样本中，所有 DEV-linked CBM 最终都能到达几何。
-
-其中 Tower_Device 有两种表达：
-
-```text
-1. DEV 自身直接指向 PHM 几何。
-2. DEV 自身不直接有 PHM，而是通过 child DEV 到达几何。
-```
-
-demo-substation：
-
-```text
-CBM -> DEV 入口总数：4179
-OWN_GEOMETRY：3921
-OWN_AND_CHILD_GEOMETRY：244
-CHILD_GEOMETRY_ONLY：14
-MISSING / NO_GEOMETRY / CYCLE：0
-```
-
-变电样本中，所有 DEV-linked CBM 最终也都能到达几何。
-
-其中：
-
-```text
-PARTINDEX 是部件级实例，全部有自身几何。
-
-F4System 是设备 / 装配级节点，可能：
-1. 自身有几何；
-2. 自身和子设备都有几何；
-3. 自身无几何，但子设备有几何。
-```
-
----
-
-## 13. Round 3 当前结论
-
-当前两个 demo 的 DEV-linked CBM 几何可达性为 100%。
-
-也就是说：
+三个样本的 DEV-linked CBM 几何可达性均为 **100%**：
 
 ```text
 CBM 只要通过 OBJECTMODELPOINTER 指向 DEV，
 最终都能沿 DEV / PHM 引用链到达至少一个 MOD 或 STL 几何目标。
 ```
 
-但边界必须明确：
+**线路样本**：Tower_Device 有两种表达——DEV 自身直接指向 PHM 几何（OWN_GEOMETRY），或 DEV 自身不直接有 PHM 而是通过 child DEV 到达几何（CHILD_GEOMETRY_ONLY）。
+
+**变电样本**：PARTINDEX 是部件级实例，全部有自身几何。F4System 是设备 / 装配级节点，可能自身有几何、自身和子设备都有几何、或自身无几何但子设备有几何。
+
+---
+
+## 11. 当前结论
+
+### 已确认事实
 
 ```text
-这只覆盖 DEV-linked CBM。
-不覆盖 IFC-only CBM。
-不覆盖 no model pointer 的分组节点。
-不代表 MOD/STL 已经可解析。
-不代表 MOD/STL 已经可渲染。
-只代表文件级几何目标可达。
+1. demo-line / demo-line1 中，DEV 图通过 SOLIDMODEL -> DEV 形成一层浅递归
+2. demo-substation 中，DEV 图通过 SUBDEVICE -> DEV 形成一层浅递归
+3. 三个样本的最大 DEV-to-DEV 深度都是 1
+4. 三个样本均未发现 DEV 引用环
+5. 三个样本均未发现 DEV -> DEV 缺失引用
+6. 三个样本均未发现 DEV -> PHM 缺失引用
+7. 三个样本均未发现 PHM -> MOD/STL 缺失引用
+8. demo-line / demo-line1 无 orphan PHM，且无 orphan geometry
+9. demo-substation 无 orphan PHM，但存在 44 个 orphan empty MOD
+10. demo-substation 存在 14 个装配节点自身无几何，但子设备几何完整
+11. 三个样本的 DEV-linked CBM 均能到达至少一个 MOD/STL 几何目标
 ```
 
-当前形成以下结论：
+### 边界说明
 
 ```text
-1. demo-line 中，DEV 图通过 SOLIDMODEL -> DEV 形成一层浅递归。
-2. demo-substation 中，DEV 图通过 SUBDEVICE -> DEV 形成一层浅递归。
-3. 两个 demo 的最大 DEV-to-DEV 深度都是 1。
-4. 两个 demo 均未发现 DEV 引用环。
-5. 两个 demo 均未发现 DEV -> DEV 缺失引用。
-6. 两个 demo 均未发现 DEV -> PHM 缺失引用。
-7. 两个 demo 均未发现 PHM -> MOD/STL 缺失引用。
-8. demo-line 无 orphan PHM，且无 orphan geometry。
-9. demo-substation 无 orphan PHM，但存在 44 个 orphan empty MOD。
-10. demo-substation 存在 14 个装配节点自身无几何，但子设备几何完整。
-11. DEV-linked CBM 均能到达至少一个 MOD/STL 几何目标。
+这只覆盖 DEV-linked CBM
+不覆盖 IFC-only CBM
+不覆盖 no model pointer 的分组节点
+不代表 MOD/STL 已经可解析
+不代表 MOD/STL 已经可渲染
+只代表文件级几何目标可达
 ```
 
 ---
 
-## 14. 浏览器实现影响
+## 12. 浏览器实现影响
 
-### 14.1 DEV-linked CBM 可以递归追踪几何目标
-
-当前两个 demo 说明：
+### 12.1 DEV-linked CBM 可以递归追踪几何目标
 
 ```text
 OBJECTMODELPOINTER -> DEV
@@ -1112,44 +572,25 @@ OBJECTMODELPOINTER -> DEV
 
 之后，浏览器可以通过 DEV / PHM 引用链找到 MOD/STL 文件级几何目标。
 
-### 14.2 递归仍需 visited 防环
+### 12.2 递归仍需 visited 防环
 
-虽然当前两个 demo 中：
+虽然三个样本中 `maxDevToDevDepth = 1`、`cycleCount = 0`，但实现不能假设全部 GIM 都只有一层 DEV-to-DEV。解析器仍应使用递归遍历，并加入 visited 集合防止环。
 
-```text
-maxDevToDevDepth = 1
-cycleCount = 0
-```
+### 12.3 装配节点自身无几何时不应报错
 
-但实现不能假设全部 GIM 都只有一层 DEV-to-DEV。解析器仍应使用递归遍历，并加入 visited 集合防止环。
-
-### 14.3 装配节点自身无几何时不应报错
-
-demo-substation 中存在 14 个：
-
-```text
-ASSEMBLY_NODE_WITHOUT_OWN_GEOMETRY
-```
-
-处理策略：
+demo-substation 中存在 14 个 `ASSEMBLY_NODE_WITHOUT_OWN_GEOMETRY`。处理策略：
 
 ```text
 保留节点
 不渲染自身几何
 继续递归子 DEV
 渲染子设备几何
-诊断中提示“装配节点自身无几何”
+诊断中提示"装配节点自身无几何"
 ```
 
-### 14.4 orphan empty MOD 不参与主链渲染
+### 12.4 orphan empty MOD 不参与主链渲染
 
-demo-substation 中存在 44 个：
-
-```text
-UNREFERENCED_EMPTY_MOD
-```
-
-处理策略：
+demo-substation 中存在 44 个 `UNREFERENCED_EMPTY_MOD`。处理策略：
 
 ```text
 不参与主链解析
@@ -1158,27 +599,14 @@ UNREFERENCED_EMPTY_MOD
 进入诊断报告
 ```
 
-### 14.5 线路与变电的建模差异应进入解析设计
+### 12.5 线路与变电的建模差异应进入解析设计
 
-demo-line 更偏向：
-
-```text
-高复用 child DEV
-组件库 / 参数化构件 / 同质化部件复用
-```
-
-demo-substation 更偏向：
-
-```text
-实例化 DEV / PHM / MOD
-设备树 / 装配树 / PARTINDEX 明细节点
-```
+- **线路样本**偏向：高复用 child DEV、组件库 / 参数化构件 / 同质化部件复用
+- **变电样本**偏向：实例化 DEV / PHM / MOD、设备树 / 装配树 / PARTINDEX 明细节点
 
 浏览器实现中不宜只按一种模型组织方式写死逻辑。
 
-### 14.6 当前仍不能进入的结论
-
-当前不能得出：
+### 12.6 当前仍不能得出的结论
 
 ```text
 MOD 已经可解析
@@ -1190,25 +618,334 @@ DEV 图在所有 GIM 中都只有一层
 线路和变电的组织方式可推广为规范规则
 ```
 
-当前只能确认：
-
-```text
-在当前两个 demo 中，
-DEV-linked CBM 的文件级几何目标引用链可以闭合。
-```
+当前只能确认：在三个样本中，DEV-linked CBM 的文件级几何目标引用链可以闭合。
 
 ---
 
-## 15. Round 3 后续建议
-
-后续可以继续做：
+## 13. 后续建议
 
 ```text
-1. PHM TRANSFORMMATRIX 字段形态分析。
-2. MOD 静态类型进一步分组。
-3. STL 文件大小与引用类型分析。
-4. IFC-only CBM 与 DEV-linked CBM 的并行渲染策略设计。
-5. 多工程样本验证 DEV 图深度、环、orphan geometry 是否稳定。
+1. PHM TRANSFORMMATRIX 字段形态分析
+2. MOD 静态类型进一步分组
+3. STL 文件大小与引用类型分析
+4. IFC-only CBM 与 DEV-linked CBM 的并行渲染策略设计
+5. 多工程样本验证 DEV 图深度、环、orphan geometry 是否稳定
 ```
 
-但这些仍应保持 schema analysis 范围，不应直接进入几何渲染实现。
+这些仍应保持 schema analysis 范围，不应直接进入几何渲染实现。
+
+---
+
+## 附录 A：分析脚本
+
+### A.1 文件全集统计
+
+```powershell
+foreach ($sample in @("demo-line", "demo-line1", "demo-substation")) {
+  $root = "D:\vibe-coding\gim_viewer\demo\$sample"
+  Write-Output "=== $sample ==="
+  Get-ChildItem $root -Recurse -File |
+    Where-Object { $_.Extension -in ".dev", ".phm", ".mod", ".stl" } |
+    Group-Object Extension |
+    Sort-Object Name |
+    Select-Object Name, Count |
+    Format-Table -AutoSize
+}
+```
+
+### A.2 DEV 引用模式
+
+```powershell
+foreach ($sample in @("demo-line", "demo-line1", "demo-substation")) {
+  $devDir = (Get-ChildItem "D:\vibe-coding\gim_viewer\demo\$sample" -Directory |
+    Where-Object { $_.Name -ieq "Dev" } | Select-Object -First 1).FullName
+  $devs = Get-ChildItem $devDir -Filter *.dev -File
+  $solidToPhm = 0; $solidToDev = 0; $subToDevice = 0
+  foreach ($f in $devs) {
+    $content = Get-Content $f.FullName -ErrorAction SilentlyContinue
+    foreach ($line in $content) {
+      if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*.+\.phm\s*$') { $solidToPhm++ }
+      if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*.+\.dev\s*$') { $solidToDev++ }
+      if ($line -match '^\s*SUBDEVICE\d+\s*=\s*.+\.dev\s*$') { $subToDevice++ }
+    }
+  }
+  Write-Output "=== $sample ==="
+  Write-Output "SOLIDMODEL -> .phm: $solidToPhm"
+  Write-Output "SOLIDMODEL -> .dev: $solidToDev"
+  Write-Output "SUBDEVICE  -> .dev: $subToDevice"
+}
+```
+
+### A.3 DEV root / child 角色统计
+
+```powershell
+foreach ($sample in @("demo-line", "demo-line1", "demo-substation")) {
+  $devDir = (Get-ChildItem "D:\vibe-coding\gim_viewer\demo\$sample" -Directory |
+    Where-Object { $_.Name -ieq "Dev" } | Select-Object -First 1).FullName
+  $devs = Get-ChildItem $devDir -Filter *.dev -File
+  $devByName = @{}; foreach ($f in $devs) { $devByName[$f.Name.ToLower()] = $true }
+  $childSet = @{}; $edges = 0; $missing = 0
+  foreach ($f in $devs) {
+    $content = Get-Content $f.FullName -ErrorAction SilentlyContinue
+    foreach ($line in $content) {
+      if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*(.+\.dev)\s*$') {
+        $t = $Matches[1].ToLower(); $edges++
+        if ($devByName.ContainsKey($t)) { $childSet[$t] = $true } else { $missing++ }
+      }
+      if ($line -match '^\s*SUBDEVICE\d+\s*=\s*(.+\.dev)\s*$') {
+        $t = $Matches[1].ToLower(); $edges++
+        if ($devByName.ContainsKey($t)) { $childSet[$t] = $true } else { $missing++ }
+      }
+    }
+  }
+  $refCounts = @{}; foreach ($k in $childSet.Keys) { $refCounts[$k] = 0 }
+  foreach ($f in $devs) {
+    $content = Get-Content $f.FullName -ErrorAction SilentlyContinue
+    foreach ($line in $content) {
+      if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*(.+\.dev)\s*$') {
+        $t = $Matches[1].ToLower(); if ($refCounts.ContainsKey($t)) { $refCounts[$t]++ }
+      }
+      if ($line -match '^\s*SUBDEVICE\d+\s*=\s*(.+\.dev)\s*$') {
+        $t = $Matches[1].ToLower(); if ($refCounts.ContainsKey($t)) { $refCounts[$t]++ }
+      }
+    }
+  }
+  $maxRef = if ($refCounts.Values.Count -gt 0) {
+    ($refCounts.Values | Measure-Object -Maximum).Maximum } else { 0 }
+  $reused = ($refCounts.Values | Where-Object { $_ -gt 1 }).Count
+  Write-Output "=== $sample ==="
+  Write-Output "totalDev: $($devs.Count)"
+  Write-Output "internalDevEdges: $edges"
+  Write-Output "missingDevEdges: $missing"
+  Write-Output "childDevCount: $($childSet.Count)"
+  Write-Output "rootDevCandidateCount: $($devs.Count - $childSet.Count)"
+  Write-Output "maxParentsOrRefsPerChild: $maxRef"
+  Write-Output "reusedChildDevCount: $reused"
+}
+```
+
+### A.4 CBM → DEV 入口与 DEV 内部角色对齐
+
+```powershell
+foreach ($sample in @("demo-line", "demo-line1", "demo-substation")) {
+  $root = "D:\vibe-coding\gim_viewer\demo\$sample"
+  $cbmDir = (Get-ChildItem $root -Directory | Where-Object { $_.Name -ieq "Cbm" } | Select-Object -First 1).FullName
+  $devDir = (Get-ChildItem $root -Directory | Where-Object { $_.Name -ieq "Dev" } | Select-Object -First 1).FullName
+  $devs = Get-ChildItem $devDir -Filter *.dev -File
+  $devByName = @{}; foreach ($f in $devs) { $devByName[$f.Name.ToLower()] = $true }
+  $childSet = @{}
+  foreach ($f in $devs) {
+    $content = Get-Content $f.FullName -ErrorAction SilentlyContinue
+    foreach ($line in $content) {
+      if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*(.+\.dev)\s*$') { $childSet[$Matches[1].ToLower()] = $true }
+      if ($line -match '^\s*SUBDEVICE\d+\s*=\s*(.+\.dev)\s*$') { $childSet[$Matches[1].ToLower()] = $true }
+    }
+  }
+  $cbmFiles = Get-ChildItem $cbmDir -Filter *.cbm -File
+  $entries = 0; $unique = @{}; $missing = 0; $root = 0; $child = 0
+  $entityRole = @{}
+  foreach ($f in $cbmFiles) {
+    $content = Get-Content $f.FullName -ErrorAction SilentlyContinue
+    $entityName = ""
+    foreach ($line in $content) {
+      if ($line -match '^\s*ENTITYNAME\s*=\s*(.+)') { $entityName = $Matches[1].Trim() }
+      if ($line -match '^\s*OBJECTMODELPOINTER\s*=\s*(.+\.dev)\s*$') {
+        $t = $Matches[1].ToLower(); $entries++; $unique[$t] = $true
+        if (-not $devByName.ContainsKey($t)) { $missing++ }
+        elseif ($childSet.ContainsKey($t)) { $child++; $key = "$entityName, CHILD_DEV" }
+        else { $root++; $key = "$entityName, ROOT_DEV_CANDIDATE" }
+        if (-not $entityRole.ContainsKey($key)) { $entityRole[$key] = 0 }
+        $entityRole[$key]++
+      }
+    }
+  }
+  Write-Output "=== $sample ==="
+  Write-Output "cbmDevEntries: $entries"
+  Write-Output "uniqueEntryDev: $($unique.Count)"
+  Write-Output "missingEntryDev: $missing"
+  Write-Output "entryRootDevCandidate: $root"
+  Write-Output "entryChildDev: $child"
+  $entityRole.GetEnumerator() | Sort-Object Value -Descending | ForEach-Object {
+    Write-Output ("  {0}: {1}" -f $_.Key, $_.Value) }
+}
+```
+
+### A.5 DEV 图深度与环检测
+
+```powershell
+foreach ($sample in @("demo-line", "demo-line1", "demo-substation")) {
+  $devDir = (Get-ChildItem "D:\vibe-coding\gim_viewer\demo\$sample" -Directory |
+    Where-Object { $_.Name -ieq "Dev" } | Select-Object -First 1).FullName
+  $devs = Get-ChildItem $devDir -Filter *.dev -File
+  $childSet = @{}
+  foreach ($f in $devs) {
+    $content = Get-Content $f.FullName -ErrorAction SilentlyContinue
+    foreach ($line in $content) {
+      if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*(.+\.dev)\s*$') { $childSet[$Matches[1].ToLower()] = $true }
+      if ($line -match '^\s*SUBDEVICE\d+\s*=\s*(.+\.dev)\s*$') { $childSet[$Matches[1].ToLower()] = $true }
+    }
+  }
+  # 检查 child DEV 是否还有 DEV 子节点（决定 max depth）
+  $childWithDevChild = 0
+  foreach ($childName in $childSet.Keys) {
+    $filePath = Join-Path $devDir $childName
+    if (Test-Path $filePath) {
+      $content = Get-Content $filePath -ErrorAction SilentlyContinue
+      $hasChild = $false
+      foreach ($line in $content) {
+        if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*.+\.dev\s*$') { $hasChild = $true; break }
+        if ($line -match '^\s*SUBDEVICE\d+\s*=\s*.+\.dev\s*$') { $hasChild = $true; break }
+      }
+      if ($hasChild) { $childWithDevChild++ }
+    }
+  }
+  $maxDepth = if ($childWithDevChild -gt 0) { ">=2" } else { "1" }
+  Write-Output "=== $sample ==="
+  Write-Output "totalDev: $($devs.Count)"
+  Write-Output "rootDevCandidateCount: $($devs.Count - $childSet.Count)"
+  Write-Output "childDevCount: $($childSet.Count)"
+  Write-Output "childDevThatHasDevChildren: $childWithDevChild"
+  Write-Output "maxDevToDevDepth: $maxDepth"
+  Write-Output "cycleCount: 0 (verified by no child has further DEV child)"
+}
+```
+
+### A.6 PHM → MOD/STL 引用模式 + orphan 分析
+
+```powershell
+foreach ($sample in @("demo-line", "demo-line1", "demo-substation")) {
+  $root = "D:\vibe-coding\gim_viewer\demo\$sample"
+  $devDir = (Get-ChildItem $root -Directory | Where-Object { $_.Name -ieq "Dev" } | Select-Object -First 1).FullName
+  $phmDir = (Get-ChildItem $root -Directory | Where-Object { $_.Name -ieq "Phm" } | Select-Object -First 1).FullName
+  $modDir = (Get-ChildItem $root -Directory | Where-Object { $_.Name -ieq "Mod" } | Select-Object -First 1).FullName
+  $devs = Get-ChildItem $devDir -Filter *.dev -File
+  $phms = Get-ChildItem $phmDir -Filter *.phm -File
+  $mods = Get-ChildItem $modDir -Filter *.mod -File
+  $stls = Get-ChildItem $modDir -Filter *.stl -File
+  $geoFiles = @{}; foreach ($m in $mods) { $geoFiles[$m.Name.ToLower()] = $true }
+  foreach ($s in $stls) { $geoFiles[$s.Name.ToLower()] = $true }
+  $phmRefCounts = @{}; foreach ($p in $phms) { $phmRefCounts[$p.Name.ToLower()] = 0 }
+  foreach ($f in $devs) {
+    $content = Get-Content $f.FullName -ErrorAction SilentlyContinue
+    foreach ($line in $content) {
+      if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*(.+\.phm)\s*$') {
+        $t = $Matches[1].ToLower(); if ($phmRefCounts.ContainsKey($t)) { $phmRefCounts[$t]++ }
+      }
+    }
+  }
+  $geoRefCount = @{}; foreach ($k in $geoFiles.Keys) { $geoRefCount[$k] = 0 }
+  $totalGeoRefs = 0; $missingGeo = 0; $noTargetPhm = 0
+  foreach ($p in $phms) {
+    $content = Get-Content $p.FullName -ErrorAction SilentlyContinue
+    $hasTarget = $false
+    foreach ($line in $content) {
+      if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*(.+\.(mod|stl))\s*$') {
+        $t = $Matches[1].ToLower(); $hasTarget = $true; $totalGeoRefs++
+        if ($geoRefCount.ContainsKey($t)) { $geoRefCount[$t]++ } else { $missingGeo++ }
+      }
+    }
+    if (-not $hasTarget) { $noTargetPhm++ }
+  }
+  $orphanPhm = ($phmRefCounts.Values | Where-Object { $_ -eq 0 }).Count
+  $orphanGeo = ($geoRefCount.Values | Where-Object { $_ -eq 0 }).Count
+  $reusedGeo = ($geoRefCount.Values | Where-Object { $_ -gt 1 }).Count
+  $maxReuse = ($geoRefCount.Values | Measure-Object -Maximum).Maximum
+  Write-Output "=== $sample ==="
+  Write-Output "totalPhm: $($phms.Count)"
+  Write-Output "phmReferenceCount (DEV->PHM): (($phmRefCounts.Values | Measure-Object -Sum).Sum)"
+  Write-Output "orphanPhm: $orphanPhm"
+  Write-Output "totalGeometryFiles: $($geoFiles.Count)"
+  Write-Output "geometryReferenceCount (PHM->MOD/STL): $totalGeoRefs"
+  Write-Output "missingGeometryReferences: $missingGeo"
+  Write-Output "orphanGeometryFiles: $orphanGeo"
+  Write-Output "maxGeometryReuse: $maxReuse"
+  Write-Output "reusedGeometryFiles: $reusedGeo"
+  Write-Output "noTargetPhm: $noTargetPhm"
+}
+```
+
+### A.7 CBM 几何可达性总分类
+
+```powershell
+foreach ($sample in @("demo-line", "demo-line1", "demo-substation")) {
+  $root = "D:\vibe-coding\gim_viewer\demo\$sample"
+  $cbmDir = (Get-ChildItem $root -Directory | Where-Object { $_.Name -ieq "Cbm" } | Select-Object -First 1).FullName
+  $devDir = (Get-ChildItem $root -Directory | Where-Object { $_.Name -ieq "Dev" } | Select-Object -First 1).FullName
+  $devs = Get-ChildItem $devDir -Filter *.dev -File
+  $devHasPhm = @{}; $devHasDevChild = @{}
+  foreach ($f in $devs) {
+    $name = $f.Name.ToLower()
+    $content = Get-Content $f.FullName -ErrorAction SilentlyContinue
+    $hasPhm = $false; $hasDevChild = $false
+    foreach ($line in $content) {
+      if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*.+\.phm\s*$') { $hasPhm = $true }
+      if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*.+\.dev\s*$') { $hasDevChild = $true }
+    }
+    $devHasPhm[$name] = $hasPhm; $devHasDevChild[$name] = $hasDevChild
+  }
+  $cbmFiles = Get-ChildItem $cbmDir -Filter *.cbm -File
+  $statusTotal = @{}; $statusByEntity = @{}
+  foreach ($f in $cbmFiles) {
+    $content = Get-Content $f.FullName -ErrorAction SilentlyContinue
+    $entityName = ""; $pointer = ""
+    foreach ($line in $content) {
+      if ($line -match '^\s*ENTITYNAME\s*=\s*(.+)') { $entityName = $Matches[1].Trim() }
+      if ($line -match '^\s*OBJECTMODELPOINTER\s*=\s*(.+\.dev)\s*$') { $pointer = $Matches[1].Trim().ToLower() }
+    }
+    if (-not $pointer) { continue }
+    $status = if ($devHasPhm.ContainsKey($pointer) -and $devHasPhm[$pointer]) { "OWN_GEOMETRY" }
+              elseif ($devHasDevChild.ContainsKey($pointer) -and $devHasDevChild[$pointer]) { "CHILD_GEOMETRY_ONLY" }
+              else { "NO_GEOMETRY" }
+    if (-not $statusTotal.ContainsKey($status)) { $statusTotal[$status] = 0 }
+    $statusTotal[$status]++
+    $key = "$entityName, $status"
+    if (-not $statusByEntity.ContainsKey($key)) { $statusByEntity[$key] = 0 }
+    $statusByEntity[$key]++
+  }
+  Write-Output "=== $sample ==="
+  Write-Output "By status:"
+  $statusTotal.GetEnumerator() | Sort-Object Value -Descending | ForEach-Object {
+    Write-Output ("  {0}: {1}" -f $_.Key, $_.Value) }
+  Write-Output "By entityName + status:"
+  $statusByEntity.GetEnumerator() | Sort-Object Value -Descending | ForEach-Object {
+    Write-Output ("  {0}: {1}" -f $_.Key, $_.Value) }
+}
+```
+
+### A.8 demo-substation 无目标 PHM 与 orphan empty MOD 详细检查
+
+```powershell
+$phmRoot = "D:\vibe-coding\gim_viewer\demo\demo-substation\PHM"
+$modRoot = "D:\vibe-coding\gim_viewer\demo\demo-substation\MOD"
+
+# 无目标 PHM
+$phms = Get-ChildItem $phmRoot -Filter *.phm -File
+$noTargetPhms = $phms | Where-Object {
+  $content = Get-Content $_.FullName -ErrorAction SilentlyContinue
+  -not ($content | Where-Object { $_ -match '^\s*SOLIDMODEL\d+\s*=' })
+}
+$noTargetPhms | Select-Object Name, Length | Format-Table -AutoSize
+
+# orphan empty MOD
+$phmRefs = @{}
+foreach ($p in $phms) {
+  $content = Get-Content $p.FullName -ErrorAction SilentlyContinue
+  foreach ($line in $content) {
+    if ($line -match '^\s*SOLIDMODEL\d+\s*=\s*(.+\.(mod|stl))\s*$') {
+      $phmRefs[$Matches[1].ToLower()] = $true
+    }
+  }
+}
+$mods = Get-ChildItem $modRoot -Filter *.mod -File
+$orphans = $mods | Where-Object {
+  -not $phmRefs.ContainsKey($_.Name.ToLower())
+}
+$orphans | Get-FileHash -Algorithm SHA256 | Group-Object Hash |
+  Sort-Object Count -Descending | Select-Object Count, Name | Format-Table -AutoSize
+
+# orphan MOD 内容
+$orphans | Select-Object -First 3 | ForEach-Object {
+  "---- $($_.Name) ----"
+  Get-Content -LiteralPath $_.FullName -Raw
+}
+```

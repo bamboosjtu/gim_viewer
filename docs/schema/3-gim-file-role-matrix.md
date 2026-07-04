@@ -14,7 +14,7 @@
 | .stl     |       181 |      1803 | Mod/MOD          | binary-like              | 三角网格资源候选           | 仅统计，不解析         |
 | .ifc     |         0 |        12 | DEV              | text-like                | 变电 3D / 土建模型交互格式 | 继续走既有 IFC viewer  |
 | .sch     |         0 |         1 | CBM              | text-like                | 逻辑模型入口               | 后续分析               |
-| .std     |         0 |         1 | CBM              | text-like                | 主接线逻辑模型定义         | 后续分析               |
+| .std     |         0 |        1 | CBM              | text-like                | 主接线逻辑模型定义         | 后续分析               |
 | .sld     |         0 |         1 | CBM              | text-like                | 主接线图 / 图形表达        | 后续分析               |
 
 ```plaintext
@@ -50,44 +50,6 @@ CBM
 
 ---
 
-## 3. sld 与 std 文件
-
-属于中国国网 GIM 体系下的自定义格式，不是国际通用标准格式。
-
-| 文件      | 实际格式      | 大小  | 内容                                                                                       |
-| --------- | ------------- | ----- | ------------------------------------------------------------------------------------------ |
-| `zjx.sld` | SVG 1.1 (XML) | 53 KB | 变电站主接线图（可视化图形），包含 "主接线元件层"、"主接线母线层" 等 CSS 图层              |
-| `zjx.std` | XML           | 5 KB  | 变电站逻辑拓扑描述，定义了电压等级(220kV)、间隔(Bay)、导电设备(断路器、隔离开关、互感器等) |
-
-两者通过 `gridId` 字段关联：STD 定义逻辑设备 → SLD 绘制对应的图形符号。
-
-### `.sld` 文件
-
-- **格式本身**：标准 SVG 1.1，这是国际主流的主接线图呈现格式（Powsybl、JointJS 等工具也是输出 SVG）
-- **`.sld` 扩展名**：这是 GIM 体系的自定义命名约定。国际上，单线图一般直接使用 `.svg` 扩展名，而非 `.sld`
-- **版本标识**：`version="DLT1"` 表明符合 DLT（电力行业推荐性标准）规范
-- **生成工具**：`soft="GRevitTools"`——来自北京博超的 Revit 二次开发工具（STD-R 变电设计平台）
-
-### `.std` 文件
-
-std (Substation Template Definition)
-
-- **专属格式**：GIM 体系内自定义的 XML 格式，描述变电站逻辑拓扑
-- **国际对比**：国际上对应的标准是 **IEC 61850-6 SCL**（Substation Configuration Language，含 SSD 系统规范描述），以及 **CIM/CGMES**（IEC 61970/61968）
-- **不属于** IEC 标准体系
-
-### 总结
-
-`.sld` 和 `.std` 在国内国网工程中是**事实上的交付标准**，在国网体系内属于主流格式。但在国际电力行业，这两个文件扩展名并不通用，国际上对标的是 IEC 61850 SCL 和 CIM/CGMES 标准。
-
-| 层面       | 中国（GIM 体系）            | 国际                          |
-| ---------- | --------------------------- | ----------------------------- |
-| 逻辑拓扑   | `.std` (STD XML)            | IEC 61850 SCL (`.ssd`/`.scd`) |
-| 接线图呈现 | `.sld` (SVG, DLT 扩展)      | SVG / CIM/CGMES + Powsybl     |
-| 三维模型   | `.cbm`/`.dev`/`.phm`/`.mod` | IFC / BIM                     |
-
----
-
 ## 3. 当前结论
 
 - `.cbm / .fam / .dev / .phm / .mod` 均可作为文本或准文本文件进入 analysis。
@@ -101,3 +63,23 @@ std (Substation Template Definition)
 - PHM 通过 `SOLIDMODELn` 引用 `.mod` 或 `.stl`，承担组合模型 / 装配体角色。
 - MOD 不能统一定义为 XML，也不能统一定义为 CODE/POINTNUM 点线格式。
 - MOD 在变电与线路中表现出不同表层格式。
+
+---
+
+## 4. 文件类型分析引用
+
+针对单类文件的字段结构、引用关系、实证样本统计及背景对比，已沉淀到对应的格式说明文档：
+
+| 文件类型 | 文档                                                        | 角色                                       |
+| -------- | ---------------------------------------------------------- | ------------------------------------------ |
+| `.cbm`   | [cbm.md](cbm.md)                                           | CBM 工程骨架与层级关系说明                 |
+| `.fam`   | [fam.md](fam.md)                                           | FAM 属性文件说明                           |
+| `.dev`   | [dev.md](dev.md)                                           | DEV 物理模型与设备组合说明                 |
+| `.phm`   | [phm.md](phm.md)                                           | PHM 组合模型与 MOD/STL 引用说明            |
+| `.mod`   | [mod.md](mod.md)                                           | MOD 基础几何/参数化模型说明                |
+| `.sch`   | [sch.md](sch.md)                                           | SCH 逻辑模型说明                           |
+| `.std`   | [std.md](std.md)                                           | STD 逻辑定义说明                           |
+| `.sld`   | [sld.md](sld.md)                                           | SLD 主接线图/图形表达说明                  |
+
+> `.stl` 为二进制三角网格资源，仅在 `5-gim-reference-integrity.md` 与 `7-dev-phm-geometry-reachability.md` 中作为统计对象出现，未单独提供格式说明文档。
+> `.ifc` 复用 IFC 标准格式，由 web-ifc 直接解析，未单独提供格式说明文档。

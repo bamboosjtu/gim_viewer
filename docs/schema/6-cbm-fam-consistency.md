@@ -269,9 +269,9 @@ FAM 行类型分布：
 
 | rowKind             |    数量 |
 | ------------------- | -----: |
+| KEY_VALUE           |     9 |
 | CN_KEY_VALUE        | 40858 |
 | CONTINUATION_OR_RAW |  6029 |
-| KEY_VALUE           |     9 |
 
 主要字段包括：
 
