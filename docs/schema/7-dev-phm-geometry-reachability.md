@@ -1,5 +1,7 @@
 # Round 3：DEV / PHM / MOD / STL 几何可达性分析
 
+目标：确认几何资源是否能从 CBM 实例一路走到 MOD/STL。
+
 ## 1. Round 3 定位
 
 Round 3 的目标不是实现几何解析或渲染，而是在 Round 1 / Round 2 已确认文件级引用链和 IFC/FAM 基础关系后，继续验证：

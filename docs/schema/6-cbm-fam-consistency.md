@@ -1,5 +1,7 @@
 # CBM → FAM 引用完整性与覆盖关系
 
+目标：确认 CBM 的 BASEFAMILY 是否能找到对应 FAM。
+
 ## 1. 校验范围
 
 本节记录当前 3 个 demo 中 `CBM → BASEFAMILY → FAM` 的引用完整性和覆盖关系。
