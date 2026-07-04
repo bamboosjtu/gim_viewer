@@ -62,21 +62,21 @@ CBM -> SUBDEVICE -> CBM -> ...
 - 线路 CBM 通过 `SUBDEVICEn=*.cbm` 建立 CBM 层级。
 - `GROUPTYPE` 和 `WIRETYPE` 是线路特有的业务分组字段。
 
-### 3.1 ENTITYNAME 分布
+### ENTITYNAME 分布
 
 | ENTITYNAME     | 判断               |  line | line1 |
 | -------------- | ------------------ | ----: | ----: |
 | `Wire_Device`  | 导线设备节点       | 11773 |  1953 |
-| `F4System`     | F4 层级 / 分组节点 |  5861 |  1072 |
 | `WIRE`         | 导线实体节点       |  5460 |  1013 |
 | `Tower_Device` | 杆塔设备节点       |  4309 |   782 |
 | `CROSS`        | 跨越实体节点       |   315 |   152 |
+| `F4System`     | F4 层级 / 分组节点 |  5861 |  1072 |
 | `F3System`     | F3 层级节点        |   108 |    22 |
 | `F2System`     | F2 层级节点        |     1 |     2 |
 | `F1System`     | F1 层级节点        |     1 |     1 |
 | 空             | 待抽样确认         |     1 |     1 |
 
-### 3.2 GROUPTYPE 分布
+### GROUPTYPE 分布
 
 | GROUPTYPE | 判断       |  line | line1 |
 | --------- | ---------- | ----: | ----: |
@@ -85,7 +85,7 @@ CBM -> SUBDEVICE -> CBM -> ...
 | `CROSS`   | 跨越分组   |    74 |    19 |
 | 空        | 非分组节点 | 21968 |  3926 |
 
-### 3.3 WIRETYPE 分布
+### WIRETYPE 分布
 
 | WIRETYPE     | 判断         |  line | line1 |
 | ------------ | ------------ | ----: | ----: |
@@ -105,7 +105,6 @@ CBM -> SUBDEVICE -> CBM -> ...
 | CBM 总数                         | 8701 |
 | 有 `BASEFAMILY`                  | 8554 |
 | 有 `OBJECTMODELPOINTER`          | 4179 |
-| `OBJECTMODELPOINTER` 指向 `.dev` | 4179 |
 | 有 `IFCFILE`                     | 4360 |
 | 有 `IFCGUID`                     | 4360 |
 | 有 `SUBDEVICE`                   |  258 |
@@ -121,7 +120,7 @@ CBM -> SUBDEVICE -> CBM -> ...
 - 变电 CBM 不使用线路中的 `GROUPTYPE` / `WIRETYPE`。
 - 变电 CBM 也通过 `SUBDEVICEn=*.cbm` 建立 CBM 层级。
 
-### 4.1 ENTITYNAME 分布
+### ENTITYNAME 分布
 
 | ENTITYNAME  | 数量 | 判断                        |
 | ----------- | ---: | --------------------------- |
@@ -150,15 +149,7 @@ CBM -> SUBDEVICE -> CBM -> ...
 
 ## 6. 当前结论
 
-当前可以确认：
-
-```text
-CBM -> DEV
-CBM -> IFC
-CBM -> CBM
-```
-
-更完整的 GIM 引用链为：
+当前可以确认完整的 GIM 引用链为：
 
 ```text
 CBM
@@ -175,7 +166,6 @@ CBM
 - `IFCFILE / IFCGUID` 是变电 CBM 关联 IFC 的字段。
 - `GROUPTYPE / WIRETYPE` 是线路 CBM 的业务分组字段。
 
-当前阶段只记录字段角色和引用链，不递归展开完整模型，不解析 PHM/MOD/STL 几何。
 
 ## 脚本
 
