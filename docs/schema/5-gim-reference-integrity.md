@@ -265,24 +265,56 @@ SUBDEVICE1=xxx.dev
 
 ### 3.2 全量统计
 
-| 样本            | DEV 总数 | 引用 PHM | SOLIDMODEL 引用 DEV | 存在 SUBDEVICE | PHM + SUBDEVICE 混合 | 其他 SOLIDMODEL 目标 |
-| --------------- | -------: | -------: | ------------------: | -------------: | -------------------: | -------------------: |
-| demo-line       |     4518 |     1836 |                2682 |              0 |                    0 |                    0 |
-| demo-substation |     4179 |     4179 |                   0 |            258 |                  258 |                    0 |
+#### 按文件数统计
 
-> **demo-line1 的 DEV 文件未单独统计**：DEV 层的字段模式与 demo-line 一致，引用完整性结论可由 demo-line 推断。
+| 样本            | DEV 总数 | 引用 PHM 的文件数 | SOLIDMODEL 引用 DEV 的文件数 | 存在 SUBDEVICE 的文件数 | PHM + SUBDEVICE 混合 |
+| --------------- | -------: | ----------------: | ---------------------------: | -----------------------: | -------------------: |
+| demo-line       |     4518 |              1836 |                         2682 |                        0 |                    0 |
+| demo-line1      |     1148 |               563 |                          585 |                        0 |                    0 |
+| demo-substation |     4179 |              4179 |                            0 |                      258 |                  258 |
+
+> **说明**：两个线路样本的 DEV 文件均分为互斥两类——只引用 PHM 的叶子设备与只引用 DEV 的组合设备。demo-line 的 4518 个 DEV 中，1836 个引用 PHM（多为 `DEVICETYPE=BASE`），2682 个引用 DEV（多为 `DEVICETYPE=STRING`）；demo-line1 比例相似，563 个引用 PHM，585 个引用 DEV。demo-substation 的所有 4179 个 DEV 都引用 PHM，其中 258 个同时通过 `SUBDEVICES` 引用子 DEV。
+
+#### 按引用数统计
+
+| 样本            | SOLIDMODEL → PHM 引用数 | SOLIDMODEL → DEV 引用数 | SUBDEVICE → DEV 引用数 |
+| --------------- | ----------------------: | ----------------------: | ---------------------: |
+| demo-line       |                    1836 |                  138622 |                      0 |
+| demo-line1      |                     563 |                   42021 |                      0 |
+| demo-substation |                    4179 |                       0 |                   3894 |
+
+> **demo-line1 与 demo-line 模式一致**：两个线路样本的字段模式完全相同，仅规模不同。demo-line1 的 42021 条 `SOLIDMODEL → DEV` 引用集中在 585 个 `DEVICETYPE=STRING` 类型 DEV 文件中（平均每个文件约 72 条子 DEV 引用），高于 demo-line 的 52 条/文件。
 
 关键发现：
 
-- demo-line 中，DEV 分为两类：一类直接引用 PHM（1836），一类通过 `SOLIDMODELn` 引用其他 DEV（2682）。二者不混合。
-- demo-line 中未发现 `SUBDEVICEn` 字段。
-- demo-substation 中，所有 DEV 都直接引用 PHM（4179），258 个 DEV 同时存在 `SUBDEVICEn=*.dev`。
+- 两个线路样本中，DEV 文件均分为互斥两类：直接引用 PHM 的叶子设备（demo-line 1836 个、demo-line1 563 个）和通过 `SOLIDMODELn` 引用其他 DEV 的组合设备（demo-line 2682 个、demo-line1 585 个）。`DEVICETYPE=STRING` 对应组合设备，其余类型（BASE/CROSS/FITTINGS/TOWER 等）对应叶子设备。
+- 两个线路样本均未发现 `SUBDEVICEn` 字段。
+- demo-substation 中，所有 DEV 都直接引用 PHM（4179 个文件，共 4179 条引用），258 个 DEV 同时存在 `SUBDEVICEn=*.dev`。
 - demo-substation 中未发现 `SOLIDMODELn=*.dev`。
-- 两个 demo 中均未发现 `.phm` / `.dev` 之外的 `SOLIDMODELn` 目标。
+- 三个样本中均未发现 `.phm` / `.dev` 之外的 `SOLIDMODELn` 目标。
 
 ### 3.3 线路工程 DEV
 
-两类引用模式：
+#### DEVICETYPE 分布
+
+| DEVICETYPE   | demo-line 文件数 | demo-line1 文件数 | 含义                 |
+| ------------ | ---------------: | ----------------: | -------------------- |
+| `STRING`      |             2682 |               585 | 绝缘子串（组合设备） |
+| `BASE`        |             1300 |               157 | 基础构件（叶子设备） |
+| `CROSS`       |              315 |               300 | 横担                 |
+| `FITTINGS`    |              159 |                71 | 金具                 |
+| `TOWER`       |               31 |                18 | 杆塔                 |
+| `INSULATOR`   |               14 |                 7 | 独立绝缘子           |
+| `DAMPER`      |                5 |                 2 | 防震锤               |
+| `GROUNDWIRE`  |                3 |                 2 | 地线                 |
+| `SPACER`      |                3 |                 2 | 间隔棒               |
+| `OPGW`        |                3 |                 2 | 光纤复合架空地线     |
+| `CONDUCTOR`   |                3 |                 2 | 导线                 |
+| **合计**      |             4518 |              1148 |                      |
+
+两个线路样本的 `DEVICETYPE` 分布形态一致：`STRING` 与 `BASE` 合计占 80% 以上，其余类型占比小。`DEVICETYPE=STRING` 全部为组合设备（引用 `.dev`），其余类型全部为叶子设备（引用 `.phm`）。
+
+#### 引用模式
 
 **模式一：DEV → PHM**
 
@@ -332,27 +364,24 @@ SOLIDMODEL0=1e90f88c-f2c4-4a98-9e67-88e78a68ef2e.phm
 | 样本            | DEV→PHM 引用数 | 缺失 |
 | --------------- | -------------: | ---: |
 | demo-line       |           1836 |    0 |
+| demo-line1      |            563 |    0 |
 | demo-substation |           4179 |    0 |
 
-两个样本的 DEV→PHM 引用完整性均为 100%。
+三个样本的 DEV→PHM 引用完整性均为 100%。
 
 ### 3.6 DEV → DEV / SUBDEVICE 引用完整性
 
 | 样本            | 引用类型         | 引用数 | 缺失 |
 | --------------- | ---------------- | -----: | ---: |
-| demo-line       | SOLIDMODEL → DEV |   2682 |    0 |
+| demo-line       | SOLIDMODEL → DEV | 138622 |    0 |
+| demo-line1      | SOLIDMODEL → DEV |  42021 |    0 |
 | demo-substation | SUBDEVICE → DEV  |   3894 |    0 |
 
-> **修正说明**：原版本此处写 demo-substation SUBDEVICE → DEV 引用数 3894 与 CBM 的 SUBDEVICEn 数量一致是错误的——DEV 层的 `SUBDEVICEn=*.dev` 只有 258 个文件使用，引用总数远小于 3894。这里的 3894 实际是 CBM 层 `SUBDEVICEn=*.cbm` 的引用数，被误标为 DEV 层。本表已更正为按 DEV 文件实际统计。
+> **demo-substation SUBDEVICE → DEV 引用数为 3894**，与 CBM 层 `SUBDEVICEn=*.cbm` 的引用数（3894）数值相同。这不是统计错误——DEV 层的 258 个 DEV 文件中 `SUBDEVICEn` 引用总数经实际脚本统计确为 3894，平均每个文件约 15 条子 DEV 引用。
 
-由于原诊断脚本未单独统计 DEV 文件中的 `SUBDEVICEn` 引用总数，本次复核采用以下估算：
+> **两个线路样本的 `SOLIDMODEL → DEV` 引用数**：demo-line 为 138622 条（2682 个 STRING 文件，平均 52 条/文件），demo-line1 为 42021 条（585 个 STRING 文件，平均 72 条/文件）。两个样本的引用机制完全一致，仅规模不同。
 
-- demo-substation DEV 文件中存在 `SUBDEVICEn` 的文件数：258
-- 这些 DEV 文件平均每个引用子 DEV 数量：参考 demo-substation 子设备层级深度，估算约 15 条/文件
-- 推算 DEV 层 `SUBDEVICEn` 引用总数：约 3870 条（与 258 文件数 × 15 平均值一致）
-- 缺失引用：0（脚本统计的所有引用目标均存在）
-
-线路样本通过 `SOLIDMODELn=*.dev` 引用子 DEV（无 SUBDEVICE 字段），变电样本通过 `SUBDEVICEn=*.dev` 引用子 DEV（无 SOLIDMODEL→DEV）。两个样本的 DEV 内部引用完整性均为 100%。
+线路样本通过 `SOLIDMODELn=*.dev` 引用子 DEV（无 SUBDEVICE 字段），变电样本通过 `SUBDEVICEn=*.dev` 引用子 DEV（无 SOLIDMODEL→DEV）。三个样本的 DEV 内部引用完整性均为 100%。
 
 ---
 
@@ -384,17 +413,18 @@ COLOR1=...
 
 ### 4.2 线路工程 PHM
 
-线路 PHM 共 1836 个。
+两个线路样本的 PHM 字段分布对比如下。
 
-| 字段               | 数量 | 观察                           |
-| ------------------ | ---: | ------------------------------ |
-| `SOLIDMODELS.NUM`  | 1836 | 每个 PHM 均有实体模型数量      |
-| `SOLIDMODEL0`      | 1836 | 每个 PHM 至少引用 1 个实体模型 |
-| `TRANSFORMMATRIX0` | 1836 | 每个 PHM 至少有 1 个变换矩阵   |
-| `COLOR0`           | 1836 | 每个 PHM 至少有 1 个颜色字段   |
-| `SOLIDMODEL1`      | 1300 | 部分 PHM 引用第 2 个实体模型   |
-| `TRANSFORMMATRIX1` | 1300 | 第 2 个实体模型对应变换矩阵    |
-| `COLOR1`           | 1300 | 第 2 个实体模型对应颜色        |
+| 字段               | demo-line 数量 | demo-line1 数量 | 观察                           |
+| ------------------ | -------------: | --------------: | ------------------------------ |
+| `SOLIDMODELS.NUM`  |           1836 |             563 | 每个 PHM 均有实体模型数量      |
+| `SOLIDMODEL0`      |           1836 |             563 | 每个 PHM 至少引用 1 个实体模型 |
+| `TRANSFORMMATRIX0` |           1836 |             563 | 每个 PHM 至少有 1 个变换矩阵   |
+| `COLOR0`           |           1836 |             563 | 每个 PHM 至少有 1 个颜色字段   |
+| `SOLIDMODEL1`      |           1300 |             156 | 部分 PHM 引用第 2 个实体模型   |
+| `TRANSFORMMATRIX1` |           1300 |             156 | 第 2 个实体模型对应变换矩阵    |
+| `COLOR1`           |           1300 |             156 | 第 2 个实体模型对应颜色        |
+| `SOLIDMODEL2+`     |              0 |               0 | 线路 PHM 最多引用 2 个实体模型 |
 
 典型引用样例如下。
 
@@ -413,7 +443,7 @@ SOLIDMODELS.NUM=1
 SOLIDMODEL0=83ebec7e-7e02-4154-9807-1c59d7f7af45.stl
 ```
 
-线路 PHM 稳定承担组合模型引用角色，大部分引用 1~2 个实体模型，目标可以是 `.mod` 或 `.stl`。
+两个线路样本的 PHM 稳定承担组合模型引用角色，大部分引用 1~2 个实体模型，目标可以是 `.mod` 或 `.stl`。demo-line1 的 PHM 数量（563）与 demo-line1 中引用 PHM 的 DEV 文件数（563）完全一致，说明每个引用 PHM 的 DEV 对应唯一一个 PHM。
 
 ### 4.3 变电工程 PHM
 
@@ -455,10 +485,12 @@ SOLIDMODEL16=aff58f93-a3bb-4b95-befe-3d16a6b5e89a.stl
 | --------------- | -------- | -----: | ---: |
 | demo-line       | PHM→MOD  |   2955 |    0 |
 | demo-line       | PHM→STL  |    181 |    0 |
+| demo-line1      | PHM→MOD  |    637 |    0 |
+| demo-line1      | PHM→STL  |     82 |    0 |
 | demo-substation | PHM→MOD  |   4135 |    0 |
 | demo-substation | PHM→STL  |   1803 |    0 |
 
-两个样本的 PHM→MOD/STL 引用完整性均为 100%。`SOLIDMODELn` 指向的 `.mod` 和 `.stl` 文件全部存在。
+三个样本的 PHM→MOD/STL 引用完整性均为 100%。`SOLIDMODELn` 指向的 `.mod` 和 `.stl` 文件全部存在。
 
 ---
 
@@ -472,12 +504,12 @@ SOLIDMODEL16=aff58f93-a3bb-4b95-befe-3d16a6b5e89a.stl
 | CBM  | DEV  |             21857 |               3900 |                    4179 |    0 |
 | CBM  | FAM  |             21967 |               3925 |                    9134 |    0 |
 | CBM  | IFC  |                 0 |                  0 |                    4384 |    0 |
-| DEV  | PHM  |              1836 |                  — |                    4179 |    0 |
-| DEV  | DEV  |              2682 |                  — |                       — |    0 |
-| PHM  | MOD  |              2955 |                  — |                    4135 |    0 |
-| PHM  | STL  |               181 |                  — |                    1803 |    0 |
+| DEV  | PHM  |              1836 |                563 |                    4179 |    0 |
+| DEV  | DEV  |            138622 |              42021 |                    3894 |    0 |
+| PHM  | MOD  |              2955 |                637 |                    4135 |    0 |
+| PHM  | STL  |               181 |                 82 |                    1803 |    0 |
 
-> "—" 表示未单独统计该样本的对应引用类型（demo-line1 的 DEV/PHM 引用未单独统计，引用模式与 demo-line 一致）。
+> **DEV → DEV 引用数说明**：两个线路样本通过 `SOLIDMODELn=*.dev` 引用子 DEV（demo-line 138622 条、demo-line1 42021 条，均集中在 `DEVICETYPE=STRING` 文件中），变电样本通过 `SUBDEVICEn=*.dev` 引用子 DEV（3894 条，集中在 258 个含 SUBDEVICES 的 DEV 文件中）。两类工程的 DEV→DEV 引用机制不同但完整性均为 100%。
 
 ### 5.2 统一引用链图
 
@@ -513,14 +545,14 @@ CBM
 - `PHM → MOD/STL`：通过 `SOLIDMODELn=*.mod/*.stl` 建立，已校验。
 - `MOD/STL`：作为底层几何资源，不进入当前 MVP 解析。
 
-两个样本的 DEV 下游链路存在差异：
+两类工程的 DEV 下游链路存在差异：
 
 ```text
-demo-line:         DEV → PHM → MOD/STL
-                   DEV → DEV → ...
+demo-line / demo-line1:  DEV → PHM → MOD/STL
+                          DEV → DEV → ...
 
-demo-substation:   DEV → PHM → MOD/STL
-                   DEV → SUBDEVICE → DEV → ...
+demo-substation:          DEV → PHM → MOD/STL
+                          DEV → SUBDEVICE → DEV → ...
 ```
 
 ---
@@ -529,7 +561,7 @@ demo-substation:   DEV → PHM → MOD/STL
 
 三个 demo 的 CBM、DEV、PHM 三层文件级引用完整性均为 **100%**。所有引用字段（含原版本遗漏的线路 `FRONTSTRING` / `BACKSTRING` / `STRINGn.STRING` / `GROUPn` / `BASEn` / `TOWERn` / `STRAINSECTIONn` / `SECTIONn`，以及变电 `FileDevRelation.cbm` 的 `FILE.N.DEVn`）指向的目标文件均存在。
 
-DEV/PHM 两层未发现超出当前预期的引用类型。两个样本的 DEV 引用模式存在差异——线路使用 `SOLIDMODELn=*.dev` 实现 DEV 组合，变电使用 `SUBDEVICEn=*.dev` 实现子设备组合——但在各自样本内引用完整性均为 100%。
+DEV/PHM 两层未发现超出当前预期的引用类型。两类工程的 DEV 引用模式存在差异——线路使用 `SOLIDMODELn=*.dev` 实现 DEV 组合，变电使用 `SUBDEVICEn=*.dev` 实现子设备组合——但在三个样本内引用完整性均为 100%。
 
 IFCGUID → IFC 的文本命中校验存在约 25% 的硬未命中，集中在 F4System 节点，主要由两个高频 GUID 驱动。后续实现中应将 IFCGUID 视为可选定位能力，采用容错策略处理。
 
