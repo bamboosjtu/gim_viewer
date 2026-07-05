@@ -17,6 +17,8 @@
 | `stretched-body-deep.ps1` | Round 6.4 | StretchedBody.Array 点序列 + Normal 向量深度分析 |
 | `line-mod-grammar-deep.ps1` | Round 7 | 线路 MOD 4 类文本格式族深度分析（grammar 与 parser 边界） |
 | `stl-static-survey.ps1` | Round 8 | STL 格式检测 + PHM 引用扫描 + CBM entityName 上游溯源 |
+| `stl-device-type-survey.ps1` | Round 8.5 | STL 设备类型调研（三样本）：CBM→DEV→PHM→STL 完整链反查 STL 对应的具体设备类型（变电二次柜 / 线路金具） |
+| `mod-device-type-survey.ps1` | Round 8.6 | MOD 设备类型对比调研（三样本）：CBM→DEV→PHM→MOD 完整链反查 MOD 对应的设备类型（变电 XML primitive 一次设备 / 线路 4 类文本格式族） |
 
 > Round 9 是 IR schema **设计**而非样本分析，无对应分析脚本。完成后输出 `docs/schema/13-geometry-ir-schema.md`，把 Round 1-8 的静态分析结论沉淀为统一 schema 草案。详见 [SKILL.md](../SKILL.md) §4 Round 9。
 
@@ -88,6 +90,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   ".trae/skills/gim-sample-verification/scripts/stl-static-survey.ps1" `
   -SampleId $sampleId -SampleRoot $sampleRoot
+
+# Round 8.5（三样本：STL 设备类型调研）
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  ".trae/skills/gim-sample-verification/scripts/stl-device-type-survey.ps1" `
+  -SampleId $sampleId -SampleRoot $sampleRoot
+
+# Round 8.6（三样本：MOD 设备类型对比调研）
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  ".trae/skills/gim-sample-verification/scripts/mod-device-type-survey.ps1" `
+  -SampleId $sampleId -SampleRoot $sampleRoot
 ```
 
 ## 输出产物
@@ -117,6 +129,8 @@ scripts/
     <SampleId>-stl-summary.csv                  （Round 8.1，STL 格式+三角面）
     <SampleId>-stl-phm-refs.csv                 （Round 8.2，PHM STL/MOD 引用模式）
     <SampleId>-stl-upstream.csv                 （Round 8.3，entityName × STL 映射）
+    stl-device-type-survey-<sampleId>.json       （Round 8.5，STL 设备类型聚合 JSON）
+    mod-device-type-survey-<sampleId>.json      （Round 8.6，MOD 设备类型聚合 JSON）
 ```
 
 ## 注意事项
@@ -125,6 +139,7 @@ scripts/
 - 变电样本（含 IFCFILE 的 CBM）会触发 Round 6 primitive 分析
 - 线路样本会触发 Round 7 文本格式族深度分析
 - 线路+变电样本均可触发 Round 8 STL 分析（线路 181-82 STL / 变电 1803 STL）
+- Round 8.5/8.6 设备类型调研支持三样本分发：变电走 F4System/PARTINDEX + SYSCLASSIFYNAME/PARTNAME，线路走 Tower_Device/Wire_Device/CROSS/WIRE/F4System + NAME/CLASSIFYNAME/DEVICETYPE/TOWERTYPE
 - 线路样本在 Round 5 会自动跳过 MOD XML Entity 分析，转而检测是否含 TransformMatrix 字段
 - 大型样本（如 demo-line 27829 个 CBM）单次执行可能耗时 1-3 分钟
 - 所有脚本不修改源文件、不写 SQLite、不创建 Viewer

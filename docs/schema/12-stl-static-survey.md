@@ -578,3 +578,332 @@ foreach ($devName in $cbmDevEntries.Keys) {
 | demo-line1 | Wire_Device | 7 KB | 11 KB | 144 | 224 |
 | demo-substation | F4System | 23 KB | 152 KB | 463 | 3112 |
 | demo-substation | PARTINDEX | 23 KB | 34 KB | 465 | 704 |
+
+---
+
+## 9. STL 设备类型分析（按 SYMBOLNAME / TYPE）
+
+> 本节通过 CBM → DEV → PHM → STL 完整链反查 STL 对应的具体设备类型，回答 "STL 主要渲染什么设备"。
+>
+> - 脚本：[_generated/stl-device-type-survey.ps1](_generated/stl-device-type-survey.ps1)
+> - JSON 输出：[_generated/stl-device-type-survey-demo-substation.json](_generated/stl-device-type-survey-demo-substation.json) / [_generated/stl-device-type-survey-demo-line.json](_generated/stl-device-type-survey-demo-line.json) / [_generated/stl-device-type-survey-demo-line1.json](_generated/stl-device-type-survey-demo-line1.json)
+> - MOD 设备类型对照见 §10
+
+### 9.1 变电样本（demo-substation）
+
+**总体规模**：STL 文件 1803 个，三角面 834,874 个，总大小 39.95 MB；含 STL 的 CBM 节点 116 个（106 F4System + 10 PARTINDEX），分类命中率 100%。
+
+**按 SYMBOLNAME（DEV 设备符号名）Top 5**：
+
+| 排名 | SYMBOLNAME | STL 数 | 三角面 | CBM 数 | 占比 |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | 光纤配线柜 | 222 | 67,764 | 3 | 12.08% |
+| 2 | 220kV线路保护测控柜 | 148 | 66,296 | 4 | 8.05% |
+| 3 | 主变电能表柜 | 86 | 16,024 | 2 | 4.68% |
+| 4 | 综合配线柜 | 74 | 20,800 | 1 | 4.03% |
+| 5 | 光传输设备柜1 | 74 | 20,952 | 1 | 4.03% |
+
+Top 5 合计 **32.88%**，Top 20 **全部为"柜"类设备**。
+
+**关键结论**：
+
+- **STL 100% 渲染二次设备柜**（DEV TYPE=SecondaryCabinet）— 不渲染一次设备（变压器/断路器由 IFC 承载），不渲染建筑结构（由 IFC 承载）
+- **STL-only 节点（30 个 F4System）**：全部为 SecondaryCabinet 类型，包括通信柜、保护测控柜、电能表柜、数据网柜等复杂柜体（含面板/指示灯/按钮细节，无法用 XML primitive 表达）
+- **STL+MOD 并存节点（86 个）**：STL 描述柜体外观，MOD 描述内部参数化构件
+- **F4System 主导**：占 98.15% STL 引用（1803/1837），PARTINDEX 仅 34 个 STL（柜内局部构件）
+- **复用率极低**：仅 34 个 STL 被多 CBM 共享（如"备用柜"29 个 CBM 共享同一 STL），其余 1769 个一对一对应
+
+### 9.2 线路样本（demo-line / demo-line1）
+
+**总体规模对比**：
+
+| 维度 | demo-line | demo-line1 | demo-substation |
+| --- | ---: | ---: | ---: |
+| 工程类型 | GIMPKGT 线路（220kV） | GIMPKGT 线路（500kV） | GIMPKGS 变电 |
+| STL 文件总数 | 181 | 82 | 1803 |
+| STL 三角面总数 | 750,304 | 238,194 | 834,874 |
+| STL 总大小 (MB) | 35.79 | 11.36 | 39.95 |
+| 含 STL 的 CBM 数 | 14455 | 2538 | 116 |
+| STL-only CBM 数 | 14455 (100%) | 2538 (100%) | 0 (0%) |
+| 实际承载 STL 的 entityName | Tower_Device + Wire_Device | Tower_Device + Wire_Device | F4System + PARTINDEX |
+| 主导 SYMBOLNAME | INSULATOR / SPACER / DAMPER | INSULATOR / SPACER / DAMPER | 光纤配线柜 / 保护测控柜 |
+
+**entityName 分布（demo-line）**：
+
+| entityName | STL 数 | 三角面 | CBM 数 | STL-only |
+| --- | ---: | ---: | ---: | ---: |
+| Tower_Device | 27007 | 103,196,318 | 4309 | 2682 |
+| Wire_Device | 11773 | 1,877,432 | 11773 | 11773 |
+| F4System / CROSS / WIRE | 0 | 0 | 5861 / 315 / 5460 | 0 |
+
+**按 SYMBOLNAME Top 3**（线路样本主导金具类型）：
+
+| 排名 | SYMBOLNAME | demo-line STL 数 | demo-line1 STL 数 | 含义 |
+| ---: | --- | ---: | ---: | --- |
+| 1 | INSULATOR（绝缘子） | 27007 | 7450 | 串绝缘子 |
+| 2 | SPACER（间隔棒） | 7305 | 1493 | 导线间隔棒 |
+| 3 | DAMPER（防振锤） | 4468 | 460 | 防振锤 |
+
+**关键结论**：
+
+- **STL 100% 渲染金具**：绝缘子 + 间隔棒 + 防振锤，不渲染塔本体（塔本体由 MOD 文本格式族渲染）
+- **STL-only 模式**：线路样本 STL 节点 100% 为 STL-only（无 MOD 共存），STL 是唯一几何来源
+- **塔型字段（TOWERTYPE）与 STL 无关**：TOWERTYPE（如 `5B2-WKZ204A` / `500-MC31S-ZJTSD07`）只出现在 CBM 上，对应 stlCount 全部为 0
+- **单塔 STL 配置固定**：每塔挂 18-19 串绝缘子，三角面约 53556-60570，分布稳定
+- **电压等级差异**：demo-line 塔型以 `5B2/562/5E7` 开头（220kV）；demo-line1 塔型以 `500-MC31S/500-MC31D` 开头（500kV）；两样本单塔 STL 配置一致
+
+### 9.3 三样本对比：STL 设备类型差异
+
+| 维度 | 线路样本（demo-line / demo-line1） | 变电样本（demo-substation） |
+| --- | --- | --- |
+| STL 渲染对象 | 金具（绝缘子/间隔棒/防振锤） | 二次设备柜（通信柜/保护测控柜/电能表柜） |
+| SYMBOLNAME 语言 | 英文大写（INSULATOR/SPACER/DAMPER） | 中文柜体名（光纤配线柜/220kV线路保护测控柜） |
+| DEV TYPE | N/A（金具类型） | SecondaryCabinet（二次柜） |
+| STL 与 MOD 关系 | 互斥（STL-only 100%） | 共存（STL+MOD 100%） |
+| 几何内容 | 三角网格（绝缘子串/间隔棒/防振锤） | 三角网格（柜体外壳/面板/屏柜） |
+| 复用模式 | 多 CBM 共享同一 STL（181 文件覆盖 14455 CBM） | 一对一为主（1803 文件覆盖 116 CBM） |
+| 单 STL 三角面 | demo-line ~4143 / demo-line1 ~2905 | ~463（远小于线路） |
+| CBM 覆盖率 | demo-line 52% / demo-line1 51% | 1.36%（仅 116/8539 CBM） |
+
+**核心差异**：线路 STL 渲染"线路金具"（绝缘子/间隔棒/防振锤），变电 STL 渲染"二次设备柜"（通信柜/保护测控柜/电能表柜），两类工程的 STL 设备类型**完全不同**。
+
+---
+
+## 10. MOD 设备类型对比分析（demo-substation）
+
+> 本节通过 CBM → DEV → PHM → MOD 完整链反查 MOD 对应的具体设备类型，回答 "MOD 主要渲染什么设备"，并与 STL 设备类型对比。
+>
+> - 脚本：[_generated/mod-device-type-survey.ps1](_generated/mod-device-type-survey.ps1)
+> - JSON 输出：[_generated/mod-device-type-survey.json](_generated/mod-device-type-survey.json)
+> - 变电 MOD 的 14 种 primitive 字段范围详见 [10-substation-mod-grammar.md](10-substation-mod-grammar.md)
+
+### 10.1 总体规模
+
+| 指标 | 数值 |
+| --- | --- |
+| MOD 文件总数 | 4179（与 PHM 文件数一致） |
+| MOD XML Entity 总数 | 46250（与 [10-substation-mod-grammar.md](10-substation-mod-grammar.md) §1.3 一致） |
+| Primitive 总数 | 46250（每个 Entity 含 1 个 primitive） |
+| MOD 总大小 | 15.39 MB |
+| MOD kind 分布 | XML_WITH_ENTITIES 4135 (98.95%) + XML_EMPTY_DEVICE 44 (1.05%) |
+| 含 MOD 引用的 CBM 节点 | 4179（100% F4System + 100% PARTINDEX） |
+| MOD 聚合引用数 | 8029（同一 MOD 被多 CBM 共享，覆盖率 192.13%） |
+| 分类命中率 | 100% |
+
+### 10.2 按 TYPE Top 5 设备类型
+
+| 排名 | TYPE | MOD 数 | Entity 数 | CBM 数 | 主要 primitive |
+| ---: | --- | ---: | ---: | ---: | --- |
+| 1 | OTHERS | 3870 | 31830 | 3870 | Cylinder(14561) + Cuboid(9689) + StretchedBody(5177) |
+| 2 | SecondaryCabinet（二次柜） | 2030 | 13767 | 106 | Cuboid(7518) + Cylinder(4252) + StretchedBody(1871) |
+| 3 | HGIS（气体绝缘开关） | 397 | 10008 | 32 | Cylinder(7756) + StretchedBody(1494) + Cuboid(461) |
+| 4 | FrameCapacitor（框架电容） | 132 | 8664 | 36 | Cylinder(2844) + Cuboid(2244) + StretchedBody(2148) |
+| 5 | GroundTransformer / ArcExtinguishingCoil | 32 | 4656 | 4 | Cylinder(2264) + Cuboid(1120) + StretchedBody(1060) |
+
+### 10.3 按 SYMBOLNAME Top 5 设备类型
+
+| 排名 | SYMBOLNAME | MOD 数 | Entity 数 | CBM 数 |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | 框架式电容器（典设A2-6） | 108 | 7548 | 12 |
+| 2 | 10kV 接地变及消弧线圈装置 | 32 | 4656 | 4 |
+| 3 | 220kV GIS 电缆出线间隔 | 77 | 2674 | 7 |
+| 4 | 220kV GIS 出线间隔 | 65 | 2610 | 5 |
+| 5 | 通信柜 | 80 | 2600 | 10 |
+
+### 10.4 按 primitive 类型分布与设备归属
+
+| Primitive | 实例数 | 占比 | 主要设备归属（Top 3） |
+| --- | ---: | ---: | --- |
+| Cylinder（圆柱） | 20421 | 44.15% | OTHERS(14561) + HGIS(7756) + SecondaryCabinet(4252) |
+| Cuboid（长方体） | 12401 | 26.81% | OTHERS(9689) + SecondaryCabinet(7518) + FrameCapacitor(2244) |
+| StretchedBody（拉伸体） | 10263 | 22.19% | OTHERS(5177) + HVSwitchCabinet(3564) + FrameCapacitor(2148) |
+| PorcelainBushing（绝缘子） | 1506 | 3.26% | FrameCapacitor(1032) + OTHERS(1386) + GroundTransformer(108) |
+| TruncatedCone（圆台） | 730 | 1.58% | OTHERS(505) + FrameCapacitor(288) + LightningArrester(162) |
+| Ring（环） | 235 | 0.51% | OilImmersedTransformer(57) + HGIS(54) + ACIsolatingSwitch(54) |
+| TerminalBlock（端子块） | 201 | 0.43% | OTHERS(78) + HGIS(45) + DryTypeReactor(36) |
+| Sphere（球体） | 141 | 0.30% | OTHERS(114) + HGIS(87) + SecondaryCabinet(24) |
+| ChannelSteel（槽钢） | 129 | 0.28% | FrameCapacitor(72) + OTHERS(72) + LightningArrester(36) |
+| Table（平台） | 109 | 0.24% | OTHERS(101) + SecondaryCabinet(101) + HGIS(6) |
+| CircularGasket（圆形垫片） | 80 | 0.17% | OTHERS(72) + LightningArrester(36) + FrameCapacitor(36) |
+| RectangularFixedPlate | 18 | 0.04% | LightningArrester(18) — 100% 独占 |
+| OffsetRectangularTable | 15 | 0.03% | OpenGroundingEquipment(15) + OTHERS(15) |
+| RectangularRing | 1 | 0.00% | SecondaryCabinet(1) + OTHERS(1) |
+
+**关键 primitive → 设备强映射**：
+
+- `PorcelainBushing` → 框架式电容器（68.5% 集中于电容器组）
+- `RectangularFixedPlate` → 避雷器（100% 独占，专用底板）
+- `ChannelSteel` → 电容器 + 支柱绝缘子（支架型材）
+- `OffsetRectangularTable` → 中性点成套装置 + 电流互感器（设备底座）
+
+### 10.5 STL vs MOD 设备类型对比
+
+| 对比维度 | STL（1803 文件 / 834874 三角面 / 39.95MB） | MOD（4179 文件 / 46250 Entity / 15.39MB） |
+| --- | --- | --- |
+| **设备属性** | 100% 渲染二次设备柜（SecondaryCabinet） | 渲染设备全谱系（一次设备 + 二次柜 + 框架电容 + 接地变等） |
+| **主导 TYPE** | SecondaryCabinet 单一类型 | OTHERS + SecondaryCabinet + HGIS + FrameCapacitor + GroundTransformer |
+| **主导 SYMBOLNAME** | 光纤配线柜、220kV线路保护测控柜、主变电能表柜 | 框架式电容器、10kV接地变、220kV GIS间隔、通信柜 |
+| **CBM 覆盖** | 116 CBM（仅 F4System 4645 中的 2.5%） | 4179 CBM（100% F4System + 100% PARTINDEX） |
+| **几何内容** | 三角网格（柜体外壳/面板/屏柜） | 14 种参数化 primitive（圆柱/长方体/拉伸体/绝缘子等） |
+| **典型设备** | 通信柜、保护测控柜、电能表柜（二次弱电设备） | 电容器、接地变、GIS间隔、避雷器、隔离开关（一次强电设备） |
+
+**核心结论**：
+
+- **STL 渲染二次设备柜**：通信柜、保护测控柜、电能表柜等，几何内容是柜体外壳/面板的三角网格
+- **MOD 渲染一次电气设备**：电容器组、接地变压器、GIS 间隔、避雷器、隔离开关等，几何内容是 14 种参数化 primitive
+- MOD 与 STL **几乎不重叠**：MOD 主导设备类型与 STL 完全不同，二者分工清晰
+- **渲染分工**：MOD 覆盖 4179 CBM（一次设备主体），STL 覆盖 116 CBM（二次柜细节）；MOD + STL 联合可覆盖变电样本全部 8539 CBM 节点
+
+### 10.6 F4System vs PARTINDEX 的 MOD 差异
+
+| entityName | MOD 数 | Entity 数 | CBM 数 | primitive 覆盖 |
+| --- | ---: | ---: | ---: | --- |
+| F4System | 4135 | 46250 | 4645 | 全部 14 种 primitive（含独占 RectangularFixedPlate 18 + 大部分 TerminalBlock 123） |
+| PARTINDEX | 3894 | 32946 | 3894 | 前 4 类主导（Cylinder 14573 + Cuboid 10073 + StretchedBody 5897 + PorcelainBushing 1386） |
+
+- **F4System** 是 MOD 渲染的"主要承载实体"（一次设备主导，含全部 14 种 primitive）
+- **PARTINDEX** 多为设备级再聚合的几何副本，低样本 primitive 显著少于 F4System
+
+### 10.7 浏览器实现影响（更新）
+
+基于 §9 + §10 的设备类型分析结论，对 §7 浏览器实现建议做以下补充：
+
+1. **变电工程渲染分工**：
+   - MOD 渲染一次设备（电容器/GIS/接地变/避雷器等，4179 CBM，参数化 primitive）
+   - STL 渲染二次柜细节（116 CBM，三角网格）
+   - IFC 渲染建筑/结构（IFCFILE 与 MOD 完全无关联）
+2. **线路工程渲染分工**：
+   - MOD 渲染塔本体（TEXT_HNUM_COMMA_RECORD 文本格式族，详见 [11-line-mod-grammar.md](11-line-mod-grammar.md)）
+   - STL 渲染金具（绝缘子/间隔棒/防振锤，181/82 文件）
+3. **MOD 渲染入口**：按 primitive 类型分发到 Three.js 几何构造器（参考 [10-substation-mod-grammar.md](10-substation-mod-grammar.md) §6.4 已实现的强类型 schema）
+4. **STL 渲染优先级**：
+   - 变电：MVP 阶段可全部跳过（仅 116 CBM，占比 1.36%），优先加载 MOD 覆盖 100%
+   - 线路：金具 STL 不可跳过（线路样本 STL-only 100%，STL 是唯一几何来源）
+
+### 10.8 线路样本（demo-line / demo-line1）MOD 设备类型分析
+
+> 本节与 §10.1-§10.6 的变电样本分析对称，回答 "线路 MOD 主要渲染什么设备"。
+>
+> - 脚本：[_generated/mod-device-type-survey.ps1](_generated/mod-device-type-survey.ps1)（已扩展支持三样本）
+> - JSON 输出：[_generated/mod-device-type-survey-demo-line.json](_generated/mod-device-type-survey-demo-line.json) / [_generated/mod-device-type-survey-demo-line1.json](_generated/mod-device-type-survey-demo-line1.json)
+> - 线路 MOD 4 类文本格式族 grammar 详见 [11-line-mod-grammar.md](11-line-mod-grammar.md)
+
+#### 10.8.1 总体规模
+
+| 指标 | demo-line | demo-line1 | demo-substation（对照） |
+| --- | ---: | ---: | ---: |
+| 工程类型 | GIMPKGT 线路（220kV） | GIMPKGT 线路（500kV） | GIMPKGS 变电 |
+| MOD 文件总数 | 1807 | 508 | 4179 |
+| MOD 总大小 | 50.72 MB | 20.06 MB | 15.39 MB |
+| MOD kind 分布 | 4 类文本格式族 | 4 类文本格式族 | XML_WITH_ENTITIES 主导（98.95%） |
+| XML Entity 总数 | 0（不适用） | 0（不适用） | 46250 |
+| Primitive 总数 | 0（不适用） | 0（不适用） | 46250 |
+| 含 MOD 引用的 CBM 节点 | 7402 | 1362 | 4179 |
+| MOD 聚合引用数 | 8702（覆盖率 481.6%） | 1518（覆盖率 298.8%） | 8029（覆盖率 192.1%） |
+| 分类命中率 | 100% | 100% | 100% |
+
+**关键观察**：
+
+- 线路 MOD 与变电 MOD **结构完全不同**：线路是 4 类文本格式族（无 XML Entity / primitive 概念），变电是统一 XML_WITH_ENTITIES（14 种 primitive 参数化几何）
+- 线路 MOD 平均单文件规模更大（demo-line 28 KB / demo-line1 39 KB vs 变电 3.7 KB），因 TEXT_HNUM_COMMA_RECORD 单文件可达 2.3 MB（杆塔主体全量骨架）
+- 线路 MOD 复用率更高（demo-line 481.6% / demo-line1 298.8%），因同一塔型的 TEXT_HNUM_COMMA_RECORD 被多 CBM 共享
+
+#### 10.8.2 按 modKind 分布
+
+| modKind | demo-line 文件数 | 占比 | demo-line1 文件数 | 占比 | 主要设备归属 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| TEXT_SECTION_KV_RECORD | 1300 | 71.94% | 156 | 30.71% | Tower_Device 螺栓表（SYMBOL=BASE） |
+| TEXT_POINT_LINE | 315 | 17.43% | 300 | 59.06% | CROSS 跨越点（SYMBOL=EQUIPMENT） |
+| TEXT_KEY_VALUE | 161 | 8.91% | 34 | 6.69% | Tower_Device 基础参数(152/34) + WIRE 导线参数(9/0) |
+| TEXT_HNUM_COMMA_RECORD | 31 | 1.72% | 18 | 3.54% | Tower_Device 杆塔主体骨架（SYMBOL=TOWER） |
+
+**关键观察**：
+
+- 4 种 kind 的设备归属 100% 稳定（无跨 kind 混用），与 [11-line-mod-grammar.md](11-line-mod-grammar.md) §1.4 核心判断一致
+- 两样本 kind 分布比例不同：demo-line1 跨越点占比更高（59.1% vs 17.4%），因 500kV 线路跨越对象更多
+- TEXT_HNUM_COMMA_RECORD 文件数最少（31/18），但单文件规模最大（杆塔主体骨架，含 P/R/G 记录可达 4 万行）
+
+#### 10.8.3 modKind → 设备类型对应关系（100% 稳定）
+
+| modKind | SYMBOLNAME | entityName | 设备语义 | CBM 数（demo-line / demo-line1） |
+| --- | --- | --- | --- | ---: |
+| TEXT_HNUM_COMMA_RECORD | TOWER | Tower_Device | 杆塔主体（角钢/钢管骨架） | 327 / 40 |
+| TEXT_KEY_VALUE（WIRE 子签名） | WIRE | WIRE | 导线参数（型号/截面/弧垂） | 5460 / 1013 |
+| TEXT_KEY_VALUE（BASE 子签名） | BASE | Tower_Device | 杆塔基础参数（H1-H4/d/e1/e2） | 1300 / 157 |
+| TEXT_POINT_LINE | EQUIPMENT | CROSS | 跨越点（经纬度点线表） | 315 / 152 |
+| TEXT_SECTION_KV_RECORD | BASE | Tower_Device | 螺栓表（BoltNum/BoltN 记录） | 1300 / 156 |
+
+**关键结论**：
+
+- **TEXT_KEY_VALUE 按 key set 签名稳定二分**（[11-line-mod-grammar.md](11-line-mod-grammar.md) §5.4）：152+34 文件为 Tower_Device 基础参数（小写 key：type/H1-H4/d/e1/e2），9+0 文件为 WIRE 导线参数（大写 key：TYPE/SECTIONALAREA/...）
+- **每类 kind 与 entityName 100% 单射对应**：无 kind 跨 entityName 复用，无 entityName 跨 kind 混合（除 TEXT_KEY_VALUE 二分外）
+- **SYMBOLNAME 与 entityName 同义**：TOWER↔Tower_Device、WIRE↔WIRE、EQUIPMENT↔CROSS、BASE↔Tower_Device（基础/螺栓表子集）
+
+#### 10.8.4 按 entityName 分布
+
+| entityName | demo-line MOD 数 | demo-line CBM 数 | demo-line1 MOD 数 | demo-line1 CBM 数 | 主要 modKind |
+| --- | ---: | ---: | ---: | ---: | --- |
+| WIRE | 5460 | 5460 | 1013 | 1013 | TEXT_KEY_VALUE（导线参数） |
+| Tower_Device | 2927 | 4309 | 353 | 782 | TEXT_HNUM + SECTION_KV + KEY_VALUE(BASE) |
+| CROSS | 315 | 315 | 152 | 152 | TEXT_POINT_LINE |
+| Wire_Device | 0 | 11773 | 0 | 1953 | （无 MOD，100% STL） |
+| F4System | 0 | 5861 | 0 | 1072 | （无 MOD，仅结构节点） |
+
+**关键观察**：
+
+- **Wire_Device 100% 无 MOD**：与 §9.2 STL 分析对称，Wire_Device（金具）100% 由 STL 渲染，MOD 完全不覆盖
+- **F4System 100% 无 MOD**：F4System 在线路工程中是结构层节点（GROUP/SECTION 父节点），不承载设备几何
+- **WIRE 100% 由 TEXT_KEY_VALUE 渲染**：导线参数（型号/截面/温度/比载/张力）以 KV 形式存储，无几何 primitive
+- **Tower_Device 是 MOD 主承载**：3 种 kind 共同渲染（主体骨架 + 螺栓表 + 基础参数），与 §9.2 STL 分支（62-75% 用 STL 整体几何）形成互补
+
+#### 10.8.5 线路样本关键结论
+
+- **MOD 100% 渲染"塔 + 线 + 跨越点"**：Tower_Device（杆塔主体/螺栓/基础）+ WIRE（导线参数）+ CROSS（跨越点点线表），不渲染金具（金具由 STL 承载）
+- **4 种文本格式族与设备类型 100% 单射对应**：无歧义，parser 可按 modKind 直接分发到对应 schema（[11-line-mod-grammar.md](11-line-mod-grammar.md) §7.2 已确认可强类型化）
+- **TEXT_HNUM_COMMA_RECORD 是杆塔主体几何的唯一来源**：31+18 文件，承载 P（节点坐标）+ R（杆件）+ G（挂点）记录，parser 草案见 [11-line-mod-grammar.md](11-line-mod-grammar.md) §7.3
+- **TEXT_POINT_LINE 是跨越点的唯一来源**：绝对坐标点线表（POINT 5 token + LINE 2 token），用于地图叠加显示跨越对象
+- **TEXT_KEY_VALUE 的二分性**：Tower_Device 基础参数（小写 key）与 WIRE 导线参数（大写 key）按 key 大小写即可稳定分离
+
+### 10.9 三样本对比：MOD 设备类型差异
+
+| 对比维度 | demo-line（220kV 线路） | demo-line1（500kV 线路） | demo-substation（变电） |
+| --- | --- | --- | --- |
+| **MOD 渲染对象** | 杆塔主体 + 导线 + 跨越点 | 杆塔主体 + 导线 + 跨越点 | 一次电气设备（电容器/GIS/接地变/避雷器等） |
+| **MOD 格式** | 4 类文本格式族 | 4 类文本格式族 | XML_WITH_ENTITIES（XML primitive） |
+| **MOD kind 分布** | SECTION_KV 71.9% + POINT_LINE 17.4% + KV 8.9% + HNUM 1.7% | POINT_LINE 59.1% + SECTION_KV 30.7% + KV 6.7% + HNUM 3.5% | XML_WITH_ENTITIES 98.95% + XML_EMPTY_DEVICE 1.05% |
+| **几何表达方式** | 文本记录（P/R/G 坐标 + Bolt 表 + KV 参数） | 文本记录（同左） | 14 种参数化 primitive（Cylinder/Cuboid/...） |
+| **主导 entityName** | WIRE + Tower_Device + CROSS | WIRE + Tower_Device + CROSS | F4System + PARTINDEX |
+| **主导 SYMBOLNAME** | BASE + TOWER + WIRE + EQUIPMENT | BASE + TOWER + WIRE + EQUIPMENT | 框架式电容器/10kV 接地变/220kV GIS 间隔 |
+| **CBM 覆盖率** | 26.6%（7402/27718） | 27.4%（1362/4972） | 100%（4179/4179） |
+| **平均单文件大小** | 28 KB | 39 KB | 3.7 KB |
+| **复用率** | 481.6% | 298.8% | 192.1% |
+| **primitive 概念** | 不适用 | 不适用 | 14 种 primitive（46250 实例） |
+
+**核心差异**：
+
+- **设备类型完全不同**：线路 MOD 渲染"杆塔 + 导线 + 跨越点"（输电线路本体），变电 MOD 渲染"一次电气设备"（电容器/GIS/变压器等）
+- **格式体系完全不同**：线路是 4 类文本格式族（无 primitive），变电是 XML 参数化 primitive（14 种）
+- **parser 路径完全不同**：线路按 modKind 分发到 4 个文本 parser（[11-line-mod-grammar.md](11-line-mod-grammar.md) §7.3），变电按 primitiveType 分发到 14 个 Three.js 几何构造器（[10-substation-mod-grammar.md](10-substation-mod-grammar.md) §6.4）
+- **共同点**：分类命中率 100%，4 类 kind / 14 种 primitive 都与设备类型稳定单射对应
+
+### 10.10 浏览器实现影响（最终更新）
+
+基于 §10.1-§10.9 三样本完整分析，对 §7 浏览器实现建议做最终补充：
+
+1. **MOD parser 双轨制**（变电 + 线路完全独立）：
+   - 变电：XML_WITH_ENTITIES → 14 种 primitive 强类型 schema（[10-substation-mod-grammar.md](10-substation-mod-grammar.md) §6.4）
+   - 线路：4 类文本格式族 → 4 个文本 parser（[11-line-mod-grammar.md](11-line-mod-grammar.md) §7.3）
+2. **线路工程渲染分工（最终）**：
+   - TEXT_HNUM_COMMA_RECORD → 渲染杆塔主体骨架（P 节点 + R 杆件 + G 挂点，Three.js LineSegments + Points）
+   - TEXT_POINT_LINE → 渲染跨越点（地图叠加，CROSS 设备）
+   - TEXT_SECTION_KV_RECORD → 属性面板展示螺栓表（BoltNum + BoltN 记录）
+   - TEXT_KEY_VALUE → 属性面板展示塔基础参数 + 导线参数（按 key 大小写二分）
+   - STL → 渲染金具（绝缘子/间隔棒/防振锤，Wire_Device 100% STL-only）
+3. **变电工程渲染分工（最终）**：
+   - MOD → 渲染一次设备（电容器/GIS/接地变/避雷器，4179 CBM，14 种 primitive）
+   - STL → 渲染二次柜细节（116 CBM，三角网格，MVP 可跳过）
+   - IFC → 渲染建筑/结构（与 MOD 完全无关联）
+4. **MOD 与 STL 的工程类型对称性**：
+   - 线路：MOD 渲染塔本体（参数化骨架） + STL 渲染金具（三角网格）
+   - 变电：MOD 渲染一次设备（参数化 primitive） + STL 渲染二次柜（三角网格）
+   - 两类工程中 MOD 与 STL 都形成"参数化 + 三角网格"的互补分工
