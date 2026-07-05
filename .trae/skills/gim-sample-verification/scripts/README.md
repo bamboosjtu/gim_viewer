@@ -18,6 +18,8 @@
 | `line-mod-grammar-deep.ps1` | Round 7 | 线路 MOD 4 类文本格式族深度分析（grammar 与 parser 边界） |
 | `stl-static-survey.ps1` | Round 8 | STL 格式检测 + PHM 引用扫描 + CBM entityName 上游溯源 |
 
+> Round 9 是 IR schema **设计**而非样本分析，无对应分析脚本。完成后输出 `docs/schema/13-geometry-ir-schema.md`，把 Round 1-8 的静态分析结论沉淀为统一 schema 草案。详见 [SKILL.md](../SKILL.md) §4 Round 9。
+
 ## 通用约定
 
 - 所有脚本使用 `param` 接受 `-SampleId` 与 `-SampleRoot` 参数
@@ -126,3 +128,4 @@ scripts/
 - 线路样本在 Round 5 会自动跳过 MOD XML Entity 分析，转而检测是否含 TransformMatrix 字段
 - 大型样本（如 demo-line 27829 个 CBM）单次执行可能耗时 1-3 分钟
 - 所有脚本不修改源文件、不写 SQLite、不创建 Viewer
+- Round 9 是 IR schema 设计而非样本分析，无脚本产出。完成后输出 `docs/schema/13-geometry-ir-schema.md`

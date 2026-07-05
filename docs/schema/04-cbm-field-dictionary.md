@@ -138,7 +138,7 @@ MATERIALSHEET=
 | 有 `IFCFILE`            |     0 |     0 |
 | 有 `IFCGUID`            |     0 |     0 |
 | 有 `IFC.NUM`            |     0 |     0 |
-| 有 `SUBDEVICE`          |  5534 |       |
+| 有 `SUBDEVICE`          |  5534 |  1032 |
 | 有 `SUBSYSTEM`          |     0 |     0 |
 | 有 `SECTIONS`           |     1 |     1 |
 | 有 `STRAINSECTIONS`     |     1 |     2 |
@@ -146,10 +146,12 @@ MATERIALSHEET=
 | 有 `TOWERS`             |   327 |    40 |
 | 有 `BASES`              |   327 |    40 |
 | 有 `STRINGS`            |   327 |    40 |
-| 有 `ENTITYNAME`         | 27828 |       |
+| 有 `ENTITYNAME`         | 27828 |  4997 |
 | 有 `GROUPTYPE`          |  5861 |  1072 |
 | 有 `WIRETYPE`           |  5460 |  1013 |
 | 有 `SYSCLASSIFYNAME`    |     0 |     0 |
+
+> 注：「有 SUBDEVICE」按文件计：CBM 文件中存在至少一个 `SUBDEVICEn` 引用键即计为 1，不是引用条目数。`05-gim-reference-integrity.md` 中的 `SUBDEVICEN` 是引用条目数（demo-line1 = 3127 条引用），与文件数（demo-line1 = 1032 个文件）不同。
 
 当前判断：
 
@@ -157,7 +159,7 @@ MATERIALSHEET=
 - 线路 CBM 通过 `OBJECTMODELPOINTER=*.dev` 指向 DEV。
 - 线路 CBM 主层级通过 `SECTIONS` → `STRAINSECTIONS` → `GROUPS` 三级递归，**不使用 `SUBSYSTEM`**。
 - 线路 F4System 通过 `GROUPTYPE` 区分 TOWER/WIRE/CROSS 三种业务分组，分别使用不同引用字段。
-- `GROUPTYPE`、`WIRETYPE`、`ISJUMPER`、`BACKSTRING`、`FRONTSTRING`、`KVALUE`、`SPLIT`、`POINTn.BLHA`、`POINTn.MATRIX0`、`MODLEG` 是线路特有字段。
+- `GROUPTYPE`、`WIRETYPE`、`ISJUMPER`、`BACKSTRING`、`FRONTSTRING`、`KVALUE`、`POINTn.BLHA`、`POINTn.MATRIX0`、`MODLEG` 是线路特有字段。
 
 ### ENTITYNAME 分布
 

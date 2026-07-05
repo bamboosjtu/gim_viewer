@@ -112,55 +112,79 @@ MATERIALSHEET=
 
 ### 4.1 modelKind 分类定义
 
-| modelKind        | 判断条件                                              | 含义                           |
-| ---------------- | --------------------------------------------------- | ------------------------------ |
-| `DEV`            | `OBJECTMODELPOINTER` 非空，`IFCFILE` 空              | 关联 DEV 物理模型               |
-| `IFC`            | `IFCFILE` 非空                                       | 关联 IFC 构件                  |
-| `CBM_GROUP`      | `OBJECTMODELPOINTER` 与 `IFCFILE` 均空，有 `SUBDEVICE` | F4System 内部分组节点          |
-| `NO_MODEL_POINTER` | `OBJECTMODELPOINTER` 与 `IFCFILE` 均空，无 `SUBDEVICE` | 系统层节点（F1/F2/F3）         |
+`modelKind` 反映 CBM 节点关联的下游资源类型，按下列**优先级顺序**判定（先命中先归类）：
 
-> **修正说明**：原版本未明确 `CBM_GROUP` 与 `NO_MODEL_POINTER` 的判别条件。本次复核明确：`CBM_GROUP` 必须同时满足「无 OBJECTMODELPOINTER + 无 IFCFILE + 有 SUBDEVICE」，否则归入 `NO_MODEL_POINTER`。
+| modelKind              | 判断条件                                                                  | 含义                                                            |
+| ---------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `GEOMETRY_DEV`         | `OBJECTMODELPOINTER` 非空                                               | 关联 DEV 物理模型（设备级叶子或装配入口）                       |
+| `IFC_NODE`             | `IFCFILE` 非空（且 `OBJECTMODELPOINTER` 空）                            | 关联 IFC 构件（变电 F4System 设备构件）                         |
+| `CBM_REF_GROUP`        | 无 `OBJECTMODELPOINTER` + 无 `IFCFILE` + 存在任意 `.cbm` 引用键         | 层级分组节点（F1/F2/F3 主层级 + F4System TOWER/WIRE/CROSS 分组） |
+| `SYSTEM_OR_CONTAINER`  | 无 `OBJECTMODELPOINTER` + 无 `IFCFILE` + 无 `.cbm` 引用键               | 纯系统/容器节点（如 project.cbm 入口或孤立分组节点）             |
+
+`.cbm` 引用键集合（与 `04-cbm-field-dictionary.md` 第 7 节主层级字段集一致）：
+
+```text
+SUBDEVICEn        SUBSYSTEMn        SECTIONn        STRAINSECTIONn
+GROUPn            TOWERn            BASEn           STRINGn.STRING
+BACKSTRING        FRONTSTRING
+```
+
+> **关键修正**：原版本（仅基于 `SUBDEVICE` 字段判定 CBM_GROUP）的判别条件太窄，遗漏了线路工程的主层级字段 `SECTIONS` / `STRAINSECTIONS` / `GROUPS` / `TOWERS` / `BASES` / `STRINGS` / `BACKSTRING` / `FRONTSTRING`。原 `NO_MODEL_POINTER` 类别同时混入了"层级分组节点"和"纯容器节点"，造成边界模糊。
+>
+> 本次复核将类别重命名为更清晰的 4 类，并把 `.cbm` 引用键集合扩展到全部主层级字段：
+> - 旧 `DEV` → 新 `GEOMETRY_DEV`（含义不变，仅改名）
+> - 旧 `IFC` → 新 `IFC_NODE`（含义不变，仅改名）
+> - 旧 `CBM_GROUP`（仅看 SUBDEVICE）→ 新 `CBM_REF_GROUP`（任意 .cbm 引用键）
+> - 旧 `NO_MODEL_POINTER` → 新 `SYSTEM_OR_CONTAINER`（无任何几何或 CBM 引用键）
 
 ### 4.2 demo-line
 
-| modelKind        |    总数 | 有 BASEFAMILY | 无 BASEFAMILY | FAM 存在 | FAM 缺失 |     覆盖率 |
-| ---------------- | ----: | -----------: | -----------: | -----: | -----: | ------: |
-| DEV              | 21857 |        21857 |            0 |  21857 |      0 | 100.00% |
-| CBM_GROUP        |  5534 |            0 |         5534 |      0 |      0 |   0.00% |
-| NO_MODEL_POINTER |   438 |          110 |          328 |    110 |      0 |  25.11% |
+| modelKind              |    总数 | 有 BASEFAMILY | 无 BASEFAMILY | FAM 存在 | FAM 缺失 |     覆盖率 |
+| ---------------------- | ----: | -----------: | -----------: | -----: | -----: | ------: |
+| GEOMETRY_DEV           | 21857 |        21857 |            0 |  21857 |      0 | 100.00% |
+| CBM_REF_GROUP          |  5971 |            0 |         5971 |      0 |      0 |   0.00% |
+| SYSTEM_OR_CONTAINER    |     1 |            0 |            1 |      0 |      0 |   0.00% |
+
+> 与原版本差异：原 `CBM_GROUP` = 5534 仅基于 `SUBDEVICE` 字段，遗漏了 F4System 中 `GROUPTYPE=TOWER/WIRE/CROSS` 但未使用 SUBDEVICE 的分组节点；扩展到全部 `.cbm` 引用键后，`CBM_REF_GROUP` = 5971（多 437 个 F4System 分组节点被正确归类）。
 
 结论：
 
-- 线路样本中，DEV 型 CBM 全部有 FAM。
-- CBM_GROUP 型 CBM 全部没有 FAM（F4System 纯分组节点）。
-- NO_MODEL_POINTER 型 CBM 只有少量有 FAM（多为 F3System 层级节点）。
+- 线路样本中，`GEOMETRY_DEV` 型 CBM 全部有 FAM。
+- `CBM_REF_GROUP` 型 CBM 全部没有 FAM（F1/F2/F3/F4 主层级与 F4System 分组节点）。
+- `SYSTEM_OR_CONTAINER` 型 CBM 极少（仅 1 个，多为 project.cbm 入口或异常节点）。
 - 线路样本的 FAM 主要服务于具体业务对象节点，而不是分组节点。
 
 ### 4.3 demo-line1
 
-| modelKind        |   总数 | 有 BASEFAMILY | 无 BASEFAMILY | FAM 存在 |     覆盖率 |
-| ---------------- | ----: | -----------: | -----------: | -----: | ------: |
-| DEV              |  3900 |         3900 |            0 |   3900 | 100.00% |
-| CBM_GROUP        |   907 |            0 |          907 |      0 |   0.00% |
-| NO_MODEL_POINTER |   191 |           25 |          166 |     25 |  13.09% |
+| modelKind              |   总数 | 有 BASEFAMILY | 无 BASEFAMILY | FAM 存在 |     覆盖率 |
+| ---------------------- | ----: | -----------: | -----------: | -----: | ------: |
+| GEOMETRY_DEV           |  3900 |         3900 |            0 |   3900 | 100.00% |
+| CBM_REF_GROUP          |  1097 |            0 |         1097 |      0 |   0.00% |
+| SYSTEM_OR_CONTAINER    |     1 |            0 |            1 |      0 |   0.00% |
 
-> demo-line1 的 modelKind 分布与 demo-line 一致：DEV 全覆盖，CBM_GROUP 全无，NO_MODEL_POINTER 部分覆盖。
+> demo-line1 的 modelKind 分布与 demo-line 一致：GEOMETRY_DEV 全覆盖，CBM_REF_GROUP 全无，SYSTEM_OR_CONTAINER 极少。
 
 ### 4.4 demo-substation
 
-| modelKind        |   总数 | 有 BASEFAMILY | 有 BASEFAMILY1..N | 无 BASEFAMILY | FAM 存在 | FAM 缺失 |  覆盖率 |
-| ---------------- | ----: | -----------: | ---------------: | -----------: | -----: | -----: | ------: |
-| IFC              |  4360 |         4360 |                0 |             0 |   4360 |      0 | 100.00% |
-| DEV              |  4179 |         4179 |                0 |             0 |   4179 |      0 | 100.00% |
-| NO_MODEL_POINTER |   162 |           15 |              145 |            2 |    610 |      0 | 100.00% |
+| modelKind              |   总数 | 有 BASEFAMILY | 有 BASEFAMILY1..N | 无 BASEFAMILY | FAM 存在 | FAM 缺失 |  覆盖率 |
+| ---------------------- | ----: | -----------: | ---------------: | -----------: | -----: | -----: | ------: |
+| IFC_NODE               |  4360 |         4360 |                0 |             0 |   4360 |      0 | 100.00% |
+| GEOMETRY_DEV           |  4179 |         4179 |                0 |             0 |   4179 |      0 | 100.00% |
+| CBM_REF_GROUP          |   159 |           15 |              144 |             0 |    591 |      0 | 100.00% |
+| SYSTEM_OR_CONTAINER    |     3 |            0 |                1 |             2 |      4 |      0 | 100.00% |
 
-> **修正说明**：原版本把多 FAM 文件归入 `NO_MODEL_POINTER` 的「无 BASEFAMILY」分类是错误的——这些文件没有单 `BASEFAMILY`，但有 `BASEFAMILY1..N`，应计入「有 FAM」分类。本次复核更正后，demo-substation 的 NO_MODEL_POINTER 类型的 FAM 覆盖率从原 9.26% 修正为 100%（含多 FAM）。
+> **修正说明**：
+> 1. 原版本把多 FAM 文件归入 `NO_MODEL_POINTER` 的「无 BASEFAMILY」分类是错误的——这些文件没有单 `BASEFAMILY`，但有 `BASEFAMILY1..N`，应计入「有 FAM」分类。本次复核更正后，demo-substation 的多 FAM 节点的 FAM 覆盖率从原 9.26% 修正为 100%（含多 FAM）。
+> 2. 类别名由旧 `DEV/IFC/CBM_GROUP/NO_MODEL_POINTER` 重命名为 `GEOMETRY_DEV/IFC_NODE/CBM_REF_GROUP/SYSTEM_OR_CONTAINER`，并按全部 `.cbm` 引用键判定。变电样本中 `CBM_REF_GROUP` = 159（含 F1/F2/F3 主层级 + 144 个 F3System 多 FAM 节点 + F1System 工程入口）。
+> 3. `SYSTEM_OR_CONTAINER` 中有 1 个 F3System 异常节点（无 .cbm 引用键也无 OBJECTMODELPOINTER/IFCFILE，但携带 4 个 `BASEFAMILY1..4`）；另 2 个空 ENTITYNAME 节点无任何下游引用。
+> 4. 总 FAM 引用数 = 4360 + 4179 + 591 + 4 = 9134，与 §2 总体统计一致。
 
 结论：
 
-- 变电样本中，IFC 型 CBM 全部有单 `BASEFAMILY`。
-- DEV 型 CBM 全部有单 `BASEFAMILY`。
-- NO_MODEL_POINTER 型 CBM 中，145 个 F3System 使用多 `BASEFAMILY1..N`，15 个使用单 `BASEFAMILY`，2 个无 FAM。
+- 变电样本中，`IFC_NODE` 型 CBM 全部有单 `BASEFAMILY`。
+- `GEOMETRY_DEV` 型 CBM 全部有单 `BASEFAMILY`。
+- `CBM_REF_GROUP` 型 CBM 中，144 个 F3System 使用多 `BASEFAMILY1..N`，15 个使用单 `BASEFAMILY`，全部有 FAM。
+- `SYSTEM_OR_CONTAINER` 型 CBM 极少（仅 3 个），其中 1 个 F3System 异常节点仍带 4 个 `BASEFAMILY1..4`。
 - 变电样本的 FAM 覆盖范围比线路样本更强，尤其覆盖了全部 IFC 关联节点和全部 F3System 层级节点。
 
 ---
@@ -169,15 +193,17 @@ MATERIALSHEET=
 
 ### 5.1 demo-line
 
-| entityName + modelKind     |    总数 | 有 BASEFAMILY | 无 BASEFAMILY | FAM 存在 |     覆盖率 |
-| -------------------------- | ----: | -----------: | -----------: | -----: | ------: |
-| Wire_Device, DEV           | 11773 |        11773 |            0 |  11773 | 100.00% |
-| F4System, CBM_GROUP        |  5534 |            0 |         5534 |      0 |   0.00% |
-| WIRE, DEV                  |  5460 |         5460 |            0 |   5460 | 100.00% |
-| Tower_Device, DEV          |  4309 |         4309 |            0 |   4309 | 100.00% |
-| F4System, NO_MODEL_POINTER |   327 |            0 |          327 |      0 |   0.00% |
-| CROSS, DEV                 |   315 |          315 |            0 |    315 | 100.00% |
-| F3System, NO_MODEL_POINTER |   108 |          108 |            0 |    108 | 100.00% |
+| entityName + modelKind          |    总数 | 有 BASEFAMILY | 无 BASEFAMILY | FAM 存在 |     覆盖率 |
+| ------------------------------- | ----: | -----------: | -----------: | -----: | ------: |
+| Wire_Device, GEOMETRY_DEV       | 11773 |        11773 |            0 |  11773 | 100.00% |
+| F4System, CBM_REF_GROUP         |  5861 |            0 |         5861 |      0 |   0.00% |
+| WIRE, GEOMETRY_DEV              |  5460 |        5460 |            0 |   5460 | 100.00% |
+| Tower_Device, GEOMETRY_DEV      |  4309 |        4309 |            0 |   4309 | 100.00% |
+| CROSS, GEOMETRY_DEV             |   315 |          315 |            0 |    315 | 100.00% |
+| F3System, CBM_REF_GROUP         |   108 |          108 |            0 |    108 | 100.00% |
+| F1System, CBM_REF_GROUP         |     1 |            0 |            1 |      0 |   0.00% |
+| F2System, CBM_REF_GROUP         |     1 |            0 |            1 |      0 |   0.00% |
+| (空), SYSTEM_OR_CONTAINER       |     1 |            0 |            1 |      0 |   0.00% |
 
 线路样本中可暂定：
 
@@ -190,29 +216,37 @@ F4System 分组层通常没有 FAM
 
 ### 5.2 demo-line1
 
-| entityName + modelKind     |   总数 | 有 BASEFAMILY | 无 BASEFAMILY | FAM 存在 |     覆盖率 |
-| -------------------------- | ----: | -----------: | -----------: | -----: | ------: |
-| Wire_Device, DEV           |  1983 |         1983 |            0 |   1983 | 100.00% |
-| F4System, CBM_GROUP        |   907 |            0 |          907 |      0 |   0.00% |
-| WIRE, DEV                  |  1013 |         1013 |            0 |   1013 | 100.00% |
-| Tower_Device, DEV          |   897 |          897 |            0 |    897 | 100.00% |
-| CROSS, DEV                 |     7 |            7 |            0 |      7 | 100.00% |
-| F4System, NO_MODEL_POINTER |    30 |            0 |           30 |      0 |   0.00% |
-| F3System, NO_MODEL_POINTER |   161 |           25 |          136 |     25 |  15.53% |
+| entityName + modelKind          |   总数 | 有 BASEFAMILY | 无 BASEFAMILY | FAM 存在 |     覆盖率 |
+| ------------------------------- | ----: | -----------: | -----------: | -----: | ------: |
+| Wire_Device, GEOMETRY_DEV       |  1953 |         1953 |            0 |   1953 | 100.00% |
+| F4System, CBM_REF_GROUP         |  1072 |            0 |         1072 |      0 |   0.00% |
+| WIRE, GEOMETRY_DEV              |  1013 |         1013 |            0 |   1013 | 100.00% |
+| Tower_Device, GEOMETRY_DEV      |   782 |          782 |            0 |    782 | 100.00% |
+| CROSS, GEOMETRY_DEV             |   152 |          152 |            0 |    152 | 100.00% |
+| F3System, CBM_REF_GROUP         |    22 |           22 |            0 |     22 | 100.00% |
+| F2System, CBM_REF_GROUP         |     2 |            2 |            0 |      2 | 100.00% |
+| F1System, CBM_REF_GROUP         |     1 |            0 |            1 |      0 |   0.00% |
+| (空), SYSTEM_OR_CONTAINER       |     1 |            0 |            1 |      0 |   0.00% |
 
-> demo-line1 的 entityName + modelKind 分布与 demo-line 一致。
+> demo-line1 的 entityName + modelKind 分布与 demo-line 一致：业务对象层（GEOMETRY_DEV）100% 有 FAM；F4System 分组节点 100% 无 FAM；F3System 层级节点 100% 有 FAM。
 
 ### 5.3 demo-substation
 
-| entityName + modelKind     |   总数 | 单 BASEFAMILY | 多 BASEFAMILY1..N | 无 FAM | FAM 存在 |     覆盖率 |
-| -------------------------- | ----: | -----------: | ---------------: | -----: | -----: | ------: |
-| F4System, IFC              |  4360 |         4360 |                0 |      0 |   4360 | 100.00% |
-| PARTINDEX, DEV             |  3894 |         3894 |                0 |      0 |   3894 | 100.00% |
-| F4System, DEV              |   285 |          285 |                0 |      0 |    285 | 100.00% |
-| F3System, NO_MODEL_POINTER |   160 |           15 |              145 |      0 |    610 | 100.00% |
-| F2System, NO_MODEL_POINTER |     2 |            0 |                0 |      2 |      0 |   0.00% |
+| entityName + modelKind          |   总数 | 单 BASEFAMILY | 多 BASEFAMILY1..N | 无 FAM | FAM 存在 |     覆盖率 |
+| ------------------------------- | ----: | -----------: | ---------------: | -----: | -----: | ------: |
+| F4System, IFC_NODE              |  4360 |         4360 |                0 |      0 |   4360 | 100.00% |
+| PARTINDEX, GEOMETRY_DEV         |  3894 |         3894 |                0 |      0 |   3894 | 100.00% |
+| F4System, GEOMETRY_DEV          |   285 |          285 |                0 |      0 |    285 | 100.00% |
+| F3System, CBM_REF_GROUP         |   144 |            0 |              144 |      0 |    576 | 100.00% |
+| F2System, CBM_REF_GROUP         |    14 |           14 |                0 |      0 |     14 | 100.00% |
+| F1System, CBM_REF_GROUP         |     1 |            0 |                0 |      1 |      0 |   0.00% |
+| F3System, SYSTEM_OR_CONTAINER   |     1 |            0 |                1 |      0 |      4 | 100.00% |
+| (空), SYSTEM_OR_CONTAINER       |     2 |            0 |                0 |      2 |      0 |   0.00% |
 
-> **修正说明**：原版本未区分单 BASEFAMILY 与多 BASEFAMILY1..N 列，且把 F3System 多 FAM 节点误归入「无 BASEFAMILY」分类。本次复核拆分两列后，F3System 的 FAM 覆盖率从原 0% 修正为 100%。
+> **修正说明**：
+> 1. 原版本未区分单 BASEFAMILY 与多 BASEFAMILY1..N 列，且把 F3System 多 FAM 节点误归入「无 BASEFAMILY」分类。本次复核拆分两列后，F3System 的 FAM 覆盖率从原 0% 修正为 100%。
+> 2. modelKind 类别重命名后，F2System/F1System 仍归为 `CBM_REF_GROUP`（含 .cbm 引用键但无 OBJECTMODELPOINTER/IFCFILE）。
+> 3. F3System 总数 = 144（CBM_REF_GROUP）+ 1（SYSTEM_OR_CONTAINER）= 145，与 §2 多 FAM 文件数一致。其中 1 个 F3System 落入 `SYSTEM_OR_CONTAINER` 是因为它没有任何 `.cbm` 引用键（异常节点，但仍携带 4 个 `BASEFAMILY1..4`）。
 
 变电样本中可暂定：
 

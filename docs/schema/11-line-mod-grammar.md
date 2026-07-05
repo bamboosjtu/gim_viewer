@@ -668,9 +668,88 @@ if (key 集合包含 "TYPE" 且全大写):  → WIRE 导线参数
 
 ---
 
-## 6. Parser 草案 schema
+## 6. demo-line1 对照验证
 
-### 6.1 判定标准
+> 前 5 节的 grammar 深度分析主要基于 `demo-line`。为验证 grammar 跨样本稳定性，本节使用同一脚本（`line-mod-grammar-deep.ps1`）对 `demo-line1` 全量复跑 4 类文本格式族，逐一对照 grammar 边界。
+>
+> 详细脚本输出见 `_generated/demo-line1/demo-line1-text-{hnum,point-line,section-kv,key-value}-summary.csv`。
+
+### 6.1 文件数对照
+
+| 格式族                     | demo-line | demo-line1 | 一致性 |
+| -------------------------- | --------: | ---------: | ------ |
+| TEXT_HNUM_COMMA_RECORD     |        31 |         18 | ✓ 同格式族 |
+| TEXT_POINT_LINE           |       315 |        300 | ✓ 同格式族 |
+| TEXT_SECTION_KV_RECORD    |      1300 |        156 | ✓ 同格式族 |
+| TEXT_KEY_VALUE             |       161 |         34 | ✓ 同格式族 |
+
+4 类格式族集合完全一致，与 `08-mod-static-survey.md` §3.3 的结论互证。
+
+### 6.2 TEXT_HNUM_COMMA_RECORD 对照
+
+| 维度              | demo-line                            | demo-line1                           | 一致性 |
+| ----------------- | ------------------------------------ | ------------------------------------ | ------ |
+| HNum 取值         | 1 / 3 / 5 / 7 / 8                    | 1 / 3 / 5 / 7 / 8                    | ✓ 完全一致 |
+| P 记录 token 数   | 恒定（与坐标维度一致）               | 恒定（5 token）                      | ✓ 稳定 |
+| R 记录 token 数   | 11 / 5 / 9 三变体                    | 11 / 5 / 9 三变体                    | ✓ 三变体均存在 |
+| R 11 token 占比   | 99.79%                               | 99.53%（119435/120073）              | ✓ 接近 |
+| R 5 token 占比    | 0.21%                                | 0.53%（636/120073）                  | △ demo-line1 钢管比例略高 |
+| R 9 token 数      | 2                                    | 2                                    | ✓ 罕见变体仍存在 |
+| G 记录 token 数   | 6（恒定）                            | 6（恒定）                            | ✓ 稳定 |
+| HSubLeg/HLeg 系列 | HSubLeg1-N / HLeg1-N                 | HSubLeg1-14 / HLeg1-8                | ✓ 同记录族 |
+
+**结论**：`demo-line1` 的 R 记录三变体分布与 `demo-line` 高度一致，11 token 仍占主导（>99%），9 token 仍是罕见兜底分支（2 条）。grammar 不需要因 demo-line1 而调整。
+
+### 6.3 TEXT_POINT_LINE 对照
+
+| 维度             | demo-line                            | demo-line1                           | 一致性 |
+| ---------------- | ------------------------------------ | ------------------------------------ | ------ |
+| POINT token 数   | 5（恒定）                            | 5（1370 条，100%）                   | ✓ 稳定 |
+| LINE token 数    | 2（恒定）                            | 2（1128 条，100%）                   | ✓ 稳定 |
+| POINT type 字段  | 13 / 42                              | 13 / 42                              | ✓ 同枚举集合 |
+| CODE 取值        | 201 / 30 / 31 / 32 / 33 / 34 / 35（7 种） | 201 / 30 / 31 / 32 / 33 / 34 / 35 / 81 / 82（9 种） | △ demo-line1 新增 81 / 82 |
+| Lat/Lon/Alt 范围 | demo-line 区域                       | 26.85 ~ 26.98°N, 112.43 ~ 112.47°E   | 各样本自有地理范围 |
+
+**结论**：`demo-line1` 新增 `CODE=81` 与 `CODE=82` 两种枚举值，但仅影响 CODE 业务枚举集合，**不影响 grammar token 结构**。POINT/LINE 仍是 5/2 token，type 字段仍是 13/42 二元枚举。grammar 不需要因新增 CODE 而调整。
+
+### 6.4 TEXT_SECTION_KV_RECORD 对照
+
+| 维度                 | demo-line                            | demo-line1                           | 一致性 |
+| -------------------- | ------------------------------------ | ------------------------------------ | ------ |
+| Section header       | 100% `Bolt`                          | 100% `Bolt`（156 文件）              | ✓ 稳定 |
+| BoltNum 取值         | 4 / 8（4 占 92%，8 占 8%）            | 4（仅 4，无 8）                      | △ demo-line1 无 8 |
+| Bolt 记录 token 数  | 15（恒定）                           | 15（624 条，100%）                   | ✓ 稳定 |
+| Bolt 记录分号段数   | 2（恒定）                            | 2（624 条，100%）                    | ✓ 稳定 |
+| 其他 KV keys        | 无                                   | 无                                   | ✓ 稳定 |
+
+**结论**：`demo-line1` 的 `BoltNum` 只取 4，不取 8。这意味着 demo-line 中 8% 的 8-bolt 文件可能是 demo-line 特有的螺栓布置变体（如双拼法兰）。grammar 应将 `BoltNum` 处理为枚举集合 `{4, 8}` 而非单一值。Bolt 记录 token 数与分号段数仍 100% 稳定。
+
+### 6.5 TEXT_KEY_VALUE 对照
+
+| 维度                    | demo-line                            | demo-line1                           | 一致性 |
+| ----------------------- | ------------------------------------ | ------------------------------------ | ------ |
+| 签名 1（Tower_Device）  | `type,H1,H2,H3,H4,d,e1,e2` (152 文件) | `type,H1,H2,H3,H4,d,e1,e2` (28 文件) | ✓ 完全一致 |
+| 签名 2（WIRE）          | `TYPE,SECTIONALAREA,...,RATEDSTRENGTH` (9 文件) | `TYPE,SECTIONALAREA,...,RATEDSTRENGTH` (6 文件) | ✓ 完全一致 |
+| key 集合重叠            | 无                                   | 无                                   | ✓ 稳定 |
+| 大小写区分规则         | 全小写 / 全大写                      | 全小写 / 全大写                      | ✓ 稳定 |
+
+**结论**：`demo-line1` 的 2 种签名与 `demo-line` 完全一致，分离规则（key 大小写）100% 稳定。grammar 不需要调整。
+
+### 6.6 对照总结
+
+```text
+1. 4 类 grammar 在 demo-line1 上全部成立，无需调整 parser 边界。
+2. demo-line1 新增 CODE=81/82 仅扩展 CODE 枚举集合，不影响 token 结构。
+3. demo-line1 缺失 BoltNum=8 是样本量较小的统计偏差，grammar 仍按 {4, 8} 枚举处理。
+4. R 记录 9 token 罕见变体在 demo-line1 仍为 2 条，确认为稳定的弱 schema 兜底分支。
+5. 两个线路样本联合验证后，TEXT_HNUM_COMMA_RECORD / TEXT_POINT_LINE / TEXT_SECTION_KV_RECORD / TEXT_KEY_VALUE 的 grammar 边界可作为线路工程通用 parser 草案。
+```
+
+---
+
+## 7. Parser 草案 schema
+
+### 7.1 判定标准
 
 | 判据 | 强类型通过条件 |
 | ---- | -------------- |
@@ -679,7 +758,7 @@ if (key 集合包含 "TYPE" 且全大写):  → WIRE 导线参数
 | 记录结构稳定 | token 数 / 段数无变体（或变体已识别） |
 | 样本充分 | 实例数 ≥ 100 |
 
-### 6.2 各格式族判定结果
+### 7.2 各格式族判定结果
 
 | 格式族 | 文件数 | 字段稳定 | 类型稳定 | 结构稳定 | 样本充分 | 判定 |
 | ------ | -----: | :------: | :------: | :------: | :------: | ---- |
@@ -688,7 +767,7 @@ if (key 集合包含 "TYPE" 且全大写):  → WIRE 导线参数
 | TEXT_SECTION_KV_RECORD | 1300 | ✓ | ✓ | ✓（Bolt 100% 稳定） | ✓ | **强类型** |
 | TEXT_KEY_VALUE | 161 | ✓（两种签名已识别） | ✓ | ✓ | ✓ | **强类型**（按签名分发） |
 
-### 6.3 推荐的 TypeScript schema 草案
+### 7.3 推荐的 TypeScript schema 草案
 
 ```typescript
 // ============ TEXT_HNUM_COMMA_RECORD ============
@@ -845,9 +924,15 @@ interface WireModFile {
 }
 ```
 
-### 6.4 实现策略建议
+### 6.4 实现策略建议（旧编号，已上移至 §7）
 
-1. **类型分发优先**：parser 按 [08-mod-static-survey.md](08-mod-static-survey.md) §3 的 `Classify-ModText` 函数分型，再按本文档 §6.3 schema 解析。
+> 本节内容已合并到 §7.4 实现策略建议。
+
+---
+
+### 7.4 实现策略建议
+
+1. **类型分发优先**：parser 按 [08-mod-static-survey.md](08-mod-static-survey.md) §3 的 `Classify-ModText` 函数分型，再按本文档 §7.3 schema 解析。
 2. **R 记录联合分发**：先按 token 数判别变体（11 → angle / 5 → tube / 其他 → unknown），分别解析。
 3. **TEXT_KEY_VALUE 签名判别**：先提取所有 key 排序后形成签名，按签名匹配 Tower_Device / WIRE。
 4. **D 字段补丁**：Tower_Device 签名 1 实测 `d,D` 同时出现，但 D 未在脚本统计的签名中。parser 应容许 D 字段可选出现。
@@ -856,19 +941,19 @@ interface WireModFile {
 
 ---
 
-## 7. 浏览器实现影响
+## 8. 浏览器实现影响
 
-### 7.1 当前缺口
+### 8.1 当前缺口
 
 线路样本（`demo-line` / `demo-line1`）当前完全不渲染 MOD 几何，导致：
 - 1807 个 MOD 文件未渲染（其中 1300 个螺栓表 + 161 个基础/导线参数 + 315 个点线 + 31 个杆塔主体）
 - CBM 树可显示节点，但无 3D 几何联动
 
-### 7.2 补齐路径建议
+### 8.2 补齐路径建议
 
 ```text
 Step 1: 在 viewer 层新增 lineModLoader（与 substation modLoader 分离，因格式完全不同）
-Step 2: parser 层按本文档 §6.3 schema 解析 4 类格式族
+Step 2: parser 层按本文档 §7.3 schema 解析 4 类格式族
 Step 3: 渲染层按格式族分发：
         TEXT_HNUM_COMMA_RECORD → 杆塔骨架渲染
           - P 节点 → THREE.Vector3
@@ -887,7 +972,7 @@ Step 4: 节点级懒加载沿用现有 IFC 流程，CBM 点击 → 查 OBJECTMOD
         DEV → SOLIDMODEL → PHM → SOLIDMODEL → MOD
 ```
 
-### 7.3 风险点
+### 8.3 风险点
 
 - **R 记录 9 token 变体**（仅 2 条）样本不足，spec 字段为空，无法确认语义。parser 应保留原始字符串兜底。
 - **HLeg 仅含 X/Y**：渲染塔腿时缺 Z 坐标，需结合 HSubLeg 偏移与 H 记录标高推断塔腿顶 Z。
@@ -896,7 +981,7 @@ Step 4: 节点级懒加载沿用现有 IFC 流程，CBM 点击 → 查 OBJECTMOD
 - **D 字段未在签名中**：Tower_Device 签名 1 未含 D，但实测全部 152 文件均有 D。应将 D 列为可选字段。
 - **TEXT_POINT_LINE 与地图叠加**：lat/lon 为 WGS84 经纬度，与项目硬约束（OSM 在线底图）坐标系一致，可直接叠加。
 
-### 7.4 与既有约束的关系
+### 8.4 与既有约束的关系
 
 - 项目硬约束："MVP 不实现悬链线、3D 线路、MOD 解析"。
 - 本报告仅形成 parser 草案边界，**不进入渲染实现**。
@@ -904,7 +989,7 @@ Step 4: 节点级懒加载沿用现有 IFC 流程，CBM 点击 → 查 OBJECTMOD
 
 ---
 
-## 8. 当前不能得出的结论
+## 9. 当前不能得出的结论
 
 ```text
 1. R 记录 9 token 变体的字段语义

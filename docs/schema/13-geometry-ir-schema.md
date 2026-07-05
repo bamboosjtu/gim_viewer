@@ -14,7 +14,7 @@
 | ---- | ---- | ---- |
 | 变电几何 | 仅渲染 IFC（设备外形 + CBM 树联动） | 4135 个 XML_WITH_ENTITIES MOD、1803 个 STL 完全未渲染 |
 | 变电属性 | 仅展示 IFC 原生属性 + CBM/FAM/DEV | 4179 个 PHM 的 COLOR/TransformMatrix 信息未参与展示；44 个 EMPTY_DEVICE_XML 孤儿 MOD 的存在未提示 |
-| 线路几何 | 仅渲染塔位点（CROSS 的经纬度点线） | 31 个 TEXT_HNUM 杆塔骨架、315 个 CROSS、181 个 Tower_Device STL、11773 个 Wire_Device STL 全部未渲染 |
+| 线路几何 | 仅渲染塔位点（CROSS 的经纬度点线） | 31 个 TEXT_HNUM_COMMA_RECORD MOD 文件未渲染；315 个 CROSS 对应的 TEXT_POINT_LINE MOD 未渲染；demo-line 中 181 个 unique STL 文件未渲染；Wire_Device 通过 11773 个 CBM refs 触达 8 个 unique STL；Tower_Device 通过部分 CBM refs 触达 STL 或 MOD，不能简单按 entityName 唯一决定 |
 | 线路属性 | 仅展示 CBM/FAM/DEV | Tower_Device 螺栓参数（1300 个 Bolt 表）、HNum 杆塔分段参数、WIRE 导线参数全部未展示 |
 | 缓存命中 | currentFiles=null 时仅恢复 CBM 树和 IFC 缓存路径 | MOD/STL 缓存策略未设计；缓存命中场景下无法回放非 IFC 几何 |
 | 节点联动 | 仅 IFC 高亮 + 相机定位 | 节点→MOD/STL 几何的联动未实现 |
@@ -32,7 +32,9 @@
    - IFC 主路径（既有）
    - 无几何的"none"分支（EMPTY_DEVICE_XML / 14 个空 PHM）
 3. 保留 Transform / Color 上游信息
-   - PHM 矩阵 + MOD Entity 矩阵的两级变换（Round 5）
+   - 结构上保留 PHM TRANSFORMMATRIX + MOD Entity TransformMatrix 两级字段
+   - 但当前三个样本中，PHM TRANSFORMMATRIX 100% 为单位矩阵（Round 5）
+   - 实际有效变换主要来自 MOD Entity.TransformMatrix（即事实上的单级变换）
    - PHM COLOR（STL 引用非空，MOD 引用为空）
 4. 支持懒加载与缓存命中两条路径
    - 首次打开：currentFiles 持有原始文件 → IR 由 parser 即时构建
@@ -47,7 +49,9 @@
 ```text
 - 渲染策略（线框 / 实体 / 点云 / 地图叠加）→ 由 viewer 层决定
 - UI 展示形式（属性面板 / 树节点 / 弹窗）→ 由 ui 层决定
-- SQLite schema 变更（PARSER_VERSION 升级）→ IR 设计兼容现有表结构
+- SQLite schema 变更（PARSER_VERSION 升级、新表 DDL、数据迁移、索引设计）
+  → 不在 IR 范围；IR 只定义内存数据结构
+  → §5.2 给出 geometry_source 表的字段建议，正式 DDL 另起 14-geometry-cache-schema.md
 - 几何运算（布尔 / CSG / 简化）→ 由渲染层或专门的 geometry 工具处理
 - 工程语义（塔型 / 跨越档距 / 导线型号）→ 由 CBM/FAM/DEV 属性层处理
 ```
@@ -70,13 +74,17 @@
  * - 每个 kind 自带最小必要字段，不复制原始文件内容
  * - 大字段（字节流 / 文件路径）保留 path 引用，由 viewer 按需读取
  * - none 分支显式表达"无几何"，避免 null 散落
+ *
+ * 顶层联合类型引用各 kind 的详细 interface（§3），
+ * 避免 inline union 与详细 interface 字段不同步。
+ * 详细 interface 见 §3.1-§3.5。
  */
 export type GimGeometrySource =
-  | { kind: "ifc"; ifcFile: string; ifcGuid?: string; modelId: string }
-  | { kind: "xml-mod"; entities: XmlModEntity[]; modPath: string }
-  | { kind: "line-text-mod"; format: LineModFormat; modPath: string }
-  | { kind: "stl"; stlPath: string; format: "binary"; triangleCount: number }
-  | { kind: "none"; reason: NoneReason };
+  | IfcGeometrySource
+  | XmlModGeometrySource
+  | LineTextModGeometrySource
+  | StlGeometrySource
+  | NoneGeometrySource;
 ```
 
 ### 2.2 NoneReason 枚举
@@ -84,16 +92,22 @@ export type GimGeometrySource =
 ```typescript
 /**
  * "无几何"原因分类，用于 UI 提示与诊断。
+ *
+ * 注意区分两种"无几何"语义：
+ * - phm-no-solidmodel：PHM 无 SOLIDMODEL 字段（底层事实状态，可能就是空装配）
+ * - assembly-node-without-own-geometry：装配节点自身无几何，但子设备几何完整
+ *   （Round 7：变电 14 个无目标 PHM 即属于此类，需要区分以免误判为"缺几何"）
  */
 export type NoneReason =
-  | "empty-device-xml"        // 变电 EMPTY_DEVICE_XML（44 个，未参与渲染但应提示）
-  | "phm-no-solidmodel"       // 变电 14 个无 SOLIDMODEL 的空 PHM
-  | "phm-missing-target"      // SOLIDMODEL 引用目标缺失（硬缺失）
-  | "cbm-no-objectmodelpointer" // CBM 未声明 OBJECTMODELPOINTER
-  | "dev-no-solidmodel"       // DEV 未引用任何 PHM
-  | "parser-unsupported"      // 解析器暂不支持该 kind（保留扩展点）
-  | "parse-failed"            // 解析失败（具体错误由 reason 详情携带）
-  | "unknown";                // 未分类
+  | "empty-device-xml"                          // 变电 EMPTY_DEVICE_XML（44 个，未参与渲染但应提示）
+  | "phm-no-solidmodel"                         // PHM 无 SOLIDMODEL 字段（底层事实状态）
+  | "assembly-node-without-own-geometry"        // 装配节点自身无几何，但子设备几何完整（变电 14 个 PHM）
+  | "phm-missing-target"                        // SOLIDMODEL 引用目标缺失（硬缺失）
+  | "cbm-no-objectmodelpointer"                 // CBM 未声明 OBJECTMODELPOINTER
+  | "dev-no-solidmodel"                         // DEV 未引用任何 PHM
+  | "parser-unsupported"                        // 解析器暂不支持该 kind（保留扩展点）
+  | "parse-failed"                              // 解析失败（具体错误由 reason 详情携带）
+  | "unknown";                                  // 未分类
 ```
 
 ### 2.3 LineModFormat 枚举
@@ -250,12 +264,13 @@ export interface StlGeometrySource {
  * 无几何来源（显式表达，避免 null 散落）。
  *
  * 用于：
- * - 变电 44 个 EMPTY_DEVICE_XML 孤儿 MOD
- * - 变电 14 个无 SOLIDMODEL 的空 PHM
- * - CBM 未声明 OBJECTMODELPOINTER
- * - DEV 未引用 PHM
- * - SOLIDMODEL 引用目标缺失
- * - 解析器暂不支持的 kind
+ * - 变电 44 个 EMPTY_DEVICE_XML 孤儿 MOD（reason: empty-device-xml）
+ * - 变电 14 个无 SOLIDMODEL 的空 PHM（reason: assembly-node-without-own-geometry，
+ *   装配节点自身无几何但子设备几何完整；与 phm-no-solidmodel 区分）
+ * - CBM 未声明 OBJECTMODELPOINTER（reason: cbm-no-objectmodelpointer）
+ * - DEV 未引用 PHM（reason: dev-no-solidmodel）
+ * - SOLIDMODEL 引用目标缺失（reason: phm-missing-target）
+ * - 解析器暂不支持的 kind（reason: parser-unsupported）
  */
 export interface NoneGeometrySource {
   kind: "none";
@@ -447,8 +462,10 @@ UI 层（属性面板 / 树节点）：
       none → 显示 reason + detail（提示用户该节点无几何）
 
 缓存层（SQLite）：
+  - IR 文档只定义内存数据结构（§2-§4 的 TypeScript interface）
+  - SQLite geometry_source 表仅作为缓存实现建议，不是 IR 的一部分
   - 现有 ifc_model / cbm_node 表保留
-  - 新增 geometry_source 表（可选）：
+  - 缓存命中时如需恢复非 IFC 几何 IR，建议新增 geometry_source 表（可选）：
       cbm_path TEXT,
       solid_model_index INTEGER,
       kind TEXT,           -- 'ifc' / 'xml-mod' / 'line-text-mod' / 'stl' / 'none'
@@ -458,6 +475,8 @@ UI 层（属性面板 / 树节点）：
       triangle_count INTEGER, -- 仅 stl 用
       reason TEXT          -- 仅 none 用
   - 缓存命中时直接从 SQLite 恢复 IR，无需重新解析 MOD/STL
+  - 正式 DDL（含 PARSER_VERSION 升级、数据迁移、索引设计）
+    应另起 `14-geometry-cache-schema.md` 或放入实现设计文档，不在本 IR 范围
 ```
 
 ---
@@ -471,7 +490,7 @@ UI 层（属性面板 / 树节点）：
 | 1 | 变电 4135 个 XML_WITH_ENTITIES MOD 未渲染 | 仅 IFC 主路径 | `xml-mod` kind + `XmlModEntity[]` + xmlModLoader |
 | 2 | 变电 1803 个 STL 未渲染 | 仅 IFC | `stl` kind + stlLoader（先做 30 个 STL-only，再评估 86 个 STL+MOD 并存） |
 | 3 | 变电 44 个 EMPTY_DEVICE_XML 孤儿未提示 | 静默忽略 | `none` kind + `reason: "empty-device-xml"`，UI 显示提示 |
-| 4 | 变电 14 个无 SOLIDMODEL 的 PHM 未提示 | 静默忽略 | `none` kind + `reason: "phm-no-solidmodel"` |
+| 4 | 变电 14 个无 SOLIDMODEL 的 PHM 未提示 | 静默忽略 | `none` kind + `reason: "assembly-node-without-own-geometry"`（装配节点自身无几何但子设备几何完整） |
 | 5 | 线路 31 个 TEXT_HNUM 杆塔骨架未渲染 | 仅塔位点 | `line-text-mod` format=`text-hnum-comma-record` + HNum parser |
 | 6 | 线路 315 个 CROSS 经纬度点线无 3D 表达 | 仅 2D 地图叠加 | `line-text-mod` format=`text-point-line`（保留地图为主，3D 可选） |
 | 7 | 线路 1300 个螺栓表未展示 | 完全缺失 | `line-text-mod` format=`text-section-kv-record` + 属性面板 |
@@ -583,6 +602,7 @@ P2（体验补齐）：
 5. PARSER_VERSION 升级会失效所有现有缓存
    - 阶段 6 实施时需提示用户重新解压 GIM
    - 或提供数据迁移脚本（从旧 cbm_node 表推导 geometry_source）
+   - geometry_source 表的正式 DDL 不在本 IR 范围，应另起 14-geometry-cache-schema.md（见 §1.3 和 §5.2）
 
 6. 内存占用
    - 4135 个变电 XML MOD 全量解析可能占用大量内存
@@ -614,8 +634,9 @@ P2（体验补齐）：
    - 不影响 IR 设计（CODE 保留为 string），但影响 UI 展示
 
 5. 缓存命中时的 geometry_source 表 schema 设计
-   - 本轮仅给出字段建议，未做 SQLite DDL
+   - 本 IR 仅给出字段建议（见 §5.2），未做正式 SQLite DDL
    - 需结合现有 cbm_node 表结构设计，避免冗余
+   - 正式 DDL 应另起 14-geometry-cache-schema.md，不在本 IR 范围（见 §1.3）
 
 6. IR 是否需要支持几何变换的"组合"（如多 PHM 共享同一 MOD 的不同变换）
    - 已知 MOD 在线路样本最大复用 70 次
@@ -810,6 +831,7 @@ export interface StlGeometrySource {
 export type NoneReason =
   | "empty-device-xml"
   | "phm-no-solidmodel"
+  | "assembly-node-without-own-geometry"
   | "phm-missing-target"
   | "cbm-no-objectmodelpointer"
   | "dev-no-solidmodel"
