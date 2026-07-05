@@ -55,9 +55,9 @@ export async function handleNodeClick(
       await highlightIfcFromNode(runtime.ctx, state, node, showMessage);
       return;
     }
-    // 无 IFC 关联但有 devPath → 尝试 xml-mod 加载路径（变电工程典型）
+    // 无 IFC 关联但有 devPath → 尝试 MOD/STL 加载路径（变电工程典型）
     if (!ifcModelId && node.devPath) {
-      await loadXmlModForNode(state, node, showMessage);
+      await loadModStlForNode(state, node, showMessage);
     }
     return;
   }
@@ -150,41 +150,57 @@ async function getIfcBufferForEntry(
 }
 
 /**
- * 节点点击时加载 xml-mod 几何（变电工程无 IFC 设备的回退路径）。
+ * 节点点击时加载 MOD/STL 几何（变电工程无 IFC 设备的回退路径）。
  *
  * 流程：
- * 1. discoverModGeometriesFromNode 走 CBM → DEV → PHM → MOD 引用链
- * 2. 对每个未加载的 modPath，loadXmlModFromFiles 转 Three.js Group
- * 3. applyExternalTransforms 应用 DEV + PHM 变换矩阵
- * 4. 加入 scene 并跟踪到 state.loadedXmlModGroups
- * 5. 首次加载时 fitCameraToScene 定位相机
+ * 1. discoverGeometriesFromNode 走 CBM → DEV → PHM → MOD/STL 引用链
+ * 2. 对每个未加载的 MOD，loadXmlModFromFiles 转 Three.js Group
+ * 3. 对每个未加载的 STL，parseStlBinary 转 Three.js Group
+ * 4. applyExternalTransforms 应用 DEV + PHM 变换矩阵
+ * 5. 加入 scene 并跟踪到 state.loadedXmlModGroups / loadedStlGroups
+ * 6. 首次加载时 fitCameraToScene 定位相机
  *
- * P0 范围：
- * - 仅处理 currentFiles 非空场景（首次打开）
- * - 缓存命中场景（currentFiles=null）由 P2 实现
- * - STL 引用由 modGeometryDiscovery 跳过（P1）
+ * 文件来源（v6 起）：
+ * - currentFiles 非空（首次打开）：直接从内存 Map 读取
+ * - currentFiles=null（缓存命中）：按需从磁盘 readCachedIfc 读取 DEV/PHM/MOD 文件
  *
  * @param state 全局 AppState
  * @param node CBM 节点（必须带 devPath）
  * @param showMessage 消息回调
  */
-async function loadXmlModForNode(
+async function loadModStlForNode(
   state: AppState,
   node: CbmNode,
   showMessage: (text: string) => void,
 ): Promise<void> {
-  if (!state.currentFiles) {
-    // 缓存命中场景，P2 处理
-    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 缓存命中场景跳过（P2 实现）:', node.devPath);
+  // 准备文件读取适配器：currentFiles 优先，缓存命中时回退磁盘
+  const files = state.currentFiles;
+  const projectId = state.currentProjectId;
+
+  if (!files && projectId == null) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 无文件来源可用（currentFiles=null 且 projectId=null）:', node.devPath);
     return;
   }
 
-  const { discoverModGeometriesFromNode } = await import('./modGeometryDiscovery.js');
-  const discovered = await discoverModGeometriesFromNode(node, state.currentFiles);
-
-  if (discovered.length === 0) {
-    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 未发现 MOD 几何来源:', node.devPath);
+  const { discoverGeometriesFromNode } = await import('./modGeometryDiscovery.js');
+  // discoverGeometriesFromNode 在 files=null 时返回空，因此缓存命中场景需要先构建临时 Map
+  const discoveryFiles = files ?? await buildGeometryFilesMapFromCache(projectId!, node);
+  if (!discoveryFiles || discoveryFiles.size === 0) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 无法获取 DEV/PHM/MOD 文件:', node.devPath);
     return;
+  }
+
+  const { mods, stls } = await discoverGeometriesFromNode(node, discoveryFiles);
+
+  if (mods.length === 0 && stls.length === 0) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 未发现 MOD/STL 几何来源:', node.devPath);
+    return;
+  }
+
+  // 缓存命中场景下，确保所有需要的 MOD/STL 文件也在 discoveryFiles 中
+  if (!files) {
+    await ensureModFilesInCacheMap(projectId!, mods, discoveryFiles);
+    await ensureStlFilesInCacheMap(projectId!, stls, discoveryFiles);
   }
 
   // 获取 ViewerRuntime（懒加载，与 IFC 路径共用同一引擎）
@@ -197,31 +213,254 @@ async function loadXmlModForNode(
   const { loadXmlModFromFiles, applyExternalTransforms } = await import('../viewer/xmlModLoader.js');
 
   let loadedCount = 0;
-  for (const geo of discovered) {
-    // 已加载则跳过
+  let stlLoadedCount = 0;
+
+  // ── 加载 MOD ──
+  for (const geo of mods) {
     if (state.loadedXmlModGroups.has(geo.modPath)) {
-      debugLog(DEBUG_IFC_LOAD, '[xml-mod] 已加载，跳过:', geo.modPath);
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] MOD 已加载，跳过:', geo.modPath);
       continue;
     }
 
-    const group = await loadXmlModFromFiles(geo.modPath, state.currentFiles);
+    const group = await loadXmlModFromFiles(geo.modPath, discoveryFiles);
     if (!group) continue;
 
-    // 应用外部变换（PHM + DEV）
     applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
-
-    // 加入场景并跟踪
     scene.add(group);
     state.loadedXmlModGroups.set(geo.modPath, group);
     loadedCount++;
   }
 
-  if (loadedCount > 0) {
-    showMessage(`已加载 ${loadedCount} 个 MOD 模型`);
+  // ── 加载 STL ──
+  const { parseStlBinary } = await import('../viewer/stlLoader.js');
+  for (const geo of stls) {
+    if (state.loadedStlGroups.has(geo.stlPath)) {
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] STL 已加载，跳过:', geo.stlPath);
+      continue;
+    }
+
+    const stlFile = discoveryFiles.get(geo.stlPath);
+    if (!stlFile) {
+      console.warn(`[xml-mod] STL 文件不存在: ${geo.stlPath}`);
+      continue;
+    }
+    const buffer = await stlFile.arrayBuffer();
+    const group = parseStlBinary(buffer, geo.stlPath);
+    if (!group) continue;
+
+    applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
+    scene.add(group);
+    state.loadedStlGroups.set(geo.stlPath, group);
+    stlLoadedCount++;
+  }
+
+  const totalLoaded = loadedCount + stlLoadedCount;
+  if (totalLoaded > 0) {
+    const parts: string[] = [];
+    if (loadedCount > 0) parts.push(`${loadedCount} 个 MOD`);
+    if (stlLoadedCount > 0) parts.push(`${stlLoadedCount} 个 STL`);
+    showMessage(`已加载 ${parts.join(' + ')} 模型`);
     // 首次加载时定位相机到场景包围盒
     if (!state.hasFittedCamera) {
       const { fitCameraToScene } = await import('../viewer/camera.js');
       fitCameraToScene(ctx, state);
     }
   }
+}
+
+/**
+ * 缓存命中场景下，从磁盘读取 DEV/PHM/MOD 文件构建临时 Map<string, File>。
+ *
+ * 读取范围：
+ * - DEV/{node.devPath}（必需）
+ * - PHM/{devDoc.solidModels[].solidModelPath}（必需）
+ * - MOD/{phmDoc.solidModels[].solidModelPath}（延迟到 ensureModFilesInCacheMap 补充）
+ *
+ * 一次点击只读取该节点引用链需要的文件，避免一次性读取全部 DEV/PHM/MOD。
+ *
+ * @param projectId 数据库 gim_project.id
+ * @param node CBM 节点（必须带 devPath）
+ * @returns 包含 DEV + PHM 文件的 Map；找不到时返回空 Map
+ */
+async function buildGeometryFilesMapFromCache(
+  projectId: number,
+  node: CbmNode,
+): Promise<Map<string, File>> {
+  const result = new Map<string, File>();
+  const { readCachedIfc } = await import('../desktop/database.js');
+  const { parseDev } = await import('../gim/geometry/devParser.js');
+
+  // 1. 读 DEV 文件
+  if (!node.devPath) return result;
+  const devPath = `DEV/${node.devPath}`;
+  try {
+    const bytes = await readCachedIfc(projectId, devPath);
+    const file = bytesToFile(bytes, devPath);
+    result.set(devPath, file);
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 从磁盘读取 DEV:', devPath, `(${bytes.byteLength} bytes)`);
+  } catch (err) {
+    console.warn(`[xml-mod] DEV 文件读取失败: ${devPath}`, err);
+    return result;
+  }
+
+  // 2. 解析 DEV，读 PHM 文件
+  const devFile = result.get(devPath)!;
+  const devBuffer = await devFile.arrayBuffer();
+  const devText = new TextDecoder().decode(devBuffer);
+  const devDoc = parseDev(devText, devPath);
+
+  for (const solid of devDoc.solidModels) {
+    const phmFileName = solid.solidModelPath;
+    if (!phmFileName.toLowerCase().endsWith('.phm')) continue;
+    const phmPath = `PHM/${phmFileName}`;
+    if (result.has(phmPath)) continue;
+    try {
+      const bytes = await readCachedIfc(projectId, phmPath);
+      const file = bytesToFile(bytes, phmPath);
+      result.set(phmPath, file);
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] 从磁盘读取 PHM:', phmPath, `(${bytes.byteLength} bytes)`);
+    } catch (err) {
+      console.warn(`[xml-mod] PHM 文件读取失败: ${phmPath}`, err);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * 补充 discovery Map 中缺失的 MOD 文件（缓存命中场景专用）。
+ *
+ * discoverModGeometriesFromNode 返回的 DiscoveredModGeometry 包含 modPath，
+ * 但 discoveryFiles Map 中可能尚未包含 MOD 文件（buildGeometryFilesMapFromCache 只读 DEV/PHM）。
+ * 本函数遍历 discovered 列表，按需读取 MOD 文件并加入 discoveryFiles。
+ *
+ * @param projectId 数据库 gim_project.id
+ * @param discovered discoverModGeometriesFromNode 返回值
+ * @param files 文件 Map（会被原地修改）
+ */
+async function ensureModFilesInCacheMap(
+  projectId: number,
+  discovered: Array<{ modPath: string }>,
+  files: Map<string, File>,
+): Promise<void> {
+  const { readCachedIfc } = await import('../desktop/database.js');
+  for (const geo of discovered) {
+    if (files.has(geo.modPath)) continue;
+    try {
+      const bytes = await readCachedIfc(projectId, geo.modPath);
+      const file = bytesToFile(bytes, geo.modPath);
+      files.set(geo.modPath, file);
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] 从磁盘读取 MOD:', geo.modPath, `(${bytes.byteLength} bytes)`);
+    } catch (err) {
+      console.warn(`[xml-mod] MOD 文件读取失败: ${geo.modPath}`, err);
+    }
+  }
+}
+
+/**
+ * 补充 discovery Map 中缺失的 STL 文件（缓存命中场景专用）。
+ *
+ * @param projectId 数据库 gim_project.id
+ * @param discovered discoverGeometriesFromNode 返回的 STL 列表
+ * @param files 文件 Map（会被原地修改）
+ */
+async function ensureStlFilesInCacheMap(
+  projectId: number,
+  discovered: Array<{ stlPath: string }>,
+  files: Map<string, File>,
+): Promise<void> {
+  const { readCachedIfc } = await import('../desktop/database.js');
+  for (const geo of discovered) {
+    if (files.has(geo.stlPath)) continue;
+    try {
+      const bytes = await readCachedIfc(projectId, geo.stlPath);
+      const file = bytesToFile(bytes, geo.stlPath);
+      files.set(geo.stlPath, file);
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] 从磁盘读取 STL:', geo.stlPath, `(${bytes.byteLength} bytes)`);
+    } catch (err) {
+      console.warn(`[xml-mod] STL 文件读取失败: ${geo.stlPath}`, err);
+    }
+  }
+}
+
+/**
+ * 把 Uint8Array 转换为 File 对象。
+ *
+ * 通过 slice 复制到一个独立的 ArrayBuffer，避免 Uint8Array<ArrayBufferLike>
+ * 与 BlobPart 类型不兼容（SharedArrayBuffer 不被 Blob 接受）。
+ */
+function bytesToFile(bytes: Uint8Array, path: string): File {
+  const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return new File([ab], path, { type: 'application/octet-stream' });
+}
+
+/**
+ * 遍历 CBM 树，收集所有"无 IFC 引用但有 devPath"的节点。
+ *
+ * 这些节点是 xml-mod 几何的来源（变电工程典型）。
+ * 跳过的节点：
+ * - 有 ifcFile 且有 ifcGuid（这些走 IFC 加载路径）
+ * - 没有 devPath（无 OBJECTMODELPOINTER）
+ *
+ * @param root CBM 根节点
+ * @returns 符合条件的节点列表
+ */
+export function collectXmlModNodes(root: CbmNode | null): CbmNode[] {
+  if (!root) return [];
+  const result: CbmNode[] = [];
+  function walk(n: CbmNode) {
+    // 跳过有 IFC 引用的节点（已通过 IFC 路径加载）
+    if (n.ifcFile && n.ifcGuid) {
+      // 但仍递归子节点（子节点可能是 MOD-only）
+    } else if (n.devPath) {
+      result.push(n);
+    }
+    for (const child of n.children) walk(child);
+  }
+  walk(root);
+  return result;
+}
+
+/**
+ * 自动加载 CBM 树中所有"无 IFC 引用但有 devPath"的节点的 xml-mod 几何。
+ *
+ * 在 IFC 加载完成后调用，遍历 CBM 树收集符合条件节点，
+ * 对每个节点调用 loadXmlModForNode，把 DEV → PHM → MOD 引用链的几何加入场景。
+ *
+ * 设计动机：
+ * - GIM 文件是一个整体，IFC 和 MOD 共同构成完整工程
+ * - 用户期望打开 GIM 后看到完整几何，而不是只有 IFC
+ * - LOD（Level of Detail）和系统高亮是未来需求，不影响当前整体加载策略
+ *
+ * @param state 全局 AppState
+ * @param showMessage 消息回调
+ * @returns 已加载的 MOD 模型数量
+ */
+export async function autoLoadAllXmlModGeometries(
+  state: AppState,
+  showMessage: (text: string) => void,
+): Promise<number> {
+  const nodes = collectXmlModNodes(state.currentCbmTree);
+  if (nodes.length === 0) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 自动加载：CBM 树中无符合条件的节点');
+    return 0;
+  }
+  debugLog(DEBUG_IFC_LOAD, '[xml-mod] 自动加载：开始遍历', { nodeCount: nodes.length });
+
+  let totalLoaded = 0;
+  for (const node of nodes) {
+    try {
+      // loadModStlForNode 内部会跳过已加载的 MOD/STL（state 索引去重）
+      await loadModStlForNode(state, node, showMessage);
+    } catch (err) {
+      console.warn('[xml-mod] 自动加载节点失败:', node.path, err);
+    }
+  }
+  totalLoaded = state.loadedXmlModGroups.size + state.loadedStlGroups.size;
+  debugLog(DEBUG_IFC_LOAD, '[xml-mod] 自动加载完成', {
+    totalLoaded,
+    mods: state.loadedXmlModGroups.size,
+    stls: state.loadedStlGroups.size,
+  });
+  return totalLoaded;
 }

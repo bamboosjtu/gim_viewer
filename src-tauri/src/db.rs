@@ -10,7 +10,8 @@ use tauri::Manager;
 /// v3: validate cache requires cbm_node index; rebuild incomplete v2 cache
 /// v4: adds transmission_line graph cache (line_cbm_node/child/ref/file_stat)
 /// v5: adds transmission_line FAM/DEV attribute cache (line_fam_property / line_dev_property)
-pub const PARSER_VERSION: &str = "gim-parser-v5";
+/// v6: 缓存 DEV/PHM/MOD 几何文件到本地磁盘（缓存命中场景下支持 xml-mod 回放）
+pub const PARSER_VERSION: &str = "gim-parser-v6";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建

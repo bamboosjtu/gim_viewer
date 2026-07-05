@@ -225,17 +225,28 @@ COLOR2=`;
       expect(results).toEqual([]);
     });
 
-    it('PHM 引用 STL → 跳过（P1 实现）', async () => {
-      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    it('PHM 引用 STL → 新版 discoverGeometriesFromNode 正常返回 STL', async () => {
+      const { discoverGeometriesFromNode } = await import('../modGeometryDiscovery.js');
+      const node = makeNode('abc.dev');
+      const files = new Map<string, File>([
+        ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'main.phm' }), 'abc.dev')],
+        ['PHM/main.phm', makeFile(makePhmText({ modelPath: 'main.stl', color: '128,128,128,100' }), 'main.phm')],
+      ]);
+      const results = await discoverGeometriesFromNode(node, files);
+      expect(results.mods).toEqual([]);
+      expect(results.stls).toHaveLength(1);
+      expect(results.stls[0].stlPath).toBe('MOD/main.stl');
+    });
+
+    it('PHM 引用 STL → 旧版 discoverModGeometriesFromNode 兼容（仅返回 MOD）', async () => {
       const node = makeNode('abc.dev');
       const files = new Map<string, File>([
         ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'main.phm' }), 'abc.dev')],
         ['PHM/main.phm', makeFile(makePhmText({ modelPath: 'main.stl', color: '128,128,128,100' }), 'main.phm')],
       ]);
       const results = await discoverModGeometriesFromNode(node, files);
+      // 旧版 wrapper 仅返回 .mods，STL 不出现（向后兼容）
       expect(results).toEqual([]);
-      expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('STL'));
-      debugSpy.mockRestore();
     });
 
     it('PHM 引用未知扩展名 → 跳过 + warn', async () => {

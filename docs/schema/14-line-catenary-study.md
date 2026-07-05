@@ -1,10 +1,12 @@
-# M4 线路几何与悬链线研究
+# 线路悬链线参数研究（M4 阶段沉淀）
 
-> 本文档合并 M4-B1 / B2 / B3 / B3A / B3B / B3C 阶段的全部研究方法论、审计流程、样本分析与实现细节。
+> 本文档沉淀 M4-B1 / B2 / B3 / B3A / B3B / B3C 阶段的全部研究方法论、审计流程、样本证据与决策路径。
 >
-> - **已证实的结论**已归纳至 [gim_line.md](gim_line.md) §11 WIRE 拓扑分类与悬链线候选字段
-> - **暂缓与待进一步研究项**已归纳至 [dev-log.md](dev-log.md) §8 M4 悬链线暂缓项
-> - 本文档聚焦研究方法、过程证据与决策路径
+> - **已证实的结论**已归纳至 [../gim_line.md](../gim_line.md) §11 WIRE 拓扑分类与悬链线候选字段
+> - **暂缓与待进一步研究项**已归纳至 [../dev-log.md](../dev-log.md) §8 M4 悬链线暂缓项
+> - 本文档聚焦研究方法、过程证据与决策路径，不重复结论性事实
+>
+> 与 [13-geometry-ir-schema.md](13-geometry-ir-schema.md) 的边界：13号文档定义几何 IR 的统一 schema（含 `line-text-mod` kind），14号文档聚焦线路 WIRE 节点悬链线候选字段的研究方法与待核验问题，两者互不重叠。
 
 ---
 
@@ -52,101 +54,9 @@ M4 围绕"线路导线几何与悬链线候选字段"展开递进式审计：
 
 ---
 
-## 2. 当前线路地图实现
+## 2. WIRE 节点字段审计
 
-### 2.1 塔位
-
-- **节点类型**：`F4System` + `GROUPTYPE=TOWER`
-- **坐标来源**：节点自身 `rawProps.BLHA`（格式 `纬度,经度,高程,方位角`）
-- **属性来源**：F4 节点 + `Tower_Device` 子节点的 FAM/DEV 引用（通过 `gatherFamRefs` / `gatherDevRefs` 收集）
-- **已提取字段**：杆塔编号、塔型、呼高、转角（通过候选键匹配 FAM/DEV 属性表）
-- **渲染**：圆形（直线塔）/ 菱形（耐张塔，DEVICETYPE 命中 TENSION 关键字）
-- **交互**：hover tooltip、click 选中、树↔地图联动
-
-### 2.2 导线
-
-- **节点类型**：`WIRE`
-- **导线类型**：`CONDUCTOR`（导线，蓝）、`GROUNDWIRE`（地线，灰）、`OPGW`（绿）、`UNKNOWN`（灰）
-- **类型判定**：`resolveWireType()` — 优先 WIRE 节点自身 `WIRETYPE`，回退父 `F4System(GROUPTYPE=WIRE)` 的 `WIRETYPE`
-- **端点坐标**：
-  - 优先 `POINT0.BLHA` + `POINT1.BLHA`（WIRE 节点自身）
-  - 兜底 `BACKSTRING` + `FRONTSTRING` → STRING 文件引用 → `TOWER F4.BLHA`
-- **渲染**：直线段（`moveTo` + `lineTo`），**无悬链线、无弧垂**
-- **图层开关**：导线 / 地线 / OPGW / 未知导线 4 个独立开关
-
-### 2.3 跨越点
-
-- **节点类型**：`F4System` + `GROUPTYPE=CROSS`
-- **坐标来源**：`rawProps.BLHA`（缺失时进 `unresolved.crosses`）
-- **渲染**：三角形警示符号
-
-### 2.4 当前折线策略
-
-- **数据来源**：`extractLineMapData()` 输出的 `LineMapData.wires: WireSegment[]`
-- **投影**：Canvas 等距矩形投影 / MapLibre overlay 模式委托 `map.project()`
-- **绘制**：`lineMapView.drawWires()` — 每条 wire 一段直线，按 `wireLayerKey(wireType)` 分图层
-- **缺失能力**：无档距计算、无弧垂、无悬链线、无分裂导线、无起止塔关联展示
-
-### 2.5 导线属性面板（M4-B2 实现）
-
-点击导线后右侧属性面板展示：
-
-| 字段 | 来源 | 缺失时 |
-|---|---|---|
-| 导线类型 | wire.wireType | — |
-| 图层 | WireSemanticInfo.layerKey | — |
-| 是否跳线 | ISJUMPER | 否 |
-| 分裂数 (SPLIT) | rawProps.SPLIT | — |
-| 档距 (近似) | Haversine 计算 | — |
-| KVALUE | rawProps.KVALUE | — |
-| 起点 BLHA (POINT0) | rawProps.POINT0.BLHA | — |
-| 终点 BLHA (POINT1) | rawProps.POINT1.BLHA | — |
-| POINT0.MATRIX0 | rawProps.POINT0.MATRIX0 | — |
-| POINT1.MATRIX0 | rawProps.POINT1.MATRIX0 | — |
-| BACKSTRING | rawProps.BACKSTRING | — |
-| FRONTSTRING | rawProps.FRONTSTRING | — |
-
-- 端点坐标小节：展示已解析的 startLat/startLng/endLat/endLng（6 位小数）
-- 解析告警小节：warnings 非空时显示 ⚠ 标识
-- 原始 rawProps 小节：折叠展示，便于排障
-- 档距保留 1 位小数（如 `356.2 m`）
-
-### 2.6 导线样式分层（M4-B2 实现）
-
-| 规则 | 样式 |
-|---|---|
-| `isJumper=true` | 虚线 `[6, 4]`（setLineDash） |
-| `SPLIT > 1` | 线宽 2.5px（默认 1.5px） |
-| 选中导线 | 线宽 3.5px + 黄色光晕描边 |
-| UNKNOWN | 保持浅灰弱化样式 |
-
-- 选中态先画一层黄色光晕（`rgba(245,158,11,0.45)`，宽 7.5px），再画主体线
-- 选中态最后绘制，确保位于所有导线最上层
-
-### 2.7 导线 hit-test 与选中态
-
-- 新增 `hitTestWire(sx, sy, threshold)`：点到线段距离（像素）
-- 点击阈值：`WIRE_HIT_DIST = 6px`（严格）
-- Hover 阈值：`WIRE_HIT_DIST_HOVER = 8px`（放宽，仅更新 cursor）
-- 优先级：塔位 > 导线（命中塔位时不触发导线 hit-test）
-- 选中导线后清除塔位选中态，反之亦然（避免双重选中）
-- `fit()` / `destroy()` 时清除导线选中态
-
-### 2.8 OSM overlay / Canvas fallback 兼容性
-
-`onWireClick` 在 3 个 renderLineMap 调用点均接入：
-
-1. 初始 Canvas 渲染
-2. OSM fallback 后的 Canvas-only 重渲染
-3. OSM overlay 模式（MapLibre 底图 + Canvas overlay）
-
-导线点击在 Canvas-only / overlay 模式下行为一致，不影响 OSM 底图加载、不影响 fallback 触发逻辑。
-
----
-
-## 3. WIRE 节点字段审计
-
-### 3.1 已解析字段清单
+### 2.1 已解析字段清单
 
 | 字段 | 来源 | 当前用途 | 是否入库 | 后续价值 |
 |---|---|---|---|---|
@@ -171,32 +81,7 @@ M4 围绕"线路导线几何与悬链线候选字段"展开递进式审计：
 
 > **关键结论**：所有 rawProps 均已序列化为 JSON 入库（`line_cbm_node.raw_props_json`），数据齐备，缺的只是"提取 + 使用"环节。
 
-### 3.2 导线语义
-
-| 类型 | WIRETYPE | 颜色 | 渲染 | 缺失能力 |
-|---|---|---|---|---|
-| 导线 | `CONDUCTOR` | `#3b82f6`（蓝） | 直线段 | 电压等级、回路、相别、导线型号、档距、弧垂 |
-| 地线 | `GROUNDWIRE` | `#6b7280`（灰） | 直线段 | — |
-| OPGW | `OPGW` | `#10b981`（绿） | 直线段 | — |
-| 未知 | 缺失/未识别 | `#9ca3af`（浅灰） | 直线段 | M4-B2 已有 WIRETYPE 兜底逻辑（按导线型号关键字推断） |
-
-### 3.3 起止塔关系
-
-- **当前**：WIRE 节点不直接持有起止塔引用，仅通过 `BACKSTRING`/`FRONTSTRING` 引用 STRING 文件，STRING 文件归属某个 TOWER F4
-- **反查路径**：`WIRE.rawProps.BACKSTRING` → `STRING<i>.STRING` → `towerGroupByStringPath` → `TOWER F4.BLHA`
-- **缺失**：未在 UI 展示"导线从 N1 塔到 N2 塔"，仅展示端点坐标
-- **建议**：M4-B2 在导线属性面板新增"起止塔"展示（通过现有拓扑反查即可，无需改 schema）
-
-### 3.4 回路 / 相别 / 线型 / 电压等级
-
-| 语义 | 当前状态 | 候选字段位置 |
-|---|---|---|
-| 回路 | ❌ 未解析 | 可能在 F1/F2/F3 rawProps（未确认）或 `STRING<i>.GPOINT` |
-| 相别 | ❌ 未解析 | `STRING<i>.GPOINT` 挂点名（如"前导6"已捕获到 rawRefs，未结构化） |
-| 线型 | ❌ 未解析 | 可能在 WIRE rawProps 或 FAM 属性 |
-| 电压等级 | ❌ 未解析 | 可能在 F1/F2/F3 rawProps（未确认） |
-
-### 3.5 悬链线相关候选字段
+### 2.2 悬链线相关候选字段
 
 #### KVALUE
 
@@ -242,7 +127,7 @@ M4 围绕"线路导线几何与悬链线候选字段"展开递进式审计：
 | `MATERIALSHEET` | 材料表 | 未解析 |
 | `TRANSFORMMATRIX` | 节点变换矩阵 | 已入库未用于几何 |
 
-### 3.6 当前缺口
+### 2.3 当前缺口
 
 #### 字段缺失
 
@@ -267,9 +152,9 @@ M4 围绕"线路导线几何与悬链线候选字段"展开递进式审计：
 
 ---
 
-## 4. 档距聚合与拓扑分类
+## 3. 档距聚合与拓扑分类
 
-### 4.1 档距聚合必要性
+### 3.1 档距聚合必要性
 
 #### 现象
 
@@ -291,7 +176,7 @@ M4 围绕"线路导线几何与悬链线候选字段"展开递进式审计：
 - 渲染重叠（同档 4 分裂导线被画成 4 条悬链线）
 - 无法对照样本工程核验 MATRIX0 平移分量的物理含义
 
-### 4.2 spanKey 规则
+### 3.2 spanKey 规则
 
 #### 规则定义
 
@@ -320,7 +205,7 @@ function buildSpanKey(p0: string, p1: string): string {
 - BLHA 第 4 段方位角差异不影响 spanKey（前 3 段相同即视为同档）
 - 同塔不同挂点（横担）若 BLHA 相同，会被聚合到同一档距 → 需要 MATRIX0 区分挂点
 
-### 4.3 MATRIX0 解析
+### 3.3 MATRIX0 解析
 
 #### 解析规则
 
@@ -367,7 +252,7 @@ interface MatrixTranslation {
 | 单位为米 | 对比 zRange 量级与塔位 BLHA 高程差 |
 | 坐标系为局部 | 对比同塔不同档距的 x/y 是否方向一致 |
 
-### 4.4 聚合统计项
+### 3.4 聚合统计项
 
 #### 每个档距组（SpanGroupSample）的统计字段
 
@@ -412,7 +297,7 @@ interface MatrixTranslation {
 | `MAX_DISTINCT_KVALUES` | 20（distinct KVALUE 原始值样本） |
 | per-kind samples | 10（每类拓扑分类样本数） |
 
-### 4.5 WIRE 拓扑分类（M4-B3C）
+### 3.5 WIRE 拓扑分类（M4-B3C）
 
 #### 分类规则
 
@@ -445,7 +330,7 @@ M4-B3C 在 `observations` 中自动输出：
 6. inter-point 中 KVALUE 是否更像弧垂候选参数
 7. MATRIX0 zRange 在 same-point / inter-point 中的表现差异（P0 / P1 分开）
 
-### 4.6 观察 / 阻塞 / 建议自动生成规则
+### 3.6 观察 / 阻塞 / 建议自动生成规则
 
 | 类型 | 自动生成条件 |
 |---|---|
@@ -455,9 +340,9 @@ M4-B3C 在 `observations` 中自动输出：
 
 ---
 
-## 5. 审计服务 API
+## 4. 审计服务 API
 
-### 5.1 悬链线参数审计（M4-B3）
+### 4.1 悬链线参数审计（M4-B3）
 
 文件：`src/services/lineGeometryAuditService.ts`
 
@@ -573,21 +458,7 @@ interface BlhaElevationSample {
 
 分隔符识别：优先识别逗号分隔，回退空格分隔。
 
-#### 摘要输出（lineProjectView 集成）
-
-```ts
-// src/ui/lineProjectView.ts
-function buildLineCatenaryAuditSummary(graph, mapData): {
-  wireCount: number;
-  coverage: Record<string, { count: number; ratio: number }>;
-  blockingQuestionCount: number;
-}
-
-// 调用点：renderLineProjectPanels 完成 mapData 提取后
-debugLog(DEBUG_LINE_MAP, '[M4-B3] catenary param audit summary', summary);
-```
-
-### 5.2 档距聚合审计（M4-B3B/B3C）
+### 4.2 档距聚合审计（M4-B3B/B3C）
 
 文件：`src/services/lineSpanGroupingAuditService.ts`
 
@@ -598,7 +469,7 @@ export function buildLineSpanGroupingAuditReport(args: {
 }): LineSpanGroupingAuditReport;
 ```
 
-完整报告结构见 [gim_line.md](gim_line.md) §11 + §4.4 聚合统计项。
+完整报告结构见 [../gim_line.md](../gim_line.md) §11 + §3.4 聚合统计项。
 
 #### 关键内部函数
 
@@ -615,7 +486,7 @@ export function buildLineSpanGroupingAuditReport(args: {
 - 入参使用 unknown 类型，由本服务内部进行类型收窄
 - 字段含义全部以"疑似 / 候选 / 待确认"措辞，不写成结论
 
-### 5.3 导线语义信息（M4-B2）
+### 4.3 导线语义信息（M4-B2）
 
 文件：`src/services/lineWireSemanticService.ts`
 
@@ -645,7 +516,7 @@ export function buildWireSemanticInfo(args: {
 - 只读 wire + rawProps，不读 DB、不改 schema
 - `spanMeters` 用 Haversine 公式（地球半径 6371000m），端点缺失返回 null + warning
 
-### 5.4 审计导出服务（M4-B3A）
+### 4.4 审计导出服务（M4-B3A）
 
 文件：`src/services/lineCatenaryAuditExportService.ts`
 
@@ -662,9 +533,9 @@ export function buildWireSemanticInfo(args: {
 
 ---
 
-## 6. 用户核验流程（M4-B3A）
+## 5. 用户核验流程（M4-B3A）
 
-### 6.1 导出方式
+### 5.1 导出方式
 
 1. 打开线路 GIM 工程（仅线路工程有数据；变电工程 / 清空场景按 Ctrl+Shift+C 会提示无数据）
 2. 等待地图渲染完成（OSM 底图加载或 Canvas fallback 均可）
@@ -681,9 +552,9 @@ export function buildWireSemanticInfo(args: {
 
 #### 冲突说明
 
-若与系统或 DevTools 的 Ctrl+Shift+C 冲突，可改为 Ctrl+Alt+C（需同步更新 `bootstrap.ts` 与 [dev-log.md](dev-log.md)）。
+若与系统或 DevTools 的 Ctrl+Shift+C 冲突，可改为 Ctrl+Alt+C（需同步更新 `bootstrap.ts` 与 [../dev-log.md](../dev-log.md)）。
 
-### 6.2 KVALUE 核验
+### 5.2 KVALUE 核验
 
 检查 JSON 中 `report.coverage.KVALUE` 与 `report.kValueSamples`：
 
@@ -692,7 +563,7 @@ export function buildWireSemanticInfo(args: {
 - 数值范围是否像系数、张力、弧垂参数，还是编码（看 `numericValue` 量级）
 - 不同导线类型 KVALUE 是否有明显差异（按 `wireType` 分组对比）
 
-### 6.3 SPLIT 核验
+### 5.3 SPLIT 核验
 
 检查 `report.coverage.SPLIT` 与 `report.splitSamples`：
 
@@ -700,7 +571,7 @@ export function buildWireSemanticInfo(args: {
 - 是否落在常见分裂数：1 / 2 / 4 / 6 / 8（看 `numericValue` 分布）
 - 是否与导线类型匹配（CONDUCTOR 常见 4 分裂 / 6 分裂；GROUNDWIRE 常见 1；OPGW 常见 1）
 
-### 6.4 MATRIX0 核验
+### 5.4 MATRIX0 核验
 
 检查 `report.coverage.POINT0.MATRIX0` / `POINT1.MATRIX0` 与 `report.matrix0FormatSamples`：
 
@@ -710,7 +581,7 @@ export function buildWireSemanticInfo(args: {
 - 是否包含平移量（前 3 行第 4 列）
 - 单位疑似米还是毫米（看数值量级）
 
-### 6.5 BLHA 高程核验
+### 5.5 BLHA 高程核验
 
 检查 `report.coverage.POINT0.BLHA` / `POINT1.BLHA` 与 `report.blhaElevationSamples`：
 
@@ -718,7 +589,7 @@ export function buildWireSemanticInfo(args: {
 - 两端高差是否合理（看 `elevationDelta`，应在合理范围如 ±50m）
 - 是否与塔位高程或地形高程相符
 
-### 6.6 档距聚合核验
+### 5.6 档距聚合核验
 
 检查 `spanGroupingReport.spanGroupSizeStats`：
 
@@ -728,7 +599,7 @@ export function buildWireSemanticInfo(args: {
 - **avg 是否接近整数**：avg ≈ 12 / 16 / 24 → 疑似标准塔型结构
 - **Top 5 是否包含特殊档距**：高 WIRE 数档距可能为变电站进出线段
 
-### 6.7 MATRIX0 平移分量核验
+### 5.7 MATRIX0 平移分量核验
 
 检查 `spanGroupingReport.spanGroupSamples[].point0TranslationStats` / `point1TranslationStats`：
 
@@ -737,7 +608,7 @@ export function buildWireSemanticInfo(args: {
 - **x/y 是否体现横担偏移**：xRange / yRange 是否在合理范围（±10m）
 - **P0 与 P1 的 zRange 是否对称**：若相同 → 同塔挂点高度一致；若不同 → 跨档挂点差异
 
-### 6.8 KVALUE 分布核验
+### 5.8 KVALUE 分布核验
 
 检查 `spanGroupingReport.spanGroupSamples[].kValueStats`：
 
@@ -746,7 +617,7 @@ export function buildWireSemanticInfo(args: {
 - **distinctSampleValues 是否有限**：值域窄 → 离散参数；值域宽 → 连续参数
 - **KVALUE 与 wireType 关系**：CONDUCTOR 的 KVALUE 是否明显不同于 OPGW
 
-### 6.9 BLHA 端点核验
+### 5.9 BLHA 端点核验
 
 检查 `spanGroupingReport.spanGroupSamples[].point0Blha` / `point1Blha`：
 
@@ -754,7 +625,7 @@ export function buildWireSemanticInfo(args: {
 - **第 3 段（高程）是否为塔位高程**：与塔位 FAM 属性的 towerHeight 是否一致
 - **第 4 段（方位角）是否为档距方向**：与前后档方位角是否连续
 
-### 6.10 拓扑分类核验（M4-B3C）
+### 5.10 拓扑分类核验（M4-B3C）
 
 检查 `spanGroupingReport.groupKindCounts` 与三类 samples：
 
@@ -762,7 +633,7 @@ export function buildWireSemanticInfo(args: {
 - **inter-point 跨点档距样本**：前 5 档距的 distance / wireTypes / SPLIT / P0/P1 zRange / KVALUE 0/非0 占比
 - **观察项**：`spanGroupingReport.observations` 自动输出 same-point/inter-point 占比与差异
 
-### 6.11 核验结论模板
+### 5.11 核验结论模板
 
 完成核验后，建议填写以下结论模板：
 
@@ -804,9 +675,9 @@ M4-B4 / M5 路线决策：
 
 ---
 
-## 7. 决策与后续路线
+## 6. 决策与后续路线
 
-### 7.1 当前决策
+### 6.1 当前决策
 
 #### M4 不实现的内容
 
@@ -830,7 +701,7 @@ M4-B4 / M5 路线决策：
 4. **BLHA 是塔位还是挂点未确认**：影响 MATRIX0 平移分量的解释
 5. **MVP 边界约束**：不做 3D 线路、不解析 MOD、不改 schema
 
-### 7.2 进入 M4-B4 / M5 的前置条件
+### 6.2 进入 M4-B4 / M5 的前置条件
 
 | 条件 | 验证方式 |
 |---|---|
@@ -840,7 +711,7 @@ M4-B4 / M5 路线决策：
 | KVALUE=0 含义已确认 | 用户对照样本工程核验 |
 | OPGW vs CONDUCTOR 差异已识别 | `wireTypeCounts` 对照样本 |
 
-### 7.3 M4-B4 路线分支（决策树）
+### 6.3 M4-B4 路线分支（决策树）
 
 | 核验结论 | M4-B4 / M5 路线 |
 |---|---|
@@ -849,7 +720,7 @@ M4-B4 / M5 路线决策：
 | BLHA=挂点 + MATRIX0=未确认 | **示意悬链线**（直接用 BLHA 作端点） |
 | 全部未确认 | **暂缓**（继续预研或放弃悬链线） |
 
-### 7.4 不进入 M4-B4 / M5 的情况
+### 6.4 不进入 M4-B4 / M5 的情况
 
 - 每档 WIRE 数完全无规律（min/max 差异极大且无原因）
 - MATRIX0 平移分量全部为 0 或缺失
@@ -857,7 +728,7 @@ M4-B4 / M5 路线决策：
 - 已实现"示意悬链线"满足业务需求
 - 业务方明确不再需要悬链线
 
-### 7.5 后续可能路线（M5 预研，不承诺实现）
+### 6.5 后续可能路线（M5 预研，不承诺实现）
 
 > 后续若需要真实导线几何，应另起 M5 或专项任务。以下为可能的 M5 子任务（均为预研）。
 
@@ -869,7 +740,7 @@ M4-B4 / M5 路线决策：
 | M5-D：示意悬链线 feature flag | 基于经验弧垂参数绘制示意悬链线（不依赖 KVALUE） | M5-A 完成 |
 | M5-E：工程语义悬链线 | 基于 MATRIX0 + KVALUE 实现工程语义悬链线 | M5-A/B/C 全部完成 |
 
-### 7.6 建议的悬链线实现策略
+### 6.6 建议的悬链线实现策略
 
 #### 先做"示意悬链线"还是"工程语义悬链线"
 
@@ -905,7 +776,7 @@ M4-B4 / M5 路线决策：
 
 ---
 
-## 8. 边界与约束
+## 7. 边界与约束
 
 - **不破坏 OSM baseline**：本轮纯内存审计，不触及底图
 - **不破坏导线交互**：不改 hit-test / 选中态 / 样式分层
@@ -916,14 +787,14 @@ M4-B4 / M5 路线决策：
 
 ---
 
-## 9. 审计工具保留
+## 8. 审计工具保留
 
 | 工具 | 快捷键 | 用途 | 保留状态 |
 |---|---|---|---|
 | 数据库诊断 | Ctrl+Shift+D | 工程类型 / 缓存状态 / 底图状态 | ✅ 保留 |
 | 悬链线参数审计 | Ctrl+Shift+C | WIRE 字段覆盖率 / KVALUE / SPLIT / MATRIX0 / BLHA / 档距聚合 / 拓扑分类 | ✅ 保留（作为后续研究工具） |
 
-### 9.1 Ctrl+Shift+C JSON payload 结构
+### 8.1 Ctrl+Shift+C JSON payload 结构
 
 ```json
 {
@@ -959,7 +830,7 @@ M4-B4 / M5 路线决策：
 }
 ```
 
-### 9.2 Markdown 摘要章节
+### 8.2 Markdown 摘要章节
 
 | 章节 | 内容 |
 |---|---|
@@ -967,7 +838,7 @@ M4-B4 / M5 路线决策：
 | §10 | 档距聚合摘要 + WIRE 拓扑分类（M4-B3C：same-point / inter-point / missing-endpoint group 数与 WIRE 数表） |
 | §11 | inter-point 跨点档距样本（M4-B3C，前 5 档距的 distance / wireTypes / SPLIT / P0/P1 zRange / KVALUE 0/非0 占比 + 观察 + 阻塞 + 收口建议） |
 
-### 9.3 兼容性
+### 8.3 兼容性
 
 - **OSM fallback 兼容**：fallback 后仍可调用，因为 payload 在 `renderLineProjectPanels` 阶段已构建，与底图模式无关
 - **向后兼容**：`spanGroupingReport` 为可选字段，旧 payload 无此字段时调用方需判空

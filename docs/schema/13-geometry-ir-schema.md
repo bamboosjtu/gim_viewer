@@ -2,78 +2,7 @@
 
 > 本文档基于 Round 1-8 的全部静态分析结论，设计一个不绑定 UI、不绑定 Three.js、不绑定 OBC 的中间表示（Intermediate Representation，IR），作为后续 `gim_viewer` 完整展示能力（变电 IFC + 变电 MOD + 变电 STL + 线路 4 类 MOD + 线路 STL）的统一对接接口。
 >
-> 本轮不写渲染实现，只沉淀 schema 与解析管道边界。
-
-## 0. 实现状态
-
-> 本节跟踪 IR schema 在 `gim_viewer` 代码库中的落地进度。最近更新：2026-07-05（P0 完成）。
-
-### 0.1 已落地代码
-
-| 路径 | 职责 | 测试 | 状态 |
-| ---- | ---- | ----: | :--: |
-| `src/gim/geometry/ir.ts` | IR 类型定义（GimGeometrySource 联合 + 5 kind + 类型守卫） | 18 | ✅ |
-| `src/gim/geometry/phmParser.ts` | PHM 解析器（SOLIDMODELn / TRANSFORMMATRIXn / COLORn 一一对应） | 25 | ✅ |
-| `src/gim/geometry/devParser.ts` | DEV 解析器（SOLIDMODELS / SUBDEVICES 两块，TRANSFORMMATRIX 索引各自独立从 0） | 31 | ✅ |
-| `src/gim/geometry/xmlModParser.ts` | XML MOD 解析器（DOMParser + 14 类 primitive 强类型/弱 schema fallback） | 43 | ✅ |
-| `src/viewer/xmlModGeometry.ts` | XmlModPrimitive → THREE.BufferGeometry 转换 | 34 | ✅ |
-| `src/viewer/xmlModLoader.ts` | MOD 文件加载入口 + dispose + applyExternalTransforms | 19 | ✅ |
-| `src/services/modGeometryDiscovery.ts` | CBM → DEV → PHM → MOD 引用链发现 | 19 | ✅ |
-| `src/services/nodeInteractionService.ts` | 节点点击回退 xml-mod 加载路径（无 IFC 但有 devPath 时） | — | ✅ |
-| `src/services/projectCleanupService.ts` | 项目切换时 dispose xml-mod Groups | — | ✅ |
-| `src/app/state.ts` | `loadedXmlModGroups: Map<string, THREE.Group>` 跟踪字段 | — | ✅ |
-| `vitest.setup.ts` | jsdom 25 Blob/File `text()` / `arrayBuffer()` polyfill | — | ✅ |
-
-合计 7 个测试文件，189 个测试通过；`tsc` 通过。
-
-### 0.2 5 kind 实现状态
-
-| kind | IR 定义 | 解析器 | 渲染器 | 缓存命中回放 | 状态 |
-| ---- | :-----: | :----: | :----: | :----------: | :--: |
-| `ifc` | ✅ | 既有 ifcLoader | 既有 OBC Fragments | 既有 cachedIfcPaths | ✅ 完整 |
-| `xml-mod` | ✅ | xmlModParser + devParser + phmParser | xmlModGeometry + xmlModLoader | ❌（P2） | ✅ P0 完整 |
-| `line-text-mod` | ✅ | ❌（线路 P0） | ❌ | ❌ | ⏳ 待 P0 线路 |
-| `stl` | ✅ | ❌（P1） | ❌ | ❌ | ⏳ 待 P1 |
-| `none` | ✅ | 部分（reason 字段已定义，UI 提示未实现） | — | — | ⏳ 待 P2 |
-
-### 0.3 14 类 primitive 实现状态（xml-mod）
-
-| Primitive | 实例数 | 强类型 | 渲染实现 | 状态 |
-| --------- | -----: | :----: | :------- | :--: |
-| Cylinder | 20421 | ✅ | CylinderGeometry | ✅ |
-| Cuboid | 12401 | ✅ | BoxGeometry | ✅ |
-| StretchedBody | 10263 | ✅ | ExtrudeGeometry（Array 点序列 + Normal 单位化除以 304.8） | ✅ |
-| PorcelainBushing | 1506 | ✅ | LatheGeometry（N 伞盘 + R/R1/R2 半径） | ✅ |
-| TruncatedCone | 730 | ✅ | CylinderGeometry（topRadius=TR, bottomRadius=BR） | ✅ |
-| Ring | 235 | ✅ | RingGeometry（Rad 弧度制） | ✅ |
-| TerminalBlock | 201 | ✅ | BoxGeometry + 端子孔（CN/RN/Phase） | ✅ |
-| Sphere | 141 | ✅ | SphereGeometry | ✅ |
-| ChannelSteel | 129 | ✅ | BoxGeometry（D/H/B/T 可选字段按 Model 查表） | ✅ |
-| Table | 109 | ✅ | BoxGeometry（H + LL1/LL2 + TL1/TL2） | ✅ |
-| CircularGasket | 80 | ✅ | RingGeometry（OR/IR + Rad 弧度制） | ✅ |
-| RectangularFixedPlate | 18 | 弱 schema | BoxGeometry fallback | ✅ |
-| OffsetRectangularTable | 15 | 弱 schema | BoxGeometry fallback | ✅ |
-| RectangularRing | 1 | 弱 schema | RingGeometry fallback | ✅ |
-
-### 0.4 关键约束已落实
-
-- TRANSFORMMATRIX 16 浮点 **行主序**（DEV/PHM/MOD 一致），与 Three.js `Matrix4.set()` 行主序参数对应
-- COLOR `R,G,B,A`：R/G/B 0-255，A 0-100（透明度百分比）
-- StretchedBody.Normal 长度恒为 304.8，渲染时除以 304.8 还原单位向量
-- jsdom 25 Blob/File 不实现 `text()` / `arrayBuffer()`，通过 `vitest.setup.ts` polyfill（生产代码使用原生方法）
-- xml-mod 不复用 OBC Fragments（IFC 专用），直接挂在 `ctx.world.scene.three` 下，独立 `loadedXmlModGroups` Map 跟踪
-- `disposeXmlModGroup` 遍历释放 geometry + material（含材质数组），由 `projectCleanupService` 在切换项目时调用
-
-### 0.5 待办（不在 P0 范围）
-
-- P0 线路：`line-text-mod` 4 类文本格式族 parser + 属性面板（HNum / PointLine / SectionKv / KeyValue）
-- P1：`stl` kind 渲染（变电 1803 STL + 线路 Wire_Device/Tower_Device STL）
-- P1：PHM COLOR 应用到 STL（覆盖 STL 默认材质）
-- P2：`none` kind UI 提示（empty-device-xml / assembly-node-without-own-geometry 等）
-- P2：缓存命中场景（currentFiles=null）下回放 xml-mod 几何（需 SQLite `geometry_source` 表 + PARSER_VERSION 升级）
-- P2：节点联动多 kind 高亮（CbmGeometryBundle.instances 遍历）
-
----
+> 本文档只沉淀 schema 与解析管道边界，不跟踪实现状态。实现状态见 [../gim_substation.md](../gim_substation.md) §0 与 [../gim_line.md](../gim_line.md) §0。
 
 ## 1. 目标与背景
 
@@ -122,7 +51,7 @@
 - UI 展示形式（属性面板 / 树节点 / 弹窗）→ 由 ui 层决定
 - SQLite schema 变更（PARSER_VERSION 升级、新表 DDL、数据迁移、索引设计）
   → 不在 IR 范围；IR 只定义内存数据结构
-  → §5.2 给出 geometry_source 表的字段建议，正式 DDL 另起 14-geometry-cache-schema.md
+  → §5.2 给出 geometry_source 表的字段建议，正式 DDL 另起 15-geometry-cache-schema.md
 - 几何运算（布尔 / CSG / 简化）→ 由渲染层或专门的 geometry 工具处理
 - 工程语义（塔型 / 跨越档距 / 导线型号）→ 由 CBM/FAM/DEV 属性层处理
 ```
@@ -547,7 +476,7 @@ UI 层（属性面板 / 树节点）：
       reason TEXT          -- 仅 none 用
   - 缓存命中时直接从 SQLite 恢复 IR，无需重新解析 MOD/STL
   - 正式 DDL（含 PARSER_VERSION 升级、数据迁移、索引设计）
-    应另起 `14-geometry-cache-schema.md` 或放入实现设计文档，不在本 IR 范围
+    应另起 `15-geometry-cache-schema.md` 或放入实现设计文档，不在本 IR 范围
 ```
 
 ---
@@ -673,7 +602,7 @@ P2（体验补齐）：
 5. PARSER_VERSION 升级会失效所有现有缓存
    - 阶段 6 实施时需提示用户重新解压 GIM
    - 或提供数据迁移脚本（从旧 cbm_node 表推导 geometry_source）
-   - geometry_source 表的正式 DDL 不在本 IR 范围，应另起 14-geometry-cache-schema.md（见 §1.3 和 §5.2）
+   - geometry_source 表的正式 DDL 不在本 IR 范围，应另起 15-geometry-cache-schema.md（见 §1.3 和 §5.2）
 
 6. 内存占用
    - 4135 个变电 XML MOD 全量解析可能占用大量内存
@@ -707,7 +636,7 @@ P2（体验补齐）：
 5. 缓存命中时的 geometry_source 表 schema 设计
    - 本 IR 仅给出字段建议（见 §5.2），未做正式 SQLite DDL
    - 需结合现有 cbm_node 表结构设计，避免冗余
-   - 正式 DDL 应另起 14-geometry-cache-schema.md，不在本 IR 范围（见 §1.3）
+   - 正式 DDL 应另起 15-geometry-cache-schema.md，不在本 IR 范围（见 §1.3）
 
 6. IR 是否需要支持几何变换的"组合"（如多 PHM 共享同一 MOD 的不同变换）
    - 已知 MOD 在线路样本最大复用 70 次

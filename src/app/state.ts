@@ -56,6 +56,11 @@ export class AppState {
   // 由 nodeInteractionService 在节点点击时懒加载，projectCleanupService 在切换项目时 dispose
   loadedXmlModGroups = new Map<string, THREE.Group>();
 
+  // STL Group 跟踪（key = stlPath，如 "MOD/abc.stl"）
+  // 与 loadedXmlModGroups 分开管理，便于 P1 阶段单独控制 STL 渲染
+  // 由 modAutoLoadService 在自动加载时填充，projectCleanupService 在切换项目时 dispose
+  loadedStlGroups = new Map<string, THREE.Group>();
+
   // 高亮
   highlightedItems: OBCF.ModelIdMap | null = null;
 
@@ -90,6 +95,7 @@ export class AppState {
     // xml-mod Group 的 dispose 由 projectCleanupService 负责（需要 Viewer scene 引用）
     // 这里只清空索引，避免 stale 引用
     this.loadedXmlModGroups.clear();
+    this.loadedStlGroups.clear();
   }
 
   /** 重置全部状态 */

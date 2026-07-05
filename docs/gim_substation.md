@@ -16,20 +16,31 @@
 | 3D 点击拾取 + 高亮 + 相机定位 | ✅ 已实现 | `src/viewer/selection.ts` / `highlight.ts` / `camera.ts` |
 | 层级树↔3D 联动 | ✅ 已实现 | `src/services/nodeInteractionService.ts` |
 | 属性面板（CBM/FAM/DEV/IFC） | ✅ 已实现 | `src/ui/propsDrawer.ts` |
-| SQLite 缓存（7 张表 + fragments_cache） | ✅ 已实现 | `src-tauri/src/db.rs`（v5 + fragments-cache-v2） |
+| SQLite 缓存（7 张表 + fragments_cache） | ✅ 已实现 | `src-tauri/src/db.rs`（v6 + fragments-cache-v2） |
 | 缓存命中短路 | ✅ 已实现 | `src/services/openGimService.ts` / `gimIndexRestoreService.ts` |
 | IFC 本地磁盘缓存 | ✅ 已实现 | `src/services/gimExtractedCacheService.ts` |
 | 诊断快捷键（Ctrl+Shift+D） | ✅ 已实现 | `src/services/diagnosticSummaryService.ts` |
 | **MOD 文件解析（XML primitive 14 类）** | ✅ 已实现 | `src/gim/geometry/xmlModParser.ts`（14 类，11 强类型 + 3 弱 schema fallback）；设计稿见 [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) |
-| **STL 渲染** | ❌ 未实现（P1） | 1803 个 unique STL 全部未渲染；详见 [12-stl-static-survey.md](schema/12-stl-static-survey.md) |
-| **PHM TransformMatrix 应用** | ✅ 已实现 | `src/viewer/xmlModLoader.ts` `applyExternalTransforms`（DEV + PHM 矩阵应用到 Group） |
-| **PHM COLOR 应用** | ⚠️ 部分（P0 接收，P1 完善） | P0 解析并透传到 `phmColor` 字段；MOD primitive 渲染未应用（实测 MOD 引用 COLORn 为空） |
+| **DEV 解析（SOLIDMODELS + SUBDEVICES）** | ✅ 已实现 | `src/gim/geometry/devParser.ts`（两块索引独立，行主序矩阵） |
 | **PHM 解析（SOLIDMODEL + TRANSFORMMATRIXn + COLORn）** | ✅ 已实现 | `src/gim/geometry/phmParser.ts` |
+| **Geometry IR schema 落地** | ✅ 已实现 | `src/gim/geometry/ir.ts`（5 kind 联合 + 14 类 primitive 类型）；设计稿见 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) |
+| **xml-mod 渲染集成（CBM→DEV→PHM→MOD）** | ✅ 已实现 | `src/viewer/xmlModGeometry.ts` / `xmlModLoader.ts` / `src/services/modGeometryDiscovery.ts` / `src/services/nodeInteractionService.ts` |
+| **PHM TransformMatrix 应用** | ✅ 已实现 | `src/viewer/xmlModLoader.ts` `applyExternalTransforms`（DEV + PHM 矩阵应用到 Group） |
+| **xml-mod 自动加载（IFC 加载完成后）** | ✅ 已实现（v6） | `src/services/nodeInteractionService.ts` `autoLoadAllXmlModGeometries`（遍历 CBM 树中所有"无 IFC 引用但有 devPath"的节点） |
+| **DEV/PHM/MOD 文件磁盘缓存** | ✅ 已实现（v6） | `src/services/gimExtractedCacheService.ts` `cacheGeometryFiles`（首次打开时缓存，供缓存命中场景按需读取） |
+| **缓存命中场景回放 xml-mod 几何** | ✅ 已实现（v6） | `src/services/nodeInteractionService.ts` `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap`（从磁盘按需读取 DEV/PHM/MOD） |
+| **STL 渲染** | ❌ 未实现（P1） | 1803 个 unique STL 全部未渲染；详见 [12-stl-static-survey.md](schema/12-stl-static-survey.md) |
+| **PHM COLOR 应用** | ⚠️ 部分（P0 接收，P1 完善） | P0 解析并透传到 `phmColor` 字段；MOD primitive 渲染未应用（实测 MOD 引用 COLORn 为空） |
 | **EMPTY_DEVICE_XML 提示** | ❌ 未实现（P1） | 44 个孤儿 MOD 静默忽略（解析为 isEmpty=true，渲染为空 Group） |
 | **装配节点无几何提示** | ❌ 未实现（P2） | 14 个无 SOLIDMODEL 的 PHM 静默忽略 |
-| **Geometry IR schema 落地** | ✅ 已实现 | `src/gim/geometry/ir.ts`（5 kind 联合 + 14 类 primitive 类型） |
-| **xml-mod 渲染集成（CBM→DEV→PHM→MOD）** | ✅ 已实现 | `src/viewer/xmlModGeometry.ts` / `xmlModLoader.ts` / `src/services/modGeometryDiscovery.ts` / `src/services/nodeInteractionService.ts` |
-| **DEV 解析（SOLIDMODELS + SUBDEVICES）** | ✅ 已实现 | `src/gim/geometry/devParser.ts`（两块索引独立，行主序矩阵） |
+
+### v6 关键改动
+
+- `PARSER_VERSION` 升级 `gim-parser-v5` → `gim-parser-v6`，旧缓存自动失效并触发完整重建
+- 首次打开 GIM 时，通过 `cacheGeometryFiles` 缓存 DEV/PHM/MOD 文件到 `app_data_dir/extracted/{projectId}/`（复用 `writeCacheFile`，路径遍历防护沿用 IFC 缓存策略）
+- IFC 加载完成后自动触发 `autoLoadAllXmlModGeometries`，遍历 CBM 树中所有"无 IFC 引用但有 devPath"的节点，加载其 xml-mod 几何。用户打开 GIM 后即可看到完整几何（IFC + MOD），无需手动点击节点
+- 缓存命中场景（currentFiles=null）下，`loadXmlModForNode` 通过 `buildGeometryFilesMapFromCache` 从磁盘按需读取 DEV/PHM/MOD 文件，并使用 `readCachedIfc` 命令（实际接受任意 entry_path）
+- 不需要 SQLite schema 变更，仅依赖磁盘缓存
 
 > 下一步实现路径见 §9。
 
@@ -161,9 +172,13 @@ libarchive.js 解压 → Map<path, File>                ✅ 已实现
 web-ifc 解析 IFC → OBC Fragments 转换 → Three.js    ✅ 已实现
   ↓
 点击拾取 → 高亮构件 + 展示 IFC 属性 + 关联 GIM 设备  ✅ 已实现
+  ↓
+（v6）IFC 加载完成后自动加载 xml-mod 几何            ✅ 已实现
+  ↓
+缓存 DEV/PHM/MOD 文件到磁盘（首次打开）              ✅ 已实现（v6）
 ```
 
-> 当前管线**仅支持 IFC**。MOD primitive、STL、PHM TransformMatrix / COLOR 全部未实现，详见 §9。
+> 当前管线支持 **IFC + xml-mod**（v6 起 IFC 加载完成后自动遍历 CBM 树加载所有 MOD 几何）。STL 与 PHM COLOR 仍未实现，详见 §9。
 
 ### 3D 渲染栈
 
@@ -176,9 +191,14 @@ web-ifc 解析 IFC → OBC Fragments 转换 → Three.js    ✅ 已实现
 | 拾取 | `viewer/selection.ts` + `viewer/highlight.ts` | raycast 高亮 + 构件选中 | ✅ |
 | 相机 | `viewer/camera.ts` | 构件定位 | ✅ |
 | 名称索引 | `viewer/ifcNameIndex.ts` | GUID→Name 批量查询 | ✅ |
-| STL 加载 | — | STL mesh 加载 | ❌ 未实现 |
-| MOD primitive 加载 | — | XML primitive → Three geometry | ❌ 未实现 |
-| PHM 解析 | — | SOLIDMODEL + TRANSFORMMATRIXn + COLORn | ❌ 未实现 |
+| DEV 解析 | `src/gim/geometry/devParser.ts` | SOLIDMODELS + SUBDEVICES 两块（行主序矩阵） | ✅ |
+| PHM 解析 | `src/gim/geometry/phmParser.ts` | SOLIDMODEL + TRANSFORMMATRIXn + COLORn | ✅ |
+| xml-mod 解析 | `src/gim/geometry/xmlModParser.ts` | XML primitive 14 类（11 强类型 + 3 弱 schema fallback） | ✅ |
+| xml-mod 渲染 | `src/viewer/xmlModGeometry.ts` / `xmlModLoader.ts` | XmlModPrimitive → BufferGeometry + Transform | ✅ |
+| 引用链发现 | `src/services/modGeometryDiscovery.ts` | CBM → DEV → PHM → MOD | ✅ |
+| 自动加载 | `src/services/nodeInteractionService.ts` `autoLoadAllXmlModGeometries` | IFC 加载完成后遍历 CBM 树加载所有 MOD（v6） | ✅ |
+| 几何缓存 | `src/services/gimExtractedCacheService.ts` `cacheGeometryFiles` | DEV/PHM/MOD 文件磁盘缓存（v6） | ✅ |
+| STL 加载 | — | STL mesh 加载 | ❌ 未实现（P1） |
 
 ### 层级树↔3D 联动
 
@@ -204,12 +224,12 @@ web-ifc 解析 IFC → OBC Fragments 转换 → Three.js    ✅ 已实现
 
 1. 用户选择 GIM → Rust 计算 sha256 + file_size
 2. `validate_gim_cache`：检查 parser_version + file_size + IFC 缓存文件存在性
-3. 命中 → 读取全部索引 → 恢复到 AppState → 直接渲染树和面板
-4. 未命中 → 完整解压 → 解析 → 入库 → 缓存 IFC 文件到本地磁盘
+3. 命中 → 读取全部索引 → 恢复到 AppState → 直接渲染树和面板；v6 起按需从磁盘读取 DEV/PHM/MOD 文件回放 xml-mod 几何
+4. 未命中 → 完整解压 → 解析 → 入库 → 缓存 IFC 文件 + DEV/PHM/MOD 文件到本地磁盘（v6）
 
-### IFC 本地缓存
+### 本地磁盘缓存
 
-IFC 文件写入 `app_data_dir/extracted/{id}/`，路径遍历防护。
+IFC 文件 + DEV/PHM/MOD 几何文件写入 `app_data_dir/extracted/{id}/`，路径遍历防护。v6 起 `cacheGeometryFiles` 在首次打开时缓存全部 DEV/PHM/MOD 文件。
 
 ---
 
@@ -220,27 +240,32 @@ IFC 文件写入 `app_data_dir/extracted/{id}/`，路径遍历防护。
 - **FAM 设计参数**：分节属性（从 fam_property 缓存或 currentFiles 读取）✅
 - **DEV 设备信息**：关键属性（从 dev_property 缓存或 currentFiles 读取）✅
 - **IFC 属性集**：web-ifc 原生属性 ✅
-- **TRANSFORMMATRIX**：monospace 文本展示（非单位矩阵时显示）✅ 仅展示，未应用到 3D
-- **MOD primitive 字段**：❌ 未实现（14 类 primitive 字段无解析）
-- **EMPTY_DEVICE_XML 提示**：❌ 未实现（44 个孤儿 MOD 静默忽略）
-- **装配节点无几何提示**：❌ 未实现（14 个无 SOLIDMODEL PHM 静默忽略）
+- **TRANSFORMMATRIX**：monospace 文本展示（非单位矩阵时显示）✅（v6 起在 xml-mod 渲染时应用到 Group）
+- **MOD primitive 字段**：✅ 已实现（14 类 primitive 字段已解析为 IR，强类型 11 类 + 弱 schema fallback 3 类）
+- **EMPTY_DEVICE_XML 提示**：❌ 未实现（P1，44 个孤儿 MOD 静默忽略）
+- **装配节点无几何提示**：❌ 未实现（P2，14 个无 SOLIDMODEL PHM 静默忽略）
 
-缓存命中时（currentFiles=null）仍可显示 CBM/FAM/DEV 基础属性。
+缓存命中时（currentFiles=null）仍可显示 CBM/FAM/DEV 基础属性；v6 起缓存命中场景也支持回放 xml-mod 几何。
 
 ---
 
 ## 9. 下一步实现路径
 
 > 基于 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) 的 IR 草案与 [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) 的 primitive grammar，按优先级分阶段实施。
+>
+> **P0 已完成（v6）**：IR schema + PHM/DEV/xml-mod parser + 14 类 primitive 渲染 + xml-mod 自动加载 + 缓存命中场景回放，189 测试通过。
 
-### 9.1 P0（MVP 必补）
+### 9.1 P0（已完成，v6）
 
 | 任务 | 输入 | 输出 | 关键约束 |
 |---|---|---|---|
-| **IR schema 落地** | [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) §2-§4 | `src/gim/geometry/ir.ts`（GimGeometrySource 联合类型 + 5 个 kind interface） | 顶层联合类型引用 interface，不 inline；NoneReason 含 `assembly-node-without-own-geometry` |
-| **PHM 解析器** | `.phm` 文件 | `src/gim/geometry/phmParser.ts`（SOLIDMODELn + TRANSFORMMATRIXn + COLORn） | PHM TRANSFORMMATRIX 100% IDENTITY（[09-transform-chain-analysis.md](schema/09-transform-chain-analysis.md)），实际单级变换 |
-| **xml-mod parser** | 14 类 primitive（Box/Cylinder/Sphere/...） | `src/gim/geometry/xmlModParser.ts` | 覆盖率 99.86%（[10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md)）；9 类低样本 primitive 保留 fallback |
-| **xml-mod 渲染** | XmlModEntity[] → Three.js geometry | `src/viewer/xmlModLoader.ts` | 与 IFC 渲染栈共存（不替换 ifcLoader）；86 个 STL+MOD 并存 PHM 需评估重复（[12-stl-static-survey.md](schema/12-stl-static-survey.md) §5） |
+| ~~IR schema 落地~~ | [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) §2-§4 | `src/gim/geometry/ir.ts` | ✅ 5 kind 联合 + 14 类 primitive 类型 |
+| ~~PHM 解析器~~ | `.phm` 文件 | `src/gim/geometry/phmParser.ts` | ✅ SOLIDMODELn + TRANSFORMMATRIXn + COLORn 一一对应 |
+| ~~xml-mod parser~~ | 14 类 primitive | `src/gim/geometry/xmlModParser.ts` | ✅ 覆盖率 99.86%，11 强类型 + 3 弱 schema fallback |
+| ~~xml-mod 渲染~~ | XmlModEntity[] → Three.js geometry | `src/viewer/xmlModLoader.ts` / `xmlModGeometry.ts` | ✅ 与 IFC 渲染栈共存，独立 `loadedXmlModGroups` 跟踪 |
+| ~~DEV/PHM/MOD 文件磁盘缓存~~ | 首次打开时缓存 | `src/services/gimExtractedCacheService.ts` `cacheGeometryFiles` | ✅ 复用 `writeCacheFile`，路径遍历防护 |
+| ~~xml-mod 自动加载~~ | IFC 加载完成后 | `src/services/nodeInteractionService.ts` `autoLoadAllXmlModGeometries` | ✅ 遍历 CBM 树所有"无 IFC 引用但有 devPath"节点 |
+| ~~缓存命中场景回放~~ | currentFiles=null | `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` | ✅ 通过 `readCachedIfc` 命令从磁盘按需读取 |
 
 ### 9.2 P1（MVP 可选，影响 STL 展示能力）
 
@@ -255,8 +280,7 @@ IFC 文件写入 `app_data_dir/extracted/{id}/`，路径遍历防护。
 | 任务 | 输入 | 输出 | 关键约束 |
 |---|---|---|---|
 | **装配节点无几何提示** | 14 个无 SOLIDMODEL PHM | UI 提示 + 诊断（reason: `assembly-node-without-own-geometry`） | 装配节点自身无几何但子设备几何完整，与 `phm-no-solidmodel` 区分 |
-| **PHM TransformMatrix 应用** | PHM TRANSFORMMATRIXn | 实例化时附加 matrix | 当前样本 100% IDENTITY，实际单级变换（保留两级字段结构，实现按单级） |
-| **缓存命中回放** | geometry_source 表（建议） | 缓存命中时直接恢复 IR | 正式 DDL 另起 [14-geometry-cache-schema.md](schema/14-geometry-cache-schema.md)（待建） |
+| **缓存命中回放 SQLite 化** | geometry_source 表（建议） | 缓存命中时直接从 SQLite 恢复 IR | 正式 DDL 另起 [15-geometry-cache-schema.md](schema/15-geometry-cache-schema.md)（待建）；当前 v6 通过磁盘缓存 + 按需读取替代 |
 | **节点联动扩展** | CBM 树 → MOD/STL 高亮 | 选中设备节点 → 高亮对应 MOD primitive + 相机定位 | 与现有 IFC 联动模式一致 |
 
 ### 9.4 关键约束（来自分析报告）
@@ -268,7 +292,7 @@ IFC 文件写入 `app_data_dir/extracted/{id}/`，路径遍历防护。
 | 1803 unique STL 全部为 binary | [12-stl-static-survey.md](schema/12-stl-static-survey.md) | 可统一用 THREE.STLLoader 二进制路径 |
 | PHM TransformMatrix 100% IDENTITY | [09-transform-chain-analysis.md](schema/09-transform-chain-analysis.md) | 单级变换，两级字段结构保留 |
 | F3System 多 FAM 引用 145 个文件 × 4 FAM | [06-cbm-fam-consistency.md](schema/06-cbm-fam-consistency.md) §3.3 | F3System 节点属性聚合需考虑多 FAM 合并展示 |
-| Geometry IR 不在 SQLite 范围 | [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) §1.3 | 正式 DDL 另起 14-geometry-cache-schema.md |
+| Geometry IR 不在 SQLite 范围 | [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) §1.3 | 正式 DDL 另起 15-geometry-cache-schema.md |
 
 ### 9.5 与现有 IFC 路径的兼容性
 

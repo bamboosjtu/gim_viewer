@@ -38,7 +38,8 @@
 | 10 | [10-substation-mod-grammar.md](10-substation-mod-grammar.md) | 变电 XML primitive 字段范围、强类型 schema 判定、Color/StretchedBody 深度分析 | 待随新样本复核 |
 | 11 | [11-line-mod-grammar.md](11-line-mod-grammar.md) | 线路 MOD 4 类文本格式族 grammar、层级关系、parser 草案边界 | 待随新样本复核 |
 | 12 | [12-stl-static-survey.md](12-stl-static-survey.md) | STL 格式检测、PHM 引用扫描、entityName 映射、STL 与 MOD 关系判定 | 待随新样本复核 |
-| 13 | [13-geometry-ir-schema.md](13-geometry-ir-schema.md) | 统一 Geometry IR 草案、5 种 kind schema、解析管道分层、缺陷对照与实施路径 | 设计文档（非样本分析） |
+| 13 | [13-geometry-ir-schema.md](13-geometry-ir-schema.md) | 统一 Geometry IR 草案、5 种 kind schema、解析管道分层、缺陷对照 | 设计文档（非样本分析，不跟踪实现状态） |
+| 14 | [14-line-catenary-study.md](14-line-catenary-study.md) | 线路悬链线参数研究方法论、审计流程、样本证据与决策路径（M4-B1/B2/B3/B3A/B3B/B3C 沉淀） | 研究文档（非样本分析） |
 
 ---
 
@@ -76,6 +77,7 @@ Step 06: 复核 10 的变电 XML primitive 字段范围与强类型 schema
 Step 07: 复核 11 的线路 MOD 文本格式族 grammar 与 parser 草案边界
 Step 08: 复核 12 的 STL 角色与 MOD 关系（互斥/并列/fallback）
 Step 09: 参考 13 的 Geometry IR 草案，再决定是否进入 STL/MOD 渲染实现
+Step 10: 线路工程参考 14 的悬链线参数研究，再决定是否进入悬链线/M5 实现
 ```
 
 ---

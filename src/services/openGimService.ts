@@ -9,7 +9,7 @@ import { parseFileDevRelation } from '../gim/fileDevParser.js';
 import { ensureEngineReady } from '../viewer/ifcLoader.js';
 import { buildIfcNameIndex } from '../viewer/ifcNameIndex.js';
 import { fitCameraToScene } from '../viewer/camera.js';
-import { openIfcModal, getModalSelectedEntries, closeIfcModal } from '../ui/ifcSelectModal.js';
+import { getModalSelectedEntries, closeIfcModal } from '../ui/ifcSelectModal.js';
 import { buildAndRenderCbmTree } from '../ui/cbmTreeView.js';
 import { renderFileDevPanel } from '../ui/fileDevView.js';
 import { loadingEl, emptyTipEl, gimFileInput, btnLoadGim } from '../ui/dom.js';
@@ -131,7 +131,160 @@ async function getIfcBufferForEntry(entry: IfcEntry, state: AppState): Promise<U
   return null;
 }
 
-/** 加载选中的 IFC 文件 */
+/**
+ * 自动加载全部 IFC 文件 + MOD/STL 几何（无需弹窗选择）。
+ *
+ * 用于 GIM 文件打开流程：GIM 被视为一个整体，
+ * 打开后直接显示所有 IFC + MOD + STL，无需用户手动选择。
+ *
+ * 与 loadSelectedIfcFiles 的区别：
+ * - 不依赖 IFC 选择弹窗（不读 getModalSelectedEntries）
+ * - 内部创建 ViewerRuntime（调用方无需预先持有 ctx）
+ * - 同时适用于首次打开（currentFiles 非空）和缓存命中（currentFiles=null）
+ *
+ * @param state 全局 AppState（currentIfcEntries / currentFiles / cachedIfcPaths 必须就绪）
+ * @param entries 要加载的 IFC 条目列表（全部，而非用户选择子集）
+ * @param showMessage 消息回调（更新 loading 文案）
+ */
+export async function loadAllIfcFiles(
+  state: AppState,
+  entries: IfcEntry[],
+  showMessage: (text: string) => void,
+): Promise<void> {
+  if (entries.length === 0) {
+    // 无 IFC 但仍触发 MOD/STL 自动加载（纯 xml-mod 工程）
+    await autoLoadModStlPostIfc(state, showMessage);
+    return;
+  }
+
+  showLoading('正在加载 3D 引擎...');
+  const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+  const runtime = await getViewerRuntime(state, showMessage);
+  const { ctx, modelCallbacks } = runtime;
+
+  showLoading('正在加载 IFC 模型...');
+  const failed: Array<{ name: string; message: string }> = [];
+
+  try {
+    await ensureEngineReady(ctx, state, modelCallbacks);
+    const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
+
+    for (const entry of entries) {
+      showLoading(`正在加载 ${entry.name}...`);
+      try {
+        await loadIfcEntry(
+          ctx,
+          state,
+          entry,
+          async () => getIfcBufferForEntry(entry, state),
+          (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('[GIM] IFC 加载失败:', entry, err);
+        failed.push({ name: entry.name, message });
+        // 防御性清理
+        try {
+          const modelId = entry.modelId;
+          if (ctx.fragments.list.has(modelId)) {
+            ctx.fragments.core.disposeModel(modelId);
+          }
+          state.loadedModels.delete(modelId);
+          const modelRow = document.getElementById(`model-${modelId}`);
+          if (modelRow) modelRow.remove();
+        } catch (cleanupErr) {
+          console.warn('[GIM] cleanup failed model after load error', entry, cleanupErr);
+        }
+        continue;
+      }
+    }
+
+    // buildIfcNameIndex 失败不应阻断 UI 渲染
+    await buildIfcNameIndex(ctx, state).catch((err) => {
+      console.warn('[GIM] buildIfcNameIndex failed', err);
+    });
+
+    // 渲染层级树和文件设备面板
+    const clickHandler = createNodeClickHandler(state, (text) => showLoading(text));
+    buildAndRenderCbmTree(state, clickHandler);
+    renderFileDevPanel(state, clickHandler);
+    emptyTipEl.style.display = 'none';
+
+    // 首次 fit 相机
+    fitCameraToScene(ctx, state);
+
+    // 自动加载 MOD/STL 几何
+    await autoLoadModStlPostIfc(state, showMessage, ctx);
+
+  } catch (err) {
+    console.error('[GIM] IFC 加载失败 (outer)', {
+      error: err,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    showLoading(`IFC 加载失败: ${err instanceof Error ? err.message : String(err)}`);
+    setTimeout(hideLoading, 3000);
+    return;
+  }
+
+  if (failed.length > 0) {
+    showLoading(`部分 IFC 加载失败：${failed.length}/${entries.length}，详见控制台`);
+    setTimeout(hideLoading, 4000);
+  } else {
+    hideLoading();
+  }
+}
+
+/**
+ * MOD/STL 自动加载（IFC 加载后置步骤，同时用于无 IFC 的纯 MOD 工程）。
+ *
+ * 若 ctx 未传入（无 IFC 场景），内部创建 ViewerRuntime。
+ * 缓存命中场景（currentFiles=null）自动回退磁盘缓存读取。
+ */
+async function autoLoadModStlPostIfc(
+  state: AppState,
+  showMessage: (text: string) => void,
+  existingCtx?: ViewerContext,
+): Promise<void> {
+  try {
+    const { autoLoadModAndStlGeometry } = await import('./modAutoLoadService.js');
+    // 获取 scene：优先用已有 ctx，否则创建 ViewerRuntime
+    let scene: import('three').Scene;
+    if (existingCtx) {
+      scene = (existingCtx.world.scene as any).three as import('three').Scene;
+    } else {
+      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+      const runtime = await getViewerRuntime(state, showMessage);
+      scene = (runtime.ctx.world.scene as any).three as import('three').Scene;
+    }
+
+    const result = await autoLoadModAndStlGeometry(
+      state,
+      scene,
+      (p) => {
+        if (p.phase === 'discovering') {
+          showLoading(`正在发现几何引用... (${p.currentPath || ''})`);
+        } else if (p.phase === 'loading_mod') {
+          showLoading(`正在加载 MOD 模型 ${p.loadedMods}/${p.totalMods}...`);
+        } else if (p.phase === 'loading_stl') {
+          showLoading(`正在加载 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
+        }
+      },
+    );
+
+    if (result.modCount > 0 || result.stlCount > 0) {
+      debugLog(DEBUG_IFC_LOAD, '[GIM] MOD/STL 自动加载完成', result);
+      // 若有 ctx，重新 fit 相机
+      if (existingCtx) {
+        const { fitCameraToScene } = await import('../viewer/camera.js');
+        fitCameraToScene(existingCtx, state);
+      }
+    }
+  } catch (err) {
+    console.warn('[GIM] MOD/STL 自动加载失败:', err);
+  }
+}
+
+/** 加载选中的 IFC 文件（IFC 选择弹窗回调，开发调试用） */
 export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, modelCallbacks: ModelEventCallbacks): Promise<void> {
   const selected = getModalSelectedEntries(state.currentIfcEntries);
   debugLog(DEBUG_IFC_LOAD, '[IFC Modal] loadSelectedIfcFiles start', {
@@ -210,6 +363,35 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
     // 对成功加载的模型执行 fitCameraToScene（即使部分失败也尝试 fit）
     const fitted = fitCameraToScene(ctx, state);
     debugLog(DEBUG_IFC_LOAD, '[IFC Modal] fitCameraToScene result', { fitted, failed: failed.length, total: selected.length });
+
+    // IFC 加载完成后，自动加载 CBM 树中所有"无 IFC 引用但有 devPath"的节点的 MOD/STL 几何
+    // 设计动机：GIM 是整体，IFC + MOD + STL 共同构成完整工程；用户期望打开后看到完整几何
+    // 性能策略：仅加载 CBM→DEV→PHM→MOD/STL 引用链可达的文件（绝不遍历 MOD/ 全量）；
+    //           去重 + 分批并发(4) + 批次间 yield 主线程，防止卡死
+    try {
+      const { autoLoadModAndStlGeometry } = await import('./modAutoLoadService.js');
+      const scene = (ctx.world.scene as any).three as import('three').Scene;
+      const result = await autoLoadModAndStlGeometry(
+        state,
+        scene,
+        (p) => {
+          if (p.phase === 'discovering') {
+            showLoading(`正在发现几何引用... (${p.currentPath || ''})`);
+          } else if (p.phase === 'loading_mod') {
+            showLoading(`正在加载 MOD 模型 ${p.loadedMods}/${p.totalMods}...`);
+          } else if (p.phase === 'loading_stl') {
+            showLoading(`正在加载 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
+          }
+        },
+      );
+      if (result.modCount > 0 || result.stlCount > 0) {
+        debugLog(DEBUG_IFC_LOAD, '[IFC Modal] MOD/STL 自动加载完成', result);
+        // MOD/STL 加载后重新 fit 相机（几何可能改变包围盒）
+        fitCameraToScene(ctx, state);
+      }
+    } catch (err) {
+      console.warn('[IFC Modal] MOD/STL 自动加载失败:', err);
+    }
   } catch (err) {
     // 外层 try 仅捕获 ensureEngineReady 等致命错误
     console.error('[IFC Modal] loadSelectedIfcFiles failed (outer)', {
@@ -403,6 +585,28 @@ async function openGimFromArrayBuffer(
       console.error('[Tauri] IFC 文件缓存失败:', err);
     }
 
+    // v6: 缓存 DEV/PHM/MOD 几何文件到本地磁盘
+    // 用于缓存命中场景下从磁盘读取这些文件以回放 xml-mod 几何
+    if (state.currentFiles) {
+      showLoading('正在缓存几何文件（DEV/PHM/MOD）...');
+      try {
+        const { cacheGeometryFiles } = await import('./gimExtractedCacheService.js');
+        const geoCacheResult = await cacheGeometryFiles(
+          options.projectId,
+          state.currentFiles,
+        );
+        debugLog(DEBUG_GIM_CACHE, '[Tauri] 几何文件缓存结果:', {
+          cached: geoCacheResult.cachedCount,
+          errors: geoCacheResult.errors,
+        });
+        if (geoCacheResult.errors.length > 0) {
+          console.warn('[Tauri] 部分几何文件缓存失败:', geoCacheResult.errors);
+        }
+      } catch (err) {
+        console.error('[Tauri] 几何文件缓存失败:', err);
+      }
+    }
+
     showLoading('正在写入 GIM 索引...');
     try {
       const { buildGimIndexPayload } = await import('./gimIndexPersistenceService.js');
@@ -437,8 +641,8 @@ async function openGimFromArrayBuffer(
     }
   }
 
-  hideLoading();
-  openIfcModal(entries);
+  // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
+  await loadAllIfcFiles(state, entries, showMessage);
 }
 
 /**
@@ -565,29 +769,10 @@ export async function openGimWithDialog(
             console.warn('[Tauri] 缓存索引中没有文件设备关系');
           }
 
-          // 立即渲染 CBM 层级树和文件设备面板（无 Viewer）
-          // 点击节点时由 nodeInteractionService 懒加载 Viewer + IFC
-          const clickHandler = createNodeClickHandler(state, showMessage);
-          buildAndRenderCbmTree(state, clickHandler);
-          renderFileDevPanel(state, clickHandler);
-          emptyTipEl.style.display = 'none';
-
-          // 缓存命中后行为对齐完整解压路径：弹出 IFC 选择框，由用户选择加载
-          // 选择 IFC 后走现有 loadSelectedIfcFiles → readCachedIfc，不重新解压 GIM
-          if (state.currentIfcEntries.length > 0) {
-            openIfcModal(state.currentIfcEntries);
-          }
-
-          hideLoading();
-          // 轻量状态提示
-          showLoading('已从本地缓存恢复，请选择 IFC 文件加载模型');
-          setTimeout(hideLoading, 3000);
-          debugLog(DEBUG_GIM_CACHE, '[Tauri] substation cache restored, opening IFC modal', {
-            project_id: record.id,
-            ifc_entries: state.currentIfcEntries.length,
-            cached_ifc_paths: state.cachedIfcPaths.size,
-          });
-          debugLog(DEBUG_GIM_CACHE, '[Tauri] 变电工程缓存短路生效：未读取原始 GIM，已打开 IFC 选择框');
+          // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
+          // loadAllIfcFiles 内部会创建 ViewerRuntime、加载 IFC、渲染树、触发 MOD/STL
+          await loadAllIfcFiles(state, state.currentIfcEntries, showMessage);
+          debugLog(DEBUG_GIM_CACHE, '[Tauri] 变电工程缓存命中：自动加载全部 IFC + MOD + STL');
           return; // 缓存命中，短路完成
         } catch (err) {
           console.warn('[Tauri] 缓存恢复失败，回退完整解压流程:', err);

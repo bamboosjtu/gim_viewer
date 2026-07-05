@@ -64,6 +64,7 @@ export async function cleanupBeforeOpenNewProject(
   let disposedCount = 0;
   let attemptedCount = 0;
   let xmlModDisposedCount = 0;
+  let stlDisposedCount = 0;
   const { isViewerRuntimeCreated, getViewerRuntime } = await import('../viewer/viewerRuntime.js');
   if (isViewerRuntimeCreated()) {
     try {
@@ -103,6 +104,18 @@ export async function cleanupBeforeOpenNewProject(
         }
       }
 
+      // dispose STL Groups（变电工程 STL primitive 渲染）
+      const { disposeStlGroup } = await import('../viewer/stlLoader.js');
+      for (const [stlPath, group] of state.loadedStlGroups) {
+        try {
+          scene.remove(group);
+          disposeStlGroup(group);
+          stlDisposedCount++;
+        } catch (err) {
+          console.warn('[Cleanup] dispose stl group failed:', stlPath, err);
+        }
+      }
+
       // ---- 3. 重置高亮 ----
       try {
         const { resetHighlight } = await import('../viewer/highlight.js');
@@ -114,7 +127,7 @@ export async function cleanupBeforeOpenNewProject(
       console.warn('[Cleanup] ViewerRuntime cleanup failed:', err);
     }
   }
-  debugLog(DEBUG_RUNTIME_LOGS, '[Cleanup] disposed viewer models:', disposedCount, '(attempted:', attemptedCount, '), xml-mod groups:', xmlModDisposedCount);
+  debugLog(DEBUG_RUNTIME_LOGS, '[Cleanup] disposed viewer models:', disposedCount, '(attempted:', attemptedCount, '), xml-mod groups:', xmlModDisposedCount, ', stl groups:', stlDisposedCount);
 
   // ---- 4. 清空 UI 残留 ----
   // disposeModel 会触发 onItemDeleted → removeModelFromUI，但保险起见再清一次
