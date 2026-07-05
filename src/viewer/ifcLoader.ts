@@ -155,7 +155,7 @@ export async function loadIfcBuffer(
     return;
   }
 
-  await ctx.ifcLoader.load(buffer, false, modelId, {
+  await ctx.ifcLoader.load(buffer, true, modelId, {
     processData: { progressCallback: (progress) => { onProgress?.(progress); } },
   });
   // onItemSet 事件已更新 state.loadedModels
