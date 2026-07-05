@@ -280,7 +280,7 @@ IFC 文件 + DEV/PHM/MOD 几何文件写入 `app_data_dir/extracted/{id}/`，路
 | 任务 | 输入 | 输出 | 关键约束 |
 |---|---|---|---|
 | **装配节点无几何提示** | 14 个无 SOLIDMODEL PHM | UI 提示 + 诊断（reason: `assembly-node-without-own-geometry`） | 装配节点自身无几何但子设备几何完整，与 `phm-no-solidmodel` 区分 |
-| **缓存命中回放 SQLite 化** | geometry_source 表（建议） | 缓存命中时直接从 SQLite 恢复 IR | 正式 DDL 另起 [15-geometry-cache-schema.md](schema/15-geometry-cache-schema.md)（待建）；当前 v6 通过磁盘缓存 + 按需读取替代 |
+| **缓存命中回放 SQLite 化** | geometry_source 表（建议） | 缓存命中时直接从 SQLite 恢复 IR | 正式 DDL 另起 16-geometry-cache-schema.md（待建）；当前 v6 通过磁盘缓存 + 按需读取替代 |
 | **节点联动扩展** | CBM 树 → MOD/STL 高亮 | 选中设备节点 → 高亮对应 MOD primitive + 相机定位 | 与现有 IFC 联动模式一致 |
 
 ### 9.4 关键约束（来自分析报告）
@@ -292,7 +292,7 @@ IFC 文件 + DEV/PHM/MOD 几何文件写入 `app_data_dir/extracted/{id}/`，路
 | 1803 unique STL 全部为 binary | [12-stl-static-survey.md](schema/12-stl-static-survey.md) | 可统一用 THREE.STLLoader 二进制路径 |
 | PHM TransformMatrix 100% IDENTITY | [09-transform-chain-analysis.md](schema/09-transform-chain-analysis.md) | 单级变换，两级字段结构保留 |
 | F3System 多 FAM 引用 145 个文件 × 4 FAM | [06-cbm-fam-consistency.md](schema/06-cbm-fam-consistency.md) §3.3 | F3System 节点属性聚合需考虑多 FAM 合并展示 |
-| Geometry IR 不在 SQLite 范围 | [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) §1.3 | 正式 DDL 另起 15-geometry-cache-schema.md |
+| Geometry IR 不在 SQLite 范围 | [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) §1.3 | 正式 DDL 另起 16-geometry-cache-schema.md |
 
 ### 9.5 与现有 IFC 路径的兼容性
 

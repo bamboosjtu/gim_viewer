@@ -46,14 +46,20 @@ export interface AutoLoadProgress {
 
 /**
  * 遍历 CBM 树，收集所有 devPath（去重）。
- * 仅收集满足条件的节点：有 devPath 且无 ifcFile（无 IFC 几何，需 MOD/STL 回退）。
+ *
+ * 设计决策：收集所有有 devPath 的节点，不论是否有 IFC。
+ * 原因：IFC 可能不包含该设备的完整几何（或 GUID 不匹配），
+ * MOD/STL 作为补充/回退几何源。仅依赖 IFC 会导致变压器等
+ * 关键设备缺失显示。
+ *
+ * 性能：devPath 去重（相同 DEV 文件只处理一次）。
  */
 function collectUniqueDevPaths(root: CbmNode | null): Map<string, CbmNode> {
   const devNodes = new Map<string, CbmNode>(); // devPath → 代表节点
 
   function walk(node: CbmNode) {
-    // 仅收集无 IFC 但有 devPath 的节点（需要 MOD/STL 几何回退）
-    if (node.devPath && !node.ifcFile && !node.ifcGuid && !devNodes.has(node.devPath)) {
+    // 收集所有有 devPath 的节点，不论是否有 IFC
+    if (node.devPath && !devNodes.has(node.devPath)) {
       devNodes.set(node.devPath, node);
     }
     for (const child of node.children) {
@@ -122,20 +128,24 @@ async function buildFileMapFromDiskCache(
   projectId: number,
   uniqueDevPaths: string[],
 ): Promise<Map<string, File> | null> {
-  const { readCachedIfc } = await import('../desktop/database.js');
+  const { batchReadCachedFiles } = await import('../desktop/database.js');
   const result = new Map<string, File>();
 
-  // 第一步：读 DEV + 解析收集 PHM 引用
-  const phmRefs = new Set<string>();
-  for (const devPath of uniqueDevPaths) {
-    const entryPath = `DEV/${devPath}`;
-    if (result.has(entryPath)) continue;
-    try {
-      const bytes = await readCachedIfc(projectId, entryPath);
-      const file = bytesToFile(bytes, entryPath);
-      result.set(entryPath, file);
+  // ── 第一步：批量读取所有 DEV 文件（1 次 IPC） ──
+  const devEntryPaths = uniqueDevPaths.map((dp) => `DEV/${dp}`);
+  console.log(`[autoLoad] 缓存命中：批量读取 ${devEntryPaths.length} 个 DEV 文件（1 次 IPC）...`);
+  const devBytes = await batchReadCachedFiles(projectId, devEntryPaths);
 
-      // 解析 DEV 收集 PHM 引用
+  const phmRefs = new Set<string>();
+  let devReadCount = 0;
+  for (const [entryPath, bytes] of devBytes) {
+    if (!bytes || bytes.byteLength === 0) continue;
+    const file = bytesToFile(bytes, entryPath);
+    result.set(entryPath, file);
+    devReadCount++;
+
+    // 解析 DEV 收集 PHM 引用
+    try {
       const devText = new TextDecoder().decode(bytes);
       const devDoc = parseDev(devText, entryPath);
       for (const solid of devDoc.solidModels) {
@@ -144,43 +154,56 @@ async function buildFileMapFromDiskCache(
           phmRefs.add(`PHM/${phmName}`);
         }
       }
-    } catch (err) {
-      console.warn(`[autoLoad] 磁盘 DEV 读取失败: ${entryPath}`, err);
+    } catch {
+      // 解析失败跳过
     }
   }
+  console.log(`[autoLoad] DEV 批量读取完成: ${devReadCount} 个有效，发现 ${phmRefs.size} 个 PHM 引用`);
 
-  // 第二步：读 PHM + 解析收集 MOD/STL 引用
+  // ── 第二步：批量读取 PHM 文件（1 次 IPC） ──
   const modStlRefs = new Set<string>();
-  for (const phmPath of phmRefs) {
-    if (result.has(phmPath)) continue;
-    try {
-      const bytes = await readCachedIfc(projectId, phmPath);
+  const phmArr = Array.from(phmRefs);
+  if (phmArr.length > 0) {
+    console.log(`[autoLoad] 批量读取 ${phmArr.length} 个 PHM 文件（1 次 IPC）...`);
+    const phmBytes = await batchReadCachedFiles(projectId, phmArr);
+
+    let phmReadCount = 0;
+    for (const [phmPath, bytes] of phmBytes) {
+      if (!bytes || bytes.byteLength === 0) continue;
       const file = bytesToFile(bytes, phmPath);
       result.set(phmPath, file);
+      phmReadCount++;
 
       // 解析 PHM 收集 MOD/STL 引用
-      const phmText = new TextDecoder().decode(bytes);
-      const phmDoc = parsePhm(phmText, phmPath);
-      for (const solid of phmDoc.solidModels) {
-        modStlRefs.add(`MOD/${solid.solidModelPath}`);
+      try {
+        const phmText = new TextDecoder().decode(bytes);
+        const phmDoc = parsePhm(phmText, phmPath);
+        for (const solid of phmDoc.solidModels) {
+          modStlRefs.add(`MOD/${solid.solidModelPath}`);
+        }
+      } catch {
+        // 解析失败跳过
       }
-    } catch (err) {
-      console.warn(`[autoLoad] 磁盘 PHM 读取失败: ${phmPath}`, err);
     }
+    console.log(`[autoLoad] PHM 批量读取完成: ${phmReadCount} 个，发现 ${modStlRefs.size} 个 MOD/STL 引用`);
   }
 
-  // 第三步：读 MOD/STL 文件（仅加载引用到的）
-  for (const modStlPath of modStlRefs) {
-    if (result.has(modStlPath)) continue;
-    try {
-      const bytes = await readCachedIfc(projectId, modStlPath);
-      const file = bytesToFile(bytes, modStlPath);
-      result.set(modStlPath, file);
-    } catch (err) {
-      console.warn(`[autoLoad] 磁盘 MOD/STL 读取失败: ${modStlPath}`, err);
+  // ── 第三步：批量读取 MOD/STL 文件（1 次 IPC） ──
+  const modStlArr = Array.from(modStlRefs);
+  if (modStlArr.length > 0) {
+    console.log(`[autoLoad] 批量读取 ${modStlArr.length} 个 MOD/STL 文件（1 次 IPC）...`);
+    const msBytes = await batchReadCachedFiles(projectId, modStlArr);
+
+    let msReadCount = 0;
+    for (const [msPath, bytes] of msBytes) {
+      if (!bytes || bytes.byteLength === 0) continue;
+      result.set(msPath, bytesToFile(bytes, msPath));
+      msReadCount++;
     }
+    console.log(`[autoLoad] MOD/STL 批量读取完成: ${msReadCount} 个`);
   }
 
+  console.log(`[autoLoad] 磁盘缓存 Map 构建完成: ${result.size} 个文件（共 3 次 IPC）`);
   return result.size > 0 ? result : null;
 }
 
@@ -238,29 +261,44 @@ export async function autoLoadModAndStlGeometry(
   }
 
   // ── Phase 2: 发现几何源（遍历 DEV → PHM → MOD/STL） ──
+  // 注意：uniqueDevPaths 可能很大（数千），必须节流 showProgress + 频繁 yield
   showProgress({ phase: 'discovering', collectedDevPaths: uniqueDevPaths.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
 
   const { discoverGeometriesFromNode } = await import('./modGeometryDiscovery.js');
 
   // 全局去重集合：key = modPath/stlPath
-  // 多个 DEV/PHM 链可能引用同一 MOD/STL 文件，去重避免重复加载
-  const modMap = new Map<string, DiscoveredModGeometry>(); // modPath → 首次发现记录
-  const stlMap = new Map<string, DiscoveredStlGeometry>();  // stlPath → 首次发现记录
+  const modMap = new Map<string, DiscoveredModGeometry>();
+  const stlMap = new Map<string, DiscoveredStlGeometry>();
+
+  console.log(`[autoLoad] 开始发现几何源（${uniqueDevPaths.length} 个 devPath）...`);
 
   let discoveredCount = 0;
+  const PROGRESS_INTERVAL = 50;  // 每 50 个 devPath 更新一次进度 UI
+  const YIELD_INTERVAL = 5;      // 每 5 个 devPath yield 主线程
+  const LOG_INTERVAL = 100;      // 每 100 个 devPath 输出 console.log
+
   for (const devPath of uniqueDevPaths) {
     const node = devNodes.get(devPath)!;
-    showProgress({
-      phase: 'discovering',
-      collectedDevPaths: uniqueDevPaths.length,
-      discoveredMods: modMap.size,
-      discoveredStls: stlMap.size,
-      loadedMods: 0,
-      loadedStls: 0,
-      totalMods: 0,
-      totalStls: 0,
-      currentPath: devPath,
-    });
+
+    // 节流：不要每轮都更新 DOM（showProgress → showLoading → textContent）
+    if (discoveredCount % PROGRESS_INTERVAL === 0) {
+      showProgress({
+        phase: 'discovering',
+        collectedDevPaths: uniqueDevPaths.length,
+        discoveredMods: modMap.size,
+        discoveredStls: stlMap.size,
+        loadedMods: 0,
+        loadedStls: 0,
+        totalMods: 0,
+        totalStls: 0,
+        currentPath: devPath,
+      });
+    }
+
+    // 里程碑日志：让用户知道发现正在推进
+    if (discoveredCount > 0 && discoveredCount % LOG_INTERVAL === 0) {
+      console.log(`[autoLoad] 发现进度: ${discoveredCount}/${uniqueDevPaths.length} devPaths, MOD=${modMap.size}, STL=${stlMap.size}`);
+    }
 
     try {
       const result = await discoverGeometriesFromNode(node, files);
@@ -279,8 +317,9 @@ export async function autoLoadModAndStlGeometry(
     }
 
     discoveredCount++;
-    // 每 10 个 devPath yield 一次，避免长时间阻塞 UI
-    if (discoveredCount % 10 === 0) {
+
+    // 频繁 yield 主线程，确保 UI 不卡死
+    if (discoveredCount % YIELD_INTERVAL === 0) {
       await new Promise((r) => setTimeout(r, 0));
     }
   }
@@ -288,6 +327,7 @@ export async function autoLoadModAndStlGeometry(
   const modGeos = Array.from(modMap.values());
   const stlGeos = Array.from(stlMap.values());
 
+  console.log(`[autoLoad] 发现完成: ${modGeos.length} 个 MOD + ${stlGeos.length} 个 STL（去重后，共扫描 ${discoveredCount} 个 devPath）`);
   debugLog(DEBUG_IFC_LOAD, `[autoLoad] 发现 ${modGeos.length} 个 MOD + ${stlGeos.length} 个 STL（去重后）`);
 
   // ── Phase 3: 分批加载 MOD ──
@@ -295,6 +335,7 @@ export async function autoLoadModAndStlGeometry(
   let loadedMods = 0;
 
   if (modGeos.length > 0) {
+    console.log(`[autoLoad] 开始加载 ${modGeos.length} 个 MOD 文件...`);
     for (let i = 0; i < modGeos.length; i += CONCURRENCY) {
       const batch = modGeos.slice(i, i + CONCURRENCY);
       showProgress({
@@ -334,6 +375,7 @@ export async function autoLoadModAndStlGeometry(
         await new Promise((r) => setTimeout(r, YIELD_MS));
       }
     }
+    console.log(`[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}`);
     debugLog(DEBUG_IFC_LOAD, `[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}`);
   }
 
@@ -341,6 +383,7 @@ export async function autoLoadModAndStlGeometry(
   let loadedStls = 0;
 
   if (stlGeos.length > 0) {
+    console.log(`[autoLoad] 开始加载 ${stlGeos.length} 个 STL 文件...`);
     for (let i = 0; i < stlGeos.length; i += CONCURRENCY) {
       const batch = stlGeos.slice(i, i + CONCURRENCY);
       showProgress({
@@ -380,10 +423,12 @@ export async function autoLoadModAndStlGeometry(
         await new Promise((r) => setTimeout(r, YIELD_MS));
       }
     }
+    console.log(`[autoLoad] STL 加载完成: ${loadedStls}/${stlGeos.length}`);
     debugLog(DEBUG_IFC_LOAD, `[autoLoad] STL 加载完成: ${loadedStls}/${stlGeos.length}`);
   }
 
   // ── Phase 5: 完成 ──
+  console.log(`[autoLoad] 全部几何加载完成: MOD=${loadedMods}, STL=${loadedStls}`);
   showProgress({
     phase: 'done',
     collectedDevPaths: uniqueDevPaths.length,

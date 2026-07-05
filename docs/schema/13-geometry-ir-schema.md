@@ -51,7 +51,7 @@
 - UI 展示形式（属性面板 / 树节点 / 弹窗）→ 由 ui 层决定
 - SQLite schema 变更（PARSER_VERSION 升级、新表 DDL、数据迁移、索引设计）
   → 不在 IR 范围；IR 只定义内存数据结构
-  → §5.2 给出 geometry_source 表的字段建议，正式 DDL 另起 15-geometry-cache-schema.md
+  → §5.2 给出 geometry_source 表的字段建议，正式 DDL 另起 16-geometry-cache-schema.md
 - 几何运算（布尔 / CSG / 简化）→ 由渲染层或专门的 geometry 工具处理
 - 工程语义（塔型 / 跨越档距 / 导线型号）→ 由 CBM/FAM/DEV 属性层处理
 ```
@@ -476,7 +476,7 @@ UI 层（属性面板 / 树节点）：
       reason TEXT          -- 仅 none 用
   - 缓存命中时直接从 SQLite 恢复 IR，无需重新解析 MOD/STL
   - 正式 DDL（含 PARSER_VERSION 升级、数据迁移、索引设计）
-    应另起 `15-geometry-cache-schema.md` 或放入实现设计文档，不在本 IR 范围
+    应另起 `16-geometry-cache-schema.md` 或放入实现设计文档，不在本 IR 范围
 ```
 
 ---
@@ -602,7 +602,7 @@ P2（体验补齐）：
 5. PARSER_VERSION 升级会失效所有现有缓存
    - 阶段 6 实施时需提示用户重新解压 GIM
    - 或提供数据迁移脚本（从旧 cbm_node 表推导 geometry_source）
-   - geometry_source 表的正式 DDL 不在本 IR 范围，应另起 15-geometry-cache-schema.md（见 §1.3 和 §5.2）
+   - geometry_source 表的正式 DDL 不在本 IR 范围，应另起 16-geometry-cache-schema.md（见 §1.3 和 §5.2）
 
 6. 内存占用
    - 4135 个变电 XML MOD 全量解析可能占用大量内存
@@ -636,7 +636,7 @@ P2（体验补齐）：
 5. 缓存命中时的 geometry_source 表 schema 设计
    - 本 IR 仅给出字段建议（见 §5.2），未做正式 SQLite DDL
    - 需结合现有 cbm_node 表结构设计，避免冗余
-   - 正式 DDL 应另起 15-geometry-cache-schema.md，不在本 IR 范围（见 §1.3）
+   - 正式 DDL 应另起 16-geometry-cache-schema.md，不在本 IR 范围（见 §1.3）
 
 6. IR 是否需要支持几何变换的"组合"（如多 PHM 共享同一 MOD 的不同变换）
    - 已知 MOD 在线路样本最大复用 70 次

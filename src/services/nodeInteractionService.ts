@@ -395,24 +395,22 @@ function bytesToFile(bytes: Uint8Array, path: string): File {
 }
 
 /**
- * 遍历 CBM 树，收集所有"无 IFC 引用但有 devPath"的节点。
+ * 遍历 CBM 树，收集所有有 devPath 的节点（不论是否有 IFC）。
  *
- * 这些节点是 xml-mod 几何的来源（变电工程典型）。
- * 跳过的节点：
- * - 有 ifcFile 且有 ifcGuid（这些走 IFC 加载路径）
- * - 没有 devPath（无 OBJECTMODELPOINTER）
+ * 设计决策：IFC 可能不包含该设备的完整几何（或 GUID 不匹配），
+ * MOD/STL 作为补充/回退几何源，应始终加载。
  *
  * @param root CBM 根节点
- * @returns 符合条件的节点列表
+ * @returns 符合条件的节点列表（devPath 去重）
  */
 export function collectXmlModNodes(root: CbmNode | null): CbmNode[] {
   if (!root) return [];
+  const seen = new Set<string>();
   const result: CbmNode[] = [];
   function walk(n: CbmNode) {
-    // 跳过有 IFC 引用的节点（已通过 IFC 路径加载）
-    if (n.ifcFile && n.ifcGuid) {
-      // 但仍递归子节点（子节点可能是 MOD-only）
-    } else if (n.devPath) {
+    // 收集所有有 devPath 的节点，不论是否有 IFC
+    if (n.devPath && !seen.has(n.devPath)) {
+      seen.add(n.devPath);
       result.push(n);
     }
     for (const child of n.children) walk(child);

@@ -739,6 +739,45 @@ pub fn read_cached_ifc(
     stdfs::read(&path).map_err(|e| format!("读取缓存文件失败: {}", e))
 }
 
+/// 批量读取缓存文件的返回项
+#[derive(Debug, Serialize)]
+pub struct BatchCacheFileResult {
+    pub entry_path: String,
+    /// 成功时包含文件字节，失败时为 null
+    pub bytes: Option<Vec<u8>>,
+}
+
+/// Tauri command：批量读取缓存文件（一次 IPC 替代 N 次 read_cached_ifc）。
+///
+/// 用于缓存命中时批量加载 DEV/PHM/MOD/STL 文件，避免数千次 IPC 往返。
+/// 单个文件读取失败不影响其他文件（对应 item.bytes = null）。
+#[tauri::command]
+pub fn batch_read_cached_files(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_paths: Vec<String>,
+) -> Result<Vec<BatchCacheFileResult>, String> {
+    let mut results = Vec::with_capacity(entry_paths.len());
+    for entry_path in &entry_paths {
+        let path = match cache_file_path(&app_handle, project_id, entry_path) {
+            Ok(p) => p,
+            Err(_) => {
+                results.push(BatchCacheFileResult {
+                    entry_path: entry_path.clone(),
+                    bytes: None,
+                });
+                continue;
+            }
+        };
+        let bytes = stdfs::read(&path).ok();
+        results.push(BatchCacheFileResult {
+            entry_path: entry_path.clone(),
+            bytes,
+        });
+    }
+    Ok(results)
+}
+
 // ===== Fragments 缓存 =====
 
 /// 计算 Fragments 缓存文件路径：app_data_dir/fragments/{project_id}/{safe_entry_path}.frag

@@ -2,9 +2,10 @@
 
 > 本文档沉淀 M4-B1 / B2 / B3 / B3A / B3B / B3C 阶段的全部研究方法论、审计流程、样本证据与决策路径。
 >
+> - **demo-line 全量静态分析证据与字段语义确认结论**已沉淀至 [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md)
 > - **已证实的结论**已归纳至 [../gim_line.md](../gim_line.md) §11 WIRE 拓扑分类与悬链线候选字段
-> - **暂缓与待进一步研究项**已归纳至 [../dev-log.md](../dev-log.md) §8 M4 悬链线暂缓项
-> - 本文档聚焦研究方法、过程证据与决策路径，不重复结论性事实
+> - **仍待决策的暂缓项**已归纳至 [../dev-log.md](../dev-log.md) §8 M4 悬链线暂缓项
+> - 本文档聚焦研究方法、审计服务 API 与决策路径，不重复结论性事实
 >
 > 与 [13-geometry-ir-schema.md](13-geometry-ir-schema.md) 的边界：13号文档定义几何 IR 的统一 schema（含 `line-text-mod` kind），14号文档聚焦线路 WIRE 节点悬链线候选字段的研究方法与待核验问题，两者互不重叠。
 
@@ -90,6 +91,7 @@ M4 围绕"线路导线几何与悬链线候选字段"展开递进式审计：
 - **推测语义**：张力系数 / 弧垂参数候选
 - **覆盖度**：审计服务可输出 `KVALUE 出现 N/M 次`
 - **风险**：未在 GIM 标准文档中确认语义，需 M4-B2 人工核验样本值
+- **静态分析结论**（demo-line 全量）：见 [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) §2 — 已确认为数值类型参数字段（覆盖率 100%，零值占 55%），具体物理含义与公式仍待决策
 
 #### SPLIT
 
@@ -111,6 +113,7 @@ M4 围绕"线路导线几何与悬链线候选字段"展开递进式审计：
 - **当前用途**：属性面板高亮显示（注释标记"悬链线计算用"）
 - **推测语义**：端点变换矩阵（可能是挂点高度偏移 / 绝缘子串长度）
 - **风险**：未确认具体语义，需 M4-B2 人工核验
+- **静态分析结论**（demo-line 全量）：见 [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) §3 — 已确认 100% 为 4x4 矩阵，z=挂点高度（24-81m）、x=横担偏移（±16m）、单位米；y 分量与坐标系局部性仍待核验
 
 #### BLHA 高程分量
 
@@ -118,6 +121,7 @@ M4 围绕"线路导线几何与悬链线候选字段"展开递进式审计：
 - **当前用途**：TowerMarker.elev，tooltip 展示
 - **悬链线用途**：两端高程差影响弧垂曲线
 - **覆盖度**：BLHA 已解析，elev 字段已存在
+- **静态分析结论**（demo-line 全量）：见 [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) §4 — 已确认 BLHA 为塔位中心坐标（interPoint + samePoint 端点 100% 命中 TOWER），挂点偏移由 MATRIX0 提供
 
 #### 其他候选字段
 
@@ -245,12 +249,14 @@ interface MatrixTranslation {
 
 #### 待用户核验
 
-| 假设 | 验证方式 |
-|---|---|
-| x/y 是横担偏移 | 对比同档不同 wireType 的 x/y 是否差异 |
-| z 是挂点高度 | 对比 CONDUCTOR vs OPGW 的 zRange 是否分层 |
-| 单位为米 | 对比 zRange 量级与塔位 BLHA 高程差 |
-| 坐标系为局部 | 对比同塔不同档距的 x/y 是否方向一致 |
+| 假设 | 验证方式 | 静态分析结论 |
+|---|---|---|
+| x/y 是横担偏移 | 对比同档不同 wireType 的 x/y 是否差异 | ✅ x 已确认（±16m，横担长度合理）；y 仍待核验（值很小） |
+| z 是挂点高度 | 对比 CONDUCTOR vs OPGW 的 zRange 是否分层 | ✅ z 已确认（24-81m，与塔高吻合，单位米） |
+| 单位为米 | 对比 zRange 量级与塔位 BLHA 高程差 | ✅ 已确认（米） |
+| 坐标系为局部 | 对比同塔不同档距的 x/y 是否方向一致 | ⏳ 未做交叉验证（基于 BLHA=塔位中心推论疑似局部） |
+
+> 全量静态分析证据见 [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) §3。
 
 ### 3.4 聚合统计项
 
@@ -695,21 +701,28 @@ M4-B4 / M5 路线决策：
 
 #### 决策理由
 
-1. **inter-point 规律未稳定**：same-point 占比高，需用户对照样本工程核验
-2. **MATRIX0 语义未确认**：单位（米/毫米）、坐标系（局部/世界/相对塔位）均未确认
-3. **KVALUE 物理含义未确认**：0 值含义不明（未启用 / 直线塔 / 其他）
-4. **BLHA 是塔位还是挂点未确认**：影响 MATRIX0 平移分量的解释
+> 静态分析证据见 [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md)，以下状态基于该文档已更新。
+
+1. ~~**inter-point 规律未稳定**~~ → ✅ 已解除：samePoint / interPoint 已分离，interPoint 档距长度合理（avg 425m，max 731m）
+2. **MATRIX0 语义部分确认**：z=挂点高度、x=横担偏移、单位米已确认；坐标系局部性 + y 分量仍待核验
+3. **KVALUE 物理含义未确认**：已确认是数值参数字段（零值占 55%），但具体公式与 0 值精确语义仍待决策
+4. ~~**BLHA 是塔位还是挂点未确认**~~ → ✅ 已解除：BLHA 为塔位中心（端点 100% 命中 TOWER）
 5. **MVP 边界约束**：不做 3D 线路、不解析 MOD、不改 schema
 
 ### 6.2 进入 M4-B4 / M5 的前置条件
 
-| 条件 | 验证方式 |
-|---|---|
-| 每档 WIRE 数规律已理解 | `spanGroupSizeStats.min === max` 或差异原因已识别 |
-| MATRIX0 平移分量单位已确认 | 用户对照样本工程核验 |
-| BLHA 是塔位还是挂点已确认 | 用户对照样本工程核验 |
-| KVALUE=0 含义已确认 | 用户对照样本工程核验 |
-| OPGW vs CONDUCTOR 差异已识别 | `wireTypeCounts` 对照样本 |
+| 条件 | 验证方式 | 静态分析状态 |
+|---|---|---|
+| 每档 WIRE 数规律已理解 | `spanGroupSizeStats.min === max` 或差异原因已识别 | ✅ 已理解（不固定，因转角塔/分支塔/跳线档差异，min=5/max=31/avg≈8.39） |
+| MATRIX0 平移分量单位已确认 | 用户对照样本工程核验 | ✅ 已确认（米） |
+| MATRIX0 坐标系局部性已确认 | 同塔不同档距的 x/y 方向一致性 | ⏳ 未做交叉验证（疑似局部） |
+| MATRIX0 y 分量语义已确认 | 对比同档不同 wireType 的 y 分布 | ⏳ 未确认（值很小，可忽略） |
+| BLHA 是塔位还是挂点已确认 | 用户对照样本工程核验 | ✅ 已确认（塔位中心） |
+| KVALUE=0 含义已确认 | 用户对照样本工程核验 | ⏳ 待决策（疑似"未启用弧垂"或"跳线"） |
+| KVALUE 公式已确认 | 对照 GIM 标准或反推经验公式 | ❌ 未确认 |
+| OPGW vs CONDUCTOR 差异已识别 | `wireTypeCounts` 对照样本 | ❌ 未识别（demo-line WIRETYPE 全为 UNKNOWN） |
+
+> 静态分析状态详见 [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) §6.3。
 
 ### 6.3 M4-B4 路线分支（决策树）
 

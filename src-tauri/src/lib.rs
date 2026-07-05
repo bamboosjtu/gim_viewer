@@ -75,6 +75,7 @@ pub fn run() {
             db::save_gim_index,
             db::write_cache_file,
             db::read_cached_ifc,
+            db::batch_read_cached_files,
             db::get_gim_index,
             db::validate_gim_cache,
             db::get_db_path,

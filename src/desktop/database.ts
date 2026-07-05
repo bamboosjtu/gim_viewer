@@ -147,6 +147,35 @@ export async function readCachedIfc(projectId: number, entryPath: string): Promi
   return new Uint8Array(bytes);
 }
 
+/** 批量读取缓存文件的结果项 */
+export interface BatchCacheFileItem {
+  entry_path: string;
+  bytes: number[] | null;
+}
+
+/**
+ * 批量读取缓存文件（一次 IPC 替代 N 次 read_cached_ifc）。
+ * 用于缓存命中时批量加载 DEV/PHM/MOD/STL，避免数千次 IPC。
+ */
+export async function batchReadCachedFiles(
+  projectId: number,
+  entryPaths: string[],
+): Promise<Map<string, Uint8Array | null>> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  const results = await invoke<BatchCacheFileItem[]>('batch_read_cached_files', {
+    projectId,
+    entryPaths,
+  });
+  const map = new Map<string, Uint8Array | null>();
+  for (const item of results) {
+    map.set(
+      item.entry_path,
+      item.bytes ? new Uint8Array(item.bytes) : null,
+    );
+  }
+  return map;
+}
+
 // ===== GIM 索引完整读取 + 缓存校验 =====
 
 export interface GimEntryRecord {

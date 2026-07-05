@@ -11,6 +11,7 @@
 | [线路 GIM](gim_line.md) | 输电线路工程（GIMPKGT）文件格式、地图渲染、树↔图联动 |
 | [开发者日志](dev-log.md) | 已知限制、技术债务、关键决策、日志系统、诊断工具 |
 | [线路悬链线参数研究](schema/14-line-catenary-study.md) | M4-B1/B2/B3/B3A/B3B/B3C 线路几何与悬链线研究合并：字段审计、档距聚合、拓扑分类、审计服务 API、用户核验流程、决策与后续路线 |
+| [线路 WIRE 悬链线静态分析证据](schema/15-wire-catenary-evidence.md) | demo-line 全量静态分析（5460 WIRE / 327 TOWER），KVALUE / MATRIX0 / BLHA / 拓扑分类字段语义确认 |
 
 ## GIM 文件格式规范
 
