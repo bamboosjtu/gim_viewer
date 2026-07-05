@@ -2,6 +2,35 @@
 
 > 变电站工程（GIMPKGS）的文件结构、解析流程与 3D 可视化。
 
+## 0. 实现状态总览
+
+| 能力 | 状态 | 实现位置 |
+|---|---|---|
+| GIM 容器解压 | ✅ 已实现 | `src/gim/gimExtractor.ts` |
+| CBM 层级树解析 | ✅ 已实现 | `src/gim/cbmParser.ts` |
+| FAM 分节属性解析 | ✅ 已实现 | `src/gim/famParser.ts` |
+| FileDevRelation 解析 | ✅ 已实现 | `src/gim/fileDevParser.ts` |
+| IFC 发现 + GUID 索引 + 名称查询 | ✅ 已实现 | `src/gim/gimIndexer.ts` / `src/viewer/ifcNameIndex.ts` |
+| IFC 3D 渲染（OBC + web-ifc + Three.js） | ✅ 已实现 | `src/viewer/viewerEngine.ts` / `ifcLoader.ts` / `ifcEntryLoader.ts` |
+| 节点级 IFC 懒加载 + Fragments 缓存 | ✅ 已实现 | `src/viewer/ifcEntryLoader.ts`（`.frag` 缓存） |
+| 3D 点击拾取 + 高亮 + 相机定位 | ✅ 已实现 | `src/viewer/selection.ts` / `highlight.ts` / `camera.ts` |
+| 层级树↔3D 联动 | ✅ 已实现 | `src/services/nodeInteractionService.ts` |
+| 属性面板（CBM/FAM/DEV/IFC） | ✅ 已实现 | `src/ui/propsDrawer.ts` |
+| SQLite 缓存（7 张表 + fragments_cache） | ✅ 已实现 | `src-tauri/src/db.rs`（v5 + fragments-cache-v2） |
+| 缓存命中短路 | ✅ 已实现 | `src/services/openGimService.ts` / `gimIndexRestoreService.ts` |
+| IFC 本地磁盘缓存 | ✅ 已实现 | `src/services/gimExtractedCacheService.ts` |
+| 诊断快捷键（Ctrl+Shift+D） | ✅ 已实现 | `src/services/diagnosticSummaryService.ts` |
+| **MOD 文件解析（XML primitive 14 类）** | ❌ 未实现 | 仅有路径记录，无 parser；设计稿见 [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) |
+| **STL 渲染** | ❌ 未实现 | 1803 个 unique STL 全部未渲染；详见 [12-stl-static-survey.md](schema/12-stl-static-survey.md) |
+| **PHM TransformMatrix 应用** | ❌ 未实现 | 仅在属性面板作 monospace 文本展示；样本中 100% IDENTITY |
+| **PHM COLOR 应用** | ❌ 未实现 | STL 引用非空时 COLOR 字段存在，但未应用到 Fragments material |
+| **PHM 解析（SOLIDMODEL + TRANSFORMMATRIXn + COLORn）** | ❌ 未实现 | — |
+| **EMPTY_DEVICE_XML 提示** | ❌ 未实现 | 44 个孤儿 MOD 静默忽略 |
+| **装配节点无几何提示** | ❌ 未实现 | 14 个无 SOLIDMODEL 的 PHM 静默忽略 |
+| **Geometry IR schema 落地** | ❌ 未实现 | 设计稿见 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) |
+
+> 下一步实现路径见 §9。
+
 ---
 
 ## 1. GIM 文件容器
@@ -115,38 +144,43 @@ project.cbm → SCH=project.sch → zjx.std + zjx.sld
 ## 6. 解析与可视化流程
 
 ```
-读取 .gim 文件
+读取 .gim 文件                                       ✅ 已实现
   ↓
-检测 GIMPKGS 头部
+检测 GIMPKGS 头部                                    ✅ 已实现
   ↓
-定位 7z/ZIP 压缩数据偏移
+定位 7z/ZIP 压缩数据偏移                             ✅ 已实现
   ↓
-libarchive.js 解压 → Map<path, File>
+libarchive.js 解压 → Map<path, File>                ✅ 已实现
   ↓
-遍历 CBM 树 → 发现 IFC 文件
+遍历 CBM 树 → 发现 IFC 文件                          ✅ 已实现
   ↓
-用户选择 IFC
+用户选择 IFC                                         ✅ 已实现
   ↓
-web-ifc 解析 IFC → OBC Fragments 转换 → Three.js 渲染
+web-ifc 解析 IFC → OBC Fragments 转换 → Three.js    ✅ 已实现
   ↓
-点击拾取 → 高亮构件 + 展示 IFC 属性 + 关联 GIM 设备
+点击拾取 → 高亮构件 + 展示 IFC 属性 + 关联 GIM 设备  ✅ 已实现
 ```
+
+> 当前管线**仅支持 IFC**。MOD primitive、STL、PHM TransformMatrix / COLOR 全部未实现，详见 §9。
 
 ### 3D 渲染栈
 
-| 层 | 模块 | 职责 |
-|---|---|---|
-| 引擎 | `viewer/viewerEngine.ts` | OBC Components 初始化 |
-| 单例 | `viewer/viewerRuntime.ts` | Viewer 懒加载（首次加载 IFC 时创建） |
-| 加载 | `viewer/ifcLoader.ts` | IFC → Fragments 转换 |
-| 懒加载 | `viewer/ifcEntryLoader.ts` | 节点级按需加载（含 Fragments 缓存休眠分支） |
-| 拾取 | `viewer/selection.ts` + `viewer/highlight.ts` | raycast 高亮 + 构件选中 |
-| 相机 | `viewer/camera.ts` | 构件定位 |
-| 名称索引 | `viewer/ifcNameIndex.ts` | GUID→Name 批量查询 |
+| 层 | 模块 | 职责 | 状态 |
+|---|---|---|---|
+| 引擎 | `viewer/viewerEngine.ts` | OBC Components 初始化 | ✅ |
+| 单例 | `viewer/viewerRuntime.ts` | Viewer 懒加载（首次加载 IFC 时创建） | ✅ |
+| 加载 | `viewer/ifcLoader.ts` | IFC → Fragments 转换 | ✅ |
+| 懒加载 | `viewer/ifcEntryLoader.ts` | 节点级按需加载（含 Fragments 缓存休眠分支） | ✅ |
+| 拾取 | `viewer/selection.ts` + `viewer/highlight.ts` | raycast 高亮 + 构件选中 | ✅ |
+| 相机 | `viewer/camera.ts` | 构件定位 | ✅ |
+| 名称索引 | `viewer/ifcNameIndex.ts` | GUID→Name 批量查询 | ✅ |
+| STL 加载 | — | STL mesh 加载 | ❌ 未实现 |
+| MOD primitive 加载 | — | XML primitive → Three geometry | ❌ 未实现 |
+| PHM 解析 | — | SOLIDMODEL + TRANSFORMMATRIXn + COLORn | ❌ 未实现 |
 
 ### 层级树↔3D 联动
 
-选中设备节点 → 高亮对应 IFC 构件 + 相机定位。
+选中设备节点 → 高亮对应 IFC 构件 + 相机定位。✅ 已实现
 
 ---
 
@@ -181,8 +215,65 @@ IFC 文件写入 `app_data_dir/extracted/{id}/`，路径遍历防护。
 
 右侧可折叠抽屉，展示：
 
-- **FAM 设计参数**：分节属性（从 fam_property 缓存或 currentFiles 读取）
-- **DEV 设备信息**：关键属性（从 dev_property 缓存或 currentFiles 读取）
-- **IFC 属性集**：web-ifc 原生属性
+- **FAM 设计参数**：分节属性（从 fam_property 缓存或 currentFiles 读取）✅
+- **DEV 设备信息**：关键属性（从 dev_property 缓存或 currentFiles 读取）✅
+- **IFC 属性集**：web-ifc 原生属性 ✅
+- **TRANSFORMMATRIX**：monospace 文本展示（非单位矩阵时显示）✅ 仅展示，未应用到 3D
+- **MOD primitive 字段**：❌ 未实现（14 类 primitive 字段无解析）
+- **EMPTY_DEVICE_XML 提示**：❌ 未实现（44 个孤儿 MOD 静默忽略）
+- **装配节点无几何提示**：❌ 未实现（14 个无 SOLIDMODEL PHM 静默忽略）
 
 缓存命中时（currentFiles=null）仍可显示 CBM/FAM/DEV 基础属性。
+
+---
+
+## 9. 下一步实现路径
+
+> 基于 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) 的 IR 草案与 [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) 的 primitive grammar，按优先级分阶段实施。
+
+### 9.1 P0（MVP 必补）
+
+| 任务 | 输入 | 输出 | 关键约束 |
+|---|---|---|---|
+| **IR schema 落地** | [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) §2-§4 | `src/gim/geometry/ir.ts`（GimGeometrySource 联合类型 + 5 个 kind interface） | 顶层联合类型引用 interface，不 inline；NoneReason 含 `assembly-node-without-own-geometry` |
+| **PHM 解析器** | `.phm` 文件 | `src/gim/geometry/phmParser.ts`（SOLIDMODELn + TRANSFORMMATRIXn + COLORn） | PHM TRANSFORMMATRIX 100% IDENTITY（[09-transform-chain-analysis.md](schema/09-transform-chain-analysis.md)），实际单级变换 |
+| **xml-mod parser** | 14 类 primitive（Box/Cylinder/Sphere/...） | `src/gim/geometry/xmlModParser.ts` | 覆盖率 99.86%（[10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md)）；9 类低样本 primitive 保留 fallback |
+| **xml-mod 渲染** | XmlModEntity[] → Three.js geometry | `src/viewer/xmlModLoader.ts` | 与 IFC 渲染栈共存（不替换 ifcLoader）；86 个 STL+MOD 并存 PHM 需评估重复（[12-stl-static-survey.md](schema/12-stl-static-survey.md) §5） |
+
+### 9.2 P1（MVP 可选，影响 STL 展示能力）
+
+| 任务 | 输入 | 输出 | 关键约束 |
+|---|---|---|---|
+| **STL 渲染** | 1803 个 unique STL（demo-substation） | `src/viewer/stlLoader.ts`（THREE.STLLoader 或等价实现） | 全部为 binary STL（[12-stl-static-survey.md](schema/12-stl-static-survey.md)）；建议先做 30 个 STL-only PHM 试点 |
+| **PHM COLOR 应用** | PHM COLORn 字段 | Fragments material 颜色覆盖 | STL 引用非空时 COLOR 存在，MOD 引用为空 |
+| **EMPTY_DEVICE_XML 提示** | 44 个孤儿 MOD | UI 提示 + 诊断（reason: `empty-device-xml`） | 不参与渲染但应提示 |
+
+### 9.3 P2（体验补齐）
+
+| 任务 | 输入 | 输出 | 关键约束 |
+|---|---|---|---|
+| **装配节点无几何提示** | 14 个无 SOLIDMODEL PHM | UI 提示 + 诊断（reason: `assembly-node-without-own-geometry`） | 装配节点自身无几何但子设备几何完整，与 `phm-no-solidmodel` 区分 |
+| **PHM TransformMatrix 应用** | PHM TRANSFORMMATRIXn | 实例化时附加 matrix | 当前样本 100% IDENTITY，实际单级变换（保留两级字段结构，实现按单级） |
+| **缓存命中回放** | geometry_source 表（建议） | 缓存命中时直接恢复 IR | 正式 DDL 另起 [14-geometry-cache-schema.md](schema/14-geometry-cache-schema.md)（待建） |
+| **节点联动扩展** | CBM 树 → MOD/STL 高亮 | 选中设备节点 → 高亮对应 MOD primitive + 相机定位 | 与现有 IFC 联动模式一致 |
+
+### 9.4 关键约束（来自分析报告）
+
+| 约束 | 来源 | 影响 |
+|---|---|---|
+| 14 类 primitive 覆盖率 99.86% | [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) | 9 类低样本 primitive 需保留弱 schema fallback |
+| 86 个 PHM 同时引用 STL + MOD | [12-stl-static-survey.md](schema/12-stl-static-survey.md) §5 | 需评估重复渲染风险（建议 MOD-first 或 STL-first 策略） |
+| 1803 unique STL 全部为 binary | [12-stl-static-survey.md](schema/12-stl-static-survey.md) | 可统一用 THREE.STLLoader 二进制路径 |
+| PHM TransformMatrix 100% IDENTITY | [09-transform-chain-analysis.md](schema/09-transform-chain-analysis.md) | 单级变换，两级字段结构保留 |
+| F3System 多 FAM 引用 145 个文件 × 4 FAM | [06-cbm-fam-consistency.md](schema/06-cbm-fam-consistency.md) §3.3 | F3System 节点属性聚合需考虑多 FAM 合并展示 |
+| Geometry IR 不在 SQLite 范围 | [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) §1.3 | 正式 DDL 另起 14-geometry-cache-schema.md |
+
+### 9.5 与现有 IFC 路径的兼容性
+
+| 兼容点 | 策略 |
+|---|---|
+| 现有 `ifcLoader.ts` | 保留，IR 通过 `kind: "ifc"` 复用 |
+| `CbmNode` 类型 | 保留 `ifcFile` / `ifcGuid` 字段，IR 不替代，仅消费 path/entityName/devPath |
+| `AppState` | 新增可选字段 `geometryBundles` / `cachedGeometryPaths`（向后兼容） |
+| SQLite 表 | 现有 7 张表 + fragments_cache 保留，新增 `geometry_source` 表为可选缓存（不破坏现有缓存命中） |
+| 渲染栈 | IFC 走 OBC Fragments，MOD/STL 走 Three.js 直接 geometry，两者共存于同一 scene |
