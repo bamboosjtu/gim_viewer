@@ -495,8 +495,8 @@ UI 层（属性面板 / 树节点）：
 | 6 | 线路 315 个 CROSS 经纬度点线无 3D 表达 | 仅 2D 地图叠加 | `line-text-mod` format=`text-point-line`（保留地图为主，3D 可选） |
 | 7 | 线路 1300 个螺栓表未展示 | 完全缺失 | `line-text-mod` format=`text-section-kv-record` + 属性面板 |
 | 8 | 线路 161 个基础/导线参数未展示 | 完全缺失 | `line-text-mod` format=`text-key-value` + 属性面板 |
-| 9 | 线路 181 个 Tower_Device STL 未渲染 | 完全缺失 | `stl` kind（Tower_Device 62% STL 分支） |
-| 10 | 线路 11773 个 Wire_Device STL 未渲染 | 完全缺失 | `stl` kind（Wire_Device 100% STL） |
+| 9 | 线路 Tower_Device 的 STL 分支未渲染 | 完全缺失 | `stl` kind（Tower_Device 中部分 CBM refs 触达 STL，需按 SOLIDMODEL 扩展名分流；不能简单按 entityName 唯一决定） |
+| 10 | 线路 Wire_Device 的 STL 分支未渲染 | 完全缺失 | `stl` kind（Wire_Device 100% 触达 STL；demo-line 为 11773 个 CBM refs → 8 个 unique STL） |
 | 11 | PHM COLOR 字段未参与展示 | 完全缺失 | `GimGeometryInstance.color` 字段，覆盖 MOD Entity 自带 Color |
 | 12 | PHM TransformMatrix 未应用 | 完全缺失 | `GimGeometryInstance.transformMatrix` 字段（已知 100% IDENTITY，但保留） |
 | 13 | 缓存命中时无法回放非 IFC 几何 | 仅 IFC | `cachedGeometryPaths` 字段 + `geometry_source` 表（可选） |
@@ -515,7 +515,7 @@ P0（MVP 必补，影响核心展示能力）：
 
 P1（MVP 可选，影响 STL 展示能力）：
   - #2 stl 渲染（变电 1803 STL，建议先做 30 个 STL-only）
-  - #9 + #10 线路 STL 渲染（181 Tower_Device + 11773 Wire_Device）
+  - #9 + #10 线路 STL 渲染（Tower_Device 部分触达 STL；Wire_Device 100% 触达 STL，demo-line 为 11773 CBM refs → 8 unique STL）
   - #11 PHM COLOR 应用
 
 P2（体验补齐）：
@@ -609,7 +609,7 @@ P2（体验补齐）：
    - 建议按需懒加载（点击节点时才解析对应 PHM 的 SOLIDMODEL）
    - IR 设计已支持懒加载（modPath 保留引用，按需读取）
 
-7. 线路 11773 个 Wire_Device STL 引用（实际 8 unique STL）
+7. 线路 Wire_Device STL 引用（demo-line 为 11773 个 CBM refs → 8 个 unique STL）
    - 阶段 5 实施时需建立几何缓存池（同内容 STL 只加载 1 次）
    - 或按 stlPath 去重，避免重复解析
 ```
