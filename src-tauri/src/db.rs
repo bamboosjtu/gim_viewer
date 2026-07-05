@@ -15,7 +15,8 @@ pub const PARSER_VERSION: &str = "gim-parser-v6";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
-pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v2";
+/// v3: IFC 加载关闭 COORDINATE_TO_ORIGIN，保留工程原始坐标以对齐 MOD
+pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v3";
 
 /// GIM 文件元信息（从前端传入，需 Deserialize）
 #[derive(Debug, Deserialize)]
@@ -60,10 +61,15 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
     let conn = Connection::open(&path).map_err(|e| format!("打开数据库失败: {}", e))?;
     conn.busy_timeout(std::time::Duration::from_secs(5))
         .map_err(|e| format!("设置数据库 busy_timeout 失败: {}", e))?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| format!("设置数据库 WAL 模式失败: {}", e))?;
-    conn.pragma_update(None, "synchronous", "NORMAL")
-        .map_err(|e| format!("设置数据库 synchronous 模式失败: {}", e))?;
+
+    // WAL is an optimization, not a startup requirement. If another dev
+    // instance is still holding the database lock, forcing WAL here would make
+    // Tauri setup panic before the UI can recover or show cache diagnostics.
+    if let Err(e) = conn.pragma_update(None, "journal_mode", "WAL") {
+        eprintln!("[db] 跳过 WAL 模式设置: {}", e);
+    } else if let Err(e) = conn.pragma_update(None, "synchronous", "NORMAL") {
+        eprintln!("[db] 跳过 synchronous=NORMAL 设置: {}", e);
+    }
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS gim_project (
@@ -385,12 +391,13 @@ pub fn upsert_gim_project(
                 info.path, old_size, info.size, &old_sha256[..old_sha256.len().min(12)]
             );
         } else {
-            // 源文件未变化：仅更新元信息和访问时间，不碰 parser_version / project_type
-            conn.execute(
-                "UPDATE gim_project SET name = ?1, size = ?2, modified_ms = ?3, sha256 = ?4, updated_at_ms = ?5, last_opened_at_ms = ?6 WHERE id = ?7",
-                params![info.name, info.size, info.modified_ms, info.sha256, now, now, id],
-            )
-            .map_err(|e| format!("更新项目记录失败: {}", e))?;
+            // 源文件未变化时不要为了 last_opened_at_ms 强制写库。打开 GIM 的
+            // 主流程只需要 project_id 和已有 parser_version；若另一个旧实例
+            // 暂时持有 SQLite 写锁，非必要写入会阻断缓存命中和后续读取。
+            println!(
+                "[GIM] 源 GIM 文件未变化，跳过项目访问时间写入（path={}）",
+                info.path
+            );
         }
 
         query_record(&conn, id)
@@ -2729,81 +2736,167 @@ fn query_reachable_geometry(
     include_mod: bool,
     include_stl: bool,
 ) -> Result<Vec<ReachableGeometry>, String> {
+    use std::collections::{HashMap, HashSet};
     use std::time::Instant;
 
-    // 构建 SQL WHERE 子句（过滤下推到 SQL 层，不在 Rust 侧逐行判断）
-    let geo_filter = if include_mod && include_stl {
-        "AND (LOWER(psm.solid_model_path) LIKE '%.mod' OR LOWER(psm.solid_model_path) LIKE '%.stl')"
-    } else if include_mod {
-        "AND LOWER(psm.solid_model_path) LIKE '%.mod'"
-    } else {
-        "AND LOWER(psm.solid_model_path) LIKE '%.stl'"
-    };
-
-    // DEV 图在样本分析中已验证最大深度为 1。这里用有界 UNION 代替递归
-    // CTE，避免 SQLite 在 rows 迭代开始时物化递归临时表进入慢路径。
-    let sql = format!(
-        "WITH
-        cbm_dev AS (
-            SELECT DISTINCT
-                CASE WHEN dev_path LIKE 'DEV/%' THEN dev_path ELSE 'DEV/' || dev_path END AS dev_path
-            FROM cbm_node
-            WHERE project_id = ?1 AND dev_path IS NOT NULL AND dev_path != ''
-        ),
-        reachable_dev AS (
-            SELECT dev_path FROM cbm_dev
-            UNION
-            SELECT
-                CASE WHEN sd.child_dev_path LIKE 'DEV/%' THEN sd.child_dev_path ELSE 'DEV/' || sd.child_dev_path END AS dev_path
-            FROM cbm_dev cd
-            JOIN dev_sub_device sd INDEXED BY idx_dev_sub_dev
-                ON sd.project_id = ?1 AND sd.dev_path = cd.dev_path
+    // Avoid SQLite recursive CTEs / multi-table joins here. In the app this
+    // command runs while rendering is active, and SQLite may spend a long time
+    // materializing a join before yielding the first row. The indexed tables are
+    // small enough to join deterministically in Rust.
+    let cbm_t0 = Instant::now();
+    let mut cbm_stmt = conn
+        .prepare(
+            "SELECT DISTINCT dev_path
+             FROM cbm_node
+             WHERE project_id = ?1 AND dev_path IS NOT NULL AND dev_path != ''",
         )
-        SELECT DISTINCT
-            'MOD/' || psm.solid_model_path AS geometry_path,
-            dsm.transform_matrix AS dev_transform_matrix,
-            psm.transform_matrix AS phm_transform_matrix,
-            psm.color AS phm_color
-        FROM reachable_dev rd
-        JOIN dev_solid_model dsm INDEXED BY idx_dev_sm_dev
-            ON dsm.project_id = ?1 AND dsm.dev_path = rd.dev_path
-        JOIN phm_solid_model psm INDEXED BY idx_phm_sm_phm
-            ON psm.project_id = ?1 AND psm.phm_path = 'PHM/' || dsm.solid_model_path
-        WHERE 1=1 {}
-        ORDER BY geometry_path
-    ", geo_filter);
-
-    let prepare_t0 = Instant::now();
-    let mut stmt = conn
-        .prepare(&sql)
-        .map_err(|e| format!("预处理 reachable_geometry 失败: {}", e))?;
+        .map_err(|e| format!("预处理 cbm_node dev_path 失败: {}", e))?;
+    let cbm_rows = cbm_stmt
+        .query_map(params![project_id], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("查询 cbm_node dev_path 失败: {}", e))?;
+    let mut reachable_devs: HashSet<String> = HashSet::new();
+    for row in cbm_rows {
+        reachable_devs.insert(normalize_dev_path(&row.map_err(|e| format!("读取 cbm_node dev_path 失败: {}", e))?));
+    }
     eprintln!(
-        "[get_reachable_geometry] prepare: {}ms",
-        prepare_t0.elapsed().as_millis()
+        "[get_reachable_geometry] cbm devs: {}ms rows={}",
+        cbm_t0.elapsed().as_millis(),
+        reachable_devs.len()
     );
 
-    let query_t0 = Instant::now();
-    let rows = stmt
+    let sub_t0 = Instant::now();
+    let direct_devs: Vec<String> = reachable_devs.iter().cloned().collect();
+    let mut sub_stmt = conn
+        .prepare(
+            "SELECT dev_path, child_dev_path
+             FROM dev_sub_device
+             WHERE project_id = ?1",
+        )
+        .map_err(|e| format!("预处理 dev_sub_device 失败: {}", e))?;
+    let sub_rows = sub_stmt
         .query_map(params![project_id], |row| {
-            Ok(ReachableGeometry {
-                geometry_path: row.get(0)?,
-                dev_transform_matrix: row.get(1)?,
-                phm_transform_matrix: row.get(2)?,
-                phm_color: row.get(3)?,
-            })
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
-        .map_err(|e| format!("查询 reachable_geometry 失败: {}", e))?;
+        .map_err(|e| format!("查询 dev_sub_device 失败: {}", e))?;
+    let direct_set: HashSet<String> = direct_devs.into_iter().collect();
+    let mut child_count = 0usize;
+    for row in sub_rows {
+        let (parent, child) = row.map_err(|e| format!("读取 dev_sub_device 行失败: {}", e))?;
+        if direct_set.contains(&normalize_dev_path(&parent)) {
+            if reachable_devs.insert(normalize_dev_path(&child)) {
+                child_count += 1;
+            }
+        }
+    }
     eprintln!(
-        "[get_reachable_geometry] query_map: {}ms",
-        query_t0.elapsed().as_millis()
+        "[get_reachable_geometry] sub devices: {}ms child_added={} reachable={}",
+        sub_t0.elapsed().as_millis(),
+        child_count,
+        reachable_devs.len()
+    );
+
+    let dsm_t0 = Instant::now();
+    let mut dev_to_phm: HashMap<String, Vec<(String, Option<String>)>> = HashMap::new();
+    let mut dsm_stmt = conn
+        .prepare(
+            "SELECT dev_path, solid_model_path, transform_matrix
+             FROM dev_solid_model
+             WHERE project_id = ?1",
+        )
+        .map_err(|e| format!("预处理 dev_solid_model 失败: {}", e))?;
+    let dsm_rows = dsm_stmt
+        .query_map(params![project_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(|e| format!("查询 dev_solid_model 失败: {}", e))?;
+    let mut dsm_count = 0usize;
+    for row in dsm_rows {
+        let (dev_path, solid_model_path, transform_matrix) =
+            row.map_err(|e| format!("读取 dev_solid_model 行失败: {}", e))?;
+        let dev_path = normalize_dev_path(&dev_path);
+        if reachable_devs.contains(&dev_path) {
+            dev_to_phm
+                .entry(dev_path)
+                .or_default()
+                .push((normalize_phm_path(&solid_model_path), transform_matrix));
+            dsm_count += 1;
+        }
+    }
+    eprintln!(
+        "[get_reachable_geometry] dev solid models: {}ms rows={}",
+        dsm_t0.elapsed().as_millis(),
+        dsm_count
+    );
+
+    let psm_t0 = Instant::now();
+    let mut phm_to_geometry: HashMap<String, Vec<(String, Option<String>, Option<String>)>> = HashMap::new();
+    let mut psm_stmt = conn
+        .prepare(
+            "SELECT phm_path, solid_model_path, transform_matrix, color
+             FROM phm_solid_model
+             WHERE project_id = ?1",
+        )
+        .map_err(|e| format!("预处理 phm_solid_model 失败: {}", e))?;
+    let psm_rows = psm_stmt
+        .query_map(params![project_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })
+        .map_err(|e| format!("查询 phm_solid_model 失败: {}", e))?;
+    let mut psm_count = 0usize;
+    for row in psm_rows {
+        let (phm_path, solid_model_path, transform_matrix, color) =
+            row.map_err(|e| format!("读取 phm_solid_model 行失败: {}", e))?;
+        let lower = solid_model_path.to_ascii_lowercase();
+        if (include_mod && lower.ends_with(".mod")) || (include_stl && lower.ends_with(".stl")) {
+            phm_to_geometry
+                .entry(normalize_phm_path(&phm_path))
+                .or_default()
+                .push((normalize_geometry_path(&solid_model_path), transform_matrix, color));
+            psm_count += 1;
+        }
+    }
+    eprintln!(
+        "[get_reachable_geometry] phm solid models: {}ms rows={}",
+        psm_t0.elapsed().as_millis(),
+        psm_count
     );
 
     let collect_t0 = Instant::now();
     let mut results = Vec::new();
-    for r in rows {
-        let geo = r.map_err(|e| format!("读取 reachable_geometry 行失败: {}", e))?;
-        results.push(geo);
+    let mut seen: HashSet<String> = HashSet::new();
+    for (_dev_path, phm_refs) in dev_to_phm {
+        for (phm_path, dev_transform_matrix) in phm_refs {
+            if let Some(geometries) = phm_to_geometry.get(&phm_path) {
+                for (geometry_path, phm_transform_matrix, phm_color) in geometries {
+                    let key = format!(
+                        "{}\u{1f}{}\u{1f}{}\u{1f}{}",
+                        geometry_path,
+                        dev_transform_matrix.as_deref().unwrap_or(""),
+                        phm_transform_matrix.as_deref().unwrap_or(""),
+                        phm_color.as_deref().unwrap_or("")
+                    );
+                    if seen.insert(key) {
+                        results.push(ReachableGeometry {
+                            geometry_path: geometry_path.clone(),
+                            dev_transform_matrix: dev_transform_matrix.clone(),
+                            phm_transform_matrix: phm_transform_matrix.clone(),
+                            phm_color: phm_color.clone(),
+                        });
+                    }
+                }
+            }
+        }
     }
+    results.sort_by(|a, b| a.geometry_path.cmp(&b.geometry_path));
     eprintln!(
         "[get_reachable_geometry] collect rows: {}ms rows={}",
         collect_t0.elapsed().as_millis(),
@@ -2811,6 +2904,34 @@ fn query_reachable_geometry(
     );
 
     Ok(results)
+}
+
+fn normalize_dev_path(path: &str) -> String {
+    normalize_prefixed_path(path, "DEV")
+}
+
+fn normalize_phm_path(path: &str) -> String {
+    normalize_prefixed_path(path, "PHM")
+}
+
+fn normalize_geometry_path(path: &str) -> String {
+    let normalized = path.trim().replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+    if lower.starts_with("mod/") || lower.starts_with("stl/") {
+        normalized
+    } else {
+        format!("MOD/{}", normalized)
+    }
+}
+
+fn normalize_prefixed_path(path: &str, prefix: &str) -> String {
+    let normalized = path.trim().replace('\\', "/");
+    let expected = format!("{}/", prefix);
+    if normalized.to_ascii_lowercase().starts_with(&expected.to_ascii_lowercase()) {
+        format!("{}{}", expected, &normalized[expected.len()..])
+    } else {
+        format!("{}{}", expected, normalized)
+    }
 }
 
 /// 获取指定项目的缓存诊断（供缓存管理 UI 使用）

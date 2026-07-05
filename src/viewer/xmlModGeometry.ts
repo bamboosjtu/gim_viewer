@@ -5,7 +5,7 @@
  * - 基础体（SAFE_PRIMITIVES）：精确几何，经样本验证渲染正确
  * - 复杂体（StretchedBody / PorcelainBushing / TerminalBlock / ChannelSteel / Table）：
  *   MVP 阶段暂停渲染，避免错误几何污染场景
- * - 弱 schema 3 类：BoxGeometry 占位 + console.warn
+ * - 弱 schema 3 类：暂不渲染，避免占位盒污染场景
  *
  * TransformMatrix 应用：
  * - GIM 矩阵实测为列主序展开（平移在 m[12], m[13], m[14]）
@@ -16,7 +16,10 @@
  * - R/G/B 范围 0-255 → setRGB(r/255, g/255, b/255)
  * - A 范围 0-100（透明度百分比）→ opacity = a/100
  *
- * 单位：毫米（与 IFC 渲染保持一致，不做单位换算）
+ * 单位：
+ * - MOD 原始尺寸/平移为毫米
+ * - IFC 当前场景为米量级
+ * - xmlModDocumentToGroup 在 Group 层统一缩放 0.001，避免逐 primitive 丢精度
  */
 
 import * as THREE from 'three';
@@ -27,6 +30,13 @@ import type {
 } from '../gim/geometry/ir.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 
+const MOD_MM_TO_SCENE_UNIT = 0.001;
+const CYLINDER_SEGMENTS = 16;
+const SPHERE_WIDTH_SEGMENTS = 16;
+const SPHERE_HEIGHT_SEGMENTS = 8;
+const TORUS_RADIAL_SEGMENTS = 8;
+const TORUS_TUBULAR_SEGMENTS = 16;
+
 /** 去重 warn（每种 primitive 只 warn 一次） */
 const _warnedOnce = new Set<string>();
 
@@ -36,22 +46,22 @@ const _warnedOnce = new Set<string>();
  * 14 类 primitive：
  * - 6 类基础体：Cylinder/Cuboid/Sphere/TruncatedCone/Ring/CircularGasket — 精确几何
  * - 5 类暂停：StretchedBody/PorcelainBushing/TerminalBlock/ChannelSteel/Table — MVP 跳过
- * - 3 类弱 schema：RectangularFixedPlate/OffsetRectangularTable/RectangularRing — 占位
+ * - 3 类弱 schema：RectangularFixedPlate/OffsetRectangularTable/RectangularRing — 暂停渲染
  */
 export function primitiveToGeometry(p: XmlModPrimitive): THREE.BufferGeometry | null {
   switch (p.type) {
     case 'Cylinder':
-      return new THREE.CylinderGeometry(sanitizeNum(p.r), sanitizeNum(p.r), sanitizeNum(p.h), 32);
+      return new THREE.CylinderGeometry(sanitizeNum(p.r), sanitizeNum(p.r), sanitizeNum(p.h), CYLINDER_SEGMENTS);
     case 'Cuboid':
       return new THREE.BoxGeometry(sanitizeNum(p.l), sanitizeNum(p.w), sanitizeNum(p.h));
     case 'Sphere':
-      return new THREE.SphereGeometry(sanitizeNum(p.r), 32, 16);
+      return new THREE.SphereGeometry(sanitizeNum(p.r), SPHERE_WIDTH_SEGMENTS, SPHERE_HEIGHT_SEGMENTS);
     case 'TruncatedCone':
-      return new THREE.CylinderGeometry(sanitizeNum(p.tr), sanitizeNum(p.br), sanitizeNum(p.h), 32);
+      return new THREE.CylinderGeometry(sanitizeNum(p.tr), sanitizeNum(p.br), sanitizeNum(p.h), CYLINDER_SEGMENTS);
     case 'Ring':
-      return new THREE.TorusGeometry(sanitizeNum(p.r), sanitizeNum(p.dr) / 2, 16, 32, sanitizeNum(p.rad));
+      return new THREE.TorusGeometry(sanitizeNum(p.r), sanitizeNum(p.dr) / 2, TORUS_RADIAL_SEGMENTS, TORUS_TUBULAR_SEGMENTS, sanitizeNum(p.rad));
     case 'CircularGasket':
-      return new THREE.TorusGeometry(sanitizeNum(p.or), Math.max(0, (sanitizeNum(p.or) - sanitizeNum(p.ir)) / 2), 16, 32, sanitizeNum(p.rad));
+      return new THREE.TorusGeometry(sanitizeNum(p.or), Math.max(0, (sanitizeNum(p.or) - sanitizeNum(p.ir)) / 2), TORUS_RADIAL_SEGMENTS, TORUS_TUBULAR_SEGMENTS, sanitizeNum(p.rad));
     case 'StretchedBody':
     case 'PorcelainBushing':
     case 'TerminalBlock':
@@ -66,10 +76,20 @@ export function primitiveToGeometry(p: XmlModPrimitive): THREE.BufferGeometry | 
     case 'RectangularFixedPlate':
     case 'OffsetRectangularTable':
     case 'RectangularRing':
-      console.warn(`[xmlModGeometry] weak schema primitive "${p.type}" 使用 BoxGeometry 占位`);
-      return new THREE.BoxGeometry(1, 1, 1);
+      if (!_warnedOnce.has(p.type)) {
+        _warnedOnce.add(p.type);
+        console.warn(`[xmlModGeometry] weak schema primitive "${p.type}" 暂停渲染（字段语义待补充）`);
+      }
+      return null;
     default:
-      return new THREE.BoxGeometry(1, 1, 1);
+      {
+        const unknownType = (p as { type?: string }).type ?? 'unknown';
+        if (!_warnedOnce.has(unknownType)) {
+          _warnedOnce.add(unknownType);
+          console.warn(`[xmlModGeometry] 未支持 primitive "${unknownType}"，已跳过`);
+        }
+      }
+      return null;
   }
 }
 
@@ -149,6 +169,7 @@ export function xmlModDocumentToGroup(doc: XmlModDocument): THREE.Group {
     mesh.visible = entity.visible;
     group.add(mesh);
   }
+  group.scale.setScalar(MOD_MM_TO_SCENE_UNIT);
   return group;
 }
 
