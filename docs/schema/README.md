@@ -37,6 +37,7 @@
 | 09 | [09-transform-chain-analysis.md](09-transform-chain-analysis.md) | PHM 与 MOD 变换链分析、矩阵存储约定、两级变换验证 | 待随新样本复核 |
 | 10 | [10-substation-mod-grammar.md](10-substation-mod-grammar.md) | 变电 XML primitive 字段范围、强类型 schema 判定、Color/StretchedBody 深度分析 | 待随新样本复核 |
 | 11 | [11-line-mod-grammar.md](11-line-mod-grammar.md) | 线路 MOD 4 类文本格式族 grammar、层级关系、parser 草案边界 | 待随新样本复核 |
+| 12 | [12-stl-static-survey.md](12-stl-static-survey.md) | STL 格式检测、PHM 引用扫描、entityName 映射、STL 与 MOD 关系判定 | 待随新样本复核 |
 
 ---
 
@@ -72,7 +73,8 @@ Step 04: 复核 07/08 的 DEV/PHM 几何可达性与 MOD 静态分型
 Step 05: 复核 09 的 PHM 与 MOD 变换链
 Step 06: 复核 10 的变电 XML primitive 字段范围与强类型 schema
 Step 07: 复核 11 的线路 MOD 文本格式族 grammar 与 parser 草案边界
-Step 08: 再决定是否进入 STL/MOD 渲染实现
+Step 08: 复核 12 的 STL 角色与 MOD 关系（互斥/并列/fallback）
+Step 09: 再决定是否进入 STL/MOD 渲染实现
 ```
 
 ---

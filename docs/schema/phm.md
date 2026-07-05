@@ -224,3 +224,5 @@ COLOR2=138,149,151,100
 | 几何复用模式     | 高复用：少量 MOD/STL 被大量 PHM 引用            | 低复用：MOD/STL 与 PHM 接近 1:1                   |
 
 差异原因：线路工程构件同质化程度高（如绝缘子串、金具），同一 PHM 模板被大量复用；变电工程设备异质性强，每个 PHM 组合更复杂但独占几何资源。详见 [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) 第 9 节。
+
+> STL 格式（全部 binary）、PHM 引用率（100%）、entityName 映射、STL 与 MOD 关系（线路 PHM 级互斥、变电部分并列）详见 [12-stl-static-survey.md](12-stl-static-survey.md)。

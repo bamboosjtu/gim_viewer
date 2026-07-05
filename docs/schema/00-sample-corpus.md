@@ -46,6 +46,7 @@ demo-substation 脱敏后的变电工程样本
 | Step 09 | 分析 PHM 与 MOD 变换链 | `09-transform-chain-analysis.md` |
 | Step 10 | 分析变电 XML primitive 字段值范围 | `10-substation-mod-grammar.md` |
 | Step 11 | 分析线路 MOD 文本格式族 grammar 与 parser 草案边界 | `11-line-mod-grammar.md` |
+| Step 12 | 分析 STL 格式、PHM 引用率、entityName 映射、与 MOD 关系 | `12-stl-static-survey.md` |
 
 详细目录入口见 `README.md`。
 

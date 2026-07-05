@@ -84,6 +84,8 @@ MOD 不是单一格式，而是按工程类型分为两大格式族：
 > 线路 MOD 的详细分型、字段统计、CODE 分布、HNum 分布、token 分布及上游 CBM→MOD 映射详见 [08-mod-static-survey.md](08-mod-static-survey.md)。
 >
 > 4 类文本格式族的字段语义、层级关系（H/Body/Leg/SubLeg）、R 记录三变体对比、Bolt 字段拆解、Tower_Device/WIRE 签名判别、TypeScript schema 草案详见 [11-line-mod-grammar.md](11-line-mod-grammar.md)。
+>
+> STL 格式（全部 binary）、PHM 引用率（100%）、entityName 映射、STL 与 MOD 关系（线路 PHM 级互斥、变电部分并列）详见 [12-stl-static-survey.md](12-stl-static-survey.md)。
 
 ## 引用关系
 
