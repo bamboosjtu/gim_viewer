@@ -53,6 +53,11 @@ export async function handleNodeClick(
       const runtime = await getViewerRuntime(state, showMessage);
       const { highlightIfcFromNode } = await import('../viewer/highlight.js');
       await highlightIfcFromNode(runtime.ctx, state, node, showMessage);
+      return;
+    }
+    // 无 IFC 关联但有 devPath → 尝试 xml-mod 加载路径（变电工程典型）
+    if (!ifcModelId && node.devPath) {
+      await loadXmlModForNode(state, node, showMessage);
     }
     return;
   }
@@ -142,4 +147,81 @@ async function getIfcBufferForEntry(
 
   console.warn('[IFC Buffer] 找不到 IFC 文件内容或缓存:', entry);
   return null;
+}
+
+/**
+ * 节点点击时加载 xml-mod 几何（变电工程无 IFC 设备的回退路径）。
+ *
+ * 流程：
+ * 1. discoverModGeometriesFromNode 走 CBM → DEV → PHM → MOD 引用链
+ * 2. 对每个未加载的 modPath，loadXmlModFromFiles 转 Three.js Group
+ * 3. applyExternalTransforms 应用 DEV + PHM 变换矩阵
+ * 4. 加入 scene 并跟踪到 state.loadedXmlModGroups
+ * 5. 首次加载时 fitCameraToScene 定位相机
+ *
+ * P0 范围：
+ * - 仅处理 currentFiles 非空场景（首次打开）
+ * - 缓存命中场景（currentFiles=null）由 P2 实现
+ * - STL 引用由 modGeometryDiscovery 跳过（P1）
+ *
+ * @param state 全局 AppState
+ * @param node CBM 节点（必须带 devPath）
+ * @param showMessage 消息回调
+ */
+async function loadXmlModForNode(
+  state: AppState,
+  node: CbmNode,
+  showMessage: (text: string) => void,
+): Promise<void> {
+  if (!state.currentFiles) {
+    // 缓存命中场景，P2 处理
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 缓存命中场景跳过（P2 实现）:', node.devPath);
+    return;
+  }
+
+  const { discoverModGeometriesFromNode } = await import('./modGeometryDiscovery.js');
+  const discovered = await discoverModGeometriesFromNode(node, state.currentFiles);
+
+  if (discovered.length === 0) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 未发现 MOD 几何来源:', node.devPath);
+    return;
+  }
+
+  // 获取 ViewerRuntime（懒加载，与 IFC 路径共用同一引擎）
+  const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+  const runtime = await getViewerRuntime(state, showMessage);
+  const { ctx } = runtime;
+  // OBC BaseScene.three 类型为 Object3D，实际为 THREE.Scene，与 viewerEngine.ts 一致用 as any
+  const scene = (ctx.world.scene as any).three as import('three').Scene;
+
+  const { loadXmlModFromFiles, applyExternalTransforms } = await import('../viewer/xmlModLoader.js');
+
+  let loadedCount = 0;
+  for (const geo of discovered) {
+    // 已加载则跳过
+    if (state.loadedXmlModGroups.has(geo.modPath)) {
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] 已加载，跳过:', geo.modPath);
+      continue;
+    }
+
+    const group = await loadXmlModFromFiles(geo.modPath, state.currentFiles);
+    if (!group) continue;
+
+    // 应用外部变换（PHM + DEV）
+    applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
+
+    // 加入场景并跟踪
+    scene.add(group);
+    state.loadedXmlModGroups.set(geo.modPath, group);
+    loadedCount++;
+  }
+
+  if (loadedCount > 0) {
+    showMessage(`已加载 ${loadedCount} 个 MOD 模型`);
+    // 首次加载时定位相机到场景包围盒
+    if (!state.hasFittedCamera) {
+      const { fitCameraToScene } = await import('../viewer/camera.js');
+      fitCameraToScene(ctx, state);
+    }
+  }
 }

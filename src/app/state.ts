@@ -1,5 +1,6 @@
 import type { IfcEntry, CbmNode, FileDevEntry } from '../gim/types.js';
 import type * as OBCF from '@thatopen/fragments';
+import type * as THREE from 'three';
 import type { GimProjectType } from '../gim/projectType.js';
 import type { GimGraph } from '../gim/gimGraphTypes.js';
 import type {
@@ -50,6 +51,11 @@ export class AppState {
   // 模型
   loadedModels = new Map<string, { modelId: string; visible: boolean }>();
 
+  // xml-mod Group 跟踪（key = modPath，如 "MOD/abc.mod"）
+  // 与 IFC loadedModels 分开管理：xml-mod 不使用 OBC Fragments
+  // 由 nodeInteractionService 在节点点击时懒加载，projectCleanupService 在切换项目时 dispose
+  loadedXmlModGroups = new Map<string, THREE.Group>();
+
   // 高亮
   highlightedItems: OBCF.ModelIdMap | null = null;
 
@@ -81,6 +87,9 @@ export class AppState {
     // 相机 fit 状态一并重置，确保新项目加载后 fitCameraToScene 能重新执行
     // （否则切换项目后中间只剩网格，IFC 几何不显示）
     this.hasFittedCamera = false;
+    // xml-mod Group 的 dispose 由 projectCleanupService 负责（需要 Viewer scene 引用）
+    // 这里只清空索引，避免 stale 引用
+    this.loadedXmlModGroups.clear();
   }
 
   /** 重置全部状态 */

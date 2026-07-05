@@ -63,6 +63,7 @@ export async function cleanupBeforeOpenNewProject(
   // 但 ctx.fragments.list 中的 Three.js 对象仍残留，需要显式 dispose
   let disposedCount = 0;
   let attemptedCount = 0;
+  let xmlModDisposedCount = 0;
   const { isViewerRuntimeCreated, getViewerRuntime } = await import('../viewer/viewerRuntime.js');
   if (isViewerRuntimeCreated()) {
     try {
@@ -86,6 +87,22 @@ export async function cleanupBeforeOpenNewProject(
         }
       }
 
+      // dispose xml-mod Groups（变电工程 MOD primitive 渲染）
+      // xml-mod 不走 OBC Fragments，直接挂在 ctx.world.scene.three 下
+      // 需要显式 dispose geometry/material 并从 scene 移除
+      // OBC BaseScene.three 类型为 Object3D，实际为 THREE.Scene，与 viewerEngine.ts 一致用 as any
+      const scene = (ctx.world.scene as any).three as import('three').Scene;
+      const { disposeXmlModGroup } = await import('../viewer/xmlModLoader.js');
+      for (const [modPath, group] of state.loadedXmlModGroups) {
+        try {
+          scene.remove(group);
+          disposeXmlModGroup(group);
+          xmlModDisposedCount++;
+        } catch (err) {
+          console.warn('[Cleanup] dispose xml-mod group failed:', modPath, err);
+        }
+      }
+
       // ---- 3. 重置高亮 ----
       try {
         const { resetHighlight } = await import('../viewer/highlight.js');
@@ -97,7 +114,7 @@ export async function cleanupBeforeOpenNewProject(
       console.warn('[Cleanup] ViewerRuntime cleanup failed:', err);
     }
   }
-  debugLog(DEBUG_RUNTIME_LOGS, '[Cleanup] disposed viewer models:', disposedCount, '(attempted:', attemptedCount, ')');
+  debugLog(DEBUG_RUNTIME_LOGS, '[Cleanup] disposed viewer models:', disposedCount, '(attempted:', attemptedCount, '), xml-mod groups:', xmlModDisposedCount);
 
   // ---- 4. 清空 UI 残留 ----
   // disposeModel 会触发 onItemDeleted → removeModelFromUI，但保险起见再清一次

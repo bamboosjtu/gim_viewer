@@ -226,3 +226,45 @@ COLOR2=138,149,151,100
 差异原因：线路工程构件同质化程度高（如绝缘子串、金具），同一 PHM 模板被大量复用；变电工程设备异质性强，每个 PHM 组合更复杂但独占几何资源。详见 [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) 第 9 节。
 
 > STL 格式（全部 binary）、PHM 引用率（100%）、entityName 映射、STL 与 MOD 关系（线路 PHM 级互斥、变电部分并列）详见 [12-stl-static-survey.md](12-stl-static-survey.md)。
+
+## 实现对照
+
+> P0 已落地实现，对应 [docs/plans/substation-geometry-impl.md](../plans/substation-geometry-impl.md) Phase 2。
+
+### 解析器
+
+- **实现位置**：`src/gim/geometry/phmParser.ts`
+- **核心函数**：`export function parsePhm(text: string, phmPath: string): PhmDocument`
+- **测试**：`src/gim/geometry/__tests__/phmParser.test.ts`（25 测试通过）
+
+### IR 类型（`src/gim/geometry/ir.ts`）
+
+```typescript
+export interface PhmSolidModelEntry {
+  solidModelPath: string;
+  transformMatrix: number[];  // 行主序，长度 16
+  color?: XmlModColor;       // MOD 引用为空 → undefined
+}
+
+export interface PhmDocument {
+  phmPath: string;
+  solidModels: PhmSolidModelEntry[];
+  isEmpty: boolean;           // SOLIDMODELS.NUM=0 或全无效引用
+}
+```
+
+### 关键约束实现
+
+| 约束 | 实现策略 |
+|---|---|
+| PHM 不分节，无 `[section] 语法` | 内联 `parsePhmKeyValue`，与 cbmParser.parseKeyValue 行为一致 |
+| `COLORn` 为空字符串 → `color` 字段为 `undefined` | `parseColor` 在 `raw === ''` 时返回 `undefined` |
+| `TRANSFORMMATRIXn` 缺失 → 回退单位矩阵 | `parseTransformMatrix` 在 `undefined` 或长度异常时返回 `IDENTITY_MATRIX` |
+| PHM 不嵌套引用同级 PHM | 解析器不处理（实证已确认 0 引用） |
+| 数值范围：R/G/B 0-255，A 0-100 | `parseColor` 校验，超出范围返回 `undefined` |
+
+### 集成点
+
+- **`src/services/modGeometryDiscovery.ts`**：`discoverModGeometriesFromNode` 调用 `parsePhm` 解析 PHM 文件，遍历 `solidModels` 收集 `.mod` 引用（`.stl` P1 跳过）
+- **`src/viewer/xmlModLoader.ts`**：`applyExternalTransforms` 应用 `phmTransformMatrix`（行主序 → Three.js Matrix4）
+- **`src/app/state.ts`**：`loadedXmlModGroups` 跟踪已加载 MOD Group

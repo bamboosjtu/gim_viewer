@@ -20,14 +20,16 @@
 | 缓存命中短路 | ✅ 已实现 | `src/services/openGimService.ts` / `gimIndexRestoreService.ts` |
 | IFC 本地磁盘缓存 | ✅ 已实现 | `src/services/gimExtractedCacheService.ts` |
 | 诊断快捷键（Ctrl+Shift+D） | ✅ 已实现 | `src/services/diagnosticSummaryService.ts` |
-| **MOD 文件解析（XML primitive 14 类）** | ❌ 未实现 | 仅有路径记录，无 parser；设计稿见 [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) |
-| **STL 渲染** | ❌ 未实现 | 1803 个 unique STL 全部未渲染；详见 [12-stl-static-survey.md](schema/12-stl-static-survey.md) |
-| **PHM TransformMatrix 应用** | ❌ 未实现 | 仅在属性面板作 monospace 文本展示；样本中 100% IDENTITY |
-| **PHM COLOR 应用** | ❌ 未实现 | STL 引用非空时 COLOR 字段存在，但未应用到 Fragments material |
-| **PHM 解析（SOLIDMODEL + TRANSFORMMATRIXn + COLORn）** | ❌ 未实现 | — |
-| **EMPTY_DEVICE_XML 提示** | ❌ 未实现 | 44 个孤儿 MOD 静默忽略 |
-| **装配节点无几何提示** | ❌ 未实现 | 14 个无 SOLIDMODEL 的 PHM 静默忽略 |
-| **Geometry IR schema 落地** | ❌ 未实现 | 设计稿见 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) |
+| **MOD 文件解析（XML primitive 14 类）** | ✅ 已实现 | `src/gim/geometry/xmlModParser.ts`（14 类，11 强类型 + 3 弱 schema fallback）；设计稿见 [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) |
+| **STL 渲染** | ❌ 未实现（P1） | 1803 个 unique STL 全部未渲染；详见 [12-stl-static-survey.md](schema/12-stl-static-survey.md) |
+| **PHM TransformMatrix 应用** | ✅ 已实现 | `src/viewer/xmlModLoader.ts` `applyExternalTransforms`（DEV + PHM 矩阵应用到 Group） |
+| **PHM COLOR 应用** | ⚠️ 部分（P0 接收，P1 完善） | P0 解析并透传到 `phmColor` 字段；MOD primitive 渲染未应用（实测 MOD 引用 COLORn 为空） |
+| **PHM 解析（SOLIDMODEL + TRANSFORMMATRIXn + COLORn）** | ✅ 已实现 | `src/gim/geometry/phmParser.ts` |
+| **EMPTY_DEVICE_XML 提示** | ❌ 未实现（P1） | 44 个孤儿 MOD 静默忽略（解析为 isEmpty=true，渲染为空 Group） |
+| **装配节点无几何提示** | ❌ 未实现（P2） | 14 个无 SOLIDMODEL 的 PHM 静默忽略 |
+| **Geometry IR schema 落地** | ✅ 已实现 | `src/gim/geometry/ir.ts`（5 kind 联合 + 14 类 primitive 类型） |
+| **xml-mod 渲染集成（CBM→DEV→PHM→MOD）** | ✅ 已实现 | `src/viewer/xmlModGeometry.ts` / `xmlModLoader.ts` / `src/services/modGeometryDiscovery.ts` / `src/services/nodeInteractionService.ts` |
+| **DEV 解析（SOLIDMODELS + SUBDEVICES）** | ✅ 已实现 | `src/gim/geometry/devParser.ts`（两块索引独立，行主序矩阵） |
 
 > 下一步实现路径见 §9。
 

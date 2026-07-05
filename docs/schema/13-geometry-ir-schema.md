@@ -4,6 +4,77 @@
 >
 > 本轮不写渲染实现，只沉淀 schema 与解析管道边界。
 
+## 0. 实现状态
+
+> 本节跟踪 IR schema 在 `gim_viewer` 代码库中的落地进度。最近更新：2026-07-05（P0 完成）。
+
+### 0.1 已落地代码
+
+| 路径 | 职责 | 测试 | 状态 |
+| ---- | ---- | ----: | :--: |
+| `src/gim/geometry/ir.ts` | IR 类型定义（GimGeometrySource 联合 + 5 kind + 类型守卫） | 18 | ✅ |
+| `src/gim/geometry/phmParser.ts` | PHM 解析器（SOLIDMODELn / TRANSFORMMATRIXn / COLORn 一一对应） | 25 | ✅ |
+| `src/gim/geometry/devParser.ts` | DEV 解析器（SOLIDMODELS / SUBDEVICES 两块，TRANSFORMMATRIX 索引各自独立从 0） | 31 | ✅ |
+| `src/gim/geometry/xmlModParser.ts` | XML MOD 解析器（DOMParser + 14 类 primitive 强类型/弱 schema fallback） | 43 | ✅ |
+| `src/viewer/xmlModGeometry.ts` | XmlModPrimitive → THREE.BufferGeometry 转换 | 34 | ✅ |
+| `src/viewer/xmlModLoader.ts` | MOD 文件加载入口 + dispose + applyExternalTransforms | 19 | ✅ |
+| `src/services/modGeometryDiscovery.ts` | CBM → DEV → PHM → MOD 引用链发现 | 19 | ✅ |
+| `src/services/nodeInteractionService.ts` | 节点点击回退 xml-mod 加载路径（无 IFC 但有 devPath 时） | — | ✅ |
+| `src/services/projectCleanupService.ts` | 项目切换时 dispose xml-mod Groups | — | ✅ |
+| `src/app/state.ts` | `loadedXmlModGroups: Map<string, THREE.Group>` 跟踪字段 | — | ✅ |
+| `vitest.setup.ts` | jsdom 25 Blob/File `text()` / `arrayBuffer()` polyfill | — | ✅ |
+
+合计 7 个测试文件，189 个测试通过；`tsc` 通过。
+
+### 0.2 5 kind 实现状态
+
+| kind | IR 定义 | 解析器 | 渲染器 | 缓存命中回放 | 状态 |
+| ---- | :-----: | :----: | :----: | :----------: | :--: |
+| `ifc` | ✅ | 既有 ifcLoader | 既有 OBC Fragments | 既有 cachedIfcPaths | ✅ 完整 |
+| `xml-mod` | ✅ | xmlModParser + devParser + phmParser | xmlModGeometry + xmlModLoader | ❌（P2） | ✅ P0 完整 |
+| `line-text-mod` | ✅ | ❌（线路 P0） | ❌ | ❌ | ⏳ 待 P0 线路 |
+| `stl` | ✅ | ❌（P1） | ❌ | ❌ | ⏳ 待 P1 |
+| `none` | ✅ | 部分（reason 字段已定义，UI 提示未实现） | — | — | ⏳ 待 P2 |
+
+### 0.3 14 类 primitive 实现状态（xml-mod）
+
+| Primitive | 实例数 | 强类型 | 渲染实现 | 状态 |
+| --------- | -----: | :----: | :------- | :--: |
+| Cylinder | 20421 | ✅ | CylinderGeometry | ✅ |
+| Cuboid | 12401 | ✅ | BoxGeometry | ✅ |
+| StretchedBody | 10263 | ✅ | ExtrudeGeometry（Array 点序列 + Normal 单位化除以 304.8） | ✅ |
+| PorcelainBushing | 1506 | ✅ | LatheGeometry（N 伞盘 + R/R1/R2 半径） | ✅ |
+| TruncatedCone | 730 | ✅ | CylinderGeometry（topRadius=TR, bottomRadius=BR） | ✅ |
+| Ring | 235 | ✅ | RingGeometry（Rad 弧度制） | ✅ |
+| TerminalBlock | 201 | ✅ | BoxGeometry + 端子孔（CN/RN/Phase） | ✅ |
+| Sphere | 141 | ✅ | SphereGeometry | ✅ |
+| ChannelSteel | 129 | ✅ | BoxGeometry（D/H/B/T 可选字段按 Model 查表） | ✅ |
+| Table | 109 | ✅ | BoxGeometry（H + LL1/LL2 + TL1/TL2） | ✅ |
+| CircularGasket | 80 | ✅ | RingGeometry（OR/IR + Rad 弧度制） | ✅ |
+| RectangularFixedPlate | 18 | 弱 schema | BoxGeometry fallback | ✅ |
+| OffsetRectangularTable | 15 | 弱 schema | BoxGeometry fallback | ✅ |
+| RectangularRing | 1 | 弱 schema | RingGeometry fallback | ✅ |
+
+### 0.4 关键约束已落实
+
+- TRANSFORMMATRIX 16 浮点 **行主序**（DEV/PHM/MOD 一致），与 Three.js `Matrix4.set()` 行主序参数对应
+- COLOR `R,G,B,A`：R/G/B 0-255，A 0-100（透明度百分比）
+- StretchedBody.Normal 长度恒为 304.8，渲染时除以 304.8 还原单位向量
+- jsdom 25 Blob/File 不实现 `text()` / `arrayBuffer()`，通过 `vitest.setup.ts` polyfill（生产代码使用原生方法）
+- xml-mod 不复用 OBC Fragments（IFC 专用），直接挂在 `ctx.world.scene.three` 下，独立 `loadedXmlModGroups` Map 跟踪
+- `disposeXmlModGroup` 遍历释放 geometry + material（含材质数组），由 `projectCleanupService` 在切换项目时调用
+
+### 0.5 待办（不在 P0 范围）
+
+- P0 线路：`line-text-mod` 4 类文本格式族 parser + 属性面板（HNum / PointLine / SectionKv / KeyValue）
+- P1：`stl` kind 渲染（变电 1803 STL + 线路 Wire_Device/Tower_Device STL）
+- P1：PHM COLOR 应用到 STL（覆盖 STL 默认材质）
+- P2：`none` kind UI 提示（empty-device-xml / assembly-node-without-own-geometry 等）
+- P2：缓存命中场景（currentFiles=null）下回放 xml-mod 几何（需 SQLite `geometry_source` 表 + PARSER_VERSION 升级）
+- P2：节点联动多 kind 高亮（CbmGeometryBundle.instances 遍历）
+
+---
+
 ## 1. 目标与背景
 
 ### 1.1 现状缺陷

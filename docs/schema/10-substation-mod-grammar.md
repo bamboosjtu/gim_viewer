@@ -606,6 +606,59 @@ Step 5: 应用 Color 节点（R/G/B/255, A/100）
 
 ---
 
+## 实现对照
+
+> P0 已落地实现，对应 [docs/plans/substation-geometry-impl.md](../plans/substation-geometry-impl.md) Phase 3 + Phase 4。
+
+### 解析器
+
+- **实现位置**：`src/gim/geometry/xmlModParser.ts`
+- **核心函数**：`export function parseXmlMod(text: string, modPath: string): XmlModDocument`
+- **测试**：`src/gim/geometry/__tests__/xmlModParser.test.ts`（43 测试通过）
+- **渲染器**：`src/viewer/xmlModGeometry.ts`（14 类 primitive → Three.js BufferGeometry，34 测试通过）
+
+### 14 类 primitive 实现状态
+
+| Primitive | 解析 | 渲染 | Three.js 几何 | 备注 |
+|---|---|---|---|---|
+| Cylinder | ✅ 强类型 `{ r, h }` | ✅ | `CylinderGeometry(r, r, h, 32)` | — |
+| Cuboid | ✅ 强类型 `{ l, w, h }` | ✅ | `BoxGeometry(l, w, h)` | 参数顺序：width=l, height=w, depth=h |
+| StretchedBody | ✅ 强类型 `{ l, array, normal }` | ✅ | `ExtrudeGeometry` + 四元数旋转 | Array/Normal 保留 string，渲染层解析；Normal 需归一化 |
+| PorcelainBushing | ✅ 强类型 `{ r, r1, r2, n, h }` | ✅ 简化 | `CylinderGeometry(r1, r, h, 32)` | P0 简化为圆柱，伞裙结构待 P1 |
+| TruncatedCone | ✅ 强类型 `{ br, tr, h }` | ✅ | `CylinderGeometry(tr, br, h, 32)` | — |
+| Ring | ✅ 强类型 `{ r, dr, rad }` | ✅ | `TorusGeometry(r, dr/2, 16, 32, rad)` | — |
+| TerminalBlock | ✅ 强类型 12 字段 | ✅ 简化 | `BoxGeometry(l, w, h)` | P0 简化为长方体，端子细节待 P1 |
+| Sphere | ✅ 强类型 `{ r }` | ✅ | `SphereGeometry(r, 32, 16)` | — |
+| ChannelSteel | ✅ 强类型 `{ l, model, d?, h?, b?, t? }` | ✅ 简化 | `BoxGeometry(l, h, b)` | P0 简化为长方体，型号表查表待 P1 |
+| Table | ✅ 强类型 `{ h, ll1, ll2, tl1, tl2 }` | ✅ 简化 | `BoxGeometry(ll1, h, ll2)` | P0 简化为台面，4 腿组合待 P1 |
+| CircularGasket | ✅ 强类型 `{ h, rad, or, ir }` | ✅ | `TorusGeometry(or, (or-ir)/2, 16, 32, rad)` | — |
+| RectangularFixedPlate | ✅ 弱 schema `{ type, raw }` | ⚠️ 占位 | `BoxGeometry(1, 1, 1)` + console.warn | 待字段补充后强类型化 |
+| OffsetRectangularTable | ✅ 弱 schema `{ type, raw }` | ⚠️ 占位 | `BoxGeometry(1, 1, 1)` + console.warn | 待字段补充后强类型化 |
+| RectangularRing | ✅ 弱 schema `{ type, raw }` | ⚠️ 占位 | `BoxGeometry(1, 1, 1)` + console.warn | 待字段补充后强类型化 |
+
+### 关键约束实现
+
+| 约束 | 实现策略 |
+|---|---|
+| XML root 为 `<Device>` | `parseXmlMod` 校验 `documentElement.tagName === 'Device'`，否则抛错 |
+| Entity 必含 TransformMatrix | 缺失时回退单位矩阵（与 PHM parser 一致） |
+| Entity 可含 Color | `parseColor` 返回 `XmlModColor \| undefined` |
+| StretchedBody.Array/Normal 保留 string | 解析层保留，渲染层 `parseArrayPoints` + `parseNormalUnit` 解析 |
+| StretchedBody.Normal 长度 304.8 | 渲染层 `parseNormalUnit` 调用 `v.normalize()` 还原单位向量 |
+| Color R/G/B 0-255, A 0-100 | `parseColor` 校验范围，超出返回 `undefined` |
+| Color 应用 sRGB hex | 渲染层用 `(r<<16)\|(g<<8)\|b` 拼为 hex，由 THREE.Color 按 sRGB 解释 |
+
+### 加载入口
+
+- **`src/viewer/xmlModLoader.ts`**：
+  - `loadXmlModFromText(text, modPath)` — 从 XML 文本加载
+  - `loadXmlModFromFiles(modPath, files)` — 从 GIM 解压文件集合加载
+  - `applyExternalTransforms(group, devMatrix, phmMatrix)` — 应用 DEV + PHM 变换矩阵
+  - `disposeXmlModGroup(group)` — 释放 GPU 资源
+- **`src/services/modGeometryDiscovery.ts`**：`discoverModGeometriesFromNode` 走 CBM → DEV → PHM → MOD 引用链
+
+---
+
 ## 附录 A：分析脚本
 
 ### A.1 主分析脚本
