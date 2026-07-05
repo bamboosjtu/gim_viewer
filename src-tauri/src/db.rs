@@ -58,6 +58,12 @@ fn db_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
 pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
     let path = db_path(app_handle)?;
     let conn = Connection::open(&path).map_err(|e| format!("打开数据库失败: {}", e))?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| format!("设置数据库 busy_timeout 失败: {}", e))?;
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(|e| format!("设置数据库 WAL 模式失败: {}", e))?;
+    conn.pragma_update(None, "synchronous", "NORMAL")
+        .map_err(|e| format!("设置数据库 synchronous 模式失败: {}", e))?;
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS gim_project (
@@ -108,6 +114,7 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
         );
         CREATE INDEX IF NOT EXISTS idx_cbm_node_project_parent ON cbm_node(project_id, parent_key);
         CREATE INDEX IF NOT EXISTS idx_cbm_node_ifc ON cbm_node(project_id, ifc_file, ifc_guid);
+        CREATE INDEX IF NOT EXISTS idx_cbm_node_project_dev ON cbm_node(project_id, dev_path);
 
         CREATE TABLE IF NOT EXISTS ifc_model (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -305,6 +312,7 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
         );
         CREATE INDEX IF NOT EXISTS idx_dev_sub_project ON dev_sub_device(project_id);
         CREATE INDEX IF NOT EXISTS idx_dev_sub_dev ON dev_sub_device(project_id, dev_path);
+        CREATE INDEX IF NOT EXISTS idx_dev_sub_project_child ON dev_sub_device(project_id, child_dev_path);
 
         CREATE TABLE IF NOT EXISTS phm_solid_model (
             project_id INTEGER NOT NULL,
@@ -317,7 +325,8 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
             PRIMARY KEY(project_id, phm_path, sort_order)
         );
         CREATE INDEX IF NOT EXISTS idx_phm_sm_project ON phm_solid_model(project_id);
-        CREATE INDEX IF NOT EXISTS idx_phm_sm_phm ON phm_solid_model(project_id, phm_path);",
+        CREATE INDEX IF NOT EXISTS idx_phm_sm_phm ON phm_solid_model(project_id, phm_path);
+        CREATE INDEX IF NOT EXISTS idx_phm_sm_project_solid ON phm_solid_model(project_id, solid_model_path);",
     )
     .map_err(|e| format!("初始化几何引用链缓存表失败: {}", e))?;
 
@@ -2677,72 +2686,130 @@ pub fn get_reachable_geometry(
     include_mod: Option<bool>,
     include_stl: Option<bool>,
 ) -> Result<Vec<ReachableGeometry>, String> {
+    use std::time::Instant;
+
+    let total_t0 = Instant::now();
     let include_mod = include_mod.unwrap_or(true);
     let include_stl = include_stl.unwrap_or(false);
 
-    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    eprintln!(
+        "[get_reachable_geometry] start project_id={} include_mod={} include_stl={}",
+        project_id, include_mod, include_stl
+    );
 
-    // 递归 CTE：收集所有可从 CBM 到达的 DEV（直接 + 间接 via SUBDEVICE）
-    // 路径归一化：CASE WHEN 防止 DEV/DEV/xxx.dev 双重前缀
-    let sql = "
-        WITH RECURSIVE
+    // 快速短路：两个都 false 直接返回空
+    if !include_mod && !include_stl {
+        eprintln!("[get_reachable_geometry] done total=0ms rows=0 (both false)");
+        return Ok(Vec::new());
+    }
+
+    let lock_t0 = Instant::now();
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    eprintln!(
+        "[get_reachable_geometry] lock acquired: {}ms",
+        lock_t0.elapsed().as_millis()
+    );
+
+    let results = query_reachable_geometry(&conn, project_id, include_mod, include_stl)?;
+
+    eprintln!(
+        "[get_reachable_geometry] done total={}ms rows={} include_mod={} include_stl={}",
+        total_t0.elapsed().as_millis(),
+        results.len(),
+        include_mod,
+        include_stl
+    );
+
+    Ok(results)
+}
+
+fn query_reachable_geometry(
+    conn: &Connection,
+    project_id: i64,
+    include_mod: bool,
+    include_stl: bool,
+) -> Result<Vec<ReachableGeometry>, String> {
+    use std::time::Instant;
+
+    // 构建 SQL WHERE 子句（过滤下推到 SQL 层，不在 Rust 侧逐行判断）
+    let geo_filter = if include_mod && include_stl {
+        "AND (LOWER(psm.solid_model_path) LIKE '%.mod' OR LOWER(psm.solid_model_path) LIKE '%.stl')"
+    } else if include_mod {
+        "AND LOWER(psm.solid_model_path) LIKE '%.mod'"
+    } else {
+        "AND LOWER(psm.solid_model_path) LIKE '%.stl'"
+    };
+
+    // DEV 图在样本分析中已验证最大深度为 1。这里用有界 UNION 代替递归
+    // CTE，避免 SQLite 在 rows 迭代开始时物化递归临时表进入慢路径。
+    let sql = format!(
+        "WITH
         cbm_dev AS (
             SELECT DISTINCT
-                CASE
-                    WHEN dev_path LIKE 'DEV/%' THEN dev_path
-                    ELSE 'DEV/' || dev_path
-                END AS dev_path
+                CASE WHEN dev_path LIKE 'DEV/%' THEN dev_path ELSE 'DEV/' || dev_path END AS dev_path
             FROM cbm_node
             WHERE project_id = ?1 AND dev_path IS NOT NULL AND dev_path != ''
         ),
-        all_dev(dev_path, depth) AS (
-            SELECT dev_path, 0 FROM cbm_dev
+        reachable_dev AS (
+            SELECT dev_path FROM cbm_dev
             UNION
             SELECT
-                CASE
-                    WHEN dsd.child_dev_path LIKE 'DEV/%' THEN dsd.child_dev_path
-                    ELSE 'DEV/' || dsd.child_dev_path
-                END AS dev_path,
-                all_dev.depth + 1
-            FROM dev_sub_device dsd
-            JOIN all_dev ON all_dev.dev_path =
-                CASE
-                    WHEN dsd.dev_path LIKE 'DEV/%' THEN dsd.dev_path
-                    ELSE 'DEV/' || dsd.dev_path
-                END
-            WHERE dsd.project_id = ?1
-              AND all_dev.depth < 2
+                CASE WHEN sd.child_dev_path LIKE 'DEV/%' THEN sd.child_dev_path ELSE 'DEV/' || sd.child_dev_path END AS dev_path
+            FROM cbm_dev cd
+            JOIN dev_sub_device sd INDEXED BY idx_dev_sub_dev
+                ON sd.project_id = ?1 AND sd.dev_path = cd.dev_path
         )
         SELECT DISTINCT
             'MOD/' || psm.solid_model_path AS geometry_path,
             dsm.transform_matrix AS dev_transform_matrix,
             psm.transform_matrix AS phm_transform_matrix,
             psm.color AS phm_color
-        FROM all_dev ad
-        JOIN dev_solid_model dsm ON dsm.project_id = ?1 AND dsm.dev_path = ad.dev_path
-        JOIN phm_solid_model psm ON psm.project_id = ?1 AND psm.phm_path = 'PHM/' || dsm.solid_model_path
+        FROM reachable_dev rd
+        JOIN dev_solid_model dsm INDEXED BY idx_dev_sm_dev
+            ON dsm.project_id = ?1 AND dsm.dev_path = rd.dev_path
+        JOIN phm_solid_model psm INDEXED BY idx_phm_sm_phm
+            ON psm.project_id = ?1 AND psm.phm_path = 'PHM/' || dsm.solid_model_path
+        WHERE 1=1 {}
         ORDER BY geometry_path
-    ";
+    ", geo_filter);
 
-    let mut stmt = conn.prepare(sql).map_err(|e| format!("预处理 reachable_geometry 失败: {}", e))?;
-    let rows = stmt.query_map(params![project_id], |row| {
-        Ok(ReachableGeometry {
-            geometry_path: row.get(0)?,
-            dev_transform_matrix: row.get(1)?,
-            phm_transform_matrix: row.get(2)?,
-            phm_color: row.get(3)?,
+    let prepare_t0 = Instant::now();
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("预处理 reachable_geometry 失败: {}", e))?;
+    eprintln!(
+        "[get_reachable_geometry] prepare: {}ms",
+        prepare_t0.elapsed().as_millis()
+    );
+
+    let query_t0 = Instant::now();
+    let rows = stmt
+        .query_map(params![project_id], |row| {
+            Ok(ReachableGeometry {
+                geometry_path: row.get(0)?,
+                dev_transform_matrix: row.get(1)?,
+                phm_transform_matrix: row.get(2)?,
+                phm_color: row.get(3)?,
+            })
         })
-    }).map_err(|e| format!("查询 reachable_geometry 失败: {}", e))?;
+        .map_err(|e| format!("查询 reachable_geometry 失败: {}", e))?;
+    eprintln!(
+        "[get_reachable_geometry] query_map: {}ms",
+        query_t0.elapsed().as_millis()
+    );
 
-    // Rust 侧按 include_mod/include_stl 过滤（SQL 去掉固定 WHERE，避免参数化 LIKE 复杂）
+    let collect_t0 = Instant::now();
     let mut results = Vec::new();
     for r in rows {
         let geo = r.map_err(|e| format!("读取 reachable_geometry 行失败: {}", e))?;
-        let lower = geo.geometry_path.to_lowercase();
-        if (include_mod && lower.ends_with(".mod")) || (include_stl && lower.ends_with(".stl")) {
-            results.push(geo);
-        }
+        results.push(geo);
     }
+    eprintln!(
+        "[get_reachable_geometry] collect rows: {}ms rows={}",
+        collect_t0.elapsed().as_millis(),
+        results.len()
+    );
+
     Ok(results)
 }
 
@@ -2756,4 +2823,122 @@ pub fn get_project_diagnostic(
     project_id: i64,
 ) -> Result<ProjectCacheDiagnostic, String> {
     get_project_cache_diagnostic(&app_handle, state, project_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_geometry_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE cbm_node (
+                project_id INTEGER NOT NULL,
+                dev_path TEXT
+            );
+            CREATE INDEX idx_cbm_node_project_dev ON cbm_node(project_id, dev_path);
+
+            CREATE TABLE dev_solid_model (
+                project_id INTEGER NOT NULL,
+                dev_path TEXT NOT NULL,
+                solid_model_path TEXT NOT NULL,
+                transform_matrix TEXT,
+                sort_order INTEGER NOT NULL
+            );
+            CREATE INDEX idx_dev_sm_dev ON dev_solid_model(project_id, dev_path);
+
+            CREATE TABLE dev_sub_device (
+                project_id INTEGER NOT NULL,
+                dev_path TEXT NOT NULL,
+                child_dev_path TEXT NOT NULL,
+                sort_order INTEGER NOT NULL
+            );
+            CREATE INDEX idx_dev_sub_dev ON dev_sub_device(project_id, dev_path);
+
+            CREATE TABLE phm_solid_model (
+                project_id INTEGER NOT NULL,
+                phm_path TEXT NOT NULL,
+                solid_model_path TEXT NOT NULL,
+                transform_matrix TEXT,
+                color TEXT,
+                sort_order INTEGER NOT NULL
+            );
+            CREATE INDEX idx_phm_sm_phm ON phm_solid_model(project_id, phm_path);",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn reachable_geometry_includes_direct_and_child_dev_paths() {
+        let conn = setup_geometry_conn();
+        conn.execute(
+            "INSERT INTO cbm_node (project_id, dev_path) VALUES (1, 'root.dev'), (1, 'direct.dev')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO dev_sub_device (project_id, dev_path, child_dev_path, sort_order)
+             VALUES (1, 'DEV/root.dev', 'child.dev', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order)
+             VALUES
+             (1, 'DEV/direct.dev', 'direct.phm', 'direct-tm', 0),
+             (1, 'DEV/child.dev', 'child.phm', 'child-tm', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, sort_order)
+             VALUES
+             (1, 'PHM/direct.phm', 'direct.mod', 'direct-phm-tm', NULL, 0),
+             (1, 'PHM/child.phm', 'child.mod', 'child-phm-tm', '1,2,3,100', 0)",
+            [],
+        )
+        .unwrap();
+
+        let rows = query_reachable_geometry(&conn, 1, true, false).unwrap();
+        let paths: Vec<_> = rows.iter().map(|r| r.geometry_path.as_str()).collect();
+        assert_eq!(paths, vec!["MOD/child.mod", "MOD/direct.mod"]);
+        assert_eq!(rows[0].dev_transform_matrix.as_deref(), Some("child-tm"));
+        assert_eq!(rows[0].phm_color.as_deref(), Some("1,2,3,100"));
+    }
+
+    #[test]
+    fn reachable_geometry_filters_mod_and_stl() {
+        let conn = setup_geometry_conn();
+        conn.execute(
+            "INSERT INTO cbm_node (project_id, dev_path) VALUES (1, 'device.dev')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order)
+             VALUES (1, 'DEV/device.dev', 'device.phm', NULL, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, sort_order)
+             VALUES
+             (1, 'PHM/device.phm', 'a.mod', NULL, NULL, 0),
+             (1, 'PHM/device.phm', 'b.stl', NULL, NULL, 1)",
+            [],
+        )
+        .unwrap();
+
+        let mod_rows = query_reachable_geometry(&conn, 1, true, false).unwrap();
+        assert_eq!(mod_rows.len(), 1);
+        assert_eq!(mod_rows[0].geometry_path, "MOD/a.mod");
+
+        let stl_rows = query_reachable_geometry(&conn, 1, false, true).unwrap();
+        assert_eq!(stl_rows.len(), 1);
+        assert_eq!(stl_rows[0].geometry_path, "MOD/b.stl");
+
+        let all_rows = query_reachable_geometry(&conn, 1, true, true).unwrap();
+        assert_eq!(all_rows.len(), 2);
+    }
 }

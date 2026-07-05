@@ -339,7 +339,7 @@ export async function autoLoadModAndStlGeometry(
   // 逐文件读取是巨大浪费。SQLite 已索引引用链，一次查询即可得到全部 MOD/STL 路径。
   const isCacheHit = !files;
   if (isCacheHit && state.currentProjectId != null) {
-    console.log('[autoLoad] 缓存命中：从 SQLite 查询可到达的 MOD/STL 几何源...');
+    console.log(`[autoLoad] SQLite 查询可到达几何: includeMod=${includeMod} includeStl=${includeStl}`);
     try {
       const { getReachableGeometry, batchReadCachedFiles } = await import('../desktop/database.js');
       const reachable = await getReachableGeometry(state.currentProjectId, { includeMod, includeStl });
@@ -359,7 +359,9 @@ export async function autoLoadModAndStlGeometry(
         else if (lower.endsWith('.stl')) stlPaths.add(r.geometry_path);
       }
 
-      console.log(`[autoLoad] SQLite 查询结果: ${reachable.length} 个几何源 → ${modPaths.size} MOD + ${stlPaths.size} STL`);
+      const logExtras: string[] = [`${modPaths.size} MOD`];
+      if (includeStl) logExtras.push(`${stlPaths.size} STL`);
+      console.log(`[autoLoad] SQLite 查询完成: ${reachable.length} 个几何源 → ${logExtras.join(' + ')}`);
 
       // 批量读取 MOD 文件（1 次 IPC）
       const modArr = Array.from(modPaths);
