@@ -24,6 +24,7 @@ import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
+import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 
 /** 自动加载选项 */
 export interface GeometryAutoLoadOptions {
@@ -106,11 +107,49 @@ function diagnoseGroupBBox(group: THREE.Group, sourcePath: string): boolean {
 }
 
 /**
+ * 输出 Group 的 bbox 诊断日志（仅 debug 模式）。
+ *
+ * 用于在应用 projectSourceToViewer 前后对比 MOD/STL 的位置，
+ * 辅助估算 sourceToViewer offset。
+ *
+ * @param stage 'raw' = 应用 projectSourceToViewer 前（GIM 工程坐标）
+ *              'transformed' = 应用后（viewer 坐标）
+ */
+function logGroupBBox(group: THREE.Group, sourcePath: string, stage: 'raw' | 'transformed'): void {
+  if (!DEBUG_IFC_LOAD) return;
+  const box = new THREE.Box3().setFromObject(group);
+  if (box.isEmpty()) {
+    debugLog(DEBUG_IFC_LOAD, `[CoordAlign] ${stage} bbox 为空: ${sourcePath}`);
+    return;
+  }
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  debugLog(DEBUG_IFC_LOAD, `[CoordAlign] ${stage} bbox: ${sourcePath}`, {
+    center: [center.x, center.y, center.z],
+    size: [size.x, size.y, size.z],
+  });
+}
+
+/**
  * MOD Entity.TransformMatrix 已经是变电站样本里的最终放置矩阵。
  * DEV/PHM TRANSFORMMATRIX 在当前变电站数据中是冗余/占位信息；
  * 叠加它们会把 MOD 几何二次变换，产生巨大飘移面。
+ *
+ * projectSourceToViewer 在 Entity local transform 之后应用（顺序：
+ * Entity local → projectSourceToViewer），把 GIM 工程坐标对齐到 viewer 空间。
  */
-function prepareModGroupForScene(group: THREE.Group, sourcePath: string): boolean {
+function prepareModGroupForScene(
+  group: THREE.Group,
+  sourcePath: string,
+  projectSourceToViewerMatrix: THREE.Matrix4 | null,
+): boolean {
+  // Entity local transform 已在 loadXmlModFromFiles 中烘焙
+  // 输出 raw bbox（应用 projectSourceToViewer 前）
+  logGroupBBox(group, sourcePath, 'raw');
+  // 应用项目级坐标转换（translation-only MVP）
+  applyProjectSourceToViewer(group, projectSourceToViewerMatrix);
+  // 输出 transformed bbox（应用后）
+  logGroupBBox(group, sourcePath, 'transformed');
   return diagnoseGroupBBox(group, sourcePath);
 }
 
@@ -120,8 +159,16 @@ function prepareStlGroupForScene(
   applyExternalTransforms: (group: THREE.Group, devTransformMatrix: number[], phmTransformMatrix: number[]) => void,
   devTransformMatrix: number[],
   phmTransformMatrix: number[],
+  projectSourceToViewerMatrix: THREE.Matrix4 | null,
 ): boolean {
+  // 顺序：Entity local(无) → PHM → DEV → projectSourceToViewer
   applyExternalTransforms(group, devTransformMatrix, phmTransformMatrix);
+  // 输出 raw bbox（应用 projectSourceToViewer 前，已含 DEV/PHM 变换）
+  logGroupBBox(group, sourcePath, 'raw');
+  // 应用项目级坐标转换
+  applyProjectSourceToViewer(group, projectSourceToViewerMatrix);
+  // 输出 transformed bbox（应用后）
+  logGroupBBox(group, sourcePath, 'transformed');
   return diagnoseGroupBBox(group, sourcePath);
 }
 
@@ -470,7 +517,7 @@ export async function autoLoadModAndStlGeometry(
             try {
               const group = await loadModFile(geo, files!);
               if (group) {
-                if (!prepareModGroupForScene(group, geo.modPath)) { skippedBadBBox++; continue; }
+                if (!prepareModGroupForScene(group, geo.modPath, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
                 modRoot.add(group);
                 state.loadedXmlModGroups.set(geo.modPath, group);
                 loadedMods++;
@@ -494,7 +541,7 @@ export async function autoLoadModAndStlGeometry(
             try {
               const group = await loadStlFile(geo, files!);
               if (group) {
-                if (!prepareStlGroupForScene(group, geo.stlPath, applyExternalTransforms, geo.devTransformMatrix, geo.phmTransformMatrix)) { skippedBadBBox++; continue; }
+                if (!prepareStlGroupForScene(group, geo.stlPath, applyExternalTransforms, geo.devTransformMatrix, geo.phmTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
                 stlRoot.add(group);
                 state.loadedStlGroups.set(geo.stlPath, group);
                 loadedStls++;
@@ -636,7 +683,7 @@ export async function autoLoadModAndStlGeometry(
         try {
           const group = await loadModFile(geo, files);
           if (group) {
-            if (!prepareModGroupForScene(group, geo.modPath)) { skippedBadBBox++; continue; }
+            if (!prepareModGroupForScene(group, geo.modPath, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
             modRoot.add(group);
             state.loadedXmlModGroups.set(geo.modPath, group);
             loadedMods++;
@@ -685,7 +732,7 @@ export async function autoLoadModAndStlGeometry(
         try {
           const group = await loadStlFile(geo, files);
           if (group) {
-            if (!prepareStlGroupForScene(group, geo.stlPath, applyExternalTransforms, geo.devTransformMatrix, geo.phmTransformMatrix)) { skippedBadBBox++; continue; }
+            if (!prepareStlGroupForScene(group, geo.stlPath, applyExternalTransforms, geo.devTransformMatrix, geo.phmTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
             stlRoot.add(group);
             state.loadedStlGroups.set(geo.stlPath, group);
             loadedStls++;

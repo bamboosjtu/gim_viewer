@@ -151,6 +151,16 @@ export async function loadAllIfcFiles(
   entries: IfcEntry[],
   showMessage: (text: string) => void,
 ): Promise<void> {
+  // 调试入口：从 localStorage 读取手动坐标偏移（GIM_COORD_OFFSET="dx,dy,dz"）
+  // 仅作为调试功能，不写入数据库，不作为最终算法。
+  // resetGimState 会清空 projectSourceToViewerMatrix，因此每次打开项目时重新解析。
+  try {
+    const { loadManualCoordOffsetFromLocalStorage } = await import('./coordinateAlignmentService.js');
+    loadManualCoordOffsetFromLocalStorage(state);
+  } catch {
+    // 忽略：coordinateAlignmentService 不可用时不影响主流程
+  }
+
   if (entries.length === 0) {
     // 无 IFC 但仍触发 MOD/STL 自动加载（纯 xml-mod 工程）
     await autoLoadModStlPostIfc(state, showMessage);

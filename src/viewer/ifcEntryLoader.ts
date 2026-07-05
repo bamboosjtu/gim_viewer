@@ -13,6 +13,35 @@ import {
 } from '../desktop/database.js';
 
 /**
+ * 输出 IFC 模型的位置诊断日志（仅 debug 模式）。
+ *
+ * 用于与 MOD/STL 的 bbox 对比，估算 projectSourceToViewer offset。
+ *
+ * 注意：不调用 THREE.Box3.setFromObject —— 该方法会递归遍历整个 Fragments
+ * 模型的所有 geometry 顶点计算包围盒，在大型 IFC 模型（数十万顶点）上
+ * 会长时间阻塞主线程导致卡死。coordinateToOrigin=true 时 object.position
+ * 已反映 IFC 原点归一化偏移，足以用于估算 sourceToViewer。
+ *
+ * 输出：modelId、object.position、object.matrixWorld、children 数量
+ */
+function logIfcModelBBox(ctx: ViewerContext, modelId: string, label: string): void {
+  if (!DEBUG_IFC_LOAD) return;
+  const model = ctx.fragments.list.get(modelId);
+  if (!model?.object) {
+    debugLog(DEBUG_IFC_LOAD, `[CoordAlign] ${label} model.object 不可用: ${modelId}`);
+    return;
+  }
+  const pos = model.object.position;
+  const mw = model.object.matrixWorld;
+  const childCount = model.object.children.length;
+  debugLog(DEBUG_IFC_LOAD, `[CoordAlign] ${label} IFC pose: ${modelId}`, {
+    objectPosition: [pos.x, pos.y, pos.z],
+    matrixWorld: mw.elements,
+    childCount,
+  });
+}
+
+/**
  * 面向 GIM IFC entry 的加载器。
  *
  * 核心改进：Fragments 缓存命中时不读取 IFC buffer（lazy getIfcBuffer）。
@@ -75,6 +104,8 @@ export async function loadIfcEntry(
     const cacheHit = await tryLoadFromFragmentsCache(ctx, state, modelId, entryPath);
     if (cacheHit) {
       debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 命中: ${entryPath} (modelId=${modelId})`);
+      // 诊断：缓存命中路径同样输出 IFC bbox（与 MOD/STL bbox 对比）
+      logIfcModelBBox(ctx, modelId, 'cache-hit');
       return;
     }
   }
@@ -121,6 +152,9 @@ export async function loadIfcEntry(
   if (!inFragments) {
     throw new Error(`IFC 加载后未进入 fragments.list: ${modelId} (${name})`);
   }
+
+  // 4c. 诊断：输出 IFC model 的 bbox（与 MOD/STL bbox 对比，辅助估算 projectSourceToViewer offset）
+  logIfcModelBBox(ctx, modelId, 'ifc-load');
 
   // 5. 写 .frag 缓存（失败不影响主流程）
   if (canUseCache && entryPath) {

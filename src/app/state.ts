@@ -66,6 +66,14 @@ export class AppState {
   modRootGroup: THREE.Group | null = null;
   stlRootGroup: THREE.Group | null = null;
 
+  // 项目级坐标转换矩阵（GIM 工程坐标 → viewer 坐标）
+  // IFC loader 使用 coordinateToOrigin=true 把 IFC 归一化到 viewer 原点，
+  // MOD/STL 保留 GIM 原始工程坐标，需要通过此矩阵对齐到 IFC/viewer 空间。
+  // null 表示未设置（MOD/STL 将保留原始坐标，可能与 IFC 错位）。
+  // MVP: translation-only，由 GIM_COORD_OFFSET localStorage 手动调试；
+  // 后续可基于共同 CBM 节点的 IFC bbox 与 MOD bbox 自动估算。
+  projectSourceToViewerMatrix: THREE.Matrix4 | null = null;
+
   // 后台几何加载 token（递增防竞态：项目切换后旧任务检测 token 不匹配则停止）
   geometryLoadToken = 0;
 
@@ -106,6 +114,8 @@ export class AppState {
     this.loadedStlGroups.clear();
     this.modRootGroup = null;
     this.stlRootGroup = null;
+    // 清空项目级坐标转换矩阵（新项目需重新估算或手动设置）
+    this.projectSourceToViewerMatrix = null;
   }
 
   /** 重置全部状态 */

@@ -15,8 +15,9 @@ pub const PARSER_VERSION: &str = "gim-parser-v6";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
-/// v3: IFC 加载关闭 COORDINATE_TO_ORIGIN，保留工程原始坐标以对齐 MOD
-pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v3";
+/// v3: IFC 加载关闭 COORDINATE_TO_ORIGIN，保留工程原始坐标以对齐 MOD（已废弃）
+/// v4: restore IFC coordinateToOrigin=true; MOD/STL alignment handled by project-level sourceToViewer transform
+pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v4";
 
 /// GIM 文件元信息（从前端传入，需 Deserialize）
 #[derive(Debug, Deserialize)]
