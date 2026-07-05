@@ -69,24 +69,17 @@ export async function loadXmlModFromFiles(
 }
 
 /**
- * 把行主序的 16 元素矩阵转换为 Three.js Matrix4。
+ * GIM DEV/PHM 变换矩阵 → Three.js Matrix4。
  *
- * GIM DEV/PHM TRANSFORMMATRIX 均为行主序（详见 docs/schema/dev.md §变换矩阵格式）。
- * Three.js Matrix4.set() 接收行主序参数，可直接映射。
+ * 样本研究结论：GIM 矩阵实际为列主序展开，平移在 m[12]/m[13]/m[14]，
+ * 等同于 Three.js Matrix4.elements 数组布局。使用 fromArray 直接加载。
  *
- * 长度不为 16 时返回单位矩阵（与 devParser/phmParser 一致）。
+ * 长度不为 16 时返回单位矩阵。
  */
 export function rowMajorToMatrix4(arr: number[]): THREE.Matrix4 {
-  if (arr.length !== 16) {
-    return new THREE.Matrix4(); // 单位矩阵
-  }
   const m = new THREE.Matrix4();
-  m.set(
-    arr[0], arr[1], arr[2], arr[3],
-    arr[4], arr[5], arr[6], arr[7],
-    arr[8], arr[9], arr[10], arr[11],
-    arr[12], arr[13], arr[14], arr[15],
-  );
+  if (!Array.isArray(arr) || arr.length !== 16) return m;
+  m.fromArray(arr);
   return m;
 }
 

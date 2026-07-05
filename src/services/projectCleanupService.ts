@@ -22,6 +22,7 @@
  */
 
 import type { AppState } from '../app/state.js';
+import * as THREE from 'three';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 
@@ -88,31 +89,57 @@ export async function cleanupBeforeOpenNewProject(
         }
       }
 
-      // dispose xml-mod Groups（变电工程 MOD primitive 渲染）
-      // xml-mod 不走 OBC Fragments，直接挂在 ctx.world.scene.three 下
-      // 需要显式 dispose geometry/material 并从 scene 移除
-      // OBC BaseScene.three 类型为 Object3D，实际为 THREE.Scene，与 viewerEngine.ts 一致用 as any
+      // dispose MOD/STL 图层根节点 + 所有子 Group
+      // v6: MOD/STL 挂在独立图层 __GIM_MOD_LAYER__ / __GIM_STL_LAYER__ 下，
+      // 移除根节点即可级联移除所有子节点
       const scene = (ctx.world.scene as any).three as import('three').Scene;
       const { disposeXmlModGroup } = await import('../viewer/xmlModLoader.js');
-      for (const [modPath, group] of state.loadedXmlModGroups) {
-        try {
-          scene.remove(group);
-          disposeXmlModGroup(group);
-          xmlModDisposedCount++;
-        } catch (err) {
-          console.warn('[Cleanup] dispose xml-mod group failed:', modPath, err);
+      const { disposeStlGroup } = await import('../viewer/stlLoader.js');
+
+      // 遍历 MOD 图层中的子 Group 并 dispose
+      if (state.modRootGroup) {
+        state.modRootGroup.traverse((obj) => {
+          const mesh = obj as THREE.Mesh;
+          mesh.geometry?.dispose?.();
+          const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+          if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+          else mat?.dispose?.();
+        });
+        scene.remove(state.modRootGroup);
+        xmlModDisposedCount = state.loadedXmlModGroups.size;
+      } else {
+        // 回退：旧版本没有图层根节点，逐个移除
+        for (const [modPath, group] of state.loadedXmlModGroups) {
+          try {
+            scene.remove(group);
+            disposeXmlModGroup(group);
+            xmlModDisposedCount++;
+          } catch (err) {
+            console.warn('[Cleanup] dispose xml-mod group failed:', modPath, err);
+          }
         }
       }
 
-      // dispose STL Groups（变电工程 STL primitive 渲染）
-      const { disposeStlGroup } = await import('../viewer/stlLoader.js');
-      for (const [stlPath, group] of state.loadedStlGroups) {
-        try {
-          scene.remove(group);
-          disposeStlGroup(group);
-          stlDisposedCount++;
-        } catch (err) {
-          console.warn('[Cleanup] dispose stl group failed:', stlPath, err);
+      // 遍历 STL 图层中的子 Group 并 dispose
+      if (state.stlRootGroup) {
+        state.stlRootGroup.traverse((obj) => {
+          const mesh = obj as THREE.Mesh;
+          mesh.geometry?.dispose?.();
+          const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+          if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+          else mat?.dispose?.();
+        });
+        scene.remove(state.stlRootGroup);
+        stlDisposedCount = state.loadedStlGroups.size;
+      } else {
+        for (const [stlPath, group] of state.loadedStlGroups) {
+          try {
+            scene.remove(group);
+            disposeStlGroup(group);
+            stlDisposedCount++;
+          } catch (err) {
+            console.warn('[Cleanup] dispose stl group failed:', stlPath, err);
+          }
         }
       }
 

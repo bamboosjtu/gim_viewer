@@ -109,13 +109,12 @@ describe('loadXmlModFromFiles', () => {
 });
 
 describe('rowMajorToMatrix4', () => {
-  it('有效 16 元素行主序 → 正确 Matrix4', () => {
-    // 平移矩阵：translation (100, 200, 50)
-    // 行主序：[1,0,0,100, 0,1,0,200, 0,0,1,50, 0,0,0,1]
-    const arr = [1, 0, 0, 100, 0, 1, 0, 200, 0, 0, 1, 50, 0, 0, 0, 1];
+  it('有效 16 元素列主序 → 正确 Matrix4', () => {
+    // GIM 矩阵为列主序展开，平移在 [12]/[13]/[14]
+    // 等同 Three.js Matrix4.elements 布局，使用 fromArray 直接加载
+    const arr = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 200, 50, 1];
     const m = rowMajorToMatrix4(arr);
-    // 验证平移分量
-    expect(m.elements[12]).toBe(100); // Matrix4.elements 是列主序，translation 在 12/13/14
+    expect(m.elements[12]).toBe(100);
     expect(m.elements[13]).toBe(200);
     expect(m.elements[14]).toBe(50);
   });
@@ -164,9 +163,9 @@ describe('applyExternalTransforms', () => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10));
     group.add(mesh);
     const devMatrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-    const phmMatrix = [1, 0, 0, 100, 0, 1, 0, 200, 0, 0, 1, 50, 0, 0, 0, 1];
+    // 列主序，平移在 [12]/[13]/[14]
+    const phmMatrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 200, 50, 1];
     applyExternalTransforms(group, devMatrix, phmMatrix);
-    // group.applyMatrix4 会分解到 group.position/quaternion/scale
     expect(group.position.x).toBe(100);
     expect(group.position.y).toBe(200);
     expect(group.position.z).toBe(50);
@@ -176,7 +175,8 @@ describe('applyExternalTransforms', () => {
     const group = new THREE.Group();
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10));
     group.add(mesh);
-    const devMatrix = [1, 0, 0, 100, 0, 1, 0, 200, 0, 0, 1, 50, 0, 0, 0, 1];
+    // DEV: 平移 (100, 200, 50)（列主序）
+    const devMatrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 200, 50, 1];
     const phmMatrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
     applyExternalTransforms(group, devMatrix, phmMatrix);
     expect(group.position.x).toBe(100);
@@ -188,10 +188,10 @@ describe('applyExternalTransforms', () => {
     const group = new THREE.Group();
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10));
     group.add(mesh);
-    // PHM: 平移 (100, 0, 0)
-    const phmMatrix = [1, 0, 0, 100, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-    // DEV: 平移 (0, 200, 0)
-    const devMatrix = [1, 0, 0, 0, 0, 1, 0, 200, 0, 0, 1, 0, 0, 0, 0, 1];
+    // PHM: 平移 (100, 0, 0)（列主序）
+    const phmMatrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 0, 0, 1];
+    // DEV: 平移 (0, 200, 0)（列主序）
+    const devMatrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 200, 0, 1];
     applyExternalTransforms(group, devMatrix, phmMatrix);
     // final = DEV × PHM × origin = (100, 200, 0)
     expect(group.position.x).toBe(100);

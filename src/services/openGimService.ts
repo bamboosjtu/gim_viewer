@@ -273,10 +273,10 @@ async function autoLoadModStlPostIfc(
 
     if (result.modCount > 0 || result.stlCount > 0) {
       debugLog(DEBUG_IFC_LOAD, '[GIM] MOD/STL 自动加载完成', result);
-      // 若有 ctx，重新 fit 相机
+      // MOD/STL 加载后强制重新 fit 相机（bbox 可能显著变化）
       if (existingCtx) {
         const { fitCameraToScene } = await import('../viewer/camera.js');
-        fitCameraToScene(existingCtx, state);
+        fitCameraToScene(existingCtx, state, { force: true });
       }
     }
   } catch (err) {

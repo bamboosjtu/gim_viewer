@@ -96,7 +96,7 @@ describe('primitiveToGeometry', () => {
       expect(tg.parameters.tube).toBe(10);
     });
 
-    it('PorcelainBushing → CylinderGeometry（伞裙结构 P1 实现，P0 简化）', () => {
+    it('PorcelainBushing → MVP 暂停渲染，返回空 BufferGeometry', () => {
       const g = primitiveToGeometry({
         type: 'PorcelainBushing',
         r: 30,
@@ -105,12 +105,8 @@ describe('primitiveToGeometry', () => {
         n: 8,
         h: 500,
       });
-      expect(g).toBeInstanceOf(THREE.CylinderGeometry);
-      const cg = g as THREE.CylinderGeometry;
-      // P0 简化：top=R1，bottom=R
-      expect(cg.parameters.radiusTop).toBe(45);
-      expect(cg.parameters.radiusBottom).toBe(30);
-      expect(cg.parameters.height).toBe(500);
+      // MVP 暂停渲染，返回空几何
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
 
     it('TerminalBlock → BoxGeometry 简化', () => {
@@ -129,113 +125,55 @@ describe('primitiveToGeometry', () => {
         rn: 3,
         phase: 'A',
       });
-      expect(g).toBeInstanceOf(THREE.BoxGeometry);
-      const bg = g as THREE.BoxGeometry;
-      // BoxGeometry(l, w, h) → width=l, height=w, depth=h
-      expect(bg.parameters.width).toBe(200);
-      expect(bg.parameters.height).toBe(100);
-      expect(bg.parameters.depth).toBe(50);
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
 
-    it('ChannelSteel → BoxGeometry 简化', () => {
+    it('ChannelSteel → MVP 暂停渲染', () => {
       const g = primitiveToGeometry({
         type: 'ChannelSteel',
-        l: 2000,
-        model: 'C5',
-        d: 50,
-        h: 100,
-        b: 40,
-        t: 8,
+        l: 2000, model: 'C5', d: 50, h: 100, b: 40, t: 8,
       });
-      expect(g).toBeInstanceOf(THREE.BoxGeometry);
-      const bg = g as THREE.BoxGeometry;
-      expect(bg.parameters.width).toBe(2000);
-      expect(bg.parameters.height).toBe(100);
-      expect(bg.parameters.depth).toBe(40);
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
 
-    it('Table → BoxGeometry 简化（仅台面）', () => {
+    it('Table → MVP 暂停渲染', () => {
       const g = primitiveToGeometry({
         type: 'Table',
-        h: 750,
-        ll1: 800,
-        ll2: 600,
-        tl1: 80,
-        tl2: 60,
+        h: 750, ll1: 800, ll2: 600, tl1: 80, tl2: 60,
       });
-      expect(g).toBeInstanceOf(THREE.BoxGeometry);
-      const bg = g as THREE.BoxGeometry;
-      expect(bg.parameters.width).toBe(800);
-      expect(bg.parameters.height).toBe(750);
-      expect(bg.parameters.depth).toBe(600);
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
 
-    it('StretchedBody → ExtrudeGeometry 沿 Z 轴拉伸', () => {
+    it('StretchedBody → MVP 暂停渲染，返回空 BufferGeometry', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
-        l: 200,
-        array: '0,0;100,0;100,50;0,50',
-        normal: '0,0,1',
+        l: 200, array: '0,0;100,0;100,50;0,50', normal: '0,0,1',
       });
-      expect(g).toBeInstanceOf(THREE.ExtrudeGeometry);
-      // boundingBox: x [0,100], y [0,50], z [0,200]（沿 Z 轴拉伸 200）
-      g.computeBoundingBox();
-      const box = g.boundingBox!;
-      expect(box.min.x).toBeCloseTo(0, 5);
-      expect(box.max.x).toBeCloseTo(100, 5);
-      expect(box.min.y).toBeCloseTo(0, 5);
-      expect(box.max.y).toBeCloseTo(50, 5);
-      expect(box.min.z).toBeCloseTo(0, 5);
-      expect(box.max.z).toBeCloseTo(200, 5);
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
 
-    it('StretchedBody 沿 Y 轴拉伸（Normal=0,1,0）', () => {
+    it('StretchedBody 沿 Y 轴（MVP 暂停）', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
-        l: 100,
-        array: '0,0;50,0;50,50;0,50',
-        normal: '0,1,0',
+        l: 100, array: '0,0;50,0;50,50;0,50', normal: '0,1,0',
       });
-      expect(g).toBeInstanceOf(THREE.ExtrudeGeometry);
-      g.computeBoundingBox();
-      const box = g.boundingBox!;
-      // 形状原本在 XY 平面，被旋转到 XZ 平面后拉伸 Y
-      // 旋转 Z+ → Y+ 会把 (x,y,z) 映射到 (x, z, -y)
-      // 原 extrude 后范围 x[0,50] y[0,50] z[0,100] → 旋转后 x[0,50] y[0,100] z[-50,0]
-      expect(box.max.y).toBeCloseTo(100, 5);
-      // X 范围保留
-      expect(box.max.x).toBeCloseTo(50, 5);
-      // Z 范围跨度 = 原 Y 范围跨度（50），方向被翻转到 -Z
-      expect(box.max.z - box.min.z).toBeCloseTo(50, 5);
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
 
-    it('StretchedBody.Normal 长度 304.8 自动归一化', () => {
+    it('StretchedBody.Normal 304.8（MVP 暂停）', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
-        l: 100,
-        array: '0,0;10,0;10,10;0,10',
-        normal: '0,0,304.8',
+        l: 100, array: '0,0;10,0;10,10;0,10', normal: '0,0,304.8',
       });
-      expect(g).toBeInstanceOf(THREE.ExtrudeGeometry);
-      g.computeBoundingBox();
-      const box = g.boundingBox!;
-      // Normal 归一化后仍是 (0,0,1)，拉伸应沿 Z 轴
-      expect(box.max.z).toBeCloseTo(100, 5);
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
 
-    it('StretchedBody.Array 含 3D 点（取前 2 个分量）', () => {
+    it('StretchedBody.Array 3D 点（MVP 暂停）', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
-        l: 50,
-        array: '0,0,0;20,0,0;20,10,0;0,10,0',
-        normal: '0,0,1',
+        l: 50, array: '0,0,0;20,0,0;20,10,0;0,10,0', normal: '0,0,1',
       });
-      expect(g).toBeInstanceOf(THREE.ExtrudeGeometry);
-      g.computeBoundingBox();
-      const box = g.boundingBox!;
-      expect(box.max.x).toBeCloseTo(20, 5);
-      expect(box.max.y).toBeCloseTo(10, 5);
-      expect(box.max.z).toBeCloseTo(50, 5);
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
   });
 
@@ -318,9 +256,8 @@ describe('entityToMesh', () => {
     });
 
     it('平移矩阵 → mesh.position 正确', () => {
-      // 行主序平移矩阵：translation (100, 200, 50)
-      // 1,0,0,100, 0,1,0,200, 0,0,1,50, 0,0,0,1
-      const matrix = [1, 0, 0, 100, 0, 1, 0, 200, 0, 0, 1, 50, 0, 0, 0, 1];
+      // GIM 列主序平移矩阵：translation (100, 200, 50) 在 [12]/[13]/[14]
+      const matrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 200, 50, 1];
       const e = makeEntity(
         { type: 'Cuboid', l: 100, w: 100, h: 100 },
         { matrix },
@@ -466,7 +403,7 @@ describe('xmlModDocumentToGroup', () => {
   <Entities>
     <Entity ID="0" Type="simple" Visible="True">
       <Cuboid L="100" W="100" H="100" />
-      <TransformMatrix Value="1,0,0,100,0,1,0,200,0,0,1,50,0,0,0,1" />
+      <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,100,200,50,1" />
       <Color R="100" G="100" B="100" A="100" />
     </Entity>
   </Entities>

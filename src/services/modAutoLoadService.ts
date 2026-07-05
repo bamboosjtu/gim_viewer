@@ -16,7 +16,7 @@
  * - 缓存命中：从磁盘 SQLite 缓存读取 DEV/PHM/MOD/STL（readCachedIfc）
  */
 
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import type { CbmNode } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
 import type { DiscoveredModGeometry, DiscoveredStlGeometry } from './modGeometryDiscovery.js';
@@ -30,6 +30,71 @@ const CONCURRENCY = 4;
 
 /** 批次间 yield 间隔（毫秒），让浏览器有机会处理 UI 事件 */
 const YIELD_MS = 16;
+
+/** 异常 bbox 阈值（米）：单轴跨度超过此值视为几何异常 */
+const BBOX_MAX_DIM_M = 50000;
+
+/**
+ * 确保 MOD/STL 图层根节点存在（挂在 scene 下，与 IFC 平级）。
+ * 首次调用时创建，后续调用返回已有实例。
+ */
+function ensureGeometryLayers(state: AppState, scene: THREE.Scene): { modRoot: THREE.Group; stlRoot: THREE.Group } {
+  if (!state.modRootGroup) {
+    state.modRootGroup = new THREE.Group();
+    state.modRootGroup.name = '__GIM_MOD_LAYER__';
+    state.modRootGroup.visible = true;
+    scene.add(state.modRootGroup);
+  }
+  if (!state.stlRootGroup) {
+    state.stlRootGroup = new THREE.Group();
+    state.stlRootGroup.name = '__GIM_STL_LAYER__';
+    state.stlRootGroup.visible = true;
+    scene.add(state.stlRootGroup);
+  }
+  return { modRoot: state.modRootGroup, stlRoot: state.stlRootGroup };
+}
+
+/**
+ * 诊断 MOD/STL Group 的 bbox 是否异常。
+ *
+ * 过滤条件：
+ * - 空包围盒
+ * - 无限/NaN 尺寸
+ * - 单轴跨度 > BBOX_MAX_DIM_M（异常矩阵或几何错误导致飘移）
+ *
+ * @returns true 表示 bbox 正常，可以加入场景
+ */
+function diagnoseGroupBBox(group: THREE.Group, sourcePath: string): boolean {
+  const box = new THREE.Box3().setFromObject(group);
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+
+  const bad =
+    box.isEmpty() ||
+    !Number.isFinite(maxDim) ||
+    maxDim <= 0 ||
+    maxDim > BBOX_MAX_DIM_M;
+
+  if (bad) {
+    console.warn('[autoLoad] 异常几何 bbox，跳过（不加入场景）:', {
+      sourcePath,
+      center: box.getCenter(new THREE.Vector3()).toArray(),
+      size: size.toArray(),
+      maxDim,
+      threshold: BBOX_MAX_DIM_M,
+    });
+    // dispose GPU 资源，避免内存泄漏
+    group.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      mesh.geometry?.dispose?.();
+      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+      else mat?.dispose?.();
+    });
+  }
+
+  return !bad;
+}
 
 /** 自动加载进度 */
 export interface AutoLoadProgress {
@@ -340,8 +405,10 @@ export async function autoLoadModAndStlGeometry(
       console.log(`[autoLoad] DB 直通加载: ${modGeos.length} MOD + ${stlGeos.length} STL`);
 
       const { applyExternalTransforms } = await import('../viewer/xmlModLoader.js');
+      const { modRoot, stlRoot } = ensureGeometryLayers(state, scene);
       let loadedMods = 0;
       let loadedStls = 0;
+      let skippedBadBBox = 0;
 
       // 加载 MOD
       if (modGeos.length > 0) {
@@ -355,7 +422,8 @@ export async function autoLoadModAndStlGeometry(
               const group = await loadModFile(geo, files!);
               if (group) {
                 applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
-                scene.add(group);
+                if (!diagnoseGroupBBox(group, geo.modPath)) { skippedBadBBox++; continue; }
+                modRoot.add(group);
                 state.loadedXmlModGroups.set(geo.modPath, group);
                 loadedMods++;
               }
@@ -363,7 +431,7 @@ export async function autoLoadModAndStlGeometry(
           }
           if (i + CONCURRENCY < modGeos.length) await new Promise((r) => setTimeout(r, YIELD_MS));
         }
-        console.log(`[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}`);
+        console.log(`[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}（跳过异常 bbox: ${skippedBadBBox}）`);
       }
 
       // 加载 STL
@@ -378,7 +446,8 @@ export async function autoLoadModAndStlGeometry(
               const group = await loadStlFile(geo, files!);
               if (group) {
                 applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
-                scene.add(group);
+                if (!diagnoseGroupBBox(group, geo.stlPath)) { skippedBadBBox++; continue; }
+                stlRoot.add(group);
                 state.loadedStlGroups.set(geo.stlPath, group);
                 loadedStls++;
               }
@@ -389,7 +458,7 @@ export async function autoLoadModAndStlGeometry(
         console.log(`[autoLoad] STL 加载完成: ${loadedStls}/${stlGeos.length}`);
       }
 
-      console.log(`[autoLoad] 全部几何加载完成 (DB直通): MOD=${loadedMods}, STL=${loadedStls}`);
+      console.log(`[autoLoad] 全部几何加载完成 (DB直通): MOD=${loadedMods}, STL=${loadedStls}, 跳过异常bbox=${skippedBadBBox}`);
       showProgress({ phase: 'done', collectedDevPaths: uniqueDevPaths.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length });
       return { modCount: loadedMods, stlCount: loadedStls };
     } catch (err) {
@@ -480,7 +549,9 @@ export async function autoLoadModAndStlGeometry(
 
   // ── Phase 3: 分批加载 MOD ──
   const { applyExternalTransforms } = await import('../viewer/xmlModLoader.js');
+  const { modRoot, stlRoot } = ensureGeometryLayers(state, scene);
   let loadedMods = 0;
+  let skippedBadBBox = 0;
 
   if (modGeos.length > 0) {
     console.log(`[autoLoad] 开始加载 ${modGeos.length} 个 MOD 文件...`);
@@ -499,17 +570,14 @@ export async function autoLoadModAndStlGeometry(
       });
 
       for (const geo of batch) {
-        // 已加载则跳过（state.loadedXmlModGroups 记录去重）
-        if (state.loadedXmlModGroups.has(geo.modPath)) {
-          loadedMods++;
-          continue;
-        }
+        if (state.loadedXmlModGroups.has(geo.modPath)) { loadedMods++; continue; }
 
         try {
           const group = await loadModFile(geo, files);
           if (group) {
             applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
-            scene.add(group);
+            if (!diagnoseGroupBBox(group, geo.modPath)) { skippedBadBBox++; continue; }
+            modRoot.add(group);
             state.loadedXmlModGroups.set(geo.modPath, group);
             loadedMods++;
           }
@@ -518,12 +586,11 @@ export async function autoLoadModAndStlGeometry(
         }
       }
 
-      // 批次间 yield 主线程，防止 UI 冻结
       if (i + CONCURRENCY < modGeos.length) {
         await new Promise((r) => setTimeout(r, YIELD_MS));
       }
     }
-    console.log(`[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}`);
+    console.log(`[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}（跳过异常 bbox: ${skippedBadBBox}）`);
     debugLog(DEBUG_IFC_LOAD, `[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}`);
   }
 
@@ -547,17 +614,14 @@ export async function autoLoadModAndStlGeometry(
       });
 
       for (const geo of batch) {
-        // 已加载则跳过
-        if (state.loadedStlGroups.has(geo.stlPath)) {
-          loadedStls++;
-          continue;
-        }
+        if (state.loadedStlGroups.has(geo.stlPath)) { loadedStls++; continue; }
 
         try {
           const group = await loadStlFile(geo, files);
           if (group) {
             applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
-            scene.add(group);
+            if (!diagnoseGroupBBox(group, geo.stlPath)) { skippedBadBBox++; continue; }
+            stlRoot.add(group);
             state.loadedStlGroups.set(geo.stlPath, group);
             loadedStls++;
           }
@@ -566,7 +630,6 @@ export async function autoLoadModAndStlGeometry(
         }
       }
 
-      // 批次间 yield
       if (i + CONCURRENCY < stlGeos.length) {
         await new Promise((r) => setTimeout(r, YIELD_MS));
       }
@@ -576,7 +639,7 @@ export async function autoLoadModAndStlGeometry(
   }
 
   // ── Phase 5: 完成 ──
-  console.log(`[autoLoad] 全部几何加载完成: MOD=${loadedMods}, STL=${loadedStls}`);
+  console.log(`[autoLoad] 全部几何加载完成: MOD=${loadedMods}, STL=${loadedStls}, 跳过异常bbox=${skippedBadBBox}`);
   showProgress({
     phase: 'done',
     collectedDevPaths: uniqueDevPaths.length,

@@ -4,8 +4,12 @@ import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 
 /** 将相机定位到场景包围盒 */
-export function fitCameraToScene(ctx: ViewerContext, state: { hasFittedCamera: boolean }): boolean {
-  if (state.hasFittedCamera) {
+export function fitCameraToScene(
+  ctx: ViewerContext,
+  state: { hasFittedCamera: boolean },
+  options?: { force?: boolean },
+): boolean {
+  if (state.hasFittedCamera && !options?.force) {
     debugLog(DEBUG_IFC_LOAD, '[Camera] fitCameraToScene skipped: hasFittedCamera=true');
     return false;
   }
@@ -15,6 +19,7 @@ export function fitCameraToScene(ctx: ViewerContext, state: { hasFittedCamera: b
   const maxDim = Math.max(size.x, size.y, size.z);
   debugLog(DEBUG_IFC_LOAD, '[Camera] fitCameraToScene', {
     hasFittedCamera: state.hasFittedCamera,
+    force: options?.force ?? false,
     maxDim,
     center: center.toArray(),
     size: size.toArray(),

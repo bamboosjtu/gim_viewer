@@ -61,6 +61,11 @@ export class AppState {
   // 由 modAutoLoadService 在自动加载时填充，projectCleanupService 在切换项目时 dispose
   loadedStlGroups = new Map<string, THREE.Group>();
 
+  // MOD/STL 图层根节点（挂在 scene 下，与 IFC 平级）
+  // 用于一键开关、异常隔离、bbox 诊断
+  modRootGroup: THREE.Group | null = null;
+  stlRootGroup: THREE.Group | null = null;
+
   // 高亮
   highlightedItems: OBCF.ModelIdMap | null = null;
 
@@ -96,6 +101,8 @@ export class AppState {
     // 这里只清空索引，避免 stale 引用
     this.loadedXmlModGroups.clear();
     this.loadedStlGroups.clear();
+    this.modRootGroup = null;
+    this.stlRootGroup = null;
   }
 
   /** 重置全部状态 */

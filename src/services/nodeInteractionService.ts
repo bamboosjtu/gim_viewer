@@ -1,5 +1,6 @@
 import type { CbmNode } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
+import * as THREE from 'three';
 import { collectIfcRefs } from '../gim/cbmParser.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
@@ -150,6 +151,34 @@ async function getIfcBufferForEntry(
 }
 
 /**
+ * 确保 MOD/STL 图层根节点存在。
+ * 与 modAutoLoadService 的图层机制一致。
+ */
+function ensureModStlLayer(
+  state: AppState,
+  scene: THREE.Scene,
+  layer: 'mod' | 'stl',
+): THREE.Group {
+  if (layer === 'mod') {
+    if (!state.modRootGroup) {
+      state.modRootGroup = new THREE.Group();
+      state.modRootGroup.name = '__GIM_MOD_LAYER__';
+      state.modRootGroup.visible = true;
+      scene.add(state.modRootGroup);
+    }
+    return state.modRootGroup;
+  } else {
+    if (!state.stlRootGroup) {
+      state.stlRootGroup = new THREE.Group();
+      state.stlRootGroup.name = '__GIM_STL_LAYER__';
+      state.stlRootGroup.visible = true;
+      scene.add(state.stlRootGroup);
+    }
+    return state.stlRootGroup;
+  }
+}
+
+/**
  * 节点点击时加载 MOD/STL 几何（变电工程无 IFC 设备的回退路径）。
  *
  * 流程：
@@ -226,7 +255,9 @@ async function loadModStlForNode(
     if (!group) continue;
 
     applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
-    scene.add(group);
+    // 加入 MOD 图层（独立于 IFC scene 根节点）
+    const modRoot = ensureModStlLayer(state, scene, 'mod');
+    modRoot.add(group);
     state.loadedXmlModGroups.set(geo.modPath, group);
     loadedCount++;
   }
@@ -249,7 +280,9 @@ async function loadModStlForNode(
     if (!group) continue;
 
     applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
-    scene.add(group);
+    // 加入 STL 图层
+    const stlRoot = ensureModStlLayer(state, scene, 'stl');
+    stlRoot.add(group);
     state.loadedStlGroups.set(geo.stlPath, group);
     stlLoadedCount++;
   }
