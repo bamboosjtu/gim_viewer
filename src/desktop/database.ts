@@ -219,10 +219,17 @@ export interface ReachableGeometry {
   phm_color: string | null;
 }
 
-/** 查询项目中所有可从 CBM 到达的 MOD/STL 几何源（一次 SQL 查询） */
-export async function getReachableGeometry(projectId: number): Promise<ReachableGeometry[]> {
+/** 查询项目中可从 CBM 到达的 MOD/STL 几何源（一次 SQL 查询） */
+export async function getReachableGeometry(
+  projectId: number,
+  options?: { includeMod?: boolean; includeStl?: boolean },
+): Promise<ReachableGeometry[]> {
   const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<ReachableGeometry[]>('get_reachable_geometry', { projectId });
+  return invoke<ReachableGeometry[]>('get_reachable_geometry', {
+    projectId,
+    includeMod: options?.includeMod ?? true,
+    includeStl: options?.includeStl ?? false,
+  });
 }
 
 // ===== GIM 索引完整读取 + 缓存校验 =====

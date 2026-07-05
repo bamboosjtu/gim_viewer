@@ -25,6 +25,16 @@ import { debugLog } from '../utils/logger.js';
 import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
 
+/** 自动加载选项 */
+export interface GeometryAutoLoadOptions {
+  /** 调用方 token（用于防竞态：项目切换后递增，后台任务检测不匹配则停止） */
+  token?: number;
+  /** 是否加载 .mod 文件（默认 true） */
+  includeMod?: boolean;
+  /** 是否加载 .stl 文件（默认 false，P0 不默认加载 STL） */
+  includeStl?: boolean;
+}
+
 /** 每批并发加载的文件数 */
 const CONCURRENCY = 4;
 
@@ -272,6 +282,12 @@ async function buildFileMapFromDiskCache(
   return result.size > 0 ? result : null;
 }
 
+/** 检查 token 是否仍然有效（防竞态：项目切换后递增 token，旧任务检测不匹配则停止） */
+function isTokenValid(state: AppState, token?: number): boolean {
+  if (token === undefined) return true;
+  return state.geometryLoadToken === token;
+}
+
 /**
  * 主入口：自动发现并加载变电工程中所有非 IFC 的 MOD/STL 几何。
  *
@@ -286,9 +302,20 @@ export async function autoLoadModAndStlGeometry(
   state: AppState,
   scene: THREE.Scene,
   showProgress: (p: AutoLoadProgress) => void,
+  options: GeometryAutoLoadOptions = {},
 ): Promise<{ modCount: number; stlCount: number }> {
+  const includeMod = options.includeMod ?? true;
+  const includeStl = options.includeStl ?? false;
+  const token = options.token;
+
   let files = state.currentFiles;
   const cbmTree = state.currentCbmTree;
+
+  // 早期 token 校验：项目已切换则立即退出
+  if (!isTokenValid(state, token)) {
+    console.log('[autoLoad] token 不匹配，停止加载（项目已切换）');
+    return { modCount: 0, stlCount: 0 };
+  }
 
   if (!cbmTree) {
     debugLog(DEBUG_IFC_LOAD, '[autoLoad] 跳过：currentCbmTree 为空');
@@ -315,7 +342,7 @@ export async function autoLoadModAndStlGeometry(
     console.log('[autoLoad] 缓存命中：从 SQLite 查询可到达的 MOD/STL 几何源...');
     try {
       const { getReachableGeometry, batchReadCachedFiles } = await import('../desktop/database.js');
-      const reachable = await getReachableGeometry(state.currentProjectId);
+      const reachable = await getReachableGeometry(state.currentProjectId, { includeMod, includeStl });
 
       if (reachable.length === 0) {
         console.log('[autoLoad] 无可到达的 MOD/STL 几何源（SQLite 查询为空）');
@@ -414,6 +441,7 @@ export async function autoLoadModAndStlGeometry(
       if (modGeos.length > 0) {
         console.log(`[autoLoad] 开始加载 ${modGeos.length} 个 MOD...`);
         for (let i = 0; i < modGeos.length; i += CONCURRENCY) {
+          if (!isTokenValid(state, token)) { console.log('[autoLoad] token 不匹配，停止 DB MOD 加载'); return { modCount: loadedMods, stlCount: 0 }; }
           const batch = modGeos.slice(i, i + CONCURRENCY);
           showProgress({ phase: 'loading_mod', collectedDevPaths: uniqueDevPaths.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length, currentPath: batch[0].modPath });
           for (const geo of batch) {
@@ -434,10 +462,11 @@ export async function autoLoadModAndStlGeometry(
         console.log(`[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}（跳过异常 bbox: ${skippedBadBBox}）`);
       }
 
-      // 加载 STL
+      // 加载 STL（仅 includeStl=true 时进入，stlGeos 已在 discovery 阶段过滤）
       if (stlGeos.length > 0) {
         console.log(`[autoLoad] 开始加载 ${stlGeos.length} 个 STL...`);
         for (let i = 0; i < stlGeos.length; i += CONCURRENCY) {
+          if (!isTokenValid(state, token)) { console.log('[autoLoad] token 不匹配，停止 DB STL 加载'); return { modCount: loadedMods, stlCount: loadedStls }; }
           const batch = stlGeos.slice(i, i + CONCURRENCY);
           showProgress({ phase: 'loading_stl', collectedDevPaths: uniqueDevPaths.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length, currentPath: batch[0].stlPath });
           for (const geo of batch) {
@@ -515,6 +544,11 @@ export async function autoLoadModAndStlGeometry(
     // 里程碑日志：让用户知道发现正在推进
     if (discoveredCount > 0 && discoveredCount % LOG_INTERVAL === 0) {
       console.log(`[autoLoad] 发现进度: ${discoveredCount}/${uniqueDevPaths.length} devPaths, MOD=${modMap.size}, STL=${stlMap.size}`);
+      // 批次间检查 token，项目切换时提前退出
+      if (!isTokenValid(state, token)) {
+        console.log('[autoLoad] token 不匹配，停止发现（项目已切换）');
+        return { modCount: 0, stlCount: 0 };
+      }
     }
 
     try {
@@ -524,9 +558,11 @@ export async function autoLoadModAndStlGeometry(
           modMap.set(modGeo.modPath, modGeo);
         }
       }
-      for (const stlGeo of result.stls) {
-        if (!stlMap.has(stlGeo.stlPath)) {
-          stlMap.set(stlGeo.stlPath, stlGeo);
+      if (includeStl) {
+        for (const stlGeo of result.stls) {
+          if (!stlMap.has(stlGeo.stlPath)) {
+            stlMap.set(stlGeo.stlPath, stlGeo);
+          }
         }
       }
     } catch (err) {
@@ -568,6 +604,12 @@ export async function autoLoadModAndStlGeometry(
         totalStls: stlGeos.length,
         currentPath: batch[0].modPath,
       });
+
+      // 每批前检查 token
+      if (!isTokenValid(state, token)) {
+        console.log('[autoLoad] token 不匹配，停止 MOD 加载');
+        return { modCount: loadedMods, stlCount: 0 };
+      }
 
       for (const geo of batch) {
         if (state.loadedXmlModGroups.has(geo.modPath)) { loadedMods++; continue; }
@@ -612,6 +654,12 @@ export async function autoLoadModAndStlGeometry(
         totalStls: stlGeos.length,
         currentPath: batch[0].stlPath,
       });
+
+      // 每批前检查 token
+      if (!isTokenValid(state, token)) {
+        console.log('[autoLoad] token 不匹配，停止 STL 加载');
+        return { modCount: loadedMods, stlCount: loadedStls };
+      }
 
       for (const geo of batch) {
         if (state.loadedStlGroups.has(geo.stlPath)) { loadedStls++; continue; }

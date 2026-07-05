@@ -2661,35 +2661,57 @@ pub struct ReachableGeometry {
     pub phm_color: Option<String>,
 }
 
-/// 查询项目中所有可从 CBM 到达的 MOD/STL 几何源。
+/// 查询项目中可从 CBM 到达的 MOD/STL 几何源。
 ///
 /// 沿引用链查询：cbm_node.dev_path → dev_solid_model → phm_solid_model，
 /// 以及 cbm_node.dev_path → dev_sub_device → dev_solid_model → phm_solid_model。
 ///
 /// 一次 SQL 查询替代数千次逐个文件 I/O。
+///
+/// - include_mod（默认 true）：返回 .mod 文件
+/// - include_stl（默认 false）：返回 .stl 文件
 #[tauri::command]
 pub fn get_reachable_geometry(
     state: tauri::State<'_, DbState>,
     project_id: i64,
+    include_mod: Option<bool>,
+    include_stl: Option<bool>,
 ) -> Result<Vec<ReachableGeometry>, String> {
+    let include_mod = include_mod.unwrap_or(true);
+    let include_stl = include_stl.unwrap_or(false);
+
     let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
 
-    // 收集所有可从 CBM 到达的 DEV（直接 + 间接 via SUBDEVICE）
-    // 深度限制：demo 样本 maxDevToDevDepth=1，多一层兜底
+    // 递归 CTE：收集所有可从 CBM 到达的 DEV（直接 + 间接 via SUBDEVICE）
+    // 路径归一化：CASE WHEN 防止 DEV/DEV/xxx.dev 双重前缀
     let sql = "
         WITH RECURSIVE
         cbm_dev AS (
-            SELECT DISTINCT 'DEV/' || dev_path AS dev_path
+            SELECT DISTINCT
+                CASE
+                    WHEN dev_path LIKE 'DEV/%' THEN dev_path
+                    ELSE 'DEV/' || dev_path
+                END AS dev_path
             FROM cbm_node
             WHERE project_id = ?1 AND dev_path IS NOT NULL AND dev_path != ''
         ),
         all_dev(dev_path, depth) AS (
             SELECT dev_path, 0 FROM cbm_dev
             UNION
-            SELECT 'DEV/' || dsd.child_dev_path, all_dev.depth + 1
+            SELECT
+                CASE
+                    WHEN dsd.child_dev_path LIKE 'DEV/%' THEN dsd.child_dev_path
+                    ELSE 'DEV/' || dsd.child_dev_path
+                END AS dev_path,
+                all_dev.depth + 1
             FROM dev_sub_device dsd
-            JOIN all_dev ON all_dev.dev_path = 'DEV/' || dsd.dev_path
-            WHERE dsd.project_id = ?1 AND all_dev.depth < 2
+            JOIN all_dev ON all_dev.dev_path =
+                CASE
+                    WHEN dsd.dev_path LIKE 'DEV/%' THEN dsd.dev_path
+                    ELSE 'DEV/' || dsd.dev_path
+                END
+            WHERE dsd.project_id = ?1
+              AND all_dev.depth < 2
         )
         SELECT DISTINCT
             'MOD/' || psm.solid_model_path AS geometry_path,
@@ -2699,7 +2721,6 @@ pub fn get_reachable_geometry(
         FROM all_dev ad
         JOIN dev_solid_model dsm ON dsm.project_id = ?1 AND dsm.dev_path = ad.dev_path
         JOIN phm_solid_model psm ON psm.project_id = ?1 AND psm.phm_path = 'PHM/' || dsm.solid_model_path
-        WHERE psm.solid_model_path LIKE '%.mod' OR psm.solid_model_path LIKE '%.stl'
         ORDER BY geometry_path
     ";
 
@@ -2713,9 +2734,14 @@ pub fn get_reachable_geometry(
         })
     }).map_err(|e| format!("查询 reachable_geometry 失败: {}", e))?;
 
+    // Rust 侧按 include_mod/include_stl 过滤（SQL 去掉固定 WHERE，避免参数化 LIKE 复杂）
     let mut results = Vec::new();
     for r in rows {
-        results.push(r.map_err(|e| format!("读取 reachable_geometry 行失败: {}", e))?);
+        let geo = r.map_err(|e| format!("读取 reachable_geometry 行失败: {}", e))?;
+        let lower = geo.geometry_path.to_lowercase();
+        if (include_mod && lower.ends_with(".mod")) || (include_stl && lower.ends_with(".stl")) {
+            results.push(geo);
+        }
     }
     Ok(results)
 }

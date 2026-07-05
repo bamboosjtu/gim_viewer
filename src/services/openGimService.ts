@@ -213,9 +213,6 @@ export async function loadAllIfcFiles(
     // 首次 fit 相机
     fitCameraToScene(ctx, state);
 
-    // 自动加载 MOD/STL 几何
-    await autoLoadModStlPostIfc(state, showMessage, ctx);
-
   } catch (err) {
     console.error('[GIM] IFC 加载失败 (outer)', {
       error: err,
@@ -226,12 +223,26 @@ export async function loadAllIfcFiles(
     return;
   }
 
+  // IFC 加载完成 → 立即 hideLoading，让用户可交互
   if (failed.length > 0) {
     showLoading(`部分 IFC 加载失败：${failed.length}/${entries.length}，详见控制台`);
     setTimeout(hideLoading, 4000);
   } else {
     hideLoading();
   }
+
+  // MOD 自动加载作为后台任务，不阻塞主流程
+  // token 机制防止项目切换后旧任务继续往新 scene 添加对象
+  state.geometryLoadToken++;
+  const token = state.geometryLoadToken;
+  const bgCtx = ctx; // 捕获当前 ctx 引用
+
+  queueMicrotask(() => {
+    void autoLoadModStlPostIfc(state, showMessage, bgCtx, { token, includeMod: true, includeStl: false })
+      .catch((err) => {
+        console.warn('[GIM] 后台 MOD 加载失败:', err);
+      });
+  });
 }
 
 /**
@@ -244,6 +255,7 @@ async function autoLoadModStlPostIfc(
   state: AppState,
   showMessage: (text: string) => void,
   existingCtx?: ViewerContext,
+  options?: { token?: number; includeMod?: boolean; includeStl?: boolean },
 ): Promise<void> {
   try {
     const { autoLoadModAndStlGeometry } = await import('./modAutoLoadService.js');
@@ -269,6 +281,7 @@ async function autoLoadModStlPostIfc(
           showLoading(`正在加载 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
         }
       },
+      { token: options?.token, includeMod: options?.includeMod ?? true, includeStl: options?.includeStl ?? false },
     );
 
     if (result.modCount > 0 || result.stlCount > 0) {

@@ -38,7 +38,7 @@ const _warnedOnce = new Set<string>();
  * - 5 类暂停：StretchedBody/PorcelainBushing/TerminalBlock/ChannelSteel/Table — MVP 跳过
  * - 3 类弱 schema：RectangularFixedPlate/OffsetRectangularTable/RectangularRing — 占位
  */
-export function primitiveToGeometry(p: XmlModPrimitive): THREE.BufferGeometry {
+export function primitiveToGeometry(p: XmlModPrimitive): THREE.BufferGeometry | null {
   switch (p.type) {
     case 'Cylinder':
       return new THREE.CylinderGeometry(sanitizeNum(p.r), sanitizeNum(p.r), sanitizeNum(p.h), 32);
@@ -57,12 +57,12 @@ export function primitiveToGeometry(p: XmlModPrimitive): THREE.BufferGeometry {
     case 'TerminalBlock':
     case 'ChannelSteel':
     case 'Table':
-      // MVP 阶段暂停渲染，仅首次 warn
+      // MVP 阶段暂停渲染 — 返回 null 避免创建空 Mesh
       if (!_warnedOnce.has(p.type)) {
         _warnedOnce.add(p.type);
         console.warn(`[xmlModGeometry] "${p.type}" MVP 暂停渲染（几何解释待完善）`);
       }
-      return new THREE.BufferGeometry();
+      return null;
     case 'RectangularFixedPlate':
     case 'OffsetRectangularTable':
     case 'RectangularRing':
@@ -93,8 +93,10 @@ export function gimMatrixToMatrix4(arr: number[]): THREE.Matrix4 {
  * - color → material
  * - transformMatrix → fromArray（列主序，与 GIM 实测布局一致）
  */
-export function entityToMesh(e: XmlModEntity): THREE.Mesh {
+export function entityToMesh(e: XmlModEntity): THREE.Mesh | null {
   const geometry = primitiveToGeometry(e.primitive);
+  if (!geometry) return null;
+
   const material = colorToMaterial(e.color);
   const mesh = new THREE.Mesh(geometry, material);
 
@@ -143,6 +145,7 @@ export function xmlModDocumentToGroup(doc: XmlModDocument): THREE.Group {
 
   for (const entity of doc.entities) {
     const mesh = entityToMesh(entity);
+    if (!mesh) continue; // 跳过暂停渲染的 primitive
     mesh.visible = entity.visible;
     group.add(mesh);
   }

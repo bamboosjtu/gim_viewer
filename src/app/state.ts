@@ -66,6 +66,9 @@ export class AppState {
   modRootGroup: THREE.Group | null = null;
   stlRootGroup: THREE.Group | null = null;
 
+  // 后台几何加载 token（递增防竞态：项目切换后旧任务检测 token 不匹配则停止）
+  geometryLoadToken = 0;
+
   // 高亮
   highlightedItems: OBCF.ModelIdMap | null = null;
 

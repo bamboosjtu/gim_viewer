@@ -32,7 +32,7 @@ function makeEntity(
 describe('primitiveToGeometry', () => {
   describe('强类型 primitive（11 类）', () => {
     it('Cylinder → CylinderGeometry 顶点数正确', () => {
-      const g = primitiveToGeometry({ type: 'Cylinder', r: 50, h: 300 });
+      const g = primitiveToGeometry({ type: 'Cylinder', r: 50, h: 300 })!;
       expect(g).toBeInstanceOf(THREE.CylinderGeometry);
       const cg = g as THREE.CylinderGeometry;
       expect(cg.parameters.radiusTop).toBe(50);
@@ -46,7 +46,7 @@ describe('primitiveToGeometry', () => {
     it('Cuboid → BoxGeometry 尺寸正确', () => {
       // 实现使用 BoxGeometry(l, w, h) → width=l, height=w, depth=h
       // （Three.js BoxGeometry 参数顺序固定为 width/height/depth，GIM 的 l/w/h 与之直接对应）
-      const g = primitiveToGeometry({ type: 'Cuboid', l: 800, w: 600, h: 2000 });
+      const g = primitiveToGeometry({ type: 'Cuboid', l: 800, w: 600, h: 2000 })!;
       expect(g).toBeInstanceOf(THREE.BoxGeometry);
       const bg = g as THREE.BoxGeometry;
       expect(bg.parameters.width).toBe(800);
@@ -57,14 +57,14 @@ describe('primitiveToGeometry', () => {
     });
 
     it('Sphere → SphereGeometry 参数正确', () => {
-      const g = primitiveToGeometry({ type: 'Sphere', r: 50 });
+      const g = primitiveToGeometry({ type: 'Sphere', r: 50 })!;
       expect(g).toBeInstanceOf(THREE.SphereGeometry);
       const sg = g as THREE.SphereGeometry;
       expect(sg.parameters.radius).toBe(50);
     });
 
     it('TruncatedCone → CylinderGeometry（顶/底半径不同）', () => {
-      const g = primitiveToGeometry({ type: 'TruncatedCone', br: 100, tr: 50, h: 200 });
+      const g = primitiveToGeometry({ type: 'TruncatedCone', br: 100, tr: 50, h: 200 })!;
       expect(g).toBeInstanceOf(THREE.CylinderGeometry);
       const cg = g as THREE.CylinderGeometry;
       expect(cg.parameters.radiusTop).toBe(50);
@@ -73,7 +73,7 @@ describe('primitiveToGeometry', () => {
     });
 
     it('Ring → TorusGeometry 参数正确', () => {
-      const g = primitiveToGeometry({ type: 'Ring', r: 100, dr: 20, rad: 3.14 });
+      const g = primitiveToGeometry({ type: 'Ring', r: 100, dr: 20, rad: 3.14 })!;
       expect(g).toBeInstanceOf(THREE.TorusGeometry);
       const tg = g as THREE.TorusGeometry;
       expect(tg.parameters.radius).toBe(100);
@@ -106,7 +106,7 @@ describe('primitiveToGeometry', () => {
         h: 500,
       });
       // MVP 暂停渲染，返回空几何
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      expect(g).toBeNull();
     });
 
     it('TerminalBlock → BoxGeometry 简化', () => {
@@ -125,7 +125,7 @@ describe('primitiveToGeometry', () => {
         rn: 3,
         phase: 'A',
       });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      expect(g).toBeNull();
     });
 
     it('ChannelSteel → MVP 暂停渲染', () => {
@@ -133,7 +133,7 @@ describe('primitiveToGeometry', () => {
         type: 'ChannelSteel',
         l: 2000, model: 'C5', d: 50, h: 100, b: 40, t: 8,
       });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      expect(g).toBeNull();
     });
 
     it('Table → MVP 暂停渲染', () => {
@@ -141,7 +141,7 @@ describe('primitiveToGeometry', () => {
         type: 'Table',
         h: 750, ll1: 800, ll2: 600, tl1: 80, tl2: 60,
       });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      expect(g).toBeNull();
     });
 
     it('StretchedBody → MVP 暂停渲染，返回空 BufferGeometry', () => {
@@ -149,7 +149,7 @@ describe('primitiveToGeometry', () => {
         type: 'StretchedBody',
         l: 200, array: '0,0;100,0;100,50;0,50', normal: '0,0,1',
       });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      expect(g).toBeNull();
     });
 
     it('StretchedBody 沿 Y 轴（MVP 暂停）', () => {
@@ -157,7 +157,7 @@ describe('primitiveToGeometry', () => {
         type: 'StretchedBody',
         l: 100, array: '0,0;50,0;50,50;0,50', normal: '0,1,0',
       });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      expect(g).toBeNull();
     });
 
     it('StretchedBody.Normal 304.8（MVP 暂停）', () => {
@@ -165,7 +165,7 @@ describe('primitiveToGeometry', () => {
         type: 'StretchedBody',
         l: 100, array: '0,0;10,0;10,10;0,10', normal: '0,0,304.8',
       });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      expect(g).toBeNull();
     });
 
     it('StretchedBody.Array 3D 点（MVP 暂停）', () => {
@@ -173,7 +173,7 @@ describe('primitiveToGeometry', () => {
         type: 'StretchedBody',
         l: 50, array: '0,0,0;20,0,0;20,10,0;0,10,0', normal: '0,0,1',
       });
-      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      expect(g).toBeNull();
     });
   });
 
@@ -215,7 +215,7 @@ describe('primitiveToGeometry', () => {
 
   describe('NaN 数值安全化', () => {
     it('Cylinder 含 NaN → 按 0 处理', () => {
-      const g = primitiveToGeometry({ type: 'Cylinder', r: NaN, h: NaN });
+      const g = primitiveToGeometry({ type: 'Cylinder', r: NaN, h: NaN })!;
       expect(g).toBeInstanceOf(THREE.CylinderGeometry);
       const cg = g as THREE.CylinderGeometry;
       expect(cg.parameters.radiusTop).toBe(0);
@@ -228,13 +228,13 @@ describe('entityToMesh', () => {
   describe('primitive → mesh', () => {
     it('Cuboid → mesh geometry 为 BoxGeometry', () => {
       const e = makeEntity({ type: 'Cuboid', l: 100, w: 200, h: 300 });
-      const mesh = entityToMesh(e);
+      const mesh = entityToMesh(e)!;
       expect(mesh.geometry).toBeInstanceOf(THREE.BoxGeometry);
     });
 
     it('Cylinder → mesh geometry 为 CylinderGeometry', () => {
       const e = makeEntity({ type: 'Cylinder', r: 50, h: 300 });
-      const mesh = entityToMesh(e);
+      const mesh = entityToMesh(e)!;
       expect(mesh.geometry).toBeInstanceOf(THREE.CylinderGeometry);
     });
   });
@@ -245,7 +245,7 @@ describe('entityToMesh', () => {
         { type: 'Cuboid', l: 100, w: 100, h: 100 },
         { matrix: IDENTITY },
       );
-      const mesh = entityToMesh(e);
+      const mesh = entityToMesh(e)!;
       expect(mesh.position.x).toBe(0);
       expect(mesh.position.y).toBe(0);
       expect(mesh.position.z).toBe(0);
@@ -262,7 +262,7 @@ describe('entityToMesh', () => {
         { type: 'Cuboid', l: 100, w: 100, h: 100 },
         { matrix },
       );
-      const mesh = entityToMesh(e);
+      const mesh = entityToMesh(e)!;
       expect(mesh.position.x).toBe(100);
       expect(mesh.position.y).toBe(200);
       expect(mesh.position.z).toBe(50);
@@ -273,7 +273,7 @@ describe('entityToMesh', () => {
         { type: 'Cuboid', l: 100, w: 100, h: 100 },
         { matrix: [1, 0, 0, 0] }, // 长度 4
       );
-      const mesh = entityToMesh(e);
+      const mesh = entityToMesh(e)!;
       expect(mesh.position.x).toBe(0);
       expect(mesh.position.y).toBe(0);
       expect(mesh.position.z).toBe(0);
@@ -283,7 +283,7 @@ describe('entityToMesh', () => {
   describe('Color 应用', () => {
     it('缺失 color → 默认灰色不透明材质', () => {
       const e = makeEntity({ type: 'Cuboid', l: 100, w: 100, h: 100 });
-      const mesh = entityToMesh(e);
+      const mesh = entityToMesh(e)!;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       expect(mat).toBeInstanceOf(THREE.MeshStandardMaterial);
       // 默认灰色 0x888888（sRGB hex，避开 ColorManagement 的 sRGB↔linear 转换）
@@ -295,7 +295,7 @@ describe('entityToMesh', () => {
     it('R/G/B/A 全值 → material.color 与 opacity 正确', () => {
       const color: XmlModColor = { r: 200, g: 50, b: 50, a: 80 };
       const e = makeEntity({ type: 'Cuboid', l: 100, w: 100, h: 100 }, { color });
-      const mesh = entityToMesh(e);
+      const mesh = entityToMesh(e)!;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       // 实现按 (r<<16)|(g<<8)|b 拼成 sRGB hex，由 THREE.Color 按 sRGB 解释
       // getHex() 在 ColorManagement 开启时返回 sRGB hex，可无损回环比较
@@ -307,7 +307,7 @@ describe('entityToMesh', () => {
     it('A=100 → 不透明材质', () => {
       const color: XmlModColor = { r: 128, g: 128, b: 128, a: 100 };
       const e = makeEntity({ type: 'Cuboid', l: 100, w: 100, h: 100 }, { color });
-      const mesh = entityToMesh(e);
+      const mesh = entityToMesh(e)!;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       expect(mat.transparent).toBe(false);
       expect(mat.opacity).toBe(1);
@@ -316,7 +316,7 @@ describe('entityToMesh', () => {
     it('A=0 → 完全透明', () => {
       const color: XmlModColor = { r: 0, g: 0, b: 0, a: 0 };
       const e = makeEntity({ type: 'Cuboid', l: 100, w: 100, h: 100 }, { color });
-      const mesh = entityToMesh(e);
+      const mesh = entityToMesh(e)!;
       const mat = mesh.material as THREE.MeshStandardMaterial;
       expect(mat.transparent).toBe(true);
       expect(mat.opacity).toBe(0);
@@ -329,7 +329,7 @@ describe('entityToMesh', () => {
         { type: 'Cuboid', l: 100, w: 100, h: 100 },
         { visible: true },
       );
-      const mesh = entityToMesh(e);
+      const mesh = entityToMesh(e)!;
       expect(mesh.visible).toBe(true);
     });
 
@@ -339,7 +339,7 @@ describe('entityToMesh', () => {
         { type: 'Cuboid', l: 100, w: 100, h: 100 },
         { visible: false },
       );
-      const mesh = entityToMesh(e);
+      const mesh = entityToMesh(e)!;
       // entityToMesh 不感知 visible，由调用方决定
       expect(mesh.visible).toBe(true); // 默认 true
     });
