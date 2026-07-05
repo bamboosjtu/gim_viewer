@@ -636,6 +636,25 @@ async function openGimFromArrayBuffer(
         fam_properties: payload.fam_properties.length,
         dev_properties: payload.dev_properties.length,
       });
+
+      // v6: 同时写入 DEV/PHM 几何引用链索引，用于缓存命中时快速查询
+      if (state.currentFiles) {
+        showLoading('正在索引几何引用链...');
+        try {
+          const { buildGeometryRefsPayload } = await import('./gimIndexPersistenceService.js');
+          const { saveGeometryRefs } = await import('../desktop/database.js');
+          const geoPayload = await buildGeometryRefsPayload(options.projectId, state.currentFiles);
+          debugLog(DEBUG_GIM_CACHE, '[Tauri] 几何引用链索引:', {
+            dev_solid_models: geoPayload.dev_solid_models.length,
+            dev_sub_devices: geoPayload.dev_sub_devices.length,
+            phm_solid_models: geoPayload.phm_solid_models.length,
+          });
+          await saveGeometryRefs(geoPayload);
+          debugLog(DEBUG_GIM_CACHE, '[Tauri] 几何引用链索引已写入');
+        } catch (geoErr) {
+          console.warn('[Tauri] 几何引用链索引写入失败:', geoErr);
+        }
+      }
     } catch (err) {
       console.error('[Tauri] GIM 索引写入失败:', err);
     }

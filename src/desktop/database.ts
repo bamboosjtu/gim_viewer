@@ -176,6 +176,55 @@ export async function batchReadCachedFiles(
   return map;
 }
 
+// ===== 几何引用链（v6） =====
+
+export interface DevSolidModelPayload {
+  dev_path: string;
+  solid_model_path: string;
+  transform_matrix: string | null;
+  sort_order: number;
+}
+
+export interface DevSubDevicePayload {
+  dev_path: string;
+  child_dev_path: string;
+  sort_order: number;
+}
+
+export interface PhmSolidModelPayload {
+  phm_path: string;
+  solid_model_path: string;
+  transform_matrix: string | null;
+  color: string | null;
+  sort_order: number;
+}
+
+export interface GeometryRefsPayload {
+  project_id: number;
+  dev_solid_models: DevSolidModelPayload[];
+  dev_sub_devices: DevSubDevicePayload[];
+  phm_solid_models: PhmSolidModelPayload[];
+}
+
+/** 批量写入 DEV/PHM 几何引用链 */
+export async function saveGeometryRefs(payload: GeometryRefsPayload): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('save_geometry_refs', { payload });
+}
+
+export interface ReachableGeometry {
+  geometry_path: string;
+  dev_transform_matrix: string | null;
+  phm_transform_matrix: string | null;
+  phm_color: string | null;
+}
+
+/** 查询项目中所有可从 CBM 到达的 MOD/STL 几何源（一次 SQL 查询） */
+export async function getReachableGeometry(projectId: number): Promise<ReachableGeometry[]> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<ReachableGeometry[]>('get_reachable_geometry', { projectId });
+}
+
 // ===== GIM 索引完整读取 + 缓存校验 =====
 
 export interface GimEntryRecord {

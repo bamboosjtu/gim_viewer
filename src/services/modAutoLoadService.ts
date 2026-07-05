@@ -242,17 +242,165 @@ export async function autoLoadModAndStlGeometry(
     return { modCount: 0, stlCount: 0 };
   }
 
-  // ── Phase 1.5: 缓存命中场景 → 从磁盘构建文件 Map ──
+  // ── Phase 1.5: 缓存命中场景 → SQLite 查询 + 仅批量读 MOD/STL ──
+  // 设计动机：demo-substation 有 4179 个 DEV → 3921 个无 SOLIDMODEL，
+  // 逐文件读取是巨大浪费。SQLite 已索引引用链，一次查询即可得到全部 MOD/STL 路径。
   const isCacheHit = !files;
   if (isCacheHit && state.currentProjectId != null) {
-    showProgress({ phase: 'collecting', collectedDevPaths: uniqueDevPaths.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0, currentPath: '从磁盘缓存读取...' });
-    files = await buildFileMapFromDiskCache(state.currentProjectId, uniqueDevPaths);
-    if (!files || files.size === 0) {
-      debugLog(DEBUG_IFC_LOAD, '[autoLoad] 磁盘缓存文件 Map 为空，跳过 MOD/STL 加载');
-      showProgress({ phase: 'done', collectedDevPaths: uniqueDevPaths.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
-      return { modCount: 0, stlCount: 0 };
+    console.log('[autoLoad] 缓存命中：从 SQLite 查询可到达的 MOD/STL 几何源...');
+    try {
+      const { getReachableGeometry, batchReadCachedFiles } = await import('../desktop/database.js');
+      const reachable = await getReachableGeometry(state.currentProjectId);
+
+      if (reachable.length === 0) {
+        console.log('[autoLoad] 无可到达的 MOD/STL 几何源（SQLite 查询为空）');
+        showProgress({ phase: 'done', collectedDevPaths: uniqueDevPaths.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
+        return { modCount: 0, stlCount: 0 };
+      }
+
+      // 分离 MOD / STL 并收集唯一路径
+      const modPaths = new Set<string>();
+      const stlPaths = new Set<string>();
+      for (const r of reachable) {
+        const lower = r.geometry_path.toLowerCase();
+        if (lower.endsWith('.mod')) modPaths.add(r.geometry_path);
+        else if (lower.endsWith('.stl')) stlPaths.add(r.geometry_path);
+      }
+
+      console.log(`[autoLoad] SQLite 查询结果: ${reachable.length} 个几何源 → ${modPaths.size} MOD + ${stlPaths.size} STL`);
+
+      // 批量读取 MOD 文件（1 次 IPC）
+      const modArr = Array.from(modPaths);
+      if (modArr.length > 0) {
+        console.log(`[autoLoad] 批量读取 ${modArr.length} 个 MOD 文件（1 次 IPC）...`);
+        const modBytes = await batchReadCachedFiles(state.currentProjectId, modArr);
+        files = new Map(); // 复用 files 变量，仅含 MOD
+        for (const [path, bytes] of modBytes) {
+          if (bytes && bytes.byteLength > 0) {
+            files.set(path, bytesToFile(bytes, path));
+          }
+        }
+      }
+
+      // 批量读取 STL 文件（1 次 IPC）
+      const stlArr = Array.from(stlPaths);
+      if (stlArr.length > 0) {
+        console.log(`[autoLoad] 批量读取 ${stlArr.length} 个 STL 文件（1 次 IPC）...`);
+        const stlBytes = await batchReadCachedFiles(state.currentProjectId, stlArr);
+        if (!files) files = new Map();
+        for (const [path, bytes] of stlBytes) {
+          if (bytes && bytes.byteLength > 0) {
+            files.set(path, bytesToFile(bytes, path));
+          }
+        }
+      }
+
+      if (!files || files.size === 0) {
+        console.log('[autoLoad] 无有效 MOD/STL 文件（磁盘缓存可能缺失），跳过加载');
+        showProgress({ phase: 'done', collectedDevPaths: uniqueDevPaths.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
+        return { modCount: 0, stlCount: 0 };
+      }
+
+      console.log(`[autoLoad] 从磁盘读取了 ${files.size} 个 MOD/STL 文件（${isCacheHit ? '缓存命中' : '首次打开'}）`);
+
+      // 缓存命中时跳过 Phase 2 的 DEV→PHM→MOD 发现循环，
+      // 直接用 SQLite 返回的结果加载几何
+      const modGeos: DiscoveredModGeometry[] = [];
+      const stlGeos: DiscoveredStlGeometry[] = [];
+
+      for (const r of reachable) {
+        const lower = r.geometry_path.toLowerCase();
+        const devTM = r.dev_transform_matrix
+          ? r.dev_transform_matrix.split(',').map(Number)
+          : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        const phmTM = r.phm_transform_matrix
+          ? r.phm_transform_matrix.split(',').map(Number)
+          : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+        if (lower.endsWith('.mod')) {
+          modGeos.push({
+            modPath: r.geometry_path,
+            devTransformMatrix: devTM,
+            phmTransformMatrix: phmTM,
+            devPath: '',
+            phmPath: '',
+          });
+        } else if (lower.endsWith('.stl')) {
+          stlGeos.push({
+            stlPath: r.geometry_path,
+            devTransformMatrix: devTM,
+            phmTransformMatrix: phmTM,
+            devPath: '',
+            phmPath: '',
+          });
+        }
+      }
+
+      // 跳过 Phase 2，直接进入加载阶段
+      console.log(`[autoLoad] DB 直通加载: ${modGeos.length} MOD + ${stlGeos.length} STL`);
+
+      const { applyExternalTransforms } = await import('../viewer/xmlModLoader.js');
+      let loadedMods = 0;
+      let loadedStls = 0;
+
+      // 加载 MOD
+      if (modGeos.length > 0) {
+        console.log(`[autoLoad] 开始加载 ${modGeos.length} 个 MOD...`);
+        for (let i = 0; i < modGeos.length; i += CONCURRENCY) {
+          const batch = modGeos.slice(i, i + CONCURRENCY);
+          showProgress({ phase: 'loading_mod', collectedDevPaths: uniqueDevPaths.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length, currentPath: batch[0].modPath });
+          for (const geo of batch) {
+            if (state.loadedXmlModGroups.has(geo.modPath)) { loadedMods++; continue; }
+            try {
+              const group = await loadModFile(geo, files!);
+              if (group) {
+                applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
+                scene.add(group);
+                state.loadedXmlModGroups.set(geo.modPath, group);
+                loadedMods++;
+              }
+            } catch (err) { console.error(`[autoLoad] MOD 加载失败: ${geo.modPath}`, err); }
+          }
+          if (i + CONCURRENCY < modGeos.length) await new Promise((r) => setTimeout(r, YIELD_MS));
+        }
+        console.log(`[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}`);
+      }
+
+      // 加载 STL
+      if (stlGeos.length > 0) {
+        console.log(`[autoLoad] 开始加载 ${stlGeos.length} 个 STL...`);
+        for (let i = 0; i < stlGeos.length; i += CONCURRENCY) {
+          const batch = stlGeos.slice(i, i + CONCURRENCY);
+          showProgress({ phase: 'loading_stl', collectedDevPaths: uniqueDevPaths.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length, currentPath: batch[0].stlPath });
+          for (const geo of batch) {
+            if (state.loadedStlGroups.has(geo.stlPath)) { loadedStls++; continue; }
+            try {
+              const group = await loadStlFile(geo, files!);
+              if (group) {
+                applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
+                scene.add(group);
+                state.loadedStlGroups.set(geo.stlPath, group);
+                loadedStls++;
+              }
+            } catch (err) { console.error(`[autoLoad] STL 加载失败: ${geo.stlPath}`, err); }
+          }
+          if (i + CONCURRENCY < stlGeos.length) await new Promise((r) => setTimeout(r, YIELD_MS));
+        }
+        console.log(`[autoLoad] STL 加载完成: ${loadedStls}/${stlGeos.length}`);
+      }
+
+      console.log(`[autoLoad] 全部几何加载完成 (DB直通): MOD=${loadedMods}, STL=${loadedStls}`);
+      showProgress({ phase: 'done', collectedDevPaths: uniqueDevPaths.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length });
+      return { modCount: loadedMods, stlCount: loadedStls };
+    } catch (err) {
+      console.warn('[autoLoad] SQLite 几何查询失败，回退到文件扫描:', err);
+      // 回退：尝试 buildFileMapFromDiskCache（已有进度日志）
+      files = await buildFileMapFromDiskCache(state.currentProjectId, uniqueDevPaths);
+      if (!files || files.size === 0) {
+        showProgress({ phase: 'done', collectedDevPaths: uniqueDevPaths.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
+        return { modCount: 0, stlCount: 0 };
+      }
     }
-    debugLog(DEBUG_IFC_LOAD, `[autoLoad] 从磁盘缓存构建了 ${files.size} 个文件`);
   }
 
   if (!files) {

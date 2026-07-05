@@ -280,6 +280,47 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
     )
     .map_err(|e| format!("初始化线路工程 FAM/DEV 属性缓存表失败: {}", e))?;
 
+    // v6: 几何引用链缓存表（DEV → PHM → MOD/STL）
+    // 避免缓存命中时逐文件读取数千个 DEV/PHM 来发现几何源
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS dev_solid_model (
+            project_id INTEGER NOT NULL,
+            dev_path TEXT NOT NULL,
+            solid_model_path TEXT NOT NULL,
+            transform_matrix TEXT,
+            sort_order INTEGER NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            PRIMARY KEY(project_id, dev_path, sort_order)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dev_sm_project ON dev_solid_model(project_id);
+        CREATE INDEX IF NOT EXISTS idx_dev_sm_dev ON dev_solid_model(project_id, dev_path);
+
+        CREATE TABLE IF NOT EXISTS dev_sub_device (
+            project_id INTEGER NOT NULL,
+            dev_path TEXT NOT NULL,
+            child_dev_path TEXT NOT NULL,
+            sort_order INTEGER NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            PRIMARY KEY(project_id, dev_path, sort_order)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dev_sub_project ON dev_sub_device(project_id);
+        CREATE INDEX IF NOT EXISTS idx_dev_sub_dev ON dev_sub_device(project_id, dev_path);
+
+        CREATE TABLE IF NOT EXISTS phm_solid_model (
+            project_id INTEGER NOT NULL,
+            phm_path TEXT NOT NULL,
+            solid_model_path TEXT NOT NULL,
+            transform_matrix TEXT,
+            color TEXT,
+            sort_order INTEGER NOT NULL,
+            created_at_ms INTEGER NOT NULL,
+            PRIMARY KEY(project_id, phm_path, sort_order)
+        );
+        CREATE INDEX IF NOT EXISTS idx_phm_sm_project ON phm_solid_model(project_id);
+        CREATE INDEX IF NOT EXISTS idx_phm_sm_phm ON phm_solid_model(project_id, phm_path);",
+    )
+    .map_err(|e| format!("初始化几何引用链缓存表失败: {}", e))?;
+
     Ok(conn)
 }
 
@@ -2504,6 +2545,179 @@ pub fn delete_project_cache(
         )
     };
     Ok(summary)
+}
+
+// ===== 几何引用链批量写入（v6） =====
+
+/// DEV SOLIDMODEL 批量写入 payload
+#[derive(Debug, Deserialize)]
+pub struct DevSolidModelPayload {
+    pub dev_path: String,
+    pub solid_model_path: String,
+    pub transform_matrix: Option<String>,
+    pub sort_order: i64,
+}
+
+/// DEV SUBDEVICE 批量写入 payload
+#[derive(Debug, Deserialize)]
+pub struct DevSubDevicePayload {
+    pub dev_path: String,
+    pub child_dev_path: String,
+    pub sort_order: i64,
+}
+
+/// PHM SOLIDMODEL 批量写入 payload
+#[derive(Debug, Deserialize)]
+pub struct PhmSolidModelPayload {
+    pub phm_path: String,
+    pub solid_model_path: String,
+    pub transform_matrix: Option<String>,
+    pub color: Option<String>,
+    pub sort_order: i64,
+}
+
+/// 几何引用链完整 payload（一次事务写入三张表）
+#[derive(Debug, Deserialize)]
+pub struct GeometryRefsPayload {
+    pub project_id: i64,
+    pub dev_solid_models: Vec<DevSolidModelPayload>,
+    pub dev_sub_devices: Vec<DevSubDevicePayload>,
+    pub phm_solid_models: Vec<PhmSolidModelPayload>,
+}
+
+/// 批量写入 DEV/PHM 几何引用链到 SQLite。
+///
+/// 在 save_gim_index 之后调用，解析 DEV/PHM 文件后将其 SOLIDMODEL / SUBDEVICE
+/// 引用写入三张缓存表。缓存命中时可直接查询这些表来发现 MOD/STL 几何源，
+/// 无需逐文件读取数千个 DEV/PHM。
+#[tauri::command]
+pub fn save_geometry_refs(
+    state: tauri::State<'_, DbState>,
+    payload: GeometryRefsPayload,
+) -> Result<(), String> {
+    let mut conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let tx = conn.transaction().map_err(|e| format!("开启事务失败: {}", e))?;
+    let now = now_ms();
+    let pid = payload.project_id;
+
+    // 1. 清空旧数据
+    tx.execute("DELETE FROM dev_solid_model WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 dev_solid_model 失败: {}", e))?;
+    tx.execute("DELETE FROM dev_sub_device WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 dev_sub_device 失败: {}", e))?;
+    tx.execute("DELETE FROM phm_solid_model WHERE project_id = ?1", params![pid])
+        .map_err(|e| format!("清理 phm_solid_model 失败: {}", e))?;
+
+    // 2. dev_solid_model（DEV SOLIDMODEL → PHM）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+        ).map_err(|e| format!("预处理 dev_solid_model 失败: {}", e))?;
+        for sm in &payload.dev_solid_models {
+            stmt.execute(params![pid, sm.dev_path, sm.solid_model_path, sm.transform_matrix, sm.sort_order, now])
+                .map_err(|e| format!("插入 dev_solid_model 失败: {}", e))?;
+        }
+    }
+
+    // 3. dev_sub_device（DEV SUBDEVICE → child DEV）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO dev_sub_device (project_id, dev_path, child_dev_path, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5)"
+        ).map_err(|e| format!("预处理 dev_sub_device 失败: {}", e))?;
+        for sd in &payload.dev_sub_devices {
+            stmt.execute(params![pid, sd.dev_path, sd.child_dev_path, sd.sort_order, now])
+                .map_err(|e| format!("插入 dev_sub_device 失败: {}", e))?;
+        }
+    }
+
+    // 4. phm_solid_model（PHM SOLIDMODEL → MOD/STL）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+        ).map_err(|e| format!("预处理 phm_solid_model 失败: {}", e))?;
+        for sm in &payload.phm_solid_models {
+            stmt.execute(params![pid, sm.phm_path, sm.solid_model_path, sm.transform_matrix, sm.color, sm.sort_order, now])
+                .map_err(|e| format!("插入 phm_solid_model 失败: {}", e))?;
+        }
+    }
+
+    tx.commit().map_err(|e| format!("提交几何引用链事务失败: {}", e))?;
+    Ok(())
+}
+
+/// 可到达的几何源（MOD/STL 路径 + 其变换矩阵来源）
+#[derive(Debug, Serialize)]
+pub struct ReachableGeometry {
+    /// MOD/STL 文件路径（如 "MOD/abc.mod"）
+    pub geometry_path: String,
+    /// DEV SOLIDMODEL 的 TRANSFORMMATRIX（行主序 16 值，逗号分隔）
+    pub dev_transform_matrix: Option<String>,
+    /// PHM SOLIDMODEL 的 TRANSFORMMATRIX（行主序 16 值，逗号分隔）
+    pub phm_transform_matrix: Option<String>,
+    /// PHM COLORn 原始串（如 "128,128,128,100"）
+    pub phm_color: Option<String>,
+}
+
+/// 查询项目中所有可从 CBM 到达的 MOD/STL 几何源。
+///
+/// 沿引用链查询：cbm_node.dev_path → dev_solid_model → phm_solid_model，
+/// 以及 cbm_node.dev_path → dev_sub_device → dev_solid_model → phm_solid_model。
+///
+/// 一次 SQL 查询替代数千次逐个文件 I/O。
+#[tauri::command]
+pub fn get_reachable_geometry(
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+) -> Result<Vec<ReachableGeometry>, String> {
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+    // 收集所有可从 CBM 到达的 DEV（直接 + 间接 via SUBDEVICE）
+    // 深度限制：demo 样本 maxDevToDevDepth=1，多一层兜底
+    let sql = "
+        WITH RECURSIVE
+        cbm_dev AS (
+            SELECT DISTINCT 'DEV/' || dev_path AS dev_path
+            FROM cbm_node
+            WHERE project_id = ?1 AND dev_path IS NOT NULL AND dev_path != ''
+        ),
+        all_dev(dev_path, depth) AS (
+            SELECT dev_path, 0 FROM cbm_dev
+            UNION
+            SELECT 'DEV/' || dsd.child_dev_path, all_dev.depth + 1
+            FROM dev_sub_device dsd
+            JOIN all_dev ON all_dev.dev_path = 'DEV/' || dsd.dev_path
+            WHERE dsd.project_id = ?1 AND all_dev.depth < 2
+        )
+        SELECT DISTINCT
+            'MOD/' || psm.solid_model_path AS geometry_path,
+            dsm.transform_matrix AS dev_transform_matrix,
+            psm.transform_matrix AS phm_transform_matrix,
+            psm.color AS phm_color
+        FROM all_dev ad
+        JOIN dev_solid_model dsm ON dsm.project_id = ?1 AND dsm.dev_path = ad.dev_path
+        JOIN phm_solid_model psm ON psm.project_id = ?1 AND psm.phm_path = 'PHM/' || dsm.solid_model_path
+        WHERE psm.solid_model_path LIKE '%.mod' OR psm.solid_model_path LIKE '%.stl'
+        ORDER BY geometry_path
+    ";
+
+    let mut stmt = conn.prepare(sql).map_err(|e| format!("预处理 reachable_geometry 失败: {}", e))?;
+    let rows = stmt.query_map(params![project_id], |row| {
+        Ok(ReachableGeometry {
+            geometry_path: row.get(0)?,
+            dev_transform_matrix: row.get(1)?,
+            phm_transform_matrix: row.get(2)?,
+            phm_color: row.get(3)?,
+        })
+    }).map_err(|e| format!("查询 reachable_geometry 失败: {}", e))?;
+
+    let mut results = Vec::new();
+    for r in rows {
+        results.push(r.map_err(|e| format!("读取 reachable_geometry 行失败: {}", e))?);
+    }
+    Ok(results)
 }
 
 /// 获取指定项目的缓存诊断（供缓存管理 UI 使用）

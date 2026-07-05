@@ -92,6 +92,8 @@ pub fn run() {
             db::list_cached_projects,
             db::delete_project_cache,
             db::get_project_diagnostic,
+            db::save_geometry_refs,
+            db::get_reachable_geometry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
