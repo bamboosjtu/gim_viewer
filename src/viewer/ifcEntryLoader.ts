@@ -92,7 +92,7 @@ export async function loadIfcEntry(
 
   // 4. IFC 转换
   const tIfcLoad = performance.now();
-  const model = await ctx.ifcLoader.load(ifcBuffer, true, modelId, {
+  const model = await ctx.ifcLoader.load(ifcBuffer, false, modelId, {
     processData: { progressCallback: (progress) => { onProgress?.(progress); } },
   });
   debugLog(DEBUG_IFC_LOAD, `[Perf] ifc load: ${Math.round(performance.now() - tIfcLoad)} ms`);
