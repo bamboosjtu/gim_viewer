@@ -41,8 +41,8 @@ const CONCURRENCY = 4;
 /** 批次间 yield 间隔（毫秒），让浏览器有机会处理 UI 事件 */
 const YIELD_MS = 16;
 
-/** 异常 bbox 阈值（米）：单轴跨度超过此值视为几何异常 */
-const BBOX_MAX_DIM_M = 50000;
+/** 异常 bbox 阈值（米）：单个 MOD/STL 源任一轴超过此值视为几何异常 */
+const BBOX_MAX_DIM_M = 50;
 
 /**
  * 确保 MOD/STL 图层根节点存在（挂在 scene 下，与 IFC 平级）。
@@ -68,7 +68,7 @@ function ensureGeometryLayers(state: AppState, scene: THREE.Scene): { modRoot: T
  * 诊断 MOD/STL Group 的 bbox 是否异常。
  *
  * 过滤条件：
- * - 空包围盒
+ * - 空包围盒（通常是当前尚未支持的 primitive，静默跳过）
  * - 无限/NaN 尺寸
  * - 单轴跨度 > BBOX_MAX_DIM_M（异常矩阵或几何错误导致飘移）
  *
@@ -79,20 +79,19 @@ function diagnoseGroupBBox(group: THREE.Group, sourcePath: string): boolean {
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
 
-  const bad =
-    box.isEmpty() ||
-    !Number.isFinite(maxDim) ||
-    maxDim <= 0 ||
-    maxDim > BBOX_MAX_DIM_M;
+  const empty = box.isEmpty() || maxDim <= 0;
+  const bad = !empty && (!Number.isFinite(maxDim) || maxDim > BBOX_MAX_DIM_M);
 
-  if (bad) {
-    console.warn('[autoLoad] 异常几何 bbox，跳过（不加入场景）:', {
-      sourcePath,
-      center: box.getCenter(new THREE.Vector3()).toArray(),
-      size: size.toArray(),
-      maxDim,
-      threshold: BBOX_MAX_DIM_M,
-    });
+  if (empty || bad) {
+    if (bad) {
+      console.warn('[autoLoad] 异常几何 bbox，跳过（不加入场景）:', {
+        sourcePath,
+        center: box.getCenter(new THREE.Vector3()).toArray(),
+        size: size.toArray(),
+        maxDim,
+        threshold: BBOX_MAX_DIM_M,
+      });
+    }
     // dispose GPU 资源，避免内存泄漏
     group.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
@@ -103,7 +102,27 @@ function diagnoseGroupBBox(group: THREE.Group, sourcePath: string): boolean {
     });
   }
 
-  return !bad;
+  return !(empty || bad);
+}
+
+/**
+ * MOD Entity.TransformMatrix 已经是变电站样本里的最终放置矩阵。
+ * DEV/PHM TRANSFORMMATRIX 在当前变电站数据中是冗余/占位信息；
+ * 叠加它们会把 MOD 几何二次变换，产生巨大飘移面。
+ */
+function prepareModGroupForScene(group: THREE.Group, sourcePath: string): boolean {
+  return diagnoseGroupBBox(group, sourcePath);
+}
+
+function prepareStlGroupForScene(
+  group: THREE.Group,
+  sourcePath: string,
+  applyExternalTransforms: (group: THREE.Group, devTransformMatrix: number[], phmTransformMatrix: number[]) => void,
+  devTransformMatrix: number[],
+  phmTransformMatrix: number[],
+): boolean {
+  applyExternalTransforms(group, devTransformMatrix, phmTransformMatrix);
+  return diagnoseGroupBBox(group, sourcePath);
 }
 
 /** 自动加载进度 */
@@ -451,8 +470,7 @@ export async function autoLoadModAndStlGeometry(
             try {
               const group = await loadModFile(geo, files!);
               if (group) {
-                applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
-                if (!diagnoseGroupBBox(group, geo.modPath)) { skippedBadBBox++; continue; }
+                if (!prepareModGroupForScene(group, geo.modPath)) { skippedBadBBox++; continue; }
                 modRoot.add(group);
                 state.loadedXmlModGroups.set(geo.modPath, group);
                 loadedMods++;
@@ -476,8 +494,7 @@ export async function autoLoadModAndStlGeometry(
             try {
               const group = await loadStlFile(geo, files!);
               if (group) {
-                applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
-                if (!diagnoseGroupBBox(group, geo.stlPath)) { skippedBadBBox++; continue; }
+                if (!prepareStlGroupForScene(group, geo.stlPath, applyExternalTransforms, geo.devTransformMatrix, geo.phmTransformMatrix)) { skippedBadBBox++; continue; }
                 stlRoot.add(group);
                 state.loadedStlGroups.set(geo.stlPath, group);
                 loadedStls++;
@@ -619,8 +636,7 @@ export async function autoLoadModAndStlGeometry(
         try {
           const group = await loadModFile(geo, files);
           if (group) {
-            applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
-            if (!diagnoseGroupBBox(group, geo.modPath)) { skippedBadBBox++; continue; }
+            if (!prepareModGroupForScene(group, geo.modPath)) { skippedBadBBox++; continue; }
             modRoot.add(group);
             state.loadedXmlModGroups.set(geo.modPath, group);
             loadedMods++;
@@ -669,8 +685,7 @@ export async function autoLoadModAndStlGeometry(
         try {
           const group = await loadStlFile(geo, files);
           if (group) {
-            applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
-            if (!diagnoseGroupBBox(group, geo.stlPath)) { skippedBadBBox++; continue; }
+            if (!prepareStlGroupForScene(group, geo.stlPath, applyExternalTransforms, geo.devTransformMatrix, geo.phmTransformMatrix)) { skippedBadBBox++; continue; }
             stlRoot.add(group);
             state.loadedStlGroups.set(geo.stlPath, group);
             loadedStls++;

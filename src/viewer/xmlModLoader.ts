@@ -1,7 +1,7 @@
 /**
  * 变电 XML MOD 文件加载入口。
  *
- * 把 MOD 文件 buffer 转换为 Three.js Group，并应用外部变换矩阵（DEV/PHM）。
+ * 把 MOD 文件 buffer 转换为 Three.js Group。
  *
  * 与 IFC 加载器（ifcEntryLoader）的差异：
  * - 不使用 OBC Fragments（IFC 专用）
@@ -9,9 +9,9 @@
  * - 独立跟踪（state.loadedXmlModGroups），不与 IFC loadedModels 混用
  *
  * 引用链：CBM → DEV → PHM → MOD
- * - Entity 内部 TransformMatrix 由 entityToMesh 应用（primitive 局部坐标 → MOD 坐标）
- * - PHM TRANSFORMMATRIXn 由本模块应用（MOD 坐标 → PHM/装配 坐标）
- * - DEV TRANSFORMMATRIXn 由本模块应用（PHM 坐标 → 设备 坐标）
+ * - Entity 内部 TransformMatrix 由 entityToMesh 应用（primitive 局部坐标 → 工程坐标）
+ * - 变电样本实测 PHM/DEV TRANSFORMMATRIXn 为冗余/占位，不参与 MOD 放置
+ * - MOD Group 在 xmlModDocumentToGroup 中统一从毫米缩放到 IFC 场景米量级
  *
  * P0 范围：
  * - 仅处理 currentFiles 非空场景（首次打开）
@@ -22,14 +22,14 @@ import * as THREE from 'three';
 import { parseXmlMod } from '../gim/geometry/xmlModParser.js';
 import { xmlModDocumentToGroup } from './xmlModGeometry.js';
 
+const RENDERABLE_MOD_PRIMITIVE_RE = /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket)\b/;
+
 /**
  * 从 XML 文本加载 MOD 文件并转换为 Three.js Group。
  *
  * 内部步骤：
  * 1. parseXmlMod → XmlModDocument
- * 2. xmlModDocumentToGroup → THREE.Group（Entity 内部 TransformMatrix 已应用）
- *
- * 外部 TransformMatrix（DEV/PHM）由调用方通过 applyExternalTransforms 应用。
+ * 2. xmlModDocumentToGroup → THREE.Group（Entity 内部 TransformMatrix 已应用，单位已缩放）
  *
  * @param modText MOD 文件 XML 文本
  * @param modPath MOD 文件路径（如 "MOD/abc.mod"），用于 Group.name 与错误消息
@@ -61,6 +61,11 @@ export async function loadXmlModFromFiles(
   const buffer = await file.arrayBuffer();
   const text = new TextDecoder().decode(buffer);
   try {
+    if (!RENDERABLE_MOD_PRIMITIVE_RE.test(text)) {
+      const group = new THREE.Group();
+      group.name = `xml-mod:${modPath}`;
+      return group;
+    }
     return loadXmlModFromText(text, modPath);
   } catch (err) {
     console.error(`[xmlModLoader] MOD 解析失败: ${modPath}`, err);
