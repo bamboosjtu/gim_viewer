@@ -232,7 +232,7 @@ export interface PhmDocument {
 export interface DevSolidModelEntry {
   /** 引用的文件名（如 "abc.phm" / "xyz.dev"） */
   solidModelPath: string;
-  /** 4×4 变换矩阵，行主序，长度 16；缺失时回退单位矩阵 */
+  /** 4×4 变换矩阵，列主序 / Three.js Matrix4.elements 布局，长度 16；缺失时回退单位矩阵 */
   transformMatrix: number[];
 }
 
@@ -244,7 +244,7 @@ export interface DevSolidModelEntry {
 export interface DevSubDeviceEntry {
   /** 引用的子 DEV 文件名（如 "child.dev"） */
   devPath: string;
-  /** 4×4 变换矩阵，行主序，长度 16 */
+  /** 4×4 变换矩阵，列主序 / Three.js Matrix4.elements 布局，长度 16 */
   transformMatrix: number[];
 }
 

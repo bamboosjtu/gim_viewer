@@ -12,7 +12,8 @@ use tauri::Manager;
 /// v5: adds transmission_line FAM/DEV attribute cache (line_fam_property / line_dev_property)
 /// v6: 缓存 DEV/PHM/MOD 几何文件到本地磁盘（缓存命中场景下支持 xml-mod 回放）
 /// v7: 几何引用链递归 DEV SUBDEVICE，并保存 SUBDEVICE 变换矩阵
-pub const PARSER_VERSION: &str = "gim-parser-v7";
+/// v8: 几何查询使用 CBM 父链累计 TRANSFORMMATRIX，并按实例级 placement 去重
+pub const PARSER_VERSION: &str = "gim-parser-v8";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
@@ -2680,12 +2681,19 @@ pub struct ReachableGeometry {
     pub instance_key: String,
     /// CBM/DEV/SUBDEVICE/PHM 累积放置矩阵（列主序 16 值，逗号分隔）
     pub placement_transform_matrix: Option<String>,
-    /// DEV SOLIDMODEL 的 TRANSFORMMATRIX（行主序 16 值，逗号分隔）
+    /// DEV SOLIDMODEL 的 TRANSFORMMATRIX（列主序 16 值，逗号分隔）
     pub dev_transform_matrix: Option<String>,
-    /// PHM SOLIDMODEL 的 TRANSFORMMATRIX（行主序 16 值，逗号分隔）
+    /// PHM SOLIDMODEL 的 TRANSFORMMATRIX（列主序 16 值，逗号分隔）
     pub phm_transform_matrix: Option<String>,
     /// PHM COLORn 原始串（如 "128,128,128,100"）
     pub phm_color: Option<String>,
+}
+
+#[derive(Clone)]
+struct CbmGeometryNode {
+    parent_key: Option<String>,
+    dev_path: Option<String>,
+    local_matrix: [f64; 16],
 }
 
 /// 查询项目中可从 CBM 到达的 MOD/STL 几何源。
@@ -2757,24 +2765,46 @@ fn query_reachable_geometry(
     let cbm_t0 = Instant::now();
     let mut cbm_stmt = conn
         .prepare(
-            "SELECT dev_path, transform_matrix
+            "SELECT node_key, parent_key, dev_path, transform_matrix
              FROM cbm_node
-             WHERE project_id = ?1 AND dev_path IS NOT NULL AND dev_path != ''",
+             WHERE project_id = ?1",
         )
         .map_err(|e| format!("预处理 cbm_node dev_path 失败: {}", e))?;
     let cbm_rows = cbm_stmt
         .query_map(params![project_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
         })
         .map_err(|e| format!("查询 cbm_node dev_path 失败: {}", e))?;
+    let mut cbm_nodes: HashMap<String, CbmGeometryNode> = HashMap::new();
+    for row in cbm_rows {
+        let (node_key, parent_key, dev_path, transform_matrix) =
+            row.map_err(|e| format!("读取 cbm_node 行失败: {}", e))?;
+        cbm_nodes.insert(node_key, CbmGeometryNode {
+            parent_key,
+            dev_path,
+            local_matrix: parse_matrix_opt(transform_matrix.as_deref()),
+        });
+    }
+
     let mut dev_instances: HashMap<String, Vec<[f64; 16]>> = HashMap::new();
     let mut dev_instance_seen: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<(String, [f64; 16])> = VecDeque::new();
-    for row in cbm_rows {
-        let (dev_path, transform_matrix) =
-            row.map_err(|e| format!("读取 cbm_node dev_path 失败: {}", e))?;
-        let dev_path = normalize_dev_path(&dev_path);
-        let matrix = parse_matrix_opt(transform_matrix.as_deref());
+
+    let mut cbm_matrix_cache: HashMap<String, [f64; 16]> = HashMap::new();
+    for (node_key, node) in &cbm_nodes {
+        let Some(dev_path_raw) = node.dev_path.as_deref() else {
+            continue;
+        };
+        if dev_path_raw.trim().is_empty() {
+            continue;
+        }
+        let dev_path = normalize_dev_path(dev_path_raw);
+        let matrix = cumulative_cbm_matrix(node_key, &cbm_nodes, &mut cbm_matrix_cache, &mut HashSet::new());
         let key = make_matrix_instance_key(&dev_path, &matrix);
         if dev_instance_seen.insert(key) {
             dev_instances.entry(dev_path.clone()).or_default().push(matrix);
@@ -3008,6 +3038,37 @@ fn make_matrix_instance_key(dev_path: &str, matrix: &[f64; 16]) -> String {
     format!("{}\u{1f}{}", dev_path, matrix_to_string(matrix))
 }
 
+fn cumulative_cbm_matrix(
+    node_key: &str,
+    nodes: &std::collections::HashMap<String, CbmGeometryNode>,
+    cache: &mut std::collections::HashMap<String, [f64; 16]>,
+    visiting: &mut std::collections::HashSet<String>,
+) -> [f64; 16]
+{
+    if let Some(matrix) = cache.get(node_key) {
+        return *matrix;
+    }
+    if !visiting.insert(node_key.to_string()) {
+        return identity_matrix();
+    }
+
+    let Some(node) = nodes.get(node_key) else {
+        visiting.remove(node_key);
+        return identity_matrix();
+    };
+
+    let parent_matrix = node
+        .parent_key
+        .as_deref()
+        .and_then(|parent_key| nodes.get(parent_key).map(|_| parent_key.to_string()))
+        .map(|parent_key| cumulative_cbm_matrix(&parent_key, nodes, cache, visiting))
+        .unwrap_or_else(identity_matrix);
+    let matrix = multiply_matrices(&parent_matrix, &node.local_matrix);
+    cache.insert(node_key.to_string(), matrix);
+    visiting.remove(node_key);
+    matrix
+}
+
 fn normalize_dev_path(path: &str) -> String {
     normalize_prefixed_path(path, "DEV")
 }
@@ -3057,6 +3118,8 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE cbm_node (
                 project_id INTEGER NOT NULL,
+                node_key TEXT NOT NULL,
+                parent_key TEXT,
                 dev_path TEXT,
                 transform_matrix TEXT
             );
@@ -3098,7 +3161,10 @@ mod tests {
     fn reachable_geometry_includes_direct_and_child_dev_paths() {
         let conn = setup_geometry_conn();
         conn.execute(
-            "INSERT INTO cbm_node (project_id, dev_path) VALUES (1, 'root.dev'), (1, 'direct.dev')",
+            "INSERT INTO cbm_node (project_id, node_key, parent_key, dev_path, transform_matrix)
+             VALUES
+             (1, 'root', NULL, 'root.dev', NULL),
+             (1, 'direct', NULL, 'direct.dev', NULL)",
             [],
         )
         .unwrap();
@@ -3136,7 +3202,8 @@ mod tests {
     fn reachable_geometry_filters_mod_and_stl() {
         let conn = setup_geometry_conn();
         conn.execute(
-            "INSERT INTO cbm_node (project_id, dev_path) VALUES (1, 'device.dev')",
+            "INSERT INTO cbm_node (project_id, node_key, parent_key, dev_path, transform_matrix)
+             VALUES (1, 'device', NULL, 'device.dev', NULL)",
             [],
         )
         .unwrap();
@@ -3165,5 +3232,37 @@ mod tests {
 
         let all_rows = query_reachable_geometry(&conn, 1, true, true).unwrap();
         assert_eq!(all_rows.len(), 2);
+    }
+
+    #[test]
+    fn reachable_geometry_uses_cumulative_cbm_transform() {
+        let conn = setup_geometry_conn();
+        conn.execute(
+            "INSERT INTO cbm_node (project_id, node_key, parent_key, dev_path, transform_matrix)
+             VALUES
+             (1, 'parent', NULL, NULL, '1,0,0,0,0,1,0,0,0,0,1,0,10,0,0,1'),
+             (1, 'child', 'parent', 'device.dev', '1,0,0,0,0,1,0,0,0,0,1,0,0,20,0,1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order)
+             VALUES (1, 'DEV/device.dev', 'device.phm', NULL, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, sort_order)
+             VALUES (1, 'PHM/device.phm', 'device.mod', NULL, NULL, 0)",
+            [],
+        )
+        .unwrap();
+
+        let rows = query_reachable_geometry(&conn, 1, true, false).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].placement_transform_matrix.as_deref(),
+            Some("1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,10.000000,20.000000,0.000000,1.000000")
+        );
     }
 }

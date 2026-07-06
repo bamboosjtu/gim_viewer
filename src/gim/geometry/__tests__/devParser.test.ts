@@ -52,32 +52,32 @@ SOLIDMODELS.NUM=0`;
       const text = `BASEFAMILY=abc.fam
 SOLIDMODELS.NUM=1
 SOLIDMODEL0=abc.phm
-TRANSFORMMATRIX0=1,0,0,100,0,1,0,200,0,0,1,50,0,0,0,1`;
+TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,100,200,50,1`;
       const doc = parseDev(text, 'DEV/abc.dev');
       expect(doc.solidModels).toHaveLength(1);
       expect(doc.solidModels[0].solidModelPath).toBe('abc.phm');
-      // 行主序：M03=100, M13=200, M23=50（索引 3/7/11）
-      expect(doc.solidModels[0].transformMatrix[3]).toBe(100);
-      expect(doc.solidModels[0].transformMatrix[7]).toBe(200);
-      expect(doc.solidModels[0].transformMatrix[11]).toBe(50);
+      // Three.js Matrix4.elements：平移在索引 12/13/14
+      expect(doc.solidModels[0].transformMatrix[12]).toBe(100);
+      expect(doc.solidModels[0].transformMatrix[13]).toBe(200);
+      expect(doc.solidModels[0].transformMatrix[14]).toBe(50);
     });
 
     it('多个 SOLIDMODEL + TRANSFORMMATRIX（按索引对应）', () => {
       const text = `SOLIDMODELS.NUM=3
 SOLIDMODEL0=a.phm
-TRANSFORMMATRIX0=1,0,0,10,0,1,0,0,0,0,1,0,0,0,0,1
+TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,10,0,0,1
 SOLIDMODEL1=b.phm
-TRANSFORMMATRIX1=1,0,0,20,0,1,0,0,0,0,1,0,0,0,0,1
+TRANSFORMMATRIX1=1,0,0,0,0,1,0,0,0,0,1,0,20,0,0,1
 SOLIDMODEL2=c.phm
-TRANSFORMMATRIX2=1,0,0,30,0,1,0,0,0,0,1,0,0,0,0,1`;
+TRANSFORMMATRIX2=1,0,0,0,0,1,0,0,0,0,1,0,30,0,0,1`;
       const doc = parseDev(text, 'DEV/abc.dev');
       expect(doc.solidModels).toHaveLength(3);
       expect(doc.solidModels[0].solidModelPath).toBe('a.phm');
-      expect(doc.solidModels[0].transformMatrix[3]).toBe(10);
+      expect(doc.solidModels[0].transformMatrix[12]).toBe(10);
       expect(doc.solidModels[1].solidModelPath).toBe('b.phm');
-      expect(doc.solidModels[1].transformMatrix[3]).toBe(20);
+      expect(doc.solidModels[1].transformMatrix[12]).toBe(20);
       expect(doc.solidModels[2].solidModelPath).toBe('c.phm');
-      expect(doc.solidModels[2].transformMatrix[3]).toBe(30);
+      expect(doc.solidModels[2].transformMatrix[12]).toBe(30);
     });
 
     it('SOLIDMODEL 缺失 TRANSFORMMATRIX → 回退单位矩阵', () => {
@@ -150,23 +150,23 @@ TRANSFORMMATRIX1=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
 TYPE=FrameCapacitor
 SUBDEVICES.NUM=2
 SUBDEVICE0=child1.dev
-TRANSFORMMATRIX0=1,0,0,10,0,1,0,0,0,0,1,0,0,0,0,1
+TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,10,0,0,1
 SUBDEVICE1=child2.dev
-TRANSFORMMATRIX1=1,0,0,20,0,1,0,0,0,0,1,0,0,0,0,1
+TRANSFORMMATRIX1=1,0,0,0,0,1,0,0,0,0,1,0,20,0,0,1
 SOLIDMODELS.NUM=1
 SOLIDMODEL0=main.phm
-TRANSFORMMATRIX0=1,0,0,30,0,1,0,0,0,0,1,0,0,0,0,1`;
+TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,30,0,0,1`;
       const doc = parseDev(text, 'DEV/parent.dev');
       // SUBDEVICES 块
       expect(doc.subDevices).toHaveLength(2);
       expect(doc.subDevices[0].devPath).toBe('child1.dev');
-      expect(doc.subDevices[0].transformMatrix[3]).toBe(10);
+      expect(doc.subDevices[0].transformMatrix[12]).toBe(10);
       expect(doc.subDevices[1].devPath).toBe('child2.dev');
-      expect(doc.subDevices[1].transformMatrix[3]).toBe(20);
+      expect(doc.subDevices[1].transformMatrix[12]).toBe(20);
       // SOLIDMODELS 块的 TRANSFORMMATRIX0 重新从 0 开始
       expect(doc.solidModels).toHaveLength(1);
       expect(doc.solidModels[0].solidModelPath).toBe('main.phm');
-      expect(doc.solidModels[0].transformMatrix[3]).toBe(30);
+      expect(doc.solidModels[0].transformMatrix[12]).toBe(30);
     });
 
     it('SUBDEVICES.NUM=0 → subDevices 为空', () => {
@@ -179,12 +179,12 @@ SOLIDMODELS.NUM=0`;
     it('仅 SUBDEVICES 无 SOLIDMODELS', () => {
       const text = `SUBDEVICES.NUM=1
 SUBDEVICE0=child.dev
-TRANSFORMMATRIX0=1,0,0,100,0,1,0,0,0,0,1,0,0,0,0,1
+TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,100,0,0,1
 SOLIDMODELS.NUM=0`;
       const doc = parseDev(text, 'DEV/abc.dev');
       expect(doc.subDevices).toHaveLength(1);
       expect(doc.subDevices[0].devPath).toBe('child.dev');
-      expect(doc.subDevices[0].transformMatrix[3]).toBe(100);
+      expect(doc.subDevices[0].transformMatrix[12]).toBe(100);
       expect(doc.solidModels).toHaveLength(0);
     });
 
@@ -219,11 +219,10 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
       expect(doc.subDevices).toHaveLength(3);
       expect(doc.subDevices[0].devPath).toBe('1caef33c-0f6e-4c60-bc2f-b0bdb3aa24c3.dev');
       expect(doc.subDevices[2].devPath).toBe('2bb88510-6ac5-41e2-95d0-2b886fdad9bd.dev');
-      // SUBDEVICE1 矩阵：translation=(0,0,0)（索引 3/7/11），M30=1.08e-12（索引 12，行主序）
-      expect(doc.subDevices[1].transformMatrix[3]).toBe(0);
-      expect(doc.subDevices[1].transformMatrix[7]).toBe(0);
-      expect(doc.subDevices[1].transformMatrix[11]).toBe(0);
+      // SUBDEVICE1 矩阵：translation 位于索引 12/13/14
       expect(doc.subDevices[1].transformMatrix[12]).toBe(1.08286712929839e-12);
+      expect(doc.subDevices[1].transformMatrix[13]).toBe(0);
+      expect(doc.subDevices[1].transformMatrix[14]).toBe(-1.40772726808791e-11);
       expect(doc.solidModels).toHaveLength(1);
       expect(doc.solidModels[0].solidModelPath).toBe('b1b1f864-a3e5-4ae5-b8a8-ed57b3c28805.phm');
     });

@@ -35,9 +35,9 @@ export interface DiscoveredModGeometry {
   instanceKey: string;
   /** CBM/DEV/SUBDEVICE/PHM 累积放置矩阵（GIM 原始单位，列主序） */
   placementTransformMatrix: number[];
-  /** DEV SOLIDMODELS 块的 TRANSFORMMATRIX（行主序，长度 16） */
+  /** DEV SOLIDMODELS 块的 TRANSFORMMATRIX（列主序 / Three.js Matrix4.elements，长度 16） */
   devTransformMatrix: number[];
-  /** PHM SOLIDMODELn 的 TRANSFORMMATRIX（行主序，长度 16） */
+  /** PHM SOLIDMODELn 的 TRANSFORMMATRIX（列主序 / Three.js Matrix4.elements，长度 16） */
   phmTransformMatrix: number[];
   /** PHM COLORn（MOD 引用为 undefined，STL 引用必非空） */
   phmColor?: XmlModColor;
@@ -55,9 +55,9 @@ export interface DiscoveredStlGeometry {
   instanceKey: string;
   /** CBM/DEV/SUBDEVICE/PHM 累积放置矩阵（GIM 原始单位，列主序） */
   placementTransformMatrix: number[];
-  /** DEV SOLIDMODELS 块的 TRANSFORMMATRIX（行主序，长度 16） */
+  /** DEV SOLIDMODELS 块的 TRANSFORMMATRIX（列主序 / Three.js Matrix4.elements，长度 16） */
   devTransformMatrix: number[];
-  /** PHM SOLIDMODELn 的 TRANSFORMMATRIX（行主序，长度 16） */
+  /** PHM SOLIDMODELn 的 TRANSFORMMATRIX（列主序 / Three.js Matrix4.elements，长度 16） */
   phmTransformMatrix: number[];
   /** PHM COLORn（STL 引用必非空） */
   phmColor?: XmlModColor;

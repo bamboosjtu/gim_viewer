@@ -121,30 +121,30 @@ COLOR2=`;
   });
 
   describe('TransformMatrix 透传', () => {
-    it('DEV TRANSFORMMATRIX 行主序透传', async () => {
+    it('DEV TRANSFORMMATRIX 按 Three.js elements 布局透传', async () => {
       const node = makeNode('abc.dev');
-      const devTransform = '1,0,0,100,0,1,0,200,0,0,1,50,0,0,0,1';
+      const devTransform = '1,0,0,0,0,1,0,0,0,0,1,0,100,200,50,1';
       const files = new Map<string, File>([
         ['DEV/abc.dev', makeFile(makeDevText({ transform: devTransform }), 'abc.dev')],
         ['PHM/main.phm', makeFile(makePhmText(), 'main.phm')],
       ]);
       const results = await discoverModGeometriesFromNode(node, files);
-      expect(results[0].devTransformMatrix[3]).toBe(100);
-      expect(results[0].devTransformMatrix[7]).toBe(200);
-      expect(results[0].devTransformMatrix[11]).toBe(50);
+      expect(results[0].devTransformMatrix[12]).toBe(100);
+      expect(results[0].devTransformMatrix[13]).toBe(200);
+      expect(results[0].devTransformMatrix[14]).toBe(50);
     });
 
-    it('PHM TRANSFORMMATRIX 行主序透传', async () => {
+    it('PHM TRANSFORMMATRIX 按 Three.js elements 布局透传', async () => {
       const node = makeNode('abc.dev');
-      const phmTransform = '1,0,0,10,0,1,0,20,0,0,1,30,0,0,0,1';
+      const phmTransform = '1,0,0,0,0,1,0,0,0,0,1,0,10,20,30,1';
       const files = new Map<string, File>([
         ['DEV/abc.dev', makeFile(makeDevText(), 'abc.dev')],
         ['PHM/main.phm', makeFile(makePhmText({ transform: phmTransform }), 'main.phm')],
       ]);
       const results = await discoverModGeometriesFromNode(node, files);
-      expect(results[0].phmTransformMatrix[3]).toBe(10);
-      expect(results[0].phmTransformMatrix[7]).toBe(20);
-      expect(results[0].phmTransformMatrix[11]).toBe(30);
+      expect(results[0].phmTransformMatrix[12]).toBe(10);
+      expect(results[0].phmTransformMatrix[13]).toBe(20);
+      expect(results[0].phmTransformMatrix[14]).toBe(30);
     });
   });
 

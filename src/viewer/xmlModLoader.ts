@@ -92,6 +92,9 @@ export function rowMajorToMatrix4(arr: number[]): THREE.Matrix4 {
 /**
  * 应用外部变换矩阵（DEV + PHM）到 MOD Group。
  *
+ * @deprecated 使用 applyPlacementTransformToSceneUnits。
+ * 此函数不缩放平移分量，且缺少 CBM/SUBDEVICE 累积矩阵，不能表达完整 placement。
+ *
  * 应用顺序：先 PHM（MOD 坐标 → 装配坐标），后 DEV（装配坐标 → 设备坐标）。
  * 即：final = DEV × PHM × MOD-local
  *

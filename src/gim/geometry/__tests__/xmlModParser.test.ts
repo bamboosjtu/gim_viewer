@@ -355,7 +355,7 @@ describe('parseXmlMod', () => {
     </Entity>
     <Entity ID="1" Type="simple" Visible="True">
       <Cylinder R="25" H="300" />
-      <TransformMatrix Value="1,0,0,200,0,1,0,200,0,0,1,25,0,0,0,1" />
+      <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,200,200,25,1" />
       <Color R="200" G="50" B="50" A="100" />
     </Entity>
     <Entity ID="2" Type="simple" Visible="False">
@@ -371,10 +371,10 @@ describe('parseXmlMod', () => {
       expect(doc.entities[0].visible).toBe(true);
       expect(doc.entities[1].visible).toBe(true);
       expect(doc.entities[2].visible).toBe(false);
-      // 第 2 个 Entity 非单位矩阵（mod.md 示例值 200/200/25 分别位于索引 3/7/11）
-      expect(doc.entities[1].transformMatrix[3]).toBe(200);
-      expect(doc.entities[1].transformMatrix[7]).toBe(200);
-      expect(doc.entities[1].transformMatrix[11]).toBe(25);
+      // 第 2 个 Entity 非单位矩阵，平移位于索引 12/13/14
+      expect(doc.entities[1].transformMatrix[12]).toBe(200);
+      expect(doc.entities[1].transformMatrix[13]).toBe(200);
+      expect(doc.entities[1].transformMatrix[14]).toBe(25);
     });
   });
 

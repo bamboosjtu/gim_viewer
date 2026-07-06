@@ -9,7 +9,7 @@
  * - SOLIDMODELS 块与 SUBDEVICES 块的 TRANSFORMMATRIX 索引各自独立从 0 开始
  *   → 同一 DEV 文件中 TRANSFORMMATRIX0 可能出现两次（一次给 SUBDEVICE0，一次给 SOLIDMODEL0）
  *   → 必须按行顺序追踪 currentBlock 区分归属
- * - TRANSFORMMATRIX 4×4 矩阵按行主序展开为 16 浮点（详见 docs/schema/dev.md §变换矩阵格式）
+ * - TRANSFORMMATRIX 4×4 矩阵按 Three.js Matrix4.elements 布局展开，平移在 m[12..14]
  * - 缺失/格式异常时回退单位矩阵（与 PHM parser 一致）
  *
  * 详见 docs/schema/dev.md。
@@ -21,7 +21,7 @@ import type {
   DevSubDeviceEntry,
 } from './ir.js';
 
-/** 单位矩阵（行主序，长度 16） */
+/** 单位矩阵（列主序 / Three.js Matrix4.elements 布局，长度 16） */
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 /**
@@ -128,7 +128,7 @@ export function parseDev(text: string, devPath: string): DevDocument {
 }
 
 /**
- * 解析 TRANSFORMMATRIX 字段（16 浮点逗号分隔，行主序）。
+ * 解析 TRANSFORMMATRIX 字段（16 浮点逗号分隔，列主序 / Three.js Matrix4.elements 布局）。
  *
  * 与 phmParser.parseTransformMatrix 行为一致：
  * - 长度不为 16 → 回退单位矩阵
