@@ -14,6 +14,8 @@ export class AppState {
   currentFiles: Map<string, File> | null = null;
   currentIfcEntries: IfcEntry[] = [];
   currentCbmTree: CbmNode | null = null;
+  /** GIM 头部提取的工程名称（如"XX变电站"），用于 F1System 根节点显示 */
+  projectName: string = '';
 
   // 工程类型 + 线路图（线路工程专用；变电工程保持 null）
   currentProjectType: GimProjectType | null = null;
@@ -90,6 +92,7 @@ export class AppState {
     this.currentFiles = null;
     this.currentIfcEntries = [];
     this.currentCbmTree = null;
+    this.projectName = '';
     this.currentProjectType = null;
     this.currentGimGraph = null;
     this.ifcGuidIndex.clear();

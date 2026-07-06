@@ -13,7 +13,9 @@ use tauri::Manager;
 /// v6: 缓存 DEV/PHM/MOD 几何文件到本地磁盘（缓存命中场景下支持 xml-mod 回放）
 /// v7: 几何引用链递归 DEV SUBDEVICE，并保存 SUBDEVICE 变换矩阵
 /// v8: 几何查询使用 CBM 父链累计 TRANSFORMMATRIX，并按实例级 placement 去重
-pub const PARSER_VERSION: &str = "gim-parser-v8";
+/// v9: 层级树名称优化——F1System 根节点用 GIM 头部工程名，F4System/PARTINDEX 设备层用 DEV SYMBOLNAME；过滤 IFC "&其他"占位符
+/// v10: F1System 显示工程类型名（变电工程/建筑工程），F2System 按 SYSCLASSIFYNAME 映射专业名（U=建筑工程等）并按 U→A→S→G 排序
+pub const PARSER_VERSION: &str = "gim-parser-v10";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建

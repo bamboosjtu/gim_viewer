@@ -31,8 +31,9 @@ function createNodeClickHandler(state: AppState, showMessage: (text: string) => 
 }
 
 /** GIM 文件解压后的处理流程 */
-export async function onGimExtracted(state: AppState, files: Map<string, File>, showMessage: (text: string) => void): Promise<IfcEntry[]> {
+export async function onGimExtracted(state: AppState, files: Map<string, File>, showMessage: (text: string) => void, projectName?: string, projectTypeName?: string): Promise<IfcEntry[]> {
   state.currentFiles = files;
+  state.projectName = projectName || '';
 
   // 发现 IFC 文件
   let ifcEntries = await discoverIfcFromCBM(files);
@@ -40,8 +41,8 @@ export async function onGimExtracted(state: AppState, files: Map<string, File>, 
 
   state.currentIfcEntries = ifcEntries;
 
-  // 构建 CBM 层级树
-  state.currentCbmTree = await buildCbmTree(files);
+  // 构建 CBM 层级树（F1System 根节点名称由 projectTypeName 设置，F2System 由 SYSCLASSIFYNAME 映射）
+  state.currentCbmTree = await buildCbmTree(files, projectTypeName);
   state.ifcGuidIndex = buildIfcGuidIndex(state.currentCbmTree);
   state.cbmNodeIndex = buildCbmNodeIndex(state.currentCbmTree);
 
@@ -461,7 +462,11 @@ async function openGimFromArrayBuffer(
   options?: { projectId?: number; persistIndex?: boolean },
 ): Promise<void> {
   showLoading('正在加载 GIM 解压模块...');
-  const { extractGimFile } = await import('../gim/gimExtractor.js');
+  const { extractGimFile, extractGimHeader, getProjectTypeName } = await import('../gim/gimExtractor.js');
+  // 先解析 GIM 头部提取工程类型名（F1System 根节点显示用）和工程名称
+  const gimHeader = extractGimHeader(ab);
+  const projectName = gimHeader?.projectName || gimHeader?.projectId || '';
+  const projectTypeName = getProjectTypeName(gimHeader?.magic || '');
   showLoading('正在解压 GIM 文件...');
   const extracted = await extractGimFile(ab);
 
@@ -589,7 +594,7 @@ async function openGimFromArrayBuffer(
 
   // 变电工程流程（含 hybrid）：解析 CBM 树 + FileDevRelation + IFC 发现
   showLoading('正在解析 GIM 层级结构...');
-  const entries = await onGimExtracted(state, extracted, showMessage);
+  const entries = await onGimExtracted(state, extracted, showMessage, projectName, projectTypeName);
 
   // 无 IFC entry：可能是线路工程被误识别为 substation。
   // 不写入 saveGimIndex（避免 project_type=substation 污染），提示检查识别日志。

@@ -271,3 +271,110 @@ npx vitest run src/gim src/services/__tests__/modGeometryDiscovery.test.ts
 - [src/services/gimIndexRestoreService.ts](../../src/services/gimIndexRestoreService.ts)：兼容性修复
 - [src/ui/fileDevView.ts](../../src/ui/fileDevView.ts)：兼容性修复
 - [src/services/__tests__/modGeometryDiscovery.test.ts](../../src/services/__tests__/modGeometryDiscovery.test.ts)：测试兼容性
+
+---
+
+## 11. 第二轮优化（2026-07-06）：根节点工程名 + 设备名优先 + "&其他"过滤
+
+### 11.1 用户反馈
+
+第一轮方案 B（§4）后用户反馈：
+
+1. **F1System 根节点显示编码不可读**：F1System 是全站根节点，应显示 GIM 头部的工程名称（如"XX变电站"），而非 `ENTITYNAME=F1System`
+2. **最底层（设备层）显示分类名称而非设备名称**：F4System/PARTINDEX 应显示 DEV 文件中的 SYMBOLNAME（设备名），而非分类编码
+3. **F4System 优先显示工程中的名称**：DEV 中的 SYMBOLNAME 是工程中的实际名称，优先于 CBM 中的编码
+4. **IFC 名称索引返回"&其他"占位符覆盖了设备名**：大量节点被 IFC Name="&其他"覆盖，导致层级树出现"&其他"节点
+
+### 11.2 根因
+
+1. `getNodeDisplayName` 原来最高优先 IFC Name，但 IFC 中未分类构件的 Name 是"&其他"（GIM 标准占位符），无意义
+2. `buildCbmTree` 中 `extractDisplayName` 对 F4System 没有特殊处理，`SYSCLASSIFYNAME`（编码）优先于 DEV SYMBOLNAME
+3. F1System 根节点没有使用 GIM 头部中存储的工程名称
+
+### 11.3 修改内容
+
+#### 11.3.1 GIM 头部解析（新增 GimHeaderInfo）
+
+**文件**：[src/gim/gimExtractor.ts](../../src/gim/gimExtractor.ts)
+
+新增 `extractGimHeader(buffer: ArrayBuffer): GimHeaderInfo | null` 函数：
+
+- 在检测压缩签名的同时，从 GIM 头部（魔数之后的 784 字节区域）提取：
+  - `magic`：魔数（`GIMPKGS`/`GIMPKGT`）
+  - `projectId`：项目编号（第一个非空字段）
+  - `projectName`：项目名称（第二个非空字段，用 GB18030 解码）
+  - `archiveOffset`：压缩数据起始偏移
+- 使用动态 import 加载（已有 worker 导入路径，无需额外 chunk）
+
+GB18030 解码通过 `TextDecoder('gb18030')` 实现（现代浏览器和 Tauri WebView 均支持）。
+
+#### 11.3.2 AppState 新增 projectName 字段
+
+**文件**：[src/app/state.ts](../../src/app/state.ts)
+
+新增 `projectName: string` 字段，存储 GIM 头部提取的工程名称，用于 F1System 根节点显示。
+
+#### 11.3.3 openGimService 调用 extractGimHeader
+
+**文件**：[src/services/openGimService.ts](../../src/services/openGimService.ts)
+
+在 `loadGimFromArrayBuffer` 中，动态 import gimExtractor 后立即调用 `extractGimHeader(ab)` 提取工程名称，传入 `onGimExtracted` → `parseGimEntries` → `buildCbmTree`，最终写入 `state.projectName`。
+
+#### 11.3.4 cbmParser 全面重写：DEV SYMBOLNAME 回填所有有 devPath 的节点
+
+**文件**：[src/gim/cbmParser.ts](../../src/gim/cbmParser.ts)
+
+核心变更：
+
+1. **新增 `isDeviceLayer(entityName)` 判断设备层**：
+   - F4System、PARTINDEX、DEV_SUBDEVICE 均为设备层
+   - 设备层节点的 `name` 直接使用 DEV SYMBOLNAME（设备名），覆盖 CBM 的分类编码
+
+2. **所有有 devPath 的节点都解析 DEV**（不再只在 expandDevSubDevices 时解析）：
+   - 新增 `devInfoCache: Map<string, DevInfo>` 避免同一 DEV 重复解析
+   - 解析后回填 `devSymbolName` 和 `devType`
+   - 对设备层节点，`name = devSymbolName`（设备名优先）
+   - 对非设备层节点，`name` 仍走 CBM 名称优先级链，但 `devSymbolName` 已缓存供后续使用
+
+3. **SUBDEVICES 展开继续沿用**：对有 SUBDEVICES 的 DEV 文件，展开为 DEV_SUBDEVICE 虚拟子节点
+
+4. **根节点特殊处理**：F1System 根节点，如果传入了 projectName，则 name 直接使用 projectName
+
+#### 11.3.5 getNodeDisplayName 过滤"&其他"占位符
+
+**文件**：[src/gim/gimIndexer.ts](../../src/gim/gimIndexer.ts)
+
+新增 `isPlaceholderName(name)` 函数，判断 IFC Name 是否为无意义占位符：
+
+- 空字符串、"&其他"、"其他"、"Other"、"OTHER"、"others" 均跳过
+- 跳过占位符后，回退到 `devSymbolName` → `node.name`
+
+更新 `getNodeDisplayName` 优先级链：
+
+1. IFC 名称（跳过占位符）
+2. DEV SYMBOLNAME（设备名）
+3. node.name（CBM 提取的最优名称）
+
+#### 11.3.6 ifcNameIndex 同步过滤占位符
+
+**文件**：[src/viewer/ifcNameIndex.ts](../../src/viewer/ifcNameIndex.ts)
+
+- 新增 `isPlaceholderIfcName(name)` 函数，与 gimIndexer 保持一致
+- 在批量设置 `state.ifcGuidToName` 和覆盖 `node.name` 时，跳过占位符名称
+
+### 11.4 层级树名称显示预期
+
+| 层级 | ENTITYNAME | 显示内容 | 来源 |
+|------|-----------|---------|------|
+| L0（根） | F1System | 工程名称（如"XX 220kV变电站"） | GIM 头部 projectName |
+| L1 | F2System | 系统分类名（待后续优化） | CBM SYSTEMNAME 拼接 |
+| L2 | F3System | 间隔名称/子系统名（待后续优化） | CBM SYSTEMNAME 拼接 |
+| L3 | F4System | **设备名称**（如"1号主变压器"） | DEV SYMBOLNAME |
+| L4 | PARTINDEX | **设备/部件名称**（如有 SUBDEVICES 则为子设备） | DEV SYMBOLNAME / SUBDEVICE SYMBOLNAME |
+| L5 | DEV_SUBDEVICE | **子设备名称** | SUBDEVICE SYMBOLNAME |
+
+### 11.5 注意事项
+
+- **parser_version**：从 `gim-parser-v8` 升级到 `gim-parser-v9`，旧缓存自动失效（需重新解压一次 GIM 以填充正确的节点名称）
+- **F2/F3 暂不优化**：本轮按用户要求不改 F2System/F3System，后续可解析 FAM 文件获取更可读的系统名称
+- **性能**：所有有 devPath 的节点都解析 DEV 文件，但有 devInfoCache 缓存；变电站工程通常有数百个 DEV，首次解析增加 100-500ms，可接受
