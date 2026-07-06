@@ -1,5 +1,5 @@
 /**
- * 项目级坐标对齐服务（MVP: translation-only）。
+ * 项目级坐标对齐服务。
  *
  * 背景：
  * - IFC loader 使用 coordinateToOrigin=true，把 IFC 几何归一化到 viewer 原点附近。
@@ -9,16 +9,14 @@
  * 策略：
  * - 保持 IFC loader 的 coordinateToOrigin=true 不变（保护 IFC 主显示链路）。
  * - 给 MOD/STL 增加 projectSourceToViewer 变换，把 GIM 工程坐标平移到 viewer 空间。
+ * - 优先复用 ThatOpen FragmentsManager 的 baseCoordinationMatrix，使 MOD/STL
+ *   与 IFC autoCoordinate 使用同一个工程坐标基准。
  *
- * 本轮 MVP 仅实现 translation-only：
- * - 不做旋转 / 缩放 / 坐标轴翻转。
- * - 不实现自动对齐算法。
- * - 通过 localStorage GIM_COORD_OFFSET="dx,dy,dz" 手动调试，输出诊断日志辅助估算。
- *
- * 后续可基于共同 CBM 节点的 IFC bbox 与 MOD bbox 自动估算 sourceToViewer offset。
+ * localStorage GIM_COORD_OFFSET="dx,dy,dz" 保留为手工调试入口；存在时不覆盖。
  */
 
 import * as THREE from 'three';
+import type * as OBC from '@thatopen/components';
 import type { AppState } from '../app/state.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
@@ -26,8 +24,11 @@ import { debugLog } from '../utils/logger.js';
 export interface ProjectCoordinateAlignment {
   sourceToViewer: THREE.Matrix4;
   reason: string;
-  confidence: 'manual' | 'estimated' | 'unknown';
+  confidence: 'manual' | 'fragments-base' | 'estimated' | 'unknown';
 }
+
+const IDENTITY_EPSILON = 1e-9;
+const FRAGMENTS_BASE_WAIT_FRAMES = 10;
 
 /**
  * 构造 translation-only 对齐矩阵。
@@ -45,6 +46,20 @@ export function makeTranslationAlignment(dx: number, dy: number, dz: number): Pr
   };
 }
 
+function isIdentityMatrix(matrix: THREE.Matrix4): boolean {
+  const identity = new THREE.Matrix4();
+  const a = matrix.elements;
+  const b = identity.elements;
+  for (let i = 0; i < 16; i++) {
+    if (Math.abs(a[i] - b[i]) > IDENTITY_EPSILON) return false;
+  }
+  return true;
+}
+
+function nextAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 /**
  * 把项目级 sourceToViewer 矩阵应用到 Group。
  * matrix 为 null 时直接返回（无对齐）。
@@ -52,6 +67,43 @@ export function makeTranslationAlignment(dx: number, dy: number, dz: number): Pr
 export function applyProjectSourceToViewer(group: THREE.Group, matrix: THREE.Matrix4 | null): void {
   if (!matrix) return;
   group.applyMatrix4(matrix);
+}
+
+/**
+ * 从 ThatOpen FragmentsManager 同步 IFC 自动坐标基准。
+ *
+ * IfcLoader.load(..., true) 会启用 Fragments 的 autoCoordinate：第一个 IFC
+ * 模型提供 baseCoordinationMatrix，后续 IFC 以它为基准。MOD/STL 不经过
+ * IfcLoader，因此需要显式应用同一个 source → viewer 矩阵。
+ *
+ * 手工 GIM_COORD_OFFSET 已设置时不覆盖，便于调试。
+ */
+export async function syncProjectSourceToViewerFromFragments(
+  state: AppState,
+  fragments: OBC.FragmentsManager,
+): Promise<boolean> {
+  if (state.projectSourceToViewerMatrix) {
+    debugLog(DEBUG_IFC_LOAD, '[CoordAlign] 已存在项目坐标矩阵，跳过 Fragments 自动同步');
+    return false;
+  }
+
+  for (let i = 0; i < FRAGMENTS_BASE_WAIT_FRAMES; i++) {
+    if (fragments.baseCoordinationModel) break;
+    await nextAnimationFrame();
+  }
+
+  const base = fragments.baseCoordinationMatrix;
+  if (!base) return false;
+
+  state.projectSourceToViewerMatrix = base.clone();
+
+  debugLog(DEBUG_IFC_LOAD, '[CoordAlign] 已从 Fragments baseCoordinationMatrix 同步 MOD/STL 坐标基准', {
+    baseCoordinationModel: fragments.baseCoordinationModel,
+    isIdentity: isIdentityMatrix(base),
+    matrix: base.elements,
+  });
+
+  return true;
 }
 
 /**

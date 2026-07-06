@@ -188,6 +188,7 @@ export interface DevSolidModelPayload {
 export interface DevSubDevicePayload {
   dev_path: string;
   child_dev_path: string;
+  transform_matrix: string | null;
   sort_order: number;
 }
 
@@ -214,6 +215,8 @@ export async function saveGeometryRefs(payload: GeometryRefsPayload): Promise<vo
 
 export interface ReachableGeometry {
   geometry_path: string;
+  instance_key: string;
+  placement_transform_matrix: string | null;
   dev_transform_matrix: string | null;
   phm_transform_matrix: string | null;
   phm_color: string | null;

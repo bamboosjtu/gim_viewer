@@ -238,6 +238,8 @@ export async function buildGeometryRefsPayload(
         devSubDevices.push({
           dev_path: path,
           child_dev_path: sd.devPath,
+          transform_matrix: sd.transformMatrix.length === 16
+            ? sd.transformMatrix.join(',') : null,
           sort_order: sdOrder++,
         });
       }

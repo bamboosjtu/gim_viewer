@@ -11,7 +11,8 @@ use tauri::Manager;
 /// v4: adds transmission_line graph cache (line_cbm_node/child/ref/file_stat)
 /// v5: adds transmission_line FAM/DEV attribute cache (line_fam_property / line_dev_property)
 /// v6: 缓存 DEV/PHM/MOD 几何文件到本地磁盘（缓存命中场景下支持 xml-mod 回放）
-pub const PARSER_VERSION: &str = "gim-parser-v6";
+/// v7: 几何引用链递归 DEV SUBDEVICE，并保存 SUBDEVICE 变换矩阵
+pub const PARSER_VERSION: &str = "gim-parser-v7";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
@@ -313,6 +314,7 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
             project_id INTEGER NOT NULL,
             dev_path TEXT NOT NULL,
             child_dev_path TEXT NOT NULL,
+            transform_matrix TEXT,
             sort_order INTEGER NOT NULL,
             created_at_ms INTEGER NOT NULL,
             PRIMARY KEY(project_id, dev_path, sort_order)
@@ -336,6 +338,9 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
         CREATE INDEX IF NOT EXISTS idx_phm_sm_project_solid ON phm_solid_model(project_id, solid_model_path);",
     )
     .map_err(|e| format!("初始化几何引用链缓存表失败: {}", e))?;
+
+    // v7: DEV SUBDEVICE 也有独立 TRANSFORMMATRIXn，旧缓存库需补列。
+    let _ = conn.execute("ALTER TABLE dev_sub_device ADD COLUMN transform_matrix TEXT", []);
 
     Ok(conn)
 }
@@ -2580,6 +2585,7 @@ pub struct DevSolidModelPayload {
 pub struct DevSubDevicePayload {
     pub dev_path: String,
     pub child_dev_path: String,
+    pub transform_matrix: Option<String>,
     pub sort_order: i64,
 }
 
@@ -2640,11 +2646,11 @@ pub fn save_geometry_refs(
     // 3. dev_sub_device（DEV SUBDEVICE → child DEV）
     {
         let mut stmt = tx.prepare(
-            "INSERT INTO dev_sub_device (project_id, dev_path, child_dev_path, sort_order, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5)"
+            "INSERT INTO dev_sub_device (project_id, dev_path, child_dev_path, transform_matrix, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
         ).map_err(|e| format!("预处理 dev_sub_device 失败: {}", e))?;
         for sd in &payload.dev_sub_devices {
-            stmt.execute(params![pid, sd.dev_path, sd.child_dev_path, sd.sort_order, now])
+            stmt.execute(params![pid, sd.dev_path, sd.child_dev_path, sd.transform_matrix, sd.sort_order, now])
                 .map_err(|e| format!("插入 dev_sub_device 失败: {}", e))?;
         }
     }
@@ -2670,6 +2676,10 @@ pub fn save_geometry_refs(
 pub struct ReachableGeometry {
     /// MOD/STL 文件路径（如 "MOD/abc.mod"）
     pub geometry_path: String,
+    /// 几何实例唯一键。同一 MOD/STL 文件可被不同矩阵多次实例化。
+    pub instance_key: String,
+    /// CBM/DEV/SUBDEVICE/PHM 累积放置矩阵（列主序 16 值，逗号分隔）
+    pub placement_transform_matrix: Option<String>,
     /// DEV SOLIDMODEL 的 TRANSFORMMATRIX（行主序 16 值，逗号分隔）
     pub dev_transform_matrix: Option<String>,
     /// PHM SOLIDMODEL 的 TRANSFORMMATRIX（行主序 16 值，逗号分隔）
@@ -2737,7 +2747,7 @@ fn query_reachable_geometry(
     include_mod: bool,
     include_stl: bool,
 ) -> Result<Vec<ReachableGeometry>, String> {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{HashMap, HashSet, VecDeque};
     use std::time::Instant;
 
     // Avoid SQLite recursive CTEs / multi-table joins here. In the app this
@@ -2747,57 +2757,88 @@ fn query_reachable_geometry(
     let cbm_t0 = Instant::now();
     let mut cbm_stmt = conn
         .prepare(
-            "SELECT DISTINCT dev_path
+            "SELECT dev_path, transform_matrix
              FROM cbm_node
              WHERE project_id = ?1 AND dev_path IS NOT NULL AND dev_path != ''",
         )
         .map_err(|e| format!("预处理 cbm_node dev_path 失败: {}", e))?;
     let cbm_rows = cbm_stmt
-        .query_map(params![project_id], |row| row.get::<_, String>(0))
+        .query_map(params![project_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
         .map_err(|e| format!("查询 cbm_node dev_path 失败: {}", e))?;
-    let mut reachable_devs: HashSet<String> = HashSet::new();
+    let mut dev_instances: HashMap<String, Vec<[f64; 16]>> = HashMap::new();
+    let mut dev_instance_seen: HashSet<String> = HashSet::new();
+    let mut queue: VecDeque<(String, [f64; 16])> = VecDeque::new();
     for row in cbm_rows {
-        reachable_devs.insert(normalize_dev_path(&row.map_err(|e| format!("读取 cbm_node dev_path 失败: {}", e))?));
+        let (dev_path, transform_matrix) =
+            row.map_err(|e| format!("读取 cbm_node dev_path 失败: {}", e))?;
+        let dev_path = normalize_dev_path(&dev_path);
+        let matrix = parse_matrix_opt(transform_matrix.as_deref());
+        let key = make_matrix_instance_key(&dev_path, &matrix);
+        if dev_instance_seen.insert(key) {
+            dev_instances.entry(dev_path.clone()).or_default().push(matrix);
+            queue.push_back((dev_path, matrix));
+        }
     }
     eprintln!(
-        "[get_reachable_geometry] cbm devs: {}ms rows={}",
+        "[get_reachable_geometry] cbm dev instances: {}ms devs={} instances={}",
         cbm_t0.elapsed().as_millis(),
-        reachable_devs.len()
+        dev_instances.len(),
+        dev_instance_seen.len()
     );
 
     let sub_t0 = Instant::now();
-    let direct_devs: Vec<String> = reachable_devs.iter().cloned().collect();
+    let mut sub_edges: HashMap<String, Vec<(String, [f64; 16])>> = HashMap::new();
     let mut sub_stmt = conn
         .prepare(
-            "SELECT dev_path, child_dev_path
+            "SELECT dev_path, child_dev_path, transform_matrix
              FROM dev_sub_device
              WHERE project_id = ?1",
         )
         .map_err(|e| format!("预处理 dev_sub_device 失败: {}", e))?;
     let sub_rows = sub_stmt
         .query_map(params![project_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
         })
         .map_err(|e| format!("查询 dev_sub_device 失败: {}", e))?;
-    let direct_set: HashSet<String> = direct_devs.into_iter().collect();
-    let mut child_count = 0usize;
     for row in sub_rows {
-        let (parent, child) = row.map_err(|e| format!("读取 dev_sub_device 行失败: {}", e))?;
-        if direct_set.contains(&normalize_dev_path(&parent)) {
-            if reachable_devs.insert(normalize_dev_path(&child)) {
-                child_count += 1;
+        let (parent, child, transform_matrix) =
+            row.map_err(|e| format!("读取 dev_sub_device 行失败: {}", e))?;
+        sub_edges
+            .entry(normalize_dev_path(&parent))
+            .or_default()
+            .push((normalize_dev_path(&child), parse_matrix_opt(transform_matrix.as_deref())));
+    }
+
+    let mut child_count = 0usize;
+    while let Some((parent_dev, parent_matrix)) = queue.pop_front() {
+        if let Some(children) = sub_edges.get(&parent_dev) {
+            for (child_dev, child_local_matrix) in children {
+                let child_matrix = multiply_matrices(&parent_matrix, child_local_matrix);
+                let key = make_matrix_instance_key(child_dev, &child_matrix);
+                if dev_instance_seen.insert(key) {
+                    dev_instances.entry(child_dev.clone()).or_default().push(child_matrix);
+                    queue.push_back((child_dev.clone(), child_matrix));
+                    child_count += 1;
+                }
             }
         }
     }
     eprintln!(
-        "[get_reachable_geometry] sub devices: {}ms child_added={} reachable={}",
+        "[get_reachable_geometry] sub devices: {}ms child_added={} reachable_devs={} instances={}",
         sub_t0.elapsed().as_millis(),
         child_count,
-        reachable_devs.len()
+        dev_instances.len(),
+        dev_instance_seen.len()
     );
 
     let dsm_t0 = Instant::now();
-    let mut dev_to_phm: HashMap<String, Vec<(String, Option<String>)>> = HashMap::new();
+    let mut phm_refs: Vec<(String, [f64; 16], Option<String>)> = Vec::new();
     let mut dsm_stmt = conn
         .prepare(
             "SELECT dev_path, solid_model_path, transform_matrix
@@ -2819,16 +2860,20 @@ fn query_reachable_geometry(
         let (dev_path, solid_model_path, transform_matrix) =
             row.map_err(|e| format!("读取 dev_solid_model 行失败: {}", e))?;
         let dev_path = normalize_dev_path(&dev_path);
-        if reachable_devs.contains(&dev_path) {
-            dev_to_phm
-                .entry(dev_path)
-                .or_default()
-                .push((normalize_phm_path(&solid_model_path), transform_matrix));
-            dsm_count += 1;
+        if let Some(instances) = dev_instances.get(&dev_path) {
+            let solid_matrix = parse_matrix_opt(transform_matrix.as_deref());
+            for base_matrix in instances {
+                phm_refs.push((
+                    normalize_phm_path(&solid_model_path),
+                    multiply_matrices(base_matrix, &solid_matrix),
+                    transform_matrix.clone(),
+                ));
+                dsm_count += 1;
+            }
         }
     }
     eprintln!(
-        "[get_reachable_geometry] dev solid models: {}ms rows={}",
+        "[get_reachable_geometry] dev solid model refs: {}ms rows={}",
         dsm_t0.elapsed().as_millis(),
         dsm_count
     );
@@ -2874,25 +2919,27 @@ fn query_reachable_geometry(
     let collect_t0 = Instant::now();
     let mut results = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    for (_dev_path, phm_refs) in dev_to_phm {
-        for (phm_path, dev_transform_matrix) in phm_refs {
-            if let Some(geometries) = phm_to_geometry.get(&phm_path) {
-                for (geometry_path, phm_transform_matrix, phm_color) in geometries {
-                    let key = format!(
-                        "{}\u{1f}{}\u{1f}{}\u{1f}{}",
-                        geometry_path,
-                        dev_transform_matrix.as_deref().unwrap_or(""),
-                        phm_transform_matrix.as_deref().unwrap_or(""),
-                        phm_color.as_deref().unwrap_or("")
-                    );
-                    if seen.insert(key) {
-                        results.push(ReachableGeometry {
-                            geometry_path: geometry_path.clone(),
-                            dev_transform_matrix: dev_transform_matrix.clone(),
-                            phm_transform_matrix: phm_transform_matrix.clone(),
-                            phm_color: phm_color.clone(),
-                        });
-                    }
+    for (phm_path, dev_placement_matrix, dev_transform_matrix) in phm_refs {
+        if let Some(geometries) = phm_to_geometry.get(&phm_path) {
+            for (geometry_path, phm_transform_matrix, phm_color) in geometries {
+                let phm_matrix = parse_matrix_opt(phm_transform_matrix.as_deref());
+                let placement_matrix = multiply_matrices(&dev_placement_matrix, &phm_matrix);
+                let placement_transform_matrix = matrix_to_string(&placement_matrix);
+                let key = format!(
+                    "{}\u{1f}{}\u{1f}{}",
+                    geometry_path,
+                    placement_transform_matrix,
+                    phm_color.as_deref().unwrap_or("")
+                );
+                if seen.insert(key) {
+                    results.push(ReachableGeometry {
+                        geometry_path: geometry_path.clone(),
+                        instance_key: format!("{}#{}", geometry_path, placement_transform_matrix),
+                        placement_transform_matrix: Some(placement_transform_matrix),
+                        dev_transform_matrix: dev_transform_matrix.clone(),
+                        phm_transform_matrix: phm_transform_matrix.clone(),
+                        phm_color: phm_color.clone(),
+                    });
                 }
             }
         }
@@ -2905,6 +2952,60 @@ fn query_reachable_geometry(
     );
 
     Ok(results)
+}
+
+fn identity_matrix() -> [f64; 16] {
+    [
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    ]
+}
+
+fn parse_matrix_opt(raw: Option<&str>) -> [f64; 16] {
+    let Some(raw) = raw else {
+        return identity_matrix();
+    };
+    let values: Vec<f64> = raw
+        .split(',')
+        .map(|part| part.trim().parse::<f64>())
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap_or_default();
+    if values.len() != 16 || values.iter().any(|v| !v.is_finite()) {
+        return identity_matrix();
+    }
+
+    let mut matrix = [0.0; 16];
+    matrix.copy_from_slice(&values);
+    matrix
+}
+
+fn multiply_matrices(a: &[f64; 16], b: &[f64; 16]) -> [f64; 16] {
+    let mut out = [0.0; 16];
+    // Three.js Matrix4 uses column-major storage. This computes out = a * b.
+    for col in 0..4 {
+        for row in 0..4 {
+            out[col * 4 + row] =
+                a[0 * 4 + row] * b[col * 4 + 0] +
+                a[1 * 4 + row] * b[col * 4 + 1] +
+                a[2 * 4 + row] * b[col * 4 + 2] +
+                a[3 * 4 + row] * b[col * 4 + 3];
+        }
+    }
+    out
+}
+
+fn matrix_to_string(matrix: &[f64; 16]) -> String {
+    matrix
+        .iter()
+        .map(|v| format!("{:.6}", v))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn make_matrix_instance_key(dev_path: &str, matrix: &[f64; 16]) -> String {
+    format!("{}\u{1f}{}", dev_path, matrix_to_string(matrix))
 }
 
 fn normalize_dev_path(path: &str) -> String {
@@ -2956,7 +3057,8 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE cbm_node (
                 project_id INTEGER NOT NULL,
-                dev_path TEXT
+                dev_path TEXT,
+                transform_matrix TEXT
             );
             CREATE INDEX idx_cbm_node_project_dev ON cbm_node(project_id, dev_path);
 
@@ -2973,6 +3075,7 @@ mod tests {
                 project_id INTEGER NOT NULL,
                 dev_path TEXT NOT NULL,
                 child_dev_path TEXT NOT NULL,
+                transform_matrix TEXT,
                 sort_order INTEGER NOT NULL
             );
             CREATE INDEX idx_dev_sub_dev ON dev_sub_device(project_id, dev_path);

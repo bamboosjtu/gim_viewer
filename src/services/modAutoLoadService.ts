@@ -131,19 +131,20 @@ function logGroupBBox(group: THREE.Group, sourcePath: string, stage: 'raw' | 'tr
 }
 
 /**
- * MOD Entity.TransformMatrix 已经是变电站样本里的最终放置矩阵。
- * DEV/PHM TRANSFORMMATRIX 在当前变电站数据中是冗余/占位信息；
- * 叠加它们会把 MOD 几何二次变换，产生巨大飘移面。
+ * MOD Entity.TransformMatrix 表达图元在 MOD 文件内的局部位置；
+ * CBM/DEV/SUBDEVICE/PHM 累积矩阵表达该 MOD 实例在工程中的放置位置。
  *
- * projectSourceToViewer 在 Entity local transform 之后应用（顺序：
- * Entity local → projectSourceToViewer），把 GIM 工程坐标对齐到 viewer 空间。
+ * 应用顺序：Entity local → placement → projectSourceToViewer。
  */
 function prepareModGroupForScene(
   group: THREE.Group,
   sourcePath: string,
+  applyPlacementTransform: (group: THREE.Group, transformMatrix: number[] | null | undefined) => void,
+  placementTransformMatrix: number[] | null | undefined,
   projectSourceToViewerMatrix: THREE.Matrix4 | null,
 ): boolean {
   // Entity local transform 已在 loadXmlModFromFiles 中烘焙
+  applyPlacementTransform(group, placementTransformMatrix);
   // 输出 raw bbox（应用 projectSourceToViewer 前）
   logGroupBBox(group, sourcePath, 'raw');
   // 应用项目级坐标转换（translation-only MVP）
@@ -156,13 +157,12 @@ function prepareModGroupForScene(
 function prepareStlGroupForScene(
   group: THREE.Group,
   sourcePath: string,
-  applyExternalTransforms: (group: THREE.Group, devTransformMatrix: number[], phmTransformMatrix: number[]) => void,
-  devTransformMatrix: number[],
-  phmTransformMatrix: number[],
+  applyPlacementTransform: (group: THREE.Group, transformMatrix: number[] | null | undefined) => void,
+  placementTransformMatrix: number[] | null | undefined,
   projectSourceToViewerMatrix: THREE.Matrix4 | null,
 ): boolean {
-  // 顺序：Entity local(无) → PHM → DEV → projectSourceToViewer
-  applyExternalTransforms(group, devTransformMatrix, phmTransformMatrix);
+  // 顺序：Entity local(无) → 累积装配矩阵 → projectSourceToViewer
+  applyPlacementTransform(group, placementTransformMatrix);
   // 输出 raw bbox（应用 projectSourceToViewer 前，已含 DEV/PHM 变换）
   logGroupBBox(group, sourcePath, 'raw');
   // 应用项目级坐标转换
@@ -478,16 +478,26 @@ export async function autoLoadModAndStlGeometry(
           : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
         if (lower.endsWith('.mod')) {
+          const placementTM = r.placement_transform_matrix
+            ? r.placement_transform_matrix.split(',').map(Number)
+            : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
           modGeos.push({
             modPath: r.geometry_path,
+            instanceKey: r.instance_key,
+            placementTransformMatrix: placementTM,
             devTransformMatrix: devTM,
             phmTransformMatrix: phmTM,
             devPath: '',
             phmPath: '',
           });
         } else if (lower.endsWith('.stl')) {
+          const placementTM = r.placement_transform_matrix
+            ? r.placement_transform_matrix.split(',').map(Number)
+            : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
           stlGeos.push({
             stlPath: r.geometry_path,
+            instanceKey: r.instance_key,
+            placementTransformMatrix: placementTM,
             devTransformMatrix: devTM,
             phmTransformMatrix: phmTM,
             devPath: '',
@@ -499,7 +509,7 @@ export async function autoLoadModAndStlGeometry(
       // 跳过 Phase 2，直接进入加载阶段
       console.log(`[autoLoad] DB 直通加载: ${modGeos.length} MOD + ${stlGeos.length} STL`);
 
-      const { applyExternalTransforms } = await import('../viewer/xmlModLoader.js');
+      const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
       const { modRoot, stlRoot } = ensureGeometryLayers(state, scene);
       let loadedMods = 0;
       let loadedStls = 0;
@@ -513,13 +523,13 @@ export async function autoLoadModAndStlGeometry(
           const batch = modGeos.slice(i, i + CONCURRENCY);
           showProgress({ phase: 'loading_mod', collectedDevPaths: uniqueDevPaths.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length, currentPath: batch[0].modPath });
           for (const geo of batch) {
-            if (state.loadedXmlModGroups.has(geo.modPath)) { loadedMods++; continue; }
+            if (state.loadedXmlModGroups.has(geo.instanceKey)) { loadedMods++; continue; }
             try {
               const group = await loadModFile(geo, files!);
               if (group) {
-                if (!prepareModGroupForScene(group, geo.modPath, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
+                if (!prepareModGroupForScene(group, geo.modPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
                 modRoot.add(group);
-                state.loadedXmlModGroups.set(geo.modPath, group);
+                state.loadedXmlModGroups.set(geo.instanceKey, group);
                 loadedMods++;
               }
             } catch (err) { console.error(`[autoLoad] MOD 加载失败: ${geo.modPath}`, err); }
@@ -537,13 +547,13 @@ export async function autoLoadModAndStlGeometry(
           const batch = stlGeos.slice(i, i + CONCURRENCY);
           showProgress({ phase: 'loading_stl', collectedDevPaths: uniqueDevPaths.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length, currentPath: batch[0].stlPath });
           for (const geo of batch) {
-            if (state.loadedStlGroups.has(geo.stlPath)) { loadedStls++; continue; }
+            if (state.loadedStlGroups.has(geo.instanceKey)) { loadedStls++; continue; }
             try {
               const group = await loadStlFile(geo, files!);
               if (group) {
-                if (!prepareStlGroupForScene(group, geo.stlPath, applyExternalTransforms, geo.devTransformMatrix, geo.phmTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
+                if (!prepareStlGroupForScene(group, geo.stlPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
                 stlRoot.add(group);
-                state.loadedStlGroups.set(geo.stlPath, group);
+                state.loadedStlGroups.set(geo.instanceKey, group);
                 loadedStls++;
               }
             } catch (err) { console.error(`[autoLoad] STL 加载失败: ${geo.stlPath}`, err); }
@@ -650,7 +660,7 @@ export async function autoLoadModAndStlGeometry(
   debugLog(DEBUG_IFC_LOAD, `[autoLoad] 发现 ${modGeos.length} 个 MOD + ${stlGeos.length} 个 STL（去重后）`);
 
   // ── Phase 3: 分批加载 MOD ──
-  const { applyExternalTransforms } = await import('../viewer/xmlModLoader.js');
+  const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
   const { modRoot, stlRoot } = ensureGeometryLayers(state, scene);
   let loadedMods = 0;
   let skippedBadBBox = 0;
@@ -678,14 +688,14 @@ export async function autoLoadModAndStlGeometry(
       }
 
       for (const geo of batch) {
-        if (state.loadedXmlModGroups.has(geo.modPath)) { loadedMods++; continue; }
+        if (state.loadedXmlModGroups.has(geo.instanceKey)) { loadedMods++; continue; }
 
         try {
           const group = await loadModFile(geo, files);
           if (group) {
-            if (!prepareModGroupForScene(group, geo.modPath, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
+            if (!prepareModGroupForScene(group, geo.modPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
             modRoot.add(group);
-            state.loadedXmlModGroups.set(geo.modPath, group);
+            state.loadedXmlModGroups.set(geo.instanceKey, group);
             loadedMods++;
           }
         } catch (err) {
@@ -727,14 +737,14 @@ export async function autoLoadModAndStlGeometry(
       }
 
       for (const geo of batch) {
-        if (state.loadedStlGroups.has(geo.stlPath)) { loadedStls++; continue; }
+        if (state.loadedStlGroups.has(geo.instanceKey)) { loadedStls++; continue; }
 
         try {
           const group = await loadStlFile(geo, files);
           if (group) {
-            if (!prepareStlGroupForScene(group, geo.stlPath, applyExternalTransforms, geo.devTransformMatrix, geo.phmTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
+            if (!prepareStlGroupForScene(group, geo.stlPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
             stlRoot.add(group);
-            state.loadedStlGroups.set(geo.stlPath, group);
+            state.loadedStlGroups.set(geo.instanceKey, group);
             loadedStls++;
           }
         } catch (err) {

@@ -9,8 +9,8 @@
  * - 独立跟踪（state.loadedXmlModGroups），不与 IFC loadedModels 混用
  *
  * 引用链：CBM → DEV → PHM → MOD
- * - Entity 内部 TransformMatrix 由 entityToMesh 应用（primitive 局部坐标 → 工程坐标）
- * - 变电样本实测 PHM/DEV TRANSFORMMATRIXn 为冗余/占位，不参与 MOD 放置
+ * - Entity 内部 TransformMatrix 由 entityToMesh 应用（primitive 局部坐标 → MOD 局部空间）
+ * - CBM/DEV/SUBDEVICE/PHM 外部矩阵由调用方累积后应用（MOD 局部空间 → 工程坐标）
  * - MOD Group 在 xmlModDocumentToGroup 中统一从毫米缩放到 IFC 场景米量级
  *
  * P0 范围：
@@ -23,6 +23,7 @@ import { parseXmlMod } from '../gim/geometry/xmlModParser.js';
 import { xmlModDocumentToGroup } from './xmlModGeometry.js';
 
 const RENDERABLE_MOD_PRIMITIVE_RE = /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket)\b/;
+const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
 
 /**
  * 从 XML 文本加载 MOD 文件并转换为 Three.js Group。
@@ -95,8 +96,8 @@ export function rowMajorToMatrix4(arr: number[]): THREE.Matrix4 {
  * 即：final = DEV × PHM × MOD-local
  *
  * @param group xmlModDocumentToGroup 返回的 Group（已含 Entity 内部 TransformMatrix）
- * @param devTransformMatrix DEV SOLIDMODELS 块的 TRANSFORMMATRIX（行主序，长度 16）
- * @param phmTransformMatrix PHM SOLIDMODELn 的 TRANSFORMMATRIX（行主序，长度 16）
+ * @param devTransformMatrix DEV SOLIDMODELS 块的 TRANSFORMMATRIX（列主序，长度 16）
+ * @param phmTransformMatrix PHM SOLIDMODELn 的 TRANSFORMMATRIX（列主序，长度 16）
  */
 export function applyExternalTransforms(
   group: THREE.Group,
@@ -107,6 +108,25 @@ export function applyExternalTransforms(
   group.applyMatrix4(rowMajorToMatrix4(phmTransformMatrix));
   // 再应用 DEV 矩阵（PHM/assembly → device space）
   group.applyMatrix4(rowMajorToMatrix4(devTransformMatrix));
+}
+
+/**
+ * 应用已累积的 CBM/DEV/SUBDEVICE/PHM 放置矩阵。
+ *
+ * MOD 文件内部几何在 xmlModDocumentToGroup 中统一缩放 0.001；外部装配矩阵的
+ * 平移量同样来自 GIM 工程长度单位，需要在应用到已缩放 Group 前缩到 viewer 单位。
+ * 旋转/缩放分量保持不变。
+ */
+export function applyPlacementTransformToSceneUnits(
+  group: THREE.Group,
+  transformMatrix: number[] | null | undefined,
+): void {
+  if (!Array.isArray(transformMatrix) || transformMatrix.length !== 16) return;
+  const matrix = rowMajorToMatrix4(transformMatrix);
+  matrix.elements[12] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
+  matrix.elements[13] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
+  matrix.elements[14] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
+  group.applyMatrix4(matrix);
 }
 
 /**

@@ -14,20 +14,27 @@
  * - MOD/STL 文件：files Map key = "MOD/" + solidModelPath
  *
  * 当前范围：
- * - SOLIDMODELS 路径（DEV → PHM → MOD/STL）
- * - 不递归 SUBDEVICES（P2 任务）
- * - 不处理缓存命中场景（currentFiles=null 时直接返回空，P2 任务）
+ * - SOLIDMODELS 路径（CBM → DEV → PHM → MOD/STL）
+ * - SUBDEVICES 递归路径（DEV → SUBDEVICE → child DEV）
+ * - 返回实例级放置矩阵；同一个 MOD/STL 文件可被多次实例化
  */
 
 import type { CbmNode } from '../gim/types.js';
 import type { XmlModColor } from '../gim/geometry/ir.js';
+import * as THREE from 'three';
 import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
+
+const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 /** 发现的 MOD 几何来源 */
 export interface DiscoveredModGeometry {
   /** MOD 文件完整路径（如 "MOD/abc.mod"） */
   modPath: string;
+  /** 实例唯一键：同一个 MOD 文件可被不同矩阵多次实例化 */
+  instanceKey: string;
+  /** CBM/DEV/SUBDEVICE/PHM 累积放置矩阵（GIM 原始单位，列主序） */
+  placementTransformMatrix: number[];
   /** DEV SOLIDMODELS 块的 TRANSFORMMATRIX（行主序，长度 16） */
   devTransformMatrix: number[];
   /** PHM SOLIDMODELn 的 TRANSFORMMATRIX（行主序，长度 16） */
@@ -44,6 +51,10 @@ export interface DiscoveredModGeometry {
 export interface DiscoveredStlGeometry {
   /** STL 文件完整路径（如 "MOD/abc.stl"） */
   stlPath: string;
+  /** 实例唯一键：同一个 STL 文件可被不同矩阵多次实例化 */
+  instanceKey: string;
+  /** CBM/DEV/SUBDEVICE/PHM 累积放置矩阵（GIM 原始单位，列主序） */
+  placementTransformMatrix: number[];
   /** DEV SOLIDMODELS 块的 TRANSFORMMATRIX（行主序，长度 16） */
   devTransformMatrix: number[];
   /** PHM SOLIDMODELn 的 TRANSFORMMATRIX（行主序，长度 16） */
@@ -76,32 +87,59 @@ export async function discoverGeometriesFromNode(
   const empty: DiscoveredGeometries = { mods: [], stls: [] };
   if (!node.devPath || !files) return empty;
 
-  // 1. 读 DEV 文件
-  const devFilePath = `DEV/${node.devPath}`;
-  const devFile = files.get(devFilePath);
+  const rootTransform = parseOptionalMatrix(node.transformMatrix);
+  return discoverGeometriesFromDevPath(`DEV/${node.devPath}`, files, rootTransform, new Set<string>());
+}
+
+async function discoverGeometriesFromDevPath(
+  devFilePath: string,
+  files: Map<string, File>,
+  parentTransform: number[],
+  visited: Set<string>,
+): Promise<DiscoveredGeometries> {
+  const empty: DiscoveredGeometries = { mods: [], stls: [] };
+  const normalizedDevPath = normalizeDevPath(devFilePath);
+  if (visited.has(normalizedDevPath)) return empty;
+  visited.add(normalizedDevPath);
+
+  const devFile = files.get(normalizedDevPath);
   if (!devFile) {
-    console.warn(`[modDiscovery] DEV 文件不存在: ${devFilePath}`);
+    console.warn(`[modDiscovery] DEV 文件不存在: ${normalizedDevPath}`);
     return empty;
   }
   // 使用 arrayBuffer + TextDecoder 而非 file.text()，确保跨运行时（浏览器/jsdom）兼容
   const devBuffer = await devFile.arrayBuffer();
   const devText = new TextDecoder().decode(devBuffer);
-  const devDoc = parseDev(devText, devFilePath);
+  const devDoc = parseDev(devText, normalizedDevPath);
 
   if (devDoc.isEmpty) return empty;
 
   const mods: DiscoveredModGeometry[] = [];
   const stls: DiscoveredStlGeometry[] = [];
 
-  // 2. 遍历 DEV SOLIDMODELS（变电工程仅指向 .phm）
+  // 2. 遍历 DEV SOLIDMODELS（变电指向 .phm；线路可能递归指向 .dev）
   for (const devSolid of devDoc.solidModels) {
-    const phmFileName = devSolid.solidModelPath;
-    if (!phmFileName.toLowerCase().endsWith('.phm')) {
-      // 跳过非 .phm 引用（如线路工程的 .dev 递归，P0 不处理）
+    const solidModelName = devSolid.solidModelPath;
+    const solidLower = solidModelName.toLowerCase();
+    const devTransform = multiplyMatrices(parentTransform, devSolid.transformMatrix);
+
+    if (solidLower.endsWith('.dev')) {
+      const child = await discoverGeometriesFromDevPath(
+        normalizeDevPath(solidModelName),
+        files,
+        devTransform,
+        new Set(visited),
+      );
+      mods.push(...child.mods);
+      stls.push(...child.stls);
       continue;
     }
 
-    const phmFilePath = `PHM/${phmFileName}`;
+    if (!solidLower.endsWith('.phm')) {
+      continue;
+    }
+
+    const phmFilePath = normalizePhmPath(solidModelName);
     const phmFile = files.get(phmFilePath);
     if (!phmFile) {
       console.warn(`[modDiscovery] PHM 文件不存在: ${phmFilePath}`);
@@ -118,29 +156,49 @@ export async function discoverGeometriesFromNode(
     for (const phmSolid of phmDoc.solidModels) {
       const modelFileName = phmSolid.solidModelPath;
       const lower = modelFileName.toLowerCase();
+      const placementTransform = multiplyMatrices(devTransform, phmSolid.transformMatrix);
 
       if (lower.endsWith('.mod')) {
+        const modPath = normalizeGeometryPath(modelFileName);
         mods.push({
-          modPath: `MOD/${modelFileName}`,
+          modPath,
+          instanceKey: makeInstanceKey(modPath, placementTransform, normalizedDevPath, phmFilePath),
+          placementTransformMatrix: placementTransform,
           devTransformMatrix: devSolid.transformMatrix,
           phmTransformMatrix: phmSolid.transformMatrix,
           phmColor: phmSolid.color,
-          devPath: devFilePath,
+          devPath: normalizedDevPath,
           phmPath: phmFilePath,
         });
       } else if (lower.endsWith('.stl')) {
+        const stlPath = normalizeGeometryPath(modelFileName);
         stls.push({
-          stlPath: `MOD/${modelFileName}`,
+          stlPath,
+          instanceKey: makeInstanceKey(stlPath, placementTransform, normalizedDevPath, phmFilePath),
+          placementTransformMatrix: placementTransform,
           devTransformMatrix: devSolid.transformMatrix,
           phmTransformMatrix: phmSolid.transformMatrix,
           phmColor: phmSolid.color,
-          devPath: devFilePath,
+          devPath: normalizedDevPath,
           phmPath: phmFilePath,
         });
       } else {
         console.warn(`[modDiscovery] 未知几何引用类型: ${modelFileName}`);
       }
     }
+  }
+
+  // 4. 变电工程 SUBDEVICE → child DEV，矩阵必须向下累积。
+  for (const sub of devDoc.subDevices) {
+    const childTransform = multiplyMatrices(parentTransform, sub.transformMatrix);
+    const child = await discoverGeometriesFromDevPath(
+      normalizeDevPath(sub.devPath),
+      files,
+      childTransform,
+      new Set(visited),
+    );
+    mods.push(...child.mods);
+    stls.push(...child.stls);
   }
 
   return { mods, stls };
@@ -156,4 +214,42 @@ export async function discoverModGeometriesFromNode(
 ): Promise<DiscoveredModGeometry[]> {
   const result = await discoverGeometriesFromNode(node, files);
   return result.mods;
+}
+
+function parseOptionalMatrix(raw: string | undefined): number[] {
+  if (!raw) return IDENTITY_MATRIX.slice();
+  const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  if (parts.length !== 16) return IDENTITY_MATRIX.slice();
+  const matrix = parts.map(Number);
+  return matrix.some((n) => !Number.isFinite(n)) ? IDENTITY_MATRIX.slice() : matrix;
+}
+
+function matrix4(arr: number[]): THREE.Matrix4 {
+  const m = new THREE.Matrix4();
+  if (arr.length === 16) m.fromArray(arr);
+  return m;
+}
+
+function multiplyMatrices(a: number[], b: number[]): number[] {
+  return matrix4(a).multiply(matrix4(b)).toArray();
+}
+
+function normalizeDevPath(path: string): string {
+  const p = path.replace(/\\/g, '/');
+  return p.toLowerCase().startsWith('dev/') ? p : `DEV/${p}`;
+}
+
+function normalizePhmPath(path: string): string {
+  const p = path.replace(/\\/g, '/');
+  return p.toLowerCase().startsWith('phm/') ? p : `PHM/${p}`;
+}
+
+function normalizeGeometryPath(path: string): string {
+  const p = path.replace(/\\/g, '/');
+  return p.toLowerCase().startsWith('mod/') || p.toLowerCase().startsWith('stl/') ? p : `MOD/${p}`;
+}
+
+function makeInstanceKey(path: string, matrix: number[], devPath: string, phmPath: string): string {
+  const compactMatrix = matrix.map((n) => Number.isFinite(n) ? Number(n.toFixed(6)) : 0).join(',');
+  return `${path}#${devPath}>${phmPath}#${compactMatrix}`;
 }

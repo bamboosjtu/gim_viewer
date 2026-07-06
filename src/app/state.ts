@@ -51,12 +51,12 @@ export class AppState {
   // 模型
   loadedModels = new Map<string, { modelId: string; visible: boolean }>();
 
-  // xml-mod Group 跟踪（key = modPath，如 "MOD/abc.mod"）
+  // xml-mod Group 跟踪（key = instanceKey；同一 MOD 文件可有多个放置实例）
   // 与 IFC loadedModels 分开管理：xml-mod 不使用 OBC Fragments
   // 由 nodeInteractionService 在节点点击时懒加载，projectCleanupService 在切换项目时 dispose
   loadedXmlModGroups = new Map<string, THREE.Group>();
 
-  // STL Group 跟踪（key = stlPath，如 "MOD/abc.stl"）
+  // STL Group 跟踪（key = instanceKey；同一 STL 文件可有多个放置实例）
   // 与 loadedXmlModGroups 分开管理，便于 P1 阶段单独控制 STL 渲染
   // 由 modAutoLoadService 在自动加载时填充，projectCleanupService 在切换项目时 dispose
   loadedStlGroups = new Map<string, THREE.Group>();
@@ -70,8 +70,8 @@ export class AppState {
   // IFC loader 使用 coordinateToOrigin=true 把 IFC 归一化到 viewer 原点，
   // MOD/STL 保留 GIM 原始工程坐标，需要通过此矩阵对齐到 IFC/viewer 空间。
   // null 表示未设置（MOD/STL 将保留原始坐标，可能与 IFC 错位）。
-  // MVP: translation-only，由 GIM_COORD_OFFSET localStorage 手动调试；
-  // 后续可基于共同 CBM 节点的 IFC bbox 与 MOD bbox 自动估算。
+  // 优先从 FragmentsManager.baseCoordinationMatrix 自动同步；
+  // GIM_COORD_OFFSET localStorage 仍可作为手工调试入口。
   projectSourceToViewerMatrix: THREE.Matrix4 | null = null;
 
   // 后台几何加载 token（递增防竞态：项目切换后旧任务检测 token 不匹配则停止）
@@ -114,7 +114,7 @@ export class AppState {
     this.loadedStlGroups.clear();
     this.modRootGroup = null;
     this.stlRootGroup = null;
-    // 清空项目级坐标转换矩阵（新项目需重新估算或手动设置）
+    // 清空项目级坐标转换矩阵（新项目需重新自动同步或手动设置）
     this.projectSourceToViewerMatrix = null;
   }
 

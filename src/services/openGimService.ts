@@ -209,6 +209,14 @@ export async function loadAllIfcFiles(
       }
     }
 
+    // IFC 必须保持 coordinate=true；MOD/STL 用同一个 Fragments 基准矩阵对齐到 viewer 空间。
+    try {
+      const { syncProjectSourceToViewerFromFragments } = await import('./coordinateAlignmentService.js');
+      await syncProjectSourceToViewerFromFragments(state, ctx.fragments);
+    } catch (err) {
+      console.warn('[CoordAlign] IFC 基准坐标同步失败，MOD/STL 将使用原始坐标或手工 offset:', err);
+    }
+
     // buildIfcNameIndex 失败不应阻断 UI 渲染
     await buildIfcNameIndex(ctx, state).catch((err) => {
       console.warn('[GIM] buildIfcNameIndex failed', err);
@@ -370,6 +378,14 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
         // 继续加载下一个 IFC，不中断循环
         continue;
       }
+    }
+
+    // IFC 必须保持 coordinate=true；MOD/STL 用同一个 Fragments 基准矩阵对齐到 viewer 空间。
+    try {
+      const { syncProjectSourceToViewerFromFragments } = await import('./coordinateAlignmentService.js');
+      await syncProjectSourceToViewerFromFragments(state, ctx.fragments);
+    } catch (err) {
+      console.warn('[CoordAlign] IFC 基准坐标同步失败，MOD/STL 将使用原始坐标或手工 offset:', err);
     }
 
     // buildIfcNameIndex 失败不应阻断 UI 渲染（仅影响名称查询，模型已加载）

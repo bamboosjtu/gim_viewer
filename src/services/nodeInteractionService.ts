@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { collectIfcRefs } from '../gim/cbmParser.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
+import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 
 /**
  * 节点点击交互服务（用于缓存命中、无 Viewer 场景）。
@@ -185,7 +186,7 @@ function ensureModStlLayer(
  * 1. discoverGeometriesFromNode 走 CBM → DEV → PHM → MOD/STL 引用链
  * 2. 对每个未加载的 MOD，loadXmlModFromFiles 转 Three.js Group
  * 3. 对每个未加载的 STL，parseStlBinary 转 Three.js Group
- * 4. applyExternalTransforms 应用 DEV + PHM 变换矩阵
+ * 4. applyPlacementTransformToSceneUnits 应用 CBM/DEV/SUBDEVICE/PHM 累积放置矩阵
  * 5. 加入 scene 并跟踪到 state.loadedXmlModGroups / loadedStlGroups
  * 6. 首次加载时 fitCameraToScene 定位相机
  *
@@ -239,34 +240,38 @@ async function loadModStlForNode(
   // OBC BaseScene.three 类型为 Object3D，实际为 THREE.Scene，与 viewerEngine.ts 一致用 as any
   const scene = (ctx.world.scene as any).three as import('three').Scene;
 
-  const { loadXmlModFromFiles, applyExternalTransforms } = await import('../viewer/xmlModLoader.js');
+  const {
+    loadXmlModFromFiles,
+    applyPlacementTransformToSceneUnits,
+  } = await import('../viewer/xmlModLoader.js');
 
   let loadedCount = 0;
   let stlLoadedCount = 0;
 
   // ── 加载 MOD ──
   for (const geo of mods) {
-    if (state.loadedXmlModGroups.has(geo.modPath)) {
-      debugLog(DEBUG_IFC_LOAD, '[xml-mod] MOD 已加载，跳过:', geo.modPath);
+    if (state.loadedXmlModGroups.has(geo.instanceKey)) {
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] MOD 实例已加载，跳过:', geo.instanceKey);
       continue;
     }
 
     const group = await loadXmlModFromFiles(geo.modPath, discoveryFiles);
     if (!group) continue;
 
-    applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
+    applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+    applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
     // 加入 MOD 图层（独立于 IFC scene 根节点）
     const modRoot = ensureModStlLayer(state, scene, 'mod');
     modRoot.add(group);
-    state.loadedXmlModGroups.set(geo.modPath, group);
+    state.loadedXmlModGroups.set(geo.instanceKey, group);
     loadedCount++;
   }
 
   // ── 加载 STL ──
   const { parseStlBinary } = await import('../viewer/stlLoader.js');
   for (const geo of stls) {
-    if (state.loadedStlGroups.has(geo.stlPath)) {
-      debugLog(DEBUG_IFC_LOAD, '[xml-mod] STL 已加载，跳过:', geo.stlPath);
+    if (state.loadedStlGroups.has(geo.instanceKey)) {
+      debugLog(DEBUG_IFC_LOAD, '[xml-mod] STL 实例已加载，跳过:', geo.instanceKey);
       continue;
     }
 
@@ -279,11 +284,12 @@ async function loadModStlForNode(
     const group = parseStlBinary(buffer, geo.stlPath);
     if (!group) continue;
 
-    applyExternalTransforms(group, geo.devTransformMatrix, geo.phmTransformMatrix);
+    applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+    applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
     // 加入 STL 图层
     const stlRoot = ensureModStlLayer(state, scene, 'stl');
     stlRoot.add(group);
-    state.loadedStlGroups.set(geo.stlPath, group);
+    state.loadedStlGroups.set(geo.instanceKey, group);
     stlLoadedCount++;
   }
 
@@ -323,41 +329,63 @@ async function buildGeometryFilesMapFromCache(
   const { readCachedIfc } = await import('../desktop/database.js');
   const { parseDev } = await import('../gim/geometry/devParser.js');
 
-  // 1. 读 DEV 文件
   if (!node.devPath) return result;
-  const devPath = `DEV/${node.devPath}`;
-  try {
-    const bytes = await readCachedIfc(projectId, devPath);
-    const file = bytesToFile(bytes, devPath);
-    result.set(devPath, file);
-    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 从磁盘读取 DEV:', devPath, `(${bytes.byteLength} bytes)`);
-  } catch (err) {
-    console.warn(`[xml-mod] DEV 文件读取失败: ${devPath}`, err);
-    return result;
-  }
+  const visitedDevs = new Set<string>();
 
-  // 2. 解析 DEV，读 PHM 文件
-  const devFile = result.get(devPath)!;
-  const devBuffer = await devFile.arrayBuffer();
-  const devText = new TextDecoder().decode(devBuffer);
-  const devDoc = parseDev(devText, devPath);
-
-  for (const solid of devDoc.solidModels) {
-    const phmFileName = solid.solidModelPath;
-    if (!phmFileName.toLowerCase().endsWith('.phm')) continue;
-    const phmPath = `PHM/${phmFileName}`;
-    if (result.has(phmPath)) continue;
+  async function readFileIntoMap(path: string, label: string): Promise<File | null> {
+    if (result.has(path)) return result.get(path)!;
     try {
-      const bytes = await readCachedIfc(projectId, phmPath);
-      const file = bytesToFile(bytes, phmPath);
-      result.set(phmPath, file);
-      debugLog(DEBUG_IFC_LOAD, '[xml-mod] 从磁盘读取 PHM:', phmPath, `(${bytes.byteLength} bytes)`);
+      const bytes = await readCachedIfc(projectId, path);
+      const file = bytesToFile(bytes, path);
+      result.set(path, file);
+      debugLog(DEBUG_IFC_LOAD, `[xml-mod] 从磁盘读取 ${label}:`, path, `(${bytes.byteLength} bytes)`);
+      return file;
     } catch (err) {
-      console.warn(`[xml-mod] PHM 文件读取失败: ${phmPath}`, err);
+      console.warn(`[xml-mod] ${label} 文件读取失败: ${path}`, err);
+      return null;
     }
   }
 
+  async function visitDev(devPathInput: string): Promise<void> {
+    const devPath = normalizeCachedDevPath(devPathInput);
+    if (visitedDevs.has(devPath)) return;
+    visitedDevs.add(devPath);
+
+    const devFile = await readFileIntoMap(devPath, 'DEV');
+    if (!devFile) return;
+
+    const devBuffer = await devFile.arrayBuffer();
+    const devText = new TextDecoder().decode(devBuffer);
+    const devDoc = parseDev(devText, devPath);
+
+    for (const solid of devDoc.solidModels) {
+      const solidPath = solid.solidModelPath;
+      const lower = solidPath.toLowerCase();
+      if (lower.endsWith('.dev')) {
+        await visitDev(solidPath);
+      } else if (lower.endsWith('.phm')) {
+        await readFileIntoMap(normalizeCachedPhmPath(solidPath), 'PHM');
+      }
+    }
+
+    for (const sub of devDoc.subDevices) {
+      await visitDev(sub.devPath);
+    }
+  }
+
+  await visitDev(node.devPath);
+
   return result;
+}
+
+function normalizeCachedDevPath(path: string): string {
+  const p = path.replace(/\\/g, '/');
+  return p.toLowerCase().startsWith('dev/') ? p : `DEV/${p}`;
+}
+
+function normalizeCachedPhmPath(path: string): string {
+  const p = path.replace(/\\/g, '/');
+  return p.toLowerCase().startsWith('phm/') ? p : `PHM/${p}`;
 }
 
 /**
