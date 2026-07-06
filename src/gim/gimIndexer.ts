@@ -44,12 +44,30 @@ export function buildIfcGuidIndex(node: CbmNode | null): Map<string, CbmNode> {
   return index;
 }
 
-/** 获取节点显示名称：优先 IFC 名称索引，其次分类名称 */
+/**
+ * 获取节点显示名称。
+ *
+ * 优先级链：
+ * 1. 若节点有 ifcFile + ifcGuid → 查询 IFC 名称索引（最精确）
+ * 2. 若节点是 DEV 虚拟子节点（devSymbolName 非空）→ 用 devSymbolName（SYMBOLNAME）
+ * 3. 回退到 node.name（CBM 的 SYSTEMNAME 拼接 / PARTNAME / SYSCLASSIFYNAME / ENTITYNAME / 文件名）
+ *
+ * 注意：node.name 已在 buildCbmTree 中通过 extractDisplayName 提取最优名称，
+ * 此函数仅在有 IFC 名称或 DEV SYMBOLNAME 覆盖时返回覆盖值。
+ */
 export function getNodeDisplayName(node: CbmNode, ifcGuidToName: Map<string, string>): string {
+  // 1. IFC 名称索引最高优先
   if (node.ifcFile && node.ifcGuid) {
     const modelId = node.ifcFile.replace(/\.ifc$/i, '');
     const ifcName = ifcGuidToName.get(`${modelId}:${node.ifcGuid}`);
     if (ifcName) return ifcName;
   }
+
+  // 2. DEV 虚拟子节点的 devSymbolName 覆盖
+  if (node.devSymbolName) {
+    return node.devSymbolName;
+  }
+
+  // 3. 回退到 node.name（已含 SYSTEMNAME 优先级链）
   return node.name;
 }

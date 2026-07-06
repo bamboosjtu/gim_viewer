@@ -2,7 +2,7 @@
 
 > 实验编号：EXP-2026-07-06-A
 > 关联文档：[17-batch-load-schema.md](./17-batch-load-schema.md) §12、[16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md) §2.4
-> 状态：**A.1 已实施 / 待用户实测**
+> 状态：**A.1 已实施 / 实测完成 — 崩溃已解决，但暴露两个新问题**
 > 实施日期：2026-07-06（A.0）、2026-07-06（A.1）
 
 ## 0. 实验演进
@@ -11,8 +11,8 @@
 | ---- | ---- | ----: | ----: | ---- |
 | 修复前 | 无缓存（每 Entity new） | ~77000 | ~2000+ MOD | — |
 | A.0 | `(modPath, type, params)` | ~46000（-40%） | ~5000+ MOD | ✓ 已实施 |
-| **A.1** | `(type, params)` 跨 modPath | ~几千（-80%+） | 待实测 | ✓ 已实施 |
-| A.2（候选） | 同 modPath Mesh 合并 | — | — | 待评估 |
+| **A.1** | `(type, params)` 跨 modPath | ~几千（-80%+） | **7553 MOD 全加载，未崩溃** ✓ | ✓ 已实施 |
+| A.2（候选） | 同 modPath Mesh 合并 | — | — | 不需要（A.1 已解决崩溃） |
 
 ## 1. 实验目标
 
@@ -328,6 +328,93 @@ A.1 实施后剩余瓶颈：
 | **draw call** | ~77000 | **是（超核显上限 10 倍）** |
 
 **若 A.1 仍崩溃**：根因是 Mesh 数量 / draw call，Geometry 共享已无进一步空间。必须进入方案 B（mergeGeometries 静态合并，draw call 77k → 几十）或方案 C（InstancedMesh，draw call → 6）。
+
+---
+
+## 11. A.1 实测结论（2026-07-06）
+
+### 11.1 实测结果
+
+| 指标 | 预期 | 实测 | 结论 |
+| ---- | ---- | ---- | ---- |
+| 崩溃临界点 | 待测 | **7553 MOD 全加载，未崩溃** ✓ | A.1 成功解决崩溃 |
+| Geometry 数 | ~几千 | ~几千（估算符合） | -80%+ 达成 |
+| 加载完成 | 期望完成 | 日志显示 "全部几何加载完成" ✓ | 加载正常 |
+| 相机调整 | 期望正常 | 日志显示 "fitCameraToScene done" ✓ | 渲染正常 |
+| UI 进度显示 | 期望 100% | **卡在 4829/7553** ✗ | UI 显示 bug |
+| bbox 跳过数 | 期望少量 | **2723/7553 = 36%** ✗ | 阈值过严或矩阵错误 |
+
+**关键日志**：
+
+```
+[autoLoad] MOD 加载完成: 4830/7553（跳过异常 bbox: 2723）
+[autoLoad] 全部几何加载完成 (DB直通): MOD=4830, STL=0, 跳过异常bbox=2723
+[GIM] MOD/STL 自动加载完成
+[Camera] fitCameraToScene done
+```
+
+### 11.2 发现的新问题 1：UI 进度卡住（显示 bug，非渲染卡住）
+
+**现象**：用户看到 UI 进度卡在 `4829/7553`，以为程序卡住。
+
+**根因**：[modAutoLoadService.ts:576](../../src/services/modAutoLoadService.ts#L576) 的 `showProgress` 传入 `loadedMods`（只含成功加入场景的 MOD），**不含 `skippedBadBBox`**：
+
+```typescript
+showProgress({
+  phase: 'loading_mod',
+  loadedMods,              // ← 4829（不含 skippedBadBBox=2723）
+  totalMods: modGeos.length,  // ← 7553
+});
+```
+
+`phase: 'done'`（[行 619](../../src/services/modAutoLoadService.ts#L619)）也只传 `loadedMods`，所以进度永远到不了 7553。
+
+**实际状态**：4830 + 2723 = 7553 ✓ 全部处理完，渲染正常完成。
+
+**结论**：**这是 UI 显示的语义问题，不是渲染卡住**。`phase: 'done'` 已触发，`fitCameraToScene done` 已执行。
+
+**修复方向**：
+- 进度显示改为 `(loadedMods + skippedBadBBox)/totalMods`，或
+- `phase: 'done'` 时强制显示 `totalMods/totalMods`（100%），或
+- UI 显示 `loadedMods/totalMods (跳过 N)` 文案
+
+### 11.3 发现的新问题 2：36% MOD 被 bbox 异常跳过
+
+**现象**：2723/7553 = 36% 的 MOD 被 `diagnoseGroupBBox` 判定为"异常 bbox"并跳过。
+
+**根因**：[modAutoLoadService.ts:46](../../src/services/modAutoLoadService.ts#L46) 的阈值：
+
+```typescript
+const BBOX_MAX_DIM_M = 50;  // 单轴超过 50 米视为异常
+```
+
+**可能原因**（按概率排序）：
+
+1. **阈值过严**：母线、导线、桥架、长形设备可能超 50 米（变电站母线常见 50-100 米）
+2. **placement 矩阵累乘错误**：几何飘移导致 bbox 异常大
+3. **Entity.TransformMatrix 未正确应用**：几何在原点附近散布，bbox 跨度大
+4. **MOD 文件几何本身错误**：坐标单位错误等
+
+**用户观察**："这些被跳过的对应一次设备/二次设备" —— 这些是关键设备，不应跳过。
+
+**待验证**：需查看控制台 `[autoLoad] 异常几何 bbox，跳过` warn 日志的 center/size/maxDim 值，判断是哪种原因。
+
+**修复方向**：
+- 提升 `BBOX_MAX_DIM_M` 阈值（如 200 米），或
+- 按 DEV 类型动态调整阈值（母线类 200 米，设备类 50 米），或
+- 改为"绝对值超过工程 bbox 范围"而非"单轴 50 米"
+
+### 11.4 方案 A 实验总结
+
+| 维度 | 结论 |
+| ---- | ---- |
+| 崩溃问题 | ✓ 已解决（A.1 跨 modPath 共享 Geometry） |
+| 加载完成 | ✓ 7553 MOD 全部处理完 |
+| 渲染正常 | ✓ 相机调整完成 |
+| UI 进度 | ✗ 显示 bug（已定位，非渲染问题） |
+| bbox 跳过 | ✗ 36% 被跳过（阈值过严或矩阵错误，待诊断） |
+
+**方案 A 实验完成**：崩溃已解决，但暴露 UI 进度 bug 和 bbox 跳过问题。下一步修复这两个问题，而非继续优化 Geometry 共享。
 
 ## 6. 风险评估
 

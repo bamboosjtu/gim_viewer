@@ -107,6 +107,11 @@ function rebuildCbmTree(index: GimIndexResult): CbmNode | null {
       ifcGuid: r.ifc_guid || '',
       classifyName: r.classify_name || '',
       transformMatrix: r.transform_matrix || '',
+      // 新增字段（缓存恢复场景未持久化，使用默认值）
+      systemNames: [],
+      devSymbolName: '',
+      devType: '',
+      devExpanded: false,
     };
     map.set(r.node_key, {
       node,

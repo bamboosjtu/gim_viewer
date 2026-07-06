@@ -15,6 +15,11 @@ function makeNode(devPath: string): CbmNode {
     ifcGuid: '',
     classifyName: '',
     transformMatrix: '',
+    // 新增字段默认值（types.ts v2）
+    systemNames: [],
+    devSymbolName: '',
+    devType: '',
+    devExpanded: false,
   };
 }
 

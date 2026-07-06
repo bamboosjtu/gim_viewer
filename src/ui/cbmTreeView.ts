@@ -5,6 +5,8 @@ import { getNodeDisplayName } from '../gim/gimIndexer.js';
 
 const ENTITY_ICONS: Record<string, string> = {
   F1System: '🏗️', F2System: '🏢', F3System: '⚡', F4System: '🔧', PARTINDEX: '🔩',
+  // DEV SUBDEVICES 展开的虚拟子设备节点（方向 B）
+  DEV_SUBDEVICE: '🔌',
 };
 
 /**
@@ -30,7 +32,12 @@ export function renderCbmTreeUI(
   const label = document.createElement('span');
   label.className = 'tree-label';
   label.textContent = getNodeDisplayName(node, state.ifcGuidToName);
-  label.title = node.path;
+  // title 提供详细路径信息（CBM 真实节点显示 CBM 路径，DEV 虚拟节点显示 DEV 路径）
+  const tooltipParts: string[] = [node.path];
+  if (node.devSymbolName) tooltipParts.push(`设备名: ${node.devSymbolName}`);
+  if (node.devType) tooltipParts.push(`类型: ${node.devType}`);
+  if (node.devPath) tooltipParts.push(`DEV: ${node.devPath}`);
+  label.title = tooltipParts.join('\n');
   row.appendChild(toggle); row.appendChild(icon); row.appendChild(label);
   nodeEl.appendChild(row);
   const childrenEl = document.createElement('div');

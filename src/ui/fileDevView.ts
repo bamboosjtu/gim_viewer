@@ -70,6 +70,8 @@ export function renderFileDevPanelUI(
                 path: `CBM/${devCbm}`, name: devCbm.replace(/\.cbm$/i, ''),
                 entityName: '', children: [], famPath: '', devPath: '',
                 ifcFile: '', ifcGuid: '', classifyName: '', transformMatrix: '',
+                // 新增字段默认值
+                systemNames: [], devSymbolName: '', devType: '', devExpanded: false,
               };
               onNodeClick(tempNode);
             }
