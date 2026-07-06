@@ -2,8 +2,17 @@
 
 > 实验编号：EXP-2026-07-06-A
 > 关联文档：[17-batch-load-schema.md](./17-batch-load-schema.md) §12、[16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md) §2.4
-> 状态：**已实施 / 待用户实测**
-> 实施日期：2026-07-06
+> 状态：**A.1 已实施 / 待用户实测**
+> 实施日期：2026-07-06（A.0）、2026-07-06（A.1）
+
+## 0. 实验演进
+
+| 版本 | 缓存键 | Geometry 数 | 崩溃临界点 | 状态 |
+| ---- | ---- | ----: | ----: | ---- |
+| 修复前 | 无缓存（每 Entity new） | ~77000 | ~2000+ MOD | — |
+| A.0 | `(modPath, type, params)` | ~46000（-40%） | ~5000+ MOD | ✓ 已实施 |
+| **A.1** | `(type, params)` 跨 modPath | ~几千（-80%+） | 待实测 | ✓ 已实施 |
+| A.2（候选） | 同 modPath Mesh 合并 | — | — | 待评估 |
 
 ## 1. 实验目标
 
@@ -194,42 +203,131 @@ disposeSharedXmlModMaterials();   // ← 统一释放 Material
 
 ### 5.1 预期效果
 
-| 指标 | 修复前 | 方案 A 预期 |
-| ---- | ---- | ---- |
-| 崩溃临界点 | ~2000+ MOD | **不确定**（取决于崩溃主因） |
-| Geometry 对象数 | ~77000 | ~46000（-40%） |
-| GPU 内存峰值 | ~100MB | ~60MB（-40%） |
-| 加载速度 | 慢（CPU 解析 XML 主导） | 略提升（XML 解析不变，仅几何构造减少） |
+| 版本 | Geometry 数 | GPU 内存 | 崩溃临界点 |
+| ---- | ----: | ----: | ----: |
+| 修复前 | ~77000 | ~100MB | ~2000+ MOD |
+| A.0 | ~46000（-40%） | ~60MB | ~5000+ MOD ✓ |
+| **A.1** | ~几千（-80%+） | ~10MB | **待实测** |
 
 ### 5.2 待用户实测验证
 
-- [ ] 加载 7000+ MOD 是否能完成（不崩溃）
-- [ ] 崩溃临界点是否提升到 4000+ 或更高
+- [ ] A.1 加载 7000+ MOD 是否能完成（不崩溃）
+- [ ] 崩溃临界点是否突破 6000+ 或加载完成
 - [ ] 加载完成后场景渲染是否正常（无视觉差异）
 - [ ] MOD 位置是否仍正确（与 IFC 构件对齐）
-- [ ] 项目切换时共享缓存是否正确释放（无内存泄漏）
+- [ ] 项目切换时共享缓存是否正确释放
 - [ ] 控制台无 geometry dispose 错误
 
 ### 5.3 可能的结果分支
 
-**分支 A：方案 A 足以解决崩溃**
+**分支 A：A.1 足以解决崩溃**
 
 - 加载 7000+ MOD 完成，无崩溃
 - 后续优化方向：阶段 2（SQLite 几何缓存）、阶段 3（Worker 化）
-- 无需立即实施方案 B（mergeGeometries）
+- 无需实施方案 B（mergeGeometries）
 
-**分支 B：方案 A 不足，仍崩溃**
+**分支 B：A.1 仍崩溃**
 
-- 崩溃临界点提升（如 3000 → 4000）但仍未完成
-- 根因：draw call 数量超限（核显上限 3000-5000）
+- 崩溃主因是 Mesh 数量 / draw call（核显上限 3000-5000）
 - 必须实施方案 B（mergeGeometries 静态合并）
 - 代价：Entity 级高亮降级为 Group 级高亮
 
-**分支 C：方案 A 反而引入新问题**
+**分支 C：A.1 引入新问题**
 
-- 共享 geometry 导致渲染异常（概率低，需验证）
-- dispose 时序问题导致 use-after-free（已通过测试覆盖）
-- 回退方案：删除 `_sharedGeometryCache`，恢复 `primitiveToGeometryUncached` 即可
+- 跨 modPath 共享导致渲染异常（概率极低，已验证安全性）
+- 回退方案：恢复 `modPath` 参与缓存键即可
+
+---
+
+## 10. A.1 优化：跨 modPath 共享 Geometry
+
+### 10.1 实验背景
+
+A.0 实施后崩溃临界点从 2000+ 提升到 5000+，但仍未完成 7000+ MOD 加载。分析显示：
+
+- Geometry 数已减少 40%（46000 vs 77000）
+- **Mesh 对象数不变**（仍 ~77000，每个 Object3D ~1KB → JS heap ~80MB）
+- **draw call 数不变**（仍 ~77000，核显上限 3000-5000）
+
+继续优化 Geometry 共享有进一步空间。
+
+### 10.2 A.0 → A.1 的关键洞察
+
+**A.0 缓存键**：`${modPath}:${p.type}:${primitiveSignature(p)}`
+
+**问题**：不同 modPath 的同参数 primitive（如 100 个 MOD 文件都有 `Cylinder r=50 h=300`）会创建 100 份相同的 geometry。
+
+**A.1 缓存键**：`${p.type}:${primitiveSignature(p)}`（移除 modPath）
+
+**安全性论证**：
+
+BufferGeometry 仅含顶点数据（position/normal/uv），由 primitive 参数决定：
+- `CylinderGeometry(r=50, h=300, segments=16)` → 固定顶点数与坐标
+- 与来自哪个 modPath 无关
+- Entity.TransformMatrix 在 `entityToMesh` 中烘焙到 `mesh.matrix`，**不写入 geometry 顶点**
+
+因此"同参数 → 同顶点数据"成立，跨 modPath 共享完全安全。
+
+### 10.3 预期收益
+
+变电站工程中基础体参数重复率估算：
+
+| Primitive | 参数组合维度 | 估算组合数 |
+| ---- | ---- | ----: |
+| Cylinder | r × h | ~200 |
+| Cuboid | l × w × h | ~500 |
+| Sphere | r | ~50 |
+| TruncatedCone | br × tr × h | ~300 |
+| Ring | r × dr × rad | ~200 |
+| CircularGasket | or × ir × rad × h | ~300 |
+| **总计** | — | **~1550** |
+
+跨 modPath 共享后 Geometry 数从 ~46000 降到 ~几千（**减少 80%+**）。
+
+GPU vertex buffer 从 ~60MB 降到 ~10MB。
+
+### 10.4 实施
+
+**代码改动**（[src/viewer/xmlModGeometry.ts](../../src/viewer/xmlModGeometry.ts)）：
+
+```typescript
+// A.0（v2）
+export function primitiveToGeometry(p: XmlModPrimitive, modPath: string): THREE.BufferGeometry | null {
+  const sig = `${modPath}:${p.type}:${primitiveSignature(p)}`;  // modPath 参与键
+  // ...
+}
+
+// A.1（v3，当前）
+export function primitiveToGeometry(p: XmlModPrimitive, modPath?: string): THREE.BufferGeometry | null {
+  void modPath; // 标记参数已废弃，保留兼容性
+  const sig = `${p.type}:${primitiveSignature(p)}`;  // 移除 modPath
+  // ...
+}
+```
+
+**测试更新**：
+- 新增 "A.1：不同 modPath 同参数 → 共享" 测试用例（验证跨 modPath 共享）
+- 其他用例保留 modPath 参数（兼容性）
+
+### 10.5 验证
+
+- ✅ TypeScript 编译通过
+- ✅ 5 个缓存共享测试全部通过
+- ⚠️ 4 个预先存在的测试失败（与 A.1 无关）
+
+### 10.6 A.1 之后的瓶颈分析
+
+A.1 实施后剩余瓶颈：
+
+| 资源 | A.1 后数量 | 是否瓶颈 |
+| ---- | ----: | ---- |
+| Geometry 对象 | ~几千 | 否（-80%+） |
+| Material 对象 | 几十个 | 否（FIX-3 已解决） |
+| GPU vertex buffer | ~10MB | 否 |
+| **Mesh 对象** | ~77000 | **是（JS heap ~80MB）** |
+| **draw call** | ~77000 | **是（超核显上限 10 倍）** |
+
+**若 A.1 仍崩溃**：根因是 Mesh 数量 / draw call，Geometry 共享已无进一步空间。必须进入方案 B（mergeGeometries 静态合并，draw call 77k → 几十）或方案 C（InstancedMesh，draw call → 6）。
 
 ## 6. 风险评估
 

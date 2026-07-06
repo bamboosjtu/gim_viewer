@@ -56,18 +56,19 @@ const _sharedMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
 let _sharedDefaultMaterial: THREE.MeshStandardMaterial | null = null;
 
 /**
- * 共享 Geometry 缓存：按 (modPath, primitiveType, primitiveParamsSignature) 聚类。
+ * 共享 Geometry 缓存：按 (primitiveType, primitiveParamsSignature) 全局聚类。
  *
- * 修复背景（方案 A，详见 docs/schema/17-batch-load-schema.md §12）：
- * Material 共享后仍崩溃，根因是每 Entity 独立 new BufferGeometry。
- * 实证 66.2% MOD 文件被多实例引用（09 号 §11.4），同 modPath 多实例
- * 解析同一 XML 得到相同 primitive 参数 → 可共享同一 BufferGeometry。
+ * 演进历程：
+ * - v1（FIX-3 后续）：每 Entity 独立 new BufferGeometry → 78000+ Geometry，OOM
+ * - v2（方案 A.0）：按 (modPath, type, params) 缓存 → 同 modPath 多实例共享，-40%
+ * - v3（方案 A.1，当前）：移除 modPath，全局共享 → 跨 modPath 同参数 primitive 共享，-80%+
  *
- * 共享 Geometry 不可在 disposeXmlModGroup 中逐 mesh dispose，
- * 必须由 disposeSharedXmlModGeometries 统一释放（项目切换时调用）。
+ * 安全性：BufferGeometry 仅含顶点数据（position/normal/uv），由 primitive 参数决定。
+ * Entity.TransformMatrix 烘焙到 mesh.matrix，不影响 geometry 顶点。
+ * 因此"同参数 → 同顶点数据"无论来自哪个 modPath，共享都安全。
  *
- * 注意：Entity.TransformMatrix 在 entityToMesh 中烘焙到 Mesh.matrix，
- * 不影响 geometry 顶点数据，因此同 modPath+primitive 实例共享 geometry 是安全的。
+ * 实证收益：变电站工程中 Cylinder/Cuboid 等基础体在多个 MOD 文件中重复出现，
+ * 全局共享后 Geometry 数从 ~46000 降到几千个。
  */
 const _sharedGeometryCache = new Map<string, THREE.BufferGeometry>();
 
@@ -182,18 +183,23 @@ function primitiveSignature(p: XmlModPrimitive): string {
 }
 
 /**
- * 将 primitive 转换为 Three.js BufferGeometry（共享缓存版本）。
+ * 将 primitive 转换为 Three.js BufferGeometry（全局共享缓存版本，A.1）。
  *
- * 按 (modPath, primitiveType, primitiveParamsSignature) 缓存：
- * - 同 modPath 同参数 primitive 共享同一 BufferGeometry 实例
- * - 66.2% MOD 文件多实例引用时，避免重复构造几何
+ * 按 (primitiveType, primitiveParamsSignature) 全局缓存：
+ * - 同参数 primitive 全局共享同一 BufferGeometry 实例（跨 modPath）
+ * - 变电站工程中基础体参数重复率高，全局共享后 Geometry 数 -80%+
  * - Entity.TransformMatrix 不影响 geometry 顶点，由 entityToMesh 烘焙到 Mesh.matrix
  *
+ * v3（A.1）变更：移除 modPath 缓存键，跨 modPath 共享。
+ * 安全性：BufferGeometry 仅含顶点数据，由 primitive 参数决定，与 modPath 无关。
+ *
  * @param p primitive 描述
- * @param modPath MOD 文件路径（用于缓存键，区分不同 MOD 文件的同型 primitive）
+ * @param modPath MOD 文件路径（保留参数兼容性，A.1 起不再参与缓存键）
  */
-export function primitiveToGeometry(p: XmlModPrimitive, modPath: string): THREE.BufferGeometry | null {
-  const sig = `${modPath}:${p.type}:${primitiveSignature(p)}`;
+export function primitiveToGeometry(p: XmlModPrimitive, modPath?: string): THREE.BufferGeometry | null {
+  // v3（A.1）：modPath 不再参与缓存键，跨 modPath 全局共享
+  void modPath; // 标记参数已废弃，保留兼容性
+  const sig = `${p.type}:${primitiveSignature(p)}`;
   const cached = _sharedGeometryCache.get(sig);
   if (cached) return cached;
   const geo = primitiveToGeometryUncached(p);

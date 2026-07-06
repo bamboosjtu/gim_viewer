@@ -468,11 +468,13 @@ describe('方案 A：Geometry 共享缓存', () => {
     expect(g1).not.toBe(g2);
   });
 
-  it('不同 modPath 同参数 → 不共享（缓存键含 modPath）', () => {
+  it('A.1：不同 modPath 同参数 → 共享（缓存键不再含 modPath）', () => {
+    // v3（A.1）变更：移除 modPath 缓存键，跨 modPath 全局共享
+    // 安全性：BufferGeometry 仅含顶点数据，同参数 → 同顶点数据，与 modPath 无关
     const p: XmlModPrimitive = { type: 'Cylinder', r: 50, h: 300 };
     const g1 = primitiveToGeometry(p, 'MOD/file-A.mod')!;
     const g2 = primitiveToGeometry(p, 'MOD/file-B.mod')!;
-    expect(g1).not.toBe(g2);
+    expect(g1).toBe(g2); // 跨 modPath 共享
   });
 
   it('Entity.TransformMatrix 不影响缓存键 → 同 modPath 同 primitive 不同 TransformMatrix 仍共享', () => {
