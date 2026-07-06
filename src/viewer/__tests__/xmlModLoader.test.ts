@@ -201,7 +201,7 @@ describe('applyExternalTransforms', () => {
 });
 
 describe('disposeXmlModGroup', () => {
-  it('遍历 Group 仅释放 geometry（Material 共享，由 disposeSharedXmlModMaterials 释放）', () => {
+  it('v3：遍历 Group 不释放 geometry/material（二者均共享，由统一函数释放）', () => {
     const group = new THREE.Group();
     const geo1 = new THREE.BoxGeometry(1, 1, 1);
     const mat1 = new THREE.MeshStandardMaterial({ color: 0xff0000 });
@@ -221,19 +221,19 @@ describe('disposeXmlModGroup', () => {
     childGroup.add(mesh3);
     group.add(childGroup);
 
-    const disposeSpy1 = vi.spyOn(geo1, 'dispose');
-    const disposeSpy2 = vi.spyOn(geo2, 'dispose');
-    const disposeSpy3 = vi.spyOn(geo3, 'dispose');
+    const geoSpy1 = vi.spyOn(geo1, 'dispose');
+    const geoSpy2 = vi.spyOn(geo2, 'dispose');
+    const geoSpy3 = vi.spyOn(geo3, 'dispose');
     const matSpy1 = vi.spyOn(mat1, 'dispose');
     const matSpy2 = vi.spyOn(mat2, 'dispose');
     const matSpy3 = vi.spyOn(mat3, 'dispose');
 
     disposeXmlModGroup(group);
 
-    expect(disposeSpy1).toHaveBeenCalledTimes(1);
-    expect(disposeSpy2).toHaveBeenCalledTimes(1);
-    expect(disposeSpy3).toHaveBeenCalledTimes(1);
-    // Material 不应被 disposeXmlModGroup dispose（共享缓存由统一函数释放）
+    // v3：geometry 与 material 均不在此处 dispose（二者共享）
+    expect(geoSpy1).not.toHaveBeenCalled();
+    expect(geoSpy2).not.toHaveBeenCalled();
+    expect(geoSpy3).not.toHaveBeenCalled();
     expect(matSpy1).not.toHaveBeenCalled();
     expect(matSpy2).not.toHaveBeenCalled();
     expect(matSpy3).not.toHaveBeenCalled();

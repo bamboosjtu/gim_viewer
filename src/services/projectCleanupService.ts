@@ -94,17 +94,15 @@ export async function cleanupBeforeOpenNewProject(
       // 移除根节点即可级联移除所有子节点
       // v7: Material 全部共享（xmlModGeometry），逐 mesh dispose 会破坏同色 Mesh；
       //     traverse 只 dispose geometry，Material 由 disposeSharedXmlModMaterials 统一释放
+      // v8: Geometry 也共享（方案 A），traverse 不再 dispose geometry；
+      //     Geometry 由 disposeSharedXmlModGeometries 统一释放
       const scene = (ctx.world.scene as any).three as import('three').Scene;
-      const { disposeXmlModGroup, disposeSharedXmlModMaterials } = await import('../viewer/xmlModLoader.js');
+      const { disposeXmlModGroup, disposeSharedXmlModMaterials, disposeSharedXmlModGeometries } = await import('../viewer/xmlModLoader.js');
       const { disposeStlGroup } = await import('../viewer/stlLoader.js');
 
-      // 遍历 MOD 图层中的子 Group 并 dispose（仅 geometry）
+      // 遍历 MOD 图层中的子 Group（v8：不 dispose geometry/material，二者均共享）
       if (state.modRootGroup) {
-        state.modRootGroup.traverse((obj) => {
-          const mesh = obj as THREE.Mesh;
-          mesh.geometry?.dispose?.();
-          // 不在此处 dispose material（共享，统一在下方 disposeSharedXmlModMaterials 释放）
-        });
+        // v8：traverse 无需 dispose（共享资源统一在下方释放）
         scene.remove(state.modRootGroup);
         xmlModDisposedCount = state.loadedXmlModGroups.size;
       } else {
@@ -120,7 +118,8 @@ export async function cleanupBeforeOpenNewProject(
         }
       }
 
-      // 统一释放共享 Material 缓存（所有 MOD Group 已移除后才能安全释放）
+      // 统一释放共享 Geometry + Material 缓存（所有 MOD Group 已移除后才能安全释放）
+      disposeSharedXmlModGeometries();
       disposeSharedXmlModMaterials();
 
       // 遍历 STL 图层中的子 Group 并 dispose

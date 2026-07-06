@@ -22,8 +22,8 @@ import * as THREE from 'three';
 import { parseXmlMod } from '../gim/geometry/xmlModParser.js';
 import { xmlModDocumentToGroup } from './xmlModGeometry.js';
 
-// re-export 共享 Material 释放函数（项目切换时由 projectCleanupService 调用）
-export { disposeSharedXmlModMaterials } from './xmlModGeometry.js';
+// re-export 共享 Material / Geometry 释放函数（项目切换时由 projectCleanupService 调用）
+export { disposeSharedXmlModMaterials, disposeSharedXmlModGeometries } from './xmlModGeometry.js';
 
 const RENDERABLE_MOD_PRIMITIVE_RE = /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket)\b/;
 const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
@@ -136,21 +136,19 @@ export function applyPlacementTransformToSceneUnits(
 }
 
 /**
- * 释放 xml-mod Group 的 geometry 资源。
+ * 从 Group 中移除 mesh（不动 geometry/material，二者均共享）。
  *
- * Material 不在此处释放：从 xmlModGeometry.ts v2 起 Material 全部共享
- * （按 colorHex/opacity/transparent 聚类），逐 mesh dispose 会破坏其他仍在
- * 场景中的同色 Mesh。共享 Material 由 disposeSharedXmlModMaterials 统一释放。
+ * v3 起 Geometry 也共享（按 modPath+primitiveType+params 聚类），
+ * 不可在此处 dispose geometry；Material 同理。
+ * 共享资源由 disposeSharedXmlModGeometries + disposeSharedXmlModMaterials 统一释放。
  *
- * 由 projectCleanupService 在切换项目时调用。
+ * 此函数仅做"从 scene 移除"的级联清理，由 projectCleanupService 调用。
  * 调用前需已从 scene 移除（scene.remove(group)）。
  */
 export function disposeXmlModGroup(group: THREE.Group): void {
-  group.traverse((obj) => {
-    const mesh = obj as THREE.Mesh;
-    if (mesh.geometry) {
-      mesh.geometry.dispose();
-    }
-    // 注意：不 dispose material（共享，由 disposeSharedXmlModMaterials 统一释放）
+  // v3：Geometry 与 Material 均共享，不在此处 dispose
+  // 仅遍历断开引用（让 GC 回收 Object3D 自身的 matrix/quaternion）
+  group.traverse(() => {
+    // 无 dispose 操作；保留 traverse 以便未来按需扩展
   });
 }

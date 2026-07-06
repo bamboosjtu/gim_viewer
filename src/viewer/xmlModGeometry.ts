@@ -56,6 +56,22 @@ const _sharedMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
 let _sharedDefaultMaterial: THREE.MeshStandardMaterial | null = null;
 
 /**
+ * 共享 Geometry 缓存：按 (modPath, primitiveType, primitiveParamsSignature) 聚类。
+ *
+ * 修复背景（方案 A，详见 docs/schema/17-batch-load-schema.md §12）：
+ * Material 共享后仍崩溃，根因是每 Entity 独立 new BufferGeometry。
+ * 实证 66.2% MOD 文件被多实例引用（09 号 §11.4），同 modPath 多实例
+ * 解析同一 XML 得到相同 primitive 参数 → 可共享同一 BufferGeometry。
+ *
+ * 共享 Geometry 不可在 disposeXmlModGroup 中逐 mesh dispose，
+ * 必须由 disposeSharedXmlModGeometries 统一释放（项目切换时调用）。
+ *
+ * 注意：Entity.TransformMatrix 在 entityToMesh 中烘焙到 Mesh.matrix，
+ * 不影响 geometry 顶点数据，因此同 modPath+primitive 实例共享 geometry 是安全的。
+ */
+const _sharedGeometryCache = new Map<string, THREE.BufferGeometry>();
+
+/**
  * 释放所有共享 Material 缓存。
  *
  * 调用时机：项目切换时（projectCleanupService）。
@@ -73,14 +89,28 @@ export function disposeSharedXmlModMaterials(): void {
 }
 
 /**
- * 将 primitive 转换为 Three.js BufferGeometry。
+ * 释放所有共享 Geometry 缓存。
+ *
+ * 调用时机：项目切换时（projectCleanupService），在 disposeSharedXmlModMaterials
+ * 之前或之后均可（两者独立）。
+ * 调用前需确保所有引用这些 Geometry 的 Mesh 已从 scene 移除。
+ */
+export function disposeSharedXmlModGeometries(): void {
+  for (const geo of _sharedGeometryCache.values()) {
+    geo.dispose();
+  }
+  _sharedGeometryCache.clear();
+}
+
+/**
+ * 将 primitive 转换为 Three.js BufferGeometry（无缓存版本，内部使用）。
  *
  * 14 类 primitive：
  * - 6 类基础体：Cylinder/Cuboid/Sphere/TruncatedCone/Ring/CircularGasket — 精确几何
  * - 5 类暂停：StretchedBody/PorcelainBushing/TerminalBlock/ChannelSteel/Table — MVP 跳过
  * - 3 类弱 schema：RectangularFixedPlate/OffsetRectangularTable/RectangularRing — 暂停渲染
  */
-export function primitiveToGeometry(p: XmlModPrimitive): THREE.BufferGeometry | null {
+function primitiveToGeometryUncached(p: XmlModPrimitive): THREE.BufferGeometry | null {
   switch (p.type) {
     case 'Cylinder':
       return new THREE.CylinderGeometry(sanitizeNum(p.r), sanitizeNum(p.r), sanitizeNum(p.h), CYLINDER_SEGMENTS);
@@ -126,6 +156,52 @@ export function primitiveToGeometry(p: XmlModPrimitive): THREE.BufferGeometry | 
 }
 
 /**
+ * 构造 primitive 参数签名（用于 Geometry 缓存键）。
+ *
+ * 仅提取影响几何形状的参数（半径/高度/分段等），不包含 TransformMatrix。
+ * 同 modPath + 同 primitive 类型 + 同参数 → 同一 BufferGeometry。
+ */
+function primitiveSignature(p: XmlModPrimitive): string {
+  switch (p.type) {
+    case 'Cuboid':
+      return `${sanitizeNum(p.l)},${sanitizeNum(p.w)},${sanitizeNum(p.h)}`;
+    case 'Cylinder':
+      return `r=${sanitizeNum(p.r)},h=${sanitizeNum(p.h)}`;
+    case 'TruncatedCone':
+      return `br=${sanitizeNum(p.br)},tr=${sanitizeNum(p.tr)},h=${sanitizeNum(p.h)}`;
+    case 'Sphere':
+      return `r=${sanitizeNum(p.r)}`;
+    case 'Ring':
+      return `r=${sanitizeNum(p.r)},dr=${sanitizeNum(p.dr)},rad=${sanitizeNum(p.rad)}`;
+    case 'CircularGasket':
+      return `or=${sanitizeNum(p.or)},ir=${sanitizeNum(p.ir)},rad=${sanitizeNum(p.rad)},h=${sanitizeNum(p.h)}`;
+    // 暂停渲染的 primitive 不会进入缓存（primitiveToGeometryUncached 返回 null）
+    default:
+      return JSON.stringify(p);
+  }
+}
+
+/**
+ * 将 primitive 转换为 Three.js BufferGeometry（共享缓存版本）。
+ *
+ * 按 (modPath, primitiveType, primitiveParamsSignature) 缓存：
+ * - 同 modPath 同参数 primitive 共享同一 BufferGeometry 实例
+ * - 66.2% MOD 文件多实例引用时，避免重复构造几何
+ * - Entity.TransformMatrix 不影响 geometry 顶点，由 entityToMesh 烘焙到 Mesh.matrix
+ *
+ * @param p primitive 描述
+ * @param modPath MOD 文件路径（用于缓存键，区分不同 MOD 文件的同型 primitive）
+ */
+export function primitiveToGeometry(p: XmlModPrimitive, modPath: string): THREE.BufferGeometry | null {
+  const sig = `${modPath}:${p.type}:${primitiveSignature(p)}`;
+  const cached = _sharedGeometryCache.get(sig);
+  if (cached) return cached;
+  const geo = primitiveToGeometryUncached(p);
+  if (geo) _sharedGeometryCache.set(sig, geo);
+  return geo;
+}
+
+/**
  * GIM TransformMatrix → Three.js Matrix4。
  *
  * 样本研究结论：GIM 矩阵为列主序展开，平移在 m[12]/m[13]/m[14]，
@@ -141,12 +217,15 @@ export function gimMatrixToMatrix4(arr: number[]): THREE.Matrix4 {
 /**
  * 将 Entity 转换为 Three.Mesh。
  *
- * - primitive → geometry
- * - color → material
+ * - primitive → geometry（共享缓存，需传入 modPath）
+ * - color → material（共享缓存）
  * - transformMatrix → fromArray（列主序，与 GIM 实测布局一致）
+ *
+ * @param e entity 描述
+ * @param modPath MOD 文件路径（用于 Geometry 共享缓存键）
  */
-export function entityToMesh(e: XmlModEntity): THREE.Mesh | null {
-  const geometry = primitiveToGeometry(e.primitive);
+export function entityToMesh(e: XmlModEntity, modPath: string): THREE.Mesh | null {
+  const geometry = primitiveToGeometry(e.primitive, modPath);
   if (!geometry) return null;
 
   const material = colorToMaterial(e.color);
@@ -213,7 +292,7 @@ export function xmlModDocumentToGroup(doc: XmlModDocument): THREE.Group {
   if (doc.isEmpty) return group;
 
   for (const entity of doc.entities) {
-    const mesh = entityToMesh(entity);
+    const mesh = entityToMesh(entity, doc.modPath);
     if (!mesh) continue; // 跳过暂停渲染的 primitive
     mesh.visible = entity.visible;
     group.add(mesh);
