@@ -41,6 +41,38 @@ const TORUS_TUBULAR_SEGMENTS = 16;
 const _warnedOnce = new Set<string>();
 
 /**
+ * 共享 Material 缓存：按 (colorHex, opacity, transparent) 聚类。
+ *
+ * 修复背景：变电工程约 78000+ Entity，若每个 Entity 独立 new MeshStandardMaterial，
+ * GPU 内存累积导致 OOM 崩溃。实证样本中颜色种类有限（数十个），
+ * 通过共享缓存可将 Material 数量从 78000+ 降到几十个。
+ *
+ * 共享 Material 不可在 disposeXmlModGroup 中逐 mesh dispose，
+ * 必须由 disposeSharedXmlModMaterials 统一释放（项目切换时调用）。
+ */
+const _sharedMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
+
+/** 默认 Material（无 color 字段的 Entity 使用） */
+let _sharedDefaultMaterial: THREE.MeshStandardMaterial | null = null;
+
+/**
+ * 释放所有共享 Material 缓存。
+ *
+ * 调用时机：项目切换时（projectCleanupService）。
+ * 调用前需确保所有引用这些 Material 的 Mesh 已从 scene 移除。
+ */
+export function disposeSharedXmlModMaterials(): void {
+  for (const mat of _sharedMaterialCache.values()) {
+    mat.dispose();
+  }
+  _sharedMaterialCache.clear();
+  if (_sharedDefaultMaterial) {
+    _sharedDefaultMaterial.dispose();
+    _sharedDefaultMaterial = null;
+  }
+}
+
+/**
  * 将 primitive 转换为 Three.js BufferGeometry。
  *
  * 14 类 primitive：
@@ -127,23 +159,40 @@ export function entityToMesh(e: XmlModEntity): THREE.Mesh | null {
   return mesh;
 }
 
-/** Color → MeshStandardMaterial */
+/**
+ * Color → 共享 MeshStandardMaterial。
+ *
+ * 按 (colorHex, opacity, transparent) 聚类缓存：
+ * - 同色同透明度的 Entity 共享同一 Material 实例
+ * - Material 不可在 disposeXmlModGroup 中 dispose（共享）
+ * - 项目切换时由 disposeSharedXmlModMaterials 统一释放
+ */
 function colorToMaterial(color: XmlModColor | undefined): THREE.MeshStandardMaterial {
   if (!color) {
-    return new THREE.MeshStandardMaterial({
-      color: 0x888888,
-      transparent: false,
-    });
+    if (!_sharedDefaultMaterial) {
+      _sharedDefaultMaterial = new THREE.MeshStandardMaterial({
+        color: 0x888888,
+        transparent: false,
+      });
+    }
+    return _sharedDefaultMaterial;
   }
   const hex =
     (clamp255(color.r) << 16) |
     (clamp255(color.g) << 8) |
     clamp255(color.b);
-  const material = new THREE.MeshStandardMaterial({
-    color: hex,
-    transparent: color.a < 100,
-    opacity: clamp100(color.a) / 100,
-  });
+  const opacity = clamp100(color.a) / 100;
+  const transparent = color.a < 100;
+  const key = `${hex}_${opacity}_${transparent}`;
+  let material = _sharedMaterialCache.get(key);
+  if (!material) {
+    material = new THREE.MeshStandardMaterial({
+      color: hex,
+      transparent,
+      opacity,
+    });
+    _sharedMaterialCache.set(key, material);
+  }
   return material;
 }
 

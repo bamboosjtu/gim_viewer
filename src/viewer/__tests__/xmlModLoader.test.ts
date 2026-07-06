@@ -201,7 +201,7 @@ describe('applyExternalTransforms', () => {
 });
 
 describe('disposeXmlModGroup', () => {
-  it('遍历 Group 释放所有 mesh 的 geometry + material', () => {
+  it('遍历 Group 仅释放 geometry（Material 共享，由 disposeSharedXmlModMaterials 释放）', () => {
     const group = new THREE.Group();
     const geo1 = new THREE.BoxGeometry(1, 1, 1);
     const mat1 = new THREE.MeshStandardMaterial({ color: 0xff0000 });
@@ -233,25 +233,10 @@ describe('disposeXmlModGroup', () => {
     expect(disposeSpy1).toHaveBeenCalledTimes(1);
     expect(disposeSpy2).toHaveBeenCalledTimes(1);
     expect(disposeSpy3).toHaveBeenCalledTimes(1);
-    expect(matSpy1).toHaveBeenCalledTimes(1);
-    expect(matSpy2).toHaveBeenCalledTimes(1);
-    expect(matSpy3).toHaveBeenCalledTimes(1);
-  });
-
-  it('mesh 含材质数组 → 全部释放', () => {
-    const group = new THREE.Group();
-    const geo = new THREE.BoxGeometry(1, 1, 1);
-    const mat1 = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-    const mat2 = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-    const mesh = new THREE.Mesh(geo, [mat1, mat2]);
-    group.add(mesh);
-
-    const spy1 = vi.spyOn(mat1, 'dispose');
-    const spy2 = vi.spyOn(mat2, 'dispose');
-
-    disposeXmlModGroup(group);
-    expect(spy1).toHaveBeenCalledTimes(1);
-    expect(spy2).toHaveBeenCalledTimes(1);
+    // Material 不应被 disposeXmlModGroup dispose（共享缓存由统一函数释放）
+    expect(matSpy1).not.toHaveBeenCalled();
+    expect(matSpy2).not.toHaveBeenCalled();
+    expect(matSpy3).not.toHaveBeenCalled();
   });
 
   it('空 Group → 不抛错', () => {

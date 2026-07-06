@@ -22,6 +22,9 @@ import * as THREE from 'three';
 import { parseXmlMod } from '../gim/geometry/xmlModParser.js';
 import { xmlModDocumentToGroup } from './xmlModGeometry.js';
 
+// re-export 共享 Material 释放函数（项目切换时由 projectCleanupService 调用）
+export { disposeSharedXmlModMaterials } from './xmlModGeometry.js';
+
 const RENDERABLE_MOD_PRIMITIVE_RE = /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket)\b/;
 const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
 
@@ -133,7 +136,11 @@ export function applyPlacementTransformToSceneUnits(
 }
 
 /**
- * 释放 xml-mod Group 的 GPU 资源（geometry + material）。
+ * 释放 xml-mod Group 的 geometry 资源。
+ *
+ * Material 不在此处释放：从 xmlModGeometry.ts v2 起 Material 全部共享
+ * （按 colorHex/opacity/transparent 聚类），逐 mesh dispose 会破坏其他仍在
+ * 场景中的同色 Mesh。共享 Material 由 disposeSharedXmlModMaterials 统一释放。
  *
  * 由 projectCleanupService 在切换项目时调用。
  * 调用前需已从 scene 移除（scene.remove(group)）。
@@ -144,11 +151,6 @@ export function disposeXmlModGroup(group: THREE.Group): void {
     if (mesh.geometry) {
       mesh.geometry.dispose();
     }
-    const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
-    if (Array.isArray(material)) {
-      material.forEach((m) => m.dispose());
-    } else if (material) {
-      material.dispose();
-    }
+    // 注意：不 dispose material（共享，由 disposeSharedXmlModMaterials 统一释放）
   });
 }
