@@ -2,7 +2,7 @@
 
 > 实验编号：EXP-2026-07-06-B
 > 关联文档：[17-batch-load-schema.md](./17-batch-load-schema.md)、[18a-experiment-shared-geometry.md](./18a-experiment-shared-geometry.md) §11
-> 状态：**已实施 / 待用户实测**
+> 状态：**已实施 / 持续优化中**
 > 实施日期：2026-07-06
 
 ## 1. 实验背景
@@ -378,3 +378,95 @@ GB18030 解码通过 `TextDecoder('gb18030')` 实现（现代浏览器和 Tauri 
 - **parser_version**：从 `gim-parser-v8` 升级到 `gim-parser-v9`，旧缓存自动失效（需重新解压一次 GIM 以填充正确的节点名称）
 - **F2/F3 暂不优化**：本轮按用户要求不改 F2System/F3System，后续可解析 FAM 文件获取更可读的系统名称
 - **性能**：所有有 devPath 的节点都解析 DEV 文件，但有 devInfoCache 缓存；变电站工程通常有数百个 DEV，首次解析增加 100-500ms，可接受
+
+---
+
+## 12. 第三轮优化（2026-07-07）：F1 工程类型名 + F2 专业名映射 + 排序
+
+### 12.1 用户反馈
+
+第二轮优化后用户反馈：
+1. F1System 根节点应显示工程类型（变电工程/建筑工程），而非工程名称
+2. F2System 的 SYSCLASSIFYNAME 单字符（U/A/S/G）不可读，应映射为工程专业名
+3. F2System 子节点应按 U→A→S→G 顺序排列
+
+### 12.2 修改内容
+
+#### 12.2.1 F1System 工程类型名
+
+**文件**：[src/gim/gimExtractor.ts](../../src/gim/gimExtractor.ts)
+
+新增 `getProjectTypeName(magic)` 函数，根据 GIM 魔数映射工程类型：
+- `GIMPKGS` → "变电工程"
+- `GIMPKGT` → "线路工程"
+- 其他 `GIMPKG` 变体 → "建筑工程"
+
+#### 12.2.2 F2System 专业名映射 + 排序
+
+**文件**：[src/gim/cbmParser.ts](../../src/gim/cbmParser.ts)
+
+- 新增 `mapF2ClassifyName(code)` 函数：U→建筑工程、A→安装工程、S→暖通工程、G→给排水工程
+- F1System 子节点按 U→A→S→G 顺序排序
+
+#### 12.2.3 PARSER_VERSION 升级
+
+`gim-parser-v9` → `gim-parser-v10`
+
+---
+
+## 13. 第四轮优化（2026-07-07）：F3 命名优化（方案 A+B）
+
+### 13.1 用户反馈
+
+第三轮后用户反馈：F2 和 F3 仍不明确，F3 层需要更合理的命名。
+
+### 13.2 分析与修改
+
+基于 [19a-substation-hierarchy.md](./19a-substation-hierarchy.md) 深度分析，实施 F3 命名优化：
+
+#### 13.2.1 方案 A：过滤 SYSTEMNAME 占位符
+
+**文件**：[src/gim/cbmParser.ts](../../src/gim/cbmParser.ts)
+
+新增 `isPlaceholderSystemName(s)` 函数，`extractDisplayName()` 收集 SYSTEMNAME1~4 时跳过 `-`/`其它`/`其他`/空值。
+
+效果：
+- `空调系统 / - / 其它空调系统` → `空调系统 / 其它空调系统`
+- `排水系统 / - / 工业废水排水系统` → `排水系统 / 工业废水排水系统`
+
+#### 13.2.2 方案 B：F4 子节点信息反推
+
+**文件**：[src/gim/cbmParser.ts](../../src/gim/cbmParser.ts)
+
+新增 `enhanceF3Name(baseName, children)` 函数，在 `buildCbmTree` 中 F3System 子节点构建完成后调用：
+- 若方案 A 名称是编码格式（含 `*` 或以数字开头）或长度≤6，触发增强
+- 遍历 F4 子节点收集 `devSymbolName`（设备名优先）和 `ifcFile`（去重）
+- 取前 3 个用 `、` 连接，超过 3 个追加 `等`
+- 拼接为 `{名称}（含{后缀}）`
+
+效果：
+- `0SAZ*001` → `0SAZ*001（含建筑部分0317、结构0317等）`
+- `构筑物 / 辅助及附属构筑物` → `构筑物 / 辅助及附属构筑物（含建筑部分0317、结构0317等）`
+
+#### 13.2.3 PARSER_VERSION 升级
+
+`gim-parser-v10` → `gim-parser-v11`
+
+---
+
+## 14. 第五轮修复（2026-07-07）：MOD 加载统计修复
+
+### 14.1 问题
+
+MOD 加载进度统计中，`loadedMods`（分子）只在成功加载时递增，遇到空 bbox / 解析失败 / 异常时只 `skippedBadBBox++` 但分子不动，导致进度卡住不动。
+
+### 14.2 修复
+
+**文件**：[src/services/modAutoLoadService.ts](../../src/services/modAutoLoadService.ts)
+
+在 4 个加载循环（DB直通 MOD/STL + 文件扫描 MOD/STL）中，将 `loadedMods++` / `loadedStls++` 添加到所有分支：
+- 空 bbox 跳过时：`skippedBadBBox++; loadedMods++; continue;`
+- `loadModFile` 返回 null 时：`loadedMods++;`
+- catch 异常时：`loadedMods++;`
+
+分子改为"已处理数"，最终必达 100%。
