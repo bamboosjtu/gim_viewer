@@ -579,12 +579,18 @@ export async function autoLoadModAndStlGeometry(
             try {
               const group = await loadModFile(geo, files!);
               if (group) {
-                if (!prepareModGroupForScene(group, geo.modPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
+                if (!prepareModGroupForScene(group, geo.modPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; loadedMods++; continue; }
                 modRoot.add(group);
                 state.loadedXmlModGroups.set(geo.instanceKey, group);
                 loadedMods++;
+              } else {
+                // MOD 解析失败（loadModFile 返回 null），也算已处理
+                loadedMods++;
               }
-            } catch (err) { console.error(`[autoLoad] MOD 加载失败: ${geo.modPath}`, err); }
+            } catch (err) {
+              console.error(`[autoLoad] MOD 加载失败: ${geo.modPath}`, err);
+              loadedMods++;
+            }
           }
           if (i + CONCURRENCY < modGeos.length) await new Promise((r) => setTimeout(r, YIELD_MS));
         }
@@ -603,12 +609,17 @@ export async function autoLoadModAndStlGeometry(
             try {
               const group = await loadStlFile(geo, files!);
               if (group) {
-                if (!prepareStlGroupForScene(group, geo.stlPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
+                if (!prepareStlGroupForScene(group, geo.stlPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; loadedStls++; continue; }
                 stlRoot.add(group);
                 state.loadedStlGroups.set(geo.instanceKey, group);
                 loadedStls++;
+              } else {
+                loadedStls++;
               }
-            } catch (err) { console.error(`[autoLoad] STL 加载失败: ${geo.stlPath}`, err); }
+            } catch (err) {
+              console.error(`[autoLoad] STL 加载失败: ${geo.stlPath}`, err);
+              loadedStls++;
+            }
           }
           if (i + CONCURRENCY < stlGeos.length) await new Promise((r) => setTimeout(r, YIELD_MS));
         }
@@ -745,13 +756,16 @@ export async function autoLoadModAndStlGeometry(
         try {
           const group = await loadModFile(geo, files);
           if (group) {
-            if (!prepareModGroupForScene(group, geo.modPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
+            if (!prepareModGroupForScene(group, geo.modPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; loadedMods++; continue; }
             modRoot.add(group);
             state.loadedXmlModGroups.set(geo.instanceKey, group);
+            loadedMods++;
+          } else {
             loadedMods++;
           }
         } catch (err) {
           console.error(`[autoLoad] MOD 加载失败: ${geo.modPath}`, err);
+          loadedMods++;
         }
       }
 
@@ -794,13 +808,16 @@ export async function autoLoadModAndStlGeometry(
         try {
           const group = await loadStlFile(geo, files);
           if (group) {
-            if (!prepareStlGroupForScene(group, geo.stlPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; continue; }
+            if (!prepareStlGroupForScene(group, geo.stlPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; loadedStls++; continue; }
             stlRoot.add(group);
             state.loadedStlGroups.set(geo.instanceKey, group);
+            loadedStls++;
+          } else {
             loadedStls++;
           }
         } catch (err) {
           console.error(`[autoLoad] STL 加载失败: ${geo.stlPath}`, err);
+          loadedStls++;
         }
       }
 

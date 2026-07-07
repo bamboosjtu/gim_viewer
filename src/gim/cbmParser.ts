@@ -12,10 +12,24 @@ export function parseKeyValue(text: string): Record<string, string> {
 }
 
 /**
+ * 判断 SYSTEMNAME 值是否为无意义占位符（应跳过，不参与名称拼接）。
+ *
+ * GIM CBM 中常见的占位符：
+ * - "其它" / "其他"（未分类）
+ * - "-"（无值占位）
+ * - 空字符串
+ */
+function isPlaceholderSystemName(s: string): boolean {
+  const t = s.trim();
+  if (!t) return true;
+  return t === '其它' || t === '其他' || t === '-';
+}
+
+/**
  * 从 CBM kv 提取可读名称（按优先级回退）。
  *
  * 优先级链（变电工程）：
- * 1. SYSTEMNAME1..4 拼接（如"交流电气系统/110kV系统/#2主变 110kV进线间隔"）— 系统层可读
+ * 1. SYSTEMNAME1..4 拼接（过滤占位符"-"/"其它"/空值后，用 " / " 拼接）
  * 2. PARTNAME（部件名）
  * 3. SYSCLASSIFYNAME（系统分类编码，如 0AFD*002）— 编码可读性差，作为回退
  * 4. ENTITYNAME（如 F1System/F2System/F3System/F4System/PARTINDEX）
@@ -30,7 +44,7 @@ function extractDisplayName(kv: Record<string, string>, path: string): { name: s
   const systemNames: string[] = [];
   for (let i = 1; i <= 4; i++) {
     const sn = kv[`SYSTEMNAME${i}`];
-    if (sn && sn.trim()) systemNames.push(sn.trim());
+    if (sn && !isPlaceholderSystemName(sn)) systemNames.push(sn.trim());
   }
 
   const partName = kv['PARTNAME'] || '';
@@ -98,6 +112,64 @@ async function readDevInfo(
   } catch {
     return null;
   }
+}
+
+/**
+ * 为 F3System 节点生成区分性后缀（方案 B：F4 子节点信息反推）。
+ *
+ * 当 F3 的方案 A 名称（过滤占位符后的 SYSTEMNAME 拼接）缺乏区分度时，
+ * 遍历其 F4 子节点收集设备名/IFC 文件名，生成 `（含XXX等）` 后缀。
+ *
+ * 规则：
+ * - 设备入口优先：收集 F4 子节点的 devSymbolName
+ * - 无设备名时用 IFC 文件名：去 `.ifc` 后缀，去重
+ * - 取前 3 个，用 `、` 连接，末尾加 `等`
+ * - 若方案 A 名称已含足够信息（SYSTEMNAME3 非"其它"），不追加后缀
+ *
+ * @param baseName 方案 A 过滤后的名称
+ * @param children F3 的子节点列表（已构建完成）
+ * @returns 追加后缀后的名称，或原名称（无需追加时）
+ */
+function enhanceF3Name(baseName: string, children: CbmNode[]): string {
+  // 判断是否需要增强：SYSTEMNAME 拼接结果末尾含"其它"或名称较短时需要
+  // 方案 A 已过滤"其它"，所以 baseName 中不包含"其它"
+  // 但如果 systemNames 过滤后为空（全是占位符），baseName 会回退到 SYSCLASSIFYNAME 编码，此时需要增强
+  // 或者 baseName 是编码格式（如 0SAZ*001），也需要增强
+  // 简单判断：如果 baseName 含 "*"（编码特征）或长度较短，则尝试增强
+  const isCodeLike = /\*/.test(baseName) || /^[\d]/.test(baseName);
+  if (!isCodeLike && baseName.length > 6) {
+    // 名称已足够可读（如"交流电气系统 / 跨电压等级系统 / 调度数据网"），不追加
+    return baseName;
+  }
+
+  // 收集子节点信息
+  const deviceNames: string[] = [];
+  const ifcNames: string[] = [];
+  const ifcNameSet = new Set<string>();
+
+  for (const child of children) {
+    // 跳过 DEV_SUBDEVICE 虚拟子节点（非 F4 原生子节点）
+    if (child.entityName === 'DEV_SUBDEVICE') continue;
+
+    if (child.devSymbolName) {
+      deviceNames.push(child.devSymbolName);
+    } else if (child.ifcFile) {
+      const ifcName = child.ifcFile.replace(/\.ifc$/i, '');
+      if (!ifcNameSet.has(ifcName)) {
+        ifcNameSet.add(ifcName);
+        ifcNames.push(ifcName);
+      }
+    }
+  }
+
+  // 设备名优先
+  const suffixes = deviceNames.length > 0 ? deviceNames : ifcNames;
+  if (suffixes.length === 0) return baseName;
+
+  // 取前 3 个
+  const top = suffixes.slice(0, 3);
+  const suffix = top.join('、') + (suffixes.length > 3 ? '等' : '');
+  return `${baseName}（含${suffix}）`;
 }
 
 /** 从文件集合递归构建 CBM 层级树（含 DEV SYMBOLNAME 回填与 SUBDEVICES 展开） */
@@ -199,6 +271,12 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
         const bi = f2Order[b.classifyName] ?? 99;
         return ai - bi;
       });
+    }
+
+    // F3System：方案 B — 收集 F4 子节点信息生成区分性后缀
+    // 子节点（F4）已在上方构建完成，可直接读取 devSymbolName / ifcFile
+    if (en === 'F3System' && children.length > 0) {
+      name = enhanceF3Name(name, children);
     }
 
     return {
