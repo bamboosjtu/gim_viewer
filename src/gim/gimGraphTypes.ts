@@ -4,7 +4,7 @@
  * 与变电工程的 CbmNode 不同，GimGraph 统一覆盖线路工程的所有引用类型：
  * CBM/DEV/FAM/PHM/MOD/STL/WIRE/IFC，并保留 rawRefs 用于后续三维渲染挂点。
  *
- * 依据 gim-analysis.md 第三章：线路工程无 IFC，使用 Cbm/Dev/Mod/Phm 目录。
+ * 依据 docs/gim_line.md：线路工程无 IFC，使用 Cbm/Dev/Mod/Phm 目录。
  */
 
 import type { GimProjectType } from './projectType.js';

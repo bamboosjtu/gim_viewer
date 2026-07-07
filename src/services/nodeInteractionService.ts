@@ -391,12 +391,12 @@ function normalizeCachedPhmPath(path: string): string {
 /**
  * 补充 discovery Map 中缺失的 MOD 文件（缓存命中场景专用）。
  *
- * discoverModGeometriesFromNode 返回的 DiscoveredModGeometry 包含 modPath，
+ * discoverGeometriesFromNode 返回的 DiscoveredModGeometry.mods 包含 modPath，
  * 但 discoveryFiles Map 中可能尚未包含 MOD 文件（buildGeometryFilesMapFromCache 只读 DEV/PHM）。
  * 本函数遍历 discovered 列表，按需读取 MOD 文件并加入 discoveryFiles。
  *
  * @param projectId 数据库 gim_project.id
- * @param discovered discoverModGeometriesFromNode 返回值
+ * @param discovered discoverGeometriesFromNode 返回的 mods 列表
  * @param files 文件 Map（会被原地修改）
  */
 async function ensureModFilesInCacheMap(

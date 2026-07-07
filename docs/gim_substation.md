@@ -25,7 +25,7 @@
 | **PHM 解析（SOLIDMODEL + TRANSFORMMATRIXn + COLORn）** | ✅ 已实现 | `src/gim/geometry/phmParser.ts` |
 | **Geometry IR schema 落地** | ✅ 已实现 | `src/gim/geometry/ir.ts`（5 kind 联合 + 14 类 primitive 类型）；设计稿见 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) |
 | **xml-mod 渲染集成（CBM→DEV→PHM→MOD）** | ✅ 已实现 | `src/viewer/xmlModGeometry.ts` / `xmlModLoader.ts` / `src/services/modGeometryDiscovery.ts` / `src/services/nodeInteractionService.ts` |
-| **PHM TransformMatrix 应用** | ✅ 已实现 | `src/viewer/xmlModLoader.ts` `applyExternalTransforms`（DEV + PHM 矩阵应用到 Group） |
+| **PHM TransformMatrix 应用** | ✅ 已实现 | `src/viewer/xmlModLoader.ts` `applyPlacementTransformToSceneUnits`（顶点烘焙 DEV/PHM/CBM/SUBDEVICE 累积矩阵，避免 Object3D.applyMatrix4 decompose 精度损失） |
 | **xml-mod 自动加载（IFC 加载完成后）** | ✅ 已实现（v6） | `src/services/nodeInteractionService.ts` `autoLoadAllXmlModGeometries`（遍历 CBM 树中所有"无 IFC 引用但有 devPath"的节点） |
 | **DEV/PHM/MOD 文件磁盘缓存** | ✅ 已实现（v6） | `src/services/gimExtractedCacheService.ts` `cacheGeometryFiles`（首次打开时缓存，供缓存命中场景按需读取） |
 | **缓存命中场景回放 xml-mod 几何** | ✅ 已实现（v6） | `src/services/nodeInteractionService.ts` `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap`（从磁盘按需读取 DEV/PHM/MOD） |

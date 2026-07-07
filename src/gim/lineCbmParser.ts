@@ -9,7 +9,7 @@
  * - F4System (GROUPTYPE=WIRE): BACKSTRING, FRONTSTRING, SUBDEVICES.NUM + SUBDEVICE<i>
  * - Tower_Device/Wire_Device/WIRE/CROSS: OBJECTMODELPOINTER(→.dev), BASEFAMILY(→.fam)
  *
- * 依据 gim-analysis.md 第三章。
+ * 依据 docs/gim_line.md。
  */
 
 import type { GimGraph, GimGraphNode } from './gimGraphTypes.js';

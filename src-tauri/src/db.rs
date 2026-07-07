@@ -1504,7 +1504,7 @@ pub struct LineDevPropertyPayload {
 /// 2. 删除旧 line_fam_property / line_dev_property
 /// 3. 插入 graph payload（nodes / children / refs / file_stats）
 /// 4. 插入 fam_props / dev_props
-/// 5. 更新 gim_project: parser_version = gim-parser-v5, project_type = transmission_line
+/// 5. 更新 gim_project: parser_version = PARSER_VERSION（当前 gim-parser-v13）, project_type = transmission_line
 ///
 /// 使用 prepared statement 批量插入，避免每行重新 prepare。
 #[tauri::command]

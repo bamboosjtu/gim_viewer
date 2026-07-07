@@ -188,7 +188,7 @@ debugError(DEBUG_FRAGMENTS, '[Fragments] full stack trace', err);
   "dbPath": "/path/to/gim_viewer.db",
   "diagnostic": {
     "project_type": "transmission_line",
-    "parser_version": "gim-parser-v6",
+    "parser_version": "gim-parser-v13",
     "line_cbm_node_count": 1234,
     "ifc_models_count": 0
   },

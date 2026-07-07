@@ -141,30 +141,6 @@ export function rowMajorToMatrix4(arr: number[]): THREE.Matrix4 {
 }
 
 /**
- * 应用外部变换矩阵（DEV + PHM）到 MOD Group。
- *
- * @deprecated 使用 applyPlacementTransformToSceneUnits。
- * 此函数不缩放平移分量，且缺少 CBM/SUBDEVICE 累积矩阵，不能表达完整 placement。
- *
- * 应用顺序：先 PHM（MOD 坐标 → 装配坐标），后 DEV（装配坐标 → 设备坐标）。
- * 即：final = DEV × PHM × MOD-local
- *
- * @param group xmlModDocumentToGroup 返回的 Group（已含 Entity 内部 TransformMatrix）
- * @param devTransformMatrix DEV SOLIDMODELS 块的 TRANSFORMMATRIX（列主序，长度 16）
- * @param phmTransformMatrix PHM SOLIDMODELn 的 TRANSFORMMATRIX（列主序，长度 16）
- */
-export function applyExternalTransforms(
-  group: THREE.Group,
-  devTransformMatrix: number[],
-  phmTransformMatrix: number[],
-): void {
-  // 先应用 PHM 矩阵（MOD local → PHM/assembly space）
-  group.applyMatrix4(rowMajorToMatrix4(phmTransformMatrix));
-  // 再应用 DEV 矩阵（PHM/assembly → device space）
-  group.applyMatrix4(rowMajorToMatrix4(devTransformMatrix));
-}
-
-/**
  * 应用已累积的 CBM/DEV/SUBDEVICE/PHM 放置矩阵（顶点烘焙版）。
  *
  * 关键修复：改为遍历 group 的 mesh，直接对 geometry.applyMatrix4(matrix)

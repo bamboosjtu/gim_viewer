@@ -1,7 +1,7 @@
 /**
  * GIM 工程类型识别。
  *
- * 依据 gim-analysis.md 第三章：
+ * 依据 docs/gim_line.md：
  * - 变电工程：CBM/DEV/MOD/PHM（全大写），含 IFC 文件，FileDevRelation.cbm
  * - 线路工程：Cbm/Dev/Mod/Phm（首字母大写），无 IFC，每层引用键不同
  *

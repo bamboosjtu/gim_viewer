@@ -425,7 +425,7 @@ export default defineConfig({
 | 4.1 devParser | ✅ | `src/gim/geometry/devParser.ts` + 31 测试（SOLIDMODELS/SUBDEVICES 独立索引、行主序矩阵） |
 | 4.2 xmlModGeometry | ✅ | `src/viewer/xmlModGeometry.ts`（14 类 primitive → BufferGeometry 转换） |
 | 4.3 xmlModGeometry 测试 | ✅ | `src/viewer/__tests__/xmlModGeometry.test.ts`（34 测试：geometry 尺寸、transform 应用、color sRGB hex、StretchedBody 拉伸方向） |
-| 4.4 xmlModLoader + modGeometryDiscovery | ✅ | `src/viewer/xmlModLoader.ts`（loadXmlModFromText/Files + applyExternalTransforms + disposeXmlModGroup） / `src/services/modGeometryDiscovery.ts`（CBM→DEV→PHM→MOD 引用链发现） / 35 测试 + vitest.setup.ts Blob polyfill |
+| 4.4 xmlModLoader + modGeometryDiscovery | ✅ | `src/viewer/xmlModLoader.ts`（loadXmlModFromText/Files + applyPlacementTransformToSceneUnits + disposeXmlModGroup） / `src/services/modGeometryDiscovery.ts`（CBM→DEV→PHM→MOD 引用链发现） / 35 测试 + vitest.setup.ts Blob polyfill |
 | 4.5 state + cleanup + nodeInteraction 集成 | ✅ | `state.ts` 新增 loadedXmlModGroups / `projectCleanupService.ts` 新增 dispose 逻辑 / `nodeInteractionService.ts` 新增 loadXmlModForNode（无 IFC 但有 devPath 时回退 xml-mod） / 3 dispose 测试 |
 | 4.6 tsc + 全部测试 + 文档同步 | ✅ | 189 测试通过，tsc 通过；同步 gim_substation.md §0、plan §10、schema/phm.md、schema/10-substation-mod-grammar.md、schema/13-geometry-ir-schema.md（新增 §0 实现状态） |
 

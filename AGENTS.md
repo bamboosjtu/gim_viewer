@@ -141,7 +141,7 @@ src-tauri/
 
 ### parser_version 失效机制
 
-- `PARSER_VERSION` 常量（当前 `gim-parser-v5`）
+- `PARSER_VERSION` 常量（当前 `gim-parser-v13`）
 - `validate_gim_cache` 检查 `parser_version_match`
 - 版本不匹配 → 缓存无效 → 完整解压 → `save_gim_index` 先删后插全部表
 

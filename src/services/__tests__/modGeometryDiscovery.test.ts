@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { discoverModGeometriesFromNode } from '../modGeometryDiscovery.js';
+import { discoverGeometriesFromNode } from '../modGeometryDiscovery.js';
 import type { CbmNode } from '../../gim/types.js';
 
 /** 构造 CbmNode */
@@ -70,7 +70,7 @@ function makePhmText(opts?: {
   return text;
 }
 
-describe('discoverModGeometriesFromNode', () => {
+describe('discoverGeometriesFromNode', () => {
   describe('基础场景', () => {
     it('完整链：CBM → DEV → PHM → MOD → 返回 1 个几何来源', async () => {
       const node = makeNode('abc.dev');
@@ -78,7 +78,7 @@ describe('discoverModGeometriesFromNode', () => {
         ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'main.phm' }), 'abc.dev')],
         ['PHM/main.phm', makeFile(makePhmText({ modelPath: 'main.mod' }), 'main.phm')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(1);
       expect(results[0].modPath).toBe('MOD/main.mod');
       expect(results[0].devPath).toBe('DEV/abc.dev');
@@ -97,7 +97,7 @@ TRANSFORMMATRIX1=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
         ['PHM/a.phm', makeFile(makePhmText({ modelPath: 'a.mod' }), 'a.phm')],
         ['PHM/b.phm', makeFile(makePhmText({ modelPath: 'b.mod' }), 'b.phm')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(2);
       expect(results[0].modPath).toBe('MOD/a.mod');
       expect(results[1].modPath).toBe('MOD/b.mod');
@@ -119,7 +119,7 @@ COLOR2=`;
         ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'main.phm' }), 'abc.dev')],
         ['PHM/main.phm', makeFile(phmText, 'main.phm')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(3);
       expect(results.map((r) => r.modPath)).toEqual(['MOD/a.mod', 'MOD/b.mod', 'MOD/c.mod']);
     });
@@ -133,7 +133,7 @@ COLOR2=`;
         ['DEV/abc.dev', makeFile(makeDevText({ transform: devTransform }), 'abc.dev')],
         ['PHM/main.phm', makeFile(makePhmText(), 'main.phm')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results[0].devTransformMatrix[12]).toBe(100);
       expect(results[0].devTransformMatrix[13]).toBe(200);
       expect(results[0].devTransformMatrix[14]).toBe(50);
@@ -146,7 +146,7 @@ COLOR2=`;
         ['DEV/abc.dev', makeFile(makeDevText(), 'abc.dev')],
         ['PHM/main.phm', makeFile(makePhmText({ transform: phmTransform }), 'main.phm')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results[0].phmTransformMatrix[12]).toBe(10);
       expect(results[0].phmTransformMatrix[13]).toBe(20);
       expect(results[0].phmTransformMatrix[14]).toBe(30);
@@ -160,7 +160,7 @@ COLOR2=`;
         ['DEV/abc.dev', makeFile(makeDevText(), 'abc.dev')],
         ['PHM/main.phm', makeFile(makePhmText({ color: '' }), 'main.phm')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results[0].phmColor).toBeUndefined();
     });
 
@@ -170,7 +170,7 @@ COLOR2=`;
         ['DEV/abc.dev', makeFile(makeDevText(), 'abc.dev')],
         ['PHM/main.phm', makeFile(makePhmText({ color: '128,128,128,100' }), 'main.phm')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results[0].phmColor).toEqual({ r: 128, g: 128, b: 128, a: 100 });
     });
   });
@@ -179,13 +179,13 @@ COLOR2=`;
     it('node.devPath 为空 → 返回空数组', async () => {
       const node = makeNode('');
       const files = new Map<string, File>();
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toEqual([]);
     });
 
     it('files 为 null（缓存命中场景）→ 返回空数组', async () => {
       const node = makeNode('abc.dev');
-      const results = await discoverModGeometriesFromNode(node, null);
+      const { mods: results } = await discoverGeometriesFromNode(node, null);
       expect(results).toEqual([]);
     });
 
@@ -193,7 +193,7 @@ COLOR2=`;
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const node = makeNode('missing.dev');
       const files = new Map<string, File>();
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toEqual([]);
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('DEV/missing.dev'));
       warnSpy.mockRestore();
@@ -204,7 +204,7 @@ COLOR2=`;
       const files = new Map<string, File>([
         ['DEV/abc.dev', makeFile('SOLIDMODELS.NUM=0', 'abc.dev')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toEqual([]);
     });
 
@@ -214,7 +214,7 @@ COLOR2=`;
       const files = new Map<string, File>([
         ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'missing.phm' }), 'abc.dev')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toEqual([]);
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('PHM/missing.phm'));
       warnSpy.mockRestore();
@@ -226,32 +226,20 @@ COLOR2=`;
         ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'empty.phm' }), 'abc.dev')],
         ['PHM/empty.phm', makeFile('SOLIDMODELS.NUM=0', 'empty.phm')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toEqual([]);
     });
 
-    it('PHM 引用 STL → 新版 discoverGeometriesFromNode 正常返回 STL', async () => {
-      const { discoverGeometriesFromNode } = await import('../modGeometryDiscovery.js');
+    it('PHM 引用 STL → mods 为空 + stls 包含 STL 几何来源', async () => {
       const node = makeNode('abc.dev');
       const files = new Map<string, File>([
         ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'main.phm' }), 'abc.dev')],
         ['PHM/main.phm', makeFile(makePhmText({ modelPath: 'main.stl', color: '128,128,128,100' }), 'main.phm')],
       ]);
-      const results = await discoverGeometriesFromNode(node, files);
-      expect(results.mods).toEqual([]);
-      expect(results.stls).toHaveLength(1);
-      expect(results.stls[0].stlPath).toBe('MOD/main.stl');
-    });
-
-    it('PHM 引用 STL → 旧版 discoverModGeometriesFromNode 兼容（仅返回 MOD）', async () => {
-      const node = makeNode('abc.dev');
-      const files = new Map<string, File>([
-        ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'main.phm' }), 'abc.dev')],
-        ['PHM/main.phm', makeFile(makePhmText({ modelPath: 'main.stl', color: '128,128,128,100' }), 'main.phm')],
-      ]);
-      const results = await discoverModGeometriesFromNode(node, files);
-      // 旧版 wrapper 仅返回 .mods，STL 不出现（向后兼容）
-      expect(results).toEqual([]);
+      const { mods, stls } = await discoverGeometriesFromNode(node, files);
+      expect(mods).toEqual([]);
+      expect(stls).toHaveLength(1);
+      expect(stls[0].stlPath).toBe('MOD/main.stl');
     });
 
     it('PHM 引用未知扩展名 → 跳过 + warn', async () => {
@@ -261,7 +249,7 @@ COLOR2=`;
         ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'main.phm' }), 'abc.dev')],
         ['PHM/main.phm', makeFile(makePhmText({ modelPath: 'main.xyz' }), 'main.phm')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toEqual([]);
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('main.xyz'));
       warnSpy.mockRestore();
@@ -275,7 +263,7 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
       const files = new Map<string, File>([
         ['DEV/abc.dev', makeFile(devText, 'abc.dev')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toEqual([]);
     });
 
@@ -293,7 +281,7 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
         ['DEV/parent.dev', makeFile(devText, 'parent.dev')],
         ['PHM/main.phm', makeFile(makePhmText({ modelPath: 'main.mod' }), 'main.phm')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(1);
       expect(results[0].modPath).toBe('MOD/main.mod');
     });
@@ -306,7 +294,7 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
         ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'main.phm' }), 'abc.dev')],
         ['PHM/main.phm', makeFile(makePhmText({ modelPath: 'main.MOD' }), 'main.phm')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(1);
       expect(results[0].modPath).toBe('MOD/main.MOD');
     });
@@ -317,7 +305,7 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
         ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'main.PHM' }), 'abc.dev')],
         ['PHM/main.PHM', makeFile(makePhmText({ modelPath: 'main.mod' }), 'main.PHM')],
       ]);
-      const results = await discoverModGeometriesFromNode(node, files);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(1);
       expect(results[0].phmPath).toBe('PHM/main.PHM');
     });

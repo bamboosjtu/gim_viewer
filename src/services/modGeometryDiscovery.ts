@@ -204,18 +204,6 @@ async function discoverGeometriesFromDevPath(
   return { mods, stls };
 }
 
-/**
- * @deprecated 使用 discoverGeometriesFromNode 代替。
- * 保留以兼容 nodeInteractionService（懒加载路径仍可用）。
- */
-export async function discoverModGeometriesFromNode(
-  node: CbmNode,
-  files: Map<string, File> | null,
-): Promise<DiscoveredModGeometry[]> {
-  const result = await discoverGeometriesFromNode(node, files);
-  return result.mods;
-}
-
 function parseOptionalMatrix(raw: string | undefined): number[] {
   if (!raw) return IDENTITY_MATRIX.slice();
   const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
