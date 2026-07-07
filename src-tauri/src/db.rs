@@ -16,7 +16,9 @@ use tauri::Manager;
 /// v9: 层级树名称优化——F1System 根节点用 GIM 头部工程名，F4System/PARTINDEX 设备层用 DEV SYMBOLNAME；过滤 IFC "&其他"占位符
 /// v10: F1System 显示工程类型名（变电工程/建筑工程），F2System 按 SYSCLASSIFYNAME 映射专业名（U=建筑工程等）并按 U→A→S→G 排序
 /// v11: F3System 命名优化——方案A 过滤 SYSTEMNAME 占位符（- / 其它 / 空），方案B 收集 F4 子节点设备名/IFC文件名生成区分性后缀
-pub const PARSER_VERSION: &str = "gim-parser-v11";
+/// v12: 修复 DEV SUBDEVICE 虚拟子节点 transformMatrix 为空导致嵌套 DEV 中 MOD 位置错误（丢失 SUBDEVICE 变换）
+/// v13: DEV_SUBDEVICE 虚拟节点仅用于层级树/点击，不作为全量几何查询起点，避免与 DEV SUBDEVICES 递归重复
+pub const PARSER_VERSION: &str = "gim-parser-v13";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
@@ -2695,6 +2697,7 @@ pub struct ReachableGeometry {
 #[derive(Clone)]
 struct CbmGeometryNode {
     parent_key: Option<String>,
+    entity_name: Option<String>,
     dev_path: Option<String>,
     local_matrix: [f64; 16],
 }
@@ -2768,7 +2771,7 @@ fn query_reachable_geometry(
     let cbm_t0 = Instant::now();
     let mut cbm_stmt = conn
         .prepare(
-            "SELECT node_key, parent_key, dev_path, transform_matrix
+            "SELECT node_key, parent_key, entity_name, dev_path, transform_matrix
              FROM cbm_node
              WHERE project_id = ?1",
         )
@@ -2780,15 +2783,17 @@ fn query_reachable_geometry(
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, Option<String>>(2)?,
                 row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
             ))
         })
         .map_err(|e| format!("查询 cbm_node dev_path 失败: {}", e))?;
     let mut cbm_nodes: HashMap<String, CbmGeometryNode> = HashMap::new();
     for row in cbm_rows {
-        let (node_key, parent_key, dev_path, transform_matrix) =
+        let (node_key, parent_key, entity_name, dev_path, transform_matrix) =
             row.map_err(|e| format!("读取 cbm_node 行失败: {}", e))?;
         cbm_nodes.insert(node_key, CbmGeometryNode {
             parent_key,
+            entity_name,
             dev_path,
             local_matrix: parse_matrix_opt(transform_matrix.as_deref()),
         });
@@ -2804,6 +2809,9 @@ fn query_reachable_geometry(
             continue;
         };
         if dev_path_raw.trim().is_empty() {
+            continue;
+        }
+        if is_virtual_dev_subdevice(node.entity_name.as_deref()) {
             continue;
         }
         let dev_path = normalize_dev_path(dev_path_raw);
@@ -3041,6 +3049,12 @@ fn make_matrix_instance_key(dev_path: &str, matrix: &[f64; 16]) -> String {
     format!("{}\u{1f}{}", dev_path, matrix_to_string(matrix))
 }
 
+fn is_virtual_dev_subdevice(entity_name: Option<&str>) -> bool {
+    entity_name
+        .map(|name| name.eq_ignore_ascii_case("DEV_SUBDEVICE"))
+        .unwrap_or(false)
+}
+
 fn cumulative_cbm_matrix(
     node_key: &str,
     nodes: &std::collections::HashMap<String, CbmGeometryNode>,
@@ -3123,6 +3137,7 @@ mod tests {
                 project_id INTEGER NOT NULL,
                 node_key TEXT NOT NULL,
                 parent_key TEXT,
+                entity_name TEXT,
                 dev_path TEXT,
                 transform_matrix TEXT
             );
@@ -3164,10 +3179,10 @@ mod tests {
     fn reachable_geometry_includes_direct_and_child_dev_paths() {
         let conn = setup_geometry_conn();
         conn.execute(
-            "INSERT INTO cbm_node (project_id, node_key, parent_key, dev_path, transform_matrix)
+            "INSERT INTO cbm_node (project_id, node_key, parent_key, entity_name, dev_path, transform_matrix)
              VALUES
-             (1, 'root', NULL, 'root.dev', NULL),
-             (1, 'direct', NULL, 'direct.dev', NULL)",
+             (1, 'root', NULL, 'F4System', 'root.dev', NULL),
+             (1, 'direct', NULL, 'F4System', 'direct.dev', NULL)",
             [],
         )
         .unwrap();
@@ -3205,8 +3220,8 @@ mod tests {
     fn reachable_geometry_filters_mod_and_stl() {
         let conn = setup_geometry_conn();
         conn.execute(
-            "INSERT INTO cbm_node (project_id, node_key, parent_key, dev_path, transform_matrix)
-             VALUES (1, 'device', NULL, 'device.dev', NULL)",
+            "INSERT INTO cbm_node (project_id, node_key, parent_key, entity_name, dev_path, transform_matrix)
+             VALUES (1, 'device', NULL, 'F4System', 'device.dev', NULL)",
             [],
         )
         .unwrap();
@@ -3241,10 +3256,10 @@ mod tests {
     fn reachable_geometry_uses_cumulative_cbm_transform() {
         let conn = setup_geometry_conn();
         conn.execute(
-            "INSERT INTO cbm_node (project_id, node_key, parent_key, dev_path, transform_matrix)
+            "INSERT INTO cbm_node (project_id, node_key, parent_key, entity_name, dev_path, transform_matrix)
              VALUES
-             (1, 'parent', NULL, NULL, '1,0,0,0,0,1,0,0,0,0,1,0,10,0,0,1'),
-             (1, 'child', 'parent', 'device.dev', '1,0,0,0,0,1,0,0,0,0,1,0,0,20,0,1')",
+             (1, 'parent', NULL, 'F3System', NULL, '1,0,0,0,0,1,0,0,0,0,1,0,10,0,0,1'),
+             (1, 'child', 'parent', 'F4System', 'device.dev', '1,0,0,0,0,1,0,0,0,0,1,0,0,20,0,1')",
             [],
         )
         .unwrap();
@@ -3266,6 +3281,45 @@ mod tests {
         assert_eq!(
             rows[0].placement_transform_matrix.as_deref(),
             Some("1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,10.000000,20.000000,0.000000,1.000000")
+        );
+    }
+
+    #[test]
+    fn reachable_geometry_does_not_seed_from_virtual_dev_subdevice_nodes() {
+        let conn = setup_geometry_conn();
+        conn.execute(
+            "INSERT INTO cbm_node (project_id, node_key, parent_key, entity_name, dev_path, transform_matrix)
+             VALUES
+             (1, 'parent', NULL, 'F4System', 'root.dev', NULL),
+             (1, 'parent#dev:0:child.dev', 'parent', 'DEV_SUBDEVICE', 'child.dev',
+              '1,0,0,0,0,1,0,0,0,0,1,0,999,0,0,1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO dev_sub_device (project_id, dev_path, child_dev_path, transform_matrix, sort_order)
+             VALUES (1, 'DEV/root.dev', 'child.dev', '1,0,0,0,0,1,0,0,0,0,1,0,100,0,0,1', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order)
+             VALUES (1, 'DEV/child.dev', 'child.phm', NULL, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, sort_order)
+             VALUES (1, 'PHM/child.phm', 'child.mod', NULL, NULL, 0)",
+            [],
+        )
+        .unwrap();
+
+        let rows = query_reachable_geometry(&conn, 1, true, false).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].placement_transform_matrix.as_deref(),
+            Some("1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,100.000000,0.000000,0.000000,1.000000")
         );
     }
 }

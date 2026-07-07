@@ -15,17 +15,26 @@
  *     - 12 字节：顶点 3（3 × float32 LE）
  *     - 2 字节：属性计数（忽略）
  *
- * 外部变换矩阵（DEV/PHM）由调用方通过 applyExternalTransforms 应用。
+ * 外部变换矩阵（DEV/PHM）由调用方通过 applyPlacementTransformToSceneUnits 应用。
+ *
+ * 单位处理：STL 顶点原始单位为毫米（与 MOD 一致，源自 CAD 导出）。
+ * 这里把 mm→m 缩放烘焙到顶点，使 group.scale 保持 1，与 MOD 加载器
+ * （collectBakedGeometriesByMaterial）保持一致。
+ * 这样 applyPlacementTransformToSceneUnits 的顶点烘焙不会因 group.scale≠1
+ * 触发 Object3D.applyMatrix4 + decompose 链路 corrupt scale。
  */
 
 import * as THREE from 'three';
+
+/** STL 原始顶点单位（毫米）→ 场景单位（米）的缩放系数，与 MOD 保持一致。 */
+const STL_MM_TO_SCENE_UNIT = 0.001;
 
 /**
  * 从 ArrayBuffer 解析二进制 STL 文件。
  *
  * @param buffer STL 文件二进制数据
  * @param stlPath STL 文件路径（用于 Group.name 和错误消息）
- * @returns THREE.Group（含 Mesh）；格式无效或解析失败返回 null
+ * @returns THREE.Group（含 Mesh）；顶点已烘焙 mm→m 缩放；格式无效或解析失败返回 null
  */
 export function parseStlBinary(buffer: ArrayBuffer, stlPath: string): THREE.Group | null {
   if (buffer.byteLength < 84) {
@@ -94,6 +103,13 @@ export function parseStlBinary(buffer: ArrayBuffer, stlPath: string): THREE.Grou
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+
+  // 烘焙 mm→m 缩放到顶点：与 MOD 加载器（collectBakedGeometriesByMaterial）一致，
+  // 使顶点直接以场景单位（米）表达，group.scale 保持 1。
+  // 这样 applyPlacementTransformToSceneUnits 的顶点烘焙不会触发
+  // Object3D.applyMatrix4 + decompose 链路 corrupt scale。
+  // 对法向量无影响：均匀缩放的逆变换矩阵仍为单位矩阵（法向量方向不变）。
+  geometry.scale(STL_MM_TO_SCENE_UNIT, STL_MM_TO_SCENE_UNIT, STL_MM_TO_SCENE_UNIT);
 
   // 默认材质：浅灰色，与 MOD primitive 默认材质一致
   const material = new THREE.MeshPhongMaterial({

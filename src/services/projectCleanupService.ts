@@ -96,13 +96,19 @@ export async function cleanupBeforeOpenNewProject(
       //     traverse 只 dispose geometry，Material 由 disposeSharedXmlModMaterials 统一释放
       // v8: Geometry 也共享（方案 A），traverse 不再 dispose geometry；
       //     Geometry 由 disposeSharedXmlModGeometries 统一释放
+      // v9（方案 B）: merged geometry 不再共享（每 MOD Group 独立），
+      //              traverse 逐 mesh dispose merged geometry；Material 仍共享
       const scene = (ctx.world.scene as any).three as import('three').Scene;
       const { disposeXmlModGroup, disposeSharedXmlModMaterials, disposeSharedXmlModGeometries } = await import('../viewer/xmlModLoader.js');
       const { disposeStlGroup } = await import('../viewer/stlLoader.js');
 
-      // 遍历 MOD 图层中的子 Group（v8：不 dispose geometry/material，二者均共享）
+      // 遍历 MOD 图层中的子 Group
       if (state.modRootGroup) {
-        // v8：traverse 无需 dispose（共享资源统一在下方释放）
+        // 方案 B：merged geometry 不共享，需逐 mesh dispose
+        state.modRootGroup.traverse((obj) => {
+          const mesh = obj as THREE.Mesh;
+          mesh.geometry?.dispose?.();
+        });
         scene.remove(state.modRootGroup);
         xmlModDisposedCount = state.loadedXmlModGroups.size;
       } else {

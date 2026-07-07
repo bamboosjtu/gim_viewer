@@ -19,8 +19,10 @@
  */
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { parseXmlMod } from '../gim/geometry/xmlModParser.js';
-import { xmlModDocumentToGroup } from './xmlModGeometry.js';
+import { collectBakedGeometriesByMaterial } from './xmlModGeometry.js';
+import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 
 // re-export 共享 Material / Geometry 释放函数（项目切换时由 projectCleanupService 调用）
 export { disposeSharedXmlModMaterials, disposeSharedXmlModGeometries } from './xmlModGeometry.js';
@@ -40,9 +42,55 @@ const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
  * @returns THREE.Group（已应用 Entity 内部 TransformMatrix；外部矩阵待应用）
  * @throws XML 解析失败时抛错（由调用方 try/catch）
  */
+/**
+ * 按 Material 分组合并 XmlModDocument 中所有 entity 的 Geometry（方案 B：mergeGeometries 静态合并）。
+ *
+ * 直接从 entity 数据烘焙 TransformMatrix + mm→m 缩放到顶点，不创建中间 Mesh 对象：
+ * - 避免 Object3D.applyMatrix4 → decompose → compose 精度损失（修复变压器位置偏离）
+ * - 省去 77000+ 个 Mesh 对象的构造和 GC 开销（性能提升）
+ * - mm→m 缩放烘焙到顶点，group.scale 保持 1，避免后续 applyPlacementTransform 的
+ *   decompose 在 placement 含缩放分量时 corrupt group.scale（修复 GIS 设备位置偏离）
+ *
+ * 共享的 BufferGeometry（来自 _sharedGeometryCache）仅被 clone，不会被修改。
+ * 共享的 Material 仍然复用（不 clone）。
+ *
+ * @param doc parseXmlMod 返回的 XmlModDocument
+ * @returns 合并后的 Group（按 Material 分组，每组一个 merged Mesh；顶点已含 entity.transform + mm→m）
+ */
+function flattenDocumentToGroup(doc: XmlModDocument): THREE.Group {
+  const merged = new THREE.Group();
+  merged.name = `xml-mod:${doc.modPath}`;
+  merged.userData.modPath = doc.modPath;
+
+  const byMaterial = collectBakedGeometriesByMaterial(doc);
+
+  for (const [mat, geos] of byMaterial) {
+    if (geos.length === 0) continue;
+    const combined = mergeGeometries(geos, false);
+    if (combined) {
+      merged.add(new THREE.Mesh(combined, mat));
+      for (const g of geos) g.dispose();
+    } else {
+      // mergeGeometries 失败（attributes 不一致等）：回退到独立 Mesh，避免 entity 丢失
+      console.warn(`[xmlModLoader] mergeGeometries 失败，回退到独立 Mesh: ${doc.modPath}`, {
+        geoCount: geos.length,
+        attributes: geos.map(g => Object.keys(g.attributes)),
+      });
+      for (const g of geos) {
+        merged.add(new THREE.Mesh(g, mat));
+        // 不 dispose g — 已交给 Mesh 使用
+      }
+    }
+  }
+
+  // 不设置 group.scale：mm→m 缩放已在 collectBakedGeometriesByMaterial 中烘焙到顶点
+  // 保持 group.scale = 1，避免后续 applyPlacementTransformToSceneUnits 的 decompose corrupt scale
+  return merged;
+}
+
 export function loadXmlModFromText(modText: string, modPath: string): THREE.Group {
   const doc = parseXmlMod(modText, modPath);
-  return xmlModDocumentToGroup(doc);
+  return flattenDocumentToGroup(doc);
 }
 
 /**
@@ -117,11 +165,21 @@ export function applyExternalTransforms(
 }
 
 /**
- * 应用已累积的 CBM/DEV/SUBDEVICE/PHM 放置矩阵。
+ * 应用已累积的 CBM/DEV/SUBDEVICE/PHM 放置矩阵（顶点烘焙版）。
  *
- * MOD 文件内部几何在 xmlModDocumentToGroup 中统一缩放 0.001；外部装配矩阵的
- * 平移量同样来自 GIM 工程长度单位，需要在应用到已缩放 Group 前缩到 viewer 单位。
- * 旋转/缩放分量保持不变。
+ * 关键修复：改为遍历 group 的 mesh，直接对 geometry.applyMatrix4(matrix)
+ * 烘焙到顶点，避免 Object3D.applyMatrix4 的 premultiply + decompose 链路。
+ *
+ * 修复背景：当 placement matrix 含缩放分量 s 时，group.applyMatrix4(matrix)
+ * 会执行 `this.matrix.premultiply(matrix)` + `this.matrix.decompose(...)`，
+ * decompose 从 `matrix × group.matrix` 提取 scale，导致 group.scale 被错误修改
+ *（如 s≠1 时 group.scale 从 1 变为 s，几何被错误缩放）。
+ *
+ * 顶点烘焙直接变换 BufferGeometry 的 position attribute，数学上精确，
+ * 不会触发 decompose，因此 placement 的旋转/平移/缩放/剪切都能正确应用到几何。
+ *
+ * 单位处理：MOD/STL 顶点已在加载阶段烘焙 mm→m 缩放（顶点单位为米），
+ * placement 平移量单位为毫米，这里 × 0.001 转为米后烘焙到顶点，单位一致。
  */
 export function applyPlacementTransformToSceneUnits(
   group: THREE.Group,
@@ -132,23 +190,28 @@ export function applyPlacementTransformToSceneUnits(
   matrix.elements[12] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
   matrix.elements[13] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
   matrix.elements[14] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
-  group.applyMatrix4(matrix);
+  // 烘焙到顶点：避免 Object3D.applyMatrix4 + decompose 在 placement 含缩放时 corrupt group.scale
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (mesh.geometry) {
+      mesh.geometry.applyMatrix4(matrix);
+    }
+  });
 }
 
 /**
- * 从 Group 中移除 mesh（不动 geometry/material，二者均共享）。
+ * 从 Group 中移除 mesh 并 dispose merged geometry。
  *
- * v3 起 Geometry 也共享（按 modPath+primitiveType+params 聚类），
- * 不可在此处 dispose geometry；Material 同理。
- * 共享资源由 disposeSharedXmlModGeometries + disposeSharedXmlModMaterials 统一释放。
+ * 方案 B（mergeGeometries 静态合并）后，每个 MOD Group 的 merged geometry 是 unique 的
+ *（合并时 clone+烘焙，不再共享），需要在移除时逐 mesh dispose。
+ * Material 仍共享（_sharedMaterialCache），不在此处 dispose。
+ * Base geometry 缓存（_sharedGeometryCache）仍存在，由 disposeSharedXmlModGeometries 统一释放。
  *
- * 此函数仅做"从 scene 移除"的级联清理，由 projectCleanupService 调用。
- * 调用前需已从 scene 移除（scene.remove(group)）。
+ * 此函数由 projectCleanupService 调用。
  */
 export function disposeXmlModGroup(group: THREE.Group): void {
-  // v3：Geometry 与 Material 均共享，不在此处 dispose
-  // 仅遍历断开引用（让 GC 回收 Object3D 自身的 matrix/quaternion）
-  group.traverse(() => {
-    // 无 dispose 操作；保留 traverse 以便未来按需扩展
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    mesh.geometry?.dispose?.();
   });
 }

@@ -94,12 +94,13 @@ function diagnoseGroupBBox(group: THREE.Group, sourcePath: string): boolean {
       });
     }
     // dispose GPU 资源，避免内存泄漏
+    // 方案 B：merged geometry 是 unique 的（每 MOD Group 独立），可以安全 dispose
+    // Material 是共享的（_sharedMaterialCache），不可在此处 dispose！
+    //   否则会 corrupt 其他使用同一 Material 的 MOD Group
     group.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       mesh.geometry?.dispose?.();
-      const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-      else mat?.dispose?.();
+      // 不 dispose material — 共享资源由 disposeSharedXmlModMaterials 统一释放
     });
   }
 
@@ -203,7 +204,11 @@ function collectCbmDeviceInstances(root: CbmNode | null): CbmNode[] {
     const localTransform = parseCbmTransformMatrix(node.transformMatrix);
     const currentTransform = multiplyTransformMatrices(parentTransform, localTransform);
 
-    if (node.devPath) {
+    // DEV_SUBDEVICE 是层级树展示/点击定位用的虚拟节点。
+    // 自动全量加载从真实 CBM 设备节点出发即可；discoverGeometriesFromNode
+    // 会沿 DEV SUBDEVICES 递归覆盖子设备。若虚拟节点也作为 seed，
+    // 同一子 DEV 会被按两条路径发现，重复实例或缺祖先矩阵的实例会污染场景。
+    if (node.devPath && node.entityName !== 'DEV_SUBDEVICE') {
       nodes.push({
         ...node,
         transformMatrix: matrixToTransformString(currentTransform),

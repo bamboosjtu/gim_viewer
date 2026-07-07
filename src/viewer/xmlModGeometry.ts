@@ -31,6 +31,7 @@ import type {
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 
 const MOD_MM_TO_SCENE_UNIT = 0.001;
+export { MOD_MM_TO_SCENE_UNIT };
 const CYLINDER_SEGMENTS = 16;
 const SPHERE_WIDTH_SEGMENTS = 16;
 const SPHERE_HEIGHT_SEGMENTS = 8;
@@ -305,6 +306,53 @@ export function xmlModDocumentToGroup(doc: XmlModDocument): THREE.Group {
   }
   group.scale.setScalar(MOD_MM_TO_SCENE_UNIT);
   return group;
+}
+
+/**
+ * 收集文档中所有可见 entity 的 baked geometry（已烘焙 TransformMatrix + mm→m 缩放），按 Material 分组。
+ *
+ * 方案 B 专用：直接从 entity 数据烘焙 transform 到 geometry 顶点，
+ * 不经过 Mesh.applyMatrix4 → decompose → compose 链路，避免精度损失。
+ *
+ * 单位处理：MOD 原始尺寸为毫米，这里把 Scale(0.001) 也烘焙到顶点（mm → m），
+ * 使 merged geometry 顶点直接以场景单位（米）表达。
+ * 这样 group.scale 保持 1，后续 applyPlacementTransformToSceneUnits 的顶点烘焙
+ * 不会再触发 Object3D.applyMatrix4 + decompose 链路 corrupt group.scale。
+ *
+ * @param doc 解析后的 XmlModDocument
+ * @returns Map<共享Material, baked BufferGeometry[]>，调用方负责 dispose baked geometry
+ */
+export function collectBakedGeometriesByMaterial(
+  doc: XmlModDocument,
+): Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]> {
+  const byMaterial = new Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>();
+  if (doc.isEmpty) return byMaterial;
+
+  // mm → m 缩放矩阵：烘焙到顶点，避免 group.scale + Object3D.applyMatrix4 decompose 精度损失
+  const mmToScene = new THREE.Matrix4().makeScale(MOD_MM_TO_SCENE_UNIT, MOD_MM_TO_SCENE_UNIT, MOD_MM_TO_SCENE_UNIT);
+
+  for (const entity of doc.entities) {
+    if (!entity.visible) continue;
+
+    const baseGeo = primitiveToGeometry(entity.primitive, doc.modPath);
+    if (!baseGeo) continue; // 跳过暂停渲染的 primitive
+
+    const material = colorToMaterial(entity.color);
+
+    // clone base geometry 并直接烘焙 entity transform + mm→m 缩放
+    // 关键：使用 BufferGeometry.applyMatrix4 直接变换顶点，不经过 Object3D.applyMatrix4/decompose
+    const baked = baseGeo.clone();
+    if (entity.transformMatrix.length === 16) {
+      baked.applyMatrix4(gimMatrixToMatrix4(entity.transformMatrix));
+    }
+    baked.applyMatrix4(mmToScene);
+
+    const arr = byMaterial.get(material) ?? [];
+    arr.push(baked);
+    byMaterial.set(material, arr);
+  }
+
+  return byMaterial;
 }
 
 function sanitizeNum(n: number): number {

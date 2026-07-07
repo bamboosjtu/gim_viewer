@@ -336,9 +336,11 @@ async function expandDevSubDevices(
   }
 
   const children: CbmNode[] = [];
-  for (const subDevice of devDoc.subDevices) {
+  for (let i = 0; i < devDoc.subDevices.length; i++) {
+    const subDevice = devDoc.subDevices[i];
     const childDevPath = subDevice.devPath;
     const normalizedChildDevPath = childDevPath.startsWith('DEV/') ? childDevPath : `DEV/${childDevPath}`;
+    const virtualPath = `${parentCbmPath}#dev:${i}:${childDevPath}`;
 
     // 从缓存获取子 DEV 的 SYMBOLNAME/TYPE
     let childSymbolName = '';
@@ -361,8 +363,10 @@ async function expandDevSubDevices(
         childSymbolName = childInfo.symbolName;
         childType = childInfo.type;
       }
-      // 递归展开孙 SUBDEVICES
-      grandChildren = await expandDevSubDevices(childDevPath, files, `${parentCbmPath}#dev:${childDevPath}`, devInfoCache, devVisited);
+      // 递归展开孙 SUBDEVICES。
+      // 每个 sibling 需要独立 visited 分支；同一个 child DEV 可被多次实例化，
+      // 但矩阵不同，不能因为同名 DEV 被前一个 sibling 访问过就跳过。
+      grandChildren = await expandDevSubDevices(childDevPath, files, virtualPath, devInfoCache, new Set(devVisited));
     } catch {
       // 子 DEV 解析失败，跳过
     }
@@ -370,7 +374,18 @@ async function expandDevSubDevices(
     // 虚拟子节点名称：SYMBOLNAME > TYPE > devPath 文件名
     const childName = childSymbolName || childType || childDevPath.replace(/\.dev$/i, '');
 
-    const virtualPath = `${parentCbmPath}#dev:${childDevPath}`;
+    // 关键：虚拟子节点的 transformMatrix 必须携带 SUBDEVICE.transformMatrix，
+    // 否则 collectCbmDeviceInstances 累积 CBM 树变换时会丢失 SUBDEVICE 变换，
+    // 导致嵌套 DEV 中的 MOD 位置错误（跑到建筑之外）。
+    // 此前为空字符串，会在以下三条路径同时出错：
+    // 1. 自动加载：collectCbmDeviceInstances → discoverGeometriesFromNode → rootTransform 缺失 SUBDEVICE
+    // 2. DB 直通：cbm_node.transform_matrix=NULL → cumulative_cbm_matrix 缺失 SUBDEVICE
+    //    （BFS 路径会补充正确实例，但同一 DEV 会得到两个不同 placement，产生重复几何）
+    // 3. 节点点击：loadModStlForNode → discoverGeometriesFromNode → rootTransform 缺失 SUBDEVICE
+    const childTransformMatrix = subDevice.transformMatrix.length === 16
+      ? subDevice.transformMatrix.join(',')
+      : '';
+
     children.push({
       path: virtualPath,
       name: childName,
@@ -381,7 +396,7 @@ async function expandDevSubDevices(
       ifcFile: '',
       ifcGuid: '',
       classifyName: '',
-      transformMatrix: '',
+      transformMatrix: childTransformMatrix,
       systemNames: [],
       devSymbolName: childSymbolName,
       devType: childType,
