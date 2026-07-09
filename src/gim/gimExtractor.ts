@@ -24,13 +24,14 @@ export interface GimHeaderInfo {
   archiveOffset: number;
 }
 
-function hasGimPackageHeader(v: Uint8Array): boolean {
+/** 检测 buffer 是否以 GIMPKG 魔数开头（纯函数，供单测直接调用） */
+export function hasGimPackageHeader(v: Uint8Array): boolean {
   if (v.length < GIM_PACKAGE_MAGIC.length) return false;
   return String.fromCharCode(...v.slice(0, GIM_PACKAGE_MAGIC.length)) === GIM_PACKAGE_MAGIC;
 }
 
-/** 在 ArrayBuffer 中搜索 7z 或 ZIP 签名的偏移量 */
-function findArchiveOffset(buffer: ArrayBuffer): number {
+/** 在 ArrayBuffer 中搜索 7z 或 ZIP 签名的偏移量（纯函数，供单测直接调用） */
+export function findArchiveOffset(buffer: ArrayBuffer): number {
   const v = new Uint8Array(buffer);
   if (v.length < 8) return 0;
   if (!hasGimPackageHeader(v)) return 0;

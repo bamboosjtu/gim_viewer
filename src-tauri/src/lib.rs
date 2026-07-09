@@ -16,6 +16,19 @@ struct FileInfo {
     sha256: String,
 }
 
+// ===== 路径信任边界（review0709.md §3.3 问题 4） =====
+//
+// `get_file_info` 与 `read_file_bytes` 接受前端传入的任意绝对路径，是本后端最强的
+// 特权边界：前端可借此读取本机任意可访问文件。这是查看器有意为之的设计——GIM/IFC
+// 文件路径由用户通过 Tauri 文件对话框选择，后端不二次校验路径范围。
+//
+// 安全前提：
+//   1. 这些命令只供查看器自身的 GIM/IFC 读取流程调用，前端不应将其暴露给任意输入。
+//   2. 缓存写入路径（`write_cache_file` 等）走的是 db.rs 的 `validate_entry_path`，
+//      与本节的"任意路径读取"是两套独立的信任模型——后者严格隔离路径遍历，前者信任前端。
+//   3. 如未来需要收紧（例如只允许读取用户上次选择目录下的文件），应在此处加白名单校验，
+//      而不是改动 db.rs 的缓存路径防护。
+
 #[tauri::command]
 fn get_file_info(path: String) -> Result<FileInfo, String> {
     let p = Path::new(&path);
@@ -52,6 +65,7 @@ fn get_file_info(path: String) -> Result<FileInfo, String> {
     })
 }
 
+/// 读取任意路径文件的原始字节。路径信任边界见上方 `get_file_info` 注释。
 #[tauri::command]
 fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
     fs::read(path).map_err(|e| e.to_string())

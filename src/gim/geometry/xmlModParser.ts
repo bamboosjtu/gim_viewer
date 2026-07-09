@@ -82,7 +82,12 @@ function parseEntity(node: Element): XmlModEntity | null {
   const id = parseInt(node.getAttribute('ID') ?? '', 10);
   if (Number.isNaN(id)) return null;
 
-  const type = node.getAttribute('Type') ?? 'simple';
+  // 当前样本 Entity.Type 全部为 "simple"，XmlModEntity.type 字段类型亦锁为 "simple" 字面量。
+  // 这里显式取值是为了在样本出现其他 Type 时通过 console.warn 暴露异常（不改变行为，仍按 simple 处理）。
+  const typeAttr = node.getAttribute('Type');
+  if (typeAttr !== null && typeAttr !== 'simple') {
+    console.warn(`[xmlModParser] 未知的 Entity.Type="${typeAttr}"，按 simple 处理（id=${id}）`);
+  }
   const visibleAttr = node.getAttribute('Visible');
   const visible = visibleAttr === null ? true : visibleAttr.toLowerCase() === 'true';
 
@@ -94,7 +99,7 @@ function parseEntity(node: Element): XmlModEntity | null {
 
   return {
     id,
-    type: type === 'simple' ? 'simple' : 'simple', // 当前样本全部为 simple
+    type: 'simple', // 当前样本全部为 simple
     visible,
     primitive,
     transformMatrix,

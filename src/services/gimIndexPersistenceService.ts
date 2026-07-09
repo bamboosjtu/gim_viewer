@@ -1,7 +1,21 @@
 import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
-import type { GimIndexPayload, GimEntryPayload, CbmNodePayload, IfcModelPayload, FileDevEntryPayload, FamPropertyPayload, DevPropertyPayload } from '../desktop/database.js';
+import type {
+  GimIndexPayload,
+  GimEntryPayload,
+  CbmNodePayload,
+  IfcModelPayload,
+  FileDevEntryPayload,
+  FamPropertyPayload,
+  DevPropertyPayload,
+  GeometryRefsPayload,
+  DevSolidModelPayload,
+  DevSubDevicePayload,
+  PhmSolidModelPayload,
+} from '../desktop/database.js';
 import { parseFamSections } from '../gim/famParser.js';
 import { parseKeyValue } from '../gim/cbmParser.js';
+import { parseDev } from '../gim/geometry/devParser.js';
+import { parsePhm } from '../gim/geometry/phmParser.js';
 
 /** 根据路径判断 entry_type */
 function classifyEntryType(path: string): string {
@@ -176,15 +190,6 @@ export async function buildGimIndexPayload(
 }
 
 // ===== 几何引用链索引（v6） =====
-
-import type {
-  GeometryRefsPayload,
-  DevSolidModelPayload,
-  DevSubDevicePayload,
-  PhmSolidModelPayload,
-} from '../desktop/database.js';
-import { parseDev } from '../gim/geometry/devParser.js';
-import { parsePhm } from '../gim/geometry/phmParser.js';
 
 /**
  * 构建几何引用链 payload：解析所有 DEV/PHM 文件的 SOLIDMODEL / SUBDEVICE 引用。

@@ -5,6 +5,22 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::Manager;
 
+/// Debug-only 性能日志宏。
+///
+/// `get_reachable_geometry` 等热路径的性能 eprintln! 在 release 构建中无条件输出，
+/// 会污染用户终端且带来微小 I/O 开销（见 review0709.md §3.3 问题 6）。
+/// 使用此宏后，性能日志仅在 debug 构建中输出；release 构建中完全消除。
+///
+/// 注意：初始化阶段的错误日志（如 init_db 中的 WAL 设置失败）仍使用 eprintln!，
+/// 因为它们是启动故障的诊断信息，需要始终可见。
+macro_rules! debug_perf_log {
+    ($($arg:tt)*) => {
+        if cfg!(debug_assertions) {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
 /// 当前解析器版本（变更解析逻辑时递增，用于缓存失效）
 /// v2: 增加 fam_property / dev_property 表，缓存 CBM/FAM/DEV 基础属性
 /// v3: validate cache requires cbm_node index; rebuild incomplete v2 cache
@@ -2724,27 +2740,27 @@ pub fn get_reachable_geometry(
     let include_mod = include_mod.unwrap_or(true);
     let include_stl = include_stl.unwrap_or(false);
 
-    eprintln!(
+    debug_perf_log!(
         "[get_reachable_geometry] start project_id={} include_mod={} include_stl={}",
         project_id, include_mod, include_stl
     );
 
     // 快速短路：两个都 false 直接返回空
     if !include_mod && !include_stl {
-        eprintln!("[get_reachable_geometry] done total=0ms rows=0 (both false)");
+        debug_perf_log!("[get_reachable_geometry] done total=0ms rows=0 (both false)");
         return Ok(Vec::new());
     }
 
     let lock_t0 = Instant::now();
     let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    eprintln!(
+    debug_perf_log!(
         "[get_reachable_geometry] lock acquired: {}ms",
         lock_t0.elapsed().as_millis()
     );
 
     let results = query_reachable_geometry(&conn, project_id, include_mod, include_stl)?;
 
-    eprintln!(
+    debug_perf_log!(
         "[get_reachable_geometry] done total={}ms rows={} include_mod={} include_stl={}",
         total_t0.elapsed().as_millis(),
         results.len(),
@@ -2823,7 +2839,7 @@ fn query_reachable_geometry(
             queue.push_back((dev_path, matrix));
         }
     }
-    eprintln!(
+    debug_perf_log!(
         "[get_reachable_geometry] cbm dev instances: {}ms devs={} instances={}",
         cbm_t0.elapsed().as_millis(),
         dev_instances.len(),
@@ -2871,7 +2887,7 @@ fn query_reachable_geometry(
             }
         }
     }
-    eprintln!(
+    debug_perf_log!(
         "[get_reachable_geometry] sub devices: {}ms child_added={} reachable_devs={} instances={}",
         sub_t0.elapsed().as_millis(),
         child_count,
@@ -2914,7 +2930,7 @@ fn query_reachable_geometry(
             }
         }
     }
-    eprintln!(
+    debug_perf_log!(
         "[get_reachable_geometry] dev solid model refs: {}ms rows={}",
         dsm_t0.elapsed().as_millis(),
         dsm_count
@@ -2952,7 +2968,7 @@ fn query_reachable_geometry(
             psm_count += 1;
         }
     }
-    eprintln!(
+    debug_perf_log!(
         "[get_reachable_geometry] phm solid models: {}ms rows={}",
         psm_t0.elapsed().as_millis(),
         psm_count
@@ -2987,7 +3003,7 @@ fn query_reachable_geometry(
         }
     }
     results.sort_by(|a, b| a.geometry_path.cmp(&b.geometry_path));
-    eprintln!(
+    debug_perf_log!(
         "[get_reachable_geometry] collect rows: {}ms rows={}",
         collect_t0.elapsed().as_millis(),
         results.len()
