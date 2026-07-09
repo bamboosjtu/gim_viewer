@@ -2773,7 +2773,8 @@ fn query_reachable_geometry(
         .prepare(
             "SELECT node_key, parent_key, entity_name, dev_path, transform_matrix
              FROM cbm_node
-             WHERE project_id = ?1",
+             WHERE project_id = ?1
+               AND (entity_name IS NULL OR entity_name != 'DEV_SUBDEVICE')",
         )
         .map_err(|e| format!("预处理 cbm_node dev_path 失败: {}", e))?;
     let cbm_rows = cbm_stmt

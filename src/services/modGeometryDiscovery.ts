@@ -76,18 +76,27 @@ export interface DiscoveredGeometries {
 /**
  * 从 CBM 节点出发，发现所有需要加载的 MOD/STL 几何来源。
  *
+ * 对真实 CBM 设备节点，rootTransform 取 node.transformMatrix（已含父链累积）。
+ * 对 DEV_SUBDEVICE 虚拟节点，node.transformMatrix 仅含 SUBDEVICE 局部变换，
+ * 调用方需传入 parentCbmTransform（父 CBM 链的累积矩阵），两者相乘得到完整 root。
+ *
  * @param node CBM 节点（必须带 devPath）
  * @param files GIM 解压后的文件集合；为 null 时（缓存命中）返回空
+ * @param parentCbmTransform 父 CBM 链累积矩阵（用于 DEV_SUBDEVICE 虚拟节点）
  * @returns 发现的 MOD + STL 几何来源列表；找不到 DEV/PHM 时返回空
  */
 export async function discoverGeometriesFromNode(
   node: CbmNode,
   files: Map<string, File> | null,
+  parentCbmTransform?: number[],
 ): Promise<DiscoveredGeometries> {
   const empty: DiscoveredGeometries = { mods: [], stls: [] };
   if (!node.devPath || !files) return empty;
 
-  const rootTransform = parseOptionalMatrix(node.transformMatrix);
+  const localTransform = parseOptionalMatrix(node.transformMatrix);
+  const rootTransform = parentCbmTransform && parentCbmTransform.length === 16
+    ? multiplyMatrices(parentCbmTransform, localTransform)
+    : localTransform;
   return discoverGeometriesFromDevPath(`DEV/${node.devPath}`, files, rootTransform, new Set<string>());
 }
 
@@ -210,6 +219,38 @@ function parseOptionalMatrix(raw: string | undefined): number[] {
   if (parts.length !== 16) return IDENTITY_MATRIX.slice();
   const matrix = parts.map(Number);
   return matrix.some((n) => !Number.isFinite(n)) ? IDENTITY_MATRIX.slice() : matrix;
+}
+
+/**
+ * 在 CBM 树中查找目标节点，并返回其父链累积变换矩阵。
+ *
+ * 用于 DEV_SUBDEVICE 虚拟节点：其自身 transformMatrix 仅含 SUBDEVICE 局部变换，
+ * 需要补上乘以父 CBM 链累积矩阵后，才能作为 discoverGeometriesFromNode 的 root。
+ *
+ * @param root CBM 树根节点
+ * @param targetPath 目标节点 path
+ * @returns 父链累积矩阵（列主序，长度 16）；找不到返回单位矩阵
+ */
+export function computeCbmParentTransform(root: CbmNode | null, targetPath: string): number[] {
+  if (!root) return IDENTITY_MATRIX.slice();
+
+  function walk(node: CbmNode, parentTransform: number[]): number[] | null {
+    const local = parseOptionalMatrix(node.transformMatrix);
+    const current = multiplyMatrices(parentTransform, local);
+
+    if (node.path === targetPath) {
+      // 返回父链累积矩阵（不含目标节点自身 local）
+      return parentTransform;
+    }
+
+    for (const child of node.children) {
+      const found = walk(child, current);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  return walk(root, IDENTITY_MATRIX.slice()) ?? IDENTITY_MATRIX.slice();
 }
 
 function matrix4(arr: number[]): THREE.Matrix4 {

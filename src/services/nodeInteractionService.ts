@@ -212,7 +212,7 @@ async function loadModStlForNode(
     return;
   }
 
-  const { discoverGeometriesFromNode } = await import('./modGeometryDiscovery.js');
+  const { discoverGeometriesFromNode, computeCbmParentTransform } = await import('./modGeometryDiscovery.js');
   // discoverGeometriesFromNode 在 files=null 时返回空，因此缓存命中场景需要先构建临时 Map
   const discoveryFiles = files ?? await buildGeometryFilesMapFromCache(projectId!, node);
   if (!discoveryFiles || discoveryFiles.size === 0) {
@@ -220,7 +220,12 @@ async function loadModStlForNode(
     return;
   }
 
-  const { mods, stls } = await discoverGeometriesFromNode(node, discoveryFiles);
+  // DEV_SUBDEVICE 虚拟节点的 transformMatrix 仅含 SUBDEVICE 局部变换，
+  // 需补上乘以父 CBM 链累积矩阵，否则点击加载的 MOD 会丢失父级位置。
+  const parentCbmTransform = node.entityName === 'DEV_SUBDEVICE'
+    ? computeCbmParentTransform(state.currentCbmTree, node.path)
+    : undefined;
+  const { mods, stls } = await discoverGeometriesFromNode(node, discoveryFiles, parentCbmTransform);
 
   if (mods.length === 0 && stls.length === 0) {
     debugLog(DEBUG_IFC_LOAD, '[xml-mod] 未发现 MOD/STL 几何来源:', node.devPath);
