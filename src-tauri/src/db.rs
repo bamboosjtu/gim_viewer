@@ -34,7 +34,8 @@ macro_rules! debug_perf_log {
 /// v11: F3System 命名优化——方案A 过滤 SYSTEMNAME 占位符（- / 其它 / 空），方案B 收集 F4 子节点设备名/IFC文件名生成区分性后缀
 /// v12: 修复 DEV SUBDEVICE 虚拟子节点 transformMatrix 为空导致嵌套 DEV 中 MOD 位置错误（丢失 SUBDEVICE 变换）
 /// v13: DEV_SUBDEVICE 虚拟节点仅用于层级树/点击，不作为全量几何查询起点，避免与 DEV SUBDEVICES 递归重复
-pub const PARSER_VERSION: &str = "gim-parser-v13";
+/// v14: PARTINDEX 是 DEV SUBDEVICE 的 CBM 语义别名，不作为第二个几何查询起点，避免遗漏局部矩阵的重复部件
+pub const PARSER_VERSION: &str = "gim-parser-v14";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
@@ -2790,7 +2791,7 @@ fn query_reachable_geometry(
             "SELECT node_key, parent_key, entity_name, dev_path, transform_matrix
              FROM cbm_node
              WHERE project_id = ?1
-               AND (entity_name IS NULL OR entity_name != 'DEV_SUBDEVICE')",
+                AND (entity_name IS NULL OR (entity_name != 'DEV_SUBDEVICE' AND entity_name != 'PARTINDEX'))",
         )
         .map_err(|e| format!("预处理 cbm_node dev_path 失败: {}", e))?;
     let cbm_rows = cbm_stmt
@@ -3302,14 +3303,16 @@ mod tests {
     }
 
     #[test]
-    fn reachable_geometry_does_not_seed_from_virtual_dev_subdevice_nodes() {
+    fn reachable_geometry_does_not_seed_from_virtual_or_partindex_alias_nodes() {
         let conn = setup_geometry_conn();
         conn.execute(
             "INSERT INTO cbm_node (project_id, node_key, parent_key, entity_name, dev_path, transform_matrix)
              VALUES
              (1, 'parent', NULL, 'F4System', 'root.dev', NULL),
              (1, 'parent#dev:0:child.dev', 'parent', 'DEV_SUBDEVICE', 'child.dev',
-              '1,0,0,0,0,1,0,0,0,0,1,0,999,0,0,1')",
+              '1,0,0,0,0,1,0,0,0,0,1,0,999,0,0,1'),
+             (1, 'part-index', 'parent', 'PARTINDEX', 'child.dev',
+              '1,0,0,0,0,1,0,0,0,0,1,0,888,0,0,1')",
             [],
         )
         .unwrap();

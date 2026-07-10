@@ -5,6 +5,9 @@
 > 关联分析详见：
 > - [09-transform-chain-analysis.md](./09-transform-chain-analysis.md) §6.6 / §13.4 / §14 / §15：变换链分析与结论修正
 > - [09-transform-chain-analysis.md](./09-transform-chain-analysis.md) §11.4 / §12：实例多样性证据与单位处理分析
+> - [20-substation-partindex-alias-correction.md](./20-substation-partindex-alias-correction.md)：PARTINDEX 与 DEV SUBDEVICE 的别名关系更正
+
+> **2026-07-10 更正**：本文涉及“9866 实例 / modPath 去重丢失 3928 实例”的结论已被撤销。该数量混入了 CBM PARTINDEX 别名路径；应从根 DEV 递归一次，并将 PARTINDEX 用作树和属性语义，而非第二个几何入口。
 
 ## 1. 背景与根因
 

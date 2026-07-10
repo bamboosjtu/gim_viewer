@@ -47,7 +47,7 @@ describe('primitiveToGeometry', () => {
       expect(cg.parameters.radiusTop).toBe(50);
       expect(cg.parameters.radiusBottom).toBe(50);
       expect(cg.parameters.height).toBe(300);
-      expect(cg.parameters.radialSegments).toBe(32);
+      expect(cg.parameters.radialSegments).toBe(16);
       // 顶点数 > 0
       expect(g.attributes.position.count).toBeGreaterThan(0);
     });
@@ -187,36 +187,36 @@ describe('primitiveToGeometry', () => {
   });
 
   describe('弱 schema primitive（3 类）', () => {
-    it('RectangularFixedPlate → BoxGeometry 占位 + warn', () => {
+    it('RectangularFixedPlate → 跳过 + warn', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const g = primitiveToGeometry({
         type: 'RectangularFixedPlate',
         raw: { L: '100', W: '50', T: '10' },
       }, TEST_MOD_PATH);
-      expect(g).toBeInstanceOf(THREE.BoxGeometry);
+      expect(g).toBeNull();
       expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(warnSpy.mock.calls[0][0]).toContain('RectangularFixedPlate');
       warnSpy.mockRestore();
     });
 
-    it('OffsetRectangularTable → BoxGeometry 占位 + warn', () => {
+    it('OffsetRectangularTable → 跳过 + warn', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const g = primitiveToGeometry({
         type: 'OffsetRectangularTable',
         raw: { H: '50', L: '200' },
       }, TEST_MOD_PATH);
-      expect(g).toBeInstanceOf(THREE.BoxGeometry);
+      expect(g).toBeNull();
       expect(warnSpy).toHaveBeenCalledTimes(1);
       warnSpy.mockRestore();
     });
 
-    it('RectangularRing → BoxGeometry 占位 + warn', () => {
+    it('RectangularRing → 跳过 + warn', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const g = primitiveToGeometry({
         type: 'RectangularRing',
         raw: { R: '100', DR: '20' },
       }, TEST_MOD_PATH);
-      expect(g).toBeInstanceOf(THREE.BoxGeometry);
+      expect(g).toBeNull();
       expect(warnSpy).toHaveBeenCalledTimes(1);
       warnSpy.mockRestore();
     });

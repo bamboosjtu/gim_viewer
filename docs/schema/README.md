@@ -41,6 +41,7 @@
 | 13 | [13-geometry-ir-schema.md](13-geometry-ir-schema.md) | 统一 Geometry IR 草案、5 种 kind schema、解析管道分层、缺陷对照 | 设计文档（非样本分析，不跟踪实现状态） |
 | 14 | [14-line-catenary-study.md](14-line-catenary-study.md) | 线路悬链线参数研究方法论、审计流程、样本证据与决策路径（M4-B1/B2/B3/B3A/B3B/B3C 沉淀） | 研究文档（非样本分析） |
 | 15 | [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) | demo-line 全量静态分析证据（5460 WIRE / 327 TOWER），KVALUE / MATRIX0 / BLHA / 拓扑分类字段语义确认 | 样本证据文档（demo-line） |
+| 20 | [20-substation-partindex-alias-correction.md](20-substation-partindex-alias-correction.md) | demo-substation PARTINDEX 与 DEV SUBDEVICE 别名关系、几何实例基线更正 | 已落实到渲染入口 |
 
 ---
 

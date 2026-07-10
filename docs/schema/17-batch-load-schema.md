@@ -5,6 +5,7 @@
 > 关联文档：
 > - [09-transform-chain-analysis.md](./09-transform-chain-analysis.md)：完整变换链分析（MOD 实例 placement 累乘）
 > - [16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md)：已知 bug 与改进方向
+> - [20-substation-partindex-alias-correction.md](./20-substation-partindex-alias-correction.md)：PARTINDEX 别名与物理实例基线更正
 > - [10-substation-mod-grammar.md](./10-substation-mod-grammar.md)：MOD XML 语法
 > - [gim_substation.md](../gim_substation.md)：GIM 工程结构
 
@@ -24,12 +25,12 @@
 
 ### 1.2 性能瓶颈定位
 
-参考 [_generated/transform-matrix-instance-analysis-demo-substation.json](./_generated/transform-matrix-instance-analysis-demo-substation.json) 的实例统计：
+参考 [20-substation-partindex-alias-correction.md](./20-substation-partindex-alias-correction.md) 的修正后实例统计：
 
 - **唯一 MOD/STL 文件**：5938 个
-- **链路重建后实例**：9866 个（修复 [16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md) 问题 1 后）
+- **物理几何引用**：5938 个（4135 MOD + 1803 STL；PARTINDEX 不作为第二个实例）
 - **平均每 MOD 文件 primitive 数**：~5 个 Entity（来自 09 号文档 §5.1：46250 Entity / 4135 MOD ≈ 11.2）
-- **预估总 Mesh 数**：9866 实例 × 11 Entity ≈ 108k Mesh
+- **方案 A 基线预估 Mesh 数**：5938 引用 × 11 Entity ≈ 65k Mesh
 
 按 [modAutoLoadService.ts:39-46](../../src/services/modAutoLoadService.ts#L39-L46) 的常量与 [modAutoLoadService.ts:670-709](../../src/services/modAutoLoadService.ts#L670-L709) 的批循环：
 

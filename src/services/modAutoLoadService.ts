@@ -197,18 +197,31 @@ export interface AutoLoadProgress {
  * 注意：同一个 devPath 可能挂在多个 CBM 节点下，且父级 CBM transform 不同。
  * 几何发现必须按 CBM 实例处理；仅磁盘读文件阶段才按 devPath 去重。
  */
-function collectCbmDeviceInstances(root: CbmNode | null): CbmNode[] {
+/**
+ * 判断 CBM 节点能否作为全量几何发现的起点。
+ *
+ * demo-substation 的 PARTINDEX 是 F4 根 DEV 的 SUBDEVICE 在 CBM 中的
+ * 语义别名：二者指向同一个 child DEV，但 PARTINDEX 本身没有
+ * SUBDEVICE 的局部矩阵。根 DEV 的递归发现已经会用正确矩阵覆盖它。
+ * 若 PARTINDEX 再作为独立 seed，会把同一部件以缺失局部矩阵的位置再渲染一次。
+ */
+export function isGeometryAutoLoadSeed(node: CbmNode): boolean {
+  return !!node.devPath
+    && node.entityName !== 'DEV_SUBDEVICE'
+    && node.entityName !== 'PARTINDEX';
+}
+
+export function collectCbmDeviceInstances(root: CbmNode | null): CbmNode[] {
   const nodes: CbmNode[] = [];
 
   function walk(node: CbmNode, parentTransform: number[]) {
     const localTransform = parseCbmTransformMatrix(node.transformMatrix);
     const currentTransform = multiplyTransformMatrices(parentTransform, localTransform);
 
-    // DEV_SUBDEVICE 是层级树展示/点击定位用的虚拟节点。
-    // 自动全量加载从真实 CBM 设备节点出发即可；discoverGeometriesFromNode
-    // 会沿 DEV SUBDEVICES 递归覆盖子设备。若虚拟节点也作为 seed，
-    // 同一子 DEV 会被按两条路径发现，重复实例或缺祖先矩阵的实例会污染场景。
-    if (node.devPath && node.entityName !== 'DEV_SUBDEVICE') {
+    // 自动全量加载仅从真正的设备根节点出发。DEV_SUBDEVICE 与 PARTINDEX
+    // 都是 child DEV 的树节点/语义别名；discoverGeometriesFromNode 会沿
+    // 根 DEV 的 SUBDEVICES 递归，并携带唯一正确的局部装配矩阵。
+    if (isGeometryAutoLoadSeed(node)) {
       nodes.push({
         ...node,
         transformMatrix: matrixToTransformString(currentTransform),
@@ -325,7 +338,7 @@ async function buildFileMapFromDiskCache(
     if (batch.length === 0) break;
 
     for (const path of batch) devSeen.add(path);
-    console.log(`[autoLoad] 缓存命中：批量读取 ${batch.length} 个 DEV 文件...`);
+    debugLog(DEBUG_IFC_LOAD, `[autoLoad] 缓存命中：批量读取 ${batch.length} 个 DEV 文件...`);
     const devBytes = await batchReadCachedFiles(projectId, batch);
 
     for (const [entryPath, bytes] of devBytes) {
@@ -356,13 +369,13 @@ async function buildFileMapFromDiskCache(
       }
     }
   }
-  console.log(`[autoLoad] DEV 批量读取完成: ${devReadCount} 个有效，发现 ${phmRefs.size} 个 PHM 引用`);
+  debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV 批量读取完成: ${devReadCount} 个有效，发现 ${phmRefs.size} 个 PHM 引用`);
 
   // ── 第二步：批量读取 PHM 文件（1 次 IPC） ──
   const modStlRefs = new Set<string>();
   const phmArr = Array.from(phmRefs);
   if (phmArr.length > 0) {
-    console.log(`[autoLoad] 批量读取 ${phmArr.length} 个 PHM 文件（1 次 IPC）...`);
+    debugLog(DEBUG_IFC_LOAD, `[autoLoad] 批量读取 ${phmArr.length} 个 PHM 文件（1 次 IPC）...`);
     const phmBytes = await batchReadCachedFiles(projectId, phmArr);
 
     let phmReadCount = 0;
@@ -383,13 +396,13 @@ async function buildFileMapFromDiskCache(
         // 解析失败跳过
       }
     }
-    console.log(`[autoLoad] PHM 批量读取完成: ${phmReadCount} 个，发现 ${modStlRefs.size} 个 MOD/STL 引用`);
+    debugLog(DEBUG_IFC_LOAD, `[autoLoad] PHM 批量读取完成: ${phmReadCount} 个，发现 ${modStlRefs.size} 个 MOD/STL 引用`);
   }
 
   // ── 第三步：批量读取 MOD/STL 文件（1 次 IPC） ──
   const modStlArr = Array.from(modStlRefs);
   if (modStlArr.length > 0) {
-    console.log(`[autoLoad] 批量读取 ${modStlArr.length} 个 MOD/STL 文件（1 次 IPC）...`);
+    debugLog(DEBUG_IFC_LOAD, `[autoLoad] 批量读取 ${modStlArr.length} 个 MOD/STL 文件（1 次 IPC）...`);
     const msBytes = await batchReadCachedFiles(projectId, modStlArr);
 
     let msReadCount = 0;
@@ -398,10 +411,10 @@ async function buildFileMapFromDiskCache(
       result.set(msPath, bytesToFile(bytes, msPath));
       msReadCount++;
     }
-    console.log(`[autoLoad] MOD/STL 批量读取完成: ${msReadCount} 个`);
+    debugLog(DEBUG_IFC_LOAD, `[autoLoad] MOD/STL 批量读取完成: ${msReadCount} 个`);
   }
 
-  console.log(`[autoLoad] 磁盘缓存 Map 构建完成: ${result.size} 个文件（共 3 次 IPC）`);
+  debugLog(DEBUG_IFC_LOAD, `[autoLoad] 磁盘缓存 Map 构建完成: ${result.size} 个文件（共 3 次 IPC）`);
   return result.size > 0 ? result : null;
 }
 
@@ -436,7 +449,7 @@ export async function autoLoadModAndStlGeometry(
 
   // 早期 token 校验：项目已切换则立即退出
   if (!isTokenValid(state, token)) {
-    console.log('[autoLoad] token 不匹配，停止加载（项目已切换）');
+    debugLog(DEBUG_IFC_LOAD, '[autoLoad] token 不匹配，停止加载（项目已切换）');
     return { modCount: 0, stlCount: 0 };
   }
 
@@ -462,13 +475,13 @@ export async function autoLoadModAndStlGeometry(
   // 逐文件读取是巨大浪费。SQLite 已索引引用链，一次查询即可得到全部 MOD/STL 路径。
   const isCacheHit = !files;
   if (isCacheHit && state.currentProjectId != null) {
-    console.log(`[autoLoad] SQLite 查询可到达几何: includeMod=${includeMod} includeStl=${includeStl}`);
+    debugLog(DEBUG_IFC_LOAD, `[autoLoad] SQLite 查询可到达几何: includeMod=${includeMod} includeStl=${includeStl}`);
     try {
       const { getReachableGeometry, batchReadCachedFiles } = await import('../desktop/database.js');
       const reachable = await getReachableGeometry(state.currentProjectId, { includeMod, includeStl });
 
       if (reachable.length === 0) {
-        console.log('[autoLoad] 无可到达的 MOD/STL 几何源（SQLite 查询为空）');
+        debugLog(DEBUG_IFC_LOAD, '[autoLoad] 无可到达的 MOD/STL 几何源（SQLite 查询为空）');
         showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
         return { modCount: 0, stlCount: 0 };
       }
@@ -484,12 +497,12 @@ export async function autoLoadModAndStlGeometry(
 
       const logExtras: string[] = [`${modPaths.size} MOD`];
       if (includeStl) logExtras.push(`${stlPaths.size} STL`);
-      console.log(`[autoLoad] SQLite 查询完成: ${reachable.length} 个几何源 → ${logExtras.join(' + ')}`);
+      debugLog(DEBUG_IFC_LOAD, `[autoLoad] SQLite 查询完成: ${reachable.length} 个几何源 → ${logExtras.join(' + ')}`);
 
       // 批量读取 MOD 文件（1 次 IPC）
       const modArr = Array.from(modPaths);
       if (modArr.length > 0) {
-        console.log(`[autoLoad] 批量读取 ${modArr.length} 个 MOD 文件（1 次 IPC）...`);
+        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 批量读取 ${modArr.length} 个 MOD 文件（1 次 IPC）...`);
         const modBytes = await batchReadCachedFiles(state.currentProjectId, modArr);
         files = new Map(); // 复用 files 变量，仅含 MOD
         for (const [path, bytes] of modBytes) {
@@ -502,7 +515,7 @@ export async function autoLoadModAndStlGeometry(
       // 批量读取 STL 文件（1 次 IPC）
       const stlArr = Array.from(stlPaths);
       if (stlArr.length > 0) {
-        console.log(`[autoLoad] 批量读取 ${stlArr.length} 个 STL 文件（1 次 IPC）...`);
+        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 批量读取 ${stlArr.length} 个 STL 文件（1 次 IPC）...`);
         const stlBytes = await batchReadCachedFiles(state.currentProjectId, stlArr);
         if (!files) files = new Map();
         for (const [path, bytes] of stlBytes) {
@@ -513,12 +526,12 @@ export async function autoLoadModAndStlGeometry(
       }
 
       if (!files || files.size === 0) {
-        console.log('[autoLoad] 无有效 MOD/STL 文件（磁盘缓存可能缺失），跳过加载');
+        debugLog(DEBUG_IFC_LOAD, '[autoLoad] 无有效 MOD/STL 文件（磁盘缓存可能缺失），跳过加载');
         showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
         return { modCount: 0, stlCount: 0 };
       }
 
-      console.log(`[autoLoad] 从磁盘读取了 ${files.size} 个 MOD/STL 文件（${isCacheHit ? '缓存命中' : '首次打开'}）`);
+      debugLog(DEBUG_IFC_LOAD, `[autoLoad] 从磁盘读取了 ${files.size} 个 MOD/STL 文件（${isCacheHit ? '缓存命中' : '首次打开'}）`);
 
       // 缓存命中时跳过 Phase 2 的 DEV→PHM→MOD 发现循环，
       // 直接用 SQLite 返回的结果加载几何
@@ -564,7 +577,7 @@ export async function autoLoadModAndStlGeometry(
       }
 
       // 跳过 Phase 2，直接进入加载阶段
-      console.log(`[autoLoad] DB 直通加载: ${modGeos.length} MOD + ${stlGeos.length} STL`);
+      debugLog(DEBUG_IFC_LOAD, `[autoLoad] DB 直通加载: ${modGeos.length} MOD + ${stlGeos.length} STL`);
 
       const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
       const { modRoot, stlRoot } = ensureGeometryLayers(state, scene);
@@ -574,9 +587,9 @@ export async function autoLoadModAndStlGeometry(
 
       // 加载 MOD
       if (modGeos.length > 0) {
-        console.log(`[autoLoad] 开始加载 ${modGeos.length} 个 MOD...`);
+        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 开始加载 ${modGeos.length} 个 MOD...`);
         for (let i = 0; i < modGeos.length; i += CONCURRENCY) {
-          if (!isTokenValid(state, token)) { console.log('[autoLoad] token 不匹配，停止 DB MOD 加载'); return { modCount: loadedMods, stlCount: 0 }; }
+          if (!isTokenValid(state, token)) { debugLog(DEBUG_IFC_LOAD, '[autoLoad] token 不匹配，停止 DB MOD 加载'); return { modCount: loadedMods, stlCount: 0 }; }
           const batch = modGeos.slice(i, i + CONCURRENCY);
           showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length, currentPath: batch[0].modPath });
           for (const geo of batch) {
@@ -599,14 +612,14 @@ export async function autoLoadModAndStlGeometry(
           }
           if (i + CONCURRENCY < modGeos.length) await new Promise((r) => setTimeout(r, YIELD_MS));
         }
-        console.log(`[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}（跳过异常 bbox: ${skippedBadBBox}）`);
+        debugLog(DEBUG_IFC_LOAD, `[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}（跳过异常 bbox: ${skippedBadBBox}）`);
       }
 
       // 加载 STL（仅 includeStl=true 时进入，stlGeos 已在 discovery 阶段过滤）
       if (stlGeos.length > 0) {
-        console.log(`[autoLoad] 开始加载 ${stlGeos.length} 个 STL...`);
+        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 开始加载 ${stlGeos.length} 个 STL...`);
         for (let i = 0; i < stlGeos.length; i += CONCURRENCY) {
-          if (!isTokenValid(state, token)) { console.log('[autoLoad] token 不匹配，停止 DB STL 加载'); return { modCount: loadedMods, stlCount: loadedStls }; }
+          if (!isTokenValid(state, token)) { debugLog(DEBUG_IFC_LOAD, '[autoLoad] token 不匹配，停止 DB STL 加载'); return { modCount: loadedMods, stlCount: loadedStls }; }
           const batch = stlGeos.slice(i, i + CONCURRENCY);
           showProgress({ phase: 'loading_stl', collectedDevPaths: deviceNodes.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length, currentPath: batch[0].stlPath });
           for (const geo of batch) {
@@ -628,10 +641,10 @@ export async function autoLoadModAndStlGeometry(
           }
           if (i + CONCURRENCY < stlGeos.length) await new Promise((r) => setTimeout(r, YIELD_MS));
         }
-        console.log(`[autoLoad] STL 加载完成: ${loadedStls}/${stlGeos.length}`);
+        debugLog(DEBUG_IFC_LOAD, `[autoLoad] STL 加载完成: ${loadedStls}/${stlGeos.length}`);
       }
 
-      console.log(`[autoLoad] 全部几何加载完成 (DB直通): MOD=${loadedMods}, STL=${loadedStls}, 跳过异常bbox=${skippedBadBBox}`);
+      debugLog(DEBUG_IFC_LOAD, `[autoLoad] 全部几何加载完成 (DB直通): MOD=${loadedMods}, STL=${loadedStls}, 跳过异常bbox=${skippedBadBBox}`);
       showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length });
       return { modCount: loadedMods, stlCount: loadedStls };
     } catch (err) {
@@ -660,12 +673,12 @@ export async function autoLoadModAndStlGeometry(
   const modMap = new Map<string, DiscoveredModGeometry>();
   const stlMap = new Map<string, DiscoveredStlGeometry>();
 
-  console.log(`[autoLoad] 开始发现几何源（${deviceNodes.length} 个 CBM 设备实例）...`);
+  debugLog(DEBUG_IFC_LOAD, `[autoLoad] 开始发现几何源（${deviceNodes.length} 个 CBM 设备实例）...`);
 
   let discoveredCount = 0;
   const PROGRESS_INTERVAL = 50;  // 每 50 个 CBM 设备实例更新一次进度 UI
   const YIELD_INTERVAL = 5;      // 每 5 个 CBM 设备实例 yield 主线程
-  const LOG_INTERVAL = 100;      // 每 100 个 CBM 设备实例输出 console.log
+  const LOG_INTERVAL = 100;      // 每 100 个 CBM 设备实例输出 debugLog
 
   for (const node of deviceNodes) {
     const devPath = node.devPath || '';
@@ -687,10 +700,10 @@ export async function autoLoadModAndStlGeometry(
 
     // 里程碑日志：让用户知道发现正在推进
     if (discoveredCount > 0 && discoveredCount % LOG_INTERVAL === 0) {
-      console.log(`[autoLoad] 发现进度: ${discoveredCount}/${deviceNodes.length} CBM instances, MOD=${modMap.size}, STL=${stlMap.size}`);
+      debugLog(DEBUG_IFC_LOAD, `[autoLoad] 发现进度: ${discoveredCount}/${deviceNodes.length} CBM instances, MOD=${modMap.size}, STL=${stlMap.size}`);
       // 批次间检查 token，项目切换时提前退出
       if (!isTokenValid(state, token)) {
-        console.log('[autoLoad] token 不匹配，停止发现（项目已切换）');
+        debugLog(DEBUG_IFC_LOAD, '[autoLoad] token 不匹配，停止发现（项目已切换）');
         return { modCount: 0, stlCount: 0 };
       }
     }
@@ -724,8 +737,7 @@ export async function autoLoadModAndStlGeometry(
   const modGeos = Array.from(modMap.values());
   const stlGeos = Array.from(stlMap.values());
 
-  console.log(`[autoLoad] 发现完成: ${modGeos.length} 个 MOD + ${stlGeos.length} 个 STL（实例去重后，共扫描 ${discoveredCount} 个 CBM 实例）`);
-  debugLog(DEBUG_IFC_LOAD, `[autoLoad] 发现 ${modGeos.length} 个 MOD + ${stlGeos.length} 个 STL（实例去重后）`);
+  debugLog(DEBUG_IFC_LOAD, `[autoLoad] 发现完成: ${modGeos.length} 个 MOD + ${stlGeos.length} 个 STL（实例去重后，共扫描 ${discoveredCount} 个 CBM 实例）`);
 
   // ── Phase 3: 分批加载 MOD ──
   const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
@@ -734,7 +746,7 @@ export async function autoLoadModAndStlGeometry(
   let skippedBadBBox = 0;
 
   if (modGeos.length > 0) {
-    console.log(`[autoLoad] 开始加载 ${modGeos.length} 个 MOD 文件...`);
+    debugLog(DEBUG_IFC_LOAD, `[autoLoad] 开始加载 ${modGeos.length} 个 MOD 文件...`);
     for (let i = 0; i < modGeos.length; i += CONCURRENCY) {
       const batch = modGeos.slice(i, i + CONCURRENCY);
       showProgress({
@@ -751,7 +763,7 @@ export async function autoLoadModAndStlGeometry(
 
       // 每批前检查 token
       if (!isTokenValid(state, token)) {
-        console.log('[autoLoad] token 不匹配，停止 MOD 加载');
+        debugLog(DEBUG_IFC_LOAD, '[autoLoad] token 不匹配，停止 MOD 加载');
         return { modCount: loadedMods, stlCount: 0 };
       }
 
@@ -778,15 +790,14 @@ export async function autoLoadModAndStlGeometry(
         await new Promise((r) => setTimeout(r, YIELD_MS));
       }
     }
-    console.log(`[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}（跳过异常 bbox: ${skippedBadBBox}）`);
-    debugLog(DEBUG_IFC_LOAD, `[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}`);
+    debugLog(DEBUG_IFC_LOAD, `[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}（跳过异常 bbox: ${skippedBadBBox}）`);
   }
 
   // ── Phase 4: 分批加载 STL ──
   let loadedStls = 0;
 
   if (stlGeos.length > 0) {
-    console.log(`[autoLoad] 开始加载 ${stlGeos.length} 个 STL 文件...`);
+    debugLog(DEBUG_IFC_LOAD, `[autoLoad] 开始加载 ${stlGeos.length} 个 STL 文件...`);
     for (let i = 0; i < stlGeos.length; i += CONCURRENCY) {
       const batch = stlGeos.slice(i, i + CONCURRENCY);
       showProgress({
@@ -803,7 +814,7 @@ export async function autoLoadModAndStlGeometry(
 
       // 每批前检查 token
       if (!isTokenValid(state, token)) {
-        console.log('[autoLoad] token 不匹配，停止 STL 加载');
+        debugLog(DEBUG_IFC_LOAD, '[autoLoad] token 不匹配，停止 STL 加载');
         return { modCount: loadedMods, stlCount: loadedStls };
       }
 
@@ -830,12 +841,11 @@ export async function autoLoadModAndStlGeometry(
         await new Promise((r) => setTimeout(r, YIELD_MS));
       }
     }
-    console.log(`[autoLoad] STL 加载完成: ${loadedStls}/${stlGeos.length}`);
     debugLog(DEBUG_IFC_LOAD, `[autoLoad] STL 加载完成: ${loadedStls}/${stlGeos.length}`);
   }
 
   // ── Phase 5: 完成 ──
-  console.log(`[autoLoad] 全部几何加载完成: MOD=${loadedMods}, STL=${loadedStls}, 跳过异常bbox=${skippedBadBBox}`);
+  debugLog(DEBUG_IFC_LOAD, `[autoLoad] 全部几何加载完成: MOD=${loadedMods}, STL=${loadedStls}, 跳过异常bbox=${skippedBadBBox}`);
   showProgress({
     phase: 'done',
     collectedDevPaths: deviceNodes.length,

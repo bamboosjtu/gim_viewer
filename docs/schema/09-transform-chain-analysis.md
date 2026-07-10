@@ -5,6 +5,8 @@
 > 本报告不进入几何渲染实现，也不解释坐标系语义、单位换算、轴方向约定或三维构件拓扑。所有分析脚本集中放在文末附录 A。
 >
 > **修订记录**：本文档初版仅覆盖 PHM × MOD Entity 两级变换，得出"两级变换假设不成立、实际为单级变换"的错误结论，导致后续渲染管线开发出现装配矩阵缺失与实例位置丢失。本次修订补充 CBM/DEV/SUBDEVICE 完整链路分析与实例级多样性证据，并修正第 6/13/14/15/16 节的结论。详见 [16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md) 的 bug 清单与修复建议。
+>
+> **2026-07-10 更正**：本样本的 `9866` 是把 F4 根 DEV 的 SUBDEVICE 路径与其 CBM PARTINDEX 语义别名重复遍历后的路径数，不是应渲染的物理实例数。PARTINDEX 与对应 SUBDEVICE 一一映射但不含局部矩阵；正确的几何引用基线为 `4135 MOD + 1803 STL = 5938`。详见 [20-substation-partindex-alias-correction.md](./20-substation-partindex-alias-correction.md)。
 
 ## 1. 分析目标与范围
 

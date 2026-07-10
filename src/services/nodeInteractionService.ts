@@ -203,6 +203,17 @@ async function loadModStlForNode(
   node: CbmNode,
   showMessage: (text: string) => void,
 ): Promise<void> {
+  // PARTINDEX 是父设备 DEV SUBDEVICE 的 CBM 语义别名。它自身没有
+  // SUBDEVICE 局部矩阵，直接从它发现几何会得到错误 placement。
+  // 回退到最近的真实设备祖先，由 DEV 递归一次性计算该设备及部件的正确矩阵。
+  const geometryNode = resolveGeometryLoadNode(state.currentCbmTree, node);
+  if (geometryNode !== node) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] PARTINDEX 使用设备祖先作为几何入口:', {
+      partIndex: node.path,
+      geometryRoot: geometryNode.path,
+    });
+  }
+
   // 准备文件读取适配器：currentFiles 优先，缓存命中时回退磁盘
   const files = state.currentFiles;
   const projectId = state.currentProjectId;
@@ -214,21 +225,21 @@ async function loadModStlForNode(
 
   const { discoverGeometriesFromNode, computeCbmParentTransform } = await import('./modGeometryDiscovery.js');
   // discoverGeometriesFromNode 在 files=null 时返回空，因此缓存命中场景需要先构建临时 Map
-  const discoveryFiles = files ?? await buildGeometryFilesMapFromCache(projectId!, node);
+  const discoveryFiles = files ?? await buildGeometryFilesMapFromCache(projectId!, geometryNode);
   if (!discoveryFiles || discoveryFiles.size === 0) {
-    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 无法获取 DEV/PHM/MOD 文件:', node.devPath);
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 无法获取 DEV/PHM/MOD 文件:', geometryNode.devPath);
     return;
   }
 
   // DEV_SUBDEVICE 虚拟节点的 transformMatrix 仅含 SUBDEVICE 局部变换，
   // 需补上乘以父 CBM 链累积矩阵，否则点击加载的 MOD 会丢失父级位置。
-  const parentCbmTransform = node.entityName === 'DEV_SUBDEVICE'
-    ? computeCbmParentTransform(state.currentCbmTree, node.path)
+  const parentCbmTransform = geometryNode.entityName === 'DEV_SUBDEVICE'
+    ? computeCbmParentTransform(state.currentCbmTree, geometryNode.path)
     : undefined;
-  const { mods, stls } = await discoverGeometriesFromNode(node, discoveryFiles, parentCbmTransform);
+  const { mods, stls } = await discoverGeometriesFromNode(geometryNode, discoveryFiles, parentCbmTransform);
 
   if (mods.length === 0 && stls.length === 0) {
-    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 未发现 MOD/STL 几何来源:', node.devPath);
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] 未发现 MOD/STL 几何来源:', geometryNode.devPath);
     return;
   }
 
@@ -310,6 +321,29 @@ async function loadModStlForNode(
       fitCameraToScene(ctx, state);
     }
   }
+}
+
+/**
+ * 为节点点击选择可用于发现几何的 CBM 节点。
+ *
+ * PARTINDEX 只描述父设备的一个组成部件，并不保存其 DEV SUBDEVICE
+ * transform。选择最近的带 DEV 的祖先可复用完整 DEV 递归链，避免生成
+ * 缺失局部矩阵的重复实例。
+ */
+export function resolveGeometryLoadNode(root: CbmNode | null, node: CbmNode): CbmNode {
+  if (node.entityName !== 'PARTINDEX' || !root) return node;
+
+  function walk(current: CbmNode, nearestDevAncestor: CbmNode | null): CbmNode | null {
+    if (current.path === node.path) return nearestDevAncestor;
+    const nextAncestor = current.devPath ? current : nearestDevAncestor;
+    for (const child of current.children) {
+      const found = walk(child, nextAncestor);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  return walk(root, null) ?? node;
 }
 
 /**
@@ -474,8 +508,8 @@ export function collectXmlModNodes(root: CbmNode | null): CbmNode[] {
   const seen = new Set<string>();
   const result: CbmNode[] = [];
   function walk(n: CbmNode) {
-    // 收集所有有 devPath 的节点，不论是否有 IFC
-    if (n.devPath && !seen.has(n.devPath)) {
+    // PARTINDEX / DEV_SUBDEVICE 都由真实设备根节点的 DEV 递归覆盖。
+    if (n.devPath && n.entityName !== 'PARTINDEX' && n.entityName !== 'DEV_SUBDEVICE' && !seen.has(n.devPath)) {
       seen.add(n.devPath);
       result.push(n);
     }

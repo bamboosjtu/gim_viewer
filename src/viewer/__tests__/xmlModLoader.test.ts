@@ -24,7 +24,8 @@ describe('loadXmlModFromText', () => {
     expect(group.children.length).toBe(1);
     expect(group.name).toBe('xml-mod:MOD/test.mod');
     const mesh = group.children[0] as THREE.Mesh;
-    expect(mesh.geometry).toBeInstanceOf(THREE.CylinderGeometry);
+    // 方案 B 按 Material 合并后保留的是烘焙后的 BufferGeometry。
+    expect(mesh.geometry).toBeInstanceOf(THREE.BufferGeometry);
   });
 
   it('EMPTY_DEVICE_XML → 空 Group', () => {
@@ -145,7 +146,7 @@ describe('rowMajorToMatrix4', () => {
 });
 
 describe('disposeXmlModGroup', () => {
-  it('v3：遍历 Group 不释放 geometry/material（二者均共享，由统一函数释放）', () => {
+  it('方案 B：释放 Group 独有的 merged geometry，但保留共享 material', () => {
     const group = new THREE.Group();
     const geo1 = new THREE.BoxGeometry(1, 1, 1);
     const mat1 = new THREE.MeshStandardMaterial({ color: 0xff0000 });
@@ -174,10 +175,9 @@ describe('disposeXmlModGroup', () => {
 
     disposeXmlModGroup(group);
 
-    // v3：geometry 与 material 均不在此处 dispose（二者共享）
-    expect(geoSpy1).not.toHaveBeenCalled();
-    expect(geoSpy2).not.toHaveBeenCalled();
-    expect(geoSpy3).not.toHaveBeenCalled();
+    expect(geoSpy1).toHaveBeenCalledTimes(1);
+    expect(geoSpy2).toHaveBeenCalledTimes(1);
+    expect(geoSpy3).toHaveBeenCalledTimes(1);
     expect(matSpy1).not.toHaveBeenCalled();
     expect(matSpy2).not.toHaveBeenCalled();
     expect(matSpy3).not.toHaveBeenCalled();

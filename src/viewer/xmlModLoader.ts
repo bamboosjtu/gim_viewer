@@ -113,7 +113,9 @@ export async function loadXmlModFromFiles(
   const buffer = await file.arrayBuffer();
   const text = new TextDecoder().decode(buffer);
   try {
-    if (!RENDERABLE_MOD_PRIMITIVE_RE.test(text)) {
+    // 空 MOD 是已知的合法占位文件；其他不含当前可渲染 primitive 的内容
+    // 仍交给 XML parser 校验，不能把损坏文件静默伪装成空模型。
+    if (!RENDERABLE_MOD_PRIMITIVE_RE.test(text) && /<Device\b[^>]*>\s*<Entities\s*\/\s*>\s*<\/Device>\s*$/i.test(text)) {
       const group = new THREE.Group();
       group.name = `xml-mod:${modPath}`;
       return group;
