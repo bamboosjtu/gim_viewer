@@ -434,6 +434,126 @@ function isTokenValid(state: AppState, token?: number): boolean {
  * @param showProgress 进度回调（传入当前进度快照）
  * @returns 加载计数
  */
+
+/**
+ * 方案 C v2：DEV 粒度 GLB 快速路径。
+ *
+ * 如果所有 CBM seed 的 DEV.glb 缓存全部命中，直接加载 DEV.glb 并应用 CBM 矩阵，
+ * 跳过全部 XML 解析和 MOD 逐个加载。
+ *
+ * 数学等价性：两次 applyPlacementTransformToSceneUnits（各 ×0.001）
+ * 等价于一次完整应用（CBM × DEV × PHM，×0.001），详见 18c §10.4。
+ *
+ * @returns loaded=true 表示全部命中并已加载；loaded=false 表示未全部命中，需回退到 MOD 粒度
+ */
+async function tryDevGlbFastPath(
+  state: AppState,
+  scene: THREE.Scene,
+  deviceNodes: CbmNode[],
+  showProgress: (p: AutoLoadProgress) => void,
+  token?: number,
+): Promise<{ loaded: boolean; modCount: number; stlCount: number }> {
+  if (state.currentProjectId == null || deviceNodes.length === 0) {
+    return { loaded: false, modCount: 0, stlCount: 0 };
+  }
+
+  // 1. 收集所有 seed devPaths（去重）
+  const devPathSet = new Set<string>();
+  for (const seed of deviceNodes) {
+    if (seed.devPath) {
+      const normalized = seed.devPath.replace(/\\/g, '/');
+      const devPath = normalized.toLowerCase().startsWith('dev/')
+        ? normalized
+        : `DEV/${normalized}`;
+      devPathSet.add(devPath);
+    }
+  }
+  const uniqueDevPaths = Array.from(devPathSet);
+
+  if (uniqueDevPaths.length === 0) {
+    return { loaded: false, modCount: 0, stlCount: 0 };
+  }
+
+  // 2. 批量预读 DEV.glb（1 次 IPC）
+  let glbCacheMap: Map<string, Uint8Array | null>;
+  try {
+    const { batchReadGlbFiles } = await import('../desktop/database.js');
+    glbCacheMap = await batchReadGlbFiles(state.currentProjectId, uniqueDevPaths);
+  } catch (err) {
+    debugLog(DEBUG_IFC_LOAD, '[autoLoad] DEV GLB 批量预读失败，回退到 MOD 粒度:', err);
+    return { loaded: false, modCount: 0, stlCount: 0 };
+  }
+
+  // 3. 检查命中率
+  // 注意：部分 DEV 没有几何引用（serializeDevToGlb 返回 null，不写 GLB 文件），
+  // 这些 DEV 在 batchReadGlbFiles 中返回 null。这是正常情况，不应导致整体回退。
+  // 只要至少有 1 个命中，就使用 GLB 快速路径；未命中的 DEV 本来就没有几何，跳过即可。
+  let hitCount = 0;
+  for (const [, bytes] of glbCacheMap) {
+    if (bytes && bytes.byteLength > 0) hitCount++;
+  }
+  debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV GLB 预读: ${hitCount}/${uniqueDevPaths.length} 命中（${uniqueDevPaths.length - hitCount} 个无几何 DEV 跳过）`);
+
+  if (hitCount === 0) {
+    // 无任何命中，回退到 MOD 粒度（首次打开尚未序列化完成的情况）
+    return { loaded: false, modCount: 0, stlCount: 0 };
+  }
+
+  // 4. 全部命中 → 加载 DEV.glb，应用 CBM 矩阵，加入 scene
+  const { loadDevGlb } = await import('./glbCacheService.js');
+  const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
+  const { applyProjectSourceToViewer } = await import('./coordinateAlignmentService.js');
+
+  const { modRoot } = ensureGeometryLayers(state, scene);
+  const loadedDevGroups = new Map<string, THREE.Group>();
+
+  let loadedCount = 0;
+  const totalSeeds = deviceNodes.length;
+  showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: totalSeeds, totalStls: 0 });
+
+  for (const seed of deviceNodes) {
+    if (!isTokenValid(state, token)) {
+      debugLog(DEBUG_IFC_LOAD, '[autoLoad] token 不匹配，停止 DEV GLB 加载');
+      return { loaded: true, modCount: loadedCount, stlCount: 0 };
+    }
+
+    if (!seed.devPath) continue;
+    const normalized = seed.devPath.replace(/\\/g, '/');
+    const devPath = normalized.toLowerCase().startsWith('dev/')
+      ? normalized
+      : `DEV/${normalized}`;
+
+    const glbBytes = glbCacheMap.get(devPath);
+    if (!glbBytes || glbBytes.byteLength === 0) continue;
+
+    try {
+      const group = await loadDevGlb(devPath, glbBytes);
+      if (!group) continue;
+
+      // 应用 CBM 累积矩阵（含 mm→m，等价于方案 B 的完整 placement 应用）
+      const cbmTransform = parseCbmTransformMatrix(seed.transformMatrix);
+      applyPlacementTransformToSceneUnits(group, cbmTransform);
+
+      // 应用项目级坐标转换（Z-up → Y-up）
+      applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
+
+      // bbox 诊断
+      if (!diagnoseGroupBBox(group, devPath)) continue;
+
+      modRoot.add(group);
+      loadedDevGroups.set(`${devPath}#${seed.path}`, group);
+      loadedCount++;
+      showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0 });
+    } catch (err) {
+      console.error(`[autoLoad] DEV GLB 加载失败: ${devPath}`, err);
+    }
+  }
+
+  debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV GLB 快速路径完成: ${loadedCount}/${deviceNodes.length} 个 seed 已加载`);
+  showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0 });
+  return { loaded: true, modCount: loadedCount, stlCount: 0 };
+}
+
 export async function autoLoadModAndStlGeometry(
   state: AppState,
   scene: THREE.Scene,
@@ -470,6 +590,13 @@ export async function autoLoadModAndStlGeometry(
     return { modCount: 0, stlCount: 0 };
   }
 
+  // ── Phase 1.2 (方案 C v2): DEV 粒度 GLB 快速路径 ──
+  // 如果所有 seed 的 DEV.glb 缓存全部命中，直接加载 DEV.glb，跳过 XML 解析
+  const devGlbResult = await tryDevGlbFastPath(state, scene, deviceNodes, showProgress, token);
+  if (devGlbResult.loaded) {
+    return { modCount: devGlbResult.modCount, stlCount: devGlbResult.stlCount };
+  }
+
   // ── Phase 1.5: 缓存命中场景 → SQLite 查询 + 仅批量读 MOD/STL ──
   // 设计动机：demo-substation 有 4179 个 DEV → 3921 个无 SOLIDMODEL，
   // 逐文件读取是巨大浪费。SQLite 已索引引用链，一次查询即可得到全部 MOD/STL 路径。
@@ -499,39 +626,33 @@ export async function autoLoadModAndStlGeometry(
       if (includeStl) logExtras.push(`${stlPaths.size} STL`);
       debugLog(DEBUG_IFC_LOAD, `[autoLoad] SQLite 查询完成: ${reachable.length} 个几何源 → ${logExtras.join(' + ')}`);
 
-      // 批量读取 MOD 文件（1 次 IPC）
+      // 方案 C v2：DEV 粒度 GLB 由 tryDevGlbFastPath 处理；
+      // 此处为回退路径，直接批量读取 MOD/STL 原始字节
       const modArr = Array.from(modPaths);
-      if (modArr.length > 0) {
-        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 批量读取 ${modArr.length} 个 MOD 文件（1 次 IPC）...`);
-        const modBytes = await batchReadCachedFiles(state.currentProjectId, modArr);
-        files = new Map(); // 复用 files 变量，仅含 MOD
-        for (const [path, bytes] of modBytes) {
-          if (bytes && bytes.byteLength > 0) {
-            files.set(path, bytesToFile(bytes, path));
-          }
-        }
-      }
-
-      // 批量读取 STL 文件（1 次 IPC）
       const stlArr = Array.from(stlPaths);
-      if (stlArr.length > 0) {
-        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 批量读取 ${stlArr.length} 个 STL 文件（1 次 IPC）...`);
-        const stlBytes = await batchReadCachedFiles(state.currentProjectId, stlArr);
-        if (!files) files = new Map();
-        for (const [path, bytes] of stlBytes) {
+      const allGeomPaths = Array.from(new Set([...modArr, ...stlArr]));
+
+      if (allGeomPaths.length > 0) {
+        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 批量读取 ${allGeomPaths.length} 个 MOD/STL 原始字节（1 次 IPC）...`);
+        const bytesMap = await batchReadCachedFiles(state.currentProjectId, allGeomPaths);
+        files = new Map();
+        let hitCount = 0;
+        for (const [path, bytes] of bytesMap) {
           if (bytes && bytes.byteLength > 0) {
             files.set(path, bytesToFile(bytes, path));
+            hitCount++;
           }
         }
+        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 原始字节读取完成: ${hitCount}/${allGeomPaths.length} 命中`);
       }
 
       if (!files || files.size === 0) {
-        debugLog(DEBUG_IFC_LOAD, '[autoLoad] 无有效 MOD/STL 文件（磁盘缓存可能缺失），跳过加载');
+        debugLog(DEBUG_IFC_LOAD, '[autoLoad] 无有效 MOD/STL 文件，跳过加载');
         showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
         return { modCount: 0, stlCount: 0 };
       }
 
-      debugLog(DEBUG_IFC_LOAD, `[autoLoad] 从磁盘读取了 ${files.size} 个 MOD/STL 文件（${isCacheHit ? '缓存命中' : '首次打开'}）`);
+      debugLog(DEBUG_IFC_LOAD, `[autoLoad] 磁盘读取完成: ${files.size} 个文件（${isCacheHit ? '缓存命中' : '首次打开'}）`);
 
       // 缓存命中时跳过 Phase 2 的 DEV→PHM→MOD 发现循环，
       // 直接用 SQLite 返回的结果加载几何
@@ -585,7 +706,7 @@ export async function autoLoadModAndStlGeometry(
       let loadedStls = 0;
       let skippedBadBBox = 0;
 
-      // 加载 MOD
+      // 加载 MOD（方案 C：优先 GLB，回退 XML）
       if (modGeos.length > 0) {
         debugLog(DEBUG_IFC_LOAD, `[autoLoad] 开始加载 ${modGeos.length} 个 MOD...`);
         for (let i = 0; i < modGeos.length; i += CONCURRENCY) {
@@ -595,7 +716,7 @@ export async function autoLoadModAndStlGeometry(
           for (const geo of batch) {
             if (state.loadedXmlModGroups.has(geo.instanceKey)) { loadedMods++; continue; }
             try {
-              const group = await loadModFile(geo, files!);
+              const group = await loadModFile(geo, files ?? new Map());
               if (group) {
                 if (!prepareModGroupForScene(group, geo.modPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; loadedMods++; continue; }
                 modRoot.add(group);
@@ -625,7 +746,7 @@ export async function autoLoadModAndStlGeometry(
           for (const geo of batch) {
             if (state.loadedStlGroups.has(geo.instanceKey)) { loadedStls++; continue; }
             try {
-              const group = await loadStlFile(geo, files!);
+              const group = await loadStlFile(geo, files ?? new Map());
               if (group) {
                 if (!prepareStlGroupForScene(group, geo.stlPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; loadedStls++; continue; }
                 stlRoot.add(group);

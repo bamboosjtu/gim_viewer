@@ -627,12 +627,24 @@ DEV 图在所有 GIM 中都只有一层
 ## 13. 后续建议
 
 ```text
-1. PHM TRANSFORMMATRIX 字段形态分析
+1. PHM TRANSFORMMATRIX 字段形态分析 — ✅ 已完成（详见 09 号文档 §4：PHM 矩阵 100% 单位）
 2. MOD 静态类型进一步分组
 3. STL 文件大小与引用类型分析
 4. IFC-only CBM 与 DEV-linked CBM 的并行渲染策略设计
 5. 多工程样本验证 DEV 图深度、环、orphan geometry 是否稳定
+   — 可使用 gim-sample-verification skill 验证
 ```
+
+### 13.1 PARTINDEX 与 DEV_SUBDEVICE 的关系（2026-07-11 补充）
+
+根据 [20-substation-partindex-alias-correction.md](./20-substation-partindex-alias-correction.md)，PARTINDEX 是 F4System 根 DEV 的 SUBDEVICE 在 CBM 中的语义别名，**不应作为第二个几何入口**。
+
+当前代码实现中：
+- `modAutoLoadService.ts` 的 `isGeometryAutoLoadSeed` 排除 `DEV_SUBDEVICE` 虚拟节点
+- `db.rs` 的 `query_reachable_geometry` SQL 过滤 `entity_name != 'DEV_SUBDEVICE'`
+- 几何发现完全依赖真实 CBM 节点 + DEV SUBDEVICES 递归
+
+因此 §10 中"PARTINDEX, OWN_GEOMETRY 3894"的统计代表"CBM PARTINDEX 节点引用的 DEV 有自身几何"，但这些 DEV 与 F4System 根 DEV 的 SUBDEVICE 指向同一 child DEV，几何 seed 不应重复计入。
 
 这些仍应保持 schema analysis 范围，不应直接进入几何渲染实现。
 

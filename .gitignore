@@ -42,3 +42,5 @@ npm-debug.log*
 # Tauri
 src-tauri/target/
 src-tauri/gen/
+# Tauri CLI 临时目录（重定向到工作区内，避免污染系统盘 %TEMP%\.tauri）
+.tmp/

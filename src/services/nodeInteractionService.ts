@@ -223,6 +223,20 @@ async function loadModStlForNode(
     return;
   }
 
+  // 获取 ViewerRuntime（懒加载，与 IFC 路径共用同一引擎）
+  const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+  const runtime = await getViewerRuntime(state, showMessage);
+  const { ctx } = runtime;
+  const scene = (ctx.world.scene as any).three as import('three').Scene;
+
+  // 方案 C v2：优先尝试 DEV 粒度 GLB 快速路径
+  // 如果 DEV.glb 命中，直接加载整个 DEV 的几何，跳过 MOD 逐个解析
+  if (projectId != null && geometryNode.devPath) {
+    const devGlbLoaded = await tryLoadDevGlbForNode(state, scene, geometryNode, projectId, showMessage);
+    if (devGlbLoaded) return;
+  }
+
+  // 回退：MOD 粒度加载（XML 解析 + 方案 C 旧路径）
   const { discoverGeometriesFromNode, computeCbmParentTransform } = await import('./modGeometryDiscovery.js');
   // discoverGeometriesFromNode 在 files=null 时返回空，因此缓存命中场景需要先构建临时 Map
   const discoveryFiles = files ?? await buildGeometryFilesMapFromCache(projectId!, geometryNode);
@@ -249,13 +263,6 @@ async function loadModStlForNode(
     await ensureStlFilesInCacheMap(projectId!, stls, discoveryFiles);
   }
 
-  // 获取 ViewerRuntime（懒加载，与 IFC 路径共用同一引擎）
-  const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-  const runtime = await getViewerRuntime(state, showMessage);
-  const { ctx } = runtime;
-  // OBC BaseScene.three 类型为 Object3D，实际为 THREE.Scene，与 viewerEngine.ts 一致用 as any
-  const scene = (ctx.world.scene as any).three as import('three').Scene;
-
   const {
     loadXmlModFromFiles,
     applyPlacementTransformToSceneUnits,
@@ -264,7 +271,7 @@ async function loadModStlForNode(
   let loadedCount = 0;
   let stlLoadedCount = 0;
 
-  // ── 加载 MOD ──
+  // ── 加载 MOD（XML 解析） ──
   for (const geo of mods) {
     if (state.loadedXmlModGroups.has(geo.instanceKey)) {
       debugLog(DEBUG_IFC_LOAD, '[xml-mod] MOD 实例已加载，跳过:', geo.instanceKey);
@@ -276,14 +283,13 @@ async function loadModStlForNode(
 
     applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
     applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
-    // 加入 MOD 图层（独立于 IFC scene 根节点）
     const modRoot = ensureModStlLayer(state, scene, 'mod');
     modRoot.add(group);
     state.loadedXmlModGroups.set(geo.instanceKey, group);
     loadedCount++;
   }
 
-  // ── 加载 STL ──
+  // ── 加载 STL（直接解析） ──
   const { parseStlBinary } = await import('../viewer/stlLoader.js');
   for (const geo of stls) {
     if (state.loadedStlGroups.has(geo.instanceKey)) {
@@ -302,7 +308,6 @@ async function loadModStlForNode(
 
     applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
     applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
-    // 加入 STL 图层
     const stlRoot = ensureModStlLayer(state, scene, 'stl');
     stlRoot.add(group);
     state.loadedStlGroups.set(geo.instanceKey, group);
@@ -315,12 +320,103 @@ async function loadModStlForNode(
     if (loadedCount > 0) parts.push(`${loadedCount} 个 MOD`);
     if (stlLoadedCount > 0) parts.push(`${stlLoadedCount} 个 STL`);
     showMessage(`已加载 ${parts.join(' + ')} 模型`);
-    // 首次加载时定位相机到场景包围盒
     if (!state.hasFittedCamera) {
       const { fitCameraToScene } = await import('../viewer/camera.js');
       fitCameraToScene(ctx, state);
     }
   }
+}
+
+/**
+ * 方案 C v2：节点点击时尝试 DEV 粒度 GLB 快速路径。
+ *
+ * 如果 DEV.glb 命中，加载整个 DEV 的几何并应用 CBM 矩阵，返回 true。
+ * 如果未命中，返回 false，调用方回退到 MOD 粒度加载。
+ */
+async function tryLoadDevGlbForNode(
+  state: AppState,
+  scene: THREE.Scene,
+  geometryNode: CbmNode,
+  projectId: number,
+  showMessage: (text: string) => void,
+): Promise<boolean> {
+  if (!geometryNode.devPath) return false;
+
+  const normalized = geometryNode.devPath.replace(/\\/g, '/');
+  const devPath = normalized.toLowerCase().startsWith('dev/')
+    ? normalized
+    : `DEV/${normalized}`;
+
+  // 读取 DEV.glb
+  let glbBytes: Uint8Array | null = null;
+  try {
+    const { readGlbFile } = await import('../desktop/database.js');
+    glbBytes = await readGlbFile(projectId, devPath);
+  } catch {
+    return false;
+  }
+  if (!glbBytes || glbBytes.byteLength === 0) return false;
+
+  // 检查是否已加载
+  const instanceKey = `dev:${devPath}#${geometryNode.path}`;
+  if (state.loadedXmlModGroups.has(instanceKey)) {
+    debugLog(DEBUG_IFC_LOAD, `[xml-mod] DEV GLB 实例已加载，跳过: ${instanceKey}`);
+    return true;
+  }
+
+  // 加载 DEV.glb
+  const { loadDevGlb } = await import('./glbCacheService.js');
+  const group = await loadDevGlb(devPath, glbBytes);
+  if (!group) return false;
+
+  // 应用 CBM 累积矩阵
+  const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
+  const { computeCbmParentTransform } = await import('./modGeometryDiscovery.js');
+
+  // DEV_SUBDEVICE 虚拟节点需要父链矩阵
+  const parentCbmTransform = geometryNode.entityName === 'DEV_SUBDEVICE'
+    ? computeCbmParentTransform(state.currentCbmTree, geometryNode.path)
+    : undefined;
+
+  // 计算 CBM 累积矩阵（parent × node.transformMatrix）
+  const localTransform = parseMatrixFromString(geometryNode.transformMatrix);
+  const cbmTransform = parentCbmTransform
+    ? multiplyMatrices(parentCbmTransform, localTransform)
+    : localTransform;
+
+  applyPlacementTransformToSceneUnits(group, cbmTransform);
+  applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
+
+  const modRoot = ensureModStlLayer(state, scene, 'mod');
+  modRoot.add(group);
+  state.loadedXmlModGroups.set(instanceKey, group);
+
+  debugLog(DEBUG_IFC_LOAD, `[xml-mod] DEV GLB 命中: ${devPath} (instance: ${instanceKey})`);
+  showMessage(`已加载 DEV 几何模型: ${devPath}`);
+
+  if (!state.hasFittedCamera) {
+    const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+    const runtime = await getViewerRuntime(state, showMessage);
+    const { fitCameraToScene } = await import('../viewer/camera.js');
+    fitCameraToScene(runtime.ctx, state);
+  }
+  return true;
+}
+
+const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+function parseMatrixFromString(raw: string | undefined): number[] {
+  if (!raw) return IDENTITY_MATRIX.slice();
+  const parts = raw.split(',').map((s) => s.trim());
+  if (parts.length !== 16) return IDENTITY_MATRIX.slice();
+  const values = parts.map(Number);
+  return values.some((n) => !Number.isFinite(n)) ? IDENTITY_MATRIX.slice() : values;
+}
+
+function multiplyMatrices(a: number[], b: number[]): number[] {
+  const am = new THREE.Matrix4().fromArray(a.length === 16 ? a : IDENTITY_MATRIX);
+  const bm = new THREE.Matrix4().fromArray(b.length === 16 ? b : IDENTITY_MATRIX);
+  return am.multiply(bm).toArray();
 }
 
 /**

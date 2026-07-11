@@ -43,6 +43,14 @@ pub const PARSER_VERSION: &str = "gim-parser-v14";
 /// v4: restore IFC coordinateToOrigin=true; MOD/STL alignment handled by project-level sourceToViewer transform
 pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v4";
 
+/// GLB 几何缓存版本（方案 C：MOD/STL → glTF 序列化格式版本）
+/// 独立于 PARSER_VERSION，用于在 MOD 解析逻辑变更时单独失效 glb 缓存。
+/// 失效规则：
+/// - PARSER_VERSION 变 → glbcache 目录由 delete_project_cache 删除重建
+/// - GEOMETRY_CACHE_VERSION 变 → validate_gim_cache 返回 invalid，触发 delete_project_cache + 重序列化
+/// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v1";
+
 /// GIM 文件元信息（从前端传入，需 Deserialize）
 #[derive(Debug, Deserialize)]
 pub struct FileInfoInput {
@@ -864,6 +872,173 @@ pub fn batch_read_cached_files(
     Ok(results)
 }
 
+// ===== GLB 几何缓存（方案 C：MOD → glTF 离线预序列化） =====
+
+/// 计算 GLB 缓存文件路径：app_data_dir/glbcache/{project_id}/{entry_path}.glb
+///
+/// 与 `cache_file_path`（extracted/）和 `fragment_cache_file_path`（fragments/）并列，
+/// 独立目录存放序列化后的 glTF 二进制，便于版本失效时整体删除。
+///
+/// entry_path 通过组件级校验（只允许 Normal 组件），防止 ../ 和 \..\ 穿越。
+fn glb_cache_file_path(app_handle: &tauri::AppHandle, project_id: i64, entry_path: &str) -> Result<PathBuf, String> {
+    let base = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+
+    let safe_rel = validate_entry_path(entry_path)?;
+
+    // 追加 .glb 后缀到文件名
+    let mut glb_rel = safe_rel;
+    let file_name = glb_rel
+        .file_name()
+        .map(|n| format!("{}.glb", n.to_string_lossy()))
+        .ok_or("无法获取 glb 文件名")?;
+    glb_rel.set_file_name(file_name);
+
+    // 构建预期根目录：app_data_dir/glbcache/{project_id}
+    let root = base.join("glbcache").join(project_id.to_string());
+    stdfs::create_dir_all(&root).map_err(|e| format!("创建 glbcache 目录失败: {}", e))?;
+
+    // 规范化根目录用于 containment 校验
+    let canonical_root = root.canonicalize().map_err(|e| format!("规范化 glbcache 根目录失败: {}", e))?;
+
+    let full = canonical_root.join(&glb_rel);
+
+    if !full.starts_with(&canonical_root) {
+        return Err("路径越界".to_string());
+    }
+
+    if let Some(parent) = full.parent() {
+        stdfs::create_dir_all(parent).map_err(|e| format!("创建 glbcache 子目录失败: {}", e))?;
+    }
+
+    Ok(full)
+}
+
+/// Tauri command：写入 GLB 缓存文件
+#[tauri::command]
+pub fn write_glb_file(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_path: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    let path = glb_cache_file_path(&app_handle, project_id, &entry_path)?;
+    let mut file = stdfs::File::create(&path).map_err(|e| format!("创建 glb 缓存文件失败: {}", e))?;
+    file.write_all(&bytes).map_err(|e| format!("写入 glb 缓存文件失败: {}", e))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Tauri command：读取 GLB 缓存文件
+#[tauri::command]
+pub fn read_glb_file(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_path: String,
+) -> Result<Vec<u8>, String> {
+    let path = glb_cache_file_path(&app_handle, project_id, &entry_path)?;
+    stdfs::read(&path).map_err(|e| format!("读取 glb 缓存文件失败: {}", e))
+}
+
+/// Tauri command：检查 GLB 缓存文件是否存在
+#[tauri::command]
+pub fn glb_file_exists(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_path: String,
+) -> Result<bool, String> {
+    let path = glb_cache_file_path(&app_handle, project_id, &entry_path)?;
+    Ok(path.exists())
+}
+
+/// 批量读取 GLB 缓存文件的返回项（与 BatchCacheFileResult 结构一致，独立定义以避免命名混淆）
+#[derive(Debug, Serialize)]
+pub struct BatchGlbFileResult {
+    pub entry_path: String,
+    pub bytes: Option<Vec<u8>>,
+}
+
+/// Tauri command：批量读取 GLB 缓存文件（一次 IPC 替代 N 次 read_glb_file）。
+///
+/// 用于缓存命中时批量加载序列化几何，避免数千次 IPC 往返。
+/// 单个文件读取失败不影响其他文件（对应 item.bytes = null）。
+#[tauri::command]
+pub fn batch_read_glb_files(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_paths: Vec<String>,
+) -> Result<Vec<BatchGlbFileResult>, String> {
+    let mut results = Vec::with_capacity(entry_paths.len());
+    for entry_path in &entry_paths {
+        let path = match glb_cache_file_path(&app_handle, project_id, entry_path) {
+            Ok(p) => p,
+            Err(_) => {
+                results.push(BatchGlbFileResult {
+                    entry_path: entry_path.clone(),
+                    bytes: None,
+                });
+                continue;
+            }
+        };
+        let bytes = stdfs::read(&path).ok();
+        results.push(BatchGlbFileResult {
+            entry_path: entry_path.clone(),
+            bytes,
+        });
+    }
+    Ok(results)
+}
+
+/// 方案 C：检查 GLB 几何缓存版本是否匹配。
+///
+/// 读取 `{app_data_dir}/glbcache/{project_id}/_version.txt` 文件内容
+/// 与 GEOMETRY_CACHE_VERSION 常量比较。
+///
+/// 返回值：
+/// - true：版本文件存在且内容等于 GEOMETRY_CACHE_VERSION
+/// - false：版本文件不存在（首次打开或旧版本无 marker）/ 内容不匹配 / IO 错误
+///
+/// 注意：调用方应将 false 视为缓存无效，触发 delete_project_cache + 重序列化。
+fn check_geometry_cache_version(app_handle: &tauri::AppHandle, project_id: i64) -> bool {
+    let base = match app_handle.path().app_data_dir() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let marker = base
+        .join("glbcache")
+        .join(project_id.to_string())
+        .join("_version.txt");
+    match stdfs::read_to_string(&marker) {
+        Ok(content) => content.trim() == GEOMETRY_CACHE_VERSION,
+        Err(_) => false,
+    }
+}
+
+/// Tauri command：写入 GLB 几何缓存版本标记文件。
+///
+/// 在 `cacheGlbFiles` 完成所有 MOD/STL → .glb 序列化后调用一次，
+/// 把当前 GEOMETRY_CACHE_VERSION 写入 `{app_data_dir}/glbcache/{project_id}/_version.txt`。
+/// 下次 `validate_gim_cache` 时读取此文件并比较，版本不匹配则整体失效。
+#[tauri::command]
+pub fn write_geometry_cache_version(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+) -> Result<String, String> {
+    let base = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    let dir = base
+        .join("glbcache")
+        .join(project_id.to_string());
+    stdfs::create_dir_all(&dir).map_err(|e| format!("创建 glbcache 目录失败: {}", e))?;
+    let marker = dir.join("_version.txt");
+    stdfs::write(&marker, GEOMETRY_CACHE_VERSION)
+        .map_err(|e| format!("写入 geometry cache version 失败: {}", e))?;
+    Ok(marker.to_string_lossy().to_string())
+}
+
 // ===== Fragments 缓存 =====
 
 /// 计算 Fragments 缓存文件路径：app_data_dir/fragments/{project_id}/{safe_entry_path}.frag
@@ -1190,6 +1365,11 @@ pub struct GimCacheValidation {
     pub missing_line_fam_sources: Vec<String>,
     /// v5: 图引用中存在但 line_dev_property 缺失的 file_name_lower 列表
     pub missing_line_dev_sources: Vec<String>,
+    /// v6（方案 C）: GLB 几何缓存版本是否匹配（读取 glbcache/{projectId}/_version.txt 比较）
+    /// 版本不匹配 → valid=false，触发 delete_project_cache + 重序列化
+    pub geometry_cache_version_match: bool,
+    /// v6（方案 C）: 当前 GEOMETRY_CACHE_VERSION（供前端诊断显示）
+    pub current_geometry_cache_version: String,
 }
 
 fn row_to_gim_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<GimEntryRecord> {
@@ -2008,6 +2188,7 @@ fn compute_line_attr_diagnostic(conn: &Connection, project_id: i64) -> Result<Li
 /// - 输出 line_dev_source_count / line_expected_fam_ref_count / missing_* 诊断字段
 #[tauri::command]
 pub fn validate_gim_cache(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, DbState>,
     project_id: i64,
 ) -> Result<GimCacheValidation, String> {
@@ -2033,6 +2214,11 @@ pub fn validate_gim_cache(
         .map(|v| v == PARSER_VERSION)
         .unwrap_or(false);
 
+    // 方案 C：校验 GLB 几何缓存版本
+    // 读取 {app_data_dir}/glbcache/{project_id}/_version.txt 并与 GEOMETRY_CACHE_VERSION 比较
+    // 版本不匹配 → valid=false，触发 delete_project_cache + 重序列化
+    let geometry_cache_version_match = check_geometry_cache_version(&app_handle, project_id);
+
     // v4: 根据 project_type 分支校验
     // v5: transmission_line 增加 line_fam_source_count > 0 条件
     // substation（或 null/unknown）：保持原有 IFC/cache 校验逻辑
@@ -2048,6 +2234,7 @@ pub fn validate_gim_cache(
     let (ifc_entry_count, cached_ifc_count, missing_cache_paths, valid) = if is_line {
         // 线路工程：不检查 IFC 缓存；v5 要求 FAM 属性源存在
         let valid = parser_version_match
+            && geometry_cache_version_match
             && line_cbm_node_count > 0
             && line_attr_diag.fam_source_count > 0;
         (0u64, 0u64, Vec::new(), valid)
@@ -2102,7 +2289,8 @@ pub fn validate_gim_cache(
             && cbm_nodes_count > 0
             && cached_ifc_count == ifc_entry_count
             && missing_cache_paths.is_empty()
-            && parser_version_match;
+            && parser_version_match
+            && geometry_cache_version_match;
 
         (ifc_entry_count, cached_ifc_count, missing_cache_paths, valid)
     };
@@ -2129,6 +2317,8 @@ pub fn validate_gim_cache(
         line_expected_dev_ref_count: line_attr_diag.expected_dev_ref_count,
         missing_line_fam_sources: line_attr_diag.missing_fam_sources,
         missing_line_dev_sources: line_attr_diag.missing_dev_sources,
+        geometry_cache_version_match,
+        current_geometry_cache_version: GEOMETRY_CACHE_VERSION.to_string(),
     })
 }
 
@@ -2577,6 +2767,15 @@ pub fn delete_project_cache(
         match stdfs::remove_dir_all(&frag_dir) {
             Ok(()) => disk_messages.push("Fragments 磁盘缓存已删除".to_string()),
             Err(e) => disk_messages.push(format!("Fragments 磁盘缓存删除失败: {}", e)),
+        }
+    }
+
+    // GLB 几何缓存目录: app_data_dir/glbcache/{project_id}/
+    let glb_dir = app_dir.join("glbcache").join(project_id.to_string());
+    if glb_dir.exists() {
+        match stdfs::remove_dir_all(&glb_dir) {
+            Ok(()) => disk_messages.push("GLB 磁盘缓存已删除".to_string()),
+            Err(e) => disk_messages.push(format!("GLB 磁盘缓存删除失败: {}", e)),
         }
     }
 

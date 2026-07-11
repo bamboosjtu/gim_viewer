@@ -45,127 +45,31 @@
 
 ### 2.1 问题 1：modPath 去重丢失实例（高优先级）
 
-#### 问题位置
+> **状态**：✅ 已完成 — 已改用 `instanceKey` 去重
 
-[modAutoLoadService.ts:633](../../src/services/modAutoLoadService.ts#L633)：
+#### 历史问题
 
-```typescript
-// 全局去重集合：key = modPath/stlPath
-const modMap = new Map<string, DiscoveredModGeometry>();
-// ...
-for (const modGeo of result.mods) {
-  if (!modMap.has(modGeo.modPath)) {       // ← BUG: 用 modPath 去重
-    modMap.set(modGeo.modPath, modGeo);    // ← 同 MOD 文件多实例只保留第一个
-  }
-}
-```
+`modAutoLoadService.ts` 原先用 `modPath` 作为去重 key，导致同一 MOD 文件被多个不同 placement 引用时只保留第一个实例。STL 同理。
 
-STL 同理（[modAutoLoadService.ts:638 附近](../../src/services/modAutoLoadService.ts#L638)）：`stlMap.has(geo.stlPath)`。
+#### 修复
 
-#### 后果量化
+已改为 `instanceKey`（含 placement）去重，与加载阶段的去重 key 一致。详见 [09-transform-chain-analysis.md](./09-transform-chain-analysis.md) §15.3。
 
-| 指标 | 期望（链路重建总数） | 实际（modPath 去重后） | 丢失 |
-| ---- | ------------------: | --------------------: | ---: |
-| MOD/STL 实例数 | 9866 | 5938 | 3928（39.8%） |
-| 多实例文件数 | 3928 | 0（被压缩为单实例） | 3928 |
-
-#### 与加载阶段的逻辑矛盾
-
-加载阶段 [modAutoLoadService.ts:526, 532, 550, 556, 691, 698](../../src/services/modAutoLoadService.ts#L526) 使用 `instanceKey` 作为去重 key：
-
-```typescript
-if (state.loadedXmlModGroups.has(geo.instanceKey)) { loadedMods++; continue; }
-// ...
-state.loadedXmlModGroups.set(geo.instanceKey, group);
-```
-
-`DiscoveredModGeometry` 数据结构同时包含 `modPath` 与 `instanceKey`（[modAutoLoadService.ts:486](../../src/services/modAutoLoadService.ts#L486)），`instanceKey` 是含 placement 的实例标识。但发现阶段的 `modMap` 用 `modPath`，造成"发现去重 key 与加载去重 key 不一致"——加载阶段已准备好处理多实例，发现阶段却把多实例丢弃了。
-
-#### 修复方案
-
-```diff
-- if (!modMap.has(modGeo.modPath)) {
--   modMap.set(modGeo.modPath, modGeo);
-- }
-+ // 同 MOD 文件可被多 CBM 节点以不同 placement 引用，
-+ // 用 instanceKey 去重保证实例级不丢失。
-+ if (!modMap.has(modGeo.instanceKey)) {
-+   modMap.set(modGeo.instanceKey, modGeo);
-+ }
-```
-
-STL 同理（`stlMap.has(geo.stlPath)` → `stlMap.has(geo.instanceKey)`）。
-
-#### 预期效果
-
-实例数从 5938 恢复到 9866，多实例文件位置正确填充，"MOD 完全覆盖 IFC"现象消失。
+> 注：早期"9866 → 5938 丢失 40%"的数字已被 2026-07-10 更正撤销，正确基线为 4135 MOD + 1803 STL = 5938，详见 [20-substation-partindex-alias-correction.md](./20-substation-partindex-alias-correction.md)。
 
 ---
 
 ### 2.2 问题 2：applyExternalTransforms 单位隐患（中优先级）
 
-#### 问题位置
+> **状态**：✅ 已完成 — 函数已从源码中删除
 
-[xmlModLoader.ts:102-111](../../src/viewer/xmlModLoader.ts#L102-L111)：
+#### 历史问题
 
-```typescript
-export function applyExternalTransforms(
-  group: THREE.Group,
-  devTransformMatrix: number[],
-  phmTransformMatrix: number[],
-): void {
-  // 先应用 PHM 矩阵（MOD local → PHM/assembly space）
-  group.applyMatrix4(rowMajorToMatrix4(phmTransformMatrix));
-  // 再应用 DEV 矩阵（PHM/assembly → device space）
-  group.applyMatrix4(rowMajorToMatrix4(devTransformMatrix));
-}
-```
+`applyExternalTransforms` 函数原先存在于 [xmlModLoader.ts](../../src/viewer/xmlModLoader.ts)，直接 `group.applyMatrix4` 不缩放平移，且参数仅含 DEV/PHM 缺少 CBM/SUBDEVICE 累积。
 
-#### 问题分析
+#### 修复
 
-- **直接 applyMatrix4 不缩放平移**：MOD Group 内部已缩放 0.001（mm → m），但外部矩阵的平移分量仍是 mm，直接应用会导致平移放大 1000 倍
-- **参数不完整**：仅含 `devTransformMatrix` 与 `phmTransformMatrix`，缺少 CBM 与 SUBDEVICE 累积，无法表达完整 placement
-- **与正确路径并存**：同文件中的 `applyPlacementTransformToSceneUnits`（[xmlModLoader.ts:120-130](../../src/viewer/xmlModLoader.ts#L120-L130)）已正确缩放平移
-
-#### 飘移场景示例
-
-DEV 矩阵含平移 45758 mm：
-
-- 路径 A（`applyPlacementTransformToSceneUnits`）：平移变成 45.758 米（正确）
-- 路径 B（`applyExternalTransforms`）：平移保持 45758 单位（错误，相当于 45.758 公里，触发 BBOX_MAX_DIM_M=50 阈值被丢弃，或落在场景外造成"巨大飘移"）
-
-#### 当前调用情况
-
-grep 显示 `applyExternalTransforms` 仅在以下位置被引用：
-
-- [src/viewer/__tests__/xmlModLoader.test.ts](../../src/viewer/__tests__/xmlModLoader.test.ts)（单元测试）
-- [src/viewer/stlLoader.ts:18](../../src/viewer/stlLoader.ts#L18)（注释）
-- [docs/schema/10-substation-mod-grammar.md](./10-substation-mod-grammar.md)、[docs/schema/phm.md](./phm.md)、[docs/gim_substation.md](../gim_substation.md)、[docs/plans/substation-geometry-impl.md](../plans/substation-geometry-impl.md)（旧文档）
-
-**生产代码无调用**。当前 `modAutoLoadService.ts` 与 `nodeInteractionService.ts` 均使用 `applyPlacementTransformToSceneUnits`，飘移问题在最新代码中已规避，但隐患仍存。
-
-#### 修复方案
-
-```diff
-+ /**
-+  * @deprecated 使用 applyPlacementTransformToSceneUnits 替代。
-+  * 此函数不缩放平移分量（MOD Group 已缩放 0.001），且参数仅含 DEV/PHM
-+  * 缺少 CBM/SUBDEVICE 累积，无法表达完整 placement。
-+  * 保留仅供向后兼容，后续版本将删除。
-+  */
-  export function applyExternalTransforms(
-    group: THREE.Group,
-    devTransformMatrix: number[],
-    phmTransformMatrix: number[],
-  ): void {
-    // 先应用 PHM 矩阵（MOD local → PHM/assembly space）
-    group.applyMatrix4(rowMajorToMatrix4(phmTransformMatrix));
-    // 再应用 DEV 矩阵（PHM/assembly → device space）
-    group.applyMatrix4(rowMajorToMatrix4(devTransformMatrix));
-  }
-```
-
-中长期：迁移测试到 `applyPlacementTransformToSceneUnits`，删除 `applyExternalTransforms`。
+函数已从源码中删除。生产路径全部走 `applyPlacementTransformToSceneUnits`（方案 B 后已改为顶点烘焙版，详见 [09-transform-chain-analysis.md](./09-transform-chain-analysis.md) §12.2.1）。
 
 ---
 
@@ -394,7 +298,7 @@ sourceToViewer = baseCoordinationMatrix × ZUpToYUp
 #### 不修改的部分
 
 - `modRootGroup` / `stlRootGroup` 不需要旋转（旋转已融合到 `projectSourceToViewerMatrix`）
-- `applyPlacementTransformToSceneUnits` 不变（仍在 GIM Z-up 下应用 placement）
+- `applyPlacementTransformToSceneUnits` 函数签名不变，但实现已改为顶点烘焙（方案 B 后，详见 09 号文档 §12.2.1），仍在 GIM Z-up 下应用 placement
 - `modGeometryDiscovery.ts` 的矩阵累乘逻辑不变（已验证 [09 号文档 §10](./09-transform-chain-analysis.md#L652)）
 
 #### 验证方法
@@ -425,12 +329,14 @@ sourceToViewer = baseCoordinationMatrix × ZUpToYUp
 
 ### 3.1 短期修复（高优先级）
 
-| 编号 | 问题 | 修复位置 | 验证方法 |
-| ---- | ---- | -------- | -------- |
-| FIX-1 | modPath 去重 bug | [modAutoLoadService.ts:633](../../src/services/modAutoLoadService.ts#L633) + STL 同理 | 加载后实例数应为 9866（非 5938）；多实例 MOD 文件位置正确填充；"MOD 完全覆盖 IFC"现象消失 |
-| FIX-2 | applyExternalTransforms 隐患 | [xmlModLoader.ts:102](../../src/viewer/xmlModLoader.ts#L102) | 标记 @deprecated；测试迁移到 applyPlacementTransformToSceneUnits；最终删除 |
-| FIX-3 | 每 Entity 独立 Material 导致 OOM 崩溃 | [xmlModGeometry.ts:131-148](../../src/viewer/xmlModGeometry.ts#L131-L148) + [projectCleanupService.ts](../../src/services/projectCleanupService.ts) | 加载 7000+ MOD 不崩溃；Material 数从 78000+ 降到几十；项目切换时共享 Material 正确释放 |
-| FIX-4 | GIM Z-up 与 viewer Y-up 坐标系不一致 | [coordinateAlignmentService.ts](../../src/services/coordinateAlignmentService.ts) `syncProjectSourceToViewerFromFragments` + `makeTranslationAlignment` | 二次屏柜直立显示（屏柜"高度"方向映射到 viewer +Y）；CBM 矩阵 Tz=5750mm 旋转后映射到 viewer +Y 约 5.75 米 |
+> **状态**：FIX-1/2/3/4 均已完成
+
+| 编号 | 问题 | 修复位置 | 状态 | 验证方法 |
+| ---- | ---- | -------- | ---- | -------- |
+| FIX-1 | modPath 去重 bug | [modAutoLoadService.ts](../../src/services/modAutoLoadService.ts) | ✅ 已完成 | 改用 instanceKey 去重；多实例 MOD 文件位置正确填充；"MOD 完全覆盖 IFC"现象消失 |
+| FIX-2 | applyExternalTransforms 隐患 | [xmlModLoader.ts](../../src/viewer/xmlModLoader.ts) | ✅ 已删除 | 函数已从源码删除；生产路径全部走 applyPlacementTransformToSceneUnits（顶点烘焙版） |
+| FIX-3 | 每 Entity 独立 Material 导致 OOM 崩溃 | [xmlModGeometry.ts](../../src/viewer/xmlModGeometry.ts) + [projectCleanupService.ts](../../src/services/projectCleanupService.ts) | ✅ 已完成 | 加载 7000+ MOD 不崩溃；Material 数从 78000+ 降到几十；项目切换时共享 Material 正确释放 |
+| FIX-4 | GIM Z-up 与 viewer Y-up 坐标系不一致 | [coordinateAlignmentService.ts](../../src/services/coordinateAlignmentService.ts) `syncProjectSourceToViewerFromFragments` + `makeTranslationAlignment` | ✅ 已完成 | 二次屏柜直立显示（屏柜"高度"方向映射到 viewer +Y）；CBM 矩阵 Tz=5750mm 旋转后映射到 viewer +Y 约 5.75 米 |
 
 ### 3.2 中期改进
 
@@ -452,47 +358,47 @@ sourceToViewer = baseCoordinationMatrix × ZUpToYUp
 
 ## 4. 验证清单
 
-修复后应通过以下验证：
+> **状态**：FIX-1/2/3/4 均已完成，以下验证项标注实施状态。
 
 ### 4.1 实例数验证
 
-- [ ] 加载 demo-substation 后，MOD/STL 实例数为 9866（非 5938）
-- [ ] 多实例文件（如 `72c8865f-*.mod`）在场景中出现 2 次，位于不同位置
-- [ ] "MOD 完全覆盖 IFC"现象消失
+- [x] 加载 demo-substation 后，MOD/STL 实例数与 20 号文档修正后基线一致（4135 MOD + 1803 STL = 5938）
+- [x] 多实例文件（如 `72c8865f-*.mod`）在场景中出现多次，位于不同位置
+- [x] "MOD 完全覆盖 IFC"现象消失
 
 ### 4.2 单位处理验证
 
-- [ ] 应用 placement 后，MOD Group bbox 中心位于工程原点附近（数十米范围内）
-- [ ] 不出现 45 公里量级的飘移
-- [ ] `applyExternalTransforms` 标记 @deprecated，无生产代码调用
+- [x] 应用 placement 后，MOD Group bbox 中心位于工程原点附近（数十米范围内）
+- [x] 不出现 45 公里量级的飘移
+- [x] `applyExternalTransforms` 已删除，无生产代码调用
 
 ### 4.3 矩阵链路验证
 
-- [ ] `geo.placementTransformMatrix` 包含 CBM×DEV×SUBDEVICE×PHM 累积
-- [ ] 应用顺序为 Entity local → placement → projectSourceToViewer
-- [ ] 非 IDENTITY 实例平移分量范围与 09 号 §10.3 一致（Tx/Ty ≈ 100m、Tz ≈ 43m）
+- [x] `geo.placementTransformMatrix` 包含 CBM×DEV×SUBDEVICE×PHM 累积
+- [x] 应用顺序为 Entity local（烘焙到顶点）→ placement（顶点烘焙）→ projectSourceToViewer
+- [x] 非 IDENTITY 实例平移分量范围与 09 号 §10.3 一致（Tx/Ty ≈ 100m、Tz ≈ 43m）
 
 ### 4.4 文档一致性验证
 
-- [ ] 09 号文档初版结论已修正（§6.6 / §13.4 / §14 / §15）
-- [ ] dev.md / phm.md 矩阵描述已修正
-- [ ] devParser.ts / phmParser.ts 注释已统一
+- [x] 09 号文档初版结论已修正（§6.6 / §13.4 / §14 / §15）
+- [ ] dev.md / phm.md 矩阵描述已修正（待完成）
+- [ ] devParser.ts / phmParser.ts 注释已统一（待完成）
 
 ### 4.5 Material 共享验证（FIX-3）
 
-- [ ] 加载 7000+ MOD 不崩溃，加载完成不出现 OOM
-- [ ] `xmlModGeometry.ts` 的 `_sharedMaterialCache.size` 为几十个（非 78000+）
-- [ ] `disposeXmlModGroup` 不再 dispose Material（仅 dispose geometry）
-- [ ] `disposeSharedXmlModMaterials` 在项目切换时被调用，共享缓存清空
-- [ ] 同色 Mesh 共享同一 Material 实例（可通过 `mesh.material === mesh2.material` 验证）
+- [x] 加载 7000+ MOD 不崩溃，加载完成不出现 OOM
+- [x] `xmlModGeometry.ts` 的 `_sharedMaterialCache.size` 为几十个（非 78000+）
+- [x] `disposeXmlModGroup` 不再 dispose Material（仅 dispose geometry）
+- [x] `disposeSharedXmlModMaterials` 在项目切换时被调用，共享缓存清空
+- [x] 同色 Mesh 共享同一 Material 实例（可通过 `mesh.material === mesh2.material` 验证）
 
 ### 4.6 坐标系对齐验证（FIX-4）
 
-- [ ] 二次屏柜直立显示（"高度"方向映射到 viewer +Y）
-- [ ] 屏柜位置与 IFC 构件对齐
-- [ ] CBM 矩阵 Tz=5750mm 旋转后映射到 viewer +Y 方向约 5.75 米
-- [ ] DEBUG_IFC_LOAD=true 时输出 `[CoordAlign] 已从 Fragments baseCoordinationMatrix 同步并组合 Z-up→Y-up 旋转` 日志
-- [ ] `projectSourceToViewerMatrix` 包含旋转分量（非纯平移）
+- [x] 二次屏柜直立显示（"高度"方向映射到 viewer +Y）
+- [x] 屏柜位置与 IFC 构件对齐
+- [x] CBM 矩阵 Tz=5750mm 旋转后映射到 viewer +Y 方向约 5.75 米
+- [x] DEBUG_IFC_LOAD=true 时输出 `[CoordAlign] 已从 Fragments baseCoordinationMatrix 同步并组合 Z-up→Y-up 旋转` 日志
+- [x] `projectSourceToViewerMatrix` 包含旋转分量（非纯平移）
 - [ ] 设备朝向正确（CBM 矩阵含绕 Z 轴 ±90° 旋转的样本旋转后变成绕 Y 轴旋转，朝向应与 IFC 一致）
 
 ---

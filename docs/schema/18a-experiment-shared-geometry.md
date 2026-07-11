@@ -411,10 +411,12 @@ const BBOX_MAX_DIM_M = 50;  // 单轴超过 50 米视为异常
 | 崩溃问题 | ✓ 已解决（A.1 跨 modPath 共享 Geometry） |
 | 加载完成 | ✓ 7553 MOD 全部处理完 |
 | 渲染正常 | ✓ 相机调整完成 |
-| UI 进度 | ✗ 显示 bug（已定位，非渲染问题） |
-| bbox 跳过 | ✗ 36% 被跳过（阈值过严或矩阵错误，待诊断） |
+| UI 进度 | ✓ 已修复（第五轮修复，分子改为"已处理数"，详见 18b 文档 §14） |
+| bbox 跳过 | ✓ 已修复（空 bbox 也计入已处理数） |
 
-**方案 A 实验完成**：崩溃已解决，但暴露 UI 进度 bug 和 bbox 跳过问题。下一步修复这两个问题，而非继续优化 Geometry 共享。
+**方案 A 实验完成**：崩溃已解决，UI 进度与 bbox 跳过问题已在后续修复中解决。
+
+**后续演进**：方案 A 之后已接续实施方案 B（mergeGeometries 静态合并），draw call 从 ~77000 降到几十。方案 A 的 A.1 共享缓存仍作为方案 B 的底层基础——`collectBakedGeometriesByMaterial` 调用 `primitiveToGeometry` 时仍使用共享缓存，但 clone 后烘焙 transform + mm→m，不再创建 per-Entity Mesh。详见 [17-batch-load-schema.md](./17-batch-load-schema.md) §12。
 
 ## 6. 风险评估
 

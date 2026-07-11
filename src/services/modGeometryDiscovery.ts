@@ -100,7 +100,7 @@ export async function discoverGeometriesFromNode(
   return discoverGeometriesFromDevPath(`DEV/${node.devPath}`, files, rootTransform, new Set<string>());
 }
 
-async function discoverGeometriesFromDevPath(
+export async function discoverGeometriesFromDevPath(
   devFilePath: string,
   files: Map<string, File>,
   parentTransform: number[],

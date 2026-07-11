@@ -1,0 +1,4 @@
+[build]
+# 显式锁定 Rust target 目录到工作区内（src-tauri/target），
+# 防止 CARGO_TARGET_DIR 环境变量或 IDE 插件把编译产物重定向到系统 Temp 目录。
+target-dir = "target"

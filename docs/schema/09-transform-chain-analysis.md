@@ -787,18 +787,31 @@ DEV 文件通过 `devParser.ts` 解析，两个块结构都会带 `TRANSFORMMATR
 ## 12. 单位处理与飘移分析
 
 > 本节为初版缺失内容，本次修订补充。外部装配矩阵与 MOD Group 内部 0.001 缩放的交互是"叠加 DEV/PHM 矩阵后巨大飘移"的根因。
+>
+> **2026-07-11 更新**：方案 B（mergeGeometries 静态合并）实施后，生产路径已切换为顶点烘焙——mm→m 缩放与 placement matrix 都直接 applyMatrix4 到 BufferGeometry 顶点，绕过 `Object3D.applyMatrix4 + decompose` 链路，避免 placement 含缩放分量时 corrupt `group.scale`。本节同步更新。
 
-### 12.1 MOD 内部 0.001 缩放
+### 12.1 MOD 内部 mm→m 缩放（顶点烘焙）
 
-`xmlModDocumentToGroup` 在解析 MOD XML 几何时统一缩放 0.001（mm → scene unit = m）。Group 内部所有顶点已位于米单位空间。
+方案 B 实施后，mm→m 缩放通过 `collectBakedGeometriesByMaterial`（[xmlModGeometry.ts](../../src/viewer/xmlModGeometry.ts)）直接烘焙到每个 entity 的 cloned BufferGeometry 顶点：
 
-### 12.2 外部矩阵的两条应用路径
+```typescript
+const mmToScene = new THREE.Matrix4().makeScale(0.001, 0.001, 0.001);
+const baked = baseGeo.clone();
+if (entity.transformMatrix.length === 16) {
+  baked.applyMatrix4(gimMatrixToMatrix4(entity.transformMatrix));
+}
+baked.applyMatrix4(mmToScene);
+```
 
-[xmlModLoader.ts](../../src/viewer/xmlModLoader.ts) 暴露两个函数应用外部矩阵：
+`group.scale` 保持 1，merged geometry 顶点直接以场景单位（米）表达。STL 路径同样通过 `geometry.scale(0.001, 0.001, 0.001)` 烘焙到顶点（[stlLoader.ts](../../src/viewer/stlLoader.ts)）。
 
-#### 12.2.1 路径 A：`applyPlacementTransformToSceneUnits`（正确）
+> 遗留：旧的 `xmlModDocumentToGroup` 仍保留 `group.scale.setScalar(0.001)`（方案 A 路径），仅被测试使用，生产不调用。
 
-[xmlModLoader.ts:120-130](../../src/viewer/xmlModLoader.ts#L120-L130)：
+### 12.2 外部矩阵的应用路径
+
+#### 12.2.1 路径 A：`applyPlacementTransformToSceneUnits`（顶点烘焙版，生产使用）
+
+[xmlModLoader.ts](../../src/viewer/xmlModLoader.ts) 的实现（方案 B 后已改为顶点烘焙）：
 
 ```typescript
 export function applyPlacementTransformToSceneUnits(
@@ -810,62 +823,36 @@ export function applyPlacementTransformToSceneUnits(
   matrix.elements[12] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;  // 0.001
   matrix.elements[13] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
   matrix.elements[14] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
-  group.applyMatrix4(matrix);
+  // 烘焙到顶点：避免 Object3D.applyMatrix4 + decompose 在 placement 含缩放时 corrupt group.scale
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (mesh.geometry) {
+      mesh.geometry.applyMatrix4(matrix);
+    }
+  });
 }
 ```
+
+**为何改为顶点烘焙**：`Object3D.applyMatrix4` 的实现是 `this.matrix.premultiply(matrix)` + `this.matrix.decompose(position, quaternion, scale)`。当 group 已有 `scale=0.001` 且 placement matrix 含缩放分量 `s` 时，`decompose` 会从 `matrix × Scale(0.001)` 提取 scale，导致 `group.scale` 被错误修改为 `0.001 × s`，几何被错误缩放。变压器 placement 通常纯旋转+平移（`s=1`）所以 OK；GIS 设备 placement 含缩放分量，触发 corrupt。改为顶点烘焙后，`BufferGeometry.applyMatrix4` 直接对 position attribute 操作，不经过 decompose，数学上精确。
 
 平移分量先乘 0.001 再 applyMatrix4，得到米单位的平移。**生产代码全部走此路径**：
 
-- [modAutoLoadService.ts:530, 554, 696, 745](../../src/services/modAutoLoadService.ts#L530)（自动加载）
-- [nodeInteractionService.ts:261, 287](../../src/services/nodeInteractionService.ts#L261)（节点点击懒加载）
+- [modAutoLoadService.ts](../../src/services/modAutoLoadService.ts)（自动加载）
+- [nodeInteractionService.ts](../../src/services/nodeInteractionService.ts)（节点点击懒加载）
 
-#### 12.2.2 路径 B：`applyExternalTransforms`（隐患）
+#### 12.2.2 路径 B：`applyExternalTransforms`（已删除）
 
-[xmlModLoader.ts:102-111](../../src/viewer/xmlModLoader.ts#L102-L111)：
+`applyExternalTransforms` 函数**已从源码中删除**。此函数原先直接 `group.applyMatrix4` 不缩放平移，且输入参数不含 CBM/SUBDEVICE 累积，无法表达完整 placement。详见 [16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md) §2.2。
 
-```typescript
-export function applyExternalTransforms(
-  group: THREE.Group,
-  devTransformMatrix: number[],
-  phmTransformMatrix: number[],
-): void {
-  // 先应用 PHM 矩阵（MOD local → PHM/assembly space）
-  group.applyMatrix4(rowMajorToMatrix4(phmTransformMatrix));
-  // 再应用 DEV 矩阵（PHM/assembly → device space）
-  group.applyMatrix4(rowMajorToMatrix4(devTransformMatrix));
-}
-```
-
-**直接 applyMatrix4 不缩放平移**。若 DEV 矩阵含平移 45758 mm：
-
-- 路径 A：平移变成 45.758 米（正确）
-- 路径 B：平移保持 45758 单位（错误，Group 内部已是米单位，平移相当于 45.758 公里，触发 BBOX_MAX_DIM_M=50 阈值被丢弃，或落在场景外造成"巨大飘移"）
-
-### 12.3 路径 B 当前调用情况
-
-grep 显示 `applyExternalTransforms` 仅在以下位置被引用：
-
-- [src/viewer/__tests__/xmlModLoader.test.ts](../../src/viewer/__tests__/xmlModLoader.test.ts)（单元测试）
-- [src/viewer/stlLoader.ts:18](../../src/viewer/stlLoader.ts#L18)（注释）
-- [docs/schema/10-substation-mod-grammar.md](./10-substation-mod-grammar.md)、[docs/schema/phm.md](./phm.md)、[docs/gim_substation.md](../gim_substation.md)、[docs/plans/substation-geometry-impl.md](../plans/substation-geometry-impl.md)（旧文档）
-
-**生产代码无调用**。当前 `modAutoLoadService.ts` 与 `nodeInteractionService.ts` 均使用 `applyPlacementTransformToSceneUnits`（路径 A），飘移问题在最新代码中已规避。
-
-### 12.4 飘移成因推断
+### 12.3 飘移成因总结
 
 ```text
-"叠加 DEV/PHM 矩阵会巨大飘移"的原因不是矩阵不该用，而是单位处理错了：
-  - 早期实现可能调用 applyExternalTransforms（路径 B），平移未缩放
-  - 当前实现已切换到 applyPlacementTransformToSceneUnits（路径 A），
-    平移正确缩放
-  - 但若路径 B 仍被旧分支、外部脚本或测试代码使用，会复现飘移
-
-建议：
-  1. 弃用 applyExternalTransforms（标记 @deprecated 或删除）
-     —— 它的输入参数 devTransformMatrix/phmTransformMatrix 不含
-     CBM/SUBDEVICE 累积，无法表达完整 placement，且无单位缩放。
-  2. 任何需要应用外部矩阵的路径都必须经过
-     applyPlacementTransformToSceneUnits，或显式缩放 m[12..14]。
+"叠加 DEV/PHM 矩阵会巨大飘移"的原因有三：
+  1. 早期实现调用 applyExternalTransforms（已删除），平移未缩放
+  2. 旧版 applyPlacementTransformToSceneUnits 使用 group.applyMatrix4，
+     当 placement 含缩放分量时 decompose corrupt group.scale（已修复为顶点烘焙）
+  3. DEV_SUBDEVICE 虚拟节点 transformMatrix 为空，丢失 SUBDEVICE 变换
+     （已修复：虚拟节点携带 SUBDEVICE.transformMatrix，且不作为几何 seed）
 ```
 
 ---
@@ -953,14 +940,15 @@ grep 显示 `applyExternalTransforms` 仅在以下位置被引用：
     平移分量在 m[12]/m[13]/m[14]，
     与 dev.md / phm.md 中"行优先、平移在最后一列"的描述矛盾，需修正。
 
-11. 单位处理：applyPlacementTransformToSceneUnits 正确缩放平移，
-    applyExternalTransforms 未缩放（仅测试与旧文档引用，生产未调用）。
-    建议弃用 applyExternalTransforms 避免误用。
+11. 单位处理：applyPlacementTransformToSceneUnits 已改为顶点烘焙
+    （方案 B 后），mm→m 缩放在 collectBakedGeometriesByMaterial 中烘焙到顶点。
+    applyExternalTransforms 已从源码删除。
 
-12. 已知 bug：modAutoLoadService.ts:633 用 modPath 去重导致
-    丢失 40% 实例（9866 → 5938）。
-    修复方法：改用 instanceKey（与加载阶段已用的 key 一致）。
+12. 已知 bug：modAutoLoadService.ts 用 modPath 去重导致丢失实例。
+    已修复：改用 instanceKey（含 placement）去重。
     详见 [16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md)。
+    （注：早期"9866 → 5938 丢失 40%"的数字已被 2026-07-10 更正撤销，
+     正确基线为 4135 MOD + 1803 STL = 5938，详见 20 号文档。）
 
 13. 变电与线路工程在变换链结构上完全不同：
     - 变电：两级变换 = 装配级（CBM×DEV×SUBDEVICE×PHM）+ 局部级（MOD Entity）
@@ -984,22 +972,24 @@ grep 显示 `applyExternalTransforms` 仅在以下位置被引用：
    SUBDEVICE 是主变换源，必须递归处理。
 
 3. 实例级去重必须使用 instanceKey（含 placement）：
-   不可用 modPath 去重，否则丢失 40% 实例。
+   不可用 modPath 去重，否则丢失多实例。
+   已修复：modAutoLoadService 使用 instanceKey 去重。
    详见 [16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md)。
 
-4. 变电 MOD 渲染只需应用 Entity.TransformMatrix：
-   Three.js 可直接使用 m[0..15] 作为 Matrix4.elements（布局一致）。
-   但需注意：Entity.TransformMatrix 是局部变换，必须先应用装配矩阵。
+4. 变电 MOD 渲染 Entity.TransformMatrix 已在烘焙阶段应用：
+   方案 B 后，collectBakedGeometriesByMaterial 把 Entity.TransformMatrix
+   直接 applyMatrix4 到 cloned BufferGeometry 顶点，再叠加 mm→m 缩放。
+   placement matrix 由 applyPlacementTransformToSceneUnits 顶点烘焙叠加。
 
 5. 线路 MOD 渲染无需矩阵处理：
    直接读取 POINTn / P 字段的绝对坐标。
    POINT 字段为经纬度高程，需做地图投影；
    P 字段为笛卡尔坐标，单位推测毫米。
 
-6. 单位处理：
-   任何应用外部矩阵的代码路径都必须经过 applyPlacementTransformToSceneUnits
-   或显式缩放 m[12..14] 乘 0.001。
-   弃用 applyExternalTransforms（无单位缩放）。
+6. 单位处理（方案 B 后）：
+   mm→m 缩放在 collectBakedGeometriesByMaterial 中烘焙到顶点。
+   placement matrix 在 applyPlacementTransformToSceneUnits 中顶点烘焙。
+   applyExternalTransforms 已删除。
 
 7. 矩阵存储约定修正后：
    现有 dev.md / phm.md 中的"最后一列控制平移"描述需改为
@@ -1053,17 +1043,13 @@ grep 显示 `applyExternalTransforms` 仅在以下位置被引用：
 ## 17. 后续建议
 
 ```text
-1. 修复 modAutoLoadService.ts:633 去重 bug（高优先级）
+1. ~~修复 modAutoLoadService.ts 去重 bug（高优先级）~~ ✅ 已完成
    diff: modMap.has(modGeo.modPath) → modMap.has(modGeo.instanceKey)
    同步修复 stlMap.has(geo.stlPath) → stlMap.has(geo.instanceKey)
-   预期效果：实例数从 5938 恢复到 9866，多实例文件位置正确填充。
    详见 [16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md)。
 
-2. 弃用 applyExternalTransforms（中优先级）
-   原因：参数仅含 devTransformMatrix/phmTransformMatrix，缺少 CBM/SUBDEVICE；
-         且无单位缩放。
-   操作：标记 @deprecated 或直接删除（生产无调用，仅测试引用）。
-   测试需迁移到 applyPlacementTransformToSceneUnits。
+2. ~~弃用 applyExternalTransforms（中优先级）~~ ✅ 已删除
+   函数已从源码中删除。生产路径全部走 applyPlacementTransformToSceneUnits（顶点烘焙版）。
    详见 [16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md)。
 
 3. 修正 dev.md 与 phm.md 中"行优先、平移在最后一列"的描述，

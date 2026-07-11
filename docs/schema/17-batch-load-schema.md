@@ -634,15 +634,30 @@ for (let j = 0; j < batch.length; j++) {
 ### 7.3 缓存版本化策略
 
 ```text
-PARSER_VERSION         = 'gim-parser-v5'         // 现有，GIM 解析层
+PARSER_VERSION          = 'gim-parser-v14'        // 现有，GIM 解析层（v1→v14 详见下方演进历史）
 FRAGMENTS_CACHE_VERSION = 'fragments-cache-v4'   // 现有，IFC .frag
-GEOMETRY_CACHE_VERSION = 'geometry-cache-v1'     // 新增，MOD/STL 序列化几何
+GEOMETRY_CACHE_VERSION  = 'geometry-cache-v1'    // 待实施，MOD/STL 序列化几何（方案 C）
 
 失效规则：
   - GIM 重解压（PARSER_VERSION 变）→ GEOMETRY_CACHE_VERSION 同步失效
   - MOD 解析逻辑变更（如 primitive 参数提取规则改）→ GEOMETRY_CACHE_VERSION 单独递增
   - InstancedMesh 装配逻辑变更 → 不影响缓存（装配是运行时）
 ```
+
+#### PARSER_VERSION 演进历史
+
+| 版本 | 变更内容 |
+| ---- | -------- |
+| v5 | 初始版本 |
+| v6 | CBM 层级树结构优化 |
+| v7 | 几何引用链递归 DEV SUBDEVICE，并保存 SUBDEVICE 变换矩阵 |
+| v8 | 几何查询使用 CBM 父链累计 TRANSFORMMATRIX，并按实例级 placement 去重 |
+| v9 | F1System 根节点用 GIM 头部工程名；F4System/PARTINDEX 用 DEV SYMBOLNAME；过滤 IFC "&其他"占位符 |
+| v10 | F1System 显示工程类型名；F2System 按 SYSCLASSIFYNAME 映射专业名并排序 |
+| v11 | F3System 命名优化（方案A 过滤占位符 + 方案B F4 反推后缀） |
+| v12 | 修复 DEV SUBDEVICE 虚拟子节点 transformMatrix 为空 |
+| v13 | DEV_SUBDEVICE 虚拟节点不作为全量几何查询起点 |
+| v14 | 当前版本（详见 18b 文档） |
 
 ---
 
@@ -948,46 +963,41 @@ export function disposeSharedXmlModGeometries(): void {
 
 ---
 
-## 12. 方案 B：mergeGeometries 静态合并（准备实施）
+## 12. 方案 B：mergeGeometries 静态合并（已实施）
 
-> **状态**：准备实施 — A.1 已解决崩溃问题，但加载耗时 ~2 小时，对生产不可接受。
+> **状态**：✅ 已实施 — draw call 从 ~77000 降到几十，加载速度大幅提升。
 >
-> 方案 A.1 解决了崩溃但未解决性能问题：
-> - draw call 仍为 ~77000（核显帧率低，加载慢）
-> - 每个 Entity 独立 Mesh，JS 累积过大
-> - 方案 B 将 draw call 从 ~77000 降到几十，JS heap 从 ~200MB 降到 ~80MB
+> **2026-07-11 更新**：方案 B 实施后，生产路径已切换为顶点烘焙——mm→m 缩放与 placement matrix 都直接 applyMatrix4 到 BufferGeometry 顶点，避免 `Object3D.applyMatrix4 + decompose` 链路在 placement 含缩放分量时 corrupt `group.scale`。详见 [09-transform-chain-analysis.md](./09-transform-chain-analysis.md) §12。
 
 ### 12.1 设计
 
 方案 A 虽解决了崩溃，但 ~77000 draw call 导致加载耗时 ~2 小时。需要把同 Material 的多个 geometry 合并成单个 BufferGeometry。
 
-**核心 API**：`BufferGeometryUtils.mergeGeometries(geometries, useGroups)`
+**实现位置**：[xmlModLoader.ts](../../src/viewer/xmlModLoader.ts) 的 `flattenDocumentToGroup` + [xmlModGeometry.ts](../../src/viewer/xmlModGeometry.ts) 的 `collectBakedGeometriesByMaterial`。
+
+**核心实现**：直接从 entity 数据烘焙 TransformMatrix + mm→m 缩放到顶点，按 Material 分组后 `mergeGeometries`：
 
 ```typescript
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-
-function flattenGroup(group: THREE.Group): THREE.Group {
-  const byMaterial = new Map<THREE.Material, THREE.BufferGeometry[]>();
-  group.traverse((obj) => {
-    const mesh = obj as THREE.Mesh;
-    if (mesh.geometry) {
-      const arr = byMaterial.get(mesh.material) ?? [];
-      arr.push(mesh.geometry);
-      byMaterial.set(mesh.material, arr);
-    }
-  });
-  const merged = new THREE.Group();
-  for (const [mat, geos] of byMaterial) {
-    const combined = mergeGeometries(geos, false);
-    merged.add(new THREE.Mesh(combined, mat));
+// xmlModGeometry.ts: collectBakedGeometriesByMaterial
+const mmToScene = new THREE.Matrix4().makeScale(0.001, 0.001, 0.001);
+for (const entity of doc.entities) {
+  const baked = baseGeo.clone();
+  if (entity.transformMatrix.length === 16) {
+    baked.applyMatrix4(gimMatrixToMatrix4(entity.transformMatrix));
   }
-  return merged;
+  baked.applyMatrix4(mmToScene);
+  // 按 Material 分组
 }
+
+// xmlModLoader.ts: flattenDocumentToGroup
+for (const [mat, geos] of byMaterial) {
+  const combined = mergeGeometries(geos, false);
+  merged.add(new THREE.Mesh(combined, mat));
+}
+// group.scale 保持 1（mm→m 已烘焙到顶点）
 ```
 
-**应用位置**：在 `loadXmlModFromText` 后、`modRoot.add(group)` 前调用 `flattenGroup`。
-
-### 12.2 预期效果
+### 12.2 实测效果
 
 | 指标 | 方案 A 后 | 方案 B 后 | 减少 |
 | ---- | ----: | ----: | ---: |
@@ -995,6 +1005,7 @@ function flattenGroup(group: THREE.Group): THREE.Group {
 | draw call 数 | ~77000 | 几十 | 99.9% |
 | GPU vertex buffer | ~60MB | ~60MB | 0（不变） |
 | JS heap | ~200MB | ~80MB | 60% |
+| 加载耗时 | ~2 小时 | 大幅提升（分钟级） | — |
 
 ### 12.3 风险与权衡
 
@@ -1244,7 +1255,9 @@ JS heap     ≤ 200MB    （WebView2 子进程上限）
 | 阶段 5 | Material 共享 | 已实施 | -50% Material 内存 | ✓ 已完成 | — |
 | 阶段 5b | Geometry 共享 A.0（按 modPath） | 已实施 | -40% GPU 内存 | ✓ 已完成 | — |
 | 阶段 5b.1 | Geometry 共享 A.1（跨 modPath） | 已实施 | -80%+ GPU 内存，解决崩溃 | ✓ 已完成 | — |
-| **阶段 5c** | **mergeGeometries 静态合并（方案 B）** | **中** | **draw call 77k → 几十，加载 2h → 分钟级** | **准备实施** | **最高** |
+| **阶段 5c** | **mergeGeometries 静态合并（方案 B）** | **中** | **draw call 77k → 几十** | **✓ 已完成** | — |
+| **阶段 5d** | **顶点烘焙修复（placement 含缩放分量）** | **低** | **GIS 设备位置正确** | **✓ 已完成** | — |
+| 阶段 5e | GLTFExporter 离线预序列化（方案 C） | 中 | 二次打开秒级 | 待实施 | 最高 |
 | 阶段 2 | 几何缓存表（SQLite） | 中 | 二次打开 < 1 秒 | 待实施 | 中 |
 | 阶段 3 | Worker 化解析 | 中 | 主线程不阻塞 | 待实施 | 中 |
 | 阶段 4 | InstancedMesh 装配 | 大 | draw call → 6 | 待实施 | 中（方案 C 一部分） |
@@ -1252,7 +1265,7 @@ JS heap     ≤ 200MB    （WebView2 子进程上限）
 | 阶段 7 | Viewer 加载 .gimc | 中 | 跳过 XML 解析 | 待实施 | 低（长期） |
 
 **当前优先级**：
-1. **最高**：阶段 5c（方案 B mergeGeometries 静态合并）— 方案 A.1 虽解决崩溃但加载 ~2 小时，draw call ~77000 是性能瓶颈主因
+1. **最高**：阶段 5e（方案 C GLTFExporter 离线预序列化）— 方案 B 已解决 draw call 与崩溃，但加载仍需分钟级；方案 C 把 MOD 解析+几何构造离线缓存为 .glb，二次打开跳过全部解析
 2. 中：阶段 2（SQLite 几何缓存）、阶段 3（Worker 化）
 3. 低：阶段 4（InstancedMesh）、阶段 6/7（预编译）
 

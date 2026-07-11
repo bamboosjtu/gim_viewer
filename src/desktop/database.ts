@@ -176,6 +176,79 @@ export async function batchReadCachedFiles(
   return map;
 }
 
+// ===== GLB 几何缓存（方案 C：MOD → glTF 离线预序列化） =====
+
+/**
+ * 在 Tauri 环境下写入 GLB 缓存文件（方案 C：序列化后的 glTF 二进制）。
+ * 路径由 projectId + entryPath 计算，存储在 app_data_dir/glbcache/{projectId}/ 下。
+ */
+export async function writeGlbFile(projectId: number, entryPath: string, bytes: Uint8Array): Promise<string> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('write_glb_file', {
+    projectId,
+    entryPath,
+    bytes: Array.from(bytes),
+  });
+}
+
+/**
+ * 在 Tauri 环境下读取 GLB 缓存文件。
+ */
+export async function readGlbFile(projectId: number, entryPath: string): Promise<Uint8Array> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  const bytes = await invoke<number[]>('read_glb_file', { projectId, entryPath });
+  return new Uint8Array(bytes);
+}
+
+/**
+ * 检查 GLB 缓存文件是否存在。
+ */
+export async function glbFileExists(projectId: number, entryPath: string): Promise<boolean> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<boolean>('glb_file_exists', { projectId, entryPath });
+}
+
+/** 批量读取 GLB 缓存文件的结果项 */
+export interface BatchGlbFileItem {
+  entry_path: string;
+  bytes: number[] | null;
+}
+
+/**
+ * 批量读取 GLB 缓存文件（一次 IPC 替代 N 次 readGlbFile）。
+ * 用于缓存命中时批量加载序列化几何，避免数千次 IPC 往返。
+ */
+export async function batchReadGlbFiles(
+  projectId: number,
+  entryPaths: string[],
+): Promise<Map<string, Uint8Array | null>> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  const results = await invoke<BatchGlbFileItem[]>('batch_read_glb_files', {
+    projectId,
+    entryPaths,
+  });
+  const map = new Map<string, Uint8Array | null>();
+  for (const item of results) {
+    map.set(
+      item.entry_path,
+      item.bytes ? new Uint8Array(item.bytes) : null,
+    );
+  }
+  return map;
+}
+
+/**
+ * 方案 C：写入 GLB 几何缓存版本标记文件。
+ *
+ * 在 cacheGlbFiles 完成所有 MOD/STL → .glb 序列化后调用一次，
+ * 把当前 GEOMETRY_CACHE_VERSION 写入 glbcache/{projectId}/_version.txt。
+ * 下次 validateGimCache 时读取此文件并比较，版本不匹配则整体失效。
+ */
+export async function writeGeometryCacheVersion(projectId: number): Promise<string> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('write_geometry_cache_version', { projectId });
+}
+
 // ===== 几何引用链（v6） =====
 
 export interface DevSolidModelPayload {
@@ -318,6 +391,10 @@ export interface GimCacheValidation {
   missing_line_fam_sources: string[];
   /** v5: 图引用中存在但 line_dev_property 缺失的 file_name_lower 列表 */
   missing_line_dev_sources: string[];
+  /** v6（方案 C）: GLB 几何缓存版本是否匹配（读取 glbcache/{projectId}/_version.txt 比较） */
+  geometry_cache_version_match: boolean;
+  /** v6（方案 C）: 当前 GEOMETRY_CACHE_VERSION（供前端诊断显示） */
+  current_geometry_cache_version: string;
 }
 
 /**

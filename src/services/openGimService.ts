@@ -630,7 +630,7 @@ async function openGimFromArrayBuffer(
     }
 
     // v6: 缓存 DEV/PHM/MOD 几何文件到本地磁盘
-    // 用于缓存命中场景下从磁盘读取这些文件以回放 xml-mod 几何
+    // 用于缓存命中场景下从磁盘读取这些文件以回放 xml-mod 几何（方案 B 回退路径）
     if (state.currentFiles) {
       showLoading('正在缓存几何文件（DEV/PHM/MOD）...');
       try {
@@ -650,6 +650,10 @@ async function openGimFromArrayBuffer(
         console.error('[Tauri] 几何文件缓存失败:', err);
       }
     }
+
+    // 方案 C：MOD → glTF 离线预序列化缓存
+    // 移到 IFC 加载之后作为后台任务（见下方 queueMicrotask），避免阻塞渲染
+    // 此处仅记录 files 引用，实际序列化在 loadAllIfcFiles 完成后执行
 
     showLoading('正在写入 GIM 索引...');
     try {
@@ -706,6 +710,49 @@ async function openGimFromArrayBuffer(
 
   // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
   await loadAllIfcFiles(state, entries, showMessage);
+
+  // 方案 C v2：GLB 序列化作为后台任务（IFC + MOD 渲染完成后执行）
+  // 按 DEV 粒度缓存：收集 CBM seed devPaths，每个 DEV 序列化为一个 .glb
+  // 不阻塞渲染；序列化结果供下次打开使用
+  const glbProjectId = options?.projectId;
+  if (state.currentFiles && glbProjectId != null) {
+    const glbFiles = state.currentFiles;
+    const glbCbmTree = state.currentCbmTree;
+    queueMicrotask(() => {
+      void (async () => {
+        try {
+          // 从 CBM 树收集所有 seed devPaths（去重）
+          const { collectCbmDeviceInstances } = await import('./modAutoLoadService.js');
+          const seeds = collectCbmDeviceInstances(glbCbmTree);
+          const devPathSet = new Set<string>();
+          for (const seed of seeds) {
+            if (seed.devPath) {
+              const normalized = seed.devPath.replace(/\\/g, '/');
+              const devPath = normalized.toLowerCase().startsWith('dev/')
+                ? normalized
+                : `DEV/${normalized}`;
+              devPathSet.add(devPath);
+            }
+          }
+          const devPaths = Array.from(devPathSet);
+          debugLog(DEBUG_GIM_CACHE, `[Tauri] GLB 后台序列化: ${devPaths.length} 个唯一 DEV（从 ${seeds.length} 个 seed）`);
+
+          const { cacheGlbFiles } = await import('./glbCacheService.js');
+          const glbResult = await cacheGlbFiles(glbProjectId, glbFiles, devPaths);
+          debugLog(DEBUG_GIM_CACHE, '[Tauri] GLB 后台序列化结果:', {
+            cached: glbResult.cachedCount,
+            skipped: glbResult.skippedCount,
+            errors: glbResult.errors.length,
+          });
+          if (glbResult.errors.length > 0) {
+            console.warn('[Tauri] 部分 GLB 序列化失败（前 5 个）:', glbResult.errors.slice(0, 5));
+          }
+        } catch (err) {
+          console.error('[Tauri] GLB 后台序列化失败:', err);
+        }
+      })();
+    });
+  }
 }
 
 /**
