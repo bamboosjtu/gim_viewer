@@ -931,14 +931,18 @@ pub fn write_glb_file(
 }
 
 /// Tauri command：读取 GLB 缓存文件
+///
+/// 返回 `tauri::ipc::Response`（原始二进制），避免 `Vec<u8>` 经 JSON 序列化为
+/// 数字数组带来的 3x 体积膨胀和解析开销。JS 侧 `invoke` 返回 `ArrayBuffer`。
 #[tauri::command]
 pub fn read_glb_file(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_path: String,
-) -> Result<Vec<u8>, String> {
+) -> Result<tauri::ipc::Response, String> {
     let path = glb_cache_file_path(&app_handle, project_id, &entry_path)?;
-    stdfs::read(&path).map_err(|e| format!("读取 glb 缓存文件失败: {}", e))
+    let bytes = stdfs::read(&path).map_err(|e| format!("读取 glb 缓存文件失败: {}", e))?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// Tauri command：检查 GLB 缓存文件是否存在
@@ -1701,7 +1705,7 @@ pub struct LineDevPropertyPayload {
 /// 2. 删除旧 line_fam_property / line_dev_property
 /// 3. 插入 graph payload（nodes / children / refs / file_stats）
 /// 4. 插入 fam_props / dev_props
-/// 5. 更新 gim_project: parser_version = PARSER_VERSION（当前 gim-parser-v13）, project_type = transmission_line
+/// 5. 更新 gim_project: parser_version = PARSER_VERSION（当前 gim-parser-v14）, project_type = transmission_line
 ///
 /// 使用 prepared statement 批量插入，避免每行重新 prepare。
 #[tauri::command]
@@ -2789,6 +2793,24 @@ pub fn delete_project_cache(
         )
     };
     Ok(summary)
+}
+
+/// Tauri command：仅删除 GLB 几何缓存目录（不删除 SQLite 记录和 IFC/Fragments 缓存）。
+///
+/// 用于缓存校验失败（如 _version.txt 缺失导致 geometry_cache_version_match=false）时，
+/// 清理陈旧 GLB 文件，避免"GLB 存在但版本标记缺失"的假象。
+#[tauri::command]
+pub fn delete_glb_cache(app_handle: tauri::AppHandle, project_id: i64) -> Result<(), String> {
+    let base = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取 app_data_dir 失败: {}", e))?;
+    let glb_dir = base.join("glbcache").join(project_id.to_string());
+    if glb_dir.exists() {
+        stdfs::remove_dir_all(&glb_dir)
+            .map_err(|e| format!("删除 glbcache 目录失败: {}", e))?;
+    }
+    Ok(())
 }
 
 // ===== 几何引用链批量写入（v6） =====

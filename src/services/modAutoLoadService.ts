@@ -474,40 +474,17 @@ async function tryDevGlbFastPath(
     return { loaded: false, modCount: 0, stlCount: 0 };
   }
 
-  // 2. 批量预读 DEV.glb（1 次 IPC）
-  let glbCacheMap: Map<string, Uint8Array | null>;
-  try {
-    const { batchReadGlbFiles } = await import('../desktop/database.js');
-    glbCacheMap = await batchReadGlbFiles(state.currentProjectId, uniqueDevPaths);
-  } catch (err) {
-    debugLog(DEBUG_IFC_LOAD, '[autoLoad] DEV GLB 批量预读失败，回退到 MOD 粒度:', err);
-    return { loaded: false, modCount: 0, stlCount: 0 };
-  }
-
-  // 3. 检查命中率
-  // 注意：部分 DEV 没有几何引用（serializeDevToGlb 返回 null，不写 GLB 文件），
-  // 这些 DEV 在 batchReadGlbFiles 中返回 null。这是正常情况，不应导致整体回退。
-  // 只要至少有 1 个命中，就使用 GLB 快速路径；未命中的 DEV 本来就没有几何，跳过即可。
-  let hitCount = 0;
-  for (const [, bytes] of glbCacheMap) {
-    if (bytes && bytes.byteLength > 0) hitCount++;
-  }
-  debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV GLB 预读: ${hitCount}/${uniqueDevPaths.length} 命中（${uniqueDevPaths.length - hitCount} 个无几何 DEV 跳过）`);
-
-  if (hitCount === 0) {
-    // 无任何命中，回退到 MOD 粒度（首次打开尚未序列化完成的情况）
-    return { loaded: false, modCount: 0, stlCount: 0 };
-  }
-
-  // 4. 全部命中 → 加载 DEV.glb，应用 CBM 矩阵，加入 scene
+  // 2. 逐个读取 DEV.glb 并加载（使用 tauri::ipc::Response 原始二进制传输）
+  //    替代原 batchReadGlbFiles：避免 146MB JSON 序列化导致 webview 冻结
   const { loadDevGlb } = await import('./glbCacheService.js');
   const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
-  const { applyProjectSourceToViewer } = await import('./coordinateAlignmentService.js');
+  const { readGlbFile } = await import('../desktop/database.js');
 
   const { modRoot } = ensureGeometryLayers(state, scene);
-  const loadedDevGroups = new Map<string, THREE.Group>();
 
   let loadedCount = 0;
+  let hitCount = 0;
+  let missCount = 0;
   const totalSeeds = deviceNodes.length;
   showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: totalSeeds, totalStls: 0 });
 
@@ -523,8 +500,20 @@ async function tryDevGlbFastPath(
       ? normalized
       : `DEV/${normalized}`;
 
-    const glbBytes = glbCacheMap.get(devPath);
-    if (!glbBytes || glbBytes.byteLength === 0) continue;
+    // 逐个读取 GLB（tauri::ipc::Response 原始二进制，不经 JSON 序列化）
+    let glbBytes: Uint8Array | null = null;
+    try {
+      glbBytes = await readGlbFile(state.currentProjectId, devPath);
+    } catch {
+      // GLB 文件不存在 = 该 DEV 无几何引用（serializeDevToGlb 返回 null），正常跳过
+      missCount++;
+      continue;
+    }
+    if (!glbBytes || glbBytes.byteLength === 0) {
+      missCount++;
+      continue;
+    }
+    hitCount++;
 
     try {
       const group = await loadDevGlb(devPath, glbBytes);
@@ -541,7 +530,6 @@ async function tryDevGlbFastPath(
       if (!diagnoseGroupBBox(group, devPath)) continue;
 
       modRoot.add(group);
-      loadedDevGroups.set(`${devPath}#${seed.path}`, group);
       loadedCount++;
       showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0 });
     } catch (err) {
@@ -549,7 +537,13 @@ async function tryDevGlbFastPath(
     }
   }
 
-  debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV GLB 快速路径完成: ${loadedCount}/${deviceNodes.length} 个 seed 已加载`);
+  // 3. 如果所有 DEV 都没有 GLB 缓存（hitCount=0），回退到 MOD 粒度
+  if (hitCount === 0) {
+    debugLog(DEBUG_IFC_LOAD, '[autoLoad] 所有 DEV GLB 均未命中，回退到 MOD 粒度');
+    return { loaded: false, modCount: 0, stlCount: 0 };
+  }
+
+  debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV GLB 快速路径完成: ${loadedCount}/${deviceNodes.length} 个 seed 已加载（命中 ${hitCount}，无几何 ${missCount}）`);
   showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0 });
   return { loaded: true, modCount: loadedCount, stlCount: 0 };
 }

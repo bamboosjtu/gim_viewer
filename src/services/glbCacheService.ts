@@ -168,6 +168,7 @@ export async function cacheGlbFiles(
   projectId: number,
   files: Map<string, File>,
   devPaths: string[],
+  onProgress?: (done: number, total: number) => void,
 ): Promise<GlbCacheResult> {
   const { writeGlbFile } = await import('../desktop/database.js');
 
@@ -179,42 +180,45 @@ export async function cacheGlbFiles(
 
   // 分批处理，每批之间 yield 主线程，防止 UI 冻结
   const BATCH_SIZE = 8;
-  for (let i = 0; i < devPaths.length; i += BATCH_SIZE) {
-    const batch = devPaths.slice(i, i + BATCH_SIZE);
-    for (const devPath of batch) {
-      try {
-        const glbBytes = await serializeDevToGlb(devPath, files);
-        if (!glbBytes) {
-          skippedCount++;
-          continue;
-        }
-        await writeGlbFile(projectId, devPath, glbBytes);
-        cachedCount++;
-      } catch (err) {
-        errors.push({
-          entryPath: devPath,
-          message: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-    // 每批后 yield 主线程，让 UI 有机会更新
-    if (i + BATCH_SIZE < devPaths.length) {
-      await new Promise((r) => setTimeout(r, 0));
-    }
-    if ((i + BATCH_SIZE) % (BATCH_SIZE * 5) === 0) {
-      debugLog(DEBUG_GIM_CACHE, `[glbCache] 进度: ${Math.min(i + BATCH_SIZE, devPaths.length)}/${devPaths.length}`);
-    }
-  }
-
-  debugLog(DEBUG_GIM_CACHE, `[glbCache] 序列化完成: ${cachedCount} DEV 缓存, ${skippedCount} 跳过, ${errors.length} 失败`);
-
-  // 写入版本标记文件，供 validate_gim_cache 校验
   try {
-    const { writeGeometryCacheVersion } = await import('../desktop/database.js');
-    await writeGeometryCacheVersion(projectId);
-    debugLog(DEBUG_GIM_CACHE, `[glbCache] 版本标记已写入 (projectId=${projectId})`);
-  } catch (err) {
-    console.warn('[glbCache] 写入版本标记失败:', err);
+    for (let i = 0; i < devPaths.length; i += BATCH_SIZE) {
+      const batch = devPaths.slice(i, i + BATCH_SIZE);
+      for (const devPath of batch) {
+        try {
+          const glbBytes = await serializeDevToGlb(devPath, files);
+          if (!glbBytes) {
+            skippedCount++;
+            continue;
+          }
+          await writeGlbFile(projectId, devPath, glbBytes);
+          cachedCount++;
+        } catch (err) {
+          errors.push({
+            entryPath: devPath,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      // 每批后 yield 主线程，让 UI 有机会更新
+      if (i + BATCH_SIZE < devPaths.length) {
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      if ((i + BATCH_SIZE) % (BATCH_SIZE * 5) === 0) {
+        debugLog(DEBUG_GIM_CACHE, `[glbCache] 进度: ${Math.min(i + BATCH_SIZE, devPaths.length)}/${devPaths.length}`);
+      }
+      onProgress?.(Math.min(i + BATCH_SIZE, devPaths.length), devPaths.length);
+    }
+
+    debugLog(DEBUG_GIM_CACHE, `[glbCache] 序列化完成: ${cachedCount} DEV 缓存, ${skippedCount} 跳过, ${errors.length} 失败`);
+  } finally {
+    // 写入版本标记文件（finally 确保即使部分失败也写入，供 validate_gim_cache 校验）
+    try {
+      const { writeGeometryCacheVersion } = await import('../desktop/database.js');
+      await writeGeometryCacheVersion(projectId);
+      debugLog(DEBUG_GIM_CACHE, `[glbCache] 版本标记已写入 (projectId=${projectId})`);
+    } catch (err) {
+      console.warn('[glbCache] 写入版本标记失败:', err);
+    }
   }
 
   return { cachedCount, skippedCount, errors };

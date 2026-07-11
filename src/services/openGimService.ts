@@ -711,47 +711,46 @@ async function openGimFromArrayBuffer(
   // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
   await loadAllIfcFiles(state, entries, showMessage);
 
-  // 方案 C v2：GLB 序列化作为后台任务（IFC + MOD 渲染完成后执行）
+  // 方案 C v2：GLB 序列化（IFC + MOD 渲染完成后执行）
   // 按 DEV 粒度缓存：收集 CBM seed devPaths，每个 DEV 序列化为一个 .glb
-  // 不阻塞渲染；序列化结果供下次打开使用
+  // 必须等待完成以确保 _version.txt 写入，否则下次打开 geometry_cache_version_match=false
   const glbProjectId = options?.projectId;
   if (state.currentFiles && glbProjectId != null) {
     const glbFiles = state.currentFiles;
     const glbCbmTree = state.currentCbmTree;
-    queueMicrotask(() => {
-      void (async () => {
-        try {
-          // 从 CBM 树收集所有 seed devPaths（去重）
-          const { collectCbmDeviceInstances } = await import('./modAutoLoadService.js');
-          const seeds = collectCbmDeviceInstances(glbCbmTree);
-          const devPathSet = new Set<string>();
-          for (const seed of seeds) {
-            if (seed.devPath) {
-              const normalized = seed.devPath.replace(/\\/g, '/');
-              const devPath = normalized.toLowerCase().startsWith('dev/')
-                ? normalized
-                : `DEV/${normalized}`;
-              devPathSet.add(devPath);
-            }
-          }
-          const devPaths = Array.from(devPathSet);
-          debugLog(DEBUG_GIM_CACHE, `[Tauri] GLB 后台序列化: ${devPaths.length} 个唯一 DEV（从 ${seeds.length} 个 seed）`);
-
-          const { cacheGlbFiles } = await import('./glbCacheService.js');
-          const glbResult = await cacheGlbFiles(glbProjectId, glbFiles, devPaths);
-          debugLog(DEBUG_GIM_CACHE, '[Tauri] GLB 后台序列化结果:', {
-            cached: glbResult.cachedCount,
-            skipped: glbResult.skippedCount,
-            errors: glbResult.errors.length,
-          });
-          if (glbResult.errors.length > 0) {
-            console.warn('[Tauri] 部分 GLB 序列化失败（前 5 个）:', glbResult.errors.slice(0, 5));
-          }
-        } catch (err) {
-          console.error('[Tauri] GLB 后台序列化失败:', err);
+    try {
+      // 从 CBM 树收集所有 seed devPaths（去重）
+      const { collectCbmDeviceInstances } = await import('./modAutoLoadService.js');
+      const seeds = collectCbmDeviceInstances(glbCbmTree);
+      const devPathSet = new Set<string>();
+      for (const seed of seeds) {
+        if (seed.devPath) {
+          const normalized = seed.devPath.replace(/\\/g, '/');
+          const devPath = normalized.toLowerCase().startsWith('dev/')
+            ? normalized
+            : `DEV/${normalized}`;
+          devPathSet.add(devPath);
         }
-      })();
-    });
+      }
+      const devPaths = Array.from(devPathSet);
+      debugLog(DEBUG_GIM_CACHE, `[Tauri] GLB 序列化: ${devPaths.length} 个唯一 DEV（从 ${seeds.length} 个 seed）`);
+
+      showLoading(`正在序列化 GLB 缓存（0/${devPaths.length}）...`);
+      const { cacheGlbFiles } = await import('./glbCacheService.js');
+      const glbResult = await cacheGlbFiles(glbProjectId, glbFiles, devPaths, (done, total) => {
+        showLoading(`正在序列化 GLB 缓存（${done}/${total}）...`);
+      });
+      debugLog(DEBUG_GIM_CACHE, '[Tauri] GLB 序列化结果:', {
+        cached: glbResult.cachedCount,
+        skipped: glbResult.skippedCount,
+        errors: glbResult.errors.length,
+      });
+      if (glbResult.errors.length > 0) {
+        console.warn('[Tauri] 部分 GLB 序列化失败（前 5 个）:', glbResult.errors.slice(0, 5));
+      }
+    } catch (err) {
+      console.error('[Tauri] GLB 序列化失败:', err);
+    }
   }
 }
 
@@ -889,9 +888,20 @@ export async function openGimWithDialog(
         }
       } else {
         debugLog(DEBUG_GIM_CACHE, '[Tauri] 缓存无效或不完整，继续完整解压流程:', validation);
+        // 清理陈旧 GLB 缓存目录（如 _version.txt 缺失导致 geometry_cache_version_match=false），
+        // 避免陈旧 GLB 文件残留造成"缓存已存在"的假象。仅 Tauri 环境下执行。
+        if (isTauri() && !validation.geometry_cache_version_match) {
+          try {
+            const { deleteGlbCache } = await import('../desktop/database.js');
+            await deleteGlbCache(record.id);
+            debugLog(DEBUG_GIM_CACHE, '[Tauri] 已清理陈旧 GLB 缓存目录');
+          } catch (err) {
+            console.warn('[Tauri] 清理 GLB 缓存失败:', err);
+          }
+        }
       }
 
-      // 4. 回退：完整解压流程（不创建 Viewer，只读取+解压+索引+渲染树）
+      // 4. 回退：完整解压流程（不创建 Viewer，只做读取+解压+索引+渲染树）
       debugLog(DEBUG_GIM_CACHE, '[Tauri] 缓存短路未生效：进入完整解压流程');
       showLoading('正在读取 GIM 文件...');
       const ab = await readFileBytes(filePath);

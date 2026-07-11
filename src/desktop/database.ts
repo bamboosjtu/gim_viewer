@@ -193,11 +193,14 @@ export async function writeGlbFile(projectId: number, entryPath: string, bytes: 
 
 /**
  * 在 Tauri 环境下读取 GLB 缓存文件。
+ *
+ * Rust 侧返回 `tauri::ipc::Response`（原始二进制），JS 侧 `invoke` 返回 `ArrayBuffer`，
+ * 避免 `Vec<u8>` 经 JSON 序列化为数字数组带来的 3x 体积膨胀和解析开销。
  */
 export async function readGlbFile(projectId: number, entryPath: string): Promise<Uint8Array> {
   const { invoke } = await import('@tauri-apps/api/core');
-  const bytes = await invoke<number[]>('read_glb_file', { projectId, entryPath });
-  return new Uint8Array(bytes);
+  const buffer = await invoke<ArrayBuffer>('read_glb_file', { projectId, entryPath });
+  return new Uint8Array(buffer);
 }
 
 /**
@@ -247,6 +250,16 @@ export async function batchReadGlbFiles(
 export async function writeGeometryCacheVersion(projectId: number): Promise<string> {
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<string>('write_geometry_cache_version', { projectId });
+}
+
+/**
+ * 删除指定项目的 GLB 几何缓存目录（仅 glbcache/{projectId}/，不影响 SQLite/IFC/Fragments）。
+ *
+ * 用于缓存校验失败时清理陈旧 GLB 文件（如 _version.txt 缺失）。
+ */
+export async function deleteGlbCache(projectId: number): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<void>('delete_glb_cache', { projectId });
 }
 
 // ===== 几何引用链（v6） =====
