@@ -25,8 +25,8 @@ export async function openIfcWithDialog(
     try {
       // 2. 加载 3D 引擎
       showLoading('正在加载 3D 引擎...');
-      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-      const runtime = await getViewerRuntime(state, showMessage);
+      const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+      const runtime = await getViewerRuntimeWithUI(state, showMessage);
       const { readFileBytes } = await import('../desktop/fileReader.js');
 
       // 3. 逐个加载 IFC
@@ -60,8 +60,8 @@ export async function openIfcWithDialog(
       btnLoadLocal.disabled = true;
       try {
         showLoading('正在加载 3D 引擎...');
-        const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-        const runtime = await getViewerRuntime(state, showMessage);
+        const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+        const runtime = await getViewerRuntimeWithUI(state, showMessage);
         await ensureEngineReady(runtime.ctx, state, runtime.modelCallbacks);
         for (const file of files) {
           showLoading(`正在加载 ${file.name}...`);

@@ -1,6 +1,7 @@
 /**
- * 诊断摘要服务：将 ProjectCacheDiagnostic 转为人类可读的 Markdown 风格文本。
+ * 诊断摘要工具：将 ProjectCacheDiagnostic 转为人类可读的 Markdown 风格文本。
  *
+ * 纯格式化函数，不依赖 services / desktop 层。
  * 用于：
  * - Ctrl+Shift+D 控制台输出
  * - 缓存管理 UI 中的"复制诊断"按钮

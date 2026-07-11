@@ -1,7 +1,7 @@
 import type { CbmNode } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
 import { cbmTreePanel } from './dom.js';
-import { getNodeDisplayName } from '../gim/gimIndexer.js';
+import { getNodeDisplayName } from '../shared/displayName.js';
 
 const ENTITY_ICONS: Record<string, string> = {
   F1System: '🏗️', F2System: '🏢', F3System: '⚡', F4System: '🔧', PARTINDEX: '🔩',

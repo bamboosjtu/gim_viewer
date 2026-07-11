@@ -17,7 +17,7 @@ import {
   getDbPath,
   type CachedProjectSummary,
 } from '../desktop/database.js';
-import { summarizeDiagnostic } from '../services/diagnosticSummaryService.js';
+import { summarizeDiagnostic } from '../shared/diagnosticSummary.js';
 import { getDebugConfigSnapshot } from '../config/debug.js';
 
 let modalEl: HTMLElement | null = null;

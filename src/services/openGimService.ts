@@ -169,8 +169,8 @@ export async function loadAllIfcFiles(
   }
 
   showLoading('正在加载 3D 引擎...');
-  const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-  const runtime = await getViewerRuntime(state, showMessage);
+  const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+  const runtime = await getViewerRuntimeWithUI(state, showMessage);
   const { ctx, modelCallbacks } = runtime;
 
   showLoading('正在加载 IFC 模型...');
@@ -283,8 +283,8 @@ async function autoLoadModStlPostIfc(
     if (existingCtx) {
       scene = (existingCtx.world.scene as any).three as import('three').Scene;
     } else {
-      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-      const runtime = await getViewerRuntime(state, showMessage);
+      const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+      const runtime = await getViewerRuntimeWithUI(state, showMessage);
       scene = (runtime.ctx.world.scene as any).three as import('three').Scene;
     }
 

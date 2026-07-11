@@ -13,8 +13,8 @@ import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
  * 1. 立即显示基础属性 + 打开属性面板（纯 UI，无 Viewer）
  * 2. 如果节点有 ifcFile/ifcGuid：
  *    a. 检查对应 IFC 模型是否已加载
- *    b. 未加载 → getViewerRuntime() → ensureEngineReady() → loadIfcBuffer() → buildIfcNameIndex()
- *    c. 已加载 → getViewerRuntime()
+ *    b. 未加载 → getViewerRuntimeWithUI() → ensureEngineReady() → loadIfcBuffer() → buildIfcNameIndex()
+ *    c. 已加载 → getViewerRuntimeWithUI()
  *    d. highlightIfcFromNode() + 刷新完整属性
  * 3. 如果节点无 IFC 关联，只显示基础属性
  */
@@ -51,8 +51,8 @@ export async function handleNodeClick(
   if (modelsToLoad.size === 0 && refs.size === 0) {
     if (ifcModelId && state.loadedModels.has(ifcModelId)) {
       // IFC 已加载但无 GUID → 只定位
-      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-      const runtime = await getViewerRuntime(state, showMessage);
+      const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+      const runtime = await getViewerRuntimeWithUI(state, showMessage);
       const { highlightIfcFromNode } = await import('../viewer/highlight.js');
       await highlightIfcFromNode(runtime.ctx, state, node, showMessage);
       return;
@@ -65,8 +65,8 @@ export async function handleNodeClick(
   }
 
   // 4. 需要加载 IFC 或高亮 → 获取 ViewerRuntime
-  const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-  const runtime = await getViewerRuntime(state, showMessage);
+  const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+  const runtime = await getViewerRuntimeWithUI(state, showMessage);
   const { ctx, modelCallbacks } = runtime;
 
   // 5. 加载未加载的 IFC 模型
@@ -224,8 +224,8 @@ async function loadModStlForNode(
   }
 
   // 获取 ViewerRuntime（懒加载，与 IFC 路径共用同一引擎）
-  const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-  const runtime = await getViewerRuntime(state, showMessage);
+  const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+  const runtime = await getViewerRuntimeWithUI(state, showMessage);
   const { ctx } = runtime;
   const scene = (ctx.world.scene as any).three as import('three').Scene;
 
@@ -395,8 +395,8 @@ async function tryLoadDevGlbForNode(
   showMessage(`已加载 DEV 几何模型: ${devPath}`);
 
   if (!state.hasFittedCamera) {
-    const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
-    const runtime = await getViewerRuntime(state, showMessage);
+    const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+    const runtime = await getViewerRuntimeWithUI(state, showMessage);
     const { fitCameraToScene } = await import('../viewer/camera.js');
     fitCameraToScene(runtime.ctx, state);
   }

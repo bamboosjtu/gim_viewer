@@ -5,7 +5,7 @@ import { btnLoadGim, btnLoadLocal, btnClear, btnCacheManager, loadingEl } from '
 import { isTauri } from '../desktop/runtime.js';
 import { DEBUG_FRAGMENTS, getDebugConfigSnapshot } from '../config/debug.js';
 import { debugWarn } from '../utils/logger.js';
-import { summarizeDiagnostic } from '../services/diagnosticSummaryService.js';
+import { summarizeDiagnostic } from '../shared/diagnosticSummary.js';
 import { getBasemapStatusSnapshot, summarizeBasemapStatus } from '../services/basemapStatusService.js';
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
@@ -33,9 +33,9 @@ async function bootstrapAsync(): Promise<void> {
   setupTabs();
   setupIfcSelectModal({
     onLoadSelected: async () => {
-      const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+      const { getViewerRuntimeWithUI } = await import('../services/viewerUIBinding.js');
       const { loadSelectedIfcFiles } = await import('../services/openGimService.js');
-      const runtime = await getViewerRuntime(state, (text) => showLoading(text));
+      const runtime = await getViewerRuntimeWithUI(state, (text) => showLoading(text));
       await loadSelectedIfcFiles(runtime.ctx, state, runtime.modelCallbacks);
     },
   });
@@ -68,9 +68,9 @@ async function bootstrapAsync(): Promise<void> {
   btnClear.addEventListener('click', async () => {
     // 统一走 cleanupBeforeOpenNewProject：销毁线路地图 + dispose 所有 fragments 模型
     // （合并 state.loadedModels 与 ctx.fragments.list，避免 state 与 ctx 不同步）+
-    // 重置高亮 + 清空所有 UI 面板 + resetAll（state.reset 含 loadedModels.clear）
+    // 重置高亮 + 清空所有 UI 面板 + resetGimState（集中 mutator，含 loadedModels.clear）
     const { cleanupBeforeOpenNewProject } = await import('../services/projectCleanupService.js');
-    await cleanupBeforeOpenNewProject(state, { resetAll: true });
+    await cleanupBeforeOpenNewProject(state);
   });
 
   // 缓存管理（M4-D2）：仅 Tauri 模式可用

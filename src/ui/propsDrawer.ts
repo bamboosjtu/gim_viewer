@@ -2,9 +2,8 @@ import type { CbmNode } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { escHtml } from '../shared/html.js';
-import { parseFamSections } from '../gim/famParser.js';
-import { parseKeyValue } from '../gim/cbmParser.js';
-import { getNodeDisplayName } from '../gim/gimIndexer.js';
+import { parseFamSections, parseKeyValue } from '../shared/gimParsing.js';
+import { getNodeDisplayName } from '../shared/displayName.js';
 import { propsDrawerBody, propsDrawer, btnToggleProps, btnCloseProps } from './dom.js';
 
 /** 刷新视口布局（面板展开/收起后调用） */

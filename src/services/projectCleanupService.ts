@@ -13,9 +13,9 @@
  *   2. dispose ViewerRuntime 中所有 fragments 模型（合并 state.loadedModels 与 ctx.fragments.list）
  *   3. 重置高亮
  *   4. 清空 model-list UI
- *   5. 重置 state（resetGimState + hasFittedCamera，可选 resetAll）
+ *   5. 重置 state（resetGimState 集中 mutator，含 loadedModels/highlightedItems/hasFittedCamera）
  *
- * 关键顺序：必须先 dispose runtime 中的模型，再 resetGimState（reset 会清空 loadedModels 索引，
+ * 关键顺序：必须先 dispose runtime 中的模型，再 resetGimState（resetGimState 会清空 loadedModels 索引，
  * 但 ctx.fragments.list 中的实际 Three.js 对象不会随之消失）。
  *
  * 分层边界：属于 services 编排层，可 dynamic import viewer/ 与 ui/ 模块。
@@ -25,16 +25,7 @@ import type { AppState } from '../app/state.js';
 import * as THREE from 'three';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
-
-export interface CleanupOptions {
-  /**
-   * 是否执行完整 state.reset()（含 loadedModels.clear / highlightedItems=null / hasFittedCamera=false）。
-   * - 打开新 GIM 前：false（保留 loadedModels，cleanup 内部已 dispose，resetGimState 会清字段）
-   * - 清空场景：true（彻底重置）
-   * 默认 false。
-   */
-  resetAll?: boolean;
-}
+import { container } from '../ui/dom.js';
 
 /**
  * 在打开新 GIM 项目前 / 清空场景时执行统一清理。
@@ -42,13 +33,10 @@ export interface CleanupOptions {
  * 幂等：ViewerRuntime 未创建时跳过 fragments 清理；无线路地图时跳过地图销毁。
  *
  * @param state 全局 AppState
- * @param options cleanup 选项
  */
 export async function cleanupBeforeOpenNewProject(
   state: AppState,
-  options: CleanupOptions = {},
 ): Promise<void> {
-  const { resetAll = false } = options;
 
   // ---- 1. 销毁线路地图 canvas / tooltip / 图层控件 / 事件监听 ----
   // 即使 ViewerRuntime 未创建，线路地图也可能存在（线路工程不创建 Viewer）
@@ -60,7 +48,7 @@ export async function cleanupBeforeOpenNewProject(
   }
 
   // ---- 2. dispose ViewerRuntime 中所有 fragments 模型 ----
-  // 必须在 resetGimState 之前执行：reset 会清空 state.loadedModels 索引，
+  // 必须在 resetGimState 之前执行：resetGimState 会清空 state.loadedModels 索引，
   // 但 ctx.fragments.list 中的 Three.js 对象仍残留，需要显式 dispose
   let disposedCount = 0;
   let attemptedCount = 0;
@@ -69,7 +57,7 @@ export async function cleanupBeforeOpenNewProject(
   const { isViewerRuntimeCreated, getViewerRuntime } = await import('../viewer/viewerRuntime.js');
   if (isViewerRuntimeCreated()) {
     try {
-      const runtime = await getViewerRuntime(state, () => {});
+      const runtime = await getViewerRuntime(container);
       const ctx = runtime.ctx;
 
       // 合并 state.loadedModels 与 ctx.fragments.list 的 modelId
@@ -186,17 +174,7 @@ export async function cleanupBeforeOpenNewProject(
   }
 
   // ---- 5. 重置 state ----
-  // 必须在 dispose 之后执行：reset 会清空 state.loadedModels 索引
-  if (resetAll) {
-    state.reset();
-  } else {
-    state.resetGimState();
-    // 相机状态也重置，确保新模型加载后 fitCameraToScene 能重新执行
-    state.hasFittedCamera = false;
-    // 显式清空 loadedModels 和 highlightedItems：
-    // resetGimState 不清这两项，若 dispose 未触发 onItemDeleted，
-    // state.loadedModels 会残留 stale modelId，导致 loadIfcEntry 误判"模型已加载，跳过"
-    state.loadedModels.clear();
-    state.highlightedItems = null;
-  }
+  // 必须在 dispose 之后执行：resetGimState 会清空 state.loadedModels 索引
+  // resetGimState 是集中 mutator，已包含 loadedModels.clear / highlightedItems=null / hasFittedCamera=false
+  state.resetGimState();
 }

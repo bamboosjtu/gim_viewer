@@ -87,7 +87,19 @@ export class AppState {
   eventsRegistered = false;
   hasFittedCamera = false;
 
-  /** 重置所有 GIM 相关状态（保留引擎初始化状态） */
+  /**
+   * 重置所有 GIM 相关状态（保留引擎初始化状态）。
+   *
+   * 集中 mutator：所有"项目切换 / 清空场景"路径统一调用此方法，
+   * 避免 state 字段在多处分散清理导致漏清。
+   *
+   * 包含：currentFiles / CBM 树 / 索引 / FAM-DEV 缓存 / 线路属性缓存 /
+   *       loadedModels / loadedXmlModGroups / loadedStlGroups / highlightedItems /
+   *       hasFittedCamera / projectSourceToViewerMatrix
+   *
+   * 注意：loadedModels.clear() 仅清空 state 侧索引，不 dispose Three.js 对象；
+   * ctx.fragments 中的实际模型需由 projectCleanupService 在调用本方法前显式 dispose。
+   */
   resetGimState() {
     this.currentFiles = null;
     this.currentIfcEntries = [];
@@ -119,13 +131,10 @@ export class AppState {
     this.stlRootGroup = null;
     // 清空项目级坐标转换矩阵（新项目需重新自动同步或手动设置）
     this.projectSourceToViewerMatrix = null;
-  }
-
-  /** 重置全部状态 */
-  reset() {
-    this.resetGimState();
+    // 清空 IFC 模型索引：若 dispose 未触发 onItemDeleted，
+    // state.loadedModels 会残留 stale modelId，导致 loadIfcEntry 误判"模型已加载，跳过"
     this.loadedModels.clear();
+    // 清空高亮索引，避免切换项目后旧高亮状态残留
     this.highlightedItems = null;
-    this.hasFittedCamera = false;
   }
 }

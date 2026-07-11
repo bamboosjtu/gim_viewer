@@ -93,7 +93,6 @@ pub fn run() {
             db::write_glb_file,
             db::read_glb_file,
             db::glb_file_exists,
-            db::batch_read_glb_files,
             db::write_geometry_cache_version,
             db::get_gim_index,
             db::validate_gim_cache,

@@ -956,44 +956,6 @@ pub fn glb_file_exists(
     Ok(path.exists())
 }
 
-/// 批量读取 GLB 缓存文件的返回项（与 BatchCacheFileResult 结构一致，独立定义以避免命名混淆）
-#[derive(Debug, Serialize)]
-pub struct BatchGlbFileResult {
-    pub entry_path: String,
-    pub bytes: Option<Vec<u8>>,
-}
-
-/// Tauri command：批量读取 GLB 缓存文件（一次 IPC 替代 N 次 read_glb_file）。
-///
-/// 用于缓存命中时批量加载序列化几何，避免数千次 IPC 往返。
-/// 单个文件读取失败不影响其他文件（对应 item.bytes = null）。
-#[tauri::command]
-pub fn batch_read_glb_files(
-    app_handle: tauri::AppHandle,
-    project_id: i64,
-    entry_paths: Vec<String>,
-) -> Result<Vec<BatchGlbFileResult>, String> {
-    let mut results = Vec::with_capacity(entry_paths.len());
-    for entry_path in &entry_paths {
-        let path = match glb_cache_file_path(&app_handle, project_id, entry_path) {
-            Ok(p) => p,
-            Err(_) => {
-                results.push(BatchGlbFileResult {
-                    entry_path: entry_path.clone(),
-                    bytes: None,
-                });
-                continue;
-            }
-        };
-        let bytes = stdfs::read(&path).ok();
-        results.push(BatchGlbFileResult {
-            entry_path: entry_path.clone(),
-            bytes,
-        });
-    }
-    Ok(results)
-}
-
 /// 方案 C：检查 GLB 几何缓存版本是否匹配。
 ///
 /// 读取 `{app_data_dir}/glbcache/{project_id}/_version.txt` 文件内容
