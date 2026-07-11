@@ -13,8 +13,8 @@ import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
  * 1. 立即显示基础属性 + 打开属性面板（纯 UI，无 Viewer）
  * 2. 如果节点有 ifcFile/ifcGuid：
  *    a. 检查对应 IFC 模型是否已加载
- *    b. 未加载 → getViewerRuntimeWithUI() → ensureEngineReady() → loadIfcBuffer() → buildIfcNameIndex()
- *    c. 已加载 → getViewerRuntimeWithUI()
+ *    b. 未加载 → getViewerRuntime() → ensureEngineReady() → loadIfcBuffer() → buildIfcNameIndex()
+ *    c. 已加载 → getViewerRuntime()
  *    d. highlightIfcFromNode() + 刷新完整属性
  * 3. 如果节点无 IFC 关联，只显示基础属性
  */
@@ -395,8 +395,8 @@ async function tryLoadDevGlbForNode(
   showMessage(`已加载 DEV 几何模型: ${devPath}`);
 
   if (!state.hasFittedCamera) {
-    const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
-    const runtime = await getViewerRuntimeWithUI(state, showMessage);
+    const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
+    const runtime = await getViewerRuntime(state, showMessage);
     const { fitCameraToScene } = await import('../viewer/camera.js');
     fitCameraToScene(runtime.ctx, state);
   }

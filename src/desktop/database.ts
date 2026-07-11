@@ -211,6 +211,35 @@ export async function glbFileExists(projectId: number, entryPath: string): Promi
   return invoke<boolean>('glb_file_exists', { projectId, entryPath });
 }
 
+/** 批量读取 GLB 缓存文件的结果项 */
+export interface BatchGlbFileItem {
+  entry_path: string;
+  bytes: number[] | null;
+}
+
+/**
+ * 批量读取 GLB 缓存文件（一次 IPC 替代 N 次 readGlbFile）。
+ * 用于缓存命中时批量加载序列化几何，避免数千次 IPC 往返。
+ */
+export async function batchReadGlbFiles(
+  projectId: number,
+  entryPaths: string[],
+): Promise<Map<string, Uint8Array | null>> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  const results = await invoke<BatchGlbFileItem[]>('batch_read_glb_files', {
+    projectId,
+    entryPaths,
+  });
+  const map = new Map<string, Uint8Array | null>();
+  for (const item of results) {
+    map.set(
+      item.entry_path,
+      item.bytes ? new Uint8Array(item.bytes) : null,
+    );
+  }
+  return map;
+}
+
 /**
  * 方案 C：写入 GLB 几何缓存版本标记文件。
  *
