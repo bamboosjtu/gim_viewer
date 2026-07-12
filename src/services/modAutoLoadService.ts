@@ -529,7 +529,12 @@ async function tryDevGlbFastPath(
       // bbox 诊断
       if (!diagnoseGroupBBox(group, devPath)) continue;
 
+      // 标记 devPath 供节点点击时相机定位查找
+      group.userData.devPath = devPath;
       modRoot.add(group);
+      // 同步跟踪到 loadedXmlModGroups，避免节点点击时重复加载
+      const instanceKey = `dev:${devPath}#${seed.path}`;
+      state.loadedXmlModGroups.set(instanceKey, group);
       loadedCount++;
       showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0 });
     } catch (err) {
@@ -713,6 +718,7 @@ export async function autoLoadModAndStlGeometry(
               const group = await loadModFile(geo, files ?? new Map());
               if (group) {
                 if (!prepareModGroupForScene(group, geo.modPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; loadedMods++; continue; }
+                group.userData.devPath = geo.devPath;
                 modRoot.add(group);
                 state.loadedXmlModGroups.set(geo.instanceKey, group);
                 loadedMods++;
@@ -743,6 +749,7 @@ export async function autoLoadModAndStlGeometry(
               const group = await loadStlFile(geo, files ?? new Map());
               if (group) {
                 if (!prepareStlGroupForScene(group, geo.stlPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; loadedStls++; continue; }
+                group.userData.devPath = geo.devPath;
                 stlRoot.add(group);
                 state.loadedStlGroups.set(geo.instanceKey, group);
                 loadedStls++;

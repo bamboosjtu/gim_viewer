@@ -1,5 +1,6 @@
 import type { CbmNode } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
+import type { ViewerContext } from '../viewer/viewerEngine.js';
 import * as THREE from 'three';
 import { collectIfcRefs } from '../gim/cbmParser.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
@@ -35,6 +36,13 @@ export async function handleNodeClick(
     ? node.ifcFile.replace(/\.ifc$/i, '')
     : state.deviceToIfcFile.get(cbmFileName);
 
+  // 无 IFC GUID 映射但有 devPath → 走 MOD/STL 加载路径
+  // （设备有 IFC 文件引用但无构件级 GUID，MOD/STL 是其可视化主体）
+  if (refs.size === 0 && node.devPath) {
+    await loadModStlForNode(state, node, showMessage);
+    return;
+  }
+
   // 需要加载的 IFC modelId 集合
   const modelsToLoad = new Set<string>();
   for (const modelId of refs.keys()) {
@@ -55,11 +63,6 @@ export async function handleNodeClick(
       const runtime = await getViewerRuntimeWithUI(state, showMessage);
       const { highlightIfcFromNode } = await import('../viewer/highlight.js');
       await highlightIfcFromNode(runtime.ctx, state, node, showMessage);
-      return;
-    }
-    // 无 IFC 关联但有 devPath → 尝试 MOD/STL 加载路径（变电工程典型）
-    if (!ifcModelId && node.devPath) {
-      await loadModStlForNode(state, node, showMessage);
     }
     return;
   }
@@ -180,6 +183,66 @@ function ensureModStlLayer(
 }
 
 /**
+ * 将 devPath 归一化为可比较的形式（去除 DEV/ 前缀，小写）。
+ *
+ * 用于 frameDeviceByDevPath 匹配：
+ * - geometryNode.devPath 形如 "abc.dev"（无 DEV/ 前缀）
+ * - group.userData.devPath 形如 "DEV/abc.dev"（glbCacheService / modAutoLoadService 标记）
+ * 归一化后两者可正确比较。
+ */
+function normalizeDevPathForCompare(devPath: string | undefined): string {
+  if (!devPath) return '';
+  const p = devPath.replace(/\\/g, '/').toLowerCase();
+  return p.startsWith('dev/') ? p.slice(4) : p;
+}
+
+/**
+ * 将相机定位到指定 devPath 对应的已加载几何。
+ *
+ * 遍历 state.loadedXmlModGroups 和 state.loadedStlGroups，查找
+ * userData.devPath 匹配的 group，合并其包围盒后调用 frameBox 定位相机。
+ *
+ * 设计动机：
+ * - 替代旧的 fitCameraToScene（仅首次加载时定位整个场景）
+ * - 用户每次点击 MOD 设备节点都应将视点聚焦到该设备
+ *
+ * @returns true 表示找到几何并完成定位；false 表示未找到匹配几何
+ */
+async function frameDeviceByDevPath(
+  ctx: ViewerContext,
+  state: AppState,
+  devPath: string,
+): Promise<boolean> {
+  const normalized = normalizeDevPathForCompare(devPath);
+  if (!normalized) return false;
+
+  const box = new THREE.Box3();
+  let found = false;
+  for (const group of state.loadedXmlModGroups.values()) {
+    const groupDevPath = normalizeDevPathForCompare(group.userData.devPath as string | undefined);
+    if (groupDevPath === normalized) {
+      box.expandByObject(group);
+      found = true;
+    }
+  }
+  for (const group of state.loadedStlGroups.values()) {
+    const groupDevPath = normalizeDevPathForCompare(group.userData.devPath as string | undefined);
+    if (groupDevPath === normalized) {
+      box.expandByObject(group);
+      found = true;
+    }
+  }
+  if (!found || box.isEmpty()) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] frameDeviceByDevPath 未找到匹配几何:', devPath);
+    return false;
+  }
+  const { frameBox } = await import('../viewer/camera.js');
+  await frameBox(ctx, box);
+  debugLog(DEBUG_IFC_LOAD, '[xml-mod] frameDeviceByDevPath 已定位到设备:', devPath);
+  return true;
+}
+
+/**
  * 节点点击时加载 MOD/STL 几何（变电工程无 IFC 设备的回退路径）。
  *
  * 流程：
@@ -188,7 +251,7 @@ function ensureModStlLayer(
  * 3. 对每个未加载的 STL，parseStlBinary 转 Three.js Group
  * 4. applyPlacementTransformToSceneUnits 应用 CBM/DEV/SUBDEVICE/PHM 累积放置矩阵
  * 5. 加入 scene 并跟踪到 state.loadedXmlModGroups / loadedStlGroups
- * 6. 首次加载时 fitCameraToScene 定位相机
+ * 6. frameDeviceByDevPath 将相机定位到该设备的包围盒
  *
  * 文件来源（v6 起）：
  * - currentFiles 非空（首次打开）：直接从内存 Map 读取
@@ -233,7 +296,10 @@ async function loadModStlForNode(
   // 如果 DEV.glb 命中，直接加载整个 DEV 的几何，跳过 MOD 逐个解析
   if (projectId != null && geometryNode.devPath) {
     const devGlbLoaded = await tryLoadDevGlbForNode(state, scene, geometryNode, projectId, showMessage);
-    if (devGlbLoaded) return;
+    if (devGlbLoaded) {
+      await frameDeviceByDevPath(ctx, state, geometryNode.devPath);
+      return;
+    }
   }
 
   // 回退：MOD 粒度加载（XML 解析 + 方案 C 旧路径）
@@ -284,6 +350,7 @@ async function loadModStlForNode(
     applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
     applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
     const modRoot = ensureModStlLayer(state, scene, 'mod');
+    group.userData.devPath = geo.devPath;
     modRoot.add(group);
     state.loadedXmlModGroups.set(geo.instanceKey, group);
     loadedCount++;
@@ -309,6 +376,7 @@ async function loadModStlForNode(
     applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
     applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
     const stlRoot = ensureModStlLayer(state, scene, 'stl');
+    group.userData.devPath = geo.devPath;
     stlRoot.add(group);
     state.loadedStlGroups.set(geo.instanceKey, group);
     stlLoadedCount++;
@@ -320,11 +388,9 @@ async function loadModStlForNode(
     if (loadedCount > 0) parts.push(`${loadedCount} 个 MOD`);
     if (stlLoadedCount > 0) parts.push(`${stlLoadedCount} 个 STL`);
     showMessage(`已加载 ${parts.join(' + ')} 模型`);
-    if (!state.hasFittedCamera) {
-      const { fitCameraToScene } = await import('../viewer/camera.js');
-      fitCameraToScene(ctx, state);
-    }
   }
+  // 无论是否新加载，都将相机定位到该设备（支持重复点击重新聚焦）
+  await frameDeviceByDevPath(ctx, state, geometryNode.devPath);
 }
 
 /**
@@ -394,12 +460,6 @@ async function tryLoadDevGlbForNode(
   debugLog(DEBUG_IFC_LOAD, `[xml-mod] DEV GLB 命中: ${devPath} (instance: ${instanceKey})`);
   showMessage(`已加载 DEV 几何模型: ${devPath}`);
 
-  if (!state.hasFittedCamera) {
-    const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
-    const runtime = await getViewerRuntimeWithUI(state, showMessage);
-    const { fitCameraToScene } = await import('../viewer/camera.js');
-    fitCameraToScene(runtime.ctx, state);
-  }
   return true;
 }
 
