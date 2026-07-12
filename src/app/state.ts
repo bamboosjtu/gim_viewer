@@ -82,6 +82,14 @@ export class AppState {
   // 高亮
   highlightedItems: OBCF.ModelIdMap | null = null;
 
+  // MOD/STL 高亮状态（保存 mesh 原始材质，用于恢复）
+  // MOD 材质是共享的（_sharedMaterialCache），高亮时必须 clone 后修改，
+  // reset 时恢复原始材质并 dispose clone，避免影响其他使用同一共享材质的 mesh。
+  highlightedModState: {
+    groups: THREE.Group[];
+    originalMaterials: Map<THREE.Mesh, THREE.Material | THREE.Material[]>;
+  } | null = null;
+
   // 引擎
   initialized = false;
   eventsRegistered = false;
@@ -136,5 +144,7 @@ export class AppState {
     this.loadedModels.clear();
     // 清空高亮索引，避免切换项目后旧高亮状态残留
     this.highlightedItems = null;
+    // 清空 MOD/STL 高亮状态（clone 材质由 resetModHighlight dispose）
+    this.highlightedModState = null;
   }
 }

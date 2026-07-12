@@ -185,7 +185,7 @@ function ensureModStlLayer(
 /**
  * 将 devPath 归一化为可比较的形式（去除 DEV/ 前缀，小写）。
  *
- * 用于 frameDeviceByDevPath 匹配：
+ * 用于 collectDeviceGroups 匹配：
  * - geometryNode.devPath 形如 "abc.dev"（无 DEV/ 前缀）
  * - group.userData.devPath 形如 "DEV/abc.dev"（glbCacheService / modAutoLoadService 标记）
  * 归一化后两者可正确比较。
@@ -197,49 +197,66 @@ function normalizeDevPathForCompare(devPath: string | undefined): string {
 }
 
 /**
- * 将相机定位到指定 devPath 对应的已加载几何。
+ * 收集指定 devPath 对应的所有已加载 Group（MOD + STL）。
  *
  * 遍历 state.loadedXmlModGroups 和 state.loadedStlGroups，查找
- * userData.devPath 匹配的 group，合并其包围盒后调用 frameBox 定位相机。
- *
- * 设计动机：
- * - 替代旧的 fitCameraToScene（仅首次加载时定位整个场景）
- * - 用户每次点击 MOD 设备节点都应将视点聚焦到该设备
- *
- * @returns true 表示找到几何并完成定位；false 表示未找到匹配几何
+ * userData.devPath 匹配的 group。用于相机定位和高亮。
  */
-async function frameDeviceByDevPath(
-  ctx: ViewerContext,
-  state: AppState,
-  devPath: string,
-): Promise<boolean> {
+function collectDeviceGroups(state: AppState, devPath: string): THREE.Group[] {
   const normalized = normalizeDevPathForCompare(devPath);
-  if (!normalized) return false;
-
-  const box = new THREE.Box3();
-  let found = false;
+  if (!normalized) return [];
+  const result: THREE.Group[] = [];
   for (const group of state.loadedXmlModGroups.values()) {
     const groupDevPath = normalizeDevPathForCompare(group.userData.devPath as string | undefined);
-    if (groupDevPath === normalized) {
-      box.expandByObject(group);
-      found = true;
-    }
+    if (groupDevPath === normalized) result.push(group);
   }
   for (const group of state.loadedStlGroups.values()) {
     const groupDevPath = normalizeDevPathForCompare(group.userData.devPath as string | undefined);
-    if (groupDevPath === normalized) {
-      box.expandByObject(group);
-      found = true;
-    }
+    if (groupDevPath === normalized) result.push(group);
   }
-  if (!found || box.isEmpty()) {
-    debugLog(DEBUG_IFC_LOAD, '[xml-mod] frameDeviceByDevPath 未找到匹配几何:', devPath);
-    return false;
+  return result;
+}
+
+/**
+ * 将相机定位到指定 devPath 对应的已加载几何并高亮。
+ *
+ * 流程：
+ * 1. collectDeviceGroups 收集匹配的 Group
+ * 2. 合并包围盒，调用 frameBox 定位相机
+ * 3. resetHighlight 清除旧高亮（IFC + MOD）
+ * 4. highlightModGroups 高亮该设备的所有 MOD/STL Group
+ *
+ * 设计动机：
+ * - 替代旧的 fitCameraToScene（仅首次加载时定位整个场景）
+ * - 用户每次点击 MOD 设备节点都应将视点聚焦到该设备并高亮
+ */
+async function frameAndHighlightDevice(
+  ctx: ViewerContext,
+  state: AppState,
+  devPath: string,
+): Promise<void> {
+  const groups = collectDeviceGroups(state, devPath);
+  if (groups.length === 0) {
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] frameAndHighlightDevice 未找到匹配几何:', devPath);
+    return;
   }
-  const { frameBox } = await import('../viewer/camera.js');
-  await frameBox(ctx, box);
-  debugLog(DEBUG_IFC_LOAD, '[xml-mod] frameDeviceByDevPath 已定位到设备:', devPath);
-  return true;
+
+  // 合并包围盒并定位相机
+  const box = new THREE.Box3();
+  for (const group of groups) {
+    box.expandByObject(group);
+  }
+  if (!box.isEmpty()) {
+    const { frameBox } = await import('../viewer/camera.js');
+    await frameBox(ctx, box);
+    debugLog(DEBUG_IFC_LOAD, '[xml-mod] frameAndHighlightDevice 已定位到设备:', devPath);
+  }
+
+  // 高亮该设备的所有 Group（先清除 IFC + MOD 旧高亮）
+  const { resetHighlight, highlightModGroups } = await import('../viewer/highlight.js');
+  await resetHighlight(ctx, state);
+  highlightModGroups(state, groups);
+  debugLog(DEBUG_IFC_LOAD, `[xml-mod] frameAndHighlightDevice 已高亮 ${groups.length} 个 Group:`, devPath);
 }
 
 /**
@@ -251,7 +268,7 @@ async function frameDeviceByDevPath(
  * 3. 对每个未加载的 STL，parseStlBinary 转 Three.js Group
  * 4. applyPlacementTransformToSceneUnits 应用 CBM/DEV/SUBDEVICE/PHM 累积放置矩阵
  * 5. 加入 scene 并跟踪到 state.loadedXmlModGroups / loadedStlGroups
- * 6. frameDeviceByDevPath 将相机定位到该设备的包围盒
+ * 6. frameAndHighlightDevice 将相机定位到该设备并高亮所有 MOD/STL
  *
  * 文件来源（v6 起）：
  * - currentFiles 非空（首次打开）：直接从内存 Map 读取
@@ -297,7 +314,7 @@ async function loadModStlForNode(
   if (projectId != null && geometryNode.devPath) {
     const devGlbLoaded = await tryLoadDevGlbForNode(state, scene, geometryNode, projectId, showMessage);
     if (devGlbLoaded) {
-      await frameDeviceByDevPath(ctx, state, geometryNode.devPath);
+      await frameAndHighlightDevice(ctx, state, geometryNode.devPath);
       return;
     }
   }
@@ -389,8 +406,8 @@ async function loadModStlForNode(
     if (stlLoadedCount > 0) parts.push(`${stlLoadedCount} 个 STL`);
     showMessage(`已加载 ${parts.join(' + ')} 模型`);
   }
-  // 无论是否新加载，都将相机定位到该设备（支持重复点击重新聚焦）
-  await frameDeviceByDevPath(ctx, state, geometryNode.devPath);
+  // 无论是否新加载，都将相机定位到该设备并高亮（支持重复点击重新聚焦）
+  await frameAndHighlightDevice(ctx, state, geometryNode.devPath);
 }
 
 /**
