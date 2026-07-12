@@ -6,5 +6,4 @@
  */
 
 export { parseFamSections } from '../gim/famParser.js';
-export type { FamSection } from '../gim/famParser.js';
 export { parseKeyValue } from '../gim/cbmParser.js';
