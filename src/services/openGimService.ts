@@ -55,6 +55,15 @@ export async function onGimExtracted(state: AppState, files: Map<string, File>, 
     }
   }
 
+  // STD/SLD 解析：在 CBM 树构建完成后并行执行（不阻塞 IFC 加载）
+  // 失败时仅 warn，不影响主流程
+  try {
+    const { parseStdSldOnGimExtracted } = await import('./stdSldService.js');
+    await parseStdSldOnGimExtracted(state, files);
+  } catch (err) {
+    console.warn('[GIM] STD/SLD 解析失败:', err);
+  }
+
   // 渲染层级树和文件设备面板（统一使用 handleNodeClick）
   const clickHandler = createNodeClickHandler(state, showMessage);
   buildAndRenderCbmTree(state, clickHandler);
@@ -876,6 +885,15 @@ export async function openGimWithDialog(
 
           if (state.fileDevRelations.length === 0) {
             console.warn('[Tauri] 缓存索引中没有文件设备关系');
+          }
+
+          // STD/SLD 从磁盘缓存恢复：CBM 树就绪后并行执行（不阻塞 IFC 加载）
+          // 失败时仅 warn，不影响主流程
+          try {
+            const { restoreStdSldFromCache } = await import('./stdSldService.js');
+            await restoreStdSldFromCache(state);
+          } catch (err) {
+            console.warn('[GIM] STD/SLD 缓存恢复失败:', err);
           }
 
           // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框

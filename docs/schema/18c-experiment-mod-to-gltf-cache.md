@@ -447,11 +447,27 @@ v'' = CBM × ((DEV × PHM) × v)
 
 ### 10.5 实施计划
 
-| 阶段 | 内容 |
-| ---- | ---- |
-| D-1 | `modGeometryDiscovery.ts` 导出 `discoverGeometriesFromDevPath` |
-| D-2 | `glbCacheService.ts` 新增 `serializeDevToGlb` + `loadDevGlb`；重写 `cacheGlbFiles` 接收 `devPaths` |
-| D-3 | `openGimService.ts` 收集 CBM seed devPaths 传给 `cacheGlbFiles` |
-| D-4 | `modAutoLoadService.ts` 重写 Phase 1.5/3：按 seed 加载 DEV.glb |
-| D-5 | `nodeInteractionService.ts` 重写 `loadModStlForNode`：按 DEV 加载 |
-| D-6 | 验证 + 文档更新 |
+| 阶段 | 内容 | 状态 |
+| ---- | ---- | ---- |
+| D-1 | `modGeometryDiscovery.ts` 导出 `discoverGeometriesFromDevPath` | ✅ 完成 |
+| D-2 | `glbCacheService.ts` 新增 `serializeDevToGlb` + `loadDevGlb`；重写 `cacheGlbFiles` 接收 `devPaths` | ✅ 完成 |
+| D-3 | `openGimService.ts` 收集 CBM seed devPaths 传给 `cacheGlbFiles` | ✅ 完成 |
+| D-4 | `modAutoLoadService.ts` 重写 Phase 1.5/3：按 seed 加载 DEV.glb | ✅ 完成 |
+| D-5 | `nodeInteractionService.ts` 重写 `loadModStlForNode`：按 DEV 加载 | ✅ 完成 |
+| D-6 | 验证 + 文档更新 | ✅ TypeScript 编译通过；⏳ 运行时验证待用户手动执行 |
+
+### 10.6 D-6 验证记录
+
+**编译验证**（2026-07-11）：
+- ✅ `npx tsc --noEmit` 通过（修复 3 个 v1 残留代码引用错误：`loadModFileWithGlb`/`loadStlFileWithGlb`/`stlRoot` 未使用）
+- ✅ 方案 C v1 残留代码已清理（`loadModFileWithGlb`/`loadStlFileWithGlb`/Phase 3 GLB 预读逻辑全部删除）
+
+**关键修复**（2026-07-11）：
+- 修复 `tryDevGlbFastPath` 100% 命中率要求导致的回退问题：原逻辑要求所有 DEV 都有 GLB 文件才使用快速路径，但无几何的 DEV 不会生成 GLB 文件，导致命中率永远 < 100%。改为部分命中即可使用 GLB 快速路径，未命中的 DEV 跳过（它们本来就没有几何）。
+
+**运行时验证清单**（待用户在 demo-substation 上手动验证）：
+- [ ] 首次打开：后台序列化 DEV.glb（`{app_data_dir}/glbcache/{projectId}/DEV/` 下生成 .glb 文件 + `_version.txt`）
+- [ ] 二次打开：`tryDevGlbFastPath` 命中，跳过 MOD 逐个 XML 解析，秒级渲染
+- [ ] MOD/STL 位置与方案 B 一致（两次 ×0.001 等价于一次完整应用）
+- [ ] 节点点击懒加载正确加载 DEV.glb
+- [ ] `GEOMETRY_CACHE_VERSION` 变更时 glb 缓存失效重建

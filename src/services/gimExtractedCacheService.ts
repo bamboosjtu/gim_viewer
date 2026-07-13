@@ -35,6 +35,21 @@ function isGeometryFile(entryPath: string): boolean {
 }
 
 /**
+ * 判断 entry_path 是否为 STD/SLD 拓扑与单线图文件。
+ * - CBM/project.sch：SCH 入口
+ * - CBM/*.std：STD 拓扑定义（XML）
+ * - CBM/*.sld：SLD 电气单线图（SVG）
+ *
+ * 用于缓存命中场景下从磁盘读取这些文件以重新解析 STD/SLD。
+ */
+function isStdSldFile(entryPath: string): boolean {
+  const lower = entryPath.toLowerCase();
+  if (lower === 'cbm/project.sch') return true;
+  if (!lower.startsWith('cbm/')) return false;
+  return lower.endsWith('.std') || lower.endsWith('.sld');
+}
+
+/**
  * 缓存 GIM 解压后的几何文件（DEV/PHM/MOD）到本地磁盘。
  *
  * 与 cacheIfcEntries 的差异：
@@ -53,7 +68,7 @@ export async function cacheGeometryFiles(
   let cachedCount = 0;
 
   for (const [entryPath, file] of files) {
-    if (!isGeometryFile(entryPath)) continue;
+    if (!isGeometryFile(entryPath) && !isStdSldFile(entryPath)) continue;
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       await writeCacheFile(projectId, entryPath, bytes);

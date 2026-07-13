@@ -72,7 +72,9 @@ PHM 文件仅包含以下 4 类字段（实证样本中无其他键）：
 
 ## 变换矩阵格式
 
-与 DEV 文件中的变换矩阵格式相同，4×4 矩阵按**行优先**展开为 16 个浮点数，以英文逗号分隔。单位矩阵为 `1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`。
+与 DEV 文件中的变换矩阵格式相同，4×4 矩阵按**列主序**展开为 16 个浮点数（与 Three.js / OpenGL `Matrix4.elements` 布局一致），平移分量在 m[12]/m[13]/m[14]。单位矩阵为 `1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`。
+
+> **存储约定**（详见 [09-transform-chain-analysis.md](09-transform-chain-analysis.md) §8）：GIM 16 浮点数采用列主序存储，平移在 m[12..14]，与 Three.js `Matrix4.elements` 布局一致。早期版本曾误记为"行优先"，已修正。
 
 数值精度因工程而异：
 
@@ -242,7 +244,7 @@ COLOR2=138,149,151,100
 ```typescript
 export interface PhmSolidModelEntry {
   solidModelPath: string;
-  transformMatrix: number[];  // 行主序，长度 16
+  transformMatrix: number[];  // 列主序 / Three.js Matrix4.elements 布局，长度 16
   color?: XmlModColor;       // MOD 引用为空 → undefined
 }
 
@@ -266,5 +268,5 @@ export interface PhmDocument {
 ### 集成点
 
 - **`src/services/modGeometryDiscovery.ts`**：`discoverModGeometriesFromNode` 调用 `parsePhm` 解析 PHM 文件，遍历 `solidModels` 收集 `.mod` 引用（`.stl` P1 跳过）
-- **`src/viewer/xmlModLoader.ts`**：`applyExternalTransforms` 应用 `phmTransformMatrix`（行主序 → Three.js Matrix4）
+- **`src/viewer/xmlModLoader.ts`**：`applyExternalTransforms` 应用 `phmTransformMatrix`（列主序，直接 `Matrix4.fromArray`）
 - **`src/app/state.ts`**：`loadedXmlModGroups` 跟踪已加载 MOD Group

@@ -7,6 +7,9 @@ import type {
   LineFamPropertyRecord,
   LineDevPropertyRecord,
 } from '../desktop/database.js';
+import type { StdDocument } from '../gim/stdParser.js';
+import type { SldDocument } from '../gim/sldParser.js';
+import type { StdSldIndex } from '../gim/stdSldIndex.js';
 
 /** 应用全局状态（由 bootstrap.ts 创建唯一实例，通过参数注入各模块） */
 export class AppState {
@@ -29,6 +32,13 @@ export class AppState {
   // 文件-设备关系
   fileDevRelations: FileDevEntry[] = [];
   deviceToIfcFile = new Map<string, string>(); // deviceCbmName → ifcModelId
+
+  // STD/SLD 电气拓扑与单线图（变电工程专用，线路工程保持 null）
+  // currentStdDoc/currentSldDoc：解析后的文档（首次打开从 currentFiles 解析，缓存命中从磁盘缓存读取）
+  // currentStdSldIndex：CBM/STD/SLD 三向 gridId 索引（用于交互联动高亮）
+  currentStdDoc: StdDocument | null = null;
+  currentSldDoc: SldDocument | null = null;
+  currentStdSldIndex: StdSldIndex | null = null;
 
   // 缓存命中时的 IFC 本地缓存路径（entry_path → local_cache_path）
   cachedIfcPaths = new Map<string, string>();
@@ -120,6 +130,10 @@ export class AppState {
     this.ifcGuidToName.clear();
     this.fileDevRelations = [];
     this.deviceToIfcFile.clear();
+    // 清空 STD/SLD 拓扑与单线图（变电工程专用）
+    this.currentStdDoc = null;
+    this.currentSldDoc = null;
+    this.currentStdSldIndex = null;
     this.cachedIfcPaths.clear();
     this.cachedFamProperties.clear();
     this.cachedDevProperties.clear();
