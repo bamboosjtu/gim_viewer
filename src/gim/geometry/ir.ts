@@ -63,15 +63,28 @@ export interface XmlModGeometrySource {
  * 线路 MOD 文本格式族（4 类）。
  *
  * 详见 docs/schema/11-line-mod-grammar.md。
- * 当前 P0 不实现，IR 类型保留以兼容联合类型。
+ * 4 类格式族均强类型化（详见 §7.2 判定结果），R 9 token 罕见变体保留弱 schema fallback。
  */
 export interface LineTextModGeometrySource {
   kind: "line-text-mod";
   format: LineModFormat;
   modPath: string;
-  /** 按 format 分发的强类型记录数组，IR 保留 unknown，由消费方按 format 显式 cast */
-  records: unknown;
+  /**
+   * 按 format 分发的强类型记录（联合类型）。
+   * - text-hnum-comma-record → HNumModFile
+   * - text-point-line → PointLineModFile
+   * - text-section-kv-record → BoltModFile
+   * - text-key-value → KeyValueModFile（TowerDeviceModFile | WireModFile）
+   */
+  records: LineModRecords;
 }
+
+/** 线路 MOD 4 类格式族解析结果联合类型 */
+export type LineModRecords =
+  | HNumModFile
+  | PointLineModFile
+  | BoltModFile
+  | KeyValueModFile;
 
 /**
  * STL 三角网格几何来源（binary STL）。
@@ -122,7 +135,7 @@ export type NoneReason =
 /**
  * 线路 MOD 4 类文本格式族（docs/schema/11-line-mod-grammar.md）。
  *
- * 当前 P0 不实现，类型保留。
+ * 4 类格式族已落地 parser（src/gim/geometry/lineModParser.ts）。
  */
 export type LineModFormat =
   | "text-hnum-comma-record" // 杆塔主体分段构件
@@ -186,6 +199,251 @@ export interface XmlModColor {
   g: number; // 0-255
   b: number; // 0-255
   a: number; // 0-100（透明度百分比）
+}
+
+// ============================================================================
+// §4b line-text-mod 详细子类型（4 类格式族）
+// ============================================================================
+
+// ─── TEXT_HNUM_COMMA_RECORD：杆塔主体分段构件 ─────────────────────────────
+
+/** H 记录：档位标高 + 归属 Body/Leg */
+export interface HRecord {
+  /** 档位标高（mm） */
+  height: number;
+  /** 归属体段（"Body1".."BodyN"） */
+  body: string;
+  /** 归属腿（"Leg1".."LegN"） */
+  leg: string;
+}
+
+/** P 记录：节点笛卡尔坐标（局部坐标，毫米） */
+export interface PRecord {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * R 记录联合类型（三变体）。
+ * - angle（11 token，99.79%）：角钢，含双方向单位向量
+ * - tube（5 token，0.21%）：钢管，规格前缀 `φ`
+ * - unknown（9 token 罕见变体 + 兜底）：保留原始记录文本
+ */
+export type RRecord = RRecordAngle | RRecordTube | RRecordUnknown;
+
+/** R 记录角钢变体（11 token） */
+export interface RRecordAngle {
+  kind: "angle";
+  /** 起点节点 id（引用 P.id） */
+  id1: number;
+  /** 终点节点 id */
+  id2: number;
+  /** 规格（"L140X12" 等） */
+  spec: string;
+  /** 材质（"Q235" / "Q355" / "Q420"） */
+  material: string;
+  /** 第一方向单位向量 */
+  dir1: [number, number, number];
+  /** 第二方向单位向量 */
+  dir2: [number, number, number];
+}
+
+/** R 记录钢管变体（5 token） */
+export interface RRecordTube {
+  kind: "tube";
+  id1: number;
+  id2: number;
+  /** 规格（"φ325.000000X6.000000" 等） */
+  spec: string;
+  material: string;
+}
+
+/** R 记录未知变体（9 token 罕见 + 兜底） */
+export interface RRecordUnknown {
+  kind: "unknown";
+  /** 保留原始记录文本，供后续样本扩展 */
+  raw: string;
+}
+
+/** G 记录：导线/地线挂点 */
+export interface GRecord {
+  /** 挂点类型（"G"=地线，"C"=导线） */
+  type: string;
+  /** 挂点名称（"后地1" 等） */
+  name: string;
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** HSubLeg 记录：子腿高度偏移（负值序列递增到 0） */
+export interface HSubLegRecord {
+  /** 子腿序号（1..N） */
+  index: number;
+  /** 高度偏移（mm） */
+  offset: number;
+}
+
+/** HLeg 记录：腿顶坐标（X/Y 平面投影） */
+export interface HLegRecord {
+  /** 腿序号（1..N） */
+  index: number;
+  x: number;
+  y: number;
+}
+
+/** Body 段：含参考标高 + P/R/G 记录组 */
+export interface BodySection {
+  /** 体段标识（"Body1".."BodyN"） */
+  name: string;
+  /** 体段参考标高（mm，来自 HBodyN 行；缺失为 undefined） */
+  hBody?: number;
+  points: PRecord[];
+  rods: RRecord[];
+  groundPoints: GRecord[];
+}
+
+/** TEXT_HNUM_COMMA_RECORD 解析结果（杆塔主体分段构件） */
+export interface HNumModFile {
+  /** 档位总数 */
+  hNum: number;
+  /** H 记录列表（长度等于 hNum） */
+  hRecords: HRecord[];
+  /** Body 段列表 */
+  bodySections: BodySection[];
+  /** 子腿高度偏移序列 */
+  hSubLegs: HSubLegRecord[];
+  /** 腿顶坐标序列 */
+  hLegs: HLegRecord[];
+}
+
+// ─── TEXT_POINT_LINE：经纬度点线表（CROSS） ───────────────────────────────
+
+/** POINT 记录：经纬度点（WGS84） */
+export interface PointRecord {
+  id: number;
+  /** 纬度（度） */
+  lat: number;
+  /** 经度（度） */
+  lon: number;
+  /** 高程（米） */
+  alt: number;
+  /** 点类型（"13" / "42" 等，保留 string） */
+  type: string;
+}
+
+/** LINE 记录：有向边（引用 POINT.id） */
+export interface LineRecord {
+  fromId: number;
+  toId: number;
+}
+
+/** TEXT_POINT_LINE 解析结果（经纬度点线表） */
+export interface PointLineModFile {
+  /** 业务码（"201" / "30" 等，保留 string） */
+  code: string;
+  pointNum: number;
+  lineNum: number;
+  points: PointRecord[];
+  lines: LineRecord[];
+}
+
+// ─── TEXT_SECTION_KV_RECORD：螺栓参数表 ───────────────────────────────────
+
+/** 螺栓位置（第 2 段，分号后 4 token） */
+export interface BoltPosition {
+  /** 方位码（210 等） */
+  code: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** Bolt 记录：螺栓参数 + 法兰盘坐标 */
+export interface BoltRecord {
+  /** 序号（1..boltNum） */
+  index: number;
+  /** 螺栓规格（"M64"） */
+  spec: string;
+  /** 螺栓长度（mm） */
+  length: number;
+  /**
+   * 第 1 段其他字段（位置 3-12，共 10 个 token）。
+   * 11 号文档 §4.3.2 已确认字段 1-3（spec/length/grade），
+   * 字段 4-12 含义待 GIM 官方规范确认，保留原始字符串数组。
+   * 索引 0 = grade, 1 = d1, 2 = d2, 3 = type, 4 = flag1,
+   * 5 = d3, 6 = d4, 7 = d5, 8 = flag2, 9 = angle
+   */
+  restFields: string[];
+  /** 螺栓位置（第 2 段） */
+  position: BoltPosition;
+}
+
+/** TEXT_SECTION_KV_RECORD 解析结果（螺栓参数表） */
+export interface BoltModFile {
+  /** section header（恒为 "Bolt"） */
+  section: "Bolt";
+  /** 螺栓总数（4 或 8） */
+  boltNum: number;
+  /** 螺栓记录列表 */
+  bolts: BoltRecord[];
+}
+
+// ─── TEXT_KEY_VALUE：Tower_Device / WIRE 二分 ────────────────────────────
+
+/** TEXT_KEY_VALUE 联合类型（按签名分发，未识别签名走 UnknownKvModFile 兜底） */
+export type KeyValueModFile = TowerDeviceModFile | WireModFile | UnknownKvModFile;
+
+/** Tower_Device 基础参数（签名 1：全小写 key） */
+export interface TowerDeviceModFile {
+  signature: "type,H1,H2,H3,H4,d,e1,e2";
+  /** 基础类型（中文） */
+  type: string;
+  H1: number;
+  H2: number;
+  H3: number;
+  H4: number;
+  /** 基础直径（小写） */
+  d: number;
+  /** 基础直径（大写，可能表示顶径；未在签名中但实测全部出现，可选） */
+  D?: number;
+  e1: number;
+  e2: number;
+}
+
+/** WIRE 导线参数（签名 2：全大写 key） */
+export interface WireModFile {
+  signature: "TYPE,SECTIONALAREA,OUTSIDEDIAMETER,WIREWEIGHT,COEFFICIENTOFELASTICITY,EXPANSIONCOEFFICIENTOFWIRE,RATEDSTRENGTH";
+  /** 导线型号 */
+  TYPE: string;
+  /** 截面面积（mm²） */
+  SECTIONALAREA: number;
+  /** 外径（mm） */
+  OUTSIDEDIAMETER: number;
+  /** 单位重量（kg/km） */
+  WIREWEIGHT: number;
+  /** 弹性系数（MPa） */
+  COEFFICIENTOFELASTICITY: number;
+  /** 线膨胀系数（1/°C × 10⁻⁶） */
+  EXPANSIONCOEFFICIENTOFWIRE: number;
+  /** 额定拉断力（N） */
+  RATEDSTRENGTH: number;
+}
+
+/**
+ * 未识别签名的 TEXT_KEY_VALUE 兜底类型（弱 schema）。
+ *
+ * 11 号文档 §7.4：若新样本出现未识别 key set 签名，应保留 Record<string, string> 弱 schema，不阻塞解析。
+ * 实测 demo-line / demo-line1 全部命中签名 1 或 2，此类型为前瞻性兜底。
+ */
+export interface UnknownKvModFile {
+  signature: "unknown";
+  /** 原始 key 集合（排序后逗号拼接，用于诊断） */
+  keySignature: string;
+  /** 弱 schema KV 字典 */
+  raw: Record<string, string>;
 }
 
 // ============================================================================

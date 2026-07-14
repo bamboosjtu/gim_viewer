@@ -55,6 +55,15 @@ export interface WireSegment {
   kValue?: string;
   split?: string;
   nodeRef: GimGraphNode;
+  // ── 悬链线渲染（M4-B3C，ENABLE_CATENARY=true 时使用） ──
+  /** 端点 0 高程（米，来自 BLHA 第 3 段）；缺失为 null */
+  startElev: number | null;
+  /** 端点 1 高程（米，来自 BLHA 第 3 段）；缺失为 null */
+  endElev: number | null;
+  /** 档距（米，Haversine 公式计算）；无效为 null */
+  spanMeters: number | null;
+  /** 拓扑分组：'inter-point'（跨塔，真实档距）/ 'same-point'（同塔内部连接）/ 'unknown' */
+  groupKind: 'inter-point' | 'same-point' | 'unknown';
 }
 
 /** 跨越点标记 */
@@ -400,6 +409,32 @@ function resolveWireEndpointsFromTowers(
 // bbox 计算
 // ---------------------------------------------------------------------------
 
+/** Haversine 距离（米），地球半径 6371000m（用于档距近似） */
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/**
+ * 判断导线端点是否为同塔内部连接（same-point）。
+ *
+ * same-point：两端 BLHA 的 lat/lng 完全相同（精度 1e-9），表示同塔内不同挂点间的连接。
+ * inter-point：跨塔真实档距，需要绘制悬链线。
+ */
+function classifyWireGroup(
+  startLat: number, startLng: number,
+  endLat: number, endLng: number,
+): 'same-point' | 'inter-point' {
+  const samePoint = Math.abs(startLat - endLat) < 1e-9
+    && Math.abs(startLng - endLng) < 1e-9;
+  return samePoint ? 'same-point' : 'inter-point';
+}
+
 /** 计算所有塔位 + 跨越点的经纬度包围盒 */
 function computeBbox(towers: TowerMarker[], crosses: CrossMarker[]): LineMapData['bbox'] {
   let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
@@ -562,6 +597,10 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
       if (p0 && p1) {
         wireWithEndpoints++;
         const wireType = resolveWireType(node, topo);
+        const groupKind = classifyWireGroup(p0.lat, p0.lng, p1.lat, p1.lng);
+        const spanMeters = groupKind === 'inter-point'
+          ? haversineMeters(p0.lat, p0.lng, p1.lat, p1.lng)
+          : 0;
         wires.push({
           startLat: p0.lat, startLng: p0.lng,
           endLat: p1.lat, endLng: p1.lng,
@@ -569,6 +608,10 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
           kValue: node.rawProps['KVALUE'] || undefined,
           split: node.rawProps['SPLIT'] || undefined,
           nodeRef: node,
+          startElev: p0.elev,
+          endElev: p1.elev,
+          spanMeters,
+          groupKind,
         });
       } else {
         // 兜底：BACKSTRING/FRONTSTRING 反查塔位 BLHA
@@ -576,12 +619,17 @@ export function extractLineMapData(graph: GimGraph, attrs: LineAttributeIndex): 
         if (fb) {
           wireWithEndpoints++;
           const wireType = resolveWireType(node, topo);
+          // 兜底路径无 elev 信息（仅 lat/lng）
           wires.push({
             ...fb,
             wireType,
             kValue: node.rawProps['KVALUE'] || undefined,
             split: node.rawProps['SPLIT'] || undefined,
             nodeRef: node,
+            startElev: null,
+            endElev: null,
+            spanMeters: null,
+            groupKind: 'unknown',
           });
         } else {
           unresolved.wires.push(path);

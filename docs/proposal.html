@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GIM 阅读器 - 产品创意提案</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #0066CC;
+      --primary-dark: #004C99;
+      --accent: #00AA88;
+      --bg-dark: #0A1628;
+      --bg-card: #111D32;
+      --bg-gradient: linear-gradient(135deg, #0A1628 0%, #152238 50%, #0F1A2E 100%);
+      --text-primary: #FFFFFF;
+      --text-secondary: #A0B4D0;
+      --text-muted: #607090;
+      --border: #1E3A5F;
+      --glow: rgba(0, 102, 204, 0.3);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Noto Sans SC', 'Inter', -apple-system, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-primary);
+      line-height: 1.7;
+      overflow-x: hidden;
+    }
+
+    /* Hero Section */
+    .hero {
+      min-height: 100vh;
+      background: var(--bg-gradient);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 40px;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle at 30% 30%, rgba(0, 102, 204, 0.08) 0%, transparent 50%),
+                  radial-gradient(circle at 70% 70%, rgba(0, 170, 136, 0.06) 0%, transparent 50%);
+      animation: heroGlow 20s ease-in-out infinite;
+    }
+
+    @keyframes heroGlow {
+      0%, 100% { transform: translate(0, 0) rotate(0deg); }
+      50% { transform: translate(2%, 2%) rotate(5deg); }
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      max-width: 900px;
+    }
+
+    .badge {
+      display: inline-block;
+      background: rgba(0, 170, 136, 0.15);
+      border: 1px solid rgba(0, 170, 136, 0.3);
+      color: var(--accent);
+      padding: 8px 20px;
+      border-radius: 30px;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 1px;
+      margin-bottom: 30px;
+    }
+
+    .hero h1 {
+      font-size: clamp(48px, 8vw, 80px);
+      font-weight: 900;
+      letter-spacing: -2px;
+      line-height: 1.1;
+      margin-bottom: 24px;
+      background: linear-gradient(135deg, #FFFFFF 0%, #A0C4FF 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero h1 span {
+      color: var(--primary);
+      -webkit-text-fill-color: var(--primary);
+    }
+
+    .hero-subtitle {
+      font-size: clamp(18px, 2.5vw, 24px);
+      color: var(--text-secondary);
+      font-weight: 300;
+      margin-bottom: 50px;
+      max-width: 700px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .hero-stats {
+      display: flex;
+      justify-content: center;
+      gap: 60px;
+      flex-wrap: wrap;
+      margin-top: 60px;
+    }
+
+    .stat-item {
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 42px;
+      font-weight: 700;
+      color: var(--primary);
+      display: block;
+    }
+
+    .stat-label {
+      font-size: 14px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* Section Styles */
+    .section {
+      padding: 100px 40px;
+      position: relative;
+    }
+
+    .section-dark {
+      background: var(--bg-card);
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 60px;
+    }
+
+    .section-tag {
+      display: inline-block;
+      font-size: 12px;
+      color: var(--accent);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: clamp(32px, 5vw, 48px);
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    .section-desc {
+      font-size: 18px;
+      color: var(--text-secondary);
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    /* Product Cards */
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 30px;
+      margin-top: 50px;
+    }
+
+    .product-card {
+      background: linear-gradient(145deg, #152238 0%, #0F1A2E 100%);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 40px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.3s ease, border-color 0.3s ease;
+    }
+
+    .product-card:hover {
+      transform: translateY(-5px);
+      border-color: var(--primary);
+    }
+
+    .product-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .product-card:hover::before {
+      opacity: 1;
+    }
+
+    .card-icon {
+      width: 60px;
+      height: 60px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      margin-bottom: 24px;
+    }
+
+    .product-card h3 {
+      font-size: 22px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .product-card p {
+      color: var(--text-secondary);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    /* Users Section */
+    .users-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+    }
+
+    .user-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      padding: 32px;
+      transition: all 0.3s ease;
+    }
+
+    .user-card:hover {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(0, 170, 136, 0.3);
+    }
+
+    .user-avatar {
+      width: 48px;
+      height: 48px;
+      background: linear-gradient(135deg, var(--accent), #008866);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      margin-bottom: 20px;
+    }
+
+    .user-card h4 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .user-card .role {
+      font-size: 13px;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+
+    .user-card p {
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    /* Value Section */
+    .value-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 40px;
+      margin-top: 60px;
+    }
+
+    @media (max-width: 900px) {
+      .value-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .value-item {
+      text-align: center;
+      padding: 40px 30px;
+    }
+
+    .value-number {
+      font-size: 72px;
+      font-weight: 900;
+      color: var(--primary);
+      opacity: 0.15;
+      line-height: 1;
+      margin-bottom: -20px;
+    }
+
+    .value-item h4 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .value-item p {
+      font-size: 15px;
+      color: var(--text-secondary);
+    }
+
+    /* Timeline */
+    .timeline {
+      position: relative;
+      padding-left: 40px;
+      margin-top: 60px;
+    }
+
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 7px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--border);
+    }
+
+    .timeline-item {
+      position: relative;
+      padding-bottom: 50px;
+    }
+
+    .timeline-item:last-child {
+      padding-bottom: 0;
+    }
+
+    .timeline-dot {
+      position: absolute;
+      left: -40px;
+      top: 4px;
+      width: 16px;
+      height: 16px;
+      background: var(--primary);
+      border-radius: 50%;
+      border: 3px solid var(--bg-dark);
+    }
+
+    .timeline-item.completed .timeline-dot {
+      background: var(--accent);
+    }
+
+    .timeline-phase {
+      font-size: 13px;
+      color: var(--accent);
+      font-weight: 500;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    .timeline-item h4 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .timeline-item p {
+      font-size: 15px;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+    }
+
+    .timeline-tags {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .timeline-tag {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    /* Tech Stack */
+    .tech-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      justify-content: center;
+      margin-top: 40px;
+    }
+
+    .tech-item {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      padding: 16px 28px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+
+    .tech-item:hover {
+      background: rgba(0, 102, 204, 0.1);
+      border-color: var(--primary);
+    }
+
+    /* Footer */
+    .footer {
+      background: var(--bg-card);
+      padding: 60px 40px;
+      text-align: center;
+      border-top: 1px solid var(--border);
+    }
+
+    .footer-logo {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    .footer-text {
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    /* Scroll animations */
+    .fade-in {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.8s ease, transform 0.8s ease;
+    }
+
+    .fade-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 768px) {
+      .hero-stats {
+        gap: 30px;
+      }
+
+      .section {
+        padding: 60px 20px;
+      }
+
+      .product-card {
+        padding: 30px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="hero-content">
+      <div class="badge">Demo 产品创意提案</div>
+      <h1>GIM <span>阅读器</span></h1>
+      <p class="hero-subtitle">面向国家电网工程信息模型的专业浏览工具，支持变电站 3D 可视化与输电线路地图浏览</p>
+      <div class="hero-stats">
+        <div class="stat-item">
+          <span class="stat-value">7+</span>
+          <span class="stat-label">文件格式支持</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value">100%</span>
+          <span class="stat-label">离线运行</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value">&lt;3s</span>
+          <span class="stat-label">缓存命中加载</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Product Concept -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header fade-in">
+        <div class="section-tag">产品定位</div>
+        <h2 class="section-title">一图览全局，一树透层级</h2>
+        <p class="section-desc">GIM 阅读器为电力工程从业者提供从设计模型到运维数据的全链路可视化能力</p>
+      </div>
+
+      <div class="product-grid">
+        <div class="product-card fade-in">
+          <div class="card-icon">🏗️</div>
+          <h3>变电站工程 3D 浏览</h3>
+          <p>基于 IFC 标准的 3D 模型渲染，支持 CBM 层级树导航、构件高亮拾取、属性面板联动查看</p>
+        </div>
+        <div class="product-card fade-in">
+          <div class="card-icon">🗺️</div>
+          <h3>输电线路地图浏览</h3>
+          <p>Canvas 2D 地图叠加 OpenStreetMap 底图，塔位符号、导线走向、跨越点一目了然</p>
+        </div>
+        <div class="product-card fade-in">
+          <div class="card-icon">⚡</div>
+          <h3>智能缓存加速</h3>
+          <p>SQLite 本地索引 + IFC 文件磁盘缓存，二次打开同一工程秒级响应</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Target Users -->
+  <section class="section section-dark">
+    <div class="container">
+      <div class="section-header fade-in">
+        <div class="section-tag">目标用户</div>
+        <h2 class="section-title">为谁而设计</h2>
+      </div>
+
+      <div class="users-grid">
+        <div class="user-card fade-in">
+          <div class="user-avatar">👨‍💼</div>
+          <h4>电力设计工程师</h4>
+          <div class="role">设计院 / 工程公司</div>
+          <p>快速查阅 GIM 工程文件，验证设计数据完整性，对比模型与属性一致性</p>
+        </div>
+        <div class="user-card fade-in">
+          <div class="user-avatar">🔧</div>
+          <h4>电网运维人员</h4>
+          <div class="role">供电公司 / 运维中心</div>
+          <p>现场离线查阅工程资料，定位设备位置，核对设备参数与现场实物</p>
+        </div>
+        <div class="user-card fade-in">
+          <div class="user-avatar">📊</div>
+          <h4>项目管理人员</h4>
+          <div class="role">基建部门 / 项目部</div>
+          <p>审查设计交付物，追溯工程变更，把控设计文件质量</p>
+        </div>
+        <div class="user-card fade-in">
+          <div class="user-avatar">💻</div>
+          <h4>系统集成商</h4>
+          <div class="role">软件公司 / 平台厂商</div>
+          <p>理解 GIM 数据结构，对接工程数据接口，开发上层应用</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Core Value -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header fade-in">
+        <div class="section-tag">核心价值</div>
+        <h2 class="section-title">为什么选择 GIM 阅读器</h2>
+      </div>
+
+      <div class="value-grid">
+        <div class="value-item fade-in">
+          <div class="value-number">01</div>
+          <h4>无需联网，完全离线</h4>
+          <p>Tauri 桌面框架 + 本地 WASM 运行时，内网环境、现场作业零依赖</p>
+        </div>
+        <div class="value-item fade-in">
+          <div class="value-number">02</div>
+          <h4>一次解析，持久加速</h4>
+          <p>首次打开解析入库，二次打开缓存命中，工程文件秒级呈现</p>
+        </div>
+        <div class="value-item fade-in">
+          <div class="value-number">03</div>
+          <h4>专业格式，深度解析</h4>
+          <p>CBM/DEV/FAM/MOD/PHM 全链路追踪，IFC 模型 + 属性一体化呈现</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Tech Stack -->
+  <section class="section section-dark">
+    <div class="container">
+      <div class="section-header fade-in">
+        <div class="section-tag">技术栈</div>
+        <h2 class="section-title">现代技术，可靠架构</h2>
+      </div>
+
+      <div class="tech-grid fade-in">
+        <div class="tech-item">Tauri 2</div>
+        <div class="tech-item">Rust</div>
+        <div class="tech-item">TypeScript</div>
+        <div class="tech-item">Vite</div>
+        <div class="tech-item">Three.js</div>
+        <div class="tech-item">web-ifc</div>
+        <div class="tech-item">@thatopen/components</div>
+        <div class="tech-item">MapLibre GL</div>
+        <div class="tech-item">SQLite</div>
+        <div class="tech-item">WebAssembly</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Roadmap -->
+  <section class="section">
+    <div class="container">
+      <div class="section-header fade-in">
+        <div class="section-tag">后续规划</div>
+        <h2 class="section-title">从 Demo 到产品</h2>
+      </div>
+
+      <div class="timeline fade-in">
+        <div class="timeline-item completed">
+          <div class="timeline-dot"></div>
+          <div class="timeline-phase">M1 - 已完成</div>
+          <h4>核心解析与渲染</h4>
+          <p>GIMPKG 头部检测、7z/ZIP 解压、CBM 层级树解析、IFC 3D 渲染、属性面板</p>
+          <div class="timeline-tags">
+            <span class="timeline-tag">GIM 解析</span>
+            <span class="timeline-tag">IFC 渲染</span>
+            <span class="timeline-tag">SQLite 缓存</span>
+          </div>
+        </div>
+        <div class="timeline-item completed">
+          <div class="timeline-dot"></div>
+          <div class="timeline-phase">M2 - 已完成</div>
+          <h4>工程类型识别与线路地图</h4>
+          <p>自动识别变电/线路工程、Canvas 地图渲染、塔位符号、导线图层</p>
+          <div class="timeline-tags">
+            <span class="timeline-tag">线路工程</span>
+            <span class="timeline-tag">地图浏览</span>
+            <span class="timeline-tag">树图联动</span>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-phase">M3 - 进行中</div>
+          <h4>MOD 几何缓存与性能优化</h4>
+          <p>DEV 粒度 GLB 缓存、合并几何体、加载性能提升、内存占用优化</p>
+          <div class="timeline-tags">
+            <span class="timeline-tag">GLB 缓存</span>
+            <span class="timeline-tag">几何合并</span>
+            <span class="timeline-tag">性能调优</span>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-phase">M4 - 规划中</div>
+          <h4>线路悬链线参数研究</h4>
+          <p>WIRE 实体字段审计、档距聚合算法、拓扑分类规则、用户核验流程</p>
+          <div class="timeline-tags">
+            <span class="timeline-tag">悬链线参数</span>
+            <span class="timeline-tag">档距聚合</span>
+            <span class="timeline-tag">拓扑分析</span>
+          </div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-phase">M5 - 探索中</div>
+          <h4>高级功能与生态对接</h4>
+          <p>悬链线 3D 渲染、几何 IR 导出、与其他电力软件数据互通</p>
+          <div class="timeline-tags">
+            <span class="timeline-tag">悬链线 3D</span>
+            <span class="timeline-tag">数据导出</span>
+            <span class="timeline-tag">生态对接</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-logo">GIM 阅读器</div>
+    <p class="footer-text">电力工程信息模型浏览工具 · Demo 产品创意提案</p>
+  </footer>
+
+  <script>
+    // Scroll animation
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+  </script>
+</body>
+</html>

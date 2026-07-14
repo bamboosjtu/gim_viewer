@@ -35,6 +35,37 @@ export interface StdSldParseResult {
 }
 
 /**
+ * 校验缓存恢复结果是否覆盖了 GIM 索引中声明的电气图文件。
+ *
+ * 旧版本缓存只落盘 IFC/几何文件，SQLite 的 gim_entry 虽然仍记录
+ * project.sch、*.std、*.sld，但 extracted/{projectId} 下没有对应文件。
+ * 这种缓存不能继续走短路路径，否则电气图面板只能显示空状态。
+ */
+export function findMissingStdSldCacheParts(
+  entryPaths: Iterable<string>,
+  result: StdSldParseResult | null,
+): string[] {
+  let expectsSch = false;
+  let expectsStd = false;
+  let expectsSld = false;
+
+  for (const entryPath of entryPaths) {
+    const lower = entryPath.replace(/\\/g, '/').toLowerCase();
+    if (lower === 'cbm/project.sch') expectsSch = true;
+    else if (lower.startsWith('cbm/') && lower.endsWith('.std')) expectsStd = true;
+    else if (lower.startsWith('cbm/') && lower.endsWith('.sld')) expectsSld = true;
+  }
+
+  const missing: string[] = [];
+  if (expectsSch && (!result || result.schEntries.length === 0)) missing.push('SCH');
+  if (expectsStd && !result?.stdDoc?.substation) missing.push('STD');
+  if (expectsSld && (!result?.sldDoc?.safeSvgOuterHTML || result.sldDoc.groups.length === 0)) {
+    missing.push('SLD');
+  }
+  return missing;
+}
+
+/**
  * 解析并构建 STD/SLD 三向索引。
  *
  * **首次打开**（files 非空）：从内存文件读取
@@ -59,9 +90,19 @@ export async function parseAndIndexStdSld(
       debugLog(DEBUG_RUNTIME_LOGS, '[STD/SLD] 该工程不含 SCH 入口（无 STD/SLD 拓扑与单线图）');
       return null;
     }
-    // 读取 STD/SLD 文件文本
+    // 读取 STD/SLD 文件文本（大小写不敏感查找：GIM 解压后路径可能是 Cbm/ 或 CBM/）
     for (const entry of schEntries) {
-      const file = files.get(entry.path);
+      let file = files.get(entry.path);
+      if (!file) {
+        // 大小写不敏感兜底：遍历匹配
+        const lower = entry.path.toLowerCase();
+        for (const [p, f] of files) {
+          if (p.toLowerCase() === lower) {
+            file = f;
+            break;
+          }
+        }
+      }
       if (!file) {
         console.warn(`[STD/SLD] SCH 引用的文件不存在: ${entry.path}`);
         continue;
@@ -81,25 +122,58 @@ export async function parseAndIndexStdSld(
 
     const projectId = state.currentProjectId;
     try {
-      const { readCachedIfc } = await import('../desktop/database.js');
-      // 读取 SCH 入口文件
-      const schBytes = await readCachedIfc(projectId, 'CBM/project.sch');
+      const { readCachedIfc, batchReadCachedFiles } = await import('../desktop/database.js');
+      // 读取 SCH 入口文件（尝试多种大小写，因 GIM 解压后路径大小写可能不同）
+      const schCandidates = ['CBM/project.sch', 'Cbm/project.sch', 'cbm/project.sch'];
+      let schBytes: Uint8Array | null = null;
+      let schMatchedPath = '';
+      for (const candidate of schCandidates) {
+        try {
+          schBytes = await readCachedIfc(projectId, candidate);
+          schMatchedPath = candidate;
+          break;
+        } catch {
+          // 此大小写不匹配，尝试下一个
+        }
+      }
+      if (!schBytes) {
+        debugLog(DEBUG_RUNTIME_LOGS, '[STD/SLD] 缓存命中但 SCH 入口不存在（尝试过', schCandidates.join('/'), ')');
+        return null;
+      }
       const schText = new TextDecoder().decode(schBytes);
       schEntries = parseSch(schText);
       if (schEntries.length === 0) {
         debugLog(DEBUG_RUNTIME_LOGS, '[STD/SLD] 缓存命中但 SCH 入口为空');
         return null;
       }
-      // 批量读取 STD/SLD 文件
-      const { batchReadCachedFiles } = await import('../desktop/database.js');
+      // 批量读取 STD/SLD 文件（同时尝试原始路径和大小写变体，应对 GIM 内部路径大小写不一致）
       const entryPaths = schEntries.map((e) => e.path);
-      const bytesMap = await batchReadCachedFiles(projectId, entryPaths);
+      // 同时加入大小写变体（Cbm/、cbm/）作为兜底
+      const altPaths: string[] = [];
+      for (const p of entryPaths) {
+        if (p.startsWith('CBM/')) {
+          altPaths.push('Cbm/' + p.slice(4));
+          altPaths.push('cbm/' + p.slice(4));
+        }
+      }
+      const bytesMap = await batchReadCachedFiles(projectId, [...entryPaths, ...altPaths]);
       for (const [entryPath, bytes] of bytesMap) {
         if (bytes) {
-          fileTextMap.set(entryPath, new TextDecoder().decode(bytes));
-        } else {
-          console.warn(`[STD/SLD] 缓存文件不存在或读取失败: ${entryPath}`);
+          // 通过 entry.path 索引（即便实际读取的路径是大小写变体，也用原始 entry.path 索引）
+          const targetPath = entryPaths.includes(entryPath) ? entryPath : entryPaths.find((p) => p.toLowerCase() === entryPath.toLowerCase());
+          if (targetPath) {
+            fileTextMap.set(targetPath, new TextDecoder().decode(bytes));
+          }
         }
+      }
+      // 校验：是否有 SCH 引用的文件未读到
+      for (const entry of schEntries) {
+        if (!fileTextMap.has(entry.path)) {
+          console.warn(`[STD/SLD] 缓存文件不存在或读取失败: ${entry.path}`);
+        }
+      }
+      if (schMatchedPath !== 'CBM/project.sch') {
+        console.log(`[SCH] 缓存命中 SCH 入口路径非默认大小写：${schMatchedPath}`);
       }
     } catch (err) {
       console.warn('[STD/SLD] 从磁盘缓存读取 STD/SLD 失败:', err);
@@ -160,11 +234,12 @@ export async function parseAndIndexStdSld(
 export async function parseStdSldOnGimExtracted(
   state: AppState,
   files: Map<string, File>,
-): Promise<void> {
+): Promise<StdSldParseResult | null> {
   try {
-    await parseAndIndexStdSld(state, files);
+    return await parseAndIndexStdSld(state, files);
   } catch (err) {
     console.warn('[STD/SLD] 后台解析失败:', err);
+    return null;
   }
 }
 
@@ -175,10 +250,11 @@ export async function parseStdSldOnGimExtracted(
  * - 不传 files，由函数内部从磁盘读取
  * - 必须在 state.currentProjectId 设置后调用
  */
-export async function restoreStdSldFromCache(state: AppState): Promise<void> {
+export async function restoreStdSldFromCache(state: AppState): Promise<StdSldParseResult | null> {
   try {
-    await parseAndIndexStdSld(state, null);
+    return await parseAndIndexStdSld(state, null);
   } catch (err) {
     console.warn('[STD/SLD] 缓存恢复失败:', err);
+    return null;
   }
 }

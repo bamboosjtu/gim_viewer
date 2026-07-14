@@ -28,6 +28,7 @@
 import type { LineMapData, TowerMarker, WireSegment } from '../gim/lineMapData.js';
 import type { GimGraphNode } from '../gim/gimGraphTypes.js';
 import type { LineMapProjection } from './lineMapProjection.js';
+import { ENABLE_CATENARY } from '../config/features.js';
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -48,6 +49,8 @@ export interface LineMapViewHandle {
   handlePointerClick?(x: number, y: number): void;
   /** M4-A2：overlay 模式下由外部（MapLibre）转发 pointer leave 事件 */
   handlePointerLeave?(): void;
+  /** 返回图层面板 DOM 元素（供外部附加底图切换控件等） */
+  getLayerPanel?(): HTMLElement | null;
 }
 
 /**
@@ -512,6 +515,7 @@ export function renderLineMap(
    * - SPLIT > 1 → 线宽 WIRE_WIDTH_SPLIT
    * - 选中态 → 线宽 WIRE_WIDTH_SELECTED + 高亮色（黄色描边）
    * - UNKNOWN → 保持弱化样式（浅灰）
+   * - ENABLE_CATENARY=true 且为 inter-point 真实档距 → 抛物线采样（M4-B3C）
    *
    * @param w 导线段
    * @param isSelected 是否为选中态
@@ -528,15 +532,19 @@ export function renderLineMap(
     const isJumper = parseWireIsJumper(raw['ISJUMPER']);
     const split = parseWireSplit(raw['SPLIT']);
 
-    // 选中态：先画一层黄色描边光晕
+    // 判断是否使用悬链线渲染
+    const useCatenary = ENABLE_CATENARY
+      && !isJumper
+      && w.groupKind === 'inter-point'
+      && w.spanMeters != null
+      && w.spanMeters > 1; // 太短不绘制曲线
+
+    // 选中态：先画一层黄色描边光晕（与导线主体同样形态）
     if (isSelected) {
       ctx.setLineDash([]);
       ctx.strokeStyle = 'rgba(245,158,11,0.45)';
       ctx.lineWidth = WIRE_WIDTH_SELECTED + 4;
-      ctx.beginPath();
-      ctx.moveTo(s.x, s.y);
-      ctx.lineTo(e.x, e.y);
-      ctx.stroke();
+      drawWirePath(s, e, w, useCatenary);
     }
 
     // 主体线
@@ -553,13 +561,75 @@ export function renderLineMap(
     } else {
       ctx.setLineDash([]);
     }
-    ctx.beginPath();
-    ctx.moveTo(s.x, s.y);
-    ctx.lineTo(e.x, e.y);
-    ctx.stroke();
+    drawWirePath(s, e, w, useCatenary);
 
     // 恢复默认
     ctx.setLineDash([]);
+  }
+
+  /**
+   * M4-B3C：绘制导线路径（直线或抛物线悬链线）。
+   *
+   * 抛物线近似：f(t) = sag * 4 * t * (1-t)，t∈[0,1]
+   * - 弧垂 sag（米）：KVALUE*L²（若 KVALUE>0），否则 3% * L
+   * - sag 上限：0.1*L（防止极端值导致视觉异常）
+   * - sagPx = sag（米）× 屏幕像素/米比例（chordPx / spanMeters）
+   * - 采样 24 段 polyline
+   */
+  function drawWirePath(
+    s: { x: number; y: number },
+    e: { x: number; y: number },
+    w: WireSegment,
+    useCatenary: boolean,
+  ): void {
+    ctx.beginPath();
+    if (!useCatenary || w.spanMeters == null || w.spanMeters <= 0) {
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(e.x, e.y);
+      ctx.stroke();
+      return;
+    }
+
+    // 计算弧垂（米）
+    const L = w.spanMeters;
+    let sagMeters: number;
+    const kValueNum = w.kValue ? parseFloat(w.kValue) : NaN;
+    if (Number.isFinite(kValueNum) && kValueNum > 0) {
+      sagMeters = kValueNum * L * L;
+    } else {
+      sagMeters = L * 0.03; // 3% 经验弧垂
+    }
+    // 限制 sagMeters <= 10% * L（防止 KVALUE 异常导致 sag 过大）
+    if (sagMeters > L * 0.1) sagMeters = L * 0.1;
+    if (sagMeters < 1) sagMeters = 1; // 至少 1 米下垂，保证视觉可辨
+
+    // 弦长像素
+    const dx = e.x - s.x;
+    const dy = e.y - s.y;
+    const chordPx = Math.sqrt(dx * dx + dy * dy);
+    if (chordPx < 2) {
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(e.x, e.y);
+      ctx.stroke();
+      return;
+    }
+
+    // 屏幕像素/米比例 + sagPx
+    const scale = chordPx / L;
+    const sagPx = sagMeters * scale;
+
+    // 沿弦线采样 24 段，每点垂直下移 sagPx * 4 * t * (1-t)
+    const N = 24;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      const x = s.x + dx * t;
+      const y = s.y + dy * t;
+      const drop = sagPx * 4 * t * (1 - t);
+      // Canvas Y 轴向下，下垂 = +y
+      if (i === 0) ctx.moveTo(x, y + drop);
+      else ctx.lineTo(x, y + drop);
+    }
+    ctx.stroke();
   }
 
   function drawCrosses(): void {
@@ -1219,6 +1289,7 @@ export function renderLineMap(
     handlePointerMove: handlePointerMoveAt,
     handlePointerClick: handlePointerClickAt,
     handlePointerLeave: handlePointerLeaveInternal,
+    getLayerPanel: () => destroyed ? null : layerPanel,
   };
 }
 

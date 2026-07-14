@@ -18,7 +18,11 @@ export type BasemapStatus =
   | 'osm-online'
   | 'osm-unavailable-fallback'
   | 'empty'
-  | 'pmtiles';
+  | 'pmtiles'
+  | 'tianditu-satellite'
+  | 'tianditu-terrain'
+  | 'tianditu-vector'
+  | 'tianditu-unavailable-fallback';
 
 /** 底图状态快照（供诊断 JSON / UI 展示） */
 export interface BasemapStatusSnapshot {
@@ -78,7 +82,7 @@ export function setBasemapStatus(
   if (options?.tileErrorCount !== undefined) currentTileErrorCount = options.tileErrorCount;
   if (options?.fallbackReason !== undefined) currentFallbackReason = options.fallbackReason;
   // 状态非回退时清除 fallbackReason
-  if (status !== 'osm-unavailable-fallback') {
+  if (status !== 'osm-unavailable-fallback' && status !== 'tianditu-unavailable-fallback') {
     currentFallbackReason = undefined;
   }
 }
@@ -119,7 +123,7 @@ export function summarizeBasemapStatus(): string {
     `MapLibre：${snap.maplibreEnabled ? '启用' : '关闭'}`,
   ];
   if (snap.tileErrorCount !== undefined && snap.tileErrorCount > 0) {
-    lines.push(`OSM tile error：${snap.tileErrorCount}`);
+    lines.push(`tile error：${snap.tileErrorCount}`);
   }
   if (snap.fallbackReason) {
     lines.push(`回退原因：${snap.fallbackReason}`);

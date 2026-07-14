@@ -45,20 +45,75 @@ export const PMTILES_DEMO_URL = '/tiles/demo.pmtiles';
 /**
  * M4-A2 第 3 轮：底图模式定义。
  *
- * - 'empty'     ：纯色 background，无瓦片（兜底模式）
- * - 'osm-online'：OpenStreetMap 在线 raster 底图（MVP 默认）
- * - 'pmtiles'   ：本地 PMTiles 矢量瓦片（后续离线方案）
+ * - 'empty'            ：纯色 background，无瓦片（兜底模式）
+ * - 'osm-online'       ：OpenStreetMap 在线 raster 底图（MVP 默认）
+ * - 'pmtiles'          ：本地 PMTiles 矢量瓦片（后续离线方案）
+ * - 'tianditu-satellite': 天地图卫星影像（img_w + cia_w 双图层叠加）
+ * - 'tianditu-terrain' : 天地图地形图（ter_w + cta_w 双图层叠加，呈现地形起伏）
+ * - 'tianditu-vector'  : 天地图矢量图（vec_w + cva_w 双图层叠加，呈现道路/地名）
+ *
+ * 天地图三种模式需要 .env 中配置 VITE_TIANDITU_KEY。
+ * 未配置 key 时自动回退到 OSM（由 lineProjectView 处理）。
  */
-export type LineBasemapMode = 'empty' | 'osm-online' | 'pmtiles';
+export type LineBasemapMode =
+  | 'empty'
+  | 'osm-online'
+  | 'pmtiles'
+  | 'tianditu-satellite'
+  | 'tianditu-terrain'
+  | 'tianditu-vector';
 
 /**
- * MVP 阶段统一使用 OSM online。
+ * MVP 默认底图模式：OpenStreetMap online。
  *
- * - 不区分开发 / 生产环境
- * - OSM 不可用时由 lineProjectView 回退 Canvas-only
- * - 后续生产正式底图、内网瓦片、PMTiles 离线方案另行扩展
+ * 用户可通过 UI 切换到天地图地形图 / 矢量图（lineProjectView 底图切换控件）。
+ * OSM 不可用时由 lineProjectView 回退 Canvas-only。
  *
  * 注意：LINE_BASEMAP_MODE 仅在 ENABLE_MAPLIBRE_EXPERIMENT=true 时生效。
  *       若 ENABLE_MAPLIBRE_EXPERIMENT=false，仍走纯 Canvas 渲染。
  */
 export const LINE_BASEMAP_MODE: LineBasemapMode = 'osm-online';
+
+/**
+ * 运行时底图模式（可被 UI 切换修改）。
+ *
+ * 初始值 = LINE_BASEMAP_MODE（编译期默认），
+ * lineProjectView 的底图切换控件会修改此变量并重建 MapLibre probe。
+ * destroyLineMapView 时重置为编译期默认值。
+ */
+export let runtimeBasemapMode: LineBasemapMode = LINE_BASEMAP_MODE;
+
+/**
+ * 设置运行时底图模式。
+ *
+ * 由 lineProjectView 底图切换控件调用。
+ * 仅修改模块内变量，不触发 probe 重建——重建由调用方负责。
+ */
+export function setRuntimeBasemapMode(mode: LineBasemapMode): void {
+  runtimeBasemapMode = mode;
+}
+
+/** 重置运行时底图模式为编译期默认值（destroyLineMapView 调用） */
+export function resetRuntimeBasemapMode(): void {
+  runtimeBasemapMode = LINE_BASEMAP_MODE;
+}
+
+/**
+ * 悬链线（catenary）渲染开关（M4-B3C，14 号文档 §6.6）。
+ *
+ * 默认 true：导线段用抛物线近似绘制弧垂（视觉示意）。
+ * 设为 false 时回退直线段绘制。
+ *
+ * 启用时的行为：
+ * - 对每条 inter-point 真实档距导线用抛物线近似 f(x) = sag * 4 * x * (1-x) 采样 24 段绘制
+ * - sag 由 KVALUE 推算（kValue*L²），缺失或为 0 时回退 3% 经验弧垂，上限 10%*L
+ * - 端点高差由 BLHA 第 3 段（elev）计算
+ * - 同塔内部连接（same-point，端点 BLHA 相同）跳过渲染，保持直线
+ * - 跳线（ISJUMPER=true）保持虚线样式，不走抛物线
+ *
+ * 设计原则：
+ * - 不依赖 KVALUE 物理公式确认，仅做视觉示意
+ * - 不修改 DB schema
+ * - 后续 KVALUE 公式确认后可在此基础上扩展真实张力/弧垂
+ */
+export const ENABLE_CATENARY = true;

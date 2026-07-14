@@ -30,6 +30,38 @@ function createNodeClickHandler(state: AppState, showMessage: (text: string) => 
   };
 }
 
+/**
+ * 注册 SLD gridId 点击联动回调（阶段 4：SLD → CBM 联动）。
+ *
+ * 在 GIM 打开后（首次或缓存命中）调用一次：
+ * - 用户点击 SLD SVG 元素或 STD 拓扑项 → 通过 gridId 查找 CBM 节点 → 触发 handleNodeClick
+ * - 失败时仅 warn，不影响 SLD 自身的高亮
+ *
+ * 配套：nodeInteractionService 在 handleNodeClick 末尾调用 highlightSldByGridId 实现 CBM → SLD 反向联动
+ */
+function setupSldGridIdInteraction(state: AppState, showMessage: (text: string) => void): void {
+  import('../ui/sldView.js').then(({ setSldGridIdClickHandler }) => {
+    setSldGridIdClickHandler(async (gridId: string) => {
+      if (!state.currentStdSldIndex) return;
+      try {
+        const { getCbmNodesByGridId } = await import('../gim/stdSldIndex.js');
+        const nodes = getCbmNodesByGridId(state.currentStdSldIndex, gridId);
+        if (nodes.length === 0) {
+          console.log('[SLD→CBM] gridId 无对应 CBM 节点:', gridId);
+          return;
+        }
+        // 取首个匹配节点触发联动（高亮 CBM 树 + 加载 IFC + 3D 高亮 + 相机定位）
+        const { handleNodeClick } = await import('./nodeInteractionService.js');
+        await handleNodeClick(state, nodes[0], showMessage);
+      } catch (err) {
+        console.warn('[SLD→CBM] 联动失败:', err);
+      }
+    });
+  }).catch((err) => {
+    console.warn('[SLD→CBM] 注册联动回调失败:', err);
+  });
+}
+
 /** GIM 文件解压后的处理流程 */
 export async function onGimExtracted(state: AppState, files: Map<string, File>, showMessage: (text: string) => void, projectName?: string, projectTypeName?: string): Promise<IfcEntry[]> {
   state.currentFiles = files;
@@ -68,6 +100,17 @@ export async function onGimExtracted(state: AppState, files: Map<string, File>, 
   const clickHandler = createNodeClickHandler(state, showMessage);
   buildAndRenderCbmTree(state, clickHandler);
   renderFileDevPanel(state, clickHandler);
+
+  // 渲染 SLD 电气单线图与 STD 拓扑列表
+  try {
+    const { renderSldView } = await import('../ui/sldView.js');
+    renderSldView(state);
+  } catch (err) {
+    console.warn('[GIM] SLD 视图渲染失败:', err);
+  }
+
+  // 阶段 4：注册 SLD gridId → CBM 联动回调
+  setupSldGridIdInteraction(state, showMessage);
 
   return ifcEntries;
 }
@@ -890,11 +933,35 @@ export async function openGimWithDialog(
           // STD/SLD 从磁盘缓存恢复：CBM 树就绪后并行执行（不阻塞 IFC 加载）
           // 失败时仅 warn，不影响主流程
           try {
-            const { restoreStdSldFromCache } = await import('./stdSldService.js');
-            await restoreStdSldFromCache(state);
+            const { restoreStdSldFromCache, findMissingStdSldCacheParts } =
+              await import('./stdSldService.js');
+            const stdSldResult = await restoreStdSldFromCache(state);
+            const missingParts = findMissingStdSldCacheParts(
+              index.entries.map((entry) => entry.entry_path),
+              stdSldResult,
+            );
+            if (missingParts.length > 0) {
+              throw new Error(
+                `本地缓存缺少电气图数据（${missingParts.join('/')}），需要从原始 GIM 重新提取`,
+              );
+            }
           } catch (err) {
             console.warn('[GIM] STD/SLD 缓存恢复失败:', err);
+            // 让外层缓存命中流程回退到完整解压。旧缓存可能有完整 IFC/MOD，
+            // 但缺少后来新增的 project.sch / STD / SLD 落盘文件。
+            throw err;
           }
+
+          // 渲染 SLD 电气单线图与 STD 拓扑列表（缓存命中路径）
+          try {
+            const { renderSldView } = await import('../ui/sldView.js');
+            renderSldView(state);
+          } catch (err) {
+            console.warn('[GIM] SLD 视图渲染失败（缓存命中）:', err);
+          }
+
+          // 阶段 4：注册 SLD gridId → CBM 联动回调（缓存命中路径）
+          setupSldGridIdInteraction(state, showMessage);
 
           // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
           // loadAllIfcFiles 内部会创建 ViewerRuntime、加载 IFC、渲染树、触发 MOD/STL

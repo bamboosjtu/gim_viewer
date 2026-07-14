@@ -29,6 +29,22 @@ export async function handleNodeClick(
   showNodePropertiesBasic(state, node);
   openPropsDrawerUI();
 
+  // 1.5 阶段 4：CBM → SLD 反向联动（在所有分支前执行，确保 MOD/STL/IFC 路径都能联动）
+  // 通过 CBM 节点路径查找对应的 gridId，高亮 SLD SVG 元素和拓扑列表项
+  // 失败时仅 warn，不影响主流程
+  try {
+    if (state.currentStdSldIndex && node.path) {
+      const { getGridIdByCbmPath } = await import('../gim/stdSldIndex.js');
+      const { highlightSldByGridId } = await import('../ui/sldView.js');
+      const gridId = getGridIdByCbmPath(state.currentStdSldIndex, node.path);
+      if (gridId) {
+        highlightSldByGridId(gridId);
+      }
+    }
+  } catch (err) {
+    console.warn('[CBM→SLD] 联动高亮失败:', err);
+  }
+
   // 2. 收集节点引用的 IFC 模型
   const refs = collectIfcRefs(node);
   const cbmFileName = node.path.split('/').pop() || '';

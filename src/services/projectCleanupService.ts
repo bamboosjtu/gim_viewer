@@ -159,6 +159,7 @@ export async function cleanupBeforeOpenNewProject(
     { id: 'model-list', html: '' },
     { id: 'cbm-tree-panel', html: '' },
     { id: 'file-dev-panel', html: '' },
+    { id: 'sld-panel', html: '' },
     { id: 'props-drawer-body', html: '<div class="props-empty">选择层级树节点查看属性</div>' },
     { id: 'empty-tip', styleDisplay: '' },
   ];
@@ -171,6 +172,22 @@ export async function cleanupBeforeOpenNewProject(
     } catch (err) {
       console.warn(`[Cleanup] clear UI ${t.id} failed:`, err);
     }
+  }
+
+  // 重置 SLD 视图模块内单例状态（selectedGridId / activeMode）
+  try {
+    const { clearSldView } = await import('../ui/sldView.js');
+    clearSldView();
+  } catch (err) {
+    console.warn('[Cleanup] clearSldView failed:', err);
+  }
+
+  // 恢复左侧 tab 可见性（lineProjectView.hideTabs 隐藏的 tab 在切换工程时需恢复）
+  try {
+    const { showAllTabs } = await import('../ui/tabs.js');
+    showAllTabs();
+  } catch (err) {
+    console.warn('[Cleanup] showAllTabs failed:', err);
   }
 
   // ---- 5. 重置 state ----

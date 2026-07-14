@@ -133,6 +133,37 @@
       .modal-check-item:hover { background: #2a2a2a; }
       .modal-check-item input[type="checkbox"] { margin: 0; accent-color: #0d84fc; }
       .modal-info { font-size: 12px; color: #888; margin-bottom: 12px; }
+
+      /* ── SLD 电气单线图 ── */
+      #sld-panel { display: flex; flex-direction: column; min-height: 0; }
+      .sld-header { padding: 10px 12px; border-bottom: 1px solid #333; font-size: 12px; color: #aaa; flex-shrink: 0; }
+      .sld-header .sld-title { font-size: 13px; color: #ddd; font-weight: 600; margin-bottom: 4px; }
+      .sld-header .sld-meta { font-size: 11px; color: #777; }
+      .sld-toolbar { padding: 6px 12px; border-bottom: 1px solid #333; display: flex; gap: 6px; flex-shrink: 0; }
+      .sld-toolbar button { padding: 4px 10px; font-size: 11px; background: #2a2a2a; color: #ccc; border: 1px solid #444; border-radius: 4px; cursor: pointer; }
+      .sld-toolbar button:hover { background: #3a3a3a; }
+      .sld-toolbar button.active { background: #0d84fc; color: #fff; border-color: #0d84fc; }
+      .sld-svg-wrap {
+        flex: 1; min-height: 0; overflow: auto; padding: 8px;
+        background: #fafafa; position: relative;
+        display: flex; align-items: flex-start; justify-content: center;
+      }
+      .sld-svg-wrap svg { max-width: 100%; height: auto; display: block; }
+      .sld-svg-wrap .sld-empty { color: #666; font-size: 13px; text-align: center; padding: 32px 0; }
+      /* SLD 内联 SVG 中的高亮交互（通过 data-grid-id 标记） */
+      .sld-svg-wrap [data-grid-id] { cursor: pointer; transition: filter 0.15s, opacity 0.15s; }
+      .sld-svg-wrap [data-grid-id]:hover { filter: drop-shadow(0 0 3px #0d84fc); }
+      .sld-svg-wrap [data-grid-id].sld-highlight { filter: drop-shadow(0 0 5px #ff8c00); }
+      .sld-svg-wrap [data-grid-id].sld-selected { filter: drop-shadow(0 0 6px #ff3b3b); }
+      /* SLD 树形拓扑列表 */
+      .sld-topo-list { padding: 6px 0; font-size: 12px; color: #ccc; }
+      .sld-topo-item { padding: 4px 8px; cursor: pointer; transition: background 0.15s; border-left: 2px solid transparent; }
+      .sld-topo-item:hover { background: #2a2a2a; }
+      .sld-topo-item.selected { background: #0d84fc33; border-left-color: #0d84fc; }
+      .sld-topo-item .sld-topo-tag { color: #888; font-size: 10px; margin-right: 6px; }
+      .sld-topo-item .sld-topo-name { color: #ddd; }
+      .sld-topo-item .sld-topo-grid { color: #0d84fc; font-size: 10px; margin-left: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .sld-empty-full { color: #666; font-size: 13px; text-align: center; padding: 32px 12px; }
     </style>
   </head>
   <body>
@@ -152,18 +183,22 @@
           <button id="btn-cache-manager" class="btn btn-secondary">缓存管理</button>
         </div>
         <div id="sidebar-tabs">
-          <button class="tab-btn active" data-tab="tab-models">模型</button>
-          <button class="tab-btn" data-tab="tab-tree">层级树</button>
+          <button class="tab-btn active" data-tab="tab-tree">层级树</button>
           <button class="tab-btn" data-tab="tab-filedev">文件设备</button>
+          <button class="tab-btn" data-tab="tab-models">模型</button>
+          <button class="tab-btn" data-tab="tab-sld">电气图</button>
         </div>
-        <div id="tab-models" class="tab-panel active">
-          <div id="model-list"></div>
-        </div>
-        <div id="tab-tree" class="tab-panel">
+        <div id="tab-tree" class="tab-panel active">
           <div id="cbm-tree-panel"></div>
         </div>
         <div id="tab-filedev" class="tab-panel">
           <div id="file-dev-panel"></div>
+        </div>
+        <div id="tab-models" class="tab-panel">
+          <div id="model-list"></div>
+        </div>
+        <div id="tab-sld" class="tab-panel">
+          <div id="sld-panel"></div>
         </div>
       </aside>
 

@@ -33,7 +33,7 @@ describe('GimGeometrySource 类型守卫', () => {
     kind: 'line-text-mod',
     format: 'text-hnum-comma-record',
     modPath: 'Mod/y.mod',
-    records: [],
+    records: { hNum: 0, hRecords: [], bodySections: [], hSubLegs: [], hLegs: [] },
   };
   const stl: GimGeometrySource = {
     kind: 'stl',

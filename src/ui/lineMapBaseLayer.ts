@@ -38,7 +38,15 @@
 
 import type { Map as MapLibreMap, StyleSpecification, LngLatBoundsLike, ScaleControl, MapMouseEvent } from 'maplibre-gl';
 import type { LineBasemapMode } from '../config/features.js';
-import { createEmptyLineMapStyle, createPmtilesLineMapStyle, createOsmOnlineRasterStyle } from './lineMapStyle.js';
+import { isTiandituKeyAvailable } from '../config/tianditu.js';
+import {
+  createEmptyLineMapStyle,
+  createPmtilesLineMapStyle,
+  createOsmOnlineRasterStyle,
+  createTiandituSatelliteStyle,
+  createTiandituTerrainStyle,
+  createTiandituVectorStyle,
+} from './lineMapStyle.js';
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -78,17 +86,21 @@ export interface CreateMapLibreProbeOptions {
   /** M4-A2 第 2 轮：PMTiles 瓦片配置（默认不启用，需 basemapMode='pmtiles' 才尝试加载） */
   pmtiles?: PmtilesOptions;
   /**
-   * M4-A2 第 3 轮：底图模式选择。
-   * - 'empty'：纯色 background，无瓦片（代码兜底）
-   * - 'osm-online'：OpenStreetMap 在线 raster（MVP 默认，启用 attribution）
-   * - 'pmtiles'：本地 PMTiles 矢量瓦片（需配合 pmtiles 选项）
+   * 底图模式选择。
+   * - 'empty'           ：纯色 background，无瓦片（代码兜底）
+   * - 'osm-online'      ：OpenStreetMap 在线 raster（MVP 默认，启用 attribution）
+   * - 'pmtiles'        ：本地 PMTiles 矢量瓦片（需配合 pmtiles 选项）
+   * - 'tianditu-satellite': 天地图卫星影像（img_w + cia_w 双图层）
+   * - 'tianditu-terrain': 天地图地形图（ter_w + cta_w 双图层）
+   * - 'tianditu-vector' : 天地图矢量图（vec_w + cva_w 双图层）
    *
-   * 优先级：osm-online > pmtiles > empty。
-   * OSM 模式不依赖 PMTiles；PMTiles 模式不影响 OSM 模式。
+   * 优先级：tianditu-* > osm-online > pmtiles > empty。
+   * 在线 raster 模式（OSM + 天地图）不依赖 PMTiles；PMTiles 模式不影响在线 raster 模式。
+   * 天地图模式在 TIANDITU_KEY 未配置时自动回退到 OSM。
    */
   basemapMode?: LineBasemapMode;
   /**
-   * M4-A2 第 3 轮 Patch：OSM online tile 加载失败回调。
+   * 在线 raster tile 加载失败回调（OSM / 天地图通用）。
    *
    * 只用于判断底图服务不可用（阈值：3 次 tile error），
    * 不处理普通 MapLibre 初始化失败（仍走 reject 路径）。
@@ -128,17 +140,33 @@ export async function createMapLibreProbe(
   const maplibre = await import('maplibre-gl');
 
   // ---- M4-A2 第 3 轮：底图模式选择 ----
-  // 优先级：osm-online > pmtiles > empty
+  // 优先级：tianditu-* > osm-online > pmtiles > empty
   const basemapMode: LineBasemapMode = options?.basemapMode ?? 'empty';
   const isOsmMode = basemapMode === 'osm-online';
-  // OSM 模式启用 attributionControl（© OpenStreetMap contributors）
+  const isTiandituSatelliteMode = basemapMode === 'tianditu-satellite';
+  const isTiandituTerrainMode = basemapMode === 'tianditu-terrain';
+  const isTiandituVectorMode = basemapMode === 'tianditu-vector';
+  // 在线 raster 模式（OSM + 天地图）都需要持续监听 tile error
+  const isOnlineRasterMode = isOsmMode || isTiandituSatelliteMode || isTiandituTerrainMode || isTiandituVectorMode;
+  // 在线 raster 模式启用 attributionControl（© OpenStreetMap / © 天地图）
   // MapLibre attributionControl 类型：false | AttributionControlOptions（不接受 true）
-  // OSM 模式传 { compact: false } 始终展开 attribution；其他模式传 false 禁用
+  // 在线 raster 模式传 { compact: false } 始终展开 attribution；其他模式传 false 禁用
+
+  // ---- 天地图 key 检查（未配置时回退到 OSM） ----
+  let effectiveBasemapMode = basemapMode;
+  if ((isTiandituSatelliteMode || isTiandituTerrainMode || isTiandituVectorMode) && !isTiandituKeyAvailable()) {
+    console.warn('[MapLibre probe] TIANDITU_KEY 未配置，回退到 OSM online');
+    effectiveBasemapMode = 'osm-online';
+  }
+  const useOsmStyle = effectiveBasemapMode === 'osm-online';
+  const useTiandituSatelliteStyle = effectiveBasemapMode === 'tianditu-satellite';
+  const useTiandituTerrainStyle = effectiveBasemapMode === 'tianditu-terrain';
+  const useTiandituVectorStyle = effectiveBasemapMode === 'tianditu-vector';
 
   // ---- M4-A2 第 2 轮：PMTiles protocol 注册（仅 pmtiles 模式尝试） ----
   let pmtilesProtocolHandle: { destroy(): void } | null = null;
   let usingPmtiles = false;
-  if (basemapMode === 'pmtiles' && options?.pmtiles?.enabled && options.pmtiles.url) {
+  if (effectiveBasemapMode === 'pmtiles' && options?.pmtiles?.enabled && options.pmtiles.url) {
     try {
       const { setupPmtilesProtocol } = await import('./lineMapPmtiles.js');
       pmtilesProtocolHandle = await setupPmtilesProtocol(maplibre);
@@ -152,11 +180,20 @@ export async function createMapLibreProbe(
   }
 
   // 选择 style：
-  // - osm-online 模式：使用 OSM raster style（不依赖 PMTiles）
-  // - pmtiles 模式：protocol 注册成功时用 PMTiles style，否则回退 empty
+  // - tianditu-satellite：img_w + cia_w 双图层
+  // - tianditu-terrain：ter_w + cta_w 双图层
+  // - tianditu-vector：vec_w + cva_w 双图层
+  // - osm-online：OSM raster style
+  // - pmtiles：protocol 注册成功时用 PMTiles style，否则回退 empty
   // - empty / 其他：empty style（最终兜底）
   let style: StyleSpecification;
-  if (isOsmMode) {
+  if (useTiandituSatelliteStyle) {
+    style = createTiandituSatelliteStyle();
+  } else if (useTiandituTerrainStyle) {
+    style = createTiandituTerrainStyle();
+  } else if (useTiandituVectorStyle) {
+    style = createTiandituVectorStyle();
+  } else if (useOsmStyle) {
     style = createOsmOnlineRasterStyle();
   } else if (usingPmtiles && options?.pmtiles?.url) {
     style = createPmtilesLineMapStyle(options.pmtiles.url);
@@ -183,12 +220,12 @@ export async function createMapLibreProbe(
       ? [(options.initialBounds[0] + options.initialBounds[2]) / 2, (options.initialBounds[1] + options.initialBounds[3]) / 2]
       : [0, 0],
     zoom: options?.initialBounds ? 10 : 0,
-    // M4-A2 第 3 轮：OSM 模式启用 attributionControl（ODbL 许可要求）
+    // 在线 raster 模式（OSM + 天地图）启用 attributionControl（许可要求）
     // empty / pmtiles 模式不显示 attribution
-    attributionControl: isOsmMode ? { compact: false } : false,
+    attributionControl: isOnlineRasterMode ? { compact: false } : false,
     // M4-A2：启用交互（pan/zoom），MapLibre 管理视图
     interactive: true,
-    // empty/pmtiles 模式不发起瓦片请求；osm-online 模式请求 https://tile.openstreetmap.org
+    // empty/pmtiles 模式不发起瓦片请求；在线 raster 模式请求对应瓦片服务
     hash: false,
   });
 
@@ -203,14 +240,14 @@ export async function createMapLibreProbe(
   }
 
   // 等待 map 加载完成（证明 WebGL 上下文 + style 可用）
-  // M4-A2 第 3 轮 Patch：OSM 模式下 tile error 计数 + 阈值触发 onBasemapUnavailable
-  let osmTileErrorCount = 0;
+  // 在线 raster 模式（OSM + 天地图）下 tile error 计数 + 阈值触发 onBasemapUnavailable
+  let onlineTileErrorCount = 0;
   let basemapUnavailableNotified = false;
-  const OSM_TILE_ERROR_THRESHOLD = 3;
-  // M4-A2 第 3 轮 Patch：OSM error listener 引用，destroy 时显式清理
-  // OSM 模式下 onLoad 不移除 error listener（需持续监听 load 后的 tile error），
+  const ONLINE_TILE_ERROR_THRESHOLD = 3;
+  // 在线 raster error listener 引用，destroy 时显式清理
+  // 在线 raster 模式下 onLoad 不移除 error listener（需持续监听 load 后的 tile error），
   // 因此 destroy() 必须显式 off，避免 map.remove() 之前的回调残留
-  let osmErrorHandler: ((e: unknown) => void) | null = null;
+  let onlineErrorHandler: ((e: unknown) => void) | null = null;
 
   function notifyBasemapUnavailable(reason: unknown): void {
     if (basemapUnavailableNotified) return;
@@ -224,12 +261,12 @@ export async function createMapLibreProbe(
 
   await new Promise<void>((resolve, reject) => {
     const onLoad = () => {
-      // M4-A2 第 3 轮 Patch：OSM 模式下 load 后仍需监听 tile error
-      // 原因：style load 成功 ≠ 瓦片请求成功；OSM 瓦片请求在 load 后才大规模发起
-      // 场景：style JSON 解析完成 → load 事件触发 → 后续 OSM tile 请求失败（net::ERR_CONNECTION_CLOSED）
+      // 在线 raster 模式下 load 后仍需监听 tile error
+      // 原因：style load 成功 ≠ 瓦片请求成功；瓦片请求在 load 后才大规模发起
+      // 场景：style JSON 解析完成 → load 事件触发 → 后续瓦片请求失败（net::ERR_CONNECTION_CLOSED / 401）
       // 若此时移除 error listener，onBasemapUnavailable 永不触发，回退失效
       // 仅 empty / pmtiles 模式在 load 后移除（首个 error 才致命，load 成功即不再需要）
-      if (!isOsmMode) {
+      if (!isOnlineRasterMode) {
         map.off('error', onError);
       }
       // 加载后 fitBounds（如果提供了初始边界），duration:0 无动画
@@ -249,15 +286,15 @@ export async function createMapLibreProbe(
       resolve();
     };
     const onError = (e: unknown) => {
-      if (isOsmMode) {
-        // M4-A2 第 3 轮 Patch：OSM 模式下瓦片 404 / 网络错误计数
+      if (isOnlineRasterMode) {
+        // 在线 raster 模式下瓦片 404 / 401 / 网络错误计数
         // 达到阈值后触发 onBasemapUnavailable，让调用方回退 Canvas-only
-        // 注意：load 前后均会触发（onLoad 不移除 OSM error listener）
-        osmTileErrorCount++;
-        if (osmTileErrorCount <= OSM_TILE_ERROR_THRESHOLD) {
-          console.warn(`[MapLibre probe] OSM tile error (${osmTileErrorCount}/${OSM_TILE_ERROR_THRESHOLD}, non-fatal):`, formatMapEvent(e));
+        // 注意：load 前后均会触发（onLoad 不移除在线 raster error listener）
+        onlineTileErrorCount++;
+        if (onlineTileErrorCount <= ONLINE_TILE_ERROR_THRESHOLD) {
+          console.warn(`[MapLibre probe] tile error (${onlineTileErrorCount}/${ONLINE_TILE_ERROR_THRESHOLD}, non-fatal):`, formatMapEvent(e));
         }
-        if (osmTileErrorCount >= OSM_TILE_ERROR_THRESHOLD) {
+        if (onlineTileErrorCount >= ONLINE_TILE_ERROR_THRESHOLD) {
           notifyBasemapUnavailable(e);
         }
         return;
@@ -266,15 +303,15 @@ export async function createMapLibreProbe(
       reject(new Error(`MapLibre probe 初始化失败: ${formatMapEvent(e)}`));
     };
     map.once('load', onLoad);
-    // OSM 模式：可能有多个 tile 错误，用 on 持续监听（计数 + 阈值）
+    // 在线 raster 模式：可能有多个 tile 错误，用 on 持续监听（计数 + 阈值）
     //   - load 前的 error：style/supplier 初始化失败
-    //   - load 后的 error：瓦片请求失败（net::ERR_CONNECTION_CLOSED 等）
-    //   - onLoad 不移除 OSM error listener，保证 load 后仍计数
+    //   - load 后的 error：瓦片请求失败（net::ERR_CONNECTION_CLOSED / 401 等）
+    //   - onLoad 不移除在线 raster error listener，保证 load 后仍计数
     // empty / pmtiles 模式：仅首个 error 致命，用 once
-    if (isOsmMode) {
+    if (isOnlineRasterMode) {
       map.on('error', onError);
       // 保存引用，destroy() 时显式 off（onLoad 不移除，需手动清理）
-      osmErrorHandler = onError;
+      onlineErrorHandler = onError;
     } else {
       map.once('error', onError);
     }
@@ -319,16 +356,16 @@ export async function createMapLibreProbe(
     destroy() {
       if (destroyed) return;
       destroyed = true;
-      // M4-A2 第 3 轮 Patch：显式移除 OSM error listener
-      // OSM 模式下 onLoad 不移除该 listener（需持续监听 load 后的 tile error），
+      // 在线 raster 模式：显式移除 error listener
+      // 在线 raster 模式下 onLoad 不移除该 listener（需持续监听 load 后的 tile error），
       // 因此 destroy 时必须显式 off，防止 map.remove() 之前的回调残留或重复触发
-      if (osmErrorHandler) {
+      if (onlineErrorHandler) {
         try {
-          map.off('error', osmErrorHandler);
+          map.off('error', onlineErrorHandler);
         } catch (err) {
-          console.warn('[MapLibre probe] OSM error listener 清理失败:', err);
+          console.warn('[MapLibre probe] tile error listener 清理失败:', err);
         }
-        osmErrorHandler = null;
+        onlineErrorHandler = null;
       }
       try {
         map.remove();

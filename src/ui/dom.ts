@@ -11,6 +11,7 @@ export const btnClear = document.getElementById('btn-clear') as HTMLButtonElemen
 export const btnCacheManager = document.getElementById('btn-cache-manager') as HTMLButtonElement;
 export const cbmTreePanel = document.getElementById('cbm-tree-panel') as HTMLElement;
 export const fileDevPanel = document.getElementById('file-dev-panel') as HTMLElement;
+export const sldPanel = document.getElementById('sld-panel') as HTMLElement;
 export const propsDrawerBody = document.getElementById('props-drawer-body') as HTMLElement;
 export const propsDrawer = document.getElementById('props-drawer') as HTMLElement;
 export const btnToggleProps = document.getElementById('btn-toggle-props') as HTMLButtonElement;

@@ -16,6 +16,7 @@ import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
 import type { LineMapData, WireSegment } from '../gim/lineMapData.js';
 import { escHtml } from '../shared/html.js';
 import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, btnToggleProps, emptyTipEl, container } from './dom.js';
+import { hideTabs } from './tabs.js';
 import type { LineMapViewHandle } from './lineMapView.js';
 import type { LineMapBaseLayerHandle } from './lineMapBaseLayer.js';
 import type { LineMapProjection, GeoBBox } from './lineMapProjection.js';
@@ -30,21 +31,27 @@ import { buildLineCatenaryAuditExportPayload } from '../services/lineCatenaryAud
 import type { LineCatenaryAuditExportPayload } from '../services/lineCatenaryAuditExportService.js';
 import { formatLineCatenaryAuditMarkdown } from '../services/lineCatenaryAuditExportService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
-import { ENABLE_MAPLIBRE_EXPERIMENT, ENABLE_PMTILES_EXPERIMENT, PMTILES_DEMO_URL, LINE_BASEMAP_MODE } from '../config/features.js';
+import { ENABLE_MAPLIBRE_EXPERIMENT, ENABLE_PMTILES_EXPERIMENT, PMTILES_DEMO_URL, runtimeBasemapMode, setRuntimeBasemapMode, resetRuntimeBasemapMode } from '../config/features.js';
+import type { LineBasemapMode } from '../config/features.js';
+import { isTiandituKeyAvailable } from '../config/tianditu.js';
 import { setBasemapStatus, resetBasemapStatus } from '../services/basemapStatusService.js';
 import type { BasemapStatus } from '../services/basemapStatusService.js';
 import { debugLog, debugWarn } from '../utils/logger.js';
 
 /**
- * 把 LINE_BASEMAP_MODE 映射为成功后的 BasemapStatus。
+ * 把 LineBasemapMode 映射为成功后的 BasemapStatus。
  *
- * MVP 阶段 LINE_BASEMAP_MODE 恒为 'osm-online'，
- * 'empty' / 'pmtiles' 仅作为内部枚举保留，不进入当前 MVP 范围。
+ * 用于在 MapLibre overlay 初始化成功后上报状态。
  */
-function basemapStatusFromMode(mode: string): BasemapStatus {
-  if (mode === 'osm-online') return 'osm-online';
-  if (mode === 'pmtiles') return 'pmtiles';
-  return 'empty';
+function basemapStatusFromMode(mode: LineBasemapMode): BasemapStatus {
+  switch (mode) {
+    case 'osm-online': return 'osm-online';
+    case 'pmtiles': return 'pmtiles';
+    case 'tianditu-satellite': return 'tianditu-satellite';
+    case 'tianditu-terrain': return 'tianditu-terrain';
+    case 'tianditu-vector': return 'tianditu-vector';
+    default: return 'empty';
+  }
 }
 
 /**
@@ -531,6 +538,13 @@ let maplibreProbeGeneration = 0;
 let maplibreInteractionCleanup: Array<() => void> = [];
 
 /**
+ * 底图切换：showMessage 回调（用于在切换成功/失败时给用户提示）。
+ *
+ * renderLineProjectPanels 时保存，destroyLineMapView 时清空。
+ */
+let currentShowMessage: ((text: string) => void) | null = null;
+
+/**
  * 销毁当前地图视图。
  *
  * 调用时机（spec 六 清理要求）：
@@ -558,6 +572,9 @@ export function destroyLineMapView(): void {
     maplibreProbeHandle = null;
   }
   lineMapData = null;
+  // 底图切换：清空引用 + 重置运行时底图模式
+  currentShowMessage = null;
+  resetRuntimeBasemapMode();
   // M4-B3A：清空悬链线审计 payload（避免变电工程 / 清空场景残留旧线路数据）
   latestCatenaryAuditPayload = null;
   // M4-A2 Finalization：重置底图运行状态（避免下次打开工程时残留旧状态）
@@ -679,6 +696,10 @@ export function renderLineProjectPanels(
   // 确保 state 与 graph 同步（调用方可能已设置，此处幂等确认）
   state.currentGimGraph = graph;
 
+  // 0. Tab 显示差异化：线路工程仅保留层级树 tab，隐藏模型/文件设备/电气图 tab
+  //    （线路工程无 IFC 模型列表、无 FileDevRelation、无 SLD/STD 拓扑）
+  hideTabs(['tab-models', 'tab-filedev', 'tab-sld']);
+
   // 1. 层级树（左侧树点击走 handleTreeNodeClick：定位地图 + 显示属性）
   cbmTreePanel.innerHTML = '';
   if (!graph.root) {
@@ -687,7 +708,7 @@ export function renderLineProjectPanels(
     renderLineTreeNode(graph.root, cbmTreePanel, handleTreeNodeClick);
   }
 
-  // 2. 文件设备面板摘要
+  // 2. 文件设备面板摘要（tab 已隐藏，但内容仍渲染以备后续展示）
   renderLineFileSummary(graph);
 
   // 3. 模型面板（清空占位，不显示 IFC 提示）
@@ -700,6 +721,8 @@ export function renderLineProjectPanels(
   const mapData = extractLineMapData(graph, attrs);
   // 模块级保存：供左侧树点击 collectDescendantTowerPaths 反查塔位 path
   lineMapData = mapData;
+  // 底图切换：保存 showMessage 引用，切换底图时给用户提示
+  currentShowMessage = showMessage;
 
   // M4-B3 / M4-B3A：构建悬链线参数审计导出 payload（模块级保存，供 Ctrl+Shift+C 复制）
   // parserVersion 当前前端拿不到（在 Rust 侧 PARSER_VERSION 常量），暂省略
@@ -746,10 +769,10 @@ export function renderLineProjectPanels(
   }
   // M4-A2 Finalization：先报告 Canvas-only 状态
   // - 无论 ENABLE_MAPLIBRE_EXPERIMENT 是否开启，主视口已先以 Canvas-only 形式就绪
-  // - 后续 MapLibre overlay 成功时状态会被更新为 'osm-online'
-  // - OSM 失败回退时状态会被更新为 'osm-unavailable-fallback'
+  // - 后续 MapLibre overlay 成功时状态会被更新为对应在线 raster 状态
+  // - 在线 raster 失败回退时状态会被更新为 '*-unavailable-fallback'
   setBasemapStatus('canvas-only', {
-    mode: LINE_BASEMAP_MODE,
+    mode: runtimeBasemapMode,
     maplibreEnabled: ENABLE_MAPLIBRE_EXPERIMENT,
   });
 
@@ -777,16 +800,26 @@ export function renderLineProjectPanels(
   //    - flag=true 时异步创建 MapLibre probe，成功后切换为 overlay 模式
   //    - overlay 模式恢复完整交互：hover/click/联动（pointer 事件桥接）
   //    - 失败时保持 Canvas-only，不影响主流程
-  //    底图模式（LINE_BASEMAP_MODE）：
-  //    - 'osm-online'：MVP 默认，加载 OSM 在线 raster 瓦片
-  //    - 'pmtiles'  ：走 PMTiles 预研路径（默认关闭，需 ENABLE_PMTILES_EXPERIMENT=true）
-  //    - 'empty'    ：不加载瓦片，仅显示纯色背景
-  //    - OSM 不可用（3 次 tile error）或初始化失败时，自动回退 Canvas-only
+  //    底图模式（runtimeBasemapMode，可由 UI 切换）：
+  //    - 'osm-online'      ：MVP 默认，加载 OSM 在线 raster 瓦片
+  //    - 'tianditu-terrain': 天地图地形图（ter_w + cta_w 双图层）
+  //    - 'tianditu-vector' : 天地图矢量图（vec_w + cva_w 双图层）
+  //    - 'pmtiles'        ：走 PMTiles 预研路径（默认关闭，需 ENABLE_PMTILES_EXPERIMENT=true）
+  //    - 'empty'          ：不加载瓦片，仅显示纯色背景
+  //    - 在线 raster 不可用（3 次 tile error）或初始化失败时，自动回退 Canvas-only
+  //    底图切换 UI：附加到图层面板下方（OSM / 天地图卫星 / 天地图地形 / 天地图矢量）
+  attachBasemapSwitcher(mapData);
   if (ENABLE_MAPLIBRE_EXPERIMENT && isLineMapDataValid(mapData)) {
     debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] enabled:', ENABLE_MAPLIBRE_EXPERIMENT);
-    debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] basemap mode:', LINE_BASEMAP_MODE);
-    if (LINE_BASEMAP_MODE === 'osm-online') {
+    debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] basemap mode:', runtimeBasemapMode);
+    if (runtimeBasemapMode === 'osm-online') {
       debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] using OSM online raster tiles');
+    } else if (runtimeBasemapMode === 'tianditu-satellite') {
+      debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] using Tianditu satellite raster tiles');
+    } else if (runtimeBasemapMode === 'tianditu-terrain') {
+      debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] using Tianditu terrain raster tiles');
+    } else if (runtimeBasemapMode === 'tianditu-vector') {
+      debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] using Tianditu vector raster tiles');
     }
     // 先销毁旧 probe + 旧 interaction listeners（避免残留）
     if (maplibreProbeHandle) {
@@ -798,7 +831,7 @@ export function renderLineProjectPanels(
     }
     maplibreInteractionCleanup = [];
     const myGen = ++maplibreProbeGeneration;
-    // M4-A2 第 3 轮 Patch：OSM 不可用时回退 Canvas-only
+    // 在线 raster 不可用时回退 Canvas-only
     //  - 只触发一次（fallbackToCanvasOnlyCalled 守卫）
     //  - 可能在 probe 创建期间（await 中）或之后触发
     //  - 创建期间触发时，IIFE 在 await 返回后检查 flag 并放弃 overlay 切换
@@ -807,7 +840,8 @@ export function renderLineProjectPanels(
       if (fallbackToCanvasOnlyCalled) return;
       fallbackToCanvasOnlyCalled = true;
 
-      debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] OSM unavailable, fallback to Canvas-only', reason);
+      const modeLabel = basemapModeLabel(runtimeBasemapMode);
+      debugWarn(DEBUG_LINE_MAP, `[MapLibre overlay] ${modeLabel} unavailable, fallback to Canvas-only`, reason);
 
       // 只在当前 generation 有效时执行（避免过期回调污染新工程）
       if (myGen !== maplibreProbeGeneration) return;
@@ -835,19 +869,24 @@ export function renderLineProjectPanels(
       lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
         onWireClick: handleMapWireClick,
       });
+      // fallback 后重新附加底图切换控件到新的图层面板
+      attachBasemapSwitcher(mapData);
 
       // M4-A2 Finalization：上报回退状态（含可读 reason 供诊断展示）
       // M4-A2 小修：fallback 后 MapLibre probe 已销毁，实际运行模式为 Canvas-only，
       //             因此 maplibreEnabled=false（反映"当前是否仍有 MapLibre 在线"而非"是否曾启用过"）
-      setBasemapStatus('osm-unavailable-fallback', {
-        mode: LINE_BASEMAP_MODE,
+      const fallbackStatus: BasemapStatus = isTiandituMode(runtimeBasemapMode)
+        ? 'tianditu-unavailable-fallback'
+        : 'osm-unavailable-fallback';
+      setBasemapStatus(fallbackStatus, {
+        mode: runtimeBasemapMode,
         maplibreEnabled: false,
         fallbackReason: reason instanceof Error ? reason.message : String(reason),
       });
 
       // UI 状态提示
       try {
-        showMessage('OSM 在线底图不可用，已切换为 Canvas 地图模式');
+        showMessage(`${modeLabel}不可用，已切换为 Canvas 地图模式`);
       } catch { /* ignore */ }
     }
     void (async () => {
@@ -859,7 +898,7 @@ export function renderLineProjectPanels(
         ];
         const probe = await createMapLibreProbe(container, {
           initialBounds,
-          basemapMode: LINE_BASEMAP_MODE,
+          basemapMode: runtimeBasemapMode,
           pmtiles: {
             enabled: ENABLE_PMTILES_EXPERIMENT,
             url: PMTILES_DEMO_URL,
@@ -916,9 +955,11 @@ export function renderLineProjectPanels(
           lineMapHandle?.handlePointerLeave?.();
         });
         maplibreInteractionCleanup.push(offView, offMove, offClick, offLeave);
+        // overlay handle 创建后，重新附加底图切换控件到新的图层面板
+        attachBasemapSwitcher(mapData);
         // M4-A2 Finalization：MapLibre overlay 初始化成功，按当前底图模式上报状态
-        setBasemapStatus(basemapStatusFromMode(LINE_BASEMAP_MODE), {
-          mode: LINE_BASEMAP_MODE,
+        setBasemapStatus(basemapStatusFromMode(runtimeBasemapMode), {
+          mode: runtimeBasemapMode,
           maplibreEnabled: true,
         });
         debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2：底图 + Canvas overlay + 交互桥接 初始化成功');
@@ -929,4 +970,272 @@ export function renderLineProjectPanels(
       }
     })();
   }
+}
+
+// ---------------------------------------------------------------------------
+// 底图切换 UI
+// ---------------------------------------------------------------------------
+
+/** 判断是否为天地图模式 */
+function isTiandituMode(mode: LineBasemapMode): boolean {
+  return mode === 'tianditu-satellite' || mode === 'tianditu-terrain' || mode === 'tianditu-vector';
+}
+
+/** 获取底图模式的人类可读标签 */
+function basemapModeLabel(mode: LineBasemapMode): string {
+  switch (mode) {
+    case 'osm-online': return 'OpenStreetMap';
+    case 'tianditu-satellite': return '天地图卫星影像';
+    case 'tianditu-terrain': return '天地图地形图';
+    case 'tianditu-vector': return '天地图矢量图';
+    case 'pmtiles': return 'PMTiles';
+    case 'empty': return '空白底图';
+    default: return mode;
+  }
+}
+
+/** 底图切换按钮配置 */
+const BASEMAP_SWITCHER_OPTIONS: { mode: LineBasemapMode; label: string; title: string }[] = [
+  { mode: 'osm-online',        label: 'OSM',  title: 'OpenStreetMap 在线底图' },
+  { mode: 'tianditu-satellite', label: '卫星', title: '天地图卫星影像（高分辨率遥感）' },
+  { mode: 'tianditu-terrain',  label: '地形', title: '天地图地形图（侧视效果，可观察悬链线弧垂）' },
+  { mode: 'tianditu-vector',   label: '矢量', title: '天地图矢量图（道路/地名）' },
+];
+
+/**
+ * 从 lineMapHandle 获取图层面板，并附加底图切换控件。
+ *
+ * 在以下时机调用：
+ * - renderLineProjectPanels 创建 lineMapHandle 后（Canvas-only）
+ * - MapLibre overlay 切换成功后（overlay handle 创建后）
+ * - switchBasemap 中每次 handle 重建后
+ *
+ * 底图切换控件渲染为图层面板的子区域（"底图" 标题 + 按钮组），
+ * 随 lineMapHandle.destroy() 自动移除（图层面板被 remove）。
+ */
+function attachBasemapSwitcher(mapData: LineMapData): void {
+  if (!lineMapHandle?.getLayerPanel) return;
+  const layerPanel = lineMapHandle.getLayerPanel();
+  if (!layerPanel) return;
+  renderBasemapSwitcherIntoLayerPanel(layerPanel, mapData);
+}
+
+/**
+ * 在图层面板内渲染底图切换区域（作为 "底图" 子区域）。
+ *
+ * - 位于图层 checkbox 下方，带分隔线和标题
+ * - 四选一切换：OSM / 天地图卫星 / 天地图地形 / 天地图矢量
+ * - 当前模式按钮高亮
+ * - 点击切换：更新 runtimeBasemapMode + 销毁当前 probe + 重建 probe
+ * - 天地图模式在 key 未配置时禁用按钮
+ * - 随图层面板 destroy 自动移除
+ *
+ * @param layerPanel 图层面板 DOM 元素
+ * @param mapData 当前线路地图数据（用于切换时复用）
+ */
+function renderBasemapSwitcherIntoLayerPanel(layerPanel: HTMLElement, mapData: LineMapData): void {
+  // 已存在则移除（重入时刷新）
+  const existing = layerPanel.querySelector('.basemap-switcher-section');
+  if (existing) existing.remove();
+
+  const section = document.createElement('div');
+  section.className = 'basemap-switcher-section';
+  section.style.cssText = `
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid #cbd5e1;
+  `;
+
+  const title = document.createElement('div');
+  title.textContent = '底图';
+  title.style.cssText = `
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: #334155;
+  `;
+  section.appendChild(title);
+
+  const btnGroup = document.createElement('div');
+  btnGroup.style.cssText = `
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+  `;
+
+  const hasTiandituKey = isTiandituKeyAvailable();
+  const container = layerPanel.parentElement || document.getElementById('viewport') as HTMLElement;
+
+  for (const opt of BASEMAP_SWITCHER_OPTIONS) {
+    const btn = document.createElement('button');
+    btn.textContent = opt.label;
+    btn.title = opt.title;
+    btn.style.cssText = `
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid transparent;
+      background: #f1f5f9;
+      color: #475569;
+      cursor: pointer;
+      font-size: 11px;
+      transition: background 0.15s;
+    `;
+    if (runtimeBasemapMode === opt.mode) {
+      btn.style.background = '#0d84fc';
+      btn.style.color = '#fff';
+      btn.style.borderColor = '#0d84fc';
+    }
+    // 天地图 key 未配置时禁用对应按钮
+    if (!hasTiandituKey && isTiandituMode(opt.mode)) {
+      btn.disabled = true;
+      btn.style.opacity = '0.4';
+      btn.style.cursor = 'not-allowed';
+      btn.title = '未配置 VITE_TIANDITU_KEY（.env），无法使用天地图';
+    }
+    btn.addEventListener('mouseenter', () => {
+      if (!btn.disabled && runtimeBasemapMode !== opt.mode) {
+        btn.style.background = '#e2e8f0';
+      }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (!btn.disabled && runtimeBasemapMode !== opt.mode) {
+        btn.style.background = '#f1f5f9';
+        btn.style.color = '#475569';
+      }
+    });
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      if (runtimeBasemapMode === opt.mode) return; // 已是当前模式
+      switchBasemap(opt.mode, container, mapData);
+    });
+    btnGroup.appendChild(btn);
+  }
+
+  section.appendChild(btnGroup);
+  layerPanel.appendChild(section);
+}
+
+/**
+ * 切换底图模式：更新 runtimeBasemapMode + 销毁旧 probe + 重建 probe + overlay。
+ *
+ * 复用 renderLineProjectPanels 的 probe 创建逻辑（异步、代次守卫、fallback 回退）。
+ * 切换期间 mapData 不变（仅底图变化，线路要素不变）。
+ *
+ * @param newMode 新底图模式
+ * @param container 地图容器
+ * @param mapData 当前线路地图数据
+ */
+function switchBasemap(
+  newMode: LineBasemapMode,
+  container: HTMLElement,
+  mapData: LineMapData,
+): void {
+  setRuntimeBasemapMode(newMode);
+
+  // 销毁旧 probe + 旧 overlay（图层面板 + 底图切换控件随之移除）
+  maplibreProbeGeneration++;
+  for (const fn of maplibreInteractionCleanup) {
+    try { fn(); } catch { /* ignore */ }
+  }
+  maplibreInteractionCleanup = [];
+  if (lineMapHandle) {
+    lineMapHandle.destroy();
+    lineMapHandle = null;
+  }
+  if (maplibreProbeHandle) {
+    maplibreProbeHandle.destroy();
+    maplibreProbeHandle = null;
+  }
+
+  // 重新渲染 Canvas-only（先恢复交互，再异步切换到 overlay）
+  lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
+    onWireClick: handleMapWireClick,
+  });
+  // Canvas-only handle 创建后，附加底图切换控件到新的图层面板
+  attachBasemapSwitcher(mapData);
+  setBasemapStatus('canvas-only', {
+    mode: runtimeBasemapMode,
+    maplibreEnabled: ENABLE_MAPLIBRE_EXPERIMENT,
+  });
+
+  if (!ENABLE_MAPLIBRE_EXPERIMENT) return;
+
+  const myGen = maplibreProbeGeneration;
+  let fallbackCalled = false;
+  function fallback(reason: unknown): void {
+    if (fallbackCalled) return;
+    fallbackCalled = true;
+    if (myGen !== maplibreProbeGeneration) return;
+    const label = basemapModeLabel(newMode);
+    debugWarn(DEBUG_LINE_MAP, `[MapLibre overlay] ${label} unavailable, fallback to Canvas-only`, reason);
+    setBasemapStatus(isTiandituMode(newMode) ? 'tianditu-unavailable-fallback' : 'osm-unavailable-fallback', {
+      mode: newMode,
+      maplibreEnabled: false,
+      fallbackReason: reason instanceof Error ? reason.message : String(reason),
+    });
+    try {
+      currentShowMessage?.(`${label}不可用，已切换为 Canvas 地图模式`);
+    } catch { /* ignore */ }
+  }
+
+  void (async () => {
+    try {
+      const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
+      if (myGen !== maplibreProbeGeneration) return;
+      const initialBounds: [number, number, number, number] = [
+        mapData.bbox.minLng, mapData.bbox.minLat, mapData.bbox.maxLng, mapData.bbox.maxLat,
+      ];
+      const probe = await createMapLibreProbe(container, {
+        initialBounds,
+        basemapMode: newMode,
+        pmtiles: {
+          enabled: ENABLE_PMTILES_EXPERIMENT,
+          url: PMTILES_DEMO_URL,
+        },
+        onBasemapUnavailable: fallback,
+      });
+      if (fallbackCalled || myGen !== maplibreProbeGeneration) {
+        try { probe.destroy(); } catch { /* ignore */ }
+        return;
+      }
+      maplibreProbeHandle = probe;
+      const map = probe.getMap();
+      if (!map) throw new Error('MapLibre map 实例为 null');
+      const baseProjection = createMapLibreProjection(map);
+      const projection: LineMapProjection = {
+        ...baseProjection,
+        fitBounds(bbox: GeoBBox) {
+          probe.fitBounds([bbox.minLng, bbox.minLat, bbox.maxLng, bbox.maxLat]);
+        },
+      };
+      if (lineMapHandle) {
+        lineMapHandle.destroy();
+        lineMapHandle = null;
+      }
+      let redrawFn: (() => void) | null = null;
+      lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
+        projection,
+        onRequestRedraw: (draw: () => void) => { redrawFn = draw; },
+        onWireClick: handleMapWireClick,
+      });
+      const offView = probe.onViewChange(() => { if (redrawFn) redrawFn(); });
+      const offMove = probe.onPointerMove((p) => { lineMapHandle?.handlePointerMove?.(p.x, p.y); });
+      const offClick = probe.onPointerClick((p) => { lineMapHandle?.handlePointerClick?.(p.x, p.y); });
+      const offLeave = probe.onPointerLeave(() => { lineMapHandle?.handlePointerLeave?.(); });
+      maplibreInteractionCleanup.push(offView, offMove, offClick, offLeave);
+      // overlay handle 创建后，重新附加底图切换控件到新的图层面板
+      attachBasemapSwitcher(mapData);
+      setBasemapStatus(basemapStatusFromMode(newMode), {
+        mode: newMode,
+        maplibreEnabled: true,
+      });
+      try {
+        currentShowMessage?.(`已切换到${basemapModeLabel(newMode)}`);
+      } catch { /* ignore */ }
+    } catch (err) {
+      debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] 切换底图失败，保持 Canvas-only', err);
+      try {
+        currentShowMessage?.(`切换到${basemapModeLabel(newMode)}失败`);
+      } catch { /* ignore */ }
+    }
+  })();
 }
