@@ -6,7 +6,7 @@
 
 ## 项目定位
 
-- **Tauri 桌面 GIM 阅读器**：离线运行、portable exe、CSP 安全策略
+- **Tauri 桌面 GIM 阅读器**：离线运行、portable ZIP（内置 WebView2 Fixed Runtime）、CSP 安全策略
 - **支持变电 IFC 浏览**：CBM 层级树 + IFC 3D 模型 + 属性面板
 - **支持线路地图浏览**：Canvas 2D 地图 + 塔位符号 + 导线折线 + 图层控制
 
@@ -30,6 +30,27 @@
 - **SQLite 缓存**：首次打开解压 + 解析 + 入库；二次打开缓存命中，秒开（不读取原始 GIM）
 - **工程切换清理**：dispose 旧 Fragments 模型 + 销毁线路地图 + 清空 UI + 重置状态
 - **IFC 异常隔离**：单个 IFC 加载失败不阻断其他 IFC；Fragments "Malformed tile" 异常被 catch
+
+## Windows 发布构建
+
+```bash
+npm run tauri:build
+```
+
+该命令会在首次构建时从微软官方页面下载最新 x64 WebView2 Fixed Version Runtime，随后同时生成：
+
+- `src-tauri/target/release/bundle/nsis/*-setup.exe`：安装版，离线内置 WebView2。
+- `src-tauri/target/release/bundle/portable/GIM-Reader_*_portable.zip`：免安装 portable 版。
+
+portable 版不是单独一个 exe。必须完整解压 ZIP，保留 `GIM-Reader.exe` 和同目录的
+`webview2-fixed-runtime/` 文件夹，否则在未安装 WebView2 的电脑上无法启动。
+
+构建机无网络时，可预先下载微软 x64 Fixed Runtime CAB，并设置：
+
+```powershell
+$env:WEBVIEW2_FIXED_RUNTIME_CAB='D:\Downloads\Microsoft.WebView2.FixedVersionRuntime.x64.cab'
+npm run tauri:build
+```
 
 ## 线路工程地图
 

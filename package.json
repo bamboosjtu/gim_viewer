@@ -11,8 +11,10 @@
     "preview": "vite preview",
     "pretauri:dev": "node scripts/copy-web-ifc-wasm.mjs",
     "tauri:dev": "node scripts/tauri-wrapper.mjs dev",
-    "pretauri:build": "node scripts/copy-web-ifc-wasm.mjs",
+    "webview2:prepare": "node scripts/prepare-webview2-fixed-runtime.mjs",
+    "pretauri:build": "node scripts/copy-web-ifc-wasm.mjs && node scripts/prepare-webview2-fixed-runtime.mjs",
     "tauri:build": "node scripts/tauri-wrapper.mjs build",
+    "posttauri:build": "node scripts/package-portable.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

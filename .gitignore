@@ -42,5 +42,7 @@ npm-debug.log*
 # Tauri
 src-tauri/target/
 src-tauri/gen/
+# WebView2 Fixed Runtime 由构建脚本从微软下载，体积约 250-300MB，不提交仓库
+src-tauri/webview2-fixed-runtime/
 # Tauri CLI 临时目录（重定向到工作区内，避免污染系统盘 %TEMP%\.tauri）
 .tmp/

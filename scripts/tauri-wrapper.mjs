@@ -32,8 +32,11 @@ const env = {
 
 const subcommand = process.argv[2] || 'build';
 const extraArgs = process.argv.slice(3);
+const buildConfigArgs = subcommand === 'build'
+  ? ['--config', resolve(projectRoot, 'src-tauri', 'tauri.portable.conf.json')]
+  : [];
 
-const result = spawnSync('npx', ['tauri', subcommand, ...extraArgs], {
+const result = spawnSync('npx', ['tauri', subcommand, ...buildConfigArgs, ...extraArgs], {
   stdio: 'inherit',
   env,
   shell: true,

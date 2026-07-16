@@ -8,7 +8,7 @@
 
 | 层 | 技术 | 版本 | 用途 |
 |---|---|---|---|
-| 桌面框架 | Tauri 2 | 2.x | Rust 后端 + Vite 前端，离线运行，portable exe |
+| 桌面框架 | Tauri 2 | 2.x | Rust 后端 + Vite 前端，离线运行，portable ZIP |
 | 3D 渲染 | @thatopen/components (OBC) | ^3.4.6 | IFC Viewer 引擎 |
 | IFC 解析 | web-ifc | ^0.0.77 | WASM 解析 IFC 二进制 |
 | 3D 图形 | Three.js | ^0.184.0 | WebGL 渲染层 |
@@ -208,10 +208,15 @@ src-tauri/
 npm run dev          # Vite 开发服务器（浏览器模式）
 npm run tauri:dev    # Tauri 开发模式（桌面应用）
 npm run build        # TypeScript 编译 + Vite 构建
-npm run tauri:build  # 构建桌面 portable exe（nsis）
+npm run tauri:build  # 构建 NSIS 安装版 + 内置 WebView2 的 portable ZIP
 ```
 
 构建前自动执行 `scripts/copy-web-ifc-wasm.mjs` 复制 WASM 文件到 `public/wasm/`。
+首次发布构建还会执行 `scripts/prepare-webview2-fixed-runtime.mjs`，从微软官方下载并缓存
+x64 WebView2 Fixed Runtime。构建完成后 `scripts/package-portable.mjs` 将 release exe 与
+`webview2-fixed-runtime/` 组装为 portable 目录和 ZIP，并校验运行时核心文件；不能将 NSIS
+安装器或裸 `target/release/gim-viewer.exe` 误称为 portable 版本。
+Fixed Runtime 仅通过 `tauri.portable.conf.json` 注入 release 构建，`tauri:dev` 仍使用系统运行时。
 
 ---
 
