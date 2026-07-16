@@ -8,6 +8,39 @@ import {
 } from '../xmlModLoader.js';
 
 describe('loadXmlModFromText', () => {
+  it('StretchedBody MOD 会生成可渲染网格而不是空 Group', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<Device><Entities><Entity ID="1" Type="simple" Visible="True">
+  <StretchedBody Array="0,0,0;100,0,0;100,50,0;0,50,0;" Normal="0,0,304.8" L="20" />
+  <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
+  <Color R="215" G="215" B="215" A="100" />
+</Entity></Entities></Device>`;
+
+    const group = loadXmlModFromText(xml, 'MOD/stretched.mod');
+    expect(group.children).toHaveLength(1);
+    expect(group.children[0]).toBeInstanceOf(THREE.Mesh);
+    expect(new THREE.Box3().setFromObject(group).isEmpty()).toBe(false);
+  });
+
+  it('StretchedBody 可与同材质内置几何合并为一个 Mesh', () => {
+    const xml = `<?xml version="1.0"?><Device><Entities>
+<Entity ID="1" Type="simple" Visible="True">
+  <StretchedBody Array="0,0,0;100,0,0;100,50,0;0,50,0;" Normal="0,0,1" L="20" />
+  <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
+  <Color R="215" G="215" B="215" A="100" />
+</Entity>
+<Entity ID="2" Type="simple" Visible="True">
+  <Cuboid L="100" W="50" H="20" />
+  <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,200,0,0,1" />
+  <Color R="215" G="215" B="215" A="100" />
+</Entity>
+</Entities></Device>`;
+
+    const group = loadXmlModFromText(xml, 'MOD/stretched-mixed.mod');
+    expect(group.children).toHaveLength(1);
+    expect(group.children[0]).toBeInstanceOf(THREE.Mesh);
+  });
+
   it('有效 MOD XML → Group 含 mesh', () => {
     const xml = `<?xml version="1.0"?>
 <Device>

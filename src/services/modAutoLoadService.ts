@@ -183,6 +183,8 @@ export interface AutoLoadProgress {
   loadedStls: number;
   totalMods: number;
   totalStls: number;
+  /** 快速缓存阶段已检查的 DEV 任务数；用于区分“已处理”和“成功渲染”。 */
+  processedMods?: number;
   currentPath?: string;
 }
 
@@ -446,12 +448,19 @@ function isTokenValid(state: AppState, token?: number): boolean {
  *
  * @returns loaded=true 表示全部命中并已加载；loaded=false 表示未全部命中，需回退到 MOD 粒度
  */
-async function tryDevGlbFastPath(
+interface DevGlbFastPathDependencies {
+  loadDevGlb: (devPath: string, bytes: Uint8Array) => Promise<THREE.Group | null>;
+  applyPlacementTransformToSceneUnits: (group: THREE.Group, transformMatrix: number[] | null | undefined) => void;
+  readGlbFile: (projectId: number, entryPath: string) => Promise<Uint8Array | null>;
+}
+
+export async function tryDevGlbFastPath(
   state: AppState,
   scene: THREE.Scene,
   deviceNodes: CbmNode[],
   showProgress: (p: AutoLoadProgress) => void,
   token?: number,
+  dependencies?: DevGlbFastPathDependencies,
 ): Promise<{ loaded: boolean; modCount: number; stlCount: number }> {
   if (state.currentProjectId == null || deviceNodes.length === 0) {
     return { loaded: false, modCount: 0, stlCount: 0 };
@@ -476,15 +485,20 @@ async function tryDevGlbFastPath(
 
   // 2. 逐个读取 DEV.glb 并加载（使用 tauri::ipc::Response 原始二进制传输）
   //    替代原 batchReadGlbFiles：避免 146MB JSON 序列化导致 webview 冻结
-  const { loadDevGlb } = await import('./glbCacheService.js');
-  const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
-  const { readGlbFile } = await import('../desktop/database.js');
+  const loadDevGlb = dependencies?.loadDevGlb
+    ?? (await import('./glbCacheService.js')).loadDevGlb;
+  const applyPlacementTransformToSceneUnits = dependencies?.applyPlacementTransformToSceneUnits
+    ?? (await import('../viewer/xmlModLoader.js')).applyPlacementTransformToSceneUnits;
+  const readGlbFile = dependencies?.readGlbFile
+    ?? (await import('../desktop/database.js')).readGlbFile;
 
   const { modRoot } = ensureGeometryLayers(state, scene);
 
   let loadedCount = 0;
   let hitCount = 0;
   let missCount = 0;
+  let processedCount = 0;
+  const addedGroups: Array<{ instanceKey: string; group: THREE.Group }> = [];
   const totalSeeds = deviceNodes.length;
   showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: totalSeeds, totalStls: 0 });
 
@@ -507,17 +521,23 @@ async function tryDevGlbFastPath(
     } catch {
       // GLB 文件不存在 = 该 DEV 无几何引用（serializeDevToGlb 返回 null），正常跳过
       missCount++;
+      processedCount++;
+      showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0, processedMods: processedCount });
       continue;
     }
     if (!glbBytes || glbBytes.byteLength === 0) {
       missCount++;
+      processedCount++;
+      showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0, processedMods: processedCount });
       continue;
     }
-    hitCount++;
 
     try {
       const group = await loadDevGlb(devPath, glbBytes);
-      if (!group) continue;
+      if (!group) {
+        missCount++;
+        continue;
+      }
 
       // 应用 CBM 累积矩阵（含 mm→m，等价于方案 B 的完整 placement 应用）
       const cbmTransform = parseCbmTransformMatrix(seed.transformMatrix);
@@ -527,7 +547,10 @@ async function tryDevGlbFastPath(
       applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
 
       // bbox 诊断
-      if (!diagnoseGroupBBox(group, devPath)) continue;
+      if (!diagnoseGroupBBox(group, devPath)) {
+        missCount++;
+        continue;
+      }
 
       // 标记 devPath 供节点点击时相机定位查找
       group.userData.devPath = devPath;
@@ -535,21 +558,37 @@ async function tryDevGlbFastPath(
       // 同步跟踪到 loadedXmlModGroups，避免节点点击时重复加载
       const instanceKey = `dev:${devPath}#${seed.path}`;
       state.loadedXmlModGroups.set(instanceKey, group);
+      addedGroups.push({ instanceKey, group });
+      hitCount++;
       loadedCount++;
-      showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0 });
     } catch (err) {
       console.error(`[autoLoad] DEV GLB 加载失败: ${devPath}`, err);
+      missCount++;
+    } finally {
+      processedCount++;
+      showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0, processedMods: processedCount });
     }
   }
 
-  // 3. 如果所有 DEV 都没有 GLB 缓存（hitCount=0），回退到 MOD 粒度
-  if (hitCount === 0) {
-    debugLog(DEBUG_IFC_LOAD, '[autoLoad] 所有 DEV GLB 均未命中，回退到 MOD 粒度');
+  // 3. 只有全部 seed 都得到有效可渲染 GLB 才能结束快速路径。
+  // 任一空 GLB、损坏 GLB 或缺失文件都必须回退，否则会出现 231/285 仍宣布完成。
+  if (hitCount !== totalSeeds) {
+    for (const { instanceKey, group } of addedGroups) {
+      modRoot.remove(group);
+      state.loadedXmlModGroups.delete(instanceKey);
+      group.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        mesh.geometry?.dispose?.();
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const material of materials) material?.dispose?.();
+      });
+    }
+    debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV GLB 仅 ${hitCount}/${totalSeeds} 个有效（空/缺失/失败 ${missCount}），已清理快速路径结果并回退到 MOD 粒度`);
     return { loaded: false, modCount: 0, stlCount: 0 };
   }
 
   debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV GLB 快速路径完成: ${loadedCount}/${deviceNodes.length} 个 seed 已加载（命中 ${hitCount}，无几何 ${missCount}）`);
-  showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0 });
+  showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0, processedMods: processedCount });
   return { loaded: true, modCount: loadedCount, stlCount: 0 };
 }
 

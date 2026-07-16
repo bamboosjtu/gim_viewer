@@ -347,7 +347,7 @@ async function autoLoadModStlPostIfc(
         if (p.phase === 'discovering') {
           showLoading(`正在发现几何引用... (${p.currentPath || ''})`);
         } else if (p.phase === 'loading_mod') {
-          showLoading(`正在加载 MOD 模型 ${p.loadedMods}/${p.totalMods}...`);
+          showLoading(`正在加载 MOD 模型 ${p.processedMods ?? p.loadedMods}/${p.totalMods}...`);
         } else if (p.phase === 'loading_stl') {
           showLoading(`正在加载 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
         }
@@ -470,7 +470,7 @@ export async function loadSelectedIfcFiles(ctx: ViewerContext, state: AppState, 
           if (p.phase === 'discovering') {
             showLoading(`正在发现几何引用... (${p.currentPath || ''})`);
           } else if (p.phase === 'loading_mod') {
-            showLoading(`正在加载 MOD 模型 ${p.loadedMods}/${p.totalMods}...`);
+            showLoading(`正在加载 MOD 模型 ${p.processedMods ?? p.loadedMods}/${p.totalMods}...`);
           } else if (p.phase === 'loading_stl') {
             showLoading(`正在加载 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
           }

@@ -49,7 +49,7 @@ pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v4";
 /// - PARSER_VERSION 变 → glbcache 目录由 delete_project_cache 删除重建
 /// - GEOMETRY_CACHE_VERSION 变 → validate_gim_cache 返回 invalid，触发 delete_project_cache + 重序列化
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v1";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v2-stretched-body";
 
 /// GIM 文件元信息（从前端传入，需 Deserialize）
 #[derive(Debug, Deserialize)]

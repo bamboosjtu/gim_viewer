@@ -153,36 +153,58 @@ describe('primitiveToGeometry', () => {
       expect(g).toBeNull();
     });
 
-    it('StretchedBody → MVP 暂停渲染，返回空 BufferGeometry', () => {
+    it('StretchedBody → 沿法向拉伸二维截面', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
         l: 200, array: '0,0;100,0;100,50;0,50', normal: '0,0,1',
       }, TEST_MOD_PATH);
-      expect(g).toBeNull();
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      g!.computeBoundingBox();
+      expect(g!.boundingBox!.min.toArray()).toEqual([0, 0, 0]);
+      expect(g!.boundingBox!.max.toArray()).toEqual([100, 50, 200]);
+      expect(g!.attributes.position.count).toBeGreaterThan(0);
+      expect(g!.index).not.toBeNull();
+      expect(g!.getAttribute('uv')).toBeDefined();
     });
 
-    it('StretchedBody 沿 Y 轴（MVP 暂停）', () => {
+    it('StretchedBody 支持位于 XZ 平面的截面并沿 Y 轴拉伸', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
-        l: 100, array: '0,0;50,0;50,50;0,50', normal: '0,1,0',
+        l: 100, array: '0,0,0;50,0,0;50,0,50;0,0,50', normal: '0,1,0',
       }, TEST_MOD_PATH);
-      expect(g).toBeNull();
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      g!.computeBoundingBox();
+      expect(g!.boundingBox!.min.toArray()).toEqual([0, 0, 0]);
+      expect(g!.boundingBox!.max.toArray()).toEqual([50, 100, 50]);
     });
 
-    it('StretchedBody.Normal 304.8（MVP 暂停）', () => {
+    it('StretchedBody.Normal 会归一化，304.8 不会放大拉伸长度', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
         l: 100, array: '0,0;10,0;10,10;0,10', normal: '0,0,304.8',
       }, TEST_MOD_PATH);
-      expect(g).toBeNull();
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      g!.computeBoundingBox();
+      expect(g!.boundingBox!.max.z).toBeCloseTo(100);
     });
 
-    it('StretchedBody.Array 3D 点（MVP 暂停）', () => {
+    it('StretchedBody.Array 支持真实样例的三维点格式', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
         l: 50, array: '0,0,0;20,0,0;20,10,0;0,10,0', normal: '0,0,1',
       }, TEST_MOD_PATH);
-      expect(g).toBeNull();
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
+      g!.computeBoundingBox();
+      expect(g!.boundingBox!.max.toArray()).toEqual([20, 10, 50]);
+    });
+
+    it('StretchedBody 无有效法向或不足三个点时跳过', () => {
+      expect(primitiveToGeometry({
+        type: 'StretchedBody', l: 50, array: '0,0;10,0', normal: '0,0,1',
+      }, `${TEST_MOD_PATH}:few-points`)).toBeNull();
+      expect(primitiveToGeometry({
+        type: 'StretchedBody', l: 50, array: '0,0;10,0;0,10', normal: '0,0,0',
+      }, `${TEST_MOD_PATH}:zero-normal`)).toBeNull();
     });
   });
 

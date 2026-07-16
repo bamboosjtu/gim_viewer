@@ -27,7 +27,7 @@ import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 // re-export 共享 Material / Geometry 释放函数（项目切换时由 projectCleanupService 调用）
 export { disposeSharedXmlModMaterials, disposeSharedXmlModGeometries } from './xmlModGeometry.js';
 
-const RENDERABLE_MOD_PRIMITIVE_RE = /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket)\b/;
+const RENDERABLE_MOD_PRIMITIVE_RE = /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket|StretchedBody)\b/;
 const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
 
 /**

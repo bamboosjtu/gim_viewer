@@ -3,7 +3,8 @@
  *
  * 14 类 primitive 转换策略：
  * - 基础体（SAFE_PRIMITIVES）：精确几何，经样本验证渲染正确
- * - 复杂体（StretchedBody / PorcelainBushing / TerminalBlock / ChannelSteel / Table）：
+ * - StretchedBody：按任意平面截面 + 法向拉伸构造精确棱柱
+ * - 其余复杂体（PorcelainBushing / TerminalBlock / ChannelSteel / Table）：
  *   MVP 阶段暂停渲染，避免错误几何污染场景
  * - 弱 schema 3 类：暂不渲染，避免占位盒污染场景
  *
@@ -109,7 +110,8 @@ export function disposeSharedXmlModGeometries(): void {
  *
  * 14 类 primitive：
  * - 6 类基础体：Cylinder/Cuboid/Sphere/TruncatedCone/Ring/CircularGasket — 精确几何
- * - 5 类暂停：StretchedBody/PorcelainBushing/TerminalBlock/ChannelSteel/Table — MVP 跳过
+ * - StretchedBody：任意平面多边形沿 Normal 拉伸 L
+ * - 4 类暂停：PorcelainBushing/TerminalBlock/ChannelSteel/Table — MVP 跳过
  * - 3 类弱 schema：RectangularFixedPlate/OffsetRectangularTable/RectangularRing — 暂停渲染
  */
 function primitiveToGeometryUncached(p: XmlModPrimitive): THREE.BufferGeometry | null {
@@ -127,6 +129,7 @@ function primitiveToGeometryUncached(p: XmlModPrimitive): THREE.BufferGeometry |
     case 'CircularGasket':
       return new THREE.TorusGeometry(sanitizeNum(p.or), Math.max(0, (sanitizeNum(p.or) - sanitizeNum(p.ir)) / 2), TORUS_RADIAL_SEGMENTS, TORUS_TUBULAR_SEGMENTS, sanitizeNum(p.rad));
     case 'StretchedBody':
+      return createStretchedBodyGeometry(p.array, p.normal, p.l);
     case 'PorcelainBushing':
     case 'TerminalBlock':
     case 'ChannelSteel':
@@ -177,10 +180,116 @@ function primitiveSignature(p: XmlModPrimitive): string {
       return `r=${sanitizeNum(p.r)},dr=${sanitizeNum(p.dr)},rad=${sanitizeNum(p.rad)}`;
     case 'CircularGasket':
       return `or=${sanitizeNum(p.or)},ir=${sanitizeNum(p.ir)},rad=${sanitizeNum(p.rad)},h=${sanitizeNum(p.h)}`;
+    case 'StretchedBody':
+      return `l=${sanitizeNum(p.l)},array=${p.array},normal=${p.normal}`;
     // 暂停渲染的 primitive 不会进入缓存（primitiveToGeometryUncached 返回 null）
     default:
       return JSON.stringify(p);
   }
+}
+
+/**
+ * 将 StretchedBody.Array 解析为三维截面点。
+ *
+ * 真实样例使用 `x,y,z;...;`，早期文档示例也出现过 `x,y;...;`；
+ * 二维点按 z=0 兼容。连续重复点和闭合尾点会被移除，避免 Earcut 退化。
+ */
+function parseStretchedBodyPoints(raw: string): THREE.Vector3[] {
+  const parsed = raw
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => part.split(',').map((value) => Number(value.trim())))
+    .filter((values) => (values.length === 2 || values.length === 3) && values.every(Number.isFinite))
+    .map((values) => new THREE.Vector3(values[0], values[1], values[2] ?? 0));
+
+  const points: THREE.Vector3[] = [];
+  for (const point of parsed) {
+    if (points.length === 0 || !point.equals(points[points.length - 1])) points.push(point);
+  }
+  if (points.length > 2 && points[0].equals(points[points.length - 1])) points.pop();
+  return points;
+}
+
+function parseStretchedBodyNormal(raw: string): THREE.Vector3 | null {
+  const values = raw.split(',').map((value) => Number(value.trim()));
+  if (values.length !== 3 || values.some((value) => !Number.isFinite(value))) return null;
+  const normal = new THREE.Vector3(values[0], values[1], values[2]);
+  return normal.lengthSq() > Number.EPSILON ? normal.normalize() : null;
+}
+
+/**
+ * 构造任意平面截面的拉伸体。
+ *
+ * Array 中的点已经位于 MOD 局部三维坐标，不能先压成 XY 再靠旋转猜回位置。
+ * 这里仅把点投影到与 Normal 正交的二维基底以完成凹多边形三角剖分，最终顶点仍
+ * 直接使用原始三维点，并沿归一化 Normal 拉伸 L。
+ */
+function createStretchedBodyGeometry(array: string, normalRaw: string, lengthRaw: number): THREE.BufferGeometry | null {
+  let points = parseStretchedBodyPoints(array);
+  const normal = parseStretchedBodyNormal(normalRaw);
+  const length = Math.abs(sanitizeNum(lengthRaw));
+  if (points.length < 3 || !normal || length <= Number.EPSILON) return null;
+
+  const reference = Math.abs(normal.z) < 0.9
+    ? new THREE.Vector3(0, 0, 1)
+    : new THREE.Vector3(0, 1, 0);
+  const axisU = new THREE.Vector3().crossVectors(reference, normal).normalize();
+  const axisV = new THREE.Vector3().crossVectors(normal, axisU).normalize();
+
+  let contour = points.map((point) => new THREE.Vector2(point.dot(axisU), point.dot(axisV)));
+  // 统一为从 +Normal 方向观察时逆时针，便于侧面法向稳定朝外。
+  if (THREE.ShapeUtils.isClockWise(contour)) {
+    points = points.slice().reverse();
+    contour = contour.slice().reverse();
+  }
+
+  const capTriangles = THREE.ShapeUtils.triangulateShape(contour, []);
+  if (capTriangles.length === 0) return null;
+
+  const extrusion = normal.clone().multiplyScalar(length);
+  const positions: number[] = [];
+  const pushTriangle = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, expectedNormal: THREE.Vector3) => {
+    const actual = new THREE.Vector3().crossVectors(
+      new THREE.Vector3().subVectors(b, a),
+      new THREE.Vector3().subVectors(c, a),
+    );
+    if (actual.dot(expectedNormal) < 0) [b, c] = [c, b];
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  };
+
+  for (const [ia, ib, ic] of capTriangles) {
+    const a = points[ia];
+    const b = points[ib];
+    const c = points[ic];
+    pushTriangle(a, b, c, normal.clone().negate());
+    pushTriangle(a.clone().add(extrusion), b.clone().add(extrusion), c.clone().add(extrusion), normal);
+  }
+
+  for (let i = 0; i < points.length; i++) {
+    const next = (i + 1) % points.length;
+    const a = points[i];
+    const b = points[next];
+    const topA = a.clone().add(extrusion);
+    const topB = b.clone().add(extrusion);
+    const outward = new THREE.Vector3().crossVectors(
+      new THREE.Vector3().subVectors(b, a),
+      normal,
+    ).normalize();
+    pushTriangle(a, b, topB, outward);
+    pushTriangle(a, topB, topA, outward);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  // 与 Three.js 内置几何保持 indexed + position/normal/uv 属性布局一致，
+  // 否则同材质的 StretchedBody 与 Cylinder/Cuboid 在 mergeGeometries 时会整体回退。
+  geometry.setIndex(Array.from({ length: positions.length / 3 }, (_, index) => index));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Array((positions.length / 3) * 2).fill(0), 2));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 /**
