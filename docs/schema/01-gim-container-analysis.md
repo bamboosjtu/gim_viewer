@@ -2,6 +2,8 @@
 
 目标：确认 .gim 是什么容器外壳。
 
+> **2026-07-17 复核**：三个原始 `.gim` 的头部标识与 7z signature 已重新读取，仍分别为 `GIMPKGT/GIMPKGT/GIMPKGS`，payload offset 均为 784；本页容器结论保持不变。
+
 ## 1. 样本范围
 
 | 样本 ID         | 类型 | GIM 魔数 | 压缩格式 | 压缩数据偏移 |

@@ -1,6 +1,6 @@
 # 方案 C：MOD → glTF 离线预序列化缓存
 
-> **状态**：已实施（2026-07-11，C-1 ~ C-6 全部完成）
+> **状态（2026-07-17 复核）**：C-1 ~ C-6 的 MOD/STL 文件粒度 v1 是历史实现，随后已由 §10 的 DEV 粒度 v2 取代。当前代码使用 `glbcache/{projectId}/DEV/` 与 `GEOMETRY_CACHE_VERSION=geometry-cache-v2-stretched-body`；编译层实现已完成，首次生成、二次命中、位置一致性和版本失效仍待运行时验收。§2-§9 保留为 v1 设计/实施记录，不代表当前缓存粒度。
 >
 > 关联文档：
 > - [17-batch-load-schema.md](./17-batch-load-schema.md)：批量加载方案对比（方案 A/B/C）
@@ -28,7 +28,7 @@
 
 ### 1.3 核心洞察
 
-项目已有完整的 MOD XML → BufferGeometry 转换链（`xmlModGeometry.ts` 的 14 类 primitive 转换），**无需任何外部工具**，只需用 Three.js 内置的 `GLTFExporter` 把 BufferGeometry 序列化为 .glb 文件缓存。
+项目已有 MOD XML → BufferGeometry 转换链（`xmlModGeometry.ts` 当前渲染 7 类 primitive，另 7 类因语义未收口而跳过），**无需任何外部工具**，可用 Three.js 内置的 `GLTFExporter` 把已支持几何序列化为 .glb 文件缓存。
 
 ## 2. 方案设计
 
@@ -57,7 +57,7 @@
   4. 跳过全部 XML 解析 + BufferGeometry 构建
 ```
 
-### 2.2 缓存粒度
+### 2.2 v1 初始缓存粒度（历史设计）
 
 **按 MOD 文件粒度缓存**（非按设备粒度）：
 
@@ -81,11 +81,11 @@
 
 **路径遍历防护**：modPath 已在 `gimIndexer.ts` 中验证为 `MOD/{uuid}.mod` 格式，无 `..` 组件。
 
-### 2.4 缓存版本化
+### 2.4 v1 缓存版本化（历史设计）
 
 ```text
 PARSER_VERSION          = 'gim-parser-v14'        // GIM 解析层（已有）
-GEOMETRY_CACHE_VERSION  = 'geometry-cache-v1'     // 新增，MOD→glb 序列化格式
+GEOMETRY_CACHE_VERSION  = 'geometry-cache-v1'     // v1 历史值；当前值见 §10
 ```
 
 失效规则：
@@ -223,7 +223,7 @@ const glbBytes = await readCachedGlb(projectId, modPath);
 const group = await loadGlbMod(modPath, glbBytes);
 ```
 
-### 3.6 C-5：GEOMETRY_CACHE_VERSION
+### 3.6 C-5：GEOMETRY_CACHE_VERSION（v1 历史实现）
 
 **文件**：`src-tauri/src/db.rs`
 
@@ -378,6 +378,8 @@ C-1 ~ C-6 全部完成，TypeScript 编译 + Rust cargo check 通过。
 - [ ] `GEOMETRY_CACHE_VERSION` 变更时 glb 缓存失效重建（`validate_gim_cache` 返回 invalid → 触发 `delete_project_cache` + 重序列化）
 
 ## 10. 设计变更：MOD 粒度 → DEV 粒度（2026-07-11 v2）
+
+> **当前实现**：本节取代 §2-§9 的 MOD/STL 文件粒度方案。2026-07-17 代码常量为 `geometry-cache-v2-stretched-body`，版本 marker 位于 `glbcache/{projectId}/_version.txt`。
 
 ### 10.1 问题
 

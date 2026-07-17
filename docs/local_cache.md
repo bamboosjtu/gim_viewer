@@ -293,7 +293,7 @@ CREATE TABLE fragment_cache (
 
 ### 2.7 PARSER_VERSION 失效机制
 
-- 常量定义：`src-tauri/src/db.rs` 中 `pub const PARSER_VERSION: &str = "gim-parser-v13"`
+- 常量定义：`src-tauri/src/db.rs` 中 `pub const PARSER_VERSION: &str = "gim-parser-v14"`
 - 写入时机：首次导入或重建索引时，`save_gim_index` / `save_line_project_cache` 事务内更新 `gim_project.parser_version`
 - 校验时机：`validate_gim_cache` 检查 `stored_parser_version == PARSER_VERSION`
 - 失效行为：版本不匹配 → 缓存无效 → 完整解压 → `save_gim_index` 先删后插全部表

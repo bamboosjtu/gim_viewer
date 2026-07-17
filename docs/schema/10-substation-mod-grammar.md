@@ -1,6 +1,8 @@
 # 变电 XML Primitive 字段值范围分析
 
 > 本文档基于 `demo-substation` 样本，对变电工程 MOD 文件中 XML Entity 下的 14 种 primitive 类型逐一梳理字段覆盖率与数值范围，回答 parser 草案应当采用强类型还是弱 schema 的关键问题。
+
+> **2026-07-17 复核**：重新扫描得到 `4179 MOD / 4135 XML_WITH_ENTITIES / 44 XML_EMPTY_DEVICE / 46250 Entity`，14 类 primitive 数量与本文一致。样本统计仍有效；§8 的实现状态已按当前代码更新。
 >
 > 本报告不进入几何渲染实现，也不解释各 primitive 的几何拓扑含义。所有分析脚本集中放在文末附录 A。
 
@@ -8,7 +10,7 @@
 
 ### 1.1 背景
 
-[08-mod-static-survey.md](08-mod-static-survey.md) 已经确认变电 MOD 内部存在 XML 格式族，并在 Entity 节点下挂载 primitive 子节点。当前浏览器只渲染 IFC，未渲染 MOD/STL，导致部分变电设备缺失。要在 parser 层补齐 MOD 渲染，必须先确定每种 primitive 的字段集合与字段类型。
+[08-mod-static-survey.md](08-mod-static-survey.md) 已经确认变电 MOD 内部存在 XML 格式族，并在 Entity 节点下挂载 primitive 子节点。本文研究启动时浏览器只渲染 IFC、未渲染 MOD/STL，因此先梳理每种 primitive 的字段集合与字段类型。该背景是历史基线；当前实现状态见 §8。
 
 ### 1.2 目标
 
@@ -539,14 +541,16 @@ type Primitive = Cylinder | Cuboid | StretchedBody | PorcelainBushing
 
 ## 7. 浏览器实现影响
 
-### 7.1 当前缺口
+### 7.1 研究启动时缺口（历史基线）
 
-`demo-substation` 浏览器只渲染 IFC，未渲染 MOD/STL，导致：
+本文研究启动时，`demo-substation` 浏览器只渲染 IFC，未渲染 MOD/STL，导致：
 - 4179 个 MOD 文件未渲染
 - 46250 个 XML Entity 未渲染
 - 涉及 14 种 primitive 全部缺失
 
-### 7.2 补齐路径建议
+2026-07-17 当前状态：XML parser 已覆盖 14 类 primitive；渲染器支持 6 类基础体与 StretchedBody，另外 7 类因几何语义未收口而主动跳过。STL 加载及 DEV 粒度 GLB 缓存也已有实现。
+
+### 7.2 原补齐路径建议（历史设计）
 
 ```text
 Step 1: 在 viewer 层新增 modLoader（参考 ifcLoader 设计）
@@ -608,33 +612,33 @@ Step 5: 应用 Color 节点（R/G/B/255, A/100）
 
 ## 实现对照
 
-> P0 已落地实现，对应 [docs/plans/substation-geometry-impl.md](../plans/substation-geometry-impl.md) Phase 3 + Phase 4。
+> P0 已落地实现；早期 `docs/plans/substation-geometry-impl.md` 计划文件已不在仓库中，当前实现以本节列出的源码与测试为准。
 
 ### 解析器
 
 - **实现位置**：`src/gim/geometry/xmlModParser.ts`
 - **核心函数**：`export function parseXmlMod(text: string, modPath: string): XmlModDocument`
-- **测试**：`src/gim/geometry/__tests__/xmlModParser.test.ts`（43 测试通过）
-- **渲染器**：`src/viewer/xmlModGeometry.ts`（14 类 primitive → Three.js BufferGeometry，34 测试通过）
+- **测试**：`src/gim/geometry/__tests__/xmlModParser.test.ts`（2026-07-17：43 测试通过）
+- **渲染器**：`src/viewer/xmlModGeometry.ts`（7 类 primitive → Three.js BufferGeometry，另 7 类主动跳过；2026-07-17：40 测试通过）
 
 ### 14 类 primitive 实现状态
 
 | Primitive | 解析 | 渲染 | Three.js 几何 | 备注 |
 |---|---|---|---|---|
-| Cylinder | ✅ 强类型 `{ r, h }` | ✅ | `CylinderGeometry(r, r, h, 32)` | — |
+| Cylinder | ✅ 强类型 `{ r, h }` | ✅ | `CylinderGeometry(r, r, h, 16)` | — |
 | Cuboid | ✅ 强类型 `{ l, w, h }` | ✅ | `BoxGeometry(l, w, h)` | 参数顺序：width=l, height=w, depth=h |
-| StretchedBody | ✅ 强类型 `{ l, array, normal }` | ✅ | `ExtrudeGeometry` + 四元数旋转 | Array/Normal 保留 string，渲染层解析；Normal 需归一化 |
-| PorcelainBushing | ✅ 强类型 `{ r, r1, r2, n, h }` | ✅ 简化 | `CylinderGeometry(r1, r, h, 32)` | P0 简化为圆柱，伞裙结构待 P1 |
-| TruncatedCone | ✅ 强类型 `{ br, tr, h }` | ✅ | `CylinderGeometry(tr, br, h, 32)` | — |
-| Ring | ✅ 强类型 `{ r, dr, rad }` | ✅ | `TorusGeometry(r, dr/2, 16, 32, rad)` | — |
-| TerminalBlock | ✅ 强类型 12 字段 | ✅ 简化 | `BoxGeometry(l, w, h)` | P0 简化为长方体，端子细节待 P1 |
-| Sphere | ✅ 强类型 `{ r }` | ✅ | `SphereGeometry(r, 32, 16)` | — |
-| ChannelSteel | ✅ 强类型 `{ l, model, d?, h?, b?, t? }` | ✅ 简化 | `BoxGeometry(l, h, b)` | P0 简化为长方体，型号表查表待 P1 |
-| Table | ✅ 强类型 `{ h, ll1, ll2, tl1, tl2 }` | ✅ 简化 | `BoxGeometry(ll1, h, ll2)` | P0 简化为台面，4 腿组合待 P1 |
-| CircularGasket | ✅ 强类型 `{ h, rad, or, ir }` | ✅ | `TorusGeometry(or, (or-ir)/2, 16, 32, rad)` | — |
-| RectangularFixedPlate | ✅ 弱 schema `{ type, raw }` | ⚠️ 占位 | `BoxGeometry(1, 1, 1)` + console.warn | 待字段补充后强类型化 |
-| OffsetRectangularTable | ✅ 弱 schema `{ type, raw }` | ⚠️ 占位 | `BoxGeometry(1, 1, 1)` + console.warn | 待字段补充后强类型化 |
-| RectangularRing | ✅ 弱 schema `{ type, raw }` | ⚠️ 占位 | `BoxGeometry(1, 1, 1)` + console.warn | 待字段补充后强类型化 |
+| StretchedBody | ✅ 强类型 `{ l, array, normal }` | ✅ | 自定义任意平面三角剖分 + 沿 Normal 拉伸 | 保留原始三维截面点，Normal 归一化后拉伸 |
+| PorcelainBushing | ✅ 强类型 `{ r, r1, r2, n, h }` | ⏸ 跳过 | `null` | 伞裙拓扑未确认，避免错误圆柱污染场景 |
+| TruncatedCone | ✅ 强类型 `{ br, tr, h }` | ✅ | `CylinderGeometry(tr, br, h, 16)` | — |
+| Ring | ✅ 强类型 `{ r, dr, rad }` | ✅ | `TorusGeometry(r, dr/2, 8, 16, rad)` | — |
+| TerminalBlock | ✅ 强类型 12 字段 | ⏸ 跳过 | `null` | 组合拓扑未确认 |
+| Sphere | ✅ 强类型 `{ r }` | ✅ | `SphereGeometry(r, 16, 8)` | — |
+| ChannelSteel | ✅ 强类型 `{ l, model, d?, h?, b?, t? }` | ⏸ 跳过 | `null` | 型号与截面解释未收口 |
+| Table | ✅ 强类型 `{ h, ll1, ll2, tl1, tl2 }` | ⏸ 跳过 | `null` | 组合拓扑未确认 |
+| CircularGasket | ✅ 强类型 `{ h, rad, or, ir }` | ✅ | `TorusGeometry(or, (or-ir)/2, 8, 16, rad)` | — |
+| RectangularFixedPlate | ✅ 弱 schema `{ type, raw }` | ⏸ 跳过 | `null` + console.warn | 待字段补充后强类型化 |
+| OffsetRectangularTable | ✅ 弱 schema `{ type, raw }` | ⏸ 跳过 | `null` + console.warn | 待字段补充后强类型化 |
+| RectangularRing | ✅ 弱 schema `{ type, raw }` | ⏸ 跳过 | `null` + console.warn | 待字段补充后强类型化 |
 
 ### 关键约束实现
 
@@ -643,8 +647,8 @@ Step 5: 应用 Color 节点（R/G/B/255, A/100）
 | XML root 为 `<Device>` | `parseXmlMod` 校验 `documentElement.tagName === 'Device'`，否则抛错 |
 | Entity 必含 TransformMatrix | 缺失时回退单位矩阵（与 PHM parser 一致） |
 | Entity 可含 Color | `parseColor` 返回 `XmlModColor \| undefined` |
-| StretchedBody.Array/Normal 保留 string | 解析层保留，渲染层 `parseArrayPoints` + `parseNormalUnit` 解析 |
-| StretchedBody.Normal 长度 304.8 | 渲染层 `parseNormalUnit` 调用 `v.normalize()` 还原单位向量 |
+| StretchedBody.Array/Normal 保留 string | 解析层保留，渲染层 `parseStretchedBodyPoints` + `parseStretchedBodyNormal` 解析 |
+| StretchedBody.Normal 长度 304.8 | 渲染层 `parseStretchedBodyNormal` 调用 `normalize()` 还原单位向量 |
 | Color R/G/B 0-255, A 0-100 | `parseColor` 校验范围，超出返回 `undefined` |
 | Color 应用 sRGB hex | 渲染层用 `(r<<16)\|(g<<8)\|b` 拼为 hex，由 THREE.Color 按 sRGB 解释 |
 

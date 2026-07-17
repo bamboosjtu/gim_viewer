@@ -4,7 +4,7 @@
  * 从 WireSegment + 节点 rawProps 提取导线的结构化语义信息，供：
  * - 导线属性面板展示（lineProjectView.showWireProperties）
  * - 导线样式分层（lineMapView.drawWires：jumper 虚线 / split 加粗）
- * - 后续悬链线预研（M4-B3，本轮不实现）
+ * - 悬链线候选字段审计与当前实验性曲线展示（工程语义仍待确认）
  *
  * 边界（强制）：
  * - 只读 wire 和 rawProps，不读 DB、不读 GIM 文件

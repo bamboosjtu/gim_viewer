@@ -2,13 +2,13 @@
 
 > 本文档基于 Round 1-8 的全部静态分析结论，设计一个不绑定 UI、不绑定 Three.js、不绑定 OBC 的中间表示（Intermediate Representation，IR），作为后续 `gim_viewer` 完整展示能力（变电 IFC + 变电 MOD + 变电 STL + 线路 4 类 MOD + 线路 STL）的统一对接接口。
 >
-> 本文档只沉淀 schema 与解析管道边界，不跟踪实现状态。实现状态见 [../gim_substation.md](../gim_substation.md) §0 与 [../gim_line.md](../gim_line.md) §0。
+> 本文档只沉淀 schema 与解析管道边界。§1 与 §6 的“现状/当前实现”是本文编写时的历史基线，不代表 2026-07-17 的代码现状；当前状态见 [21-schema-conclusion-review-0717.md](21-schema-conclusion-review-0717.md)。目前 Geometry IR、变电 XML parser、线路文本 parser、MOD/STL 节点加载和 DEV 粒度 GLB 缓存均已有实现，但线路 parser 尚未接入运行时渲染，变电仍有 7 类 primitive 主动跳过。
 
 ## 1. 目标与背景
 
-### 1.1 现状缺陷
+### 1.1 设计时现状缺陷（历史基线）
 
-`gim_viewer` 当前展示能力存在以下明显缺陷：
+设计本文时，`gim_viewer` 展示能力存在以下明显缺陷；下表保留作为 IR 设计动机，不用作当前缺陷清单：
 
 | 维度 | 现状 | 缺陷 |
 | ---- | ---- | ---- |
@@ -481,9 +481,11 @@ UI 层（属性面板 / 树节点）：
 
 ---
 
-## 6. 现有 gim_viewer 缺陷与 IR 补齐路径
+## 6. 设计时 gim_viewer 缺陷与 IR 补齐路径（历史基线）
 
-### 6.1 缺陷对照表
+### 6.1 缺陷对照表（历史基线）
+
+> 本表记录 IR 方案形成时的缺口。部分项目已落地，不能据此判断当前实现；2026-07-17 复核结果见 [21-schema-conclusion-review-0717.md](21-schema-conclusion-review-0717.md)。
 
 | # | 缺陷 | 当前实现 | IR 补齐路径 |
 | - | ---- | -------- | ----------- |

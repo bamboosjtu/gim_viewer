@@ -1,5 +1,7 @@
 # GIM 样本清单
 
+> **最近复核：2026-07-17。** 三个 `.gim` 文件的大小与 SHA-256 均与下表一致；本轮复核使用的仍是同一批样本。详细复核范围见 [21-schema-conclusion-review-0717.md](21-schema-conclusion-review-0717.md)。
+
 ## 当前样本
 
 | 样本 ID | 类型 | 大小 | hash |

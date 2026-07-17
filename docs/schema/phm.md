@@ -231,7 +231,7 @@ COLOR2=138,149,151,100
 
 ## 实现对照
 
-> P0 已落地实现，对应 [docs/plans/substation-geometry-impl.md](../plans/substation-geometry-impl.md) Phase 2。
+> P0 已落地实现；早期 `docs/plans/substation-geometry-impl.md` 计划文件已不在仓库中，当前实现以本节列出的源码与测试为准。
 
 ### 解析器
 

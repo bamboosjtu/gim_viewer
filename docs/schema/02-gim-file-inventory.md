@@ -2,6 +2,8 @@
 
 目标：确认解压后有哪些文件族。
 
+> **2026-07-17 复核**：直接扫描 `demo/demo-line`、`demo/demo-line1`、`demo/demo-substation`，扩展名数量与本页表格一致。
+
 ## 1. 线路工程
 
 ### 扩展名统计
@@ -95,7 +97,7 @@
 - `text-like` 表示文件前部样本可按 UTF-8 文本读取，并命中 key-value、XML 或类文本特征。
 - `unknown-text` 不等于二进制。当前抽样显示，部分 `unknown-text` 文件仍然是 plain text，只是没有命中粗判脚本中的 `<xml`、`<tag`、`=`、`;` 等启发式规，后续实证大部分为键值对。
 - `binary-like` 当前主要出现在 `.stl`，可暂按三角网格二进制资源处理。
-- 线路与变电的 `.mod` 均不应直接视为黑盒二进制文件；当前阶段可进入静态文本分析，但不进入几何解析。
+- 线路与变电的 `.mod` 均不应直接视为黑盒二进制文件。当前代码已实现变电 XML MOD parser/部分 primitive 渲染，以及线路四类文本 MOD parser；线路 parser 尚未接入运行时渲染，变电复杂 primitive 仍有 7 类主动跳过。具体状态见 [21-schema-conclusion-review-0717.md](21-schema-conclusion-review-0717.md)。
 
 ## 脚本
 

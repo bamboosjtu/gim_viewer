@@ -698,7 +698,7 @@ export interface LineDevPropertyPayload {
  *
  * 生产线路首次导入路径应调用此命令，不得再单独调用 saveLineGraph。
  * 事务内：删除 6 张表旧数据 → 插入 graph + fam + dev → 更新
- * parser_version = PARSER_VERSION（当前 gim-parser-v13）, project_type = transmission_line。
+ * parser_version = PARSER_VERSION（当前 gim-parser-v14）, project_type = transmission_line。
  */
 export async function saveLineProjectCache(
   projectId: number,

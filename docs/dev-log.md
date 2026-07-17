@@ -19,15 +19,15 @@
 | 限制 | 说明 |
 |---|---|
 | 非真实模型 | 圆形/菱形符号，非真实塔型 3D 模型 |
-| 无 MOD 解析 | 未解析 .mod 几何文件 |
+| MOD 运行时未接入 | 四类线路 MOD parser 已实现，但塔位/杆件运行时尚未消费解析结果 |
 | 塔型分类有限 | 仅区分直线塔（圆形）和耐张塔（菱形） |
 
 ### 导线
 
 | 限制 | 说明 |
 |---|---|
-| 折线渲染 | 两塔之间直线连接，非真实弧垂 |
-| 无悬链线 | 未使用 KVALUE/SPLIT 参数计算导线弧垂曲线（决策见 §8.4） |
+| 实验曲线非工程弧垂 | 当前默认绘制 2D 示意曲线，但未使用 MATRIX0 挂点/BLHA 高程，不能视为真实弧垂 |
+| 悬链线交互未闭环 | hover/click 仍按端点直线命中，与可见曲线不一致（决策见 §8.4） |
 | 档距为近似值 | M4-B2 档距由经纬度 Haversine 反算，未考虑高程差，与真实档距存在偏差 |
 | KVALUE 公式未确认 | KVALUE 已确认为参数字段（见 [schema/15-wire-catenary-evidence.md](schema/15-wire-catenary-evidence.md) §2），但具体物理含义与公式仍待决策（见 §8.1） |
 
@@ -188,7 +188,7 @@ debugError(DEBUG_FRAGMENTS, '[Fragments] full stack trace', err);
   "dbPath": "/path/to/gim_viewer.db",
   "diagnostic": {
     "project_type": "transmission_line",
-    "parser_version": "gim-parser-v13",
+    "parser_version": "gim-parser-v14",
     "line_cbm_node_count": 1234,
     "ifc_models_count": 0
   },
@@ -309,9 +309,10 @@ debugError(DEBUG_FRAGMENTS, '[Fragments] full stack trace', err);
 - **影响**：无法按 CONDUCTOR / GROUNDWIRE / OPGW 分组分析 KVALUE / MATRIX0 分层差异
 - **核验路径**：检查 DEV/FAM 文件中的导线类型字段，或对照 demo-line1 样本
 
-### 8.4 悬链线实现决策（后置到 M5）
+### 8.4 悬链线决策（M4 历史与当前状态）
 
-- **决策**：M4 不实现悬链线，地图保持直线段显示
+- **M4 历史决策**：当时不实现悬链线，地图保持直线段显示
+- **2026-07-17 当前实现**：代码已默认启用实验性 2D 曲线，但它未使用 MATRIX0 挂点偏移/BLHA 高程差，KVALUE 公式未确认，hit-test 仍按直线；不能视为工程语义悬链线
 - **数据可行性已确认**（见 [schema/15-wire-catenary-evidence.md](schema/15-wire-catenary-evidence.md) §6.1）：
   - BLHA=塔位中心 ✅
   - MATRIX0=挂点偏移 ✅
@@ -319,8 +320,9 @@ debugError(DEBUG_FRAGMENTS, '[Fragments] full stack trace', err);
   - interPoint 档距可识别 ✅
   - KVALUE 为非零小参数（符合弧垂系数特征）✅
 - **仍待决策**：
-  - 是否实现悬链线（业务需求驱动）
-  - 使用何种公式（依赖 §8.1 KVALUE 公式确认）
+  - 实验曲线是关闭、保留为明确标注的示意模式，还是升级为工程语义悬链线
+  - 使用何种公式（依赖 §8.1 KVALUE 物理含义、单位和公式确认）
+  - MATRIX0 y 分量和 WIRETYPE 来源确认后，是否纳入挂点/分层计算
 - **后续路线**（详见 [schema/14-line-catenary-study.md](schema/14-line-catenary-study.md) §6.5 后续可能路线）：
   - M5-A：真实跨点档距识别（基于 inter-point）— 前置已解除
   - M5-B：MATRIX0 挂点坐标确认 — 部分已确认（z/x/单位已确认，y/坐标系待核验）

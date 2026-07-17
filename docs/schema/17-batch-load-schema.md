@@ -9,9 +9,11 @@
 > - [10-substation-mod-grammar.md](./10-substation-mod-grammar.md)：MOD XML 语法
 > - [gim_substation.md](../gim_substation.md)：GIM 工程结构
 
+> **2026-07-17 当前状态**：本文同时包含设计基线与实施历史。方案 B 静态合并、DEV 粒度 GLB 缓存及 marker 版本失效机制已经实现；当前 `PARSER_VERSION=gim-parser-v14`、`GEOMETRY_CACHE_VERSION=geometry-cache-v2-stretched-body`。Worker 化解析、SQLite 几何缓存表和 `.gimc` 预编译容器仍未实现。§1 的“现状”与 §15 早期“待实施”表应按本说明及 [18c](18c-experiment-mod-to-gltf-cache.md) 的 v2 记录理解。
+
 ## 1. 问题背景
 
-### 1.1 现状对比
+### 1.1 设计时现状对比（历史基线）
 
 | 维度 | IFC 加载 | MOD/STL 加载 |
 | ---- | -------- | ------------ |
@@ -29,7 +31,7 @@
 
 - **唯一 MOD/STL 文件**：5938 个
 - **物理几何引用**：5938 个（4135 MOD + 1803 STL；PARTINDEX 不作为第二个实例）
-- **平均每 MOD 文件 primitive 数**：~5 个 Entity（来自 09 号文档 §5.1：46250 Entity / 4135 MOD ≈ 11.2）
+- **平均每 MOD 文件 primitive 数**：约 11.2 个 Entity（来自 09 号文档 §5.1：46250 Entity / 4135 个非空 MOD）
 - **方案 A 基线预估 Mesh 数**：5938 引用 × 11 Entity ≈ 65k Mesh
 
 按 [modAutoLoadService.ts:39-46](../../src/services/modAutoLoadService.ts#L39-L46) 的常量与 [modAutoLoadService.ts:670-709](../../src/services/modAutoLoadService.ts#L670-L709) 的批循环：
@@ -636,7 +638,7 @@ for (let j = 0; j < batch.length; j++) {
 ```text
 PARSER_VERSION          = 'gim-parser-v14'        // 现有，GIM 解析层（v1→v14 详见下方演进历史）
 FRAGMENTS_CACHE_VERSION = 'fragments-cache-v4'   // 现有，IFC .frag
-GEOMETRY_CACHE_VERSION  = 'geometry-cache-v1'    // 待实施，MOD/STL 序列化几何（方案 C）
+GEOMETRY_CACHE_VERSION  = 'geometry-cache-v2-stretched-body' // 已实施，DEV 粒度 MOD/STL 序列化几何（方案 C v2）
 
 失效规则：
   - GIM 重解压（PARSER_VERSION 变）→ GEOMETRY_CACHE_VERSION 同步失效
@@ -1257,15 +1259,15 @@ JS heap     ≤ 200MB    （WebView2 子进程上限）
 | 阶段 5b.1 | Geometry 共享 A.1（跨 modPath） | 已实施 | -80%+ GPU 内存，解决崩溃 | ✓ 已完成 | — |
 | **阶段 5c** | **mergeGeometries 静态合并（方案 B）** | **中** | **draw call 77k → 几十** | **✓ 已完成** | — |
 | **阶段 5d** | **顶点烘焙修复（placement 含缩放分量）** | **低** | **GIS 设备位置正确** | **✓ 已完成** | — |
-| 阶段 5e | GLTFExporter 离线预序列化（方案 C） | 中 | 二次打开秒级 | 待实施 | 最高 |
+| 阶段 5e | GLTFExporter 离线预序列化（方案 C，最终为 DEV 粒度） | 中 | 二次打开跳过逐 MOD 解析 | ✓ 已完成；运行时性能验收待完成 | — |
 | 阶段 2 | 几何缓存表（SQLite） | 中 | 二次打开 < 1 秒 | 待实施 | 中 |
 | 阶段 3 | Worker 化解析 | 中 | 主线程不阻塞 | 待实施 | 中 |
 | 阶段 4 | InstancedMesh 装配 | 大 | draw call → 6 | 待实施 | 中（方案 C 一部分） |
 | 阶段 6 | 预编译工具原型 | 大 | 首次打开 < 5 秒 | 待实施 | 低（长期） |
 | 阶段 7 | Viewer 加载 .gimc | 中 | 跳过 XML 解析 | 待实施 | 低（长期） |
 
-**当前优先级**：
-1. **最高**：阶段 5e（方案 C GLTFExporter 离线预序列化）— 方案 B 已解决 draw call 与崩溃，但加载仍需分钟级；方案 C 把 MOD 解析+几何构造离线缓存为 .glb，二次打开跳过全部解析
+**2026-07-17 剩余优先级**：
+1. 完成 DEV 粒度 GLB 缓存的首次生成、二次命中、位置一致性和版本失效运行时验收
 2. 中：阶段 2（SQLite 几何缓存）、阶段 3（Worker 化）
 3. 低：阶段 4（InstancedMesh）、阶段 6/7（预编译）
 

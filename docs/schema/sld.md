@@ -4,6 +4,8 @@
 
 SLD（Single Line Diagram）文件是 GIM 工程中的单线接线图文件，基于标准 SVG 1.1 格式并扩展了自定义属性。SLD 文件描述了变电站的电气主接线方案，通过自定义 CSS 样式类、`gridId` 属性和 `<symbol>` 定义，实现了电气元件的可视化表示以及与逻辑模型（STD）的关联。
 
+> **2026-07-17 实现状态**：`src/gim/sldParser.ts`、`src/ui/sldView.ts` 和 `stdSldService.ts` 已实现解析、视图展示、gridId 双向联动及缓存恢复，并有 parser/index/cache 测试。当前只有 `demo-substation` 提供 1 份 SLD，两个线路样本均为 0。注意：现有 SVG/CSS 清洗仍不足以安全处理不可信 SLD，这是评审报告中的独立 P0 问题，不能因“已实现解析”而视为已解决。
+
 ## 文件格式
 
 - **格式**：SVG 1.1

@@ -9,6 +9,8 @@
 
 研究结论只代表当前样本实证结果，不直接等同于完整 GIM 标准。新增样本后，应优先复跑编号文档中的脚本，再决定是否更新解析器。
 
+> **2026-07-17 复核**：三个登记样本的 SHA-256、容器头、目录清单、MOD 格式族和 STL 二进制统计已重新核对。当前实现状态与历史研究结论的分界见 [21-schema-conclusion-review-0717.md](21-schema-conclusion-review-0717.md)。
+
 ---
 
 ## 1. 研究主线
@@ -36,12 +38,15 @@
 | 08 | [08-mod-static-survey.md](08-mod-static-survey.md) | MOD 静态分型、线路/变电 MOD 格式边界、可解析性边界 | 待随新样本复核 |
 | 09 | [09-transform-chain-analysis.md](09-transform-chain-analysis.md) | PHM 与 MOD 变换链分析、矩阵存储约定、两级变换验证 | 待随新样本复核 |
 | 10 | [10-substation-mod-grammar.md](10-substation-mod-grammar.md) | 变电 XML primitive 字段范围、强类型 schema 判定、Color/StretchedBody 深度分析 | 待随新样本复核 |
-| 11 | [11-line-mod-grammar.md](11-line-mod-grammar.md) | 线路 MOD 4 类文本格式族 grammar、层级关系、parser 草案边界 | 待实施（MVP 范围内） |
+| 11 | [11-line-mod-grammar.md](11-line-mod-grammar.md) | 线路 MOD 4 类文本格式族 grammar、层级关系、parser 草案边界 | Parser 已实现并有单测；尚未接入运行时渲染 |
 | 12 | [12-stl-static-survey.md](12-stl-static-survey.md) | STL 格式检测、PHM 引用扫描、entityName 映射、STL 与 MOD 关系判定、§9 STL 设备类型分析（三样本）、§10 MOD 设备类型对比分析（三样本：变电 XML primitive vs 线路 4 类文本格式族） | 待随新样本复核 |
-| 13 | [13-geometry-ir-schema.md](13-geometry-ir-schema.md) | 统一 Geometry IR 草案、5 种 kind schema、解析管道分层、缺陷对照 | 设计文档（非样本分析，不跟踪实现状态） |
-| 14 | [14-line-catenary-study.md](14-line-catenary-study.md) | 线路悬链线参数研究方法论、审计流程、样本证据与决策路径（M4-B1/B2/B3/B3A/B3B/B3C 沉淀） | 研究文档（MVP 范围内，待研究补充） |
+| 13 | [13-geometry-ir-schema.md](13-geometry-ir-schema.md) | 统一 Geometry IR 草案、5 种 kind schema、解析管道分层、缺陷对照 | 设计文档；§1/§6 是历史实现基线 |
+| 14 | [14-line-catenary-study.md](14-line-catenary-study.md) | 线路悬链线参数研究方法论、审计流程、样本证据与决策路径（M4-B1/B2/B3/B3A/B3B/B3C 沉淀） | 样本研究有效；实验渲染已落地但与建议边界不一致 |
 | 15 | [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) | demo-line 全量静态分析证据（5460 WIRE / 327 TOWER），KVALUE / MATRIX0 / BLHA / 拓扑分类字段语义确认 | 样本证据文档（demo-line） |
+| 17 | [17-batch-load-schema.md](17-batch-load-schema.md) | MOD/STL 批量加载、共享几何、GLB 中间态缓存设计与演进 | 方案 B 与 DEV 粒度方案 C 已实现；Worker/SQLite 几何表未实现 |
+| 18c | [18c-experiment-mod-to-gltf-cache.md](18c-experiment-mod-to-gltf-cache.md) | MOD/STL → GLB 缓存实验及 MOD 粒度到 DEV 粒度的设计变更 | DEV 粒度 v2 已实现；运行时验收项仍待完成 |
 | 20 | [20-substation-partindex-alias-correction.md](20-substation-partindex-alias-correction.md) | demo-substation PARTINDEX 与 DEV SUBDEVICE 别名关系、几何实例基线更正 | 已落实到渲染入口 |
+| 21 | [21-schema-conclusion-review-0717.md](21-schema-conclusion-review-0717.md) | 2026-07-17 样本事实与当前实现状态复核 | 本轮复核基线 |
 
 ---
 
@@ -56,9 +61,9 @@
 | [dev.md](dev.md) | DEV 物理模型与设备组合说明 |
 | [phm.md](phm.md) | PHM 组合模型与 MOD/STL 引用说明 |
 | [mod.md](mod.md) | MOD 基础几何/参数化模型说明 |
-| [sch.md](sch.md) | SCH 逻辑模型说明 |
-| [std.md](std.md) | STD 逻辑定义说明 |
-| [sld.md](sld.md) | SLD 主接线图/图形表达说明 |
+| [sch.md](sch.md) | SCH 逻辑模型入口；parser、首次打开和缓存恢复已实现 |
+| [std.md](std.md) | STD 逻辑定义；parser 与 gridId 索引已实现 |
+| [sld.md](sld.md) | SLD 主接线图；parser/视图/联动已实现，安全化仍有 P0 风险 |
 
 ---
 
@@ -78,8 +83,8 @@ Step 05: 复核 09 的 PHM 与 MOD 变换链
 Step 06: 复核 10 的变电 XML primitive 字段范围与强类型 schema
 Step 07: 复核 11 的线路 MOD 文本格式族 grammar 与 parser 草案边界
 Step 08: 复核 12 的 STL 角色与 MOD 关系（互斥/并列/fallback）
-Step 09: 参考 13 的 Geometry IR 草案，再决定是否进入 STL/MOD 渲染实现
-Step 10: 线路工程参考 14 的悬链线参数研究方法论 + 15 的 demo-line 全量静态分析证据，再决定是否进入悬链线/M5 实现
+Step 09: 参考 13 的 Geometry IR 草案，并对照 21 复核已落地与未落地部分
+Step 10: 线路工程参考 14/15 的样本证据，并对照 21 验证当前悬链线实现是否满足语义边界
 ```
 
 ---

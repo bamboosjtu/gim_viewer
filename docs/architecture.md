@@ -183,7 +183,7 @@ src-tauri/
 
 ### PARSER_VERSION 失效机制
 
-- 定义在 `src-tauri/src/db.rs`：`pub const PARSER_VERSION: &str = "gim-parser-v13"`
+- 定义在 `src-tauri/src/db.rs`：`pub const PARSER_VERSION: &str = "gim-parser-v14"`
 - `validate_gim_cache` 检查 `parser_version_match`
 - 版本不匹配 → 缓存无效 → 完整解压 → `save_gim_index` 先删后插全部表
 

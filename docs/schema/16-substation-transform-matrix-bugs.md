@@ -343,8 +343,8 @@ sourceToViewer = baseCoordinationMatrix × ZUpToYUp
 | 编号 | 改进项 | 目标 |
 | ---- | ------ | ---- |
 | IMP-1 | 验证 placement 矩阵完整性 | 检查 `geo.placementTransformMatrix` 是否包含 CBM 与 SUBDEVICE 累积，而非仅含 DEV/PHM |
-| IMP-2 | 修正 dev.md / phm.md 矩阵描述 | "行优先、平移在最后一列" → "列主序、平移在 m[12..14]" |
-| IMP-3 | 修正 devParser.ts / phmParser.ts 注释 | 统一为"列主序、平移在 m[12..14]"；澄清 `rowMajorToMatrix4` 函数命名歧义 |
+| IMP-2 | 修正 dev.md / phm.md 矩阵描述 | ✅ 已完成：统一为“列主序、平移在数组索引 m[12..14]” |
+| IMP-3 | 修正 parser/viewer 矩阵术语 | ✅ 已完成：parser 注释已统一，helper 已更名为 `columnMajorToMatrix4` |
 
 ### 3.3 长期演进
 

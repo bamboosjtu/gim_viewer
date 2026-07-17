@@ -4,6 +4,8 @@
 >
 > 数据来源：对 demo-line / demo-line1 / demo-substation 三样本的全量扫描（无抽样）。分析脚本见文末附录 A。
 
+> **2026-07-17 复核**：直接按 binary STL 长度公式 `84 + 50 × triangleCount` 扫描三组样本，`demo-line=181/750304 triangles`、`demo-line1=82/238194`、`demo-substation=1803/834874`，全部为 binary STL；文件数、三角形 min/max/avg 和 header 特征均与本文一致。
+
 ## 1. 分析目标与范围
 
 ### 1.1 背景
@@ -366,12 +368,11 @@ STL/MOD 同 PHM 是否描述同一几何：当前不能得出结论
   - 30 个 STL-only 节点必须有 STL 加载器才能显示
 ```
 
-### 7.5 与既有约束的关系
+### 7.5 与研究启动时约束的关系（历史记录）
 
-- 项目硬约束："MVP 不实现悬链线、3D 线路、MOD 解析"
-- 本轮仅形成"加载策略建议"，**不进入 STL 渲染实现**
-- Wire_Device STL 加载属于待评估项，需在 M5+ 阶段决策
-- 变电 STL 加载属于可选补齐项，MVP 阶段可全部跳过
+- 当时的项目硬约束为："MVP 不实现悬链线、3D 线路、MOD 解析"
+- 当时本轮仅形成"加载策略建议"，不进入 STL 渲染实现
+- 该范围后续已调整；当前已存在 STL 加载与 DEV 粒度 GLB 缓存，不能再把本节当作实现现状
 
 ---
 
@@ -619,7 +620,7 @@ Top 5 合计 **32.88%**，Top 20 **全部为"柜"类设备**。
 
 | 维度 | demo-line | demo-line1 | demo-substation |
 | --- | ---: | ---: | ---: |
-| 工程类型 | GIMPKGT 线路（220kV） | GIMPKGT 线路（500kV） | GIMPKGS 变电 |
+| 工程类型 | GIMPKGT 线路（工程头标识 500kV；FAM 含 AC220kV/AC500kV 混合设备属性） | GIMPKGT 线路（500kV） | GIMPKGS 变电 |
 | STL 文件总数 | 181 | 82 | 1803 |
 | STL 三角面总数 | 750,304 | 238,194 | 834,874 |
 | STL 总大小 (MB) | 35.79 | 11.36 | 39.95 |
@@ -650,7 +651,7 @@ Top 5 合计 **32.88%**，Top 20 **全部为"柜"类设备**。
 - **STL-only 模式**：线路样本 STL 节点 100% 为 STL-only（无 MOD 共存），STL 是唯一几何来源
 - **塔型字段（TOWERTYPE）与 STL 无关**：TOWERTYPE（如 `5B2-WKZ204A` / `500-MC31S-ZJTSD07`）只出现在 CBM 上，对应 stlCount 全部为 0
 - **单塔 STL 配置固定**：每塔挂 18-19 串绝缘子，三角面约 53556-60570，分布稳定
-- **电压等级差异**：demo-line 塔型以 `5B2/562/5E7` 开头（220kV）；demo-line1 塔型以 `500-MC31S/500-MC31D` 开头（500kV）；两样本单塔 STL 配置一致
+- **塔型族差异**：demo-line 塔型以 `5B2/562/5E7` 开头，demo-line1 塔型以 `500-MC31S/500-MC31D` 开头；两样本工程头均标识 500kV，不能仅凭前缀把 demo-line 判为 220kV。两样本单塔 STL 配置一致
 
 ### 9.3 三样本对比：STL 设备类型差异
 
@@ -792,7 +793,7 @@ Top 5 合计 **32.88%**，Top 20 **全部为"柜"类设备**。
 
 | 指标 | demo-line | demo-line1 | demo-substation（对照） |
 | --- | ---: | ---: | ---: |
-| 工程类型 | GIMPKGT 线路（220kV） | GIMPKGT 线路（500kV） | GIMPKGS 变电 |
+| 工程类型 | GIMPKGT 线路（工程头标识 500kV） | GIMPKGT 线路（500kV） | GIMPKGS 变电 |
 | MOD 文件总数 | 1807 | 508 | 4179 |
 | MOD 总大小 | 50.72 MB | 20.06 MB | 15.39 MB |
 | MOD kind 分布 | 4 类文本格式族 | 4 类文本格式族 | XML_WITH_ENTITIES 主导（98.95%） |
@@ -820,7 +821,7 @@ Top 5 合计 **32.88%**，Top 20 **全部为"柜"类设备**。
 **关键观察**：
 
 - 4 种 kind 的设备归属 100% 稳定（无跨 kind 混用），与 [11-line-mod-grammar.md](11-line-mod-grammar.md) §1.4 核心判断一致
-- 两样本 kind 分布比例不同：demo-line1 跨越点占比更高（59.1% vs 17.4%），因 500kV 线路跨越对象更多
+- 两样本 kind 分布比例不同：demo-line1 跨越点占比更高（59.1% vs 17.4%）；两者工程头均标识 500kV，因此该差异只能归因于样本工程本身，不能据此归因于电压等级
 - TEXT_HNUM_COMMA_RECORD 文件数最少（31/18），但单文件规模最大（杆塔主体骨架，含 P/R/G 记录可达 4 万行）
 
 #### 10.8.3 modKind → 设备类型对应关系（100% 稳定）
@@ -866,7 +867,7 @@ Top 5 合计 **32.88%**，Top 20 **全部为"柜"类设备**。
 
 ### 10.9 三样本对比：MOD 设备类型差异
 
-| 对比维度 | demo-line（220kV 线路） | demo-line1（500kV 线路） | demo-substation（变电） |
+| 对比维度 | demo-line（工程头标识 500kV 线路） | demo-line1（500kV 线路） | demo-substation（变电） |
 | --- | --- | --- | --- |
 | **MOD 渲染对象** | 杆塔主体 + 导线 + 跨越点 | 杆塔主体 + 导线 + 跨越点 | 一次电气设备（电容器/GIS/接地变/避雷器等） |
 | **MOD 格式** | 4 类文本格式族 | 4 类文本格式族 | XML_WITH_ENTITIES（XML primitive） |

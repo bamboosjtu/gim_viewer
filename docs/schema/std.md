@@ -4,6 +4,8 @@
 
 STD（Substation Template Definition）文件是 GIM 工程中定义变电站逻辑结构的 XML 文件。STD 文件描述了变电站的层级逻辑模型，包括电压等级、间隔（Bay）、导电设备（ConductingEquipment）及其参数和子设备。STD 文件是电气逻辑模型的核心，通过 `gridId` 属性与 SLD 接线图建立可视化关联。
 
+> **2026-07-17 实现状态**：`src/gim/stdParser.ts` 已解析 Substation/VoltageLevel/Bay/Group/ConductingEquipment 并构建 `gridId` 索引；`stdSldIndex.ts` 已实现 STD/SLD/CBM 三向关联，相关 parser/index 测试已覆盖。当前只有 `demo-substation` 提供 1 份 STD，两个线路样本均为 0，因此“仅变电存在”是当前样本事实，不是已证明的格式强约束。
+
 ## 文件格式
 
 - **编码**：UTF-8

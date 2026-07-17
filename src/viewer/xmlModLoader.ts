@@ -135,7 +135,7 @@ export async function loadXmlModFromFiles(
  *
  * 长度不为 16 时返回单位矩阵。
  */
-export function rowMajorToMatrix4(arr: number[]): THREE.Matrix4 {
+export function columnMajorToMatrix4(arr: number[]): THREE.Matrix4 {
   const m = new THREE.Matrix4();
   if (!Array.isArray(arr) || arr.length !== 16) return m;
   m.fromArray(arr);
@@ -164,7 +164,7 @@ export function applyPlacementTransformToSceneUnits(
   transformMatrix: number[] | null | undefined,
 ): void {
   if (!Array.isArray(transformMatrix) || transformMatrix.length !== 16) return;
-  const matrix = rowMajorToMatrix4(transformMatrix);
+  const matrix = columnMajorToMatrix4(transformMatrix);
   matrix.elements[12] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
   matrix.elements[13] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
   matrix.elements[14] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;

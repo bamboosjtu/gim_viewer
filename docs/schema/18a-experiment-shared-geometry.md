@@ -331,7 +331,7 @@ A.1 实施后剩余瓶颈：
 
 ---
 
-## 11. A.1 实测结论（2026-07-06）
+## 11. A.1 实测结论
 
 ### 11.1 实测结果
 
@@ -481,7 +481,7 @@ const BBOX_MAX_DIM_M = 50;  // 单轴超过 50 米视为异常
 ### 8.2 根据实测结果分支
 
 - **若加载完成** → 方案 A 成功，后续按 [17-batch-load-schema.md](./17-batch-load-schema.md) §16 阶段 2/3 推进
-- **若仍崩溃** → 启动 [18b-experiment-merge-geometries.md](./18b-experiment-merge-geometries.md)（方案 B），需用户确认 Entity 高亮降级为 Group 级
+- **若仍崩溃** → 启动 [17-batch-load-schema.md §12](./17-batch-load-schema.md#12-方案-bmergegeometries-静态合并已实施) 的方案 B，需用户确认 Entity 高亮降级为 Group 级
 
 ### 8.3 实验记录模板
 

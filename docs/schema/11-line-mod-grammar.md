@@ -1,6 +1,8 @@
 # 线路 MOD 文本格式族 grammar 与 parser 边界
 
 > 本文档基于 `demo-line` 样本，对线路工程 4 类 MOD 文本格式族逐一梳理字段格式、记录语义与层级关系，回答 parser 草案应当采用强类型还是弱 schema 的关键问题。
+
+> **2026-07-17 复核**：重新扫描 `demo-line` 与 `demo-line1`，四类格式族数量与 grammar 结论保持一致。`src/gim/geometry/lineModParser.ts` 已实现四类 parser，38 个测试已通过；当前仅测试引用该入口，运行时加载/渲染尚未消费 parser 结果。
 >
 > 本报告不进入几何渲染实现，也不解释杆塔结构、跨越档距的工程语义。所有分析脚本集中放在文末附录 A。
 
@@ -943,9 +945,9 @@ interface WireModFile {
 
 ## 8. 浏览器实现影响
 
-### 8.1 当前缺口
+### 8.1 当前运行时缺口
 
-线路样本（`demo-line` / `demo-line1`）当前完全不渲染 MOD 几何，导致：
+线路 MOD 的语法解析已实现，但 `parseLineMod` 当前只被单元测试调用，尚未接入运行时加载/渲染，导致：
 - 1807 个 MOD 文件未渲染（其中 1300 个螺栓表 + 161 个基础/导线参数 + 315 个点线 + 31 个杆塔主体）
 - CBM 树可显示节点，但无 3D 几何联动
 
@@ -953,7 +955,7 @@ interface WireModFile {
 
 ```text
 Step 1: 在 viewer 层新增 lineModLoader（与 substation modLoader 分离，因格式完全不同）
-Step 2: parser 层按本文档 §7.3 schema 解析 4 类格式族
+Step 2: 复用现有 src/gim/geometry/lineModParser.ts 解析 4 类格式族
 Step 3: 渲染层按格式族分发：
         TEXT_HNUM_COMMA_RECORD → 杆塔骨架渲染
           - P 节点 → THREE.Vector3
@@ -983,10 +985,10 @@ Step 4: 节点级懒加载沿用现有 IFC 流程，CBM 点击 → 查 OBJECTMOD
 
 ### 8.4 与既有约束的关系
 
-> **范围调整**（2026-07-11）：原项目硬约束"MVP 不实现悬链线、3D 线路、MOD 解析"已调整。经用户确认，线路 MOD 解析纳入 MVP 范围，需基于本报告的 grammar 研究实施 parser。
+> **范围与实现更新**（2026-07-17）：原项目硬约束"MVP 不实现悬链线、3D 线路、MOD 解析"已调整。线路 MOD parser 已基于本报告落地；运行时消费与线路几何渲染仍未落地。
 
 - ~~项目硬约束："MVP 不实现悬链线、3D 线路、MOD 解析"~~ → **已调整：线路 MOD parser 纳入 MVP 范围**
-- ~~本报告仅形成 parser 草案边界，不进入渲染实现~~ → **已调整：需进入 parser 实施阶段**
+- ~~本报告仅形成 parser 草案边界，不进入渲染实现~~ → **Parser 已实施；运行时渲染仍待实施**
 - TEXT_POINT_LINE 的地图叠加属于待评估项，需在实施阶段决策是否启用。
 
 ---

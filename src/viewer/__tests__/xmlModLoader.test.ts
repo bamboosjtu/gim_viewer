@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import {
   loadXmlModFromText,
   loadXmlModFromFiles,
-  rowMajorToMatrix4,
+  columnMajorToMatrix4,
   disposeXmlModGroup,
 } from '../xmlModLoader.js';
 
@@ -141,12 +141,12 @@ describe('loadXmlModFromFiles', () => {
   });
 });
 
-describe('rowMajorToMatrix4', () => {
+describe('columnMajorToMatrix4', () => {
   it('有效 16 元素列主序 → 正确 Matrix4', () => {
     // GIM 矩阵为列主序展开，平移在 [12]/[13]/[14]
     // 等同 Three.js Matrix4.elements 布局，使用 fromArray 直接加载
     const arr = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 100, 200, 50, 1];
-    const m = rowMajorToMatrix4(arr);
+    const m = columnMajorToMatrix4(arr);
     expect(m.elements[12]).toBe(100);
     expect(m.elements[13]).toBe(200);
     expect(m.elements[14]).toBe(50);
@@ -154,7 +154,7 @@ describe('rowMajorToMatrix4', () => {
 
   it('单位矩阵 → Matrix4 identity', () => {
     const arr = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-    const m = rowMajorToMatrix4(arr);
+    const m = columnMajorToMatrix4(arr);
     expect(m.elements[0]).toBe(1);
     expect(m.elements[5]).toBe(1);
     expect(m.elements[10]).toBe(1);
@@ -162,7 +162,7 @@ describe('rowMajorToMatrix4', () => {
   });
 
   it('长度不为 16 → 返回单位矩阵', () => {
-    const m = rowMajorToMatrix4([1, 0, 0, 0]);
+    const m = columnMajorToMatrix4([1, 0, 0, 0]);
     expect(m.elements[0]).toBe(1);
     expect(m.elements[5]).toBe(1);
     expect(m.elements[10]).toBe(1);
@@ -170,7 +170,7 @@ describe('rowMajorToMatrix4', () => {
   });
 
   it('空数组 → 返回单位矩阵', () => {
-    const m = rowMajorToMatrix4([]);
+    const m = columnMajorToMatrix4([]);
     expect(m.elements[0]).toBe(1);
     expect(m.elements[5]).toBe(1);
     expect(m.elements[10]).toBe(1);
