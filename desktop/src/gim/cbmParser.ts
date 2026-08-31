@@ -1,4 +1,6 @@
-import type { CbmNode } from './types.js';
+import type { CbmNode, IfcEntry } from './types.js';
+import { resolveIfcModelId } from './modelIdentity.js';
+import { stripIfcExtension } from './modelIdentity.js';
 import { parseDev } from './geometry/devParser.js';
 import { normalizeEntityName } from './entityName.js';
 import { PARSER_LIMITS, parseBoundedCount } from './parserLimits.js';
@@ -455,11 +457,19 @@ export function buildCbmNodeIndex(node: CbmNode | null): Map<string, CbmNode> {
 }
 
 /** 收集节点及其后代的所有 IFC 引用 → Map<modelId, Set<ifcGuid>> */
-export function collectIfcRefs(node: CbmNode): Map<string, Set<string>> {
+export function collectIfcRefs(node: CbmNode, ifcEntries: readonly IfcEntry[] = []): Map<string, Set<string>> {
   const refs = new Map<string, Set<string>>();
   function walk(n: CbmNode) {
     if (n.ifcFile && n.ifcGuid) {
-      const modelId = n.ifcFile.replace(/\.ifc$/i, '');
+      const modelId = resolveIfcModelId(n.ifcFile, ifcEntries)
+        ?? (ifcEntries.length === 0
+          ? stripIfcExtension(n.ifcFile.split(/[\\/]/).pop() || n.ifcFile)
+          : (n.ifcFile.startsWith('ifc_') ? n.ifcFile : ''));
+      // 重复 basename 且引用不含目录时不猜测模型，避免把 GUID 高亮到错误 IFC。
+      if (!modelId) {
+        for (const child of n.children) walk(child);
+        return;
+      }
       if (!refs.has(modelId)) refs.set(modelId, new Set());
       refs.get(modelId)!.add(n.ifcGuid);
     }

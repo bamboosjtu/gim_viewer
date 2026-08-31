@@ -16,7 +16,7 @@
 | 3D 点击拾取 + 高亮 + 相机定位 | ✅ 已实现 | `desktop/src/viewer/selection.ts` / `highlight.ts` / `camera.ts` |
 | 层级树↔3D 联动 | ✅ 已实现 | `desktop/src/services/nodeInteractionService.ts` |
 | 属性面板（CBM/FAM/DEV/IFC + 语义字典） | ✅ 已实现 | `desktop/src/ui/propsDrawer.ts` / `propertyDictionary.ts` |
-| SQLite 缓存（索引、属性、Fragments、几何引用链） | ✅ 已实现 | `desktop/src-tauri/src/db.rs`（当前 `PARSER_VERSION=gim-parser-v17`） |
+| SQLite 缓存（索引、属性、Fragments、几何引用链） | ✅ 已实现 | `desktop/src-tauri/src/db.rs`（当前 `PARSER_VERSION=gim-parser-v18`） |
 | 缓存命中短路 | ✅ 已实现 | `desktop/src/services/openGimService.ts` / `gimIndexRestoreService.ts` |
 | IFC/DEV/PHM/MOD/STL 本地磁盘缓存 | ✅ 已实现 | `desktop/src/services/gimExtractedCacheService.ts` |
 | 诊断快捷键（Ctrl+Shift+D） | ✅ 已实现 | `desktop/src/services/diagnosticSummaryService.ts` |
@@ -36,7 +36,7 @@
 
 ### 当前版本关键改动
 
-- `PARSER_VERSION` 当前为 `gim-parser-v17`；几何 GLB 缓存版本为 `geometry-cache-v4-phm-color`。任一版本变化都会使旧缓存失效并触发重建。
+- `PARSER_VERSION` 当前为 `gim-parser-v18`；几何 GLB 缓存版本为 `geometry-cache-v4-phm-color`。任一版本变化都会使旧缓存失效并触发重建。Fragments 缓存另绑定源 GIM SHA-256 与 `fragments-cache-v6` 运行时版本，旧记录缺少源 SHA 时视为失效。
 - 首次打开 GIM 时，通过 `cacheGeometryFiles` 缓存 DEV/PHM/MOD/STL 文件到 `app_data_dir/extracted/{projectId}/`（复用 `writeCacheFile`，沿用路径遍历防护）。
 - IFC 加载完成后自动启动渐进式 DEV GLB 管线（`progressiveGeometryService`），按 DEV 粒度一次解析、落盘并逐实例渲染 IFC 之外的 MOD/STL；用户无需逐节点点击才能看到几何。
 - 缓存命中场景（`currentFiles=null`）下，`nodeInteractionService` 通过 `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` 从磁盘按需读取 DEV/PHM/MOD/STL；GLB 快速路径失败时回退到原始文件解析。
@@ -64,7 +64,9 @@
 - 7z 签名：`37 7A BC AF 27 1C`
 - ZIP 签名：`50 4B 03 04`
 
-**解压**：libarchive.js（WebAssembly）解压后展平为 `Map<path, File>`。
+**解压**：Tauri 生产路径由 Rust `sevenz-rust/zip` 从磁盘逐条解压并返回
+manifest + `DiskBackedFile`（条目按需读取）；浏览器或原生能力不可用时回退
+libarchive.js（WebAssembly）并展平为 `Map<path, File>`。
 
 ---
 

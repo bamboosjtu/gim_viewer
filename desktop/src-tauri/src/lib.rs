@@ -291,6 +291,7 @@ pub fn run() {
             db::save_gim_index,
             db::write_cache_file_binary,
             db::read_cached_ifc,
+            db::read_cached_entry,
             db::batch_read_cached_files,
             db::write_glb_file_binary,
             db::read_glb_file,

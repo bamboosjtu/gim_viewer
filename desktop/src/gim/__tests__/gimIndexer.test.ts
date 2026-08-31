@@ -58,13 +58,12 @@ describe('discoverIfcFromCBM IFC 路径解析', () => {
     expect(entries[0].path).toBe('IFC/model.ifc');
   });
 
-  it('完全无法解析时回退 DEV/ 拼接（保持旧行为可诊断）', async () => {
+  it('完全无法解析时不生成虚假模型条目（保留告警供诊断）', async () => {
     const files = new Map<string, File>([
       ['CBM/project.cbm', textFile('SUBSYSTEM=root.cbm', 'project.cbm')],
       ['CBM/root.cbm', textFile('ENTITYNAME=F1System\nIFC.NUM=1\nIFC0=缺失.ifc', 'root.cbm')],
     ]);
     const entries = await discoverIfcFromCBM(files);
-    expect(entries).toHaveLength(1);
-    expect(entries[0].path).toBe('DEV/缺失.ifc');
+    expect(entries).toHaveLength(0);
   });
 });

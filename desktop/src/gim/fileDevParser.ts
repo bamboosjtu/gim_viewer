@@ -2,6 +2,8 @@ import type { FileDevEntry } from './types.js';
 import { parseKeyValue } from './cbmParser.js';
 import { parseBoundedCount } from './parserLimits.js';
 import { getFileByPath } from './fileLookup.js';
+import { createIfcModelId } from './modelIdentity.js';
+import { resolveIfcPath } from './gimIndexer.js';
 
 /**
  * 解析 FileDevRelation.cbm。
@@ -49,7 +51,16 @@ export async function parseFileDevRelation(files: Map<string, File>): Promise<Fi
     const nameAsIfc = /\.ifc$/i.test(rawName) ? rawName : '';
     const ifcFile = directIfc || pairedIfc || nameAsIfc;
     const ifcName = rawName.replace(/\.(?:ifc|dgn)$/i, '') || ifcFile.replace(/\.ifc$/i, '');
-    const modelId = /\.ifc$/i.test(ifcFile) ? ifcFile.replace(/\.ifc$/i, '') : '';
+    const resolvedIfc = /\.ifc$/i.test(ifcFile) ? resolveIfcPath(files, ifcFile) : { kind: 'not-found' as const };
+    // 只有实际存在且唯一解析到的 IFC 才生成 runtime hash；缺失或重复 basename
+    // 不猜测 modelId。ifcFile 仍保留原始引用，供来源面板诊断，但不会进入
+    // deviceToIfcFile，也不会让缓存入库引用一个不存在的模型。
+    const modelId = resolvedIfc.kind === 'resolved'
+      ? createIfcModelId(resolvedIfc.path)
+      : '';
+    if (resolvedIfc.kind === 'ambiguous') {
+      console.warn('[GIM] FileDevRelation IFC 引用存在重复 basename，跳过模型关联:', ifcFile, resolvedIfc.candidates);
+    }
     // 有 NAME、IFC 或设备列表任一事实就保留条目；不要静默丢掉“仅 IFC 清单”行。
     if (ifcName || ifcFile || devKey) {
       entries.push({ ifcName, ifcFile, modelId, deviceCount: devNum, deviceCbms });

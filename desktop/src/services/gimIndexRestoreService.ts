@@ -41,7 +41,7 @@ export function restoreGimIndexToState(state: AppState, index: GimIndexResult): 
   state.currentCbmTree = rebuildCbmTree(index);
 
   // 5. 重建索引
-  state.ifcGuidIndex = buildIfcGuidIndex(state.currentCbmTree);
+  state.ifcGuidIndex = buildIfcGuidIndex(state.currentCbmTree, ifcEntries);
   state.cbmNodeIndex = buildCbmNodeIndex(state.currentCbmTree);
 
   // 6. 恢复 fileDevRelations

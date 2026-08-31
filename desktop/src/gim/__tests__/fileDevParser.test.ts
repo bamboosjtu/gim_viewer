@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseFileDevRelation } from '../fileDevParser.js';
+import { createIfcModelId } from '../modelIdentity.js';
 
 describe('FileDevRelation 路径兼容', () => {
   it('识别 Cbm/ 目录大小写变体', async () => {
@@ -12,16 +13,37 @@ describe('FileDevRelation 路径兼容', () => {
     ].join('\n');
     const files = new Map<string, File>([
       ['Cbm/FileDevRelation.cbm', new File([relation], 'FileDevRelation.cbm')],
+      ['DEV/device.ifc', new File(['ISO-10303-21'], 'device.ifc')],
     ]);
 
     await expect(parseFileDevRelation(files)).resolves.toEqual([
       {
         ifcName: '一次设备',
         ifcFile: 'device.ifc',
-        modelId: 'device',
+        modelId: createIfcModelId('DEV/device.ifc'),
         deviceCount: 1,
         deviceCbms: ['CBM/device.cbm'],
       },
+    ]);
+  });
+
+  it('缺失或重复 basename 的 IFC 来源不伪造 modelId', async () => {
+    const relation = [
+      'FILE.NUM=1',
+      'FILE0.NAME=设备图纸',
+      'FILE0.IFC=missing.ifc',
+      'FILE0.DEV.NUM=1',
+      'FILE0.DEV0=CBM/device.cbm',
+    ].join('\n');
+    const files = new Map<string, File>([
+      ['CBM/FileDevRelation.cbm', new File([relation], 'FileDevRelation.cbm')],
+    ]);
+
+    await expect(parseFileDevRelation(files)).resolves.toEqual([
+      expect.objectContaining({
+        ifcFile: 'missing.ifc',
+        modelId: '',
+      }),
     ]);
   });
 
@@ -84,14 +106,14 @@ describe('FileDevRelation 路径兼容', () => {
       {
         ifcName: '建筑',
         ifcFile: '建筑.ifc',
-        modelId: '建筑',
+        modelId: '',
         deviceCount: 0,
         deviceCbms: [],
       },
       {
         ifcName: '设备接线',
         ifcFile: '设备接线.ifc',
-        modelId: '设备接线',
+        modelId: '',
         deviceCount: 0,
         deviceCbms: [],
       },

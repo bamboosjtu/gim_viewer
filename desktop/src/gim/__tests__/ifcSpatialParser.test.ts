@@ -136,6 +136,38 @@ describe('ifc spatial parser', () => {
     expect(index.coverage.placementOnlyAssets).toBe(3);
   });
 
+  it('按 IFC 标准顺序计算父级与子级平移', () => {
+    const text = [
+      "#10=IFCWALL('wall-translation',#99,'墙体',$,$,#40,$,$,$);",
+      '#40=IFCLOCALPLACEMENT(#50,#60);',
+      '#50=IFCLOCALPLACEMENT($,#51);',
+      '#51=IFCAXIS2PLACEMENT3D(#52,$,$);',
+      '#52=IFCCARTESIANPOINT((100.,200.,300.));',
+      '#60=IFCAXIS2PLACEMENT3D(#61,$,$);',
+      '#61=IFCCARTESIANPOINT((10.,20.,30.));',
+    ].join('\n');
+    const index = buildSubstationSpatialIndexFromTexts([{ entry, text }], node());
+    expect(index.objects.find((item) => item.globalId === 'wall-translation')?.placement?.position)
+      .toEqual([110, 220, 330]);
+  });
+
+  it('父级旋转会作用于子级平移（验证 Parent × Relative 顺序）', () => {
+    const text = [
+      "#10=IFCWALL('wall-rotation',#99,'旋转墙体',$,$,#40,$,$,$);",
+      '#40=IFCLOCALPLACEMENT(#50,#60);',
+      '#50=IFCLOCALPLACEMENT($,#51);',
+      '#51=IFCAXIS2PLACEMENT3D(#52,#53,#54);',
+      '#52=IFCCARTESIANPOINT((100.,200.,300.));',
+      '#53=IFCDIRECTION((0.,0.,1.));',
+      '#54=IFCDIRECTION((0.,1.,0.));',
+      '#60=IFCAXIS2PLACEMENT3D(#61,$,$);',
+      '#61=IFCCARTESIANPOINT((10.,0.,0.));',
+    ].join('\n');
+    const index = buildSubstationSpatialIndexFromTexts([{ entry, text }], node());
+    expect(index.objects.find((item) => item.globalId === 'wall-rotation')?.placement?.position)
+      .toEqual([100, 210, 300]);
+  });
+
   it('保留 IFC 原生身份字段和属性集摘要，Name 为占位符时不再显示 --', () => {
     const text = [
       "#1=IFCPROJECT('p',#99,'项目',$,$,$,$,(#2),$);",

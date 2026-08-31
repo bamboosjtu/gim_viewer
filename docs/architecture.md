@@ -14,7 +14,8 @@
 | 3D 图形 | Three.js | ^0.184.0 | WebGL 渲染层 |
 | 地图引擎 | maplibre-gl | ^5.24.0 | 线路地图底图（OSM raster） |
 | 离线瓦片预研 | pmtiles | ^4.4.1 | PMTiles 矢量瓦片（默认关闭） |
-| 压缩包解压 | libarchive.js | ^2.0.2 | WASM，支持 7z/ZIP/RAR |
+| 原生压缩包解压 | sevenz-rust + zip | 0.6 / 2.x | Tauri 磁盘优先逐条解压（生产路径） |
+| 浏览器回退解压 | libarchive.js | ^2.0.2 | WASM，支持 7z/ZIP/RAR |
 | 本地数据库 | rusqlite | 0.31 | bundled SQLite，Rust 侧管理 |
 | 相机控制 | camera-controls | ^3.1.2 | Three.js 相机扩展 |
 | 构建 | Vite + TypeScript 5.3 | — | 严格模式 |
@@ -46,7 +47,8 @@ src/
 │  ├─ features.ts     ENABLE_MAPLIBRE_EXPERIMENT / LINE_BASEMAP_MODE / ENABLE_FRAGMENTS_CACHE / ENABLE_PMTILES_EXPERIMENT
 │  └─ debug.ts        DEBUG_RUNTIME_LOGS / DEBUG_IFC_LOAD / DEBUG_GIM_CACHE / DEBUG_LINE_MAP / DEBUG_FRAGMENTS
 ├─ gim/           GIM 解析层（纯逻辑，无 UI/Viewer 依赖）
-│  ├─ gimExtractor.ts # GIMPKG* 头部检测 + 7z/ZIP 解压 + 文件展平
+│  ├─ gimExtractor.ts # 浏览器 GIMPKG* 头部检测 + WASM 解压 + 文件展平
+│  ├─ modelIdentity.ts # IFC entry_path 规范化与稳定 runtime modelId
 │  ├─ cbmParser.ts    # 变电 CBM 层级树解析 + parseKeyValue
 │  ├─ famParser.ts    # 变电 FAM 分节属性解析
 │  ├─ fileDevParser.ts# 变电 FileDevRelation 解析
@@ -182,11 +184,11 @@ desktop/src-tauri/
 
 | 表名 | 说明 |
 |---|---|
-| `substation_fragment_cache` | Fragments 二进制缓存（受 `ENABLE_FRAGMENTS_CACHE=false` 控制） |
+| `substation_fragment_cache` | Fragments 二进制缓存（受 `ENABLE_FRAGMENTS_CACHE=false` 控制，绑定源 GIM SHA-256） |
 
 ### PARSER_VERSION 失效机制
 
-- 定义在 `desktop/src-tauri/src/db.rs`：`pub const PARSER_VERSION: &str = "gim-parser-v17"`
+- 定义在 `desktop/src-tauri/src/db.rs`：`pub const PARSER_VERSION: &str = "gim-parser-v18"`
 - `validate_gim_cache` 检查 `parser_version_match`
 - 版本不匹配 → 缓存无效 → 完整解压 → `save_gim_index` 先删后插全部表
 - 2026-08 v17：表名规范化迁移——变电表统一 `substation_` 前缀、线路表统一
@@ -243,6 +245,10 @@ Fixed Runtime 仅通过 `tauri.portable.conf.json` 注入 release 构建，`taur
 ### 节点级 IFC 懒加载
 
 点击节点 → 显示基础属性（CBM/FAM/DEV，优先 currentFiles 回退缓存）→ 懒加载对应 IFC → 高亮 + 完整属性
+
+Tauri 首次解包不把整个归档复制到前端：`extract_gim_archive(file_path, project_id)` 返回
+manifest，条目内容由 `DiskBackedFile` 在 `text()` / `arrayBuffer()` 时调用
+`read_cached_entry(project_id, entry_path)` 按需读取；浏览器路径仍使用内存 `Map<File>`。
 
 ### 渐进式 DEV GLB 几何管线（首次打开）
 

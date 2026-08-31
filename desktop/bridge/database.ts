@@ -132,8 +132,17 @@ export interface CbmNodeRecord {
  * 头部：`GIMB` + version(u8) + metadata 长度(u32 LE) + JSON metadata + bytes。
  * 这样大型 IFC/MOD/Fragments 不再经过 JSON 数字数组序列化。
  */
-function packBinaryCacheWrite(projectId: number, entryPath: string, bytes: Uint8Array): Uint8Array {
-  const metadata = new TextEncoder().encode(JSON.stringify({ project_id: projectId, entry_path: entryPath }));
+function packBinaryCacheWrite(
+  projectId: number,
+  entryPath: string,
+  bytes: Uint8Array,
+  sourceGimSha256?: string,
+): Uint8Array {
+  const metadata = new TextEncoder().encode(JSON.stringify({
+    project_id: projectId,
+    entry_path: entryPath,
+    ...(sourceGimSha256 ? { source_gim_sha256: sourceGimSha256 } : {}),
+  }));
   if (metadata.byteLength > 16 * 1024) throw new Error('缓存写入 metadata 过大');
   const output = new Uint8Array(9 + metadata.byteLength + bytes.byteLength);
   output.set([0x47, 0x49, 0x4d, 0x42, 1], 0); // GIMB + version
@@ -164,6 +173,16 @@ export async function writeCacheFile(projectId: number, entryPath: string, bytes
 export async function readCachedIfc(projectId: number, entryPath: string): Promise<Uint8Array> {
   const { invoke } = await import('@tauri-apps/api/core');
   const bytes = await invoke<ArrayBuffer>('read_cached_ifc', { projectId, entryPath });
+  return toUint8Array(bytes);
+}
+
+/**
+ * 按 GIM entry_path 从 extracted/{projectId} 读取任意缓存条目。
+ * 路径由 Rust 侧重新计算并校验，前端不传绝对路径。
+ */
+export async function readCachedEntry(projectId: number, entryPath: string): Promise<Uint8Array> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  const bytes = await invoke<ArrayBuffer>('read_cached_entry', { projectId, entryPath });
   return toUint8Array(bytes);
 }
 
@@ -470,9 +489,12 @@ export interface IfcCacheFileDiagnostic {
 export interface FragmentCacheFileDiagnostic {
   entry_path: string;
   model_id: string;
+  source_gim_sha256: string;
+  source_gim_sha256_match: boolean;
   source_ifc_size: number;
   fragment_file_size_stored: number;
   fragment_file_size_actual: number;
+  fragment_file_size_match: boolean;
   stored_fragments_version: string;
   current_fragments_cache_version: string;
   fragments_version_match: boolean;
@@ -553,9 +575,12 @@ export interface FragmentCacheValidation {
   stored_fragments_version: string | null;
   current_fragments_version: string;
   fragments_version_match: boolean;
+  source_gim_sha256: string | null;
+  source_gim_sha256_match: boolean;
   source_ifc_size_match: boolean;
   fragment_file_exists: boolean;
   fragment_file_size: number;
+  fragment_file_size_match: boolean;
   valid: boolean;
 }
 
@@ -573,9 +598,13 @@ export async function writeFragmentCacheFile(
   projectId: number,
   entryPath: string,
   bytes: Uint8Array,
+  sourceGimSha256: string,
 ): Promise<FragmentCacheWriteResult> {
   const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<FragmentCacheWriteResult>('write_fragment_cache_file_binary', packBinaryCacheWrite(projectId, entryPath, bytes));
+  return invoke<FragmentCacheWriteResult>(
+    'write_fragment_cache_file_binary',
+    packBinaryCacheWrite(projectId, entryPath, bytes, sourceGimSha256),
+  );
 }
 
 /**
@@ -588,7 +617,8 @@ export async function readFragmentCacheFile(projectId: number, entryPath: string
 }
 
 /**
- * upsert fragment_cache 记录（版本由 Rust 侧写入当前 FRAGMENTS_CACHE_VERSION）。
+ * upsert fragment_cache 记录（版本由前端写入包含 Fragments/web-ifc 实际版本的组合键；
+ * Rust 侧会再次核对源 GIM SHA）。
  */
 export async function upsertFragmentCacheRecord(
   projectId: number,
@@ -597,6 +627,7 @@ export async function upsertFragmentCacheRecord(
   sourceIfcSize: number,
   fragmentFileSize: number,
   cacheVersion: string,
+  sourceGimSha256: string,
 ): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke<void>('upsert_fragment_cache_record', {
@@ -606,18 +637,21 @@ export async function upsertFragmentCacheRecord(
     sourceIfcSize,
     fragmentFileSize,
     cacheVersion,
+    sourceGimSha256,
   });
 }
 
 /**
  * 校验 Fragments 缓存有效性（只读，不修复）。
- * 检查项：记录存在、版本匹配、source_ifc_size 匹配、fragments 文件存在且大小 > 0。
+ * 检查项：记录存在、版本匹配、源 GIM SHA 匹配、Fragments 文件存在且实际大小
+ * 与记录一致（source_ifc_size 仅作辅助诊断）。
  */
 export async function validateFragmentCache(
   projectId: number,
   entryPath: string,
   sourceIfcSize: number,
   cacheVersion: string,
+  sourceGimSha256: string,
 ): Promise<FragmentCacheValidation> {
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<FragmentCacheValidation>('validate_fragment_cache', {
@@ -625,6 +659,7 @@ export async function validateFragmentCache(
     entryPath,
     sourceIfcSize,
     cacheVersion,
+    sourceGimSha256,
   });
 }
 
@@ -732,7 +767,7 @@ export interface LineDevPropertyPayload {
  *
  * 生产线路首次导入路径应调用此命令，不得再单独调用 saveLineGraph。
  * 事务内：删除 6 张表旧数据 → 插入 graph + fam + dev → 更新
- * parser_version = PARSER_VERSION（当前 gim-parser-v17）, project_type = transmission_line。
+ * parser_version = PARSER_VERSION（当前 gim-parser-v18）, project_type = transmission_line。
  */
 /** 属性分块大小：每批 IPC 传输的记录数（acc-plan P1-2） */
 const LINE_ATTR_CHUNK_SIZE = 4000;

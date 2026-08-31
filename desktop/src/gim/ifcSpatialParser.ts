@@ -1,4 +1,5 @@
 import type { CbmNode, FileDevEntry, IfcEntry } from './types.js';
+import { resolveIfcModelId } from './modelIdentity.js';
 
 /** IFC 空间容器的业务类型。 */
 export type SpatialKind = 'project' | 'site' | 'building' | 'storey' | 'space' | 'zone' | 'container';
@@ -341,6 +342,7 @@ export function buildSubstationSpatialIndexFromTexts(
   }
 
   const cbmNodes = collectCbmNodes(cbmTree);
+  const ifcEntries = sources.map((source) => source.entry);
   // 空间索引与几何加载必须使用同一条 CBM 变换链。真实 CBM 文件中的
   // F4System 通常已经写入父链累积矩阵；PARTINDEX 往往没有自己的矩阵，
   // DEV_SUBDEVICE 虚拟节点则只保存 SUBDEVICE 局部矩阵。若这里只读取
@@ -365,13 +367,16 @@ export function buildSubstationSpatialIndexFromTexts(
 
     if (cbm.ifcFile && cbm.ifcGuid) {
       directGuidCandidates++;
-      const modelId = normalizeModelId(cbm.ifcFile);
+      const modelId = resolveIfcModelId(cbm.ifcFile, ifcEntries)
+        ?? (cbm.ifcFile.startsWith('ifc_') ? cbm.ifcFile : null);
       const guid = normalizeGuid(cbm.ifcGuid);
       const placementKind = matrix ? classifyPlacement(matrix) : undefined;
       // modelId 是首选且通常唯一。只有在整个样本中 GUID 没有跨模型重复时，
       // 才允许用裸 GUID 兜底，避免把同 GUID 的两个 IFC 模型错误串联。
-      const object = objectByModelGuid.get(`${modelId}:${guid}`)
-        ?? (duplicateGuid.has(guid) ? undefined : objectByGuid.get(guid));
+      const object = modelId
+        ? (objectByModelGuid.get(`${normalizeModelId(modelId)}:${guid}`)
+          ?? (duplicateGuid.has(guid) ? undefined : objectByGuid.get(guid)))
+        : undefined;
       if (object) {
         directGuidMatches++;
         if (object.spatialKey) spatiallyContainedMatches++;
@@ -1404,14 +1409,15 @@ function createIfcPlacementResolver(
     resolving.add(id);
     let result: IfcPlacementSummary | null = null;
     if (record.ifcType === 'IFCLOCALPLACEMENT') {
-      // IFCLOCALPLACEMENT 的 RelativePlacement 可以为 `$`（表示单位局部变换）。
-      // 少数导出器还会把 PlacementRelTo 直接写成 AXIS2PLACEMENT，兼容这两种形态。
-      const relativeRef = parseRef(record.args[0]);
+      // IFC 标准字段顺序为 PlacementRelTo, RelativePlacement。
+      // RelativePlacement 可以为 `$`（表示单位局部变换）；少数导出器
+      // 会把 PlacementRelTo 直接写成 AXIS2PLACEMENT，下面的 fallback 兼容它。
+      const parentRef = parseRef(record.args[0]);
+      const relativeRef = parseRef(record.args[1]);
       const relativeSummary = relativeRef == null ? null : resolve(relativeRef);
       const relative = relativeRef == null
         ? identityMatrix()
         : relativeSummary?.matrix ?? resolveAxisPlacement(relativeRef);
-      const parentRef = parseRef(record.args[1]);
       const parent = resolve(parentRef);
       const parentMatrix = parent?.matrix ?? (parentRef == null ? null : resolveAxisPlacement(parentRef));
       if (relative) {

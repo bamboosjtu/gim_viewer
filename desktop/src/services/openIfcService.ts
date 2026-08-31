@@ -36,7 +36,7 @@ export async function openIfcWithDialog(
         const ab = await readFileBytes(fp);
         const buffer = new Uint8Array(ab);
         const name = (fp.split(/[\\/]/).pop() || 'model.ifc').replace(/\.ifc$/i, '');
-        await loadIfcBuffer(runtime.ctx, name, buffer, state, (p) => showLoading(`${name}: ${Math.round(p * 100)}%`));
+        await loadIfcBuffer(runtime.ctx, name, buffer, state, (p) => showLoading(`${name}: ${Math.round(p * 100)}%`), fp);
       }
       emptyTipEl.style.display = 'none';
       fitCameraToScene(runtime.ctx, state);
@@ -67,7 +67,7 @@ export async function openIfcWithDialog(
           showLoading(`正在加载 ${file.name}...`);
           const buffer = new Uint8Array(await file.arrayBuffer());
           const name = file.name.replace(/\.ifc$/i, '');
-          await loadIfcBuffer(runtime.ctx, name, buffer, state, (p) => showLoading(`${file.name}: ${Math.round(p * 100)}%`));
+          await loadIfcBuffer(runtime.ctx, name, buffer, state, (p) => showLoading(`${file.name}: ${Math.round(p * 100)}%`), file.webkitRelativePath || file.name);
         }
         emptyTipEl.style.display = 'none';
         fitCameraToScene(runtime.ctx, state);

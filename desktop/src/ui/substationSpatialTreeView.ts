@@ -37,7 +37,7 @@ export function buildSpatialSearchIndex(
     items.push({
       key: node.key,
       title: spatialNodeLabel(node),
-      subtitle: `${node.ifcType} · ${node.modelId} · IFC 构件 ${node.objectKeys.length}`
+      subtitle: `${node.ifcType} · ${modelDisplayName(state, index, node.modelId)} · IFC 构件 ${node.objectKeys.length}`
         + (node.geometryStatus === 'represented' ? ' · 有空间几何' : ' · 无空间几何')
         + (node.globalId ? ` · GUID ${node.globalId}` : ''),
     });
@@ -50,7 +50,7 @@ export function buildSpatialSearchIndex(
       title: object.name,
       subtitle: [
         objectSubtitle(object),
-        object.modelId,
+        modelDisplayName(state, index, object.modelId),
         object.spatialKey
           ? object.spatialContainment === 'inherited'
             ? object.spatialInheritanceKind === 'host-relation' ? '空间已确认（宿主关系继承）' : '空间已确认（分解继承）'
@@ -70,7 +70,7 @@ export function buildSpatialSearchIndex(
     seenCbm.add(link.cbmPath);
     items.push({
       key: node.path,
-      title: getNodeDisplayName(node, state.ifcGuidToName),
+      title: getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries),
       subtitle: [
         node.entityName,
         link.confidence === 'inferred' ? '位置推断' : link.confidence === 'unresolved' ? '未关联' : link.spatialKey ? '已确认' : '已关联但无空间容器',
@@ -310,7 +310,7 @@ export function renderSubstationSpatialTree(
         renderLeafRow(
           childrenEl,
           `spatial:quality:parse:${model.modelId}`,
-          `IFC 模型未解析 · ${model.modelId}`,
+          `IFC 模型未解析 · ${modelDisplayName(state, index, model.modelId)}`,
           `${model.parseError}`,
           SPATIAL_ICONS.quality,
         );
@@ -363,7 +363,7 @@ export function renderSubstationSpatialTree(
       node.key,
       spatialNodeLabel(node),
       SPATIAL_ICONS[node.kind] || SPATIAL_ICONS.container,
-      `${node.ifcType} · ${node.modelId} · ${countLabel} · ${geometryLabel}`
+      `${node.ifcType} · ${modelDisplayName(state, index, node.modelId)} · ${countLabel} · ${geometryLabel}`
         + (node.kind === 'space' && node.objectKeys.length === 0 ? ' · 未关联构件' : ''),
       node.childKeys.length > 0 || node.objectKeys.length > 0 || links.length > 0,
       (childrenEl) => {
@@ -440,7 +440,7 @@ export function renderSubstationSpatialTree(
             object.key,
             object.name,
             `${objectSubtitle(object)}`
-              + (cbm ? ` · ${getNodeDisplayName(cbm, state.ifcGuidToName)}` : '')
+              + (cbm ? ` · ${getNodeDisplayName(cbm, state.ifcGuidToName, state.currentIfcEntries)}` : '')
               + (link && link.length > 1 ? ` · CBM 关联 ${link.length}` : '')
               + sourceDesignSuffixes(link ?? []),
             SPATIAL_ICONS.object,
@@ -473,7 +473,7 @@ export function renderSubstationSpatialTree(
           renderLeafRow(
             rowsEl,
             link.cbmPath,
-            getNodeDisplayName(cbm, state.ifcGuidToName),
+            getNodeDisplayName(cbm, state.ifcGuidToName, state.currentIfcEntries),
             `${cbm.entityName} · ${link.sourceIfcGuid || '无 GUID'} · 已确认${sourceDesignSuffix(link)}`,
             SPATIAL_ICONS.asset,
             () => onNodeClick(cbm),
@@ -496,7 +496,7 @@ export function renderSubstationSpatialTree(
     renderSyntheticNode(
       host,
       spatialModelGroupKey(modelId),
-      modelId || '未命名 IFC 模型',
+      modelDisplayName(state, index, modelId),
       SPATIAL_ICONS.model,
       summary,
       roots.length > 0,
@@ -531,7 +531,7 @@ export function renderSubstationSpatialTree(
         renderLeafRow(
           rowsEl,
           link.cbmPath,
-          getNodeDisplayName(cbm, state.ifcGuidToName),
+          getNodeDisplayName(cbm, state.ifcGuidToName, state.currentIfcEntries),
           `${cbm.entityName} · ${status}${reason}${position}${sourceDesignSuffix(link)}`,
           SPATIAL_ICONS.asset,
           () => onNodeClick(cbm),
@@ -600,7 +600,7 @@ export function renderSubstationSpatialTree(
           renderLeafRow(
             rowsEl,
             link.cbmPath,
-            getNodeDisplayName(cbm, state.ifcGuidToName),
+            getNodeDisplayName(cbm, state.ifcGuidToName, state.currentIfcEntries),
             `${cbm.entityName} · 位置推断${position}${sourceDesignSuffix(link)}`,
             SPATIAL_ICONS.asset,
             () => onNodeClick(cbm),
@@ -622,7 +622,7 @@ export function renderSubstationSpatialTree(
         const links = index.linksByIfcObjectKey.get(object.key) ?? [];
         const cbm = links.length === 1 ? cbmByPath.get(links[0].cbmPath) : undefined;
         const cbmLabel = cbm
-          ? ` · ${getNodeDisplayName(cbm, state.ifcGuidToName)}`
+          ? ` · ${getNodeDisplayName(cbm, state.ifcGuidToName, state.currentIfcEntries)}`
           : links.length > 1 ? ` · CBM 关联 ${links.length}` : '';
         renderLeafRow(
           rowsEl,
@@ -658,7 +658,7 @@ export function renderSubstationSpatialTree(
           renderLeafRow(
             childrenEl,
             `spatial:resource:${model.modelId}`,
-            model.modelId,
+            modelDisplayName(state, index, model.modelId),
             `资源 ${model.resourceCount}${typeSummary ? ` · ${typeSummary}` : ''}`,
             SPATIAL_ICONS.container,
           );
@@ -866,6 +866,26 @@ function buildCbmPathMap(root: CbmNode | null): Map<string, CbmNode> {
 
 function spatialNodeLabel(node: IfcSpatialNode): string {
   return node.name || '未命名空间';
+}
+
+/**
+ * 将运行时 modelId 映射为用户可读的 IFC 名称。
+ *
+ * modelId 只用于 Fragments、索引和缓存寻址（例如 ifc_<hash>），不能直接
+ * 出现在导航标题或搜索摘要中；优先使用 IfcEntry.name，恢复缓存时再从
+ * entryPath 提取文件名，最后使用通用占位文本而不是泄漏内部哈希。
+ */
+function modelDisplayName(
+  state: AppState,
+  index: SubstationSpatialIndex,
+  modelId: string,
+): string {
+  const entry = state.currentIfcEntries.find((item) => item.modelId === modelId);
+  if (entry?.name?.trim()) return entry.name.trim();
+  const summary = index.models.find((item) => item.modelId === modelId);
+  const path = summary?.entryPath?.replace(/\\/g, '/');
+  const fileName = path?.split('/').pop()?.replace(/\.ifc$/i, '').trim();
+  return fileName || '未命名 IFC 模型';
 }
 
 /**

@@ -10,7 +10,7 @@ const ENABLE_FRAGMENTS_CACHE_BASE = false;
 export const FRAGMENTS_CACHE_DEBUG_KEY = 'gim-debug-fragments-cache';
 
 /** 缓存键基础版本（语义变更时手动 bump，配合依赖包版本自动失效） */
-export const FRAGMENTS_CACHE_KEY_VERSION = 'fragments-cache-v5';
+export const FRAGMENTS_CACHE_KEY_VERSION = 'fragments-cache-v6';
 
 /**
  * Fragments 缓存是否启用（acc-plan P0-3 灰度开关）。

@@ -138,11 +138,11 @@ export type LineModFormat =
 ```typescript
 export interface IfcGeometrySource {
   kind: "ifc";
-  /** IFC 文件名（如 "ABC123.ifc"），用于唯一标识 modelId */
+  /** IFC entry 路径（如 "DEV/ABC123.ifc"），用于追溯真实资源 */
   ifcFile: string;
   /** IFC GlobalID（可选，CBM 的 IFCGUID 字段） */
   ifcGuid?: string;
-  /** modelId = ifcFile 去除 .ifc 后缀，用于 OBC Fragments 注册 */
+  /** modelId = "ifc_" + 规范化 entry_path 的稳定 hash，用于 OBC Fragments 注册 */
   modelId: string;
   /** 缓存命中时从 cachedIfcPaths 获取本地路径；首次打开时为空 */
   cachedPath?: string;
@@ -405,7 +405,7 @@ export interface GeometryParser {
 }
 
 export interface GeometryParseContext {
-  /** GIM 解压后的内存文件（首次打开时持有，缓存命中时为 null） */
+  /** GIM 文件集合；Tauri 首次打开使用 DiskBackedFile，缓存命中时为 null */
   currentFiles: Map<string, File> | null;
   /** 缓存命中时的 IFC 本地路径索引 */
   cachedIfcPaths: Map<string, string>;

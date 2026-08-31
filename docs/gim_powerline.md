@@ -41,7 +41,7 @@
 
 - GIMPKG* 头部（变长，含项目编号和名称，零填充）
 - 1MB 窗口内搜索 7z（`37 7A BC AF 27 1C`）或 ZIP（`50 4B 03 04`）签名
-- libarchive.js（WebAssembly）解压
+- Tauri 生产路径：Rust `sevenz-rust/zip` 磁盘优先逐条解压；浏览器/能力回退路径使用 libarchive.js（WebAssembly）
 
 ### 目录命名差异
 
@@ -282,7 +282,7 @@ Canvas overlay 委托底图层的 `project()` 方法，两种模式共用同一�
 
 ### 首次导入事务
 
-`save_line_project_cache` 是统一事务命令：线路图（6 张表）+ FAM/DEV 属性在同一事务内写入，成功后设置 `parser_version = PARSER_VERSION`（当前为 `gim-parser-v17`，详见 `desktop/src-tauri/src/db.rs`；版本变更使旧缓存自动失效以触发完整重建）。
+`save_line_project_cache` 是统一事务命令：线路图（6 张表）+ FAM/DEV 属性在同一事务内写入，成功后设置 `parser_version = PARSER_VERSION`（当前为 `gim-parser-v18`，详见 `desktop/src-tauri/src/db.rs`；版本变更使旧缓存自动失效以触发完整重建）。
 
 ### 诊断键空间
 

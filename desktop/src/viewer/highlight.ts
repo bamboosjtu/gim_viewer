@@ -8,6 +8,7 @@ import { getNodeDisplayName } from '../gim/gimIndexer.js';
 import { frameBox } from './camera.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
+import { resolveIfcModelId } from '../gim/modelIdentity.js';
 
 /** 高亮样式 */
 export const HIGHLIGHT_STYLE: OBCF.MaterialDefinition = {
@@ -111,7 +112,7 @@ export async function highlightIfcFromNode(
   node: import('../gim/types.js').CbmNode,
   showMessage: (text: string) => void,
 ): Promise<void> {
-  const refs = collectIfcRefs(node);
+  const refs = collectIfcRefs(node, state.currentIfcEntries);
 
   if (refs.size > 0) {
     await resetHighlight(ctx, state);
@@ -157,15 +158,19 @@ export async function highlightIfcFromNode(
 
   // 回退：无 IFCGUID
   const cbmFileName = node.path.split('/').pop() || '';
-  const ifcModelId = node.ifcFile ? node.ifcFile.replace(/\.ifc$/i, '') : state.deviceToIfcFile.get(cbmFileName);
+  const ifcModelId = node.ifcFile
+    ? resolveIfcModelId(node.ifcFile, state.currentIfcEntries)
+    : state.deviceToIfcFile.get(cbmFileName);
   if (ifcModelId) {
+    const ifcLabel = state.currentIfcEntries.find((entry) => entry.modelId === ifcModelId)?.name
+      || 'IFC 模型';
     const loaded = ctx.fragments.list.has(ifcModelId);
     if (loaded) {
-      showMessage(`设备 "${getNodeDisplayName(node, state.ifcGuidToName)}" 属于 ${ifcModelId}.ifc，但无 IFCGUID 映射到具体构件`);
+      showMessage(`设备 "${getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)}" 属于 ${ifcLabel}，但无 IFCGUID 映射到具体构件`);
     } else {
-      showMessage(`设备 "${getNodeDisplayName(node, state.ifcGuidToName)}" 属于 ${ifcModelId}.ifc，该 IFC 文件未加载`);
+      showMessage(`设备 "${getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)}" 属于 ${ifcLabel}，该 IFC 文件未加载`);
     }
   } else {
-    showMessage(`设备 "${getNodeDisplayName(node, state.ifcGuidToName)}" 无 IFC 关联`);
+    showMessage(`设备 "${getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)}" 无 IFC 关联`);
   }
 }

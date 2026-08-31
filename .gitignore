@@ -47,3 +47,4 @@ desktop/src-tauri/webview2-fixed-runtime/
 # Tauri CLI 临时目录（重定向到工作区内，避免污染系统盘 %TEMP%\.tauri）
 .tmp/
 .playwright-cli/
+output/

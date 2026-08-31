@@ -5,6 +5,12 @@ import type { IfcSpatialNode, IfcSpatialObject, SubstationSpatialIndex } from '.
 import { escHtml } from '../shared/html.js';
 import { parseFamSections, parseKeyValue } from '../shared/gimParsing.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
+import {
+  findIfcEntryByModelId,
+  normalizeEntryPath,
+  normalizedIfcBasename,
+  resolveIfcModelId,
+} from '../gim/modelIdentity.js';
 import { propsDrawerBody, propsDrawer, btnToggleProps, btnCloseProps, btnExportProps } from './dom.js';
 import { buildCsv, downloadTextFile } from '../shared/csv.js';
 import {
@@ -326,14 +332,23 @@ function buildCbmOverviewAndSource(state: AppState, node: CbmNode): { overview: 
     ['实体类型', node.entityName],
     ['分类名称', node.classifyName],
   ];
-  const cbmFileName = node.path.split('/').pop() || '';
   const spatial = state.substationSpatialIndex?.linksByCbmPath.get(node.path);
-  const ifcModelId = findDeviceIfcModel(state, cbmFileName);
-  if (ifcModelId && !node.ifcFile) ov.push(['所属 IFC 文件', fileReferenceValue('ifc', `${ifcModelId}.ifc`)]);
+  const ifcModelId = findDeviceIfcModel(state, node.path);
+  // modelId 是 Fragments 的运行时标识（当前为 ifc_<hash>），不能拼成
+  // 文件名；必须通过当前工程的 IfcEntry 反查真实包内路径。
+  const inferredIfcPath = ifcModelId
+    ? ifcReferencePath(ifcModelId, state.currentIfcEntries)
+    : '';
+  if (inferredIfcPath && !node.ifcFile) {
+    ov.push(['所属 IFC 文件', fileReferenceValue('ifc', inferredIfcPath)]);
+  }
   if (node.children.length > 0) ov.push(['子节点数', String(node.children.length)]);
 
   const src: Array<[string, string | FileReferenceValue]> = [['CBM 文件', fileReferenceValue('cbm', node.path, '定位当前 CBM')]];
-  if (node.ifcFile) src.push(['IFC 文件', fileReferenceValue('ifc', node.ifcFile)]);
+  const directIfcPath = node.ifcFile
+    ? ifcReferencePath(node.ifcFile, state.currentIfcEntries)
+    : '';
+  if (directIfcPath) src.push(['IFC 文件', fileReferenceValue('ifc', directIfcPath)]);
   if (node.ifcGuid) src.push(['IFC GUID', node.ifcGuid]);
   appendSourceDesignRows(src, spatial);
 
@@ -402,20 +417,59 @@ function isUsefulPropertyValue(value: unknown): boolean {
 }
 
 /** 将 Fragments 的模型标识转成来源按钮可用的 IFC 路径。 */
-function ifcReferencePath(modelId: string): string {
+function ifcReferencePath(modelId: string, entries: readonly import('../gim/types.js').IfcEntry[] = []): string {
   const value = modelId.trim();
   if (!value) return '';
+  const entry = findIfcEntryByModelId(value, entries);
+  if (entry) return entry.path;
+
+  // CBM/FileDevRelation 中的引用经常只有 basename（例如 `foo.ifc`），
+  // 而 IfcEntry.path 才是 GIM 包内真实资源身份。优先通过同一套三态
+  // 解析规则反查真实路径；重复 basename 时返回 null，避免来源按钮
+  // 指向不确定的文件。
+  const resolvedModelId = resolveIfcModelId(value, entries);
+  if (resolvedModelId) {
+    const resolved = findIfcEntryByModelId(resolvedModelId, entries);
+    if (resolved) return resolved.path;
+  }
+
+  // `resolveIfcModelId` 返回 null 既可能表示未知引用，也可能表示重复
+  // basename。后者不能回退为 `foo.ifc`，否则 UI 会制造看似确定但实际
+  // 不可定位的来源。只有确实没有任何候选时才保留原始引用作为诊断文本。
+  const basename = normalizedIfcBasename(value);
+  const basenameCandidates = entries.filter((item) => normalizedIfcBasename(item.path) === basename);
+  if (basenameCandidates.length > 1) return '';
+
+  // `ifc_<hash>` 是运行时身份，不是包内文件名。若当前工程没有对应
+  // IfcEntry，宁可不显示来源按钮，也不能把内部 ID 拼成虚假的路径。
+  // 任意 `ifc_` 前缀都属于内部 runtime 身份；只有能在当前 entry 清单
+  // 反查成功时才显示来源，避免未知/未来格式的 ID 被拼成伪造路径。
+  if (/^ifc_/i.test(value)) return '';
   return /\.ifc$/i.test(value) ? value : `${value}.ifc`;
 }
 
-function findDeviceIfcModel(state: AppState, cbmFileName: string): string {
-  const direct = state.deviceToIfcFile.get(cbmFileName);
+function findDeviceIfcModel(state: AppState, cbmPath: string): string {
+  const direct = state.deviceToIfcFile.get(cbmPath);
   if (direct) return direct;
-  const lower = cbmFileName.toLowerCase();
-  for (const [key, modelId] of state.deviceToIfcFile) {
-    if (key.toLowerCase() === lower && modelId) return modelId;
-  }
-  return '';
+  const normalizedPath = normalizeEntryPath(cbmPath);
+  const exactMatches = Array.from(state.deviceToIfcFile)
+    .filter(([key, modelId]) => modelId && normalizeEntryPath(key) === normalizedPath)
+    .map(([, modelId]) => modelId);
+  const exactIds = [...new Set(exactMatches)];
+  if (exactIds.length === 1) return exactIds[0];
+  if (exactIds.length > 1) return '';
+
+  // FileDevRelation 既可能存完整 CBM 路径，也可能只存 basename。basename
+  // 只在候选 modelId 唯一时采用，避免多个同名 CBM 被静默关联到第一个 IFC。
+  const basename = normalizedPath.split('/').pop() || normalizedPath;
+  const basenameMatches = Array.from(state.deviceToIfcFile)
+    .filter(([key, modelId]) => {
+      const keyBase = normalizeEntryPath(key).split('/').pop() || normalizeEntryPath(key);
+      return Boolean(modelId) && keyBase === basename;
+    })
+    .map(([, modelId]) => modelId);
+  const basenameIds = [...new Set(basenameMatches)];
+  return basenameIds.length === 1 ? basenameIds[0] : '';
 }
 
 function appendSourceDesignRows(
@@ -499,7 +553,7 @@ export function showSpatialNodePropertiesBasic(
   const hostInheritedObjects = node.hostObjectKeys.length;
   const directLinks = index.linksBySpatialKey.get(node.key)?.length ?? 0;
   const children = node.childKeys.length;
-  const modelPath = ifcReferencePath(node.modelId);
+  const modelPath = ifcReferencePath(node.modelId, state.currentIfcEntries);
   const overview = sectionHtml('空间容器', [
     ...(state.projectName ? [['工程', state.projectName] as [string, string]] : []),
     ['空间类型', node.ifcType],
@@ -561,7 +615,7 @@ export function showIfcSpatialObjectPropertiesBasic(
     .map((link) => findCbmNodeByPath(state.currentCbmTree, link.cbmPath))
     .filter((node): node is CbmNode => !!node);
   const sourceDesign = collectSourceDesigns(links);
-  const modelPath = ifcReferencePath(object.modelId);
+  const modelPath = ifcReferencePath(object.modelId, state.currentIfcEntries);
   const overview = sectionHtml('IFC 构件', [
     ['名称', object.name],
     ['IFC 类型', object.ifcType],
@@ -582,7 +636,7 @@ export function showIfcSpatialObjectPropertiesBasic(
   ]);
   const relations = sectionHtml('对象关系', [
     ...(linkedCbms.length > 0
-      ? [['CBM 关联', linkedCbms.map((node) => getNodeDisplayName(node, state.ifcGuidToName)).join('、')] as [string, string]]
+      ? [['CBM 关联', linkedCbms.map((node) => getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)).join('、')] as [string, string]]
       : [['CBM 关联', '未命中（保留为 IFC 构件）'] as [string, string]]),
     ['CBM 关联数量', String(links.length)],
     ...(sourceDesign.names.length > 0
@@ -623,7 +677,7 @@ export async function showNodePropertiesBasic(state: AppState, node: CbmNode): P
   const { overview, source } = buildCbmOverviewAndSource(state, node);
   const params = await buildCbmParams(state, node);
   const relations = buildCbmRelations(state, node);
-  const title = `<div class="props-header">${escHtml(getNodeDisplayName(node, state.ifcGuidToName))}</div>`;
+  const title = `<div class="props-header">${escHtml(getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries))}</div>`;
   renderInspectorTabs(title, { overview, params, relations, source });
 }
 
@@ -639,10 +693,14 @@ export async function showNodeProperties(ctx: ViewerContext, state: AppState, no
     ['实体类型', node.entityName],
     ['分类名称', node.classifyName],
   ];
-  const cbmFileName = node.path.split('/').pop() || '';
   const spatialLink = state.substationSpatialIndex?.linksByCbmPath.get(node.path);
-  const ifcModelId = findDeviceIfcModel(state, cbmFileName);
-  if (ifcModelId && !node.ifcFile) bp.push(['所属 IFC 文件', fileReferenceValue('ifc', `${ifcModelId}.ifc`)]);
+  const ifcModelId = findDeviceIfcModel(state, node.path);
+  const inferredIfcPath = ifcModelId
+    ? ifcReferencePath(ifcModelId, state.currentIfcEntries)
+    : '';
+  if (inferredIfcPath && !node.ifcFile) {
+    bp.push(['所属 IFC 文件', fileReferenceValue('ifc', inferredIfcPath)]);
+  }
   if (node.children.length > 0) bp.push(['子节点数', String(node.children.length)]);
   overview += sectionHtml('基本信息', bp);
 
@@ -651,7 +709,10 @@ export async function showNodeProperties(ctx: ViewerContext, state: AppState, no
 
   // 来源：路径 + GUID + 变换矩阵
   const sp: Array<[string, string | FileReferenceValue]> = [['CBM 文件', fileReferenceValue('cbm', node.path, '定位当前 CBM')]];
-  if (node.ifcFile) sp.push(['IFC 文件', fileReferenceValue('ifc', node.ifcFile)]);
+  const directIfcPath = node.ifcFile
+    ? ifcReferencePath(node.ifcFile, state.currentIfcEntries)
+    : '';
+  if (directIfcPath) sp.push(['IFC 文件', fileReferenceValue('ifc', directIfcPath)]);
   if (node.ifcGuid) sp.push(['IFC GUID', node.ifcGuid]);
   appendSourceDesignRows(sp, spatialLink);
   source += sectionHtml('来源引用', sp);
@@ -661,15 +722,15 @@ export async function showNodeProperties(ctx: ViewerContext, state: AppState, no
 
   // IFC 构件原生属性 → 参数；GUID 关联 → 关系
   if (node.ifcFile && node.ifcGuid) {
-    const modelId = node.ifcFile.replace(/\.ifc$/i, '');
-    const model = ctx.fragments.list.get(modelId);
-    if (model) {
+    const modelId = resolveIfcModelId(node.ifcFile, state.currentIfcEntries);
+    const model = modelId ? ctx.fragments.list.get(modelId) : undefined;
+    if (modelId && model) {
       try {
         const localIds = await model.getLocalIdsByGuids([node.ifcGuid]);
         const localId = localIds[0];
         if (localId !== null && localId !== undefined) {
           relations += sectionHtml('IFC 构件关联', [
-            ['模型', fileReferenceValue('ifc', ifcReferencePath(modelId))],
+            ['模型', fileReferenceValue('ifc', ifcReferencePath(modelId, state.currentIfcEntries))],
             ['LocalId', String(localId)],
             ['GUID', node.ifcGuid],
           ]);
@@ -688,7 +749,7 @@ export async function showNodeProperties(ctx: ViewerContext, state: AppState, no
     }
   }
 
-  const title = `<div class="props-header">${escHtml(getNodeDisplayName(node, state.ifcGuidToName))}</div>`;
+  const title = `<div class="props-header">${escHtml(getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries))}</div>`;
   renderInspectorTabs(title, {
     overview,
     params,
@@ -708,20 +769,22 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
     const guids = await model.getGuidsByLocalIds([localId]);
     guid = guids[0] || null;
     if (guid) {
-      const ifcFile = `${modelId}.ifc`;
-      gimNode = state.ifcGuidIndex.get(`${ifcFile}:${guid}`) || null;
+      gimNode = state.ifcGuidIndex.get(`${modelId}:${guid}`)
+        // 兼容升级前以 basename.ifc 为 key 的旧内存索引。
+        ?? state.ifcGuidIndex.get(`${modelId}.ifc:${guid}`)
+        ?? null;
     }
   } catch { /* GUID 获取失败 */ }
 
   // 概览：构件身份 + GIM 设备
   const ov: Array<[string, string | FileReferenceValue]> = [
-    ['模型', fileReferenceValue('ifc', ifcReferencePath(modelId))],
+    ['模型', fileReferenceValue('ifc', ifcReferencePath(modelId, state.currentIfcEntries))],
     ['LocalId', String(localId)],
   ];
   if (guid) {
     ov.push(['GUID', guid]);
     if (gimNode) {
-      ov.push(['GIM 设备', getNodeDisplayName(gimNode, state.ifcGuidToName)]);
+      ov.push(['GIM 设备', getNodeDisplayName(gimNode, state.ifcGuidToName, state.currentIfcEntries)]);
       ov.push(['GIM 分类', gimNode.classifyName]);
     }
   }
@@ -744,14 +807,14 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
   // 关系：GIM 设备关联
   const relations = gimNode
     ? sectionHtml('GIM 设备关联', [
-        ['关联设备', getNodeDisplayName(gimNode, state.ifcGuidToName)],
+        ['关联设备', getNodeDisplayName(gimNode, state.ifcGuidToName, state.currentIfcEntries)],
         ['分类', gimNode.classifyName],
       ])
     : '';
 
   // 来源：模型与 GUID
   const source = sectionHtml('来源引用', [
-    ['IFC 模型', fileReferenceValue('ifc', `${modelId}.ifc`)],
+    ['IFC 模型', fileReferenceValue('ifc', ifcReferencePath(modelId, state.currentIfcEntries))],
     ['LocalId', String(localId)],
     ...(guid ? ([['GUID', guid]] as Array<[string, string | FileReferenceValue]>) : []),
   ]);

@@ -37,11 +37,11 @@ export type GimGeometrySource =
  */
 export interface IfcGeometrySource {
   kind: "ifc";
-  /** IFC 文件名（如 "ABC123.ifc"），用于唯一标识 modelId */
+  /** IFC 文件名（如 "ABC123.ifc"），用于展示和来源追踪 */
   ifcFile: string;
   /** IFC GlobalID（可选，CBM 的 IFCGUID 字段） */
   ifcGuid?: string;
-  /** modelId = ifcFile 去除 .ifc 后缀，用于 OBC Fragments 注册 */
+  /** 由 GIM 包内 entry path 稳定生成的 runtime ID，用于 OBC Fragments 注册 */
   modelId: string;
   /** 缓存命中时从 cachedIfcPaths 获取本地路径；首次打开时为空 */
   cachedPath?: string;

@@ -3,6 +3,7 @@ import type { ViewerContext } from './viewerEngine.js';
 import type { AppState } from '../app/state.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
+import { resolveIfcModelId } from '../gim/modelIdentity.js';
 
 /**
  * 判断 IFC Name 是否为无意义占位符（不应覆盖 CBM/DEV 名称）。
@@ -20,7 +21,9 @@ export async function buildIfcNameIndex(ctx: ViewerContext, state: AppState): Pr
   // 按 modelId 分组收集 GUID
   const byModel = new Map<string, { guid: string; node: CbmNode }[]>();
   for (const [, node] of state.ifcGuidIndex) {
-    const modelId = node.ifcFile.replace(/\.ifc$/i, '');
+    const modelId = resolveIfcModelId(node.ifcFile, state.currentIfcEntries)
+      ?? (node.ifcFile.startsWith('ifc_') ? node.ifcFile : null);
+    if (!modelId) continue;
     if (!byModel.has(modelId)) byModel.set(modelId, []);
     byModel.get(modelId)!.push({ guid: node.ifcGuid, node });
   }

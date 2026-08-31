@@ -7,6 +7,7 @@ import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 import { getFileByPath, hasFileByPath } from '../gim/fileLookup.js';
+import { resolveIfcModelId } from '../gim/modelIdentity.js';
 
 /**
  * 节点点击交互服务（用于缓存命中、无 Viewer 场景）。
@@ -52,10 +53,10 @@ export async function handleNodeClick(
   }
 
   // 2. 收集节点引用的 IFC 模型
-  const refs = collectIfcRefs(node);
+  const refs = collectIfcRefs(node, state.currentIfcEntries);
   const cbmFileName = node.path.split('/').pop() || '';
   const ifcModelId = node.ifcFile
-    ? node.ifcFile.replace(/\.ifc$/i, '')
+    ? resolveIfcModelId(node.ifcFile, state.currentIfcEntries)
     : state.deviceToIfcFile.get(cbmFileName);
 
   // 无 IFC GUID 映射但有 devPath → 走 MOD/STL 加载路径

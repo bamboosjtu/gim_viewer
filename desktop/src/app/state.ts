@@ -39,7 +39,7 @@ export class AppState {
   currentGimGraph: GimGraph | null = null;
 
   // 索引
-  ifcGuidIndex = new Map<string, CbmNode>(); // "ifcFile:ifcGuid" → CbmNode
+  ifcGuidIndex = new Map<string, CbmNode>(); // "runtimeModelId:ifcGuid" → CbmNode
   cbmNodeIndex = new Map<string, CbmNode>(); // cbmFileName → CbmNode
   ifcGuidToName = new Map<string, string>(); // "modelId:guid" → displayName
 

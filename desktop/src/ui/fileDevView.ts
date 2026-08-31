@@ -94,7 +94,7 @@ function createDeviceRow(
   devIcon.textContent = devNode ? (ENTITY_ICONS[devNode.entityName] || '📁') : '🔩';
   const devLabel = document.createElement('span');
   devLabel.className = 'tree-label';
-  devLabel.textContent = devNode ? getNodeDisplayName(devNode, state.ifcGuidToName) : fallbackName;
+  devLabel.textContent = devNode ? getNodeDisplayName(devNode, state.ifcGuidToName, state.currentIfcEntries) : fallbackName;
   devRow.appendChild(devIcon); devRow.appendChild(devLabel);
   devRow.addEventListener('click', (e) => {
     e.stopPropagation();

@@ -245,7 +245,7 @@ export function buildFunctionalSearchIndex(
         subtitle: `F3 路径 · ${functionalDomainLabel(domain)}`,
       });
       for (const asset of system.assets) {
-        const title = getNodeDisplayName(asset.node, state.ifcGuidToName) || ROLE_LABELS[asset.role];
+        const title = getNodeDisplayName(asset.node, state.ifcGuidToName, state.currentIfcEntries) || ROLE_LABELS[asset.role];
         push({
           key: asset.node.path,
           title,
@@ -260,7 +260,7 @@ export function buildFunctionalSearchIndex(
           ].filter(Boolean).join(' · '),
         });
         for (const part of flattenPartProjections(asset.parts)) {
-          const partTitle = getNodeDisplayName(part.node, state.ifcGuidToName) || '部件';
+        const partTitle = getNodeDisplayName(part.node, state.ifcGuidToName, state.currentIfcEntries) || '部件';
           const sourceLabel = part.sourceNodes.map((source) => normalizeEntityName(source.entityName))
             .filter((value, pos, all) => all.indexOf(value) === pos)
             .join('/');
@@ -402,7 +402,7 @@ export function renderSubstationFunctionalTree(
 
   function renderAsset(asset: FunctionalAssetProjection, host: HTMLElement): void {
     const node = asset.node;
-    const title = getNodeDisplayName(node, state.ifcGuidToName) || ROLE_LABELS[asset.role];
+    const title = getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries) || ROLE_LABELS[asset.role];
     const source = [
       normalizeEntityName(node.entityName),
       node.ifcFile ? `IFC ${node.ifcFile}` : undefined,
@@ -438,7 +438,7 @@ export function renderSubstationFunctionalTree(
   }
 
   function renderPart(part: FunctionalPartProjection, host: HTMLElement): void {
-    const title = getNodeDisplayName(part.node, state.ifcGuidToName) || '部件';
+    const title = getNodeDisplayName(part.node, state.ifcGuidToName, state.currentIfcEntries) || '部件';
     const sourceLabel = part.sourceNodes.map((source) => normalizeEntityName(source.entityName))
       .filter((value, pos, all) => all.indexOf(value) === pos).join('/');
     renderFunctionalNode(

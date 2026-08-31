@@ -4,6 +4,7 @@ import type { AppState } from '../app/state.js';
 import { resolveWebIfcWasmBaseUrl } from './wasmAssets.js';
 import { DEBUG_IFC_LOAD, DEBUG_FRAGMENTS } from '../config/debug.js';
 import { debugLog, debugWarn } from '../utils/logger.js';
+import { createIfcModelId } from '../gim/modelIdentity.js';
 
 export type ModelEventCallbacks = {
   onModelAdded: (modelId: string) => void;
@@ -147,8 +148,9 @@ export async function loadIfcBuffer(
   buffer: Uint8Array,
   state: AppState,
   onProgress?: (progress: number) => void,
+  identityPath?: string,
 ): Promise<void> {
-  const modelId = name.replace(/\.ifc$/i, '');
+  const modelId = createIfcModelId(identityPath || name);
 
   if (state.loadedModels.has(modelId)) {
     debugLog(DEBUG_IFC_LOAD, `[IFC Loader] 模型已加载，跳过: ${modelId}`);

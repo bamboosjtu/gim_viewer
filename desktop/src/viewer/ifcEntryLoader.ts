@@ -104,11 +104,12 @@ export async function loadIfcEntry(
   if (!cacheEnabled) {
     debugLog(DEBUG_IFC_LOAD, '[Fragments Cache] disabled, using IFC loader');
   }
-  const canUseCache = cacheEnabled && isTauri() && projectId != null && !!entryPath;
+  const sourceGimSha256 = state.currentSourceSha256?.trim() || '';
+  const canUseCache = cacheEnabled && isTauri() && projectId != null && !!entryPath && !!sourceGimSha256;
 
   // 2. 尝试 Fragments 缓存（不读 IFC buffer）
   if (canUseCache && entryPath) {
-    const cacheHit = await tryLoadFromFragmentsCache(ctx, state, modelId, entryPath);
+    const cacheHit = await tryLoadFromFragmentsCache(ctx, state, modelId, entryPath, sourceGimSha256);
     if (cacheHit) {
       debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 命中: ${entryPath} (modelId=${modelId})`);
       // 诊断：缓存命中路径同样输出 IFC bbox（与 MOD/STL bbox 对比）
@@ -165,7 +166,7 @@ export async function loadIfcEntry(
 
   // 5. 写 .frag 缓存（失败不影响主流程）
   if (canUseCache && entryPath) {
-    await tryWriteFragmentsCache(model, projectId as number, entryPath, modelId, ifcBuffer.byteLength).catch((err) => {
+    await tryWriteFragmentsCache(model, projectId as number, entryPath, modelId, ifcBuffer.byteLength, sourceGimSha256).catch((err) => {
       console.warn(`[Fragments Cache] 写入失败，不影响当前加载: ${entryPath}`, err);
     });
   }
@@ -180,6 +181,7 @@ async function tryLoadFromFragmentsCache(
   state: AppState,
   modelId: string,
   entryPath: string,
+  sourceGimSha256: string,
 ): Promise<boolean> {
   const projectId = state.currentProjectId;
   if (projectId == null) return false;
@@ -188,16 +190,27 @@ async function tryLoadFromFragmentsCache(
   const tValidate = performance.now();
   let validation;
   try {
-    validation = await validateFragmentCache(projectId, entryPath, 0, FRAG_CACHE_VERSION);
+    validation = await validateFragmentCache(projectId, entryPath, 0, FRAG_CACHE_VERSION, sourceGimSha256);
   } catch (err) {
     console.warn(`[Fragments Cache] 校验失败，回退 IFC: ${entryPath}`, err);
     return false;
   }
   debugLog(DEBUG_IFC_LOAD, `[Perf] fragment validate: ${Math.round(performance.now() - tValidate)} ms`);
 
-  // 注意：sourceIfcSize 传 0 表示不校验 IFC 大小（因为不读 IFC buffer）
-  // 仅校验：记录存在 + 版本匹配 + .frag 文件存在 + size > 0
+  // sourceIfcSize 传 0 表示不校验 IFC 大小（因为不读 IFC buffer），但源 GIM
+  // SHA-256 是强身份条件，必须在 Rust 侧完成匹配。
   if (!validation.valid) {
+    // 校验已确认记录或文件存在但实际大小不一致时，先删除坏记录和文件。
+    // 这样“截断但非空”的 .frag 不会在每次打开时重复命中同一坏缓存，
+    // 也满足损坏缓存自愈后回退 IFC 的语义；版本/SHA 不匹配则保留旧
+    // 记录，便于诊断并由后续成功写入覆盖。
+    if (validation.has_record
+      && validation.fragment_file_exists
+      && !validation.fragment_file_size_match) {
+      await deleteFragmentCacheRecord(projectId, entryPath).catch((err) => {
+        console.warn(`[Fragments Cache] 删除尺寸不一致的缓存失败，继续回退 IFC: ${entryPath}`, err);
+      });
+    }
     if (validation.has_record && !validation.fragments_version_match) {
       console.warn(`[Fragments Cache] 版本不匹配: ${entryPath} (stored=${validation.stored_fragments_version}, current=${validation.current_fragments_version})`);
     }
@@ -273,6 +286,7 @@ async function tryWriteFragmentsCache(
   entryPath: string,
   modelId: string,
   sourceIfcSize: number,
+  sourceGimSha256: string,
 ): Promise<void> {
   // 序列化
   const tSerialize = performance.now();
@@ -295,7 +309,7 @@ async function tryWriteFragmentsCache(
   const tWrite = performance.now();
   let writeResult: { path: string; size: number };
   try {
-    writeResult = await writeFragmentCacheFile(projectId, entryPath, bytes);
+    writeResult = await writeFragmentCacheFile(projectId, entryPath, bytes, sourceGimSha256);
   } catch (err) {
     console.warn(`[Fragments Cache] 写入文件失败，不影响当前加载: ${entryPath}`, err);
     return;
@@ -305,7 +319,7 @@ async function tryWriteFragmentsCache(
   // 写记录
   const tUpsert = performance.now();
   try {
-    await upsertFragmentCacheRecord(projectId, entryPath, modelId, sourceIfcSize, writeResult.size, FRAG_CACHE_VERSION);
+    await upsertFragmentCacheRecord(projectId, entryPath, modelId, sourceIfcSize, writeResult.size, FRAG_CACHE_VERSION, sourceGimSha256);
     debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 写入成功: ${entryPath} (size=${writeResult.size})`);
   } catch (err) {
     console.warn(`[Fragments Cache] 写入记录失败，不影响当前加载: ${entryPath}`, err);

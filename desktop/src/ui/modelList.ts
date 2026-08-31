@@ -17,7 +17,13 @@ export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: strin
   });
 
   const name = document.createElement('span');
-  name.className = 'name'; name.title = modelId; name.textContent = modelId;
+  const entry = state.currentIfcEntries.find((item) => item.modelId === modelId);
+  name.className = 'name';
+  // runtime modelId 只用于内部寻址（例如 ifc_<hash>），不应泄漏到
+  // 模型列表作为用户可读名称；缓存/异常恢复缺少 entry 时也使用通用
+  // 占位文本，而不是把内部 hash 展示出来。
+  name.title = entry?.path || 'IFC 模型';
+  name.textContent = entry?.name || '未命名 IFC 模型';
 
   const actions = document.createElement('div');
   actions.className = 'actions';

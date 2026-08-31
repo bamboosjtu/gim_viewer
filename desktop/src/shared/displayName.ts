@@ -1,4 +1,5 @@
-import type { CbmNode } from '../gim/types.js';
+import type { CbmNode, IfcEntry } from '../gim/types.js';
+import { resolveIfcModelId } from '../gim/modelIdentity.js';
 
 /**
  * 判断 IFC Name 是否为占位符（无意义名称）。
@@ -26,11 +27,16 @@ export function isPlaceholderName(name: string): boolean {
  * 注意：node.name 已在 buildCbmTree 中通过 extractDisplayName 提取最优名称，
  * 对 F4System/PARTINDEX 设备层节点，node.name 已被 DEV SYMBOLNAME 覆盖。
  */
-export function getNodeDisplayName(node: CbmNode, ifcGuidToName: Map<string, string>): string {
+export function getNodeDisplayName(
+  node: CbmNode,
+  ifcGuidToName: Map<string, string>,
+  ifcEntries: readonly IfcEntry[] = [],
+): string {
   // 1. IFC 名称索引（跳过占位符）
   if (node.ifcFile && node.ifcGuid) {
-    const modelId = node.ifcFile.replace(/\.ifc$/i, '');
-    const ifcName = ifcGuidToName.get(`${modelId}:${node.ifcGuid}`);
+    const modelId = resolveIfcModelId(node.ifcFile, ifcEntries)
+      ?? (node.ifcFile.startsWith('ifc_') ? node.ifcFile : '');
+    const ifcName = modelId ? ifcGuidToName.get(`${modelId}:${node.ifcGuid}`) : undefined;
     if (ifcName && !isPlaceholderName(ifcName)) return ifcName;
   }
 

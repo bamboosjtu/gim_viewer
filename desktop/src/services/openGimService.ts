@@ -84,7 +84,7 @@ export async function onGimExtracted(
   // 构建 CBM 层级树（F1System 根节点名称由 projectTypeName 设置，F2System 由 SYSCLASSIFYNAME 映射）
   state.currentCbmTree = await buildCbmTree(files, projectTypeName);
   if (!state.isCurrentSession(session)) return [];
-  state.ifcGuidIndex = buildIfcGuidIndex(state.currentCbmTree);
+  state.ifcGuidIndex = buildIfcGuidIndex(state.currentCbmTree, ifcEntries);
   state.cbmNodeIndex = buildCbmNodeIndex(state.currentCbmTree);
 
   // FileDevRelation 是空间资产“来源图纸”证据的一部分，必须在构建空间索引

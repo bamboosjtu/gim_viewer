@@ -1,6 +1,6 @@
 # 本地缓存设计
 
-> GIM 阅读器的两层缓存架构：SQLite 索引缓存（结构化数据）+ 磁盘文件缓存（大文件）。
+> GIM 阅读器的三层缓存架构：SQLite 语义索引 + 磁盘源文件 + 可选运行时几何缓存。
 >
 > 设计目标：二次打开同一 GIM 工程时跳过解压与解析，秒开层级树与属性面板；首次打开时构建索引并缓存大文件，供后续懒加载。
 
@@ -10,7 +10,7 @@
 
 ```
 首次打开 .gim：
-  检测 GIMPKG* 头部 → libarchive.js 解压 → Map<path, File>
+  检测 GIMPKG* 头部 → Rust 磁盘优先逐条解压 → manifest + DiskBackedFile Map
     ├─ 解析 CBM/DEV/FAM/PHM → 写入 SQLite 索引表
     ├─ IFC/DEV/PHM/MOD/STL 文件 → 写入磁盘缓存（app_data_dir/extracted/{id}/）
     └─ parser_version = PARSER_VERSION 写入 gim_project
@@ -21,13 +21,24 @@
     └─ 未命中 → 完整解压 → 解析 → 入库 → 缓存文件
 ```
 
-两层缓存的职责划分：
+缓存层的职责划分：
 
 | 层 | 存储 | 内容 | 访问方式 |
 |---|---|---|---|
-| SQLite 索引 | `app_data_dir/gim_cache.db` | CBM 树/属性/引用链等结构化数据 | Tauri IPC（SQL 查询） |
-| 磁盘文件 | `app_data_dir/extracted/{id}/` | IFC/DEV/PHM/MOD/STL 二进制原文件 | Tauri IPC（按 entry_path 读取） |
-| 磁盘文件（休眠） | `app_data_dir/fragments/{id}/` | Fragments 二进制预编译（`.frag`） | Tauri IPC（按 entry_path 读取） |
+| Layer 1 源文件 | `app_data_dir/extracted/{id}/` | IFC/DEV/PHM/MOD/STL/CBM/FAM 等解压条目 | Tauri IPC（按 `entry_path` 懒读） |
+| Layer 2 语义索引 | `app_data_dir/gim_cache.db` | CBM 树/属性/引用链/文件清单 | Tauri IPC（SQL 查询） |
+| Layer 3 运行时缓存 | `app_data_dir/fragments/{id}/`、`glbcache/{id}/` | Fragments `.frag`、DEV→GLB | Tauri IPC（受身份校验后读取） |
+
+### 1.1 磁盘优先解包边界
+
+Tauri 原生 `extract_gim_archive(file_path, project_id)` 不再把解压结果重新拼成
+`[manifest][全部条目 blob]`。Rust 只读取最多 1 MiB 头部定位压缩数据，然后逐条解压、
+原子写入 `extracted/{project_id}/{entry_path}`，IPC 返回 manifest（路径、大小、缓存路径）。
+前端用 `DiskBackedFile` 保持现有 `Map<string, File>` 解析边界；只有 parser 调用
+`text()` / `arrayBuffer()` 时才通过 `read_cached_entry(project_id, entry_path)` 读取当前条目。
+因此原生解包的条目内容内存峰值约为最大单文件加解码器工作集，而不是整个 GIM 展开体积。
+
+浏览器或无 `project_id` 的兼容调用仍可使用 inline blob；该路径不用于 Tauri 生产打开流程。
 
 ---
 
@@ -104,7 +115,7 @@ CREATE TABLE substation_cbm_node (
 CREATE TABLE substation_ifc_model (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id INTEGER NOT NULL,
-  model_id TEXT NOT NULL,              -- '电气二次0317其他'（ifc_file 去后缀）
+  model_id TEXT NOT NULL,              -- 'ifc_<path hash>'（规范化 entry_path 的稳定 runtime ID）
   name TEXT NOT NULL,                  -- IFC 显示名
   entry_path TEXT NOT NULL,            -- 'DEV/电气二次0317其他.ifc'
   created_at_ms INTEGER NOT NULL,
@@ -279,10 +290,11 @@ CREATE TABLE substation_fragment_cache (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id INTEGER NOT NULL,
   entry_path TEXT NOT NULL,            -- 'DEV/abc.ifc'
-  model_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,              -- 稳定 runtime modelId（ifc_<path hash>）
+  source_gim_sha256 TEXT NOT NULL,     -- 生成 fragment 时的 GIM 内容身份
   source_ifc_size INTEGER NOT NULL,    -- 原始 IFC 大小（校验用）
   fragment_file_size INTEGER NOT NULL, -- .frag 文件大小
-  fragments_version TEXT NOT NULL,     -- OBC Fragments 版本（兼容性校验）
+  fragments_version TEXT NOT NULL,     -- 基础版本 + @thatopen/fragments/web-ifc 实际版本（兼容性校验）
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,
   UNIQUE(project_id, entry_path)
@@ -293,7 +305,7 @@ CREATE TABLE substation_fragment_cache (
 
 ### 2.7 PARSER_VERSION 失效机制
 
-- 常量定义：`desktop/src-tauri/src/db.rs` 中 `pub const PARSER_VERSION: &str = "gim-parser-v17"`
+- 常量定义：`desktop/src-tauri/src/db.rs` 中 `pub const PARSER_VERSION: &str = "gim-parser-v18"`
 - 写入时机：首次导入或重建索引时，`save_gim_index` / `save_line_project_cache` 事务内更新 `gim_project.parser_version`
 - 校验时机：`validate_gim_cache` 检查 `stored_parser_version == PARSER_VERSION`
 - 失效行为：版本不匹配 → 缓存无效 → 完整解压 → `save_gim_index` 先删后插全部表
@@ -308,6 +320,14 @@ CREATE TABLE substation_fragment_cache (
 - `cbm_nodes_count > 0` && `ifc_models_count > 0` && `ifc_entry_count > 0`
 - `cached_ifc_count == ifc_entry_count`（所有 IFC 磁盘缓存文件存在且大小匹配）
 - `missing_cache_paths.is_empty()`
+
+Fragments 运行时缓存另需同时满足：
+
+- `project_id + entry_path` 命中记录；
+- `source_gim_sha256` 与当前工程 SHA-256（大小写不敏感）一致且非空；
+- `fragments_version` 与当前 OBC/web-ifc 运行时版本一致；
+- `.frag` 文件存在、非空且实际大小等于记录的 `fragment_file_size`
+  （记录的 `source_ifc_size` 仅作辅助诊断）。
 
 **线路工程（transmission_line）**：
 - `parser_version_match`
@@ -347,10 +367,13 @@ app_data_dir/
 
 ### 3.2 IFC 文件缓存（变电工程）
 
-由 `desktop/src/services/gimExtractedCacheService.ts` `cacheIfcEntries` 调用 `write_cache_file_binary` 写入：
-- 首次打开变电 GIM 时，遍历 `ifcEntries`，逐个写入 `extracted/{id}/DEV/{name}.ifc`
+原生 Tauri 首次打开时由 Rust 解压器直接逐条写入；WASM 回退路径由
+`desktop/src/services/gimExtractedCacheService.ts` `cacheIfcEntries` 调用
+`write_cache_file_binary` 写入：
+- 首次打开变电 GIM 时，遍历 `ifcEntries`，逐个写入 `extracted/{id}/{entry_path}`
 - 写入后 `substation_gim_entry.local_cache_path` 记录绝对路径
-- 节点点击懒加载时：优先 `currentFiles`（内存），回退 `readCachedIfc(projectId, entryPath)`（磁盘）
+- 节点点击懒加载时：优先 `currentFiles`（浏览器内存文件或 Tauri `DiskBackedFile`），
+  内容按需通过 `read_cached_entry(projectId, entryPath)` / `readCachedIfc`（IFC 专用别名）读取
 
 ### 3.3 DEV/PHM/MOD/STL 文件缓存（变电工程）
 
@@ -400,8 +423,9 @@ app_data_dir/
 `validateFragmentCache` 检查：
 - `parser_version_match`（解析器版本一致）
 - `fragments_version` 一致（OBC Fragments 格式版本）
-- `source_ifc_size` 匹配（原始 IFC 大小）
-- `.frag` 文件存在且大小匹配 `fragment_file_size`
+- `source_gim_sha256` 与当前工程 SHA-256 匹配（主身份条件，缺少/不匹配即失效）
+- `source_ifc_size` 匹配时仅作为辅助诊断（Fragments 命中路径可传 0 跳过）
+- `.frag` 文件存在且实际大小匹配 `fragment_file_size`
 
 ---
 
@@ -416,7 +440,8 @@ app_data_dir/
 | `get_project_diagnostic` | 返回单个项目完整诊断（表行数 + 校验状态 + 工程类型） |
 | `validate_gim_cache` | 校验缓存完整性（只读，不修复） |
 | `write_cache_file_binary` | 以 Raw IPC 写入单个缓存文件（路径遍历防护） |
-| `read_cached_ifc` | 读取单个缓存文件 |
+| `read_cached_ifc` | 读取单个 IFC 缓存文件 |
+| `read_cached_entry` | 按 `project_id + entry_path` 懒读任意解压条目 |
 | `batch_read_cached_files` | 批量读取缓存文件（一次 IPC 替代 N 次） |
 
 ### 5.2 删除策略

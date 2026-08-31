@@ -43,6 +43,55 @@ function buildPayload(
 }
 
 describe('parseExtractionPayload', () => {
+  it('磁盘优先 manifest 不创建内联 blob，条目按需读取', () => {
+    const enc = new TextEncoder();
+    const manifest = enc.encode(JSON.stringify({
+      magic: 'GIMPKGS',
+      project_id: 'header-project',
+      entries: [{ path: 'DEV/model.ifc', offset: 0, size: 123, cache_path: 'C:/cache/model.ifc' }],
+    }));
+    const out = new Uint8Array(4 + manifest.length);
+    new DataView(out.buffer).setUint32(0, manifest.length, true);
+    out.set(manifest, 4);
+
+    const result = parseExtractionPayload(out.buffer, { cacheProjectId: 7 });
+    const file = result.files.get('DEV/model.ifc')!;
+    expect(result.cacheProjectId).toBe(7);
+    expect(file.size).toBe(123);
+    expect(result.cachePaths.get('DEV/model.ifc')).toBe('C:/cache/model.ifc');
+  });
+
+  it('延迟 File 的 slice 遵循 Blob 边界语义', async () => {
+    const enc = new TextEncoder();
+    const manifest = enc.encode(JSON.stringify({
+      magic: 'GIMPKGT',
+      entries: [{ path: 'CBM/entry.txt', offset: 0, size: 8, cache_path: 'C:/cache/entry.txt' }],
+    }));
+    const out = new Uint8Array(4 + manifest.length);
+    new DataView(out.buffer).setUint32(0, manifest.length, true);
+    out.set(manifest, 4);
+
+    const file = parseExtractionPayload(out.buffer, { cacheProjectId: 7 }).files.get('CBM/entry.txt')!;
+    const reverse = file.slice(6, 2);
+    expect(reverse.size).toBe(0);
+    await expect(reverse.text()).resolves.toBe('');
+  });
+
+  it('无 project_id 的零字节兼容 payload 仍返回普通空 File', async () => {
+    const enc = new TextEncoder();
+    const manifest = enc.encode(JSON.stringify({
+      magic: 'GIMPKGT',
+      entries: [{ path: 'CBM/empty.cbm', offset: 0, size: 0 }],
+    }));
+    const out = new Uint8Array(4 + manifest.length);
+    new DataView(out.buffer).setUint32(0, manifest.length, true);
+    out.set(manifest, 4);
+
+    const file = parseExtractionPayload(out.buffer).files.get('CBM/empty.cbm')!;
+    expect(file.size).toBe(0);
+    await expect(file.text()).resolves.toBe('');
+  });
+
   it('解析 manifest 与条目数据', () => {
     const buf = buildPayload(
       [

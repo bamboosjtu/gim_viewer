@@ -39,15 +39,15 @@ macro_rules! debug_perf_log {
 /// v14: PARTINDEX 是 DEV SUBDEVICE 的 CBM 语义别名，不作为第二个几何查询起点，避免遗漏局部矩阵的重复部件
 /// v15: IFC 路径解析兼容任意目录（Bentley 导出 IFC 位于 CBM/ 而非 DEV/），旧缓存存有错误的 DEV/ 路径需失效重建
 /// v16: 资源上限、几何 ready 提交协议、线路缓存 session 校验
-pub const PARSER_VERSION: &str = "gim-parser-v17";
+pub const PARSER_VERSION: &str = "gim-parser-v18";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
 /// v3: IFC 加载关闭 COORDINATE_TO_ORIGIN，保留工程原始坐标以对齐 MOD（已废弃）
 /// v4: restore IFC coordinateToOrigin=true; MOD/STL alignment handled by project-level sourceToViewer transform
-// 2026-08 P0-3：缓存键由前端传入（fragments-cache-v5|fragments@x.y.z|web-ifc@a.b.c），
+// 2026-08 P0-3：缓存键由前端传入（fragments-cache-v6|fragments@x.y.z|web-ifc@a.b.c），
 // 绑定 @thatopen/fragments 与 web-ifc 包版本；此常量仅作诊断兜底显示。
-pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v5";
+pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 
 /// GLB 几何缓存版本（方案 C：MOD/STL → glTF 序列化格式版本）
 /// 独立于 PARSER_VERSION，用于在 MOD 解析逻辑变更时单独失效 glb 缓存。
@@ -228,6 +228,7 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
             project_id INTEGER NOT NULL,
             entry_path TEXT NOT NULL,
             model_id TEXT NOT NULL,
+            source_gim_sha256 TEXT NOT NULL DEFAULT '',
             source_ifc_size INTEGER NOT NULL,
             fragment_file_size INTEGER NOT NULL,
             fragments_version TEXT NOT NULL,
@@ -420,6 +421,13 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
     // v8: preserve PHM file-level COLOR.A scale for cache replay (percent vs byte).
     let _ = conn.execute(
         "ALTER TABLE substation_phm_solid_model ADD COLUMN phm_color_max_a REAL",
+        [],
+    );
+
+    // v18/P0-3：Fragments 缓存必须绑定源 GIM 内容身份；旧记录填空值并在
+    // validate_fragment_cache 中一律视为失效，由当前工程重新生成。
+    let _ = conn.execute(
+        "ALTER TABLE substation_fragment_cache ADD COLUMN source_gim_sha256 TEXT NOT NULL DEFAULT ''",
         [],
     );
 
@@ -773,7 +781,9 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), String> {
         }
     }
     for f in &payload.file_dev_entries {
-        if !model_ids.contains(f.model_id.as_str()) {
+        // DGN/缺失/重复 basename 的来源记录可以保留为证据，但没有可解析的
+        // IFC model_id；只有非空 model_id 才必须引用本次索引中的模型。
+        if !f.model_id.trim().is_empty() && !model_ids.contains(f.model_id.as_str()) {
             return Err(format!("文件设备关系引用未知 IFC model_id: {}", f.model_id));
         }
         if f.device_count < 0
@@ -1081,6 +1091,8 @@ const MAX_BATCH_CACHE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 struct BinaryCacheWriteMeta {
     project_id: i64,
     entry_path: String,
+    #[serde(default)]
+    source_gim_sha256: Option<String>,
 }
 
 fn decode_binary_cache_write_request(
@@ -1400,6 +1412,29 @@ pub fn read_cached_ifc(
     }
     let path = cache_file_path(&app_handle, project_id, &entry_path)?;
     let bytes = stdfs::read(&path).map_err(|e| format!("读取缓存文件失败: {}", e))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Tauri command：读取 extracted/{project_id} 下的任意 GIM 条目。
+///
+/// 与 read_cached_ifc 相同，目标路径只由 project_id + entry_path 计算，
+/// 不接受前端传入的绝对路径，供原生解压后的磁盘懒读 File 适配器使用。
+#[tauri::command]
+pub fn read_cached_entry(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_path: String,
+) -> Result<tauri::ipc::Response, String> {
+    {
+        let conn = app_handle.state::<DbState>();
+        let guard = conn
+            .0
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        ensure_project_exists(&guard, project_id)?;
+    }
+    let path = cache_file_path(&app_handle, project_id, &entry_path)?;
+    let bytes = stdfs::read(&path).map_err(|e| format!("读取缓存条目失败: {}", e))?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -1775,6 +1810,22 @@ pub fn write_geometry_cache_version(
 
 // ===== Fragments 缓存 =====
 
+/// Fragments 文件完整性校验：记录大小必须为正且与磁盘实际大小完全一致。
+/// 单纯“存在且非空”无法识别截断文件。
+fn fragment_file_size_matches(stored: i64, actual: u64) -> bool {
+    stored > 0 && actual == stored as u64
+}
+
+/// 诊断侧的 Fragments 版本兼容判断。
+///
+/// 前端实际写入的是 `fragments-cache-vN|fragments@...|web-ifc@...`，
+/// Rust 侧只知道基础 schema 版本，因此诊断应识别同一基础版本的组合键；
+/// 运行时 `validate_fragment_cache` 仍使用前端传入的完整组合键做严格匹配。
+fn fragment_cache_version_matches(stored: &str) -> bool {
+    stored == FRAGMENTS_CACHE_VERSION
+        || stored.starts_with(&format!("{}|", FRAGMENTS_CACHE_VERSION))
+}
+
 /// 计算 Fragments 缓存文件路径：app_data_dir/fragments/{project_id}/{safe_entry_path}.frag
 /// entry_path 通过组件级校验（只允许 Normal 组件），防止 ../ 和 \..\ 穿越。
 /// 最终路径必须位于 app_data_dir/fragments/{project_id}/ 下。
@@ -1834,6 +1885,7 @@ pub struct FragmentCacheRecord {
     pub project_id: i64,
     pub entry_path: String,
     pub model_id: String,
+    pub source_gim_sha256: String,
     pub source_ifc_size: i64,
     pub fragment_file_size: i64,
     pub fragments_version: String,
@@ -1850,9 +1902,12 @@ pub struct FragmentCacheValidation {
     pub stored_fragments_version: Option<String>,
     pub current_fragments_version: String,
     pub fragments_version_match: bool,
+    pub source_gim_sha256: Option<String>,
+    pub source_gim_sha256_match: bool,
     pub source_ifc_size_match: bool,
     pub fragment_file_exists: bool,
     pub fragment_file_size: u64,
+    pub fragment_file_size_match: bool,
     pub valid: bool,
 }
 
@@ -1863,16 +1918,24 @@ pub fn write_fragment_cache_file_binary(
     request: tauri::ipc::Request<'_>,
 ) -> Result<serde_json::Value, String> {
     let (meta, bytes) = decode_binary_cache_write_request(&request)?;
+    let source_sha = meta
+        .source_gim_sha256
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Fragments 缓存写入缺少 source_gim_sha256".to_string())?;
     let conn = app_handle.state::<DbState>();
     let guard = conn
         .0
         .lock()
         .map_err(|e| format!("获取数据库锁失败: {}", e))?;
     ensure_project_exists(&guard, meta.project_id)?;
-    drop(guard);
+    // 在同一把数据库锁下核对源 SHA 并完成原子写入，避免工程切换时旧
+    // 异步任务先覆盖当前 .frag、随后才在 upsert 阶段被拒绝。
+    ensure_project_source_sha(&guard, meta.project_id, Some(source_sha))?;
     let path = fragment_cache_file_path(&app_handle, meta.project_id, &meta.entry_path)?;
     let size = bytes.len();
     atomic_write(&path, &bytes, " fragments")?;
+    drop(guard);
     Ok(serde_json::json!({ "path": path.to_string_lossy(), "size": size }))
 }
 
@@ -1951,19 +2014,23 @@ pub fn upsert_fragment_cache_record(
     source_ifc_size: i64,
     fragment_file_size: i64,
     cache_version: String,
+    source_gim_sha256: String,
 ) -> Result<(), String> {
     let conn = state
         .0
         .lock()
         .map_err(|e| format!("获取数据库锁失败: {}", e))?;
     ensure_project_exists(&conn, project_id)?;
+    // 写入记录前重新核对项目源身份，防止旧工程的异步任务在工程切换或
+    // 同路径文件更新后把旧 SHA 记录写入当前项目。
+    ensure_project_source_sha(&conn, project_id, Some(&source_gim_sha256))?;
     let now = now_ms();
     conn.execute(
-        "INSERT INTO substation_fragment_cache (project_id, entry_path, model_id, source_ifc_size, fragment_file_size, fragments_version, created_at_ms, updated_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "INSERT INTO substation_fragment_cache (project_id, entry_path, model_id, source_gim_sha256, source_ifc_size, fragment_file_size, fragments_version, created_at_ms, updated_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(project_id, entry_path) DO UPDATE SET
-           model_id = ?3, source_ifc_size = ?4, fragment_file_size = ?5, fragments_version = ?6, updated_at_ms = ?8",
-        params![project_id, entry_path, model_id, source_ifc_size, fragment_file_size, cache_version, now, now],
+           model_id = ?3, source_gim_sha256 = ?4, source_ifc_size = ?5, fragment_file_size = ?6, fragments_version = ?7, updated_at_ms = ?9",
+        params![project_id, entry_path, model_id, source_gim_sha256, source_ifc_size, fragment_file_size, cache_version, now, now],
     )
     .map_err(|e| format!("upsert substation_fragment_cache 失败: {}", e))?;
     Ok(())
@@ -1982,7 +2049,7 @@ pub fn get_fragment_cache_record(
         .map_err(|e| format!("获取数据库锁失败: {}", e))?;
     ensure_project_exists(&conn, project_id)?;
     let res = conn.query_row(
-        "SELECT id, project_id, entry_path, model_id, source_ifc_size, fragment_file_size, fragments_version, created_at_ms, updated_at_ms
+        "SELECT id, project_id, entry_path, model_id, source_gim_sha256, source_ifc_size, fragment_file_size, fragments_version, created_at_ms, updated_at_ms
          FROM substation_fragment_cache
          WHERE project_id = ?1 AND entry_path = ?2",
         params![project_id, entry_path],
@@ -1991,11 +2058,12 @@ pub fn get_fragment_cache_record(
             project_id: row.get(1)?,
             entry_path: row.get(2)?,
             model_id: row.get(3)?,
-            source_ifc_size: row.get(4)?,
-            fragment_file_size: row.get(5)?,
-            fragments_version: row.get(6)?,
-            created_at_ms: row.get(7)?,
-            updated_at_ms: row.get(8)?,
+            source_gim_sha256: row.get(4)?,
+            source_ifc_size: row.get(5)?,
+            fragment_file_size: row.get(6)?,
+            fragments_version: row.get(7)?,
+            created_at_ms: row.get(8)?,
+            updated_at_ms: row.get(9)?,
         }),
     );
     match res {
@@ -2014,6 +2082,7 @@ pub fn validate_fragment_cache(
     entry_path: String,
     source_ifc_size: i64,
     cache_version: String,
+    source_gim_sha256: String,
 ) -> Result<FragmentCacheValidation, String> {
     let conn = state
         .0
@@ -2023,7 +2092,7 @@ pub fn validate_fragment_cache(
 
     // 查询记录
     let res = conn.query_row(
-        "SELECT id, project_id, entry_path, model_id, source_ifc_size, fragment_file_size, fragments_version, created_at_ms, updated_at_ms
+        "SELECT id, project_id, entry_path, model_id, source_gim_sha256, source_ifc_size, fragment_file_size, fragments_version, created_at_ms, updated_at_ms
          FROM substation_fragment_cache
          WHERE project_id = ?1 AND entry_path = ?2",
         params![project_id, entry_path],
@@ -2032,11 +2101,12 @@ pub fn validate_fragment_cache(
             project_id: row.get(1)?,
             entry_path: row.get(2)?,
             model_id: row.get(3)?,
-            source_ifc_size: row.get(4)?,
-            fragment_file_size: row.get(5)?,
-            fragments_version: row.get(6)?,
-            created_at_ms: row.get(7)?,
-            updated_at_ms: row.get(8)?,
+            source_gim_sha256: row.get(4)?,
+            source_ifc_size: row.get(5)?,
+            fragment_file_size: row.get(6)?,
+            fragments_version: row.get(7)?,
+            created_at_ms: row.get(8)?,
+            updated_at_ms: row.get(9)?,
         }),
     );
     drop(conn);
@@ -2049,12 +2119,18 @@ pub fn validate_fragment_cache(
 
     let has_record = record.is_some();
     let stored_version = record.as_ref().map(|r| r.fragments_version.clone());
+    let stored_gim_sha256 = record.as_ref().map(|r| r.source_gim_sha256.clone());
     let stored_ifc_size = record.as_ref().map(|r| r.source_ifc_size);
 
     let version_match = stored_version
         .as_ref()
         .map(|v| v == &cache_version)
         .unwrap_or(false);
+    let source_gim_sha256_match = !source_gim_sha256.trim().is_empty()
+        && stored_gim_sha256
+            .as_deref()
+            .map(|stored| stored.eq_ignore_ascii_case(source_gim_sha256.trim()))
+            .unwrap_or(false);
     // source_ifc_size = 0 表示跳过大小校验（Fragments 缓存命中路径不读 IFC buffer）
     let size_match = if source_ifc_size == 0 {
         true
@@ -2064,7 +2140,7 @@ pub fn validate_fragment_cache(
             .unwrap_or(false)
     };
 
-    // 检查 fragments 文件是否存在且大小 > 0
+    // 检查 fragments 文件是否存在且大小 > 0，并与记录中的实际写入大小一致。
     let (file_exists, file_size) =
         match fragment_cache_file_path(&app_handle, project_id, &entry_path) {
             Ok(path) => match stdfs::metadata(&path) {
@@ -2074,7 +2150,16 @@ pub fn validate_fragment_cache(
             Err(_) => (false, 0),
         };
 
-    let valid = has_record && version_match && size_match && file_exists && file_size > 0;
+    let stored_fragment_size = record.as_ref().map(|r| r.fragment_file_size);
+    let fragment_file_size_match = stored_fragment_size
+        .map(|stored| fragment_file_size_matches(stored, file_size))
+        .unwrap_or(false);
+    let valid = has_record
+        && version_match
+        && source_gim_sha256_match
+        && size_match
+        && file_exists
+        && fragment_file_size_match;
 
     Ok(FragmentCacheValidation {
         project_id,
@@ -2083,9 +2168,12 @@ pub fn validate_fragment_cache(
         stored_fragments_version: stored_version,
         current_fragments_version: cache_version.clone(),
         fragments_version_match: version_match,
+        source_gim_sha256: stored_gim_sha256,
+        source_gim_sha256_match,
         source_ifc_size_match: size_match,
         fragment_file_exists: file_exists,
         fragment_file_size: file_size,
+        fragment_file_size_match,
         valid,
     })
 }
@@ -3675,6 +3763,8 @@ pub struct IfcCacheFileDiagnostic {
 pub struct FragmentCacheFileDiagnostic {
     pub entry_path: String,
     pub model_id: String,
+    pub source_gim_sha256: String,
+    pub source_gim_sha256_match: bool,
     pub source_ifc_size: i64,
     pub fragment_file_size_stored: i64,
     pub fragment_file_size_actual: u64,
@@ -3682,6 +3772,7 @@ pub struct FragmentCacheFileDiagnostic {
     pub current_fragments_cache_version: String,
     pub fragments_version_match: bool,
     pub fragment_file_exists: bool,
+    pub fragment_file_size_match: bool,
     pub valid: bool,
 }
 
@@ -3848,7 +3939,7 @@ pub fn get_project_cache_diagnostic(
     // 4. 查询 substation_fragment_cache 记录并诊断每个 fragments 缓存文件
     let mut frag_stmt = conn
         .prepare(
-            "SELECT entry_path, model_id, source_ifc_size, fragment_file_size, fragments_version
+            "SELECT entry_path, model_id, source_gim_sha256, source_ifc_size, fragment_file_size, fragments_version
              FROM substation_fragment_cache
              WHERE project_id = ?1
              ORDER BY entry_path ASC",
@@ -3859,9 +3950,10 @@ pub fn get_project_cache_diagnostic(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
+                row.get::<_, String>(2)?,
                 row.get::<_, i64>(3)?,
-                row.get::<_, String>(4)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
             ))
         })
         .map_err(|e| format!("查询 substation_fragment_cache 失败: {}", e))?;
@@ -3872,11 +3964,19 @@ pub fn get_project_cache_diagnostic(
     let mut fragment_cache_files: Vec<FragmentCacheFileDiagnostic> = Vec::new();
 
     for r in frag_rows {
-        let (entry_path, model_id, source_ifc_size, frag_size_stored, stored_version) =
-            r.map_err(|e| format!("读取 substation_fragment_cache 失败: {}", e))?;
+        let (
+            entry_path,
+            model_id,
+            source_gim_sha256,
+            source_ifc_size,
+            frag_size_stored,
+            stored_version,
+        ) = r.map_err(|e| format!("读取 substation_fragment_cache 失败: {}", e))?;
         fragment_cache_count += 1;
 
-        let version_match = stored_version == FRAGMENTS_CACHE_VERSION;
+        let version_match = fragment_cache_version_matches(&stored_version);
+        let source_gim_sha256_match =
+            !source_gim_sha256.is_empty() && source_gim_sha256.eq_ignore_ascii_case(&project.5);
         let (file_exists, file_size_actual) =
             match fragment_cache_file_path(app_handle, project_id, &entry_path) {
                 Ok(path) => match stdfs::metadata(&path) {
@@ -3886,7 +3986,10 @@ pub fn get_project_cache_diagnostic(
                 Err(_) => (false, 0),
             };
 
-        let frag_valid = version_match && file_exists && file_size_actual > 0;
+        let fragment_file_size_match =
+            fragment_file_size_matches(frag_size_stored, file_size_actual);
+        let frag_valid =
+            version_match && source_gim_sha256_match && file_exists && fragment_file_size_match;
         if frag_valid {
             valid_fragment_cache_count += 1;
         } else {
@@ -3896,6 +3999,8 @@ pub fn get_project_cache_diagnostic(
         fragment_cache_files.push(FragmentCacheFileDiagnostic {
             entry_path,
             model_id,
+            source_gim_sha256,
+            source_gim_sha256_match,
             source_ifc_size,
             fragment_file_size_stored: frag_size_stored,
             fragment_file_size_actual: file_size_actual,
@@ -3903,6 +4008,7 @@ pub fn get_project_cache_diagnostic(
             current_fragments_cache_version: FRAGMENTS_CACHE_VERSION.to_string(),
             fragments_version_match: version_match,
             fragment_file_exists: file_exists,
+            fragment_file_size_match,
             valid: frag_valid,
         });
     }
@@ -4634,8 +4740,10 @@ fn query_reachable_geometry(
     );
 
     let psm_t0 = Instant::now();
-    let mut phm_to_geometry: HashMap<String, Vec<(String, Option<String>, Option<String>, Option<f64>)>> =
-        HashMap::new();
+    let mut phm_to_geometry: HashMap<
+        String,
+        Vec<(String, Option<String>, Option<String>, Option<f64>)>,
+    > = HashMap::new();
     let mut psm_stmt = conn
         .prepare(
             "SELECT phm_path, solid_model_path, transform_matrix, color, phm_color_max_a
@@ -5051,6 +5159,28 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn fragment_cache_requires_exact_nonzero_file_size() {
+        assert!(fragment_file_size_matches(128, 128));
+        assert!(!fragment_file_size_matches(128, 127));
+        assert!(!fragment_file_size_matches(128, 0));
+        assert!(!fragment_file_size_matches(0, 128));
+        assert!(!fragment_file_size_matches(-1, 128));
+    }
+
+    #[test]
+    fn fragment_cache_diagnostic_accepts_composed_runtime_version() {
+        assert!(fragment_cache_version_matches(FRAGMENTS_CACHE_VERSION));
+        let composed = format!("{}|fragments@0.0.0|web-ifc@0.0.0", FRAGMENTS_CACHE_VERSION);
+        assert!(fragment_cache_version_matches(&composed));
+        assert!(!fragment_cache_version_matches(
+            "fragments-cache-v5|fragments@0.0.0"
+        ));
+        assert!(!fragment_cache_version_matches(
+            "fragments-cache-v60|fragments@0.0.0"
+        ));
+    }
 
     fn setup_geometry_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();

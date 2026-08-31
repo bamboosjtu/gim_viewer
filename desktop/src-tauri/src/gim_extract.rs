@@ -1,7 +1,8 @@
 //! acc-plan P0-2：GIM 归档原生解压（替代 libarchive.js WASM 路径）。
 //!
-//! 流程：读入 .gim 字节 → 定位 GIMPKG* 魔数后的压缩数据偏移 →
-//! 按签名分发 7z（sevenz-rust）/ ZIP（zip crate）解码 → 展平条目。
+//! 流程：定位 GIMPKG* 魔数后的压缩数据偏移 → 按签名分发 7z
+//! （sevenz-rust）/ ZIP（zip crate）解码 → 逐条交给调用方；兼容测试接口
+//! 仍可从字节返回条目集合，生产 Tauri 路径使用磁盘 reader + sink。
 //!
 //! 与前端 libarchive.js 路径的行为对齐：
 //! - 路径分隔符统一为 `/`，剥离 `./` 前缀
@@ -9,7 +10,9 @@
 //! - 头部文本区按 \0 分割字段（字段 1=项目编号，字段 2=项目名称），
 //!   连续 ≥4 个 \0 视为零填充开始
 
-use std::io::{Cursor, Read};
+use std::fs::File;
+use std::io::{self, Cursor, Read, Seek, SeekFrom};
+use std::path::Path;
 
 /// 解压结果：条目列表（相对路径 + 字节）与头部信息
 #[derive(Debug)]
@@ -161,6 +164,301 @@ impl Default for ExtractionQuota {
 
 fn quota_err(msg: String) -> String {
     format!("解压终止（超出资源配额）: {}", msg)
+}
+
+/// GIM 头部与归档元数据。原生磁盘路径只返回这部分信息，条目内容由
+/// `extract_archive_reader` 逐个交给 sink，不在此结构中累计。
+#[derive(Debug, Clone)]
+pub struct ExtractionMetadata {
+    pub magic: String,
+    pub project_id: Option<String>,
+    pub project_name: Option<String>,
+}
+
+/// 将位于 .gim 文件中间的归档暴露为从 0 开始的 Read + Seek。
+/// sevenz-rust/zip 会对归档起点执行相对 seek，不能直接把带 GIM 头部的
+/// File 传入 reader。
+struct OffsetReader<R> {
+    inner: R,
+    base: u64,
+    len: u64,
+    pos: u64,
+}
+
+impl<R: Read + Seek> OffsetReader<R> {
+    fn new(mut inner: R, base: u64, len: u64) -> io::Result<Self> {
+        inner.seek(SeekFrom::Start(base))?;
+        Ok(Self {
+            inner,
+            base,
+            len,
+            pos: 0,
+        })
+    }
+}
+
+impl<R: Read + Seek> Read for OffsetReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let remaining = self.len.saturating_sub(self.pos);
+        if remaining == 0 {
+            return Ok(0);
+        }
+        let max = usize::try_from(remaining).unwrap_or(usize::MAX);
+        let read_len = buf.len().min(max);
+        let n = self.inner.read(&mut buf[..read_len])?;
+        self.pos = self.pos.saturating_add(n as u64);
+        Ok(n)
+    }
+}
+
+impl<R: Read + Seek> Seek for OffsetReader<R> {
+    fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
+        let target = match from {
+            SeekFrom::Start(value) => i128::from(value),
+            SeekFrom::Current(value) => i128::from(self.pos) + i128::from(value),
+            SeekFrom::End(value) => i128::from(self.len) + i128::from(value),
+        };
+        if target < 0 || target > i128::from(self.len) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "归档相对 seek 越界",
+            ));
+        }
+        let target = target as u64;
+        let absolute = self
+            .base
+            .checked_add(target)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "归档 seek 溢出"))?;
+        self.inner.seek(SeekFrom::Start(absolute))?;
+        self.pos = target;
+        Ok(target)
+    }
+}
+
+fn parse_archive_prefix(data: &[u8]) -> Result<(usize, ExtractionMetadata, bool), String> {
+    let offset = find_archive_offset(data)
+        .ok_or_else(|| "未找到有效的 GIMPKG* 头部或压缩数据签名".to_string())?;
+    let (project_id, project_name) = parse_header_fields(data, offset);
+    let magic = String::from_utf8_lossy(&data[..magic_len(data)]).to_string();
+    let is_sevenz = data[offset..].starts_with(&SEVENZ_SIG);
+    Ok((
+        offset,
+        ExtractionMetadata {
+            magic,
+            project_id,
+            project_name,
+        },
+        is_sevenz,
+    ))
+}
+
+fn check_declared_size(
+    entry_count: &mut usize,
+    total_uncompressed: u64,
+    path: &str,
+    declared: u64,
+    archive_len: u64,
+    quota: &ExtractionQuota,
+) -> Result<(), String> {
+    if *entry_count >= quota.max_entries {
+        return Err(quota_err(format!("条目数超限（>{}）", quota.max_entries)));
+    }
+    if declared > quota.max_file_bytes {
+        return Err(quota_err(format!(
+            "单文件 {} 解压大小 {} 超限（>{})",
+            path, declared, quota.max_file_bytes
+        )));
+    }
+    let declared_total = total_uncompressed
+        .checked_add(declared)
+        .ok_or_else(|| quota_err("总解压量溢出".to_string()))?;
+    if declared_total > quota.max_total_uncompressed_bytes {
+        return Err(quota_err(format!(
+            "总解压量 {} 超限（>{}）",
+            declared_total, quota.max_total_uncompressed_bytes
+        )));
+    }
+    if declared_total > archive_len.saturating_mul(quota.max_compression_ratio) {
+        return Err(quota_err(format!(
+            "压缩比超限（>{}×，疑似压缩炸弹）",
+            quota.max_compression_ratio
+        )));
+    }
+    *entry_count += 1;
+    Ok(())
+}
+
+fn read_entry_bytes<R: Read + ?Sized>(
+    stream: &mut R,
+    path: &str,
+    declared: u64,
+    total_uncompressed: u64,
+    archive_len: u64,
+    quota: &ExtractionQuota,
+) -> Result<(Vec<u8>, u64), String> {
+    // 声明大小不可信：限制读取上限，并将预分配封顶，避免恶意条目造成
+    // 巨量单次分配。调用方已完成声明大小配额检查。
+    let capacity = declared.min(quota.max_file_bytes).min(64 * 1024 * 1024) as usize;
+    let mut buf = Vec::with_capacity(capacity);
+    stream
+        .take(quota.max_file_bytes.saturating_add(1))
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("读取条目 {} 失败: {}", path, e))?;
+    if buf.len() as u64 > quota.max_file_bytes {
+        return Err(quota_err(format!(
+            "单文件 {} 实际解压大小超过 {}",
+            path, quota.max_file_bytes
+        )));
+    }
+    let actual_total = total_uncompressed
+        .checked_add(buf.len() as u64)
+        .ok_or_else(|| quota_err("总解压量溢出".to_string()))?;
+    if actual_total > quota.max_total_uncompressed_bytes {
+        return Err(quota_err(format!(
+            "实际总解压量 {} 超限（>{}）",
+            actual_total, quota.max_total_uncompressed_bytes
+        )));
+    }
+    if actual_total > archive_len.saturating_mul(quota.max_compression_ratio) {
+        return Err(quota_err(format!(
+            "实际压缩比超限（>{}×，疑似压缩炸弹）",
+            quota.max_compression_ratio
+        )));
+    }
+    Ok((buf, actual_total))
+}
+
+/// 从已定位的归档 reader 逐条解压。sink 返回后当前条目的字节立即释放，
+/// 因而原生落盘路径的内存上限约为最大单文件 + 解码器工作集。
+fn extract_archive_reader<R, F>(
+    reader: R,
+    archive_len: u64,
+    is_sevenz: bool,
+    quota: &ExtractionQuota,
+    mut sink: F,
+) -> Result<(), String>
+where
+    R: Read + Seek,
+    F: FnMut(String, Vec<u8>) -> Result<(), String>,
+{
+    let mut entry_count = 0usize;
+    let mut total_uncompressed = 0u64;
+
+    if is_sevenz {
+        let mut reader =
+            sevenz_rust::SevenZReader::new(reader, archive_len, sevenz_rust::Password::empty())
+                .map_err(|e| format!("打开 7z 归档失败: {}", e))?;
+        reader
+            .for_each_entries(|entry, stream| {
+                if entry.is_directory() || !entry.has_stream() {
+                    return Ok(true);
+                }
+                let path = normalize_path(&entry.name);
+                validate_archive_path(&path).map_err(sevenz_rust::Error::other)?;
+                check_declared_size(
+                    &mut entry_count,
+                    total_uncompressed,
+                    &path,
+                    entry.size(),
+                    archive_len,
+                    quota,
+                )
+                .map_err(sevenz_rust::Error::other)?;
+                let (bytes, actual_total) = read_entry_bytes(
+                    stream,
+                    &path,
+                    entry.size(),
+                    total_uncompressed,
+                    archive_len,
+                    quota,
+                )
+                .map_err(sevenz_rust::Error::other)?;
+                total_uncompressed = actual_total;
+                sink(path, bytes).map_err(sevenz_rust::Error::other)?;
+                Ok(true)
+            })
+            .map_err(|e| {
+                let msg = e.to_string();
+                if msg.starts_with("解压终止") {
+                    msg
+                } else {
+                    format!("7z 解压失败: {}", e)
+                }
+            })?;
+    } else {
+        let mut archive =
+            zip::ZipArchive::new(reader).map_err(|e| format!("打开 ZIP 归档失败: {}", e))?;
+        for i in 0..archive.len() {
+            let mut file = archive
+                .by_index(i)
+                .map_err(|e| format!("ZIP 条目读取失败: {}", e))?;
+            if file.is_dir() {
+                continue;
+            }
+            let raw_name = file.name_raw().to_vec();
+            let path = normalize_path(&String::from_utf8_lossy(&raw_name));
+            validate_archive_path(&path)?;
+            if path.ends_with('/') {
+                continue;
+            }
+            let declared = file.size();
+            check_declared_size(
+                &mut entry_count,
+                total_uncompressed,
+                &path,
+                declared,
+                archive_len,
+                quota,
+            )?;
+            let (bytes, actual_total) = read_entry_bytes(
+                &mut file,
+                &path,
+                declared,
+                total_uncompressed,
+                archive_len,
+                quota,
+            )?;
+            total_uncompressed = actual_total;
+            sink(path, bytes)?;
+        }
+    }
+    Ok(())
+}
+
+/// 从磁盘上的 .gim 逐条解压。只读取最多 1 MiB 头部来定位归档，归档 reader
+/// 直接 seek 到压缩数据；不会将整个输入文件读入内存，也不会累计所有条目。
+pub fn extract_from_path_with_quota<F>(
+    path: &Path,
+    quota: &ExtractionQuota,
+    sink: F,
+) -> Result<ExtractionMetadata, String>
+where
+    F: FnMut(String, Vec<u8>) -> Result<(), String>,
+{
+    let metadata =
+        std::fs::metadata(path).map_err(|e| format!("读取 GIM 文件元信息失败: {}", e))?;
+    if metadata.len() > quota.max_archive_bytes {
+        return Err(quota_err(format!(
+            "GIM 文件大小 {} 超限（>{})",
+            metadata.len(),
+            quota.max_archive_bytes
+        )));
+    }
+    let mut file = File::open(path).map_err(|e| format!("打开 GIM 文件失败: {}", e))?;
+    let prefix_len = usize::try_from(metadata.len().min(SIGNATURE_SEARCH_LIMIT as u64))
+        .map_err(|_| "GIM 头部窗口长度溢出".to_string())?;
+    let mut prefix = vec![0u8; prefix_len];
+    file.read_exact(&mut prefix)
+        .map_err(|e| format!("读取 GIM 头部失败: {}", e))?;
+    let (offset, info, is_sevenz) = parse_archive_prefix(&prefix)?;
+    let archive_len = metadata
+        .len()
+        .checked_sub(offset as u64)
+        .ok_or_else(|| "GIM 归档偏移越界".to_string())?;
+    let reader = OffsetReader::new(file, offset as u64, archive_len)
+        .map_err(|e| format!("定位 GIM 归档失败: {}", e))?;
+    extract_archive_reader(reader, archive_len, is_sevenz, quota, sink)?;
+    Ok(info)
 }
 
 /// 从 .gim 字节中提取全部文件条目（自定义资源配额）
@@ -540,6 +838,51 @@ mod tests {
         assert_eq!(result.entries.len(), 1);
     }
 
+    /// 磁盘优先路径只逐条交付条目，验证头部窗口定位和 ZIP reader 的相对 seek。
+    #[test]
+    fn extracts_path_with_stream_sink() {
+        let mut zip_buf = Cursor::new(Vec::new());
+        {
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            let mut w = zip::ZipWriter::new(&mut zip_buf);
+            w.start_file("CBM/project.cbm", options).unwrap();
+            std::io::Write::write_all(&mut w, b"TYPE=TS\n").unwrap();
+            w.start_file("MOD/example.mod", options).unwrap();
+            std::io::Write::write_all(&mut w, b"MOD=1\n").unwrap();
+            w.finish().unwrap();
+        }
+        let gim = build_gim_bytes(&zip_buf.into_inner(), b'S', "stream-test");
+        let path = std::env::temp_dir().join(format!(
+            "gim-viewer-stream-{}-{}.gim",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, gim).unwrap();
+
+        let mut seen = Vec::new();
+        let info =
+            extract_from_path_with_quota(&path, &ExtractionQuota::default(), |name, bytes| {
+                seen.push((name, bytes));
+                Ok(())
+            })
+            .expect("磁盘逐条解压应成功");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(info.magic, "GIMPKGS");
+        assert_eq!(info.project_name.as_deref(), Some("stream-test"));
+        assert_eq!(seen.len(), 2);
+        assert!(seen
+            .iter()
+            .any(|(name, bytes)| name == "CBM/project.cbm" && bytes == b"TYPE=TS\n"));
+        assert!(seen
+            .iter()
+            .any(|(name, bytes)| name == "MOD/example.mod" && bytes == b"MOD=1\n"));
+    }
+
     /// 真实样本验证：对 demo/line02.gim 执行完整解压，校验条目规模与关键文件。
     /// 样本缺失时静默跳过（CI 无 demo 数据）。
     #[test]
@@ -554,31 +897,30 @@ mod tests {
             eprintln!("[skip] demo/line02.gim 不存在，跳过真实样本验证");
             return;
         };
-        let t0 = std::time::Instant::now();
-        let data = std::fs::read(path).expect("读取样本失败");
-        let read_ms = t0.elapsed().as_millis();
-
+        let file_size = std::fs::metadata(path).expect("读取样本元信息失败").len();
         let t1 = std::time::Instant::now();
-        let result = extract_from_bytes_with_quota(&data, &ExtractionQuota::default())
-            .expect("真实样本解压失败");
+        let mut entry_count = 0usize;
+        let mut has_project_cbm = false;
+        let result = extract_from_path_with_quota(
+            std::path::Path::new(path),
+            &ExtractionQuota::default(),
+            |entry_path, _bytes| {
+                entry_count += 1;
+                if entry_path.eq_ignore_ascii_case("cbm/project.cbm") {
+                    has_project_cbm = true;
+                }
+                Ok(())
+            },
+        )
+        .expect("真实样本磁盘优先解压失败");
         let extract_ms = t1.elapsed().as_millis();
 
         println!(
-            "[perf] line02.gim: {} bytes, 读取 {}ms, 原生解压 {}ms, 条目数 {}",
-            data.len(),
-            read_ms,
-            extract_ms,
-            result.entries.len()
+            "[perf] line02.gim: {} bytes, 磁盘优先原生解压 {}ms, 条目数 {}",
+            file_size, extract_ms, entry_count
         );
         assert_eq!(result.magic, "GIMPKGT");
-        assert!(
-            result.entries.len() > 1000,
-            "条目数异常: {}",
-            result.entries.len()
-        );
-        assert!(result
-            .entries
-            .iter()
-            .any(|(p, _)| p.to_lowercase() == "cbm/project.cbm"));
+        assert!(entry_count > 1000, "条目数异常: {}", entry_count);
+        assert!(has_project_cbm);
     }
 }

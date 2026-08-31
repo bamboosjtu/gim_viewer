@@ -2,6 +2,7 @@ import type { CbmNode } from '../gim/types.js';
 import type { AppState } from '../app/state.js';
 import { cbmTreePanel } from './dom.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
+import { resolveIfcModelId } from '../gim/modelIdentity.js';
 import { renderSearchBox } from './searchBox.js';
 import type { SearchItem } from './searchBox.js';
 import type { IfcSpatialNode, IfcSpatialObject } from '../gim/ifcSpatialParser.js';
@@ -52,7 +53,7 @@ export function renderCbmTreeUI(
   icon.textContent = ENTITY_ICONS[node.entityName] || '□';
   const label = document.createElement('span');
   label.className = 'tree-label';
-  label.textContent = getNodeDisplayName(node, state.ifcGuidToName);
+  label.textContent = getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries);
   // title 提供详细路径信息（CBM 真实节点显示 CBM 路径，DEV 虚拟节点显示 DEV 路径）
   const tooltipParts: string[] = [node.path];
   if (node.devSymbolName) tooltipParts.push(`设备名: ${node.devSymbolName}`);
@@ -106,7 +107,7 @@ function buildCbmSearchIndex(state: AppState, root: CbmNode): SearchItem[] {
       seen.add(node.path);
       items.push({
         key: node.path,
-        title: getNodeDisplayName(node, state.ifcGuidToName),
+        title: getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries),
         subtitle: [node.entityName, node.devType].filter(Boolean).join(' · ') || undefined,
       });
     }
@@ -339,8 +340,8 @@ export function handleSubstationPropertyReference(
   } else if (detail.kind === 'ifc') {
     target = nodes.find((node) => pathMatches(node.ifcFile));
     if (!target) {
-      const entry = state.currentIfcEntries.find((item) => pathMatches(item.path) || item.modelId.toLowerCase() === fileName.replace(/\.ifc$/i, ''));
-      if (entry) target = nodes.find((node) => node.ifcFile.toLowerCase().replace(/\.ifc$/i, '') === entry.modelId.toLowerCase());
+      const entry = state.currentIfcEntries.find((item) => pathMatches(item.path) || pathMatches(item.name));
+      if (entry) target = nodes.find((node) => resolveIfcModelId(node.ifcFile, state.currentIfcEntries) === entry.modelId);
     }
   } else if (detail.kind === 'phm' || detail.kind === 'mod' || detail.kind === 'stl') {
     // PHM/MOD/STL 不是独立 CBM 节点：优先利用已加载几何实例携带的
