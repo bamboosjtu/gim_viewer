@@ -84,11 +84,13 @@ export async function cleanupBeforeOpenNewProject(
       if (!isCurrentCleanup()) return false;
       const ctx = runtime.ctx;
 
-      // 合并 state.loadedModels 与 ctx.fragments.list 的 modelId
+      // 合并 state.loadedModels 中记录的 runtime ID 与 ctx.fragments.list 的 key
       // - state.loadedModels 可能比 ctx 多（dispose 失败的残留索引）
       // - ctx.fragments.list 可能比 state 多（state 被外部 reset 但 ctx 未清）
       const ids = new Set<string>();
-      for (const [modelId] of state.loadedModels) ids.add(modelId);
+      for (const [logicalModelId, loaded] of state.loadedModels) {
+        ids.add(loaded.runtimeModelId || state.ifcRuntimeModelIds.get(logicalModelId) || logicalModelId);
+      }
       for (const modelId of ctx.fragments.list.keys()) ids.add(modelId);
 
       attemptedCount = ids.size;

@@ -723,7 +723,8 @@ export async function showNodeProperties(ctx: ViewerContext, state: AppState, no
   // IFC 构件原生属性 → 参数；GUID 关联 → 关系
   if (node.ifcFile && node.ifcGuid) {
     const modelId = resolveIfcModelId(node.ifcFile, state.currentIfcEntries);
-    const model = modelId ? ctx.fragments.list.get(modelId) : undefined;
+    const runtimeModelId = modelId ? state.getRuntimeModelId(modelId) : '';
+    const model = runtimeModelId ? ctx.fragments.list.get(runtimeModelId) : undefined;
     if (modelId && model) {
       try {
         const localIds = await model.getLocalIdsByGuids([node.ifcGuid]);
@@ -760,7 +761,9 @@ export async function showNodeProperties(ctx: ViewerContext, state: AppState, no
 
 /** 展示 IFC 构件属性（从 3D 点击触发） */
 export async function showIfcElementProperties(ctx: ViewerContext, state: AppState, modelId: string, localId: number): Promise<void> {
-  const model = ctx.fragments.list.get(modelId);
+  const logicalModelId = state.resolveLogicalModelId(modelId) ?? modelId;
+  const runtimeModelId = state.ifcRuntimeModelIds.get(logicalModelId) ?? modelId;
+  const model = ctx.fragments.list.get(runtimeModelId);
   if (!model) return;
 
   let guid: string | null = null;
@@ -769,16 +772,16 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
     const guids = await model.getGuidsByLocalIds([localId]);
     guid = guids[0] || null;
     if (guid) {
-      gimNode = state.ifcGuidIndex.get(`${modelId}:${guid}`)
+      gimNode = state.ifcGuidIndex.get(`${logicalModelId}:${guid}`)
         // 兼容升级前以 basename.ifc 为 key 的旧内存索引。
-        ?? state.ifcGuidIndex.get(`${modelId}.ifc:${guid}`)
+        ?? state.ifcGuidIndex.get(`${logicalModelId}.ifc:${guid}`)
         ?? null;
     }
   } catch { /* GUID 获取失败 */ }
 
   // 概览：构件身份 + GIM 设备
   const ov: Array<[string, string | FileReferenceValue]> = [
-    ['模型', fileReferenceValue('ifc', ifcReferencePath(modelId, state.currentIfcEntries))],
+    ['模型', fileReferenceValue('ifc', ifcReferencePath(logicalModelId, state.currentIfcEntries))],
     ['LocalId', String(localId)],
   ];
   if (guid) {
@@ -814,7 +817,7 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
 
   // 来源：模型与 GUID
   const source = sectionHtml('来源引用', [
-    ['IFC 模型', fileReferenceValue('ifc', ifcReferencePath(modelId, state.currentIfcEntries))],
+    ['IFC 模型', fileReferenceValue('ifc', ifcReferencePath(logicalModelId, state.currentIfcEntries))],
     ['LocalId', String(localId)],
     ...(guid ? ([['GUID', guid]] as Array<[string, string | FileReferenceValue]>) : []),
   ]);

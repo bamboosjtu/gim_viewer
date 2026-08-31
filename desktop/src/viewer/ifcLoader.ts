@@ -1,14 +1,15 @@
 import fragmentsWorkerUrl from '@thatopen/fragments/worker?url';
 import type { ViewerContext } from './viewerEngine.js';
-import type { AppState } from '../app/state.js';
+import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { resolveWebIfcWasmBaseUrl } from './wasmAssets.js';
 import { DEBUG_IFC_LOAD, DEBUG_FRAGMENTS } from '../config/debug.js';
 import { debugLog, debugWarn } from '../utils/logger.js';
 import { createIfcModelId } from '../gim/modelIdentity.js';
 
 export type ModelEventCallbacks = {
-  onModelAdded: (modelId: string) => void;
-  onModelRemoved: (modelId: string) => void;
+  /** 回调使用 logical modelId；Fragments 实际 key 通过第二参数传递。 */
+  onModelAdded: (modelId: string, runtimeModelId: string) => void;
+  onModelRemoved: (modelId: string, runtimeModelId: string) => void;
 };
 
 /**
@@ -93,6 +94,18 @@ export function registerModelEvents(
   callbacks: ModelEventCallbacks,
 ): void {
   ctx.fragments.list.onItemSet.add(({ value: model }) => {
+    const runtimeModelId = model.modelId;
+    // Fragments 事件可能在 IFC load() 的 await 之后才到达。只有当前会话
+    // 登记过的 runtime ID 才能进入 scene；旧工程迟到的模型直接销毁，
+    // 不更新 loadedModels/UI。
+    if (!state.isCurrentRuntimeModel(runtimeModelId)) {
+      debugWarn(DEBUG_FRAGMENTS, `[Fragments] 拒绝过期/未知模型: ${runtimeModelId}`);
+      queueMicrotask(() => {
+        try { ctx.fragments.core.disposeModel(runtimeModelId); } catch { /* 模型可能尚未完全登记 */ }
+      });
+      return;
+    }
+    const logicalModelId = state.resolveLogicalModelId(runtimeModelId) ?? runtimeModelId;
     // 顺序：先加入 scene + state + UI（模型生命周期状态可见），再触发 fragments update
     // 即使 update 报错（如 "Malformed tile"），模型生命周期状态也要可见，便于后续清理
     // 不让 state 与 ctx.fragments.list 继续不同步
@@ -100,22 +113,39 @@ export function registerModelEvents(
       model.useCamera((ctx.world.camera as any).three);
       (ctx.world.scene as any).three.add(model.object);
 
-      state.loadedModels.set(model.modelId, { modelId: model.modelId, visible: true });
-      callbacks.onModelAdded(model.modelId);
+      state.loadedModels.set(logicalModelId, {
+        modelId: logicalModelId,
+        runtimeModelId,
+        visible: true,
+      });
+      callbacks.onModelAdded(logicalModelId, runtimeModelId);
 
       // update(true) 强制重建 virtual tiles，最可能抛 "Malformed tile"
       // warn 中带 modelId，方便定位是哪一个 IFC 出问题
       safeFragmentsUpdate(ctx, `model-added:${model.modelId}`, true);
     } catch (err) {
-      console.error(`[IFC Loader] onItemSet failed: ${model.modelId}`, err);
+      console.error(`[IFC Loader] onItemSet failed: ${runtimeModelId}`, err);
     }
   });
   ctx.fragments.list.onBeforeDelete.add(({ value: model }) => {
     (ctx.world.scene as any).three.remove(model.object);
   });
-  ctx.fragments.list.onItemDeleted.add((modelId) => {
-    callbacks.onModelRemoved(modelId);
-    state.loadedModels.delete(modelId);
+  ctx.fragments.list.onItemDeleted.add((runtimeModelId) => {
+    const logicalModelId = state.resolveLogicalModelId(runtimeModelId)
+      ?? Array.from(state.loadedModels.values()).find((item) => item.runtimeModelId === runtimeModelId)?.modelId
+      ?? runtimeModelId;
+    // 旧会话的迟到删除事件不能把同一 logical ID 的新会话模型/UI 行删掉。
+    // 只有当前 loadedModels 行仍指向这一个 runtime ID 时，才触发 UI 删除。
+    const currentLoaded = state.loadedModels.get(logicalModelId);
+    if (!currentLoaded || currentLoaded.runtimeModelId === runtimeModelId) {
+      callbacks.onModelRemoved(logicalModelId, runtimeModelId);
+      state.loadedModels.delete(logicalModelId);
+      if (state.ifcRuntimeModelIds.get(logicalModelId) === runtimeModelId) {
+        state.ifcRuntimeModelIds.delete(logicalModelId);
+      }
+    }
+    state.ifcLogicalModelIds.delete(runtimeModelId);
+    state.ifcRuntimeModelOwners.delete(runtimeModelId);
   });
   ctx.fragments.core.models.materials.list.onItemSet.add(({ value: material }) => {
     if (!('isLodMaterial' in material && material.isLodMaterial)) {
@@ -141,6 +171,7 @@ export async function ensureEngineReady(
  * 直接加载 IFC Buffer（不启用 Fragments 缓存）。
  * 用于本地 IFC 打开等无 project_id 的场景。
  * GIM IFC entry 加载请使用 ifcEntryLoader.loadIfcEntry。
+ * @param options 可选的工程会话快照；传入后可在工程切换时丢弃迟到加载。
  */
 export async function loadIfcBuffer(
   ctx: ViewerContext,
@@ -149,16 +180,30 @@ export async function loadIfcBuffer(
   state: AppState,
   onProgress?: (progress: number) => void,
   identityPath?: string,
+  options: { session?: ProjectLoadSession } = {},
 ): Promise<void> {
   const modelId = createIfcModelId(identityPath || name);
+  const session = options.session ?? state.captureProjectSession();
+  const isCurrent = () => state.isCurrentSession(session);
+  if (!isCurrent()) return;
+  const runtimeModelId = state.getRuntimeModelId(modelId, session);
 
   if (state.loadedModels.has(modelId)) {
     debugLog(DEBUG_IFC_LOAD, `[IFC Loader] 模型已加载，跳过: ${modelId}`);
     return;
   }
 
-  await ctx.ifcLoader.load(buffer, true, modelId, {
-    processData: { progressCallback: (progress) => { onProgress?.(progress); } },
+  state.registerIfcRuntimeModel(modelId, runtimeModelId, session);
+
+  const reportProgress = (progress: number) => {
+    if (isCurrent()) onProgress?.(progress);
+  };
+  await ctx.ifcLoader.load(buffer, true, runtimeModelId, {
+    processData: { progressCallback: reportProgress },
   });
+  if (!isCurrent()) {
+    try { ctx.fragments.core.disposeModel(runtimeModelId); } catch { /* 事件尚未登记时无需清理 */ }
+    return;
+  }
   // onItemSet 事件已更新 state.loadedModels
 }

@@ -39,7 +39,8 @@ macro_rules! debug_perf_log {
 /// v14: PARTINDEX 是 DEV SUBDEVICE 的 CBM 语义别名，不作为第二个几何查询起点，避免遗漏局部矩阵的重复部件
 /// v15: IFC 路径解析兼容任意目录（Bentley 导出 IFC 位于 CBM/ 而非 DEV/），旧缓存存有错误的 DEV/ 路径需失效重建
 /// v16: 资源上限、几何 ready 提交协议、线路缓存 session 校验
-pub const PARSER_VERSION: &str = "gim-parser-v18";
+/// v19: IFC 空间索引改为逐模型增量构建；运行时 IFC 会话身份与模型事件隔离
+pub const PARSER_VERSION: &str = "gim-parser-v19";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建

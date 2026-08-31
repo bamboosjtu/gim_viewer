@@ -21,23 +21,37 @@ export async function openIfcWithDialog(
     // 1. 对话框立即打开（无 3D 依赖）
     const filePaths = await openIfcFilePaths();
     if (!filePaths || filePaths.length === 0) return;
+    const session = state.captureProjectSession();
     btnLoadLocal.disabled = true;
     try {
       // 2. 加载 3D 引擎
       showLoading('正在加载 3D 引擎...');
       const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
       const runtime = await getViewerRuntimeWithUI(state, showMessage);
+      if (!state.isCurrentSession(session)) return;
       const { readFileBytes } = await import('@desktop/fileReader.js');
 
       // 3. 逐个加载 IFC
       await ensureEngineReady(runtime.ctx, state, runtime.modelCallbacks);
+      if (!state.isCurrentSession(session)) return;
       for (const fp of filePaths) {
+        if (!state.isCurrentSession(session)) return;
         showLoading(`正在加载 ${fp}...`);
         const ab = await readFileBytes(fp);
+        if (!state.isCurrentSession(session)) return;
         const buffer = new Uint8Array(ab);
         const name = (fp.split(/[\\/]/).pop() || 'model.ifc').replace(/\.ifc$/i, '');
-        await loadIfcBuffer(runtime.ctx, name, buffer, state, (p) => showLoading(`${name}: ${Math.round(p * 100)}%`), fp);
+        await loadIfcBuffer(
+          runtime.ctx,
+          name,
+          buffer,
+          state,
+          (p) => showLoading(`${name}: ${Math.round(p * 100)}%`),
+          fp,
+          { session },
+        );
       }
+      if (!state.isCurrentSession(session)) return;
       emptyTipEl.style.display = 'none';
       fitCameraToScene(runtime.ctx, state);
     } catch (err) {
@@ -57,18 +71,32 @@ export async function openIfcWithDialog(
       fileInput.removeEventListener('change', handler);
       const files = Array.from(fileInput.files || []);
       if (files.length === 0) { resolve(); return; }
+      const session = state.captureProjectSession();
       btnLoadLocal.disabled = true;
       try {
         showLoading('正在加载 3D 引擎...');
         const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
         const runtime = await getViewerRuntimeWithUI(state, showMessage);
+        if (!state.isCurrentSession(session)) return;
         await ensureEngineReady(runtime.ctx, state, runtime.modelCallbacks);
+        if (!state.isCurrentSession(session)) return;
         for (const file of files) {
+          if (!state.isCurrentSession(session)) return;
           showLoading(`正在加载 ${file.name}...`);
           const buffer = new Uint8Array(await file.arrayBuffer());
+          if (!state.isCurrentSession(session)) return;
           const name = file.name.replace(/\.ifc$/i, '');
-          await loadIfcBuffer(runtime.ctx, name, buffer, state, (p) => showLoading(`${file.name}: ${Math.round(p * 100)}%`), file.webkitRelativePath || file.name);
+          await loadIfcBuffer(
+            runtime.ctx,
+            name,
+            buffer,
+            state,
+            (p) => showLoading(`${file.name}: ${Math.round(p * 100)}%`),
+            file.webkitRelativePath || file.name,
+            { session },
+          );
         }
+        if (!state.isCurrentSession(session)) return;
         emptyTipEl.style.display = 'none';
         fitCameraToScene(runtime.ctx, state);
       } catch (err) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createIfcModelId, normalizeEntryPath, resolveIfcModelId } from '../modelIdentity.js';
+import { createIfcModelId, createIfcRuntimeModelId, normalizeEntryPath, resolveIfcModelId } from '../modelIdentity.js';
 import { resolveIfcPath, scanIfcFiles } from '../gimIndexer.js';
 
 function files(entries: Record<string, string>): Map<string, File> {
@@ -11,6 +11,17 @@ describe('IFC model identity', () => {
     expect(normalizeEntryPath('./DEV\\A\\foo.ifc')).toBe('dev/a/foo.ifc');
     expect(createIfcModelId('./DEV\\A\\foo.ifc')).toBe(createIfcModelId('dev/a/foo.ifc'));
     expect(createIfcModelId('DEV/A/foo.ifc')).not.toBe(createIfcModelId('DEV/B/foo.ifc'));
+  });
+
+  it('运行时 ID 绑定源 GIM 身份，同时保持 logical ID 稳定', () => {
+    const logical = createIfcModelId('DEV/model.ifc');
+    const runtimeA = createIfcRuntimeModelId('sha-a', logical);
+    const runtimeB = createIfcRuntimeModelId('sha-b', logical);
+    expect(runtimeA).not.toBe(logical);
+    expect(runtimeA).not.toBe(runtimeB);
+    expect(runtimeA).toBe(createIfcRuntimeModelId('SHA-A', logical));
+    expect(createIfcRuntimeModelId('sha-a', logical, 1))
+      .not.toBe(createIfcRuntimeModelId('sha-a', logical, 2));
   });
 
   it('重复 basename 不静默选择第一个', () => {

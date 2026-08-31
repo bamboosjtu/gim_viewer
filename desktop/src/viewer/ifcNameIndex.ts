@@ -1,6 +1,6 @@
 import type { CbmNode } from '../gim/types.js';
 import type { ViewerContext } from './viewerEngine.js';
-import type { AppState } from '../app/state.js';
+import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
@@ -16,8 +16,16 @@ function isPlaceholderIfcName(name: string): boolean {
   return tl === 'other' || tl === 'others';
 }
 
-/** IFC 模型加载后，构建 GUID → 名称索引 */
-export async function buildIfcNameIndex(ctx: ViewerContext, state: AppState): Promise<void> {
+/** IFC 模型加载后，构建 GUID → 名称索引。 */
+export async function buildIfcNameIndex(
+  ctx: ViewerContext,
+  state: AppState,
+  options: { session?: ProjectLoadSession } = {},
+): Promise<void> {
+  const session = options.session ?? state.captureProjectSession();
+  const isCurrent = () => state.isCurrentSession(session);
+  if (!isCurrent()) return;
+
   // 按 modelId 分组收集 GUID
   const byModel = new Map<string, { guid: string; node: CbmNode }[]>();
   for (const [, node] of state.ifcGuidIndex) {
@@ -29,15 +37,19 @@ export async function buildIfcNameIndex(ctx: ViewerContext, state: AppState): Pr
   }
 
   for (const [modelId, entries] of byModel) {
-    const model = ctx.fragments.list.get(modelId);
+    if (!isCurrent()) return;
+    const runtimeModelId = state.getRuntimeModelId(modelId, session);
+    const model = ctx.fragments.list.get(runtimeModelId);
     if (!model) continue;
     const guids = entries.map(e => e.guid);
     try {
       const localIds = await model.getLocalIdsByGuids(guids);
+      if (!isCurrent()) return;
       const validEntries = entries.filter((_, i) => localIds[i] !== null);
       const validLocalIds = localIds.filter((id): id is number => id !== null);
       if (validLocalIds.length === 0) continue;
       const itemsData = await model.getItemsData(validLocalIds, { attributesDefault: true });
+      if (!isCurrent()) return;
       for (let i = 0; i < validEntries.length; i++) {
         const data = itemsData[i] as unknown as Record<string, unknown>;
         if (!data) continue;
@@ -49,7 +61,7 @@ export async function buildIfcNameIndex(ctx: ViewerContext, state: AppState): Pr
             break;
           }
         }
-        if (name && !isPlaceholderIfcName(name)) {
+        if (name && !isPlaceholderIfcName(name) && isCurrent()) {
           state.ifcGuidToName.set(`${modelId}:${validEntries[i].guid}`, name);
           validEntries[i].node.name = name;
         }

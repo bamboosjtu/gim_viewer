@@ -23,7 +23,7 @@
 
 import * as THREE from 'three';
 import type * as OBC from '@thatopen/components';
-import type { AppState } from '../app/state.js';
+import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 
@@ -107,23 +107,30 @@ export function applyProjectSourceToViewer(group: THREE.Group, matrix: THREE.Mat
 export async function syncProjectSourceToViewerFromFragments(
   state: AppState,
   fragments: OBC.FragmentsManager,
+  options: { session?: ProjectLoadSession } = {},
 ): Promise<boolean> {
+  const session = options.session;
+  const isCurrent = () => session == null || state.isCurrentSession(session);
+  if (!isCurrent()) return false;
   if (state.projectSourceToViewerMatrix) {
     debugLog(DEBUG_IFC_LOAD, '[CoordAlign] 已存在项目坐标矩阵，跳过 Fragments 自动同步');
     return false;
   }
 
   for (let i = 0; i < FRAGMENTS_BASE_WAIT_FRAMES; i++) {
+    if (!isCurrent()) return false;
     if (fragments.baseCoordinationModel) break;
     await nextAnimationFrame();
   }
 
+  if (!isCurrent()) return false;
   const base = fragments.baseCoordinationMatrix;
   if (!base) return false;
 
   // 组合：baseCoordinationMatrix（Y-up 平移）× ZUpToYUp（Z-up→Y-up 旋转）
   // 应用顺序：先旋转 GIM 几何到 Y-up，再用 baseCoordinationMatrix 平移到 viewer 原点
   const combined = base.clone().multiply(Z_UP_TO_Y_UP);
+  if (!isCurrent()) return false;
   state.projectSourceToViewerMatrix = combined;
 
   debugLog(DEBUG_IFC_LOAD, '[CoordAlign] 已从 Fragments baseCoordinationMatrix 同步并组合 Z-up→Y-up 旋转', {

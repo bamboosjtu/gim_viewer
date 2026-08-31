@@ -1006,7 +1006,11 @@ export function handleLinePropertyReference(detail: PropertyReferenceDetail): bo
 }
 
 /** 显示线路节点属性；MOD 解析异步补到“参数”页签，避免阻塞树交互。 */
-export function showLineNodeProperties(node: GimGraphNode, state: AppState | null = currentLineState): void {
+export function showLineNodeProperties(
+  node: GimGraphNode,
+  state: AppState | null = currentLineState,
+  displayLabel?: string,
+): void {
   const generation = ++lineInspectorGeneration;
   currentLineInspectorNode = node;
   currentLineInspectorSourcePaths = new Set([
@@ -1021,18 +1025,19 @@ export function showLineNodeProperties(node: GimGraphNode, state: AppState | nul
     ...node.refs.ifcFiles,
   ]);
   const attrs = state ? buildLineAttributeIndex(state) : undefined;
-  showLineInspector(nodeDisplayName(node), buildLineNodeBuckets(node, attrs));
+  const title = displayLabel?.trim() || nodeDisplayName(node);
+  showLineInspector(title, buildLineNodeBuckets(node, attrs));
   if (!state) return;
   void loadLineModSourcesForNode(state, node).then((entries) => {
     if (generation !== lineInspectorGeneration || currentLineState !== state) return;
     for (const entry of entries) currentLineInspectorSourcePaths.add(entry.path);
     const buckets = buildLineNodeBuckets(node, buildLineAttributeIndex(state), entries);
-    showLineInspector(nodeDisplayName(node), buckets, activeInspectorTab());
+    showLineInspector(title, buckets, activeInspectorTab());
   }).catch((error) => {
     if (generation !== lineInspectorGeneration || currentLineState !== state) return;
     const buckets = buildLineNodeBuckets(node, buildLineAttributeIndex(state), []);
     buckets.params += `<div class="props-note warning">读取线路 MOD 失败：${escHtml(error instanceof Error ? error.message : String(error))}</div>`;
-    showLineInspector(nodeDisplayName(node), buckets, activeInspectorTab());
+    showLineInspector(title, buckets, activeInspectorTab());
   });
 }
 
@@ -1288,7 +1293,9 @@ function handleLineNavigationNode(node: LineNavigationNode): void {
   if (node.kind === 'wire' && node.wire) {
     showWireProperties(node.wire, currentLineState);
   } else if (node.node) {
-    showLineNodeProperties(node.node, currentLineState);
+    // 右侧标题使用业务投影行（如“杆塔 01”），分类 TOWER/F4System
+    // 仅在概览/副信息中展示，避免原始实体名抢占实例名称。
+    showLineNodeProperties(node.node, currentLineState, node.label);
   } else {
     propsDrawerBody.innerHTML = `<div class="props-empty">${escHtml(node.label)}</div>`;
   }
@@ -1306,11 +1313,13 @@ function handleLineNavigationNode(node: LineNavigationNode): void {
  * 3. 已渲染节点可滚动到可见区域；未渲染的懒加载节点不强求
  */
 function handleMapTowerClick(node: GimGraphNode): void {
-  showLineNodeProperties(node, currentLineState);
+  const target = lineNavigationIndex && node.path
+    ? resolveLineNavigationTarget(lineNavigationIndex, node.path)
+    : null;
+  showLineNodeProperties(node, currentLineState, target?.label);
   propsDrawer.classList.remove('collapsed');
   btnToggleProps.style.right = '364px';
   if (lineNavigationIndex && node.path) {
-    const target = resolveLineNavigationTarget(lineNavigationIndex, node.path);
     if (target) {
       const targetKey = revealLineNavigationTarget(lineNavigationIndex, target.key);
       if (targetKey) selectTreeRow(targetKey);

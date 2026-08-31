@@ -3,7 +3,7 @@ import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 
 /** 添加模型到 UI 列表 */
-export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: string): void {
+export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: string, runtimeModelId = modelId): void {
   if (document.getElementById(`model-${modelId}`)) return;
   const item = document.createElement('div');
   item.id = `model-${modelId}`;
@@ -12,7 +12,7 @@ export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: strin
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox'; checkbox.checked = true; checkbox.className = 'model-checkbox'; checkbox.title = '显示/隐藏';
   checkbox.addEventListener('change', () => {
-    const model = ctx.fragments.list.get(modelId);
+    const model = ctx.fragments.list.get(runtimeModelId);
     if (model) { model.object.visible = checkbox.checked; const e = state.loadedModels.get(modelId); if (e) e.visible = checkbox.checked; }
   });
 
@@ -29,7 +29,7 @@ export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: strin
   actions.className = 'actions';
   const removeBtn = document.createElement('button');
   removeBtn.className = 'icon-btn'; removeBtn.textContent = '×'; removeBtn.title = '移除模型';
-  removeBtn.addEventListener('click', () => { ctx.fragments.core.disposeModel(modelId); });
+  removeBtn.addEventListener('click', () => { ctx.fragments.core.disposeModel(runtimeModelId); });
 
   actions.appendChild(removeBtn);
   item.appendChild(checkbox); item.appendChild(name); item.appendChild(actions);
@@ -37,6 +37,8 @@ export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: strin
 }
 
 /** 从 UI 列表移除模型 */
-export function removeModelFromUI(modelId: string): void {
+export function removeModelFromUI(modelId: string, runtimeModelId = modelId): void {
   document.getElementById(`model-${modelId}`)?.remove();
+  // 兼容旧版本曾以 runtime ID 直接作为 DOM key 的残留行。
+  if (runtimeModelId !== modelId) document.getElementById(`model-${runtimeModelId}`)?.remove();
 }

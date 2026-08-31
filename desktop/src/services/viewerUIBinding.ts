@@ -65,8 +65,8 @@ export async function getViewerRuntimeWithUI(
 
     // 构造模型生命周期回调（IFC 加载/卸载时同步更新 model-list UI）
     const modelCallbacks: ModelEventCallbacks = {
-      onModelAdded: (modelId) => addModelToUI(ctx, state, modelId),
-      onModelRemoved: (modelId) => removeModelFromUI(modelId),
+      onModelAdded: (modelId, runtimeModelId) => addModelToUI(ctx, state, modelId, runtimeModelId),
+      onModelRemoved: (modelId, runtimeModelId) => removeModelFromUI(modelId, runtimeModelId),
     };
 
     return { ctx, modelCallbacks };

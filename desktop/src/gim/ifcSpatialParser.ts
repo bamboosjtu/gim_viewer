@@ -273,60 +273,65 @@ const SPATIAL_TYPES: ReadonlyMap<string, SpatialKind> = new Map([
   ['IFCSPATIALZONE', 'zone'],
 ]);
 
-/** 解析多个 IFC 文本并建立变电空间索引。输入文本由调用方决定来自解压包还是缓存。 */
-export function buildSubstationSpatialIndexFromTexts(
-  sources: Array<{ entry: IfcEntry; text: string | null }>,
-  cbmTree: CbmNode | null,
-  fileDevRelations: FileDevEntry[] = [],
-): SubstationSpatialIndex {
-  const models: SpatialModelSummary[] = [];
-  const nodes: IfcSpatialNode[] = [];
-  const objects: IfcSpatialObject[] = [];
+function emptySpatialModelSummary(entry: IfcEntry, parseError: string): SpatialModelSummary {
+  return {
+    modelId: entry.modelId,
+    entryPath: entry.path,
+    spatialEntityCount: 0,
+    objectCount: 0,
+    directContainedObjectCount: 0,
+    spatialObjectCount: 0,
+    containedObjectCount: 0,
+    resourceCount: 0,
+    propertyValueCount: 0,
+    quantityValueCount: 0,
+    objectsWithProperties: 0,
+    objectsWithMaterials: 0,
+    parseError,
+  };
+}
 
-  for (const source of sources) {
-    if (source.text == null) {
-      models.push({
-        modelId: source.entry.modelId,
-        entryPath: source.entry.path,
-        spatialEntityCount: 0,
-        objectCount: 0,
-        directContainedObjectCount: 0,
-        spatialObjectCount: 0,
-        containedObjectCount: 0,
-        resourceCount: 0,
-        propertyValueCount: 0,
-        quantityValueCount: 0,
-        objectsWithProperties: 0,
-        objectsWithMaterials: 0,
-        parseError: '无法读取 IFC 内容',
-      });
-      continue;
+/**
+ * 增量构建变电 IFC 空间索引。
+ *
+ * `addIfcModel` 只保留单个 IFC 的语义节点/对象，绝不保存原始文本；调用方
+ * 可以在每次 await 读取后立即解析并释放字符串。跨模型关系和覆盖率在
+ * `finalize` 中统一计算，保持原有索引结果不变。
+ */
+export class SubstationSpatialIndexBuilder {
+  private readonly models: SpatialModelSummary[] = [];
+  private readonly nodes: IfcSpatialNode[] = [];
+  private readonly objects: IfcSpatialObject[] = [];
+  private readonly entries: IfcEntry[] = [];
+
+  constructor(
+    private readonly cbmTree: CbmNode | null,
+    private readonly fileDevRelations: FileDevEntry[] = [],
+  ) {}
+
+  addIfcModel(entry: IfcEntry, text: string | null): void {
+    this.entries.push(entry);
+    if (text == null) {
+      this.models.push(emptySpatialModelSummary(entry, '无法读取 IFC 内容'));
+      return;
     }
     try {
-      const parsed = parseIfcModel(source.entry, source.text);
-      models.push(parsed.summary);
+      const parsed = parseIfcModel(entry, text);
+      this.models.push(parsed.summary);
       // 不使用 push(...largeArray)：BIMBase/Bentley IFC 中单文件实体可超过
       // JS 引擎的函数参数上限，会以 RangeError 静默丢掉整个模型。
-      for (const node of parsed.spatialEntities) nodes.push(node);
-      for (const object of parsed.objects) objects.push(object);
+      for (const node of parsed.spatialEntities) this.nodes.push(node);
+      for (const object of parsed.objects) this.objects.push(object);
     } catch (error) {
-      models.push({
-        modelId: source.entry.modelId,
-        entryPath: source.entry.path,
-        spatialEntityCount: 0,
-        objectCount: 0,
-        directContainedObjectCount: 0,
-        spatialObjectCount: 0,
-        containedObjectCount: 0,
-        resourceCount: 0,
-        propertyValueCount: 0,
-        quantityValueCount: 0,
-        objectsWithProperties: 0,
-        objectsWithMaterials: 0,
-        parseError: error instanceof Error ? error.message : String(error),
-      });
+      this.models.push(emptySpatialModelSummary(
+        entry,
+        error instanceof Error ? error.message : String(error),
+      ));
     }
   }
+
+  finalize(): SubstationSpatialIndex {
+    const { models, nodes, objects } = this;
 
   const nodeByKey = new Map(nodes.map((node) => [node.key, node]));
   const objectByKey = new Map(objects.map((object) => [object.key, object]));
@@ -341,13 +346,13 @@ export function buildSubstationSpatialIndexFromTexts(
     else objectByGuid.set(bare, object);
   }
 
-  const cbmNodes = collectCbmNodes(cbmTree);
-  const ifcEntries = sources.map((source) => source.entry);
+  const cbmNodes = collectCbmNodes(this.cbmTree);
+  const ifcEntries = this.entries;
   // 空间索引与几何加载必须使用同一条 CBM 变换链。真实 CBM 文件中的
   // F4System 通常已经写入父链累积矩阵；PARTINDEX 往往没有自己的矩阵，
   // DEV_SUBDEVICE 虚拟节点则只保存 SUBDEVICE 局部矩阵。若这里只读取
   // 当前节点，会把所有部件误报为“没有坐标”，造成空间导航大量缺项。
-  const cbmPlacementByPath = buildCbmPlacementMap(cbmTree);
+  const cbmPlacementByPath = buildCbmPlacementMap(this.cbmTree);
   const links: SpatialAssetLink[] = [];
   let directGuidCandidates = 0;
   let directGuidMatches = 0;
@@ -358,7 +363,7 @@ export function buildSubstationSpatialIndexFromTexts(
   const linksByCbmPath = new Map<string, SpatialAssetLink>();
   const linksBySpatialKey = new Map<string, SpatialAssetLink[]>();
   const linksByIfcObjectKey = new Map<string, SpatialAssetLink[]>();
-  const fileDevRelationIndex = buildFileDevRelationIndex(fileDevRelations);
+  const fileDevRelationIndex = buildFileDevRelationIndex(this.fileDevRelations);
 
   for (const cbm of cbmNodes) {
     const matrix = cbmPlacementByPath.get(cbm.path) ?? null;
@@ -564,6 +569,18 @@ export function buildSubstationSpatialIndexFromTexts(
     identityPlacementLinks,
   };
 }
+}
+
+/** 解析多个 IFC 文本并建立变电空间索引。输入文本由调用方决定来自解压包还是缓存。 */
+export function buildSubstationSpatialIndexFromTexts(
+  sources: Array<{ entry: IfcEntry; text: string | null }>,
+  cbmTree: CbmNode | null,
+  fileDevRelations: FileDevEntry[] = [],
+): SubstationSpatialIndex {
+  const builder = new SubstationSpatialIndexBuilder(cbmTree, fileDevRelations);
+  for (const source of sources) builder.addIfcModel(source.entry, source.text);
+  return builder.finalize();
+}
 
 /** 从解压后的文件集合构建空间索引。路径匹配大小写不敏感，兼容不同导出工具目录布局。 */
 export async function buildSubstationSpatialIndexFromFiles(
@@ -574,12 +591,13 @@ export async function buildSubstationSpatialIndexFromFiles(
 ): Promise<SubstationSpatialIndex> {
   const byLowerPath = new Map<string, File>();
   for (const [path, file] of files) byLowerPath.set(normalizePath(path).toLowerCase(), file);
-  const sources: Array<{ entry: IfcEntry; text: string | null }> = [];
+  const builder = new SubstationSpatialIndexBuilder(cbmTree, fileDevRelations);
   for (const entry of entries) {
     const file = byLowerPath.get(normalizePath(entry.path).toLowerCase());
-    sources.push({ entry, text: file ? await file.text() : null });
+    // 逐条读取/解析，不让多个 IFC 原始文本同时驻留；addIfcModel 不保存 text。
+    builder.addIfcModel(entry, file ? await file.text() : null);
   }
-  return buildSubstationSpatialIndexFromTexts(sources, cbmTree, fileDevRelations);
+  return builder.finalize();
 }
 
 function parseIfcModel(entry: IfcEntry, text: string): ParsedIfcModel {

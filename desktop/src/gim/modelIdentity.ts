@@ -18,7 +18,7 @@ export function stripIfcExtension(value: string): string {
 }
 
 /**
- * 生成稳定且与文件名无关的 IFC runtime modelId。
+ * 生成稳定且与文件名无关的 IFC logical modelId。
  *
  * FNV-1a 64 位无需异步 WebCrypto，适合在解析索引阶段同步生成；规范化
  * 路径仍保存在 entry_path 中，因此 hash 只承担短 ID 作用，不替代资源身份。
@@ -32,6 +32,32 @@ export function createIfcModelId(entryPath: string): string {
     hash = BigInt.asUintN(64, hash * prime);
   }
   return `ifc_${hash.toString(16).padStart(16, '0')}`;
+}
+
+/**
+ * 生成当前 Viewer 生命周期内使用的 IFC 模型 ID。
+ *
+ * `createIfcModelId` 是包内稳定的 logical ID，数据库和 CBM 关联必须继续
+ * 使用它；Fragments 则需要把源 GIM 身份带入运行时 ID，避免工程 A 的迟到
+ * 异步加载与工程 B 共用同一个长生命周期 key。sourceIdentity 通常为 GIM
+ * SHA-256，缺失时由调用方提供 project/generation 作用域字符串。可选的
+ * generation 用于区分“同一 GIM 关闭后再次打开”的两个 Viewer 会话；它不
+ * 参与数据库/业务索引，只是运行时生命周期盐。
+ */
+export function createIfcRuntimeModelId(
+  sourceIdentity: string,
+  logicalModelId: string,
+  generation?: number,
+): string {
+  const generationSalt = generation == null ? '' : `\u0000generation:${generation}`;
+  const input = `${sourceIdentity.trim().toLowerCase()}\u0000${logicalModelId.trim().toLowerCase()}${generationSalt}`;
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= BigInt(input.charCodeAt(i));
+    hash = BigInt.asUintN(64, hash * prime);
+  }
+  return `ifc_rt_${hash.toString(16).padStart(16, '0')}`;
 }
 
 /** 返回路径的 basename（小写、去 IFC 后缀）。 */

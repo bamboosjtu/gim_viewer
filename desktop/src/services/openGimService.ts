@@ -4,7 +4,7 @@ import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { CbmNode } from '../gim/types.js';
 import { scanIfcFiles, discoverIfcFromCBM, buildIfcGuidIndex } from '../gim/gimIndexer.js';
 import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
-import { buildSubstationSpatialIndexFromFiles, buildSubstationSpatialIndexFromTexts } from '../gim/ifcSpatialParser.js';
+import { SubstationSpatialIndexBuilder, buildSubstationSpatialIndexFromFiles } from '../gim/ifcSpatialParser.js';
 import { parseFileDevRelation } from '../gim/fileDevParser.js';
 import { buildAndRenderCbmTree } from '../ui/cbmTreeView.js';
 import { renderFileDevPanel } from '../ui/fileDevView.js';
@@ -19,6 +19,16 @@ import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBa
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; pushBusy(text); }
 function hideLoading() { loadingEl.style.display = 'none'; popBusy('就绪'); }
+
+/** 取得可读工程名；不能让缺失 GIM header 的线路退化为“未命名线路”。 */
+function resolveProjectName(
+  headerName: string | undefined,
+  headerId: string | undefined,
+  fileName: string,
+): string {
+  const fileStem = (fileName.split(/[\\/]/).pop() || fileName).replace(/\.gim$/i, '').trim();
+  return [headerName, headerId, fileStem].map((value) => String(value ?? '').trim()).find(Boolean) || '';
+}
 
 /** 创建统一的节点点击回调 */
 function createNodeClickHandler(state: AppState, showMessage: (text: string) => void): (node: CbmNode) => void {
@@ -303,6 +313,7 @@ export async function loadAllIfcFiles(
           entry,
           async () => getIfcBufferForEntry(entry, state, session),
           (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
+          { session },
         );
         if (!isCurrent()) return;
         endIfc();
@@ -313,15 +324,20 @@ export async function loadAllIfcFiles(
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error('[GIM] IFC 加载失败:', entry, err);
+        // IFC 加载可能在工程切换后才 reject；不要让旧工程继续进入
+        // 后续坐标同步、名称索引或 UI 渲染阶段。
+        if (!isCurrent()) return;
         failed.push({ name: entry.name, message });
         // 防御性清理
         try {
           const modelId = entry.modelId;
-          if (ctx.fragments.list.has(modelId)) {
-            ctx.fragments.core.disposeModel(modelId);
+          const runtimeModelId = state.ifcRuntimeModelIds.get(modelId) ?? modelId;
+          if (ctx.fragments.list.has(runtimeModelId)) {
+            ctx.fragments.core.disposeModel(runtimeModelId);
           }
           state.loadedModels.delete(modelId);
-          const modelRow = document.getElementById(`model-${modelId}`);
+          const modelRow = document.getElementById(`model-${modelId}`)
+            ?? document.getElementById(`model-${runtimeModelId}`);
           if (modelRow) modelRow.remove();
         } catch (cleanupErr) {
           console.warn('[GIM] cleanup failed model after load error', entry, cleanupErr);
@@ -333,16 +349,18 @@ export async function loadAllIfcFiles(
     // IFC 必须保持 coordinate=true；MOD/STL 用同一个 Fragments 基准矩阵对齐到 viewer 空间。
     try {
       const { syncProjectSourceToViewerFromFragments } = await import('./coordinateAlignmentService.js');
-      await syncProjectSourceToViewerFromFragments(state, ctx.fragments);
+      await syncProjectSourceToViewerFromFragments(state, ctx.fragments, { session });
+      if (!isCurrent()) return;
     } catch (err) {
       console.warn('[CoordAlign] IFC 基准坐标同步失败，MOD/STL 将使用原始坐标或手工 offset:', err);
     }
 
     // buildIfcNameIndex 失败不应阻断 UI 渲染
     const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
-    await buildIfcNameIndex(ctx, state).catch((err) => {
+    await buildIfcNameIndex(ctx, state, { session }).catch((err) => {
       console.warn('[GIM] buildIfcNameIndex failed', err);
     });
+    if (!isCurrent()) return;
 
     // 渲染层级树和文件设备面板
     const endTreeRender = perfBegin('层级树+面板渲染');
@@ -511,7 +529,7 @@ async function autoLoadModStlPostIfc(
 /** 从 ArrayBuffer 加载 GIM 文件的完整流程（浏览器和 Tauri 共用，不创建 Viewer） */
 async function openGimFromArrayBuffer(
   state: AppState,
-  _fileName: string,
+  fileName: string,
   ab: ArrayBuffer | null,
   showMessage: (text: string) => void,
   options?: {
@@ -549,7 +567,7 @@ async function openGimFromArrayBuffer(
       projectId: preExtracted.projectId,
       projectName: preExtracted.projectName,
     };
-    projectName = preExtracted.projectName || preExtracted.projectId || '';
+    projectName = resolveProjectName(preExtracted.projectName, preExtracted.projectId, fileName);
   } else {
     perfReset();
     const endExtract = perfBegin('解压');
@@ -557,7 +575,7 @@ async function openGimFromArrayBuffer(
     const { extractGimFile, extractGimHeader, getProjectTypeName } = await import('../gim/gimExtractor.js');
     // 先解析 GIM 头部提取工程类型名（F1System 根节点显示用）和工程名称
     gimHeader = extractGimHeader(ab!);
-    projectName = gimHeader?.projectName || gimHeader?.projectId || '';
+    projectName = resolveProjectName(gimHeader?.projectName, gimHeader?.projectId, fileName);
     projectTypeName = getProjectTypeName(gimHeader?.magic || '');
     showLoading('正在解压 GIM 文件...');
     extracted = await extractGimFile(ab!);
@@ -577,6 +595,9 @@ async function openGimFromArrayBuffer(
 
   // 清理完成后再激活新工程身份；所有后续异步任务都以该快照为边界。
   const session = state.activateProject(options?.projectId ?? null, options?.sourceSha256 ?? null);
+  // 两类工程共用工程身份；线路分支不会经过 onGimExtracted，必须在类型
+  // 分支之前写入 state，避免导航树回退到“未命名线路”。
+  state.projectName = projectName;
 
   // 工程类型识别：线路工程走独立流程，不弹 IFC 模态框，不创建 Viewer
   showLoading('正在识别工程类型...');
@@ -928,6 +949,7 @@ export async function openGimWithDialog(
           const cleanupOk = await cleanupBeforeOpenNewProject(state, requestGeneration);
           if (!cleanupOk) return;
           const session = state.activateProject(record.id, record.sha256);
+          state.projectName = resolveProjectName(record.name, undefined, record.name);
 
           // v4: 线路工程缓存命中 → 从 SQLite 恢复 GimGraph + FAM/DEV 属性，跳过解压
           // v5: 缓存命中顺序：validate → get_line_graph → restoreLineGraphToState
@@ -1026,19 +1048,25 @@ export async function openGimWithDialog(
           // 在不重新解压 GIM 的情况下从 IFC 磁盘缓存恢复同一空间对象图。
           try {
             showLoading('正在从缓存 IFC 恢复空间结构...');
-            const spatialSources = await Promise.all(state.currentIfcEntries.map(async (entry) => {
-              const bytes = await getIfcBufferForEntry(entry, state, session);
-              return {
-                entry,
-                text: bytes ? new TextDecoder().decode(bytes) : null,
-              };
-            }));
-            if (!state.isCurrentSession(session)) return;
-            state.substationSpatialIndex = buildSubstationSpatialIndexFromTexts(
-              spatialSources,
+            const spatialBuilder = new SubstationSpatialIndexBuilder(
               state.currentCbmTree,
               state.fileDevRelations,
             );
+            const decoder = new TextDecoder();
+            for (const entry of state.currentIfcEntries) {
+              if (!state.isCurrentSession(session)) return;
+              let bytes = await getIfcBufferForEntry(entry, state, session);
+              if (!state.isCurrentSession(session)) return;
+              // 只在当前迭代保留 IFC bytes/text；builder.addIfcModel 不保存原文，
+              // 下一轮开始前上一轮的局部变量即可被回收，避免 Promise.all 峰值。
+              const text = bytes ? decoder.decode(bytes) : null;
+              // 明确释放当前 IFC 的原始字节引用，再进入语义解析，避免
+              // 缓存命中路径同时保留 bytes + text + 解析对象。
+              bytes = null;
+              spatialBuilder.addIfcModel(entry, text);
+            }
+            if (!state.isCurrentSession(session)) return;
+            state.substationSpatialIndex = spatialBuilder.finalize();
           } catch (err) {
             state.substationSpatialIndex = null;
             console.warn('[GIM] 缓存 IFC 空间索引恢复失败，保留功能系统视图:', err);

@@ -121,17 +121,21 @@ export async function handleNodeClick(
           entry,
           () => getIfcBufferForEntry(entry, state, session),
           (p) => showMessage(`${entry.name}: ${Math.round(p * 100)}%`),
+          { session },
         );
         if (!isCurrent()) return;
         debugLog(DEBUG_IFC_LOAD, `[懒加载] IFC 已加载: ${modelId}`);
       } catch (err) {
         console.error(`[懒加载] IFC 加载失败 (${modelId}):`, err);
+        // 旧工程的 IFC 任务可能在切换后才 reject；此时立即退出，避免
+        // 继续为新工程构建名称索引或刷新导航树。
+        if (!isCurrent()) return;
       }
     }
 
     // 构建 IFC 名称索引
     const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
-    await buildIfcNameIndex(ctx, state);
+    await buildIfcNameIndex(ctx, state, { session });
     if (!isCurrent()) return;
 
     // 刷新树显示（更新名称）— 统一使用 handleNodeClick 作为点击回调

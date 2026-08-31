@@ -11,6 +11,7 @@ import type { StdDocument } from '../gim/stdParser.js';
 import type { SldDocument } from '../gim/sldParser.js';
 import type { StdSldIndex } from '../gim/stdSldIndex.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
+import { createIfcRuntimeModelId } from '../gim/modelIdentity.js';
 
 /** 工程异步任务携带的不可变身份快照。 */
 export interface ProjectLoadSession {
@@ -39,9 +40,16 @@ export class AppState {
   currentGimGraph: GimGraph | null = null;
 
   // 索引
-  ifcGuidIndex = new Map<string, CbmNode>(); // "runtimeModelId:ifcGuid" → CbmNode
+  ifcGuidIndex = new Map<string, CbmNode>(); // "logicalModelId:ifcGuid" → CbmNode
   cbmNodeIndex = new Map<string, CbmNode>(); // cbmFileName → CbmNode
   ifcGuidToName = new Map<string, string>(); // "modelId:guid" → displayName
+
+  /** logical modelId（包内稳定身份）→ Fragments runtime modelId（会话身份）。 */
+  ifcRuntimeModelIds = new Map<string, string>();
+  /** Fragments runtime modelId → logical modelId，供拾取/生命周期回调反查。 */
+  ifcLogicalModelIds = new Map<string, string>();
+  /** 在途 IFC 的会话所有者；本地 IFC 也绑定捕获时的会话以便清理时失效。 */
+  ifcRuntimeModelOwners = new Map<string, ProjectLoadSession>();
 
   // 文件-设备关系
   fileDevRelations: FileDevEntry[] = [];
@@ -83,7 +91,8 @@ export class AppState {
   projectGeneration = 0;
 
   // 模型
-  loadedModels = new Map<string, { modelId: string; visible: boolean }>();
+  /** 以 logical modelId 为 key，值中同时保留 Fragments runtime ID。 */
+  loadedModels = new Map<string, { modelId: string; runtimeModelId: string; visible: boolean }>();
 
   // xml-mod Group 跟踪（key = instanceKey；同一 MOD 文件可有多个放置实例）
   // 与 IFC loadedModels 分开管理：xml-mod 不使用 OBC Fragments
@@ -154,6 +163,47 @@ export class AppState {
       && this.currentSourceSha256 === session.sourceSha256;
   }
 
+  /** 为当前会话取得 logical → runtime 的映射，并登记反向索引。 */
+  getRuntimeModelId(logicalModelId: string, session: ProjectLoadSession = this.captureProjectSession()): string {
+    const sourceIdentity = session.sourceSha256?.trim()
+      || `project:${session.projectId ?? 'none'}:generation:${session.generation}`;
+    const runtimeModelId = createIfcRuntimeModelId(sourceIdentity, logicalModelId, session.generation);
+    this.ifcRuntimeModelIds.set(logicalModelId, runtimeModelId);
+    this.ifcLogicalModelIds.set(runtimeModelId, logicalModelId);
+    return runtimeModelId;
+  }
+
+  /** 登记一次 IFC 加载的所有者；在 onItemSet 到达时用于拒绝过期模型。 */
+  registerIfcRuntimeModel(
+    logicalModelId: string,
+    runtimeModelId: string,
+    owner: ProjectLoadSession,
+  ): void {
+    this.ifcRuntimeModelIds.set(logicalModelId, runtimeModelId);
+    this.ifcLogicalModelIds.set(runtimeModelId, logicalModelId);
+    this.ifcRuntimeModelOwners.set(runtimeModelId, owner);
+  }
+
+  /** 反查 Fragments runtime ID 对应的 logical ID。 */
+  resolveLogicalModelId(runtimeModelId: string): string | null {
+    return this.ifcLogicalModelIds.get(runtimeModelId) ?? null;
+  }
+
+  /** 判断 runtime ID 是否属于当前工程，避免旧任务迟到后进入新 scene。 */
+  isCurrentRuntimeModel(runtimeModelId: string): boolean {
+    if (this.ifcRuntimeModelOwners.has(runtimeModelId)) {
+      const owner = this.ifcRuntimeModelOwners.get(runtimeModelId);
+      return owner != null && this.isCurrentSession(owner);
+    }
+    const session = this.captureProjectSession();
+    return this.currentIfcEntries.some((entry) =>
+      createIfcRuntimeModelId(
+        session.sourceSha256?.trim() || `project:${session.projectId ?? 'none'}:generation:${session.generation}`,
+        entry.modelId,
+        session.generation,
+      ) === runtimeModelId);
+  }
+
   // 引擎
   initialized = false;
   eventsRegistered = false;
@@ -184,6 +234,9 @@ export class AppState {
     this.ifcGuidIndex.clear();
     this.cbmNodeIndex.clear();
     this.ifcGuidToName.clear();
+    this.ifcRuntimeModelIds.clear();
+    this.ifcLogicalModelIds.clear();
+    this.ifcRuntimeModelOwners.clear();
     this.fileDevRelations = [];
     this.deviceToIfcFile.clear();
     // 清空 STD/SLD 拓扑与单线图（变电工程专用）

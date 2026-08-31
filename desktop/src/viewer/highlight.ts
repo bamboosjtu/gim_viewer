@@ -121,7 +121,8 @@ export async function highlightIfcFromNode(
     const highlightBoxes: THREE.Box3[] = [];
 
     for (const [modelId, guids] of refs) {
-      const model = ctx.fragments.list.get(modelId);
+      const runtimeModelId = state.getRuntimeModelId(modelId);
+      const model = ctx.fragments.list.get(runtimeModelId);
       if (!model) {
         debugLog(DEBUG_IFC_LOAD, `模型 ${modelId} 未加载，跳过 ${guids.size} 个 GUID`);
         continue;
@@ -130,7 +131,7 @@ export async function highlightIfcFromNode(
         const localIds = await model.getLocalIdsByGuids(Array.from(guids));
         const validIds = localIds.filter((id): id is number => id !== null);
         if (validIds.length > 0) {
-          items[modelId] = new Set(validIds);
+          items[runtimeModelId] = new Set(validIds);
           totalHighlighted += validIds.length;
           try {
             const box = await model.getMergedBox(validIds);
@@ -164,7 +165,8 @@ export async function highlightIfcFromNode(
   if (ifcModelId) {
     const ifcLabel = state.currentIfcEntries.find((entry) => entry.modelId === ifcModelId)?.name
       || 'IFC 模型';
-    const loaded = ctx.fragments.list.has(ifcModelId);
+    const runtimeModelId = state.getRuntimeModelId(ifcModelId);
+    const loaded = ctx.fragments.list.has(runtimeModelId);
     if (loaded) {
       showMessage(`设备 "${getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)}" 属于 ${ifcLabel}，但无 IFCGUID 映射到具体构件`);
     } else {
