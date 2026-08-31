@@ -92,23 +92,28 @@ export async function onGimExtracted(
   state.currentIfcEntries = ifcEntries;
 
   // 构建 CBM 层级树（F1System 根节点名称由 projectTypeName 设置，F2System 由 SYSCLASSIFYNAME 映射）
-  state.currentCbmTree = await buildCbmTree(files, projectTypeName);
+  const cbmTree = await buildCbmTree(files, projectTypeName);
   if (!state.isCurrentSession(session)) return [];
-  state.ifcGuidIndex = buildIfcGuidIndex(state.currentCbmTree, ifcEntries);
-  state.cbmNodeIndex = buildCbmNodeIndex(state.currentCbmTree);
+  // 解析结果先保存在局部变量；只有 await 返回后仍属于当前工程才提交。
+  state.currentCbmTree = cbmTree;
+  state.ifcGuidIndex = buildIfcGuidIndex(cbmTree, ifcEntries);
+  state.cbmNodeIndex = buildCbmNodeIndex(cbmTree);
 
   // FileDevRelation 是空间资产“来源图纸”证据的一部分，必须在构建空间索引
   // 之前解析；否则 Bentley 的 DGN 设备列表和 BIMBase 的同条目 IFC 关系会
   // 被空间视图遗漏。解析失败只影响来源标注，不阻断 IFC/CBM 主流程。
+  let fileDevRelations: Awaited<ReturnType<typeof parseFileDevRelation>> = [];
   try {
-    state.fileDevRelations = await parseFileDevRelation(files);
+    fileDevRelations = await parseFileDevRelation(files);
   } catch (err) {
-    state.fileDevRelations = [];
+    // 旧工程的异常不能清空新工程已经提交的关系；失效会话直接放弃。
+    if (!state.isCurrentSession(session)) return [];
     console.warn('[GIM] FileDevRelation 解析失败，保留空间/功能系统视图:', err);
   }
   if (!state.isCurrentSession(session)) return [];
+  state.fileDevRelations = fileDevRelations;
   state.deviceToIfcFile.clear();
-  for (const entry of state.fileDevRelations) {
+  for (const entry of fileDevRelations) {
     // DGN/非 IFC 来源的 modelId 为空，不能写入 deviceToIfcFile，避免把图纸
     // 名称误当作可加载的 IFC 模型。
     if (!entry.modelId || !/\.ifc$/i.test(entry.ifcFile)) continue;
@@ -122,21 +127,24 @@ export async function onGimExtracted(
   // 单个 IFC 解析失败只降级该模型，不能阻断整个 GIM 打开流程。
   try {
     const endSpatial = perfBegin('变电 IFC 空间索引');
-    state.substationSpatialIndex = await buildSubstationSpatialIndexFromFiles(
+    const spatialIndex = await buildSubstationSpatialIndexFromFiles(
       files,
       ifcEntries,
-      state.currentCbmTree,
-      state.fileDevRelations,
+      cbmTree,
+      fileDevRelations,
     );
+    if (!state.isCurrentSession(session)) return [];
     endSpatial(undefined, {
-      models: state.substationSpatialIndex.models.length,
-      spatialNodes: state.substationSpatialIndex.nodes.length,
-      containedObjects: state.substationSpatialIndex.models.reduce((sum, m) => sum + m.containedObjectCount, 0),
-      uncontainedIfcObjects: state.substationSpatialIndex.coverage.uncontainedIfcObjects,
-      resourceRecords: state.substationSpatialIndex.models.reduce((sum, m) => sum + m.resourceCount, 0),
-      cbmLinks: state.substationSpatialIndex.links.length,
+      models: spatialIndex.models.length,
+      spatialNodes: spatialIndex.nodes.length,
+      containedObjects: spatialIndex.models.reduce((sum, m) => sum + m.containedObjectCount, 0),
+      uncontainedIfcObjects: spatialIndex.coverage.uncontainedIfcObjects,
+      resourceRecords: spatialIndex.models.reduce((sum, m) => sum + m.resourceCount, 0),
+      cbmLinks: spatialIndex.links.length,
     });
+    state.substationSpatialIndex = spatialIndex;
   } catch (err) {
+    if (!state.isCurrentSession(session)) return [];
     state.substationSpatialIndex = null;
     console.warn('[GIM] IFC 空间索引构建失败，保留功能系统视图:', err);
   }
@@ -144,9 +152,10 @@ export async function onGimExtracted(
   // STD/SLD 解析：在 CBM 树构建完成后并行执行（不阻塞 IFC 加载）
   // 失败时仅 warn，不影响主流程
   try {
-    const { parseStdSldOnGimExtracted } = await import('./stdSldService.js');
-    await parseStdSldOnGimExtracted(state, files);
+    const { parseStdSldOnGimExtracted, commitStdSldResult } = await import('./stdSldService.js');
+    const stdSldResult = await parseStdSldOnGimExtracted(state, files);
     if (!state.isCurrentSession(session)) return [];
+    commitStdSldResult(state, stdSldResult);
   } catch (err) {
     console.warn('[GIM] STD/SLD 解析失败:', err);
   }
@@ -1002,6 +1011,7 @@ export async function openGimWithDialog(
           const { restoreGimIndexToState } = await import('./gimIndexRestoreService.js');
 
           const index = await getGimIndex(record.id);
+          if (!state.isCurrentSession(session)) return;
           restoreGimIndexToState(state, index);
           // 工程身份已在清理后激活，确保首个 IFC/几何 await 期间也使用正确 project_id。
 
@@ -1048,9 +1058,11 @@ export async function openGimWithDialog(
           // 在不重新解压 GIM 的情况下从 IFC 磁盘缓存恢复同一空间对象图。
           try {
             showLoading('正在从缓存 IFC 恢复空间结构...');
+            const cbmTree = state.currentCbmTree;
+            const fileDevRelations = state.fileDevRelations;
             const spatialBuilder = new SubstationSpatialIndexBuilder(
-              state.currentCbmTree,
-              state.fileDevRelations,
+              cbmTree,
+              fileDevRelations,
             );
             const decoder = new TextDecoder();
             for (const entry of state.currentIfcEntries) {
@@ -1066,8 +1078,11 @@ export async function openGimWithDialog(
               spatialBuilder.addIfcModel(entry, text);
             }
             if (!state.isCurrentSession(session)) return;
-            state.substationSpatialIndex = spatialBuilder.finalize();
+            const spatialIndex = spatialBuilder.finalize();
+            if (!state.isCurrentSession(session)) return;
+            state.substationSpatialIndex = spatialIndex;
           } catch (err) {
+            if (!state.isCurrentSession(session)) return;
             state.substationSpatialIndex = null;
             console.warn('[GIM] 缓存 IFC 空间索引恢复失败，保留功能系统视图:', err);
           }
@@ -1078,6 +1093,7 @@ export async function openGimWithDialog(
             const { restoreStdSldFromCache, findMissingStdSldCacheParts } =
               await import('./stdSldService.js');
             const stdSldResult = await restoreStdSldFromCache(state);
+            if (!state.isCurrentSession(session)) return;
             const missingParts = findMissingStdSldCacheParts(
               index.entries.map((entry) => entry.entry_path),
               stdSldResult,
@@ -1087,6 +1103,9 @@ export async function openGimWithDialog(
                 `本地缓存缺少电气图数据（${missingParts.join('/')}），需要从原始 GIM 重新提取`,
               );
             }
+            if (!state.isCurrentSession(session)) return;
+            const { commitStdSldResult } = await import('./stdSldService.js');
+            commitStdSldResult(state, stdSldResult);
           } catch (err) {
             console.warn('[GIM] STD/SLD 缓存恢复失败:', err);
             // 让外层缓存命中流程回退到完整解压。旧缓存可能有完整 IFC/MOD，

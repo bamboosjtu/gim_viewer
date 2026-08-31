@@ -8,7 +8,7 @@
  *   1. discoverStdSldFromSCH(currentFiles) → SchEntry[]
  *   2. 按 SchEntry 类型读取 STD/SLD 文件 → parseStd/parseSld
  *   3. buildStdSldIndex(cbmRoot, stdDoc, sldDoc) → StdSldIndex
- *   4. 写入 state.currentStdDoc / currentSldDoc / currentStdSldIndex
+ *   4. 返回局部结果；由调用方在 ProjectLoadSession 仍有效时提交到 AppState
  *
  * **缓存命中**（currentFiles 为空）：
  *   从磁盘缓存读取 STD/SLD 文件后走相同流程。
@@ -32,6 +32,22 @@ export interface StdSldParseResult {
   stdDoc: StdDocument | null;
   sldDoc: SldDocument | null;
   index: StdSldIndex;
+}
+
+/**
+ * 将一次 STD/SLD 解析的局部结果提交到 AppState。
+ *
+ * 解析服务本身可能跨越多个 await，不能在内部直接写全局状态；调用方应
+ * 在提交前完成 `state.isCurrentSession(session)` 校验，再调用此同步函数。
+ * 传入 null 表示当前工程没有可用的 STD/SLD 文档，显式清空三项状态。
+ */
+export function commitStdSldResult(
+  state: AppState,
+  result: StdSldParseResult | null,
+): void {
+  state.currentStdDoc = result?.stdDoc ?? null;
+  state.currentSldDoc = result?.sldDoc ?? null;
+  state.currentStdSldIndex = result?.index ?? null;
 }
 
 /**
@@ -72,7 +88,7 @@ export function findMissingStdSldCacheParts(
  * **缓存命中**（files 为空 + state.currentProjectId 设置 + Tauri 环境）：
  *   从磁盘缓存读取 CBM/project.sch 与各 SCH 引用的 .std/.sld 文件
  *
- * @param state 全局 AppState，写入 currentStdDoc/currentSldDoc/currentStdSldIndex
+ * @param state 全局 AppState；只读取当前 CBM 树和缓存工程 ID，不在本函数内写入状态
  * @param files GIM 解压后的文件集合（首次打开），或 null（缓存命中从磁盘读取）
  * @returns 解析结果摘要；若 SCH 入口不存在或缓存不可用返回 null
  */
@@ -80,6 +96,10 @@ export async function parseAndIndexStdSld(
   state: AppState,
   files: Map<string, File> | null,
 ): Promise<StdSldParseResult | null> {
+  // 在第一次 await 之前捕获只读输入。若工程在解析期间切换，后续构建仍
+  // 只能基于原工程的 CBM 树/项目 ID 生成局部结果，绝不混入新工程状态。
+  const cbmTree = state.currentCbmTree;
+  const projectId = state.currentProjectId;
   let schEntries: SchEntry[] = [];
   let fileTextMap: Map<string, string> = new Map();
 
@@ -115,12 +135,11 @@ export async function parseAndIndexStdSld(
     }
   } else {
     // 缓存命中：从磁盘缓存读取
-    if (!isTauri() || state.currentProjectId == null) {
+    if (!isTauri() || projectId == null) {
       debugLog(DEBUG_RUNTIME_LOGS, '[STD/SLD] 缓存命中场景缺少 projectId，跳过 STD/SLD 解析');
       return null;
     }
 
-    const projectId = state.currentProjectId;
     try {
       const { readCachedIfc, batchReadCachedFiles } = await import('@desktop/database.js');
       // 读取 SCH 入口文件（尝试多种大小写，因 GIM 解压后路径大小写可能不同）
@@ -206,12 +225,7 @@ export async function parseAndIndexStdSld(
   }
 
   // 构建三向索引
-  const index = buildStdSldIndex(state.currentCbmTree, stdDoc, sldDoc);
-
-  // 写入 state
-  state.currentStdDoc = stdDoc;
-  state.currentSldDoc = sldDoc;
-  state.currentStdSldIndex = index;
+  const index = buildStdSldIndex(cbmTree, stdDoc, sldDoc);
 
   debugLog(DEBUG_RUNTIME_LOGS, '[STD/SLD] 解析完成', {
     source: files ? 'extracted' : 'cache',
@@ -229,7 +243,8 @@ export async function parseAndIndexStdSld(
 /**
  * 在 GIM 解压完成后并行解析 STD/SLD（不阻塞主流程）。
  *
- * 失败时不抛错，仅输出警告（与 CBM 树构建失败时的处理方式一致）。
+ * 失败时不抛错，仅输出警告（与 CBM 树构建失败时的处理方式一致）。返回的
+ * 结果必须由调用方在会话校验通过后调用 commitStdSldResult 提交。
  */
 export async function parseStdSldOnGimExtracted(
   state: AppState,
@@ -249,6 +264,7 @@ export async function parseStdSldOnGimExtracted(
  * 与 parseStdSldOnGimExtracted 的差异：
  * - 不传 files，由函数内部从磁盘读取
  * - 必须在 state.currentProjectId 设置后调用
+ * - 只返回局部结果，不直接写入 AppState
  */
 export async function restoreStdSldFromCache(state: AppState): Promise<StdSldParseResult | null> {
   try {

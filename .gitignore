@@ -10,6 +10,7 @@ coverage/
 # Demo data (large binary files)
 demo/
 docs/schema/_generated
+tmp/
 
 # PMTiles offline tile data (M4-A2 第 2 轮，不提交大文件)
 desktop/public/tiles/*.pmtiles

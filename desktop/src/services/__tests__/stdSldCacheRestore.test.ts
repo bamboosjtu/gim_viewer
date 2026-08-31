@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { findMissingStdSldCacheParts, type StdSldParseResult } from '../stdSldService.js';
+import { AppState } from '../../app/state.js';
+import { commitStdSldResult, findMissingStdSldCacheParts, type StdSldParseResult } from '../stdSldService.js';
 
 function result(overrides: Partial<StdSldParseResult> = {}): StdSldParseResult {
   return {
@@ -39,5 +40,22 @@ describe('findMissingStdSldCacheParts', () => {
   it('路径匹配不区分大小写并兼容反斜杠', () => {
     expect(findMissingStdSldCacheParts(['Cbm\\project.sch', 'cbm\\zjx.std', 'cbm\\zjx.sld'], null))
       .toEqual(['SCH', 'STD', 'SLD']);
+  });
+});
+
+describe('commitStdSldResult', () => {
+  it('只做同步提交，null 结果会清空三项文档状态', () => {
+    const state = new AppState();
+    const parsed = result();
+
+    commitStdSldResult(state, parsed);
+    expect(state.currentStdDoc).toBe(parsed.stdDoc);
+    expect(state.currentSldDoc).toBe(parsed.sldDoc);
+    expect(state.currentStdSldIndex).toBe(parsed.index);
+
+    commitStdSldResult(state, null);
+    expect(state.currentStdDoc).toBeNull();
+    expect(state.currentSldDoc).toBeNull();
+    expect(state.currentStdSldIndex).toBeNull();
   });
 });
