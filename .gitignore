@@ -6,6 +6,7 @@ dist/
 
 # Test coverage
 coverage/
+.vite/
 
 # Demo data (large binary files)
 demo/

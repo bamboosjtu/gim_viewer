@@ -13,7 +13,7 @@ import { isTauri } from '@desktop/runtime.js';
 import { openGimFilePath } from '@desktop/fileDialog.js';
 import { DEBUG_IFC_LOAD, DEBUG_GIM_CACHE, DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
-import { perfReset, perfBegin, perfMark } from '../utils/perfTimings.js';
+import { perfReset, perfCurrentSession, perfBegin, perfMark, type PerfSession } from '../utils/perfTimings.js';
 import { pushBusy, popBusy } from '../ui/shell/statusBar.js';
 import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBar.js';
 
@@ -48,12 +48,19 @@ function createNodeClickHandler(state: AppState, showMessage: (text: string) => 
  *
  * 配套：nodeInteractionService 在 handleNodeClick 末尾调用 highlightSldByGridId 实现 CBM → SLD 反向联动
  */
-function setupSldGridIdInteraction(state: AppState, showMessage: (text: string) => void): void {
+function setupSldGridIdInteraction(
+  state: AppState,
+  showMessage: (text: string) => void,
+  session?: ProjectLoadSession,
+): void {
   import('../ui/sldView.js').then(({ setSldGridIdClickHandler }) => {
+    if (session && !state.isCurrentSession(session)) return;
     setSldGridIdClickHandler(async (gridId: string) => {
+      if (session && !state.isCurrentSession(session)) return;
       if (!state.currentStdSldIndex) return;
       try {
         const { getCbmNodesByGridId } = await import('../gim/stdSldIndex.js');
+        if (session && !state.isCurrentSession(session)) return;
         const nodes = getCbmNodesByGridId(state.currentStdSldIndex, gridId);
         if (nodes.length === 0) {
           console.log('[SLD→CBM] gridId 无对应 CBM 节点:', gridId);
@@ -61,6 +68,7 @@ function setupSldGridIdInteraction(state: AppState, showMessage: (text: string) 
         }
         // 取首个匹配节点触发联动（高亮 CBM 树 + 加载 IFC + 3D 高亮 + 相机定位）
         const { handleNodeClick } = await import('./nodeInteractionService.js');
+        if (session && !state.isCurrentSession(session)) return;
         await handleNodeClick(state, nodes[0], showMessage);
       } catch (err) {
         console.warn('[SLD→CBM] 联动失败:', err);
@@ -81,6 +89,7 @@ export async function onGimExtracted(
   session: ProjectLoadSession = state.captureProjectSession(),
 ): Promise<IfcEntry[]> {
   if (!state.isCurrentSession(session)) return [];
+  const perfSession = perfCurrentSession();
   state.currentFiles = files;
   state.projectName = projectName || '';
 
@@ -126,7 +135,7 @@ export async function onGimExtracted(
   // 左侧导航可以按站区/建筑/楼层浏览，同时保留功能系统视图和未关联设备。
   // 单个 IFC 解析失败只降级该模型，不能阻断整个 GIM 打开流程。
   try {
-    const endSpatial = perfBegin('变电 IFC 空间索引');
+    const endSpatial = perfBegin('变电 IFC 空间索引', undefined, perfSession);
     const spatialIndex = await buildSubstationSpatialIndexFromFiles(
       files,
       ifcEntries,
@@ -159,6 +168,7 @@ export async function onGimExtracted(
   } catch (err) {
     console.warn('[GIM] STD/SLD 解析失败:', err);
   }
+  if (!state.isCurrentSession(session)) return [];
 
   // 渲染层级树和文件设备面板（统一使用 handleNodeClick）
   const clickHandler = createNodeClickHandler(state, showMessage);
@@ -168,13 +178,14 @@ export async function onGimExtracted(
   // 渲染 SLD 电气单线图与 STD 拓扑列表
   try {
     const { renderSldView } = await import('../ui/sldView.js');
+    if (!state.isCurrentSession(session)) return [];
     renderSldView(state);
   } catch (err) {
     console.warn('[GIM] SLD 视图渲染失败:', err);
   }
 
   // 阶段 4：注册 SLD gridId → CBM 联动回调
-  setupSldGridIdInteraction(state, showMessage);
+  setupSldGridIdInteraction(state, showMessage, session);
 
   return ifcEntries;
 }
@@ -275,6 +286,7 @@ export async function loadAllIfcFiles(
   options: { session?: ProjectLoadSession } = {},
 ): Promise<void> {
   const session = options.session ?? state.captureProjectSession();
+  const perfSession = perfCurrentSession();
   const isCurrent = () => state.isCurrentSession(session);
   if (!isCurrent()) return;
   // 调试入口：从 localStorage 读取手动坐标偏移（GIM_COORD_OFFSET="dx,dy,dz"）
@@ -282,6 +294,7 @@ export async function loadAllIfcFiles(
   // resetGimState 会清空 projectSourceToViewerMatrix，因此每次打开项目时重新解析。
   try {
     const { loadManualCoordOffsetFromLocalStorage } = await import('./coordinateAlignmentService.js');
+    if (!isCurrent()) return;
     loadManualCoordOffsetFromLocalStorage(state);
   } catch {
     // 忽略：coordinateAlignmentService 不可用时不影响主流程
@@ -294,8 +307,9 @@ export async function loadAllIfcFiles(
   }
 
   showLoading('正在加载 3D 引擎...');
-  const endEngine = perfBegin('3D 引擎创建');
+  const endEngine = perfBegin('3D 引擎创建', undefined, perfSession);
   const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+  if (!isCurrent()) return;
   const runtime = await getViewerRuntimeWithUI(state, showMessage);
   if (!isCurrent()) return;
   const { ctx, modelCallbacks } = runtime;
@@ -306,16 +320,18 @@ export async function loadAllIfcFiles(
 
   try {
     const { ensureEngineReady } = await import('../viewer/ifcLoader.js');
+    if (!isCurrent()) return;
     await ensureEngineReady(ctx, state, modelCallbacks);
     if (!isCurrent()) return;
     const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
+    if (!isCurrent()) return;
 
     let firstIfcReady = true;
     for (const entry of entries) {
       if (!isCurrent()) return;
       showLoading(`正在加载 ${entry.name}...`);
       try {
-        const endIfc = perfBegin(`IFC ${entry.name}`);
+        const endIfc = perfBegin(`IFC ${entry.name}`, undefined, perfSession);
         await loadIfcEntry(
           ctx,
           state,
@@ -328,7 +344,7 @@ export async function loadAllIfcFiles(
         endIfc();
         if (firstIfcReady) {
           firstIfcReady = false;
-          perfMark('首个 IFC 就绪', { name: entry.name });
+          perfMark('首个 IFC 就绪', { name: entry.name }, perfSession);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -358,6 +374,7 @@ export async function loadAllIfcFiles(
     // IFC 必须保持 coordinate=true；MOD/STL 用同一个 Fragments 基准矩阵对齐到 viewer 空间。
     try {
       const { syncProjectSourceToViewerFromFragments } = await import('./coordinateAlignmentService.js');
+      if (!isCurrent()) return;
       await syncProjectSourceToViewerFromFragments(state, ctx.fragments, { session });
       if (!isCurrent()) return;
     } catch (err) {
@@ -366,13 +383,14 @@ export async function loadAllIfcFiles(
 
     // buildIfcNameIndex 失败不应阻断 UI 渲染
     const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
+    if (!isCurrent()) return;
     await buildIfcNameIndex(ctx, state, { session }).catch((err) => {
       console.warn('[GIM] buildIfcNameIndex failed', err);
     });
     if (!isCurrent()) return;
 
     // 渲染层级树和文件设备面板
-    const endTreeRender = perfBegin('层级树+面板渲染');
+    const endTreeRender = perfBegin('层级树+面板渲染', undefined, perfSession);
     const clickHandler = createNodeClickHandler(state, (text) => showLoading(text));
     buildAndRenderCbmTree(state, clickHandler);
     renderFileDevPanel(state, clickHandler);
@@ -381,8 +399,9 @@ export async function loadAllIfcFiles(
 
     // 首次 fit 相机
     const { fitCameraToScene } = await import('../viewer/camera.js');
+    if (!isCurrent()) return;
     fitCameraToScene(ctx, state);
-    perfMark('变电工程可交互（IFC 全部就绪）');
+    perfMark('变电工程可交互（IFC 全部就绪）', undefined, perfSession);
 
   } catch (err) {
     if (!isCurrent()) return;
@@ -441,6 +460,7 @@ async function autoLoadModStlPostIfc(
 ): Promise<void> {
   try {
     const session = options?.session ?? state.captureProjectSession();
+    const perfSession = perfCurrentSession();
     if (!state.isCurrentSession(session)) return;
     // 获取 scene：优先用已有 ctx，否则创建 ViewerRuntime
     let scene: import('three').Scene;
@@ -448,6 +468,7 @@ async function autoLoadModStlPostIfc(
       scene = (existingCtx.world.scene as any).three as import('three').Scene;
     } else {
       const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
+      if (!state.isCurrentSession(session)) return;
       const runtime = await getViewerRuntimeWithUI(state, showMessage);
       if (!state.isCurrentSession(session)) return;
       scene = (runtime.ctx.world.scene as any).three as import('three').Scene;
@@ -456,17 +477,19 @@ async function autoLoadModStlPostIfc(
     // 首次打开：渐进式 DEV GLB 管线（编译→落盘→渐进渲染一体）
     if (state.currentFiles) {
       const { runProgressiveDevGlbPipeline } = await import('./progressiveGeometryService.js');
+      if (!state.isCurrentSession(session)) return;
       const result = await runProgressiveDevGlbPipeline(
         state,
         scene,
         (p) => {
+          if (!state.isCurrentSession(session)) return;
           if (p.phase === 'compiling') {
             showLoading(`正在后台编译几何模型 (${p.compiledDevs}/${p.totalDevs})...`);
           } else if (p.phase === 'done') {
             perfMark('渐进式 DEV GLB 管线完成', {
               compiledDevs: p.compiledDevs,
               renderedInstances: p.renderedInstances,
-            });
+            }, perfSession);
             hideLoading();
           }
         },
@@ -486,6 +509,7 @@ async function autoLoadModStlPostIfc(
         // 编译完成后强制重新 fit 相机（bbox 可能显著变化）
         if (existingCtx) {
           const { fitCameraToScene } = await import('../viewer/camera.js');
+          if (!state.isCurrentSession(session)) return;
           fitCameraToScene(existingCtx, state, { force: true });
         }
       }
@@ -494,10 +518,12 @@ async function autoLoadModStlPostIfc(
 
     // 缓存命中：原有路径（GLB 快速路径 → SQLite 直通回退）
     const { autoLoadModAndStlGeometry } = await import('./modAutoLoadService.js');
+    if (!state.isCurrentSession(session)) return;
     const result = await autoLoadModAndStlGeometry(
       state,
       scene,
       (p) => {
+        if (!state.isCurrentSession(session)) return;
         if (p.phase === 'discovering') {
           showLoading(`正在发现几何引用... (${p.currentPath || ''})`);
         } else if (p.phase === 'loading_mod') {
@@ -527,6 +553,7 @@ async function autoLoadModStlPostIfc(
       // MOD/STL 加载后强制重新 fit 相机（bbox 可能显著变化）
       if (existingCtx) {
         const { fitCameraToScene } = await import('../viewer/camera.js');
+        if (!state.isCurrentSession(session)) return;
         fitCameraToScene(existingCtx, state, { force: true });
       }
     }
@@ -560,6 +587,7 @@ async function openGimFromArrayBuffer(
   const requestGeneration = options?.requestGeneration ?? state.projectGeneration;
   const requestIsCurrent = () => state.projectGeneration === requestGeneration;
   if (!requestIsCurrent()) return;
+  let perfSession: PerfSession = perfCurrentSession();
   let extracted: Map<string, File>;
   let projectTypeName: string;
   let projectName: string;
@@ -578,8 +606,13 @@ async function openGimFromArrayBuffer(
     };
     projectName = resolveProjectName(preExtracted.projectName, preExtracted.projectId, fileName);
   } else {
-    perfReset();
-    const endExtract = perfBegin('解压');
+    perfReset({
+      generation: requestGeneration,
+      projectId: options?.projectId ?? null,
+      sourceSha256: options?.sourceSha256 ?? null,
+    });
+    perfSession = perfCurrentSession();
+    const endExtract = perfBegin('解压', undefined, perfSession);
     showLoading('正在加载 GIM 解压模块...');
     const { extractGimFile, extractGimHeader, getProjectTypeName } = await import('../gim/gimExtractor.js');
     // 先解析 GIM 头部提取工程类型名（F1System 根节点显示用）和工程名称
@@ -591,6 +624,9 @@ async function openGimFromArrayBuffer(
     if (!requestIsCurrent()) return;
     endExtract('（首开）', { files: extracted.size });
   }
+
+  // native preExtracted 路径在 openGimWithDialog 中已 reset；浏览器/WASM
+  // 路径在上方 reset。此时 perfSession 已是本次流程的 immutable 快照。
 
   if (!requestIsCurrent()) return;
 
@@ -610,7 +646,7 @@ async function openGimFromArrayBuffer(
 
   // 工程类型识别：线路工程走独立流程，不弹 IFC 模态框，不创建 Viewer
   showLoading('正在识别工程类型...');
-  const endDetect = perfBegin('工程类型识别');
+  const endDetect = perfBegin('工程类型识别', undefined, perfSession);
   const { detectGimProjectType } = await import('../gim/projectType.js');
   const projectTypeResult = await detectGimProjectType(extracted);
   if (!state.isCurrentSession(session)) return;
@@ -648,16 +684,58 @@ async function openGimFromArrayBuffer(
   }
 
   if (projectTypeResult.type === 'transmission_line') {
-    // 线路工程流程：构建 GimGraph + 解析 FAM/DEV 属性 + 渲染面板，不走 IFC/Viewer 流程
-    showLoading('正在解析线路 CBM 层级...');
-    const endGraph = perfBegin('线路图构建');
-    const { buildLineGimGraph } = await import('../gim/lineCbmParser.js');
-    const graph = await buildLineGimGraph(extracted);
+    // 线路工程流程：先按批次准备可转移的文本输入，再由 Line Parser Worker
+    // 一次完成 GimGraph + FAM/DEV 属性解析；不走 IFC/Viewer 流程。
+    showLoading('正在批量读取线路 CBM/FAM/DEV 文件...');
+    const endInput = perfBegin('线路解析输入', undefined, perfSession);
+    const { readLineParserInput } = await import('./lineParserInput.js');
+    const parserInput = await readLineParserInput(extracted, session.projectId, {
+      isCurrent: () => state.isCurrentSession(session),
+    });
+    if (parserInput.cancelled || !state.isCurrentSession(session)) return;
+    endInput(undefined, {
+      files: parserInput.files.length,
+      requested: parserInput.requested,
+      bytes: parserInput.bytes,
+      batches: parserInput.batches,
+    });
+    showLoading('正在后台解析线路 CBM 与属性...');
+    const endGraph = perfBegin('线路图构建+属性解析', undefined, perfSession);
+    const { parseLineInWorker } = await import('./lineParserWorkerClient.js');
+    let workerResult: Awaited<ReturnType<typeof parseLineInWorker>>;
+    try {
+      workerResult = await parseLineInWorker(parserInput.files, session);
+    } catch (error) {
+      // 清理工程时主动终止旧 Worker 会拒绝其 promise；这是正常的取消，
+      // 不应被外层打开流程误报为“GIM 解析失败”。当前工程的真实错误仍上抛。
+      if (!state.isCurrentSession(session)) return;
+      throw error;
+    }
     if (!state.isCurrentSession(session)) return;
-    endGraph(undefined, { nodes: graph.stats.total });
-    perfMark('线路图就绪', { nodes: graph.stats.total });
+    const graph = workerResult.graph;
+    const attrResult = workerResult.attributes;
+    endGraph(undefined, {
+      nodes: graph.stats.total,
+      files: parserInput.files.length,
+      bytes: parserInput.bytes,
+      batches: parserInput.batches,
+      worker: workerResult.timings.worker,
+      workerMs: Math.round(workerResult.timings.totalMs),
+      graphMs: Math.round(workerResult.timings.graphMs),
+      attributesMs: Math.round(workerResult.timings.attributesMs),
+    });
+    perfMark('线路图就绪', { nodes: graph.stats.total }, perfSession);
     state.currentGimGraph = graph;
     state.currentFiles = extracted; // 保留文件供后续读取
+
+    // Worker 的属性结果与缓存命中恢复结构同构；先提交到当前 state，保证
+    // 浏览器模式和 Tauri 首开都能得到塔型/呼高/转角等地图与属性字段。
+    const { restoreLineAttributesToState } = await import('./lineAttrRestoreService.js');
+    if (!state.isCurrentSession(session)) return;
+    restoreLineAttributesToState({
+      fam_properties: attrResult.famPayloads,
+      dev_properties: attrResult.devPayloads,
+    }, state);
 
     // v5: 首次导入 → 解析 FAM/DEV 属性 → 统一事务写入缓存 → 恢复到 state → 渲染面板
     // 顺序：extract → detect → buildLineGimGraph → parseLineAttributes
@@ -666,15 +744,11 @@ async function openGimFromArrayBuffer(
     //       FAM/DEV 属性，塔位编号/塔型/呼高/转角等 tooltip 字段会缺失
     if (options?.persistIndex && options.projectId != null && isTauri()) {
       try {
-        showLoading('正在解析线路 FAM/DEV 属性...');
-        const { parseLineAttributes, estimatePayloadSizeMB } = await import('./lineAttrPersistenceService.js');
+        showLoading('正在准备线路缓存数据...');
+        const { estimatePayloadSizeMB } = await import('./lineAttrPersistenceService.js');
         const { buildLineGraphPayload } = await import('./lineGraphPersistenceService.js');
         const { saveLineProjectCache } = await import('@desktop/database.js');
-        const { restoreLineAttributesToState } = await import('./lineAttrRestoreService.js');
 
-        const endAttrs = perfBegin('线路 FAM/DEV 属性解析');
-        const attrResult = await parseLineAttributes(graph, extracted);
-        endAttrs(undefined, { fam: attrResult.famPayloads.length, dev: attrResult.devPayloads.length });
         const graphPayload = buildLineGraphPayload(options.projectId, graph, session.sourceSha256);
 
         // 性能日志：payload 统计 + 风险评估
@@ -699,7 +773,7 @@ async function openGimFromArrayBuffer(
         }
 
         showLoading('正在写入线路工程缓存...');
-        const endSave = perfBegin('线路 SQLite 入库');
+        const endSave = perfBegin('线路 SQLite 入库', undefined, perfSession);
         const t0 = performance.now();
         if (!state.isCurrentSession(session)) return;
         await saveLineProjectCache(
@@ -719,14 +793,6 @@ async function openGimFromArrayBuffer(
         endSave(undefined, { ms: elapsedMs });
         debugLog(DEBUG_GIM_CACHE, '[LineCache] save_line_project_cache 完成，耗时', elapsedMs, 'ms');
 
-        // 恢复属性到 state（payload 与 record 字段一致，结构兼容可直接传入）
-        restoreLineAttributesToState(
-          {
-            fam_properties: attrResult.famPayloads,
-            dev_properties: attrResult.devPayloads,
-          },
-          state,
-        );
       } catch (err) {
         console.error('[Tauri] 线路工程缓存写入失败:', err);
       }
@@ -734,11 +800,11 @@ async function openGimFromArrayBuffer(
 
     // 渲染面板（在属性恢复之后，确保地图 tooltip/标签有完整 FAM/DEV 属性）
     if (!state.isCurrentSession(session)) return;
-    const endRender = perfBegin('线路面板+地图渲染');
+    const endRender = perfBegin('线路面板+地图渲染', undefined, perfSession);
     const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
     renderLineProjectPanels(state, graph, showMessage);
     endRender();
-    perfMark('线路工程可交互');
+    perfMark('线路工程可交互', undefined, perfSession);
 
     hideLoading();
     // 轻量状态提示
@@ -928,6 +994,9 @@ export async function openGimWithDialog(
     // 文件选择完成即失效旧工程的在途任务，避免读取/解压期间旧几何继续写入场景。
     state.invalidatePendingLoads();
     const requestGeneration = state.projectGeneration;
+    // 性能会话也必须在请求开始的同步边界失效；否则旧工程的迟到 invoke/span
+    // 可能在缓存校验或原生解压期间继续写入上一会话。
+    perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
     btnLoadGim.disabled = true;
     try {
       // 2. FileInfo + 缓存校验（无 3D 依赖）
@@ -950,7 +1019,8 @@ export async function openGimWithDialog(
       // 3. 缓存命中短路：不 readFileBytes、不 extractGimFile、不创建 Viewer
       if (validation.valid) {
         try {
-          perfReset();
+          perfReset({ generation: requestGeneration, projectId: record.id, sourceSha256: record.sha256 });
+          const perfSession = perfCurrentSession();
           // 清空上一次 GIM 的状态，避免残留
           // 统一走 cleanupBeforeOpenNewProject：销毁线路地图 + dispose 旧 fragments 模型 +
           // 重置高亮 + 清空 model-list UI + resetGimState + hasFittedCamera=false
@@ -967,7 +1037,7 @@ export async function openGimWithDialog(
             setProjectIdentity(record.name || null, 'transmission_line');
             refreshNavigatorTitle();
             showLoading('正在从本地缓存恢复线路工程索引...');
-            const endRestoreGraph = perfBegin('线路图恢复（缓存命中）');
+            const endRestoreGraph = perfBegin('线路图恢复（缓存命中）', undefined, perfSession);
             const { getLineGraph, getLineAttributes } = await import('@desktop/database.js');
             const { restoreLineGraphToState } = await import('./lineGraphRestoreService.js');
             const { restoreLineAttributesToState } = await import('./lineAttrRestoreService.js');
@@ -977,12 +1047,12 @@ export async function openGimWithDialog(
             endRestoreGraph(undefined, { nodes: graph.stats.total });
             // v5: 恢复 FAM/DEV 属性（缓存命中，currentFiles 保持 null）
             showLoading('正在从本地缓存恢复线路 FAM/DEV 属性...');
-            const endRestoreAttrs = perfBegin('线路属性恢复（缓存命中）');
+            const endRestoreAttrs = perfBegin('线路属性恢复（缓存命中）', undefined, perfSession);
             const attrResult = await getLineAttributes(record.id);
             if (!state.isCurrentSession(session)) return;
             const attrStats = restoreLineAttributesToState(attrResult, state);
             endRestoreAttrs(undefined, { fam: attrStats.famCount, dev: attrStats.devCount });
-            perfMark('线路工程可交互（缓存命中）');
+            perfMark('线路工程可交互（缓存命中）', undefined, perfSession);
 
             const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
             renderLineProjectPanels(state, graph, showMessage);
@@ -1116,13 +1186,14 @@ export async function openGimWithDialog(
           // 渲染 SLD 电气单线图与 STD 拓扑列表（缓存命中路径）
           try {
             const { renderSldView } = await import('../ui/sldView.js');
+            if (!state.isCurrentSession(session)) return;
             renderSldView(state);
           } catch (err) {
             console.warn('[GIM] SLD 视图渲染失败（缓存命中）:', err);
           }
 
           // 阶段 4：注册 SLD gridId → CBM 联动回调（缓存命中路径）
-          setupSldGridIdInteraction(state, showMessage);
+          setupSldGridIdInteraction(state, showMessage, session);
 
           // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
           // loadAllIfcFiles 内部会创建 ViewerRuntime、加载 IFC、渲染树、触发 MOD/STL
@@ -1130,6 +1201,7 @@ export async function openGimWithDialog(
           debugLog(DEBUG_GIM_CACHE, '[Tauri] 变电工程缓存命中：自动加载全部 IFC + MOD + STL');
           return; // 缓存命中，短路完成
         } catch (err) {
+          if (state.projectGeneration !== requestGeneration) return;
           console.warn('[Tauri] 缓存恢复失败，回退完整解压流程:', err);
         }
       } else {
@@ -1152,13 +1224,14 @@ export async function openGimWithDialog(
       // acc-plan P0-2：优先 Rust 原生解压（含资源配额），失败回退 libarchive.js WASM
       let preExtracted: Awaited<ReturnType<typeof import('@desktop/gimExtract.js').extractGimArchiveNative>> | undefined;
       try {
-        perfReset();
-        const endNative = perfBegin('解压（Rust 原生）');
+        perfReset({ generation: requestGeneration, projectId: record.id, sourceSha256: record.sha256 });
+        const perfSession = perfCurrentSession();
+        const endNative = perfBegin('解压（Rust 原生）', undefined, perfSession);
         const { extractGimArchiveNative } = await import('@desktop/gimExtract.js');
         preExtracted = await extractGimArchiveNative(filePath, record.id);
         if (state.projectGeneration !== requestGeneration) return;
         endNative(undefined, { files: preExtracted.files.size });
-        perfMark('原生解压完成', { files: preExtracted.files.size });
+        perfMark('原生解压完成', { files: preExtracted.files.size }, perfSession);
       } catch (nativeErr) {
         const nativeMessage = nativeErr instanceof Error ? nativeErr.message : String(nativeErr);
         // 资源配额是安全边界，不得通过 WASM 回退绕过；仅能力/格式/运行时
@@ -1195,6 +1268,7 @@ export async function openGimWithDialog(
   // 浏览器模式：input.click() 立即触发，change 后读取+解压（不创建 Viewer）
   state.invalidatePendingLoads();
   const requestGeneration = state.projectGeneration;
+  perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
   return new Promise<void>((resolve) => {
     const handler = async () => {
       gimFileInput.removeEventListener('change', handler);

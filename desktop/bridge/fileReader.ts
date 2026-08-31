@@ -1,10 +1,11 @@
+import { invokeTimed } from './invokeTimed.js';
+
 /**
  * 在 Tauri 环境下通过 Rust command 读取文件内容为 ArrayBuffer。
  * 仅在 Tauri 环境可用，浏览器环境不应调用此函数。
  */
 export async function readFileBytes(path: string): Promise<ArrayBuffer> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  const bytes = await invoke<ArrayBuffer | Uint8Array>('read_file_bytes', { path });
+  const bytes = await invokeTimed<ArrayBuffer | Uint8Array>('read_file_bytes', { path });
   if (bytes instanceof ArrayBuffer) return bytes;
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
@@ -23,6 +24,5 @@ export interface FileInfo {
  * 仅在 Tauri 环境可用，浏览器环境不应调用此函数。
  */
 export async function getFileInfo(path: string): Promise<FileInfo> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<FileInfo>('get_file_info', { path });
+  return invokeTimed<FileInfo>('get_file_info', { path });
 }

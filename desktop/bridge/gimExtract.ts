@@ -8,7 +8,7 @@
  * 浏览器模式或原生解压失败时由调用方回退 libarchive.js WASM 路径。
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeTimed } from './invokeTimed.js';
 
 export interface NativeExtractionResult {
   /** GIM 魔数（GIMPKGS/GIMPKGT） */
@@ -113,6 +113,8 @@ class DiskBackedBlob {
 }
 
 class DiskBackedFile extends DiskBackedBlob {
+  /** 供线路批量读取协调器识别 native manifest-only 文件。 */
+  readonly __gimDiskBacked = true;
   readonly lastModified = 0;
   readonly name: string;
   readonly webkitRelativePath = '';
@@ -121,6 +123,11 @@ class DiskBackedFile extends DiskBackedBlob {
     super(projectId, entryPath, size);
     this.name = name;
   }
+}
+
+/** 判断条目是否由原生解压落盘并按需从缓存读取。 */
+export function isDiskBackedFile(value: File | undefined): boolean {
+  return Boolean(value && (value as File & { __gimDiskBacked?: boolean }).__gimDiskBacked === true);
 }
 
 const MAX_NATIVE_ENTRIES = 200_000;
@@ -215,6 +222,6 @@ export async function extractGimArchiveNative(
   filePath: string,
   projectId?: number,
 ): Promise<NativeExtractionResult> {
-  const buf = await invoke<ArrayBuffer>('extract_gim_archive', { filePath, projectId });
+  const buf = await invokeTimed<ArrayBuffer>('extract_gim_archive', { filePath, projectId });
   return parseExtractionPayload(buf, { cacheProjectId: projectId });
 }

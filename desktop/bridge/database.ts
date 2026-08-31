@@ -1,4 +1,5 @@
 import type { FileInfo } from './fileReader.js';
+import { invokeTimed } from './invokeTimed.js';
 
 /** 数据库中的 GIM 项目完整记录 */
 export interface GimProjectRecord {
@@ -18,8 +19,7 @@ export interface GimProjectRecord {
  * 仅在 Tauri 环境可用，浏览器环境不应调用此函数。
  */
 export async function upsertGimProject(info: FileInfo): Promise<GimProjectRecord> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<GimProjectRecord>('upsert_gim_project', { info });
+  return invokeTimed<GimProjectRecord>('upsert_gim_project', { info });
 }
 
 // ===== GIM 索引入库 =====
@@ -92,8 +92,7 @@ export interface GimIndexPayload {
  * 在 Tauri 环境下保存 GIM 索引（事务：先删后插）。
  */
 export async function saveGimIndex(payload: GimIndexPayload): Promise<void> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  await invoke<void>('save_gim_index', { payload });
+  await invokeTimed<void>('save_gim_index', { payload });
 }
 
 // ===== GIM 索引读取 =====
@@ -163,16 +162,14 @@ function toUint8Array(value: ArrayBuffer | Uint8Array): Uint8Array {
  * 返回本地缓存路径 local_cache_path。
  */
 export async function writeCacheFile(projectId: number, entryPath: string, bytes: Uint8Array): Promise<string> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<string>('write_cache_file_binary', packBinaryCacheWrite(projectId, entryPath, bytes));
+  return invokeTimed<string>('write_cache_file_binary', packBinaryCacheWrite(projectId, entryPath, bytes));
 }
 
 /**
  * 在 Tauri 环境下从缓存读取 IFC 文件（路径由 projectId + entryPath 计算，不接受任意路径）。
  */
 export async function readCachedIfc(projectId: number, entryPath: string): Promise<Uint8Array> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  const bytes = await invoke<ArrayBuffer>('read_cached_ifc', { projectId, entryPath });
+  const bytes = await invokeTimed<ArrayBuffer>('read_cached_ifc', { projectId, entryPath });
   return toUint8Array(bytes);
 }
 
@@ -181,8 +178,7 @@ export async function readCachedIfc(projectId: number, entryPath: string): Promi
  * 路径由 Rust 侧重新计算并校验，前端不传绝对路径。
  */
 export async function readCachedEntry(projectId: number, entryPath: string): Promise<Uint8Array> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  const bytes = await invoke<ArrayBuffer>('read_cached_entry', { projectId, entryPath });
+  const bytes = await invokeTimed<ArrayBuffer>('read_cached_entry', { projectId, entryPath });
   return toUint8Array(bytes);
 }
 
@@ -200,8 +196,7 @@ export async function batchReadCachedFiles(
   projectId: number,
   entryPaths: string[],
 ): Promise<Map<string, Uint8Array | null>> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  const payload = await invoke<ArrayBuffer>('batch_read_cached_files', {
+  const payload = await invokeTimed<ArrayBuffer>('batch_read_cached_files', {
     projectId,
     entryPaths,
   });
@@ -252,8 +247,7 @@ function parseBatchCachePayload(value: ArrayBuffer | Uint8Array): BatchCacheFile
  * 路径由 projectId + entryPath 计算，存储在 app_data_dir/glbcache/{projectId}/ 下。
  */
 export async function writeGlbFile(projectId: number, entryPath: string, bytes: Uint8Array): Promise<string> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<string>('write_glb_file_binary', packBinaryCacheWrite(projectId, entryPath, bytes));
+  return invokeTimed<string>('write_glb_file_binary', packBinaryCacheWrite(projectId, entryPath, bytes));
 }
 
 /**
@@ -263,8 +257,7 @@ export async function writeGlbFile(projectId: number, entryPath: string, bytes: 
  * 避免 `Vec<u8>` 经 JSON 序列化为数字数组带来的 3x 体积膨胀和解析开销。
  */
 export async function readGlbFile(projectId: number, entryPath: string): Promise<Uint8Array> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  const buffer = await invoke<ArrayBuffer>('read_glb_file', { projectId, entryPath });
+  const buffer = await invokeTimed<ArrayBuffer>('read_glb_file', { projectId, entryPath });
   return new Uint8Array(buffer);
 }
 
@@ -277,8 +270,7 @@ export async function readGlbFile(projectId: number, entryPath: string): Promise
  * 下次 validateGimCache 时读取此文件并比较，版本不匹配则整体失效。
  */
 export async function writeGeometryCacheVersion(projectId: number): Promise<string> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<string>('write_geometry_cache_version', { projectId });
+  return invokeTimed<string>('write_geometry_cache_version', { projectId });
 }
 
 export interface GeometryCacheManifestEntry {
@@ -291,8 +283,7 @@ export async function writeGeometryCacheManifest(
   sourceSha256: string,
   entries: GeometryCacheManifestEntry[],
 ): Promise<string> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<string>('write_geometry_cache_manifest', {
+  return invokeTimed<string>('write_geometry_cache_manifest', {
     projectId,
     sourceSha256,
     entries,
@@ -305,8 +296,7 @@ export async function writeGeometryCacheManifest(
  * 用于缓存校验失败时清理陈旧 GLB 文件（如 _version.txt 缺失）。
  */
 export async function deleteGlbCache(projectId: number): Promise<void> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<void>('delete_glb_cache', { projectId });
+  return invokeTimed<void>('delete_glb_cache', { projectId });
 }
 
 // ===== 几何引用链（v6） =====
@@ -345,8 +335,7 @@ export interface GeometryRefsPayload {
 
 /** 批量写入 DEV/PHM 几何引用链 */
 export async function saveGeometryRefs(payload: GeometryRefsPayload): Promise<void> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  await invoke('save_geometry_refs', { payload });
+  await invokeTimed('save_geometry_refs', { payload });
 }
 
 export interface ReachableGeometry {
@@ -364,8 +353,7 @@ export async function getReachableGeometry(
   projectId: number,
   options?: { includeMod?: boolean; includeStl?: boolean },
 ): Promise<ReachableGeometry[]> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<ReachableGeometry[]>('get_reachable_geometry', {
+  return invokeTimed<ReachableGeometry[]>('get_reachable_geometry', {
     projectId,
     includeMod: options?.includeMod ?? true,
     includeStl: options?.includeStl ?? false,
@@ -465,16 +453,14 @@ export interface GimCacheValidation {
  * 完整读取 GIM 索引（只读）。
  */
 export async function getGimIndex(projectId: number): Promise<GimIndexResult> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<GimIndexResult>('get_gim_index', { projectId });
+  return invokeTimed<GimIndexResult>('get_gim_index', { projectId });
 }
 
 /**
  * 校验 GIM 缓存完整性（只读，不修复）。
  */
 export async function validateGimCache(projectId: number): Promise<GimCacheValidation> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<GimCacheValidation>('validate_gim_cache', { projectId });
+  return invokeTimed<GimCacheValidation>('validate_gim_cache', { projectId });
 }
 
 // ==================== 诊断 ====================
@@ -554,14 +540,12 @@ export interface ProjectCacheDiagnostic {
 
 /** 返回当前 SQLite 文件路径 */
 export async function getDbPath(): Promise<string> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<string>('get_db_path');
+  return invokeTimed<string>('get_db_path');
 }
 
 /** 获取最近打开项目的缓存诊断 */
 export async function getLatestProjectCacheDiagnostic(): Promise<ProjectCacheDiagnostic | null> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<ProjectCacheDiagnostic | null>('get_latest_project_cache_diagnostic');
+  return invokeTimed<ProjectCacheDiagnostic | null>('get_latest_project_cache_diagnostic');
 }
 
 // ==================== Fragments 缓存 ====================
@@ -600,8 +584,7 @@ export async function writeFragmentCacheFile(
   bytes: Uint8Array,
   sourceGimSha256: string,
 ): Promise<FragmentCacheWriteResult> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<FragmentCacheWriteResult>(
+  return invokeTimed<FragmentCacheWriteResult>(
     'write_fragment_cache_file_binary',
     packBinaryCacheWrite(projectId, entryPath, bytes, sourceGimSha256),
   );
@@ -611,8 +594,7 @@ export async function writeFragmentCacheFile(
  * 读取 Fragments 缓存文件（路径由 projectId + entryPath 计算）。
  */
 export async function readFragmentCacheFile(projectId: number, entryPath: string): Promise<Uint8Array> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  const bytes = await invoke<ArrayBuffer>('read_fragment_cache_file', { projectId, entryPath });
+  const bytes = await invokeTimed<ArrayBuffer>('read_fragment_cache_file', { projectId, entryPath });
   return toUint8Array(bytes);
 }
 
@@ -629,8 +611,7 @@ export async function upsertFragmentCacheRecord(
   cacheVersion: string,
   sourceGimSha256: string,
 ): Promise<void> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  await invoke<void>('upsert_fragment_cache_record', {
+  await invokeTimed<void>('upsert_fragment_cache_record', {
     projectId,
     entryPath,
     modelId,
@@ -653,8 +634,7 @@ export async function validateFragmentCache(
   cacheVersion: string,
   sourceGimSha256: string,
 ): Promise<FragmentCacheValidation> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<FragmentCacheValidation>('validate_fragment_cache', {
+  return invokeTimed<FragmentCacheValidation>('validate_fragment_cache', {
     projectId,
     entryPath,
     sourceIfcSize,
@@ -671,8 +651,7 @@ export async function deleteFragmentCacheRecord(
   projectId: number,
   entryPath: string,
 ): Promise<void> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  await invoke<void>('delete_fragment_cache_record', { projectId, entryPath });
+  await invokeTimed<void>('delete_fragment_cache_record', { projectId, entryPath });
 }
 
 // ==================== 线路工程图缓存（v4） ====================
@@ -731,8 +710,7 @@ export interface LineGraphPayload {
  * 在 Tauri 环境下保存线路工程图缓存（事务：先删后插 + 更新 project_type）。
  */
 export async function saveLineGraph(payload: LineGraphPayload): Promise<void> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  await invoke<void>('save_line_gim_graph', { payload });
+  await invokeTimed<void>('save_line_gim_graph', { payload });
 }
 
 // ===== v5: 线路工程 FAM/DEV 属性缓存 =====
@@ -793,12 +771,11 @@ export async function saveLineProjectCache(
   onProgress?: (done: number, total: number) => void,
   sourceSha256?: string | null,
 ): Promise<void> {
-  const { invoke } = await import('@tauri-apps/api/core');
   const sessionId = typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
-  await invoke<void>('save_line_graph_begin', {
+  await invokeTimed<void>('save_line_graph_begin', {
     projectId,
     sessionId,
     graphPayload,
@@ -817,7 +794,7 @@ export async function saveLineProjectCache(
   for (let i = 0; i < maxChunks; i++) {
     const famChunk = famProps.slice(i * LINE_ATTR_CHUNK_SIZE, (i + 1) * LINE_ATTR_CHUNK_SIZE);
     const devChunk = devProps.slice(i * LINE_ATTR_CHUNK_SIZE, (i + 1) * LINE_ATTR_CHUNK_SIZE);
-    await invoke<void>('save_line_attrs_chunk', {
+    await invokeTimed<void>('save_line_attrs_chunk', {
       projectId,
       sessionId,
       famProps: famChunk,
@@ -827,7 +804,7 @@ export async function saveLineProjectCache(
     onProgress?.(done, total);
   }
 
-  await invoke<void>('save_line_project_finish', { projectId, sessionId });
+  await invokeTimed<void>('save_line_project_finish', { projectId, sessionId });
 }
 
 // ===== 线路工程图读取 =====
@@ -883,8 +860,7 @@ export interface LineGraphResult {
  * 完整读取线路工程图缓存（只读）。
  */
 export async function getLineGraph(projectId: number): Promise<LineGraphResult> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<LineGraphResult>('get_line_gim_graph', { projectId });
+  return invokeTimed<LineGraphResult>('get_line_gim_graph', { projectId });
 }
 
 // ===== v5: 线路工程 FAM/DEV 属性读取 =====
@@ -924,8 +900,7 @@ export interface LineAttributeResult {
  * 二次打开线路 GIM（缓存命中）时调用，配合 getLineGraph 恢复全部状态。
  */
 export async function getLineAttributes(projectId: number): Promise<LineAttributeResult> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<LineAttributeResult>('get_line_attributes', { projectId });
+  return invokeTimed<LineAttributeResult>('get_line_attributes', { projectId });
 }
 
 /**
@@ -947,8 +922,7 @@ export interface CachedProjectSummary {
  * 供缓存管理 UI 使用。
  */
 export async function listCachedProjects(): Promise<CachedProjectSummary[]> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<CachedProjectSummary[]>('list_cached_projects');
+  return invokeTimed<CachedProjectSummary[]>('list_cached_projects');
 }
 
 /**
@@ -956,8 +930,7 @@ export async function listCachedProjects(): Promise<CachedProjectSummary[]> {
  * 返回操作摘要文本。
  */
 export async function deleteProjectCache(projectId: number): Promise<string> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<string>('delete_project_cache', { projectId });
+  return invokeTimed<string>('delete_project_cache', { projectId });
 }
 
 /**
@@ -965,6 +938,5 @@ export async function deleteProjectCache(projectId: number): Promise<string> {
  * 返回与 getLatestProjectCacheDiagnostic 相同结构的 ProjectCacheDiagnostic。
  */
 export async function getProjectDiagnostic(projectId: number): Promise<ProjectCacheDiagnostic> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<ProjectCacheDiagnostic>('get_project_diagnostic', { projectId });
+  return invokeTimed<ProjectCacheDiagnostic>('get_project_diagnostic', { projectId });
 }

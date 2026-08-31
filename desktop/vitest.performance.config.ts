@@ -31,7 +31,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    include: ['tmp/performance-characterization.test.ts'],
+    include: ['tmp/performance-line-worker.test.ts'],
     setupFiles: [resolve(desktop, 'vitest.setup.ts')],
   },
 });

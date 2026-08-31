@@ -20,6 +20,8 @@ import { discoverIfcFromCBM } from '../gimIndexer.js';
 import { parseFileDevRelation } from '../fileDevParser.js';
 import { parseFamSections } from '../famParser.js';
 import { buildLineGimGraph } from '../lineCbmParser.js';
+import { buildLineGimGraphFromTexts } from '../lineCbmParserCore.js';
+import { createLineParserCache, parseLineAttributesFromCache } from '../lineAttrParserCore.js';
 import { buildSubstationSpatialIndexFromFiles } from '../ifcSpatialParser.js';
 import {
   extractLineMapData,
@@ -62,6 +64,54 @@ function loadFilesFromDir(rootDir: string, prefix = ''): Map<string, File> {
     }
   }
   return files;
+}
+
+/** 将首开/Worker 的属性 payload 组装成地图提取层所需的索引。 */
+function buildLineAttributeIndex(
+  famPayloads: Array<LineFamPropertyRecord>,
+  devPayloads: Array<LineDevPropertyRecord>,
+): LineAttributeIndex {
+  const famBySourcePath = new Map<string, Map<string, LineFamPropertyRecord[]>>();
+  const famByFileNameLower = new Map<string, Map<string, LineFamPropertyRecord[]>>();
+  for (const record of famPayloads) {
+    for (const [target, key] of [
+      [famBySourcePath, record.source_path],
+      [famByFileNameLower, record.file_name_lower],
+    ] as const) {
+      let byProp = target.get(key);
+      if (!byProp) { byProp = new Map(); target.set(key, byProp); }
+      const list = byProp.get(record.prop_key) ?? [];
+      list.push(record);
+      byProp.set(record.prop_key, list);
+    }
+  }
+  const devBySourcePath = new Map<string, Map<string, LineDevPropertyRecord[]>>();
+  const devByFileNameLower = new Map<string, Map<string, LineDevPropertyRecord[]>>();
+  for (const record of devPayloads) {
+    for (const [target, key] of [
+      [devBySourcePath, record.source_path],
+      [devByFileNameLower, record.file_name_lower],
+    ] as const) {
+      let byProp = target.get(key);
+      if (!byProp) { byProp = new Map(); target.set(key, byProp); }
+      const list = byProp.get(record.prop_key) ?? [];
+      list.push(record);
+      byProp.set(record.prop_key, list);
+    }
+  }
+  return { famBySourcePath, famByFileNameLower, devBySourcePath, devByFileNameLower };
+}
+
+/** 去除 nodeRef 后比较线路地图的业务输出，避免对象引用掩盖字段差异。 */
+function lineMapBusinessShape(data: ReturnType<typeof extractLineMapData>): unknown {
+  return {
+    towers: data.towers.map(({ nodeRef: _nodeRef, ...tower }) => tower),
+    wires: data.wires.map(({ nodeRef: _nodeRef, ...wire }) => wire),
+    crosses: data.crosses.map(({ nodeRef: _nodeRef, ...cross }) => cross),
+    bbox: data.bbox,
+    stats: data.stats,
+    unresolved: data.unresolved,
+  };
 }
 
 function findFirstFile(files: Map<string, File>, ext: string): string | null {
@@ -244,53 +294,46 @@ describe.skipIf(!hasLine)('样本回归·线路 line02', () => {
     expect(graph.stats.Tower_Device ?? 0).toBeGreaterThan(0);
     expect(graph.stats.WIRE ?? 0).toBeGreaterThan(0);
 
+    // Line Parser Worker v1 的纯核心与既有 File API parser 结果保持一致。
+    // 这里只读取线路文本类型，模拟 Worker 输入的可序列化 bytes。
+    const workerTextFiles: Array<{ path: string; text: string }> = [];
+    for (const [path, file] of files) {
+      if (/\.(cbm|dev|fam|phm|mod)$/i.test(path)) {
+        workerTextFiles.push({ path, text: await file.text() });
+      } else {
+        // Worker 只需路径元数据即可保持 filesByType 统计（STL/other 不解码）。
+        workerTextFiles.push({ path, text: '' });
+      }
+    }
+    const workerCache = createLineParserCache(workerTextFiles);
+    const workerGraph = buildLineGimGraphFromTexts(workerTextFiles, workerCache);
+    const workerAttrPayloads = parseLineAttributesFromCache(workerGraph, workerCache);
+    expect(workerGraph.stats).toEqual(graph.stats);
+
     // FAM/DEV 属性解析
     const { famPayloads, devPayloads } = await parseLineAttributes(graph, files);
     expect(famPayloads.length).toBeGreaterThan(0);
+    expect(workerAttrPayloads.famPayloads.length).toBe(famPayloads.length);
+    expect(workerAttrPayloads.devPayloads.length).toBe(devPayloads.length);
+    expect(workerAttrPayloads.famPayloads).toEqual(famPayloads);
+    expect(workerAttrPayloads.devPayloads).toEqual(devPayloads);
+    expect(Array.from(workerGraph.nodesByPath.keys()).sort())
+      .toEqual(Array.from(graph.nodesByPath.keys()).sort());
 
-    // 组装属性索引并提取地图数据
-    const famBySourcePath = new Map<string, Map<string, LineFamPropertyRecord[]>>();
-    for (const rec of famPayloads as unknown as LineFamPropertyRecord[]) {
-      let byProp = famBySourcePath.get(rec.source_path);
-      if (!byProp) { byProp = new Map(); famBySourcePath.set(rec.source_path, byProp); }
-      const list = byProp.get(rec.prop_key) ?? [];
-      list.push(rec);
-      byProp.set(rec.prop_key, list);
-    }
-    const devBySourcePath = new Map<string, Map<string, LineDevPropertyRecord[]>>();
-    for (const rec of devPayloads as unknown as LineDevPropertyRecord[]) {
-      let byProp = devBySourcePath.get(rec.source_path);
-      if (!byProp) { byProp = new Map(); devBySourcePath.set(rec.source_path, byProp); }
-      const list = byProp.get(rec.prop_key) ?? [];
-      list.push(rec);
-      byProp.set(rec.prop_key, list);
-    }
-    // 按文件名小写补建索引（extractLineMapData 有 source_path 与 file_name_lower 双查找通道）
-    const famByFn = new Map<string, Map<string, LineFamPropertyRecord[]>>();
-    for (const rec of famPayloads as unknown as LineFamPropertyRecord[]) {
-      let byProp = famByFn.get(rec.file_name_lower);
-      if (!byProp) { byProp = new Map(); famByFn.set(rec.file_name_lower, byProp); }
-      const list = byProp.get(rec.prop_key) ?? [];
-      list.push(rec);
-      byProp.set(rec.prop_key, list);
-    }
-    const devByFn = new Map<string, Map<string, LineDevPropertyRecord[]>>();
-    for (const rec of devPayloads as unknown as LineDevPropertyRecord[]) {
-      let byProp = devByFn.get(rec.file_name_lower);
-      if (!byProp) { byProp = new Map(); devByFn.set(rec.file_name_lower, byProp); }
-      const list = byProp.get(rec.prop_key) ?? [];
-      list.push(rec);
-      byProp.set(rec.prop_key, list);
-    }
-
-    const attrs: LineAttributeIndex = {
-      famBySourcePath,
-      famByFileNameLower: famByFn,
-      devBySourcePath,
-      devByFileNameLower: devByFn,
-    };
+    // 组装属性索引并提取地图数据；同时用 Worker payload 构建平行索引，
+    // 让回归覆盖塔位、档距、跨越物和导航投影，而不只比较节点计数。
+    const attrs = buildLineAttributeIndex(
+      famPayloads as unknown as LineFamPropertyRecord[],
+      devPayloads as unknown as LineDevPropertyRecord[],
+    );
+    const workerAttrs = buildLineAttributeIndex(
+      workerAttrPayloads.famPayloads as unknown as LineFamPropertyRecord[],
+      workerAttrPayloads.devPayloads as unknown as LineDevPropertyRecord[],
+    );
 
     const mapData = extractLineMapData(graph, attrs);
+    const workerMapData = extractLineMapData(workerGraph, workerAttrs);
+    expect(lineMapBusinessShape(workerMapData)).toEqual(lineMapBusinessShape(mapData));
     expect(mapData.towers.length).toBeGreaterThan(0);
     expect(isLineMapDataValid(mapData)).toBe(true);
 
@@ -329,6 +372,21 @@ describe.skipIf(!hasLine)('样本回归·线路 line02', () => {
     // 线路业务导航投影回归：原始 9276 节点不得直接成为左侧树，
     // F3 映射为耐张段，CROSS 无坐标全部保留在待关联组。
     const navigation = buildLineNavigationIndex(graph, mapData, { attrs });
+    const workerNavigation = buildLineNavigationIndex(workerGraph, workerMapData, { attrs: workerAttrs });
+    expect(workerNavigation.stats).toEqual(navigation.stats);
+    expect(Array.from(workerNavigation.nodesByKey.keys()).sort())
+      .toEqual(Array.from(navigation.nodesByKey.keys()).sort());
+    expect(Array.from(workerNavigation.nodesByKey.entries()).map(([key, node]) => [
+      key,
+      node.kind,
+      node.label,
+      node.subtitle,
+    ])).toEqual(Array.from(navigation.nodesByKey.entries()).map(([key, node]) => [
+      key,
+      node.kind,
+      node.label,
+      node.subtitle,
+    ]));
     expect(navigation.stats.sectionCount).toBe(1);
     expect(navigation.stats.strainSectionCount).toBe(47);
     expect(navigation.stats.towerCount).toBe(129);

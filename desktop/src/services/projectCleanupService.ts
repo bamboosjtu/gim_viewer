@@ -26,6 +26,7 @@ import * as THREE from 'three';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { container } from '../ui/dom.js';
+import { perfReset } from '../utils/perfTimings.js';
 
 /**
  * 在打开新 GIM 项目前 / 清空场景时执行统一清理。
@@ -50,6 +51,12 @@ export async function cleanupBeforeOpenNewProject(
   // UI 状态写入新项目。必须在任何 await 之前执行——后续新增逻辑不得移到本行之前。
   state.invalidatePendingLoads();
   const cleanupGeneration = state.projectGeneration;
+  // 清空场景没有上层 open 请求负责重置性能会话；在无 expectedGeneration
+  // 的直接清理路径这里切断旧工程的迟到 span/invoke/Long Task。带代次的
+  // 打开流程由 openGimService 在请求开始处重置，并保留本次解压计时。
+  if (expectedGeneration === undefined) {
+    perfReset({ generation: cleanupGeneration, projectId: null, sourceSha256: null });
+  }
   const isCurrentCleanup = () => state.projectGeneration === cleanupGeneration;
 
   // M0 设计系统：清理即重置顶栏工程身份与状态栏（纯 UI，位于 token 递增之后）
@@ -67,6 +74,16 @@ export async function cleanupBeforeOpenNewProject(
     destroyLineMapView();
   } catch (err) {
     console.warn('[Cleanup] destroyLineMapView failed:', err);
+  }
+
+  // 线路解析 Worker 只服务当前工程；切换工程时主动终止在途任务，
+  // 即使旧结果随后从消息队列到达也不会进入当前工程。
+  try {
+    const { terminateLineParserWorker } = await import('./lineParserWorkerClient.js');
+    if (!isCurrentCleanup()) return false;
+    terminateLineParserWorker();
+  } catch (err) {
+    console.warn('[Cleanup] terminate line parser worker failed:', err);
   }
 
   // ---- 2. dispose ViewerRuntime 中所有 fragments 模型 ----

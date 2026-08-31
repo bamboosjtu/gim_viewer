@@ -205,6 +205,21 @@ export async function detectGimProjectType(
 
   const lineSignals = new Set<string>();
 
+  // 原生 manifest-only 解压后的 DiskBackedFile 在这里若逐个 text()，会把
+  // 线路解析前的类型识别退化成数千次 read_cached_entry IPC。对于没有 IFC
+  // 且同时具备 Cbm/Dev/Mod 三类 PascalCase 目录的标准线路包，目录布局本身
+  // 已是充分的线路信号；直接采用它，后续统一由 lineParserInput 批量读取。
+  // 仍保留非标准布局的文本扫描路径，避免改变旧样本/兼容格式的识别能力。
+  const canonicalLineLayout = !hasIfc
+    && lineCbmDirCount > 0
+    && lineDevDirCount > 0
+    && lineModDirCount > 0;
+  if (!hasIfc && (hasLineArtifacts || canonicalLineLayout)) {
+    hasLineArtifacts = true;
+    lineSignals.add('PascalCaseLayout:Cbm/Dev/Mod');
+    textFilesToScan.length = 0;
+  }
+
   // 扫描文本文件（KEY=VALUE 级别匹配，避免裸子串误判）
   for (const { file } of textFilesToScan) {
     let text: string;

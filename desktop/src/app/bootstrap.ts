@@ -17,6 +17,11 @@ function hideLoading() { loadingEl.style.display = 'none'; popBusy('就绪'); }
 async function bootstrapAsync(): Promise<void> {
   const state = new AppState();
 
+  // WebView Long Task 统计从首屏开始记录；perfReset 会在工程切换时重建
+  // observer，使旧工程迟到的 PerformanceObserver 回调不会污染新 session。
+  const { installLongTaskObserver } = await import('../utils/perfTimings.js');
+  installLongTaskObserver();
+
   // 全局 unhandledrejection 监听（仅 Fragments 相关）：
   // - Fragments 内部异常（如 "Malformed tile"）会被 preventDefault() 捕获，避免控制台红屏
   // - 真实错误仍通过 ifcLoader.ts 的 safeFragmentsUpdate 局部 catch / console.error 处理
