@@ -37,6 +37,19 @@ export interface LineFamProperty {
   raw_line: string | null;
 }
 
+/**
+ * 部分线路导出器会输出 `中文展示键==值`，即三段式记录缺少英文键。
+ * SQLite 的线路属性表要求 prop_key 非空，因此用稳定、可诊断的保底键
+ * 保存该行，display_key/raw_line 仍保留原始业务语义。正常英文键不变。
+ */
+function normalizePropertyKey(propKey: string, displayKey: string | null, lineNumber: number): string {
+  const key = propKey.trim();
+  if (key) return key;
+  const display = displayKey?.trim();
+  if (display) return `__display__${display}`;
+  return `__line_fam_${lineNumber}`;
+}
+
 
 /**
  * 解析线路 FAM 文件文本。
@@ -51,7 +64,7 @@ export function parseLineFam(text: string): LineFamProperty[] {
   // 清理 BOM（全文）
   const cleaned = text.replace(BOM_RE, '');
 
-  for (const raw of cleaned.split(/\r?\n/)) {
+  for (const [lineIndex, raw] of cleaned.split(/\r?\n/).entries()) {
     // 清理不可见控制字符，保留可见内容
     const line = raw.replace(CTRL_RE, '').trim();
     if (!line) continue;
@@ -61,7 +74,7 @@ export function parseLineFam(text: string): LineFamProperty[] {
     if (parts.length >= 3) {
       // 三段式：中文展示键=ENGLISH_KEY=值（值可能含 =）
       const display_key = parts[0].trim();
-      const prop_key = parts[1].trim();
+      const prop_key = normalizePropertyKey(parts[1], display_key || null, lineIndex + 1);
       const prop_value = parts.slice(2).join('=').trim();
       result.push({
         display_key: display_key || null,
@@ -71,7 +84,7 @@ export function parseLineFam(text: string): LineFamProperty[] {
       });
     } else if (parts.length === 2) {
       // 单段式：KEY=VALUE
-      const prop_key = parts[0].trim();
+      const prop_key = normalizePropertyKey(parts[0], null, lineIndex + 1);
       const prop_value = parts[1].trim();
       result.push({
         display_key: null,
@@ -83,7 +96,7 @@ export function parseLineFam(text: string): LineFamProperty[] {
       // 异常行：无 `=` 或只有 `=`，不阻断，保留 raw_line 用于排查
       result.push({
         display_key: null,
-        prop_key: line,
+        prop_key: normalizePropertyKey(line, null, lineIndex + 1),
         prop_value: null,
         raw_line: line,
       });

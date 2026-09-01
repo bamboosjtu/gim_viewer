@@ -59,6 +59,43 @@ describe('线路塔位来源形状预览', () => {
     expect(html).not.toContain('未找到可预览');
   });
 
+  it('大规模 HNum 不按文件前缀截断，杆件用单个 Path 且点标记覆盖全高度', () => {
+    const points = Array.from({ length: 2001 }, (_, index) => ({
+      id: index + 1,
+      x: (index % 2 === 0 ? -1 : 1) * (100 + (index % 11)),
+      y: 0,
+      z: index,
+    }));
+    const rods = Array.from({ length: 2000 }, (_, index) => ({
+      kind: 'tube' as const,
+      id1: index + 1,
+      id2: index + 2,
+      spec: 'φ100X5',
+      material: 'Q235',
+    }));
+    const html = renderLineTowerShapeSource(node(), [{
+      path: 'Mod/large-tower.mod',
+      source: {
+        kind: 'line-text-mod',
+        format: 'text-hnum-comma-record',
+        modPath: 'Mod/large-tower.mod',
+        records: {
+          hNum: 1,
+          hRecords: [{ height: 2000, body: 'Body1', leg: 'Leg1' }],
+          bodySections: [{ name: 'Body1', points, rods, groundPoints: [] }],
+          hSubLegs: [],
+          hLegs: [],
+        },
+      },
+    }]);
+
+    expect(html).toContain('杆塔形状（局部骨架预览）');
+    expect(html).toContain('P 2001（点标记 1800）');
+    expect(html).toContain('R 2000');
+    expect(html).toContain('<path d="M');
+    expect(html).not.toContain('<line ');
+  });
+
   it('非杆塔节点不插入形状预览', () => {
     expect(renderLineTowerShapeSource(node({ classifyName: 'WIRE', rawProps: { GROUPTYPE: 'WIRE' } }), [])).toBe('');
   });

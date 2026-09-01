@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const invokeMock = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
-import { invokeTimed } from '../invokeTimed.js';
+import { estimateInvokeByteMeasurement, invokeTimed } from '../invokeTimed.js';
 import { perfReset, perfSnapshot } from '../../src/utils/perfTimings.js';
 
 describe('invokeTimed', () => {
@@ -44,5 +44,22 @@ describe('invokeTimed', () => {
     resolveInvoke?.(new ArrayBuffer(8));
     await expect(oldCall).resolves.toBeInstanceOf(ArrayBuffer);
     expect(perfSnapshot().invokes).toEqual([]);
+  });
+
+  it('普通对象不为埋点重复 JSON 序列化，并标记 bytesMeasured=false', async () => {
+    const request = { graphPayload: { nodes: Array.from({ length: 10 }, (_, index) => ({ index })) }, toJSON: () => { throw new Error('must not stringify'); } };
+    invokeMock.mockResolvedValue({ ok: true });
+    await expect(invokeTimed('save_line_graph_begin', request)).resolves.toEqual({ ok: true });
+    const stat = perfSnapshot().invokes.find((item) => item.command === 'save_line_graph_begin');
+    expect(stat).toMatchObject({ count: 1, bytes: 0, bytesMeasured: false, measuredCalls: 0, unmeasuredCalls: 1 });
+    expect(estimateInvokeByteMeasurement(request, { ok: true })).toEqual({ bytes: 0, measured: false });
+  });
+
+  it('调用方显式提供请求/响应字节数时完整记录，不触发对象序列化', async () => {
+    const request = { graphPayload: { huge: true }, toJSON: () => { throw new Error('must not stringify'); } };
+    invokeMock.mockResolvedValue({ saved: true });
+    await invokeTimed('save_line_graph_begin', request, { requestBytes: 1234, responseBytes: 16 });
+    const stat = perfSnapshot().invokes.find((item) => item.command === 'save_line_graph_begin');
+    expect(stat).toMatchObject({ bytes: 1250, bytesMeasured: true, measuredCalls: 1, unmeasuredCalls: 0 });
   });
 });

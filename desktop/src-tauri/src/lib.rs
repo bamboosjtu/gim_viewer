@@ -163,6 +163,25 @@ pub(crate) fn require_authorized_path(
 mod file_dialog_commands {
     use super::*;
 
+    /// 开发版性能采集用：登记一个本地 GIM 路径，绕过系统文件选择器的
+    /// 模态窗口，但仍复用同一 canonicalize/扩展名/文件大小校验。发布版
+    /// 保留命令签名但始终拒绝，避免页面注入路径扩大生产信任边界。
+    #[tauri::command]
+    pub fn authorize_gim_file_path_for_dev(
+        access: tauri::State<'_, AuthorizedFilePaths>,
+        path: String,
+    ) -> Result<String, String> {
+        #[cfg(debug_assertions)]
+        {
+            return authorize_selected_path(&access, Path::new(&path), Some("gim"));
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            let _ = (access, path);
+            Err("开发性能采集命令仅在 debug 构建可用".to_string())
+        }
+    }
+
     /// 后端 GIM 文件选择器，同时登记 canonical path 授权。
     #[tauri::command]
     pub async fn pick_gim_file_path(
@@ -284,6 +303,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_file_bytes,
             get_file_info,
+            file_dialog_commands::authorize_gim_file_path_for_dev,
             file_dialog_commands::pick_gim_file_path,
             file_dialog_commands::pick_ifc_file_paths,
             gim_extract_command::extract_gim_archive,

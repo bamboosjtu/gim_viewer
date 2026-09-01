@@ -62,17 +62,17 @@ export function classifyLineMod(text: string): LineModFormat | null {
   const normalized = normalizeText(text);
   // 多行模式（m 标志）
   if (
-    /^CODE\s*=/m.test(normalized) &&
-    /^POINTNUM\s*=/m.test(normalized) &&
-    /^LINENUM\s*=/m.test(normalized)
+    /^CODE\s*=/im.test(normalized) &&
+    /^POINTNUM\s*=/im.test(normalized) &&
+    /^LINENUM\s*=/im.test(normalized)
   ) {
     return 'text-point-line';
   }
-  if (/^HNum\s*,/m.test(normalized)) {
+  if (/^HNum\s*,/im.test(normalized)) {
     return 'text-hnum-comma-record';
   }
   // section header：行首为 Bolt（独立行，非 BoltN=...）
-  if (/^Bolt\s*$/m.test(normalized)) {
+  if (/^Bolt\s*$/im.test(normalized)) {
     return 'text-section-kv-record';
   }
   // KEY=VALUE 形式：至少有一行匹配 KEY=VALUE
@@ -119,22 +119,22 @@ export function parseLineMod(text: string, modPath: string): LineTextModGeometry
 // §2 TEXT_HNUM_COMMA_RECORD 解析
 // ============================================================================
 
-/** H 记录正则：H,<height>,<body>,<leg> */
-const RE_H_RECORD = /^H\s*,\s*(-?[\d.]+)\s*,\s*(Body\d+)\s*,\s*(Leg\d+)\s*$/;
-/** HNum 行正则：HNum,<n> */
-const RE_HNUM = /^HNum\s*,\s*(\d+)\s*$/;
-/** BodyN 独立行正则：Body1 / Body2 ... */
-const RE_BODY_HEADER = /^(Body\d+)$/;
-/** HBodyN 行正则：HBody1,26720.401 */
-const RE_HBODY = /^HBody(\d+)\s*,\s*(-?[\d.]+)\s*$/;
+/** H 记录正则：H,<height>,<body>[,<leg>]；导出器可能使用 body/leg 小写，Leg 可省略。 */
+const RE_H_RECORD = /^H\s*,\s*(-?[\d.]+)\s*,\s*Body(\d+)(?:\s*,\s*Leg(\d+))?\s*$/i;
+/** HNum 行正则：HNum,<n>（对字段名大小写不敏感） */
+const RE_HNUM = /^HNum\s*,\s*(\d+)\s*$/i;
+/** BodyN 独立行正则：Body1 / Body2 ...（对字段名大小写不敏感） */
+const RE_BODY_HEADER = /^(Body\d+)$/i;
+/** HBodyN 行正则：HBody1,26720.401（对字段名大小写不敏感） */
+const RE_HBODY = /^HBody(\d+)\s*,\s*(-?[\d.]+)\s*$/i;
 /** P 记录正则：P,<id>,<X>,<Y>,<Z> */
-const RE_P_RECORD = /^P\s*,\s*(\d+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/;
+const RE_P_RECORD = /^P\s*,\s*(\d+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/i;
 /** G 记录正则：G,<type>,<name>,<X>,<Y>,<Z> */
-const RE_G_RECORD = /^G\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/;
-/** HSubLegN 行正则：HSubLeg1,-3000 */
-const RE_HSUBLEG = /^HSubLeg(\d+)\s*,\s*(-?[\d.]+)\s*$/;
-/** HLegN 行正则：HLeg1,0,7997.065 */
-const RE_HLEG = /^HLeg(\d+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/;
+const RE_G_RECORD = /^G\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/i;
+/** HSubLegN 行正则：HSubLeg1,-3000（对字段名大小写不敏感） */
+const RE_HSUBLEG = /^HSubLeg(\d+)\s*,\s*(-?[\d.]+)\s*$/i;
+/** HLegN 行正则：HLeg1,0,7997.065（对字段名大小写不敏感） */
+const RE_HLEG = /^HLeg(\d+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*$/i;
 
 /**
  * 解析 TEXT_HNUM_COMMA_RECORD 文本为 HNumModFile。
@@ -180,8 +180,9 @@ export function parseHNumCommaRecord(text: string, modPath: string): HNumModFile
       if (hRecords.length >= PARSER_LIMITS.maxGeometryInstances) throw new Error(`H 记录数超过安全上限 ${PARSER_LIMITS.maxGeometryInstances}`);
       hRecords.push({
         height: parseFloat(m[1]),
-        body: m[2],
-        leg: m[3],
+        // 统一为 IR 约定的规范名称，兼容 line03 中的 body1/leg1 变体。
+        body: `Body${m[2]}`,
+        ...(m[3] ? { leg: `Leg${m[3]}` } : {}),
       });
       continue;
     }
@@ -191,7 +192,8 @@ export function parseHNumCommaRecord(text: string, modPath: string): HNumModFile
       if (bodySections.length >= PARSER_LIMITS.maxGeometryInstances) throw new Error(`Body 段数超过安全上限 ${PARSER_LIMITS.maxGeometryInstances}`);
       flushCurrentBody();
       currentBody = {
-        name: m[1],
+        // 与 H 记录一样规范化名称，避免 body1 与 Body1 无法关联。
+        name: `Body${m[1].slice(4)}`,
         points: [],
         rods: [],
         groundPoints: [],
@@ -203,7 +205,7 @@ export function parseHNumCommaRecord(text: string, modPath: string): HNumModFile
     if (m) {
       if (currentBody && currentBody.points.length >= PARSER_LIMITS.maxGeometryInstances) throw new Error(`P 点记录数超过安全上限 ${PARSER_LIMITS.maxGeometryInstances}`);
       // 若未开启 Body 段，忽略（不应发生，但兜底）
-      if (currentBody && currentBody.name === `Body${m[1]}`) {
+      if (currentBody && currentBody.name.toLowerCase() === `body${m[1]}`.toLowerCase()) {
         currentBody.hBody = parseFloat(m[2]);
       }
       continue;
@@ -225,7 +227,7 @@ export function parseHNumCommaRecord(text: string, modPath: string): HNumModFile
       continue;
     }
     // R,...
-    if (line.startsWith('R,')) {
+    if (/^R\s*,/i.test(line)) {
       const r = parseRRecord(line);
       if (r) {
         if (currentBody && currentBody.rods.length >= PARSER_LIMITS.maxGeometryInstances) throw new Error(`R 记录数超过安全上限 ${PARSER_LIMITS.maxGeometryInstances}`);
@@ -320,8 +322,17 @@ function parseRRecord(line: string): RRecord | null {
       material: tokens[3],
     };
   }
-  // 9 token 罕见变体（去掉 R 后 8 token）或其他：保留原始文本
-  return { kind: 'unknown', raw: line };
+  // 9 token 罕见变体（去掉 R 后 8 token）或其他：保留原始文本。
+  // 大多数变体仍以 id1,id2 开头，提取端点可让骨架预览绘制该杆件，
+  // 但不对其余字段做未经证实的语义解释。
+  const id1 = Number.parseInt(tokens[0] ?? '', 10);
+  const id2 = Number.parseInt(tokens[1] ?? '', 10);
+  return {
+    kind: 'unknown',
+    ...(Number.isFinite(id1) ? { id1 } : {}),
+    ...(Number.isFinite(id2) ? { id2 } : {}),
+    raw: line,
+  };
 }
 
 // ============================================================================
@@ -329,15 +340,15 @@ function parseRRecord(line: string): RRecord | null {
 // ============================================================================
 
 /** CODE 行正则：CODE=201 */
-const RE_CODE = /^CODE\s*=\s*(.*)$/;
+const RE_CODE = /^CODE\s*=\s*(.*)$/i;
 /** POINTNUM 行正则 */
-const RE_POINTNUM = /^POINTNUM\s*=\s*(\d+)\s*$/;
+const RE_POINTNUM = /^POINTNUM\s*=\s*(\d+)\s*$/i;
 /** LINENUM 行正则 */
-const RE_LINENUM = /^LINENUM\s*=\s*(\d+)\s*$/;
+const RE_LINENUM = /^LINENUM\s*=\s*(\d+)\s*$/i;
 /** POINTn 行正则：POINT1=id,lat,lon,alt,type */
-const RE_POINT = /^POINT(\d+)\s*=\s*(\d+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(\S+)\s*$/;
+const RE_POINT = /^POINT(\d+)\s*=\s*(\d+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(\S+)\s*$/i;
 /** LINEn 行正则：LINE1=fromId,toId */
-const RE_LINE = /^LINE(\d+)\s*=\s*(\d+)\s*,\s*(\d+)\s*$/;
+const RE_LINE = /^LINE(\d+)\s*=\s*(\d+)\s*,\s*(\d+)\s*$/i;
 
 /**
  * 解析 TEXT_POINT_LINE 文本为 PointLineModFile。
@@ -404,9 +415,9 @@ export function parsePointLine(text: string, _modPath: string): PointLineModFile
 // ============================================================================
 
 /** BoltNum 行正则 */
-const RE_BOLTNUM = /^BoltNum\s*=\s*(\d+)\s*$/;
+const RE_BOLTNUM = /^BoltNum\s*=\s*(\d+)\s*$/i;
 /** BoltN 行正则（前缀，值部分按分号拆分） */
-const RE_BOLT_N = /^Bolt(\d+)\s*=\s*(.*)$/;
+const RE_BOLT_N = /^Bolt(\d+)\s*=\s*(.*)$/i;
 
 /**
  * 解析 TEXT_SECTION_KV_RECORD 文本为 BoltModFile。
@@ -428,7 +439,7 @@ export function parseSectionKvRecord(text: string, modPath: string): BoltModFile
     if (line === '') continue;
 
     // 跳过 section header 行（"Bolt"）
-    if (line === 'Bolt') continue;
+    if (/^Bolt$/i.test(line)) continue;
 
     let m = RE_BOLTNUM.exec(line);
     if (m) {

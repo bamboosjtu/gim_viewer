@@ -225,14 +225,14 @@ export interface XmlModColor {
 
 // ─── TEXT_HNUM_COMMA_RECORD：杆塔主体分段构件 ─────────────────────────────
 
-/** H 记录：档位标高 + 归属 Body/Leg */
+/** H 记录：档位标高 + 归属 Body/Leg（部分导出器省略 Leg） */
 export interface HRecord {
   /** 档位标高（mm） */
   height: number;
   /** 归属体段（"Body1".."BodyN"） */
   body: string;
-  /** 归属腿（"Leg1".."LegN"） */
-  leg: string;
+  /** 归属腿（"Leg1".."LegN"）；导出器省略时为空 */
+  leg?: string;
 }
 
 /** P 记录：节点笛卡尔坐标（局部坐标，毫米） */
@@ -278,9 +278,13 @@ export interface RRecordTube {
   material: string;
 }
 
-/** R 记录未知变体（9 token 罕见 + 兜底） */
+/** R 记录未知变体（9 token 罕见 + 兜底）；若前两 token 可解析则保留端点供骨架预览 */
 export interface RRecordUnknown {
   kind: "unknown";
+  /** 可选起点节点 id（引用 P.id） */
+  id1?: number;
+  /** 可选终点节点 id（引用 P.id） */
+  id2?: number;
   /** 保留原始记录文本，供后续样本扩展 */
   raw: string;
 }

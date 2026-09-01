@@ -128,9 +128,14 @@ async function bootstrapAsync(): Promise<void> {
         e.preventDefault();
         try {
           showLoading('正在生成数据库诊断...');
-          const { getDbPath, getLatestProjectCacheDiagnostic } = await import('@desktop/database.js');
+          const { getDbPath, getLatestProjectCacheDiagnostic, getProjectDiagnostic } = await import('@desktop/database.js');
           const dbPath = await getDbPath();
-          const diagnostic = await getLatestProjectCacheDiagnostic();
+          // Prefer the active project's diagnostic.  The "latest" record is a
+          // global fallback and can describe another project after a cache-hit
+          // switch, which would mix its semantic counts with current timings.
+          const diagnostic = state.currentProjectId != null
+            ? await getProjectDiagnostic(state.currentProjectId)
+            : await getLatestProjectCacheDiagnostic();
           const debug = getDebugConfigSnapshot();
           // M4-A2 Finalization：附带底图运行状态（仅在线路工程场景有意义，无工程时为初始 'canvas-only'）
           const basemap = getBasemapStatusSnapshot();
@@ -141,6 +146,12 @@ async function bootstrapAsync(): Promise<void> {
           const timings = perfSnapshot();
           const webIfcMt = { available: isWebIfcMultiThreadingAvailable() };
           const payload = JSON.stringify({ dbPath, diagnostic, debug, basemap, timings, webIfcMt }, null, 2);
+          // Debug-only performance harness: expose the exact diagnostic payload to
+          // the local CDP runner.  Production builds intentionally do not publish
+          // this global, preserving the existing clipboard-only diagnostic path.
+          if (import.meta.env.DEV) {
+            (globalThis as { __GIM_LAST_DIAGNOSTIC__?: string }).__GIM_LAST_DIAGNOSTIC__ = payload;
+          }
           await navigator.clipboard.writeText(payload);
           // 完整 JSON 仍输出到控制台（便于排障）
           console.log('[诊断] 数据库诊断信息已复制到剪贴板:\n', payload);

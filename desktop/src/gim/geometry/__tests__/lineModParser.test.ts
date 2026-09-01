@@ -171,6 +171,8 @@ R,1,2,,Q235,100.000000,500.000000,8.000000,0`;
     const doc = parseHNumCommaRecord(text, 'MOD/rare.mod');
     const rod = doc.bodySections[0].rods[0] as Extract<RRecord, { kind: 'unknown' }>;
     expect(rod.kind).toBe('unknown');
+    expect(rod.id1).toBe(1);
+    expect(rod.id2).toBe(2);
     expect(rod.raw).toBe('R,1,2,,Q235,100.000000,500.000000,8.000000,0');
   });
 
@@ -186,6 +188,43 @@ R,1,2,,Q235,100.000000,500.000000,8.000000,0`;
     const text = '\uFEFF' + SAMPLE_HNUM;
     const doc = parseHNumCommaRecord(text, 'MOD/tower.mod');
     expect(doc.hNum).toBe(10);
+  });
+
+  it('H/Body/Leg 记录大小写不敏感，并保持规范化关联', () => {
+    const text = `hnum,1
+h,1000,body1,leg1
+body1
+hbody1,900
+p,1,0,0,0
+p,2,100,0,1000
+r,1,2,φ100X5,Q235
+g,g,ground,0,0,1000
+hsubleg1,-200
+hleg1,0,100`;
+    const doc = parseHNumCommaRecord(text, 'MOD/lowercase.mod');
+    expect(doc.hNum).toBe(1);
+    expect(doc.hRecords[0]).toEqual({ height: 1000, body: 'Body1', leg: 'Leg1' });
+    expect(doc.bodySections[0].name).toBe('Body1');
+    expect(doc.bodySections[0].hBody).toBe(900);
+    expect(doc.bodySections[0].points).toHaveLength(2);
+    expect(doc.bodySections[0].rods).toHaveLength(1);
+    expect(doc.bodySections[0].groundPoints).toHaveLength(1);
+    expect(doc.hSubLegs).toEqual([{ index: 1, offset: -200 }]);
+    expect(doc.hLegs).toEqual([{ index: 1, x: 0, y: 100 }]);
+  });
+
+  it('兼容导出器省略 Leg 的 H 记录', () => {
+    const text = `HNum,1
+H,24500,body1
+body1
+HBody1,32500
+P,1,0,0,0
+P,2,0,0,32500
+R,1,2,φ76X3,Q235`;
+    const doc = parseHNumCommaRecord(text, 'MOD/optional-leg.mod');
+    expect(doc.hRecords).toEqual([{ height: 24500, body: 'Body1' }]);
+    expect(doc.bodySections[0].name).toBe('Body1');
+    expect(doc.bodySections[0].points).toHaveLength(2);
   });
 
   it('缺失 HBody 时 hBody 为 undefined', () => {

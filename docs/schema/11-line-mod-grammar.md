@@ -164,13 +164,15 @@ HLeg2,3961.944,7894.048
 HLeg3,6895.407,7894.048
 ```
 
+> 兼容性注记：已登记线路样本中有 3 条 `H,<高度>,BodyN` 记录省略 `LegN`。这类记录仍表示有效档位，`Leg` 在 Geometry IR 中按可选字段处理；`H`/`Body`/`Leg` 关键字及编号大小写均不敏感。
+
 ### 2.3 层级关系
 
 ```text
 Tower (单文件 = 单杆塔)
 ├── HNum 个档位（H 记录）
-│   └── 每个 H 归属一个 Body + 一个 Leg
-│       H,<高度>,<BodyN>,<LegN>
+│   └── 每个 H 归属一个 Body，可选一个 Leg
+│       H,<高度>,<BodyN>[,<LegN>]
 │
 ├── BodyN 个体段（顺序出现，每段含 HBody + P + R + G）
 │   ├── HBodyN,<高度>          ← 该体段参考标高
@@ -828,7 +830,7 @@ interface HNumHeader {
 interface HRecord {
   height: number;
   body: string;   // "Body1".."BodyN"
-  leg: string;    // "Leg1".."LegN"
+  leg?: string;   // "Leg1".."LegN"（部分导出器省略）
 }
 
 interface BodySection {
@@ -1171,7 +1173,7 @@ $sig = $keys -join ","
 | HNum | hNum | int | 1-10 | 档位总数 |
 | H | height | float | 21000-78000 | 档位标高（mm） |
 | H | body | string | "Body1".."BodyN" | 归属体段 |
-| H | leg | string | "Leg1".."LegN" | 归属腿 |
+| H | leg | string（可选） | "Leg1".."LegN" | 归属腿；部分导出器省略 |
 | Body | name | string | "Body1".."BodyN" | 体段标识 |
 | HBody | hbody | float | 22337-46588 | 体段参考标高 |
 | P | id | int | 1-29798 | 节点 id |

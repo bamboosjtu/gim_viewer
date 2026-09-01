@@ -1,6 +1,8 @@
 import type { FileInfo } from './fileReader.js';
 import { invokeTimed } from './invokeTimed.js';
 
+const utf8Encoder = new TextEncoder();
+
 /** 数据库中的 GIM 项目完整记录 */
 export interface GimProjectRecord {
   id: number;
@@ -196,10 +198,17 @@ export async function batchReadCachedFiles(
   projectId: number,
   entryPaths: string[],
 ): Promise<Map<string, Uint8Array | null>> {
+  // The request is a small JSON object, but serializing it a second time only
+  // to measure IPC would distort the very batch-read timing we are collecting.
+  // Account for the known UTF-8 path bytes plus a conservative fixed envelope
+  // estimate instead. The response is an ArrayBuffer and is measured exactly
+  // by invokeTimed.
+  const pathBytes = entryPaths.reduce((sum, path) => sum + utf8Encoder.encode(path).byteLength, 0);
+  const requestBytes = pathBytes + entryPaths.length * 6 + String(projectId).length + 32;
   const payload = await invokeTimed<ArrayBuffer>('batch_read_cached_files', {
     projectId,
     entryPaths,
-  });
+  }, { requestBytes });
   const results = parseBatchCachePayload(payload);
   const map = new Map<string, Uint8Array | null>();
   for (const item of results) {
@@ -770,6 +779,8 @@ export async function saveLineProjectCache(
   devProps: LineDevPropertyPayload[],
   onProgress?: (done: number, total: number) => void,
   sourceSha256?: string | null,
+  /** 已由调用方生成 graphPayload JSON 时复用其 UTF-8 字节数，避免再次序列化。 */
+  graphPayloadBytes?: number,
 ): Promise<void> {
   const sessionId = typeof globalThis.crypto?.randomUUID === 'function'
     ? globalThis.crypto.randomUUID()
@@ -782,7 +793,7 @@ export async function saveLineProjectCache(
     sourceSha256: sourceSha256 ?? graphPayload.source_sha256 ?? null,
     expectedFamProperties: famProps.length,
     expectedDevProperties: devProps.length,
-  });
+  }, graphPayloadBytes === undefined ? {} : { requestBytes: graphPayloadBytes });
 
   const total = famProps.length + devProps.length;
   let done = 0;

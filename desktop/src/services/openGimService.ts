@@ -30,6 +30,21 @@ function resolveProjectName(
   return [headerName, headerId, fileStem].map((value) => String(value ?? '').trim()).find(Boolean) || '';
 }
 
+/**
+ * 仅开发构建使用的本地性能采集入口。
+ *
+ * Tauri 的原生文件选择器无法通过 WebView CDP 自动化（它属于系统模态
+ * 窗口），而性能灰度需要重复打开固定的真实 GIM。允许采集脚本在当前
+ * WebView 设置一个绝对路径，仍然走与点击“打开 GIM”完全相同的原生
+ * FileInfo/SQLite/解压/批量读取流程；生产构建通过 import.meta.env.DEV
+ * 消除该分支，绝不接受页面注入路径。
+ */
+function getDevPerformanceFilePath(): string | null {
+  if (!import.meta.env.DEV) return null;
+  const value = (globalThis as { __GIM_DEV_PERF_FILE_PATH__?: unknown }).__GIM_DEV_PERF_FILE_PATH__;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 /** 创建统一的节点点击回调 */
 function createNodeClickHandler(state: AppState, showMessage: (text: string) => void): (node: CbmNode) => void {
   return (node: CbmNode) => {
@@ -753,6 +768,7 @@ async function openGimFromArrayBuffer(
 
         // 性能日志：payload 统计 + 风险评估
         const graphPayloadJson = JSON.stringify(graphPayload);
+        const graphPayloadBytes = new TextEncoder().encode(graphPayloadJson).byteLength;
         const estimatedMB = estimatePayloadSizeMB(
           graphPayloadJson,
           attrResult.famPayloads,
@@ -787,6 +803,7 @@ async function openGimFromArrayBuffer(
             }
           },
           session.sourceSha256,
+          graphPayloadBytes,
         );
         if (!state.isCurrentSession(session)) return;
         const elapsedMs = Math.round(performance.now() - t0);
@@ -989,7 +1006,7 @@ export async function openGimWithDialog(
 ): Promise<void> {
   if (isTauri()) {
     // 1. 对话框立即打开（无 3D 依赖）
-    const filePath = await openGimFilePath();
+    const filePath = getDevPerformanceFilePath() ?? await openGimFilePath();
     if (!filePath) return;
     // 文件选择完成即失效旧工程的在途任务，避免读取/解压期间旧几何继续写入场景。
     state.invalidatePendingLoads();
@@ -1052,10 +1069,17 @@ export async function openGimWithDialog(
             if (!state.isCurrentSession(session)) return;
             const attrStats = restoreLineAttributesToState(attrResult, state);
             endRestoreAttrs(undefined, { fam: attrStats.famCount, dev: attrStats.devCount });
-            perfMark('线路工程可交互（缓存命中）', undefined, perfSession);
 
             const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
+            const endRestoreMap = perfBegin('线路面板+地图渲染（缓存命中）', undefined, perfSession);
             renderLineProjectPanels(state, graph, showMessage);
+            endRestoreMap(undefined, {
+              nodes: graph.stats.total,
+              towers: graph.stats.Tower_Device,
+              wires: graph.stats.WIRE,
+              crosses: graph.stats.CROSS,
+            });
+            perfMark('线路工程可交互（缓存命中）', undefined, perfSession);
             emptyTipEl.style.display = 'none';
 
             hideLoading();

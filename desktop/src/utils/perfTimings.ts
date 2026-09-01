@@ -43,8 +43,14 @@ export interface PerfSession extends PerfSessionIdentity {
 export interface PerfInvokeCommandStats {
   command: string;
   count: number;
-  /** 请求 + 响应的估算字节数。二进制响应按实际 byteLength 统计。 */
+  /** 已测得的请求 + 响应字节数；普通对象不会为测量而重复序列化。 */
   bytes: number;
+  /** 该 command 的所有调用是否都得到了完整字节测量。 */
+  bytesMeasured: boolean;
+  /** 完整测得字节数的调用次数。 */
+  measuredCalls: number;
+  /** 因普通对象/未知响应而未完整测量字节数的调用次数。 */
+  unmeasuredCalls: number;
   totalMs: number;
   p50Ms: number;
   p95Ms: number;
@@ -62,6 +68,8 @@ export interface PerfLongTaskStats {
 interface InvokeAccumulator {
   count: number;
   bytes: number;
+  measuredCalls: number;
+  unmeasuredCalls: number;
   totalMs: number;
   maxMs: number;
   failures: number;
@@ -159,6 +167,7 @@ export function perfRecordInvoke(
   bytes: number,
   sessionId: number = currentSession.id,
   failed = false,
+  bytesMeasured = true,
 ): void {
   if (sessionId !== currentSession.id) return;
   const safeDuration = Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0;
@@ -166,6 +175,8 @@ export function perfRecordInvoke(
   const current = invokeStats.get(command) ?? {
     count: 0,
     bytes: 0,
+    measuredCalls: 0,
+    unmeasuredCalls: 0,
     totalMs: 0,
     maxMs: 0,
     failures: 0,
@@ -173,6 +184,8 @@ export function perfRecordInvoke(
   } satisfies InvokeAccumulator;
   current.count += 1;
   current.bytes += safeBytes;
+  if (bytesMeasured) current.measuredCalls += 1;
+  else current.unmeasuredCalls += 1;
   current.totalMs += safeDuration;
   current.maxMs = Math.max(current.maxMs, safeDuration);
   if (failed) current.failures += 1;
@@ -195,6 +208,9 @@ export function perfInvokeSnapshot(): PerfInvokeCommandStats[] {
       command,
       count: value.count,
       bytes: Math.round(value.bytes),
+      bytesMeasured: value.unmeasuredCalls === 0,
+      measuredCalls: value.measuredCalls,
+      unmeasuredCalls: value.unmeasuredCalls,
       totalMs: Math.round(value.totalMs * 100) / 100,
       p50Ms: Math.round(percentile(value.durations, 0.5) * 100) / 100,
       p95Ms: Math.round(percentile(value.durations, 0.95) * 100) / 100,
@@ -297,7 +313,9 @@ export function perfSummary(): string {
   lines.push('─'.repeat(64));
   lines.push(`总时长: ${(performance.now() - sessionStartMs).toFixed(0)}ms`);
   if (invokes.length > 0) {
-    lines.push(`Tauri IPC: ${invokes.reduce((sum, item) => sum + item.count, 0)} 次, ${Math.round(invokes.reduce((sum, item) => sum + item.bytes, 0))} B`);
+    const measured = invokes.reduce((sum, item) => sum + item.bytes, 0);
+    const unmeasured = invokes.reduce((sum, item) => sum + item.unmeasuredCalls, 0);
+    lines.push(`Tauri IPC: ${invokes.reduce((sum, item) => sum + item.count, 0)} 次, ${Math.round(measured)} B${unmeasured > 0 ? `（${unmeasured} 次字节未测量）` : ''}`);
   }
   lines.push(`Long Task: ${longTasks.count} 次, blocking ${Math.round(longTasks.totalBlockingTimeMs)}ms, max ${Math.round(longTasks.maxMs)}ms`);
   return lines.join('\n');
