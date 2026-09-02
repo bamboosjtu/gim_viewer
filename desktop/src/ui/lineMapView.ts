@@ -55,11 +55,15 @@ export interface LineMapViewHandle {
   getLayerPanel?(): HTMLElement | null;
 }
 
+/** MapLibre overlay 的渲染阶段；Canvas-only 模式保持原有单阶段行为。 */
+export type LineMapRenderPhase = 'interactive' | 'settled';
+
 /**
  * M4-A2 / M4-B2：renderLineMap 可选参数。
  *
  * - projection：外部投影接口（MapLibre），传入后 geoToScreen 委托给它
- * - onRequestRedraw：调用方注册 redraw 回调，用于 MapLibre 视图变化时触发 Canvas 重绘
+ * - onRequestRedraw：调用方注册 redraw 回调，用于 MapLibre 视图变化时触发
+ *   interactive/settled 两阶段 Canvas 重绘
  * - showGrid：是否绘制经纬度网格（overlay 默认 false，Canvas-only 默认 true）
  * - showCanvasScaleBar：是否绘制 Canvas 比例尺（overlay 默认 false，Canvas-only 默认 true）
  * - onWireClick：M4-B2 点击导线回调（命中导线且未命中塔位时触发）
@@ -70,7 +74,7 @@ export interface LineMapViewHandle {
  */
 export interface RenderLineMapOptions {
   projection?: LineMapProjection;
-  onRequestRedraw?: (draw: () => void) => void;
+  onRequestRedraw?: (draw: (phase?: LineMapRenderPhase) => void) => void;
   showGrid?: boolean;
   showCanvasScaleBar?: boolean;
   /** M4-B2：点击导线回调（优先级低于塔位） */
@@ -483,20 +487,27 @@ export function renderLineMap(
   /** M4-B2：导线命中距离阈值（点击严格，hover 放宽） */
   let destroyed = false;
 
-  /** P1-2：渐进绘制代次；新视图/缩放/切换图层会取消旧绘制。 */
+  /** 渐进绘制代次；settled 重绘或销毁时取消旧 RAF。 */
   let renderGeneration = 0;
   let pendingFrame: ScheduledFrame | null = null;
-  let pendingRedraw: ScheduledFrame | null = null;
+  let pendingInteractionFrame: ScheduledFrame | null = null;
+  let pendingSettledFrame: ScheduledFrame | null = null;
   let activePhaseEnd: ((labelSuffix?: string, endMeta?: Record<string, unknown>) => void) | null = null;
   let instrumentNextRender = true;
-  /** MapLibre 视图变化可能在补绘期间连续到达；完成当前 pass 后再合并重绘。 */
+  /** MapLibre 相机变化期间使用轻量交互帧；停止后才启动完整 progressive。 */
   let progressiveActive = false;
-  let redrawAfterProgressive = false;
+  let interactionActive = false;
+  let interactionRequestStartedAt: number | null = null;
+  /** MapLibre move/zoom/resize 每次变化递增；所有投影缓存必须绑定该 revision。 */
+  let cameraRevision = 0;
   let activeDevRenderToken = 0;
   let devRenderTokenSequence = 0;
   let activeDevRenderRunId: string | null = null;
-  /** 一个 draw pass 内的投影缓存；帧结束或取消时释放。 */
-  let frameProjectionCache: Map<string, { x: number; y: number }> | null = null;
+  /** 只在同一 camera revision 内复用投影结果；相机变化或新交互帧会重建。 */
+  let frameProjectionCache: {
+    revision: number;
+    points: Map<string, { x: number; y: number }>;
+  } | null = null;
 
   /** 选中塔位的 nodePath 集合（树点击/地图 focus 时高亮） */
   let selectedTowerPaths: Set<string> = new Set();
@@ -523,6 +534,7 @@ export function renderLineMap(
 
   // ---- 尺寸 / DPR ----
   function resize(): void {
+    const wasInitialized = cssW > 0 && cssH > 0;
     const rect = container.getBoundingClientRect();
     cssW = Math.max(rect.width, 1);
     cssH = Math.max(rect.height, 1);
@@ -535,19 +547,29 @@ export function renderLineMap(
     const availW = Math.max(cssW - 2 * FIT_PADDING, 1);
     const availH = Math.max(cssH - 2 * FIT_PADDING, 1);
     baseScale = Math.min(availW / worldW, availH / worldH);
-    draw();
+    if (overlayMode && wasInitialized) {
+      // ResizeObserver 触发时 MapLibre 可能尚未发出 resize 事件；主动
+      // 让缓存失效并安排一帧轻量重绘，随后补一轮完整 settled 绘制。
+      requestInteractiveFrame(true);
+      requestSettledFrame();
+    } else {
+      draw();
+    }
   }
 
   // ---- 投影 ----
   function geoToScreenPoint(point: RuntimeGeoPoint): { x: number; y: number } {
-    // M4-A2：overlay 模式委托给外部投影（MapLibre project）。同一 draw
-    // pass 内多个导线共享塔位端点时，只调用一次 map.project。
+    // overlay 模式委托给外部投影（MapLibre project）。缓存只属于当前
+    // camera revision 的一个 Canvas frame，绝不跨相机变化复用屏幕坐标。
     if (projection) {
-      const cached = frameProjectionCache?.get(point.key);
+      if (frameProjectionCache?.revision !== cameraRevision) {
+        frameProjectionCache = { revision: cameraRevision, points: new Map() };
+      }
+      const cached = frameProjectionCache.points.get(point.key);
       if (cached) return cached;
       const p = projection.project(point.lng, point.lat);
       const result = { x: p.x, y: p.y };
-      frameProjectionCache?.set(point.key, result);
+      frameProjectionCache.points.set(point.key, result);
       return result;
     }
     const s = baseScale * zoom;
@@ -592,8 +614,14 @@ export function renderLineMap(
   function draw(): void {
     if (destroyed) return;
     cancelProgressiveRender();
-    redrawAfterProgressive = false;
+    cancelScheduledFrame(pendingInteractionFrame);
+    pendingInteractionFrame = null;
+    cancelScheduledFrame(pendingSettledFrame);
+    pendingSettledFrame = null;
+    interactionRequestStartedAt = null;
+    interactionActive = false;
     const generation = renderGeneration;
+    const cameraSnapshot = cameraRevision;
     activeDevRenderToken = ++devRenderTokenSequence;
     const devGlobals = globalThis as { __GIM_DEV_LINE_MAP_RENDER_RUN_ID__?: unknown };
     activeDevRenderRunId = typeof devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__ === 'string'
@@ -606,7 +634,7 @@ export function renderLineMap(
       : null;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    frameProjectionCache = new Map();
+    frameProjectionCache = { revision: cameraRevision, points: new Map() };
     // 背景：overlay 模式下透明（让 MapLibre 底图透出），Canvas-only 模式填色
     if (overlayMode) {
       ctx.clearRect(0, 0, cssW, cssH);
@@ -638,7 +666,66 @@ export function renderLineMap(
       wires: runtimeWires.length,
       crosses: runtimeCrosses.length,
     });
-    startProgressiveRender(generation, instrument);
+    startProgressiveRender(generation, cameraSnapshot, instrument);
+  }
+
+  /** 清空 overlay 并绘制当前相机下的轻量交互层。 */
+  function drawInteractiveFrame(revision: number): void {
+    if (destroyed || !overlayMode) return;
+    if (revision !== cameraRevision) {
+      requestInteractiveFrame(false);
+      return;
+    }
+
+    activeDevRenderToken = ++devRenderTokenSequence;
+    const devGlobals = globalThis as { __GIM_DEV_LINE_MAP_RENDER_RUN_ID__?: unknown };
+    activeDevRenderRunId = typeof devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__ === 'string'
+      ? devGlobals.__GIM_DEV_LINE_MAP_RENDER_RUN_ID__
+      : null;
+    setDevMapRenderState(activeDevRenderToken, false, activeDevRenderRunId);
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // 交互帧每次都建立新的 revision-scoped cache；不携带上一帧的屏幕坐标。
+    frameProjectionCache = { revision, points: new Map() };
+    ctx.clearRect(0, 0, cssW, cssH);
+    if (!valid) {
+      drawEmptyHint('未提取到可定位塔位');
+      drawBorder();
+      frameProjectionCache = null;
+      interactionRequestStartedAt = null;
+      return;
+    }
+
+    // 底图由 MapLibre 提供，交互态只绘制必要工程元素；标签和悬链线
+    // 留给 moveend/zoomend 后的 settled progressive pass。
+    drawLegend();
+    drawBorder();
+    towerScreen = [];
+    drawTowerRange(0, runtimeTowers.length);
+    drawWireRange(0, runtimeWires.length, true);
+    drawSelectedWire(true);
+    drawCrossRange(0, runtimeCrosses.length);
+
+    frameProjectionCache = null;
+    const latencyMs = interactionRequestStartedAt == null
+      ? null
+      : Math.max(0, performance.now() - interactionRequestStartedAt);
+    interactionRequestStartedAt = null;
+    // 同一 RAF 内不会被 MapLibre 插入新事件；结束后再次检查 revision，
+    // 防止测试替身或同步 fitBounds 触发的旧 camera frame 继续写入。
+    if (revision !== cameraRevision) {
+      requestInteractiveFrame(false);
+      return;
+    }
+    if (latencyMs != null) {
+      perfMark('线路 Canvas 交互帧', {
+        cameraRevision: revision,
+        latencyMs: Math.round(latencyMs * 100) / 100,
+        towers: runtimeTowers.length,
+        wires: runtimeWires.length,
+        crosses: runtimeCrosses.length,
+      }, perfSession);
+    }
   }
 
   /** 终止当前渐进绘制并释放帧内投影缓存。 */
@@ -646,8 +733,6 @@ export function renderLineMap(
     renderGeneration += 1;
     cancelScheduledFrame(pendingFrame);
     pendingFrame = null;
-    cancelScheduledFrame(pendingRedraw);
-    pendingRedraw = null;
     if (activePhaseEnd) {
       activePhaseEnd('（取消）');
       activePhaseEnd = null;
@@ -667,32 +752,34 @@ export function renderLineMap(
 
   function scheduleProgressive(
     generation: number,
+    cameraSnapshot: number,
     stage: 'towers' | 'wires' | 'crosses' | 'labels',
     offset: number,
     instrument: boolean,
   ): void {
     pendingFrame = scheduleFrame(() => {
       pendingFrame = null;
-      runProgressiveStage(generation, stage, offset, instrument);
+      runProgressiveStage(generation, cameraSnapshot, stage, offset, instrument);
     });
   }
 
-  function startProgressiveRender(generation: number, instrument: boolean): void {
+  function startProgressiveRender(generation: number, cameraSnapshot: number, instrument: boolean): void {
     progressiveActive = true;
     towerScreen = [];
     labelQueue = [];
     labelLastDrawnY = -Infinity;
     beginProgressivePhase('线路 Canvas 塔位分批绘制', instrument);
-    scheduleProgressive(generation, 'towers', 0, instrument);
+    scheduleProgressive(generation, cameraSnapshot, 'towers', 0, instrument);
   }
 
   function runProgressiveStage(
     generation: number,
+    cameraSnapshot: number,
     stage: 'towers' | 'wires' | 'crosses' | 'labels',
     offset: number,
     instrument: boolean,
   ): void {
-    if (destroyed || generation !== renderGeneration) return;
+    if (destroyed || generation !== renderGeneration || cameraSnapshot !== cameraRevision) return;
     const started = performance.now();
     const sourceLength = stage === 'towers'
       ? runtimeTowers.length
@@ -730,7 +817,7 @@ export function renderLineMap(
     }
 
     if (next < sourceLength) {
-      scheduleProgressive(generation, stage, next, instrument);
+      scheduleProgressive(generation, cameraSnapshot, stage, next, instrument);
       return;
     }
 
@@ -738,17 +825,17 @@ export function renderLineMap(
     if (stage === 'towers') {
       finishProgressivePhase(stageMeta);
       beginProgressivePhase('线路 Canvas 导线分批绘制', instrument);
-      scheduleProgressive(generation, 'wires', 0, instrument);
+      scheduleProgressive(generation, cameraSnapshot, 'wires', 0, instrument);
     } else if (stage === 'wires') {
       drawSelectedWire();
       finishProgressivePhase({ ...stageMeta, catenary: enableCatenary });
       beginProgressivePhase('线路 Canvas 跨越物分批绘制', instrument);
-      scheduleProgressive(generation, 'crosses', 0, instrument);
+      scheduleProgressive(generation, cameraSnapshot, 'crosses', 0, instrument);
     } else if (stage === 'crosses') {
       finishProgressivePhase(stageMeta);
       labelQueue = towerScreen.slice().sort((a, b) => a.y - b.y);
       beginProgressivePhase('线路 Canvas 标签分批绘制', instrument);
-      scheduleProgressive(generation, 'labels', 0, instrument);
+      scheduleProgressive(generation, cameraSnapshot, 'labels', 0, instrument);
     } else {
       // 标签关闭或缩放不足时 sourceLength 为 0，也会在这里结束。
       finishProgressivePhase({ ...stageMeta, visible: layerState.label && zoom >= LABEL_SHOW_ZOOM });
@@ -761,32 +848,85 @@ export function renderLineMap(
       progressiveActive = false;
       if (instrument) instrumentNextRender = false;
       setDevMapRenderState(activeDevRenderToken, true, activeDevRenderRunId);
-      // MapLibre 的 fitBounds/resize 可能在补绘中触发视图变化。不要在每个
-      // move/zoom 事件里取消当前 pass（会造成大线路永远停在塔位阶段），
-      // 而是在当前 pass 完成后合并成一次下一帧重绘。
-      if (redrawAfterProgressive && !destroyed && !pendingRedraw) {
-        redrawAfterProgressive = false;
-        pendingRedraw = scheduleFrame(() => {
-          pendingRedraw = null;
-          draw();
-        });
-      }
     }
   }
 
-  // M4-A2：向调用方注册 redraw 回调，供 MapLibre 视图变化时触发 Canvas 重绘
+  function requestInteractiveFrame(cameraChanged: boolean): void {
+    if (destroyed) return;
+    if (!overlayMode) {
+      // Canvas-only 不引入两阶段调度，保持既有单阶段绘制与交互行为。
+      draw();
+      return;
+    }
+    if (cameraChanged) {
+      cameraRevision += 1;
+      interactionActive = true;
+      // 以最近一次相机事件为延迟起点；连续 move/zoom 时不把整段手势
+      // 累计成一个虚假的长延迟。
+      interactionRequestStartedAt = performance.now();
+      // 相机已改变，旧 progressive 的投影全部失效；只取消旧 pass，
+      // 不在这里启动新的完整 pass，避免连续 move 让大线路永远停在塔位阶段。
+      if (progressiveActive || pendingFrame || activePhaseEnd) {
+        cancelProgressiveRender();
+      }
+      cancelScheduledFrame(pendingSettledFrame);
+      pendingSettledFrame = null;
+      // 保留已经排队的 interaction RAF，并在回调执行时读取最新
+      // cameraRevision。MapLibre 可能每个 RAF 都发出 move/zoom；如果
+      // 每次事件都取消并重新排队，事件恰好在 RAF 前到达时会造成交互帧
+      // 饥饿，Canvas 反而无法持续跟随底图。
+    } else if (progressiveActive || pendingFrame || activePhaseEnd) {
+      // Hover/selection changes also replace the pixels on the overlay.  Do
+      // not let a previously scheduled progressive stage draw on top of the
+      // new interaction frame with stale ordering/state.
+      cancelProgressiveRender();
+    }
+    if (pendingInteractionFrame) return;
+    if (interactionRequestStartedAt == null) interactionRequestStartedAt = performance.now();
+    pendingInteractionFrame = scheduleFrame(() => {
+      pendingInteractionFrame = null;
+      // 不捕获事件到达时的旧 revision；连续相机事件合并到这一帧时，
+      // 只使用执行时的最新相机投影。
+      drawInteractiveFrame(cameraRevision);
+    });
+  }
+
+  function requestSettledFrame(): void {
+    if (destroyed) return;
+    if (!overlayMode) {
+      draw();
+      return;
+    }
+    interactionActive = false;
+    if (pendingSettledFrame) return;
+    const revision = cameraRevision;
+    pendingSettledFrame = scheduleFrame(() => {
+      pendingSettledFrame = null;
+      if (destroyed || revision !== cameraRevision || interactionActive) return;
+      draw();
+    });
+  }
+
+  /** 请求一次视觉更新；MapLibre overlay 只绘制轻量交互帧，Canvas-only 维持原行为。 */
+  function requestVisualRender(): void {
+    if (!overlayMode) {
+      draw();
+      return;
+    }
+
+    // 悬停/选中也需要先用当前相机快速刷新；如果它打断了正在进行的
+    // settled progressive pass，则排队一次完整补绘。相机仍在变化时不
+    // 提前启动 settled，继续由 moveend/zoomend 统一触发。
+    requestInteractiveFrame(false);
+    if (!interactionActive) requestSettledFrame();
+  }
+
+  // 向调用方注册 redraw 回调，供 MapLibre 视图变化时触发 Canvas 重绘。
+  // 默认 phase=interactive，兼容旧调用方和测试替身。
   if (options?.onRequestRedraw) {
-    // MapLibre 在一次拖拽中可能连续发出多个 move/zoom 事件；合并到
-    // 下一帧，避免每个事件都取消并重启一轮渐进绘制。
-    options.onRequestRedraw(() => {
-      if (destroyed) return;
-      redrawAfterProgressive = true;
-      if (progressiveActive || pendingRedraw) return;
-      pendingRedraw = scheduleFrame(() => {
-        pendingRedraw = null;
-        redrawAfterProgressive = false;
-        draw();
-      });
+    options.onRequestRedraw((phase: LineMapRenderPhase = 'interactive') => {
+      if (phase === 'settled') requestSettledFrame();
+      else requestInteractiveFrame(true);
     });
   }
 
@@ -854,7 +994,7 @@ export function renderLineMap(
     return 'unknownWire';
   }
 
-  function drawWireRange(start: number, end: number): void {
+  function drawWireRange(start: number, end: number, simplified = false): void {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     // M4-B2：先画非选中导线；选中导线在全部批次完成后补画，确保
@@ -865,14 +1005,14 @@ export function renderLineMap(
       const { wire } = runtimeWire;
       if (!layerState[wireLayerKey(wire.wireType)]) continue;
       if (wire === selectedWire) continue;
-      drawWireSegment(runtimeWire, false);
+      drawWireSegment(runtimeWire, false, simplified);
     }
   }
 
-  function drawSelectedWire(): void {
+  function drawSelectedWire(simplified = false): void {
     if (!selectedWire || !layerState[wireLayerKey(selectedWire.wireType)]) return;
     const runtimeWire = runtimeWires.find((candidate) => candidate.wire === selectedWire);
-    if (runtimeWire) drawWireSegment(runtimeWire, true);
+    if (runtimeWire) drawWireSegment(runtimeWire, true, simplified);
   }
 
   function drawTowerRange(start: number, end: number): void {
@@ -940,7 +1080,7 @@ export function renderLineMap(
    * @param w 导线段
    * @param isSelected 是否为选中态
    */
-  function drawWireSegment(runtimeWire: RuntimeWire, isSelected: boolean): void {
+  function drawWireSegment(runtimeWire: RuntimeWire, isSelected: boolean, simplified = false): void {
     const w = runtimeWire.wire;
     const s = geoToScreenPoint(runtimeWire.start);
     const e = geoToScreenPoint(runtimeWire.end);
@@ -956,7 +1096,7 @@ export function renderLineMap(
       ctx.setLineDash([]);
       ctx.strokeStyle = 'rgba(245,158,11,0.45)';
       ctx.lineWidth = WIRE_WIDTH_SELECTED + 4;
-      drawWirePath(s, e, runtimeWire);
+      drawWirePath(s, e, runtimeWire, simplified);
     }
 
     // 主体线
@@ -973,7 +1113,7 @@ export function renderLineMap(
     } else {
       ctx.setLineDash([]);
     }
-    drawWirePath(s, e, runtimeWire);
+    drawWirePath(s, e, runtimeWire, simplified);
 
     // 恢复默认
     ctx.setLineDash([]);
@@ -1027,7 +1167,9 @@ export function renderLineMap(
     s: { x: number; y: number },
     e: { x: number; y: number },
     runtimeWire: RuntimeWire,
+    simplified = false,
   ): Array<{ x: number; y: number }> {
+    if (simplified) return [s, e];
     const w = runtimeWire.wire;
     if (!shouldUseCatenary(runtimeWire) || w.spanMeters == null || w.spanMeters <= 0) {
       return [s, e];
@@ -1062,9 +1204,10 @@ export function renderLineMap(
     s: { x: number; y: number },
     e: { x: number; y: number },
     runtimeWire: RuntimeWire,
+    simplified = false,
   ): void {
     ctx.beginPath();
-    const pts = wireScreenPoints(s, e, runtimeWire);
+    const pts = wireScreenPoints(s, e, runtimeWire, simplified);
     ctx.moveTo(pts[0].x, pts[0].y);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
@@ -1249,13 +1392,30 @@ export function renderLineMap(
     if (!layerState.tower) return null;
     let best: TowerMarker | null = null;
     let bestDist = HIT_RADIUS;
-    for (const ts of towerScreen) {
-      const dx = ts.x - sx;
-      const dy = ts.y - sy;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d <= bestDist) {
-        bestDist = d;
-        best = ts.tower;
+    if (overlayMode) {
+      // 不依赖上一 progressive pass 的 towerScreen 快照。MapLibre 相机
+      // 事件到达后，交互 RAF 可能尚未执行；此处直接按当前 revision 投影，
+      // 使 hover/click 在那一个 RAF 窗口内也不会命中旧屏幕坐标。
+      for (const runtimeTower of runtimeTowers) {
+        const p = geoToScreenPoint(runtimeTower.point);
+        const dx = p.x - sx;
+        const dy = p.y - sy;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d <= bestDist) {
+          bestDist = d;
+          best = runtimeTower.tower;
+        }
+      }
+    } else {
+      // Canvas-only 保持原有行为：仅对已经绘制并缓存的塔位做命中检测。
+      for (const ts of towerScreen) {
+        const dx = ts.x - sx;
+        const dy = ts.y - sy;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d <= bestDist) {
+          bestDist = d;
+          best = ts.tower;
+        }
       }
     }
     return best;
@@ -1377,7 +1537,7 @@ export function renderLineMap(
     const t = hitTestTower(mx, my);
     if (t !== hoveredTower) {
       hoveredTower = t;
-      draw();
+      requestVisualRender();
     }
     if (t) {
       showTooltip(t, mx, my);
@@ -1420,7 +1580,7 @@ export function renderLineMap(
       }
       // 命中塔位时清除导线选中态
       selectedWire = null;
-      draw();
+      requestVisualRender();
       try {
         onTowerClick(t.nodeRef);
       } catch (err) {
@@ -1435,7 +1595,7 @@ export function renderLineMap(
         selectedWire = w;
         // 选中导线时清除塔位选中态（避免双重选中）
         selectedTowerPaths = new Set();
-        draw();
+        requestVisualRender();
         try {
           options.onWireClick(w);
         } catch (err) {
@@ -1455,7 +1615,7 @@ export function renderLineMap(
     // M4-B2 cleanup：鼠标离开地图区域时同时清理导线 hover 态
     hoveredWire = null;
     hideTooltip();
-    draw();
+    requestVisualRender();
   }
 
   function onWheel(e: WheelEvent): void {
@@ -1546,7 +1706,8 @@ export function renderLineMap(
         maxLng: bbox.maxLng,
         maxLat: bbox.maxLat,
       });
-      draw();
+      requestInteractiveFrame(true);
+      requestSettledFrame();
       return;
     }
     zoom = 1;
@@ -1571,7 +1732,8 @@ export function renderLineMap(
         maxLng: t.lng + pad,
         maxLat: t.lat + pad,
       });
-      draw();
+      requestInteractiveFrame(true);
+      requestSettledFrame();
       return true;
     }
     zoom = clamp(FOCUS_TOWER_ZOOM, MIN_ZOOM, MAX_ZOOM);
@@ -1611,7 +1773,8 @@ export function renderLineMap(
     // M4-A2：overlay 模式下委托 MapLibre fitBounds
     if (projection?.fitBounds) {
       projection.fitBounds({ minLng, minLat, maxLng, maxLat });
-      draw();
+      requestInteractiveFrame(true);
+      requestSettledFrame();
       return true;
     }
 
@@ -1643,6 +1806,12 @@ export function renderLineMap(
     if (destroyed) return;
     destroyed = true;
     cancelProgressiveRender();
+    cancelScheduledFrame(pendingInteractionFrame);
+    pendingInteractionFrame = null;
+    cancelScheduledFrame(pendingSettledFrame);
+    pendingSettledFrame = null;
+    interactionRequestStartedAt = null;
+    interactionActive = false;
     canvas.removeEventListener('wheel', onWheel);
     canvas.removeEventListener('mousedown', onMouseDown);
     window.removeEventListener('mousemove', onMouseMove);

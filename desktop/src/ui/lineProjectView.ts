@@ -17,7 +17,7 @@ import type { LineMapData, WireSegment } from '../gim/lineMapData.js';
 import { escHtml } from '../shared/html.js';
 import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, btnToggleProps, emptyTipEl, container } from './dom.js';
 import { hideTabs } from './tabs.js';
-import type { LineMapViewHandle } from './lineMapView.js';
+import type { LineMapRenderPhase, LineMapViewHandle } from './lineMapView.js';
 import type { LineMapBaseLayerHandle } from './lineMapBaseLayer.js';
 import type { LineMapProjection, GeoBBox } from './lineMapProjection.js';
 import { createMapLibreProjection } from './lineMapProjection.js';
@@ -1716,18 +1716,26 @@ export function renderLineProjectPanels(
           lineMapHandle.destroy();
           lineMapHandle = null;
         }
-        let redrawFn: (() => void) | null = null;
+        let redrawFn: ((phase?: LineMapRenderPhase) => void) | null = null;
         lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
           projection,
-          onRequestRedraw: (draw: () => void) => { redrawFn = draw; },
+          onRequestRedraw: (draw) => { redrawFn = draw; },
           // M4-B2：overlay 模式下也支持导线点击
           onWireClick: handleMapWireClick,
           enableCatenary: currentLineCatenaryEnabled,
           perfSession: perfCurrentSession(),
         });
-        // MapLibre 视图变化（move/zoom/resize）时触发 Canvas overlay 重绘
-        const offView = probe.onViewChange(() => {
-          if (redrawFn) redrawFn();
+        // MapLibre 相机变化期间只请求 interactive frame；moveend/zoomend
+        // 才启动完整 settled progressive pass，避免拖动时等待旧 pass 或
+        // 每个 move 都重新开始完整渐进绘制。
+        const offView = probe.onViewChange((kind) => {
+          redrawFn?.('interactive');
+          // Resize 没有对应的 resizeend 事件；在尺寸变化完成后安排
+          // 一次 settled pass，保证标签/悬链线不会停留在轻量层。
+          if (kind === 'resize') redrawFn?.('settled');
+        });
+        const offSettled = probe.onViewSettled(() => {
+          redrawFn?.('settled');
         });
         // M4-A2：pointer 事件桥接（MapLibre → Canvas overlay）
         // Canvas pointer-events:none，MapLibre 接收鼠标事件并转发给 Canvas handle
@@ -1740,7 +1748,7 @@ export function renderLineProjectPanels(
         const offLeave = probe.onPointerLeave(() => {
           lineMapHandle?.handlePointerLeave?.();
         });
-        maplibreInteractionCleanup.push(offView, offMove, offClick, offLeave);
+        maplibreInteractionCleanup.push(offView, offSettled, offMove, offClick, offLeave);
         // overlay handle 创建后，重新附加底图切换控件到新的图层面板
         attachBasemapSwitcher(mapData);
         // M4-A2 Finalization：MapLibre overlay 初始化成功，按当前底图模式上报状态
@@ -1999,19 +2007,23 @@ function switchBasemap(
         lineMapHandle.destroy();
         lineMapHandle = null;
       }
-      let redrawFn: (() => void) | null = null;
+      let redrawFn: ((phase?: LineMapRenderPhase) => void) | null = null;
       lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
         projection,
-        onRequestRedraw: (draw: () => void) => { redrawFn = draw; },
+        onRequestRedraw: (draw) => { redrawFn = draw; },
         onWireClick: handleMapWireClick,
         enableCatenary: currentLineCatenaryEnabled,
         perfSession: perfCurrentSession(),
       });
-      const offView = probe.onViewChange(() => { if (redrawFn) redrawFn(); });
+      const offView = probe.onViewChange((kind) => {
+        redrawFn?.('interactive');
+        if (kind === 'resize') redrawFn?.('settled');
+      });
+      const offSettled = probe.onViewSettled(() => { redrawFn?.('settled'); });
       const offMove = probe.onPointerMove((p) => { lineMapHandle?.handlePointerMove?.(p.x, p.y); });
       const offClick = probe.onPointerClick((p) => { lineMapHandle?.handlePointerClick?.(p.x, p.y); });
       const offLeave = probe.onPointerLeave(() => { lineMapHandle?.handlePointerLeave?.(); });
-      maplibreInteractionCleanup.push(offView, offMove, offClick, offLeave);
+      maplibreInteractionCleanup.push(offView, offSettled, offMove, offClick, offLeave);
       // overlay handle 创建后，重新附加底图切换控件到新的图层面板
       attachBasemapSwitcher(mapData);
       setBasemapStatus(basemapStatusFromMode(newMode), {

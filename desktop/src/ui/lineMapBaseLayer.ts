@@ -13,6 +13,7 @@
  * M4-A2 第 1 轮（已完成，原 M4-A2 已升级）：
  * - Handle 新增 project(lng, lat) → 屏幕像素（桥接 Canvas overlay）
  * - Handle 新增 onViewChange(callback) → 监听 move/zoom/resize
+ * - Handle 新增 onViewSettled(callback) → 监听 moveend/zoomend
  * - 支持交互（pan/zoom），MapLibre 管理视图，Canvas overlay 跟随重绘
  * - 支持初始 bbox（fitBounds）
  * - Handle 新增 onPointerMove / onPointerClick / onPointerLeave → 桥接 Canvas 交互
@@ -64,8 +65,10 @@ export interface LineMapBaseLayerHandle {
   getMap(): MapLibreMap | null;
   /** 将经纬度投影为屏幕像素坐标（桥接 Canvas overlay 的 geoToScreen） */
   project(lng: number, lat: number): { x: number; y: number } | null;
-  /** 注册视图变化回调（move/zoom/resize），返回取消注册函数 */
-  onViewChange(callback: () => void): () => void;
+  /** 注册相机变化回调（move/zoom/resize），返回取消注册函数 */
+  onViewChange(callback: (kind: LineMapViewChangeKind) => void): () => void;
+  /** 注册相机稳定回调（moveend/zoomend），返回取消注册函数 */
+  onViewSettled(callback: (kind: LineMapViewSettledKind) => void): () => void;
   /** 调整视图以适配指定 bbox（LngLatBoundsLike: [minLng, minLat, maxLng, maxLat]），duration:0 无动画 */
   fitBounds(bounds: [number, number, number, number]): void;
   /** M4-A2：注册 pointer move 回调，参数为容器内像素坐标，返回取消注册函数 */
@@ -75,6 +78,12 @@ export interface LineMapBaseLayerHandle {
   /** M4-A2：注册 pointer leave 回调（鼠标离开地图容器），返回取消注册函数 */
   onPointerLeave(cb: () => void): () => void;
 }
+
+/** MapLibre 相机正在变化的事件类型。 */
+export type LineMapViewChangeKind = 'move' | 'zoom' | 'resize';
+
+/** MapLibre 相机停止变化的事件类型。 */
+export type LineMapViewSettledKind = 'moveend' | 'zoomend';
 
 /** PMTiles 配置（M4-A2 第 2 轮） */
 export interface PmtilesOptions {
@@ -402,16 +411,36 @@ export async function createMapLibreProbe(
         return null;
       }
     },
-    onViewChange(callback: () => void): () => void {
+    onViewChange(callback: (kind: LineMapViewChangeKind) => void): () => void {
       if (destroyed) return () => {};
-      const events = ['move', 'zoom', 'resize'] as const;
-      for (const ev of events) {
-        map.on(ev, callback);
+      const handlers: Array<[LineMapViewChangeKind, () => void]> = [
+        ['move', () => callback('move')],
+        ['zoom', () => callback('zoom')],
+        ['resize', () => callback('resize')],
+      ];
+      for (const [ev, handler] of handlers) {
+        map.on(ev, handler);
       }
       return () => {
         if (destroyed) return;
-        for (const ev of events) {
-          map.off(ev, callback);
+        for (const [ev, handler] of handlers) {
+          map.off(ev, handler);
+        }
+      };
+    },
+    onViewSettled(callback: (kind: LineMapViewSettledKind) => void): () => void {
+      if (destroyed) return () => {};
+      const handlers: Array<[LineMapViewSettledKind, () => void]> = [
+        ['moveend', () => callback('moveend')],
+        ['zoomend', () => callback('zoomend')],
+      ];
+      for (const [ev, handler] of handlers) {
+        map.on(ev, handler);
+      }
+      return () => {
+        if (destroyed) return;
+        for (const [ev, handler] of handlers) {
+          map.off(ev, handler);
         }
       };
     },

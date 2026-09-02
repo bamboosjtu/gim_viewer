@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GimGraphNode } from '../../gim/gimGraphTypes.js';
 import type { LineMapData } from '../../gim/lineMapData.js';
-import { renderLineMap } from '../lineMapView.js';
+import { renderLineMap, type LineMapRenderPhase } from '../lineMapView.js';
+import { perfSnapshot } from '../../utils/perfTimings.js';
 
 function node(path: string): GimGraphNode {
   return {
@@ -106,6 +107,51 @@ function installCanvasStubs(): { calls: Record<string, number>; restore: () => v
   };
 }
 
+/** 用手动 RAF 让相机竞态测试不依赖 jsdom 的 16ms 调度。 */
+function installRafQueue(): {
+  pending(): number;
+  runNext(): boolean;
+  runAll(max?: number): number;
+  restore(): void;
+} {
+  const originalRaf = window.requestAnimationFrame;
+  const originalCancel = window.cancelAnimationFrame;
+  let nextId = 1;
+  const queue = new Map<number, FrameRequestCallback>();
+  Object.defineProperty(window, 'requestAnimationFrame', {
+    configurable: true,
+    value: (callback: FrameRequestCallback): number => {
+      const id = nextId++;
+      queue.set(id, callback);
+      return id;
+    },
+  });
+  Object.defineProperty(window, 'cancelAnimationFrame', {
+    configurable: true,
+    value: (id: number): void => { queue.delete(id); },
+  });
+  const runNext = (): boolean => {
+    const item = queue.entries().next().value as [number, FrameRequestCallback] | undefined;
+    if (!item) return false;
+    queue.delete(item[0]);
+    item[1](performance.now());
+    return true;
+  };
+  return {
+    pending: () => queue.size,
+    runNext,
+    runAll: (max = 1000) => {
+      let count = 0;
+      while (count < max && runNext()) count += 1;
+      return count;
+    },
+    restore: () => {
+      Object.defineProperty(window, 'requestAnimationFrame', { configurable: true, value: originalRaf });
+      Object.defineProperty(window, 'cancelAnimationFrame', { configurable: true, value: originalCancel });
+    },
+  };
+}
+
 afterEach(() => {
   document.body.innerHTML = '';
   vi.unstubAllGlobals();
@@ -160,42 +206,152 @@ describe('线路 Canvas 渐进绘制与运行时投影索引', () => {
     stubs.restore();
   });
 
-  it('MapLibre 连续视图变化时合并重绘，不会取消当前补绘流水线', async () => {
+  it('camera A→B→C 时交互帧只使用当前 revision 的投影缓存', () => {
     const stubs = installCanvasStubs();
+    const raf = installRafQueue();
     const container = document.createElement('div');
     container.getBoundingClientRect = () => ({ width: 800, height: 600 } as DOMRect);
     document.body.appendChild(container);
-    // 通过对象属性保存回调；TypeScript 不会把闭包稍后赋值的可变局部
-    // 变量错误收窄成 never。
-    const requestRedraw: { current: (() => void) | null } = { current: null };
+    const requestRedraw: { current: ((phase?: LineMapRenderPhase) => void) | null } = { current: null };
+    let camera = 'A';
+    const projectCameras: string[] = [];
     const handle = renderLineMap(makeMapData(600), container, () => undefined, {
       onRequestRedraw: (draw) => { requestRedraw.current = draw; },
+      projection: {
+        project: () => {
+          projectCameras.push(camera);
+          const x = camera === 'A' ? 100 : camera === 'B' ? 200 : 300;
+          return { x, y: 300 };
+        },
+      },
     });
 
-    // 模拟 MapLibre 在 fitBounds/拖拽过程中连续发出的 move/zoom/resize。
-    // 旧实现会在每次回调里取消当前 pass，导致大线路一直停在塔位阶段；
-    // 新实现应让当前 pass 完成，再合并成一次重绘。
-    let completed = false;
-    const deadline = Date.now() + 800;
-    while (Date.now() < deadline) {
-      const state = (globalThis as {
-        __GIM_DEV_LINE_MAP_RENDER_STATE__?: { done?: boolean };
-      }).__GIM_DEV_LINE_MAP_RENDER_STATE__;
-      if (state?.done) {
-        completed = true;
-        break;
-      }
-      // 先捕获局部引用，避免 tsc 在闭包赋值的可变变量上把可选调用
-      // 错误收窄为 never（运行时仍允许尚未注册回调）。
-      const redraw = requestRedraw.current;
-      if (redraw) redraw();
-      await new Promise((resolve) => setTimeout(resolve, 4));
-    }
-    expect(completed).toBe(true);
-    // 每条导线至少产生一次 stroke；这个断言同时覆盖非 DEV 环境下的
-    // 回退行为，并确保不是只完成了塔位首阶段。
+    const redraw = requestRedraw.current;
+    expect(redraw).toBeTypeOf('function');
+    // 初始 progressive 尚未执行时连续切换相机；旧 RAF 必须被取消，
+    // 第一个真正执行的 interaction frame 只能读取 C 的 project 结果。
+    camera = 'B';
+    redraw?.('interactive');
+    camera = 'C';
+    redraw?.('interactive');
+    expect(raf.runNext()).toBe(true);
+    expect(projectCameras.length).toBeGreaterThan(0);
+    expect(projectCameras.every((value) => value === 'C')).toBe(true);
+    expect(projectCameras).not.toContain('A');
+
+    // 相机稳定后启动完整 settled progressive；全过程仍使用 C revision。
+    redraw?.('settled');
+    raf.runAll();
+    expect(projectCameras.every((value) => value === 'C')).toBe(true);
     expect(stubs.calls.stroke || 0).toBeGreaterThanOrEqual(600);
     handle.destroy();
+    raf.restore();
+    stubs.restore();
+  });
+
+  it('连续 pan/zoom 产生交互帧，停止后 settled progressive 最终完成', () => {
+    const stubs = installCanvasStubs();
+    const raf = installRafQueue();
+    const container = document.createElement('div');
+    container.getBoundingClientRect = () => ({ width: 800, height: 600 } as DOMRect);
+    document.body.appendChild(container);
+    const requestRedraw: { current: ((phase?: LineMapRenderPhase) => void) | null } = { current: null };
+    const handle = renderLineMap(makeMapData(600), container, () => undefined, {
+      onRequestRedraw: (draw) => { requestRedraw.current = draw; },
+      projection: { project: () => ({ x: 400, y: 300 }) },
+    });
+    const redraw = requestRedraw.current;
+
+    // 先让一轮完整绘制开始，再模拟未完成时的连续相机变化。
+    expect(raf.runNext()).toBe(true);
+    const before = perfSnapshot().spans.filter((span) => span.label === '线路 Canvas 交互帧').length;
+    redraw?.('settled');
+    redraw?.('interactive');
+    expect(raf.runNext()).toBe(true);
+    redraw?.('interactive');
+    expect(raf.runNext()).toBe(true);
+    redraw?.('interactive');
+    expect(raf.runNext()).toBe(true);
+    const afterInteractive = perfSnapshot().spans.filter((span) => span.label === '线路 Canvas 交互帧').length;
+    expect(afterInteractive - before).toBeGreaterThanOrEqual(3);
+
+    // 停止操作后只启动一次 settled pass；不得重新退化为只完成塔位。
+    redraw?.('settled');
+    raf.runAll();
+    const state = (globalThis as {
+      __GIM_DEV_LINE_MAP_RENDER_STATE__?: { done?: boolean };
+    }).__GIM_DEV_LINE_MAP_RENDER_STATE__;
+    expect(state?.done).toBe(true);
+    expect(stubs.calls.stroke || 0).toBeGreaterThanOrEqual(600);
+    handle.destroy();
+    raf.restore();
+    stubs.restore();
+  });
+
+  it('settled 补绘期间的 hover/选中不会让 overlay 永久停在简化层', () => {
+    const stubs = installCanvasStubs();
+    const raf = installRafQueue();
+    const container = document.createElement('div');
+    container.getBoundingClientRect = () => ({ width: 800, height: 600 } as DOMRect);
+    document.body.appendChild(container);
+    const handle = renderLineMap(makeMapData(600), container, () => undefined, {
+      projection: { project: () => ({ x: 220, y: 240 }) },
+    });
+
+    // 初始 settled pass 进入进行中状态；随后悬停会取消当前 pass 并先
+    // 刷新交互层，之后必须自动排队新的 settled pass。
+    expect(raf.runNext()).toBe(true);
+    handle.handlePointerMove?.(220, 240);
+    raf.runAll();
+    const state = (globalThis as {
+      __GIM_DEV_LINE_MAP_RENDER_STATE__?: { done?: boolean };
+    }).__GIM_DEV_LINE_MAP_RENDER_STATE__;
+    expect(state?.done).toBe(true);
+    expect(stubs.calls.stroke || 0).toBeGreaterThanOrEqual(600);
+
+    handle.destroy();
+    raf.restore();
+    stubs.restore();
+  });
+
+  it('相机切换后 hover/click 使用当前屏幕位置，销毁后迟到 RAF 不写 Canvas', () => {
+    const stubs = installCanvasStubs();
+    const raf = installRafQueue();
+    const container = document.createElement('div');
+    container.getBoundingClientRect = () => ({ width: 800, height: 600 } as DOMRect);
+    document.body.appendChild(container);
+    const requestRedraw: { current: ((phase?: LineMapRenderPhase) => void) | null } = { current: null };
+    let camera = 'B';
+    // 通过对象属性保存回调结果，避免 TypeScript 将闭包赋值的可变局部
+    // 错误收窄为 never。
+    const clicked: { current: GimGraphNode | null } = { current: null };
+    const handle = renderLineMap(makeMapData(12), container, (nodeRef) => { clicked.current = nodeRef; }, {
+      onRequestRedraw: (draw) => { requestRedraw.current = draw; },
+      projection: {
+        project: (_lng, lat) => camera === 'B'
+          ? { x: 220, y: 240 }
+          : lat < 30.005 ? { x: 620, y: 440 } : { x: 100, y: 100 },
+      },
+    });
+    const redraw = requestRedraw.current;
+    redraw?.('interactive');
+    expect(raf.runNext()).toBe(true);
+    camera = 'C';
+    redraw?.('interactive');
+    // 在新的 interaction RAF 执行前立即点击，也必须使用 C 相机投影，
+    // 不能回退到上一帧的 towerScreen 快照。
+    handle.handlePointerMove?.(620, 440);
+    handle.handlePointerClick?.(620, 440);
+    expect(clicked.current?.path).toBe('Cbm/N001.cbm');
+    expect(raf.runNext()).toBe(true);
+
+    const clearBeforeDestroy = stubs.calls.clearRect || 0;
+    camera = 'C';
+    redraw?.('interactive');
+    handle.destroy();
+    raf.runAll();
+    expect(stubs.calls.clearRect || 0).toBe(clearBeforeDestroy);
+    raf.restore();
     stubs.restore();
   });
 });
