@@ -8,7 +8,10 @@
  */
 
 import { isTauri } from '@desktop/runtime.js';
-import { batchReadCachedFiles, readLineSemanticPack } from '@desktop/database.js';
+import {
+  batchReadCachedFiles,
+  readLineSemanticPack,
+} from '@desktop/database.js';
 import { isDiskBackedFile, isSemanticPackBackedFile } from '@desktop/gimExtract.js';
 import type { LineParserWorkerFile } from './lineParserWorker.js';
 
@@ -220,9 +223,13 @@ export async function readLineParserInput(
       }
       if (!isCurrent()) return result(true);
     } catch (error) {
-      // 旧缓存没有 semantic pack、或 pack 损坏时，回退到原生单条读取。
-      // Rust read_cached_entry 会按 pack offset 懒读；失败只影响该条目。
-      console.warn('[LineParserInput] semantic pack 读取失败，回退单文件读取:', error);
+      // 只有单条 ENTRY_MISS 才允许逐条降级。pack/index 整体错误必须向上
+      // 抛出，由打开流程使 semantic source cache 失效并重新解压重建；
+      // 绝不能在其它条目完整时提交 partial graph/attributes。
+      const kind = (error as { kind?: unknown } | null)?.kind;
+      if (kind !== 'ENTRY_MISS') throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn('[LineParserInput] semantic pack 单条条目缺失，回退单文件读取:', message);
       const fallback = await readRegularCandidates(semanticPackCandidates, isCurrent);
       for (const file of fallback) setResolved(file.path, file.bytes);
       if (!isCurrent()) return result(true);

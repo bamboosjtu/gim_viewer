@@ -43,7 +43,8 @@ macro_rules! debug_perf_log {
 /// v16: 资源上限、几何 ready 提交协议、线路缓存 session 校验
 /// v19: IFC 空间索引改为逐模型增量构建；运行时 IFC 会话身份与模型事件隔离
 /// v20: 线路 native semantic pack 与大 MOD 仅保留路径元数据，缓存输入边界同步升级
-pub const PARSER_VERSION: &str = "gim-parser-v20";
+/// v21: 线路 semantic pack index 保存完整 entry metadata，并支持 warm full-read
+pub const PARSER_VERSION: &str = "gim-parser-v21";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
@@ -1097,8 +1098,10 @@ const MAX_BATCH_CACHE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 pub(crate) const LINE_SEMANTIC_PACK_FILE: &str = ".gim-line-semantic.pack";
 pub(crate) const LINE_SEMANTIC_INDEX_FILE: &str = ".gim-line-semantic.index";
 const LINE_SEMANTIC_INDEX_MAGIC: &[u8; 4] = b"GLSI";
-const LINE_SEMANTIC_INDEX_VERSION: u8 = 1;
+const LINE_SEMANTIC_INDEX_VERSION: u8 = 2;
+const LINE_SEMANTIC_INDEX_LEGACY_VERSION: u8 = 1;
 const LINE_SEMANTIC_INDEX_HEADER: usize = 9; // magic + version + count
+const LINE_SEMANTIC_INDEX_FLAG_PACKED: u8 = 0x01;
 /// semantic pack 是线路首屏语义输入，不应成为一次 IPC 的无界内存源。
 /// 当前六个真实线路样本的 pack 约 2--22 MB；512 MiB 足以覆盖正常工程，
 /// 同时把损坏/恶意缓存的单次响应和 Rust 分配控制在明确边界内。
@@ -1148,7 +1151,10 @@ fn decode_binary_cache_write_request(
 /// 同时处理 "/" 和 Windows "\" 语义下的路径穿越。
 /// 返回由 Normal 组件拼接的相对 PathBuf。
 fn validate_entry_path(entry_path: &str) -> Result<PathBuf, String> {
-    let path = Path::new(entry_path);
+    // 归一化分隔符后再按组件校验，保证线路 PascalCase 清单和 Windows
+    // 反斜杠引用在不同平台/旧缓存中得到同一安全语义。
+    let normalized = entry_path.replace('\\', "/");
+    let path = Path::new(&normalized);
     let mut components = Vec::new();
     for comp in path.components() {
         match comp {
@@ -1423,6 +1429,8 @@ pub(crate) struct LineSemanticPackEntry {
     pub path: String,
     pub offset: u64,
     pub size: u64,
+    /// true 表示数据位于连续 pack；false 表示仅记录独立缓存文件元数据。
+    pub packed: bool,
 }
 
 /// 将线路 parser 所需的小文本连续写入 staging 文件。
@@ -1481,12 +1489,30 @@ impl LineSemanticPackWriter {
             path: path.to_string(),
             offset,
             size,
+            packed: true,
         });
         Ok(CacheWriteTiming {
             // pack data file 在 new() 时只打开一次；单条追加没有 open 成本。
             open_ms: 0.0,
             data_ms,
         })
+    }
+
+    /// 只记录不进入连续 pack 的大 MOD/STL（或其它）条目元数据。
+    /// warm full-read 会据此重建完整 filesByType/currentFiles，而不把几何
+    /// 字节复制到 semantic pack 或 Worker。
+    pub(crate) fn record_metadata(&mut self, path: &str, size: u64) -> Result<(), String> {
+        let normalized_path = normalize_cache_lookup_path(path);
+        if !self.seen_paths.insert(normalized_path) {
+            return Err(format!("线路语义 pack 条目重复: {}", path));
+        }
+        self.entries.push(LineSemanticPackEntry {
+            path: path.to_string(),
+            offset: 0,
+            size,
+            packed: false,
+        });
+        Ok(())
     }
 
     pub(crate) fn last_entry(&self) -> Option<&LineSemanticPackEntry> {
@@ -1525,6 +1551,9 @@ impl LineSemanticPackWriter {
                 .and_then(|_| index_file.write_all(path))
                 .and_then(|_| index_file.write_all(&entry.offset.to_le_bytes()))
                 .and_then(|_| index_file.write_all(&entry.size.to_le_bytes()))
+                .and_then(|_| index_file.write_all(&[
+                    if entry.packed { LINE_SEMANTIC_INDEX_FLAG_PACKED } else { 0 },
+                ]))
                 .map_err(|e| format!("写入线路语义 pack 索引项失败: {} — {}", entry.path, e))?;
         }
         index_file
@@ -1549,7 +1578,8 @@ fn read_line_semantic_index(
         .map_err(|e| format!("读取线路语义 pack 索引失败: {}", e))?;
     if bytes.len() < LINE_SEMANTIC_INDEX_HEADER
         || &bytes[..4] != LINE_SEMANTIC_INDEX_MAGIC
-        || bytes[4] != LINE_SEMANTIC_INDEX_VERSION
+        || (bytes[4] != LINE_SEMANTIC_INDEX_VERSION
+            && bytes[4] != LINE_SEMANTIC_INDEX_LEGACY_VERSION)
     {
         return Err("线路语义 pack 索引头无效".to_string());
     }
@@ -1560,29 +1590,60 @@ fn read_line_semantic_index(
     let mut offset = LINE_SEMANTIC_INDEX_HEADER;
     let mut result = HashMap::with_capacity(count);
     for _ in 0..count {
-        if offset + 4 > bytes.len() {
+        let path_len_end = offset
+            .checked_add(4)
+            .ok_or_else(|| "线路语义 pack 索引偏移溢出".to_string())?;
+        if path_len_end > bytes.len() {
             return Err("线路语义 pack 索引路径长度越界".to_string());
         }
-        let path_len = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
-        offset += 4;
-        if path_len == 0 || path_len > 4096 || offset + path_len + 16 > bytes.len() {
+        let path_len = u32::from_le_bytes(bytes[offset..path_len_end].try_into().unwrap()) as usize;
+        offset = path_len_end;
+        let entry_end = offset
+            .checked_add(path_len)
+            .and_then(|v| v.checked_add(16))
+            .and_then(|v| {
+                if bytes[4] == LINE_SEMANTIC_INDEX_VERSION {
+                    v.checked_add(1)
+                } else {
+                    Some(v)
+                }
+            })
+            .ok_or_else(|| "线路语义 pack 索引条目偏移溢出".to_string())?;
+        if path_len == 0 || path_len > 4096 || entry_end > bytes.len() {
             return Err("线路语义 pack 索引路径或长度无效".to_string());
         }
-        let path = String::from_utf8(bytes[offset..offset + path_len].to_vec())
+        let path_end = offset + path_len;
+        let path = String::from_utf8(bytes[offset..path_end].to_vec())
             .map_err(|_| "线路语义 pack 索引路径不是 UTF-8".to_string())?;
-        offset += path_len;
+        offset = path_end;
         validate_entry_path(&path)?;
-        let entry_offset = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
-        offset += 8;
-        let entry_size = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
-        offset += 8;
+        let entry_offset_end = offset + 8;
+        let entry_offset = u64::from_le_bytes(bytes[offset..entry_offset_end].try_into().unwrap());
+        offset = entry_offset_end;
+        let entry_size_end = offset + 8;
+        let entry_size = u64::from_le_bytes(bytes[offset..entry_size_end].try_into().unwrap());
+        offset = entry_size_end;
+        let packed = if bytes[4] == LINE_SEMANTIC_INDEX_VERSION {
+            let flags = bytes[offset];
+            offset += 1;
+            if flags & !LINE_SEMANTIC_INDEX_FLAG_PACKED != 0 {
+                return Err("线路语义 pack 索引 flags 无效".to_string());
+            }
+            flags & LINE_SEMANTIC_INDEX_FLAG_PACKED != 0
+        } else {
+            // v1 索引只包含 pack 数据，因此旧条目全部视为 packed。
+            true
+        };
         let entry = LineSemanticPackEntry {
             path: path.clone(),
             offset: entry_offset,
             size: entry_size,
+            packed,
         };
         let key = normalize_cache_lookup_path(&path);
-        result.entry(key).or_insert(entry);
+        if result.insert(key, entry).is_some() {
+            return Err("线路语义 pack 索引包含重复路径".to_string());
+        }
     }
     if offset != bytes.len() {
         return Err("线路语义 pack 索引存在尾随数据".to_string());
@@ -1590,34 +1651,234 @@ fn read_line_semantic_index(
     Ok(result)
 }
 
+fn semantic_error(kind: &str, message: impl AsRef<str>) -> String {
+    format!("{}: {}", kind, message.as_ref())
+}
+
+/// 校验 index 中 packed 区间的算术、边界与重叠关系。
+///
+/// 该检查在单条读取、full-read 和缓存校验中共享，任何整体损坏都会
+/// 返回 PACK_TRUNCATED/INDEX_INVALID，而不是把其它条目当作可用的部分缓存。
+fn validate_line_semantic_pack_ranges(
+    index: &HashMap<String, LineSemanticPackEntry>,
+    pack_len: u64,
+) -> Result<(), String> {
+    if pack_len > MAX_LINE_SEMANTIC_PACK_BYTES {
+        return Err(semantic_error(
+            "PACK_INVALID",
+            format!(
+                "线路语义 pack 大小超过安全上限（>{} bytes）",
+                MAX_LINE_SEMANTIC_PACK_BYTES
+            ),
+        ));
+    }
+    let mut ranges: Vec<(u64, u64, &str)> = Vec::new();
+    for entry in index.values() {
+        if !entry.packed {
+            continue;
+        }
+        let end = entry.offset.checked_add(entry.size).ok_or_else(|| {
+            semantic_error(
+                "PACK_TRUNCATED",
+                format!("线路语义 pack 条目偏移溢出: {}", entry.path),
+            )
+        })?;
+        if end > pack_len {
+            return Err(semantic_error(
+                "PACK_TRUNCATED",
+                format!("线路语义 pack 条目越界: {}", entry.path),
+            ));
+        }
+        if entry.size > 0 {
+            ranges.push((entry.offset, end, entry.path.as_str()));
+        }
+    }
+    ranges.sort_by_key(|(start, _, _)| *start);
+    if ranges.is_empty() {
+        if pack_len != 0 {
+            return Err(semantic_error(
+                "PACK_INVALID",
+                "线路语义 pack 无 packed 条目但数据文件非空",
+            ));
+        }
+    } else {
+        if ranges[0].0 != 0 {
+            return Err(semantic_error(
+                "INDEX_INVALID",
+                "线路语义 pack packed 区间未从 0 开始",
+            ));
+        }
+        if ranges.last().map(|(_, end, _)| *end) != Some(pack_len) {
+            return Err(semantic_error(
+                "PACK_INVALID",
+                "线路语义 pack 存在未被 index 覆盖的尾部数据",
+            ));
+        }
+    }
+    for pair in ranges.windows(2) {
+        if pair[1].0 < pair[0].1 {
+            return Err(semantic_error(
+                "INDEX_INVALID",
+                format!(
+                    "线路语义 pack 条目区间重叠: {} / {}",
+                    pair[0].2, pair[1].2
+                ),
+            ));
+        }
+        if pair[1].0 > pair[0].1 {
+            return Err(semantic_error(
+                "INDEX_INVALID",
+                format!(
+                    "线路语义 pack packed 区间存在空洞: {} / {}",
+                    pair[0].2, pair[1].2
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// v2 index 还保存 metadata-only entry；full-read/validate 时校验这些
+/// 独立文件仍存在且大小未变，避免构造不完整的线路 Runtime。
+fn validate_line_semantic_metadata_files(
+    root: &Path,
+    index: &HashMap<String, LineSemanticPackEntry>,
+) -> Result<(), String> {
+    for entry in index.values() {
+        if entry.packed {
+            continue;
+        }
+        let path = cache_file_path_from_root(root, &entry.path)?;
+        let metadata = stdfs::metadata(&path).map_err(|e| {
+            semantic_error(
+                "PACK_INVALID",
+                format!("线路语义 pack metadata 文件缺失: {} — {}", entry.path, e),
+            )
+        })?;
+        if metadata.len() != entry.size {
+            return Err(semantic_error(
+                "PACK_INVALID",
+                format!(
+                    "线路语义 pack metadata 文件大小不匹配: {}（期望 {}, 实际 {}）",
+                    entry.path,
+                    entry.size,
+                    metadata.len()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// 在已经 canonicalize 的缓存根目录下安全拼出相对 entry 路径；不创建目录。
+fn cache_file_path_from_root(root: &Path, entry_path: &str) -> Result<PathBuf, String> {
+    let relative = validate_entry_path(entry_path)
+        .map_err(|e| semantic_error("PACK_INVALID", e))?;
+    let full = root.join(relative);
+    if !full.starts_with(root) {
+        return Err(semantic_error("PACK_INVALID", "线路语义 pack metadata 路径越界"));
+    }
+    reject_link(&full, "线路语义 pack metadata 文件")
+        .map_err(|e| semantic_error("PACK_INVALID", e))?;
+    Ok(full)
+}
+
+/// 读取并校验 semantic pack 的公共入口。缺失/格式错误、pack 越界和
+/// metadata 缺失分别保留可判定的错误前缀，供 WebView 选择整体重建或单条降级。
+fn read_line_semantic_pack_files(
+    root: &Path,
+    validate_metadata: bool,
+) -> Result<(HashMap<String, LineSemanticPackEntry>, u64), String> {
+    let index = read_line_semantic_index(root)
+        .map_err(|e| semantic_error("INDEX_INVALID", e))?;
+    // A syntactically valid but empty index can be produced by truncating both
+    // sidecars to their headers.  It is not a usable line semantic source:
+    // accepting it would let the warm path build an empty/partial Runtime and
+    // silently fall back to neither the pack nor the complete source.  Every
+    // valid line pack must contain at least the project CBM (case-insensitive;
+    // v2 may additionally contain metadata-only geometry entries).
+    let has_packed_cbm = index.values().any(|entry| {
+        entry.packed
+            && entry.size > 0
+            && normalize_cache_lookup_path(&entry.path).ends_with(".cbm")
+    });
+    if !has_packed_cbm {
+        return Err(semantic_error(
+            "INDEX_INVALID",
+            "线路语义 pack index 不包含 packed CBM 入口",
+        ));
+    }
+    let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
+    reject_link(&pack_path, "线路语义 pack")
+        .map_err(|e| semantic_error("PACK_INVALID", e))?;
+    let pack_len = stdfs::metadata(&pack_path)
+        .map_err(|e| {
+            semantic_error(
+                "PACK_INVALID",
+                format!("读取线路语义 pack 元信息失败: {}", e),
+            )
+        })?
+        .len();
+    validate_line_semantic_pack_ranges(&index, pack_len)?;
+    if validate_metadata {
+        validate_line_semantic_metadata_files(root, &index)?;
+    }
+    Ok((index, pack_len))
+}
+
+#[cfg(test)]
+fn validate_line_semantic_pack_files(root: &Path, validate_metadata: bool) -> Result<(), String> {
+    let _ = read_line_semantic_pack_files(root, validate_metadata)?;
+    Ok(())
+}
+
 /// 从线路语义 pack 读取单个条目；供 DiskBackedFile 的普通 source/geometry
 /// 读取路径使用。按需只读取指定区间，不把整个 pack 复制到 JS。
 fn read_line_semantic_pack_entry(root: &Path, entry_path: &str) -> Result<Option<Vec<u8>>, String> {
-    let index = read_line_semantic_index(root)?;
+    let (index, _pack_len) = read_line_semantic_pack_files(root, false)?;
     let key = normalize_cache_lookup_path(entry_path);
     let Some(entry) = index.get(&key) else { return Ok(None); };
+    if !entry.packed {
+        // 该路径是 metadata-only（通常为大 MOD/STL），不是 semantic
+        // entry；调用方可以按普通独立文件路径继续读取。
+        return Ok(None);
+    }
     let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
-    reject_link(&pack_path, "线路语义 pack")?;
+    reject_link(&pack_path, "线路语义 pack")
+        .map_err(|e| semantic_error("PACK_INVALID", e))?;
     let pack_len = stdfs::metadata(&pack_path)
-        .map_err(|e| format!("读取线路语义 pack 元信息失败: {}", e))?
+        .map_err(|e| {
+            semantic_error(
+                "PACK_INVALID",
+                format!("读取线路语义 pack 元信息失败: {}", e),
+            )
+        })?
         .len();
     let end = entry
         .offset
         .checked_add(entry.size)
-        .ok_or_else(|| "线路语义 pack 条目偏移溢出".to_string())?;
+        .ok_or_else(|| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目偏移溢出"))?;
     if end > pack_len {
-        return Err(format!("线路语义 pack 条目越界: {}", entry.path));
+        return Err(semantic_error(
+            "PACK_TRUNCATED",
+            format!("线路语义 pack 条目越界: {}", entry.path),
+        ));
     }
     let mut file = stdfs::File::open(&pack_path)
-        .map_err(|e| format!("打开线路语义 pack 失败: {}", e))?;
+        .map_err(|e| semantic_error("PACK_INVALID", format!("打开线路语义 pack 失败: {}", e)))?;
     use std::io::{Read, Seek, SeekFrom};
     file.seek(SeekFrom::Start(entry.offset))
-        .map_err(|e| format!("定位线路语义 pack 失败: {}", e))?;
+        .map_err(|e| semantic_error("PACK_INVALID", format!("定位线路语义 pack 失败: {}", e)))?;
     let size = usize::try_from(entry.size)
-        .map_err(|_| "线路语义 pack 条目大小超过平台限制".to_string())?;
+        .map_err(|_| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目大小超过平台限制"))?;
     let mut data = vec![0u8; size];
     file.read_exact(&mut data)
-        .map_err(|e| format!("读取线路语义 pack 条目失败: {}", e))?;
+        .map_err(|e| {
+            semantic_error(
+                "PACK_TRUNCATED",
+                format!("读取线路语义 pack 条目失败: {}", e),
+            )
+        })?;
     Ok(Some(data))
 }
 
@@ -2100,19 +2361,8 @@ pub fn read_line_semantic_pack(
         return Err("线路语义 pack 读取条目数超过安全上限".to_string());
     }
     let root = cache_project_root_for_batch(&app_handle, project_id)?;
-    let read_started = Instant::now();
-    let index = read_line_semantic_index(&root)?;
+    let (index, pack_len) = read_line_semantic_pack_files(&root, false)?;
     let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
-    reject_link(&pack_path, "线路语义 pack")?;
-    let pack_len = stdfs::metadata(&pack_path)
-        .map_err(|e| format!("读取线路语义 pack 元信息失败: {}", e))?
-        .len();
-    if pack_len > MAX_LINE_SEMANTIC_PACK_BYTES {
-        return Err(format!(
-            "线路语义 pack 大小超过安全上限（>{} bytes）",
-            MAX_LINE_SEMANTIC_PACK_BYTES
-        ));
-    }
     // 只打开一次 pack，并按索引区间读取请求项；不要把整个 pack 复制到
     // Rust 堆再切片。正常请求按 manifest 顺序到达，读取仍接近顺序 IO；
     // 即使请求顺序被调用方改变，也只产生 seek，不会增加 IPC 次数或峰值内存。
@@ -2123,32 +2373,43 @@ pub fn read_line_semantic_pack(
     let mut total_bytes: u64 = 0;
     let mut hit_count: u32 = 0;
     let mut resolve_ms = 0.0_f64;
+    let mut read_ms = 0.0_f64;
     for requested_path in &entry_paths {
         let resolve_started = Instant::now();
         let resolved = validate_entry_path(requested_path)
             .ok()
             .and_then(|_| index.get(&normalize_cache_lookup_path(requested_path)));
         resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
-        let bytes = if let Some(entry) = resolved {
+        let bytes = if let Some(entry) = resolved.filter(|entry| entry.packed) {
             let end = entry
                 .offset
                 .checked_add(entry.size)
-                .ok_or_else(|| format!("线路语义 pack 条目偏移溢出: {}", requested_path))?;
+                .ok_or_else(|| {
+                    semantic_error(
+                        "PACK_TRUNCATED",
+                        format!("线路语义 pack 条目偏移溢出: {}", requested_path),
+                    )
+                })?;
             if end > pack_len {
-                return Err(format!("线路语义 pack 条目越界: {}", requested_path));
+                return Err(semantic_error(
+                    "PACK_TRUNCATED",
+                    format!("线路语义 pack 条目越界: {}", requested_path),
+                ));
             }
             let start = usize::try_from(entry.offset)
-                .map_err(|_| "线路语义 pack 条目偏移超过平台限制".to_string())?;
+                .map_err(|_| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目偏移超过平台限制"))?;
             let end = usize::try_from(end)
-                .map_err(|_| "线路语义 pack 条目末端超过平台限制".to_string())?;
+                .map_err(|_| semantic_error("PACK_TRUNCATED", "线路语义 pack 条目末端超过平台限制"))?;
             let mut data = vec![0u8; end - start];
             use std::io::{Read, Seek, SeekFrom};
+            let read_started = Instant::now();
             pack_file
                 .seek(SeekFrom::Start(entry.offset))
-                .map_err(|e| format!("定位线路语义 pack 失败: {} — {}", requested_path, e))?;
+                .map_err(|e| semantic_error("PACK_INVALID", format!("定位线路语义 pack 失败: {} — {}", requested_path, e)))?;
             pack_file
                 .read_exact(&mut data)
-                .map_err(|e| format!("读取线路语义 pack 条目失败: {} — {}", requested_path, e))?;
+                .map_err(|e| semantic_error("PACK_TRUNCATED", format!("读取线路语义 pack 条目失败: {} — {}", requested_path, e)))?;
+            read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
             hit_count = hit_count.saturating_add(1);
             total_bytes = total_bytes
                 .checked_add(data.len() as u64)
@@ -2165,7 +2426,6 @@ pub fn read_line_semantic_pack(
             bytes,
         });
     }
-    let read_ms = read_started.elapsed().as_secs_f64() * 1000.0;
     let out = encode_batch_cache_response(
         results,
         total_bytes,
@@ -2174,6 +2434,164 @@ pub fn read_line_semantic_pack(
         resolve_ms,
         total_started,
     )?;
+    Ok(tauri::ipc::Response::new(out))
+}
+
+/// semantic pack full-read 的二进制 envelope。
+///
+/// `GIMF` v1 头部：magic(4) + version(1) + count(u32) +
+/// index/resolve/read/encode/total(f64×5) + packed_bytes(u64) +
+/// packed_count(u32)。每项为 path_len(u32)+path+flags(u8)+size(u64)+
+/// data_len(u64)+data。metadata-only 项 flags=0、data_len=0，但保留
+/// 原始 size，使 WebView 可以创建 lazy DiskBackedFile。
+const LINE_SEMANTIC_FULL_MAGIC: &[u8; 4] = b"GIMF";
+const LINE_SEMANTIC_FULL_VERSION: u8 = 1;
+const LINE_SEMANTIC_FULL_HEADER: usize = 61;
+const LINE_SEMANTIC_FULL_FLAG_PACKED: u8 = 0x01;
+const MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES: u64 =
+    MAX_LINE_SEMANTIC_PACK_BYTES + 64 * 1024 * 1024;
+
+fn encode_line_semantic_pack_full_header(
+    count: u32,
+    index_ms: f64,
+    resolve_ms: f64,
+    read_ms: f64,
+    packed_bytes: u64,
+    packed_count: u32,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(LINE_SEMANTIC_FULL_HEADER);
+    out.extend_from_slice(LINE_SEMANTIC_FULL_MAGIC);
+    out.push(LINE_SEMANTIC_FULL_VERSION);
+    out.extend_from_slice(&count.to_le_bytes());
+    out.extend_from_slice(&index_ms.to_le_bytes());
+    out.extend_from_slice(&resolve_ms.to_le_bytes());
+    out.extend_from_slice(&read_ms.to_le_bytes());
+    // encodeMs / totalMs 在全部 item 完成后回填。
+    out.extend_from_slice(&0.0_f64.to_le_bytes());
+    out.extend_from_slice(&0.0_f64.to_le_bytes());
+    out.extend_from_slice(&packed_bytes.to_le_bytes());
+    out.extend_from_slice(&packed_count.to_le_bytes());
+    out
+}
+
+/// Tauri command：一次读取完整线路 semantic pack，并返回 metadata-only 条目。
+///
+/// 与旧 `read_line_semantic_pack(project_id, entry_paths)` 不同，WebView 不
+/// 再传递两万条路径；Rust 直接按 index 返回全部条目。整体 index/pack
+/// 损坏会返回带前缀的错误，调用方必须让 semantic source cache 失效并重建，
+/// 不得退化成逐条读取后提交 partial Runtime。
+#[tauri::command]
+pub fn read_line_semantic_pack_all(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+) -> Result<tauri::ipc::Response, String> {
+    let total_started = Instant::now();
+    {
+        let conn = app_handle.state::<DbState>();
+        let guard = conn
+            .0
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        ensure_project_exists(&guard, project_id)?;
+    }
+    let root = cache_project_root_for_batch(&app_handle, project_id)?;
+    let index_started = Instant::now();
+    let (index, pack_len) = read_line_semantic_pack_files(&root, true)?;
+    let index_ms = index_started.elapsed().as_secs_f64() * 1000.0;
+    // `resolveMs` covers all work after the index bytes have been validated and
+    // before any semantic payload is read: collecting entries from the lookup
+    // map, deterministic ordering, count/size arithmetic and response-size
+    // validation. Keep it separate from `readMs` so the latter represents only
+    // file seek/read operations.
+    let resolve_started = Instant::now();
+    let mut entries: Vec<LineSemanticPackEntry> = index.into_values().collect();
+    // HashMap 只用于大小写不敏感查找；full-read 使用稳定排序，避免不同
+    // Rust 进程的随机 hash seed 改变 Worker 输入/导航顺序。
+    entries.sort_by(|a, b| normalize_cache_lookup_path(&a.path).cmp(&normalize_cache_lookup_path(&b.path)));
+    let count = u32::try_from(entries.len())
+        .map_err(|_| semantic_error("INDEX_INVALID", "线路语义 pack 条目数溢出"))?;
+    let packed_count = entries.iter().filter(|entry| entry.packed).count();
+    let packed_count = u32::try_from(packed_count)
+        .map_err(|_| semantic_error("INDEX_INVALID", "线路语义 pack packed 条目数溢出"))?;
+    let packed_bytes = entries
+        .iter()
+        .filter(|entry| entry.packed)
+        .try_fold(0u64, |sum, entry| sum.checked_add(entry.size))
+        .ok_or_else(|| semantic_error("PACK_TRUNCATED", "线路语义 pack 总大小溢出"))?;
+    let response_overhead = entries.iter().try_fold(0u64, |sum, entry| {
+        let path_len = u64::try_from(entry.path.as_bytes().len()).ok()?;
+        sum.checked_add(4 + path_len + 1 + 8 + 8)
+    }).ok_or_else(|| semantic_error("INDEX_INVALID", "线路语义 pack 响应大小溢出"))?;
+    let expected_response = u64::try_from(LINE_SEMANTIC_FULL_HEADER)
+        .ok()
+        .and_then(|v| v.checked_add(response_overhead))
+        .and_then(|v| v.checked_add(packed_bytes))
+        .ok_or_else(|| semantic_error("PACK_INVALID", "线路语义 pack 响应大小溢出"))?;
+    if expected_response > MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES {
+        return Err(semantic_error(
+            "PACK_INVALID",
+            format!("线路语义 pack full response 超过安全上限（>{} bytes）", MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES),
+        ));
+    }
+    let resolve_ms = resolve_started.elapsed().as_secs_f64() * 1000.0;
+    let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
+    let mut pack_file = stdfs::File::open(&pack_path)
+        .map_err(|e| semantic_error("PACK_INVALID", format!("打开线路语义 pack 失败: {}", e)))?;
+    use std::io::{Read, Seek, SeekFrom};
+    let mut out = encode_line_semantic_pack_full_header(
+        count,
+        index_ms,
+        resolve_ms,
+        0.0,
+        packed_bytes,
+        packed_count,
+    );
+    let mut read_ms = 0.0_f64;
+    let mut encode_ms = 0.0_f64;
+    for entry in entries {
+        let path = entry.path.as_bytes();
+        let path_len = u32::try_from(path.len())
+            .map_err(|_| semantic_error("INDEX_INVALID", format!("线路语义 pack 路径过长: {}", entry.path)))?;
+        let data = if entry.packed {
+            let size = usize::try_from(entry.size)
+                .map_err(|_| semantic_error("PACK_TRUNCATED", format!("线路语义 pack 条目大小超过平台限制: {}", entry.path)))?;
+            let mut data = vec![0u8; size];
+            let read_started = Instant::now();
+            pack_file
+                .seek(SeekFrom::Start(entry.offset))
+                .map_err(|e| semantic_error("PACK_INVALID", format!("定位线路语义 pack 失败: {} — {}", entry.path, e)))?;
+            pack_file
+                .read_exact(&mut data)
+                .map_err(|e| semantic_error("PACK_TRUNCATED", format!("读取线路语义 pack 条目失败: {} — {}", entry.path, e)))?;
+            read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
+            Some(data)
+        } else {
+            None
+        };
+        // 只把 envelope 拼装计入 encodeMs；entry 的 seek/read 已在 readMs
+        // 单独计时，避免阶段互相重叠导致性能报告误判瓶颈。
+        let encode_item_started = Instant::now();
+        out.extend_from_slice(&path_len.to_le_bytes());
+        out.extend_from_slice(path);
+        out.push(if entry.packed { LINE_SEMANTIC_FULL_FLAG_PACKED } else { 0 });
+        out.extend_from_slice(&entry.size.to_le_bytes());
+        if let Some(data) = data {
+            out.extend_from_slice(&(data.len() as u64).to_le_bytes());
+            out.extend_from_slice(&data);
+        } else {
+            out.extend_from_slice(&0u64.to_le_bytes());
+        }
+        encode_ms += encode_item_started.elapsed().as_secs_f64() * 1000.0;
+        let response_bytes = u64::try_from(out.len()).unwrap_or(u64::MAX);
+        if response_bytes > MAX_LINE_SEMANTIC_FULL_RESPONSE_BYTES {
+            return Err(semantic_error("PACK_INVALID", "线路语义 pack full response 超过安全上限"));
+        }
+    }
+    let total_ms = total_started.elapsed().as_secs_f64() * 1000.0;
+    out[25..33].copy_from_slice(&read_ms.to_le_bytes());
+    out[33..41].copy_from_slice(&encode_ms.to_le_bytes());
+    out[41..49].copy_from_slice(&total_ms.to_le_bytes());
+    let _ = pack_len;
     Ok(tauri::ipc::Response::new(out))
 }
 
@@ -2932,6 +3350,11 @@ pub struct GimCacheValidation {
     pub missing_line_fam_sources: Vec<String>,
     /// v5: 图引用中存在但 powerline_dev_property 缺失的 file_name_lower 列表
     pub missing_line_dev_sources: Vec<String>,
+    /// v21: 线路 semantic source 状态：valid / missing / invalid。
+    /// missing 表示旧缓存尚未生成 pack，可使用 SQLite fallback；invalid
+    /// 表示 pack/index 或 metadata 整体损坏，必须重新解压重建。
+    pub line_semantic_pack_status: String,
+    pub line_semantic_pack_error: Option<String>,
     /// v6（方案 C）: GLB 几何缓存版本是否匹配（读取 glbcache/{projectId}/_version.txt 比较）
     /// 版本不匹配 → valid=false，触发 delete_project_cache + 重序列化
     pub geometry_cache_version_match: bool,
@@ -4239,6 +4662,44 @@ fn compute_line_attr_diagnostic(
     })
 }
 
+/// 检查线路 semantic source 是否可用于 warm full-read。
+///
+/// 两个 sidecar 都不存在时视为 `missing`（兼容 v20 以前由 SQLite 入库、
+/// 但没有 native pack 的缓存）；只有单边存在、格式/边界错误或 metadata
+/// 文件缺失才视为 `invalid`，由上层放弃 SQLite partial runtime 并重建。
+fn inspect_line_semantic_pack(
+    app_handle: &tauri::AppHandle,
+    project_id: i64,
+) -> (String, Option<String>) {
+    let root = match cache_project_root_for_batch(app_handle, project_id) {
+        Ok(root) => root,
+        Err(error) => return ("invalid".to_string(), Some(semantic_error("PACK_INVALID", error))),
+    };
+    let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
+    let index_path = root.join(LINE_SEMANTIC_INDEX_FILE);
+    let pack_exists = pack_path.exists();
+    let index_exists = index_path.exists();
+    if !pack_exists && !index_exists {
+        return ("missing".to_string(), None);
+    }
+    if !index_exists {
+        return (
+            "invalid".to_string(),
+            Some(semantic_error("INDEX_INVALID", "线路语义 pack index 缺失")),
+        );
+    }
+    if !pack_exists {
+        return (
+            "invalid".to_string(),
+            Some(semantic_error("PACK_INVALID", "线路语义 pack 数据文件缺失")),
+        );
+    }
+    match read_line_semantic_pack_files(&root, true) {
+        Ok(_) => ("valid".to_string(), None),
+        Err(error) => ("invalid".to_string(), Some(error)),
+    }
+}
+
 /// Tauri command：校验 GIM 缓存完整性（只读，不修复）
 ///
 /// v4 增强：根据 project_type 分支校验逻辑
@@ -4302,6 +4763,12 @@ pub fn validate_gim_cache(
         LineAttrDiagnostic::default()
     };
 
+    let (line_semantic_pack_status, line_semantic_pack_error) = if is_line {
+        inspect_line_semantic_pack(&app_handle, project_id)
+    } else {
+        ("missing".to_string(), None)
+    };
+
     let (ifc_entry_count, cached_ifc_count, missing_cache_paths, valid) = if is_line {
         // 线路工程：不检查 IFC 缓存；要求 FAM 属性源存在。
         // P1 评审修复：不再依赖 geometry_cache_version_match——glbcache/_version.txt
@@ -4309,7 +4776,12 @@ pub fn validate_gim_cache(
         // 永远失效、每次打开都重新解压。线路缓存的完整性由三阶段入库协议保证：
         // parser_version 仅在 save_line_project_finish 提交。
         let valid =
-            parser_version_match && line_cbm_node_count > 0 && line_attr_diag.fam_source_count > 0;
+            parser_version_match
+                && line_cbm_node_count > 0
+                && line_attr_diag.fam_source_count > 0
+                // semantic source 整体损坏时不能拿 SQLite 图/属性拼出
+                // partial Runtime；missing 则兼容旧缓存并允许 SQLite fallback。
+                && line_semantic_pack_status != "invalid";
         (0u64, 0u64, Vec::new(), valid)
     } else {
         // 变电工程：保持原有 IFC 缓存校验
@@ -4401,6 +4873,8 @@ pub fn validate_gim_cache(
         line_expected_dev_ref_count: line_attr_diag.expected_dev_ref_count,
         missing_line_fam_sources: line_attr_diag.missing_fam_sources,
         missing_line_dev_sources: line_attr_diag.missing_dev_sources,
+        line_semantic_pack_status,
+        line_semantic_pack_error,
         geometry_cache_version_match,
         current_geometry_cache_version: GEOMETRY_CACHE_VERSION.to_string(),
     })
@@ -6072,6 +6546,96 @@ mod tests {
         assert_eq!(first_bytes, b"A=B");
         let pack = std::fs::read(root.join(LINE_SEMANTIC_PACK_FILE)).unwrap();
         assert_eq!(pack, b"A=BC=D");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn line_semantic_pack_v2_keeps_metadata_only_entries() {
+        let root = std::env::temp_dir().join(format!(
+            "gim-viewer-semantic-pack-meta-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut writer = LineSemanticPackWriter::new(&root).unwrap();
+        writer
+            .append_with_timing("Cbm/project.cbm", b"A=B")
+            .unwrap();
+        writer.record_metadata("Mod/tower.stl", 1234).unwrap();
+        let entries = writer.finish().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].packed);
+        assert!(!entries[1].packed);
+        let index = read_line_semantic_index(&root).unwrap();
+        assert_eq!(index.len(), 2);
+        assert!(index.get("cbm/project.cbm").unwrap().packed);
+        assert!(!index.get("mod/tower.stl").unwrap().packed);
+        assert_eq!(index.get("mod/tower.stl").unwrap().size, 1234);
+        assert!(read_line_semantic_pack_entry(&root, "MOD/tower.stl")
+            .unwrap()
+            .is_none());
+        std::fs::create_dir_all(root.join("Mod")).unwrap();
+        std::fs::write(root.join("Mod/tower.stl"), vec![0u8; 1234]).unwrap();
+        validate_line_semantic_pack_files(&root, true).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn line_semantic_pack_integrity_errors_are_classified_without_panic() {
+        let root = std::env::temp_dir().join(format!(
+            "gim-viewer-semantic-pack-invalid-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut writer = LineSemanticPackWriter::new(&root).unwrap();
+        writer.append_with_timing("Cbm/a.cbm", b"abc").unwrap();
+        writer.finish().unwrap();
+
+        let index_path = root.join(LINE_SEMANTIC_INDEX_FILE);
+        let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
+        let index_backup = std::fs::read(&index_path).unwrap();
+
+        std::fs::write(&index_path, b"bad").unwrap();
+        let error = read_line_semantic_pack_files(&root, false).unwrap_err();
+        assert!(error.starts_with("INDEX_INVALID:"));
+        std::fs::write(&index_path, &index_backup).unwrap();
+
+        std::fs::write(&pack_path, b"a").unwrap();
+        let error = read_line_semantic_pack_files(&root, false).unwrap_err();
+        assert!(error.starts_with("PACK_TRUNCATED:"));
+        std::fs::write(&pack_path, b"abc").unwrap();
+
+        let mut corrupted = index_backup.clone();
+        // v2 record: header(9) + path_len(4) + path(9) => offset at 22.
+        let offset_start = 9 + 4 + "Cbm/a.cbm".len();
+        corrupted[offset_start..offset_start + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+        std::fs::write(&index_path, corrupted).unwrap();
+        let error = read_line_semantic_pack_files(&root, false).unwrap_err();
+        assert!(error.starts_with("PACK_TRUNCATED:"));
+
+        std::fs::write(&index_path, &index_backup).unwrap();
+        std::fs::remove_file(&pack_path).unwrap();
+        let error = read_line_semantic_pack_files(&root, false).unwrap_err();
+        assert!(error.starts_with("PACK_INVALID:"));
+
+        // Both sidecars reduced to valid-looking empty headers must still be
+        // rejected as an incomplete source; otherwise warm restore could
+        // commit an empty graph while SQLite remains apparently valid.
+        let mut empty_index = Vec::new();
+        empty_index.extend_from_slice(b"GLSI");
+        empty_index.push(LINE_SEMANTIC_INDEX_VERSION);
+        empty_index.extend_from_slice(&0u32.to_le_bytes());
+        std::fs::write(&index_path, empty_index).unwrap();
+        std::fs::write(&pack_path, Vec::<u8>::new()).unwrap();
+        let error = read_line_semantic_pack_files(&root, false).unwrap_err();
+        assert!(error.starts_with("INDEX_INVALID:"));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

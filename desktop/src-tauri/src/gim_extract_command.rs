@@ -142,21 +142,29 @@ pub async fn extract_gim_archive(
                     return Err(error);
                 }
             };
-            let mut semantic_writer: Option<LineSemanticPackWriter> = None;
+            // 线路 index v2 同时记录 packed 语义条目和 metadata-only 大
+            // MOD/STL；这样 warm full-read 不需要 WebView 再传递全量路径。
+            let mut semantic_writer: Option<LineSemanticPackWriter> = if line_pack_enabled {
+                Some(LineSemanticPackWriter::new(&staging_root)?)
+            } else {
+                None
+            };
             let mut write_open_ms = 0.0_f64;
             let mut write_data_ms = 0.0_f64;
             let mut semantic_pack_write_ms = 0.0_f64;
             let extraction = extract_from_path_with_quota_profile(&authorized_path, &quota, |path, bytes| {
                 let size = u64::try_from(bytes.len())
                     .map_err(|e| format!("条目大小溢出: {} — {}", path, e))?;
-                let semantic_pack_offset = if line_pack_enabled && is_line_semantic_entry(&path, bytes.len()) {
-                    if semantic_writer.is_none() {
-                        semantic_writer = Some(LineSemanticPackWriter::new(&staging_root)?);
+                let semantic_pack_offset = if line_pack_enabled {
+                    let writer = semantic_writer.as_mut().expect("line semantic writer just created");
+                    if is_line_semantic_entry(&path, bytes.len()) {
+                        let timing = writer.append_with_timing(&path, &bytes)?;
+                        semantic_pack_write_ms += timing.data_ms;
+                        writer.last_entry().map(|entry| entry.offset)
+                    } else {
+                        writer.record_metadata(&path, size)?;
+                        None
                     }
-                    let writer = semantic_writer.as_mut().expect("semantic writer just created");
-                    let timing = writer.append_with_timing(&path, &bytes)?;
-                    semantic_pack_write_ms += timing.data_ms;
-                    writer.last_entry().map(|entry| entry.offset)
                 } else {
                     None
                 };
@@ -203,8 +211,12 @@ pub async fn extract_gim_archive(
                         return Err(error);
                     }
                 };
-                profile.semantic_pack_entries = entries.len();
-                profile.semantic_pack_bytes = entries.iter().map(|entry| entry.size).sum();
+                profile.semantic_pack_entries = entries.iter().filter(|entry| entry.packed).count();
+                profile.semantic_pack_bytes = entries
+                    .iter()
+                    .filter(|entry| entry.packed)
+                    .map(|entry| entry.size)
+                    .sum();
                 profile.semantic_pack_write_ms = semantic_pack_write_ms;
                 entries
             } else {

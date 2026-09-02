@@ -125,4 +125,40 @@ describe('lineParserInput', () => {
     ]);
     expect(new TextDecoder().decode(result.files[0].bytes)).toBe('ENTITYNAME=F1System');
   });
+
+  it('semantic pack 单条 ENTRY_MISS 只回退缺失文件，其余命中仍可复用', async () => {
+    const packed = (text: string): File => Object.assign(new File([text], 'packed'), { __semantic: true });
+    semanticPackReadMock.mockResolvedValue(new Map([
+      ['CBM/a.cbm', new TextEncoder().encode('A=1')],
+      ['CBM/b.cbm', null],
+    ]));
+    const missing = Object.assign(new File(['B=2'], 'b.cbm'), { __semantic: true });
+    const result = await readLineParserInput(new Map([
+      ['CBM/a.cbm', packed('old-a')],
+      ['CBM/b.cbm', missing],
+    ]), 9);
+
+    expect(result.files.map((file) => file.path)).toEqual(['CBM/a.cbm', 'CBM/b.cbm']);
+    expect(new TextDecoder().decode(result.files[0].bytes)).toBe('A=1');
+    expect(new TextDecoder().decode(result.files[1].bytes)).toBe('B=2');
+    expect(batchReadMock).not.toHaveBeenCalled();
+  });
+
+  it('semantic pack 整体错误直接抛出，不得逐条 fallback 形成 partial 输入', async () => {
+    const packed = Object.assign(new File(['old'], 'a.cbm'), { __semantic: true });
+    semanticPackReadMock.mockRejectedValue({ kind: 'PACK_TRUNCATED', message: 'pack 截断' });
+    await expect(readLineParserInput(new Map([
+      ['CBM/a.cbm', packed],
+      ['CBM/b.cbm', packed],
+    ]), 9)).rejects.toMatchObject({ kind: 'PACK_TRUNCATED' });
+    expect(batchReadMock).not.toHaveBeenCalled();
+  });
+
+  it('未分类 semantic pack IPC 错误按整体 PACK_INVALID 处理', async () => {
+    const packed = Object.assign(new File(['old'], 'a.cbm'), { __semantic: true });
+    semanticPackReadMock.mockRejectedValue(new Error('协议版本不支持'));
+    await expect(readLineParserInput(new Map([['CBM/a.cbm', packed]]), 9))
+      .rejects.toThrow('协议版本不支持');
+    expect(batchReadMock).not.toHaveBeenCalled();
+  });
 });

@@ -162,6 +162,20 @@ class DiskBackedFile extends DiskBackedBlob {
   }
 }
 
+/**
+ * 为缓存命中/full semantic-pack 路径创建与原生 manifest 同构的 lazy File。
+ * 仅保留路径和大小元数据，内容仍由受限 read_cached_entry IPC 按需读取。
+ */
+export function createDiskBackedFile(
+  projectId: number,
+  entryPath: string,
+  size: number,
+  semanticPackBacked = false,
+): File {
+  const name = entryPath.split(/[\\/]/).pop() || entryPath;
+  return new DiskBackedFile(projectId, entryPath, size, name, semanticPackBacked) as unknown as File;
+}
+
 /** 判断条目是否由原生解压落盘并按需从缓存读取。 */
 export function isDiskBackedFile(value: File | undefined): boolean {
   return Boolean(value && (value as File & { __gimDiskBacked?: boolean }).__gimDiskBacked === true);

@@ -245,15 +245,197 @@ export async function readLineSemanticPack(
   const perfSession = perfCurrentSession();
   const pathBytes = entryPaths.reduce((sum, path) => sum + utf8Encoder.encode(path).byteLength, 0);
   const requestBytes = pathBytes + entryPaths.length * 6 + String(projectId).length + 32;
-  const payload = await invokeTimed<ArrayBuffer>('read_line_semantic_pack', {
-    projectId,
-    entryPaths,
-  }, { requestBytes });
-  const parsed = parseBatchCachePayload(payload);
+  let payload: ArrayBuffer;
+  try {
+    payload = await invokeTimed<ArrayBuffer>('read_line_semantic_pack', {
+      projectId,
+      entryPaths,
+    }, { requestBytes });
+  } catch (error) {
+    throw normalizeLineSemanticPackError(error);
+  }
+  let parsed: ReturnType<typeof parseBatchCachePayload>;
+  try {
+    parsed = parseBatchCachePayload(payload);
+  } catch (error) {
+    throw new LineSemanticPackError('PACK_INVALID', error instanceof Error ? error.message : String(error));
+  }
   if (parsed.profile) perfRecordBatchRead(parsed.profile, perfSession.id);
   const map = new Map<string, Uint8Array | null>();
   for (const item of parsed.items) map.set(item.entry_path, item.bytes);
   return map;
+}
+
+export type LineSemanticPackErrorKind =
+  | 'ENTRY_MISS'
+  | 'PACK_INVALID'
+  | 'INDEX_INVALID'
+  | 'PACK_TRUNCATED';
+
+/** 错误分类供线路 parser 区分单条 miss 与 pack/index 整体损坏。 */
+export class LineSemanticPackError extends Error {
+  readonly kind: LineSemanticPackErrorKind;
+
+  constructor(kind: LineSemanticPackErrorKind, message: string) {
+    super(message);
+    this.name = 'LineSemanticPackError';
+    this.kind = kind;
+  }
+}
+
+function normalizeLineSemanticPackError(error: unknown): LineSemanticPackError {
+  if (error instanceof LineSemanticPackError) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/^(ENTRY_MISS|PACK_INVALID|INDEX_INVALID|PACK_TRUNCATED)\s*:\s*(.*)$/s);
+  if (match) return new LineSemanticPackError(match[1] as LineSemanticPackErrorKind, match[2] || match[1]);
+  // 未分类的 invoke/协议失败属于整体不可用，不能逐条 fallback 后提交 partial Runtime。
+  return new LineSemanticPackError('PACK_INVALID', message);
+}
+
+export interface LineSemanticPackFullItem {
+  entry_path: string;
+  /** packed=true 为 semantic 文本；false 仅含独立缓存文件元数据。 */
+  packed: boolean;
+  size: number;
+  bytes: Uint8Array | null;
+}
+
+export interface LineSemanticPackFullProfile {
+  indexMs: number;
+  resolveMs: number;
+  readMs: number;
+  encodeMs: number;
+  totalMs: number;
+  bytes: number;
+  entryCount: number;
+  packedCount: number;
+}
+
+export interface LineSemanticPackFullResult {
+  items: LineSemanticPackFullItem[];
+  profile: LineSemanticPackFullProfile;
+}
+
+/**
+ * 读取完整线路 semantic pack。Rust 侧依据 index 返回所有语义字节及
+ * metadata-only 条目，WebView 不再把 2 万条路径作为 invoke 参数传回。
+ */
+export async function readLineSemanticPackAll(projectId: number): Promise<LineSemanticPackFullResult> {
+  let payload: ArrayBuffer;
+  try {
+    payload = await invokeTimed<ArrayBuffer>('read_line_semantic_pack_all', { projectId });
+  } catch (error) {
+    throw normalizeLineSemanticPackError(error);
+  }
+  try {
+    return parseLineSemanticPackFullPayload(payload);
+  } catch (error) {
+    // 解析 envelope 失败同样是整体 source cache 损坏；不要降级为逐条读取。
+    const normalized = normalizeLineSemanticPackError(error);
+    if (normalized.kind === 'ENTRY_MISS') {
+      throw new LineSemanticPackError('PACK_INVALID', normalized.message);
+    }
+    throw normalized;
+  }
+}
+
+/** 解析 Rust GIMF v1 full semantic-pack envelope（纯函数，供回归测试）。 */
+export function parseLineSemanticPackFullPayload(value: ArrayBuffer | Uint8Array): LineSemanticPackFullResult {
+  const bytes = toUint8Array(value);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const header = 61;
+  if (bytes.byteLength < header || new TextDecoder().decode(bytes.slice(0, 4)) !== 'GIMF' || bytes[4] !== 1) {
+    throw new LineSemanticPackError('PACK_INVALID', '线路语义 pack full envelope 无效');
+  }
+  const count = view.getUint32(5, true);
+  if (count > 200_000) throw new LineSemanticPackError('INDEX_INVALID', '线路语义 pack 条目数超限');
+  // A valid line source always contains at least one packed CBM entry.  Treat
+  // an empty full response as an invalid index instead of committing an empty
+  // graph when a truncated/legacy Rust endpoint returns only the header.
+  if (count === 0) throw new LineSemanticPackError('INDEX_INVALID', '线路语义 pack 条目为空');
+  const indexMs = view.getFloat64(9, true);
+  const resolveMs = view.getFloat64(17, true);
+  const readMs = view.getFloat64(25, true);
+  const encodeMs = view.getFloat64(33, true);
+  const totalMs = view.getFloat64(41, true);
+  const packedBytes = view.getBigUint64(49, true);
+  if (packedBytes > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new LineSemanticPackError('PACK_INVALID', '线路语义 pack 字节数过大');
+  }
+  const packedCount = view.getUint32(57, true);
+  if (packedCount > count) throw new LineSemanticPackError('INDEX_INVALID', '线路语义 pack packed 条目数无效');
+  let offset = header;
+  let countedPacked = 0;
+  let countedBytes = 0;
+  let hasPackedCbm = false;
+  const seenPaths = new Set<string>();
+  const items: LineSemanticPackFullItem[] = [];
+  for (let i = 0; i < count; i++) {
+    if (offset + 4 > bytes.byteLength) throw new LineSemanticPackError('PACK_TRUNCATED', '线路语义 pack full 路径长度越界');
+    const pathLen = view.getUint32(offset, true); offset += 4;
+    if (pathLen === 0 || pathLen > 4096 || offset + pathLen + 1 + 8 + 8 > bytes.byteLength) {
+      throw new LineSemanticPackError('INDEX_INVALID', '线路语义 pack full 路径或长度无效');
+    }
+    let entryPath: string;
+    try {
+      entryPath = decoder.decode(bytes.slice(offset, offset + pathLen));
+    } catch {
+      throw new LineSemanticPackError('INDEX_INVALID', '线路语义 pack full 路径不是 UTF-8');
+    }
+    offset += pathLen;
+    const normalizedPath = entryPath.replace(/\\/g, '/').toLowerCase();
+    const pathParts = normalizedPath.split('/');
+    const duplicatePath = seenPaths.has(normalizedPath);
+    if (!entryPath || entryPath.startsWith('/') || /^[a-z]:\//i.test(normalizedPath)
+      || pathParts.some((part) => !part || part === '.' || part === '..')
+      || duplicatePath) {
+      throw new LineSemanticPackError('INDEX_INVALID', `线路语义 pack full 路径无效或重复: ${entryPath}`);
+    }
+    seenPaths.add(normalizedPath);
+    const flags = bytes[offset++];
+    if (flags & ~1) throw new LineSemanticPackError('INDEX_INVALID', '线路语义 pack full flags 无效');
+    const packed = (flags & 1) !== 0;
+    const sizeBig = view.getBigUint64(offset, true); offset += 8;
+    const dataLenBig = view.getBigUint64(offset, true); offset += 8;
+    if (sizeBig > BigInt(Number.MAX_SAFE_INTEGER) || dataLenBig > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new LineSemanticPackError('PACK_INVALID', '线路语义 pack full 条目大小过大');
+    }
+    const size = Number(sizeBig);
+    const dataLen = Number(dataLenBig);
+    if ((packed && dataLen !== size) || (!packed && dataLen !== 0)) {
+      throw new LineSemanticPackError('PACK_INVALID', `线路语义 pack full 条目长度不一致: ${entryPath}`);
+    }
+    if (offset + dataLen > bytes.byteLength) throw new LineSemanticPackError('PACK_TRUNCATED', `线路语义 pack full 数据越界: ${entryPath}`);
+    const data = packed ? bytes.slice(offset, offset + dataLen) : null;
+    offset += dataLen;
+    if (packed) {
+      countedPacked += 1;
+      countedBytes += dataLen;
+      if (dataLen > 0 && normalizedPath.endsWith('.cbm')) hasPackedCbm = true;
+    }
+    items.push({ entry_path: entryPath, packed, size, bytes: data });
+  }
+  if (offset !== bytes.byteLength) throw new LineSemanticPackError('PACK_INVALID', '线路语义 pack full envelope 存在尾随数据');
+  if (countedPacked !== packedCount || countedBytes !== Number(packedBytes)) {
+    throw new LineSemanticPackError('PACK_INVALID', '线路语义 pack full profile 与条目不一致');
+  }
+  if (!hasPackedCbm) {
+    throw new LineSemanticPackError('INDEX_INVALID', '线路语义 pack 不包含有效 packed CBM 入口');
+  }
+  return {
+    items,
+    profile: {
+      indexMs: Number.isFinite(indexMs) && indexMs >= 0 ? indexMs : 0,
+      resolveMs: Number.isFinite(resolveMs) && resolveMs >= 0 ? resolveMs : 0,
+      readMs: Number.isFinite(readMs) && readMs >= 0 ? readMs : 0,
+      encodeMs: Number.isFinite(encodeMs) && encodeMs >= 0 ? encodeMs : 0,
+      totalMs: Number.isFinite(totalMs) && totalMs >= 0 ? totalMs : 0,
+      bytes: Number(packedBytes),
+      entryCount: count,
+      packedCount,
+    },
+  };
 }
 
 /** 解析 Rust 批量缓存读取的二进制响应（兼容 GIMR v1/v2）。 */
@@ -516,6 +698,10 @@ export interface GimCacheValidation {
   missing_line_fam_sources: string[];
   /** v5: 图引用中存在但 line_dev_property 缺失的 file_name_lower 列表 */
   missing_line_dev_sources: string[];
+  /** v21: semantic source 状态：valid / missing / invalid */
+  line_semantic_pack_status: 'valid' | 'missing' | 'invalid' | string;
+  /** v21: invalid 时的可判定错误（PACK_INVALID/INDEX_INVALID/PACK_TRUNCATED） */
+  line_semantic_pack_error: string | null;
   /** v6（方案 C）: GLB 几何缓存版本是否匹配（读取 glbcache/{projectId}/_version.txt 比较） */
   geometry_cache_version_match: boolean;
   /** v6（方案 C）: 当前 GEOMETRY_CACHE_VERSION（供前端诊断显示） */
