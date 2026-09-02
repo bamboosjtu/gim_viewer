@@ -313,6 +313,7 @@ pub fn run() {
             db::read_cached_ifc,
             db::read_cached_entry,
             db::batch_read_cached_files,
+            db::read_line_semantic_pack,
             db::write_glb_file_binary,
             db::read_glb_file,
             db::write_geometry_cache_version,

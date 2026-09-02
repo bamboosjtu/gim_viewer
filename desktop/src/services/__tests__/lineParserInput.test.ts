@@ -1,14 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const batchReadMock = vi.hoisted(() => vi.fn());
+const semanticPackReadMock = vi.hoisted(() => vi.fn());
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => true }));
-vi.mock('@desktop/gimExtract.js', () => ({ isDiskBackedFile: () => true }));
-vi.mock('@desktop/database.js', () => ({ batchReadCachedFiles: batchReadMock }));
+vi.mock('@desktop/gimExtract.js', () => ({
+  isDiskBackedFile: () => true,
+  isSemanticPackBackedFile: (file: File | undefined) => Boolean((file as File & { __semantic?: boolean } | undefined)?.__semantic),
+}));
+vi.mock('@desktop/database.js', () => ({
+  batchReadCachedFiles: batchReadMock,
+  readLineSemanticPack: semanticPackReadMock,
+}));
 
-import { readLineParserInput } from '../lineParserInput.js';
+import { LINE_PARSER_SMALL_MOD_MAX_BYTES, readLineParserInput } from '../lineParserInput.js';
 
 describe('lineParserInput', () => {
-  beforeEach(() => batchReadMock.mockReset());
+  beforeEach(() => {
+    batchReadMock.mockReset();
+    semanticPackReadMock.mockReset();
+  });
 
   it('DiskBackedFile 按文件数/总字节分批读取，非语义二进制只传元数据', async () => {
     batchReadMock.mockImplementation(async (...args: unknown[]) => {
@@ -70,5 +80,49 @@ describe('lineParserInput', () => {
     expect(result.files[0].bytes.byteLength).toBe(0);
     expect(file.arrayBuffer).not.toHaveBeenCalled();
     expect(batchReadMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('原生大 MOD 几何只传路径元数据，不进入线路 Worker 输入', async () => {
+    batchReadMock.mockImplementation(async (...args: unknown[]) => {
+      const paths = (args[1] ?? args[0] ?? []) as string[];
+      return new Map(paths.map((path) => [path, new Uint8Array([67, 79, 68, 69, 61, 49])]));
+    });
+    const largeMod = new File([
+      new Uint8Array(LINE_PARSER_SMALL_MOD_MAX_BYTES + 1),
+    ], 'large.mod');
+    const smallMod = new File(['CODE=1'], 'small.mod');
+    const result = await readLineParserInput(new Map([
+      ['CBM/project.cbm', new File(['ENTITYNAME=F1System'], 'project.cbm')],
+      ['Mod/large.mod', largeMod],
+      ['Mod/small.mod', smallMod],
+    ]), 7);
+
+    const requestedPaths = batchReadMock.mock.calls.flatMap((call) => (call[1] ?? call[0] ?? []) as string[]);
+    expect(requestedPaths).toContain('Mod/small.mod');
+    expect(requestedPaths).not.toContain('Mod/large.mod');
+    expect(result.skippedLargeModFiles).toBe(1);
+    expect(result.skippedLargeModBytes).toBe(largeMod.size);
+    expect(result.files.find((file) => file.path === 'Mod/large.mod')?.bytes.byteLength).toBe(0);
+  });
+
+  it('semantic pack 一次读取文本，保留 Map 顺序且不再调用普通 batch', async () => {
+    semanticPackReadMock.mockResolvedValue(new Map([
+      ['Cbm/project.cbm', new TextEncoder().encode('ENTITYNAME=F1System')],
+      ['Dev/a.dev', new TextEncoder().encode('A=B')],
+    ]));
+    const packed = (text: string): File => Object.assign(new File([text], 'packed'), { __semantic: true });
+    const result = await readLineParserInput(new Map([
+      ['Cbm/project.cbm', packed('ignored')],
+      ['Dev/a.dev', packed('ignored')],
+    ]), 9);
+
+    expect(semanticPackReadMock).toHaveBeenCalledTimes(1);
+    expect(batchReadMock).not.toHaveBeenCalled();
+    expect(result.semanticPackReads).toBe(1);
+    expect(result.files.map((file) => file.path)).toEqual([
+      'Cbm/project.cbm',
+      'Dev/a.dev',
+    ]);
+    expect(new TextDecoder().decode(result.files[0].bytes)).toBe('ENTITYNAME=F1System');
   });
 });

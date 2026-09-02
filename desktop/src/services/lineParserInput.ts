@@ -1,17 +1,26 @@
 /**
  * 线路解析输入读取协调器。
  *
- * 首次 native 解压得到的 DiskBackedFile 不再逐个调用 text()；在 Tauri 中按
- * 文件数/总字节上限调用 batchReadCachedFiles。WASM/浏览器普通 File 仍走
- * File.arrayBuffer() 兼容路径。返回的 ArrayBuffer 会交给 Worker transferable。
+ * 首次 native 解压得到的 semantic-pack-backed 文本先通过一次连续 pack IPC
+ * 读取；其余 DiskBackedFile 再按文件数/总字节上限调用 batchReadCachedFiles。
+ * WASM/浏览器普通 File 仍走 File.arrayBuffer() 兼容路径。返回的 ArrayBuffer
+ * 会交给 Worker transferable。
  */
 
 import { isTauri } from '@desktop/runtime.js';
-import { batchReadCachedFiles } from '@desktop/database.js';
-import { isDiskBackedFile } from '@desktop/gimExtract.js';
+import { batchReadCachedFiles, readLineSemanticPack } from '@desktop/database.js';
+import { isDiskBackedFile, isSemanticPackBackedFile } from '@desktop/gimExtract.js';
 import type { LineParserWorkerFile } from './lineParserWorker.js';
 
-const TEXT_EXTENSIONS = new Set(['cbm', 'dev', 'fam', 'phm', 'mod']);
+const TEXT_EXTENSIONS = new Set(['cbm', 'dev', 'fam', 'phm']);
+
+/**
+ * 线路 MOD 同时承载两种内容：数百字节的文本族（例如 CROSS 的
+ * `CODE=...`）和数 MB 的几何族。后者不参与线路首屏语义解析，只会在
+ * 用户查看来源时通过 currentFiles/缓存懒加载。原生 manifest-only File
+ * 的 size 来自 Rust 清单，因此可在发起批量读取前安全跳过大几何条目。
+ */
+export const LINE_PARSER_SMALL_MOD_MAX_BYTES = 256 * 1024;
 
 export interface LineParserBatchOptions {
   maxFiles?: number;
@@ -30,6 +39,12 @@ export interface LineParserInputResult {
   requested: number;
   /** 读取过程中工程已切换；调用方应丢弃局部 files，不提交结果。 */
   cancelled?: boolean;
+  /** Native line MOD geometry omitted from Worker input (metadata remains). */
+  skippedLargeModFiles: number;
+  /** Bytes omitted from Worker input for large MOD geometry files. */
+  skippedLargeModBytes: number;
+  /** 使用连续线路 semantic pack 的 IPC 次数（通常为 0 或 1）。 */
+  semanticPackReads: number;
 }
 
 interface Candidate {
@@ -37,9 +52,16 @@ interface Candidate {
   file: File;
 }
 
-function isLineTextPath(path: string): boolean {
+function isLineParserTextPath(path: string, file: File): boolean {
   const dot = path.lastIndexOf('.');
-  return dot >= 0 && TEXT_EXTENSIONS.has(path.slice(dot + 1).toLowerCase());
+  if (dot < 0) return false;
+  const extension = path.slice(dot + 1).toLowerCase();
+  if (TEXT_EXTENSIONS.has(extension)) return true;
+  // Keep the old behavior for regular browser Files. Only native disk-backed
+  // files are filtered, because their large MOD bytes would otherwise make a
+  // needless IPC round-trip and Worker transfer.
+  return extension === 'mod'
+    && (!isDiskBackedFile(file) || file.size <= LINE_PARSER_SMALL_MOD_MAX_BYTES);
 }
 
 function toTransferable(bytes: Uint8Array | ArrayBuffer): ArrayBuffer {
@@ -72,17 +94,24 @@ function chunkCandidates(candidates: Candidate[], maxFiles: number, maxBytes: nu
   return chunks;
 }
 
+function buildBatchByteLookup(result: Map<string, Uint8Array | null>): Map<string, Uint8Array | null> {
+  const normalized = new Map<string, Uint8Array | null>();
+  for (const [candidatePath, bytes] of result) {
+    const key = candidatePath.replace(/\\/g, '/').toLowerCase();
+    if (!normalized.has(key)) normalized.set(key, bytes);
+  }
+  return normalized;
+}
+
 function lookupBatchBytes(
   result: Map<string, Uint8Array | null>,
+  normalizedResult: Map<string, Uint8Array | null>,
   path: string,
 ): Uint8Array | null | undefined {
   const exact = result.get(path);
   if (exact !== undefined || result.has(path)) return exact;
   const key = path.replace(/\\/g, '/').toLowerCase();
-  for (const [candidatePath, bytes] of result) {
-    if (candidatePath.replace(/\\/g, '/').toLowerCase() === key) return bytes;
-  }
-  return undefined;
+  return normalizedResult.get(key);
 }
 
 async function readRegularCandidates(
@@ -109,33 +138,96 @@ export async function readLineParserInput(
   projectId: number | null,
   options: LineParserBatchOptions = {},
 ): Promise<LineParserInputResult> {
-  const maxFiles = Math.max(1, options.maxFiles ?? 256);
+  // 8 MiB 仍是主要内存上限；将文件数上限提高到 1024 可显著减少
+  // 小文件密集线路的 IPC 次数，而不会把单批响应放大到不可控规模。
+  const maxFiles = Math.max(1, options.maxFiles ?? 1024);
   const maxBytes = Math.max(1, options.maxBytes ?? 8 * 1024 * 1024);
   const isCurrent = options.isCurrent ?? (() => true);
   const candidates = Array.from(files.entries())
-    .filter(([path]) => isLineTextPath(path))
+    .filter(([path, file]) => isLineParserTextPath(path, file))
     .map(([path, file]) => ({ path, file }));
+  const candidatePaths = new Set(candidates.map((candidate) => candidate.path));
+  const skippedLargeMod = Array.from(files.entries()).filter(([path, file]) => {
+    const dot = path.lastIndexOf('.');
+    return dot >= 0
+      && path.slice(dot + 1).toLowerCase() === 'mod'
+      && isDiskBackedFile(file)
+      && file.size > LINE_PARSER_SMALL_MOD_MAX_BYTES;
+  });
   const metadataFiles: LineParserWorkerFile[] = Array.from(files.keys())
-    .filter((path) => !isLineTextPath(path))
+    .filter((path) => !candidatePaths.has(path))
     // STL/MOD 等大二进制不属于线路语义 parser 的输入；仅发送路径元数据，
     // 让 Worker 仍能准确填充 filesByType，而不会把几何字节复制进解析线程。
     .map((path) => ({ path, bytes: new ArrayBuffer(0) }));
-  const diskCandidates = isTauri() && projectId != null
+  const nativeDiskCandidates = isTauri() && projectId != null
     ? candidates.filter((candidate) => isDiskBackedFile(candidate.file))
     : [];
-  const regularCandidates = candidates.filter((candidate) => !diskCandidates.includes(candidate));
-  const output: LineParserWorkerFile[] = [];
+  const semanticPackCandidates = nativeDiskCandidates.filter((candidate) => isSemanticPackBackedFile(candidate.file));
+  const diskCandidates = nativeDiskCandidates.filter((candidate) => !isSemanticPackBackedFile(candidate.file));
+  // Array.includes() 逐项排除在大线路样本上会退化为 O(n²)；使用对象
+  // identity Set 保持语义不变，同时避免输入准备阶段无意义的比较。
+  const nativeDiskCandidateSet = new Set(nativeDiskCandidates);
+  const regularCandidates = candidates.filter((candidate) => !nativeDiskCandidateSet.has(candidate));
+  // 先按原始 Map 顺序暂存读取结果，最后再统一组装 Worker 输入；这样
+  // semantic pack（一次 IPC）与普通 batch（多次 IPC）不会改变 parser 的
+  // 文件遍历顺序，保持大小写兼容和旧样本结果一致。
+  const resolved = new Map<string, ArrayBuffer>();
+  const resolvedNormalized = new Map<string, ArrayBuffer>();
+  const setResolved = (path: string, bytes: ArrayBuffer): void => {
+    if (!resolved.has(path)) resolved.set(path, bytes);
+    const key = path.replace(/\\/g, '/').toLowerCase();
+    if (!resolvedNormalized.has(key)) resolvedNormalized.set(key, bytes);
+  };
+  const getResolved = (path: string): ArrayBuffer | undefined =>
+    resolved.get(path) ?? resolvedNormalized.get(path.replace(/\\/g, '/').toLowerCase());
   let batches = 0;
+  let semanticPackReads = 0;
 
   const result = (cancelled = false): LineParserInputResult => ({
-    files: output,
-    bytes: output.reduce((sum, file) => sum + file.bytes.byteLength, 0),
+    files: Array.from(candidates, (candidate) => {
+      const bytes = getResolved(candidate.path);
+      return bytes ? { path: candidate.path, bytes } : null;
+    }).filter((file): file is LineParserWorkerFile => file !== null).concat(metadataFiles),
+    bytes: Array.from(resolved.values()).reduce((sum, bytes) => sum + bytes.byteLength, 0),
     batches,
     requested: files.size,
+    skippedLargeModFiles: skippedLargeMod.length,
+    skippedLargeModBytes: skippedLargeMod.reduce((sum, [, file]) => sum + Math.max(0, file.size || 0), 0),
+    semanticPackReads,
     ...(cancelled ? { cancelled: true } : {}),
   });
 
   if (!isCurrent()) return result(true);
+
+  if (semanticPackCandidates.length > 0 && projectId != null) {
+    if (!isCurrent()) return result(true);
+    semanticPackReads += 1;
+    const paths = semanticPackCandidates.map((candidate) => candidate.path);
+    try {
+      const bytesMap = await readLineSemanticPack(projectId, paths);
+      if (!isCurrent()) return result(true);
+      const normalizedBytesMap = buildBatchByteLookup(bytesMap);
+      for (const candidate of semanticPackCandidates) {
+        if (!isCurrent()) return result(true);
+        const bytes = lookupBatchBytes(bytesMap, normalizedBytesMap, candidate.path);
+        if (bytes != null) {
+          setResolved(candidate.path, toTransferable(bytes));
+        } else {
+          // 索引缺项/损坏时仅回退该文件，不放弃其它 pack 命中。
+          const fallback = await readRegularCandidates([candidate], isCurrent);
+          for (const file of fallback) setResolved(file.path, file.bytes);
+        }
+      }
+      if (!isCurrent()) return result(true);
+    } catch (error) {
+      // 旧缓存没有 semantic pack、或 pack 损坏时，回退到原生单条读取。
+      // Rust read_cached_entry 会按 pack offset 懒读；失败只影响该条目。
+      console.warn('[LineParserInput] semantic pack 读取失败，回退单文件读取:', error);
+      const fallback = await readRegularCandidates(semanticPackCandidates, isCurrent);
+      for (const file of fallback) setResolved(file.path, file.bytes);
+      if (!isCurrent()) return result(true);
+    }
+  }
 
   if (diskCandidates.length > 0 && projectId != null) {
     for (const chunk of chunkCandidates(diskCandidates, maxFiles, maxBytes)) {
@@ -147,36 +239,37 @@ export async function readLineParserInput(
         bytesMap = await batchReadCachedFiles(projectId, paths);
       } catch (error) {
         console.warn('[LineParserInput] 批量读取失败，回退单文件读取:', error);
-        output.push(...await readRegularCandidates(chunk, isCurrent));
+        const fallback = await readRegularCandidates(chunk, isCurrent);
+        for (const file of fallback) setResolved(file.path, file.bytes);
         if (!isCurrent()) return result(true);
         continue;
       }
       if (!isCurrent()) return result(true);
+      const normalizedBytesMap = buildBatchByteLookup(bytesMap);
       for (const candidate of chunk) {
         if (!isCurrent()) return result(true);
-        const bytes = lookupBatchBytes(bytesMap, candidate.path);
+        const bytes = lookupBatchBytes(bytesMap, normalizedBytesMap, candidate.path);
         // null 表示缓存缺失；0 字节 Uint8Array 仍是有效的已命中条目，
         // 不能因为长度为 0 又触发一次 read_cached_entry IPC。
         if (bytes != null) {
-          output.push({ path: candidate.path, bytes: toTransferable(bytes) });
+          setResolved(candidate.path, toTransferable(bytes));
           continue;
         }
         // 缓存缺失/大小写变体响应时，保留兼容回退；单条失败不阻断其它文件。
         const fallback = await readRegularCandidates([candidate], isCurrent);
-        output.push(...fallback);
+        for (const file of fallback) setResolved(file.path, file.bytes);
       }
     }
   }
 
   for (const chunk of chunkCandidates(regularCandidates, maxFiles, maxBytes)) {
     if (!isCurrent()) return result(true);
-    output.push(...await readRegularCandidates(chunk, isCurrent));
+    const regular = await readRegularCandidates(chunk, isCurrent);
+    for (const file of regular) setResolved(file.path, file.bytes);
     if (!isCurrent()) return result(true);
   }
 
   // 元数据条目不触发磁盘读取，仅用于保持 filesByType（尤其 STL/other）
   // 与既有 parser 统计一致。
-  output.push(...metadataFiles);
-
   return result();
 }

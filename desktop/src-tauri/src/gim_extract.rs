@@ -13,6 +13,8 @@
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
+use std::time::Instant;
+use serde::Serialize;
 
 /// 解压结果：条目列表（相对路径 + 字节）与头部信息
 #[derive(Debug)]
@@ -175,6 +177,55 @@ pub struct ExtractionMetadata {
     pub project_name: Option<String>,
 }
 
+/// 原生解压阶段计时。该结构随 manifest 返回给 WebView，便于把冷启动中
+/// 的归档解码、逐文件写盘和 manifest 组装拆开观察；所有耗时均为 Rust
+/// 单调时钟毫秒，不包含前端 IPC 等待。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractionProfile {
+    /// extract_gim_archive 命令从进入阻塞线程到返回 payload 的总耗时。
+    pub total_ms: f64,
+    /// 定位归档后逐条解压/写盘的耗时（不含 header 与 manifest 组装）。
+    pub archive_ms: f64,
+    /// metadata/open/read prefix/parse header 的耗时。
+    pub header_ms: f64,
+    /// sevenz/zip 解码并读取每个条目字节的累计耗时。
+    pub decode_ms: f64,
+    /// sink（生产路径为 staging 文件写入）的累计耗时。
+    pub write_ms: f64,
+    /// staging 文件 OpenOptions/create_new 的累计耗时。
+    pub write_open_ms: f64,
+    /// staging 文件 write_all 的累计耗时；不含打开文件和目录检查。
+    pub write_data_ms: f64,
+    /// manifest JSON + envelope 组装耗时。
+    pub manifest_ms: f64,
+    /// staging 目录改名/替换正式缓存目录耗时。
+    pub commit_ms: f64,
+    /// 当前写盘策略，生产原生路径为 staging-directory。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub write_mode: Option<String>,
+    /// GIM 输入归档字节数。
+    pub archive_bytes: u64,
+    /// 成功解压并交给 sink 的文件条目数。
+    pub entry_count: usize,
+    /// 成功解压的总字节数。
+    pub total_bytes: u64,
+    /// 线路 semantic pack 中连续写入的条目/字节；非线路或未启用时为 0。
+    pub semantic_pack_entries: usize,
+    pub semantic_pack_bytes: u64,
+    pub semantic_pack_write_ms: f64,
+    /// 单条 sink 写入最大耗时及其路径，定位数万小文件中的异常项。
+    pub max_entry_write_ms: f64,
+    pub max_entry_write_path: Option<String>,
+    /// 单条解码/读取最大耗时及其路径。
+    pub max_entry_decode_ms: f64,
+    pub max_entry_decode_path: Option<String>,
+}
+
+fn elapsed_ms(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
 /// 将位于 .gim 文件中间的归档暴露为从 0 开始的 Read + Seek。
 /// sevenz-rust/zip 会对归档起点执行相对 seek，不能直接把带 GIM 头部的
 /// File 传入 reader。
@@ -335,6 +386,7 @@ fn extract_archive_reader<R, F>(
     archive_len: u64,
     is_sevenz: bool,
     quota: &ExtractionQuota,
+    profile: &mut ExtractionProfile,
     mut sink: F,
 ) -> Result<(), String>
 where
@@ -364,6 +416,7 @@ where
                     quota,
                 )
                 .map_err(sevenz_rust::Error::other)?;
+                let decode_started = Instant::now();
                 let (bytes, actual_total) = read_entry_bytes(
                     stream,
                     &path,
@@ -373,8 +426,24 @@ where
                     quota,
                 )
                 .map_err(sevenz_rust::Error::other)?;
+                let decode_ms = elapsed_ms(decode_started);
+                profile.decode_ms += decode_ms;
+                if decode_ms > profile.max_entry_decode_ms {
+                    profile.max_entry_decode_ms = decode_ms;
+                    profile.max_entry_decode_path = Some(path.clone());
+                }
                 total_uncompressed = actual_total;
+                profile.entry_count += 1;
+                profile.total_bytes = actual_total;
+                let path_for_profile = path.clone();
+                let write_started = Instant::now();
                 sink(path, bytes).map_err(sevenz_rust::Error::other)?;
+                let write_ms = elapsed_ms(write_started);
+                profile.write_ms += write_ms;
+                if write_ms > profile.max_entry_write_ms {
+                    profile.max_entry_write_ms = write_ms;
+                    profile.max_entry_write_path = Some(path_for_profile);
+                }
                 Ok(true)
             })
             .map_err(|e| {
@@ -410,6 +479,7 @@ where
                 archive_len,
                 quota,
             )?;
+            let decode_started = Instant::now();
             let (bytes, actual_total) = read_entry_bytes(
                 &mut file,
                 &path,
@@ -418,8 +488,24 @@ where
                 archive_len,
                 quota,
             )?;
+            let decode_ms = elapsed_ms(decode_started);
+            profile.decode_ms += decode_ms;
+            if decode_ms > profile.max_entry_decode_ms {
+                profile.max_entry_decode_ms = decode_ms;
+                profile.max_entry_decode_path = Some(path.clone());
+            }
             total_uncompressed = actual_total;
+            profile.entry_count += 1;
+            profile.total_bytes = actual_total;
+            let path_for_profile = path.clone();
+            let write_started = Instant::now();
             sink(path, bytes)?;
+            let write_ms = elapsed_ms(write_started);
+            profile.write_ms += write_ms;
+            if write_ms > profile.max_entry_write_ms {
+                profile.max_entry_write_ms = write_ms;
+                profile.max_entry_write_path = Some(path_for_profile);
+            }
         }
     }
     Ok(())
@@ -427,6 +513,7 @@ where
 
 /// 从磁盘上的 .gim 逐条解压。只读取最多 1 MiB 头部来定位归档，归档 reader
 /// 直接 seek 到压缩数据；不会将整个输入文件读入内存，也不会累计所有条目。
+#[allow(dead_code)]
 pub fn extract_from_path_with_quota<F>(
     path: &Path,
     quota: &ExtractionQuota,
@@ -435,6 +522,21 @@ pub fn extract_from_path_with_quota<F>(
 where
     F: FnMut(String, Vec<u8>) -> Result<(), String>,
 {
+    let (metadata, _) = extract_from_path_with_quota_profile(path, quota, sink)?;
+    Ok(metadata)
+}
+
+/// 与 `extract_from_path_with_quota` 相同，但返回 Rust 内部阶段计时。
+/// 生产 Tauri 路径使用该变体；旧调用方继续使用上面的兼容函数。
+pub fn extract_from_path_with_quota_profile<F>(
+    path: &Path,
+    quota: &ExtractionQuota,
+    sink: F,
+) -> Result<(ExtractionMetadata, ExtractionProfile), String>
+where
+    F: FnMut(String, Vec<u8>) -> Result<(), String>,
+{
+    let started = Instant::now();
     let metadata =
         std::fs::metadata(path).map_err(|e| format!("读取 GIM 文件元信息失败: {}", e))?;
     if metadata.len() > quota.max_archive_bytes {
@@ -451,14 +553,23 @@ where
     file.read_exact(&mut prefix)
         .map_err(|e| format!("读取 GIM 头部失败: {}", e))?;
     let (offset, info, is_sevenz) = parse_archive_prefix(&prefix)?;
+    let header_ms = elapsed_ms(started);
     let archive_len = metadata
         .len()
         .checked_sub(offset as u64)
         .ok_or_else(|| "GIM 归档偏移越界".to_string())?;
     let reader = OffsetReader::new(file, offset as u64, archive_len)
         .map_err(|e| format!("定位 GIM 归档失败: {}", e))?;
-    extract_archive_reader(reader, archive_len, is_sevenz, quota, sink)?;
-    Ok(info)
+    let archive_started = Instant::now();
+    let mut profile = ExtractionProfile {
+        header_ms,
+        archive_bytes: metadata.len(),
+        ..ExtractionProfile::default()
+    };
+    extract_archive_reader(reader, archive_len, is_sevenz, quota, &mut profile, sink)?;
+    profile.archive_ms = elapsed_ms(archive_started);
+    profile.total_ms = elapsed_ms(started);
+    Ok((info, profile))
 }
 
 /// 从 .gim 字节中提取全部文件条目（自定义资源配额）

@@ -26,12 +26,11 @@ import { extractLineMapData, isLineMapDataValid } from '../gim/lineMapData.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
 import { buildWireSemanticInfo } from '../services/lineWireSemanticService.js';
 import type { WireSemanticInfo } from '../services/lineWireSemanticService.js';
-import { buildLineCatenaryParamAuditReport } from '../services/lineGeometryAuditService.js';
 import { buildLineCatenaryAuditExportPayload } from '../services/lineCatenaryAuditExportService.js';
 import type { LineCatenaryAuditExportPayload } from '../services/lineCatenaryAuditExportService.js';
 import { formatLineCatenaryAuditMarkdown } from '../services/lineCatenaryAuditExportService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
-import { ENABLE_MAPLIBRE_EXPERIMENT, ENABLE_PMTILES_EXPERIMENT, PMTILES_DEMO_URL, runtimeBasemapMode, setRuntimeBasemapMode, resetRuntimeBasemapMode } from '../config/features.js';
+import { ENABLE_CATENARY, ENABLE_MAPLIBRE_EXPERIMENT, ENABLE_PMTILES_EXPERIMENT, PMTILES_DEMO_URL, runtimeBasemapMode, setRuntimeBasemapMode, resetRuntimeBasemapMode } from '../config/features.js';
 import type { LineBasemapMode } from '../config/features.js';
 import { isTiandituKeyAvailable } from '../config/tianditu.js';
 import { setBasemapStatus, resetBasemapStatus } from '../services/basemapStatusService.js';
@@ -78,6 +77,7 @@ import type {
 } from '../gim/geometry/ir.js';
 import type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
 import type { LineFamPropertyRecord, LineDevPropertyRecord } from '@desktop/database.js';
+import { perfBegin, perfCurrentSession, type PerfSession } from '../utils/perfTimings.js';
 
 /**
  * 把 LineBasemapMode 映射为成功后的 BasemapStatus。
@@ -93,37 +93,6 @@ function basemapStatusFromMode(mode: LineBasemapMode): BasemapStatus {
     case 'tianditu-vector': return 'tianditu-vector';
     default: return 'empty';
   }
-}
-
-/**
- * M4-B3：构建悬链线参数审计摘要（精简版，用于 debugLog 输出）。
- *
- * 不输出全部样本，只输出：
- * - wireCount
- * - 各候选字段覆盖率（KVALUE/SPLIT/MATRIX0/BLHA 等）
- * - 阻塞问题数量
- *
- * 完整报告需调用 lineGeometryAuditService.buildLineCatenaryParamAuditReport。
- *
- * @param graph 线路工程图
- * @param mapData 已提取的地图数据
- */
-function buildLineCatenaryAuditSummary(graph: unknown, mapData: unknown): {
-  wireCount: number;
-  coverage: Record<string, { count: number; ratio: number }>;
-  blockingQuestionCount: number;
-} {
-  const report = buildLineCatenaryParamAuditReport({ graph, mapData });
-  // 精简 coverage：移除 sampleValues 避免日志过大
-  const coverageSummary: Record<string, { count: number; ratio: number }> = {};
-  for (const [field, stat] of Object.entries(report.coverage)) {
-    coverageSummary[field] = { count: stat.count, ratio: stat.ratio };
-  }
-  return {
-    wireCount: report.wireCount,
-    coverage: coverageSummary,
-    blockingQuestionCount: report.blockingQuestions.length,
-  };
 }
 
 /** 节点显示名称：classifyName 优先，回退 entityName，再回退文件名 */
@@ -1215,23 +1184,39 @@ let lineMapData: LineMapData | null = null;
 /** 当前线路业务导航投影（地图/搜索/树联动共用，变电工程不触碰）。 */
 let lineNavigationIndex: LineNavigationIndex | null = null;
 
+/** 当前线路地图的悬链线模式；底图 overlay/fallback 重建时必须沿用 A/B 选择。 */
+let currentLineCatenaryEnabled = ENABLE_CATENARY;
+
+/** 线路面板渲染选项；默认值保持现有生产行为，额外字段仅供性能 A/B。 */
+export interface LineRenderOptions {
+  /** 调用方捕获的性能会话；迟到的渲染 span 不得写入新工程。 */
+  perfSession?: PerfSession;
+  /** 覆盖悬链线渲染开关，便于在同一样本做 A/B；默认 ENABLE_CATENARY。 */
+  enableCatenary?: boolean;
+}
+
 /**
  * M4-B3A：最新悬链线参数审计导出 payload（模块级，供 Ctrl+Shift+C 复制使用）。
  *
  * 仅线路工程成功渲染后有值；变电工程 / 清空场景时为 null。
- * 在 renderLineProjectPanels 完成后赋值，destroyLineMapView 中清空。
+ * 在 renderLineProjectPanels 完成后保存上下文；真正的审计 payload 在用户
+ * 按 Ctrl+Shift+C 或显式导出时才构建，避免把完整报告放进首屏关键路径。
  */
 let latestCatenaryAuditPayload: LineCatenaryAuditExportPayload | null = null;
+let latestCatenaryAuditContext: { graph: GimGraph; mapData: LineMapData } | null = null;
 
 /** M4-B3A：读取最新悬链线审计 payload（供快捷键 Ctrl+Shift+C 调用） */
 export function getLatestCatenaryAuditPayload(): LineCatenaryAuditExportPayload | null {
+  if (!latestCatenaryAuditPayload && latestCatenaryAuditContext) {
+    latestCatenaryAuditPayload = buildLineCatenaryAuditExportPayload(latestCatenaryAuditContext);
+  }
   return latestCatenaryAuditPayload;
 }
 
 /** M4-B3A：将 payload 格式化为 Markdown（供快捷键 Ctrl+Shift+C 调用） */
 export function formatLatestCatenaryAuditMarkdown(): string | null {
-  if (!latestCatenaryAuditPayload) return null;
-  return formatLineCatenaryAuditMarkdown(latestCatenaryAuditPayload);
+  const payload = getLatestCatenaryAuditPayload();
+  return payload ? formatLineCatenaryAuditMarkdown(payload) : null;
 }
 
 /**
@@ -1287,6 +1272,8 @@ export function destroyLineMapView(): void {
   resetRuntimeBasemapMode();
   // M4-B3A：清空悬链线审计 payload（避免变电工程 / 清空场景残留旧线路数据）
   latestCatenaryAuditPayload = null;
+  latestCatenaryAuditContext = null;
+  currentLineCatenaryEnabled = ENABLE_CATENARY;
   // M4-A2 Finalization：重置底图运行状态（避免下次打开工程时残留旧状态）
   resetBasemapStatus();
 }
@@ -1422,7 +1409,12 @@ export function renderLineProjectPanels(
   state: AppState,
   graph: GimGraph,
   showMessage: (text: string) => void,
+  options: LineRenderOptions = {},
 ): void {
+  const perfSession = options.perfSession ?? perfCurrentSession();
+  const catenaryEnabled = options.enableCatenary ?? ENABLE_CATENARY;
+  currentLineCatenaryEnabled = catenaryEnabled;
+
   // 确保 state 与 graph 同步（调用方可能已设置，此处幂等确认）
   state.currentGimGraph = graph;
 
@@ -1436,24 +1428,42 @@ export function renderLineProjectPanels(
   // 绑定当前线路，保证属性来源按钮和异步 MOD 解析能拿到当前 graph。
   currentLineState = state;
   const attrs = buildLineAttributeIndex(state);
+  const endMapData = perfBegin('线路地图数据提取', undefined, perfSession);
   const mapData = extractLineMapData(graph, attrs);
+  endMapData(undefined, {
+    towers: mapData.stats.towerTotal,
+    wires: mapData.stats.wireTotal,
+    crosses: mapData.stats.crossTotal,
+  });
   lineMapData = mapData;
+  const endNavigationIndex = perfBegin('线路导航索引构建', undefined, perfSession);
   lineNavigationIndex = graph.root
     ? buildLineNavigationIndex(graph, mapData, {
       projectName: state.projectName,
       attrs,
     })
     : null;
+  endNavigationIndex(undefined, lineNavigationIndex ? {
+    nodes: lineNavigationIndex.nodesByKey.size,
+    sections: lineNavigationIndex.stats.sectionCount,
+    strains: lineNavigationIndex.stats.strainSectionCount,
+    spans: lineNavigationIndex.stats.spanCount,
+  } : { nodes: 0 });
 
   // 2. 左侧树只渲染线路业务投影，不再把 F1/F2/F3/F4 和设备原始节点直接铺开。
+  const endNavigationDom = perfBegin('线路导航树 DOM 渲染', undefined, perfSession);
   cbmTreePanel.innerHTML = '';
   if (!lineNavigationIndex) {
     cbmTreePanel.innerHTML = '<div class="props-empty">线路工程未找到 CBM 层级树</div>';
   } else {
     renderLineNavigationTree(lineNavigationIndex, cbmTreePanel, handleLineNavigationNode);
   }
+  endNavigationDom(undefined, {
+    nodes: lineNavigationIndex?.nodesByKey.size ?? 0,
+  });
 
   // 3. 文件设备面板摘要（tab 已隐藏，但内容仍渲染以备后续展示）
+  const endSummaryDom = perfBegin('线路摘要与搜索 DOM', undefined, perfSession);
   renderLineFileSummary(graph);
 
   // 4. 模型面板（清空占位，不显示 IFC 提示）
@@ -1468,8 +1478,11 @@ export function renderLineProjectPanels(
 
   // 搜索框：索引只包含线路/区段/耐张段/塔位/档距/导线/跨越物业务行，
   // 命中后展开祖先链并复用树点击的属性和地图联动。
+  let searchItemCount = 0;
   if (lineNavigationIndex) {
-    renderSearchBox(cbmTreePanel, buildLineNavigationSearchIndex(lineNavigationIndex), (key) => {
+    const searchItems = buildLineNavigationSearchIndex(lineNavigationIndex);
+    searchItemCount = searchItems.length;
+    renderSearchBox(cbmTreePanel, searchItems, (key) => {
       if (!lineNavigationIndex) return;
       const target = resolveLineNavigationTarget(lineNavigationIndex, key);
       if (!target) return;
@@ -1479,28 +1492,32 @@ export function renderLineProjectPanels(
       handleLineNavigationNode(target);
     });
   }
+  endSummaryDom(undefined, {
+    searchItems: searchItemCount,
+  });
   // 底图切换：保存 showMessage 引用，切换底图时给用户提示
   currentShowMessage = showMessage;
 
-  // M4-B3 / M4-B3A：构建悬链线参数审计导出 payload（模块级保存，供 Ctrl+Shift+C 复制）
-  // parserVersion 当前前端拿不到（在 Rust 侧 PARSER_VERSION 常量），暂省略
-  latestCatenaryAuditPayload = buildLineCatenaryAuditExportPayload({
-    graph,
-    mapData,
+  // M4-B3A：只保存审计上下文；完整 report/sample 在 Ctrl+Shift+C 或显式
+  // 导出时按需构建，避免首屏渲染关键路径执行全量审计。
+  latestCatenaryAuditPayload = null;
+  latestCatenaryAuditContext = { graph, mapData };
+  debugLog(DEBUG_LINE_MAP, '[M4-B3] catenary renderer config', {
+    enabled: catenaryEnabled,
+    wireCount: mapData.wires.length,
   });
-
-  // M4-B3：在 debug 模式输出悬链线参数审计摘要（仅摘要，不输出全部样本）
-  // 仅在 DEBUG_LINE_MAP 开启时执行，避免生产环境性能影响
-  debugLog(DEBUG_LINE_MAP, '[M4-B3] catenary param audit summary', buildLineCatenaryAuditSummary(graph, mapData));
 
   // Phase 5：地图数据统计与未解析引用摘要（追加到文件设备面板）
   renderMapStats(mapData);
 
+  const endCanvasMap = perfBegin('线路 Canvas 地图绘制', undefined, perfSession);
   if (isLineMapDataValid(mapData)) {
     // 地图点击塔位走 handleMapTowerClick：显示属性 + 选中左侧树行
     // M4-B2：onWireClick 处理导线点击（命中导线且未命中塔位时触发）
     lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
       onWireClick: handleMapWireClick,
+      enableCatenary: catenaryEnabled,
+      perfSession,
     });
   } else {
     // 塔位坐标缺失：在视口中央显示提示，不抛异常
@@ -1525,6 +1542,13 @@ export function renderLineProjectPanels(
       focusBboxByNodePaths() { return false; },
     };
   }
+  endCanvasMap(undefined, {
+    towers: mapData.towers.length,
+    wires: mapData.wires.length,
+    crosses: mapData.crosses.length,
+    catenary: catenaryEnabled,
+    valid: isLineMapDataValid(mapData),
+  });
   // M4-A2 Finalization：先报告 Canvas-only 状态
   // - 无论 ENABLE_MAPLIBRE_EXPERIMENT 是否开启，主视口已先以 Canvas-only 形式就绪
   // - 后续 MapLibre overlay 成功时状态会被更新为对应在线 raster 状态
@@ -1626,6 +1650,8 @@ export function renderLineProjectPanels(
       // M4-B2：onWireClick 在 fallback 模式下同样生效
       lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
         onWireClick: handleMapWireClick,
+        enableCatenary: currentLineCatenaryEnabled,
+        perfSession: perfCurrentSession(),
       });
       // fallback 后重新附加底图切换控件到新的图层面板
       attachBasemapSwitcher(mapData);
@@ -1696,6 +1722,8 @@ export function renderLineProjectPanels(
           onRequestRedraw: (draw: () => void) => { redrawFn = draw; },
           // M4-B2：overlay 模式下也支持导线点击
           onWireClick: handleMapWireClick,
+          enableCatenary: currentLineCatenaryEnabled,
+          perfSession: perfCurrentSession(),
         });
         // MapLibre 视图变化（move/zoom/resize）时触发 Canvas overlay 重绘
         const offView = probe.onViewChange(() => {
@@ -1907,6 +1935,8 @@ function switchBasemap(
   // 重新渲染 Canvas-only（先恢复交互，再异步切换到 overlay）
   lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
     onWireClick: handleMapWireClick,
+    enableCatenary: currentLineCatenaryEnabled,
+    perfSession: perfCurrentSession(),
   });
   // Canvas-only handle 创建后，附加底图切换控件到新的图层面板
   attachBasemapSwitcher(mapData);
@@ -1974,6 +2004,8 @@ function switchBasemap(
         projection,
         onRequestRedraw: (draw: () => void) => { redrawFn = draw; },
         onWireClick: handleMapWireClick,
+        enableCatenary: currentLineCatenaryEnabled,
+        perfSession: perfCurrentSession(),
       });
       const offView = probe.onViewChange(() => { if (redrawFn) redrawFn(); });
       const offMove = probe.onPointerMove((p) => { lineMapHandle?.handlePointerMove?.(p.x, p.y); });

@@ -375,7 +375,7 @@ GB18030 解码通过 `TextDecoder('gb18030')` 实现（现代浏览器和 Tauri 
 
 ### 11.5 注意事项
 
-- **parser_version**：从 `gim-parser-v8` 起逐步升级；本节的 v14 为历史快照，当前源码为 `gim-parser-v19`（演进历史详见 [17-batch-load-schema.md](./17-batch-load-schema.md) §7.3）
+- **parser_version**：从 `gim-parser-v8` 起逐步升级；本节的 v14 为历史快照，当前源码为 `gim-parser-v20`（演进历史详见 [17-batch-load-schema.md](./17-batch-load-schema.md) §7.3）
 - **F2/F3 暂不优化**：本轮按用户要求不改 F2System/F3System，后续可解析 FAM 文件获取更可读的系统名称
 - **性能**：所有有 devPath 的节点都解析 DEV 文件，但有 devInfoCache 缓存；变电站工程通常有数百个 DEV，首次解析增加 100-500ms，可接受
 

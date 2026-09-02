@@ -1,10 +1,12 @@
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::fs as stdfs;
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
 use tauri::Manager;
 
 /// Debug-only 性能日志宏。
@@ -40,7 +42,8 @@ macro_rules! debug_perf_log {
 /// v15: IFC 路径解析兼容任意目录（Bentley 导出 IFC 位于 CBM/ 而非 DEV/），旧缓存存有错误的 DEV/ 路径需失效重建
 /// v16: 资源上限、几何 ready 提交协议、线路缓存 session 校验
 /// v19: IFC 空间索引改为逐模型增量构建；运行时 IFC 会话身份与模型事件隔离
-pub const PARSER_VERSION: &str = "gim-parser-v19";
+/// v20: 线路 native semantic pack 与大 MOD 仅保留路径元数据，缓存输入边界同步升级
+pub const PARSER_VERSION: &str = "gim-parser-v20";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
@@ -1088,6 +1091,19 @@ const MAX_BINARY_CACHE_METADATA_BYTES: usize = 16 * 1024;
 const MAX_BATCH_CACHE_FILES: usize = 200_000;
 const MAX_BATCH_CACHE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
+/// 线路首屏语义文本的连续磁盘包。原生解压时，CBM/DEV/FAM/PHM 以及小型
+/// MOD 不再各自落盘；它们被追加到一个连续文件，随后由一次 IPC 读取给
+/// Line Parser Worker。大 MOD/STL 仍保留独立文件，供用户查看几何来源。
+pub(crate) const LINE_SEMANTIC_PACK_FILE: &str = ".gim-line-semantic.pack";
+pub(crate) const LINE_SEMANTIC_INDEX_FILE: &str = ".gim-line-semantic.index";
+const LINE_SEMANTIC_INDEX_MAGIC: &[u8; 4] = b"GLSI";
+const LINE_SEMANTIC_INDEX_VERSION: u8 = 1;
+const LINE_SEMANTIC_INDEX_HEADER: usize = 9; // magic + version + count
+/// semantic pack 是线路首屏语义输入，不应成为一次 IPC 的无界内存源。
+/// 当前六个真实线路样本的 pack 约 2--22 MB；512 MiB 足以覆盖正常工程，
+/// 同时把损坏/恶意缓存的单次响应和 Rust 分配控制在明确边界内。
+const MAX_LINE_SEMANTIC_PACK_BYTES: u64 = 512 * 1024 * 1024;
+
 #[derive(Debug, Deserialize)]
 struct BinaryCacheWriteMeta {
     project_id: i64,
@@ -1263,7 +1279,397 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], label: &str) -> Result<(),
     Ok(())
 }
 
-fn remove_cache_dir_if_safe(path: &Path, label: &str) -> Result<bool, String> {
+/// 为一次原生 GIM 解压创建独立 staging 目录。
+///
+/// 逐条写入 staging 时不需要对每个小文件执行 `sync_all + rename`；只有
+/// 全部条目成功后才通过 `commit_cache_staging` 替换 project 目录。这样把
+/// 数万次同步/元数据更新从冷启动关键路径移出，同时保留“未完成解压不
+/// 能被缓存校验命中”的提交语义。
+pub(crate) fn create_cache_staging_dir(
+    app_handle: &tauri::AppHandle,
+    project_id: i64,
+) -> Result<(PathBuf, PathBuf), String> {
+    ensure_cache_project_id(project_id)?;
+    let base = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?
+        .join("extracted");
+    if !base.exists() {
+        stdfs::create_dir_all(&base).map_err(|e| format!("创建 extracted 目录失败: {}", e))?;
+    }
+    reject_link(&base, " extracted")?;
+    if !base.is_dir() {
+        return Err(format!("extracted 路径不是目录: {}", base.display()));
+    }
+
+    let final_root = base.join(project_id.to_string());
+    // 纳入路径安全检查；旧目录即使存在也只允许是普通目录，提交时会
+    // 先移动到 backup，再由新 staging 目录接替。
+    reject_link(&final_root, "缓存")?;
+    if final_root.exists() && !final_root.is_dir() {
+        return Err(format!("缓存根路径不是目录: {}", final_root.display()));
+    }
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let staging = base.join(format!(
+        ".staging-{}-{}-{}",
+        project_id,
+        std::process::id(),
+        stamp
+    ));
+    if staging.exists() {
+        return Err(format!("缓存 staging 目录已存在: {}", staging.display()));
+    }
+    stdfs::create_dir(&staging).map_err(|e| format!("创建缓存 staging 目录失败: {}", e))?;
+    reject_link(&staging, " staging")?;
+    Ok((final_root, staging))
+}
+
+/// 一次解压过程复用的 staging 写入器。
+///
+/// 归档通常包含上万条同目录文件。逐条重新执行父目录的
+/// `exists + symlink_metadata + is_dir` 会把元数据调用放大到数万次，
+/// 在 Windows/Defender 环境下比实际写入更慢。写入器只缓存本次新建
+/// staging 中已经检查过的目录。staging 根目录是本次调用刚创建的唯一
+/// 目录，目标文件使用 `create_new` 原子创建：它既拒绝预先存在的普通文件，
+/// 也拒绝预先存在的符号链接/junction，因此不必再对每个新文件做一次
+/// `symlink_metadata`。这样在数万条目场景中可以把安全检查从“每文件”降为
+/// “每个目录”，同时保留路径穿越和 reparse point 防护。
+pub(crate) struct CacheStagingWriter {
+    root: PathBuf,
+    checked_dirs: HashSet<PathBuf>,
+}
+
+/// 一次 staging 文件写入中可拆分的耗时，用于区分 Windows 文件 open/创建
+/// 与真正的字节写入。该信息只用于解压性能 profile，不改变写入语义。
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CacheWriteTiming {
+    pub open_ms: f64,
+    pub data_ms: f64,
+}
+
+impl CacheStagingWriter {
+    pub(crate) fn new(staging_root: &Path) -> Result<Self, String> {
+        reject_link(staging_root, " staging")?;
+        if !staging_root.is_dir() {
+            return Err(format!("缓存 staging 根路径不是目录: {}", staging_root.display()));
+        }
+        let mut checked_dirs = HashSet::new();
+        checked_dirs.insert(staging_root.to_path_buf());
+        Ok(Self {
+            root: staging_root.to_path_buf(),
+            checked_dirs,
+        })
+    }
+
+    pub(crate) fn write_with_timing(
+        &mut self,
+        entry_path: &str,
+        bytes: &[u8],
+    ) -> Result<CacheWriteTiming, String> {
+        let relative = validate_entry_path(entry_path)?;
+        let mut current = self.root.clone();
+        let parent = relative.parent().unwrap_or_else(|| Path::new(""));
+        for component in parent.components() {
+            let Component::Normal(part) = component else {
+                return Err("缓存 staging 父目录组件无效".to_string());
+            };
+            current.push(part);
+            if !self.checked_dirs.contains(&current) {
+                if !current.exists() {
+                    stdfs::create_dir(&current)
+                        .map_err(|e| format!("创建缓存 staging 子目录失败: {}", e))?;
+                }
+                reject_link(&current, " staging")?;
+                if !current.is_dir() {
+                    return Err(format!("缓存 staging 路径组件不是目录: {}", current.display()));
+                }
+                self.checked_dirs.insert(current.clone());
+            }
+        }
+        let name = relative
+            .file_name()
+            .ok_or_else(|| "缓存 staging entry_path 缺少文件名".to_string())?;
+        let full = current.join(name);
+        if !full.starts_with(&self.root) {
+            return Err("缓存 staging 路径越界".to_string());
+        }
+        // `create_new` 在文件系统层面原子拒绝已经存在的目标（包括链接），
+        // 避免每个条目额外进行一次 symlink_metadata。staging 目录本身已在
+        // 上方逐目录检查，且不会与旧正式缓存目录共享路径。
+        let open_started = Instant::now();
+        let mut file = stdfs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&full)
+            .map_err(|e| format!("写入缓存 staging 文件失败: {} — {}", entry_path, e))?;
+        let open_ms = open_started.elapsed().as_secs_f64() * 1000.0;
+        let data_started = Instant::now();
+        file.write_all(bytes)
+            .map_err(|e| format!("写入缓存 staging 文件失败: {} — {}", entry_path, e))?;
+        let data_ms = data_started.elapsed().as_secs_f64() * 1000.0;
+        Ok(CacheWriteTiming { open_ms, data_ms })
+    }
+}
+
+/// 线路语义 pack 的索引项。offset/size 均相对于
+/// `LINE_SEMANTIC_PACK_FILE` 的数据起点（文件本身不含头部）。
+#[derive(Debug, Clone)]
+pub(crate) struct LineSemanticPackEntry {
+    pub path: String,
+    pub offset: u64,
+    pub size: u64,
+}
+
+/// 将线路 parser 所需的小文本连续写入 staging 文件。
+///
+/// 这里故意把索引写成独立文件：解压回调是逐条的，无法在还不知道条目数
+/// 时构造固定头部；独立索引也让 `read_line_semantic_pack` 可以先读取索引，
+/// 再一次性读取数据，避免数万次小文件 open。
+pub(crate) struct LineSemanticPackWriter {
+    data_file: stdfs::File,
+    data_path: PathBuf,
+    entries: Vec<LineSemanticPackEntry>,
+    seen_paths: HashSet<String>,
+    total_bytes: u64,
+}
+
+impl LineSemanticPackWriter {
+    pub(crate) fn new(staging_root: &Path) -> Result<Self, String> {
+        reject_link(staging_root, " staging")?;
+        let data_path = staging_root.join(LINE_SEMANTIC_PACK_FILE);
+        let data_file = stdfs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&data_path)
+            .map_err(|e| format!("创建线路语义 pack 失败: {}", e))?;
+        Ok(Self {
+            data_file,
+            data_path,
+            entries: Vec::new(),
+            seen_paths: HashSet::new(),
+            total_bytes: 0,
+        })
+    }
+
+    pub(crate) fn append_with_timing(
+        &mut self,
+        path: &str,
+        bytes: &[u8],
+    ) -> Result<CacheWriteTiming, String> {
+        let normalized_path = normalize_cache_lookup_path(path);
+        if !self.seen_paths.insert(normalized_path) {
+            return Err(format!("线路语义 pack 条目重复: {}", path));
+        }
+        let offset = self.total_bytes;
+        let size = u64::try_from(bytes.len())
+            .map_err(|e| format!("线路语义 pack 条目大小溢出: {} — {}", path, e))?;
+        let data_started = Instant::now();
+        self.data_file
+            .write_all(bytes)
+            .map_err(|e| format!("写入线路语义 pack 失败: {} — {}", path, e))?;
+        let data_ms = data_started.elapsed().as_secs_f64() * 1000.0;
+        self.total_bytes = self
+            .total_bytes
+            .checked_add(size)
+            .ok_or_else(|| "线路语义 pack 总大小溢出".to_string())?;
+        self.entries.push(LineSemanticPackEntry {
+            path: path.to_string(),
+            offset,
+            size,
+        });
+        Ok(CacheWriteTiming {
+            // pack data file 在 new() 时只打开一次；单条追加没有 open 成本。
+            open_ms: 0.0,
+            data_ms,
+        })
+    }
+
+    pub(crate) fn last_entry(&self) -> Option<&LineSemanticPackEntry> {
+        self.entries.last()
+    }
+
+    pub(crate) fn finish(mut self) -> Result<Vec<LineSemanticPackEntry>, String> {
+        self.data_file
+            .flush()
+            .map_err(|e| format!("刷新线路语义 pack 失败: {}", e))?;
+        drop(self.data_file);
+
+        let index_path = self.data_path.with_file_name(LINE_SEMANTIC_INDEX_FILE);
+        let mut index_file = stdfs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&index_path)
+            .map_err(|e| format!("创建线路语义 pack 索引失败: {}", e))?;
+        index_file
+            .write_all(LINE_SEMANTIC_INDEX_MAGIC)
+            .map_err(|e| format!("写入线路语义 pack 索引失败: {}", e))?;
+        index_file
+            .write_all(&[LINE_SEMANTIC_INDEX_VERSION])
+            .map_err(|e| format!("写入线路语义 pack 索引版本失败: {}", e))?;
+        let count = u32::try_from(self.entries.len())
+            .map_err(|_| "线路语义 pack 条目数溢出".to_string())?;
+        index_file
+            .write_all(&count.to_le_bytes())
+            .map_err(|e| format!("写入线路语义 pack 条目数失败: {}", e))?;
+        for entry in &self.entries {
+            let path = entry.path.as_bytes();
+            let path_len = u32::try_from(path.len())
+                .map_err(|_| format!("线路语义 pack 路径过长: {}", entry.path))?;
+            index_file
+                .write_all(&path_len.to_le_bytes())
+                .and_then(|_| index_file.write_all(path))
+                .and_then(|_| index_file.write_all(&entry.offset.to_le_bytes()))
+                .and_then(|_| index_file.write_all(&entry.size.to_le_bytes()))
+                .map_err(|e| format!("写入线路语义 pack 索引项失败: {} — {}", entry.path, e))?;
+        }
+        index_file
+            .flush()
+            .map_err(|e| format!("刷新线路语义 pack 索引失败: {}", e))?;
+        Ok(self.entries)
+    }
+}
+
+fn normalize_cache_lookup_path(path: &str) -> String {
+    path.replace('\\', "/").to_lowercase()
+}
+
+/// 读取并校验线路语义 pack 索引。索引是 staging/commit 产生的受信任文件，
+/// 仍执行长度、路径和 offset 边界检查，避免损坏缓存导致 panic 或越界切片。
+fn read_line_semantic_index(
+    root: &Path,
+) -> Result<HashMap<String, LineSemanticPackEntry>, String> {
+    let index_path = root.join(LINE_SEMANTIC_INDEX_FILE);
+    reject_link(&index_path, "线路语义 pack 索引")?;
+    let bytes = stdfs::read(&index_path)
+        .map_err(|e| format!("读取线路语义 pack 索引失败: {}", e))?;
+    if bytes.len() < LINE_SEMANTIC_INDEX_HEADER
+        || &bytes[..4] != LINE_SEMANTIC_INDEX_MAGIC
+        || bytes[4] != LINE_SEMANTIC_INDEX_VERSION
+    {
+        return Err("线路语义 pack 索引头无效".to_string());
+    }
+    let count = u32::from_le_bytes(bytes[5..9].try_into().unwrap()) as usize;
+    if count > MAX_BATCH_CACHE_FILES {
+        return Err("线路语义 pack 条目数超过安全上限".to_string());
+    }
+    let mut offset = LINE_SEMANTIC_INDEX_HEADER;
+    let mut result = HashMap::with_capacity(count);
+    for _ in 0..count {
+        if offset + 4 > bytes.len() {
+            return Err("线路语义 pack 索引路径长度越界".to_string());
+        }
+        let path_len = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4;
+        if path_len == 0 || path_len > 4096 || offset + path_len + 16 > bytes.len() {
+            return Err("线路语义 pack 索引路径或长度无效".to_string());
+        }
+        let path = String::from_utf8(bytes[offset..offset + path_len].to_vec())
+            .map_err(|_| "线路语义 pack 索引路径不是 UTF-8".to_string())?;
+        offset += path_len;
+        validate_entry_path(&path)?;
+        let entry_offset = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+        offset += 8;
+        let entry_size = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+        offset += 8;
+        let entry = LineSemanticPackEntry {
+            path: path.clone(),
+            offset: entry_offset,
+            size: entry_size,
+        };
+        let key = normalize_cache_lookup_path(&path);
+        result.entry(key).or_insert(entry);
+    }
+    if offset != bytes.len() {
+        return Err("线路语义 pack 索引存在尾随数据".to_string());
+    }
+    Ok(result)
+}
+
+/// 从线路语义 pack 读取单个条目；供 DiskBackedFile 的普通 source/geometry
+/// 读取路径使用。按需只读取指定区间，不把整个 pack 复制到 JS。
+fn read_line_semantic_pack_entry(root: &Path, entry_path: &str) -> Result<Option<Vec<u8>>, String> {
+    let index = read_line_semantic_index(root)?;
+    let key = normalize_cache_lookup_path(entry_path);
+    let Some(entry) = index.get(&key) else { return Ok(None); };
+    let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
+    reject_link(&pack_path, "线路语义 pack")?;
+    let pack_len = stdfs::metadata(&pack_path)
+        .map_err(|e| format!("读取线路语义 pack 元信息失败: {}", e))?
+        .len();
+    let end = entry
+        .offset
+        .checked_add(entry.size)
+        .ok_or_else(|| "线路语义 pack 条目偏移溢出".to_string())?;
+    if end > pack_len {
+        return Err(format!("线路语义 pack 条目越界: {}", entry.path));
+    }
+    let mut file = stdfs::File::open(&pack_path)
+        .map_err(|e| format!("打开线路语义 pack 失败: {}", e))?;
+    use std::io::{Read, Seek, SeekFrom};
+    file.seek(SeekFrom::Start(entry.offset))
+        .map_err(|e| format!("定位线路语义 pack 失败: {}", e))?;
+    let size = usize::try_from(entry.size)
+        .map_err(|_| "线路语义 pack 条目大小超过平台限制".to_string())?;
+    let mut data = vec![0u8; size];
+    file.read_exact(&mut data)
+        .map_err(|e| format!("读取线路语义 pack 条目失败: {}", e))?;
+    Ok(Some(data))
+}
+
+/// 提交一次完整的 staging 解压结果。
+///
+/// Windows 不支持 rename 覆盖目录，因此先把旧 project 目录移到同级 backup，
+/// 再把 staging 目录改名为正式目录；新目录改名失败时尝试恢复 backup。
+pub(crate) fn commit_cache_staging(
+    app_handle: &tauri::AppHandle,
+    project_id: i64,
+    staging_root: &Path,
+) -> Result<(), String> {
+    ensure_cache_project_id(project_id)?;
+    reject_link(staging_root, " staging")?;
+    let base = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?
+        .join("extracted");
+    reject_link(&base, " extracted")?;
+    let final_root = base.join(project_id.to_string());
+    reject_link(&final_root, "缓存")?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let backup = base.join(format!(
+        ".previous-{}-{}-{}",
+        project_id,
+        std::process::id(),
+        stamp
+    ));
+    let had_previous = final_root.exists();
+    if had_previous {
+        stdfs::rename(&final_root, &backup)
+            .map_err(|e| format!("移动旧缓存目录失败: {}", e))?;
+    }
+    if let Err(error) = stdfs::rename(staging_root, &final_root) {
+        if had_previous {
+            let _ = stdfs::rename(&backup, &final_root);
+        }
+        return Err(format!("提交缓存 staging 目录失败: {}", error));
+    }
+    // 旧目录不再参与缓存命中；清理失败不影响新目录的有效性，避免把一
+    // 次成功解压误报成失败。下次可安全清理残留的 .previous-* 目录。
+    if had_previous {
+        let _ = remove_cache_dir_if_safe(&backup, "旧缓存");
+    }
+    Ok(())
+}
+
+pub(crate) fn remove_cache_dir_if_safe(path: &Path, label: &str) -> Result<bool, String> {
     if !path.exists() {
         return Ok(false);
     }
@@ -1377,6 +1783,91 @@ fn is_expected_cache_path(
     Ok(true)
 }
 
+/// 批量读取专用的缓存根目录解析。
+///
+/// `cache_file_path` 为单文件读写提供了最严格的逐次 canonicalize 防护；
+/// 线路语义读取在同一 command 内反复使用同一个 project 根目录，若每条
+/// entry 都重复 canonicalize，会让路径解析本身成为主要耗时。这里先把
+/// 根目录规范化一次，再对每个相对组件做轻量 reparse-point 检查。
+pub(crate) fn cache_project_root_for_batch(
+    app_handle: &tauri::AppHandle,
+    project_id: i64,
+) -> Result<PathBuf, String> {
+    ensure_cache_project_id(project_id)?;
+    let base = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?
+        .join("extracted");
+    if !base.exists() {
+        stdfs::create_dir_all(&base).map_err(|e| format!("创建 extracted 目录失败: {}", e))?;
+    }
+    reject_link(&base, " extracted")?;
+    if !base.is_dir() {
+        return Err(format!("extracted 路径不是目录: {}", base.display()));
+    }
+    let root = base.join(project_id.to_string());
+    if !root.exists() {
+        stdfs::create_dir_all(&root).map_err(|e| format!("创建缓存根目录失败: {}", e))?;
+    }
+    reject_link(&root, "缓存")?;
+    if !root.is_dir() {
+        return Err(format!("缓存根路径不是目录: {}", root.display()));
+    }
+    root.canonicalize()
+        .map_err(|e| format!("规范化缓存根目录失败: {}", e))
+}
+
+/// 在已经 canonicalize 的缓存根目录下解析一条 entry。
+pub(crate) struct BatchCachePathResolver {
+    root: PathBuf,
+    /// 同一批 entry 通常共享 Cbm/Dev/Mod/Phm 等父目录。缓存已经检查过
+    /// 的目录，避免为每个文件重复触发 Windows reparse-point 元数据查询。
+    checked_dirs: HashSet<PathBuf>,
+}
+
+impl BatchCachePathResolver {
+    pub(crate) fn new(root: &Path) -> Result<Self, String> {
+        reject_link(root, "缓存")?;
+        if !root.is_dir() {
+            return Err(format!("缓存根路径不是目录: {}", root.display()));
+        }
+        let mut checked_dirs = HashSet::new();
+        checked_dirs.insert(root.to_path_buf());
+        Ok(Self {
+            root: root.to_path_buf(),
+            checked_dirs,
+        })
+    }
+
+    pub(crate) fn resolve(&mut self, entry_path: &str) -> Result<PathBuf, String> {
+        let relative = validate_entry_path(entry_path)?;
+        let mut current = self.root.clone();
+        for component in relative.parent().unwrap_or_else(|| Path::new("")).components() {
+            let Component::Normal(part) = component else {
+                return Err("缓存 entry_path 父目录组件无效".to_string());
+            };
+            current.push(part);
+            if !current.exists() {
+                continue;
+            }
+            if self.checked_dirs.insert(current.clone()) {
+                reject_link(&current, "")?;
+                if !current.is_dir() {
+                    return Err(format!("缓存路径组件不是目录: {}", current.display()));
+                }
+            }
+        }
+        let full = self.root.join(relative);
+        if !full.starts_with(&self.root) {
+            return Err("缓存路径越界".to_string());
+        }
+        // 文件自身仍逐条检查，避免把 symlink/junction 当作缓存命中。
+        reject_link(&full, "文件")?;
+        Ok(full)
+    }
+}
+
 /// Tauri command：以 Raw IPC 写入缓存文件，避免 Vec<u8> JSON 数字数组膨胀。
 #[tauri::command]
 pub fn write_cache_file_binary(
@@ -1435,7 +1926,20 @@ pub fn read_cached_entry(
         ensure_project_exists(&guard, project_id)?;
     }
     let path = cache_file_path(&app_handle, project_id, &entry_path)?;
-    let bytes = stdfs::read(&path).map_err(|e| format!("读取缓存条目失败: {}", e))?;
+    let bytes = match stdfs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // 线路原生解压会把 parser 文本放入连续 semantic pack，避免数万
+            // 个小文件 open。source/几何查看仍沿用原来的单条 API；只有
+            // pack-backed 条目才在这里按 offset 懒读，普通缓存行为不变。
+            let root = cache_project_root_for_batch(&app_handle, project_id)?;
+            match read_line_semantic_pack_entry(&root, &entry_path)? {
+                Some(bytes) => bytes,
+                None => return Err(format!("读取缓存条目失败: {}", error)),
+            }
+        }
+        Err(error) => return Err(format!("读取缓存条目失败: {}", error)),
+    };
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -1447,58 +1951,32 @@ pub struct BatchCacheFileResult {
     pub bytes: Option<Vec<u8>>,
 }
 
-/// Tauri command：批量读取缓存文件（一次 IPC 替代 N 次 read_cached_ifc）。
-///
-/// 用于缓存命中时批量加载 DEV/PHM/MOD/STL 文件，避免数千次 IPC 往返。
-/// 单个文件读取失败不影响其他文件（对应 item.bytes = null）。
-#[tauri::command]
-pub fn batch_read_cached_files(
-    app_handle: tauri::AppHandle,
-    project_id: i64,
-    entry_paths: Vec<String>,
-) -> Result<tauri::ipc::Response, String> {
-    {
-        let conn = app_handle.state::<DbState>();
-        let guard = conn
-            .0
-            .lock()
-            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        ensure_project_exists(&guard, project_id)?;
-    }
-    if entry_paths.len() > MAX_BATCH_CACHE_FILES {
-        return Err("批量读取缓存文件数量超过安全上限".to_string());
-    }
-    let mut results = Vec::with_capacity(entry_paths.len());
-    let mut total_bytes: u64 = 0;
-    for entry_path in &entry_paths {
-        let path = match cache_file_path(&app_handle, project_id, entry_path) {
-            Ok(p) => p,
-            Err(_) => {
-                results.push(BatchCacheFileResult {
-                    entry_path: entry_path.clone(),
-                    bytes: None,
-                });
-                continue;
-            }
-        };
-        let bytes = stdfs::read(&path).ok();
-        if let Some(ref data) = bytes {
-            total_bytes = total_bytes
-                .checked_add(data.len() as u64)
-                .ok_or_else(|| "批量读取缓存文件总量溢出".to_string())?;
-            if total_bytes > MAX_BATCH_CACHE_BYTES {
-                return Err("批量读取缓存文件总量超过安全上限".to_string());
-            }
-        }
-        results.push(BatchCacheFileResult {
-            entry_path: entry_path.clone(),
-            bytes,
-        });
-    }
+/// 将批量读取结果编码为 GIMR v2 envelope。线路 semantic pack 与普通批量
+/// 文件读取共享此编码器，确保 WebView 端只需维护一套 transferable 解析器。
+fn encode_batch_cache_response(
+    results: Vec<BatchCacheFileResult>,
+    total_bytes: u64,
+    hit_count: u32,
+    read_ms: f64,
+    resolve_ms: f64,
+    total_started: Instant,
+) -> Result<Vec<u8>, String> {
+    const HEADER_SIZE_V2: usize = 57;
+    let encode_started = Instant::now();
     let mut out = Vec::new();
+    out.reserve(HEADER_SIZE_V2);
     out.extend_from_slice(b"GIMR");
-    out.push(1);
-    out.extend_from_slice(&(results.len() as u32).to_le_bytes());
+    out.push(2);
+    let count = u32::try_from(results.len()).map_err(|_| "批量读取结果条目数溢出".to_string())?;
+    out.extend_from_slice(&count.to_le_bytes());
+    out.extend_from_slice(&read_ms.to_le_bytes());
+    out.extend_from_slice(&resolve_ms.to_le_bytes());
+    // encode_ms/total_ms 在所有 item 写入后回填。
+    out.extend_from_slice(&0.0_f64.to_le_bytes());
+    out.extend_from_slice(&0.0_f64.to_le_bytes());
+    out.extend_from_slice(&total_bytes.to_le_bytes());
+    out.extend_from_slice(&hit_count.to_le_bytes());
+    out.extend_from_slice(&count.saturating_sub(hit_count).to_le_bytes());
     for item in results {
         let path = item.entry_path.as_bytes();
         let path_len = u32::try_from(path.len()).map_err(|_| "批量读取路径过长".to_string())?;
@@ -1516,6 +1994,186 @@ pub fn batch_read_cached_files(
             }
         }
     }
+    let encode_ms = encode_started.elapsed().as_secs_f64() * 1000.0;
+    out[25..33].copy_from_slice(&encode_ms.to_le_bytes());
+    let total_ms = total_started.elapsed().as_secs_f64() * 1000.0;
+    out[33..41].copy_from_slice(&total_ms.to_le_bytes());
+    Ok(out)
+}
+
+/// Tauri command：批量读取缓存文件（一次 IPC 替代 N 次 read_cached_ifc）。
+///
+/// 用于缓存命中时批量加载 DEV/PHM/MOD/STL 文件，避免数千次 IPC 往返。
+/// 单个文件读取失败不影响其他文件（对应 item.bytes = null）。
+#[tauri::command]
+pub fn batch_read_cached_files(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_paths: Vec<String>,
+) -> Result<tauri::ipc::Response, String> {
+    let total_started = Instant::now();
+    {
+        let conn = app_handle.state::<DbState>();
+        let guard = conn
+            .0
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        ensure_project_exists(&guard, project_id)?;
+    }
+    if entry_paths.len() > MAX_BATCH_CACHE_FILES {
+        return Err("批量读取缓存文件数量超过安全上限".to_string());
+    }
+    // 同一批次共享 project 根目录；逐条只做相对路径和 reparse-point
+    // 检查，避免重复 app_data_dir/canonicalize 带来的秒级开销。
+    let batch_root = cache_project_root_for_batch(&app_handle, project_id)?;
+    let mut path_resolver = BatchCachePathResolver::new(&batch_root)?;
+    let mut results = Vec::with_capacity(entry_paths.len());
+    let mut total_bytes: u64 = 0;
+    let mut resolve_ms = 0.0_f64;
+    let mut read_ms = 0.0_f64;
+    let mut hit_count: u32 = 0;
+    for entry_path in &entry_paths {
+        let resolve_started = Instant::now();
+        let path = match path_resolver.resolve(entry_path) {
+            Ok(p) => p,
+            Err(_) => {
+                resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
+                results.push(BatchCacheFileResult {
+                    entry_path: entry_path.clone(),
+                    bytes: None,
+                });
+                continue;
+            }
+        };
+        resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
+        let read_started = Instant::now();
+        let bytes = stdfs::read(&path).ok();
+        read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
+        if let Some(ref data) = bytes {
+            hit_count = hit_count.saturating_add(1);
+            total_bytes = total_bytes
+                .checked_add(data.len() as u64)
+                .ok_or_else(|| "批量读取缓存文件总量溢出".to_string())?;
+            if total_bytes > MAX_BATCH_CACHE_BYTES {
+                return Err("批量读取缓存文件总量超过安全上限".to_string());
+            }
+        }
+        results.push(BatchCacheFileResult {
+            entry_path: entry_path.clone(),
+            bytes,
+        });
+    }
+    // GIMR v2：在原有 item 列表前附加 Rust 内部阶段计时。旧 WebView
+    // 仍可解析 v1；新 WebView 只把这些字段写入 perfTimings，不改变业务 Map API。
+    let out = encode_batch_cache_response(
+        results,
+        total_bytes,
+        hit_count,
+        read_ms,
+        resolve_ms,
+        total_started,
+    )?;
+    Ok(tauri::ipc::Response::new(out))
+}
+
+/// Tauri command：一次读取线路语义 pack 中的多个文本条目。
+///
+/// 原生冷启动只为线路 parser 保留一个连续 pack，避免 batch_read_cached_files
+/// 对两万多个 CBM/FAM/DEV 文件逐个 open。索引先在 Rust 侧解析，数据文件只
+/// 打开/读取一次；返回格式仍是 GIMR v2，因此 WebView 的 bytes/阶段埋点可复用。
+#[tauri::command]
+pub fn read_line_semantic_pack(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_paths: Vec<String>,
+) -> Result<tauri::ipc::Response, String> {
+    let total_started = Instant::now();
+    {
+        let conn = app_handle.state::<DbState>();
+        let guard = conn
+            .0
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        ensure_project_exists(&guard, project_id)?;
+    }
+    if entry_paths.len() > MAX_BATCH_CACHE_FILES {
+        return Err("线路语义 pack 读取条目数超过安全上限".to_string());
+    }
+    let root = cache_project_root_for_batch(&app_handle, project_id)?;
+    let read_started = Instant::now();
+    let index = read_line_semantic_index(&root)?;
+    let pack_path = root.join(LINE_SEMANTIC_PACK_FILE);
+    reject_link(&pack_path, "线路语义 pack")?;
+    let pack_len = stdfs::metadata(&pack_path)
+        .map_err(|e| format!("读取线路语义 pack 元信息失败: {}", e))?
+        .len();
+    if pack_len > MAX_LINE_SEMANTIC_PACK_BYTES {
+        return Err(format!(
+            "线路语义 pack 大小超过安全上限（>{} bytes）",
+            MAX_LINE_SEMANTIC_PACK_BYTES
+        ));
+    }
+    // 只打开一次 pack，并按索引区间读取请求项；不要把整个 pack 复制到
+    // Rust 堆再切片。正常请求按 manifest 顺序到达，读取仍接近顺序 IO；
+    // 即使请求顺序被调用方改变，也只产生 seek，不会增加 IPC 次数或峰值内存。
+    let mut pack_file = stdfs::File::open(&pack_path)
+        .map_err(|e| format!("打开线路语义 pack 失败: {}", e))?;
+
+    let mut results = Vec::with_capacity(entry_paths.len());
+    let mut total_bytes: u64 = 0;
+    let mut hit_count: u32 = 0;
+    let mut resolve_ms = 0.0_f64;
+    for requested_path in &entry_paths {
+        let resolve_started = Instant::now();
+        let resolved = validate_entry_path(requested_path)
+            .ok()
+            .and_then(|_| index.get(&normalize_cache_lookup_path(requested_path)));
+        resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
+        let bytes = if let Some(entry) = resolved {
+            let end = entry
+                .offset
+                .checked_add(entry.size)
+                .ok_or_else(|| format!("线路语义 pack 条目偏移溢出: {}", requested_path))?;
+            if end > pack_len {
+                return Err(format!("线路语义 pack 条目越界: {}", requested_path));
+            }
+            let start = usize::try_from(entry.offset)
+                .map_err(|_| "线路语义 pack 条目偏移超过平台限制".to_string())?;
+            let end = usize::try_from(end)
+                .map_err(|_| "线路语义 pack 条目末端超过平台限制".to_string())?;
+            let mut data = vec![0u8; end - start];
+            use std::io::{Read, Seek, SeekFrom};
+            pack_file
+                .seek(SeekFrom::Start(entry.offset))
+                .map_err(|e| format!("定位线路语义 pack 失败: {} — {}", requested_path, e))?;
+            pack_file
+                .read_exact(&mut data)
+                .map_err(|e| format!("读取线路语义 pack 条目失败: {} — {}", requested_path, e))?;
+            hit_count = hit_count.saturating_add(1);
+            total_bytes = total_bytes
+                .checked_add(data.len() as u64)
+                .ok_or_else(|| "线路语义 pack 读取总量溢出".to_string())?;
+            if total_bytes > MAX_BATCH_CACHE_BYTES {
+                return Err("线路语义 pack 读取总量超过安全上限".to_string());
+            }
+            Some(data)
+        } else {
+            None
+        };
+        results.push(BatchCacheFileResult {
+            entry_path: requested_path.clone(),
+            bytes,
+        });
+    }
+    let read_ms = read_started.elapsed().as_secs_f64() * 1000.0;
+    let out = encode_batch_cache_response(
+        results,
+        total_bytes,
+        hit_count,
+        read_ms,
+        resolve_ms,
+        total_started,
+    )?;
     Ok(tauri::ipc::Response::new(out))
 }
 
@@ -5377,5 +6035,43 @@ mod tests {
             rows[0].placement_transform_matrix.as_deref(),
             Some("1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,100.000000,0.000000,0.000000,1.000000")
         );
+    }
+
+    #[test]
+    fn line_semantic_pack_round_trip_is_contiguous_and_case_insensitive() {
+        let root = std::env::temp_dir().join(format!(
+            "gim-viewer-semantic-pack-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut writer = LineSemanticPackWriter::new(&root).unwrap();
+        writer
+            .append_with_timing("Cbm/project.cbm", b"A=B")
+            .unwrap();
+        writer
+            .append_with_timing("Dev/item.dev", b"C=D")
+            .unwrap();
+        let entries = writer.finish().unwrap();
+        assert_eq!(entries[0].offset, 0);
+        assert_eq!(entries[0].size, 3);
+        assert_eq!(entries[1].offset, 3);
+
+        let index = read_line_semantic_index(&root).unwrap();
+        let first = index.get("cbm/project.cbm").unwrap();
+        assert_eq!(first.path, "Cbm/project.cbm");
+        let first_bytes = read_line_semantic_pack_entry(
+            &root,
+            "CBM\\PROJECT.CBM",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(first_bytes, b"A=B");
+        let pack = std::fs::read(root.join(LINE_SEMANTIC_PACK_FILE)).unwrap();
+        assert_eq!(pack, b"A=BC=D");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -65,6 +65,22 @@ export interface PerfLongTaskStats {
   maxMs: number;
 }
 
+/** Rust batch_read_cached_files 的内部阶段统计（不含 WebView IPC 往返）。 */
+export interface PerfBatchReadStats {
+  count: number;
+  requestedEntries: number;
+  hitEntries: number;
+  missEntries: number;
+  bytes: number;
+  totalReadMs: number;
+  totalResolveMs: number;
+  totalEncodeMs: number;
+  totalMs: number;
+  p50Ms: number;
+  p95Ms: number;
+  maxMs: number;
+}
+
 interface InvokeAccumulator {
   count: number;
   bytes: number;
@@ -82,6 +98,32 @@ let currentSession: PerfSession = { id: 0 };
 let spans: PerfSpan[] = [];
 const invokeStats = new Map<string, InvokeAccumulator>();
 let longTaskStats: PerfLongTaskStats = { count: 0, totalBlockingTimeMs: 0, maxMs: 0 };
+interface BatchReadAccumulator {
+  count: number;
+  requestedEntries: number;
+  hitEntries: number;
+  missEntries: number;
+  bytes: number;
+  totalReadMs: number;
+  totalResolveMs: number;
+  totalEncodeMs: number;
+  totalMs: number;
+  maxMs: number;
+  durations: number[];
+}
+let batchReadStats: BatchReadAccumulator = {
+  count: 0,
+  requestedEntries: 0,
+  hitEntries: 0,
+  missEntries: 0,
+  bytes: 0,
+  totalReadMs: 0,
+  totalResolveMs: 0,
+  totalEncodeMs: 0,
+  totalMs: 0,
+  maxMs: 0,
+  durations: [],
+};
 let longTaskObserver: PerformanceObserver | null = null;
 let longTaskObserverEnabled = false;
 
@@ -91,6 +133,19 @@ function cloneSession(session: PerfSession): PerfSession {
 
 /** 当前性能会话快照。异步任务应在启动时捕获并在写入时传回。 */
 export function perfCurrentSession(): PerfSession {
+  return cloneSession(currentSession);
+}
+
+/**
+ * 更新当前性能会话的工程身份，但不清空已经采集的 span。
+ *
+ * 打开 GIM 时，文件信息/缓存校验发生在拿到 SQLite project_id 之前；如果
+ * 此处再次调用 perfReset，会把冷启动前半段（尤其是原生解压前的准备时间）
+ * 丢掉。身份更新仍然保留同一个 session id，因此在途旧任务继续受到原有
+ * session 隔离规则保护。
+ */
+export function perfUpdateSessionIdentity(identity: PerfSessionIdentity): PerfSession {
+  currentSession = { ...currentSession, ...identity };
   return cloneSession(currentSession);
 }
 
@@ -109,6 +164,19 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
   sessionStartMs = performance.now();
   spans = [];
   invokeStats.clear();
+  batchReadStats = {
+    count: 0,
+    requestedEntries: 0,
+    hitEntries: 0,
+    missEntries: 0,
+    bytes: 0,
+    totalReadMs: 0,
+    totalResolveMs: 0,
+    totalEncodeMs: 0,
+    totalMs: 0,
+    maxMs: 0,
+    durations: [],
+  };
   longTaskStats = { count: 0, totalBlockingTimeMs: 0, maxMs: 0 };
   // PerformanceObserver 回调可能在旧工程 reset 后才到达。重建 observer，
   // 让回调闭包绑定新 session id，避免旧 Long Task 计入新工程。
@@ -219,6 +287,55 @@ export function perfInvokeSnapshot(): PerfInvokeCommandStats[] {
     }));
 }
 
+/** 记录 Rust batch_read_cached_files v2 的内部阶段计时。 */
+export function perfRecordBatchRead(
+  profile: {
+    readMs: number;
+    resolveMs: number;
+    encodeMs: number;
+    totalMs: number;
+    bytes: number;
+    entryCount: number;
+    hitCount: number;
+  },
+  sessionId: number = currentSession.id,
+): void {
+  if (sessionId !== currentSession.id) return;
+  const safe = (value: number): number => Number.isFinite(value) && value >= 0 ? value : 0;
+  const totalMs = safe(profile.totalMs);
+  const entryCount = Math.max(0, Math.floor(safe(profile.entryCount)));
+  const hitCount = Math.min(entryCount, Math.max(0, Math.floor(safe(profile.hitCount))));
+  batchReadStats.count += 1;
+  batchReadStats.requestedEntries += entryCount;
+  batchReadStats.hitEntries += hitCount;
+  batchReadStats.missEntries += entryCount - hitCount;
+  batchReadStats.bytes += safe(profile.bytes);
+  batchReadStats.totalReadMs += safe(profile.readMs);
+  batchReadStats.totalResolveMs += safe(profile.resolveMs);
+  batchReadStats.totalEncodeMs += safe(profile.encodeMs);
+  batchReadStats.totalMs += totalMs;
+  batchReadStats.maxMs = Math.max(batchReadStats.maxMs, totalMs);
+  batchReadStats.durations.push(totalMs);
+}
+
+/** 供诊断 JSON / 性能报告使用的 batch 内部统计。 */
+export function perfBatchReadSnapshot(): PerfBatchReadStats {
+  return {
+    count: batchReadStats.count,
+    requestedEntries: batchReadStats.requestedEntries,
+    hitEntries: batchReadStats.hitEntries,
+    missEntries: batchReadStats.missEntries,
+    bytes: Math.round(batchReadStats.bytes),
+    totalReadMs: Math.round(batchReadStats.totalReadMs * 100) / 100,
+    totalResolveMs: Math.round(batchReadStats.totalResolveMs * 100) / 100,
+    totalEncodeMs: Math.round(batchReadStats.totalEncodeMs * 100) / 100,
+    totalMs: Math.round(batchReadStats.totalMs * 100) / 100,
+    p50Ms: Math.round(percentile(batchReadStats.durations, 0.5) * 100) / 100,
+    p95Ms: Math.round(percentile(batchReadStats.durations, 0.95) * 100) / 100,
+    maxMs: Math.round(batchReadStats.maxMs * 100) / 100,
+  };
+}
+
 /**
  * 启用 WebView Long Task 统计。浏览器/测试环境没有 PerformanceObserver 时
  * 安全降级为 no-op。返回的函数只停止 observer，不清空当前快照。
@@ -287,6 +404,7 @@ export function perfSnapshot(): {
   session: PerfSession;
   spans: PerfSpan[];
   invokes: PerfInvokeCommandStats[];
+  batchReads: PerfBatchReadStats;
   longTasks: PerfLongTaskStats;
 } {
   return {
@@ -296,6 +414,7 @@ export function perfSnapshot(): {
     session: perfCurrentSession(),
     spans: spans.slice(),
     invokes: perfInvokeSnapshot(),
+    batchReads: perfBatchReadSnapshot(),
     longTasks: perfLongTaskSnapshot(),
   };
 }
@@ -303,8 +422,9 @@ export function perfSnapshot(): {
 /** 人类可读摘要（对齐文本表） */
 export function perfSummary(): string {
   const invokes = perfInvokeSnapshot();
+  const batchReads = perfBatchReadSnapshot();
   const longTasks = perfLongTaskSnapshot();
-  if (spans.length === 0 && invokes.length === 0 && longTasks.count === 0) return '(无性能埋点数据)';
+  if (spans.length === 0 && invokes.length === 0 && batchReads.count === 0 && longTasks.count === 0) return '(无性能埋点数据)';
   const lines = ['阶段耗时（相对会话起点）:', '─'.repeat(64)];
   for (const s of spans) {
     const dur = s.durationMs > 0 ? `${Math.round(s.durationMs)}ms`.padEnd(8) : '  事件 ';
@@ -316,6 +436,9 @@ export function perfSummary(): string {
     const measured = invokes.reduce((sum, item) => sum + item.bytes, 0);
     const unmeasured = invokes.reduce((sum, item) => sum + item.unmeasuredCalls, 0);
     lines.push(`Tauri IPC: ${invokes.reduce((sum, item) => sum + item.count, 0)} 次, ${Math.round(measured)} B${unmeasured > 0 ? `（${unmeasured} 次字节未测量）` : ''}`);
+  }
+  if (batchReads.count > 0) {
+    lines.push(`Batch Rust: ${batchReads.count} 批, ${batchReads.requestedEntries} 条（命中 ${batchReads.hitEntries}）, ${Math.round(batchReads.bytes)} B, read ${Math.round(batchReads.totalReadMs)}ms, encode ${Math.round(batchReads.totalEncodeMs)}ms, total ${Math.round(batchReads.totalMs)}ms`);
   }
   lines.push(`Long Task: ${longTasks.count} 次, blocking ${Math.round(longTasks.totalBlockingTimeMs)}ms, max ${Math.round(longTasks.maxMs)}ms`);
   return lines.join('\n');

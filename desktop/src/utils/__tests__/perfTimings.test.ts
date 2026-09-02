@@ -5,12 +5,14 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import {
   perfReset,
+  perfUpdateSessionIdentity,
   perfBegin,
   perfMark,
   perfSnapshot,
   perfSummary,
   perfCurrentSession,
   perfRecordInvoke,
+  perfRecordBatchRead,
   installLongTaskObserver,
   perfLongTaskSnapshot,
 } from '../perfTimings.js';
@@ -61,6 +63,20 @@ describe('perfTimings', () => {
     expect(perfSnapshot().totalMs).toBeGreaterThanOrEqual(0);
   });
 
+  it('更新工程身份时保留同一性能会话及既有冷启动 span', () => {
+    const initial = perfCurrentSession();
+    perfMark('冷启动：读取 GIM 文件信息', { bytes: 123 }, initial);
+    const updated = perfUpdateSessionIdentity({
+      generation: 8,
+      projectId: 42,
+      sourceSha256: 'sha-42',
+    });
+    const snapshot = perfSnapshot();
+    expect(updated.id).toBe(initial.id);
+    expect(snapshot.session).toMatchObject({ id: initial.id, generation: 8, projectId: 42, sourceSha256: 'sha-42' });
+    expect(snapshot.spans.map((span) => span.label)).toContain('冷启动：读取 GIM 文件信息');
+  });
+
   it('旧性能会话的迟到 span 不会写入新会话', () => {
     const oldSession = perfCurrentSession();
     const end = perfBegin('旧工程异步阶段', undefined, oldSession);
@@ -79,6 +95,57 @@ describe('perfTimings', () => {
     perfRecordInvoke('read_cached_entry', 30, 300, sessionId, true);
     const item = perfSnapshot().invokes.find((entry) => entry.command === 'read_cached_entry');
     expect(item).toMatchObject({ count: 3, bytes: 600, failures: 1, totalMs: 60, p50Ms: 20, p95Ms: 30, maxMs: 30 });
+  });
+
+  it('batch Rust 内部计时按 session 隔离并汇总命中/字节', () => {
+    const oldSession = perfCurrentSession();
+    perfRecordBatchRead({
+      readMs: 4,
+      resolveMs: 1,
+      encodeMs: 2,
+      totalMs: 8,
+      bytes: 1024,
+      entryCount: 4,
+      hitCount: 3,
+    }, oldSession.id);
+    perfReset({ generation: 2 });
+    perfRecordBatchRead({
+      readMs: 5,
+      resolveMs: 1,
+      encodeMs: 1,
+      totalMs: 9,
+      bytes: 2048,
+      entryCount: 2,
+      hitCount: 2,
+    }, oldSession.id);
+    const snapshot = perfSnapshot().batchReads;
+    expect(snapshot).toMatchObject({
+      count: 0,
+      requestedEntries: 0,
+      hitEntries: 0,
+      bytes: 0,
+    });
+    const current = perfCurrentSession();
+    perfRecordBatchRead({
+      readMs: 5,
+      resolveMs: 1,
+      encodeMs: 1,
+      totalMs: 9,
+      bytes: 2048,
+      entryCount: 2,
+      hitCount: 2,
+    }, current.id);
+    expect(perfSnapshot().batchReads).toMatchObject({
+      count: 1,
+      requestedEntries: 2,
+      hitEntries: 2,
+      missEntries: 0,
+      bytes: 2048,
+      totalReadMs: 5,
+      totalResolveMs: 1,
+      totalEncodeMs: 1,
+      totalMs: 9,
+    });
   });
 
   it('Long Task 统计 blocking time，旧 observer 回调不污染新会话', () => {

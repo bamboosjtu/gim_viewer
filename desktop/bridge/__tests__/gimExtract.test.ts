@@ -48,6 +48,7 @@ describe('parseExtractionPayload', () => {
     const manifest = enc.encode(JSON.stringify({
       magic: 'GIMPKGS',
       project_id: 'header-project',
+      profile: { totalMs: 12.5, archiveMs: 11.2, headerMs: 0.3, decodeMs: 7.1, writeMs: 3.4, manifestMs: 0.2, commitMs: 0.5, writeMode: 'staging-directory', archiveBytes: 99, entryCount: 1, totalBytes: 123, maxEntryWriteMs: 3.4, maxEntryWritePath: 'DEV/model.ifc', maxEntryDecodeMs: 7.1, maxEntryDecodePath: 'DEV/model.ifc' },
       entries: [{ path: 'DEV/model.ifc', offset: 0, size: 123, cache_path: 'C:/cache/model.ifc' }],
     }));
     const out = new Uint8Array(4 + manifest.length);
@@ -59,6 +60,28 @@ describe('parseExtractionPayload', () => {
     expect(result.cacheProjectId).toBe(7);
     expect(file.size).toBe(123);
     expect(result.cachePaths.get('DEV/model.ifc')).toBe('C:/cache/model.ifc');
+    expect(result.extractionProfile?.entryCount).toBe(1);
+    expect(result.extractionProfile?.writeMs).toBe(3.4);
+    expect(result.extractionProfile?.commitMs).toBe(0.5);
+    expect(result.extractionProfile?.writeMode).toBe('staging-directory');
+  });
+
+  it('线路 semantic pack 条目允许省略单文件 cache_path，并标记为 pack-backed', () => {
+    const enc = new TextEncoder();
+    const manifest = enc.encode(JSON.stringify({
+      magic: 'GIMPKGT',
+      semantic_pack_path: '.gim-line-semantic.pack',
+      entries: [{ path: 'Cbm/project.cbm', offset: 0, size: 8, semantic_pack_offset: 0 }],
+    }));
+    const out = new Uint8Array(4 + manifest.length);
+    new DataView(out.buffer).setUint32(0, manifest.length, true);
+    out.set(manifest, 4);
+
+    const result = parseExtractionPayload(out.buffer, { cacheProjectId: 11 });
+    expect(result.semanticPackPath).toBe('.gim-line-semantic.pack');
+    const file = result.files.get('Cbm/project.cbm') as File & { __gimSemanticPackBacked?: boolean };
+    expect(file.__gimSemanticPackBacked).toBe(true);
+    expect(result.cachePaths.size).toBe(0);
   });
 
   it('延迟 File 的 slice 遵循 Blob 边界语义', async () => {

@@ -13,9 +13,17 @@ import { isTauri } from '@desktop/runtime.js';
 import { openGimFilePath } from '@desktop/fileDialog.js';
 import { DEBUG_IFC_LOAD, DEBUG_GIM_CACHE, DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
-import { perfReset, perfCurrentSession, perfBegin, perfMark, type PerfSession } from '../utils/perfTimings.js';
+import {
+  perfReset,
+  perfCurrentSession,
+  perfUpdateSessionIdentity,
+  perfBegin,
+  perfMark,
+  type PerfSession,
+} from '../utils/perfTimings.js';
 import { pushBusy, popBusy } from '../ui/shell/statusBar.js';
 import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBar.js';
+import type { NativeExtractionProfile } from '@desktop/gimExtract.js';
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; pushBusy(text); }
 function hideLoading() { loadingEl.style.display = 'none'; popBusy('就绪'); }
@@ -43,6 +51,36 @@ function getDevPerformanceFilePath(): string | null {
   if (!import.meta.env.DEV) return null;
   const value = (globalThis as { __GIM_DEV_PERF_FILE_PATH__?: unknown }).__GIM_DEV_PERF_FILE_PATH__;
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/**
+ * 线路性能采集的开发期覆盖项。
+ *
+ * 这些值只从 DEV WebView 的 globalThis 读取，生产构建中的分支会被 Vite
+ * 常量折叠掉。这样可以在同一个真实 Tauri WebView 中做 catenary 与 batch
+ * 规模 A/B，而不会把实验开关暴露成用户可配置的产品行为。
+ */
+function getDevLineBatchOptions(): { maxFiles?: number; maxBytes?: number } {
+  if (!import.meta.env.DEV) return {};
+  const globals = globalThis as {
+    __GIM_DEV_LINE_BATCH_MAX_FILES__?: unknown;
+    __GIM_DEV_LINE_BATCH_MAX_BYTES__?: unknown;
+  };
+  const asPositiveInt = (value: unknown): number | undefined => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+    const integer = Math.floor(value);
+    return integer > 0 ? integer : undefined;
+  };
+  return {
+    maxFiles: asPositiveInt(globals.__GIM_DEV_LINE_BATCH_MAX_FILES__),
+    maxBytes: asPositiveInt(globals.__GIM_DEV_LINE_BATCH_MAX_BYTES__),
+  };
+}
+
+function getDevLineCatenaryMode(): boolean | undefined {
+  if (!import.meta.env.DEV) return undefined;
+  const value = (globalThis as { __GIM_DEV_CATENARY_MODE__?: unknown }).__GIM_DEV_CATENARY_MODE__;
+  return typeof value === 'boolean' ? value : undefined;
 }
 
 /** 创建统一的节点点击回调 */
@@ -596,6 +634,7 @@ async function openGimFromArrayBuffer(
     projectName?: string;
     projectId?: string;
     nativeExtractionMs?: number;
+    extractionProfile?: NativeExtractionProfile;
     cachePaths?: Map<string, string>;
   },
 ): Promise<void> {
@@ -621,11 +660,23 @@ async function openGimFromArrayBuffer(
     };
     projectName = resolveProjectName(preExtracted.projectName, preExtracted.projectId, fileName);
   } else {
-    perfReset({
-      generation: requestGeneration,
-      projectId: options?.projectId ?? null,
-      sourceSha256: options?.sourceSha256 ?? null,
-    });
+    // Tauri fallback（WASM）和浏览器路径都已经在打开请求入口处建立了
+    // 性能 session。只更新身份，不重置起点，保留“文件读取/解压模块/
+    // 解压”这些冷启动前半段 span；若调用方没有同一代次的 session，
+    // 再建立一个新的会话作为安全兜底。
+    const currentPerf = perfCurrentSession();
+    if (currentPerf.generation === requestGeneration) {
+      perfUpdateSessionIdentity({
+        projectId: options?.projectId ?? null,
+        sourceSha256: options?.sourceSha256 ?? null,
+      });
+    } else {
+      perfReset({
+        generation: requestGeneration,
+        projectId: options?.projectId ?? null,
+        sourceSha256: options?.sourceSha256 ?? null,
+      });
+    }
     perfSession = perfCurrentSession();
     const endExtract = perfBegin('解压', undefined, perfSession);
     showLoading('正在加载 GIM 解压模块...');
@@ -640,8 +691,9 @@ async function openGimFromArrayBuffer(
     endExtract('（首开）', { files: extracted.size });
   }
 
-  // native preExtracted 路径在 openGimWithDialog 中已 reset；浏览器/WASM
-  // 路径在上方 reset。此时 perfSession 已是本次流程的 immutable 快照。
+  // native preExtracted 路径和 Tauri WASM 回退路径都沿用打开请求入口处的
+  // 性能 session；浏览器路径也只在没有同代 session 时新建。此时
+  // perfSession 已是本次流程的 immutable 快照。
 
   if (!requestIsCurrent()) return;
 
@@ -655,6 +707,14 @@ async function openGimFromArrayBuffer(
 
   // 清理完成后再激活新工程身份；所有后续异步任务都以该快照为边界。
   const session = state.activateProject(options?.projectId ?? null, options?.sourceSha256 ?? null);
+  // cleanup 会递增 projectGeneration；将性能会话身份同步到真正激活的
+  // session，但不要重置起点，否则会再次丢失冷启动解压和前置检查耗时。
+  perfUpdateSessionIdentity({
+    generation: session.generation,
+    projectId: session.projectId,
+    sourceSha256: session.sourceSha256,
+  });
+  perfSession = perfCurrentSession();
   // 两类工程共用工程身份；线路分支不会经过 onGimExtracted，必须在类型
   // 分支之前写入 state，避免导航树回退到“未命名线路”。
   state.projectName = projectName;
@@ -704,7 +764,9 @@ async function openGimFromArrayBuffer(
     showLoading('正在批量读取线路 CBM/FAM/DEV 文件...');
     const endInput = perfBegin('线路解析输入', undefined, perfSession);
     const { readLineParserInput } = await import('./lineParserInput.js');
+    const lineBatchOptions = getDevLineBatchOptions();
     const parserInput = await readLineParserInput(extracted, session.projectId, {
+      ...lineBatchOptions,
       isCurrent: () => state.isCurrentSession(session),
     });
     if (parserInput.cancelled || !state.isCurrentSession(session)) return;
@@ -713,6 +775,11 @@ async function openGimFromArrayBuffer(
       requested: parserInput.requested,
       bytes: parserInput.bytes,
       batches: parserInput.batches,
+      semanticPackReads: parserInput.semanticPackReads,
+      skippedLargeModFiles: parserInput.skippedLargeModFiles,
+      skippedLargeModBytes: parserInput.skippedLargeModBytes,
+      maxFiles: lineBatchOptions.maxFiles ?? 1024,
+      maxBytes: lineBatchOptions.maxBytes ?? 8 * 1024 * 1024,
     });
     showLoading('正在后台解析线路 CBM 与属性...');
     const endGraph = perfBegin('线路图构建+属性解析', undefined, perfSession);
@@ -752,74 +819,92 @@ async function openGimFromArrayBuffer(
       dev_properties: attrResult.devPayloads,
     }, state);
 
-    // v5: 首次导入 → 解析 FAM/DEV 属性 → 统一事务写入缓存 → 恢复到 state → 渲染面板
-    // 顺序：extract → detect → buildLineGimGraph → parseLineAttributes
-    //       → save_line_graph_begin → attrs chunks → save_line_project_finish → restore attrs → render
+    // v5: 首次导入 → 解析 FAM/DEV 属性 → 恢复到 state → 渲染面板。
     // 注意：render 必须在 restore attrs 之后，否则 extractLineMapData 拿不到
-    //       FAM/DEV 属性，塔位编号/塔型/呼高/转角等 tooltip 字段会缺失
+    //       FAM/DEV 属性，塔位编号/塔型/呼高/转角等 tooltip 字段会缺失。
+    // SQLite 事务写入移到首帧之后，避免数万节点/属性的 JSON + IPC 把“可交互”
+    // 阻塞数秒；save_line_project_finish 仍是缓存提交点，写入失败不会把
+    // 半成品标记为有效缓存。
     if (options?.persistIndex && options.projectId != null && isTauri()) {
-      try {
-        showLoading('正在准备线路缓存数据...');
-        const { estimatePayloadSizeMB } = await import('./lineAttrPersistenceService.js');
-        const { buildLineGraphPayload } = await import('./lineGraphPersistenceService.js');
-        const { saveLineProjectCache } = await import('@desktop/database.js');
-
-        const graphPayload = buildLineGraphPayload(options.projectId, graph, session.sourceSha256);
-
-        // 性能日志：payload 统计 + 风险评估
-        const graphPayloadJson = JSON.stringify(graphPayload);
-        const graphPayloadBytes = new TextEncoder().encode(graphPayloadJson).byteLength;
-        const estimatedMB = estimatePayloadSizeMB(
-          graphPayloadJson,
-          attrResult.famPayloads,
-          attrResult.devPayloads,
-        );
-        debugLog(DEBUG_GIM_CACHE, '[LineCache] 线路入库 payload 统计:', {
-          nodes: graphPayload.nodes.length,
-          children: graphPayload.children.length,
-          refs: graphPayload.refs.length,
-          fam_props: attrResult.famPayloads.length,
-          dev_props: attrResult.devPayloads.length,
-          estimatedJsonSizeMB: Math.round(estimatedMB * 100) / 100,
-        });
-        if (estimatedMB > 50) {
-          console.warn(
-            `[LineCache] payload 较大 (${Math.round(estimatedMB * 100) / 100} MB)，一次性 invoke 可能较慢`,
-          );
-        }
-
-        showLoading('正在写入线路工程缓存...');
-        const endSave = perfBegin('线路 SQLite 入库', undefined, perfSession);
-        const t0 = performance.now();
-        if (!state.isCurrentSession(session)) return;
-        await saveLineProjectCache(
-          options.projectId,
-          graphPayload,
-          attrResult.famPayloads,
-          attrResult.devPayloads,
-          (done, total) => {
-            if (total > 0) {
-              showLoading(`正在写入线路工程缓存... (${Math.round((done / total) * 100)}%)`);
-            }
-          },
-          session.sourceSha256,
-          graphPayloadBytes,
-        );
-        if (!state.isCurrentSession(session)) return;
-        const elapsedMs = Math.round(performance.now() - t0);
-        endSave(undefined, { ms: elapsedMs });
-        debugLog(DEBUG_GIM_CACHE, '[LineCache] save_line_project_cache 完成，耗时', elapsedMs, 'ms');
-
-      } catch (err) {
-        console.error('[Tauri] 线路工程缓存写入失败:', err);
+      if (import.meta.env.DEV) {
+        // 真实 Tauri 性能采集需要知道后台入库何时完成，才能在诊断快照中
+        // 同时看到该 span，并避免下一次 cold run 删除缓存时与旧写入交错。
+        (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = false;
       }
+      const persistLineCache = async (): Promise<void> => {
+        if (!state.isCurrentSession(session)) return;
+        try {
+          const { estimatePayloadSizeMB } = await import('./lineAttrPersistenceService.js');
+          const { buildLineGraphPayload } = await import('./lineGraphPersistenceService.js');
+          const { saveLineProjectCache } = await import('@desktop/database.js');
+          if (!state.isCurrentSession(session)) return;
+
+          const graphPayload = buildLineGraphPayload(options.projectId!, graph, session.sourceSha256);
+
+          // 性能日志：payload 统计 + 风险评估。graphPayloadJson 同时作为
+          // invokeTimed 的已知 requestBytes，避免监控再次 JSON.stringify。
+          const graphPayloadJson = JSON.stringify(graphPayload);
+          const graphPayloadBytes = new TextEncoder().encode(graphPayloadJson).byteLength;
+          const estimatedMB = estimatePayloadSizeMB(
+            graphPayloadJson,
+            attrResult.famPayloads,
+            attrResult.devPayloads,
+          );
+          debugLog(DEBUG_GIM_CACHE, '[LineCache] 线路后台入库 payload 统计:', {
+            nodes: graphPayload.nodes.length,
+            children: graphPayload.children.length,
+            refs: graphPayload.refs.length,
+            fam_props: attrResult.famPayloads.length,
+            dev_props: attrResult.devPayloads.length,
+            estimatedJsonSizeMB: Math.round(estimatedMB * 100) / 100,
+          });
+          if (estimatedMB > 50) {
+            console.warn(
+              `[LineCache] payload 较大 (${Math.round(estimatedMB * 100) / 100} MB)，后台一次性 invoke 可能较慢`,
+            );
+          }
+
+          const endSave = perfBegin('线路 SQLite 入库（后台）', undefined, perfSession);
+          const t0 = performance.now();
+          if (!state.isCurrentSession(session)) return;
+          await saveLineProjectCache(
+            options.projectId!,
+            graphPayload,
+            attrResult.famPayloads,
+            attrResult.devPayloads,
+            undefined,
+            session.sourceSha256,
+            graphPayloadBytes,
+          );
+          if (!state.isCurrentSession(session)) return;
+          const elapsedMs = Math.round(performance.now() - t0);
+          endSave(undefined, { ms: elapsedMs, background: true });
+          debugLog(DEBUG_GIM_CACHE, '[LineCache] 后台 save_line_project_cache 完成，耗时', elapsedMs, 'ms');
+        } catch (err) {
+          // 工程切换后的旧任务不应在新工程控制台制造错误噪声。
+          if (state.isCurrentSession(session)) {
+            console.error('[Tauri] 线路工程缓存后台写入失败:', err);
+          }
+        } finally {
+          if (import.meta.env.DEV && state.isCurrentSession(session)) {
+            (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
+          }
+        }
+      };
+      // 让浏览器先完成首帧绘制并返回可交互状态，再开始 JSON/SQLite IPC。
+      window.setTimeout(() => { void persistLineCache(); }, 0);
+    } else if (import.meta.env.DEV) {
+      (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
     }
 
     // 渲染面板（在属性恢复之后，确保地图 tooltip/标签有完整 FAM/DEV 属性）
     if (!state.isCurrentSession(session)) return;
     const endRender = perfBegin('线路面板+地图渲染', undefined, perfSession);
     const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
-    renderLineProjectPanels(state, graph, showMessage);
+    renderLineProjectPanels(state, graph, showMessage, {
+      perfSession,
+      enableCatenary: getDevLineCatenaryMode(),
+    });
     endRender();
     perfMark('线路工程可交互', undefined, perfSession);
 
@@ -1014,29 +1099,42 @@ export async function openGimWithDialog(
     // 性能会话也必须在请求开始的同步边界失效；否则旧工程的迟到 invoke/span
     // 可能在缓存校验或原生解压期间继续写入上一会话。
     perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
+    const requestPerfSession = perfCurrentSession();
     btnLoadGim.disabled = true;
     try {
       // 2. FileInfo + 缓存校验（无 3D 依赖）
       showLoading('正在读取 GIM 文件信息...');
       const { getFileInfo, readFileBytes } = await import('@desktop/fileReader.js');
+      const endFileInfo = perfBegin('冷启动：读取 GIM 文件信息', undefined, requestPerfSession);
       const info = await getFileInfo(filePath);
       if (state.projectGeneration !== requestGeneration) return;
+      endFileInfo(undefined, { bytes: info.size });
       debugLog(DEBUG_GIM_CACHE, '[Tauri] GIM 文件信息:', info);
       showLoading('正在写入本地项目索引...');
       const { upsertGimProject, validateGimCache, getGimIndex } = await import('@desktop/database.js');
+      const endUpsert = perfBegin('冷启动：项目索引登记', undefined, requestPerfSession);
       const record = await upsertGimProject(info);
       if (state.projectGeneration !== requestGeneration) return;
+      endUpsert(undefined, { projectId: record.id });
+      perfUpdateSessionIdentity({ projectId: record.id, sourceSha256: record.sha256 });
       debugLog(DEBUG_GIM_CACHE, '[Tauri] GIM 项目记录:', record);
 
       showLoading('正在检查本地缓存...');
+      const endValidate = perfBegin('冷启动：缓存校验', undefined, requestPerfSession);
       const validation = await validateGimCache(record.id);
       if (state.projectGeneration !== requestGeneration) return;
+      endValidate(undefined, { valid: validation.valid, type: validation.project_type ?? null });
       debugLog(DEBUG_GIM_CACHE, '[Tauri] GIM 缓存校验:', validation);
 
       // 3. 缓存命中短路：不 readFileBytes、不 extractGimFile、不创建 Viewer
       if (validation.valid) {
         try {
-          perfReset({ generation: requestGeneration, projectId: record.id, sourceSha256: record.sha256 });
+          // 保留文件信息/项目登记/缓存校验 span；这里仅同步最终工程身份。
+          perfUpdateSessionIdentity({
+            generation: requestGeneration,
+            projectId: record.id,
+            sourceSha256: record.sha256,
+          });
           const perfSession = perfCurrentSession();
           // 清空上一次 GIM 的状态，避免残留
           // 统一走 cleanupBeforeOpenNewProject：销毁线路地图 + dispose 旧 fragments 模型 +
@@ -1072,7 +1170,10 @@ export async function openGimWithDialog(
 
             const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
             const endRestoreMap = perfBegin('线路面板+地图渲染（缓存命中）', undefined, perfSession);
-            renderLineProjectPanels(state, graph, showMessage);
+            renderLineProjectPanels(state, graph, showMessage, {
+              perfSession,
+              enableCatenary: getDevLineCatenaryMode(),
+            });
             endRestoreMap(undefined, {
               nodes: graph.stats.total,
               towers: graph.stats.Tower_Device,
@@ -1085,6 +1186,9 @@ export async function openGimWithDialog(
             hideLoading();
             showLoading('已从本地缓存恢复线路工程索引');
             setTimeout(hideLoading, 3000);
+            if (import.meta.env.DEV) {
+              (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
+            }
             debugLog(DEBUG_GIM_CACHE, '[Tauri] 线路工程缓存短路生效：未读取原始 GIM，未执行解压', {
               project_id: record.id,
               nodes: graph.stats.total,
@@ -1247,17 +1351,30 @@ export async function openGimWithDialog(
       debugLog(DEBUG_GIM_CACHE, '[Tauri] 缓存短路未生效：进入完整解压流程');
       // acc-plan P0-2：优先 Rust 原生解压（含资源配额），失败回退 libarchive.js WASM
       let preExtracted: Awaited<ReturnType<typeof import('@desktop/gimExtract.js').extractGimArchiveNative>> | undefined;
+      let endNative: ((labelSuffix?: string, endMeta?: Record<string, unknown>) => void) | null = null;
       try {
-        perfReset({ generation: requestGeneration, projectId: record.id, sourceSha256: record.sha256 });
+        // 不重置性能会话，确保冷启动总时间包含文件信息/缓存校验和本次解压。
+        perfUpdateSessionIdentity({
+          generation: requestGeneration,
+          projectId: record.id,
+          sourceSha256: record.sha256,
+        });
         const perfSession = perfCurrentSession();
-        const endNative = perfBegin('解压（Rust 原生）', undefined, perfSession);
+        endNative = perfBegin('解压（Rust 原生）', undefined, perfSession);
         const { extractGimArchiveNative } = await import('@desktop/gimExtract.js');
         preExtracted = await extractGimArchiveNative(filePath, record.id);
         if (state.projectGeneration !== requestGeneration) return;
-        endNative(undefined, { files: preExtracted.files.size });
-        perfMark('原生解压完成', { files: preExtracted.files.size }, perfSession);
+        endNative(undefined, {
+          files: preExtracted.files.size,
+          extraction: preExtracted.extractionProfile ?? null,
+        });
+        perfMark('原生解压完成', {
+          files: preExtracted.files.size,
+          extraction: preExtracted.extractionProfile ?? null,
+        }, perfSession);
       } catch (nativeErr) {
         const nativeMessage = nativeErr instanceof Error ? nativeErr.message : String(nativeErr);
+        endNative?.('（失败）', { error: nativeMessage });
         // 资源配额是安全边界，不得通过 WASM 回退绕过；仅能力/格式/运行时
         // 不可用时才允许走前端解压器。
         if (/超出资源配额|资源配额|压缩比超限|条目数超限|单文件.*超限|总解压量.*超限/i.test(nativeMessage)) {
@@ -1270,8 +1387,11 @@ export async function openGimWithDialog(
       let ab: ArrayBuffer | null = null;
       if (!preExtracted) {
         showLoading('正在读取 GIM 文件...');
+        const perfSession = perfCurrentSession();
+        const endFallbackRead = perfBegin('冷启动：读取 GIM 原始文件（WASM 回退）', undefined, perfSession);
         ab = await readFileBytes(filePath);
         if (state.projectGeneration !== requestGeneration) return;
+        endFallbackRead(undefined, { bytes: ab.byteLength });
       }
 
       const fileName = filePath.split(/[\\/]/).pop() || 'project.gim';

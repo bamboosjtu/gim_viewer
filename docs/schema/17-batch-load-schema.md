@@ -11,7 +11,7 @@
 
 > **历史状态（2026-07-17）**：本文同时包含设计基线与实施历史。方案 B 静态合并、DEV 粒度 GLB 缓存及 marker 版本失效机制已经实现；当时 `PARSER_VERSION=gim-parser-v14`、`GEOMETRY_CACHE_VERSION=geometry-cache-v2-stretched-body`。Worker 化解析、SQLite 几何缓存表和 `.gimc` 预编译容器仍未实现。§1 的“现状”与 §15 早期“待实施”表应按本说明及 [18c](18c-experiment-mod-to-gltf-cache.md) 的 v2 记录理解。
 >
-> **当前状态（2026-08-31）**：源码以 `PARSER_VERSION=gim-parser-v19`、`GEOMETRY_CACHE_VERSION=geometry-cache-v4-phm-color` 为准；DEV 粒度 GLB 管线、PHM 颜色覆盖、缓存命中回放和属性来源路由已落地。Worker 化解析、SQLite 几何缓存表、InstancedMesh 装配及 `.gimc` 预编译容器仍是长期路线，本文旧版本号仅作演进记录。
+> **当前状态（2026-09-01）**：源码以 `PARSER_VERSION=gim-parser-v20`、`GEOMETRY_CACHE_VERSION=geometry-cache-v4-phm-color` 为准；DEV 粒度 GLB 管线、PHM 颜色覆盖、缓存命中回放、属性来源路由、线路 Parser Worker 与 semantic pack 已落地。Worker 化 IFC 解析、SQLite 几何缓存表、InstancedMesh 装配及 `.gimc` 预编译容器仍是长期路线，本文旧版本号仅作演进记录。
 
 ## 1. 问题背景
 
@@ -638,7 +638,7 @@ for (let j = 0; j < batch.length; j++) {
 ### 7.3 缓存版本化策略
 
 ```text
-PARSER_VERSION          = 'gim-parser-v19'        // 当前，GIM 解析层（v1→v19 详见下方演进历史）
+PARSER_VERSION          = 'gim-parser-v20'        // 当前，GIM 解析层（v1→v20 详见下方演进历史）
 FRAGMENTS_CACHE_VERSION = 'fragments-cache-v6'   // 基础版本；运行时另拼接 fragments/web-ifc 实际版本
 GEOMETRY_CACHE_VERSION  = 'geometry-cache-v4-phm-color' // 当前，DEV 粒度 MOD/STL 序列化几何与 PHM 颜色覆盖
 

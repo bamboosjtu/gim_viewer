@@ -21,6 +21,36 @@ export interface NativeExtractionResult {
   cachePaths: Map<string, string>;
   /** 原生解压对应的 SQLite project_id，用于按 entry_path 懒读。 */
   cacheProjectId?: number;
+  /** Rust 原生解压阶段计时（冷启动诊断用；旧 payload 可为空）。 */
+  extractionProfile?: NativeExtractionProfile;
+  /** 线路原生解压时写入的连续语义 pack 相对路径；旧 payload 无此字段。 */
+  semanticPackPath?: string;
+}
+
+export interface NativeExtractionProfile {
+  totalMs: number;
+  archiveMs: number;
+  headerMs: number;
+  decodeMs: number;
+  writeMs: number;
+  /** Rust staging writer 中打开/创建文件的累计耗时。 */
+  writeOpenMs?: number;
+  /** Rust staging writer 中写入文件内容的累计耗时。 */
+  writeDataMs?: number;
+  /** 线路 semantic pack 连续写入的条目、字节与耗时。 */
+  semanticPackEntries?: number;
+  semanticPackBytes?: number;
+  semanticPackWriteMs?: number;
+  manifestMs: number;
+  commitMs?: number;
+  writeMode?: string;
+  archiveBytes: number;
+  entryCount: number;
+  totalBytes: number;
+  maxEntryWriteMs: number;
+  maxEntryWritePath?: string;
+  maxEntryDecodeMs: number;
+  maxEntryDecodePath?: string;
 }
 
 /** manifest 条目 */
@@ -29,6 +59,8 @@ interface ExtractManifestEntry {
   offset: number;
   size: number;
   cache_path?: string;
+  /** 线路语义 pack 中的偏移；有此字段时对应独立小文件未落盘。 */
+  semantic_pack_offset?: number;
 }
 
 /** manifest 结构 */
@@ -37,6 +69,8 @@ interface ExtractManifest {
   project_id?: string;
   project_name?: string;
   entries: ExtractManifestEntry[];
+  semantic_pack_path?: string;
+  profile?: NativeExtractionProfile;
 }
 
 /**
@@ -119,15 +153,23 @@ class DiskBackedFile extends DiskBackedBlob {
   readonly name: string;
   readonly webkitRelativePath = '';
 
-  constructor(projectId: number, entryPath: string, size: number, name: string) {
+  readonly __gimSemanticPackBacked: boolean;
+
+  constructor(projectId: number, entryPath: string, size: number, name: string, semanticPackBacked = false) {
     super(projectId, entryPath, size);
     this.name = name;
+    this.__gimSemanticPackBacked = semanticPackBacked;
   }
 }
 
 /** 判断条目是否由原生解压落盘并按需从缓存读取。 */
 export function isDiskBackedFile(value: File | undefined): boolean {
   return Boolean(value && (value as File & { __gimDiskBacked?: boolean }).__gimDiskBacked === true);
+}
+
+/** 判断 native manifest 条目是否由线路 semantic pack 支撑。 */
+export function isSemanticPackBackedFile(value: File | undefined): boolean {
+  return Boolean(value && (value as File & { __gimSemanticPackBacked?: boolean }).__gimSemanticPackBacked === true);
 }
 
 const MAX_NATIVE_ENTRIES = 200_000;
@@ -183,8 +225,8 @@ export function parseExtractionPayload(
     if (hasInlineBlob && e.offset + e.size > buf.byteLength - base) {
       throw new Error(`条目 ${e.path} 数据越界`);
     }
-    if (!hasInlineBlob && e.size > 0 && (options.cacheProjectId == null || !e.cache_path)) {
-      throw new Error(`条目 ${e.path} 缺少磁盘缓存路径`);
+    if (!hasInlineBlob && e.size > 0 && options.cacheProjectId == null) {
+      throw new Error(`条目 ${e.path} 缺少磁盘缓存 project_id`);
     }
     totalBytes += e.size;
     if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_NATIVE_TOTAL_BYTES) {
@@ -197,7 +239,16 @@ export function parseExtractionPayload(
       const part = buf.slice(base + e.offset, base + e.offset + e.size);
       files.set(e.path, new File([part], name));
     } else {
-      files.set(e.path, new DiskBackedFile(options.cacheProjectId!, e.path, e.size, name) as unknown as File);
+      files.set(
+        e.path,
+        new DiskBackedFile(
+          options.cacheProjectId!,
+          e.path,
+          e.size,
+          name,
+          e.semantic_pack_offset !== undefined,
+        ) as unknown as File,
+      );
     }
     if (e.cache_path) cachePaths.set(e.path, e.cache_path);
   }
@@ -209,6 +260,8 @@ export function parseExtractionPayload(
     files,
     cachePaths,
     cacheProjectId: options.cacheProjectId,
+    extractionProfile: manifest.profile,
+    semanticPackPath: manifest.semantic_pack_path,
   };
 }
 

@@ -143,7 +143,8 @@ export function resetRuntimeBasemapMode(): void {
  * 设为 false 时回退直线段绘制。
  *
  * 启用时的行为：
- * - 对每条 inter-point 真实档距导线用抛物线近似 f(x) = sag * 4 * x * (1-x) 采样 24 段绘制
+ * - 对每条 inter-point 真实档距导线用抛物线近似 f(x) = sag * 4 * x * (1-x) 绘制；
+ *   采样段数按屏幕弦长自适应（4–24 段），低缩放时减少 Canvas 指令，高缩放时保留细节
  * - sag 由 KVALUE 推算（kValue*L²），缺失或为 0 时回退 3% 经验弧垂，上限 10%*L
  * - 端点高差由 BLHA 第 3 段（elev）计算
  * - 同塔内部连接（same-point，端点 BLHA 相同）跳过渲染，保持直线

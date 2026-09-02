@@ -83,7 +83,7 @@
 | 16 | C | FIX-1~4 作为修复历史保留；其 9866 实例旧结论继续服从 20 号更正 |
 | 17 | C | 方案 B 和 DEV 粒度方案 C 已实现；当前缓存版本为 `geometry-cache-v4-phm-color`，Worker/SQLite 几何表仍未实现 |
 | 18a | C | 共享 Geometry 实验记录保留；属于历史实测，不外推为所有设备几何正确 |
-| 18b | C | 层级树/DEV SUBDEVICE 演进记录保留；文中 v14 为历史快照，当前 parser 版本为 v19 |
+| 18b | C | 层级树/DEV SUBDEVICE 演进记录保留；文中 v14 为历史快照，当前 parser 版本为 v20 |
 | 18c | C | §2-§9 标记为 MOD/STL 文件粒度 v1 历史方案；§10 DEV 粒度方案已落地，当前几何缓存版本为 v4 |
 | 19a | B | F2/F3/F4 层级统计对应未变化的变电样本；属于单样本结构事实 |
 | 20 | B+C | PARTINDEX 是 SUBDEVICE 语义别名、不能作为第二几何 seed 的更正继续作为当前基线 |
@@ -98,7 +98,7 @@
 4. 13 号文档中的“当前缺陷”是 IR 设计时快照，已明确改为历史基线。
 5. 14 号文档“悬链线未实现/直线默认”与代码不符；当前实验实现默认开启，但未使用 MATRIX0 挂点偏移/BLHA 高程差，hit-test 仍按直线，且 `KVALUE × L²` 语义未确认。
 6. 15 号证据把一个 WIRE 的 KVALUE 错写成 P0/P1 各计一次；脚本也把数值计数重复相加。脚本、JSON 和文档均改为 5460。
-7. 17/18c 的部分段落仍保留旧版本号；当前源码以 `PARSER_VERSION=gim-parser-v19`、`GEOMETRY_CACHE_VERSION=geometry-cache-v4-phm-color` 为准，旧版本仅作历史记录。
+7. 17/18c 的部分段落仍保留旧版本号；当前源码以 `PARSER_VERSION=gim-parser-v20`、`GEOMETRY_CACHE_VERSION=geometry-cache-v4-phm-color` 为准，旧版本仅作历史记录。
 8. 17 号文档把 `46250 / 4135` 同时写成“约 5”和“约 11.2”；已统一为约 11.2 Entity/非空 MOD。
 
 ## 6. 仍然有效的风险边界

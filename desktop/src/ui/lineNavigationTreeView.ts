@@ -154,6 +154,22 @@ interface F3Record {
   spanKeys: Set<string>;
 }
 
+/**
+ * 导航投影构建期间使用的轻量倒排索引。
+ *
+ * 线路样本通常有数千个 F4/WIRE 和上百个档距。旧实现为每个 F3 扫描
+ * 全部 SpanRecord、为每个塔位再次扫描当前耐张段的全部 span，导致在
+ * 真实样本上出现 O(F3×span) / O(tower×span) 的长任务。索引只保存 key
+ * 或 SpanRecord 引用，不复制业务对象，完成投影后即可释放。
+ */
+interface SpanRecordIndexes {
+  bySourcePath: Map<string, Set<string>>;
+  byOwnerF3Path: Map<string, SpanRecord[]>;
+  nonSameByOwnerF3Path: Map<string, SpanRecord[]>;
+  sameByTowerPath: Map<string, SpanRecord[]>;
+  byTowerPair: Map<string, SpanRecord[]>;
+}
+
 const PROJECT_KEY = 'line-navigation:project';
 
 const WIRE_LABELS: Record<string, string> = {
@@ -208,6 +224,7 @@ export function buildLineNavigationIndex(
   );
   const spanByKey = new Map<string, SpanRecord>();
   for (const span of spanRecords) spanByKey.set(span.key, span);
+  const spanIndexes = buildSpanRecordIndexes(spanRecords);
 
   const crossProjections = mapData.crosses.map((marker) =>
     buildCrossProjection(marker, options.attrs),
@@ -223,18 +240,14 @@ export function buildLineNavigationIndex(
     for (const group of collectDescendantF4(node, parentIndex)) {
       if (group.rawProps['GROUPTYPE'] === 'TOWER') record.towerPaths.add(group.path);
       if (group.rawProps['GROUPTYPE'] === 'WIRE') {
-        for (const span of spanRecords) {
-          if (span.sourcePaths.has(group.path)) record.spanKeys.add(span.key);
-        }
+        for (const key of spanIndexes.bySourcePath.get(group.path) || []) record.spanKeys.add(key);
       }
     }
     // 也接收通过 WIRE 子节点登记的 F3 所有权。
-    for (const span of spanRecords) {
-      if (span.ownerF3Paths.has(node.path)) record.spanKeys.add(span.key);
-      if (span.ownerF3Paths.has(node.path)) {
-        if (span.startPath) record.towerPaths.add(span.startPath);
-        if (span.endPath) record.towerPaths.add(span.endPath);
-      }
+    for (const span of spanIndexes.byOwnerF3Path.get(node.path) || []) {
+      record.spanKeys.add(span.key);
+      if (span.startPath) record.towerPaths.add(span.startPath);
+      if (span.endPath) record.towerPaths.add(span.endPath);
     }
     return record;
   });
@@ -298,6 +311,7 @@ export function buildLineNavigationIndex(
         strainKey,
         orderedTowerPaths,
         spans,
+        spanIndexes,
         towerByPath,
         towerOrder,
         assignedSpanKeys,
@@ -336,6 +350,7 @@ export function buildLineNavigationIndex(
         inferredKey,
         paths,
         fallbackSpans,
+        spanIndexes,
         towerByPath,
         towerOrder,
         assignedSpanKeys,
@@ -423,7 +438,7 @@ export function buildLineNavigationIndex(
     if (assignedCrossPaths.has(cross.marker.cbmPath)) continue;
     const ownerF3 = parentIndex.f4CrossF3ByPath.get(cross.marker.cbmPath);
     const candidates = ownerF3
-      ? spanRecords.filter((span) => span.ownerF3Paths.has(ownerF3.path) && !span.samePointWires.length)
+      ? spanIndexes.nonSameByOwnerF3Path.get(ownerF3.path) || []
       : [];
     const selected = chooseCrossSpan(cross, candidates, towerByPath, stringToTowerPath);
     if (selected) {
@@ -890,10 +905,54 @@ function buildCrossProjection(marker: CrossMarker, attrs?: LineAttributeIndex): 
   return { marker, node, title, subtitle, typeLabel, codes, sourceNodes };
 }
 
+function appendSpanIndex<T>(map: Map<string, T[]>, key: string | undefined, value: T): void {
+  if (!key) return;
+  const bucket = map.get(key);
+  if (bucket) bucket.push(value);
+  else map.set(key, [value]);
+}
+
+function appendSpanKeyIndex(map: Map<string, Set<string>>, key: string, value: string): void {
+  const bucket = map.get(key);
+  if (bucket) bucket.add(value);
+  else map.set(key, new Set([value]));
+}
+
+function spanTowerPairKey(a: string, b: string): string {
+  return a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`;
+}
+
+/** 为一次导航构建所有可重复使用的 span 倒排索引。 */
+function buildSpanRecordIndexes(spans: SpanRecord[]): SpanRecordIndexes {
+  const bySourcePath = new Map<string, Set<string>>();
+  const byOwnerF3Path = new Map<string, SpanRecord[]>();
+  const nonSameByOwnerF3Path = new Map<string, SpanRecord[]>();
+  const sameByTowerPath = new Map<string, SpanRecord[]>();
+  const byTowerPair = new Map<string, SpanRecord[]>();
+
+  for (const span of spans) {
+    for (const sourcePath of span.sourcePaths) appendSpanKeyIndex(bySourcePath, sourcePath, span.key);
+    for (const ownerPath of span.ownerF3Paths) {
+      appendSpanIndex(byOwnerF3Path, ownerPath, span);
+      if (span.samePointWires.length === 0) appendSpanIndex(nonSameByOwnerF3Path, ownerPath, span);
+    }
+    if (span.samePointWires.length > 0) {
+      // 同塔连接的 start/end 通常相同；Set 避免同一个 span 被重复加入。
+      const towerPaths = new Set([span.startPath, span.endPath].filter(Boolean) as string[]);
+      for (const towerPath of towerPaths) appendSpanIndex(sameByTowerPath, towerPath, span);
+    } else if (span.startPath && span.endPath) {
+      appendSpanIndex(byTowerPair, spanTowerPairKey(span.startPath, span.endPath), span);
+    }
+  }
+
+  return { bySourcePath, byOwnerF3Path, nonSameByOwnerF3Path, sameByTowerPath, byTowerPair };
+}
+
 function buildStrainChildren(
   strainKey: string,
   orderedTowerPaths: string[],
   spans: SpanRecord[],
+  spanIndexes: SpanRecordIndexes,
   towerByPath: Map<string, TowerEntry>,
   towerOrder: Map<string, number>,
   assignedSpanKeys: Set<string>,
@@ -904,6 +963,8 @@ function buildStrainChildren(
 ): LineNavigationNode[] {
   const children: LineNavigationNode[] = [];
   const consumed = new Set<string>();
+  const spanKeys = new Set(spans.map((span) => span.key));
+  const inCurrentStrain = (span: SpanRecord): boolean => spanKeys.has(span.key);
   for (let index = 0; index < orderedTowerPaths.length; index++) {
     const path = orderedTowerPaths[index];
     const tower = towerByPath.get(path);
@@ -916,9 +977,7 @@ function buildStrainChildren(
         targetBySourcePath,
       );
       // 同塔 WIRE 是内部连接，透明地挂在塔位下，而不是伪造一个跨塔档距。
-      const samePointSpans = spans.filter((span) =>
-        span.samePointWires.length > 0 && (span.startPath === path || span.endPath === path),
-      );
+      const samePointSpans = (spanIndexes.sameByTowerPath.get(path) || []).filter(inCurrentStrain);
       for (const samePoint of samePointSpans) {
         const sameNode = buildSamePointNode(
           `${towerNode.key}:same:${encodeURIComponent(samePoint.key)}`,
@@ -937,11 +996,8 @@ function buildStrainChildren(
 
     const nextPath = orderedTowerPaths[index + 1];
     if (!nextPath) continue;
-    const between = spans.filter((span) =>
-      !span.samePointWires.length
-      && connects(span, path, nextPath)
-      && !consumed.has(span.key),
-    );
+    const between = (spanIndexes.byTowerPair.get(spanTowerPairKey(path, nextPath)) || [])
+      .filter((span) => inCurrentStrain(span) && !consumed.has(span.key));
     for (const span of between) {
       const spanNode = buildSpanNode(span, parentByKey, nodesByKey, targetBySourcePath);
       children.push(spanNode);
@@ -1177,15 +1233,26 @@ function registerGraphSourceAliases(
   parentIndex: ParentIndex,
   targetBySourcePath: Map<string, string>,
 ): void {
+  // `findSourceTargetKey` 的裸文件名兜底原先会在每个隐藏 graph 节点上
+  // 扫描整个 targetBySourcePath。真实线路图有近万节点时，这个 O(n×m)
+  // 过程本身就足以制造秒级长任务；预先建立同样保持“首次登记优先”
+  // 语义的文件名倒排表。
+  const targetByFileName = new Map<string, string>();
+  for (const [source, target] of targetBySourcePath) {
+    const fileName = getFileNameLower(source);
+    if (fileName && !targetByFileName.has(fileName)) targetByFileName.set(fileName, target);
+  }
   for (const graphNode of graph.nodesByPath.values()) {
-    if (findSourceTargetKey(targetBySourcePath, graphNode.path)) continue;
+    if (findSourceTargetKey(targetBySourcePath, graphNode.path, targetByFileName)) continue;
     const seen = new Set<string>();
     let current: GimGraphNode | undefined = parentIndex.parentByPath.get(graphNode.path);
     while (current && !seen.has(current.path)) {
       seen.add(current.path);
-      const targetKey = findSourceTargetKey(targetBySourcePath, current.path);
+      const targetKey = findSourceTargetKey(targetBySourcePath, current.path, targetByFileName);
       if (targetKey) {
         registerSourceAlias(targetBySourcePath, graphNode.path, targetKey);
+        const fileName = getFileNameLower(graphNode.path);
+        if (fileName && !targetByFileName.has(fileName)) targetByFileName.set(fileName, targetKey);
         break;
       }
       current = parentIndex.parentByPath.get(current.path);
@@ -1197,6 +1264,7 @@ function registerGraphSourceAliases(
 function findSourceTargetKey(
   targetBySourcePath: Map<string, string>,
   sourcePath: string,
+  targetByFileName?: Map<string, string>,
 ): string | undefined {
   if (!sourcePath) return undefined;
   const direct = targetBySourcePath.get(sourcePath);
@@ -1212,6 +1280,7 @@ function findSourceTargetKey(
   // 未来出现同名文件，仍优先使用上面的完整路径匹配。
   const fileName = getFileNameLower(normalized);
   if (!fileName) return undefined;
+  if (targetByFileName) return targetByFileName.get(fileName);
   for (const [source, target] of targetBySourcePath) {
     if (getFileNameLower(source) === fileName) return target;
   }
@@ -1297,10 +1366,6 @@ function coordKey(lat: number, lng: number): string {
 
 function coordKeyFromCoord(coord: Coord | undefined): string | undefined {
   return coord ? coordKey(coord.lat, coord.lng) : undefined;
-}
-
-function connects(span: SpanRecord, a: string, b: string): boolean {
-  return (span.startPath === a && span.endPath === b) || (span.startPath === b && span.endPath === a);
 }
 
 function sortTowerPaths(
