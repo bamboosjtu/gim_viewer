@@ -16,7 +16,7 @@
 | 3D 点击拾取 + 高亮 + 相机定位 | ✅ 已实现 | `desktop/src/viewer/selection.ts` / `highlight.ts` / `camera.ts` |
 | 层级树↔3D 联动 | ✅ 已实现 | `desktop/src/services/nodeInteractionService.ts` |
 | 属性面板（CBM/FAM/DEV/IFC + 语义字典） | ✅ 已实现 | `desktop/src/ui/propsDrawer.ts` / `propertyDictionary.ts` |
-| SQLite 缓存（索引、属性、Fragments、几何引用链） | ✅ 已实现 | `desktop/src-tauri/src/db.rs`（当前 `PARSER_VERSION=gim-parser-v20`） |
+| SQLite 缓存（索引、属性、Fragments、几何引用链） | ✅ 已实现 | `desktop/src-tauri/src/db.rs`（当前 `PARSER_VERSION=gim-parser-v21`） |
 | 缓存命中短路 | ✅ 已实现 | `desktop/src/services/openGimService.ts` / `gimIndexRestoreService.ts` |
 | IFC/DEV/PHM/MOD/STL 本地磁盘缓存 | ✅ 已实现 | `desktop/src/services/gimExtractedCacheService.ts` |
 | 诊断快捷键（Ctrl+Shift+D） | ✅ 已实现 | `desktop/src/services/diagnosticSummaryService.ts` |
@@ -36,10 +36,12 @@
 
 ### 当前版本关键改动
 
-- `PARSER_VERSION` 当前为 `gim-parser-v20`；几何 GLB 缓存版本为 `geometry-cache-v4-phm-color`。任一版本变化都会使旧缓存失效并触发重建。Fragments 缓存另绑定源 GIM SHA-256 与 `fragments-cache-v6` 运行时版本，旧记录缺少源 SHA 时视为失效。
+- `PARSER_VERSION` 当前为 `gim-parser-v21`；几何 GLB 缓存版本为 `geometry-cache-v5-dev-status`。任一版本变化都会使旧缓存失效并触发重建。Fragments 缓存另绑定源 GIM SHA-256 与 `fragments-cache-v6` 运行时版本，旧记录缺少源 SHA 时视为失效。
 - 首次打开 GIM 时，通过 `cacheGeometryFiles` 缓存 DEV/PHM/MOD/STL 文件到 `app_data_dir/extracted/{projectId}/`（复用 `writeCacheFile`，沿用路径遍历防护）。
 - IFC 加载完成后自动启动渐进式 DEV GLB 管线（`progressiveGeometryService`），按 DEV 粒度一次解析、落盘并逐实例渲染 IFC 之外的 MOD/STL；用户无需逐节点点击才能看到几何。
-- 缓存命中场景（`currentFiles=null`）下，`nodeInteractionService` 通过 `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` 从磁盘按需读取 DEV/PHM/MOD/STL；GLB 快速路径失败时回退到原始文件解析。
+- 每个 unique DEV 在 `_manifest.json` 中记录 `status=glb|empty` 与字节数。缓存命中场景（`currentFiles=null`）先按 manifest 建立 DEV→CBM placement 映射，以 GIMR 二进制 envelope 分批读取 GLB；同一 DEV 的 GLB 最多读取一次，`empty` 不读取也不触发回退，随后每个 placement 独立加载并应用 CBM 矩阵。manifest 缺失、GLB 大小/header 不符、真实读取或解析失败时才整体回退原始 MOD/STL。
+- 旧缓存或写入/序列化未完成时不写几何版本标记；缓存校验失败会清理 `glbcache/{projectId}` 并重新生成，避免 partial geometry 被当作完整缓存。
+- 缓存命中场景的节点按需回放仍由 `nodeInteractionService` 通过 `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` 读取 DEV/PHM/MOD/STL；GLB fast path 不可用时保留原始文件解析。
 - PHM 的 `COLORn` 与文件级 `max(A)` 已随几何引用链缓存；重放时对 MOD/STL 实例应用 RGB、透明度和 A=0 不透明哨兵规则。
 
 > P0 实现路径及仍待补齐的 P1/P2 见 §9。
@@ -201,7 +203,7 @@ IFC 加载完成后自动启动渐进式 MOD/STL 几何管线       ✅ 已实�
 | xml-mod 渲染 | `desktop/src/viewer/xmlModGeometry.ts` / `xmlModLoader.ts` | XmlModPrimitive → BufferGeometry + Transform + PHM 颜色覆盖 | ✅ |
 | 引用链发现 | `desktop/src/services/modGeometryDiscovery.ts` | CBM → DEV → PHM → MOD/STL（递归 + 防环） | ✅ |
 | 自动加载 | `desktop/src/services/progressiveGeometryService.ts` `runProgressiveDevGlbPipeline` | IFC 加载完成后后台渐进渲染全部 DEV 几何（按 DEV 编译） | ✅ |
-| 几何缓存 | `desktop/src/services/gimExtractedCacheService.ts` `cacheGeometryFiles` | DEV/PHM/MOD/STL 文件 + 引用链缓存 | ✅ |
+| 几何缓存 | `desktop/src/services/gimExtractedCacheService.ts` `cacheGeometryFiles` / `desktop/src/services/modAutoLoadService.ts` | DEV/PHM/MOD/STL 文件 + 引用链缓存；warm 先走 DEV GLB manifest/batch fast path | ✅ |
 | STL 加载 | `desktop/src/viewer/stlLoader.ts` | Binary/ASCII STL → Three.js mesh；首次打开由 GLB 管线承载 | ✅ |
 
 ### 层级树↔3D 联动
@@ -231,12 +233,20 @@ IFC 加载完成后自动启动渐进式 MOD/STL 几何管线       ✅ 已实�
 
 1. 用户选择 GIM → Rust 计算 sha256 + file_size
 2. `validate_gim_cache`：检查 parser_version + file_size + IFC 缓存文件存在性
-3. 命中 → 读取全部索引 → 恢复到 AppState → 直接渲染树和面板；按需从磁盘读取 DEV/PHM/MOD/STL 文件回放几何
+3. 命中 → 读取全部索引 → 恢复到 AppState → 直接渲染树和面板；几何恢复先读取 DEV GLB manifest，按 unique DEV 二进制批读并实例化 placement，只有 fast path 不完整或读取/解析失败时才按需读取 DEV/PHM/MOD/STL 原始文件
 4. 未命中 → 完整解压 → 解析 → 入库 → 缓存 IFC/DEV/PHM/MOD/STL 文件与几何引用链到本地磁盘
 
 ### 本地磁盘缓存
 
-IFC + DEV/PHM/MOD/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路径遍历防护。`cacheGeometryFiles` 在首次打开时缓存可达几何文件；`substation_dev_solid_model`、`substation_dev_sub_device`、`substation_phm_solid_model` 保存引用链与 PHM 颜色刻度。
+IFC + DEV/PHM/MOD/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路径遍历防护。`cacheGeometryFiles` 在首次打开时缓存可达几何文件；`substation_dev_solid_model`、`substation_dev_sub_device`、`substation_phm_solid_model` 保存引用链与 PHM 颜色刻度。渐进管线另在 `app_data_dir/glbcache/{id}/` 写入 DEV 粒度 GLB 与 `_manifest.json`：每个 unique DEV 必须有 `status=glb`（带 size）或 `status=empty`（size=0），仅 manifest 完整且版本标记写入成功才算 warm cache 完整。
+
+### 7.1 DEV GLB warm fast path（geometry-cache-v5）
+
+- manifest 以大小写不敏感的 `DEV/<name>.dev` 为唯一键；同一 DEV 被多个 CBM placement 引用时只批量读取一次 GLB bytes，随后每个 placement 独立 `loadDevGlb`，继续应用各自 CBM 累积矩阵。
+- Rust `batch_read_glb_files` 返回 GIMR v2 二进制 envelope，前端按最多 256 个文件或预计 64 MiB 分批；不使用旧 JSON 数组响应。
+- `empty` 是合法确定性结果：不读文件、不解析、不触发原始 MOD fallback。manifest 缺项、GLB 缺失/截断/header 或 size 不符、真实读取/解析错误会清理已加入场景的 fast-path group，并整体回退原始 MOD/STL。
+- profile 随 `finishModStl` 写入诊断：`cbmInstanceCount`、`uniqueDevCount`、`glbDevCount`、`emptyDevCount`、`glbBatchReadMs`、`glbReadBytes`、`glbParseCount`、`glbParseMs`、`rawModFallbackCount`。
+- `GEOMETRY_CACHE_VERSION` 由 `geometry-cache-v4-phm-color` bump 为 `geometry-cache-v5-dev-status`；旧 manifest（缺少 status）会被视为不完整并重新生成。
 
 ---
 
@@ -261,7 +271,7 @@ IFC + DEV/PHM/MOD/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路径
 
 > 基于 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) 的 IR 草案与 [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) 的 primitive grammar，按优先级分阶段实施。
 >
-> **P0 已完成**：IR schema + PHM/DEV/xml-mod parser + 14 类 primitive 渲染 + xml-mod 自动加载 + 缓存命中场景回放 + 属性字典/来源按钮；当前工作树验证为 `npm test` 544/544，样本回归 12/12。
+> **P0 已完成**：IR schema + PHM/DEV/xml-mod parser + 14 类 primitive 渲染 + xml-mod 自动加载 + 缓存命中场景回放 + 属性字典/来源按钮；当前工作树验证以最新 `npm test -- --run` 与 `npm run test:sample` 结果为准（本轮记录为 628/628、30/30）。
 
 ### 9.1 P0（已完成）
 

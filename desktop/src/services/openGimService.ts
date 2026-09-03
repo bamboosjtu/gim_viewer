@@ -926,6 +926,7 @@ async function autoLoadModStlPostIfc(
       path: 'cached-geometry',
       modCount: result.modCount,
       stlCount: result.stlCount,
+      ...(result.devGlbProfile ? { devGlbProfile: result.devGlbProfile } : {}),
     });
     if (!state.isCurrentSession(session)) return;
     if (!perfProductMomentSnapshot().firstGeometryReady

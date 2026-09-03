@@ -282,7 +282,7 @@ Canvas overlay 委托底图层的 `project()` 方法，两种模式共用同一�
 
 ### 首次导入事务
 
-`save_line_project_cache` 是统一事务命令：线路图（6 张表）+ FAM/DEV 属性在同一事务内写入，成功后设置 `parser_version = PARSER_VERSION`（当前为 `gim-parser-v20`，详见 `desktop/src-tauri/src/db.rs`；版本变更使旧缓存自动失效以触发完整重建）。
+`save_line_project_cache` 是统一事务命令：线路图（6 张表）+ FAM/DEV 属性在同一事务内写入，成功后设置 `parser_version = PARSER_VERSION`（当前为 `gim-parser-v21`，详见 `desktop/src-tauri/src/db.rs`；版本变更使旧缓存自动失效以触发完整重建）。
 
 ### 诊断键空间
 

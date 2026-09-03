@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { runProgressiveDevGlbPipeline } from '../progressiveGeometryService.js';
 import { AppState } from '../../app/state.js';
 import type { ProgressiveGeometryDependencies } from '../progressiveGeometryService.js';
+import type { GeometryCacheManifestEntry } from '@desktop/database.js';
 import type { CbmNode } from '../../gim/types.js';
 import { isTauri } from '@desktop/runtime.js';
 
@@ -71,6 +72,7 @@ interface DepsRecorder {
   writeCalls: string[];
   versionWrites: number;
   loadCalls: string[];
+  manifestEntries?: GeometryCacheManifestEntry[][];
 }
 
 function makeDeps(opts: { serializeNullFor?: string[] } = {}, rec?: DepsRecorder): ProgressiveGeometryDependencies {
@@ -91,7 +93,9 @@ function makeDeps(opts: { serializeNullFor?: string[] } = {}, rec?: DepsRecorder
     writeGeometryCacheVersion: vi.fn(async () => {
       recorder.versionWrites++;
     }),
-    writeGeometryCacheManifest: vi.fn(async () => {}),
+    writeGeometryCacheManifest: vi.fn(async (_projectId: number, _sourceSha256: string, entries: GeometryCacheManifestEntry[]) => {
+      recorder.manifestEntries?.push(entries);
+    }),
     applyPlacementTransformToSceneUnits: vi.fn(() => {}),
     yieldToMain: vi.fn(async () => {}),
   };
@@ -229,7 +233,7 @@ describe('runProgressiveDevGlbPipeline', () => {
 
   it('全部 DEV 均为空几何（tombstone）时仍提交版本标记（P1 评审）', async () => {
     vi.mocked(isTauri).mockReturnValue(true);
-    const rec: DepsRecorder = { serializeCalls: [], writeCalls: [], versionWrites: 0, loadCalls: [] };
+    const rec: DepsRecorder = { serializeCalls: [], writeCalls: [], versionWrites: 0, loadCalls: [], manifestEntries: [] };
     const state = makeState({ projectId: 7 });
     const result = await runProgressiveDevGlbPipeline(
       state,
@@ -242,6 +246,11 @@ describe('runProgressiveDevGlbPipeline', () => {
     // tombstone 是确定性结果：无几何也是有效缓存状态
     expect(rec.versionWrites).toBe(1);
     expect(result.failedDevs).toEqual([]);
+    expect(rec.manifestEntries).toHaveLength(1);
+    expect(rec.manifestEntries?.[0]).toEqual([
+      { entry_path: 'DEV/a.dev', status: 'empty', size: 0 },
+      { entry_path: 'DEV/b.dev', status: 'empty', size: 0 },
+    ]);
   });
 
   it('管线开始时捕获 projectId 快照（P1 竞态：中途变更 state 不影响落盘目标）', async () => {
@@ -263,12 +272,32 @@ describe('runProgressiveDevGlbPipeline', () => {
 
   it('Tauri 模式下逐 DEV 落盘并写版本标记', async () => {
     vi.mocked(isTauri).mockReturnValue(true);
-    const rec: DepsRecorder = { serializeCalls: [], writeCalls: [], versionWrites: 0, loadCalls: [] };
+    const rec: DepsRecorder = { serializeCalls: [], writeCalls: [], versionWrites: 0, loadCalls: [], manifestEntries: [] };
     const state = makeState({ projectId: 9 });
     await runProgressiveDevGlbPipeline(state, new THREE.Scene(), vi.fn(), { token: 1 }, makeDeps({}, rec));
 
     // a.dev 序列化一次、落盘一次（多实例共享）
     expect(rec.writeCalls).toEqual(['DEV/a.dev', 'DEV/b.dev']);
+    expect(rec.versionWrites).toBe(1);
+    expect(rec.manifestEntries?.[0]).toEqual([
+      { entry_path: 'DEV/a.dev', status: 'glb', size: 3 },
+      { entry_path: 'DEV/b.dev', status: 'glb', size: 3 },
+    ]);
+  });
+
+  it('DEV 路径大小写变体只生成一个 manifest 条目并共享序列化结果', async () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    const rec: DepsRecorder = { serializeCalls: [], writeCalls: [], versionWrites: 0, loadCalls: [], manifestEntries: [] };
+    const state = makeState({ projectId: 11 });
+    const tree = makeTree();
+    tree.children[0].devPath = 'dev/A.DEV';
+    tree.children[1].devPath = 'DEV/a.dev';
+    state.currentCbmTree = tree;
+    const result = await runProgressiveDevGlbPipeline(state, new THREE.Scene(), vi.fn(), { token: 1 }, makeDeps({}, rec));
+
+    expect(result.failedDevs).toEqual([]);
+    expect(rec.serializeCalls).toEqual(['dev/A.DEV', 'DEV/b.dev']);
+    expect(rec.manifestEntries?.[0].filter((entry) => entry.entry_path.toLowerCase() === 'dev/a.dev')).toHaveLength(1);
     expect(rec.versionWrites).toBe(1);
   });
 });

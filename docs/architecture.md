@@ -188,7 +188,7 @@ desktop/src-tauri/
 
 ### PARSER_VERSION 失效机制
 
-- 定义在 `desktop/src-tauri/src/db.rs`：`pub const PARSER_VERSION: &str = "gim-parser-v20"`
+- 定义在 `desktop/src-tauri/src/db.rs`：`pub const PARSER_VERSION: &str = "gim-parser-v21"`
 - `validate_gim_cache` 检查 `parser_version_match`
 - 版本不匹配 → 缓存无效 → 完整解压 → `save_gim_index` 先删后插全部表
 - 2026-08 v17：表名规范化迁移——变电表统一 `substation_` 前缀、线路表统一
@@ -262,7 +262,7 @@ manifest，条目内容由 `DiskBackedFile` 在 `text()` / `arrayBuffer()` 时�
 - **浏览器模式**：无 projectId / 非 Tauri 时跳过落盘与版本文件，仅渐进渲染
 - **中断安全**：项目切换 token 中断即退出且不写版本标记 →
   下次打开 `geometry_cache_version_match=false` 自动清理重编译
-- **二次打开不变**：`tryDevGlbFastPath` GLB 快速路径照旧（秒开）
+- **二次打开**：`tryDevGlbFastPath` 先读取 `geometry-cache-v5-dev-status` 的 DEV manifest，按 unique DEV 通过 `batch_read_glb_files` 二进制 envelope 批读；`empty` 为合法空结果，只有 manifest/GLB 不完整或读取/解析失败才整体回退原始 MOD/STL。
 
 ### 工程类型检测
 

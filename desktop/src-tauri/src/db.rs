@@ -60,11 +60,14 @@ pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 /// - PARSER_VERSION 变 → glbcache 目录由 delete_project_cache 删除重建
 /// - GEOMETRY_CACHE_VERSION 变 → validate_gim_cache 返回 invalid，触发 delete_project_cache + 重序列化
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v4-phm-color";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v5-dev-status";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GeometryCacheManifestEntry {
     pub entry_path: String,
+    /// DEV 几何结果：`glb` 表示有可加载的 GLB，`empty` 表示确定性空几何。
+    /// 旧 manifest 没有该字段，反序列化失败后会整体失效并重建。
+    pub status: String,
     pub size: u64,
 }
 
@@ -2606,6 +2609,13 @@ pub fn read_line_semantic_pack_all(
 
 // ===== GLB 几何缓存（方案 C：MOD → glTF 离线预序列化） =====
 
+/// GLB warm fast path 的单次批读上限。前端按 manifest 中的 size 在此边界
+/// 内组批；单个超大 DEV 允许独占一个批次，避免因为一个合法大模型直接回退
+/// 原始 MOD。
+const MAX_GLB_BATCH_FILES: usize = 256;
+const MAX_GLB_BATCH_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_SINGLE_GLB_BYTES: u64 = 512 * 1024 * 1024;
+
 /// 计算 GLB 缓存文件路径：app_data_dir/glbcache/{project_id}/{entry_path}.glb
 ///
 /// 与 `cache_file_path`（extracted/）和 `fragment_cache_file_path`（fragments/）并列，
@@ -2701,6 +2711,88 @@ pub fn read_glb_file(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Tauri command：批量读取 DEV GLB 缓存文件。
+///
+/// 请求仍只携带受校验的 entry_path 列表，响应使用 GIMR v2 二进制 envelope，
+/// 不把 GLB 编码成 JSON 数字数组。单条文件缺失返回 envelope 中的 null；
+/// 前端根据 manifest 将其判定为 fast path 整体不可用并回退原始 MOD。
+#[tauri::command]
+pub fn batch_read_glb_files(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_paths: Vec<String>,
+) -> Result<tauri::ipc::Response, String> {
+    let total_started = Instant::now();
+    {
+        let conn = app_handle.state::<DbState>();
+        let guard = conn
+            .0
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        ensure_project_exists(&guard, project_id)?;
+    }
+    if entry_paths.len() > MAX_GLB_BATCH_FILES {
+        return Err("批量读取 GLB 文件数量超过安全上限".to_string());
+    }
+
+    let mut results = Vec::with_capacity(entry_paths.len());
+    let mut total_bytes: u64 = 0;
+    let mut hit_count: u32 = 0;
+    let mut resolve_ms = 0.0_f64;
+    let mut read_ms = 0.0_f64;
+    for entry_path in &entry_paths {
+        let resolve_started = Instant::now();
+        let path = match glb_cache_file_path(&app_handle, project_id, entry_path) {
+            Ok(path) => path,
+            Err(_) => {
+                resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
+                results.push(BatchCacheFileResult {
+                    entry_path: entry_path.clone(),
+                    bytes: None,
+                });
+                continue;
+            }
+        };
+        resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
+        let read_started = Instant::now();
+        let bytes = match stdfs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            // 对权限/IO 错误也返回单条 miss；调用方会放弃 fast path，
+            // 但不会把一个不可读的缓存当作完整几何继续提交。
+            Err(_) => None,
+        };
+        read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
+        if let Some(ref data) = bytes {
+            hit_count = hit_count.saturating_add(1);
+            total_bytes = total_bytes
+                .checked_add(data.len() as u64)
+                .ok_or_else(|| "批量读取 GLB 总量溢出".to_string())?;
+            let oversized_single = entry_paths.len() == 1
+                && data.len() as u64 <= MAX_SINGLE_GLB_BYTES;
+            if total_bytes > MAX_GLB_BATCH_BYTES && !oversized_single {
+                return Err(format!(
+                    "批量读取 GLB 总量超过安全上限（>{} bytes）",
+                    MAX_GLB_BATCH_BYTES
+                ));
+            }
+        }
+        results.push(BatchCacheFileResult {
+            entry_path: entry_path.clone(),
+            bytes,
+        });
+    }
+    let out = encode_batch_cache_response(
+        results,
+        total_bytes,
+        hit_count,
+        read_ms,
+        resolve_ms,
+        total_started,
+    )?;
+    Ok(tauri::ipc::Response::new(out))
+}
+
 /// 方案 C：检查 GLB 几何缓存版本是否匹配。
 ///
 /// 读取 `{app_data_dir}/glbcache/{project_id}/_version.txt` 文件内容
@@ -2741,6 +2833,29 @@ fn validate_glb_bytes(bytes: &[u8]) -> bool {
     declared == bytes.len()
 }
 
+/// 校验磁盘上的 GLB 头，而不把完整文件读入 Rust 堆。
+///
+/// `validate_gim_cache` 在 warm restore 前会遍历 manifest；完整 GLB 内容随后
+/// 由 `batch_read_glb_files` 统一读取一次。这里只读固定 12-byte header，避免
+/// 预检阶段把每个 DEV 的 GLB 再完整读一遍。
+fn validate_glb_file_header(path: &Path, expected_size: u64) -> bool {
+    if expected_size < 12 || expected_size > u32::MAX as u64 {
+        return false;
+    }
+    let Ok(mut file) = stdfs::File::open(path) else {
+        return false;
+    };
+    let mut header = [0u8; 12];
+    use std::io::Read;
+    if file.read_exact(&mut header).is_err() {
+        return false;
+    }
+    &header[..4] == b"glTF"
+        && u32::from_le_bytes([header[4], header[5], header[6], header[7]]) == 2
+        && u32::from_le_bytes([header[8], header[9], header[10], header[11]]) as u64
+            == expected_size
+}
+
 fn geometry_manifest_path(
     app_handle: &tauri::AppHandle,
     project_id: i64,
@@ -2763,6 +2878,52 @@ fn geometry_manifest_path(
     Ok(manifest)
 }
 
+/// 校验一个 DEV geometry manifest 条目的结构。该检查不访问磁盘，供
+/// `validate_gim_cache`、manifest 写入和单元测试共享；文件存在/GLB header
+/// 校验由调用方在此结构检查通过后执行。
+fn validate_geometry_manifest_entry_shape(
+    entry: &GeometryCacheManifestEntry,
+    seen: &mut HashSet<String>,
+) -> Result<(), String> {
+    let normalized_path = normalize_cache_lookup_path(&entry.entry_path);
+    validate_entry_path(&entry.entry_path)
+        .map_err(|e| format!("GLB manifest entry_path 无效: {} ({})", entry.entry_path, e))?;
+    if !normalized_path.starts_with("dev/") {
+        return Err(format!("GLB manifest 只允许 DEV 条目: {}", entry.entry_path));
+    }
+    if !seen.insert(normalized_path) {
+        return Err(format!("GLB manifest 条目重复: {}", entry.entry_path));
+    }
+    match entry.status.as_str() {
+        "empty" if entry.size == 0 => Ok(()),
+        "glb" if entry.size > 0 => Ok(()),
+        "empty" => Err(format!("empty GLB manifest 条目大小必须为 0: {}", entry.entry_path)),
+        "glb" => Err(format!("glb GLB manifest 条目大小必须大于 0: {}", entry.entry_path)),
+        _ => Err(format!("GLB manifest 状态无效: {}", entry.entry_path)),
+    }
+}
+
+/// 读取当前项目的 DEV geometry manifest。manifest 本身只描述 source/status/size；
+/// GLB 文件及 header/长度由 fast path 和 validate_gim_cache 继续独立校验。
+#[tauri::command]
+pub fn read_geometry_cache_manifest(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+) -> Result<GeometryCacheManifest, String> {
+    {
+        let conn = app_handle.state::<DbState>();
+        let guard = conn
+            .0
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        ensure_project_exists(&guard, project_id)?;
+    }
+    let path = geometry_manifest_path(&app_handle, project_id)?;
+    let bytes = stdfs::read(&path).map_err(|e| format!("读取 GLB manifest 失败: {}", e))?;
+    serde_json::from_slice::<GeometryCacheManifest>(&bytes)
+        .map_err(|e| format!("解析 GLB manifest 失败: {}", e))
+}
+
 fn check_geometry_cache_manifest(
     app_handle: &tauri::AppHandle,
     project_id: i64,
@@ -2782,8 +2943,12 @@ fn check_geometry_cache_manifest(
     }
     let mut seen = std::collections::HashSet::new();
     for entry in manifest.entries {
-        if !seen.insert(entry.entry_path.clone()) || entry.size == 0 {
+        if validate_geometry_manifest_entry_shape(&entry, &mut seen).is_err() {
             return false;
+        }
+        if entry.status == "empty" {
+            // empty 是确定性的合法结果，不存在对应 GLB 文件也不构成 miss。
+            continue;
         }
         let Ok(glb_path) = glb_cache_file_path(app_handle, project_id, &entry.entry_path) else {
             return false;
@@ -2794,10 +2959,10 @@ fn check_geometry_cache_manifest(
         if meta.len() != entry.size {
             return false;
         }
-        let Ok(glb) = stdfs::read(&glb_path) else {
-            return false;
-        };
-        if !validate_glb_bytes(&glb) {
+        // Only inspect the fixed header here. The warm fast path's binary batch
+        // read performs the one full-file read and repeats size/header checks
+        // on the returned bytes before parsing.
+        if !validate_glb_file_header(&glb_path, entry.size) {
             return false;
         }
     }
@@ -2829,11 +2994,12 @@ pub fn write_geometry_cache_manifest(
     }
     let mut seen = std::collections::HashSet::new();
     for entry in &entries {
-        if !seen.insert(entry.entry_path.clone()) || entry.size == 0 {
-            return Err(format!(
-                "GLB manifest 条目重复或大小无效: {}",
-                entry.entry_path
-            ));
+        if let Err(error) = validate_geometry_manifest_entry_shape(entry, &mut seen) {
+            return Err(error);
+        }
+        if entry.status == "empty" {
+            // empty 为确定性 tombstone：不要求磁盘上存在零字节占位文件。
+            continue;
         }
         let path = glb_cache_file_path(&app_handle, project_id, &entry.entry_path)?;
         let meta =
@@ -6646,5 +6812,55 @@ mod tests {
         let error = read_line_semantic_pack_files(&root, false).unwrap_err();
         assert!(error.starts_with("INDEX_INVALID:"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn geometry_manifest_accepts_glb_and_empty_and_is_case_insensitive() {
+        let mut seen = HashSet::new();
+        validate_geometry_manifest_entry_shape(
+            &GeometryCacheManifestEntry {
+                entry_path: "DEV/Shared.Dev".into(),
+                status: "glb".into(),
+                size: 12,
+            },
+            &mut seen,
+        )
+        .unwrap();
+        validate_geometry_manifest_entry_shape(
+            &GeometryCacheManifestEntry {
+                entry_path: "dev/empty.dev".into(),
+                status: "empty".into(),
+                size: 0,
+            },
+            &mut seen,
+        )
+        .unwrap();
+        let duplicate = validate_geometry_manifest_entry_shape(
+            &GeometryCacheManifestEntry {
+                entry_path: "Dev/SHARED.DEV".into(),
+                status: "glb".into(),
+                size: 12,
+            },
+            &mut seen,
+        )
+        .unwrap_err();
+        assert!(duplicate.contains("重复"));
+    }
+
+    #[test]
+    fn geometry_manifest_rejects_invalid_status_and_empty_size() {
+        for (status, size) in [("empty", 1), ("glb", 0), ("partial", 12)] {
+            let mut seen = HashSet::new();
+            let error = validate_geometry_manifest_entry_shape(
+                &GeometryCacheManifestEntry {
+                    entry_path: "DEV/item.dev".into(),
+                    status: status.into(),
+                    size,
+                },
+                &mut seen,
+            )
+            .unwrap_err();
+            assert!(!error.is_empty());
+        }
     }
 }

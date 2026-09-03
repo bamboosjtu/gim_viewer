@@ -1,6 +1,6 @@
 # 方案 C：MOD → glTF 离线预序列化缓存
 
-> **状态（2026-08-30）**：C-1 ~ C-6 的 MOD/STL 文件粒度 v1 是历史实现，随后已由 §10 的 DEV 粒度方案取代。当前代码使用 `glbcache/{projectId}/DEV/` 与 `GEOMETRY_CACHE_VERSION=geometry-cache-v4-phm-color`；首次生成、二次命中、位置一致性和版本失效已纳入当前构建/样本回归验证。§2-§9 保留为 v1 设计/实施记录，不代表当前缓存粒度。
+> **状态（2026-09-03）**：C-1 ~ C-6 的 MOD/STL 文件粒度 v1 是历史实现，随后已由 §10 的 DEV 粒度方案取代。当前代码使用 `glbcache/{projectId}/DEV/` 与 `GEOMETRY_CACHE_VERSION=geometry-cache-v5-dev-status`；manifest 对每个 unique DEV 显式记录 `status=glb|empty`，warm 回放以 unique DEV 二进制 batch 读取 GLB，合法 empty 不触发回退；首次生成、二次命中、位置一致性和版本失效已纳入当前构建/样本回归验证。§2-§9 保留为 v1 设计/实施记录，不代表当前缓存粒度。
 >
 > 关联文档：
 > - [17-batch-load-schema.md](./17-batch-load-schema.md)：批量加载方案对比（方案 A/B/C）
@@ -379,7 +379,7 @@ C-1 ~ C-6 全部完成，TypeScript 编译 + Rust cargo check 通过。
 
 ## 10. 设计变更：MOD 粒度 → DEV 粒度（2026-07-11 v2）
 
-> **当前实现**：本节取代 §2-§9 的 MOD/STL 文件粒度方案。当前代码常量为 `geometry-cache-v4-phm-color`，版本 marker 位于 `glbcache/{projectId}/_version.txt`。
+> **当前实现**：本节取代 §2-§9 的 MOD/STL 文件粒度方案。当前代码常量为 `geometry-cache-v5-dev-status`，版本 marker 位于 `glbcache/{projectId}/_version.txt`，同目录 `_manifest.json` 保存 source SHA 与每个 DEV 的 `status/size`。
 
 ### 10.1 问题
 
@@ -456,20 +456,35 @@ v'' = CBM × ((DEV × PHM) × v)
 | D-3 | `openGimService.ts` 收集 CBM seed devPaths 传给 `cacheGlbFiles` | ✅ 完成 |
 | D-4 | `modAutoLoadService.ts` 重写 Phase 1.5/3：按 seed 加载 DEV.glb | ✅ 完成 |
 | D-5 | `nodeInteractionService.ts` 重写 `loadModStlForNode`：按 DEV 加载 | ✅ 完成 |
-| D-6 | 验证 + 文档更新 | ✅ TypeScript 编译通过；⏳ 运行时验证待用户手动执行 |
+| D-6 | 验证 + 文档更新 | ✅ TypeScript/Rust 编译与回归通过 |
+| D-7 | v3 完整性与 warm fast path | ✅ 每 DEV `glb|empty` manifest、大小写不敏感 unique DEV 去重、GIMR v2 二进制 batch 读取、失败整体回退 |
 
 ### 10.6 D-6 验证记录
 
-**编译验证**（2026-07-11）：
-- ✅ `npx tsc --noEmit` 通过（修复 3 个 v1 残留代码引用错误：`loadModFileWithGlb`/`loadStlFileWithGlb`/`stlRoot` 未使用）
-- ✅ 方案 C v1 残留代码已清理（`loadModFileWithGlb`/`loadStlFileWithGlb`/Phase 3 GLB 预读逻辑全部删除）
+**编译与回归验证**（2026-09-03）：
+- ✅ `npm test -- --run`：54 个测试文件、628/628 通过；包含 v3 fast path、manifest、失败清理和 session 竞态回归。
+- ✅ `npm run test:sample`：4 个测试文件、30/30 通过；真实 line02 样本解析链保持不变。
+- ✅ `npm run build`、`cargo check`、`cargo test`：均通过（Rust 24 个单元测试）。
+- ✅ 旧 manifest（缺少 `status`）按整体失效处理；`glb+empty` 完整覆盖时不触发 raw MOD fallback。
 
-**关键修复**（2026-07-11）：
-- 修复 `tryDevGlbFastPath` 100% 命中率要求导致的回退问题：原逻辑要求所有 DEV 都有 GLB 文件才使用快速路径，但无几何的 DEV 不会生成 GLB 文件，导致命中率永远 < 100%。改为部分命中即可使用 GLB 快速路径，未命中的 DEV 跳过（它们本来就没有几何）。
+**v3 关键修复**（2026-09-03）：
+- manifest 对每个 unique DEV 明确记录 `status=glb` 或 `status=empty`；序列化/落盘失败不写完整版本标记。
+- warm fast path 先按大小写不敏感的 DEV key 建立 CBM placement 映射，GLB bytes 以 Rust `batch_read_glb_files` 的 GIMR v2 envelope 分批读取；同一 DEV 只读一次，每个 placement 仍独立 `loadDevGlb`。
+- empty DEV 不读、不 parse、不触发 fallback；manifest 缺项、GLB 缺失/截断/header 或 size 不符、真实 parse 错误会清理已加入场景的 group 并整体回退原始 MOD/STL。
 
-**运行时验证清单**（待用户在 demo-substation 上手动验证）：
-- [ ] 首次打开：后台序列化 DEV.glb（`{app_data_dir}/glbcache/{projectId}/DEV/` 下生成 .glb 文件 + `_version.txt`）
-- [ ] 二次打开：`tryDevGlbFastPath` 命中，跳过 MOD 逐个 XML 解析，秒级渲染
-- [ ] MOD/STL 位置与方案 B 一致（两次 ×0.001 等价于一次完整应用）
-- [ ] 节点点击懒加载正确加载 DEV.glb
-- [ ] `GEOMETRY_CACHE_VERSION` 变更时 glb 缓存失效重建
+**运行时验证清单**（2026-09-03，真实 Tauri warm 样本）：
+- [x] 首次打开路径已生成 DEV.glb 与 `_version.txt`；manifest 对每个 unique DEV 写入 `glb|empty` 状态。
+- [x] 二次打开 `tryDevGlbFastPath` 命中，使用 `batch_read_glb_files` GIMR v2；两组样本 `read_glb_file=0`。
+- [x] `glb+empty` 混合命中：substation02 的 547 个 empty DEV 未读取、未触发 raw MOD fallback。
+- [x] 多 CBM placement 复用同一 DEV bytes，仍按 placement 独立 `loadDevGlb`；单元回归验证实例数量和矩阵应用路径。
+- [x] manifest 缺失、GLB 截断/大小或 header 不符、真实读取/解析失败时整体清理 fast-path group 并回退原始 MOD/STL；截断、解析失败和 A→B session 竞态均有回归测试。
+- [x] `GEOMETRY_CACHE_VERSION` 变更时 glb 缓存失效重建。
+
+真实 Tauri warm 复测（n=3/样本）摘要：
+
+| 样本 | CBM instances | unique DEV | glb DEV | empty DEV | batch calls | batch read median/P95 | GLB bytes | GLB parse count | GLB parse median/P95 | `read_glb_file` | raw MOD fallback |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| substation02 | 4675 | 1174 | 627 | 547 | 9 | 2363.9 / 2637.9 ms | 59.25 MiB | 4114 | 967.3 / 1029.8 ms | 0 | 0 |
+| substation04 | 532 | 207 | 207 | 0 | 3 | 733.3 / 739.7 ms | 27.07 MiB | 532 | 175.0 / 191.5 ms | 0 | 0 |
+
+以上仅覆盖本轮指定的两个 warm 样本，不替代 cold 路径或其它变电样本的完整性能结论；详细 IPC、RSS、JS heap 和阶段时序见 [`docs/substation_loading_characterization_v1.md`](../substation_loading_characterization_v1.md)。

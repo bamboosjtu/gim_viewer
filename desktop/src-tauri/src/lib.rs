@@ -431,6 +431,8 @@ pub fn run() {
             db::read_line_semantic_pack_all,
             db::write_glb_file_binary,
             db::read_glb_file,
+            db::batch_read_glb_files,
+            db::read_geometry_cache_manifest,
             db::write_geometry_cache_version,
             db::write_geometry_cache_manifest,
             db::get_gim_index,

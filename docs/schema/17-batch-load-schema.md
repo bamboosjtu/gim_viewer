@@ -11,7 +11,7 @@
 
 > **历史状态（2026-07-17）**：本文同时包含设计基线与实施历史。方案 B 静态合并、DEV 粒度 GLB 缓存及 marker 版本失效机制已经实现；当时 `PARSER_VERSION=gim-parser-v14`、`GEOMETRY_CACHE_VERSION=geometry-cache-v2-stretched-body`。Worker 化解析、SQLite 几何缓存表和 `.gimc` 预编译容器仍未实现。§1 的“现状”与 §15 早期“待实施”表应按本说明及 [18c](18c-experiment-mod-to-gltf-cache.md) 的 v2 记录理解。
 >
-> **当前状态（2026-09-01）**：源码以 `PARSER_VERSION=gim-parser-v20`、`GEOMETRY_CACHE_VERSION=geometry-cache-v4-phm-color` 为准；DEV 粒度 GLB 管线、PHM 颜色覆盖、缓存命中回放、属性来源路由、线路 Parser Worker 与 semantic pack 已落地。Worker 化 IFC 解析、SQLite 几何缓存表、InstancedMesh 装配及 `.gimc` 预编译容器仍是长期路线，本文旧版本号仅作演进记录。
+> **当前状态（2026-09-03）**：源码以 `PARSER_VERSION=gim-parser-v21`、`GEOMETRY_CACHE_VERSION=geometry-cache-v5-dev-status` 为准；DEV 粒度 GLB 管线、每 DEV `glb|empty` manifest、unique DEV 二进制 batch warm 回放、PHM 颜色覆盖、缓存命中回放、属性来源路由、线路 Parser Worker 与 semantic pack 已落地。Worker 化 IFC 解析、SQLite 几何缓存表、InstancedMesh 装配及 `.gimc` 预编译容器仍是长期路线，本文旧版本号仅作演进记录。
 
 ## 1. 问题背景
 
@@ -638,13 +638,14 @@ for (let j = 0; j < batch.length; j++) {
 ### 7.3 缓存版本化策略
 
 ```text
-PARSER_VERSION          = 'gim-parser-v20'        // 当前，GIM 解析层（v1→v20 详见下方演进历史）
+PARSER_VERSION          = 'gim-parser-v21'        // 当前，GIM 解析层（v1→v21 详见下方演进历史）
 FRAGMENTS_CACHE_VERSION = 'fragments-cache-v6'   // 基础版本；运行时另拼接 fragments/web-ifc 实际版本
-GEOMETRY_CACHE_VERSION  = 'geometry-cache-v4-phm-color' // 当前，DEV 粒度 MOD/STL 序列化几何与 PHM 颜色覆盖
+GEOMETRY_CACHE_VERSION  = 'geometry-cache-v5-dev-status' // 当前，DEV 粒度 GLB + empty manifest 与 PHM 颜色覆盖
 
 失效规则：
   - GIM 重解压（PARSER_VERSION 变）→ GEOMETRY_CACHE_VERSION 同步失效
   - MOD 解析逻辑变更（如 primitive 参数提取规则改）→ GEOMETRY_CACHE_VERSION 单独递增
+  - DEV manifest/批读协议变更（`status=glb|empty`、GLB header/size 校验）→ GEOMETRY_CACHE_VERSION 单独递增
   - InstancedMesh 装配逻辑变更 → 不影响缓存（装配是运行时）
 ```
 
@@ -661,7 +662,14 @@ GEOMETRY_CACHE_VERSION  = 'geometry-cache-v4-phm-color' // 当前，DEV 粒度 M
 | v11 | F3System 命名优化（方案A 过滤占位符 + 方案B F4 反推后缀） |
 | v12 | 修复 DEV SUBDEVICE 虚拟子节点 transformMatrix 为空 |
 | v13 | DEV_SUBDEVICE 虚拟节点不作为全量几何查询起点 |
-| v14 | 当前版本（详见 18b 文档） |
+| v14 | 线路/变电缓存分层基线（历史快照，详见 18b 文档） |
+| v15 | IFC 路径可位于 CBM/ 或 DEV/；旧错误 DEV/ 路径缓存失效重建 |
+| v16 | 资源上限、几何 ready 提交协议、线路缓存 session 校验 |
+| v17 | 变电/线路 SQLite 表前缀规范化（共享 `gim_project` 保留） |
+| v18 | 线路语义索引与批量读取协议演进（历史中间版本） |
+| v19 | IFC 空间索引逐模型增量构建；运行时 IFC 会话与模型事件隔离 |
+| v20 | 线路 native semantic pack 与大 MOD 仅保留路径元数据 |
+| v21 | semantic pack 保存完整 entry metadata 并支持 warm full-read；当前源码版本 |
 
 ---
 
@@ -728,6 +736,21 @@ GEOMETRY_CACHE_VERSION  = 'geometry-cache-v4-phm-color' // 当前，DEV 粒度 M
    → state.loadedInstancedMeshes.clear()
 
 3. 新项目进入流程 8.1 或 8.2
+```
+
+> 注：8.1/8.2/8.3 保留的是早期 geometry cache / InstancedMesh 设计推演。当前生产实现不使用 `geometry_cache` SQLite 表或 InstancedMesh；变电 warm 几何按下列 v5 路径执行。
+
+### 8.4 当前 DEV GLB warm 回放（geometry-cache-v5）
+
+```text
+validate_gim_cache
+  → gim-parser-v21 + geometry-cache-v5-dev-status/_manifest.json
+  → 恢复 CBM/IFC 索引
+  → Map<lowercase DEV path, CBM placement[]> 建立 unique DEV 输入
+  → batch_read_glb_files（GIMR v2；<=256 文件、预计 <=64 MiB）
+  → status=glb：每个 placement 独立 loadDevGlb + CBM transform
+  → status=empty：不读文件、不 parse、不 fallback
+  → manifest/GLB 缺失、截断、size/header 或读取/解析错误：清理已加载 group，整体回退原始 MOD/STL
 ```
 
 ---

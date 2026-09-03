@@ -528,6 +528,28 @@ export async function readGlbFile(projectId: number, entryPath: string): Promise
 }
 
 /**
+ * 批量读取 DEV GLB 缓存。Rust 返回 GIMR v2 二进制 envelope，避免旧的
+ * JSON 数字数组响应；调用方负责按文件数/预计字节数切分批次。
+ */
+export async function batchReadGlbFiles(
+  projectId: number,
+  entryPaths: string[],
+): Promise<Map<string, Uint8Array | null>> {
+  const perfSession = perfCurrentSession();
+  const pathBytes = entryPaths.reduce((sum, path) => sum + utf8Encoder.encode(path).byteLength, 0);
+  const requestBytes = pathBytes + entryPaths.length * 6 + String(projectId).length + 32;
+  const payload = await invokeTimed<ArrayBuffer>('batch_read_glb_files', {
+    projectId,
+    entryPaths,
+  }, { requestBytes });
+  const parsed = parseBatchCachePayload(payload);
+  if (parsed.profile) perfRecordBatchRead(parsed.profile, perfSession.id);
+  const map = new Map<string, Uint8Array | null>();
+  for (const item of parsed.items) map.set(item.entry_path, item.bytes);
+  return map;
+}
+
+/**
  * 方案 C：写入 GLB 几何缓存版本标记文件。
  *
  * 在渐进式几何管线（progressiveGeometryService）完成所有 MOD/STL → .glb
@@ -539,9 +561,22 @@ export async function writeGeometryCacheVersion(projectId: number): Promise<stri
   return invokeTimed<string>('write_geometry_cache_version', { projectId });
 }
 
+export type GeometryCacheManifestStatus = 'glb' | 'empty';
+
 export interface GeometryCacheManifestEntry {
   entry_path: string;
+  status: GeometryCacheManifestStatus;
   size: number;
+}
+
+export interface GeometryCacheManifest {
+  source_sha256: string;
+  entries: GeometryCacheManifestEntry[];
+}
+
+/** 读取 DEV 粒度 GLB manifest（仅读取描述，不传输 GLB 内容）。 */
+export async function readGeometryCacheManifest(projectId: number): Promise<GeometryCacheManifest> {
+  return invokeTimed<GeometryCacheManifest>('read_geometry_cache_manifest', { projectId });
 }
 
 export async function writeGeometryCacheManifest(
@@ -1015,7 +1050,7 @@ export interface LineDevPropertyPayload {
  *
  * 生产线路首次导入路径应调用此命令，不得再单独调用 saveLineGraph。
  * 事务内：删除 6 张表旧数据 → 插入 graph + fam + dev → 更新
- * parser_version = PARSER_VERSION（当前 gim-parser-v20）, project_type = transmission_line。
+ * parser_version = PARSER_VERSION（当前 gim-parser-v21）, project_type = transmission_line。
  */
 /** 属性分块大小：每批 IPC 传输的记录数（acc-plan P1-2） */
 const LINE_ATTR_CHUNK_SIZE = 4000;

@@ -23,6 +23,7 @@
 import * as THREE from 'three';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { CbmNode } from '../gim/types.js';
+import type { GeometryCacheManifestEntry } from '@desktop/database.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { isTauri } from '@desktop/runtime.js';
@@ -64,7 +65,7 @@ export interface ProgressiveGeometryDependencies {
   loadDevGlb: (devPath: string, bytes: Uint8Array) => Promise<THREE.Group | null>;
   writeGlbFile: (projectId: number, entryPath: string, bytes: Uint8Array) => Promise<unknown>;
   writeGeometryCacheVersion: (projectId: number) => Promise<unknown>;
-  writeGeometryCacheManifest: (projectId: number, sourceSha256: string, entries: Array<{ entry_path: string; size: number }>) => Promise<unknown>;
+  writeGeometryCacheManifest: (projectId: number, sourceSha256: string, entries: GeometryCacheManifestEntry[]) => Promise<unknown>;
   applyPlacementTransformToSceneUnits: (group: THREE.Group, transformMatrix: number[] | null | undefined) => void;
   yieldToMain: () => Promise<void>;
 }
@@ -151,10 +152,13 @@ export async function runProgressiveDevGlbPipeline(
   for (const seed of seeds) {
     if (!seed.devPath) continue;
     const devPath = normalizeDevEntryPath(seed.devPath);
-    const arr = seedsByDev.get(devPath);
+    // GIM samples mix DEV/dev casing.  Treat paths case-insensitively for
+    // cache identity while retaining the first spelling for IPC/file lookup.
+    const key = devPath.toLowerCase();
+    const arr = seedsByDev.get(key);
     if (arr) arr.push(seed);
     else {
-      seedsByDev.set(devPath, [seed]);
+      seedsByDev.set(key, [seed]);
       devOrder.push(devPath);
     }
   }
@@ -168,7 +172,7 @@ export async function runProgressiveDevGlbPipeline(
   // P1 评审：结果追踪——只有全部 DEV 都有确定性结果（GLB 落盘成功 或 确认空几何）
   // 才写版本标记；任何失败都保持版本戳过期，下次打开自动重建
   const failedDevs: string[] = [];
-  const glbEntries: Array<{ entry_path: string; size: number }> = [];
+  const glbEntries: GeometryCacheManifestEntry[] = [];
 
   const report = (currentDevPath?: string) =>
     onProgress({ phase: 'compiling', compiledDevs, totalDevs, renderedInstances, currentDevPath });
@@ -196,7 +200,11 @@ export async function runProgressiveDevGlbPipeline(
     }
     if (!glbBytes || glbBytes.byteLength === 0) {
       if (!serializeFailed) {
-        // 无几何引用或空几何：tombstone（确定性结果），与 tryDevGlbFastPath 的 miss 语义一致
+        // 无几何引用或空几何：tombstone（确定性结果）。v3 manifest
+        // 必须显式记录 empty，warm fast path 才能区分合法空结果与缓存缺失。
+        if (capturedProjectId != null && isTauri()) {
+          glbEntries.push({ entry_path: devPath, status: 'empty', size: 0 });
+        }
         compiledDevs++;
         continue;
       }
@@ -213,7 +221,7 @@ export async function runProgressiveDevGlbPipeline(
       }
       try {
         await deps.writeGlbFile(capturedProjectId, devPath, glbBytes);
-        glbEntries.push({ entry_path: devPath, size: glbBytes.byteLength });
+        glbEntries.push({ entry_path: devPath, status: 'glb', size: glbBytes.byteLength });
         if (!isSessionValid()) {
           return { ...interrupted, compiledDevs, renderedInstances, failedDevs };
         }
@@ -224,7 +232,7 @@ export async function runProgressiveDevGlbPipeline(
     }
 
     // 2.3 逐 CBM 实例渲染
-    const devSeeds = seedsByDev.get(devPath)!;
+    const devSeeds = seedsByDev.get(devPath.toLowerCase())!;
     for (const seed of devSeeds) {
       const instanceKey = `dev:${devPath}#${seed.path}`;
       if (state.loadedXmlModGroups.has(instanceKey)) continue;
@@ -279,6 +287,16 @@ export async function runProgressiveDevGlbPipeline(
       try {
         if (!session.sourceSha256) {
           throw new Error('缺少当前源 GIM SHA-256，拒绝提交 GLB 缓存');
+        }
+        // The manifest is the completeness contract for the warm path. A
+        // successful DEV must contribute exactly one case-insensitive entry;
+        // otherwise a coding/data anomaly could publish a cache that silently
+        // omits a placement source while still carrying a current version.
+        const manifestKeys = new Set(glbEntries.map((entry) => normalizeDevEntryPath(entry.entry_path).toLowerCase()));
+        if (glbEntries.length !== totalDevs || manifestKeys.size !== totalDevs) {
+          throw new Error(
+            `GLB manifest 覆盖不完整: ${manifestKeys.size}/${totalDevs} unique DEV`,
+          );
         }
         await deps.writeGeometryCacheManifest(capturedProjectId, session.sourceSha256, glbEntries);
         if (!isSessionValid()) {

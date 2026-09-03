@@ -52,15 +52,27 @@ function getGltfLoader(): GLTFLoader {
  *
  * @param devPath DEV 文件路径（如 "DEV/abc.dev"）
  * @param files GIM 解压后的文件集合
- * @returns GLB 二进制 bytes；空几何或失败返回 null
+ * @returns GLB 二进制 bytes；无几何引用返回 null；缺失/序列化失败抛错
  */
 export async function serializeDevToGlb(
   devPath: string,
   files: Map<string, File>,
 ): Promise<Uint8Array | null> {
+  // A missing DEV is a cache failure, not a deterministic empty result. The
+  // discovery helper intentionally treats missing references as empty for the
+  // interactive XML fallback, but the geometry manifest must not record that
+  // failure as `empty`.
+  const normalizedDevPath = devPath.replace(/\\/g, '/');
+  const canonicalDevPath = normalizedDevPath.toLowerCase().startsWith('dev/')
+    ? normalizedDevPath
+    : `DEV/${normalizedDevPath}`;
+  if (!getFileByPath(files, canonicalDevPath)) {
+    throw new Error(`DEV 文件不存在，无法生成 GLB: ${canonicalDevPath}`);
+  }
+
   // 1. 发现 DEV 内部所有 MOD/STL 几何（parentTransform = IDENTITY，不含 CBM）
   const discovered = await discoverGeometriesFromDevPath(
-    devPath,
+    canonicalDevPath,
     files,
     IDENTITY_MATRIX.slice(),
     new Set<string>(),
@@ -77,8 +89,8 @@ export async function serializeDevToGlb(
   const { applyPhmColorOverride } = await import('../viewer/xmlModGeometry.js');
 
   const devGroup = new THREE.Group();
-  devGroup.name = `glb-dev:${devPath}`;
-  devGroup.userData.devPath = devPath;
+  devGroup.name = `glb-dev:${canonicalDevPath}`;
+  devGroup.userData.devPath = canonicalDevPath;
 
   let modLoaded = 0;
   let stlLoaded = 0;
@@ -93,7 +105,7 @@ export async function serializeDevToGlb(
       devGroup.add(group);
       modLoaded++;
     } catch (err) {
-      console.warn(`[glbCache] DEV ${devPath} 内 MOD 加载失败: ${geo.modPath}`, err);
+      console.warn(`[glbCache] DEV ${canonicalDevPath} 内 MOD 加载失败: ${geo.modPath}`, err);
     }
   }
 
@@ -111,32 +123,34 @@ export async function serializeDevToGlb(
       devGroup.add(group);
       stlLoaded++;
     } catch (err) {
-      console.warn(`[glbCache] DEV ${devPath} 内 STL 加载失败: ${geo.stlPath}`, err);
+      console.warn(`[glbCache] DEV ${canonicalDevPath} 内 STL 加载失败: ${geo.stlPath}`, err);
     }
   }
 
   if (devGroup.children.length === 0) {
-    return null;
+    // A DEV with references but no loadable child is not equivalent to a DEV
+    // with no references. Throw so the progressive pipeline leaves the
+    // manifest/version incomplete and warm restore falls back to raw MOD/STL.
+    throw new Error(`DEV ${canonicalDevPath} 的几何引用均无法加载`);
   }
 
-  debugLog(DEBUG_GIM_CACHE, `[glbCache] DEV ${devPath}: ${modLoaded} MOD + ${stlLoaded} STL 合并完成`);
+  debugLog(DEBUG_GIM_CACHE, `[glbCache] DEV ${canonicalDevPath}: ${modLoaded} MOD + ${stlLoaded} STL 合并完成`);
 
   // 3. 序列化 devGroup → GLB
   const exporter = new GLTFExporter();
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     exporter.parse(
       devGroup,
       (gltf) => {
         if (gltf instanceof ArrayBuffer) {
           resolve(new Uint8Array(gltf));
         } else {
-          console.warn(`[glbCache] 非预期 GLTFExporter 输出类型: ${devPath}`);
-          resolve(null);
+          reject(new Error(`GLTFExporter 输出类型无效: ${canonicalDevPath}`));
         }
       },
       (error) => {
-        console.error(`[glbCache] DEV 序列化失败: ${devPath}`, error);
-        resolve(null);
+        const detail = error instanceof Error ? error.message : String(error);
+        reject(new Error(`DEV 序列化失败: ${canonicalDevPath}: ${detail}`));
       },
       { binary: true },
     );
