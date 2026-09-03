@@ -65,6 +65,84 @@ export interface PerfLongTaskStats {
   maxMs: number;
 }
 
+/** 变电加载的产品时刻；名称保持稳定，供 Tauri 采集脚本和报告使用。 */
+export type PerfProductMoment = 'semanticReady' | 'firstGeometryReady' | 'fullModelReady';
+
+export interface PerfProductMomentInfo {
+  atMs: number;
+  meta?: Record<string, unknown>;
+  sessionId: number;
+}
+
+/** 分阶段内存样本。RSS 与 JS heap 必须分别标注来源，不能互相替代。 */
+export interface PerfMemorySample {
+  label: string;
+  atMs: number;
+  sessionId: number;
+  rssBytes: number | null;
+  rssSource?: string;
+  jsHeapUsedBytes: number | null;
+  jsHeapTotalBytes: number | null;
+  jsHeapLimitBytes: number | null;
+  meta?: Record<string, unknown>;
+}
+
+/** 单个 IFC 的磁盘读取与文本解码 profile。 */
+export interface PerfSubstationIfcReadProfile {
+  modelId: string;
+  entryPath: string;
+  bytes: number;
+  readMs: number;
+  decodeMs: number;
+  found: boolean;
+  error?: string;
+}
+
+/** 单个 IFC 的 Spatial Semantic 分阶段 profile。 */
+export interface PerfSubstationIfcProfile {
+  modelId: string;
+  entryPath: string;
+  sourceBytes: number;
+  totalMs: number;
+  stepScanMs: number;
+  rawEntityCount: number;
+  detailEntityCount: number;
+  placementEntityCount: number;
+  placementDetailMs: number;
+  spatialEntityCount: number;
+  spatialEntityMs: number;
+  propertyEntityCount: number;
+  quantityEntityCount: number;
+  propertyValueCount: number;
+  quantityValueCount: number;
+  materialEntityCount: number;
+  classificationEntityCount: number;
+  propertyMs: number;
+  relationshipRecordCount: number;
+  relationshipReferenceCount: number;
+  relationshipMs: number;
+  finalizeMs: number;
+  objectCount: number;
+  containedObjectCount: number;
+  parseError?: string;
+}
+
+export interface PerfSubstationFinalizeProfile {
+  durationMs: number;
+  modelCount: number;
+  spatialNodeCount: number;
+  objectCount: number;
+  linkCount: number;
+  cbmLinkCount: number;
+  uncontainedIfcObjects: number;
+}
+
+export interface PerfSubstationStats {
+  ifcReads: PerfSubstationIfcReadProfile[];
+  ifcParses: PerfSubstationIfcProfile[];
+  finalize: PerfSubstationFinalizeProfile[];
+}
+
 /** Rust batch_read_cached_files 的内部阶段统计（不含 WebView IPC 往返）。 */
 export interface PerfBatchReadStats {
   count: number;
@@ -98,6 +176,11 @@ let currentSession: PerfSession = { id: 0 };
 let spans: PerfSpan[] = [];
 const invokeStats = new Map<string, InvokeAccumulator>();
 let longTaskStats: PerfLongTaskStats = { count: 0, totalBlockingTimeMs: 0, maxMs: 0 };
+const productMoments = new Map<PerfProductMoment, PerfProductMomentInfo>();
+let memorySamples: PerfMemorySample[] = [];
+let substationIfcReads: PerfSubstationIfcReadProfile[] = [];
+let substationIfcParses: PerfSubstationIfcProfile[] = [];
+let substationFinalizes: PerfSubstationFinalizeProfile[] = [];
 interface BatchReadAccumulator {
   count: number;
   requestedEntries: number;
@@ -178,6 +261,15 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
     durations: [],
   };
   longTaskStats = { count: 0, totalBlockingTimeMs: 0, maxMs: 0 };
+  productMoments.clear();
+  if (import.meta.env?.DEV) {
+    (globalThis as { __GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__?: Record<string, unknown> })
+      .__GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__ = {};
+  }
+  memorySamples = [];
+  substationIfcReads = [];
+  substationIfcParses = [];
+  substationFinalizes = [];
   // PerformanceObserver 回调可能在旧工程 reset 后才到达。重建 observer，
   // 让回调闭包绑定新 session id，避免旧 Long Task 计入新工程。
   if (longTaskObserverEnabled) installLongTaskObserver();
@@ -223,6 +315,159 @@ export function perfMark(
   };
   spans.push(span);
   debugPerf(span);
+}
+
+/**
+ * 记录一个已经在其它运行时完成的计时区间（例如 Rust/同步解析器）。
+ * startMs 是按“完成时刻 - duration”反推的近似时间轴位置；精确阶段数据
+ * 同时保存在 meta/结构化 profile 中，不依赖该近似位置。
+ */
+export function perfRecordExternalSpan(
+  label: string,
+  durationMs: number,
+  meta?: Record<string, unknown>,
+  session: PerfSession = currentSession,
+): void {
+  if (!perfIsCurrentSession(session)) return;
+  const safeDuration = Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0;
+  const completedAt = performance.now();
+  const span: PerfSpan = {
+    label,
+    startMs: Math.max(0, completedAt - sessionStartMs - safeDuration),
+    durationMs: safeDuration,
+    meta,
+    sessionId: session.id,
+  };
+  spans.push(span);
+  debugPerf(span);
+}
+
+/** 记录稳定的产品时刻；同一时刻只保留第一次提交。 */
+export function perfMarkProductMoment(
+  moment: PerfProductMoment,
+  meta?: Record<string, unknown>,
+  session: PerfSession = currentSession,
+): void {
+  if (!perfIsCurrentSession(session) || productMoments.has(moment)) return;
+  const atMs = performance.now() - sessionStartMs;
+  productMoments.set(moment, { atMs, meta, sessionId: session.id });
+  perfMark(moment, meta, session);
+  // 开发期采集器可轮询该只读快照，不影响生产构建行为。
+  if (import.meta.env?.DEV) {
+    const target = globalThis as { __GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__?: Record<string, unknown> };
+    target.__GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__ = Object.fromEntries(
+      [...productMoments.entries()].map(([key, value]) => [key, { ...value }]),
+    );
+  }
+}
+
+export function perfProductMomentSnapshot(): Record<PerfProductMoment, PerfProductMomentInfo | null> {
+  return {
+    semanticReady: productMoments.get('semanticReady') ?? null,
+    firstGeometryReady: productMoments.get('firstGeometryReady') ?? null,
+    fullModelReady: productMoments.get('fullModelReady') ?? null,
+  };
+}
+
+/** 记录一个变电阶段的 RSS/JS heap 样本；缺失值统一为 null。 */
+export function perfRecordMemorySample(
+  label: string,
+  sample: {
+    rssBytes?: number | null;
+    rssSource?: string;
+    jsHeapUsedBytes?: number | null;
+    jsHeapTotalBytes?: number | null;
+    jsHeapLimitBytes?: number | null;
+    meta?: Record<string, unknown>;
+  },
+  session: PerfSession = currentSession,
+): void {
+  if (!perfIsCurrentSession(session)) return;
+  const finiteOrNull = (value: number | null | undefined): number | null =>
+    value != null && Number.isFinite(value) && value >= 0 ? value : null;
+  memorySamples.push({
+    label,
+    atMs: performance.now() - sessionStartMs,
+    sessionId: session.id,
+    rssBytes: finiteOrNull(sample.rssBytes),
+    ...(sample.rssSource ? { rssSource: sample.rssSource } : {}),
+    jsHeapUsedBytes: finiteOrNull(sample.jsHeapUsedBytes),
+    jsHeapTotalBytes: finiteOrNull(sample.jsHeapTotalBytes),
+    jsHeapLimitBytes: finiteOrNull(sample.jsHeapLimitBytes),
+    meta: sample.meta,
+  });
+}
+
+export function perfMemorySnapshot(): PerfMemorySample[] {
+  return memorySamples.map((sample) => ({ ...sample, meta: sample.meta ? { ...sample.meta } : undefined }));
+}
+
+/** 记录变电 IFC 读取 profile，并单列 read/decode 阶段。 */
+export function perfRecordSubstationIfcRead(
+  profile: PerfSubstationIfcReadProfile,
+  session: PerfSession = currentSession,
+): void {
+  if (!perfIsCurrentSession(session)) return;
+  const normalized = { ...profile };
+  substationIfcReads.push(normalized);
+  perfRecordExternalSpan(
+    `变电 IFC read/decode · ${profile.entryPath}`,
+    Math.max(0, profile.readMs) + Math.max(0, profile.decodeMs),
+    normalized,
+    session,
+  );
+}
+
+/** 记录单 IFC Spatial Semantic 分阶段 profile。 */
+export function perfRecordSubstationIfcProfile(
+  profile: PerfSubstationIfcProfile,
+  session: PerfSession = currentSession,
+): void {
+  if (!perfIsCurrentSession(session)) return;
+  const normalized = { ...profile };
+  substationIfcParses.push(normalized);
+  const prefix = `变电 IFC Spatial Semantic · ${profile.entryPath}`;
+  perfRecordExternalSpan(`${prefix} · total`, profile.totalMs, normalized, session);
+  perfRecordExternalSpan(`${prefix} · STEP scan`, profile.stepScanMs, { rawEntityCount: profile.rawEntityCount }, session);
+  perfRecordExternalSpan(`${prefix} · placement/detail`, profile.placementDetailMs, {
+    detailEntityCount: profile.detailEntityCount,
+    placementEntityCount: profile.placementEntityCount,
+  }, session);
+  perfRecordExternalSpan(`${prefix} · spatial entity`, profile.spatialEntityMs, { spatialEntityCount: profile.spatialEntityCount }, session);
+  perfRecordExternalSpan(`${prefix} · property/quantity/material/classification`, profile.propertyMs, {
+    propertyEntityCount: profile.propertyEntityCount,
+    quantityEntityCount: profile.quantityEntityCount,
+    propertyValueCount: profile.propertyValueCount,
+    quantityValueCount: profile.quantityValueCount,
+    materialEntityCount: profile.materialEntityCount,
+    classificationEntityCount: profile.classificationEntityCount,
+  }, session);
+  perfRecordExternalSpan(`${prefix} · relationships`, profile.relationshipMs, {
+    relationshipRecordCount: profile.relationshipRecordCount,
+    relationshipReferenceCount: profile.relationshipReferenceCount,
+  }, session);
+  perfRecordExternalSpan(`${prefix} · finalize`, profile.finalizeMs, {
+    objectCount: profile.objectCount,
+    containedObjectCount: profile.containedObjectCount,
+  }, session);
+}
+
+export function perfRecordSubstationFinalizeProfile(
+  profile: PerfSubstationFinalizeProfile,
+  session: PerfSession = currentSession,
+): void {
+  if (!perfIsCurrentSession(session)) return;
+  const normalized = { ...profile };
+  substationFinalizes.push(normalized);
+  perfRecordExternalSpan('变电 spatial finalize / CBM linkage', profile.durationMs, normalized, session);
+}
+
+export function perfSubstationSnapshot(): PerfSubstationStats {
+  return {
+    ifcReads: substationIfcReads.map((item) => ({ ...item })),
+    ifcParses: substationIfcParses.map((item) => ({ ...item })),
+    finalize: substationFinalizes.map((item) => ({ ...item })),
+  };
 }
 
 /**
@@ -406,6 +651,9 @@ export function perfSnapshot(): {
   invokes: PerfInvokeCommandStats[];
   batchReads: PerfBatchReadStats;
   longTasks: PerfLongTaskStats;
+  productMoments: Record<PerfProductMoment, PerfProductMomentInfo | null>;
+  memory: PerfMemorySample[];
+  substation: PerfSubstationStats;
 } {
   return {
     sessionStartMs,
@@ -416,6 +664,9 @@ export function perfSnapshot(): {
     invokes: perfInvokeSnapshot(),
     batchReads: perfBatchReadSnapshot(),
     longTasks: perfLongTaskSnapshot(),
+    productMoments: perfProductMomentSnapshot(),
+    memory: perfMemorySnapshot(),
+    substation: perfSubstationSnapshot(),
   };
 }
 
@@ -424,7 +675,7 @@ export function perfSummary(): string {
   const invokes = perfInvokeSnapshot();
   const batchReads = perfBatchReadSnapshot();
   const longTasks = perfLongTaskSnapshot();
-  if (spans.length === 0 && invokes.length === 0 && batchReads.count === 0 && longTasks.count === 0) return '(无性能埋点数据)';
+  if (spans.length === 0 && invokes.length === 0 && batchReads.count === 0 && longTasks.count === 0 && memorySamples.length === 0) return '(无性能埋点数据)';
   const lines = ['阶段耗时（相对会话起点）:', '─'.repeat(64)];
   for (const s of spans) {
     const dur = s.durationMs > 0 ? `${Math.round(s.durationMs)}ms`.padEnd(8) : '  事件 ';
@@ -441,5 +692,21 @@ export function perfSummary(): string {
     lines.push(`Batch Rust: ${batchReads.count} 批, ${batchReads.requestedEntries} 条（命中 ${batchReads.hitEntries}）, ${Math.round(batchReads.bytes)} B, read ${Math.round(batchReads.totalReadMs)}ms, encode ${Math.round(batchReads.totalEncodeMs)}ms, total ${Math.round(batchReads.totalMs)}ms`);
   }
   lines.push(`Long Task: ${longTasks.count} 次, blocking ${Math.round(longTasks.totalBlockingTimeMs)}ms, max ${Math.round(longTasks.maxMs)}ms`);
+  const moments = perfProductMomentSnapshot();
+  const momentText = (Object.entries(moments) as Array<[PerfProductMoment, PerfProductMomentInfo | null]>)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${key}=+${Math.round(value!.atMs)}ms`)
+    .join(', ');
+  if (momentText) lines.push(`产品时刻: ${momentText}`);
+  const rssSamples = memorySamples.filter((sample) => sample.rssBytes != null);
+  const heapSamples = memorySamples.filter((sample) => sample.jsHeapUsedBytes != null);
+  if (rssSamples.length > 0) {
+    const peak = Math.max(...rssSamples.map((sample) => sample.rssBytes!));
+    lines.push(`RSS 样本: ${rssSamples.length} 个, 峰值 ${(peak / 1024 / 1024).toFixed(1)}MB（来源以 sample.rssSource 标注）`);
+  }
+  if (heapSamples.length > 0) {
+    const peak = Math.max(...heapSamples.map((sample) => sample.jsHeapUsedBytes!));
+    lines.push(`JS heap 样本: ${heapSamples.length} 个, used 峰值 ${(peak / 1024 / 1024).toFixed(1)}MB（不等同 RSS）`);
+  }
   return lines.join('\n');
 }

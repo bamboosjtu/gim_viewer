@@ -28,7 +28,10 @@
 | Canvas fallback 投影 | 已改为 Web Mercator（与 MapLibre/OSM 一致，正形投影），比例尺按中心纬度修正；原高纬度等距投影畸变已消除 |
 | 跨越点定位 | 数据层面受限：line02 实测 44 个 CROSS 全部无 BLHA 坐标（无法插值修复——跨越点不在塔位连线上）；有坐标样本已可正常定位标注；无坐标时统计面板显示 unresolved 计数 |
 | OSM 在线依赖 | 设计如此：OSM 不可用（3 次 tile error）自动回退 Canvas-only，行为符合预期，无动作 |
-| 首次导入性能 | 已测量（2026-08，line02 / 2.3 万文件）：解析层耗时约 1.3s（图构建 0.7s + FAM/DEV 属性解析 0.6s），非主要瓶颈；剩余耗时在解压（libarchive WASM，首次必需）与 SQLite 入库（Rust 侧已有耗时日志），需 Tauri 环境实测后针对性优化 |
+| 首次导入性能 | 2026-09-02 已用真实 Tauri 对 line01–line06 做 cold/warm 各 n=3：Worker 解析通常低于 0.5s，SQLite 已移出 ready critical path；冷启动瓶颈随样本变化，line03 的 Rust 7z decode 约 13.1s | 7z decoder 专项；保持与 UI/语义缓存改造解耦 |
+| 杆塔 HNum/MOD lazy preview 偶发长延迟 | 选中杆塔后来源页按需读取/解析 HNum/MOD，真实使用中偶发几十秒才显示 | 拆分 preview read/parse/render 埋点后，再评估预览缓存或独立解析任务 |
+| warm RSS 偏高 | 六个线路样本的 Tauri warm 采样约 0.9–1.3 GB（进程树工作集，非 JS heap） | 先做独立进程基线与回收测量，再决定 property lazy load |
+| line03 7z decode 偏慢 | 真实 Tauri 冷启动 Rust `decodeMs` 约 13.1s，总解压约 15.1s | decoder 专项分析 7z 解码、entry 写盘和调度，不在本轮线路 UI 范围内 |
 
 ---
 

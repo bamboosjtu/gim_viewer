@@ -74,7 +74,12 @@ export function findMissingStdSldCacheParts(
 
   const missing: string[] = [];
   if (expectsSch && (!result || result.schEntries.length === 0)) missing.push('SCH');
-  if (expectsStd && !result?.stdDoc?.substation) missing.push('STD');
+  // NBT1 samples intentionally store the rendered SLD SVG in both the .std
+  // and .sld entries. parseStd returns a document with version=NBT1 and no
+  // Substation for that format; this is a supported "no standalone topology"
+  // result (the cold path follows the same degradation), not a missing cache.
+  const stdIsRenderedSvg = result?.stdDoc?.version?.toUpperCase() === 'NBT1';
+  if (expectsStd && !result?.stdDoc?.substation && !stdIsRenderedSvg) missing.push('STD');
   if (expectsSld && (!result?.sldDoc?.safeSvgOuterHTML || result.sldDoc.groups.length === 0)) {
     missing.push('SLD');
   }
@@ -209,7 +214,10 @@ export async function parseAndIndexStdSld(
     try {
       if (entry.type === 'std') {
         stdDoc = parseStd(text, entry.path);
-        if (!stdDoc.substation) {
+        // NBT1 is an SVG merge document intentionally carrying no standalone
+        // electrical topology. Keep the parsed marker so cache restore can
+        // distinguish this supported format from a missing/corrupt STD file.
+        if (!stdDoc.substation && stdDoc.version.toUpperCase() !== 'NBT1') {
           console.warn(`[STD/SLD] STD 解析失败或无 Substation: ${entry.path}`);
           stdDoc = null;
         }

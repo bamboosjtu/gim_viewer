@@ -277,6 +277,119 @@ fn get_file_info(
     })
 }
 
+/// 当前 Tauri 后端进程的驻留集大小（RSS）。
+///
+/// WebView2 子进程与 Rust 后端是不同进程，因此该值只代表后端进程；前端
+/// 性能埋点会把 source 一并记录，不能将它当作 JS heap 或整个进程树 RSS。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProcessMemorySnapshot {
+    pid: u32,
+    rss_bytes: Option<u64>,
+    source: String,
+}
+
+#[cfg(windows)]
+fn current_process_id() -> u32 {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentProcessId() -> u32;
+    }
+    // SAFETY: GetCurrentProcessId has no preconditions.
+    unsafe { GetCurrentProcessId() }
+}
+
+#[cfg(windows)]
+fn current_process_rss_bytes() -> Option<u64> {
+    use std::ffi::c_void;
+    use std::mem::size_of;
+
+    #[repr(C)]
+    struct ProcessMemoryCounters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentProcess() -> *mut c_void;
+    }
+    #[link(name = "psapi")]
+    extern "system" {
+        fn GetProcessMemoryInfo(
+            process: *mut c_void,
+            counters: *mut ProcessMemoryCounters,
+            size: u32,
+        ) -> i32;
+    }
+
+    // SAFETY: Win32 returns a pseudo-handle valid for the current process;
+    // counters is a properly sized writable C struct for this API.
+    unsafe {
+        let mut counters = ProcessMemoryCounters {
+            cb: size_of::<ProcessMemoryCounters>() as u32,
+            page_fault_count: 0,
+            peak_working_set_size: 0,
+            working_set_size: 0,
+            quota_peak_paged_pool_usage: 0,
+            quota_paged_pool_usage: 0,
+            quota_peak_non_paged_pool_usage: 0,
+            quota_non_paged_pool_usage: 0,
+            pagefile_usage: 0,
+            peak_pagefile_usage: 0,
+        };
+        if GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) != 0 {
+            Some(counters.working_set_size as u64)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn current_process_rss_bytes() -> Option<u64> {
+    // Keep the command portable without adding a runtime dependency. Linux
+    // builds can read /proc; other targets report unavailable explicitly.
+    #[cfg(target_os = "linux")]
+    {
+        let text = std::fs::read_to_string("/proc/self/statm").ok()?;
+        let resident_pages = text.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+        let page_size = 4096u64;
+        return resident_pages.checked_mul(page_size);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+#[tauri::command]
+fn get_process_memory() -> ProcessMemorySnapshot {
+    #[cfg(windows)]
+    let pid = current_process_id();
+    #[cfg(not(windows))]
+    let pid = std::process::id();
+    ProcessMemorySnapshot {
+        pid,
+        rss_bytes: current_process_rss_bytes(),
+        source: if cfg!(windows) {
+            "tauri-process-working-set".to_string()
+        } else if cfg!(target_os = "linux") {
+            "tauri-process-proc-statm".to_string()
+        } else {
+            "tauri-process-unavailable".to_string()
+        },
+    }
+}
+
 /// 读取任意路径文件的原始字节。路径信任边界见上方 `get_file_info` 注释。
 #[tauri::command]
 fn read_file_bytes(
@@ -303,6 +416,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_file_bytes,
             get_file_info,
+            get_process_memory,
             file_dialog_commands::authorize_gim_file_path_for_dev,
             file_dialog_commands::pick_gim_file_path,
             file_dialog_commands::pick_ifc_file_paths,

@@ -4,7 +4,10 @@ import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { CbmNode } from '../gim/types.js';
 import { scanIfcFiles, discoverIfcFromCBM, buildIfcGuidIndex } from '../gim/gimIndexer.js';
 import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
-import { SubstationSpatialIndexBuilder, buildSubstationSpatialIndexFromFiles } from '../gim/ifcSpatialParser.js';
+import {
+  buildSubstationSpatialIndexFromFiles,
+  type SubstationSpatialIndexObserver,
+} from '../gim/ifcSpatialParser.js';
 import { parseFileDevRelation } from '../gim/fileDevParser.js';
 import { buildAndRenderCbmTree } from '../ui/cbmTreeView.js';
 import { renderFileDevPanel } from '../ui/fileDevView.js';
@@ -12,6 +15,7 @@ import { loadingEl, emptyTipEl, gimFileInput, btnLoadGim } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { openGimFilePath } from '@desktop/fileDialog.js';
 import { DEBUG_IFC_LOAD, DEBUG_GIM_CACHE, DEBUG_RUNTIME_LOGS } from '../config/debug.js';
+import { isFragmentsCacheEnabled } from '../config/features.js';
 import { debugLog } from '../utils/logger.js';
 import {
   perfReset,
@@ -19,6 +23,14 @@ import {
   perfUpdateSessionIdentity,
   perfBegin,
   perfMark,
+  perfMarkProductMoment,
+  perfProductMomentSnapshot,
+  perfRecordExternalSpan,
+  perfRecordMemorySample,
+  perfRecordSubstationIfcRead,
+  perfRecordSubstationIfcProfile,
+  perfRecordSubstationFinalizeProfile,
+  perfIsCurrentSession,
   type PerfSession,
 } from '../utils/perfTimings.js';
 import { pushBusy, popBusy } from '../ui/shell/statusBar.js';
@@ -81,6 +93,127 @@ export function buildLineSemanticWarmFiles(
 
 function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; pushBusy(text); }
 function hideLoading() { loadingEl.style.display = 'none'; popBusy('就绪'); }
+
+/**
+ * 采集变电阶段内存。WebView 的 performance.memory（若可用）只代表 JS
+ * heap；Tauri command 返回的是后端进程 RSS，两者分别记录，绝不互换。
+ * RSS 读取在阶段计时结束后执行，采样 IPC 不会混入业务 span。
+ */
+async function sampleSubstationMemory(
+  label: string,
+  session: PerfSession,
+  meta?: Record<string, unknown>,
+): Promise<void> {
+  if (!perfIsCurrentSession(session)) return;
+  const memory = (typeof performance !== 'undefined'
+    ? (performance as Performance & {
+      memory?: { usedJSHeapSize?: number; totalJSHeapSize?: number; jsHeapSizeLimit?: number };
+    }).memory
+    : undefined);
+  let rssBytes: number | null = null;
+  let rssSource: string | undefined;
+  if (isTauri()) {
+    try {
+      const { getProcessMemory } = await import('@desktop/database.js');
+      const processMemory = await getProcessMemory();
+      if (!perfIsCurrentSession(session)) return;
+      rssBytes = processMemory.rssBytes ?? null;
+      rssSource = processMemory.source;
+    } catch (error) {
+      // 采样失败不能影响工程加载；记录原因供报告识别“不可测”而非 0。
+      if (perfIsCurrentSession(session)) {
+        perfRecordMemorySample(label, {
+          rssBytes: null,
+          jsHeapUsedBytes: memory?.usedJSHeapSize,
+          jsHeapTotalBytes: memory?.totalJSHeapSize,
+          jsHeapLimitBytes: memory?.jsHeapSizeLimit,
+          meta: { ...meta, rssError: error instanceof Error ? error.message : String(error) },
+        }, session);
+      }
+      return;
+    }
+  }
+  if (!perfIsCurrentSession(session)) return;
+  perfRecordMemorySample(label, {
+    rssBytes,
+    ...(rssSource ? { rssSource } : {}),
+    jsHeapUsedBytes: memory?.usedJSHeapSize,
+    jsHeapTotalBytes: memory?.totalJSHeapSize,
+    jsHeapLimitBytes: memory?.jsHeapSizeLimit,
+    meta,
+  }, session);
+}
+
+function recordNativeExtractionStages(
+  profile: NativeExtractionProfile | undefined,
+  session: PerfSession,
+): void {
+  if (!profile || !perfIsCurrentSession(session)) return;
+  const stages: Array<[string, number, Record<string, unknown>]> = [
+    ['native extract · header', profile.headerMs, { archiveBytes: profile.archiveBytes }],
+    ['native extract · archive decode', profile.decodeMs, { entryCount: profile.entryCount, totalBytes: profile.totalBytes }],
+    ['native extract · write', profile.writeMs, {
+      writeOpenMs: profile.writeOpenMs ?? null,
+      writeDataMs: profile.writeDataMs ?? null,
+      writeMode: profile.writeMode ?? null,
+    }],
+    ['native extract · manifest', profile.manifestMs, {}],
+    ['native extract · commit', profile.commitMs ?? 0, {}],
+  ];
+  for (const [label, durationMs, meta] of stages) {
+    if (durationMs > 0) perfRecordExternalSpan(label, durationMs, meta, session);
+  }
+}
+
+function createSubstationSpatialObserver(session: PerfSession): SubstationSpatialIndexObserver {
+  // 只采一次阶段内存，避免大型工程的每个 IFC 都增加一个 RSS IPC。
+  // 回调本身保持同步，采样异步执行且在 sampleSubstationMemory 内再次做
+  // session 校验；这样不会阻塞纯解析层。
+  let textSampled = false;
+  let stepSampled = false;
+  return {
+    onModelRead: (profile) => {
+      perfRecordSubstationIfcRead(profile, session);
+      if (!textSampled && profile.bytes > 0) {
+        textSampled = true;
+        void sampleSubstationMemory('IFC text 读入后', session, {
+          entryPath: profile.entryPath,
+          bytes: profile.bytes,
+          readMs: profile.readMs,
+          decodeMs: profile.decodeMs,
+        });
+      }
+    },
+    onStepScan: (profile) => {
+      if (!stepSampled) {
+        stepSampled = true;
+        void sampleSubstationMemory('STEP scan 后', session, {
+          entryPath: profile.entryPath,
+          bytes: profile.sourceBytes,
+          rawEntityCount: profile.rawEntityCount,
+          stepScanMs: profile.stepScanMs,
+        });
+      }
+    },
+    onModelParsed: (profile) => {
+      perfRecordSubstationIfcProfile(profile, session);
+    },
+    onFinalize: (profile) => {
+      perfRecordSubstationFinalizeProfile(profile, session);
+    },
+  };
+}
+
+function collectCbmNodeCount(root: CbmNode | null): number {
+  if (!root) return 0;
+  let count = 0;
+  const walk = (node: CbmNode): void => {
+    count += 1;
+    for (const child of node.children) walk(child);
+  };
+  walk(root);
+  return count;
+}
 
 /** 取得可读工程名；不能让缺失 GIM header 的线路退化为“未命名线路”。 */
 function resolveProjectName(
@@ -201,13 +334,17 @@ export async function onGimExtracted(
   state.projectName = projectName || '';
 
   // 发现 IFC 文件
+  const endIfcDiscovery = perfBegin('变电 IFC discovery', undefined, perfSession);
   let ifcEntries = await discoverIfcFromCBM(files);
   if (!state.isCurrentSession(session)) return [];
   if (ifcEntries.length === 0) ifcEntries = scanIfcFiles(files);
+  endIfcDiscovery(undefined, { count: ifcEntries.length });
+  await sampleSubstationMemory('IFC discovery 后', perfSession, { ifcCount: ifcEntries.length });
 
   state.currentIfcEntries = ifcEntries;
 
   // 构建 CBM 层级树（F1System 根节点名称由 projectTypeName 设置，F2System 由 SYSCLASSIFYNAME 映射）
+  const endCbmCore = perfBegin('变电 CBM/FAM/DEV/FileDevRelation', undefined, perfSession);
   const cbmTree = await buildCbmTree(files, projectTypeName);
   if (!state.isCurrentSession(session)) return [];
   // 解析结果先保存在局部变量；只有 await 返回后仍属于当前工程才提交。
@@ -237,6 +374,15 @@ export async function onGimExtracted(
       state.deviceToIfcFile.set(devCbm, entry.modelId);
     }
   }
+  endCbmCore(undefined, {
+    cbmNodes: collectCbmNodeCount(cbmTree),
+    fileDevRelations: fileDevRelations.length,
+    deviceIfcLinks: state.deviceToIfcFile.size,
+  });
+  await sampleSubstationMemory('CBM/FAM/DEV/FileDevRelation 后', perfSession, {
+    cbmNodes: collectCbmNodeCount(cbmTree),
+    fileDevRelations: fileDevRelations.length,
+  });
 
   // IFC 空间结构与 CBM 树是两种不同事实视图：在解析阶段建立共享索引，
   // 左侧导航可以按站区/建筑/楼层浏览，同时保留功能系统视图和未关联设备。
@@ -248,6 +394,7 @@ export async function onGimExtracted(
       ifcEntries,
       cbmTree,
       fileDevRelations,
+      createSubstationSpatialObserver(perfSession),
     );
     if (!state.isCurrentSession(session)) return [];
     endSpatial(undefined, {
@@ -259,6 +406,11 @@ export async function onGimExtracted(
       cbmLinks: spatialIndex.links.length,
     });
     state.substationSpatialIndex = spatialIndex;
+    await sampleSubstationMemory('SpatialIndex finalize 后', perfSession, {
+      models: spatialIndex.models.length,
+      spatialNodes: spatialIndex.nodes.length,
+      objects: spatialIndex.objects.length,
+    });
   } catch (err) {
     if (!state.isCurrentSession(session)) return [];
     state.substationSpatialIndex = null;
@@ -273,11 +425,18 @@ export async function onGimExtracted(
     if (!state.isCurrentSession(session)) return [];
     commitStdSldResult(state, stdSldResult);
   } catch (err) {
-    console.warn('[GIM] STD/SLD 解析失败:', err);
+    if (state.isCurrentSession(session)) console.warn('[GIM] STD/SLD 解析失败:', err);
   }
   if (!state.isCurrentSession(session)) return [];
 
+  perfMarkProductMoment('semanticReady', {
+    ifcModels: state.substationSpatialIndex?.models.length ?? 0,
+    spatialNodes: state.substationSpatialIndex?.nodes.length ?? 0,
+    cbmNodes: collectCbmNodeCount(state.currentCbmTree),
+  }, perfSession);
+
   // 渲染层级树和文件设备面板（统一使用 handleNodeClick）
+  const endSubstationUi = perfBegin('变电 navigation/UI（语义）', undefined, perfSession);
   const clickHandler = createNodeClickHandler(state, showMessage);
   buildAndRenderCbmTree(state, clickHandler);
   renderFileDevPanel(state, clickHandler);
@@ -288,11 +447,15 @@ export async function onGimExtracted(
     if (!state.isCurrentSession(session)) return [];
     renderSldView(state);
   } catch (err) {
-    console.warn('[GIM] SLD 视图渲染失败:', err);
+    if (state.isCurrentSession(session)) console.warn('[GIM] SLD 视图渲染失败:', err);
   }
 
   // 阶段 4：注册 SLD gridId → CBM 联动回调
   setupSldGridIdInteraction(state, showMessage, session);
+  endSubstationUi(undefined, {
+    cbmNodes: collectCbmNodeCount(state.currentCbmTree),
+    ifcModels: state.currentIfcEntries.length,
+  });
 
   return ifcEntries;
 }
@@ -428,8 +591,10 @@ export async function loadAllIfcFiles(
   try {
     const { ensureEngineReady } = await import('../viewer/ifcLoader.js');
     if (!isCurrent()) return;
+    const endEngineInit = perfBegin('web-ifc / Fragments engine 初始化', undefined, perfSession);
     await ensureEngineReady(ctx, state, modelCallbacks);
     if (!isCurrent()) return;
+    endEngineInit(undefined, { initialized: true });
     const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
     if (!isCurrent()) return;
 
@@ -437,23 +602,83 @@ export async function loadAllIfcFiles(
     for (const entry of entries) {
       if (!isCurrent()) return;
       showLoading(`正在加载 ${entry.name}...`);
+      let readEnded = false;
+      let loadEnded = false;
+      const loadSource: { value: 'fragments-cache' | 'ifc' | 'unknown' } = { value: 'unknown' };
+      const endRead = perfBegin(`变电 IFC read · ${entry.path}`, undefined, perfSession);
+      const endIfcLoad = perfBegin(`变电 web-ifc / Fragments load · ${entry.path}`, undefined, perfSession);
       try {
-        const endIfc = perfBegin(`IFC ${entry.name}`, undefined, perfSession);
+        const ifcBytes: { value: Uint8Array | null } = { value: null };
         await loadIfcEntry(
           ctx,
           state,
           entry,
-          async () => getIfcBufferForEntry(entry, state, session),
+          async () => {
+            ifcBytes.value = await getIfcBufferForEntry(entry, state, session);
+            if (!isCurrent()) return null;
+            endRead(undefined, {
+              bytes: ifcBytes.value?.byteLength ?? 0,
+              source: state.currentFiles ? 'extracted' : 'disk-cache',
+              found: ifcBytes.value != null,
+            });
+            readEnded = true;
+            return ifcBytes.value;
+          },
           (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
-          { session },
+          {
+            session,
+            onLoadSource: (source) => { loadSource.value = source; },
+          },
         );
         if (!isCurrent()) return;
-        endIfc();
+        if (!readEnded) {
+          // Fragments cache 命中时不会调用 getIfcBuffer；显式记录“未读取 IFC”。
+          endRead(undefined, {
+            bytes: 0,
+            source: loadSource.value === 'fragments-cache' ? 'fragments-cache' : 'not-read',
+            found: false,
+          });
+          readEnded = true;
+        }
+        endIfcLoad(undefined, {
+          bytes: ifcBytes.value?.byteLength ?? 0,
+          source: loadSource.value,
+          fragmentsCacheEnabled: isFragmentsCacheEnabled(),
+          cacheHit: loadSource.value === 'fragments-cache',
+        });
+        loadEnded = true;
         if (firstIfcReady) {
           firstIfcReady = false;
-          perfMark('首个 IFC 就绪', { name: entry.name }, perfSession);
+          perfMark('首个 IFC 就绪', {
+            name: entry.name,
+            source: loadSource.value,
+            cacheHit: loadSource.value === 'fragments-cache',
+          }, perfSession);
+          perfMarkProductMoment('firstGeometryReady', {
+            kind: 'ifc',
+            name: entry.name,
+            source: loadSource.value,
+            cacheHit: loadSource.value === 'fragments-cache',
+          }, perfSession);
+          void sampleSubstationMemory('第一个 Fragments model 后', perfSession, {
+            name: entry.name,
+            source: loadSource,
+          });
         }
       } catch (err) {
+        if (!readEnded) {
+          endRead('（失败）', { source: loadSource.value, error: err instanceof Error ? err.message : String(err) });
+          readEnded = true;
+        }
+        if (!loadEnded) {
+          endIfcLoad('（失败）', {
+            source: loadSource.value,
+            fragmentsCacheEnabled: isFragmentsCacheEnabled(),
+            cacheHit: loadSource.value === 'fragments-cache',
+            error: err instanceof Error ? err.message : String(err),
+          });
+          loadEnded = true;
+        }
         const message = err instanceof Error ? err.message : String(err);
         console.error('[GIM] IFC 加载失败:', entry, err);
         // IFC 加载可能在工程切换后才 reject；不要让旧工程继续进入
@@ -479,25 +704,32 @@ export async function loadAllIfcFiles(
     }
 
     // IFC 必须保持 coordinate=true；MOD/STL 用同一个 Fragments 基准矩阵对齐到 viewer 空间。
+    const endCoordinate = perfBegin('变电 coordinate alignment', undefined, perfSession);
     try {
       const { syncProjectSourceToViewerFromFragments } = await import('./coordinateAlignmentService.js');
       if (!isCurrent()) return;
       await syncProjectSourceToViewerFromFragments(state, ctx.fragments, { session });
       if (!isCurrent()) return;
+      endCoordinate(undefined, {
+        hasMatrix: state.projectSourceToViewerMatrix != null,
+      });
     } catch (err) {
+      endCoordinate('（失败）', { error: err instanceof Error ? err.message : String(err) });
       console.warn('[CoordAlign] IFC 基准坐标同步失败，MOD/STL 将使用原始坐标或手工 offset:', err);
     }
 
     // buildIfcNameIndex 失败不应阻断 UI 渲染
     const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
     if (!isCurrent()) return;
+    const endNameIndex = perfBegin('变电 IFC name index', undefined, perfSession);
     await buildIfcNameIndex(ctx, state, { session }).catch((err) => {
       console.warn('[GIM] buildIfcNameIndex failed', err);
     });
     if (!isCurrent()) return;
+    endNameIndex(undefined, { models: state.loadedModels.size });
 
     // 渲染层级树和文件设备面板
-    const endTreeRender = perfBegin('层级树+面板渲染', undefined, perfSession);
+    const endTreeRender = perfBegin('变电 navigation/UI（3D）', undefined, perfSession);
     const clickHandler = createNodeClickHandler(state, (text) => showLoading(text));
     buildAndRenderCbmTree(state, clickHandler);
     renderFileDevPanel(state, clickHandler);
@@ -565,10 +797,18 @@ async function autoLoadModStlPostIfc(
   existingCtx?: ViewerContext,
   options?: { token?: number; includeMod?: boolean; includeStl?: boolean; session?: ProjectLoadSession },
 ): Promise<void> {
+  let endModStl: ((labelSuffix?: string, endMeta?: Record<string, unknown>) => void) | null = null;
+  let modStlEnded = false;
   try {
     const session = options?.session ?? state.captureProjectSession();
     const perfSession = perfCurrentSession();
     if (!state.isCurrentSession(session)) return;
+    endModStl = perfBegin('变电 MOD/STL', undefined, perfSession);
+    const finishModStl = (suffix?: string, meta?: Record<string, unknown>): void => {
+      if (modStlEnded) return;
+      modStlEnded = true;
+      endModStl?.(suffix, meta);
+    };
     // 获取 scene：优先用已有 ctx，否则创建 ViewerRuntime
     let scene: import('three').Scene;
     if (existingCtx) {
@@ -611,6 +851,12 @@ async function autoLoadModStlPostIfc(
 
       if (!state.isCurrentSession(session)) return;
 
+      finishModStl(undefined, {
+        path: 'progressive-dev-glb',
+        compiledDevs: result.compiledDevs,
+        renderedInstances: result.renderedInstances,
+        interrupted: result.interrupted,
+      });
       if (!result.interrupted && (result.renderedInstances > 0)) {
         debugLog(DEBUG_IFC_LOAD, '[GIM] 渐进几何管线完成', result);
         // 编译完成后强制重新 fit 相机（bbox 可能显著变化）
@@ -619,6 +865,18 @@ async function autoLoadModStlPostIfc(
           if (!state.isCurrentSession(session)) return;
           fitCameraToScene(existingCtx, state, { force: true });
         }
+      }
+      if (!result.interrupted) {
+        perfMarkProductMoment('fullModelReady', {
+          ifcModels: state.loadedModels.size,
+          modInstances: result.renderedInstances,
+          compiledDevs: result.compiledDevs,
+          stlInstances: 0,
+        }, perfSession);
+        await sampleSubstationMemory('full ready 后', perfSession, {
+          path: 'progressive-dev-glb',
+          renderedInstances: result.renderedInstances,
+        });
       }
       return;
     }
@@ -664,7 +922,41 @@ async function autoLoadModStlPostIfc(
         fitCameraToScene(existingCtx, state, { force: true });
       }
     }
+    finishModStl(undefined, {
+      path: 'cached-geometry',
+      modCount: result.modCount,
+      stlCount: result.stlCount,
+    });
+    if (!state.isCurrentSession(session)) return;
+    if (!perfProductMomentSnapshot().firstGeometryReady
+      && (result.modCount > 0 || result.stlCount > 0)) {
+      perfMarkProductMoment('firstGeometryReady', {
+        kind: 'mod-stl',
+        modCount: result.modCount,
+        stlCount: result.stlCount,
+      }, perfSession);
+      void sampleSubstationMemory('第一个几何模型后', perfSession, {
+        kind: 'mod-stl',
+        modCount: result.modCount,
+        stlCount: result.stlCount,
+      });
+    }
+    perfMarkProductMoment('fullModelReady', {
+      ifcModels: state.loadedModels.size,
+      modInstances: result.modCount,
+      stlInstances: result.stlCount,
+      path: 'cached-geometry',
+    }, perfSession);
+    await sampleSubstationMemory('full ready 后', perfSession, {
+      path: 'cached-geometry',
+      modCount: result.modCount,
+      stlCount: result.stlCount,
+    });
   } catch (err) {
+    if (!modStlEnded) {
+      endModStl?.('（失败）', { error: err instanceof Error ? err.message : String(err) });
+      modStlEnded = true;
+    }
     console.warn('[GIM] MOD/STL 自动加载失败:', err);
   }
 }
@@ -743,6 +1035,11 @@ async function openGimFromArrayBuffer(
     extracted = await extractGimFile(ab!);
     if (!requestIsCurrent()) return;
     endExtract('（首开）', { files: extracted.size });
+    await sampleSubstationMemory('extraction 后', perfSession, {
+      mode: 'wasm',
+      files: extracted.size,
+      bytes: ab?.byteLength ?? 0,
+    });
   }
 
   // native preExtracted 路径和 Tauri WASM 回退路径都沿用打开请求入口处的
@@ -1331,9 +1628,22 @@ export async function openGimWithDialog(
           showLoading('正在从本地缓存恢复 GIM 索引...');
           const { restoreGimIndexToState } = await import('./gimIndexRestoreService.js');
 
+          const endRestoreCore = perfBegin('变电 CBM/FAM/DEV/FileDevRelation（缓存命中）', undefined, perfSession);
           const index = await getGimIndex(record.id);
           if (!state.isCurrentSession(session)) return;
           restoreGimIndexToState(state, index);
+          endRestoreCore(undefined, {
+            entries: index.entries.length,
+            cbmNodes: index.cbm_nodes.length,
+            ifcModels: index.ifc_models.length,
+            fileDevRelations: index.file_dev_entries.length,
+            famProperties: index.fam_properties.length,
+            devProperties: index.dev_properties.length,
+          });
+          await sampleSubstationMemory('CBM/FAM/DEV/FileDevRelation 后（缓存命中）', perfSession, {
+            cbmNodes: index.cbm_nodes.length,
+            fileDevRelations: index.file_dev_entries.length,
+          });
           // 工程身份已在清理后激活，确保首个 IFC/几何 await 期间也使用正确 project_id。
 
           debugLog(DEBUG_GIM_CACHE, '[Restore Debug]', {
@@ -1377,31 +1687,44 @@ export async function openGimWithDialog(
 
           // 缓存索引保留了 CBM/IFC 文件路径，但空间关系来自 IFC 原文；
           // 在不重新解压 GIM 的情况下从 IFC 磁盘缓存恢复同一空间对象图。
+          // 使用与 cold path 完全相同的增量 builder/observer，避免缓存命中
+          // 产生另一套解析结果或重新累积所有 IFC 文本。
           try {
             showLoading('正在从缓存 IFC 恢复空间结构...');
+            const endSpatial = perfBegin('变电 IFC 空间索引（缓存命中）', undefined, perfSession);
             const cbmTree = state.currentCbmTree;
             const fileDevRelations = state.fileDevRelations;
-            const spatialBuilder = new SubstationSpatialIndexBuilder(
+            const { createDiskBackedFile } = await import('@desktop/gimExtract.js');
+            const cachedIfcFiles = new Map<string, File>();
+            for (const cachedEntry of index.entries) {
+              if (!/^ifc$/i.test(cachedEntry.entry_type)) continue;
+              cachedIfcFiles.set(
+                cachedEntry.entry_path,
+                createDiskBackedFile(record.id, cachedEntry.entry_path, cachedEntry.file_size),
+              );
+            }
+            const spatialIndex = await buildSubstationSpatialIndexFromFiles(
+              cachedIfcFiles,
+              state.currentIfcEntries,
               cbmTree,
               fileDevRelations,
+              createSubstationSpatialObserver(perfSession),
             );
-            const decoder = new TextDecoder();
-            for (const entry of state.currentIfcEntries) {
-              if (!state.isCurrentSession(session)) return;
-              let bytes = await getIfcBufferForEntry(entry, state, session);
-              if (!state.isCurrentSession(session)) return;
-              // 只在当前迭代保留 IFC bytes/text；builder.addIfcModel 不保存原文，
-              // 下一轮开始前上一轮的局部变量即可被回收，避免 Promise.all 峰值。
-              const text = bytes ? decoder.decode(bytes) : null;
-              // 明确释放当前 IFC 的原始字节引用，再进入语义解析，避免
-              // 缓存命中路径同时保留 bytes + text + 解析对象。
-              bytes = null;
-              spatialBuilder.addIfcModel(entry, text);
-            }
             if (!state.isCurrentSession(session)) return;
-            const spatialIndex = spatialBuilder.finalize();
-            if (!state.isCurrentSession(session)) return;
+            endSpatial(undefined, {
+              models: spatialIndex.models.length,
+              spatialNodes: spatialIndex.nodes.length,
+              containedObjects: spatialIndex.models.reduce((sum, model) => sum + model.containedObjectCount, 0),
+              uncontainedIfcObjects: spatialIndex.coverage.uncontainedIfcObjects,
+              resourceRecords: spatialIndex.models.reduce((sum, model) => sum + model.resourceCount, 0),
+              cbmLinks: spatialIndex.links.length,
+            });
             state.substationSpatialIndex = spatialIndex;
+            await sampleSubstationMemory('SpatialIndex finalize 后（缓存命中）', perfSession, {
+              models: spatialIndex.models.length,
+              spatialNodes: spatialIndex.nodes.length,
+              objects: spatialIndex.objects.length,
+            });
           } catch (err) {
             if (!state.isCurrentSession(session)) return;
             state.substationSpatialIndex = null;
@@ -1433,6 +1756,14 @@ export async function openGimWithDialog(
             // 但缺少后来新增的 project.sch / STD / SLD 落盘文件。
             throw err;
           }
+
+          if (!state.isCurrentSession(session)) return;
+          perfMarkProductMoment('semanticReady', {
+            ifcModels: state.substationSpatialIndex?.models.length ?? 0,
+            spatialNodes: state.substationSpatialIndex?.nodes.length ?? 0,
+            cbmNodes: collectCbmNodeCount(state.currentCbmTree),
+            cacheHit: true,
+          }, perfSession);
 
           // 渲染 SLD 电气单线图与 STD 拓扑列表（缓存命中路径）
           try {
@@ -1491,10 +1822,16 @@ export async function openGimWithDialog(
           files: preExtracted.files.size,
           extraction: preExtracted.extractionProfile ?? null,
         });
+        recordNativeExtractionStages(preExtracted.extractionProfile, perfSession);
         perfMark('原生解压完成', {
           files: preExtracted.files.size,
           extraction: preExtracted.extractionProfile ?? null,
         }, perfSession);
+        await sampleSubstationMemory('extraction 后', perfSession, {
+          mode: 'native',
+          files: preExtracted.files.size,
+          extraction: preExtracted.extractionProfile ?? null,
+        });
       } catch (nativeErr) {
         const nativeMessage = nativeErr instanceof Error ? nativeErr.message : String(nativeErr);
         endNative?.('（失败）', { error: nativeMessage });

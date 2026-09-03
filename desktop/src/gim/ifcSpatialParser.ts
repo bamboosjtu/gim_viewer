@@ -236,6 +236,79 @@ interface ParsedIfcModel {
   summary: SpatialModelSummary;
   spatialEntities: IfcSpatialNode[];
   objects: IfcSpatialObject[];
+  profile: IfcSpatialParseProfile;
+}
+
+/**
+ * IFC Spatial Semantic 的可选诊断 profile。解析器仍保持纯函数/同步语义，
+ * 只有调用方提供 observer 时才会消费这些计时与计数；不把诊断依赖反向
+ * 引入 gim 层。
+ */
+export interface IfcSpatialParseProfile {
+  modelId: string;
+  entryPath: string;
+  sourceBytes: number;
+  totalMs: number;
+  /** STEP 记录扫描及 RawIfcEntity 构建耗时。 */
+  stepScanMs: number;
+  rawEntityCount: number;
+  /** detailById 中保留的放置/属性/材质等实体数。 */
+  detailEntityCount: number;
+  placementEntityCount: number;
+  placementDetailMs: number;
+  /** 构建空间节点/构件对象耗时与数量。 */
+  spatialEntityMs: number;
+  spatialEntityCount: number;
+  /** 属性、工程量、材料、分类映射耗时与实体/值数量。 */
+  propertyMs: number;
+  propertyEntityCount: number;
+  quantityEntityCount: number;
+  propertyValueCount: number;
+  quantityValueCount: number;
+  materialEntityCount: number;
+  classificationEntityCount: number;
+  /** IFCREL* 关系扫描、对象分解/空间归属构建耗时与数量。 */
+  relationshipMs: number;
+  relationshipRecordCount: number;
+  relationshipReferenceCount: number;
+  /** 单模型语义 finalize（传播/汇总）耗时。 */
+  finalizeMs: number;
+  objectCount: number;
+  containedObjectCount: number;
+  parseError?: string;
+}
+
+export interface IfcSpatialReadProfile {
+  modelId: string;
+  entryPath: string;
+  bytes: number;
+  readMs: number;
+  decodeMs: number;
+  found: boolean;
+  /** 文件存在但读取失败时保留错误；不会让单个 IFC 阻断其它模型。 */
+  error?: string;
+}
+
+export interface SubstationSpatialIndexObserver {
+  onModelRead?: (profile: IfcSpatialReadProfile) => void;
+  /** STEP scan 完成后触发；此时原始文本和 RawIfcEntity 列表仍在当前调用栈。 */
+  onStepScan?: (profile: {
+    modelId: string;
+    entryPath: string;
+    sourceBytes: number;
+    rawEntityCount: number;
+    stepScanMs: number;
+  }) => void;
+  onModelParsed?: (profile: IfcSpatialParseProfile) => void;
+  onFinalize?: (profile: {
+    durationMs: number;
+    modelCount: number;
+    spatialNodeCount: number;
+    objectCount: number;
+    linkCount: number;
+    cbmLinkCount: number;
+    uncontainedIfcObjects: number;
+  }) => void;
 }
 
 /**
@@ -307,30 +380,86 @@ export class SubstationSpatialIndexBuilder {
   constructor(
     private readonly cbmTree: CbmNode | null,
     private readonly fileDevRelations: FileDevEntry[] = [],
+    private readonly observer?: SubstationSpatialIndexObserver,
   ) {}
 
-  addIfcModel(entry: IfcEntry, text: string | null): void {
+  addIfcModel(entry: IfcEntry, text: string | null, sourceBytes?: number): void {
     this.entries.push(entry);
     if (text == null) {
       this.models.push(emptySpatialModelSummary(entry, '无法读取 IFC 内容'));
+      this.observer?.onModelParsed?.({
+        modelId: entry.modelId,
+        entryPath: entry.path,
+        sourceBytes: sourceBytes ?? 0,
+        totalMs: 0,
+        stepScanMs: 0,
+        rawEntityCount: 0,
+        detailEntityCount: 0,
+        placementEntityCount: 0,
+        placementDetailMs: 0,
+        spatialEntityMs: 0,
+        spatialEntityCount: 0,
+        propertyMs: 0,
+        propertyEntityCount: 0,
+        quantityEntityCount: 0,
+        propertyValueCount: 0,
+        quantityValueCount: 0,
+        materialEntityCount: 0,
+        classificationEntityCount: 0,
+        relationshipMs: 0,
+        relationshipRecordCount: 0,
+        relationshipReferenceCount: 0,
+        finalizeMs: 0,
+        objectCount: 0,
+        containedObjectCount: 0,
+        parseError: '无法读取 IFC 内容',
+      });
       return;
     }
+    const parseStarted = performance.now();
     try {
-      const parsed = parseIfcModel(entry, text);
+      const parsed = parseIfcModel(entry, text, sourceBytes, this.observer);
       this.models.push(parsed.summary);
+      this.observer?.onModelParsed?.(parsed.profile);
       // 不使用 push(...largeArray)：BIMBase/Bentley IFC 中单文件实体可超过
       // JS 引擎的函数参数上限，会以 RangeError 静默丢掉整个模型。
       for (const node of parsed.spatialEntities) this.nodes.push(node);
       for (const object of parsed.objects) this.objects.push(object);
     } catch (error) {
-      this.models.push(emptySpatialModelSummary(
-        entry,
-        error instanceof Error ? error.message : String(error),
-      ));
+      const parseError = error instanceof Error ? error.message : String(error);
+      this.models.push(emptySpatialModelSummary(entry, parseError));
+      this.observer?.onModelParsed?.({
+        modelId: entry.modelId,
+        entryPath: entry.path,
+        sourceBytes: sourceBytes ?? text.length,
+        totalMs: performance.now() - parseStarted,
+        stepScanMs: 0,
+        rawEntityCount: 0,
+        detailEntityCount: 0,
+        placementEntityCount: 0,
+        placementDetailMs: 0,
+        spatialEntityMs: 0,
+        spatialEntityCount: 0,
+        propertyMs: 0,
+        propertyEntityCount: 0,
+        quantityEntityCount: 0,
+        propertyValueCount: 0,
+        quantityValueCount: 0,
+        materialEntityCount: 0,
+        classificationEntityCount: 0,
+        relationshipMs: 0,
+        relationshipRecordCount: 0,
+        relationshipReferenceCount: 0,
+        finalizeMs: 0,
+        objectCount: 0,
+        containedObjectCount: 0,
+        parseError,
+      });
     }
   }
 
   finalize(): SubstationSpatialIndex {
+    const finalizeStarted = performance.now();
     const { models, nodes, objects } = this;
 
   const nodeByKey = new Map(nodes.map((node) => [node.key, node]));
@@ -531,7 +660,7 @@ export class SubstationSpatialIndexBuilder {
     model.spatialEntityCount = modelNodes.length;
   }
 
-  return {
+  const result = {
     models,
     nodes,
     objects,
@@ -568,6 +697,16 @@ export class SubstationSpatialIndexBuilder {
     placementGroups,
     identityPlacementLinks,
   };
+  this.observer?.onFinalize?.({
+    durationMs: performance.now() - finalizeStarted,
+    modelCount: models.length,
+    spatialNodeCount: nodes.length,
+    objectCount: objects.length,
+    linkCount: links.length,
+    cbmLinkCount: links.filter((link) => link.ifcObjectKey != null || link.spatialKey != null).length,
+    uncontainedIfcObjects: result.coverage.uncontainedIfcObjects,
+  });
+  return result;
 }
 }
 
@@ -576,8 +715,9 @@ export function buildSubstationSpatialIndexFromTexts(
   sources: Array<{ entry: IfcEntry; text: string | null }>,
   cbmTree: CbmNode | null,
   fileDevRelations: FileDevEntry[] = [],
+  observer?: SubstationSpatialIndexObserver,
 ): SubstationSpatialIndex {
-  const builder = new SubstationSpatialIndexBuilder(cbmTree, fileDevRelations);
+  const builder = new SubstationSpatialIndexBuilder(cbmTree, fileDevRelations, observer);
   for (const source of sources) builder.addIfcModel(source.entry, source.text);
   return builder.finalize();
 }
@@ -588,24 +728,91 @@ export async function buildSubstationSpatialIndexFromFiles(
   entries: IfcEntry[],
   cbmTree: CbmNode | null,
   fileDevRelations: FileDevEntry[] = [],
+  observer?: SubstationSpatialIndexObserver,
 ): Promise<SubstationSpatialIndex> {
   const byLowerPath = new Map<string, File>();
   for (const [path, file] of files) byLowerPath.set(normalizePath(path).toLowerCase(), file);
-  const builder = new SubstationSpatialIndexBuilder(cbmTree, fileDevRelations);
+  const builder = new SubstationSpatialIndexBuilder(cbmTree, fileDevRelations, observer);
   for (const entry of entries) {
     const file = byLowerPath.get(normalizePath(entry.path).toLowerCase());
     // 逐条读取/解析，不让多个 IFC 原始文本同时驻留；addIfcModel 不保存 text。
-    builder.addIfcModel(entry, file ? await file.text() : null);
+    const readStarted = performance.now();
+    let bytes: ArrayBuffer | null = null;
+    let fallbackText: string | null = null;
+    let readError: string | undefined;
+    if (file) {
+      try {
+        // 生产路径使用 Blob.arrayBuffer()，但保留 text-only File 兼容性：
+        // 样本回归和部分宿主会提供最小的 `text()` shim，而不是完整 Blob。
+        const readable = file as File & {
+          arrayBuffer?: () => Promise<ArrayBuffer>;
+          text?: () => Promise<string>;
+        };
+        if (typeof readable.arrayBuffer === 'function') {
+          bytes = await readable.arrayBuffer();
+        } else if (typeof readable.text === 'function') {
+          fallbackText = await readable.text();
+        } else {
+          throw new Error('IFC 文件对象不支持 arrayBuffer/text');
+        }
+      } catch (error) {
+        readError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    const readMs = performance.now() - readStarted;
+    const decodeStarted = performance.now();
+    const text = fallbackText ?? (bytes == null ? null : new TextDecoder().decode(bytes));
+    const decodeMs = performance.now() - decodeStarted;
+    observer?.onModelRead?.({
+      modelId: entry.modelId,
+      entryPath: entry.path,
+      bytes: bytes?.byteLength
+        ?? (fallbackText == null ? file?.size ?? 0 : new TextEncoder().encode(fallbackText).byteLength),
+      readMs,
+      decodeMs,
+      found: file != null,
+      ...(readError ? { error: readError } : {}),
+    });
+    const sourceBytes = bytes?.byteLength
+      ?? (fallbackText == null ? file?.size ?? 0 : new TextEncoder().encode(fallbackText).byteLength);
+    // 释放此模型的原始 ArrayBuffer 引用，再进入下一个模型；解析器只保留
+    // 语义对象和 profile。
+    bytes = null;
+    builder.addIfcModel(entry, text, sourceBytes);
   }
   return builder.finalize();
 }
 
-function parseIfcModel(entry: IfcEntry, text: string): ParsedIfcModel {
+function parseIfcModel(
+  entry: IfcEntry,
+  text: string,
+  sourceBytes?: number,
+  observer?: SubstationSpatialIndexObserver,
+): ParsedIfcModel {
+  const parseStarted = performance.now();
+  const stepStarted = performance.now();
   const records = scanIfcEntities(text);
+  const stepScanMs = performance.now() - stepStarted;
+  observer?.onStepScan?.({
+    modelId: entry.modelId,
+    entryPath: entry.path,
+    sourceBytes: sourceBytes ?? text.length,
+    rawEntityCount: records.length,
+    stepScanMs,
+  });
   const detailById = new Map<number, RawIfcEntity>();
+  const detailStarted = performance.now();
   for (const record of records) {
     if (isIfcDetailType(record.ifcType)) detailById.set(record.expressId, record);
   }
+  const placementEntityCount = records.filter((record) =>
+    record.ifcType === 'IFCLOCALPLACEMENT'
+    || record.ifcType === 'IFCAXIS2PLACEMENT3D'
+    || record.ifcType === 'IFCAXIS2PLACEMENT2D'
+    || record.ifcType === 'IFCCARTESIANPOINT'
+    || record.ifcType === 'IFCDIRECTION',
+  ).length;
+  const placementDetailMs = performance.now() - detailStarted;
   const lengthUnit = parseLengthUnit(records);
   const placementResolver = createIfcPlacementResolver(detailById, lengthUnit);
 
@@ -654,6 +861,7 @@ function parseIfcModel(entry: IfcEntry, text: string): ParsedIfcModel {
   const resourceTypeCounts = new Map<string, number>();
   const propertyGroupsById = new Map<number, IfcPropertyGroup>();
   const propertyGroupsByObjectId = new Map<number, IfcPropertyGroup[]>();
+  const propertyStarted = performance.now();
   for (const record of records) {
     if (record.ifcType === 'IFCPROPERTYSET') {
       propertyGroupsById.set(record.expressId, parseIfcPropertyGroup(record, detailById, 'property'));
@@ -707,6 +915,11 @@ function parseIfcModel(entry: IfcEntry, text: string): ParsedIfcModel {
       if (name) addNamesForObjects(groupNamesByObjectId, parseRefs(record.args[4]), [name]);
     }
   }
+  const propertyMs = performance.now() - propertyStarted;
+  const propertyEntityCount = records.filter((record) => record.ifcType.startsWith('IFCPROPERTY')).length;
+  const quantityEntityCount = records.filter((record) => record.ifcType.startsWith('IFCQUANTITY') || record.ifcType === 'IFCELEMENTQUANTITY').length;
+  const materialEntityCount = records.filter((record) => record.ifcType.startsWith('IFCMATERIAL')).length;
+  const classificationEntityCount = records.filter((record) => record.ifcType.startsWith('IFCCLASSIFICATION')).length;
 
   const navigationIds = new Set<number>();
   for (const record of records) {
@@ -725,11 +938,16 @@ function parseIfcModel(entry: IfcEntry, text: string): ParsedIfcModel {
   const relationshipTypesByObjectId = new Map<number, Map<string, number>>();
   const childIdsByObjectId = new Map<number, number[]>();
   const parentIdByObjectId = new Map<number, number>();
+  const relationshipStarted = performance.now();
+  let relationshipRecordCount = 0;
+  let relationshipReferenceCount = 0;
   for (const record of records) {
     if (record.ifcType.startsWith('IFCREL')) {
+      relationshipRecordCount++;
       for (const arg of record.args) {
         for (const objectId of parseRefs(arg)) {
           if (!navigationIds.has(objectId)) continue;
+          relationshipReferenceCount++;
           relationshipCountByObjectId.set(objectId, (relationshipCountByObjectId.get(objectId) ?? 0) + 1);
           const typeCounts = relationshipTypesByObjectId.get(objectId) ?? new Map<string, number>();
           typeCounts.set(record.ifcType, (typeCounts.get(record.ifcType) ?? 0) + 1);
@@ -752,6 +970,7 @@ function parseIfcModel(entry: IfcEntry, text: string): ParsedIfcModel {
     childIdsByObjectId.set(parentId, existing);
   }
 
+  const spatialStarted = performance.now();
   for (const record of records) {
     const kind = SPATIAL_TYPES.get(record.ifcType);
     const globalId = parseString(record.args[0]);
@@ -828,6 +1047,7 @@ function parseIfcModel(entry: IfcEntry, text: string): ParsedIfcModel {
       resourceTypeCounts.set(record.ifcType, (resourceTypeCounts.get(record.ifcType) ?? 0) + 1);
     }
   }
+  const spatialEntityMs = performance.now() - spatialStarted;
 
   const objectById = new Map<number, IfcSpatialObject>();
   for (const object of objects) objectById.set(object.expressId, object);
@@ -981,6 +1201,9 @@ function parseIfcModel(entry: IfcEntry, text: string): ParsedIfcModel {
     if (object.spatialKeys.length > 0) propagateSpatialContainment(object, new Set<string>());
   }
 
+  const relationshipMs = performance.now() - relationshipStarted;
+
+  const finalizeStarted = performance.now();
   const containedObjectCount = objects.filter((object) => object.spatialKeys.length > 0).length;
   const directContainedObjectCount = objects.filter((object) => object.spatialContainment === 'direct').length;
   const propertyValueCount = objects.reduce(
@@ -993,6 +1216,33 @@ function parseIfcModel(entry: IfcEntry, text: string): ParsedIfcModel {
       .reduce((count, group) => count + group.values.length, 0),
     0,
   );
+  const finalizeMs = performance.now() - finalizeStarted;
+  const profile: IfcSpatialParseProfile = {
+    modelId: entry.modelId,
+    entryPath: entry.path,
+    sourceBytes: sourceBytes ?? text.length,
+    totalMs: performance.now() - parseStarted,
+    stepScanMs,
+    rawEntityCount: records.length,
+    detailEntityCount: detailById.size,
+    placementEntityCount,
+    placementDetailMs,
+    spatialEntityMs,
+    spatialEntityCount: spatialEntities.length,
+    propertyMs,
+    propertyEntityCount,
+    quantityEntityCount,
+    propertyValueCount,
+    quantityValueCount,
+    materialEntityCount,
+    classificationEntityCount,
+    relationshipMs,
+    relationshipRecordCount,
+    relationshipReferenceCount,
+    finalizeMs,
+    objectCount: objects.length,
+    containedObjectCount,
+  };
   return {
     summary: {
       modelId: entry.modelId,
@@ -1013,6 +1263,7 @@ function parseIfcModel(entry: IfcEntry, text: string): ParsedIfcModel {
     },
     spatialEntities,
     objects,
+    profile,
   };
 }
 

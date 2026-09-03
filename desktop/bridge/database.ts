@@ -185,6 +185,17 @@ export async function readCachedEntry(projectId: number, entryPath: string): Pro
   return toUint8Array(bytes);
 }
 
+/** 获取 Tauri 后端进程 RSS；该值不代表 WebView2 子进程或 JS heap。 */
+export interface ProcessMemorySnapshot {
+  pid: number;
+  rssBytes: number | null;
+  source: string;
+}
+
+export async function getProcessMemory(): Promise<ProcessMemorySnapshot> {
+  return invokeTimed<ProcessMemorySnapshot>('get_process_memory');
+}
+
 /** 批量读取缓存文件的结果项 */
 export interface BatchCacheFileItem {
   entry_path: string;

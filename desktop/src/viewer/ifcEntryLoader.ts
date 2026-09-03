@@ -75,6 +75,9 @@ export interface IfcEntryLike {
   modelId: string;
 }
 
+/** 供变电加载性能诊断使用；不改变 IFC/Fragments 业务结果。 */
+export type IfcLoadSource = 'fragments-cache' | 'ifc';
+
 /**
  * 加载 GIM IFC entry，优先 Fragments 缓存（命中时不读 IFC buffer）。
  *
@@ -90,7 +93,11 @@ export async function loadIfcEntry(
   entry: IfcEntryLike,
   getIfcBuffer: () => Promise<Uint8Array | null>,
   onProgress?: (progress: number) => void,
-  options: { session?: ProjectLoadSession } = {},
+  options: {
+    session?: ProjectLoadSession;
+    /** 加载来源确定后回调一次；调用方可记录 cache hit/miss。 */
+    onLoadSource?: (source: IfcLoadSource) => void;
+  } = {},
 ): Promise<void> {
   const { modelId, name, path: entryPath } = entry;
   const session = options.session ?? state.captureProjectSession();
@@ -130,6 +137,7 @@ export async function loadIfcEntry(
     );
     if (!isCurrent()) return;
     if (cacheHit) {
+      options.onLoadSource?.('fragments-cache');
       debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 命中: ${entryPath} (modelId=${modelId})`);
       // 诊断：缓存命中路径同样输出 IFC bbox（与 MOD/STL bbox 对比）
       logIfcModelBBox(ctx, runtimeModelId, 'cache-hit');
@@ -141,6 +149,7 @@ export async function loadIfcEntry(
 
   // 3. 缓存无效或未启用 → lazy 读取 IFC buffer
   debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 未命中: ${entryPath ?? '(无 entryPath)'} (modelId=${modelId})`);
+  options.onLoadSource?.('ifc');
 
   const tIfcRead = performance.now();
   const ifcBuffer = await getIfcBuffer();

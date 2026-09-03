@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../types.js';
-import { buildSubstationSpatialIndexFromTexts } from '../ifcSpatialParser.js';
+import type {
+  IfcSpatialParseProfile,
+  IfcSpatialReadProfile,
+  SubstationSpatialIndexObserver,
+} from '../ifcSpatialParser.js';
+import {
+  buildSubstationSpatialIndexFromFiles,
+  buildSubstationSpatialIndexFromTexts,
+} from '../ifcSpatialParser.js';
 
 const entry: IfcEntry = { modelId: 'model', name: 'model', path: 'DEV/model.ifc' };
 
@@ -346,5 +354,70 @@ describe('ifc spatial parser', () => {
     expect(link?.confidence).toBe('inferred');
     expect(link?.sourceDesignNames).toEqual(['GIS 布置']);
     expect(link?.sourceDesignFiles).toBeUndefined();
+  });
+
+  it('逐 IFC 读取时发出 read/STEP/semantic/finalize profile，且路径大小写不敏感', async () => {
+    const text = "#1=IFCWALL('wall-guid',#99,'墙体',$,$,$,$,$,$);";
+    const observer: SubstationSpatialIndexObserver & {
+      reads: IfcSpatialReadProfile[];
+      steps: Array<Parameters<NonNullable<SubstationSpatialIndexObserver['onStepScan']>>[0]>;
+      parses: IfcSpatialParseProfile[];
+      finalizes: Array<Parameters<NonNullable<SubstationSpatialIndexObserver['onFinalize']>>[0]>;
+    } = {
+      reads: [],
+      steps: [],
+      parses: [],
+      finalizes: [],
+      onModelRead(profile) { this.reads.push(profile); },
+      onStepScan(profile) { this.steps.push(profile); },
+      onModelParsed(profile) { this.parses.push(profile); },
+      onFinalize(profile) { this.finalizes.push(profile); },
+    };
+    const files = new Map<string, File>([['dev/MODEL.IFC', new File([text], 'MODEL.IFC')]]);
+    const result = await buildSubstationSpatialIndexFromFiles(
+      files,
+      [entry],
+      node(),
+      [],
+      observer,
+    );
+    expect(result.models).toHaveLength(1);
+    expect(observer.reads).toHaveLength(1);
+    expect(observer.reads[0]).toMatchObject({
+      entryPath: 'DEV/model.ifc',
+      found: true,
+      bytes: new TextEncoder().encode(text).byteLength,
+    });
+    expect(observer.reads[0].readMs).toBeGreaterThanOrEqual(0);
+    expect(observer.reads[0].decodeMs).toBeGreaterThanOrEqual(0);
+    expect(observer.steps).toHaveLength(1);
+    expect(observer.steps[0]).toMatchObject({ entryPath: 'DEV/model.ifc', rawEntityCount: 1 });
+    expect(observer.parses).toHaveLength(1);
+    expect(observer.parses[0]).toMatchObject({ rawEntityCount: 1, objectCount: 1 });
+    expect(observer.finalizes).toHaveLength(1);
+    expect(observer.finalizes[0]).toMatchObject({ modelCount: 1, objectCount: 1 });
+  });
+
+  it('单个 IFC 读取失败时记录错误并保留其它模型的完整索引', async () => {
+    const goodEntry: IfcEntry = { modelId: 'good', name: 'good', path: 'DEV/good.ifc' };
+    const badEntry: IfcEntry = { modelId: 'bad', name: 'bad', path: 'DEV/bad.ifc' };
+    const badFile = {
+      size: 123,
+      async arrayBuffer(): Promise<ArrayBuffer> { throw new Error('simulated read failure'); },
+    } as unknown as File;
+    const reads: IfcSpatialReadProfile[] = [];
+    const result = await buildSubstationSpatialIndexFromFiles(
+      new Map<string, File>([
+        ['DEV/good.ifc', new File(["#1=IFCWALL('good',#99,'good',$,$,$,$,$,$);"], 'good.ifc')],
+        ['DEV/bad.ifc', badFile],
+      ]),
+      [goodEntry, badEntry],
+      node(),
+      [],
+      { onModelRead: (profile) => reads.push(profile) },
+    );
+    expect(result.models.map((model) => model.modelId)).toEqual(['good', 'bad']);
+    expect(result.models.find((model) => model.modelId === 'bad')?.parseError).toContain('无法读取 IFC 内容');
+    expect(reads[1]).toMatchObject({ found: true, bytes: 123, error: 'simulated read failure' });
   });
 });

@@ -13,6 +13,13 @@ import {
   perfCurrentSession,
   perfRecordInvoke,
   perfRecordBatchRead,
+  perfMarkProductMoment,
+  perfProductMomentSnapshot,
+  perfRecordMemorySample,
+  perfRecordExternalSpan,
+  perfRecordSubstationIfcRead,
+  perfRecordSubstationIfcProfile,
+  perfRecordSubstationFinalizeProfile,
   installLongTaskObserver,
   perfLongTaskSnapshot,
 } from '../perfTimings.js';
@@ -170,5 +177,49 @@ describe('perfTimings', () => {
     FakeObserver.instances[FakeObserver.instances.length - 1].emit(60);
     expect(perfLongTaskSnapshot()).toMatchObject({ count: 1, totalBlockingTimeMs: 10, maxMs: 60 });
     vi.unstubAllGlobals();
+  });
+
+  it('产品时刻每个会话只记录第一次，迟到时刻不污染新会话', () => {
+    const oldSession = perfCurrentSession();
+    perfMarkProductMoment('semanticReady', { source: 'old-first' }, oldSession);
+    perfMarkProductMoment('semanticReady', { source: 'old-second' }, oldSession);
+    expect(perfProductMomentSnapshot().semanticReady?.meta).toEqual({ source: 'old-first' });
+
+    perfReset({ generation: 11 });
+    perfMarkProductMoment('semanticReady', { source: 'late-old' }, oldSession);
+    expect(perfProductMomentSnapshot().semanticReady).toBeNull();
+    perfMarkProductMoment('semanticReady', { source: 'new' });
+    expect(perfProductMomentSnapshot().semanticReady?.meta).toEqual({ source: 'new' });
+  });
+
+  it('内存样本、外部 span 和变电 IFC profile 按 session 隔离', () => {
+    const oldSession = perfCurrentSession();
+    perfRecordMemorySample('old', { rssBytes: 10, jsHeapUsedBytes: 5 }, oldSession);
+    perfRecordExternalSpan('old external', 7, undefined, oldSession);
+    perfRecordSubstationIfcRead({
+      modelId: 'old', entryPath: 'old.ifc', bytes: 100, readMs: 1, decodeMs: 2, found: true,
+    }, oldSession);
+    perfRecordSubstationIfcProfile({
+      modelId: 'old', entryPath: 'old.ifc', sourceBytes: 100, totalMs: 3,
+      stepScanMs: 1, rawEntityCount: 2, detailEntityCount: 1, placementEntityCount: 1,
+      placementDetailMs: 0.1, spatialEntityMs: 0.2, spatialEntityCount: 1,
+      propertyMs: 0.3, propertyEntityCount: 1, quantityEntityCount: 0,
+      propertyValueCount: 1, quantityValueCount: 0, materialEntityCount: 0,
+      classificationEntityCount: 0, relationshipMs: 0.4, relationshipRecordCount: 1,
+      relationshipReferenceCount: 1, finalizeMs: 0.1, objectCount: 1,
+      containedObjectCount: 1,
+    }, oldSession);
+    perfRecordSubstationFinalizeProfile({
+      durationMs: 1, modelCount: 1, spatialNodeCount: 1, objectCount: 1,
+      linkCount: 1, cbmLinkCount: 1, uncontainedIfcObjects: 0,
+    }, oldSession);
+    perfReset({ generation: 12 });
+    perfRecordMemorySample('late-old', { rssBytes: 20 }, oldSession);
+    perfRecordExternalSpan('late-old external', 9, undefined, oldSession);
+    expect(perfSnapshot().memory).toHaveLength(0);
+    expect(perfSnapshot().substation.ifcReads).toHaveLength(0);
+    expect(perfSnapshot().substation.ifcParses).toHaveLength(0);
+    expect(perfSnapshot().substation.finalize).toHaveLength(0);
+    expect(perfSnapshot().spans).toHaveLength(0);
   });
 });

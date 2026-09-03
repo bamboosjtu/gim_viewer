@@ -2022,6 +2022,15 @@ fn is_expected_cache_path(
         {
             s = s.to_ascii_lowercase();
         }
+        // `std::fs::canonicalize` may return an extended-length Windows path
+        // (`\\\\?\\C:` / `//?/C:`), while older entries persisted the same
+        // cache path without that prefix.  They identify the same file; keep
+        // the containment check strict but compare a canonical prefix form.
+        if let Some(rest) = s.strip_prefix("//?/unc/") {
+            s = format!("//{}", rest);
+        } else if let Some(rest) = s.strip_prefix("//?/") {
+            s = rest.to_string();
+        }
         while s.ends_with('/') {
             s.pop();
         }

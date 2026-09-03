@@ -33,6 +33,12 @@ describe('findMissingStdSldCacheParts', () => {
     expect(findMissingStdSldCacheParts(entries, result({ sldDoc: null }))).toEqual(['SLD']);
   });
 
+  it('NBT1 SVG 形式的 std（无独立拓扑）与冷路径保持兼容', () => {
+    expect(findMissingStdSldCacheParts(entries, result({
+      stdDoc: { version: 'NBT1', substation: null } as StdSldParseResult['stdDoc'],
+    }))).toEqual([]);
+  });
+
   it('工程索引不声明电气图文件时保持兼容', () => {
     expect(findMissingStdSldCacheParts(['CBM/project.cbm', 'DEV/model.ifc'], null)).toEqual([]);
   });
