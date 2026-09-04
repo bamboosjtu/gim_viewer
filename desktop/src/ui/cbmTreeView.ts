@@ -196,7 +196,9 @@ export function buildAndRenderCbmTree(
     const onSpatialObjectClick = (object: IfcSpatialObject): void => {
       void import('./propsDrawer.js').then(({ showIfcSpatialObjectPropertiesBasic, openPropsDrawerUI }) => {
         if (state.substationSpatialIndex?.objectByKey.get(object.key) !== object) return;
-        showIfcSpatialObjectPropertiesBasic(state, object, state.substationSpatialIndex!);
+        void showIfcSpatialObjectPropertiesBasic(state, object, state.substationSpatialIndex!).catch((err) => {
+          console.warn('[空间树] IFC 属性按需读取失败:', err);
+        });
         openPropsDrawerUI();
       }).catch((err) => console.warn('[空间树] 显示 IFC 构件属性失败:', err));
     };

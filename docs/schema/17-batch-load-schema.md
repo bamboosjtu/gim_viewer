@@ -11,7 +11,7 @@
 
 > **历史状态（2026-07-17）**：本文同时包含设计基线与实施历史。方案 B 静态合并、DEV 粒度 GLB 缓存及 marker 版本失效机制已经实现；当时 `PARSER_VERSION=gim-parser-v14`、`GEOMETRY_CACHE_VERSION=geometry-cache-v2-stretched-body`。Worker 化解析、SQLite 几何缓存表和 `.gimc` 预编译容器仍未实现。§1 的“现状”与 §15 早期“待实施”表应按本说明及 [18c](18c-experiment-mod-to-gltf-cache.md) 的 v2 记录理解。
 >
-> **当前状态（2026-09-03）**：源码以 `PARSER_VERSION=gim-parser-v21`、`GEOMETRY_CACHE_VERSION=geometry-cache-v5-dev-status` 为准；DEV 粒度 GLB 管线、每 DEV `glb|empty` manifest、unique DEV 二进制 batch warm 回放、PHM 颜色覆盖、缓存命中回放、属性来源路由、线路 Parser Worker 与 semantic pack 已落地。Worker 化 IFC 解析、SQLite 几何缓存表、InstancedMesh 装配及 `.gimc` 预编译容器仍是长期路线，本文旧版本号仅作演进记录。
+> **当前状态（2026-09-04）**：源码以 `PARSER_VERSION=gim-parser-v22`、`GEOMETRY_CACHE_VERSION=geometry-cache-v5-dev-status` 为准；DEV 粒度 GLB 管线、每 DEV `glb|empty` manifest、unique DEV 二进制 batch warm 回放、PHM 颜色覆盖、缓存命中回放、属性来源路由、线路 Parser Worker 与 semantic pack，以及变电 IFC Spatial Semantic Core selective/two-pass scan 已落地。Worker 化 IFC 解析、SQLite 几何缓存表、InstancedMesh 装配及 `.gimc` 预编译容器仍是长期路线，本文旧版本号仅作演进记录。
 
 ## 1. 问题背景
 
@@ -638,7 +638,7 @@ for (let j = 0; j < batch.length; j++) {
 ### 7.3 缓存版本化策略
 
 ```text
-PARSER_VERSION          = 'gim-parser-v21'        // 当前，GIM 解析层（v1→v21 详见下方演进历史）
+PARSER_VERSION          = 'gim-parser-v22'        // 当前，GIM 解析层（v1→v22 详见下方演进历史）
 FRAGMENTS_CACHE_VERSION = 'fragments-cache-v6'   // 基础版本；运行时另拼接 fragments/web-ifc 实际版本
 GEOMETRY_CACHE_VERSION  = 'geometry-cache-v5-dev-status' // 当前，DEV 粒度 GLB + empty manifest 与 PHM 颜色覆盖
 
@@ -669,7 +669,8 @@ GEOMETRY_CACHE_VERSION  = 'geometry-cache-v5-dev-status' // 当前，DEV 粒度 
 | v18 | 线路语义索引与批量读取协议演进（历史中间版本） |
 | v19 | IFC 空间索引逐模型增量构建；运行时 IFC 会话与模型事件隔离 |
 | v20 | 线路 native semantic pack 与大 MOD 仅保留路径元数据 |
-| v21 | semantic pack 保存完整 entry metadata 并支持 warm full-read；当前源码版本 |
+| v21 | semantic pack 保存完整 entry metadata 并支持 warm full-read；历史当前版本 |
+| v22 | 变电 IFC Spatial Semantic Core selective/two-pass scan；属性/材质等延迟到 Fragments 按需读取；当前源码版本 |
 
 ---
 
@@ -744,7 +745,7 @@ GEOMETRY_CACHE_VERSION  = 'geometry-cache-v5-dev-status' // 当前，DEV 粒度 
 
 ```text
 validate_gim_cache
-  → gim-parser-v21 + geometry-cache-v5-dev-status/_manifest.json
+  → gim-parser-v22 + geometry-cache-v5-dev-status/_manifest.json
   → 恢复 CBM/IFC 索引
   → Map<lowercase DEV path, CBM placement[]> 建立 unique DEV 输入
   → batch_read_glb_files（GIMR v2；<=256 文件、预计 <=64 MiB）

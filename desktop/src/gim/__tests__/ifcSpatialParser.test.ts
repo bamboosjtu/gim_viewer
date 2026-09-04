@@ -176,7 +176,7 @@ describe('ifc spatial parser', () => {
       .toEqual([100, 210, 300]);
   });
 
-  it('保留 IFC 原生身份字段和属性集摘要，Name 为占位符时不再显示 --', () => {
+  it('保留 IFC 原生身份字段并将属性详情延迟到 Fragments，Name 为占位符时不再显示 --', () => {
     const text = [
       "#1=IFCPROJECT('p',#99,'项目',$,$,$,$,(#2),$);",
       "#2=IFCSITE('s',#99,'站区',$,$,$,$,$,.ELEMENT.,$,$,0.,$,$);",
@@ -205,13 +205,82 @@ describe('ifc spatial parser', () => {
     expect(object.placement?.position).toEqual([1, 2, 3]);
     expect(object.geometryStatus).toBe('represented');
     expect(object.representationRef).toBe('#41');
-    expect(object.propertySets?.[0].name).toBe('Pset_WallCommon');
-    expect(object.propertySets?.[0].values).toEqual([
-      { name: 'FireRating', value: '2h', dataType: 'IFCLABEL' },
-    ]);
+    expect(object.propertyDataDeferred).toBe(true);
+    expect(object.propertySets).toBeUndefined();
+    expect(object.propertySetNames).toBeUndefined();
+    expect(index.models[0].propertyValueCount).toBe(0);
+    expect(index.models[0].objectsWithProperties).toBe(0);
     expect(object.relationshipCount).toBeGreaterThanOrEqual(2);
-    expect(object.propertySetNames).toEqual(['Pset_WallCommon']);
     expect(object.sourcePath).toBe('DEV/model.ifc');
+  });
+
+  it('Selective IFC Core 不物化无关实体，并只保留实际引用的 placement 闭包', () => {
+    const unrelatedPoints = Array.from({ length: 1200 }, (_, index) =>
+      `#${1000 + index}=IFCCARTESIANPOINT((${index}.,0.,0.));`);
+    const text = [
+      "#10=IFCWALL('wall-selective',#99,'选择性构件',$,$,#40,$,$,$);",
+      '#40=IFCLOCALPLACEMENT(#50,#60);',
+      '#50=IFCLOCALPLACEMENT($,#51);',
+      '#51=IFCAXIS2PLACEMENT3D(#52,#53,#54);',
+      '#52=IFCCARTESIANPOINT((100.,200.,300.));',
+      '#53=IFCDIRECTION((0.,0.,1.));',
+      '#54=IFCDIRECTION((0.,1.,0.));',
+      '#60=IFCAXIS2PLACEMENT3D(#61,$,$);',
+      '#61=IFCCARTESIANPOINT((10.,0.,0.));',
+      ...unrelatedPoints,
+      "#3000=IFCPROPERTYSINGLEVALUE('Ignored',$,IFCLABEL('not in core'),$);",
+    ].join('\n');
+    const parsed: IfcSpatialParseProfile[] = [];
+    const index = buildSubstationSpatialIndexFromTexts(
+      [{ entry, text }],
+      node(),
+      [],
+      { onModelParsed: (profile) => parsed.push(profile) },
+    );
+    const object = index.objects.find((item) => item.globalId === 'wall-selective')!;
+    expect(object).toBeDefined();
+    expect(object.propertyDataDeferred).toBe(true);
+    expect(object.propertySets).toBeUndefined();
+    expect(object.placement?.position).toEqual([100, 210, 300]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].rawEntityCount).toBe(1210);
+    expect(parsed[0].retainedEntityCount).toBe(1);
+    expect(parsed[0].placementCandidateCount).toBe(1208);
+    expect(parsed[0].placementEntityCount).toBe(8);
+    expect(parsed[0].detailEntityCount).toBe(9);
+    expect(parsed[0].rawEntityCount).toBeGreaterThan(parsed[0].detailEntityCount);
+    expect(index.models[0].resourceTypeCounts?.IFCPROPERTYSINGLEVALUE).toBe(1);
+  });
+
+  it('placement 闭包支持超过 32 层的深链', () => {
+    const depth = 40;
+    const placements: string[] = [];
+    for (let i = 0; i < depth; i++) {
+      const placementId = 100 + i;
+      const axisId = 200 + i;
+      const pointId = 300 + i;
+      const parent = i === depth - 1 ? '$' : `#${placementId + 1}`;
+      placements.push(
+        `#${placementId}=IFCLOCALPLACEMENT(${parent},#${axisId});`,
+        `#${axisId}=IFCAXIS2PLACEMENT3D(#${pointId},$,$);`,
+        `#${pointId}=IFCCARTESIANPOINT((1.,0.,0.));`,
+      );
+    }
+    const text = [
+      `#10=IFCWALL('deep-placement',#99,'深层放置',$,$,#100,$,$,$);`,
+      ...placements,
+    ].join('\n');
+    const profiles: IfcSpatialParseProfile[] = [];
+    const index = buildSubstationSpatialIndexFromTexts(
+      [{ entry, text }],
+      node(),
+      [],
+      { onModelParsed: (profile) => profiles.push(profile) },
+    );
+    expect(index.objects.find((item) => item.globalId === 'deep-placement')?.placement?.position)
+      .toEqual([depth, 0, 0]);
+    expect(profiles[0].placementEntityCount).toBe(depth * 3);
+    expect(profiles[0].placementCandidateCount).toBe(depth * 3);
   });
 
   it('沿 IFC 分解关系继承空间归属，避免子构件被误列为未落位', () => {
@@ -305,7 +374,7 @@ describe('ifc spatial parser', () => {
     expect(index.coverage.boundaryContainedIfcObjects).toBe(1);
   });
 
-  it('保留工程量单位和 Representation 缺失状态', () => {
+  it('保留工程量实体计数、单位和 Representation 缺失状态，属性值不进入 Spatial Core', () => {
     const text = [
       "#1=IFCPROJECT('p',#99,'项目',$,$,$,$,(#2),$);",
       "#2=IFCSITE('s',#99,'站区',$,$,$,$,$,.ELEMENT.,$,$,0.,$,$);",
@@ -318,7 +387,7 @@ describe('ifc spatial parser', () => {
       "#50=IFCPROPERTYSET('ps',#99,'Pset_WallCommon',$,(#51));",
       "#51=IFCELEMENTQUANTITY('q',#99,'BaseQuantities',$,$,(#52));",
       "#52=IFCQUANTITYLENGTH('Length',$,#60,12.5);",
-      "#60=IFCSIUNIT(*,.MILLI.,.METRE.,$);",
+      "#60=IFCSIUNIT(.LENGTHUNIT.,.MILLI.,.METRE.,$);",
       "#53=IFCRELDEFINESBYPROPERTIES('r5',#99,$,$,(#10),#51);",
       "#20=IFCRELAGGREGATES('r1',#99,$,$,#1,(#2));",
       "#21=IFCRELAGGREGATES('r2',#99,$,$,#2,(#3));",
@@ -328,9 +397,14 @@ describe('ifc spatial parser', () => {
     const index = buildSubstationSpatialIndexFromTexts([{ entry, text }], node());
     const object = index.objects.find((item) => item.globalId === 'wall-guid')!;
     expect(object.geometryStatus).toBe('unrepresented');
-    expect(object.propertySets?.[0].values[0]).toEqual({
-      name: 'Length', value: '12.5', dataType: 'length', unit: 'MILLI METRE',
-    });
+    expect(object.propertyDataDeferred).toBe(true);
+    expect(object.propertySets).toBeUndefined();
+    expect(index.models[0].propertyValueCount).toBe(0);
+    expect(index.models[0].quantityValueCount).toBe(0);
+    expect(index.models[0].objectsWithProperties).toBe(0);
+    expect(index.models[0].lengthUnit).toBe('MILLI METRE');
+    expect(index.models[0].resourceTypeCounts?.IFCELEMENTQUANTITY).toBe(1);
+    expect(index.models[0].resourceTypeCounts?.IFCQUANTITYLENGTH).toBe(1);
   });
 
   it('把 FileDevRelation 的图纸来源挂到空间资产，并兼容带路径/大小写差异的 CBM 引用', () => {

@@ -1059,7 +1059,7 @@ export interface LineDevPropertyPayload {
  *
  * 生产线路首次导入路径应调用此命令，不得再单独调用 saveLineGraph。
  * 事务内：删除 6 张表旧数据 → 插入 graph + fam + dev → 更新
- * parser_version = PARSER_VERSION（当前 gim-parser-v21）, project_type = transmission_line。
+ * parser_version = PARSER_VERSION（当前 gim-parser-v22）, project_type = transmission_line。
  */
 /** 属性分块大小：每批 IPC 传输的记录数（acc-plan P1-2） */
 const LINE_ATTR_CHUNK_SIZE = 4000;

@@ -188,7 +188,7 @@ desktop/src-tauri/
 
 ### PARSER_VERSION 失效机制
 
-- 定义在 `desktop/src-tauri/src/db.rs`：`pub const PARSER_VERSION: &str = "gim-parser-v21"`
+- 定义在 `desktop/src-tauri/src/db.rs`：`pub const PARSER_VERSION: &str = "gim-parser-v22"`
 - `validate_gim_cache` 检查 `parser_version_match`
 - 版本不匹配 → 缓存无效 → 完整解压 → `save_gim_index` 先删后插全部表
 - 2026-08 v17：表名规范化迁移——变电表统一 `substation_` 前缀、线路表统一

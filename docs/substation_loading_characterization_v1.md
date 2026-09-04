@@ -2,9 +2,69 @@
 
 > 生成时间：2026-09-03T04:05:34.3542998Z；真实 Tauri 记录：6 次。冷启动定义为删除项目缓存后打开，热启动定义为保留缓存后二次打开；每组以 median/P95 汇总。P95 使用 nearest-rank（n=3 时等于该组最大观测值）。
 
+> **Semantic Core v1 修订（2026-09-04）**：本轮 IFC 空间语义解析已升级为
+> `gim-parser-v22` 的 selective/two-pass 实现。下文原有的 Tauri 表格是
+> `gim-parser-v21` 采集结果，保留作历史对照；新增的 Node parser 基准和样本
+> 回归单独列出，不能与旧 Tauri 数字混合，也不能据此宣称已完成新的 WebView
+> RSS/产品时刻复测。
+
 ## 结论状态
 
 已采集 6 次 Tauri 运行。下表只使用诊断 JSON 中的真实运行值；Vitest/Node 测试不混入统计。下一轮决策应以表中占主导的阶段为准。
+
+### Semantic Core v1 当前结果（Node parser benchmark）
+
+本轮使用与样本回归相同的真实解压目录，在单个 Node 进程中逐 IFC
+`arrayBuffer/text → parse → merge → 释放文本`，每个样本连续运行 3 次。
+该基准用于验证解析器的选择性扫描和峰值趋势，不代表 Tauri WebView 的产品时刻、
+进程树 RSS 或 Fragments/web-ifc 加载时长。
+
+| 样本 | 运行次数 | 全包 Spatial Core ms（3 次观测） | median ms | P95 ms | 单文件最大 IFC | 最大 IFC raw entity | retained entity | placement candidate | placement closure | 最大 IFC parse 总时长（观测范围） | Node heap 观察 |
+|---|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---|
+| substation02 | 3 | 15,310 / 15,100 / 14,940 | 15,100 | 15,310 | `CBM/0302-钢结构.ifc`（约 372.6 MiB） | 6,160,057 | 69,275 | 2,132,613 | 171,165 | 约 8.5–9.3 s | 单次约 714 MB；同一进程重复运行因 GC 延迟最高约 1.58 GB |
+| substation04 | 3 | 3,180 / 3,150 / 3,400 | 3,180 | 3,400 | `DEV/设备支架-版本1.ifc`（约 92.5 MiB） | 1,780,745 | 426,363 | 425,553 | 未单列（各模型闭包按 profile） | 未单列 | 约 225–324 MB |
+
+> substation02 的最大 IFC profile 中 STEP scan 约 7.8–8.1 s，placement 闭包约
+> 0.17–0.25 s，关系构建约 0.5–0.7 s。`retained entity` 是空间/导航/关系/单位
+> 首遍保留数，不是完整 Raw entity 数；`placement candidate` 仅保存紧凑偏移编码，
+> `placement closure` 才物化为 placement/detail 记录。substation04 的 closure
+> 数量因 IFC 文件不同，报告只用于规模量级，不作为跨样本总和断言。
+
+### 第一阶段验收判定
+
+- **解析时长**：substation02 全包 Spatial Core median 15.10 s、P95 15.31 s，
+  已接近但尚未严格低于 15 s 的目标；最大 IFC 本身约 8.5–9.3 s。后续若要把
+  全包稳定压到 15 s 以下，应先针对剩余文本扫描成本做专项，不在本轮扩大范围。
+- **空间语义内存**：Node 单次 heap 约 714 MB，重复运行的 1.58 GB 是进程 GC
+  延迟现象；这不是 Tauri WebView heap。新的真实 Tauri `Spatial finalize` 后
+  `<2 GB` 尚未复测，因此不能把该目标标记为已通过。
+- **语义完整性**：样本回归保持 substation02/03/04 与 demo-substation 的
+  模型数、空间对象数、直接/分解/宿主关系计数及 CBM/IFC 链接基线一致；
+  选择性核心不再提交 Pset/工程量/材质/分类/类型/分组，构件属性由 Fragments
+  `getItemsData()` 按需读取。
+- **MOD/STL 边界**：若 substation02 后续运行出现 `MOD/STL > 30 s`，本轮只
+  保存 `devGlbProfile` 诊断，不修改 Geometry compiler。
+
+### Semantic Core v1 Tauri smoke（非 n=3 统计）
+
+为确认 v22 已接入真实 WebView，另用带远程调试的 Tauri 开发实例做了小规模
+烟测。该表只记录本轮新代码，不能替代正式 cold/warm n=3；产品时刻包含解压、
+CBM/FAM/DEV、IFC 读取及后续编排，必须与上面的单模型 Spatial Core profile
+分开解读。
+
+| 样本/模式 | 次数 | semanticReady median/P95 ms | firstGeometryReady median/P95 ms | fullModelReady median/P95 ms | Spatial finalize 后 JS heap | 进程树 RSS 峰值 | 备注 |
+|---|---:|---:|---:|---:|---:|---:|---|
+| substation04 / cold | 1 | 28,048 | 32,923 | 83,656 | 159.8 MB | 2,166.6 MB | 19 IFC；v22；单次烟测 |
+| substation04 / warm | 3 | 5,179 / 5,254 | 5,763 / 5,828 | 10,326 / 10,337 | 392.8 / 393.0 MB（Spatial finalize） | 2,287.9 / 2,293.5 MB | 19 IFC；未开启 Fragments cache |
+| substation02 / cold | 1（语义完成后停止等待） | 152,096 | 153,703 | — | 997.9 MB | 采样未落盘 | 17 IFC；MOD/GLB 仍在后台，按边界只保留诊断，不把未完成运行计入 ready 统计 |
+
+substation02 这次语义 profile 的最大 IFC 为 `CBM/0302-钢结构.ifc`：
+`rawEntityCount=6,160,057`、`retainedEntityCount=69,275`、
+`placementCandidateCount=2,132,613`、`placementEntityCount=171,165`，
+单文件 Spatial Core `total=7,312.5 ms`（STEP scan `6,838.8 ms`，
+relationships `319.4 ms`）。该结果说明选择性扫描已在真实 Tauri 中生效；
+`semanticReady` 的 152 s 主要还包括原生解压、文件发现和 CBM/FAM/DEV 编排，
+不能归因于 IFC Spatial Core 本身。
 
 ## 测量边界与证据链
 

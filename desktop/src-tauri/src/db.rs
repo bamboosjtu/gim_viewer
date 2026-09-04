@@ -43,8 +43,8 @@ macro_rules! debug_perf_log {
 /// v16: 资源上限、几何 ready 提交协议、线路缓存 session 校验
 /// v19: IFC 空间索引改为逐模型增量构建；运行时 IFC 会话身份与模型事件隔离
 /// v20: 线路 native semantic pack 与大 MOD 仅保留路径元数据，缓存输入边界同步升级
-/// v21: 线路 semantic pack index 保存完整 entry metadata，并支持 warm full-read
-pub const PARSER_VERSION: &str = "gim-parser-v21";
+/// v22: Substation IFC Spatial Semantic Core selective/two-pass scan
+pub const PARSER_VERSION: &str = "gim-parser-v22";
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建

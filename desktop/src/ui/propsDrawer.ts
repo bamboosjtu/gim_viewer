@@ -495,38 +495,6 @@ function collectSourceDesigns(
   return { names, files };
 }
 
-/** IFC Pset/工程量详情；属性值按原始单位保留，避免检查器只剩“有几个属性集”。 */
-function renderIfcPropertyGroups(groups: NonNullable<IfcSpatialObject['propertySets']> | undefined): string {
-  if (!groups || groups.length === 0) return '';
-  let html = '';
-  for (const group of groups) {
-    if (group.values.length === 0 && !group.truncated) continue;
-    const title = `${group.name} · ${group.kind === 'quantity' ? '工程量' : '属性'}`;
-    const rows: PropertyRow[] = group.values.map((value) => ({
-      key: value.name,
-      value: value.value,
-      unit: value.unit,
-    }));
-    const primary = rows.filter((row) => (getPropertyDefinition('ifc-object', row.key)?.priority ?? 2) < 2);
-    const technical = rows.filter((row) => (getPropertyDefinition('ifc-object', row.key)?.priority ?? 2) >= 2);
-    html += renderPropertySection(title, 'ifc-object', primary);
-    if (technical.length > 0) html += renderTechnicalSection(`${title} · 技术字段`, 'ifc-object', technical);
-    if (group.truncated) {
-      html += '<div class="props-note">属性过多，仅显示前 256 项</div>';
-    }
-  }
-  return html;
-}
-
-function renderIfcExtendedMetadata(item: Pick<IfcSpatialObject, 'materials' | 'classifications' | 'typeName' | 'groupNames'>): string {
-  const rows: Array<[string, string | FileReferenceValue]> = [];
-  if (item.typeName) rows.push(['类型定义', item.typeName]);
-  if (item.materials && item.materials.length > 0) rows.push(['材质', item.materials.join('、')]);
-  if (item.classifications && item.classifications.length > 0) rows.push(['分类引用', item.classifications.join('、')]);
-  if (item.groupNames && item.groupNames.length > 0) rows.push(['所属组/系统', item.groupNames.join('、')]);
-  return sectionHtml('IFC 扩展信息', rows);
-}
-
 function findCbmNodeByPath(root: CbmNode | null, path: string): CbmNode | null {
   if (!root) return null;
   const queue: CbmNode[] = [root];
@@ -586,8 +554,7 @@ export function showSpatialNodePropertiesBasic(
     ...(node.placementRef ? [['IFC 放置引用', node.placementRef] as [string, string]] : []),
     ...(node.representationRef ? [['IFC 表示引用', node.representationRef] as [string, string]] : []),
   ]);
-  const params = renderIfcPropertyGroups(node.propertySets)
-    + renderIfcExtendedMetadata(node);
+  const params = '<div class="props-note">IFC 属性、材质、类型和分组在选中具体构件后通过 Fragments 按需读取。</div>';
   const source = sectionHtml('来源引用', [
     ['IFC 文件', fileReferenceValue('ifc', node.sourcePath)],
     ...(node.globalId ? [['IFC GUID', node.globalId] as [string, string]] : []),
@@ -600,12 +567,35 @@ export function showSpatialNodePropertiesBasic(
   renderInspectorTabs(title, { overview, params, relations, source });
 }
 
-/** 显示未直接关联 CBM 的 IFC 构件属性，避免空间树中的 IFC 对象成为“死节点”。 */
-export function showIfcSpatialObjectPropertiesBasic(
+async function loadSpatialIfcItemData(state: AppState, object: IfcSpatialObject): Promise<string> {
+  const ctx = propsDrawerViewerContext;
+  if (!ctx || !object.globalId) {
+    return '<div class="props-note">IFC 属性需在模型加载后按需读取（Fragments getItemsData）。</div>';
+  }
+  const logicalModelId = object.modelId;
+  const runtimeModelId = state.ifcRuntimeModelIds.get(logicalModelId)
+    ?? state.getRuntimeModelId(logicalModelId);
+  const model = ctx.fragments.list.get(runtimeModelId);
+  if (!model) return '<div class="props-note">对应 IFC 模型尚未完成加载，属性将在模型就绪后可读。</div>';
+  try {
+    const localIds = await model.getLocalIdsByGuids([object.globalId]);
+    const localId = localIds[0];
+    if (localId == null) return '<div class="props-empty">未在当前 IFC 模型中找到该 GUID。</div>';
+    const itemsData = await model.getItemsData([localId], { attributesDefault: true });
+    const data = itemsData[0] as unknown as Record<string, unknown> | undefined;
+    return data ? renderIfcItemData(data) : '<div class="props-empty">该构件暂无 IFC 属性。</div>';
+  } catch (error) {
+    console.warn(`读取 IFC 构件属性失败 (${object.globalId}):`, error);
+    return '<div class="props-note">IFC 属性读取失败，请稍后重试。</div>';
+  }
+}
+
+/** 显示未直接关联 CBM 的 IFC 构件属性，属性详情由 Fragments 按需读取。 */
+export async function showIfcSpatialObjectPropertiesBasic(
   state: AppState,
   object: IfcSpatialObject,
   index: SubstationSpatialIndex,
-): void {
+): Promise<void> {
   const spatial = object.spatialKey ? index.nodeByKey.get(object.spatialKey) : undefined;
   const spatialPaths = object.spatialKeys
     .map((key) => buildSpatialPath(index, key))
@@ -647,9 +637,7 @@ export function showIfcSpatialObjectPropertiesBasic(
       : []),
     ...(spatial ? [['所属空间', spatial.name] as [string, string]] : []),
     ...(object.spatialKeys.length > 1 ? [['空间关系数量', String(object.spatialKeys.length)] as [string, string]] : []),
-    ...(object.propertySetNames && object.propertySetNames.length > 0
-      ? [['属性集', object.propertySetNames.join('、')] as [string, string]]
-      : [['属性集', '未发现 IFCRELDEFINESBYPROPERTIES 关联'] as [string, string]]),
+    ['IFC 属性', object.propertyDataDeferred ? '参数页按需读取（Fragments）' : '未发现 IFC 属性'],
     ['关系记录', String(object.relationshipCount)],
     ...(object.relationshipTypes
       ? [['关系类型', Object.entries(object.relationshipTypes).map(([type, count]) => `${type} ×${count}`).join('、')] as [string, string]]
@@ -658,7 +646,6 @@ export function showIfcSpatialObjectPropertiesBasic(
     ...(object.hostObjectKey ? [['宿主构件', object.hostObjectKey] as [string, string]] : []),
     ...(object.childObjectKeys.length > 0 ? [['子构件', String(object.childObjectKeys.length)] as [string, string]] : []),
   ]);
-  const params = renderIfcPropertyGroups(object.propertySets) + renderIfcExtendedMetadata(object);
   const source = sectionHtml('来源引用', [
     ['IFC 文件', fileReferenceValue('ifc', object.sourcePath)],
     ...(object.globalId ? [['IFC GUID', object.globalId] as [string, string]] : [['IFC GUID', '未提供'] as [string, string]]),
@@ -669,7 +656,11 @@ export function showIfcSpatialObjectPropertiesBasic(
     { key: 'stableKey', value: object.key, mono: true },
   ]);
   const title = `<div class="props-header">${escHtml(object.name || 'IFC 构件')}</div>`;
-  renderInspectorTabs(title, { overview, params, relations, source });
+  let params = '<div class="props-note">正在准备 IFC 属性（按需读取）…</div>';
+  const render = (): void => renderInspectorTabs(title, { overview, params, relations, source });
+  render();
+  params = await loadSpatialIfcItemData(state, object);
+  render();
 }
 
 /** 显示 CbmNode 属性（基础版，不需要 Viewer，不含 IFC 原生属性） */

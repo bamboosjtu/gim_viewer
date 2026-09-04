@@ -63,6 +63,8 @@ export interface IfcSpatialObject {
   /** Representation 引用用于判断 IFC 是否提供了可渲染形状。 */
   representationRef?: string;
   geometryStatus: 'represented' | 'unrepresented';
+  /** 属性/材质/类型等由 Fragments 在选择时按需读取，启动语义索引不展开。 */
+  propertyDataDeferred?: boolean;
   propertySets?: IfcPropertyGroup[];
   propertySetNames?: string[];
   materials?: string[];
@@ -101,6 +103,8 @@ export interface IfcSpatialNode {
   placement?: IfcPlacementSummary;
   representationRef?: string;
   geometryStatus: 'represented' | 'unrepresented';
+  /** 空间容器属性同样不在启动 Spatial Core 展开。 */
+  propertyDataDeferred?: boolean;
   propertySets?: IfcPropertyGroup[];
   materials?: string[];
   classifications?: string[];
@@ -232,6 +236,49 @@ interface RawIfcEntity {
   args: string[];
 }
 
+/**
+ * STEP 选择性扫描的中间结果。
+ *
+ * 注意：这里不保存非空间/导航实体的原始参数。关系记录仍需要保留，
+ * 但属性、材质、分类、类型和组记录只计数，不进入长期对象图。
+ */
+interface SelectiveIfcScanResult {
+  selectedById: Map<number, RawIfcEntity>;
+  relationships: RawIfcEntity[];
+  /** 关系记录的引用在首遍解析一次，后续关系计数/建图复用，避免二次 regex 扫描。 */
+  relationshipRefsById: Map<number, number[]>;
+  /** 空间关系的 parent/related 列表在首遍解析一次，末阶段直接投影。 */
+  spatialRelationRefsById: Map<number, { parentId: number | null; relatedIds: number[] }>;
+  /** 所有 placement 候选只保存文本偏移，不物化参数；供闭包按 ID 取值。 */
+  /** 编码后的 placement 候选（bodyStart + 类型），避免为数百万候选分配对象。 */
+  placementCandidates: Map<number, number>;
+  rawEntityCount: number;
+  totalTypeCounts: Map<string, number>;
+  spatialContainedIds: Set<number>;
+  hostObjectIdsByChildId: Map<number, number[]>;
+  boundarySpaceIdsByObjectId: Map<number, number[]>;
+  spatialRelationIds: Set<number>;
+  placementRoots: Set<number>;
+  propertyEntityCount: number;
+  quantityEntityCount: number;
+  materialEntityCount: number;
+  classificationEntityCount: number;
+}
+
+interface ScannedIfcEntity {
+  expressId: number;
+  ifcType: string;
+  bodyStart: number;
+  bodyEnd: number;
+}
+
+type ScannedIfcEntityCallback = (
+  expressId: number,
+  ifcType: string,
+  bodyStart: number,
+  bodyEnd: number,
+) => void;
+
 interface ParsedIfcModel {
   summary: SpatialModelSummary;
   spatialEntities: IfcSpatialNode[];
@@ -249,17 +296,21 @@ export interface IfcSpatialParseProfile {
   entryPath: string;
   sourceBytes: number;
   totalMs: number;
-  /** STEP 记录扫描及 RawIfcEntity 构建耗时。 */
+  /** STEP 记录扫描耗时；仅选择性实体会构造 RawIfcEntity。 */
   stepScanMs: number;
   rawEntityCount: number;
-  /** detailById 中保留的放置/属性/材质等实体数。 */
+  /** 仍驻留在语义索引中的实体（空间/导航/关系/单位/placement 闭包）。 */
   detailEntityCount: number;
+  /** 选择性首遍保留的空间/导航/关系/单位实体数。 */
+  retainedEntityCount?: number;
   placementEntityCount: number;
+  /** 文件中 placement 候选总数，仅用于诊断，不代表长期驻留数量。 */
+  placementCandidateCount?: number;
   placementDetailMs: number;
   /** 构建空间节点/构件对象耗时与数量。 */
   spatialEntityMs: number;
   spatialEntityCount: number;
-  /** 属性、工程量、材料、分类映射耗时与实体/值数量。 */
+  /** 属性、工程量、材料、分类仅保留扫描计数；启动 Spatial Core 不展开它们。 */
   propertyMs: number;
   propertyEntityCount: number;
   quantityEntityCount: number;
@@ -291,13 +342,16 @@ export interface IfcSpatialReadProfile {
 
 export interface SubstationSpatialIndexObserver {
   onModelRead?: (profile: IfcSpatialReadProfile) => void;
-  /** STEP scan 完成后触发；此时原始文本和 RawIfcEntity 列表仍在当前调用栈。 */
+  /** STEP 选择性 scan 完成后触发；不会暴露全量 RawIfcEntity。 */
   onStepScan?: (profile: {
     modelId: string;
     entryPath: string;
     sourceBytes: number;
     rawEntityCount: number;
     stepScanMs: number;
+    retainedEntityCount?: number;
+    placementCandidateCount?: number;
+    placementEntityCount?: number;
   }) => void;
   onModelParsed?: (profile: IfcSpatialParseProfile) => void;
   onFinalize?: (profile: {
@@ -309,31 +363,6 @@ export interface SubstationSpatialIndexObserver {
     cbmLinkCount: number;
     uncontainedIfcObjects: number;
   }) => void;
-}
-
-/**
- * IFC STEP 记录很多（尤其 BIMBase 导出的文件可达千万级），这里只为
- * 属性、材质、类型和放置解析保留需要的记录，避免再建立一个全量 ID 索引。
- */
-function isIfcDetailType(ifcType: string): boolean {
-  return ifcType === 'IFCPROPERTYSET'
-    || ifcType === 'IFCELEMENTQUANTITY'
-    || ifcType.startsWith('IFCPROPERTY')
-    || ifcType.startsWith('IFCQUANTITY')
-    || ifcType.startsWith('IFCMATERIAL')
-    || ifcType === 'IFCCLASSIFICATION'
-    || ifcType === 'IFCCLASSIFICATIONREFERENCE'
-    || ifcType === 'IFCGROUP'
-    || ifcType === 'IFCSYSTEM'
-    || ifcType.endsWith('TYPE')
-    || ifcType === 'IFCLOCALPLACEMENT'
-    || ifcType === 'IFCAXIS2PLACEMENT3D'
-    || ifcType === 'IFCAXIS2PLACEMENT2D'
-    || ifcType === 'IFCCARTESIANPOINT'
-    || ifcType === 'IFCDIRECTION'
-    || ifcType === 'IFCSIUNIT'
-    || ifcType === 'IFCCONVERSIONBASEDUNIT'
-    || ifcType === 'IFCMEASUREWITHUNIT';
 }
 
 const SPATIAL_TYPES: ReadonlyMap<string, SpatialKind> = new Map([
@@ -791,138 +820,56 @@ function parseIfcModel(
 ): ParsedIfcModel {
   const parseStarted = performance.now();
   const stepStarted = performance.now();
-  const records = scanIfcEntities(text);
+  const scan = scanIfcSemanticPass1(text);
   const stepScanMs = performance.now() - stepStarted;
+  const selectedRecords = [...scan.selectedById.values()];
+  const placementStarted = performance.now();
+  // 仅针对空间/导航对象实际引用的 placement 做第二阶段扫描。placement
+  // 记录可能引用文件中更早出现的父级/点/方向，因此 helper 会在需要时
+  // 重扫直到引用闭包稳定；任何 IFCCARTESIANPOINT/IFCDIRECTION 都不会
+  // 进入全量 detail map。
+  const placementById = collectIfcPlacementClosure(text, scan.placementRoots, scan.placementCandidates);
+  const placementDetailMs = performance.now() - placementStarted;
+  const placementEntityCount = placementById.size;
+  const placementCandidateCount = countPlacementCandidates(scan.totalTypeCounts);
   observer?.onStepScan?.({
     modelId: entry.modelId,
     entryPath: entry.path,
     sourceBytes: sourceBytes ?? text.length,
-    rawEntityCount: records.length,
+    rawEntityCount: scan.rawEntityCount,
     stepScanMs,
+    retainedEntityCount: selectedRecords.length + scan.relationships.length,
+    placementCandidateCount,
+    placementEntityCount,
   });
-  const detailById = new Map<number, RawIfcEntity>();
-  const detailStarted = performance.now();
-  for (const record of records) {
-    if (isIfcDetailType(record.ifcType)) detailById.set(record.expressId, record);
-  }
-  const placementEntityCount = records.filter((record) =>
-    record.ifcType === 'IFCLOCALPLACEMENT'
-    || record.ifcType === 'IFCAXIS2PLACEMENT3D'
-    || record.ifcType === 'IFCAXIS2PLACEMENT2D'
-    || record.ifcType === 'IFCCARTESIANPOINT'
-    || record.ifcType === 'IFCDIRECTION',
-  ).length;
-  const placementDetailMs = performance.now() - detailStarted;
-  const lengthUnit = parseLengthUnit(records);
+  const detailById = placementById;
+  const lengthUnit = parseLengthUnit(selectedRecords);
   const placementResolver = createIfcPlacementResolver(detailById, lengthUnit);
 
   // 先收集空间包含关系，再决定哪些非空间记录值得进入导航。
   // IFC 导出中大量 IFCPROPERTYSINGLEVALUE / 几何资源也带有“第一参数”，
   // 不能把它误读成 GlobalId；只有被空间关系引用或属于 IFC 产品类型的记录
   // 才进入对象索引。
-  const spatialContainedIds = new Set<number>();
-  for (const record of records) {
-    if (
-      record.ifcType === 'IFCRELCONTAINEDINSPATIALSTRUCTURE'
-      || record.ifcType === 'IFCRELREFERENCEDINSPATIALSTRUCTURE'
-    ) {
-      for (const id of parseRefs(record.args[4])) spatialContainedIds.add(id);
-    }
-  }
-  // 一些构件不会直接出现在 IFCREL*SPATIAL* 的 RelatedElements 中：
-  // - IFCOPENINGELEMENT 由 IFCRELVOIDSELEMENT 指向宿主墙/板/梁；
-  // - IFCDISTRIBUTIONPORT 由 IFCRELCONNECTSPORTTOELEMENT 指向宿主设备；
-  // - IFCSPACE 与墙/门等构件通过 IFCRELSPACEBOUNDARY 建立空间边界。
-  // 先记录这些关系，后续在对象图建立后沿宿主构件补齐空间归属。
-  const hostObjectIdsByChildId = new Map<number, number[]>();
-  const boundarySpaceIdsByObjectId = new Map<number, number[]>();
-  const spatialRelationIds = new Set<number>();
-  const addRelation = (map: Map<number, number[]>, childId: number | null, parentId: number | null): void => {
-    if (childId == null || parentId == null) return;
-    const values = map.get(childId) ?? [];
-    if (!values.includes(parentId)) values.push(parentId);
-    map.set(childId, values);
-    spatialRelationIds.add(childId);
-    spatialRelationIds.add(parentId);
-  };
-  for (const record of records) {
-    if (record.ifcType === 'IFCRELVOIDSELEMENT') {
-      addRelation(hostObjectIdsByChildId, parseRef(record.args[5]), parseRef(record.args[4]));
-    } else if (record.ifcType === 'IFCRELCONNECTSPORTTOELEMENT') {
-      addRelation(hostObjectIdsByChildId, parseRef(record.args[4]), parseRef(record.args[5]));
-    } else if (record.ifcType.startsWith('IFCRELSPACEBOUNDARY')) {
-      // IFC2x3/IFC4 均将 RelatingSpace、RelatedBuildingElement 放在第 5/6 个参数。
-      addRelation(boundarySpaceIdsByObjectId, parseRef(record.args[5]), parseRef(record.args[4]));
-    }
-  }
+  const spatialContainedIds = scan.spatialContainedIds;
+  const hostObjectIdsByChildId = scan.hostObjectIdsByChildId;
+  const boundarySpaceIdsByObjectId = scan.boundarySpaceIdsByObjectId;
+  const spatialRelationIds = scan.spatialRelationIds;
+  const relationships = scan.relationships;
   const spatialEntities: IfcSpatialNode[] = [];
   const spatialById = new Map<number, IfcSpatialNode>();
   const objects: IfcSpatialObject[] = [];
-  const resourceTypeCounts = new Map<string, number>();
-  const propertyGroupsById = new Map<number, IfcPropertyGroup>();
-  const propertyGroupsByObjectId = new Map<number, IfcPropertyGroup[]>();
-  const propertyStarted = performance.now();
-  for (const record of records) {
-    if (record.ifcType === 'IFCPROPERTYSET') {
-      propertyGroupsById.set(record.expressId, parseIfcPropertyGroup(record, detailById, 'property'));
-    } else if (record.ifcType === 'IFCELEMENTQUANTITY') {
-      propertyGroupsById.set(record.expressId, parseIfcPropertyGroup(record, detailById, 'quantity'));
-    }
-  }
-  for (const record of records) {
-    if (record.ifcType !== 'IFCRELDEFINESBYPROPERTIES') continue;
-    const propertySetId = parseRef(record.args[5]);
-    const group = propertySetId == null ? undefined : propertyGroupsById.get(propertySetId);
-    if (!group) continue;
-    for (const objectId of parseRefs(record.args[4])) {
-      const groups = propertyGroupsByObjectId.get(objectId) ?? [];
-      if (!groups.some((item) => item.id === group.id)) groups.push(group);
-      propertyGroupsByObjectId.set(objectId, groups);
-    }
-  }
-
-  const materialNamesById = new Map<number, string[]>();
-  for (const record of detailById.values()) {
-    if (record.ifcType === 'IFCMATERIAL') {
-      const name = meaningfulIfcString(parseString(record.args[0]));
-      if (name) materialNamesById.set(record.expressId, [name]);
-    }
-  }
-  const materialsByObjectId = new Map<number, string[]>();
-  const classificationsByObjectId = new Map<number, string[]>();
-  const typeNamesByObjectId = new Map<number, string>();
-  const groupNamesByObjectId = new Map<number, string[]>();
-  for (const record of records) {
-    if (record.ifcType === 'IFCRELASSOCIATESMATERIAL') {
-      const materialRef = parseRef(record.args[5]);
-      const names = materialRef == null ? [] : collectMaterialNames(materialRef, detailById, materialNamesById);
-      if (names.length > 0) addNamesForObjects(materialsByObjectId, parseRefs(record.args[4]), names);
-    } else if (record.ifcType === 'IFCRELASSOCIATESCLASSIFICATION') {
-      const classificationRef = parseRef(record.args[5]);
-      const name = classificationRef == null ? '' : collectClassificationName(classificationRef, detailById, new Set());
-      if (name) addNamesForObjects(classificationsByObjectId, parseRefs(record.args[4]), [name]);
-    } else if (record.ifcType === 'IFCRELDEFINESBYTYPE') {
-      const typeRef = parseRef(record.args[5]);
-      const typeRecord = typeRef == null ? undefined : detailById.get(typeRef);
-      const name = typeRecord ? meaningfulIfcString(parseString(typeRecord.args[2])) : '';
-      if (name) {
-        for (const objectId of parseRefs(record.args[4])) typeNamesByObjectId.set(objectId, name);
-      }
-    } else if (record.ifcType === 'IFCRELASSIGNSTOGROUP') {
-      const groupRef = parseRef(record.args[5]);
-      const groupRecord = groupRef == null ? undefined : detailById.get(groupRef);
-      const name = groupRecord ? meaningfulIfcString(parseString(groupRecord.args[2])) : '';
-      if (name) addNamesForObjects(groupNamesByObjectId, parseRefs(record.args[4]), [name]);
-    }
-  }
-  const propertyMs = performance.now() - propertyStarted;
-  const propertyEntityCount = records.filter((record) => record.ifcType.startsWith('IFCPROPERTY')).length;
-  const quantityEntityCount = records.filter((record) => record.ifcType.startsWith('IFCQUANTITY') || record.ifcType === 'IFCELEMENTQUANTITY').length;
-  const materialEntityCount = records.filter((record) => record.ifcType.startsWith('IFCMATERIAL')).length;
-  const classificationEntityCount = records.filter((record) => record.ifcType.startsWith('IFCCLASSIFICATION')).length;
+  // 属性/材质/分类/类型/组在 Spatial Core 中只保留计数；实际面板详情
+  // 由 Fragments getItemsData() 在选择时按需读取。
+  const propertyMs = 0;
+  const propertyEntityCount = scan.propertyEntityCount;
+  const quantityEntityCount = scan.quantityEntityCount;
+  const propertyValueCount = 0;
+  const quantityValueCount = 0;
+  const materialEntityCount = scan.materialEntityCount;
+  const classificationEntityCount = scan.classificationEntityCount;
 
   const navigationIds = new Set<number>();
-  for (const record of records) {
+  for (const record of selectedRecords) {
     const kind = SPATIAL_TYPES.get(record.ifcType);
     if (kind) continue;
     const globalId = parseString(record.args[0]);
@@ -941,26 +888,29 @@ function parseIfcModel(
   const relationshipStarted = performance.now();
   let relationshipRecordCount = 0;
   let relationshipReferenceCount = 0;
-  for (const record of records) {
+  for (const record of relationships) {
     if (record.ifcType.startsWith('IFCREL')) {
       relationshipRecordCount++;
-      for (const arg of record.args) {
-        for (const objectId of parseRefs(arg)) {
-          if (!navigationIds.has(objectId)) continue;
-          relationshipReferenceCount++;
-          relationshipCountByObjectId.set(objectId, (relationshipCountByObjectId.get(objectId) ?? 0) + 1);
-          const typeCounts = relationshipTypesByObjectId.get(objectId) ?? new Map<string, number>();
-          typeCounts.set(record.ifcType, (typeCounts.get(record.ifcType) ?? 0) + 1);
-          relationshipTypesByObjectId.set(objectId, typeCounts);
-        }
+      // Pass 1 已经为每条 IFCREL 解析过引用列表。复用该列表，避免在
+      // relationship 阶段再次对所有参数执行 parseRefs；这对包含数千 Related
+      // Elements 的关系记录尤其重要，同时保持原有“每个对象引用计数一次”的语义。
+      const relationRefs = scan.relationshipRefsById.get(record.expressId) ?? [];
+      for (const objectId of relationRefs) {
+        if (!navigationIds.has(objectId)) continue;
+        relationshipReferenceCount++;
+        relationshipCountByObjectId.set(objectId, (relationshipCountByObjectId.get(objectId) ?? 0) + 1);
+        const typeCounts = relationshipTypesByObjectId.get(objectId) ?? new Map<string, number>();
+        typeCounts.set(record.ifcType, (typeCounts.get(record.ifcType) ?? 0) + 1);
+        relationshipTypesByObjectId.set(objectId, typeCounts);
       }
     }
     if (record.ifcType !== 'IFCRELAGGREGATES'
       && record.ifcType !== 'IFCRELNESTS'
       && record.ifcType !== 'IFCRELDECOMPOSES') continue;
-    const parentId = parseRef(record.args[4]);
+    const spatialRelation = scan.spatialRelationRefsById.get(record.expressId);
+    const parentId = spatialRelation?.parentId ?? null;
     if (parentId == null || !navigationIds.has(parentId)) continue;
-    const childIds = parseRefs(record.args[5]).filter((id) => navigationIds.has(id));
+    const childIds = (spatialRelation?.relatedIds ?? []).filter((id) => navigationIds.has(id));
     if (childIds.length === 0) continue;
     const existing = childIdsByObjectId.get(parentId) ?? [];
     for (const childId of childIds) {
@@ -971,7 +921,7 @@ function parseIfcModel(
   }
 
   const spatialStarted = performance.now();
-  for (const record of records) {
+  for (const record of selectedRecords) {
     const kind = SPATIAL_TYPES.get(record.ifcType);
     const globalId = parseString(record.args[0]);
     const name = displayIfcName(record.ifcType, record.args, record.expressId);
@@ -988,9 +938,7 @@ function parseIfcModel(
         ...(spatialElevation(record.ifcType, record.args) != null
           ? { elevation: spatialElevation(record.ifcType, record.args)! }
           : {}),
-        ...(propertyGroupsByObjectId.has(record.expressId)
-          ? { propertySets: clonePropertyGroups(propertyGroupsByObjectId.get(record.expressId)!) }
-          : {}),
+        propertyDataDeferred: true,
         ...(placementResolver.resolve(parseRef(record.args[5]))
           ? { placement: placementResolver.resolve(parseRef(record.args[5]))! }
           : {}),
@@ -1012,7 +960,6 @@ function parseIfcModel(
     // `isContained` 允许兼容厂商扩展的 IFC 产品类型；产品类型判断则补齐
     // 没有空间容器但仍应在“未落入空间”分组中可检索的实体。
     if (isContained || (globalId && isIfcNavigationObjectType(record.ifcType))) {
-      const propertyGroups = propertyGroupsByObjectId.get(record.expressId);
       const placement = placementResolver.resolve(parseRef(record.args[5]));
       objects.push({
         key: objectKey(entry.modelId, record.expressId),
@@ -1021,12 +968,8 @@ function parseIfcModel(
         ifcType: record.ifcType,
         globalId: isContained || isIfcRootLikeType(record.ifcType) ? globalId : '',
         name,
-        ...ifcObjectMetadata(record.args, propertyGroups, placement ?? undefined, {
-          materials: materialsByObjectId.get(record.expressId),
-          classifications: classificationsByObjectId.get(record.expressId),
-          typeName: typeNamesByObjectId.get(record.expressId),
-          groupNames: groupNamesByObjectId.get(record.expressId),
-        }),
+        propertyDataDeferred: true,
+        ...ifcObjectMetadata(record.args, undefined, placement ?? undefined, {}),
         parentObjectKey: parentIdByObjectId.has(record.expressId)
           ? objectKey(entry.modelId, parentIdByObjectId.get(record.expressId)!)
           : null,
@@ -1043,17 +986,52 @@ function parseIfcModel(
         spatialContainment: null,
         sourcePath: entry.path,
       });
-    } else {
-      resourceTypeCounts.set(record.ifcType, (resourceTypeCounts.get(record.ifcType) ?? 0) + 1);
     }
   }
   const spatialEntityMs = performance.now() - spatialStarted;
+
+  // resourceTypeCounts 仍反映完整 STEP 文件画像，但只扣除真正进入
+  // Spatial Core 的空间/导航对象；属性、材质、分类、几何资源和关系
+  // 记录不会被展开成长期对象。
+  const resourceTypeCounts = new Map(scan.totalTypeCounts);
+  const consumeResourceType = (ifcType: string): void => {
+    const remaining = (resourceTypeCounts.get(ifcType) ?? 0) - 1;
+    if (remaining > 0) resourceTypeCounts.set(ifcType, remaining);
+    else resourceTypeCounts.delete(ifcType);
+  };
+  for (const node of spatialEntities) consumeResourceType(node.ifcType);
+  for (const object of objects) consumeResourceType(object.ifcType);
 
   const objectById = new Map<number, IfcSpatialObject>();
   for (const object of objects) objectById.set(object.expressId, object);
   const objectByKey = new Map(objects.map((object) => [object.key, object]));
   const nodeBySpatialKey = new Map<string, IfcSpatialNode>();
   for (const node of spatialEntities) nodeBySpatialKey.set(node.key, node);
+
+  // 大型 IFC 往往只有一个 IFCREL*SPATIAL*，但 related elements 可达数万条。
+  // 不能在逐对象投影时对不断增长的数组调用 includes（会退化为 O(n²)）；
+  // 这些 Set 仅在当前模型解析期间存在，最终仍按原有数组接口输出。
+  const nodeObjectKeySets = new Map<string, {
+    objectKeys: Set<string>;
+    directObjectKeys: Set<string>;
+    boundaryObjectKeys: Set<string>;
+    decompositionObjectKeys: Set<string>;
+    hostObjectKeys: Set<string>;
+  }>();
+  const nodeSets = (node: IfcSpatialNode) => {
+    let sets = nodeObjectKeySets.get(node.key);
+    if (!sets) {
+      sets = {
+        objectKeys: new Set(node.objectKeys),
+        directObjectKeys: new Set(node.directObjectKeys),
+        boundaryObjectKeys: new Set(node.boundaryObjectKeys),
+        decompositionObjectKeys: new Set(node.decompositionObjectKeys),
+        hostObjectKeys: new Set(node.hostObjectKeys),
+      };
+      nodeObjectKeySets.set(node.key, sets);
+    }
+    return sets;
+  };
 
   /** 把 IFC 空间关系写入对象图，同时保留多容器关系和直接/继承证据。 */
   const assignObjectToSpatial = (
@@ -1062,10 +1040,22 @@ function parseIfcModel(
     evidence: 'direct' | 'boundary' | 'inherited',
     inheritanceKind?: IfcSpatialInheritanceKind,
   ): void => {
-    if (!object.spatialKeys.includes(parent.key)) object.spatialKeys.push(parent.key);
-    if (!parent.objectKeys.includes(object.key)) parent.objectKeys.push(object.key);
+    const parentSets = nodeSets(parent);
+    // 单个对象通常只关联少量空间；保留数组 includes 可避免为数万对象各建
+    // 一个 Set。真正会增长到数万项的是节点侧 objectKeys，那里使用上面的
+    // nodeObjectKeySets 做 O(1) 去重。
+    if (!object.spatialKeys.includes(parent.key)) {
+      object.spatialKeys.push(parent.key);
+    }
+    if (!parentSets.objectKeys.has(object.key)) {
+      parentSets.objectKeys.add(object.key);
+      parent.objectKeys.push(object.key);
+    }
     if (evidence === 'direct') {
-      if (!parent.directObjectKeys.includes(object.key)) parent.directObjectKeys.push(object.key);
+      if (!parentSets.directObjectKeys.has(object.key)) {
+        parentSets.directObjectKeys.add(object.key);
+        parent.directObjectKeys.push(object.key);
+      }
       // 同一对象可能先通过分解关系继承到一个空间，再被另一个 IFC 关系直接包含；
       // 直接关系的置信度更高，作为主空间和主证据。
       if (object.spatialContainment !== 'direct') {
@@ -1075,7 +1065,10 @@ function parseIfcModel(
         delete object.spatialInheritanceKind;
       }
     } else if (evidence === 'boundary') {
-      if (!parent.boundaryObjectKeys.includes(object.key)) parent.boundaryObjectKeys.push(object.key);
+      if (!parentSets.boundaryObjectKeys.has(object.key)) {
+        parentSets.boundaryObjectKeys.add(object.key);
+        parent.boundaryObjectKeys.push(object.key);
+      }
       // 直接包含优先于边界关系；否则将边界关系作为主空间证据保留。
       if (!object.spatialKey || object.spatialContainment === 'inherited') {
         object.spatialKey = parent.key;
@@ -1088,7 +1081,13 @@ function parseIfcModel(
       const targetKeys = resolvedKind === 'host-relation'
         ? parent.hostObjectKeys
         : parent.decompositionObjectKeys;
-      if (!targetKeys.includes(object.key)) targetKeys.push(object.key);
+      const targetSet = resolvedKind === 'host-relation'
+        ? parentSets.hostObjectKeys
+        : parentSets.decompositionObjectKeys;
+      if (!targetSet.has(object.key)) {
+        targetSet.add(object.key);
+        targetKeys.push(object.key);
+      }
       // spatialKey/spatialContainment 仅表示一个稳定的主空间兼容视图；完整
       // 的分解/宿主证据已经按空间保存在上面的数组中。若对象尚未有主空间，
       // 选择本次继承关系作为主证据；若已有直接/边界/其他空间，不覆盖它。
@@ -1101,10 +1100,11 @@ function parseIfcModel(
     }
   };
 
-  for (const record of records) {
+  for (const record of relationships) {
     if (record.ifcType === 'IFCRELAGGREGATES') {
-      const parentId = parseRef(record.args[4]);
-      const childIds = parseRefs(record.args[5]);
+      const spatialRelation = scan.spatialRelationRefsById.get(record.expressId);
+      const parentId = spatialRelation?.parentId ?? null;
+      const childIds = spatialRelation?.relatedIds ?? [];
       const parent = parentId == null ? null : spatialById.get(parentId);
       if (parent) {
         for (const childId of childIds) {
@@ -1115,8 +1115,9 @@ function parseIfcModel(
         }
       }
     } else if (record.ifcType === 'IFCRELNESTS' || record.ifcType === 'IFCRELDECOMPOSES') {
-      const parentId = parseRef(record.args[4]);
-      const childIds = parseRefs(record.args[5]);
+      const spatialRelation = scan.spatialRelationRefsById.get(record.expressId);
+      const parentId = spatialRelation?.parentId ?? null;
+      const childIds = spatialRelation?.relatedIds ?? [];
       const parent = parentId == null ? null : spatialById.get(parentId);
       if (parent) {
         for (const childId of childIds) {
@@ -1130,8 +1131,9 @@ function parseIfcModel(
       record.ifcType === 'IFCRELCONTAINEDINSPATIALSTRUCTURE'
       || record.ifcType === 'IFCRELREFERENCEDINSPATIALSTRUCTURE'
     ) {
-      const elementIds = parseRefs(record.args[4]);
-      const parentId = parseRef(record.args[5]);
+      const spatialRelation = scan.spatialRelationRefsById.get(record.expressId);
+      const elementIds = spatialRelation?.relatedIds ?? [];
+      const parentId = spatialRelation?.parentId ?? null;
       const parent = parentId == null ? null : spatialById.get(parentId);
       if (!parent) continue;
       for (const elementId of elementIds) {
@@ -1206,16 +1208,6 @@ function parseIfcModel(
   const finalizeStarted = performance.now();
   const containedObjectCount = objects.filter((object) => object.spatialKeys.length > 0).length;
   const directContainedObjectCount = objects.filter((object) => object.spatialContainment === 'direct').length;
-  const propertyValueCount = objects.reduce(
-    (sum, object) => sum + (object.propertySets ?? []).filter((group) => group.kind === 'property')
-      .reduce((count, group) => count + group.values.length, 0),
-    0,
-  );
-  const quantityValueCount = objects.reduce(
-    (sum, object) => sum + (object.propertySets ?? []).filter((group) => group.kind === 'quantity')
-      .reduce((count, group) => count + group.values.length, 0),
-    0,
-  );
   const finalizeMs = performance.now() - finalizeStarted;
   const profile: IfcSpatialParseProfile = {
     modelId: entry.modelId,
@@ -1223,9 +1215,11 @@ function parseIfcModel(
     sourceBytes: sourceBytes ?? text.length,
     totalMs: performance.now() - parseStarted,
     stepScanMs,
-    rawEntityCount: records.length,
-    detailEntityCount: detailById.size,
+    rawEntityCount: scan.rawEntityCount,
+    detailEntityCount: selectedRecords.length + relationships.length + detailById.size,
+    retainedEntityCount: selectedRecords.length + relationships.length,
     placementEntityCount,
+    placementCandidateCount,
     placementDetailMs,
     spatialEntityMs,
     spatialEntityCount: spatialEntities.length,
@@ -1258,8 +1252,10 @@ function parseIfcModel(
       lengthUnitScaleToMetres: lengthUnit.scaleToMetres,
       propertyValueCount,
       quantityValueCount,
-      objectsWithProperties: objects.filter((object) => (object.propertySets?.length ?? 0) > 0).length,
-      objectsWithMaterials: objects.filter((object) => (object.materials?.length ?? 0) > 0).length,
+      // 属性/材质等在启动 Spatial Core 延迟到 Fragments getItemsData；
+      // 这里明确为 0，避免把“发现实体数量”误报成已加载属性。
+      objectsWithProperties: 0,
+      objectsWithMaterials: 0,
     },
     spatialEntities,
     objects,
@@ -1267,9 +1263,41 @@ function parseIfcModel(
   };
 }
 
-/** 扫描 STEP 实体记录，支持嵌套列表和跨行记录；不依赖 IFC schema 版本。 */
-function scanIfcEntities(text: string): RawIfcEntity[] {
-  const records: RawIfcEntity[] = [];
+/**
+ * 扫描 STEP 实体边界。非目标实体只经过字符级括号/字符串扫描，
+ * 不创建 body substring、args 数组或 RawIfcEntity。
+ */
+function scanIfcEntityBoundaries(text: string, onEntity: ScannedIfcEntityCallback): number {
+  // IFC DATA records are delimited by `;` and their entity header is always
+  // anchored at the beginning of a line/record.  Let V8's native regexp engine
+  // find the 6M headers first; only retained entities pay the nested-parenthesis
+  // scan in materializeIfcEntity().  The character scanner below remains the
+  // fallback for malformed/minified input where no anchored header is found.
+  const header = /(?:^|;|\r?\n)\s*#(\d+)\s*=\s*([A-Za-z0-9_]+)\s*\(/g;
+  let fastCount = 0;
+  let match: RegExpExecArray | null;
+  while ((match = header.exec(text)) !== null) {
+    fastCount++;
+    onEntity(
+      Number(match[1]),
+      match[2].toUpperCase(),
+      // The expression includes the opening parenthesis, so the body starts
+      // at the match end. Avoid a second indexOf/lastIndexOf over all 6M
+      // headers in large IFC files.
+      match.index + match[0].length,
+      // -1 means "resolve lazily".  Retained records and placement-closure
+      // records calculate their end only when their arguments are needed.
+      -1,
+    );
+  }
+  if (fastCount > 0) return fastCount;
+
+  return scanIfcEntityBoundariesCharacter(text, onEntity);
+}
+
+/** 兼容无标准行/记录分隔符的最小 STEP 文本。 */
+function scanIfcEntityBoundariesCharacter(text: string, onEntity: ScannedIfcEntityCallback): number {
+  let count = 0;
   let cursor = 0;
   while (cursor < text.length) {
     const hash = text.indexOf('#', cursor);
@@ -1317,13 +1345,301 @@ function scanIfcEntities(text: string): RawIfcEntity[] {
       }
     }
     if (depth !== 0) break;
-    const body = text.slice(bodyStart, i);
-    const args = splitIfcArgs(body);
-    records.push({ expressId, ifcType, args });
+    count++;
+    onEntity(expressId, ifcType, bodyStart, i);
     const semi = text.indexOf(';', i);
     cursor = semi >= 0 ? semi + 1 : i + 1;
   }
-  return records;
+  return count;
+}
+
+function materializeIfcEntity(text: string, entity: ScannedIfcEntity): RawIfcEntity {
+  const bodyEnd = entity.bodyEnd >= entity.bodyStart
+    ? entity.bodyEnd
+    : findIfcEntityBodyEnd(text, entity.bodyStart - 1);
+  if (bodyEnd < entity.bodyStart) {
+    return { expressId: entity.expressId, ifcType: entity.ifcType, args: [] };
+  }
+  return {
+    expressId: entity.expressId,
+    ifcType: entity.ifcType,
+    args: splitIfcArgs(text.slice(entity.bodyStart, bodyEnd)),
+  };
+}
+
+function findIfcEntityBodyEnd(text: string, openParen: number): number {
+  let depth = 1;
+  let inString = false;
+  for (let i = openParen + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "'") {
+      if (inString && text[i + 1] === "'") {
+        i++;
+        continue;
+      }
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function scanIfcEntitiesSelective(
+  text: string,
+  shouldRetain: (ifcType: string, expressId: number) => boolean,
+  onScanned?: ScannedIfcEntityCallback,
+): { retained: RawIfcEntity[]; rawEntityCount: number; totalTypeCounts: Map<string, number> } {
+  const retained: RawIfcEntity[] = [];
+  const totalTypeCounts = new Map<string, number>();
+  const rawEntityCount = scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
+    totalTypeCounts.set(ifcType, (totalTypeCounts.get(ifcType) ?? 0) + 1);
+    // 仅 placement 候选需要回调；避免对数百万普通实体产生一次额外
+    // callback/分支，再由 pass 1 统一收集其压缩位置编码。
+    if (onScanned && isIfcPlacementEntityType(ifcType)) {
+      onScanned(expressId, ifcType, bodyStart, bodyEnd);
+    }
+    if (shouldRetain(ifcType, expressId)) {
+      retained.push(materializeIfcEntity(text, { expressId, ifcType, bodyStart, bodyEnd }));
+    }
+  });
+  return { retained, rawEntityCount, totalTypeCounts };
+}
+
+function isIfcUnitEntityType(ifcType: string): boolean {
+  return ifcType === 'IFCSIUNIT'
+    || ifcType === 'IFCCONVERSIONBASEDUNIT'
+    || ifcType === 'IFCMEASUREWITHUNIT';
+}
+
+function addRelationReference(
+  map: Map<number, number[]>,
+  childId: number | null,
+  parentId: number | null,
+  spatialRelationIds: Set<number>,
+): void {
+  if (childId == null || parentId == null) return;
+  const values = map.get(childId) ?? [];
+  if (!values.includes(parentId)) values.push(parentId);
+  map.set(childId, values);
+  spatialRelationIds.add(childId);
+  spatialRelationIds.add(parentId);
+}
+
+/**
+ * 首遍只保存空间/导航候选、关系和单位。关系引用的自定义对象可能在
+ * 首遍尚未满足产品白名单，随后以 expressId 定向补齐，不会把资源实体
+ * 全量带入内存。
+ */
+function scanIfcSemanticPass1(text: string): SelectiveIfcScanResult {
+  const placementCandidates = new Map<number, number>();
+  const first = scanIfcEntitiesSelective(
+    text,
+    (ifcType) => SPATIAL_TYPES.has(ifcType) || isIfcNavigationObjectType(ifcType) || isIfcUnitEntityType(ifcType) || ifcType.startsWith('IFCREL'),
+    (expressId, ifcType, bodyStart) => {
+      if (isIfcPlacementEntityType(ifcType)) {
+        placementCandidates.set(expressId, encodePlacementCandidate(ifcType, bodyStart));
+      }
+    },
+  );
+  const selectedById = new Map<number, RawIfcEntity>();
+  const relationships: RawIfcEntity[] = [];
+  const relationshipRefsById = new Map<number, number[]>();
+  const spatialRelationRefsById = new Map<number, { parentId: number | null; relatedIds: number[] }>();
+  const spatialContainedIds = new Set<number>();
+  const hostObjectIdsByChildId = new Map<number, number[]>();
+  const boundarySpaceIdsByObjectId = new Map<number, number[]>();
+  const spatialRelationIds = new Set<number>();
+  const referencedIds = new Set<number>();
+  for (const record of first.retained) {
+    if (record.ifcType.startsWith('IFCREL')) {
+      relationships.push(record);
+      const relationRefs = record.args.flatMap((arg) => parseRefs(arg));
+      relationshipRefsById.set(record.expressId, relationRefs);
+      // 只有会影响 Spatial Core 的关系才需要定向补扫关系目标。属性、材质、
+      // 分类、类型和组关系的目标在启动阶段按需读取，不要把它们的数百万
+      // property/value entity 引入救援集合。
+      if (isIfcSpatialSemanticRelationship(record.ifcType)) {
+        for (const id of relationRefs) referencedIds.add(id);
+      }
+      if (record.ifcType === 'IFCRELCONTAINEDINSPATIALSTRUCTURE'
+        || record.ifcType === 'IFCRELREFERENCEDINSPATIALSTRUCTURE') {
+        const relatedIds = parseRefs(record.args[4]);
+        spatialRelationRefsById.set(record.expressId, {
+          parentId: parseRef(record.args[5]),
+          relatedIds,
+        });
+        for (const id of relatedIds) spatialContainedIds.add(id);
+      } else if (record.ifcType === 'IFCRELAGGREGATES'
+        || record.ifcType === 'IFCRELNESTS'
+        || record.ifcType === 'IFCRELDECOMPOSES') {
+        spatialRelationRefsById.set(record.expressId, {
+          parentId: parseRef(record.args[4]),
+          relatedIds: parseRefs(record.args[5]),
+        });
+      } else if (record.ifcType === 'IFCRELVOIDSELEMENT') {
+        addRelationReference(hostObjectIdsByChildId, parseRef(record.args[5]), parseRef(record.args[4]), spatialRelationIds);
+      } else if (record.ifcType === 'IFCRELCONNECTSPORTTOELEMENT') {
+        addRelationReference(hostObjectIdsByChildId, parseRef(record.args[4]), parseRef(record.args[5]), spatialRelationIds);
+      } else if (record.ifcType.startsWith('IFCRELSPACEBOUNDARY')) {
+        // IFC2x3/IFC4 均将 RelatingSpace、RelatedBuildingElement 放在第 5/6 个参数。
+        addRelationReference(boundarySpaceIdsByObjectId, parseRef(record.args[5]), parseRef(record.args[4]), spatialRelationIds);
+      }
+      continue;
+    }
+    selectedById.set(record.expressId, record);
+  }
+
+  // 关系引用可能指向厂商扩展的实体类型；定向二遍只取这些 express id。
+  const rescueIds = new Set<number>([...referencedIds].filter((id) => !selectedById.has(id)));
+  if (rescueIds.size > 0) {
+    const rescue = scanIfcEntitiesSelective(text, (_ifcType, expressId) => rescueIds.has(expressId));
+    for (const record of rescue.retained) selectedById.set(record.expressId, record);
+  }
+
+  const placementRoots = new Set<number>();
+  for (const record of selectedById.values()) {
+    if (SPATIAL_TYPES.has(record.ifcType) || isIfcNavigationObjectType(record.ifcType)) {
+      const placementRef = parseRef(record.args[5]);
+      if (placementRef != null) placementRoots.add(placementRef);
+    }
+  }
+  return {
+    selectedById,
+    relationships,
+    relationshipRefsById,
+    spatialRelationRefsById,
+    placementCandidates,
+    rawEntityCount: first.rawEntityCount,
+    totalTypeCounts: first.totalTypeCounts,
+    spatialContainedIds,
+    hostObjectIdsByChildId,
+    boundarySpaceIdsByObjectId,
+    spatialRelationIds,
+    placementRoots,
+    propertyEntityCount: [...first.totalTypeCounts.entries()]
+      .filter(([type]) => type.startsWith('IFCPROPERTY'))
+      .reduce((sum, [, count]) => sum + count, 0),
+    quantityEntityCount: [...first.totalTypeCounts.entries()]
+      .filter(([type]) => type.startsWith('IFCQUANTITY') || type === 'IFCELEMENTQUANTITY')
+      .reduce((sum, [, count]) => sum + count, 0),
+    materialEntityCount: [...first.totalTypeCounts.entries()]
+      .filter(([type]) => type.startsWith('IFCMATERIAL'))
+      .reduce((sum, [, count]) => sum + count, 0),
+    classificationEntityCount: [...first.totalTypeCounts.entries()]
+      .filter(([type]) => type.startsWith('IFCCLASSIFICATION'))
+      .reduce((sum, [, count]) => sum + count, 0),
+  };
+}
+
+/**
+ * 只扫描 placement 引用闭包。因 STEP 允许父 placement 出现在子记录之前，
+ * 需要在新增引用后继续消费队列；每个 ID 最多 materialize 一次。使用显式
+ * 队列而不是固定轮数上限，避免深层（或厂商扩展）placement 链被截断；
+ * `closure` 同时也负责打断循环引用。
+ */
+function collectIfcPlacementClosure(
+  text: string,
+  roots: Set<number>,
+  candidates: Map<number, number>,
+): Map<number, RawIfcEntity> {
+  const wanted = new Set<number>(roots);
+  const closure = new Map<number, RawIfcEntity>();
+  const pending = [...wanted];
+  for (let cursor = 0; cursor < pending.length; cursor++) {
+    const id = pending[cursor];
+    if (closure.has(id)) continue;
+    const encoded = candidates.get(id);
+    if (encoded == null) continue;
+    const candidate = decodePlacementCandidate(id, encoded);
+    const record = materializeIfcEntity(text, candidate);
+    closure.set(record.expressId, record);
+    for (const ref of placementReferenceIds(record)) {
+      if (wanted.has(ref)) continue;
+      wanted.add(ref);
+      pending.push(ref);
+    }
+  }
+  return closure;
+}
+
+/**
+ * placement 候选数量可能达到百万级。候选只需保存 bodyStart 和五种实体类型，
+ * 用一个安全整数编码即可避免为每个候选分配 ScannedIfcEntity 对象；真正进入
+ * 引用闭包的记录才在 collectIfcPlacementClosure 中物化。
+ */
+const PLACEMENT_TYPE_CODE: Readonly<Record<string, number>> = {
+  IFCLOCALPLACEMENT: 1,
+  IFCAXIS2PLACEMENT3D: 2,
+  IFCAXIS2PLACEMENT2D: 3,
+  IFCCARTESIANPOINT: 4,
+  IFCDIRECTION: 5,
+};
+
+const PLACEMENT_TYPE_BY_CODE: Readonly<Record<number, string>> = {
+  1: 'IFCLOCALPLACEMENT',
+  2: 'IFCAXIS2PLACEMENT3D',
+  3: 'IFCAXIS2PLACEMENT2D',
+  4: 'IFCCARTESIANPOINT',
+  5: 'IFCDIRECTION',
+};
+
+function encodePlacementCandidate(ifcType: string, bodyStart: number): number {
+  return bodyStart * 8 + (PLACEMENT_TYPE_CODE[ifcType] ?? 0);
+}
+
+function decodePlacementCandidate(expressId: number, encoded: number): ScannedIfcEntity {
+  const typeCode = encoded % 8;
+  return {
+    expressId,
+    ifcType: PLACEMENT_TYPE_BY_CODE[typeCode] ?? 'IFCLOCALPLACEMENT',
+    bodyStart: Math.floor(encoded / 8),
+    // bodyEnd is deliberately resolved lazily only for closure members.
+    bodyEnd: -1,
+  };
+}
+
+function isIfcPlacementEntityType(ifcType: string): boolean {
+  return ifcType === 'IFCLOCALPLACEMENT'
+    || ifcType === 'IFCAXIS2PLACEMENT3D'
+    || ifcType === 'IFCAXIS2PLACEMENT2D'
+    || ifcType === 'IFCCARTESIANPOINT'
+    || ifcType === 'IFCDIRECTION';
+}
+
+function isIfcSpatialSemanticRelationship(ifcType: string): boolean {
+  return ifcType === 'IFCRELAGGREGATES'
+    || ifcType === 'IFCRELNESTS'
+    || ifcType === 'IFCRELDECOMPOSES'
+    || ifcType === 'IFCRELCONTAINEDINSPATIALSTRUCTURE'
+    || ifcType === 'IFCRELREFERENCEDINSPATIALSTRUCTURE'
+    || ifcType === 'IFCRELVOIDSELEMENT'
+    || ifcType === 'IFCRELCONNECTSPORTTOELEMENT'
+    || ifcType.startsWith('IFCRELSPACEBOUNDARY');
+}
+
+function placementReferenceIds(record: RawIfcEntity): number[] {
+  if (record.ifcType === 'IFCLOCALPLACEMENT'
+    || record.ifcType === 'IFCAXIS2PLACEMENT3D'
+    || record.ifcType === 'IFCAXIS2PLACEMENT2D') {
+    return record.args.flatMap((arg) => parseRefs(arg));
+  }
+  return [];
+}
+
+function countPlacementCandidates(totalTypeCounts: Map<string, number>): number {
+  return [
+    'IFCLOCALPLACEMENT',
+    'IFCAXIS2PLACEMENT3D',
+    'IFCAXIS2PLACEMENT2D',
+    'IFCCARTESIANPOINT',
+    'IFCDIRECTION',
+  ].reduce((sum, type) => sum + (totalTypeCounts.get(type) ?? 0), 0);
 }
 
 function splitIfcArgs(body: string): string[] {
@@ -1447,176 +1763,6 @@ function clonePropertyGroups(groups: IfcPropertyGroup[]): IfcPropertyGroup[] {
     ...group,
     values: group.values.map((value) => ({ ...value })),
   }));
-}
-
-function addNamesForObjects(
-  target: Map<number, string[]>,
-  objectIds: number[],
-  names: string[],
-): void {
-  for (const objectId of objectIds) {
-    const current = target.get(objectId) ?? [];
-    for (const name of names) {
-      if (name && !current.includes(name)) current.push(name);
-    }
-    if (current.length > 0) target.set(objectId, current);
-  }
-}
-
-function parseIfcPropertyGroup(
-  record: RawIfcEntity,
-  detailById: Map<number, RawIfcEntity>,
-  kind: IfcPropertyGroup['kind'],
-): IfcPropertyGroup {
-  const name = meaningfulIfcString(parseString(record.args[2])) || `${kind === 'quantity' ? '工程量集' : '属性集'} #${record.expressId}`;
-  const refs = kind === 'quantity' ? parseRefs(record.args[5]) : parseRefs(record.args[4]);
-  const values: IfcPropertyValue[] = [];
-  let truncated = false;
-  const maxValues = 256;
-  for (const ref of refs) {
-    const value = kind === 'quantity'
-      ? parseIfcQuantityValue(detailById.get(ref), detailById)
-      : parseIfcPropertyValue(detailById.get(ref), detailById);
-    if (!value || !value.name || !value.value) continue;
-    if (values.length >= maxValues) {
-      truncated = true;
-      break;
-    }
-    values.push(value);
-  }
-  return {
-    id: record.expressId,
-    name,
-    kind,
-    values,
-    ...(truncated ? { truncated: true } : {}),
-  };
-}
-
-function parseIfcPropertyValue(
-  record: RawIfcEntity | undefined,
-  detailById: Map<number, RawIfcEntity>,
-): IfcPropertyValue | null {
-  if (!record) return null;
-  const name = meaningfulIfcString(parseString(record.args[0]));
-  if (!name) return null;
-  if (record.ifcType === 'IFCPROPERTYSINGLEVALUE') {
-    const parsed = formatIfcSelectValue(record.args[2]);
-    if (!parsed) return null;
-    const unit = formatIfcUnitRef(parseRef(record.args[3]), detailById);
-    return { name, value: parsed.value, ...(parsed.dataType ? { dataType: parsed.dataType } : {}), ...(unit ? { unit } : {}) };
-  }
-  if (record.ifcType === 'IFCPROPERTYENUMERATEDVALUE' || record.ifcType === 'IFCPROPERTYLISTVALUE') {
-    const parsed = parseIfcValueList(record.args[2]);
-    if (!parsed) return null;
-    const unit = formatIfcUnitRef(parseRef(record.args[3]), detailById);
-    return { name, value: parsed.value, ...(parsed.dataType ? { dataType: parsed.dataType } : {}), ...(unit ? { unit } : {}) };
-  }
-  if (record.ifcType === 'IFCPROPERTYTABLEVALUE') {
-    const defining = parseIfcValueList(record.args[2])?.value || '';
-    const defined = parseIfcValueList(record.args[3])?.value || '';
-    const value = defining && defined ? `${defining} → ${defined}` : defining || defined;
-    if (!value) return null;
-    return { name, value, dataType: 'table' };
-  }
-  if (record.ifcType === 'IFCPROPERTYREFERENCEVALUE') {
-    const ref = parseRef(record.args[3]);
-    const referenced = ref == null ? '' : formatIfcReference(ref, detailById);
-    return referenced ? { name, value: referenced, dataType: 'reference' } : null;
-  }
-  if (record.ifcType === 'IFCDERIVEDPROPERTY') {
-    const value = formatIfcSelectValue(record.args[4]) || formatIfcSelectValue(record.args[3]);
-    return value ? { name, value: value.value, dataType: value.dataType || 'derived' } : null;
-  }
-  return null;
-}
-
-function parseIfcQuantityValue(record: RawIfcEntity | undefined, detailById: Map<number, RawIfcEntity>): IfcPropertyValue | null {
-  if (!record || !record.ifcType.startsWith('IFCQUANTITY')) return null;
-  const name = meaningfulIfcString(parseString(record.args[0]));
-  const value = parseIfcNumber(record.args[3]);
-  if (!name || value == null) return null;
-  const unit = formatIfcUnitRef(parseRef(record.args[2]), detailById);
-  return {
-    name,
-    value: formatIfcNumber(value),
-    dataType: record.ifcType.replace(/^IFCQUANTITY/, '').toLowerCase(),
-    ...(unit ? { unit } : {}),
-  };
-}
-
-function formatIfcSelectValue(raw: string | undefined): { value: string; dataType?: string } | null {
-  if (!raw) return null;
-  const text = raw.trim();
-  if (!text || text === '$' || text === '*') return null;
-  const wrapped = text.match(/^([A-Za-z0-9_]+)\(([\s\S]*)\)$/);
-  if (wrapped) {
-    const dataType = wrapped[1];
-    const inner = wrapped[2].trim();
-    if (inner === '$' || inner === '*') return null;
-    if (inner.startsWith("'")) {
-      const parsed = parseString(inner);
-      return parsed ? { value: parsed, dataType } : null;
-    }
-    if (inner.startsWith('(')) {
-      const list = parseIfcValueList(inner);
-      return list ? { value: list.value, dataType } : null;
-    }
-    return { value: normalizeIfcEnumOrScalar(inner), dataType };
-  }
-  return { value: normalizeIfcEnumOrScalar(text) };
-}
-
-function parseIfcValueList(raw: string | undefined): { value: string; dataType?: string } | null {
-  if (!raw) return null;
-  const text = raw.trim();
-  if (!text || text === '$' || text === '*') return null;
-  const inner = text.startsWith('(') && text.endsWith(')') ? text.slice(1, -1) : text;
-  const values = splitIfcArgs(inner)
-    .map((item) => formatIfcSelectValue(item))
-    .filter((item): item is { value: string; dataType?: string } => !!item && item.value !== '');
-  if (values.length === 0) return null;
-  return {
-    value: values.map((item) => item.value).join(', '),
-    ...(values[0].dataType ? { dataType: values[0].dataType } : {}),
-  };
-}
-
-function normalizeIfcEnumOrScalar(value: string): string {
-  const trimmed = value.trim();
-  if (/^\.[A-Za-z0-9_]+\.$/.test(trimmed)) return trimmed.slice(1, -1);
-  if (trimmed === '.T.') return 'true';
-  if (trimmed === '.F.') return 'false';
-  if (trimmed === '.U.') return 'unknown';
-  const number = Number(trimmed);
-  return Number.isFinite(number) ? formatIfcNumber(number) : trimmed;
-}
-
-function formatIfcNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
-}
-
-function formatIfcReference(id: number, detailById: Map<number, RawIfcEntity>): string {
-  const record = detailById.get(id);
-  if (!record) return `#${id}`;
-  const values = record.args.map((arg) => parseString(arg)).filter(Boolean);
-  return values[0] || `${record.ifcType} #${id}`;
-}
-
-function formatIfcUnitRef(id: number | null, detailById: Map<number, RawIfcEntity>): string {
-  if (id == null) return '';
-  const record = detailById.get(id);
-  return record ? formatUnitRecord(record) : `#${id}`;
-}
-
-function formatUnitRecord(record: RawIfcEntity): string {
-  if (record.ifcType === 'IFCSIUNIT') {
-    const prefix = meaningfulIfcEnum(record.args[1]);
-    const name = meaningfulIfcEnum(record.args[2]);
-    return [prefix, name].filter(Boolean).join(' ') || record.ifcType;
-  }
-  const names = record.args.map((arg) => parseString(arg)).filter(Boolean);
-  return names[0] || record.ifcType;
 }
 
 function spatialElevation(ifcType: string, args: string[]): number | null {
@@ -1789,53 +1935,6 @@ function cross(a: Vec3, b: Vec3): Vec3 {
 function normalizeVector(value: Vec3, fallback: Vec3): Vec3 {
   const length = Math.hypot(value[0], value[1], value[2]);
   return length > 1e-12 ? [value[0] / length, value[1] / length, value[2] / length] : fallback;
-}
-
-function collectMaterialNames(
-  id: number,
-  detailById: Map<number, RawIfcEntity>,
-  materialNamesById: Map<number, string[]>,
-  seen = new Set<number>(),
-): string[] {
-  if (seen.has(id)) return [];
-  seen.add(id);
-  const direct = materialNamesById.get(id);
-  if (direct) return direct;
-  const record = detailById.get(id);
-  if (!record || !record.ifcType.startsWith('IFCMATERIAL')) return [];
-  const names: string[] = [];
-  for (const arg of record.args) {
-    for (const ref of parseRefs(arg)) {
-      for (const name of collectMaterialNames(ref, detailById, materialNamesById, seen)) {
-        if (!names.includes(name)) names.push(name);
-      }
-    }
-  }
-  return names;
-}
-
-function collectClassificationName(
-  id: number,
-  detailById: Map<number, RawIfcEntity>,
-  seen: Set<number>,
-): string {
-  if (seen.has(id)) return '';
-  seen.add(id);
-  const record = detailById.get(id);
-  if (!record) return '';
-  if (record.ifcType === 'IFCCLASSIFICATIONREFERENCE') {
-    const identification = meaningfulIfcString(parseString(record.args[1]));
-    const name = meaningfulIfcString(parseString(record.args[2]));
-    return [identification, name].filter(Boolean).join(' · ');
-  }
-  if (record.ifcType === 'IFCCLASSIFICATION') return meaningfulIfcString(parseString(record.args[3])) || meaningfulIfcString(parseString(record.args[0]));
-  for (const arg of record.args) {
-    for (const ref of parseRefs(arg)) {
-      const nested = collectClassificationName(ref, detailById, seen);
-      if (nested) return nested;
-    }
-  }
-  return '';
 }
 
 function isIfcPlaceholder(value: string): boolean {

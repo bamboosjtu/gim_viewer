@@ -219,8 +219,15 @@ describe.skipIf(!hasSubstation)('样本回归·变电 demo-substation', () => {
         + boundaryContained,
     ).toBe(index.objects.filter((object) => object.spatialKeys.length > 0).length);
     expect(index.models.reduce((sum, model) => sum + model.resourceCount, 0)).toBeGreaterThan(0);
-    expect(index.models.reduce((sum, model) => sum + model.objectsWithProperties, 0)).toBeGreaterThan(0);
-    expect(index.models.reduce((sum, model) => sum + model.propertyValueCount, 0)).toBeGreaterThan(0);
+    // Spatial Core v1 不再展开 Pset/工程量/材质/分类实体；属性详情由
+    // Fragments getItemsData() 在用户选择构件时按需读取。扫描计数仍保留，
+    // 用于诊断和验证没有把 IFC 属性误当成导航对象。
+    expect(index.models.reduce((sum, model) => sum + model.objectsWithProperties, 0)).toBe(0);
+    expect(index.models.reduce((sum, model) => sum + model.propertyValueCount, 0)).toBe(0);
+    expect(index.models.reduce((sum, model) => sum + model.quantityValueCount, 0)).toBe(0);
+    expect(index.objects.every((object) => object.propertyDataDeferred === true)).toBe(true);
+    expect(index.nodes.every((node) => node.propertyDataDeferred === true)).toBe(true);
+    expect(index.models.reduce((sum, model) => sum + (model.resourceTypeCounts?.IFCPROPERTYSET ?? 0), 0)).toBeGreaterThan(0);
     expect(index.objects.some((object) => object.placement?.position != null)).toBe(true);
     expect(fileDevRelations.length).toBeGreaterThan(0);
     expect(index.links.some((link) => (link.sourceDesignNames?.length ?? 0) > 0)).toBe(true);

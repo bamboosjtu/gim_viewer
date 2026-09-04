@@ -107,7 +107,9 @@ export interface PerfSubstationIfcProfile {
   stepScanMs: number;
   rawEntityCount: number;
   detailEntityCount: number;
+  retainedEntityCount?: number;
   placementEntityCount: number;
+  placementCandidateCount?: number;
   placementDetailMs: number;
   spatialEntityCount: number;
   spatialEntityMs: number;
@@ -518,10 +520,15 @@ export function perfRecordSubstationIfcProfile(
   substationIfcParses.push(normalized);
   const prefix = `变电 IFC Spatial Semantic · ${profile.entryPath}`;
   perfRecordExternalSpan(`${prefix} · total`, profile.totalMs, normalized, session);
-  perfRecordExternalSpan(`${prefix} · STEP scan`, profile.stepScanMs, { rawEntityCount: profile.rawEntityCount }, session);
+  perfRecordExternalSpan(`${prefix} · STEP scan`, profile.stepScanMs, {
+    rawEntityCount: profile.rawEntityCount,
+    ...(profile.retainedEntityCount != null ? { retainedEntityCount: profile.retainedEntityCount } : {}),
+    ...(profile.placementCandidateCount != null ? { placementCandidateCount: profile.placementCandidateCount } : {}),
+  }, session);
   perfRecordExternalSpan(`${prefix} · placement/detail`, profile.placementDetailMs, {
     detailEntityCount: profile.detailEntityCount,
     placementEntityCount: profile.placementEntityCount,
+    ...(profile.placementCandidateCount != null ? { placementCandidateCount: profile.placementCandidateCount } : {}),
   }, session);
   perfRecordExternalSpan(`${prefix} · spatial entity`, profile.spatialEntityMs, { spatialEntityCount: profile.spatialEntityCount }, session);
   perfRecordExternalSpan(`${prefix} · property/quantity/material/classification`, profile.propertyMs, {
