@@ -627,6 +627,7 @@ export async function loadAllIfcFiles(
           (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
           {
             session,
+            perfSessionId: perfSession.id,
             onLoadSource: (source) => { loadSource.value = source; },
           },
         );

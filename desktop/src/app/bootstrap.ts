@@ -17,6 +17,16 @@ function hideLoading() { loadingEl.style.display = 'none'; popBusy('就绪'); }
 async function bootstrapAsync(): Promise<void> {
   const state = new AppState();
 
+  // 开发期 A/B 采集需要区分“同一 WebView 连续打开”和“应用重启后打开”。
+  // 该标识只暴露给 DEV harness，不参与业务状态或缓存键。
+  if (import.meta.env.DEV) {
+    const target = globalThis as { __GIM_DEV_BOOT_ID__?: string };
+    const webCrypto = globalThis.crypto;
+    target.__GIM_DEV_BOOT_ID__ = typeof webCrypto?.randomUUID === 'function'
+      ? webCrypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
   // WebView Long Task 统计从首屏开始记录；perfReset 会在工程切换时重建
   // observer，使旧工程迟到的 PerformanceObserver 回调不会污染新 session。
   const { installLongTaskObserver } = await import('../utils/perfTimings.js');

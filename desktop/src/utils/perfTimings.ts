@@ -143,6 +143,48 @@ export interface PerfSubstationStats {
   finalize: PerfSubstationFinalizeProfile[];
 }
 
+/** Fragments 缓存链路中的单类操作统计。bytes 仅记录该操作明确可测的
+ * 二进制负载；validate/upsert 等 JSON 元数据操作不会为了测量而重复序列化。 */
+export interface PerfFragmentsCacheOperationStats {
+  count: number;
+  bytes: number;
+  totalMs: number;
+  p50Ms: number;
+  p95Ms: number;
+  maxMs: number;
+  failures: number;
+}
+
+export type PerfFragmentsCacheOperation =
+  | 'validate'
+  | 'read'
+  | 'load'
+  | 'serialize'
+  | 'write'
+  | 'upsert'
+  | 'delete';
+
+/** 变电 Fragments cache-on A/B 所需的结构化统计。 */
+export interface PerfFragmentsCacheStats {
+  /** 首次调用时的开关状态；null 表示本次工程没有走 IFC cache loader。 */
+  enabled: boolean | null;
+  /** cache-enabled 下实际尝试校验的 IFC 条目数。 */
+  attempts: number;
+  /** 校验无有效记录/文件时的正常 miss；不含 disabled。 */
+  misses: number;
+  /** 有效缓存读取或反序列化失败后回退 IFC 的次数。 */
+  fallbacks: number;
+  /** 有效缓存加载并通过 runtime 校验的次数。 */
+  hits: number;
+  /** cache disabled 时绕过缓存的 IFC 条目数。 */
+  disabled: number;
+  /** 已知的二进制读取/序列化/写入字节总量。 */
+  readBytes: number;
+  serializedBytes: number;
+  writtenBytes: number;
+  operations: Record<PerfFragmentsCacheOperation, PerfFragmentsCacheOperationStats>;
+}
+
 /** Rust batch_read_cached_files 的内部阶段统计（不含 WebView IPC 往返）。 */
 export interface PerfBatchReadStats {
   count: number;
@@ -181,6 +223,53 @@ let memorySamples: PerfMemorySample[] = [];
 let substationIfcReads: PerfSubstationIfcReadProfile[] = [];
 let substationIfcParses: PerfSubstationIfcProfile[] = [];
 let substationFinalizes: PerfSubstationFinalizeProfile[] = [];
+const FRAGMENTS_CACHE_OPERATIONS: PerfFragmentsCacheOperation[] = [
+  'validate', 'read', 'load', 'serialize', 'write', 'upsert', 'delete',
+];
+interface FragmentsCacheOperationAccumulator {
+  count: number;
+  bytes: number;
+  totalMs: number;
+  maxMs: number;
+  failures: number;
+  durations: number[];
+}
+interface FragmentsCacheAccumulator {
+  enabled: boolean | null;
+  attempts: number;
+  misses: number;
+  fallbacks: number;
+  hits: number;
+  disabled: number;
+  readBytes: number;
+  serializedBytes: number;
+  writtenBytes: number;
+  operations: Record<PerfFragmentsCacheOperation, FragmentsCacheOperationAccumulator>;
+}
+function createFragmentsCacheAccumulator(): FragmentsCacheAccumulator {
+  return {
+    enabled: null,
+    attempts: 0,
+    misses: 0,
+    fallbacks: 0,
+    hits: 0,
+    disabled: 0,
+    readBytes: 0,
+    serializedBytes: 0,
+    writtenBytes: 0,
+    operations: Object.fromEntries(
+      FRAGMENTS_CACHE_OPERATIONS.map((operation) => [operation, {
+        count: 0,
+        bytes: 0,
+        totalMs: 0,
+        maxMs: 0,
+        failures: 0,
+        durations: [],
+      }]),
+    ) as unknown as Record<PerfFragmentsCacheOperation, FragmentsCacheOperationAccumulator>,
+  };
+}
+let fragmentsCacheStats: FragmentsCacheAccumulator = createFragmentsCacheAccumulator();
 interface BatchReadAccumulator {
   count: number;
   requestedEntries: number;
@@ -270,6 +359,7 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
   substationIfcReads = [];
   substationIfcParses = [];
   substationFinalizes = [];
+  fragmentsCacheStats = createFragmentsCacheAccumulator();
   // PerformanceObserver 回调可能在旧工程 reset 后才到达。重建 observer，
   // 让回调闭包绑定新 session id，避免旧 Long Task 计入新工程。
   if (longTaskObserverEnabled) installLongTaskObserver();
@@ -470,6 +560,84 @@ export function perfSubstationSnapshot(): PerfSubstationStats {
   };
 }
 
+/** 设置当前工程是否启用 Fragments cache；迟到 session 不得写入新快照。 */
+export function perfSetFragmentsCacheEnabled(enabled: boolean, sessionId: number = currentSession.id): void {
+  if (sessionId !== currentSession.id) return;
+  if (fragmentsCacheStats.enabled === null) fragmentsCacheStats.enabled = enabled;
+  // 同一工程内开关不应被重复调用改写；仅累计每个条目绕过缓存的次数。
+  if (!enabled) fragmentsCacheStats.disabled += 1;
+}
+
+/** 记录一次 cache loader 的结构化操作，bytes 为调用方明确知道的二进制量。 */
+export function perfRecordFragmentsCacheOperation(
+  operation: PerfFragmentsCacheOperation,
+  durationMs: number,
+  bytes = 0,
+  failed = false,
+  sessionId: number = currentSession.id,
+): void {
+  if (sessionId !== currentSession.id) return;
+  const current = fragmentsCacheStats.operations[operation];
+  if (!current) return;
+  const safeDuration = Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0;
+  const safeBytes = Number.isFinite(bytes) && bytes >= 0 ? bytes : 0;
+  current.count += 1;
+  current.bytes += safeBytes;
+  current.totalMs += safeDuration;
+  current.maxMs = Math.max(current.maxMs, safeDuration);
+  if (failed) current.failures += 1;
+  current.durations.push(safeDuration);
+  if (operation === 'read') fragmentsCacheStats.readBytes += safeBytes;
+  if (operation === 'serialize') fragmentsCacheStats.serializedBytes += safeBytes;
+  if (operation === 'write') fragmentsCacheStats.writtenBytes += safeBytes;
+}
+
+/** 记录 cache 尝试的最终语义状态。 */
+export function perfRecordFragmentsCacheOutcome(
+  outcome: 'attempt' | 'miss' | 'fallback' | 'hit',
+  sessionId: number = currentSession.id,
+): void {
+  if (sessionId !== currentSession.id) return;
+  if (outcome === 'attempt') fragmentsCacheStats.attempts += 1;
+  else if (outcome === 'miss') fragmentsCacheStats.misses += 1;
+  else if (outcome === 'fallback') fragmentsCacheStats.fallbacks += 1;
+  else if (outcome === 'hit') fragmentsCacheStats.hits += 1;
+}
+
+function snapshotFragmentsCacheOperation(
+  value: FragmentsCacheOperationAccumulator,
+): PerfFragmentsCacheOperationStats {
+  return {
+    count: value.count,
+    bytes: Math.round(value.bytes),
+    totalMs: Math.round(value.totalMs * 100) / 100,
+    p50Ms: Math.round(percentile(value.durations, 0.5) * 100) / 100,
+    p95Ms: Math.round(percentile(value.durations, 0.95) * 100) / 100,
+    maxMs: Math.round(value.maxMs * 100) / 100,
+    failures: value.failures,
+  };
+}
+
+export function perfFragmentsCacheSnapshot(): PerfFragmentsCacheStats {
+  return {
+    enabled: fragmentsCacheStats.enabled,
+    attempts: fragmentsCacheStats.attempts,
+    misses: fragmentsCacheStats.misses,
+    fallbacks: fragmentsCacheStats.fallbacks,
+    hits: fragmentsCacheStats.hits,
+    disabled: fragmentsCacheStats.disabled,
+    readBytes: Math.round(fragmentsCacheStats.readBytes),
+    serializedBytes: Math.round(fragmentsCacheStats.serializedBytes),
+    writtenBytes: Math.round(fragmentsCacheStats.writtenBytes),
+    operations: Object.fromEntries(
+      FRAGMENTS_CACHE_OPERATIONS.map((operation) => [
+        operation,
+        snapshotFragmentsCacheOperation(fragmentsCacheStats.operations[operation]),
+      ]),
+    ) as Record<PerfFragmentsCacheOperation, PerfFragmentsCacheOperationStats>,
+  };
+}
+
 /**
  * 记录一次 Tauri invoke。由 bridge/invokeTimed.ts 调用，不能把旧 session
  * 的迟到响应写入新工程。bytes 为请求和响应的估算总和。
@@ -650,6 +818,7 @@ export function perfSnapshot(): {
   spans: PerfSpan[];
   invokes: PerfInvokeCommandStats[];
   batchReads: PerfBatchReadStats;
+  fragmentsCache: PerfFragmentsCacheStats;
   longTasks: PerfLongTaskStats;
   productMoments: Record<PerfProductMoment, PerfProductMomentInfo | null>;
   memory: PerfMemorySample[];
@@ -663,6 +832,7 @@ export function perfSnapshot(): {
     spans: spans.slice(),
     invokes: perfInvokeSnapshot(),
     batchReads: perfBatchReadSnapshot(),
+    fragmentsCache: perfFragmentsCacheSnapshot(),
     longTasks: perfLongTaskSnapshot(),
     productMoments: perfProductMomentSnapshot(),
     memory: perfMemorySnapshot(),
@@ -675,7 +845,8 @@ export function perfSummary(): string {
   const invokes = perfInvokeSnapshot();
   const batchReads = perfBatchReadSnapshot();
   const longTasks = perfLongTaskSnapshot();
-  if (spans.length === 0 && invokes.length === 0 && batchReads.count === 0 && longTasks.count === 0 && memorySamples.length === 0) return '(无性能埋点数据)';
+  const fragmentsCache = perfFragmentsCacheSnapshot();
+  if (spans.length === 0 && invokes.length === 0 && batchReads.count === 0 && longTasks.count === 0 && memorySamples.length === 0 && fragmentsCache.attempts === 0 && fragmentsCache.disabled === 0) return '(无性能埋点数据)';
   const lines = ['阶段耗时（相对会话起点）:', '─'.repeat(64)];
   for (const s of spans) {
     const dur = s.durationMs > 0 ? `${Math.round(s.durationMs)}ms`.padEnd(8) : '  事件 ';
@@ -690,6 +861,9 @@ export function perfSummary(): string {
   }
   if (batchReads.count > 0) {
     lines.push(`Batch Rust: ${batchReads.count} 批, ${batchReads.requestedEntries} 条（命中 ${batchReads.hitEntries}）, ${Math.round(batchReads.bytes)} B, read ${Math.round(batchReads.totalReadMs)}ms, encode ${Math.round(batchReads.totalEncodeMs)}ms, total ${Math.round(batchReads.totalMs)}ms`);
+  }
+  if (fragmentsCache.enabled !== null) {
+    lines.push(`Fragments Cache: ${fragmentsCache.enabled ? 'enabled' : 'disabled'}, attempts ${fragmentsCache.attempts}, hit ${fragmentsCache.hits}, miss ${fragmentsCache.misses}, fallback ${fragmentsCache.fallbacks}, read ${Math.round(fragmentsCache.readBytes)}B, write ${Math.round(fragmentsCache.writtenBytes)}B`);
   }
   lines.push(`Long Task: ${longTasks.count} 次, blocking ${Math.round(longTasks.totalBlockingTimeMs)}ms, max ${Math.round(longTasks.maxMs)}ms`);
   const moments = perfProductMomentSnapshot();

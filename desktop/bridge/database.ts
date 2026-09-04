@@ -1,5 +1,5 @@
 import type { FileInfo } from './fileReader.js';
-import { invokeTimed } from './invokeTimed.js';
+import { invokeTimed, type InvokeTimedOptions } from './invokeTimed.js';
 import { perfCurrentSession, perfRecordBatchRead } from '../src/utils/perfTimings.js';
 
 const utf8Encoder = new TextEncoder();
@@ -888,18 +888,24 @@ export async function writeFragmentCacheFile(
   entryPath: string,
   bytes: Uint8Array,
   sourceGimSha256: string,
+  options: Pick<InvokeTimedOptions, 'sessionId'> = {},
 ): Promise<FragmentCacheWriteResult> {
   return invokeTimed<FragmentCacheWriteResult>(
     'write_fragment_cache_file_binary',
     packBinaryCacheWrite(projectId, entryPath, bytes, sourceGimSha256),
+    options,
   );
 }
 
 /**
  * 读取 Fragments 缓存文件（路径由 projectId + entryPath 计算）。
  */
-export async function readFragmentCacheFile(projectId: number, entryPath: string): Promise<Uint8Array> {
-  const bytes = await invokeTimed<ArrayBuffer>('read_fragment_cache_file', { projectId, entryPath });
+export async function readFragmentCacheFile(
+  projectId: number,
+  entryPath: string,
+  options: Pick<InvokeTimedOptions, 'sessionId'> = {},
+): Promise<Uint8Array> {
+  const bytes = await invokeTimed<ArrayBuffer>('read_fragment_cache_file', { projectId, entryPath }, options);
   return toUint8Array(bytes);
 }
 
@@ -915,6 +921,7 @@ export async function upsertFragmentCacheRecord(
   fragmentFileSize: number,
   cacheVersion: string,
   sourceGimSha256: string,
+  options: Pick<InvokeTimedOptions, 'sessionId'> = {},
 ): Promise<void> {
   await invokeTimed<void>('upsert_fragment_cache_record', {
     projectId,
@@ -924,7 +931,7 @@ export async function upsertFragmentCacheRecord(
     fragmentFileSize,
     cacheVersion,
     sourceGimSha256,
-  });
+  }, options);
 }
 
 /**
@@ -938,6 +945,7 @@ export async function validateFragmentCache(
   sourceIfcSize: number,
   cacheVersion: string,
   sourceGimSha256: string,
+  options: Pick<InvokeTimedOptions, 'sessionId'> = {},
 ): Promise<FragmentCacheValidation> {
   return invokeTimed<FragmentCacheValidation>('validate_fragment_cache', {
     projectId,
@@ -945,7 +953,7 @@ export async function validateFragmentCache(
     sourceIfcSize,
     cacheVersion,
     sourceGimSha256,
-  });
+  }, options);
 }
 
 /**
@@ -955,8 +963,9 @@ export async function validateFragmentCache(
 export async function deleteFragmentCacheRecord(
   projectId: number,
   entryPath: string,
+  options: Pick<InvokeTimedOptions, 'sessionId'> = {},
 ): Promise<void> {
-  await invokeTimed<void>('delete_fragment_cache_record', { projectId, entryPath });
+  await invokeTimed<void>('delete_fragment_cache_record', { projectId, entryPath }, options);
 }
 
 // ==================== 线路工程图缓存（v4） ====================
