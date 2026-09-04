@@ -38,6 +38,7 @@ import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBa
 import type { NativeExtractionProfile } from '@desktop/gimExtract.js';
 import type { LineParserWorkerResult } from './lineParserWorkerClient.js';
 import type { LineParserWorkerFile } from './lineParserWorker.js';
+import { hydrateNativeSmallFiles } from './nativeSmallFileHydration.js';
 
 /**
  * 线路 cold Worker 与 warm semantic-pack fast path 共用的状态提交边界。
@@ -981,6 +982,8 @@ async function openGimFromArrayBuffer(
     magic: string;
     projectName?: string;
     projectId?: string;
+    /** native extraction 的 SQLite project id，用于批量物化小文件 */
+    cacheProjectId?: number;
     nativeExtractionMs?: number;
     extractionProfile?: NativeExtractionProfile;
     cachePaths?: Map<string, string>;
@@ -1080,6 +1083,28 @@ async function openGimFromArrayBuffer(
   if (!state.isCurrentSession(session)) return;
   endDetect(undefined, { type: projectTypeResult.type });
   state.currentProjectType = projectTypeResult.type;
+
+  // Native manifest-only 解压之后，变电流程会在 CBM/FAM/DEV、STD/SLD、
+  // 几何引用链等阶段重复读取同一批小文本文件。先用既有 batch IPC
+  // 物化有界小文件，避免“解压一次 + 数万次单条 read_cached_entry”；
+  // IFC、大文件和线路 semantic-pack 条目仍保持 lazy，不改变其内存边界。
+  if (projectTypeResult.type !== 'transmission_line' && preExtracted?.cacheProjectId != null) {
+    const endHydrate = perfBegin('变电小文件批量物化', undefined, perfSession);
+    const hydrated = await hydrateNativeSmallFiles(
+      extracted,
+      preExtracted.cacheProjectId,
+      { isCurrent: () => state.isCurrentSession(session) },
+    );
+    if (hydrated.cancelled || !state.isCurrentSession(session)) return;
+    extracted = hydrated.files;
+    endHydrate(undefined, {
+      requested: hydrated.requested,
+      hydrated: hydrated.hydrated,
+      bytes: hydrated.bytes,
+      batches: hydrated.batches,
+      misses: hydrated.misses,
+    });
+  }
 
   // M0 设计系统：顶栏工程身份 + 导航器标题
   const kind = projectTypeResult.type === 'transmission_line' ? 'transmission_line'
@@ -1467,7 +1492,23 @@ export async function openGimWithDialog(
       const endValidate = perfBegin('冷启动：缓存校验', undefined, requestPerfSession);
       const validation = await validateGimCache(record.id);
       if (state.projectGeneration !== requestGeneration) return;
-      endValidate(undefined, { valid: validation.valid, type: validation.project_type ?? null });
+      endValidate(undefined, {
+        valid: validation.valid,
+        type: validation.project_type ?? null,
+        cacheMissReason: validation.cache_miss_reason ?? null,
+        storedParserVersion: validation.stored_parser_version ?? null,
+        currentParserVersion: validation.current_parser_version,
+        parserVersionMatch: validation.parser_version_match,
+        storedLineParserVersion: validation.stored_line_parser_version ?? null,
+        currentLineParserVersion: validation.current_line_parser_version,
+        lineParserVersionMatch: validation.line_parser_version_match,
+        storedSubstationParserVersion: validation.stored_substation_parser_version ?? null,
+        currentSubstationParserVersion: validation.current_substation_parser_version,
+        substationParserVersionMatch: validation.substation_parser_version_match,
+        lineSemanticPackStatus: validation.line_semantic_pack_status,
+        lineSemanticPackError: validation.line_semantic_pack_error ?? null,
+        geometryCacheVersionMatch: validation.geometry_cache_version_match,
+      });
       debugLog(DEBUG_GIM_CACHE, '[Tauri] GIM 缓存校验:', validation);
 
       // 3. 缓存命中短路：不 readFileBytes、不 extractGimFile、不创建 Viewer

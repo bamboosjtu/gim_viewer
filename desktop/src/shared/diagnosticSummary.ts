@@ -15,6 +15,17 @@ interface DiagnosticPayload {
   stored_parser_version?: string | null;
   current_parser_version?: string;
   parser_version_match?: boolean;
+  stored_line_parser_version?: string | null;
+  current_line_parser_version?: string;
+  line_parser_version_match?: boolean;
+  stored_substation_parser_version?: string | null;
+  current_substation_parser_version?: string;
+  substation_parser_version_match?: boolean;
+  cache_miss_reason?: string | null;
+  line_semantic_pack_status?: string;
+  line_semantic_pack_error?: string | null;
+  geometry_cache_version_match?: boolean;
+  current_geometry_cache_version?: string;
 
   // 变电工程
   entries_count?: number;
@@ -62,6 +73,17 @@ export function summarizeDiagnostic(payload: unknown): string {
   lines.push(`工程类型：${projectType}`);
   lines.push(`缓存状态：valid=${valid}`);
   lines.push(`parser_version：${storedVersion} / ${currentVersion}${versionMatch ? '' : '（不匹配）'}`);
+  if (diag.project_type === 'transmission_line') {
+    lines.push(`线路缓存版本：${diag.stored_line_parser_version ?? '(兼容旧字段)'} / ${diag.current_line_parser_version ?? '(未知)'}${diag.line_parser_version_match === false ? '（不匹配）' : ''}`);
+  } else if (diag.project_type === 'substation' || diag.project_type === 'hybrid') {
+    lines.push(`变电缓存版本：${diag.stored_substation_parser_version ?? '(兼容旧字段)'} / ${diag.current_substation_parser_version ?? '(未知)'}${diag.substation_parser_version_match === false ? '（不匹配）' : ''}`);
+  }
+  if (diag.cache_miss_reason) lines.push(`缓存失效原因：${diag.cache_miss_reason}`);
+  if (diag.project_type === 'transmission_line') {
+    lines.push(`线路 semantic pack：${diag.line_semantic_pack_status ?? 'unknown'}${diag.line_semantic_pack_error ? `（${diag.line_semantic_pack_error}）` : ''}`);
+  } else if (diag.project_type === 'substation' || diag.project_type === 'hybrid') {
+    lines.push(`变电几何缓存版本：${diag.geometry_cache_version_match ? '匹配' : '不匹配'} / ${diag.current_geometry_cache_version ?? '(未知)'}`);
+  }
 
   if (projectType === 'transmission_line') {
     lines.push(`线路节点：${diag.line_cbm_node_count ?? 0}`);

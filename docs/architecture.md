@@ -186,11 +186,11 @@ desktop/src-tauri/
 |---|---|
 | `substation_fragment_cache` | Fragments 二进制缓存（受 `ENABLE_FRAGMENTS_CACHE=false` 控制，绑定源 GIM SHA-256） |
 
-### PARSER_VERSION 失效机制
+### 解析缓存版本域与失效机制
 
-- 定义在 `desktop/src-tauri/src/db.rs`：`pub const PARSER_VERSION: &str = "gim-parser-v22"`
-- `validate_gim_cache` 检查 `parser_version_match`
-- 版本不匹配 → 缓存无效 → 完整解压 → `save_gim_index` 先删后插全部表
+- 定义在 `desktop/src-tauri/src/db.rs`：`LINE_PARSER_VERSION = "gim-line-parser-v1"`、`SUBSTATION_PARSER_VERSION = "gim-substation-parser-v22"`；`PARSER_VERSION = "gim-parser-v22"` 仅保留兼容/诊断
+- `validate_gim_cache` 按 `project_type` 校验对应 domain 字段；变电 Semantic Core 升级不会使线路 graph/属性/semantic pack 失效
+- 对应 domain 版本不匹配 → 缓存无效 → 完整解压/重建对应工程索引；旧共享版本按工程类型兼容迁移
 - 2026-08 v17：表名规范化迁移——变电表统一 `substation_` 前缀、线路表统一
   `powerline_` 前缀（`gim_project` 为两类工程共用的项目记录表，保持中性命名）；
   init_db 自动 DROP 旧命名表回收空间

@@ -44,7 +44,17 @@ macro_rules! debug_perf_log {
 /// v19: IFC 空间索引改为逐模型增量构建；运行时 IFC 会话身份与模型事件隔离
 /// v20: 线路 native semantic pack 与大 MOD 仅保留路径元数据，缓存输入边界同步升级
 /// v22: Substation IFC Spatial Semantic Core selective/two-pass scan
+///
+/// `parser_version` 保留为旧版兼容/诊断字段；线路与变电从 v22 起使用
+/// 独立 domain version，避免变电 Semantic Core 升级误伤线路缓存。
 pub const PARSER_VERSION: &str = "gim-parser-v22";
+pub const LINE_PARSER_VERSION: &str = "gim-line-parser-v1";
+pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v22";
+
+/// v21/v22 的线路缓存逻辑没有变化。升级到 domain version 时将这些旧的
+/// 共享版本安全迁移为 LINE_PARSER_VERSION，而不是要求线路重新解析。
+const LEGACY_LINE_PARSER_VERSIONS: &[&str] = &["gim-parser-v21", "gim-parser-v22"];
+const LEGACY_SUBSTATION_PARSER_VERSIONS: &[&str] = &["gim-parser-v22"];
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
@@ -138,6 +148,9 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
             size INTEGER NOT NULL,
             modified_ms INTEGER NOT NULL,
             sha256 TEXT NOT NULL,
+            parser_version TEXT,
+            line_parser_version TEXT,
+            substation_parser_version TEXT,
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL,
             last_opened_at_ms INTEGER NOT NULL,
@@ -258,8 +271,36 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<Connection, String> {
     // 兼容旧库：给 gim_project 增加 parser_version 列（已存在则忽略）
     let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN parser_version TEXT", []);
 
+    // v22：解析缓存按工程类型隔离。旧库仍只有共享 parser_version；先补列，
+    // 再把 v21/v22 的线路缓存迁移到独立 domain 版本，避免仅因变电
+    // Semantic Core 升级而重建线路 graph/属性/semantic pack。
+    let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN line_parser_version TEXT", []);
+    let _ = conn.execute(
+        "ALTER TABLE gim_project ADD COLUMN substation_parser_version TEXT",
+        [],
+    );
+
     // v4: 给 gim_project 增加 project_type 列（substation / transmission_line / hybrid / unknown）
     let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN project_type TEXT", []);
+
+    // 仅迁移可明确识别的旧缓存；未知工程继续由正常校验判定无效，
+    // 不猜测其 domain，避免把变电数据误标为线路或反之。
+    let _ = conn.execute(
+        "UPDATE gim_project
+         SET line_parser_version = ?1
+         WHERE line_parser_version IS NULL
+           AND project_type = 'transmission_line'
+           AND parser_version IN ('gim-parser-v21', 'gim-parser-v22')",
+        params![LINE_PARSER_VERSION],
+    );
+    let _ = conn.execute(
+        "UPDATE gim_project
+         SET substation_parser_version = ?1
+         WHERE substation_parser_version IS NULL
+           AND project_type IN ('substation', 'hybrid')
+           AND parser_version = 'gim-parser-v22'",
+        params![SUBSTATION_PARSER_VERSION],
+    );
 
     // v4: 线路工程图缓存表
     conn.execute_batch(
@@ -473,6 +514,29 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// 校验 domain 版本；第二个参数用于兼容 domain 列尚未迁移的旧共享
+/// `parser_version`。迁移完成后新缓存只依赖独立列。
+fn parser_domain_version_matches(
+    stored_domain: Option<&str>,
+    stored_legacy: Option<&str>,
+    current: &str,
+    legacy: &[&str],
+) -> bool {
+    stored_domain == Some(current)
+        || (stored_domain.is_none()
+            && stored_legacy
+                .map(|value| legacy.iter().any(|candidate| *candidate == value))
+                .unwrap_or(false))
+}
+
+fn cache_miss_reason(reasons: Vec<String>) -> Option<String> {
+    if reasons.is_empty() {
+        None
+    } else {
+        Some(reasons.join("; "))
+    }
+}
+
 pub(crate) fn ensure_project_exists(conn: &Connection, project_id: i64) -> Result<(), String> {
     ensure_cache_project_id(project_id)?;
     let exists: bool = conn
@@ -560,7 +624,7 @@ pub fn upsert_gim_project(
             // 源 GIM 文件变化：更新元信息，同时清空 parser_version / project_type，
             // 使 validate_gim_cache 返回 invalid，触发完整重建（不删除旧索引表数据）
             conn.execute(
-                "UPDATE gim_project SET path = ?1, name = ?2, size = ?3, modified_ms = ?4, sha256 = ?5, parser_version = NULL, project_type = NULL, updated_at_ms = ?6, last_opened_at_ms = ?7 WHERE id = ?8",
+                "UPDATE gim_project SET path = ?1, name = ?2, size = ?3, modified_ms = ?4, sha256 = ?5, parser_version = NULL, line_parser_version = NULL, substation_parser_version = NULL, project_type = NULL, updated_at_ms = ?6, last_opened_at_ms = ?7 WHERE id = ?8",
                 params![path_identity, info.name, info.size, info.modified_ms, info.sha256, now, now, id],
             )
             .map_err(|e| format!("更新项目记录失败: {}", e))?;
@@ -589,7 +653,7 @@ pub fn upsert_gim_project(
     } else {
         // 插入新记录（parser_version = NULL，表示尚无索引）
         conn.execute(
-            "INSERT INTO gim_project (path, name, size, modified_ms, sha256, parser_version, created_at_ms, updated_at_ms, last_opened_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?7, ?8)",
+            "INSERT INTO gim_project (path, name, size, modified_ms, sha256, parser_version, line_parser_version, substation_parser_version, created_at_ms, updated_at_ms, last_opened_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL, ?6, ?7, ?8)",
             params![path_identity, info.name, info.size, info.modified_ms, info.sha256, now, now, now],
         )
         .map_err(|e| format!("插入项目记录失败: {}", e))?;
@@ -1002,7 +1066,7 @@ pub fn save_gim_index(
     // 几何引用链尚未写入，不能在此处提交 parser_version；由
     // save_geometry_refs 完成后统一提交 ready 状态。
     tx.execute(
-        "UPDATE gim_project SET parser_version = NULL, project_type = 'substation', updated_at_ms = ?1 WHERE id = ?2",
+        "UPDATE gim_project SET parser_version = NULL, substation_parser_version = NULL, project_type = 'substation', updated_at_ms = ?1 WHERE id = ?2",
         params![now, pid],
     )
     .map_err(|e| format!("清空 parser_version 失败: {}", e))?;
@@ -3508,6 +3572,15 @@ pub struct GimCacheValidation {
     pub stored_parser_version: Option<String>,
     pub current_parser_version: String,
     pub parser_version_match: bool,
+    /// v22：线路/变电独立缓存 domain 版本（旧字段保留兼容）。
+    pub stored_line_parser_version: Option<String>,
+    pub current_line_parser_version: String,
+    pub line_parser_version_match: bool,
+    pub stored_substation_parser_version: Option<String>,
+    pub current_substation_parser_version: String,
+    pub substation_parser_version_match: bool,
+    /// invalid 时给出可操作的首要原因；多个原因以 `; ` 分隔。
+    pub cache_miss_reason: Option<String>,
     pub valid: bool,
     /// v4: 工程类型（substation / transmission_line / hybrid / unknown）
     pub project_type: Option<String>,
@@ -3849,7 +3922,7 @@ pub fn save_line_gim_graph(
     // 兼容旧命令仅写入图表，但不再宣称缓存 ready；生产流程必须使用
     // begin/chunk/finish 三阶段协议完成属性完整性校验。
     tx.execute(
-        "UPDATE gim_project SET parser_version = NULL, project_type = ?1, updated_at_ms = ?2 WHERE id = ?3",
+        "UPDATE gim_project SET parser_version = NULL, line_parser_version = NULL, project_type = ?1, updated_at_ms = ?2 WHERE id = ?3",
         params![payload.project_type, now, pid],
     )
     .map_err(|e| format!("更新 project_type 失败: {}", e))?;
@@ -4209,10 +4282,10 @@ fn insert_line_graph(
 /// 半成品数据在 finish 提交前不可能被 validate_gim_cache 命中）
 fn invalidate_line_parser_version(tx: &rusqlite::Transaction, pid: i64) -> Result<(), String> {
     tx.execute(
-        "UPDATE gim_project SET parser_version = NULL WHERE id = ?1",
+        "UPDATE gim_project SET parser_version = NULL, line_parser_version = NULL WHERE id = ?1",
         params![pid],
     )
-    .map_err(|e| format!("清空 parser_version 失败: {}", e))?;
+    .map_err(|e| format!("清空线路 parser_version 失败: {}", e))?;
     Ok(())
 }
 
@@ -4427,8 +4500,8 @@ pub fn save_line_project_finish(
     }
     let now = now_ms();
     tx.execute(
-        "UPDATE gim_project SET parser_version = ?1, project_type = 'transmission_line', updated_at_ms = ?2 WHERE id = ?3",
-        params![PARSER_VERSION, now, project_id],
+        "UPDATE gim_project SET parser_version = ?1, line_parser_version = ?2, project_type = 'transmission_line', updated_at_ms = ?3 WHERE id = ?4",
+        params![PARSER_VERSION, LINE_PARSER_VERSION, now, project_id],
     )
     .map_err(|e| format!("更新 parser_version 失败: {}", e))?;
     tx.execute(
@@ -4902,23 +4975,46 @@ pub fn validate_gim_cache(
     let line_cbm_node_count = count_rows(&conn, "powerline_cbm_node", project_id)?;
     let has_index = cbm_nodes_count > 0 || ifc_models_count > 0 || line_cbm_node_count > 0;
 
-    // 读取 parser_version 和 project_type
-    let (stored_parser_version, project_type, source_sha256): (
+    // 读取旧共享版本、domain 版本和工程类型。旧版本字段只用于迁移兼容
+    // 与诊断；有效性按工程类型选择独立 domain。
+    let (
+        stored_parser_version,
+        stored_line_parser_version,
+        stored_substation_parser_version,
+        project_type,
+        source_sha256,
+    ): (
+        Option<String>,
+        Option<String>,
         Option<String>,
         Option<String>,
         String,
     ) = conn
         .query_row(
-            "SELECT parser_version, project_type, sha256 FROM gim_project WHERE id = ?1",
+            "SELECT parser_version, line_parser_version, substation_parser_version, project_type, sha256 FROM gim_project WHERE id = ?1",
             params![project_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
         )
-        .ok()
-        .unwrap_or((None, None, String::new()));
-    let parser_version_match = stored_parser_version
-        .as_deref()
-        .map(|v| v == PARSER_VERSION)
-        .unwrap_or(false);
+        .map_err(|e| format!("读取项目版本失败: {}", e))?;
+
+    let is_line = project_type.as_deref() == Some("transmission_line");
+    let line_parser_version_match = parser_domain_version_matches(
+        stored_line_parser_version.as_deref(),
+        stored_parser_version.as_deref(),
+        LINE_PARSER_VERSION,
+        LEGACY_LINE_PARSER_VERSIONS,
+    );
+    let substation_parser_version_match = parser_domain_version_matches(
+        stored_substation_parser_version.as_deref(),
+        stored_parser_version.as_deref(),
+        SUBSTATION_PARSER_VERSION,
+        LEGACY_SUBSTATION_PARSER_VERSIONS,
+    );
+    let parser_version_match = if is_line {
+        line_parser_version_match
+    } else {
+        substation_parser_version_match
+    };
 
     // 方案 C：校验 GLB 几何缓存版本
     // 读取 {app_data_dir}/glbcache/{project_id}/_version.txt 并与 GEOMETRY_CACHE_VERSION 比较
@@ -4929,8 +5025,6 @@ pub fn validate_gim_cache(
     // v4: 根据 project_type 分支校验
     // v5: transmission_line 增加 line_fam_source_count > 0 条件
     // substation（或 null/unknown）：保持原有 IFC/cache 校验逻辑
-    let is_line = project_type.as_deref() == Some("transmission_line");
-
     // v5: 线路工程计算 FAM/DEV 属性诊断字段（非线路工程返回全零/空，不影响结果）
     let line_attr_diag = if is_line {
         compute_line_attr_diagnostic(&conn, project_id)?
@@ -5026,6 +5120,35 @@ pub fn validate_gim_cache(
         )
     };
 
+    let mut miss_reasons = Vec::new();
+    if !parser_version_match {
+        let domain = if is_line { "line" } else { "substation" };
+        let stored = if is_line {
+            stored_line_parser_version.as_deref().or(stored_parser_version.as_deref())
+        } else {
+            stored_substation_parser_version.as_deref().or(stored_parser_version.as_deref())
+        }
+        .unwrap_or("(未设置)");
+        let current = if is_line { LINE_PARSER_VERSION } else { SUBSTATION_PARSER_VERSION };
+        miss_reasons.push(format!("{}_PARSER_VERSION_MISMATCH:{} -> {}", domain.to_ascii_uppercase(), stored, current));
+    }
+    if is_line {
+        if line_cbm_node_count == 0 { miss_reasons.push("LINE_GRAPH_EMPTY".to_string()); }
+        if line_attr_diag.fam_source_count == 0 { miss_reasons.push("LINE_FAM_SOURCE_EMPTY".to_string()); }
+        if line_semantic_pack_status == "invalid" {
+            miss_reasons.push(line_semantic_pack_error.clone().unwrap_or_else(|| "LINE_SEMANTIC_PACK_INVALID".to_string()));
+        }
+    } else {
+        if !has_index { miss_reasons.push("SUBSTATION_INDEX_EMPTY".to_string()); }
+        if ifc_models_count == 0 { miss_reasons.push("IFC_MODEL_EMPTY".to_string()); }
+        if ifc_entry_count == 0 { miss_reasons.push("IFC_ENTRY_EMPTY".to_string()); }
+        if cbm_nodes_count == 0 { miss_reasons.push("CBM_NODE_EMPTY".to_string()); }
+        if !missing_cache_paths.is_empty() {
+            miss_reasons.push(format!("IFC_CACHE_MISSING:{}", missing_cache_paths.len()));
+        }
+        if !geometry_cache_version_match { miss_reasons.push("GEOMETRY_CACHE_VERSION_MISMATCH".to_string()); }
+    }
+
     Ok(GimCacheValidation {
         project_id,
         has_index,
@@ -5038,6 +5161,13 @@ pub fn validate_gim_cache(
         stored_parser_version,
         current_parser_version: PARSER_VERSION.to_string(),
         parser_version_match,
+        stored_line_parser_version,
+        current_line_parser_version: LINE_PARSER_VERSION.to_string(),
+        line_parser_version_match,
+        stored_substation_parser_version,
+        current_substation_parser_version: SUBSTATION_PARSER_VERSION.to_string(),
+        substation_parser_version_match,
+        cache_miss_reason: cache_miss_reason(miss_reasons),
         valid,
         project_type,
         line_cbm_node_count: line_cbm_node_count as u64,
@@ -5107,6 +5237,21 @@ pub struct ProjectCacheDiagnostic {
     pub stored_parser_version: Option<String>,
     pub current_parser_version: String,
     pub parser_version_match: bool,
+    pub stored_line_parser_version: Option<String>,
+    pub current_line_parser_version: String,
+    pub line_parser_version_match: bool,
+    pub stored_substation_parser_version: Option<String>,
+    pub current_substation_parser_version: String,
+    pub substation_parser_version_match: bool,
+    pub cache_miss_reason: Option<String>,
+    /// 线路 semantic source 的完整性状态；missing 表示旧 SQLite 缓存可用但
+    /// 尚未生成 pack，invalid 表示 pack/index 整体损坏，必须重建而不能 partial fallback。
+    pub line_semantic_pack_status: String,
+    pub line_semantic_pack_error: Option<String>,
+    /// 变电 GLB manifest/版本是否匹配。线路工程不把该字段纳入 valid，
+    /// 但仍返回它以便诊断 JSON 明确区分几何缓存域。
+    pub geometry_cache_version_match: bool,
+    pub current_geometry_cache_version: String,
     pub valid: bool,
 
     pub ifc_cache_files: Vec<IfcCacheFileDiagnostic>,
@@ -5154,10 +5299,10 @@ pub fn get_project_cache_diagnostic(
         .lock()
         .map_err(|e| format!("获取数据库锁失败: {}", e))?;
 
-    // 1. 查询 gim_project 基本信息（含 parser_version、project_type）
+    // 1. 查询 gim_project 基本信息（含旧共享版本、domain 版本、project_type）
     let project = conn
         .query_row(
-            "SELECT id, path, name, size, modified_ms, sha256, parser_version, project_type FROM gim_project WHERE id = ?1",
+            "SELECT id, path, name, size, modified_ms, sha256, parser_version, line_parser_version, substation_parser_version, project_type FROM gim_project WHERE id = ?1",
             params![project_id],
             |row| {
                 Ok((
@@ -5169,13 +5314,47 @@ pub fn get_project_cache_diagnostic(
                     row.get::<_, String>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                 ))
             },
         )
         .map_err(|e| format!("查询项目失败: {}", e))?;
 
-    let parser_version_match = project.6.as_deref() == Some(PARSER_VERSION);
-    let project_type = project.7.clone();
+    let project_type = project.9.clone();
+    let is_line = project_type.as_deref() == Some("transmission_line");
+    let stored_line_parser_version = project.7.clone();
+    let stored_substation_parser_version = project.8.clone();
+    let line_parser_version_match = parser_domain_version_matches(
+        stored_line_parser_version.as_deref(),
+        project.6.as_deref(),
+        LINE_PARSER_VERSION,
+        LEGACY_LINE_PARSER_VERSIONS,
+    );
+    let substation_parser_version_match = parser_domain_version_matches(
+        stored_substation_parser_version.as_deref(),
+        project.6.as_deref(),
+        SUBSTATION_PARSER_VERSION,
+        LEGACY_SUBSTATION_PARSER_VERSIONS,
+    );
+    let parser_version_match = if is_line {
+        line_parser_version_match
+    } else {
+        substation_parser_version_match
+    };
+
+    // 与 validate_gim_cache 使用同一套几何域判定。诊断 JSON 必须能解释
+    // 为什么打开流程没有命中，不能只显示共享 parser_version。
+    let geometry_cache_version_match = check_geometry_cache_version(app_handle, project.0)
+        && check_geometry_cache_manifest(app_handle, project.0, &project.5);
+
+    // 线路 semantic pack 是独立于 SQLite graph/attribute 的 source cache。
+    // missing 允许旧缓存走 SQLite fallback；invalid 则必须整体重建。
+    let (line_semantic_pack_status, line_semantic_pack_error) = if is_line {
+        inspect_line_semantic_pack(app_handle, project.0)
+    } else {
+        ("missing".to_string(), None)
+    };
 
     // 2. 统计索引表数量
     let entries_count = count_rows(&conn, "substation_gim_entry", project_id)?;
@@ -5197,14 +5376,18 @@ pub fn get_project_cache_diagnostic(
     // 3. 查询 IFC entry 并诊断每个缓存文件
     let mut stmt = conn
         .prepare(
-            "SELECT entry_path, local_cache_path
+            "SELECT entry_path, local_cache_path, file_size
              FROM substation_gim_entry
              WHERE project_id = ?1 AND entry_type = 'IFC'",
         )
         .map_err(|e| format!("预处理 IFC entry 失败: {}", e))?;
     let rows = stmt
         .query_map(params![project_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         })
         .map_err(|e| format!("查询 IFC entry 失败: {}", e))?;
 
@@ -5214,16 +5397,30 @@ pub fn get_project_cache_diagnostic(
     let mut ifc_cache_files: Vec<IfcCacheFileDiagnostic> = Vec::new();
 
     for r in rows {
-        let (entry_path, local_cache_path) =
+        let (entry_path, local_cache_path, expected_size) =
             r.map_err(|e| format!("读取 IFC entry 失败: {}", e))?;
         ifc_entry_count += 1;
 
         let (exists, file_size) = match &local_cache_path {
             Some(p) if !p.is_empty() => {
                 let path = std::path::Path::new(p);
-                if path.exists() {
+                let expected_path = is_expected_cache_path(app_handle, project.0, &entry_path, path)
+                    .unwrap_or(false);
+                if !expected_path {
+                    missing_cache_paths.push(format!("{} (缓存路径不匹配)", entry_path));
+                    (false, None)
+                } else if path.exists() {
                     let size = stdfs::metadata(path).map(|m| m.len()).ok();
-                    cached_ifc_count += 1;
+                    if expected_size >= 0 && size == Some(expected_size as u64) {
+                        cached_ifc_count += 1;
+                    } else {
+                        missing_cache_paths.push(format!(
+                            "{} (大小不匹配: 期望 {}, 实际 {})",
+                            entry_path,
+                            expected_size,
+                            size.unwrap_or(0)
+                        ));
+                    }
                     (true, size)
                 } else {
                     missing_cache_paths.push(entry_path.clone());
@@ -5324,7 +5521,6 @@ pub fn get_project_cache_diagnostic(
     // v4: 根据 project_type 分支 valid 判断
     // v5: transmission_line 增加 line_fam_source_count > 0 条件
     // - substation（或 null/unknown）：保持原有 IFC 缓存校验逻辑
-    let is_line = project_type.as_deref() == Some("transmission_line");
     // v5: 线路工程计算 FAM/DEV 属性诊断字段
     let line_attr_diag = if is_line {
         compute_line_attr_diagnostic(&conn, project_id)?
@@ -5332,7 +5528,10 @@ pub fn get_project_cache_diagnostic(
         LineAttrDiagnostic::default()
     };
     let valid = if is_line {
-        parser_version_match && line_cbm_node_count > 0 && line_attr_diag.fam_source_count > 0
+        parser_version_match
+            && line_cbm_node_count > 0
+            && line_attr_diag.fam_source_count > 0
+            && line_semantic_pack_status != "invalid"
     } else {
         has_index
             && ifc_models_count > 0
@@ -5340,7 +5539,36 @@ pub fn get_project_cache_diagnostic(
             && cached_ifc_count == ifc_entry_count
             && missing_cache_paths.is_empty()
             && parser_version_match
+            && geometry_cache_version_match
     };
+
+    let mut miss_reasons = Vec::new();
+    if !parser_version_match {
+        let domain = if is_line { "LINE" } else { "SUBSTATION" };
+        let stored = if is_line {
+            stored_line_parser_version.as_deref().or(project.6.as_deref())
+        } else {
+            stored_substation_parser_version.as_deref().or(project.6.as_deref())
+        }
+        .unwrap_or("(未设置)");
+        let current = if is_line { LINE_PARSER_VERSION } else { SUBSTATION_PARSER_VERSION };
+        miss_reasons.push(format!("{}_PARSER_VERSION_MISMATCH:{} -> {}", domain, stored, current));
+    }
+    if is_line {
+        if line_cbm_node_count == 0 { miss_reasons.push("LINE_GRAPH_EMPTY".to_string()); }
+        if line_attr_diag.fam_source_count == 0 { miss_reasons.push("LINE_FAM_SOURCE_EMPTY".to_string()); }
+        if line_semantic_pack_status == "invalid" {
+            miss_reasons.push(line_semantic_pack_error.clone().unwrap_or_else(|| "LINE_SEMANTIC_PACK_INVALID".to_string()));
+        }
+    } else {
+        if !has_index { miss_reasons.push("SUBSTATION_INDEX_EMPTY".to_string()); }
+        if ifc_models_count == 0 { miss_reasons.push("IFC_MODEL_EMPTY".to_string()); }
+        if ifc_entry_count == 0 { miss_reasons.push("IFC_ENTRY_EMPTY".to_string()); }
+        if !missing_cache_paths.is_empty() {
+            miss_reasons.push(format!("IFC_CACHE_MISSING:{}", missing_cache_paths.len()));
+        }
+        if !geometry_cache_version_match { miss_reasons.push("GEOMETRY_CACHE_VERSION_MISMATCH".to_string()); }
+    }
 
     Ok(ProjectCacheDiagnostic {
         project_id: project.0,
@@ -5361,6 +5589,17 @@ pub fn get_project_cache_diagnostic(
         stored_parser_version: project.6.clone(),
         current_parser_version: PARSER_VERSION.to_string(),
         parser_version_match,
+        stored_line_parser_version,
+        current_line_parser_version: LINE_PARSER_VERSION.to_string(),
+        line_parser_version_match,
+        stored_substation_parser_version,
+        current_substation_parser_version: SUBSTATION_PARSER_VERSION.to_string(),
+        substation_parser_version_match,
+        cache_miss_reason: cache_miss_reason(miss_reasons),
+        line_semantic_pack_status,
+        line_semantic_pack_error,
+        geometry_cache_version_match,
+        current_geometry_cache_version: GEOMETRY_CACHE_VERSION.to_string(),
         valid,
         ifc_cache_files,
         fragment_cache_count,
@@ -5768,8 +6007,8 @@ pub fn save_geometry_refs(
     // 几何引用链写入成功后才提交变电缓存 ready 状态；任何前置索引或
     // 引用链失败都保持 parser_version=NULL，下次打开会完整重建。
     tx.execute(
-        "UPDATE gim_project SET parser_version = ?1, project_type = 'substation', updated_at_ms = ?2 WHERE id = ?3",
-        params![PARSER_VERSION, now, pid],
+        "UPDATE gim_project SET parser_version = ?1, substation_parser_version = ?2, project_type = 'substation', updated_at_ms = ?3 WHERE id = ?4",
+        params![PARSER_VERSION, SUBSTATION_PARSER_VERSION, now, pid],
     )
     .map_err(|e| format!("提交变电缓存版本失败: {}", e))?;
 
@@ -6286,9 +6525,11 @@ mod tests {
         fn setup_line_conn() -> Connection {
             let conn = Connection::open_in_memory().unwrap();
             conn.execute_batch(
-                "CREATE TABLE gim_project (
+            "CREATE TABLE gim_project (
                 id INTEGER PRIMARY KEY,
                 parser_version TEXT,
+                line_parser_version TEXT,
+                substation_parser_version TEXT,
                 project_type TEXT
             );
             CREATE TABLE powerline_cbm_node (
@@ -6463,6 +6704,105 @@ mod tests {
             // 新表达式（修复后 validate_gim_cache is_line 分支）
             let new_valid = parser_version_match && line_cbm_node_count > 0 && fam_source_count > 0;
             assert!(new_valid, "修复后：无几何标记不应阻止线路缓存命中");
+        }
+
+        #[test]
+        fn domain_versions_are_isolated_and_legacy_line_versions_migrate() {
+            // 变电 domain 版本升级不应改变线路版本判断；v21/v22 共享字段
+            // 的线路缓存仍视为当前线路缓存，避免无意义重建。
+            assert!(super::super::parser_domain_version_matches(
+                Some(super::super::LINE_PARSER_VERSION),
+                Some("gim-parser-v22"),
+                super::super::LINE_PARSER_VERSION,
+                super::super::LEGACY_LINE_PARSER_VERSIONS,
+            ));
+            assert!(super::super::parser_domain_version_matches(
+                None,
+                Some("gim-parser-v21"),
+                super::super::LINE_PARSER_VERSION,
+                super::super::LEGACY_LINE_PARSER_VERSIONS,
+            ));
+            assert!(!super::super::parser_domain_version_matches(
+                Some("gim-substation-parser-v21"),
+                Some("gim-parser-v22"),
+                super::super::SUBSTATION_PARSER_VERSION,
+                super::super::LEGACY_SUBSTATION_PARSER_VERSIONS,
+            ));
+        }
+
+        #[test]
+        fn substation_domain_upgrade_does_not_invalidate_line_cache() {
+            // 仅变电语义版本变化时，线路自己的 domain 仍然命中；共享旧列
+            // 即使记录了一个未来的变电版本，也不能让线路缓存失效。
+            let line_matches = super::super::parser_domain_version_matches(
+                Some(super::super::LINE_PARSER_VERSION),
+                Some("gim-substation-parser-v23"),
+                super::super::LINE_PARSER_VERSION,
+                super::super::LEGACY_LINE_PARSER_VERSIONS,
+            );
+            assert!(line_matches);
+
+            // 变电 domain 自己升级则应失配并触发变电重建，两个判断彼此独立。
+            let substation_matches = super::super::parser_domain_version_matches(
+                Some("gim-substation-parser-v22"),
+                Some("gim-substation-parser-v22"),
+                "gim-substation-parser-v23",
+                &["gim-parser-v22"],
+            );
+            assert!(!substation_matches);
+        }
+
+        #[test]
+        fn line_domain_upgrade_does_not_invalidate_substation_cache() {
+            // 仅线路语义版本变化时，变电 domain 仍然命中；线路版本不应
+            // 通过旧 parser_version 字段误伤 IFC/几何缓存。
+            let substation_matches = super::super::parser_domain_version_matches(
+                Some(super::super::SUBSTATION_PARSER_VERSION),
+                Some("gim-line-parser-v2"),
+                super::super::SUBSTATION_PARSER_VERSION,
+                super::super::LEGACY_SUBSTATION_PARSER_VERSIONS,
+            );
+            assert!(substation_matches);
+
+            let line_matches = super::super::parser_domain_version_matches(
+                Some("gim-line-parser-v1"),
+                Some("gim-line-parser-v1"),
+                "gim-line-parser-v2",
+                super::super::LEGACY_LINE_PARSER_VERSIONS,
+            );
+            assert!(!line_matches);
+        }
+
+        #[test]
+        fn cache_miss_reason_is_diagnosable_and_stable() {
+            let reason = super::super::cache_miss_reason(vec![
+                "LINE_PARSER_VERSION_MISMATCH:gim-parser-v21 -> gim-line-parser-v1".into(),
+                "LINE_SEMANTIC_PACK_INVALID".into(),
+            ]);
+            assert_eq!(
+                reason.as_deref(),
+                Some("LINE_PARSER_VERSION_MISMATCH:gim-parser-v21 -> gim-line-parser-v1; LINE_SEMANTIC_PACK_INVALID")
+            );
+            assert_eq!(super::super::cache_miss_reason(Vec::new()), None);
+        }
+
+        #[test]
+        fn line_invalidation_does_not_clear_substation_domain_version() {
+            let conn = setup_line_conn();
+            insert_project(&conn, 1, Some(PARSER_VERSION));
+            conn.execute(
+                "UPDATE gim_project SET line_parser_version = ?1, substation_parser_version = ?2 WHERE id = 1",
+                rusqlite::params![super::super::LINE_PARSER_VERSION, super::super::SUBSTATION_PARSER_VERSION],
+            ).unwrap();
+            let tx = conn.unchecked_transaction().unwrap();
+            invalidate_line_parser_version(&tx, 1).unwrap();
+            tx.commit().unwrap();
+            let (line, substation): (Option<String>, Option<String>) = conn.query_row(
+                "SELECT line_parser_version, substation_parser_version FROM gim_project WHERE id = 1",
+                [], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).unwrap();
+            assert_eq!(line, None);
+            assert_eq!(substation.as_deref(), Some(super::super::SUBSTATION_PARSER_VERSION));
         }
     }
 

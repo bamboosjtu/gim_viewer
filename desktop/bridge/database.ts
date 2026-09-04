@@ -727,6 +727,14 @@ export interface GimCacheValidation {
   stored_parser_version: string | null;
   current_parser_version: string;
   parser_version_match: boolean;
+  stored_line_parser_version: string | null;
+  current_line_parser_version: string;
+  line_parser_version_match: boolean;
+  stored_substation_parser_version: string | null;
+  current_substation_parser_version: string;
+  substation_parser_version_match: boolean;
+  /** 缓存无效时的可诊断原因；有效时为 null。 */
+  cache_miss_reason: string | null;
   valid: boolean;
   /** v4: 工程类型（substation / transmission_line / hybrid / unknown），决定缓存校验分支 */
   project_type: string | null;
@@ -814,6 +822,20 @@ export interface ProjectCacheDiagnostic {
   stored_parser_version: string | null;
   current_parser_version: string;
   parser_version_match: boolean;
+  stored_line_parser_version: string | null;
+  current_line_parser_version: string;
+  line_parser_version_match: boolean;
+  stored_substation_parser_version: string | null;
+  current_substation_parser_version: string;
+  substation_parser_version_match: boolean;
+  cache_miss_reason: string | null;
+  /** v21: semantic source 状态：valid / missing / invalid */
+  line_semantic_pack_status: 'valid' | 'missing' | 'invalid' | string;
+  /** v21: pack/index 整体损坏时的可诊断错误前缀 */
+  line_semantic_pack_error: string | null;
+  /** v6: 变电 GLB 几何缓存版本/manifest 是否匹配 */
+  geometry_cache_version_match: boolean;
+  current_geometry_cache_version: string;
   valid: boolean;
 
   ifc_cache_files: IfcCacheFileDiagnostic[];
@@ -1059,7 +1081,8 @@ export interface LineDevPropertyPayload {
  *
  * 生产线路首次导入路径应调用此命令，不得再单独调用 saveLineGraph。
  * 事务内：删除 6 张表旧数据 → 插入 graph + fam + dev → 更新
- * parser_version = PARSER_VERSION（当前 gim-parser-v22）, project_type = transmission_line。
+ * line_parser_version = LINE_PARSER_VERSION（当前 gim-line-parser-v1），同时保留
+ * parser_version 作为旧库兼容/诊断字段，project_type = transmission_line。
  */
 /** 属性分块大小：每批 IPC 传输的记录数（acc-plan P1-2） */
 const LINE_ATTR_CHUNK_SIZE = 4000;
@@ -1071,7 +1094,7 @@ const LINE_ATTR_CHUNK_SIZE = 4000;
  * save_line_project_finish）：
  * 1. begin：清空旧表 + 写入 graph（4 张表）
  * 2. attrs_chunk × N：每批 ATTR_CHUNK_SIZE 条，fam/dev 同批交错传输
- * 3. finish：写入 parser_version（提交点），缓存生效
+ * 3. finish：写入 line_parser_version（提交点），缓存生效
  *
  * 中途失败时版本戳未更新 → 缓存判定无效 → 下次打开完整重建。
  *

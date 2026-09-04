@@ -276,13 +276,15 @@ Canvas overlay 委托底图层的 `project()` 方法，两种模式共用同一�
 
 线路工程缓存命中条件（`validate_gim_cache`）：
 
-- parser_version 匹配
+- `line_parser_version` 匹配当前 `LINE_PARSER_VERSION`（当前为 `gim-line-parser-v1`）；旧库中仅有 `parser_version` 时按 v21/v22 兼容迁移
 - file_size 匹配
 - `line_cbm_node_count > 0` 且 `line_fam_source_count > 0`（`project_type = 'transmission_line'`）
 
+`parser_version` 仍保留为兼容/诊断字段，但不再作为线路缓存的唯一失效依据；变电 `SUBSTATION_PARSER_VERSION` 升级不会使线路图、属性或 semantic pack 失效。
+
 ### 首次导入事务
 
-`save_line_project_cache` 是统一事务命令：线路图（6 张表）+ FAM/DEV 属性在同一事务内写入，成功后设置 `parser_version = PARSER_VERSION`（当前为 `gim-parser-v22`，详见 `desktop/src-tauri/src/db.rs`；版本变更使旧缓存自动失效以触发完整重建）。
+`save_line_project_cache` 是统一事务命令：线路图（6 张表）+ FAM/DEV 属性在同一事务内写入，成功后设置 `line_parser_version = LINE_PARSER_VERSION`（当前为 `gim-line-parser-v1`），同时写入旧 `parser_version` 供兼容诊断。线路 domain 版本独立于变电 `SUBSTATION_PARSER_VERSION`，版本变更只失效对应工程域。
 
 ### 诊断键空间
 

@@ -38,4 +38,22 @@ describe('detectGimProjectType', () => {
     expect(result.type).toBe('transmission_line');
     expect(cbm.text).toHaveBeenCalledTimes(1);
   });
+
+  it('已有 IFC 且无线路目录时不扫描变电小文件文本', async () => {
+    const cbm = lazyTextFile('ENTITYNAME=F1System');
+    const dev = lazyTextFile('SYMBOLNAME=主变');
+    const fam = lazyTextFile('额定容量=100');
+    const ifc = { size: 1024, text: vi.fn(async () => 'ISO-10303-21;') } as unknown as File;
+    const result = await detectGimProjectType(new Map([
+      ['CBM/project.cbm', cbm],
+      ['DEV/main.dev', dev],
+      ['FAM/main.fam', fam],
+      ['CBM/main.ifc', ifc],
+    ]));
+
+    expect(result.type).toBe('substation');
+    expect(cbm.text).not.toHaveBeenCalled();
+    expect(dev.text).not.toHaveBeenCalled();
+    expect(fam.text).not.toHaveBeenCalled();
+  });
 });

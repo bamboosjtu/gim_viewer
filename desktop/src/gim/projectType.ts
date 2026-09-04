@@ -220,6 +220,20 @@ export async function detectGimProjectType(
     textFilesToScan.length = 0;
   }
 
+  // 变电 native manifest-only 解压只携带文件元数据；如果这里继续扫描
+  // 每个 CBM/DEV/FAM 的 text()，类型识别会退化成数千次
+  // read_cached_entry IPC。已有 IFC 且没有 PascalCase 线路目录时，IFC
+  // 本身已经是充分的变电信号，跳过这些低价值文本读取。保留带线路目录
+  // 的 hybrid 走原有信号扫描，避免误把混合工程判成纯变电。
+  const canonicalSubstationLayout = hasIfc
+    && lineCbmDirCount === 0
+    && lineDevDirCount === 0
+    && lineModDirCount === 0
+    && linePhmDirCount === 0;
+  if (canonicalSubstationLayout) {
+    textFilesToScan.length = 0;
+  }
+
   // 扫描文本文件（KEY=VALUE 级别匹配，避免裸子串误判）
   for (const { file } of textFilesToScan) {
     let text: string;

@@ -17,7 +17,7 @@
 | 3D 点击拾取 + 高亮 + 相机定位 | ✅ 已实现 | `desktop/src/viewer/selection.ts` / `highlight.ts` / `camera.ts` |
 | 层级树↔3D 联动 | ✅ 已实现 | `desktop/src/services/nodeInteractionService.ts` |
 | 属性面板（CBM/FAM/DEV/IFC + 语义字典） | ✅ 已实现 | `desktop/src/ui/propsDrawer.ts` / `propertyDictionary.ts` |
-| SQLite 缓存（索引、属性、Fragments、几何引用链） | ✅ 已实现 | `desktop/src-tauri/src/db.rs`（当前 `PARSER_VERSION=gim-parser-v22`） |
+| SQLite 缓存（索引、属性、Fragments、几何引用链） | ✅ 已实现 | `desktop/src-tauri/src/db.rs`（变电 `SUBSTATION_PARSER_VERSION=gim-substation-parser-v22`；线路使用独立 domain） |
 | 缓存命中短路 | ✅ 已实现 | `desktop/src/services/openGimService.ts` / `gimIndexRestoreService.ts` |
 | IFC/DEV/PHM/MOD/STL 本地磁盘缓存 | ✅ 已实现 | `desktop/src/services/gimExtractedCacheService.ts` |
 | 诊断快捷键（Ctrl+Shift+D） | ✅ 已实现 | `desktop/src/services/diagnosticSummaryService.ts` |
@@ -37,7 +37,7 @@
 
 ### 当前版本关键改动
 
-- `PARSER_VERSION` 当前为 `gim-parser-v22`；本版本引入 IFC Spatial Semantic Core selective/two-pass scan：Pass1 只保留空间/导航对象、必要 IFCREL、单位并收集 placement 候选偏移，Pass2 只物化实际引用的 placement 闭包；属性集、工程量、材质、分类、类型和分组不进入启动索引。几何 GLB 缓存版本为 `geometry-cache-v5-dev-status`。任一版本变化都会使旧缓存失效并触发重建。Fragments 缓存另绑定源 GIM SHA-256 与 `fragments-cache-v6` 运行时版本，旧记录缺少源 SHA 时视为失效。
+- 变电语义缓存使用独立的 `SUBSTATION_PARSER_VERSION=gim-substation-parser-v22`；线路使用 `LINE_PARSER_VERSION=gim-line-parser-v1`。旧 `PARSER_VERSION=gim-parser-v22` 字段仅作兼容/诊断，并按工程类型迁移，不会因变电 Semantic Core 升级而误使线路缓存失效。本版本引入 IFC Spatial Semantic Core selective/two-pass scan：Pass1 只保留空间/导航对象、必要 IFCREL、单位并收集 placement 候选偏移，Pass2 只物化实际引用的 placement 闭包；属性集、工程量、材质、分类、类型和分组不进入启动索引。几何 GLB 缓存版本为 `geometry-cache-v5-dev-status`，与语义版本独立。Fragments 缓存另绑定源 GIM SHA-256 与 `fragments-cache-v6` 运行时版本，旧记录缺少源 SHA 时视为失效。
 - 首次打开 GIM 时，通过 `cacheGeometryFiles` 缓存 DEV/PHM/MOD/STL 文件到 `app_data_dir/extracted/{projectId}/`（复用 `writeCacheFile`，沿用路径遍历防护）。
 - IFC 加载完成后自动启动渐进式 DEV GLB 管线（`progressiveGeometryService`），按 DEV 粒度一次解析、落盘并逐实例渲染 IFC 之外的 MOD/STL；用户无需逐节点点击才能看到几何。
 - 每个 unique DEV 在 `_manifest.json` 中记录 `status=glb|empty` 与字节数。缓存命中场景（`currentFiles=null`）先按 manifest 建立 DEV→CBM placement 映射，以 GIMR 二进制 envelope 分批读取 GLB；同一 DEV 的 GLB 最多读取一次，`empty` 不读取也不触发回退，随后每个 placement 独立加载并应用 CBM 矩阵。manifest 缺失、GLB 大小/header 不符、真实读取或解析失败时才整体回退原始 MOD/STL。

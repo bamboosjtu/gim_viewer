@@ -303,20 +303,24 @@ CREATE TABLE substation_fragment_cache (
 
 详见 §4 未来：Fragments 二进制预编译缓存。
 
-### 2.7 PARSER_VERSION 失效机制
+### 2.7 解析缓存版本域
 
-- 常量定义：`desktop/src-tauri/src/db.rs` 中 `pub const PARSER_VERSION: &str = "gim-parser-v22"`
-- 写入时机：首次导入或重建索引时，`save_gim_index` / `save_line_project_cache` 事务内更新 `gim_project.parser_version`
-- 校验时机：`validate_gim_cache` 检查 `stored_parser_version == PARSER_VERSION`
-- 失效行为：版本不匹配 → 缓存无效 → 完整解压 → `save_gim_index` 先删后插全部表
-- 升级触发：解析逻辑变更（如 CBM 字段映射调整、新表新增）时手动升级 `PARSER_VERSION`
+解析缓存从 v22 起按工程类型隔离：
+
+- `LINE_PARSER_VERSION = gim-line-parser-v1`：线路 graph、FAM/DEV 属性和 semantic pack。
+- `SUBSTATION_PARSER_VERSION = gim-substation-parser-v22`：变电 CBM/FAM/DEV、IFC Spatial Semantic 和关系索引。
+- `PARSER_VERSION = gim-parser-v22` 保留为旧库兼容/诊断字段，不再单独决定线路或变电缓存是否有效。
+
+写入时机：首次导入或重建索引时，线路事务更新 `line_parser_version`，变电事务更新 `substation_parser_version`；旧共享字段同时写入以兼容旧版本诊断。校验时 `validate_gim_cache` 按 `project_type` 选择对应 domain。旧库只有共享字段时，明确识别为线路且版本为 v21/v22 的记录迁移到线路域，变电 v22 记录迁移到变电域；无法识别工程类型的记录不猜测域并按 miss 处理。
+
+失效行为：对应 domain 版本不匹配 → 缓存无效 → 完整解压/重建对应工程索引；变电 domain 升级不会触发线路缓存重建，反之亦然。
 
 ### 2.8 缓存校验逻辑（validate_gim_cache）
 
 按 `project_type` 分支校验：
 
 **变电工程（substation）**：
-- `parser_version_match`
+- `substation_parser_version_match`
 - `cbm_nodes_count > 0` && `ifc_models_count > 0` && `ifc_entry_count > 0`
 - `cached_ifc_count == ifc_entry_count`（所有 IFC 磁盘缓存文件存在且大小匹配）
 - `missing_cache_paths.is_empty()`
@@ -330,7 +334,7 @@ Fragments 运行时缓存另需同时满足：
   （记录的 `source_ifc_size` 仅作辅助诊断）。
 
 **线路工程（transmission_line）**：
-- `parser_version_match`
+- `line_parser_version_match`
 - `line_cbm_node_count > 0`
 - `line_fam_source_count > 0`（v5 新增，FAM 属性必须存在）
 

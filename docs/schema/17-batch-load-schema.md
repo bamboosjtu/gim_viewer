@@ -11,7 +11,7 @@
 
 > **历史状态（2026-07-17）**：本文同时包含设计基线与实施历史。方案 B 静态合并、DEV 粒度 GLB 缓存及 marker 版本失效机制已经实现；当时 `PARSER_VERSION=gim-parser-v14`、`GEOMETRY_CACHE_VERSION=geometry-cache-v2-stretched-body`。Worker 化解析、SQLite 几何缓存表和 `.gimc` 预编译容器仍未实现。§1 的“现状”与 §15 早期“待实施”表应按本说明及 [18c](18c-experiment-mod-to-gltf-cache.md) 的 v2 记录理解。
 >
-> **当前状态（2026-09-04）**：源码以 `PARSER_VERSION=gim-parser-v22`、`GEOMETRY_CACHE_VERSION=geometry-cache-v5-dev-status` 为准；DEV 粒度 GLB 管线、每 DEV `glb|empty` manifest、unique DEV 二进制 batch warm 回放、PHM 颜色覆盖、缓存命中回放、属性来源路由、线路 Parser Worker 与 semantic pack，以及变电 IFC Spatial Semantic Core selective/two-pass scan 已落地。Worker 化 IFC 解析、SQLite 几何缓存表、InstancedMesh 装配及 `.gimc` 预编译容器仍是长期路线，本文旧版本号仅作演进记录。
+> **当前状态（2026-09-04）**：解析缓存按工程域隔离：线路 `LINE_PARSER_VERSION=gim-line-parser-v1`，变电 `SUBSTATION_PARSER_VERSION=gim-substation-parser-v22`；旧 `PARSER_VERSION=gim-parser-v22` 仅作兼容/诊断。`GEOMETRY_CACHE_VERSION=geometry-cache-v5-dev-status` 独立于语义版本。DEV 粒度 GLB 管线、每 DEV `glb|empty` manifest、unique DEV 二进制 batch warm 回放、PHM 颜色覆盖、缓存命中回放、属性来源路由、线路 Parser Worker 与 semantic pack，以及变电 IFC Spatial Semantic Core selective/two-pass scan 已落地。Worker 化 IFC 解析、SQLite 几何缓存表、InstancedMesh 装配及 `.gimc` 预编译容器仍是长期路线，本文旧版本号仅作演进记录。
 
 ## 1. 问题背景
 
@@ -638,12 +638,15 @@ for (let j = 0; j < batch.length; j++) {
 ### 7.3 缓存版本化策略
 
 ```text
-PARSER_VERSION          = 'gim-parser-v22'        // 当前，GIM 解析层（v1→v22 详见下方演进历史）
+LINE_PARSER_VERSION     = 'gim-line-parser-v1'   // 线路 graph/FAM/DEV/semantic pack
+SUBSTATION_PARSER_VERSION = 'gim-substation-parser-v22' // 变电 CBM/IFC Spatial Semantic
+PARSER_VERSION          = 'gim-parser-v22'        // 旧共享字段，仅兼容/诊断
 FRAGMENTS_CACHE_VERSION = 'fragments-cache-v6'   // 基础版本；运行时另拼接 fragments/web-ifc 实际版本
 GEOMETRY_CACHE_VERSION  = 'geometry-cache-v5-dev-status' // 当前，DEV 粒度 GLB + empty manifest 与 PHM 颜色覆盖
 
 失效规则：
-  - GIM 重解压（PARSER_VERSION 变）→ GEOMETRY_CACHE_VERSION 同步失效
+  - 对应语义 domain 版本变更 → 仅该工程域的索引/semantic pack 失效
+  - GIM 重解压或几何逻辑变更 → 按 GEOMETRY_CACHE_VERSION 独立失效
   - MOD 解析逻辑变更（如 primitive 参数提取规则改）→ GEOMETRY_CACHE_VERSION 单独递增
   - DEV manifest/批读协议变更（`status=glb|empty`、GLB header/size 校验）→ GEOMETRY_CACHE_VERSION 单独递增
   - InstancedMesh 装配逻辑变更 → 不影响缓存（装配是运行时）
