@@ -560,7 +560,8 @@ function isGeometryContextValid(
  * 修改 BufferGeometry，暂不共享 Three geometry）。
  *
  * 数学等价性：两次 applyPlacementTransformToSceneUnits（各 ×0.001）
- * 等价于一次完整应用（CBM × DEV × PHM，×0.001），详见 18c §10.4。
+ * 等价于一次完整应用（CBM × DEV × PHM，×0.001）。详见
+ * docs/schema/17-batch-load-schema.md。
  *
  * @returns loaded=true 表示 manifest 结构可用，成功/empty DEV 与失败 DEV
  * 均已按粒度归类；loaded=false 仅表示 manifest/工程级前置条件不可用，

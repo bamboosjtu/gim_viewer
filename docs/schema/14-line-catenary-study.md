@@ -4,18 +4,14 @@
 >
 > - **demo-line 全量静态分析证据与字段语义确认结论**已沉淀至 [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md)
 > - **已证实的结论**已归纳至 [../gim_powerline.md](../gim_powerline.md) §11 WIRE 拓扑分类与悬链线候选字段
-> - **仍待决策的暂缓项**已归纳至 [../dev-log.md](../dev-log.md) §3 悬链线待决策项
+> - **仍待决策的暂缓项**统一归纳至 [../dev-log.md](../dev-log.md)
 > - 本文档聚焦研究方法、审计服务 API 与决策路径，不重复结论性事实
 >
 > 与 [13-geometry-ir-schema.md](13-geometry-ir-schema.md) 的边界：13号文档定义几何 IR 的统一 schema（含 `line-text-mod` kind），14号文档聚焦线路 WIRE 节点悬链线候选字段的研究方法与待核验问题，两者互不重叠。
 
-> **历史状态（2026-07-17）**：样本研究和“工程语义未确认”的结论仍有效，但代码已存在默认启用的实验性示意悬链线（`ENABLE_CATENARY=true`）。当前实现以 `KVALUE × L²` 或 `3% × L` 估算弧垂，在屏幕 Y 方向下移，未使用 MATRIX0 挂点偏移/BLHA 高程差，且 hit-test 仍按直线弦段计算。它不满足本文“默认禁用、直线段为默认”和“不要把未确认语义写死”的建议，应视为待收口的实验实现，而非工程语义悬链线。
-
-> **当前状态（2026-08-30）**：线路 MOD 四类 parser 已由 `desktop/src/services/lineModRuntimeService.ts` 接入属性面板，用于 HNum 形状、Bolt 表格及 Tower_Device/WIRE 参数展示。线路产品只保留“模型”地图工作区，不创建独立线路 3D；地图上的 `ENABLE_CATENARY=true` 仍是视觉示意，不代表工程语义确认。
-
-> **2026-08-24 样本库变更**：原 demo-line（某500kV线路）已退出 demo/ 目录。本文方法论与审计流程仍有效，
-> 但其中基于 demo-line 的样本证据应标注为"已退出样本的历史证据"；跨样本悬链线验证应在当前
-> 6 个在册线路样本上重新执行（待办）。
+> 当前实现：线路 MOD 四类 parser 已由 `desktop/src/services/lineModRuntimeService.ts` 接入属性面板，
+> 用于 HNum 形状、Bolt 表格及 Tower_Device/WIRE 参数展示。线路产品只保留“模型”地图工作区，
+> 不创建独立线路 3D；`ENABLE_CATENARY=true` 仅表示视觉示意，不代表工程语义确认。
 
 ---
 

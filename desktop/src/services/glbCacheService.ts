@@ -5,18 +5,18 @@
  * 逐 DEV 调用：序列化 → 落盘 → 逐 CBM 实例渲染一体化。
  * 二次打开时可直接用 GLTFLoader 加载 .glb，跳过全部 XML 解析。
  *
- * 关键设计（v2 变更，详见 18c 文档 §10）：
+ * 关键设计（当前 DEV 粒度缓存契约见 docs/schema/17-batch-load-schema.md）：
  * - 按 DEV 文件粒度缓存（非按 MOD 文件粒度）
  *   理由：DEV 粒度大幅减少加载次数（5982 → 数百）
  * - 序列化时烘焙 DEV 内部所有 transform（DEV × PHM × SUBDEVICE × Entity + mm→m）
  * - CBM 累积矩阵运行时应用（同一 DEV 可被多 CBM 引用）
  * - 数学等价性：两次 applyPlacementTransformToSceneUnits（各 ×0.001）
- *   等价于一次完整应用（CBM × DEV × PHM，×0.001），详见 18c §10.4
+ *   等价于一次完整应用（CBM × DEV × PHM，×0.001）
  *
  * 缓存路径：app_data_dir/glbcache/{project_id}/{devPath}.glb
  * 版本化：通过 GEOMETRY_CACHE_VERSION 失效
  *
- * 关联文档：docs/schema/18c-experiment-mod-to-gltf-cache.md
+ * 关联文档：docs/schema/17-batch-load-schema.md、docs/gim_substation.md
  */
 
 import * as THREE from 'three';

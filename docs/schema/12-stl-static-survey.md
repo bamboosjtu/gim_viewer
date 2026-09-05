@@ -1,10 +1,10 @@
 # STL 静态角色与 MOD 关系分析
 
-> 本文档回答 Round 8 的 6 个关键问题：STL 是 ASCII 还是 binary、是否被 PHM 引用、对应哪些 CBM entityName、与 MOD 的关系（互斥 / 并列 / fallback）、变电中 XML MOD 与 STL 是否服务不同设备、线路中 STL 是否主要服务特殊构件。
+> 本文沉淀 STL 的格式、PHM 引用、CBM entityName 归属以及与 MOD 的关系，作为当前解析和渲染边界的样本证据。
 >
 > 数据来源：对 demo-line / demo-line1 / demo-substation 三样本的全量扫描（无抽样）。分析脚本见文末附录 A。
 
-> **2026-08-24 十样本复核**（证据：`_generated/<sid>/transform-stl.csv`，脚本 `desktop/scripts/gim_survey/transform_stl.py`）：
+> 十样本证据（`_generated/<sid>/transform-stl.csv`，脚本 `desktop/scripts/gim_survey/transform_stl.py`）：
 >
 > **保持成立**：
 > - STL 覆盖率 100%（被 PHM 引用）且**零复用**（每个 STL 恰被 1 个 PHM 引用 1 次），10 样本全部复现。
@@ -37,7 +37,7 @@
 > - line03 特例：其 DEV 缺 SYMBOLNAME 字段，设备类型维度退化为 DEVICETYPE
 >   （CONDUCTOR/OPGW/GROUNDWIRE 直接出现在 MOD 关联维度），字段兜底链需保留。
 >
-> **2026-07-17 复核**：直接按 binary STL 长度公式 `84 + 50 × triangleCount` 扫描三组样本，`demo-line=181/750304 triangles`、`demo-line1=82/238194`、`demo-substation=1803/834874`，全部为 binary STL；文件数、三角形 min/max/avg 和 header 特征均与本文一致。
+> 早期样本的 binary STL 长度公式 `84 + 50 × triangleCount` 仍适用于对应文件；新增 ASCII STL 时由 loader 的内容检测分支处理。
 
 ## 1. 分析目标与范围
 
@@ -336,97 +336,36 @@
 
 ---
 
-## 7. 浏览器实现影响
+## 7. 当前实现影响
 
-### 7.1 加载策略建议
+样本证据对应的运行时处理如下：
 
-```text
-线路样本（demo-line / demo-line1）：
-  - Wire_Device → 直接加载 STL（无 MOD 选择，无重复风险）
-  - Tower_Device → 检查 SOLIDMODEL 扩展名：
-      *.stl → 加载 STL（杆塔整体几何）
-      *.mod → 按 MOD kind 加载（TEXT_HNUM 杆塔骨架 / TEXT_KEY_VALUE+SECTION_KV 参数）
-  - CROSS → 加载 TEXT_POINT_LINE（经纬度点线，地图叠加）
-  - WIRE → 加载 TEXT_KEY_VALUE（导线参数，属性面板）
+| 场景 | 当前处理 |
+|---|---|
+| 变电 MOD | XML primitive 进入 Geometry IR，由 DEV GLB 管线渐进编译；未知类型保留弱 schema 或空结果。 |
+| 变电 STL | `stlLoader.ts` 同时识别 binary/ASCII；由 DEV GLB 管线承载，PHM 颜色和变换在实例级应用。 |
+| 线路 MOD | CROSS/WIRE/Tower_Device 等四类文本族按需供属性面板消费，线路不创建独立 3D。 |
+| 线路 STL | 来源链可追溯，属性面板提供可读定位；地图仍以塔位/导线/跨越物表达。 |
+| STL 与 MOD 并存 | 是否同时渲染由引用链和 parser 结果决定，不按文件数量假定冗余；单个来源失败时由上层几何管线按 DEV 粒度隔离。 |
 
-变电样本（demo-substation）：
-  - F4System → 检查 SOLIDMODEL 扩展名：
-      *.stl only → 加载 STL（复杂几何设备）
-      *.mod only → 加载 XML_WITH_ENTITIES（参数化 primitive）
-      *.stl + *.mod → 优先加载 XML_WITH_ENTITIES（已实现）+ 评估是否需要 STL 补充
-  - PARTINDEX → 加载 XML_WITH_ENTITIES（仅 10 个节点有 STL，可暂不处理 STL 路径）
-```
-
-### 7.2 优先级建议
-
-| 决策点 | 推荐 | 理由 |
-| ------ | ---- | ---- |
-| 线路优先解析 | **MOD 优先**（CROSS/WIRE/Tower_Device-参数化分支） | MOD 已可解析，覆盖 90% 节点 |
-| 线路 Wire_Device | **STL 直接加载** | 无 MOD 替代，必须解析 STL |
-| 线路 Tower_Device-STL 分支 | **延后**（M5+） | STL 平均 187 KB，加载成本可控但需 Three.js STLLoader |
-| 变电优先解析 | **MOD 优先**（XML_WITH_ENTITIES 已实现） | 覆盖 96.9% PHM |
-| 变电 STL-only 节点 | **延后**（30 个 F4System 节点） | 占比 0.7%，可在后期补齐 |
-| 变电 STL+MOD 并存节点 | **暂不加载 STL** | 86 个 PHM 已有 MOD，STL 可能是冗余备份 |
-
-### 7.3 重复渲染风险评估
-
-```text
-线路样本：无重复风险
-  - PHM 级互斥（0 PHM 同时有 STL 和 MOD）
-  - 同一节点只会显示一种几何来源
-
-变电样本：存在潜在重复风险
-  - 86 个 PHM 同时有 STL 和 MOD
-  - 若 STL 与 MOD 描述同一几何的不同表达：可能重复渲染同一构件
-  - 若 STL 与 MOD 描述 PHM 内不同部件（如 STL = 外壳，MOD = 内部零件）：可同时渲染
-  - 风险评估需结合 PHM TRANSFORMMATRIX 与 STL/MOD 的 bounding box 比对
-  - 当前阶段建议：**仅加载 MOD，跳过 STL**（避免重复风险，可后期补齐）
-
-STL/MOD 同 PHM 是否描述同一几何：当前不能得出结论
-  - 需要采样 86 个 PHM 的 STL/MOD 几何 bounding box 比对
-  - 需要检查 STL 三角面是否对应 MOD primitive 的并集
-  - 本轮不进入几何解析，保留为后续待办
-```
-
-### 7.4 Fallback 路径评估
-
-```text
-线路样本：不需要 STL↔MOD fallback
-  - PHM 级互斥，MOD 解析失败不会回退到 STL
-  - 失败处理：直接报错，提示用户该节点几何无法显示
-
-变电样本：可考虑 STL fallback
-  - 86 个 PHM 有 STL+MOD，若 XML primitive 解析失败可尝试 STL
-  - 但 fallback 增加复杂度，建议 MVP 阶段不做
-  - 30 个 STL-only 节点必须有 STL 加载器才能显示
-```
-
-### 7.5 与研究启动时约束的关系（历史记录）
-
-- 当时的项目硬约束为："MVP 不实现悬链线、3D 线路、MOD 解析"
-- 当时本轮仅形成"加载策略建议"，不进入 STL 渲染实现
-- 该范围后续已调整；当前已存在 STL 加载与 DEV 粒度 GLB 缓存，不能再把本节当作实现现状
+STL 的 binary/ASCII 判定、PHM 引用率和设备归属仍是样本证据；产品待办不在本文件维护。
 
 ---
 
-## 8. 当前不能得出的结论
+## 8. 样本边界
 
 ```text
-1. 86 个变电 PHM 中 STL 与 MOD 是否描述同一几何
-   - 需采样 86 个 PHM 的 STL 三角面与 MOD primitive 进行 bounding box 比对
-   - 若 bounding box 完全重合 → STL 是 MOD 的备选表达（重复风险高）
-   - 若 bounding box 不重合 → STL 描述 MOD 未覆盖的部件（可同时渲染）
-   - 本轮不进入几何解析，保留为后续待办
+1. 变电 PHM 中 STL 与 MOD 是否描述同一几何，不能仅由扩展名或引用数量判断；需结合实际几何和工程语义核验。
 
 2. Wire_Device STL 是否为标准金具模型
    - demo-line 与 demo-line1 的 Wire_Device STL 大小高度一致（max 11 KB）
    - 推测为同一规格的金具（如绝缘子串、联金、联板），但未对照金具型号表
-   - 需结合上游 CBM 的金具名称字段验证
+    - 需结合上游 CBM 的金具名称字段验证；当前只作为样本观察。
 
 3. Tower_Device 中 STL 分支与 MOD 分支是否描述同类塔型
    - 38% Tower_Device 用 MOD（参数化），62% 用 STL（整体几何）
    - 是否同一塔型可有两种表达（设计师选择），还是不同塔型只能选一种？
-   - 需结合 CBM 的塔型字段（如 TOWER_TYPE / TOWER_HEIGHT）验证
+    - 需结合 CBM 的塔型字段（如 TOWER_TYPE / TOWER_HEIGHT）验证；当前地图不渲染独立塔体 STL。
 
 4. STL header 中 "name" 字符串的含义（仅 demo-substation）
    - 推测为导出工具的固定标识，但未对照导出工具源码
@@ -446,7 +385,7 @@ STL/MOD 同 PHM 是否描述同一几何：当前不能得出结论
    - 标准 binary STL 每个三角面含 12 个 float（normal + 3 vertices）+ 2 字节 attribute
    - 50 字节/三角面，含法向量
    - 但部分导出工具将法向量置零，需运行时重新计算
-   - 本轮未做 STL 内容解析，未验证法向量是否有效
+    - loader 可在需要时重新计算法向量，但法向量质量仍取决于源文件。
 ```
 
 ---
@@ -457,7 +396,7 @@ STL/MOD 同 PHM 是否描述同一几何：当前不能得出结论
 
 | 脚本 | 路径 | 用途 |
 | ---- | ---- | ---- |
-| stl-static-survey.ps1 | [skill scripts/stl-static-survey.ps1](../../.agents/skills/gim-sample-verification/scripts/stl-static-survey.ps1) | Round 8 主分析：STL 格式检测 + PHM 引用扫描 + CBM 上游溯源 |
+| stl-static-survey.ps1 | [skill scripts/stl-static-survey.ps1](../../.agents/skills/gim-sample-verification/scripts/stl-static-survey.ps1) | STL 格式检测 + PHM 引用扫描 + CBM 上游溯源 |
 
 ### A.2 执行命令
 
@@ -798,21 +737,17 @@ Top 5 合计 **32.88%**，Top 20 **全部为"柜"类设备**。
 - **F4System** 是 MOD 渲染的"主要承载实体"（一次设备主导，含全部 14 种 primitive）
 - **PARTINDEX** 多为设备级再聚合的几何副本，低样本 primitive 显著少于 F4System
 
-### 10.7 浏览器实现影响（更新）
+### 10.7 当前实现映射
 
-基于 §9 + §10 的设备类型分析结论，对 §7 浏览器实现建议做以下补充：
+基于设备类型分析，当前运行时采用以下分工：
 
 1. **变电工程渲染分工**：
-   - MOD 渲染一次设备（电容器/GIS/接地变/避雷器等，4179 CBM，参数化 primitive）
-   - STL 渲染二次柜细节（116 CBM，三角网格）
-   - IFC 渲染建筑/结构（IFCFILE 与 MOD 完全无关联）
+   - MOD 通过 Geometry IR 和 DEV GLB 管线承载参数化设备；STL 作为可选三角网格来源；IFC 负责空间/建筑构件。
 2. **线路工程渲染分工**：
    - MOD 渲染塔本体（TEXT_HNUM_COMMA_RECORD 文本格式族，详见 [11-line-mod-grammar.md](11-line-mod-grammar.md)）
-   - STL 渲染金具（绝缘子/间隔棒/防振锤，181/82 文件）
-3. **MOD 渲染入口**：按 primitive 类型分发到 Three.js 几何构造器（参考 [10-substation-mod-grammar.md](10-substation-mod-grammar.md) §6.4 已实现的强类型 schema）
-4. **STL 渲染优先级**：
-   - 变电：MVP 阶段可全部跳过（仅 116 CBM，占比 1.36%），优先加载 MOD 覆盖 100%
-   - 线路：金具 STL 不可跳过（线路样本 STL-only 100%，STL 是唯一几何来源）
+   - MOD 供塔位/导线/跨越物属性与 HNum 局部骨架预览；STL 只通过来源链追溯，不创建独立线路 3D。
+3. **MOD 渲染入口**：按 primitive 或文本格式分发到对应 parser 和 Geometry IR；未知记录保留弱 schema。
+4. **STL 入口**：`stlLoader.ts` 同时识别 binary/ASCII，变电由 DEV GLB 管线承载，线路由来源面板追溯。
 
 ### 10.8 线路样本（demo-line / demo-line1）MOD 设备类型分析
 
@@ -920,9 +855,9 @@ Top 5 合计 **32.88%**，Top 20 **全部为"柜"类设备**。
 - **parser 路径完全不同**：线路按 modKind 分发到 4 个文本 parser（[11-line-mod-grammar.md](11-line-mod-grammar.md) §7.3），变电按 primitiveType 分发到 14 个 Three.js 几何构造器（[10-substation-mod-grammar.md](10-substation-mod-grammar.md) §6.4）
 - **共同点**：分类命中率 100%，4 类 kind / 14 种 primitive 都与设备类型稳定单射对应
 
-### 10.10 浏览器实现影响（最终更新）
+### 10.10 当前消费边界
 
-基于 §10.1-§10.9 三样本完整分析，对 §7 浏览器实现建议做最终补充：
+基于设备类型分析，当前消费边界如下：
 
 1. **MOD parser 双轨制**（变电 + 线路完全独立）：
    - 变电：XML_WITH_ENTITIES → 14 种 primitive 强类型 schema（[10-substation-mod-grammar.md](10-substation-mod-grammar.md) §6.4）
@@ -932,10 +867,10 @@ Top 5 合计 **32.88%**，Top 20 **全部为"柜"类设备**。
    - TEXT_POINT_LINE → 渲染跨越点（地图叠加，CROSS 设备）
    - TEXT_SECTION_KV_RECORD → 属性面板展示螺栓表（BoltNum + BoltN 记录）
    - TEXT_KEY_VALUE → 属性面板展示塔基础参数 + 导线参数（按 key 大小写二分）
-   - STL → 渲染金具（绝缘子/间隔棒/防振锤，Wire_Device 100% STL-only）
+    - STL → 变电几何管线加载；线路仅提供来源追溯
 3. **变电工程渲染分工（最终）**：
    - MOD → 渲染一次设备（电容器/GIS/接地变/避雷器，4179 CBM，14 种 primitive）
-   - STL → 渲染二次柜细节（116 CBM，三角网格，MVP 可跳过）
+    - STL → 按 PHM 引用链加载三角网格，具体设备角色以样本和来源链为准
    - IFC → 渲染建筑/结构（与 MOD 完全无关联）
 4. **MOD 与 STL 的工程类型对称性**：
    - 线路：MOD 渲染塔本体（参数化骨架） + STL 渲染金具（三角网格）

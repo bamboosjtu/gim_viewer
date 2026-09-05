@@ -16,8 +16,8 @@
 >   几何遍历必须递归展开 PHM 并防环；IR 设计中「max depth = 1」约束作废。
 > - 几何资源扩展名集合从 {.mod, .stl} 扩大到 {.mod, .stl, .gl}；其中 substation03 的
 >   45 个 .gl 当前**零引用**（孤儿资源，详见 07 号文档复核）。
-> - IFCGUID 命中率 74.59%/75.60% 为 demo-substation 单样本值；本轮新增 4 个变电样本均有
->   `cbm->.ifc` 文件级引用（17/16/19 条），但 IFCGUID 文本级命中复算尚未执行（待办）。
+> - 设备级 IFCFILE+IFCGUID 只在部分导出工具中出现；没有 IFCGUID 时由 FileDevRelation
+>   或项目级 IFC 清单提供降级关联，不能把 GUID 命中当作工程存在性的前提。
 
 > - IFCGUID 命中率 74.59%/75.60% 为 demo-substation 单样本值。**2026-08-24 四变电样本复算**
 >   （`desktop/scripts/gim_survey/ifc_guid_check.py`，输出 `_generated/<sid>/ifc-guid-detail.csv`）：
@@ -31,7 +31,7 @@
 >   - **结论升级：设备级 IFCFILE+IFCGUID 关联是 JinQu 工具的特有机制，不是 GIM 格式保证。**
 >     IFC 发现与 GUID 索引逻辑必须对无 IFCGUID 的样本降级到 FileDevRelation / 项目级清单路径。
 
-> **2026-08-24 P1-5：FileDevRelation 跨工具格式对比**（3 变电样本实证）：
+> **FileDevRelation 跨工具格式对比**（变电样本实证）：
 >
 > | 维度 | 变电站01 (JinQu) | 变电站02 (Bentley) | 变电站03 (BIMBase) |
 > |---|---|---|---|
@@ -43,16 +43,13 @@
 > ① 计数键双形态（FILE.NUM / FILES.NUM）；② 子计数键双形态（DEV.NUM / DEVS.NUM）；
 > ③ IFC 名三种来源（奇数条目 .IFC 键 / NAME 直接为文件名 / 独立 .IFC 键）。
 >
-以下正文保留历史三样本分析过程与数据，作为方法与基线记录。
+以下正文保留文件级统计和判定方法，作为可复核证据；不作为运行时状态或过程日志。
 
 ## 1. 范围与方法
 
 ### 校验范围
 
-当前覆盖 3 个 demo 的 GIM 文件：
-
-- `demo-line`、`demo-line1`（线路工程）
-- `demo-substation`（变电工程）
+当前覆盖登记样本中的变电与线路 GIM 文件；具体样本清单见 [00-sample-corpus.md](00-sample-corpus.md)。
 
 校验层次为 CBM、DEV、PHM 三层的文件级引用目标是否存在。不递归展开完整模型树，不解析 PHM / MOD / STL 几何。
 
@@ -606,11 +603,11 @@ demo-substation:          DEV → PHM → MOD/STL
 
 DEV/PHM 两层未发现超出当前预期的引用类型。两类工程的 DEV 引用模式存在差异——线路使用 `SOLIDMODELn=*.dev` 实现 DEV 组合，变电使用 `SUBDEVICEn=*.dev` 实现子设备组合——但在三个样本内引用完整性均为 100%。
 
-IFCGUID → IFC 的文本命中校验存在约 25% 的硬未命中，集中在 F4System 节点，主要由两个高频 GUID 驱动。后续实现中应将 IFCGUID 视为可选定位能力，采用容错策略处理。
+IFCGUID → IFC 的文本命中校验存在硬未命中，集中在部分 F4System 节点。当前实现将 IFCGUID 视为可选定位能力：命中时用于构件定位，未命中时仍保留 CBM 节点和其它空间语义。
 
 ---
 
-## 7. 尚未完成的校验
+## 7. 校验边界
 
 | 校验项                      | 状态                                           |
 | --------------------------- | ---------------------------------------------- |
@@ -621,13 +618,15 @@ IFCGUID → IFC 的文本命中校验存在约 25% 的硬未命中，集中在 F
 | IFCGUID → IFC 内部构件      | 已完成文本命中校验，存在硬未命中分型           |
 | FAM 与 CBM/DEV 的字段一致性 | 已分析，详见 `06-cbm-fam-consistency.md`        |
 
-当前不进入 MOD/STL 几何解析，不展开 IFC 构件属性分析。
+MOD/STL 几何解析和引用链见 [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md)、
+[12-stl-static-survey.md](12-stl-static-survey.md) 与 [17-batch-load-schema.md](17-batch-load-schema.md)。
+IFC 构件属性由 Fragments 在属性面板按需读取，不在本文件复制字段明细。
 
 ---
 
 ## 附录 A：诊断脚本
 
-以下 PowerShell 脚本用于 CBM / PHM / DEV 的字段探测与引用分析，保留为分析过程记录。
+以下 PowerShell 脚本用于复核 CBM / PHM / DEV 的字段探测与引用完整性；输出是可重跑的证据，不是产品运行日志。
 
 ### A.1 CBM 引用字段全量统计（按扩展名 + 按字段分组）
 

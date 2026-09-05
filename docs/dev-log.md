@@ -1,60 +1,96 @@
-# 开发者日志（待优化项）
+# 开发日志：待办与技术债务
 
-> 仅记录待优化 / 待决策 / 待核验项。
-> 历史过程记录与关键决策说明已移除，可在 git 历史（`docs/dev-log.md`）中查阅。
+> 本文件只维护当前仍未完成、需要决策或需要补充证据的事项。
+> 不记录按日期排列的过程、单次运行结果或已完成工作的复盘；当前实现以
+> [技术架构](architecture.md)、[变电 GIM](gim_substation.md)、[线路 GIM](gim_powerline.md)
+> 和 [Schema](schema/README.md) 为准。每个条目在状态变化时原地更新。
 
----
+## 使用约定
 
-## 1. 变电工程
+- `P0` 表示阻断正确性或核心使用流程，`P1` 表示明显影响效率/可维护性，`P2` 表示体验增强或低频场景。
+- 只把仍然需要工程行动的事项放在这里；已经完成的功能从本表删除，并在对应实现文档中说明。
+- 性能数字仅作为问题规模的当前基线，不作为按日期追加的实验日志；重新测量时更新同一条目的基线和完成条件。
 
-| 项 | 说明 | 优化方向 |
-|---|---|---|
-| 几何管线主线程编译 | `serializeDevToGlb`（XML 解析 + GLTFExporter）在主线程分批 yield，首次打开仍占用主线程 | 移入 Web Worker |
-| IFC 无 Fragments 缓存 | 每次打开重新解析 IFC（`ENABLE_FRAGMENTS_CACHE=false` 休眠） | 重评估启用该缓存 |
-| web-ifc 模型完整性 | 部分 IFC 可能丢构件；"Malformed tile" 被 catch 但该 IFC 显示不全（OBC 上游限制） | 跟踪上游 |
-| Bentley F2 编码语义 | F2System `SYSCLASSIFYNAME=1/2/3/4/Y/02` 与 JinQu 的 U/A/S/G 体系不同，层级树暂显示裸编码 | 待更多样本确认后映射 |
-| 电气图数据缺失 | Bentley 样本不含 `.sld`/`.std`/`.sch`，电气图 tab 无数据可渲染 | 数据层面，无动作 |
+## 变电工程
 
----
+### P1 · 几何实例化与渲染长尾
 
-## 2. 线路工程
-
-| 项 | 说明 |
+| 字段 | 当前定义 |
 |---|---|
-| 塔位真实 3D | 普通地图使用圆形/菱形符号；HNum 形状在选中杆塔后的属性面板“来源”页等比例预览；线路不启用独立 3D |
-| 塔型分类 | 仅区分直线塔（圆形）/耐张塔（菱形） |
-| 工程弧垂 | 曲线为抛物线示意，未使用 MATRIX0 挂点 / BLHA 高程；hover/click 已与可见曲线一致（wireScreenPoints 共享采样）；升级工程语义依赖 KVALUE 确认（见 §3） |
-| 坐标偏移 | 已核验（2026-08）：BLHA 为 CGCS2000/WGS-84 勘测数据，叠加 WGS-84 底图（OSM）无需转换；GCJ-02 为 Web 地图展示层混淆，强转反而引入误差。决策已文档化（lineMapBaseLayer.ts / lineMapData.ts 头注释） |
-| Canvas fallback 投影 | 已改为 Web Mercator（与 MapLibre/OSM 一致，正形投影），比例尺按中心纬度修正；原高纬度等距投影畸变已消除 |
-| 跨越点定位 | 数据层面受限：line02 实测 44 个 CROSS 全部无 BLHA 坐标（无法插值修复——跨越点不在塔位连线上）；有坐标样本已可正常定位标注；无坐标时统计面板显示 unresolved 计数 |
-| OSM 在线依赖 | 设计如此：OSM 不可用（3 次 tile error）自动回退 Canvas-only，行为符合预期，无动作 |
-| 首次导入性能 | 2026-09-02 已用真实 Tauri 对 line01–line06 做 cold/warm 各 n=3：Worker 解析通常低于 0.5s，SQLite 已移出 ready critical path；冷启动瓶颈随样本变化，line03 的 Rust 7z decode 约 13.1s | 7z decoder 专项；保持与 UI/语义缓存改造解耦 |
-| 杆塔 HNum/MOD lazy preview 偶发长延迟 | 选中杆塔后来源页按需读取/解析 HNum/MOD，真实使用中偶发几十秒才显示 | 拆分 preview read/parse/render 埋点后，再评估预览缓存或独立解析任务 |
-| warm RSS 偏高 | 六个线路样本的 Tauri warm 采样约 0.9–1.3 GB（进程树工作集，非 JS heap） | 先做独立进程基线与回收测量，再决定 property lazy load |
-| line03 7z decode 偏慢 | 真实 Tauri 冷启动 Rust `decodeMs` 约 13.1s，总解压约 15.1s | decoder 专项分析 7z 解码、entry 写盘和调度，不在本轮线路 UI 范围内 |
+| 状态 | 待专项定位 |
+| 现象 | 正常 warm 运行中 DEV GLB fast path 可以完整命中（包括合法 `empty` DEV），GLB 解析本身约 1 秒量级，但 `fullModelReady` 仍可能远高于 `MOD/STL` 阶段；问题集中在实例化、场景提交或渲染尾部。 |
+| 影响 | 变电工程已经显示语义和首批几何后，仍需很长时间才达到完整模型状态。 |
+| 下一步 | 单独拆分实例创建、矩阵烘焙、场景提交和渲染稳定四段耗时，并给每段设资源上限；不得回退到全项目 raw MOD 重建。 |
+| 完成条件 | 至少三个真实变电样本的 warm `fullModelReady` 长尾有可重复归因；成功 GLB 与合法空 DEV 的结果、CBM placement 数量和空间位置不变。 |
 
----
+### P1 · EMPTY_DEVICE_XML 与无几何装配节点提示
 
-## 3. 悬链线待决策项
-
-> 数据可行性已确认（BLHA=塔位中心、MATRIX0=挂点偏移、挂点坐标可算、KVALUE 为参数字段），
-> 详见 [schema/15-wire-catenary-evidence.md](schema/15-wire-catenary-evidence.md)。
-> 已解决：WIRETYPE 来源（经 DEV→FAM 链解析）、KVALUE=0 语义、MATRIX0 x 符号对称性。
-
-| 项 | 现状 | 阻塞 |
-|---|---|---|
-| KVALUE 物理含义与公式 | 非零值 0.00025-1.34，符合弧垂系数特征；具体含义（弧垂/张力/应力参数）、单位与公式（抛物线 `f=k*x*(L-x)` vs cosh）未确认 | GIM 标准无字段定义；需对照导线型号表 + 标准弧垂表反推 |
-| MATRIX0 y 分量与坐标系局部性 | y 值极小（±0.3m）影响可忽略；基于 BLHA=塔位中心的局部坐标系推论未做跨塔交叉验证 | 需同塔多挂点样本核验 |
-| 悬链线模式决策 | 当前默认启用实验性 2D 曲线（非工程语义） | 关闭 / 保留示意模式 / 升级工程语义（后者依赖 KVALUE 确认，路线 M5-A~E 见 [schema/14](schema/14-line-catenary-study.md) §6.5） |
-
----
-
-## 4. 通用
-
-| 项 | 说明 |
+| 字段 | 当前定义 |
 |---|---|
-| 单工程模式 | 同时只能打开一个 GIM 工程（架构级限制：AppState 单例 + 工程切换清理流程；多工程需重设计状态管理与缓存隔离，暂不实施） |
-| 无搜索 | 已实现（2026-08）：变电 CBM 树 + 线路工程均支持按名称/编号搜索定位（通用组件 ui/searchBox.ts），搜索结果联动属性面板 + 地图定位 + 树行选中 |
-| 无导出 | 已实现（2026-08）：线路地图新增「截图」PNG 导出（合成底图+叠加层）与「CSV」塔位/导线/跨越点表格导出（UTF-8 BOM）；变电属性抽屉新增「⇩」按钮导出当前属性 CSV |
-| 休眠功能 | 决策（2026-08）：继续保留休眠、开关关闭。Fragments 缓存此前因正确性问题主动休眠，重新启用需实测验证；PMTiles 为离线场景预研，保留代码路径待离线需求明确后再评估。两者均不影响默认功能路径 |
-| 审计服务 | `lineGeometryAuditService` / `lineSpanGroupingAuditService` / `lineCatenaryAuditExportService` / `lineWireSemanticService` 为纯内存研究工具（Ctrl+Shift+C 导出），保留 |
+| 状态 | 未实现 |
+| 现象 | `EMPTY_DEVICE_XML` 或没有自有 `SOLIDMODEL` 的装配节点会被解析为空 Group；其它设备仍可正常显示。 |
+| 影响 | 用户无法区分“确实没有几何”和“几何加载失败”。 |
+| 下一步 | 在属性/来源面板显示明确原因和可达子设备数量，并把原因写入诊断；不得伪造几何，也不得阻塞其它 DEV。 |
+| 完成条件 | `empty-device-xml` 与 `assembly-node-without-own-geometry` 可区分、可检索、可在缓存命中和首次打开中保持一致。 |
+
+### P1 · Fragments 缓存默认策略
+
+| 字段 | 当前定义 |
+|---|---|
+| 状态 | 灰度能力已实现，默认关闭 |
+| 现象 | `ENABLE_FRAGMENTS_CACHE=false`；调试覆盖可用于 cache-off/build/hit 对照，缓存按工程 SHA、IFC 路径、Fragments/web-ifc 版本和文件大小校验。 |
+| 影响 | 默认路径每次需要重新走 IFC→Fragments，变电 warm 启动仍承担解析成本。 |
+| 下一步 | 用独立进程完成跨重启的 cache-off/build/hit 对照，分别确认 `frag read` 与 `fragments.core.load` 的占比，再决定是否改变默认开关。 |
+| 完成条件 | cache hit 的模型数、GUID/CBM 关联、选择高亮、坐标及 IFC/MOD 相对位置与 cache-off 一致；截断、缺失、版本或源 SHA 不匹配都自动回退 IFC。 |
+
+## 线路工程
+
+### P1 · 杆塔 HNum/MOD lazy preview 长尾
+
+| 字段 | 当前定义 |
+|---|---|
+| 状态 | 待专项定位 |
+| 现象 | 选中杆塔后，来源页按需读取并解析 HNum/MOD；少数真实使用场景会延迟几十秒才显示形状。 |
+| 影响 | 塔型核验反馈慢，容易被误判为来源缺失或解析失败。 |
+| 下一步 | 增加 preview read、parse、SVG/Canvas render 三段互斥计时；再评估有界预览缓存或独立解析任务。 |
+| 完成条件 | 预览延迟可归因且不阻塞线路树、地图和属性切换；预览明确标注为“局部骨架预览”，不把它误报为完整塔型。 |
+
+### P2 · warm 进程树 RSS 偏高
+
+| 字段 | 当前定义 |
+|---|---|
+| 状态 | 待独立进程基线 |
+| 现象 | 线路 warm 浏览的进程树工作集约 0.9–1.3 GB；该指标不是 JS heap。 |
+| 影响 | 长时间浏览或频繁切换工程存在内存压力。 |
+| 下一步 | 在独立进程中分别测量 WebView、Worker、Tauri 后端的峰值与回收；确认归因后再决定是否引入 property lazy load。 |
+| 完成条件 | 报告 JS heap、WebView RSS、Tauri 后端 RSS 的独立口径，并能证明释放工程后旧对象不再增长。 |
+
+### P2 · line03 7z 解码
+
+| 字段 | 当前定义 |
+|---|---|
+| 状态 | 待 decoder 专项 |
+| 现象 | line03 冷启动的 Rust 归档解码约 13 秒，总解压约 15 秒；线路 Worker 解析不是主导阶段。 |
+| 影响 | 冷启动交互时间受压缩包解码限制。 |
+| 下一步 | 独立测量 7z decode、entry 落盘和调度开销，再评估解码器或归档结构；不与线路语义/地图架构改造绑定。 |
+| 完成条件 | 有可重复的解码/落盘分解和安全性回归，且不改变 GIM 条目完整性、路径大小写兼容和缓存身份。 |
+
+### P1 · 悬链线产品语义收口
+
+| 字段 | 当前定义 |
+|---|---|
+| 状态 | 待产品决策与工程资料核验 |
+| 现象 | 地图保留实验性 2D 弧垂示意；`KVALUE`、`MATRIX0` 的完整物理含义和工程公式尚未形成可验收规范。 |
+| 影响 | 示意曲线不能当作施工/设计级悬链线，可能造成语义误读。 |
+| 下一步 | 基于设计资料核验系数、单位、斜档距和挂点坐标，再决定继续示意、默认关闭或升级工程模式；交互 hit-test 必须与可见曲线共享采样。 |
+| 完成条件 | 产品文案、默认开关、公式、异常数据处理和审计输出形成一套可测试的约定。 |
+
+## 暂不排期的边界
+
+以下能力不属于当前产品路径，不作为“进行中”事项；只有需求重新立项时才新增条目：
+
+- 独立线路 3D Viewer；线路当前只有“模型”地图工作区，杆塔形状通过来源页局部骨架预览表达。
+- shared Three.js geometry / InstancedMesh；当前 placement 会修改 `BufferGeometry`，先保持实例隔离。
+- IFC Semantic Worker、Spatial SQLite Cache、Compact Line Runtime Cache；当前没有扩大这些缓存/线程边界的计划。
+- PMTiles 离线底图；代码保留休眠开关，默认仍使用 OSM 在线底图或 Canvas-only 回退。
+

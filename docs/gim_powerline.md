@@ -27,7 +27,7 @@
 | 3D 线路（独立 viewer） | ⏸ 产品边界：不启用；线路仅保留“模型”地图工作区，杆塔形状在来源页预览 | — |
 | PHM TransformMatrix 应用 | ⚠️ 线路不实例化 3D；PHM 实例矩阵保留在来源/技术字段，供后续几何能力使用 | 属性面板保留来源和技术字段 |
 
-> 下一步实现路径见 §12。
+> 未完成的性能提升和功能决策统一维护在 [dev-log.md](dev-log.md)；本文件只描述当前实现和稳定边界。
 
 ---
 
@@ -306,19 +306,16 @@ Canvas overlay 委托底图层的 `project()` 方法，两种模式共用同一�
 
 ---
 
-## 10. 当前实现限制
+## 10. 当前实现边界
 
-| 限制 | 说明 | 对应下一步 |
-|---|---|---|
-| 无真实底图（Canvas-only 时） | Canvas 2D 绘制经纬度网格，无卫星图/地形图 | §12 P2 |
-| 简化投影 | Canvas 等距投影，高纬度有畸变（overlay 模式用 MapLibre 投影） | §12 P2 |
-| 无坐标偏移修正 | 直接使用 BLHA 原始坐标，未做 GCJ-02/WGS-84 转换 | §12 P2 |
-| 非真实塔型 | 普通地图使用圆形/菱形符号；选中杆塔后可在“来源”页签查看 HNum X/Z 杆塔骨架预览 | 后续实例级 STL/MOD 对齐 |
-| 实验悬链线未完成语义验收 | 默认曲线使用未确认的 KVALUE 公式，未使用挂点高程且 hit-test 仍按直线 | §11 / schema 14、15 |
-| 线路 MOD 运行时 | 四类 parser 已由属性面板异步消费；选中杆塔时 HNum 形状在“来源”页签按需预览，原始记录不铺进导航树 | 实例级几何缓存/编辑能力 |
-| 线路 3D | 当前不创建独立线路 3D 视图，避免低价值的全线三维表达；模型地图 + 塔型来源预览为主 | 若未来重新立项，需单独评估 PHM/STL 实例对齐 |
-| 无 IFC | 线路工程不加载 IFC 文件 | 不在路径上（线路无 IFC） |
-| 工程语义悬链线待决策 | BLHA 与 MATRIX0 x/z 已确认；KVALUE 物理含义/公式、MATRIX0 y、WIRETYPE 来源仍未确认。当前仅有待收口的实验曲线 | §11、schema 14/15 |
+| 边界 | 当前行为 |
+|---|---|
+| 底图不可用 | MapLibre/OSM 或天地图不可用时自动回退 Canvas-only；Canvas-only 绘制经纬度网格，不依赖在线瓦片。 |
+| 投影 | MapLibre overlay 使用 MapLibre 当前相机投影；Canvas-only 使用 Web Mercator 兼容投影。BLHA 按样本约定作为 WGS-84 坐标，不做 GCJ-02 强转。 |
+| 塔型表达 | 地图以圆形/菱形业务符号表示塔位；选中杆塔后，在属性面板“来源”页显示等比例 HNum 局部骨架预览，明确不等同完整 3D 塔型。 |
+| 悬链线 | 地图可显示实验性 2D 弧垂示意；它不代表经过工程验收的张力/弧垂计算。same-point 内部连接不绘制为跨塔悬链线，交互采样与可见曲线共享。 |
+| 线路 MOD/STL | 四类线路 MOD 文本格式由属性面板按需解析；来源页提供可读的 CBM/DEV/FAM/PHM/MOD/STL 定位按钮。线路不创建独立 3D Viewer。 |
+| IFC | 线路工程不加载 IFC；CBM 语义、地图实体和来源关系由线路 graph/属性缓存提供。 |
 
 ---
 
@@ -404,71 +401,22 @@ Canvas overlay 委托底图层的 `project()` 方法，两种模式共用同一�
 
 ---
 
-## 12. 下一步实现路径
+## 12. 当前实现摘要
 
-> 基于 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) 的 IR 草案与 [11-line-mod-grammar.md](schema/11-line-mod-grammar.md) 的 grammar 边界，按优先级分阶段实施。
+### 12.1 解析、导航与属性
 
-### 12.1 P0（本轮已完成）
+- 线路 CBM 按“线路 → 区段 → 耐张段 → 杆塔/档距 → 导线与跨越物”的业务顺序构建树；原始引用文件名和技术数值不占用导航节点。
+- 四类线路 MOD 文本格式由 `lineModParser.ts` 分发，按需供属性面板消费；HNum 预览只表达局部骨架，来源页提供统一可读的文件定位按钮。
+- 属性面板按“概览 / 参数 / 关系 / 来源”组织；坐标逐行展示，杆塔、基础、导线和导线挂点在关系页分组，文件链接集中在来源页。
 
-| 任务 | 输入 | 输出 | 关键约束 |
-|---|---|---|---|
-| ~~**IR schema 落地**~~ | 13-geometry-ir-schema.md §2-§4 | ✅ `desktop/src/gim/geometry/ir.ts` | 顶层联合类型引用 interface，不 inline |
-| ~~**line-text-mod parser + 运行时分发**~~ | 4 类文本格式族（HNum/PointLine/SectionKV/KeyValue） | ✅ `desktop/src/gim/geometry/lineModParser.ts` + `lineModRuntimeService.ts` | R 记录 9 token 变体保留弱 schema fallback |
-| ~~**TEXT_HNUM_COMMA_RECORD 可视化**~~ | HNum P/R/G 记录 | ✅ 选中杆塔后在属性面板“来源”页签显示 X/Z 预览 | 轻量骨架不等同完整 CAD 塔型 |
-| ~~**Bolt 属性面板**~~ | TEXT_SECTION_KV_RECORD | ✅ BoltNum/BoltN 摘要 + 单表格展示位置、规格、长度；未确认字段折叠 | 原值保留 |
-| ~~**Tower_Device/WIRE 参数面板**~~ | TEXT_KEY_VALUE | ✅ 按 key set 分流并按字典显示单位 | 与 §9 四页签整合 |
-| ~~**属性按 format 分发**~~ | LineModFormat 枚举 | ✅ 异步读取可达 MOD，失败不阻塞树交互 | 来源按钮可回到业务节点 |
+### 12.2 地图与交互
 
-### 12.2 P1（MVP 可选，影响 STL 展示能力）
+- “模型”是线路唯一工作区。MapLibre overlay 与 Canvas-only 使用同一套塔位、导线、跨越物语义；OSM/天地图不可用时自动回退 Canvas-only。
+- MapLibre 相机变化维护 camera revision。交互态每个 RAF 用当前相机快速绘制塔位、简化导线和跨越点，停止移动后再运行完整渐进绘制；旧 revision 的投影结果不会写入当前 Canvas。
+- 地图、导航树和属性面板共享选择状态；塔位、导线和跨越物的 hover/click 使用可见几何的同一采样结果。
 
-| 任务 | 输入 | 输出 | 关键约束 |
-|---|---|---|---|
-| **STL 渲染** | Wire_Device 100% 触达 STL；Tower_Device 部分触达 | 引用/解析已接入；线路模型地图不实例化 STL，统一通过来源按钮追溯 | demo-line 为 11773 CBM refs → 8 unique STL |
-| **PHM COLOR 应用** | PHM COLORn 字段 | Fragments material 颜色覆盖 | STL 引用非空，MOD 引用为空 |
+### 12.3 缓存、诊断与范围
 
-### 12.3 P2（体验补齐）
-
-| 任务 | 输入 | 输出 | 关键约束 |
-|---|---|---|---|
-| **none 分支提示** | 装配节点自身无几何 / 缺失引用 | UI 提示 + 诊断 | 区分 `assembly-node-without-own-geometry` 与 `phm-no-solidmodel` |
-| **CROSS 地图视觉增强** | TEXT_POINT_LINE 315 文件 | 2D 地图跨越点样式与交互增强 | POINT 恒为 5 token，LINE 恒为 2 token |
-| **PHM TransformMatrix 应用** | PHM TRANSFORMMATRIXn | 线路暂无独立 3D 实例化路径 | 线路属性面板保留矩阵；未来如恢复几何视图，必须按实例应用两级矩阵 |
-| **缓存命中回放** | geometry_source 表（建议） | 缓存命中时直接恢复 IR | 正式 DDL 另起 16-geometry-cache-schema.md（待建） |
-| **节点联动** | CBM 树 → 地图高亮 | 选中业务节点 → 定位对应塔位/档距/跨越物 | 与变电空间树保持同一选择语义 |
-| **悬链线/弧垂渲染** | inter-point 档距 | 当前实验曲线需先默认关闭或明确标注示意模式；工程模式待决策 | KVALUE 物理含义/公式、MATRIX0 y、WIRETYPE 来源未确认；绘制与 hit-test 应共享曲线采样 |
-
-> 产品边界：独立线路 3D viewer 不属于当前路线。需要查看塔型时，在“模型”地图中选择杆塔，再到属性面板“来源”页查看等比例 HNum 形状预览。
-
-### 12.4 关键约束（来自分析报告）
-
-| 约束 | 来源 | 影响 |
-|---|---|---|
-| R 记录 9 token 变体仅 2 条样本 | [11-line-mod-grammar.md](schema/11-line-mod-grammar.md) §2.5.4 | 必须保留弱 schema fallback |
-| TEXT_POINT_LINE CODE=81/82 仅 demo-line1 出现 | [08-mod-static-survey.md](schema/08-mod-static-survey.md) §4.2 | CODE 不应硬编码业务含义，按 entityName 分流 |
-| Wire_Device 11773 CBM refs → 8 unique STL | [12-stl-static-survey.md](schema/12-stl-static-survey.md) | 必须建几何缓存池 |
-| PHM TransformMatrix 随导出软件变化 | [09-transform-chain-analysis.md](schema/09-transform-chain-analysis.md) | 线路当前不实例化 3D；若未来重新立项，必须按实例应用两级矩阵 |
-| Geometry IR 不在 SQLite 范围 | [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) §1.3 | 正式 DDL 另起 16-geometry-cache-schema.md |
-
-### 12.5 不在路径上
-
-- **IFC 加载**：线路工程 CBM 不含 `IFCFILE` 字段（demo-line / demo-line1 全量统计 0 个 IFC_NODE），不需要 IFC 加载路径
-- **XML primitive 渲染**：变电专用（10-substation-mod-grammar.md），线路 MOD 全部为文本格式族
-
----
-
-## 13. 已知技术债务
-
-> 本节记录已确认但不在当前线路相机同步范围内的问题。优先级表示对使用体验的影响，不代表本轮立即实施。
-
-| 优先级 | 技术债务 | 现状与证据 | 影响 | 后续处理与触发条件 |
-|---|---|---|---|---|
-| **P1** | 杆塔 HNum/MOD lazy preview 偶发几十秒 | 选中杆塔后“来源”页按需读取并解析 HNum/MOD；真实使用中偶发几十秒才出现预览，当前尚未拆分读取、解析、SVG 绘制三个阶段的耗时 | 塔型核验反馈慢，用户容易误以为来源缺失或解析失败 | 单独增加 preview read/parse/render 埋点，先定位瓶颈，再评估预览缓存或独立解析任务；不得把完整塔型 3D 重新引入线路主路径 |
-| **P2** | warm RSS 偏高 | 2026-09-02 六个真实线路样本的 Tauri warm 采样约 **0.9–1.3 GB**（为进程树工作集，不等同 JS heap） | 长时间浏览或频繁切换工程时存在内存压力 | 先用独立进程测量 WebView、Worker、Tauri 后端的基线和回收情况；完成归因后再决定是否实施 property lazy load，当前不提前开启 |
-| **P2** | line03 冷启动 7z decode 约 13s | 真实 Tauri 冷启动剖析中 line03 的 Rust `decodeMs` 约 **13.1s**（总解压约 15.1s）；解析 Worker 不是主要耗时 | 冷启动交互时间受归档解码主导 | 作为 decoder 专项处理，分别测量 7z 解码、entry 写盘和调度开销后再选择解码器或并行策略；不与线路 UI/语义缓存改造耦合 |
-
-### 13.1 记录边界
-
-- 上述债务不改变当前产品边界：线路仍只有“模型”地图工作区，杆塔形状通过来源页预览表达。
-- 本轮 MapLibre/Canvas 相机同步修复已完成，但不应被误认为解决了 HNum/MOD 预览延迟、warm RSS 或 7z 解码问题。
-- 性能数字以真实 Tauri/CDP 采样为依据；重新测量时应保持样本、首开/热开定义和采样次数一致，并报告中位数与 P95。
-- 本轮线路采样汇总暂存于 `tmp/tauri-perf-20260902-v1/summary.md`；该目录是临时证据，不作为发布文档的运行时依赖。
+- 线路 graph、FAM/DEV 属性和 semantic pack 使用独立的 `LINE_PARSER_VERSION`；缓存命中不重新解压，路径比较大小写不敏感。
+- 性能诊断通过 `Ctrl+Shift+D` 输出；线路语义解析可在 Worker 中执行，结果提交受 `ProjectLoadSession` 保护。
+- 线路不加载 IFC、不创建独立 3D Viewer，也不把变电 XML primitive 当作线路格式。未完成事项和下一步统一见 [dev-log.md](dev-log.md)。

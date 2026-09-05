@@ -1,92 +1,61 @@
 # GIM 文件角色矩阵
 
-> **2026-08-24 十样本复核**：文件角色矩阵总体成立，需补充三点：
-> ① 几何资源扩展名新增 `.gl`（BIMBase 导出，XML Device 格式，当前 45 个全部零引用孤儿）；
-> ② STL 是可选几何载体（Bentley 变电样本为 0，SDDP 仅 1 个），"变电必有大量 STL"不成立；
-> ③ SCH/STD/SLD 三件套仅 JinQu/SDDP 工具产出，不能假设存在。详见 [22](22-ten-sample-verification-0824.md)。
-
-目标：确认每类文件在这个样本中扮演什么角色。
-
-> **2026-07-17 说明**：文件角色与三样本数量仍有效；下表“当前处理策略”保留的是研究启动时基线，不代表当前代码。MOD/STL parser、渲染与 GLB 缓存的现状见 [21-schema-conclusion-review-0717.md](21-schema-conclusion-review-0717.md)。
+> 本文定义当前解析器对 GIM 文件类型的角色和处理入口。数量仅作为样本规模
+> 参考，不代表标准中固定的文件配比；跨工具差异见 [22-ten-sample-verification-0824.md](22-ten-sample-verification-0824.md)。
 
 ## 1. 文件角色总览
 
-| 文件类型 | 线路 demo | 变电 demo | 主要目录         | 粗判格式                 | 当前角色判断               | 当前处理策略           |
-| -------- | --------: | --------: | ---------------- | ------------------------ | -------------------------- | ---------------------- |
-| .cbm     |     27829 |      8701 | Cbm/CBM          | text-like                | 工程层级与引用关系         | 已作为核心解析对象     |
-| .fam     |     26485 |     13056 | Cbm/CBM, Dev/DEV | text-like / unknown-text | 属性文件                   | 继续字段字典分析       |
-| .dev     |      4518 |      4179 | Dev/DEV          | text-like                | 设备物理模型与设备属性     | 继续引用关系分析       |
-| .phm     |      1836 |      4179 | Phm/PHM          | text-like                | 组合模型 / 装配体候选      | 静态分析引用关系       |
-| .mod     |      1807 |      4179 | Mod/MOD          | text-like / unknown-text | 基础几何模型候选           | 仅静态体检，不解析几何 |
-| .stl     |       181 |      1803 | Mod/MOD          | binary-like              | 三角网格资源候选           | 仅统计，不解析         |
-| .ifc     |         0 |        12 | DEV              | text-like                | 变电 3D / 土建模型交互格式 | 继续走既有 IFC viewer  |
-| .sch     |         0 |         1 | CBM              | text-like                | 逻辑模型入口               | 后续分析               |
-| .std     |         0 |        1 | CBM              | text-like                | 主接线逻辑模型定义         | 后续分析               |
-| .sld     |         0 |         1 | CBM              | text-like                | 主接线图 / 图形表达        | 后续分析               |
+| 文件类型 | 主要目录 | 业务角色 | 当前处理 |
+|---|---|---|---|
+| `.cbm` | `CBM/` 或 `Cbm/` | 工程层级、引用和 placement | 变电/线路分别解析为 CBM tree/graph，并写入对应 SQLite 域 |
+| `.fam` | `CBM/`、`DEV/` 或对应大小写目录 | 设备、杆塔、导线和基础属性 | 按分节或键值解析，属性按字典展示并缓存 |
+| `.dev` | `DEV/` 或 `Dev/` | 设备定义、PHM/子 DEV 组合 | 解析 `SOLIDMODELS`、`SUBDEVICES` 和变换矩阵；变电几何按 unique DEV 编译 GLB |
+| `.phm` | `PHM/` 或 `Phm/` | 可复用装配模型 | 递归解析 `SOLIDMODEL`、矩阵和颜色，带 visited 防环 |
+| `.mod` | `MOD/` 或 `Mod/` | 基础几何或线路文本记录 | 变电 XML MOD 进入 Geometry IR；线路按四类文本格式供属性面板/HNum 预览消费 |
+| `.stl` | `MOD/` 或 `Mod/` | 三角网格资源 | 变电 DEV GLB 管线支持 binary/ASCII 读取；线路仅保留来源追溯，不创建独立 3D |
+| `.ifc` | 常见于 `DEV/` | 变电 IFC 空间/构件模型 | 发现后由 OBC Fragments 加载；Spatial Core 只保留空间和 placement 语义 |
+| `.sch` | `CBM/` 或 `Cbm/` | 逻辑模型入口 | 解析逻辑模型引用，供 STD/SLD 视图选择 |
+| `.std` | `CBM/` 或 `Cbm/` | 逻辑模型定义 | 解析电压等级、间隔和设备关系 |
+| `.sld` | `CBM/` 或 `Cbm/` | 主接线图 | 白名单净化后在中间工作区渲染，保持与三维模型叠加 |
+| `.gl` | 导出器定义的几何目录 | 低频辅助几何资源 | 作为可发现条目保留；只有引用链明确支持时才进入渲染 |
 
-```plaintext
+## 2. 引用关系
+
+```text
 CBM
- ├─ DEV
- │   ├─ PHM
- │   │   ├─ MOD
- │   │   └─ STL
- │   └─ DEV / SUBDEVICE
- ├─ IFC
- ├─ FAM
- └─ CBM
+ ├─ OBJECTMODELPOINTER → DEV
+ │   ├─ SOLIDMODEL → PHM / DEV
+ │   │   ├─ SOLIDMODEL → MOD / STL
+ │   │   └─ TRANSFORMMATRIXn / COLORn
+ │   └─ SUBDEVICEn → DEV
+ ├─ BASEFAMILY → FAM
+ ├─ IFCFILE / IFCGUID → IFC 构件
+ └─ SCH → STD / SLD
 ```
 
-## 2. 规范背景与实证差异
+引用解析按 entry path 归一化，目录和文件名匹配大小写不敏感；业务名称不由 GUID
+或文件名直接决定。线路 CBM 的 `SECTION`、`STRAINSECTION`、`GROUP`、`TOWER`、
+`WIRE`、`CROSS` 引用由线路 graph 额外保留。
 
-内部背景资料中提到：
+## 3. 格式差异与处理原则
 
-- 变电工程土建及水暖系统可采用 IFC 进行交互。
-- 电气设备、安装材料、线路工程可采用基本图元、参数化模型或 STL 进行交互。
-- CBM / DEV / PHM / MOD 分别承担工程骨架、设备模型、组合模型、基础几何模型角色。
+| 主题 | 样本事实 | 当前处理原则 |
+|---|---|---|
+| IFC 位置 | 常见于 DEV，但不保证固定目录 | 全量文件索引搜索，不写死目录 |
+| MOD 表层格式 | 变电以 XML primitive 为主，线路以四类文本族为主 | 先按工程类型和内容分型，再选择 parser |
+| 目录大小写 | 变电通常大写，线路通常 PascalCase | 统一使用大小写不敏感键空间 |
+| PHM 结构 | 可嵌套，矩阵可能非单位阵 | 递归 + 防环，始终应用累积矩阵 |
+| STL 角色 | 可选，工具间数量和用途差异很大 | 按引用链判断，不假定固定配比 |
+| 逻辑图纸 | SCH/STD/SLD 可能缺失或由不同导出器组合 | 缺失时只隐藏对应入口，不阻塞三维/地图模型 |
 
-但当前两个 demo 的实证结果与规范描述存在一些路径和格式差异：
+## 4. 当前消费入口
 
-| 主题         | 背景描述                           | demo 实证                                                              | 当前处理                            |
-| ------------ | ---------------------------------- | ---------------------------------------------------------------------- | ----------------------------------- |
-| IFC 存放目录 | 背景中可能描述为 CBM 或被 CBM 引用 | demo-substation 的 12 个 IFC 位于 DEV 目录                             | 不写死 IFC 目录，按实际文件索引搜索 |
-| MOD 格式     | 背景中提到 XML / 基本图元          | demo-line 存在 key-value 点线型 MOD；demo-substation 存在 XML-like MOD | 按样本分型，不统一假设              |
-| 目录大小写   | 规范不强调大小写                   | 线路为 Cbm/Dev/Phm/Mod，变电为 CBM/DEV/PHM/MOD                         | 路径匹配必须大小写不敏感            |
-| STL 角色     | 复杂几何三角网格                   | 两个 demo 均存在 STL，且粗判为 binary-like                             | 仅统计，不解析                      |
+| 文件类型 | 解析/编排入口 | 主要消费方 |
+|---|---|---|
+| CBM/FAM/DEV/PHM/MOD/STL | `desktop/src/gim/` 与 `desktop/src/services/` | 导航树、属性抽屉、Geometry IR、DEV GLB 管线 |
+| IFC | `gimIndexer.ts`、`ifcSpatialParser.ts`、`ifcEntryLoader.ts` | 空间树、Fragments 三维、高亮与按需属性 |
+| SCH/STD/SLD | `schParser.ts`、`stdParser.ts`、`sldParser.ts` | 主接线图和逻辑模型工作区 |
 
-当前文档以 demo 实证为准；规范背景只作为解释线索，不直接替代样本事实。
+单类字段和语法说明见本目录的 `cbm.md`、`fam.md`、`dev.md`、`phm.md`、`mod.md`、
+`sch.md`、`std.md` 和 `sld.md`。性能、实验和下一步功能不在 Schema 文档中维护。
 
----
-
-## 3. 当前结论
-
-- `.cbm / .fam / .dev / .phm / .mod` 均可作为文本或准文本文件进入 analysis。
-- `.stl` 当前按 binary-like 三角网格资源处理。
-- `.ifc` 当前只在 demo-substation 中出现，且位于 DEV 目录。
-- CBM 通过 `OBJECTMODELPOINTER` 指向 `.dev`。
-- CBM 通过 `BASEFAMILY`、`SUBDEVICEn`、`IFCFILE` 建立 FAM / CBM / IFC 引用。
-- DEV 可以通过 `SOLIDMODELn` 引用 `.phm` 或 `.dev`。
-- DEV 可以通过 `SUBDEVICEn` 引用子 `.dev`，说明设备物理模型存在递归组合关系。
-- DEV / PHM 层文件级引用完整性已完成校验，`DEV -> PHM/DEV`、`PHM -> MOD/STL`。
-- PHM 通过 `SOLIDMODELn` 引用 `.mod` 或 `.stl`，承担组合模型 / 装配体角色。
-- MOD 不能统一定义为 XML，也不能统一定义为 CODE/POINTNUM 点线格式。
-- MOD 在变电与线路中表现出不同表层格式。
-
----
-
-## 4. 文件类型分析引用
-
-针对单类文件的字段结构、引用关系、实证样本统计及背景对比，已沉淀到对应的格式说明文档：
-
-| 文件类型 | 文档                                                        | 角色                                       |
-| -------- | ---------------------------------------------------------- | ------------------------------------------ |
-| `.cbm`   | [cbm.md](cbm.md)                                           | CBM 工程骨架与层级关系说明                 |
-| `.fam`   | [fam.md](fam.md)                                           | FAM 属性文件说明                           |
-| `.dev`   | [dev.md](dev.md)                                           | DEV 物理模型与设备组合说明                 |
-| `.phm`   | [phm.md](phm.md)                                           | PHM 组合模型与 MOD/STL 引用说明            |
-| `.mod`   | [mod.md](mod.md)                                           | MOD 基础几何/参数化模型说明                |
-| `.sch`   | [sch.md](sch.md)                                           | SCH 逻辑模型说明                           |
-| `.std`   | [std.md](std.md)                                           | STD 逻辑定义说明                           |
-| `.sld`   | [sld.md](sld.md)                                           | SLD 主接线图/图形表达说明                  |
-
-> `.stl` 为二进制三角网格资源，仅在 `05-gim-reference-integrity.md` 与 `07-dev-phm-geometry-reachability.md` 中作为统计对象出现，未单独提供格式说明文档。
-> `.ifc` 复用 IFC 标准格式，由 web-ifc 直接解析，未单独提供格式说明文档。

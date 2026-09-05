@@ -282,7 +282,7 @@ CREATE TABLE substation_phm_solid_model (
 );
 ```
 
-### 2.6 休眠表：Fragments 二进制预编译
+### 2.6 Fragments 二进制缓存表（默认关闭）
 
 ```sql
 -- Fragments 缓存记录（受 ENABLE_FRAGMENTS_CACHE=false 控制，默认关闭）
@@ -301,7 +301,7 @@ CREATE TABLE substation_fragment_cache (
 );
 ```
 
-详见 §4 未来：Fragments 二进制预编译缓存。
+缓存的启用条件、校验和回退行为见 §4。
 
 ### 2.7 解析缓存版本域
 
@@ -365,7 +365,7 @@ app_data_dir/
 │  ├─ PHM/xyz.phm
 │  ├─ MOD/uvw.mod
 │  └─ MOD/uvw.stl
-└─ fragments/{project_id}/               # Fragments 预编译缓存（休眠）
+└─ fragments/{project_id}/               # Fragments 预编译缓存（默认关闭）
    └─ DEV_abc.ifc.frag
 ```
 
@@ -395,41 +395,26 @@ app_data_dir/
 
 ---
 
-## 4. 未来：Fragments 二进制预编译缓存
+## 4. Fragments 二进制缓存（默认关闭）
 
-### 4.1 设计目标
+Fragments 缓存已经接入加载器，但 `ENABLE_FRAGMENTS_CACHE=false` 时不参与默认路径。
+开启灰度覆盖后，流程为：
 
-跳过 web-ifc WASM 解析 IFC 的耗时步骤，直接加载 OBC Fragments 二进制：
-- 首次加载 IFC → web-ifc 解析 → 转 Fragments → 写入 `.frag` 文件
-- 二次加载 → 直接读取 `.frag` → `ctx.fragments.core.load` → 跳过 web-ifc
+1. `validateFragmentCache` 在不读取 IFC buffer 的情况下检查记录和文件；
+2. 命中后读取 `.frag`，调用 `ctx.fragments.core.load`，并校验模型是否进入运行时集合；
+3. 缓存无效、文件损坏或加载校验失败时回退 `getIfcBuffer()` + `ctx.ifcLoader.load`；
+4. IFC 成功加载后序列化 `.frag` 并写入记录，写入失败不提交完整缓存状态。
 
-### 4.2 当前状态：休眠
+校验条件：
 
-- 开关：`desktop/src/config/features.ts` `ENABLE_FRAGMENTS_CACHE = false`
-- 休眠代码路径：
-  - `desktop/bridge/database.ts`：`writeFragmentCacheFile` / `readFragmentCacheFile` / `upsertFragmentCacheRecord` / `getFragmentCacheRecord` / `validateFragmentCache`
-  - `desktop/src/viewer/ifcEntryLoader.ts`：`tryLoadFromFragmentsCache` / `tryWriteFragmentsCache`
-- 休眠原因：Fragments 版本兼容性 + 调试复杂度，MVP 阶段优先保证 IFC 加载稳定性
+- `project_id + entry_path` 记录存在；
+- `source_gim_sha256` 与当前 GIM SHA-256 一致且非空；
+- `fragments_version` 与当前 OBC/web-ifc 运行时版本一致；
+- `.frag` 存在、非空且实际大小等于记录的 `fragment_file_size`。
 
-### 4.3 启用后的流程
-
-`ifcEntryLoader.loadIfcEntry` 启用后的加载顺序：
-1. `modelId` 已加载 → return
-2. `validateFragmentCache`（不读 IFC buffer）→ valid → `readFragmentCacheFile` → `ctx.fragments.core.load`
-3. 加载后校验 `loadedModels` / `fragments.list`，失败回退 IFC
-4. 缓存无效或加载失败 → `getIfcBuffer()` → `ctx.ifcLoader.load`（web-ifc 解析）
-5. IFC 加载成功 → 写 `.frag` 文件 + `upsertFragmentCacheRecord`
-
-关键设计：Fragments 缓存命中时**不读取 IFC buffer**，省去大文件 IPC 传输 + web-ifc 解析耗时。
-
-### 4.4 校验机制
-
-`validateFragmentCache` 检查：
-- `parser_version_match`（解析器版本一致）
-- `fragments_version` 一致（OBC Fragments 格式版本）
-- `source_gim_sha256` 与当前工程 SHA-256 匹配（主身份条件，缺少/不匹配即失效）
-- `source_ifc_size` 匹配时仅作为辅助诊断（Fragments 命中路径可传 0 跳过）
-- `.frag` 文件存在且实际大小匹配 `fragment_file_size`
+命中路径不会读取 IFC buffer，因此可跳过大文件 IPC 和 web-ifc 解析；缓存域只影响
+对应 IFC，不改变 CBM/FAM/DEV 或线路语义缓存。默认开关是否调整由
+[dev-log.md](dev-log.md) 管理。
 
 ---
 
@@ -469,6 +454,6 @@ app_data_dir/
 - **不持久化底图状态**：`basemapStatusService` 为内存单例，工程切换时重置，不写入 SQLite
 - **不缓存 MapLibre 瓦片**：OSM 在线瓦片不下载、不缓存，遵循 OSM 使用条款
 - **线路工程不缓存 IFC**：线路工程无 IFC 文件，`validate_gim_cache` 跳过 IFC 校验分支
-- **Fragments 缓存默认关闭**：`ENABLE_FRAGMENTS_CACHE=false`，休眠代码保留但不执行
-- **PARSER_VERSION 变更即全量失效**：版本不匹配时所有旧缓存自动失效，用户需重新解压 GIM
+- **Fragments 缓存默认关闭**：`ENABLE_FRAGMENTS_CACHE=false`，灰度开启时按版本和源 SHA 校验
+- **解析缓存按工程域失效**：线路和变电使用独立 parser version；对应域版本变化才重建该域索引
 - **磁盘缓存 best-effort 删除**：DB 事务成功即视为项目已删除，磁盘文件删除失败不阻断（下次启动可手动清理）

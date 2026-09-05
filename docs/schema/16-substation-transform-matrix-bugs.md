@@ -199,16 +199,12 @@ function colorToMaterial(color: XmlModColor | undefined): THREE.MeshStandardMate
 3. **`xmlModLoader.ts` re-export**：`export { disposeSharedXmlModMaterials } from './xmlModGeometry.js'`，统一入口。
 4. **测试更新**：`disposeXmlModGroup` 测试期望从 "释放 geometry + material" 改为 "仅释放 geometry"，并验证 Material 未被 dispose。
 
-#### 后续优化方向（未实施）
+#### 当前实例化边界
 
-| 优化项 | 预期效果 | 优先级 |
-| ---- | ---- | ---- |
-| Geometry 缓存（按 modPath） | 同 MOD 多实例仅解析一次，减少 ~50% 解析压力 | P1 |
-| LRU 上限（state.loadedXmlModGroups ≤ 1500） | 防止累积过多 Group 导致内存增长 | P1 |
-| InstancedMesh（同 modPath + 同 placement） | 78000 Mesh → 数百 InstancedMesh，大幅减少 draw call | P2 |
-| Worker 化 XML 解析 + 几何构造 | 主线程不阻塞，加载流畅度提升 | P3 |
-
-详见 [17-batch-load-schema.md](./17-batch-load-schema.md)。
+当前 DEV GLB 管线按 unique DEV 编译并缓存 bytes，但每个 CBM placement 仍保持独立
+实例，避免可变 `BufferGeometry` 的矩阵修改互相污染。shared geometry、LRU 和几何
+Worker 不属于当前实现契约，边界说明见 [17-batch-load-schema.md](./17-batch-load-schema.md)
+和 [dev-log.md](../dev-log.md)。
 
 ---
 

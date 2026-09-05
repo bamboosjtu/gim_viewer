@@ -7,9 +7,7 @@
 1. **研究分析文档**：按分析顺序编号，记录样本事实、统计结果、引用链、异常分型和实现边界。
 2. **格式说明文档**：按文件类型命名，记录单类文件的字段结构和解析约定。
 
-研究结论只代表当前样本实证结果，不直接等同于完整 GIM 标准。新增样本后，应优先复跑编号文档中的脚本，再决定是否更新解析器。
-
-> **2026-07-17 复核**：三个登记样本的 SHA-256、容器头、目录清单、MOD 格式族和 STL 二进制统计已重新核对。当前实现状态与历史研究结论的分界见 [21-schema-conclusion-review-0717.md](21-schema-conclusion-review-0717.md)。
+研究结论只代表当前样本实证结果，不直接等同于完整 GIM 标准。新增样本后，应先核对样本事实，再决定是否更新解析器；文档不记录按日期追加的过程日志。
 
 ---
 
@@ -40,14 +38,12 @@
 | 10 | [10-substation-mod-grammar.md](10-substation-mod-grammar.md) | 变电 XML primitive 字段范围、强类型 schema 判定、Color/StretchedBody 深度分析 | 待随新样本复核 |
 | 11 | [11-line-mod-grammar.md](11-line-mod-grammar.md) | 线路 MOD 4 类文本格式族 grammar、层级关系、parser 草案边界 | Parser 已实现并由属性面板运行时消费；不启用独立线路 3D |
 | 12 | [12-stl-static-survey.md](12-stl-static-survey.md) | STL 格式检测、PHM 引用扫描、entityName 映射、STL 与 MOD 关系判定、§9 STL 设备类型分析（三样本）、§10 MOD 设备类型对比分析（三样本：变电 XML primitive vs 线路 4 类文本格式族） | 待随新样本复核 |
-| 13 | [13-geometry-ir-schema.md](13-geometry-ir-schema.md) | 统一 Geometry IR 草案、5 种 kind schema、解析管道分层、缺陷对照 | 设计文档；§1/§6 是历史实现基线 |
-| 14 | [14-line-catenary-study.md](14-line-catenary-study.md) | 线路悬链线参数研究方法论、审计流程、样本证据与决策路径（M4-B1/B2/B3/B3A/B3B/B3C 沉淀） | 样本研究有效；当前仅保留地图上的实验性 2D 曲线和审计导出，独立线路 3D 未启用 |
+| 13 | [13-geometry-ir-schema.md](13-geometry-ir-schema.md) | 统一 Geometry IR、5 种 kind schema、解析管道分层和边界 | 当前 Geometry IR 的类型与解析边界 |
+| 14 | [14-line-catenary-study.md](14-line-catenary-study.md) | 线路 WIRE 字段、档距聚合、拓扑分类和审计接口的语义证据 | 当前仅保留地图上的实验性 2D 曲线和审计导出，独立线路 3D 未启用 |
 | 15 | [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) | demo-line 全量静态分析证据（5460 WIRE / 327 TOWER），KVALUE / MATRIX0 / BLHA / 拓扑分类字段语义确认 | 样本证据文档（demo-line） |
-| 17 | [17-batch-load-schema.md](17-batch-load-schema.md) | MOD/STL 批量加载、共享几何、GLB 中间态缓存设计与演进 | 方案 B 与 DEV 粒度方案 C 已实现；Worker/SQLite 几何表未实现 |
-| 18c | [18c-experiment-mod-to-gltf-cache.md](18c-experiment-mod-to-gltf-cache.md) | MOD/STL → GLB 缓存实验及 MOD 粒度到 DEV 粒度的设计变更 | DEV 粒度方案已实现并纳入构建/样本回归验证；Worker/SQLite 几何表仍是长期路线 |
+| 17 | [17-batch-load-schema.md](17-batch-load-schema.md) | 变电 DEV/PHM/MOD/STL 批量读取、GLB manifest、失败隔离和缓存契约 | 当前 geometry-cache-v5 实现边界 |
 | 20 | [20-substation-partindex-alias-correction.md](20-substation-partindex-alias-correction.md) | demo-substation PARTINDEX 与 DEV SUBDEVICE 别名关系、几何实例基线更正 | 已落实到渲染入口 |
-| 21 | [21-schema-conclusion-review-0717.md](21-schema-conclusion-review-0717.md) | 2026-07-17 样本事实与当前实现状态复核 | 本轮复核基线 |
-| 22 | [22-ten-sample-verification-0824.md](22-ten-sample-verification-0824.md) | **2026-08-24 十样本（4 变电 + 6 线路）全量复核**：结论外推性判定、导出软件混杂变量、实现影响清单 | 当前最新基线 |
+| 22 | [22-ten-sample-verification-0824.md](22-ten-sample-verification-0824.md) | 十样本（4 变电 + 6 线路）字段、容器、引用和导出差异基线 | 当前跨样本证据 |
 
 ---
 

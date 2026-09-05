@@ -431,5 +431,5 @@ F1System: 868b296f-...
 | CBM 规范 | `docs/schema/cbm.md` |
 | 字段统计 | `docs/schema/04-cbm-field-dictionary.md` |
 | DEV 规范 | `docs/schema/dev.md` |
-| 命名实验 | `docs/schema/18b-experiment-cbm-tree-dev-subdevices.md` |
+| 几何缓存与实例边界 | `docs/schema/17-batch-load-schema.md` |
 | 排序代码 | `src/gim/cbmParser.ts` 第 194-200 行 |

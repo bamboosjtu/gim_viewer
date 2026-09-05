@@ -647,20 +647,20 @@ DEV 图在所有 GIM 中都只有一层
 线路和变电的组织方式可推广为规范规则
 ```
 
-当前只能确认：在三个样本中，DEV-linked CBM 的文件级几何目标引用链可以闭合。
+当前确认：登记样本中的 DEV-linked CBM 文件级几何目标可以闭合；运行时仍以
+`ProjectLoadSession`、visited 防环和 manifest 完整性校验为准。
 
 ---
 
-## 13. 后续建议
+## 13. 当前运行时边界
 
-```text
-1. PHM TRANSFORMMATRIX 字段形态分析 — ✅ 已完成（详见 09 号文档 §4：PHM 矩阵 100% 单位）
-2. MOD 静态类型进一步分组
-3. STL 文件大小与引用类型分析
-4. IFC-only CBM 与 DEV-linked CBM 的并行渲染策略设计
-5. 多工程样本验证 DEV 图深度、环、orphan geometry 是否稳定
-   — 可使用 gim-sample-verification skill 验证
-```
+- PHM `TRANSFORMMATRIX` 可为非单位阵，遍历必须递归并防环。
+- MOD/STL 的可达性只由 CBM→DEV→PHM/子 DEV→几何目标引用链决定；孤儿资源保留为
+  诊断，不自动生成实例。
+- IFC-only CBM 与 DEV-linked CBM 可并列进入变电导航，但各自的加载状态和来源链接
+  由上层模型树区分。
+- 新样本验证只更新本目录的事实表，不在这里追加性能或实施日志；待办统一见
+  [dev-log.md](../dev-log.md)。
 
 ### 13.1 PARTINDEX 与 DEV_SUBDEVICE 的关系（2026-07-11 补充）
 
@@ -673,7 +673,7 @@ DEV 图在所有 GIM 中都只有一层
 
 因此 §10 中"PARTINDEX, OWN_GEOMETRY 3894"的统计代表"CBM PARTINDEX 节点引用的 DEV 有自身几何"，但这些 DEV 与 F4System 根 DEV 的 SUBDEVICE 指向同一 child DEV，几何 seed 不应重复计入。
 
-这些仍应保持 schema analysis 范围，不应直接进入几何渲染实现。
+这些关系属于 schema 事实；当前几何渲染入口已经按上述别名规则处理，不重复创建实例。
 
 ---
 

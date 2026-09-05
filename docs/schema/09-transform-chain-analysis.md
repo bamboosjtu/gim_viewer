@@ -1,10 +1,10 @@
 # GIM 工程完整变换链分析
 
-> 本文档基于三个 demo 样本（`demo-line`、`demo-line1`、`demo-substation`）对 GIM 工程中变换矩阵的组合关系进行系统性梳理。每个分析维度下对比变电工程与线路工程的异同。
+> 本文沉淀变电与线路样本中的变换矩阵组合关系，作为当前解析器和渲染器的格式证据。
 >
-> 本报告不进入几何渲染实现，也不解释坐标系语义、单位换算、轴方向约定或三维构件拓扑。所有分析脚本集中放在文末附录 A。
+> 本文不定义具体三维拓扑；运行时变换入口和实例化边界见 [13-geometry-ir-schema.md](13-geometry-ir-schema.md) 与 [17-batch-load-schema.md](17-batch-load-schema.md)。
 >
-> **2026-08-24 十样本复核**（证据：`_generated/<sid>/transform-stl.csv`，脚本 `desktop/scripts/gim_survey/transform_stl.py`）：
+> 跨样本证据（`_generated/<sid>/transform-stl.csv`，脚本 `desktop/scripts/gim_survey/transform_stl.py`）：
 >
 > **PHM 矩阵 100% IDENTITY 的旧结论被推翻**：
 >
@@ -37,11 +37,8 @@
 >    - DEV SUBDEVICE 非单位占比：87.8%(JinQu) / 93.9%(Bentley) / 93.8%(BIMBase) / 59.1%(SDDP)，
 >      方向一致但数值随工具变化。
 >
-> **修订记录**：本文档初版仅覆盖 PHM × MOD Entity 两级变换，得出“两级变换假设不成立、实际为单级变换”的错误结论，导致后续渲染管线开发出现装配矩阵缺失与实例位置丢失。本次修订补充 CBM/DEV/SUBDEVICE 完整链路分析与实例级多样性证据，并修正第 6/13/14/15/16 节的结论。详见 [16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md) 的 bug 清单与修复建议。
->
-> **2026-07-10 更正**：本样本的 `9866` 是把 F4 根 DEV 的 SUBDEVICE 路径与其 CBM PARTINDEX 语义别名重复遍历后的路径数，不是应渲染的物理实例数。PARTINDEX 与对应 SUBDEVICE 一一映射但不含局部矩阵；正确的几何引用基线为 `4135 MOD + 1803 STL = 5938`。详见 [20-substation-partindex-alias-correction.md](./20-substation-partindex-alias-correction.md)。
->
-> **2026-07-17 状态复核**：`dev.md`、`phm.md`、DEV/PHM/XML parser 及 viewer helper 已统一为“16 浮点数列主序展开，平移在数组索引 m[12..14]（数学矩阵最后一列）”。旧“行优先”文字只在本文的历史对照段落中保留。53.4% CBM 矩阵覆盖率和 87.8% DEV SUBDEVICES 非单位占比仅来自当前唯一变电样本，仍需新变电样本复核。
+> 当前实现统一按 16 浮点数列主序展开，平移在数组索引 `m[12..14]`；
+> PARTINDEX 作为语义别名不重复创建物理实例。
 
 ## 1. 分析目标与范围
 
@@ -126,24 +123,7 @@ CBM → DEV → SUBDEVICE → PHM → MOD 完整链路重建后的实例级 plac
 
 ## 2. 矩阵存储约定
 
-### 2.1 早期文档快照（历史）
-
-`dev.md` 与 `phm.md` 早期曾按如下方式描述矩阵；该描述已撤销：
-
-```text
-4×4 矩阵按行优先展开为 16 个浮点数：
-M00,M01,M02,M03,M10,M11,M12,M13,M20,M21,M22,M23,M30,M31,M32,M33
-
-| M00  M01  M02  M03 |
-| M10  M11  M12  M13 |
-| M20  M21  M22  M23 |
-| M30  M31  M32  M33 |
-
-- 最后一列（M03, M13, M23）控制平移（X, Y, Z 方向）
-- 最后一行固定为 0,0,0,1
-```
-
-### 2.2 实证样本
+### 2.1 实证样本
 
 从 `demo-substation` MOD Entity 抽取一个含平移的样本：
 
@@ -1073,50 +1053,23 @@ export function applyPlacementTransformToSceneUnits(
 
 ---
 
-## 17. 后续建议
+## 17. 当前变换契约
+
+当前渲染路径统一使用以下变换链：
 
 ```text
-1. ~~修复 modAutoLoadService.ts 去重 bug（高优先级）~~ ✅ 已完成
-   diff: modMap.has(modGeo.modPath) → modMap.has(modGeo.instanceKey)
-   同步修复 stlMap.has(geo.stlPath) → stlMap.has(geo.instanceKey)
-   详见 [16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md)。
-
-2. ~~弃用 applyExternalTransforms（中优先级）~~ ✅ 已删除
-   函数已从源码中删除。生产路径全部走 applyPlacementTransformToSceneUnits（顶点烘焙版）。
-   详见 [16-substation-transform-matrix-bugs.md](./16-substation-transform-matrix-bugs.md)。
-
-3. ~~修正 dev.md 与 phm.md 中"行优先"的描述~~ ✅ 已完成
-   已统一为"16 浮点数列主序展开，平移在数组索引 m[12]/m[13]/m[14]"，
-   并补充与 Three.js Matrix4.elements 的对应关系。
-
-4. ~~修正 parser/viewer 的"行主序/列主序"矛盾~~ ✅ 已完成
-   devParser.ts / phmParser.ts / xmlModParser.ts 注释已统一；viewer helper
-   已更名为 `columnMajorToMatrix4`。
-
-5. 未来渲染管线实现时，必须应用完整装配矩阵：
-   placementTransform = CBM × DEV_SOLID × SUBDEVICE × PHM
-   finalTransform = placementTransform × MOD_Entity_TransformMatrix
-   不可跳过装配矩阵乘法（与初版建议相反）。
-
-6. 后续若有新 GIM 样本，使用 gim-sample-verification skill 验证：
-   - PHM 矩阵是否仍 100% 为单位
-   - CBM TRANSFORMMATRIX 命中率
-   - DEV SUBDEVICES 非单位矩阵占比
-   - 多实例 MOD 文件比例
-   - MOD Entity.TransformMatrix 分类分布是否在合理范围
-   - 矩阵存储约定是否仍为列主序
-
-7. 对线路工程 POINT 字段的经纬度格式做坐标系确认，
-   与 IFC GlobalID 坐标系或 OSM 底图做对照。
-
-8. 对 TEXT_HNUM_COMMA_RECORD 的 P 字段单位做确认，
-   与杆塔 H 字段（如 H,27000）做量纲一致性检查。
-
-9. 撰写实例级 instanceKey 构造规则文档
-   现有 instanceKey 由 modGeometryDiscovery.ts 生成，
-   需明确其与 (modPath, placementTransform) 的对应关系，
-   指导去重逻辑与缓存键设计。
+placementTransform = CBM × DEV_SOLID × SUBDEVICE × PHM
+finalTransform = placementTransform × MOD_Entity_TransformMatrix
 ```
+
+- `TRANSFORMMATRIX` 由 parser 按 16 个浮点数的列主序展开，平移位于
+  `m[12] / m[13] / m[14]`，与 Three.js `Matrix4.elements` 对齐。
+- 变换在实例级累积；不同 CBM placement 即使引用同一 MOD，也必须保留不同
+  `instanceKey`，不得按文件路径简单去重。
+- 新样本复核时只需确认矩阵列主序、CBM/DEV/SUBDEVICE 覆盖率和实例复用情况；
+  这些是格式证据，不是运行时性能日志。
+- shared geometry、LRU 和 Worker 等优化不属于本 schema；当前排期统一见
+  [dev-log.md](../dev-log.md)。
 
 ---
 

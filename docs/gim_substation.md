@@ -45,7 +45,7 @@
 - 缓存命中场景的节点按需回放仍由 `nodeInteractionService` 通过 `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` 读取 DEV/PHM/MOD/STL；GLB fast path 不可用时保留原始文件解析。
 - PHM 的 `COLORn` 与文件级 `max(A)` 已随几何引用链缓存；重放时对 MOD/STL 实例应用 RGB、透明度和 A=0 不透明哨兵规则。
 
-> P0 实现路径及仍待补齐的 P1/P2 见 §9。
+> 未完成事项与下一步性能/功能工作统一维护在 [dev-log.md](dev-log.md)；本文件只描述当前实现和稳定边界。
 
 ---
 
@@ -155,8 +155,8 @@ project.cbm（工程根）
 3. 选中构件后的参数详情由 Fragments `getItemsData()` 按需读取，避免启动时构造
    全量属性对象。
 
-四个真实变电样本的空间对象、直接/分解/宿主关系和 CBM↔IFC 链接回归记录见
-[变电加载性能特征化 v1](substation_loading_characterization_v1.md)。
+空间对象、直接/分解/宿主关系和 CBM↔IFC 链接的字段定义与样本边界见
+[Schema 目录](schema/README.md)；性能待办不在本文件重复记录。
 
 ---
 
@@ -283,58 +283,24 @@ IFC + DEV/PHM/MOD/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路径
 
 ---
 
-## 9. 下一步实现路径
+## 9. 当前实现边界
 
-> 基于 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) 的 IR 草案与 [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) 的 primitive grammar，按优先级分阶段实施。
->
-> **P0 已完成**：IR schema + PHM/DEV/xml-mod parser + 14 类 primitive 渲染 + xml-mod 自动加载 + 缓存命中场景回放 + 属性字典/来源按钮；当前工作树验证以最新 `npm test -- --run` 与 `npm run test:sample` 结果为准（本轮记录为 642/642、30/30）。
+### 9.1 语义与几何管线
 
-### 9.1 P0（已完成）
+- IFC Spatial Semantic Core 采用 selective/two-pass scan：首遍只保留空间/导航对象、必要关系和单位；次遍只物化导航对象引用到的 placement 闭包。属性集、工程量、材质、分类、类型和分组由 Fragments 在属性面板按需读取。
+- IFC 通过 OBC Fragments 加载到 Three.js；DEV→PHM→MOD/STL 通过 Geometry IR 和渐进式 DEV GLB 管线渲染到同一场景。PHM 的变换矩阵和颜色覆盖在实例级应用。
+- 每个 unique DEV 的几何缓存 manifest 记录 `status=glb|empty`。合法 `empty` 是成功结果；单个 DEV 的 GLB 读取或解析失败只触发该 DEV 的 scoped raw MOD/STL fallback，整体 manifest/source 损坏才重建几何缓存。
 
-| 任务 | 输入 | 输出 | 关键约束 |
-|---|---|---|---|
-| ~~IR schema 落地~~ | [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) §2-§4 | `desktop/src/gim/geometry/ir.ts` | ✅ 5 kind 联合 + 14 类 primitive 类型 |
-| ~~PHM 解析器与颜色刻度~~ | `.phm` 文件 | `desktop/src/gim/geometry/phmParser.ts` | ✅ SOLIDMODELn + TRANSFORMMATRIXn + COLORn 一一对应，并统计 `colorMaxA` |
-| ~~xml-mod parser~~ | 14 类 primitive | `desktop/src/gim/geometry/xmlModParser.ts` | ✅ 覆盖率 99.86%，11 强类型 + 3 弱 schema fallback |
-| ~~xml-mod 渲染~~ | XmlModEntity[] → Three.js geometry | `desktop/src/viewer/xmlModLoader.ts` / `xmlModGeometry.ts` | ✅ 与 IFC 渲染栈共存，独立 `loadedXmlModGroups` 跟踪；PHM 颜色覆盖隔离共享材质 |
-| ~~DEV/PHM/MOD/STL 文件磁盘缓存~~ | 首次打开时缓存 | `desktop/src/services/gimExtractedCacheService.ts` `cacheGeometryFiles` | ✅ 复用缓存写入，路径遍历防护；几何引用链同步入库 |
-| ~~xml-mod 自动加载~~ | IFC 加载完成后 | `desktop/src/services/progressiveGeometryService.ts` | ✅ 渐进式 DEV GLB 管线统一处理 MOD/STL |
-| ~~缓存命中场景回放~~ | `currentFiles=null` | `desktop/src/services/nodeInteractionService.ts` `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` | ✅ 通过 `readCachedIfc` 从磁盘按需读取，缓存键含几何版本 |
-| ~~属性语义与来源路由~~ | CBM/FAM/DEV/IFC 属性 | `desktop/src/ui/propertyDictionary.ts` / `propsDrawer.ts` / `cbmTreeView.ts` | ✅ 四页签、P0/P1/P2 字典、技术字段折叠、来源按钮跳转 |
+### 9.2 缓存与交互
 
-### 9.2 P1（MVP 可选，影响 STL 展示能力）
+- 语义缓存按线路/变电工程域隔离版本；几何缓存和 Fragments 缓存拥有独立版本与源 SHA 校验。几何缓存失效不会重新解压或重建 CBM、FAM、DEV 和 IFC Spatial 索引。
+- 首次打开完成 IFC 首批加载后，几何在后台渐进显示；缓存命中时从磁盘 manifest 和二进制 batch 恢复。项目切换由 `ProjectLoadSession` 和 geometry token 隔离旧任务。
+- 属性抽屉提供“概览 / 参数 / 关系 / 来源”四页签，技术标识和长路径折叠，来源按钮负责定位到可读业务对象或图纸。
 
-| 任务 | 输入 | 输出 | 关键约束 |
-|---|---|---|---|
-| **STL 渲染增强** | 变电 STL（含 binary/ASCII 兼容） | `desktop/src/viewer/stlLoader.ts` + 渐进式 GLB | 基础加载与首次打开已完成；缓存命中默认按需加载，仍需大样本性能验收 |
-| ~~**PHM COLOR 应用**~~ | PHM COLORn 字段 | `desktop/src/viewer/xmlModGeometry.ts` `applyPhmColorOverride` | ✅ 已完成；实例材质 clone，A=0 哨兵、百分制/字节制均有测试 |
-| **EMPTY_DEVICE_XML 提示** | 44 个孤儿 MOD | UI 提示 + 诊断（reason: `empty-device-xml`） | 不参与渲染但应提示，尚未实现 |
+### 9.3 已知边界
 
-### 9.3 P2（体验补齐）
+- 无几何的 MOD 或没有自有 `SOLIDMODEL` 的装配节点当前不伪造模型，只保留空结果；明确原因提示列在 [dev-log.md](dev-log.md)。
+- Fragments 缓存代码可灰度使用但默认关闭；线路不启用独立 3D Viewer。
+- 变电数据格式与导出工具存在差异，新增样本的字段语义以 [Schema 研究](schema/README.md) 的跨样本证据为准。
 
-| 任务 | 输入 | 输出 | 关键约束 |
-|---|---|---|---|
-| **装配节点无几何提示** | 14 个无 SOLIDMODEL PHM | UI 提示 + 诊断（reason: `assembly-node-without-own-geometry`） | 装配节点自身无几何但子设备几何完整，与 `phm-no-solidmodel` 区分 |
-| **缓存命中回放 SQLite 化** | geometry_source 表（建议） | 缓存命中时直接从 SQLite 恢复 IR | 正式 DDL 另起 16-geometry-cache-schema.md（待建）；当前通过磁盘缓存 + 按需读取替代 |
-| **节点联动扩展** | CBM 树 → MOD/STL 高亮 | 选中设备节点 → 高亮对应 MOD primitive + 相机定位 | 与现有 IFC 联动模式一致 |
-
-### 9.4 关键约束（来自分析报告）
-
-| 约束 | 来源 | 影响 |
-|---|---|---|
-| 14 类 primitive 覆盖率 99.86% | [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) | 9 类低样本 primitive 需保留弱 schema fallback |
-| 86 个 PHM 同时引用 STL + MOD | [12-stl-static-survey.md](schema/12-stl-static-survey.md) §5 | 当前实例级材质覆盖已隔离；仍需评估重复渲染风险（建议 MOD-first 或 STL-first 策略） |
-| STL 以 binary 为主、个别样本含 ASCII | [12-stl-static-survey.md](schema/12-stl-static-survey.md) | `stlLoader` 先按长度公式判定 binary，再兼容 `solid` ASCII 分支 |
-| PHM TransformMatrix 随导出软件变化 | [09-transform-chain-analysis.md](schema/09-transform-chain-analysis.md) | 运行时无条件应用 DEV/PHM/CBM/SUBDEVICE 两级累积矩阵；不能写死为 IDENTITY |
-| F3System 多 FAM 引用 145 个文件 × 4 FAM | [06-cbm-fam-consistency.md](schema/06-cbm-fam-consistency.md) §3.3 | F3System 节点属性聚合需考虑多 FAM 合并展示 |
-| Geometry IR 不在 SQLite 范围 | [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) §1.3 | 正式 DDL 另起 16-geometry-cache-schema.md |
-
-### 9.5 与现有 IFC 路径的兼容性
-
-| 兼容点 | 策略 |
-|---|---|
-| 现有 `ifcLoader.ts` | 保留，IR 通过 `kind: "ifc"` 复用 |
-| `CbmNode` 类型 | 保留 `ifcFile` / `ifcGuid` 字段，IR 不替代，仅消费 path/entityName/devPath |
-| `AppState` | 新增可选字段 `geometryBundles` / `cachedGeometryPaths`（向后兼容） |
-| SQLite 表 | 现有 7 张表 + fragments_cache 保留，新增 `geometry_source` 表为可选缓存（不破坏现有缓存命中） |
-| 渲染栈 | IFC 走 OBC Fragments，MOD/STL 走 Three.js 直接 geometry，两者共存于同一 scene |
+未完成的性能提升、功能特性和产品决策不在本文件展开，统一维护在 [dev-log.md](dev-log.md)。
