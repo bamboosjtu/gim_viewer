@@ -512,8 +512,16 @@ export function parseBatchCachePayload(value: ArrayBuffer | Uint8Array): {
  * 在 Tauri 环境下写入 GLB 缓存文件（方案 C：序列化后的 glTF 二进制）。
  * 路径由 projectId + entryPath 计算，存储在 app_data_dir/glbcache/{projectId}/ 下。
  */
-export async function writeGlbFile(projectId: number, entryPath: string, bytes: Uint8Array): Promise<string> {
-  return invokeTimed<string>('write_glb_file_binary', packBinaryCacheWrite(projectId, entryPath, bytes));
+export async function writeGlbFile(
+  projectId: number,
+  entryPath: string,
+  bytes: Uint8Array,
+  sourceGimSha256?: string | null,
+): Promise<string> {
+  return invokeTimed<string>(
+    'write_glb_file_binary',
+    packBinaryCacheWrite(projectId, entryPath, bytes, sourceGimSha256 ?? undefined),
+  );
 }
 
 /**
@@ -555,10 +563,17 @@ export async function batchReadGlbFiles(
  * 在渐进式几何管线（progressiveGeometryService）完成所有 MOD/STL → .glb
  * 序列化后调用一次，把当前 GEOMETRY_CACHE_VERSION 写入
  * glbcache/{projectId}/_version.txt。
- * 下次 validateGimCache 时读取此文件并比较，版本不匹配则整体失效。
+ * 下次 validateGimCache 时读取此文件并比较；版本不匹配只使 geometry
+ * domain 失效，不影响 CBM/IFC 语义缓存。
  */
-export async function writeGeometryCacheVersion(projectId: number): Promise<string> {
-  return invokeTimed<string>('write_geometry_cache_version', { projectId });
+export async function writeGeometryCacheVersion(
+  projectId: number,
+  sourceSha256?: string | null,
+): Promise<string> {
+  return invokeTimed<string>('write_geometry_cache_version', {
+    projectId,
+    sourceSha256: sourceSha256 ?? null,
+  });
 }
 
 export type GeometryCacheManifestStatus = 'glb' | 'empty';
@@ -640,6 +655,8 @@ export async function saveGeometryRefs(payload: GeometryRefsPayload): Promise<vo
 }
 
 export interface ReachableGeometry {
+  /** 产生该引用的 DEV 路径（DEV/ 前缀，大小写不敏感）。 */
+  dev_path: string;
   geometry_path: string;
   instance_key: string;
   placement_transform_matrix: string | null;
@@ -652,12 +669,13 @@ export interface ReachableGeometry {
 /** 查询项目中可从 CBM 到达的 MOD/STL 几何源（一次 SQL 查询） */
 export async function getReachableGeometry(
   projectId: number,
-  options?: { includeMod?: boolean; includeStl?: boolean },
+  options?: { includeMod?: boolean; includeStl?: boolean; devPaths?: string[] },
 ): Promise<ReachableGeometry[]> {
   return invokeTimed<ReachableGeometry[]>('get_reachable_geometry', {
     projectId,
     includeMod: options?.includeMod ?? true,
     includeStl: options?.includeStl ?? false,
+    devPaths: options?.devPaths ?? null,
   });
 }
 
@@ -760,6 +778,16 @@ export interface GimCacheValidation {
   geometry_cache_version_match: boolean;
   /** v6（方案 C）: 当前 GEOMETRY_CACHE_VERSION（供前端诊断显示） */
   current_geometry_cache_version: string;
+  /** 版本标记文件是否匹配；与单个 GLB 文件完整性分开。 */
+  geometry_cache_version_file_match: boolean;
+  /** manifest/source/entry 结构是否有效；单个 GLB 缺失可由 DEV fast path 隔离。 */
+  geometry_cache_manifest_valid: boolean;
+  /** 变电基础索引/IFC source cache 是否有效（不含几何域）。 */
+  substation_semantic_cache_valid: boolean;
+  /** DEV GLB geometry cache 是否有效。 */
+  geometry_cache_valid: boolean;
+  /** 所有 IFC Fragments cache 是否完整有效。 */
+  fragments_cache_valid: boolean;
 }
 
 /**
@@ -836,6 +864,11 @@ export interface ProjectCacheDiagnostic {
   /** v6: 变电 GLB 几何缓存版本/manifest 是否匹配 */
   geometry_cache_version_match: boolean;
   current_geometry_cache_version: string;
+  geometry_cache_version_file_match: boolean;
+  geometry_cache_manifest_valid: boolean;
+  substation_semantic_cache_valid: boolean;
+  geometry_cache_valid: boolean;
+  fragments_cache_valid: boolean;
   valid: boolean;
 
   ifc_cache_files: IfcCacheFileDiagnostic[];

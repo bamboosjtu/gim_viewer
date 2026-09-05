@@ -261,8 +261,8 @@ manifest，条目内容由 `DiskBackedFile` 在 `text()` / `arrayBuffer()` 时�
 - **同 DEV 多实例**：共享一次序列化，逐实例应用 CBM 累积矩阵（数学与 GLB 快速路径一致）
 - **浏览器模式**：无 projectId / 非 Tauri 时跳过落盘与版本文件，仅渐进渲染
 - **中断安全**：项目切换 token 中断即退出且不写版本标记 →
-  下次打开 `geometry_cache_version_match=false` 自动清理重编译
-- **二次打开**：`tryDevGlbFastPath` 先读取 `geometry-cache-v5-dev-status` 的 DEV manifest，按 unique DEV 通过 `batch_read_glb_files` 二进制 envelope 批读；`empty` 为合法空结果，只有 manifest/GLB 不完整或读取/解析失败才整体回退原始 MOD/STL。
+  下次打开 `geometry_cache_version_match=false` 仅重建 geometry domain
+- **二次打开**：`tryDevGlbFastPath` 先读取 `geometry-cache-v5-dev-status` 的 DEV manifest，按 unique DEV 通过 `batch_read_glb_files` 二进制 envelope 批读；`empty` 为合法空结果，单个 DEV 的 GLB 不完整或读取/解析失败只做该 DEV 的 scoped 原始 MOD/STL 回退，manifest/source 结构损坏才整体重建 geometry cache。
 
 ### 工程类型检测
 

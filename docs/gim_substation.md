@@ -40,8 +40,8 @@
 - 变电语义缓存使用独立的 `SUBSTATION_PARSER_VERSION=gim-substation-parser-v22`；线路使用 `LINE_PARSER_VERSION=gim-line-parser-v1`。旧 `PARSER_VERSION=gim-parser-v22` 字段仅作兼容/诊断，并按工程类型迁移，不会因变电 Semantic Core 升级而误使线路缓存失效。本版本引入 IFC Spatial Semantic Core selective/two-pass scan：Pass1 只保留空间/导航对象、必要 IFCREL、单位并收集 placement 候选偏移，Pass2 只物化实际引用的 placement 闭包；属性集、工程量、材质、分类、类型和分组不进入启动索引。几何 GLB 缓存版本为 `geometry-cache-v5-dev-status`，与语义版本独立。Fragments 缓存另绑定源 GIM SHA-256 与 `fragments-cache-v6` 运行时版本，旧记录缺少源 SHA 时视为失效。
 - 首次打开 GIM 时，通过 `cacheGeometryFiles` 缓存 DEV/PHM/MOD/STL 文件到 `app_data_dir/extracted/{projectId}/`（复用 `writeCacheFile`，沿用路径遍历防护）。
 - IFC 加载完成后自动启动渐进式 DEV GLB 管线（`progressiveGeometryService`），按 DEV 粒度一次解析、落盘并逐实例渲染 IFC 之外的 MOD/STL；用户无需逐节点点击才能看到几何。
-- 每个 unique DEV 在 `_manifest.json` 中记录 `status=glb|empty` 与字节数。缓存命中场景（`currentFiles=null`）先按 manifest 建立 DEV→CBM placement 映射，以 GIMR 二进制 envelope 分批读取 GLB；同一 DEV 的 GLB 最多读取一次，`empty` 不读取也不触发回退，随后每个 placement 独立加载并应用 CBM 矩阵。manifest 缺失、GLB 大小/header 不符、真实读取或解析失败时才整体回退原始 MOD/STL。
-- 旧缓存或写入/序列化未完成时不写几何版本标记；缓存校验失败会清理 `glbcache/{projectId}` 并重新生成，避免 partial geometry 被当作完整缓存。
+- 每个 unique DEV 在 `_manifest.json` 中记录 `status=glb|empty` 与字节数。缓存命中场景（`currentFiles=null`）先按 manifest 建立 DEV→CBM placement 映射，以 GIMR 二进制 envelope 分批读取 GLB；同一 DEV 的 GLB 最多读取一次，`empty` 不读取也不触发回退，随后每个 placement 独立加载并应用 CBM 矩阵。单个 DEV 的 GLB 缺失、大小/header 不符、真实读取或解析失败只隔离该 DEV，并按 DEV path 做 scoped 原始 MOD/STL 回退；manifest/source 结构损坏或版本失效才重建整个 geometry cache。
+- 旧缓存或写入/序列化未完成时不提交几何版本标记；geometry cache 与 CBM/IFC 语义缓存独立，几何版本失效不会重新解压或重建语义索引。partial failure 的成功 GLB 保留在场景中，避免将单个坏 DEV 放大为全项目 MOD/STL 长尾。
 - 缓存命中场景的节点按需回放仍由 `nodeInteractionService` 通过 `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` 读取 DEV/PHM/MOD/STL；GLB fast path 不可用时保留原始文件解析。
 - PHM 的 `COLORn` 与文件级 `max(A)` 已随几何引用链缓存；重放时对 MOD/STL 实例应用 RGB、透明度和 A=0 不透明哨兵规则。
 
@@ -260,8 +260,8 @@ IFC + DEV/PHM/MOD/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路径
 
 - manifest 以大小写不敏感的 `DEV/<name>.dev` 为唯一键；同一 DEV 被多个 CBM placement 引用时只批量读取一次 GLB bytes，随后每个 placement 独立 `loadDevGlb`，继续应用各自 CBM 累积矩阵。
 - Rust `batch_read_glb_files` 返回 GIMR v2 二进制 envelope，前端按最多 256 个文件或预计 64 MiB 分批；不使用旧 JSON 数组响应。
-- `empty` 是合法确定性结果：不读文件、不解析、不触发原始 MOD fallback。manifest 缺项、GLB 缺失/截断/header 或 size 不符、真实读取/解析错误会清理已加入场景的 fast-path group，并整体回退原始 MOD/STL。
-- profile 随 `finishModStl` 写入诊断：`cbmInstanceCount`、`uniqueDevCount`、`glbDevCount`、`emptyDevCount`、`glbBatchReadMs`、`glbReadBytes`、`glbParseCount`、`glbParseMs`、`rawModFallbackCount`。
+- `empty` 是合法确定性结果：不读文件、不解析、不触发原始 MOD fallback。单个 DEV 的 manifest 缺项、GLB 缺失/截断/header 或 size 不符、真实读取/解析错误只进入该 DEV 的 scoped fallback；manifest/source 结构损坏或版本失效才重建整个 geometry cache。
+- profile 随 `finishModStl` 写入诊断：`cbmInstanceCount`、`uniqueDevCount`、`glbDevCount`、`emptyDevCount`、`glbBatchReadMs`、`glbReadBytes`、`glbParseCount`、`glbParseMs`、`rawModFallbackCount`、`failedDevCount`、`failedDevPaths`、`failureType`、`partialRawFallbackCount`、`partialRawFallbackInstanceCount`、`successfulGlbDevCount`、`successfulGlbInstanceCount`、`fullProjectRawFallbackCount` 及 scoped fallback 的耗时/行数。
 - `GEOMETRY_CACHE_VERSION` 由 `geometry-cache-v4-phm-color` bump 为 `geometry-cache-v5-dev-status`；旧 manifest（缺少 status）会被视为不完整并重新生成。
 
 ---

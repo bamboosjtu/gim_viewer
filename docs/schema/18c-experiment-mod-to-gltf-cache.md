@@ -457,30 +457,31 @@ v'' = CBM × ((DEV × PHM) × v)
 | D-4 | `modAutoLoadService.ts` 重写 Phase 1.5/3：按 seed 加载 DEV.glb | ✅ 完成 |
 | D-5 | `nodeInteractionService.ts` 重写 `loadModStlForNode`：按 DEV 加载 | ✅ 完成 |
 | D-6 | 验证 + 文档更新 | ✅ TypeScript/Rust 编译与回归通过 |
-| D-7 | v3 完整性与 warm fast path | ✅ 每 DEV `glb|empty` manifest、大小写不敏感 unique DEV 去重、GIMR v2 二进制 batch 读取、失败整体回退 |
+| D-7 | v3 完整性与 warm fast path | ✅ 每 DEV `glb|empty` manifest、大小写不敏感 unique DEV 去重、GIMR v2 二进制 batch 读取、单 DEV 失败隔离与 scoped 回退 |
 
 ### 10.6 D-6 验证记录
 
-**编译与回归验证**（2026-09-03）：
-- ✅ `npm test -- --run`：54 个测试文件、628/628 通过；包含 v3 fast path、manifest、失败清理和 session 竞态回归。
-- ✅ `npm run test:sample`：4 个测试文件、30/30 通过；真实 line02 样本解析链保持不变。
-- ✅ `npm run build`、`cargo check`、`cargo test`：均通过（Rust 24 个单元测试）。
+**编译与回归验证**（2026-09-05）：
+- ✅ `npm test -- --run`：57 个测试文件、668/668 通过；包含 v4 fast path、manifest、失败隔离、scoped fallback 和 session 竞态回归。
+- ✅ `npm run test:sample`：4 个测试文件、30/30 通过（本次真实样本回归耗时约 536 秒）；真实 line02 与四变电样本解析链保持不变。
+- ✅ `npm run build`、`cargo check`、`cargo test`：均通过（Rust 30 个单元测试）。
 - ✅ 旧 manifest（缺少 `status`）按整体失效处理；`glb+empty` 完整覆盖时不触发 raw MOD fallback。
 
 **v3 关键修复**（2026-09-03）：
 - manifest 对每个 unique DEV 明确记录 `status=glb` 或 `status=empty`；序列化/落盘失败不写完整版本标记。
 - warm fast path 先按大小写不敏感的 DEV key 建立 CBM placement 映射，GLB bytes 以 Rust `batch_read_glb_files` 的 GIMR v2 envelope 分批读取；同一 DEV 只读一次，每个 placement 仍独立 `loadDevGlb`。
-- empty DEV 不读、不 parse、不触发 fallback；manifest 缺项、GLB 缺失/截断/header 或 size 不符、真实 parse 错误会清理已加入场景的 group 并整体回退原始 MOD/STL。
+- empty DEV 不读、不 parse、不触发 fallback；单 DEV 的 manifest 缺项、GLB 缺失/截断/header 或 size 不符、真实 parse 错误会隔离该 DEV 并做 scoped 原始 MOD/STL 回退，manifest/source 结构损坏才整体重建 geometry domain。
 
-**运行时验证清单**（2026-09-03，真实 Tauri warm 样本）：
+**运行时验证清单**（2026-09-03，历史 v3 真实 Tauri warm 样本；不作为 v4 验收数据）：
 - [x] 首次打开路径已生成 DEV.glb 与 `_version.txt`；manifest 对每个 unique DEV 写入 `glb|empty` 状态。
 - [x] 二次打开 `tryDevGlbFastPath` 命中，使用 `batch_read_glb_files` GIMR v2；两组样本 `read_glb_file=0`。
 - [x] `glb+empty` 混合命中：substation02 的 547 个 empty DEV 未读取、未触发 raw MOD fallback。
 - [x] 多 CBM placement 复用同一 DEV bytes，仍按 placement 独立 `loadDevGlb`；单元回归验证实例数量和矩阵应用路径。
-- [x] manifest 缺失、GLB 截断/大小或 header 不符、真实读取/解析失败时整体清理 fast-path group 并回退原始 MOD/STL；截断、解析失败和 A→B session 竞态均有回归测试。
+- [x] v3 行为：manifest 缺失、GLB 截断/大小或 header 不符、真实读取/解析失败时曾整体清理 fast-path group 并回退原始 MOD/STL；该表述仅保留作历史记录。
+- [x] v4 行为：manifest/source 结构损坏或版本失效才整体重建 geometry domain；单个 DEV 的上述错误只清理该 DEV 的 placement，并进入 scoped 原始 MOD/STL fallback，成功 DEV 与合法 `empty` 保留。
 - [x] `GEOMETRY_CACHE_VERSION` 变更时 glb 缓存失效重建。
 
-真实 Tauri warm 复测（n=3/样本）摘要：
+历史 v3 真实 Tauri warm 复测（n=3/样本）摘要（不是本轮 v4 结果）：
 
 | 样本 | CBM instances | unique DEV | glb DEV | empty DEV | batch calls | batch read median/P95 | GLB bytes | GLB parse count | GLB parse median/P95 | `read_glb_file` | raw MOD fallback |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -488,3 +489,15 @@ v'' = CBM × ((DEV × PHM) × v)
 | substation04 | 532 | 207 | 207 | 0 | 3 | 733.3 / 739.7 ms | 27.07 MiB | 532 | 175.0 / 191.5 ms | 0 | 0 |
 
 以上仅覆盖本轮指定的两个 warm 样本，不替代 cold 路径或其它变电样本的完整性能结论；详细 IPC、RSS、JS heap 和阶段时序见 [`docs/substation_loading_characterization_v1.md`](../substation_loading_characterization_v1.md)。
+
+### 10.7 v4 真实 Tauri 验收（substation02 warm）
+
+2026-09-05 在同一 Tauri WebView 对 geometry manifest 已生成的 `substation02` 连续执行 3 次有效 warm run。中间一次未触发新加载 session（按钮仍处于前一轮恢复过程），已剔除；补测后有效 session 为 2、3、4。三次均满足：语义缓存有效、geometry manifest/version 有效、421 个 GLB DEV 批量命中、555 个合法 `empty` DEV 不读取，`failedDevCount=0`、`rawModFallbackCount=0`、`fullProjectRawFallbackCount=0`。
+
+| 有效 session | semanticReady | firstGeometryReady | fullModelReady | GLB batch | GLB bytes | GLB parse | MOD/STL span | full project fallback | JS heap（full ready） |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 28.92 s | 29.57 s | 327.81 s | 2 | 51.66 MiB | 2566 / 0.84 s | 5.60 s | 0 | 1.15 GB |
+| 3 | 28.99 s | 29.68 s | 327.95 s | 2 | 51.66 MiB | 2566 / 0.85 s | 4.83 s | 0 | 1.16 GB |
+| 4 | 28.78 s | 29.42 s | 329.44 s | 2 | 51.66 MiB | 2566 / 0.85 s | （诊断同量级） | 0 | （未单独截取） |
+
+本次验收证明失败隔离与 scoped fallback 未触发全项目回退；但 `fullModelReady` 仍约 328–329 s，显著高于 `MOD/STL` span 和 GLB parse 时长，说明剩余长尾属于现有变电渲染/实例化路径，不在 v4 故障隔离范围内，需另开 Geometry Compiler 性能专项。第 2 次脚本采集因无新 session 不计入 n=3。

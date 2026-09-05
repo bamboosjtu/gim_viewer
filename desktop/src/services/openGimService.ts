@@ -554,7 +554,12 @@ export async function loadAllIfcFiles(
   state: AppState,
   entries: IfcEntry[],
   showMessage: (text: string) => void,
-  options: { session?: ProjectLoadSession } = {},
+  options: {
+    session?: ProjectLoadSession;
+    geometryCacheValid?: boolean;
+    geometryCacheManifestValid?: boolean;
+    geometryCacheVersionFileMatch?: boolean;
+  } = {},
 ): Promise<void> {
   const session = options.session ?? state.captureProjectSession();
   const perfSession = perfCurrentSession();
@@ -573,7 +578,12 @@ export async function loadAllIfcFiles(
 
   if (entries.length === 0) {
     // 无 IFC 但仍触发 MOD/STL 自动加载（纯 xml-mod 工程）
-    await autoLoadModStlPostIfc(state, showMessage, undefined, { session });
+    await autoLoadModStlPostIfc(state, showMessage, undefined, {
+      session,
+      geometryCacheValid: options.geometryCacheValid,
+      geometryCacheManifestValid: options.geometryCacheManifestValid,
+      geometryCacheVersionFileMatch: options.geometryCacheVersionFileMatch,
+    });
     return;
   }
 
@@ -775,6 +785,9 @@ export async function loadAllIfcFiles(
       includeMod: true,
       includeStl: false,
       session,
+      geometryCacheValid: options.geometryCacheValid,
+      geometryCacheManifestValid: options.geometryCacheManifestValid,
+      geometryCacheVersionFileMatch: options.geometryCacheVersionFileMatch,
     })
       .catch((err) => {
         console.warn('[GIM] 后台 MOD 加载失败:', err);
@@ -797,7 +810,15 @@ async function autoLoadModStlPostIfc(
   state: AppState,
   showMessage: (text: string) => void,
   existingCtx?: ViewerContext,
-  options?: { token?: number; includeMod?: boolean; includeStl?: boolean; session?: ProjectLoadSession },
+  options?: {
+    token?: number;
+    includeMod?: boolean;
+    includeStl?: boolean;
+    session?: ProjectLoadSession;
+    geometryCacheValid?: boolean;
+    geometryCacheManifestValid?: boolean;
+    geometryCacheVersionFileMatch?: boolean;
+  },
 ): Promise<void> {
   let endModStl: ((labelSuffix?: string, endMeta?: Record<string, unknown>) => void) | null = null;
   let modStlEnded = false;
@@ -853,13 +874,62 @@ async function autoLoadModStlPostIfc(
 
       if (!state.isCurrentSession(session)) return;
 
+      // 渐进 GLB 编译同样按 DEV 做失败隔离。无法产生 GLB 的 DEV 只在
+      // 当前解压文件源上做定向 raw fallback；已成功渲染的其它 DEV 不得
+      // 被清理或重新解析。
+      const devGlbProfile = result.devGlbProfile;
+      let scopedRaw = { modCount: 0, stlCount: 0, rows: 0 };
+      if (!result.interrupted && result.rawFallbackDevs.length > 0 && state.currentFiles) {
+        try {
+          const {
+            collectCbmDeviceInstances,
+            loadScopedRawFallbackGeometry,
+          } = await import('./modAutoLoadService.js');
+          const fallbackNodes = collectCbmDeviceInstances(state.currentCbmTree);
+          scopedRaw = await loadScopedRawFallbackGeometry(
+            state,
+            scene,
+            (p) => {
+              if (!state.isCurrentSession(session)) return;
+              if (p.phase === 'loading_mod') {
+                showLoading(`正在定向回退失败 DEV 的 MOD 模型 ${p.loadedMods}/${p.totalMods}...`);
+              } else if (p.phase === 'loading_stl') {
+                showLoading(`正在定向回退失败 DEV 的 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
+              }
+            },
+            result.rawFallbackDevs,
+            true,
+            false,
+            options?.token,
+            session.generation,
+            session.projectId,
+            session.sourceSha256,
+            session,
+            devGlbProfile,
+            state.currentFiles,
+            fallbackNodes,
+          );
+        } catch (error) {
+          // 定向回退失败不应清理已经成功的 GLB；把错误留在控制台与
+          // 性能 span 中，后续诊断可以区分“部分回退失败”和全项目失败。
+          console.warn('[GIM] 渐进几何 scoped raw fallback 失败:', error);
+        }
+      }
+
       finishModStl(undefined, {
         path: 'progressive-dev-glb',
         compiledDevs: result.compiledDevs,
         renderedInstances: result.renderedInstances,
+        rawFallbackDevs: result.rawFallbackDevs.length,
+        rawFallbackInstances: scopedRaw.modCount + scopedRaw.stlCount,
+        rawFallbackRows: scopedRaw.rows,
         interrupted: result.interrupted,
+        ...(devGlbProfile ? { devGlbProfile } : {}),
       });
-      if (!result.interrupted && (result.renderedInstances > 0)) {
+      const totalGeometryInstances = result.renderedInstances
+        + scopedRaw.modCount
+        + scopedRaw.stlCount;
+      if (!result.interrupted && totalGeometryInstances > 0) {
         debugLog(DEBUG_IFC_LOAD, '[GIM] 渐进几何管线完成', result);
         // 编译完成后强制重新 fit 相机（bbox 可能显著变化）
         if (existingCtx) {
@@ -871,13 +941,13 @@ async function autoLoadModStlPostIfc(
       if (!result.interrupted) {
         perfMarkProductMoment('fullModelReady', {
           ifcModels: state.loadedModels.size,
-          modInstances: result.renderedInstances,
+          modInstances: result.renderedInstances + scopedRaw.modCount,
           compiledDevs: result.compiledDevs,
-          stlInstances: 0,
+          stlInstances: scopedRaw.stlCount,
         }, perfSession);
         await sampleSubstationMemory('full ready 后', perfSession, {
           path: 'progressive-dev-glb',
-          renderedInstances: result.renderedInstances,
+          renderedInstances: totalGeometryInstances,
         });
       }
       return;
@@ -908,6 +978,9 @@ async function autoLoadModStlPostIfc(
         projectId: session.projectId,
         sourceSha256: session.sourceSha256,
         session,
+        geometryCacheValid: options?.geometryCacheValid,
+        geometryCacheManifestValid: options?.geometryCacheManifestValid,
+        geometryCacheVersionFileMatch: options?.geometryCacheVersionFileMatch,
         includeMod: options?.includeMod ?? true,
         includeStl: options?.includeStl ?? false,
       },
@@ -1508,11 +1581,21 @@ export async function openGimWithDialog(
         lineSemanticPackStatus: validation.line_semantic_pack_status,
         lineSemanticPackError: validation.line_semantic_pack_error ?? null,
         geometryCacheVersionMatch: validation.geometry_cache_version_match,
+        geometryCacheVersionFileMatch: validation.geometry_cache_version_file_match,
+        geometryCacheManifestValid: validation.geometry_cache_manifest_valid,
+        substationSemanticCacheValid: validation.substation_semantic_cache_valid,
+        geometryCacheValid: validation.geometry_cache_valid,
+        fragmentsCacheValid: validation.fragments_cache_valid,
       });
       debugLog(DEBUG_GIM_CACHE, '[Tauri] GIM 缓存校验:', validation);
 
-      // 3. 缓存命中短路：不 readFileBytes、不 extractGimFile、不创建 Viewer
-      if (validation.valid) {
+      // 3. 缓存命中短路：不 readFileBytes、不 extractGimFile、不创建 Viewer。
+      // 变电 source/index cache 与 DEV GLB geometry cache 解耦：即使几何
+      // 版本/manifest 失效，也应复用 CBM/IFC/STD/SLD 语义缓存，仅重走几何域。
+      const semanticCacheValid = validation.project_type === 'substation'
+        ? (validation.substation_semantic_cache_valid ?? validation.valid)
+        : validation.valid;
+      if (semanticCacheValid) {
         try {
           // 保留文件信息/项目登记/缓存校验 span；这里仅同步最终工程身份。
           perfUpdateSessionIdentity({
@@ -1822,7 +1905,12 @@ export async function openGimWithDialog(
 
           // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
           // loadAllIfcFiles 内部会创建 ViewerRuntime、加载 IFC、渲染树、触发 MOD/STL
-          await loadAllIfcFiles(state, state.currentIfcEntries, showMessage, { session });
+          await loadAllIfcFiles(state, state.currentIfcEntries, showMessage, {
+            session,
+            geometryCacheValid: validation.geometry_cache_valid ?? validation.geometry_cache_version_match,
+            geometryCacheManifestValid: validation.geometry_cache_manifest_valid,
+            geometryCacheVersionFileMatch: validation.geometry_cache_version_file_match,
+          });
           debugLog(DEBUG_GIM_CACHE, '[Tauri] 变电工程缓存命中：自动加载全部 IFC + MOD + STL');
           return; // 缓存命中，短路完成
         } catch (err) {
@@ -1831,17 +1919,8 @@ export async function openGimWithDialog(
         }
       } else {
         debugLog(DEBUG_GIM_CACHE, '[Tauri] 缓存无效或不完整，继续完整解压流程:', validation);
-        // 清理陈旧 GLB 缓存目录（如 _version.txt 缺失导致 geometry_cache_version_match=false），
-        // 避免陈旧 GLB 文件残留造成"缓存已存在"的假象。仅 Tauri 环境下执行。
-        if (isTauri() && !validation.geometry_cache_version_match) {
-          try {
-            const { deleteGlbCache } = await import('@desktop/database.js');
-            await deleteGlbCache(record.id);
-            debugLog(DEBUG_GIM_CACHE, '[Tauri] 已清理陈旧 GLB 缓存目录');
-          } catch (err) {
-            console.warn('[Tauri] 清理 GLB 缓存失败:', err);
-          }
-        }
+        // source/index 缓存无效才进入完整解压。单独的 geometry cache
+        // 版本失效由 semantic 命中分支传给几何加载，不得触发 native extract。
       }
 
       // 4. 回退：完整解压流程（不创建 Viewer，只做读取+解压+索引+渲染树）

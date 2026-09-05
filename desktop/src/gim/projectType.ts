@@ -198,10 +198,10 @@ export async function detectGimProjectType(
   // hasIfc 判定 1：存在 IFC 文件
   let hasIfc = ifcCount > 0;
 
-  // hasLineArtifacts 判定 1：存在位于 PascalCase Mod/ 目录下的 .mod 或 .stl
-  // spec 第三章：线路工程使用 Cbm/Dev/Mod/Phm 首字母大写目录；
-  // 变电工程的 MOD/ 目录下也有 .mod/.stl，但不应计为线路特征。
-  let hasLineArtifacts = lineModCount > 0 || lineStlCount > 0;
+  // 路径 casing 只用于决定“是否需要检查线路语义”，不能单独把带 IFC
+  // 的变电工程判成 hybrid/line。无 IFC 时 PascalCase 布局仍是标准线路
+  // 的快速信号。
+  let hasLineArtifacts = !hasIfc && (lineModCount > 0 || lineStlCount > 0);
 
   const lineSignals = new Set<string>();
 
@@ -232,6 +232,12 @@ export async function detectGimProjectType(
     && linePhmDirCount === 0;
   if (canonicalSubstationLayout) {
     textFilesToScan.length = 0;
+  }
+
+  // 混合 casing + IFC 的工程仅做有界语义探测；不要让类型识别退化为
+  // 数千次 DiskBackedFile.text() IPC。
+  if (hasIfc && !canonicalSubstationLayout && textFilesToScan.length > 128) {
+    textFilesToScan.length = 128;
   }
 
   // 扫描文本文件（KEY=VALUE 级别匹配，避免裸子串误判）
@@ -279,7 +285,7 @@ export async function detectGimProjectType(
       }
     }
 
-    if (hasIfc && hasLineArtifacts && lineSignals.size > 0) {
+    if (hasIfc && lineSignals.size > 0) {
       // 类型已可确定为 hybrid，提前结束
       break;
     }
@@ -294,8 +300,12 @@ export async function detectGimProjectType(
     lineSignals.add('PascalCaseLayout:Cbm/Dev/Mod');
   }
 
+  // 只有真实线路语义字段才允许 IFC 工程进入 hybrid。PascalCase 目录本身
+  // 不能覆盖 IFC 事实，避免 Cbm/Dev/Mod + IFC 的变电样本被误判。
+  const hasSemanticLineSignals = Array.from(lineSignals)
+    .some((signal) => signal !== 'PascalCaseLayout:Cbm/Dev/Mod');
   let type: GimProjectType;
-  if (hasIfc && hasLineArtifacts) type = 'hybrid';
+  if (hasIfc && hasSemanticLineSignals) type = 'hybrid';
   else if (hasIfc) type = 'substation';
   else if (hasLineArtifacts) type = 'transmission_line';
   else type = 'unknown';

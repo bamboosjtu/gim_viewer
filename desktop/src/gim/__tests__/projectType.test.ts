@@ -56,4 +56,20 @@ describe('detectGimProjectType', () => {
     expect(dev.text).not.toHaveBeenCalled();
     expect(fam.text).not.toHaveBeenCalled();
   });
+
+  it('带 IFC 但使用 Cbm/Dev/Mod 目录 casing 的变电工程不误判为 hybrid', async () => {
+    const cbm = lazyTextFile('ENTITYNAME=F1System');
+    const dev = lazyTextFile('SYMBOLNAME=主变');
+    const mod = lazyTextFile('MODTYPE=设备');
+    const ifc = { size: 1024, text: vi.fn(async () => 'ISO-10303-21;') } as unknown as File;
+    const result = await detectGimProjectType(new Map([
+      ['Cbm/project.cbm', cbm],
+      ['Dev/main.dev', dev],
+      ['Mod/main.mod', mod],
+      ['Cbm/main.ifc', ifc],
+    ]));
+
+    expect(result.type).toBe('substation');
+    expect(result.details.hasLineArtifacts).toBe(false);
+  });
 });

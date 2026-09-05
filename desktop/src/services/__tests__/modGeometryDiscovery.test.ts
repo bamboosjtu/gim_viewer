@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { discoverGeometriesFromNode } from '../modGeometryDiscovery.js';
+import { discoverGeometriesFromDevPath, discoverGeometriesFromNode } from '../modGeometryDiscovery.js';
 import type { CbmNode } from '../../gim/types.js';
 
 /** 构造 CbmNode */
@@ -83,6 +83,18 @@ describe('discoverGeometriesFromNode', () => {
       expect(results[0].modPath).toBe('MOD/main.mod');
       expect(results[0].devPath).toBe('DEV/abc.dev');
       expect(results[0].phmPath).toBe('PHM/main.phm');
+    });
+
+    it('node.devPath 已带 DEV/ 且目录/文件大小写混合时不重复拼接前缀', async () => {
+      const node = makeNode('dEv/ABC.DEV');
+      const files = new Map<string, File>([
+        ['Dev/abc.dev', makeFile(makeDevText({ phmPath: 'MAIN.PHM' }), 'ABC.DEV')],
+        ['pHm/main.phm', makeFile(makePhmText({ modelPath: 'MAIN.MOD' }), 'MAIN.PHM')],
+      ]);
+      const { mods: results } = await discoverGeometriesFromNode(node, files);
+      expect(results).toHaveLength(1);
+      expect(results[0].devPath.toLowerCase()).toBe('dev/abc.dev');
+      expect(results[0].modPath.toLowerCase()).toBe('mod/main.mod');
     });
 
     it('多个 SOLIDMODEL → 返回多个几何来源', async () => {
@@ -381,6 +393,63 @@ TRANSFORMMATRIX0=-1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(1);
       expect(results[0].phmPath).toBe('PHM/main.PHM');
+    });
+  });
+
+  describe('strictDependencies（GLB cache build）', () => {
+    const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    const strict = { strictDependencies: true } as const;
+
+    it('缺失 PHM 时抛错，而不是把有引用的 DEV 记录成 empty', async () => {
+      const files = new Map<string, File>([
+        ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'missing.phm' }), 'abc.dev')],
+      ]);
+
+      await expect(
+        discoverGeometriesFromDevPath('DEV/abc.dev', files, identity, new Set<string>(), 0, { instances: 0 }, strict),
+      ).rejects.toThrow(/PHM 文件不存在/i);
+    });
+
+    it('缺失 MOD 时抛错，而不是静默跳过引用', async () => {
+      const files = new Map<string, File>([
+        ['DEV/abc.dev', makeFile(makeDevText(), 'abc.dev')],
+        ['PHM/main.phm', makeFile(makePhmText({ modelPath: 'missing.mod' }), 'main.phm')],
+      ]);
+
+      await expect(
+        discoverGeometriesFromDevPath('DEV/abc.dev', files, identity, new Set<string>(), 0, { instances: 0 }, strict),
+      ).rejects.toThrow(/MOD 文件不存在/i);
+    });
+
+    it('缺失嵌套 child DEV 时抛错', async () => {
+      const parent = `SUBDEVICES.NUM=1\nSUBDEVICE0=child.dev\nTRANSFORMMATRIX0=${identity.join(',')}\n`;
+      const files = new Map<string, File>([
+        ['DEV/parent.dev', makeFile(parent, 'parent.dev')],
+      ]);
+
+      await expect(
+        discoverGeometriesFromDevPath('DEV/parent.dev', files, identity, new Set<string>(), 0, { instances: 0 }, strict),
+      ).rejects.toThrow(/DEV 文件不存在/i);
+    });
+
+    it('strict 模式仍按大小写不敏感命中 DEV/PHM/MOD', async () => {
+      const files = new Map<string, File>([
+        ['dEv/ABC.DEV', makeFile(makeDevText({ phmPath: 'MAIN.PHM' }), 'ABC.DEV')],
+        ['pHm/MAIN.PHM', makeFile(makePhmText({ modelPath: 'MAIN.MOD' }), 'MAIN.PHM')],
+        ['mOd/MAIN.MOD', makeFile('<Device><Entities /></Device>', 'MAIN.MOD')],
+      ]);
+
+      const result = await discoverGeometriesFromDevPath(
+        'DEV/abc.dev',
+        files,
+        identity,
+        new Set<string>(),
+        0,
+        { instances: 0 },
+        strict,
+      );
+      expect(result.mods).toHaveLength(1);
+      expect(result.mods[0].modPath).toBe('MOD/MAIN.MOD');
     });
   });
 });

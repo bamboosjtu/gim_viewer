@@ -754,7 +754,8 @@ validate_gim_cache
   → batch_read_glb_files（GIMR v2；<=256 文件、预计 <=64 MiB）
   → status=glb：每个 placement 独立 loadDevGlb + CBM transform
   → status=empty：不读文件、不 parse、不 fallback
-  → manifest/GLB 缺失、截断、size/header 或读取/解析错误：清理已加载 group，整体回退原始 MOD/STL
+  → 单 DEV 的 GLB 缺失、截断、size/header 或读取/解析错误：保留其它 DEV，
+    仅对失败 DEV 做 scoped 原始 MOD/STL 回退；manifest 结构损坏才整体重建 geometry domain
 ```
 
 ---

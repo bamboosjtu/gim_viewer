@@ -55,6 +55,12 @@ describe('substation geometry seed selection', () => {
       .toEqual(['root.dev', 'independent.dev']);
   });
 
+  it('treats virtual/alias entity names case-insensitively', () => {
+    expect(isGeometryAutoLoadSeed(node({ entityName: 'partIndex', devPath: 'child.dev' }))).toBe(false);
+    expect(isGeometryAutoLoadSeed(node({ entityName: 'dev_subDevice', devPath: 'child.dev' }))).toBe(false);
+    expect(isGeometryAutoLoadSeed(node({ entityName: 'f4system', devPath: 'device.dev' }))).toBe(true);
+  });
+
   it('resolves a PARTINDEX click to its nearest device ancestor', () => {
     const partIndex = node({
       path: 'CBM/root.cbm/part.cbm',

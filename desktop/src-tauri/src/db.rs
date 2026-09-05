@@ -67,8 +67,9 @@ pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 /// GLB 几何缓存版本（方案 C：MOD/STL → glTF 序列化格式版本）
 /// 独立于 PARSER_VERSION，用于在 MOD 解析逻辑变更时单独失效 glb 缓存。
 /// 失效规则：
-/// - PARSER_VERSION 变 → glbcache 目录由 delete_project_cache 删除重建
-/// - GEOMETRY_CACHE_VERSION 变 → validate_gim_cache 返回 invalid，触发 delete_project_cache + 重序列化
+/// - 语义 parser domain 版本变 → 仅对应 source/index cache 失效
+/// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
+///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
 pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v5-dev-status";
 
@@ -2746,6 +2747,13 @@ pub fn write_glb_file_binary(
         .lock()
         .map_err(|e| format!("获取数据库锁失败: {}", e))?;
     ensure_project_exists(&guard, meta.project_id)?;
+    // GLB 编译运行在后台；在命令真正落盘前再次核对源 GIM SHA，避免
+    // 旧工程任务在同一 project_id 被源文件更新后覆盖新几何缓存。
+    ensure_project_source_sha(
+        &guard,
+        meta.project_id,
+        meta.source_gim_sha256.as_deref(),
+    )?;
     drop(guard);
     let path = glb_cache_file_path(&app_handle, meta.project_id, &meta.entry_path)?;
     atomic_write(&path, &bytes, " GLB")?;
@@ -2779,7 +2787,8 @@ pub fn read_glb_file(
 ///
 /// 请求仍只携带受校验的 entry_path 列表，响应使用 GIMR v2 二进制 envelope，
 /// 不把 GLB 编码成 JSON 数字数组。单条文件缺失返回 envelope 中的 null；
-/// 前端根据 manifest 将其判定为 fast path 整体不可用并回退原始 MOD。
+/// 前端根据 manifest 将其判定为对应 DEV 的 fast path 不可用，并仅对
+/// 该 DEV 做 scoped 原始 MOD/STL 回退；manifest 结构本身损坏才整体重建。
 #[tauri::command]
 pub fn batch_read_glb_files(
     app_handle: tauri::AppHandle,
@@ -2866,8 +2875,9 @@ pub fn batch_read_glb_files(
 /// - true：版本文件存在且内容等于 GEOMETRY_CACHE_VERSION
 /// - false：版本文件不存在（首次打开或旧版本无 marker）/ 内容不匹配 / IO 错误
 ///
-/// 注意：调用方应将 false 视为缓存无效，触发 delete_project_cache + 重序列化。
-fn check_geometry_cache_version(app_handle: &tauri::AppHandle, project_id: i64) -> bool {
+/// 注意：false 只表示 geometry domain 不可用；调用方不得据此删除整个
+/// 项目 source/index cache，应进入 DEV geometry rebuild。
+fn check_geometry_cache_version_file(app_handle: &tauri::AppHandle, project_id: i64) -> bool {
     let base = match app_handle.path().app_data_dir() {
         Ok(p) => p,
         Err(_) => return false,
@@ -2883,6 +2893,37 @@ fn check_geometry_cache_version(app_handle: &tauri::AppHandle, project_id: i64) 
         Ok(content) => content.trim() == GEOMETRY_CACHE_VERSION,
         Err(_) => false,
     }
+}
+
+fn load_geometry_cache_manifest(
+    app_handle: &tauri::AppHandle,
+    project_id: i64,
+) -> Option<GeometryCacheManifest> {
+    let path = geometry_manifest_path(app_handle, project_id).ok()?;
+    let bytes = stdfs::read(path).ok()?;
+    serde_json::from_slice::<GeometryCacheManifest>(&bytes).ok()
+}
+
+/// 校验 manifest 的整体结构与 source 身份，但不检查每个 GLB 文件。
+///
+/// 该层级故意与文件完整性分开：manifest/version 可用时，单个 GLB
+/// 缺失或截断应由前端 DEV 粒度 fast path 隔离，而不是迫使整个工程重建。
+fn check_geometry_cache_manifest_structure(
+    app_handle: &tauri::AppHandle,
+    project_id: i64,
+    source_sha256: &str,
+) -> bool {
+    let Some(manifest) = load_geometry_cache_manifest(app_handle, project_id) else {
+        return false;
+    };
+    if manifest.source_sha256 != source_sha256 || manifest.entries.len() > 200_000 {
+        return false;
+    }
+    let mut seen = std::collections::HashSet::new();
+    manifest
+        .entries
+        .iter()
+        .all(|entry| validate_geometry_manifest_entry_shape(entry, &mut seen).is_ok())
 }
 
 fn validate_glb_bytes(bytes: &[u8]) -> bool {
@@ -2993,13 +3034,7 @@ fn check_geometry_cache_manifest(
     project_id: i64,
     source_sha256: &str,
 ) -> bool {
-    let Ok(path) = geometry_manifest_path(app_handle, project_id) else {
-        return false;
-    };
-    let Ok(bytes) = stdfs::read(path) else {
-        return false;
-    };
-    let Ok(manifest) = serde_json::from_slice::<GeometryCacheManifest>(&bytes) else {
+    let Some(manifest) = load_geometry_cache_manifest(app_handle, project_id) else {
         return false;
     };
     if manifest.source_sha256 != source_sha256 || manifest.entries.len() > 200_000 {
@@ -3102,13 +3137,27 @@ pub fn write_geometry_cache_manifest(
 ///
 /// 在 `cacheGlbFiles` 完成所有 MOD/STL → .glb 序列化后调用一次，
 /// 把当前 GEOMETRY_CACHE_VERSION 写入 `{app_data_dir}/glbcache/{project_id}/_version.txt`。
-/// 下次 `validate_gim_cache` 时读取此文件并比较，版本不匹配则整体失效。
+/// 下次 `validate_gim_cache` 时读取此文件并比较，版本不匹配只使 geometry
+/// domain 失效，由前端重建 DEV GLB。
 #[tauri::command]
 pub fn write_geometry_cache_version(
     app_handle: tauri::AppHandle,
     project_id: i64,
+    source_sha256: Option<String>,
 ) -> Result<String, String> {
     ensure_cache_project_id(project_id)?;
+    {
+        let state = app_handle.state::<DbState>();
+        let guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        ensure_project_exists(&guard, project_id)?;
+        // The marker is the final geometry-cache commit. Re-check the source
+        // identity here as well as during manifest/GLB writes so a delayed
+        // task cannot publish a current-version marker for a different GIM.
+        ensure_project_source_sha(&guard, project_id, source_sha256.as_deref())?;
+    }
     let base = app_handle
         .path()
         .app_data_dir()
@@ -3140,6 +3189,73 @@ fn fragment_file_size_matches(stored: i64, actual: u64) -> bool {
 fn fragment_cache_version_matches(stored: &str) -> bool {
     stored == FRAGMENTS_CACHE_VERSION
         || stored.starts_with(&format!("{}|", FRAGMENTS_CACHE_VERSION))
+}
+
+/// 判断变电项目的 Fragments cache 是否覆盖全部 IFC。该域仅用于诊断/选择
+/// cache source，绝不参与默认开关或基础 semantic cache 的有效性判断。
+fn check_fragments_cache_complete(
+    app_handle: &tauri::AppHandle,
+    conn: &Connection,
+    project_id: i64,
+    source_sha256: &str,
+    ifc_entry_count: u64,
+) -> bool {
+    if ifc_entry_count == 0 {
+        return false;
+    }
+    let mut expected_sizes = std::collections::HashMap::<String, i64>::new();
+    let Ok(mut ifc_stmt) = conn.prepare(
+        "SELECT entry_path, file_size FROM substation_gim_entry
+         WHERE project_id = ?1 AND entry_type = 'IFC'",
+    ) else {
+        return false;
+    };
+    let Ok(ifc_rows) = ifc_stmt.query_map(params![project_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    }) else {
+        return false;
+    };
+    for row in ifc_rows.flatten() {
+        expected_sizes.insert(normalize_cache_lookup_path(&row.0), row.1);
+    }
+
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT entry_path, source_gim_sha256, source_ifc_size, fragment_file_size, fragments_version
+         FROM substation_fragment_cache WHERE project_id = ?1",
+    ) else {
+        return false;
+    };
+    let Ok(rows) = stmt.query_map(params![project_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, String>(4)?,
+        ))
+    }) else {
+        return false;
+    };
+    let mut valid_entries = std::collections::HashSet::new();
+    for row in rows.flatten() {
+        let (entry_path, source, source_size, frag_size, version) = row;
+        let key = normalize_cache_lookup_path(&entry_path);
+        let Some(expected_size) = expected_sizes.get(&key) else { continue; };
+        if source != source_sha256
+            || *expected_size != source_size
+            || !fragment_cache_version_matches(&version)
+        {
+            continue;
+        }
+        let Ok(path) = fragment_cache_file_path(app_handle, project_id, &entry_path) else {
+            continue;
+        };
+        let Ok(actual_size) = stdfs::metadata(path).map(|meta| meta.len()) else { continue; };
+        if fragment_file_size_matches(frag_size, actual_size) {
+            valid_entries.insert(key);
+        }
+    }
+    valid_entries.len() as u64 == ifc_entry_count && expected_sizes.len() as u64 == ifc_entry_count
 }
 
 /// 计算 Fragments 缓存文件路径：app_data_dir/fragments/{project_id}/{safe_entry_path}.frag
@@ -3603,11 +3719,23 @@ pub struct GimCacheValidation {
     /// 表示 pack/index 或 metadata 整体损坏，必须重新解压重建。
     pub line_semantic_pack_status: String,
     pub line_semantic_pack_error: Option<String>,
-    /// v6（方案 C）: GLB 几何缓存版本是否匹配（读取 glbcache/{projectId}/_version.txt 比较）
-    /// 版本不匹配 → valid=false，触发 delete_project_cache + 重序列化
+    /// v6（方案 C）: GLB geometry cache 是否完整有效（版本标记、manifest
+    /// 结构及每个 GLB 文件均通过校验）。版本/文件不匹配只影响 geometry
+    /// domain，不影响 source/index cache 的有效性。
     pub geometry_cache_version_match: bool,
     /// v6（方案 C）: 当前 GEOMETRY_CACHE_VERSION（供前端诊断显示）
     pub current_geometry_cache_version: String,
+    /// 版本标记文件本身是否匹配；与单个 GLB 文件完整性分开。
+    pub geometry_cache_version_file_match: bool,
+    /// manifest 可解析、source SHA 和条目结构是否完整；不检查每个 GLB 文件。
+    /// 该值为 true 时允许前端按 DEV 隔离缺失/截断 GLB。
+    pub geometry_cache_manifest_valid: bool,
+    /// 变电基础索引/IFC source cache 是否有效（不包含几何版本）。
+    pub substation_semantic_cache_valid: bool,
+    /// DEV GLB geometry cache 是否有效。
+    pub geometry_cache_valid: bool,
+    /// 所有 IFC Fragments cache 是否完整有效（默认关闭时通常为 false）。
+    pub fragments_cache_valid: bool,
 }
 
 fn row_to_gim_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<GimEntryRecord> {
@@ -5016,10 +5144,17 @@ pub fn validate_gim_cache(
         substation_parser_version_match
     };
 
-    // 方案 C：校验 GLB 几何缓存版本
-    // 读取 {app_data_dir}/glbcache/{project_id}/_version.txt 并与 GEOMETRY_CACHE_VERSION 比较
-    // 版本不匹配 → valid=false，触发 delete_project_cache + 重序列化
-    let geometry_cache_version_match = check_geometry_cache_version(&app_handle, project_id)
+    // 方案 C：校验 GLB 几何缓存版本。版本不匹配只影响 geometry domain；
+    // 下方 semantic_cache_valid 不依赖该值，前端会复用 source/index 并
+    // 单独重建 DEV GLB。
+    let geometry_cache_version_file_match =
+        check_geometry_cache_version_file(&app_handle, project_id);
+    let geometry_cache_manifest_valid = check_geometry_cache_manifest_structure(
+        &app_handle,
+        project_id,
+        &source_sha256,
+    );
+    let geometry_cache_version_match = geometry_cache_version_file_match
         && check_geometry_cache_manifest(&app_handle, project_id, &source_sha256);
 
     // v4: 根据 project_type 分支校验
@@ -5038,7 +5173,7 @@ pub fn validate_gim_cache(
         ("missing".to_string(), None)
     };
 
-    let (ifc_entry_count, cached_ifc_count, missing_cache_paths, valid) = if is_line {
+    let (ifc_entry_count, cached_ifc_count, missing_cache_paths, semantic_cache_valid) = if is_line {
         // 线路工程：不检查 IFC 缓存；要求 FAM 属性源存在。
         // P1 评审修复：不再依赖 geometry_cache_version_match——glbcache/_version.txt
         // 仅由变电渐进 GLB 管线写入，线路工程永远没有该文件，旧条件导致线路缓存
@@ -5109,8 +5244,7 @@ pub fn validate_gim_cache(
             && cbm_nodes_count > 0
             && cached_ifc_count == ifc_entry_count
             && missing_cache_paths.is_empty()
-            && parser_version_match
-            && geometry_cache_version_match;
+            && parser_version_match;
 
         (
             ifc_entry_count,
@@ -5119,6 +5253,20 @@ pub fn validate_gim_cache(
             valid,
         )
     };
+
+    let fragments_cache_valid = if is_line {
+        false
+    } else {
+        check_fragments_cache_complete(
+            &app_handle,
+            &conn,
+            project_id,
+            &source_sha256,
+            ifc_entry_count,
+        )
+    };
+    let valid = semantic_cache_valid;
+    let substation_semantic_cache_valid = !is_line && semantic_cache_valid;
 
     let mut miss_reasons = Vec::new();
     if !parser_version_match {
@@ -5146,7 +5294,16 @@ pub fn validate_gim_cache(
         if !missing_cache_paths.is_empty() {
             miss_reasons.push(format!("IFC_CACHE_MISSING:{}", missing_cache_paths.len()));
         }
-        if !geometry_cache_version_match { miss_reasons.push("GEOMETRY_CACHE_VERSION_MISMATCH".to_string()); }
+        if !geometry_cache_version_file_match {
+            miss_reasons.push("GEOMETRY_CACHE_VERSION_MISMATCH".to_string());
+        } else if !geometry_cache_manifest_valid {
+            miss_reasons.push("GEOMETRY_MANIFEST_INVALID".to_string());
+        } else if !geometry_cache_version_match {
+            // Manifest/source structure is usable; only one or more individual
+            // GLB files are missing, truncated, or have an invalid header.
+            // The warm fast path can isolate those DEV entries.
+            miss_reasons.push("GEOMETRY_CACHE_ENTRY_INVALID".to_string());
+        }
     }
 
     Ok(GimCacheValidation {
@@ -5182,6 +5339,11 @@ pub fn validate_gim_cache(
         line_semantic_pack_error,
         geometry_cache_version_match,
         current_geometry_cache_version: GEOMETRY_CACHE_VERSION.to_string(),
+        geometry_cache_version_file_match,
+        geometry_cache_manifest_valid,
+        substation_semantic_cache_valid,
+        geometry_cache_valid: geometry_cache_version_match,
+        fragments_cache_valid,
     })
 }
 
@@ -5248,10 +5410,15 @@ pub struct ProjectCacheDiagnostic {
     /// 尚未生成 pack，invalid 表示 pack/index 整体损坏，必须重建而不能 partial fallback。
     pub line_semantic_pack_status: String,
     pub line_semantic_pack_error: Option<String>,
-    /// 变电 GLB manifest/版本是否匹配。线路工程不把该字段纳入 valid，
-    /// 但仍返回它以便诊断 JSON 明确区分几何缓存域。
+    /// 变电 GLB geometry cache 是否完整有效。线路工程不把该字段纳入
+    /// valid，但仍返回它以便诊断 JSON 明确区分几何缓存域。
     pub geometry_cache_version_match: bool,
     pub current_geometry_cache_version: String,
+    pub geometry_cache_version_file_match: bool,
+    pub geometry_cache_manifest_valid: bool,
+    pub substation_semantic_cache_valid: bool,
+    pub geometry_cache_valid: bool,
+    pub fragments_cache_valid: bool,
     pub valid: bool,
 
     pub ifc_cache_files: Vec<IfcCacheFileDiagnostic>,
@@ -5345,7 +5512,14 @@ pub fn get_project_cache_diagnostic(
 
     // 与 validate_gim_cache 使用同一套几何域判定。诊断 JSON 必须能解释
     // 为什么打开流程没有命中，不能只显示共享 parser_version。
-    let geometry_cache_version_match = check_geometry_cache_version(app_handle, project.0)
+    let geometry_cache_version_file_match =
+        check_geometry_cache_version_file(app_handle, project.0);
+    let geometry_cache_manifest_valid = check_geometry_cache_manifest_structure(
+        app_handle,
+        project.0,
+        &project.5,
+    );
+    let geometry_cache_version_match = geometry_cache_version_file_match
         && check_geometry_cache_manifest(app_handle, project.0, &project.5);
 
     // 线路 semantic pack 是独立于 SQLite graph/attribute 的 source cache。
@@ -5527,7 +5701,7 @@ pub fn get_project_cache_diagnostic(
     } else {
         LineAttrDiagnostic::default()
     };
-    let valid = if is_line {
+    let semantic_cache_valid = if is_line {
         parser_version_match
             && line_cbm_node_count > 0
             && line_attr_diag.fam_source_count > 0
@@ -5539,8 +5713,12 @@ pub fn get_project_cache_diagnostic(
             && cached_ifc_count == ifc_entry_count
             && missing_cache_paths.is_empty()
             && parser_version_match
-            && geometry_cache_version_match
     };
+    let valid = semantic_cache_valid;
+    let substation_semantic_cache_valid = !is_line && semantic_cache_valid;
+    let fragments_cache_valid = !is_line
+        && ifc_entry_count > 0
+        && valid_fragment_cache_count == ifc_entry_count;
 
     let mut miss_reasons = Vec::new();
     if !parser_version_match {
@@ -5567,7 +5745,13 @@ pub fn get_project_cache_diagnostic(
         if !missing_cache_paths.is_empty() {
             miss_reasons.push(format!("IFC_CACHE_MISSING:{}", missing_cache_paths.len()));
         }
-        if !geometry_cache_version_match { miss_reasons.push("GEOMETRY_CACHE_VERSION_MISMATCH".to_string()); }
+        if !geometry_cache_version_file_match {
+            miss_reasons.push("GEOMETRY_CACHE_VERSION_MISMATCH".to_string());
+        } else if !geometry_cache_manifest_valid {
+            miss_reasons.push("GEOMETRY_MANIFEST_INVALID".to_string());
+        } else if !geometry_cache_version_match {
+            miss_reasons.push("GEOMETRY_CACHE_ENTRY_INVALID".to_string());
+        }
     }
 
     Ok(ProjectCacheDiagnostic {
@@ -5600,6 +5784,11 @@ pub fn get_project_cache_diagnostic(
         line_semantic_pack_error,
         geometry_cache_version_match,
         current_geometry_cache_version: GEOMETRY_CACHE_VERSION.to_string(),
+        geometry_cache_version_file_match,
+        geometry_cache_manifest_valid,
+        substation_semantic_cache_valid,
+        geometry_cache_valid: geometry_cache_version_match,
+        fragments_cache_valid,
         valid,
         ifc_cache_files,
         fragment_cache_count,
@@ -5807,8 +5996,8 @@ pub fn delete_project_cache(
 
 /// Tauri command：仅删除 GLB 几何缓存目录（不删除 SQLite 记录和 IFC/Fragments 缓存）。
 ///
-/// 用于缓存校验失败（如 _version.txt 缺失导致 geometry_cache_version_match=false）时，
-/// 清理陈旧 GLB 文件，避免"GLB 存在但版本标记缺失"的假象。
+/// 用于显式清理陈旧 GLB 文件；geometry domain 失效时默认由前端直接
+/// 重建并覆盖 manifest，不会自动删除项目的 source/index cache。
 #[tauri::command]
 pub fn delete_glb_cache(app_handle: tauri::AppHandle, project_id: i64) -> Result<(), String> {
     ensure_cache_project_id(project_id)?;
@@ -6020,6 +6209,9 @@ pub fn save_geometry_refs(
 /// 可到达的几何源（MOD/STL 路径 + 其变换矩阵来源）
 #[derive(Debug, Serialize)]
 pub struct ReachableGeometry {
+    /// 产生该几何引用的 DEV 路径（规范化为 DEV/ 前缀）。用于 partial
+    /// raw fallback 只恢复失败 DEV 的可达几何。
+    pub dev_path: String,
     /// MOD/STL 文件路径（如 "MOD/abc.mod"）
     pub geometry_path: String,
     /// 几何实例唯一键。同一 MOD/STL 文件可被不同矩阵多次实例化。
@@ -6059,12 +6251,31 @@ pub fn get_reachable_geometry(
     project_id: i64,
     include_mod: Option<bool>,
     include_stl: Option<bool>,
+    dev_paths: Option<Vec<String>>,
 ) -> Result<Vec<ReachableGeometry>, String> {
     use std::time::Instant;
 
     let total_t0 = Instant::now();
     let include_mod = include_mod.unwrap_or(true);
     let include_stl = include_stl.unwrap_or(false);
+    let dev_filter = if let Some(paths) = dev_paths {
+        if paths.len() > 50_000 {
+            return Err("DEV 过滤路径数量超过安全上限".to_string());
+        }
+        let mut normalized = std::collections::HashSet::with_capacity(paths.len());
+        for path in paths {
+            validate_entry_path(&path)?;
+            if !path.to_ascii_lowercase().ends_with(".dev") {
+                return Err(format!("DEV 过滤路径类型无效: {}", path));
+            }
+            // Comparison keys are case-insensitive; retain the original
+            // spelling only in the returned diagnostic payload.
+            normalized.insert(normalize_dev_path(&path).to_ascii_lowercase());
+        }
+        Some(normalized)
+    } else {
+        None
+    };
 
     debug_perf_log!(
         "[get_reachable_geometry] start project_id={} include_mod={} include_stl={}",
@@ -6091,7 +6302,13 @@ pub fn get_reachable_geometry(
         return Ok(Vec::new());
     }
 
-    let results = query_reachable_geometry(&conn, project_id, include_mod, include_stl)?;
+    let results = query_reachable_geometry_filtered(
+        &conn,
+        project_id,
+        include_mod,
+        include_stl,
+        dev_filter.as_ref(),
+    )?;
 
     debug_perf_log!(
         "[get_reachable_geometry] done total={}ms rows={} include_mod={} include_stl={}",
@@ -6104,14 +6321,35 @@ pub fn get_reachable_geometry(
     Ok(results)
 }
 
+#[allow(dead_code)]
 fn query_reachable_geometry(
     conn: &Connection,
     project_id: i64,
     include_mod: bool,
     include_stl: bool,
 ) -> Result<Vec<ReachableGeometry>, String> {
+    query_reachable_geometry_filtered(conn, project_id, include_mod, include_stl, None)
+}
+
+fn query_reachable_geometry_filtered(
+    conn: &Connection,
+    project_id: i64,
+    include_mod: bool,
+    include_stl: bool,
+    dev_filter: Option<&std::collections::HashSet<String>>,
+) -> Result<Vec<ReachableGeometry>, String> {
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::time::Instant;
+
+    // Keep the helper safe for both the Tauri command and direct internal
+    // callers/tests: normalize again here instead of relying on callers to
+    // have already lower-cased the DEV paths.
+    let normalized_dev_filter = dev_filter.map(|filter| {
+        filter
+            .iter()
+            .map(|path| normalize_dev_path(path).to_ascii_lowercase())
+            .collect::<HashSet<String>>()
+    });
 
     // Avoid SQLite recursive CTEs / multi-table joins here. In the app this
     // command runs while rendering is active, and SQLite may spend a long time
@@ -6123,7 +6361,7 @@ fn query_reachable_geometry(
             "SELECT node_key, parent_key, entity_name, dev_path, transform_matrix
              FROM substation_cbm_node
              WHERE project_id = ?1
-                AND (entity_name IS NULL OR (entity_name != 'DEV_SUBDEVICE' AND entity_name != 'PARTINDEX'))",
+                AND (entity_name IS NULL OR (LOWER(entity_name) != 'dev_subdevice' AND LOWER(entity_name) != 'partindex'))",
         )
         .map_err(|e| format!("预处理 substation_cbm_node dev_path 失败: {}", e))?;
     let cbm_rows = cbm_stmt
@@ -6167,7 +6405,7 @@ fn query_reachable_geometry(
         if is_virtual_dev_subdevice(node.entity_name.as_deref()) {
             continue;
         }
-        let dev_path = normalize_dev_path(dev_path_raw);
+        let dev_path = normalize_dev_path(dev_path_raw).to_ascii_lowercase();
         let matrix = cumulative_cbm_matrix(
             node_key,
             &cbm_nodes,
@@ -6212,10 +6450,10 @@ fn query_reachable_geometry(
         let (parent, child, transform_matrix) =
             row.map_err(|e| format!("读取 substation_dev_sub_device 行失败: {}", e))?;
         sub_edges
-            .entry(normalize_dev_path(&parent))
+            .entry(normalize_dev_path(&parent).to_ascii_lowercase())
             .or_default()
             .push((
-                normalize_dev_path(&child),
+                normalize_dev_path(&child).to_ascii_lowercase(),
                 parse_matrix_opt(transform_matrix.as_deref()),
             ));
     }
@@ -6246,7 +6484,25 @@ fn query_reachable_geometry(
     );
 
     let dsm_t0 = Instant::now();
-    let mut phm_refs: Vec<(String, [f64; 16], Option<String>)> = Vec::new();
+    // A failed parent DEV owns its nested SUBDEVICE closure. Expand the filter
+    // before selecting DEV solid models so a parent failure also restores child
+    // DEV geometry, while selecting a child alone remains scoped to that child.
+    let expanded_dev_filter = normalized_dev_filter.as_ref().map(|filter| {
+        let mut expanded = filter.clone();
+        let mut queue: VecDeque<String> = filter.iter().cloned().collect();
+        while let Some(parent) = queue.pop_front() {
+            if let Some(children) = sub_edges.get(&parent) {
+                for (child, _) in children {
+                    if expanded.insert(child.clone()) {
+                        queue.push_back(child.clone());
+                    }
+                }
+            }
+        }
+        expanded
+    });
+
+    let mut phm_refs: Vec<(String, [f64; 16], Option<String>, String)> = Vec::new();
     let mut dsm_stmt = conn
         .prepare(
             "SELECT dev_path, solid_model_path, transform_matrix
@@ -6267,14 +6523,20 @@ fn query_reachable_geometry(
     for row in dsm_rows {
         let (dev_path, solid_model_path, transform_matrix) =
             row.map_err(|e| format!("读取 substation_dev_solid_model 行失败: {}", e))?;
-        let dev_path = normalize_dev_path(&dev_path);
-        if let Some(instances) = dev_instances.get(&dev_path) {
+        let dev_path_key = normalize_dev_path(&dev_path).to_ascii_lowercase();
+        if let Some(filter) = expanded_dev_filter.as_ref() {
+            if !filter.contains(&dev_path_key) {
+                continue;
+            }
+        }
+        if let Some(instances) = dev_instances.get(&dev_path_key) {
             let solid_matrix = parse_matrix_opt(transform_matrix.as_deref());
             for base_matrix in instances {
                 phm_refs.push((
                     normalize_phm_path(&solid_model_path),
                     multiply_matrices(base_matrix, &solid_matrix),
                     transform_matrix.clone(),
+                    normalize_dev_path(&dev_path),
                 ));
                 dsm_count += 1;
             }
@@ -6316,7 +6578,7 @@ fn query_reachable_geometry(
         let lower = solid_model_path.to_ascii_lowercase();
         if (include_mod && lower.ends_with(".mod")) || (include_stl && lower.ends_with(".stl")) {
             phm_to_geometry
-                .entry(normalize_phm_path(&phm_path))
+                .entry(normalize_phm_path(&phm_path).to_ascii_lowercase())
                 .or_default()
                 .push((
                     normalize_geometry_path(&solid_model_path),
@@ -6336,8 +6598,8 @@ fn query_reachable_geometry(
     let collect_t0 = Instant::now();
     let mut results = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    for (phm_path, dev_placement_matrix, dev_transform_matrix) in phm_refs {
-        if let Some(geometries) = phm_to_geometry.get(&phm_path) {
+    for (phm_path, dev_placement_matrix, dev_transform_matrix, dev_path) in phm_refs {
+        if let Some(geometries) = phm_to_geometry.get(&phm_path.to_ascii_lowercase()) {
             for (geometry_path, phm_transform_matrix, phm_color, phm_color_max_a) in geometries {
                 let phm_matrix = parse_matrix_opt(phm_transform_matrix.as_deref());
                 let placement_matrix = multiply_matrices(&dev_placement_matrix, &phm_matrix);
@@ -6350,6 +6612,7 @@ fn query_reachable_geometry(
                 );
                 if seen.insert(key) {
                     results.push(ReachableGeometry {
+                        dev_path: dev_path.clone(),
                         geometry_path: geometry_path.clone(),
                         instance_key: format!(
                             "{}#{}{}",
@@ -6913,8 +7176,53 @@ mod tests {
         let rows = query_reachable_geometry(&conn, 1, true, false).unwrap();
         let paths: Vec<_> = rows.iter().map(|r| r.geometry_path.as_str()).collect();
         assert_eq!(paths, vec!["MOD/child.mod", "MOD/direct.mod"]);
+        assert_eq!(rows[0].dev_path, "DEV/child.dev");
         assert_eq!(rows[0].dev_transform_matrix.as_deref(), Some("child-tm"));
         assert_eq!(rows[0].phm_color.as_deref(), Some("1,2,3,100"));
+    }
+
+    #[test]
+    fn reachable_geometry_filter_is_case_insensitive_and_expands_child_devs() {
+        let conn = setup_geometry_conn();
+        conn.execute(
+            "INSERT INTO substation_cbm_node (project_id, node_key, parent_key, entity_name, dev_path, transform_matrix)
+             VALUES
+             (1, 'root', NULL, 'F4System', 'ROOT.DEV', NULL),
+             (1, 'other', NULL, 'F4System', 'other.dev', NULL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO substation_dev_sub_device (project_id, dev_path, child_dev_path, sort_order)
+             VALUES (1, 'dev/root.dev', 'CHILD.DEV', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO substation_dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order)
+             VALUES
+             (1, 'DEV/root.dev', 'root.phm', NULL, 0),
+             (1, 'DEV/child.dev', 'child.phm', NULL, 0),
+             (1, 'DEV/other.dev', 'other.phm', NULL, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO substation_phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, sort_order)
+             VALUES
+             (1, 'PHM/root.phm', 'root.mod', NULL, NULL, 0),
+             (1, 'PHM/child.phm', 'child.mod', NULL, NULL, 0),
+             (1, 'PHM/other.phm', 'other.mod', NULL, NULL, 0)",
+            [],
+        )
+        .unwrap();
+
+        let mut filter = HashSet::new();
+        filter.insert("dev/ROOT.DEV".to_string());
+        let rows = query_reachable_geometry_filtered(&conn, 1, true, false, Some(&filter)).unwrap();
+        let paths: Vec<_> = rows.iter().map(|r| r.geometry_path.as_str()).collect();
+        assert_eq!(paths, vec!["MOD/child.mod", "MOD/root.mod"]);
+        assert!(rows.iter().all(|row| row.dev_path == "DEV/root.dev" || row.dev_path == "DEV/child.dev"));
     }
 
     #[test]
@@ -6995,7 +7303,9 @@ mod tests {
              (1, 'parent#dev:0:child.dev', 'parent', 'DEV_SUBDEVICE', 'child.dev',
               '1,0,0,0,0,1,0,0,0,0,1,0,999,0,0,1'),
              (1, 'part-index', 'parent', 'PARTINDEX', 'child.dev',
-              '1,0,0,0,0,1,0,0,0,0,1,0,888,0,0,1')",
+              '1,0,0,0,0,1,0,0,0,0,1,0,888,0,0,1'),
+             (1, 'part-index-mixed', 'parent', 'PartIndex', 'child.dev',
+              '1,0,0,0,0,1,0,0,0,0,1,0,777,0,0,1')",
             [],
         )
         .unwrap();

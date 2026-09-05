@@ -119,10 +119,14 @@ export async function loadXmlModFromFiles(
   files: Map<string, File>,
   phmColor?: XmlModColor,
   phmColorMaxA?: number,
+  options?: { strict?: boolean },
 ): Promise<THREE.Group | null> {
+  const strict = options?.strict === true;
   const file = getFileByPath(files, modPath);
   if (!file) {
-    console.warn(`[xmlModLoader] MOD 文件不存在: ${modPath}`);
+    const message = `[xmlModLoader] MOD 文件不存在: ${modPath}`;
+    if (strict) throw new Error(message);
+    console.warn(message);
     return null;
   }
   // 使用 arrayBuffer + TextDecoder 而非 file.text()，确保跨运行时（浏览器/jsdom）兼容
@@ -139,7 +143,17 @@ export async function loadXmlModFromFiles(
     }
     return loadXmlModFromText(text, modPath, phmColor, phmColorMaxA);
   } catch (err) {
-    console.error(`[xmlModLoader] MOD 解析失败: ${modPath}`, err);
+    const message = `MOD 解析失败: ${modPath}`;
+    if (strict) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const strictError = new Error(`${message}: ${detail}`);
+      // ErrorOptions.cause is not part of this ES2020 build target. Preserve
+      // the original exception for diagnostics without widening the runtime
+      // lib requirement.
+      (strictError as Error & { cause?: unknown }).cause = err;
+      throw strictError;
+    }
+    console.error(`[xmlModLoader] ${message}`, err);
     return null;
   }
 }

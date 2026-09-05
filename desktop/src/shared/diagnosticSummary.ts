@@ -26,6 +26,11 @@ interface DiagnosticPayload {
   line_semantic_pack_error?: string | null;
   geometry_cache_version_match?: boolean;
   current_geometry_cache_version?: string;
+  geometry_cache_version_file_match?: boolean;
+  geometry_cache_manifest_valid?: boolean;
+  substation_semantic_cache_valid?: boolean;
+  geometry_cache_valid?: boolean;
+  fragments_cache_valid?: boolean;
 
   // 变电工程
   entries_count?: number;
@@ -83,6 +88,7 @@ export function summarizeDiagnostic(payload: unknown): string {
     lines.push(`线路 semantic pack：${diag.line_semantic_pack_status ?? 'unknown'}${diag.line_semantic_pack_error ? `（${diag.line_semantic_pack_error}）` : ''}`);
   } else if (diag.project_type === 'substation' || diag.project_type === 'hybrid') {
     lines.push(`变电几何缓存版本：${diag.geometry_cache_version_match ? '匹配' : '不匹配'} / ${diag.current_geometry_cache_version ?? '(未知)'}`);
+    lines.push(`变电语义缓存：${diag.substation_semantic_cache_valid ? '有效' : '无效'}；几何域：${diag.geometry_cache_valid ? '有效' : '不完整'}（版本标记：${diag.geometry_cache_version_file_match ? '匹配' : '不匹配'}，manifest：${diag.geometry_cache_manifest_valid ? '有效' : '无效'}）；Fragments：${diag.fragments_cache_valid ? '完整' : '未完整'}`);
   }
 
   if (projectType === 'transmission_line') {

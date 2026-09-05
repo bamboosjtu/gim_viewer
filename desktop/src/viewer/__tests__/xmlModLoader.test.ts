@@ -139,6 +139,21 @@ describe('loadXmlModFromFiles', () => {
     expect(errorSpy).toHaveBeenCalledTimes(1);
     errorSpy.mockRestore();
   });
+
+  it('strict 模式下缺失 MOD 抛错，避免 GLB cache 把引用误记为 empty', async () => {
+    await expect(
+      loadXmlModFromFiles('MOD/missing.mod', new Map(), undefined, undefined, { strict: true }),
+    ).rejects.toThrow(/MOD 文件不存在/);
+  });
+
+  it('strict 模式下 XML 解析失败抛错', async () => {
+    const files = new Map<string, File>([
+      ['MOD/bad.mod', new File(['not xml'], 'bad.mod', { type: 'text/plain' })],
+    ]);
+    await expect(
+      loadXmlModFromFiles('MOD/bad.mod', files, undefined, undefined, { strict: true }),
+    ).rejects.toThrow(/MOD 解析失败/);
+  });
 });
 
 describe('columnMajorToMatrix4', () => {

@@ -214,6 +214,83 @@ describe('runProgressiveDevGlbPipeline', () => {
     // 避免「完成」掩盖缺失 GLB 导致二次打开静默丢几何
     expect(rec.versionWrites).toBe(0);
     expect(result.failedDevs).toEqual(['DEV/a.dev']);
+    expect(result.rawFallbackDevs).toEqual(['DEV/a.dev']);
+    expect(result.devGlbProfile?.failureType).toEqual({ 'DEV/a.dev': 'parse-exception' });
+  });
+
+  it('strict geometry dependency 缺失时保留 missing 诊断并只进入该 DEV 回退', async () => {
+    const state = makeState({ projectId: 7 });
+    const deps = makeDeps();
+    deps.serializeDevToGlb = vi.fn(async (devPath: string) => {
+      if (devPath.includes('a.dev')) {
+        const error = new Error('DEV DEV/a.dev 内 MOD 加载失败');
+        (error as Error & { cause?: unknown }).cause = new Error('MOD 文件不存在: MOD/missing.mod');
+        throw error;
+      }
+      return new Uint8Array([1, 2, 3]);
+    });
+
+    const result = await runProgressiveDevGlbPipeline(
+      state,
+      new THREE.Scene(),
+      vi.fn(),
+      { token: 1 },
+      deps,
+    );
+
+    expect(result.rawFallbackDevs).toEqual(['DEV/a.dev']);
+    expect(result.devGlbProfile?.failureType).toEqual({ 'DEV/a.dev': 'missing' });
+    expect(result.devGlbProfile?.fullProjectRawFallbackCount).toBe(0);
+  });
+
+  it('同一 DEV 的 GLB 解码失败只尝试一次并返回定向 raw fallback', async () => {
+    const state = makeState({ projectId: 7 });
+    const loadCalls: string[] = [];
+    const deps = makeDeps({}, undefined);
+    deps.loadDevGlb = vi.fn(async (devPath: string) => {
+      loadCalls.push(devPath);
+      return devPath === 'DEV/a.dev' ? null : makeGroup();
+    });
+
+    const result = await runProgressiveDevGlbPipeline(
+      state,
+      new THREE.Scene(),
+      vi.fn(),
+      { token: 1 },
+      deps,
+    );
+
+    // a.dev has two placements, but a failed DEV is one failure domain.
+    expect(loadCalls).toEqual(['DEV/a.dev', 'DEV/b.dev']);
+    expect(result.renderedInstances).toBe(1); // b.dev remains intact
+    expect(result.failedDevs).toEqual(['DEV/a.dev',]);
+    expect(result.rawFallbackDevs).toEqual(['DEV/a.dev']);
+    expect(state.loadedXmlModGroups.size).toBe(1);
+  });
+
+  it('warm geometry rebuild 可通过 files 覆盖使用磁盘源，不写入 state.currentFiles', async () => {
+    const state = makeState({ projectId: 7 });
+    const originalFiles = state.currentFiles;
+    const rebuildFiles = new Map<string, File>([['DEV/a.dev', new File(['x'], 'DEV/a.dev')]]);
+    const seenFiles: Map<string, File>[] = [];
+    const deps = makeDeps();
+    deps.serializeDevToGlb = vi.fn(async (_devPath: string, files: Map<string, File>) => {
+      seenFiles.push(files);
+      return new Uint8Array([1, 2, 3]);
+    });
+
+    const result = await runProgressiveDevGlbPipeline(
+      state,
+      new THREE.Scene(),
+      vi.fn(),
+      { token: 1, files: rebuildFiles },
+      deps,
+    );
+
+    expect(result.interrupted).toBe(false);
+    expect(seenFiles.length).toBe(2);
+    expect(seenFiles.every((files) => files === rebuildFiles)).toBe(true);
+    expect(state.currentFiles).toBe(originalFiles);
   });
 
   it('落盘失败的 DEV 阻止版本标记提交但渲染照常（P1 评审）', async () => {

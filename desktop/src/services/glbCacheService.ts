@@ -76,6 +76,9 @@ export async function serializeDevToGlb(
     files,
     IDENTITY_MATRIX.slice(),
     new Set<string>(),
+    0,
+    { instances: 0 },
+    { strictDependencies: true },
   );
 
   if (discovered.mods.length === 0 && discovered.stls.length === 0) {
@@ -94,18 +97,52 @@ export async function serializeDevToGlb(
 
   let modLoaded = 0;
   let stlLoaded = 0;
+  const hasRenderableGeometry = (group: THREE.Group): boolean => {
+    let found = false;
+    group.traverse((object) => {
+      if (found) return;
+      const mesh = object as THREE.Mesh;
+      const position = mesh.geometry?.getAttribute?.('position');
+      if (mesh.isMesh && position && position.count > 0) found = true;
+    });
+    return found;
+  };
 
   // 加载 MOD
   for (const geo of discovered.mods) {
     try {
-      const group = await loadXmlModFromFiles(geo.modPath, files, geo.phmColor, geo.phmColorMaxA);
+      const group = await loadXmlModFromFiles(
+        geo.modPath,
+        files,
+        geo.phmColor,
+        geo.phmColorMaxA,
+        { strict: true },
+      );
       if (!group) continue;
+      // EMPTY_DEVICE_XML and MODs whose parsed entities have no supported
+      // renderable primitive are deterministic empty geometry. Do not add an
+      // empty Group to the exported scene: an otherwise-empty DEV must become
+      // the explicit `empty` manifest state, while mixed DEV content keeps its
+      // real meshes only.
+      if (!hasRenderableGeometry(group)) {
+        group.traverse((object) => {
+          const mesh = object as THREE.Mesh;
+          mesh.geometry?.dispose?.();
+          const materials = Array.isArray(mesh.material)
+            ? mesh.material
+            : mesh.material ? [mesh.material] : [];
+          for (const material of materials) material?.dispose?.();
+        });
+        continue;
+      }
       // 烘焙 DEV × PHM placement 到顶点（含 mm→m）
       applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
       devGroup.add(group);
       modLoaded++;
     } catch (err) {
-      console.warn(`[glbCache] DEV ${canonicalDevPath} 内 MOD 加载失败: ${geo.modPath}`, err);
+      const strictError = new Error(`DEV ${canonicalDevPath} 内 MOD 加载失败: ${geo.modPath}`);
+      (strictError as Error & { cause?: unknown }).cause = err;
+      throw strictError;
     }
   }
 
@@ -113,25 +150,39 @@ export async function serializeDevToGlb(
   for (const geo of discovered.stls) {
     try {
       const file = getFileByPath(files, geo.stlPath);
-      if (!file) continue;
+      if (!file) throw new Error(`STL 文件不存在: ${geo.stlPath}`);
       const buffer = await file.arrayBuffer();
       const group = parseStlBinary(buffer, geo.stlPath);
-      if (!group) continue;
+      if (!group) throw new Error(`STL 解析失败: ${geo.stlPath}`);
+      if (!hasRenderableGeometry(group)) {
+        group.traverse((object) => {
+          const mesh = object as THREE.Mesh;
+          mesh.geometry?.dispose?.();
+          const materials = Array.isArray(mesh.material)
+            ? mesh.material
+            : mesh.material ? [mesh.material] : [];
+          for (const material of materials) material?.dispose?.();
+        });
+        continue;
+      }
       applyPhmColorOverride(group, geo.phmColor, geo.phmColorMaxA);
       // 烘焙 DEV × PHM placement 到顶点（含 mm→m）
       applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
       devGroup.add(group);
       stlLoaded++;
     } catch (err) {
-      console.warn(`[glbCache] DEV ${canonicalDevPath} 内 STL 加载失败: ${geo.stlPath}`, err);
+      const strictError = new Error(`DEV ${canonicalDevPath} 内 STL 加载失败: ${geo.stlPath}`);
+      (strictError as Error & { cause?: unknown }).cause = err;
+      throw strictError;
     }
   }
 
   if (devGroup.children.length === 0) {
-    // A DEV with references but no loadable child is not equivalent to a DEV
-    // with no references. Throw so the progressive pipeline leaves the
-    // manifest/version incomplete and warm restore falls back to raw MOD/STL.
-    throw new Error(`DEV ${canonicalDevPath} 的几何引用均无法加载`);
+    // All referenced files were present and parsed, but none contained a
+    // renderable primitive (for example EMPTY_DEVICE_XML or an intentionally
+    // empty placeholder MOD).  This is a deterministic empty DEV, not a
+    // dependency/parse failure; persist it as the manifest `empty` tombstone.
+    return null;
   }
 
   debugLog(DEBUG_GIM_CACHE, `[glbCache] DEV ${canonicalDevPath}: ${modLoaded} MOD + ${stlLoaded} STL 合并完成`);

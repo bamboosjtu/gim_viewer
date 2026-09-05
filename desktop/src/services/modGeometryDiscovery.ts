@@ -82,6 +82,18 @@ export interface DiscoveredGeometries {
 }
 
 /**
+ * 几何引用发现选项。
+ *
+ * 默认模式保持历史的容错语义：缺失的 DEV/PHM/MOD/STL 只记录 warning，
+ * raw 回退可以继续显示其余可达几何。GLB 编译则使用严格模式，因为把
+ * “有引用但依赖缺失”当成合法 `empty` 会把不完整结果持久化到 manifest，
+ * 后续 warm restore 将永远跳过真实几何。
+ */
+export interface GeometryDiscoveryOptions {
+  strictDependencies?: boolean;
+}
+
+/**
  * 从 CBM 节点出发，发现所有需要加载的 MOD/STL 几何来源。
  *
  * 对真实 CBM 设备节点，rootTransform 取 node.transformMatrix（已含父链累积）。
@@ -105,7 +117,12 @@ export async function discoverGeometriesFromNode(
   const rootTransform = parentCbmTransform && parentCbmTransform.length === 16
     ? multiplyMatrices(parentCbmTransform, localTransform)
     : localTransform;
-  return discoverGeometriesFromDevPath(`DEV/${node.devPath}`, files, rootTransform, new Set<string>());
+  // CBM exporters are inconsistent: OBJECTMODELPOINTER may be a bare file
+  // name or already include a DEV/ prefix (with arbitrary casing).  Let the
+  // canonical helper add the prefix exactly once; prepending unconditionally
+  // would turn `dev/foo.dev` into `DEV/dev/foo.dev` and make a valid source
+  // look missing on mixed-case samples.
+  return discoverGeometriesFromDevPath(normalizeDevPath(node.devPath), files, rootTransform, new Set<string>());
 }
 
 export async function discoverGeometriesFromDevPath(
@@ -115,17 +132,23 @@ export async function discoverGeometriesFromDevPath(
   visited: Set<string>,
   depth = 0,
   budget: { instances: number } = { instances: 0 },
+  options: GeometryDiscoveryOptions = {},
 ): Promise<DiscoveredGeometries> {
   const empty: DiscoveredGeometries = { mods: [], stls: [] };
+  const strictDependencies = options.strictDependencies === true;
   if (depth > PARSER_LIMITS.maxRecursionDepth) {
     throw new Error(`几何 DEV/PHM 递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
   }
   const normalizedDevPath = normalizeDevPath(devFilePath);
-  if (visited.has(normalizedDevPath)) return empty;
-  visited.add(normalizedDevPath);
+  const devVisitKey = normalizedDevPath.toLowerCase();
+  if (visited.has(devVisitKey)) return empty;
+  visited.add(devVisitKey);
 
   const devFile = getFileByPath(files, normalizedDevPath);
   if (!devFile) {
+    if (strictDependencies) {
+      throw new Error(`DEV 文件不存在: ${normalizedDevPath}`);
+    }
     console.warn(`[modDiscovery] DEV 文件不存在: ${normalizedDevPath}`);
     return empty;
   }
@@ -156,11 +179,15 @@ export async function discoverGeometriesFromDevPath(
     if (phmDepth > PARSER_LIMITS.maxRecursionDepth) {
       throw new Error(`几何 PHM 递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
     }
-    if (visited.has(phmFilePath)) return;
-    visited.add(phmFilePath);
+    const phmVisitKey = phmFilePath.toLowerCase();
+    if (visited.has(phmVisitKey)) return;
+    visited.add(phmVisitKey);
 
     const phmFile = getFileByPath(files, phmFilePath);
     if (!phmFile) {
+      if (strictDependencies) {
+        throw new Error(`PHM 文件不存在: ${phmFilePath}`);
+      }
       console.warn(`[modDiscovery] PHM 文件不存在: ${phmFilePath}`);
       return;
     }
@@ -182,11 +209,14 @@ export async function discoverGeometriesFromDevPath(
       }
 
       if (lower.endsWith('.mod')) {
+        const modPath = normalizeGeometryPath(modelFileName);
+        if (strictDependencies && !getFileByPath(files, modPath)) {
+          throw new Error(`MOD 文件不存在: ${modPath}`);
+        }
         budget.instances++;
         if (budget.instances > PARSER_LIMITS.maxGeometryInstances) {
           throw new Error(`几何实例数超过安全上限 ${PARSER_LIMITS.maxGeometryInstances}`);
         }
-        const modPath = normalizeGeometryPath(modelFileName);
         mods.push({
           modPath,
           instanceKey: makeInstanceKey(modPath, placementTransform, normalizedDevPath, phmFilePath, phmSolid.color),
@@ -199,11 +229,14 @@ export async function discoverGeometriesFromDevPath(
           phmPath: phmFilePath,
         });
       } else if (lower.endsWith('.stl')) {
+        const stlPath = normalizeGeometryPath(modelFileName);
+        if (strictDependencies && !getFileByPath(files, stlPath)) {
+          throw new Error(`STL 文件不存在: ${stlPath}`);
+        }
         budget.instances++;
         if (budget.instances > PARSER_LIMITS.maxGeometryInstances) {
           throw new Error(`几何实例数超过安全上限 ${PARSER_LIMITS.maxGeometryInstances}`);
         }
-        const stlPath = normalizeGeometryPath(modelFileName);
         stls.push({
           stlPath,
           instanceKey: makeInstanceKey(stlPath, placementTransform, normalizedDevPath, phmFilePath, phmSolid.color),
@@ -216,6 +249,9 @@ export async function discoverGeometriesFromDevPath(
           phmPath: phmFilePath,
         });
       } else {
+        if (strictDependencies) {
+          throw new Error(`PHM 引用了不支持的几何文件: ${modelFileName}`);
+        }
         console.warn(`[modDiscovery] 未知几何引用类型: ${modelFileName}`);
       }
     }
@@ -235,6 +271,7 @@ export async function discoverGeometriesFromDevPath(
         new Set(visited),
         depth + 1,
         budget,
+        options,
       );
       mods.push(...child.mods);
       stls.push(...child.stls);
@@ -242,6 +279,9 @@ export async function discoverGeometriesFromDevPath(
     }
 
     if (!solidLower.endsWith('.phm')) {
+      if (strictDependencies) {
+        throw new Error(`DEV 引用了不支持的几何文件: ${solidModelName}`);
+      }
       continue;
     }
 
@@ -259,6 +299,7 @@ export async function discoverGeometriesFromDevPath(
       new Set(visited),
       depth + 1,
       budget,
+      options,
     );
     mods.push(...child.mods);
     stls.push(...child.stls);
