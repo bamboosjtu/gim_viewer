@@ -18,7 +18,8 @@
 | 层级树↔3D 联动 | ✅ 已实现 | `desktop/src/services/nodeInteractionService.ts` |
 | 属性面板（CBM/FAM/DEV/IFC + 语义字典） | ✅ 已实现 | `desktop/src/ui/propsDrawer.ts` / `propertyDictionary.ts` |
 | SQLite 缓存（索引、属性、Fragments、几何引用链） | ✅ 已实现 | `desktop/src-tauri/src/db.rs`（变电 `SUBSTATION_PARSER_VERSION=gim-substation-parser-v22`；线路使用独立 domain） |
-| 缓存命中短路 | ✅ 已实现 | `desktop/src/services/openGimService.ts` / `gimIndexRestoreService.ts` |
+| 变电 Runtime 打开/缓存生命周期 | ✅ 已实现 | `desktop/src/services/substationRuntime.ts` / `gimOpenCore.ts` |
+| 缓存命中短路 | ✅ 已实现 | `desktop/src/services/substationRuntime.ts` / `gimIndexRestoreService.ts` |
 | IFC/DEV/PHM/MOD/STL 本地磁盘缓存 | ✅ 已实现 | `desktop/src/services/gimExtractedCacheService.ts` |
 | 诊断快捷键（Ctrl+Shift+D） | ✅ 已实现 | `desktop/src/services/diagnosticSummaryService.ts` |
 | **MOD 文件解析（XML primitive 14 类）** | ✅ 已实现 | `desktop/src/gim/geometry/xmlModParser.ts`（14 类，11 强类型 + 3 弱 schema fallback）；设计稿见 [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) |
@@ -27,7 +28,7 @@
 | **Geometry IR schema 落地** | ✅ 已实现 | `desktop/src/gim/geometry/ir.ts`（5 kind 联合 + 14 类 primitive 类型）；设计稿见 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) |
 | **xml-mod 渲染集成（CBM→DEV→PHM→MOD）** | ✅ 已实现 | `desktop/src/viewer/xmlModGeometry.ts` / `xmlModLoader.ts` / `desktop/src/services/modGeometryDiscovery.ts` / `desktop/src/services/nodeInteractionService.ts` |
 | **PHM TransformMatrix 应用** | ✅ 已实现 | `desktop/src/viewer/xmlModLoader.ts` `applyPlacementTransformToSceneUnits`（顶点烘焙 DEV/PHM/CBM/SUBDEVICE 累积矩阵，避免 Object3D.applyMatrix4 decompose 精度损失） |
-| **xml-mod 自动加载（IFC 加载完成后）** | ✅ 已实现（渐进式管线） | `desktop/src/services/openGimService.ts` `loadAllIfcFiles` 后台任务 → `progressiveGeometryService.ts` |
+| **xml-mod 自动加载（IFC 加载完成后）** | ✅ 已实现（渐进式管线） | `desktop/src/services/substationRuntime.ts` `loadAllIfcFiles` 后台任务 → `progressiveGeometryService.ts` |
 | **DEV/PHM/MOD/STL 文件磁盘缓存** | ✅ 已实现 | `desktop/src/services/gimExtractedCacheService.ts` `cacheGeometryFiles`（首次打开时缓存，缓存命中按需读取） |
 | **缓存命中场景回放 xml-mod 几何** | ✅ 已实现 | `desktop/src/services/nodeInteractionService.ts` `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` |
 | **STL 渲染** | ⚠️ 已实现加载器与首次打开渐进渲染；缓存命中默认不主动加载 STL | `desktop/src/viewer/stlLoader.ts` / `desktop/src/services/glbCacheService.ts`；几何角色见 [12-stl-static-survey.md](schema/12-stl-static-survey.md) |
@@ -43,6 +44,27 @@
 - 每个 unique DEV 在 `_manifest.json` 中记录 `status=glb|empty` 与字节数。缓存命中场景（`currentFiles=null`）先按 manifest 建立 DEV→CBM placement 映射，以 GIMR 二进制 envelope 分批读取 GLB；同一 DEV 的 GLB 最多读取一次，`empty` 不读取也不触发回退，随后每个 placement 独立加载并应用 CBM 矩阵。单个 DEV 的 GLB 缺失、大小/header 不符、真实读取或解析失败只隔离该 DEV，并按 DEV path 做 scoped 原始 MOD/STL 回退；manifest/source 结构损坏或版本失效才重建整个 geometry cache。
 - 旧缓存或写入/序列化未完成时不提交几何版本标记；geometry cache 与 CBM/IFC 语义缓存独立，几何版本失效不会重新解压或重建语义索引。partial failure 的成功 GLB 保留在场景中，避免将单个坏 DEV 放大为全项目 MOD/STL 长尾。
 - 缓存命中场景的节点按需回放仍由 `nodeInteractionService` 通过 `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` 读取 DEV/PHM/MOD/STL；GLB fast path 不可用时保留原始文件解析。
+
+### Runtime 打开边界
+
+`GIMPKGS` 在 Shared Core 的 source inspection 阶段直接选择 Substation Runtime。变电
+Runtime 自己完成缓存校验、CBM/FAM/DEV/FileDevRelation 恢复或冷解析、IFC Spatial/
+Fragments 加载，以及 DEV GLB/MOD-STL 几何路径；不会读取线路 graph/属性缓存，也不依赖
+线路 Runtime。
+
+```text
+source identity / GIMPKGS
+  → substation cache validation
+  → CBM/FAM/DEV/FileDevRelation
+  → IFC / Fragments
+  → DEV GLB / MOD-STL fallback
+  → 3D + tree/UI
+```
+
+`validate_gim_cache` 的校验分支由当前 source magic 映射出的
+`expected_project_type=substation` 决定。SQLite 旧 `project_type` 只用于 mismatch
+诊断；解压后保留 `detectGimProjectType` 做内容校验和 fallback，不把 `hybrid` 变成第三
+Runtime。
 - PHM 的 `COLORn` 与文件级 `max(A)` 已随几何引用链缓存；重放时对 MOD/STL 实例应用 RGB、透明度和 A=0 不透明哨兵规则。
 
 > 未完成事项与下一步性能/功能工作统一维护在 [dev-log.md](dev-log.md)；本文件只描述当前实现和稳定边界。
@@ -247,8 +269,9 @@ IFC 加载完成后自动启动渐进式 MOD/STL 几何管线       ✅ 已实�
 
 ### 缓存命中流程
 
-1. 用户选择 GIM → Rust 计算 sha256 + file_size
-2. `validate_gim_cache`：检查 parser_version + file_size + IFC 缓存文件存在性
+1. 用户选择 GIM → Shared Core 读取 GIMPKGS source header，Rust 计算 sha256 + file_size
+2. Substation Runtime 调用 `validate_gim_cache(expected_project_type=substation)`：检查
+   parser domain + file_size + IFC 缓存文件存在性
 3. 命中 → 读取全部索引 → 恢复到 AppState → 直接渲染树和面板；几何恢复先读取 DEV GLB manifest，按 unique DEV 二进制批读并实例化 placement，只有 fast path 不完整或读取/解析失败时才按需读取 DEV/PHM/MOD/STL 原始文件
 4. 未命中 → 完整解压 → 解析 → 入库 → 缓存 IFC/DEV/PHM/MOD/STL 文件与几何引用链到本地磁盘
 

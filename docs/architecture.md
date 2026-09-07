@@ -61,7 +61,7 @@ src/
 │  ├─ linePathNormalize.ts # 路径归一化（file_name_lower 统一键空间）
 │  ├─ lineRefKind.ts   # 线路引用类型常量（10 种）
 │  ├─ gimGraphTypes.ts # 线路图节点/边类型
-│  ├─ projectType.ts   # 工程类型检测（substation / transmission_line）
+│  ├─ projectType.ts   # 解压内容校验/回退工程类型检测
   ├─ entityName.ts    # ENTITYNAME 大小写归一化（十样本实证三态变体，docs/schema/04）
 │  └─ types.ts         # 统一类型定义
 ├─ viewer/        3D 渲染层（仅变电工程使用）
@@ -89,7 +89,11 @@ src/
 │  ├─ lineMapStyle.ts   # MapLibre style 工厂（empty / osm-online / pmtiles）
 │  └─ lineMapPmtiles.ts  # PMTiles protocol 管理（引用计数）
 ├─ services/      业务编排层
-│  ├─ openGimService.ts          # GIM 打开流程（含缓存短路）
+│  ├─ openGimService.ts          # 顶层入口：Shared Core 后 dispatch 到 Runtime
+│  ├─ gimSourceService.ts        # source header/magic、source identity 与类型映射
+│  ├─ gimOpenCore.ts             # Shared Core：session、解压输入、清理/性能边界
+│  ├─ powerlineRuntime.ts        # 线路 cache/Worker/graph/属性/地图生命周期
+│  ├─ substationRuntime.ts       # 变电 CBM/IFC/Fragments/DEV/MOD/STL 生命周期
 │  ├─ openIfcService.ts          # IFC 文件打开
 │  ├─ nodeInteractionService.ts  # 节点点击懒加载 IFC
 │  ├─ gimIndexPersistenceService.ts # 变电索引入库 payload 构建
@@ -105,7 +109,7 @@ src/
 ├─ desktop/       Tauri 桥接层
 │  ├─ runtime.ts      # isTauri() 环境检测
 │  ├─ fileDialog.ts   # 文件选择对话框
-│  ├─ fileReader.ts   # 文件读取（getFileInfo/readFileBytes）
+│  ├─ fileReader.ts   # 文件读取（getFileInfo/readFileHead/readFileBytes）
 │  └─ database.ts     # SQLite 命令前端包装
 ├─ shared/
 │  └─ html.ts         # HTML 转义工具
@@ -147,6 +151,9 @@ desktop/src-tauri/
 - `gim/` 不依赖 `services/`、`viewer/`、`ui/`、`desktop/`
 - `viewer/` 不依赖 `services/`、`ui/`
 - `ui/` 不直接碰数据库和 IFC Loader（通过 services 间接调用）
+- `services/gimOpenCore.ts` 只提供共用基础设施；不持有 Line/Substation domain model
+- `services/powerlineRuntime.ts` 与 `services/substationRuntime.ts` 互不依赖
+- `services/openGimService.ts` 只负责入口、source identity/session 和 Runtime dispatch
 - `services/` 编排 `gim/` + `viewer/` + `ui/` + `desktop/`
 - `desktop/` 仅封装 Tauri invoke
 
@@ -234,13 +241,43 @@ Fixed Runtime 仅通过 `tauri.portable.conf.json` 注入 release 构建，`taur
 
 `main.ts` → `bootstrap.ts`：不立即创建 Viewer，3D 引擎按需懒加载。
 
+### GIM 打开流程与 Runtime 边界
+
+当前入口按以下顺序执行：
+
+```text
+inspect source
+  → source identity / sha256 / magic / project type
+  → cleanup / ProjectLoadSession
+  → dispatch
+      ├─ openPowerlineProject
+      └─ openSubstationProject
+```
+
+Shared Core 位于 `gimSourceService.ts`、`gimOpenCore.ts` 和桌面桥接基础设施中，负责
+读取 GIM header、归一化 source identity、文件授权、SHA、解压 primitive、路径/缓存
+桥接、清理和 session/perf guard。`GIMPKGT` 选择 `transmission_line`，`GIMPKGS` 选择
+`substation`；选择结果不从 SQLite 的旧 `project_type` 反推。
+
+`detectGimProjectType` 仍在解压后运行，但定位为内容校验、未知 magic 的 fallback 和
+magic/content mismatch 诊断。`hybrid` 只作为诊断状态：source magic 已知时由 magic
+优先，magic 未知时回退到 Substation Runtime，不新增第三个 Runtime。
+
+Powerline Runtime 独立拥有线路 cache validation、semantic pack/SQLite warm path、冷
+Line Parser Worker、GimGraph/FAM/DEV 属性提交和地图/树 UI。Substation Runtime 独立拥有
+CBM/FAM/DEV/FileDevRelation、IFC/Fragments、DEV GLB 以及 MOD/STL 回退和 3D/tree UI。
+两边共用 `ProjectLoadSession` guard，所有异步提交仍须通过 `state.isCurrentSession`。
+
 ### 缓存命中短路
 
 二次打开同一 GIM 时：
 
-1. Rust 计算 sha256 + file_size
-2. `validate_gim_cache` 检查 parser_version + file_size + IFC 缓存文件存在性
-3. 命中 → `get_gim_index` 读取全部索引 → 恢复到 AppState → 直接渲染树和面板（不读取原始 GIM、不解压、不创建 Viewer）
+1. Shared Core 读取 source header/magic，并由 Rust 计算 sha256 + file_size
+2. 已选 Runtime 以显式 `expected_project_type` 调用 `validate_gim_cache`；SQLite 中的旧
+   `project_type` 只用于 mismatch 诊断，不决定校验分支
+3. 线路命中 → semantic pack/SQLite graph + 属性恢复 → 地图/树 UI
+4. 变电命中 → CBM/FAM/DEV/FileDevRelation + IFC 空间索引恢复 → 3D/tree/UI
+5. 语义缓存未命中才提取原始 GIM；几何域的既有版本/manifest 策略保持不变
 
 ### 节点级 IFC 懒加载
 
@@ -266,7 +303,10 @@ manifest，条目内容由 `DiskBackedFile` 在 `text()` / `arrayBuffer()` 时�
 
 ### 工程类型检测
 
-通过 `.ifc` 文件存在性 + 线路专属 CBM/DEV/FAM 字段（`ENTITYNAME`/`GROUPTYPE`/`DEVICETYPE` 键值级匹配）区分变电与线路工程。
+打开前优先读取 `GIMPKGT` / `GIMPKGS` source magic。解压后仍通过 `.ifc` 文件存在性 +
+线路专属 CBM/DEV/FAM 字段（`ENTITYNAME`/`GROUPTYPE`/`DEVICETYPE` 键值级匹配）执行
+`detectGimProjectType` 内容校验和 fallback；它不再把缓存中的 `project_type` 当作 source
+identity。
 
 ### 底图运行状态（内存单例）
 

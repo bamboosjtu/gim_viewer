@@ -8,6 +8,7 @@
 |---|---|---|
 | GIM 容器解压 | ✅ 已实现 | `desktop/src/gim/gimExtractor.ts` |
 | 工程类型识别 | ✅ 已实现 | `desktop/src/gim/projectType.ts` |
+| 线路 Runtime 打开/缓存生命周期 | ✅ 已实现 | `desktop/src/services/powerlineRuntime.ts` / `gimOpenCore.ts` |
 | CBM 层级解析（F1-F4System） | ✅ 已实现 | `desktop/src/gim/lineCbmParser.ts` |
 | DEV/FAM 解析 | ✅ 已实现 | `desktop/src/gim/lineDevParser.ts` / `lineFamParser.ts` |
 | 引用链索引（含 .cbm/.dev/.fam/.phm/.mod/.stl） | ✅ 已实现 | `desktop/src/gim/lineRefKind.ts` / `gimGraphTypes.ts` |
@@ -51,6 +52,26 @@
 | 线路（GIMPKGT） | PascalCase：`Cbm/` `Dev/` `Phm/` `Mod/` |
 
 解析器通过 `lowerFileName()` 兼容大小写，以文件名小写作为统一查找键。
+
+### Runtime 打开边界
+
+打开入口先读取 GIM source header。`GIMPKGT` 直接选择 `Powerline Runtime`；缓存校验
+显式传入 `expected_project_type=transmission_line`，不会使用 `gim_project.project_type`
+反向决定线路或变电分支。旧 `project_type` 只保留为缓存 mismatch 诊断字段。
+
+线路 Runtime 的生命周期为：
+
+```text
+source identity / GIMPKGT
+  → line cache validation
+  → semantic pack / SQLite warm path
+  → cold Line Parser Worker
+  → GimGraph + FAM/DEV properties
+  → tree + map UI
+```
+
+解压后仍调用 `detectGimProjectType` 做内容校验和 mismatch 诊断；它不改变已由
+`GIMPKGT` 确定的 Runtime。`hybrid` 不会创建第三种 Runtime。
 
 ---
 
@@ -278,7 +299,9 @@ Canvas overlay 委托底图层的 `project()` 方法，两种模式共用同一�
 
 - `line_parser_version` 匹配当前 `LINE_PARSER_VERSION`（当前为 `gim-line-parser-v1`）；旧库中仅有 `parser_version` 时按 v21/v22 兼容迁移
 - file_size 匹配
-- `line_cbm_node_count > 0` 且 `line_fam_source_count > 0`（`project_type = 'transmission_line'`）
+- `line_cbm_node_count > 0` 且 `line_fam_source_count > 0`，并且旧记录的
+  `project_type` 与当前 source domain 不冲突；校验分支由 `GIMPKGT` 对应的
+  `expected_project_type` 选择
 
 `parser_version` 仍保留为兼容/诊断字段，但不再作为线路缓存的唯一失效依据；变电 `SUBSTATION_PARSER_VERSION` 升级不会使线路图、属性或 semantic pack 失效。
 
