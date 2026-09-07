@@ -26,3 +26,13 @@ export interface FileInfo {
 export async function getFileInfo(path: string): Promise<FileInfo> {
   return invokeTimed<FileInfo>('get_file_info', { path });
 }
+
+/**
+ * Read only the bounded GIM header prefix. The Rust command enforces the same
+ * upper bound regardless of the caller-provided value.
+ */
+export async function readFileHead(path: string, maxBytes = 1024 * 1024): Promise<ArrayBuffer> {
+  const bytes = await invokeTimed<ArrayBuffer | Uint8Array>('read_file_head', { path, maxBytes });
+  if (bytes instanceof ArrayBuffer) return bytes;
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}

@@ -90,6 +90,7 @@ pub struct AuthorizedFilePaths(pub std::sync::Mutex<HashSet<String>>);
 
 /// 原始源文件读取上限，避免恶意路径触发无界内存分配。
 const MAX_SOURCE_FILE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const MAX_SOURCE_HEAD_BYTES: u64 = 1024 * 1024;
 
 fn canonical_identity(path: &Path) -> Result<(PathBuf, String), String> {
     let canonical = fs::canonicalize(path).map_err(|e| format!("规范化文件路径失败: {}", e))?;
@@ -401,6 +402,24 @@ fn read_file_bytes(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Read a bounded prefix for source inspection without loading the archive.
+#[tauri::command]
+fn read_file_head(
+    access: tauri::State<'_, AuthorizedFilePaths>,
+    path: String,
+    max_bytes: Option<u64>,
+) -> Result<tauri::ipc::Response, String> {
+    let p = require_authorized_path(&access, &path, Some("gim"))?;
+    let requested = max_bytes.unwrap_or(MAX_SOURCE_HEAD_BYTES);
+    let limit = requested.min(MAX_SOURCE_HEAD_BYTES) as usize;
+    let file = fs::File::open(p).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::with_capacity(limit);
+    file.take(limit as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     ensure_fixed_webview2_acl();
@@ -415,6 +434,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             read_file_bytes,
+            read_file_head,
             get_file_info,
             get_process_memory,
             file_dialog_commands::authorize_gim_file_path_for_dev,
