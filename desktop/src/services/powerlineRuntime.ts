@@ -2,7 +2,7 @@ import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { LineParserWorkerResult } from './lineParserWorkerClient.js';
 import type { LineParserWorkerFile } from './lineParserWorker.js';
 import type { GimRuntimeOpenContext } from './gimOpenCore.js';
-import { currentPerfSession, getDevLineBatchOptions, getDevLineCatenaryMode, hideLoading, showLoading } from './gimOpenCore.js';
+import { currentPerfSession, hideLoading, showLoading } from './gimOpenCore.js';
 import { emptyTipEl } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_GIM_CACHE, DEBUG_RUNTIME_LOGS } from '../config/debug.js';
@@ -13,6 +13,29 @@ import {
 } from '../utils/perfTimings.js';
 import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBar.js';
 import { validateGimCache } from '@desktop/database.js';
+
+function getDevLineBatchOptions(): { maxFiles?: number; maxBytes?: number } {
+  if (!import.meta.env.DEV) return {};
+  const globals = globalThis as {
+    __GIM_DEV_LINE_BATCH_MAX_FILES__?: unknown;
+    __GIM_DEV_LINE_BATCH_MAX_BYTES__?: unknown;
+  };
+  const asPositiveInt = (value: unknown): number | undefined => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+    const integer = Math.floor(value);
+    return integer > 0 ? integer : undefined;
+  };
+  return {
+    maxFiles: asPositiveInt(globals.__GIM_DEV_LINE_BATCH_MAX_FILES__),
+    maxBytes: asPositiveInt(globals.__GIM_DEV_LINE_BATCH_MAX_BYTES__),
+  };
+}
+
+function getDevLineCatenaryMode(): boolean | undefined {
+  if (!import.meta.env.DEV) return undefined;
+  const value = (globalThis as { __GIM_DEV_CATENARY_MODE__?: unknown }).__GIM_DEV_CATENARY_MODE__;
+  return typeof value === 'boolean' ? value : undefined;
+}
 
 export async function commitLineParserResult(
   state: AppState,

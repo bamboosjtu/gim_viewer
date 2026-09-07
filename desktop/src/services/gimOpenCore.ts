@@ -2,7 +2,6 @@ import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { NativeExtractionProfile } from '@desktop/gimExtract.js';
 import type { GimSourceDescriptor } from './gimSourceService.js';
 import {
-  perfBegin,
   perfCurrentSession,
   perfIsCurrentSession,
   perfRecordExternalSpan,
@@ -49,29 +48,6 @@ export function currentPerfSession(): PerfSession {
   return perfCurrentSession();
 }
 
-export function getDevLineBatchOptions(): { maxFiles?: number; maxBytes?: number } {
-  if (!import.meta.env.DEV) return {};
-  const globals = globalThis as {
-    __GIM_DEV_LINE_BATCH_MAX_FILES__?: unknown;
-    __GIM_DEV_LINE_BATCH_MAX_BYTES__?: unknown;
-  };
-  const asPositiveInt = (value: unknown): number | undefined => {
-    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-    const integer = Math.floor(value);
-    return integer > 0 ? integer : undefined;
-  };
-  return {
-    maxFiles: asPositiveInt(globals.__GIM_DEV_LINE_BATCH_MAX_FILES__),
-    maxBytes: asPositiveInt(globals.__GIM_DEV_LINE_BATCH_MAX_BYTES__),
-  };
-}
-
-export function getDevLineCatenaryMode(): boolean | undefined {
-  if (!import.meta.env.DEV) return undefined;
-  const value = (globalThis as { __GIM_DEV_CATENARY_MODE__?: unknown }).__GIM_DEV_CATENARY_MODE__;
-  return typeof value === 'boolean' ? value : undefined;
-}
-
 /** Keep source/header naming fallback in Shared Core. */
 export function resolveProjectName(
   headerName: string | undefined,
@@ -101,9 +77,4 @@ export function recordNativeExtractionStages(
   for (const [label, durationMs, meta] of stages) {
     if (durationMs > 0) perfRecordExternalSpan(label, durationMs, meta, session);
   }
-}
-
-/** A small shared timing helper for runtime boundaries. */
-export function beginRuntimeSpan(label: string, session?: PerfSession): ReturnType<typeof perfBegin> {
-  return perfBegin(label, undefined, session ?? currentPerfSession());
 }
