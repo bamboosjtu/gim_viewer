@@ -2110,7 +2110,7 @@ export async function autoLoadModAndStlGeometry(
       // fitCameraToScene 需要 ViewerContext，这里通过 runtime 获取
       // 但 autoLoad 在 IFC 流程之后调用，runtime 必定已存在
       // 为避免循环依赖，延迟到 IFC 加载流程的 fitCameraToScene 后执行
-      // 这里只标记，不实际 fit（fit 由 openGimService 在 autoLoad 完成后统一调用）
+      // 这里只标记，不实际 fit（fit 由 Substation Runtime 在 autoLoad 完成后统一调用）
     } catch {
       // ignore
     }

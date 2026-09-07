@@ -3,6 +3,7 @@ import { extractGimHeader, type GimHeaderInfo } from '../gim/gimExtractor.js';
 /** Runtime is selected from the source package, never from a cache row. */
 export type GimRuntimeType = 'transmission_line' | 'substation';
 export type GimSourceKind = GimRuntimeType | 'unknown';
+export type GimContentProjectType = GimSourceKind | 'hybrid';
 
 export interface GimSourceIdentity {
   path?: string;
@@ -24,6 +25,21 @@ export interface GimSourceDescriptor extends GimSourceIdentity {
 export function runtimeTypeFromMagic(magic: string): GimSourceKind {
   if (magic === 'GIMPKGT') return 'transmission_line';
   if (magic === 'GIMPKGS') return 'substation';
+  return 'unknown';
+}
+
+/**
+ * Resolve the Runtime boundary after content validation.
+ * A recognized source magic always wins; hybrid remains a diagnostic state and
+ * falls back to the existing Substation Runtime only when magic is unknown.
+ */
+export function resolveGimRuntimeType(
+  sourceType: GimSourceKind,
+  contentType: GimContentProjectType,
+): GimSourceKind {
+  if (sourceType !== 'unknown') return sourceType;
+  if (contentType === 'transmission_line') return 'transmission_line';
+  if (contentType === 'substation' || contentType === 'hybrid') return 'substation';
   return 'unknown';
 }
 
@@ -79,4 +95,3 @@ export function inspectGimSourceHead(
 ): GimSourceDescriptor {
   return buildDescriptor(fileName, head, identity);
 }
-

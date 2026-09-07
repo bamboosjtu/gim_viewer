@@ -318,7 +318,7 @@ function renderStdNode(node: StdNode, depth: number, parent: HTMLElement, state:
 // ===== 阶段 4：gridId 双向联动 =====
 
 /**
- * 外部联动回调（由 openGimService 注入）。
+ * 外部联动回调（由 Substation Runtime 注入）。
  *
  * 点击 SLD 元素或 STD 拓扑项时触发，外部回调负责：
  * - 通过 gridId 查找 CBM 节点
@@ -332,7 +332,7 @@ let gridIdClickHandler: GridIdClickHandler | null = null;
 /**
  * 注册外部 gridId 点击联动回调。
  *
- * 在 GIM 打开（首次或缓存命中）后由 openGimService 调用，
+ * 在 GIM 打开（首次或缓存命中）后由 Substation Runtime 调用，
  * 在 projectCleanupService 清空项目时置空。
  */
 export function setSldGridIdClickHandler(handler: GridIdClickHandler | null): void {
