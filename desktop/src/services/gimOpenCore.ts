@@ -107,4 +107,3 @@ export function recordNativeExtractionStages(
 export function beginRuntimeSpan(label: string, session?: PerfSession): ReturnType<typeof perfBegin> {
   return perfBegin(label, undefined, session ?? currentPerfSession());
 }
-
