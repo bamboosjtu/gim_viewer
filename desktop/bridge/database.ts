@@ -754,8 +754,10 @@ export interface GimCacheValidation {
   /** 缓存无效时的可诊断原因；有效时为 null。 */
   cache_miss_reason: string | null;
   valid: boolean;
-  /** v4: 工程类型（substation / transmission_line / hybrid / unknown），决定缓存校验分支 */
+  /** 旧缓存记录中的工程类型，仅用于诊断，不决定校验分支。 */
   project_type: string | null;
+  /** 当前源 GIM magic 映射出的校验域。 */
+  validated_project_type: 'substation' | 'transmission_line' | string;
   /** v4: line_cbm_node 表行数（transmission_line 缓存校验用） */
   line_cbm_node_count: number;
   /** v5: line_fam_property 不同 file_name_lower 的去重数量 */
@@ -800,8 +802,14 @@ export async function getGimIndex(projectId: number): Promise<GimIndexResult> {
 /**
  * 校验 GIM 缓存完整性（只读，不修复）。
  */
-export async function validateGimCache(projectId: number): Promise<GimCacheValidation> {
-  return invokeTimed<GimCacheValidation>('validate_gim_cache', { projectId });
+export async function validateGimCache(
+  projectId: number,
+  expectedProjectType: 'substation' | 'transmission_line',
+): Promise<GimCacheValidation> {
+  return invokeTimed<GimCacheValidation>('validate_gim_cache', {
+    projectId,
+    expectedProjectType,
+  });
 }
 
 // ==================== 诊断 ====================

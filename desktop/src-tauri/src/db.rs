@@ -3698,8 +3698,10 @@ pub struct GimCacheValidation {
     /// invalid 时给出可操作的首要原因；多个原因以 `; ` 分隔。
     pub cache_miss_reason: Option<String>,
     pub valid: bool,
-    /// v4: 工程类型（substation / transmission_line / hybrid / unknown）
+    /// 旧缓存记录中的工程类型，仅用于诊断，不参与本次校验分支选择。
     pub project_type: Option<String>,
+    /// 本次校验实际使用的源工程类型。它来自当前 GIM source magic。
+    pub validated_project_type: String,
     /// v4: powerline_cbm_node 表行数（transmission_line 缓存校验用）
     pub line_cbm_node_count: u64,
     /// v5: powerline_fam_property 不同 file_name_lower 的去重数量
@@ -5078,9 +5080,9 @@ fn inspect_line_semantic_pack(
 
 /// Tauri command：校验 GIM 缓存完整性（只读，不修复）
 ///
-/// v4 增强：根据 project_type 分支校验逻辑
+/// v4 增强：根据调用方传入的 source project type 分支校验逻辑
 /// - transmission_line：valid = parser_version_match && line_cbm_node_count > 0
-/// - substation（或 null/unknown）：保持原有 IFC/cache 校验逻辑
+/// - substation：保持原有 IFC/cache 校验逻辑
 ///
 /// v5 增强（transmission_line 分支）：
 /// - valid 增加 line_fam_source_count > 0 条件（FAM 属性必须存在）
@@ -5090,6 +5092,7 @@ pub fn validate_gim_cache(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, DbState>,
     project_id: i64,
+    expected_project_type: String,
 ) -> Result<GimCacheValidation, String> {
     let conn = state
         .0
@@ -5125,7 +5128,19 @@ pub fn validate_gim_cache(
         )
         .map_err(|e| format!("读取项目版本失败: {}", e))?;
 
-    let is_line = project_type.as_deref() == Some("transmission_line");
+    if expected_project_type != "transmission_line" && expected_project_type != "substation" {
+        return Err(format!(
+            "缓存校验需要明确的源工程类型，收到: {}",
+            expected_project_type
+        ));
+    }
+    // 关键边界：校验分支由当前 GIM source magic 决定，不能由旧缓存中的
+    // project_type 反向决定。旧字段保留在响应中，只供诊断和迁移观察。
+    let is_line = expected_project_type == "transmission_line";
+    let stored_project_type_match = project_type
+        .as_deref()
+        .map(|stored| stored == expected_project_type)
+        .unwrap_or(true);
     let line_parser_version_match = parser_domain_version_matches(
         stored_line_parser_version.as_deref(),
         stored_parser_version.as_deref(),
@@ -5265,8 +5280,8 @@ pub fn validate_gim_cache(
             ifc_entry_count,
         )
     };
-    let valid = semantic_cache_valid;
-    let substation_semantic_cache_valid = !is_line && semantic_cache_valid;
+    let valid = semantic_cache_valid && stored_project_type_match;
+    let substation_semantic_cache_valid = !is_line && semantic_cache_valid && stored_project_type_match;
 
     let mut miss_reasons = Vec::new();
     if !parser_version_match {
@@ -5279,6 +5294,13 @@ pub fn validate_gim_cache(
         .unwrap_or("(未设置)");
         let current = if is_line { LINE_PARSER_VERSION } else { SUBSTATION_PARSER_VERSION };
         miss_reasons.push(format!("{}_PARSER_VERSION_MISMATCH:{} -> {}", domain.to_ascii_uppercase(), stored, current));
+    }
+    if !stored_project_type_match {
+        miss_reasons.push(format!(
+            "PROJECT_TYPE_MISMATCH:{} -> {}",
+            project_type.as_deref().unwrap_or("(未设置)"),
+            expected_project_type
+        ));
     }
     if is_line {
         if line_cbm_node_count == 0 { miss_reasons.push("LINE_GRAPH_EMPTY".to_string()); }
@@ -5327,6 +5349,7 @@ pub fn validate_gim_cache(
         cache_miss_reason: cache_miss_reason(miss_reasons),
         valid,
         project_type,
+        validated_project_type: expected_project_type,
         line_cbm_node_count: line_cbm_node_count as u64,
         // v5: 线路工程 FAM/DEV 属性诊断字段
         line_fam_source_count: line_attr_diag.fam_source_count,
