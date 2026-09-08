@@ -224,6 +224,18 @@ export function loadDevGlb(
   devPath: string,
   glbBytes: Uint8Array,
 ): Promise<THREE.Group | null> {
+  return parseDevGlbAsset(devPath, glbBytes).then((asset) => asset?.scene ?? null);
+}
+
+/**
+ * Parse a DEV GLB and retain the small amount of GLTF metadata needed by the
+ * session-local template validator.  `loadDevGlb` remains the compatibility
+ * helper for legacy callers and returns only the scene.
+ */
+export function parseDevGlbAsset(
+  devPath: string,
+  glbBytes: Uint8Array,
+): Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] } | null> {
   const loader = getGltfLoader();
   const ab = glbBytes.buffer.slice(
     glbBytes.byteOffset,
@@ -238,7 +250,7 @@ export function loadDevGlb(
         const group = gltf.scene as THREE.Group;
         group.name = `glb-dev:${devPath}`;
         group.userData.devPath = devPath;
-        resolve(group);
+        resolve({ scene: group, animations: gltf.animations ?? [] });
       },
       (error) => {
         console.error(`[glbCache] DEV GLB 加载失败: ${devPath}`, error);

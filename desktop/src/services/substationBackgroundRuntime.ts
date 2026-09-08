@@ -35,6 +35,8 @@ export interface SubstationBackgroundTaskSpec {
   startAfter: 'interactive' | 'allIfcReady';
   /** A cheap cache restore gates heavy scheduling until it has classified hit/miss. */
   blocksHeavy?: boolean;
+  /** Manually driven lifecycle marker, never selected by a drain. */
+  manual?: boolean;
   run: () => Promise<void> | void;
 }
 
@@ -92,6 +94,7 @@ export class SubstationBackgroundCoordinator {
       heavy: false,
       startAfter: 'interactive',
       blocksHeavy: true,
+      manual: true,
       run: () => undefined,
     });
   }
@@ -176,6 +179,7 @@ export class SubstationBackgroundCoordinator {
     const candidates = Array.from(this.tasks.values())
       .filter((record) => record.state === 'queued'
         && !record.spec.heavy
+        && !record.spec.manual
         && record.spec.startAfter === 'interactive')
       .sort((a, b) => a.spec.priority - b.spec.priority || a.queuedAt - b.queuedAt);
     const next = candidates[0];

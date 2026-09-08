@@ -96,7 +96,7 @@ function depsFor(
 }
 
 describe('DEV GLB fast path v3', () => {
-  it('多个 CBM instance 共用同一 DEV 时只读一次，但各 placement 独立 parse/load', async () => {
+  it('多个 CBM instance 共用同一 DEV 时只读一次，template 只 parse 一次并共享 placement', async () => {
     const state = makeState();
     const nodes = [
       seed('CBM/a1.cbm', 'dev/shared.dev'),
@@ -130,12 +130,14 @@ describe('DEV GLB fast path v3', () => {
       uniqueDevCount: 2,
       glbDevCount: 2,
       emptyDevCount: 0,
-      glbParseCount: 3,
+      glbParseCount: 2,
+      templateParseCount: 2,
+      sharedPlacementCount: 3,
       glbReadBytes: 24,
       rawModFallbackCount: 0,
     });
     expect(deps.batchReadGlbFiles).toHaveBeenCalledTimes(1);
-    expect(deps.loadDevGlb).toHaveBeenCalledTimes(3);
+    expect(deps.loadDevGlb).toHaveBeenCalledTimes(2);
     expect(state.loadedXmlModGroups.size).toBe(3);
     expect(batchCalls[0]).toEqual(['DEV/shared.dev', 'DEV/other.dev']);
   });

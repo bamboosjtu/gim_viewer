@@ -85,4 +85,24 @@ describe('SubstationBackgroundCoordinator', () => {
     expect(ran).toBe(false);
     expect(states).toContain('devGeometry:cancelled');
   });
+
+  it('keeps remainingIfc as a manual marker even if interactive is marked first', async () => {
+    let current = true;
+    const states: string[] = [];
+    const coordinator = new SubstationBackgroundCoordinator({
+      session: { id: 3 },
+      isCurrent: () => current,
+      onEvent: (event) => states.push(`${event.task}:${event.state}`),
+    });
+    coordinator.registerRemainingIfc();
+    coordinator.markInteractive();
+    await tick();
+    expect(states).not.toContain('remainingIfc:running');
+
+    coordinator.startRemainingIfc();
+    expect(states).toContain('remainingIfc:running');
+    coordinator.completeRemainingIfc();
+    expect(states).toContain('remainingIfc:completed');
+    current = false;
+  });
 });

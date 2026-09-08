@@ -6,10 +6,13 @@ export type DevGeometryTelemetryPhase =
   | 'glbWrite'
   | 'glbRead'
   | 'glbParse'
+  | 'templateParse'
   | 'placementTransform'
+  | 'placementMatrix'
   | 'bbox'
   | 'sceneCommit'
   | 'yield'
+  | 'placementSlice'
   | 'devTotal';
 
 export interface DevGeometryPhaseSummary {
@@ -32,6 +35,27 @@ export interface DevGeometryTelemetry {
   uniqueDevCount: number;
   placementCount: number;
   totalMs: number;
+  /** DEV template/placement aggregate counters; no per-placement trace retained. */
+  uniqueGlbDevCount: number;
+  templateParseCount: number;
+  templateParseMs: number;
+  templateShareableCount: number;
+  templateFallbackCount: number;
+  fallbackDevPaths: string[];
+  fallbackReasons: Record<string, string>;
+  sharedPlacementCount: number;
+  legacyFallbackPlacementCount: number;
+  sharedGeometryCount: number;
+  sharedMaterialCount: number;
+  sharedTextureCount: number;
+  placementMatrixMs: number;
+  bboxMs: number;
+  sceneCommitMs: number;
+  placementYieldCount: number;
+  placementSliceCount: number;
+  maxPlacementSliceMs: number;
+  placementSliceP50Ms: number;
+  placementSliceP95Ms: number;
   phases: Partial<Record<DevGeometryTelemetryPhase, DevGeometryPhaseSummary>>;
   worstDevPaths: DevGeometryWorstDevSummary[];
 }
@@ -70,14 +94,50 @@ export function createDevGeometryTelemetry(
 ): {
   beginDev: (devPath: string, placementCount: number) => number;
   record: (phase: DevGeometryTelemetryPhase, durationMs: number, devPath?: string) => void;
+  recordTemplateParse: (durationMs: number, devPath?: string) => void;
+  recordPlacementMatrix: (durationMs: number, devPath?: string) => void;
+  recordPlacementSlice: (durationMs: number, yielded: boolean, devPath?: string) => void;
+  recordSharedPlacement: (devPath?: string) => void;
+  recordLegacyFallbackPlacement: (devPath?: string) => void;
+  setTemplateMetrics: (metrics: {
+    uniqueGlbDevCount?: number;
+    templateParseCount?: number;
+    templateParseMs?: number;
+    templateShareableCount?: number;
+    templateFallbackCount?: number;
+    fallbackDevPaths?: string[];
+    fallbackReasons?: Record<string, string>;
+    sharedGeometryCount?: number;
+    sharedMaterialCount?: number;
+    sharedTextureCount?: number;
+  }) => void;
   finishDev: (devPath: string, startedAt: number) => void;
   snapshot: (totalMs: number) => DevGeometryTelemetry;
 } {
   const phases = new Map<DevGeometryTelemetryPhase, MutablePhase>();
   const devs = new Map<string, MutableDevSummary>();
+  let uniqueGlbDevCount = uniqueDevCount;
+  let templateParseCount = 0;
+  let templateParseMs = 0;
+  let templateShareableCount = 0;
+  let templateFallbackCount = 0;
+  let fallbackDevPaths: string[] = [];
+  let fallbackReasons: Record<string, string> = {};
+  let sharedPlacementCount = 0;
+  let legacyFallbackPlacementCount = 0;
+  let sharedGeometryCount = 0;
+  let sharedMaterialCount = 0;
+  let sharedTextureCount = 0;
+  let placementMatrixMs = 0;
+  let bboxMs = 0;
+  let sceneCommitMs = 0;
+  let placementYieldCount = 0;
+  const placementSliceDurations: number[] = [];
 
   const record = (phase: DevGeometryTelemetryPhase, durationMs: number, devPath?: string): void => {
     const safe = safeDuration(durationMs);
+    if (phase === 'bbox') bboxMs += safe;
+    if (phase === 'sceneCommit') sceneCommitMs += safe;
     const phaseStats = phases.get(phase) ?? { durations: [], totalMs: 0, maxMs: 0 };
     phaseStats.durations.push(safe);
     phaseStats.totalMs += safe;
@@ -91,6 +151,27 @@ export function createDevGeometryTelemetry(
     }
   };
 
+  const recordTemplateParse = (durationMs: number, devPath?: string): void => {
+    const safe = safeDuration(durationMs);
+    templateParseCount++;
+    templateParseMs += safe;
+    record('templateParse', safe, devPath);
+    record('glbParse', safe, devPath);
+  };
+
+  const recordPlacementMatrix = (durationMs: number, devPath?: string): void => {
+    const safe = safeDuration(durationMs);
+    placementMatrixMs += safe;
+    record('placementMatrix', safe, devPath);
+  };
+
+  const recordPlacementSlice = (durationMs: number, yielded: boolean, devPath?: string): void => {
+    const safe = safeDuration(durationMs);
+    placementSliceDurations.push(safe);
+    if (yielded) placementYieldCount++;
+    record('placementSlice', safe, devPath);
+  };
+
   return {
     beginDev: (devPath, count) => {
       const existing = devs.get(devPath);
@@ -99,6 +180,35 @@ export function createDevGeometryTelemetry(
       return performance.now();
     },
     record,
+    recordTemplateParse,
+    recordPlacementMatrix,
+    recordPlacementSlice,
+    recordSharedPlacement: (devPath) => {
+      sharedPlacementCount++;
+      if (devPath) {
+        const dev = devs.get(devPath) ?? { placementCount: 0, totalMs: 0, phases: {} };
+        devs.set(devPath, dev);
+      }
+    },
+    recordLegacyFallbackPlacement: (devPath) => {
+      legacyFallbackPlacementCount++;
+      if (devPath) {
+        const dev = devs.get(devPath) ?? { placementCount: 0, totalMs: 0, phases: {} };
+        devs.set(devPath, dev);
+      }
+    },
+    setTemplateMetrics: (metrics) => {
+      if (metrics.uniqueGlbDevCount != null) uniqueGlbDevCount = metrics.uniqueGlbDevCount;
+      if (metrics.templateParseCount != null) templateParseCount = metrics.templateParseCount;
+      if (metrics.templateParseMs != null) templateParseMs = safeDuration(metrics.templateParseMs);
+      if (metrics.templateShareableCount != null) templateShareableCount = metrics.templateShareableCount;
+      if (metrics.templateFallbackCount != null) templateFallbackCount = metrics.templateFallbackCount;
+      if (metrics.fallbackDevPaths) fallbackDevPaths = metrics.fallbackDevPaths.slice();
+      if (metrics.fallbackReasons) fallbackReasons = { ...metrics.fallbackReasons };
+      if (metrics.sharedGeometryCount != null) sharedGeometryCount = metrics.sharedGeometryCount;
+      if (metrics.sharedMaterialCount != null) sharedMaterialCount = metrics.sharedMaterialCount;
+      if (metrics.sharedTextureCount != null) sharedTextureCount = metrics.sharedTextureCount;
+    },
     finishDev: (devPath, startedAt) => record('devTotal', performance.now() - startedAt, devPath),
     snapshot: (totalMs) => {
       const phaseSnapshot: Partial<Record<DevGeometryTelemetryPhase, DevGeometryPhaseSummary>> = {};
@@ -125,6 +235,26 @@ export function createDevGeometryTelemetry(
         uniqueDevCount,
         placementCount,
         totalMs: safeDuration(totalMs),
+        uniqueGlbDevCount,
+        templateParseCount,
+        templateParseMs,
+        templateShareableCount,
+        templateFallbackCount,
+        fallbackDevPaths: fallbackDevPaths.slice(),
+        fallbackReasons: { ...fallbackReasons },
+        sharedPlacementCount,
+        legacyFallbackPlacementCount,
+        sharedGeometryCount,
+        sharedMaterialCount,
+        sharedTextureCount,
+        placementMatrixMs,
+        bboxMs: bboxMs || (phaseSnapshot.bbox?.totalMs ?? 0),
+        sceneCommitMs: sceneCommitMs || (phaseSnapshot.sceneCommit?.totalMs ?? 0),
+        placementYieldCount,
+        placementSliceCount: placementSliceDurations.length,
+        maxPlacementSliceMs: placementSliceDurations.length > 0 ? Math.max(...placementSliceDurations) : 0,
+        placementSliceP50Ms: percentile(placementSliceDurations, 0.5),
+        placementSliceP95Ms: percentile(placementSliceDurations, 0.95),
         phases: phaseSnapshot,
         worstDevPaths,
       };

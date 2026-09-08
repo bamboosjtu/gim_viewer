@@ -132,15 +132,35 @@ export async function cleanupBeforeOpenNewProject(
       const scene = (ctx.world.scene as any).three as import('three').Scene;
       const { disposeXmlModGroup, disposeOwnedXmlModMaterials, disposeSharedXmlModMaterials, disposeSharedXmlModGeometries } = await import('../viewer/xmlModLoader.js');
       const { disposeStlGroup } = await import('../viewer/stlLoader.js');
+      const {
+        disposeDevGlbTemplatePool,
+        DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY,
+        DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY,
+      } = await import('./devGlbTemplateRuntime.js');
       if (!isCurrentCleanup()) return false;
 
       // 遍历 MOD 图层中的子 Group
       if (state.modRootGroup) {
-        // 方案 B：merged geometry 不共享，需逐 mesh dispose
-        state.modRootGroup.traverse((obj) => {
-          const mesh = obj as THREE.Mesh;
-          mesh.geometry?.dispose?.();
-        });
+        // DEV GLB Phase 4 placements share template resources.  Remove the
+        // placement nodes without disposing their geometry; the session-local
+        // template pool owns and releases each shared resource exactly once.
+        disposeDevGlbTemplatePool(state.modRootGroup);
+        for (const child of state.modRootGroup.children) {
+          if (child.userData?.[DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY] === true) continue;
+          const legacyGlb = child.userData?.[DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY] === true;
+          // Legacy XML MOD groups have instance-owned geometry.  Keep the
+          // previous cleanup semantics for those groups only.
+          child.traverse((obj) => {
+            const mesh = obj as THREE.Mesh;
+            mesh.geometry?.dispose?.();
+            if (legacyGlb) {
+              const materials = Array.isArray(mesh.material)
+                ? mesh.material
+                : mesh.material ? [mesh.material] : [];
+              for (const material of materials) material.dispose();
+            }
+          });
+        }
         disposeOwnedXmlModMaterials(state.modRootGroup);
         scene.remove(state.modRootGroup);
         xmlModDisposedCount = state.loadedXmlModGroups.size;

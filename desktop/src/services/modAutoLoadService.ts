@@ -33,6 +33,15 @@ import {
   createDevGeometryTelemetry,
   type DevGeometryTelemetry,
 } from './devGeometryTelemetry.js';
+import {
+  attachDevGlbTemplatePool,
+  disposeDevGlbTemplatePool,
+  getDevGlbTemplatePool,
+  DevGlbTemplatePool,
+  runBudgetedPlacementWork,
+  DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY,
+  type DevGlbParsedAsset,
+} from './devGlbTemplateRuntime.js';
 
 /** 自动加载选项 */
 export interface GeometryAutoLoadOptions {
@@ -113,7 +122,11 @@ export function ensureGeometryLayers(state: AppState, scene: THREE.Scene): { mod
  *
  * @returns true 表示 bbox 正常，可以加入场景
  */
-export function diagnoseGroupBBox(group: THREE.Group, sourcePath: string): boolean {
+export function diagnoseGroupBBox(
+  group: THREE.Group,
+  sourcePath: string,
+  options: { disposeOnFailure?: boolean } = {},
+): boolean {
   const box = new THREE.Box3().setFromObject(group);
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
@@ -139,7 +152,10 @@ export function diagnoseGroupBBox(group: THREE.Group, sourcePath: string): boole
         thresholds: { maxDim: BBOX_MAX_DIM_M, center: BBOX_MAX_CENTER_M },
       });
     }
-    // dispose GPU 资源，避免内存泄漏
+    // dispose GPU 资源，避免内存泄漏.  Shared DEV GLB placements must
+    // disable this branch: their geometry/materials belong to the template
+    // pool and are released once at session cleanup.
+    if (options.disposeOnFailure === false) return false;
     // 方案 B：merged geometry 是 unique 的（每 MOD Group 独立），可以安全 dispose
     // Material 是共享的（_sharedMaterialCache），不可在此处 dispose！
     //   否则会 corrupt 其他使用同一 Material 的 MOD Group
@@ -560,8 +576,9 @@ function isGeometryContextValid(
  * 方案 C v3：DEV 粒度 GLB 快速路径。
  *
  * 先按 unique DEV 校验 manifest，再以二进制批次读取 GLB；同一 DEV 的 bytes
- * 只读一次，但每个 CBM placement 仍独立调用 loadDevGlb（当前 placement 会
- * 修改 BufferGeometry，暂不共享 Three geometry）。
+ * 只读一次，并进入 session-local template pool。clean static DEV 只 parse 一次，
+ * placement 只 clone Object3D 节点并共享 immutable geometry/material；无法证明
+ * 可共享的 DEV 才按 DEV 回退 legacy placement。
  *
  * 数学等价性：两次 applyPlacementTransformToSceneUnits（各 ×0.001）
  * 等价于一次完整应用（CBM × DEV × PHM，×0.001）。详见
@@ -608,6 +625,27 @@ export interface DevGlbFastPathProfile {
   cacheRecoveryFailureCount?: number;
   cacheRecoveryDevPaths?: string[];
   fallbackReason?: string;
+  /** Phase 4 template/placement diagnostics. */
+  uniqueGlbDevCount?: number;
+  templateParseCount?: number;
+  templateParseMs?: number;
+  templateShareableCount?: number;
+  templateFallbackCount?: number;
+  fallbackDevPaths?: string[];
+  fallbackReasons?: Record<string, string>;
+  sharedPlacementCount?: number;
+  legacyFallbackPlacementCount?: number;
+  sharedGeometryCount?: number;
+  sharedMaterialCount?: number;
+  sharedTextureCount?: number;
+  placementMatrixMs?: number;
+  bboxMs?: number;
+  sceneCommitMs?: number;
+  placementYieldCount?: number;
+  placementSliceCount?: number;
+  maxPlacementSliceMs?: number;
+  placementSliceP50Ms?: number;
+  placementSliceP95Ms?: number;
   /** Warm DEV GLB aggregate spans; placement-level traces are histogrammed. */
   deepTelemetry?: DevGeometryTelemetry;
 }
@@ -623,6 +661,8 @@ export interface DevGlbFastPathResult {
 
 interface DevGlbFastPathDependencies {
   loadDevGlb: (devPath: string, bytes: Uint8Array) => Promise<THREE.Group | null>;
+  /** Phase 4 production parser retains animations for shareability validation. */
+  parseDevGlbAsset?: (devPath: string, bytes: Uint8Array) => Promise<DevGlbParsedAsset | null>;
   applyPlacementTransformToSceneUnits: (group: THREE.Group, transformMatrix: number[] | null | undefined) => void;
   /** v3：仅读取 manifest 描述；缺省时由 bridge 动态提供。 */
   readGeometryCacheManifest?: (projectId: number) => Promise<GeometryCacheManifest>;
@@ -701,6 +741,26 @@ function emptyFastPathProfile(cbmInstanceCount: number, uniqueDevCount: number):
     cacheRecoveryEmptyCount: 0,
     cacheRecoveryFailureCount: 0,
     cacheRecoveryDevPaths: [],
+    uniqueGlbDevCount: uniqueDevCount,
+    templateParseCount: 0,
+    templateParseMs: 0,
+    templateShareableCount: 0,
+    templateFallbackCount: 0,
+    fallbackDevPaths: [],
+    fallbackReasons: {},
+    sharedPlacementCount: 0,
+    legacyFallbackPlacementCount: 0,
+    sharedGeometryCount: 0,
+    sharedMaterialCount: 0,
+    sharedTextureCount: 0,
+    placementMatrixMs: 0,
+    bboxMs: 0,
+    sceneCommitMs: 0,
+    placementYieldCount: 0,
+    placementSliceCount: 0,
+    maxPlacementSliceMs: 0,
+    placementSliceP50Ms: 0,
+    placementSliceP95Ms: 0,
   };
 }
 
@@ -968,36 +1028,78 @@ export async function tryDevGlbFastPath(
   }
   if (!isCurrent()) return fail('session-invalid');
 
-  const loadDevGlb = dependencies?.loadDevGlb
-    ?? (await import('./glbCacheService.js')).loadDevGlb;
+  const glbCache = dependencies?.loadDevGlb
+    ? null
+    : await import('./glbCacheService.js');
+  const loadDevGlb = dependencies?.loadDevGlb ?? glbCache!.loadDevGlb;
+  const parseDevGlbAsset = dependencies?.parseDevGlbAsset
+    ?? (dependencies?.loadDevGlb
+      ? async (devPath: string, bytes: Uint8Array): Promise<DevGlbParsedAsset | null> => {
+          const group = await loadDevGlb(devPath, bytes);
+          return group ? { scene: group, animations: [] } : null;
+        }
+      : glbCache!.parseDevGlbAsset);
   const applyPlacementTransformToSceneUnits = dependencies?.applyPlacementTransformToSceneUnits
     ?? (await import('../viewer/xmlModLoader.js')).applyPlacementTransformToSceneUnits;
   const { modRoot } = ensureGeometryLayers(state, scene);
-  const addedGroups: Array<{ instanceKey: string; group: THREE.Group }> = [];
-  const addedGroupsByDev = new Map<string, Array<{ instanceKey: string; group: THREE.Group }>>();
+  const templatePool = getDevGlbTemplatePool(modRoot, session) ?? new DevGlbTemplatePool({
+    session,
+    isCurrent,
+    parse: parseDevGlbAsset,
+  });
+  attachDevGlbTemplatePool(modRoot, templatePool);
+  const syncTemplateMetrics = (): void => {
+    const metrics = templatePool.metrics();
+    profile.uniqueGlbDevCount = profile.glbDevCount;
+    profile.templateParseCount = metrics.templateParseCount;
+    profile.templateParseMs = metrics.templateParseMs;
+    profile.templateShareableCount = metrics.templateShareableCount;
+    profile.templateFallbackCount = metrics.templateFallbackCount;
+    profile.fallbackDevPaths = metrics.fallbackDevPaths;
+    profile.fallbackReasons = metrics.fallbackReasons;
+    profile.sharedGeometryCount = metrics.sharedGeometryCount;
+    profile.sharedMaterialCount = metrics.sharedMaterialCount;
+    profile.sharedTextureCount = metrics.sharedTextureCount;
+    deepTelemetry.setTemplateMetrics({
+      uniqueGlbDevCount: profile.glbDevCount,
+      templateParseCount: metrics.templateParseCount,
+      templateParseMs: metrics.templateParseMs,
+      templateShareableCount: metrics.templateShareableCount,
+      templateFallbackCount: metrics.templateFallbackCount,
+      fallbackDevPaths: metrics.fallbackDevPaths,
+      fallbackReasons: metrics.fallbackReasons,
+      sharedGeometryCount: metrics.sharedGeometryCount,
+      sharedMaterialCount: metrics.sharedMaterialCount,
+      sharedTextureCount: metrics.sharedTextureCount,
+    });
+  };
+  type AddedGroup = { instanceKey: string; group: THREE.Group; shared: boolean };
+  const addedGroups: AddedGroup[] = [];
+  const addedGroupsByDev = new Map<string, AddedGroup[]>();
   const totalSeeds = deviceNodes.length;
   let loadedCount = 0;
   let processedCount = 0;
   showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: totalSeeds, totalStls: 0 });
 
   const cleanupAndFail = (reason: string): DevGlbFastPathResult => {
-    for (const { instanceKey, group } of addedGroups) {
+    for (const { instanceKey, group, shared } of addedGroups) {
       modRoot.remove(group);
       state.loadedXmlModGroups.delete(instanceKey);
-      disposeFastPathGroup(group);
+      if (!shared) disposeFastPathGroup(group);
     }
+    disposeDevGlbTemplatePool(modRoot, session);
     return fail(reason);
   };
 
   const removeDevGroups = (devPath: string): void => {
     const key = devPath.toLowerCase();
     const groups = addedGroupsByDev.get(key) ?? [];
-    for (const { instanceKey, group } of groups) {
+    for (const { instanceKey, group, shared } of groups) {
       modRoot.remove(group);
       state.loadedXmlModGroups.delete(instanceKey);
       const index = addedGroups.findIndex((item) => item.instanceKey === instanceKey);
       if (index >= 0) addedGroups.splice(index, 1);
-      disposeFastPathGroup(group);
+      if (!shared) disposeFastPathGroup(group);
       loadedCount = Math.max(0, loadedCount - 1);
     }
     addedGroupsByDev.delete(key);
@@ -1008,6 +1110,8 @@ export async function tryDevGlbFastPath(
     showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0, processedMods: processedCount });
   };
 
+  const yieldToPlacementMain = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
   for (const devPath of devOrder) {
     const devTelemetryStarted = deepTelemetry.beginDev(
       devPath,
@@ -1016,106 +1120,149 @@ export async function tryDevGlbFastPath(
     const entry = manifestEntries.get(devPath.toLowerCase())!;
     const bytes = entry.status === 'glb' ? glbBytesByDev.get(devPath.toLowerCase())! : null;
     const failedKey = devPath.toLowerCase();
+    const devSeeds = seedsByDev.get(failedKey) ?? [];
     if (failedDevPaths.has(failedKey)) {
-      // 已知失败 DEV 的所有 placement 共用同一失败状态，不再重复 parse。
-      for (const _seed of seedsByDev.get(failedKey) ?? []) markProcessed();
+      for (const _seed of devSeeds) markProcessed();
       deepTelemetry.finishDev(devPath, devTelemetryStarted);
       continue;
     }
-    for (const seed of seedsByDev.get(devPath.toLowerCase()) ?? []) {
-      // A DEV failure is shared by every placement of that DEV.  Once the
-      // first parse/read attempt classified it, do not retry the same bytes
-      // for the remaining CBM instances; scoped raw fallback handles all of
-      // them together later.
-      if (failedDevPaths.has(failedKey)) {
-        markProcessed();
-        continue;
+
+    let preparation: Awaited<ReturnType<DevGlbTemplatePool['prepare']>> = null;
+    if (entry.status === 'glb' && bytes) {
+      const parseBefore = templatePool.metrics();
+      preparation = await templatePool.prepare(devPath, bytes);
+      const parseAfter = templatePool.metrics();
+      if (parseAfter.templateParseCount > parseBefore.templateParseCount) {
+        deepTelemetry.recordTemplateParse(
+          Math.max(0, parseAfter.templateParseMs - parseBefore.templateParseMs),
+          devPath,
+        );
       }
+      syncTemplateMetrics();
+      const metrics = templatePool.metrics();
+      profile.glbParseCount = metrics.templateParseCount;
+      profile.glbParseMs = metrics.templateParseMs;
       if (!isCurrent()) return cleanupAndFail('session-invalid');
+      if (!preparation) markDevFailure(devPath, 'parse-exception');
+    }
+
+    let devInvalidated = false;
+    await runBudgetedPlacementWork(devSeeds, async (seed) => {
+      if (failedDevPaths.has(failedKey) || devInvalidated) {
+        markProcessed();
+        return;
+      }
+      if (!isCurrent()) {
+        devInvalidated = true;
+        return;
+      }
       const instanceKey = `dev:${devPath}#${seed.path}`;
       if (state.loadedXmlModGroups.has(instanceKey)) {
         loadedCount++;
-        processedCount++;
-        showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: totalSeeds, discoveredStls: 0, loadedMods: loadedCount, loadedStls: 0, totalMods: totalSeeds, totalStls: 0, processedMods: processedCount });
-        continue;
+        markProcessed();
+        return;
       }
+      if (entry.status === 'empty' || !bytes || !preparation) {
+        markProcessed();
+        return;
+      }
+
       let loadedGroup: THREE.Group | null = null;
+      const shared = preparation.kind === 'shared';
       try {
-        if (entry.status === 'empty') {
-          // 合法 empty DEV：不读、不 parse、不触发原始 MOD fallback。
-          continue;
+        const cbmTransform = parseCbmTransformMatrix(seed.transformMatrix);
+        if (preparation.kind === 'shared') {
+          const matrixStarted = performance.now();
+          loadedGroup = preparation.template.createPlacement({
+            instanceKey,
+            placementMatrix: cbmTransform,
+            projectSourceToViewerMatrix: state.projectSourceToViewerMatrix,
+          });
+          deepTelemetry.recordPlacementMatrix(performance.now() - matrixStarted, devPath);
+          deepTelemetry.recordSharedPlacement(devPath);
+          profile.sharedPlacementCount = (profile.sharedPlacementCount ?? 0) + 1;
+        } else {
+          const parseStarted = performance.now();
+          profile.glbParseCount++;
+          try {
+            loadedGroup = await loadDevGlb(devPath, bytes);
+          } finally {
+            const parseMs = Math.max(0, performance.now() - parseStarted);
+            profile.glbParseMs += parseMs;
+            deepTelemetry.record('glbParse', parseMs, devPath);
+          }
+          if (!loadedGroup) {
+            markDevFailure(devPath, 'parse-exception');
+            removeDevGroups(devPath);
+            return;
+          }
+          if (!hasRenderableGlbGeometry(loadedGroup)) {
+            disposeFastPathGroup(loadedGroup);
+            loadedGroup = null;
+            markDevFailure(devPath, 'empty-scene');
+            removeDevGroups(devPath);
+            return;
+          }
+          const transformStarted = performance.now();
+          applyPlacementTransformToSceneUnits(loadedGroup, cbmTransform);
+          applyProjectSourceToViewer(loadedGroup, state.projectSourceToViewerMatrix);
+          deepTelemetry.record('placementTransform', performance.now() - transformStarted, devPath);
+          deepTelemetry.recordLegacyFallbackPlacement(devPath);
+          profile.legacyFallbackPlacementCount = (profile.legacyFallbackPlacementCount ?? 0) + 1;
         }
-        if (!bytes) {
-          markDevFailure(devPath, 'missing');
-          continue;
-        }
-        const parseStarted = performance.now();
-        profile.glbParseCount++;
-        try {
-          loadedGroup = await loadDevGlb(devPath, bytes);
-        } finally {
-          const parseMs = Math.max(0, performance.now() - parseStarted);
-          profile.glbParseMs += parseMs;
-          deepTelemetry.record('glbParse', parseMs, devPath);
+
+        if (!isCurrent()) {
+          if (loadedGroup && !shared) disposeFastPathGroup(loadedGroup);
+          devInvalidated = true;
+          return;
         }
         if (!loadedGroup) {
           markDevFailure(devPath, 'parse-exception');
           removeDevGroups(devPath);
-          continue;
+          return;
         }
-        if (!isCurrent()) {
-          disposeFastPathGroup(loadedGroup);
-          return cleanupAndFail('session-invalid');
-        }
-
-        if (!hasRenderableGlbGeometry(loadedGroup)) {
-          disposeFastPathGroup(loadedGroup);
-          loadedGroup = null;
-          markDevFailure(devPath, 'empty-scene');
-          removeDevGroups(devPath);
-          continue;
-        }
-
-        const cbmTransform = parseCbmTransformMatrix(seed.transformMatrix);
-        const transformStarted = performance.now();
-        applyPlacementTransformToSceneUnits(loadedGroup, cbmTransform);
-        applyProjectSourceToViewer(loadedGroup, state.projectSourceToViewerMatrix);
-        deepTelemetry.record('placementTransform', performance.now() - transformStarted, devPath);
-        // A valid GLB can still contain a placement whose transformed bounds
-        // are outside the scene safety envelope (the raw MOD path makes the
-        // same per-placement decision).  This is a geometry-quality issue,
-        // not cache corruption: do not discard otherwise valid DEV cache data
-        // and do not trigger an expensive raw-MOD fallback for the whole
-        // project.  `diagnoseGroupBBox` owns disposal for rejected groups.
         const bboxStarted = performance.now();
-        const bboxValid = diagnoseGroupBBox(loadedGroup, devPath);
+        const bboxValid = diagnoseGroupBBox(loadedGroup, devPath, { disposeOnFailure: !shared });
         deepTelemetry.record('bbox', performance.now() - bboxStarted, devPath);
         if (!bboxValid) {
+          if (loadedGroup && !shared) disposeFastPathGroup(loadedGroup);
           loadedGroup = null;
-          continue;
+          return;
         }
 
         loadedGroup.userData.devPath = devPath;
+        if (!shared) loadedGroup.userData[DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY] = true;
         const sceneCommitStarted = performance.now();
         modRoot.add(loadedGroup);
         state.loadedXmlModGroups.set(instanceKey, loadedGroup);
         deepTelemetry.record('sceneCommit', performance.now() - sceneCommitStarted, devPath);
-        addedGroups.push({ instanceKey, group: loadedGroup });
+        const added: AddedGroup = { instanceKey, group: loadedGroup, shared };
+        addedGroups.push(added);
         const perDev = addedGroupsByDev.get(failedKey) ?? [];
-        perDev.push({ instanceKey, group: loadedGroup });
+        perDev.push(added);
         addedGroupsByDev.set(failedKey, perDev);
-        loadedGroup = null; // ownership transferred to scene/cleanup list
+        loadedGroup = null;
         loadedCount++;
       } catch (err) {
-        if (loadedGroup) disposeFastPathGroup(loadedGroup);
-        console.error(`[autoLoad] DEV GLB 加载失败: ${devPath}`, err);
+        if (loadedGroup && !shared) disposeFastPathGroup(loadedGroup);
+        console.error(`[autoLoad] DEV GLB placement 加载失败: ${devPath} #${seed.path}`, err);
         markDevFailure(devPath, 'parse-exception');
+        if (shared) templatePool.invalidate(devPath);
         removeDevGroups(devPath);
-        continue;
       } finally {
         markProcessed();
       }
-    }
+    }, {
+      maxSliceMs: 6,
+      maxPlacementsPerSlice: 32,
+      yieldToMain: yieldToPlacementMain,
+      isCurrent,
+      onSlice: (durationMs, yielded) => {
+        deepTelemetry.recordPlacementSlice(durationMs, yielded, devPath);
+      },
+    });
+    syncTemplateMetrics();
+    if (!isCurrent() || devInvalidated) return cleanupAndFail('session-invalid');
     deepTelemetry.finishDev(devPath, devTelemetryStarted);
   }
 
@@ -1128,6 +1275,21 @@ export async function tryDevGlbFastPath(
     return entry?.status === 'glb' && !failedDevPaths.has(devPath.toLowerCase());
   }).length;
   syncFailureProfile();
+  syncTemplateMetrics();
+  const finalTemplateMetrics = templatePool.metrics();
+  const finalTelemetry = deepTelemetry.snapshot(0);
+  profile.sharedPlacementCount = finalTelemetry.sharedPlacementCount;
+  profile.legacyFallbackPlacementCount = finalTelemetry.legacyFallbackPlacementCount;
+  profile.placementMatrixMs = finalTelemetry.placementMatrixMs;
+  profile.bboxMs = finalTelemetry.bboxMs;
+  profile.sceneCommitMs = finalTelemetry.sceneCommitMs;
+  profile.placementYieldCount = finalTelemetry.placementYieldCount;
+  profile.placementSliceCount = finalTelemetry.placementSliceCount;
+  profile.maxPlacementSliceMs = finalTelemetry.maxPlacementSliceMs;
+  profile.placementSliceP50Ms = finalTelemetry.placementSliceP50Ms;
+  profile.placementSliceP95Ms = finalTelemetry.placementSliceP95Ms;
+  profile.templateParseCount = finalTemplateMetrics.templateParseCount;
+  profile.templateParseMs = finalTemplateMetrics.templateParseMs;
   profile.deepTelemetry = deepTelemetry.snapshot(performance.now() - fastPathStarted);
   return success(loadedCount);
 }

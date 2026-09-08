@@ -8,6 +8,12 @@ import { debugLog } from '../utils/logger.js';
 import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 import { getFileByPath, hasFileByPath } from '../gim/fileLookup.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
+import {
+  attachDevGlbTemplatePool,
+  getDevGlbTemplatePool,
+  DevGlbTemplatePool,
+  DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY,
+} from './devGlbTemplateRuntime.js';
 
 /**
  * 节点点击交互服务（用于缓存命中、无 Viewer 场景）。
@@ -511,15 +517,6 @@ async function tryLoadDevGlbForNode(
     return true;
   }
 
-  // 加载 DEV.glb
-  const { loadDevGlb } = await import('./glbCacheService.js');
-  const group = await loadDevGlb(devPath, glbBytes);
-  if (!state.isCurrentSession(session)) {
-    group?.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
-    return false;
-  }
-  if (!group) return false;
-
   // 应用 CBM 累积矩阵
   const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
   const { computeCbmParentTransform } = await import('./modGeometryDiscovery.js');
@@ -535,6 +532,45 @@ async function tryLoadDevGlbForNode(
     ? multiplyMatrices(parentCbmTransform, localTransform)
     : localTransform;
 
+  // Reuse the current session's template pool when the automatic pipeline
+  // already parsed this DEV.  A click that reaches a not-yet-loaded DEV also
+  // creates the same pool abstraction, so lazy interaction does not introduce
+  // a second placement/parse semantic.
+  const { loadDevGlb, parseDevGlbAsset } = await import('./glbCacheService.js');
+  const modRoot = ensureModStlLayer(state, scene, 'mod');
+  const templatePool = getDevGlbTemplatePool(modRoot, session) ?? new DevGlbTemplatePool({
+    session,
+    isCurrent: () => state.isCurrentSession(session),
+    parse: parseDevGlbAsset,
+  });
+  attachDevGlbTemplatePool(modRoot, templatePool);
+  const preparation = await templatePool.prepare(devPath, glbBytes);
+  if (!state.isCurrentSession(session)) return false;
+
+  if (preparation?.kind === 'shared') {
+    const sharedGroup = preparation.template.createPlacement({
+      instanceKey,
+      placementMatrix: cbmTransform,
+      projectSourceToViewerMatrix: state.projectSourceToViewerMatrix,
+    });
+    if (!state.isCurrentSession(session)) return false;
+    modRoot.add(sharedGroup);
+    state.loadedXmlModGroups.set(instanceKey, sharedGroup);
+    debugLog(DEBUG_IFC_LOAD, `[xml-mod] DEV GLB template placement 命中: ${devPath} (instance: ${instanceKey})`);
+    showMessage(`已加载 DEV 几何模型: ${devPath}`);
+    return true;
+  }
+
+  // A non-shareable hierarchy is isolated to this DEV and keeps the exact
+  // legacy per-placement loader semantics.  A parse failure returns false so
+  // the caller can continue with the existing raw MOD/STL path.
+  const group = await loadDevGlb(devPath, glbBytes);
+  if (!state.isCurrentSession(session)) {
+    group?.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
+    return false;
+  }
+  if (!group) return false;
+
   applyPlacementTransformToSceneUnits(group, cbmTransform);
   if (!state.isCurrentSession(session)) {
     group.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
@@ -542,7 +578,7 @@ async function tryLoadDevGlbForNode(
   }
   applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
 
-  const modRoot = ensureModStlLayer(state, scene, 'mod');
+  group.userData[DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY] = true;
   if (!state.isCurrentSession(session)) {
     group.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
     return false;

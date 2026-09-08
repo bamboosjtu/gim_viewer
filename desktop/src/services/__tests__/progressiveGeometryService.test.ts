@@ -128,11 +128,13 @@ describe('runProgressiveDevGlbPipeline', () => {
 
     // a.dev 被 a1/a2 两个实例共享 → 只序列化一次
     expect(rec.serializeCalls).toEqual(['DEV/a.dev', 'DEV/b.dev']);
-    // 渲染：a1 + a2 + b = 3 实例
+    // 渲染：a1 + a2 + b = 3 实例；GLB template 按 unique DEV parse 一次
     expect(result.renderedInstances).toBe(3);
     expect(result.compiledDevs).toBe(2);
     expect(result.interrupted).toBe(false);
-    expect(rec.loadCalls).toHaveLength(3);
+    expect(rec.loadCalls).toHaveLength(2);
+    expect(result.devGlbProfile?.templateParseCount).toBe(2);
+    expect(result.devGlbProfile?.sharedPlacementCount).toBe(3);
     // instanceKey 注册（键格式 dev:{devPath}#{seed.path}）
     expect(state.loadedXmlModGroups.has('dev:DEV/a.dev#CBM/a1.cbm')).toBe(true);
     expect(state.loadedXmlModGroups.has('dev:DEV/a.dev#CBM/a2.cbm')).toBe(true);
