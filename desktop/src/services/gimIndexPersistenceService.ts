@@ -19,14 +19,19 @@ const PARSE_CONCURRENCY = 32;
 import { parseKeyValue } from '../gim/cbmParser.js';
 import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
-import { getFileByPath } from '../gim/fileLookup.js';
+import { getFileByPath, normalizeFilePath } from '../gim/fileLookup.js';
+import { isGimEmptyValue, resolveBaseFamilyReference } from '../gim/gimValueSemantics.js';
 
 /** 根据路径判断 entry_type */
 function classifyEntryType(path: string): string {
-  const lower = path.toLowerCase();
+  const normalized = normalizeFilePath(path);
+  const lower = normalized.toLowerCase();
   if (lower.endsWith('.ifc')) return 'IFC';
-  const top = path.split('/')[0]?.toUpperCase() || '';
+  const top = normalized.split('/')[0]?.toUpperCase() || '';
+  // A few exporters may expose a separate GL/ directory; it is still the
+  // same XML geometry role as MOD for cache/index purposes.
   if (top === 'CBM' || top === 'DEV' || top === 'PHM' || top === 'MOD') return top;
+  if (top === 'GL') return 'MOD';
   return 'OTHER';
 }
 
@@ -59,8 +64,8 @@ function flattenCbmTree(
 /** 递归遍历 CBM 树，收集所有非空的 famPath / devPath 引用 */
 function collectFamDevRefs(node: CbmNode | null, out: { famPaths: Set<string>; devPaths: Set<string> }): void {
   if (!node) return;
-  if (node.famPath) out.famPaths.add(`CBM/${node.famPath}`);
-  if (node.devPath) out.devPaths.add(`DEV/${node.devPath}`);
+  if (!isGimEmptyValue(node.famPath)) out.famPaths.add(withEntryPrefix('CBM', node.famPath));
+  if (!isGimEmptyValue(node.devPath)) out.devPaths.add(withEntryPrefix('DEV', node.devPath));
   for (const child of node.children) collectFamDevRefs(child, out);
 }
 
@@ -134,6 +139,27 @@ export async function buildGimIndexPayload(
   const refs = { famPaths: new Set<string>(), devPaths: new Set<string>() };
   collectFamDevRefs(cbmTree, refs);
 
+  // CbmNode.famPath intentionally exposes the primary family reference only.
+  // Some exporters also keep additional BASEFAMILY1..N fields on grouping
+  // nodes; include those persistence references without widening the runtime
+  // tree model.  This also handles BASEFAMILYPOINTER when it is not the first
+  // value selected for a node.
+  for (const [entryPath, file] of files) {
+    const normalized = normalizeFilePath(entryPath);
+    if (!/^cbm\/.*\.cbm$/i.test(normalized)) continue;
+    try {
+      const kv = parseKeyValue(await file.text());
+      for (const [key, value] of Object.entries(kv)) {
+        if (!/^BASEFAMILY(?:POINTER|\d*)$/i.test(key) || isGimEmptyValue(value)) continue;
+        refs.famPaths.add(withEntryPrefix('CBM', value));
+      }
+    } catch {
+      // CBM tree construction already owns parse failure reporting. An
+      // auxiliary persistence scan must not turn one malformed file into a
+      // project-wide cache failure.
+    }
+  }
+
   // 5a. 读取 DEV 文件，解析键值对 → dev_property，同时收集 BASEFAMILY 引用
   // acc-plan P2-3：文本读取分批并行（IO 密集），解析保持原顺序保证结果确定性
   const devFamRefs = new Set<string>();
@@ -149,11 +175,12 @@ export async function buildGimIndexPayload(
       const kv = parseKeyValue(text);
       const devPath = chunkPaths[j];
       for (const [key, val] of Object.entries(kv)) {
-        if (val) devProperties.push({ dev_path: devPath, prop_key: key, prop_value: val });
+        if (!isGimEmptyValue(val)) devProperties.push({ dev_path: devPath, prop_key: key, prop_value: val });
       }
-      // 收集 BASEFAMILY 引用
-      const baseFamily = kv['BASEFAMILY'];
-      if (baseFamily) devFamRefs.add(`DEV/${baseFamily}`);
+      // 收集 BASEFAMILY / BASEFAMILYPOINTER 引用；空 sentinel 不进入
+      // persistence，否则 warm restore 会留下不可点击的伪来源。
+      const baseFamily = resolveBaseFamilyReference(kv);
+      if (baseFamily) devFamRefs.add(withEntryPrefix('DEV', baseFamily));
     }
   }
 
@@ -168,30 +195,30 @@ export async function buildGimIndexPayload(
       chunkPaths.map((p) => getFileByPath(files, p)?.text().catch(() => null) ?? Promise.resolve(null)),
     );
     for (let j = 0; j < chunkPaths.length; j++) {
-    const text = texts[j];
-    if (!text) continue;
-    let sections: Map<string, Map<string, string>>;
-    try {
-      sections = parseFamSections(text);
-    } catch {
-      continue;
-    }
-    const famPath = chunkPaths[j];
-    let sortOrder = 0;
-    for (const [secName, props] of sections) {
-      for (const [key, val] of props) {
-        if (val) {
-          famProperties.push({
-            source_path: famPath,
-            section_name: secName,
-            prop_key: key,
-            prop_value: val,
-            sort_order: sortOrder,
-          });
-        }
+      const text = texts[j];
+      if (!text) continue;
+      let sections: Map<string, Map<string, string>>;
+      try {
+        sections = parseFamSections(text);
+      } catch {
+        continue;
       }
-      sortOrder++;
-    }
+      const famPath = chunkPaths[j];
+      let sortOrder = 0;
+      for (const [secName, props] of sections) {
+        for (const [key, val] of props) {
+          if (!isGimEmptyValue(val)) {
+            famProperties.push({
+              source_path: famPath,
+              section_name: secName,
+              prop_key: key,
+              prop_value: val,
+              sort_order: sortOrder,
+            });
+          }
+        }
+        sortOrder++;
+      }
     }
   }
 
@@ -207,13 +234,20 @@ export async function buildGimIndexPayload(
   };
 }
 
+function withEntryPrefix(prefix: string, value: string): string {
+  const normalized = normalizeFilePath(value.trim());
+  return normalized.toLowerCase().startsWith(`${prefix.toLowerCase()}/`)
+    ? normalized
+    : `${prefix}/${normalized}`;
+}
+
 // ===== 几何引用链索引（v6） =====
 
 /**
  * 构建几何引用链 payload：解析所有 DEV/PHM 文件的 SOLIDMODEL / SUBDEVICE 引用。
  *
  * 设计动机：缓存命中时无需逐文件读取数千个 DEV/PHM，
- * 直接查询 SQLite 即可得到所有可达的 MOD/STL 几何源路径。
+ * 直接查询 SQLite 即可得到所有可达的 MOD/GL/STL 几何源路径。
  *
  * @param projectId 数据库 gim_project.id
  * @param files GIM 解压后的文件集合
@@ -232,11 +266,12 @@ export async function buildGeometryRefsPayload(
   const phmFiles: Array<{ path: string; file: File }> = [];
 
   for (const [entryPath, file] of files) {
-    const lower = entryPath.toLowerCase();
+    const normalized = normalizeFilePath(entryPath);
+    const lower = normalized.toLowerCase();
     if (lower.startsWith('dev/') && lower.endsWith('.dev')) {
-      devFiles.push({ path: entryPath, file });
+      devFiles.push({ path: normalized, file });
     } else if (lower.startsWith('phm/') && lower.endsWith('.phm')) {
-      phmFiles.push({ path: entryPath, file });
+      phmFiles.push({ path: normalized, file });
     }
   }
 
@@ -272,7 +307,7 @@ export async function buildGeometryRefsPayload(
     }
   }
 
-  // 2. 解析 PHM → SOLIDMODEL (→ MOD/STL)
+  // 2. 解析 PHM → SOLIDMODEL (→ MOD/GL/STL)
   for (const { path, file } of phmFiles) {
     try {
       const text = await file.text();

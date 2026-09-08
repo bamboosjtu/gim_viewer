@@ -2,6 +2,7 @@ import type { IfcEntry, CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { scanIfcFiles, discoverIfcFromCBM, buildIfcGuidIndex } from '../gim/gimIndexer.js';
+import { getFileByPath } from '../gim/fileLookup.js';
 import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
 import {
   buildSubstationSpatialIndexFromFiles,
@@ -715,7 +716,7 @@ async function getIfcBufferForEntry(
   if (!state.isCurrentSession(session)) return null;
   // 1. 完整解压流程
   if (state.currentFiles) {
-    const file = state.currentFiles.get(entry.path);
+    const file = getFileByPath(state.currentFiles, entry.path);
     if (file) {
       debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用 GIM 解压内存文件:', {
         name: entry.name,
@@ -727,17 +728,18 @@ async function getIfcBufferForEntry(
   }
 
   // 2. Tauri 缓存命中
-  if (isTauri() && state.cachedIfcPaths.has(entry.path)) {
+  const cachedEntryPath = findCachedPath(state.cachedIfcPaths, entry.path);
+  if (isTauri() && cachedEntryPath) {
     const projectId = session.projectId;
     if (projectId != null) {
-      const cachePath = state.cachedIfcPaths.get(entry.path)!;
+      const cachePath = state.cachedIfcPaths.get(cachedEntryPath)!;
       debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用本地 IFC 缓存:', {
         name: entry.name,
         path: entry.path,
         cachePath,
       });
       const { readCachedIfc } = await import('@desktop/database.js');
-      const bytes = await readCachedIfc(projectId, entry.path);
+      const bytes = await readCachedIfc(projectId, cachedEntryPath);
       if (!state.isCurrentSession(session)) return null;
 
       // 可疑缓存定位日志：MVP 阶段用于排查缓存 IFC 是否被截断/损坏
@@ -775,6 +777,16 @@ async function getIfcBufferForEntry(
   // 3. 找不到：始终输出（非 debug），便于定位
   console.warn('[IFC Buffer] 找不到 IFC 文件内容或缓存:', entry);
   return null;
+}
+
+/** cachedIfcPaths 保留磁盘/SQLite 的原始 entry_path；查找时仍按 GIM 引用规则忽略大小写和分隔符。 */
+function findCachedPath(paths: Map<string, string>, requestedPath: string): string | undefined {
+  if (paths.has(requestedPath)) return requestedPath;
+  const normalized = requestedPath.replace(/\\/g, '/').toLowerCase();
+  for (const path of paths.keys()) {
+    if (path.replace(/\\/g, '/').toLowerCase() === normalized) return path;
+  }
+  return undefined;
 }
 
 /**

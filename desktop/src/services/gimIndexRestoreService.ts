@@ -3,6 +3,7 @@ import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
 import type { GimIndexResult } from '@desktop/database.js';
 import { buildIfcGuidIndex } from '../gim/gimIndexer.js';
 import { buildCbmNodeIndex } from '../gim/cbmParser.js';
+import { isGimEmptyValue } from '../gim/gimValueSemantics.js';
 
 /**
  * 从 SQLite 读取的 GIM 索引恢复到 AppState。
@@ -71,7 +72,9 @@ export function restoreGimIndexToState(state: AppState, index: GimIndexResult): 
       byKey = new Map();
       bySection.set(fp.section_name, byKey);
     }
-    if (fp.prop_value) byKey.set(fp.prop_key, fp.prop_value);
+    if (!isGimEmptyValue(fp.prop_value) && typeof fp.prop_value === 'string') {
+      byKey.set(fp.prop_key, fp.prop_value);
+    }
   }
 
   // 9. 恢复 cachedDevProperties: devPath → key → value
@@ -82,7 +85,9 @@ export function restoreGimIndexToState(state: AppState, index: GimIndexResult): 
       kv = {};
       state.cachedDevProperties.set(dp.dev_path, kv);
     }
-    if (dp.prop_value) kv[dp.prop_key] = dp.prop_value;
+    if (!isGimEmptyValue(dp.prop_value) && typeof dp.prop_value === 'string') {
+      kv[dp.prop_key] = dp.prop_value;
+    }
   }
 }
 

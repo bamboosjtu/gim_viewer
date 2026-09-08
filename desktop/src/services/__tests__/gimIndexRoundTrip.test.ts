@@ -337,4 +337,37 @@ MANUFACTURER=某厂`, 'fam001.fam')],
     expect(state.cachedIfcPaths.get('DEV/a.ifc')).toBe('/cache/DEV/a.ifc');
     expect(state.cachedIfcPaths.has('DEV/b.ifc')).toBe(false);
   });
+
+  it('BASEFAMILYPOINTER 进入同一 FAM persistence/source-tracing 链，空 sentinel 不入库', async () => {
+    const files = new Map<string, File>([
+      ['CBM/project.cbm', makeFile('ENTITYNAME=F1System\nSUBSYSTEM=device.cbm', 'project.cbm')],
+      ['CBM/device.cbm', makeFile('ENTITYNAME=F4System\nOBJECTMODELPOINTER=pointer.dev\nBASEFAMILY=-', 'device.cbm')],
+      ['dEv/pointer.dev', makeFile(
+        'BASEFAMILY= /\nBASEFAMILYPOINTER=Pointer.FAM\nSYMBOLNAME=设备\nZERO=0\nFALSE=false\nNULL=null\nSOLIDMODELS.NUM=0',
+        'pointer.dev',
+      )],
+      ['DEV/Pointer.FAM', makeFile('[属性]\n显示名=中文名=设备\n空值=null\n零值=0', 'Pointer.FAM')],
+    ]);
+    const tree = makeNode({
+      path: 'CBM/project.cbm',
+      name: 'root',
+      entityName: 'F1System',
+      children: [makeNode({
+        path: 'CBM/device.cbm',
+        name: 'device',
+        entityName: 'F4System',
+        devPath: 'pointer.dev',
+        famPath: '-',
+      })],
+    });
+
+    const payload = await buildGimIndexPayload(PROJECT_ID, files, [], tree, []);
+    expect(payload.fam_properties.some((item) => item.source_path.toLowerCase() === 'dev/pointer.fam'))
+      .toBe(true);
+    expect(payload.fam_properties.some((item) => item.prop_key === '空值')).toBe(false);
+    expect(payload.fam_properties.some((item) => item.prop_key === '零值' && item.prop_value === '0')).toBe(true);
+    expect(payload.dev_properties.some((item) => item.prop_key === 'NULL')).toBe(false);
+    expect(payload.dev_properties.some((item) => item.prop_key === 'ZERO' && item.prop_value === '0')).toBe(true);
+    expect(payload.dev_properties.some((item) => item.prop_key === 'FALSE' && item.prop_value === 'false')).toBe(true);
+  });
 });

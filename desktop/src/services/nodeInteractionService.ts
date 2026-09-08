@@ -179,7 +179,7 @@ async function getIfcBufferForEntry(
   if (!state.isCurrentSession(session)) return null;
   // 1. 完整解压流程
   if (state.currentFiles) {
-    const file = state.currentFiles.get(entry.path);
+    const file = getFileByPath(state.currentFiles, entry.path);
     if (file) {
       debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用 GIM 解压内存文件:', { name: entry.name, path: entry.path });
       const bytes = new Uint8Array(await file.arrayBuffer());
@@ -189,19 +189,30 @@ async function getIfcBufferForEntry(
 
   // 2. Tauri 缓存命中
   const { isTauri } = await import('@desktop/runtime.js');
-  if (isTauri() && state.cachedIfcPaths.has(entry.path)) {
+  const cachedEntryPath = findCachedPath(state.cachedIfcPaths, entry.path);
+  if (isTauri() && cachedEntryPath) {
     const projectId = session.projectId;
     if (projectId != null) {
-      const cachePath = state.cachedIfcPaths.get(entry.path)!;
+      const cachePath = state.cachedIfcPaths.get(cachedEntryPath)!;
       debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用本地 IFC 缓存:', { name: entry.name, path: entry.path, cachePath });
       const { readCachedIfc } = await import('@desktop/database.js');
-      const bytes = await readCachedIfc(projectId, entry.path);
+      const bytes = await readCachedIfc(projectId, cachedEntryPath);
       return state.isCurrentSession(session) ? bytes : null;
     }
   }
 
   console.warn('[IFC Buffer] 找不到 IFC 文件内容或缓存:', entry);
   return null;
+}
+
+/** cachedIfcPaths 保留缓存索引的原始路径；跨厂商引用查找忽略大小写和分隔符。 */
+function findCachedPath(paths: Map<string, string>, requestedPath: string): string | undefined {
+  if (paths.has(requestedPath)) return requestedPath;
+  const normalized = requestedPath.replace(/\\/g, '/').toLowerCase();
+  for (const path of paths.keys()) {
+    if (path.replace(/\\/g, '/').toLowerCase() === normalized) return path;
+  }
+  return undefined;
 }
 
 /**

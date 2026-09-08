@@ -729,7 +729,9 @@ export function renderLineTowerShapeSource(
   return html;
 }
 
-type LineSourceKind = Parameters<typeof fileReferenceValue>[0];
+// GL is a substation-only source kind. Keep the line source contract narrow so
+// adding the shared property-dictionary kind does not alter line behavior.
+type LineSourceKind = Exclude<Parameters<typeof fileReferenceValue>[0], 'gl'>;
 
 interface LineSourceEntry {
   kind: LineSourceKind;

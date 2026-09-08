@@ -52,6 +52,19 @@ describe('属性字典与引用展示', () => {
     expect(technical).toContain('opaque-value');
   });
 
+  it('统一空值哨兵不渲染为引用或业务值，0/false 仍保留', () => {
+    const html = renderPropertyRows('substation-dev', [
+      { key: 'BASEFAMILY', value: 'NULL' },
+      { key: 'ZERO_VALUE', value: 0 },
+      { key: 'BOOL_VALUE', value: false },
+    ]);
+    expect(html).not.toContain('查看属性族');
+    expect(html).toContain('ZERO_VALUE');
+    expect(html).toContain('>0</td>');
+    expect(html).toContain('BOOL_VALUE');
+    expect(html).toContain('>false</td>');
+  });
+
   it('多文件引用保持可读按钮并隐藏所有原始路径', () => {
     const first = 'MOD/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.mod';
     const second = 'MOD/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.mod';

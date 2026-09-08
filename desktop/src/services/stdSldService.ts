@@ -25,6 +25,7 @@ import { buildStdSldIndex, type StdSldIndex } from '../gim/stdSldIndex.js';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { isTauri } from '@desktop/runtime.js';
+import { getFileByPath } from '../gim/fileLookup.js';
 
 /** 解析结果摘要 */
 export interface StdSldParseResult {
@@ -117,17 +118,7 @@ export async function parseAndIndexStdSld(
     }
     // 读取 STD/SLD 文件文本（大小写不敏感查找：GIM 解压后路径可能是 Cbm/ 或 CBM/）
     for (const entry of schEntries) {
-      let file = files.get(entry.path);
-      if (!file) {
-        // 大小写不敏感兜底：遍历匹配
-        const lower = entry.path.toLowerCase();
-        for (const [p, f] of files) {
-          if (p.toLowerCase() === lower) {
-            file = f;
-            break;
-          }
-        }
-      }
+      const file = getFileByPath(files, entry.path);
       if (!file) {
         console.warn(`[STD/SLD] SCH 引用的文件不存在: ${entry.path}`);
         continue;

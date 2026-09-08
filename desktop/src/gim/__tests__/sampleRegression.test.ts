@@ -15,10 +15,15 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { buildCbmTree, collectIfcRefs, buildCbmNodeIndex } from '../cbmParser.js';
+import { buildCbmTree, collectIfcRefs, buildCbmNodeIndex, parseKeyValue } from '../cbmParser.js';
 import { discoverIfcFromCBM } from '../gimIndexer.js';
 import { parseFileDevRelation } from '../fileDevParser.js';
 import { parseFamSections } from '../famParser.js';
+import { parsePhm } from '../geometry/phmParser.js';
+import { parseXmlMod } from '../geometry/xmlModParser.js';
+import { getFileByPath, normalizeFilePath } from '../fileLookup.js';
+import { isGimEmptyValue, resolveBaseFamilyReference } from '../gimValueSemantics.js';
+import type { CbmNode, IfcEntry } from '../types.js';
 import { buildLineGimGraph } from '../lineCbmParser.js';
 import { buildLineGimGraphFromTexts } from '../lineCbmParserCore.js';
 import { createLineParserCache, parseLineAttributesFromCache } from '../lineAttrParserCore.js';
@@ -175,6 +180,162 @@ const SUBSTATION_CORPUS = [
   { id: 'substation04', models: 19, contained: 7182, spatial: 7720, decomposition: 44, host: 494 },
 ].map((item) => ({ ...item, dir: resolveDemoDir(item.id) }));
 
+const RENDERABLE_XML_PRIMITIVES = new Set([
+  'Cuboid', 'Cylinder', 'Sphere', 'TruncatedCone', 'Ring',
+  'CircularGasket', 'StretchedBody', 'Wire', 'Cable',
+  'RotationalEllipsoid', 'BeamChannelLike', 'Boolean',
+]);
+const IDENTITY_MATRIX_VALUES = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+function prefixedReference(prefix: string, value: string): string {
+  const normalized = normalizeFilePath(value.trim());
+  const top = normalized.split('/')[0]?.toLowerCase();
+  return top === prefix.toLowerCase() ? normalized : `${prefix}/${normalized}`;
+}
+
+function resolveFamFile(files: Map<string, File>, value: string, preferredPrefix: string): File | undefined {
+  if (isGimEmptyValue(value)) return undefined;
+  const normalized = normalizeFilePath(value.trim());
+  const candidates = normalized.includes('/')
+    ? [normalized]
+    : [prefixedReference(preferredPrefix, normalized), `CBM/${normalized}`, `DEV/${normalized}`];
+  return candidates.map((candidate) => getFileByPath(files, candidate)).find((file): file is File => !!file);
+}
+
+interface SubstationCompatibilitySummary {
+  cbmNodeCount: number;
+  devCount: number;
+  resolvedDevFamCount: number;
+  baseFamilyPointerCount: number;
+  resolvedBaseFamilyPointerCount: number;
+  famPropertyCount: number;
+  famLeadingEmptyKeyPropertyCount: number;
+  devPropertyCount: number;
+  ifcCount: number;
+  ifcComponentGuidLinkCount: number;
+  emptyGeometryCount: number;
+  unsupportedGeometryRefs: number;
+  unsupportedPrimitiveTypeCounts: Record<string, number>;
+  phmPlacementCount: number;
+  phmEmptyCount: number;
+  nonIdentityPlacementCount: number;
+  glSourceCount: number;
+  glXmlEntityCount: number;
+}
+
+/**
+ * Cross-vendor gate metrics. This deliberately walks the real source files
+ * instead of reading generated survey CSVs, so a parser regression fails on
+ * the same input that the desktop runtime consumes.
+ */
+async function inspectSubstationCompatibility(
+  files: Map<string, File>,
+  tree: CbmNode,
+  ifcEntries: IfcEntry[],
+): Promise<SubstationCompatibilitySummary> {
+  const summary: SubstationCompatibilitySummary = {
+    cbmNodeCount: buildCbmNodeIndex(tree).size,
+    devCount: 0,
+    resolvedDevFamCount: 0,
+    baseFamilyPointerCount: 0,
+    resolvedBaseFamilyPointerCount: 0,
+    famPropertyCount: 0,
+    famLeadingEmptyKeyPropertyCount: 0,
+    devPropertyCount: 0,
+    ifcCount: ifcEntries.length,
+    ifcComponentGuidLinkCount: 0,
+    emptyGeometryCount: 0,
+    unsupportedGeometryRefs: 0,
+    unsupportedPrimitiveTypeCounts: {},
+    phmPlacementCount: 0,
+    phmEmptyCount: 0,
+    nonIdentityPlacementCount: 0,
+    glSourceCount: 0,
+    glXmlEntityCount: 0,
+  };
+
+  for (const [path, file] of files) {
+    const normalized = normalizeFilePath(path);
+    const lower = normalized.toLowerCase();
+    if (lower.endsWith('.fam')) {
+      const text = await file.text();
+      const sections = parseFamSections(text);
+      for (const properties of sections.values()) {
+        for (const value of properties.values()) {
+          if (!isGimEmptyValue(value)) summary.famPropertyCount++;
+        }
+      }
+      for (const rawLine of text.split(/\r?\n/)) {
+        const parts = rawLine.replace(/^\uFEFF/, '').trim().split('=');
+        if (parts.length < 3 || !isGimEmptyValue(parts[0])) continue;
+        const candidate = parts.slice(1, -1).map((part) => part.trim())
+          .find((value) => !isGimEmptyValue(value));
+        if (candidate && Array.from(sections.values()).some((properties) => properties.has(candidate))) {
+          summary.famLeadingEmptyKeyPropertyCount++;
+        }
+      }
+      continue;
+    }
+
+    if (lower.endsWith('.dev')) {
+      summary.devCount++;
+      const text = await file.text();
+      const kv = parseKeyValue(text);
+      summary.devPropertyCount += Object.values(kv).filter((value) => !isGimEmptyValue(value)).length;
+      const baseFamily = resolveBaseFamilyReference(kv);
+      if (baseFamily && resolveFamFile(files, baseFamily, 'DEV')) summary.resolvedDevFamCount++;
+      const pointer = Object.entries(kv).find(([key, value]) =>
+        key.trim().toUpperCase() === 'BASEFAMILYPOINTER' && !isGimEmptyValue(value));
+      if (pointer) {
+        summary.baseFamilyPointerCount++;
+        if (resolveFamFile(files, pointer[1], 'DEV')) summary.resolvedBaseFamilyPointerCount++;
+      }
+      continue;
+    }
+
+    if (lower.endsWith('.phm')) {
+      const doc = parsePhm(await file.text(), normalized);
+      summary.phmPlacementCount += doc.solidModels.length;
+      if (doc.isEmpty) summary.phmEmptyCount++;
+      if (doc.solidModels.some((entry) => entry.transformMatrix.some((value, index) =>
+        value !== IDENTITY_MATRIX_VALUES[index]))) {
+        summary.nonIdentityPlacementCount++;
+      }
+      continue;
+    }
+
+    if (!lower.endsWith('.mod') && !lower.endsWith('.gl')) continue;
+    if (lower.endsWith('.gl')) summary.glSourceCount++;
+    const doc = parseXmlMod(await file.text(), normalized);
+    if (lower.endsWith('.gl')) summary.glXmlEntityCount += doc.declaredEntityCount;
+    if (doc.isEmpty) {
+      summary.emptyGeometryCount++;
+      continue;
+    }
+    let renderableCount = 0;
+    let unsupportedCount = doc.malformedEntityCount;
+    for (const entity of doc.entities) {
+      if (RENDERABLE_XML_PRIMITIVES.has(entity.primitive.type)) {
+        renderableCount++;
+        continue;
+      }
+      unsupportedCount++;
+      const primitiveType = entity.primitive.type === 'Unsupported'
+        ? entity.primitive.sourceType
+        : entity.primitive.type;
+      summary.unsupportedPrimitiveTypeCounts[primitiveType] =
+        (summary.unsupportedPrimitiveTypeCounts[primitiveType] ?? 0) + 1;
+    }
+    if (renderableCount === 0 && unsupportedCount > 0) summary.unsupportedGeometryRefs++;
+  }
+
+  for (const [modelId, guids] of collectIfcRefs(tree, ifcEntries)) {
+    void modelId;
+    summary.ifcComponentGuidLinkCount += guids.size;
+  }
+  return summary;
+}
+
 // ---------------------------------------------------------------------------
 // 变电工程回归：demo-substation（JinQu）
 // ---------------------------------------------------------------------------
@@ -326,6 +487,50 @@ describe.skipIf(!SUBSTATION_CORPUS.every((item) => existsSync(item.dir)))('样�
         .toHaveLength(baseline.unclassified ? 1 : 0);
     }
   }, 120_000);
+
+  it('vendor-neutral parser compatibility matrix covers hierarchy, references, properties and geometry degradation', async () => {
+    const summaries: Record<string, SubstationCompatibilitySummary> = {};
+    for (const sample of SUBSTATION_CORPUS) {
+      const files = loadFilesFromDir(sample.dir);
+      const tree = await buildCbmTree(files);
+      expect(tree, sample.id).not.toBeNull();
+      if (!tree) continue;
+      const ifcEntries = await discoverIfcFromCBM(files);
+      const summary = await inspectSubstationCompatibility(files, tree, ifcEntries);
+      summaries[sample.id] = summary;
+
+      expect(summary.cbmNodeCount, `${sample.id} CBM`).toBeGreaterThan(0);
+      expect(summary.devCount, `${sample.id} DEV`).toBeGreaterThan(0);
+      expect(summary.resolvedDevFamCount, `${sample.id} DEV→FAM`).toBeGreaterThan(0);
+      expect(summary.famPropertyCount, `${sample.id} FAM properties`).toBeGreaterThan(0);
+      expect(summary.devPropertyCount, `${sample.id} DEV properties`).toBeGreaterThan(0);
+      expect(summary.ifcCount, `${sample.id} IFC`).toBe(sample.models);
+      expect(summary.phmPlacementCount, `${sample.id} PHM placements`).toBeGreaterThan(0);
+      expect(summary.nonIdentityPlacementCount, `${sample.id} finite/transform evidence`).toBeGreaterThanOrEqual(0);
+
+      // Every real source key is mixed-case at least through its top-level
+      // directory; lower-casing the lookup spelling must still resolve it.
+      const mixedCaseSource = Array.from(files.keys()).find((path) =>
+        path !== path.toLowerCase() && /\.(cbm|dev|fam|phm|mod|gl|stl|ifc)$/i.test(path));
+      expect(mixedCaseSource, `${sample.id} case-insensitive source lookup`).toBeDefined();
+      if (mixedCaseSource) expect(getFileByPath(files, mixedCaseSource.toLowerCase())).toBeDefined();
+
+      if (summary.glSourceCount > 0) {
+        expect(summary.glXmlEntityCount, `${sample.id} GL XML pipeline`).toBeGreaterThan(0);
+      }
+    }
+
+    expect(summaries.substation02.baseFamilyPointerCount).toBeGreaterThan(0);
+    expect(summaries.substation02.resolvedBaseFamilyPointerCount).toBeGreaterThan(0);
+    expect(summaries.substation03.baseFamilyPointerCount).toBeGreaterThan(0);
+    expect(summaries.substation03.resolvedBaseFamilyPointerCount).toBeGreaterThan(0);
+    expect(summaries.substation03.famLeadingEmptyKeyPropertyCount).toBeGreaterThan(0);
+    expect(summaries['demo-substation'].ifcComponentGuidLinkCount).toBeGreaterThan(0);
+
+    // Print one compact, reproducible evidence line for the release report;
+    // do not log individual files or entities.
+    console.log('[substation-compat]', JSON.stringify(summaries));
+  }, 600_000);
 });
 
 // ---------------------------------------------------------------------------

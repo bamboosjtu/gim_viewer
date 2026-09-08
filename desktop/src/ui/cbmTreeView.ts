@@ -345,8 +345,8 @@ export function handleSubstationPropertyReference(
       const entry = state.currentIfcEntries.find((item) => pathMatches(item.path) || pathMatches(item.name));
       if (entry) target = nodes.find((node) => resolveIfcModelId(node.ifcFile, state.currentIfcEntries) === entry.modelId);
     }
-  } else if (detail.kind === 'phm' || detail.kind === 'mod' || detail.kind === 'stl') {
-    // PHM/MOD/STL 不是独立 CBM 节点：优先利用已加载几何实例携带的
+  } else if (detail.kind === 'phm' || detail.kind === 'mod' || detail.kind === 'gl' || detail.kind === 'stl') {
+    // PHM/MOD/GL/STL 不是独立 CBM 节点：优先利用已加载几何实例携带的
     // devPath 回到业务设备。instanceKey 也包含 PHM/MOD/STL 文件名，
     // 因此缓存命中或不同大小写目录下仍可完成定位。
     const groups = [

@@ -7,6 +7,7 @@
  */
 
 import { escHtml } from '../shared/html.js';
+import { isGimEmptyValue } from '../gim/gimValueSemantics.js';
 
 export type PropertyComponent =
   | 'generic'
@@ -59,7 +60,7 @@ export interface FileReferenceValue {
 }
 
 export interface PropertyReferenceDetail {
-  kind: 'cbm' | 'dev' | 'fam' | 'phm' | 'mod' | 'stl' | 'ifc' | 'sld' | 'file';
+  kind: 'cbm' | 'dev' | 'fam' | 'phm' | 'mod' | 'gl' | 'stl' | 'ifc' | 'sld' | 'file';
   path: string;
 }
 
@@ -432,7 +433,7 @@ export function getPropertyReferenceKind(
 
 export function formatPropertyValue(component: PropertyComponent, key: string, value: unknown, unitOverride?: string): { text: string; html: string } {
   const definition = getPropertyDefinition(component, key);
-  const text = value === null || value === undefined || value === '' ? '—' : String(value);
+  const text = isGimEmptyValue(value) ? '—' : String(value);
   if (definition?.dataType === 'coordinate' && text !== '—') {
     return formatCoordinateValue(key, text);
   }
@@ -483,9 +484,9 @@ function inferReferenceKind(
 ): PropertyReferenceDetail['kind'] | undefined {
   if (explicit) return explicit;
   const text = value === null || value === undefined ? '' : String(value).trim();
-  if (!text || /^IFCGUID$/i.test(key) || /guid/i.test(key)) return undefined;
+  if (!text || isGimEmptyValue(text) || /^IFCGUID$/i.test(key) || /guid/i.test(key)) return undefined;
   const keyUpper = key.toUpperCase();
-  const extension = text.match(/\.(cbm|dev|fam|phm|mod|stl|ifc|sld)$/i)?.[1]?.toLowerCase();
+  const extension = text.match(/\.(cbm|dev|fam|phm|mod|gl|stl|ifc|sld)$/i)?.[1]?.toLowerCase();
   if (extension) return extension as PropertyReferenceDetail['kind'];
   if (keyUpper === 'OBJECTMODELPOINTER' || keyUpper.includes('DEVFILE') || keyUpper === 'DEV') return 'dev';
   if (keyUpper === 'BASEFAMILY' || keyUpper === 'BASEFAMILYPOINTER' || keyUpper.includes('FAMFILE') || keyUpper === 'FAM') return 'fam';
@@ -501,7 +502,7 @@ function inferReferenceKind(
  * 点击后由注册的工程路由处理。这样既可追溯又不破坏检查器可读性。
  */
 export function fileReferenceValue(
-  kind: 'cbm' | 'dev' | 'fam' | 'phm' | 'mod' | 'stl' | 'ifc' | 'sld' | 'file',
+  kind: 'cbm' | 'dev' | 'fam' | 'phm' | 'mod' | 'gl' | 'stl' | 'ifc' | 'sld' | 'file',
   path: string,
   label?: string,
 ): FileReferenceValue {
@@ -511,6 +512,7 @@ export function fileReferenceValue(
     fam: '查看属性族',
     phm: '查看 PHM',
     mod: '查看 MOD',
+    gl: '查看 GL',
     stl: '查看 STL',
     ifc: '切换 IFC 模型',
     sld: '打开电气图纸',

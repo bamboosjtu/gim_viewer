@@ -3,7 +3,14 @@ import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { IfcSpatialNode, IfcSpatialObject, SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
 import { escHtml } from '../shared/html.js';
-import { parseFamSections, parseKeyValue } from '../shared/gimParsing.js';
+import {
+  getFileByPath,
+  getFirstNonEmptyKv,
+  isGimEmptyValue,
+  parseFamSections,
+  parseKeyValue,
+  resolveBaseFamilyReference,
+} from '../shared/gimParsing.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
 import {
   findIfcEntryByModelId,
@@ -216,34 +223,34 @@ async function renderNodeFamDevProperties(state: AppState, node: CbmNode): Promi
 
   // FAM 属性（CBM/{famPath}）
   if (node.famPath) {
-    const famKey = `CBM/${node.famPath}`;
+    const famKey = withEntryPrefix('CBM', node.famPath);
     if (state.currentFiles) {
-      const f = state.currentFiles.get(famKey);
+      const f = getFileByPath(state.currentFiles, famKey);
       if (f) html += renderFamSections(parseFamSections(await f.text()), 'substation-fam');
     } else {
-      const cached = state.cachedFamProperties.get(famKey);
+      const cached = getCachedByPath(state.cachedFamProperties, famKey);
       if (cached) html += renderFamSections(cached, 'substation-fam');
     }
   }
 
   // DEV 属性（DEV/{devPath}）
   if (node.devPath) {
-    const devKey = `DEV/${node.devPath}`;
+    const devKey = withEntryPrefix('DEV', node.devPath);
     let kv: Record<string, string> | null = null;
     if (state.currentFiles) {
-      const f = state.currentFiles.get(devKey);
+      const f = getFileByPath(state.currentFiles, devKey);
       if (f) kv = parseKeyValue(await f.text());
     } else {
-      kv = state.cachedDevProperties.get(devKey) ?? null;
+      kv = getCachedByPath(state.cachedDevProperties, devKey) ?? null;
     }
     if (kv) {
       const deviceRows: PropertyRow[] = [
-        ...(isUsefulPropertyValue(kv['SYMBOLNAME']) ? [{ key: 'SYMBOLNAME', value: kv['SYMBOLNAME'] }] : []),
-        ...(isUsefulPropertyValue(kv['TYPE']) ? [{ key: 'TYPE', value: kv['TYPE'] }] : []),
+        ...(isUsefulPropertyValue(getFirstNonEmptyKv(kv, ['SYMBOLNAME'])) ? [{ key: 'SYMBOLNAME', value: getFirstNonEmptyKv(kv, ['SYMBOLNAME']) }] : []),
+        ...(isUsefulPropertyValue(getFirstNonEmptyKv(kv, ['TYPE', 'DEVICETYPE'])) ? [{ key: 'TYPE', value: getFirstNonEmptyKv(kv, ['TYPE', 'DEVICETYPE']) }] : []),
       ];
       html += renderPropertySection('设备信息', 'substation-dev', deviceRows);
       const otherDevRows = Object.entries(kv)
-        .filter(([key, value]) => isUsefulPropertyValue(value) && key !== 'SYMBOLNAME' && key !== 'TYPE')
+        .filter(([key, value]) => isUsefulPropertyValue(value) && !['SYMBOLNAME', 'TYPE', 'DEVICETYPE'].includes(key.toUpperCase()))
         .map(([key, value]) => ({ key, value }));
       if (otherDevRows.length > 0) {
         const primaryDevRows = otherDevRows.filter((row) => (getPropertyDefinition('substation-dev', row.key)?.priority ?? 2) < 2);
@@ -251,15 +258,15 @@ async function renderNodeFamDevProperties(state: AppState, node: CbmNode): Promi
         html += renderPropertySection('DEV 参数', 'substation-dev', primaryDevRows);
         html += renderTechnicalSection('DEV 技术字段', 'substation-dev', technicalDevRows);
       }
-      // DEV BASEFAMILY 引用的 FAM 属性
-      const famRef = kv['BASEFAMILY'];
+      // DEV BASEFAMILY / BASEFAMILYPOINTER 引用的 FAM 属性
+      const famRef = resolveBaseFamilyReference(kv);
       if (famRef) {
-        const famKey = `DEV/${famRef}`;
+        const famKey = withEntryPrefix('DEV', famRef);
         if (state.currentFiles) {
-          const famFile = state.currentFiles.get(famKey);
+          const famFile = getFileByPath(state.currentFiles, famKey);
           if (famFile) html += renderFamSections(parseFamSections(await famFile.text()), 'substation-fam');
         } else {
-          const cached = state.cachedFamProperties.get(famKey);
+          const cached = getCachedByPath(state.cachedFamProperties, famKey);
           if (cached) html += renderFamSections(cached, 'substation-fam');
         }
       }
@@ -276,7 +283,7 @@ function renderIfcItemData(data: Record<string, unknown>, depth = 0): string {
   const nested: Array<[string, Record<string, unknown>]> = [];
 
   for (const [key, value] of Object.entries(data)) {
-    if (value === null || value === undefined || value === '' || key.startsWith('_')) continue;
+    if (isGimEmptyValue(value) || key.startsWith('_')) continue;
     if (typeof value === 'object' && !Array.isArray(value)) {
       nested.push([key, value as Record<string, unknown>]);
       continue;
@@ -318,7 +325,9 @@ export function sectionHtml(
   component: PropertyComponent = 'generic',
 ): string {
   const rows: PropertyRow[] = pairs
-    .filter(([, value]) => typeof value === 'string' ? Boolean(value) : Boolean(value?.text))
+    .filter(([, value]) => typeof value === 'string'
+      ? !isGimEmptyValue(value)
+      : !isGimEmptyValue(value?.text))
     .map(([key, value]) => {
       if (typeof value === 'string') return { key, value, mono: monoValue };
       return { key, value: value.text, valueHtml: value.html, valueText: value.text, mono: monoValue };
@@ -411,9 +420,24 @@ function formatSpatialNumber(value: number): string {
 
 /** FAM/DEV 导出器常用的空值哨兵不占用首屏；真实负数等正常值不受影响。 */
 function isUsefulPropertyValue(value: unknown): boolean {
-  if (value === null || value === undefined) return false;
-  const text = String(value).trim();
-  return text !== '' && text !== '/' && text !== '-';
+  return !isGimEmptyValue(value);
+}
+
+function withEntryPrefix(prefix: string, value: string): string {
+  const normalized = value.trim().replace(/\\/g, '/');
+  return normalized.toLowerCase().startsWith(`${prefix.toLowerCase()}/`)
+    ? normalized
+    : `${prefix}/${normalized}`;
+}
+
+function getCachedByPath<T>(map: Map<string, T>, path: string): T | undefined {
+  const exact = map.get(path);
+  if (exact !== undefined) return exact;
+  const wanted = path.replace(/\\/g, '/').toLowerCase();
+  for (const [candidate, value] of map) {
+    if (candidate.replace(/\\/g, '/').toLowerCase() === wanted) return value;
+  }
+  return undefined;
 }
 
 /** 将 Fragments 的模型标识转成来源按钮可用的 IFC 路径。 */

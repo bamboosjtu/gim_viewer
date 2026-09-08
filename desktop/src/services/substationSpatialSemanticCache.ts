@@ -21,7 +21,7 @@ export const SUBSTATION_SPATIAL_SEMANTIC_CACHE_ENTRY =
   '__derived__/substation-spatial-semantic-v1.json';
 
 /** Must match desktop/src-tauri/src/db.rs::SUBSTATION_PARSER_VERSION. */
-export const SUBSTATION_PARSER_DOMAIN_VERSION = 'gim-substation-parser-v22';
+export const SUBSTATION_PARSER_DOMAIN_VERSION = 'gim-substation-parser-v23';
 
 /** Refuse to parse an unbounded/corrupt derived payload in the WebView. */
 export const MAX_SUBSTATION_SPATIAL_SNAPSHOT_BYTES = 128 * 1024 * 1024;
