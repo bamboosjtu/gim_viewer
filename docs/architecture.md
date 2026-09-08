@@ -279,7 +279,7 @@ CBM/FAM/DEV/FileDevRelation
   → 基础 tree/search/properties
   → 首个可用 IFC + coordinate anchor + camera/selection 初始化
   → firstUsableGeometryReady / interactive
-  → 启动 spatial semantic（不再与首个 IFC 争用 critical path）
+  →（独立后台启动）spatial semantic / STD-SLD parse-or-restore / cold cache persistence
   → 其余 IFC 按原顺序串行后台加载
   → allIfcReady
   → DEV/MOD/STL 后台几何
@@ -289,6 +289,10 @@ CBM/FAM/DEV/FileDevRelation
 `spatialSemanticReady` 是独立的 IFC 空间语义投影：任务在 `interactive` 之后才启动，
 完成前不阻塞基础 CBM 导航、搜索、属性、来源追踪或首个 IFC。首个有效 Fragments 模型
 足以建立当前坐标锚点；仅当该尝试没有可用基准时，后台尾部才做一次 coordinate fallback。
+STD/SLD 解析或缓存恢复、SLD 渲染和 gridId 联动注册也在 `interactive` 之后才启动；
+冷启动的 GIM index、文件/几何引用链持久化同样延后到 `interactive` 之后，并保持后台执行。
+这三个后台任务之间不规定先后，也不阻塞剩余 IFC 串行加载；各自失败只降级对应功能或缓存
+写入，不回滚已经可交互的 IFC。
 每个阶段继续携带同一个 `ProjectLoadSession`，旧工程的 IFC、空间语义和几何结果不能提交
 到新工程。缓存命中和冷启动遵循相同的时刻语义。
 
@@ -302,8 +306,7 @@ CBM/FAM/DEV/FileDevRelation
 3. 线路命中 → semantic pack/SQLite graph + 属性恢复 → 地图/树 UI
 4. 变电命中 → CBM/FAM/DEV/FileDevRelation 恢复并提交 `coreSemanticReady` → 基础
    tree/search/properties → 首个 IFC 后 `firstUsableGeometryReady` / `interactive` →
-   启动空间索引并异步提交 `spatialSemanticReady` → 其余 IFC 串行加载并记录
-   `allIfcReady`
+   独立启动空间索引、STD/SLD 缓存恢复 → 其余 IFC 串行加载并记录 `allIfcReady`
 5. 语义缓存未命中才提取原始 GIM；几何域的既有版本/manifest 策略保持不变
 
 ### 节点级 IFC 懒加载

@@ -184,6 +184,8 @@ interface SubstationSemanticOptions {
    * scheduling details.
    */
   onSpatialSemanticStart?: (start: () => void) => void;
+  /** Start STD/SLD parsing or cache restore only after first interactive. */
+  onStdSldStart?: (start: () => void) => void;
 }
 
 function markSubstationCoreSemanticReady(
@@ -281,6 +283,108 @@ async function buildAndCommitSubstationSpatialSemantic(
       error: err instanceof Error ? err.message : String(err),
     }, perfSession);
     console.warn('[GIM] IFC 空间索引构建失败，保留功能系统视图:', err);
+    return false;
+  }
+}
+
+async function buildAndCommitSubstationStdSld(
+  state: AppState,
+  files: Map<string, File> | null,
+  cacheEntryPaths: readonly string[],
+  session: ProjectLoadSession,
+  perfSession: PerfSession,
+  showMessage: (text: string) => void,
+  source: 'cold' | 'warm',
+): Promise<boolean> {
+  if (!state.isCurrentSession(session)) return false;
+  const label = source === 'cold' ? '变电 STD/SLD 解析' : '变电 STD/SLD 缓存恢复';
+  perfMarkProductMoment('stdSldStart', { source }, perfSession);
+  const endStdSld = perfBegin(label, undefined, perfSession);
+  try {
+    const {
+      commitStdSldResult,
+      findMissingStdSldCacheParts,
+      parseStdSldOnGimExtracted,
+      restoreStdSldFromCache,
+    } = await import('./stdSldService.js');
+    if (!state.isCurrentSession(session)) return false;
+
+    const result = files
+      ? await parseStdSldOnGimExtracted(state, files)
+      : await restoreStdSldFromCache(state);
+    if (!state.isCurrentSession(session)) return false;
+
+    if (!files) {
+      const missingParts = findMissingStdSldCacheParts(cacheEntryPaths, result);
+      if (missingParts.length > 0) {
+        throw new Error(`本地缓存缺少电气图数据（${missingParts.join('/')}）`);
+      }
+    }
+
+    // STD/SLD services return a local result and do not commit AppState.  The
+    // session fence immediately before/after this commit is intentional:
+    // delayed A results must never become B's source-tracing state.
+    commitStdSldResult(state, result);
+    if (!state.isCurrentSession(session)) return false;
+
+    let rendered = false;
+    try {
+      const { renderSldView } = await import('../ui/sldView.js');
+      if (!state.isCurrentSession(session)) return false;
+      renderSldView(state);
+      rendered = true;
+    } catch (err) {
+      if (state.isCurrentSession(session)) {
+        console.warn(`[GIM] SLD 视图渲染失败（${source}）:`, err);
+      }
+    }
+    if (!state.isCurrentSession(session)) return false;
+
+    // Register the callback only after the corresponding documents/index have
+    // been committed.  The callback itself keeps a session guard for clicks
+    // that arrive while another project is opening.
+    if (result) {
+      setupSldGridIdInteraction(state, showMessage, session);
+    }
+    endStdSld(undefined, {
+      source,
+      available: result != null,
+      schEntries: result?.schEntries.length ?? 0,
+      hasStd: result?.stdDoc != null,
+      hasSld: result?.sldDoc != null,
+      rendered,
+    });
+    perfMarkProductMoment('stdSldReady', {
+      source,
+      available: result != null,
+      schEntries: result?.schEntries.length ?? 0,
+      hasStd: result?.stdDoc != null,
+      hasSld: result?.sldDoc != null,
+      rendered,
+    }, perfSession);
+    return result != null;
+  } catch (err) {
+    if (!state.isCurrentSession(session)) return false;
+    // Do not leave a partial document/index from a failed current-session
+    // attempt visible.  This clears only the STD/SLD projection; IFC and core
+    // semantic state remain intact.
+    try {
+      const { commitStdSldResult } = await import('./stdSldService.js');
+      if (!state.isCurrentSession(session)) return false;
+      commitStdSldResult(state, null);
+    } catch (clearErr) {
+      console.warn('[GIM] 清理失败的 STD/SLD 状态失败:', clearErr);
+    }
+    endStdSld('（失败）', {
+      source,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    perfMarkProductMoment('stdSldReady', {
+      source,
+      available: false,
+      error: err instanceof Error ? err.message : String(err),
+    }, perfSession);
+    console.warn(`[GIM] STD/SLD 后台任务失败（${source}），不影响 IFC interactive:`, err);
     return false;
   }
 }
@@ -388,29 +492,30 @@ export async function onGimExtracted(
     await startSpatialSemantic();
   }
 
-  // STD/SLD 解析：在 CBM 树构建完成后并行执行（不阻塞 IFC 加载）
-  // 失败时仅 warn，不影响主流程
-  try {
-    const { parseStdSldOnGimExtracted, commitStdSldResult } = await import('./stdSldService.js');
-    const stdSldResult = await parseStdSldOnGimExtracted(state, files);
-    if (!state.isCurrentSession(session)) return [];
-    commitStdSldResult(state, stdSldResult);
-  } catch (err) {
-    if (state.isCurrentSession(session)) console.warn('[GIM] STD/SLD 解析失败:', err);
+  let stdSldPromise: Promise<boolean> | null = null;
+  const startStdSld = (): Promise<boolean> => {
+    if (!stdSldPromise) {
+      stdSldPromise = buildAndCommitSubstationStdSld(
+        state,
+        files,
+        [],
+        session,
+        perfSession,
+        showMessage,
+        'cold',
+      );
+    }
+    return stdSldPromise;
+  };
+  if (options.onStdSldStart) {
+    // Production passes this starter to loadAllIfcFiles.  Registering it is
+    // deliberately side-effect free before first interactive.
+    options.onStdSldStart(startStdSld);
+  } else if (!options.deferSpatialSemantic) {
+    // Preserve the direct-call contract for callers that do not use the
+    // deferred Runtime opening path.
+    await startStdSld();
   }
-  if (!state.isCurrentSession(session)) return [];
-
-  // 渲染 SLD 电气单线图与 STD 拓扑列表
-  try {
-    const { renderSldView } = await import('../ui/sldView.js');
-    if (!state.isCurrentSession(session)) return [];
-    renderSldView(state);
-  } catch (err) {
-    if (state.isCurrentSession(session)) console.warn('[GIM] SLD 视图渲染失败:', err);
-  }
-
-  // 阶段 4：注册 SLD gridId → CBM 联动回调
-  setupSldGridIdInteraction(state, showMessage, session);
 
   return ifcEntries;
 }
@@ -517,6 +622,10 @@ export async function loadAllIfcFiles(
     geometryCacheVersionFileMatch?: boolean;
     /** Start optional spatial semantic only after first interactive. */
     startSpatialSemantic?: () => void;
+    /** Start STD/SLD parsing or cache restore only after first interactive. */
+    startStdSld?: () => void;
+    /** Start cold cache persistence only after first interactive. */
+    startCachePersistence?: () => void;
   } = {},
 ): Promise<void> {
   const session = options.session ?? state.captureProjectSession();
@@ -635,16 +744,24 @@ export async function loadAllIfcFiles(
     void sampleSubstationMemory('第一个可用 IFC / interactive 后', perfSession, firstMeta);
     hideLoading();
     signalInteractive();
-    try {
-      // This callback is deliberately after the interactive product moment:
-      // invoking the spatial parser earlier would still consume main-thread
-      // time even if its promise were not awaited.
-      options.startSpatialSemantic?.();
-    } catch (err) {
-      // Spatial semantic is an optional navigation projection.  A callback
-      // failure must not turn a usable IFC into an interactive-load failure.
-      console.warn('[GIM] 启动 IFC 空间语义失败，继续 IFC 后台加载:', err);
-    }
+    const startPostInteractiveTask = (
+      label: string,
+      starter?: () => void,
+    ): void => {
+      if (!starter) return;
+      try {
+        // All three starters are deliberately invoked only after the
+        // interactive product moment.  They are independent background
+        // tasks; one synchronous registration failure must not suppress the
+        // other tasks or the sequential IFC tail.
+        starter();
+      } catch (err) {
+        console.warn(`[GIM] 启动${label}失败，继续 IFC 后台加载:`, err);
+      }
+    };
+    startPostInteractiveTask('IFC 空间语义', options.startSpatialSemantic);
+    startPostInteractiveTask('STD/SLD', options.startStdSld);
+    startPostInteractiveTask('缓存持久化', options.startCachePersistence);
   };
 
   const lifecycleTask = (async (): Promise<void> => {
@@ -1209,44 +1326,6 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         );
       }
 
-      // STD/SLD 从磁盘缓存恢复：CBM 树就绪后并行执行（不阻塞 IFC 加载）
-      // 失败时仅 warn，不影响主流程
-      try {
-        const { restoreStdSldFromCache, findMissingStdSldCacheParts } =
-          await import('./stdSldService.js');
-        const stdSldResult = await restoreStdSldFromCache(state);
-        if (!state.isCurrentSession(session)) return;
-        const missingParts = findMissingStdSldCacheParts(
-          index.entries.map((entry) => entry.entry_path),
-          stdSldResult,
-        );
-        if (missingParts.length > 0) {
-          throw new Error(
-            `本地缓存缺少电气图数据（${missingParts.join('/')}），需要从原始 GIM 重新提取`,
-          );
-        }
-        if (!state.isCurrentSession(session)) return;
-        const { commitStdSldResult } = await import('./stdSldService.js');
-        commitStdSldResult(state, stdSldResult);
-      } catch (err) {
-        console.warn('[GIM] STD/SLD 缓存恢复失败:', err);
-        // 让外层缓存命中流程回退到完整解压。旧缓存可能有完整 IFC/MOD，
-        // 但缺少后来新增的 project.sch / STD / SLD 落盘文件。
-        throw err;
-      }
-
-      // 渲染 SLD 电气单线图与 STD 拓扑列表（缓存命中路径）
-      try {
-        const { renderSldView } = await import('../ui/sldView.js');
-        if (!state.isCurrentSession(session)) return;
-        renderSldView(state);
-      } catch (err) {
-        console.warn('[GIM] SLD 视图渲染失败（缓存命中）:', err);
-      }
-
-      // 阶段 4：注册 SLD gridId → CBM 联动回调（缓存命中路径）
-      setupSldGridIdInteraction(state, showMessage, session);
-
       // Register the spatial starter, but let loadAllIfcFiles invoke it only
       // after the first usable IFC has established interactive.  Starting it
       // here would still compete with web-ifc/Fragments on the main thread.
@@ -1264,11 +1343,28 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         );
       };
 
+      const cachedStdSldEntryPaths = index.entries.map((entry) => entry.entry_path);
+      // STD/SLD restore is a feature-local background task.  A missing or
+      // stale STD/SLD cache must not discard an otherwise valid IFC cache hit;
+      // the helper records the degradation and clears only that projection.
+      const startStdSld = (): void => {
+        void buildAndCommitSubstationStdSld(
+          state,
+          null,
+          cachedStdSldEntryPaths,
+          session,
+          perfSession,
+          showMessage,
+          'warm',
+        );
+      };
+
       // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
       // loadAllIfcFiles 内部会创建 ViewerRuntime、加载 IFC、渲染树、触发 MOD/STL
       await loadAllIfcFiles(state, cachedIfcEntries, showMessage, {
         session,
         startSpatialSemantic,
+        startStdSld,
         geometryCacheValid: validation.geometry_cache_valid ?? validation.geometry_cache_version_match,
         geometryCacheManifestValid: validation.geometry_cache_manifest_valid,
         geometryCacheVersionFileMatch: validation.geometry_cache_version_file_match,
@@ -1309,6 +1405,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   // this Runtime. The parser implementation is unchanged; only ownership moved.
   showLoading('正在解析 GIM 层级结构...');
   let startSpatialSemantic: (() => void) | undefined;
+  let startStdSld: (() => void) | undefined;
   const entries = await onGimExtracted(
     state,
     extracted,
@@ -1321,6 +1418,9 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       onSpatialSemanticStart: (start) => {
         startSpatialSemantic = start;
       },
+      onStdSldStart: (start) => {
+        startStdSld = start;
+      },
     },
   );
   if (!state.isCurrentSession(session)) return;
@@ -1332,12 +1432,19 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
 
   const preExtracted = extractedSource;
   const persistProjectId = context.projectId != null && isTauri() ? context.projectId : null;
-    // 异步持久化只使用本次打开捕获的不可变输入，避免切换工程后读取新 state。
-    const filesForPersist = extracted;
-    const ifcEntriesForPersist = entries.slice();
-    const cbmTreeForPersist = state.currentCbmTree;
-    const fileDevRelationsForPersist = state.fileDevRelations.slice();
-    const persistPromise =
+  // 异步持久化只使用本次打开捕获的不可变输入，避免切换工程后读取新 state。
+  const filesForPersist = extracted;
+  const ifcEntriesForPersist = entries.slice();
+  const cbmTreeForPersist = state.currentCbmTree;
+  const fileDevRelationsForPersist = state.fileDevRelations.slice();
+  let persistPromise: Promise<void> | null = null;
+  const startCachePersistence = (): void => {
+    if (persistPromise) return;
+    perfMarkProductMoment('cachePersistenceStart', {
+      enabled: persistProjectId != null,
+      projectId: persistProjectId,
+    }, perfSession);
+    const persistTask =
       persistProjectId != null
         ? (async () => {
       const projectId = persistProjectId;
@@ -1460,17 +1567,36 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       } catch (err) {
         console.error('[Tauri] GIM 索引写入失败:', err);
       }
-        })().catch((err) => {
-          console.error('[Tauri] 缓存/索引入库后台任务失败:', err);
-        })
+        })()
       : Promise.resolve();
+    persistPromise = persistTask
+      .then(() => {
+        if (!state.isCurrentSession(session)) return;
+        perfMarkProductMoment('cachePersistenceReady', {
+          enabled: persistProjectId != null,
+          projectId: persistProjectId,
+        }, perfSession);
+      })
+      .catch((err) => {
+        if (state.isCurrentSession(session)) {
+          perfMarkProductMoment('cachePersistenceReady', {
+            enabled: persistProjectId != null,
+            projectId: persistProjectId,
+            available: false,
+            error: err instanceof Error ? err.message : String(err),
+          }, perfSession);
+        }
+        console.error('[Tauri] 缓存/索引入库后台任务失败:', err);
+      });
+  };
 
   // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框。
   // loadAllIfcFiles 在首个可用 IFC 后返回；剩余 IFC、几何和这里的缓存
   // 持久化都继续作为当前 session 的后台工作，不重新成为 interactive barrier。
-  void persistPromise;
   await loadAllIfcFiles(state, entries, showMessage, {
     session,
     startSpatialSemantic,
+    startStdSld,
+    startCachePersistence,
   });
 }

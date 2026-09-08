@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   buildAndRenderCbmTree: vi.fn(),
   renderFileDevPanel: vi.fn(),
   parseStdSldOnGimExtracted: vi.fn(),
+  findMissingStdSldCacheParts: vi.fn(() => []),
+  restoreStdSldFromCache: vi.fn(),
   commitStdSldResult: vi.fn((state: AppState, result: StdSldParseResult | null) => {
     state.currentStdDoc = result?.stdDoc ?? null;
     state.currentSldDoc = result?.sldDoc ?? null;
@@ -48,6 +50,8 @@ vi.mock('../../ui/cbmTreeView.js', () => ({ buildAndRenderCbmTree: mocks.buildAn
 vi.mock('../../ui/fileDevView.js', () => ({ renderFileDevPanel: mocks.renderFileDevPanel }));
 vi.mock('../stdSldService.js', () => ({
   parseStdSldOnGimExtracted: mocks.parseStdSldOnGimExtracted,
+  findMissingStdSldCacheParts: mocks.findMissingStdSldCacheParts,
+  restoreStdSldFromCache: mocks.restoreStdSldFromCache,
   commitStdSldResult: mocks.commitStdSldResult,
 }));
 vi.mock('../../ui/sldView.js', () => ({
@@ -154,6 +158,7 @@ describe('openGimService AppState commit race', () => {
     const file = new File(['A'], 'marker.cbm');
     const files = new Map<string, File>([['CBM/marker.cbm', file]]);
     let startSpatialSemantic!: () => void;
+    let startStdSld!: () => void;
     mocks.discoverIfcFromCBM.mockResolvedValue([
       { name: 'A.ifc', path: 'IFC/A.ifc', modelId: 'model-A' } satisfies IfcEntry,
     ]);
@@ -174,6 +179,7 @@ describe('openGimService AppState commit race', () => {
       {
         deferSpatialSemantic: true,
         onSpatialSemanticStart: (start) => { startSpatialSemantic = start; },
+        onStdSldStart: (start) => { startStdSld = start; },
       },
     );
     await loading;
@@ -184,11 +190,20 @@ describe('openGimService AppState commit race', () => {
     expect(mocks.buildAndRenderCbmTree).toHaveBeenCalled();
     expect(mocks.renderFileDevPanel).toHaveBeenCalled();
     expect(mocks.buildSubstationSpatialIndexFromFiles).not.toHaveBeenCalled();
+    expect(mocks.parseStdSldOnGimExtracted).not.toHaveBeenCalled();
 
     startSpatialSemantic();
     spatialGate.resolve(makeSpatial('A'));
     await vi.waitFor(() => {
       expect(state.substationSpatialIndex?.models[0]?.modelId).toBe('model-A');
+    });
+
+    // STD/SLD is also registered as a post-interactive starter.  It must not
+    // move back onto the core semantic path merely because CBM parsing ended.
+    startStdSld();
+    await vi.waitFor(() => {
+      expect((state.currentStdDoc as any)?.sourcePath).toBe('A.std');
+      expect((state.currentSldDoc as any)?.sourcePath).toBe('A.sld');
     });
   });
 
@@ -266,7 +281,7 @@ describe('openGimService AppState commit race', () => {
     expect((state.currentStdSldIndex as any)?.source).toBe('B');
   });
 
-  it.each(['relation', 'spatial'])('%s 解析异常迟到时不能清空工程 B', async (errorStage) => {
+  it.each(['relation', 'spatial', 'std'])('%s 解析异常迟到时不能清空工程 B', async (errorStage) => {
     vi.clearAllMocks();
     const gate = deferred<string>();
     const entered = deferred<void>();
@@ -292,7 +307,11 @@ describe('openGimService AppState commit race', () => {
       const label = await read(files, 'spatial');
       return makeSpatial(label);
     });
-    mocks.parseStdSldOnGimExtracted.mockResolvedValue(makeStdSldResult('B'));
+    mocks.parseStdSldOnGimExtracted.mockImplementation(async (state: AppState, files: Map<string, File>) => {
+      const label = await read(files, 'std');
+      void state;
+      return makeStdSldResult(label);
+    });
 
     const state = new AppState();
     const sessionA = state.activateProject(1, 'sha-a');

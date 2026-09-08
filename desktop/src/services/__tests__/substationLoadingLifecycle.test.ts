@@ -86,6 +86,16 @@ describe('Substation Loading v2 readiness lifecycle', () => {
       perfMarkProductMoment('spatialSemanticStart', { test: true });
       throw new Error('test spatial semantic failure');
     });
+    const stdSldStart = vi.fn(() => {
+      expect(perfProductMomentSnapshot().interactive).not.toBeNull();
+      perfMarkProductMoment('stdSldStart', { test: true });
+      perfMarkProductMoment('stdSldReady', { test: true });
+    });
+    const cachePersistenceStart = vi.fn(() => {
+      expect(perfProductMomentSnapshot().interactive).not.toBeNull();
+      perfMarkProductMoment('cachePersistenceStart', { test: true });
+      perfMarkProductMoment('cachePersistenceReady', { test: true });
+    });
     const entries: IfcEntry[] = [
       { name: 'first.ifc', path: 'DEV/first.ifc', modelId: 'first' },
       { name: 'second.ifc', path: 'DEV/second.ifc', modelId: 'second' },
@@ -134,6 +144,8 @@ describe('Substation Loading v2 readiness lifecycle', () => {
     const loading = loadAllIfcFiles(state, entries, vi.fn(), {
       session,
       startSpatialSemantic: spatialStart,
+      startStdSld: stdSldStart,
+      startCachePersistence: cachePersistenceStart,
     });
     let callerSettled = false;
     void loading.then(() => { callerSettled = true; });
@@ -144,11 +156,23 @@ describe('Substation Loading v2 readiness lifecycle', () => {
     expect(callerSettled).toBe(true);
     expect(mocks.loadIfcEntry).toHaveBeenCalledTimes(2);
     expect(spatialStart).toHaveBeenCalledTimes(1);
+    expect(stdSldStart).toHaveBeenCalledTimes(1);
+    expect(cachePersistenceStart).toHaveBeenCalledTimes(1);
     expect(perfProductMomentSnapshot().firstIfcLoadStart).not.toBeNull();
+    expect(perfProductMomentSnapshot().stdSldStart).not.toBeNull();
+    expect(perfProductMomentSnapshot().stdSldReady).not.toBeNull();
+    expect(perfProductMomentSnapshot().cachePersistenceStart).not.toBeNull();
+    expect(perfProductMomentSnapshot().cachePersistenceReady).not.toBeNull();
     expect(perfProductMomentSnapshot().spatialSemanticStart).not.toBeNull();
     expect(perfProductMomentSnapshot().firstUsableGeometryReady).not.toBeNull();
     expect(perfProductMomentSnapshot().interactive).not.toBeNull();
+    expect(perfProductMomentSnapshot().firstIfcLoadStart!.atMs)
+      .toBeLessThan(perfProductMomentSnapshot().interactive!.atMs);
     expect(perfProductMomentSnapshot().spatialSemanticStart!.atMs)
+      .toBeGreaterThanOrEqual(perfProductMomentSnapshot().interactive!.atMs);
+    expect(perfProductMomentSnapshot().stdSldStart!.atMs)
+      .toBeGreaterThanOrEqual(perfProductMomentSnapshot().interactive!.atMs);
+    expect(perfProductMomentSnapshot().cachePersistenceStart!.atMs)
       .toBeGreaterThanOrEqual(perfProductMomentSnapshot().interactive!.atMs);
     expect(perfProductMomentSnapshot().allIfcReady).toBeNull();
 
