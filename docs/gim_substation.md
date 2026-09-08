@@ -180,6 +180,24 @@ project.cbm（工程根）
 空间对象、直接/分解/宿主关系和 CBM↔IFC 链接的字段定义与样本边界见
 [Schema 目录](schema/README.md)；性能待办不在本文件重复记录。
 
+### Spatial Semantic Cache v1 / Background Runtime
+
+`SubstationSpatialIndex` 的运行时 `Map` 不直接序列化。`substationSpatialSemanticCache.ts`
+保存 canonical `models/nodes/objects/links/rootNodeKeys/coverage/placementGroups/
+identityPlacementLinks` snapshot，加载后重新 hydrate：`nodeByKey`、`objectByKey`、
+`linksBySpatialKey`、`linksByCbmPath`、`linksByIfcObjectKey`。snapshot 绑定
+`sourceSha256`、`gim-substation-parser-v22` 和独立的 `substation-spatial-semantic-v1`
+版本；版本/source SHA、JSON、引用关系或 count invariant 任一失败都按 cache miss 处理，
+不恢复 partial index。derived entry 通过现有 Rust `atomic_write` 写入，并在命令侧再次
+核对项目 source SHA。
+
+`SubstationBackgroundCoordinator` 只服务变电 Runtime，不是通用任务框架。它把
+`remainingIfc`、空间 cache restore/rebuild、STD/SLD、cold cache persistence 和 DEV geometry
+记录为有 priority/heavy/start condition/session/state 的任务。interactive 后先进行轻量
+restore/STD；空间 miss 的 IFC STEP rebuild 与 DEV geometry 只在 `allIfcReady` 后进入串行
+heavy lane，低优先级 persistence 不抢占 heavy lane。任务事件只保留 queued/started/
+completed/cancelled/failed 和 queue wait 的低开销诊断。
+
 ---
 
 ## 5. 逻辑模型

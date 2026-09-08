@@ -94,6 +94,9 @@ src/
 │  ├─ gimOpenCore.ts             # Shared Core：session、解压输入、清理/性能边界
 │  ├─ powerlineRuntime.ts        # 线路 cache/Worker/graph/属性/地图生命周期
 │  ├─ substationRuntime.ts       # 变电 CBM/IFC/Fragments/DEV/MOD/STL 生命周期
+│  ├─ substationBackgroundRuntime.ts # 变电 post-interactive 轻/重任务协调
+│  ├─ substationSpatialSemanticCache.ts # 变电空间语义 snapshot/validate/hydrate
+│  ├─ devGeometryTelemetry.ts    # DEV cold/warm 聚合阶段诊断
 │  ├─ openIfcService.ts          # IFC 文件打开
 │  ├─ nodeInteractionService.ts  # 节点点击懒加载 IFC
 │  ├─ gimIndexPersistenceService.ts # 变电索引入库 payload 构建
@@ -279,20 +282,23 @@ CBM/FAM/DEV/FileDevRelation
   → 基础 tree/search/properties
   → 首个可用 IFC + coordinate anchor + camera/selection 初始化
   → firstUsableGeometryReady / interactive
-  →（独立后台启动）spatial semantic / STD-SLD parse-or-restore / cold cache persistence
-  → 其余 IFC 按原顺序串行后台加载
-  → allIfcReady
-  → DEV/MOD/STL 后台几何
+  → 变电 Background Coordinator 排队：空间 cache restore / STD-SLD / 其余 IFC
+  → remaining IFC 按既有顺序串行完成 / allIfcReady
+  → cache miss 的空间 semantic rebuild 与 DEV geometry 进入串行 heavy lane
   → fullModelReady
 ```
 
-`spatialSemanticReady` 是独立的 IFC 空间语义投影：任务在 `interactive` 之后才启动，
-完成前不阻塞基础 CBM 导航、搜索、属性、来源追踪或首个 IFC。首个有效 Fragments 模型
-足以建立当前坐标锚点；仅当该尝试没有可用基准时，后台尾部才做一次 coordinate fallback。
+`spatialSemanticReady` 是独立的 IFC 空间语义投影：`interactive` 后先读取独立的
+`substation-spatial-semantic-v1` derived snapshot；命中时只做 JSON deserialize、引用校验
+和 Map hydrate，不重新扫描 IFC STEP。miss、损坏、版本/source SHA 不匹配或引用完整性失败
+都会进入 cache miss，等 `allIfcReady` 后由 Background Coordinator 串行执行 rebuild，成功
+后再通过原子缓存写入替换 snapshot。首个有效 Fragments 模型足以建立当前坐标锚点；仅当
+该尝试没有可用基准时，后台尾部才做一次 coordinate fallback。
 STD/SLD 解析或缓存恢复、SLD 渲染和 gridId 联动注册也在 `interactive` 之后才启动；
-冷启动的 GIM index、文件/几何引用链持久化同样延后到 `interactive` 之后，并保持后台执行。
-这三个后台任务之间不规定先后，也不阻塞剩余 IFC 串行加载；各自失败只降级对应功能或缓存
-写入，不回滚已经可交互的 IFC。
+冷启动的 GIM index、文件/几何引用链持久化同样由 coordinator 延后到 all-IFC 之后的低优先级
+任务。remaining IFC 仍按既有顺序串行加载；空间 cache restore、STD/SLD 等轻任务通过显式
+队列管理，空间 rebuild 与 DEV geometry 不并发。各自失败只降级对应功能或缓存写入，不回滚
+已经可交互的 IFC。
 每个阶段继续携带同一个 `ProjectLoadSession`，旧工程的 IFC、空间语义和几何结果不能提交
 到新工程。缓存命中和冷启动遵循相同的时刻语义。
 
@@ -306,7 +312,8 @@ STD/SLD 解析或缓存恢复、SLD 渲染和 gridId 联动注册也在 `interac
 3. 线路命中 → semantic pack/SQLite graph + 属性恢复 → 地图/树 UI
 4. 变电命中 → CBM/FAM/DEV/FileDevRelation 恢复并提交 `coreSemanticReady` → 基础
    tree/search/properties → 首个 IFC 后 `firstUsableGeometryReady` / `interactive` →
-   独立启动空间索引、STD/SLD 缓存恢复 → 其余 IFC 串行加载并记录 `allIfcReady`
+   coordinator 尝试空间 snapshot restore、STD/SLD；其余 IFC 串行加载并记录 `allIfcReady`；
+   spatial miss 完成 rebuild 后才与 DEV geometry 进入串行 heavy lane
 5. 语义缓存未命中才提取原始 GIM；几何域的既有版本/manifest 策略保持不变
 
 ### 节点级 IFC 懒加载
@@ -319,7 +326,8 @@ manifest，条目内容由 `DiskBackedFile` 在 `text()` / `arrayBuffer()` 时�
 
 ### 渐进式 DEV GLB 几何管线（首次打开）
 
-`src/services/progressiveGeometryService.ts`，IFC 加载完成后以后台任务启动：
+`src/services/progressiveGeometryService.ts`，`allIfcReady` 后由变电 Background Coordinator
+以后台 heavy task 启动：
 
 - **统一序列化与渲染**：按唯一 DEV 迭代 `serializeDevToGlb（MOD/STL 只解析 1 遍）
   → writeGlbFile 落盘 → 逐 CBM 实例渲染到场景`，替代原
@@ -330,6 +338,7 @@ manifest，条目内容由 `DiskBackedFile` 在 `text()` / `arrayBuffer()` 时�
 - **中断安全**：项目切换 token 中断即退出且不写版本标记 →
   下次打开 `geometry_cache_version_match=false` 仅重建 geometry domain
 - **二次打开**：`tryDevGlbFastPath` 先读取 `geometry-cache-v5-dev-status` 的 DEV manifest，按 unique DEV 通过 `batch_read_glb_files` 二进制 envelope 批读；`empty` 为合法空结果，单个 DEV 的 GLB 不完整或读取/解析失败只做该 DEV 的 scoped 原始 MOD/STL 回退，manifest/source 结构损坏才整体重建 geometry cache。
+- **Phase 3 telemetry**：cold/warm geometry 只记录聚合 histogram 与最慢 DEV 摘要，覆盖 discovery、source/MOD/STL/mesh/bake/glTF composite、GLB read/write/parse、placement transform、bbox、scene commit 和 yield；IFC loader 另记录 Fragments cache composite、web-ifc/conversion + model callback composite、RAF/stable validation，无法拆分的第三方内部阶段明确保持 composite。
 
 ### 工程类型检测
 

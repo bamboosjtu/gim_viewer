@@ -43,6 +43,16 @@
 | 下一步 | 用独立进程完成跨重启的 cache-off/build/hit 对照，分别确认 `frag read` 与 `fragments.core.load` 的占比，再决定是否改变默认开关。 |
 | 完成条件 | cache hit 的模型数、GUID/CBM 关联、选择高亮、坐标及 IFC/MOD 相对位置与 cache-off 一致；截断、缺失、版本或源 SHA 不匹配都自动回退 IFC。 |
 
+### P1 · Spatial Semantic Cache 运行时证据
+
+| 字段 | 当前定义 |
+|---|---|
+| 状态 | v1 已实现，等待真实 Tauri corpus 重新测量 |
+| 现象 | warm spatial semantic 命中只读取 derived snapshot、校验引用并 hydrate Map；miss/损坏/版本或 source SHA 不匹配才在 all-IFC 后重建。 |
+| 影响 | 已移除 warm 重复 IFC STEP spatial scan；重建仍属于 post-interactive heavy task。 |
+| 下一步 | 用真实样本比较 cache read/deserialize/hydrate 与 rebuild 的 p50/p95/max、RSS/JS heap，并确认 A→B stale restore/rebuild 不提交。 |
+| 完成条件 | 多个真实工程的 models/nodes/objects/links/coverage/root/placement/source tracing 结构等价，坏 snapshot fail-closed，cache hit 不触碰 IFC spatial parser。 |
+
 ## 线路工程
 
 ### P1 · 杆塔 HNum/MOD lazy preview 长尾
@@ -91,6 +101,5 @@
 
 - 独立线路 3D Viewer；线路当前只有“模型”地图工作区，杆塔形状通过来源页局部骨架预览表达。
 - shared Three.js geometry / InstancedMesh；当前 placement 会修改 `BufferGeometry`，先保持实例隔离。
-- IFC Semantic Worker、Spatial SQLite Cache、Compact Line Runtime Cache；当前没有扩大这些缓存/线程边界的计划。
+- IFC Semantic Worker、Compact Line Runtime Cache；当前没有扩大这些线程/缓存边界的计划。
 - PMTiles 离线底图；代码保留休眠开关，默认仍使用 OSM 在线底图或 Canvas-only 回退。
-
