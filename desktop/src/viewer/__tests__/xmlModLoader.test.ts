@@ -119,6 +119,21 @@ describe('loadXmlModFromFiles', () => {
     expect(group!.children.length).toBe(1);
   });
 
+  it('.gl XML 文件复用 MOD pipeline', async () => {
+    const xml = `<?xml version="1.0"?>
+<Device><Entities><Entity ID="0" Type="simple" Visible="true">
+  <Cuboid L="100" W="50" H="20" />
+  <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
+  <Color R="200" G="50" B="50" A="100" />
+</Entity></Entities></Device>`;
+    const files = new Map<string, File>([
+      ['GL/DEVICE.GL', new File([xml], 'DEVICE.GL', { type: 'application/xml' })],
+    ]);
+    const group = await loadXmlModFromFiles('gl/device.gl', files);
+    expect(group).not.toBeNull();
+    expect(group!.children).toHaveLength(1);
+  });
+
   it('文件不存在 → 返回 null + warn', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const files = new Map<string, File>();

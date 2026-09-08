@@ -26,6 +26,19 @@ import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import type { XmlModColor } from '../gim/geometry/ir.js';
 import { getFileByPath } from '../gim/fileLookup.js';
 
+export type XmlModGeometryStatus = 'empty' | 'renderable' | 'partial' | 'unsupported';
+
+export interface XmlModGeometryDiagnostics {
+  status: XmlModGeometryStatus;
+  entityCount: number;
+  renderableEntityCount: number;
+  malformedEntityCount: number;
+  unsupportedEntityCount: number;
+  unsupportedPrimitiveTypeCounts: Record<string, number>;
+}
+
+export const XML_MOD_GEOMETRY_DIAGNOSTICS_KEY = '__gimXmlModDiagnostics';
+
 // re-export 共享 Material / Geometry 释放函数（项目切换时由 projectCleanupService 调用）
 export {
   disposeSharedXmlModMaterials,
@@ -70,6 +83,24 @@ function flattenDocumentToGroup(doc: XmlModDocument): THREE.Group {
   merged.userData.modPath = doc.modPath;
 
   const byMaterial = collectBakedGeometriesByMaterial(doc);
+  const unsupportedPrimitiveTypeCounts: Record<string, number> = {};
+  // Keep the current renderer's primitive policy, but expose its degradation
+  // explicitly to cache/pipeline callers. A non-rendered primitive is not an
+  // empty source.
+  const renderableTypes = new Set([
+    'Cuboid', 'Cylinder', 'Sphere', 'TruncatedCone', 'Ring',
+    'CircularGasket', 'StretchedBody', 'Wire', 'Cable',
+    'RotationalEllipsoid', 'BeamChannelLike', 'Boolean',
+  ]);
+  let unsupportedEntityCount = doc.malformedEntityCount;
+  for (const entity of doc.entities) {
+    if (renderableTypes.has(entity.primitive.type)) continue;
+    unsupportedEntityCount++;
+    const type = entity.primitive.type === 'Unsupported'
+      ? entity.primitive.sourceType
+      : entity.primitive.type;
+    unsupportedPrimitiveTypeCounts[type] = (unsupportedPrimitiveTypeCounts[type] ?? 0) + 1;
+  }
 
   for (const [mat, geos] of byMaterial) {
     if (geos.length === 0) continue;
@@ -89,6 +120,28 @@ function flattenDocumentToGroup(doc: XmlModDocument): THREE.Group {
       }
     }
   }
+
+  let renderableEntityCount = 0;
+  merged.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (mesh.isMesh && mesh.geometry?.getAttribute?.('position')?.count > 0) {
+      renderableEntityCount++;
+    }
+  });
+  const hasRenderable = renderableEntityCount > 0;
+  const status: XmlModGeometryStatus = doc.declaredEntityCount === 0
+    ? 'empty'
+    : hasRenderable
+      ? (unsupportedEntityCount > 0 ? 'partial' : 'renderable')
+      : 'unsupported';
+  merged.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY] = {
+    status,
+    entityCount: doc.declaredEntityCount,
+    renderableEntityCount,
+    malformedEntityCount: doc.malformedEntityCount,
+    unsupportedEntityCount,
+    unsupportedPrimitiveTypeCounts,
+  } satisfies XmlModGeometryDiagnostics;
 
   // 不设置 group.scale：mm→m 缩放已在 collectBakedGeometriesByMaterial 中烘焙到顶点
   // 保持 group.scale = 1，避免后续 applyPlacementTransformToSceneUnits 的 decompose corrupt scale
@@ -124,7 +177,8 @@ export async function loadXmlModFromFiles(
   const strict = options?.strict === true;
   const file = getFileByPath(files, modPath);
   if (!file) {
-    const message = `[xmlModLoader] MOD 文件不存在: ${modPath}`;
+    const kind = /\.gl$/i.test(modPath) ? 'GL' : 'MOD';
+    const message = `[xmlModLoader] ${kind} 文件不存在: ${modPath}`;
     if (strict) throw new Error(message);
     console.warn(message);
     return null;
@@ -138,12 +192,21 @@ export async function loadXmlModFromFiles(
     if (!RENDERABLE_MOD_PRIMITIVE_RE.test(text) && /<Device\b[^>]*>\s*<Entities\s*\/\s*>\s*<\/Device>\s*$/i.test(text)) {
       const group = new THREE.Group();
       group.name = `xml-mod:${modPath}`;
+      group.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY] = {
+        status: 'empty',
+        entityCount: 0,
+        renderableEntityCount: 0,
+        malformedEntityCount: 0,
+        unsupportedEntityCount: 0,
+        unsupportedPrimitiveTypeCounts: {},
+      } satisfies XmlModGeometryDiagnostics;
       applyPhmColorOverride(group, phmColor, phmColorMaxA);
       return group;
     }
     return loadXmlModFromText(text, modPath, phmColor, phmColorMaxA);
   } catch (err) {
-    const message = `MOD 解析失败: ${modPath}`;
+    const kind = /\.gl$/i.test(modPath) ? 'GL' : 'MOD';
+    const message = `${kind} 解析失败: ${modPath}`;
     if (strict) {
       const detail = err instanceof Error ? err.message : String(err);
       const strictError = new Error(`${message}: ${detail}`);

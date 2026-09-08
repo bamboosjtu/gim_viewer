@@ -584,7 +584,7 @@ export async function writeGeometryCacheVersion(
   });
 }
 
-export type GeometryCacheManifestStatus = 'glb' | 'empty';
+export type GeometryCacheManifestStatus = 'glb' | 'partial' | 'empty' | 'unsupported';
 
 export interface GeometryCacheManifestEntry {
   entry_path: string;

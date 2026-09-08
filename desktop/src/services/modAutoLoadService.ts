@@ -405,7 +405,7 @@ function normalizePhmEntryPath(path: string): string {
 function normalizeGeometryEntryPath(path: string): string {
   const normalized = path.replace(/\\/g, '/');
   const lower = normalized.toLowerCase();
-  if (lower.startsWith('mod/') || lower.startsWith('stl/')) return normalized;
+  if (lower.startsWith('mod/') || lower.startsWith('gl/') || lower.startsWith('stl/')) return normalized;
   return `MOD/${normalized}`;
 }
 
@@ -593,6 +593,8 @@ export interface DevGlbFastPathProfile {
   uniqueDevCount: number;
   glbDevCount: number;
   emptyDevCount: number;
+  /** DEV 内有非空但当前 renderer 不支持的 geometry source。 */
+  unsupportedDevCount?: number;
   glbBatchReadMs: number;
   glbReadBytes: number;
   glbParseCount: number;
@@ -650,7 +652,7 @@ export interface DevGlbFastPathProfile {
   deepTelemetry?: DevGeometryTelemetry;
 }
 
-export type DevGlbFailureType = 'missing' | 'invalid' | 'parse-exception' | 'empty-scene';
+export type DevGlbFailureType = 'missing' | 'invalid' | 'parse-exception' | 'empty-scene' | 'unsupported';
 
 export interface DevGlbFastPathResult {
   loaded: boolean;
@@ -719,6 +721,7 @@ function emptyFastPathProfile(cbmInstanceCount: number, uniqueDevCount: number):
     uniqueDevCount,
     glbDevCount: 0,
     emptyDevCount: 0,
+    unsupportedDevCount: 0,
     glbBatchReadMs: 0,
     glbReadBytes: 0,
     glbParseCount: 0,
@@ -901,9 +904,10 @@ export async function tryDevGlbFastPath(
       const key = normalizeDevEntryPath(entry.entry_path).toLowerCase();
       if (manifestEntries.has(key)
         || !/^dev\//i.test(entry.entry_path.replace(/\\/g, '/'))
-        || (entry.status !== 'glb' && entry.status !== 'empty')
-        || (entry.status === 'empty' && entry.size !== 0)
-        || (entry.status === 'glb' && (!Number.isSafeInteger(entry.size) || entry.size <= 0))) {
+        || !(['glb', 'partial', 'empty', 'unsupported'] as string[]).includes(entry.status)
+        || ((entry.status === 'empty' || entry.status === 'unsupported') && entry.size !== 0)
+        || ((entry.status === 'glb' || entry.status === 'partial')
+          && (!Number.isSafeInteger(entry.size) || entry.size <= 0))) {
         return fail(`manifest-entry-invalid:${entry.entry_path}`);
       }
       manifestEntries.set(key, entry);
@@ -931,10 +935,11 @@ export async function tryDevGlbFastPath(
   // partial failure looks like a smaller project rather than an isolated
   // failed DEV.
   profile.glbDevCount = selectedEntries.filter((entry) =>
-    entry.status === 'glb'
+    (entry.status === 'glb' || entry.status === 'partial')
       && advertisedManifestKeys.has(normalizeDevEntryPath(entry.entry_path).toLowerCase()),
   ).length;
   profile.emptyDevCount = selectedEntries.filter((entry) => entry.status === 'empty').length;
+  profile.unsupportedDevCount = selectedEntries.filter((entry) => entry.status === 'unsupported').length;
 
   // 2. 先读取全部 unique DEV GLB bytes，再进入 placement parse；空 DEV 不读取。
   const glbBytesByDev = new Map<string, Uint8Array | null>();
@@ -943,7 +948,7 @@ export async function tryDevGlbFastPath(
   // the batch reader.  Doing so would turn one missing DEV into a second
   // pointless IPC miss (and can obscure the original `missing` diagnosis).
   const glbPaths = selectedEntries
-    .filter((entry) => entry.status === 'glb'
+    .filter((entry) => (entry.status === 'glb' || entry.status === 'partial')
       && !failedDevPaths.has(normalizeDevEntryPath(entry.entry_path).toLowerCase()))
     .map((entry) => entry.entry_path);
   const batchStarted = performance.now();
@@ -1010,7 +1015,7 @@ export async function tryDevGlbFastPath(
   deepTelemetry.record('glbRead', profile.glbBatchReadMs);
 
   for (const entry of selectedEntries) {
-    if (entry.status !== 'glb') continue;
+    if (entry.status !== 'glb' && entry.status !== 'partial') continue;
     // The batch response map is keyed by the canonical slash-separated path;
     // manifests produced by older/exporter variants may still use backslashes.
     // Normalize here as well as during manifest lookup so a valid cache is not
@@ -1118,7 +1123,9 @@ export async function tryDevGlbFastPath(
       seedsByDev.get(devPath.toLowerCase())?.length ?? 0,
     );
     const entry = manifestEntries.get(devPath.toLowerCase())!;
-    const bytes = entry.status === 'glb' ? glbBytesByDev.get(devPath.toLowerCase())! : null;
+    const bytes = (entry.status === 'glb' || entry.status === 'partial')
+      ? glbBytesByDev.get(devPath.toLowerCase())!
+      : null;
     const failedKey = devPath.toLowerCase();
     const devSeeds = seedsByDev.get(failedKey) ?? [];
     if (failedDevPaths.has(failedKey)) {
@@ -1128,7 +1135,7 @@ export async function tryDevGlbFastPath(
     }
 
     let preparation: Awaited<ReturnType<DevGlbTemplatePool['prepare']>> = null;
-    if (entry.status === 'glb' && bytes) {
+    if ((entry.status === 'glb' || entry.status === 'partial') && bytes) {
       const parseBefore = templatePool.metrics();
       preparation = await templatePool.prepare(devPath, bytes);
       const parseAfter = templatePool.metrics();
@@ -1162,7 +1169,7 @@ export async function tryDevGlbFastPath(
         markProcessed();
         return;
       }
-      if (entry.status === 'empty' || !bytes || !preparation) {
+      if (entry.status === 'empty' || entry.status === 'unsupported' || !bytes || !preparation) {
         markProcessed();
         return;
       }
@@ -1275,7 +1282,8 @@ export async function tryDevGlbFastPath(
   profile.successfulGlbInstanceCount = loadedCount;
   profile.successfulGlbDevCount = devOrder.filter((devPath) => {
     const entry = manifestEntries.get(devPath.toLowerCase());
-    return entry?.status === 'glb' && !failedDevPaths.has(devPath.toLowerCase());
+    return (entry?.status === 'glb' || entry?.status === 'partial')
+      && !failedDevPaths.has(devPath.toLowerCase());
   }).length;
   syncFailureProfile();
   syncTemplateMetrics();
@@ -1300,11 +1308,16 @@ export async function tryDevGlbFastPath(
 export interface DevGlbCacheRecoveryResult {
   repairedDevPaths: string[];
   emptyDevPaths: string[];
+  unsupportedDevPaths?: string[];
   unresolvedDevPaths: string[];
 }
 
 export interface DevGlbCacheRecoveryDependencies {
   serializeDevToGlb?: (devPath: string, files: Map<string, File>) => Promise<Uint8Array | null>;
+  serializeDevToGlbDetailed?: (
+    devPath: string,
+    files: Map<string, File>,
+  ) => Promise<import('./glbCacheService.js').DevGlbSerializationResult>;
   loadDevGlb?: (devPath: string, bytes: Uint8Array) => Promise<THREE.Group | null>;
   readGeometryCacheManifest?: (projectId: number) => Promise<GeometryCacheManifest>;
   writeGeometryCacheManifest?: (
@@ -1393,6 +1406,10 @@ export async function recoverFailedDevGlbCaches(
     ?? (await import('@desktop/database.js')).invalidateGlbCacheEntry;
   const serialize = dependencies.serializeDevToGlb
     ?? (await import('./glbCacheService.js')).serializeDevToGlb;
+  const serializeDetailed = dependencies.serializeDevToGlbDetailed
+    ?? (dependencies.serializeDevToGlb
+      ? undefined
+      : (await import('./glbCacheService.js')).serializeDevToGlbDetailed);
   const loadGlb = dependencies.loadDevGlb
     ?? (await import('./glbCacheService.js')).loadDevGlb;
 
@@ -1422,6 +1439,7 @@ export async function recoverFailedDevGlbCaches(
   const recoveredEntries = new Map<string, GeometryCacheManifestEntry>();
   const repairedDevPaths: string[] = [];
   const emptyDevPaths: string[] = [];
+  const unsupportedDevPaths: string[] = [];
   const unresolvedDevPaths: string[] = [];
 
   for (const [key, devPath] of normalizedTargets) {
@@ -1452,15 +1470,29 @@ export async function recoverFailedDevGlbCaches(
     }
 
     try {
-      const bytes = await serialize(devPath, files);
+      let bytes: Uint8Array | null;
+      let serializationStatus: 'complete' | 'partial' | 'empty' | 'unsupported' = 'complete';
+      if (serializeDetailed) {
+        const serialized = await serializeDetailed(devPath, files);
+        bytes = serialized.bytes;
+        serializationStatus = serialized.status;
+      } else {
+        bytes = await serialize(devPath, files);
+        serializationStatus = bytes ? 'complete' : 'empty';
+      }
       if (!isCurrent()) return {
         repairedDevPaths,
         emptyDevPaths,
         unresolvedDevPaths: Array.from(normalizedTargets.values()),
       };
       if (bytes == null) {
-        recoveredEntries.set(key, { entry_path: devPath, status: 'empty', size: 0 });
-        emptyDevPaths.push(devPath);
+        recoveredEntries.set(key, {
+          entry_path: devPath,
+          status: serializationStatus === 'unsupported' ? 'unsupported' : 'empty',
+          size: 0,
+        });
+        if (serializationStatus === 'unsupported') unsupportedDevPaths.push(devPath);
+        else emptyDevPaths.push(devPath);
         continue;
       }
       if (!validateCachedGlbBytes(bytes)) {
@@ -1482,7 +1514,11 @@ export async function recoverFailedDevGlbCaches(
         emptyDevPaths,
         unresolvedDevPaths: Array.from(normalizedTargets.values()),
       };
-      recoveredEntries.set(key, { entry_path: devPath, status: 'glb', size: bytes.byteLength });
+      recoveredEntries.set(key, {
+        entry_path: devPath,
+        status: serializationStatus === 'partial' ? 'partial' : 'glb',
+        size: bytes.byteLength,
+      });
     } catch (error) {
       unresolvedDevPaths.push(devPath);
       debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV GLB recovery 编译失败: ${devPath}`, error);
@@ -1506,7 +1542,7 @@ export async function recoverFailedDevGlbCaches(
   } catch (error) {
     // Do not leave an unadvertised success around as a future cache source.
     for (const entry of recoveredEntries.values()) {
-      if (entry.status !== 'glb') continue;
+      if (entry.status !== 'glb' && entry.status !== 'partial') continue;
       try {
         await invalidateEntry(projectId, entry.entry_path, sourceSha256);
       } catch {
@@ -1523,13 +1559,14 @@ export async function recoverFailedDevGlbCaches(
   }
 
   for (const path of recoveredEntries.values()) {
-    if (path.status === 'glb') repairedDevPaths.push(path.entry_path);
+    if (path.status === 'glb' || path.status === 'partial') repairedDevPaths.push(path.entry_path);
   }
   // A deterministic empty DEV is a valid cache result and must not be sent
   // to the raw fallback path on the next warm open.
   return {
     repairedDevPaths,
     emptyDevPaths,
+    ...(unsupportedDevPaths.length > 0 ? { unsupportedDevPaths } : {}),
     unresolvedDevPaths: Array.from(new Set(unresolvedDevPaths)),
   };
 }
@@ -1726,7 +1763,7 @@ export async function loadScopedRawFallbackGeometry(
     const stlPaths = new Set<string>();
     for (const row of scopedReachable) {
       const lower = row.geometry_path.toLowerCase();
-      if (lower.endsWith('.mod') && includeMod) modPaths.add(row.geometry_path);
+      if ((lower.endsWith('.mod') || lower.endsWith('.gl')) && includeMod) modPaths.add(row.geometry_path);
       if (lower.endsWith('.stl') && includeStl) stlPaths.add(row.geometry_path);
     }
     const geometryPaths = Array.from(new Set([...modPaths, ...stlPaths]));
@@ -1752,7 +1789,7 @@ export async function loadScopedRawFallbackGeometry(
       const placementTransformMatrix = parseCbmTransformMatrix(row.placement_transform_matrix ?? undefined);
       const phmColor = parseCachedPhmColor(row.phm_color);
       const phmColorMaxA = row.phm_color_max_a ?? phmColor?.a ?? 0;
-      if (lower.endsWith('.mod') && includeMod) {
+      if ((lower.endsWith('.mod') || lower.endsWith('.gl')) && includeMod) {
         modGeos.push({
           modPath: row.geometry_path,
           instanceKey: `raw:${row.instance_key}`,
@@ -2201,7 +2238,7 @@ export async function autoLoadModAndStlGeometry(
       const stlPaths = new Set<string>();
       for (const r of reachable) {
         const lower = r.geometry_path.toLowerCase();
-        if (lower.endsWith('.mod')) modPaths.add(r.geometry_path);
+        if (lower.endsWith('.mod') || lower.endsWith('.gl')) modPaths.add(r.geometry_path);
         else if (lower.endsWith('.stl')) stlPaths.add(r.geometry_path);
       }
 
@@ -2257,7 +2294,7 @@ export async function autoLoadModAndStlGeometry(
         const phmColor = parseCachedPhmColor(r.phm_color);
         const phmColorMaxA = r.phm_color_max_a ?? phmColor?.a ?? 0;
 
-        if (lower.endsWith('.mod')) {
+        if (lower.endsWith('.mod') || lower.endsWith('.gl')) {
           const placementTM = r.placement_transform_matrix
             ? r.placement_transform_matrix.split(',').map(Number)
             : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];

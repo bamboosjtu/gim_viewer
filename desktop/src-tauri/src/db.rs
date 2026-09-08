@@ -49,12 +49,16 @@ macro_rules! debug_perf_log {
 /// 独立 domain version，避免变电 Semantic Core 升级误伤线路缓存。
 pub const PARSER_VERSION: &str = "gim-parser-v22";
 pub const LINE_PARSER_VERSION: &str = "gim-line-parser-v1";
-pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v22";
+pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v23";
 
 /// v21/v22 的线路缓存逻辑没有变化。升级到 domain version 时将这些旧的
 /// 共享版本安全迁移为 LINE_PARSER_VERSION，而不是要求线路重新解析。
 const LEGACY_LINE_PARSER_VERSIONS: &[&str] = &["gim-parser-v21", "gim-parser-v22"];
-const LEGACY_SUBSTATION_PARSER_VERSIONS: &[&str] = &["gim-parser-v22"];
+// Phase 5 changes the persisted substation reference/property semantics.
+// Do not treat pre-Phase-5 shared/domain rows as current when the dedicated
+// substation column is absent; rebuilding is required to populate aliases and
+// case-normalized references correctly.
+const LEGACY_SUBSTATION_PARSER_VERSIONS: &[&str] = &[];
 
 /// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
 /// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
@@ -71,12 +75,13 @@ pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 /// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
 ///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v5-dev-status";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v6-geometry-status";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GeometryCacheManifestEntry {
     pub entry_path: String,
-    /// DEV 几何结果：`glb` 表示有可加载的 GLB，`empty` 表示确定性空几何。
+    /// DEV 几何结果：`glb`/`partial` 表示有可加载的 GLB，`empty` 表示
+    /// 确定性空几何，`unsupported` 表示源非空但当前 renderer 不支持。
     /// 旧 manifest 没有该字段，反序列化失败后会整体失效并重建。
     pub status: String,
     pub size: u64,
@@ -3010,9 +3015,11 @@ fn validate_geometry_manifest_entry_shape(
     }
     match entry.status.as_str() {
         "empty" if entry.size == 0 => Ok(()),
-        "glb" if entry.size > 0 => Ok(()),
+        "unsupported" if entry.size == 0 => Ok(()),
+        "glb" | "partial" if entry.size > 0 => Ok(()),
         "empty" => Err(format!("empty GLB manifest 条目大小必须为 0: {}", entry.entry_path)),
-        "glb" => Err(format!("glb GLB manifest 条目大小必须大于 0: {}", entry.entry_path)),
+        "unsupported" => Err(format!("unsupported GLB manifest 条目大小必须为 0: {}", entry.entry_path)),
+        "glb" | "partial" => Err(format!("{} GLB manifest 条目大小必须大于 0: {}", entry.status, entry.entry_path)),
         _ => Err(format!("GLB manifest 状态无效: {}", entry.entry_path)),
     }
 }
@@ -3054,8 +3061,9 @@ fn check_geometry_cache_manifest(
         if validate_geometry_manifest_entry_shape(&entry, &mut seen).is_err() {
             return false;
         }
-        if entry.status == "empty" {
-            // empty 是确定性的合法结果，不存在对应 GLB 文件也不构成 miss。
+        if entry.status == "empty" || entry.status == "unsupported" {
+            // empty/unsupported 都是确定性的合法结果，不存在对应 GLB
+            // 文件也不构成 miss。
             continue;
         }
         let Ok(glb_path) = glb_cache_file_path(app_handle, project_id, &entry.entry_path) else {
@@ -3105,8 +3113,9 @@ pub fn write_geometry_cache_manifest(
         if let Err(error) = validate_geometry_manifest_entry_shape(entry, &mut seen) {
             return Err(error);
         }
-        if entry.status == "empty" {
-            // empty 为确定性 tombstone：不要求磁盘上存在零字节占位文件。
+        if entry.status == "empty" || entry.status == "unsupported" {
+            // empty/unsupported 为确定性 tombstone：不要求磁盘上存在零
+            // 字节占位文件。
             continue;
         }
         let path = glb_cache_file_path(&app_handle, project_id, &entry.entry_path)?;
@@ -6177,7 +6186,7 @@ fn validate_geometry_refs_payload(payload: &GeometryRefsPayload) -> Result<(), S
         validate_entry_path(&p.phm_path)?;
         validate_entry_path(&p.solid_model_path)?;
         let lower = p.solid_model_path.to_ascii_lowercase();
-        if !lower.ends_with(".mod") && !lower.ends_with(".stl") && !lower.ends_with(".phm") {
+        if !lower.ends_with(".mod") && !lower.ends_with(".gl") && !lower.ends_with(".stl") && !lower.ends_with(".phm") {
             return Err(format!(
                 "PHM solid_model_path 类型无效: {}",
                 p.solid_model_path
@@ -6669,7 +6678,8 @@ fn query_reachable_geometry_filtered(
         let (phm_path, solid_model_path, transform_matrix, color, color_max_a) =
             row.map_err(|e| format!("读取 substation_phm_solid_model 行失败: {}", e))?;
         let lower = solid_model_path.to_ascii_lowercase();
-        if (include_mod && lower.ends_with(".mod")) || (include_stl && lower.ends_with(".stl")) {
+        if (include_mod && (lower.ends_with(".mod") || lower.ends_with(".gl")))
+            || (include_stl && lower.ends_with(".stl")) {
             phm_to_geometry
                 .entry(normalize_phm_path(&phm_path).to_ascii_lowercase())
                 .or_default()
@@ -7558,7 +7568,7 @@ mod tests {
     }
 
     #[test]
-    fn geometry_manifest_accepts_glb_and_empty_and_is_case_insensitive() {
+    fn geometry_manifest_accepts_glb_partial_empty_unsupported_and_is_case_insensitive() {
         let mut seen = HashSet::new();
         validate_geometry_manifest_entry_shape(
             &GeometryCacheManifestEntry {
@@ -7578,6 +7588,24 @@ mod tests {
             &mut seen,
         )
         .unwrap();
+        validate_geometry_manifest_entry_shape(
+            &GeometryCacheManifestEntry {
+                entry_path: "dev/partial.dev".into(),
+                status: "partial".into(),
+                size: 12,
+            },
+            &mut seen,
+        )
+        .unwrap();
+        validate_geometry_manifest_entry_shape(
+            &GeometryCacheManifestEntry {
+                entry_path: "dev/unsupported.dev".into(),
+                status: "unsupported".into(),
+                size: 0,
+            },
+            &mut seen,
+        )
+        .unwrap();
         let duplicate = validate_geometry_manifest_entry_shape(
             &GeometryCacheManifestEntry {
                 entry_path: "Dev/SHARED.DEV".into(),
@@ -7592,7 +7620,7 @@ mod tests {
 
     #[test]
     fn geometry_manifest_rejects_invalid_status_and_empty_size() {
-        for (status, size) in [("empty", 1), ("glb", 0), ("partial", 12)] {
+        for (status, size) in [("empty", 1), ("unsupported", 1), ("glb", 0), ("partial", 0), ("unknown", 0)] {
             let mut seen = HashSet::new();
             let error = validate_geometry_manifest_entry_shape(
                 &GeometryCacheManifestEntry {

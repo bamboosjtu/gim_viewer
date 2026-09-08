@@ -172,7 +172,7 @@ export interface XmlModEntity {
  * 3 类低样本（RectangularFixedPlate / OffsetRectangularTable / RectangularRing）
  * 保留弱 schema fallback（raw: Record<string, string>）。
  * 十样本复核新增 4 类强类型（docs/schema/08 §P0-3）：Wire/Cable/RotationalEllipsoid/BeamChannelLike；
- * 未识别 primitive 仍归入弱 schema fallback（_unknown 记录原始标签）。
+ * 未识别 primitive 保留为显式 Unsupported，供几何层记录降级而不是伪装成 empty。
  */
 export type XmlModPrimitive =
   | { type: "Cuboid"; l: number; w: number; h: number }
@@ -204,7 +204,14 @@ export type XmlModPrimitive =
       op: "Difference" | "Union" | "Intersection";
       entity1: number;
       entity2: number;
-    };
+    }
+  /**
+   * Primitive tag understood by the XML reader but not by the current
+   * geometry renderer. Keeping it distinct from a weak-schema primitive is
+   * important: a non-empty source with an unsupported tag must not become an
+   * `empty` cache tombstone.
+   */
+  | { type: "Unsupported"; sourceType: string; raw: Record<string, string> };
 
 /**
  * Color 节点，4 通道独立属性（非 Value 字符串）。

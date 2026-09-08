@@ -24,6 +24,10 @@ import type {
   XmlModPrimitive,
 } from './ir.js';
 
+// Entity.Type 不是几何 primitive；某些导出器会写入非 simple 值。
+// 只保留一次诊断，避免真实样本扫描时为每个 Entity 产生大量主线程日志。
+const warnedEntityTypes = new Set<string>();
+
 /** MOD 文件解析结果 */
 export interface XmlModDocument {
   /** MOD 文件路径（如 "MOD/abc.mod"） */
@@ -32,6 +36,10 @@ export interface XmlModDocument {
   entities: XmlModEntity[];
   /** EMPTY_DEVICE_XML（<Entities /> 为空）标识 */
   isEmpty: boolean;
+  /** Entity 元素的实际数量；与 declaredEntityCount 相同或大于可解析实体数。 */
+  declaredEntityCount: number;
+  /** 因缺少 ID/primitive 等原因未能进入 entities 的 Entity 数量。 */
+  malformedEntityCount: number;
   /**
    * 文件内 Color.A 的最大值（用于透明度刻度判定）。
    * 判定规则（docs/schema/10 §P3-2）：max(A) > 100 → 字节制(/255)，否则百分制(/100)。
@@ -61,12 +69,26 @@ export function parseXmlMod(text: string, modPath: string): XmlModDocument {
 
   const entitiesNode = device.querySelector(':scope > Entities');
   if (!entitiesNode) {
-    return { modPath, entities: [], isEmpty: true, colorMaxA: 0 };
+    return {
+      modPath,
+      entities: [],
+      isEmpty: true,
+      declaredEntityCount: 0,
+      malformedEntityCount: 0,
+      colorMaxA: 0,
+    };
   }
 
   const entityNodes = Array.from(entitiesNode.querySelectorAll(':scope > Entity'));
   if (entityNodes.length === 0) {
-    return { modPath, entities: [], isEmpty: true, colorMaxA: 0 };
+    return {
+      modPath,
+      entities: [],
+      isEmpty: true,
+      declaredEntityCount: 0,
+      malformedEntityCount: 0,
+      colorMaxA: 0,
+    };
   }
 
   const entities: XmlModEntity[] = [];
@@ -84,7 +106,12 @@ export function parseXmlMod(text: string, modPath: string): XmlModDocument {
   return {
     modPath,
     entities,
-    isEmpty: entities.length === 0,
+    // A non-empty Entities block is not an empty source merely because every
+    // Entity is malformed/unsupported. The geometry/cache layer needs to
+    // preserve that distinction for diagnostics and warm-cache recovery.
+    isEmpty: false,
+    declaredEntityCount: entityNodes.length,
+    malformedEntityCount: entityNodes.length - entities.length,
     colorMaxA,
   };
 }
@@ -98,7 +125,11 @@ function parseEntity(node: Element): XmlModEntity | null {
   // 这里显式取值是为了在样本出现其他 Type 时通过 console.warn 暴露异常（不改变行为，仍按 simple 处理）。
   const typeAttr = node.getAttribute('Type');
   if (typeAttr !== null && typeAttr !== 'simple') {
-    console.warn(`[xmlModParser] 未知的 Entity.Type="${typeAttr}"，按 simple 处理（id=${id}）`);
+    const normalizedType = typeAttr.trim().toLowerCase();
+    if (!warnedEntityTypes.has(normalizedType)) {
+      warnedEntityTypes.add(normalizedType);
+      console.warn(`[xmlModParser] 未知的 Entity.Type="${typeAttr}"，按 simple 处理`);
+    }
   }
   const visibleAttr = node.getAttribute('Visible');
   const visible = visibleAttr === null ? true : visibleAttr.toLowerCase() === 'true';
@@ -242,8 +273,9 @@ function parsePrimitive(entityNode: Element): XmlModPrimitive | null {
     case 'H':
       return { type: 'BeamChannelLike', length: num(attrs, 'Length'), model: attrs['Model'] ?? '' };
     default:
-      // 未识别 primitive，归入弱 schema（使用 raw 类型联合的最后一个分支）
-      return { type: 'RectangularRing', raw: { _unknown: tagName, ...attrs } };
+      // 未识别 primitive 保留为显式 unsupported，而不是伪装成弱 schema
+      // RectangularRing；否则几何缓存会把“解析器不会”错误记录为 empty。
+      return { type: 'Unsupported', sourceType: tagName, raw: attrs };
   }
 }
 

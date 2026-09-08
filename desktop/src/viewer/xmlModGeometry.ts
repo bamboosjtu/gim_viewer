@@ -196,6 +196,12 @@ function primitiveToGeometryUncached(p: XmlModPrimitive): THREE.BufferGeometry |
         console.warn(`[xmlModGeometry] weak schema primitive "${p.type}" 暂停渲染（字段语义待补充）`);
       }
       return null;
+    case 'Unsupported':
+      if (!_warnedOnce.has(`unsupported:${p.sourceType}`)) {
+        _warnedOnce.add(`unsupported:${p.sourceType}`);
+        console.warn(`[xmlModGeometry] 未支持 primitive "${p.sourceType}"，已跳过`);
+      }
+      return null;
     default:
       {
         const unknownType = (p as { type?: string }).type ?? 'unknown';

@@ -26,8 +26,33 @@ import { discoverGeometriesFromDevPath } from './modGeometryDiscovery.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { getFileByPath } from '../gim/fileLookup.js';
+import {
+  disposeXmlModGroup,
+  XML_MOD_GEOMETRY_DIAGNOSTICS_KEY,
+  type XmlModGeometryDiagnostics,
+} from '../viewer/xmlModLoader.js';
 
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+export type DevGlbSerializationStatus = 'complete' | 'partial' | 'empty' | 'unsupported';
+
+export interface DevGlbSerializationDiagnostics {
+  status: DevGlbSerializationStatus;
+  discoveredModCount: number;
+  discoveredStlCount: number;
+  renderableModCount: number;
+  renderableStlCount: number;
+  emptySourceCount: number;
+  unsupportedSourceCount: number;
+  partialSourceCount: number;
+  unsupportedPrimitiveTypeCounts: Record<string, number>;
+}
+
+export interface DevGlbSerializationResult {
+  status: DevGlbSerializationStatus;
+  bytes: Uint8Array | null;
+  diagnostics: DevGlbSerializationDiagnostics;
+}
 
 /** 单例 GLTFLoader（内部无状态，可安全复用） */
 let _gltfLoader: GLTFLoader | null = null;
@@ -54,10 +79,10 @@ function getGltfLoader(): GLTFLoader {
  * @param files GIM 解压后的文件集合
  * @returns GLB 二进制 bytes；无几何引用返回 null；缺失/序列化失败抛错
  */
-export async function serializeDevToGlb(
+export async function serializeDevToGlbDetailed(
   devPath: string,
   files: Map<string, File>,
-): Promise<Uint8Array | null> {
+): Promise<DevGlbSerializationResult> {
   // A missing DEV is a cache failure, not a deterministic empty result. The
   // discovery helper intentionally treats missing references as empty for the
   // interactive XML fallback, but the geometry manifest must not record that
@@ -81,8 +106,20 @@ export async function serializeDevToGlb(
     { strictDependencies: true },
   );
 
+  const diagnostics: DevGlbSerializationDiagnostics = {
+    status: 'empty',
+    discoveredModCount: discovered.mods.length,
+    discoveredStlCount: discovered.stls.length,
+    renderableModCount: 0,
+    renderableStlCount: 0,
+    emptySourceCount: 0,
+    unsupportedSourceCount: 0,
+    partialSourceCount: 0,
+    unsupportedPrimitiveTypeCounts: {},
+  };
+
   if (discovered.mods.length === 0 && discovered.stls.length === 0) {
-    return null;
+    return { status: 'empty', bytes: null, diagnostics };
   }
 
   // 2. 加载所有 MOD + STL，烘焙 placement 到顶点，合并到 devGroup
@@ -107,6 +144,33 @@ export async function serializeDevToGlb(
     });
     return found;
   };
+  const readXmlDiagnostics = (group: THREE.Group): XmlModGeometryDiagnostics | undefined => {
+    const value = group.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY];
+    if (!value || typeof value !== 'object') return undefined;
+    return value as XmlModGeometryDiagnostics;
+  };
+  const addUnsupportedCounts = (counts: Record<string, number>): void => {
+    for (const [type, count] of Object.entries(counts)) {
+      diagnostics.unsupportedPrimitiveTypeCounts[type] =
+        (diagnostics.unsupportedPrimitiveTypeCounts[type] ?? 0) + count;
+    }
+  };
+  const disposeStlGroup = (group: THREE.Group): void => {
+    group.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      mesh.geometry?.dispose?.();
+      const materials = Array.isArray(mesh.material)
+        ? mesh.material
+        : mesh.material ? [mesh.material] : [];
+      for (const material of materials) material?.dispose?.();
+    });
+  };
+  const disposeSourceGroup = (group: THREE.Group): void => {
+    // XML MOD/GL groups use the process-wide primitive/material caches. Only
+    // their merged geometry and instance-owned materials may be released.
+    if (readXmlDiagnostics(group)) disposeXmlModGroup(group);
+    else disposeStlGroup(group);
+  };
 
   // 加载 MOD
   for (const geo of discovered.mods) {
@@ -119,26 +183,27 @@ export async function serializeDevToGlb(
         { strict: true },
       );
       if (!group) continue;
+      const xmlDiagnostics = readXmlDiagnostics(group);
+      if (xmlDiagnostics) {
+        addUnsupportedCounts(xmlDiagnostics.unsupportedPrimitiveTypeCounts);
+      }
       // EMPTY_DEVICE_XML and MODs whose parsed entities have no supported
       // renderable primitive are deterministic empty geometry. Do not add an
       // empty Group to the exported scene: an otherwise-empty DEV must become
       // the explicit `empty` manifest state, while mixed DEV content keeps its
       // real meshes only.
       if (!hasRenderableGeometry(group)) {
-        group.traverse((object) => {
-          const mesh = object as THREE.Mesh;
-          mesh.geometry?.dispose?.();
-          const materials = Array.isArray(mesh.material)
-            ? mesh.material
-            : mesh.material ? [mesh.material] : [];
-          for (const material of materials) material?.dispose?.();
-        });
+        if (!xmlDiagnostics || xmlDiagnostics.status === 'empty') diagnostics.emptySourceCount++;
+        if (xmlDiagnostics && xmlDiagnostics.status !== 'empty') diagnostics.unsupportedSourceCount++;
+        disposeSourceGroup(group);
         continue;
       }
       // 烘焙 DEV × PHM placement 到顶点（含 mm→m）
       applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
       devGroup.add(group);
       modLoaded++;
+      diagnostics.renderableModCount++;
+      if (xmlDiagnostics?.status === 'partial') diagnostics.partialSourceCount++;
     } catch (err) {
       const strictError = new Error(`DEV ${canonicalDevPath} 内 MOD 加载失败: ${geo.modPath}`);
       (strictError as Error & { cause?: unknown }).cause = err;
@@ -155,14 +220,8 @@ export async function serializeDevToGlb(
       const group = parseStlBinary(buffer, geo.stlPath);
       if (!group) throw new Error(`STL 解析失败: ${geo.stlPath}`);
       if (!hasRenderableGeometry(group)) {
-        group.traverse((object) => {
-          const mesh = object as THREE.Mesh;
-          mesh.geometry?.dispose?.();
-          const materials = Array.isArray(mesh.material)
-            ? mesh.material
-            : mesh.material ? [mesh.material] : [];
-          for (const material of materials) material?.dispose?.();
-        });
+        diagnostics.emptySourceCount++;
+        disposeSourceGroup(group);
         continue;
       }
       applyPhmColorOverride(group, geo.phmColor, geo.phmColorMaxA);
@@ -170,6 +229,7 @@ export async function serializeDevToGlb(
       applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
       devGroup.add(group);
       stlLoaded++;
+      diagnostics.renderableStlCount++;
     } catch (err) {
       const strictError = new Error(`DEV ${canonicalDevPath} 内 STL 加载失败: ${geo.stlPath}`);
       (strictError as Error & { cause?: unknown }).cause = err;
@@ -182,30 +242,55 @@ export async function serializeDevToGlb(
     // renderable primitive (for example EMPTY_DEVICE_XML or an intentionally
     // empty placeholder MOD).  This is a deterministic empty DEV, not a
     // dependency/parse failure; persist it as the manifest `empty` tombstone.
-    return null;
+    diagnostics.status = diagnostics.unsupportedSourceCount > 0 ? 'unsupported' : 'empty';
+    return { status: diagnostics.status, bytes: null, diagnostics };
   }
+
+  diagnostics.status = diagnostics.unsupportedSourceCount > 0
+    || diagnostics.partialSourceCount > 0
+    || diagnostics.emptySourceCount > 0
+    ? 'partial'
+    : 'complete';
 
   debugLog(DEBUG_GIM_CACHE, `[glbCache] DEV ${canonicalDevPath}: ${modLoaded} MOD + ${stlLoaded} STL 合并完成`);
 
   // 3. 序列化 devGroup → GLB
   const exporter = new GLTFExporter();
   return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      for (const child of [...devGroup.children]) {
+        devGroup.remove(child);
+        disposeSourceGroup(child as THREE.Group);
+      }
+    };
     exporter.parse(
       devGroup,
       (gltf) => {
         if (gltf instanceof ArrayBuffer) {
-          resolve(new Uint8Array(gltf));
+          cleanup();
+          resolve({ status: diagnostics.status, bytes: new Uint8Array(gltf), diagnostics });
         } else {
+          cleanup();
           reject(new Error(`GLTFExporter 输出类型无效: ${canonicalDevPath}`));
         }
       },
       (error) => {
+        cleanup();
         const detail = error instanceof Error ? error.message : String(error);
         reject(new Error(`DEV 序列化失败: ${canonicalDevPath}: ${detail}`));
       },
       { binary: true },
     );
   });
+}
+
+/** Compatibility wrapper retained for the existing progressive/runtime APIs. */
+export async function serializeDevToGlb(
+  devPath: string,
+  files: Map<string, File>,
+): Promise<Uint8Array | null> {
+  const result = await serializeDevToGlbDetailed(devPath, files);
+  return result.bytes;
 }
 
 // ===== GLB 加载（方案 C v2：DEV 粒度缓存命中路径） =====

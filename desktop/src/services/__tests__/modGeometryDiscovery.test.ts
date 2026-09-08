@@ -254,6 +254,19 @@ COLOR2=`;
       expect(stls[0].stlPath).toBe('MOD/main.stl');
     });
 
+    it('PHM 引用 .gl → 沿 XML MOD pipeline 发现几何来源', async () => {
+      const node = makeNode('abc.dev');
+      const files = new Map<string, File>([
+        ['DEV/abc.dev', makeFile(makeDevText({ phmPath: 'main.phm' }), 'abc.dev')],
+        ['PHM/main.phm', makeFile(makePhmText({ modelPath: 'MAIN.GL' }), 'main.phm')],
+        ['MOD/main.gl', makeFile('<Device><Entities /></Device>', 'main.gl')],
+      ]);
+      const { mods, stls } = await discoverGeometriesFromNode(node, files);
+      expect(stls).toEqual([]);
+      expect(mods).toHaveLength(1);
+      expect(mods[0].modPath).toBe('MOD/MAIN.GL');
+    });
+
     it('PHM 引用未知扩展名 → 跳过 + warn', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const node = makeNode('abc.dev');
@@ -450,6 +463,26 @@ TRANSFORMMATRIX0=-1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
       );
       expect(result.mods).toHaveLength(1);
       expect(result.mods[0].modPath).toBe('MOD/MAIN.MOD');
+    });
+
+    it('strict 模式按大小写不敏感命中 GL，并沿 XML 几何分支', async () => {
+      const files = new Map<string, File>([
+        ['dEv/ABC.DEV', makeFile(makeDevText({ phmPath: 'MAIN.PHM' }), 'ABC.DEV')],
+        ['pHm/MAIN.PHM', makeFile(makePhmText({ modelPath: 'MAIN.GL' }), 'MAIN.PHM')],
+        ['mOd/MAIN.GL', makeFile('<Device><Entities /></Device>', 'MAIN.GL')],
+      ]);
+
+      const result = await discoverGeometriesFromDevPath(
+        'DEV/abc.dev',
+        files,
+        identity,
+        new Set<string>(),
+        0,
+        { instances: 0 },
+        strict,
+      );
+      expect(result.mods).toHaveLength(1);
+      expect(result.mods[0].modPath).toBe('MOD/MAIN.GL');
     });
   });
 });

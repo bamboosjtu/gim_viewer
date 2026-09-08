@@ -13,7 +13,7 @@ export interface IfcCacheResult {
   }>;
 }
 
-/** 几何文件缓存结果（DEV/PHM/MOD） */
+/** 几何文件缓存结果（DEV/PHM/MOD/GL） */
 export interface GeometryCacheResult {
   /** 已缓存的 entry_path 数量 */
   cachedCount: number;
@@ -25,13 +25,15 @@ export interface GeometryCacheResult {
 }
 
 /**
- * 判断 entry_path 是否为几何发现需要的文件（DEV/PHM/MOD）。
+ * 判断 entry_path 是否为几何发现需要的文件（DEV/PHM/MOD/GL）。
  * 用于缓存命中场景下从磁盘读取这些文件以回放 xml-mod 几何。
  */
 function isGeometryFile(entryPath: string): boolean {
   const lower = entryPath.toLowerCase();
-  const isGeometryDir = lower.startsWith('dev/') || lower.startsWith('phm/') || lower.startsWith('mod/');
-  const isGeometryExt = lower.endsWith('.dev') || lower.endsWith('.phm') || lower.endsWith('.mod');
+  const isGeometryDir = lower.startsWith('dev/') || lower.startsWith('phm/')
+    || lower.startsWith('mod/') || lower.startsWith('gl/');
+  const isGeometryExt = lower.endsWith('.dev') || lower.endsWith('.phm')
+    || lower.endsWith('.mod') || lower.endsWith('.gl');
   return isGeometryDir && isGeometryExt;
 }
 
@@ -51,11 +53,11 @@ function isStdSldFile(entryPath: string): boolean {
 }
 
 /**
- * 缓存 GIM 解压后的几何文件（DEV/PHM/MOD）到本地磁盘。
+ * 缓存 GIM 解压后的几何文件（DEV/PHM/MOD/GL）到本地磁盘。
  *
  * 与 cacheIfcEntries 的差异：
  * - cacheIfcEntries 以 ifcEntries 为准，仅缓存 IFC 文件
- * - 本函数遍历 files Map，缓存所有 DEV/PHM/MOD 文件
+ * - 本函数遍历 files Map，缓存所有 DEV/PHM/MOD/GL 文件
  * - 用于缓存命中场景下从磁盘读取这些文件以回放 xml-mod 几何
  *
  * @param projectId 数据库 gim_project.id

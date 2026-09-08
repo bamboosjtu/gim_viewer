@@ -301,7 +301,7 @@ describe('parseXmlMod', () => {
       expect(p.raw).toEqual({ R: '100', DR: '20' });
     });
 
-    it('未识别 primitive：归入弱 schema 并标记 _unknown', () => {
+    it('未识别 primitive：保留为显式 Unsupported', () => {
       const xml = wrap(
         `<Entity ID="16" Type="simple" Visible="True">
           <UnknownShape Foo="1" Bar="abc" />
@@ -311,12 +311,11 @@ describe('parseXmlMod', () => {
       );
       const p = parseXmlMod(xml, 'MOD/unknown.mod').entities[0].primitive as Extract<
         XmlModPrimitive,
-        { raw: Record<string, string> }
+        { type: 'Unsupported' }
       >;
-      expect(p.type).toBe('RectangularRing');
-      expect(p.raw._unknown).toBe('UnknownShape');
-      expect(p.raw.Foo).toBe('1');
-      expect(p.raw.Bar).toBe('abc');
+      expect(p.type).toBe('Unsupported');
+      expect(p.sourceType).toBe('UnknownShape');
+      expect(p.raw).toEqual({ Foo: '1', Bar: 'abc' });
     });
   });
 
@@ -556,7 +555,7 @@ describe('parseXmlMod', () => {
       expect(doc.entities[0].id).toBe(1);
     });
 
-    it('primitive 缺失 → entity 被跳过', () => {
+    it('primitive 缺失 → entity 被跳过但 source 不伪装为空', () => {
       const xml = wrap(
         `<Entity ID="0" Type="simple" Visible="True">
           <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
@@ -565,8 +564,9 @@ describe('parseXmlMod', () => {
       );
       const doc = parseXmlMod(xml, 'MOD/no-primitive.mod');
       expect(doc.entities.length).toBe(0);
-      // entity 全部被跳过 → isEmpty=true
-      expect(doc.isEmpty).toBe(true);
+      expect(doc.isEmpty).toBe(false);
+      expect(doc.declaredEntityCount).toBe(1);
+      expect(doc.malformedEntityCount).toBe(1);
     });
   });
 
@@ -773,7 +773,7 @@ describe('十样本新增 primitive（docs/schema/08 §P0-3）', () => {
     expect(doc.entities[1].primitive).toEqual({ type: 'BeamChannelLike', length: 1600, model: '10#' });
   });
 
-  it('未识别 primitive 仍归入弱 schema（_unknown 记录标签）', () => {
+  it('未识别 primitive 保留 source type 与 raw 属性', () => {
     const xml = wrap(
       `<Entity ID="1" Type="simple" Visible="true">
         <SomeFutureType X="1"/>
@@ -781,7 +781,13 @@ describe('十样本新增 primitive（docs/schema/08 §P0-3）', () => {
       </Entity>`,
     );
     const doc = parseXmlMod(xml, 'MOD/future.mod');
-    const prim = doc.entities[0].primitive as { type: string; raw: Record<string, string> };
-    expect(prim.raw['_unknown']).toBe('SomeFutureType');
+    const prim = doc.entities[0].primitive as {
+      type: 'Unsupported';
+      sourceType: string;
+      raw: Record<string, string>;
+    };
+    expect(prim.type).toBe('Unsupported');
+    expect(prim.sourceType).toBe('SomeFutureType');
+    expect(prim.raw).toEqual({ X: '1' });
   });
 });

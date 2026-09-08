@@ -6,7 +6,7 @@
  * 引用链（详见 docs/schema/dev.md §引用关系）：
  * - CBM.OBJECTMODELPOINTER → DEV 文件名（裸名，如 "abc.dev"）
  * - DEV.SOLIDMODELn → PHM 文件名（变电工程仅指向 .phm）
- * - PHM.SOLIDMODELn → MOD / STL 文件名
+ * - PHM.SOLIDMODELn → MOD / GL / STL 文件名
  *
  * 路径前缀拼接规则：
  * - DEV 文件：files Map key = "DEV/" + devPath
@@ -33,7 +33,7 @@ const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 /** 发现的 MOD 几何来源 */
 export interface DiscoveredModGeometry {
-  /** MOD 文件完整路径（如 "MOD/abc.mod"） */
+  /** XML 几何文件完整路径（如 "MOD/abc.mod" 或 "MOD/abc.gl"） */
   modPath: string;
   /** 实例唯一键：同一个 MOD 文件可被不同矩阵多次实例化 */
   instanceKey: string;
@@ -166,7 +166,7 @@ export async function discoverGeometriesFromDevPath(
    * PHM 递归遍历（BIMBase 实测嵌套最深 4 层，docs/schema/07）。
    *
    * - 逐边乘 TRANSFORMMATRIXn：placement = parent × 本边矩阵（层级级联，docs/schema/phm.md）
-   * - 叶级（.mod/.stl/.gl）产出实例；.phm 递归向下
+   * - 叶级（.mod/.gl/.stl）产出实例；.phm 递归向下
    * - visited 防环；同 PHM 在同一 DEV 链内只展开一次
    */
   async function walkPhm(
@@ -208,10 +208,11 @@ export async function discoverGeometriesFromDevPath(
         continue;
       }
 
-      if (lower.endsWith('.mod')) {
+      if (lower.endsWith('.mod') || lower.endsWith('.gl')) {
         const modPath = normalizeGeometryPath(modelFileName);
         if (strictDependencies && !getFileByPath(files, modPath)) {
-          throw new Error(`MOD 文件不存在: ${modPath}`);
+          const kind = lower.endsWith('.gl') ? 'GL' : 'MOD';
+          throw new Error(`${kind} 文件不存在: ${modPath}`);
         }
         budget.instances++;
         if (budget.instances > PARSER_LIMITS.maxGeometryInstances) {
@@ -370,7 +371,13 @@ function normalizePhmPath(path: string): string {
 
 function normalizeGeometryPath(path: string): string {
   const p = path.replace(/\\/g, '/');
-  return p.toLowerCase().startsWith('mod/') || p.toLowerCase().startsWith('stl/') ? p : `MOD/${p}`;
+  const lower = p.toLowerCase();
+  // `.gl` is normally stored under MOD/ in the four-sample corpus, but keep
+  // an explicit GL/ prefix intact when an exporter uses a separate folder.
+  // The extension still follows the same XML geometry pipeline.
+  return lower.startsWith('mod/') || lower.startsWith('gl/') || lower.startsWith('stl/')
+    ? p
+    : `MOD/${p}`;
 }
 
 function makeInstanceKey(path: string, matrix: number[], devPath: string, phmPath: string, color?: XmlModColor): string {

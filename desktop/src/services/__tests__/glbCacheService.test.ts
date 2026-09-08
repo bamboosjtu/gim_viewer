@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { serializeDevToGlb } from '../glbCacheService.js';
+import { serializeDevToGlb, serializeDevToGlbDetailed } from '../glbCacheService.js';
 
 function file(text: string, name: string): File {
   return new File([text], name, { type: 'text/plain' });
@@ -64,5 +64,38 @@ describe('serializeDevToGlb strict dependency semantics', () => {
         ['MOD/empty.mod', emptyMod],
       ]),
     )).resolves.toBeNull();
+  });
+
+  it('非空但未知 primitive 不会被伪装成 deterministic empty', async () => {
+    const dev = file([
+      'SOLIDMODELS.NUM=1',
+      'SOLIDMODEL0=device.phm',
+      `TRANSFORMMATRIX0=${IDENTITY}`,
+    ].join('\n'), 'device.dev');
+    const phm = file([
+      'SOLIDMODELS.NUM=1',
+      'SOLIDMODEL0=unknown.mod',
+      `TRANSFORMMATRIX0=${IDENTITY}`,
+      'COLOR0=',
+    ].join('\n'), 'device.phm');
+    const unknownMod = file(
+      '<Device><Entities><Entity ID="0" Type="simple" Visible="true"><UnknownPrimitive Foo="1" /></Entity></Entities></Device>',
+      'unknown.mod',
+    );
+
+    const result = await serializeDevToGlbDetailed(
+      'DEV/device.dev',
+      new Map([
+        ['DEV/device.dev', dev],
+        ['PHM/device.phm', phm],
+        ['MOD/unknown.mod', unknownMod],
+      ]),
+    );
+
+    expect(result.status).toBe('unsupported');
+    expect(result.bytes).toBeNull();
+    expect(result.diagnostics.emptySourceCount).toBe(0);
+    expect(result.diagnostics.unsupportedSourceCount).toBe(1);
+    expect(result.diagnostics.unsupportedPrimitiveTypeCounts).toEqual({ UnknownPrimitive: 1 });
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import type { AppState } from '../../app/state.js';
 import type { CbmNode } from '../../gim/types.js';
+import type { GeometryCacheManifestStatus } from '@desktop/database.js';
 import {
   tryDevGlbFastPath,
   recoverFailedDevGlbCaches,
@@ -69,7 +70,7 @@ function makeState(projectId = 1): AppState {
   } as unknown as AppState;
 }
 
-function manifest(entries: Array<{ entry_path: string; status: 'glb' | 'empty'; size: number }>) {
+function manifest(entries: Array<{ entry_path: string; status: GeometryCacheManifestStatus; size: number }>) {
   return { source_sha256: 'sha-test', entries };
 }
 
@@ -447,14 +448,14 @@ describe('DEV GLB fast path v3', () => {
     ]);
     const rebuiltBytes = validGlb();
     let storedBytes: Uint8Array | null = null;
-    const writtenManifests: Array<Array<{ entry_path: string; status: 'glb' | 'empty'; size: number }>> = [];
+    const writtenManifests: Array<Array<{ entry_path: string; status: GeometryCacheManifestStatus; size: number }>> = [];
     const invalidate = vi.fn(async () => undefined);
     const deps = {
       readGeometryCacheManifest: vi.fn(async () => currentManifest),
       writeGeometryCacheManifest: vi.fn(async (
         _projectId: number,
         _sourceSha256: string,
-        entries: Array<{ entry_path: string; status: 'glb' | 'empty'; size: number }>,
+        entries: Array<{ entry_path: string; status: GeometryCacheManifestStatus; size: number }>,
       ) => {
         currentManifest = manifest(entries);
         writtenManifests.push(entries);

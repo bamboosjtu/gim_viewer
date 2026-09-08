@@ -36,6 +36,7 @@ import {
   isGeometryTokenValid,
 } from './modAutoLoadService.js';
 import type { DevGlbFailureType, DevGlbFastPathProfile } from './modAutoLoadService.js';
+import type { DevGlbSerializationResult } from './glbCacheService.js';
 import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 import { createDevGeometryTelemetry } from './devGeometryTelemetry.js';
 import {
@@ -71,6 +72,8 @@ export interface ProgressiveGeometryResult {
   failedDevs: string[];
   /** 无法产生可渲染 GLB、需要定向 raw fallback 的 DEV。 */
   rawFallbackDevs: string[];
+  /** Non-empty DEV sources with unsupported/partially unsupported primitives. */
+  unsupportedDevs?: string[];
   /** DEV 粒度几何诊断；冷路径与 warm geometry rebuild 共用该结构。 */
   devGlbProfile?: DevGlbFastPathProfile;
 }
@@ -78,6 +81,8 @@ export interface ProgressiveGeometryResult {
 /** 依赖注入（测试可替换） */
 export interface ProgressiveGeometryDependencies {
   serializeDevToGlb: (devPath: string, files: Map<string, File>) => Promise<Uint8Array | null>;
+  /** Detailed compiler contract. The byte-only dependency remains for tests/embedders. */
+  serializeDevToGlbDetailed?: (devPath: string, files: Map<string, File>) => Promise<DevGlbSerializationResult>;
   loadDevGlb: (devPath: string, bytes: Uint8Array) => Promise<THREE.Group | null>;
   parseDevGlbAsset?: (devPath: string, bytes: Uint8Array) => Promise<DevGlbParsedAsset | null>;
   writeGlbFile: (projectId: number, entryPath: string, bytes: Uint8Array, sourceGimSha256?: string | null) => Promise<unknown>;
@@ -90,6 +95,7 @@ export interface ProgressiveGeometryDependencies {
 function defaultDependencies(): ProgressiveGeometryDependencies {
   return {
     serializeDevToGlb: (devPath, files) => import('./glbCacheService.js').then((m) => m.serializeDevToGlb(devPath, files)),
+    serializeDevToGlbDetailed: (devPath, files) => import('./glbCacheService.js').then((m) => m.serializeDevToGlbDetailed(devPath, files)),
     loadDevGlb: (devPath, bytes) => import('./glbCacheService.js').then((m) => m.loadDevGlb(devPath, bytes)),
     parseDevGlbAsset: (devPath, bytes) => import('./glbCacheService.js').then((m) => m.parseDevGlbAsset(devPath, bytes)),
     writeGlbFile: (projectId, entryPath, bytes, sourceGimSha256) => import('@desktop/database.js').then((m) => m.writeGlbFile(projectId, entryPath, bytes, sourceGimSha256)),
@@ -152,6 +158,7 @@ function emptyDevGlbProfile(cbmInstanceCount: number, uniqueDevCount: number): D
     uniqueDevCount,
     glbDevCount: 0,
     emptyDevCount: 0,
+    unsupportedDevCount: 0,
     glbBatchReadMs: 0,
     glbReadBytes: 0,
     glbParseCount: 0,
@@ -332,14 +339,22 @@ export async function runProgressiveDevGlbPipeline(
   // 才写版本标记；任何失败都保持版本戳过期，下次打开自动重建
   const failedDevs: string[] = [];
   const rawFallbackDevs: string[] = [];
+  const unsupportedDevs: string[] = [];
   const failedDevKeys = new Set<string>();
   const rawFallbackDevKeys = new Set<string>();
   const failureTypes: Record<string, DevGlbFailureType> = {};
   const glbDevKeys = new Set<string>();
   const emptyDevKeys = new Set<string>();
+  const unsupportedDevKeys = new Set<string>();
   let glbParseCount = 0;
   let glbParseMs = 0;
   const glbEntries: GeometryCacheManifestEntry[] = [];
+  // Preserve the byte-only injection contract used by embedders/tests. The
+  // detailed compiler is selected by production defaults or explicitly by a
+  // caller; an old byte-only override must not accidentally invoke the real
+  // source compiler as a second path.
+  const serializeDetailed = dependencies?.serializeDevToGlbDetailed
+    ?? (dependencies?.serializeDevToGlb ? undefined : deps.serializeDevToGlbDetailed);
   // Keep placement-budget yields separate from the existing per-DEV compiler
   // marker.  A caller may use `deps.yieldToMain` to model the boundary between
   // DEV A and DEV B (and to invalidate the session there); placement slices
@@ -388,6 +403,7 @@ export async function runProgressiveDevGlbPipeline(
       ...devGlbProfile,
       glbDevCount: glbDevKeys.size,
       emptyDevCount: emptyDevKeys.size,
+      unsupportedDevCount: unsupportedDevKeys.size,
       glbParseCount,
       glbParseMs,
       rawModFallbackCount: failedPaths.length,
@@ -416,6 +432,7 @@ export async function runProgressiveDevGlbPipeline(
       interrupted: wasInterrupted,
       failedDevs: failedDevs.slice(),
       rawFallbackDevs: rawFallbackDevs.slice(),
+      unsupportedDevs: unsupportedDevs.slice(),
       devGlbProfile: snapshotProfile(),
     };
   };
@@ -440,10 +457,22 @@ export async function runProgressiveDevGlbPipeline(
 
     // 2.1 序列化（MOD/STL 只在此解析一次）
     let glbBytes: Uint8Array | null = null;
+    let serializationStatus: 'complete' | 'partial' | 'empty' | 'unsupported' = 'complete';
     let serializeFailed = false;
     const serializeStarted = performance.now();
     try {
-      glbBytes = await deps.serializeDevToGlb(devPath, files);
+      if (serializeDetailed) {
+        const serialized = await serializeDetailed(devPath, files);
+        serializationStatus = serialized.status;
+        glbBytes = serialized.bytes;
+        if (serialized.status === 'unsupported') {
+          unsupportedDevKeys.add(devPath.toLowerCase());
+          unsupportedDevs.push(devPath);
+        }
+      } else {
+        glbBytes = await deps.serializeDevToGlb(devPath, files);
+        serializationStatus = glbBytes && glbBytes.byteLength > 0 ? 'complete' : 'empty';
+      }
     } catch (err) {
       serializeFailed = true;
       markGeometryFailure(devPath, classifyDevGlbFailure(err));
@@ -460,12 +489,18 @@ export async function runProgressiveDevGlbPipeline(
     }
     if (!glbBytes || glbBytes.byteLength === 0) {
       if (!serializeFailed) {
-        // 无几何引用或空几何：tombstone（确定性结果）。v3 manifest
-        // 必须显式记录 empty，warm fast path 才能区分合法空结果与缓存缺失。
+        // Non-empty unsupported sources get their own deterministic manifest
+        // state. They must not be routed through raw fallback or recorded as
+        // `empty`, otherwise every warm open would repeat the same unsupported
+        // parse and silently hide a compatibility gap.
         if (capturedProjectId != null && isTauri()) {
-          glbEntries.push({ entry_path: devPath, status: 'empty', size: 0 });
+          glbEntries.push({
+            entry_path: devPath,
+            status: serializationStatus === 'unsupported' ? 'unsupported' : 'empty',
+            size: 0,
+          });
         }
-        emptyDevKeys.add(devPath.toLowerCase());
+        if (serializationStatus !== 'unsupported') emptyDevKeys.add(devPath.toLowerCase());
         compiledDevs++;
         deepTelemetry.finishDev(devPath, devTelemetryStarted);
         continue;
@@ -487,7 +522,11 @@ export async function runProgressiveDevGlbPipeline(
         const writeStarted = performance.now();
         await deps.writeGlbFile(capturedProjectId, devPath, glbBytes, session.sourceSha256);
         deepTelemetry.record('glbWrite', performance.now() - writeStarted, devPath);
-        glbEntries.push({ entry_path: devPath, status: 'glb', size: glbBytes.byteLength });
+        glbEntries.push({
+          entry_path: devPath,
+          status: serializationStatus === 'partial' ? 'partial' : 'glb',
+          size: glbBytes.byteLength,
+        });
         if (!isSessionValid()) {
           return resultSnapshot(true);
         }
@@ -618,11 +657,11 @@ export async function runProgressiveDevGlbPipeline(
         renderedInstances++;
       } catch (err) {
         if (group && !shared) disposeGroup(group);
-          console.warn(`[progressive] DEV GLB placement 渲染失败: ${devPath} #${seed.path}`, err);
-          markGeometryFailure(devPath, classifyDevGlbFailure(err));
-          templatePool.invalidate(devPath);
-          disposeDevGroups();
-        }
+        console.warn(`[progressive] DEV GLB placement 渲染失败: ${devPath} #${seed.path}`, err);
+        markGeometryFailure(devPath, classifyDevGlbFailure(err));
+        templatePool.invalidate(devPath);
+        disposeDevGroups();
+      }
     }, {
       maxSliceMs: 6,
       maxPlacementsPerSlice: 32,
