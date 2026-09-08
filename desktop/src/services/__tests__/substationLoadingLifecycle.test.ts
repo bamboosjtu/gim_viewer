@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import type { CbmNode, IfcEntry } from '../../gim/types.js';
 import { loadAllIfcFiles } from '../openGimService.js';
-import { perfProductMomentSnapshot, perfReset } from '../../utils/perfTimings.js';
+import { perfMarkProductMoment, perfProductMomentSnapshot, perfReset } from '../../utils/perfTimings.js';
 
 const mocks = vi.hoisted(() => ({
   ensureEngineReady: vi.fn(),
@@ -73,9 +73,19 @@ function makeTree(): CbmNode {
 }
 
 describe('Substation Loading v2 readiness lifecycle', () => {
-  it('returns at first usable IFC while the remaining IFC stays sequential and allIfcReady is later', async () => {
+  it('returns at first usable IFC, isolates spatial failure, and keeps the IFC tail sequential', async () => {
     vi.clearAllMocks();
     const secondIfcGate = deferred<void>();
+    const spatialGate = deferred<void>();
+    const spatialStart = vi.fn(() => {
+      // A real spatial starter owns its promise and is intentionally not
+      // awaited by loadAllIfcFiles.  Keep this one pending to prove that the
+      // interactive caller is independent from it.
+      void spatialGate.promise;
+      expect(perfProductMomentSnapshot().interactive).not.toBeNull();
+      perfMarkProductMoment('spatialSemanticStart', { test: true });
+      throw new Error('test spatial semantic failure');
+    });
     const entries: IfcEntry[] = [
       { name: 'first.ifc', path: 'DEV/first.ifc', modelId: 'first' },
       { name: 'second.ifc', path: 'DEV/second.ifc', modelId: 'second' },
@@ -106,6 +116,7 @@ describe('Substation Loading v2 readiness lifecycle', () => {
       options: { session?: ReturnType<AppState['captureProjectSession']>; onLoadSource?: (source: 'ifc') => void },
     ) => {
       if (entry.modelId === 'second') await secondIfcGate.promise;
+      if (entry.modelId === 'first') expect(spatialStart).not.toHaveBeenCalled();
       if (!options.session || !state.isCurrentSession(options.session)) return;
       const runtimeModelId = state.getRuntimeModelId(entry.modelId, options.session);
       state.loadedModels.set(entry.modelId, { modelId: entry.modelId, runtimeModelId, visible: true });
@@ -120,7 +131,10 @@ describe('Substation Loading v2 readiness lifecycle', () => {
     const session = state.activateProject(7, 'sha-substation');
     perfReset({ generation: session.generation, projectId: session.projectId, sourceSha256: session.sourceSha256 });
 
-    const loading = loadAllIfcFiles(state, entries, vi.fn(), { session });
+    const loading = loadAllIfcFiles(state, entries, vi.fn(), {
+      session,
+      startSpatialSemantic: spatialStart,
+    });
     let callerSettled = false;
     void loading.then(() => { callerSettled = true; });
 
@@ -129,8 +143,13 @@ describe('Substation Loading v2 readiness lifecycle', () => {
 
     expect(callerSettled).toBe(true);
     expect(mocks.loadIfcEntry).toHaveBeenCalledTimes(2);
+    expect(spatialStart).toHaveBeenCalledTimes(1);
+    expect(perfProductMomentSnapshot().firstIfcLoadStart).not.toBeNull();
+    expect(perfProductMomentSnapshot().spatialSemanticStart).not.toBeNull();
     expect(perfProductMomentSnapshot().firstUsableGeometryReady).not.toBeNull();
     expect(perfProductMomentSnapshot().interactive).not.toBeNull();
+    expect(perfProductMomentSnapshot().spatialSemanticStart!.atMs)
+      .toBeGreaterThanOrEqual(perfProductMomentSnapshot().interactive!.atMs);
     expect(perfProductMomentSnapshot().allIfcReady).toBeNull();
 
     secondIfcGate.resolve();
@@ -139,5 +158,6 @@ describe('Substation Loading v2 readiness lifecycle', () => {
     expect(perfProductMomentSnapshot().interactive!.atMs)
       .toBeLessThanOrEqual(perfProductMomentSnapshot().allIfcReady!.atMs);
     await loading;
+    spatialGate.resolve();
   });
 });

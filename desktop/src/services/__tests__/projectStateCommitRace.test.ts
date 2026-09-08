@@ -153,6 +153,7 @@ describe('openGimService AppState commit race', () => {
     const relation = makeRelation('A');
     const file = new File(['A'], 'marker.cbm');
     const files = new Map<string, File>([['CBM/marker.cbm', file]]);
+    let startSpatialSemantic!: () => void;
     mocks.discoverIfcFromCBM.mockResolvedValue([
       { name: 'A.ifc', path: 'IFC/A.ifc', modelId: 'model-A' } satisfies IfcEntry,
     ]);
@@ -170,7 +171,10 @@ describe('openGimService AppState commit race', () => {
       'A',
       '变电工程',
       session,
-      { deferSpatialSemantic: true },
+      {
+        deferSpatialSemantic: true,
+        onSpatialSemanticStart: (start) => { startSpatialSemantic = start; },
+      },
     );
     await loading;
 
@@ -179,7 +183,9 @@ describe('openGimService AppState commit race', () => {
     expect(state.substationSpatialIndex).toBeNull();
     expect(mocks.buildAndRenderCbmTree).toHaveBeenCalled();
     expect(mocks.renderFileDevPanel).toHaveBeenCalled();
+    expect(mocks.buildSubstationSpatialIndexFromFiles).not.toHaveBeenCalled();
 
+    startSpatialSemantic();
     spatialGate.resolve(makeSpatial('A'));
     await vi.waitFor(() => {
       expect(state.substationSpatialIndex?.models[0]?.modelId).toBe('model-A');

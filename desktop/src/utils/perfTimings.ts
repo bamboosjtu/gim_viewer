@@ -70,11 +70,13 @@ export interface PerfLongTaskStats {
  *
  * semanticReady / firstGeometryReady 保留为兼容别名：新的 Substation
  * Runtime 会在对应的 core/first usable 时刻同时记录它们，新增的细粒度
- * 时刻用于区分 spatial semantic、interactive 和 all-IFC barrier。
+ * 时刻用于区分首个 IFC、spatial semantic、interactive 和 all-IFC barrier。
  */
 export type PerfProductMoment =
   | 'coreSemanticReady'
   | 'semanticReady'
+  | 'firstIfcLoadStart'
+  | 'spatialSemanticStart'
   | 'spatialSemanticReady'
   | 'firstUsableGeometryReady'
   | 'firstGeometryReady'
@@ -471,6 +473,8 @@ export function perfProductMomentSnapshot(): Record<PerfProductMoment, PerfProdu
   return {
     coreSemanticReady: productMoments.get('coreSemanticReady') ?? null,
     semanticReady: productMoments.get('semanticReady') ?? null,
+    firstIfcLoadStart: productMoments.get('firstIfcLoadStart') ?? null,
+    spatialSemanticStart: productMoments.get('spatialSemanticStart') ?? null,
     spatialSemanticReady: productMoments.get('spatialSemanticReady') ?? null,
     firstUsableGeometryReady: productMoments.get('firstUsableGeometryReady') ?? null,
     firstGeometryReady: productMoments.get('firstGeometryReady') ?? null,

@@ -177,6 +177,13 @@ interface SubstationSemanticOptions {
    * finishes; direct callers keep the historical await behaviour by default.
    */
   deferSpatialSemantic?: boolean;
+  /**
+   * Production opening supplies this callback so the deferred spatial task is
+   * started by the Substation Runtime only after first interactive.  Keeping
+   * the starter opaque here avoids coupling core semantic parsing to IFC
+   * scheduling details.
+   */
+  onSpatialSemanticStart?: (start: () => void) => void;
 }
 
 function markSubstationCoreSemanticReady(
@@ -230,6 +237,10 @@ async function buildAndCommitSubstationSpatialSemantic(
 ): Promise<boolean> {
   if (!state.isCurrentSession(session)) return false;
   try {
+    perfMarkProductMoment('spatialSemanticStart', {
+      label,
+      models: ifcEntries.length,
+    }, perfSession);
     const endSpatial = perfBegin(label, undefined, perfSession);
     const spatialIndex = await buildSubstationSpatialIndexFromFiles(
       files,
@@ -346,22 +357,35 @@ export async function onGimExtracted(
   // and session fence, but does not hold the first IFC open.
   markSubstationCoreSemanticReady(state, perfSession);
   await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（core semantic）');
-  const spatialSemanticPromise = buildAndCommitSubstationSpatialSemantic(
-    state,
-    files,
-    ifcEntries,
-    cbmTree,
-    fileDevRelations,
-    session,
-    perfSession,
-    showMessage,
-    '变电 IFC 空间索引',
-  );
+
+  let spatialSemanticPromise: Promise<boolean> | null = null;
+  const startSpatialSemantic = (): Promise<boolean> => {
+    if (!spatialSemanticPromise) {
+      spatialSemanticPromise = buildAndCommitSubstationSpatialSemantic(
+        state,
+        files,
+        ifcEntries,
+        cbmTree,
+        fileDevRelations,
+        session,
+        perfSession,
+        showMessage,
+        '变电 IFC 空间索引',
+      );
+    }
+    return spatialSemanticPromise;
+  };
   if (options.deferSpatialSemantic) {
-    void spatialSemanticPromise;
-  } else if (!await spatialSemanticPromise) {
+    // The real open path hands this starter to loadAllIfcFiles.  It is not
+    // invoked here: starting the parser would put spatial work back on the
+    // first-IFC critical path even if its promise is not awaited.  A deferred
+    // caller without a starter simply opts out of spatial semantic for this
+    // invocation; there is no safe implicit “start now” fallback.
+    options.onSpatialSemanticStart?.(startSpatialSemantic);
+  } else {
     // Preserve the historical direct-call contract: callers that do not opt
     // into deferred spatial semantic receive completion before returning.
+    await startSpatialSemantic();
   }
 
   // STD/SLD 解析：在 CBM 树构建完成后并行执行（不阻塞 IFC 加载）
@@ -491,6 +515,8 @@ export async function loadAllIfcFiles(
     geometryCacheValid?: boolean;
     geometryCacheManifestValid?: boolean;
     geometryCacheVersionFileMatch?: boolean;
+    /** Start optional spatial semantic only after first interactive. */
+    startSpatialSemantic?: () => void;
   } = {},
 ): Promise<void> {
   const session = options.session ?? state.captureProjectSession();
@@ -609,6 +635,16 @@ export async function loadAllIfcFiles(
     void sampleSubstationMemory('第一个可用 IFC / interactive 后', perfSession, firstMeta);
     hideLoading();
     signalInteractive();
+    try {
+      // This callback is deliberately after the interactive product moment:
+      // invoking the spatial parser earlier would still consume main-thread
+      // time even if its promise were not awaited.
+      options.startSpatialSemantic?.();
+    } catch (err) {
+      // Spatial semantic is an optional navigation projection.  A callback
+      // failure must not turn a usable IFC into an interactive-load failure.
+      console.warn('[GIM] 启动 IFC 空间语义失败，继续 IFC 后台加载:', err);
+    }
   };
 
   const lifecycleTask = (async (): Promise<void> => {
@@ -622,6 +658,7 @@ export async function loadAllIfcFiles(
     const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
     if (!isCurrent()) return;
 
+    let firstIfcLoadStarted = false;
     for (const entry of entries) {
       if (!isCurrent()) return;
         showLoading(interactiveInitialized ? `后台加载 ${entry.name}...` : `正在加载 ${entry.name}...`);
@@ -631,6 +668,13 @@ export async function loadAllIfcFiles(
       const endRead = perfBegin(`变电 IFC read · ${entry.path}`, undefined, perfSession);
       const endIfcLoad = perfBegin(`变电 web-ifc / Fragments load · ${entry.path}`, undefined, perfSession);
       try {
+        if (!firstIfcLoadStarted) {
+          firstIfcLoadStarted = true;
+          perfMarkProductMoment('firstIfcLoadStart', {
+            name: entry.name,
+            path: entry.path,
+          }, perfSession);
+        }
         const ifcBytes: { value: Uint8Array | null } = { value: null };
         await loadIfcEntry(
           ctx,
@@ -1153,7 +1197,8 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
 
       const cbmTree = state.currentCbmTree;
       if (!cbmTree) throw new Error('缓存索引中没有 CBM 层级树');
-      const fileDevRelations = state.fileDevRelations;
+      const fileDevRelations = state.fileDevRelations.slice();
+      const cachedIfcEntries = state.currentIfcEntries.slice();
       const { createDiskBackedFile } = await import('@desktop/gimExtract.js');
       const cachedIfcFiles = new Map<string, File>();
       for (const cachedEntry of index.entries) {
@@ -1202,25 +1247,28 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       // 阶段 4：注册 SLD gridId → CBM 联动回调（缓存命中路径）
       setupSldGridIdInteraction(state, showMessage, session);
 
-      // Start spatial semantic only after the warm semantic restore has
-      // passed its own validation.  Otherwise a later warm→cold fallback
-      // could leave a same-session cached spatial task in flight.
-      void buildAndCommitSubstationSpatialSemantic(
-        state,
-        cachedIfcFiles,
-        state.currentIfcEntries,
-        cbmTree,
-        fileDevRelations,
-        session,
-        perfSession,
-        showMessage,
-        '变电 IFC 空间索引（缓存命中）',
-      );
+      // Register the spatial starter, but let loadAllIfcFiles invoke it only
+      // after the first usable IFC has established interactive.  Starting it
+      // here would still compete with web-ifc/Fragments on the main thread.
+      const startSpatialSemantic = (): void => {
+        void buildAndCommitSubstationSpatialSemantic(
+          state,
+          cachedIfcFiles,
+          cachedIfcEntries,
+          cbmTree,
+          fileDevRelations,
+          session,
+          perfSession,
+          showMessage,
+          '变电 IFC 空间索引（缓存命中）',
+        );
+      };
 
       // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
       // loadAllIfcFiles 内部会创建 ViewerRuntime、加载 IFC、渲染树、触发 MOD/STL
-      await loadAllIfcFiles(state, state.currentIfcEntries, showMessage, {
+      await loadAllIfcFiles(state, cachedIfcEntries, showMessage, {
         session,
+        startSpatialSemantic,
         geometryCacheValid: validation.geometry_cache_valid ?? validation.geometry_cache_version_match,
         geometryCacheManifestValid: validation.geometry_cache_manifest_valid,
         geometryCacheVersionFileMatch: validation.geometry_cache_version_file_match,
@@ -1260,6 +1308,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   // Cold path: CBM/FAM/DEV/FileDevRelation and IFC discovery stay entirely in
   // this Runtime. The parser implementation is unchanged; only ownership moved.
   showLoading('正在解析 GIM 层级结构...');
+  let startSpatialSemantic: (() => void) | undefined;
   const entries = await onGimExtracted(
     state,
     extracted,
@@ -1267,7 +1316,12 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
     context.projectName,
     context.projectTypeName,
     session,
-    { deferSpatialSemantic: true },
+    {
+      deferSpatialSemantic: true,
+      onSpatialSemanticStart: (start) => {
+        startSpatialSemantic = start;
+      },
+    },
   );
   if (!state.isCurrentSession(session)) return;
   if (entries.length === 0) {
@@ -1415,5 +1469,8 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   // loadAllIfcFiles 在首个可用 IFC 后返回；剩余 IFC、几何和这里的缓存
   // 持久化都继续作为当前 session 的后台工作，不重新成为 interactive barrier。
   void persistPromise;
-  await loadAllIfcFiles(state, entries, showMessage, { session });
+  await loadAllIfcFiles(state, entries, showMessage, {
+    session,
+    startSpatialSemantic,
+  });
 }
