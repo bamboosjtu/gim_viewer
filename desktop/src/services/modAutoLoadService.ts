@@ -597,6 +597,12 @@ export interface DevGlbFastPathProfile {
   partialRawFallbackReadMs: number;
   partialRawFallbackParseMs: number;
   partialRawFallbackRows: number;
+  /** 单 DEV cache recovery 诊断，不改变旧 fallback 字段语义。 */
+  cacheRecoveryAttemptCount?: number;
+  cacheRecoverySuccessCount?: number;
+  cacheRecoveryEmptyCount?: number;
+  cacheRecoveryFailureCount?: number;
+  cacheRecoveryDevPaths?: string[];
   fallbackReason?: string;
 }
 
@@ -684,6 +690,11 @@ function emptyFastPathProfile(cbmInstanceCount: number, uniqueDevCount: number):
     partialRawFallbackReadMs: 0,
     partialRawFallbackParseMs: 0,
     partialRawFallbackRows: 0,
+    cacheRecoveryAttemptCount: 0,
+    cacheRecoverySuccessCount: 0,
+    cacheRecoveryEmptyCount: 0,
+    cacheRecoveryFailureCount: 0,
+    cacheRecoveryDevPaths: [],
   };
 }
 
@@ -1091,6 +1102,243 @@ export async function tryDevGlbFastPath(
   }).length;
   syncFailureProfile();
   return success(loadedCount);
+}
+
+export interface DevGlbCacheRecoveryResult {
+  repairedDevPaths: string[];
+  emptyDevPaths: string[];
+  unresolvedDevPaths: string[];
+}
+
+export interface DevGlbCacheRecoveryDependencies {
+  serializeDevToGlb?: (devPath: string, files: Map<string, File>) => Promise<Uint8Array | null>;
+  loadDevGlb?: (devPath: string, bytes: Uint8Array) => Promise<THREE.Group | null>;
+  readGeometryCacheManifest?: (projectId: number) => Promise<GeometryCacheManifest>;
+  writeGeometryCacheManifest?: (
+    projectId: number,
+    sourceSha256: string,
+    entries: GeometryCacheManifestEntry[],
+  ) => Promise<string>;
+  writeGlbFile?: (
+    projectId: number,
+    entryPath: string,
+    bytes: Uint8Array,
+    sourceSha256?: string | null,
+  ) => Promise<string>;
+  invalidateGlbCacheEntry?: (
+    projectId: number,
+    entryPath: string,
+    sourceSha256?: string | null,
+  ) => Promise<void>;
+}
+
+/**
+ * Rebuild only DEV GLB entries which failed the warm fast path.
+ *
+ * The cache entry is removed before source compilation and is advertised as
+ * `glb` only after both a fresh GLB parse/renderability check and an atomic
+ * manifest write succeed.  The caller can then run the existing fast path
+ * once more; that keeps placement/scene behaviour in one code path and avoids
+ * introducing a second GLB renderer just for recovery.
+ */
+export async function recoverFailedDevGlbCaches(
+  state: AppState,
+  failedDevPaths: string[],
+  sourceFiles: Map<string, File> | null,
+  context: {
+    token?: number;
+    generation: number;
+    projectId: number | null;
+    sourceSha256: string | null;
+    session: ProjectLoadSession;
+  },
+  dependencies: DevGlbCacheRecoveryDependencies = {},
+): Promise<DevGlbCacheRecoveryResult> {
+  const normalizedTargets = new Map<string, string>();
+  for (const path of failedDevPaths) {
+    const normalized = normalizeDevEntryPath(path);
+    normalizedTargets.set(normalized.toLowerCase(), normalized);
+  }
+  const unresolved = (): DevGlbCacheRecoveryResult => ({
+    repairedDevPaths: [],
+    emptyDevPaths: [],
+    unresolvedDevPaths: Array.from(normalizedTargets.values()),
+  });
+  if (
+    normalizedTargets.size === 0
+    || context.projectId == null
+    || !context.sourceSha256
+    || !isGeometryContextValid(
+      state,
+      context.token,
+      context.generation,
+      context.projectId,
+      context.sourceSha256,
+    )
+  ) {
+    return unresolved();
+  }
+
+  const isCurrent = () => isGeometryContextValid(
+    state,
+    context.token,
+    context.generation,
+    context.projectId,
+    context.sourceSha256,
+  ) && (typeof state.isCurrentSession === 'function'
+    ? state.isCurrentSession(context.session)
+    : true);
+  const projectId = context.projectId;
+  const sourceSha256 = context.sourceSha256;
+  const readManifest = dependencies.readGeometryCacheManifest
+    ?? (await import('@desktop/database.js')).readGeometryCacheManifest;
+  const writeManifest = dependencies.writeGeometryCacheManifest
+    ?? (await import('@desktop/database.js')).writeGeometryCacheManifest;
+  const writeGlb = dependencies.writeGlbFile
+    ?? (await import('@desktop/database.js')).writeGlbFile;
+  const invalidateEntry = dependencies.invalidateGlbCacheEntry
+    ?? (await import('@desktop/database.js')).invalidateGlbCacheEntry;
+  const serialize = dependencies.serializeDevToGlb
+    ?? (await import('./glbCacheService.js')).serializeDevToGlb;
+  const loadGlb = dependencies.loadDevGlb
+    ?? (await import('./glbCacheService.js')).loadDevGlb;
+
+  let manifest: GeometryCacheManifest;
+  try {
+    manifest = await readManifest(projectId);
+  } catch (error) {
+    debugLog(DEBUG_IFC_LOAD, '[autoLoad] DEV GLB recovery manifest 不可读', error);
+    return unresolved();
+  }
+  if (!isCurrent() || manifest.source_sha256 !== sourceSha256 || !Array.isArray(manifest.entries)) {
+    return unresolved();
+  }
+
+  let files = sourceFiles;
+  if (!files) {
+    try {
+      files = await buildFileMapFromDiskCache(projectId, Array.from(normalizedTargets.values()));
+    } catch (error) {
+      debugLog(DEBUG_IFC_LOAD, '[autoLoad] DEV GLB recovery 源文件准备失败', error);
+      return unresolved();
+    }
+  }
+  if (!files || !isCurrent()) return unresolved();
+
+  const invalidatedKeys = new Set<string>();
+  const recoveredEntries = new Map<string, GeometryCacheManifestEntry>();
+  const repairedDevPaths: string[] = [];
+  const emptyDevPaths: string[] = [];
+  const unresolvedDevPaths: string[] = [];
+
+  for (const [key, devPath] of normalizedTargets) {
+    if (!isCurrent()) return {
+      repairedDevPaths,
+      emptyDevPaths,
+      unresolvedDevPaths: [
+        ...unresolvedDevPaths,
+        ...Array.from(normalizedTargets.entries())
+          .filter(([targetKey]) => !repairedDevPaths.some((path) => path.toLowerCase() === targetKey))
+          .map(([, path]) => path),
+      ],
+    };
+    try {
+      // Invalidate exactly this DEV.  Other DEV GLBs and their manifest
+      // entries remain untouched even when this source rebuild fails.
+      await invalidateEntry(projectId, devPath, sourceSha256);
+      if (!isCurrent()) return {
+        repairedDevPaths,
+        emptyDevPaths,
+        unresolvedDevPaths: Array.from(normalizedTargets.values()),
+      };
+      invalidatedKeys.add(key);
+    } catch (error) {
+      unresolvedDevPaths.push(devPath);
+      debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV GLB recovery invalidate 失败: ${devPath}`, error);
+      continue;
+    }
+
+    try {
+      const bytes = await serialize(devPath, files);
+      if (!isCurrent()) return {
+        repairedDevPaths,
+        emptyDevPaths,
+        unresolvedDevPaths: Array.from(normalizedTargets.values()),
+      };
+      if (bytes == null) {
+        recoveredEntries.set(key, { entry_path: devPath, status: 'empty', size: 0 });
+        emptyDevPaths.push(devPath);
+        continue;
+      }
+      if (!validateCachedGlbBytes(bytes)) {
+        unresolvedDevPaths.push(devPath);
+        continue;
+      }
+      // Parse once before publishing the bytes.  A syntactically valid but
+      // empty/undecodable GLB must never become a warm-path cache hit.
+      const validationGroup = await loadGlb(devPath, bytes);
+      if (!validationGroup || !hasRenderableGlbGeometry(validationGroup)) {
+        if (validationGroup) disposeFastPathGroup(validationGroup);
+        unresolvedDevPaths.push(devPath);
+        continue;
+      }
+      disposeFastPathGroup(validationGroup);
+      await writeGlb(projectId, devPath, bytes, sourceSha256);
+      if (!isCurrent()) return {
+        repairedDevPaths,
+        emptyDevPaths,
+        unresolvedDevPaths: Array.from(normalizedTargets.values()),
+      };
+      recoveredEntries.set(key, { entry_path: devPath, status: 'glb', size: bytes.byteLength });
+    } catch (error) {
+      unresolvedDevPaths.push(devPath);
+      debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV GLB recovery 编译失败: ${devPath}`, error);
+    }
+  }
+
+  if (!isCurrent() || invalidatedKeys.size === 0) {
+    return { repairedDevPaths, emptyDevPaths, unresolvedDevPaths };
+  }
+
+  const entries = manifest.entries
+    .filter((entry) => !invalidatedKeys.has(normalizeDevEntryPath(entry.entry_path).toLowerCase()))
+    .concat(Array.from(recoveredEntries.values()));
+  try {
+    await writeManifest(projectId, sourceSha256, entries);
+    if (!isCurrent()) return {
+      repairedDevPaths: [],
+      emptyDevPaths: [],
+      unresolvedDevPaths: Array.from(normalizedTargets.values()),
+    };
+  } catch (error) {
+    // Do not leave an unadvertised success around as a future cache source.
+    for (const entry of recoveredEntries.values()) {
+      if (entry.status !== 'glb') continue;
+      try {
+        await invalidateEntry(projectId, entry.entry_path, sourceSha256);
+      } catch {
+        // The manifest was not published; the next validation still rejects
+        // the orphan unless a later explicit cleanup removes it.
+      }
+    }
+    debugLog(DEBUG_IFC_LOAD, '[autoLoad] DEV GLB recovery manifest 原子提交失败', error);
+    return {
+      repairedDevPaths: [],
+      emptyDevPaths: [],
+      unresolvedDevPaths: Array.from(normalizedTargets.values()),
+    };
+  }
+
+  for (const path of recoveredEntries.values()) {
+    if (path.status === 'glb') repairedDevPaths.push(path.entry_path);
+  }
+  // A deterministic empty DEV is a valid cache result and must not be sent
+  // to the raw fallback path on the next warm open.
+  return {
+    repairedDevPaths,
+    emptyDevPaths,
+    unresolvedDevPaths: Array.from(new Set(unresolvedDevPaths)),
+  };
 }
 
 export interface ScopedRawFallbackResult {
@@ -1641,7 +1889,63 @@ export async function autoLoadModAndStlGeometry(
   });
   devGlbProfile = devGlbResult.profile;
   if (devGlbResult.loaded) {
-    const failedDevPaths = devGlbResult.profile.failedDevPaths;
+    let fastPathResult = devGlbResult;
+    let failedDevPaths = fastPathResult.profile.failedDevPaths;
+    const recoveryEligible = failedDevPaths.length > 0
+      && capturedProjectId != null
+      && capturedSourceSha256 != null
+      && !files;
+    if (recoveryEligible) {
+      const recovery = await recoverFailedDevGlbCaches(
+        state,
+        failedDevPaths,
+        files,
+        {
+          token,
+          generation: capturedGeneration,
+          projectId: capturedProjectId,
+          sourceSha256: capturedSourceSha256,
+          session,
+        },
+      );
+      const attempted = failedDevPaths.length;
+      const recoveryMeta = {
+        cacheRecoveryAttemptCount: attempted,
+        cacheRecoverySuccessCount: recovery.repairedDevPaths.length,
+        cacheRecoveryEmptyCount: recovery.emptyDevPaths.length,
+        cacheRecoveryFailureCount: recovery.unresolvedDevPaths.length,
+        cacheRecoveryDevPaths: [
+          ...recovery.repairedDevPaths,
+          ...recovery.emptyDevPaths,
+          ...recovery.unresolvedDevPaths,
+        ],
+      };
+      devGlbProfile = { ...devGlbProfile, ...recoveryMeta };
+      if (recovery.repairedDevPaths.length > 0 || recovery.emptyDevPaths.length > 0) {
+        // Reuse the existing placement/scene path. It skips already loaded
+        // successful placements and parses only newly repaired GLBs.
+        const retry = await tryDevGlbFastPath(
+          state,
+          scene,
+          deviceNodes,
+          showProgress,
+          token,
+          undefined,
+          {
+            generation: capturedGeneration,
+            projectId: capturedProjectId,
+            sourceSha256: capturedSourceSha256,
+            session,
+            geometryCacheValid: options.geometryCacheValid,
+          },
+        );
+        if (retry.loaded) {
+          fastPathResult = retry;
+          failedDevPaths = retry.profile.failedDevPaths;
+          devGlbProfile = { ...retry.profile, ...recoveryMeta };
+        }
+      }
+    }
     // A failed DEV can be recovered from the in-memory source map in browser
     // mode as well as from the SQLite index in Tauri.  Do not gate this on
     // projectId alone, otherwise a browser session would silently omit the
@@ -1668,18 +1972,18 @@ export async function autoLoadModAndStlGeometry(
           return resultWithProfile(0, 0);
         }
         return {
-          modCount: devGlbResult.modCount + scoped.modCount,
-          stlCount: devGlbResult.stlCount + scoped.stlCount,
+          modCount: fastPathResult.modCount + scoped.modCount,
+          stlCount: fastPathResult.stlCount + scoped.stlCount,
           devGlbProfile,
         };
       } catch (error) {
         // 失败 DEV 的 scoped 查询失败不应清理已成功的 GLB；保留当前
         // 场景并将错误写入诊断，调用方仍可继续使用成功实例。
         debugLog(DEBUG_IFC_LOAD, '[autoLoad] scoped raw fallback 失败，保留成功 GLB', error);
-        return { modCount: devGlbResult.modCount, stlCount: devGlbResult.stlCount, devGlbProfile };
+        return { modCount: fastPathResult.modCount, stlCount: fastPathResult.stlCount, devGlbProfile };
       }
     }
-    return { modCount: devGlbResult.modCount, stlCount: devGlbResult.stlCount, devGlbProfile };
+    return { modCount: fastPathResult.modCount, stlCount: fastPathResult.stlCount, devGlbProfile };
   }
 
   // ── Phase 1.5: 缓存命中场景 → SQLite 查询 + 仅批量读 MOD/STL ──

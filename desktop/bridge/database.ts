@@ -615,6 +615,24 @@ export async function deleteGlbCache(projectId: number): Promise<void> {
   return invokeTimed<void>('delete_glb_cache', { projectId });
 }
 
+/**
+ * 删除单个 DEV GLB，并从 manifest 移除同一 DEV 条目。
+ *
+ * 用于 warm fast path parse failure 的定向恢复；不会影响其它 DEV、IFC
+ * 或语义索引缓存。Rust 侧会再次校验 project source SHA。
+ */
+export async function invalidateGlbCacheEntry(
+  projectId: number,
+  entryPath: string,
+  sourceSha256?: string | null,
+): Promise<void> {
+  return invokeTimed<void>('invalidate_glb_cache_entry', {
+    projectId,
+    entryPath,
+    sourceSha256: sourceSha256 ?? null,
+  });
+}
+
 // ===== 几何引用链（v6） =====
 
 export interface DevSolidModelPayload {

@@ -455,6 +455,7 @@ pub fn run() {
             db::read_geometry_cache_manifest,
             db::write_geometry_cache_version,
             db::write_geometry_cache_manifest,
+            db::invalidate_glb_cache_entry,
             db::get_gim_index,
             db::validate_gim_cache,
             db::get_db_path,

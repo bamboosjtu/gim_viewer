@@ -3133,6 +3133,67 @@ pub fn write_geometry_cache_manifest(
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Tauri command：只失效一个 DEV 的 GLB 与 manifest 条目。
+///
+/// 该命令用于 warm fast path 解析失败后的定向恢复。manifest 先以原子
+/// 替换方式移除条目，再删除对应文件；任何中间失败都不会把坏 GLB
+/// 重新宣传为有效缓存。其它 DEV 条目、SQLite 语义索引和 IFC 缓存不受影响。
+#[tauri::command]
+pub fn invalidate_glb_cache_entry(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    entry_path: String,
+    source_sha256: Option<String>,
+) -> Result<(), String> {
+    ensure_cache_project_id(project_id)?;
+    let normalized = normalize_cache_lookup_path(&entry_path);
+    if !normalized.starts_with("dev/") {
+        return Err("GLB 单项失效只允许 DEV 条目".to_string());
+    }
+    validate_entry_path(&entry_path)?;
+    {
+        let state = app_handle.state::<DbState>();
+        let guard = state
+            .0
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        ensure_project_exists(&guard, project_id)?;
+        ensure_project_source_sha(&guard, project_id, source_sha256.as_deref())?;
+    }
+
+    let manifest_path = geometry_manifest_path(&app_handle, project_id).ok();
+    if let Some(path) = manifest_path.as_ref() {
+        if path.exists() {
+            let bytes = stdfs::read(path).map_err(|e| format!("读取 GLB manifest 失败: {}", e))?;
+            let mut manifest = serde_json::from_slice::<GeometryCacheManifest>(&bytes)
+                .map_err(|e| format!("解析 GLB manifest 失败: {}", e))?;
+            if let Some(expected) = source_sha256.as_deref() {
+                if manifest.source_sha256 != expected {
+                    return Err("GLB manifest source SHA 与当前工程不一致".to_string());
+                }
+            }
+            let mut seen = HashSet::new();
+            for entry in &manifest.entries {
+                validate_geometry_manifest_entry_shape(entry, &mut seen)?;
+            }
+            manifest.entries.retain(|entry| {
+                normalize_cache_lookup_path(&entry.entry_path) != normalized
+            });
+            let updated = serde_json::to_vec(&manifest)
+                .map_err(|e| format!("序列化 GLB manifest 失败: {}", e))?;
+            atomic_write(path, &updated, " GLB manifest")?;
+        }
+    }
+
+    let glb_path = glb_cache_file_path(&app_handle, project_id, &entry_path)?;
+    match stdfs::remove_file(&glb_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("删除 DEV GLB 缓存失败: {}", error)),
+    }
+    Ok(())
+}
+
 /// Tauri command：写入 GLB 几何缓存版本标记文件。
 ///
 /// 在 `cacheGlbFiles` 完成所有 MOD/STL → .glb 序列化后调用一次，

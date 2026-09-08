@@ -4,6 +4,7 @@ import type { AppState } from '../../app/state.js';
 import type { CbmNode } from '../../gim/types.js';
 import {
   tryDevGlbFastPath,
+  recoverFailedDevGlbCaches,
   loadScopedRawFallbackGeometry,
   type AutoLoadProgress,
   type DevGlbFastPathProfile,
@@ -434,6 +435,129 @@ describe('DEV GLB fast path v3', () => {
     expect(result.profile.fallbackReason).toBe('session-invalid');
     expect(deps.loadDevGlb).not.toHaveBeenCalled();
     expect(state.loadedXmlModGroups.size).toBe(0);
+  });
+
+  it('坏 GLB 只失效并重建对应 DEV，下一次 warm fast path 不再进入 raw fallback', async () => {
+    const state = makeState();
+    const nodes = [seed('CBM/bad.cbm', 'DEV/bad.dev')];
+    let currentManifest = manifest([
+      { entry_path: 'DEV/bad.dev', status: 'glb', size: 12 },
+    ]);
+    const rebuiltBytes = validGlb();
+    let storedBytes: Uint8Array | null = null;
+    const writtenManifests: Array<Array<{ entry_path: string; status: 'glb' | 'empty'; size: number }>> = [];
+    const invalidate = vi.fn(async () => undefined);
+    const deps = {
+      readGeometryCacheManifest: vi.fn(async () => currentManifest),
+      writeGeometryCacheManifest: vi.fn(async (
+        _projectId: number,
+        _sourceSha256: string,
+        entries: Array<{ entry_path: string; status: 'glb' | 'empty'; size: number }>,
+      ) => {
+        currentManifest = manifest(entries);
+        writtenManifests.push(entries);
+        return 'manifest';
+      }),
+      invalidateGlbCacheEntry: invalidate,
+      serializeDevToGlb: vi.fn(async () => rebuiltBytes),
+      loadDevGlb: vi.fn(async (path: string) => renderableGroup(path)),
+      writeGlbFile: vi.fn(async (_projectId: number, _path: string, bytes: Uint8Array) => {
+        storedBytes = bytes;
+        return 'bad.glb';
+      }),
+    };
+
+    const recovery = await recoverFailedDevGlbCaches(
+      state,
+      ['DEV/bad.dev'],
+      new Map([['DEV/bad.dev', new File(['source'], 'bad.dev')]]),
+      {
+        token: 1,
+        generation: 1,
+        projectId: 1,
+        sourceSha256: 'sha-test',
+        session: {
+          generation: 1,
+          projectId: 1,
+          sourceSha256: 'sha-test',
+          geometryToken: 1,
+        },
+      },
+      deps,
+    );
+
+    expect(recovery).toEqual({
+      repairedDevPaths: ['DEV/bad.dev'],
+      emptyDevPaths: [],
+      unresolvedDevPaths: [],
+    });
+    expect(invalidate).toHaveBeenCalledWith(1, 'DEV/bad.dev', 'sha-test');
+    expect(storedBytes).toBe(rebuiltBytes);
+    expect(writtenManifests).toHaveLength(1);
+    expect(currentManifest.entries).toEqual([
+      { entry_path: 'DEV/bad.dev', status: 'glb', size: 12 },
+    ]);
+
+    const warm = await tryDevGlbFastPath(
+      state,
+      new THREE.Scene(),
+      nodes,
+      vi.fn(),
+      1,
+      {
+        readGeometryCacheManifest: vi.fn(async () => currentManifest),
+        batchReadGlbFiles: vi.fn(async () => new Map([['DEV/bad.dev', storedBytes]])),
+        loadDevGlb: vi.fn(async (path: string) => renderableGroup(path)),
+        applyPlacementTransformToSceneUnits: vi.fn(),
+      },
+      { projectId: 1, generation: 1, sourceSha256: 'sha-test' },
+    );
+    expect(warm.loaded).toBe(true);
+    expect(warm.profile.failedDevPaths).toEqual([]);
+    expect(warm.profile.rawModFallbackCount).toBe(0);
+    expect(state.loadedXmlModGroups.size).toBe(1);
+  });
+
+  it('恢复任务在工程切换后不发布 GLB 或 manifest', async () => {
+    const state = makeState(1);
+    let release!: (bytes: Uint8Array) => void;
+    const pendingBytes = new Promise<Uint8Array>((resolve) => { release = resolve; });
+    const writeGlb = vi.fn(async () => 'bad.glb');
+    const writeManifest = vi.fn(async () => 'manifest');
+    const recovery = recoverFailedDevGlbCaches(
+      state,
+      ['DEV/bad.dev'],
+      new Map([['DEV/bad.dev', new File(['source'], 'bad.dev')]]),
+      {
+        token: 1,
+        generation: 1,
+        projectId: 1,
+        sourceSha256: 'sha-test',
+        session: {
+          generation: 1,
+          projectId: 1,
+          sourceSha256: 'sha-test',
+          geometryToken: 1,
+        },
+      },
+      {
+        readGeometryCacheManifest: vi.fn(async () => manifest([
+          { entry_path: 'DEV/bad.dev', status: 'glb', size: 12 },
+        ])),
+        invalidateGlbCacheEntry: vi.fn(async () => undefined),
+        serializeDevToGlb: vi.fn(async () => pendingBytes),
+        loadDevGlb: vi.fn(async (path: string) => renderableGroup(path)),
+        writeGlbFile: writeGlb,
+        writeGeometryCacheManifest: writeManifest,
+      },
+    );
+    state.currentProjectId = 2;
+    state.projectGeneration = 2;
+    release(validGlb());
+    const result = await recovery;
+    expect(result.repairedDevPaths).toEqual([]);
+    expect(writeGlb).not.toHaveBeenCalled();
+    expect(writeManifest).not.toHaveBeenCalled();
   });
 
   it('source-files scoped fallback 对同一失败 DEV 只解析一次并保留每个 placement 矩阵', async () => {
