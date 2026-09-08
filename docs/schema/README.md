@@ -41,7 +41,7 @@
 | 13 | [13-geometry-ir-schema.md](13-geometry-ir-schema.md) | 统一 Geometry IR、5 种 kind schema、解析管道分层和边界 | 当前 Geometry IR 的类型与解析边界 |
 | 14 | [14-line-catenary-study.md](14-line-catenary-study.md) | 线路 WIRE 字段、档距聚合、拓扑分类和审计接口的语义证据 | 当前仅保留地图上的实验性 2D 曲线和审计导出，独立线路 3D 未启用 |
 | 15 | [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) | demo-line 全量静态分析证据（5460 WIRE / 327 TOWER），KVALUE / MATRIX0 / BLHA / 拓扑分类字段语义确认 | 样本证据文档（demo-line） |
-| 17 | [17-batch-load-schema.md](17-batch-load-schema.md) | 变电 DEV/PHM/MOD/STL 批量读取、GLB manifest、失败隔离和缓存契约 | 当前 geometry-cache-v5 实现边界 |
+| 17 | [17-batch-load-schema.md](17-batch-load-schema.md) | 变电 DEV/PHM/MOD/GL/STL 批量读取、GLB manifest、失败隔离和缓存契约 | 当前 geometry-cache-v6 实现边界 |
 | 20 | [20-substation-partindex-alias-correction.md](20-substation-partindex-alias-correction.md) | demo-substation PARTINDEX 与 DEV SUBDEVICE 别名关系、几何实例基线更正 | 已落实到渲染入口 |
 | 22 | [22-ten-sample-verification-0824.md](22-ten-sample-verification-0824.md) | 十样本（4 变电 + 6 线路）字段、容器、引用和导出差异基线 | 当前跨样本证据 |
 

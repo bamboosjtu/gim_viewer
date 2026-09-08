@@ -93,7 +93,7 @@ src/
 │  ├─ gimSourceService.ts        # source header/magic、source identity 与类型映射
 │  ├─ gimOpenCore.ts             # Shared Core：session、解压输入、清理/性能边界
 │  ├─ powerlineRuntime.ts        # 线路 cache/Worker/graph/属性/地图生命周期
-│  ├─ substationRuntime.ts       # 变电 CBM/IFC/Fragments/DEV/MOD/STL 生命周期
+│  ├─ substationRuntime.ts       # 变电 CBM/IFC/Fragments/DEV/MOD/GL/STL 生命周期
 │  ├─ substationBackgroundRuntime.ts # 变电 post-interactive 轻/重任务协调
 │  ├─ substationSpatialSemanticCache.ts # 变电空间语义 snapshot/validate/hydrate
 │  ├─ devGeometryTelemetry.ts    # DEV cold/warm 聚合阶段诊断
@@ -177,7 +177,7 @@ desktop/src-tauri/
 | `substation_dev_property` | DEV 关键属性缓存（dev_path, key, value） |
 | `substation_dev_solid_model` | DEV→PHM 几何引用链缓存 |
 | `substation_dev_sub_device` | DEV 子设备引用链缓存 |
-| `substation_phm_solid_model` | PHM→MOD/STL 几何引用链缓存 |
+| `substation_phm_solid_model` | PHM→MOD/GL/STL 几何引用链缓存 |
 
 ### 线路工程表（6 张，2026-08 起统一以 `powerline_` 前缀命名）
 
@@ -198,7 +198,7 @@ desktop/src-tauri/
 
 ### 解析缓存版本域与失效机制
 
-- 定义在 `desktop/src-tauri/src/db.rs`：`LINE_PARSER_VERSION = "gim-line-parser-v1"`、`SUBSTATION_PARSER_VERSION = "gim-substation-parser-v22"`；`PARSER_VERSION = "gim-parser-v22"` 仅保留兼容/诊断
+- 定义在 `desktop/src-tauri/src/db.rs`：`LINE_PARSER_VERSION = "gim-line-parser-v1"`、`SUBSTATION_PARSER_VERSION = "gim-substation-parser-v23"`；`PARSER_VERSION = "gim-parser-v22"` 仅保留兼容/诊断
 - `validate_gim_cache` 按 `project_type` 校验对应 domain 字段；变电 Semantic Core 升级不会使线路 graph/属性/semantic pack 失效
 - 对应 domain 版本不匹配 → 缓存无效 → 完整解压/重建对应工程索引；旧共享版本按工程类型兼容迁移
 - 2026-08 v17：表名规范化迁移——变电表统一 `substation_` 前缀、线路表统一
@@ -271,7 +271,7 @@ source identity。
 
 Powerline Runtime 独立拥有线路 cache validation、semantic pack/SQLite warm path、冷
 Line Parser Worker、GimGraph/FAM/DEV 属性提交和地图/树 UI。Substation Runtime 独立拥有
-CBM/FAM/DEV/FileDevRelation、IFC/Fragments、DEV GLB 以及 MOD/STL 回退和 3D/tree UI。
+CBM/FAM/DEV/FileDevRelation、IFC/Fragments、DEV GLB 以及 MOD/GL/STL 回退和 3D/tree UI。
 两边共用 `ProjectLoadSession` guard，所有异步提交仍须通过 `state.isCurrentSession`。
 
 变电 Runtime 的产品就绪时刻按依赖拆分，而不是把全部 IFC 作为首屏门槛：
@@ -329,7 +329,7 @@ manifest，条目内容由 `DiskBackedFile` 在 `text()` / `arrayBuffer()` 时�
 `src/services/progressiveGeometryService.ts`，`allIfcReady` 后由变电 Background Coordinator
 以后台 heavy task 启动：
 
-- **统一序列化与渲染**：按唯一 DEV 迭代 `serializeDevToGlb（MOD/STL 只解析 1 遍）
+- **统一序列化与渲染**：按唯一 DEV 迭代 `serializeDevToGlb（MOD/GL/STL 只解析 1 遍）
   → writeGlbFile 落盘 → 逐 CBM 实例渲染到场景`，替代原
   "MOD 逐实例解析渲染 + GLB 序列化"两遍解析流程（首次打开耗时约减半）
 - **渐进显示**：每编译一个 DEV 场景立即更新，toast 显示 `正在后台编译几何模型 (X/Y)...`
@@ -337,8 +337,8 @@ manifest，条目内容由 `DiskBackedFile` 在 `text()` / `arrayBuffer()` 时�
 - **浏览器模式**：无 projectId / 非 Tauri 时跳过落盘与版本文件，仅渐进渲染
 - **中断安全**：项目切换 token 中断即退出且不写版本标记 →
   下次打开 `geometry_cache_version_match=false` 仅重建 geometry domain
-- **二次打开**：`tryDevGlbFastPath` 先读取 `geometry-cache-v5-dev-status` 的 DEV manifest，按 unique DEV 通过 `batch_read_glb_files` 二进制 envelope 批读；`empty` 为合法空结果，单个 DEV 的 GLB 不完整或读取/解析失败只做该 DEV 的 scoped 原始 MOD/STL 回退，manifest/source 结构损坏才整体重建 geometry cache。
-- **Phase 3/4 telemetry**：cold/warm geometry 只记录聚合 histogram 与最慢 DEV 摘要，覆盖 discovery、source/MOD/STL/mesh/bake/glTF composite、GLB read/write/parse、template parse、placement matrix、bbox、scene commit、placement slice/yield；同时记录 shared/fallback DEV、shared resource 数量和 placement slice p50/p95/max。IFC loader 另记录 Fragments cache composite、web-ifc/conversion + model callback composite、RAF/stable validation，无法拆分的第三方内部阶段明确保持 composite。
+- **二次打开**：`tryDevGlbFastPath` 先读取 `geometry-cache-v6-geometry-status` 的 DEV manifest，按 unique DEV 通过 `batch_read_glb_files` 二进制 envelope 批读；`empty`/`unsupported` 为合法的非渲染结果，`partial` 保留已解析几何；单个 DEV 的 GLB 不完整或读取/解析失败只做该 DEV 的 scoped 原始 MOD/GL/STL 回退，manifest/source 结构损坏才整体重建 geometry cache。
+- **Phase 3/4 telemetry**：cold/warm geometry 只记录聚合 histogram 与最慢 DEV 摘要，覆盖 discovery、source/MOD/GL/STL/mesh/bake/glTF composite、GLB read/write/parse、template parse、placement matrix、bbox、scene commit、placement slice/yield；同时记录 shared/fallback DEV、shared resource 数量和 placement slice p50/p95/max。IFC loader 另记录 Fragments cache composite、web-ifc/conversion + model callback composite、RAF/stable validation，无法拆分的第三方内部阶段明确保持 composite。
 
 ### DEV Geometry Runtime v2（Phase 4）
 
@@ -360,6 +360,23 @@ manifest，条目内容由 `DiskBackedFile` 在 `text()` / `arrayBuffer()` 时�
 - placement commit 使用保守 `maxSliceMs=6`、`maxPlacementsPerSlice=32`，每个 slice 后重新
   检查 session/geometry token；cold DEV compiler 仍保持“编译一个 DEV → yield → 下一个 DEV”的
   渐进边界，未引入 IFC 并发、Worker 或 InstancedMesh。
+
+### 变电跨厂商兼容性门（Phase 5）
+
+变电文本解析使用少量 vendor-neutral helper，而不是按导出厂商分支：
+`gimValueSemantics.ts` 统一 trim 后的空值 sentinel（`''`、`/`、`-`、`null`）、大小写不敏感
+KV 访问和 `BASEFAMILY`/`BASEFAMILYPOINTER` 的首个有效值选择；CBM、DEV、FAM、索引入库、
+缓存恢复和属性抽屉共用同一约定。`parseFamSections` 去 BOM，按 `=` 的最后一段取 value、
+value 前第一个非空段取 key，任意 section 名均可保留，因此支持三段式双语字段和 BIMBase 的
+`=中文名=值` 形态。
+
+IFC discovery 同时保留工程级 `IFC.NUM/IFCn` 和有效的 `IFCFILE/IFCGUID` 组件关联；所有目录
+和文件名查找均使用大小写/分隔符不敏感的 lookup identity，同时保留实际 source path。BIMBase
+的 `.gl` 与 `.mod` 共用 XML geometry parser；几何 manifest/诊断明确区分 `complete`、`partial`、
+`empty` 和 `unsupported`，未知 primitive 不会把一个 DEV 或整个工程变成伪造的 deterministic
+empty。该 gate 只改变变电兼容性与降级表达，保持 Phase 4 template/placement 数学和线路
+Runtime 稳定路径不变；相关版本为 `gim-substation-parser-v23` 与独立的
+`geometry-cache-v6-geometry-status`。
 
 ### 工程类型检测
 
