@@ -1179,8 +1179,6 @@ export async function tryDevGlbFastPath(
             projectSourceToViewerMatrix: state.projectSourceToViewerMatrix,
           });
           deepTelemetry.recordPlacementMatrix(performance.now() - matrixStarted, devPath);
-          deepTelemetry.recordSharedPlacement(devPath);
-          profile.sharedPlacementCount = (profile.sharedPlacementCount ?? 0) + 1;
         } else {
           const parseStarted = performance.now();
           profile.glbParseCount++;
@@ -1207,8 +1205,6 @@ export async function tryDevGlbFastPath(
           applyPlacementTransformToSceneUnits(loadedGroup, cbmTransform);
           applyProjectSourceToViewer(loadedGroup, state.projectSourceToViewerMatrix);
           deepTelemetry.record('placementTransform', performance.now() - transformStarted, devPath);
-          deepTelemetry.recordLegacyFallbackPlacement(devPath);
-          profile.legacyFallbackPlacementCount = (profile.legacyFallbackPlacementCount ?? 0) + 1;
         }
 
         if (!isCurrent()) {
@@ -1236,6 +1232,13 @@ export async function tryDevGlbFastPath(
         modRoot.add(loadedGroup);
         state.loadedXmlModGroups.set(instanceKey, loadedGroup);
         deepTelemetry.record('sceneCommit', performance.now() - sceneCommitStarted, devPath);
+        if (shared) {
+          deepTelemetry.recordSharedPlacement(devPath);
+          profile.sharedPlacementCount = (profile.sharedPlacementCount ?? 0) + 1;
+        } else {
+          deepTelemetry.recordLegacyFallbackPlacement(devPath);
+          profile.legacyFallbackPlacementCount = (profile.legacyFallbackPlacementCount ?? 0) + 1;
+        }
         const added: AddedGroup = { instanceKey, group: loadedGroup, shared };
         addedGroups.push(added);
         const perDev = addedGroupsByDev.get(failedKey) ?? [];

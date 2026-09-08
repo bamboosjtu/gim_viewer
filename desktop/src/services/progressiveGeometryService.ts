@@ -566,8 +566,6 @@ export async function runProgressiveDevGlbPipeline(
             projectSourceToViewerMatrix: state.projectSourceToViewerMatrix,
           });
           deepTelemetry.recordPlacementMatrix(performance.now() - matrixStarted, devPath);
-          deepTelemetry.recordSharedPlacement(devPath);
-          devGlbProfile.sharedPlacementCount = (devGlbProfile.sharedPlacementCount ?? 0) + 1;
         } else {
           const parseStarted = performance.now();
           glbParseCount++;
@@ -588,8 +586,6 @@ export async function runProgressiveDevGlbPipeline(
           deps.applyPlacementTransformToSceneUnits(group, cbmTransform);
           applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
           deepTelemetry.record('placementTransform', performance.now() - transformStarted, devPath);
-          deepTelemetry.recordLegacyFallbackPlacement(devPath);
-          devGlbProfile.legacyFallbackPlacementCount = (devGlbProfile.legacyFallbackPlacementCount ?? 0) + 1;
           group.userData[DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY] = true;
         }
 
@@ -611,6 +607,13 @@ export async function runProgressiveDevGlbPipeline(
         modRoot.add(group);
         state.loadedXmlModGroups.set(instanceKey, group);
         deepTelemetry.record('sceneCommit', performance.now() - sceneCommitStarted, devPath);
+        if (shared) {
+          deepTelemetry.recordSharedPlacement(devPath);
+          devGlbProfile.sharedPlacementCount = (devGlbProfile.sharedPlacementCount ?? 0) + 1;
+        } else {
+          deepTelemetry.recordLegacyFallbackPlacement(devPath);
+          devGlbProfile.legacyFallbackPlacementCount = (devGlbProfile.legacyFallbackPlacementCount ?? 0) + 1;
+        }
         devGroups.push({ instanceKey, group, shared });
         renderedInstances++;
       } catch (err) {
