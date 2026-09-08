@@ -41,7 +41,7 @@
 - 变电语义缓存使用独立的 `SUBSTATION_PARSER_VERSION=gim-substation-parser-v22`；线路使用 `LINE_PARSER_VERSION=gim-line-parser-v1`。旧 `PARSER_VERSION=gim-parser-v22` 字段仅作兼容/诊断，并按工程类型迁移，不会因变电 Semantic Core 升级而误使线路缓存失效。本版本引入 IFC Spatial Semantic Core selective/two-pass scan：Pass1 只保留空间/导航对象、必要 IFCREL、单位并收集 placement 候选偏移，Pass2 只物化实际引用的 placement 闭包；属性集、工程量、材质、分类、类型和分组不进入启动索引。几何 GLB 缓存版本为 `geometry-cache-v5-dev-status`，与语义版本独立。Fragments 缓存另绑定源 GIM SHA-256 与 `fragments-cache-v6` 运行时版本，旧记录缺少源 SHA 时视为失效。
 - 首次打开 GIM 时，通过 `cacheGeometryFiles` 缓存 DEV/PHM/MOD/STL 文件到 `app_data_dir/extracted/{projectId}/`（复用 `writeCacheFile`，沿用路径遍历防护）。
 - IFC 加载完成后自动启动渐进式 DEV GLB 管线（`progressiveGeometryService`），按 DEV 粒度一次解析、落盘并逐实例渲染 IFC 之外的 MOD/STL；用户无需逐节点点击才能看到几何。
-- 每个 unique DEV 在 `_manifest.json` 中记录 `status=glb|empty` 与字节数。缓存命中场景（`currentFiles=null`）先按 manifest 建立 DEV→CBM placement 映射，以 GIMR 二进制 envelope 分批读取 GLB；同一 DEV 的 GLB 最多读取一次，`empty` 不读取也不触发回退，随后每个 placement 独立加载并应用 CBM 矩阵。单个 DEV 的 GLB 缺失、大小/header 不符、真实读取或解析失败只隔离该 DEV，并按 DEV path 做 scoped 原始 MOD/STL 回退；manifest/source 结构损坏或版本失效才重建整个 geometry cache。
+- 每个 unique DEV 在 `_manifest.json` 中记录 `status=glb|empty` 与字节数。缓存命中场景（`currentFiles=null`）先按 manifest 建立 DEV→CBM placement 映射，以 GIMR 二进制 envelope 分批读取 GLB；同一 DEV 的 GLB 最多读取一次，随后进入 session-local `DevGlbTemplatePool`，clean static DEV 只 parse 一次并由 placement nodes 共享 geometry/material，`empty` 不读取也不触发回退。单个 DEV 的 GLB 缺失、大小/header 不符、真实读取或解析失败只隔离该 DEV，并按 DEV path 做 scoped 原始 MOD/STL 回退；无法证明静态可共享的 DEV 只回退 legacy placement；manifest/source 结构损坏或版本失效才重建整个 geometry cache。
 - 旧缓存或写入/序列化未完成时不提交几何版本标记；geometry cache 与 CBM/IFC 语义缓存独立，几何版本失效不会重新解压或重建语义索引。partial failure 的成功 GLB 保留在场景中，避免将单个坏 DEV 放大为全项目 MOD/STL 长尾。
 - 缓存命中场景的节点按需回放仍由 `nodeInteractionService` 通过 `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` 读取 DEV/PHM/MOD/STL；GLB fast path 不可用时保留原始文件解析。
 
@@ -301,11 +301,11 @@ IFC + DEV/PHM/MOD/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路径
 
 ### 7.1 DEV GLB warm fast path（geometry-cache-v5）
 
-- manifest 以大小写不敏感的 `DEV/<name>.dev` 为唯一键；同一 DEV 被多个 CBM placement 引用时只批量读取一次 GLB bytes，随后每个 placement 独立 `loadDevGlb`，继续应用各自 CBM 累积矩阵。
+- manifest 以大小写不敏感的 `DEV/<name>.dev` 为唯一键；同一 DEV 被多个 CBM placement 引用时只批量读取一次 GLB bytes，并在当前 session 内只调用一次 template parse。每个 placement 只创建独立 Object3D hierarchy，复用 immutable BufferGeometry/base Material，继续应用各自 CBM 累积矩阵；不能证明可共享的 DEV 按 DEV 隔离使用 legacy placement。
 - Rust `batch_read_glb_files` 返回 GIMR v2 二进制 envelope，前端按最多 256 个文件或预计 64 MiB 分批；不使用旧 JSON 数组响应。
 - `empty` 是合法确定性结果：不读文件、不解析、不触发原始 MOD fallback。单个 DEV 的 manifest 缺项、GLB 缺失/截断/header 或 size 不符、真实读取/解析错误只进入该 DEV 的 scoped fallback；manifest/source 结构损坏或版本失效才重建整个 geometry cache。
 - warm fast path 的单个 DEV GLB parse/解码失败会先定向移除该 DEV 的 manifest 条目和文件，再从对应原始几何重建；只有通过 GLB header、实际解析/可渲染校验且 source SHA 一致后才原子写回 GLB/manifest。恢复失败只让该 DEV 进入 scoped raw fallback，不清理其它 DEV，也不写入坏的完成缓存。
-- profile 随 `finishModStl` 写入诊断：`cbmInstanceCount`、`uniqueDevCount`、`glbDevCount`、`emptyDevCount`、`glbBatchReadMs`、`glbReadBytes`、`glbParseCount`、`glbParseMs`、`rawModFallbackCount`、`failedDevCount`、`failedDevPaths`、`failureType`、`partialRawFallbackCount`、`partialRawFallbackInstanceCount`、`successfulGlbDevCount`、`successfulGlbInstanceCount`、`fullProjectRawFallbackCount` 及 scoped fallback 的耗时/行数。
+- profile 随 `finishModStl` 写入诊断：除既有 `cbmInstanceCount`、`uniqueDevCount`、`glbDevCount`、`emptyDevCount`、`glbBatchReadMs`、`glbReadBytes`、`glbParseCount`、`glbParseMs`、fallback 和成功计数外，还记录 `templateParseCount/templateParseMs`、`templateShareableCount/templateFallbackCount`、fallback DEV/reason、`sharedPlacementCount`、`legacyFallbackPlacementCount`、shared geometry/material/texture 数量、placement matrix/bbox/scene commit、slice yield 和 slice p50/p95/max。clean path 的 `templateParseCount` 应接近成功 unique GLB DEV 数，而不是 placement 数。
 - `GEOMETRY_CACHE_VERSION` 由 `geometry-cache-v4-phm-color` bump 为 `geometry-cache-v5-dev-status`；旧 manifest（缺少 status）会被视为不完整并重新生成。
 
 ---
@@ -334,6 +334,7 @@ IFC + DEV/PHM/MOD/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路径
 - IFC Spatial Semantic Core 采用 selective/two-pass scan：首遍只保留空间/导航对象、必要关系和单位；次遍只物化导航对象引用到的 placement 闭包。属性集、工程量、材质、分类、类型和分组由 Fragments 在属性面板按需读取。
 - IFC 通过 OBC Fragments 加载到 Three.js；DEV→PHM→MOD/STL 通过 Geometry IR 和渐进式 DEV GLB 管线渲染到同一场景。PHM 的变换矩阵和颜色覆盖在实例级应用。
 - 每个 unique DEV 的几何缓存 manifest 记录 `status=glb|empty`。合法 `empty` 是成功结果；单个 DEV 的 GLB 读取或解析失败只触发该 DEV 的 scoped raw MOD/STL fallback，整体 manifest/source 损坏才重建几何缓存。
+- DEV geometry Phase 4 使用 session-local template/placement runtime：cold/warm 共用一次 GLB parse 语义，静态 DEV placement 共享 immutable geometry/material，不能证明可共享的 DEV 仅按 DEV 回退 legacy placement；placement commit 使用 bounded slices，工程切换后 stale slice 不提交。
 
 ### 9.2 缓存与交互
 

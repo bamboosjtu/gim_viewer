@@ -338,7 +338,28 @@ manifest，条目内容由 `DiskBackedFile` 在 `text()` / `arrayBuffer()` 时�
 - **中断安全**：项目切换 token 中断即退出且不写版本标记 →
   下次打开 `geometry_cache_version_match=false` 仅重建 geometry domain
 - **二次打开**：`tryDevGlbFastPath` 先读取 `geometry-cache-v5-dev-status` 的 DEV manifest，按 unique DEV 通过 `batch_read_glb_files` 二进制 envelope 批读；`empty` 为合法空结果，单个 DEV 的 GLB 不完整或读取/解析失败只做该 DEV 的 scoped 原始 MOD/STL 回退，manifest/source 结构损坏才整体重建 geometry cache。
-- **Phase 3 telemetry**：cold/warm geometry 只记录聚合 histogram 与最慢 DEV 摘要，覆盖 discovery、source/MOD/STL/mesh/bake/glTF composite、GLB read/write/parse、placement transform、bbox、scene commit 和 yield；IFC loader 另记录 Fragments cache composite、web-ifc/conversion + model callback composite、RAF/stable validation，无法拆分的第三方内部阶段明确保持 composite。
+- **Phase 3/4 telemetry**：cold/warm geometry 只记录聚合 histogram 与最慢 DEV 摘要，覆盖 discovery、source/MOD/STL/mesh/bake/glTF composite、GLB read/write/parse、template parse、placement matrix、bbox、scene commit、placement slice/yield；同时记录 shared/fallback DEV、shared resource 数量和 placement slice p50/p95/max。IFC loader 另记录 Fragments cache composite、web-ifc/conversion + model callback composite、RAF/stable validation，无法拆分的第三方内部阶段明确保持 composite。
+
+### DEV Geometry Runtime v2（Phase 4）
+
+`devGlbTemplateRuntime.ts` 是变电 Runtime 内部的 session-local geometry ownership 边界，
+不是跨工程全局缓存：
+
+- cold 的 `serializeDevToGlb` 和 warm 的 GLB bytes 都进入同一个 `DevGlbTemplatePool`；每个
+  normalized DEV 在当前 `ProjectLoadSession` 内只做一次 GLTF parse，随后保留静态 hierarchy
+  作为 template。
+- placement 只 clone Object3D 节点，复用 template 的 BufferGeometry、base Material 和
+  texture；CBM 的 mm→m 仿射按“原 Mesh local matrix × CBM”精确组合，project source 矩阵仍在
+  root 上使用 exact Matrix4，不经过 TRS 分解。`state.loadedXmlModGroups` 仍以
+  `instanceKey → placement Group` 记录每个实例。
+- SkinnedMesh、morph/animation、非有限矩阵、可变 render/material state 等无法证明静态可共享
+  的 DEV，只在 DEV 粒度回退到 legacy placement，不把整个工程退回 raw MOD。
+- template pool 拥有 shared GPU resources，placement 只拥有节点和高亮 clone material；工程清理
+  先移除 placement，再由 pool exactly-once dispose shared resources。legacy fallback 的资源仍按
+  placement 独占清理。
+- placement commit 使用保守 `maxSliceMs=6`、`maxPlacementsPerSlice=32`，每个 slice 后重新
+  检查 session/geometry token；cold DEV compiler 仍保持“编译一个 DEV → yield → 下一个 DEV”的
+  渐进边界，未引入 IFC 并发、Worker 或 InstancedMesh。
 
 ### 工程类型检测
 

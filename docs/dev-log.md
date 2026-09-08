@@ -13,15 +13,15 @@
 
 ## 变电工程
 
-### P1 · 几何实例化与渲染长尾
+### P1 · 几何实例化与渲染长尾（Phase 4 结构性改造已完成）
 
 | 字段 | 当前定义 |
 |---|---|
-| 状态 | 待专项定位 |
-| 现象 | 正常 warm 运行中 DEV GLB fast path 可以完整命中（包括合法 `empty` DEV），GLB 解析本身约 1 秒量级，但 `fullModelReady` 仍可能远高于 `MOD/STL` 阶段；问题集中在实例化、场景提交或渲染尾部。 |
+| 状态 | Phase 4 已完成结构性改造；等待真实 Tauri corpus 重新测量 |
+| 现象 | 正常 warm 运行中 DEV GLB fast path 可以完整命中（包括合法 `empty` DEV）。现在 clean static DEV 在 session 内 template parse once，placement 节点按 bounded slices 提交；剩余 wall-clock 长尾需要真实样本 telemetry 再归因。 |
 | 影响 | 变电工程已经显示语义和首批几何后，仍需很长时间才达到完整模型状态。 |
-| 下一步 | 单独拆分实例创建、矩阵烘焙、场景提交和渲染稳定四段耗时，并给每段设资源上限；不得回退到全项目 raw MOD 重建。 |
-| 完成条件 | 至少三个真实变电样本的 warm `fullModelReady` 长尾有可重复归因；成功 GLB 与合法空 DEV 的结果、CBM placement 数量和空间位置不变。 |
+| 下一步 | 用 `templateParseCount`、shared/fallback 计数、placement slice p50/p95/max、scene commit 和内存采样复核真实样本；再决定 memory retention/unload、cold compiler Worker 或 IFC/Fragments 优化。 |
+| 完成条件 | 结构性 invariant 已由 unit/regression 覆盖：clean path parse≈unique DEV、placement 共享资源且不改写 geometry、A/B transform 等价、stale slice 不提交、cleanup exactly once。真实 wall-clock/RSS/Long Task 仍需 Tauri 运行证据。 |
 
 ### P1 · EMPTY_DEVICE_XML 与无几何装配节点提示
 
