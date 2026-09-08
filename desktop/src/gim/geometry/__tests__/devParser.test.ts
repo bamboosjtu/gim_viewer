@@ -38,6 +38,12 @@ SOLIDMODELS.NUM=0`;
       expect(doc.type).toBe('OTHERS');
     });
 
+    it('BASEFAMILY 为空时回退到 BASEFAMILYPOINTER', () => {
+      const text = `BASEFAMILY= /\nBASEFAMILYPOINTER=pointer.fam\nSOLIDMODELS.NUM=0`;
+      const doc = parseDev(text, 'DEV/pointer.dev');
+      expect(doc.baseFamily).toBe('pointer.fam');
+    });
+
     it('BASEFAMILY / SYMBOLNAME / TYPE 全部缺失时为空字符串', () => {
       const text = `SOLIDMODELS.NUM=0`;
       const doc = parseDev(text, 'DEV/empty.dev');

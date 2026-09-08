@@ -8,6 +8,7 @@ import {
   normalizedIfcBasename,
   stripIfcExtension,
 } from './modelIdentity.js';
+import { getFirstNonEmptyKv, isGimEmptyValue } from './gimValueSemantics.js';
 
 /**
  * 解析 CBM IFC 引用值的实际路径。
@@ -22,11 +23,12 @@ export type IfcPathResolveResult =
   | { kind: 'ambiguous'; candidates: string[] };
 
 export function resolveIfcPath(files: Map<string, File>, ref: string): IfcPathResolveResult {
+  if (isGimEmptyValue(ref)) return { kind: 'not-found' };
   const normalizedRef = normalizeEntryPath(ref);
   if (!normalizedRef) return { kind: 'not-found' };
 
-  // 保留 Map 的真实键；后续解析会直接 `files.get(entry.path)`，不能把
-  // Windows 反斜杠键只转换成展示用的正斜杠而丢失可读性/可访问性。
+  // 保留 Map 的真实键；后续解析通过 getFileByPath 读取，不能把 Windows
+  // 反斜杠键只转换成展示用的正斜杠而丢失可读性/可访问性。
   const allPaths = Array.from(files.keys());
   const exactCandidates = allPaths.filter((path) => normalizeEntryPath(path) === normalizedRef);
   if (normalizedRef.includes('/')) {
@@ -76,9 +78,9 @@ export async function discoverIfcFromCBM(files: Map<string, File>): Promise<IfcE
     if (visitedCount > PARSER_LIMITS.maxCbmNodes) throw new Error(`CBM IFC 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
     const f = getFileByPath(files, p) ?? fileByLowerPath.get(visitKey); if (!f) return;
     const kv = parseKeyValue(await f.text());
-    const n = parseBoundedCount(kv['IFC.NUM'], 'IFC.NUM');
+    const n = parseBoundedCount(getFirstNonEmptyKv(kv, ['IFC.NUM']), 'IFC.NUM');
     for (let i = 0; i < n; i++) {
-      const r = kv[`IFC${i}`];
+      const r = getFirstNonEmptyKv(kv, [`IFC${i}`]);
       if (!r) continue;
       const nm = stripIfcExtension(r.split(/[\\/]/).pop() || r);
       const resolved = resolveIfcPath(files, r);
@@ -106,9 +108,13 @@ export async function discoverIfcFromCBM(files: Map<string, File>): Promise<IfcE
         // 引用仍保留在节点和诊断日志中，用户可据此定位缺失资源。
       }
     }
-    const sn = parseBoundedCount(kv['SUBSYSTEMS.NUM'], 'SUBSYSTEMS.NUM');
-    for (let i = 0; i < sn; i++) { const s = kv[`SUBSYSTEM${i}`]; if (s) await walk(`CBM/${s}`, depth + 1); }
-    const sg = kv['SUBSYSTEM']; if (sg) await walk(`CBM/${sg}`, depth + 1);
+    const sn = parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBSYSTEMS.NUM']), 'SUBSYSTEMS.NUM');
+    for (let i = 0; i < sn; i++) {
+      const s = getFirstNonEmptyKv(kv, [`SUBSYSTEM${i}`]);
+      if (s) await walk(`CBM/${s}`, depth + 1);
+    }
+    const sg = getFirstNonEmptyKv(kv, ['SUBSYSTEM']);
+    if (sg) await walk(`CBM/${sg}`, depth + 1);
   }
   const entry = hasFileByPath(files, 'CBM/project.cbm')
     ? 'CBM/project.cbm'

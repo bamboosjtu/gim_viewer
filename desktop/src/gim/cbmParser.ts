@@ -5,11 +5,16 @@ import { parseDev } from './geometry/devParser.js';
 import { normalizeEntityName } from './entityName.js';
 import { PARSER_LIMITS, parseBoundedCount } from './parserLimits.js';
 import { getFileByPath } from './fileLookup.js';
+import {
+  getFirstNonEmptyKv,
+  resolveBaseFamilyReference,
+} from './gimValueSemantics.js';
 
 /** 解析 KEY=VALUE 格式文本 */
 export function parseKeyValue(text: string): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const line of text.split(/\r?\n/)) {
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^\uFEFF/, '');
     const idx = line.indexOf('=');
     if (idx > 0) result[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
   }
@@ -53,16 +58,16 @@ function isPlaceholderSystemName(s: string): boolean {
 function extractDisplayName(kv: Record<string, string>, path: string): { name: string; systemNames: string[] } {
   const systemNames: string[] = [];
   for (let i = 1; i <= 4; i++) {
-    const sn = kv[`SYSTEMNAME${i}`];
+    const sn = getFirstNonEmptyKv(kv, [`SYSTEMNAME${i}`]);
     if (sn && !isPlaceholderSystemName(sn)) systemNames.push(sn.trim());
   }
 
-  const rawPartName = kv['PARTNAME'] || '';
+  const rawPartName = getFirstNonEmptyKv(kv, ['PARTNAME']);
   // PARTNAME 占位符（如 Bentley 导出的 "&GN"）不参与名称回退
   const partName = isPlaceholderSystemName(rawPartName) ? '' : rawPartName.trim();
-  const sysClassifyName = kv['SYSCLASSIFYNAME'] || '';
+  const sysClassifyName = getFirstNonEmptyKv(kv, ['SYSCLASSIFYNAME']);
   // ENTITYNAME 大小写三态实证（PartIndex/F4SYSTEM 等），统一归一化（docs/schema/04）
-  const entityName = normalizeEntityName(kv['ENTITYNAME'] || '');
+  const entityName = normalizeEntityName(getFirstNonEmptyKv(kv, ['ENTITYNAME']));
   const fileName = path.split('/').pop()!.replace(/\.cbm$/i, '');
 
   let name: string;
@@ -116,7 +121,7 @@ async function readDevInfo(
   devPath: string,
   files: Map<string, File>,
 ): Promise<{ symbolName: string; type: string } | null> {
-  const normalized = devPath.startsWith('DEV/') ? devPath : `DEV/${devPath}`;
+  const normalized = normalizeDevReference(devPath);
   const devFile = getFileByPath(files, normalized);
   if (!devFile) return null;
   try {
@@ -195,10 +200,11 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
   const devInfoCache = new Map<string, { symbolName: string; type: string } | null>();
 
   async function readDevCached(devPath: string): Promise<{ symbolName: string; type: string } | null> {
-    const normalized = devPath.startsWith('DEV/') ? devPath : `DEV/${devPath}`;
-    if (devInfoCache.has(normalized)) return devInfoCache.get(normalized)!;
+    const normalized = normalizeDevReference(devPath);
+    const cacheKey = normalized.toLowerCase();
+    if (devInfoCache.has(cacheKey)) return devInfoCache.get(cacheKey)!;
     const info = await readDevInfo(devPath, files);
-    devInfoCache.set(normalized, info);
+    devInfoCache.set(cacheKey, info);
     return info;
   }
 
@@ -217,10 +223,10 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
       throw new Error(`CBM 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
     }
     const kv = parseKeyValue(await f.text());
-    const en = kv['ENTITYNAME'] || '';
+    const en = getFirstNonEmptyKv(kv, ['ENTITYNAME']);
     let { name, systemNames } = extractDisplayName(kv, p);
-    const cn = kv['SYSCLASSIFYNAME'] || kv['PARTNAME'] || '';
-    const devPath = kv['OBJECTMODELPOINTER'] || '';
+    const cn = getFirstNonEmptyKv(kv, ['SYSCLASSIFYNAME', 'PARTNAME']);
+    const devPath = getFirstNonEmptyKv(kv, ['OBJECTMODELPOINTER']);
 
     // 读取 DEV SYMBOLNAME/TYPE（回填到节点，供 getNodeDisplayName 使用）
     let devSymbolName = '';
@@ -252,16 +258,16 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     const children: CbmNode[] = [];
 
     // 1. SUBSYSTEM 单值引用
-    const sg = kv['SUBSYSTEM'];
+    const sg = getFirstNonEmptyKv(kv, ['SUBSYSTEM']);
     if (sg) {
       const c = await build(`CBM/${sg}`, depth + 1);
       if (c) children.push(c);
     }
 
     // 2. SUBSYSTEMS.NUM + SUBSYSTEMi 数组引用
-    const sn = parseBoundedCount(kv['SUBSYSTEMS.NUM'], 'SUBSYSTEMS.NUM');
+    const sn = parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBSYSTEMS.NUM']), 'SUBSYSTEMS.NUM');
     for (let i = 0; i < sn; i++) {
-      const s = kv[`SUBSYSTEM${i}`];
+      const s = getFirstNonEmptyKv(kv, [`SUBSYSTEM${i}`]);
       if (s) {
         const c = await build(`CBM/${s}`, depth + 1);
         if (c) children.push(c);
@@ -269,9 +275,9 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     }
 
     // 3. SUBDEVICES.NUM + SUBDEVICEi 数组引用（F4System 内部子设备分组）
-    const dn2 = parseBoundedCount(kv['SUBDEVICES.NUM'], 'SUBDEVICES.NUM');
+    const dn2 = parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBDEVICES.NUM']), 'SUBDEVICES.NUM');
     for (let i = 0; i < dn2; i++) {
-      const s = kv[`SUBDEVICE${i}`];
+      const s = getFirstNonEmptyKv(kv, [`SUBDEVICE${i}`]);
       if (s) {
         const c = await build(`CBM/${s}`, depth + 1);
         if (c) children.push(c);
@@ -309,12 +315,12 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
       name,
       entityName: en,
       children,
-      famPath: kv['BASEFAMILY'] || '',
+      famPath: resolveBaseFamilyReference(kv),
       devPath,
-      ifcFile: kv['IFCFILE'] || '',
-      ifcGuid: (kv['IFCGUID'] || '').replace(/\$+$/, '').trim(),
+      ifcFile: getFirstNonEmptyKv(kv, ['IFCFILE']),
+      ifcGuid: getFirstNonEmptyKv(kv, ['IFCGUID']).replace(/\$+$/, '').trim(),
       classifyName: cn,
-      transformMatrix: kv['TRANSFORMMATRIX'] || '',
+      transformMatrix: getFirstNonEmptyKv(kv, ['TRANSFORMMATRIX']),
       systemNames,
       devSymbolName,
       devType,
@@ -353,9 +359,10 @@ async function expandDevSubDevices(
   }
   if (!devVisited) devVisited = new Set<string>();
 
-  const normalizedDevPath = devPath.startsWith('DEV/') ? devPath : `DEV/${devPath}`;
-  if (devVisited.has(normalizedDevPath)) return [];
-  devVisited.add(normalizedDevPath);
+  const normalizedDevPath = normalizeDevReference(devPath);
+  const devVisitKey = normalizedDevPath.toLowerCase();
+  if (devVisited.has(devVisitKey)) return [];
+  devVisited.add(devVisitKey);
 
   // 从缓存读取 DEV 文档（若已解析过）
   const devFile = getFileByPath(files, normalizedDevPath);
@@ -376,7 +383,7 @@ async function expandDevSubDevices(
     }
     const subDevice = devDoc.subDevices[i];
     const childDevPath = subDevice.devPath;
-    const normalizedChildDevPath = childDevPath.startsWith('DEV/') ? childDevPath : `DEV/${childDevPath}`;
+    const normalizedChildDevPath = normalizeDevReference(childDevPath);
     const virtualPath = `${parentCbmPath}#dev:${i}:${childDevPath}`;
 
     // 从缓存获取子 DEV 的 SYMBOLNAME/TYPE
@@ -385,7 +392,8 @@ async function expandDevSubDevices(
     let grandChildren: CbmNode[] = [];
     try {
       // 优先查缓存
-      let childInfo = devInfoCache.get(normalizedChildDevPath);
+      const childCacheKey = normalizedChildDevPath.toLowerCase();
+      let childInfo = devInfoCache.get(childCacheKey);
       if (childInfo === undefined) {
         const childFile = getFileByPath(files, normalizedChildDevPath);
         if (childFile) {
@@ -394,7 +402,7 @@ async function expandDevSubDevices(
         } else {
           childInfo = null;
         }
-        devInfoCache.set(normalizedChildDevPath, childInfo);
+        devInfoCache.set(childCacheKey, childInfo);
       }
       if (childInfo) {
         childSymbolName = childInfo.symbolName;
@@ -442,6 +450,12 @@ async function expandDevSubDevices(
   }
 
   return children;
+}
+
+/** DEV 引用只规范分隔符和目录前缀，lookup identity 另按大小写不敏感处理。 */
+function normalizeDevReference(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  return normalized.toLowerCase().startsWith('dev/') ? normalized : `DEV/${normalized}`;
 }
 
 /** 构建 CBM 文件名 → CbmNode 索引 */

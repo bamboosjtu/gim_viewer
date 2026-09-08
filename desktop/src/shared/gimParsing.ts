@@ -5,5 +5,13 @@
  * 避免 ui → gim 的直接依赖。
  */
 
-export { parseFamSections } from '../gim/famParser.js';
+export { parseFamSections, parseFamSectionsWithDiagnostics } from '../gim/famParser.js';
 export { parseKeyValue } from '../gim/cbmParser.js';
+export { getFileByPath } from '../gim/fileLookup.js';
+export {
+  GIM_EMPTY_SENTINELS,
+  getCaseInsensitiveKv,
+  getFirstNonEmptyKv,
+  isGimEmptyValue,
+  resolveBaseFamilyReference,
+} from '../gim/gimValueSemantics.js';

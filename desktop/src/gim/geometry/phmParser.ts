@@ -17,6 +17,11 @@
 
 import type { PhmDocument, PhmSolidModelEntry, XmlModColor } from './ir.js';
 import { parseBoundedCount } from '../parserLimits.js';
+import {
+  getCaseInsensitiveKv,
+  getFirstNonEmptyKv,
+  isGimEmptyValue,
+} from '../gimValueSemantics.js';
 
 /** 单位矩阵（列主序，长度 16） */
 const IDENTITY_MATRIX: number[] = [
@@ -34,26 +39,27 @@ const IDENTITY_MATRIX: number[] = [
  */
 export function parsePhm(text: string, phmPath: string): PhmDocument {
   const kv = parsePhmKeyValue(text);
-  const num = parseBoundedCount(kv['SOLIDMODELS.NUM'], 'SOLIDMODELS.NUM');
+  const num = parseBoundedCount(getFirstNonEmptyKv(kv, ['SOLIDMODELS.NUM']), 'SOLIDMODELS.NUM');
   if (num === 0) {
     return { phmPath, solidModels: [], isEmpty: true, colorMaxA: 0 };
   }
 
-  const solidModels: PhmSolidModelEntry[] = [];
+  const solidModelSlots: Array<PhmSolidModelEntry | undefined> = [];
   for (let i = 0; i < num; i++) {
-    const solidModelPath = kv[`SOLIDMODEL${i}`];
+    const solidModelPath = getFirstNonEmptyKv(kv, [`SOLIDMODEL${i}`]);
     if (!solidModelPath) continue;
 
-    const transformMatrixRaw = kv[`TRANSFORMMATRIX${i}`];
-    const colorRaw = kv[`COLOR${i}`];
+    const transformMatrixRaw = getCaseInsensitiveKv(kv, `TRANSFORMMATRIX${i}`);
+    const colorRaw = getCaseInsensitiveKv(kv, `COLOR${i}`);
 
-    solidModels.push({
+    solidModelSlots[i] = {
       solidModelPath,
-      transformMatrix: parseTransformMatrix(transformMatrixRaw),
-      color: parseColor(colorRaw),
-    });
+      transformMatrix: parseTransformMatrix(typeof transformMatrixRaw === 'string' ? transformMatrixRaw : undefined),
+      color: parseColor(typeof colorRaw === 'string' ? colorRaw : undefined),
+    };
   }
 
+  const solidModels = solidModelSlots.filter((entry): entry is PhmSolidModelEntry => entry !== undefined);
   const colorMaxA = solidModels.reduce((max, entry) => Math.max(max, entry.color?.a ?? 0), 0);
 
   return {
@@ -71,7 +77,8 @@ export function parsePhm(text: string, phmPath: string): PhmDocument {
  */
 function parsePhmKeyValue(text: string): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const line of text.split(/\r?\n/)) {
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/^\uFEFF/, '');
     const idx = line.indexOf('=');
     if (idx > 0) {
       const key = line.slice(0, idx).trim();
@@ -88,7 +95,7 @@ function parsePhmKeyValue(text: string): Record<string, string> {
  * 缺失或格式异常时回退单位矩阵。
  */
 function parseTransformMatrix(raw: string | undefined): number[] {
-  if (!raw) return [...IDENTITY_MATRIX];
+  if (typeof raw !== 'string' || isGimEmptyValue(raw)) return [...IDENTITY_MATRIX];
   const parts = raw.split(',').map((s) => s.trim());
   if (parts.length !== 16) return [...IDENTITY_MATRIX];
   const matrix = parts.map((p) => parseFloat(p));
@@ -107,7 +114,7 @@ function parseTransformMatrix(raw: string | undefined): number[] {
  * - R/G/B 取值 0-255
  */
 function parseColor(raw: string | undefined): XmlModColor | undefined {
-  if (!raw || raw.trim() === '') return undefined;
+  if (typeof raw !== 'string' || isGimEmptyValue(raw)) return undefined;
   const parts = raw.split(',').map((s) => s.trim());
   if (parts.length !== 4) return undefined;
   const [r, g, b, a] = parts.map((p) => parseInt(p, 10));

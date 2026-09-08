@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { scanIfcFiles, discoverIfcFromCBM } from '../gimIndexer.js';
+import { buildCbmTree, collectIfcRefs } from '../cbmParser.js';
 
 function textFile(text: string, name: string): File {
   return new File([text], name, { type: 'text/plain' });
@@ -65,5 +66,27 @@ describe('discoverIfcFromCBM IFC 路径解析', () => {
     ]);
     const entries = await discoverIfcFromCBM(files);
     expect(entries).toHaveLength(0);
+  });
+
+  it('工程级 IFC.NUM/IFCn 与节点级 IFCFILE/IFCGUID 进入同一 source model', async () => {
+    const files = new Map<string, File>([
+      ['CBM/project.cbm', textFile('SUBSYSTEM=root.cbm', 'project.cbm')],
+      ['CBM/root.cbm', textFile([
+        'ENTITYNAME=F4System',
+        'IFC.NUM=1',
+        'IFC0=model.ifc',
+        'IFCFILE=CBM/model.ifc',
+        'IFCGUID=component-guid',
+      ].join('\n'), 'root.cbm')],
+      ['CBM/model.ifc', textFile('ISO-10303-21', 'model.ifc')],
+    ]);
+
+    const entries = await discoverIfcFromCBM(files);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].path).toBe('CBM/model.ifc');
+    const tree = await buildCbmTree(files);
+    const refs = collectIfcRefs(tree!, entries);
+    expect(Array.from(refs.values()).flatMap((guids) => Array.from(guids)))
+      .toContain('component-guid');
   });
 });

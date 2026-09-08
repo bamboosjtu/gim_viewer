@@ -21,6 +21,10 @@ import type {
   DevSubDeviceEntry,
 } from './ir.js';
 import { parseBoundedCount } from '../parserLimits.js';
+import {
+  getFirstNonEmptyKv,
+  isGimEmptyValue,
+} from '../gimValueSemantics.js';
 
 /** 单位矩阵（列主序 / Three.js Matrix4.elements 布局，长度 16） */
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -34,7 +38,7 @@ const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 export function parseDev(text: string, devPath: string): DevDocument {
   const lines = text
     .split(/\r?\n/)
-    .map((l) => l.trim())
+    .map((l) => l.replace(/^\uFEFF/, '').trim())
     .filter((l) => l.length > 0);
 
   // 第一遍：提取简单标量字段
@@ -45,16 +49,19 @@ export function parseDev(text: string, devPath: string): DevDocument {
     kv[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
   }
 
-  const baseFamily = kv['BASEFAMILY'] || '';
-  const symbolName = kv['SYMBOLNAME'] || '';
-  const type = kv['TYPE'] || kv['DEVICETYPE'] || '';
-  const solidModelsNum = parseBoundedCount(kv['SOLIDMODELS.NUM'], 'SOLIDMODELS.NUM');
-  const subDevicesNum = parseBoundedCount(kv['SUBDEVICES.NUM'], 'SUBDEVICES.NUM');
+  const baseFamily = getFirstNonEmptyKv(kv, ['BASEFAMILY', 'BASEFAMILYPOINTER']);
+  const symbolName = getFirstNonEmptyKv(kv, ['SYMBOLNAME']);
+  const type = getFirstNonEmptyKv(kv, ['TYPE', 'DEVICETYPE']);
+  const solidModelsNum = parseBoundedCount(getFirstNonEmptyKv(kv, ['SOLIDMODELS.NUM']), 'SOLIDMODELS.NUM');
+  const subDevicesNum = parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBDEVICES.NUM']), 'SUBDEVICES.NUM');
 
   // 第二遍：按行顺序解析 SOLIDMODELS / SUBDEVICES 块
   // 关键：通过 currentBlock 追踪当前所处的块，正确归属 TRANSFORMMATRIXn
-  const solidModels: DevSolidModelEntry[] = [];
-  const subDevices: DevSubDeviceEntry[] = [];
+  // 先按声明索引保留槽位，再在末尾过滤空 sentinel。这样 Bentley 等
+  // 导出器的 `SOLIDMODEL0=` 不会让后续 `TRANSFORMMATRIX1` 错配到
+  // 实际的 SOLIDMODEL1；同样适用于 SUBDEVICE 的稀疏槽位。
+  const solidModelSlots: Array<DevSolidModelEntry | undefined> = [];
+  const subDeviceSlots: Array<DevSubDeviceEntry | undefined> = [];
   let currentBlock: 'solid' | 'sub' | null = null;
 
   for (const line of lines) {
@@ -62,59 +69,62 @@ export function parseDev(text: string, devPath: string): DevDocument {
     if (idx <= 0) continue;
     const key = line.slice(0, idx).trim();
     const value = line.slice(idx + 1).trim();
+    const keyUpper = key.toUpperCase();
 
     // 块开始标记
-    if (key === 'SOLIDMODELS.NUM') {
+    if (keyUpper === 'SOLIDMODELS.NUM') {
       currentBlock = 'solid';
       continue;
     }
-    if (key === 'SUBDEVICES.NUM') {
+    if (keyUpper === 'SUBDEVICES.NUM') {
       currentBlock = 'sub';
       continue;
     }
 
     // SOLIDMODELn 条目
-    const solidMatch = key.match(/^SOLIDMODEL(\d+)$/);
+    const solidMatch = keyUpper.match(/^SOLIDMODEL(\d+)$/);
     if (solidMatch) {
       const i = parseInt(solidMatch[1], 10);
       currentBlock = 'solid';
-      if (i >= 0 && i < solidModelsNum && value) {
-        solidModels.push({
+      if (i >= 0 && i < solidModelsNum && !isGimEmptyValue(value)) {
+        solidModelSlots[i] = {
           solidModelPath: value,
           transformMatrix: IDENTITY_MATRIX.slice(),
-        });
+        };
       }
       continue;
     }
 
     // SUBDEVICEn 条目
-    const subMatch = key.match(/^SUBDEVICE(\d+)$/);
+    const subMatch = keyUpper.match(/^SUBDEVICE(\d+)$/);
     if (subMatch) {
       const i = parseInt(subMatch[1], 10);
       currentBlock = 'sub';
-      if (i >= 0 && i < subDevicesNum && value) {
-        subDevices.push({
+      if (i >= 0 && i < subDevicesNum && !isGimEmptyValue(value)) {
+        subDeviceSlots[i] = {
           devPath: value,
           transformMatrix: IDENTITY_MATRIX.slice(),
-        });
+        };
       }
       continue;
     }
 
     // TRANSFORMMATRIXn（归属当前块）
-    const tmMatch = key.match(/^TRANSFORMMATRIX(\d+)$/);
+    const tmMatch = keyUpper.match(/^TRANSFORMMATRIX(\d+)$/);
     if (tmMatch) {
       const tmIndex = parseInt(tmMatch[1], 10);
       const matrix = parseTransformMatrix(value);
-      if (currentBlock === 'solid' && tmIndex >= 0 && tmIndex < solidModels.length) {
-        solidModels[tmIndex].transformMatrix = matrix;
-      } else if (currentBlock === 'sub' && tmIndex >= 0 && tmIndex < subDevices.length) {
-        subDevices[tmIndex].transformMatrix = matrix;
+      if (currentBlock === 'solid' && tmIndex >= 0 && solidModelSlots[tmIndex]) {
+        solidModelSlots[tmIndex]!.transformMatrix = matrix;
+      } else if (currentBlock === 'sub' && tmIndex >= 0 && subDeviceSlots[tmIndex]) {
+        subDeviceSlots[tmIndex]!.transformMatrix = matrix;
       }
       // currentBlock 为 null 时不归属（不应出现在合法 DEV 中）
     }
   }
 
+  const solidModels = solidModelSlots.filter((entry): entry is DevSolidModelEntry => entry !== undefined);
+  const subDevices = subDeviceSlots.filter((entry): entry is DevSubDeviceEntry => entry !== undefined);
   const isEmpty = solidModels.length === 0 && subDevices.length === 0;
 
   return {

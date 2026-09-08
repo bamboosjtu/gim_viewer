@@ -279,14 +279,16 @@ describe('parsePhm', () => {
       expect(doc.solidModels.length).toBe(1);
     });
 
-    it('大小写敏感（PHM 字段名大写）', () => {
+    it('字段名大小写不敏感并保留实际 indexed entry', () => {
       const text = [
-        'solidmodels.num=1',  // 小写，应被忽略
+        'solidmodels.num=1',
         'SOLIDMODEL0=a.mod',
         'COLOR0=',
       ].join('\n');
       const doc = parsePhm(text, 'PHM/lowercase.phm');
-      expect(doc.isEmpty).toBe(true);
+      expect(doc.isEmpty).toBe(false);
+      expect(doc.solidModels).toHaveLength(1);
+      expect(doc.solidModels[0].solidModelPath).toBe('a.mod');
     });
   });
 

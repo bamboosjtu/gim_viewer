@@ -578,6 +578,15 @@ TRANSFORMMATRIX=${matrix}`, 'project.cbm')],
     expect(tree!.transformMatrix).toBe(matrix);
   });
 
+  it('BASEFAMILY 为空时使用 BASEFAMILYPOINTER', async () => {
+    const files = new Map<string, File>([
+      ['CBM/project.cbm', textFile(
+        'ENTITYNAME=F4System\nBASEFAMILY=-\nBASEFAMILYPOINTER=pointer.fam', 'project.cbm')],
+    ]);
+    const tree = await buildCbmTree(files, '变电工程');
+    expect(tree!.famPath).toBe('pointer.fam');
+  });
+
   it('无 IFC 引用时 ifcFile 和 ifcGuid 为空', async () => {
     const files = new Map<string, File>([
       ['CBM/project.cbm', textFile('ENTITYNAME=F1System', 'project.cbm')],
