@@ -272,8 +272,10 @@ IFC 加载完成后自动启动渐进式 MOD/STL 几何管线       ✅ 已实�
 1. 用户选择 GIM → Shared Core 读取 GIMPKGS source header，Rust 计算 sha256 + file_size
 2. Substation Runtime 调用 `validate_gim_cache(expected_project_type=substation)`：检查
    parser domain + file_size + IFC 缓存文件存在性
-3. 命中 → 读取全部索引 → 恢复到 AppState → 直接渲染树和面板；几何恢复先读取 DEV GLB manifest，按 unique DEV 二进制批读并实例化 placement，只有 fast path 不完整或读取/解析失败时才按需读取 DEV/PHM/MOD/STL 原始文件
-4. 未命中 → 完整解压 → 解析 → 入库 → 缓存 IFC/DEV/PHM/MOD/STL 文件与几何引用链到本地磁盘
+3. 命中 → 读取全部索引 → 恢复到 AppState → 提交 `coreSemanticReady` 并先渲染基础树/搜索/属性/来源面板；IFC spatial semantic 在独立任务中提交 `spatialSemanticReady`，不阻塞基础 UI
+4. 首个 IFC 完成 Fragments 加载、坐标锚点、相机和选择初始化后记录 `firstUsableGeometryReady` / `interactive`；其余 IFC 继续按现有顺序串行后台加载，全部完成时单独记录 `allIfcReady`
+5. 几何恢复先读取 DEV GLB manifest，按 unique DEV 二进制批读并实例化 placement，只有 fast path 不完整或读取/解析失败时才按需读取 DEV/PHM/MOD/STL 原始文件
+6. 未命中 → 完整解压 → 解析 → 入库 → 缓存 IFC/DEV/PHM/MOD/STL 文件与几何引用链到本地磁盘；冷启动沿用相同 readiness 顺序
 
 ### 本地磁盘缓存
 
@@ -284,6 +286,7 @@ IFC + DEV/PHM/MOD/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路径
 - manifest 以大小写不敏感的 `DEV/<name>.dev` 为唯一键；同一 DEV 被多个 CBM placement 引用时只批量读取一次 GLB bytes，随后每个 placement 独立 `loadDevGlb`，继续应用各自 CBM 累积矩阵。
 - Rust `batch_read_glb_files` 返回 GIMR v2 二进制 envelope，前端按最多 256 个文件或预计 64 MiB 分批；不使用旧 JSON 数组响应。
 - `empty` 是合法确定性结果：不读文件、不解析、不触发原始 MOD fallback。单个 DEV 的 manifest 缺项、GLB 缺失/截断/header 或 size 不符、真实读取/解析错误只进入该 DEV 的 scoped fallback；manifest/source 结构损坏或版本失效才重建整个 geometry cache。
+- warm fast path 的单个 DEV GLB parse/解码失败会先定向移除该 DEV 的 manifest 条目和文件，再从对应原始几何重建；只有通过 GLB header、实际解析/可渲染校验且 source SHA 一致后才原子写回 GLB/manifest。恢复失败只让该 DEV 进入 scoped raw fallback，不清理其它 DEV，也不写入坏的完成缓存。
 - profile 随 `finishModStl` 写入诊断：`cbmInstanceCount`、`uniqueDevCount`、`glbDevCount`、`emptyDevCount`、`glbBatchReadMs`、`glbReadBytes`、`glbParseCount`、`glbParseMs`、`rawModFallbackCount`、`failedDevCount`、`failedDevPaths`、`failureType`、`partialRawFallbackCount`、`partialRawFallbackInstanceCount`、`successfulGlbDevCount`、`successfulGlbInstanceCount`、`fullProjectRawFallbackCount` 及 scoped fallback 的耗时/行数。
 - `GEOMETRY_CACHE_VERSION` 由 `geometry-cache-v4-phm-color` bump 为 `geometry-cache-v5-dev-status`；旧 manifest（缺少 status）会被视为不完整并重新生成。
 
@@ -317,7 +320,7 @@ IFC + DEV/PHM/MOD/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路径
 ### 9.2 缓存与交互
 
 - 语义缓存按线路/变电工程域隔离版本；几何缓存和 Fragments 缓存拥有独立版本与源 SHA 校验。几何缓存失效不会重新解压或重建 CBM、FAM、DEV 和 IFC Spatial 索引。
-- 首次打开完成 IFC 首批加载后，几何在后台渐进显示；缓存命中时从磁盘 manifest 和二进制 batch 恢复。项目切换由 `ProjectLoadSession` 和 geometry token 隔离旧任务。
+- 首次打开首个可用 IFC 后即进入 interactive，剩余 IFC 按顺序后台加载；`allIfcReady` 之后几何继续后台渐进显示。缓存命中时从磁盘 manifest 和二进制 batch 恢复。项目切换由 `ProjectLoadSession` 和 geometry token 隔离旧任务。
 - 属性抽屉提供“概览 / 参数 / 关系 / 来源”四页签，技术标识和长路径折叠，来源按钮负责定位到可读业务对象或图纸。
 
 ### 9.3 已知边界

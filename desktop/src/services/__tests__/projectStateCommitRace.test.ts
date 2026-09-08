@@ -146,6 +146,46 @@ function labelOf(files: Map<string, File>): string {
  * A 的结果和异常均不能覆盖或清空 B 的 CBM/关系/空间/STD/SLD 状态。
  */
 describe('openGimService AppState commit race', () => {
+  it('deferred spatial semantic does not hold core navigation readiness', async () => {
+    vi.clearAllMocks();
+    const spatialGate = deferred<any>();
+    const tree = makeTree('A');
+    const relation = makeRelation('A');
+    const file = new File(['A'], 'marker.cbm');
+    const files = new Map<string, File>([['CBM/marker.cbm', file]]);
+    mocks.discoverIfcFromCBM.mockResolvedValue([
+      { name: 'A.ifc', path: 'IFC/A.ifc', modelId: 'model-A' } satisfies IfcEntry,
+    ]);
+    mocks.buildCbmTree.mockResolvedValue(tree);
+    mocks.parseFileDevRelation.mockResolvedValue(relation);
+    mocks.buildSubstationSpatialIndexFromFiles.mockReturnValue(spatialGate.promise);
+    mocks.parseStdSldOnGimExtracted.mockResolvedValue(makeStdSldResult('A'));
+
+    const state = new AppState();
+    const session = state.activateProject(1, 'sha-a');
+    const loading = onGimExtracted(
+      state,
+      files,
+      vi.fn(),
+      'A',
+      '变电工程',
+      session,
+      { deferSpatialSemantic: true },
+    );
+    await loading;
+
+    expect(state.currentCbmTree?.name).toBe('A');
+    expect(state.fileDevRelations).toEqual(relation);
+    expect(state.substationSpatialIndex).toBeNull();
+    expect(mocks.buildAndRenderCbmTree).toHaveBeenCalled();
+    expect(mocks.renderFileDevPanel).toHaveBeenCalled();
+
+    spatialGate.resolve(makeSpatial('A'));
+    await vi.waitFor(() => {
+      expect(state.substationSpatialIndex?.models[0]?.modelId).toBe('model-A');
+    });
+  });
+
   it.each(['cbm', 'relation', 'spatial', 'std'])('%s 结果迟到时只保留工程 B', async (delayStage) => {
     vi.clearAllMocks();
     const gate = deferred<string>();

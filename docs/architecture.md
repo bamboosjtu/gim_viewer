@@ -271,6 +271,26 @@ Line Parser Worker、GimGraph/FAM/DEV 属性提交和地图/树 UI。Substation 
 CBM/FAM/DEV/FileDevRelation、IFC/Fragments、DEV GLB 以及 MOD/STL 回退和 3D/tree UI。
 两边共用 `ProjectLoadSession` guard，所有异步提交仍须通过 `state.isCurrentSession`。
 
+变电 Runtime 的产品就绪时刻按依赖拆分，而不是把全部 IFC 作为首屏门槛：
+
+```text
+CBM/FAM/DEV/FileDevRelation
+  → coreSemanticReady
+  → 基础 tree/search/properties
+  → 首个可用 IFC + coordinate anchor + camera/selection 初始化
+  → firstUsableGeometryReady / interactive
+  → 其余 IFC 按原顺序串行后台加载
+  → allIfcReady
+  → DEV/MOD/STL 后台几何
+  → fullModelReady
+```
+
+`spatialSemanticReady` 是独立的 IFC 空间语义投影：它可以在 core semantic 之后异步
+提交，不阻塞基础 CBM 导航、搜索、属性和来源追踪。首个有效 Fragments 模型足以建立
+当前坐标锚点；仅当该尝试没有可用基准时，后台尾部才做一次 coordinate fallback。每个
+阶段继续携带同一个 `ProjectLoadSession`，旧工程的 IFC、空间语义和几何结果不能提交到
+新工程。缓存命中和冷启动遵循相同的时刻语义。
+
 ### 缓存命中短路
 
 二次打开同一 GIM 时：
@@ -279,7 +299,9 @@ CBM/FAM/DEV/FileDevRelation、IFC/Fragments、DEV GLB 以及 MOD/STL 回退和 3
 2. 已选 Runtime 以显式 `expected_project_type` 调用 `validate_gim_cache`；SQLite 中的旧
    `project_type` 只用于 mismatch 诊断，不决定校验分支
 3. 线路命中 → semantic pack/SQLite graph + 属性恢复 → 地图/树 UI
-4. 变电命中 → CBM/FAM/DEV/FileDevRelation + IFC 空间索引恢复 → 3D/tree/UI
+4. 变电命中 → CBM/FAM/DEV/FileDevRelation 恢复并提交 `coreSemanticReady` → 基础
+   tree/search/properties → 空间索引异步提交 `spatialSemanticReady` → 首个 IFC 后
+   `firstUsableGeometryReady` / `interactive` → 其余 IFC 串行加载并记录 `allIfcReady`
 5. 语义缓存未命中才提取原始 GIM；几何域的既有版本/manifest 策略保持不变
 
 ### 节点级 IFC 懒加载

@@ -65,8 +65,22 @@ export interface PerfLongTaskStats {
   maxMs: number;
 }
 
-/** 变电加载的产品时刻；名称保持稳定，供 Tauri 采集脚本和报告使用。 */
-export type PerfProductMoment = 'semanticReady' | 'firstGeometryReady' | 'fullModelReady';
+/**
+ * 变电加载的产品时刻；名称保持稳定，供 Tauri 采集脚本和报告使用。
+ *
+ * semanticReady / firstGeometryReady 保留为兼容别名：新的 Substation
+ * Runtime 会在对应的 core/first usable 时刻同时记录它们，新增的细粒度
+ * 时刻用于区分 spatial semantic、interactive 和 all-IFC barrier。
+ */
+export type PerfProductMoment =
+  | 'coreSemanticReady'
+  | 'semanticReady'
+  | 'spatialSemanticReady'
+  | 'firstUsableGeometryReady'
+  | 'firstGeometryReady'
+  | 'interactive'
+  | 'allIfcReady'
+  | 'fullModelReady';
 
 export interface PerfProductMomentInfo {
   atMs: number;
@@ -455,8 +469,13 @@ export function perfMarkProductMoment(
 
 export function perfProductMomentSnapshot(): Record<PerfProductMoment, PerfProductMomentInfo | null> {
   return {
+    coreSemanticReady: productMoments.get('coreSemanticReady') ?? null,
     semanticReady: productMoments.get('semanticReady') ?? null,
+    spatialSemanticReady: productMoments.get('spatialSemanticReady') ?? null,
+    firstUsableGeometryReady: productMoments.get('firstUsableGeometryReady') ?? null,
     firstGeometryReady: productMoments.get('firstGeometryReady') ?? null,
+    interactive: productMoments.get('interactive') ?? null,
+    allIfcReady: productMoments.get('allIfcReady') ?? null,
     fullModelReady: productMoments.get('fullModelReady') ?? null,
   };
 }
