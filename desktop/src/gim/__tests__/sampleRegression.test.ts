@@ -24,6 +24,11 @@ import { buildLineGimGraphFromTexts } from '../lineCbmParserCore.js';
 import { createLineParserCache, parseLineAttributesFromCache } from '../lineAttrParserCore.js';
 import { buildSubstationSpatialIndexFromFiles } from '../ifcSpatialParser.js';
 import {
+  hydrateSubstationSpatialIndex,
+  serializeSubstationSpatialIndex,
+  validateSubstationSpatialSnapshot,
+} from '../../services/substationSpatialSemanticCache.js';
+import {
   extractLineMapData,
   isLineMapDataValid,
 } from '../lineMapData.js';
@@ -259,6 +264,31 @@ describe.skipIf(!SUBSTATION_CORPUS.every((item) => existsSync(item.dir)))('æ ·æœ
       const entries = await discoverIfcFromCBM(files);
       const fileDevRelations = await parseFileDevRelation(files);
       const index = await buildSubstationSpatialIndexFromFiles(files, entries, tree, fileDevRelations);
+
+      // The derived cache is a persistence boundary, not a second domain
+      // model. Round-trip the complete real-sample projection so warm restore
+      // preserves source tracing and every canonical collection, not only the
+      // headline counts below.
+      const sourceSha256 = `sample-${sample.id}`;
+      const snapshot = serializeSubstationSpatialIndex(index, { sourceSha256 });
+      expect(validateSubstationSpatialSnapshot(snapshot, { sourceSha256 }), sample.id)
+        .toEqual({ valid: true });
+      const restored = hydrateSubstationSpatialIndex(snapshot);
+      expect(restored.models, sample.id).toEqual(index.models);
+      expect(restored.nodes, sample.id).toEqual(index.nodes);
+      expect(restored.objects, sample.id).toEqual(index.objects);
+      expect(restored.links, sample.id).toEqual(index.links);
+      expect(restored.rootNodeKeys, sample.id).toEqual(index.rootNodeKeys);
+      expect(restored.coverage, sample.id).toEqual(index.coverage);
+      expect(restored.placementGroups, sample.id).toEqual(index.placementGroups);
+      expect(restored.identityPlacementLinks, sample.id).toEqual(index.identityPlacementLinks);
+      expect(Array.from(restored.nodeByKey.keys()), sample.id).toEqual(Array.from(index.nodeByKey.keys()));
+      expect(Array.from(restored.objectByKey.keys()), sample.id).toEqual(Array.from(index.objectByKey.keys()));
+      expect(Array.from(restored.linksByCbmPath.keys()), sample.id)
+        .toEqual(Array.from(index.linksByCbmPath.keys()));
+      expect(Array.from(restored.linksByIfcObjectKey.keys()), sample.id)
+        .toEqual(Array.from(index.linksByIfcObjectKey.keys()));
+
       expect(index.models.length, sample.id).toBe(sample.models);
       expect(index.models.some((model) => model.parseError), sample.id).toBe(false);
       expect(index.models.reduce((sum, model) => sum + model.containedObjectCount, 0), sample.id)

@@ -2219,6 +2219,15 @@ pub fn write_cache_file_binary(
         .lock()
         .map_err(|e| format!("获取数据库锁失败: {}", e))?;
     ensure_project_exists(&guard, meta.project_id)?;
+    // Derived semantic snapshots also run in background.  Bind the raw file
+    // write to the captured source identity while the project row is locked,
+    // matching the GLB/Fragments cache write contract.  A stale A→B task must
+    // not overwrite the cache directory for the newer source.
+    ensure_project_source_sha(
+        &guard,
+        meta.project_id,
+        meta.source_gim_sha256.as_deref(),
+    )?;
     drop(guard);
     let path = cache_file_path(&app_handle, meta.project_id, &meta.entry_path)?;
     atomic_write(&path, &bytes, "")?;

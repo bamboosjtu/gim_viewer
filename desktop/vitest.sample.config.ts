@@ -24,6 +24,7 @@ export default defineConfig({
     // three-bvh-csg 无 exports 字段，Node 环境会解析到 CJS UMD 构建（同主配置）
     alias: {
       'three-bvh-csg': '/node_modules/three-bvh-csg/src/index.js',
+      '@desktop': resolve(__dirname, 'bridge'),
     },
   },
   test: {

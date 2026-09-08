@@ -164,8 +164,16 @@ function toUint8Array(value: ArrayBuffer | Uint8Array): Uint8Array {
  * 在 Tauri 环境下写入缓存文件到 app_data_dir/extracted/{projectId}/{entryPath}。
  * 返回本地缓存路径 local_cache_path。
  */
-export async function writeCacheFile(projectId: number, entryPath: string, bytes: Uint8Array): Promise<string> {
-  return invokeTimed<string>('write_cache_file_binary', packBinaryCacheWrite(projectId, entryPath, bytes));
+export async function writeCacheFile(
+  projectId: number,
+  entryPath: string,
+  bytes: Uint8Array,
+  sourceGimSha256?: string | null,
+): Promise<string> {
+  return invokeTimed<string>(
+    'write_cache_file_binary',
+    packBinaryCacheWrite(projectId, entryPath, bytes, sourceGimSha256 ?? undefined),
+  );
 }
 
 /**

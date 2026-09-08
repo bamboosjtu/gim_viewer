@@ -20,6 +20,13 @@ import type { GimRuntimeOpenContext } from './gimOpenCore.js';
 import { validateGimCache } from '@desktop/database.js';
 import { hydrateNativeSmallFiles } from './nativeSmallFileHydration.js';
 import {
+  readSubstationSpatialSemanticCache,
+  writeSubstationSpatialSemanticCache,
+  SUBSTATION_PARSER_DOMAIN_VERSION,
+  type SubstationSpatialCacheHit,
+} from './substationSpatialSemanticCache.js';
+import { SubstationBackgroundCoordinator } from './substationBackgroundRuntime.js';
+import {
   perfCurrentSession,
   perfBegin,
   perfMark,
@@ -183,9 +190,9 @@ interface SubstationSemanticOptions {
    * the starter opaque here avoids coupling core semantic parsing to IFC
    * scheduling details.
    */
-  onSpatialSemanticStart?: (start: () => void) => void;
+  onSpatialSemanticStart?: (start: () => Promise<boolean>) => void;
   /** Start STD/SLD parsing or cache restore only after first interactive. */
-  onStdSldStart?: (start: () => void) => void;
+  onStdSldStart?: (start: () => Promise<boolean>) => void;
 }
 
 function markSubstationCoreSemanticReady(
@@ -236,11 +243,21 @@ async function buildAndCommitSubstationSpatialSemantic(
   perfSession: PerfSession,
   showMessage: (text: string) => void,
   label: string,
+  options: {
+    projectId?: number | null;
+    sourceSha256?: string | null;
+    cacheMissReason?: string;
+  } = {},
 ): Promise<boolean> {
   if (!state.isCurrentSession(session)) return false;
+  const rebuildStarted = performance.now();
+  const cacheMissReason = options.cacheMissReason ?? 'cache-not-tried';
   try {
     perfMarkProductMoment('spatialSemanticStart', {
       label,
+      source: 'rebuild',
+      cacheHit: false,
+      cacheMissReason,
       models: ifcEntries.length,
     }, perfSession);
     const endSpatial = perfBegin(label, undefined, perfSession);
@@ -261,8 +278,37 @@ async function buildAndCommitSubstationSpatialSemantic(
       cbmLinks: spatialIndex.links.length,
     });
     state.substationSpatialIndex = spatialIndex;
+    const rebuildMs = Math.max(0, performance.now() - rebuildStarted);
+    let writeMs = 0;
+    let snapshotBytes = 0;
+    if (options.projectId != null && options.sourceSha256 && state.isCurrentSession(session)) {
+      try {
+        const cacheWrite = await writeSubstationSpatialSemanticCache(
+          options.projectId,
+          options.sourceSha256,
+          spatialIndex,
+          SUBSTATION_PARSER_DOMAIN_VERSION,
+        );
+        writeMs = cacheWrite.writeMs;
+        snapshotBytes = cacheWrite.snapshotBytes;
+      } catch (writeError) {
+        // The complete in-memory projection remains usable.  A failed write
+        // is deliberately not reported as a valid cache; the next open will
+        // rebuild it again.
+        console.warn('[GIM] 空间语义缓存写入失败，本次运行继续:', writeError);
+      }
+    }
     perfMarkProductMoment('spatialSemanticReady', {
       available: true,
+      source: 'rebuild',
+      cacheHit: false,
+      cacheMissReason,
+      readMs: 0,
+      deserializeMs: 0,
+      hydrateMs: 0,
+      rebuildMs,
+      writeMs,
+      snapshotBytes,
       models: spatialIndex.models.length,
       spatialNodes: spatialIndex.nodes.length,
       objects: spatialIndex.objects.length,
@@ -280,11 +326,145 @@ async function buildAndCommitSubstationSpatialSemantic(
     state.substationSpatialIndex = null;
     perfMarkProductMoment('spatialSemanticReady', {
       available: false,
+      source: 'rebuild',
+      cacheHit: false,
+      cacheMissReason,
       error: err instanceof Error ? err.message : String(err),
     }, perfSession);
     console.warn('[GIM] IFC 空间索引构建失败，保留功能系统视图:', err);
     return false;
   }
+}
+
+async function commitCachedSubstationSpatialSemantic(
+  state: AppState,
+  result: SubstationSpatialCacheHit,
+  session: ProjectLoadSession,
+  perfSession: PerfSession,
+  showMessage: (text: string) => void,
+): Promise<boolean> {
+  if (!state.isCurrentSession(session)) return false;
+  const endRestore = perfBegin('变电空间语义缓存恢复', undefined, perfSession);
+  perfMarkProductMoment('spatialSemanticStart', {
+    source: 'cache',
+    cacheHit: true,
+    readMs: result.readMs,
+    deserializeMs: result.deserializeMs,
+    hydrateMs: result.hydrateMs,
+    snapshotBytes: result.snapshotBytes,
+    models: result.models,
+    nodes: result.nodes,
+    objects: result.objects,
+    links: result.links,
+  }, perfSession);
+  state.substationSpatialIndex = result.index;
+  if (!state.isCurrentSession(session)) return false;
+  await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（空间语义缓存）');
+  if (!state.isCurrentSession(session)) return false;
+  endRestore(undefined, {
+    source: 'cache',
+    models: result.models,
+    nodes: result.nodes,
+    objects: result.objects,
+    links: result.links,
+  });
+  perfMarkProductMoment('spatialSemanticReady', {
+    available: true,
+    source: 'cache',
+    cacheHit: true,
+    readMs: result.readMs,
+    deserializeMs: result.deserializeMs,
+    hydrateMs: result.hydrateMs,
+    rebuildMs: 0,
+    writeMs: 0,
+    snapshotBytes: result.snapshotBytes,
+    models: result.models,
+    spatialNodes: result.nodes,
+    objects: result.objects,
+    links: result.links,
+  }, perfSession);
+  await sampleSubstationMemory('SpatialIndex cache hydrate 后', perfSession, {
+    source: 'cache',
+    models: result.models,
+    spatialNodes: result.nodes,
+    objects: result.objects,
+  });
+  return true;
+}
+
+function scheduleSubstationSpatialSemantic(
+  coordinator: SubstationBackgroundCoordinator,
+  state: AppState,
+  files: Map<string, File>,
+  ifcEntries: IfcEntry[],
+  cbmTree: CbmNode,
+  fileDevRelations: Awaited<ReturnType<typeof parseFileDevRelation>>,
+  session: ProjectLoadSession,
+  perfSession: PerfSession,
+  showMessage: (text: string) => void,
+  label: string,
+): void {
+  let cacheMissReason = 'cache-not-tried';
+  const enqueueRebuild = (): void => {
+    coordinator.enqueue({
+      task: 'spatialSemanticRebuild',
+      priority: 1,
+      heavy: true,
+      startAfter: 'allIfcReady',
+      run: async () => {
+        const ready = await buildAndCommitSubstationSpatialSemantic(
+          state,
+          files,
+          ifcEntries,
+          cbmTree,
+          fileDevRelations,
+          session,
+          perfSession,
+          showMessage,
+          label,
+          {
+            projectId: session.projectId,
+            sourceSha256: session.sourceSha256,
+            cacheMissReason,
+          },
+        );
+        if (!ready && state.isCurrentSession(session)) {
+          throw new Error('空间语义 rebuild 未生成可用索引');
+        }
+      },
+    });
+  };
+  coordinator.enqueue({
+    task: 'spatialSemanticCacheRestore',
+    priority: 1,
+    heavy: false,
+    startAfter: 'interactive',
+    blocksHeavy: true,
+    run: async () => {
+      const cache = await readSubstationSpatialSemanticCache(
+        session.projectId,
+        session.sourceSha256,
+        SUBSTATION_PARSER_DOMAIN_VERSION,
+      );
+      if (!state.isCurrentSession(session)) return;
+      if (cache.hit) {
+        const committed = await commitCachedSubstationSpatialSemantic(
+          state,
+          cache,
+          session,
+          perfSession,
+          showMessage,
+        );
+        if (!committed && state.isCurrentSession(session)) {
+          cacheMissReason = 'cache-commit-failed';
+          enqueueRebuild();
+        }
+        return;
+      }
+      cacheMissReason = cache.reason;
+      enqueueRebuild();
+    },
+  });
 }
 
 async function buildAndCommitSubstationStdSld(
@@ -621,17 +801,39 @@ export async function loadAllIfcFiles(
     geometryCacheManifestValid?: boolean;
     geometryCacheVersionFileMatch?: boolean;
     /** Start optional spatial semantic only after first interactive. */
-    startSpatialSemantic?: () => void;
+    startSpatialSemantic?: () => void | Promise<unknown>;
     /** Start STD/SLD parsing or cache restore only after first interactive. */
-    startStdSld?: () => void;
+    startStdSld?: () => void | Promise<unknown>;
     /** Start cold cache persistence only after first interactive. */
-    startCachePersistence?: () => void;
+    startCachePersistence?: () => void | Promise<unknown>;
+    /** Schedule optional spatial work through the substation coordinator. */
+    scheduleSpatialSemantic?: (coordinator: SubstationBackgroundCoordinator) => void;
+    /** Schedule STD/SLD through the substation coordinator. */
+    scheduleStdSld?: (coordinator: SubstationBackgroundCoordinator) => void;
+    /** Schedule cold persistence through the substation coordinator. */
+    scheduleCachePersistence?: (coordinator: SubstationBackgroundCoordinator) => void;
   } = {},
 ): Promise<void> {
   const session = options.session ?? state.captureProjectSession();
   const perfSession = perfCurrentSession();
   const isCurrent = () => state.isCurrentSession(session);
   if (!isCurrent()) return;
+  const background = new SubstationBackgroundCoordinator({
+    session: perfSession,
+    isCurrent,
+    onEvent: (event) => {
+      // One compact span per lifecycle transition is enough for queue wait /
+      // cancellation diagnostics; do not trace individual placements here.
+      perfMark(`变电 background task · ${event.task} · ${event.state}`, {
+        priority: event.priority,
+        heavy: event.heavy,
+        ...(event.queueWaitMs != null ? { queueWaitMs: event.queueWaitMs } : {}),
+        ...(event.durationMs != null ? { durationMs: event.durationMs } : {}),
+        ...(event.error ? { error: event.error } : {}),
+      }, perfSession);
+    },
+  });
+  background.registerRemainingIfc();
   // 调试入口：从 localStorage 读取手动坐标偏移（GIM_COORD_OFFSET="dx,dy,dz"）
   // 仅作为调试功能，不写入数据库，不作为最终算法。
   // resetGimState 会清空 projectSourceToViewerMatrix，因此每次打开项目时重新解析。
@@ -746,22 +948,52 @@ export async function loadAllIfcFiles(
     signalInteractive();
     const startPostInteractiveTask = (
       label: string,
-      starter?: () => void,
+      starter?: () => void | Promise<unknown>,
+      scheduler?: (coordinator: SubstationBackgroundCoordinator) => void,
     ): void => {
-      if (!starter) return;
+      if (!starter && !scheduler) return;
       try {
         // All three starters are deliberately invoked only after the
         // interactive product moment.  They are independent background
         // tasks; one synchronous registration failure must not suppress the
         // other tasks or the sequential IFC tail.
-        starter();
+        if (scheduler) scheduler(background);
+        else starter?.();
       } catch (err) {
         console.warn(`[GIM] 启动${label}失败，继续 IFC 后台加载:`, err);
       }
     };
-    startPostInteractiveTask('IFC 空间语义', options.startSpatialSemantic);
-    startPostInteractiveTask('STD/SLD', options.startStdSld);
-    startPostInteractiveTask('缓存持久化', options.startCachePersistence);
+    background.startRemainingIfc();
+    background.markInteractive();
+    startPostInteractiveTask('IFC 空间语义', options.startSpatialSemantic, options.scheduleSpatialSemantic);
+    startPostInteractiveTask('STD/SLD', options.startStdSld, options.scheduleStdSld);
+    startPostInteractiveTask('缓存持久化', options.startCachePersistence, options.scheduleCachePersistence);
+  };
+
+  const enqueueDevGeometry = (): void => {
+    background.enqueue({
+      task: 'devGeometry',
+      priority: 2,
+      heavy: true,
+      startAfter: 'allIfcReady',
+      run: async () => {
+        state.geometryLoadToken++;
+        const token = state.geometryLoadToken;
+        try {
+          await autoLoadModStlPostIfc(state, showMessage, ctx, {
+            token,
+            includeMod: true,
+            includeStl: false,
+            session,
+            geometryCacheValid: options.geometryCacheValid,
+            geometryCacheManifestValid: options.geometryCacheManifestValid,
+            geometryCacheVersionFileMatch: options.geometryCacheVersionFileMatch,
+          });
+        } catch (err) {
+          console.warn('[GIM] 后台 MOD 加载失败:', err);
+        }
+      },
+    });
   };
 
   const lifecycleTask = (async (): Promise<void> => {
@@ -885,6 +1117,11 @@ export async function loadAllIfcFiles(
       if (!isCurrent()) return;
     }
 
+    background.completeRemainingIfc();
+    // Register the heavy geometry task before releasing the all-IFC gate so a
+    // low-priority persistence task cannot start in the small async gap while
+    // the final name-index/UI pass is still running.
+    enqueueDevGeometry();
     perfMarkProductMoment('allIfcReady', {
       total: entries.length,
       loaded: state.loadedModels.size,
@@ -911,6 +1148,11 @@ export async function loadAllIfcFiles(
     }
     await renderSubstationCoreUi(state, (text) => showLoading(text), session, perfSession, '变电 navigation/UI（all IFC）');
     if (!isCurrent()) return;
+    // Keep the heavy post-IFC lane behind the final name-index/UI pass.  The
+    // allIfcReady product moment is already recorded above, but releasing the
+    // coordinator here avoids DEV geometry or a spatial rebuild competing with
+    // the last mandatory UI bookkeeping.
+    background.markAllIfcReady();
 
     } catch (err) {
       if (!isCurrent()) return;
@@ -934,26 +1176,6 @@ export async function loadAllIfcFiles(
     hideLoading();
   }
 
-  // MOD 自动加载作为后台任务，不阻塞主流程
-  // token 机制防止项目切换后旧任务继续往新 scene 添加对象
-  state.geometryLoadToken++;
-  const token = state.geometryLoadToken;
-  const bgCtx = ctx; // 捕获当前 ctx 引用
-
-  queueMicrotask(() => {
-    void autoLoadModStlPostIfc(state, showMessage, bgCtx, {
-      token,
-      includeMod: true,
-      includeStl: false,
-      session,
-      geometryCacheValid: options.geometryCacheValid,
-      geometryCacheManifestValid: options.geometryCacheManifestValid,
-      geometryCacheVersionFileMatch: options.geometryCacheVersionFileMatch,
-    })
-      .catch((err) => {
-        console.warn('[GIM] 后台 MOD 加载失败:', err);
-      });
-  });
   })();
 
   // The first usable IFC is the caller-visible readiness boundary. The
@@ -1326,11 +1548,22 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         );
       }
 
-      // Register the spatial starter, but let loadAllIfcFiles invoke it only
-      // after the first usable IFC has established interactive.  Starting it
-      // here would still compete with web-ifc/Fragments on the main thread.
-      const startSpatialSemantic = (): void => {
-        void buildAndCommitSubstationSpatialSemantic(
+      const cachedStdSldEntryPaths = index.entries.map((entry) => entry.entry_path);
+      // STD/SLD restore is a feature-local background task.  A missing or
+      // stale STD/SLD cache must not discard an otherwise valid IFC cache hit;
+      // the helper records the degradation and clears only that projection.
+      const startStdSld = (): Promise<boolean> => buildAndCommitSubstationStdSld(
+          state,
+          null,
+          cachedStdSldEntryPaths,
+          session,
+          perfSession,
+          showMessage,
+          'warm',
+        );
+      const scheduleSpatialSemantic = (coordinator: SubstationBackgroundCoordinator): void => {
+        scheduleSubstationSpatialSemantic(
+          coordinator,
           state,
           cachedIfcFiles,
           cachedIfcEntries,
@@ -1342,29 +1575,28 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
           '变电 IFC 空间索引（缓存命中）',
         );
       };
-
-      const cachedStdSldEntryPaths = index.entries.map((entry) => entry.entry_path);
-      // STD/SLD restore is a feature-local background task.  A missing or
-      // stale STD/SLD cache must not discard an otherwise valid IFC cache hit;
-      // the helper records the degradation and clears only that projection.
-      const startStdSld = (): void => {
-        void buildAndCommitSubstationStdSld(
-          state,
-          null,
-          cachedStdSldEntryPaths,
-          session,
-          perfSession,
-          showMessage,
-          'warm',
-        );
+      const scheduleStdSld = (coordinator: SubstationBackgroundCoordinator): void => {
+        coordinator.enqueue({
+          task: 'stdSld',
+          priority: 2,
+           heavy: false,
+           startAfter: 'interactive',
+           run: async () => {
+             const ready = await startStdSld();
+             if (!ready && state.isCurrentSession(session)) {
+               throw new Error('STD/SLD 未生成可用结果');
+             }
+           },
+         });
       };
 
       // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
       // loadAllIfcFiles 内部会创建 ViewerRuntime、加载 IFC、渲染树、触发 MOD/STL
       await loadAllIfcFiles(state, cachedIfcEntries, showMessage, {
         session,
-        startSpatialSemantic,
         startStdSld,
+        scheduleSpatialSemantic,
+        scheduleStdSld,
         geometryCacheValid: validation.geometry_cache_valid ?? validation.geometry_cache_version_match,
         geometryCacheManifestValid: validation.geometry_cache_manifest_valid,
         geometryCacheVersionFileMatch: validation.geometry_cache_version_file_match,
@@ -1404,8 +1636,8 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   // Cold path: CBM/FAM/DEV/FileDevRelation and IFC discovery stay entirely in
   // this Runtime. The parser implementation is unchanged; only ownership moved.
   showLoading('正在解析 GIM 层级结构...');
-  let startSpatialSemantic: (() => void) | undefined;
-  let startStdSld: (() => void) | undefined;
+  let startSpatialSemantic: (() => Promise<boolean>) | undefined;
+  let startStdSld: (() => Promise<boolean>) | undefined;
   const entries = await onGimExtracted(
     state,
     extracted,
@@ -1438,8 +1670,8 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   const cbmTreeForPersist = state.currentCbmTree;
   const fileDevRelationsForPersist = state.fileDevRelations.slice();
   let persistPromise: Promise<void> | null = null;
-  const startCachePersistence = (): void => {
-    if (persistPromise) return;
+  const startCachePersistence = (): Promise<void> => {
+    if (persistPromise) return persistPromise;
     perfMarkProductMoment('cachePersistenceStart', {
       enabled: persistProjectId != null,
       projectId: persistProjectId,
@@ -1588,6 +1820,44 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         }
         console.error('[Tauri] 缓存/索引入库后台任务失败:', err);
       });
+    return persistPromise;
+  };
+
+  const scheduleSpatialSemantic = (coordinator: SubstationBackgroundCoordinator): void => {
+    const cbmTree = state.currentCbmTree;
+    if (!cbmTree) return;
+    scheduleSubstationSpatialSemantic(
+      coordinator,
+      state,
+      extracted,
+      entries,
+      cbmTree,
+      fileDevRelationsForPersist,
+      session,
+      perfSession,
+      showMessage,
+      '变电 IFC 空间索引',
+    );
+  };
+  const scheduleStdSld = (coordinator: SubstationBackgroundCoordinator): void => {
+    if (!startStdSld) return;
+    const starter = startStdSld;
+    coordinator.enqueue({
+      task: 'stdSld',
+      priority: 2,
+      heavy: false,
+      startAfter: 'interactive',
+      run: async () => { await starter(); },
+    });
+  };
+  const scheduleCachePersistence = (coordinator: SubstationBackgroundCoordinator): void => {
+    coordinator.enqueue({
+      task: 'cachePersistence',
+      priority: 10,
+      heavy: false,
+      startAfter: 'allIfcReady',
+      run: async () => { await startCachePersistence(); },
+    });
   };
 
   // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框。
@@ -1598,5 +1868,8 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
     startSpatialSemantic,
     startStdSld,
     startCachePersistence,
+    scheduleSpatialSemantic,
+    scheduleStdSld,
+    scheduleCachePersistence,
   });
 }
