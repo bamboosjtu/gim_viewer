@@ -27,7 +27,10 @@ import {
   extractLineMapData,
   isLineMapDataValid,
 } from '../lineMapData.js';
-import { buildLineNavigationIndex } from '../../ui/lineNavigationTreeView.js';
+import {
+  buildLineNavigationIndex,
+  buildLineNavigationSearchIndex,
+} from '../../ui/lineNavigationTreeView.js';
 import type { LineAttributeIndex } from '../lineAttributeTypes.js';
 import type {
   LineFamPropertyRecord,
@@ -152,6 +155,14 @@ const SUBSTATION_DIR = resolveDemoDir('demo-substation');
 const LINE_DIR = resolveDemoDir('line02');
 const hasSubstation = existsSync(SUBSTATION_DIR);
 const hasLine = existsSync(LINE_DIR);
+const LINE_CORPUS = [
+  'demo-line1',
+  'line02',
+  'line03',
+  'line04',
+  'line05',
+  'line06',
+].map((id) => ({ id, dir: resolveDemoDir(id) }));
 const SUBSTATION_CORPUS = [
   { id: 'demo-substation', models: 12, contained: 3111, spatial: 4714, decomposition: 74, host: 1529 },
   { id: 'substation02', models: 17, contained: 51767, spatial: 62176, decomposition: 38, host: 10371 },
@@ -404,4 +415,85 @@ describe.skipIf(!hasLine)('样本回归·线路 line02', () => {
     expect(navigation.nodesByKey.get('line-navigation:unassociated-crossings')?.children).toHaveLength(44);
     expect(Array.from(navigation.nodesByKey.values()).some((item) => /F[1-4]System|Tower_Device|Wire_Device/.test(item.label))).toBe(false);
   }, 120_000);
+});
+
+describe.skipIf(!LINE_CORPUS.every((sample) => existsSync(sample.dir)))('样本回归·Powerline Runtime v1 六样本', () => {
+  it('冷解析、Worker 语义、属性引用和地图/树投影保持一致', async () => {
+    for (const sample of LINE_CORPUS) {
+      const files = loadFilesFromDir(sample.dir);
+      expect(files.size, sample.id).toBeGreaterThan(100);
+
+      const graph = await buildLineGimGraph(files);
+      expect(graph.root, sample.id).not.toBeNull();
+      for (const kind of ['F1System', 'F2System', 'F3System', 'F4System', 'Tower_Device', 'WIRE'] as const) {
+        expect(graph.stats[kind] ?? 0, `${sample.id} ${kind}`).toBeGreaterThan(0);
+      }
+
+      // 复现 Line Parser Worker 的可序列化输入边界，并与兼容主线程 parser
+      // 比较整个图统计及 FAM/DEV payload，而非只比较总节点数。
+      const workerTextFiles: Array<{ path: string; text: string }> = [];
+      for (const [path, file] of files) {
+        if (/\.(cbm|dev|fam|phm|mod)$/i.test(path)) {
+          workerTextFiles.push({ path, text: await file.text() });
+        } else {
+          workerTextFiles.push({ path, text: '' });
+        }
+      }
+      const workerCache = createLineParserCache(workerTextFiles);
+      const workerGraph = buildLineGimGraphFromTexts(workerTextFiles, workerCache);
+      expect(workerGraph.stats, sample.id).toEqual(graph.stats);
+
+      const { famPayloads, devPayloads } = await parseLineAttributes(graph, files);
+      const workerAttrs = parseLineAttributesFromCache(workerGraph, workerCache);
+      expect(famPayloads.length, `${sample.id} FAM`).toBeGreaterThan(0);
+      expect(devPayloads.length, `${sample.id} DEV`).toBeGreaterThan(0);
+      expect(workerAttrs.famPayloads, `${sample.id} worker FAM`).toEqual(famPayloads);
+      expect(workerAttrs.devPayloads, `${sample.id} worker DEV`).toEqual(devPayloads);
+
+      const attrs = buildLineAttributeIndex(
+        famPayloads as unknown as LineFamPropertyRecord[],
+        devPayloads as unknown as LineDevPropertyRecord[],
+      );
+      const mapData = extractLineMapData(graph, attrs);
+      expect(isLineMapDataValid(mapData), sample.id).toBe(true);
+      expect(mapData.towers.length, `${sample.id} towers`).toBeGreaterThan(0);
+      expect(mapData.wires.length, `${sample.id} wires`).toBeGreaterThan(0);
+      expect(mapData.stats.towerWithBlha, `${sample.id} tower coordinates`).toBeGreaterThan(0);
+      expect(mapData.stats.towerWithFam, `${sample.id} tower FAM`).toBeGreaterThan(0);
+      expect(mapData.stats.wireWithEndpoints, `${sample.id} wire endpoints`).toBeGreaterThan(0);
+      expect(mapData.towers.some((tower) => tower.towerNumber), `${sample.id} tower number`).toBe(true);
+      expect(mapData.towers.some((tower) => tower.towerType), `${sample.id} tower type`).toBe(true);
+      expect(mapData.towers.some((tower) => tower.towerHeight), `${sample.id} tower height`).toBe(true);
+      expect(mapData.towers.some((tower) => tower.turnAngle), `${sample.id} turn angle`).toBe(true);
+      expect(mapData.bbox.minLat, `${sample.id} bbox`).toBeLessThanOrEqual(mapData.bbox.maxLat);
+      expect(mapData.bbox.minLng, `${sample.id} bbox`).toBeLessThanOrEqual(mapData.bbox.maxLng);
+
+      for (const tower of mapData.towers) {
+        expect(graph.nodesByPath.has(tower.cbmPath), `${sample.id} tower source`).toBe(true);
+        expect(Number.isFinite(tower.lat) && Number.isFinite(tower.lng), `${sample.id} tower coordinate`).toBe(true);
+        expect(tower.lat).toBeGreaterThan(10);
+        expect(tower.lat).toBeLessThan(60);
+        expect(tower.lng).toBeGreaterThan(70);
+        expect(tower.lng).toBeLessThan(140);
+      }
+      for (const wire of mapData.wires) {
+        expect(Number.isFinite(wire.startLat) && Number.isFinite(wire.startLng)
+          && Number.isFinite(wire.endLat) && Number.isFinite(wire.endLng),
+        `${sample.id} wire endpoint`).toBe(true);
+      }
+
+      const navigation = buildLineNavigationIndex(graph, mapData, { attrs });
+      const searchIndex = buildLineNavigationSearchIndex(navigation);
+      expect(navigation.nodesByKey.size, `${sample.id} navigation`).toBeGreaterThan(0);
+      expect(searchIndex.length, `${sample.id} search`).toBeGreaterThan(0);
+      expect(navigation.stats.towerCount, `${sample.id} navigation towers`).toBe(mapData.towers.length);
+      expect(navigation.stats.wireCount, `${sample.id} navigation wires`).toBeGreaterThan(0);
+      // Graph CROSS 是原始节点总数；地图/树只投影带可用坐标的业务跨越点，
+      // 因此允许两者不同，但投影层自身必须守恒。
+      expect(navigation.stats.crossCount, `${sample.id} navigation crosses`).toBe(mapData.crosses.length);
+      for (const tower of mapData.towers) {
+        expect(navigation.targetBySourcePath.has(tower.cbmPath), `${sample.id} tree↔map link`).toBe(true);
+      }
+    }
+  }, 600_000);
 });
