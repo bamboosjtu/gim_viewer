@@ -71,7 +71,9 @@ source identity / GIMPKGT
 ```
 
 解压后仍调用 `detectGimProjectType` 做内容校验和 mismatch 诊断；它不改变已由
-`GIMPKGT` 确定的 Runtime。`hybrid` 不会创建第三种 Runtime。
+`GIMPKGT` 确定的 Runtime。`hybrid` 不会创建第三种 Runtime。若 source inspection 与
+extraction 的非空 magic 不一致，打开流程以 `SOURCE_CHANGED_DURING_OPEN` 安全失败，
+避免将实际解压内容与旧 source identity/cache 绑定。
 
 ---
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertGimSourceMagicStable,
   inspectGimSourceBuffer,
   inspectGimSourceHead,
   readGimMagic,
@@ -38,5 +39,11 @@ describe('GIM source descriptor', () => {
     expect(descriptor.sha256).toBe('sha');
     expect(descriptor.runtimeType).toBe('transmission_line');
   });
-});
 
+  it('fails closed when extraction observes a different source magic', () => {
+    expect(() => assertGimSourceMagicStable('GIMPKGT', 'GIMPKGS')).toThrow(
+      'SOURCE_CHANGED_DURING_OPEN',
+    );
+    expect(() => assertGimSourceMagicStable('GIMPKGT', 'GIMPKGT')).not.toThrow();
+  });
+});

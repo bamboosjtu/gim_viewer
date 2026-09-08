@@ -29,6 +29,35 @@ export function runtimeTypeFromMagic(magic: string): GimSourceKind {
 }
 
 /**
+ * The source descriptor is the identity used before cache routing. If the
+ * archive extractor observes a different non-empty magic later, the file was
+ * replaced/changed during the open (or the source is malformed). Continuing
+ * would associate the extracted bytes with the wrong source identity/cache.
+ */
+export class SourceChangedDuringOpenError extends Error {
+  readonly code = 'SOURCE_CHANGED_DURING_OPEN';
+
+  constructor(
+    readonly inspectedMagic: string,
+    readonly extractedMagic: string,
+  ) {
+    super(
+      `SOURCE_CHANGED_DURING_OPEN: source magic ${inspectedMagic} changed to ${extractedMagic}`,
+    );
+    this.name = 'SourceChangedDuringOpenError';
+  }
+}
+
+export function assertGimSourceMagicStable(
+  inspectedMagic: string,
+  extractedMagic: string,
+): void {
+  if (inspectedMagic && extractedMagic && inspectedMagic !== extractedMagic) {
+    throw new SourceChangedDuringOpenError(inspectedMagic, extractedMagic);
+  }
+}
+
+/**
  * Resolve the Runtime boundary after content validation.
  * A recognized source magic always wins; hybrid remains a diagnostic state and
  * falls back to the existing Substation Runtime only when magic is unknown.

@@ -261,7 +261,10 @@ Shared Core 位于 `gimSourceService.ts`、`gimOpenCore.ts` 和桌面桥接基�
 
 `detectGimProjectType` 仍在解压后运行，但定位为内容校验、未知 magic 的 fallback 和
 magic/content mismatch 诊断。`hybrid` 只作为诊断状态：source magic 已知时由 magic
-优先，magic 未知时回退到 Substation Runtime，不新增第三个 Runtime。
+优先，magic 未知时回退到 Substation Runtime，不新增第三个 Runtime。若 source inspection
+与 extraction 观察到的非空 magic 不一致，Shared Core 立即以
+`SOURCE_CHANGED_DURING_OPEN` 安全失败，不进入任何 Runtime，也不把解压结果绑定到旧的
+source identity。
 
 Powerline Runtime 独立拥有线路 cache validation、semantic pack/SQLite warm path、冷
 Line Parser Worker、GimGraph/FAM/DEV 属性提交和地图/树 UI。Substation Runtime 独立拥有
@@ -306,7 +309,8 @@ manifest，条目内容由 `DiskBackedFile` 在 `text()` / `arrayBuffer()` 时�
 打开前优先读取 `GIMPKGT` / `GIMPKGS` source magic。解压后仍通过 `.ifc` 文件存在性 +
 线路专属 CBM/DEV/FAM 字段（`ENTITYNAME`/`GROUPTYPE`/`DEVICETYPE` 键值级匹配）执行
 `detectGimProjectType` 内容校验和 fallback；它不再把缓存中的 `project_type` 当作 source
-identity。
+identity。若 extraction magic 与打开前的 source magic 不一致，则以
+`SOURCE_CHANGED_DURING_OPEN` 终止本次打开。
 
 ### 底图运行状态（内存单例）
 

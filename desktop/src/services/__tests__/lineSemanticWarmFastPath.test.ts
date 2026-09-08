@@ -5,7 +5,7 @@ import { createLineParserCache, parseLineAttributesFromCache } from '../../gim/l
 import { buildLineGraphPayload } from '../lineGraphPersistenceService.js';
 import { restoreLineGraphToState } from '../lineGraphRestoreService.js';
 import { restoreLineAttributesToState } from '../lineAttrRestoreService.js';
-import { buildLineSemanticWarmFiles, commitLineParserResult } from '../openGimService.js';
+import { buildLineSemanticWarmFiles, commitLineParserResult } from '../powerlineRuntime.js';
 import { parseLineInWorker } from '../lineParserWorkerClient.js';
 import type { LineParserWorkerFile } from '../lineParserWorker.js';
 import type { LineParserWorkerResult } from '../lineParserWorkerClient.js';

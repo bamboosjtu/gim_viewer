@@ -19,6 +19,7 @@ import {
   type GimRuntimeOpenContext,
 } from './gimOpenCore.js';
 import {
+  assertGimSourceMagicStable,
   inspectGimSourceBuffer,
   inspectGimSourceHead,
   resolveGimRuntimeType,
@@ -28,10 +29,9 @@ import {
 } from './gimSourceService.js';
 import { extractGimFile, getProjectTypeName } from '../gim/gimExtractor.js';
 import { detectGimProjectType } from '../gim/projectType.js';
-import { openPowerlineProject, commitLineParserResult, buildLineSemanticWarmFiles } from './powerlineRuntime.js';
+import { openPowerlineProject } from './powerlineRuntime.js';
 import { openSubstationProject, onGimExtracted, loadAllIfcFiles } from './substationRuntime.js';
 
-export { commitLineParserResult, buildLineSemanticWarmFiles };
 export { onGimExtracted, loadAllIfcFiles };
 
 /**
@@ -156,6 +156,8 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
           magic: source.magic,
           files: new Map(),
         };
+        const observed = inspectGimSourceBuffer(source.fileName, bytes);
+        assertGimSourceMagicStable(source.magic, observed.magic);
         endRead(undefined, { bytes: bytes.byteLength });
         const endExtract = perfBegin('解压（WASM 回退）', undefined, perfSession);
         const files = await extractGimFile(bytes);
@@ -165,9 +167,9 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
         };
         endExtract('（首开）', { files: files.size });
         extracted = {
-          magic: source.magic,
-          projectId: source.projectId,
-          projectName: source.projectName,
+          magic: observed.magic || source.magic,
+          projectId: observed.projectId || source.projectId,
+          projectName: observed.projectName || source.projectName,
           files,
         };
       }
@@ -191,12 +193,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
 
     if (!state.isCurrentSession(session)) return extracted;
 
-    if (extracted.magic && source.magic && extracted.magic !== source.magic) {
-      console.warn('[GIM] source magic changed between inspection and extraction:', {
-        inspected: source.magic,
-        extracted: extracted.magic,
-      });
-    }
+    assertGimSourceMagicStable(source.magic, extracted.magic);
     context.projectName = resolveProjectName(
       extracted.projectName || source.projectName,
       extracted.projectId || source.projectId,
