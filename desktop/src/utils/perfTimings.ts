@@ -439,9 +439,10 @@ export function perfRecordExternalSpan(
   label: string,
   durationMs: number,
   meta?: Record<string, unknown>,
-  session: PerfSession = currentSession,
+  session: PerfSession | number = currentSession,
 ): void {
   if (!perfIsCurrentSession(session)) return;
+  const sessionId = typeof session === 'number' ? session : session.id;
   const safeDuration = Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0;
   const completedAt = performance.now();
   const span: PerfSpan = {
@@ -449,7 +450,7 @@ export function perfRecordExternalSpan(
     startMs: Math.max(0, completedAt - sessionStartMs - safeDuration),
     durationMs: safeDuration,
     meta,
-    sessionId: session.id,
+    sessionId,
   };
   spans.push(span);
   debugPerf(span);

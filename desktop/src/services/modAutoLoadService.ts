@@ -29,6 +29,10 @@ import { parsePhm } from '../gim/geometry/phmParser.js';
 import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 import { PARSER_LIMITS } from '../gim/parserLimits.js';
 import { getFileByPath } from '../gim/fileLookup.js';
+import {
+  createDevGeometryTelemetry,
+  type DevGeometryTelemetry,
+} from './devGeometryTelemetry.js';
 
 /** 自动加载选项 */
 export interface GeometryAutoLoadOptions {
@@ -604,6 +608,8 @@ export interface DevGlbFastPathProfile {
   cacheRecoveryFailureCount?: number;
   cacheRecoveryDevPaths?: string[];
   fallbackReason?: string;
+  /** Warm DEV GLB aggregate spans; placement-level traces are histogrammed. */
+  deepTelemetry?: DevGeometryTelemetry;
 }
 
 export type DevGlbFailureType = 'missing' | 'invalid' | 'parse-exception' | 'empty-scene';
@@ -715,6 +721,8 @@ export async function tryDevGlbFastPath(
 ): Promise<DevGlbFastPathResult> {
   const uniqueKeys = new Set<string>();
   for (const seed of deviceNodes) if (seed.devPath) uniqueKeys.add(normalizeDevEntryPath(seed.devPath).toLowerCase());
+  const fastPathStarted = performance.now();
+  const deepTelemetry = createDevGeometryTelemetry('warm', uniqueKeys.size, deviceNodes.length);
   const profile = emptyFastPathProfile(deviceNodes.length, uniqueKeys.size);
   const failedDevPaths = new Map<string, string>();
   const failureTypes: Record<string, DevGlbFailureType> = {};
@@ -756,6 +764,7 @@ export async function tryDevGlbFastPath(
       failureType: { ...failureTypes },
       failedDevCount: failedDevPaths.size,
       failedDevPaths: Array.from(failedDevPaths.values()),
+      deepTelemetry: deepTelemetry.snapshot(performance.now() - fastPathStarted),
     },
   });
   const success = (modCount: number): DevGlbFastPathResult => ({
@@ -769,6 +778,7 @@ export async function tryDevGlbFastPath(
       failureType: { ...failureTypes },
       failedDevCount: failedDevPaths.size,
       failedDevPaths: Array.from(failedDevPaths.values()),
+      deepTelemetry: deepTelemetry.snapshot(performance.now() - fastPathStarted),
     },
   });
 
@@ -801,6 +811,7 @@ export async function tryDevGlbFastPath(
       devOrder.push(devPath);
     }
   }
+  deepTelemetry.record('discovery', performance.now() - fastPathStarted);
 
   const useLegacyRead = Boolean(dependencies?.readGlbFile
     && !dependencies?.readGeometryCacheManifest
@@ -936,6 +947,7 @@ export async function tryDevGlbFastPath(
     return fail('glb-batch-read-failed');
   }
   profile.glbBatchReadMs = Math.max(0, performance.now() - batchStarted);
+  deepTelemetry.record('glbRead', profile.glbBatchReadMs);
 
   for (const entry of selectedEntries) {
     if (entry.status !== 'glb') continue;
@@ -997,12 +1009,17 @@ export async function tryDevGlbFastPath(
   };
 
   for (const devPath of devOrder) {
+    const devTelemetryStarted = deepTelemetry.beginDev(
+      devPath,
+      seedsByDev.get(devPath.toLowerCase())?.length ?? 0,
+    );
     const entry = manifestEntries.get(devPath.toLowerCase())!;
     const bytes = entry.status === 'glb' ? glbBytesByDev.get(devPath.toLowerCase())! : null;
     const failedKey = devPath.toLowerCase();
     if (failedDevPaths.has(failedKey)) {
       // 已知失败 DEV 的所有 placement 共用同一失败状态，不再重复 parse。
       for (const _seed of seedsByDev.get(failedKey) ?? []) markProcessed();
+      deepTelemetry.finishDev(devPath, devTelemetryStarted);
       continue;
     }
     for (const seed of seedsByDev.get(devPath.toLowerCase()) ?? []) {
@@ -1037,7 +1054,9 @@ export async function tryDevGlbFastPath(
         try {
           loadedGroup = await loadDevGlb(devPath, bytes);
         } finally {
-          profile.glbParseMs += Math.max(0, performance.now() - parseStarted);
+          const parseMs = Math.max(0, performance.now() - parseStarted);
+          profile.glbParseMs += parseMs;
+          deepTelemetry.record('glbParse', parseMs, devPath);
         }
         if (!loadedGroup) {
           markDevFailure(devPath, 'parse-exception');
@@ -1058,22 +1077,29 @@ export async function tryDevGlbFastPath(
         }
 
         const cbmTransform = parseCbmTransformMatrix(seed.transformMatrix);
+        const transformStarted = performance.now();
         applyPlacementTransformToSceneUnits(loadedGroup, cbmTransform);
         applyProjectSourceToViewer(loadedGroup, state.projectSourceToViewerMatrix);
+        deepTelemetry.record('placementTransform', performance.now() - transformStarted, devPath);
         // A valid GLB can still contain a placement whose transformed bounds
         // are outside the scene safety envelope (the raw MOD path makes the
         // same per-placement decision).  This is a geometry-quality issue,
         // not cache corruption: do not discard otherwise valid DEV cache data
         // and do not trigger an expensive raw-MOD fallback for the whole
         // project.  `diagnoseGroupBBox` owns disposal for rejected groups.
-        if (!diagnoseGroupBBox(loadedGroup, devPath)) {
+        const bboxStarted = performance.now();
+        const bboxValid = diagnoseGroupBBox(loadedGroup, devPath);
+        deepTelemetry.record('bbox', performance.now() - bboxStarted, devPath);
+        if (!bboxValid) {
           loadedGroup = null;
           continue;
         }
 
         loadedGroup.userData.devPath = devPath;
+        const sceneCommitStarted = performance.now();
         modRoot.add(loadedGroup);
         state.loadedXmlModGroups.set(instanceKey, loadedGroup);
+        deepTelemetry.record('sceneCommit', performance.now() - sceneCommitStarted, devPath);
         addedGroups.push({ instanceKey, group: loadedGroup });
         const perDev = addedGroupsByDev.get(failedKey) ?? [];
         perDev.push({ instanceKey, group: loadedGroup });
@@ -1090,6 +1116,7 @@ export async function tryDevGlbFastPath(
         markProcessed();
       }
     }
+    deepTelemetry.finishDev(devPath, devTelemetryStarted);
   }
 
   if (!isCurrent()) return cleanupAndFail('session-invalid');
@@ -1101,6 +1128,7 @@ export async function tryDevGlbFastPath(
     return entry?.status === 'glb' && !failedDevPaths.has(devPath.toLowerCase());
   }).length;
   syncFailureProfile();
+  profile.deepTelemetry = deepTelemetry.snapshot(performance.now() - fastPathStarted);
   return success(loadedCount);
 }
 

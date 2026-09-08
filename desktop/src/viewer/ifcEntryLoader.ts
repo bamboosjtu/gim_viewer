@@ -14,6 +14,7 @@ import {
 } from '@desktop/database.js';
 import {
   perfCurrentSession,
+  perfRecordExternalSpan,
   perfRecordFragmentsCacheOperation,
   perfRecordFragmentsCacheOutcome,
   perfSetFragmentsCacheEnabled,
@@ -142,8 +143,15 @@ export async function loadIfcEntry(
 
   // 2. 尝试 Fragments 缓存（不读 IFC buffer）
   if (canUseCache && entryPath) {
+    const cacheStarted = performance.now();
     const cacheHit = await tryLoadFromFragmentsCache(
       ctx, state, runtimeModelId, modelId, entryPath, sourceGimSha256, session, perfSessionId,
+    );
+    perfRecordExternalSpan(
+      `变电 IFC Fragments cache restore composite · ${entryPath}`,
+      performance.now() - cacheStarted,
+      { entryPath, cacheHit, phase: 'cache-read/deserialize/model-callback composite' },
+      perfSessionId,
     );
     if (!isCurrent()) return;
     if (cacheHit) {
@@ -176,7 +184,14 @@ export async function loadIfcEntry(
   const model = await ctx.ifcLoader.load(ifcBuffer, true, runtimeModelId, {
     processData: { progressCallback: reportProgress },
   });
-  debugLog(DEBUG_IFC_LOAD, `[Perf] ifc load: ${Math.round(performance.now() - tIfcLoad)} ms`);
+  const ifcConversionMs = Math.max(0, performance.now() - tIfcLoad);
+  debugLog(DEBUG_IFC_LOAD, `[Perf] ifc load: ${Math.round(ifcConversionMs)} ms`);
+  perfRecordExternalSpan(
+    `变电 IFC web-ifc load/conversion + Fragments callback composite · ${entryPath}`,
+    ifcConversionMs,
+    { entryPath, phase: 'web-ifc conversion/model-callback/scene-add composite' },
+    perfSessionId,
+  );
 
   // load() 可能在旧工程失效后才完成；模型已进入 Fragments 时必须立即销毁，
   // 后续不能继续写缓存或刷新当前工程 UI。
@@ -190,7 +205,14 @@ export async function loadIfcEntry(
   // 4b. 后置校验：等待一帧让 onItemSet 完成（state.loadedModels + ctx.fragments.list 更新）
   // 即使 onItemSet 内部 safeFragmentsUpdate 报了 "Malformed tile"（被 catch），
   // 模型对象本身应该已经进入 scene + fragments.list + loadedModels
+  const stableStarted = performance.now();
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  perfRecordExternalSpan(
+    `变电 IFC RAF/stable validation · ${entryPath}`,
+    performance.now() - stableStarted,
+    { entryPath, phase: 'RAF + Fragments list/model state validation' },
+    perfSessionId,
+  );
 
   if (!isCurrent()) {
     try { ctx.fragments.core.disposeModel(runtimeModelId); } catch { /* ignore */ }

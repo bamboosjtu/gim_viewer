@@ -36,6 +36,7 @@ import {
 } from './modAutoLoadService.js';
 import type { DevGlbFailureType, DevGlbFastPathProfile } from './modAutoLoadService.js';
 import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
+import { createDevGeometryTelemetry } from './devGeometryTelemetry.js';
 
 /** 渐进管线进度 */
 export interface ProgressiveGeometryProgress {
@@ -246,11 +247,15 @@ export async function runProgressiveDevGlbPipeline(
     }
   }
 
+  const pipelineStarted = performance.now();
+
   debugLog(DEBUG_IFC_LOAD, `[progressive] ${seeds.length} 个 CBM 实例 → ${devOrder.length} 个唯一 DEV，开始渐进编译`);
 
   const { modRoot } = ensureGeometryLayers(state, scene);
   const totalDevs = devOrder.length;
   const devGlbProfile = emptyDevGlbProfile(seeds.length, totalDevs);
+  const deepTelemetry = createDevGeometryTelemetry('cold', totalDevs, seeds.length);
+  deepTelemetry.record('discovery', performance.now() - pipelineStarted);
   let compiledDevs = 0;
   let renderedInstances = 0;
   // P1 评审：结果追踪——只有全部 DEV 都有确定性结果（GLB 落盘成功 或 确认空几何）
@@ -320,6 +325,7 @@ export async function runProgressiveDevGlbPipeline(
       failureType,
       failedDevCount: failedPaths.length,
       failedDevPaths: failedPaths,
+      deepTelemetry: deepTelemetry.snapshot(performance.now() - pipelineStarted),
     };
   };
 
@@ -345,16 +351,30 @@ export async function runProgressiveDevGlbPipeline(
     }
 
     report(devPath);
+    const devTelemetryStarted = deepTelemetry.beginDev(
+      devPath,
+      seedsByDev.get(devPath.toLowerCase())?.length ?? 0,
+    );
 
     // 2.1 序列化（MOD/STL 只在此解析一次）
     let glbBytes: Uint8Array | null = null;
     let serializeFailed = false;
+    const serializeStarted = performance.now();
     try {
       glbBytes = await deps.serializeDevToGlb(devPath, files);
     } catch (err) {
       serializeFailed = true;
       markGeometryFailure(devPath, classifyDevGlbFailure(err));
       console.warn(`[progressive] DEV 序列化失败（计入失败清单，不写版本标记）: ${devPath}`, err);
+    } finally {
+      // The compiler currently exposes one async boundary.  Keep this as an
+      // honest composite span for source read + MOD/STL parse + mesh/bake +
+      // glTF export rather than inventing precision inside third-party code.
+      deepTelemetry.record(
+        'sourceReadModStlParseMeshBuildBakeGltfSerialize',
+        performance.now() - serializeStarted,
+        devPath,
+      );
     }
     if (!glbBytes || glbBytes.byteLength === 0) {
       if (!serializeFailed) {
@@ -365,9 +385,11 @@ export async function runProgressiveDevGlbPipeline(
         }
         emptyDevKeys.add(devPath.toLowerCase());
         compiledDevs++;
+        deepTelemetry.finishDev(devPath, devTelemetryStarted);
         continue;
       }
       compiledDevs++; // 进度计数继续，但该 DEV 未获得确定性结果
+      deepTelemetry.finishDev(devPath, devTelemetryStarted);
       continue;
     }
     glbDevKeys.add(devPath.toLowerCase());
@@ -380,7 +402,9 @@ export async function runProgressiveDevGlbPipeline(
         return resultSnapshot(true);
       }
       try {
+        const writeStarted = performance.now();
         await deps.writeGlbFile(capturedProjectId, devPath, glbBytes, session.sourceSha256);
+        deepTelemetry.record('glbWrite', performance.now() - writeStarted, devPath);
         glbEntries.push({ entry_path: devPath, status: 'glb', size: glbBytes.byteLength });
         if (!isSessionValid()) {
           return resultSnapshot(true);
@@ -437,7 +461,9 @@ export async function runProgressiveDevGlbPipeline(
         try {
           group = await deps.loadDevGlb(devPath, glbBytes);
         } finally {
-          glbParseMs += Math.max(0, performance.now() - parseStarted);
+          const parseMs = Math.max(0, performance.now() - parseStarted);
+          glbParseMs += parseMs;
+          deepTelemetry.record('glbParse', parseMs, devPath);
         }
         if (!isSessionValid()) {
           if (group) disposeGroup(group);
@@ -452,20 +478,27 @@ export async function runProgressiveDevGlbPipeline(
 
         // 应用 CBM 累积矩阵（含 mm→m，与 tryDevGlbFastPath 数学一致）
         const cbmTransform = parseCbmTransformMatrix(seed.transformMatrix);
+        const transformStarted = performance.now();
         deps.applyPlacementTransformToSceneUnits(group, cbmTransform);
 
         // 应用项目级坐标转换（Z-up → Y-up）
         applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
+        deepTelemetry.record('placementTransform', performance.now() - transformStarted, devPath);
 
         // bbox 守卫（空/NaN/超大跨度跳过，与现有路径一致）
-        if (!diagnoseGroupBBox(group, devPath)) {
+        const bboxStarted = performance.now();
+        const bboxValid = diagnoseGroupBBox(group, devPath);
+        deepTelemetry.record('bbox', performance.now() - bboxStarted, devPath);
+        if (!bboxValid) {
           disposeGroup(group);
           continue;
         }
 
         group.userData.devPath = devPath;
+        const sceneCommitStarted = performance.now();
         modRoot.add(group);
         state.loadedXmlModGroups.set(instanceKey, group);
+        deepTelemetry.record('sceneCommit', performance.now() - sceneCommitStarted, devPath);
         devGroups.push({ instanceKey, group });
         renderedInstances++;
       } catch (err) {
@@ -479,7 +512,10 @@ export async function runProgressiveDevGlbPipeline(
     report();
 
     // 批次间让出主线程，保证 IFC 交互与渲染不卡顿
+    const yieldStarted = performance.now();
     await deps.yieldToMain();
+    deepTelemetry.record('yield', performance.now() - yieldStarted, devPath);
+    deepTelemetry.finishDev(devPath, devTelemetryStarted);
   }
 
   // ── 3. 写版本标记（P1 评审：仅当全部 DEV 均有确定性结果时提交；
