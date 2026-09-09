@@ -26,7 +26,9 @@ import * as THREE from 'three';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { container } from '../ui/dom.js';
-import { perfReset } from '../utils/perfTimings.js';
+import { perfCurrentSession, perfReset } from '../utils/perfTimings.js';
+import { sampleSubstationRuntimeResources } from './substationResourceTelemetry.js';
+import type { ViewerContext } from '../viewer/viewerEngine.js';
 
 /**
  * 在打开新 GIM 项目前 / 清空场景时执行统一清理。
@@ -46,6 +48,12 @@ export async function cleanupBeforeOpenNewProject(
   if (expectedGeneration !== undefined && state.projectGeneration !== expectedGeneration) {
     return false;
   }
+  const shouldCaptureSubstationResources = state.currentProjectType === 'substation'
+    || state.currentIfcEntries.length > 0
+    || state.modRootGroup != null
+    || state.stlRootGroup != null
+    || state.loadedXmlModGroups.size > 0
+    || state.loadedStlGroups.size > 0;
   // P1 安全评审：清理开始时立即递增 geometry token，同步失效所有在途几何任务
   // （渐进 GLB 管线 / MOD 自动加载），防止旧项目任务把 GLB、版本标记或
   // UI 状态写入新项目。必须在任何 await 之前执行——后续新增逻辑不得移到本行之前。
@@ -57,7 +65,22 @@ export async function cleanupBeforeOpenNewProject(
   if (expectedGeneration === undefined) {
     perfReset({ generation: cleanupGeneration, projectId: null, sourceSha256: null });
   }
+  const cleanupPerfSession = perfCurrentSession();
   const isCurrentCleanup = () => state.projectGeneration === cleanupGeneration;
+  let cleanupViewerContext: ViewerContext | null = null;
+  let beforeCleanupSampled = false;
+  const sampleBeforeCleanup = (ctx?: ViewerContext | null): void => {
+    if (!shouldCaptureSubstationResources || beforeCleanupSampled) return;
+    beforeCleanupSampled = true;
+    void sampleSubstationRuntimeResources(
+      state,
+      'beforeCleanup',
+      cleanupPerfSession,
+      ctx,
+      { cleanupGeneration },
+      { isCurrent: isCurrentCleanup },
+    );
+  };
 
   // M0 设计系统：清理即重置顶栏工程身份与状态栏（纯 UI，位于 token 递增之后）
   try {
@@ -100,6 +123,8 @@ export async function cleanupBeforeOpenNewProject(
       const runtime = await getViewerRuntime(container);
       if (!isCurrentCleanup()) return false;
       const ctx = runtime.ctx;
+      cleanupViewerContext = ctx;
+      sampleBeforeCleanup(ctx);
 
       // 合并 state.loadedModels 中记录的 runtime ID 与 ctx.fragments.list 的 key
       // - state.loadedModels 可能比 ctx 多（dispose 失败的残留索引）
@@ -217,6 +242,9 @@ export async function cleanupBeforeOpenNewProject(
       console.warn('[Cleanup] ViewerRuntime cleanup failed:', err);
     }
   }
+  // A project can have semantic/geometry state without a created viewer (for
+  // example a partially failed open).  Still record the ownership checkpoint.
+  sampleBeforeCleanup();
   debugLog(DEBUG_RUNTIME_LOGS, '[Cleanup] disposed viewer models:', disposedCount, '(attempted:', attemptedCount, '), xml-mod groups:', xmlModDisposedCount, ', stl groups:', stlDisposedCount);
 
   // ---- 4. 清空 UI 残留 ----
@@ -264,5 +292,33 @@ export async function cleanupBeforeOpenNewProject(
   // resetGimState 是集中 mutator，已包含 loadedModels.clear / highlightedItems=null / hasFittedCamera=false
   if (!isCurrentCleanup()) return false;
   state.resetGimState();
+  if (shouldCaptureSubstationResources && isCurrentCleanup()) {
+    const cleanupMeta = {
+      cleanupGeneration,
+      disposedModels: disposedCount,
+      attemptedModels: attemptedCount,
+      xmlModGroups: xmlModDisposedCount,
+      stlGroups: stlDisposedCount,
+    };
+    void sampleSubstationRuntimeResources(
+      state,
+      'afterCleanup',
+      cleanupPerfSession,
+      cleanupViewerContext,
+      cleanupMeta,
+      { isCurrent: isCurrentCleanup },
+    );
+    setTimeout(() => {
+      if (!isCurrentCleanup()) return;
+      void sampleSubstationRuntimeResources(
+        state,
+        'settledAfterCleanup',
+        cleanupPerfSession,
+        cleanupViewerContext,
+        cleanupMeta,
+        { isCurrent: isCurrentCleanup },
+      );
+    }, 250);
+  }
   return true;
 }

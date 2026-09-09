@@ -16,6 +16,10 @@ import {
   perfMarkProductMoment,
   perfProductMomentSnapshot,
   perfRecordMemorySample,
+  perfRecordRuntimeResourceSnapshot,
+  perfRecordDevGeometryProfile,
+  perfRuntimeResourceSnapshot,
+  perfBenchmarkSnapshot,
   perfRecordExternalSpan,
   perfRecordSubstationIfcRead,
   perfRecordSubstationIfcProfile,
@@ -225,6 +229,70 @@ describe('perfTimings', () => {
     expect(perfSnapshot().substation.ifcParses).toHaveLength(0);
     expect(perfSnapshot().substation.finalize).toHaveLength(0);
     expect(perfSnapshot().spans).toHaveLength(0);
+  });
+
+  it('资源 checkpoint 与 benchmark export 使用同一会话并脱敏路径字段', () => {
+    const session = perfCurrentSession();
+    perfRecordRuntimeResourceSnapshot('beforeCleanup', {
+      sceneObjectCount: 0,
+      groupCount: 0,
+      meshCount: 0,
+      uniqueGeometryCount: 0,
+      uniqueMaterialCount: 0,
+      uniqueTextureCount: 0,
+      rendererInfoGeometries: null,
+      rendererInfoTextures: null,
+      rendererInfoPrograms: null,
+      templateCount: 0,
+      templateParseCount: 0,
+      sharedPlacementCount: 0,
+      legacyPlacementCount: 0,
+      sharedGeometryCount: 0,
+      sharedMaterialCount: 0,
+      sharedTextureCount: 0,
+      loadedXmlModGroupCount: 0,
+      loadedStlGroupCount: 0,
+      fragmentModelCount: 0,
+      loadedIfcModelCount: 0,
+      currentIfcEntryCount: 0,
+      cbmNodeCount: 0,
+      spatialNodeCount: 0,
+      spatialObjectCount: 0,
+      spatialLinkCount: 0,
+      fileDevRelationCount: 0,
+      modRootPresent: false,
+      stlRootPresent: false,
+      meta: { entryPath: 'D:\\sensitive\\DEV\\a.ifc' },
+    }, session);
+    perfRecordDevGeometryProfile({
+      path: 'DEV',
+      fallbackDevPaths: ['D:\\sensitive\\DEV\\bad.dev'],
+    }, session);
+    perfRecordMemorySample('interactive', {
+      rssBytes: 10,
+      processTreeRssBytes: 20,
+      processCount: 3,
+      processTreeAvailable: true,
+      jsHeapUsedBytes: 5,
+      meta: { entryPath: 'D:\\sensitive\\DEV\\a.ifc' },
+    }, session);
+
+    expect(perfRuntimeResourceSnapshot()).toHaveLength(1);
+    const snapshot = perfBenchmarkSnapshot({
+      commit: '7a12d88',
+      sample: 'D:/samples/substation02',
+      coldWarm: 'warm',
+    });
+    expect(snapshot).toMatchObject({
+      schemaVersion: 1,
+      commit: '7a12d88',
+      sample: 'substation02',
+      coldWarm: 'warm',
+      longTasks: { count: 0 },
+    });
+    expect(snapshot.cleanupProfile[0]?.meta).toMatchObject({ entryPath: 'a.ifc' });
+    expect(snapshot.devGeometryProfile[0]?.fallbackDevPaths).toEqual(['bad.dev']);
+    expect(snapshot.memorySamples[0]?.meta).toMatchObject({ entryPath: 'a.ifc' });
   });
 
   it('Fragments cache 操作、字节和命中/未命中/回退按会话汇总', () => {

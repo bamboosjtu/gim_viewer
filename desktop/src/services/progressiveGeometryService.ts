@@ -48,6 +48,11 @@ import {
   DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY,
   type DevGlbParsedAsset,
 } from './devGlbTemplateRuntime.js';
+import {
+  diagnosticForFailure,
+  diagnosticFromSerialization,
+  setGeometryDiagnostic,
+} from '../gim/geometry/geometryDiagnostics.js';
 
 /** 渐进管线进度 */
 export interface ProgressiveGeometryProgress {
@@ -377,6 +382,19 @@ export async function runProgressiveDevGlbPipeline(
     const key = devPath.toLowerCase();
     if (!failureTypes[key]) failureTypes[key] = type;
     markFailedDev(devPath, true);
+    if (isSessionValid()) {
+      setGeometryDiagnostic(
+        state,
+        diagnosticForFailure(
+          devPath,
+          type === 'missing' ? 'missing-dependency' : 'parse-failed',
+          'cold',
+          type === 'missing'
+            ? '几何依赖缺失；已隔离该 DEV 并保留其它设备。'
+            : undefined,
+        ),
+      );
+    }
   };
   // A write failure makes the persisted cache incomplete, but the freshly
   // compiled bytes are still valid for this run.  Keep it out of
@@ -465,6 +483,9 @@ export async function runProgressiveDevGlbPipeline(
         const serialized = await serializeDetailed(devPath, files);
         serializationStatus = serialized.status;
         glbBytes = serialized.bytes;
+        if (isSessionValid()) {
+          setGeometryDiagnostic(state, diagnosticFromSerialization(devPath, serialized.diagnostics, 'cold'));
+        }
         if (serialized.status === 'unsupported') {
           unsupportedDevKeys.add(devPath.toLowerCase());
           unsupportedDevs.push(devPath);
@@ -472,6 +493,11 @@ export async function runProgressiveDevGlbPipeline(
       } else {
         glbBytes = await deps.serializeDevToGlb(devPath, files);
         serializationStatus = glbBytes && glbBytes.byteLength > 0 ? 'complete' : 'empty';
+        if (isSessionValid()) {
+          setGeometryDiagnostic(state, diagnosticFromSerialization(devPath, {
+            status: serializationStatus,
+          }, 'cold'));
+        }
       }
     } catch (err) {
       serializeFailed = true;
@@ -487,6 +513,7 @@ export async function runProgressiveDevGlbPipeline(
         devPath,
       );
     }
+    if (!isSessionValid()) return resultSnapshot(true);
     if (!glbBytes || glbBytes.byteLength === 0) {
       if (!serializeFailed) {
         // Non-empty unsupported sources get their own deterministic manifest

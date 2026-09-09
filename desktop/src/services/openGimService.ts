@@ -49,6 +49,27 @@ function getDevPerformanceFilePath(): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+/**
+ * Acceptance checkpoint only: capture the state before Shared Core starts a
+ * new open.  The collector is dynamically loaded so the dialog/open entry
+ * keeps its existing lazy dependency boundary.  A generation guard prevents a
+ * slow process-memory IPC response from being recorded after cleanup has
+ * already moved on to the next project.
+ */
+function scheduleBaselineBeforeOpen(state: AppState, generation: number): void {
+  const perfSession = perfCurrentSession();
+  void import('./substationResourceTelemetry.js').then(({ sampleSubstationRuntimeResources }) =>
+    sampleSubstationRuntimeResources(
+      state,
+      'baselineBeforeOpen',
+      perfSession,
+      undefined,
+      { requestGeneration: generation },
+      { isCurrent: () => state.projectGeneration === generation },
+    )
+  ).catch(() => undefined);
+}
+
 function describeType(type: GimRuntimeType | 'unknown'): string {
   return type === 'transmission_line' ? 'transmission_line'
     : type === 'substation' ? 'substation'
@@ -278,6 +299,7 @@ async function openTauriGim(
   state.invalidatePendingLoads();
   const requestGeneration = state.projectGeneration;
   perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
+  scheduleBaselineBeforeOpen(state, requestGeneration);
   btnLoadGim.disabled = true;
 
   try {
@@ -350,6 +372,7 @@ async function openBrowserGim(
   state.invalidatePendingLoads();
   const requestGeneration = state.projectGeneration;
   perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
+  scheduleBaselineBeforeOpen(state, requestGeneration);
 
   return new Promise<void>((resolve) => {
     const handler = async () => {

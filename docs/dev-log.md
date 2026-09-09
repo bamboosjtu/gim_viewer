@@ -23,14 +23,14 @@
 | 下一步 | 用 `templateParseCount`、shared/fallback 计数、placement slice p50/p95/max、scene commit 和内存采样复核真实样本；再决定 memory retention/unload、cold compiler Worker 或 IFC/Fragments 优化。 |
 | 完成条件 | 结构性 invariant 已由 unit/regression 覆盖：clean path parse≈unique DEV、placement 共享资源且不改写 geometry、A/B transform 等价、stale slice 不提交、cleanup exactly once。真实 wall-clock/RSS/Long Task 仍需 Tauri 运行证据。 |
 
-### P1 · EMPTY_DEVICE_XML 与无几何装配节点提示
+### P1 · 几何状态可解释性（第一阶段已实现）
 
 | 字段 | 当前定义 |
 |---|---|
-| 状态 | 未实现 |
-| 现象 | `EMPTY_DEVICE_XML` 或没有自有 `SOLIDMODEL` 的装配节点会被解析为空 Group；其它设备仍可正常显示。 |
-| 影响 | 用户无法区分“确实没有几何”和“几何加载失败”。 |
-| 下一步 | 在属性/来源面板显示明确原因和可达子设备数量，并把原因写入诊断；不得伪造几何，也不得阻塞其它 DEV。 |
+| 状态 | 第一阶段已实现；精确来源归因仍待补齐 |
+| 现象 | `EMPTY_DEVICE_XML` 或没有自有 `SOLIDMODEL` 的装配节点仍可能没有可渲染几何；其它设备必须继续正常显示。 |
+| 影响 | 属性抽屉现在能显示 session 内 DEV 的 `renderable/partial/empty/unsupported/failed` 状态、冷/暖来源和 unsupported primitive 统计，避免把 unsupported 或失败误看成 empty。 |
+| 下一步 | 从 DEV/PHM 解析结果进一步填充 `empty-device-xml`、`assembly-node-without-own-geometry` 等精确原因，并让首次打开与缓存命中保持同一原因粒度；不得伪造几何，也不得阻塞其它 DEV。 |
 | 完成条件 | `empty-device-xml` 与 `assembly-node-without-own-geometry` 可区分、可检索、可在缓存命中和首次打开中保持一致。 |
 
 ### P1 · Fragments 缓存默认策略

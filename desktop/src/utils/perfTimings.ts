@@ -102,10 +102,86 @@ export interface PerfMemorySample {
   sessionId: number;
   rssBytes: number | null;
   rssSource?: string;
+  /** Rust/Tauri backend working set; kept explicit because rssBytes is legacy. */
+  tauriProcessRssBytes: number | null;
+  processPid: number | null;
+  processTreeRssBytes: number | null;
+  processCount: number | null;
+  processTreeAvailable: boolean;
+  processTreeSource?: string;
+  processTreeReason?: string;
   jsHeapUsedBytes: number | null;
   jsHeapTotalBytes: number | null;
   jsHeapLimitBytes: number | null;
   meta?: Record<string, unknown>;
+}
+
+/** 低频采集的变电运行时资源所有权快照，不复制 geometry bytes。 */
+export interface PerfRuntimeResourceSnapshot {
+  label: string;
+  atMs: number;
+  sessionId: number;
+  sceneObjectCount: number | null;
+  groupCount: number | null;
+  meshCount: number | null;
+  uniqueGeometryCount: number | null;
+  uniqueMaterialCount: number | null;
+  uniqueTextureCount: number | null;
+  rendererInfoGeometries: number | null;
+  rendererInfoTextures: number | null;
+  rendererInfoPrograms: number | null;
+  templateCount: number | null;
+  templateParseCount: number | null;
+  sharedPlacementCount: number | null;
+  legacyPlacementCount: number | null;
+  sharedGeometryCount: number | null;
+  sharedMaterialCount: number | null;
+  sharedTextureCount: number | null;
+  loadedXmlModGroupCount: number | null;
+  loadedStlGroupCount: number | null;
+  fragmentModelCount: number | null;
+  loadedIfcModelCount: number | null;
+  currentIfcEntryCount: number | null;
+  cbmNodeCount: number | null;
+  spatialNodeCount: number | null;
+  spatialObjectCount: number | null;
+  spatialLinkCount: number | null;
+  fileDevRelationCount: number | null;
+  modRootPresent: boolean;
+  stlRootPresent: boolean;
+  meta?: Record<string, unknown>;
+}
+
+export type PerfCleanupCheckpoint =
+  | 'beforeCleanup'
+  | 'afterCleanup'
+  | 'settledAfterCleanup';
+
+export interface PerfBenchmarkMetadata {
+  commit?: string;
+  platform?: string;
+  buildMode?: string;
+  sample?: string | null;
+  coldWarm?: 'cold' | 'warm' | null;
+  sourceSha256?: string | null;
+}
+
+export interface PerfBenchmarkSnapshot {
+  schemaVersion: 1;
+  commit: string;
+  platform: string;
+  buildMode: string;
+  sample: string | null;
+  coldWarm: 'cold' | 'warm' | null;
+  sourceSha256: string | null;
+  productMoments: Record<PerfProductMoment, PerfProductMomentInfo | null>;
+  longTasks: PerfLongTaskStats;
+  memorySamples: PerfMemorySample[];
+  runtimeResourceSnapshots: PerfRuntimeResourceSnapshot[];
+  ifcProfiles: PerfSubstationStats;
+  fragmentsCacheProfile: PerfFragmentsCacheStats;
+  devGeometryProfile: Array<Record<string, unknown>>;
+  cleanupProfile: PerfRuntimeResourceSnapshot[];
 }
 
 /** 单个 IFC 的磁盘读取与文本解码 profile。 */
@@ -243,6 +319,8 @@ const invokeStats = new Map<string, InvokeAccumulator>();
 let longTaskStats: PerfLongTaskStats = { count: 0, totalBlockingTimeMs: 0, maxMs: 0 };
 const productMoments = new Map<PerfProductMoment, PerfProductMomentInfo>();
 let memorySamples: PerfMemorySample[] = [];
+let runtimeResourceSnapshots: PerfRuntimeResourceSnapshot[] = [];
+let devGeometryProfiles: Array<Record<string, unknown>> = [];
 let substationIfcReads: PerfSubstationIfcReadProfile[] = [];
 let substationIfcParses: PerfSubstationIfcProfile[] = [];
 let substationFinalizes: PerfSubstationFinalizeProfile[] = [];
@@ -379,6 +457,8 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
       .__GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__ = {};
   }
   memorySamples = [];
+  runtimeResourceSnapshots = [];
+  devGeometryProfiles = [];
   substationIfcReads = [];
   substationIfcParses = [];
   substationFinalizes = [];
@@ -500,6 +580,13 @@ export function perfRecordMemorySample(
   sample: {
     rssBytes?: number | null;
     rssSource?: string;
+    tauriProcessRssBytes?: number | null;
+    processPid?: number | null;
+    processTreeRssBytes?: number | null;
+    processCount?: number | null;
+    processTreeAvailable?: boolean;
+    processTreeSource?: string;
+    processTreeReason?: string;
     jsHeapUsedBytes?: number | null;
     jsHeapTotalBytes?: number | null;
     jsHeapLimitBytes?: number | null;
@@ -516,6 +603,13 @@ export function perfRecordMemorySample(
     sessionId: session.id,
     rssBytes: finiteOrNull(sample.rssBytes),
     ...(sample.rssSource ? { rssSource: sample.rssSource } : {}),
+    tauriProcessRssBytes: finiteOrNull(sample.tauriProcessRssBytes ?? sample.rssBytes),
+    processPid: finiteOrNull(sample.processPid),
+    processTreeRssBytes: finiteOrNull(sample.processTreeRssBytes),
+    processCount: finiteOrNull(sample.processCount),
+    processTreeAvailable: sample.processTreeAvailable === true,
+    ...(sample.processTreeSource ? { processTreeSource: sample.processTreeSource } : {}),
+    ...(sample.processTreeReason ? { processTreeReason: sample.processTreeReason } : {}),
     jsHeapUsedBytes: finiteOrNull(sample.jsHeapUsedBytes),
     jsHeapTotalBytes: finiteOrNull(sample.jsHeapTotalBytes),
     jsHeapLimitBytes: finiteOrNull(sample.jsHeapLimitBytes),
@@ -525,6 +619,69 @@ export function perfRecordMemorySample(
 
 export function perfMemorySnapshot(): PerfMemorySample[] {
   return memorySamples.map((sample) => ({ ...sample, meta: sample.meta ? { ...sample.meta } : undefined }));
+}
+
+/** 记录一次低频的 Three/Fragments/语义资源所有权快照。 */
+export function perfRecordRuntimeResourceSnapshot(
+  label: string,
+  snapshot: Omit<PerfRuntimeResourceSnapshot, 'label' | 'atMs' | 'sessionId'>,
+  session: PerfSession = currentSession,
+): void {
+  if (!perfIsCurrentSession(session)) return;
+  const finiteOrNull = (value: number | null | undefined): number | null =>
+    value != null && Number.isFinite(value) && value >= 0 ? value : null;
+  const countFields = [
+    'sceneObjectCount', 'groupCount', 'meshCount',
+    'uniqueGeometryCount', 'uniqueMaterialCount', 'uniqueTextureCount',
+    'rendererInfoGeometries', 'rendererInfoTextures', 'rendererInfoPrograms',
+    'templateCount', 'templateParseCount', 'sharedPlacementCount',
+    'legacyPlacementCount', 'sharedGeometryCount', 'sharedMaterialCount',
+    'sharedTextureCount', 'loadedXmlModGroupCount', 'loadedStlGroupCount',
+    'fragmentModelCount', 'loadedIfcModelCount', 'currentIfcEntryCount',
+    'cbmNodeCount', 'spatialNodeCount', 'spatialObjectCount',
+    'spatialLinkCount', 'fileDevRelationCount',
+  ] as const;
+  const normalized = {} as Omit<PerfRuntimeResourceSnapshot, 'label' | 'atMs' | 'sessionId'>;
+  for (const field of countFields) {
+    (normalized as unknown as Record<string, unknown>)[field] = finiteOrNull(snapshot[field]);
+  }
+  normalized.modRootPresent = snapshot.modRootPresent === true;
+  normalized.stlRootPresent = snapshot.stlRootPresent === true;
+  normalized.meta = snapshot.meta;
+  runtimeResourceSnapshots.push({
+    label,
+    atMs: performance.now() - sessionStartMs,
+    sessionId: session.id,
+    ...normalized,
+  });
+}
+
+export function perfRuntimeResourceSnapshot(): PerfRuntimeResourceSnapshot[] {
+  return runtimeResourceSnapshots.map((snapshot) => ({
+    ...snapshot,
+    meta: snapshot.meta ? { ...snapshot.meta } : undefined,
+  }));
+}
+
+/** cleanupProfile 是 runtime resource 快照的稳定子集，避免创建第二套采样器。 */
+export function perfCleanupSnapshot(): PerfRuntimeResourceSnapshot[] {
+  const checkpoints = new Set<PerfCleanupCheckpoint>([
+    'beforeCleanup', 'afterCleanup', 'settledAfterCleanup',
+  ]);
+  return perfRuntimeResourceSnapshot().filter((snapshot) => checkpoints.has(snapshot.label as PerfCleanupCheckpoint));
+}
+
+/** 记录一次已经聚合的 DEV geometry profile；不记录每个 placement 的 trace。 */
+export function perfRecordDevGeometryProfile(
+  profile: Record<string, unknown>,
+  session: PerfSession = currentSession,
+): void {
+  if (!perfIsCurrentSession(session)) return;
+  devGeometryProfiles.push({ ...profile });
+}
+
+export function perfDevGeometrySnapshot(): Array<Record<string, unknown>> {
+  return devGeometryProfiles.map((profile) => ({ ...profile }));
 }
 
 /** 记录变电 IFC 读取 profile，并单列 read/decode 阶段。 */
@@ -862,6 +1019,9 @@ export function perfSnapshot(): {
   longTasks: PerfLongTaskStats;
   productMoments: Record<PerfProductMoment, PerfProductMomentInfo | null>;
   memory: PerfMemorySample[];
+  runtimeResources: PerfRuntimeResourceSnapshot[];
+  devGeometry: Array<Record<string, unknown>>;
+  cleanup: PerfRuntimeResourceSnapshot[];
   substation: PerfSubstationStats;
 } {
   return {
@@ -876,8 +1036,112 @@ export function perfSnapshot(): {
     longTasks: perfLongTaskSnapshot(),
     productMoments: perfProductMomentSnapshot(),
     memory: perfMemorySnapshot(),
+    runtimeResources: perfRuntimeResourceSnapshot(),
+    devGeometry: perfDevGeometrySnapshot(),
+    cleanup: perfCleanupSnapshot(),
     substation: perfSubstationSnapshot(),
   };
+}
+
+function benchmarkPath(value: string): string {
+  const normalized = value.replace(/\\/g, '/');
+  return normalized.split('/').pop() || normalized;
+}
+
+function isBenchmarkPathField(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized === 'name'
+    || normalized === 'sample'
+    || normalized === 'path'
+    || normalized.endsWith('path')
+    || normalized.endsWith('_path')
+    || normalized.includes('devpath')
+    || normalized.includes('entrypath')
+    || normalized === 'fallbackdevpaths'
+    || normalized === 'worstdevpaths';
+}
+
+/**
+ * Benchmark JSON is intended for local acceptance exchange.  Keep hashes and
+ * aggregate counters, but strip directory prefixes and file-name fields to
+ * avoid exporting project/business identity through the diagnostics shortcut.
+ */
+function sanitizeBenchmarkValue(value: unknown, key = ''): unknown {
+  if (typeof value === 'string') return isBenchmarkPathField(key) ? benchmarkPath(value) : value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeBenchmarkValue(item, key));
+  if (!value || typeof value !== 'object') return value;
+  const result: Record<string, unknown> = {};
+  for (const [rawKey, child] of Object.entries(value)) {
+    const safeKey = rawKey.includes('/') || rawKey.includes('\\')
+      ? benchmarkPath(rawKey)
+      : rawKey;
+    result[safeKey] = sanitizeBenchmarkValue(child, rawKey);
+  }
+  return result;
+}
+
+function benchmarkDefaults(): Required<Pick<PerfBenchmarkMetadata, 'commit' | 'platform' | 'buildMode'>> & {
+  sample: string | null;
+  coldWarm: 'cold' | 'warm' | null;
+  sourceSha256: string | null;
+} {
+  const globals = globalThis as {
+    __GIM_COMMIT__?: unknown;
+    __GIM_BENCHMARK_SAMPLE_ID__?: unknown;
+    __GIM_BENCHMARK_COLD_WARM__?: unknown;
+  };
+  const env = import.meta.env as Record<string, unknown>;
+  const platform = typeof navigator !== 'undefined'
+    ? ((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform
+      || navigator.platform
+      || 'unknown')
+    : 'unknown';
+  const sample = typeof globals.__GIM_BENCHMARK_SAMPLE_ID__ === 'string'
+    && globals.__GIM_BENCHMARK_SAMPLE_ID__.trim()
+    ? benchmarkPath(globals.__GIM_BENCHMARK_SAMPLE_ID__.trim())
+    : null;
+  const coldWarm = globals.__GIM_BENCHMARK_COLD_WARM__ === 'cold'
+    || globals.__GIM_BENCHMARK_COLD_WARM__ === 'warm'
+    ? globals.__GIM_BENCHMARK_COLD_WARM__
+    : null;
+  return {
+    commit: typeof env.VITE_GIM_COMMIT === 'string'
+      ? env.VITE_GIM_COMMIT
+      : typeof globals.__GIM_COMMIT__ === 'string' ? globals.__GIM_COMMIT__ : 'unknown',
+    platform,
+    buildMode: import.meta.env?.DEV ? 'development' : 'production',
+    sample,
+    coldWarm,
+    sourceSha256: currentSession.sourceSha256 ?? null,
+  };
+}
+
+/**
+ * Stable, machine-readable acceptance export built on the existing perf
+ * contracts.  Unlike perfSnapshot(), it intentionally omits raw spans because
+ * their labels/meta can contain source paths; path-bearing fields are
+ * basename-sanitized in the structured profiles below.
+ */
+export function perfBenchmarkSnapshot(metadata: PerfBenchmarkMetadata = {}): PerfBenchmarkSnapshot {
+  const defaults = benchmarkDefaults();
+  const raw = {
+    schemaVersion: 1 as const,
+    commit: metadata.commit ?? defaults.commit,
+    platform: metadata.platform ?? defaults.platform,
+    buildMode: metadata.buildMode ?? defaults.buildMode,
+    sample: metadata.sample ?? defaults.sample,
+    coldWarm: metadata.coldWarm ?? defaults.coldWarm,
+    sourceSha256: metadata.sourceSha256 ?? defaults.sourceSha256,
+    productMoments: perfProductMomentSnapshot(),
+    longTasks: perfLongTaskSnapshot(),
+    memorySamples: perfMemorySnapshot(),
+    runtimeResourceSnapshots: perfRuntimeResourceSnapshot(),
+    ifcProfiles: perfSubstationSnapshot(),
+    fragmentsCacheProfile: perfFragmentsCacheSnapshot(),
+    devGeometryProfile: perfDevGeometrySnapshot(),
+    cleanupProfile: perfCleanupSnapshot(),
+  };
+  return sanitizeBenchmarkValue(raw) as PerfBenchmarkSnapshot;
 }
 
 /** 人类可读摘要（对齐文本表） */

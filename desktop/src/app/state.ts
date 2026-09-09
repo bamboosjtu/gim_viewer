@@ -12,6 +12,7 @@ import type { SldDocument } from '../gim/sldParser.js';
 import type { StdSldIndex } from '../gim/stdSldIndex.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
 import { createIfcRuntimeModelId } from '../gim/modelIdentity.js';
+import type { GeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 
 /** 工程异步任务携带的不可变身份快照。 */
 export interface ProjectLoadSession {
@@ -103,6 +104,15 @@ export class AppState {
   // 与 loadedXmlModGroups 分开管理，便于 P1 阶段单独控制 STL 渲染
   // 由 modAutoLoadService 在自动加载时填充，projectCleanupService 在切换项目时 dispose
   loadedStlGroups = new Map<string, THREE.Group>();
+
+  /**
+   * DEV 几何降级结果（key = normalized DEV path）。
+   *
+   * 这是当前工程会话内的轻量诊断索引，不是第二份 geometry model；
+   * cold serialization、warm manifest 和按需 raw path 都写入同一 contract，
+   * 让属性面板能够区分 empty/partial/unsupported/failed，而不猜测场景状态。
+   */
+  geometryDiagnosticsByDevPath = new Map<string, GeometryDiagnostic>();
 
   // MOD/STL 图层根节点（挂在 scene 下，与 IFC 平级）
   // 用于一键开关、异常隔离、bbox 诊断
@@ -259,6 +269,7 @@ export class AppState {
     // 这里只清空索引，避免 stale 引用
     this.loadedXmlModGroups.clear();
     this.loadedStlGroups.clear();
+    this.geometryDiagnosticsByDevPath.clear();
     this.modRootGroup = null;
     this.stlRootGroup = null;
     // 清空项目级坐标转换矩阵（新项目需重新自动同步或手动设置）

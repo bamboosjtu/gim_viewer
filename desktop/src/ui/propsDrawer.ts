@@ -13,6 +13,11 @@ import {
 } from '../shared/gimParsing.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
 import {
+  getGeometryDiagnostic,
+  geometryReasonLabel,
+  geometryStatusLabel,
+} from '../gim/geometry/geometryDiagnostics.js';
+import {
   findIfcEntryByModelId,
   normalizeEntryPath,
   normalizedIfcBasename,
@@ -214,12 +219,65 @@ function renderFamSections(sections: Map<string, Map<string, string>>, component
   return html;
 }
 
+function countChildGeometryEntries(node: CbmNode): number {
+  let count = 0;
+  const visit = (current: CbmNode): void => {
+    for (const child of current.children) {
+      if (child.devPath) count++;
+      visit(child);
+    }
+  };
+  visit(node);
+  return count;
+}
+
+/**
+ * 将已有 geometry pipeline 结果显示在设备检查器中。
+ *
+ * 这里不重新扫描 DEV/PHM/MOD；首次打开和 warm manifest 都由 runtime
+ * 写入同一 session-local index，避免属性点击反过来制造一条慢解析路径。
+ */
+function renderNodeGeometryDiagnostics(state: AppState, node: CbmNode): string {
+  const childDevCount = countChildGeometryEntries(node);
+  if (!node.devPath && childDevCount === 0) return '';
+
+  const diagnostic = getGeometryDiagnostic(state, node.devPath);
+  const rows: PropertyRow[] = [];
+  if (diagnostic) {
+    rows.push({ key: '几何状态', value: geometryStatusLabel(diagnostic.status) });
+    rows.push({ key: '诊断来源', value: diagnostic.source === 'cold' ? '首次打开/编译' : diagnostic.source === 'warm' ? '缓存 manifest' : '按需回退' });
+    if (diagnostic.reason) rows.push({ key: '原因', value: geometryReasonLabel(diagnostic.reason) });
+    if (diagnostic.discoveredModCount != null) rows.push({ key: '发现 MOD/GL', value: String(diagnostic.discoveredModCount) });
+    if (diagnostic.discoveredStlCount != null) rows.push({ key: '发现 STL', value: String(diagnostic.discoveredStlCount) });
+    if (diagnostic.renderableModCount != null) rows.push({ key: '可渲染 MOD/GL', value: String(diagnostic.renderableModCount) });
+    if (diagnostic.renderableStlCount != null) rows.push({ key: '可渲染 STL', value: String(diagnostic.renderableStlCount) });
+    if (diagnostic.emptySourceCount != null && diagnostic.emptySourceCount > 0) {
+      rows.push({ key: '空几何源', value: String(diagnostic.emptySourceCount) });
+    }
+    if (diagnostic.unsupportedSourceCount != null && diagnostic.unsupportedSourceCount > 0) {
+      rows.push({ key: '未支持几何源', value: String(diagnostic.unsupportedSourceCount) });
+    }
+    const unsupportedTypes = Object.entries(diagnostic.unsupportedPrimitiveTypeCounts)
+      .filter(([, count]) => count > 0)
+      .map(([type, count]) => `${type} × ${count}`)
+      .join('、');
+    if (unsupportedTypes) rows.push({ key: '未支持 primitive', value: unsupportedTypes });
+    if (diagnostic.detail) rows.push({ key: '说明', value: diagnostic.detail });
+  } else {
+    rows.push({ key: '几何状态', value: '尚未完成几何发现或当前 DEV 尚未加载' });
+  }
+  if (childDevCount > 0) {
+    rows.push({ key: '子设备 DEV 入口', value: String(childDevCount) });
+  }
+  return renderPropertySection('几何状态', 'substation-dev', rows);
+}
+
 /**
  * 渲染节点的 FAM/DEV 属性为 HTML。
  * 优先从 currentFiles 读取（首次打开），回退到 cachedFamProperties/cachedDevProperties（缓存命中）。
  */
 async function renderNodeFamDevProperties(state: AppState, node: CbmNode): Promise<string> {
-  let html = '';
+  let html = renderNodeGeometryDiagnostics(state, node);
 
   // FAM 属性（CBM/{famPath}）
   if (node.famPath) {

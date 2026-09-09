@@ -403,6 +403,36 @@ export class DevGlbTemplatePool {
     };
   }
 
+  /**
+   * Current ownership counts, as opposed to the cumulative telemetry above.
+   * This is intentionally count-only so memory checkpoints never copy resource
+   * buffers or retain a second ownership graph.
+   */
+  currentResourceCounts(): {
+    templateCount: number;
+    sharedGeometryCount: number;
+    sharedMaterialCount: number;
+    sharedTextureCount: number;
+  } {
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    const textures = new Set<THREE.Texture>();
+    let templateCount = 0;
+    for (const preparation of this.preparations.values()) {
+      if (preparation.kind !== 'shared') continue;
+      templateCount += 1;
+      for (const geometry of preparation.template.geometryRefs) geometries.add(geometry);
+      for (const material of preparation.template.materialRefs) materials.add(material);
+      for (const texture of preparation.template.textureRefs) textures.add(texture);
+    }
+    return {
+      templateCount,
+      sharedGeometryCount: geometries.size,
+      sharedMaterialCount: materials.size,
+      sharedTextureCount: textures.size,
+    };
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;

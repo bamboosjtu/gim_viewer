@@ -181,6 +181,32 @@ async function bootstrapAsync(): Promise<void> {
       }
     });
 
+    // Desktop acceptance export: Ctrl+Shift+B copies only the stable,
+    // path-sanitized benchmark contract (no DB diagnostic or raw spans).
+    // The local harness may set __GIM_BENCHMARK_SAMPLE_ID__ and
+    // __GIM_BENCHMARK_COLD_WARM__ before opening a sample.
+    document.addEventListener('keydown', async (e) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'B' || e.key === 'b')) {
+        e.preventDefault();
+        try {
+          showLoading('正在生成性能验收 JSON...');
+          const { perfBenchmarkSnapshot } = await import('../utils/perfTimings.js');
+          const payload = JSON.stringify(perfBenchmarkSnapshot(), null, 2);
+          if (import.meta.env.DEV) {
+            (globalThis as { __GIM_LAST_BENCHMARK__?: string }).__GIM_LAST_BENCHMARK__ = payload;
+          }
+          await navigator.clipboard.writeText(payload);
+          console.log('[性能验收] benchmark JSON 已复制到剪贴板:\n', payload);
+          showLoading('性能验收 JSON 已复制到剪贴板');
+          setTimeout(hideLoading, 2000);
+        } catch (err) {
+          console.error('[性能验收] benchmark JSON 导出失败:', err);
+          showLoading(`性能验收导出失败: ${err instanceof Error ? err.message : String(err)}`);
+          setTimeout(hideLoading, 3000);
+        }
+      }
+    });
+
     // M4-B3A：悬链线参数审计导出快捷键 Ctrl+Shift+C
     // - 复制完整审计 JSON 到剪贴板（含 report.coverage / kValueSamples / splitSamples /
     //   matrix0FormatSamples / blhaElevationSamples / semanticHypotheses / blockingQuestions）

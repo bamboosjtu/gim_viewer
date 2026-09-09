@@ -1,0 +1,43 @@
+name: Desktop compile gate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-and-rust:
+    name: Frontend + Tauri Rust checks
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend unit tests
+        run: npm test
+
+      - name: Build frontend
+        env:
+          VITE_GIM_COMMIT: ${{ github.sha }}
+        run: npm run build
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check Tauri Rust boundary
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked

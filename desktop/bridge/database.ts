@@ -193,11 +193,21 @@ export async function readCachedEntry(projectId: number, entryPath: string): Pro
   return toUint8Array(bytes);
 }
 
-/** 获取 Tauri 后端进程 RSS；该值不代表 WebView2 子进程或 JS heap。 */
+/**
+ * 获取 Tauri 后端进程及可测 WebView2 descendant process-tree RSS。
+ * processTreeRssBytes 为 null 时必须结合 processTreeAvailable/reason 解读，
+ * 不能把后端 rssBytes 当作完整桌面进程树内存。
+ */
 export interface ProcessMemorySnapshot {
   pid: number;
   rssBytes: number | null;
   source: string;
+  rssSource?: string;
+  processTreeRssBytes: number | null;
+  processCount: number | null;
+  processTreeAvailable: boolean;
+  processTreeSource?: string;
+  processTreeReason?: string | null;
 }
 
 export async function getProcessMemory(): Promise<ProcessMemorySnapshot> {

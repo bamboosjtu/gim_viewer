@@ -288,6 +288,12 @@ struct ProcessMemorySnapshot {
     pid: u32,
     rss_bytes: Option<u64>,
     source: String,
+    rss_source: String,
+    process_tree_rss_bytes: Option<u64>,
+    process_count: Option<u32>,
+    process_tree_available: bool,
+    process_tree_source: String,
+    process_tree_reason: Option<String>,
 }
 
 #[cfg(windows)]
@@ -298,6 +304,224 @@ fn current_process_id() -> u32 {
     }
     // SAFETY: GetCurrentProcessId has no preconditions.
     unsafe { GetCurrentProcessId() }
+}
+
+#[cfg(windows)]
+mod windows_process_tree {
+    use std::collections::HashMap;
+    use std::ffi::c_void;
+    use std::mem::size_of;
+
+    const TH32CS_SNAPPROCESS: u32 = 0x0000_0002;
+    const ERROR_NO_MORE_FILES: u32 = 18;
+    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+    const PROCESS_VM_READ: u32 = 0x0010;
+
+    #[repr(C)]
+    struct ProcessMemoryCounters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+
+    #[repr(C)]
+    struct ProcessEntry32W {
+        dw_size: u32,
+        cnt_usage: u32,
+        th32_process_id: u32,
+        th32_default_heap_id: usize,
+        th32_module_id: u32,
+        cnt_threads: u32,
+        th32_parent_process_id: u32,
+        pc_pri_class_base: i32,
+        dw_flags: u32,
+        sz_exe_file: [u16; 260],
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateToolhelp32Snapshot(flags: u32, process_id: u32) -> *mut c_void;
+        fn Process32FirstW(snapshot: *mut c_void, entry: *mut ProcessEntry32W) -> i32;
+        fn Process32NextW(snapshot: *mut c_void, entry: *mut ProcessEntry32W) -> i32;
+        fn GetLastError() -> u32;
+        fn OpenProcess(access: u32, inherit_handle: i32, process_id: u32) -> *mut c_void;
+        fn CloseHandle(handle: *mut c_void) -> i32;
+    }
+
+    #[link(name = "psapi")]
+    extern "system" {
+        fn GetProcessMemoryInfo(
+            process: *mut c_void,
+            counters: *mut ProcessMemoryCounters,
+            size: u32,
+        ) -> i32;
+    }
+
+    pub(super) struct Snapshot {
+        pub(super) rss_bytes: Option<u64>,
+        pub(super) process_count: Option<u32>,
+        pub(super) available: bool,
+        pub(super) source: String,
+        pub(super) reason: Option<String>,
+    }
+
+    fn unavailable(reason: impl Into<String>) -> Snapshot {
+        Snapshot {
+            rss_bytes: None,
+            process_count: None,
+            available: false,
+            source: "windows-process-tree-unavailable".to_string(),
+            reason: Some(reason.into()),
+        }
+    }
+
+    fn query_rss(handle: *mut c_void) -> Option<u64> {
+        // SAFETY: the handle comes from OpenProcess and the output struct is
+        // initialized to the exact shape required by GetProcessMemoryInfo.
+        unsafe {
+            let mut counters = ProcessMemoryCounters {
+                cb: size_of::<ProcessMemoryCounters>() as u32,
+                page_fault_count: 0,
+                peak_working_set_size: 0,
+                working_set_size: 0,
+                quota_peak_paged_pool_usage: 0,
+                quota_paged_pool_usage: 0,
+                quota_peak_non_paged_pool_usage: 0,
+                quota_non_paged_pool_usage: 0,
+                pagefile_usage: 0,
+                peak_pagefile_usage: 0,
+            };
+            if GetProcessMemoryInfo(handle, &mut counters, counters.cb) != 0 {
+                Some(counters.working_set_size as u64)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub(super) fn snapshot(root_pid: u32) -> Snapshot {
+        // SAFETY: Toolhelp32 APIs write only to the initialized entry and
+        // return a handle that is closed on every completed enumeration path.
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if snapshot as isize == -1 {
+            return unavailable("CreateToolhelp32Snapshot-failed");
+        }
+
+        let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut entry = ProcessEntry32W {
+            dw_size: size_of::<ProcessEntry32W>() as u32,
+            cnt_usage: 0,
+            th32_process_id: 0,
+            th32_default_heap_id: 0,
+            th32_module_id: 0,
+            cnt_threads: 0,
+            th32_parent_process_id: 0,
+            pc_pri_class_base: 0,
+            dw_flags: 0,
+            sz_exe_file: [0; 260],
+        };
+        let first_ok = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
+        if !first_ok {
+            unsafe { CloseHandle(snapshot); }
+            return unavailable("Process32FirstW-failed");
+        }
+        loop {
+            children
+                .entry(entry.th32_parent_process_id)
+                .or_default()
+                .push(entry.th32_process_id);
+            if unsafe { Process32NextW(snapshot, &mut entry) } == 0 {
+                let error = unsafe { GetLastError() };
+                if error != ERROR_NO_MORE_FILES {
+                    unsafe { CloseHandle(snapshot); }
+                    return unavailable(format!("Process32NextW-failed:{}", error));
+                }
+                break;
+            }
+        }
+        unsafe { CloseHandle(snapshot); }
+
+        let mut process_ids = vec![root_pid];
+        let mut cursor = 0;
+        while cursor < process_ids.len() {
+            let parent = process_ids[cursor];
+            if let Some(descendants) = children.get(&parent) {
+                for child in descendants {
+                    if *child != parent && !process_ids.contains(child) {
+                        process_ids.push(*child);
+                    }
+                }
+            }
+            cursor += 1;
+        }
+
+        let mut total_rss = 0u64;
+        for process_id in &process_ids {
+            // SAFETY: OpenProcess receives a PID returned by the process
+            // snapshot.  The handle is closed immediately after querying it.
+            let handle = unsafe {
+                OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, *process_id)
+            };
+            if handle.is_null() {
+                return unavailable(format!("OpenProcess-failed:{}", process_id));
+            }
+            let rss = query_rss(handle);
+            unsafe { CloseHandle(handle); }
+            let Some(rss) = rss else {
+                return unavailable(format!("GetProcessMemoryInfo-failed:{}", process_id));
+            };
+            let Some(next_total) = total_rss.checked_add(rss) else {
+                return unavailable("process-tree-rss-overflow");
+            };
+            total_rss = next_total;
+        }
+
+        Snapshot {
+            rss_bytes: Some(total_rss),
+            process_count: Some(process_ids.len() as u32),
+            available: true,
+            source: "windows-process-tree-working-set".to_string(),
+            reason: None,
+        }
+    }
+}
+
+struct ProcessTreeSnapshot {
+    rss_bytes: Option<u64>,
+    process_count: Option<u32>,
+    available: bool,
+    source: String,
+    reason: Option<String>,
+}
+
+#[cfg(windows)]
+fn process_tree_snapshot(pid: u32) -> ProcessTreeSnapshot {
+    let snapshot = windows_process_tree::snapshot(pid);
+    ProcessTreeSnapshot {
+        rss_bytes: snapshot.rss_bytes,
+        process_count: snapshot.process_count,
+        available: snapshot.available,
+        source: snapshot.source,
+        reason: snapshot.reason,
+    }
+}
+
+#[cfg(not(windows))]
+fn process_tree_snapshot(_pid: u32) -> ProcessTreeSnapshot {
+    ProcessTreeSnapshot {
+        rss_bytes: None,
+        process_count: None,
+        available: false,
+        source: "unavailable-non-windows".to_string(),
+        reason: Some("process-tree-enumeration-not-implemented".to_string()),
+    }
 }
 
 #[cfg(windows)]
@@ -378,16 +602,24 @@ fn get_process_memory() -> ProcessMemorySnapshot {
     let pid = current_process_id();
     #[cfg(not(windows))]
     let pid = std::process::id();
+    let source = if cfg!(windows) {
+        "tauri-process-working-set".to_string()
+    } else if cfg!(target_os = "linux") {
+        "tauri-process-proc-statm".to_string()
+    } else {
+        "tauri-process-unavailable".to_string()
+    };
+    let tree = process_tree_snapshot(pid);
     ProcessMemorySnapshot {
         pid,
         rss_bytes: current_process_rss_bytes(),
-        source: if cfg!(windows) {
-            "tauri-process-working-set".to_string()
-        } else if cfg!(target_os = "linux") {
-            "tauri-process-proc-statm".to_string()
-        } else {
-            "tauri-process-unavailable".to_string()
-        },
+        rss_source: source.clone(),
+        source,
+        process_tree_rss_bytes: tree.rss_bytes,
+        process_count: tree.process_count,
+        process_tree_available: tree.available,
+        process_tree_source: tree.source,
+        process_tree_reason: tree.reason,
     }
 }
 

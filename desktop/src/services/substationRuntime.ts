@@ -33,62 +33,34 @@ import {
   perfMark,
   perfMarkProductMoment,
   perfProductMomentSnapshot,
-  perfRecordMemorySample,
   perfRecordSubstationIfcRead,
   perfRecordSubstationIfcProfile,
   perfRecordSubstationFinalizeProfile,
-  perfIsCurrentSession,
+  perfRecordDevGeometryProfile,
   type PerfSession,
 } from '../utils/perfTimings.js';
+import { sampleSubstationRuntimeResources, scheduleSubstationResourceCheckpoint } from './substationResourceTelemetry.js';
 import { showLoading, hideLoading } from './gimOpenCore.js';
 
 
 async function sampleSubstationMemory(
+  state: AppState,
   label: string,
   session: PerfSession,
   meta?: Record<string, unknown>,
+  ctx?: ViewerContext | null,
 ): Promise<void> {
-  if (!perfIsCurrentSession(session)) return;
-  const memory = (typeof performance !== 'undefined'
-    ? (performance as Performance & {
-      memory?: { usedJSHeapSize?: number; totalJSHeapSize?: number; jsHeapSizeLimit?: number };
-    }).memory
-    : undefined);
-  let rssBytes: number | null = null;
-  let rssSource: string | undefined;
-  if (isTauri()) {
-    try {
-      const { getProcessMemory } = await import('@desktop/database.js');
-      const processMemory = await getProcessMemory();
-      if (!perfIsCurrentSession(session)) return;
-      rssBytes = processMemory.rssBytes ?? null;
-      rssSource = processMemory.source;
-    } catch (error) {
-      // 采样失败不能影响工程加载；记录原因供报告识别“不可测”而非 0。
-      if (perfIsCurrentSession(session)) {
-        perfRecordMemorySample(label, {
-          rssBytes: null,
-          jsHeapUsedBytes: memory?.usedJSHeapSize,
-          jsHeapTotalBytes: memory?.totalJSHeapSize,
-          jsHeapLimitBytes: memory?.jsHeapSizeLimit,
-          meta: { ...meta, rssError: error instanceof Error ? error.message : String(error) },
-        }, session);
-      }
-      return;
-    }
-  }
-  if (!perfIsCurrentSession(session)) return;
-  perfRecordMemorySample(label, {
-    rssBytes,
-    ...(rssSource ? { rssSource } : {}),
-    jsHeapUsedBytes: memory?.usedJSHeapSize,
-    jsHeapTotalBytes: memory?.totalJSHeapSize,
-    jsHeapLimitBytes: memory?.jsHeapSizeLimit,
-    meta,
-  }, session);
+  await sampleSubstationRuntimeResources(state, label, session, ctx, meta, {
+    isCurrent: () => state.isCurrentSession({
+      generation: session.generation ?? -1,
+      projectId: session.projectId ?? null,
+      sourceSha256: session.sourceSha256 ?? null,
+      geometryToken: state.geometryLoadToken,
+    }),
+  });
 }
 
-function createSubstationSpatialObserver(session: PerfSession): SubstationSpatialIndexObserver {
+function createSubstationSpatialObserver(state: AppState, session: PerfSession): SubstationSpatialIndexObserver {
   // 只采一次阶段内存，避免大型工程的每个 IFC 都增加一个 RSS IPC。
   // 回调本身保持同步，采样异步执行且在 sampleSubstationMemory 内再次做
   // session 校验；这样不会阻塞纯解析层。
@@ -99,7 +71,7 @@ function createSubstationSpatialObserver(session: PerfSession): SubstationSpatia
       perfRecordSubstationIfcRead(profile, session);
       if (!textSampled && profile.bytes > 0) {
         textSampled = true;
-        void sampleSubstationMemory('IFC text 读入后', session, {
+        void sampleSubstationMemory(state, 'IFC text 读入后', session, {
           entryPath: profile.entryPath,
           bytes: profile.bytes,
           readMs: profile.readMs,
@@ -110,7 +82,7 @@ function createSubstationSpatialObserver(session: PerfSession): SubstationSpatia
     onStepScan: (profile) => {
       if (!stepSampled) {
         stepSampled = true;
-        void sampleSubstationMemory('STEP scan 后', session, {
+        void sampleSubstationMemory(state, 'STEP scan 后', session, {
           entryPath: profile.entryPath,
           bytes: profile.sourceBytes,
           rawEntityCount: profile.rawEntityCount,
@@ -267,7 +239,7 @@ async function buildAndCommitSubstationSpatialSemantic(
       ifcEntries,
       cbmTree,
       fileDevRelations,
-      createSubstationSpatialObserver(perfSession),
+      createSubstationSpatialObserver(state, perfSession),
     );
     if (!state.isCurrentSession(session)) return false;
     endSpatial(undefined, {
@@ -315,7 +287,7 @@ async function buildAndCommitSubstationSpatialSemantic(
       objects: spatialIndex.objects.length,
       links: spatialIndex.links.length,
     }, perfSession);
-    await sampleSubstationMemory('SpatialIndex finalize 后', perfSession, {
+    await sampleSubstationMemory(state, 'SpatialIndex finalize 后', perfSession, {
       models: spatialIndex.models.length,
       spatialNodes: spatialIndex.nodes.length,
       objects: spatialIndex.objects.length,
@@ -384,7 +356,7 @@ async function commitCachedSubstationSpatialSemantic(
     objects: result.objects,
     links: result.links,
   }, perfSession);
-  await sampleSubstationMemory('SpatialIndex cache hydrate 后', perfSession, {
+  await sampleSubstationMemory(state, 'SpatialIndex cache hydrate 后', perfSession, {
     source: 'cache',
     models: result.models,
     spatialNodes: result.nodes,
@@ -590,7 +562,7 @@ export async function onGimExtracted(
   if (!state.isCurrentSession(session)) return [];
   if (ifcEntries.length === 0) ifcEntries = scanIfcFiles(files);
   endIfcDiscovery(undefined, { count: ifcEntries.length });
-  await sampleSubstationMemory('IFC discovery 后', perfSession, { ifcCount: ifcEntries.length });
+  await sampleSubstationMemory(state, 'IFC discovery 后', perfSession, { ifcCount: ifcEntries.length });
 
   state.currentIfcEntries = ifcEntries;
 
@@ -631,7 +603,7 @@ export async function onGimExtracted(
     fileDevRelations: fileDevRelations.length,
     deviceIfcLinks: state.deviceToIfcFile.size,
   });
-  await sampleSubstationMemory('CBM/FAM/DEV/FileDevRelation 后', perfSession, {
+  await sampleSubstationMemory(state, 'CBM/FAM/DEV/FileDevRelation 后', perfSession, {
     cbmNodes: collectCbmNodeCount(cbmTree),
     fileDevRelations: fileDevRelations.length,
   });
@@ -642,6 +614,12 @@ export async function onGimExtracted(
   // and session fence, but does not hold the first IFC open.
   markSubstationCoreSemanticReady(state, perfSession);
   await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（core semantic）');
+  void sampleSubstationMemory(state, 'coreSemanticReady', perfSession, {
+    source: 'cold',
+    cbmNodes: collectCbmNodeCount(cbmTree),
+    ifcEntries: ifcEntries.length,
+    fileDevRelations: fileDevRelations.length,
+  });
 
   let spatialSemanticPromise: Promise<boolean> | null = null;
   const startSpatialSemantic = (): Promise<boolean> => {
@@ -955,7 +933,7 @@ export async function loadAllIfcFiles(
     perfMarkProductMoment('firstGeometryReady', { ...firstMeta, compatibilityAlias: 'firstUsableGeometryReady' }, perfSession);
     perfMarkProductMoment('interactive', firstMeta, perfSession);
     perfMark('变电工程可交互（首个 IFC 就绪）', firstMeta, perfSession);
-    void sampleSubstationMemory('第一个可用 IFC / interactive 后', perfSession, firstMeta);
+    void sampleSubstationMemory(state, 'interactive', perfSession, firstMeta, ctx);
     hideLoading();
     signalInteractive();
     const startPostInteractiveTask = (
@@ -1140,6 +1118,11 @@ export async function loadAllIfcFiles(
       failed: failed.length,
       firstInteractive: interactiveInitialized,
     }, perfSession);
+    void sampleSubstationMemory(state, 'allIfcReady', perfSession, {
+      total: entries.length,
+      loaded: state.loadedModels.size,
+      failed: failed.length,
+    }, ctx);
 
     // buildIfcNameIndex 失败不应阻断 UI 渲染
     const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
@@ -1247,6 +1230,7 @@ async function autoLoadModStlPostIfc(
     };
     // 获取 scene：优先用已有 ctx，否则创建 ViewerRuntime
     let scene: import('three').Scene;
+    let resourceCtx: ViewerContext | null = existingCtx ?? null;
     if (existingCtx) {
       scene = (existingCtx.world.scene as any).three as import('three').Scene;
     } else {
@@ -1255,6 +1239,7 @@ async function autoLoadModStlPostIfc(
       const runtime = await getViewerRuntimeWithUI(state, showMessage);
       if (!state.isCurrentSession(session)) return;
       scene = (runtime.ctx.world.scene as any).three as import('three').Scene;
+      resourceCtx = runtime.ctx;
     }
 
     // 首次打开：渐进式 DEV GLB 管线（编译→落盘→渐进渲染一体）
@@ -1329,6 +1314,9 @@ async function autoLoadModStlPostIfc(
         }
       }
 
+      if (devGlbProfile) {
+        perfRecordDevGeometryProfile(devGlbProfile as unknown as Record<string, unknown>, perfSession);
+      }
       finishModStl(undefined, {
         path: 'progressive-dev-glb',
         compiledDevs: result.compiledDevs,
@@ -1358,10 +1346,18 @@ async function autoLoadModStlPostIfc(
           compiledDevs: result.compiledDevs,
           stlInstances: scopedRaw.stlCount,
         }, perfSession);
-        await sampleSubstationMemory('full ready 后', perfSession, {
+        await sampleSubstationMemory(state, 'fullModelReady', perfSession, {
           path: 'progressive-dev-glb',
           renderedInstances: totalGeometryInstances,
-        });
+        }, resourceCtx);
+        scheduleSubstationResourceCheckpoint(
+          state,
+          'idleAfterFullModel',
+          perfSession,
+          resourceCtx,
+          { path: 'progressive-dev-glb', renderedInstances: totalGeometryInstances },
+          { isCurrent: () => state.isCurrentSession(session) },
+        );
       }
       return;
     }
@@ -1416,6 +1412,9 @@ async function autoLoadModStlPostIfc(
       stlCount: result.stlCount,
       ...(result.devGlbProfile ? { devGlbProfile: result.devGlbProfile } : {}),
     });
+    if (result.devGlbProfile) {
+      perfRecordDevGeometryProfile(result.devGlbProfile as unknown as Record<string, unknown>, perfSession);
+    }
     if (!state.isCurrentSession(session)) return;
     if (!perfProductMomentSnapshot().firstGeometryReady
       && (result.modCount > 0 || result.stlCount > 0)) {
@@ -1424,7 +1423,7 @@ async function autoLoadModStlPostIfc(
         modCount: result.modCount,
         stlCount: result.stlCount,
       }, perfSession);
-      void sampleSubstationMemory('第一个几何模型后', perfSession, {
+      void sampleSubstationMemory(state, '第一个几何模型后', perfSession, {
         kind: 'mod-stl',
         modCount: result.modCount,
         stlCount: result.stlCount,
@@ -1436,11 +1435,19 @@ async function autoLoadModStlPostIfc(
       stlInstances: result.stlCount,
       path: 'cached-geometry',
     }, perfSession);
-    await sampleSubstationMemory('full ready 后', perfSession, {
+    await sampleSubstationMemory(state, 'fullModelReady', perfSession, {
       path: 'cached-geometry',
       modCount: result.modCount,
       stlCount: result.stlCount,
-    });
+    }, resourceCtx);
+    scheduleSubstationResourceCheckpoint(
+      state,
+      'idleAfterFullModel',
+      perfSession,
+      resourceCtx,
+      { path: 'cached-geometry', modCount: result.modCount, stlCount: result.stlCount },
+      { isCurrent: () => state.isCurrentSession(session) },
+    );
   } catch (err) {
     if (!modStlEnded) {
       endModStl?.('（失败）', { error: err instanceof Error ? err.message : String(err) });
@@ -1494,7 +1501,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         famProperties: index.fam_properties.length,
         devProperties: index.dev_properties.length,
       });
-      await sampleSubstationMemory('CBM/FAM/DEV/FileDevRelation 后（缓存命中）', perfSession, {
+      await sampleSubstationMemory(state, 'CBM/FAM/DEV/FileDevRelation 后（缓存命中）', perfSession, {
         cbmNodes: index.cbm_nodes.length,
         fileDevRelations: index.file_dev_entries.length,
       });
@@ -1545,6 +1552,13 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       markSubstationCoreSemanticReady(state, perfSession, { cacheHit: true });
       await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（core semantic，缓存命中）');
       if (!state.isCurrentSession(session)) return;
+      void sampleSubstationMemory(state, 'coreSemanticReady', perfSession, {
+        source: 'warm',
+        cacheHit: true,
+        cbmNodes: state.currentCbmTree ? collectCbmNodeCount(state.currentCbmTree) : 0,
+        ifcEntries: state.currentIfcEntries.length,
+        fileDevRelations: state.fileDevRelations.length,
+      });
 
       const cbmTree = state.currentCbmTree;
       if (!cbmTree) throw new Error('缓存索引中没有 CBM 层级树');

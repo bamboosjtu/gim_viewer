@@ -98,6 +98,40 @@ describe('属性检查器纯 DOM 交互', () => {
     expect(document.querySelector('[data-reference-kind="ifc"]')).toBeNull();
   });
 
+  it('在 DEV 属性中显示 geometry pipeline 的降级状态', async () => {
+    const drawer = await import('../propsDrawer.js');
+    const state = new AppState();
+    state.geometryDiagnosticsByDevPath.set('dev/vendor-device.dev', {
+      devPath: 'DEV/vendor-device.dev',
+      status: 'partial',
+      source: 'cold',
+      emptySourceCount: 1,
+      unsupportedPrimitiveTypeCounts: { VendorPrimitive: 2 },
+      detail: '部分几何可渲染；其余来源或 primitive 已降级。',
+    });
+    const node: CbmNode = {
+      path: 'CBM/device.cbm',
+      name: '设备',
+      entityName: 'F4System',
+      children: [],
+      famPath: '',
+      devPath: 'DEV\\Vendor-Device.DEV',
+      ifcFile: '',
+      ifcGuid: '',
+      classifyName: '',
+      transformMatrix: '',
+      systemNames: [],
+      devSymbolName: '',
+      devType: '',
+      devExpanded: false,
+    };
+
+    await drawer.showNodePropertiesBasic(state, node);
+    expect(document.getElementById('props-drawer-body')?.textContent).toContain('部分可渲染');
+    expect(document.getElementById('props-drawer-body')?.textContent).toContain('空几何源');
+    expect(document.getElementById('props-drawer-body')?.textContent).toContain('VendorPrimitive × 2');
+  });
+
   it('CBM 裸 IFC 文件名来源反查为包内真实路径', async () => {
     const drawer = await import('../propsDrawer.js');
     const state = new AppState();

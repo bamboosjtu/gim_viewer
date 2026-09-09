@@ -33,8 +33,8 @@
 | **缓存命中场景回放 xml-mod 几何** | ✅ 已实现 | `desktop/src/services/nodeInteractionService.ts` `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` |
 | **STL 渲染** | ⚠️ 已实现加载器与首次打开渐进渲染；缓存命中默认不主动加载 STL | `desktop/src/viewer/stlLoader.ts` / `desktop/src/services/glbCacheService.ts`；几何角色见 [12-stl-static-survey.md](schema/12-stl-static-survey.md) |
 | **PHM COLOR 应用** | ✅ 已实现 | `desktop/src/viewer/xmlModGeometry.ts` `applyPhmColorOverride`；按文件级 `max(A)` 区分百分制/字节制，缓存保存刻度 |
-| **EMPTY_DEVICE_XML 提示** | ❌ 未实现（P1） | 44 个孤儿 MOD 静默忽略（解析为 isEmpty=true，渲染为空 Group） |
-| **装配节点无几何提示** | ❌ 未实现（P2） | 14 个无 SOLIDMODEL 的 PHM 静默忽略 |
+| **EMPTY_DEVICE_XML 提示** | ⚠️ 第一阶段已实现 | 属性抽屉显示 DEV 的 empty/partial/unsupported/failed 状态和冷/暖来源；精确区分空 XML 与装配节点仍待解析来源补齐 |
+| **装配节点无几何提示** | ⚠️ 第一阶段已实现 | 无自有 SOLIDMODEL 的结果不伪造模型，并在 DEV 几何状态中可见；精确的 PHM/装配原因仍待补齐 |
 
 ### 当前版本关键改动
 
@@ -322,7 +322,7 @@ IFC + DEV/PHM/MOD/GL/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路
 - **来源**：CBM/DEV/FAM/PHM/MOD/GL/STL/IFC/SLD 统一显示“定位/查看/切换”按钮，正文不直接显示 GUID 文件名和长路径；点击按钮再回到业务节点或图纸。
 - **TRANSFORMMATRIX**：仅在技术字段中以等宽文本展示；几何加载时仍应用 DEV/PHM/CBM/SUBDEVICE 累积变换。
 - **PHM COLOR**：在 MOD/GL/STL 实例级应用 RGB、透明度和 A=0 不透明哨兵；`max(A)>100` 按字节制，否则按百分制。
-- **EMPTY_DEVICE_XML / 装配节点无几何**：当前仍保留为 P1/P2 诊断待办，不伪造几何；解析结果不会阻塞其它设备展示。
+- **EMPTY_DEVICE_XML / 装配节点无几何**：几何状态第一阶段已接入属性抽屉，显示 empty/partial/unsupported/failed 与 cold/warm 来源，不伪造几何且不阻塞其它设备展示；`empty-device-xml` 与 `assembly-node-without-own-geometry` 的精确来源归因仍是待办。
 
 缓存命中时（`currentFiles=null`）仍可显示 CBM/FAM/DEV 基础属性；来源按钮和 MOD/GL/STL 按需回放复用磁盘缓存与几何引用链。
 
@@ -345,7 +345,7 @@ IFC + DEV/PHM/MOD/GL/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路
 
 ### 9.3 已知边界
 
-- 无几何的 MOD 或没有自有 `SOLIDMODEL` 的装配节点当前不伪造模型，只保留空结果；明确原因提示列在 [dev-log.md](dev-log.md)。
+- 无几何的 MOD 或没有自有 `SOLIDMODEL` 的装配节点当前不伪造模型，只保留空结果；属性抽屉显示 session 内几何状态，精确来源归因列在 [dev-log.md](dev-log.md) 的待办中。
 - Fragments 缓存代码可灰度使用但默认关闭；线路不启用独立 3D Viewer。
 - 变电数据格式与导出工具存在差异，新增样本的字段语义以 [Schema 研究](schema/README.md) 的跨样本证据为准。
 

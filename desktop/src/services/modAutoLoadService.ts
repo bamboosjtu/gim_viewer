@@ -42,6 +42,11 @@ import {
   DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY,
   type DevGlbParsedAsset,
 } from './devGlbTemplateRuntime.js';
+import {
+  diagnosticForFailure,
+  diagnosticFromManifest,
+  setGeometryDiagnostic,
+} from '../gim/geometry/geometryDiagnostics.js';
 
 /** 自动加载选项 */
 export interface GeometryAutoLoadOptions {
@@ -813,6 +818,19 @@ export async function tryDevGlbFastPath(
       failureTypes[canonical] = type;
     }
     syncFailureProfile();
+    if (isCurrent()) {
+      setGeometryDiagnostic(
+        state,
+        diagnosticForFailure(
+          devPath,
+          type === 'missing' ? 'missing-dependency' : 'parse-failed',
+          'warm',
+          type === 'missing'
+            ? '缓存条目或几何依赖缺失；仅该 DEV 进入原始几何回退。'
+            : undefined,
+        ),
+      );
+    }
   };
 
   const fail = (reason: string, modCount = 0): DevGlbFastPathResult => ({
@@ -929,6 +947,15 @@ export async function tryDevGlbFastPath(
     manifestEntries.set(devPath.toLowerCase(), missingEntry);
     return missingEntry;
   });
+  // Warm manifest is the persisted source of truth for deterministic
+  // empty/unsupported/partial results.  Do not overwrite a missing-entry
+  // failure recorded above with the synthetic `glb` placeholder.
+  for (const entry of selectedEntries) {
+    const key = normalizeDevEntryPath(entry.entry_path).toLowerCase();
+    if (!failedDevPaths.has(key)) {
+      setGeometryDiagnostic(state, diagnosticFromManifest(entry.entry_path, entry));
+    }
+  }
   // `glbDevCount` describes what the manifest advertised.  Keep it separate
   // from `successfulGlbDevCount`, which is populated after parse/scene
   // validation; otherwise a corrupt entry disappears from diagnostics and a

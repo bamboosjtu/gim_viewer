@@ -6,8 +6,10 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import { cleanupBeforeOpenNewProject } from '../projectCleanupService.js';
+import { perfMemorySnapshot, perfRuntimeResourceSnapshot } from '../../utils/perfTimings.js';
 
 // mock 掉重依赖的动态导入目标，避免 jsdom 下加载 three/maplibre 链路
 vi.mock('../ui/lineProjectView.js', () => ({ destroyLineMapView: vi.fn() }));
@@ -38,5 +40,68 @@ describe('cleanupBeforeOpenNewProject（P1 竞态修复）', () => {
     await cleanupBeforeOpenNewProject(state);
     await cleanupBeforeOpenNewProject(state);
     expect(state.geometryLoadToken).toBe(2);
+  });
+
+  it('变电清理记录前后 ownership checkpoint，稳定窗口确认逻辑资源归零', async () => {
+    vi.useFakeTimers();
+    try {
+      const state = new AppState();
+      state.currentProjectType = 'substation';
+      state.currentIfcEntries = [{ name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'a' }];
+      state.loadedXmlModGroups.set('dev:a', new THREE.Group());
+      state.loadedStlGroups.set('stl:a', new THREE.Group());
+      state.geometryDiagnosticsByDevPath.set('dev/a', {
+        devPath: 'DEV/a.dev',
+        status: 'empty',
+        source: 'warm',
+        unsupportedPrimitiveTypeCounts: {},
+      });
+
+      await cleanupBeforeOpenNewProject(state);
+      expect(perfRuntimeResourceSnapshot().map((item) => item.label)).toEqual([
+        'beforeCleanup', 'afterCleanup',
+      ]);
+      expect(perfRuntimeResourceSnapshot().find((item) => item.label === 'beforeCleanup'))
+        .toMatchObject({ loadedXmlModGroupCount: 1, loadedStlGroupCount: 1 });
+      expect(perfRuntimeResourceSnapshot().find((item) => item.label === 'afterCleanup'))
+        .toMatchObject({ loadedXmlModGroupCount: 0, loadedStlGroupCount: 0, templateCount: 0 });
+      expect(state.geometryDiagnosticsByDevPath.size).toBe(0);
+
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+      expect(perfRuntimeResourceSnapshot().map((item) => item.label)).toEqual([
+        'beforeCleanup', 'afterCleanup', 'settledAfterCleanup',
+      ]);
+      expect(perfMemorySnapshot().map((item) => item.label)).toEqual([
+        'beforeCleanup', 'afterCleanup', 'settledAfterCleanup',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('工程切换后不提交旧工程的 delayed settled checkpoint', async () => {
+    vi.useFakeTimers();
+    try {
+      const state = new AppState();
+      state.currentProjectType = 'substation';
+      state.currentIfcEntries = [{ name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'a' }];
+
+      await cleanupBeforeOpenNewProject(state);
+      expect(perfRuntimeResourceSnapshot().map((item) => item.label)).toEqual([
+        'beforeCleanup', 'afterCleanup',
+      ]);
+
+      // 这模拟 cleanup 已为 A 安排稳定窗口，但 B 已经成为当前工程。
+      // generation guard 应使 A 的 delayed callback 直接退出。
+      state.activateProject(2, 'sha-b');
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+      expect(perfRuntimeResourceSnapshot().map((item) => item.label)).toEqual([
+        'beforeCleanup', 'afterCleanup',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
