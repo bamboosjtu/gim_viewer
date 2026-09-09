@@ -19,15 +19,29 @@ cargo check --manifest-path src-tauri/Cargo.toml --locked
 GitHub Actions 的 Windows job 执行同一组命令。`npm run test:sample` 仍是
 本地 corpus gate；样本缺失时的自动 skip 不代表 CI 已验证真实工程。
 
+在 GitHub Actions 中手动运行 `Desktop compile gate` 的 `workflow_dispatch`。
+手动运行会在上述 compile gate 通过后复用 `npm run tauri:build` 生成并上传
+`gim-viewer-windows-portable-benchmark-<commit>` artifact。artifact 包含 portable
+ZIP、SHA-256 文件和 `benchmark-build-manifest.json`；manifest 必须同时声明当前
+commit、`buildMode=benchmark` 和 `webview2.mode=fixedRuntime`。普通 push/PR 不上传
+该大体积 artifact。真实 GIM 样本仍只从本地磁盘提供，不进入 GitHub。
+
 ## Desktop benchmark
 
-使用 debug Tauri 构建运行 `npm run tauri:dev`。在打开固定样本前，在 WebView
-DevTools 控制台设置脱敏元数据和开发路径：
+优先下载并完整解压 Windows portable benchmark artifact，先核对其中的
+`benchmark-build-manifest.json`、ZIP checksum 和 portable ZIP 内的
+`portable-manifest.json` commit 相同，再直接运行 `GIM-Reader.exe`。artifact 是
+release 构建，打开样本使用正常的 GIM 文件选择器；它不携带仓库中的真实样本。
+
+若本机有 Rust 并需要重复脚本化选取路径，也可以使用 debug Tauri 构建运行
+`npm run tauri:dev`。仅 debug 构建接受下面的固定路径注入；portable release
+应使用文件选择器，不能把该 debug hook 当成产品能力。在可用的 WebView
+DevTools 控制台设置脱敏元数据：
 
 ```js
 globalThis.__GIM_BENCHMARK_SAMPLE_ID__ = 'substation02';
 globalThis.__GIM_BENCHMARK_COLD_WARM__ = 'cold';
-globalThis.__GIM_COMMIT__ = '7a12d88'; // 当前待验收 commit；也可使用完整 SHA
+globalThis.__GIM_COMMIT__ = '<artifact manifest commit>'; // 也可使用完整 SHA
 globalThis.__GIM_DEV_PERF_FILE_PATH__ = 'D:/path/outside/repository/sample.gim';
 ```
 

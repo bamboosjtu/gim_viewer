@@ -18,6 +18,14 @@ const portableRoot = join(releaseDir, 'bundle', 'portable');
 const folderName = `GIM-Reader_${packageJson.version}_x64_portable`;
 const outputDir = join(portableRoot, folderName);
 const outputZip = join(portableRoot, `${folderName}.zip`);
+const buildCommit = [
+  process.env.GIM_BUILD_COMMIT,
+  process.env.GITHUB_SHA,
+  process.env.VITE_GIM_COMMIT,
+]
+  .map((value) => String(value ?? '').trim())
+  .find(Boolean) ?? null;
+const buildMode = String(process.env.GIM_BUILD_MODE ?? 'portable').trim() || 'portable';
 
 function assertInsideWorkspace(target) {
   const rel = relative(projectRoot, resolve(target));
@@ -71,6 +79,8 @@ async function main() {
   const manifest = {
     product: 'GIM 阅读器',
     version: packageJson.version,
+    commit: buildCommit,
+    buildMode,
     architecture: 'x64',
     portable: true,
     executable: 'GIM-Reader.exe',

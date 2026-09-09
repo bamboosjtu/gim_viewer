@@ -3,6 +3,7 @@ name: Desktop compile gate
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -41,3 +42,76 @@ jobs:
 
       - name: Check Tauri Rust boundary
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+
+      # The portable build is intentionally manual-only.  It reuses the same
+      # Tauri wrapper, fixed WebView2 preparation and package-portable hook as
+      # the product build; ordinary pushes/PRs do not spend time uploading a
+      # 250MB+ runtime artifact.
+      - name: Build Windows portable benchmark artifact
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VITE_GIM_COMMIT: ${{ github.sha }}
+          GIM_BUILD_COMMIT: ${{ github.sha }}
+          GIM_BUILD_MODE: benchmark
+        run: npm run tauri:build
+
+      - name: Validate portable benchmark artifact
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          $portableRoot = Join-Path $PWD 'src-tauri/target/release/bundle/portable'
+          $zipFiles = @(Get-ChildItem -LiteralPath $portableRoot -Filter '*.zip' -File)
+          if ($zipFiles.Count -ne 1) {
+            throw "Expected exactly one portable ZIP under $portableRoot, found $($zipFiles.Count)"
+          }
+
+          $zip = $zipFiles[0]
+          $packageDir = Join-Path $portableRoot ([IO.Path]::GetFileNameWithoutExtension($zip.Name))
+          $exePath = Join-Path $packageDir 'GIM-Reader.exe'
+          $runtimeDir = Join-Path $packageDir 'webview2-fixed-runtime'
+          if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) {
+            throw "Portable executable missing: $exePath"
+          }
+          foreach ($requiredRuntimeFile in @('msedgewebview2.exe', 'msedge.dll', 'icudtl.dat', 'resources.pak')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $runtimeDir $requiredRuntimeFile) -PathType Leaf)) {
+              throw "Fixed WebView2 Runtime file missing: $requiredRuntimeFile"
+            }
+          }
+
+          $manifestPath = Join-Path $packageDir 'portable-manifest.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+            throw "Portable manifest missing: $manifestPath"
+          }
+
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          if ($manifest.commit -ne $env:EXPECTED_COMMIT) {
+            throw "Portable manifest commit mismatch: expected $env:EXPECTED_COMMIT, got $($manifest.commit)"
+          }
+          if ($manifest.buildMode -ne 'benchmark' -or $manifest.portable -ne $true) {
+            throw 'Portable manifest is not marked as a benchmark portable build'
+          }
+          if ($manifest.webview2.mode -ne 'fixedRuntime') {
+            throw 'Portable manifest does not declare fixed WebView2 Runtime'
+          }
+
+          $shaPath = "$($zip.FullName).sha256"
+          if (-not (Test-Path -LiteralPath $shaPath -PathType Leaf)) {
+            throw "Portable ZIP checksum missing: $shaPath"
+          }
+
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $PWD 'benchmark-build-manifest.json') -Encoding utf8
+          Write-Host "Validated portable benchmark artifact: $($zip.Name)"
+
+      - name: Upload Windows portable benchmark artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gim-viewer-windows-portable-benchmark-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            desktop/src-tauri/target/release/bundle/portable/*.zip
+            desktop/src-tauri/target/release/bundle/portable/*.zip.sha256
+            desktop/benchmark-build-manifest.json
