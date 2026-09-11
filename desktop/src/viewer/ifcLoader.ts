@@ -8,6 +8,17 @@ import { createIfcModelId } from '../gim/modelIdentity.js';
 import { perfBegin, perfCurrentSession } from '../utils/perfTimings.js';
 import { registerIfcLoadDiagnostic, takeIfcLoadDiagnostic } from './ifcLoadDiagnostics.js';
 
+/** 诊断计数：仅反映已返回 Promise 的 Fragments update 是否 settle。 */
+let outstandingFragmentsUpdateCount = 0;
+
+export function getOutstandingFragmentsUpdateCount(): number {
+  return outstandingFragmentsUpdateCount;
+}
+
+// 本地 acceptance harness 读取该计数；不改变 update 调度或错误处理。
+(globalThis as { __GIM_GET_OUTSTANDING_FRAGMENTS_UPDATES__?: () => number })
+  .__GIM_GET_OUTSTANDING_FRAGMENTS_UPDATES__ = getOutstandingFragmentsUpdateCount;
+
 export type ModelEventCallbacks = {
   /** 回调使用 logical modelId；Fragments 实际 key 通过第二参数传递。 */
   onModelAdded: (modelId: string, runtimeModelId: string) => void;
@@ -61,16 +72,22 @@ function safeFragmentsUpdate(
     const result = ctx.fragments.core.update(force);
     // 不同 OBC 版本 update 可能返回 void 或 Promise<void>
     if (result && typeof (result as Promise<void>).then === 'function') {
+      outstandingFragmentsUpdateCount += 1;
       if (endUpdate) {
         void (result as Promise<void>).then(
-          () => finishUpdate(),
+          () => {
+            outstandingFragmentsUpdateCount = Math.max(0, outstandingFragmentsUpdateCount - 1);
+            finishUpdate();
+          },
           (err) => {
+            outstandingFragmentsUpdateCount = Math.max(0, outstandingFragmentsUpdateCount - 1);
             debugWarn(DEBUG_FRAGMENTS, `[Fragments] update failed (${label})`, err);
             finishUpdate(true);
           },
         );
       } else {
         void (result as Promise<void>).catch((err) => {
+          outstandingFragmentsUpdateCount = Math.max(0, outstandingFragmentsUpdateCount - 1);
           debugWarn(DEBUG_FRAGMENTS, `[Fragments] update failed (${label})`, err);
         });
       }

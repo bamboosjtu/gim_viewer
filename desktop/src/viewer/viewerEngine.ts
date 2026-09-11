@@ -25,8 +25,10 @@ export function createViewerEngine(container: HTMLElement): ViewerContext {
   const ifcLoader = components.get(OBC.IfcLoader);
   const fragments = components.get(OBC.FragmentsManager);
 
-  // 调试钩子：控制台/Playwright 可通过 __gimWorld 访问场景做运行时诊断
+  // 诊断钩子：控制台/Playwright 可读取场景与 Fragments 所有权，
+  // 不参与产品流程，也不暴露到任何外部网络接口。
   (window as any).__gimWorld = world;
+  (window as any).__gimFragments = fragments;
 
   return { components, world, ifcLoader, fragments };
 }

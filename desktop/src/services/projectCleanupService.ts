@@ -29,6 +29,7 @@ import { container } from '../ui/dom.js';
 import { perfCurrentSession, perfReset } from '../utils/perfTimings.js';
 import { sampleSubstationRuntimeResources } from './substationResourceTelemetry.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
+import { resetStatusRight } from '../ui/shell/statusBar.js';
 
 /**
  * 在打开新 GIM 项目前 / 清空场景时执行统一清理。
@@ -84,10 +85,13 @@ export async function cleanupBeforeOpenNewProject(
 
   // 共性 UI 契约：清理即重置顶栏工程身份与状态栏（纯 UI，位于 token 递增之后）
   try {
-    const { setProjectIdentity } = await import('../ui/shell/projectBar.js');
+    const { setProjectIdentity, refreshNavigatorTitle } = await import('../ui/shell/projectBar.js');
     if (!isCurrentCleanup()) return false;
     setProjectIdentity(null, null);
+    refreshNavigatorTitle();
   } catch { /* UI 模块不可用不影响清理 */ }
+  if (!isCurrentCleanup()) return false;
+  resetStatusRight();
 
   // ---- 1. 销毁线路地图 canvas / tooltip / 图层控件 / 事件监听 ----
   // 即使 ViewerRuntime 未创建，线路地图也可能存在（线路工程不创建 Viewer）

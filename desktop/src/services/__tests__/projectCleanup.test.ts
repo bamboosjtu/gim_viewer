@@ -10,6 +10,8 @@ import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import { cleanupBeforeOpenNewProject } from '../projectCleanupService.js';
 import { perfMemorySnapshot, perfRuntimeResourceSnapshot } from '../../utils/perfTimings.js';
+import { setStatusRight } from '../../ui/shell/statusBar.js';
+import { setProjectIdentity } from '../../ui/shell/projectBar.js';
 
 // mock 掉重依赖的动态导入目标，避免 jsdom 下加载 three/maplibre 链路
 vi.mock('../ui/lineProjectView.js', () => ({ destroyLineMapView: vi.fn() }));
@@ -21,6 +23,24 @@ vi.mock('../ui/sldView.js', () => ({ clearSldView: vi.fn() }));
 vi.mock('../ui/tabs.js', () => ({ showAllTabs: vi.fn() }));
 
 describe('cleanupBeforeOpenNewProject（P1 竞态修复）', () => {
+  it('清理线路后重置工程导航与状态栏，避免残留线路统计', async () => {
+    document.body.innerHTML = `
+      <div id="project-title"></div>
+      <div id="project-type-badge"></div>
+      <div id="navigator-title"></div>
+      <div id="status-right"></div>
+    `;
+    setProjectIdentity('线路工程', 'transmission_line');
+    setStatusRight('129 杆塔 · 2232 导线段 · 44 跨越物');
+
+    await cleanupBeforeOpenNewProject(new AppState());
+
+    expect(document.getElementById('project-title')?.textContent).toBe('未打开工程');
+    expect(document.getElementById('project-type-badge')?.classList.contains('hidden')).toBe(true);
+    expect(document.getElementById('navigator-title')?.textContent).toBe('模型导航');
+    expect(document.getElementById('status-right')?.textContent).toBe('GIM BIM 浏览器');
+  });
+
   it('清理开始即递增 geometryLoadToken（在任何异步操作前）', async () => {
     const state = new AppState();
     state.geometryLoadToken = 41;

@@ -273,7 +273,8 @@ export async function createMapLibreProbe(
     }
   }
 
-  await new Promise<void>((resolve, reject) => {
+  try {
+    await new Promise<void>((resolve, reject) => {
     const onLoad = () => {
       // 在线 raster 模式下 load 后仍需监听 tile error
       // 原因：style load 成功 ≠ 瓦片请求成功；瓦片请求在 load 后才大规模发起
@@ -329,7 +330,27 @@ export async function createMapLibreProbe(
     } else {
       map.once('error', onError);
     }
-  });
+    });
+  } catch (error) {
+    // 初始化阶段 reject 时调用方尚未拿到 handle，destroyLineMapResources
+    // 无法清理这个 mount。这里必须对 map、监听器、mount 和协议做回滚，
+    // 否则线路→变电切换会留下不可见但仍占用 WebGL/DOM 的地理图层。
+    if (onlineErrorHandler) {
+      try { map.off('error', onlineErrorHandler); } catch { /* best effort */ }
+      onlineErrorHandler = null;
+    }
+    try { map.remove(); } catch (cleanupError) {
+      console.warn('[MapLibre probe] 初始化失败后的 map.remove() 失败:', cleanupError);
+    }
+    if (mountDiv.parentNode) mountDiv.parentNode.removeChild(mountDiv);
+    if (pmtilesProtocolHandle) {
+      try { pmtilesProtocolHandle.destroy(); } catch (cleanupError) {
+        console.warn('[MapLibre probe] 初始化失败后的 PMTiles cleanup 失败:', cleanupError);
+      }
+      pmtilesProtocolHandle = null;
+    }
+    throw error;
+  }
 
   let destroyed = false;
 

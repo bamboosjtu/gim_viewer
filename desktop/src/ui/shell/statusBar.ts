@@ -9,6 +9,9 @@ let statusTextEl: HTMLElement | null = null;
 let statusDotEl: HTMLElement | null = null;
 let busyCount = 0;
 
+/** 空工程时右侧状态栏的稳定默认文案。 */
+export const DEFAULT_STATUS_RIGHT = 'GIM BIM 浏览器';
+
 function ensureEls(): void {
   if (statusTextEl && statusDotEl) return;
   statusTextEl = document.getElementById('status-text');
@@ -42,4 +45,9 @@ export function popBusy(idleText = '就绪'): void {
 export function setStatusRight(text: string): void {
   const el = document.getElementById('status-right');
   if (el) el.textContent = text;
+}
+
+/** 清理工程时恢复共性状态栏，避免线路统计泄漏到下一工程。 */
+export function resetStatusRight(): void {
+  setStatusRight(DEFAULT_STATUS_RIGHT);
 }
