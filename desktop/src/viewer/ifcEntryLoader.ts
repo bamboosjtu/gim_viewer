@@ -14,11 +14,13 @@ import {
 } from '@desktop/database.js';
 import {
   perfCurrentSession,
+  perfBegin,
   perfRecordExternalSpan,
   perfRecordFragmentsCacheOperation,
   perfRecordFragmentsCacheOutcome,
   perfSetFragmentsCacheEnabled,
 } from '../utils/perfTimings.js';
+import { registerIfcLoadDiagnostic } from './ifcLoadDiagnostics.js';
 
 /**
  * Fragments 缓存版本键（P0-3）：绑定 @thatopen/fragments 与 web-ifc 包版本，
@@ -180,10 +182,34 @@ export async function loadIfcEntry(
   }
 
   // 4. IFC 转换
-  const tIfcLoad = performance.now();
-  const model = await ctx.ifcLoader.load(ifcBuffer, true, runtimeModelId, {
-    processData: { progressCallback: reportProgress },
+  registerIfcLoadDiagnostic(runtimeModelId, {
+    entryPath,
+    source: 'ifc',
+    sessionId: perfSessionId,
   });
+  const tIfcLoad = performance.now();
+  const endWebIfcConversion = perfBegin(
+    `变电 IFC web-ifc conversion · ${entryPath}`,
+    { entryPath, phase: 'web-ifc conversion', source: 'ifc' },
+    { id: perfSessionId },
+  );
+  let webIfcLoadFailed = false;
+  let model: any;
+  try {
+    model = await ctx.ifcLoader.load(ifcBuffer, true, runtimeModelId, {
+      processData: { progressCallback: reportProgress },
+    });
+  } catch (err) {
+    webIfcLoadFailed = true;
+    throw err;
+  } finally {
+    endWebIfcConversion(undefined, {
+      entryPath,
+      phase: 'web-ifc conversion',
+      source: 'ifc',
+      failed: webIfcLoadFailed,
+    });
+  }
   const ifcConversionMs = Math.max(0, performance.now() - tIfcLoad);
   debugLog(DEBUG_IFC_LOAD, `[Perf] ifc load: ${Math.round(ifcConversionMs)} ms`);
   perfRecordExternalSpan(
@@ -274,6 +300,11 @@ async function tryLoadFromFragmentsCache(
 
   // 2a. 校验缓存（不读 IFC）
   const tValidate = performance.now();
+  const endValidate = perfBegin(
+    `变电 Fragments cache validate · ${entryPath}`,
+    { entryPath, phase: 'fragments.validate' },
+    { id: perfSessionId },
+  );
   let validation;
   try {
     perfRecordFragmentsCacheOutcome('attempt', perfSessionId);
@@ -286,8 +317,10 @@ async function tryLoadFromFragmentsCache(
       { sessionId: perfSessionId },
     );
     perfRecordFragmentsCacheOperation('validate', performance.now() - tValidate, 0, false, perfSessionId);
+    endValidate(undefined, { entryPath, phase: 'fragments.validate', valid: validation.valid });
   } catch (err) {
     perfRecordFragmentsCacheOperation('validate', performance.now() - tValidate, 0, true, perfSessionId);
+    endValidate(undefined, { entryPath, phase: 'fragments.validate', failed: true });
     perfRecordFragmentsCacheOutcome('fallback', perfSessionId);
     console.warn(`[Fragments Cache] 校验失败，回退 IFC: ${entryPath}`, err);
     return false;
@@ -322,12 +355,19 @@ async function tryLoadFromFragmentsCache(
 
   // 2b. 读取 .frag
   const tRead = performance.now();
+  const endRead = perfBegin(
+    `变电 Fragments cache read · ${entryPath}`,
+    { entryPath, phase: 'fragments.read' },
+    { id: perfSessionId },
+  );
   let fragBytes: Uint8Array;
   try {
     fragBytes = await readFragmentCacheFile(projectId, entryPath, { sessionId: perfSessionId });
     perfRecordFragmentsCacheOperation('read', performance.now() - tRead, fragBytes.byteLength, false, perfSessionId);
+    endRead(undefined, { entryPath, phase: 'fragments.read', bytes: fragBytes.byteLength });
   } catch (err) {
     perfRecordFragmentsCacheOperation('read', performance.now() - tRead, 0, true, perfSessionId);
+    endRead(undefined, { entryPath, phase: 'fragments.read', failed: true });
     perfRecordFragmentsCacheOutcome('fallback', perfSessionId);
     console.warn(`[Fragments Cache] 读取失败，删除坏缓存并回退 IFC: ${entryPath}`, err);
     // 读取失败可能是在工程切换后才返回；旧 session 不得删除新工程
@@ -367,7 +407,31 @@ async function tryLoadFromFragmentsCache(
   const tLoad = performance.now();
   try {
     const camera = (ctx.world.camera as unknown as OBC.SimpleCamera).three;
-    await ctx.fragments.core.load(fragBytes, { modelId: runtimeModelId, camera });
+    registerIfcLoadDiagnostic(runtimeModelId, {
+      entryPath,
+      source: 'fragments-cache',
+      sessionId: perfSessionId,
+    });
+    const endCoreLoad = perfBegin(
+      `变电 Fragments cache core.load · ${entryPath}`,
+      { entryPath, phase: 'fragments.core.load', source: 'fragments-cache', bytes: fragBytes.byteLength },
+      { id: perfSessionId },
+    );
+    let coreLoadFailed = false;
+    try {
+      await ctx.fragments.core.load(fragBytes, { modelId: runtimeModelId, camera });
+    } catch (err) {
+      coreLoadFailed = true;
+      throw err;
+    } finally {
+      endCoreLoad(undefined, {
+        entryPath,
+        phase: 'fragments.core.load',
+        source: 'fragments-cache',
+        bytes: fragBytes.byteLength,
+        failed: coreLoadFailed,
+      });
+    }
     const loadMs = Math.round(performance.now() - tLoad);
     perfRecordFragmentsCacheOperation('load', performance.now() - tLoad, fragBytes.byteLength, false, perfSessionId);
     debugLog(DEBUG_IFC_LOAD, `[Perf] fragment load: ${loadMs} ms`);
@@ -438,12 +502,19 @@ async function tryWriteFragmentsCache(
   if (!state.isCurrentSession(session)) return;
   // 序列化
   const tSerialize = performance.now();
+  const endSerialize = perfBegin(
+    `变电 Fragments cache serialize · ${entryPath}`,
+    { entryPath, phase: 'fragments.serialize', source: 'ifc' },
+    { id: perfSessionId },
+  );
   let buffer: ArrayBuffer;
   try {
     buffer = await model.getBuffer();
     perfRecordFragmentsCacheOperation('serialize', performance.now() - tSerialize, buffer.byteLength, false, perfSessionId);
+    endSerialize(undefined, { entryPath, phase: 'fragments.serialize', bytes: buffer.byteLength });
   } catch (err) {
     perfRecordFragmentsCacheOperation('serialize', performance.now() - tSerialize, 0, true, perfSessionId);
+    endSerialize(undefined, { entryPath, phase: 'fragments.serialize', failed: true });
     console.warn(`[Fragments Cache] 序列化失败，跳过缓存写入: ${entryPath}`, err);
     return;
   }
@@ -458,12 +529,19 @@ async function tryWriteFragmentsCache(
 
   // 写文件
   const tWrite = performance.now();
+  const endWrite = perfBegin(
+    `变电 Fragments cache write · ${entryPath}`,
+    { entryPath, phase: 'fragments.write', source: 'ifc' },
+    { id: perfSessionId },
+  );
   let writeResult: { path: string; size: number };
   try {
     writeResult = await writeFragmentCacheFile(projectId, entryPath, bytes, sourceGimSha256, { sessionId: perfSessionId });
     perfRecordFragmentsCacheOperation('write', performance.now() - tWrite, writeResult.size, false, perfSessionId);
+    endWrite(undefined, { entryPath, phase: 'fragments.write', bytes: writeResult.size });
   } catch (err) {
     perfRecordFragmentsCacheOperation('write', performance.now() - tWrite, 0, true, perfSessionId);
+    endWrite(undefined, { entryPath, phase: 'fragments.write', failed: true });
     console.warn(`[Fragments Cache] 写入文件失败，不影响当前加载: ${entryPath}`, err);
     return;
   }
@@ -472,12 +550,19 @@ async function tryWriteFragmentsCache(
 
   // 写记录
   const tUpsert = performance.now();
+  const endUpsert = perfBegin(
+    `变电 Fragments cache upsert · ${entryPath}`,
+    { entryPath, phase: 'fragments.upsert', source: 'ifc' },
+    { id: perfSessionId },
+  );
   try {
     await upsertFragmentCacheRecord(projectId, entryPath, modelId, sourceIfcSize, writeResult.size, FRAG_CACHE_VERSION, sourceGimSha256, { sessionId: perfSessionId });
     perfRecordFragmentsCacheOperation('upsert', performance.now() - tUpsert, 0, false, perfSessionId);
+    endUpsert(undefined, { entryPath, phase: 'fragments.upsert' });
     debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 写入成功: ${entryPath} (size=${writeResult.size})`);
   } catch (err) {
     perfRecordFragmentsCacheOperation('upsert', performance.now() - tUpsert, 0, true, perfSessionId);
+    endUpsert(undefined, { entryPath, phase: 'fragments.upsert', failed: true });
     console.warn(`[Fragments Cache] 写入记录失败，不影响当前加载: ${entryPath}`, err);
   }
   debugLog(DEBUG_IFC_LOAD, `[Perf] fragment upsert: ${Math.round(performance.now() - tUpsert)} ms`);

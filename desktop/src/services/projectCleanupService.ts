@@ -82,7 +82,7 @@ export async function cleanupBeforeOpenNewProject(
     );
   };
 
-  // M0 设计系统：清理即重置顶栏工程身份与状态栏（纯 UI，位于 token 递增之后）
+  // 共性 UI 契约：清理即重置顶栏工程身份与状态栏（纯 UI，位于 token 递增之后）
   try {
     const { setProjectIdentity } = await import('../ui/shell/projectBar.js');
     if (!isCurrentCleanup()) return false;
@@ -107,6 +107,16 @@ export async function cleanupBeforeOpenNewProject(
     terminateLineParserWorker();
   } catch (err) {
     console.warn('[Cleanup] terminate line parser worker failed:', err);
+  }
+
+  // MOD 来源解析结果按 AppState 缓存；显式清空，避免同一窗口连续打开
+  // 多个线路工程时保留旧工程的文本/Geometry IR 结果。
+  try {
+    const { clearLineModRuntimeCache } = await import('./lineModRuntimeService.js');
+    if (!isCurrentCleanup()) return false;
+    clearLineModRuntimeCache(state);
+  } catch (err) {
+    console.warn('[Cleanup] clear line MOD runtime cache failed:', err);
   }
 
   // ---- 2. dispose ViewerRuntime 中所有 fragments 模型 ----

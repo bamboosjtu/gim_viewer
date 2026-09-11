@@ -5,6 +5,8 @@ import { resolveWebIfcWasmBaseUrl } from './wasmAssets.js';
 import { DEBUG_IFC_LOAD, DEBUG_FRAGMENTS } from '../config/debug.js';
 import { debugLog, debugWarn } from '../utils/logger.js';
 import { createIfcModelId } from '../gim/modelIdentity.js';
+import { perfBegin, perfCurrentSession } from '../utils/perfTimings.js';
+import { registerIfcLoadDiagnostic, takeIfcLoadDiagnostic } from './ifcLoadDiagnostics.js';
 
 export type ModelEventCallbacks = {
   /** 回调使用 logical modelId；Fragments 实际 key 通过第二参数传递。 */
@@ -30,17 +32,54 @@ export type ModelEventCallbacks = {
  * @param label 调用来源标识（如 'camera-controls-update' / 'model-added:<id>'），用于 warn 定位
  * @param force 是否强制重建（true 用于新模型加入）
  */
-function safeFragmentsUpdate(ctx: ViewerContext, label: string, force = false): void {
+function safeFragmentsUpdate(
+  ctx: ViewerContext,
+  label: string,
+  force = false,
+  diagnostic?: { entryPath: string; source: string; sessionId: number },
+): void {
+  const endUpdate = diagnostic
+    ? perfBegin(
+      `变电 Fragments cache core.update(true) · ${diagnostic.entryPath}`,
+      {
+        entryPath: diagnostic.entryPath,
+        phase: 'fragments.core.update(true)',
+        source: diagnostic.source,
+      },
+      { id: diagnostic.sessionId },
+    )
+    : undefined;
+  const finishUpdate = (failed = false) => {
+    endUpdate?.(undefined, {
+      entryPath: diagnostic?.entryPath,
+      phase: 'fragments.core.update(true)',
+      source: diagnostic?.source,
+      failed,
+    });
+  };
   try {
     const result = ctx.fragments.core.update(force);
     // 不同 OBC 版本 update 可能返回 void 或 Promise<void>
     if (result && typeof (result as Promise<void>).then === 'function') {
-      void (result as Promise<void>).catch((err) => {
-        debugWarn(DEBUG_FRAGMENTS, `[Fragments] update failed (${label})`, err);
-      });
+      if (endUpdate) {
+        void (result as Promise<void>).then(
+          () => finishUpdate(),
+          (err) => {
+            debugWarn(DEBUG_FRAGMENTS, `[Fragments] update failed (${label})`, err);
+            finishUpdate(true);
+          },
+        );
+      } else {
+        void (result as Promise<void>).catch((err) => {
+          debugWarn(DEBUG_FRAGMENTS, `[Fragments] update failed (${label})`, err);
+        });
+      }
+    } else {
+      finishUpdate();
     }
   } catch (err) {
     debugWarn(DEBUG_FRAGMENTS, `[Fragments] update threw (${label})`, err);
+    finishUpdate(true);
   }
 }
 
@@ -95,6 +134,26 @@ export function registerModelEvents(
 ): void {
   ctx.fragments.list.onItemSet.add(({ value: model }) => {
     const runtimeModelId = model.modelId;
+    const loadDiagnostic = takeIfcLoadDiagnostic(runtimeModelId);
+    const endModelAdded = loadDiagnostic
+      ? perfBegin(
+        `变电 Fragments model-added callback · ${loadDiagnostic.entryPath}`,
+        {
+          entryPath: loadDiagnostic.entryPath,
+          phase: 'fragments.model-added callback',
+          source: loadDiagnostic.source,
+        },
+        { id: loadDiagnostic.sessionId },
+      )
+      : undefined;
+    const finishModelAdded = (failed = false) => {
+      endModelAdded?.(undefined, {
+        entryPath: loadDiagnostic?.entryPath,
+        phase: 'fragments.model-added callback',
+        source: loadDiagnostic?.source,
+        failed,
+      });
+    };
     // Fragments 事件可能在 IFC load() 的 await 之后才到达。只有当前会话
     // 登记过的 runtime ID 才能进入 scene；旧工程迟到的模型直接销毁，
     // 不更新 loadedModels/UI。
@@ -103,6 +162,7 @@ export function registerModelEvents(
       queueMicrotask(() => {
         try { ctx.fragments.core.disposeModel(runtimeModelId); } catch { /* 模型可能尚未完全登记 */ }
       });
+      finishModelAdded(true);
       return;
     }
     const logicalModelId = state.resolveLogicalModelId(runtimeModelId) ?? runtimeModelId;
@@ -122,10 +182,13 @@ export function registerModelEvents(
 
       // update(true) 强制重建 virtual tiles，最可能抛 "Malformed tile"
       // warn 中带 modelId，方便定位是哪一个 IFC 出问题
-      safeFragmentsUpdate(ctx, `model-added:${model.modelId}`, true);
+      safeFragmentsUpdate(ctx, `model-added:${model.modelId}`, true, loadDiagnostic);
     } catch (err) {
       console.error(`[IFC Loader] onItemSet failed: ${runtimeModelId}`, err);
+      finishModelAdded(true);
+      return;
     }
+    finishModelAdded();
   });
   ctx.fragments.list.onBeforeDelete.add(({ value: model }) => {
     (ctx.world.scene as any).three.remove(model.object);
@@ -194,6 +257,11 @@ export async function loadIfcBuffer(
   }
 
   state.registerIfcRuntimeModel(modelId, runtimeModelId, session);
+  registerIfcLoadDiagnostic(runtimeModelId, {
+    entryPath: identityPath || name,
+    source: 'ifc',
+    sessionId: perfCurrentSession().id,
+  });
 
   const reportProgress = (progress: number) => {
     if (isCurrent()) onProgress?.(progress);

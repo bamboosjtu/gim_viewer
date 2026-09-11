@@ -18,6 +18,7 @@ import {
   type CachedProjectSummary,
 } from '@desktop/database.js';
 import { summarizeDiagnostic } from '../shared/diagnosticSummary.js';
+import { escapeHtml } from '../shared/html.js';
 import { getDebugConfigSnapshot } from '../config/debug.js';
 
 let modalEl: HTMLElement | null = null;
@@ -131,10 +132,6 @@ function createProjectRow(project: CachedProjectSummary): HTMLElement {
   `;
 
   return row;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 /** 加载并渲染项目列表 */

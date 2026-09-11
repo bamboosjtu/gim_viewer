@@ -25,6 +25,7 @@ import {
   getFirstNonEmptyKv,
   isGimEmptyValue,
 } from '../gimValueSemantics.js';
+import { parseKeyValue } from '../kvParser.js';
 
 /** 单位矩阵（列主序 / Three.js Matrix4.elements 布局，长度 16） */
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -41,13 +42,9 @@ export function parseDev(text: string, devPath: string): DevDocument {
     .map((l) => l.replace(/^\uFEFF/, '').trim())
     .filter((l) => l.length > 0);
 
-  // 第一遍：提取简单标量字段
-  const kv: Record<string, string> = {};
-  for (const line of lines) {
-    const idx = line.indexOf('=');
-    if (idx <= 0) continue;
-    kv[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
-  }
+  // 普通标量字段使用与 CBM/PHM 共用的 KEY=VALUE 解析器；第二遍仍按行
+  // 处理 block 归属，因为同名 TRANSFORMMATRIX 需要区分 SOLID/SUBDEVICE。
+  const kv = parseKeyValue(text);
 
   const baseFamily = getFirstNonEmptyKv(kv, ['BASEFAMILY', 'BASEFAMILYPOINTER']);
   const symbolName = getFirstNonEmptyKv(kv, ['SYMBOLNAME']);

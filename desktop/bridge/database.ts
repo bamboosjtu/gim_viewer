@@ -625,15 +625,6 @@ export async function writeGeometryCacheManifest(
 }
 
 /**
- * 删除指定项目的 GLB 几何缓存目录（仅 glbcache/{projectId}/，不影响 SQLite/IFC/Fragments）。
- *
- * 用于缓存校验失败时清理陈旧 GLB 文件（如 _version.txt 缺失）。
- */
-export async function deleteGlbCache(projectId: number): Promise<void> {
-  return invokeTimed<void>('delete_glb_cache', { projectId });
-}
-
-/**
  * 删除单个 DEV GLB，并从 manifest 移除同一 DEV 条目。
  *
  * 用于 warm fast path parse failure 的定向恢复；不会影响其它 DEV、IFC

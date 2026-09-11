@@ -9,17 +9,9 @@ import {
   getFirstNonEmptyKv,
   resolveBaseFamilyReference,
 } from './gimValueSemantics.js';
+import { parseKeyValue } from './kvParser.js';
 
-/** 解析 KEY=VALUE 格式文本 */
-export function parseKeyValue(text: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/^\uFEFF/, '');
-    const idx = line.indexOf('=');
-    if (idx > 0) result[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
-  }
-  return result;
-}
+export { parseKeyValue } from './kvParser.js';
 
 /**
  * 判断 SYSTEMNAME 值是否为无意义占位符（应跳过，不参与名称拼接）。

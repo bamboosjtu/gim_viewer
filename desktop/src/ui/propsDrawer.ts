@@ -128,7 +128,7 @@ export function setupPropsDrawerInteractions(ctx?: ViewerContext): void {
     downloadTextFile(`gim-props-${ts}.csv`, buildCsv(rows));
   });
 
-  // M0 设计系统：检查器四页签（概览/参数/关系/来源）点击委托。
+  // 共性 UI 契约：检查器四页签（概览/参数/关系/来源）点击委托。
   // CSV 导出遍历全部 pane（含隐藏），导出内容不受当前页签影响。
   propsDrawerBody.addEventListener('click', (ev) => {
     const element = ev.target instanceof Element ? ev.target : null;
@@ -170,7 +170,7 @@ export interface InspectorBuckets {
 }
 
 /**
- * 渲染四页签结构到检查器 body（M0 设计系统 §18 ObjectInspector）。
+ * 渲染四页签结构到检查器 body（共性 ObjectInspector 契约）。
  *
  * @param titleHtml 对象标题（.props-header）
  * @param buckets 四个页签的内容 HTML（各页签内部使用 .props-section 结构）

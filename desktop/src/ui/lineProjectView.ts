@@ -1473,7 +1473,7 @@ export function renderLineProjectPanels(
 
   // 5. 主视口：渲染线路地图
 
-  // M0 设计系统：状态栏右侧工程统计（design/component_brief.md §21）
+  // 共性 UI 契约：状态栏右侧工程统计（docs/gim_common.md）
   setStatusRight(
     `${mapData.stats.towerTotal} 杆塔 · ${mapData.wires.length} 导线段 · ${mapData.crosses.length} 跨越物`,
   );

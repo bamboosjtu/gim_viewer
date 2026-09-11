@@ -1,9 +1,9 @@
-# 开发日志：待办与技术债务
+# 遗留技术债务
 
 > 本文件只维护当前仍未完成、需要决策或需要补充证据的事项。
 > 不记录按日期排列的过程、单次运行结果或已完成工作的复盘；当前实现以
-> [技术架构](architecture.md)、[变电 GIM](gim_substation.md)、[线路 GIM](gim_powerline.md)
-> 和 [Schema](schema/README.md) 为准。每个条目在状态变化时原地更新。
+> [架构](architecture.md)、[共性运行时](gim_common.md)、[变电 GIM](gim_substation.md)、
+> [线路 GIM](gim_powerline.md) 和 [Schema](schema/README.md) 为准。每个条目在状态变化时原地更新。
 
 ## 使用约定
 
@@ -17,10 +17,10 @@
 
 | 字段 | 当前定义 |
 |---|---|
-| 状态 | Phase 4 已完成结构性改造；等待真实 Tauri corpus 重新测量 |
+| 状态 | Phase 4 已完成结构性改造；warm release corpus 已有证据，cold DEV 长尾仍待专项 |
 | 现象 | 正常 warm 运行中 DEV GLB fast path 可以完整命中（包括合法 `empty` DEV）。现在 clean static DEV 在 session 内 template parse once，placement 节点按 bounded slices 提交；剩余 wall-clock 长尾需要真实样本 telemetry 再归因。 |
 | 影响 | 变电工程已经显示语义和首批几何后，仍需很长时间才达到完整模型状态。 |
-| 下一步 | 用 `templateParseCount`、shared/fallback 计数、placement slice p50/p95/max、scene commit 和内存采样复核真实样本；再决定 memory retention/unload、cold compiler Worker 或 IFC/Fragments 优化。 |
+| 下一步 | 保留真实样本的 `templateParseCount`、shared/fallback、placement slice、scene commit、`worstDevPaths` 和 phase；下一轮只做 cold DEV Compiler Characterization，不与 IFC/Fragments 改造绑定。 |
 | 完成条件 | 结构性 invariant 已由 unit/regression 覆盖：clean path parse≈unique DEV、placement 共享资源且不改写 geometry、A/B transform 等价、stale slice 不提交、cleanup exactly once。真实 wall-clock/RSS/Long Task 仍需 Tauri 运行证据。 |
 
 ### P1 · 几何状态可解释性（第一阶段已实现）
@@ -37,10 +37,10 @@
 
 | 字段 | 当前定义 |
 |---|---|
-| 状态 | 灰度能力已实现，默认关闭 |
+| 状态 | Final Gate：substation01/02/03 通过，substation04 因 JS heap 回归 hold；默认关闭 |
 | 现象 | `ENABLE_FRAGMENTS_CACHE=false`；调试覆盖可用于 cache-off/build/hit 对照，缓存按工程 SHA、IFC 路径、Fragments/web-ifc 版本和文件大小校验。 |
 | 影响 | 默认路径每次需要重新走 IFC→Fragments，变电 warm 启动仍承担解析成本。 |
-| 下一步 | 用独立进程完成跨重启的 cache-off/build/hit 对照，分别确认 `frag read` 与 `fragments.core.load` 的占比，再决定是否改变默认开关。 |
+| 下一步 | 只对 substation04 做 JS heap 驻留/回收归因；若通过，再复核四样本并评审 `ENABLE_FRAGMENTS_CACHE_BASE=true`。HIT composite 已拆出 `core.load`、model-added callback、`core.update(true)`；不改 IFC 顺序或 persistence。 |
 | 完成条件 | cache hit 的模型数、GUID/CBM 关联、选择高亮、坐标及 IFC/MOD 相对位置与 cache-off 一致；截断、缺失、版本或源 SHA 不匹配都自动回退 IFC。 |
 
 ### P1 · Spatial Semantic Cache 运行时证据
@@ -103,3 +103,9 @@
 - shared Three.js geometry / InstancedMesh；当前 placement 会修改 `BufferGeometry`，先保持实例隔离。
 - IFC Semantic Worker、Compact Line Runtime Cache；当前没有扩大这些线程/缓存边界的计划。
 - PMTiles 离线底图；代码保留休眠开关，默认仍使用 OSM 在线底图或 Canvas-only 回退。
+
+## 关联文档
+
+- [变电性能 Benchmark](benchmark_substation.md)：Fragments RC v2 的测量契约、A/B 结果和默认策略门槛。
+- [线路性能 Benchmark](benchmark_powerline.md)：线路冷/暖路径的测量契约和待补证据。
+- [产品路线图](gim_viewer_product_roadmap.md)：按产品阶段维护的后续交付顺序。

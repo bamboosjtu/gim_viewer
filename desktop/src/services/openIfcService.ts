@@ -1,12 +1,10 @@
 import type { AppState } from '../app/state.js';
 import { ensureEngineReady, loadIfcBuffer } from '../viewer/ifcLoader.js';
 import { fitCameraToScene } from '../viewer/camera.js';
-import { loadingEl, emptyTipEl, fileInput, btnLoadLocal } from '../ui/dom.js';
+import { emptyTipEl, fileInput, btnLoadLocal } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { openIfcFilePaths } from '@desktop/fileDialog.js';
-
-function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; }
-function hideLoading() { loadingEl.style.display = 'none'; }
+import { showLoading, hideLoading } from './gimOpenCore.js';
 
 /**
  * 打开本地 IFC 文件的动作函数（供 bootstrap 懒加载调用）。

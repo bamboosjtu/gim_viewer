@@ -82,8 +82,4 @@ export class LineParserTextCache {
   }
 }
 
-/** 仅用于让类型系统表达共享 cache 的可复用结果，运行时无额外开销。 */
-export type LineParserParsedCache = LineParserTextCache;
-
 export type { LineFamProperty, LineDevProperty };
-

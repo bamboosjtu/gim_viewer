@@ -1,6 +1,7 @@
 # GIM Schema Research 目录
 
-本目录用于沉淀 GIM 文件格式研究、样本实证结论和后续解析器实现边界。
+本目录用于沉淀 GIM 文件格式研究、样本实证结论和后续解析器实现边界。样本分析的唯一归档
+位置是本目录；产品实现文档只引用已经确认的规则，不复制样本过程或单次分析日志。
 
 当前文档分为两类：
 
@@ -8,6 +9,11 @@
 2. **格式说明文档**：按文件类型命名，记录单类文件的字段结构和解析约定。
 
 研究结论只代表当前样本实证结果，不直接等同于完整 GIM 标准。新增样本后，应先核对样本事实，再决定是否更新解析器；文档不记录按日期追加的过程日志。
+
+产品侧入口：架构见 [architecture.md](../architecture.md)，共性运行时见
+[gim_common.md](../gim_common.md)，线路/变电实现见 [gim_powerline.md](../gim_powerline.md)
+和 [gim_substation.md](../gim_substation.md)，性能证据见
+[benchmark_powerline.md](../benchmark_powerline.md) 和 [benchmark_substation.md](../benchmark_substation.md)。
 
 ---
 
@@ -26,8 +32,8 @@
 | 顺序 | 文档 | 关注问题 | 状态 |
 | ---: | ---- | -------- | ---- |
 | 00 | [00-sample-corpus.md](00-sample-corpus.md) | 样本台账、样本边界、后续样本登记规则 | 持续维护 |
-| 01 | [01-gim-container-analysis.md](01-gim-container-analysis.md) | `.gim` 外壳、GIMPKG 魔数、压缩格式、payload offset | 已纳入 3 个样本 |
-| 02 | [02-gim-file-inventory.md](02-gim-file-inventory.md) | 解压后文件清单、目录大小写、文本/二进制粗判 | 已纳入 3 个样本 |
+| 01 | [01-gim-container-analysis.md](01-gim-container-analysis.md) | `.gim` 外壳、GIMPKG 魔数、压缩格式、payload offset | 已纳入十样本 |
+| 02 | [02-gim-file-inventory.md](02-gim-file-inventory.md) | 解压后文件清单、目录大小写、文本/二进制粗判 | 已纳入十样本 |
 | 03 | [03-gim-file-role-matrix.md](03-gim-file-role-matrix.md) | CBM/FAM/DEV/PHM/MOD/STL/IFC/SCH/STD/SLD 文件角色 | 待随新样本复核 |
 | 04 | [04-cbm-field-dictionary.md](04-cbm-field-dictionary.md) | CBM 字段、线路/变电差异、CBM 下游引用 | 待随新样本复核 |
 | 05 | [05-gim-reference-integrity.md](05-gim-reference-integrity.md) | CBM/DEV/PHM 文件级引用完整性、IFCGUID 命中分型 | 待随新样本复核 |
@@ -80,8 +86,8 @@ Step 05: 复核 09 的 PHM 与 MOD 变换链
 Step 06: 复核 10 的变电 XML primitive 字段范围与强类型 schema
 Step 07: 复核 11 的线路 MOD 文本格式族 grammar 与 parser 草案边界
 Step 08: 复核 12 的 STL 角色与 MOD 关系（互斥/并列/fallback）
-Step 09: 参考 13 的 Geometry IR 草案，并对照 21 复核已落地与未落地部分
-Step 10: 线路工程参考 14/15 的样本证据，并对照 21 验证当前悬链线实现是否满足语义边界
+Step 09: 参考 13 的 Geometry IR 草案，并对照当前实现和 20 的别名修正复核边界
+Step 10: 线路工程参考 14/15 的样本证据，并对照当前线路实现验证悬链线语义边界
 ```
 
 ---
@@ -91,6 +97,6 @@ Step 10: 线路工程参考 14/15 的样本证据，并对照 21 验证当前悬
 - 编号文档按研究流程排序，不按文件类型排序。
 - 文件类型说明文档按扩展名命名，不加编号。
 - `_generated/` 仅存放临时 CSV、诊断表和可复跑输出，不作为人工维护文档。
-- 任何结论都要区分“当前样本事实”和“候选通用规则”。
+- 任何结论都要区分“当前样本事实”和“候选通用规则”；性能数字归档到对应 benchmark 文档。
 - 遇到 demo 实证与背景规范不一致时，优先记录实证结果，并标注边界。
 - 在解析器实现前，先完成样本复核和诊断分型，避免把单一样本特征写死。

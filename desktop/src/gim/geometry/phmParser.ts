@@ -22,6 +22,7 @@ import {
   getFirstNonEmptyKv,
   isGimEmptyValue,
 } from '../gimValueSemantics.js';
+import { parseKeyValue } from '../kvParser.js';
 
 /** 单位矩阵（列主序，长度 16） */
 const IDENTITY_MATRIX: number[] = [
@@ -38,7 +39,7 @@ const IDENTITY_MATRIX: number[] = [
  * @param phmPath PHM 文件路径（如 "PHM/abc.phm"），用于 PhmDocument.phmPath
  */
 export function parsePhm(text: string, phmPath: string): PhmDocument {
-  const kv = parsePhmKeyValue(text);
+  const kv = parseKeyValue(text);
   const num = parseBoundedCount(getFirstNonEmptyKv(kv, ['SOLIDMODELS.NUM']), 'SOLIDMODELS.NUM');
   if (num === 0) {
     return { phmPath, solidModels: [], isEmpty: true, colorMaxA: 0 };
@@ -68,25 +69,6 @@ export function parsePhm(text: string, phmPath: string): PhmDocument {
     isEmpty: solidModels.length === 0,
     colorMaxA,
   };
-}
-
-/**
- * 解析 KEY=VALUE 文本（PHM 不分节，无 [section] 语法）。
- *
- * 与 src/gim/cbmParser.ts 的 parseKeyValue 行为一致，但内联以避免循环依赖。
- */
-function parsePhmKeyValue(text: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/^\uFEFF/, '');
-    const idx = line.indexOf('=');
-    if (idx > 0) {
-      const key = line.slice(0, idx).trim();
-      const val = line.slice(idx + 1).trim();
-      if (key) result[key] = val;
-    }
-  }
-  return result;
 }
 
 /**

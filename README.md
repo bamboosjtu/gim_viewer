@@ -8,7 +8,7 @@
 |---|---|
 | [`desktop/`](desktop/) | **桌面端**（当前唯一实现）：Tauri 2 应用，独立维护 Node.js 构建环境（package.json / vite / vitest）与 Rust 后端 |
 | [`app/`](app/) | **手机端**（预留）：技术栈待定，不强制 Node.js |
-| [`docs/`](docs/) | 技术文档 + [`design/`](docs/design/) 设计稿 |
+| [`docs/`](docs/) | 架构、当前实现、样本 Schema、性能证据和产品路线图 |
 | [`demo/`](demo/) | 样本数据（大型二进制，gitignored） |
 
 ## 快速开始（桌面端）
@@ -47,4 +47,4 @@ Vite 会在启动或构建时读取该文件；修改后需要重启 `npm run de
 - [变电 GIM](docs/gim_substation.md)
 - [线路 GIM](docs/gim_powerline.md)
 - [开发者日志](docs/dev-log.md)
-- [UI 设计系统](docs/design/design_system.md)
+- [产品路线图](docs/gim_viewer_product_roadmap.md)

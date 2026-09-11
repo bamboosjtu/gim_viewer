@@ -34,12 +34,6 @@ function measureByteLength(value: unknown): ByteMeasurement {
   return { bytes: 0, measured: false };
 }
 
-/** 估算一次 command 的请求 + 响应字节量（不对普通对象做额外序列化）。 */
-export function estimateInvokeBytes(request: unknown, response: unknown): number {
-  const requestMeasurement = typeof request === 'number' ? measuredBytes(request) : measureByteLength(request);
-  return requestMeasurement.bytes + measureByteLength(response).bytes;
-}
-
 /** 供埋点/测试查看字节是否完整测得；普通对象会返回 measured=false。 */
 export function estimateInvokeByteMeasurement(request: unknown, response: unknown): {
   bytes: number;

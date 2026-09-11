@@ -10,6 +10,8 @@
  * - 失焦延迟收起（保证结果行 click 先触发）
  */
 
+import { escapeHtml } from '../shared/html.js';
+
 export interface SearchItem {
   /** 唯一键（通常为节点路径），onPick 回传 */
   key: string;
@@ -22,15 +24,6 @@ export interface SearchItem {
 /** 下拉最多展示的条数（超出时显示提示） */
 const MAX_HITS = 50;
 let searchInstanceId = 0;
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
 
 export function renderSearchBox(
   host: HTMLElement,

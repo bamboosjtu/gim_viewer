@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 import type { AppState } from '../app/state.js';
 import { collectIfcRefs } from '../gim/cbmParser.js';
-import { getNodeDisplayName } from '../gim/gimIndexer.js';
+import { getNodeDisplayName } from '../shared/displayName.js';
 import { frameBox } from './camera.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';

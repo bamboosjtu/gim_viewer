@@ -6096,30 +6096,6 @@ pub fn delete_project_cache(
     Ok(summary)
 }
 
-/// Tauri command：仅删除 GLB 几何缓存目录（不删除 SQLite 记录和 IFC/Fragments 缓存）。
-///
-/// 用于显式清理陈旧 GLB 文件；geometry domain 失效时默认由前端直接
-/// 重建并覆盖 manifest，不会自动删除项目的 source/index cache。
-#[tauri::command]
-pub fn delete_glb_cache(app_handle: tauri::AppHandle, project_id: i64) -> Result<(), String> {
-    ensure_cache_project_id(project_id)?;
-    {
-        let state = app_handle.state::<DbState>();
-        let conn = state
-            .0
-            .lock()
-            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        ensure_project_exists(&conn, project_id)?;
-    }
-    let base = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取 app_data_dir 失败: {}", e))?;
-    let glb_dir = base.join("glbcache").join(project_id.to_string());
-    let _ = remove_cache_dir_if_safe(&glb_dir, " GLB")?;
-    Ok(())
-}
-
 // ===== 几何引用链批量写入（v6） =====
 
 /// DEV SOLIDMODEL 批量写入 payload

@@ -186,13 +186,7 @@ export async function loadLineModSourcesForNode(state: AppState, node: GimGraphN
   return entries;
 }
 
-/** 单文件加载入口，供属性页签和测试使用。 */
-export async function loadLineModSource(state: AppState, path: string): Promise<LineModRuntimeEntry> {
-  return loadSource(state, path);
-}
-
 /** 工程切换时由 UI/清理流程调用；WeakMap 会自动释放 state，但显式清空便于测试。 */
 export function clearLineModRuntimeCache(state: AppState): void {
   sourceCache.get(state)?.clear();
 }
-

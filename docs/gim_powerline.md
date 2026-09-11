@@ -1,447 +1,132 @@
-# 线路 GIM 文件格式与可视化
+# 线路 GIM 当前实现
 
-> 输电线路工程（GIMPKGT）的文件结构、解析流程、地图渲染与树↔图联动。
+> 线路 Runtime 面向 `GIMPKGT` 工程，负责 CBM 语义、FAM/DEV 属性、地图投影和来源追踪。
+> 容器、会话、缓存共性见 [gim_common.md](gim_common.md)，字段和跨样本证据见
+> [schema/README.md](schema/README.md)，性能问题见 [benchmark_powerline.md](benchmark_powerline.md)。
 
-## 0. 实现状态总览
+## 1. Runtime 边界
 
-| 能力 | 状态 | 实现位置 |
-|---|---|---|
-| GIM 容器解压 | ✅ 已实现 | `desktop/src/gim/gimExtractor.ts` |
-| 工程类型识别 | ✅ 已实现 | `desktop/src/gim/projectType.ts` |
-| 线路 Runtime 打开/缓存生命周期 | ✅ 已实现 | `desktop/src/services/powerlineRuntime.ts` / `gimOpenCore.ts` |
-| CBM 层级解析（F1-F4System） | ✅ 已实现 | `desktop/src/gim/lineCbmParser.ts` |
-| DEV/FAM 解析 | ✅ 已实现 | `desktop/src/gim/lineDevParser.ts` / `lineFamParser.ts` |
-| 引用链索引（含 .cbm/.dev/.fam/.phm/.mod/.stl） | ✅ 已实现 | `desktop/src/gim/lineRefKind.ts` / `gimGraphTypes.ts` |
-| 地图数据提取（塔位/导线/跨越点） | ✅ 已实现 | `desktop/src/gim/lineMapData.ts` |
-| 2D 地图渲染（Canvas + MapLibre overlay） | ✅ 已实现 | `desktop/src/ui/lineMapView.ts` / `lineMapBaseLayer.ts` |
-| OSM 在线底图 + 不可用回退 | ✅ 已实现 | `desktop/src/ui/lineMapBaseLayer.ts` / `lineMapStyle.ts` |
-| 树↔地图双向联动 | ✅ 已实现 | `desktop/src/ui/lineMapView.ts` / `lineProjectView.ts` |
-| SQLite 缓存（6 张表） | ✅ 已实现 | `desktop/src-tauri/src/db.rs`（v6） |
-| 悬链线参数**审计**（只读，Ctrl+Shift+C） | ✅ 已实现 | `desktop/src/services/lineGeometryAuditService.ts` 等 4 个服务 |
-| **Geometry IR schema 落地（统一 IR）** | ✅ 已实现 | `desktop/src/gim/geometry/ir.ts` 含 `line-text-mod` kind 类型定义；设计稿见 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) |
-| MOD 文件解析（4 类文本格式族） | ✅ 已实现并接入属性面板 | `desktop/src/gim/geometry/lineModParser.ts` + `desktop/src/services/lineModRuntimeService.ts` |
-| HNum 杆塔骨架可视化（TEXT_HNUM_COMMA_RECORD） | ✅ 选中杆塔后在属性面板“来源”页签显示 SVG 形状预览 | `desktop/src/ui/lineProjectView.ts` |
-| Bolt 属性面板（TEXT_SECTION_KV_RECORD） | ✅ 已实现 | `desktop/src/ui/lineProjectView.ts`，摘要 + 单表格展示 BoltNum/BoltN，未确认字段折叠 |
-| Tower_Device/WIRE 参数面板（TEXT_KEY_VALUE） | ✅ 已实现 | `desktop/src/ui/lineProjectView.ts`，按 key set 分流 |
-| STL 渲染（Wire_Device 100% 触达 STL） | ⚠️ 解析与引用已接入；来源页提供可读按钮追溯，线路不单独创建 3D Viewer | `desktop/src/services/lineModRuntimeService.ts`；`desktop/src/ui/lineProjectView.ts` |
-| 悬链线/弧垂渲染 | ⚠️ 实验实现默认开启 | 2D 屏幕方向示意曲线；KVALUE/MATRIX0/WIRETYPE 语义与 hit-test 尚未收口 |
-| 3D 线路（独立 viewer） | ⏸ 产品边界：不启用；线路仅保留“模型”地图工作区，杆塔形状在来源页预览 | — |
-| PHM TransformMatrix 应用 | ⚠️ 线路不实例化 3D；PHM 实例矩阵保留在来源/技术字段，供后续几何能力使用 | 属性面板保留来源和技术字段 |
-
-> 未完成的性能提升和功能决策统一维护在 [dev-log.md](dev-log.md)；本文件只描述当前实现和稳定边界。
-
----
-
-## 1. GIM 文件容器
-
-| 头部魔数 | 工程类型 |
-|---|---|
-| `GIMPKGT` | 输电线路（Transmission Line） |
-
-与变电工程共享相同的容器格式：
-
-- GIMPKG* 头部（变长，含项目编号和名称，零填充）
-- 1MB 窗口内搜索 7z（`37 7A BC AF 27 1C`）或 ZIP（`50 4B 03 04`）签名
-- Tauri 生产路径：Rust `sevenz-rust/zip` 磁盘优先逐条解压；浏览器/能力回退路径使用 libarchive.js（WebAssembly）
-
-### 目录命名差异
-
-| 工程 | 目录命名 |
-|---|---|
-| 变电（GIMPKGS） | 大写：`CBM/` `DEV/` `PHM/` `MOD/` |
-| 线路（GIMPKGT） | PascalCase：`Cbm/` `Dev/` `Phm/` `Mod/` |
-
-解析器通过 `lowerFileName()` 兼容大小写，以文件名小写作为统一查找键。
-
-### Runtime 打开边界
-
-打开入口先读取 GIM source header。`GIMPKGT` 直接选择 `Powerline Runtime`；缓存校验
-显式传入 `expected_project_type=transmission_line`，不会使用 `gim_project.project_type`
-反向决定线路或变电分支。旧 `project_type` 只保留为缓存 mismatch 诊断字段。
-
-线路 Runtime 的生命周期为：
+线路工程由 source magic 路由到 `Powerline Runtime`。它不加载 IFC，也不创建独立 3D
+Viewer；线路的“模型”工作区是 2D 地图，杆塔形状仅在来源页提供局部 HNum 骨架预览。
 
 ```text
-source identity / GIMPKGT
+GIMPKGT
   → line cache validation
-  → semantic pack / SQLite warm path
-  → cold Line Parser Worker
-  → GimGraph + FAM/DEV properties
-  → tree + map UI
+  → semantic pack / SQLite restore 或 cold parser input
+  → Line Parser Worker（不可用时主线程兼容回退）
+  → GimGraph + FAM/DEV attributes
+  → navigation tree + map + property/source panel
 ```
 
-解压后仍调用 `detectGimProjectType` 做内容校验和 mismatch 诊断；它不改变已由
-`GIMPKGT` 确定的 Runtime。`hybrid` 不会创建第三种 Runtime。若 source inspection 与
-extraction 的非空 magic 不一致，打开流程以 `SOURCE_CHANGED_DURING_OPEN` 安全失败，
-避免将实际解压内容与旧 source identity/cache 绑定。
+当前能力：
 
----
-
-## 2. CBM 层级结构
-
-线路 CBM 每层引用键不同（变电工程统一用 `SUBSYSTEM<i>`）：
-
-```
-project.cbm
-└── F1System（SECTIONS.NUM + SECTION<i>）
-    └── F2System（STRAINSECTIONS.NUM + STRAINSECTION<i>）
-        └── F3System（GROUPS.NUM + GROUP<i>）
-            └── F4System
-                ├── GROUPTYPE=TOWER
-                │   ├── TOWERS.NUM + TOWER<i> → Tower_Device
-                │   ├── STRINGS.NUM + STRING<i>.STRING（递归）+ STRING<i>.GPOINT（挂点名）
-                │   ├── BASES.NUM + BASE<i>
-                │   └── SUBDEVICES.NUM + SUBDEVICE<i>
-                └── GROUPTYPE=WIRE
-                    ├── BACKSTRING / FRONTSTRING
-                    └── SUBDEVICES.NUM + SUBDEVICE<i>
-```
-
-### 叶子节点
-
-| 实体 | 引用键 | 含义 |
-|---|---|---|
-| `Tower_Device` | `OBJECTMODELPOINTER`(→.dev), `BASEFAMILY`(→.fam) | 塔位设备 |
-| `Wire_Device` | 同上 | 导线设备 |
-| `WIRE` | 同上 + `WIRETYPE` | 导线段（CONDUCTOR/GROUNDWIRE/OPGW） |
-| `CROSS` | 同上 | 跨越点 |
-
-### 引用类型（LineRefKind）
-
-`desktop/src/gim/lineRefKind.ts` 定义 10 种引用类型：
-
-| 常量 | ref_kind 值 | 说明 |
-|---|---|---|
-| `CBM_FILES` | `cbmFiles` | CBM 文件引用 |
-| `DEV_FILES` | `devFiles` | DEV 文件引用 |
-| `FAM_FILES` | `famFiles` | FAM 文件引用 |
-| `PHM_FILES` | `phmFiles` | PHM 文件引用 |
-| `MOD_FILES` | `modFiles` | MOD 文件引用 |
-| `STL_FILES` | `stlFiles` | STL 文件引用 |
-| `WIRE_FILES` | `wireFiles` | WIRE 文件引用 |
-| `IFC_FILES` | `ifcFiles` | IFC 文件引用 |
-| `IFC_GUIDS` | `ifcGuids` | IFC GUID 引用（保留，当前未使用） |
-| `RAW_REFS` | `rawRefs` | 原始键值对（非数组型引用） |
-
----
-
-## 3. 坐标系统
-
-### BLHA 格式
-
-塔位坐标存储在 `F4System(GROUPTYPE=TOWER)` 节点的 `rawProps.BLHA`：
-
-```
-BLHA=<纬度>,<经度>,<海拔>,<方向角>
-```
-
-### GeoJSON 映射
-
-BLHA 纬度在前，GeoJSON 经度在前：
-
-```
-BLHA[lat, lng, elev, azimuth] → GeoJSON [lng, lat]
-```
-
-### 导线端点
-
-WIRE 节点的 `POINT0.BLHA` 和 `POINT1.BLHA` 存储导线两端坐标，`WIRETYPE` 区分类型：
-
-| WIRETYPE | 含义 |
+| 能力 | 实现 |
 |---|---|
-| `CONDUCTOR` | 导线 |
-| `GROUNDWIRE` | 地线 |
-| `OPGW` | 光纤复合架空地线 |
+| 容器识别与内容校验 | `gimExtractor.ts`、`gimSourceService.ts`、`projectType.ts` |
+| CBM 图 | `lineCbmParser.ts` / `lineCbmParserCore.ts`，支持 F1–F4、塔、导线、跨越物 |
+| 属性 | `lineFamParser.ts`、`lineDevParser.ts`，写入扁平 payload |
+| 解析输入 | `lineParserInput.ts`，semantic pack、批量磁盘读和大 MOD 元数据过滤 |
+| Worker | `lineParserWorker.ts`、`lineParserWorkerClient.ts`，共享文本/解析 cache |
+| 地图数据 | `lineMapData.ts`，塔位、WIRE、CROSS、质量和 unresolved 统计 |
+| 地图视图 | Canvas overlay + MapLibre OSM raster；OSM 失败回退 Canvas-only |
+| 交互 | 树↔地图定位、搜索、图层开关、来源定位、属性分组 |
+| 线路几何 | 四类文本 MOD 仅按需解析；不进入独立线路 3D 渲染 |
 
----
+## 2. CBM、属性与引用链
 
-## 4. 地图数据提取
+线路 CBM 的引用键随层级变化：F1 使用 `SECTIONS`，F2 使用 `STRAINSECTIONS`，F3 使用
+`GROUPS`，塔组使用 `TOWERS/STRINGS/BASES/SUBDEVICES`，WIRE 组使用
+`BACKSTRING/FRONTSTRING`。叶子节点通过 `OBJECTMODELPOINTER` 指向 DEV、通过
+`BASEFAMILY` 指向 FAM；`WIRETYPE`、`ISJUMPER`、`KVALUE`、`POINT*.BLHA` 等原始字段保留
+在 `rawProps`，不在解析层提前猜测工程公式。
 
-`desktop/src/gim/lineMapData.ts` 的 `extractLineMapData(graph, attrs)` 将 GIM 图转为扁平地图数据：
+`GimGraph` 是线路 Runtime 的唯一语义输入，包含：
 
-### 数据结构
+- `nodesByPath` 与有序 `children`，保留 CBM source path；
+- `refs`，按 CBM/DEV/FAM/PHM/MOD/STL/WIRE/IFC 分类，并保留 `rawRefs`；
+- `stats` 和 `filesByType`，用于文件摘要、缓存恢复和诊断；
+- 线路属性 payload 的 `source_path`、`normalized_path`、`file_name_lower`、行序和原始行。
 
-| 类型 | 字段 | 来源 |
-|---|---|---|
-| `TowerMarker` | lat/lng/elev/azimuth/towerNumber/towerType/towerHeight/turnAngle | F4System(TOWER) 的 rawProps.BLHA + FAM/DEV 属性 |
-| `WireSegment` | startLat/startLng/endLat/endLng/wireType/kValue/split | WIRE 节点的 POINT0/1.BLHA + WIRETYPE |
-| `CrossMarker` | lat/lng/crossType/name | F4System(CROSS) 的 BLHA |
+线路 FAM 支持 `展示名=英文键=值`、`展示名=展示名=值`、`=展示名=值` 和普通
+`键=值`；值中的等号不会被错误截断。DEV 保留单行、原始行和无值属性。FAM/DEV
+缺失只形成 `unmatchedRefs`，不阻断 graph 或地图渲染。
 
-### 数据质量分级
+线路 MOD 按内容分为 HNum、Point/Line、Section-KV、普通 Key-Value 四类 Geometry IR。
+它们是来源页的可读参数和局部预览输入，不是线路地图的完整三维模型。
 
-`TowerMarker.dataQuality`：
+## 3. 解析性能与共享输入
 
-| 等级 | 含义 |
+冷路径先读取 CBM/DEV/FAM/PHM 等语义小文件，线路 MOD 中超过
+`LINE_PARSER_SMALL_MOD_MAX_BYTES` 的 native 几何文件只发送路径元数据；这样 Worker
+仍能得到完整文件类型统计，但不会复制无关大几何字节。
+
+`LineParserTextCache` 在同一 parser session 内缓存文本、KV/FAM/DEV 解析结果。graph 和
+attributes 都使用同一实例，避免重复 `TextDecoder`、重复按文件解析和不同路径上的
+结果漂移。Worker 与主线程 fallback 使用同一套 `lineCbmParserCore`、
+`lineAttrParserCore` 和 cache contract。
+
+缓存命中时，线路 graph、属性和文件统计从 SQLite/semantic pack 恢复；缓存完整性失败
+则整体回到 cold rebuild，不提交 partial graph。`save_line_project_cache` 将 graph 与
+FAM/DEV 属性放入一次事务，成功后才更新线路域版本。
+
+## 4. 地图与交互投影
+
+`extractLineMapData(graph, attrs)` 把语义图投影成渲染无关的 `LineMapData`：
+
+| 投影对象 | 输入 |
 |---|---|
-| `full` | 有坐标 + FAM 命中 |
-| `partial` | 有坐标 + FAM 未命中 |
-| `coords-only` | 仅有坐标 |
+| `TowerMarker` | 塔组 `BLHA`、塔号/塔型/呼高/转角属性 |
+| `WireSegment` | WIRE 的 `POINT0/POINT1.BLHA`、`WIRETYPE`、`KVALUE`、`SPLIT` |
+| `CrossMarker` | 跨越物节点的坐标、类型和名称 |
+| unresolved | 无坐标、属性未命中或引用未定位的原因 |
 
-### 统计
+BLHA 按“纬度、经度、高程、方位角”读取，地图坐标输出为 `[经度, 纬度]`。MapLibre
+overlay 和 Canvas-only 使用同一个绘制/命中逻辑，只替换投影实现；因此底图不可用时
+仍保留网格、比例尺、hover、click、tooltip 和树联动。
 
-`LineMapStats`：塔位总数、有坐标塔位、有 FAM 塔位、导线段总数、有端点导线、跨越点总数、有坐标跨越点。
+默认底图为 OSM online；连续 tile error 达到阈值后销毁 MapLibre probe，切换到
+Canvas-only，并在内存 `basemapStatusService` 中留下状态。PMTiles 代码保留但默认关闭，
+不把在线瓦片写入本地缓存。
 
-### 未解析引用
+悬链线当前是实验性 2D 示意：`same-point` 内部连接不画成跨塔曲线，绘制和 hit-test
+共享采样；`KVALUE`、`MATRIX0` 的物理公式仍以 Schema 研究和技术债务为准。
 
-`LineMapUnresolved`：未定位塔位/导线/跨越点、FAM 未命中引用、DEV 未命中引用（不阻断渲染）。
+## 5. 属性、来源和本地缓存
 
----
+线路属性抽屉分为概览、参数、关系、来源四个投影：正文显示业务字段，GUID 和长路径
+只作为来源按钮的内部定位键。来源按钮可以回到 CBM、FAM、DEV、PHM、MOD 或 STL 的
+可读上下文；HNum 预览明确标注为局部骨架，不冒充完整塔型。
 
-## 5. 地图渲染
+本地缓存的共性规则见 [gim_common.md](gim_common.md)。线路专属部分是：
 
-### 渲染架构
+- `powerline_cbm_node`：节点和 raw properties；
+- `powerline_cbm_child`：有序父子边；
+- `powerline_cbm_ref`：分类引用及归一化诊断键；
+- `powerline_file_stat`：文件类型统计；
+- `powerline_fam_property` / `powerline_dev_property`：扁平属性和 source path。
 
-```
-┌─────────────────────────────────────────┐
-│  MapLibre 底图层（z-index: 0）           │  OSM raster 瓦片
-├─────────────────────────────────────────┤
-│  Canvas overlay（z-index: 2，透明）      │  塔位/导线/跨越点/网格/比例尺
-├─────────────────────────────────────────┤
-│  控件层（z-index: 20）                   │  tooltip / fit 按钮 / 图层面板
-└─────────────────────────────────────────┘
-```
+线路 cache key 使用 `gim_project` 的源 SHA、文件尺寸和
+`gim-line-parser-v1`。线路不检查或缓存 IFC；变电域版本变化不会使线路 graph/属性
+失效。工程切换时 parser Worker、MOD 来源 cache、地图句柄和 UI 状态一起清理。
 
-### 模块分工
+## 6. 正确性边界与下一步
 
-| 模块 | 职责 |
-|---|---|
-| `ui/lineMapView.ts` | Canvas 渲染（塔位/导线/跨越点/经纬度网格/比例尺/hover/click/tooltip） |
-| `ui/lineMapBaseLayer.ts` | MapLibre 底图层（probe + overlay 桥接 + pointer 事件转发） |
-| `ui/lineMapProjection.ts` | 投影接口（`createMapLibreProjection` / `createCanvasProjection`） |
-| `ui/lineMapStyle.ts` | MapLibre style 工厂（`createOsmOnlineRasterStyle` / `createEmptyLineMapStyle` / `createPmtilesLineMapStyle`） |
-| `ui/lineMapPmtiles.ts` | PMTiles protocol 管理（引用计数，默认关闭） |
-| `ui/lineProjectView.ts` | 线路工程面板编排（树 + 地图 + 属性 + 生命周期） |
+当前必须保持的 invariant：
 
-### MVP 底图策略
+- source magic 决定 Runtime；旧缓存的 `project_type` 不能改写路由；
+- cold parser、Worker parser、semantic pack 和 SQLite restore 的 graph/属性业务形状一致；
+- 路径大小写、目录大小写和 `/`/`\` 分隔符变化不改变引用命中；
+- 地图塔位/导线坐标必须是有限值，source path 必须能回到 graph 节点；
+- 工程切换后迟到 Worker、属性或地图回调不能提交到新工程。
 
-| 模式 | 说明 | 状态 |
-|---|---|---|
-| `osm-online` | OSM online raster（MVP 默认） | ✅ 启用 |
-| Canvas-only | OSM 不可用时自动回退 | ✅ 兜底 |
-| `pmtiles` | 本地 PMTiles 矢量瓦片 | 休眠（`ENABLE_PMTILES_EXPERIMENT=false`） |
-| `empty` | 纯色 background | 代码保留 |
+后续路线：
 
-### OSM 在线底图
+1. 为 HNum/MOD 来源预览补齐 read、parse、SVG/Canvas render 的分段 profile，并评估有界
+   预览 cache；不阻塞线路首屏。
+2. 用独立进程拆分 warm JS heap、WebView/Worker/Tauri RSS 和释放后的增长，避免把 process
+   tree RSS 与 JS heap 混为一谈。
+3. 对 line03 继续拆 7z decode、entry write 和 parser input 阶段；先保留现有安全配额
+   和 cache identity。
+4. 完成 `KVALUE`、`MATRIX0`、斜档距和跨越物坐标语义核验，再决定实验弧垂是否继续默认开启。
 
-- 瓦片源：`https://tile.openstreetmap.org/{z}/{x}/{y}.png`（HTTPS，单服务器，无 a/b/c 子域）
-- `tileSize: 256`（OSM 标准）
-- `attribution: '© OpenStreetMap contributors'`（ODbL 许可）
-- `attributionControl: { compact: false }`（始终展开）
-
-### OSM 不可用回退
-
-当 OSM tile 错误累积达 **3 次** 时触发 `onBasemapUnavailable` 回调：
-
-1. 清理 MapLibre interaction listeners
-2. 销毁 Canvas overlay handle
-3. 销毁 MapLibre probe（`map.remove()`）
-4. 重新渲染 Canvas-only（恢复经纬度网格、比例尺、hover/click/tooltip/树联动）
-5. UI 提示：`OSM 在线底图不可用，已切换为 Canvas 地图模式`
-
-**error listener 生命周期**：OSM 模式下 `onLoad` 不移除 error listener（需持续监听 load 后的 tile error），`destroy()` 时显式 `map.off`。
-
-### 投影桥接
-
-| 模式 | 投影方法 |
-|---|---|
-| MapLibre overlay | `map.project({ lng, lat })` → 屏幕像素 |
-| Canvas-only | 等距投影（Equirectangular） |
-
-Canvas overlay 委托底图层的 `project()` 方法，两种模式共用同一渲染逻辑。
-
----
-
-## 6. Canvas 地图元素
-
-| 元素 | 渲染 |
-|---|---|
-| 塔位 | 直线塔（圆形）/ 耐张塔（菱形），按 DEVICETYPE 区分 |
-| 导线 | 两塔之间直线连接，按 WIRETYPE 着色（CONDUCTOR/GROUNDWIRE/OPGW） |
-| 跨越点 | ✖️ 符号 |
-| 经纬度网格 | Canvas 绘制（Canvas-only 模式显示，overlay 模式隐藏） |
-| 比例尺 | Canvas 绘制（Canvas-only 模式显示，overlay 模式由 MapLibre ScaleControl 替代） |
-
-### 图层开关
-
-地图图层可见性维护在前端内存（不持久化）：
-
-- 导线 / 地线 / OPGW / 未知线 / 塔位 / 跨越点 / 标签
-- 塔位图层可见性控制 hover/click 命中检测
-- 标签图层可见性覆盖基于缩放级别的标签显示
-
----
-
-## 7. 树↔地图联动
-
-| 方向 | 实现 |
-|---|---|
-| 树 → 地图 | 点击树节点 → `focusTowerByNodePath(path)` → 地图定位 + 高亮 |
-| 地图 → 树 | 点击地图塔位 → `selectTreeRow(path)` → 树行选中 + 滚动 |
-
-树节点行带 `data-node-path` 属性，供地图反查。
-
----
-
-## 8. SQLite 缓存
-
-### 线路工程表（6 张）
-
-| 表 | 用途 |
-|---|---|
-| `powerline_cbm_node` | 线路 CBM 节点（F1-F4System / TOWER / WIRE / CROSS） |
-| `powerline_cbm_child` | 线路 CBM 父子关系 |
-| `powerline_cbm_ref` | 线路 CBM 引用（含 `normalized_ref_value` / `file_name_lower`） |
-| `powerline_file_stat` | 线路文件统计 |
-| `powerline_fam_property` | 线路 FAM 属性缓存 |
-| `powerline_dev_property` | 线路 DEV 属性缓存 |
-
-### 缓存校验
-
-线路工程缓存命中条件（`validate_gim_cache`）：
-
-- `line_parser_version` 匹配当前 `LINE_PARSER_VERSION`（当前为 `gim-line-parser-v1`）；旧库中仅有 `parser_version` 时按 v21/v22 兼容迁移
-- file_size 匹配
-- `line_cbm_node_count > 0` 且 `line_fam_source_count > 0`，并且旧记录的
-  `project_type` 与当前 source domain 不冲突；校验分支由 `GIMPKGT` 对应的
-  `expected_project_type` 选择
-
-`parser_version` 仍保留为兼容/诊断字段，但不再作为线路缓存的唯一失效依据；变电 `SUBSTATION_PARSER_VERSION` 升级不会使线路图、属性或 semantic pack 失效。
-
-### 首次导入事务
-
-`save_line_project_cache` 是统一事务命令：线路图（6 张表）+ FAM/DEV 属性在同一事务内写入，成功后设置 `line_parser_version = LINE_PARSER_VERSION`（当前为 `gim-line-parser-v1`），同时写入旧 `parser_version` 供兼容诊断。线路 domain 版本独立于变电 `SUBSTATION_PARSER_VERSION`，版本变更只失效对应工程域。
-
-### 诊断键空间
-
-`powerline_cbm_ref.refs` 是裸文件名（如 `x.fam`），`line_fam/dev_property.normalized_path` 是完整路径（如 `Cbm/x.fam`）。诊断使用 `file_name_lower` 作为统一键空间，避免 false-positive missing 报告。
-
----
-
-## 9. 属性面板
-
-线路节点属性面板使用“概览 / 参数 / 关系 / 来源”四页签展示：
-
-- **概览**：实体类型、可读名称、分类、子节点/关键业务字段
-- **WIRE 悬链线参数**：`KVALUE` / `SPLIT` / `POINT0.BLHA` / `POINT1.BLHA` / `POINT0.MATRIX0` / `POINT1.MATRIX0`
-- **参数**：按“当前对象/杆塔实例/基础/导线串”及属性组展示 FAM/DEV，四类线路 MOD 解析结果；HNum 显示骨架统计，Bolt 明细采用单张表格
-- **关系**：塔位按“杆塔/基础/导线/导线挂点”分组，导线节点显示端点关联状态；不在关系页铺文件引用
-- **来源**：CBM/DEV/FAM/PHM/MOD/STL/WIRE/IFC 的可读按钮统一集中于此页；GUID 文件名和完整路径不直接显示
-- BLHA/POINT*.BLHA 坐标按纬度、经度、高程、方位角逐行展示；来源按钮通过线路业务树定位，不要求用户阅读 GUID 文件名。
-- 左侧线路工作区仅保留“模型”（地图）入口；选中杆塔后，切换属性面板“来源”页签可查看 HNum 杆塔形状预览。
-
----
-
-## 10. 当前实现边界
-
-| 边界 | 当前行为 |
-|---|---|
-| 底图不可用 | MapLibre/OSM 或天地图不可用时自动回退 Canvas-only；Canvas-only 绘制经纬度网格，不依赖在线瓦片。 |
-| 投影 | MapLibre overlay 使用 MapLibre 当前相机投影；Canvas-only 使用 Web Mercator 兼容投影。BLHA 按样本约定作为 WGS-84 坐标，不做 GCJ-02 强转。 |
-| 塔型表达 | 地图以圆形/菱形业务符号表示塔位；选中杆塔后，在属性面板“来源”页显示等比例 HNum 局部骨架预览，明确不等同完整 3D 塔型。 |
-| 悬链线 | 地图可显示实验性 2D 弧垂示意；它不代表经过工程验收的张力/弧垂计算。same-point 内部连接不绘制为跨塔悬链线，交互采样与可见曲线共享。 |
-| 线路 MOD/STL | 四类线路 MOD 文本格式由属性面板按需解析；来源页提供可读的 CBM/DEV/FAM/PHM/MOD/STL 定位按钮。线路不创建独立 3D Viewer。 |
-| IFC | 线路工程不加载 IFC；CBM 语义、地图实体和来源关系由线路 graph/属性缓存提供。 |
-
----
-
-## 11. WIRE 拓扑分类与悬链线候选字段
-
-> 本节归纳 M4-B3 / B3A / B3B / B3C 审计 + demo-line 全量静态分析的**已证实**结论。
->
-> 待决策的暂缓项见 [dev-log.md](dev-log.md) "悬链线待决策项"。
->
-> 研究方法论、审计流程与决策路径见 [14-line-catenary-study.md](schema/14-line-catenary-study.md)。
->
-> demo-line 全量静态分析证据（5460 WIRE / 327 TOWER）见 [schema/15-wire-catenary-evidence.md](schema/15-wire-catenary-evidence.md)。
-
-### 11.1 WIRE 节点字段清单（已证实存在）
-
-实际线路样本（`wireCount=5460`、`towerCount=327`、`spanGroupCount=651`）确认以下字段在 WIRE 节点的 `rawProps` 中**覆盖率 100%**：
-
-| 字段 | 已证实事实 | 语义状态 |
-|---|---|---|
-| `POINT0.BLHA` | 导线起点坐标，格式 `纬度,经度,高程,方位角` | ✅ 已确认（与塔位 BLHA 格式一致） |
-| `POINT1.BLHA` | 导线终点坐标，格式同上 | ✅ 已确认 |
-| `KVALUE` | 数值类型，覆盖率 100%，零值占 55%，非零值 0.00025-1.34 | ✅ 已确认为参数字段；⏳ 具体公式仍待决策 |
-| `SPLIT` | 取值 `1` / `4`，正整数 | ⏳ 候选（疑似分裂数，已用于样式加粗） |
-| `POINT0.MATRIX0` | 16 元素 4x4 矩阵（逗号分隔），平移在 `[12][13][14]` | ✅ z=挂点高度（24-81m）、x=横担偏移（±16m）、单位米已确认；⏳ y 分量与坐标系局部性仍待核验 |
-| `POINT1.MATRIX0` | 同上 | 同上 |
-| `WIRETYPE` | `CONDUCTOR` / `GROUNDWIRE` / `OPGW` | ✅ 已确认（用于着色与样式） |
-| `ISJUMPER` | 跳线标识 | ✅ 已确认（用于虚线样式） |
-| `BACKSTRING` / `FRONTSTRING` | 端点兜底引用（塔名） | ✅ 已确认 |
-
-### 11.2 WIRE 拓扑分类（M4-B3C 已证实）
-
-实际样本中存在大量 `POINT0.BLHA == POINT1.BLHA` 的 WIRE 节点，证明**同一档距内存在"同点内部连接"**。M4-B3C 将档距组分为三类：
-
-| 分类 | 判定规则 | 已证实事实 |
-|---|---|---|
-| `same-point` | POINT0.BLHA 归一化后等于 POINT1.BLHA | 同点内部连接候选（跳线 / 同塔内部连接），**不应直接进入悬链线渲染** |
-| `inter-point` | 两端 BLHA 不同 | 真实跨点档距候选，**未来悬链线候选** |
-| `missing-endpoint` | 任一端 BLHA 缺失 | 端点缺失 |
-
-归一化规则：按逗号分割后逐段 trim 再 join（`'1, 2, 3'` → `'1,2,3'`）。
-
-### 11.3 档距聚合结构（M4-B3B 已证实）
-
-- 每组 WIRE 数：`min=5 / max=31 / avg≈8.39`（不固定，因转角塔/分支塔/跳线档差异）
-- 多条 WIRE 共用相同 BLHA → 必须先做档距聚合才能理解"一档多线"
-- spanKey 规则：`min(POINT0.BLHA, POINT1.BLHA) -> max(...)`，去方向
-
-### 11.4 MATRIX0 格式与语义（demo-line 全量静态分析已证实）
-
-- **格式确认**：16 元素，逗号分隔，为 4x4 矩阵（5460/5460 = 100%）
-- **平移分量位置确认**：`values[12]`(x) / `values[13]`(y) / `values[14]`(z)
-- **z 分量**：范围 24-81m，与塔位 FAM TOWERHEIGHT 量级吻合 → ✅ 已确认为挂点高度，单位米
-- **x 分量**：范围 ±16m，符合典型横担长度 → ✅ 已确认为横担偏移，单位米
-- **y 分量**：范围 ±0.3m，值很小 → ⏳ 语义未确认（疑似旋转残留或顺线方向微偏移，可忽略）
-- **坐标系**：基于 BLHA=塔位中心推论，疑似为相对塔位的局部坐标系 → ⏳ 未做交叉验证
-- **挂点坐标公式**：`hangPoint = towerBlha.latLng + (MATRIX0.x, MATRIX0.y)` + `towerBlha.elev + MATRIX0.z`
-
-> 详细证据见 [schema/15-wire-catenary-evidence.md](schema/15-wire-catenary-evidence.md) §3。
-
-### 11.5 BLHA 含义（demo-line 全量静态分析已证实）
-
-- **已确认**：BLHA 为塔位中心坐标（非挂点坐标）
-  - interPoint 档距的 652 个端点（326 档距 × 2）全部命中 TOWER BLHA（100%）
-  - samePoint 档距的 325 个 BLHA 全部命中 TOWER BLHA（100%）
-- **挂点偏移由 MATRIX0 平移分量提供**（见 §11.4）
-- **同塔不同挂点 BLHA 相同**：samePoint group 中 `POINT0.BLHA == POINT1.BLHA`（325 组）
-
-> 详细证据见 [schema/15-wire-catenary-evidence.md](schema/15-wire-catenary-evidence.md) §4。
-
-### 11.6 审计工具
-
-| 快捷键 | 用途 | 输出 |
-|---|---|---|
-| `Ctrl+Shift+C` | 悬链线参数审计导出 | JSON（`report` + `spanGroupingReport`）+ Markdown 摘要（§1-§11） |
-| `Ctrl+Shift+D` | 数据库诊断 | JSON（工程类型 / 缓存状态 / 底图状态） |
-
-### 11.7 决策与当前实现
-
-- **M4 历史决策**是不实现悬链线；此后范围已经调整
-- **当前地图默认绘制实验性 2D 曲线**，但它不等同于工程语义悬链线
-- **same-point 与 inter-point 已分离**，后续若做悬链线需基于 inter-point
-- **M5/专项决策仍未完成**：KVALUE 公式、MATRIX0 y、WIRETYPE 来源及示意/工程模式边界仍待确认
-
----
-
-## 12. 当前实现摘要
-
-### 12.1 解析、导航与属性
-
-- 线路 CBM 按“线路 → 区段 → 耐张段 → 杆塔/档距 → 导线与跨越物”的业务顺序构建树；原始引用文件名和技术数值不占用导航节点。
-- 四类线路 MOD 文本格式由 `lineModParser.ts` 分发，按需供属性面板消费；HNum 预览只表达局部骨架，来源页提供统一可读的文件定位按钮。
-- 属性面板按“概览 / 参数 / 关系 / 来源”组织；坐标逐行展示，杆塔、基础、导线和导线挂点在关系页分组，文件链接集中在来源页。
-
-### 12.2 地图与交互
-
-- “模型”是线路唯一工作区。MapLibre overlay 与 Canvas-only 使用同一套塔位、导线、跨越物语义；OSM/天地图不可用时自动回退 Canvas-only。
-- MapLibre 相机变化维护 camera revision。交互态每个 RAF 用当前相机快速绘制塔位、简化导线和跨越点，停止移动后再运行完整渐进绘制；旧 revision 的投影结果不会写入当前 Canvas。
-- 地图、导航树和属性面板共享选择状态；塔位、导线和跨越物的 hover/click 使用可见几何的同一采样结果。
-
-### 12.3 缓存、诊断与范围
-
-- 线路 graph、FAM/DEV 属性和 semantic pack 使用独立的 `LINE_PARSER_VERSION`；缓存命中不重新解压，路径比较大小写不敏感。
-- 性能诊断通过 `Ctrl+Shift+D` 输出；线路语义解析可在 Worker 中执行，结果提交受 `ProjectLoadSession` 保护。
-- 线路不加载 IFC、不创建独立 3D Viewer，也不把变电 XML primitive 当作线路格式。未完成事项和下一步统一见 [dev-log.md](dev-log.md)。
+独立线路 3D、IFC 加载和新的语义 Worker 不在当前线路 Runtime 范围内。

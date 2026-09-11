@@ -1,27 +1,50 @@
-# 文档索引
+# GIM Viewer 文档索引
 
-> GIM 阅读器项目文档总览。所有文档描述当前实现状态，便于新开发者理解。
+文档只描述架构、当前实现和下一步计划，不记录按日期排列的开发流水。
 
-## 总览
+## 架构与共性
 
-| 文档 | 说明 |
-|------|------|
-| [技术架构](architecture.md) | 技术选型、源码结构、模块关系、SQLite 表结构、功能开关 |
-| [变电 GIM](gim_substation.md) | 变电站工程（GIMPKGS）文件格式、解析流程、3D 可视化 |
-| [线路 GIM](gim_powerline.md) | 输电线路工程（GIMPKGT）文件格式、地图渲染、树↔图联动 |
-| [开发者日志](dev-log.md) | 待优化项清单（限制 / 技术债务 / 待决策项） |
-| [线路悬链线参数研究](schema/14-line-catenary-study.md) | 线路 WIRE 字段、档距聚合、拓扑分类和审计接口的语义证据；未决产品事项见 `dev-log.md` |
-| [线路 WIRE 悬链线静态分析证据](schema/15-wire-catenary-evidence.md) | demo-line 全量静态分析（5460 WIRE / 327 TOWER），KVALUE / MATRIX0 / BLHA / 拓扑分类字段语义确认 |
+| 文档 | 内容 |
+|---|---|
+| [architecture.md](architecture.md) | Runtime 分层、打开生命周期、边界和版本化策略 |
+| [gim_common.md](gim_common.md) | GIM 容器、应用状态、清理、共性缓存和诊断契约 |
+| [dev-log.md](dev-log.md) | 尚未关闭的技术债务、证据缺口和明确的非目标 |
+| [gim_viewer_product_roadmap.md](gim_viewer_product_roadmap.md) | 产品阶段、交付顺序和后续路线图 |
 
-## GIM 文件格式规范
+## 当前功能实现
 
-| 文档 | 说明 |
-|------|------|
-| [格式规范 - CBM](schema/cbm.md) | CBM 层级文件格式 |
-| [格式规范 - DEV](schema/dev.md) | DEV 设备文件格式 |
-| [格式规范 - FAM](schema/fam.md) | FAM 属性文件格式 |
-| [格式规范 - MOD](schema/mod.md) | MOD 几何文件格式 |
-| [格式规范 - PHM](schema/phm.md) | PHM 装配体文件格式 |
-| [格式规范 - SCH](schema/sch.md) | SCH 图纸文件格式 |
-| [格式规范 - SLD](schema/sld.md) | SLD 单线图文件格式 |
-| [格式规范 - STD](schema/std.md) | STD 标准文件格式 |
+| 文档 | 内容 |
+|---|---|
+| [gim_powerline.md](gim_powerline.md) | GIMPKGT、线路语义图、地图、属性和线路缓存 |
+| [gim_substation.md](gim_substation.md) | GIMPKGS、CBM/IFC、Fragments、DEV/MOD 和变电缓存 |
+
+## 性能证据
+
+| 文档 | 内容 |
+|---|---|
+| [benchmark_powerline.md](benchmark_powerline.md) | 线路性能模型、当前基线和正式测量契约 |
+| [benchmark_substation.md](benchmark_substation.md) | 变电 Fragments RC v2 的 A/B benchmark、正确性和决策 |
+
+## GIM 样本与格式
+
+样本分析、格式研究、引用链和几何可达性统一归档在 [schema/README.md](schema/README.md)；
+文件类型说明也集中在 `schema/`，产品实现文档只引用结论，不复制样本流水。
+
+| 文档 | 内容 |
+|---|---|
+| [schema/README.md](schema/README.md) | 样本研究主线、新样本接入顺序和格式文档索引 |
+| [schema/cbm.md](schema/cbm.md) | CBM 工程骨架与层级关系 |
+| [schema/dev.md](schema/dev.md) | DEV 物理模型与设备组合 |
+| [schema/fam.md](schema/fam.md) | FAM 属性文件 |
+| [schema/mod.md](schema/mod.md) | MOD 几何/参数化模型 |
+| [schema/phm.md](schema/phm.md) | PHM 组合模型与 MOD/STL 引用 |
+| [schema/sch.md](schema/sch.md) | SCH 逻辑模型 |
+| [schema/sld.md](schema/sld.md) | SLD 主接线图 |
+| [schema/std.md](schema/std.md) | STD 逻辑定义 |
+
+## 文档维护边界
+
+- 架构变化先更新 `architecture.md`，共性生命周期、缓存和诊断变化同步更新 `gim_common.md`。
+- 线路/变电功能变化只更新对应实现文档；共享缓存细节统一维护在 `gim_common.md`，不再维护重复的缓存导航页。
+- 性能数字和测量规则只写入对应 benchmark 文档；仍未解决的问题写入 `dev-log.md`。
+- 新样本先进入 `schema/`，确认跨样本规则后再更新实现文档。

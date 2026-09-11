@@ -1,5 +1,5 @@
 /**
- * 顶部项目栏（M0 设计系统：design/component_brief.md §4）。
+ * 顶部项目栏（共性 UI 契约见 docs/gim_common.md）。
  *
  * 职责：工程身份展示（匿名工程名 + 类型徽标）。
  * 打开/附加/关闭/缓存等命令按钮保留原 ID，由 bootstrap 绑定。

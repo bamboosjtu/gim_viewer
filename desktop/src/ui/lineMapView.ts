@@ -30,6 +30,7 @@ import type { GimGraphNode } from '../gim/gimGraphTypes.js';
 import type { LineMapProjection } from './lineMapProjection.js';
 import { ENABLE_CATENARY } from '../config/features.js';
 import { perfBegin, perfCurrentSession, perfMark, type PerfSession } from '../utils/perfTimings.js';
+import { escapeHtml } from '../shared/html.js';
 
 
 // ---------------------------------------------------------------------------
@@ -1913,14 +1914,6 @@ function formatLat(lat: number): string {
 }
 function formatLng(lng: number): string {
   return lng.toFixed(4) + '°';
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 /**

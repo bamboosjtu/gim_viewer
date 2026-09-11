@@ -1,352 +1,141 @@
-# 变电 GIM 文件格式与可视化
+# 变电 GIM 当前实现
 
-> 变电站工程（GIMPKGS）的文件结构、解析流程与 3D 可视化。
+> 变电 Runtime 面向 `GIMPKGS` 工程，负责 CBM/IFC 语义、Fragments 3D、DEV 几何和
+> 树/属性交互。共用容器、会话、缓存基础设施见 [gim_common.md](gim_common.md)，字段和
+> 样本边界见 [schema/README.md](schema/README.md)，性能证据见
+> [benchmark_substation.md](benchmark_substation.md)。
 
-## 0. 实现状态总览
-
-| 能力 | 状态 | 实现位置 |
-|---|---|---|
-| GIM 容器解压 | ✅ 已实现 | `desktop/src/gim/gimExtractor.ts` |
-| CBM 层级树解析 | ✅ 已实现 | `desktop/src/gim/cbmParser.ts` |
-| FAM 分节属性解析 | ✅ 已实现 | `desktop/src/gim/famParser.ts` |
-| FileDevRelation 解析 | ✅ 已实现 | `desktop/src/gim/fileDevParser.ts` |
-| IFC 发现 + GUID 索引 + 名称查询 | ✅ 已实现 | `desktop/src/gim/gimIndexer.ts` / `desktop/src/viewer/ifcNameIndex.ts` |
-| IFC Spatial Semantic Core（selective/two-pass + placement 闭包） | ✅ 已实现（v1） | `desktop/src/gim/ifcSpatialParser.ts`；启动阶段仅保留空间/导航/关系/单位，属性由 Fragments 按需读取 |
-| IFC 3D 渲染（OBC + web-ifc + Three.js） | ✅ 已实现 | `desktop/src/viewer/viewerEngine.ts` / `ifcLoader.ts` / `ifcEntryLoader.ts` |
-| 节点级 IFC 懒加载 + Fragments 缓存 | ✅ 已实现 | `desktop/src/viewer/ifcEntryLoader.ts`（`.frag` 缓存） |
-| 3D 点击拾取 + 高亮 + 相机定位 | ✅ 已实现 | `desktop/src/viewer/selection.ts` / `highlight.ts` / `camera.ts` |
-| 层级树↔3D 联动 | ✅ 已实现 | `desktop/src/services/nodeInteractionService.ts` |
-| 属性面板（CBM/FAM/DEV/IFC + 语义字典） | ✅ 已实现 | `desktop/src/ui/propsDrawer.ts` / `propertyDictionary.ts` |
-| SQLite 缓存（索引、属性、Fragments、几何引用链） | ✅ 已实现 | `desktop/src-tauri/src/db.rs`（变电 `SUBSTATION_PARSER_VERSION=gim-substation-parser-v23`；线路使用独立 domain） |
-| 变电 Runtime 打开/缓存生命周期 | ✅ 已实现 | `desktop/src/services/substationRuntime.ts` / `gimOpenCore.ts` |
-| 缓存命中短路 | ✅ 已实现 | `desktop/src/services/substationRuntime.ts` / `gimIndexRestoreService.ts` |
-| IFC/DEV/PHM/MOD/GL/STL 本地磁盘缓存 | ✅ 已实现 | `desktop/src/services/gimExtractedCacheService.ts` |
-| 诊断快捷键（Ctrl+Shift+D） | ✅ 已实现 | `desktop/src/services/diagnosticSummaryService.ts` |
-| **MOD/GL 文件解析（XML primitive + 显式降级）** | ✅ 已实现 | `desktop/src/gim/geometry/xmlModParser.ts`（已知 primitive + unsupported/partial 诊断）；设计稿见 [10-substation-mod-grammar.md](schema/10-substation-mod-grammar.md) |
-| **DEV 解析（SOLIDMODELS + SUBDEVICES）** | ✅ 已实现 | `desktop/src/gim/geometry/devParser.ts`（两块索引独立，保留完整仿射矩阵） |
-| **PHM 解析（SOLIDMODEL + TRANSFORMMATRIXn + COLORn）** | ✅ 已实现 | `desktop/src/gim/geometry/phmParser.ts` |
-| **Geometry IR schema 落地** | ✅ 已实现 | `desktop/src/gim/geometry/ir.ts`（5 kind 联合 + 已知/Unsupported primitive 类型）；设计稿见 [13-geometry-ir-schema.md](schema/13-geometry-ir-schema.md) |
-| **xml-mod/gl 渲染集成（CBM→DEV→PHM→MOD/GL）** | ✅ 已实现 | `desktop/src/viewer/xmlModGeometry.ts` / `xmlModLoader.ts` / `desktop/src/services/modGeometryDiscovery.ts` / `desktop/src/services/nodeInteractionService.ts` |
-| **PHM TransformMatrix 应用** | ✅ 已实现 | `desktop/src/viewer/xmlModLoader.ts` `applyPlacementTransformToSceneUnits`（顶点烘焙 DEV/PHM/CBM/SUBDEVICE 累积矩阵，避免 Object3D.applyMatrix4 decompose 精度损失） |
-| **xml-mod 自动加载（IFC 加载完成后）** | ✅ 已实现（渐进式管线） | `desktop/src/services/substationRuntime.ts` `loadAllIfcFiles` 后台任务 → `progressiveGeometryService.ts` |
-| **DEV/PHM/MOD/GL/STL 文件磁盘缓存** | ✅ 已实现 | `desktop/src/services/gimExtractedCacheService.ts` `cacheGeometryFiles`（首次打开时缓存，缓存命中按需读取） |
-| **缓存命中场景回放 xml-mod 几何** | ✅ 已实现 | `desktop/src/services/nodeInteractionService.ts` `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` |
-| **STL 渲染** | ⚠️ 已实现加载器与首次打开渐进渲染；缓存命中默认不主动加载 STL | `desktop/src/viewer/stlLoader.ts` / `desktop/src/services/glbCacheService.ts`；几何角色见 [12-stl-static-survey.md](schema/12-stl-static-survey.md) |
-| **PHM COLOR 应用** | ✅ 已实现 | `desktop/src/viewer/xmlModGeometry.ts` `applyPhmColorOverride`；按文件级 `max(A)` 区分百分制/字节制，缓存保存刻度 |
-| **EMPTY_DEVICE_XML 提示** | ⚠️ 第一阶段已实现 | 属性抽屉显示 DEV 的 empty/partial/unsupported/failed 状态和冷/暖来源；精确区分空 XML 与装配节点仍待解析来源补齐 |
-| **装配节点无几何提示** | ⚠️ 第一阶段已实现 | 无自有 SOLIDMODEL 的结果不伪造模型，并在 DEV 几何状态中可见；精确的 PHM/装配原因仍待补齐 |
-
-### 当前版本关键改动
-
-- 变电语义缓存使用独立的 `SUBSTATION_PARSER_VERSION=gim-substation-parser-v23`；线路使用 `LINE_PARSER_VERSION=gim-line-parser-v1`。旧 `PARSER_VERSION=gim-parser-v22` 字段仅作兼容/诊断，并按工程类型迁移，不会因变电 Semantic Core 升级而误使线路缓存失效。本版本引入 IFC Spatial Semantic Core selective/two-pass scan：Pass1 只保留空间/导航对象、必要 IFCREL、单位并收集 placement 候选偏移，Pass2 只物化实际引用的 placement 闭包；属性集、工程量、材质、分类、类型和分组不进入启动索引。几何 GLB 缓存版本为 `geometry-cache-v6-geometry-status`，与语义版本独立。Fragments 缓存另绑定源 GIM SHA-256 与 `fragments-cache-v6` 运行时版本，旧记录缺少源 SHA 时视为失效。
-- Phase 5 跨厂商兼容性使用 `gimValueSemantics.ts` 的统一空值、大小写不敏感 KV 和 `BASEFAMILY`/`BASEFAMILYPOINTER` fallback；FAM parser 支持 BOM、任意 section 和 `key=value` 三段式变体（包括 `=中文名=值`）。IFC 同时处理 `IFC.NUM/IFCn` 工程级发现与有效 `IFCFILE/IFCGUID` 组件级关联。`.gl` 与 `.mod` 共用 XML geometry pipeline，几何结果显式记录 complete/partial/empty/unsupported，unsupported 不会伪装成 empty。
-- 首次打开 GIM 时，通过 `cacheGeometryFiles` 缓存 DEV/PHM/MOD/GL/STL 文件到 `app_data_dir/extracted/{projectId}/`（复用 `writeCacheFile`，沿用路径遍历防护）。
-- IFC 加载完成后自动启动渐进式 DEV GLB 管线（`progressiveGeometryService`），按 DEV 粒度一次解析、落盘并逐实例渲染 IFC 之外的 MOD/GL/STL；用户无需逐节点点击才能看到几何。
-- 每个 unique DEV 在 `_manifest.json` 中记录 `status=glb|partial|empty|unsupported` 与字节数。缓存命中场景（`currentFiles=null`）先按 manifest 建立 DEV→CBM placement 映射，以 GIMR 二进制 envelope 分批读取 GLB；同一 DEV 的 GLB 最多读取一次，随后进入 session-local `DevGlbTemplatePool`，clean static DEV 只 parse 一次并由 placement nodes 共享 geometry/material，`empty`/`unsupported` 不读取也不触发错误的 raw fallback。单个 DEV 的 GLB 缺失、大小/header 不符、真实读取或解析失败只隔离该 DEV，并按 DEV path 做 scoped 原始 MOD/GL/STL 回退；无法证明静态可共享的 DEV 只回退 legacy placement；manifest/source 结构损坏或版本失效才重建整个 geometry cache。
-- 旧缓存或写入/序列化未完成时不提交几何版本标记；geometry cache 与 CBM/IFC 语义缓存独立，几何版本失效不会重新解压或重建语义索引。partial failure 的成功 GLB 保留在场景中，避免将单个坏 DEV 放大为全项目 MOD/GL/STL 长尾；unsupported 与 empty 保持不同的诊断和 manifest 状态。
-- 缓存命中场景的节点按需回放仍由 `nodeInteractionService` 通过 `buildGeometryFilesMapFromCache` / `ensureModFilesInCacheMap` 读取 DEV/PHM/MOD/GL/STL；GLB fast path 不可用时保留原始文件解析。
-
-### Runtime 打开边界
-
-`GIMPKGS` 在 Shared Core 的 source inspection 阶段直接选择 Substation Runtime。变电
-Runtime 自己完成缓存校验、CBM/FAM/DEV/FileDevRelation 恢复或冷解析、IFC Spatial/
-Fragments 加载，以及 DEV GLB/MOD-STL 几何路径；不会读取线路 graph/属性缓存，也不依赖
-线路 Runtime。
+## 1. Runtime 与就绪语义
 
 ```text
-source identity / GIMPKGS
+GIMPKGS
   → substation cache validation
   → CBM/FAM/DEV/FileDevRelation
-  → IFC / Fragments
-  → DEV GLB / MOD-STL fallback
-  → 3D + tree/UI
+  → core semantic UI
+  → first usable IFC + coordinate anchor
+  → firstUsableGeometryReady / interactive
+  → remaining IFC、空间语义、STD/SLD、缓存持久化
+  → allIfcReady
+  → DEV GLB / MOD / GL / STL
+  → fullModelReady
 ```
 
-`validate_gim_cache` 的校验分支由当前 source magic 映射出的
-`expected_project_type=substation` 决定。SQLite 旧 `project_type` 只用于 mismatch
-诊断；解压后保留 `detectGimProjectType` 做内容校验和 fallback，不把 `hybrid` 变成第三
-Runtime。
-- PHM 的 `COLORn` 与文件级 `max(A)` 已随几何引用链缓存；重放时对 MOD/GL/STL 实例应用 RGB、透明度和 A=0 不透明哨兵规则。
+当前就绪时刻不是同一个门：
 
-> 未完成事项与下一步性能/功能工作统一维护在 [dev-log.md](dev-log.md)；本文件只描述当前实现和稳定边界。
-
----
-
-## 1. GIM 文件容器
-
-`.gim` 文件是自定义格式（非标准 ZIP）：
-
-```
-偏移 0:    GIMPKG* 头部（变长，含项目编号和名称，零填充）
-偏移 N:    7z 或 ZIP 压缩数据（在头部之后 1MB 窗口内搜索签名定位）
-```
-
-| 头部魔数 | 工程类型 |
+| 时刻 | 语义 |
 |---|---|
-| `GIMPKGS` | 变电站（Transformer Substation） |
+| `coreSemanticReady` | CBM、IFC entry、设备关系和基础属性可用 |
+| `firstUsableGeometryReady` | 首个有效 IFC 已进入 Fragments，并建立坐标锚点 |
+| `interactive` | 基础树、搜索、属性、相机/选择和首个 IFC 已可操作 |
+| `allIfcReady` | 所有 IFC 按既有顺序完成或被记录为失败 |
+| `fullModelReady` | DEV 派生几何和按需回退路径完成 |
 
-**压缩数据定位**：在 GIMPKG* 头部之后 1MB 窗口内搜索：
+首次可交互不再等待全部 IFC 或 DEV 几何；项目切换由 `ProjectLoadSession` 和 geometry
+token 隔离旧模型、空间结果、GLB placement 和 UI 回调。
 
-- 7z 签名：`37 7A BC AF 27 1C`
-- ZIP 签名：`50 4B 03 04`
+## 2. 语义模型与空间索引
 
-**解压**：Tauri 生产路径由 Rust `sevenz-rust/zip` 从磁盘逐条解压并返回
-manifest + `DiskBackedFile`（条目按需读取）；浏览器或原生能力不可用时回退
-libarchive.js（WebAssembly）并展平为 `Map<path, File>`。
+入口 `CBM/project.cbm` 构建功能树，并从 CBM、FAM、DEV、FileDevRelation 得到 IFC
+文件、设备关系和基础属性。IFC 由 `gimIndexer.ts` 发现并使用稳定的 logical `modelId`；
+会话内再映射到带 source/session 身份的 Fragments runtime model ID。
 
----
+`ifcSpatialParser.ts` 实现变电 Spatial Semantic Core：
 
-## 2. 解压后目录结构
+- selective/two-pass scan 只把空间树、必要关系、placement 闭包和导航对象放入长期索引；
+- IFC 属性集、工程量、材质、分类、类型和分组由 Fragments `getItemsData()` 按需读取；
+- containment、decomposition、host、boundary 和 CBM↔IFC link 以 evidence/confidence
+  保存，不把推断关系伪装成直接 IFC 事实；
+- `SubstationSpatialIndex` 提供 `nodeByKey`、`objectByKey`、link 反查和 coverage，供
+  空间树、属性抽屉、GUID 选择和导航使用。
 
-```
-XX变电站新建.gim/
-├── CBM/     # 工程层级结构文件（.cbm / .fam）
-├── DEV/     # 设备定义与IFC文件（.dev / .fam / .ifc）
-├── PHM/     # 组合模型文件（.phm）
-└── MOD/     # 基础几何模型文件（.mod / .gl）
-```
+交互后先尝试独立的 `substation-spatial-semantic-v1` snapshot。命中只做版本/source SHA
+校验、JSON deserialize 和 Map hydrate；miss、损坏或引用不完整才在 `allIfcReady` 后重建。
+Spatial Semantic Core 本身不在本文下一步改造范围内。
 
-| 目录 | 文件类型 | 职责 |
-|---|---|---|
-| CBM/ | `.cbm`, `.fam` | 构建工程层级树，从工程根到设备级 |
-| DEV/ | `.dev`, `.fam`, `.ifc` | 设备属性与参数，IFC 承载三维建筑信息模型 |
-| PHM/ | `.phm` | 组合模型，将多个 MOD 组装为可复用设备模型 |
-| MOD/ / GL/ | `.mod` / `.gl` | 基础几何模型（XML 格式），定义最底层几何形状与材质 |
+## 3. IFC、DEV 与 3D 实现
 
----
+IFC 路径为 `web-ifc → @thatopen/fragments → Three.js/OBC`。`ifcEntryLoader.ts` 依次尝试
+Fragments cache，失败时回退原始 IFC；加载后校验模型同时存在于 `AppState.loadedModels`
+和 Fragments runtime list，避免“回调到了但模型不可用”。首个模型还负责 coordinate anchor、
+名称索引、选择和相机初始化。
 
-## 3. CBM 层级结构
+DEV 几何路径为 `DEV → PHM/DEV → MOD/GL/STL`：
 
-入口文件：`CBM/project.cbm`
+- cold 由 `progressiveGeometryService.ts` 按 unique DEV 编译为 GLB，再按 CBM placement
+  渐进显示；
+- warm 优先读取 geometry manifest 和批量 GLB，`empty`/`unsupported` 是合法确定性结果，
+  `partial` 保留已有几何；
+- session-local `DevGlbTemplatePool` 对静态 DEV 只做一次 template parse，placement
+  共享 immutable geometry/material，不能证明可共享的 DEV 仅按 DEV 回退 legacy placement；
+- 单个 DEV 的 GLB 缺失、截断、读取或解析失败只触发该 DEV 的 raw MOD/GL/STL fallback，
+  不清理其它成功模型；manifest/source 结构损坏才重建 geometry domain；
+- DEV、PHM、CBM、SUBDEVICE 的完整矩阵在实例级累积，PHM `COLOR` 在实例级应用，几何
+  状态以 `renderable/partial/empty/unsupported/failed` 写入诊断。
 
-```
-BLHA=<纬度>,<经度>,<海拔>,<方向角>
-SUBSYSTEM=<UUID>.cbm
-SCH=project.sch
-TYPE=TS
-```
+这是 Geometry Failure Isolation + immutable DEV template + bounded placement 的当前
+实现；不引入 shared geometry、InstancedMesh，也不把 cold DEV compiler 与 IFC 并发绑定。
 
-### 层级树
+## 4. 缓存与属性 UI
 
-```
-project.cbm（工程根）
-└── 一级子系统.cbm（F1System）
-    ├── 二级子系统.cbm
-    │   └── 三级子系统.cbm → ... → 设备级.cbm
-    ├── IFC0~N → *.ifc（DEV目录）
-    └── SCH → project.sch → *.std + *.sld
-```
+变电专属缓存字段在本节维护，共性缓存契约见 [gim_common.md](gim_common.md)：
 
-### 引用键
-
-| 键 | 含义 |
+| 域 | 当前实现 |
 |---|---|
-| `SUBSYSTEMS.NUM` / `SUBSYSTEM0~N` | 子系统 CBM 文件引用 |
-| `IFC.NUM` / `IFC0~N` | IFC 文件引用（位于 DEV 目录） |
-| `OBJECTMODELPOINTER` | 设备到 DEV 文件的引用 |
-| `BASEFAMILY` | 基础族文件引用（.fam） |
-| `SCH` | 逻辑模型引用（.sch） |
+| 语义 | `substation_cbm_node`、`substation_ifc_model`、`substation_file_dev_entry`、FAM/DEV 属性 |
+| 引用链 | `substation_dev_solid_model`、`substation_dev_sub_device`、`substation_phm_solid_model` |
+| IFC 文件 | `substation_gim_entry.local_cache_path`，按 entry path 懒读 |
+| Spatial | 独立 snapshot，绑定 source SHA、parser/domain version 和 snapshot version |
+| Fragments | `substation_fragment_cache` + `fragments/{project_id}`，绑定 GIM SHA、IFC size、Fragments/web-ifc 版本 |
+| DEV 几何 | `glbcache/{project_id}` 的 GLB、manifest 和 geometry version marker |
 
----
+缓存命中先恢复 CBM/FAM/DEV/FileDevRelation 和基础 UI，再按就绪语义恢复 IFC。缓存失效、
+文件缺失、版本不匹配和坏的派生数据都 fail closed，并回到对应的原始路径；不会用空对象
+替代未知或失败数据。
 
-## 4. IFC 文件
+属性抽屉统一为概览、参数、关系、来源四个视图：IFC Pset/工程量按需读取，CBM↔IFC、空间
+link 和几何来源可互相定位，GUID/长路径只作为来源按钮内部键。STD/SLD 在 interactive
+之后解析或从缓存恢复，不成为首个 IFC 的前置门槛。
 
-变电工程包含 12 个 IFC 文件（示例工程），按专业分组：
+## 5. 导航、属性与来源投影
 
-| 专业 | 示例 IFC 文件 |
-|---|---|
-| 电气 | 电气二次、动力照明、接地、一次设备 |
-| 建筑 | 建筑部分、警卫室建筑 |
-| 结构 | 基础、结构 |
-| 给排水 | 给排水消防、室内给排水 |
-| 暖通 | 暖通布置 |
-| 总图 | 总图 |
+同一空间/功能对象图提供两个变电导航视角：空间树用于位置和 IFC 空间容器，功能系统树
+用于 F1–F4/专业/设备关系；设备、图纸和模型工作区只改变投影，不复制另一份语义状态。
+搜索、面包屑、树行、3D 选择和属性抽屉使用稳定 logical model ID/GUID，来源按钮再回到
+CBM、FAM、DEV、IFC、PHM、MOD 或 STL 原文。
 
-### FileDevRelation
+当前 UI 遵守以下边界：
 
-`FileDevRelation.cbm` 记录 IFC 文件与设备的映射关系（示例工程共 24 条映射）。
+- 首个 IFC 建立坐标锚点后即可操作，不等待全部 IFC、Spatial snapshot 或 DEV；
+- `visibility`、`highlight` 和 camera fit 只作用于当前 session 的 runtime model；
+- IFC Pset/工程量按需读取，空间关系保留 evidence/confidence，不把推断关系当作原始事实；
+- STD/SLD 是 interactive 后的图纸能力，不改变首个 IFC 的前置门槛；
+- `renderable`、`partial`、`empty`、`unsupported`、`failed` 和 fallback 原因分别展示。
 
-### IFC Spatial Semantic Core v1
+## 6. Fragments Cache 当前状态
 
-启动阶段采用两遍选择性扫描（`ifcSpatialParser.ts`）：
+Fragments Cache 的版本键绑定 GIM source SHA、IFC size、`@thatopen/fragments`/`web-ifc`
+版本和派生格式版本。命中前 validate/read，成功后由 `core.load` 恢复模型；任何缺失、截断、
+版本不匹配或运行时登记失败都回到原始 IFC，记录 fallback，并允许该模型继续完成自愈。
+cache-off、miss/build、hit 三种 profile 都保留 attempts、hits、misses、fallbacks 和
+validate/read/load/serialize/write/upsert 的耗时。
 
-1. Pass1 只保留空间/导航对象、单位和用于 containment、decomposition、host、
-   boundary 及关系计数的 IFCREL；IFC 属性、材质、分类、类型和分组只保留诊断计数。
-2. Pass2 从导航对象实际引用的 `ObjectPlacement` 出发，按引用闭包物化
-   `IFCLOCALPLACEMENT`、`IFCAXIS2PLACEMENT*`、点和方向；无关的几何点/方向不进入
-   长期 detail map。
-3. 选中构件后的参数详情由 Fragments `getItemsData()` 按需读取，避免启动时构造
-   全量属性对象。
+当前产品默认仍为 `false`。最新 release portable gate 的完整 A/B、MISS/build 和逐 IFC
+诊断见 [benchmark_substation.md](benchmark_substation.md)；本轮四个样本的 HIT correctness
+和 fallback 门槛通过，但 substation04 的 JS heap peak/idle 稳定高于 OFF 约 20%，因此尚未
+满足默认开启条件。
 
-空间对象、直接/分解/宿主关系和 CBM↔IFC 链接的字段定义与样本边界见
-[Schema 目录](schema/README.md)；性能待办不在本文件重复记录。
+## 7. DEV 几何与下一步计划
 
-### Spatial Semantic Cache v1 / Background Runtime
+DEV 路径保持 Geometry Failure Isolation、immutable DEV template 和 bounded placement：
+本轮没有改 DEV Geometry Compiler、shared geometry、IFC parser 或 IFC scheduling。现有
+`devGeometryProfile` 继续保存 `worstDevPaths`、phase、instance count、fallback 和
+unresolved 信息；substation01 cold 的长尾另作为下一轮专项，不在 Fragments gate 中混测。
 
-`SubstationSpatialIndex` 的运行时 `Map` 不直接序列化。`substationSpatialSemanticCache.ts`
-保存 canonical `models/nodes/objects/links/rootNodeKeys/coverage/placementGroups/
-identityPlacementLinks` snapshot，加载后重新 hydrate：`nodeByKey`、`objectByKey`、
-`linksBySpatialKey`、`linksByCbmPath`、`linksByIfcObjectKey`。snapshot 绑定
-`sourceSha256`、`gim-substation-parser-v23` 和独立的 `substation-spatial-semantic-v1`
-版本；版本/source SHA、JSON、引用关系或 count invariant 任一失败都按 cache miss 处理，
-不恢复 partial index。derived entry 通过现有 Rust `atomic_write` 写入，并在命令侧再次
-核对项目 source SHA。
+下一步按顺序执行：
 
-`SubstationBackgroundCoordinator` 只服务变电 Runtime，不是通用任务框架。它把
-`remainingIfc`、空间 cache restore/rebuild、STD/SLD、cold cache persistence 和 DEV geometry
-记录为有 priority/heavy/start condition/session/state 的任务。interactive 后先进行轻量
-restore/STD；空间 miss 的 IFC STEP rebuild 与 DEV geometry 只在 `allIfcReady` 后进入串行
-heavy lane，低优先级 persistence 不抢占 heavy lane。任务事件只保留 queued/started/
-completed/cancelled/failed 和 queue wait 的低开销诊断。
-
----
-
-## 5. 逻辑模型
-
-```
-project.cbm → SCH=project.sch → zjx.std + zjx.sld
-```
-
-| 文件 | 格式 | 职责 |
-|---|---|---|
-| `project.sch` | 文本 | 逻辑模型入口，引用 std 和 sld |
-| `zjx.std` | XML | 变电站逻辑模型定义（电压等级、间隔、设备） |
-| `zjx.sld` | SVG | 主接线图（电气元件符号和连接关系） |
-
----
-
-## 6. 解析与可视化流程
-
-```
-读取 .gim 文件                                       ✅ 已实现
-  ↓
-检测 GIMPKGS 头部                                    ✅ 已实现
-  ↓
-定位 7z/ZIP 压缩数据偏移                             ✅ 已实现
-  ↓
-libarchive.js 解压 → Map<path, File>                ✅ 已实现
-  ↓
-遍历 CBM 树 → 发现 IFC 文件                          ✅ 已实现
-  ↓
-用户选择 IFC                                         ✅ 已实现
-  ↓
-web-ifc 解析 IFC → OBC Fragments 转换 → Three.js    ✅ 已实现
-  ↓
-点击拾取 → 高亮构件 + 展示 IFC 属性 + 关联 GIM 设备  ✅ 已实现
-  ↓
-IFC 加载完成后自动启动渐进式 MOD/GL/STL 几何管线       ✅ 已实现
-  ↓
-缓存 DEV/PHM/MOD/GL/STL 文件与几何引用链                ✅ 已实现
-```
-
-> 当前管线支持 **IFC + xml-mod/gl + STL**（渐进式 DEV GLB 管线：IFC 优先加载，MOD/GL/STL 后台编译为
-> GLB 并逐实例渐进渲染，详见 [architecture.md](architecture.md) §关键设计）。PHM COLOR 已在 MOD/GL/STL
-> 实例加载和缓存回放时应用，详见 §9。
-
-### 3D 渲染栈
-
-| 层 | 模块 | 职责 | 状态 |
-|---|---|---|---|
-| 引擎 | `viewer/viewerEngine.ts` | OBC Components 初始化 | ✅ |
-| 单例 | `viewer/viewerRuntime.ts` | Viewer 懒加载（首次加载 IFC 时创建） | ✅ |
-| 加载 | `viewer/ifcLoader.ts` | IFC → Fragments 转换 | ✅ |
-| 懒加载 | `viewer/ifcEntryLoader.ts` | 节点级按需加载（含 Fragments 缓存休眠分支） | ✅ |
-| 拾取 | `viewer/selection.ts` + `viewer/highlight.ts` | raycast 高亮 + 构件选中 | ✅ |
-| 相机 | `viewer/camera.ts` | 构件定位 | ✅ |
-| 名称索引 | `viewer/ifcNameIndex.ts` | GUID→Name 批量查询 | ✅ |
-| DEV 解析 | `desktop/src/gim/geometry/devParser.ts` | SOLIDMODELS + SUBDEVICES 两块（保留完整仿射矩阵） | ✅ |
-| PHM 解析 | `desktop/src/gim/geometry/phmParser.ts` | SOLIDMODEL + TRANSFORMMATRIXn + COLORn + colorMaxA | ✅ |
-| xml-mod/gl 解析 | `desktop/src/gim/geometry/xmlModParser.ts` | 已知 XML primitive + Unsupported/partial 显式降级 | ✅ |
-| xml-mod 渲染 | `desktop/src/viewer/xmlModGeometry.ts` / `xmlModLoader.ts` | XmlModPrimitive → BufferGeometry + Transform + PHM 颜色覆盖 | ✅ |
-| 引用链发现 | `desktop/src/services/modGeometryDiscovery.ts` | CBM → DEV → PHM → MOD/GL/STL（递归 + 防环） | ✅ |
-| 自动加载 | `desktop/src/services/progressiveGeometryService.ts` `runProgressiveDevGlbPipeline` | IFC 加载完成后后台渐进渲染全部 DEV 几何（按 DEV 编译） | ✅ |
-| 几何缓存 | `desktop/src/services/gimExtractedCacheService.ts` `cacheGeometryFiles` / `desktop/src/services/modAutoLoadService.ts` | DEV/PHM/MOD/GL/STL 文件 + 引用链缓存；warm 先走 DEV GLB manifest/batch fast path | ✅ |
-| STL 加载 | `desktop/src/viewer/stlLoader.ts` | Binary/ASCII STL → Three.js mesh；首次打开由 GLB 管线承载 | ✅ |
-
-### 层级树↔3D 联动
-
-选中设备节点 → 高亮对应 IFC 构件 + 相机定位。✅ 已实现
-
----
-
-## 7. SQLite 缓存
-
-### 变电工程表（核心 8 张 + 几何引用链 3 张）
-
-| 表 | 用途 |
-|---|---|
-| `gim_project` | 项目记录（path, sha256, size, parser_version, project_type） |
-| `substation_gim_entry` | GIM 内部文件清单 |
-| `substation_cbm_node` | CBM 层级节点（树形结构，含 ifc_file/ifc_guid 引用） |
-| `substation_ifc_model` | IFC 文件索引 |
-| `substation_file_dev_entry` | IFC↔设备 CBM 映射 |
-| `substation_fam_property` | FAM 分节属性缓存 |
-| `substation_dev_property` | DEV 关键属性缓存 |
-| `substation_fragment_cache` | IFC Fragments 文件缓存索引 |
-| `substation_dev_solid_model` / `substation_dev_sub_device` | DEV → PHM/DEV 引用与装配矩阵 |
-| `substation_phm_solid_model` | PHM → MOD/GL/STL 引用、变换、颜色与 `phm_color_max_a` |
-
-### 缓存命中流程
-
-1. 用户选择 GIM → Shared Core 读取 GIMPKGS source header，Rust 计算 sha256 + file_size
-2. Substation Runtime 调用 `validate_gim_cache(expected_project_type=substation)`：检查
-   parser domain + file_size + IFC 缓存文件存在性
-3. 命中 → 读取全部索引 → 恢复到 AppState → 提交 `coreSemanticReady` 并先渲染基础树/搜索/属性/来源面板；首个 IFC interactive 后才独立启动 IFC spatial semantic 与 STD/SLD 缓存恢复，完成时分别记录 `spatialSemanticReady` / `stdSldReady`，不阻塞基础 UI 或首个 IFC
-4. 首个 IFC 完成 Fragments 加载、坐标锚点、相机和选择初始化后记录 `firstUsableGeometryReady` / `interactive`；其余 IFC 继续按现有顺序串行后台加载，全部完成时单独记录 `allIfcReady`
-5. 几何恢复先读取 DEV GLB manifest，按 unique DEV 二进制批读并实例化 placement，只有 fast path 不完整或读取/解析失败时才按需读取 DEV/PHM/MOD/GL/STL 原始文件
-6. 未命中 → 完整解压 → 解析 → 首个 IFC interactive 后后台入库 → 缓存 IFC/DEV/PHM/MOD/GL/STL 文件与几何引用链到本地磁盘；冷启动沿用相同 readiness 顺序
-
-### 本地磁盘缓存
-
-IFC + DEV/PHM/MOD/GL/STL 几何文件写入 `app_data_dir/extracted/{id}/`，路径遍历防护。`cacheGeometryFiles` 在首次打开时缓存可达几何文件；`substation_dev_solid_model`、`substation_dev_sub_device`、`substation_phm_solid_model` 保存引用链与 PHM 颜色刻度。渐进管线另在 `app_data_dir/glbcache/{id}/` 写入 DEV 粒度 GLB 与 `_manifest.json`：每个 unique DEV 必须有 `status=glb|partial`（带 size）或 `status=empty|unsupported`（size=0），仅 manifest 完整且版本标记写入成功才算 warm cache 完整。
-
-### 7.1 DEV GLB warm fast path（geometry-cache-v6）
-
-- manifest 以大小写不敏感的 `DEV/<name>.dev` 为唯一键；同一 DEV 被多个 CBM placement 引用时只批量读取一次 GLB bytes，并在当前 session 内只调用一次 template parse。每个 placement 只创建独立 Object3D hierarchy，复用 immutable BufferGeometry/base Material，继续应用各自 CBM 累积矩阵；不能证明可共享的 DEV 按 DEV 隔离使用 legacy placement。
-- Rust `batch_read_glb_files` 返回 GIMR v2 二进制 envelope，前端按最多 256 个文件或预计 64 MiB 分批；不使用旧 JSON 数组响应。
-- `empty`/`unsupported` 是合法确定性结果：不读文件、不解析、不触发错误的原始 fallback；`partial` 保留已生成的 GLB。单个 DEV 的 manifest 缺项、GLB 缺失/截断/header 或 size 不符、真实读取/解析错误只进入该 DEV 的 scoped fallback；manifest/source 结构损坏或版本失效才重建整个 geometry cache。
-- warm fast path 的单个 DEV GLB parse/解码失败会先定向移除该 DEV 的 manifest 条目和文件，再从对应原始几何重建；只有通过 GLB header、实际解析/可渲染校验且 source SHA 一致后才原子写回 GLB/manifest。恢复失败只让该 DEV 进入 scoped raw fallback，不清理其它 DEV，也不写入坏的完成缓存。
-- profile 随 `finishModStl` 写入诊断：除既有 `cbmInstanceCount`、`uniqueDevCount`、`glbDevCount`、`emptyDevCount`、`glbBatchReadMs`、`glbReadBytes`、`glbParseCount`、`glbParseMs`、fallback 和成功计数外，还记录 `templateParseCount/templateParseMs`、`templateShareableCount/templateFallbackCount`、fallback DEV/reason、`sharedPlacementCount`、`legacyFallbackPlacementCount`、shared geometry/material/texture 数量、placement matrix/bbox/scene commit、slice yield 和 slice p50/p95/max。clean path 的 `templateParseCount` 应接近成功 unique GLB DEV 数，而不是 placement 数。
-- `GEOMETRY_CACHE_VERSION` 由 `geometry-cache-v5-dev-status` bump 为 `geometry-cache-v6-geometry-status`；旧 manifest（缺少或不支持 `partial`/`unsupported` status）会被视为不完整并重新生成。
-
----
-
-## 8. 属性面板
-
-右侧可折叠抽屉采用“概览 / 参数 / 关系 / 来源”四页签，属性字典和完整展示约定见
-[design/property_dictionary.md](design/property_dictionary.md)：
-
-- **概览**：CBM/DEV/IFC 的可读名称、实体类型、系统/空间状态、数量和关键业务字段；项目编号、Default、Building 等通用技术节点不再挤占首屏。
-- **参数**：FAM 分节属性、DEV 设备信息、IFC Pset/工程量和 MOD primitive 字段；未知字段保留原值并默认折叠到“技术字段”。
-- **关系**：父子节点、IFC 空间包含/继承、CBM↔IFC 关联以及几何来源关系。
-- **来源**：CBM/DEV/FAM/PHM/MOD/GL/STL/IFC/SLD 统一显示“定位/查看/切换”按钮，正文不直接显示 GUID 文件名和长路径；点击按钮再回到业务节点或图纸。
-- **TRANSFORMMATRIX**：仅在技术字段中以等宽文本展示；几何加载时仍应用 DEV/PHM/CBM/SUBDEVICE 累积变换。
-- **PHM COLOR**：在 MOD/GL/STL 实例级应用 RGB、透明度和 A=0 不透明哨兵；`max(A)>100` 按字节制，否则按百分制。
-- **EMPTY_DEVICE_XML / 装配节点无几何**：几何状态第一阶段已接入属性抽屉，显示 empty/partial/unsupported/failed 与 cold/warm 来源，不伪造几何且不阻塞其它设备展示；`empty-device-xml` 与 `assembly-node-without-own-geometry` 的精确来源归因仍是待办。
-
-缓存命中时（`currentFiles=null`）仍可显示 CBM/FAM/DEV 基础属性；来源按钮和 MOD/GL/STL 按需回放复用磁盘缓存与几何引用链。
-
----
-
-## 9. 当前实现边界
-
-### 9.1 语义与几何管线
-
-- IFC Spatial Semantic Core 采用 selective/two-pass scan：首遍只保留空间/导航对象、必要关系和单位；次遍只物化导航对象引用到的 placement 闭包。属性集、工程量、材质、分类、类型和分组由 Fragments 在属性面板按需读取。
-- IFC 通过 OBC Fragments 加载到 Three.js；DEV→PHM→MOD/GL/STL 通过 Geometry IR 和渐进式 DEV GLB 管线渲染到同一场景。PHM 的变换矩阵和颜色覆盖在实例级应用。
-- 每个 unique DEV 的几何缓存 manifest 记录 `status=glb|partial|empty|unsupported`。合法 `empty`/`unsupported` 是确定性非渲染结果，`partial` 保留已解析几何；单个 DEV 的 GLB 读取或解析失败只触发该 DEV 的 scoped raw MOD/GL/STL fallback，整体 manifest/source 损坏才重建几何缓存。未知 primitive 会进入 unsupported/partial diagnostics，不会被记录成 empty。
-- DEV geometry Phase 4 使用 session-local template/placement runtime：cold/warm 共用一次 GLB parse 语义，静态 DEV placement 共享 immutable geometry/material，不能证明可共享的 DEV 仅按 DEV 回退 legacy placement；placement commit 使用 bounded slices，工程切换后 stale slice 不提交。
-
-### 9.2 缓存与交互
-
-- 语义缓存按线路/变电工程域隔离版本；几何缓存和 Fragments 缓存拥有独立版本与源 SHA 校验。几何缓存失效不会重新解压或重建 CBM、FAM、DEV 和 IFC Spatial 索引。
-- 首次打开首个可用 IFC 后即进入 interactive，随后才启动 spatial semantic、STD/SLD parse-or-restore 和 cold cache persistence；三者都是独立后台任务，不规定彼此先后，也不阻塞剩余 IFC。剩余 IFC 按顺序后台加载；`allIfcReady` 之后几何继续后台渐进显示。缓存命中时从磁盘 manifest 和二进制 batch 恢复。项目切换由 `ProjectLoadSession` 和 geometry token 隔离旧任务。
-- 属性抽屉提供“概览 / 参数 / 关系 / 来源”四页签，技术标识和长路径折叠，来源按钮负责定位到可读业务对象或图纸。
-
-### 9.3 已知边界
-
-- 无几何的 MOD 或没有自有 `SOLIDMODEL` 的装配节点当前不伪造模型，只保留空结果；属性抽屉显示 session 内几何状态，精确来源归因列在 [dev-log.md](dev-log.md) 的待办中。
-- Fragments 缓存代码可灰度使用但默认关闭；线路不启用独立 3D Viewer。
-- 变电数据格式与导出工具存在差异，新增样本的字段语义以 [Schema 研究](schema/README.md) 的跨样本证据为准。
-
-未完成的性能提升、功能特性和产品决策不在本文件展开，统一维护在 [dev-log.md](dev-log.md)。
+1. 对 substation04 做 JS heap 驻留/回收归因，确认 fragment cache 对 heap 的稳定增量；
+2. 如内存门槛通过，再复核四样本 release gate 并提交 `ENABLE_FRAGMENTS_CACHE_BASE=true`；
+3. 若后续出现超过 30 s 的 HIT Long Task，只继续拆 `fragment read`、`core.load`、
+   `core.update(true)` 和 model-added callback 的诊断，不进入 DEV compiler；
+4. MISS persistence 若成为唯一不可接受回归，再单独评估把 serialize/write 移出 IFC
+   sequential critical path，本轮不移动 persistence。

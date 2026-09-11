@@ -153,7 +153,3 @@ export function buildIfcGuidIndex(node: CbmNode | null, ifcEntries: readonly imp
   if (node) walk(node);
   return index;
 }
-
-// getNodeDisplayName / isPlaceholderName 已迁移至 shared/displayName.ts
-// 此处保留 re-export 以兼容 viewer/highlight.ts 等已有导入
-export { getNodeDisplayName } from '../shared/displayName.js';

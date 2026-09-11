@@ -4,6 +4,7 @@ import {
   inspectGimSourceBuffer,
   inspectGimSourceHead,
   readGimMagic,
+  resolveGimRuntimeType,
   runtimeTypeFromMagic,
 } from '../gimSourceService.js';
 
@@ -45,5 +46,12 @@ describe('GIM source descriptor', () => {
       'SOURCE_CHANGED_DURING_OPEN',
     );
     expect(() => assertGimSourceMagicStable('GIMPKGT', 'GIMPKGT')).not.toThrow();
+  });
+
+  it('keeps cache/runtime routing source-driven', () => {
+    expect(resolveGimRuntimeType('transmission_line', 'substation')).toBe('transmission_line');
+    expect(resolveGimRuntimeType('substation', 'hybrid')).toBe('substation');
+    expect(resolveGimRuntimeType('unknown', 'hybrid')).toBe('substation');
+    expect(resolveGimRuntimeType('unknown', 'unknown')).toBe('unknown');
   });
 });

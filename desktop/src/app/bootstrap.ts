@@ -1,17 +1,15 @@
 import { AppState } from './state.js';
 import { setupTabs } from '../ui/tabs.js';
-import { btnLoadGim, btnLoadLocal, btnClear, btnCacheManager, loadingEl } from '../ui/dom.js';
+import { btnLoadGim, btnLoadLocal, btnClear, btnCacheManager } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_FRAGMENTS, getDebugConfigSnapshot } from '../config/debug.js';
 import { debugWarn } from '../utils/logger.js';
 import { summarizeDiagnostic } from '../shared/diagnosticSummary.js';
 import { getBasemapStatusSnapshot, summarizeBasemapStatus } from '../services/basemapStatusService.js';
-import { pushBusy, popBusy, setStatusRight } from '../ui/shell/statusBar.js';
+import { setStatusRight } from '../ui/shell/statusBar.js';
 import { registerPropertyReferenceHandler } from '../ui/propertyDictionary.js';
 import { setupPropsDrawerInteractions } from '../ui/propsDrawer.js';
-
-function showLoading(text: string) { loadingEl.textContent = text; loadingEl.style.display = 'block'; pushBusy(text); }
-function hideLoading() { loadingEl.style.display = 'none'; popBusy('就绪'); }
+import { showLoading, hideLoading } from '../services/gimOpenCore.js';
 
 /** 异步启动逻辑（轻量，不加载 3D 引擎） */
 async function bootstrapAsync(): Promise<void> {
