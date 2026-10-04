@@ -18,6 +18,7 @@ describe('FileDevRelation 路径兼容', () => {
 
     await expect(parseFileDevRelation(files)).resolves.toEqual([
       {
+        sourceDesignFile: '一次设备',
         ifcName: '一次设备',
         ifcFile: 'device.ifc',
         modelId: createIfcModelId('DEV/device.ifc'),
@@ -64,6 +65,7 @@ describe('FileDevRelation 路径兼容', () => {
 
     await expect(parseFileDevRelation(files)).resolves.toEqual([
       {
+        sourceDesignFile: '220kV GIS设备.DGN',
         ifcName: '220kV GIS设备',
         ifcFile: '',
         modelId: '',
@@ -71,6 +73,7 @@ describe('FileDevRelation 路径兼容', () => {
         deviceCbms: ['CBM/a.cbm', 'b.cbm'],
       },
       {
+        sourceDesignFile: '二次屏柜布置.DGN',
         ifcName: '二次屏柜布置',
         ifcFile: '',
         modelId: '',
@@ -97,6 +100,7 @@ describe('FileDevRelation 路径兼容', () => {
 
     await expect(parseFileDevRelation(files)).resolves.toEqual([
       {
+        sourceDesignFile: '电气总平',
         ifcName: '电气总平',
         ifcFile: '',
         modelId: '',
@@ -104,6 +108,7 @@ describe('FileDevRelation 路径兼容', () => {
         deviceCbms: ['first.cbm'],
       },
       {
+        sourceDesignFile: '建筑',
         ifcName: '建筑',
         ifcFile: '建筑.ifc',
         modelId: '',
@@ -111,6 +116,7 @@ describe('FileDevRelation 路径兼容', () => {
         deviceCbms: [],
       },
       {
+        sourceDesignFile: '设备接线',
         ifcName: '设备接线',
         ifcFile: '设备接线.ifc',
         modelId: '',

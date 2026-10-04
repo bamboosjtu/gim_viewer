@@ -905,7 +905,7 @@ export function applyPlacementTransformToSceneUnits(
 | ------ | -------- | -------- |
 | PHM 矩阵作用 | 全部为单位，无实际变换 | **保留**：PHM 层 100% 单位，但仅是装配链路中的一环 |
 | 变电两级变换假设 | 不成立，实际为单级变换 | **修正**：PHM × MOD Entity 两级假设不成立，但完整链路 CBM×DEV×SUBDEVICE×PHM × MOD Entity 是两级变换（装配级 + 局部级） |
-| 渲染管线实现 | PHM 矩阵可跳过，直接用 MOD Entity | **修正**：PHM 矩阵可跳过，但必须应用 CBM×DEV×SUBDEVICE×PHM 累积矩阵，再乘 MOD Entity 局部矩阵 |
+| 渲染管线实现 | 历史误判：PHM 矩阵可跳过，直接用 MOD Entity | **Runtime 契约**：逐边应用 CBM×DEV×SUBDEVICE×PHM 累积矩阵，再乘 MOD Entity 局部矩阵；只有实际为单位阵的边才可省略乘法 |
 
 ---
 
@@ -974,9 +974,9 @@ export function applyPlacementTransformToSceneUnits(
 ## 15. 浏览器实现影响
 
 ```text
-1. PHM 矩阵可跳过乘法运算：
-   PHM 矩阵恒为单位，乘法无意义。
-   （此条与初版一致。）
+1. PHM 每条边的矩阵必须保留：
+   旧三样本的 PHM 为单位阵是历史观察，substation03 的嵌套边包含真实旋转/平移。
+   Runtime 必须逐边累积，不能按文件类型省略 PHM 矩阵。
 
 2. 装配级矩阵不可省略（修正初版）：
    渲染管线必须应用 CBM × DEV_SOLID × SUBDEVICE × PHM 累积矩阵，

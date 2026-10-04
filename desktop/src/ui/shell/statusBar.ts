@@ -50,4 +50,11 @@ export function setStatusRight(text: string): void {
 /** 清理工程时恢复共性状态栏，避免线路统计泄漏到下一工程。 */
 export function resetStatusRight(): void {
   setStatusRight(DEFAULT_STATUS_RIGHT);
+  setSelectionStatus(null);
+}
+
+/** Current semantic selection, including objects without displayable geometry. */
+export function setSelectionStatus(label: string | null): void {
+  const element=document.getElementById('status-selection');
+  if (element) element.textContent=label ?? '未选中';
 }

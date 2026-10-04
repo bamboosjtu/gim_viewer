@@ -13,7 +13,7 @@
 | `.phm` | `PHM/` 或 `Phm/` | 可复用装配模型 | 递归解析 `SOLIDMODEL`、矩阵和颜色，带 visited 防环 |
 | `.mod` | `MOD/` 或 `Mod/` | 基础几何或线路文本记录 | 变电 XML MOD 进入 Geometry IR；线路按四类文本格式供属性面板/HNum 预览消费 |
 | `.stl` | `MOD/` 或 `Mod/` | 三角网格资源 | 变电 DEV GLB 管线支持 binary/ASCII 读取；线路仅保留来源追溯，不创建独立 3D |
-| `.ifc` | 常见于 `DEV/` | 变电 IFC 空间/构件模型 | 发现后由 OBC Fragments 加载；Spatial Core 只保留空间和 placement 语义 |
+| `.ifc` | 可能在 `DEV/`、`CBM/` 等目录 | 变电 IFC 空间/构件模型 | 目录是 exporter detail；基于 CBM 引用 + 全局 entry resolver 发现，再由 OBC Fragments 加载 |
 | `.sch` | `CBM/` 或 `Cbm/` | 逻辑模型入口 | 解析逻辑模型引用，供 STD/SLD 视图选择 |
 | `.std` | `CBM/` 或 `Cbm/` | 逻辑模型定义 | 解析电压等级、间隔和设备关系 |
 | `.sld` | `CBM/` 或 `Cbm/` | 主接线图 | 白名单净化后在中间工作区渲染，保持与三维模型叠加 |

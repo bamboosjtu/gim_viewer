@@ -59,8 +59,17 @@ export async function getViewerRuntimeWithUI(
     setupPropsDrawer(ctx);
 
     // 装配 3D 点击拾取 → 显示 IFC 构件属性
-    setupSelection(ctx, state, container, (modelId, localId) => {
-      void showIfcElementProperties(ctx, state, modelId, localId);
+    const {syncSelectionNavigation}=await import('./nodeInteractionService.js');
+    setupSelection(ctx,state,container,(modelId,localId,request) => {
+      void syncSelectionNavigation(state,request);
+      void showIfcElementProperties(ctx,state,modelId,localId,request);
+    },(request) => {
+      void syncSelectionNavigation(state,request);
+      if (state.isCurrentSelection(request)) {
+        void import('../ui/shell/statusBar.js').then(({setSelectionStatus}) => { if (state.isCurrentSelection(request)) setSelectionStatus(null); });
+        const body=document.getElementById('props-drawer-body');
+        if (body) body.innerHTML='<div class="props-empty">尚未选择对象</div>';
+      }
     });
 
     // 构造模型生命周期回调（IFC 加载/卸载时同步更新 model-list UI）

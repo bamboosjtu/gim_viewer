@@ -16,11 +16,13 @@ import { readCachedEntry, writeCacheFile } from '@desktop/database.js';
  * the geometry/Fragments cache versions.  A change to the line parser or to
  * DEV GLB output must not invalidate this derived semantic projection.
  */
-export const SUBSTATION_SPATIAL_SEMANTIC_VERSION = 'substation-spatial-semantic-v1';
+// v2: source-relation pairing and normalized CBM identity change spatial asset links.
+export const SUBSTATION_SPATIAL_SEMANTIC_VERSION = 'substation-spatial-semantic-v2';
 export const SUBSTATION_SPATIAL_SEMANTIC_CACHE_ENTRY =
-  '__derived__/substation-spatial-semantic-v1.json';
+  '__derived__/substation-spatial-semantic-v2.json';
 
-/** Must match desktop/src-tauri/src/db.rs::SUBSTATION_PARSER_VERSION. */
+/** Independent IFC parser contract; CBM/FAM source evidence uses its own v24 domain. */
+/** Spatial parser contract; intentionally independent of CBM/FAM domain upgrades. */
 export const SUBSTATION_PARSER_DOMAIN_VERSION = 'gim-substation-parser-v23';
 
 /** Refuse to parse an unbounded/corrupt derived payload in the WebView. */

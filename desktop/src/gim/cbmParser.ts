@@ -8,7 +8,9 @@ import { getFileByPath } from './fileLookup.js';
 import {
   getFirstNonEmptyKv,
   resolveBaseFamilyReference,
+  resolveBaseFamilyReferences,
 } from './gimValueSemantics.js';
+import { parseFamSections } from './famParser.js';
 import { parseKeyValue } from './kvParser.js';
 
 export { parseKeyValue } from './kvParser.js';
@@ -36,7 +38,7 @@ function isPlaceholderSystemName(s: string): boolean {
  * 从 CBM kv 提取可读名称（按优先级回退）。
  *
  * 优先级链（变电工程）：
- * 1. SYSTEMNAME1..4 拼接（过滤占位符"-"/"其它"/空值后，用 " / " 拼接）
+ * 1. SYSTEMNAME1..N 拼接（过滤占位符"-"/"其它"/空值后，用 " / " 拼接）
  * 2. PARTNAME（部件名）
  * 3. SYSCLASSIFYNAME（系统分类编码，如 0AFD*002）— 编码可读性差，作为回退
  * 4. ENTITYNAME（如 F1System/F2System/F3System/F4System/PARTINDEX）
@@ -47,12 +49,18 @@ function isPlaceholderSystemName(s: string): boolean {
  * @param kv 已解析的键值表
  * @param path CBM 文件路径（用于提取文件名回退）
  */
-function extractDisplayName(kv: Record<string, string>, path: string): { name: string; systemNames: string[] } {
+export function readSubstationSystemNames(kv: Record<string, string>): string[] {
   const systemNames: string[] = [];
-  for (let i = 1; i <= 4; i++) {
-    const sn = getFirstNonEmptyKv(kv, [`SYSTEMNAME${i}`]);
+  for (const key of Object.keys(kv).filter((key) => /^SYSTEMNAME\d+$/i.test(key))
+    .sort((a, b) => Number(a.match(/\d+$/)![0]) - Number(b.match(/\d+$/)![0]))) {
+    const sn = getFirstNonEmptyKv(kv, [key]);
     if (sn && !isPlaceholderSystemName(sn)) systemNames.push(sn.trim());
   }
+  return systemNames;
+}
+
+function extractDisplayName(kv: Record<string, string>, path: string): { name: string; systemNames: string[] } {
+  const systemNames = readSubstationSystemNames(kv);
 
   const rawPartName = getFirstNonEmptyKv(kv, ['PARTNAME']);
   // PARTNAME 占位符（如 Bentley 导出的 "&GN"）不参与名称回退
@@ -87,25 +95,6 @@ function extractDisplayName(kv: Record<string, string>, path: string): { name: s
  */
 function isDeviceLayer(entityName: string): boolean {
   return entityName === 'F4System' || entityName === 'PARTINDEX' || entityName === 'DEV_SUBDEVICE';
-}
-
-/**
- * 将 F2System 的 SYSCLASSIFYNAME 单字符代码映射为工程专业名称。
- *
- * 变电工程内部的专业分项（CBM 中 F2System 的 SYSCLASSIFYNAME 为单字符）：
- * - U → 建筑工程
- * - A → 安装工程
- * - S → 暖通工程
- * - G → 给排水工程
- */
-function mapF2ClassifyName(code: string): string {
-  switch (code) {
-    case 'U': return '建筑工程';
-    case 'A': return '安装工程';
-    case 'S': return '暖通工程';
-    case 'G': return '给排水工程';
-    default: return '';
-  }
 }
 
 /** 解析 DEV 文件获取 SYMBOLNAME 和 TYPE（失败返回空值） */
@@ -215,7 +204,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
       throw new Error(`CBM 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
     }
     const kv = parseKeyValue(await f.text());
-    const en = getFirstNonEmptyKv(kv, ['ENTITYNAME']);
+    const en = normalizeEntityName(getFirstNonEmptyKv(kv, ['ENTITYNAME']));
     let { name, systemNames } = extractDisplayName(kv, p);
     const cn = getFirstNonEmptyKv(kv, ['SYSCLASSIFYNAME', 'PARTNAME']);
     const devPath = getFirstNonEmptyKv(kv, ['OBJECTMODELPOINTER']);
@@ -230,7 +219,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
         devType = info.type;
         // 设备层节点（F4System/PARTINDEX）优先用 DEV SYMBOLNAME 作为节点名称
         // 这比 SYSCLASSIFYNAME 编码（如 CAH*006）可读得多
-        if (isDeviceLayer(en) && devSymbolName) {
+        if (isDeviceLayer(en) && devSymbolName && systemNames.length === 0) {
           name = devSymbolName;
         }
       }
@@ -241,10 +230,18 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
       name = projectTypeName;
     }
 
-    // F2System：将 SYSCLASSIFYNAME 单字符代码（U/A/S/G）映射为工程专业名
-    if (en === 'F2System') {
-      const f2Name = mapF2ClassifyName(cn);
-      if (f2Name) name = f2Name;
+    // Family sidecars may provide the only readable name (also for PARTINDEX).
+    // Do not interpret classification codes as a standard discipline vocabulary.
+    for (const ref of (systemNames.length === 0 || en === 'PARTINDEX') ? resolveBaseFamilyReferences(kv) : []) {
+      const famPath = ref.path.replace(/\\/g, '/');
+      const famFile = getFileByPath(files, famPath.includes('/') ? famPath : `CBM/${famPath}`);
+      if (!famFile) continue;
+      let sections;
+      try { sections = parseFamSections(await famFile.text()); } catch { continue; }
+      const values = [...sections.values()].flatMap((section) => [...section.entries()]);
+      const readable = ['工程中名称', '系统名称', '设备名称', 'ShowName', 'LevelName', 'NAME', '名称'].map((key) =>
+        values.find(([k, v]) => k.toUpperCase() === key.toUpperCase() && !isPlaceholderSystemName(v))?.[1]).find(Boolean);
+      if (readable && (systemNames.length === 0 || en === 'PARTINDEX')) { name = readable; break; }
     }
 
     const children: CbmNode[] = [];
@@ -286,16 +283,6 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
       }
     }
 
-    // F1System 子节点（F2System）按 U→A→S→G 顺序排列
-    if (en === 'F1System') {
-      const f2Order: Record<string, number> = { U: 0, A: 1, S: 2, G: 3 };
-      children.sort((a, b) => {
-        const ai = f2Order[a.classifyName] ?? 99;
-        const bi = f2Order[b.classifyName] ?? 99;
-        return ai - bi;
-      });
-    }
-
     // F3System：方案 B — 收集 F4 子节点信息生成区分性后缀
     // 子节点（F4）已在上方构建完成，可直接读取 devSymbolName / ifcFile
     if (en === 'F3System' && children.length > 0) {
@@ -303,6 +290,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     }
 
     return {
+      rawProperties: kv,
       path: p,
       name,
       entityName: en,

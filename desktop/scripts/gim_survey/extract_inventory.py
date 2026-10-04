@@ -10,6 +10,8 @@ sampleId 映射表维护在本脚本 SAMPLES 常量中（与 00-sample-corpus.md
 from __future__ import annotations
 
 import csv
+import argparse
+import hashlib
 import time
 from collections import Counter
 from datetime import datetime
@@ -69,6 +71,7 @@ def extract_all() -> None:
                 z.extractall(target)
         finally:
             payload_path.unlink(missing_ok=True)
+        (target / '.gim-source.sha256').write_text(hashlib.sha256(data).hexdigest(), encoding='ascii')
         print(f"[done] {sid} offset={off} 用时 {time.time() - t0:.0f}s", flush=True)
 
 
@@ -125,7 +128,18 @@ def inventory(sid: str) -> dict:
 
 
 def main() -> None:
+    global DEMO, SAMPLES
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--sample-root', type=Path, default=DEMO)
+    parser.add_argument('--samples', nargs='+', choices=list(SAMPLES.values()))
+    parser.add_argument('--extract-only', action='store_true')
+    args = parser.parse_args()
+    DEMO = args.sample_root.resolve()
+    if args.samples:
+        SAMPLES = {name: sid for name, sid in SAMPLES.items() if sid in args.samples}
     extract_all()
+    if args.extract_only:
+        return
     OUT.mkdir(parents=True, exist_ok=True)
     rows = []
     for fname, sid in sorted(SAMPLES.items(), key=lambda kv: kv[1]):

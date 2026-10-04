@@ -9,7 +9,7 @@
  */
 
 import * as THREE from 'three';
-import type { ProjectLoadSession } from '../app/state.js';
+import type { AppState, ProjectLoadSession } from '../app/state.js';
 
 export interface DevGlbParsedAsset {
   scene: THREE.Group;
@@ -39,6 +39,7 @@ export interface DevGlbTemplatePoolMetrics {
 }
 
 export interface DevGlbPlacementOptions {
+  rootOccurrence?: string;
   instanceKey?: string;
   /** CBM placement in source millimetres, column-major. */
   placementMatrix?: number[] | null;
@@ -65,6 +66,24 @@ export interface PlacementBudgetResult {
 export const DEV_GLB_TEMPLATE_POOL_USER_DATA_KEY = '__gimDevGlbTemplatePool';
 export const DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY = '__gimDevGlbTemplatePlacement';
 export const DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY = '__gimDevGlbLegacyPlacement';
+
+/** Query existing placement ownership; raw and GLB must not both own one root. */
+export function getLoadedDevOccurrenceKind(
+  state: Pick<AppState, 'loadedXmlModGroups' | 'loadedStlGroups'>,
+  rootOccurrence: string | undefined,
+): 'glb' | 'raw' | null {
+  if (!rootOccurrence) return null;
+  let raw = false;
+  for (const groups of [state.loadedXmlModGroups, state.loadedStlGroups]) {
+    if (!groups) continue;
+    for (const group of groups.values()) {
+      if (group.userData.rootOccurrence !== rootOccurrence) continue;
+      if (group.userData[DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY] || group.userData[DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY]) return 'glb';
+      raw = true;
+    }
+  }
+  return raw ? 'raw' : null;
+}
 
 const DEFAULT_MAX_SLICE_MS = 6;
 const DEFAULT_MAX_PLACEMENTS_PER_SLICE = 32;
@@ -288,6 +307,7 @@ export class DevGlbTemplate {
     placement.updateMatrixWorld(true);
     placement.userData[DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY] = true;
     placement.userData.devPath = this.devPath;
+    if (options.rootOccurrence) placement.userData.rootOccurrence = options.rootOccurrence;
     if (options.instanceKey) placement.userData.instanceKey = options.instanceKey;
     return placement;
   }

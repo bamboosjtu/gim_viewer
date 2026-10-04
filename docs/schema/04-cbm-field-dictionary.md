@@ -310,7 +310,7 @@ CBM
 
 其中：
 
-- `OBJECTMODELPOINTER` 是 CBM 指向 DEV 的主字段（叶子节点必备）。
+- `OBJECTMODELPOINTER` 是 CBM 指向 DEV 的主字段；该历史样本叶子节点均具备，Runtime 允许 IFC-only 或语义叶子缺失。
 - `BASEFAMILY` 是 CBM 指向 FAM 属性文件的主字段；`BASEFAMILY1..N` 仅在变电中出现。
 - `SUBSYSTEMS` 是变电主层级递归字段（F1/F2/F3 共用）。
 - `SECTIONS` / `STRAINSECTIONS` / `GROUPS` 是线路主层级递归字段（按 F1/F2/F3 分别使用）。

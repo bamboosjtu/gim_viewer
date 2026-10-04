@@ -28,6 +28,12 @@ function node(overrides: Partial<CbmNode> = {}): CbmNode {
   };
 }
 
+it('child display hints do not promote raw classification codes to functional domains', () => {
+  const root = node({ children: [node({ entityName:'F3System', path:'CBM/system.cbm',
+    systemNames:[], classifyName:'0****001', name:'0****001（含部件A、部件B）', rawProperties:{} })] });
+  expect(buildFunctionalDomainIndex(root).domains.map((domain) => domain.title)).toEqual(['未归类系统']);
+});
+
 describe('substation functional tree projection', () => {
   afterEach(() => {
     document.body.innerHTML = '';
@@ -80,7 +86,7 @@ describe('substation functional tree projection', () => {
       name: '&其他',
       entityName: 'F3System',
       systemNames: [],
-      classifyName: '0****001',
+      classifyName: '建筑系统代码',
       children: [],
     });
     const root = node({
@@ -93,7 +99,7 @@ describe('substation functional tree projection', () => {
 
     const index = buildFunctionalDomainIndex(root);
     expect(index.domains.map((domain) => domain.title)).toEqual(['电气系统', '建筑物系统', '未归类系统']);
-    expect(index.domains.find((domain) => domain.title === '电气系统')?.disciplineLabels).toEqual(['安装']);
+    expect(index.domains.find((domain) => domain.title === '电气系统')?.disciplineLabels).toEqual([]);
     expect(index.domains.find((domain) => domain.title === '未归类系统')?.systems).toHaveLength(1);
 
     const electrical = index.domains[0].systems[0];

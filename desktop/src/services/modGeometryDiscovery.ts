@@ -33,6 +33,9 @@ const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 /** 发现的 MOD 几何来源 */
 export interface DiscoveredModGeometry {
+  rootOccurrence?: string;
+  assemblyPath?: string;
+  referencePath?: string;
   /** XML 几何文件完整路径（如 "MOD/abc.mod" 或 "MOD/abc.gl"） */
   modPath: string;
   /** 实例唯一键：同一个 MOD 文件可被不同矩阵多次实例化 */
@@ -55,6 +58,9 @@ export interface DiscoveredModGeometry {
 
 /** 发现的 STL 几何来源 */
 export interface DiscoveredStlGeometry {
+  rootOccurrence?: string;
+  assemblyPath?: string;
+  referencePath?: string;
   /** STL 文件完整路径（如 "MOD/abc.stl"） */
   stlPath: string;
   /** 实例唯一键：同一个 STL 文件可被不同矩阵多次实例化 */
@@ -91,6 +97,9 @@ export interface DiscoveredGeometries {
  */
 export interface GeometryDiscoveryOptions {
   strictDependencies?: boolean;
+  rootOccurrence?: string;
+  assemblyPath?: string;
+  referencePath?: string;
 }
 
 /**
@@ -122,7 +131,7 @@ export async function discoverGeometriesFromNode(
   // canonical helper add the prefix exactly once; prepending unconditionally
   // would turn `dev/foo.dev` into `DEV/dev/foo.dev` and make a valid source
   // look missing on mixed-case samples.
-  return discoverGeometriesFromDevPath(normalizeDevPath(node.devPath), files, rootTransform, new Set<string>());
+  return discoverGeometriesFromDevPath(normalizeDevPath(node.devPath), files, rootTransform, new Set<string>(), 0, { instances: 0 }, { rootOccurrence: node.path });
 }
 
 export async function discoverGeometriesFromDevPath(
@@ -175,6 +184,7 @@ export async function discoverGeometriesFromDevPath(
     visited: Set<string>,
     devEntryMatrix: number[],
     phmDepth: number,
+    referencePath: string,
   ): Promise<void> {
     if (phmDepth > PARSER_LIMITS.maxRecursionDepth) {
       throw new Error(`几何 PHM 递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
@@ -198,13 +208,14 @@ export async function discoverGeometriesFromDevPath(
 
     if (phmDoc.isEmpty) return;
 
-    for (const phmSolid of phmDoc.solidModels) {
+    for (const [ordinal, phmSolid] of phmDoc.solidModels.entries()) {
+      const leafReference = `${referencePath}/phm:${ordinal}`;
       const modelFileName = phmSolid.solidModelPath;
       const lower = modelFileName.toLowerCase();
       const placementTransform = multiplyMatrices(parentTransform, phmSolid.transformMatrix);
 
       if (lower.endsWith('.phm')) {
-        await walkPhm(normalizePhmPath(modelFileName), placementTransform, new Set(visited), devEntryMatrix, phmDepth + 1);
+        await walkPhm(normalizePhmPath(modelFileName), placementTransform, new Set(visited), devEntryMatrix, phmDepth + 1, leafReference);
         continue;
       }
 
@@ -220,7 +231,8 @@ export async function discoverGeometriesFromDevPath(
         }
         mods.push({
           modPath,
-          instanceKey: makeInstanceKey(modPath, placementTransform, normalizedDevPath, phmFilePath, phmSolid.color),
+          instanceKey: occurrenceGeometryKey(options.rootOccurrence ?? '', leafReference),
+          rootOccurrence: options.rootOccurrence, assemblyPath: options.assemblyPath ?? '', referencePath: leafReference,
           placementTransformMatrix: placementTransform,
           devTransformMatrix: devEntryMatrix,
           phmTransformMatrix: phmSolid.transformMatrix,
@@ -240,7 +252,8 @@ export async function discoverGeometriesFromDevPath(
         }
         stls.push({
           stlPath,
-          instanceKey: makeInstanceKey(stlPath, placementTransform, normalizedDevPath, phmFilePath, phmSolid.color),
+          instanceKey: occurrenceGeometryKey(options.rootOccurrence ?? '', leafReference),
+          rootOccurrence: options.rootOccurrence, assemblyPath: options.assemblyPath ?? '', referencePath: leafReference,
           placementTransformMatrix: placementTransform,
           devTransformMatrix: devEntryMatrix,
           phmTransformMatrix: phmSolid.transformMatrix,
@@ -259,7 +272,8 @@ export async function discoverGeometriesFromDevPath(
   }
 
   // 2. 遍历 DEV SOLIDMODELS（变电指向 .phm；线路可能递归指向 .dev）
-  for (const devSolid of devDoc.solidModels) {
+  for (const [ordinal, devSolid] of devDoc.solidModels.entries()) {
+    const referencePath = `${options.referencePath ?? ''}/solid:${ordinal}`;
     const solidModelName = devSolid.solidModelPath;
     const solidLower = solidModelName.toLowerCase();
     const devTransform = multiplyMatrices(parentTransform, devSolid.transformMatrix);
@@ -272,7 +286,7 @@ export async function discoverGeometriesFromDevPath(
         new Set(visited),
         depth + 1,
         budget,
-        options,
+        { ...options, referencePath, assemblyPath: `${options.assemblyPath ?? ''}/solid:${ordinal}`.replace(/^\//, '') },
       );
       mods.push(...child.mods);
       stls.push(...child.stls);
@@ -287,11 +301,11 @@ export async function discoverGeometriesFromDevPath(
     }
 
     const phmFilePath = normalizePhmPath(solidModelName);
-    await walkPhm(phmFilePath, devTransform, new Set(visited), devSolid.transformMatrix, depth + 1);
+    await walkPhm(phmFilePath, devTransform, new Set(visited), devSolid.transformMatrix, depth + 1, referencePath);
   }
 
   // 4. 变电工程 SUBDEVICE → child DEV，矩阵必须向下累积。
-  for (const sub of devDoc.subDevices) {
+  for (const [ordinal, sub] of devDoc.subDevices.entries()) {
     const childTransform = multiplyMatrices(parentTransform, sub.transformMatrix);
     const child = await discoverGeometriesFromDevPath(
       normalizeDevPath(sub.devPath),
@@ -300,7 +314,7 @@ export async function discoverGeometriesFromDevPath(
       new Set(visited),
       depth + 1,
       budget,
-      options,
+      { ...options, assemblyPath: `${options.assemblyPath ?? ''}/sub:${ordinal}`.replace(/^\//, ''), referencePath: `${options.referencePath ?? ''}/sub:${ordinal}` },
     );
     mods.push(...child.mods);
     stls.push(...child.stls);
@@ -380,8 +394,6 @@ function normalizeGeometryPath(path: string): string {
     : `MOD/${p}`;
 }
 
-function makeInstanceKey(path: string, matrix: number[], devPath: string, phmPath: string, color?: XmlModColor): string {
-  const compactMatrix = matrix.map((n) => Number.isFinite(n) ? Number(n.toFixed(6)) : 0).join(',');
-  const colorKey = color ? `#${color.r},${color.g},${color.b},${color.a}` : '';
-  return `${path}#${devPath}>${phmPath}#${compactMatrix}${colorKey}`;
+export function occurrenceGeometryKey(rootOccurrence: string, referencePath: string): string {
+  return `raw:${rootOccurrence}${referencePath}`;
 }

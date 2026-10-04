@@ -41,7 +41,7 @@ CBM placement → DEV → PHM / 子 DEV → MOD 或 GL 或 STL
 | `devPath` | 归一化后的 DEV 相对路径，比较大小写不敏感 |
 | `status` | `glb`/`partial`/`empty`/`unsupported`；后两者是合法的确定性非渲染结果 |
 | `size` | `glb`/`partial` 为实际字节数，`empty`/`unsupported` 为 `0` |
-| `geometryCacheVersion` | 当前为 `geometry-cache-v6-geometry-status` |
+| `geometryCacheVersion` | 当前为 `geometry-cache-v7-open-boolean` |
 | `sourceSha256` | 生成该缓存的 GIM 内容身份 |
 
 以下条件同时满足才算 geometry cache 完整命中：
@@ -99,9 +99,9 @@ Rust command `batch_read_glb_files` 返回 GIMR v2 二进制 envelope，而不�
 
 | 缓存域 | 身份/版本 | 失效影响 |
 |---|---|---|
-| 语义索引 | `SUBSTATION_PARSER_VERSION=gim-substation-parser-v23` | 重建变电 CBM/FAM/DEV/IFC Spatial 索引 |
+| 语义索引 | `SUBSTATION_PARSER_VERSION=gim-substation-parser-v24` | 重建变电 CBM/FAM/DEV/FDR 来源索引；IFC Spatial snapshot 独立版本 |
 | 线路语义 | `LINE_PARSER_VERSION=gim-line-parser-v1` | 只重建线路 graph、属性和 semantic pack |
-| DEV 几何 | `GEOMETRY_CACHE_VERSION=geometry-cache-v6-geometry-status` + source SHA | 只重建 geometry manifest/GLB |
+| DEV 几何 | `GEOMETRY_CACHE_VERSION=geometry-cache-v7-open-boolean` + source SHA | 只重建 geometry manifest/GLB |
 | IFC Fragments | `FRAGMENTS_CACHE_KEY_VERSION` + OBC/web-ifc 版本 + source SHA | 只回退对应 IFC 的 web-ifc 路径 |
 
 geometry cache 版本变化、manifest 损坏或单 DEV 失败，不得清空已经恢复的语义树，

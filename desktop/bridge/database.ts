@@ -36,6 +36,7 @@ export interface GimEntryPayload {
 }
 
 export interface CbmNodePayload {
+  raw_properties_json?: string | null;
   node_key: string;
   parent_key: string | null;
   path: string;
@@ -57,6 +58,7 @@ export interface IfcModelPayload {
 }
 
 export interface FileDevEntryPayload {
+  source_design_file?: string | null;
   model_id: string;
   ifc_name: string;
   ifc_file: string;
@@ -66,6 +68,8 @@ export interface FileDevEntryPayload {
 }
 
 export interface FamPropertyPayload {
+  source_line?: number;
+  raw_property_json?: string | null;
   source_path: string;
   section_name: string;
   prop_key: string;
@@ -80,6 +84,7 @@ export interface DevPropertyPayload {
 }
 
 export interface GimIndexPayload {
+  capability_summary_json?: string | null;
   project_id: number;
   /** 源 GIM 内容身份；后端提交前会与 gim_project.sha256 比较。 */
   source_sha256?: string | null;
@@ -110,6 +115,7 @@ export interface IfcModelRecord {
 }
 
 export interface CbmNodeRecord {
+  raw_properties_json?: string | null;
   id: number;
   project_id: number;
   node_key: string;
@@ -682,6 +688,9 @@ export async function saveGeometryRefs(payload: GeometryRefsPayload): Promise<vo
 }
 
 export interface ReachableGeometry {
+  root_occurrence?: string;
+  assembly_path?: string;
+  reference_path?: string;
   /** 产生该引用的 DEV 路径（DEV/ 前缀，大小写不敏感）。 */
   dev_path: string;
   geometry_path: string;
@@ -720,6 +729,7 @@ export interface GimEntryRecord {
 }
 
 export interface FileDevEntryRecord {
+  source_design_file?: string | null;
   id: number;
   project_id: number;
   model_id: string;
@@ -732,6 +742,8 @@ export interface FileDevEntryRecord {
 }
 
 export interface FamPropertyRecord {
+  source_line?: number;
+  raw_property_json?: string | null;
   id: number;
   project_id: number;
   source_path: string;
@@ -752,6 +764,7 @@ export interface DevPropertyRecord {
 }
 
 export interface GimIndexResult {
+  capability_summary_json?: string | null;
   entries: GimEntryRecord[];
   cbm_nodes: CbmNodeRecord[];
   ifc_models: IfcModelRecord[];

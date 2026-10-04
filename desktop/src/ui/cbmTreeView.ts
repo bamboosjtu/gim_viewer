@@ -187,20 +187,18 @@ export function buildAndRenderCbmTree(
     });
 
     const onSpatialNodeClick = (node: IfcSpatialNode): void => {
-      void import('./propsDrawer.js').then(({ showSpatialNodePropertiesBasic, openPropsDrawerUI }) => {
-        if (state.substationSpatialIndex?.nodeByKey.get(node.key) !== node) return;
-        showSpatialNodePropertiesBasic(state, node, state.substationSpatialIndex!);
-        openPropsDrawerUI();
-      }).catch((err) => console.warn('[空间树] 显示空间属性失败:', err));
+      if (state.substationSpatialIndex?.nodeByKey.get(node.key) !== node) return;
+      const request=state.beginSelection({kind:'spatial-node',key:node.key});
+      void import('../services/nodeInteractionService.js').then(({handleSpatialSelection}) =>
+        handleSpatialSelection(state,node,spatialIndex!,request),
+      ).catch((error) => console.warn('[空间树] 显示空间属性失败:',error));
     };
     const onSpatialObjectClick = (object: IfcSpatialObject): void => {
-      void import('./propsDrawer.js').then(({ showIfcSpatialObjectPropertiesBasic, openPropsDrawerUI }) => {
-        if (state.substationSpatialIndex?.objectByKey.get(object.key) !== object) return;
-        void showIfcSpatialObjectPropertiesBasic(state, object, state.substationSpatialIndex!).catch((err) => {
-          console.warn('[空间树] IFC 属性按需读取失败:', err);
-        });
-        openPropsDrawerUI();
-      }).catch((err) => console.warn('[空间树] 显示 IFC 构件属性失败:', err));
+      if (state.substationSpatialIndex?.objectByKey.get(object.key) !== object) return;
+      const request=state.beginSelection({kind:'ifc-object',key:object.key});
+      void import('../services/nodeInteractionService.js').then(({handleSpatialSelection}) =>
+        handleSpatialSelection(state,object,spatialIndex!,request),
+      ).catch((error) => console.warn('[空间树] 显示 IFC 属性失败:',error));
     };
 
     const isSpatialMode = state.substationNavMode === 'spatial' && !!spatialIndex && hasSpatialTree;
@@ -269,6 +267,7 @@ export function buildAndRenderCbmTree(
     } else {
       renderCbmTreeUI(state, state.currentCbmTree, treeHost, onNodeClick);
     }
+    syncSelectedTreeRow(state);
     return;
   }
 
@@ -302,6 +301,21 @@ function selectCbmTreeRow(path: string): void {
   document.querySelectorAll('.tree-row.selected').forEach((r) => r.classList.remove('selected'));
   row.classList.add('selected');
   row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/** Restore the current selection after lazy tree/name refresh, without a new request. */
+export function syncSelectedTreeRow(state: AppState): void {
+  document.querySelectorAll('#cbm-tree-panel .tree-row.selected').forEach((row) => row.classList.remove('selected'));
+  const target=state.selectionRequest?.target;
+  if (!target) return;
+  let rowKey=target.key;
+  if (target.kind==='cbm' && state.currentCbmTree && state.substationNavMode==='functional') {
+    rowKey=revealFunctionalSearchTarget(buildFunctionalDomainIndex(state.currentCbmTree),target.key) ?? target.key;
+  } else if (state.substationNavMode==='spatial' && state.substationSpatialIndex && target.kind!=='ifc-element') {
+    const paginationKey=revealSpatialSearchTarget(state.substationSpatialIndex,target.key);
+    loadSpatialSearchTargetPage(paginationKey,target.key);
+  }
+  selectCbmTreeRow(rowKey);
 }
 
 /**
@@ -375,8 +389,9 @@ export function handleSubstationPropertyReference(
   }
   if (target) {
     selectCbmTreeRow(target.path);
+    const request=state.beginSelection({kind:'cbm',key:target.path});
     void import('../services/nodeInteractionService.js').then(({ handleNodeClick }) =>
-      handleNodeClick(state, target!, showMessage),
+      handleNodeClick(state,target!,showMessage,request),
     ).catch((error) => console.warn('[属性引用] 变电节点定位失败:', error));
     return true;
   }

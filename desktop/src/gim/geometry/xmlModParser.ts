@@ -235,7 +235,10 @@ function parsePrimitive(entityNode: Element): XmlModPrimitive | null {
     case 'RectangularRing':
       return { type: tagName, raw: attrs };
     case 'Boolean': {
-      const rawOp = (attrs['Type'] ?? '').toLowerCase();
+      const rawOp = (attrs['Type'] ?? '').trim().toLowerCase();
+      if (!['union', 'intersection', 'difference'].includes(rawOp)) {
+        return { type: 'Unsupported', sourceType: 'Boolean', raw: attrs };
+      }
       const op =
         rawOp === 'union'
           ? 'Union'

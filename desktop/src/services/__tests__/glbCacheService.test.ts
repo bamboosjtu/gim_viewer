@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { serializeDevToGlb, serializeDevToGlbDetailed } from '../glbCacheService.js';
+import { serializeDevToGlb, serializeDevToGlbDetailed, parseDevGlbAsset } from '../glbCacheService.js';
+import { collectDeviceGroups } from '../nodeInteractionService.js';
+import { AppState } from '../../app/state.js';
 
 function file(text: string, name: string): File {
   return new File([text], name, { type: 'text/plain' });
@@ -8,6 +10,31 @@ function file(text: string, name: string): File {
 const IDENTITY = '1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1';
 
 describe('serializeDevToGlb strict dependency semantics', () => {
+  it('compiles nested PHM and repeated MOD deterministically, keeps child identity and ignores GL sidecar', async () => {
+    const uuid = '12345678-1234-1234-1234-123456789abc';
+    const files = new Map(Object.entries({
+      'DEV/root.dev': `SUBDEVICES.NUM=1\nSUBDEVICE0=${uuid}.dev`,
+      [`DEV/${uuid}.dev`]: 'SOLIDMODELS.NUM=2\nSOLIDMODEL0=first.phm\nSOLIDMODEL1=second.phm',
+      'PHM/first.phm': 'SOLIDMODELS.NUM=1\nSOLIDMODEL0=nested.phm',
+      'PHM/second.phm': 'SOLIDMODELS.NUM=1\nSOLIDMODEL0=leaf.mod\nTRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,40,0,0,1',
+      'PHM/nested.phm': 'SOLIDMODELS.NUM=1\nSOLIDMODEL0=leaf.mod',
+      'MOD/leaf.mod': '<Device><Entities><Entity ID="1" Visible="TRUE"><Cuboid L="10" W="10" H="10"/></Entity></Entities></Device>',
+      [`MOD/${uuid}.gl`]: '<Device><Entities><Entity ID="1"><GimGeCableConcentration/></Entity></Entities></Device>',
+    }).map(([path, text]) => [path, file(text, path)]));
+    const first = await serializeDevToGlbDetailed('DEV/root.dev', files);
+    const second = await serializeDevToGlbDetailed('DEV/root.dev', files);
+    expect(first.status).toBe('complete');
+    expect(first.diagnostics).toMatchObject({ discoveredModCount: 2, renderableModCount: 2, unsupportedSourceCount: 0 });
+    expect(second.bytes).toEqual(first.bytes);
+    expect(first.bytes).not.toBeNull();
+    const asset = await parseDevGlbAsset('DEV/root.dev', first.bytes!);
+    expect(asset).not.toBeNull();
+    const state = new AppState();
+    state.loadedXmlModGroups.set('root', asset!.scene);
+    expect(collectDeviceGroups(state, `${uuid}.dev`)).toHaveLength(2);
+    expect(collectDeviceGroups(state, 'DEV/root.dev')).toHaveLength(1);
+  });
+
   it('missing DEV rejects instead of producing an empty cache entry', async () => {
     await expect(serializeDevToGlb('DEV/missing.dev', new Map())).rejects.toThrow('DEV 文件不存在');
   });

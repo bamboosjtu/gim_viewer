@@ -16,6 +16,28 @@ describe('属性检查器纯 DOM 交互', () => {
     `;
   });
 
+  it('FAM duplicate source rows and conflicts remain visible cold and warm', async () => {
+    const drawer = await import('../propsDrawer.js');
+    const { parseFamSectionsWithDiagnostics } = await import('../../gim/famParser.js');
+    const state = new AppState();
+    const text = '[设计参数]\n材质=Material=铝\n材质=Material=铝\n材质=Material=铜';
+    const parsed = parseFamSectionsWithDiagnostics(text,'CBM/raw.fam');
+    const node: CbmNode = { path:'CBM/device.cbm',name:'设备',entityName:'F4System',children:[],famPath:'raw.fam',devPath:'',
+      ifcFile:'',ifcGuid:'',classifyName:'',transformMatrix:'',systemNames:[],devSymbolName:'',devType:'',devExpanded:false };
+    state.currentFiles = new Map([['CBM/raw.fam',new File([text],'raw.fam')]]);
+    await drawer.showNodePropertiesBasic(state,node);
+    const cold = document.querySelector('#props-drawer-body')!.innerHTML;
+    expect([...document.querySelectorAll('details tbody tr')].filter((row) => row.getAttribute('title')?.startsWith('材质=')))
+      .toHaveLength(3);
+    expect(document.body.textContent).toContain('冲突键');
+    expect(document.body.textContent).toContain('最后一行生效');
+    state.currentFiles=null;
+    state.cachedFamSourceProperties.set('CBM/raw.fam',parsed.properties);
+    state.cachedFamProperties.set('CBM/raw.fam',parsed.sections);
+    await drawer.showNodePropertiesBasic(state,node);
+    expect(document.querySelector('#props-drawer-body')!.innerHTML).toBe(cold);
+  });
+
   it('无 Viewer 时也能切换页签并分发来源引用事件', async () => {
     // dom.ts 在模块加载时读取元素，因此必须在动态 import 前创建 DOM。
     const drawer = await import('../propsDrawer.js');

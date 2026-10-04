@@ -247,7 +247,7 @@ export async function cleanupBeforeOpenNewProject(
       try {
         const { resetHighlight } = await import('../viewer/highlight.js');
         if (!isCurrentCleanup()) return false;
-        await resetHighlight(ctx, state);
+        await resetHighlight(ctx,state,isCurrentCleanup);
         if (!isCurrentCleanup()) return false;
       } catch (err) {
         console.warn('[Cleanup] resetHighlight failed:', err);

@@ -1,5 +1,6 @@
+import { buildSubstationAliasIndex, deviceOccurrenceScope, type DeviceOccurrenceScope } from '../gim/substationEvidence.js';
 import type { CbmNode } from '../gim/types.js';
-import type { AppState, ProjectLoadSession } from '../app/state.js';
+import type { AppState, ProjectLoadSession, SelectionRequest, SelectionGeometryState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import * as THREE from 'three';
 import { collectIfcRefs } from '../gim/cbmParser.js';
@@ -7,12 +8,14 @@ import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 import { getFileByPath, hasFileByPath } from '../gim/fileLookup.js';
+import { getGeometryDiagnostic, geometryStatusLabel, geometryReasonLabel, diagnosticForFailure, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
 import {
   attachDevGlbTemplatePool,
   getDevGlbTemplatePool,
   DevGlbTemplatePool,
   DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY,
+  getLoadedDevOccurrenceKind,
 } from './devGlbTemplateRuntime.js';
 
 /**
@@ -27,142 +30,157 @@ import {
  *    d. highlightIfcFromNode() + 刷新完整属性
  * 3. 如果节点无 IFC 关联，只显示基础属性
  */
-export async function handleNodeClick(
+/** Only the current request may publish selection messages. */
+export function selectionMessage(state: AppState, request: SelectionRequest, sink: (text: string) => void) {
+  return (text: string): void => {
+    if (!state.isCurrentSelection(request)) return;
+    state.selectionMessage=text;
+    sink(text);
+  };
+}
+
+export function describeNodeSelectionGeometry(state: AppState, node: CbmNode, attempted=false): SelectionGeometryState {
+  const scope=deviceOccurrenceScope(state.currentCbmTree,node);
+  if (scope.assemblyPaths?.length === 0) return {status:'unlinked',detail:'部件未关联到真实 DEV 装配路径；保留相机位置。'};
+  const diagnostic=getGeometryDiagnostic(state,node.devPath);
+  if ((scope.assemblyPaths?.length ?? 0)>1) return {status:'ambiguous',detail:`部件存在 ${scope.assemblyPaths!.length} 条装配路径，将定位所属设备内的全部候选。${diagnostic ? `几何状态：${geometryStatusLabel(diagnostic.status)}；${diagnostic.detail ?? ''}` : '部件完整性尚未获得确定性诊断。'}`};
+  if (diagnostic) return {status:diagnostic.status,detail:`${geometryStatusLabel(diagnostic.status)}${diagnostic.reason ? `：${geometryReasonLabel(diagnostic.reason)}` : ''}${diagnostic.detail ? `；${diagnostic.detail}` : ''}`};
+  if (node.devPath) {
+    const groups=collectDeviceGroups(state,node.devPath,scope);
+    if (groups.some(hasRenderableGeometry)) return {status:'available',detail:'已有可显示几何；完整性尚未获得确定性诊断。'};
+    const owner=resolveGeometryLoadNode(state.currentCbmTree,node);
+    const parentDiagnostic=owner!==node ? getGeometryDiagnostic(state,owner.devPath) : undefined;
+    if (parentDiagnostic && ['failed','empty','unsupported'].includes(parentDiagnostic.status)) return {status:parentDiagnostic.status,detail:`所属装配设备${geometryStatusLabel(parentDiagnostic.status)}：${parentDiagnostic.detail ?? '当前部件没有可显示几何'}`};
+    return attempted ? {status:'unknown',detail:'当前没有可显示几何；尚无确定性诊断，不能判为空模型。'}
+      : {status:'not-loaded',detail:'当前设备几何尚未加载。'};
+  }
+  if (collectIfcRefs(node,state.currentIfcEntries).size>0) return {status:attempted ? 'unknown':'not-loaded',detail:attempted ? '未找到可显示的直接 GUID 关联构件。':'正在读取直接 IFC 对象关联。'};
+  if (node.ifcFile || state.deviceToIfcFile.has(node.path.split('/').pop() || '')) return {status:'file-only',detail:'只有 IFC 文件来源，没有直接对象 GUID 关联；保留相机位置。'};
+  return {status:'unassociated',detail:'此对象没有可定位的设备几何或直接 IFC 对象关联；保留相机位置。'};
+}
+
+function hasRenderableGeometry(group: THREE.Object3D): boolean {
+  let found=false;
+  group.traverse((o) => { const mesh=o as THREE.Mesh; if (mesh.isMesh && (mesh.geometry?.getAttribute('position')?.count ?? 0)>0) found=true; });
+  return found;
+}
+
+/** Clear selection effects without creating a viewer just for an empty object. */
+export async function clearSelectionHighlight(state: AppState, request: SelectionRequest, showMessage: (text: string) => void): Promise<void> {
+  if (!state.isCurrentSelection(request)) return;
+  if (!state.initialized && !state.highlightedItems && !state.highlightedModState) return;
+  const { getViewerRuntimeWithUI }=await import('./viewerUIBinding.js');
+  const { ctx }=await getViewerRuntimeWithUI(state,showMessage);
+  const { commitSelectionHighlight }=await import('../viewer/highlight.js');
+  await commitSelectionHighlight(ctx,state,state.selectionGuard(request));
+}
+
+/** UI projections follow the request; rendering a tree never starts a selection. */
+export async function syncSelectionNavigation(state: AppState, request: SelectionRequest): Promise<void> {
+  const [{syncSelectedTreeRow},{highlightSldByGridId},{getGridIdByCbmPath}]=await Promise.all([
+    import('../ui/cbmTreeView.js'),import('../ui/sldView.js'),import('../gim/stdSldIndex.js'),
+  ]);
+  if (!state.isCurrentSelection(request)) return;
+  syncSelectedTreeRow(state);
+  const target=request.target;
+  const gridId=target?.kind==='sld' ? target.key : target?.kind==='cbm' && state.currentStdSldIndex
+    ? getGridIdByCbmPath(state.currentStdSldIndex,target.key) : null;
+  highlightSldByGridId(gridId);
+}
+
+/** Spatial navigation already opens the inspector; it has no implicit 3D fit. */
+export async function handleSpatialSelection(
   state: AppState,
-  node: CbmNode,
-  showMessage: (text: string) => void,
+  object: import('../gim/ifcSpatialParser.js').IfcSpatialObject | import('../gim/ifcSpatialParser.js').IfcSpatialNode,
+  index: import('../gim/ifcSpatialParser.js').SubstationSpatialIndex,
+  request: SelectionRequest,
 ): Promise<void> {
-  // 点击回调可能来自旧工程的树；固定会话身份，所有 await 前后都验证它。
-  const session = state.captureProjectSession();
-  const isCurrent = () => state.isCurrentSession(session);
-
-  // 1. 立即显示基础属性（无 Viewer）
-  const { showNodePropertiesBasic, openPropsDrawerUI } = await import('../ui/propsDrawer.js');
-  if (!isCurrent()) return;
-  showNodePropertiesBasic(state, node);
+  if (!state.isCurrentSelection(request)) return;
+  const {showSpatialNodePropertiesBasic,showIfcSpatialObjectPropertiesBasic,openPropsDrawerUI}=await import('../ui/propsDrawer.js');
+  if (!state.isCurrentSelection(request)) return;
   openPropsDrawerUI();
+  await Promise.all([
+    request.target?.kind==='spatial-node' ? showSpatialNodePropertiesBasic(state,object as import('../gim/ifcSpatialParser.js').IfcSpatialNode,index,request)
+      : showIfcSpatialObjectPropertiesBasic(state,object as import('../gim/ifcSpatialParser.js').IfcSpatialObject,index,request),
+    clearSelectionHighlight(state,request,() => {}),syncSelectionNavigation(state,request),
+  ]);
+}
 
-  // 1.5 阶段 4：CBM → SLD 反向联动（在所有分支前执行，确保 MOD/STL/IFC 路径都能联动）
-  // 通过 CBM 节点路径查找对应的 gridId，高亮 SLD SVG 元素和拓扑列表项
-  // 失败时仅 warn，不影响主流程
+export async function handleNodeClick(
+  state: AppState, node: CbmNode, showMessage: (text: string) => void,
+  request: SelectionRequest = state.beginSelection({kind:'cbm',key:node.path}),
+): Promise<void> {
+  const session=request.session;
+  const isSessionCurrent=() => state.isCurrentSession(session);
+  const isSelected=() => state.isCurrentSelection(request);
+  if (!isSessionCurrent()) return;
+  const message=selectionMessage(state,request,showMessage);
+  const {showNodePropertiesBasic,openPropsDrawerUI}=await import('../ui/propsDrawer.js');
+  if (isSelected()) {
+    state.selectionGeometry=describeNodeSelectionGeometry(state,node);
+    openPropsDrawerUI();
+  }
+  const basic=showNodePropertiesBasic(state,node,request);
+  // Resource loading and property reads are concurrent. Only the short visual
+  // reset/apply commit waits behind an already-started external operation.
+  const cleared=clearSelectionHighlight(state,request,message);
+  await syncSelectionNavigation(state,request);
+
+  const refs=collectIfcRefs(node,state.currentIfcEntries);
+  const ifcModelId=node.ifcFile ? resolveIfcModelId(node.ifcFile,state.currentIfcEntries) : state.deviceToIfcFile.get(node.path.split('/').pop() || '');
   try {
-    if (state.currentStdSldIndex && node.path) {
-      const { getGridIdByCbmPath } = await import('../gim/stdSldIndex.js');
-      const { highlightSldByGridId } = await import('../ui/sldView.js');
-      const gridId = getGridIdByCbmPath(state.currentStdSldIndex, node.path);
-      if (gridId) {
-        highlightSldByGridId(gridId);
+    if (refs.size===0 && node.devPath) {
+      await loadModStlForNode(state,node,message,session,request);
+      await basic;
+      if (isSelected()) await showNodePropertiesBasic(state,node,request);
+      return;
+    }
+    const modelsToLoad=new Set([...refs.keys()].filter((id) => !state.loadedModels.has(id)));
+    if (ifcModelId && !state.loadedModels.has(ifcModelId)) modelsToLoad.add(ifcModelId);
+    if (modelsToLoad.size===0 && refs.size===0) {
+      if (isSelected()) { state.selectionGeometry=describeNodeSelectionGeometry(state,node,true); message(state.selectionGeometry.detail); }
+      return;
+    }
+    const {getViewerRuntimeWithUI}=await import('./viewerUIBinding.js');
+    const {ctx,modelCallbacks}=await getViewerRuntimeWithUI(state,message);
+    if (!isSessionCurrent()) return;
+    let ifcFailure:string | undefined;
+    if (modelsToLoad.size>0) {
+      const {ensureEngineReady}=await import('../viewer/ifcLoader.js');
+      const {loadIfcEntry}=await import('../viewer/ifcEntryLoader.js');
+      await ensureEngineReady(ctx,state,modelCallbacks);
+      if (!isSessionCurrent()) return;
+      for (const id of modelsToLoad) {
+        if (!isSessionCurrent()) return;
+        const entry=state.currentIfcEntries.find((e) => e.modelId===id);
+        if (!entry) { ifcFailure=`IFC 来源引用未找到：${id}`;continue; }
+        message(`正在加载 ${entry.name}…`);
+        try { await loadIfcEntry(ctx,state,entry,() => getIfcBufferForEntry(entry,state,session),(p) => message(`${entry.name}: ${Math.round(p*100)}%`),{session}); }
+        catch (error) { ifcFailure=`IFC 加载失败：${entry.name}`;if (isSessionCurrent()) message(ifcFailure); }
       }
+      if (!isSessionCurrent()) return;
+      const {buildIfcNameIndex}=await import('../viewer/ifcNameIndex.js');
+      await buildIfcNameIndex(ctx,state,{session});
+      if (!isSessionCurrent()) return;
+      const {buildAndRenderCbmTree}=await import('../ui/cbmTreeView.js');
+      const {renderFileDevPanel}=await import('../ui/fileDevView.js');
+      // This callback handles future user clicks; it is scoped to the project,
+      // not to the old selection which happened to refresh the names.
+      const click=(n:CbmNode) => { if (isSessionCurrent()) void handleNodeClick(state,n,showMessage); };
+      buildAndRenderCbmTree(state,click); renderFileDevPanel(state,click);
     }
-  } catch (err) {
-    console.warn('[CBM→SLD] 联动高亮失败:', err);
-  }
-
-  // 2. 收集节点引用的 IFC 模型
-  const refs = collectIfcRefs(node, state.currentIfcEntries);
-  const cbmFileName = node.path.split('/').pop() || '';
-  const ifcModelId = node.ifcFile
-    ? resolveIfcModelId(node.ifcFile, state.currentIfcEntries)
-    : state.deviceToIfcFile.get(cbmFileName);
-
-  // 无 IFC GUID 映射但有 devPath → 走 MOD/STL 加载路径
-  // （设备有 IFC 文件引用但无构件级 GUID，MOD/STL 是其可视化主体）
-  if (refs.size === 0 && node.devPath) {
-    await loadModStlForNode(state, node, showMessage, session);
-    return;
-  }
-
-  // 需要加载的 IFC modelId 集合
-  const modelsToLoad = new Set<string>();
-  for (const modelId of refs.keys()) {
-    if (!state.loadedModels.has(modelId)) {
-      modelsToLoad.add(modelId);
-    }
-  }
-  // 如果节点本身有 ifcFile 但没有 ifcGuid，也确保对应 IFC 加载
-  if (ifcModelId && !state.loadedModels.has(ifcModelId) && !modelsToLoad.has(ifcModelId)) {
-    modelsToLoad.add(ifcModelId);
-  }
-
-  // 3. 如果没有需要加载的 IFC 且没有需要高亮的，直接返回
-  if (modelsToLoad.size === 0 && refs.size === 0) {
-    if (ifcModelId && state.loadedModels.has(ifcModelId)) {
-      // IFC 已加载但无 GUID → 只定位
-      const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
-      const runtime = await getViewerRuntimeWithUI(state, showMessage);
-      if (!isCurrent()) return;
-      const { highlightIfcFromNode } = await import('../viewer/highlight.js');
-      if (!isCurrent()) return;
-      await highlightIfcFromNode(runtime.ctx, state, node, showMessage);
-      if (!isCurrent()) return;
-    }
-    return;
-  }
-
-  // 4. 需要加载 IFC 或高亮 → 获取 ViewerRuntime
-  const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
-  const runtime = await getViewerRuntimeWithUI(state, showMessage);
-  if (!isCurrent()) return;
-  const { ctx, modelCallbacks } = runtime;
-
-  // 5. 加载未加载的 IFC 模型
-  if (modelsToLoad.size > 0) {
-    const { ensureEngineReady } = await import('../viewer/ifcLoader.js');
-    const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
-    await ensureEngineReady(ctx, state, modelCallbacks);
-    if (!isCurrent()) return;
-
-    for (const modelId of modelsToLoad) {
-      if (!isCurrent()) return;
-      const entry = state.currentIfcEntries.find((e) => e.modelId === modelId);
-      if (!entry) {
-        console.warn(`[懒加载] 找不到 IFC entry: ${modelId}`);
-        continue;
-      }
-      showMessage(`正在加载 ${entry.name}...`);
-      try {
-        await loadIfcEntry(
-          ctx,
-          state,
-          entry,
-          () => getIfcBufferForEntry(entry, state, session),
-          (p) => showMessage(`${entry.name}: ${Math.round(p * 100)}%`),
-          { session },
-        );
-        if (!isCurrent()) return;
-        debugLog(DEBUG_IFC_LOAD, `[懒加载] IFC 已加载: ${modelId}`);
-      } catch (err) {
-        console.error(`[懒加载] IFC 加载失败 (${modelId}):`, err);
-        // 旧工程的 IFC 任务可能在切换后才 reject；此时立即退出，避免
-        // 继续为新工程构建名称索引或刷新导航树。
-        if (!isCurrent()) return;
-      }
-    }
-
-    // 构建 IFC 名称索引
-    const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
-    await buildIfcNameIndex(ctx, state, { session });
-    if (!isCurrent()) return;
-
-    // 刷新树显示（更新名称）— 统一使用 handleNodeClick 作为点击回调
-    const { buildAndRenderCbmTree } = await import('../ui/cbmTreeView.js');
-    const { renderFileDevPanel } = await import('../ui/fileDevView.js');
-    const clickHandler = (n: CbmNode) => {
-      if (isCurrent()) void handleNodeClick(state, n, showMessage);
-    };
-    buildAndRenderCbmTree(state, clickHandler);
-    renderFileDevPanel(state, clickHandler);
-  }
-
-  // 6. 高亮 + 显示完整属性
-  const { highlightIfcFromNode } = await import('../viewer/highlight.js');
-  const { showNodeProperties, openPropsDrawer } = await import('../ui/propsDrawer.js');
-  if (!isCurrent()) return;
-  await highlightIfcFromNode(ctx, state, node, showMessage);
-  if (!isCurrent()) return;
-  await showNodeProperties(ctx, state, node);
-  if (!isCurrent()) return;
-  openPropsDrawer(ctx);
+    if (!isSelected()) return;
+    const {highlightIfcFromNode}=await import('../viewer/highlight.js');
+    const {showNodeProperties,openPropsDrawer}=await import('../ui/propsDrawer.js');
+    await highlightIfcFromNode(ctx,state,node,message,request);
+    if (!isSelected()) return;
+    state.selectionGeometry=refs.size>0 && state.highlightedItems
+      ? ifcFailure ? {status:'partial',detail:`已定位当前可用的直接 GUID 构件；${ifcFailure}`} : {status:'available',detail:'已定位直接 GUID 关联的 IFC 构件。'}
+      : ifcFailure ? {status:'failed',detail:ifcFailure} : describeNodeSelectionGeometry(state,node,true);
+    await basic;
+    await showNodeProperties(ctx,state,node,request);
+    if (isSelected()) openPropsDrawer(ctx);
+  } finally { await Promise.all([basic,cleared]); }
 }
 
 /**
@@ -261,19 +279,36 @@ function normalizeDevPathForCompare(devPath: string | undefined): string {
  * 收集指定 devPath 对应的所有已加载 Group（MOD + STL）。
  *
  * 遍历 state.loadedXmlModGroups 和 state.loadedStlGroups，查找
- * userData.devPath 匹配的 group。用于相机定位和高亮。
+ * scope 指定根放置实例和实际装配候选子树。无 scope 时才显式按 DEV
+ * 模板收集全部实例。用于相机定位和高亮。
  */
-function collectDeviceGroups(state: AppState, devPath: string): THREE.Group[] {
+export function collectDeviceGroups(state: AppState, devPath: string, scope?: DeviceOccurrenceScope): THREE.Object3D[] {
   const normalized = normalizeDevPathForCompare(devPath);
   if (!normalized) return [];
-  const result: THREE.Group[] = [];
-  for (const group of state.loadedXmlModGroups.values()) {
-    const groupDevPath = normalizeDevPathForCompare(group.userData.devPath as string | undefined);
-    if (groupDevPath === normalized) result.push(group);
-  }
-  for (const group of state.loadedStlGroups.values()) {
-    const groupDevPath = normalizeDevPathForCompare(group.userData.devPath as string | undefined);
-    if (groupDevPath === normalized) result.push(group);
+  const result: THREE.Object3D[] = [];
+  const seen = new Set<THREE.Object3D>();
+  for (const root of [...state.loadedXmlModGroups.values(), ...state.loadedStlGroups.values()]) {
+    root.traverse((object) => {
+      // GLTFLoader restores source group nodes as Object3D, which still owns
+      // the complete renderable subtree. Identity must not depend on isGroup.
+      const group = object;
+      if (seen.has(group)) return;
+      let owner: THREE.Object3D | null = group;
+      while (owner && !owner.userData.rootOccurrence) owner = owner.parent;
+      const inRoot = !scope || owner?.userData.rootOccurrence === scope.rootOccurrence;
+      const assembly = String(group.userData.assemblyPath ?? '');
+      const inAssembly = !scope?.assemblyPaths || scope.assemblyPaths.some((path) => assembly === path || assembly.startsWith(`${path}/`));
+      const matches = scope
+        ? !!group.userData.devPath : normalizeDevPathForCompare(group.userData.devPath as string | undefined) === normalized;
+      if (inRoot && inAssembly && matches) {
+        // A selected ancestor already contains these meshes; returning both
+        // would highlight them twice and overwrite original material tracking.
+        for (let parent = group.parent; parent; parent = parent.parent) {
+          if (seen.has(parent)) return;
+        }
+        seen.add(group); result.push(group);
+      }
+    });
   }
   return result;
 }
@@ -291,33 +326,26 @@ function collectDeviceGroups(state: AppState, devPath: string): THREE.Group[] {
  * - 替代旧的 fitCameraToScene（仅首次加载时定位整个场景）
  * - 用户每次点击 MOD 设备节点都应将视点聚焦到该设备并高亮
  */
-async function frameAndHighlightDevice(
-  ctx: ViewerContext,
-  state: AppState,
-  devPath: string,
+export async function frameAndHighlightDevice(
+  ctx: ViewerContext, state: AppState, devPath: string, scope: DeviceOccurrenceScope,
+  session: ProjectLoadSession = state.captureProjectSession(),
+  request?: SelectionRequest,
 ): Promise<void> {
-  const groups = collectDeviceGroups(state, devPath);
-  if (groups.length === 0) {
-    debugLog(DEBUG_IFC_LOAD, '[xml-mod] frameAndHighlightDevice 未找到匹配几何:', devPath);
-    return;
-  }
-
-  // 合并包围盒并定位相机
-  const box = new THREE.Box3();
-  for (const group of groups) {
-    box.expandByObject(group);
-  }
-  if (!box.isEmpty()) {
-    const { frameBox } = await import('../viewer/camera.js');
-    await frameBox(ctx, box);
-    debugLog(DEBUG_IFC_LOAD, '[xml-mod] frameAndHighlightDevice 已定位到设备:', devPath);
-  }
-
-  // 高亮该设备的所有 Group（先清除 IFC + MOD 旧高亮）
-  const { resetHighlight, highlightModGroups } = await import('../viewer/highlight.js');
-  await resetHighlight(ctx, state);
-  highlightModGroups(state, groups);
-  debugLog(DEBUG_IFC_LOAD, `[xml-mod] frameAndHighlightDevice 已高亮 ${groups.length} 个 Group:`, devPath);
+  if (!state.isCurrentSession(session)) return;
+  request ??= state.beginSelection({kind:'cbm',key:scope.rootOccurrence});
+  const guard=state.selectionGuard(request);
+  if (!state.isCurrentSession(session) || !guard.isCurrent()) return;
+  const groups=collectDeviceGroups(state,devPath,scope).filter(hasRenderableGeometry);
+  const {commitSelectionHighlight,highlightModGroups}=await import('../viewer/highlight.js');
+  await commitSelectionHighlight(ctx,state,guard,() => highlightModGroups(state,groups));
+  if (!guard.isCurrent() || groups.length===0) return;
+  const box=new THREE.Box3(); groups.forEach((g) => box.expandByObject(g));
+  const {frameBox}=await import('../viewer/camera.js');
+  const owned=state.highlightedModState;
+  const {resetModHighlight}=await import('../viewer/highlight.js');
+  const clearOwned=() => { if (state.highlightedModState===owned) resetModHighlight(state); };
+  request.signal.addEventListener('abort',clearOwned,{once:true});
+  try { await frameBox(ctx,box,guard); } finally { request.signal.removeEventListener('abort',clearOwned); }
 }
 
 /**
@@ -339,7 +367,44 @@ async function frameAndHighlightDevice(
  * @param node CBM 节点（必须带 devPath）
  * @param showMessage 消息回调
  */
-async function loadModStlForNode(
+const pendingOccurrenceLoads = new WeakMap<AppState, Map<string, Promise<void>>>();
+
+export async function loadModStlForNode(
+  state: AppState, node: CbmNode, showMessage: (text: string) => void,
+  session: ProjectLoadSession = state.captureProjectSession(),
+  request?: SelectionRequest,
+): Promise<void> {
+  if (!state.isCurrentSession(session)) return;
+  request ??= state.beginSelection({kind:'cbm',key:node.path});
+  const root=resolveGeometryLoadNode(state.currentCbmTree,node);
+  const scope=deviceOccurrenceScope(state.currentCbmTree,node);
+  const message=selectionMessage(state,request,showMessage);
+  const known=getGeometryDiagnostic(state,node.devPath);
+  const alreadyLoaded=scope.assemblyPaths?.length && scope.assemblyPaths.every((path) => collectDeviceGroups(state,node.devPath,{...scope,assemblyPaths:[path]}).some(hasRenderableGeometry));
+  const noLoad=alreadyLoaded || scope.assemblyPaths?.length===0 || known?.status==='empty' || known?.status==='unsupported';
+  if (!noLoad) {
+    const key=`${session.generation}:${session.geometryToken}:${root.path}`;
+    const pending=pendingOccurrenceLoads.get(state) ?? new Map(); pendingOccurrenceLoads.set(state,pending);
+    let task=pending.get(key);
+    if (!task) {
+      // No messages, camera or highlight in this shared resource promise.
+      task=loadModStlForNodeImpl(state,root,() => {},session).catch((error) => {
+        if (state.isCurrentSession(session)) setGeometryDiagnostic(state,diagnosticForFailure(root.devPath,'parse-failed','raw',error instanceof Error ? error.message : String(error)));
+      });
+      pending.set(key,task);
+    }
+    try { await task; } finally { if (pending.get(key)===task) pending.delete(key); }
+  }
+  if (!state.isCurrentSelection(request)) return;
+  state.selectionGeometry=describeNodeSelectionGeometry(state,node,true);
+  message(state.selectionGeometry.detail);
+  const {getViewerRuntimeWithUI}=await import('./viewerUIBinding.js');
+  const {ctx}=await getViewerRuntimeWithUI(state,message);
+  await frameAndHighlightDevice(ctx,state,node.devPath,scope,session,request);
+}
+
+
+async function loadModStlForNodeImpl(
   state: AppState,
   node: CbmNode,
   showMessage: (text: string) => void,
@@ -350,6 +415,9 @@ async function loadModStlForNode(
   // SUBDEVICE 局部矩阵，直接从它发现几何会得到错误 placement。
   // 回退到最近的真实设备祖先，由 DEV 递归一次性计算该设备及部件的正确矩阵。
   const geometryNode = resolveGeometryLoadNode(state.currentCbmTree, node);
+  const scope = deviceOccurrenceScope(state.currentCbmTree, node);
+  if (scope.assemblyPaths?.length === 0) { showMessage('部件未关联到真实 DEV 装配路径'); return; }
+  if ((scope.assemblyPaths?.length ?? 0) > 1) showMessage(`部件存在 ${scope.assemblyPaths!.length} 条装配路径，将定位全部候选`);
   if (geometryNode !== node) {
     debugLog(DEBUG_IFC_LOAD, '[xml-mod] PARTINDEX 使用设备祖先作为几何入口:', {
       partIndex: node.path,
@@ -373,13 +441,17 @@ async function loadModStlForNode(
   const { ctx } = runtime;
   const scene = (ctx.world.scene as any).three as import('three').Scene;
 
+  if (node.entityName.toUpperCase() === 'PARTINDEX' && scope.assemblyPaths!.every((path) =>
+    collectDeviceGroups(state, node.devPath, { ...scope, assemblyPaths: [path] }).length > 0)) {
+    return;
+  }
+
   // 方案 C v2：优先尝试 DEV 粒度 GLB 快速路径
   // 如果 DEV.glb 命中，直接加载整个 DEV 的几何，跳过 MOD 逐个解析
   if (projectId != null && geometryNode.devPath) {
     const devGlbLoaded = await tryLoadDevGlbForNode(state, scene, geometryNode, projectId, showMessage, session);
     if (!state.isCurrentSession(session)) return;
     if (devGlbLoaded) {
-      await frameAndHighlightDevice(ctx, state, geometryNode.devPath);
       if (!state.isCurrentSession(session)) return;
       return;
     }
@@ -404,6 +476,17 @@ async function loadModStlForNode(
   if (!state.isCurrentSession(session)) return;
 
   if (mods.length === 0 && stls.length === 0) {
+    // The permissive discovery path may hide missing dependencies. Confirm
+    // reachability with the existing strict traversal before calling it empty.
+    const {discoverGeometriesFromDevPath}=await import('./modGeometryDiscovery.js');
+    try {
+      await discoverGeometriesFromDevPath(geometryNode.devPath,discoveryFiles,new THREE.Matrix4().toArray(),new Set(),0,{instances:0},{strictDependencies:true});
+      if (state.isCurrentSession(session) && !getGeometryDiagnostic(state,geometryNode.devPath)) {
+        setGeometryDiagnostic(state,{devPath:geometryNode.devPath,status:'empty',source:'raw',unsupportedPrimitiveTypeCounts:{},detail:'引用遍历已完成，没有可达 MOD/STL 主几何源。'});
+      }
+    } catch (error) {
+      if (state.isCurrentSession(session)) setGeometryDiagnostic(state,diagnosticForFailure(geometryNode.devPath,'missing-dependency','raw',String(error)));
+    }
     debugLog(DEBUG_IFC_LOAD, '[xml-mod] 未发现 MOD/STL 几何来源:', geometryNode.devPath);
     return;
   }
@@ -419,6 +502,7 @@ async function loadModStlForNode(
   const {
     loadXmlModFromFiles,
     applyPlacementTransformToSceneUnits,
+    XML_MOD_GEOMETRY_DIAGNOSTICS_KEY,
   } = await import('../viewer/xmlModLoader.js');
 
   let loadedCount = 0;
@@ -442,6 +526,12 @@ async function loadModStlForNode(
     applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
     const modRoot = ensureModStlLayer(state, scene, 'mod');
     group.userData.devPath = geo.devPath;
+    if (getLoadedDevOccurrenceKind(state,geo.rootOccurrence) === 'glb' || state.loadedXmlModGroups.has(geo.instanceKey)) {
+      group.traverse((o) => (o as THREE.Mesh).geometry?.dispose?.()); continue;
+    }
+    group.userData.rootOccurrence = geo.rootOccurrence;
+    group.userData.assemblyPath = geo.assemblyPath;
+    group.userData.referencePath = geo.referencePath;
     modRoot.add(group);
     state.loadedXmlModGroups.set(geo.instanceKey, group);
     loadedCount++;
@@ -471,6 +561,12 @@ async function loadModStlForNode(
     applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
     const stlRoot = ensureModStlLayer(state, scene, 'stl');
     group.userData.devPath = geo.devPath;
+    if (getLoadedDevOccurrenceKind(state,geo.rootOccurrence) === 'glb' || state.loadedStlGroups.has(geo.instanceKey)) {
+      group.traverse((o) => (o as THREE.Mesh).geometry?.dispose?.()); continue;
+    }
+    group.userData.rootOccurrence = geo.rootOccurrence;
+    group.userData.assemblyPath = geo.assemblyPath;
+    group.userData.referencePath = geo.referencePath;
     stlRoot.add(group);
     state.loadedStlGroups.set(geo.instanceKey, group);
     stlLoadedCount++;
@@ -483,9 +579,31 @@ async function loadModStlForNode(
     if (stlLoadedCount > 0) parts.push(`${stlLoadedCount} 个 STL`);
     showMessage(`已加载 ${parts.join(' + ')} 模型`);
   }
-  // 无论是否新加载，都将相机定位到该设备并高亮（支持重复点击重新聚焦）
+  // Reuse actual loader diagnostics; no unknown source is labelled empty.
+  const groups=[...mods.map((geo) => state.loadedXmlModGroups.get(geo.instanceKey)),...stls.map((geo) => state.loadedStlGroups.get(geo.instanceKey))];
+  const visible=groups.filter((group) => group && hasRenderableGeometry(group)).length;
+  const missing=groups.filter((group) => !group).length;
+  let reachabilityError:string | undefined;
+  try {
+    const {discoverGeometriesFromDevPath}=await import('./modGeometryDiscovery.js');
+    await discoverGeometriesFromDevPath(geometryNode.devPath,discoveryFiles,new THREE.Matrix4().toArray(),new Set(),0,{instances:0},{strictDependencies:true});
+  } catch (error) { reachabilityError=String(error); }
   if (!state.isCurrentSession(session)) return;
-  await frameAndHighlightDevice(ctx, state, geometryNode.devPath);
+  const xml=groups.flatMap((group) => group?.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY] ? [group.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY] as import('../viewer/xmlModLoader.js').XmlModGeometryDiagnostics] : []);
+  const degraded=xml.some((diagnostic) => diagnostic.status==='partial' || diagnostic.status==='unsupported');
+  const types:Record<string,number>={};
+  for (const diagnostic of xml) for (const [type,count] of Object.entries(diagnostic.unsupportedPrimitiveTypeCounts)) types[type]=(types[type] ?? 0)+count;
+  if (visible || missing || xml.length===groups.length) {
+    const status=visible ? missing || reachabilityError || degraded ? 'partial':'renderable' : missing || reachabilityError ? 'failed' : degraded ? 'unsupported':'empty';
+    setGeometryDiagnostic(state,{devPath:geometryNode.devPath,status,source:'raw',unsupportedPrimitiveTypeCounts:types,
+      ...(missing || reachabilityError ? {reason:'missing-dependency' as const,detail:`${missing} 个几何源加载失败；${visible} 个来源可显示。${reachabilityError ?? ''}`} :
+        degraded ? {reason:'parser-unsupported' as const,detail:'部分来源或 primitive 暂不支持；只定位当前实例中可显示的几何。'} : {}),
+      discoveredModCount:mods.length,discoveredStlCount:stls.length,
+    });
+  }
+  // This shared task only commits resources/diagnostics. Each selection waiter
+  // independently decides whether it may frame and highlight these resources.
+  if (!state.isCurrentSession(session)) return;
 }
 
 /**
@@ -504,6 +622,8 @@ async function tryLoadDevGlbForNode(
 ): Promise<boolean> {
   if (!state.isCurrentSession(session)) return false;
   if (!geometryNode.devPath) return false;
+  const existing = getLoadedDevOccurrenceKind(state,geometryNode.path);
+  if (existing) return existing === 'glb';
 
   const normalized = geometryNode.devPath.replace(/\\/g, '/');
   const devPath = normalized.toLowerCase().startsWith('dev/')
@@ -557,6 +677,8 @@ async function tryLoadDevGlbForNode(
   attachDevGlbTemplatePool(modRoot, templatePool);
   const preparation = await templatePool.prepare(devPath, glbBytes);
   if (!state.isCurrentSession(session)) return false;
+  const afterPrepare = getLoadedDevOccurrenceKind(state,geometryNode.path);
+  if (afterPrepare) return afterPrepare === 'glb';
 
   if (preparation?.kind === 'shared') {
     const sharedGroup = preparation.template.createPlacement({
@@ -565,6 +687,7 @@ async function tryLoadDevGlbForNode(
       projectSourceToViewerMatrix: state.projectSourceToViewerMatrix,
     });
     if (!state.isCurrentSession(session)) return false;
+    sharedGroup.userData.rootOccurrence = geometryNode.path;
     modRoot.add(sharedGroup);
     state.loadedXmlModGroups.set(instanceKey, sharedGroup);
     debugLog(DEBUG_IFC_LOAD, `[xml-mod] DEV GLB template placement 命中: ${devPath} (instance: ${instanceKey})`);
@@ -589,6 +712,13 @@ async function tryLoadDevGlbForNode(
   }
   applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
 
+  const beforeCommit = getLoadedDevOccurrenceKind(state,geometryNode.path);
+  if (beforeCommit) {
+    group.traverse((o) => (o as THREE.Mesh).geometry?.dispose?.());
+    return beforeCommit === 'glb';
+  }
+  group.userData.rootOccurrence = geometryNode.path;
+  group.userData.instanceKey = instanceKey;
   group.userData[DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY] = true;
   if (!state.isCurrentSession(session)) {
     group.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
@@ -627,19 +757,13 @@ function multiplyMatrices(a: number[], b: number[]): number[] {
  * 缺失局部矩阵的重复实例。
  */
 export function resolveGeometryLoadNode(root: CbmNode | null, node: CbmNode): CbmNode {
-  if (node.entityName !== 'PARTINDEX' || !root) return node;
-
-  function walk(current: CbmNode, nearestDevAncestor: CbmNode | null): CbmNode | null {
-    if (current.path === node.path) return nearestDevAncestor;
-    const nextAncestor = current.devPath ? current : nearestDevAncestor;
-    for (const child of current.children) {
-      const found = walk(child, nextAncestor);
-      if (found) return found;
-    }
-    return null;
+  if (node.entityName.toUpperCase() === 'DEV_SUBDEVICE' && root) {
+    const rootPath = node.path.split('#dev:')[0];
+    const find = (n: CbmNode): CbmNode | undefined => n.path === rootPath ? n : n.children.map(find).find(Boolean);
+    return find(root) ?? node;
   }
-
-  return walk(root, null) ?? node;
+  if (node.entityName.toUpperCase() !== 'PARTINDEX' || !root) return node;
+  return buildSubstationAliasIndex(root).partToRoot.get(node.path) ?? node;
 }
 
 /**
@@ -647,14 +771,14 @@ export function resolveGeometryLoadNode(root: CbmNode | null, node: CbmNode): Cb
  *
  * 读取范围：
  * - DEV/{node.devPath}（必需）
- * - PHM/{devDoc.solidModels[].solidModelPath}（必需）
- * - MOD/{phmDoc.solidModels[].solidModelPath}（延迟到 ensureModFilesInCacheMap 补充）
+ * - 递归 DEV / PHM 引用（批量读取，visited 与深度限制）
+ * - 显式 MOD / GL / STL 叶子（缺失时仅隔离目标）
  *
  * 一次点击只读取该节点引用链需要的文件，避免一次性读取全部 DEV/PHM/MOD。
  *
  * @param projectId 数据库 gim_project.id
  * @param node CBM 节点（必须带 devPath）
- * @returns 包含 DEV + PHM 文件的 Map；找不到时返回空 Map
+ * @returns 包含可达引用源的 Map；找不到时返回空 Map
  */
 async function buildGeometryFilesMapFromCache(
   projectId: number,
@@ -662,72 +786,16 @@ async function buildGeometryFilesMapFromCache(
   state?: AppState,
   session?: ProjectLoadSession,
 ): Promise<Map<string, File>> {
-  const result = new Map<string, File>();
-  const { readCachedIfc } = await import('@desktop/database.js');
-  const { parseDev } = await import('../gim/geometry/devParser.js');
-
-  if (!node.devPath) return result;
-  const visitedDevs = new Set<string>();
-
-  async function readFileIntoMap(path: string, label: string): Promise<File | null> {
-    if (state && session && !state.isCurrentSession(session)) return null;
-    if (result.has(path)) return result.get(path)!;
-    try {
-      const bytes = await readCachedIfc(projectId, path);
-      if (state && session && !state.isCurrentSession(session)) return null;
-      const file = bytesToFile(bytes, path);
-      result.set(path, file);
-      debugLog(DEBUG_IFC_LOAD, `[xml-mod] 从磁盘读取 ${label}:`, path, `(${bytes.byteLength} bytes)`);
-      return file;
-    } catch (err) {
-      console.warn(`[xml-mod] ${label} 文件读取失败: ${path}`, err);
-      return null;
-    }
-  }
-
-  async function visitDev(devPathInput: string): Promise<void> {
-    if (state && session && !state.isCurrentSession(session)) return;
-    const devPath = normalizeCachedDevPath(devPathInput);
-    if (visitedDevs.has(devPath)) return;
-    visitedDevs.add(devPath);
-
-    const devFile = await readFileIntoMap(devPath, 'DEV');
-    if (!devFile) return;
-
-    const devBuffer = await devFile.arrayBuffer();
-    const devText = new TextDecoder().decode(devBuffer);
-    const devDoc = parseDev(devText, devPath);
-
-    for (const solid of devDoc.solidModels) {
-      if (state && session && !state.isCurrentSession(session)) return;
-      const solidPath = solid.solidModelPath;
-      const lower = solidPath.toLowerCase();
-      if (lower.endsWith('.dev')) {
-        await visitDev(solidPath);
-      } else if (lower.endsWith('.phm')) {
-        await readFileIntoMap(normalizeCachedPhmPath(solidPath), 'PHM');
-      }
-    }
-
-    for (const sub of devDoc.subDevices) {
-      if (state && session && !state.isCurrentSession(session)) return;
-      await visitDev(sub.devPath);
-    }
-  }
-
-  await visitDev(node.devPath);
-
-  return result;
-}
-
-function normalizeCachedDevPath(path: string): string {
-  const p = path.replace(/\\/g, '/');
-  return p.toLowerCase().startsWith('dev/') ? p : `DEV/${p}`;
-}
-
-function normalizeCachedPhmPath(path: string): string {
-  const p = path.replace(/\\/g, '/');
-  return p.toLowerCase().startsWith('phm/') ? p : `PHM/${p}`;
+  const { batchReadCachedFiles } = await import('@desktop/database.js');
+  const { hydrateSubstationGeometryGraph } = await import('../gim/geometry/substationSourceGraph.js');
+  if (!node.devPath) return new Map();
+  return hydrateSubstationGeometryGraph([node.devPath], async (paths) => {
+    if (state && session && !state.isCurrentSession(session)) return new Map();
+    const bytes = await batchReadCachedFiles(projectId, paths);
+    if (state && session && !state.isCurrentSession(session)) return new Map();
+    return new Map([...bytes].filter(([, value]) => value && value.byteLength > 0)
+      .map(([path, value]) => [path, bytesToFile(value!, path)]));
+  });
 }
 
 /**

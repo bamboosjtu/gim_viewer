@@ -1,5 +1,11 @@
 # FAM 文件格式
 
+> **当前变电 Runtime 契约**：FAM 是属性 sidecar，允许空文件与 sentinel；统一发现
+> BASEFAMILY、BASEFAMILYPOINTER、BASEFAMILY1..N。详细属性保留 source path、分节、
+> raw key、normalized label、raw value 和原行，兼容 K=K=V / 中文标签=内部键=值。
+> 业务身份取实际属性候选（模型编码、工程标识系统编码、设备编码、调度编码、实物ID），
+> 不能要求某个编码必备，也不把内部 GUID/path 冒充统一业务编码。
+
 ## 文件概述
 
 > **2026-08-24 P2 补充**：FAM 属性行存在**空英文键变体**：`额定载流量==1456.000000`

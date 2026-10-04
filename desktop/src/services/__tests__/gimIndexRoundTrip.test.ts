@@ -364,7 +364,7 @@ MANUFACTURER=某厂`, 'fam001.fam')],
     const payload = await buildGimIndexPayload(PROJECT_ID, files, [], tree, []);
     expect(payload.fam_properties.some((item) => item.source_path.toLowerCase() === 'dev/pointer.fam'))
       .toBe(true);
-    expect(payload.fam_properties.some((item) => item.prop_key === '空值')).toBe(false);
+    expect(payload.fam_properties.some((item) => item.prop_key === '空值')).toBe(true);
     expect(payload.fam_properties.some((item) => item.prop_key === '零值' && item.prop_value === '0')).toBe(true);
     expect(payload.dev_properties.some((item) => item.prop_key === 'NULL')).toBe(false);
     expect(payload.dev_properties.some((item) => item.prop_key === 'ZERO' && item.prop_value === '0')).toBe(true);

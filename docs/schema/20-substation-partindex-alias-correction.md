@@ -3,7 +3,9 @@
 ## 结论
 
 `demo-substation` 的 CBM `PARTINDEX` 不是第二个物理几何实例。它是父 F4 设备
-DEV `SUBDEVICEi` 的 CBM 语义节点，二者按索引一一对应；几何位置必须使用父设备
+DEV `SUBDEVICEi` 的 CBM 语义节点；该历史样本恰好顺序一致，不能推广为 Runtime 契约。
+substation03 已证明两侧顺序不同，必须按 `OBJECTMODELPOINTER` / DEV UUID 做 identity join。
+几何位置必须使用父设备
 累计矩阵乘以 `SUBDEVICEi.TRANSFORMMATRIXi`。
 
 因此全量渲染只能从根 DEV 递归一次。PARTINDEX 用于层级树、属性与点击，不可作为
@@ -43,5 +45,7 @@ DEV 链正确位置:    (22505.17, 3920.26, 5720.00) mm
 
 1. 自动加载和 SQLite 可达几何查询跳过 `PARTINDEX` 与 `DEV_SUBDEVICE` seed。
 2. 从 F4 根 DEV 沿 SUBDEVICE 递归，保留其完整矩阵链。
-3. 点击 PARTINDEX 时改用最近的带 DEV 的祖先加载，避免生成缺局部矩阵的副本。
+3. `buildSubstationAliasIndex` 提供 child DEV → semantic PARTINDEX 与反向索引。
+   点击 PARTINDEX 时沿真实 DEV occurrence 找到拥有它的装配根加载，并定位 child DEV
+   对应的已有几何；名称、FAM 和业务属性来自 PARTINDEX，placement 来自 DEV 装配链。
 4. 缓存解析版本升级，防止旧索引继续走旧入口策略。

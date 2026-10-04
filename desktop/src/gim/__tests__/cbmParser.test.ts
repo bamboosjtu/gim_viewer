@@ -268,8 +268,8 @@ SUBSYSTEM1=missing.cbm`, 'project.cbm')],
 
 // ===== buildCbmTree F2System 分类映射 =====
 
-describe('buildCbmTree F2System 分类映射', () => {
-  it('F2System SYSCLASSIFYNAME=U → 建筑工程', async () => {
+describe('buildCbmTree F2System 原始分类码', () => {
+  it('F2System SYSCLASSIFYNAME=U 保留原始码', async () => {
     const files = new Map<string, File>([
       ['CBM/project.cbm', textFile(
         `ENTITYNAME=F1System
@@ -279,10 +279,10 @@ SUBSYSTEM=f2.cbm`, 'project.cbm')],
 SYSCLASSIFYNAME=U`, 'f2.cbm')],
     ]);
     const tree = await buildCbmTree(files, '变电工程');
-    expect(tree!.children[0].name).toBe('建筑工程');
+    expect(tree!.children[0].name).toBe('U');
   });
 
-  it('F2System SYSCLASSIFYNAME=A → 安装工程', async () => {
+  it('F2System SYSCLASSIFYNAME=A 保留原始码', async () => {
     const files = new Map<string, File>([
       ['CBM/project.cbm', textFile(
         `ENTITYNAME=F1System
@@ -292,10 +292,10 @@ SUBSYSTEM=f2.cbm`, 'project.cbm')],
 SYSCLASSIFYNAME=A`, 'f2.cbm')],
     ]);
     const tree = await buildCbmTree(files, '变电工程');
-    expect(tree!.children[0].name).toBe('安装工程');
+    expect(tree!.children[0].name).toBe('A');
   });
 
-  it('F2System SYSCLASSIFYNAME=S → 暖通工程', async () => {
+  it('F2System SYSCLASSIFYNAME=S 保留原始码', async () => {
     const files = new Map<string, File>([
       ['CBM/project.cbm', textFile(
         `ENTITYNAME=F1System
@@ -305,10 +305,10 @@ SUBSYSTEM=f2.cbm`, 'project.cbm')],
 SYSCLASSIFYNAME=S`, 'f2.cbm')],
     ]);
     const tree = await buildCbmTree(files, '变电工程');
-    expect(tree!.children[0].name).toBe('暖通工程');
+    expect(tree!.children[0].name).toBe('S');
   });
 
-  it('F2System SYSCLASSIFYNAME=G → 给排水工程', async () => {
+  it('F2System SYSCLASSIFYNAME=G 保留原始码', async () => {
     const files = new Map<string, File>([
       ['CBM/project.cbm', textFile(
         `ENTITYNAME=F1System
@@ -318,7 +318,7 @@ SUBSYSTEM=f2.cbm`, 'project.cbm')],
 SYSCLASSIFYNAME=G`, 'f2.cbm')],
     ]);
     const tree = await buildCbmTree(files, '变电工程');
-    expect(tree!.children[0].name).toBe('给排水工程');
+    expect(tree!.children[0].name).toBe('G');
   });
 
   it('F2System 未知分类码保持原名称', async () => {
@@ -335,7 +335,7 @@ SYSCLASSIFYNAME=X`, 'f2.cbm')],
     expect(tree!.children[0].name).toBe('自定义专业');
   });
 
-  it('F1System 子节点按 U→A→S→G 顺序排列', async () => {
+  it('F1System 子节点保持源文件引用顺序', async () => {
     const files = new Map<string, File>([
       ['CBM/project.cbm', textFile(
         `ENTITYNAME=F1System
@@ -351,7 +351,7 @@ SUBSYSTEM3=u.cbm`, 'project.cbm')],
     ]);
     const tree = await buildCbmTree(files, '变电工程');
     const names = tree!.children.map((c) => c.name);
-    expect(names).toEqual(['建筑工程', '安装工程', '暖通工程', '给排水工程']);
+    expect(names).toEqual(['G', 'S', 'A', 'U']);
   });
 });
 

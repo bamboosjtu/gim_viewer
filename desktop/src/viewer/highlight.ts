@@ -2,7 +2,7 @@ import * as OBC from '@thatopen/components';
 import * as OBCF from '@thatopen/fragments';
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
-import type { AppState } from '../app/state.js';
+import type { AppState, SelectionCommitGuard, SelectionRequest } from '../app/state.js';
 import { collectIfcRefs } from '../gim/cbmParser.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
 import { frameBox } from './camera.js';
@@ -58,7 +58,7 @@ export function resetModHighlight(state: AppState): void {
  */
 export function highlightModGroups(
   state: AppState,
-  groups: THREE.Group[],
+  groups: THREE.Object3D[],
 ): void {
   // 先重置已有高亮（恢复上一次高亮的 mesh 材质）
   resetModHighlight(state);
@@ -96,13 +96,33 @@ export function highlightModGroups(
   state.highlightedModState = { groups, originalMaterials };
 }
 
-/** 重置当前高亮（IFC + MOD） */
-export async function resetHighlight(ctx: ViewerContext, state: AppState): Promise<void> {
-  if (state.highlightedItems) {
-    await ctx.fragments.resetHighlight(state.highlightedItems as any);
-    state.highlightedItems = null;
-  }
-  resetModHighlight(state);
+const highlightCommits = new WeakMap<AppState, Promise<void>>();
+
+/** Only the external reset/apply stage is serialized; reads and loads stay concurrent. */
+export async function commitSelectionHighlight(
+  ctx: ViewerContext, state: AppState, guard: SelectionCommitGuard,
+  apply?: () => Promise<void> | void,
+): Promise<void> {
+  const previous = highlightCommits.get(state) ?? Promise.resolve();
+  const task = previous.catch(() => {}).then(async () => {
+    if (!guard.isCurrent()) return;
+    const items = state.highlightedItems;
+    if (items) {
+      await ctx.fragments.resetHighlight(items as any);
+      if (!guard.isSessionCurrent()) return;
+      if (state.highlightedItems === items) state.highlightedItems = null;
+    }
+    if (!guard.isCurrent()) return;
+    resetModHighlight(state);
+    await apply?.();
+  });
+  highlightCommits.set(state,task);
+  try { await task; } finally { if (highlightCommits.get(state) === task) highlightCommits.delete(state); }
+}
+
+/** 重置当前高亮（IFC + MOD），与选择的外部高亮提交使用同一短队列。 */
+export async function resetHighlight(ctx: ViewerContext, state: AppState, isCurrent: () => boolean = () => true): Promise<void> {
+  await commitSelectionHighlight(ctx,state,{isCurrent,isSessionCurrent:isCurrent});
 }
 
 /** 从 CbmNode 高亮对应的 IFC 构件 */
@@ -111,16 +131,19 @@ export async function highlightIfcFromNode(
   state: AppState,
   node: import('../gim/types.js').CbmNode,
   showMessage: (text: string) => void,
+  request: SelectionRequest = state.beginSelection({kind:'cbm',key:node.path}),
 ): Promise<void> {
+  const guard = state.selectionGuard(request);
+  if (!guard.isCurrent()) return;
   const refs = collectIfcRefs(node, state.currentIfcEntries);
 
   if (refs.size > 0) {
-    await resetHighlight(ctx, state);
     const items: OBC.ModelIdMap = {};
     let totalHighlighted = 0;
     const highlightBoxes: THREE.Box3[] = [];
 
     for (const [modelId, guids] of refs) {
+      if (!guard.isCurrent()) return;
       const runtimeModelId = state.getRuntimeModelId(modelId);
       const model = ctx.fragments.list.get(runtimeModelId);
       if (!model) {
@@ -146,18 +169,24 @@ export async function highlightIfcFromNode(
     }
 
     if (Object.keys(items).length > 0) {
-      await ctx.fragments.highlight(HIGHLIGHT_STYLE, items as any);
-      state.highlightedItems = items as any;
+      await commitSelectionHighlight(ctx,state,guard,async () => {
+        await ctx.fragments.highlight(HIGHLIGHT_STYLE, items as any);
+        // Bookkeeping includes an already-started apply so the next commit can reset it.
+        if (guard.isSessionCurrent()) state.highlightedItems = items as any;
+      });
+      if (!guard.isCurrent()) return;
       debugLog(DEBUG_IFC_LOAD, `已高亮 ${totalHighlighted} 个 IFC 构件`);
       if (highlightBoxes.length > 0) {
         const unionBox = highlightBoxes.reduce((acc, b) => acc.union(b), highlightBoxes[0].clone());
-        await frameBox(ctx, unionBox);
+        await frameBox(ctx, unionBox, guard);
       }
       return;
     }
   }
 
   // 回退：无 IFCGUID
+  await commitSelectionHighlight(ctx,state,guard);
+  if (!guard.isCurrent()) return;
   const cbmFileName = node.path.split('/').pop() || '';
   const ifcModelId = node.ifcFile
     ? resolveIfcModelId(node.ifcFile, state.currentIfcEntries)

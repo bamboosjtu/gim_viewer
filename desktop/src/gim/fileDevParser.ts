@@ -28,10 +28,11 @@ export async function parseFileDevRelation(files: Map<string, File>): Promise<Fi
 
   // 只有在“偶数条目全部带设备数、奇数条目全部只带 IFC”时，才判定为
   // JinQu 的奇偶配对。BIMBase 的 FILE0 设备 + FILE1..N IFC 不能误配。
-  const isLegacyPair = num > 1 && num % 2 === 0
+  const isLegacyPair = countKey === 'FILE.NUM' && num > 1 && num % 2 === 0
     && Array.from({ length: num / 2 }, (_, pair) => pair * 2).every((i) => hasDeviceCount(kv, i))
     && Array.from({ length: num / 2 }, (_, pair) => pair * 2 + 1).every((i) => hasNonEmptyKv(kv, `FILE${i}.IFC`))
-    && Array.from({ length: num / 2 }, (_, pair) => pair * 2 + 1).every((i) => !hasDeviceCount(kv, i));
+    && Array.from({ length: num / 2 }, (_, pair) => pair * 2 + 1).every((i) => !hasDeviceCount(kv, i)
+      && !hasNonEmptyKv(kv, `FILE${i}.NAME`));
 
   const appendEntry = (i: number, pairedIfc: string = ''): void => {
     const rawName = getFirstNonEmptyKv(kv, [`FILE${i}.NAME`]);
@@ -64,7 +65,7 @@ export async function parseFileDevRelation(files: Map<string, File>): Promise<Fi
     }
     // 有 NAME、IFC 或设备列表任一事实就保留条目；不要静默丢掉“仅 IFC 清单”行。
     if (ifcName || ifcFile || devKey) {
-      entries.push({ ifcName, ifcFile, modelId, deviceCount: devNum, deviceCbms });
+      entries.push({ sourceDesignFile: rawName, ifcName, ifcFile, modelId, deviceCount: devNum, deviceCbms });
     }
   };
 

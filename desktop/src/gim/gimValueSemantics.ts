@@ -59,3 +59,10 @@ export function getFirstNonEmptyKv(kv: GimKv, keys: readonly string[]): string {
 export function resolveBaseFamilyReference(kv: GimKv): string {
   return getFirstNonEmptyKv(kv, ['BASEFAMILY', 'BASEFAMILYPOINTER']);
 }
+
+/** All family edges, with original key/path provenance; no filename inference. */
+export function resolveBaseFamilyReferences(kv: GimKv): Array<{ key: string; path: string }> {
+  const entries = kv instanceof Map ? [...kv] : Object.entries(kv);
+  return entries.filter(([key, value]) => /^BASEFAMILY(?:POINTER|\d*)$/i.test(key.trim()) && !isGimEmptyValue(value))
+    .map(([key, value]) => ({ key, path: String(value).trim() }));
+}

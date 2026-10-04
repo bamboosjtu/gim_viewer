@@ -7,6 +7,8 @@ export interface IfcEntry {
 
 /** CBM 层级树节点 */
 export interface CbmNode {
+  /** Original CBM fields; optional for virtual nodes. Source paths/values are not rewritten. */
+  rawProperties?: Record<string, string>;
   path: string;
   name: string;
   entityName: string;
@@ -18,7 +20,7 @@ export interface CbmNode {
   classifyName: string;
   transformMatrix: string;
   /**
-   * CBM 节点的 SYSTEMNAME1..4 字段（变电工程特有，比 SYSCLASSIFYNAME 编码更可读）。
+   * CBM 节点的 SYSTEMNAME1..N 字段（变电工程特有，比 SYSCLASSIFYNAME 编码更可读）。
    * 例如：["交流电气系统", "110kV系统", "#2主变 110kV进线间隔"]
    * 非变电工程或缺失时为空数组。
    */
@@ -43,6 +45,8 @@ export interface CbmNode {
 
 /** FileDevRelation 条目 */
 export interface FileDevEntry {
+  /** Original design-document NAME, independent from IFC model discovery. */
+  sourceDesignFile?: string;
   ifcName: string;
   ifcFile: string;
   modelId: string;

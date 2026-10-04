@@ -2,6 +2,11 @@
 
 ## 文件概述
 
+> **当前变电 Runtime 契约**：SYSTEMNAME1..N / FAM / DEV SYMBOLNAME 提供可读名称；
+> SYSCLASSIFYNAME 是原始码，不能据此推断统一专业。OBJECTMODELPOINTER 可缺失，
+> IFC.NUM 文件清单与 IFCFILE+IFCGUID 组件链接独立。PARTINDEX 与 child DEV 按身份关联，
+> 不按 SUBDEVICE 数组位置；SCH/STD/SLD 可缺失。下文示例和计数保留历史样本边界。
+
 > **2026-08-24 十样本复核**：① ENTITYNAME 值存在大小写三态（PARTINDEX/PartIndex、F4System/F4SYSTEM、
 > Wire_Device/WIRE_DEVICE），比较必须归一化；② 新实体类型 LOGICALMODEL（Bentley，空壳节点）；
 > ③ project.cbm 的 SCH=project.sch 为固定文件名而非 <uuid>.sch；BLHA 第 4 值可为方向角（275.98）
@@ -15,7 +20,7 @@ CBM 文件有三种主要用途：
 | ----------------------- | -------------------------------------------------------------- |
 | **project.cbm**         | 工程入口文件，定义顶层子系统引用；变电样本还直接给出工程地理坐标、SCH 和 TYPE |
 | **普通 \*.cbm**         | 层级模型文件，描述子系统/部件的组成结构                        |
-| **FileDevRelation.cbm** | 文件-设备关系文件，描述 IFC 文件与设备的对应关系（仅变电工程） |
+| **FileDevRelation.cbm** | 设备到原始设计文档的来源关系，可包含真实 IFC 引用，也可只有 DGN 等设计文档名 |
 
 ## 文件格式
 
@@ -44,7 +49,7 @@ GIM 工程分为**变电工程**与**线路工程**两种类型。两者在 CBM 
 | -------------------- | ----------------------- | -------------------------------------------- |
 | `ENTITYNAME`         | `<名称>`                | 实体名称，标识 CBM 在层级中的角色            |
 | `BASEFAMILY`         | `<uuid>.fam`            | 单值 FAM 属性文件引用                        |
-| `OBJECTMODELPOINTER` | `<uuid>.dev`            | DEV 物理模型引用（设备级叶子节点必备）       |
+| `OBJECTMODELPOINTER` | `<uuid>.dev`            | 可选 DEV 物理模型引用；IFC-only 语义节点可缺失 |
 | `TRANSFORMMATRIX`    | 16 个浮点数（4×4 矩阵） | 设备局部坐标系到全局坐标系的变换矩阵         |
 | `BLHA`               | `纬度,经度,海拔,方向角` | 工程地理坐标（杆塔/导线/工程入口均可能出现） |
 | `MATERIALSHEET`      | （通常为空）            | 材料表占位                                   |
@@ -87,7 +92,7 @@ GIM 工程分为**变电工程**与**线路工程**两种类型。两者在 CBM 
 | 字段              | 格式       | 说明                                            |
 | ----------------- | ---------- | ----------------------------------------------- |
 | `SYSCLASSIFYNAME` | `<分类码>` | 设备分类码（如 `0AFD*002`、`GSK*010`、`&其他`） |
-| `SYSTEMNAME1..4`  | `<名称>`   | 系统层级名称（如 `交流电气系统`、`110kV系统`）  |
+| `SYSTEMNAME1..N`  | `<名称>`   | 系统层级名称（如 `交流电气系统`、`110kV系统`）  |
 
 ### IFC 引用字段
 

@@ -208,7 +208,7 @@ describe('substation spatial semantic snapshot', () => {
     expect(written.snapshotBytes).toBeGreaterThan(0);
     const call = writeCacheFileMock.mock.calls[0];
     expect(call?.[0]).toBe(7);
-    expect(call?.[1]).toBe('__derived__/substation-spatial-semantic-v1.json');
+    expect(call?.[1]).toBe('__derived__/substation-spatial-semantic-v2.json');
     expect(call?.[2]).toBeTruthy();
     expect(call?.[3]).toBe('sha-a');
   });

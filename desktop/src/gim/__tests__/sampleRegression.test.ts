@@ -1,3 +1,4 @@
+import { inspectSubstationCapabilities, buildSubstationAliasIndex } from '../substationEvidence.js';
 /**
  * 样本级集成回归测试（真实 GIM 解压目录）。
  *
@@ -155,6 +156,7 @@ function haversine(lat1: number, lng1: number, lat2: number, lng2: number): numb
 // never silently reported as skipped merely because cwd differs.
 function resolveDemoDir(sample: string): string {
   const candidates = [
+    ...(process.env.GIM_SAMPLE_ROOT ? [join(process.env.GIM_SAMPLE_ROOT, sample)] : []),
     join(process.cwd(), 'demo', sample),
     join(process.cwd(), '..', 'demo', sample),
   ];
@@ -417,9 +419,9 @@ describe.skipIf(!hasSubstation)('样本回归·变电 demo-substation', () => {
   }, 120_000);
 });
 
-describe.skipIf(!SUBSTATION_CORPUS.every((item) => existsSync(item.dir)))('样本回归·变电空间语义四样本', () => {
+describe.skipIf(!SUBSTATION_CORPUS.some((item) => existsSync(item.dir)))('样本回归·变电空间语义四样本', () => {
   it('空间实体、包含关系和解析错误与基线快照一致', async () => {
-    for (const sample of SUBSTATION_CORPUS) {
+    for (const sample of SUBSTATION_CORPUS.filter((item) => existsSync(item.dir))) {
       const files = loadFilesFromDir(sample.dir);
       const tree = await buildCbmTree(files);
       const entries = await discoverIfcFromCBM(files);
@@ -477,7 +479,7 @@ describe.skipIf(!SUBSTATION_CORPUS.every((item) => existsSync(item.dir)))('样�
       ['substation03', { domains: ['电气系统', '建筑物系统', '未归类系统'], unclassified: true }],
       ['substation04', { domains: ['交流电气系统', '未归类系统'], unclassified: true }],
     ]);
-    for (const sample of SUBSTATION_CORPUS) {
+    for (const sample of SUBSTATION_CORPUS.filter((item) => existsSync(item.dir))) {
       const files = loadFilesFromDir(sample.dir);
       const tree = await buildCbmTree(files);
       const index = buildFunctionalDomainIndex(tree!);
@@ -490,13 +492,22 @@ describe.skipIf(!SUBSTATION_CORPUS.every((item) => existsSync(item.dir)))('样�
 
   it('vendor-neutral parser compatibility matrix covers hierarchy, references, properties and geometry degradation', async () => {
     const summaries: Record<string, SubstationCompatibilitySummary> = {};
-    for (const sample of SUBSTATION_CORPUS) {
+    for (const sample of SUBSTATION_CORPUS.filter((item) => existsSync(item.dir))) {
       const files = loadFilesFromDir(sample.dir);
       const tree = await buildCbmTree(files);
       expect(tree, sample.id).not.toBeNull();
       if (!tree) continue;
       const ifcEntries = await discoverIfcFromCBM(files);
       const summary = await inspectSubstationCompatibility(files, tree, ifcEntries);
+      const capabilities = await inspectSubstationCapabilities(files, tree, ifcEntries);
+      const aliases = buildSubstationAliasIndex(tree);
+      expect(capabilities.ifc.modelCount).toBe(summary.ifcCount);
+      expect(capabilities.geometry.dev).toBe(summary.devCount);
+      for (const [path, identity] of aliases.partToChildDev) {
+        expect(aliases.partToOccurrences.get(path)?.every((node) =>
+          node.devPath.replace(/^dev\//i, '').toLowerCase() === identity)).toBe(true);
+      }
+      console.log('[substation-capability]', sample.id, JSON.stringify(capabilities));
       summaries[sample.id] = summary;
 
       expect(summary.cbmNodeCount, `${sample.id} CBM`).toBeGreaterThan(0);

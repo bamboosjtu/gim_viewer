@@ -139,6 +139,10 @@ async function bootstrapAsync(): Promise<void> {
       if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
         e.preventDefault();
         try {
+          const diagnosticSession = state.captureProjectSession();
+          const diagnosticFiles = state.currentProjectType === 'substation' ? state.currentFiles : null;
+          const diagnosticTree = state.currentCbmTree;
+          const diagnosticIfcEntries = state.currentIfcEntries;
           showLoading('正在生成数据库诊断...');
           const { getDbPath, getLatestProjectCacheDiagnostic, getProjectDiagnostic } = await import('@desktop/database.js');
           const dbPath = await getDbPath();
@@ -157,7 +161,12 @@ async function bootstrapAsync(): Promise<void> {
           const { isWebIfcMultiThreadingAvailable } = await import('../config/features.js');
           const timings = perfSnapshot();
           const webIfcMt = { available: isWebIfcMultiThreadingAvailable() };
-          const payload = JSON.stringify({ dbPath, diagnostic, debug, basemap, timings, webIfcMt }, null, 2);
+          const capabilities = diagnosticFiles
+            ? await import('../gim/substationEvidence.js').then(({ inspectSubstationCapabilities }) =>
+              inspectSubstationCapabilities(diagnosticFiles, diagnosticTree, diagnosticIfcEntries))
+            : state.substationCapabilities;
+          if (!state.isCurrentSession(diagnosticSession)) return;
+          const payload = JSON.stringify({ substationCapabilities: capabilities, dbPath, diagnostic, debug, basemap, timings, webIfcMt }, null, 2);
           // Debug-only performance harness: expose the exact diagnostic payload to
           // the local CDP runner.  Production builds intentionally do not publish
           // this global, preserving the existing clipboard-only diagnostic path.

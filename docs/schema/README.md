@@ -1,7 +1,8 @@
 # GIM Schema Research 目录
 
 本目录用于沉淀 GIM 文件格式研究、样本实证结论和后续解析器实现边界。样本分析的唯一归档
-位置是本目录；产品实现文档只引用已经确认的规则，不复制样本过程或单次分析日志。
+位置是本目录；`research/*.html` 是当前 demo 样本的最新分析输入，较旧结论冲突时须以
+最新证据复核。产品实现文档只引用已经确认的规则，不复制单次分析日志。
 
 当前文档分为两类：
 
@@ -9,6 +10,11 @@
 2. **格式说明文档**：按文件类型命名，记录单类文件的字段结构和解析约定。
 
 研究结论只代表当前样本实证结果，不直接等同于完整 GIM 标准。新增样本后，应先核对样本事实，再决定是否更新解析器；文档不记录按日期追加的过程日志。
+
+当前变电 Runtime 契约见 [gim_substation.md](../gim_substation.md)：IFC 目录是 exporter detail；
+文件发现与 GUID 关联分开；PARTINDEX 按 DEV identity join，不按数组序号；DEV/PHM/MOD
+不要求等量；PHM 可递归；STL、SCH/STD/SLD 可缺失；同 UUID GL 是辅助来源。
+编号文档中的单样本数字、零引用和同序观察保留为历史事实，不能成为 parser 假设。
 
 产品侧入口：架构见 [architecture.md](../architecture.md)，共性运行时见
 [gim_common.md](../gim_common.md)，线路/变电实现见 [gim_powerline.md](../gim_powerline.md)
@@ -47,7 +53,7 @@
 | 13 | [13-geometry-ir-schema.md](13-geometry-ir-schema.md) | 统一 Geometry IR、5 种 kind schema、解析管道分层和边界 | 当前 Geometry IR 的类型与解析边界 |
 | 14 | [14-line-catenary-study.md](14-line-catenary-study.md) | 线路 WIRE 字段、档距聚合、拓扑分类和审计接口的语义证据 | 当前仅保留地图上的实验性 2D 曲线和审计导出，独立线路 3D 未启用 |
 | 15 | [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) | demo-line 全量静态分析证据（5460 WIRE / 327 TOWER），KVALUE / MATRIX0 / BLHA / 拓扑分类字段语义确认 | 样本证据文档（demo-line） |
-| 17 | [17-batch-load-schema.md](17-batch-load-schema.md) | 变电 DEV/PHM/MOD/GL/STL 批量读取、GLB manifest、失败隔离和缓存契约 | 当前 geometry-cache-v6 实现边界 |
+| 17 | [17-batch-load-schema.md](17-batch-load-schema.md) | 变电 DEV/PHM/MOD/GL/STL 批量读取、GLB manifest、失败隔离和缓存契约 | 当前 geometry-cache-v7 实现边界 |
 | 20 | [20-substation-partindex-alias-correction.md](20-substation-partindex-alias-correction.md) | demo-substation PARTINDEX 与 DEV SUBDEVICE 别名关系、几何实例基线更正 | 已落实到渲染入口 |
 | 22 | [22-ten-sample-verification-0824.md](22-ten-sample-verification-0824.md) | 十样本（4 变电 + 6 线路）字段、容器、引用和导出差异基线 | 当前跨样本证据 |
 
@@ -66,7 +72,7 @@
 | [mod.md](mod.md) | MOD 基础几何/参数化模型说明 |
 | [sch.md](sch.md) | SCH 逻辑模型入口；parser、首次打开和缓存恢复已实现 |
 | [std.md](std.md) | STD 逻辑定义；parser 与 gridId 索引已实现 |
-| [sld.md](sld.md) | SLD 主接线图；parser/视图/联动已实现，安全化仍有 P0 风险 |
+| [sld.md](sld.md) | 可选 SLD 主接线图；白名单净化与 img 沙箱、视图/联动已实现 |
 
 ---
 

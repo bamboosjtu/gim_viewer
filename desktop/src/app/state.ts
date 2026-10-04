@@ -1,3 +1,5 @@
+import type { FamSourceProperty } from '../gim/famParser.js';
+import type { SubstationCapabilitySummary } from '../gim/substationEvidence.js';
 import type { IfcEntry, CbmNode, FileDevEntry } from '../gim/types.js';
 import type * as OBCF from '@thatopen/fragments';
 import type * as THREE from 'three';
@@ -23,8 +25,58 @@ export interface ProjectLoadSession {
   geometryToken: number;
 }
 
+/** Runtime-only user intent; it never invalidates the geometry batch or cache. */
+export interface SelectionRequest {
+  id: number;
+  session: ProjectLoadSession;
+  signal: AbortSignal;
+  target: { kind: 'cbm' | 'spatial-node' | 'ifc-object' | 'ifc-element' | 'sld'; key: string } | null;
+}
+
+export interface SelectionCommitGuard {
+  isCurrent: () => boolean;
+  isSessionCurrent: () => boolean;
+  signal?: AbortSignal;
+}
+
+export interface SelectionGeometryState {
+  status: 'not-loaded' | 'unknown' | 'available' | 'renderable' | 'empty' | 'unsupported' | 'partial' | 'failed' | 'unlinked' | 'ambiguous' | 'file-only' | 'unassociated';
+  detail: string;
+}
+
 /** 应用全局状态（由 bootstrap.ts 创建唯一实例，通过参数注入各模块） */
 export class AppState {
+  selectionRequest: SelectionRequest | null = null;
+  selectionGeometry: SelectionGeometryState | null = null;
+  selectionMessage = '';
+  private selectionSequence = 0;
+  private selectionAbort: AbortController | null = null;
+
+  beginSelection(target: SelectionRequest['target']): SelectionRequest {
+    this.selectionAbort?.abort();
+    this.selectionAbort = new AbortController();
+    const request: SelectionRequest = { id: ++this.selectionSequence, session: this.captureProjectSession(), signal: this.selectionAbort.signal, target };
+    this.selectionRequest = request;
+    this.selectionGeometry = null;
+    this.selectionMessage = '';
+    return request;
+  }
+
+  isCurrentSelection(request: SelectionRequest): boolean {
+    return this.selectionRequest?.id === request.id && !request.signal.aborted && this.isCurrentSession(request.session);
+  }
+
+  selectionGuard(request: SelectionRequest): SelectionCommitGuard {
+    return { isCurrent: () => this.isCurrentSelection(request), isSessionCurrent: () => this.isCurrentSession(request.session), signal: request.signal };
+  }
+
+  invalidateSelection(): void {
+    this.selectionAbort?.abort();
+    this.selectionSequence++;
+    this.selectionRequest = null;
+    this.selectionGeometry = null;
+    this.selectionMessage = '';
+  }
   // GIM 文件相关
   currentFiles: Map<string, File> | null = null;
   currentIfcEntries: IfcEntry[] = [];
@@ -53,6 +105,9 @@ export class AppState {
   ifcRuntimeModelOwners = new Map<string, ProjectLoadSession>();
 
   // 文件-设备关系
+  substationCapabilities: SubstationCapabilitySummary | null = null;
+  substationEntryPaths: string[] = [];
+  cachedFamSourceProperties = new Map<string, FamSourceProperty[]>();
   fileDevRelations: FileDevEntry[] = [];
   deviceToIfcFile = new Map<string, string>(); // deviceCbmName → ifcModelId
 
@@ -137,7 +192,7 @@ export class AppState {
   // MOD 材质是共享的（_sharedMaterialCache），高亮时必须 clone 后修改，
   // reset 时恢复原始材质并 dispose clone，避免影响其他使用同一共享材质的 mesh。
   highlightedModState: {
-    groups: THREE.Group[];
+    groups: THREE.Object3D[];
     originalMaterials: Map<THREE.Mesh, THREE.Material | THREE.Material[]>;
   } | null = null;
 
@@ -153,12 +208,14 @@ export class AppState {
 
   /** 使所有在途工程/几何任务失效；必须在切换工程的第一个同步动作调用。 */
   invalidatePendingLoads(): void {
+    this.invalidateSelection();
     this.projectGeneration += 1;
     this.geometryLoadToken += 1;
   }
 
   /** 激活新工程并返回其身份快照。 */
   activateProject(projectId: number | null, sourceSha256?: string | null): ProjectLoadSession {
+    this.invalidateSelection();
     this.projectGeneration += 1;
     this.currentProjectId = projectId;
     this.currentSourceSha256 = sourceSha256 ?? null;
@@ -233,6 +290,7 @@ export class AppState {
    * ctx.fragments 中的实际模型需由 projectCleanupService 在调用本方法前显式 dispose。
    */
   resetGimState() {
+    this.invalidateSelection();
     this.currentFiles = null;
     this.currentIfcEntries = [];
     this.currentCbmTree = null;
@@ -247,6 +305,9 @@ export class AppState {
     this.ifcRuntimeModelIds.clear();
     this.ifcLogicalModelIds.clear();
     this.ifcRuntimeModelOwners.clear();
+    this.substationCapabilities = null;
+    this.substationEntryPaths = [];
+    this.cachedFamSourceProperties.clear();
     this.fileDevRelations = [];
     this.deviceToIfcFile.clear();
     // 清空 STD/SLD 拓扑与单线图（变电工程专用）

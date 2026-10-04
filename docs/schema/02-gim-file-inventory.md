@@ -27,7 +27,7 @@
 
 | 目录 | 扩展名 |
 | ---- | ------ |
-| CBM/DEV/PHM/MOD（全大写） | 各类型按上表分布；.fam 与 .cbm/.dev 同目录混放；.ifc 仅在 DEV；.sch/.std/.sld 在 CBM；.gl/.stl/.mod 在 MOD |
+| CBM/DEV/PHM/MOD（全大写） | 各类型按上表分布；.fam 与 .cbm/.dev 同目录混放；.ifc 可在 DEV 或 CBM，目录是 exporter detail；.sch/.std/.sld 是可选能力；.gl/.stl/.mod 通常在 MOD |
 
 ## 2. 线路工程（6 个）
 
@@ -55,7 +55,7 @@
 | --- | --- | --- |
 | 四目录结构 | 解压后恒为 CBM/DEV/PHM/MOD 四目录（大小写随工程类型） | 10/10 |
 | 目录大小写 | 变电全大写、线路首字母大写 | 10/10（4+6） |
-| IFC 归属 | .ifc 仅出现在变电 DEV 目录；线路工程无 IFC | 10/10 |
+| IFC 归属 | 变电 IFC 可在 DEV 或 CBM，必须通过 CBM 引用 + 全局 entry resolver；当前线路样本无 IFC | 十样本复核 |
 | 三件套归属 | .sch/.std/.sld 在 CBM 目录，且仅 JinQu/SDDP 两个变电工具产出 | 2/4 变电 |
 | STL 归属 | .stl 在 MOD 目录；变电可有可无（变电站02为 0），线路必有 | 10/10 |
 

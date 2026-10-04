@@ -120,7 +120,9 @@ PHM 仅引用两类几何文件：
 - **MOD 文件**：基础几何模型，XML 格式，含几何图元定义
 - **STL 文件**：标准三角网格模型，binary-like
 
-> **重要纠正**：早期版本曾提到 PHM 可引用同级 PHM 文件实现嵌套组合。基于三个样本（demo-line / demo-line1 / demo-substation）的全量实证，**未发现任何 `SOLIDMODEL` → `.phm` 引用**（均为 0）。PHM 不嵌套引用同级 PHM，几何叶子层固定为 MOD/STL。
+> **历史三样本观察**：demo-line / demo-line1 / demo-substation 没有 `SOLIDMODEL` → `.phm`
+> 引用。新样本已证伪“不存在 PHM 嵌套”的推论；Runtime 必须按 target extension 递归，
+> 逐边累积矩阵并防环。此处保留历史统计，不作为解析契约。
 
 ## 示例
 
@@ -215,7 +217,7 @@ COLOR2=138,149,151,100
 | `SOLIDMODEL` → `.phm`   |                 0 |                 0 |                       0 |
 | 总引用数                |              3136 |               719 |                    5938 |
 
-> 三个样本中均**未发现 PHM 引用同级 PHM 的现象**，PHM 不存在嵌套引用关系。
+> 此历史三样本没有 PHM 嵌套；substation03 存在嵌套，不能由旧样本推断格式限制。
 
 ### COLOR 字段分布
 
@@ -283,11 +285,12 @@ export interface PhmDocument {
 | PHM 不分节，无 `[section] 语法` | 内联 `parsePhmKeyValue`，与 cbmParser.parseKeyValue 行为一致 |
 | `COLORn` 为空字符串 → `color` 字段为 `undefined` | `parseColor` 在 `raw === ''` 时返回 `undefined` |
 | `TRANSFORMMATRIXn` 缺失 → 回退单位矩阵 | `parseTransformMatrix` 在 `undefined` 或长度异常时返回 `IDENTITY_MATRIX` |
-| PHM 不嵌套引用同级 PHM | 解析器不处理（实证已确认 0 引用） |
+| PHM 可以嵌套引用 PHM | IR 保留每条引用，discovery 与 Rust 缓存查询递归，逐边矩阵累积、分支防环和深度限制 |
 | 数值范围：R/G/B 0-255，A 0-100 | `parseColor` 校验，超出范围返回 `undefined` |
 
 ### 集成点
 
-- **`src/services/modGeometryDiscovery.ts`**：`discoverModGeometriesFromNode` 调用 `parsePhm` 解析 PHM 文件，遍历 `solidModels` 收集 `.mod` 引用（`.stl` P1 跳过）
-- **`src/viewer/xmlModLoader.ts`**：`applyExternalTransforms` 应用 `phmTransformMatrix`（列主序，直接 `Matrix4.fromArray`）
-- **`src/app/state.ts`**：`loadedXmlModGroups` 跟踪已加载 MOD Group
+- **`desktop/src/services/modGeometryDiscovery.ts`**：递归 PHM，`.mod` / 显式 `.gl` / `.stl` 为叶子，缺失目标只隔离该分支。
+- **`desktop/src/gim/geometry/substationSourceGraph.ts`**：自动与点击缓存回退共用的批量引用源读取器；不决定 placement。
+- **`desktop/src-tauri/src/db.rs`**：缓存可达性查询保留 nested PHM，组合完整矩阵并保留叶子 COLOR。
+- **Viewer / GLB compiler**：消费最终 placement；GLB 保留 child DEV 来源 identity，支持部件定位。

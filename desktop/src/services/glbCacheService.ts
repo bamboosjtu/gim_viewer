@@ -200,6 +200,9 @@ export async function serializeDevToGlbDetailed(
       }
       // 烘焙 DEV × PHM placement 到顶点（含 mm→m）
       applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+      group.userData.devPath = geo.devPath;
+      group.userData.assemblyPath = geo.assemblyPath;
+      group.userData.referencePath = geo.referencePath;
       devGroup.add(group);
       modLoaded++;
       diagnostics.renderableModCount++;
@@ -227,6 +230,9 @@ export async function serializeDevToGlbDetailed(
       applyPhmColorOverride(group, geo.phmColor, geo.phmColorMaxA);
       // 烘焙 DEV × PHM placement 到顶点（含 mm→m）
       applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+      group.userData.devPath = geo.devPath;
+      group.userData.assemblyPath = geo.assemblyPath;
+      group.userData.referencePath = geo.referencePath;
       devGroup.add(group);
       stlLoaded++;
       diagnostics.renderableStlCount++;

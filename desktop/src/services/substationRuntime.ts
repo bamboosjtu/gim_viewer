@@ -110,36 +110,47 @@ function collectCbmNodeCount(root: CbmNode | null): number {
   return count;
 }
 
-function createNodeClickHandler(state: AppState, showMessage: (text: string) => void): (node: CbmNode) => void {
+export function createNodeClickHandler(state: AppState, showMessage: (text: string) => void): (node: CbmNode) => void {
+  const session=state.captureProjectSession();
   return (node: CbmNode) => {
-    import('./nodeInteractionService.js').then(({ handleNodeClick }) => {
-      handleNodeClick(state, node, showMessage);
-    });
+    if (!state.isCurrentSession(session)) return;
+    const request=state.beginSelection({kind:'cbm',key:node.path});
+    void import('./nodeInteractionService.js').then(({ handleNodeClick }) =>
+      handleNodeClick(state,node,showMessage,request),
+    ).catch((error) => console.warn('[选择] 节点交互失败:',error));
   };
 }
 
-function setupSldGridIdInteraction(
+export function setupSldGridIdInteraction(
   state: AppState,
   showMessage: (text: string) => void,
   session?: ProjectLoadSession,
-): void {
-  import('../ui/sldView.js').then(({ setSldGridIdClickHandler }) => {
+): Promise<void> {
+  return import('../ui/sldView.js').then(({ setSldGridIdClickHandler }) => {
     if (session && !state.isCurrentSession(session)) return;
     setSldGridIdClickHandler(async (gridId: string) => {
       if (session && !state.isCurrentSession(session)) return;
       if (!state.currentStdSldIndex) return;
+      const request=state.beginSelection({kind:'sld',key:gridId});
       try {
         const { getCbmNodesByGridId } = await import('../gim/stdSldIndex.js');
         if (session && !state.isCurrentSession(session)) return;
         const nodes = getCbmNodesByGridId(state.currentStdSldIndex, gridId);
         if (nodes.length === 0) {
+          const [{clearSelectionHighlight,syncSelectionNavigation},{showUnlinkedSldProperties}]=await Promise.all([
+            import('./nodeInteractionService.js'),import('../ui/propsDrawer.js'),
+          ]);
+          if (!state.isCurrentSelection(request)) return;
+          showUnlinkedSldProperties(state,gridId,request);
+          await Promise.all([clearSelectionHighlight(state,request,showMessage),syncSelectionNavigation(state,request)]);
           console.log('[SLD→CBM] gridId 无对应 CBM 节点:', gridId);
           return;
         }
         // 取首个匹配节点触发联动（高亮 CBM 树 + 加载 IFC + 3D 高亮 + 相机定位）
         const { handleNodeClick } = await import('./nodeInteractionService.js');
         if (session && !state.isCurrentSession(session)) return;
-        await handleNodeClick(state, nodes[0], showMessage);
+        request.target={kind:'cbm',key:nodes[0].path};
+        await handleNodeClick(state,nodes[0],showMessage,request);
       } catch (err) {
         console.warn('[SLD→CBM] 联动失败:', err);
       }
@@ -554,6 +565,7 @@ export async function onGimExtracted(
   if (!state.isCurrentSession(session)) return [];
   const perfSession = perfCurrentSession();
   state.currentFiles = files;
+  state.substationEntryPaths = [...files.keys()];
   state.projectName = projectName || '';
 
   // 发现 IFC 文件
@@ -566,7 +578,7 @@ export async function onGimExtracted(
 
   state.currentIfcEntries = ifcEntries;
 
-  // 构建 CBM 层级树（F1System 根节点名称由 projectTypeName 设置，F2System 由 SYSCLASSIFYNAME 映射）
+  // 构建 CBM 层级树（F1System 根节点名称由 projectTypeName 设置，F2System 保留原始分类码并使用可读来源名称）
   const endCbmCore = perfBegin('变电 CBM/FAM/DEV/FileDevRelation', undefined, perfSession);
   const cbmTree = await buildCbmTree(files, projectTypeName);
   if (!state.isCurrentSession(session)) return [];
@@ -913,7 +925,7 @@ export async function loadAllIfcFiles(
 
     const { fitCameraToScene } = await import('../viewer/camera.js');
     if (!isCurrent()) return;
-    fitCameraToScene(ctx, state);
+    if (!state.selectionRequest?.target) fitCameraToScene(ctx, state);
     interactiveInitialized = true;
     perfMark('首个 IFC 就绪', {
       name: entry.name,
@@ -1336,7 +1348,7 @@ async function autoLoadModStlPostIfc(
         if (existingCtx) {
           const { fitCameraToScene } = await import('../viewer/camera.js');
           if (!state.isCurrentSession(session)) return;
-          fitCameraToScene(existingCtx, state, { force: true });
+          if (!state.selectionRequest?.target) fitCameraToScene(existingCtx, state, { force: true });
         }
       }
       if (!result.interrupted) {
@@ -1403,7 +1415,7 @@ async function autoLoadModStlPostIfc(
       if (existingCtx) {
         const { fitCameraToScene } = await import('../viewer/camera.js');
         if (!state.isCurrentSession(session)) return;
-        fitCameraToScene(existingCtx, state, { force: true });
+        if (!state.selectionRequest?.target) fitCameraToScene(existingCtx, state, { force: true });
       }
     }
     finishModStl(undefined, {

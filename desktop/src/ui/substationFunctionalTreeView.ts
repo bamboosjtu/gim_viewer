@@ -1,5 +1,6 @@
 import type { AppState } from '../app/state.js';
 import { normalizeEntityName } from '../gim/entityName.js';
+import { substationDevIdentity } from '../gim/substationEvidence.js';
 import type { CbmNode } from '../gim/types.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
 import type { SearchItem } from './searchBox.js';
@@ -64,13 +65,6 @@ export interface FunctionalDomainIndex {
 
 const FUNCTIONAL_ROOT_KEY = 'functional:project-root';
 
-const DISCIPLINES: Record<string, { label: string; fullLabel: string }> = {
-  U: { label: '建筑', fullLabel: '建筑工程' },
-  A: { label: '安装', fullLabel: '安装工程' },
-  S: { label: '暖通', fullLabel: '暖通工程' },
-  G: { label: '给排水', fullLabel: '给排水工程' },
-};
-
 const ROLE_LABELS: Record<FunctionalRole, string> = {
   component: '构件',
   device: '设备',
@@ -103,7 +97,7 @@ export function buildFunctionalDomainIndex(root: CbmNode): FunctionalDomainIndex
   const visit = (node: CbmNode, discipline: DisciplineContext | null): void => {
     const entity = normalizeEntityName(node.entityName);
     let nextDiscipline = discipline;
-    if (entity === 'F2System') nextDiscipline = readDiscipline(node.classifyName);
+    if (entity === 'F2System') nextDiscipline = readDiscipline(node);
 
     if (entity === 'F3System' && !seenSystemPaths.has(node.path)) {
       seenSystemPaths.add(node.path);
@@ -564,14 +558,6 @@ function deriveDomain(node: CbmNode): { key: string; title: string; inferred: bo
     const normalized = normalizeDomain(first);
     return { key: `functional:domain:${encodeURIComponent(normalized.key)}`, title: first, inferred: false };
   }
-  const inferred = inferDomainFromClassification(node.classifyName || node.name);
-  if (inferred) {
-    return {
-      key: `functional:domain:${encodeURIComponent(inferred.key)}`,
-      title: inferred.title,
-      inferred: true,
-    };
-  }
   return {
     key: 'functional:domain:unclassified',
     title: '未归类系统',
@@ -588,6 +574,10 @@ function deriveSystemTitle(node: CbmNode, ordinal: number): string {
 }
 
 function extractFunctionalNames(node: CbmNode): string[] {
+  // Parser-added child summaries do not turn an exporter classification code
+  // into a functional domain name. Keep that readable hint on the system row.
+  if (node.rawProperties && node.systemNames.length === 0
+      && node.name.split('（含')[0] === node.classifyName) return [];
   const raw = node.systemNames.length > 0
     ? node.systemNames
     : node.name.split(/\s*\/\s*/g);
@@ -625,24 +615,15 @@ function normalizeDomain(value: string): { key: string; title: string } {
   return { key: text.toLocaleLowerCase(), title: text };
 }
 
-function inferDomainFromClassification(value: string): { key: string; title: string } | null {
-  const text = value.trim();
-  if (!text || text.startsWith('&')) return null;
-  if (/电气/.test(text)) return { key: 'electrical', title: '电气系统' };
-  if (/建筑/.test(text)) return { key: 'building', title: '建筑物系统' };
-  if (/构筑/.test(text)) return { key: 'structure', title: '构筑物系统' };
-  if (/暖通|空调/.test(text)) return { key: 'hvac', title: '暖通系统' };
-  if (/给排水|排水|消防/.test(text)) return { key: 'plumbing', title: '给排水系统' };
-  return null;
-}
-
-function readDiscipline(value: string): DisciplineContext | null {
-  const raw = value.trim();
-  if (!raw) return null;
-  const code = raw.toUpperCase();
-  const known = DISCIPLINES[code];
-  if (known) return { codes: [code], labels: [known.label], sourceCodes: [raw] };
-  return { codes: [], labels: [], sourceCodes: [raw] };
+function readDiscipline(node: CbmNode): DisciplineContext | null {
+  const raw = node.classifyName.trim();
+  const readable = node.systemNames.filter((name) => name.trim() && !/^(&|null\d*$|-+$|其它$|其他$)/i.test(name.trim()));
+  if (!readable.length && node.rawProperties && node.name !== node.classifyName && node.name !== node.entityName) {
+    const familyName = cleanToken(node.name);
+    if (familyName) readable.push(familyName);
+  }
+  // Labels are source names only; raw exporter codes never infer a profession.
+  return raw || readable.length ? { codes: [], labels: readable, sourceCodes: raw ? [raw] : [] } : null;
 }
 
 interface DisciplineContext {
@@ -724,7 +705,7 @@ function mergePartChildren(target: FunctionalPartProjection[], additions: Functi
 }
 
 function partIdentity(node: CbmNode): string {
-  const devPath = node.devPath.trim().replace(/\\/g, '/').toLowerCase();
+  const devPath = substationDevIdentity(node.devPath);
   return devPath ? `dev:${devPath}` : `path:${node.path}`;
 }
 

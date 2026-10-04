@@ -697,12 +697,13 @@ describe('DEV GLB fast path v3', () => {
       ],
     );
 
-    // child DEV 有独立成功 GLB 的 seed，因此父 DEV 的 scoped fallback
-    // 应完成发现但过滤掉 child，避免重复渲染成功的 GLB。
-    expect(result.modCount).toBe(0);
-    expect(result.rows).toBe(0);
-    expect(state.loadedXmlModGroups.size).toBe(1);
-    expect(profile.partialRawFallbackRows).toBe(0);
+    // A successful standalone child placement cannot replace the child occurrence
+    // inside the failed parent. Restore that assembly occurrence only.
+    expect(result.modCount).toBe(1);
+    expect(result.rows).toBe(1);
+    expect(state.loadedXmlModGroups.size).toBe(2);
+    expect([...state.loadedXmlModGroups.values()].filter((g) => g.userData.rootOccurrence === 'CBM/parent.cbm')).toHaveLength(1);
+    expect(profile.partialRawFallbackRows).toBe(1);
     expect(parentRead).toHaveBeenCalledTimes(1);
     expect(childRead).toHaveBeenCalledTimes(1);
     expect(phmRead).toHaveBeenCalledTimes(1);

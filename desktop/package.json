@@ -17,6 +17,7 @@
     "posttauri:build": "node scripts/package-portable.mjs",
     "test": "vitest run",
     "test:sample": "vitest run --config vitest.sample.config.ts",
+    "test:substation:strict": "node scripts/test-substation-strict.mjs",
     "test:all": "vitest run --config vitest.sample.config.ts && vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

@@ -2,6 +2,11 @@
 
 ## 文件概述
 
+> **当前变电 Runtime 契约**：primitive 是开放集合，unknown 保留 raw tag/attrs，
+> 跳过该 primitive 而不失败整个文件。未知 Boolean Type 明确 unsupported；Visible
+> 大小写不敏感。`.gl` 仅在真实 SOLIDMODEL 引用时进入主链，同 UUID sidecar 单独
+> 关联为辅助来源，不据 ConnectGuid / ConnectionRules 猜测 3D 连接几何。
+
 > **2026-08-24 十样本复核**：① 几何资源扩展名新增 `.gl`（BIMBase，XML Device 同构格式，
 > primitive 含 GimGeCableConcentration 等）；② 变电 XML primitive 家族从 14 类扩至 ≥27 类
 > （新增 Boolean/Wire/Cable/BeamChannel/LightBeamChannel/RotationalEllipsoid/ConePorcelainBushing 等）；

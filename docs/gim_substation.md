@@ -5,6 +5,10 @@
 > 样本边界见 [schema/README.md](schema/README.md)，性能证据见
 > [benchmark_substation.md](benchmark_substation.md)。
 
+交互的最新选择提交、无几何状态与本次桌面验收见
+[substation_interaction_correctness.md](substation_interaction_correctness.md)。工程会话保护资源
+有效性，独立的 SelectionRequest 保护属性、高亮、相机及树/SLD 的选择提交权。
+
 ## 1. Runtime 与就绪语义
 
 ```text
@@ -35,6 +39,42 @@ token 隔离旧模型、空间结果、GLB placement 和 UI 回调。
 
 ## 2. 语义模型与空间索引
 
+当前变电边界沿用既有类型体系，不引入 VendorAdapter 或第二套 Domain Model：
+
+```text
+Raw GIM 文件 / 原字段 / 原引用 / source path
+  → capability 与 evidence 探测（描述，不选择厂商分支）
+  → CbmNode + PARTINDEX alias + FAM 来源属性 / business identity 候选
+  + DevDocument / PhmDocument / XML IR + 完整实例 placement
+  → Substation Runtime / 功能与空间投影 / 分域缓存
+```
+
+`CbmNode.rawProperties` 保留原始分类码、SYSTEMNAME 和引用字段。F2 保留原始顺序，
+不把 A/U/S/G、Y、数字或文字码映射为统一专业。名称优先使用 SYSTEMNAME1..N、FAM
+的可读名称和 DEV SYMBOLNAME；PARTINDEX 的业务名称可覆盖通用 DEV 名称。
+
+`gim/substationEvidence.ts` 的轻量投影提供：
+
+- `inspectSubstationCapabilities`：统计文件、component GUID / file-level IFC、family reference、
+  nested DEV/PHM、optional logical model、GL sidecar 和 FDR；用于诊断 JSON、回归和缓存 metadata。
+  它不驱动 parser 分支，也不是另一份 semantic graph。
+- `buildSubstationIfcEvidence`：direct-guid / source-file / unlinked 原始引用证据。IFC 发现和
+  对象关联分开；IFC.NUM + IFC0..N 不产生伪造 GUID。物理目录是 exporter detail，
+  路径基于 CBM 引用 + 全局 entry resolver，不能写死 DEV/ 或 CBM/。
+- `buildSubstationAliasIndex`：PARTINDEX 与实际 DEV occurrence 按 OBJECTMODELPOINTER
+  identity join；不按数组位置。PARTINDEX 只提供语义属性，不产生第二个几何 seed。
+- `discoverSubstationGlSidecars`：MOD/<same-UUID>.gl 与实际设备 DEV 关联，来源 UI 和诊断
+  可见；它不自动进入 SOLIDMODEL 链，也不推断 ConnectGuid / ConnectionRules 的空间含义。
+
+FAM 是 property sidecar，支持 BASEFAMILY / BASEFAMILYPOINTER / BASEFAMILY1..N 和空文件。
+详细属性保留 sourcePath、section、rawKey、label、rawValue、rawLine；既有 section Map
+仍可用于显示。business identity 按三维设计模型编码、电网工程标识系统编码、设备编码、
+调度编码、实物ID寻找实际候选，缺失返回空；内部 GUID/path 仍作为技术来源标识。
+空 sentinel 不进入可操作属性缓存，原文件与原 CBM 字段仍保留。
+
+FileDevRelation 是独立的设备 → 原始设计文档 provenance。缓存保留原 NAME（含 DGN 等
+扩展名）及无设备列表的来源条目；它不能替代 package → IFC discovery，也不伪造 IFC 文件。
+
 入口 `CBM/project.cbm` 构建功能树，并从 CBM、FAM、DEV、FileDevRelation 得到 IFC
 文件、设备关系和基础属性。IFC 由 `gimIndexer.ts` 发现并使用稳定的 logical `modelId`；
 会话内再映射到带 source/session 身份的 Fragments runtime model ID。
@@ -48,7 +88,7 @@ token 隔离旧模型、空间结果、GLB placement 和 UI 回调。
 - `SubstationSpatialIndex` 提供 `nodeByKey`、`objectByKey`、link 反查和 coverage，供
   空间树、属性抽屉、GUID 选择和导航使用。
 
-交互后先尝试独立的 `substation-spatial-semantic-v1` snapshot。命中只做版本/source SHA
+交互后先尝试独立的 `substation-spatial-semantic-v2` snapshot。命中只做版本/source SHA
 校验、JSON deserialize 和 Map hydrate；miss、损坏或引用不完整才在 `allIfcReady` 后重建。
 Spatial Semantic Core 本身不在本文下一步改造范围内。
 
@@ -61,6 +101,12 @@ Fragments cache，失败时回退原始 IFC；加载后校验模型同时存在�
 
 DEV 几何路径为 `DEV → PHM/DEV → MOD/GL/STL`：
 
+- DEV/PHM/MOD cardinality 不参与遍历；STL 为零也合法。PHM 按目标扩展名递归，完整保留
+  每条边的矩阵和颜色。cold discovery、Rust SQLite query、自动和点击 raw fallback 一致处理
+  nested PHM、分支 cycle guard、递归深度与实例上限；缺失目标隔离，不隐藏其余来源。
+- XML primitive 是开放 IR：known 正常渲染；未支持或 unknown 保留 raw tag/attrs 并跳过
+  renderer，不拖垮其它 Entity。Visible 大小写不敏感；未知 Boolean operation 明确 unsupported，
+  不默认 Difference。
 - cold 由 `progressiveGeometryService.ts` 按 unique DEV 编译为 GLB，再按 CBM placement
   渐进显示；
 - warm 优先读取 geometry manifest 和批量 GLB，`empty`/`unsupported` 是合法确定性结果，
@@ -88,13 +134,34 @@ DEV 几何路径为 `DEV → PHM/DEV → MOD/GL/STL`：
 | Fragments | `substation_fragment_cache` + `fragments/{project_id}`，绑定 GIM SHA、IFC size、Fragments/web-ifc 版本 |
 | DEV 几何 | `glbcache/{project_id}` 的 GLB、manifest 和 geometry version marker |
 
+版本边界：变电语义 `gim-substation-parser-v25`（FAM 原始行身份、完整 provenance 和 occurrence
+可达性）；几何 `geometry-cache-v8-occurrence`（GLB 子几何保存 assembly/reference path）。
+FAM SQLite 唯一键是 project/source/source_line；section/label 是查询键，不是原始记录身份。
+单值 Map 按原始行顺序采用最后一行生效，包含空值；原始行和冲突诊断独立保留。
+DEV 是共享模板身份，根 CBM path 是放置实例身份，实际 DEV 装配边路径是 child occurrence。
+PARTINDEX 通过 DEV identity join 得到同一 root 下的候选集合，不按数组位置配对；多条候选
+明确提示并定位集合。raw、GLB 和 SQLite 恢复共享 root/assembly/reference 归属。
+线路保持 v1、Fragments 保持 v6。IFC 空间 parser contract 保持 v23，snapshot 保持
+`substation-spatial-semantic-v2`；这两个 Spatial 版本已存在于本轮基线 d6daece。
+失效由各域自身版本和 source SHA 决定。不清空整个项目缓存。
+
 缓存命中先恢复 CBM/FAM/DEV/FileDevRelation 和基础 UI，再按就绪语义恢复 IFC。缓存失效、
 文件缺失、版本不匹配和坏的派生数据都 fail closed，并回到对应的原始路径；不会用空对象
 替代未知或失败数据。
 
+严格三样本门禁：`npm run test:substation:strict`；`GIM_SAMPLE_ROOT` 可配置样本根目录。
+01/02/03 缺失、失败或 skip 都返回非零；04 可选且独立执行。解包使用
+`python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation substation02 substation03 substation04 --extract-only`，
+可加 `--sample-root`。解包身份标记 `.gim-source.sha256` 由工具写入，不属于 GIM entry。
+SQLite 往返调用生产 Rust SQL，落盘后关闭并重开连接，读取结果再交给 TS restore。
+逐样本明细与验收边界见 [Runtime 正确性收口](substation_runtime_correctness.md)。
+
 属性抽屉统一为概览、参数、关系、来源四个视图：IFC Pset/工程量按需读取，CBM↔IFC、空间
 link 和几何来源可互相定位，GUID/长路径只作为来源按钮内部键。STD/SLD 在 interactive
 之后解析或从缓存恢复，不成为首个 IFC 的前置门槛。
+
+SCH/STD/SLD 是 optional capability；LOGICALMODEL 空占位或无图纸不会报错、阻塞打开，
+UI 不产生空图纸入口，缓存不要求存在逻辑模型。
 
 ## 5. 导航、属性与来源投影
 
@@ -127,7 +194,7 @@ validate/read/load/serialize/write/upsert 的耗时。
 ## 7. DEV 几何与下一步计划
 
 DEV 路径保持 Geometry Failure Isolation、immutable DEV template 和 bounded placement：
-本轮没有改 DEV Geometry Compiler、shared geometry、IFC parser 或 IFC scheduling。现有
+既有 Fragments release gate 没有改 DEV Geometry Compiler、shared geometry、IFC parser 或 IFC scheduling。现有
 `devGeometryProfile` 继续保存 `worstDevPaths`、phase、instance count、fallback 和
 unresolved 信息；substation01 cold 的长尾另作为下一轮专项，不在 Fragments gate 中混测。
 

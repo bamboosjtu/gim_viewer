@@ -15,7 +15,7 @@
 >   全部位于 `SOLIDMODELn` 字段，嵌套深度分布 {0:2869, 1:329, 2:82, 3:33, 4:3}，最深 4 层。
 >   几何遍历必须递归展开 PHM 并防环；IR 设计中「max depth = 1」约束作废。
 > - 几何资源扩展名集合从 {.mod, .stl} 扩大到 {.mod, .stl, .gl}；其中 substation03 的
->   45 个 .gl 当前**零引用**（孤儿资源，详见 07 号文档复核）。
+>   45 个 .gl 在 SOLIDMODEL 主链中**零引用**；最新研究确认其为同 UUID 设备辅助连接来源，不能据零引用判为无语义资源。
 > - 设备级 IFCFILE+IFCGUID 只在部分导出工具中出现；没有 IFCGUID 时由 FileDevRelation
 >   或项目级 IFC 清单提供降级关联，不能把 GUID 命中当作工程存在性的前提。
 
@@ -160,7 +160,7 @@ docs/schema/_generated/demo-substation-cbm-integrity.csv
 | `FILE22.DEVN`        |    145 | FileDevRelation.cbm 设备映射               |
 | **合计**             |  13344 |                                            |
 
-> `FILE.N.DEVn` 字段集中在 `FileDevRelation.cbm` 一个文件中，每个 `FILE.N` 对应一个 IFC 文件，`DEVn` 列出该 IFC 关联的所有设备 CBM。这是变电工程专用的「IFC ↔ 设备」反向索引表。
+> `FILE.N.DEVn` 字段集中在 `FileDevRelation.cbm` 一个文件中，该历史样本中每个 `FILE.N` 对应一个 IFC 文件，`DEVn` 列出该 IFC 关联的所有设备 CBM。这是该历史样本的反向索引观察；Runtime 的 FDR 是独立设计文档 provenance，可指向 DGN 等来源，不能替代 IFC discovery。
 
 ### 2.2 引用完整性结论
 

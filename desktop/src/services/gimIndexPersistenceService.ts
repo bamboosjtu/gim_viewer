@@ -12,7 +12,8 @@ import type {
   DevSubDevicePayload,
   PhmSolidModelPayload,
 } from '@desktop/database.js';
-import { parseFamSections } from '../gim/famParser.js';
+import { inspectSubstationCapabilities } from '../gim/substationEvidence.js';
+import { parseFamSectionsWithDiagnostics } from '../gim/famParser.js';
 
 /** 属性文件文本读取并发数（acc-plan P2-3） */
 const PARSE_CONCURRENCY = 32;
@@ -20,7 +21,7 @@ import { parseKeyValue } from '../gim/cbmParser.js';
 import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
 import { getFileByPath, normalizeFilePath } from '../gim/fileLookup.js';
-import { isGimEmptyValue, resolveBaseFamilyReference } from '../gim/gimValueSemantics.js';
+import { isGimEmptyValue, resolveBaseFamilyReferences } from '../gim/gimValueSemantics.js';
 
 /** 根据路径判断 entry_type */
 function classifyEntryType(path: string): string {
@@ -43,6 +44,7 @@ function flattenCbmTree(
   out: CbmNodePayload[],
 ): void {
   out.push({
+    raw_properties_json: node.rawProperties ? JSON.stringify(node.rawProperties) : null,
     node_key: node.path,
     parent_key: parentKey,
     path: node.path,
@@ -120,13 +122,14 @@ export async function buildGimIndexPayload(
   // 4. file_dev_entries：每个 deviceCbm 生成一行
   const fileDevEntries: FileDevEntryPayload[] = [];
   for (const entry of fileDevRelations) {
-    for (let i = 0; i < entry.deviceCbms.length; i++) {
+    for (let i = 0; i < Math.max(1, entry.deviceCbms.length); i++) {
       fileDevEntries.push({
+        source_design_file: entry.sourceDesignFile ?? null,
         model_id: entry.modelId,
         ifc_name: entry.ifcName,
         ifc_file: entry.ifcFile,
         device_count: entry.deviceCount,
-        device_cbm: entry.deviceCbms[i],
+        device_cbm: entry.deviceCbms[i] ?? '',
         sort_order: i,
       });
     }
@@ -179,8 +182,7 @@ export async function buildGimIndexPayload(
       }
       // 收集 BASEFAMILY / BASEFAMILYPOINTER 引用；空 sentinel 不进入
       // persistence，否则 warm restore 会留下不可点击的伪来源。
-      const baseFamily = resolveBaseFamilyReference(kv);
-      if (baseFamily) devFamRefs.add(withEntryPrefix('DEV', baseFamily));
+      for (const ref of resolveBaseFamilyReferences(kv)) devFamRefs.add(withEntryPrefix('DEV', ref.path));
     }
   }
 
@@ -197,32 +199,21 @@ export async function buildGimIndexPayload(
     for (let j = 0; j < chunkPaths.length; j++) {
       const text = texts[j];
       if (!text) continue;
-      let sections: Map<string, Map<string, string>>;
-      try {
-        sections = parseFamSections(text);
-      } catch {
-        continue;
-      }
       const famPath = chunkPaths[j];
-      let sortOrder = 0;
-      for (const [secName, props] of sections) {
-        for (const [key, val] of props) {
-          if (!isGimEmptyValue(val)) {
-            famProperties.push({
-              source_path: famPath,
-              section_name: secName,
-              prop_key: key,
-              prop_value: val,
-              sort_order: sortOrder,
-            });
-          }
+      try {
+        const parsed = parseFamSectionsWithDiagnostics(text, famPath);
+        for (const [sortOrder, property] of parsed.properties.entries()) {
+          famProperties.push({ source_path: famPath, section_name: property.section,
+            source_line: property.sourceLine,
+            prop_key: property.label, prop_value: property.rawValue,
+            raw_property_json: JSON.stringify(property), sort_order: sortOrder });
         }
-        sortOrder++;
-      }
+      } catch { continue; }
     }
   }
 
   return {
+    capability_summary_json: JSON.stringify(await inspectSubstationCapabilities(files, cbmTree, ifcEntries)),
     project_id: projectId,
     source_sha256: sourceSha256 ?? null,
     entries,

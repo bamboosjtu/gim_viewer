@@ -46,6 +46,7 @@ import {
   DevGlbTemplatePool,
   runBudgetedPlacementWork,
   DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY,
+  getLoadedDevOccurrenceKind,
   type DevGlbParsedAsset,
 } from './devGlbTemplateRuntime.js';
 import {
@@ -617,7 +618,7 @@ export async function runProgressiveDevGlbPipeline(
       if (failedDevKeys.has(devKey)) return;
       if (!isSessionValid()) return;
       const instanceKey = `dev:${devPath}#${seed.path}`;
-      if (state.loadedXmlModGroups.has(instanceKey)) return;
+      if (state.loadedXmlModGroups.has(instanceKey) || getLoadedDevOccurrenceKind(state,seed.path)) return;
       if (!preparation) return;
 
       let group: THREE.Group | null = null;
@@ -669,6 +670,12 @@ export async function runProgressiveDevGlbPipeline(
         }
 
         group.userData.devPath = devPath;
+        if (getLoadedDevOccurrenceKind(state,seed.path)) {
+          if (!shared) disposeGroup(group);
+          return;
+        }
+        group.userData.rootOccurrence = seed.path;
+        group.userData.instanceKey = instanceKey;
         const sceneCommitStarted = performance.now();
         modRoot.add(group);
         state.loadedXmlModGroups.set(instanceKey, group);
