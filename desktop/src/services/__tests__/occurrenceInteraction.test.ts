@@ -10,6 +10,7 @@ import { highlightModGroups, resetModHighlight } from '../../viewer/highlight.js
 import { autoLoadModAndStlGeometry } from '../modAutoLoadService.js';
 import { runProgressiveDevGlbPipeline } from '../progressiveGeometryService.js';
 import type { ViewerContext } from '../../viewer/viewerEngine.js';
+import { nestedPartFixture } from './nestedPartIndexFixture.js';
 
 const mock = vi.hoisted(() => ({ ctx: null as any, frame: vi.fn(), bytes: null as Uint8Array | null }));
 vi.mock('@desktop/database.js', () => ({ readGlbFile: async () => mock.bytes }));
@@ -36,6 +37,27 @@ beforeEach(() => {
   mock.ctx = { world: { scene: { three: new THREE.Scene() } }, fragments: { resetHighlight: vi.fn() } };
   mock.frame.mockReset(); mock.frame.mockResolvedValue(undefined);
   mock.bytes = null;
+});
+
+it.each(['raw','glb'] as const)('nested PARTINDEX uses the real root and parent subtree after %s loading', async (mode) => {
+  const {files,tree,root,b}=await nestedPartFixture(2);
+  const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.currentProjectId=1;
+  if (mode==='glb') mock.bytes=(await serializeDevToGlbDetailed(root.devPath,files)).bytes!;
+  await loadModStlForNode(state,b,() => {});
+  const scope=deviceOccurrenceScope(tree,b);
+  expect(scope.rootOccurrence).toBe(root.path);
+  const groups=collectDeviceGroups(state,b.devPath,scope);
+  expect(groups.map(g=>g.userData.assemblyPath).sort()).toEqual(['sub:0/sub:0','sub:1/sub:0']);
+  expect(state.highlightedModState?.groups).toEqual(groups);
+  expect(groups.every(g=>{
+    let owner: THREE.Object3D | null=g;
+    while (owner && !owner.userData.rootOccurrence) owner=owner.parent;
+    return owner?.userData.rootOccurrence===root.path;
+  })).toBe(true);
+  const count=state.loadedXmlModGroups.size;
+  await loadModStlForNode(state,b,() => {});
+  expect(state.loadedXmlModGroups.size).toBe(count);
+  expect([...state.loadedXmlModGroups.values()].every(g=>g.userData.rootOccurrence===root.path)).toBe(true);
 });
 
 it('a GLB becoming available after raw loading does not duplicate the same occurrence on repeat click', async () => {

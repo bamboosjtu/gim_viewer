@@ -1,5 +1,10 @@
 # 变电交互正确性收口验收
 
+后续记录：本文件保留上一轮的受控实验事实。04 嵌套 PARTINDEX 的 physical root 和候选范围
+已在 [嵌套部件报告](substation_nested_partindex_correctness.md) 修正；默认完整 IFC 路径的新测量、
+失败的响应目标与未执行项见 [IFC 响应报告](substation_ifc_responsiveness.md)。
+下文暂停大型 IFC 的观察不能代替默认完整路径验收。
+
 验收日期：2026-10-05（Asia/Shanghai）。开始时 HEAD 为
 `c1e582fb37f0dc9b1a0c39578201734a86ee5807`，与指定基线一致，工作区干净。
 本报告对应基线上的未提交修改。上一轮 FAM sourceLine、SQLite 真实往返、DEV occurrence、

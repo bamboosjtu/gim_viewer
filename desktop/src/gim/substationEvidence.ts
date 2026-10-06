@@ -40,6 +40,8 @@ export function substationDevIdentity(path: string): string {
 }
 
 export interface SubstationAliasIndex {
+  /** Source hierarchy, independent of the physical placement owner. */
+  partToSemanticParent: Map<string, CbmNode>;
   partToRoot: Map<string, CbmNode>;
   childDevToParts: Map<string, CbmNode[]>;
   partToChildDev: Map<string, string>;
@@ -47,32 +49,55 @@ export interface SubstationAliasIndex {
   partToOccurrences: Map<string, CbmNode[]>;
 }
 
-/** Identity join scoped to the nearest owning device; never join array positions. */
+/** The same entries seed physical loading and own derived semantic aliases. */
+export function isSubstationGeometryRoot(node: CbmNode): boolean {
+  const entity = normalizeEntityName(node.entityName);
+  return !!node.devPath && entity !== 'DEV_SUBDEVICE' && entity !== 'PARTINDEX';
+}
+
+/** Identity join within the real root's assembly graph and the semantic parent's candidates. */
 export function buildSubstationAliasIndex(root: CbmNode | null): SubstationAliasIndex {
   const index: SubstationAliasIndex = {
     childDevToParts: new Map(), partToChildDev: new Map(), partToOccurrences: new Map(), partToRoot: new Map(),
+    partToSemanticParent: new Map(),
   };
-  const visit = (node: CbmNode): void => {
-    const parts = node.children.filter((n) => normalizeEntityName(n.entityName) === 'PARTINDEX');
+  const collectOccurrences = (owner: CbmNode): CbmNode[] => {
     const occurrences: CbmNode[] = [];
     const collect = (n: CbmNode): void => {
       if (normalizeEntityName(n.entityName) !== 'DEV_SUBDEVICE') return;
       occurrences.push(n);
       n.children.forEach(collect);
     };
-    node.children.forEach(collect);
-    for (const part of parts) {
-      index.partToRoot.set(part.path, node);
-      if (!part.devPath) continue;
-      const identity = substationDevIdentity(part.devPath);
-      const aliases = index.childDevToParts.get(identity) ?? [];
-      aliases.push(part);
-      index.childDevToParts.set(identity, aliases);
-      index.partToChildDev.set(part.path, identity);
-      index.partToOccurrences.set(part.path,
-        occurrences.filter((n) => substationDevIdentity(n.devPath) === identity));
+    owner.children.forEach(collect);
+    return occurrences;
+  };
+  const visit = (node: CbmNode, parent?: CbmNode, owner?: CbmNode,
+    occurrences: CbmNode[] = [], parentPart?: CbmNode): void => {
+    const entity = normalizeEntityName(node.entityName);
+    // Virtual DEV nodes are physical evidence, never another semantic loading root.
+    if (entity === 'DEV_SUBDEVICE') return;
+    if (isSubstationGeometryRoot(node)) {
+      owner = node;
+      occurrences = collectOccurrences(node);
+      parentPart = undefined;
     }
-    node.children.forEach(visit);
+    if (entity === 'PARTINDEX') {
+      if (parent) index.partToSemanticParent.set(node.path, parent);
+      if (owner) index.partToRoot.set(node.path, owner);
+      const identity = substationDevIdentity(node.devPath ?? '');
+      if (identity) {
+        const aliases = index.childDevToParts.get(identity) ?? [];
+        aliases.push(node);
+        index.childDevToParts.set(identity, aliases);
+        index.partToChildDev.set(node.path, identity);
+      }
+      const parents = parentPart ? index.partToOccurrences.get(parentPart.path) ?? [] : undefined;
+      index.partToOccurrences.set(node.path, occurrences.filter((candidate) =>
+        !!identity && substationDevIdentity(candidate.devPath) === identity &&
+        (!parents || parents.some((p) => candidate.path === p.path || candidate.path.startsWith(`${p.path}#dev:`)))));
+      parentPart = node;
+    }
+    node.children.forEach((child) => visit(child, node, owner, occurrences, parentPart));
   };
   if (root) visit(root);
   return index;

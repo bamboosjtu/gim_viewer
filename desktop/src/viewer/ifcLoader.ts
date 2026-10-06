@@ -7,6 +7,7 @@ import { debugLog, debugWarn } from '../utils/logger.js';
 import { createIfcModelId } from '../gim/modelIdentity.js';
 import { perfBegin, perfCurrentSession } from '../utils/perfTimings.js';
 import { registerIfcLoadDiagnostic, takeIfcLoadDiagnostic } from './ifcLoadDiagnostics.js';
+import { loadRawIfc } from './ifcConversion.js';
 
 /** 诊断计数：仅反映已返回 Promise 的 Fragments update 是否 settle。 */
 let outstandingFragmentsUpdateCount = 0;
@@ -283,9 +284,7 @@ export async function loadIfcBuffer(
   const reportProgress = (progress: number) => {
     if (isCurrent()) onProgress?.(progress);
   };
-  await ctx.ifcLoader.load(buffer, true, runtimeModelId, {
-    processData: { progressCallback: reportProgress },
-  });
+  await loadRawIfc(ctx, state, session, buffer, runtimeModelId, identityPath || name, reportProgress);
   if (!isCurrent()) {
     try { ctx.fragments.core.disposeModel(runtimeModelId); } catch { /* 事件尚未登记时无需清理 */ }
     return;

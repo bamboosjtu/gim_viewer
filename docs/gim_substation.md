@@ -9,6 +9,11 @@
 [substation_interaction_correctness.md](substation_interaction_correctness.md)。工程会话保护资源
 有效性，独立的 SelectionRequest 保护属性、高亮、相机及树/SLD 的选择提交权。
 
+嵌套 PARTINDEX 的语义父链与实际几何 root 分开；子候选限定在父候选装配子树内，
+详见 [嵌套部件正确性](substation_nested_partindex_correctness.md)。原始 IFC conversion 与
+Spatial STEP scan 使用独立 Worker，保持原坐标锚点、属性及缓存契约；当前持续响应的
+失败项和完整路径证据见 [IFC 响应验收](substation_ifc_responsiveness.md)。
+
 ## 1. Runtime 与就绪语义
 
 ```text

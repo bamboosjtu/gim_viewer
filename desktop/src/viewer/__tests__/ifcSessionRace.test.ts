@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import { loadIfcEntry } from '../ifcEntryLoader.js';
 import { registerModelEvents } from '../ifcLoader.js';
+vi.mock('../ifcConversion.js', () => ({ loadRawIfc: (ctx:any,_state:any,_session:any,bytes:Uint8Array,id:string) =>
+  ctx.ifcLoader.load(bytes,true,id), cancelIfcConversions:vi.fn() }));
 
 type Model = {
   modelId: string;

@@ -14,14 +14,21 @@ it('retains every physical FAM row through production SQLite save/query/restore'
     ['DEV/raw.fam', new File([text], 'raw.fam')],
     ['DEV/empty.fam', new File([''], 'empty.fam')],
     ['CBM/model.ifc', new File([''], 'model.ifc')],
+    ['CBM/later.ifc', new File([''], 'later.ifc')],
   ]);
   const tree = await buildCbmTree(files);
-  const index = await buildGimIndexPayload(1, files, [{ modelId: 'model', name: 'model', path: 'CBM/model.ifc' }], tree, []);
+  // Hash-like identities need not sort in original load order. The first IFC
+  // establishes the shared coordinate anchor, so SQLite must preserve order.
+  const ifcs = [{ modelId: 'z-first', name: 'model', path: 'CBM/model.ifc' },
+    { modelId: 'a-second', name: 'later', path: 'CBM/later.ifc' }];
+  const index = await buildGimIndexPayload(1, files, ifcs, tree, []);
   const refs = await buildGeometryRefsPayload(1, files);
   const [warm, migrated] = sqliteRoundTrip([{ index, refs },{ index, refs, migrate:true }]);
   expect(migrated.index.fam_properties.map((p) => p.raw_property_json)).toEqual(warm.index.fam_properties.map((p) => p.raw_property_json));
   const state = new AppState();
   restoreGimIndexToState(state, warm.index);
+  expect(state.currentIfcEntries).toEqual(ifcs);
+  expect(migrated.index.ifc_models.map(m => m.model_id)).toEqual(ifcs.map(m => m.modelId));
   const parsed = parseFamSectionsWithDiagnostics(text, 'DEV/raw.fam');
   expect(state.cachedFamSourceProperties.get('DEV/raw.fam')).toEqual(parsed.properties);
   expect(warm.index.fam_properties.map((p) => p.source_line)).toEqual([2,3,4,5,7,9]);

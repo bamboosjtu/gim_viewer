@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import type { CbmNode } from '../../gim/types.js';
+import { nestedPartFixture } from './nestedPartIndexFixture.js';
 
 const runtime = vi.hoisted(() => ({ ctx: null as any }));
 vi.mock('../../viewer/viewerRuntime.js', () => ({ getViewerRuntime: async () => ({ctx:runtime.ctx}) }));
@@ -36,6 +37,26 @@ beforeEach(() => {
     stop:vi.fn(),getPosition:(v:THREE.Vector3) => v.copy(camera.position),getTarget:(v:THREE.Vector3) => v.copy(camera.target) };
   runtime.ctx={ world:{ scene:{three:new THREE.Scene()},camera:{controls:camera} },
     fragments:{list:new Map(),resetHighlight:vi.fn(async () => {}),highlight:vi.fn(async () => {}),core:{update:vi.fn()} } };
+});
+
+it('nested parent → child selections share the physical root load while the child owns the final commit', async () => {
+  const {files,tree,root,a,b}=await nestedPartFixture(2);
+  const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree;
+  const source=files.get('DEV/root.dev')!,read=deferred<ArrayBuffer>(),started=deferred<void>();
+  let reads=0;
+  files.set('DEV/root.dev',{text:()=>source.text(),arrayBuffer:()=>{reads++;started.resolve();return read.promise;}} as File);
+  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const slow=handleNodeClick(state,a,()=>{}); await started.promise;
+  const latest=handleNodeClick(state,b,()=>{});
+  expect(reads).toBe(1);
+  read.resolve(await source.arrayBuffer()); await Promise.all([slow,latest]);
+  expect(state.selectionRequest?.target?.key).toBe(b.path);
+  expect(document.querySelector('.props-header')?.textContent).toBe(b.name);
+  expect(state.highlightedModState?.groups.map(g=>g.userData.assemblyPath).sort()).toEqual(['sub:0/sub:0','sub:1/sub:0']);
+  expect([...state.loadedXmlModGroups.values()].every(g=>g.userData.rootOccurrence===root.path)).toBe(true);
+  const count=state.loadedXmlModGroups.size;
+  await handleNodeClick(state,b,()=>{});
+  expect(state.loadedXmlModGroups.size).toBe(count);
 });
 
 it('A slow FAM cannot replace B inspector after B has rendered', async () => {

@@ -6,6 +6,11 @@ import { perfReset, perfSnapshot } from '../../utils/perfTimings.js';
 import { loadIfcEntry } from '../ifcEntryLoader.js';
 import { registerModelEvents } from '../ifcLoader.js';
 
+// Cache policy tests control the raw-conversion boundary; worker IPC and actual
+// lifecycle registration are exercised separately in ifcConversion.test.ts.
+vi.mock('../ifcConversion.js', () => ({ loadRawIfc: (ctx:any,_state:any,_session:any,bytes:Uint8Array,id:string,_path:string,progress:any) =>
+  ctx.ifcLoader.load(bytes,true,id,{processData:{progressCallback:progress}}), cancelIfcConversions:vi.fn() }));
+
 const db = vi.hoisted(() => ({
   validate: vi.fn(),
   read: vi.fn(),

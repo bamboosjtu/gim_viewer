@@ -14,10 +14,11 @@ try {
   if (run.status === 0 && existsSync(report)) {
     const results = JSON.parse(readFileSync(report,'utf8'));
     const assertions = results.testResults.flatMap((suite) => suite.assertionResults);
-    const missing = ['substation01','substation02','substation03'].filter((id) => !assertions.some((a) =>
+    const required = ['substation01','substation02','substation03', ...(process.env.GIM_REQUIRE_SUBSTATION04==='1' ? ['substation04'] : [])];
+    const missing = required.filter((id) => !assertions.some((a) =>
       a.fullName.includes(`STRICT ${id}:`) && a.status === 'passed'));
     if (missing.length) console.error(`Strict gate failed: required sample test missing, failed or skipped: ${missing.join(', ')}`);
-    else { console.info('Strict required samples 01/02/03: passed with zero required skips'); code=0; }
+    else { console.info(`Strict required samples ${required.join('/')}: passed with zero required skips`); code=0; }
   }
 } finally { rmSync(dir,{recursive:true,force:true}); }
 process.exitCode=code;

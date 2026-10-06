@@ -1,5 +1,9 @@
 # 变电 Runtime 正确性收口验收
 
+本文件保留 FAM 与 occurrence 收口时的验收事实。后续嵌套 PARTINDEX 物理 root 修正见
+[独立报告](substation_nested_partindex_correctness.md)，默认完整 IFC 的 Worker 隔离、
+冷暖实验及响应限制见 [响应报告](substation_ifc_responsiveness.md)。
+
 基线：`d6daecec40b3b8a3db6f15a9038715fcff942b9c`。开始时 HEAD 与该提交一致，工作区干净，未发现需要保留的后续提交。本轮保留现有解析层、Spatial Core、immutable DEV template pool 和分域缓存，不新增厂商分支、primitive、InstancedMesh，不调整 Fragments 默认开关或线路业务。
 
 ## 修改前复现

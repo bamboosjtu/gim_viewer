@@ -8,7 +8,7 @@ import { buildCbmTree } from '../../gim/cbmParser.js';
 import { discoverIfcFromCBM } from '../../gim/gimIndexer.js';
 import { parseFileDevRelation } from '../../gim/fileDevParser.js';
 import { parseFamSectionsWithDiagnostics } from '../../gim/famParser.js';
-import { buildSubstationAliasIndex, discoverSubstationGlSidecars, deviceOccurrenceScope } from '../../gim/substationEvidence.js';
+import { buildSubstationAliasIndex, discoverSubstationGlSidecars, deviceOccurrenceScope, devAssemblyPath } from '../../gim/substationEvidence.js';
 import { buildGimIndexPayload, buildGeometryRefsPayload } from '../gimIndexPersistenceService.js';
 import { restoreGimIndexToState } from '../gimIndexRestoreService.js';
 import { collectCbmDeviceInstances, tryDevGlbFastPath, loadScopedRawFallbackGeometry } from '../modAutoLoadService.js';
@@ -53,12 +53,31 @@ function aliasShape(tree: Parameters<typeof buildSubstationAliasIndex>[0]) {
   const aliases = buildSubstationAliasIndex(tree);
   return [...aliases.partToOccurrences].map(([path, nodes]) => [path, nodes.map((n) => n.path)]).sort();
 }
+function verifyPhysicalAliases(tree: Parameters<typeof buildSubstationAliasIndex>[0]) {
+  const aliases=buildSubstationAliasIndex(tree),roots=new Set(collectCbmDeviceInstances(tree).map(n=>n.path));
+  for (const [path,candidates] of aliases.partToOccurrences) {
+    const owner=aliases.partToRoot.get(path);
+    if (!candidates.length) continue;
+    expect(owner, `linked alias ${path} must have a real loading root`).toBeDefined();
+    expect(roots.has(owner!.path)).toBe(true);
+    const actual=new Set<string>();
+    const walk=(n:NonNullable<typeof tree>)=>{if(n.entityName!=='DEV_SUBDEVICE')return;actual.add(n.path);n.children.forEach(walk);};
+    owner!.children.forEach(walk);
+    expect(candidates.every(n=>actual.has(n.path))).toBe(true);
+    const parent=aliases.partToSemanticParent.get(path);
+    if (parent?.entityName==='PARTINDEX') {
+      const parentCandidates=aliases.partToOccurrences.get(parent.path) ?? [];
+      expect(candidates.every(n=>parentCandidates.some(p=>n.path===p.path||n.path.startsWith(`${p.path}#dev:`)))).toBe(true);
+    }
+  }
+  return aliases;
+}
 const results: unknown[] = [];
 
 for (const [ordinal, sample] of samples.entries()) {
   const available = existsSync(join(root, `${sample.id}.gim`));
   // 04 optional does not gate required 01/02/03. Required ones never use skip.
-  if (ordinal === 3 && !available) { console.info('substation04: optional sample unavailable'); continue; }
+  if (ordinal === 3 && !available && process.env.GIM_REQUIRE_SUBSTATION04!=='1') { console.info('substation04: optional sample unavailable'); continue; }
   it(`STRICT ${sample.id}: raw → SQLite → restore → Rust/TS geometry → GLB → raw fallback`, async () => {
     expect(available, `required ${sample.id}.gim missing from ${root}`).toBe(true);
     expect(createHash('sha256').update(readFileSync(join(root, `${sample.id}.gim`))).digest('hex')).toBe(sample.sha);
@@ -74,12 +93,20 @@ for (const [ordinal, sample] of samples.entries()) {
     const index = await buildGimIndexPayload(1, files, ifcs, tree, fdr, undefined, sample.sha);
     const refs = await buildGeometryRefsPayload(1, files, sample.sha);
     const seeds = collectCbmDeviceInstances(tree);
+    const physicalAliases=verifyPhysicalAliases(tree);
+    if (sample.id==='substation04') {
+      const part='CBM/85401e77-4659-47df-847b-ec4d4e8a319d.cbm';
+      expect(physicalAliases.partToRoot.get(part)?.path).toBe('CBM/c93b6211-9266-4a4f-a0d9-dec587b4e02c.cbm');
+      expect(physicalAliases.partToOccurrences.get(part)?.map(n=>devAssemblyPath(n.path))).toEqual(
+        [0,1].flatMap(parent=>Array.from({length:8},(_,i)=>`sub:0/sub:${parent}/sub:${i}`)));
+    }
     const byDev = new Map<string, typeof seeds>();
     for (const seed of seeds) { const key = seed.devPath.replace(/^dev\//i, '').toLowerCase(); byDev.set(key, [...(byDev.get(key) ?? []), seed]); }
     const filter = byDev.keys().next().value!;
     const [sql] = sqliteRoundTrip([{ index, refs, filter: [filter] }]);
     const state = new AppState();
     restoreGimIndexToState(state, sql.index);
+    expect(state.currentIfcEntries).toEqual(ifcs); // first IFC anchor survives SQLite restore
     const raw = index.fam_properties.map((r) => JSON.parse(r.raw_property_json!));
     const warm = [...state.cachedFamSourceProperties.values()].flat();
     const sortRows = (rows: typeof raw) => rows.sort((a, b) => a.sourcePath.localeCompare(b.sourcePath) || a.sourceLine - b.sourceLine);
@@ -93,6 +120,7 @@ for (const [ordinal, sample] of samples.entries()) {
     const warmSeeds = collectCbmDeviceInstances(state.currentCbmTree);
     expect(warmSeeds.map((s) => [s.path,s.name,s.devPath,s.transformMatrix])).toEqual(seeds.map((s) => [s.path,s.name,s.devPath,s.transformMatrix]));
     expect(aliasShape(state.currentCbmTree)).toEqual(aliasShape(tree));
+    verifyPhysicalAliases(state.currentCbmTree);
     const local = new Map<string, Awaited<ReturnType<typeof discoverGeometriesFromDevPath>>>();
     const coldLeaves: ReturnType<typeof canonicalLeaf>[] = [];
     for (const [dev, placements] of byDev) {

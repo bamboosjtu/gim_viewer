@@ -206,8 +206,11 @@ async function bootstrapAsync(): Promise<void> {
           if (import.meta.env.DEV) {
             (globalThis as { __GIM_LAST_BENCHMARK__?: string }).__GIM_LAST_BENCHMARK__ = payload;
           }
+          // Keep the measured evidence available when WebView clipboard access
+          // is denied or its permission dialog remains pending.
+          console.log('[性能验收] benchmark JSON:\n', payload);
           await navigator.clipboard.writeText(payload);
-          console.log('[性能验收] benchmark JSON 已复制到剪贴板:\n', payload);
+          console.log('[性能验收] benchmark JSON 已复制到剪贴板');
           showLoading('性能验收 JSON 已复制到剪贴板');
           setTimeout(hideLoading, 2000);
         } catch (err) {

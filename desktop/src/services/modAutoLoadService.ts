@@ -18,6 +18,7 @@
 
 import * as THREE from 'three';
 import type { CbmNode } from '../gim/types.js';
+import { isSubstationGeometryRoot } from '../gim/substationEvidence.js';
 import type { XmlModColor } from '../gim/geometry/ir.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { GeometryCacheManifest, GeometryCacheManifestEntry } from '@desktop/database.js';
@@ -282,10 +283,7 @@ export interface AutoLoadProgress {
  * 若 PARTINDEX 再作为独立 seed，会把同一部件以缺失局部矩阵的位置再渲染一次。
  */
 export function isGeometryAutoLoadSeed(node: CbmNode): boolean {
-  const entityName = node.entityName?.trim().toLowerCase();
-  return !!node.devPath
-    && entityName !== 'dev_subdevice'
-    && entityName !== 'partindex';
+  return isSubstationGeometryRoot(node);
 }
 
 export function collectCbmDeviceInstances(root: CbmNode | null): CbmNode[] {

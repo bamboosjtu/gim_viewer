@@ -5,7 +5,6 @@ import { scanIfcFiles, discoverIfcFromCBM, buildIfcGuidIndex } from '../gim/gimI
 import { getFileByPath } from '../gim/fileLookup.js';
 import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
 import {
-  buildSubstationSpatialIndexFromFiles,
   type SubstationSpatialIndexObserver,
 } from '../gim/ifcSpatialParser.js';
 import { parseFileDevRelation } from '../gim/fileDevParser.js';
@@ -20,6 +19,7 @@ import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBa
 import type { GimRuntimeOpenContext } from './gimOpenCore.js';
 import { validateGimCache } from '@desktop/database.js';
 import { hydrateNativeSmallFiles } from './nativeSmallFileHydration.js';
+import { buildSubstationSpatialIndexInWorker } from './substationSpatialWorkerClient.js';
 import {
   readSubstationSpatialSemanticCache,
   writeSubstationSpatialSemanticCache,
@@ -245,12 +245,13 @@ async function buildAndCommitSubstationSpatialSemantic(
       models: ifcEntries.length,
     }, perfSession);
     const endSpatial = perfBegin(label, undefined, perfSession);
-    const spatialIndex = await buildSubstationSpatialIndexFromFiles(
+    const spatialIndex = await buildSubstationSpatialIndexInWorker(
       files,
       ifcEntries,
       cbmTree,
       fileDevRelations,
       createSubstationSpatialObserver(state, perfSession),
+      () => state.isCurrentSession(session),
     );
     if (!state.isCurrentSession(session)) return false;
     endSpatial(undefined, {

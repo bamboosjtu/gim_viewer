@@ -2137,13 +2137,22 @@ fn is_expected_cache_path(
         .path()
         .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
-    let relative = validate_entry_path(entry_path)?;
     let root = base.join("extracted").join(project_id.to_string());
+    is_expected_cache_path_in_root(&root, entry_path, candidate)
+}
+
+fn is_expected_cache_path_in_root(
+    root: &Path,
+    entry_path: &str,
+    candidate: &Path,
+) -> Result<bool, String> {
+    let relative = validate_entry_path(entry_path)?;
     if reject_link(&root, " IFC").is_err() {
         return Ok(false);
     }
-    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.clone());
-    let expected = canonical_root.join(relative);
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let expected = canonical_root.join(&relative);
+    let lexical_expected = root.join(relative);
     let norm = |path: &Path| {
         let mut s = path.to_string_lossy().replace('\\', "/");
         #[cfg(windows)]
@@ -2164,7 +2173,11 @@ fn is_expected_cache_path(
         }
         s
     };
-    if norm(candidate) != norm(&expected) {
+    // Windows packaged processes can redirect a trusted app-data directory
+    // into their package LocalCache during canonicalize. Entries written via
+    // app_data_dir retain the lexical name. Accept either trusted spelling;
+    // never canonicalize an arbitrary candidate to establish containment.
+    if norm(candidate) != norm(&expected) && norm(candidate) != norm(&lexical_expected) {
         return Ok(false);
     }
     let mut current = canonical_root;
@@ -3979,13 +3992,15 @@ fn get_gim_index_connection(conn: &Connection, project_id: i64) -> Result<GetGim
         cbm_nodes.push(r.map_err(|e| format!("读取 substation_cbm_node 失败: {}", e))?);
     }
 
-    // 3. substation_ifc_model
+    // 3. substation_ifc_model: INSERT follows cold load order. Preserve it:
+    // model_id is a hash identity, not a presentation/loading order; changing
+    // the first IFC also changes the project coordinate anchor.
     let mut stmt = conn
         .prepare(
             "SELECT id, project_id, model_id, name, entry_path, created_at_ms
              FROM substation_ifc_model
              WHERE project_id = ?1
-             ORDER BY model_id ASC",
+             ORDER BY id ASC",
         )
         .map_err(|e| format!("预处理 substation_ifc_model 失败: {}", e))?;
     let rows = stmt
@@ -6929,6 +6944,21 @@ pub fn get_project_diagnostic(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ifc_cache_path_accepts_trusted_lexical_and_canonical_root_names() {
+        let root = std::env::temp_dir().join(format!("gim-ifc-root-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(root.join("CBM")).unwrap();
+        let file = root.join("CBM").join("模型.ifc");
+        std::fs::write(&file, b"ISO-10303-21;").unwrap();
+        assert!(super::is_expected_cache_path_in_root(&root, "CBM/模型.ifc", &file).unwrap());
+        assert!(super::is_expected_cache_path_in_root(&root, "CBM/模型.ifc", &file.canonicalize().unwrap()).unwrap());
+        assert!(!super::is_expected_cache_path_in_root(&root, "CBM/模型.ifc", &root.join("other.ifc")).unwrap());
+        assert!(super::is_expected_cache_path_in_root(&root, "../模型.ifc", &file).is_err());
+        std::fs::remove_file(file).unwrap();
+        std::fs::remove_dir(root.join("CBM")).unwrap();
+        std::fs::remove_dir(root).unwrap();
+    }
     #[cfg(test)]
     mod line_cache_protocol_tests {
         #[allow(unused_imports)]

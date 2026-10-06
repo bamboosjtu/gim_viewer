@@ -1,5 +1,9 @@
 # 变电性能 Benchmark
 
+最新默认 OFF、完整原始 IFC 路径的逐次测量见
+[IFC 阻塞归因与响应报告](substation_ifc_responsiveness.md)。下文的历史 HIT/完整性标签与
+较短 interactive 时刻不等于持续响应验收通过，也不表示所有 primitive 已完整还原。
+
 > 本文记录变电 Runtime 的可复核性能证据、Fragments Cache 门禁和下一步计划，不记录按日期
 > 排列的运行日志。当前实现见 [gim_substation.md](gim_substation.md)，样本事实见
 > [schema/README.md](schema/README.md)。

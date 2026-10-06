@@ -1,5 +1,6 @@
 import * as OBC from '@thatopen/components';
 import type { ViewerContext } from './viewerEngine.js';
+import { loadRawIfc } from './ifcConversion.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { isTauri } from '@desktop/runtime.js';
 import { isFragmentsCacheEnabled, FRAGMENTS_CACHE_COMPOSED_KEY } from '../config/features.js';
@@ -196,9 +197,7 @@ export async function loadIfcEntry(
   let webIfcLoadFailed = false;
   let model: any;
   try {
-    model = await ctx.ifcLoader.load(ifcBuffer, true, runtimeModelId, {
-      processData: { progressCallback: reportProgress },
-    });
+    model = await loadRawIfc(ctx, state, session, ifcBuffer, runtimeModelId, entryPath || name, reportProgress, perfSessionId);
   } catch (err) {
     webIfcLoadFailed = true;
     throw err;
