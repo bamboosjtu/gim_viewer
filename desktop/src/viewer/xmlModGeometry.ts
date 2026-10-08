@@ -174,7 +174,7 @@ function primitiveToGeometryUncached(p: XmlModPrimitive): THREE.BufferGeometry |
       return geo;
     }
     case 'BeamChannelLike':
-      // 截面需型号查表，暂用近似盒体（100×L×50），docs/schema/08 §P0-3 已标注近似语义
+      // 截面需型号查表，暂用近似盒体（100×L×50），docs/schema/substation-mod.md 已标注近似语义
       return new THREE.BoxGeometry(100, Math.max(sanitizeNum(p.length), 1), 50);
     case 'StretchedBody':
       return createStretchedBodyGeometry(p.array, p.normal, p.l);
@@ -415,7 +415,7 @@ export function entityToMesh(
 /**
  * A 原始值 → 不透明度。
  *
- * 规则（docs/schema/10 §P3-2 实测四工具）：
+ * 规则（docs/schema/substation-mod.md 实测四工具）：
  * - A=0 是 Bentley/BIMBase 的「不透明哨兵」（占绝对主导），不是全透明
  * - 刻度按文件级 maxA 判定：maxA > 100 → 字节制(/255)，否则百分制(/100)
  */

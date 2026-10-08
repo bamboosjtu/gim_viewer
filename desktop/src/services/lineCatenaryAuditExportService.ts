@@ -274,7 +274,7 @@ export function formatLineCatenaryAuditMarkdown(payload: LineCatenaryAuditExport
  *
  * 新增章节：
  * - §10 档距聚合摘要 + WIRE 拓扑分类摘要（M4-B3C）
- * - §11 inter-point 跨点档距样本（M4-B3C，前 5 档距）
+ * - §11 inter-point 跨点档距样本（前 5 档距）
  *
  * M4-B3C 收口说明：
  * - same-point 不应直接进入悬链线渲染（同点内部连接）

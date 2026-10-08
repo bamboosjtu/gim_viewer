@@ -9,7 +9,7 @@
  * - F4System (GROUPTYPE=WIRE): BACKSTRING, FRONTSTRING, SUBDEVICES.NUM + SUBDEVICE<i>
  * - Tower_Device/Wire_Device/WIRE/CROSS: OBJECTMODELPOINTER(→.dev), BASEFAMILY(→.fam)
  *
- * 依据 docs/gim_powerline.md。
+ * 依据 docs/software-spec.md。
  */
 
 import type { GimGraph, GimGraphNode } from './gimGraphTypes.js';
@@ -145,7 +145,7 @@ export async function buildLineGimGraph(
    *
    * 链路：CROSS.cbm 的 OBJECTMODELPOINTER → .dev → SOLIDMODEL0(.phm) → SOLIDMODEL0(.mod)
    * → MOD 文本首部的 `CODE=<n>` 行。
-   * 业务映射（docs/schema/11）：201=房屋、191=河流、1019=树木、30~37=电力线、523=通信电缆。
+   * 业务映射（docs/schema/powerline-mod.md）：201=房屋、191=河流、1019=树木、30~37=电力线、523=通信电缆。
    * 任一环节失败返回 null，不阻断图构建。
    */
   async function resolveCrossCode(
@@ -306,7 +306,7 @@ export async function buildLineGimGraph(
     }
 
     // CROSS 叶节点：沿 OBJECTMODELPOINTER → DEV → PHM → MOD 读取 CODE（被跨越物类型，
-    // 业务映射表见 docs/schema/11：201=房屋、191=河流、1019=树木、30~37=电力线、523=通信电缆）。
+    // 业务映射表见 docs/schema/powerline-mod.md：201=房屋、191=河流、1019=树木、30~37=电力线、523=通信电缆）。
     // 失败不阻断构建，CODE 缺失时 UI 回退到 classifyName 展示。
     if (entityName === 'CROSS') {
       const code = await resolveCrossCode(kv['OBJECTMODELPOINTER'] || '', fileByName);

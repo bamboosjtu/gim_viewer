@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeEntityName } from '../entityName.js';
 
-describe('normalizeEntityName（大小写三态实证，docs/schema/04）', () => {
+describe('normalizeEntityName（大小写三态实证，docs/schema/semantic-model.md）', () => {
   it('变电层级：F4SYSTEM / f4system → F4System', () => {
     expect(normalizeEntityName('F4SYSTEM')).toBe('F4System');
     expect(normalizeEntityName('f4system')).toBe('F4System');

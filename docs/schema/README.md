@@ -1,108 +1,45 @@
-# GIM Schema Research 目录
+# GIM 格式与样本复核
 
-本目录用于沉淀 GIM 文件格式研究、样本实证结论和后续解析器实现边界。样本分析的唯一归档
-位置是本目录；`research/*.html` 是当前 demo 样本的最新分析输入，较旧结论冲突时须以
-最新证据复核。产品实现文档只引用已经确认的规则，不复制单次分析日志。
+这里记录匿名样本中的格式事实，以及当前软件解析和消费这些数据的边界。
+每项结论限于已登记样本；不能由导出工具习惯推定通用 GIM 标准。
 
-当前文档分为两类：
+## 主题导航
 
-1. **研究分析文档**：按分析顺序编号，记录样本事实、统计结果、引用链、异常分型和实现边界。
-2. **格式说明文档**：按文件类型命名，记录单类文件的字段结构和解析约定。
+| 文档 | 负责内容 |
+|---|---|
+| [样本台账](sample-corpus.md) | 源身份、数量、别名、覆盖与研究来源 |
+| [容器与文件角色](container.md) | magic、压缩载荷、编码、条目解析和文件类型 |
+| [语义模型](semantic-model.md) | CBM/FAM、层级/引用图、身份、来源、IFC 关联 |
+| [几何模型](geometry-model.md) | DEV/PHM、模板与 occurrence、矩阵、颜色、STL/GL |
+| [变电 XML MOD](substation-mod.md) | XML grammar、primitive 与实际渲染范围 |
+| [线路文本 MOD](powerline-mod.md) | 四类 grammar、WIRE/挂点与当前示意曲线 |
+| [逻辑模型](logical-model.md) | SCH、STD 内容变体、SLD 与关联 |
 
-研究结论只代表当前样本实证结果，不直接等同于完整 GIM 标准。新增样本后，应先核对样本事实，再决定是否更新解析器；文档不记录按日期追加的过程日志。
+用户可用行为见 [软件规格](../software-spec.md)，内部缓存和生命周期见
+[架构](../architecture.md)，所有补证据或开发行动见 [未决事项](../open-issues.md)。
 
-当前变电 Runtime 契约见 [gim_substation.md](../gim_substation.md)：IFC 目录是 exporter detail；
-文件发现与 GUID 关联分开；PARTINDEX 按 DEV identity join，不按数组序号；DEV/PHM/MOD
-不要求等量；PHM 可递归；STL、SCH/STD/SLD 可缺失；同 UUID GL 是辅助来源。
-编号文档中的单样本数字、零引用和同序观察保留为历史事实，不能成为 parser 假设。
+## 复核顺序
 
-产品侧入口：架构见 [architecture.md](../architecture.md)，共性运行时见
-[gim_common.md](../gim_common.md)，线路/变电实现见 [gim_powerline.md](../gim_powerline.md)
-和 [gim_substation.md](../gim_substation.md)，性能证据见
-[benchmark_powerline.md](../benchmark_powerline.md) 和 [benchmark_substation.md](../benchmark_substation.md)。
+1. 记录原始包大小、SHA、magic、payload 类型和位置。
+2. 读取归档或解包清单，排除目录条目、解压标记与外部生成文件。
+3. 从 `project.cbm` 建立类型与引用链，统一大小写/分隔符，区分缺失、歧义和不可达。
+4. 核对 CBM/FAM 原始行、实体与属性来源，不只查看单值 Map。
+5. 逐边检查 DEV/PHM 递归、装配路径、变换和实际可达叶子。
+6. 按内容分类 MOD/STL/STD/SLD，区分存在、可解析与可渲染。
+7. 将研究报告断言与源事实、当前 parser 和实际视图证据交叉检查。
 
----
+全包条目数、树可达文件数、唯一模板数和 occurrence 数分别报告。
+重复引用是图关系，不自动算文件重复或损坏；未被根引用的来源不自动计为业务对象。
 
-## 1. 研究主线
+## 脚本与输出
 
-完整解析 GIM 可以拆成三层：
+[样本验证技能](../../.agents/skills/gim-sample-verification/SKILL.md) 提供工作入口，
+[脚本说明](../../.agents/skills/gim-sample-verification/scripts/README.md) 列出参数和输出。
+[Python 调研脚本](../../desktop/scripts/gim_survey/) 支持批量分析。
 
-```text
-文件容器层
-  -> 工程语义层
-     -> 几何 / 图纸展示层
-```
+脚本的分类、固定字段假设、阈值与默认样本列表需要核对，不是权威格式定义。
+脚本不修改源样本，但会写统计文件；使用独立输出目录，避免覆盖已保存资产。
+当前 `docs/schema/_generated/` 不是可用证据目录，正文不引用不存在的产物。
 
-当前建议的阅读与研究顺序如下。
-
-| 顺序 | 文档 | 关注问题 | 状态 |
-| ---: | ---- | -------- | ---- |
-| 00 | [00-sample-corpus.md](00-sample-corpus.md) | 样本台账、样本边界、后续样本登记规则 | 持续维护 |
-| 01 | [01-gim-container-analysis.md](01-gim-container-analysis.md) | `.gim` 外壳、GIMPKG 魔数、压缩格式、payload offset | 已纳入十样本 |
-| 02 | [02-gim-file-inventory.md](02-gim-file-inventory.md) | 解压后文件清单、目录大小写、文本/二进制粗判 | 已纳入十样本 |
-| 03 | [03-gim-file-role-matrix.md](03-gim-file-role-matrix.md) | CBM/FAM/DEV/PHM/MOD/STL/IFC/SCH/STD/SLD 文件角色 | 待随新样本复核 |
-| 04 | [04-cbm-field-dictionary.md](04-cbm-field-dictionary.md) | CBM 字段、线路/变电差异、CBM 下游引用 | 待随新样本复核 |
-| 05 | [05-gim-reference-integrity.md](05-gim-reference-integrity.md) | CBM/DEV/PHM 文件级引用完整性、IFCGUID 命中分型 | 待随新样本复核 |
-| 06 | [06-cbm-fam-consistency.md](06-cbm-fam-consistency.md) | CBM -> FAM 覆盖关系、FAM 字段形态、属性 sidecar 判断 | 待随新样本复核 |
-| 07 | [07-dev-phm-geometry-reachability.md](07-dev-phm-geometry-reachability.md) | DEV/PHM 递归、MOD/STL 几何目标可达性、无几何装配节点 | 待随新样本复核 |
-| 08 | [08-mod-static-survey.md](08-mod-static-survey.md) | MOD 静态分型、线路/变电 MOD 格式边界、可解析性边界 | 待随新样本复核 |
-| 09 | [09-transform-chain-analysis.md](09-transform-chain-analysis.md) | PHM 与 MOD 变换链分析、矩阵存储约定、两级变换验证 | 待随新样本复核 |
-| 10 | [10-substation-mod-grammar.md](10-substation-mod-grammar.md) | 变电 XML primitive 字段范围、强类型 schema 判定、Color/StretchedBody 深度分析 | 待随新样本复核 |
-| 11 | [11-line-mod-grammar.md](11-line-mod-grammar.md) | 线路 MOD 4 类文本格式族 grammar、层级关系、parser 草案边界 | Parser 已实现并由属性面板运行时消费；不启用独立线路 3D |
-| 12 | [12-stl-static-survey.md](12-stl-static-survey.md) | STL 格式检测、PHM 引用扫描、entityName 映射、STL 与 MOD 关系判定、§9 STL 设备类型分析（三样本）、§10 MOD 设备类型对比分析（三样本：变电 XML primitive vs 线路 4 类文本格式族） | 待随新样本复核 |
-| 13 | [13-geometry-ir-schema.md](13-geometry-ir-schema.md) | 统一 Geometry IR、5 种 kind schema、解析管道分层和边界 | 当前 Geometry IR 的类型与解析边界 |
-| 14 | [14-line-catenary-study.md](14-line-catenary-study.md) | 线路 WIRE 字段、档距聚合、拓扑分类和审计接口的语义证据 | 当前仅保留地图上的实验性 2D 曲线和审计导出，独立线路 3D 未启用 |
-| 15 | [15-wire-catenary-evidence.md](15-wire-catenary-evidence.md) | demo-line 全量静态分析证据（5460 WIRE / 327 TOWER），KVALUE / MATRIX0 / BLHA / 拓扑分类字段语义确认 | 样本证据文档（demo-line） |
-| 17 | [17-batch-load-schema.md](17-batch-load-schema.md) | 变电 DEV/PHM/MOD/GL/STL 批量读取、GLB manifest、失败隔离和缓存契约 | 当前 geometry-cache-v7 实现边界 |
-| 20 | [20-substation-partindex-alias-correction.md](20-substation-partindex-alias-correction.md) | demo-substation PARTINDEX 与 DEV SUBDEVICE 别名关系、几何实例基线更正 | 已落实到渲染入口 |
-| 22 | [22-ten-sample-verification-0824.md](22-ten-sample-verification-0824.md) | 十样本（4 变电 + 6 线路）字段、容器、引用和导出差异基线 | 当前跨样本证据 |
-
----
-
-## 2. 文件类型说明文档
-
-以下文档更接近“格式说明 / parser 设计输入”，不承担样本统计主线。
-
-| 文档 | 角色 |
-| ---- | ---- |
-| [cbm.md](cbm.md) | CBM 工程骨架与层级关系说明 |
-| [fam.md](fam.md) | FAM 属性文件说明 |
-| [dev.md](dev.md) | DEV 物理模型与设备组合说明 |
-| [phm.md](phm.md) | PHM 组合模型与 MOD/STL 引用说明 |
-| [mod.md](mod.md) | MOD 基础几何/参数化模型说明 |
-| [sch.md](sch.md) | SCH 逻辑模型入口；parser、首次打开和缓存恢复已实现 |
-| [std.md](std.md) | STD 逻辑定义；parser 与 gridId 索引已实现 |
-| [sld.md](sld.md) | 可选 SLD 主接线图；白名单净化与 img 沙箱、视图/联动已实现 |
-
----
-
-## 3. 新样本接入顺序
-
-新增 GIM 样本时，先只更新文件层研究，不直接改 parser。
-
-推荐顺序：
-
-```text
-Step 00: 更新 00-sample-corpus.md 样本台账
-Step 01: 复核 01-gim-container-analysis.md 的魔数、压缩格式、offset
-Step 02: 复核 02-gim-file-inventory.md 的文件清单、目录分布、文本/二进制粗判
-Step 03: 复核 03/04/05 的文件角色、CBM 字段、引用完整性
-Step 04: 复核 07/08 的 DEV/PHM 几何可达性与 MOD 静态分型
-Step 05: 复核 09 的 PHM 与 MOD 变换链
-Step 06: 复核 10 的变电 XML primitive 字段范围与强类型 schema
-Step 07: 复核 11 的线路 MOD 文本格式族 grammar 与 parser 草案边界
-Step 08: 复核 12 的 STL 角色与 MOD 关系（互斥/并列/fallback）
-Step 09: 参考 13 的 Geometry IR 草案，并对照当前实现和 20 的别名修正复核边界
-Step 10: 线路工程参考 14/15 的样本证据，并对照当前线路实现验证悬链线语义边界
-```
-
----
-
-## 4. 文档维护规则
-
-- 编号文档按研究流程排序，不按文件类型排序。
-- 文件类型说明文档按扩展名命名，不加编号。
-- `_generated/` 仅存放临时 CSV、诊断表和可复跑输出，不作为人工维护文档。
-- 任何结论都要区分“当前样本事实”和“候选通用规则”；性能数字归档到对应 benchmark 文档。
-- 遇到 demo 实证与背景规范不一致时，优先记录实证结果，并标注边界。
-- 在解析器实现前，先完成样本复核和诊断分型，避免把单一样本特征写死。
+样本身份与核心数量直接维护于台账，完整 CSV 可保存在独立复核输出。
+匿名示例只展示结构，不能复制真实工程名、地理位置或内部编号。

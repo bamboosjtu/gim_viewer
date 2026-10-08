@@ -1,138 +1,55 @@
-# gim-sample-verification skill 脚本目录
+# 样本验证脚本
 
-本目录下所有脚本均参数化，可对任意 GIM 样本执行。所有脚本只读、只统计、不修改样本数据。
+这些资产用于静态调查，不修改原始样本、不写 SQLite、不创建 Viewer。
+脚本会生成 CSV/统计输出；它们的分类、参数和阈值需要与当前源码核对。
+方法入口见 [SKILL](../SKILL.md)，格式基线见 [Schema](../../../../docs/schema/README.md)。
 
 ## 脚本清单
 
-| 脚本 | 对应分析 Round | 用途 |
-| ---- | --------------- | ---- |
-| `gim-container-verify.ps1` | Round 1.1 | GIM 头部魔数、压缩格式、偏移验证 |
-| `file-inventory-text-binary.ps1` | Round 1.2 + 1.3 | 文件清单 + 文本/二进制粗判 |
-| `mod-static-profile.ps1` | Round 1.4 | MOD 静态分类（6 类）+ Entity/primitive 统计 |
-| `ref-chain-and-integrity.ps1` | Round 2 | CBM/DEV/PHM 引用链提取 + 文件级完整性校验 |
-| `geometry-reachability.ps1` | Round 3 | 几何可达性分类 + 孤儿溯源 + DEV 图分析 |
-| `transform-chain-analysis.ps1` | Round 5 | PHM/MOD 矩阵分类 + 两级变换抽样 |
-| `xml-primitive-survey.ps1` | Round 6.1 + 6.2 | 变电 XML primitive 类型分布 + 数值字段范围 |
-| `color-analysis.ps1` | Round 6.3 | Color 节点 R/G/B/A 4 通道分布分析 |
-| `stretched-body-deep.ps1` | Round 6.4 | StretchedBody.Array 点序列 + Normal 向量深度分析 |
-| `line-mod-grammar-deep.ps1` | Round 7 | 线路 MOD 4 类文本格式族深度分析（grammar 与 parser 边界） |
-| `stl-static-survey.ps1` | Round 8 | STL 格式检测 + PHM 引用扫描 + CBM entityName 上游溯源 |
-| `desktop/scripts/gim_survey/device_type_survey.py` | Round 8.5 + 8.6 | STL / MOD 设备类型六维度聚合（十样本批量反查） |
+| 脚本 | 用途 | 参数 |
+|---|---|---|
+| [gim-container-verify.ps1](gim-container-verify.ps1) | magic、SHA、压缩签名和头部调查 | GimPath |
+| [file-inventory-text-binary.ps1](file-inventory-text-binary.ps1) | 清单和文本/二进制粗判 | SampleId,SampleRoot,OutDir |
+| [mod-static-profile.ps1](mod-static-profile.ps1) | MOD 分型、Entity/primitive 和键调查 | 同上 |
+| [ref-chain-and-integrity.ps1](ref-chain-and-integrity.ps1) | CBM/DEV/PHM 引用及文件完整性 | 同上 |
+| [geometry-reachability.ps1](geometry-reachability.ps1) | 可达性、孤立来源和 DEV 图 | 同上 |
+| [transform-chain-analysis.ps1](transform-chain-analysis.ps1) | PHM/Entity 矩阵与链抽样 | 同上 |
+| [xml-primitive-survey.ps1](xml-primitive-survey.ps1) | XML 类型与数值字段范围 | 同上 |
+| [color-analysis.ps1](color-analysis.ps1) | 四通道颜色统计 | 同上 |
+| [stretched-body-deep.ps1](stretched-body-deep.ps1) | 截面点和 Normal 调查 | 同上 |
+| [line-mod-grammar-deep.ps1](line-mod-grammar-deep.ps1) | 四类线路文本 grammar | 同上 |
+| [stl-static-survey.ps1](stl-static-survey.ps1) | STL 格式、引用和上游来源 | 同上 |
 
-> Round 9 是 IR schema **设计**而非样本分析，无对应分析脚本。完成后输出 `docs/schema/13-geometry-ir-schema.md`，把 Round 1-8 的静态分析结论沉淀为统一 schema 草案。详见 [SKILL.md](../SKILL.md) §4 Round 9。
+变电/线路脚本按实际内容选用，不能仅看有没有 IFC 推定工程类型。
+原有 `demo-substation/` CSV 为保存资产，不能在新分析中覆盖；其统计不自动代表全部在册样本。
 
-## 通用约定
+## 参数与例子
 
-- 所有脚本使用 `param` 接受 `-SampleId` 与 `-SampleRoot` 参数
-- 默认输出目录为脚本目录下的 `<SampleId>/` 子目录
-- 输出 CSV 使用 UTF-8 编码（`-Encoding UTF8`）
-- 所有文件查找大小写不敏感（`Get-ChildItem -ieq`）
-- 读取文本文件统一通过 `Read-TextFileLoose` 函数，自动处理 UTF-8 BOM
-- 脚本可独立运行，无需依赖其他脚本
-
-## 执行示例
+从仓库根运行，路径按当前环境解析：
 
 ```powershell
-# 单样本验证（推荐通过 SKILL.md 主入口执行）
-$sampleId = "demo-substation"
-$sampleRoot = "D:\vibe-coding\gim_viewer\demo\$sampleId"
-
-# Round 1.1
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  ".agents/skills/gim-sample-verification/scripts/gim-container-verify.ps1" `
-  -GimPath "$sampleRoot.gim"
-
-# Round 1.2 + 1.3
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  ".agents/skills/gim-sample-verification/scripts/file-inventory-text-binary.ps1" `
-  -SampleId $sampleId -SampleRoot $sampleRoot
-
-# Round 1.4
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  ".agents/skills/gim-sample-verification/scripts/mod-static-profile.ps1" `
-  -SampleId $sampleId -SampleRoot $sampleRoot
-
-# Round 2
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  ".agents/skills/gim-sample-verification/scripts/ref-chain-and-integrity.ps1" `
-  -SampleId $sampleId -SampleRoot $sampleRoot
-
-# Round 3
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  ".agents/skills/gim-sample-verification/scripts/geometry-reachability.ps1" `
-  -SampleId $sampleId -SampleRoot $sampleRoot
-
-# Round 5
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  ".agents/skills/gim-sample-verification/scripts/transform-chain-analysis.ps1" `
-  -SampleId $sampleId -SampleRoot $sampleRoot
-
-# Round 6（仅变电样本，三个子脚本）
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  ".agents/skills/gim-sample-verification/scripts/xml-primitive-survey.ps1" `
-  -SampleId $sampleId -SampleRoot $sampleRoot
-
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  ".agents/skills/gim-sample-verification/scripts/color-analysis.ps1" `
-  -SampleId $sampleId -SampleRoot $sampleRoot
-
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  ".agents/skills/gim-sample-verification/scripts/stretched-body-deep.ps1" `
-  -SampleId $sampleId -SampleRoot $sampleRoot
-
-# Round 7（仅线路样本）
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  ".agents/skills/gim-sample-verification/scripts/line-mod-grammar-deep.ps1" `
-  -SampleId $sampleId -SampleRoot $sampleRoot
-
-# Round 8（线路+变电均可用）
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  ".agents/skills/gim-sample-verification/scripts/stl-static-survey.ps1" `
-  -SampleId $sampleId -SampleRoot $sampleRoot
-
-# Round 8.5 + 8.6（十样本：STL / MOD 设备类型批量调研）
-python desktop/scripts/gim_survey/device_type_survey.py
+$sampleId = 'substation03'
+$sampleRoot = Join-Path (Get-Location) 'demo/substation03'
+$surveyOut = Join-Path (Get-Location) 'output/sample-verification/substation03'
+powershell -NoProfile -ExecutionPolicy Bypass -File .agents/skills/gim-sample-verification/scripts/ref-chain-and-integrity.ps1 -SampleId $sampleId -SampleRoot $sampleRoot -OutDir $surveyOut
+powershell -NoProfile -ExecutionPolicy Bypass -File .agents/skills/gim-sample-verification/scripts/transform-chain-analysis.ps1 -SampleId $sampleId -SampleRoot $sampleRoot -OutDir $surveyOut
+powershell -NoProfile -ExecutionPolicy Bypass -File .agents/skills/gim-sample-verification/scripts/gim-container-verify.ps1 -GimPath ./demo/substation03.gim
 ```
 
-## 输出产物
+除容器脚本外，省略 OutDir 通常写入脚本目录的 SampleId 子目录。
+使用新的显式 OutDir；不要把默认行为称为完全没有写入。
+脚本使用 PowerShell；编码、目录枚举和大小写规则以脚本实际实现为准。
 
-每个脚本运行后会在 `<SampleId>/` 目录下生成 CSV 与文本统计：
+## 输出解释
 
-```text
-scripts/
-  <SampleId>/
-    <SampleId>-file-inventory.csv
-    <SampleId>-text-binary-survey.csv
-    <SampleId>-mod-kind.csv
-    <SampleId>-cbm-refs.csv
-    <SampleId>-dev-refs.csv
-    <SampleId>-phm-refs.csv
-    <SampleId>-ref-integrity.csv
-    <SampleId>-geometry-reachability.csv
-    <SampleId>-orphan-trace.csv
-    <SampleId>-primitive-attrs.csv          （仅变电，Round 6.1+6.2）
-    <SampleId>-primitive-summary.csv         （仅变电，Round 6.1+6.2）
-    <SampleId>-color-attrs.csv               （仅变电，Round 6.3）
-    <SampleId>-stretched-body-summary.csv     （仅变电，Round 6.4）
-    <SampleId>-text-hnum-summary.csv            （仅线路，Round 7.1）
-    <SampleId>-text-point-line-summary.csv     （仅线路，Round 7.2）
-    <SampleId>-text-section-kv-summary.csv      （仅线路，Round 7.3）
-    <SampleId>-text-key-value-summary.csv       （仅线路，Round 7.4）
-    <SampleId>-stl-summary.csv                  （Round 8.1，STL 格式+三角面）
-    <SampleId>-stl-phm-refs.csv                 （Round 8.2，PHM STL/MOD 引用模式）
-    <SampleId>-stl-upstream.csv                 （Round 8.3，entityName × STL 映射）
-    stl-device-type-survey-<sampleId>.json       （Round 8.5，STL 设备类型聚合 JSON）
-    mod-device-type-survey-<sampleId>.json      （Round 8.6，MOD 设备类型聚合 JSON）
-```
+输出包括文件/文本粗判清单、MOD 分型、各类引用、完整性、可达性、
+primitive/颜色/截面、四类线路记录及 STL 来源表。
+每次输出同时登记源 SHA、样本根、参数、计数排除项和阈值。
+全文件数、根可达数、唯一模板数和实例数不能相互替代。
 
-## 注意事项
+[Python 调研目录](../../../../desktop/scripts/gim_survey/) 提供批量容器、清单、引用、
+类型和矩阵调查。部分脚本默认写 `docs/schema/_generated/`，运行前确认样本集合和输出路径。
+默认生成位置不是正文证据永久存在的保证，文档不要链接未生成的文件。
 
-- 脚本运行需要 PowerShell 5.1+（Windows 自带）
-- 变电样本（含 IFCFILE 的 CBM）会触发 Round 6 primitive 分析
-- 线路样本会触发 Round 7 文本格式族深度分析
-- 线路+变电样本均可触发 Round 8 STL 分析（线路 181-82 STL / 变电 1803 STL）
-- Round 8.5/8.6 设备类型调研支持三样本分发：变电走 F4System/PARTINDEX + SYSCLASSIFYNAME/PARTNAME，线路走 Tower_Device/Wire_Device/CROSS/WIRE/F4System + NAME/CLASSIFYNAME/DEVICETYPE/TOWERTYPE
-- 线路样本在 Round 5 会自动跳过 MOD XML Entity 分析，转而检测是否含 TransformMatrix 字段
-- 大型样本（如 demo-line 27829 个 CBM）单次执行可能耗时 1-3 分钟
-- 所有脚本不修改源文件、不写 SQLite、不创建 Viewer
-- Round 9 是 IR schema 设计而非样本分析，无脚本产出。完成后输出 `docs/schema/13-geometry-ir-schema.md`
+脚本原始方法保留，未经核验不改其行为。固定字段布局、矩阵阈值、
+同下标关联或分类差异应按 [open-issues](../../../../docs/open-issues.md) 的证据要求处理。

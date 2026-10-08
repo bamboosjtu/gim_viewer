@@ -18,7 +18,7 @@
  *   下次打开 geometry_cache_version_match=false 仅重建 geometry domain
  * - 浏览器模式：无 projectId / 非 Tauri 时跳过落盘与版本文件，仅渐进渲染
  *
- * 关联文档：docs/architecture.md §关键设计、docs/dev-log.md
+ * 关联文档：docs/architecture.md §关键设计、docs/open-issues.md
  */
 
 import * as THREE from 'three';

@@ -3,7 +3,7 @@
  *
  * 走 CBM 节点 → DEV → PHM → MOD/STL 引用链，发现需要加载的几何来源。
  *
- * 引用链（详见 docs/schema/dev.md §引用关系）：
+ * 引用链（详见 docs/schema/geometry-model.md §引用关系）：
  * - CBM.OBJECTMODELPOINTER → DEV 文件名（裸名，如 "abc.dev"）
  * - DEV.SOLIDMODELn → PHM 文件名（变电工程仅指向 .phm）
  * - PHM.SOLIDMODELn → MOD / GL / STL 文件名
@@ -16,7 +16,7 @@
  * 当前范围：
  * - SOLIDMODELS 路径（CBM → DEV → PHM → MOD/STL）
  * - SUBDEVICES 递归路径（DEV → SUBDEVICE → child DEV）
- * - **PHM 嵌套递归**（BIMBase 实测最深 4 层；docs/schema/05/07）：
+ * - **PHM 嵌套递归**（BIMBase 实测最深 4 层；docs/schema/geometry-model.md）：
  *   PHM.SOLIDMODELn 可指向 .phm，逐边乘 TRANSFORMMATRIXn 向下累积，visited 防环
  * - 返回实例级放置矩阵；同一个 MOD/STL 文件可被多次实例化
  */
@@ -172,9 +172,9 @@ export async function discoverGeometriesFromDevPath(
   const stls: DiscoveredStlGeometry[] = [];
 
   /**
-   * PHM 递归遍历（BIMBase 实测嵌套最深 4 层，docs/schema/07）。
+   * PHM 递归遍历（BIMBase 实测嵌套最深 4 层，docs/schema/geometry-model.md）。
    *
-   * - 逐边乘 TRANSFORMMATRIXn：placement = parent × 本边矩阵（层级级联，docs/schema/phm.md）
+   * - 逐边乘 TRANSFORMMATRIXn：placement = parent × 本边矩阵（层级级联，docs/schema/geometry-model.md）
    * - 叶级（.mod/.gl/.stl）产出实例；.phm 递归向下
    * - visited 防环；同 PHM 在同一 DEV 链内只展开一次
    */

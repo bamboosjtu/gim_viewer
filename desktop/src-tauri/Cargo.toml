@@ -13,6 +13,7 @@ crate-type = ["lib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+gim-native-core = { path = "../../crates/gim-native-core" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }

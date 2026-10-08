@@ -312,7 +312,7 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
     });
   });
 
-  describe('PHM 嵌套递归（BIMBase，docs/schema/07）', () => {
+  describe('PHM 嵌套递归（BIMBase，docs/schema/geometry-model.md）', () => {
     it('PHM → PHM → MOD：逐边矩阵级联，返回 1 个实例', async () => {
       const node = makeNode('abc.dev');
       // 根 PHM 平移 (100,0,0)，子 PHM 平移 (0,50,0) → 期望组合平移 (100,50,0)

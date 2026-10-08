@@ -22,7 +22,7 @@
  * - `<symbol>` 定义元件图形（id 为 UUID），通过 `<use xlink:href="#UUID">` 实例化
  * - CSS 在 `<script type="text/css">` 块中，Tauri CSP 下会被阻止，需预处理为 `<style>` 标签
  *
- * 关联文档：[05-cbm-tree-structure.md](../../docs/schema/05-cbm-tree-structure.md)
+ * 关联文档：docs/schema/semantic-model.md
  */
 
 /** SLD 顶层文档 */

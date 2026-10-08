@@ -730,7 +730,7 @@ describe('Color.A 刻度（P3-2）', () => {
 });
 
 
-describe('十样本新增 primitive（docs/schema/08 §P0-3）', () => {
+describe('十样本新增 primitive（docs/schema/substation-mod.md）', () => {
   it('Wire：FitCoordArray 解析为展平坐标数组', () => {
     const xml = wrap(
       `<Entity ID="1" Type="simple" Visible="true">

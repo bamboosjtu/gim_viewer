@@ -1,5 +1,5 @@
 /**
- * shared/csv 工具单测（dev-log「无导出」项）。
+ * shared/csv 工具单测。
  */
 
 import { describe, expect, it } from 'vitest';

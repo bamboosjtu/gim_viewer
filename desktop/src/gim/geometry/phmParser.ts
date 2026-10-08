@@ -5,7 +5,7 @@
  * 采用 KEY=VALUE 文本格式，将多个基础几何模型（MOD / STL）组装在一起，
  * 每个引用的模型通过独立的变换矩阵定义空间位置，并可指定颜色。
  *
- * 详见 docs/schema/phm.md。
+ * 详见 docs/schema/geometry-model.md。
  *
  * 关键约束：
  * - PHM 不分节，无 [section] 语法

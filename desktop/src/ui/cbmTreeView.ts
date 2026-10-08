@@ -92,7 +92,7 @@ export function renderCbmTreeUI(
 }
 
 /**
- * 构建变电 CBM 树搜索索引（dev-log「无搜索」项）。
+ * 构建变电 CBM 树搜索索引。
  *
  * 遍历全树，标签取 getNodeDisplayName（含 IFC 名称索引 / DEV SYMBOLNAME 覆盖），
  * 副标签含实体类型与 DEV 类型。

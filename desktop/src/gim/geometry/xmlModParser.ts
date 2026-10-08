@@ -4,14 +4,14 @@
  * 解析 <Device><Entities><Entity>... 结构，提取：
  * - Entity 属性（id / type / visible）
  * - TransformMatrix（4×4 矩阵，列主序，16 浮点）
- * - Color（R/G/B/A 4 通道，A 为 0-100 透明度百分比）
- * - primitive（14 类，11 强类型 + 3 弱 schema fallback）
+ * - Color（R/G/B/A 4 通道，A 为百分制或字节制）
+ * - primitive（已知类型、弱结构或显式 Unsupported）
  *
- * 详见 docs/schema/mod.md 与 docs/schema/10-substation-mod-grammar.md。
+ * 详见 docs/schema/substation-mod.md 与 docs/schema/substation-mod.md。
  *
  * 关键约束：
  * - XML root 为 Device，子节点 Entities，再子节点 Entity
- * - Entity 必含 TransformMatrix（除非 EMPTY_DEVICE_XML）
+ * - Entity 缺少 TransformMatrix 时当前 parser 回退单位阵
  * - Entity 可含 Color（实测 100%，但保留可选）
  * - primitive 节点 nodeName 大小写敏感
  * - StretchedBody.Array/Normal 保留 string，由渲染层解析
@@ -42,7 +42,7 @@ export interface XmlModDocument {
   malformedEntityCount: number;
   /**
    * 文件内 Color.A 的最大值（用于透明度刻度判定）。
-   * 判定规则（docs/schema/10 §P3-2）：max(A) > 100 → 字节制(/255)，否则百分制(/100)。
+   * 判定规则（docs/schema/substation-mod.md）：max(A) > 100 → 字节制(/255)，否则百分制(/100)。
    */
   colorMaxA: number;
 }
@@ -189,9 +189,9 @@ function parseColor(entityNode: Element): XmlModColor | undefined {
 }
 
 /**
- * 解析 primitive 子节点（14 类 + 十样本新增 4 类）。
+ * 解析 primitive 子节点，未知标签保留 Unsupported/raw。
  *
- * 强类型 11 类（按 docs/schema/10-substation-mod-grammar.md §6.4）：
+ * 强类型 11 类（按 docs/schema/substation-mod.md）：
  * Cylinder / Cuboid / StretchedBody / PorcelainBushing / TruncatedCone /
  * Ring / TerminalBlock / Sphere / ChannelSteel / Table / CircularGasket
  *

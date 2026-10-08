@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[3]
 DEMO = ROOT / "demo"
 OUT = ROOT / "docs" / "schema" / "_generated"
 
-# 文件名 -> sampleId（与 docs/schema/00-sample-corpus.md 保持一致）
+# 文件名 -> sampleId（与 docs/schema/sample-corpus.md 保持一致）
 SAMPLES: dict[str, str] = {
     "substation01.gim": "demo-substation",
     "substation02.gim": "substation02",

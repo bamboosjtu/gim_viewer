@@ -1,0 +1,21 @@
+[package]
+name = "gim-powerline-mobile"
+version = "0.1.0"
+edition = "2021"
+[lib]
+name = "gim_powerline_mobile_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-gim-import = { path = "../../crates/tauri-plugin-gim-import" }
+gim-native-core = { path = "../../crates/gim-native-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+
+[dev-dependencies]
+zip = { version = "2", default-features = false, features = ["deflate"] }

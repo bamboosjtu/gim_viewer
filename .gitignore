@@ -51,3 +51,15 @@ desktop/src-tauri/webview2-fixed-runtime/
 .tmp/
 .playwright-cli/
 output/
+
+# Mobile native and generated build caches
+app/src-tauri/target/
+app/src-tauri/gen/android/.gradle/
+app/src-tauri/gen/android/**/build/
+app/src-tauri/gen/android/local.properties
+crates/**/target/
+app/test-results/
+app/playwright-report/
+
+app/src-tauri/gen/android/app/src/main/jniLibs/
+app/src-tauri/gen/android/.tauri/

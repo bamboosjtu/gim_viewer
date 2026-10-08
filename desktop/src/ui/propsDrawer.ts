@@ -110,7 +110,7 @@ export function setupPropsDrawerInteractions(ctx?: ViewerContext): void {
     if (propsDrawerViewerContext) closePropsDrawer(propsDrawerViewerContext);
     else closePropsDrawerUI();
   });
-  // 导出当前属性面板为 CSV（dev-log「无导出」项）：
+  // 导出当前属性面板为 CSV：
   // 直接从已渲染 DOM 抓取分节标题 + 键值行，导出内容与用户所见一致
   btnExportProps.addEventListener('click', () => {
     const rows: string[][] = [['分类', '属性', '值']];

@@ -1,0 +1,14 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.gimviewer.importer" >
+4
+5    <uses-sdk android:minSdkVersion="29" />
+6
+7    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+7-->C:\Users\theTruth\Documents\projects\vibe-working\gim_viewer\crates\tauri-plugin-gim-import\android\src\main\AndroidManifest.xml:1:70-143
+7-->C:\Users\theTruth\Documents\projects\vibe-working\gim_viewer\crates\tauri-plugin-gim-import\android\src\main\AndroidManifest.xml:1:87-141
+8    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+8-->C:\Users\theTruth\Documents\projects\vibe-working\gim_viewer\crates\tauri-plugin-gim-import\android\src\main\AndroidManifest.xml:1:143-218
+8-->C:\Users\theTruth\Documents\projects\vibe-working\gim_viewer\crates\tauri-plugin-gim-import\android\src\main\AndroidManifest.xml:1:160-216
+9
+10</manifest>

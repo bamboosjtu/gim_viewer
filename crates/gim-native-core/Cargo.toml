@@ -1,0 +1,8 @@
+[package]
+name = "gim-native-core"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sevenz-rust = "0.6"
+zip = { version = "2", default-features = false, features = ["deflate"] }

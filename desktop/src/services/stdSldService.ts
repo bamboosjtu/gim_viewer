@@ -13,7 +13,7 @@
  * **缓存命中**（currentFiles 为空）：
  *   从磁盘缓存读取 STD/SLD 文件后走相同流程。
  *
- * 关联文档：[05-cbm-tree-structure.md](../../docs/schema/05-cbm-tree-structure.md)
+ * 关联文档：docs/schema/semantic-model.md
  */
 
 import type { AppState } from '../app/state.js';

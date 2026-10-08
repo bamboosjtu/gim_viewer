@@ -12,7 +12,7 @@
  * - TRANSFORMMATRIX 4×4 矩阵按 Three.js Matrix4.elements 布局展开，平移在 m[12..14]
  * - 缺失/格式异常时回退单位矩阵（与 PHM parser 一致）
  *
- * 详见 docs/schema/dev.md。
+ * 详见 docs/schema/geometry-model.md。
  */
 
 import type {

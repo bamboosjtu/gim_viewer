@@ -5,7 +5,7 @@
  * 逐 DEV 调用：序列化 → 落盘 → 逐 CBM 实例渲染一体化。
  * 二次打开时可直接用 GLTFLoader 加载 .glb，跳过全部 XML 解析。
  *
- * 关键设计（当前 DEV 粒度缓存契约见 docs/schema/17-batch-load-schema.md）：
+ * 关键设计（当前 DEV 粒度缓存契约见 docs/architecture.md）：
  * - 按 DEV 文件粒度缓存（非按 MOD 文件粒度）
  *   理由：DEV 粒度大幅减少加载次数（5982 → 数百）
  * - 序列化时烘焙 DEV 内部所有 transform（DEV × PHM × SUBDEVICE × Entity + mm→m）
@@ -16,7 +16,7 @@
  * 缓存路径：app_data_dir/glbcache/{project_id}/{devPath}.glb
  * 版本化：通过 GEOMETRY_CACHE_VERSION 失效
  *
- * 关联文档：docs/schema/17-batch-load-schema.md、docs/gim_substation.md
+ * 关联文档：docs/architecture.md、docs/software-spec.md
  */
 
 import * as THREE from 'three';

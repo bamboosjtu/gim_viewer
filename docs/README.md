@@ -1,50 +1,41 @@
-# GIM Viewer 文档索引
+# GIM Viewer 文档
 
-文档只描述架构、当前实现和下一步计划，不记录按日期排列的开发流水。
+文档描述仓库当前样本、当前源码和实际能力。桌面端与 Android 线路端均有实现；设备验收范围按验证证据说明。
+格式观察、软件行为、验证结果分别维护，研究结论只有经源包或源码复核后才进入正文。
 
-## 架构与共性
+## 阅读入口
 
-| 文档 | 内容 |
-|---|---|
-| [architecture.md](architecture.md) | Runtime 分层、打开生命周期、边界和版本化策略 |
-| [gim_common.md](gim_common.md) | GIM 容器、应用状态、清理、共性缓存和诊断契约 |
-| [dev-log.md](dev-log.md) | 尚未关闭的技术债务、证据缺口和明确的非目标 |
-| [gim_viewer_product_roadmap.md](gim_viewer_product_roadmap.md) | 产品阶段、交付顺序和后续路线图 |
+| 需要了解的内容 | 文档 | 维护责任 |
+|---|---|---|
+| 桌面功能、操作与限制 | [软件规格](software-spec.md) | 当前用户可用行为 |
+| 移动端能力状态 | [移动端规格](mobile-spec.md) | 当前目录和实现状态 |
+| 分层、生命周期、缓存和发布 | [架构](architecture.md) | 当前内部契约及版本 |
+| 缺陷、证据缺口、决策和开发需求 | [未决事项](open-issues.md) | 唯一行动清单 |
+| 正确性不变量与复核方法 | [验证](validation.md) | 检查口径和证据范围 |
+| 性能测量与有效基线 | [性能](performance.md) | 指标定义和可比条件 |
+| GIM 格式及样本事实 | [Schema](schema/README.md) | 匿名格式说明 |
 
-## 当前功能实现
+## 资料边界
 
-| 文档 | 内容 |
-|---|---|
-| [gim_powerline.md](gim_powerline.md) | GIMPKGT、线路语义图、地图、属性和线路缓存 |
-| [gim_substation.md](gim_substation.md) | GIMPKGS、CBM/IFC、Fragments、DEV/MOD 和变电缓存 |
+- `demo/` 保存原始 GIM 包和本地解包样本，大型文件由 Git 忽略。
+- `research/` 保存原始 HTML 分析材料，是研究来源；其断言需要复核。
+- `docs/schema/` 只使用匿名样本 ID，不写真实工程名、地理归属、建设单位或内部工程标识。
+- 应用能力以源码为准；样本覆盖不等于完整行业标准；单元测试不等于真实桌面验收。
+- 生成统计、性能日志、截图和临时复核文件保存到明确的输出目录，不作为额外长期正文。
 
-## 性能证据
+## 维护规则
 
-| 文档 | 内容 |
-|---|---|
-| [benchmark_powerline.md](benchmark_powerline.md) | 线路性能模型、当前基线和正式测量契约 |
-| [benchmark_substation.md](benchmark_substation.md) | 变电 Fragments RC v2 的 A/B benchmark、正确性和决策 |
+长期正文共 15 份 Markdown。按稳定主题维护，不按分析批次或实施阶段拆分。
+修改一个主题时直接更新其权威文档，其他文档引用它；不要复制缓存版本表、样本统计表或待办清单。
 
-## GIM 样本与格式
+过程记录、历史版本、修改前后对照和已关闭问题复盘不进入正文。
+当前有效版本集中在 [架构](architecture.md)，样本身份与数量集中在
+[样本台账](schema/sample-corpus.md)，未完成工作集中在 [未决事项](open-issues.md)。
+事项关闭后，从未决事项删除；将实现后的行为写入对应规格、架构或 Schema。
+证据更新时原地替换状态和来源，不按日期追加试验流水。
 
-样本分析、格式研究、引用链和几何可达性统一归档在 [schema/README.md](schema/README.md)；
-文件类型说明也集中在 `schema/`，产品实现文档只引用结论，不复制样本流水。
+格式文档区分三种陈述：已登记样本中的观察、当前 parser/render 行为、来源尚不足的语义。
+后者只在未决事项记录其核验任务。正文可说明当前限制，但不另设未来开发章节。
 
-| 文档 | 内容 |
-|---|---|
-| [schema/README.md](schema/README.md) | 样本研究主线、新样本接入顺序和格式文档索引 |
-| [schema/cbm.md](schema/cbm.md) | CBM 工程骨架与层级关系 |
-| [schema/dev.md](schema/dev.md) | DEV 物理模型与设备组合 |
-| [schema/fam.md](schema/fam.md) | FAM 属性文件 |
-| [schema/mod.md](schema/mod.md) | MOD 几何/参数化模型 |
-| [schema/phm.md](schema/phm.md) | PHM 组合模型与 MOD/STL 引用 |
-| [schema/sch.md](schema/sch.md) | SCH 逻辑模型 |
-| [schema/sld.md](schema/sld.md) | SLD 主接线图 |
-| [schema/std.md](schema/std.md) | STD 逻辑定义 |
-
-## 文档维护边界
-
-- 架构变化先更新 `architecture.md`，共性生命周期、缓存和诊断变化同步更新 `gim_common.md`。
-- 线路/变电功能变化只更新对应实现文档；共享缓存细节统一维护在 `gim_common.md`，不再维护重复的缓存导航页。
-- 性能数字和测量规则只写入对应 benchmark 文档；仍未解决的问题写入 `dev-log.md`。
-- 新样本先进入 `schema/`，确认跨样本规则后再更新实现文档。
+命令在 [验证](validation.md) 与 [架构](architecture.md) 中维护。
+文档变更应检查内部链接、源码路径、匿名化、重复定义与样本/研究资产是否被意外修改。

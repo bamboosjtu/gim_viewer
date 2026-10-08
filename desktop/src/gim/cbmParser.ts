@@ -21,7 +21,7 @@ export { parseKeyValue } from './kvParser.js';
  * GIM CBM 中常见的占位符：
  * - "其它" / "其他"（未分类）
  * - "-"（无值占位）
- * - "NULL" / "NULL1"（Bentley 导出空值占位，docs/schema/04）
+ * - "NULL" / "NULL1"（Bentley 导出空值占位，docs/schema/semantic-model.md）
  * - "&GN" 等 & 前缀占位（Bentley 导出未映射参数名）
  * - 空字符串
  */
@@ -66,7 +66,7 @@ function extractDisplayName(kv: Record<string, string>, path: string): { name: s
   // PARTNAME 占位符（如 Bentley 导出的 "&GN"）不参与名称回退
   const partName = isPlaceholderSystemName(rawPartName) ? '' : rawPartName.trim();
   const sysClassifyName = getFirstNonEmptyKv(kv, ['SYSCLASSIFYNAME']);
-  // ENTITYNAME 大小写三态实证（PartIndex/F4SYSTEM 等），统一归一化（docs/schema/04）
+  // ENTITYNAME 大小写三态实证（PartIndex/F4SYSTEM 等），统一归一化（docs/schema/semantic-model.md）
   const entityName = normalizeEntityName(getFirstNonEmptyKv(kv, ['ENTITYNAME']));
   const fileName = path.split('/').pop()!.replace(/\.cbm$/i, '');
 

@@ -346,7 +346,7 @@ describe('entityToMesh', () => {
       expect(mat.opacity).toBe(1);
     });
 
-    it('A=0 → 不透明哨兵（Bentley/BIMBase 实测语义，docs/schema/10 §P3-2）', () => {
+    it('A=0 → 不透明哨兵（Bentley/BIMBase 实测语义，docs/schema/substation-mod.md）', () => {
       const color: XmlModColor = { r: 0, g: 0, b: 0, a: 0 };
       const e = makeEntity({ type: 'Cuboid', l: 100, w: 100, h: 100 }, { color });
       const mesh = entityToMesh(e, TEST_MOD_PATH)!;
@@ -525,7 +525,7 @@ describe('方案 A：Geometry 共享缓存', () => {
   });
 });
 
-describe('Color A 刻度规则（P3-2，docs/schema/10）', () => {
+describe('Color A 刻度规则（P3-2，docs/schema/substation-mod.md）', () => {
   const cyl: XmlModPrimitive = { type: 'Cylinder', r: 100, h: 200 };
 
   function meshOpacity(color: XmlModColor | undefined, maxA = 100): number {

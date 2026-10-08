@@ -205,7 +205,7 @@ SOLIDMODELS.NUM=0`;
     });
 
     it('含 9 个子设备的 FrameCapacitor（变电工程典型样本，简化为 3 个验证）', () => {
-      // 基于 docs/schema/dev.md 真实样本（简化，仅保留 SUBDEVICE0/1/8 验证格式与归属）
+      // 基于 docs/schema/geometry-model.md 真实样本（简化，仅保留 SUBDEVICE0/1/8 验证格式与归属）
       const text = `BASEFAMILY=77791a2a-6f55-4c6c-8d7a-c48e0cb0fc4d.fam
 SYMBOLNAME=框架式电容器（典设A2-6）
 TYPE=FrameCapacitor
@@ -236,7 +236,7 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
 
   describe('线路工程典型样本', () => {
     it('STRING 类型：4 个子 DEV 递归引用（SOLIDMODELn → .dev）', () => {
-      // 基于 docs/schema/dev.md 真实样本（简化）
+      // 基于 docs/schema/geometry-model.md 真实样本（简化）
       const text = `DEVICETYPE=STRING
 SYMBOLNAME=INSULATOR
 BASEFAMILY=006bb90c-7d49-4f08-92f8-b43f2f18c4db.fam

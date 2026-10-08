@@ -1117,9 +1117,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gim-native-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "sevenz-rust",
+ "zip",
+]
+
+[[package]]
 name = "gim-viewer"
 version = "0.0.1"
 dependencies = [
+ "gim-native-core",
  "rusqlite",
  "serde",
  "serde_json",

@@ -1,0 +1,19 @@
+<lint-module
+    format="1"
+    dir="C:\Users\theTruth\Documents\projects\vibe-working\gim_viewer\crates\tauri-plugin-gim-import\android"
+    name=":tauri-plugin-gim-import"
+    type="LIBRARY"
+    maven="android:tauri-plugin-gim-import:unspecified"
+    agpVersion="8.13.0"
+    buildFolder="build"
+    bootClassPath="D:\ProgramData\Android\Sdk\platforms\android-36\android.jar;D:\ProgramData\Android\Sdk\build-tools\35.0.0\core-lambda-stubs.jar"
+    javaSourceLevel="17"
+    compileTarget="android-36"
+    neverShrinking="true">
+  <lintOptions
+      abortOnError="true"
+      absolutePaths="true"
+      checkReleaseBuilds="true"
+      explainIssues="true"/>
+  <variant name="release"/>
+</lint-module>

@@ -137,7 +137,7 @@ export function resetRuntimeBasemapMode(): void {
 }
 
 /**
- * 悬链线（catenary）渲染开关（M4-B3C，14 号文档 §6.6）。
+ * 悬链线（catenary）渲染开关（docs/schema/powerline-mod.md）。
  *
  * 默认 true：导线段用抛物线近似绘制弧垂（视觉示意）。
  * 设为 false 时回退直线段绘制。

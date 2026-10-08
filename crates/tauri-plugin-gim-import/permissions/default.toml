@@ -1,0 +1,3 @@
+[default]
+description = "User-selected private GIM import and cancellation"
+permissions = ["allow-pick", "allow-cancel", "allow-check-location-permissions", "allow-request-location-permissions", "allow-get-position"]

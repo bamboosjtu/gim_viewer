@@ -14,7 +14,7 @@
  *
  * 文件类型由后缀推断：`.std` → STD（拓扑定义），`.sld` → SLD（电气单线图 SVG）。
  *
- * 关联文档：[sch.md](../../docs/schema/sch.md)
+ * 关联文档：docs/schema/logical-model.md
  */
 
 import { parseKeyValue } from './cbmParser.js';

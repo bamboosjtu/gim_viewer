@@ -1,0 +1,29 @@
+{
+  "name": "gim-powerline-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1421",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "test:sample": "vitest run --config vitest.samples.config.ts",
+    "tauri": "tauri",
+    "android:init": "tauri android init",
+    "android:dev": "tauri android dev",
+    "android:build": "tauri android build --target aarch64 --apk"
+  },
+  "dependencies": {
+    "@gim/plugin-api": "file:../packages/plugin-api",
+    "@gim/powerline-core": "file:../packages/powerline-core",
+    "@tauri-apps/api": "^2.10.1",
+    "maplibre-gl": "^5.24.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.3",
+    "@types/node": "^22.0.0",
+    "typescript": "~5.6.3",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.9"
+  }
+}

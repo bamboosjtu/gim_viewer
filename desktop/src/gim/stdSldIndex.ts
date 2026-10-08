@@ -13,7 +13,7 @@
  *    - CBM `0AEC*002` → STD/SLD `A0AEC*002`（CBM 前加 `A`）
  *    - 反向：STD/SLD `A0AEC*002` → CBM `0AEC*002`（去首字符 `A`）
  *
- * 关联文档：[05-cbm-tree-structure.md](../../docs/schema/05-cbm-tree-structure.md)
+ * 关联文档：docs/schema/semantic-model.md
  */
 
 import type { CbmNode } from './types.js';

@@ -43,7 +43,7 @@ export function parseStlBinary(buffer: ArrayBuffer, stlPath: string): THREE.Grou
   }
 
   // ASCII 检测：以 "solid" 开头且不满足二进制长度公式（部分二进制 STL 头也写 "solid"，
-  // 必须用长度公式区分，见 docs/schema/12：line03 存在 AssimpScene ASCII STL）。
+  // 必须用长度公式区分，见 docs/schema/geometry-model.md：line03 存在 AssimpScene ASCII STL）。
   const head = new Uint8Array(buffer, 0, Math.min(80, buffer.byteLength));
   const looksSolid = head[0] === 0x73 && head[1] === 0x6f && head[2] === 0x6c && head[3] === 0x69 && head[4] === 0x64;
   if (looksSolid) {

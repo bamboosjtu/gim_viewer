@@ -1,50 +1,43 @@
-# GIM BIM 浏览器
+# GIM Viewer
 
-面向电网工程信息模型（GIM）的 BIM 浏览工作台：**变电工程**（IFC 3D + 设备属性）与**线路工程**（地图 + 塔位/导线/跨越物）。
+面向电网工程信息模型的本地浏览器：变电工程提供 CBM 层级、IFC/MOD/STL 三维与属性，
+线路工程提供塔位、导线、跨越对象的地图和来源浏览。
+桌面端支持变电与线路；`app/` 为 Tauri 2 Android 线路端，提供现场地图、工程树、来源与定位。
 
-## 目录结构
+## 目录
 
-| 目录 | 说明 |
+| 目录 | 内容 |
 |---|---|
-| [`desktop/`](desktop/) | **桌面端**（当前唯一实现）：Tauri 2 应用，独立维护 Node.js 构建环境（package.json / vite / vitest）与 Rust 后端 |
-| [`app/`](app/) | **手机端**（预留）：技术栈待定，不强制 Node.js |
-| [`docs/`](docs/) | 架构、当前实现、样本 Schema、性能证据和产品路线图 |
-| [`demo/`](demo/) | 样本数据（大型二进制，gitignored） |
+| [desktop](desktop/) | 桌面前端、Tauri/Rust 后端、构建和测试 |
+| [app](app/) | Android 线路应用、SAF 导入、地图与本地缓存 |
+| [packages](packages/) / [crates](crates/) | 跨端共享纯线路解析、插件接口、原生解压与 Android 文件导入 |
+| [docs](docs/README.md) | 当前规格、架构、验证、性能、格式和未决事项 |
+| [demo](demo/) | 本地 GIM 包及解包样本，大型文件由 Git 忽略 |
+| [research](research/) | 原始研究材料，使用前需复核 |
 
-## 快速开始（桌面端）
+## 桌面开发
 
-```bash
+```powershell
 cd desktop
-npm install          # 安装前端依赖
-npm run tauri:dev    # Tauri 开发模式（需 Rust 工具链）
-# 或
-npm run dev          # 纯浏览器模式
+npm install
+npm run tauri:dev
 ```
 
-构建与打包：
+`npm run dev` 可启动浏览器开发模式。构建使用 `npm run build`，
+桌面打包使用 `npm run tauri:build`，包含 portable ZIP 生成流程。
+运行时资源和发布约束见 [架构](docs/architecture.md)，测试与严格样本门禁见 [验证](docs/validation.md)。
 
-```bash
-cd desktop
-npm run build        # TS 编译 + Vite 构建
-npm run tauri:build  # NSIS 安装版 + portable ZIP
-```
-
-### 天地图 Key（线路工程可选）
-
-在仓库根目录创建 `.env`（不要提交真实 Key）：
-
-```dotenv
-VITE_TIANDITU_KEY=你的天地图 tk
-```
-
-Vite 会在启动或构建时读取该文件；修改后需要重启 `npm run dev` / `npm run tauri:dev`。
-线路工程未配置或服务不可用时会自动回退为 Canvas-only 地图。旧版 `desktop/.env` 中的
-`TIANDITU_APIKEY` 也会被兼容读取，但推荐迁移到上面的 `VITE_TIANDITU_KEY`。
+桌面线路默认在线底图为 OSM，移动端默认天地图影像；天地图在仓库根 `.env` 配置
+`VITE_TIANDITU_KEY`，不要提交真实 Key。移动端构建和私有配置方法见 [App README](app/README.md)。
+底图异常时按配置回退 OSM 或 Canvas 工程覆盖层。
+解析与缓存本地运行，在线底图需要网络。
 
 ## 文档
 
-- [技术架构](docs/architecture.md)
-- [变电 GIM](docs/gim_substation.md)
-- [线路 GIM](docs/gim_powerline.md)
-- [开发者日志](docs/dev-log.md)
-- [产品路线图](docs/gim_viewer_product_roadmap.md)
+- [桌面软件规格](docs/software-spec.md)
+- [系统架构](docs/architecture.md)
+- [GIM 格式与匿名样本](docs/schema/README.md)
+- [正确性验证](docs/validation.md)
+- [性能测量](docs/performance.md)
+- [移动端状态](docs/mobile-spec.md)
+- [未决事项与待开发功能](docs/open-issues.md)

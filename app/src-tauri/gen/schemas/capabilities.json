@@ -1,0 +1,1 @@
+{"main":{"identifier":"main","description":"Foreground location and user-initiated SAF import only","local":true,"windows":["main"],"permissions":["core:default","gim-import:default"]}}

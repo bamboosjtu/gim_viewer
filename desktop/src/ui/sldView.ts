@@ -6,7 +6,7 @@
  * - 「拓扑列表」模式：树形展示 STD 层级（Substation → VoltageLevel → Bay → ConductingEquipment）
  * - 点击带 gridId 的元素（SVG `<g>` 或拓扑项）触发选中高亮，为阶段 4 联动预留入口
  *
- * 关联文档：[05-cbm-tree-structure.md](../../docs/schema/05-cbm-tree-structure.md)
+ * 关联文档：docs/schema/semantic-model.md
  */
 
 import type { AppState } from '../app/state.js';

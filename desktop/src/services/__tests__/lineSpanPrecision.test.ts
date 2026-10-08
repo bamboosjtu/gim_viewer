@@ -1,7 +1,7 @@
 /**
  * lineWireSemanticService 档距计算单测。
  *
- * 覆盖 dev-log「档距精度」修复：BLHA 含高程时档距按斜距 sqrt(d²+h²)
+ * 覆盖 端点高程与档距口径：BLHA 含高程时档距按斜距 sqrt(d²+h²)
  * 修正，不再仅用 Haversine 平面距离（山地塔位高程差数十米会明显低估）。
  */
 

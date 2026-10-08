@@ -22,7 +22,7 @@
  * - CBM: `SYSCLASSIFYNAME=0AEC*002` → STD: `gridId=A0AEC*002`
  * - CBM: `SYSCLASSIFYNAME=0ATA*240` → STD: `gridId=A0ATA*240`
  *
- * 关联文档：[05-cbm-tree-structure.md](../../docs/schema/05-cbm-tree-structure.md)
+ * 关联文档：docs/schema/semantic-model.md
  */
 
 /**
@@ -158,7 +158,7 @@ export function parseStd(text: string, sourcePath: string = ''): StdDocument {
 
   const root = xml.documentElement;
   if (root.tagName !== 'STD') {
-    // P1-6（docs/schema/sch.md）：SDDP 产出的 .std 为 NBT1 版本 SVG 合并文档
+    // P1-6（docs/schema/logical-model.md）：SDDP 产出的 .std 为 NBT1 版本 SVG 合并文档
     // （与 .sld 同内容），非 DLT1 拓扑定义。降级为空文档而非报错。
     if (root.tagName.toLowerCase() === 'svg') {
       console.warn(

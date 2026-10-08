@@ -2,7 +2,7 @@ import { inspectSubstationCapabilities, buildSubstationAliasIndex } from '../sub
 /**
  * 样本级集成回归测试（真实 GIM 解压目录）。
  *
- * 目的：为 dev-log 修复提供"一个变电工程 + 一个线路工程"的可执行验证手段，
+ * 目的：为样本正确性提供"一个变电工程 + 一个线路工程"的可执行验证手段，
  * 覆盖 CBM 树构建、IFC 发现、FAM/DEV 属性解析、线路地图数据提取全链路。
  *
  * 边界：
@@ -618,7 +618,7 @@ describe.skipIf(!hasLine)('样本回归·线路 line02', () => {
       expect(tower.lng).toBeLessThan(140);
     }
 
-    // 档距合理性（dev-log「档距精度」）：含端点高程的档距应为斜距 ≥ 平面距离，
+    // 档距合理性：含端点高程的档距应为斜距 ≥ 平面距离，
     // 且典型档距在 50~1500m 范围内（超出多为异常）
     let checked = 0;
     for (const w of mapData.wires) {
