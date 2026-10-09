@@ -9,20 +9,22 @@ import { icon, esc } from './ui/icons';
 import { PluginHost } from './plugins/host';
 
 type InspectorTab = 'overview' | 'attributes' | 'relations' | 'sources';
-interface UiState { selected?: string; camera?: Camera; expanded?: string[]; tab?: InspectorTab; treeMode?: 'structure' | 'objects'; filter?: string }
+interface UiState { selected?: string; camera?: Camera; expanded?: string[]; tab?: InspectorTab; treeMode?: 'structure' | 'objects'; filter?: string; treeOpen?: boolean; inspectorOpen?: boolean; inspectorExpanded?: boolean }
 const kindNames = { project: '工程', line: '线路', strain: '耐张段', tower: '杆塔', span: '档', cross: '跨越物' };
 const host = document.querySelector<HTMLDivElement>('#app')!;
 host.innerHTML = `
   <header class="app-header"><button class="brand-button" id="projects-top" aria-label="我的工程">${icon('tower', 26)}</button><div class="title-block"><h1 id="project-title">线路 GIM</h1><span id="project-subtitle">工程地图 · 现场查看</span></div><button class="header-button" id="search-open" aria-label="搜索工程对象">${icon('search', 22)}</button><button class="header-button" id="settings-open" aria-label="地图设置">${icon('settings', 22)}</button></header>
-  <main class="workspace" id="workspace"><aside class="tree-panel" id="tree-panel"><div class="panel-heading"><span>工程导航</span><button class="icon-button compact-only" id="tree-close" aria-label="关闭工程树">${icon('close')}</button></div><label class="tree-search">${icon('search', 18)}<input id="tree-search" placeholder="搜索塔号、塔型、耐张段…" aria-label="搜索工程对象"></label><div id="tree-host"></div></aside>
+  <main class="workspace" id="workspace"><aside class="tree-panel" id="tree-panel"><div class="panel-heading"><span>工程导航</span><button class="icon-button" id="tree-close" aria-label="关闭工程树">${icon('close')}</button></div><label class="tree-search">${icon('search', 18)}<input id="tree-search" placeholder="搜索塔号、塔型、耐张段…" aria-label="搜索工程对象"></label><div id="tree-host"></div></aside>
     <section class="map-region"><div id="map-host"></div><div class="map-caption"><span class="map-chip" id="map-label">无底图工程图</span><span id="map-summary"></span></div><div class="map-toolbar"><button id="layers" aria-label="选择底图">${icon('layers', 21)}</button><button id="gps" aria-label="当前位置">${icon('locate', 21)}</button><button id="fit" aria-label="显示完整工程">${icon('fit', 21)}</button></div><div class="zoom-tools"><button id="zoom-in" aria-label="放大">${icon('plus', 18)}</button><button id="zoom-out" aria-label="缩小"><span class="minus"></span></button></div><div class="map-attribution" id="fallback-attribution">工程坐标 · 无底图</div><div class="empty-welcome" id="welcome"><span class="welcome-mark">${icon('tower', 56)}</span><h2>把线路带到现场</h2><p>导入 GIM，沿地图查看杆塔、档和跨越物。<br>工程文件保存在本机，可离线查阅。</p><button class="primary" id="welcome-import">${icon('plus', 20)} 导入线路工程</button><button class="text-button" id="welcome-projects">查看我的工程</button></div></section>
     <section class="inspector" id="inspector" aria-label="对象详情"><button class="sheet-grip" id="sheet-toggle" aria-label="展开或收起详情"><span></span></button><div class="inspector-heading" id="inspector-heading"></div><div class="inspector-tabs" role="tablist">${[['overview','概览'],['attributes','属性'],['relations','关系'],['sources','来源']].map(([tab, label]) => `<button role="tab" data-tab="${tab}">${label}</button>`).join('')}</div><div class="inspector-content" id="inspector-content"></div></section>
-  </main><nav class="bottom-nav" aria-label="主导航"><button id="nav-map" class="active">${icon('map', 22)}<span>地图</span></button><button id="nav-tree">${icon('tree', 22)}<span>工程树</span></button><button id="nav-projects">${icon('folder', 22)}<span>我的工程</span></button></nav><div id="toast" class="toast" role="status" hidden></div><div id="modal-root"></div>`;
+  </main><nav class="bottom-nav" aria-label="主导航"><button id="nav-map" class="active">${icon('map', 22)}<span>地图</span></button><button id="nav-tree" aria-controls="tree-panel" aria-expanded="false">${icon('tree', 22)}<span>工程树</span></button><button id="nav-details" aria-controls="inspector" aria-expanded="false">${icon('info', 22)}<span>详情</span></button><button id="nav-projects">${icon('folder', 22)}<span>我的工程</span></button></nav><div id="toast" class="toast" role="status" hidden></div><div id="modal-root"></div>`;
 
 class MobileApp {
   private project?: PowerlineProject;
   private objects = new Map<string, BusinessObject>();
   private selected?: string;
+  private treeOpen = false;
+  private inspectorOpen = false;
   private tab: InspectorTab = 'overview';
   private settings: bridge.Settings = { tiandituKey: '', baseLayer: 'imagery' };
   private parser = new ParserWorker();
@@ -44,19 +46,20 @@ class MobileApp {
     this.map = new MapWorkspace(this.el('map-host'), id => this.select(id), (message, base) => { this.el('map-label').textContent = message; this.el('fallback-attribution').hidden = base !== 'canvas'; }, () => this.persist());
     this.tree = new VirtualTree(this.el('tree-host'), id => this.select(id, true), () => this.persist());
     this.bind('projects-top', () => void this.showProjects()); this.bind('nav-projects', () => void this.showProjects()); this.bind('welcome-projects', () => void this.showProjects());
-    this.bind('welcome-import', () => void this.showImport()); this.bind('nav-tree', () => this.showTree()); this.bind('nav-map', () => this.hideTree()); this.bind('tree-close', () => this.hideTree());
+    this.bind('welcome-import', () => void this.showImport()); this.bind('nav-tree', () => this.setTreeOpen(!this.treeOpen)); this.bind('nav-details', () => this.setInspectorOpen(!this.inspectorOpen)); this.bind('nav-map', () => { this.treeOpen = false; this.inspectorOpen = false; this.el('inspector').classList.remove('expanded'); this.applyPanels(); }); this.bind('tree-close', () => this.hideTree());
     this.bind('search-open', () => { this.showTree(); (this.el('tree-search') as HTMLInputElement).focus(); });
     this.el('tree-search').addEventListener('input', e => this.tree.search((e.target as HTMLInputElement).value));
     this.bind('settings-open', () => this.showSettings()); this.bind('layers', () => this.showSettings()); this.bind('gps', () => void this.locate());
     this.bind('fit', () => this.map.fit()); this.bind('zoom-in', () => this.map.zoom(1)); this.bind('zoom-out', () => this.map.zoom(-1));
-    this.bind('sheet-toggle', () => this.el('inspector').classList.toggle('expanded'));
+    this.bind('sheet-toggle', () => { this.el('inspector').classList.toggle('expanded'); this.map.refreshLayout(); this.persist(); });
     document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b => b.onclick = () => { this.tab = b.dataset.tab as InspectorTab; this.renderInspector(); this.persist(); });
     window.addEventListener('beforeunload', () => this.persist());
     (window as Window & { gimHandleBack?: () => boolean }).gimHandleBack = () => {
       if (this.importing) { void this.abortImport(); return true; }
       if (this.el('modal-root').querySelector('.modal')) { this.closeModal(); return true; }
-      if (this.el('tree-panel').classList.contains('visible')) { this.hideTree(); return true; }
-      if (this.el('inspector').classList.contains('expanded')) { this.el('inspector').classList.remove('expanded'); return true; }
+      if (this.treeOpen) { this.hideTree(); return true; }
+      if (this.el('inspector').classList.contains('expanded')) { this.el('inspector').classList.remove('expanded'); this.map.refreshLayout(); this.persist(); return true; }
+      if (this.inspectorOpen) { this.setInspectorOpen(false); return true; }
       this.persist(); return false;
     };
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { this.closeModal(); this.hideTree(); } });
@@ -70,8 +73,26 @@ class MobileApp {
     this.renderInspector();
   }
   private notify(message: string) { clearTimeout(this.toastTimer); this.el('toast').textContent = message; this.el('toast').hidden = false; this.toastTimer = setTimeout(() => { this.el('toast').hidden = true; }, 6000); }
-  private showTree() { this.el('tree-panel').classList.add('visible'); this.el('nav-tree').classList.add('active'); this.el('nav-map').classList.remove('active'); }
-  private hideTree() { this.el('tree-panel').classList.remove('visible'); this.el('nav-tree').classList.remove('active'); this.el('nav-map').classList.add('active'); }
+  private applyPanels(persist = true) {
+    this.el('workspace').classList.toggle('tree-open', this.treeOpen);
+    this.el('workspace').classList.toggle('inspector-open', this.inspectorOpen);
+    this.el('tree-panel').classList.toggle('visible', this.treeOpen);
+    this.el('tree-panel').setAttribute('aria-hidden', String(!this.treeOpen));
+    this.el('inspector').setAttribute('aria-hidden', String(!this.inspectorOpen));
+    for (const [id, open] of [['nav-tree', this.treeOpen], ['nav-details', this.inspectorOpen]] as const) {
+      this.el(id).classList.toggle('active', open); this.el(id).setAttribute('aria-expanded', String(open));
+    }
+    this.el('nav-map').classList.toggle('active', !this.treeOpen && !this.inspectorOpen);
+    this.map.refreshLayout(); if (persist) this.persist();
+  }
+  private setTreeOpen(open: boolean) { this.treeOpen = open; this.applyPanels(); }
+  private showTree() { this.setTreeOpen(true); }
+  private hideTree() { this.setTreeOpen(false); }
+  private setInspectorOpen(open: boolean) {
+    this.inspectorOpen = open;
+    if (!open) { this.el('inspector').classList.remove('expanded'); this.previewSession++; this.previewParser.cancel(); }
+    this.applyPanels(); if (open) this.renderInspector();
+  }
   private modal(title: string, content: string, actions = '') {
     const root = this.el('modal-root'); root.innerHTML = `<div class="modal-scrim"><section class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal-heading"><h2>${esc(title)}</h2><button class="icon-button" id="modal-close" aria-label="关闭">${icon('close')}</button></div><div class="modal-body">${content}</div>${actions ? `<div class="modal-actions">${actions}</div>` : ''}</section></div>`;
     this.bind('modal-close', () => { if (this.importing) void this.abortImport(); else this.closeModal(); });
@@ -155,22 +176,26 @@ class MobileApp {
     let state: UiState = {}; try { state = JSON.parse(localStorage.getItem(`gim-mobile-ui:${project.id}`) ?? '{}'); } catch { /* damaged UI preferences do not damage project data */ }
     this.selected = state.selected && this.objects.has(state.selected) ? state.selected : project.tree.objectId; this.tab = state.tab ?? 'overview';
     this.tree.mode = state.treeMode ?? 'structure'; this.tree.filter = state.filter ?? 'all'; this.tree.setProject(project, state.expanded); this.tree.select(this.selected!);
-    this.el('workspace').classList.add('has-project'); this.map.refreshLayout();
+    this.treeOpen = state.treeOpen ?? false; this.inspectorOpen = state.inspectorOpen ?? false;
+    this.el('inspector').classList.toggle('expanded', this.inspectorOpen && (state.inspectorExpanded ?? false));
+    this.el('workspace').classList.add('has-project'); this.applyPanels(false);
     this.map.setProject(project, state.camera); this.map.select(this.selected!); this.el('project-title').textContent = project.name; this.el('project-subtitle').textContent = `${project.counts.line} 条线路 · ${project.counts.tower} 基杆塔`;
     this.el('map-summary').textContent = `${project.counts.tower} 塔 · ${project.counts.span} 档 · ${project.counts.cross} 跨越`;
     this.el('welcome').hidden = true; localStorage.setItem('gim-mobile-last-project', project.id); this.renderInspector(); this.persist();
     void this.pluginHost.load({ id: project.id, name: project.name, sourceSha256: project.sourceSha256, towerIds: project.objects.filter(o => o.kind === 'tower').map(o => o.id), lineIds: project.objects.filter(o => o.kind === 'line').map(o => o.id) }).catch(() => {});
   }
-  private persist() { if (!this.project) return; const value: UiState = { selected: this.selected, tab: this.tab, camera: this.map.getCamera(), expanded: [...this.tree.expanded], treeMode: this.tree.mode, filter: this.tree.filter }; localStorage.setItem(`gim-mobile-ui:${this.project.id}`, JSON.stringify(value)); }
-  private select(id: string, focus = false) { if (!this.objects.has(id)) return; this.selected = id; this.tree.select(id); this.map.select(id, focus); this.el('inspector').classList.remove('expanded'); this.hideTree(); this.renderInspector(); this.persist(); }
+  private persist() { if (!this.project) return; const value: UiState = { selected: this.selected, tab: this.tab, camera: this.map.getCamera(), expanded: [...this.tree.expanded], treeMode: this.tree.mode, filter: this.tree.filter, treeOpen: this.treeOpen, inspectorOpen: this.inspectorOpen, inspectorExpanded: this.el('inspector').classList.contains('expanded') }; localStorage.setItem(`gim-mobile-ui:${this.project.id}`, JSON.stringify(value)); }
+  private select(id: string, focus = false) { if (!this.objects.has(id)) return; this.selected = id; this.tree.select(id); this.map.select(id, focus); this.el('inspector').classList.remove('expanded'); if (window.innerWidth < 600) this.treeOpen = false; this.inspectorOpen = true; this.applyPanels(); this.renderInspector(); this.persist(); }
   private renderInspector() {
     const object = this.selected ? this.objects.get(this.selected) : undefined;
     const title = this.el('inspector-heading'), content = this.el('inspector-content');
     if (!object || !this.project) { title.innerHTML = '<div><span class="eyebrow">工程详情</span><h2>选择地图上的对象</h2></div>'; content.innerHTML = '<p class="muted">塔位、物理档与跨越物会在这里显示。</p>'; return; }
-    title.innerHTML = `<span class="selection-icon ${object.kind}">${icon(['tower', 'span', 'cross'].includes(object.kind) ? object.kind : 'folder', 26)}</span><div><span class="eyebrow">${kindNames[object.kind]}${object.type ? ' · '+esc(object.type) : ''}</span><h2>${esc(object.name)}</h2></div><button class="icon-button" id="focus-object" aria-label="定位到所选对象">${icon('fit', 19)}</button>`;
+    title.innerHTML = `<span class="selection-icon ${object.kind}">${icon(['tower', 'span', 'cross'].includes(object.kind) ? object.kind : 'folder', 26)}</span><div><span class="eyebrow">${kindNames[object.kind]}${object.type ? ' · '+esc(object.type) : ''}</span><h2>${esc(object.name)}</h2></div><button class="icon-button" id="focus-object" aria-label="定位到所选对象">${icon('fit', 19)}</button><button class="icon-button" id="inspector-close" aria-label="关闭详情面板">${icon('close', 19)}</button>`;
+    this.bind('inspector-close', () => this.setInspectorOpen(false));
     this.bind('focus-object', () => this.map.fit(object));
     document.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b => { b.classList.toggle('active', b.dataset.tab === this.tab); b.setAttribute('aria-selected', String(b.dataset.tab === this.tab)); });
     this.previewSession++; this.previewParser.cancel();
+    if (!this.inspectorOpen) return;
     if (this.tab === 'overview') this.renderOverview(object, content);
     if (this.tab === 'attributes') content.innerHTML = `<div class="attribute-table">${object.attributes.map(a => `<div class="attribute-row"><span>${esc(a.label)}</span><strong>${esc(a.value || '—')}</strong><small>${esc(a.key)} · ${esc(a.source.split('/').pop())}</small></div>`).join('')}</div>`;
     if (this.tab === 'relations') this.renderRelations(object, content);

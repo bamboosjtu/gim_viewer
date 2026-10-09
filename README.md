@@ -27,8 +27,9 @@ npm run tauri:dev
 桌面打包使用 `npm run tauri:build`，包含 portable ZIP 生成流程。
 运行时资源和发布约束见 [架构](docs/architecture.md)，测试与严格样本门禁见 [验证](docs/validation.md)。
 
-桌面线路默认在线底图为 OSM，移动端默认天地图影像；天地图在仓库根 `.env` 配置
-`VITE_TIANDITU_KEY`，不要提交真实 Key。移动端构建和私有配置方法见 [App README](app/README.md)。
+桌面线路默认在线底图为 OSM；桌面与本机浏览器开发预览可在根 `.env` 配置
+`VITE_TIANDITU_KEY`，不要提交真实 Key。Android 安装包不携带开发密钥，用户在地图设置中手动配置；
+未配置时使用 OSM。移动端构建和配置方法见 [App README](app/README.md)。
 底图异常时按配置回退 OSM 或 Canvas 工程覆盖层。
 解析与缓存本地运行，在线底图需要网络。
 

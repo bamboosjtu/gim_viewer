@@ -5,3 +5,32 @@
 .preview-zoom-controls{display:flex;justify-content:center;gap:12px}.preview-zoom-controls button{width:44px;height:44px;border:1px solid #d4dfe8;border-radius:7px;padding:0;font-size:20px}
 .short-map .map-toolbar{flex-direction:row}.short-map .map-toolbar button{border-bottom:0;border-right:1px solid #eef1f5}.short-map .map-toolbar button:last-child{border-right:0}
 @media(min-width:600px) and (max-height:500px){.has-project{grid-template-columns:190px minmax(180px,1fr) 260px;grid-template-rows:minmax(0,1fr)}.tree-panel{grid-column:1;grid-row:1}.map-region{grid-column:2;grid-row:1}.inspector{grid-column:3;grid-row:1;min-height:0;border-top:0;border-left:1px solid #e2e9f0}.sheet-grip{display:none}.inspector.expanded{position:relative;left:auto;height:auto;border-radius:0;box-shadow:none}.overview-grid:has(.tower-preview){grid-template-columns:1fr}.inspector-heading{padding-top:10px;padding-bottom:10px}.inspector-heading h2{font-size:18px}}
+
+/* Panels have the same explicit open/close state on every display width. */
+.workspace{grid-template-rows:minmax(0,1fr)}
+.workspace .tree-panel{display:none}
+.workspace.tree-open .tree-panel{display:flex}
+.workspace:not(.inspector-open) .inspector{display:none}
+.has-project.inspector-open{grid-template-rows:minmax(120px,1fr) 286px}
+.bottom-nav button{width:25%}
+#tree-close,#inspector-close{width:44px;height:44px}
+@media(min-width:600px){
+  .workspace{--tree-width:230px;--tree-column:0px;grid-template-columns:var(--tree-column) minmax(0,1fr)}
+  .workspace.tree-open{--tree-column:var(--tree-width)}
+  .has-project.inspector-open{grid-template-rows:minmax(160px,1fr) 310px}
+  .map-region,.inspector{grid-column:2}
+  .map-region{grid-row:1}.tree-panel{grid-row:1/-1}
+  .inspector.expanded{left:var(--tree-column)}
+  .bottom-nav button{width:160px}
+}
+@media(min-width:840px){.workspace{--tree-width:280px}.has-project.inspector-open{grid-template-rows:minmax(200px,1fr) 310px}.bottom-nav button{width:180px}}
+@media(min-width:1200px){
+  .workspace{--detail-column:0px;grid-template-columns:var(--tree-column) minmax(0,1fr) var(--detail-column)}
+  .workspace.has-project.inspector-open{--detail-column:340px;grid-template-rows:minmax(0,1fr)}
+  .inspector{grid-column:3;grid-row:1}.inspector.expanded{left:auto}
+}
+@media(min-width:600px) and (max-height:500px){
+  .workspace{--tree-width:190px;--detail-column:0px;grid-template-columns:var(--tree-column) minmax(0,1fr) var(--detail-column)}
+  .workspace.has-project.inspector-open{--detail-column:260px;grid-template-rows:minmax(0,1fr)}
+  .inspector{grid-column:3;grid-row:1}.inspector.expanded{left:auto}
+}

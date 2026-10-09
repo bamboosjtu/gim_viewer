@@ -1,13 +1,10 @@
 mod storage;
-use serde::{Deserialize, Serialize};
+mod settings;
+use settings::Settings;
 use std::{path::PathBuf, sync::{Arc, atomic::{AtomicBool, Ordering}}};
 use tauri::{Emitter, Manager};
-include!(concat!(env!("OUT_DIR"), "/bootstrap.rs"));
 #[derive(Clone)]
 struct Store { root: PathBuf, cancelled: Arc<AtomicBool>, busy: Arc<AtomicBool> }
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Settings { tianditu_key: String, base_layer: String }
 #[tauri::command]
 fn list_projects(store: tauri::State<Store>) -> Vec<storage::ProjectMeta> { storage::list(&store.root).into_iter().filter(|m| !m.parser_version.is_empty()).collect() }
 #[tauri::command]
@@ -35,12 +32,11 @@ fn delete_project(store: tauri::State<Store>, id: String) -> Result<(), String> 
 async fn preview_cache(store: tauri::State<'_, Store>, id: String, key: String, data: Option<serde_json::Value>) -> Result<Option<serde_json::Value>, String> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::preview(&root, &id, &key, data)).await.map_err(|e| e.to_string())? }
 #[tauri::command]
 fn get_settings(store: tauri::State<Store>) -> Settings {
-    std::fs::read(store.root.join("settings.json")).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or(Settings { tianditu_key: BOOTSTRAP_KEY.into(), base_layer: "imagery".into() })
+    settings::load(&store.root)
 }
 #[tauri::command]
 fn save_settings(store: tauri::State<Store>, settings: Settings) -> Result<(), String> {
-    if settings.tianditu_key.len() > 128 || !settings.tianditu_key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') || !["imagery", "vector", "terrain", "osm", "canvas"].contains(&settings.base_layer.as_str()) { return Err("地图设置无效".into()); }
-    std::fs::write(store.root.join("settings.json"), serde_json::to_vec(&settings).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    settings::save(&store.root, settings)
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
