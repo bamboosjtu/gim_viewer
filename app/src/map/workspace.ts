@@ -26,11 +26,13 @@ export class MapWorkspace {
   private touches = new Map<number, { x: number; y: number }>();
   private drag?: { x: number; y: number; moved: boolean };
   private resizeObserver: ResizeObserver;
+  private resized = () => this.refreshLayout();
   constructor(private host: HTMLElement, private onSelect: (id: string) => void, private status: (text: string, base: string) => void, private onCamera: (c: Camera) => void) {
     this.glElement = document.createElement('div'); this.glElement.className = 'gl-map'; host.append(this.glElement);
     this.canvas = document.createElement('canvas'); this.canvas.className = 'engineering-canvas'; this.canvas.setAttribute('aria-label', '工程地图，可拖动和缩放'); this.canvas.tabIndex = 0; host.append(this.canvas);
     this.selectionLabel = document.createElement('div'); this.selectionLabel.className = 'object-map-label'; this.selectionLabel.hidden = true; host.append(this.selectionLabel);
-    this.resizeObserver = new ResizeObserver(() => { this.map?.resize(); this.draw(); }); this.resizeObserver.observe(host);
+    this.resizeObserver = new ResizeObserver(this.resized); this.resizeObserver.observe(host);
+    window.addEventListener('resize', this.resized);
     this.canvas.addEventListener('pointerdown', e => { this.canvas.setPointerCapture(e.pointerId); this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY }); this.drag = { x: e.clientX, y: e.clientY, moved: false }; });
     this.canvas.addEventListener('pointermove', e => {
       const old = this.touches.get(e.pointerId); if (!old) return;
@@ -51,6 +53,7 @@ export class MapWorkspace {
     this.draw();
   }
   setProject(project: PowerlineProject, camera?: Camera) { this.project = project; if (camera) { this.camera = camera; this.syncCamera(); } else this.fit(); this.updateOverlay(); this.draw(); }
+  refreshLayout() { this.host.parentElement?.classList.toggle('short-map', this.host.clientHeight < 260); this.map?.resize(); this.draw(); }
   getCamera(): Camera { return this.map ? { center: this.map.getCenter().toArray(), zoom: this.map.getZoom() } : { center: [...this.camera.center], zoom: this.camera.zoom }; }
   private syncCamera() { this.map?.jumpTo(this.camera); this.onCamera(this.camera); }
   private scale() { return 512 * 2 ** this.camera.zoom; }
@@ -169,5 +172,5 @@ export class MapWorkspace {
     const points = this.hit.filter(h => h.point).map(h => ({ id: h.id, d: Math.hypot(x - h.point![0], y - h.point![1]) })).sort((a, b) => a.d - b.d); if (points[0]?.d <= 22) { this.onSelect(points[0].id); return; }
     const segments = this.hit.filter(h => h.segment).map(h => { const [ax, ay, bx, by] = h.segment!; const t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / ((bx - ax) ** 2 + (by - ay) ** 2 || 1))); return { id: h.id, d: Math.hypot(x - ax - t * (bx - ax), y - ay - t * (by - ay)) }; }).sort((a, b) => a.d - b.d); if (segments[0]?.d <= 14) this.onSelect(segments[0].id);
   }
-  destroy() { this.generation++; clearTimeout(this.fallbackTimer); this.resizeObserver.disconnect(); this.map?.remove(); this.raster?.dispose(); }
+  destroy() { this.generation++; clearTimeout(this.fallbackTimer); this.resizeObserver.disconnect(); window.removeEventListener('resize', this.resized); this.map?.remove(); this.raster?.dispose(); }
 }

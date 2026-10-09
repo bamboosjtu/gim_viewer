@@ -95,7 +95,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 
 最后一条是需要真实源包而显式启用的六包测试，必须实际执行并报告零 skip。
 检查源身份、有界解压、空 7z 文件、SQLite、重复导入与删除；常规存储单测另覆盖取消清理、
-路径限制、语义身份拒绝及损坏数据库由校验后的原包重建。
+路径限制、语义身份拒绝、有效缓存下源 magic/大小/SHA 改变的拒绝，及损坏数据库由校验后的原包重建。
 
 Android 使用同一 APK，通过系统 DocumentsUI 选择 `.gim`，核对私有工程目录、metadata、
 源 SHA、语义计数和 UI 来源。API 36 模拟器已完成六包 SAF 导入；P8/LM 的来源、
@@ -105,6 +105,9 @@ Android 使用同一 APK，通过系统 DocumentsUI 选择 `.gim`，核对私有
 浏览器预览另检查手机/展开布局、真实底图、虚拟树末端搜索、属性和塔形。
 API 29 的原装 WebView 74 单独检查普通 Worker、二维瓦片、line04/line02 SAF 与缓存、
 P8 HNum、窗口变化和定位权限拒绝。诊断构建用于结构断言，最终签名 Release 另检查原生闭环。
+API 36 Pixel Fold profile 使用模拟器真实 fold/unfold 和 user-rotation 命令，核验内外显示切换，
+比较同一工程的相机、选择、树展开与页签；截图明确指定活动物理显示。低高度横屏另检查详情
+页签及内容滚动区可达，fit/zoom 按钮不重叠。普通 `wm size` 调整不等同于这一检查。
 
 模拟位置、尺寸调整和 Windows 存储测试只支持相应功能，不能替代真实 GNSS、
 X Fold5 内外屏或性能验收。设备错误路径及最终发布完成条件只在

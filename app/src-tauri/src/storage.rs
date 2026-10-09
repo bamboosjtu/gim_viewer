@@ -25,6 +25,17 @@ fn database(root: &Path, id: &str) -> Result<Connection, String> {
     Connection::open(path).map_err(error)
 }
 pub fn read_meta(root: &Path, id: &str) -> Result<ProjectMeta, String> { serde_json::from_slice(&fs::read(dir(root, id)?.join("metadata.json")).map_err(error)?).map_err(error) }
+pub fn validate_source(root: &Path, id: &str) -> Result<(), String> {
+    let meta = read_meta(root, id)?;
+    let mut file = fs::File::open(dir(root, id)?.join("source/original.gim")).map_err(error)?;
+    if meta.id != id || meta.sha256 != id || file.metadata().map_err(error)?.len() != meta.size { return Err("私有源包身份或大小不匹配".into()); }
+    let mut header = [0u8; 7]; file.read_exact(&mut header).map_err(error)?;
+    if &header != b"GIMPKGT" { return Err("私有源包类型错误，不能使用线路缓存".into()); }
+    let mut digest = Sha256::new(); digest.update(header); let mut buffer = [0u8; 256*1024];
+    loop { let n = file.read(&mut buffer).map_err(error)?; if n == 0 { break; } digest.update(&buffer[..n]); }
+    if format!("{:x}", digest.finalize()) != id { return Err("私有源包 SHA 校验失败，不能使用缓存".into()); }
+    Ok(())
+}
 fn write_meta(path: &Path, meta: &ProjectMeta) -> Result<(), String> {
     let temp = path.join("metadata.pending"); fs::write(&temp, serde_json::to_vec(meta).map_err(error)?).map_err(error)?;
     let target = path.join("metadata.json");
@@ -49,6 +60,7 @@ fn stored_text_entries(root: &Path, id: &str) -> Result<Vec<TextEntry>, String> 
     rows.collect::<Result<Vec<_>, _>>().map_err(error)
 }
 pub fn text_entries(root: &Path, id: &str) -> Result<Vec<TextEntry>, String> {
+    validate_source(root, id)?;
     match stored_text_entries(root, id) { Ok(v) if !v.is_empty() => Ok(v), _ => { rebuild_entries(root, id)?; stored_text_entries(root, id) } }
 }
 fn rebuild_entries(root: &Path, id: &str) -> Result<(), String> {
@@ -89,6 +101,7 @@ pub fn cached_json(root: &Path, id: &str) -> Result<Option<String>, String> {
     Ok(checked_cache(root,id)?.map(|(_,json)| json))
 }
 fn checked_cache(root: &Path, id: &str) -> Result<Option<(serde_json::Value,String)>, String> {
+    validate_source(root, id)?;
     if read_meta(root,id)?.parser_version != PARSER { return Ok(None); }
     let db = database(root, id)?;
     // Warm open checks the semantic table; text pages are read only when their sources are needed.
@@ -176,6 +189,7 @@ pub fn commit(root: &Path, id: &str, payload: serde_json::Value) -> Result<(), S
     commit_json(root,id,serde_json::to_string(&payload).map_err(error)?)
 }
 pub fn commit_json(root: &Path, id: &str, json: String) -> Result<(), String> {
+    validate_source(root, id)?;
     if json.len() > 64*1024*1024 { return Err("语义缓存超过 64 MiB 限额".into()); }
     let payload: serde_json::Value = serde_json::from_str(&json).map_err(error)?;
     let mut meta = read_meta(root, id)?;
@@ -226,12 +240,18 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test] fn semantic_commit_checks_source_identity() {
-        let root = std::env::temp_dir().join(format!("gim-mobile-test-{}", now())); let id = "b".repeat(64); let p = dir(&root, &id).unwrap(); fs::create_dir_all(p.join("cache")).unwrap();
+        let root = std::env::temp_dir().join(format!("gim-mobile-test-{}", now())); let bytes = b"GIMPKGT"; let id = format!("{:x}", Sha256::digest(bytes)); let p = dir(&root, &id).unwrap(); fs::create_dir_all(p.join("cache")).unwrap(); fs::create_dir_all(p.join("source")).unwrap(); fs::write(p.join("source/original.gim"),bytes).unwrap();
         let m = ProjectMeta { id: id.clone(), name: "test".into(), sha256: id.clone(), size: 7, imported_at: 0, last_opened_at: 0, parser_version: String::new(), counts: serde_json::json!({}) }; write_meta(&p, &m).unwrap();
         let db = Connection::open(p.join("cache/project.sqlite")).unwrap(); db.execute_batch("CREATE TABLE semantics(parser TEXT PRIMARY KEY,json TEXT NOT NULL);").unwrap(); drop(db);
         let bad = serde_json::json!({"id":id,"sourceSha256":"wrong","sourceSize":7,"parserVersion":PARSER}); assert!(commit(&root, &id, bad).is_err()); assert!(cached(&root, &id).unwrap().is_none());
         let good = test_payload(&id, 7, "saved"); commit(&root, &id, good.clone()).unwrap(); assert_eq!(cached(&root, &id).unwrap(), Some(good.clone()));
         assert_eq!(serde_json::from_str::<serde_json::Value>(&cached_json(&root,&id).unwrap().unwrap()).unwrap(),good);
+        fs::write(p.join("source/original.gim"), b"GIMPKGS").unwrap();
+        assert!(cached_json(&root,&id).unwrap_err().contains("类型")); assert!(text_entries(&root,&id).is_err());
+        fs::write(p.join("source/original.gim"), b"GIMPKGTchanged").unwrap();
+        assert!(cached_json(&root,&id).unwrap_err().contains("大小"));
+        let mut m = read_meta(&root,&id).unwrap(); m.size = 14; write_meta(&p,&m).unwrap();
+        assert!(cached_json(&root,&id).unwrap_err().contains("SHA"));
         delete(&root, &id).unwrap(); assert!(!p.exists()); fs::remove_dir_all(root).unwrap();
     }
     #[test]

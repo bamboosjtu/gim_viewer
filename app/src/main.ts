@@ -155,9 +155,10 @@ class MobileApp {
     let state: UiState = {}; try { state = JSON.parse(localStorage.getItem(`gim-mobile-ui:${project.id}`) ?? '{}'); } catch { /* damaged UI preferences do not damage project data */ }
     this.selected = state.selected && this.objects.has(state.selected) ? state.selected : project.tree.objectId; this.tab = state.tab ?? 'overview';
     this.tree.mode = state.treeMode ?? 'structure'; this.tree.filter = state.filter ?? 'all'; this.tree.setProject(project, state.expanded); this.tree.select(this.selected!);
+    this.el('workspace').classList.add('has-project'); this.map.refreshLayout();
     this.map.setProject(project, state.camera); this.map.select(this.selected!); this.el('project-title').textContent = project.name; this.el('project-subtitle').textContent = `${project.counts.line} 条线路 · ${project.counts.tower} 基杆塔`;
     this.el('map-summary').textContent = `${project.counts.tower} 塔 · ${project.counts.span} 档 · ${project.counts.cross} 跨越`;
-    this.el('welcome').hidden = true; this.el('workspace').classList.add('has-project'); localStorage.setItem('gim-mobile-last-project', project.id); this.renderInspector(); this.persist();
+    this.el('welcome').hidden = true; localStorage.setItem('gim-mobile-last-project', project.id); this.renderInspector(); this.persist();
     void this.pluginHost.load({ id: project.id, name: project.name, sourceSha256: project.sourceSha256, towerIds: project.objects.filter(o => o.kind === 'tower').map(o => o.id), lineIds: project.objects.filter(o => o.kind === 'line').map(o => o.id) }).catch(() => {});
   }
   private persist() { if (!this.project) return; const value: UiState = { selected: this.selected, tab: this.tab, camera: this.map.getCamera(), expanded: [...this.tree.expanded], treeMode: this.tree.mode, filter: this.tree.filter }; localStorage.setItem(`gim-mobile-ui:${this.project.id}`, JSON.stringify(value)); }
