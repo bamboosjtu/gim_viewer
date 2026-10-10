@@ -1,8 +1,19 @@
-name: Desktop compile gate
+name: Windows Desktop CI
 
 on:
   push:
+    paths:
+      - 'desktop/**'
+      - 'packages/**'
+      - 'crates/**'
+      - '.github/workflows/windows-ci.yml'
+
   pull_request:
+    paths:
+      - 'desktop/**'
+      - 'packages/**'
+      - 'crates/**'
+      - '.github/workflows/windows-ci.yml'
   workflow_dispatch:
 
 permissions:

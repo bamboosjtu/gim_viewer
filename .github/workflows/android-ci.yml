@@ -1,0 +1,200 @@
+name: Android CI
+
+on:
+  push:
+    paths:
+      - 'app/**'
+      - 'packages/**'
+      - 'crates/**'
+      - '.github/workflows/android-ci.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'packages/**'
+      - 'crates/**'
+      - '.github/workflows/android-ci.yml'
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Full 40-character source commit SHA (must be in main history)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Android checks / manual signed APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout selected source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Only the workflow on the default branch may sign packages. The checked-
+      # out source must be an existing commit in the history of main.
+      - name: Validate manual build source
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: .
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main' || {
+            echo '::error::Select main as the workflow branch.'; exit 1;
+          }
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || {
+            echo '::error::source_sha must be a full lowercase 40-character SHA.'; exit 1;
+          }
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main || {
+            echo '::error::source_sha is not an ancestor of main.'; exit 1;
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend unit tests
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      # The rest is intentionally manual-only: normal push/PR runs never
+      # install the native Android toolchain and never use signing secrets.
+      - name: Set up Java
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        if: github.event_name == 'workflow_dispatch'
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK, Build Tools and NDK
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            'platform-tools' \
+            'platforms;android-36' \
+            'build-tools;36.0.0' \
+            'ndk;28.2.13676358'
+          echo "NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          test -f "$ANDROID_HOME/ndk/28.2.13676358/source.properties"
+
+      - name: Set up Rust Android target
+        if: github.event_name == 'workflow_dispatch'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Build ARM64 release APK
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          chmod +x src-tauri/gen/android/gradlew
+          npm run android:build
+
+      # Signing is performed AFTER the unsigned Tauri/Gradle build. This means
+      # we can sign an exact old source SHA without changing its Gradle files.
+      - name: Sign and verify Android APK
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: .
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing GitHub Actions secret: $name"; exit 1
+            fi
+          done
+
+          KEYSTORE="$RUNNER_TEMP/gim-viewer-release.jks"
+          trap 'rm -f "$KEYSTORE" "$RUNNER_TEMP/aligned.apk"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+
+          APK_DIR='app/src-tauri/gen/android/app/build/outputs/apk'
+          mapfile -d '' APKS < <(find "$APK_DIR" -type f -name '*.apk' -path '*/release/*' -print0)
+          if [ "${#APKS[@]}" -ne 1 ]; then
+            echo "::error::Expected one release APK, found ${#APKS[@]}"
+            find "$APK_DIR" -type f -name '*.apk' -print
+            exit 1
+          fi
+
+          VERSION="$(node -p "require('./app/package.json').version")"
+          CONFIG_VERSION="$(node -p "require('./app/src-tauri/tauri.conf.json').version")"
+          if [ "$VERSION" != "$CONFIG_VERSION" ] || ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo '::error::Android package/Tauri version mismatch or invalid version'
+            exit 1
+          fi
+          VERSION_CODE="$(node -e "const c=require('./app/src-tauri/tauri.conf.json');const v=c.version.split('.').map(Number);console.log(c.bundle?.android?.versionCode ?? v[0]*1000000+v[1]*1000+v[2])")"
+
+          mkdir -p dist/android
+          OUT="dist/android/GIM-Viewer-Android-v${VERSION}-arm64.apk"
+          TOOLS="$ANDROID_HOME/build-tools/36.0.0"
+          "$TOOLS/zipalign" -P 16 -f 4 "${APKS[0]}" "$RUNNER_TEMP/aligned.apk"
+          "$TOOLS/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$OUT" \
+            "$RUNNER_TEMP/aligned.apk"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$OUT"
+          "$TOOLS/zipalign" -c -P 16 4 "$OUT"
+
+          BADGING="$RUNNER_TEMP/apk-badging.txt"
+          "$TOOLS/aapt" dump badging "$OUT" > "$BADGING"
+          grep -Fq "name='com.gimviewer.powerline'" "$BADGING"
+          grep -Fq "versionName='$VERSION'" "$BADGING"
+          grep -Fq "versionCode='$VERSION_CODE'" "$BADGING"
+          unzip -Z -1 "$OUT" | awk '/^lib\/arm64-v8a\/.*\.so$/ { found=1 } END { exit !found }'
+
+          (cd dist/android && sha256sum *.apk > SHA256SUMS.txt)
+          VERSION="$VERSION" COMMIT_SHA="$(git rev-parse HEAD)" node -e '
+            const fs = require("fs");
+            const info = {
+              product: "GIM Viewer Android",
+              version: process.env.VERSION,
+              source_commit: process.env.COMMIT_SHA,
+              package_id: "com.gimviewer.powerline",
+              abi: "arm64-v8a",
+              signed: true
+            };
+            fs.writeFileSync("dist/android/build-info.json", JSON.stringify(info, null, 2) + "\n");
+          '
+          rm -f "$KEYSTORE" "$RUNNER_TEMP/aligned.apk"
+
+      - name: Upload signed APK as Actions artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gim-viewer-android-${{ inputs.source_sha }}
+          path: dist/android/*
+          retention-days: 30
+          if-no-files-found: error
