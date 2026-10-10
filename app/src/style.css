@@ -74,3 +74,4 @@
 .immersive-overview .values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px;margin:0}
 .immersive-overview .values>div{display:flex;align-items:baseline;justify-content:space-between;gap:0;padding:0;margin:0;border:0;min-width:0;line-height:1.45}.immersive-overview .values>div:last-child{grid-column:1/-1}.immersive-overview dt{font-size:11px;color:#71818f;margin:0 6px 0 0;flex:none}.immersive-overview dd{font-size:12px;text-align:right;margin:0;min-width:0;overflow-wrap:break-word}
 .immersive-overview-details{min-height:44px;flex:none;justify-content:space-between;padding:0 14px;border-top:1px solid #e7edf2;color:#1b5fb9;font-size:12px}
+@media(max-width:599.98px){.immersive-overview .values{grid-template-columns:minmax(0,1fr)}}
