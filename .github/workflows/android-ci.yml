@@ -87,7 +87,10 @@ jobs:
 
       - name: Set up Android SDK
         if: github.event_name == 'workflow_dispatch'
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          # Google removed the legacy 'tools' SDK package requested by v3.
+          packages: 'platform-tools'
 
       - name: Install Android SDK, Build Tools and NDK
         if: github.event_name == 'workflow_dispatch'

@@ -40,6 +40,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # The Vitest SQLite test executes 'cargo test' with a 180-second
+      # spawnSync timeout. Precompile it outside that timeout on a clean runner.
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Precompile Rust SQLite test harness
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib substation_sqlite_exchange --no-run
+
       - name: Run frontend unit tests
         run: npm test
 
@@ -47,9 +55,6 @@ jobs:
         env:
           VITE_GIM_COMMIT: ${{ github.sha }}
         run: npm run build
-
-      - name: Install stable Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
 
       - name: Check Tauri Rust boundary
         run: cargo check --manifest-path src-tauri/Cargo.toml --locked
