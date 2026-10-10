@@ -129,7 +129,7 @@ MapLibre、Canvas、树和搜索共用对象选择状态。
 | IFC Spatial parser contract | `gim-substation-parser-v23` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | Fragments | `fragments-cache-v6` | [db.rs](../desktop/src-tauri/src/db.rs)、[features](../desktop/src/config/features.ts) | 源/IFC 身份及实际安装的 fragments/web-ifc 版本 |
 | Android 线路语义 | `mobile-powerline-v2` | [移动存储](../app/src-tauri/src/storage.rs)、[领域投影](../packages/powerline-core/src/domain.ts) | 私有源 SHA/大小、业务属性范围、唯一对象和语义表校验 |
-| Android HNum 预览 | `hnum-xz-v1` | [领域定义](../packages/powerline-core/src/domain.ts) | 源 SHA、MOD 路径和 Body 内部点引用 |
+| Android HNum 预览 | `hnum-xz-v2` | [领域定义](../packages/powerline-core/src/domain.ts) | 源 SHA、MOD 路径；文件全局唯一点号可跨 Body 连接尾部杆件，重复点号仅在当前 Body 解析 |
 
 SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `powerline_*`。
 FAM 来源记录使用 `(project_id, source_path, source_line)` 区分物理行，不用归一化键覆盖重复原文。

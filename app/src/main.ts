@@ -16,7 +16,7 @@ const host = document.querySelector<HTMLDivElement>('#app')!;
 host.innerHTML = `
   <header class="app-header"><button class="brand-button" id="projects-top" aria-label="我的工程">${icon('tower', 26)}</button><div class="title-block"><h1 id="project-title">线路 GIM</h1><span id="project-subtitle">工程地图 · 现场查看</span></div><button class="header-button" id="search-open" aria-label="搜索工程对象">${icon('search', 22)}</button><button class="header-button" id="settings-open" aria-label="地图设置">${icon('settings', 22)}</button></header>
   <main class="workspace" id="workspace"><aside class="tree-panel" id="tree-panel"><div class="panel-heading"><span>工程导航</span><button class="icon-button" id="tree-close" aria-label="关闭工程树">${icon('close')}</button></div><label class="tree-search">${icon('search', 18)}<input id="tree-search" placeholder="搜索塔号、塔型、耐张段…" aria-label="搜索工程对象"></label><div id="tree-host"></div></aside>
-    <section class="map-region"><div id="map-host"></div><div class="map-caption"><span class="map-chip" id="map-label">无底图工程图</span><span id="map-summary"></span></div><div class="map-toolbar"><button id="layers" aria-label="选择底图">${icon('layers', 21)}</button><button id="gps" aria-label="当前位置">${icon('locate', 21)}</button><button id="fit" aria-label="显示完整工程">${icon('range', 21)}</button><button id="map-fullscreen" aria-label="进入沉浸地图" aria-pressed="false" disabled>${icon('fullscreen', 21)}</button></div><div class="zoom-tools"><button id="zoom-in" aria-label="放大">${icon('plus', 18)}</button><button id="zoom-out" aria-label="缩小"><span class="minus"></span></button></div><div class="map-attribution" id="fallback-attribution">工程坐标 · 无底图</div><div class="empty-welcome" id="welcome"><span class="welcome-mark">${icon('tower', 56)}</span><h2>把线路带到现场</h2><p>导入 GIM，沿地图查看杆塔、档和跨越物。<br>工程文件保存在本机，可离线查阅。</p><button class="primary" id="welcome-import">${icon('plus', 20)} 导入线路工程</button><button class="text-button" id="welcome-projects">查看我的工程</button></div></section>
+    <section class="map-region"><div id="map-host"></div><div class="map-caption"><span class="map-chip" id="map-label">无底图工程图</span><span id="map-summary"></span></div><div class="map-toolbar"><button id="layers" aria-label="选择底图">${icon('layers', 21)}</button><button id="gps" aria-label="当前位置">${icon('locate', 21)}</button><button id="fit" aria-label="显示完整工程">${icon('range', 21)}</button><button id="map-fullscreen" aria-label="进入沉浸地图" aria-pressed="false" disabled>${icon('fullscreen', 21)}</button></div><div class="zoom-tools"><button id="zoom-in" aria-label="放大">${icon('plus', 18)}</button><button id="zoom-out" aria-label="缩小"><span class="minus"></span></button></div><section class="immersive-overview" id="immersive-overview" aria-label="所选对象概览" hidden></section><div class="map-attribution" id="fallback-attribution">工程坐标 · 无底图</div><div class="empty-welcome" id="welcome"><span class="welcome-mark">${icon('tower', 56)}</span><h2>把线路带到现场</h2><p>导入 GIM，沿地图查看杆塔、档和跨越物。<br>工程文件保存在本机，可离线查阅。</p><button class="primary" id="welcome-import">${icon('plus', 20)} 导入线路工程</button><button class="text-button" id="welcome-projects">查看我的工程</button></div></section>
     <section class="inspector" id="inspector" aria-label="对象详情"><button class="sheet-grip" id="sheet-toggle" aria-label="展开或收起详情"><span></span></button><div class="inspector-heading" id="inspector-heading"></div><div class="inspector-tabs" role="tablist">${[['overview','概览'],['attributes','属性'],['relations','关系'],['sources','来源']].map(([tab, label]) => `<button role="tab" data-tab="${tab}">${label}</button>`).join('')}</div><div class="inspector-content" id="inspector-content"></div></section>
   </main><nav class="bottom-nav" aria-label="主导航"><button id="nav-map" class="active">${icon('map', 22)}<span>地图</span></button><button id="nav-tree" aria-controls="tree-panel" aria-expanded="false">${icon('tree', 22)}<span>工程树</span></button><button id="nav-details" aria-controls="inspector" aria-expanded="false">${icon('info', 22)}<span>详情</span></button><button id="nav-projects">${icon('folder', 22)}<span>我的工程</span></button></nav><div id="toast" class="toast" role="status" hidden></div><div id="modal-root"></div>`;
 
@@ -25,6 +25,8 @@ class MobileApp {
   private header?: ProjectHeader;
   private headerError?: string;
   private immersive = false;
+  private immersiveDismissed?: string;
+  private immersiveRendered?: string;
   private windowBusy = false;
   private windowRequest = 0;
   private windowSyncTimer?: ReturnType<typeof setTimeout>;
@@ -108,13 +110,17 @@ class MobileApp {
     catch { /* Keep the last known safe area; the next native event or foreground transition retries. */ }
   }
   private applyImmersive(enabled: boolean) {
+    const wasImmersive = this.immersive;
     this.immersive = enabled && Boolean(this.project);
+    if (this.immersive && !wasImmersive) { this.immersiveDismissed = undefined; this.previewSession++; this.previewParser.cancel(); }
     host.classList.toggle('immersive-map', this.immersive);
     const button = this.el('map-fullscreen'); button.setAttribute('aria-pressed', String(this.immersive));
     button.setAttribute('aria-label', this.immersive ? '退出沉浸地图' : '进入沉浸地图');
     button.innerHTML = icon(this.immersive ? 'fullscreenExit' : 'fullscreen',21);
     this.el('tree-panel').setAttribute('aria-hidden', String(this.immersive || !this.treeOpen));
     this.el('inspector').setAttribute('aria-hidden', String(this.immersive || !this.inspectorOpen));
+    this.renderImmersiveOverview();
+    if (wasImmersive && !this.immersive) this.renderInspector();
     this.map.refreshLayout();
   }
   private async setImmersive(enabled: boolean) {
@@ -231,7 +237,7 @@ class MobileApp {
     } catch (error) { if (token === this.session) { this.importing = false; this.closeModal(); this.notify(`打开失败：${String(error)}`); } }
   }
   private activate(project: PowerlineProject) {
-    this.persist(); this.project = project; this.header = undefined; this.headerError = undefined;
+    this.persist(); this.project = project; this.immersiveRendered = undefined; this.immersiveDismissed = undefined; this.header = undefined; this.headerError = undefined;
     (this.el('map-fullscreen') as HTMLButtonElement).disabled = false;
     void bridge.readHeader(project.id).then(bytes => { if (this.project !== project) return; this.header = parseProjectHeader(bytes); if (this.objects.get(this.selected ?? '')?.kind === 'project') this.renderInspector(); }).catch(() => { if (this.project !== project) return; this.headerError = 'GIM 头部读取失败，可重新打开工程重试'; if (this.objects.get(this.selected ?? '')?.kind === 'project') this.renderInspector(); }); this.objects = new Map(project.objects.map(o => [o.id, o]));
     let state: UiState = {}; try { state = JSON.parse(localStorage.getItem(`gim-mobile-ui:${project.id}`) ?? '{}'); } catch { /* damaged UI preferences do not damage project data */ }
@@ -246,8 +252,10 @@ class MobileApp {
     void this.pluginHost.load({ id: project.id, name: project.name, sourceSha256: project.sourceSha256, towerIds: project.objects.filter(o => o.kind === 'tower').map(o => o.id), lineIds: project.objects.filter(o => o.kind === 'line').map(o => o.id) }).catch(() => {});
   }
   private persist() { if (!this.project) return; const value: UiState = { selected: this.selected, tab: this.tab, camera: this.map.getCamera(), expanded: [...this.tree.expanded], treeMode: this.tree.mode, filter: this.tree.filter, treeOpen: this.treeOpen, inspectorOpen: this.inspectorOpen, inspectorExpanded: this.el('inspector').classList.contains('expanded') }; localStorage.setItem(`gim-mobile-ui:${this.project.id}`, JSON.stringify(value)); }
-  private select(id: string, focus = false) { if (!this.objects.has(id)) return; this.selected = id; this.tree.select(id); this.map.select(id, focus); if (this.immersive) { this.renderInspector(); this.persist(); return; } this.el('inspector').classList.remove('expanded'); if (window.innerWidth < 600) this.treeOpen = false; this.inspectorOpen = true; this.applyPanels(); this.renderInspector(); this.persist(); }
+  private select(id: string, focus = false) { if (!this.objects.has(id)) return; this.selected = id; this.immersiveDismissed = undefined; this.tree.select(id); this.map.select(id, focus); if (this.immersive) { this.renderImmersiveOverview(); this.persist(); return; } this.el('inspector').classList.remove('expanded'); if (window.innerWidth < 600) this.treeOpen = false; this.inspectorOpen = true; this.applyPanels(); this.renderInspector(); this.persist(); }
   private renderInspector() {
+    this.renderImmersiveOverview();
+    if (this.immersive) return;
     const object = this.selected ? this.objects.get(this.selected) : undefined;
     const title = this.el('inspector-heading'), content = this.el('inspector-content');
     if (!object || !this.project) { title.innerHTML = '<div><span class="eyebrow">工程详情</span><h2>选择地图上的对象</h2></div>'; content.innerHTML = '<p class="muted">塔位、物理档与跨越物会在这里显示。</p>'; return; }
@@ -263,17 +271,31 @@ class MobileApp {
     if (this.tab === 'sources') this.renderSources(object, content);
   }
   private values(values: [string, unknown][]) { return `<dl class="values">${values.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value ?? '未提供')}</dd></div>`).join('')}</dl>`; }
-  private renderOverview(o: BusinessObject, content: HTMLElement) {
+  private overviewFields(o: BusinessObject): [string, unknown][] {
     const coordinate = o.coordinate;
     const location: [string, unknown][] = coordinate ? [['纬度', coordinate[1].toFixed(7)+'°'], ['经度', coordinate[0].toFixed(7)+'°'], ['高程', coordinate[2] != null ? coordinate[2].toFixed(2)+' m' : undefined]] : [];
     let fields: [string, unknown][] = [];
-    if (o.kind === 'tower') fields = [['塔型', o.type], ['呼称高', o.height ? `${o.height} m` : undefined], ...location, ['方位角', Number.isFinite(o.azimuth) ? o.azimuth!.toFixed(2)+'°' : undefined], ['所属线路', o.lineIds.map(id => this.objects.get(id)?.name).join(' / ')], ['耐张段', o.strainIds.map(id => this.objects.get(id)?.name).join(' / ')]];
+    if (o.kind === 'tower') fields = [['塔型', o.type], ['呼称高', o.height != null ? `${o.height} m` : undefined], ...location, ['方位角', Number.isFinite(o.azimuth) ? o.azimuth!.toFixed(2)+'°' : undefined], ['所属线路', o.lineIds.map(id => this.objects.get(id)?.name).join(' / ')], ['耐张段', o.strainIds.map(id => this.objects.get(id)?.name).join(' / ')]];
     else if (o.kind === 'span') fields = [['起始塔', this.objects.get(o.startTowerId ?? '')?.name], ['终止塔', this.objects.get(o.endTowerId ?? '')?.name], ['水平档距', o.horizontalMeters != null ? o.horizontalMeters.toFixed(2)+' m' : undefined], ['三维直线距离', o.spatialMeters != null ? o.spatialMeters.toFixed(2)+' m' : undefined], ['原始导线记录', o.rawWireIds?.length], ...Object.entries(o.wireCounts ?? {}).map(([key, value]): [string, unknown] => [key, value]), ['耐张段', o.strainIds.map(id => this.objects.get(id)?.name).join(' / ')]];
     else if (o.kind === 'cross') fields = [['类型 / 业务码', o.type], ...location, ['几何点数', o.geometry?.length ?? 0], ['所属线路', o.lineIds.map(id => this.objects.get(id)?.name).join(' / ')], ['耐张段', o.strainIds.map(id => this.objects.get(id)?.name).join(' / ')]];
     else {
       const members = o.kind === 'project' ? this.project!.objects : this.project!.objects.filter(v => v.lineIds.includes(o.id) || v.strainIds.includes(o.id));
       fields = [['杆塔', members.filter(v => v.kind === 'tower').length+' 基'], ['物理档', members.filter(v => v.kind === 'span').length+' 档'], ['跨越物', members.filter(v => v.kind === 'cross').length+' 处'], ['去重档水平长度', (members.filter(v => v.kind === 'span').reduce((s, v) => s+(v.horizontalMeters ?? 0), 0)/1000).toFixed(3)+' km'], ['源线路长度', o.attributes.filter(a => a.key.toUpperCase() === 'LINELENGTH').map(a => a.value+' km').join(' / ') || '参见各线路属性']];
     }
+    return fields;
+  }
+  private renderImmersiveOverview() {
+    const card = this.el('immersive-overview'), o = this.selected ? this.objects.get(this.selected) : undefined;
+    card.hidden = !this.immersive || !o || o.id === this.immersiveDismissed;
+    if (card.hidden || !o) return;
+    if (this.immersiveRendered === o.id && card.dataset.objectId === o.id) return;
+    this.immersiveRendered = o.id; card.dataset.objectId = o.id;
+    card.innerHTML = `<div class="immersive-overview-heading"><span class="selection-icon ${o.kind}">${icon(['tower','span','cross'].includes(o.kind) ? o.kind : 'folder',22)}</span><div><span class="eyebrow">${kindNames[o.kind]} · 概览</span><h2>${esc(o.name)}</h2></div><button class="icon-button" id="immersive-overview-close" aria-label="关闭地图概览">${icon('close',19)}</button></div><div class="immersive-overview-body">${this.values(this.overviewFields(o))}</div><button class="immersive-overview-details" id="immersive-overview-details">查看详情 ${icon('chevron',16)}</button>`;
+    this.bind('immersive-overview-close', () => { this.immersiveDismissed = o.id; this.renderImmersiveOverview(); });
+    this.bind('immersive-overview-details', () => void (async () => { await this.setImmersive(false); if (this.immersive) return; this.tab = 'overview'; this.setInspectorOpen(true); })());
+  }
+  private renderOverview(o: BusinessObject, content: HTMLElement) {
+    const fields = this.overviewFields(o);
     const warnings = this.project!.findings.filter(f => f.objectId === o.id || o.kind === 'project').slice(0, 5);
     content.innerHTML = `${o.kind === 'project' ? this.headerContent() : ''}<div class="overview-grid"><div>${this.values(fields)}${o.kind === 'tower' ? '<div id="tower-distance" class="distance-box"></div><button class="text-button" id="distance-refresh">'+icon('locate', 16)+' 当前位置与该塔距离</button>' : ''}</div>${o.kind === 'tower' ? '<section class="tower-preview"><div class="preview-title">塔形 · X/Z</div><div id="preview-host" class="preview-host"><span class="muted">'+(o.previewRef ? '读取塔形…' : '未提供 HNum 塔形')+'</span></div><button class="text-button" id="preview-reset">重置视图</button></section>' : ''}</div>${warnings.length ? `<button class="finding-strip" id="show-findings">${icon('info', 16)} ${this.project!.findings.filter(f => f.objectId === o.id || o.kind === 'project').length} 条工程诊断 · 查看详情</button>` : ''}`;
     if (o.kind === 'tower') { this.bind('distance-refresh', () => void this.locate(false)); this.updateDistance(o); if (o.previewRef) void this.loadPreview(o); }

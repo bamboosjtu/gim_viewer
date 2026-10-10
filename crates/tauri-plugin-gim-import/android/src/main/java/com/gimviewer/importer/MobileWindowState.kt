@@ -1,6 +1,7 @@
 package com.gimviewer.importer
 
 import android.app.Activity
+import android.content.pm.ActivityInfo
 import android.view.View
 import android.webkit.WebView
 import androidx.core.view.ViewCompat
@@ -18,6 +19,8 @@ internal class MobileWindowState(private val activity: Activity) {
     fun load(view: WebView) {
         webView = view
         val content = activity.findViewById<View>(android.R.id.content)
+        updateOrientation()
+        content.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateOrientation() }
         ViewCompat.setOnApplyWindowInsetsListener(content) { _, value ->
             insets = value
             publish()
@@ -36,6 +39,16 @@ internal class MobileWindowState(private val activity: Activity) {
             .put("left", (safe?.left ?: 0) / density)
             .put("right", (safe?.right ?: 0) / density)
             .put("immersive", immersive)
+            .put("portraitLocked", activity.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_PORTRAIT)
+    }
+
+    private fun updateOrientation() {
+        // The current configuration changes with fold/unfold; landscape width alone is misleading.
+        val smallestWidth = activity.resources.configuration.smallestScreenWidthDp
+        if (smallestWidth <= 0) return
+        val requested = if (smallestWidth < 600) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if (activity.requestedOrientation != requested) activity.requestedOrientation = requested
     }
 
     fun setImmersive(enabled: Boolean): JSObject {

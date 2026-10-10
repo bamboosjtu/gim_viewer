@@ -49,7 +49,7 @@ export function checkLocationPermissions(): Promise<LocationPermissions> { retur
 export function requestLocationPermissions(): Promise<LocationPermissions> { return invoke('plugin:gim-import|request_location_permissions'); }
 export function getPosition(): Promise<CurrentPosition> { return invoke('plugin:gim-import|get_position'); }
 
-export interface WindowState { top: number; bottom: number; left: number; right: number; immersive: boolean }
+export interface WindowState { top: number; bottom: number; left: number; right: number; immersive: boolean; portraitLocked?: boolean }
 export function getWindowState(): Promise<WindowState> { return invoke('plugin:gim-import|get_window_state'); }
 export function setImmersive(enabled: boolean): Promise<WindowState> { return invoke('plugin:gim-import|set_immersive', { enabled }); }
 export async function readHeader(id: string): Promise<number[]> {
