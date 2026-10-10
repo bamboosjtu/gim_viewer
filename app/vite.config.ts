@@ -15,6 +15,8 @@ export default defineConfig(({ mode }) => ({
       try {
         if (req.url === '/__dev/settings') { res.end(JSON.stringify({ tiandituKey: env.VITE_TIANDITU_KEY ?? '', baseLayer: 'imagery' })); return; }
         if (req.url === '/__dev/samples') { const files = await readdir(resolve('../output/mobile-samples')); res.end(JSON.stringify(files.filter(f => /^line\d\d\.json$/.test(f)).map(f => f.slice(0, -5)))); return; }
+        const header = req.url.match(/^\/__dev\/header\/(line0[1-6])$/);
+        if (header) { const { open } = await import('node:fs/promises'); const file = await open(resolve(`../demo/${header[1]}.gim`)); try { const bytes = Buffer.alloc(1024 * 1024); const { bytesRead } = await file.read(bytes, 0, bytes.length, 0); const prefix = bytes.subarray(0, bytesRead); const offsets = [prefix.indexOf(Buffer.from([0x37,0x7a,0xbc,0xaf,0x27,0x1c]),7),prefix.indexOf(Buffer.from([0x50,0x4b,0x03,0x04]),7)].filter(n => n >= 0); if (!offsets.length) throw new Error('载荷未找到'); res.end(JSON.stringify([...prefix.subarray(0,Math.min(...offsets))])); return; } finally { await file.close(); } }
         const match = req.url.match(/^\/__dev\/sample\/(line0[1-6])$/);
         if (match) { res.end(await readFile(resolve(`../output/mobile-samples/${match[1]}.json`))); return; }
         res.statusCode = 404; res.end('{}');

@@ -34,3 +34,33 @@
   .workspace.has-project.inspector-open{--detail-column:260px;grid-template-rows:minmax(0,1fr)}
   .inspector{grid-column:3;grid-row:1}.inspector.expanded{left:auto}
 }
+
+/* Native insets become CSS pixels once; only controls own safe-area padding. */
+#app{--safe-top:env(safe-area-inset-top,0px);--safe-bottom:env(safe-area-inset-bottom,0px);--safe-left:env(safe-area-inset-left,0px);--safe-right:env(safe-area-inset-right,0px);--control-left:12px;--control-right:12px;--dialog-top:18px;--dialog-bottom:18px;--dialog-left:18px;--dialog-right:18px;--header-content-height:52px;--nav-content-height:52px;width:100%;height:100vh;height:100dvh;padding:0}
+.app-header{box-sizing:border-box;height:calc(var(--header-content-height) + var(--safe-top));padding:var(--safe-top) var(--control-right) 0 var(--control-left);background:#1b5fb9}
+.bottom-nav{box-sizing:border-box;height:calc(var(--nav-content-height) + var(--safe-bottom));padding:0 var(--safe-right) var(--safe-bottom) var(--safe-left)}
+.bottom-nav button{height:var(--nav-content-height)}
+.tree-panel{padding-left:var(--safe-left)}.inspector{padding-right:var(--safe-right)}
+.map-caption{left:var(--control-left)}.map-toolbar,.zoom-tools{right:var(--control-right)}
+.header-button,.brand-button{min-width:44px;min-height:44px}
+.map-toolbar button:disabled{opacity:.4}
+.modal-scrim{padding:var(--dialog-top) var(--dialog-right) var(--dialog-bottom) var(--dialog-left)}
+.modal{max-height:100%}.toast{bottom:calc(65px + var(--safe-bottom))}
+.project-header-metadata{margin-bottom:20px}.project-header-metadata h3{font-size:13px;margin-bottom:8px;font-weight:600}
+#app.immersive-map{display:block}
+.immersive-map .app-header{position:absolute;top:0;left:0;right:0;z-index:10;background:#1b5fb9ed}
+.immersive-map .title-block span{display:none}.immersive-map #search-open{display:none}
+.immersive-map .workspace{position:absolute;inset:0;display:block;margin:0}
+.immersive-map .workspace .tree-panel,.immersive-map .workspace .inspector,.immersive-map .bottom-nav{display:none}
+.immersive-map .map-region{position:absolute;inset:0}
+.immersive-map .map-toolbar{top:calc(var(--header-content-height) + var(--safe-top) + 12px);right:var(--control-right)}
+.immersive-map .map-caption{top:calc(var(--header-content-height) + var(--safe-top) + 12px);left:var(--control-left)}
+.immersive-map .zoom-tools{bottom:calc(28px + var(--safe-bottom));right:var(--control-right)}
+.immersive-map .map-attribution{bottom:var(--safe-bottom)}
+@media(min-width:600px){#app{--header-content-height:52px;--nav-content-height:48px}.app-header{padding-left:var(--dialog-left);padding-right:var(--dialog-right)}}
+
+.short-map .map-caption{display:none}
+.short-map .zoom-tools{display:flex;flex-direction:row;bottom:18px;right:var(--control-right)}
+.short-map .zoom-tools button{width:44px;height:44px}
+.short-map .map-toolbar{top:12px}
+.immersive-map .short-map .map-toolbar{top:calc(var(--header-content-height) + var(--safe-top) + 12px)}

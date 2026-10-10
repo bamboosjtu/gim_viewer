@@ -1,6 +1,7 @@
 package com.gimviewer.importer
 
 import android.app.Activity
+import android.webkit.WebView
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -35,12 +36,20 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 @InvokeArg
 class PickArgs { lateinit var progress: Channel }
+@InvokeArg
+class ImmersiveArgs { var enabled: Boolean = false }
 
 @TauriPlugin(permissions = [
     Permission(strings = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION], alias = "location"),
     Permission(strings = [Manifest.permission.ACCESS_COARSE_LOCATION], alias = "coarseLocation")
 ])
 class GimImportPlugin(private val activity: Activity): Plugin(activity) {
+    private val windowState = MobileWindowState(activity)
+    override fun load(webView: WebView) { windowState.load(webView) }
+    @Command
+    fun getWindowState(invoke: Invoke) { activity.runOnUiThread { invoke.resolve(windowState.state()) } }
+    @Command
+    fun setImmersive(invoke: Invoke) { val args = invoke.parseArgs(ImmersiveArgs::class.java); activity.runOnUiThread { invoke.resolve(windowState.setImmersive(args.enabled)) } }
     private val executor = Executors.newSingleThreadExecutor()
     private val cancelled = AtomicBoolean(false)
     private val busy = AtomicBoolean(false)
@@ -64,6 +73,7 @@ class GimImportPlugin(private val activity: Activity): Plugin(activity) {
     }
     override fun onPause(activity: AppCompatActivity) {
         super.onPause(activity)
+        windowState.leaveForeground()
         main.post { val pending = positionInvoke; stopPosition(); pending?.reject("定位已取消，应用已离开前台") }
     }
     @Command

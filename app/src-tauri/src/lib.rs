@@ -27,6 +27,8 @@ async fn commit_project(store: tauri::State<'_, Store>, id: String, payload_json
 #[tauri::command]
 async fn read_source(store: tauri::State<'_, Store>, id: String, path: String) -> Result<String, String> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::source(&root, &id, &path)).await.map_err(|e| e.to_string())? }
 #[tauri::command]
+async fn read_project_header(store: tauri::State<'_, Store>, id: String) -> Result<Vec<u8>, String> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::header(&root, &id)).await.map_err(|e| e.to_string())? }
+#[tauri::command]
 fn delete_project(store: tauri::State<Store>, id: String) -> Result<(), String> { storage::delete(&store.root, &id) }
 #[tauri::command]
 async fn preview_cache(store: tauri::State<'_, Store>, id: String, key: String, data: Option<serde_json::Value>) -> Result<Option<serde_json::Value>, String> { let root = store.root.clone(); tauri::async_runtime::spawn_blocking(move || storage::preview(&root, &id, &key, data)).await.map_err(|e| e.to_string())? }
@@ -48,6 +50,6 @@ pub fn run() {
             std::fs::create_dir_all(&root)?;
             storage::clean_imports(&root).map_err(std::io::Error::other)?;
             app.manage(Store { root, cancelled: Arc::new(AtomicBool::new(false)), busy: Arc::new(AtomicBool::new(false)) }); Ok(())
-        }).invoke_handler(tauri::generate_handler![list_projects,prepare_project,cancel_import,discard_import,get_project_cache,read_text_entries,commit_project,read_source,delete_project,preview_cache,get_settings,save_settings])
+        }).invoke_handler(tauri::generate_handler![list_projects,prepare_project,cancel_import,discard_import,get_project_cache,read_text_entries,commit_project,read_source,read_project_header,delete_project,preview_cache,get_settings,save_settings])
         .run(tauri::generate_context!()).expect("无法启动线路 GIM 应用");
 }

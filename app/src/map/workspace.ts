@@ -53,7 +53,7 @@ export class MapWorkspace {
     this.draw();
   }
   setProject(project: PowerlineProject, camera?: Camera) { this.project = project; if (camera) { this.camera = camera; this.syncCamera(); } else this.fit(); this.updateOverlay(); this.draw(); }
-  refreshLayout() { this.host.parentElement?.classList.toggle('short-map', this.host.clientHeight < 260); this.map?.resize(); this.draw(); }
+  refreshLayout() { this.host.parentElement?.classList.toggle('short-map', this.host.clientHeight < 340); this.map?.resize(); this.draw(); }
   getCamera(): Camera { return this.map ? { center: this.map.getCenter().toArray(), zoom: this.map.getZoom() } : { center: [...this.camera.center], zoom: this.camera.zoom }; }
   private syncCamera() { this.map?.jumpTo(this.camera); this.onCamera(this.camera); }
   private scale() { return 512 * 2 ** this.camera.zoom; }

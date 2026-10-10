@@ -36,6 +36,14 @@ pub fn validate_source(root: &Path, id: &str) -> Result<(), String> {
     if format!("{:x}", digest.finalize()) != id { return Err("私有源包 SHA 校验失败，不能使用缓存".into()); }
     Ok(())
 }
+/// Source identity is rechecked; only the bounded header, never the archive, crosses IPC.
+pub fn header(root: &Path, id: &str) -> Result<Vec<u8>, String> {
+    validate_source(root, id)?;
+    let file = fs::File::open(dir(root, id)?.join("source/original.gim")).map_err(error)?;
+    let mut bytes = Vec::new(); file.take(1024 * 1024 + 7).read_to_end(&mut bytes).map_err(error)?;
+    let end = (7..bytes.len()).find(|&i| bytes[i..].starts_with(&[0x37,0x7a,0xbc,0xaf,0x27,0x1c]) || bytes[i..].starts_with(&[0x50,0x4b,0x03,0x04])).ok_or("头部搜索窗口内未找到压缩载荷")?;
+    bytes.truncate(end); Ok(bytes)
+}
 fn write_meta(path: &Path, meta: &ProjectMeta) -> Result<(), String> {
     let temp = path.join("metadata.pending"); fs::write(&temp, serde_json::to_vec(meta).map_err(error)?).map_err(error)?;
     let target = path.join("metadata.json");
@@ -253,6 +261,19 @@ mod tests {
         let mut m = read_meta(&root,&id).unwrap(); m.size = 14; write_meta(&p,&m).unwrap();
         assert!(cached_json(&root,&id).unwrap_err().contains("SHA"));
         delete(&root, &id).unwrap(); assert!(!p.exists()); fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn header_reads_only_prefix_and_rejects_changed_source() {
+        let root = std::env::temp_dir().join(format!("gim-header-test-{}", now()));
+        let mut bytes = vec![0u8; 784]; bytes[..7].copy_from_slice(b"GIMPKGT");
+        bytes.extend_from_slice(&[0x37,0x7a,0xbc,0xaf,0x27,0x1c]); bytes.extend_from_slice(b"archive bytes");
+        let id = format!("{:x}", Sha256::digest(&bytes)); let p = dir(&root,&id).unwrap();
+        fs::create_dir_all(p.join("source")).unwrap(); fs::write(p.join("source/original.gim"), &bytes).unwrap();
+        let m = ProjectMeta { id:id.clone(),name:"anonymous".into(),sha256:id.clone(),size:bytes.len() as u64,imported_at:0,last_opened_at:0,parser_version:PARSER.into(),counts:serde_json::json!({}) };
+        write_meta(&p,&m).unwrap(); assert_eq!(header(&root,&id).unwrap(),bytes[..784]);
+        bytes[20] = 1; fs::write(p.join("source/original.gim"), &bytes).unwrap();
+        assert!(header(&root,&id).unwrap_err().contains("SHA")); assert!(header(&root,"../escape").is_err());
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     #[ignore = "Requires demo/line01.gim through line06.gim; run explicitly for the mobile release gate"]

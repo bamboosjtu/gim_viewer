@@ -37,9 +37,23 @@ async fn get_position<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json
     #[cfg(not(target_os = "android"))]
     { let _ = app; Err("定位仅在 Android 应用中可用".into()) }
 }
+#[tauri::command]
+async fn get_window_state<R: Runtime>(app: tauri::AppHandle<R>) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "android")]
+    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("getWindowState", serde_json::json!({})).map_err(|e| e.to_string()) }
+    #[cfg(not(target_os = "android"))]
+    { let _ = app; Err("窗口控制仅在 Android 应用中可用".into()) }
+}
+#[tauri::command]
+async fn set_immersive<R: Runtime>(app: tauri::AppHandle<R>, enabled: bool) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "android")]
+    { use tauri::Manager; app.state::<ImportHandle<R>>().0.run_mobile_plugin("setImmersive", serde_json::json!({"enabled":enabled})).map_err(|e| e.to_string()) }
+    #[cfg(not(target_os = "android"))]
+    { let _ = (app, enabled); Err("窗口控制仅在 Android 应用中可用".into()) }
+}
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("gim-import")
-        .invoke_handler(tauri::generate_handler![pick, cancel, check_location_permissions, request_location_permissions, get_position])
+        .invoke_handler(tauri::generate_handler![pick, cancel, check_location_permissions, request_location_permissions, get_position, get_window_state, set_immersive])
         .setup(|_app, _api| {
             #[cfg(target_os = "android")]
             { use tauri::Manager; let handle = _api.register_android_plugin("com.gimviewer.importer", "GimImportPlugin")?; _app.manage(ImportHandle(handle)); }

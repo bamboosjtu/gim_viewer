@@ -2217,10 +2217,10 @@
           "markdownDescription": "Denies the unminimize command without any pre-configured scope."
         },
         {
-          "description": "User-selected private GIM import and cancellation\n#### This default permission set includes:\n\n- `allow-pick`\n- `allow-cancel`\n- `allow-check-location-permissions`\n- `allow-request-location-permissions`\n- `allow-get-position`",
+          "description": "User-selected private GIM import and cancellation\n#### This default permission set includes:\n\n- `allow-pick`\n- `allow-cancel`\n- `allow-check-location-permissions`\n- `allow-request-location-permissions`\n- `allow-get-position`\n- `allow-get-window-state`\n- `allow-set-immersive`",
           "type": "string",
           "const": "gim-import:default",
-          "markdownDescription": "User-selected private GIM import and cancellation\n#### This default permission set includes:\n\n- `allow-pick`\n- `allow-cancel`\n- `allow-check-location-permissions`\n- `allow-request-location-permissions`\n- `allow-get-position`"
+          "markdownDescription": "User-selected private GIM import and cancellation\n#### This default permission set includes:\n\n- `allow-pick`\n- `allow-cancel`\n- `allow-check-location-permissions`\n- `allow-request-location-permissions`\n- `allow-get-position`\n- `allow-get-window-state`\n- `allow-set-immersive`"
         },
         {
           "description": "Enables the cancel command without any pre-configured scope.",
@@ -2241,6 +2241,12 @@
           "markdownDescription": "Enables the get_position command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_window_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "gim-import:allow-get-window-state",
+          "markdownDescription": "Enables the get_window_state command without any pre-configured scope."
+        },
+        {
           "description": "Enables the pick command without any pre-configured scope.",
           "type": "string",
           "const": "gim-import:allow-pick",
@@ -2251,6 +2257,12 @@
           "type": "string",
           "const": "gim-import:allow-request-location-permissions",
           "markdownDescription": "Enables the request_location_permissions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_immersive command without any pre-configured scope.",
+          "type": "string",
+          "const": "gim-import:allow-set-immersive",
+          "markdownDescription": "Enables the set_immersive command without any pre-configured scope."
         },
         {
           "description": "Denies the cancel command without any pre-configured scope.",
@@ -2271,6 +2283,12 @@
           "markdownDescription": "Denies the get_position command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_window_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "gim-import:deny-get-window-state",
+          "markdownDescription": "Denies the get_window_state command without any pre-configured scope."
+        },
+        {
           "description": "Denies the pick command without any pre-configured scope.",
           "type": "string",
           "const": "gim-import:deny-pick",
@@ -2281,6 +2299,12 @@
           "type": "string",
           "const": "gim-import:deny-request-location-permissions",
           "markdownDescription": "Denies the request_location_permissions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_immersive command without any pre-configured scope.",
+          "type": "string",
+          "const": "gim-import:deny-set-immersive",
+          "markdownDescription": "Denies the set_immersive command without any pre-configured scope."
         }
       ]
     },

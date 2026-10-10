@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildPowerlineProject, buildTowerPreview } from '@gim/powerline-core';
 import type { TreeNode } from '@gim/powerline-core';
+import { parseProjectHeader } from '../src/core/header';
 const expected = [
   { tower: 40, cross: 152 }, { tower: 129, cross: 414 }, { tower: 111, cross: 772 },
   { tower: 6, cross: 16 }, { tower: 49, cross: 798 }, { tower: 14, cross: 7 },
@@ -10,6 +11,11 @@ const expected = [
 describe('six source package mobile contracts (required, never skipped)', () => {
   for (let i = 1; i <= 6; i++) it(`line0${i} has complete unique objects, sources, tree and cache equivalence`, () => {
     const sid = `line0${i}`;
+    const header = parseProjectHeader(readFileSync(resolve(`../demo/${sid}.gim`)).subarray(0,784));
+    expect(header.layout).toBe('在册分段头部布局');
+    expect(header.fields.find(f => f.label === '工程名称')?.value).toBeTruthy();
+    expect(header.fields.find(f => f.label === '导出软件')?.encoding).toBe('UTF-8');
+    if (i === 4) expect(header.fields.find(f => f.label === '设计单位')?.value).toBeTruthy();
     const input = JSON.parse(readFileSync(resolve(`../output/mobile-samples/${sid}.json`), 'utf8'));
     const start = performance.now(); const project = buildPowerlineProject(input.files, input.identity); const parserMs = performance.now() - start;
     const ids = new Set(project.objects.map(o => o.id)); expect(ids.size).toBe(project.objects.length);

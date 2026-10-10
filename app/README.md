@@ -57,7 +57,7 @@ Android 安装包不读取或内嵌 `.env` 密钥。首次安装的天地图密�
 
 - `packages/powerline-core`：桌面/移动共用的 CBM/FAM/DEV、线路 MOD、graph 与路径解析；移动领域投影、距离和 HNum 预览也在纯模块中。
 - `crates/gim-native-core`：两个平台共用的有界容器解压，移动路径输入无需经 JS 读取整包。
-- `crates/tauri-plugin-gim-import`：Android SAF、ContentResolver 流式复制、SHA、取消与进度，以及 Android 系统前台定位。
+- `crates/tauri-plugin-gim-import`：Android SAF、ContentResolver 流式复制、SHA、取消与进度，以及 Android 系统前台定位、WindowInsets 和地图沉浸窗口控制。
 - `packages/plugin-api`：中立 provider 接口；`src/plugins/host.ts` 提供注册、取消与 dispose。尚无实际外部业务插件。
 
 应用不依赖 IFC、Three.js、桌面 Viewer 或悬链线运行时。工程覆盖层先用 Canvas 显示，
@@ -68,3 +68,17 @@ OSM 和工程交互，新版 WebView 使用 MapLibre。瓦片缓存只在内存�
 工程树和详情面板均可通过底部导航独立打开/收起，所有屏宽均提供关闭按钮。
 “地图”收起两者；选择对象打开详情，窄屏下同时关闭覆盖地图的工程树。
 新工程默认收起面板，用户选择按工程保存，折叠/展开和旋转不重置；收起后地图占据释放的区域。
+
+
+普通界面采用 edge-to-edge：WebView 铺满窗口，原生只发布安全区 CSS 像素，Header、底部导航
+和浮动控件避让系统栏/刘海。Header 内容区为 52 CSS px，蓝色背景延伸至状态栏。
+地图工具栏分别提供“显示完整工程”和“进入/退出沉浸地图”。沉浸地图覆盖整个窗口，隐藏
+树、详情、底部导航及系统栏；边缘滑动临时唤回系统栏。返回键、设置、我的工程或离开前台
+恢复普通界面；面板偏好与地图视角保留，全屏状态不持久化。
+前台恢复、窗口尺寸变化和模式切换完成后刷新原生安全区；较新的 Insets 事件优先于过期查询。
+旧 WebView 的控件安全间距在 JS 中计算，窗口高度保留 `100vh` 回退。
+
+选择工程根节点时，概览、属性和来源页展示私有源 GIM 的头部元信息：工程名称、设计单位、
+原始单位、导出软件/时间和标准标识，并保留字节偏移及编码。只有匹配在册分段布局的头部
+才赋予字段角色；未知布局展示未命名原值，空字段不补造，未确认单位不标为软件厂商或业主。
+头部独立按需读取并校验源身份，不改写语义缓存版本或重新导入既有工程。

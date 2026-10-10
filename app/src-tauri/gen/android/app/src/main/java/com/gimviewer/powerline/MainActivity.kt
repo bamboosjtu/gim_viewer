@@ -4,26 +4,19 @@ import android.os.Bundle
 import android.webkit.WebView
 import android.view.View
 import android.graphics.Color
-import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
-    enableEdgeToEdge()
+    enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT))
     super.onCreate(savedInstanceState)
     WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = false
     val content = findViewById<View>(android.R.id.content)
     content.setBackgroundColor(Color.rgb(27, 95, 185))
-    ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
-      val top = insets.getInsets(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.displayCutout()).top
-      val bottom = insets.getInsets(WindowInsetsCompat.Type.navigationBars() or WindowInsetsCompat.Type.displayCutout()).bottom
-      view.setPadding(view.paddingLeft, top, view.paddingRight, bottom)
-      insets
-    }
-    ViewCompat.requestApplyInsets(content)
+    window.isNavigationBarContrastEnforced = false
   }
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
