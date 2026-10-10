@@ -1,7 +1,6 @@
 # SCH、STD 与 SLD
 
-逻辑模型是可选能力。SCH 索引逻辑文件，STD 可表达电气结构，也可具有 SVG 内容；
-SLD 表达单线图。缺失或局部解析异常不能阻断可用语义与三维模型。
+逻辑模型是可选能力。SCH 索引逻辑文件，STD 可表达电气结构，也可具有 SVG 内容；SLD 表达单线图。缺失或局部解析异常不能阻断可用语义与三维模型。
 
 ## SCH 入口
 
@@ -46,16 +45,14 @@ CBM 根的 SCH 指向入口，SCHn 按实际条目引用 STD/SLD。
 ```
 
 此例只说明层级，不声称每种节点都必有或必在该位置。
-当前 parser 读取 Substation、VoltageLevel、Bay、Group、ConductingEquipment、SubEquipment 和 Parameter，
-保留节点原属性。version/revision、name、gridId、type、schedulecode 等属于来源信息。
+当前 parser 读取 Substation、VoltageLevel、Bay、Group、ConductingEquipment、SubEquipment 和 Parameter，保留节点原属性。version/revision、name、gridId、type、schedulecode 等属于来源信息。
 gridId 为空时不进入有效索引，重复和无法对应的 ID 不能解释为确定一一关系。
 实际遍历与索引见 [stdParser](../../desktop/src/gim/stdParser.ts)。
 
 ## SLD SVG
 
 SLD 为 SVG 图形加行业扩展属性。
-常见结构包括 symbol、g、use、line、circle、rect、text；
-id 用于符号/本地引用，gridId 用于逻辑设备候选关联，二者不能混用。
+常见结构包括 symbol、g、use、line、circle、rect、text；id 用于符号/本地引用，gridId 用于逻辑设备候选关联，二者不能混用。
 
 | 字段/结构 | 含义 |
 |---|---|
@@ -77,6 +74,4 @@ STD gridId、SLD gridId、CBM 字段和 IFCGUID 是独立身份域。
 一个设备可对应多个图形，非空 ID 也不能自动证明一一映射。
 SVG STD 不提供传统 STD 层级，应显示能力边界，不能按扩展名补造对象。
 
-[schParser](../../desktop/src/gim/schParser.ts)、
-[stdSldIndex](../../desktop/src/gim/stdSldIndex.ts) 负责格式与关联，
-打开、恢复、安全和当前产品入口分别见 [架构](../architecture.md) 和 [规格](../software-spec.md)。
+[schParser](../../desktop/src/gim/schParser.ts)、[stdSldIndex](../../desktop/src/gim/stdSldIndex.ts) 负责格式与关联，打开、恢复、安全和当前产品入口分别见 [架构](../architecture.md) 和 [规格](../software-spec.md)。

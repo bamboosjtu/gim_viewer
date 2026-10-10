@@ -1,7 +1,6 @@
 # 在册样本与证据台账
 
-当前在册 10 包：4 变电、6 线路。以下身份和归档清单直接读取当前源包，
-变电递归/矩阵/alias 统计读取对应解包目录。结论只覆盖这些 SHA 对应的样本。
+当前在册 10 包：4 变电、6 线路。以下身份和归档清单直接读取当前源包，变电递归/矩阵/alias 统计读取对应解包目录。结论只覆盖这些 SHA 对应的样本。
 台账使用匿名 ASCII ID，不保留真实工程名、地理归属或内部编号。
 
 ## 样本身份
@@ -19,8 +18,7 @@
 | substation03 | `substation03.gim` | 71,831,575 | `3197C03EF2C6C423CBB85447F71491A4112DB0F9A8CEA0C9F72F0B410B8175AB` | GIMPKGS | 776 |
 | substation04 | `substation04.gim` | 11,789,608 | `00B7746D5EA6AB3B92C215C1E42FFC7EEC5A9F0517C1C555FA27A596D4D800DC` | GIMPKGS | 784 |
 
-源包位于 `demo/`。substation01 的当前解包目录/测试 ID 为 `demo-substation`，
-line01 对应 `demo-line1`；其余同匿名 ID。别名是路径兼容名，不另算一个样本。
+源包位于 `demo/`。substation01 的当前解包目录/测试 ID 为 `demo-substation`，line01 对应 `demo-line1`；其余同匿名 ID。别名是路径兼容名，不另算一个样本。
 当前本地具有四变电解包目录，六线路只有源包；线路原值从归档内存读取。
 样本测试需要的解包目录缺失时不能将 skip 计为通过。
 
@@ -51,23 +49,20 @@ line01 对应 `demo-line1`；其余同匿名 ID。别名是路径兼容名，不
 | substation03 | CBM | 缺失 | 2289 | 5415 | 1952 | 224 | 45 | 27 |
 | substation04 | DEV | svg | 0 | 229 | 53 | 137 | 68 | 0 |
 
-PHM 扫描所有 `.phm` 的 SOLIDMODELn→PHM 边和 16 项 TRANSFORMMATRIXn；
-非单位阵以逐项绝对差 >1e-8 判定。这个阈值与部分调研脚本的默认值不同，不能混表比较。
+PHM 扫描所有 `.phm` 的 SOLIDMODELn→PHM 边和 16 项 TRANSFORMMATRIXn；非单位阵以逐项绝对差 >1e-8 判定。这个阈值与部分调研脚本的默认值不同，不能混表比较。
 矩阵计数不是去重值数或实际渲染实例数。
 
 “两侧清单”指父 CBM 的 PARTINDEX 子项与父 DEV 的 SUBDEVICEn 同时存在。
 同下标比较其 OBJECTMODELPOINTER/DEV 目标，只描述源列表排列。
 即使某包同下标一致，运行时仍须按身份 join，不把一致性变成通用序号规则。
 
-substation03 的 45 个 GL 为可选 sidecar。substation02 没有 STL，
-各包 DEV/PHM/MOD 数量不同，不能要求三者一一对应。
+substation03 的 45 个 GL 为可选 sidecar。substation02 没有 STL，各包 DEV/PHM/MOD 数量不同，不能要求三者一一对应。
 substation01 的 FAM 存在同节重复“材质”行：保留物理行与单值视图两套口径。
 substation04 的 STD 实际为 SVG，不能据扩展名补造 STD 电气层级。
 
 ## 六线路语义规模与原属性
 
-下表 F2/F3/TOWER/WIRE/CROSS 是全包 CBM 归一化实体或 F4 GROUPTYPE 数量，
-不是唯一物理档、根可达对象数或场景实例数。CROSS 分组和 CROSS 实体数可以不同。
+下表 F2/F3/TOWER/WIRE/CROSS 是全包 CBM 归一化实体或 F4 GROUPTYPE 数量，不是唯一物理档、根可达对象数或场景实例数。CROSS 分组和 CROSS 实体数可以不同。
 LINELENGTH 来自各 F2 实际 BASEFAMILY 的原始键，按 F2 顺序列示。
 求和仅是原属性聚合，不证明物理线路或设计回路长度。
 
@@ -95,10 +90,8 @@ line03 的两个 LINELENGTH 都有原值，不能当作长度缺省样本。
 | 变电检查材料 | `research/substation_inspect.html` | 独立检查来源，不代替当前运行验收 |
 | 当前实现 | `desktop/src/` 与 `desktop/src-tauri/src/` | 以 parser、引用、版本和实际消费分支为准 |
 
-研究来源共 13 份 HTML，原文件保持不变。这里保留匿名来源类别，
-不把原报告中的真实工程名称或过时实施结论复制到格式文档。
+研究来源共 13 份 HTML，原文件保持不变。这里保留匿名来源类别，不把原报告中的真实工程名称或过时实施结论复制到格式文档。
 
-原包复核可使用 [Python 脚本目录](../../desktop/scripts/gim_survey/) 与
-[验证技能](../../.agents/skills/gim-sample-verification/SKILL.md)。
+原包复核可使用 [Python 脚本目录](../../desktop/scripts/gim_survey/) 与[验证技能](../../.agents/skills/gim-sample-verification/SKILL.md)。
 完整统计应记录脚本参数、包 SHA、目录映射和算法，核心身份/数量只在本台账维护。
 源码契约与运行证据的区别见 [验证](../validation.md)。

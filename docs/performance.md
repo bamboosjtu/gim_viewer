@@ -20,9 +20,7 @@
 | 主线程响应 | Long Task、heartbeat 间隔、输入延迟 | 监测窗口、最长值、分位数 |
 | 内存 | JS heap、WebView/Worker/Tauri RSS 与峰值 | 单进程和进程树，采样方法、回收时间 |
 
-ready 含义以 [架构](architecture.md#配置与加载状态) 为准。
-`allIfcReady` 和 `fullModelReady` 都须附加载失败、partial/unsupported 数；
-达到阶段不能解释为全源模型覆盖。
+ready 含义以 [架构](architecture.md#配置与加载状态) 为准。`allIfcReady` 和 `fullModelReady` 都须附加载失败、partial/unsupported 数；达到阶段不能解释为全源模型覆盖。
 
 ## 样本与运行条件
 
@@ -30,8 +28,7 @@ ready 含义以 [架构](architecture.md#配置与加载状态) 为准。
 line02 为六线路中最大文件数与解包体积的样本，可作为线路压力输入。
 具体身份与数量只在 [样本台账](schema/sample-corpus.md) 维护。
 
-记录源码提交、依赖安装版本、EXE 与运行时资产哈希、OS/WebView、CPU/RAM、
-源位置、浏览器或原生、底图网络、监测器和缓存目录。
+记录源码提交、依赖安装版本、EXE 与运行时资产哈希、OS/WebView、CPU/RAM、源位置、浏览器或原生、底图网络、监测器和缓存目录。
 不同时运行其他基准任务；profiler 测量单独标注，不与未开 profiler 的值直接比较。
 
 ## 冷、暖与缓存策略
@@ -54,14 +51,12 @@ line02 为六线路中最大文件数与解包体积的样本，可作为线路�
 取消/切换用例属于生命周期验证，与连续完整加载基准分开。
 
 `Ctrl+Shift+D` 导出包含 timings 的诊断 JSON；`Ctrl+Shift+B` 进入基准相关工具。
-埋点入口为 [perfTimings](../desktop/src/utils/perfTimings.ts)，
-DEV 细分入口为 [devGeometryTelemetry](../desktop/src/services/devGeometryTelemetry.ts)。
+埋点入口为 [perfTimings](../desktop/src/utils/perfTimings.ts)，DEV 细分入口为 [devGeometryTelemetry](../desktop/src/services/devGeometryTelemetry.ts)。
 报告同时保存 root/alias/instance、IFC 数、缓存命中与选择结果，便于判定速度改善是否改变行为。
 
 ## 可采信基线
 
-正式基线需具有相同输入和清晰构建身份，完成规定正确性门禁，
-报告多次运行的 p50/p95/max、内存峰值及释放后驻留。
+正式基线需具有相同输入和清晰构建身份，完成规定正确性门禁，报告多次运行的 p50/p95/max、内存峰值及释放后驻留。
 只测到 warm、只测首批模型或缺少连续响应窗口时，只能说明对应范围。
 
 当前没有满足上述条件的完整构建基线，正文不沿用不同构建的数字。

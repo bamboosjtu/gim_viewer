@@ -25,8 +25,7 @@ GIM（Grid Information Model，电网信息模型）文件浏览器。国家电�
 - ZIP 签名：`50 4B 03 04`
 
 常见解包目录：CBM/（工程骨架）、DEV/（设备）、PHM/（装配体）、MOD/（几何图元）。
-IFC 的物理目录是 exporter detail。解析必须基于 CBM 引用 + 全局 entry resolver，
-不得写死 DEV/ 或 CBM/；文件发现与 IFCGUID 对象关联是独立能力。
+IFC 的物理目录是 exporter detail。解析必须基于 CBM 引用 + 全局 entry resolver，不得写死 DEV/ 或 CBM/；文件发现与 IFCGUID 对象关联是独立能力。
 在册变电目录为大写（CBM/DEV/MOD/PHM），线路常为 PascalCase（Cbm/Dev/Mod/Phm），路径处理必须大小写不敏感。
 
 ### CBM 层级
@@ -74,19 +73,13 @@ crates/gim-native-core/         # 跨端原生有界解压
 crates/tauri-plugin-gim-import/ # Android SAF 流式导入
 ```
 
-分层规则：`gim/` 不依赖 services/viewer/ui；`viewer/` 不依赖 services/ui；
-`ui/` 不直接碰数据库；`services/` 编排全部。重依赖按需动态 import——
+分层规则：`gim/` 不依赖 services/viewer/ui；`viewer/` 不依赖 services/ui；`ui/` 不直接碰数据库；`services/` 编排全部。重依赖按需动态 import——
 入口与 openGimService 不静态引用 three/web-ifc/maplibre。
 
 ## 关键设计
 
-- **变电证据边界**：原始 CBM 字段、FAM 原行/内部键/标签、设计文档来源独立保留。
-  `gim/substationEvidence.ts` 提供能力摘要、IFC evidence、PARTINDEX identity alias 和 UUID GL
-  sidecar 投影；摘要只描述文件事实，不决定解析分支。不得按厂商名称选择 parser。
-- **变电几何契约**：PARTINDEX → child DEV 按 OBJECTMODELPOINTER 身份关联，不能按数组序号，
-  PARTINDEX/DEV_SUBDEVICE 不作为第二个 seed。PHM 按扩展名递归、逐边累积矩阵、分支防环；
-  cold/缓存查询/raw fallback 采用同一引用语义。不得假定 DEV=PHM=MOD、STL 必备。
-  同 UUID `.gl` 是可选辅助来源，不自动加入 SOLIDMODEL 主链；SCH/STD/SLD 也是可选能力。
+- **变电证据边界**：原始 CBM 字段、FAM 原行/内部键/标签、设计文档来源独立保留。`gim/substationEvidence.ts` 提供能力摘要、IFC evidence、PARTINDEX identity alias 和 UUID GL sidecar 投影；摘要只描述文件事实，不决定解析分支。不得按厂商名称选择 parser。
+- **变电几何契约**：PARTINDEX → child DEV 按 OBJECTMODELPOINTER 身份关联，不能按数组序号，PARTINDEX/DEV_SUBDEVICE 不作为第二个 seed。PHM 按扩展名递归、逐边累积矩阵、分支防环；cold/缓存查询/raw fallback 采用同一引用语义。不得假定 DEV=PHM=MOD、STL 必备。同 UUID `.gl` 是可选辅助来源，不自动加入 SOLIDMODEL 主链；SCH/STD/SLD 也是可选能力。
 - **打开流程**：源身份/SHA/magic → validate_gim_cache → 分域恢复 / 未命中解压（原生或 WASM）→ 类型分支；源 magic 不由缓存覆盖
 - **变电首开**：loadAllIfcFiles 自动加载全部 IFC → 渐进式 DEV GLB 管线后台任务（serializeDevToGlb → 落盘 → 渐进渲染；token 防竞态；失败不写版本标记）
 - **线路首开**：buildLineGimGraph → parseLineAttributes → 三阶段分块入库（begin/chunks/finish，finish 才提交 parser_version）→ Canvas/MapLibre 地图
@@ -95,8 +88,7 @@ crates/tauri-plugin-gim-import/ # Android SAF 流式导入
 ## 已实现功能
 
 - **GIM 文件解析**：GIMPKGS/GIMPKGT 头部检测 + 原生/WASM 双路径解压（资源配额防护）
-- **变电工程**：CBM 层级树 + 搜索定位 + IFC 全量自动加载 + 渐进式 MOD/STL 几何 +
-  属性抽屉 CSV 导出 + SLD 单线图（白名单净化后 img 沙箱渲染）
+- **变电工程**：CBM 层级树 + 搜索定位 + IFC 全量自动加载 + 渐进式 MOD/STL 几何 + 属性抽屉 CSV 导出 + SLD 单线图（白名单净化后 img 沙箱渲染）
 - **线路工程**：地图（塔位/导线弧垂视觉示意/跨越点）+ 树↔图联动 + 截图/CSV 导出 + 搜索定位
 - **缓存体系**：SQLite 索引/属性/几何引用链/GLB 快速路径 + PARSER_VERSION 失效
 - **安全加固**：SLD 白名单净化、解压资源配额、几何 token 竞态防护、GLB 完成标记门控
@@ -116,12 +108,8 @@ cargo check --manifest-path src-tauri/Cargo.toml   # Rust 检查（desktop/ 内�
 
 ## 注意事项
 
-- `demo/` 目录包含大型二进制文件（.gim 及解压目录），已在 .gitignore 中排除；
-  `npm run test:sample` 依赖 demo-substation 与 line02 解压目录
-- `desktop/public/worker-bundle.js`、`desktop/public/libarchive.wasm`、`desktop/public/wasm/web-ifc*.wasm`
-  是运行时资产，由 scripts/copy-web-ifc-wasm.mjs 维护，需随项目提交
-- 修改持久化含义时只 bump 受影响域。当前语义/几何/Spatial/Fragments 契约与权威源码只在
-  [架构](docs/architecture.md#当前缓存域) 维护；Fragments 键绑定实际安装依赖版本。
-- 长期文档只写当前状态，删除过程和历史版本；遗留问题、待验证和待开发功能统一维护在
-  [open-issues](docs/open-issues.md)，当前桌面能力见 [规格](docs/software-spec.md)。
+- `demo/` 目录包含大型二进制文件（.gim 及解压目录），已在 .gitignore 中排除；`npm run test:sample` 依赖 demo-substation 与 line02 解压目录
+- `desktop/public/worker-bundle.js`、`desktop/public/libarchive.wasm`、`desktop/public/wasm/web-ifc*.wasm`是运行时资产，由 scripts/copy-web-ifc-wasm.mjs 维护，需随项目提交
+- 修改持久化含义时只 bump 受影响域。当前语义/几何/Spatial/Fragments 契约与权威源码只在[架构](docs/architecture.md#当前缓存域) 维护；Fragments 键绑定实际安装依赖版本。
+- 长期文档只写当前状态，删除过程和历史版本；遗留问题、待验证和待开发功能统一维护在[open-issues](docs/open-issues.md)，当前桌面能力见 [规格](docs/software-spec.md)。
 - 写入 docs/schema/ 的内容不得包含真实工程名与地理归属（匿名化约定）

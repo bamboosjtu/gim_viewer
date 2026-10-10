@@ -1,8 +1,7 @@
 # 线路文本 MOD 与 WIRE 来源
 
 线路 MOD 采用四类内容 grammar。它不是变电 Device XML，也不是所有文件都可用 KEY=VALUE Map 读取。
-分型与类型定义以 [lineModParser](../../desktop/src/gim/geometry/lineModParser.ts) 和
-[IR](../../desktop/src/gim/geometry/ir.ts) 为准。
+分型与类型定义以 [lineModParser](../../desktop/src/gim/geometry/lineModParser.ts) 和[IR](../../desktop/src/gim/geometry/ir.ts) 为准。
 
 ## 内容分型
 
@@ -31,8 +30,7 @@ HSubLeg1,0
 HLeg1,1000,0
 ```
 
-合成例仅表达记录形状。H 与 body/leg 标识按 parser 实际 token 保留，
-不能从 HNum 数字直接推定完整杆塔部件数。
+合成例仅表达记录形状。H 与 body/leg 标识按 parser 实际 token 保留，不能从 HNum 数字直接推定完整杆塔部件数。
 
 | 记录 | 字段/结构 | 用途与边界 |
 |---|---|---|
@@ -50,8 +48,7 @@ HLeg1,1000,0
 
 骨架预览连接 P/R，不能宣称完整钢材实体或施工级模型。
 在册 HNum 存在 P 分布于多个 Body、R 集中在文件尾部的布局，H 高度方案不截断几何。
-当前预览在点号全文件唯一时按全文件 ID 连接杆件；出现重复点号时只在当前 Body 内解析，
-不借用其他 Body 的同号点或缺失端点。几何范围从实际连接的 P/R 计算，不按 H 或 HBody 裁切。
+当前预览在点号全文件唯一时按全文件 ID 连接杆件；出现重复点号时只在当前 Body 内解析，不借用其他 Body 的同号点或缺失端点。几何范围从实际连接的 P/R 计算，不按 H 或 HBody 裁切。
 未匹配词法的行可能不进入结构记录，raw/source 应用于诊断；科学计数法等覆盖见未决事项。
 
 ## POINT_LINE
@@ -65,8 +62,7 @@ POINT2=2,0.002,0.003,12,42
 LINE1=1,2
 ```
 
-合成地理示例不代表真实位置。POINT 值为 id,lat,lon,alt,type 五 token，
-LINE 值为 fromId,toId 两 token，通过 POINT.id 建立局部点线拓扑。
+合成地理示例不代表真实位置。POINT 值为 id,lat,lon,alt,type 五 token，LINE 值为 fromId,toId 两 token，通过 POINT.id 建立局部点线拓扑。
 索引 n 与 POINT.id 是不同字段，不能假定等同。
 
 CODE 和 type 保留源值，不能在 parser 层强行映射为完整业务枚举。

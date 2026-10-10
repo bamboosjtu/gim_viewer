@@ -21,17 +21,13 @@ GIMPKG* + 可变元数据/零填充 + 压缩 payload
 包中的 payload 位置见 [台账](sample-corpus.md)。
 
 头部含源工程元数据，字段分段和长度不应写成固定偏移的通用协议。
-移动端在册分段头部识别同时检查 784 字节头长度、NUL 填充、`QGDW2` 标识、年份和
-导出日期形状；匹配后分别投影工程名、设计单位、原始单位、导出软件/时间与标准标识。
-这仅描述当前六线路源包的布局证据，不覆盖其他导出格式。单位字段的业务角色不由单位
-名称推定；未知布局保留原始文本段、字节偏移与编码，不赋予未经验证的字段名。
+移动端在册分段头部识别同时检查 784 字节头长度、NUL 填充、`QGDW2` 标识、年份和导出日期形状；匹配后分别投影工程名、设计单位、原始单位、导出软件/时间与标准标识。
+这仅描述当前六线路源包的布局证据，不覆盖其他导出格式。单位字段的业务角色不由单位名称推定；未知布局保留原始文本段、字节偏移与编码，不赋予未经验证的字段名。
 
 源 magic 用于工程类型，文件名、缓存 projectType 或 ENTITYNAME 大小写不能替代它。
 非 magic 元数据可供诊断，不用未经确认的字段布局驱动业务分支。
 
-实现入口：[gimExtractor](../../desktop/src/gim/gimExtractor.ts)、
-[projectType](../../desktop/src/gim/projectType.ts)、
-[原生解压](../../desktop/src-tauri/src/gim_extract.rs)。
+实现入口：[gimExtractor](../../desktop/src/gim/gimExtractor.ts)、[projectType](../../desktop/src/gim/projectType.ts)、[原生解压](../../desktop/src-tauri/src/gim_extract.rs)。
 
 ## 目录和条目解析
 
@@ -40,8 +36,7 @@ GIMPKG* + 可变元数据/零填充 + 压缩 payload
 目录是导出组织细节，不是固定文件角色契约。
 
 IFC 可位于 DEV 或 CBM，属性 sidecar、PHM/MOD/STL 也不能靠固定目录拼接。
-解析优先使用规范化条目路径，必要时以唯一文件名候选解析；
-同名多候选不能静默任选。相对路径、异常路径、缺文件和歧义都应有明确结果。
+解析优先使用规范化条目路径，必要时以唯一文件名候选解析；同名多候选不能静默任选。相对路径、异常路径、缺文件和歧义都应有明确结果。
 全局 lookup 见 [fileLookup](../../desktop/src/gim/fileLookup.ts)。
 
 ## 文件角色
@@ -65,8 +60,7 @@ STL 不必存在，DEV/PHM/MOD 数量不必相等；SCH/STD/SLD 也不是所有�
 
 ## 文本和空值
 
-文本读取处理 UTF-8 BOM、CRLF/LF 和空行。CBM/DEV/PHM/SCH 常为 `KEY=VALUE` 变体；
-FAM 使用分节和多段 `=`，HNum 使用逗号记录，XML/SVG 由结构 parser 处理。
+文本读取处理 UTF-8 BOM、CRLF/LF 和空行。CBM/DEV/PHM/SCH 常为 `KEY=VALUE` 变体；FAM 使用分节和多段 `=`，HNum 使用逗号记录，XML/SVG 由结构 parser 处理。
 不能用同一个全局 Map 解析全部文本文件。
 
 键和 ENTITYNAME 比较使用各 parser 的归一化规则；XML primitive 标签保留大小写敏感。

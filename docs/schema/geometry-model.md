@@ -1,7 +1,6 @@
 # DEV、PHM 与几何实例
 
-物理主链通常为 CBM→DEV→PHM→MOD/STL，PHM 可以继续指向 PHM，
-DEV 可包含子 DEV。文件清单、几何可达性、模板和场景实例必须分别统计。
+物理主链通常为 CBM→DEV→PHM→MOD/STL，PHM 可以继续指向 PHM，DEV 可包含子 DEV。文件清单、几何可达性、模板和场景实例必须分别统计。
 
 ## DEV 结构
 
@@ -14,9 +13,7 @@ DEV 可包含子 DEV。文件清单、几何可达性、模板和场景实例必
 | SUBDEVICES.NUM / SUBDEVICEn | 子 DEV 引用 |
 | TRANSFORMMATRIXn | 对应块、对应索引的局部变换 |
 
-DEV 是有序块文本。固体块和子设备块都可能出现 `TRANSFORMMATRIX0`，
-简单全文件 Map 会覆盖块内信息。当前 parser 先读标量，再按源顺序识别 solid/sub 块，
-保留稀疏下标，不把缺失引用后的矩阵移到前一个目标。
+DEV 是有序块文本。固体块和子设备块都可能出现 `TRANSFORMMATRIX0`，简单全文件 Map 会覆盖块内信息。当前 parser 先读标量，再按源顺序识别 solid/sub 块，保留稀疏下标，不把缺失引用后的矩阵移到前一个目标。
 空目标/哨兵不生成有效引用，声明数量受资源上限约束。
 
 合成结构：
@@ -41,8 +38,7 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,1000,0,0,1
 | TRANSFORMMATRIXn | 当前引用边的局部矩阵 |
 | COLORn | 可选 R,G,B,A 覆盖 |
 
-解析实际扩展名，不预设所有目标都是 MOD。递归时累积父矩阵与子矩阵，
-防环只针对当前分支，重复模板在不同路径的出现合法。
+解析实际扩展名，不预设所有目标都是 MOD。递归时累积父矩阵与子矩阵，防环只针对当前分支，重复模板在不同路径的出现合法。
 没有自有 SOLIDMODEL 的节点仍可能有子设备或被其他路径装配，不能直接推定整个子树为空。
 
 原始源的引用可达性与软件支持度分别记录：缺文件、循环截断、不支持图元、真正空内容和编译失败。
@@ -53,8 +49,7 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,1000,0,0,1
 两次相同 DEV 的出现可以具有不同矩阵、颜色与语义归属。
 不能用“去重 DEV 文件”删除 occurrence，也不能让 PARTINDEX 再生成一套几何。
 
-身份 alias 只在所属根的物理子树查候选。候选不唯一保留 ambiguity，
-不能全局搜索并拿第一个同 UUID 对象替代。对应当前契约见 [语义模型](semantic-model.md)。
+身份 alias 只在所属根的物理子树查候选。候选不唯一保留 ambiguity，不能全局搜索并拿第一个同 UUID 对象替代。对应当前契约见 [语义模型](semantic-model.md)。
 
 ## 矩阵约定
 
@@ -76,22 +71,17 @@ translation = array[12], array[13], array[14]
 
 ## 单位和轴转换
 
-当前 MOD/STL 加载将原始毫米顶点转为米。Entity 局部矩阵在原 MOD 空间应用，
-然后进行顶点单位转换。外部 placement 的平移分量乘 0.001，
+当前 MOD/STL 加载将原始毫米顶点转为米。Entity 局部矩阵在原 MOD 空间应用，然后进行顶点单位转换。外部 placement 的平移分量乘 0.001，
 其旋转/缩放线性部分不重复乘 0.001。
 
-等价表示：`p_project_m = S × M_assembly_mm × M_entity_mm × p_mm`，
-其中 `S=Scale(0.001)`；若顶点已转米，外部矩阵应使用 `S × M_assembly_mm × S^-1`。
+等价表示：`p_project_m = S × M_assembly_mm × M_entity_mm × p_mm`，其中 `S=Scale(0.001)`；若顶点已转米，外部矩阵应使用 `S × M_assembly_mm × S^-1`。
 
-项目 source→viewer 独立应用：GIM Z-up 先绕 X 轴 -90° 转为 Y-up，
-再乘 IFC baseCoordinationMatrix。当前组合为 `baseCoordinationMatrix × ZUpToYUp`。
+项目 source→viewer 独立应用：GIM Z-up 先绕 X 轴 -90° 转为 Y-up，再乘 IFC baseCoordinationMatrix。当前组合为 `baseCoordinationMatrix × ZUpToYUp`。
 首 IFC 决定锚点，因此冷/暖 IFC 顺序一致是坐标正确性的必要条件。
 不能再次旋转已经处于 viewer 坐标的 IFC，也不能重复缩放缓存 GLB。
 
 共享模板 placement 不修改共享 geometry；局部 raw fallback 的顶点烘焙有独立所有权。
-源单位与轴转换的具体实现见
-[xmlModLoader](../../desktop/src/viewer/xmlModLoader.ts)、
-[坐标对齐](../../desktop/src/services/coordinateAlignmentService.ts)。
+源单位与轴转换的具体实现见[xmlModLoader](../../desktop/src/viewer/xmlModLoader.ts)、[坐标对齐](../../desktop/src/services/coordinateAlignmentService.ts)。
 
 ## 颜色
 
@@ -105,8 +95,7 @@ PHM 颜色覆盖应作用于当前 occurrence 所有资源，不能修改共享�
 
 ## STL
 
-支持二进制与 ASCII 两类。二进制常见结构为 80 字节头、4 字节 little-endian 三角数，
-随后每三角 50 字节：normal、三个顶点和属性字节。长度校验为 `84 + 50 × N`。
+支持二进制与 ASCII 两类。二进制常见结构为 80 字节头、4 字节 little-endian 三角数，随后每三角 50 字节：normal、三个顶点和属性字节。长度校验为 `84 + 50 × N`。
 ASCII 常以 `solid` 和 `facet/vertex` 记录组成；二进制头也可能含 solid，不能仅按开头文字判断。
 
 PHM 可引用 MOD、STL 或混合。没有证据表明它们固定构成某种 LOD、互斥备用或固定设备类别。
@@ -114,14 +103,9 @@ PHM 可引用 MOD、STL 或混合。没有证据表明它们固定构成某种 L
 
 ## GL 辅助来源
 
-同 UUID `.gl` 可与 DEV 形成 sidecar，包含 ConnectGuid、Direction、ConnectionRules、
-GimGeCableConcentration 等来源。存在辅助文件不代表它自动参与 SOLIDMODEL 主链。
-它的连接/空间字段与主几何事实分别保留，不能由相似 UUID 猜测主装配关系。
+同 UUID `.gl` 可与 DEV 形成 sidecar，包含 ConnectGuid、Direction、ConnectionRules、GimGeCableConcentration 等来源。存在辅助文件不代表它自动参与 SOLIDMODEL 主链。它的连接/空间字段与主几何事实分别保留，不能由相似 UUID 猜测主装配关系。
 
 ## 实现与验证边界
 
-[devParser](../../desktop/src/gim/geometry/devParser.ts)、
-[phmParser](../../desktop/src/gim/geometry/phmParser.ts)、
-[sourceGraph](../../desktop/src/gim/geometry/substationSourceGraph.ts)
-负责原始结构与来源关系；运行时和缓存消费见 [架构](../architecture.md)。
+[devParser](../../desktop/src/gim/geometry/devParser.ts)、[phmParser](../../desktop/src/gim/geometry/phmParser.ts)、[sourceGraph](../../desktop/src/gim/geometry/substationSourceGraph.ts)负责原始结构与来源关系；运行时和缓存消费见 [架构](../architecture.md)。
 矩阵、alias 和嵌套数量只在 [台账](sample-corpus.md) 维护。

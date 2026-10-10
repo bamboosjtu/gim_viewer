@@ -4,7 +4,8 @@
 只维护未关闭项，不保存开发流水或历史版本。实现与格式正文说明当前行为，
 本文件维护行动、依赖和完成条件。关闭后删除条目，并更新相应正文。
 
-优先级：P0 为正确性或核心流程阻断，P1 为主要效率、可维护性或拟交付核心需求，
+优先级：
+P0 为正确性或核心流程阻断，P1 为主要效率、可维护性或拟交付核心需求，
 P2 为增强或需要场景确认的候选。状态分为待核验、待开发、待决策；列入不代表已排期。
 同一问题只使用一个 ID，新增证据原地更新，不追加阶段叙事。
 
@@ -80,7 +81,6 @@ warm 从点击已有工程开始，终点同为树与工程覆盖层可交互。
 | P-04 | P2 / 待决策 | P-03 实际用户验证 | 计划/实际偏差、滞后、长时间无进展、连续区段断点、数据缺失、无法映射和状态冲突；规则有来源、阈值、对象和可核验 Finding |
 | P-05 | P2 / 待决策 | 真实现场需求、P-01 | 站班会/FieldActivity、项目部/ProjectFacility 等候选；确认对象/空间关联和现场价值，再定义地图事件或标记及隐私范围 |
 
-插件只能输出中立 ExternalProjectData，由 Core 转为 MapLayer/ObjectBadge/InspectorSection/Finding，
-不能取得 MapLibre 实例任意修改。capability 可表达 progress、field-activity、
-project-facility、coordinate-observation；能力边界以实际首个闭环决定，不预建完整插件生态。
+插件只能输出中立 ExternalProjectData，由 Core 转为 MapLayer/ObjectBadge/InspectorSection/Finding，不能取得 MapLibre 实例任意修改。capability 可表达 progress、field-activity、project-facility、coordinate-observation；能力边界以实际首个闭环决定，不预建完整插件生态。
+
 移动端 Plugin Host 属于 P-01 的同一需求，避免另一套数据源 API。

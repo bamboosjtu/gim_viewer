@@ -18,8 +18,7 @@
 ```
 
 合成示例不含工程来源标识。Device 与 primitive 标签大小写敏感。
-`<Device><Entities /></Device>` 是合法空内容；有 Entity 但全都 malformed 或 unsupported
-不能记成 empty。缺少 Entities 时当前 parser 也返回空文档。
+`<Device><Entities /></Device>` 是合法空内容；有 Entity 但全都 malformed 或 unsupported 不能记成 empty。缺少 Entities 时当前 parser 也返回空文档。
 
 | 元素/字段 | 当前解析行为 |
 |---|---|
@@ -60,10 +59,8 @@
 | BeamChannel / LightBeamChannel / H | Length,Model | BeamChannelLike；盒体近似 |
 | 其他标签 | raw attrs | Unsupported，局部降级并保留来源类型 |
 
-Insulator、ConePorcelainBushing、SquareGasket、CircularFixedPlate、BendingCylindrical 等
-未进入强类型分支的来源不能因为名字看似熟悉就宣称支持。
-全部覆盖以 [parser](../../desktop/src/gim/geometry/xmlModParser.ts) 与
-[geometry renderer](../../desktop/src/viewer/xmlModGeometry.ts) 的实际分支为准。
+Insulator、ConePorcelainBushing、SquareGasket、CircularFixedPlate、BendingCylindrical 等未进入强类型分支的来源不能因为名字看似熟悉就宣称支持。
+全部覆盖以 [parser](../../desktop/src/gim/geometry/xmlModParser.ts) 与[geometry renderer](../../desktop/src/viewer/xmlModGeometry.ts) 的实际分支为准。
 
 ## StretchedBody
 
