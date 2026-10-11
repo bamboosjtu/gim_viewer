@@ -7,6 +7,34 @@ import { setSelectionStatus } from '../ui/shell/statusBar.js';
 import * as THREE from 'three';
 import { previewShapeGeometry } from '../viewer/ifcPreviewProvider.js';
 
+type FineGuidModel = {
+  getLocalIdsByGuids(guids:string[]):Promise<(number|null)[]>;
+  getItemsIds():Promise<number[]>;
+  getGuidsByLocalIds(ids:number[]):Promise<(string|null)[]>;
+};
+const fineGuidQueries = new WeakMap<FineGuidModel, Map<string, Promise<number[]>>>();
+
+/** Fragments 3.4.6 returns one value per GUID from a lossy Map. Verify
+ * uniqueness via the public inverse lookup; cache only the requested GUID,
+ * not a second semantic model. Weak ownership follows the runtime model. */
+async function fineGuidCandidates(model:FineGuidModel,guid:string):Promise<number[]> {
+  let queries=fineGuidQueries.get(model);
+  if(!queries){queries=new Map();fineGuidQueries.set(model,queries);}
+  const cached=queries.get(guid);if(cached)return cached;
+  const task=(async()=>{
+    const hints=[...new Set((await model.getLocalIdsByGuids([guid])).filter((id):id is number=>id!=null))];
+    if(hints.length>1)return hints;
+    const ids=await model.getItemsIds(), candidates=new Set<number>();
+    for(let start=0;start<ids.length;start+=2048){
+      const batch=ids.slice(start,start+2048),guids=await model.getGuidsByLocalIds(batch);
+      for(let i=0;i<batch.length;i++)if(guids[i]===guid)candidates.add(batch[i]);
+    }
+    return [...candidates];
+  })();
+  queries.set(guid,task);
+  try{return await task;}catch(error){queries.delete(guid);throw error;}
+}
+
 /** Diagnostics captured only at an explicit Preview -> Fragments promotion. */
 export interface IfcPreviewReplacementDiagnostic {
   requestId: number;
@@ -40,9 +68,10 @@ export async function captureIfcPreviewReplacementDiagnostic(
   if (!state.isCurrentSelection(request) || !provider.data) return null;
   const runtimeModelId = state.ifcRuntimeModelIds.get(object.modelId) ?? null;
   const model = runtimeModelId ? ctx.fragments.list.get(runtimeModelId) : undefined;
-  if (!model || !object.globalId) return null;
-  const ids = await model.getLocalIdsByGuids([object.globalId]);
+  if (!model || !object.globalId || provider.findByGlobalId(object.globalId).length !== 1) return null;
+  const ids = await fineGuidCandidates(model,object.globalId);
   if (!state.isCurrentSelection(request)) return null;
+  if (ids.length !== 1) return null;
   const localId = ids[0];
   if (localId == null) return null;
 
@@ -123,8 +152,9 @@ export async function promoteIfcPreviewSelection(ctx:ViewerContext,state:AppStat
     state.selectionGeometry={status:'ambiguous',detail:`GlobalId 有 ${candidates.length} 个预览候选，保留原 ExpressId，未推断精细对象`};
     setSelectionStatus(state.selectionGeometry.detail);return;
   }
-  const ids=await model.getLocalIdsByGuids([object.globalId]);
+  const ids=await fineGuidCandidates(model,object.globalId);
   if(!state.isCurrentSelection(request))return;
+  if(ids.length>1){state.selectionGeometry={status:'ambiguous',detail:`精细模型 GlobalId 有 ${ids.length} 个候选；未选择任意对象`};setSelectionStatus(state.selectionGeometry.detail);return;}
   const localId=ids[0];
   if(localId==null){state.selectionGeometry={status:'unlinked',detail:'精细模型无对应 GlobalId；保留语义选择'};setSelectionStatus(state.selectionGeometry.detail);return;}
   state.selectionGeometry={status:'available',detail:'已建立原 IFC 对象的 LOD2 关联；沿用当前选择身份'};
@@ -150,7 +180,6 @@ export async function selectIfcPreview(ctx:ViewerContext,state:AppState,provider
       await captureIfcPreviewReplacementDiagnostic(ctx,state,provider,request,object);
       if(!state.isCurrentSelection(request))return;
       await promoteIfcPreviewSelection(ctx,state,provider,request,object);
-      if(provider.fineState==='fineReady')provider.releaseMetadata();
     }
     catch(error){if(state.isCurrentSelection(request)){
       const cancelled=error instanceof Error&&error.name==='AbortError';
@@ -158,7 +187,11 @@ export async function selectIfcPreview(ctx:ViewerContext,state:AppState,provider
         ? {status:'partial',detail:'LOD2 请求已取消排队；LOD0/LOD1 预览仍可用'}
         : {status:'failed',detail:`LOD2 加载失败；保留预览：${error instanceof Error?error.message:String(error)}`};
       setSelectionStatus(state.selectionGeometry.detail);
-    }}
+    }} finally {
+      // Resource ownership is file/session scoped, independent of whether
+      // this user selection still owns UI commits when conversion finishes.
+      if(provider.fineState==='fineReady')provider.releaseMetadata();
+    }
   };
   await showIfcPreviewProperties(ctx,state,provider,object,request,refine);
 }
@@ -168,9 +201,10 @@ export async function finishIfcPreview(ctx:ViewerContext,state:AppState,provider
   if(!state.isCurrentSession(session))return;
   const request=state.selectionRequest;
   const object=request?.target?.kind==='ifc-object' ? provider.data?.shapes.find(s=>s.object.key===request.target!.key)?.object : undefined;
-  if(request && object)await captureIfcPreviewReplacementDiagnostic(ctx,state,provider,request,object);
-  if(!state.isCurrentSession(session))return;
-  provider.retire();
-  if(request && object)await promoteIfcPreviewSelection(ctx,state,provider,request,object);
-  provider.releaseMetadata();
+  try {
+    if(request && object)await captureIfcPreviewReplacementDiagnostic(ctx,state,provider,request,object);
+    if(!state.isCurrentSession(session))return;
+    provider.retire();
+    if(request && object)await promoteIfcPreviewSelection(ctx,state,provider,request,object);
+  } finally {provider.releaseMetadata();}
 }

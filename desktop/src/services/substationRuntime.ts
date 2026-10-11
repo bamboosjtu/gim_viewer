@@ -826,6 +826,8 @@ export async function loadAllIfcFiles(
   const background = new SubstationBackgroundCoordinator({
     session: perfSession,
     isCurrent,
+    onFineEvent: event => perfMark(`IFC user fine · ${event.state}`, {...event}, perfSession),
+    onCheckpoint: unit => perfMark('DEV safe checkpoint', {...unit}, perfSession),
     onEvent: (event) => {
       // One compact span per lifecycle transition is enough for queue wait /
       // cancellation diagnostics; do not trace individual placements here.
@@ -1023,6 +1025,7 @@ export async function loadAllIfcFiles(
         const token = state.geometryLoadToken;
         try {
           await autoLoadModStlPostIfc(state, showMessage, ctx, {
+            onDevCheckpoint: unit => background.servicePendingUserFineAtCheckpoint(unit),
             token,
             includeMod: true,
             includeStl: false,
@@ -1363,6 +1366,7 @@ async function autoLoadModStlPostIfc(
     geometryCacheVersionFileMatch?: boolean;
     deferFullModelReady?:boolean;
     onGeometryComplete?:(meta:Record<string,unknown>)=>void;
+    onDevCheckpoint?: import('./substationBackgroundRuntime.js').DevCheckpointHandler;
   },
 ): Promise<void> {
   let endModStl: ((labelSuffix?: string, endMeta?: Record<string, unknown>) => void) | null = null;
@@ -1416,6 +1420,7 @@ async function autoLoadModStlPostIfc(
           projectId: session.projectId,
           sourceSha256: session.sourceSha256,
           session,
+          onDevCheckpoint: options?.onDevCheckpoint,
         },
       );
 
@@ -1455,6 +1460,7 @@ async function autoLoadModStlPostIfc(
             devGlbProfile,
             state.currentFiles,
             fallbackNodes,
+            options?.onDevCheckpoint,
           );
         } catch (error) {
           // 定向回退失败不应清理已经成功的 GLB；把错误留在控制台与
@@ -1534,6 +1540,7 @@ async function autoLoadModStlPostIfc(
         geometryCacheValid: options?.geometryCacheValid,
         geometryCacheManifestValid: options?.geometryCacheManifestValid,
         geometryCacheVersionFileMatch: options?.geometryCacheVersionFileMatch,
+        onDevCheckpoint: options?.onDevCheckpoint,
         includeMod: options?.includeMod ?? true,
         includeStl: options?.includeStl ?? false,
       },

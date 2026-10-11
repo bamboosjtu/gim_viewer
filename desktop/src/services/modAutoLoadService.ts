@@ -21,6 +21,7 @@ import type { CbmNode } from '../gim/types.js';
 import { isSubstationGeometryRoot } from '../gim/substationEvidence.js';
 import type { XmlModColor } from '../gim/geometry/ir.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
+import type { DevCheckpointHandler } from './substationBackgroundRuntime.js';
 import type { GeometryCacheManifest, GeometryCacheManifestEntry } from '@desktop/database.js';
 import type { DiscoveredModGeometry, DiscoveredStlGeometry } from './modGeometryDiscovery.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
@@ -50,6 +51,7 @@ import {
 
 /** 自动加载选项 */
 export interface GeometryAutoLoadOptions {
+  onDevCheckpoint?: DevCheckpointHandler;
   /** 调用方 token（用于防竞态：项目切换后递增，后台任务检测不匹配则停止） */
   token?: number;
   /** 工程加载代次（与 token 配合，防止同一 token 被错误复用）。 */
@@ -666,6 +668,7 @@ export async function tryDevGlbFastPath(
     sourceSha256?: string | null;
     session?: ProjectLoadSession;
     geometryCacheValid?: boolean;
+    onDevCheckpoint?: DevCheckpointHandler;
   },
 ): Promise<DevGlbFastPathResult> {
   const uniqueKeys = new Set<string>();
@@ -864,6 +867,8 @@ export async function tryDevGlbFastPath(
     if (useLegacyRead) {
       const readGlbFile = dependencies!.readGlbFile!;
       for (const devPath of glbPaths) {
+        if (!isCurrent()) return fail('session-invalid');
+        const unitStarted = performance.now();
         let bytes: Uint8Array | null = null;
         try {
           bytes = await readGlbFile(capturedProjectId, devPath);
@@ -872,11 +877,14 @@ export async function tryDevGlbFastPath(
         }
         if (!isCurrent()) return fail('session-invalid');
         glbBytesByDev.set(devPath.toLowerCase(), bytes);
+        await context?.onDevCheckpoint?.({phase:'warm-glb-read',path:devPath,durationMs:performance.now()-unitStarted});
       }
     } else {
       const batchReadGlbFiles = dependencies?.batchReadGlbFiles
         ?? (await import('@desktop/database.js')).batchReadGlbFiles;
       for (let start = 0; start < glbPaths.length;) {
+        if (!isCurrent()) return fail('session-invalid');
+        const unitStarted = performance.now();
         const batch: string[] = [];
         let expectedBytes = 0;
         while (start < glbPaths.length && batch.length < GLB_BATCH_MAX_FILES) {
@@ -904,6 +912,7 @@ export async function tryDevGlbFastPath(
             markDevFailure(path, 'missing');
           }
           debugLog(DEBUG_IFC_LOAD, '[autoLoad] 单批 DEV GLB 读取失败，转为 scoped fallback', error);
+          await context?.onDevCheckpoint?.({phase:'warm-glb-read',path:batch.join('|'),durationMs:performance.now()-unitStarted});
           continue;
         }
         if (!isCurrent()) return fail('session-invalid');
@@ -913,6 +922,7 @@ export async function tryDevGlbFastPath(
           const key = normalizeDevEntryPath(path).toLowerCase();
           glbBytesByDev.set(key, normalizedResults.get(key) ?? null);
         }
+        await context?.onDevCheckpoint?.({phase:'warm-glb-read',path:batch.join('|'),durationMs:performance.now()-unitStarted});
       }
     }
   } catch (err) {
@@ -1026,6 +1036,7 @@ export async function tryDevGlbFastPath(
   const yieldToPlacementMain = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
   for (const devPath of devOrder) {
+    if (!isCurrent()) return cleanupAndFail('session-invalid');
     const devTelemetryStarted = deepTelemetry.beginDev(
       devPath,
       seedsByDev.get(devPath.toLowerCase())?.length ?? 0,
@@ -1039,6 +1050,7 @@ export async function tryDevGlbFastPath(
     if (failedDevPaths.has(failedKey)) {
       for (const _seed of devSeeds) markProcessed();
       deepTelemetry.finishDev(devPath, devTelemetryStarted);
+      await context?.onDevCheckpoint?.({phase:'warm-dev',path:devPath,durationMs:performance.now()-devTelemetryStarted});
       continue;
     }
 
@@ -1188,6 +1200,7 @@ export async function tryDevGlbFastPath(
     syncTemplateMetrics();
     if (!isCurrent() || devInvalidated) return cleanupAndFail('session-invalid');
     deepTelemetry.finishDev(devPath, devTelemetryStarted);
+    await context?.onDevCheckpoint?.({phase:'warm-dev',path:devPath,durationMs:performance.now()-devTelemetryStarted});
   }
 
   if (!isCurrent()) return cleanupAndFail('session-invalid');
@@ -1271,6 +1284,7 @@ export async function recoverFailedDevGlbCaches(
     projectId: number | null;
     sourceSha256: string | null;
     session: ProjectLoadSession;
+    onDevCheckpoint?: DevCheckpointHandler;
   },
   dependencies: DevGlbCacheRecoveryDependencies = {},
 ): Promise<DevGlbCacheRecoveryResult> {
@@ -1367,6 +1381,8 @@ export async function recoverFailedDevGlbCaches(
           .map(([, path]) => path),
       ],
     };
+    const unitStarted = performance.now();
+    try {
     try {
       // Invalidate exactly this DEV.  Other DEV GLBs and their manifest
       // entries remain untouched even when this source rebuild fails.
@@ -1436,6 +1452,9 @@ export async function recoverFailedDevGlbCaches(
     } catch (error) {
       unresolvedDevPaths.push(devPath);
       debugLog(DEBUG_IFC_LOAD, `[autoLoad] DEV GLB recovery 编译失败: ${devPath}`, error);
+    }
+    } finally {
+      if (isCurrent()) await context?.onDevCheckpoint?.({ phase: 'cache-repair', path: devPath, durationMs: performance.now() - unitStarted });
     }
   }
 
@@ -1514,6 +1533,7 @@ export async function loadScopedRawFallbackGeometry(
   profile?: DevGlbFastPathProfile,
   sourceFiles?: Map<string, File> | null,
   deviceNodes: CbmNode[] = [],
+  onDevCheckpoint?: DevCheckpointHandler,
 ): Promise<ScopedRawFallbackResult> {
   // Source-file fallback is also valid in browser/non-Tauri mode, where no
   // SQLite project id exists.  Only the disk-backed branch requires
@@ -1731,9 +1751,12 @@ export async function loadScopedRawFallbackGeometry(
   let parseMs = 0;
   let skippedBadBBox = 0;
   const allModCount = modGeos.length;
+  if(isCurrent())await onDevCheckpoint?.({phase:'raw-prepare',path:failedDevPaths.join('|'),durationMs:performance.now()-started});
   const allStlCount = stlGeos.length;
 
   for (let i = 0; i < modGeos.length; i++) {
+    const unitStarted = performance.now();
+    try {
     if (!isCurrent()) return { modCount: loadedMods, stlCount: loadedStls, rows: reachableRows };
     const geo = modGeos[i];
     showProgress({
@@ -1785,9 +1808,14 @@ export async function loadScopedRawFallbackGeometry(
       loadedMods++;
     }
     if (i + 1 < modGeos.length) await new Promise((resolve) => setTimeout(resolve, YIELD_MS));
+    } finally {
+      if(isCurrent())await onDevCheckpoint?.({phase:'raw-commit',path:modGeos[i].modPath,durationMs:performance.now()-unitStarted});
+    }
   }
 
   for (let i = 0; i < stlGeos.length; i++) {
+    const unitStarted = performance.now();
+    try {
     if (!isCurrent()) return { modCount: loadedMods, stlCount: loadedStls, rows: reachableRows };
     const geo = stlGeos[i];
     showProgress({
@@ -1838,6 +1866,9 @@ export async function loadScopedRawFallbackGeometry(
       loadedStls++;
     }
     if (i + 1 < stlGeos.length) await new Promise((resolve) => setTimeout(resolve, YIELD_MS));
+    } finally {
+      if(isCurrent())await onDevCheckpoint?.({phase:'raw-commit',path:stlGeos[i].stlPath,durationMs:performance.now()-unitStarted});
+    }
   }
 
   if (profile) {
@@ -1987,6 +2018,7 @@ export async function autoLoadModAndStlGeometry(
         sourceSha256: capturedSourceSha256,
         session,
         files: rebuildFiles,
+        onDevCheckpoint: options.onDevCheckpoint,
       },
     );
     devGlbProfile = rebuilt.devGlbProfile;
@@ -2015,6 +2047,7 @@ export async function autoLoadModAndStlGeometry(
           devGlbProfile,
           rebuildFiles,
           deviceNodes,
+          options.onDevCheckpoint,
         );
       } catch (error) {
         debugLog(DEBUG_IFC_LOAD, '[autoLoad] geometry rebuild scoped raw fallback 失败，保留成功 GLB', error);
@@ -2031,6 +2064,7 @@ export async function autoLoadModAndStlGeometry(
     sourceSha256: capturedSourceSha256,
     session,
     geometryCacheValid: options.geometryCacheValid,
+    onDevCheckpoint: options.onDevCheckpoint,
   });
   devGlbProfile = devGlbResult.profile;
   if (devGlbResult.loaded) {
@@ -2051,6 +2085,7 @@ export async function autoLoadModAndStlGeometry(
           projectId: capturedProjectId,
           sourceSha256: capturedSourceSha256,
           session,
+          onDevCheckpoint: options.onDevCheckpoint,
         },
       );
       const attempted = failedDevPaths.length;
@@ -2082,6 +2117,7 @@ export async function autoLoadModAndStlGeometry(
             sourceSha256: capturedSourceSha256,
             session,
             geometryCacheValid: options.geometryCacheValid,
+          onDevCheckpoint: options.onDevCheckpoint,
           },
         );
         if (retry.loaded) {
@@ -2112,6 +2148,7 @@ export async function autoLoadModAndStlGeometry(
           devGlbProfile,
           files,
           deviceNodes,
+          options.onDevCheckpoint,
         );
         if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) {
           return resultWithProfile(0, 0);

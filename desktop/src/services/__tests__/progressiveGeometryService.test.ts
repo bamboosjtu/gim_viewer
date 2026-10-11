@@ -6,6 +6,7 @@ import type { ProgressiveGeometryDependencies } from '../progressiveGeometryServ
 import type { GeometryCacheManifestEntry } from '@desktop/database.js';
 import type { CbmNode } from '../../gim/types.js';
 import { isTauri } from '@desktop/runtime.js';
+import { SubstationBackgroundCoordinator } from '../substationBackgroundRuntime.js';
 
 // jsdom 下 isTauri() 恒为 false；通过 mock 控制 Tauri/浏览器两种模式
 vi.mock('@desktop/runtime.js', () => ({
@@ -118,6 +119,38 @@ describe('runProgressiveDevGlbPipeline', () => {
 
   afterEach(() => {
     vi.mocked(isTauri).mockReturnValue(false);
+  });
+
+  it.each([false,true])('production DEV loop: cooperative checkpoints=%s',async(cooperate)=>{
+    vi.mocked(isTauri).mockReturnValue(true);
+    const hold=()=>{let resolve!:(value?:any)=>void;const promise=new Promise<any>(r=>resolve=r);return {resolve,promise};};
+    const aStarted=hold(),aFinish=hold(),bStarted=hold(),bFinish=hold(),fineStarted=hold(),fineFinish=hold(),done=hold();
+    const state=makeState({projectId:7}),scene=new THREE.Scene(),order:string[]=[],events:any[]=[],units:any[]=[];
+    const rec:DepsRecorder={serializeCalls:[],writeCalls:[],versionWrites:0,loadCalls:[],manifestEntries:[]};
+    const deps=makeDeps({},rec);
+    deps.serializeDevToGlb=async path=>{order.push(path+' start');if(path.endsWith('a.dev')){aStarted.resolve();await aFinish.promise;}else{bStarted.resolve();await bFinish.promise;}return new Uint8Array([1,2,3]);};
+    const coordinator=new SubstationBackgroundCoordinator({session:{id:90},isCurrent:()=>state.currentProjectId===7,onFineEvent:event=>events.push(event),onCheckpoint:unit=>units.push(unit)});
+    coordinator.enqueue({task:'devGeometry',priority:1,heavy:true,startAfter:'allIfcPreviewsReady',run:async()=>{
+      const result=await runProgressiveDevGlbPipeline(state,scene,()=>{}, {token:1,onDevCheckpoint:cooperate?async unit=>{
+        if(unit.path.endsWith('a.dev')){expect(rec.writeCalls).toEqual(['DEV/a.dev']);expect(state.loadedXmlModGroups.size).toBe(2);expect(rec.versionWrites).toBe(0);}
+        await coordinator.servicePendingUserFineAtCheckpoint(unit);
+      }:undefined},deps);done.resolve(result);
+    }});
+    coordinator.markInteractive();coordinator.markAllIfcPreviewsReady();await aStarted.promise;
+    const fine=coordinator.enqueueUserIfcFine('small-ifc',async()=>{order.push('fine start');fineStarted.resolve();await fineFinish.promise;order.push('fine end');});
+    aFinish.resolve();
+    if(cooperate){await fineStarted.promise;expect(order).toEqual(['DEV/a.dev start','fine start']);expect(rec.versionWrites).toBe(0);fineFinish.resolve();await fine.promise;await bStarted.promise;}
+    else {await bStarted.promise;expect(order).toEqual(['DEV/a.dev start','DEV/b.dev start']);expect(events.map(x=>x.state)).toEqual(['queued']);}
+    bFinish.resolve();const result=await done.promise;
+    if(!cooperate){await fineStarted.promise;fineFinish.resolve();await fine.promise;}
+    expect(result.renderedInstances).toBe(3);expect(result.interrupted).toBe(false);expect(rec.versionWrites).toBe(1);
+    expect(rec.manifestEntries?.[0].map(x=>x.entry_path)).toEqual(['DEV/a.dev','DEV/b.dev']);
+    expect(state.loadedXmlModGroups.size).toBe(3);
+    expect(events.map(x=>x.state)).toEqual(['queued','running','completed']);
+    expect(events[1].queueWaitMs).toBeGreaterThanOrEqual(0);
+    expect(events[2].durationMs).toBeGreaterThanOrEqual(0);
+    if(cooperate)expect(units.map(x=>x.serviced)).toEqual([true,false]);
+    console.info(JSON.stringify({cooperate,order,events,units}));
   });
 
   it('同 DEV 多实例只序列化一次，逐实例渲染并注册 instanceKey', async () => {

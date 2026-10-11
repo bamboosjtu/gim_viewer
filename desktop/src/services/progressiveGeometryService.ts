@@ -23,6 +23,7 @@
 
 import * as THREE from 'three';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
+import type { DevCheckpointHandler } from './substationBackgroundRuntime.js';
 import type { CbmNode } from '../gim/types.js';
 import type { GeometryCacheManifestEntry } from '@desktop/database.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
@@ -231,6 +232,7 @@ export async function runProgressiveDevGlbPipeline(
      * hit back into a project-wide in-memory file source.
      */
     files?: Map<string, File>;
+    onDevCheckpoint?: DevCheckpointHandler;
   } = {},
   dependencies?: Partial<ProgressiveGeometryDependencies>,
 ): Promise<ProgressiveGeometryResult> {
@@ -468,6 +470,8 @@ export async function runProgressiveDevGlbPipeline(
       return resultSnapshot(true);
     }
 
+    const unitStarted = performance.now();
+    try {
     report(devPath);
     const devTelemetryStarted = deepTelemetry.beginDev(
       devPath,
@@ -714,6 +718,9 @@ export async function runProgressiveDevGlbPipeline(
     await deps.yieldToMain();
     deepTelemetry.record('yield', performance.now() - yieldStarted, devPath);
     deepTelemetry.finishDev(devPath, devTelemetryStarted);
+    } finally {
+      if(isSessionValid()) await options.onDevCheckpoint?.({phase:'cold-dev',path:devPath,durationMs:performance.now()-unitStarted});
+    }
   }
 
   // ── 3. 写版本标记（P1 评审：仅当全部 DEV 均有确定性结果时提交；

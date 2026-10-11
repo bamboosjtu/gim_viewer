@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { SubstationBackgroundCoordinator } from '../substationBackgroundRuntime.js';
 import * as THREE from 'three';
 import type { AppState } from '../../app/state.js';
 import type { CbmNode } from '../../gim/types.js';
@@ -736,3 +737,24 @@ function emptyProfileForTest(): DevGlbFastPathProfile {
     partialRawFallbackRows: 0,
   };
 }
+
+it('production warm DEV loop yields only after all A placements and resumes B after Fine',async()=>{
+  const gate=()=>{let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r);return{promise,resolve};};
+  const a=gate(),started=gate(),fineStart=gate(),fineEnd=gate(),done=gate(),order:string[]=[];
+  const state=makeState(),scene=new THREE.Scene(),units:string[]=[];
+  const deps=depsFor([{entry_path:'DEV/A.dev',status:'glb',size:12},{entry_path:'DEV/B.dev',status:'glb',size:12}],
+    {'DEV/A.dev':validGlb(),'DEV/B.dev':validGlb()},{load:async path=>{order.push(path);if(path==='DEV/A.dev'){started.resolve();await a.promise;}return renderableGroup(path);}});
+  const c=new SubstationBackgroundCoordinator({session:{id:25},isCurrent:()=>true});c.markInteractive();c.markAllIfcPreviewsReady();
+  c.enqueue({task:'devGeometry',priority:1,heavy:true,startAfter:'allIfcPreviewsReady',run:async()=>{
+    const result=await tryDevGlbFastPath(state,scene,[seed('CBM/A1.cbm','DEV/A.dev'),seed('CBM/A2.cbm','DEV/A.dev'),seed('CBM/B.cbm','DEV/B.dev')],vi.fn(),1,deps,
+      {projectId:1,generation:1,sourceSha256:'sha-test',onDevCheckpoint:async unit=>{
+        units.push(unit.phase);if(unit.path==='DEV/A.dev'&&unit.phase==='warm-dev')expect(state.loadedXmlModGroups.size).toBe(2);
+        await c.servicePendingUserFineAtCheckpoint(unit);
+      }});
+    expect(result.modCount).toBe(3);expect(result.profile.templateParseCount).toBe(2);done.resolve();
+  }});await started.promise;
+  const f=c.enqueueUserIfcFine('small',async()=>{order.push('Fine');fineStart.resolve();await fineEnd.promise;order.push('Fine done');});a.resolve();
+  await fineStart.promise;expect(order).toEqual(['DEV/A.dev','Fine']);expect(state.loadedXmlModGroups.size).toBe(2);
+  fineEnd.resolve();await f.promise;await done.promise;
+  expect(order).toEqual(['DEV/A.dev','Fine','Fine done','DEV/B.dev']);expect(units).toContain('warm-glb-read');expect(state.loadedXmlModGroups.size).toBe(3);
+});

@@ -165,3 +165,46 @@ describe('SubstationBackgroundCoordinator', () => {
     current = false;
   });
 });
+
+function gate(){let resolve!:()=>void;const promise=new Promise<void>(r=>resolve=r);return{promise,resolve};}
+it.each(['success','failure','cancel','switch'] as const)('DEV checkpoint resumes safely after user Fine %s',async(mode)=>{
+  let current=true,active=0,maxActive=0;
+  const order:string[]=[],a=gate(),started=gate(),fineStarted=gate(),fineEnd=gate(),devEnd=gate();
+  const c=new SubstationBackgroundCoordinator({session:{id:20},isCurrent:()=>current});
+  c.markInteractive();c.markAllIfcPreviewsReady();
+  c.enqueue({task:'devGeometry',priority:1,heavy:true,startAfter:'allIfcPreviewsReady',run:async()=>{
+    active++;maxActive=Math.max(maxActive,active);order.push('A');started.resolve();await a.promise;
+    active--;await c.servicePendingUserFineAtCheckpoint({phase:'cold-dev',path:'DEV/A.dev',durationMs:1});
+    if(current){active++;maxActive=Math.max(maxActive,active);order.push('B');active--;}
+    devEnd.resolve();
+  }});await started.promise;
+  const f=c.enqueueUserIfcFine('fine',async()=>{active++;maxActive=Math.max(maxActive,active);order.push('fine');fineStarted.resolve();
+    try{await fineEnd.promise;if(mode==='failure')throw Error('conversion failed');}finally{active--;}
+  });const observed=f.promise.catch(e=>e.message);
+  if(mode==='cancel')expect(f.cancel()).toBe(true);
+  a.resolve();
+  if(mode!=='cancel'){await fineStarted.promise;expect(order).toEqual(['A','fine']);if(mode==='switch'){current=false;c.cancelPending();}fineEnd.resolve();}
+  await observed;await devEnd.promise;
+  expect(order).toEqual(mode==='cancel'?['A','B']:mode==='switch'?['A','fine']:['A','fine','B']);
+  expect(maxActive).toBe(1);expect(active).toBe(0);
+});
+it('each checkpoint services only one queued request and gives the next DEV unit a turn',async()=>{
+  const order:string[]=[],started=gate(),a=gate(),done=gate();
+  const c=new SubstationBackgroundCoordinator({session:{id:21},isCurrent:()=>true});c.markInteractive();c.markAllIfcPreviewsReady();
+  c.enqueue({task:'devGeometry',priority:1,heavy:true,startAfter:'allIfcPreviewsReady',run:async()=>{
+    order.push('A');started.resolve();await a.promise;
+    await c.servicePendingUserFineAtCheckpoint({phase:'cold-dev',path:'A',durationMs:1});order.push('B');
+    await c.servicePendingUserFineAtCheckpoint({phase:'cold-dev',path:'B',durationMs:1});order.push('C');done.resolve();
+  }});await started.promise;
+  const f1=c.enqueueUserIfcFine('one',async()=>{order.push('one');}),f2=c.enqueueUserIfcFine('two',async()=>{order.push('two');});
+  a.resolve();await Promise.all([f1.promise,f2.promise,done.promise]);expect(order).toEqual(['A','one','B','two','C']);
+});
+
+it('an unexpected DEV task exit releases the lane and runs pending Fine before the next heavy task',async()=>{
+  const order:string[]=[],started=gate(),exit=gate(),next=gate();
+  const c=new SubstationBackgroundCoordinator({session:{id:22},isCurrent:()=>true});c.markInteractive();c.markAllIfcPreviewsReady();
+  c.enqueue({task:'devGeometry',priority:1,heavy:true,startAfter:'allIfcPreviewsReady',run:async()=>{order.push('A');started.resolve();await exit.promise;throw Error('unexpected DEV exit');}});
+  c.enqueue({task:'spatialSemanticRebuild',priority:2,heavy:true,startAfter:'allIfcPreviewsReady',run:async()=>{order.push('next heavy');next.resolve();}});
+  await started.promise;const fine=c.enqueueUserIfcFine('small',async()=>{order.push('Fine');});exit.resolve();await fine.promise;await next.promise;
+  expect(order).toEqual(['A','Fine','next heavy']);expect(c.snapshot().find(x=>x.task==='devGeometry')?.state).toBe('failed');
+});
