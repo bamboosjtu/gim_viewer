@@ -17,6 +17,7 @@
  */
 
 import * as THREE from 'three';
+import { GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
 import type { CbmNode } from '../gim/types.js';
 import { isSubstationGeometryRoot } from '../gim/substationEvidence.js';
 import type { XmlModColor } from '../gim/geometry/ir.js';
@@ -87,7 +88,7 @@ const YIELD_MS = 16;
  * 阈值需覆盖站点尺度（500m 覆盖特大型变电站）；
  * 单位错误类损坏（mm/m 混淆）通常为 km 级，仍可拦截。
  */
-const BBOX_MAX_DIM_M = 500;
+const BBOX_MAX_DIM_M = GEOMETRY_MAX_EXTENT_M;
 
 /**
  * 异常 bbox 位置阈值（米）：bbox 中心距原点超过此值视为平移失控。

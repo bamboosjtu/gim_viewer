@@ -50,7 +50,7 @@ macro_rules! debug_perf_log {
 pub const PARSER_VERSION: &str = "gim-parser-v22";
 pub const LINE_PARSER_VERSION: &str = "gim-line-parser-v1";
 // v25: FAM physical-row identity/provenance and occurrence-aware reachability.
-pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v25";
+pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v26";
 
 #[cfg(test)]
 #[path = "substation_sqlite_tests.rs"]
@@ -388,6 +388,7 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
     let _ = conn.execute("ALTER TABLE substation_file_dev_entry ADD COLUMN source_design_file TEXT", []);
     let _ = conn.execute("ALTER TABLE substation_fam_property ADD COLUMN raw_property_json TEXT", []);
     let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN substation_capability_summary_json TEXT", []);
+    let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN substation_index_receipt_json TEXT", []);
 
     // line_fam_property：display_key 为中文展示键，prop_key 为英文键，prop_value 可含 =
     // line_dev_property：普通 KEY=VALUE，无 display_key
@@ -1125,7 +1126,7 @@ fn save_gim_index_connection(conn: &mut Connection, payload: GimIndexPayload) ->
     // 几何引用链尚未写入，不能在此处提交 parser_version；由
     // save_geometry_refs 完成后统一提交 ready 状态。
     tx.execute(
-        "UPDATE gim_project SET parser_version = NULL, substation_parser_version = NULL, project_type = 'substation', updated_at_ms = ?1, substation_capability_summary_json = ?3 WHERE id = ?2",
+        "UPDATE gim_project SET parser_version = NULL, substation_parser_version = NULL, substation_index_receipt_json = NULL, project_type = 'substation', updated_at_ms = ?1, substation_capability_summary_json = ?3 WHERE id = ?2",
         params![now, pid, payload.capability_summary_json],
     )
     .map_err(|e| format!("清空 parser_version 失败: {}", e))?;
@@ -1172,6 +1173,52 @@ fn count_rows(conn: &Connection, table: &str, project_id: i64) -> Result<i64, St
     let sql = format!("SELECT COUNT(*) FROM {} WHERE project_id = ?1", table);
     conn.query_row(&sql, params![project_id], |row| row.get(0))
         .map_err(|e| format!("统计 {} 失败: {}", table, e))
+}
+
+// Publication receipt belongs to the existing semantic domain. It detects
+// truncated/deleted index rows on the next open without depending on GLBs.
+fn substation_index_receipt(conn: &Connection, project_id: i64) -> Result<String, String> {
+    let sha: String = conn.query_row("SELECT sha256 FROM gim_project WHERE id=?1", params![project_id], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let mut counts = std::collections::BTreeMap::new();
+    for table in ["substation_gim_entry", "substation_cbm_node", "substation_ifc_model",
+        "substation_file_dev_entry", "substation_fam_property", "substation_dev_property",
+        "substation_dev_solid_model", "substation_dev_sub_device", "substation_phm_solid_model"] {
+        counts.insert(table, count_rows(conn,table,project_id)?);
+    }
+    if counts["substation_cbm_node"] == 0 || counts["substation_ifc_model"] == 0 {
+        return Err("拒绝发布不完整变电语义索引".to_string());
+    }
+    serde_json::to_string(&serde_json::json!({"sha256":sha,"version":SUBSTATION_PARSER_VERSION,"counts":counts}))
+        .map_err(|e| e.to_string())
+}
+
+fn substation_index_receipt_matches(conn: &Connection, project_id: i64) -> bool {
+    let stored: Option<String> = conn.query_row("SELECT substation_index_receipt_json FROM gim_project WHERE id=?1",params![project_id],|r|r.get(0)).ok().flatten();
+    stored.is_some() && substation_index_receipt(conn,project_id).ok() == stored
+}
+
+fn missing_substation_sources(conn: &Connection, app: &tauri::AppHandle, project_id: i64) -> Result<Vec<String>,String> {
+    let mut stmt = conn.prepare("SELECT entry_path, local_cache_path, file_size FROM substation_gim_entry WHERE project_id=?1").map_err(|e|e.to_string())?;
+    let rows = stmt.query_map(params![project_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,i64>(2)?))).map_err(|e|e.to_string())?;
+    let mut missing = Vec::new();
+    for row in rows {
+        let (entry, local, size) = row.map_err(|e|e.to_string())?;
+        let ext = entry.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+        if !matches!(ext.as_str(),"cbm"|"fam"|"dev"|"phm"|"mod"|"gl"|"stl"|"sch"|"std"|"sld") { continue; }
+        let valid = local.as_deref().map(|p| {
+            let path = std::path::Path::new(p);
+            is_expected_cache_path(app,project_id,&entry,path).unwrap_or(false)
+                && readable_source_of_size(path,size)
+        }).unwrap_or(false);
+        if !valid { missing.push(format!("{} (语义/原始几何源缓存不可读)",entry)); }
+    }
+    Ok(missing)
+}
+
+fn readable_source_of_size(path: &std::path::Path, size: i64) -> bool {
+    stdfs::metadata(path).map(|m|m.is_file() && m.len() as i64 == size).unwrap_or(false)
+        && stdfs::File::open(path).is_ok()
 }
 
 fn row_to_ifc_model(row: &rusqlite::Row<'_>) -> rusqlite::Result<IfcModelRecord> {
@@ -5415,13 +5462,15 @@ pub fn validate_gim_cache(
             }
         }
 
+        missing_cache_paths.extend(missing_substation_sources(&conn,&app_handle,project_id)?);
         let valid = has_index
             && ifc_models_count > 0
             && ifc_entry_count > 0
             && cbm_nodes_count > 0
             && cached_ifc_count == ifc_entry_count
             && missing_cache_paths.is_empty()
-            && parser_version_match;
+            && parser_version_match
+            && substation_index_receipt_matches(&conn,project_id);
 
         (
             ifc_entry_count,
@@ -5472,6 +5521,7 @@ pub fn validate_gim_cache(
         }
     } else {
         if !has_index { miss_reasons.push("SUBSTATION_INDEX_EMPTY".to_string()); }
+        if !substation_index_receipt_matches(&conn,project_id) { miss_reasons.push("SUBSTATION_INDEX_RECEIPT_INVALID".to_string()); }
         if ifc_models_count == 0 { miss_reasons.push("IFC_MODEL_EMPTY".to_string()); }
         if ifc_entry_count == 0 { miss_reasons.push("IFC_ENTRY_EMPTY".to_string()); }
         if cbm_nodes_count == 0 { miss_reasons.push("CBM_NODE_EMPTY".to_string()); }
@@ -5886,6 +5936,7 @@ pub fn get_project_cache_diagnostic(
     } else {
         LineAttrDiagnostic::default()
     };
+    if !is_line { missing_cache_paths.extend(missing_substation_sources(&conn,app_handle,project_id)?); }
     let semantic_cache_valid = if is_line {
         parser_version_match
             && line_cbm_node_count > 0
@@ -5898,6 +5949,7 @@ pub fn get_project_cache_diagnostic(
             && cached_ifc_count == ifc_entry_count
             && missing_cache_paths.is_empty()
             && parser_version_match
+            && substation_index_receipt_matches(&conn,project_id)
     };
     let valid = semantic_cache_valid;
     let substation_semantic_cache_valid = !is_line && semantic_cache_valid;
@@ -6358,9 +6410,10 @@ fn save_geometry_refs_connection(conn: &mut Connection, payload: GeometryRefsPay
 
     // 几何引用链写入成功后才提交变电缓存 ready 状态；任何前置索引或
     // 引用链失败都保持 parser_version=NULL，下次打开会完整重建。
+    let receipt = substation_index_receipt(&tx,pid)?;
     tx.execute(
-        "UPDATE gim_project SET parser_version = ?1, substation_parser_version = ?2, project_type = 'substation', updated_at_ms = ?3 WHERE id = ?4",
-        params![PARSER_VERSION, SUBSTATION_PARSER_VERSION, now, pid],
+        "UPDATE gim_project SET parser_version = ?1, substation_parser_version = ?2, project_type = 'substation', updated_at_ms = ?3, substation_index_receipt_json = ?5 WHERE id = ?4",
+        params![PARSER_VERSION, SUBSTATION_PARSER_VERSION, now, pid, receipt],
     )
     .map_err(|e| format!("提交变电缓存版本失败: {}", e))?;
 

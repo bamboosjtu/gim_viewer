@@ -1901,6 +1901,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
               cached: geoCacheResult.cachedCount,
               errors: geoCacheResult.errors,
             });
+            for (const [path,localPath] of geoCacheResult.pathMap) localCachePathMap.set(path,localPath);
             if (geoCacheResult.errors.length > 0) {
               console.warn('[Tauri] 部分几何文件缓存失败:', geoCacheResult.errors);
             }
@@ -1910,67 +1911,19 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         }
       }
 
-      // 方案 C：MOD → glTF 离线预序列化缓存
-      // 移到 IFC 加载之后作为后台任务（见下方 queueMicrotask），避免阻塞渲染
-      // 此处仅记录 files 引用，实际序列化在 loadAllIfcFiles 完成后执行
-
-      showLoading('正在写入 GIM 索引...');
-      try {
-        if (!state.isCurrentSession(session)) return;
-        const { buildGimIndexPayload } = await import('./gimIndexPersistenceService.js');
-        const { saveGimIndex } = await import('@desktop/database.js');
-        const payload = await buildGimIndexPayload(
-          projectId,
-          filesForPersist,
-          ifcEntriesForPersist,
-          cbmTreeForPersist,
-          fileDevRelationsForPersist,
-          localCachePathMap,
-          session.sourceSha256,
-        );
-
-        // 校验：即将写入的 IFC local_cache_path 数量
-        const payloadIfcEntries = payload.entries.filter((e) => e.entry_type === 'IFC');
-        debugLog(DEBUG_GIM_CACHE, '[Tauri] 即将写入 SQLite 的 IFC local_cache_path:', {
-          ifc_entries: payloadIfcEntries.length,
-          with_cache_path: payloadIfcEntries.filter((e) => !!e.local_cache_path).length,
-        });
-
-        if (!state.isCurrentSession(session)) return;
-        await saveGimIndex(payload);
-        if (!state.isCurrentSession(session)) return;
-        debugLog(DEBUG_GIM_CACHE, '[Tauri] GIM 索引已写入:', {
-          entries: payload.entries.length,
-          cbm_nodes: payload.cbm_nodes.length,
-          ifc_models: payload.ifc_models.length,
-          file_dev_entries: payload.file_dev_entries.length,
-          fam_properties: payload.fam_properties.length,
-          dev_properties: payload.dev_properties.length,
-        });
-
-        // v6: 同时写入 DEV/PHM 几何引用链索引，用于缓存命中时快速查询
-        if (filesForPersist) {
-          showLoading('正在索引几何引用链...');
-          try {
-            const { buildGeometryRefsPayload } = await import('./gimIndexPersistenceService.js');
-            const { saveGeometryRefs } = await import('@desktop/database.js');
-            const geoPayload = await buildGeometryRefsPayload(projectId, filesForPersist, session.sourceSha256);
-            if (!state.isCurrentSession(session)) return;
-            debugLog(DEBUG_GIM_CACHE, '[Tauri] 几何引用链索引:', {
-              dev_solid_models: geoPayload.dev_solid_models.length,
-              dev_sub_devices: geoPayload.dev_sub_devices.length,
-              phm_solid_models: geoPayload.phm_solid_models.length,
-            });
-            await saveGeometryRefs(geoPayload);
-            if (!state.isCurrentSession(session)) return;
-            debugLog(DEBUG_GIM_CACHE, '[Tauri] 几何引用链索引已写入');
-          } catch (geoErr) {
-            console.warn('[Tauri] 几何引用链索引写入失败:', geoErr);
-          }
-        }
-      } catch (err) {
-        console.error('[Tauri] GIM 索引写入失败:', err);
-      }
+      if (!state.isCurrentSession(session)) return;
+      const { publishSubstationIndex } = await import('./substationIndexPublication.js');
+      const { saveGimIndex, saveGeometryRefs, validateGimCache } = await import('@desktop/database.js');
+      await publishSubstationIndex({
+        projectId, sourceSha256: session.sourceSha256 ?? '', files: filesForPersist,
+        cachePaths: localCachePathMap, tree: cbmTreeForPersist,
+        ifcs: ifcEntriesForPersist, relations: fileDevRelationsForPersist,
+      }, {
+        isCurrent: () => state.isCurrentSession(session),
+        saveIndex: saveGimIndex, saveRefs: saveGeometryRefs,
+        validate: () => validateGimCache(projectId,'substation'),
+        onPhase: (phase,counts) => perfMark(`变电 semantic persistence · ${phase}`, {projectId,...counts}, perfSession),
+      });
         })()
       : Promise.resolve();
     persistPromise = persistTask
@@ -2023,15 +1976,21 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       run: async () => { await starter(); },
     });
   };
-  const scheduleCachePersistence = (coordinator: SubstationBackgroundCoordinator,gate:SubstationBackgroundGate): void => {
+  const scheduleCachePersistence = (coordinator: SubstationBackgroundCoordinator,_gate:SubstationBackgroundGate): void => {
     coordinator.enqueue({
       task: 'cachePersistence',
       priority: 10,
-      heavy: false,
-      startAfter: gate,
+      heavy: !preExtracted?.cachePaths?.size,
+      startAfter: 'interactive',
       run: async () => { await startCachePersistence(); },
     });
   };
+
+  // Native extraction already atomically finished source files on disk. The
+  // small semantic/reference transactions do not depend on Preview or DEV.
+  if (persistProjectId != null && preExtracted?.cachePaths?.size) {
+    void startCachePersistence();
+  }
 
   // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框。
   // loadAllIfcFiles 在首个可用 IFC 后返回；剩余 IFC、几何和这里的缓存

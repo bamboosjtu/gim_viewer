@@ -56,7 +56,7 @@ IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CB
 
 原型默认关闭。`localStorage.setItem('gim-debug-ifc-preview','1')` 后重新打开变电工程启用，删除该键后恢复完整几何路径；Fragments 开关和默认值独立。首个完整 IFC 仍先建立生产坐标锚点，后续文件在 metadata Worker 中读取单位、上下文和 LocalPlacement 链，先提交 LOD0，再提交 LOD1，自动完整加载与属性面板的“加载精细几何 LOD2”共用该文件的加载 Promise。
 
-另一个独立、默认关闭的实验开关 `gim-debug-ifc-preview-deferred-fine` 必须与 Preview 开关同时启用。该模式不改变原完整加载模式：首个 IFC 仍完整加载并建立坐标锚点，后续文件顺序生成 Preview，LOD0/LOD1 均完成后标记 `previewReady`，精细状态为 `fineDeferred`，不自动启动 LOD2。全部 Preview 完成后，DEV/Spatial/缓存等可运行于 `allIfcPreviewsReady` 门禁；`allIfcReady` 仍等待每个 IFC 精细加载成功或明确失败，延期中的文件不计为 ready，`fullModelReady` 还要求 DEV 完成且所有 IFC 为 `fineReady`。
+另一个独立、默认关闭的实验开关 `gim-debug-ifc-preview-deferred-fine` 必须与 Preview 开关同时启用。该模式不改变原完整加载模式：首个 IFC 仍完整加载并建立坐标锚点，后续文件顺序生成 Preview，LOD0/LOD1 均完成后标记 `previewReady`，精细状态为 `fineDeferred`，不自动启动 LOD2。全部 Preview 完成后，DEV/Spatial 等可运行于 `allIfcPreviewsReady` 门禁；语义索引发布不依赖该门禁。`allIfcReady` 仍等待每个 IFC 精细加载成功或明确失败，延期中的文件不计为 ready，`fullModelReady` 还要求 DEV 完成且所有 IFC 为 `fineReady`。
 
 属性面板中的精细加载请求按逻辑模型 ID 去重，并排在尚未启动的普通重任务之前。已运行的 DEV 管线在完成单个 DEV 的解析、缓存写入和全部 placement 提交后，调用协调器安全检查点；暖路径还在有界 GLB 批读完成后检查。每个检查点最多执行一个用户精化请求，保留 DEV 的重任务调度权，精化完成或失败后继续下一工作单元，不与其他受协调器管理的重任务并行。定向 raw 回退和单 DEV 缓存修复也记录安全边界；完整 manifest/version 仍在管线原有结束位置提交。单个 DEV 内部序列化和已运行的 Spatial/转换不能中途让权。工程关闭会取消排队请求，并由原 ProjectLoadSession 释放活动 Worker。精细转换失败后可重试。LOD1 完成即终止该文件的 Preview metadata Worker；按需属性查询重新读取单个 IFC，并在一次性 Worker 结束或工程关闭后释放。Preview、属性查询和精细转换以转移方式交接各自的一次性 IFC 输入；延期精化重新读取源文件，不使用已释放的预览缓冲区。metadata 就绪 Promise 只持有完成状态，精细替换后清除显式 metadata 所有者。不同文件的 Preview 与精化、一次性属性读取仍可能短暂并行，不保证全工程只有一个 WASM heap。资源事件和进程内存采样用于观测生命周期，Fragments 转换 WASM heap 的精确值仍不由当前公开 API 暴露。
 
@@ -79,6 +79,8 @@ PHM 根据引用扩展名递归，逐边累积矩阵，按当前分支防环。�
 冷路径按唯一 DEV 编译 GLB、落盘并渐进提交 placement。clean static DEV 在会话内只解析一个模板，共享不可变 geometry/material；每个 occurrence 保留独立节点层级和变换。不能把 placement 烘焙写回共享 geometry。无法共享的范围使用局部回退。当前不采用 InstancedMesh。
 
 GLB 恢复校验 manifest、源身份、条目状态和文件完整性。单 DEV 文件失败可局部回退原始几何；manifest 无效使几何域失效，不要求删除有效语义域。完成标记只在所有目标条目形成确定状态后提交，瞬时失败不能写为完整版本。
+
+DEV 导出前和静态 GLB 模板恢复时检查有限值与包围盒跨度，复用场景既有 500 m 跨度上限，不按设备名称选择规则。异常源矩阵不会被 clamp 或静默删除；导出失败进入现有 failed 路径，不发布正常 GLB 或完整几何版本。运行时仍在应用 occurrence 变换后执行原包围盒守卫。样本验收分别统计候选可恢复、实际提交与异常拒绝 occurrence，不能以文件存在代替显示成功。
 
 | 条目状态 | 含义 |
 |---|---|
@@ -105,7 +107,7 @@ GLB 恢复校验 manifest、源身份、条目状态和文件完整性。单 DEV
 | 域 | 当前契约 | 权威定义 | 校验与失效范围 |
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
-| 变电语义 | `gim-substation-parser-v25` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性和语义引用 |
+| 变电语义 | `gim-substation-parser-v26` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性、语义引用及索引发布凭据 |
 | DEV 几何 | `geometry-cache-v8-occurrence` | [db.rs](../desktop/src-tauri/src/db.rs) | occurrence 引用、manifest 和 GLB |
 | Spatial snapshot | `substation-spatial-semantic-v2` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 源、链接和序列化结构 |
 | IFC Spatial parser contract | `gim-substation-parser-v23` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
@@ -115,6 +117,10 @@ GLB 恢复校验 manifest、源身份、条目状态和文件完整性。单 DEV
 
 SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `powerline_*`。
 FAM 来源记录使用 `(project_id, source_path, source_line)` 区分物理行，不用归一化键覆盖重复原文。
+
+变电原生解压完成后返回全部已落盘条目的缓存路径。核心语义就绪且完整源文件可读时，独立发布 CBM/FAM/DEV/FileDevRelation 与 DEV/PHM 引用索引，不等待 DEV 编译、IFC Preview、Spatial 或 Fragments。发布过程只准备有界批次的小文本，不再次通过 IPC 读取 IFC 字节；WASM 回退必须先完成源文件写入，并沿用重任务协调器以免与用户精化并行争用大量资源。
+
+`save_gim_index` 清空变电域版本与发布凭据，`save_geometry_refs` 在现有事务中最终提交版本和 `substation_index_receipt_json`。凭据记录源 SHA、语义版本及九张语义/引用表行数；恢复时校验凭据、IFC 清单、必需缓存路径、文件大小与可读性。源改变、未完成写入、删行或缺源均不能作为合法语义 HIT。空 FAM 的零字节文件有效。凭据用于完整发布与截断检测，不是逐行内容签名，也不代表 GLB、Spatial 或 Fragments 完成；变电语义旧版本独立失效，不清除其他域。
 
 ## 配置与加载状态
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { serializeDevToGlb, serializeDevToGlbDetailed, parseDevGlbAsset } from '../glbCacheService.js';
+import { serializeDevToGlb, serializeDevToGlbDetailed, parseDevGlbAsset, InvalidDevGeometryError } from '../glbCacheService.js';
 import { collectDeviceGroups } from '../nodeInteractionService.js';
 import { AppState } from '../../app/state.js';
 
@@ -10,6 +10,14 @@ function file(text: string, name: string): File {
 const IDENTITY = '1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1';
 
 describe('serializeDevToGlb strict dependency semantics', () => {
+  it('finite extreme source Entity translations are rejected before normal GLB publication', async () => {
+    const files = new Map(Object.entries({
+      'DEV/device.dev': 'SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.phm',
+      'PHM/body.phm': 'SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.mod',
+      'MOD/body.mod': `<Device><Entities><Entity ID="2"><Cuboid L="1000" W="1000" H="1000"/><TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,-251014909666872,609402508870763,-175,1"/></Entity><Entity ID="3"><Cuboid L="1000" W="1000" H="1000"/></Entity></Entities></Device>`,
+    }).map(([path,text]) => [path,file(text,path)]));
+    await expect(serializeDevToGlbDetailed('DEV/device.dev',files)).rejects.toBeInstanceOf(InvalidDevGeometryError);
+  });
   it('compiles nested PHM and repeated MOD deterministically, keeps child identity and ignores GL sidecar', async () => {
     const uuid = '12345678-1234-1234-1234-123456789abc';
     const files = new Map(Object.entries({

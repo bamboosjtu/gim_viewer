@@ -50,6 +50,14 @@ function makeNestedTemplate(): THREE.Group {
   return root;
 }
 
+it('rejects a historical GLB with finite astronomical extent before creating any occurrence', async () => {
+  const group = new THREE.Group();
+  group.add(new THREE.Mesh(new THREE.BoxGeometry(7.57e11,1,1),new THREE.MeshStandardMaterial()));
+  const pool = new DevGlbTemplatePool({session:new AppState().captureProjectSession(),isCurrent:()=>true,parse:async()=>({scene:group,animations:[]})});
+  expect(await pool.prepare('DEV/bad.dev',new Uint8Array([1]))).toBeNull();
+  pool.dispose();
+});
+
 function cloneLegacy(root: THREE.Group, placementRaw: number[], project: THREE.Matrix4 | null): THREE.Group {
   const clone = root.clone(true) as THREE.Group;
   clone.traverse((object) => {

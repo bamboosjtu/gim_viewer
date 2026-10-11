@@ -15,6 +15,7 @@ export interface IfcCacheResult {
 
 /** 几何文件缓存结果（DEV/PHM/MOD/GL） */
 export interface GeometryCacheResult {
+  pathMap: Map<string, string>;
   /** 已缓存的 entry_path 数量 */
   cachedCount: number;
   /** 缓存失败的条目 */
@@ -69,12 +70,15 @@ export async function cacheGeometryFiles(
 ): Promise<GeometryCacheResult> {
   const errors: Array<{ entryPath: string; message: string }> = [];
   let cachedCount = 0;
+  const pathMap = new Map<string,string>();
 
   for (const [entryPath, file] of files) {
-    if (!isGeometryFile(entryPath) && !isStdSldFile(entryPath)) continue;
+    if (!isGeometryFile(entryPath) && !isStdSldFile(entryPath)
+      && !/\.(cbm|fam|stl|sch)$/i.test(entryPath)) continue;
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      await writeCacheFile(projectId, entryPath, bytes);
+      const localPath = await writeCacheFile(projectId, entryPath, bytes);
+      pathMap.set(entryPath,localPath);
       cachedCount++;
     } catch (err) {
       errors.push({
@@ -84,7 +88,7 @@ export async function cacheGeometryFiles(
     }
   }
 
-  return { cachedCount, errors };
+  return { cachedCount, errors, pathMap };
 }
 
 /**

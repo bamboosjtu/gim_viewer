@@ -9,6 +9,7 @@
  */
 
 import * as THREE from 'three';
+import { invalidGeometryExtent } from '../viewer/geometryBounds.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 
 export interface DevGlbParsedAsset {
@@ -390,6 +391,13 @@ export class DevGlbTemplatePool {
         this.metricsState.fallbackDevPaths.push(normalizeDevPath(devPath));
         this.metricsState.fallbackReasons[normalizeDevPath(devPath)] = validation.reason;
         return legacy;
+      }
+      // Older caches may contain finite but astronomically large vertices.
+      // They must use the existing failed-template/raw-repair path, rather
+      // than a legacy placement of a known invalid asset.
+      if (invalidGeometryExtent(asset.scene)) {
+        disposeObjectResources(asset.scene);
+        return null;
       }
       const template = new DevGlbTemplate(normalizeDevPath(devPath), asset.scene, this.options.session);
       const shared: DevGlbTemplatePreparation = { kind: 'shared', template };

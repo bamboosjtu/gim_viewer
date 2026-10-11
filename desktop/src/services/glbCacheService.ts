@@ -26,6 +26,7 @@ import { discoverGeometriesFromDevPath } from './modGeometryDiscovery.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { getFileByPath } from '../gim/fileLookup.js';
+import { invalidGeometryExtent } from '../viewer/geometryBounds.js';
 import {
   disposeXmlModGroup,
   XML_MOD_GEOMETRY_DIAGNOSTICS_KEY,
@@ -52,6 +53,13 @@ export interface DevGlbSerializationResult {
   status: DevGlbSerializationStatus;
   bytes: Uint8Array | null;
   diagnostics: DevGlbSerializationDiagnostics;
+}
+
+export class InvalidDevGeometryError extends Error {
+  constructor(readonly devPath: string, readonly reason: string) {
+    super(`DEV 几何无效，拒绝导出 GLB: ${devPath}: ${reason}`);
+    this.name = 'InvalidDevGeometryError';
+  }
 }
 
 /** 单例 GLTFLoader（内部无状态，可安全复用） */
@@ -259,6 +267,18 @@ export async function serializeDevToGlbDetailed(
     : 'complete';
 
   debugLog(DEBUG_GIM_CACHE, `[glbCache] DEV ${canonicalDevPath}: ${modLoaded} MOD + ${stlLoaded} STL 合并完成`);
+
+  // Finite source coordinates can still be corrupt. Reject before exporting
+  // and publishing a normal GLB, using the existing scene extent budget.
+  // Do not clamp source values or remove entities and label the DEV complete.
+  const invalidExtent = invalidGeometryExtent(devGroup);
+  if (invalidExtent) {
+    for (const child of [...devGroup.children]) {
+      devGroup.remove(child);
+      disposeSourceGroup(child as THREE.Group);
+    }
+    throw new InvalidDevGeometryError(canonicalDevPath, invalidExtent);
+  }
 
   // 3. 序列化 devGroup → GLB
   const exporter = new GLTFExporter();

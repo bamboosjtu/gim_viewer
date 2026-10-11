@@ -6,6 +6,39 @@ fn project(conn: &Connection, id: i64, sha: &str) {
 }
 
 #[test]
+fn semantic_receipt_rejects_truncation_changed_sha_and_pending_or_failed_publication() {
+    let mut conn=Connection::open_in_memory().unwrap();
+    initialize_schema(&conn).unwrap(); project(&conn,1,"source-a");
+    let value=serde_json::json!({"project_id":1,"source_sha256":"source-a",
+        "entries":[{"entry_path":"CBM/model.ifc","file_name":"model.ifc","entry_type":"IFC","file_size":1}],
+        "cbm_nodes":[{"node_key":"CBM/project.cbm","path":"CBM/project.cbm","name":"project","sort_order":0}],
+        "ifc_models":[{"model_id":"model","name":"model","entry_path":"CBM/model.ifc"}],
+        "file_dev_entries":[],"fam_properties":[{"source_path":"CBM/props.fam","section_name":"design","prop_key":"key","prop_value":"value","sort_order":0,"source_line":1}],"dev_properties":[]});
+    save_gim_index_connection(&mut conn,serde_json::from_value(value.clone()).unwrap()).unwrap();
+    assert!(!substation_index_receipt_matches(&conn,1));
+    save_geometry_refs_connection(&mut conn,serde_json::from_value(serde_json::json!({"project_id":1,"source_sha256":"source-a","dev_solid_models":[],"dev_sub_devices":[],"phm_solid_models":[]})).unwrap()).unwrap();
+    assert!(substation_index_receipt_matches(&conn,1));
+    { let tx=conn.unchecked_transaction().unwrap(); tx.execute("DELETE FROM substation_fam_property",[]).unwrap(); assert!(!substation_index_receipt_matches(&tx,1)); }
+    assert!(substation_index_receipt_matches(&conn,1));
+    { let tx=conn.unchecked_transaction().unwrap(); tx.execute("UPDATE gim_project SET sha256='source-b' WHERE id=1",[]).unwrap(); assert!(!substation_index_receipt_matches(&tx,1)); }
+    let mut old=value.clone(); old["source_sha256"]=serde_json::json!("stale-source");
+    assert!(save_gim_index_connection(&mut conn,serde_json::from_value(old).unwrap()).is_err());
+    assert!(substation_index_receipt_matches(&conn,1));
+    save_gim_index_connection(&mut conn,serde_json::from_value(value).unwrap()).unwrap();
+    assert!(!substation_index_receipt_matches(&conn,1));
+}
+
+#[test]
+fn semantic_source_missing_wrong_size_and_empty_file_are_distinct() {
+    let dir=std::env::temp_dir().join(format!("gim-source-readability-{}",std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap(); let path=dir.join("empty.fam");
+    std::fs::write(&path,b"").unwrap();
+    assert!(readable_source_of_size(&path,0)); assert!(!readable_source_of_size(&path,1));
+    std::fs::remove_file(&path).unwrap(); assert!(!readable_source_of_size(&path,0));
+    std::fs::remove_dir(dir).unwrap();
+}
+
+#[test]
 fn fam_schema_migrates_without_losing_existing_rows() {
     let conn = Connection::open_in_memory().unwrap();
     initialize_schema(&conn).unwrap();
@@ -56,11 +89,28 @@ fn substation_sqlite_exchange() {
         }
         // Only production INSERT/SELECT results cross back into the TS restore.
         save_gim_index_connection(&mut conn, index).unwrap();
+        assert!(!substation_index_receipt_matches(&conn,pid));
+        let pending: Option<String> = conn.query_row("SELECT substation_parser_version FROM gim_project WHERE id=?1",params![pid],|r|r.get(0)).unwrap();
+        assert!(pending.is_none());
         save_gim_index_connection(&mut conn, serde_json::from_value(request["index"].clone()).unwrap()).unwrap();
         save_geometry_refs_connection(&mut conn, refs).unwrap();
+        assert!(substation_index_receipt_matches(&conn,pid));
         drop(conn);
         // Warm read reopens the on-disk SQLite database; no payload substitution.
         let conn = Connection::open(&sqlite_path).unwrap();
+        assert!(substation_index_receipt_matches(&conn,pid));
+        // Truncated properties / interrupted index and source identity changes
+        // are rejected independently of whether any DEV GLB has completed.
+        {
+            let tx=conn.unchecked_transaction().unwrap();
+            tx.execute("DELETE FROM substation_cbm_node WHERE rowid=(SELECT rowid FROM substation_cbm_node WHERE project_id=?1 LIMIT 1)",params![pid]).unwrap();
+            assert!(!substation_index_receipt_matches(&tx,pid));
+        }
+        {
+            let tx=conn.unchecked_transaction().unwrap();
+            tx.execute("UPDATE gim_project SET sha256='changed-source' WHERE id=?1",params![pid]).unwrap();
+            assert!(!substation_index_receipt_matches(&tx,pid));
+        }
         let warm = get_gim_index_connection(&conn, pid).unwrap();
         let reachable = query_reachable_geometry_filtered(&conn,pid,true,true,None).unwrap();
         let filter = request["filter"].as_array().map(|a| a.iter().map(|v| v.as_str().unwrap().to_string()).collect());

@@ -11,9 +11,9 @@ import { parseFamSectionsWithDiagnostics } from '../../gim/famParser.js';
 import { buildSubstationAliasIndex, discoverSubstationGlSidecars, deviceOccurrenceScope, devAssemblyPath } from '../../gim/substationEvidence.js';
 import { buildGimIndexPayload, buildGeometryRefsPayload } from '../gimIndexPersistenceService.js';
 import { restoreGimIndexToState } from '../gimIndexRestoreService.js';
-import { collectCbmDeviceInstances, tryDevGlbFastPath, loadScopedRawFallbackGeometry } from '../modAutoLoadService.js';
+import { collectCbmDeviceInstances, tryDevGlbFastPath, loadScopedRawFallbackGeometry, diagnoseGroupBBox } from '../modAutoLoadService.js';
 import { discoverGeometriesFromDevPath, discoverGeometriesFromNode } from '../modGeometryDiscovery.js';
-import { serializeDevToGlbDetailed, parseDevGlbAsset, loadDevGlb } from '../glbCacheService.js';
+import { serializeDevToGlbDetailed, parseDevGlbAsset, loadDevGlb, InvalidDevGeometryError } from '../glbCacheService.js';
 import { applyPlacementTransformToSceneUnits } from '../../viewer/xmlModLoader.js';
 import { DevGlbTemplatePool } from '../devGlbTemplateRuntime.js';
 import { collectDeviceGroups } from '../nodeInteractionService.js';
@@ -144,13 +144,25 @@ for (const [ordinal, sample] of samples.entries()) {
     const statuses: Record<string, number> = { complete: 0, partial: 0, empty: 0, unsupported: 0, failed: 0 };
     const cache = mkdtempSync(join(tmpdir(), `gim-${sample.id}-glb-`));
     let glbChecks = 0;
+    let theoreticalRecoverableOccurrences = 0;
+    let rejectedOccurrences = 0;
+    const rejectedTemplates: Array<{dev:string;roots:number;reason:string}> = [];
     let fallbackChecks = 0;
     let damagedDev: string | null = null;
     const fallbackBoxes = new Map<string, THREE.Box3>();
     try {
       // Every unique root template is compiled; every root occurrence is restored.
       for (const [dev, placements] of byDev) {
-        const compiled = await serializeDevToGlbDetailed(dev, files);
+        let compiled;
+        try {
+          compiled = await serializeDevToGlbDetailed(dev, files);
+        } catch (error) {
+          if (!(error instanceof InvalidDevGeometryError)) throw error;
+          statuses.failed++;
+          rejectedOccurrences += placements.length;
+          rejectedTemplates.push({ dev, roots:placements.length, reason:error.reason });
+          continue;
+        }
         statuses[compiled.status]++;
         if (!compiled.bytes) { expect(['empty','unsupported']).toContain(compiled.status); continue; }
         writeFileSync(join(cache,'device.glb'),compiled.bytes);
@@ -201,6 +213,11 @@ for (const [ordinal, sample] of samples.entries()) {
         if (prepared?.kind !== 'shared') throw new Error(`Non-shareable actual GLB: ${dev}`);
         for (const seed of placements) {
           const group = prepared.template.createPlacement({ rootOccurrence: seed.path, instanceKey: `dev:${dev}#${seed.path}`, placementMatrix: seed.transformMatrix!.split(',').map(Number) });
+          theoreticalRecoverableOccurrences++;
+          if (!diagnoseGroupBBox(group,dev,{disposeOnFailure:false})) {
+            rejectedOccurrences++;
+            continue;
+          }
           state.loadedXmlModGroups.set(seed.path,group);
           expect(collectDeviceGroups(state,dev,deviceOccurrenceScope(state.currentCbmTree,seed))).toEqual([group]);
           if (dev === damagedDev) {
@@ -243,6 +260,8 @@ for (const [ordinal, sample] of samples.entries()) {
       parts: aliases.partToOccurrences.size, unlinked:[...aliases.partToOccurrences.values()].filter((p) => p.length === 0).length,
       ambiguous:[...aliases.partToOccurrences.values()].filter((p) => p.length > 1).length,
       geometryLeaves:coldLeaves.length, glSidecars:sidecars.length, glbRestoredOccurrences:glbChecks,
+      theoreticalRecoverableOccurrences: theoreticalRecoverableOccurrences + rejectedTemplates.reduce((sum,r)=>sum+r.roots,0),
+      successfullySubmittedOccurrences:glbChecks, abnormalRejectedOccurrences:rejectedOccurrences, rejectedTemplates,
       corruptDevRawFallbackLeaves:fallbackChecks, statuses, visual:'not-executed' };
     results.push(summary);
     writeFileSync(join(root,'runtime-correctness-gate.json'),JSON.stringify(results,null,2));

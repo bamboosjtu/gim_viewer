@@ -116,17 +116,17 @@ pub async fn extract_gim_archive(
     // 的兼容调用保留旧的 inline payload 行为。
     // GIMPKGT 头部已经足以确定线路语义 pack；只额外读取 7 个字节，避免
     // 等待完整归档后才决定是否可以跳过数万次小文本文件 open。
-    let line_pack_enabled = if project_id.is_some() {
+    let (line_pack_enabled, substation_sources) = if project_id.is_some() {
         let mut magic = [0u8; 7];
         match std::fs::File::open(&authorized_path).and_then(|mut file| {
             use std::io::Read as _;
             file.read_exact(&mut magic)
         }) {
-            Ok(()) => magic == *b"GIMPKGT",
-            Err(_) => false,
+            Ok(()) => (magic == *b"GIMPKGT", magic == *b"GIMPKGS"),
+            Err(_) => (false, false),
         }
     } else {
-        false
+        (false, false)
     };
     let payload = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
         if let Some(pid) = project_id {
@@ -176,10 +176,10 @@ pub async fn extract_gim_archive(
                 // path 已由 extract_archive_reader + CacheStagingWriter 做过
                 // 同一套 Normal 组件校验；此处只拼接最终目录，不再次触发磁盘
                 // canonicalize/rename，避免数万条目重复路径解析。
-                // 只有变电 IFC 索引需要绝对 local_cache_path。线路 semantic
+                // 变电发布凭据需要全部已落盘来源的 cache_path。线路 semantic
                 // pack 条目通过 project_id + entry_path 读取，省去数万条
                 // 绝对路径字符串和不必要的 manifest 序列化成本。
-                let cache_path = if path.to_ascii_lowercase().ends_with(".ifc") {
+                let cache_path = if substation_sources || path.to_ascii_lowercase().ends_with(".ifc") {
                     Some(final_root.join(Path::new(&path)).to_string_lossy().to_string())
                 } else {
                     None

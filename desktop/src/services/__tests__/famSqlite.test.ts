@@ -38,5 +38,5 @@ it('retains every physical FAM row through production SQLite save/query/restore'
   expect(warm.index.entries.some((e) => e.entry_path === 'DEV/empty.fam')).toBe(true);
   expect(warm.index.fam_properties.some((p) => p.source_path === 'DEV/empty.fam')).toBe(false);
   expect(state.cachedFamSourceProperties.get('DEV/empty.fam')).toEqual([]);
-  expect(warm.version).toBe('gim-substation-parser-v25');
+  expect(warm.version).toBe('gim-substation-parser-v26');
 }, 180_000);
