@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 import type { AppState, SelectionRequest } from '../app/state.js';
 import { commitSelectionHighlight, HIGHLIGHT_STYLE } from './highlight.js';
+import type { IfcGeometryProvider, IfcPreviewObject } from './ifcGeometryProvider.js';
 
 export type OnElementSelected = (modelId: string, localId: number, request: SelectionRequest) => void;
 
@@ -11,6 +12,7 @@ export function setupSelection(
   ctx: ViewerContext, state: AppState, container: HTMLElement,
   onElementSelected: OnElementSelected,
   onSelectionCleared: (request: SelectionRequest) => void = () => {},
+  onPreviewSelected?: (provider: IfcGeometryProvider, object: IfcPreviewObject, request: SelectionRequest) => void,
 ): void {
   container.addEventListener('click', async (e: MouseEvent) => {
     if (!state.initialized) return;
@@ -19,11 +21,28 @@ export function setupSelection(
     const request=state.beginSelection({kind:'ifc-element',key:''});
     const guard=state.selectionGuard(request);
     try {
+      const previews: Array<{provider:IfcGeometryProvider;object:IfcPreviewObject;distance:number}>=[];
+      if(state.ifcPreviewProviders.size) {
+        const rect=(canvas || container).getBoundingClientRect();
+        if(rect.width>0 && rect.height>0) {
+          const ray=new THREE.Raycaster();
+          ray.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1),(ctx.world.camera as any).three);
+          for(const provider of state.ifcPreviewProviders.values()){const hit=provider.pick(ray);if(hit)previews.push({provider,...hit});}
+          previews.sort((a,b)=>a.distance-b.distance);
+        }
+      }
       const result=ctx.fragments.list.size===0 ? null : await ctx.fragments.raycast({
         camera:(ctx.world.camera as any).three,mouse:new THREE.Vector2(e.clientX,e.clientY),
         dom:canvas as HTMLCanvasElement || container,
       });
       if (!guard.isCurrent()) return;
+      const preview=previews[0];
+      if (preview && preview.provider.level!==2 && (!result || preview.distance < (result.rayDistance ?? result.distance))) {
+        request.target={kind:'ifc-object',key:preview.object.key};
+        onPreviewSelected?.(preview.provider,preview.object,request);
+        await commitSelectionHighlight(ctx,state,guard,()=>preview.provider.highlight(preview.object));
+        return;
+      }
       if (!result) {
         request.target=null;
         onSelectionCleared(request);

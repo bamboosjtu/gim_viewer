@@ -3,6 +3,7 @@ import { parseFamSectionsWithDiagnostics, resolveSubstationBusinessIdentity, typ
 import { discoverSubstationGlSidecars, substationDevIdentity, buildSubstationAliasIndex, buildSubstationIfcEvidence, findSubstationSourceDocuments } from '../gim/substationEvidence.js';
 import type { CbmNode } from '../gim/types.js';
 import type { AppState, SelectionRequest } from '../app/state.js';
+import type { IfcGeometryProvider, IfcPreviewObject, IfcPreviewProperties } from '../viewer/ifcGeometryProvider.js';
 import { setSelectionStatus } from './shell/statusBar.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { IfcSpatialNode, IfcSpatialObject, SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
@@ -203,6 +204,30 @@ export function renderInspectorTabs(titleHtml: string, buckets: InspectorBuckets
     ${pane('relations', buckets.relations, selectedTab === 'relations')}
     ${pane('source', buckets.source, selectedTab === 'source')}
   `;
+}
+
+/** Preview is a representation of the original IFC object, not a new semantic node. */
+export async function showIfcPreviewProperties(ctx:ViewerContext,state:AppState,provider:IfcGeometryProvider,
+  object:IfcPreviewObject,request:SelectionRequest,refine:()=>Promise<void>):Promise<void> {
+  const current=()=>state.isCurrentSelection(request) && provider.level!==2;
+  const render=(properties:IfcPreviewProperties|null,error='')=>{
+    if(!current())return;
+    openPropsDrawer(ctx);
+    setSelectionStatus(`${object.name || object.ifcType} · IFC 预览`);
+    const val=(v:unknown):string=>v!=null && typeof v==='object' ? JSON.stringify(v) : String(v??'');
+    const rows=properties ? Object.entries(properties.attributes).map(([key,value])=>[key,val(value)] as [string,string]) : [];
+    const sets=properties?.propertySets.map(set=>sectionHtml('IFC 属性集',[['原始属性',JSON.stringify(set)]],true)).join('')??'';
+    renderInspectorTabs(`<div class="props-header">${escHtml(object.name || object.ifcType)} · 预览</div>`,{
+      overview:sectionHtml('原 IFC 对象',[['GlobalId',object.globalId],['ExpressId',String(object.expressId)],['IFC 类型',object.ifcType],['表示',`LOD${provider.objectLOD(object)}`],['状态',state.selectionGeometry?.detail??'预览']])+'<button type="button" data-preview-refine>加载精细几何 LOD2</button>',
+      params:properties ? sectionHtml('IFC 原始属性',rows)+sets : `<div class="props-note">${escHtml(error || '正在读取 IFC 属性…')}</div>`,
+      relations:'<div class="props-note">沿用原 IFC 文件与 ExpressId；空间关系由现有空间语义图提供。</div>',
+      source:sectionHtml('来源',[['IFC 文件',object.sourcePath],['Provider',object.provider],['对象键',object.key],['近似边界','参数棱柱/OBB 预览，裁剪和精细细节未还原']]),
+    });
+    propsDrawerBody.querySelector('[data-preview-refine]')?.addEventListener('click',()=>{if(current())void refine();});
+  };
+  render(null);
+  try {const properties=await provider.getProperties(object.expressId);render(properties);}
+  catch(error){render(null,error instanceof Error?error.message:String(error));}
 }
 
 /** 渲染 FAM 分节属性为 HTML */

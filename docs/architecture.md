@@ -50,6 +50,22 @@ IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CB
 
 [Spatial snapshot 服务](../desktop/src/services/substationSpatialSemanticCache.ts) 校验源、域和版本后 hydrate Map。缺失、损坏或不匹配的快照在全部 IFC 尝试完成后重建。它不替代 IFC 几何，也不覆盖变电语义缓存。
 
+### 实验性 IFC Preview Provider（桌面变电）
+
+[`IfcGeometryProvider`](../desktop/src/viewer/ifcGeometryProvider.ts) 定义 `canProvide / loadLOD / release / findByGlobalId`，并提供拾取、属性与高亮接口。对象仍采用现有 `ifc:<logical modelId>:object:<ExpressId>` 身份，保留 GlobalId、ExpressId、IFC 类型和来源 Provider；GlobalId 查询返回候选集合。Provider 不生成新 CBM、空间语义节点或 DEV occurrence，不替代 Fragments Runtime。
+
+原型默认关闭。`localStorage.setItem('gim-debug-ifc-preview','1')` 后重新打开变电工程启用，删除该键后恢复完整几何路径；Fragments 开关和默认值独立。首个完整 IFC 仍先建立生产坐标锚点，后续文件在 metadata Worker 中读取单位、上下文和 LocalPlacement 链，先提交 LOD0，再提交 LOD1，自动完整加载与属性面板的“加载精细几何 LOD2”共用该文件的加载 Promise。
+
+| 级别 | 当前表示与边界 |
+|---|---|
+| LOD0 | 显式 IfcBoundingBox 或支持拉伸体的局部包围盒，保留放置方向；开孔等 subtractive feature 不生成正向代理 |
+| LOD1 | IfcExtrudedAreaSolid 的矩形/闭合折线轮廓棱柱；IfcBooleanClippingResult 递归取 FirstOperand，明确省略裁剪；凹轮廓采用 earcut 封口；无法提供棱柱的对象仍标 LOD0 |
+| LOD2 | 原 web-ifc + Fragments 完整加载，不新增精细渲染 Runtime，不跳过原 IFC |
+
+源坐标使用 IfcProject 长度单位、representation context、递归 LocalPlacement（含 Site 父链）及 solid/profile 放置；矩阵为列主序，先源放置、再单位缩放、再现有工程 source-to-viewer 锚点。metadata-derived 原点仅用于 Float32 精度，根矩阵抵消该平移。禁止使用研究 benchmark 的真值拟合 T；MapConversion、mapped/BRep 主体和其他未覆盖轮廓保留诊断，由 LOD2 处理，不推断空间含义。
+
+预览几何分批合并网格并保留三角面 → ExpressId 映射，高亮使用独立覆盖层。同一 SelectionRequest 沿用至精细表示；属性异步结果和精细高亮提交均检查最新选择/工程会话。精细模型可用后移除预览并释放 metadata Worker，按原 GlobalId 查询精细 LocalId；无唯一关联时保留原语义选择和未关联/歧义状态，不猜第一个对象。工程切换立即释放 Worker、网格和材质。预览不持久化，不改变现有缓存域版本。
+
 ## DEV 编译、模板与 occurrence
 
 [MOD 编排服务](../desktop/src/services/modAutoLoadService.ts) 从物理根建立独立 occurrence，模板身份使用规范化 DEV 路径；实例身份包括 CBM 物理根与装配/引用路径。PARTINDEX 和 DEV_SUBDEVICE 是语义投影，不生成第二套 seed。

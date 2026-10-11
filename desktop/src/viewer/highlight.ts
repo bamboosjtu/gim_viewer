@@ -114,6 +114,7 @@ export async function commitSelectionHighlight(
     }
     if (!guard.isCurrent()) return;
     resetModHighlight(state);
+    for (const provider of state.ifcPreviewProviders.values()) provider.clearHighlight();
     await apply?.();
   });
   highlightCommits.set(state,task);

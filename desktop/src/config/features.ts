@@ -6,6 +6,12 @@
  */
 const ENABLE_FRAGMENTS_CACHE_BASE = false;
 
+/** Desktop substation prototype only; independent of the Fragments cache policy. */
+export const IFC_PREVIEW_DEBUG_KEY = 'gim-debug-ifc-preview';
+export function isIfcPreviewEnabled(): boolean {
+  try { return localStorage.getItem(IFC_PREVIEW_DEBUG_KEY) === '1'; } catch { return false; }
+}
+
 /** Fragments 缓存灰度开关的 localStorage 覆盖键（设为 '1' 开启实测） */
 export const FRAGMENTS_CACHE_DEBUG_KEY = 'gim-debug-fragments-cache';
 

@@ -70,6 +70,9 @@ export async function getViewerRuntimeWithUI(
         const body=document.getElementById('props-drawer-body');
         if (body) body.innerHTML='<div class="props-empty">尚未选择对象</div>';
       }
+    },(provider,object,request)=>{
+      void syncSelectionNavigation(state,request);
+      void import('./ifcPreviewService.js').then(({selectIfcPreview})=>selectIfcPreview(ctx,state,provider,object,request));
     });
 
     // 构造模型生命周期回调（IFC 加载/卸载时同步更新 model-list UI）

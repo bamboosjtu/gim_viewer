@@ -13,7 +13,7 @@ import { renderFileDevPanel } from '../ui/fileDevView.js';
 import { emptyTipEl } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_GIM_CACHE, DEBUG_IFC_LOAD } from '../config/debug.js';
-import { isFragmentsCacheEnabled } from '../config/features.js';
+import { isFragmentsCacheEnabled, isIfcPreviewEnabled } from '../config/features.js';
 import { debugLog } from '../utils/logger.js';
 import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBar.js';
 import type { GimRuntimeOpenContext } from './gimOpenCore.js';
@@ -1028,21 +1028,20 @@ export async function loadAllIfcFiles(
           }, perfSession);
         }
         const ifcBytes: { value: Uint8Array | null } = { value: null };
-        await loadIfcEntry(
+        const readBytes = async (): Promise<Uint8Array|null> => {
+          if (readEnded) return ifcBytes.value;
+          ifcBytes.value = await getIfcBufferForEntry(entry, state, session);
+          if (!isCurrent()) return null;
+          endRead(undefined, {bytes:ifcBytes.value?.byteLength??0,source:state.currentFiles?'extracted':'disk-cache',found:ifcBytes.value!=null});
+          readEnded=true;
+          return ifcBytes.value;
+        };
+        let finePromise: Promise<void>|null=null;
+        const loadFine = (): Promise<void> => finePromise ??= loadIfcEntry(
           ctx,
           state,
           entry,
-          async () => {
-            ifcBytes.value = await getIfcBufferForEntry(entry, state, session);
-            if (!isCurrent()) return null;
-            endRead(undefined, {
-              bytes: ifcBytes.value?.byteLength ?? 0,
-              source: state.currentFiles ? 'extracted' : 'disk-cache',
-              found: ifcBytes.value != null,
-            });
-            readEnded = true;
-            return ifcBytes.value;
-          },
+          readBytes,
           (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
           {
             session,
@@ -1050,6 +1049,38 @@ export async function loadAllIfcFiles(
             onLoadSource: (source) => { loadSource.value = source; },
           },
         );
+        // Preserve the first complete IFC/DEV coordinate anchor contract. Preview
+        // is opt-in and only attaches later files after that production anchor exists.
+        let preview: import('../viewer/ifcGeometryProvider.js').IfcGeometryProvider|null=null;
+        if (state.currentProjectType==='substation' && isIfcPreviewEnabled() && state.projectSourceToViewerMatrix && !state.loadedModels.has(entry.modelId)) {
+          const endPreview=perfBegin(`变电 IFC Preview · ${entry.path}`,undefined,perfSession);
+          try {
+            const bytes=await readBytes();
+            if(!isCurrent())return;
+            if(bytes) {
+              const {IfcPreviewProvider}=await import('../viewer/ifcPreviewProvider.js');
+              if(!isCurrent())return;
+              preview=new IfcPreviewProvider({modelId:entry.modelId,sourcePath:entry.path,bytes,
+                wasm:{...ctx.ifcLoader.settings.wasm},sourceToViewer:state.projectSourceToViewerMatrix.clone(),
+                loadFine:async()=>{await loadFine();if(!state.loadedModels.has(entry.modelId))throw new Error('IFC fine model unavailable');}});
+              state.ifcPreviewProviders.set(entry.modelId,preview);
+              (ctx.world.scene as any).three.add(preview.root);
+              await preview.loadLOD(0);
+              if(!isCurrent())return;
+              perfMark('IFC Preview LOD0 ready',{path:entry.path,...preview.data?.diagnostics},perfSession);
+              await preview.loadLOD(1);
+              if(!isCurrent())return;
+              perfMark('IFC Preview LOD1 ready',{path:entry.path,...preview.data?.diagnostics},perfSession);
+            }
+            endPreview(undefined,{represented:preview?.data?.diagnostics.represented??0});
+          } catch(error) {
+            endPreview('（失败）',{error:error instanceof Error?error.message:String(error)});
+            preview?.release();state.ifcPreviewProviders.delete(entry.modelId);preview=null;
+            if(!isCurrent())return;
+            console.warn('[IFC Preview] unavailable; continuing original fine runtime',entry.path,error);
+          }
+        }
+        await loadFine();
         if (!isCurrent()) return;
         if (!readEnded) {
           // Fragments cache 命中时不会调用 getIfcBuffer；显式记录“未读取 IFC”。
@@ -1067,8 +1098,16 @@ export async function loadAllIfcFiles(
           cacheHit: loadSource.value === 'fragments-cache',
         });
         loadEnded = true;
+        // The preview's fine delegate survives in the provider map; release its raw input.
+        ifcBytes.value = null;
         const runtimeModelId = state.ifcRuntimeModelIds.get(entry.modelId) ?? entry.modelId;
         const usable = state.loadedModels.has(entry.modelId) && ctx.fragments.list.has(runtimeModelId);
+        if(usable && preview) {
+          const {finishIfcPreview}=await import('./ifcPreviewService.js');
+          await finishIfcPreview(ctx,state,preview,session);
+          if(!isCurrent())return;
+          perfMark('IFC Preview replaced by LOD2',{path:entry.path},perfSession);
+        }
         if (usable && !interactiveInitialized) {
           await initializeInteractiveAfterFirstIfc(entry, loadSource.value);
           if (!isCurrent()) return;
