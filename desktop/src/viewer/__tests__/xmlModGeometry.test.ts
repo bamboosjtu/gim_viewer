@@ -4,6 +4,7 @@ import {
   primitiveToGeometry,
   entityToMesh,
   collectBakedGeometriesByMaterial,
+  collectBakedGeometriesByMaterialAsync,
   xmlModDocumentToGroup,
   applyPhmColorOverride,
   disposeSharedXmlModGeometries,
@@ -625,6 +626,61 @@ describe('Boolean CSG（P3-1，three-bvh-csg）', () => {
       'MOD/bool.mod',
     );
   }
+
+  it('cooperative nested CSG preserves every vertex/index/color and lets input run before completion', async () => {
+    // The visible outer Boolean appears before its hidden operands, so its
+    // recursive chain must also cooperate; yielding only per visible entity
+    // would leave the entire chain in one task.
+    const doc = makeBoolDoc(`
+      <Entity ID="4" Visible="true"><Boolean Type="Union" Entity1="3" Entity2="2"/>
+        <Color R="12" G="34" B="56" A="100"/><TransformMatrix Value="${TM}"/></Entity>
+      <Entity ID="3" Visible="false"><Boolean Type="Difference" Entity1="1" Entity2="2"/></Entity>
+      <Entity ID="1" Visible="false"><Cuboid L="100" W="100" H="100"/></Entity>
+      <Entity ID="2" Visible="false"><Cuboid L="30" W="30" H="30"/></Entity>`);
+    const snapshot = (buckets: ReturnType<typeof collectBakedGeometriesByMaterial>) =>
+      [...buckets].map(([material, geometries]) => ({
+        color: material.color.toArray(), opacity: material.opacity,
+        geometries: geometries.map((geometry) => ({
+          index: Array.from(geometry.index?.array ?? []),
+          attributes: Object.fromEntries(Object.entries(geometry.attributes)
+            .map(([key, attribute]) => [key, Array.from(attribute.array)])),
+          groups: geometry.groups,
+        })),
+      }));
+    const expected = snapshot(collectBakedGeometriesByMaterial(doc));
+    const otherDoc = { ...doc, modPath: 'MOD/other-cooperative.mod', entities: doc.entities.map((entity) => ({
+      ...entity, primitive: entity.primitive.type === 'Cuboid'
+        ? { ...entity.primitive, l: entity.primitive.l + 20 }
+        : entity.primitive,
+    })) };
+    const otherExpected = snapshot(collectBakedGeometriesByMaterial(otherDoc));
+    expect(expected).toHaveLength(1);
+    expect(expected[0].geometries[0].attributes.position.length).toBeGreaterThan(0);
+    let elapsed = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => elapsed += 9);
+    const events: string[] = [];
+    const input = new Promise<void>((resolve) => setTimeout(() => {
+      events.push('input'); resolve();
+    }, 0));
+    try {
+      const result = await collectBakedGeometriesByMaterialAsync(doc);
+      events.push('geometry');
+      await input;
+      expect(events).toEqual(['input', 'geometry']);
+      expect(snapshot(result)).toEqual(expected);
+      expect(snapshot(await collectBakedGeometriesByMaterialAsync(doc))).toEqual(expected);
+      // Background compilation and an on-demand selection can interleave at
+      // these boundaries while sharing the synchronous Evaluator/cache.
+      const [first, other] = await Promise.all([
+        collectBakedGeometriesByMaterialAsync(doc),
+        collectBakedGeometriesByMaterialAsync(otherDoc),
+      ]);
+      expect(snapshot(first)).toEqual(expected);
+      expect(snapshot(other)).toEqual(otherExpected);
+    } finally {
+      clock.mockRestore();
+    }
+  });
 
   it('Difference：两立方体相减产出非空几何', () => {
     const doc = makeBoolDoc(

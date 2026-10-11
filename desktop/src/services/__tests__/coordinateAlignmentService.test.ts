@@ -4,8 +4,63 @@ import {
   makeTranslationAlignment,
   applyProjectSourceToViewer,
   loadManualCoordOffsetFromLocalStorage,
+  syncProjectSourceToViewerFromFragments,
 } from '../coordinateAlignmentService.js';
 import { AppState } from '../../app/state.js';
+import type { FragmentsManager } from '@thatopen/components';
+
+function pendingMatrix() {
+  let resolve!: (matrix: THREE.Matrix4) => void;
+  const promise = new Promise<THREE.Matrix4>(r => { resolve=r; });
+  const model = { getCoordinationMatrix: () => promise };
+  const manager = { baseCoordinationModel: 'first', baseCoordinationMatrix: new THREE.Matrix4(),
+    list: new Map([['first',model]]) };
+  return { resolve, manager, fragments: manager as unknown as FragmentsManager };
+}
+
+describe('first IFC coordination readiness', () => {
+  it('waits for the actual first model matrix despite the already-published ID and identity placeholder', async () => {
+    const state=new AppState(), {resolve,fragments}=pendingMatrix();
+    const session=state.activateProject(1,'same-source');
+    const pending=syncProjectSourceToViewerFromFragments(state,fragments,{session});
+    expect(state.projectSourceToViewerMatrix).toBeNull();
+    // New selections do not invalidate reusable project coordinates.
+    state.beginSelection({kind:'cbm',key:'B'});
+    const base=new THREE.Matrix4().makeTranslation(-17.75,-0.73,-0.025);
+    resolve(base);expect(await pending).toBe(true);
+    expect(state.projectSourceToViewerMatrix!.elements).toEqual(
+      base.clone().multiply(new THREE.Matrix4().makeRotationX(-Math.PI/2)).elements);
+    const placed=new THREE.Group();
+    placed.position.set(59.5,32.465,0.455);
+    applyProjectSourceToViewer(placed,state.projectSourceToViewerMatrix);
+    expect(placed.position.x).toBeCloseTo(41.75);
+    expect(placed.position.y).toBeCloseTo(-0.275);
+    expect(placed.position.z).toBeCloseTo(-32.49);
+  });
+
+  it('accepts a genuinely resolved identity matrix', async () => {
+    const state=new AppState(),{resolve,fragments}=pendingMatrix();
+    const pending=syncProjectSourceToViewerFromFragments(state,fragments);
+    resolve(new THREE.Matrix4());expect(await pending).toBe(true);
+    expect(state.projectSourceToViewerMatrix!.elements).toEqual(new THREE.Matrix4().makeRotationX(-Math.PI/2).elements);
+  });
+
+  it('does not submit coordinates after the project is replaced', async () => {
+    const state=new AppState(),{resolve,fragments}=pendingMatrix();
+    const session=state.activateProject(1,'A');
+    const pending=syncProjectSourceToViewerFromFragments(state,fragments,{session});
+    state.activateProject(2,'B');resolve(new THREE.Matrix4().makeTranslation(10,20,30));
+    expect(await pending).toBe(false);expect(state.projectSourceToViewerMatrix).toBeNull();
+  });
+
+  it('does not submit an old model matrix after Fragments ownership changes', async () => {
+    const state=new AppState(),{resolve,fragments,manager}=pendingMatrix();
+    const pending=syncProjectSourceToViewerFromFragments(state,fragments);
+    manager.baseCoordinationModel='replacement';
+    resolve(new THREE.Matrix4());expect(await pending).toBe(false);
+    expect(state.projectSourceToViewerMatrix).toBeNull();
+  });
+});
 
 // ===== makeTranslationAlignment =====
 

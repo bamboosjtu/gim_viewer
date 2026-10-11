@@ -555,6 +555,35 @@ export function xmlModDocumentToGroup(doc: XmlModDocument): THREE.Group {
 export function collectBakedGeometriesByMaterial(
   doc: XmlModDocument,
 ): Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]> {
+  const steps = bakeGeometrySteps(doc);
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
+}
+
+/** Keep exactly the synchronous operation order, yielding between completed
+ * operations (including recursive Boolean operands). A single CSG evaluation
+ * is still synchronous; this bounds chains, not the cost of an individual CSG.
+ */
+export async function collectBakedGeometriesByMaterialAsync(
+  doc: XmlModDocument,
+): Promise<Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>> {
+  const steps = bakeGeometrySteps(doc);
+  let sliceStarted = performance.now();
+  let step = steps.next();
+  while (!step.done) {
+    if (performance.now() - sliceStarted >= 8) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      sliceStarted = performance.now();
+    }
+    step = steps.next();
+  }
+  return step.value;
+}
+
+function* bakeGeometrySteps(
+  doc: XmlModDocument,
+): Generator<void, Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>, void> {
   const byMaterial = new Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>();
   if (doc.isEmpty) return byMaterial;
 
@@ -579,13 +608,14 @@ export function collectBakedGeometriesByMaterial(
         local.applyMatrix4(gimMatrixToMatrix4(entity.transformMatrix));
       }
       localGeoById.set(entity.id, local);
+      yield;
     }
   }
   const boolMemo = new Map<number, THREE.BufferGeometry | null>();
   const boolStack = new Set<number>();
 
   /** 求值 Boolean 实体（递归、防环）；操作数缺失返回 null */
-  function evalBoolean(id: number, prim: Extract<XmlModPrimitive, { type: 'Boolean' }>): THREE.BufferGeometry | null {
+  function* evalBoolean(id: number, prim: Extract<XmlModPrimitive, { type: 'Boolean' }>): Generator<void, THREE.BufferGeometry | null, void> {
     if (boolMemo.has(id)) return boolMemo.get(id) ?? null;
     if (boolStack.has(id)) {
       console.warn(`[xmlModGeometry] Boolean 循环引用（id=${id}），跳过`);
@@ -598,11 +628,11 @@ export function collectBakedGeometriesByMaterial(
       // 操作数若本身是 Boolean，先递归求值并回填索引
       if (!geoA) {
         const ref1 = doc.entities.find((e) => e.id === prim.entity1);
-        if (ref1?.primitive.type === 'Boolean') geoA = evalBoolean(ref1.id, ref1.primitive);
+        if (ref1?.primitive.type === 'Boolean') geoA = yield* evalBoolean(ref1.id, ref1.primitive);
       }
       if (!geoB) {
         const ref2 = doc.entities.find((e) => e.id === prim.entity2);
-        if (ref2?.primitive.type === 'Boolean') geoB = evalBoolean(ref2.id, ref2.primitive);
+        if (ref2?.primitive.type === 'Boolean') geoB = yield* evalBoolean(ref2.id, ref2.primitive);
       }
       if (!geoA || !geoB) {
         console.warn(`[xmlModGeometry] Boolean(id=${id}) 操作数缺失（e1=${prim.entity1}, e2=${prim.entity2}），跳过`);
@@ -614,6 +644,7 @@ export function collectBakedGeometriesByMaterial(
       const evaluator = getSharedCsgEvaluator();
       const result = evaluator.evaluate(new Brush(geoA), new Brush(geoB), op);
       boolMemo.set(id, result.geometry);
+      yield;
       return result.geometry;
     } finally {
       boolStack.delete(id);
@@ -627,7 +658,7 @@ export function collectBakedGeometriesByMaterial(
     if (entity.primitive.type === 'Boolean') {
       baseGeo =
         entity.primitive.type === 'Boolean'
-          ? evalBoolean(entity.id, entity.primitive)
+          ? yield* evalBoolean(entity.id, entity.primitive)
           : null;
     } else {
       baseGeo = primitiveToGeometry(entity.primitive, doc.modPath);
@@ -648,6 +679,7 @@ export function collectBakedGeometriesByMaterial(
     const arr = byMaterial.get(material) ?? [];
     arr.push(baked);
     byMaterial.set(material, arr);
+    yield;
   }
 
   return byMaterial;

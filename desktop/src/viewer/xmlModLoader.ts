@@ -21,7 +21,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { parseXmlMod } from '../gim/geometry/xmlModParser.js';
-import { applyPhmColorOverride, collectBakedGeometriesByMaterial, disposeOwnedXmlModMaterials } from './xmlModGeometry.js';
+import { applyPhmColorOverride, collectBakedGeometriesByMaterial, collectBakedGeometriesByMaterialAsync, disposeOwnedXmlModMaterials } from './xmlModGeometry.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import type { XmlModColor } from '../gim/geometry/ir.js';
 import { getFileByPath } from '../gim/fileLookup.js';
@@ -77,12 +77,14 @@ const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
  * @param doc parseXmlMod 返回的 XmlModDocument
  * @returns 合并后的 Group（按 Material 分组，每组一个 merged Mesh；顶点已含 entity.transform + mm→m）
  */
-function flattenDocumentToGroup(doc: XmlModDocument): THREE.Group {
+function flattenDocumentToGroup(
+  doc: XmlModDocument,
+  byMaterial = collectBakedGeometriesByMaterial(doc),
+): THREE.Group {
   const merged = new THREE.Group();
   merged.name = `xml-mod:${doc.modPath}`;
   merged.userData.modPath = doc.modPath;
 
-  const byMaterial = collectBakedGeometriesByMaterial(doc);
   const unsupportedPrimitiveTypeCounts: Record<string, number> = {};
   // Keep the current renderer's primitive policy, but expose its degradation
   // explicitly to cache/pipeline callers. A non-rendered primitive is not an
@@ -203,7 +205,10 @@ export async function loadXmlModFromFiles(
       applyPhmColorOverride(group, phmColor, phmColorMaxA);
       return group;
     }
-    return loadXmlModFromText(text, modPath, phmColor, phmColorMaxA);
+    const doc = parseXmlMod(text, modPath);
+    const group = flattenDocumentToGroup(doc, await collectBakedGeometriesByMaterialAsync(doc));
+    applyPhmColorOverride(group, phmColor, phmColorMaxA);
+    return group;
   } catch (err) {
     const kind = /\.gl$/i.test(modPath) ? 'GL' : 'MOD';
     const message = `${kind} 解析失败: ${modPath}`;

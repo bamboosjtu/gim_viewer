@@ -22,6 +22,15 @@
 
 ready 含义以 [架构](architecture.md#配置与加载状态) 为准。`allIfcReady` 和 `fullModelReady` 都须附加载失败、partial/unsupported 数；达到阶段不能解释为全源模型覆盖。
 
+原始 IFC 的百分比由当前 Fragments `IfcImporter` 按几何类别、属性、关系和序列化阶段报告，
+不是已读取字节或已完成构件的比例。某一类别的同步 `StreamMeshes` 返回前可能没有新的百分比；
+必须结合 Worker CPU、主线程 heartbeat、输入响应和最终文件状态区分计算长尾与界面阻塞。
+Worker 隔离同步转换不等于减少几何计算时间，也不保证后续 DEV 编译没有主线程长任务。
+
+桌面 MOD 文件加载在已完成的 primitive 烘焙和递归 Boolean 运算之间按时间片让出主线程；
+同步文本转换接口仍采用相同的运算顺序。单次 CSG 运算、合并和 GLB 序列化仍需分别测量，
+时间片预算不能解释为这些操作的最大耗时，也不能替代完整加载和持续响应验收。
+
 ## 样本与运行条件
 
 变电四包覆盖不同 IFC 布局、嵌套装配和 primitive；线路六包覆盖导出变体。

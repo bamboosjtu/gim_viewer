@@ -28,3 +28,16 @@ it('a missing nested identity stays unlinked despite other geometry under its ro
   const {tree,root,b}=await nestedPartFixture(2,true);
   expect(deviceOccurrenceScope(tree,b)).toEqual({rootOccurrence:root.path,assemblyPaths:[]});
 });
+
+it('an unlinked parent cannot borrow its child from an unrelated branch of the real root',async()=>{
+  const {tree,root,a,b}=await nestedPartFixture(0);
+  const aliases=buildSubstationAliasIndex(tree);
+  // B.dev really exists directly under root, but no A.dev assembly occurrence exists.
+  expect(aliases.partToSemanticParent.get(b.path)).toBe(a);
+  expect(root.children.some(n=>n.entityName==='DEV_SUBDEVICE' && n.devPath==='B.dev')).toBe(true);
+  expect(aliases.partToOccurrences.get(a.path)).toEqual([]);
+  expect(aliases.partToOccurrences.get(b.path)).toEqual([]);
+  expect(aliases.partToRoot.get(b.path)).toBe(root);
+  expect(resolveGeometryLoadNode(tree,b)).toBe(root);
+  expect(deviceOccurrenceScope(tree,b)).toEqual({rootOccurrence:root.path,assemblyPaths:[]});
+});

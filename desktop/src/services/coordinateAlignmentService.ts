@@ -124,8 +124,16 @@ export async function syncProjectSourceToViewerFromFragments(
   }
 
   if (!isCurrent()) return false;
-  const base = fragments.baseCoordinationMatrix;
-  if (!base) return false;
+  const baseModelId = fragments.baseCoordinationModel;
+  const baseModel = fragments.list.get(baseModelId);
+  if (!baseModel) return false;
+  // OBC 3.4.6 publishes baseCoordinationModel before awaiting this query.
+  // Its public baseCoordinationMatrix can still be the initial identity here,
+  // even with a non-empty model ID. Read the same first model's actual matrix;
+  // a resolved identity is valid and must not be confused with a placeholder.
+  const base = await baseModel.getCoordinationMatrix();
+  if (!isCurrent() || fragments.baseCoordinationModel !== baseModelId
+    || fragments.list.get(baseModelId) !== baseModel || state.projectSourceToViewerMatrix) return false;
 
   // 组合：baseCoordinationMatrix（Y-up 平移）× ZUpToYUp（Z-up→Y-up 旋转）
   // 应用顺序：先旋转 GIM 几何到 Y-up，再用 baseCoordinationMatrix 平移到 viewer 原点
