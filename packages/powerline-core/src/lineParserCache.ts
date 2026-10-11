@@ -52,7 +52,15 @@ export class LineParserTextCache {
   }
 
   /** 取得引用对应的实际原始路径（用于 payload/source_path）。 */
-  resolveOriginalPath(path: string): string | null {
+  resolveOriginalPath(path: string, sourcePath?: string): string | null {
+    // A bare reference first addresses a sibling of its source file. Keep global ambiguity
+    // rejection when no source context is supplied; never choose the first duplicate basename.
+    const ref = normalizeGimPath(path).replace(/^\.\//, '');
+    if (sourcePath && !ref.includes('/')) {
+      const folder = normalizeGimPath(sourcePath).split('/').slice(0, -1).join('/');
+      const sibling = this.filesByPath.get((folder ? `${folder}/${ref}` : ref).toLowerCase());
+      if (sibling) return sibling.path;
+    }
     const key = this.resolvePath(path);
     return key ? this.filesByPath.get(key)?.path ?? null : null;
   }

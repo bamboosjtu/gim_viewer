@@ -4,8 +4,9 @@ import { parseLineFam } from './lineFamParser.js';
 import { parseKeyValue } from './kvParser.js';
 import { parsePointLine, classifyLineMod } from './geometry/lineModParser.js';
 import type { GimGraphNode } from './gimGraphTypes.js';
+import { classifyCrossing, type CrossingClassification } from './crossingClassification.js';
 
-export const MOBILE_PARSER_VERSION = 'mobile-powerline-v2';
+export const MOBILE_PARSER_VERSION = 'mobile-powerline-v3';
 export const PREVIEW_VERSION = 'hnum-xz-v2';
 export type Coordinate = [number, number, number?]; // longitude, latitude, elevation
 export type ObjectKind = 'project' | 'line' | 'strain' | 'tower' | 'span' | 'cross';
@@ -17,6 +18,7 @@ export interface BusinessObject {
   lineIds: string[]; strainIds: string[]; relatedIds: string[]; height?: string; azimuth?: number;
   startTowerId?: string; endTowerId?: string; horizontalMeters?: number; spatialMeters?: number;
   rawWireIds?: string[]; wireCounts?: Record<string, number>; previewRef?: string;
+  crossing?: CrossingClassification; businessCode?: string;
 }
 export interface RawWire { id: string; sourcePath: string; start?: Coordinate; end?: Coordinate; startTowerId?: string; endTowerId?: string; type: string; jumper: boolean; sourceRefs: string[]; attributes: Attribute[] }
 export interface TreeNode { id: string; objectId: string; label: string; children: TreeNode[] }
@@ -56,8 +58,8 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
   const resolveNode = (ref: string) => nodeMap.get(pathKey(ref)) ?? (byName.get(pathKey(ref).split('/').pop()!)?.length === 1 ? byName.get(pathKey(ref).split('/').pop()!)![0] : undefined);
   const findings: Finding[] = [];
   const missing = new Set<string>();
-  const resolveFile = (ref: string): string | undefined => {
-    const path = cache.resolveOriginalPath(ref);
+  const resolveFile = (ref: string, sourcePath?: string): string | undefined => {
+    const path = cache.resolveOriginalPath(ref, sourcePath);
     if (!path && !missing.has(ref)) { missing.add(ref); findings.push({ severity: 'WARNING', code: 'missing-reference', message: '引用文件缺失或存在歧义', source: ref }); }
     return path ?? undefined;
   };
@@ -74,9 +76,9 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
     const mods: string[] = [];
     const attrs: Attribute[] = Object.entries(n.rawProps).map(([key, value]) => ({ label: key, key, value, source: n.path }));
     const visited = new Map<string, boolean>();
-    const follow = (ref: string, depth = 0, ownAttributes = true) => {
+    const follow = (ref: string, depth = 0, ownAttributes = true, sourcePath = n.path) => {
       if (depth > 32) return;
-      const actual = resolveFile(ref); if (!actual) return;
+      const actual = resolveFile(ref, sourcePath); if (!actual) return;
       const seen = visited.get(pathKey(actual)); if (seen === true || (seen === false && !ownAttributes)) return;
       visited.set(pathKey(actual), ownAttributes); refs.add(actual);
       if (/\.mod$/i.test(actual)) { mods.push(actual); return; }
@@ -91,7 +93,7 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
         // A bolt/insulator inside an assembly supplies source evidence, not tower properties.
         // Keep every referenced file, but project attributes only from the object's own DEV/FAM.
         if (ownAttributes && /\.dev$/i.test(actual)) attrs.push({ label: key, key, value, source: actual });
-        if (/^(BASEFAMILY|SOLIDMODEL\d+|SUBDEVICE\d+)$/.test(key) && /\.(fam|dev|phm|mod)$/i.test(value)) follow(value, depth + 1, ownAttributes && /\.dev$/i.test(actual) && key === 'BASEFAMILY');
+        if (/^(BASEFAMILY|SOLIDMODEL\d+|SUBDEVICE\d+)$/.test(key) && /\.(fam|dev|phm|mod)$/i.test(value)) follow(value, depth + 1, ownAttributes && /\.dev$/i.test(actual) && key === 'BASEFAMILY', actual);
       }
     };
     for (const ref of [...n.refs.famFiles, ...n.refs.devFiles, ...n.refs.phmFiles, ...n.refs.modFiles]) follow(ref);
@@ -201,7 +203,12 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
   }
   for (const n of nodes.filter(n => entity(n) === 'CROSS')) {
     const obj = make(n, 'cross'); inherit(obj, n); const ev = evidence(n);
-    obj.type = pick(ev.attrs, ['CROSSTYPE', 'CROSSINGTYPE', 'DEVICETYPE', 'TYPE', 'CODE']); obj.name = pick(ev.attrs, ['NAME', 'CROSSNAME', '名称']) ?? `跨越物 ${objects.filter(o => o.kind === 'cross').length}`;
+    const ownFamPaths = new Set(n.refs.famFiles.map(ref => cache.resolveOriginalPath(ref, n.path)).filter((p): p is string => !!p).map(pathKey));
+    obj.crossing = classifyCrossing(ev.attrs.filter(a => ownFamPaths.has(pathKey(a.source))));
+    obj.type = obj.crossing.label;
+    obj.businessCode = pick(ev.attrs, ['CODE']);
+    obj.name = obj.crossing.name ?? `${obj.crossing.label} ${objects.filter(o => o.kind === 'cross').length}`;
+    if (obj.crossing.status !== 'identified') findings.push({ severity: 'WARNING', code: `cross-type-${obj.crossing.status}`, message: obj.crossing.status === 'conflict' ? '跨越物 FAM 同时包含多个类型键族，保留冲突证据' : '跨越物 FAM 缺少可辨识的类型键族', source: n.path, objectId: obj.id });
     obj.coordinate = coordinateFromBlha(n.rawProps.BLHA);
     for (const mod of ev.mods) {
       const text = cache.getText(mod); if (!text || classifyLineMod(text) !== 'text-point-line') continue;
@@ -209,7 +216,7 @@ export function buildPowerlineProject(files: LineParserTextFile[], identity: Pro
         const data = parsePointLine(text, mod); const pts = data.points.filter(p => Number.isFinite(p.lon) && Number.isFinite(p.lat) && Math.abs(p.lon) <= 180 && Math.abs(p.lat) <= 90);
         obj.geometry = pts.map(p => [p.lon, p.lat, p.alt]);
         if (pts.length) obj.coordinate ??= [pts.reduce((s, p) => s + p.lon, 0) / pts.length, pts.reduce((s, p) => s + p.lat, 0) / pts.length];
-        obj.type ??= data.code;
+        obj.businessCode ??= data.code;
       } catch { findings.push({ severity: 'WARNING', code: 'cross-mod', message: '跨越物点线 MOD 无法投影，原始文件可查阅', source: mod, objectId: obj.id }); }
     }
     if (!obj.coordinate) findings.push({ severity: 'WARNING', code: 'cross-coordinate', message: '跨越物无可用位置', objectId: obj.id });

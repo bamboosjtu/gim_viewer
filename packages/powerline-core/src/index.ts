@@ -10,3 +10,4 @@ export * from './linePathNormalize.js';
 export { classifyLineMod, parseLineMod, parseHNumCommaRecord, parsePointLine } from './geometry/lineModParser.js';
 export * from './domain.js';
 export * from './preview.js';
+export * from './crossingClassification.js';

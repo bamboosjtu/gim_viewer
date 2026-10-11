@@ -1,7 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Channel } from '@tauri-apps/api/core';
-import type { PowerlineProject, ProjectIdentity, TowerPreview } from '@gim/powerline-core';
+import { MOBILE_PARSER_VERSION, type PowerlineProject, type ProjectIdentity, type TowerPreview } from '@gim/powerline-core';
 export interface ProjectMeta { id: string; name: string; sha256: string; size: number; importedAt: number; lastOpenedAt: number; parserVersion: string; counts: Record<string, number> }
 export interface Settings { tiandituKey: string; baseLayer: 'imagery' | 'vector' | 'terrain' | 'osm' | 'canvas' }
 export interface ImportProgress { stage: string; done?: number; total?: number | null }
@@ -24,7 +24,10 @@ export async function listProjects(): Promise<ProjectMeta[]> {
 export async function chooseNativeFile(onProgress: (p: ImportProgress) => void): Promise<{ path: string; name: string; sha256: string; size: number; copyMs: number }> { return invoke('plugin:gim-import|pick', { progress: new Channel<ImportProgress>(onProgress) }); }
 export async function discardImport(path: string): Promise<void> { if (native) await invoke("discard_import", { path }); }
 export async function prepareNative(input: Awaited<ReturnType<typeof chooseNativeFile>>): Promise<Prepared> { return invoke('prepare_project', { input }); }
-export async function loadCache(id: string): Promise<PowerlineProject | undefined> { return native ? (await invoke<PowerlineProject | null>('get_project_cache', { id })) ?? undefined : local('projects', id); }
+export async function loadCache(id: string): Promise<PowerlineProject | undefined> {
+  const project = native ? await invoke<PowerlineProject | null>('get_project_cache', { id }) : await local<PowerlineProject>('projects', id);
+  return project?.parserVersion === MOBILE_PARSER_VERSION ? project : undefined;
+}
 export async function readEntries(id: string): Promise<{ path: string; text: string }[]> { return native ? invoke('read_text_entries', { id }) : (await local<{ path: string; text: string }[]>('sources', id)) ?? []; }
 export async function commit(project: PowerlineProject): Promise<void> { if (native) return invoke('commit_project', { id: project.id, payloadJson: JSON.stringify(project) }); await local('projects', project.id, project); }
 export async function readSource(id: string, path: string): Promise<string> { if (native) return invoke('read_source', { id, path }); return (await readEntries(id)).find(f => f.path.toLowerCase() === path.toLowerCase())?.text ?? ''; }

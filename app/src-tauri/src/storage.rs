@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, io::Read, path::{Path, PathBuf}, sync::atomic::{AtomicBool, Ordering}, time::{SystemTime, UNIX_EPOCH}};
 
-pub const PARSER: &str = "mobile-powerline-v2";
+pub const PARSER: &str = "mobile-powerline-v3";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMeta { pub id: String, pub name: String, pub sha256: String, pub size: u64, pub imported_at: u64, pub last_opened_at: u64, pub parser_version: String, pub counts: serde_json::Value }
@@ -254,6 +254,14 @@ mod tests {
         let bad = serde_json::json!({"id":id,"sourceSha256":"wrong","sourceSize":7,"parserVersion":PARSER}); assert!(commit(&root, &id, bad).is_err()); assert!(cached(&root, &id).unwrap().is_none());
         let good = test_payload(&id, 7, "saved"); commit(&root, &id, good.clone()).unwrap(); assert_eq!(cached(&root, &id).unwrap(), Some(good.clone()));
         assert_eq!(serde_json::from_str::<serde_json::Value>(&cached_json(&root,&id).unwrap().unwrap()).unwrap(),good);
+        // A prior semantic contract must rebuild from the existing private source, not require reimport.
+        let mut old = good.clone(); old["parserVersion"] = serde_json::json!("mobile-powerline-v2");
+        let db = database(&root, &id).unwrap();
+        db.execute("DELETE FROM semantics", []).unwrap();
+        db.execute("INSERT INTO semantics(parser,json) VALUES(?1,?2)", params!["mobile-powerline-v2", old.to_string()]).unwrap(); drop(db);
+        assert!(cached_json(&root,&id).unwrap().is_none());
+        assert_eq!(fs::read(p.join("source/original.gim")).unwrap(), bytes);
+        commit(&root, &id, good.clone()).unwrap(); assert_eq!(cached(&root, &id).unwrap(), Some(good));
         fs::write(p.join("source/original.gim"), b"GIMPKGS").unwrap();
         assert!(cached_json(&root,&id).unwrap_err().contains("类型")); assert!(text_entries(&root,&id).is_err());
         fs::write(p.join("source/original.gim"), b"GIMPKGTchanged").unwrap();

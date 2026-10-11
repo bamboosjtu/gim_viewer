@@ -22,6 +22,7 @@ import type {
 import type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
 import { getFileNameLower, normalizeGimPath } from '../gim/linePathNormalize.js';
 import type { SearchItem } from './searchBox.js';
+import { classifyCrossing } from '../gim/crossingClassification.js';
 
 export type LineNavigationKind =
   | 'project'
@@ -56,7 +57,7 @@ export interface LineSpanProjection {
 export interface LineCrossProjection {
   marker: CrossMarker;
   node: GimGraphNode;
-  /** 名称优先来自 CROSS 子节点 FAM，其次为 CODE 辅助标签。 */
+  /** 类型来自各 CROSS 子节点的 FAM 键族，CODE 仅保留为来源证据。 */
   title: string;
   subtitle: string;
   typeLabel: string;
@@ -179,13 +180,6 @@ const WIRE_LABELS: Record<string, string> = {
   UNKNOWN: '未知导线',
 };
 
-const CROSS_CODE_LABELS: Record<string, string> = {
-  '201': '房屋',
-  '191': '河流/水域',
-  '1019': '树木',
-  '523': '地下通信电缆',
-};
-
 const PLACEHOLDER_RE = /^(?:-|\$|NULL\d*|其它|其他|&其他|无|未命名)$/i;
 
 /**
@@ -226,8 +220,9 @@ export function buildLineNavigationIndex(
   for (const span of spanRecords) spanByKey.set(span.key, span);
   const spanIndexes = buildSpanRecordIndexes(spanRecords);
 
+  const crossFamResolver = buildCrossFamResolver(options.attrs);
   const crossProjections = mapData.crosses.map((marker) =>
-    buildCrossProjection(marker, options.attrs),
+    buildCrossProjection(marker, crossFamResolver),
   );
   // 以每个 F3 的真实来源关系归集塔位、档距和跨越物。F3 的 WIRE 端点可能指向前一段
   // 的塔，因此 spanRecord 的端点塔会补入 towerPaths。
@@ -887,20 +882,29 @@ function buildSpanRecords(
   return Array.from(records.values());
 }
 
-function buildCrossProjection(marker: CrossMarker, attrs?: LineAttributeIndex): LineCrossProjection {
+function buildCrossFamResolver(attrs?: LineAttributeIndex) {
+  const byPath = new Map([...(attrs?.famBySourcePath ?? [])].map(([path, rows]) => [normalizeGimPath(path).toLowerCase(), rows]));
+  const byName = new Map<string, string[]>();
+  for (const path of byPath.keys()) { const name = getFileNameLower(path); const paths = byName.get(name) ?? []; paths.push(path); byName.set(name, paths); }
+  return (node: GimGraphNode) => node.refs.famFiles.flatMap(ref => {
+    const path = normalizeGimPath(ref).toLowerCase();
+    const folder = normalizeGimPath(node.path).split('/').slice(0, -1).join('/').toLowerCase();
+    const sibling = !path.includes('/') ? byPath.get(`${folder}/${path}`) : undefined;
+    const candidates = byName.get(getFileNameLower(path));
+    const rows = sibling ?? byPath.get(path) ?? (candidates?.length === 1 ? byPath.get(candidates[0]) : undefined);
+    return [...(rows ?? [])].flatMap(([key, records]) => records.map(row => ({ key, label: row.display_key, value: row.prop_value, source: row.source_path })));
+  });
+}
+
+function buildCrossProjection(marker: CrossMarker, resolveFam: ReturnType<typeof buildCrossFamResolver>): LineCrossProjection {
   const node = marker.nodeRef;
   const sourceNodes = collectDescendants(node, (child) => child.entityName === 'CROSS');
   const codes = uniqueStrings(sourceNodes.map((child) => child.rawProps['CODE']).filter(Boolean));
-  const names = uniqueStrings(sourceNodes.flatMap((child) => {
-    const propMap = lookupFamMap(child.refs.famFiles, attrs);
-    return [
-      firstProp(propMap, ['NAME', 'CROSSNAME', 'HOUSETYPE', 'TREETYPE', 'WIRETYPE']),
-    ].filter((value): value is string => Boolean(value && !PLACEHOLDER_RE.test(value)));
-  }));
-  const codeLabels = codes.map((code) => CROSS_CODE_LABELS[code] || `代码 ${code}`);
-  const typeLabel = uniqueStrings([...names, ...codeLabels]).join('/') || '其他跨越物';
+  const classifications = sourceNodes.map(child => classifyCrossing(resolveFam(child)));
+  const names = uniqueStrings(classifications.flatMap(c => c.name ? [c.name] : []));
+  const typeLabel = uniqueStrings(classifications.map(c => c.label)).join('/') || '未分类跨越物';
   const position = marker.lat != null && marker.lng != null ? '可定位' : '无法定位';
-  const title = `跨越物 · ${typeLabel}`;
+  const title = `跨越物 · ${typeLabel}${names.length ? ' · ' + names.join('/') : ''}`;
   const subtitle = `${position}${sourceNodes.length > 1 ? ` · ${sourceNodes.length} 个来源对象` : ''}`;
   return { marker, node, title, subtitle, typeLabel, codes, sourceNodes };
 }
@@ -1504,7 +1508,7 @@ function normalizeTowerNumber(value: string | undefined): string | undefined {
 function lookupFamMap(
   refs: string[],
   attrs?: LineAttributeIndex,
-): Map<string, { prop_value?: string | null }[]> | undefined {
+): Map<string, { prop_value?: string | null; display_key?: string | null; source_path?: string }[]> | undefined {
   if (!attrs) return undefined;
   for (const ref of refs) {
     const normalized = normalizeGimPath(ref);

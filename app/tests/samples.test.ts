@@ -9,6 +9,11 @@ const expected = [
   { tower: 40, cross: 152 }, { tower: 129, cross: 414 }, { tower: 111, cross: 772 },
   { tower: 6, cross: 16 }, { tower: 49, cross: 798 }, { tower: 14, cross: 7 },
 ];
+const crossFamilies = [
+  {powerline:119,road:4,building:29}, {tree:290,building:76,powerline:48},
+  {railway:1,tree:221,building:430,powerline:116,road:4}, {building:8,powerline:4,tree:4},
+  {building:412,river:216,powerline:98,tree:69,'underground-communication-cable':3}, {tree:2,building:2,powerline:3},
+];
 describe('six source package mobile contracts (required, never skipped)', () => {
   for (let i = 1; i <= 6; i++) it(`line0${i} has complete unique objects, sources, tree and cache equivalence`, () => {
     const sid = `line0${i}`;
@@ -23,6 +28,15 @@ describe('six source package mobile contracts (required, never skipped)', () => 
     const treeIds = new Set<string>(); const walk = (n: TreeNode) => { expect(ids.has(n.objectId)).toBe(true); treeIds.add(n.objectId); n.children.forEach(walk); }; walk(project.tree);
     expect(treeIds.size).toBe(ids.size);
     expect(project.counts.tower).toBe(expected[i - 1].tower); expect(project.counts.cross).toBe(expected[i - 1].cross);
+    const crosses = project.objects.filter(o => o.kind === 'cross');
+    const crossCounts: Record<string,number> = {};
+    for (const cross of crosses) {
+      expect(cross.crossing?.status, cross.sourcePath).toBe('identified');
+      const kind = cross.crossing!.kind; crossCounts[kind] = (crossCounts[kind] ?? 0) + 1;
+      expect(cross.crossing!.evidence.every(a => /\.fam$/i.test(a.source ?? ''))).toBe(true);
+    }
+    expect(crossCounts).toEqual(crossFamilies[i - 1]);
+    if (i === 3) expect(crosses.find(o=>o.crossing?.kind === 'railway')!.crossing!.evidence.some(a=>a.key==='接触网高'&&a.value==='')).toBe(true);
     expect(project.objects.filter(o => o.kind === 'tower' && o.coordinate).length).toBe(project.counts.tower);
     const rawIds = new Set<string>(); for (const span of project.objects.filter(o => o.kind === 'span')) { for (const id of span.rawWireIds ?? []) { expect(rawIds.has(id)).toBe(false); rawIds.add(id); expect(project.rawWires.find(w => w.id === id)?.jumper).toBe(false); } }
     expect(rawIds.size).toBe(project.rawWires.filter(w => !w.jumper).length);
