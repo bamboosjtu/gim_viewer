@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { IfcGeometryProvider, IfcLOD, IfcPreviewData, IfcPreviewObject, IfcPreviewProperties, IfcPreviewShape } from './ifcGeometryProvider.js';
+import type { IfcGeometryProvider, IfcLOD, IfcPreviewData, IfcPreviewFineState, IfcPreviewObject, IfcPreviewProperties, IfcPreviewShape } from './ifcGeometryProvider.js';
 
 /** Parameterized prisms, with earcut caps (including concave profiles). */
 export function previewShapeGeometry(shape: IfcPreviewShape, level: 0|1, origin: number[]): THREE.BufferGeometry {
@@ -34,16 +34,26 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
   private sequence=0;
   private released=false;
   private fineTask: Promise<void>|null=null;
+  private _fineState:IfcPreviewFineState|null=null;
+  private fineListeners=new Set<(state:IfcPreviewFineState)=>void>();
   private loads=new Map<IfcLOD,Promise<void>>();
   private byGuid=new Map<string,IfcPreviewObject[]>();
   private byId=new Map<number,IfcPreviewObject>();
   private overlay: THREE.Mesh|null=null;
   private selected: IfcPreviewObject|null=null;
   private readonly material=new THREE.MeshStandardMaterial({color:0x849aaf,roughness:.8,side:THREE.DoubleSide});
-  private readonly opened: Promise<IfcPreviewData>;
+  // Resolve readiness only: a fulfilled Promise must not retain the metadata
+  // after releaseMetadata clears the provider's explicit owner.
+  private readonly opened: Promise<void>;
+  private propertyWorkers = new Map<Worker, (error: Error) => void>();
+  private readonly wasmConfig:{path:string;absolute:boolean};
   constructor(options: {modelId:string;sourcePath:string;bytes:Uint8Array;wasm:{path:string;absolute:boolean};
-    sourceToViewer:THREE.Matrix4;loadFine:()=>Promise<void>;worker?:Worker}) {
+    sourceToViewer:THREE.Matrix4;loadFine:()=>Promise<void>;cancelFine?:()=>boolean;
+    loadPropertiesBytes?:()=>Promise<Uint8Array|null>;releaseMetadataAfterPreview?:boolean;transferInput?:boolean;
+    onResource?: (event:{state:'metadata-open'|'metadata-released'|'property-worker-open'|'property-worker-released';wasmHeapBytes?:number;rawBytes?:number})=>void;
+    worker?:Worker}) {
     this.modelId=options.modelId;
+    this.wasmConfig=options.wasm;
     this.worker=options.worker ?? new Worker(new URL('./ifcPreviewWorker.ts',import.meta.url),{type:'module'});
     this.root.name=`IFC Preview · ${options.sourcePath}`;
     this.root.userData={provider:'ifc-preview',modelId:this.modelId,sourcePath:options.sourcePath};
@@ -53,7 +63,9 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
       if(event.data.error)p.reject(new Error(event.data.error));else p.resolve(event.data.data);
     };
     this.worker.onerror=(event)=>{this.stopWorker(new Error(event.message || 'Preview worker failed'));};
-    const owned=new Uint8Array(options.bytes);
+    const exact=options.bytes.byteOffset===0&&options.bytes.byteLength===options.bytes.buffer.byteLength;
+    const owned=options.transferInput&&exact?options.bytes:new Uint8Array(options.bytes);
+    const inputBytes=owned.byteLength;
     this.opened=this.send({type:'open',modelId:options.modelId,sourcePath:options.sourcePath,bytes:owned,wasm:options.wasm},[owned.buffer]).then(data=>{
       if(this.released)throw new Error('Preview released');
       this.data=data;
@@ -63,28 +75,60 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
         this.byId.set(s.object.expressId,s.object);
         const candidates=this.byGuid.get(s.object.globalId) ?? [];candidates.push(s.object);this.byGuid.set(s.object.globalId,candidates);
       }
-      return data;
+      options.onResource?.({state:'metadata-open',wasmHeapBytes:data.wasmHeapBytes,rawBytes:inputBytes});
     });
     this.loadFine=options.loadFine;
+    this.cancelFine=options.cancelFine??null;
+    this.loadPropertiesBytes=options.loadPropertiesBytes??null;
+    this.releaseMetadataAfterPreview=options.releaseMetadataAfterPreview??false;
+    this.onResource=options.onResource;
   }
   private readonly loadFine:()=>Promise<void>;
+  private readonly cancelFine:(()=>boolean)|null;
+  private readonly loadPropertiesBytes:(()=>Promise<Uint8Array|null>)|null;
+  private readonly releaseMetadataAfterPreview:boolean;
+  private readonly onResource:((event:{state:'metadata-open'|'metadata-released'|'property-worker-open'|'property-worker-released';wasmHeapBytes?:number;rawBytes?:number})=>void)|undefined;
+  get fineState():IfcPreviewFineState|null{return this._fineState;}
+  private setFineState(value:IfcPreviewFineState):void {this._fineState=value;for(const listener of this.fineListeners)listener(value);}
+  subscribeFineState(listener:(state:IfcPreviewFineState)=>void):()=>void {this.fineListeners.add(listener);return()=>this.fineListeners.delete(listener);}
+  cancelFineRequest():boolean {return this.cancelFine?.()??false;}
+  setFineDeferred():void {if(this.level===1&&this._fineState!=='fineLoading'&&this._fineState!=='fineReady')this.setFineState('fineDeferred');}
+  releaseMetadata():void {this.stopWorker(new Error('Preview metadata released'));this.stopPropertyWorkers();this.data=null;this.byId.clear();this.byGuid.clear();this.onResource?.({state:'metadata-released'});}
   private unavailable():boolean {return this.released || this.level===2;}
   private send(message: Record<string,unknown>,transfer: Transferable[]=[]):Promise<any> {
     if(!this.worker)return Promise.reject(new Error('Preview metadata released'));
     const id=++this.sequence;
     return new Promise((resolve,reject)=>{this.pending.set(id,{resolve,reject});this.worker!.postMessage({...message,id},transfer);});
   }
+  private releasePreviewWorker():void {
+    if(!this.worker)return;
+    this.stopWorker(new Error('Preview metadata model released after LOD1'));
+    this.onResource?.({state:'metadata-released',wasmHeapBytes:this.data?.wasmHeapBytes});
+  }
   canProvide(level: IfcLOD):boolean { return !this.released && (level===2 || (this.level!==2 && !!this.data?.shapes.some(s=>level===0||s.profile))); }
   loadLOD(level:IfcLOD):Promise<void> {
     if(this.released)return Promise.reject(new Error('Preview released'));
-    if(level===2) return this.fineTask ??= this.loadFine().then(()=>{if(!this.released)this.retire();}).catch(error=>{this.fineTask=null;throw error;});
+    if(level===2) {
+      if(this._fineState==='fineReady')return Promise.resolve();
+      if(this.fineTask)return this.fineTask;
+      this.setFineState('fineLoading');
+      const task=this.loadFine().then(()=>{
+        if(!this.released){this.setFineState('fineReady');this.retire();}
+      }).catch(error=>{
+        this.fineTask=null;
+        if(!this.released)this.setFineState((error as Error)?.name==='AbortError'?'fineDeferred':'fineFailed');
+        throw error;
+      });
+      this.fineTask=task;return task;
+    }
     if(this.level===2)return Promise.resolve();
     const existing=this.loads.get(level);if(existing)return existing;
-    const task=this.build(level);this.loads.set(level,task);return task;
+    const task=this.build(level).then(()=>{if(level===1&&this.level===1){this.setFineState('previewReady');if(this.releaseMetadataAfterPreview)this.releasePreviewWorker();}});this.loads.set(level,task);return task;
   }
   private async build(level:0|1):Promise<void> {
-    const data=await this.opened;
-    if(this.unavailable())return;
+    await this.opened;
+    const data=this.data;
+    if(this.unavailable()||!data)return;
     const temporary=new THREE.Group();
     // Box and Body are alternative representations. Keep all supported body items,
     // use explicit IFC boxes for LOD0 or when a product has no supported prism.
@@ -117,7 +161,27 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
   }
   findByGlobalId(guid:string):IfcPreviewObject[]{return [...this.byGuid.get(guid)??[]];}
   objectLOD(object:IfcPreviewObject):IfcLOD {return this.level===2?2:this.level===1&&this.data?.shapes.some(s=>s.object.expressId===object.expressId&&s.profile)?1:0;}
-  getProperties(expressId:number):Promise<IfcPreviewProperties>{return this.send({type:'properties',expressId});}
+  async getProperties(expressId:number):Promise<IfcPreviewProperties>{
+    if(this.unavailable())throw new Error('Preview released');
+    if(this.worker)return this.send({type:'properties',expressId});
+    if(!this.loadPropertiesBytes)throw new Error('Preview metadata released');
+    const bytes=await this.loadPropertiesBytes();if(!bytes)throw new Error('IFC property source unavailable');
+    if(this.unavailable())throw new Error('Preview released');
+    const worker=new Worker(new URL('./ifcPreviewWorker.ts',import.meta.url),{type:'module'});
+    const rawBytes=bytes.byteLength;
+    const view=bytes.byteOffset===0&&bytes.byteLength===bytes.buffer.byteLength?bytes:new Uint8Array(bytes);
+    const id=1;
+    try {
+      const response=await new Promise<any>((resolve,reject)=>{
+        this.propertyWorkers.set(worker,reject);
+        worker.onmessage=e=>e.data.id===id&&(e.data.error?reject(new Error(e.data.error)):resolve(e.data));
+        worker.onerror=e=>reject(new Error(e.message||'IFC property worker failed'));
+        worker.postMessage({id,type:'properties-once',bytes:view,expressId,wasm:this.wasmConfig},[view.buffer]);
+      });
+      this.onResource?.({state:'property-worker-open',wasmHeapBytes:response.wasmHeapBytes,rawBytes});
+      return response.data;
+    } finally {if(this.propertyWorkers.delete(worker))worker.terminate();this.onResource?.({state:'property-worker-released'});}
+  }
   pick(raycaster:THREE.Raycaster):{object:IfcPreviewObject;distance:number}|null {
     if(this.released||this.level===2||!this.root.visible)return null;
     this.root.updateMatrixWorld(true);
@@ -143,6 +207,7 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
   clearHighlight():void {this.selected=null;if(this.overlay){this.root.remove(this.overlay);this.overlay.geometry.dispose();(this.overlay.material as THREE.Material).dispose();this.overlay=null;}}
   private clearGeometry():void {this.clearHighlight();for(const mesh of [...this.root.children] as THREE.Mesh[]){this.root.remove(mesh);mesh.geometry?.dispose();}}
   private stopWorker(error:Error):void {this.worker?.terminate();this.worker=null;for(const p of this.pending.values())p.reject(error);this.pending.clear();}
-  retire():void {this.clearGeometry();this.level=2;this.root.removeFromParent();this.stopWorker(new Error('Fine geometry available'));}
-  release():void {if(this.released)return;this.released=true;this.retire();this.material.dispose();this.data=null;this.byId.clear();this.byGuid.clear();}
+  private stopPropertyWorkers():void {for(const [worker,reject] of this.propertyWorkers){worker.terminate();reject(new Error('Preview released'));}this.propertyWorkers.clear();}
+  retire():void {this.clearGeometry();this.level=2;this.root.removeFromParent();this.stopWorker(new Error('Fine geometry available'));this.stopPropertyWorkers();}
+  release():void {if(this.released)return;this.released=true;this.cancelFine?.();this.retire();this.material.dispose();this.releaseMetadata();this.fineListeners.clear();}
 }

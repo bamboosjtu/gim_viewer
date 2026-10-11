@@ -105,4 +105,63 @@ describe('SubstationBackgroundCoordinator', () => {
     expect(states).toContain('remainingIfc:completed');
     current = false;
   });
+
+  it('opens preview-gated work without claiming all IFC fine models are ready', async () => {
+    let current = true;
+    const order: string[] = [];
+    const coordinator = new SubstationBackgroundCoordinator({
+      session: { id: 4 }, isCurrent: () => current,
+    });
+    coordinator.enqueue({ task: 'devGeometry', priority: 2, heavy: true,
+      startAfter: 'allIfcPreviewsReady', run: async () => { order.push('dev'); } });
+    coordinator.enqueue({ task: 'spatialSemanticRebuild', priority: 1, heavy: true,
+      startAfter: 'allIfcReady', run: async () => { order.push('fine-ready-only'); } });
+    coordinator.markInteractive();
+    coordinator.markAllIfcPreviewsReady();
+    await tick(); await tick();
+    expect(order).toEqual(['dev']);
+    coordinator.markAllIfcReady();
+    await tick(); await tick();
+    expect(order).toEqual(['dev', 'fine-ready-only']);
+    current = false;
+  });
+
+  it('deduplicates a selected fine request and lets it run before queued background work', async () => {
+    let current = true;
+    const order: string[] = [];
+    const coordinator = new SubstationBackgroundCoordinator({ session: { id: 5 }, isCurrent: () => current });
+    coordinator.enqueue({ task: 'devGeometry', priority: 0, heavy: true,
+      startAfter: 'allIfcPreviewsReady', run: async () => { order.push('ordinary'); } });
+    coordinator.markInteractive();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const first = coordinator.enqueueUserIfcFine('selected-A', async () => { order.push('selected'); await held; });
+    const duplicate = coordinator.enqueueUserIfcFine('selected-A', async () => { order.push('duplicate'); });
+    expect(duplicate.promise).toBe(first.promise);
+    coordinator.markAllIfcPreviewsReady();
+    await tick();
+    expect(order).toEqual(['selected']);
+    release();
+    await first.promise;
+    await tick(); await tick();
+    expect(order).toEqual(['selected', 'ordinary']);
+    current = false;
+  });
+
+  it('cancels a selected fine request only while it is queued', async () => {
+    let current = true;
+    const coordinator = new SubstationBackgroundCoordinator({ session: { id: 6 }, isCurrent: () => current });
+    coordinator.markInteractive();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const active = coordinator.enqueueUserIfcFine('active', () => held);
+    await tick();
+    const queued = coordinator.enqueueUserIfcFine('queued', async () => { throw new Error('must not run'); });
+    const observed = queued.promise.catch((error: Error) => error.name);
+    expect(queued.cancel()).toBe(true);
+    await expect(observed).resolves.toBe('AbortError');
+    expect(active.cancel()).toBe(false);
+    release(); await active.promise;
+    current = false;
+  });
 });

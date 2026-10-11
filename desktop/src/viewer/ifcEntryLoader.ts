@@ -109,6 +109,8 @@ export async function loadIfcEntry(
     perfSessionId?: number;
     /** 加载来源确定后回调一次；调用方可记录 cache hit/miss。 */
     onLoadSource?: (source: IfcLoadSource) => void;
+    /** Transfer the one-shot raw IFC buffer to the conversion worker. */
+    transferInput?: boolean;
   } = {},
 ): Promise<void> {
   const { modelId, name, path: entryPath } = entry;
@@ -197,7 +199,8 @@ export async function loadIfcEntry(
   let webIfcLoadFailed = false;
   let model: any;
   try {
-    model = await loadRawIfc(ctx, state, session, ifcBuffer, runtimeModelId, entryPath || name, reportProgress, perfSessionId);
+    model = await loadRawIfc(ctx, state, session, ifcBuffer, runtimeModelId, entryPath || name, reportProgress, perfSessionId,
+      { transferInput: options.transferInput });
   } catch (err) {
     webIfcLoadFailed = true;
     throw err;

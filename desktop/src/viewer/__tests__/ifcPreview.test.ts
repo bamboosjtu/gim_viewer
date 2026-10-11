@@ -29,12 +29,15 @@ function data():IfcPreviewData {const f=fixture();return inspectIfcPreview(f.api
 class WorkerStub {
   onmessage:((event:any)=>void)|null=null;onerror:((event:any)=>void)|null=null;
   terminate=vi.fn();
-  postMessage(input:any){if(input.type==='open')queueMicrotask(()=>this.onmessage?.({data:{id:input.id,data:data()}}));}
+  postMessage(input:any){
+    if(input.type==='open')queueMicrotask(()=>this.onmessage?.({data:{id:input.id,data:data()}}));
+    if(input.type==='properties-once')queueMicrotask(()=>this.onmessage?.({data:{id:input.id,data:{attributes:{Name:{value:'A'}},propertySets:[]},wasmHeapBytes:4096}}));
+  }
 }
-function provider(loadFine=async()=>{}) {
+function provider(loadFine=async()=>{},extra:Record<string,unknown>={}) {
   const worker=new WorkerStub();
   const p=new IfcPreviewProvider({modelId:'ifc_fixture',sourcePath:'CBM/model.ifc',bytes:new Uint8Array([1]),wasm:{path:'/',absolute:true},
-    sourceToViewer:new THREE.Matrix4().makeRotationX(-Math.PI/2),loadFine,worker:worker as unknown as Worker});
+    sourceToViewer:new THREE.Matrix4().makeRotationX(-Math.PI/2),loadFine,worker:worker as unknown as Worker,...extra});
   return {p,worker};
 }
 describe('IFC preview source coordinates and representation identity',()=>{
@@ -98,5 +101,70 @@ describe('IFC preview source coordinates and representation identity',()=>{
   it('fine completion removes preview without losing the GlobalId lookup',async()=>{
     const {p}=provider();await p.loadLOD(1);const object:IfcPreviewObject=p.findByGlobalId('GUID-A')[0];
     await p.loadLOD(2);expect(p.level).toBe(2);expect(p.root.children).toHaveLength(0);expect(p.findByGlobalId('GUID-A')).toEqual([object]);p.release();
+  });
+  it('retries failed fine conversion and publishes each lifecycle state',async()=>{
+    let attempts=0;const states:string[]=[];
+    const {p}=provider(async()=>{attempts++;if(attempts===1)throw new Error('transient conversion failure');});
+    p.subscribeFineState(state=>states.push(state));await p.loadLOD(1);p.setFineDeferred();
+    expect(p.fineState).toBe('fineDeferred');
+    await expect(p.loadLOD(2)).rejects.toThrow('transient conversion failure');
+    expect(p.fineState).toBe('fineFailed');
+    await p.loadLOD(2);
+    expect(attempts).toBe(2);expect(p.fineState).toBe('fineReady');
+    expect(states).toEqual(['previewReady','fineDeferred','fineLoading','fineFailed','fineLoading','fineReady']);p.release();
+  });
+  it('releases Preview WASM after LOD1 and reads properties with a disposable metadata worker',async()=>{
+    const created:WorkerStub[]=[];
+    class PropertyWorker extends WorkerStub {constructor(){super();created.push(this);}}
+    vi.stubGlobal('Worker',PropertyWorker);
+    const events:any[]=[];
+    const {p,worker}=provider(async()=>{}, {releaseMetadataAfterPreview:true,
+      loadPropertiesBytes:async()=>new Uint8Array([9,8,7]),onResource:(event:any)=>events.push(event)});
+    await p.loadLOD(1);
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
+    expect(events.some(event=>event.state==='metadata-released')).toBe(true);
+    await expect(p.getProperties(20)).resolves.toMatchObject({attributes:{Name:{value:'A'}}});
+    expect(created).toHaveLength(1);expect(created[0].terminate).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual(expect.objectContaining({state:'property-worker-open',wasmHeapBytes:4096,rawBytes:3}));
+    expect(events.some(event=>event.state==='property-worker-released')).toBe(true);
+    p.release();vi.unstubAllGlobals();
+  });
+  it('transfers the property input without a copy and terminates an outstanding property worker on release',async()=>{
+    const input=new Uint8Array([9,8,7]);
+    const created:WorkerStub[]=[];
+    let sent:Uint8Array|undefined;
+    class SlowPropertyWorker extends WorkerStub {
+      constructor(){super();created.push(this);}
+      postMessage(message:any){sent=message.bytes;}
+    }
+    vi.stubGlobal('Worker',SlowPropertyWorker);
+    try {
+      const {p}=provider(async()=>{}, {releaseMetadataAfterPreview:true,loadPropertiesBytes:async()=>input});
+      await p.loadLOD(1);
+      expect(await (p as any).opened).toBeUndefined();
+      const query=p.getProperties(20);
+      const rejected=expect(query).rejects.toThrow('Preview released');
+      await Promise.resolve();
+      expect(sent).toBe(input);
+      p.release();
+      await rejected;
+      expect(created[0].terminate).toHaveBeenCalledTimes(1);
+      expect(p.data).toBeNull();
+      expect(p.findByGlobalId('GUID-A')).toEqual([]);
+    } finally {vi.unstubAllGlobals();}
+  });
+  it('does not start a metadata worker when a source reread finishes after project release',async()=>{
+    let finish!:(bytes:Uint8Array)=>void;
+    const created:WorkerStub[]=[];
+    class PropertyWorker extends WorkerStub {constructor(){super();created.push(this);}}
+    vi.stubGlobal('Worker',PropertyWorker);
+    try {
+      const {p}=provider(async()=>{}, {releaseMetadataAfterPreview:true,
+        loadPropertiesBytes:()=>new Promise<Uint8Array>(resolve=>{finish=resolve;})});
+      await p.loadLOD(1);
+      const query=p.getProperties(20),rejected=expect(query).rejects.toThrow('Preview released');
+      p.release();finish(new Uint8Array([1]));
+      await rejected;expect(created).toHaveLength(0);
+    } finally {vi.unstubAllGlobals();}
   });
 });

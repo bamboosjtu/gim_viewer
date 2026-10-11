@@ -39,9 +39,11 @@ P2 为增强或需要场景确认的候选。状态分为待核验、待开发�
 
 现行模板共享和 IFC/Spatial Worker 已存在，不作为待开发项重复立项。
 
-IFC Preview Provider 已有默认关闭的桌面变电原型（见[架构](architecture.md#实验性-ifc-preview-provider桌面变电)）。尚未实现视距自动切换、对象级 LOD2 转换、预览缓存、MappedItem/BRep 预览主体、带孔/曲线轮廓及 MapConversion。LOD2 当前仍按整文件加载；预览可提前浏览，不代表完整加载耗时已经降低。跨文件生产坐标和实际 GPU 替换仍需逐样本证据，不沿用研究报告的拟合 T 或 Node 计时作为桌面验收。
+IFC Preview Provider 已有默认关闭的桌面变电原型（见[架构](architecture.md#实验性-ifc-preview-provider桌面变电)），并增加独立默认关闭的 Preview-First / Deferred-Fine 调度模式。尚未实现视距自动切换、对象级 LOD2 转换、预览缓存、MappedItem/BRep 预览主体、带孔/曲线轮廓及 MapConversion。LOD2 当前仍按整文件加载；预览可提前浏览，不代表完整加载耗时已经降低。跨表示坐标与实际 GPU 替换仍需逐样本证据，不沿用研究报告的拟合 T 或 Node 计时作为桌面验收。
 
-原型桌面验收尚未通过：substation02 冷运行已观察到钢结构 LOD1 拾取、属性读取和关闭释放，但完整 IFC 在 600 秒观察预算内未完成，最大 heartbeat 间隔 3330ms、输入响应 1118ms，超过 D-01 目标。合法语义/DEV 缓存暖运行的钢结构精细替换未完成验收；该次鼠标选择命中已有精细 IFC 楼板，不能算预览选择或替换通过。冷暖记录的生产坐标锚点平移不同，需核验首个 IFC 锚点建立和跨表示坐标一致性；100 条 metadata placement 核验不能替代精细几何包围盒对照。保留默认关闭，不重试抬高时间上限；本次源码指纹、构建 SHA、截图和阶段日志保存在本地 `output/ifc-preview-prototype/`。
+小 IFC 的真实 Tauri/WebView 替换已有局部验收证据：独立验收包封装两个未修改的真实 IFC，目标文件 575,414 bytes、SHA-256 `3cfe2f6927511badc4b5ae112a71e994404b83139102d0ea63c4b2be8f7f927d`；语义冷/暖路径均保持同一 GlobalId/ExpressId，LOD0/LOD1/LOD2 包围盒中心误差约 4.21 微米，Preview 退出场景，精细高亮与属性沿用原 SelectionRequest。此证据只覆盖该对象和输入，不证明全站跨表示等价。现有 debug-only 原生路径授权及 CDP 可用于桌面验收，无需改变生产文件权限。
+
+substation02 的钢结构 LOD1、延期状态、后续 Preview 继续、精化请求入队/取消已在桌面执行，未启动钢结构完整转换。完整工程中的小 IFC 精化曾因已运行的 DEV 重任务等待超过 90 秒预算；用户请求优先级目前不能抢占该批次，这是仍未关闭的交互等待风险。02 再打开实验未证明语义/DEV 缓存全部 warm，不能用作该暖场景通过证据。30 次加载后输入响应观测通过预设窗口目标，但不覆盖整段预览生成与所有后台工作；进程内存驻留仍较高，完整转换 Worker heap 尚无精确公开测量，未完成与旧实现等条件的内存比较。保留两个实验开关默认关闭；不修改 IFC/Fragments/语义缓存版本。
 性能指标见 [性能](performance.md)。
 
 ## 格式与样本证据

@@ -7,6 +7,7 @@ export type SubstationBackgroundTaskName =
   | 'stdSld'
   | 'cachePersistence'
   | 'devGeometry';
+export type SubstationBackgroundGate = 'interactive' | 'allIfcReady' | 'allIfcPreviewsReady';
 
 export type SubstationBackgroundTaskState =
   | 'queued'
@@ -32,7 +33,7 @@ export interface SubstationBackgroundTaskSpec {
   priority: number;
   /** Heavy tasks never run together and only start after all IFC. */
   heavy: boolean;
-  startAfter: 'interactive' | 'allIfcReady';
+  startAfter: SubstationBackgroundGate;
   /** A cheap cache restore gates heavy scheduling until it has classified hit/miss. */
   blocksHeavy?: boolean;
   /** Manually driven lifecycle marker, never selected by a drain. */
@@ -66,9 +67,13 @@ export class SubstationBackgroundCoordinator {
   private readonly tasks = new Map<SubstationBackgroundTaskName, TaskRecord>();
   private interactive = false;
   private allIfcReady = false;
+  private allIfcPreviewsReady = false;
   private lightRunning = false;
   private heavyRunning = false;
   private drainScheduled = false;
+  private priorityWork = new Map<string, {run:()=>Promise<void>;promise:Promise<void>;resolve:()=>void;reject:(error:unknown)=>void;priority:number;order:number;state:'queued'|'running'}>();
+  private priorityOrder=0;
+  private priorityRunning=false;
 
   constructor(private readonly options: SubstationBackgroundCoordinatorOptions) {}
 
@@ -119,6 +124,23 @@ export class SubstationBackgroundCoordinator {
     this.scheduleDrain();
   }
 
+  markAllIfcPreviewsReady():void {if(this.allIfcPreviewsReady)return;this.allIfcPreviewsReady=true;this.scheduleDrain();}
+
+  enqueueUserIfcFine(key:string,run:()=>Promise<void>):{promise:Promise<void>;cancel:()=>boolean} {
+    const existing=this.priorityWork.get(key);
+    if(existing)return {promise:existing.promise,cancel:()=>this.cancelUserIfcFine(key)};
+    let resolve!:()=>void,reject!:(error:unknown)=>void;
+    const promise=new Promise<void>((res,rej)=>{resolve=res;reject=rej;});
+    this.priorityWork.set(key,{run,promise,resolve,reject,priority:0,order:this.priorityOrder++,state:'queued'});
+    this.scheduleDrain();
+    return {promise,cancel:()=>this.cancelUserIfcFine(key)};
+  }
+
+  cancelUserIfcFine(key:string):boolean {
+    const task=this.priorityWork.get(key);if(!task||task.state!=='queued')return false;
+    this.priorityWork.delete(key);const error=new Error('精细几何请求已取消排队');error.name='AbortError';task.reject(error);this.scheduleDrain();return true;
+  }
+
   /** Mark all not-yet-started tasks cancelled when a session becomes stale. */
   cancelPending(): void {
     for (const record of this.tasks.values()) {
@@ -126,6 +148,11 @@ export class SubstationBackgroundCoordinator {
       record.state = 'cancelled';
       this.emit(record);
     }
+    this.cancelPendingUserIfcFine();
+  }
+
+  cancelPendingUserIfcFine():void {
+    for(const [key,task] of this.priorityWork)if(task.state==='queued')this.cancelUserIfcFine(key);
   }
 
   snapshot(): Array<SubstationBackgroundTaskEvent & { queuedMs?: number }> {
@@ -192,7 +219,13 @@ export class SubstationBackgroundCoordinator {
   }
 
   private drainHeavy(): void {
-    if (!this.allIfcReady || this.heavyRunning || !this.options.isCurrent()) return;
+    if (this.heavyRunning || !this.options.isCurrent()) return;
+    if(this.interactive&&!this.priorityRunning&&this.priorityWork.size){
+      const [key,task]=[...this.priorityWork.entries()].filter(([,x])=>x.state==='queued').sort((a,b)=>a[1].priority-b[1].priority||a[1].order-b[1].order)[0]??[];
+      if(task&&key){task.state='running';this.priorityRunning=true;this.heavyRunning=true;
+        void task.run().then(task.resolve,task.reject).finally(()=>{this.priorityWork.delete(key);this.priorityRunning=false;this.heavyRunning=false;this.scheduleDrain();});return;}
+    }
+    if (!this.allIfcReady&&!this.allIfcPreviewsReady) return;
     // Do not choose DEV geometry before a spatial cache restore has classified
     // hit/miss.  A miss queues the rebuild ahead of DEV geometry.
     const spatialRestore = this.tasks.get('spatialSemanticCacheRestore');
@@ -202,7 +235,7 @@ export class SubstationBackgroundCoordinator {
     const candidates = Array.from(this.tasks.values())
       .filter((record) => record.state === 'queued'
         && record.spec.heavy
-        && record.spec.startAfter === 'allIfcReady')
+        && this.gateReady(record.spec.startAfter))
       .sort((a, b) => a.spec.priority - b.spec.priority || a.queuedAt - b.queuedAt);
     const next = candidates[0];
     if (next) {
@@ -217,11 +250,11 @@ export class SubstationBackgroundCoordinator {
   }
 
   private drainLowPriority(): void {
-    if (!this.allIfcReady || this.heavyRunning || this.lightRunning || !this.options.isCurrent()) return;
+    if ((!this.allIfcReady&&!this.allIfcPreviewsReady) || this.heavyRunning || this.lightRunning || !this.options.isCurrent()) return;
     const candidates = Array.from(this.tasks.values())
       .filter((record) => record.state === 'queued'
         && !record.spec.heavy
-        && record.spec.startAfter === 'allIfcReady')
+        && this.gateReady(record.spec.startAfter))
       .sort((a, b) => a.spec.priority - b.spec.priority || a.queuedAt - b.queuedAt);
     const next = candidates[0];
     if (!next) return;
@@ -230,6 +263,12 @@ export class SubstationBackgroundCoordinator {
       this.lightRunning = false;
       this.scheduleDrain();
     });
+  }
+
+  private gateReady(gate:SubstationBackgroundGate):boolean {
+    if(gate==='interactive')return this.interactive;
+    if(gate==='allIfcPreviewsReady')return this.allIfcPreviewsReady||this.allIfcReady;
+    return this.allIfcReady;
   }
 
   private async run(record: TaskRecord): Promise<void> {

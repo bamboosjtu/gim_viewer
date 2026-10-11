@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 
 export type IfcLOD = 0 | 1 | 2;
+export type IfcPreviewFineState = 'previewReady' | 'fineDeferred' | 'fineLoading' | 'fineReady' | 'fineFailed';
 /** Representation ownership is separate from the existing IFC object identity. */
 export interface IfcPreviewObject {
   key: string;
@@ -25,6 +26,8 @@ export interface IfcPreviewData {
   unitScale: number;
   origin: number[];
   diagnostics: { products: number; represented: number; unsupported: number; reasons: Record<string, number> };
+  /** web-ifc heap capacity observed in its Worker; freed when that Worker terminates. */
+  wasmHeapBytes?: number;
 }
 export interface IfcPreviewProperties {
   attributes: Record<string, unknown>;
@@ -34,6 +37,7 @@ export interface IfcGeometryProvider {
   readonly modelId: string;
   readonly root: THREE.Group;
   readonly level: IfcLOD | null;
+  readonly fineState: IfcPreviewFineState | null;
   readonly data: IfcPreviewData | null;
   canProvide(level: IfcLOD): boolean;
   loadLOD(level: IfcLOD): Promise<void>;
@@ -41,6 +45,11 @@ export interface IfcGeometryProvider {
   findByGlobalId(globalId: string): IfcPreviewObject[];
   objectLOD(object: IfcPreviewObject): IfcLOD;
   getProperties(expressId: number): Promise<IfcPreviewProperties>;
+  subscribeFineState(listener: (state: IfcPreviewFineState) => void): () => void;
+  cancelFineRequest(): boolean;
+  setFineDeferred(): void;
+  /** Release metadata-only WASM and indexes after an equivalent LOD2 is available. */
+  releaseMetadata(): void;
   pick(raycaster: THREE.Raycaster): { object: IfcPreviewObject; distance: number } | null;
   highlight(object: IfcPreviewObject): void;
   clearHighlight(): void;

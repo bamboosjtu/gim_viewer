@@ -217,17 +217,34 @@ export async function showIfcPreviewProperties(ctx:ViewerContext,state:AppState,
     const val=(v:unknown):string=>v!=null && typeof v==='object' ? JSON.stringify(v) : String(v??'');
     const rows=properties ? Object.entries(properties.attributes).map(([key,value])=>[key,val(value)] as [string,string]) : [];
     const sets=properties?.propertySets.map(set=>sectionHtml('IFC 属性集',[['原始属性',JSON.stringify(set)]],true)).join('')??'';
+    const fineState=provider.fineState;
+    const stateText=fineState==='fineDeferred'?'LOD0/LOD1 已就绪；LOD2 延期至用户请求'
+      :fineState==='fineLoading'?'LOD2 已排队或正在加载'
+      :fineState==='fineFailed'?'LOD2 加载失败，可重试'
+      :fineState==='fineReady'?'LOD2 已就绪':state.selectionGeometry?.detail??'预览就绪';
+    const action=fineState==='fineReady'?'':`<button type="button" data-preview-refine ${fineState==='fineLoading'?'disabled':''}>${fineState==='fineFailed'?'重试 LOD2':fineState==='fineLoading'?'正在排队/加载 LOD2…':'加载精细几何 LOD2'}</button>${fineState==='fineLoading'?'<button type="button" data-preview-cancel>取消排队</button>':''}`;
     renderInspectorTabs(`<div class="props-header">${escHtml(object.name || object.ifcType)} · 预览</div>`,{
-      overview:sectionHtml('原 IFC 对象',[['GlobalId',object.globalId],['ExpressId',String(object.expressId)],['IFC 类型',object.ifcType],['表示',`LOD${provider.objectLOD(object)}`],['状态',state.selectionGeometry?.detail??'预览']])+'<button type="button" data-preview-refine>加载精细几何 LOD2</button>',
+      overview:sectionHtml('原 IFC 对象',[['GlobalId',object.globalId],['ExpressId',String(object.expressId)],['IFC 类型',object.ifcType],['表示',`LOD${provider.objectLOD(object)}`],['精细状态',stateText]])+action,
       params:properties ? sectionHtml('IFC 原始属性',rows)+sets : `<div class="props-note">${escHtml(error || '正在读取 IFC 属性…')}</div>`,
       relations:'<div class="props-note">沿用原 IFC 文件与 ExpressId；空间关系由现有空间语义图提供。</div>',
       source:sectionHtml('来源',[['IFC 文件',object.sourcePath],['Provider',object.provider],['对象键',object.key],['近似边界','参数棱柱/OBB 预览，裁剪和精细细节未还原']]),
     });
     propsDrawerBody.querySelector('[data-preview-refine]')?.addEventListener('click',()=>{if(current())void refine();});
+    propsDrawerBody.querySelector('[data-preview-cancel]')?.addEventListener('click',()=>{
+      if(!current())return;
+      if(!provider.cancelFineRequest())setSelectionStatus('LOD2 转换已开始；当前阶段不能中断');
+    });
   };
+  let unsubscribe:(()=>void)|null=null;
+  let loadedProperties:IfcPreviewProperties|null=null;
+  let propertyError='';
+  unsubscribe=provider.subscribeFineState(()=>{
+    if(!current()){unsubscribe?.();unsubscribe=null;return;}
+    render(loadedProperties,propertyError);
+  });
   render(null);
-  try {const properties=await provider.getProperties(object.expressId);render(properties);}
-  catch(error){render(null,error instanceof Error?error.message:String(error));}
+  try {loadedProperties=await provider.getProperties(object.expressId);render(loadedProperties);}
+  catch(error){propertyError=error instanceof Error?error.message:String(error);render(null,propertyError);}
 }
 
 /** 渲染 FAM 分节属性为 HTML */

@@ -56,6 +56,10 @@ IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CB
 
 原型默认关闭。`localStorage.setItem('gim-debug-ifc-preview','1')` 后重新打开变电工程启用，删除该键后恢复完整几何路径；Fragments 开关和默认值独立。首个完整 IFC 仍先建立生产坐标锚点，后续文件在 metadata Worker 中读取单位、上下文和 LocalPlacement 链，先提交 LOD0，再提交 LOD1，自动完整加载与属性面板的“加载精细几何 LOD2”共用该文件的加载 Promise。
 
+另一个独立、默认关闭的实验开关 `gim-debug-ifc-preview-deferred-fine` 必须与 Preview 开关同时启用。该模式不改变原完整加载模式：首个 IFC 仍完整加载并建立坐标锚点，后续文件顺序生成 Preview，LOD0/LOD1 均完成后标记 `previewReady`，精细状态为 `fineDeferred`，不自动启动 LOD2。全部 Preview 完成后，DEV/Spatial/缓存等可运行于 `allIfcPreviewsReady` 门禁；`allIfcReady` 仍等待每个 IFC 精细加载成功或明确失败，延期中的文件不计为 ready，`fullModelReady` 还要求 DEV 完成且所有 IFC 为 `fineReady`。
+
+属性面板中的精细加载请求按逻辑模型 ID 去重，并排在尚未启动的普通重任务之前；已运行的 DEV/Spatial 重任务及转换不会被抢占，工程关闭会取消排队请求并由原 ProjectLoadSession 释放活动 Worker。精细转换失败后可重试。LOD1 完成即终止该文件的 Preview metadata Worker；按需属性查询重新读取单个 IFC，并在一次性 Worker 结束或工程关闭后释放。Preview、属性查询和精细转换以转移方式交接各自的一次性 IFC 输入；延期精化重新读取源文件，不使用已释放的预览缓冲区。metadata 就绪 Promise 只持有完成状态，精细替换后清除显式 metadata 所有者。不同文件的 Preview 与精化、一次性属性读取仍可能短暂并行，不保证全工程只有一个 WASM heap。资源事件和进程内存采样用于观测生命周期，Fragments 转换 WASM heap 的精确值仍不由当前公开 API 暴露。
+
 | 级别 | 当前表示与边界 |
 |---|---|
 | LOD0 | 显式 IfcBoundingBox 或支持拉伸体的局部包围盒，保留放置方向；开孔等 subtractive feature 不生成正向代理 |
@@ -64,7 +68,7 @@ IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CB
 
 源坐标使用 IfcProject 长度单位、representation context、递归 LocalPlacement（含 Site 父链）及 solid/profile 放置；矩阵为列主序，先源放置、再单位缩放、再现有工程 source-to-viewer 锚点。metadata-derived 原点仅用于 Float32 精度，根矩阵抵消该平移。禁止使用研究 benchmark 的真值拟合 T；MapConversion、mapped/BRep 主体和其他未覆盖轮廓保留诊断，由 LOD2 处理，不推断空间含义。
 
-预览几何分批合并网格并保留三角面 → ExpressId 映射，高亮使用独立覆盖层。同一 SelectionRequest 沿用至精细表示；属性异步结果和精细高亮提交均检查最新选择/工程会话。精细模型可用后移除预览并释放 metadata Worker，按原 GlobalId 查询精细 LocalId；无唯一关联时保留原语义选择和未关联/歧义状态，不猜第一个对象。工程切换立即释放 Worker、网格和材质。预览不持久化，不改变现有缓存域版本。
+预览几何分批合并网格并保留三角面 → ExpressId 映射，高亮使用独立覆盖层。同一 SelectionRequest 沿用至精细表示；属性异步结果和精细高亮提交均检查最新选择/工程会话。精细模型可用后移除预览并释放 metadata Worker，按原 GlobalId 查询精细 LocalId；无唯一关联时保留原语义选择和未关联/歧义状态，不猜第一个对象。工程切换立即释放 Worker、网格和材质。LOD2 替换诊断对同一 GlobalId 记录首个 IFC 锚点、实际协调矩阵、工程变换、预览世界矩阵、Fragments 世界矩阵/位置/包围盒差值；诊断不拟合或修改矩阵，必须由真实桌面样本验收确认空间等价。预览不持久化，不改变现有缓存域版本。
 
 ## DEV 编译、模板与 occurrence
 

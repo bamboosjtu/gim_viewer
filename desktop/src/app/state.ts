@@ -1,5 +1,5 @@
 import type { FamSourceProperty } from '../gim/famParser.js';
-import type { IfcGeometryProvider } from '../viewer/ifcGeometryProvider.js';
+import type { IfcGeometryProvider, IfcPreviewFineState } from '../viewer/ifcGeometryProvider.js';
 import type { SubstationCapabilitySummary } from '../gim/substationEvidence.js';
 import type { IfcEntry, CbmNode, FileDevEntry } from '../gim/types.js';
 import type * as OBCF from '@thatopen/fragments';
@@ -152,9 +152,15 @@ export class AppState {
   loadedModels = new Map<string, { modelId: string; runtimeModelId: string; visible: boolean }>();
   /** Experimental render resources, never a second semantic graph or cache domain. */
   ifcPreviewProviders = new Map<string, IfcGeometryProvider>();
+  ifcPreviewFineStates = new Map<string, IfcPreviewFineState>();
+  /** Cancels queued per-file IFC fine work before preview resources are released. */
+  cancelPendingIfcFine: (() => void) | null = null;
   private releaseIfcPreviews(): void {
+    this.cancelPendingIfcFine?.();
+    this.cancelPendingIfcFine = null;
     for (const provider of this.ifcPreviewProviders.values()) provider.release();
     this.ifcPreviewProviders.clear();
+    this.ifcPreviewFineStates.clear();
   }
 
   // xml-mod Group 跟踪（key = instanceKey；同一 MOD 文件可有多个放置实例）

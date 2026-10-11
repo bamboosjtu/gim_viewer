@@ -64,6 +64,19 @@ it('raw entry transfers a dedicated input copy, preserves identity/settings and 
   expect(worker.terminate).toHaveBeenCalledTimes(1);expect(input).toEqual(new Uint8Array([1,2,3]));
 });
 
+it('deferred fine mode transfers the sole owned input buffer without a second full-size copy',async()=>{
+  const state=new AppState(),session=state.activateProject(1,'sha'),{ctx}=context(state);
+  const input=new Uint8Array([4,5,6,7]);
+  const loading=loadIfcEntry(ctx,state,entry,async()=>input,undefined,{session,transferInput:true});
+  await vi.waitFor(()=>expect(ConversionWorker.instances).toHaveLength(1));
+  const worker=ConversionWorker.instances[0];
+  expect(Array.from(worker.input!.bytes)).toEqual([4,5,6,7]);
+  expect(input.byteLength).toBe(0);
+  worker.reply({type:'complete',bytes:new Uint8Array([8]),conversionMs:1});
+  await loading;
+  expect(state.loadedModels.has(entry.modelId)).toBe(true);
+});
+
 it('project cleanup terminates pending WASM and old messages cannot register into the new project',async()=>{
   const state=new AppState(),session=state.activateProject(1,'A'),{ctx,scene}=context(state);
   const loading=loadIfcEntry(ctx,state,entry,async()=>new Uint8Array([1]),undefined,{session});

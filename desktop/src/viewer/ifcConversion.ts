@@ -16,6 +16,7 @@ export async function loadRawIfc(
   ctx: ViewerContext, state: AppState, session: ProjectLoadSession,
   buffer: Uint8Array, runtimeModelId: string, entryPath: string,
   onProgress?: (progress: number) => void, perfSessionId?: number,
+  options: { transferInput?: boolean } = {},
 ) {
   const isCurrent = () => state.isCurrentSession(session);
   if (!isCurrent()) return;
@@ -51,10 +52,21 @@ export async function loadRawIfc(
       try {
         const endPrepare = perfBegin(`变电 IFC worker input preparation · ${entryPath}`,
           { entryPath, phase: 'ifc.worker input preparation', bytes: buffer.byteLength }, diagnosticSession);
-        const owned = new Uint8Array(buffer);
-        endPrepare();
+        // Deferred preview mode transfers its one-shot source buffer to the
+        // conversion Worker. The caller must re-read the IFC after a failed
+        // attempt because a transferred ArrayBuffer is detached.
+        const exactBuffer = buffer.buffer instanceof ArrayBuffer
+          && buffer.byteOffset === 0 && buffer.byteLength === buffer.buffer.byteLength;
+        const owned = (options.transferInput && exactBuffer ? buffer : new Uint8Array(buffer)) as Uint8Array<ArrayBuffer>;
         const input: IfcConversionInput = { bytes: owned, wasm: { ...ctx.ifcLoader.settings.wasm },
           webIfcSettings: { ...ctx.ifcLoader.settings.webIfc } };
+        endPrepare(undefined, {
+          entryPath,
+          phase: 'ifc.worker input preparation',
+          sourceBytes: buffer.byteLength,
+          workerBytes: owned.byteLength,
+          transferredInput: options.transferInput === true && exactBuffer,
+        });
         worker.postMessage(input, [owned.buffer]);
       } catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
     });

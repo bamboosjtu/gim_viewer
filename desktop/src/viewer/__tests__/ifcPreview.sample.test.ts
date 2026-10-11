@@ -8,6 +8,32 @@ import { inspectIfcPreview } from '../ifcPreviewData.js';
 import { previewShapeGeometry } from '../ifcPreviewProvider.js';
 import * as THREE from 'three';
 
+it('small real substation02 IFC: metadata identity, preview geometry and sample fingerprint',async()=>{
+  const require=createRequire(import.meta.url), {IfcAPI}=require('web-ifc');
+  const packageDir=dirname(require.resolve('web-ifc'));
+  const source=resolve(process.env.GIM_SAMPLE_ROOT??'../demo','substation02/CBM/02-警传室.ifc');
+  const bytes=readFileSync(source),sha=createHash('sha256').update(bytes).digest('hex');
+  expect(bytes.byteLength).toBe(575414);
+  expect(sha).toBe('3cfe2f6927511badc4b5ae112a71e994404b83139102d0ea63c4b2be8f7f927d');
+  const api=new IfcAPI();api.SetWasmPath(packageDir+sep,true);await api.Init(undefined,true);
+  const model=api.OpenModel(bytes,{COORDINATE_TO_ORIGIN:false});
+  try {
+    const data=inspectIfcPreview(api,model,'ifc_small_sample','CBM/02-警传室.ifc');
+    expect(data.diagnostics.products).toBeGreaterThan(0);expect(data.shapes.length).toBeGreaterThan(0);
+    expect(data.shapes.every(shape=>shape.object.globalId&&shape.object.expressId>0&&shape.object.ifcType)).toBe(true);
+    const shape=data.shapes.find(item=>item.profile)??data.shapes[0];
+    const geometry=previewShapeGeometry(shape,shape.profile?1:0,data.origin);
+    geometry.computeBoundingBox();
+    expect(geometry.boundingBox?.isEmpty()).toBe(false);
+    expect(geometry.getAttribute('position').array.every(Number.isFinite)).toBe(true);
+    geometry.dispose();
+    console.info(JSON.stringify({source,bytes:bytes.byteLength,sha,products:data.diagnostics.products,
+      represented:data.diagnostics.represented,unsupported:data.diagnostics.unsupported,shapeCount:data.shapes.length,
+      prismCount:data.shapes.filter(item=>item.profile).length,expressId:shape.object.expressId,globalId:shape.object.globalId,
+      sourceMatrix:shape.matrix,origin:data.origin}));
+  } finally {api.CloseModel(model);}
+},30_000);
+
 it('real substation02 steel: source metadata, all product identities, parametric prism coverage',async()=>{
   const require=createRequire(import.meta.url), {IfcAPI}=require('web-ifc');
   const packageDir=dirname(require.resolve('web-ifc'));

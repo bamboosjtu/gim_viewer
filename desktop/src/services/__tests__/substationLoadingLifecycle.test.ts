@@ -29,7 +29,8 @@ vi.mock('../coordinateAlignmentService.js', () => ({
   syncProjectSourceToViewerFromFragments: mocks.syncProjectSourceToViewerFromFragments,
   loadManualCoordOffsetFromLocalStorage: mocks.loadManualCoordOffsetFromLocalStorage,
 }));
-vi.mock('../modAutoLoadService.js', () => ({ autoLoadModAndStlGeometry: mocks.autoLoadModAndStlGeometry }));
+vi.mock('../modAutoLoadService.js', () => ({ autoLoadModAndStlGeometry: mocks.autoLoadModAndStlGeometry,
+  isGeometryTokenValid:(state:AppState,token:number)=>state.geometryLoadToken===token }));
 vi.mock('../../ui/cbmTreeView.js', () => ({ buildAndRenderCbmTree: mocks.buildAndRenderCbmTree }));
 vi.mock('../../ui/fileDevView.js', () => ({ renderFileDevPanel: mocks.renderFileDevPanel }));
 vi.mock('../gimOpenCore.js', () => ({
@@ -39,6 +40,19 @@ vi.mock('../gimOpenCore.js', () => ({
   resolveProjectName: vi.fn((headerName?: string, headerId?: string, fileName?: string) => headerName || headerId || fileName || ''),
 }));
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => false }));
+vi.mock('../../viewer/ifcPreviewProvider.js', async () => {
+  const { Group } = await import('three');
+  return { IfcPreviewProvider: class {
+    root=new Group();level:number|null=null;fineState:string|null=null;
+    data={origin:[0,0,0],shapes:[],diagnostics:{represented:1}};
+    listeners=new Set<(state:string)=>void>();
+    constructor(private options:any){}
+    subscribeFineState(listener:(state:string)=>void){this.listeners.add(listener);return()=>this.listeners.delete(listener);}
+    async loadLOD(level:number){if(level===2)await this.options.loadFine();this.level=level;}
+    setFineDeferred(){this.fineState='fineDeferred';for(const f of this.listeners)f(this.fineState);}
+    release(){} releaseMetadata(){} retire(){}
+  }};
+});
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -73,6 +87,36 @@ function makeTree(): CbmNode {
 }
 
 describe('Substation Loading v2 readiness lifecycle', () => {
+  it('reads a fresh input when user fine loading starts after the preview tail released its buffer', async () => {
+    vi.clearAllMocks();
+    localStorage.setItem('gim-debug-ifc-preview','1');
+    localStorage.setItem('gim-debug-ifc-preview-deferred-fine','1');
+    const state=new AppState();const session=state.activateProject(8,'deferred-source');
+    state.currentProjectType='substation';state.currentCbmTree=makeTree();
+    const entries=[{name:'anchor',path:'CBM/anchor.ifc',modelId:'anchor'},{name:'small',path:'CBM/small.ifc',modelId:'small'}];
+    const read=vi.fn(async()=>new Uint8Array([1,2,3]).buffer);
+    state.currentFiles=new Map(entries.map(e=>[e.path,{arrayBuffer:read} as unknown as File]));
+    const ctx:any={fragments:{list:new Map(),core:{disposeModel:vi.fn()}},world:{scene:{three:new THREE.Scene()}},ifcLoader:{settings:{wasm:{path:'/wasm/',absolute:true}}}};
+    mocks.getViewerRuntimeWithUI.mockResolvedValue({ctx,modelCallbacks:{}});
+    mocks.ensureEngineReady.mockResolvedValue(undefined);mocks.buildIfcNameIndex.mockResolvedValue(undefined);
+    mocks.syncProjectSourceToViewerFromFragments.mockImplementation(async(s:AppState)=>{s.projectSourceToViewerMatrix=new THREE.Matrix4();});
+    mocks.autoLoadModAndStlGeometry.mockResolvedValue({modCount:0,stlCount:0});
+    mocks.loadIfcEntry.mockImplementation(async(_ctx:any,s:AppState,e:IfcEntry,getBuffer:()=>Promise<Uint8Array|null>)=>{
+      expect(await getBuffer()).toEqual(new Uint8Array([1,2,3]));
+      const runtimeModelId=s.getRuntimeModelId(e.modelId,session);
+      s.loadedModels.set(e.modelId,{modelId:e.modelId,runtimeModelId,visible:true});ctx.fragments.list.set(runtimeModelId,{object:{children:[]}});
+    });
+    perfReset();
+    try {
+      await loadAllIfcFiles(state,entries,vi.fn(),{session});
+      await vi.waitFor(()=>expect(perfProductMomentSnapshot().allIfcPreviewsReady).not.toBeNull());
+      expect(mocks.loadIfcEntry).toHaveBeenCalledTimes(1);
+      expect(perfProductMomentSnapshot().allIfcReady).toBeNull();
+      await state.ifcPreviewProviders.get('small')!.loadLOD(2);
+      expect(mocks.loadIfcEntry).toHaveBeenCalledTimes(2);
+      expect(read).toHaveBeenCalledTimes(3); // anchor, preview, deferred fine
+    } finally {state.cancelPendingIfcFine?.();localStorage.removeItem('gim-debug-ifc-preview');localStorage.removeItem('gim-debug-ifc-preview-deferred-fine');}
+  });
   it('returns at first usable IFC, isolates spatial failure, and keeps the IFC tail sequential', async () => {
     vi.clearAllMocks();
     const secondIfcGate = deferred<void>();

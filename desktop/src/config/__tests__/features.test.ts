@@ -9,13 +9,18 @@ import {
   FRAGMENTS_CACHE_DEBUG_KEY,
   FRAGMENTS_CACHE_KEY_VERSION,
   isIfcPreviewEnabled, IFC_PREVIEW_DEBUG_KEY,
+  isIfcPreviewDeferredFineEnabled, IFC_PREVIEW_DEFERRED_FINE_KEY,
 } from '../features.js';
 
 it('IFC preview is opt-in and independent of the Fragments cache default',()=>{
   localStorage.removeItem(IFC_PREVIEW_DEBUG_KEY);localStorage.removeItem(FRAGMENTS_CACHE_DEBUG_KEY);
+  localStorage.removeItem(IFC_PREVIEW_DEFERRED_FINE_KEY);
   expect(isIfcPreviewEnabled()).toBe(false);
+  expect(isIfcPreviewDeferredFineEnabled()).toBe(false);
   localStorage.setItem(IFC_PREVIEW_DEBUG_KEY,'1');
   expect(isIfcPreviewEnabled()).toBe(true);expect(isFragmentsCacheEnabled()).toBe(false);
+  localStorage.setItem(IFC_PREVIEW_DEFERRED_FINE_KEY,'1');
+  expect(isIfcPreviewDeferredFineEnabled()).toBe(true);
   localStorage.removeItem(IFC_PREVIEW_DEBUG_KEY);
 });
 

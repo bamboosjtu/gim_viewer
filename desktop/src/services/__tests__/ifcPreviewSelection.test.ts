@@ -14,7 +14,8 @@ function fixture(name='A') {
   const object:IfcPreviewObject={key:`ifc:model:object:${name==='A'?20:21}`,modelId:'model',sourcePath:'CBM/model.ifc',expressId:name==='A'?20:21,globalId:`GUID-${name}`,ifcType:'IFCMEMBER',name,provider:'ifc-preview'};
   const properties=deferred<any>(),root=new THREE.Group(),clearHighlight=vi.fn(),highlight=vi.fn();
   const provider:any={modelId:'model',root,level:1,data:{shapes:[{object}]},objectLOD:()=>1,canProvide:()=>true,getProperties:()=>properties.promise,
-    findByGlobalId:()=>[object],clearHighlight,highlight,pick:()=>({object,distance:1}),loadLOD:vi.fn(async()=>{provider.level=2;}),retire:()=>{provider.level=2;},release:vi.fn()};
+    fineState:'fineDeferred',subscribeFineState:()=>()=>{},cancelFineRequest:()=>false,setFineDeferred:vi.fn(),releaseMetadata:vi.fn(),
+    findByGlobalId:()=>[object],clearHighlight,highlight,pick:()=>({object,distance:1}),loadLOD:vi.fn(async()=>{provider.level=2;provider.fineState='fineReady';}),retire:()=>{provider.level=2;},release:vi.fn()};
   state.ifcPreviewProviders.set('model',provider);
   const camera=new THREE.PerspectiveCamera(),ctx:any={world:{scene:{three:new THREE.Scene()},camera:{three:camera}},fragments:{list:new Map(),resetHighlight:vi.fn(async()=>{}),highlight:vi.fn(async()=>{}),core:{update:vi.fn()}}};
   return {state,object,provider:provider as IfcGeometryProvider,properties,ctx};
@@ -37,6 +38,17 @@ it('project switch invalidates pending preview properties and releases providers
   f.properties.resolve({attributes:{Name:{value:'obsolete'}},propertySets:[]});await pending;
   expect(document.getElementById('props-drawer-body')!.textContent).toBe('new project');expect(f.provider.release).toHaveBeenCalled();
 });
+it('fine status updates preserve properties already read for the current preview selection',async()=>{
+  const f=fixture();let changed!:()=>void;
+  f.provider.subscribeFineState=listener=>{changed=()=>listener('fineLoading');return()=>{};};
+  const {selectIfcPreview}=await import('../ifcPreviewService.js');
+  f.properties.resolve({attributes:{Name:{value:'retained-property'}},propertySets:[]});
+  const request=f.state.beginSelection({kind:'ifc-object',key:f.object.key});
+  await selectIfcPreview(f.ctx,f.state,f.provider,f.object,request);
+  Object.assign(f.provider,{fineState:'fineLoading'});changed();
+  (document.querySelector('[data-tab="params"]') as HTMLButtonElement)?.click();
+  expect(document.getElementById('props-drawer-body')!.innerHTML).toContain('retained-property');
+});
 it('the real viewport entry picks preview with the canonical IFC identity',async()=>{
   const f=fixture();f.state.initialized=true;const selected=vi.fn(),canvas=document.querySelector('canvas')!,container=document.getElementById('viewport')!;
   canvas.getBoundingClientRect=()=>({left:0,top:0,width:100,height:100} as DOMRect);
@@ -49,7 +61,8 @@ it('the real viewport entry picks preview with the canonical IFC identity',async
 it('actual inspector refine button retains the request and promotes through GUID to the existing fine model',async()=>{
   const f=fixture(),{selectIfcPreview}=await import('../ifcPreviewService.js');
   const runtime=f.state.getRuntimeModelId('model'),model={getLocalIdsByGuids:vi.fn(async()=>[88]),getGuidsByLocalIds:vi.fn(async()=>[f.object.globalId]),getItemsData:vi.fn(async()=>[{Name:{value:'Fine A'}}])};
-  f.ctx.fragments.list.set(runtime,model);
+  Object.assign(model,{getCoordinationMatrix:vi.fn(async()=>new THREE.Matrix4()),getMergedBox:vi.fn(async()=>new THREE.Box3(new THREE.Vector3(0,0,0),new THREE.Vector3(1,1,1))),getPositions:vi.fn(async()=>[new THREE.Vector3(.5,.5,.5)]),object:new THREE.Group()});
+  f.ctx.fragments.baseCoordinationModel=runtime;f.ctx.fragments.baseCoordinationMatrix=new THREE.Matrix4();f.ctx.fragments.list.set(runtime,model);
   const request=f.state.beginSelection({kind:'ifc-object',key:f.object.key});
   f.properties.resolve({attributes:{Name:{value:'A'}},propertySets:[]});await selectIfcPreview(f.ctx,f.state,f.provider,f.object,request);
   (document.querySelector('[data-preview-refine]') as HTMLButtonElement).click();

@@ -8,8 +8,13 @@ const ENABLE_FRAGMENTS_CACHE_BASE = false;
 
 /** Desktop substation prototype only; independent of the Fragments cache policy. */
 export const IFC_PREVIEW_DEBUG_KEY = 'gim-debug-ifc-preview';
+export const IFC_PREVIEW_DEFERRED_FINE_KEY = 'gim-debug-ifc-preview-deferred-fine';
 export function isIfcPreviewEnabled(): boolean {
   try { return localStorage.getItem(IFC_PREVIEW_DEBUG_KEY) === '1'; } catch { return false; }
+}
+/** Independent experiment; requires the opt-in preview provider and is OFF by default. */
+export function isIfcPreviewDeferredFineEnabled(): boolean {
+  try { return localStorage.getItem(IFC_PREVIEW_DEFERRED_FINE_KEY) === '1'; } catch { return false; }
 }
 
 /** Fragments 缓存灰度开关的 localStorage 覆盖键（设为 '1' 开启实测） */
