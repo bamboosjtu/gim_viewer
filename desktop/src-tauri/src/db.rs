@@ -1212,6 +1212,11 @@ fn substation_index_receipt_matches(conn: &Connection, project_id: i64) -> bool 
 }
 
 fn missing_substation_sources(conn: &Connection, app: &tauri::AppHandle, project_id: i64) -> Result<Vec<String>,String> {
+    let context = CacheValidationContext::for_project(app, project_id).ok();
+    missing_substation_sources_with_context(conn, project_id, context.as_ref())
+}
+
+fn missing_substation_sources_with_context(conn: &Connection, project_id: i64, context: Option<&CacheValidationContext>) -> Result<Vec<String>,String> {
     let _timing = ValidationSpan::new("source_scan_path_files");
     let mut stmt = conn.prepare("SELECT entry_path, local_cache_path, file_size FROM substation_gim_entry WHERE project_id=?1").map_err(|e|e.to_string())?;
     let rows = stmt.query_map(params![project_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,i64>(2)?))).map_err(|e|e.to_string())?;
@@ -1222,7 +1227,7 @@ fn missing_substation_sources(conn: &Connection, app: &tauri::AppHandle, project
         if !matches!(ext.as_str(),"cbm"|"fam"|"dev"|"phm"|"mod"|"gl"|"stl"|"sch"|"std"|"sld") { continue; }
         let valid = local.as_deref().map(|p| {
             let path = std::path::Path::new(p);
-            is_expected_cache_path(app,project_id,&entry,path).unwrap_or(false)
+            context.map(|c| c.contains(project_id, &entry, path).unwrap_or(false)).unwrap_or(false)
                 && readable_source_of_size(path,size)
         }).unwrap_or(false);
         if !valid { missing.push(format!("{} (语义/原始几何源缓存不可读)",entry)); }
@@ -1232,8 +1237,19 @@ fn missing_substation_sources(conn: &Connection, app: &tauri::AppHandle, project
 
 fn readable_source_of_size(path: &std::path::Path, size: i64) -> bool {
     let _timing = ValidationSpan::new("metadata_open");
-    stdfs::metadata(path).map(|m|m.is_file() && m.len() as i64 == size).unwrap_or(false)
-        && stdfs::File::open(path).is_ok()
+    let mut options = stdfs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Do not follow a final-file reparse point swapped in after the path check.
+        options.custom_flags(0x00200000); // FILE_FLAG_OPEN_REPARSE_POINT
+    }
+    options.open(path).and_then(|f| f.metadata()).map(|m| {
+        #[cfg(windows)]
+        if m.file_attributes() & 0x0400 != 0 { return false; }
+        m.is_file() && size >= 0 && m.len() == size as u64
+    }).unwrap_or(false)
 }
 
 fn row_to_ifc_model(row: &rusqlite::Row<'_>) -> rusqlite::Result<IfcModelRecord> {
@@ -2203,6 +2219,107 @@ fn is_expected_cache_path(
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
     let root = base.join("extracted").join(project_id.to_string());
     is_expected_cache_path_in_root(&root, entry_path, candidate)
+}
+
+/// Call-scoped trusted root. No database candidate is ever canonicalized.
+/// Directory safety is deliberately not memoized: every entry rechecks all
+/// components, including both accepted root spellings.
+struct CacheValidationContext {
+    project_id: i64,
+    lexical_root: PathBuf,
+    canonical_root: PathBuf,
+    // On Windows, directory handles deny DELETE sharing for the whole call,
+    // preventing root rename/replacement while its canonical spelling is reused.
+    _root_handles: Vec<stdfs::File>,
+    #[cfg(unix)]
+    root_identity: (u64, u64),
+}
+
+fn normalized_cache_path(path: &Path) -> String {
+    let mut s = path.to_string_lossy().replace('\\', "/");
+    #[cfg(windows)]
+    { s = s.to_ascii_lowercase(); }
+    if let Some(rest) = s.strip_prefix("//?/unc/") { s = format!("//{}", rest); }
+    else if let Some(rest) = s.strip_prefix("//?/") { s = rest.to_string(); }
+    while s.ends_with('/') { s.pop(); }
+    s
+}
+
+impl CacheValidationContext {
+    fn for_project(app: &tauri::AppHandle, project_id: i64) -> Result<Self, String> {
+        let _timing = ValidationSpan::new("cache_root_resolution");
+        ensure_cache_project_id(project_id)?;
+        let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        Self::new(project_id, &base.join("extracted").join(project_id.to_string()))
+    }
+
+    fn new(project_id: i64, root: &Path) -> Result<Self, String> {
+        ensure_cache_project_id(project_id)?;
+        Self::check_component(root, "root_reparse_checks")?;
+        let mut handles = Vec::new();
+        #[cfg(windows)]
+        let pin = |path: &Path| -> Result<stdfs::File, String> {
+            use std::os::windows::fs::OpenOptionsExt;
+            stdfs::OpenOptions::new().read(true).share_mode(3)
+                .custom_flags(0x02000000 | 0x00200000) // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
+                .open(path).map_err(|e| format!("固定可信缓存根失败: {}: {}", path.display(), e))
+        };
+        #[cfg(windows)]
+        handles.push(pin(root)?);
+        let canonical_root = {
+            let _timing = ValidationSpan::new("root_canonicalize");
+            root.canonicalize().map_err(|e| e.to_string())?
+        };
+        Self::check_component(&canonical_root, "root_reparse_checks")?;
+        if !canonical_root.is_dir() { return Err("缓存根不是目录".into()); }
+        #[cfg(windows)]
+        handles.push(pin(&canonical_root)?);
+        #[cfg(unix)]
+        let root_identity = {
+            use std::os::unix::fs::MetadataExt;
+            let m = stdfs::metadata(root).map_err(|e| e.to_string())?;
+            (m.dev(), m.ino())
+        };
+        Ok(Self { project_id, lexical_root: root.to_path_buf(), canonical_root,
+            _root_handles: handles, #[cfg(unix)] root_identity })
+    }
+
+    fn check_component(path: &Path, phase: &'static str) -> Result<(), String> {
+        let _phase = ValidationSpan::new(phase);
+        let _timing = ValidationSpan::new("symlink_metadata");
+        let meta = stdfs::symlink_metadata(path).map_err(|e| format!("缓存路径不可检查: {}: {}", path.display(), e))?;
+        #[cfg(windows)]
+        let reparse = meta.file_attributes() & 0x0400 != 0;
+        #[cfg(not(windows))]
+        let reparse = false;
+        if meta.file_type().is_symlink() || reparse { return Err(format!("缓存包含符号链接或 reparse point: {}", path.display())); }
+        Ok(())
+    }
+
+    fn contains(&self, project_id: i64, entry: &str, candidate: &Path) -> Result<bool, String> {
+        let _timing = ValidationSpan::new("path_containment");
+        if project_id != self.project_id { return Ok(false); }
+        let relative = validate_entry_path(entry)?;
+        let candidate_name = normalized_cache_path(candidate);
+        if candidate_name != normalized_cache_path(&self.lexical_root.join(&relative))
+            && candidate_name != normalized_cache_path(&self.canonical_root.join(&relative)) { return Ok(false); }
+        Self::check_component(&self.lexical_root, "root_reparse_checks")?;
+        Self::check_component(&self.canonical_root, "root_reparse_checks")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let m = stdfs::metadata(&self.lexical_root).map_err(|e| e.to_string())?;
+            if (m.dev(), m.ino()) != self.root_identity { return Err("缓存根在验证中发生变化".into()); }
+        }
+        let mut current = self.canonical_root.clone();
+        let parts: Vec<_> = relative.components().collect();
+        for (index, part) in parts.iter().enumerate() {
+            let Component::Normal(name) = part else { return Ok(false); };
+            current.push(name);
+            Self::check_component(&current, if index + 1 == parts.len() { "file_reparse_checks" } else { "directory_reparse_checks" })?;
+        }
+        Ok(true)
+    }
 }
 
 fn is_expected_cache_path_in_root(
@@ -5445,6 +5562,7 @@ pub fn validate_gim_cache(
         (0u64, 0u64, Vec::new(), valid)
     } else {
         // 变电工程：保持原有 IFC 缓存校验
+        let context = CacheValidationContext::for_project(&app_handle, project_id).ok();
         let mut stmt = conn
             .prepare(
                 "SELECT entry_path, local_cache_path, file_size
@@ -5473,20 +5591,12 @@ pub fn validate_gim_cache(
             match local_cache_path {
                 Some(p) if !p.is_empty() => {
                     let path = std::path::Path::new(&p);
-                    if !is_expected_cache_path(&app_handle, project_id, &entry_path, path)? {
+                    if !context.as_ref().map(|c| c.contains(project_id, &entry_path, path).unwrap_or(false)).unwrap_or(false) {
                         missing_cache_paths.push(format!("{} (缓存路径不匹配)", entry_path));
-                    } else if path.exists() {
-                        let actual_size = stdfs::metadata(path).map(|m| m.len()).unwrap_or(0);
-                        if actual_size as i64 == expected_size {
-                            cached_ifc_count += 1;
-                        } else {
-                            missing_cache_paths.push(format!(
-                                "{} (大小不匹配: 期望 {}, 实际 {})",
-                                entry_path, expected_size, actual_size
-                            ));
-                        }
+                    } else if readable_source_of_size(path, expected_size) {
+                        cached_ifc_count += 1;
                     } else {
-                        missing_cache_paths.push(entry_path);
+                        missing_cache_paths.push(format!("{} (缓存不可读或大小不匹配)", entry_path));
                     }
                 }
                 _ => {
@@ -5496,7 +5606,7 @@ pub fn validate_gim_cache(
         }
 
         drop(ifc_timing);
-        missing_cache_paths.extend(missing_substation_sources(&conn,&app_handle,project_id)?);
+        missing_cache_paths.extend(missing_substation_sources_with_context(&conn,project_id,context.as_ref())?);
         let valid = has_index
             && ifc_models_count > 0
             && ifc_entry_count > 0
@@ -7031,6 +7141,70 @@ pub fn get_project_diagnostic(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn validation_context_checks_exact_project_paths_and_both_root_spellings() {
+        let root = std::env::temp_dir().join(format!("gim-context-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("1/CBM")).unwrap();
+        std::fs::create_dir_all(root.join("2/CBM")).unwrap();
+        let file = root.join("1/CBM/model.ifc");
+        std::fs::write(&file, b"model").unwrap();
+        let context = super::CacheValidationContext::new(1, &root.join("1")).unwrap();
+        assert!(context.contains(1, "CBM/model.ifc", &file).unwrap());
+        assert!(context.contains(1, "CBM/model.ifc", &file.canonicalize().unwrap()).unwrap());
+        assert!(!context.contains(2, "CBM/model.ifc", &file).unwrap());
+        assert!(!context.contains(1, "CBM/model.ifc", &root.join("2/CBM/model.ifc")).unwrap());
+        assert!(context.contains(1, "../CBM/model.ifc", &file).is_err());
+        assert!(context.contains(1, "/CBM/model.ifc", &file).is_err());
+        assert!(context.contains(1, "C:\\CBM\\model.ifc", &file).is_err());
+        assert!(super::readable_source_of_size(&file, 5));
+        assert!(!super::readable_source_of_size(&file, 4));
+        assert!(!super::readable_source_of_size(&file, -1));
+        assert!(!super::readable_source_of_size(&root.join("1/CBM"), 0));
+        #[cfg(windows)]
+        assert!(std::fs::rename(root.join("1"), root.join("moved")).is_err(), "trusted root must be pinned against replacement");
+        drop(context);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn validation_context_rechecks_changed_directory_and_rejects_links() {
+        let root = std::env::temp_dir().join(format!("gim-context-links-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("1/CBM")).unwrap();
+        std::fs::create_dir_all(root.join("outside")).unwrap();
+        let file = root.join("1/CBM/model.ifc");
+        std::fs::write(&file, b"model").unwrap();
+        std::fs::write(root.join("outside/model.ifc"), b"model").unwrap();
+        let context = super::CacheValidationContext::new(1, &root.join("1")).unwrap();
+        assert!(context.contains(1, "CBM/model.ifc", &file).unwrap());
+        std::fs::rename(root.join("1/CBM"), root.join("1/old")).unwrap();
+        #[cfg(windows)]
+        {
+            let status = std::process::Command::new("cmd").args(["/C", "mklink", "/J"])
+                .arg(root.join("1/CBM").to_string_lossy().replace('/', "\\"))
+                .arg(root.join("outside").to_string_lossy().replace('/', "\\")).output().unwrap();
+            assert!(status.status.success(), "junction fixture: {}", String::from_utf8_lossy(&status.stderr));
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("outside"), root.join("1/CBM")).unwrap();
+        assert!(context.contains(1, "CBM/model.ifc", &file).is_err());
+        #[cfg(windows)]
+        std::fs::remove_dir(root.join("1/CBM")).unwrap();
+        #[cfg(unix)]
+        std::fs::remove_file(root.join("1/CBM")).unwrap();
+        std::fs::rename(root.join("1/old"), root.join("1/CBM")).unwrap();
+        let link = root.join("1/CBM/linked.ifc");
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&file, &link).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        assert!(context.contains(1, "CBM/linked.ifc", &link).is_err());
+        #[cfg(windows)]
+        assert!(!super::readable_source_of_size(&link, 5));
+        std::fs::remove_file(link).unwrap();
+        drop(context);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn ifc_cache_path_accepts_trusted_lexical_and_canonical_root_names() {
         let root = std::env::temp_dir().join(format!("gim-ifc-root-{}-{}", std::process::id(),

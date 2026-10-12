@@ -142,7 +142,7 @@ for (const [ordinal, sample] of samples.entries()) {
     expect(sql.reachable.map((r) => r.instance_key).sort()).toEqual(coldLeaves.map((r) => `raw:${r.rootOccurrence}${r.referencePath}`).sort());
     const sidecars = discoverSubstationGlSidecars(files.keys(),tree);
     for (const sidecar of sidecars) expect(sql.reachable.some((r) => r.geometry_path.toLowerCase() === sidecar.path.toLowerCase())).toBe(false);
-    const statuses: Record<string, number> = { complete: 0, partial: 0, empty: 0, unsupported: 0, failed: 0 };
+    const statuses: Record<string, number> = { complete: 0, partial: 0, empty: 0, unsupported: 0, sourceInvalid: 0, transientFailed: 0 };
     const cache = mkdtempSync(join(tmpdir(), `gim-${sample.id}-glb-`));
     const persisted: GeometryCacheManifestEntry[] = [];
     let warmReads = 0;
@@ -162,7 +162,7 @@ for (const [ordinal, sample] of samples.entries()) {
         } catch (error) {
           if (!(error instanceof InvalidDevGeometryError) || !error.sourceEvidence) throw error;
           persisted.push({entry_path:`DEV/${dev}`,status:'source-invalid',size:0,diagnostic:`${error.message}; ${error.sourceEvidence}`});
-          statuses.failed++;
+          statuses.sourceInvalid++;
           rejectedOccurrences += placements.length;
           rejectedTemplates.push({ dev, roots:placements.length, reason:error.reason });
           continue;
@@ -269,6 +269,11 @@ for (const [ordinal, sample] of samples.entries()) {
     const repeated = new Map<string, typeof raw>();
     for (const r of raw) { const key = `${r.sourcePath}\0${r.section}\0${r.label}`; repeated.set(key,[...(repeated.get(key) ?? []),r]); }
     const groups = [...repeated.values()].filter((r) => r.length > 1);
+    expect(statuses.transientFailed).toBe(0); // untyped/transient errors above fail the strict gate
+    if(sample.id==='substation02') {
+      expect(statuses.sourceInvalid).toBe(2);
+      expect(rejectedOccurrences).toBe(34);
+    }
     const summary = { sample:sample.id, sha256:sample.sha, famRows:raw.length, duplicateKeys:groups.length,
       conflicts:groups.filter((g) => new Set(g.map((p) => p.rawValue)).size > 1).length,
       rootOccurrences:seeds.length, uniqueDevTemplates:byDev.size,

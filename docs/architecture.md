@@ -123,6 +123,8 @@ FAM 来源记录使用 `(project_id, source_path, source_line)` 区分物理行�
 
 `save_gim_index` 清空变电域版本与发布凭据，`save_geometry_refs` 在现有事务中最终提交版本和 `substation_index_receipt_json`。凭据记录源 SHA、语义版本及九张语义/引用表行数；恢复时校验凭据、IFC 清单、必需缓存路径、文件大小与可读性。源改变、未完成写入、删行或缺源均不能作为合法语义 HIT。空 FAM 的零字节文件有效。凭据用于完整发布与截断检测，不是逐行内容签名，也不代表 GLB、Spatial 或 Fragments 完成；变电语义旧版本独立失效，不清除其他域。
 
+变电来源文件 validation 使用单次调用内的 `CacheValidationContext`：只规范化可信工程 root 一次，同时接受其 lexical 与 MSIX redirected canonical 两种精确路径形式；不规范化数据库 candidate 来证明归属。Windows root handle 在该调用内禁止 delete sharing，逐 entry 仍检查相对路径、工程身份、两种 root 和所有目录/文件组件的 symlink/reparse 状态，不缓存目录安全结论。路径检查通过后实际打开文件，在同一 handle 上检查 regular-file 和准确大小；Windows 最终文件以 OPEN_REPARSE_POINT 打开，拒绝检查后替换的文件链接。上下文不会跨调用或工程复用，不改变 receipt、版本或缓存发布契约。
+
 ## 配置与加载状态
 
 下表描述桌面配置与加载阶段。移动端默认天地图影像，Canvas 工程覆盖层先就绪，底图加载独立进行；移动生命周期与存储见 [移动端规格](mobile-spec.md)。

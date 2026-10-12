@@ -114,6 +114,34 @@ function makeState(opts: { projectId?: number } = {}): AppState {
 }
 
 describe('runProgressiveDevGlbPipeline', () => {
+  it('mixed deterministic states plus a transient write failure do not publish; a new open retries', async () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    const allPaths=['normal','empty','unsupported','invalid','transient'];
+    for (const failWrite of [true,false]) {
+      const state=makeState({projectId:7});
+      state.currentCbmTree!.children=allPaths.map((p,i)=>makeSeed(`CBM/${p}.cbm`,`${p}.dev`,i*1000));
+      const rec:DepsRecorder={serializeCalls:[],writeCalls:[],versionWrites:0,loadCalls:[],manifestEntries:[]};
+      const deps=makeDeps({},rec);
+      deps.serializeDevToGlbDetailed=async path=>{
+        rec.serializeCalls.push(path);
+        if(path.endsWith('invalid.dev'))throw new InvalidDevGeometryError(path,'source extent','source-origin-span-v1 fixture');
+        const status=path.endsWith('empty.dev')?'empty':path.endsWith('unsupported.dev')?'unsupported':'complete';
+        return {status,bytes:status==='complete'?new Uint8Array([1,2,3]):null,diagnostics:{status,discoveredModCount:1,discoveredStlCount:0,renderableModCount:status==='complete'?1:0,renderableStlCount:0,emptySourceCount:status==='empty'?1:0,unsupportedSourceCount:status==='unsupported'?1:0,partialSourceCount:0,unsupportedPrimitiveTypeCounts:{}}};
+      };
+      deps.writeGlbFile=async (_pid,path)=>{rec.writeCalls.push(path);if(failWrite&&path.includes('transient.dev'))throw new Error('transient disk write failed');};
+      const result=await runProgressiveDevGlbPipeline(state,new THREE.Scene(),()=>{},{token:1},deps);
+      expect(rec.serializeCalls).toHaveLength(5); // no complete marker means current contract retries the batch
+      expect(result.sourceInvalidDevs).toEqual(['DEV/invalid.dev']);
+      expect(result.failedDevs).toEqual(failWrite?['DEV/transient.dev']:[]);
+      expect(rec.versionWrites).toBe(failWrite?0:1);
+      expect(rec.manifestEntries).toHaveLength(failWrite?0:1);
+      if(!failWrite){
+        expect(rec.manifestEntries![0].map(e=>e.status)).toEqual(['glb','empty','unsupported','source-invalid','glb']);
+        expect(rec.manifestEntries![0].filter(e=>e.status==='source-invalid').map(e=>e.entry_path)).toEqual(['DEV/invalid.dev']);
+      }
+    }
+  });
+
   beforeEach(() => {
     vi.mocked(isTauri).mockReturnValue(false);
   });
