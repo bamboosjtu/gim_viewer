@@ -23,6 +23,7 @@ export type GeometryDiagnosticReason =
   | 'dev-no-solidmodel'
   | 'parser-unsupported'
   | 'missing-dependency'
+  | 'source-invalid'
   | 'parse-failed'
   | 'unknown';
 
@@ -66,7 +67,8 @@ export interface SerializationDiagnosticInput {
 }
 
 export interface ManifestDiagnosticInput {
-  status: 'glb' | 'partial' | 'empty' | 'unsupported';
+  diagnostic?: string;
+  status: 'glb' | 'partial' | 'empty' | 'unsupported' | 'source-invalid';
 }
 
 export function normalizeGeometryDiagnosticPath(path: string): string {
@@ -84,6 +86,7 @@ function statusFromSerialization(status: SerializationDiagnosticInput['status'])
     case 'complete': return 'renderable';
     case 'partial': return 'partial';
     case 'unsupported': return 'unsupported';
+
     case 'empty': return 'empty';
   }
 }
@@ -94,6 +97,7 @@ function statusFromManifest(status: ManifestDiagnosticInput['status']): Geometry
     case 'partial': return 'partial';
     case 'empty': return 'empty';
     case 'unsupported': return 'unsupported';
+    case 'source-invalid': return 'failed';
   }
 }
 
@@ -139,6 +143,7 @@ export function diagnosticFromManifest(
   devPath: string,
   input: ManifestDiagnosticInput,
 ): GeometryDiagnostic {
+  if (input.status === 'source-invalid') return diagnosticForFailure(devPath, 'source-invalid', 'warm', input.diagnostic);
   const status = statusFromManifest(input.status);
   return {
     devPath: normalizeGeometryDiagnosticPath(devPath),
@@ -207,6 +212,7 @@ export function geometryReasonLabel(reason: GeometryDiagnosticReason): string {
     case 'dev-no-solidmodel': return 'DEV 未声明可达 SOLIDMODEL';
     case 'parser-unsupported': return '几何类型暂不支持';
     case 'missing-dependency': return '几何依赖缺失';
+    case 'source-invalid': return '源几何异常，禁止渲染';
     case 'parse-failed': return '几何解析失败';
     case 'unknown': return '未分类';
   }

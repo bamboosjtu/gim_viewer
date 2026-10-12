@@ -80,10 +80,12 @@ pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 /// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
 ///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v8-occurrence";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v9-source-invalid";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GeometryCacheManifestEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
     pub entry_path: String,
     /// DEV 几何结果：`glb`/`partial` 表示有可加载的 GLB，`empty` 表示
     /// 确定性空几何，`unsupported` 表示源非空但当前 renderer 不支持。
@@ -1169,7 +1171,17 @@ pub struct CbmNodeRecord {
     pub created_at_ms: u64,
 }
 
+// Per-validation, per-thread aggregate only. Nested spans overlap; do not sum.
+thread_local! { static VALIDATION_TIMINGS: std::cell::RefCell<Option<std::collections::BTreeMap<&'static str,(u64,f64)>>> = const { std::cell::RefCell::new(None) }; }
+struct ValidationSpan { label: &'static str, start: std::time::Instant }
+impl ValidationSpan { fn new(label: &'static str) -> Self { Self { label, start:std::time::Instant::now() } } }
+impl Drop for ValidationSpan { fn drop(&mut self) { VALIDATION_TIMINGS.with(|cell| { if let Some(map)=cell.borrow_mut().as_mut() { let v=map.entry(self.label).or_default(); v.0+=1;v.1+=self.start.elapsed().as_secs_f64()*1000.0; } }); } }
+struct ValidationProfile;
+impl ValidationProfile { fn begin() -> Self { VALIDATION_TIMINGS.with(|c| *c.borrow_mut()=Some(Default::default())); Self } }
+impl Drop for ValidationProfile { fn drop(&mut self) { VALIDATION_TIMINGS.with(|c| { if let Some(map)=c.borrow_mut().take() { eprintln!("[gim-cache-validation] {}",serde_json::to_string(&map).unwrap_or_default()); } }); } }
+
 fn count_rows(conn: &Connection, table: &str, project_id: i64) -> Result<i64, String> {
+    let _timing = ValidationSpan::new("sqlite_counts");
     let sql = format!("SELECT COUNT(*) FROM {} WHERE project_id = ?1", table);
     conn.query_row(&sql, params![project_id], |row| row.get(0))
         .map_err(|e| format!("统计 {} 失败: {}", table, e))
@@ -1178,6 +1190,7 @@ fn count_rows(conn: &Connection, table: &str, project_id: i64) -> Result<i64, St
 // Publication receipt belongs to the existing semantic domain. It detects
 // truncated/deleted index rows on the next open without depending on GLBs.
 fn substation_index_receipt(conn: &Connection, project_id: i64) -> Result<String, String> {
+    let _timing = ValidationSpan::new("receipt");
     let sha: String = conn.query_row("SELECT sha256 FROM gim_project WHERE id=?1", params![project_id], |r| r.get(0))
         .map_err(|e| e.to_string())?;
     let mut counts = std::collections::BTreeMap::new();
@@ -1199,6 +1212,7 @@ fn substation_index_receipt_matches(conn: &Connection, project_id: i64) -> bool 
 }
 
 fn missing_substation_sources(conn: &Connection, app: &tauri::AppHandle, project_id: i64) -> Result<Vec<String>,String> {
+    let _timing = ValidationSpan::new("source_scan_path_files");
     let mut stmt = conn.prepare("SELECT entry_path, local_cache_path, file_size FROM substation_gim_entry WHERE project_id=?1").map_err(|e|e.to_string())?;
     let rows = stmt.query_map(params![project_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,i64>(2)?))).map_err(|e|e.to_string())?;
     let mut missing = Vec::new();
@@ -1217,6 +1231,7 @@ fn missing_substation_sources(conn: &Connection, app: &tauri::AppHandle, project
 }
 
 fn readable_source_of_size(path: &std::path::Path, size: i64) -> bool {
+    let _timing = ValidationSpan::new("metadata_open");
     stdfs::metadata(path).map(|m|m.is_file() && m.len() as i64 == size).unwrap_or(false)
         && stdfs::File::open(path).is_ok()
 }
@@ -1353,6 +1368,7 @@ fn validate_entry_path(entry_path: &str) -> Result<PathBuf, String> {
 /// 拒绝缓存目录中的符号链接/junction（Windows reparse point）。
 /// 仅检查 metadata，不跟随链接，避免缓存路径被重定向到任意目录。
 fn reject_link(path: &Path, label: &str) -> Result<(), String> {
+    let _timing = ValidationSpan::new("symlink_metadata");
     let Ok(meta) = stdfs::symlink_metadata(path) else {
         return Ok(());
     };
@@ -2179,6 +2195,7 @@ fn is_expected_cache_path(
     entry_path: &str,
     candidate: &Path,
 ) -> Result<bool, String> {
+    let _timing = ValidationSpan::new("cache_root_resolution");
     ensure_cache_project_id(project_id)?;
     let base = app_handle
         .path()
@@ -2193,13 +2210,11 @@ fn is_expected_cache_path_in_root(
     entry_path: &str,
     candidate: &Path,
 ) -> Result<bool, String> {
+    let _timing = ValidationSpan::new("path_containment");
     let relative = validate_entry_path(entry_path)?;
     if reject_link(&root, " IFC").is_err() {
         return Ok(false);
     }
-    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    let expected = canonical_root.join(&relative);
-    let lexical_expected = root.join(relative);
     let norm = |path: &Path| {
         let mut s = path.to_string_lossy().replace('\\', "/");
         #[cfg(windows)]
@@ -2220,6 +2235,12 @@ fn is_expected_cache_path_in_root(
         }
         s
     };
+    let canonical_root = {
+        let _resolve=ValidationSpan::new("root_canonicalize");
+        root.canonicalize().unwrap_or_else(|_|root.to_path_buf())
+    };
+    let expected = canonical_root.join(&relative);
+    let lexical_expected = root.join(relative);
     // Windows packaged processes can redirect a trusted app-data directory
     // into their package LocalCache during canonicalize. Entries written via
     // app_data_dir retain the lexical name. Accept either trusted spelling;
@@ -3042,6 +3063,7 @@ fn check_geometry_cache_manifest_structure(
     project_id: i64,
     source_sha256: &str,
 ) -> bool {
+    let _timing = ValidationSpan::new("geometry_structure");
     let Some(manifest) = load_geometry_cache_manifest(app_handle, project_id) else {
         return false;
     };
@@ -3129,6 +3151,7 @@ fn validate_geometry_manifest_entry_shape(
         return Err(format!("GLB manifest 条目重复: {}", entry.entry_path));
     }
     match entry.status.as_str() {
+        "source-invalid" if entry.size == 0 && entry.diagnostic.as_deref().map(|s| !s.trim().is_empty() && s.len() <= 16384).unwrap_or(false) => Ok(()),
         "empty" if entry.size == 0 => Ok(()),
         "unsupported" if entry.size == 0 => Ok(()),
         "glb" | "partial" if entry.size > 0 => Ok(()),
@@ -3165,6 +3188,7 @@ fn check_geometry_cache_manifest(
     project_id: i64,
     source_sha256: &str,
 ) -> bool {
+    let _timing = ValidationSpan::new("geometry_files");
     let Some(manifest) = load_geometry_cache_manifest(app_handle, project_id) else {
         return false;
     };
@@ -3176,7 +3200,7 @@ fn check_geometry_cache_manifest(
         if validate_geometry_manifest_entry_shape(&entry, &mut seen).is_err() {
             return false;
         }
-        if entry.status == "empty" || entry.status == "unsupported" {
+        if entry.status == "empty" || entry.status == "unsupported" || entry.status == "source-invalid" {
             // empty/unsupported 都是确定性的合法结果，不存在对应 GLB
             // 文件也不构成 miss。
             continue;
@@ -3228,7 +3252,7 @@ pub fn write_geometry_cache_manifest(
         if let Err(error) = validate_geometry_manifest_entry_shape(entry, &mut seen) {
             return Err(error);
         }
-        if entry.status == "empty" || entry.status == "unsupported" {
+        if entry.status == "empty" || entry.status == "unsupported" || entry.status == "source-invalid" {
             // empty/unsupported 为确定性 tombstone：不要求磁盘上存在零
             // 字节占位文件。
             continue;
@@ -3394,6 +3418,7 @@ fn check_fragments_cache_complete(
     source_sha256: &str,
     ifc_entry_count: u64,
 ) -> bool {
+    let _timing = ValidationSpan::new("fragments");
     if ifc_entry_count == 0 {
         return false;
     }
@@ -5303,10 +5328,14 @@ pub fn validate_gim_cache(
     project_id: i64,
     expected_project_type: String,
 ) -> Result<GimCacheValidation, String> {
+    let _profile = if expected_project_type == "substation" { Some(ValidationProfile::begin()) } else { None };
+    let _total = ValidationSpan::new("total");
+    let lock_timing = ValidationSpan::new("database_lock_wait");
     let conn = state
         .0
         .lock()
         .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    drop(lock_timing);
     ensure_project_exists(&conn, project_id)?;
 
     let cbm_nodes_count = count_rows(&conn, "substation_cbm_node", project_id)?;
@@ -5317,6 +5346,8 @@ pub fn validate_gim_cache(
 
     // 读取旧共享版本、domain 版本和工程类型。旧版本字段只用于迁移兼容
     // 与诊断；有效性按工程类型选择独立 domain。
+    let _sql = ValidationSpan::new("validation_body_including_io");
+    let version_timing = ValidationSpan::new("sqlite_version_query");
     let (
         stored_parser_version,
         stored_line_parser_version,
@@ -5337,6 +5368,7 @@ pub fn validate_gim_cache(
         )
         .map_err(|e| format!("读取项目版本失败: {}", e))?;
 
+    drop(version_timing);
     if expected_project_type != "transmission_line" && expected_project_type != "substation" {
         return Err(format!(
             "缓存校验需要明确的源工程类型，收到: {}",
@@ -5433,6 +5465,7 @@ pub fn validate_gim_cache(
         let mut cached_ifc_count: u64 = 0;
         let mut ifc_entry_count: u64 = 0;
         let mut missing_cache_paths: Vec<String> = Vec::new();
+        let ifc_timing = ValidationSpan::new("ifc_source_files");
         for r in rows {
             let (entry_path, local_cache_path, expected_size) =
                 r.map_err(|e| format!("读取 IFC entry 失败: {}", e))?;
@@ -5462,6 +5495,7 @@ pub fn validate_gim_cache(
             }
         }
 
+        drop(ifc_timing);
         missing_cache_paths.extend(missing_substation_sources(&conn,&app_handle,project_id)?);
         let valid = has_index
             && ifc_models_count > 0
@@ -7746,6 +7780,7 @@ mod tests {
         let mut seen = HashSet::new();
         validate_geometry_manifest_entry_shape(
             &GeometryCacheManifestEntry {
+                diagnostic: None,
                 entry_path: "DEV/Shared.Dev".into(),
                 status: "glb".into(),
                 size: 12,
@@ -7755,6 +7790,7 @@ mod tests {
         .unwrap();
         validate_geometry_manifest_entry_shape(
             &GeometryCacheManifestEntry {
+                diagnostic: None,
                 entry_path: "dev/empty.dev".into(),
                 status: "empty".into(),
                 size: 0,
@@ -7764,6 +7800,7 @@ mod tests {
         .unwrap();
         validate_geometry_manifest_entry_shape(
             &GeometryCacheManifestEntry {
+                diagnostic: None,
                 entry_path: "dev/partial.dev".into(),
                 status: "partial".into(),
                 size: 12,
@@ -7773,6 +7810,7 @@ mod tests {
         .unwrap();
         validate_geometry_manifest_entry_shape(
             &GeometryCacheManifestEntry {
+                diagnostic: None,
                 entry_path: "dev/unsupported.dev".into(),
                 status: "unsupported".into(),
                 size: 0,
@@ -7782,6 +7820,7 @@ mod tests {
         .unwrap();
         let duplicate = validate_geometry_manifest_entry_shape(
             &GeometryCacheManifestEntry {
+                diagnostic: None,
                 entry_path: "Dev/SHARED.DEV".into(),
                 status: "glb".into(),
                 size: 12,
@@ -7798,6 +7837,7 @@ mod tests {
             let mut seen = HashSet::new();
             let error = validate_geometry_manifest_entry_shape(
                 &GeometryCacheManifestEntry {
+                diagnostic: None,
                     entry_path: "DEV/item.dev".into(),
                     status: status.into(),
                     size,

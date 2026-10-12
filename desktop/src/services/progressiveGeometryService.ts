@@ -37,6 +37,7 @@ import {
   isGeometryTokenValid,
 } from './modAutoLoadService.js';
 import type { DevGlbFailureType, DevGlbFastPathProfile } from './modAutoLoadService.js';
+import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import type { DevGlbSerializationResult } from './glbCacheService.js';
 import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 import { createDevGeometryTelemetry } from './devGeometryTelemetry.js';
@@ -76,6 +77,7 @@ export interface ProgressiveGeometryResult {
   /** 是否被 token 中断（项目切换） */
   interrupted: boolean;
   /** P1 评审：序列化或落盘失败、未获得确定性结果的 DEV 路径 */
+  sourceInvalidDevs?: string[];
   failedDevs: string[];
   /** 无法产生可渲染 GLB、需要定向 raw fallback 的 DEV。 */
   rawFallbackDevs: string[];
@@ -448,6 +450,7 @@ export async function runProgressiveDevGlbPipeline(
     // same-project geometry token supersedes this pipeline.
     if (wasInterrupted) disposeDevGlbTemplatePool(modRoot, session);
     return {
+      sourceInvalidDevs: glbEntries.filter(e=>e.status === 'source-invalid').map(e=>e.entry_path),
       compiledDevs,
       renderedInstances,
       interrupted: wasInterrupted,
@@ -506,8 +509,11 @@ export async function runProgressiveDevGlbPipeline(
       }
     } catch (err) {
       serializeFailed = true;
-      markGeometryFailure(devPath, classifyDevGlbFailure(err));
-      console.warn(`[progressive] DEV 序列化失败（计入失败清单，不写版本标记）: ${devPath}`, err);
+      if (err instanceof InvalidDevGeometryError && err.sourceEvidence) {
+        if (capturedProjectId != null && isTauri()) glbEntries.push({entry_path:devPath,status:'source-invalid',size:0,diagnostic:`${err.message}; ${err.sourceEvidence}`});
+        if (isSessionValid()) setGeometryDiagnostic(state, diagnosticForFailure(devPath, 'source-invalid', 'cold', `${err.message}; ${err.sourceEvidence}`));
+      } else markGeometryFailure(devPath, classifyDevGlbFailure(err));
+      console.warn(`[progressive] DEV 几何拒绝或编译失败: ${devPath}`, err);
     } finally {
       // The compiler currently exposes one async boundary.  Keep this as an
       // honest composite span for source read + MOD/STL parse + mesh/bake +
@@ -696,7 +702,10 @@ export async function runProgressiveDevGlbPipeline(
       } catch (err) {
         if (group && !shared) disposeGroup(group);
         console.warn(`[progressive] DEV GLB placement 渲染失败: ${devPath} #${seed.path}`, err);
-        markGeometryFailure(devPath, classifyDevGlbFailure(err));
+        if (err instanceof InvalidDevGeometryError && err.sourceEvidence) {
+        if (capturedProjectId != null && isTauri()) glbEntries.push({entry_path:devPath,status:'source-invalid',size:0,diagnostic:`${err.message}; ${err.sourceEvidence}`});
+        if (isSessionValid()) setGeometryDiagnostic(state, diagnosticForFailure(devPath, 'source-invalid', 'cold', `${err.message}; ${err.sourceEvidence}`));
+      } else markGeometryFailure(devPath, classifyDevGlbFailure(err));
         templatePool.invalidate(devPath);
         disposeDevGroups();
       }

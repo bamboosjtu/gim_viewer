@@ -807,7 +807,8 @@ export async function tryDevGlbFastPath(
       const key = normalizeDevEntryPath(entry.entry_path).toLowerCase();
       if (manifestEntries.has(key)
         || !/^dev\//i.test(entry.entry_path.replace(/\\/g, '/'))
-        || !(['glb', 'partial', 'empty', 'unsupported'] as string[]).includes(entry.status)
+        || !(['glb', 'partial', 'empty', 'unsupported', 'source-invalid'] as string[]).includes(entry.status)
+        || (entry.status === 'source-invalid' && (entry.size !== 0 || !entry.diagnostic?.trim()))
         || ((entry.status === 'empty' || entry.status === 'unsupported') && entry.size !== 0)
         || ((entry.status === 'glb' || entry.status === 'partial')
           && (!Number.isSafeInteger(entry.size) || entry.size <= 0))) {

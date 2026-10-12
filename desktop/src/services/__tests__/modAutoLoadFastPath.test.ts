@@ -76,7 +76,7 @@ function manifest(entries: Array<{ entry_path: string; status: GeometryCacheMani
 }
 
 function depsFor(
-  entries: Array<{ entry_path: string; status: 'glb' | 'empty'; size: number }>,
+  entries: Array<{ entry_path: string; status: GeometryCacheManifestStatus; size: number; diagnostic?: string }>,
   bytes: Record<string, Uint8Array | null>,
   options: {
     load?: (path: string, data: Uint8Array) => Promise<THREE.Group | null>;
@@ -98,6 +98,16 @@ function depsFor(
 }
 
 describe('DEV GLB fast path v3', () => {
+  it('source-invalid never reads GLB or falls back; normal sibling restores without compilation',async()=>{
+    const state=makeState(),batchCalls:string[][]=[];
+    const deps=depsFor([{entry_path:'DEV/a.dev',status:'partial',size:12},{entry_path:'DEV/b.dev',status:'source-invalid',size:0,diagnostic:'typed extent; MOD/b.mod'}],{'DEV/a.dev':validGlb()},{batchCalls});
+    const nodes=[seed('CBM/a.cbm','a.dev'),seed('CBM/b.cbm','b.dev')];
+    const result=await tryDevGlbFastPath(state,new THREE.Scene(),nodes,vi.fn(),1,deps,{projectId:1,generation:1,sourceSha256:'sha-test'});
+    expect(result).not.toBeNull();expect(batchCalls.flat()).toEqual(['DEV/a.dev']);
+    expect(state.loadedXmlModGroups.size).toBe(1);
+    expect(result?.profile.failedDevPaths).toEqual([]);
+  });
+
   it('多个 CBM instance 共用同一 DEV 时只读一次，template 只 parse 一次并共享 placement', async () => {
     const state = makeState();
     const nodes = [

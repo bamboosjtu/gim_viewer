@@ -26,7 +26,7 @@ import { discoverGeometriesFromDevPath } from './modGeometryDiscovery.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { getFileByPath } from '../gim/fileLookup.js';
-import { invalidGeometryExtent } from '../viewer/geometryBounds.js';
+import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
 import {
   disposeXmlModGroup,
   XML_MOD_GEOMETRY_DIAGNOSTICS_KEY,
@@ -55,12 +55,8 @@ export interface DevGlbSerializationResult {
   diagnostics: DevGlbSerializationDiagnostics;
 }
 
-export class InvalidDevGeometryError extends Error {
-  constructor(readonly devPath: string, readonly reason: string) {
-    super(`DEV 几何无效，拒绝导出 GLB: ${devPath}: ${reason}`);
-    this.name = 'InvalidDevGeometryError';
-  }
-}
+export { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
+import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 
 /** 单例 GLTFLoader（内部无状态，可安全复用） */
 let _gltfLoader: GLTFLoader | null = null;
@@ -277,7 +273,27 @@ export async function serializeDevToGlbDetailed(
       devGroup.remove(child);
       disposeSourceGroup(child as THREE.Group);
     }
-    throw new InvalidDevGeometryError(canonicalDevPath, invalidExtent);
+    // Verify source placements independently of primitive mesh construction.
+    // An arbitrary renderer/serializer failure is never a source tombstone.
+    const { parseXmlMod } = await import('../gim/geometry/xmlModParser.js');
+    const origins = new THREE.Box3();
+    const sources: string[] = [];
+    for (const edge of discovered.mods) {
+      const file=getFileByPath(files,edge.modPath);
+      if (!file) throw new Error(`Source evidence missing: ${edge.modPath}`);
+      const doc=parseXmlMod(await file.text(),edge.modPath);
+      for (const entity of doc.entities) {
+        if (!entity.visible) continue;
+        const point=new THREE.Vector3().applyMatrix4(new THREE.Matrix4().fromArray(entity.transformMatrix))
+          .applyMatrix4(new THREE.Matrix4().fromArray(edge.placementTransformMatrix)).multiplyScalar(0.001);
+        origins.expandByPoint(point);
+        if (sources.length<8 && point.length()>GEOMETRY_MAX_EXTENT_M) sources.push(`${edge.modPath} Entity ${entity.id}: ${entity.transformMatrix.join(',')}`);
+      }
+    }
+    const span=origins.getSize(new THREE.Vector3());
+    const sourceEvidence=Number.isFinite(span.length()) && Math.max(span.x,span.y,span.z)>GEOMETRY_MAX_EXTENT_M
+      ? `source-origin-span-v1: ${span.toArray().join(',')}; ${sources.join('; ')}` : undefined;
+    throw new InvalidDevGeometryError(canonicalDevPath, `${invalidExtent}; sources: ${[...discovered.mods.map(r=>r.modPath),...discovered.stls.map(r=>r.stlPath)].join(", ")}`, sourceEvidence);
   }
 
   // 3. 序列化 devGroup → GLB

@@ -78,7 +78,7 @@ PHM 根据引用扩展名递归，逐边累积矩阵，按当前分支防环。�
 
 冷路径按唯一 DEV 编译 GLB、落盘并渐进提交 placement。clean static DEV 在会话内只解析一个模板，共享不可变 geometry/material；每个 occurrence 保留独立节点层级和变换。不能把 placement 烘焙写回共享 geometry。无法共享的范围使用局部回退。当前不采用 InstancedMesh。
 
-GLB 恢复校验 manifest、源身份、条目状态和文件完整性。单 DEV 文件失败可局部回退原始几何；manifest 无效使几何域失效，不要求删除有效语义域。完成标记只在所有目标条目形成确定状态后提交，瞬时失败不能写为完整版本。
+GLB 恢复校验 manifest、源身份、条目状态和文件完整性。单 DEV 文件失败可局部回退原始几何；manifest 无效使几何域失效，不要求删除有效语义域。完成标记只在所有目标条目形成确定状态后提交，瞬时失败不能写为完整版本。确定性 source-invalid 可与其他确定结果共同发布结构有效的缓存，暖恢复不读取其 GLB 或重试 raw；结构有效不等于所有几何显示，fullModelReady 诊断明确记录拒绝数及 geometryFullyRendered。
 
 DEV 导出前和静态 GLB 模板恢复时检查有限值与包围盒跨度，复用场景既有 500 m 跨度上限，不按设备名称选择规则。异常源矩阵不会被 clamp 或静默删除；导出失败进入现有 failed 路径，不发布正常 GLB 或完整几何版本。运行时仍在应用 occurrence 变换后执行原包围盒守卫。样本验收分别统计候选可恢复、实际提交与异常拒绝 occurrence，不能以文件存在代替显示成功。
 
@@ -88,6 +88,7 @@ DEV 导出前和静态 GLB 模板恢复时检查有限值与包围盒跨度，�
 | `partial` | 有可渲染部分，同时有未覆盖来源 |
 | `empty` | 源内容没有自有可渲染几何，允许零字节标记 |
 | `unsupported` | 源存在但当前能力不支持，不能算 empty |
+| `source-invalid` | 有类型的确定性源几何异常，零字节且保留来源诊断；禁止渲染，按 SHA/几何版本重新评估 |
 | 运行失败 | 读取/编译异常；不是可接受的完整性终态 |
 
 二进制批读 `batch_read_glb_files` 使用 GIMR 协议；当前批量上限为 256 文件或估算 64 MiB。内部 IR 区分 XmlModDocument、primitive、DEV/PHM 模板、引用边、装配路径和场景资源。类型定义以 [geometry/ir.ts](../desktop/src/gim/geometry/ir.ts) 为准，格式契约见 [几何模型](schema/geometry-model.md)。
@@ -108,7 +109,7 @@ DEV 导出前和静态 GLB 模板恢复时检查有限值与包围盒跨度，�
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
 | 变电语义 | `gim-substation-parser-v26` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性、语义引用及索引发布凭据 |
-| DEV 几何 | `geometry-cache-v8-occurrence` | [db.rs](../desktop/src-tauri/src/db.rs) | occurrence 引用、manifest 和 GLB |
+| DEV 几何 | `geometry-cache-v9-source-invalid` | [db.rs](../desktop/src-tauri/src/db.rs) | occurrence 引用、manifest 和 GLB |
 | Spatial snapshot | `substation-spatial-semantic-v2` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 源、链接和序列化结构 |
 | IFC Spatial parser contract | `gim-substation-parser-v23` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | Fragments | `fragments-cache-v6` | [db.rs](../desktop/src-tauri/src/db.rs)、[features](../desktop/src/config/features.ts) | 源/IFC 身份及实际安装的 fragments/web-ifc 版本 |

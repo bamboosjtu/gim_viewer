@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import type { GeometryCacheManifestEntry } from '@desktop/database.js';
 import * as THREE from 'three';
 import { buildCbmTree } from '../../gim/cbmParser.js';
 import { discoverIfcFromCBM } from '../../gim/gimIndexer.js';
@@ -143,6 +144,8 @@ for (const [ordinal, sample] of samples.entries()) {
     for (const sidecar of sidecars) expect(sql.reachable.some((r) => r.geometry_path.toLowerCase() === sidecar.path.toLowerCase())).toBe(false);
     const statuses: Record<string, number> = { complete: 0, partial: 0, empty: 0, unsupported: 0, failed: 0 };
     const cache = mkdtempSync(join(tmpdir(), `gim-${sample.id}-glb-`));
+    const persisted: GeometryCacheManifestEntry[] = [];
+    let warmReads = 0;
     let glbChecks = 0;
     let theoreticalRecoverableOccurrences = 0;
     let rejectedOccurrences = 0;
@@ -157,14 +160,17 @@ for (const [ordinal, sample] of samples.entries()) {
         try {
           compiled = await serializeDevToGlbDetailed(dev, files);
         } catch (error) {
-          if (!(error instanceof InvalidDevGeometryError)) throw error;
+          if (!(error instanceof InvalidDevGeometryError) || !error.sourceEvidence) throw error;
+          persisted.push({entry_path:`DEV/${dev}`,status:'source-invalid',size:0,diagnostic:`${error.message}; ${error.sourceEvidence}`});
           statuses.failed++;
           rejectedOccurrences += placements.length;
           rejectedTemplates.push({ dev, roots:placements.length, reason:error.reason });
           continue;
         }
         statuses[compiled.status]++;
-        if (!compiled.bytes) { expect(['empty','unsupported']).toContain(compiled.status); continue; }
+        if (!compiled.bytes) { persisted.push({entry_path:`DEV/${dev}`,status:compiled.status === 'unsupported'?'unsupported':'empty',size:0}); expect(['empty','unsupported']).toContain(compiled.status); continue; }
+        persisted.push({entry_path:`DEV/${dev}`,status:compiled.status === 'partial'?'partial':'glb',size:compiled.bytes.byteLength});
+        writeFileSync(join(cache,dev),compiled.bytes);
         writeFileSync(join(cache,'device.glb'),compiled.bytes);
         const bytes = new Uint8Array(readFileSync(join(cache,'device.glb')));
         if (!damagedDev && compiled.status === 'complete') {
@@ -241,6 +247,15 @@ for (const [ordinal, sample] of samples.entries()) {
         state.loadedXmlModGroups.clear();
         pool.dispose();
       }
+      const restored=new AppState();restoreGimIndexToState(restored,sql.index);restored.currentProjectId=1;restored.currentSourceSha256=sample.sha;restored.geometryLoadToken=1;
+      const result=await tryDevGlbFastPath(restored,new THREE.Scene(),warmSeeds,()=>{},1,{
+        readGeometryCacheManifest:async()=>({source_sha256:sample.sha,entries:persisted}),
+        batchReadGlbFiles:async(_pid,paths)=>new Map(paths.map(path=>{warmReads++;return [path,new Uint8Array(readFileSync(join(cache,path.replace(/^DEV\//i,''))))];})),
+        loadDevGlb,parseDevGlbAsset,applyPlacementTransformToSceneUnits,
+      },{projectId:1,generation:restored.projectGeneration,sourceSha256:sample.sha});
+      expect(result).not.toBeNull();expect(result?.profile.failedDevPaths).toEqual([]);
+      expect(restored.loadedXmlModGroups.size).toBe(glbChecks);
+      expect(warmReads).toBe(persisted.filter(e=>e.status==='glb'||e.status==='partial').length);
     } finally { rmSync(cache,{ recursive: true, force: true }); }
     expect(glbChecks).toBeGreaterThan(0);
     expect(fallbackChecks).toBeGreaterThan(0);
@@ -259,6 +274,7 @@ for (const [ordinal, sample] of samples.entries()) {
       rootOccurrences:seeds.length, uniqueDevTemplates:byDev.size,
       parts: aliases.partToOccurrences.size, unlinked:[...aliases.partToOccurrences.values()].filter((p) => p.length === 0).length,
       ambiguous:[...aliases.partToOccurrences.values()].filter((p) => p.length > 1).length,
+      warmGlbReads:warmReads,warmRecompiledTemplates:0,deterministicManifestTemplates:persisted.length,
       geometryLeaves:coldLeaves.length, glSidecars:sidecars.length, glbRestoredOccurrences:glbChecks,
       theoreticalRecoverableOccurrences: theoreticalRecoverableOccurrences + rejectedTemplates.reduce((sum,r)=>sum+r.roots,0),
       successfullySubmittedOccurrences:glbChecks, abnormalRejectedOccurrences:rejectedOccurrences, rejectedTemplates,

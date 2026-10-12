@@ -1,3 +1,4 @@
+import { InvalidDevGeometryError } from '../glbCacheService.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as THREE from 'three';
 import { runProgressiveDevGlbPipeline } from '../progressiveGeometryService.js';
@@ -119,6 +120,31 @@ describe('runProgressiveDevGlbPipeline', () => {
 
   afterEach(() => {
     vi.mocked(isTauri).mockReturnValue(false);
+  });
+
+  it('stale source rejection cannot poison a new project diagnostic or publish a version',async()=>{
+    vi.mocked(isTauri).mockReturnValue(true);
+    const state=makeState({projectId:7});
+    const rec:DepsRecorder={serializeCalls:[],writeCalls:[],versionWrites:0,loadCalls:[],manifestEntries:[]};
+    const deps=makeDeps({},rec);deps.serializeDevToGlb=async path=>{state.currentProjectId=8;throw new InvalidDevGeometryError(path,'source invalid','source-origin-span-v1 fixture');};
+    const result=await runProgressiveDevGlbPipeline(state,new THREE.Scene(),()=>{},{token:1},deps);
+    expect(result.interrupted).toBe(true);expect(state.geometryDiagnosticsByDevPath.size).toBe(0);expect(rec.versionWrites).toBe(0);
+  });
+
+  it('typed source rejection publishes a tombstone; generic failure still prevents publication', async () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    for (const deterministic of [true,false]) {
+      const state=makeState({projectId:7});
+      const rec:DepsRecorder={serializeCalls:[],writeCalls:[],versionWrites:0,loadCalls:[],manifestEntries:[]};
+      const deps=makeDeps({},rec);
+      deps.serializeDevToGlb=async path=>{rec.serializeCalls.push(path);if(path.endsWith('b.dev'))throw deterministic?new InvalidDevGeometryError(path,'extent-exceeds-500m; MOD/b.mod','source-origin-span-v1 fixture'):new Error('disk read failed');return new Uint8Array([1,2,3]);};
+      const result=await runProgressiveDevGlbPipeline(state,new THREE.Scene(),()=>{},{token:1},deps);
+      expect(rec.serializeCalls).toHaveLength(2);
+      expect(result.renderedInstances).toBe(2);
+      expect(rec.versionWrites).toBe(deterministic?1:0);
+      if(deterministic){expect(result.sourceInvalidDevs).toEqual(['DEV/b.dev']);expect(result.failedDevs).toEqual([]);expect(rec.manifestEntries?.[0][1]).toMatchObject({status:'source-invalid',size:0,diagnostic:expect.stringContaining('MOD/b.mod')});}
+      else expect(result.failedDevs).toEqual(['DEV/b.dev']);
+    }
   });
 
   it.each([false,true])('production DEV loop: cooperative checkpoints=%s',async(cooperate)=>{

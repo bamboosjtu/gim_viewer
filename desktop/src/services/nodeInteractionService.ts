@@ -381,7 +381,7 @@ export async function loadModStlForNode(
   const message=selectionMessage(state,request,showMessage);
   const known=getGeometryDiagnostic(state,node.devPath);
   const alreadyLoaded=scope.assemblyPaths?.length && scope.assemblyPaths.every((path) => collectDeviceGroups(state,node.devPath,{...scope,assemblyPaths:[path]}).some(hasRenderableGeometry));
-  const noLoad=alreadyLoaded || scope.assemblyPaths?.length===0 || known?.status==='empty' || known?.status==='unsupported';
+  const noLoad=known?.reason==='source-invalid' || getGeometryDiagnostic(state,root.devPath)?.reason==='source-invalid' || alreadyLoaded || scope.assemblyPaths?.length===0 || known?.status==='empty' || known?.status==='unsupported';
   if (!noLoad) {
     const key=`${session.generation}:${session.geometryToken}:${root.path}`;
     const pending=pendingOccurrenceLoads.get(state) ?? new Map(); pendingOccurrenceLoads.set(state,pending);

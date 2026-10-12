@@ -600,9 +600,11 @@ export async function writeGeometryCacheVersion(
   });
 }
 
-export type GeometryCacheManifestStatus = 'glb' | 'partial' | 'empty' | 'unsupported';
+export type GeometryCacheManifestStatus = 'glb' | 'partial' | 'empty' | 'unsupported' | 'source-invalid';
 
 export interface GeometryCacheManifestEntry {
+  /** Typed source rejection; never generated from a generic error string. */
+  diagnostic?: string;
   entry_path: string;
   status: GeometryCacheManifestStatus;
   size: number;

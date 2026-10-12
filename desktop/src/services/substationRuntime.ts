@@ -1499,6 +1499,8 @@ async function autoLoadModStlPostIfc(
           ifcModels: state.loadedModels.size,
           modInstances: result.renderedInstances + scopedRaw.modCount,
           compiledDevs: result.compiledDevs,
+          sourceInvalidDevCount: result.sourceInvalidDevs?.length ?? 0,
+          geometryFullyRendered:![...state.geometryDiagnosticsByDevPath.values()].some(d=>d.status==='failed'||d.status==='partial'||d.status==='unsupported'),
           stlInstances: scopedRaw.stlCount,
         };
         options?.onGeometryComplete?.({...fullMeta,path:'progressive-dev-glb',renderedInstances:totalGeometryInstances});
@@ -1585,6 +1587,8 @@ async function autoLoadModStlPostIfc(
       modInstances: result.modCount,
       stlInstances: result.stlCount,
       path: 'cached-geometry',
+      sourceInvalidDevCount:[...state.geometryDiagnosticsByDevPath.values()].filter(d=>d.reason==='source-invalid').length,
+      geometryFullyRendered:![...state.geometryDiagnosticsByDevPath.values()].some(d=>d.status==='failed'||d.status==='partial'||d.status==='unsupported'),
     };
     options?.onGeometryComplete?.(fullMeta);
     if(!options?.deferFullModelReady){

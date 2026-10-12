@@ -119,3 +119,31 @@ fn substation_sqlite_exchange() {
     }
     std::fs::write(output_path,serde_json::to_vec(&output).unwrap()).unwrap();
 }
+
+/// Read-only native path replay. Opt-in; this is not a Tauri/WebView run.
+#[test]
+fn validation_path_replay() {
+    let Ok(base)=std::env::var("GIM_VALIDATION_REPLAY") else { return };
+    let base=std::path::PathBuf::from(base);
+    let conn=Connection::open_with_flags(base.join("gim_cache.db"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let _profile=ValidationProfile::begin();let _total=ValidationSpan::new("total");
+    assert!(substation_index_receipt_matches(&conn,1));
+    let root=base.join("extracted").join("1");
+    let mut stmt=conn.prepare("SELECT entry_path,local_cache_path,file_size FROM substation_gim_entry WHERE project_id=1").unwrap();
+    let rows=stmt.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,i64>(2)?))).unwrap();
+    let mut n=0;
+    for row in rows {let (entry,path,size)=row.unwrap();let ext=entry.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+        if !matches!(ext.as_str(),"ifc"|"cbm"|"fam"|"dev"|"phm"|"mod"|"gl"|"stl"|"sch"|"std"|"sld") {continue;}
+        let path=std::path::PathBuf::from(path.unwrap());assert!(is_expected_cache_path_in_root(&root,&entry,&path).unwrap());assert!(readable_source_of_size(&path,size));n+=1;
+    }
+    eprintln!("validation_path_replay files={}",n);
+}
+
+#[test]
+fn source_invalid_manifest_requires_diagnostic_and_zero_bytes() {
+    let mut e=GeometryCacheManifestEntry{entry_path:"DEV/bad.dev".into(),status:"source-invalid".into(),size:0,diagnostic:Some("typed bbox rejection; MOD/bad.mod".into())};
+    assert!(validate_geometry_manifest_entry_shape(&e,&mut HashSet::new()).is_ok());
+    e.diagnostic=None;assert!(validate_geometry_manifest_entry_shape(&e,&mut HashSet::new()).is_err());
+    e.diagnostic=Some("typed source diagnostic".into());e.size=12;assert!(validate_geometry_manifest_entry_shape(&e,&mut HashSet::new()).is_err());
+    assert_ne!(GEOMETRY_CACHE_VERSION,"geometry-cache-v8-occurrence");
+}
