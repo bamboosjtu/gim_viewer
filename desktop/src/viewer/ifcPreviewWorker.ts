@@ -9,14 +9,17 @@ self.onmessage = async (event: MessageEvent) => {
   try {
     if (input.type === 'open') {
       api.SetWasmPath(input.wasm.path, input.wasm.absolute);
+      const initStarted=performance.now();
       await api.Init(undefined, true);
+      const wasmInitMs=performance.now()-initStarted;
       const started = performance.now();
       model = api.OpenModel(input.bytes, { COORDINATE_TO_ORIGIN: false });
       if (model < 0) throw new Error('IFC metadata open failed');
       const openMs = performance.now() - started;
       const data = inspectIfcPreview(api, model, input.modelId, input.sourcePath);
       data.wasmHeapBytes = api.wasmModule?.HEAPU8?.byteLength ?? 0;
-      self.postMessage({ id: input.id, data, openMs, inspectMs: performance.now()-started-openMs });
+      data.timings={wasmInitMs,openModelMs:openMs,metadataMs:performance.now()-started-openMs};
+      self.postMessage({ id: input.id, data });
     } else if (input.type === 'properties-once') {
       api.SetWasmPath(input.wasm.path, input.wasm.absolute);
       await api.Init(undefined, true);

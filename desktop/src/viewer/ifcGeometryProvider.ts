@@ -28,6 +28,8 @@ export interface IfcPreviewData {
   diagnostics: { products: number; represented: number; unsupported: number; reasons: Record<string, number> };
   /** web-ifc heap capacity observed in its Worker; freed when that Worker terminates. */
   wasmHeapBytes?: number;
+  /** Metadata-only Worker stages, independent of full web-ifc conversion. */
+  timings?: { wasmInitMs: number; openModelMs: number; metadataMs: number };
 }
 export interface IfcPreviewProperties {
   attributes: Record<string, unknown>;

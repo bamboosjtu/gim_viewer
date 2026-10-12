@@ -159,7 +159,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
           files: native.files.size,
           extraction: native.extractionProfile ?? null,
         });
-        recordNativeExtractionStages(native.extractionProfile, perfSession);
+        recordNativeExtractionStages(native.extractionProfile, perfSession, source.magic === 'GIMPKGS');
         extracted = native;
       } catch (nativeError) {
         const nativeMessage = nativeError instanceof Error ? nativeError.message : String(nativeError);

@@ -8,7 +8,7 @@ import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 import { getFileByPath, hasFileByPath } from '../gim/fileLookup.js';
-import { getGeometryDiagnostic, geometryStatusLabel, geometryReasonLabel, diagnosticForFailure, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
+import { getGeometryDiagnostic, geometryDiagnosticSummary, diagnosticForFailure, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
 import {
   attachDevGlbTemplatePool,
@@ -43,14 +43,14 @@ export function describeNodeSelectionGeometry(state: AppState, node: CbmNode, at
   const scope=deviceOccurrenceScope(state.currentCbmTree,node);
   if (scope.assemblyPaths?.length === 0) return {status:'unlinked',detail:'部件未关联到真实 DEV 装配路径；保留相机位置。'};
   const diagnostic=getGeometryDiagnostic(state,node.devPath);
-  if ((scope.assemblyPaths?.length ?? 0)>1) return {status:'ambiguous',detail:`部件存在 ${scope.assemblyPaths!.length} 条装配路径，将定位所属设备内的全部候选。${diagnostic ? `几何状态：${geometryStatusLabel(diagnostic.status)}；${diagnostic.detail ?? ''}` : '部件完整性尚未获得确定性诊断。'}`};
-  if (diagnostic) return {status:diagnostic.status,detail:`${geometryStatusLabel(diagnostic.status)}${diagnostic.reason ? `：${geometryReasonLabel(diagnostic.reason)}` : ''}${diagnostic.detail ? `；${diagnostic.detail}` : ''}`};
+  if ((scope.assemblyPaths?.length ?? 0)>1) return {status:'ambiguous',detail:`部件存在 ${scope.assemblyPaths!.length} 条装配路径，将定位所属设备内的全部候选。${diagnostic ? `几何状态：${geometryDiagnosticSummary(diagnostic)}` : '部件完整性尚未获得确定性诊断。'}`};
+  if (diagnostic) return {status:diagnostic.status,detail:geometryDiagnosticSummary(diagnostic)};
   if (node.devPath) {
     const groups=collectDeviceGroups(state,node.devPath,scope);
     if (groups.some(hasRenderableGeometry)) return {status:'available',detail:'已有可显示几何；完整性尚未获得确定性诊断。'};
     const owner=resolveGeometryLoadNode(state.currentCbmTree,node);
     const parentDiagnostic=owner!==node ? getGeometryDiagnostic(state,owner.devPath) : undefined;
-    if (parentDiagnostic && ['failed','empty','unsupported'].includes(parentDiagnostic.status)) return {status:parentDiagnostic.status,detail:`所属装配设备${geometryStatusLabel(parentDiagnostic.status)}：${parentDiagnostic.detail ?? '当前部件没有可显示几何'}`};
+    if (parentDiagnostic && ['failed','empty','unsupported'].includes(parentDiagnostic.status)) return {status:parentDiagnostic.status,detail:`所属装配设备：${geometryDiagnosticSummary(parentDiagnostic)}`};
     return attempted ? {status:'unknown',detail:'当前没有可显示几何；尚无确定性诊断，不能判为空模型。'}
       : {status:'not-loaded',detail:'当前设备几何尚未加载。'};
   }

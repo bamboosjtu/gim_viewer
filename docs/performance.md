@@ -22,6 +22,12 @@
 
 ready 含义以 [架构](architecture.md#配置与加载状态) 为准。`allIfcReady` 和 `fullModelReady` 都须附加载失败、partial/unsupported 数；达到阶段不能解释为全源模型覆盖。
 
+桌面变电优先报告四个产品时刻：`coreSemanticReady`（树/基础属性）、`firstUsableGeometryReady`（首个可浏览站模型）、`devGeometryReady`（设备恢复或编译结束）、`selectedFineReady`（用户选择的唯一精细关联、高亮和属性提交）。同时报告 anchor 到 DEV ready 的等待与执行时间，不用全部 IFC 就绪替代设备可用性。`selectedFineReady` 产品时刻记录首个成功选择；逐请求事件保留 requestId、GlobalId、ExpressId 与 LocalId，过期或歧义选择不产生成功事件。
+
+每个 Preview 记录来源 bytes、WASM 初始化、OpenModel、metadata 检查、LOD0/LOD1 生成与 scene commit。LOD 生成 wall 包含时间片让权及 commit，不能与 commit 时长相加；完整 Preview wall 还包含源读取、Worker 启动/传输等。首个完整 IFC 的顺序不改变，剩余 Preview 保持顺序，不用文件大小代替实测成本排序。
+
+原生冷解压记录 header、archive wall、逐 entry decode/read 累计、sink write/open/data、staging commit、最大 entry decode/write 及路径，前端另记录小文件物化和 CBM/FAM/DEV 解析。archive wall 包含 decode 与 write，不能重复相加；7z solid stream 中单 entry 的读取/解码时长不等于可独立消除的文件成本。阶段解压或延迟 IFC 落盘需要另行评估条目顺序、solid block 和二次解码成本。
+
 原始 IFC 的百分比由当前 Fragments `IfcImporter` 按几何类别、属性、关系和序列化阶段报告，
 不是已读取字节或已完成构件的比例。某一类别的同步 `StreamMeshes` 返回前可能没有新的百分比；
 必须结合 Worker CPU、主线程 heartbeat、输入响应和最终文件状态区分计算长尾与界面阻塞。

@@ -154,6 +154,32 @@ describe('属性检查器纯 DOM 交互', () => {
     expect(document.getElementById('props-drawer-body')?.textContent).toContain('VendorPrimitive × 2');
   });
 
+  it('source-invalid has a short explanation, collapsed escaped evidence and full diagnostic copy',async()=>{
+    const drawer=await import('../propsDrawer.js');
+    const {geometryDiagnosticSummary}=await import('../../gim/geometry/geometryDiagnostics.js');
+    const state=new AppState(),raw=('MOD/bad.mod Entity 2 matrix 1e14 <source>\n').repeat(40);
+    const diagnostic={devPath:'DEV/bad.dev',status:'failed' as const,source:'warm' as const,reason:'source-invalid' as const,unsupportedPrimitiveTypeCounts:{},detail:raw};
+    state.geometryDiagnosticsByDevPath.set('dev/bad.dev',diagnostic);
+    const node:CbmNode={path:'CBM/bad.cbm',name:'设备',entityName:'F4System',children:[],famPath:'',devPath:'bad.dev',ifcFile:'',ifcGuid:'',classifyName:'',transformMatrix:'',systemNames:[],devSymbolName:'',devType:'',devExpanded:false};
+    state.currentCbmTree=node;
+    state.selectionGeometry={status:'failed',detail:geometryDiagnosticSummary(diagnostic)};
+    const writeText=vi.fn(async()=>{});Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true});
+    drawer.setupPropsDrawerInteractions();await drawer.showNodePropertiesBasic(state,node);
+    expect(geometryDiagnosticSummary(diagnostic)).toBe('源模型几何异常，已跳过渲染。属性和来源信息仍可查看。');
+    expect(document.body.textContent).toContain('模型坐标超出合理范围');
+    const details=document.querySelector('[data-geometry-details] details') as HTMLDetailsElement;
+    expect(details.open).toBe(false);expect(details.querySelector('source')).toBeNull();
+    expect(details.querySelector('pre')!.textContent).toContain(raw);
+    (document.querySelector('[data-itab="params"]') as HTMLButtonElement).click();details.open=true;
+    await drawer.showNodePropertiesBasic(state,node,state.selectionRequest!);
+    expect(document.querySelector('[data-itab="params"]')!.classList.contains('active')).toBe(true);
+    expect((document.querySelector('[data-geometry-details] details') as HTMLDetailsElement).open).toBe(true);
+    (document.querySelector('[data-copy-geometry-diagnostic]') as HTMLButtonElement).click();
+    await vi.waitFor(()=>expect(writeText).toHaveBeenCalledWith(`DEV/bad.dev\nsource-invalid\n${raw}`));
+    expect(document.querySelector('[data-copy-result]')!.textContent).toBe('已复制诊断信息');
+    expect(state.geometryDiagnosticsByDevPath.get('dev/bad.dev')!.detail).toBe(raw);
+  });
+
   it('CBM 裸 IFC 文件名来源反查为包内真实路径', async () => {
     const drawer = await import('../propsDrawer.js');
     const state = new AppState();

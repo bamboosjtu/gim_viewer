@@ -135,6 +135,20 @@ export function setupPropsDrawerInteractions(ctx?: ViewerContext): void {
   // CSV 导出遍历全部 pane（含隐藏），导出内容不受当前页签影响。
   propsDrawerBody.addEventListener('click', (ev) => {
     const element = ev.target instanceof Element ? ev.target : null;
+    const copy = element?.closest<HTMLButtonElement>('[data-copy-geometry-diagnostic]');
+    if (copy) {
+      const container=copy.closest('[data-geometry-details]');
+      const text=container?.querySelector('pre')?.textContent ?? '';
+      const status=container?.querySelector('[data-copy-result]');
+      const owner=propsDrawerBody.dataset.cbmSelection;
+      const report=(message:string)=>{
+        if(copy.isConnected&&status)status.textContent=message;
+        else if(owner&&propsDrawerBody.dataset.cbmSelection===owner){const current=propsDrawerBody.querySelector('[data-copy-result]');if(current)current.textContent=message;}
+      };
+      if(!navigator.clipboard?.writeText){report('无法自动复制，请选中技术详情复制。');return;}
+      void navigator.clipboard.writeText(text).then(()=>report('已复制诊断信息')).catch(()=>report('复制未成功，请选中技术详情复制。'));
+      return;
+    }
     const ref = element?.closest<HTMLElement>('[data-prop-ref]');
     if (ref) {
       ev.preventDefault();
@@ -179,6 +193,7 @@ export interface InspectorBuckets {
  * @param buckets 四个页签的内容 HTML（各页签内部使用 .props-section 结构）
  */
 export function renderInspectorTabs(titleHtml: string, buckets: InspectorBuckets, activeTab = 'overview'): void {
+  delete propsDrawerBody.dataset.cbmSelection;
   const selectedTab = (['overview', 'params', 'relations', 'source'] as const).includes(activeTab as 'overview' | 'params' | 'relations' | 'source')
     ? activeTab
     : 'overview';
@@ -291,9 +306,9 @@ function renderNodeGeometryDiagnostics(state: AppState, node: CbmNode): string {
     rows.push({ key: '当前选择几何', value: state.selectionGeometry.detail });
   }
   if (diagnostic) {
-    rows.push({ key: '几何状态', value: geometryStatusLabel(diagnostic.status) });
+    rows.push({ key: '几何状态', value: diagnostic.reason==='source-invalid' ? '源几何异常' : geometryStatusLabel(diagnostic.status) });
     rows.push({ key: '诊断来源', value: diagnostic.source === 'cold' ? '首次打开/编译' : diagnostic.source === 'warm' ? '缓存 manifest' : '按需回退' });
-    if (diagnostic.reason) rows.push({ key: '原因', value: geometryReasonLabel(diagnostic.reason) });
+    if (diagnostic.reason) rows.push({ key: '原因', value: diagnostic.reason==='source-invalid' ? '模型坐标超出合理范围' : geometryReasonLabel(diagnostic.reason) });
     if (diagnostic.discoveredModCount != null) rows.push({ key: '发现 MOD/GL', value: String(diagnostic.discoveredModCount) });
     if (diagnostic.discoveredStlCount != null) rows.push({ key: '发现 STL', value: String(diagnostic.discoveredStlCount) });
     if (diagnostic.renderableModCount != null) rows.push({ key: '可渲染 MOD/GL', value: String(diagnostic.renderableModCount) });
@@ -309,7 +324,7 @@ function renderNodeGeometryDiagnostics(state: AppState, node: CbmNode): string {
       .map(([type, count]) => `${type} × ${count}`)
       .join('、');
     if (unsupportedTypes) rows.push({ key: '未支持 primitive', value: unsupportedTypes });
-    if (diagnostic.detail) rows.push({ key: '说明', value: diagnostic.detail });
+    if (diagnostic.detail && diagnostic.reason!=='source-invalid') rows.push({ key: '说明', value: diagnostic.detail });
   } else {
     const selection=state.selectionRequest?.target?.key===node.path ? state.selectionGeometry : null;
     const labels:Record<NonNullable<AppState['selectionGeometry']>['status'],string>={
@@ -322,7 +337,9 @@ function renderNodeGeometryDiagnostics(state: AppState, node: CbmNode): string {
   if (childDevCount > 0) {
     rows.push({ key: '子设备 DEV 入口', value: String(childDevCount) });
   }
-  return renderPropertySection('几何状态', 'substation-dev', rows);
+  const technical=diagnostic?.reason==='source-invalid' && diagnostic.detail
+    ? `<div data-geometry-details class="props-section"><details><summary>查看技术详情</summary><pre style="max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere">${escHtml(`${diagnostic.devPath}\n${diagnostic.reason}\n${diagnostic.detail}`)}</pre></details><button type="button" class="prop-ref-link" data-copy-geometry-diagnostic>复制诊断信息</button><span role="status" data-copy-result></span></div>` : '';
+  return renderPropertySection('几何状态', 'substation-dev', rows)+technical;
 }
 
 /**
@@ -854,11 +871,21 @@ export async function showNodePropertiesBasic(state: AppState, node: CbmNode, re
   setSelectionStatus(getNodeDisplayName(node,state.ifcGuidToName,state.currentIfcEntries));
   const { overview, source } = buildCbmOverviewAndSource(state, node);
   const title = `<div class="props-header">${escHtml(getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries))}</div>`;
-  renderInspectorTabs(title, { overview, params:'<div class="props-note">正在读取属性…</div>', relations:buildCbmRelations(state,node), source });
+  const owner=`${request.session.generation}:${request.id}:${node.path}`;
+  // Same-request geometry refresh must not close a tab/details the user has
+  // just opened. Keep the completed inspector visible while its refresh reads.
+  if(propsDrawerBody.dataset.cbmSelection!==owner){
+    renderInspectorTabs(title, { overview, params:'<div class="props-note">正在读取属性…</div>', relations:buildCbmRelations(state,node), source });
+    propsDrawerBody.dataset.cbmSelection=owner;
+  }
   const params = await buildCbmParams(state, node);
   if (!state.isCurrentSelection(request)) return;
   const relations = buildCbmRelations(state, node);
-  renderInspectorTabs(title, { overview, params, relations, source });
+  const activeTab=propsDrawerBody.dataset.cbmSelection===owner ? propsDrawerBody.querySelector('[data-itab].active')?.getAttribute('data-itab')??'overview' : 'overview';
+  const technicalOpen=propsDrawerBody.dataset.cbmSelection===owner && Boolean(propsDrawerBody.querySelector<HTMLDetailsElement>('[data-geometry-details] details')?.open);
+  renderInspectorTabs(title, { overview, params, relations, source }, activeTab);
+  propsDrawerBody.dataset.cbmSelection=owner;
+  if(technicalOpen){const details=propsDrawerBody.querySelector<HTMLDetailsElement>('[data-geometry-details] details');if(details)details.open=true;}
 }
 
 /** 显示 CbmNode 属性（完整版，包含 IFC 原生属性，需要 Viewer） */

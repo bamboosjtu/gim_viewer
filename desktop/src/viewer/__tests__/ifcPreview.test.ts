@@ -41,6 +41,15 @@ function provider(loadFine=async()=>{},extra:Record<string,unknown>={}) {
   return {p,worker};
 }
 describe('IFC preview source coordinates and representation identity',()=>{
+  it('reports Worker metadata and LOD/commit durations without changing identity',async()=>{
+    const events:any[]=[];
+    const {p}=provider(async()=>{}, {onTiming:(e:any)=>events.push(e)});
+    await p.loadLOD(0);await p.loadLOD(1);
+    expect(events.map(e=>e.stage)).toEqual(['metadata','scene-commit','lod0','scene-commit','lod1']);
+    expect(events.every(e=>Number.isFinite(e.durationMs)&&e.durationMs>=0)).toBe(true);
+    expect(events[0].sourceBytes).toBe(1);expect(p.findByGlobalId('GUID-A')[0].expressId).toBe(20);
+    p.release();
+  });
   it('derives metres from project units, context and nested Site placement exactly once',()=>{
     const d=data(),s=d.shapes[0],matrix=new THREE.Matrix4().fromArray(s.matrix);
     expect(d.unitScale).toBe(.001);expect(d.origin).toEqual([10,0,0]);

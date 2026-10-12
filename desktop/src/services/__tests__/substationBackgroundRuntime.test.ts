@@ -7,6 +7,18 @@ const tick = async (): Promise<void> => {
 };
 
 describe('SubstationBackgroundCoordinator', () => {
+  it('cached DEV runs at an anchor while Preview stays pending; rebuild retains its tail gate and heavy lease',async()=>{
+    let resolve!:()=>void;const held=new Promise<void>(r=>resolve=r),order:string[]=[];
+    const coordinator=new SubstationBackgroundCoordinator({session:{id:9},isCurrent:()=>true});
+    coordinator.registerRemainingIfc();coordinator.startRemainingIfc();
+    coordinator.enqueue({task:'devGeometry',priority:2,heavy:true,startAfter:'coordinateAnchorReady',run:async()=>{order.push('dev');await held;}});
+    coordinator.enqueue({task:'spatialSemanticRebuild',priority:1,heavy:true,startAfter:'allIfcPreviewsReady',run:()=>{order.push('rebuild');}});
+    coordinator.markInteractive();await tick();expect(order).toEqual([]);
+    coordinator.markCoordinateAnchorReady();await tick();expect(order).toEqual(['dev']);
+    coordinator.markAllIfcPreviewsReady();await tick();expect(order).toEqual(['dev']);
+    resolve();await tick();await tick();expect(order).toEqual(['dev','rebuild']);
+  });
+
   it('serializes the heavy lane and keeps low-priority persistence behind geometry', async () => {
     let current = true;
     const order: string[] = [];

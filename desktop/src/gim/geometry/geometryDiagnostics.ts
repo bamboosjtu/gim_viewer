@@ -170,6 +170,12 @@ export function diagnosticForFailure(
   };
 }
 
+/** User-facing explanation; the full source evidence stays in diagnostic.detail. */
+export function geometryDiagnosticSummary(diagnostic: GeometryDiagnostic): string {
+  if (diagnostic.reason === 'source-invalid') return '源模型几何异常，已跳过渲染。属性和来源信息仍可查看。';
+  return `${geometryStatusLabel(diagnostic.status)}${diagnostic.reason ? `：${geometryReasonLabel(diagnostic.reason)}` : ''}${diagnostic.detail ? `；${diagnostic.detail}` : ''}`;
+}
+
 export function setGeometryDiagnostic(
   store: GeometryDiagnosticStore,
   diagnostic: GeometryDiagnostic,

@@ -51,8 +51,10 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
     sourceToViewer:THREE.Matrix4;loadFine:()=>Promise<void>;cancelFine?:()=>boolean;
     loadPropertiesBytes?:()=>Promise<Uint8Array|null>;releaseMetadataAfterPreview?:boolean;transferInput?:boolean;
     onResource?: (event:{state:'metadata-open'|'metadata-released'|'property-worker-open'|'property-worker-released';wasmHeapBytes?:number;rawBytes?:number})=>void;
+    onTiming?: (event:{stage:'metadata'|'lod0'|'lod1'|'scene-commit';durationMs:number;level?:number;sourceBytes?:number;wasmInitMs?:number;openModelMs?:number;metadataMs?:number})=>void;
     worker?:Worker}) {
     this.modelId=options.modelId;
+    this.onTiming=options.onTiming;
     this.wasmConfig=options.wasm;
     this.worker=options.worker ?? new Worker(new URL('./ifcPreviewWorker.ts',import.meta.url),{type:'module'});
     this.root.name=`IFC Preview · ${options.sourcePath}`;
@@ -69,6 +71,7 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
     this.opened=this.send({type:'open',modelId:options.modelId,sourcePath:options.sourcePath,bytes:owned,wasm:options.wasm},[owned.buffer]).then(data=>{
       if(this.released)throw new Error('Preview released');
       this.data=data;
+      options.onTiming?.({stage:'metadata',durationMs:(data.timings?.wasmInitMs??0)+(data.timings?.openModelMs??0)+(data.timings?.metadataMs??0),sourceBytes:inputBytes,...data.timings});
       this.root.matrix.copy(options.sourceToViewer).multiply(new THREE.Matrix4().makeTranslation(...data.origin as [number,number,number]));
       for(const s of data.shapes as IfcPreviewShape[]) {
         if(this.byId.has(s.object.expressId))continue;
@@ -84,6 +87,7 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
     this.onResource=options.onResource;
   }
   private readonly loadFine:()=>Promise<void>;
+  private readonly onTiming?: (event:{stage:'metadata'|'lod0'|'lod1'|'scene-commit';durationMs:number;level?:number;sourceBytes?:number;wasmInitMs?:number;openModelMs?:number;metadataMs?:number})=>void;
   private readonly cancelFine:(()=>boolean)|null;
   private readonly loadPropertiesBytes:(()=>Promise<Uint8Array|null>)|null;
   private readonly releaseMetadataAfterPreview:boolean;
@@ -129,6 +133,7 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
     await this.opened;
     const data=this.data;
     if(this.unavailable()||!data)return;
+    const buildStarted=performance.now();
     const temporary=new THREE.Group();
     // Box and Body are alternative representations. Keep all supported body items,
     // use explicit IFC boxes for LOD0 or when a product has no supported prism.
@@ -154,9 +159,12 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
       }
       if(this.unavailable())return;
       const selected=this.selected;
+      const commitStarted=performance.now();
       this.clearGeometry();this.root.add(...temporary.children.slice());this.level=level;
       if(selected)this.highlight(selected);
       this.root.updateMatrixWorld(true);
+      this.onTiming?.({stage:'scene-commit',level,durationMs:performance.now()-commitStarted});
+      this.onTiming?.({stage:level===0?'lod0':'lod1',level,durationMs:performance.now()-buildStarted});
     } finally {for(const mesh of temporary.children as THREE.Mesh[])mesh.geometry.dispose();}
   }
   findByGlobalId(guid:string):IfcPreviewObject[]{return [...this.byGuid.get(guid)??[]];}

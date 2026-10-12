@@ -61,19 +61,23 @@ export function resolveProjectName(
 export function recordNativeExtractionStages(
   profile: NativeExtractionProfile | undefined,
   session: PerfSession,
+  substation = false,
 ): void {
   if (!profile || !perfIsCurrentSession(session)) return;
   const stages: Array<[string, number, Record<string, unknown>]> = [
     ['native extract · header', profile.headerMs, { archiveBytes: profile.archiveBytes }],
-    ['native extract · archive decode', profile.decodeMs, { entryCount: profile.entryCount, totalBytes: profile.totalBytes }],
+    ['native extract · archive decode', profile.decodeMs, { entryCount: profile.entryCount, totalBytes: profile.totalBytes,
+      ...(substation ? {maxEntryDecodeMs:profile.maxEntryDecodeMs,maxEntryDecodePath:profile.maxEntryDecodePath} : {}) }],
     ['native extract · write', profile.writeMs, {
       writeOpenMs: profile.writeOpenMs ?? null,
       writeDataMs: profile.writeDataMs ?? null,
       writeMode: profile.writeMode ?? null,
+      ...(substation ? {maxEntryWriteMs:profile.maxEntryWriteMs,maxEntryWritePath:profile.maxEntryWritePath} : {}),
     }],
     ['native extract · manifest', profile.manifestMs, {}],
     ['native extract · commit', profile.commitMs ?? 0, {}],
   ];
+  if(substation)stages.splice(1,0,['native extract · archive wall',profile.archiveMs,{includesDecodeAndWrite:true}]);
   for (const [label, durationMs, meta] of stages) {
     if (durationMs > 0) perfRecordExternalSpan(label, durationMs, meta, session);
   }

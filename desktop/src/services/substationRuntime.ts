@@ -843,6 +843,7 @@ export async function loadAllIfcFiles(
   const previewFirstDeferredFine = state.currentProjectType==='substation'
     && isIfcPreviewEnabled() && isIfcPreviewDeferredFineEnabled();
   const backgroundReadinessGate:SubstationBackgroundGate=previewFirstDeferredFine?'allIfcPreviewsReady':'allIfcReady';
+  let devGeometryQueued = false;
   state.cancelPendingIfcFine=()=>background.cancelPendingUserIfcFine();
   let allPreviewEntriesReady=false;
   let allIfcReadyRecorded=false;
@@ -868,12 +869,13 @@ export async function loadAllIfcFiles(
     if(deferredDevGeometryReady&&deferredDevMeta)recordDeferredFullModelReady();
   };
   const recordDeferredFullModelReady=():void=>{
-    if(!previewFirstDeferredFine||!allIfcReadyRecorded||!deferredDevGeometryReady||!deferredDevMeta)return;
+    if(!allIfcReadyRecorded||!deferredDevGeometryReady||!deferredDevMeta)return;
     // A failed file is terminal for allIfcReady, but cannot be described as a
     // complete model. A later user retry may still satisfy this condition.
-    if(entries.some(entry=>state.ifcPreviewFineStates.get(entry.modelId)!=='fineReady'))return;
+    if(previewFirstDeferredFine&&entries.some(entry=>state.ifcPreviewFineStates.get(entry.modelId)!=='fineReady'))return;
     if(perfProductMomentSnapshot().fullModelReady)return;
-    const meta={...deferredDevMeta,ifcModels:state.loadedModels.size,deferredFine:0};
+    const meta={...deferredDevMeta,ifcModels:state.loadedModels.size,deferredFine:0,failedIfcCount:fineFailureCount(),
+      geometryFullyRendered:deferredDevMeta.geometryFullyRendered===true&&fineFailureCount()===0};
     perfMarkProductMoment('fullModelReady',meta,perfSession);
     void sampleSubstationMemory(state,'fullModelReady',perfSession,meta,ctx);
   };
@@ -1012,14 +1014,21 @@ export async function loadAllIfcFiles(
     startPostInteractiveTask('IFC 空间语义', options.startSpatialSemantic, options.scheduleSpatialSemantic);
     startPostInteractiveTask('STD/SLD', options.startStdSld, options.scheduleStdSld);
     startPostInteractiveTask('缓存持久化', options.startCachePersistence, options.scheduleCachePersistence);
+    if (state.projectSourceToViewerMatrix) {
+      background.markCoordinateAnchorReady();
+      // Only a validated, complete cache gets this early lane. Cold builds and
+      // incomplete caches retain the existing tail gate and repair contracts.
+      if (options.geometryCacheValid === true && !state.currentFiles) enqueueDevGeometry('coordinateAnchorReady');
+    }
   };
 
-  const enqueueDevGeometry = (): void => {
-    background.enqueue({
+  const enqueueDevGeometry = (startAfter:SubstationBackgroundGate=backgroundReadinessGate): void => {
+    if (devGeometryQueued) return;
+    devGeometryQueued = background.enqueue({
       task: 'devGeometry',
       priority: 2,
       heavy: true,
-      startAfter: backgroundReadinessGate,
+      startAfter,
       run: async () => {
         state.geometryLoadToken++;
         const token = state.geometryLoadToken;
@@ -1033,8 +1042,11 @@ export async function loadAllIfcFiles(
             geometryCacheValid: options.geometryCacheValid,
             geometryCacheManifestValid: options.geometryCacheManifestValid,
             geometryCacheVersionFileMatch: options.geometryCacheVersionFileMatch,
-            deferFullModelReady:previewFirstDeferredFine,
-            onGeometryComplete:previewFirstDeferredFine?(meta=>{deferredDevMeta=meta;deferredDevGeometryReady=true;recordDeferredFullModelReady();}):undefined,
+            // DEV can now finish before the IFC tail even in full-loading mode.
+            // Its product readiness is independent; legacy full readiness still
+            // needs both domains to have finished.
+            deferFullModelReady:true,
+            onGeometryComplete:meta=>{deferredDevMeta=meta;deferredDevGeometryReady=true;recordDeferredFullModelReady();},
           });
         } catch (err) {
           console.warn('[GIM] 后台 MOD 加载失败:', err);
@@ -1134,6 +1146,7 @@ export async function loadAllIfcFiles(
                 loadPropertiesBytes:()=>getIfcBufferForEntry(entry,state,session),
                 cancelFine:()=>fineHandle?.cancel()??false,
                 onResource:event=>perfMark('IFC Preview resource',{path:entry.path,...event},perfSession),
+                onTiming:event=>perfMark('IFC Preview stage',{entryPath:entry.path,modelId:entry.modelId,...event},perfSession),
                 loadFine:async()=>{
                   const run=async()=>{await loadFine();if(!state.loadedModels.has(entry.modelId))throw new Error('IFC fine model unavailable');};
                   if(!previewFirstDeferredFine){await run();return;}
@@ -1271,6 +1284,7 @@ export async function loadAllIfcFiles(
       background.markAllIfcReady();
       perfMarkProductMoment('allIfcReady', {total:entries.length,loaded:state.loadedModels.size,
         failed:failed.length,firstInteractive:interactiveInitialized}, perfSession);
+      recordDeferredFullModelReady();
       void sampleSubstationMemory(state,'allIfcReady',perfSession,{total:entries.length,loaded:state.loadedModels.size,failed:failed.length},ctx);
     }
 
@@ -1503,6 +1517,7 @@ async function autoLoadModStlPostIfc(
           geometryFullyRendered:![...state.geometryDiagnosticsByDevPath.values()].some(d=>d.status==='failed'||d.status==='partial'||d.status==='unsupported'),
           stlInstances: scopedRaw.stlCount,
         };
+        perfMarkProductMoment('devGeometryReady',{...fullMeta,path:'progressive-dev-glb',renderedInstances:totalGeometryInstances},perfSession);
         options?.onGeometryComplete?.({...fullMeta,path:'progressive-dev-glb',renderedInstances:totalGeometryInstances});
         if(!options?.deferFullModelReady){
           perfMarkProductMoment('fullModelReady',fullMeta,perfSession);
@@ -1590,6 +1605,7 @@ async function autoLoadModStlPostIfc(
       sourceInvalidDevCount:[...state.geometryDiagnosticsByDevPath.values()].filter(d=>d.reason==='source-invalid').length,
       geometryFullyRendered:![...state.geometryDiagnosticsByDevPath.values()].some(d=>d.status==='failed'||d.status==='partial'||d.status==='unsupported'),
     };
+    perfMarkProductMoment('devGeometryReady',{...fullMeta,path:'cached-geometry'},perfSession);
     options?.onGeometryComplete?.(fullMeta);
     if(!options?.deferFullModelReady){
       perfMarkProductMoment('fullModelReady',fullMeta,perfSession);

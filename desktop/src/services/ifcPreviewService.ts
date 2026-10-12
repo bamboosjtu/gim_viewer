@@ -6,6 +6,7 @@ import { showIfcElementProperties, showIfcPreviewProperties } from '../ui/propsD
 import { setSelectionStatus } from '../ui/shell/statusBar.js';
 import * as THREE from 'three';
 import { previewShapeGeometry } from '../viewer/ifcPreviewProvider.js';
+import { perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 
 type FineGuidModel = {
   getLocalIdsByGuids(guids:string[]):Promise<(number|null)[]>;
@@ -166,6 +167,11 @@ export async function promoteIfcPreviewSelection(ctx:ViewerContext,state:AppStat
   });
   if(!state.isCurrentSelection(request))return;
   await showIfcElementProperties(ctx,state,runtimeId!,localId,request);
+  if(state.isCurrentSelection(request)) {
+    const meta={requestId:request.id,modelId:object.modelId,globalId:object.globalId,expressId:object.expressId,localId};
+    perfMarkProductMoment('selectedFineReady',meta);
+    perfMark('IFC selected fine ready',meta); // each request, while the product moment records the first
+  }
 }
 
 export async function selectIfcPreview(ctx:ViewerContext,state:AppState,provider:IfcGeometryProvider,

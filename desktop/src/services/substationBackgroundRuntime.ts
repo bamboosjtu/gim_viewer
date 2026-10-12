@@ -7,7 +7,7 @@ export type SubstationBackgroundTaskName =
   | 'stdSld'
   | 'cachePersistence'
   | 'devGeometry';
-export type SubstationBackgroundGate = 'interactive' | 'allIfcReady' | 'allIfcPreviewsReady';
+export type SubstationBackgroundGate = 'interactive' | 'coordinateAnchorReady' | 'allIfcReady' | 'allIfcPreviewsReady';
 
 export type SubstationBackgroundTaskState =
   | 'queued'
@@ -31,7 +31,7 @@ export interface SubstationBackgroundTaskSpec {
   task: SubstationBackgroundTaskName;
   /** Lower values run first within the same scheduler lane. */
   priority: number;
-  /** Heavy tasks never run together and only start after all IFC. */
+  /** Heavy tasks never run together; each task retains its explicit readiness gate. */
   heavy: boolean;
   startAfter: SubstationBackgroundGate;
   /** A cheap cache restore gates heavy scheduling until it has classified hit/miss. */
@@ -72,6 +72,7 @@ export type DevCheckpointHandler = (unit: DevWorkCheckpoint) => Promise<void>;
 export class SubstationBackgroundCoordinator {
   private readonly tasks = new Map<SubstationBackgroundTaskName, TaskRecord>();
   private interactive = false;
+  private coordinateAnchorReady = false;
   private allIfcReady = false;
   private allIfcPreviewsReady = false;
   private lightRunning = false;
@@ -132,6 +133,8 @@ export class SubstationBackgroundCoordinator {
   }
 
   markAllIfcPreviewsReady():void {if(this.allIfcPreviewsReady)return;this.allIfcPreviewsReady=true;this.scheduleDrain();}
+
+  markCoordinateAnchorReady():void {if(this.coordinateAnchorReady)return;this.coordinateAnchorReady=true;this.scheduleDrain();}
 
   enqueueUserIfcFine(key:string,run:()=>Promise<void>):{promise:Promise<void>;cancel:()=>boolean} {
     const existing=this.priorityWork.get(key);
@@ -267,7 +270,6 @@ export class SubstationBackgroundCoordinator {
       if(next){this.heavyRunning=true;
         void this.runUserFine(next[0],next[1]).finally(()=>{this.heavyRunning=false;this.scheduleDrain();});return;}
     }
-    if (!this.allIfcReady&&!this.allIfcPreviewsReady) return;
     // Do not choose DEV geometry before a spatial cache restore has classified
     // hit/miss.  A miss queues the rebuild ahead of DEV geometry.
     const spatialRestore = this.tasks.get('spatialSemanticCacheRestore');
@@ -311,6 +313,7 @@ export class SubstationBackgroundCoordinator {
 
   private gateReady(gate:SubstationBackgroundGate):boolean {
     if(gate==='interactive')return this.interactive;
+    if(gate==='coordinateAnchorReady')return this.interactive&&this.coordinateAnchorReady;
     if(gate==='allIfcPreviewsReady')return this.allIfcPreviewsReady||this.allIfcReady;
     return this.allIfcReady;
   }
