@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import type { IfcGeometryProvider, IfcLOD, IfcPreviewData, IfcPreviewFineState, IfcPreviewObject, IfcPreviewProperties, IfcPreviewShape } from './ifcGeometryProvider.js';
+import { buildPreviewInstances, disposePreviewMeshes, farViewDecision, projectedPreviewPixels, setPreviewInstanceVisible, type PreviewInstance, type FarViewDecision } from './ifcPreviewInstances.js';
+import { IfcObjectFineRuntime, objectFineGroup } from './ifcObjectFineRuntime.js';
+import type { LoaderSettings } from 'web-ifc';
 
 /** Parameterized prisms, with earcut caps (including concave profiles). */
 export function previewShapeGeometry(shape: IfcPreviewShape, level: 0|1, origin: number[]): THREE.BufferGeometry {
@@ -46,16 +49,67 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
   // after releaseMetadata clears the provider's explicit owner.
   private readonly opened: Promise<void>;
   private propertyWorkers = new Map<Worker, (error: Error) => void>();
+  private propertyEpoch=0;
   private readonly wasmConfig:{path:string;absolute:boolean};
+  private readonly instanceBoxes:boolean;
+  private readonly farView?:()=>{camera:THREE.Camera;height:number};
+  private instances:PreviewInstance[]=[];
+  private adaptive=new Map<number,{decision:FarViewDecision;sphere:THREE.Sphere;prism:THREE.Mesh|null}>();
+  private frame:number|null=null;
+  private cursor=0;
+  private prismsById=new Map<number,IfcPreviewShape[]>();
+  private instanceBounds=new Map<number,THREE.Box3>();
+  private cachedPrisms=0;
+  private maxAdaptiveFrameMs=0;
+  private maxProfileUnitMs=0;
+  private fineObjects=new Map<number,THREE.Mesh[]>();
+  private objectFineRuntime:IfcObjectFineRuntime|null=null;
+  private objectTasks=new Map<number,Promise<void>>();
+  private fineProperties=new Map<number,IfcPreviewProperties>();
+  loadObjectFine?: (object:IfcPreviewObject)=>Promise<void>;
   constructor(options: {modelId:string;sourcePath:string;bytes:Uint8Array;wasm:{path:string;absolute:boolean};
     sourceToViewer:THREE.Matrix4;loadFine:()=>Promise<void>;cancelFine?:()=>boolean;
     loadPropertiesBytes?:()=>Promise<Uint8Array|null>;releaseMetadataAfterPreview?:boolean;transferInput?:boolean;
     onResource?: (event:{state:'metadata-open'|'metadata-released'|'property-worker-open'|'property-worker-released';wasmHeapBytes?:number;rawBytes?:number})=>void;
     onTiming?: (event:{stage:'metadata'|'lod0'|'lod1'|'scene-commit';durationMs:number;level?:number;sourceBytes?:number;wasmInitMs?:number;openModelMs?:number;metadataMs?:number})=>void;
-    worker?:Worker}) {
+    worker?:Worker;instanceBoxes?:boolean;farView?:()=>{camera:THREE.Camera;height:number};
+    objectFine?:boolean;webIfcSettings?:LoaderSettings;releaseObjectWorkerAfterLoad?:boolean;scheduleObjectFine?:(key:string,run:()=>Promise<void>)=>Promise<void>}) {
     this.modelId=options.modelId;
     this.onTiming=options.onTiming;
     this.wasmConfig=options.wasm;
+    // Shared LOD0 boxes are the Preview default; explicit false is retained for A/B only.
+    this.instanceBoxes=options.instanceBoxes??true;
+    this.farView=options.farView;
+    if(options.objectFine&&options.loadPropertiesBytes&&this.instanceBoxes){
+      this.loadObjectFine=object=>{
+        const existing=this.objectTasks.get(object.expressId);if(existing)return existing;
+        if(this.byId.get(object.expressId)?.globalId!==object.globalId)return Promise.reject(new Error('IFC object identity mismatch'));
+        const run=async()=>{
+          if(this.unavailable())throw new Error('Preview released');
+          // The source model is retained only in one bounded object Worker, not two WASM heaps.
+          this.releasePreviewWorker();this.propertyEpoch++;this.stopPropertyWorkers();
+          if(!this.objectFineRuntime)this.objectFineRuntime=new IfcObjectFineRuntime({wasm:options.wasm,webIfcSettings:options.webIfcSettings,readBytes:options.loadPropertiesBytes!,
+            onTiming:event=>{this.root.userData.objectFineDiagnostic=event;(this.root.userData.objectFineEvents??=[]).push({...event,at:performance.now()});}});
+          try {
+          const result=await this.objectFineRuntime.load(object);
+          if(this.unavailable())throw new Error('Preview released');
+          if(!result.parts.some(part=>part.indices.length))throw new Error('Selected IFC object produced no fine geometry');
+          const properties=options.releaseObjectWorkerAfterLoad?await this.objectFineRuntime.properties(object.expressId):null;
+          if(this.unavailable())throw new Error('Preview released');
+          const group=objectFineGroup(result,object,options.sourceToViewer),meshes=group.children.slice() as THREE.Mesh[];
+          for(const mesh of meshes){mesh.matrix.premultiply(this.root.matrix.clone().invert().multiply(group.matrix));mesh.userData.expressId=object.expressId;this.root.add(mesh);}
+          this.fineObjects.set(object.expressId,meshes);
+          this.objectFineRuntime.forget(object.expressId);
+          for(const entry of this.instances)if(entry.shape.object.expressId===object.expressId)setPreviewInstanceVisible(entry,false);
+          const state=this.adaptive.get(object.expressId);if(state?.prism)state.prism.visible=false;
+          this.root.updateMatrixWorld(true);
+          if(properties)this.fineProperties.set(object.expressId,properties);
+          } finally {if(options.releaseObjectWorkerAfterLoad){this.objectFineRuntime?.release();this.objectFineRuntime=null;}}
+        };
+        const task=options.scheduleObjectFine?options.scheduleObjectFine(`${options.modelId}:object:${object.expressId}`,run):run();
+        this.objectTasks.set(object.expressId,task);void task.catch(()=>this.objectTasks.delete(object.expressId));return task;
+      };
+    }
     this.worker=options.worker ?? new Worker(new URL('./ifcPreviewWorker.ts',import.meta.url),{type:'module'});
     this.root.name=`IFC Preview · ${options.sourcePath}`;
     this.root.userData={provider:'ifc-preview',modelId:this.modelId,sourcePath:options.sourcePath};
@@ -134,6 +188,16 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
     const data=this.data;
     if(this.unavailable()||!data)return;
     const buildStarted=performance.now();
+    if(level===1&&this.instanceBoxes&&this.farView){
+      for(const shape of data.shapes)if(shape.profile){const list=this.prismsById.get(shape.object.expressId)??[];list.push(shape);this.prismsById.set(shape.object.expressId,list);}
+      // Process physically large candidates first; retain immutable GPU slot
+      // identity/order. Selection bypasses this background projection queue.
+      const importance=new Map([...this.instanceBounds].map(([id,box])=>[id,box.getSize(new THREE.Vector3()).lengthSq()]));
+      this.instances.sort((a,b)=>(importance.get(b.shape.object.expressId)??0)-(importance.get(a.shape.object.expressId)??0));
+      // LOD1 capability is ready; only in-view profiles are generated on demand.
+      this.level=1;this.startFarView();
+      this.onTiming?.({stage:'lod1',level,durationMs:performance.now()-buildStarted});return;
+    }
     const temporary=new THREE.Group();
     // Box and Body are alternative representations. Keep all supported body items,
     // use explicit IFC boxes for LOD0 or when a product has no supported prism.
@@ -141,6 +205,11 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
     const boxes=new Set(data.shapes.filter(s=>!s.profile).map(s=>s.object.expressId));
     const shapes=data.shapes.filter(s=>level===1 ? (prisms.has(s.object.expressId)?!!s.profile:!s.profile) : (boxes.has(s.object.expressId)?!s.profile:!!s.profile));
     try {
+      let instances:PreviewInstance[]=[];
+      if(level===0&&this.instanceBoxes){
+        const built=await buildPreviewInstances(shapes,data.origin,this.material,this.modelId,()=>this.unavailable(),()=>new Promise(resolve=>setTimeout(resolve,0)));
+        temporary.add(...built.group.children.slice());instances=built.instances;
+      } else {
       for(let offset=0;offset<shapes.length;offset+=64) {
         if(this.unavailable())return;
         const positions:number[]=[], ids:number[]=[];
@@ -157,24 +226,78 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
         temporary.add(mesh);
         await new Promise<void>(resolve=>setTimeout(resolve,0));
       }
+      }
       if(this.unavailable())return;
       const selected=this.selected;
       const commitStarted=performance.now();
-      this.clearGeometry();this.root.add(...temporary.children.slice());this.level=level;
+      this.clearGeometry();this.instances=instances;this.root.add(...temporary.children.slice());this.level=level;
+      for(const entry of instances){const id=entry.shape.object.expressId,box=this.instanceBounds.get(id)??new THREE.Box3();box.union(new THREE.Box3(new THREE.Vector3(-.5,-.5,-.5),new THREE.Vector3(.5,.5,.5)).applyMatrix4(entry.matrix));this.instanceBounds.set(id,box);}
       if(selected)this.highlight(selected);
       this.root.updateMatrixWorld(true);
       this.onTiming?.({stage:'scene-commit',level,durationMs:performance.now()-commitStarted});
       this.onTiming?.({stage:level===0?'lod0':'lod1',level,durationMs:performance.now()-buildStarted});
-    } finally {for(const mesh of temporary.children as THREE.Mesh[])mesh.geometry.dispose();}
+    } finally {disposePreviewMeshes(temporary);}
+  }
+  private startFarView():void {
+    if(!this.farView||this.frame!==null)return;
+    const update=()=>{this.frame=null;if(this.unavailable()||!this.farView)return;
+      const view=this.farView();this.updateFarView(view.camera,view.height);
+      this.frame=requestAnimationFrame(update);
+    };this.frame=requestAnimationFrame(update);
+  }
+  /** At most 128 instances / 2 ms per frame; one profile is the indivisible work unit. */
+  updateFarView(camera:THREE.Camera,height:number):void {
+    if(!this.data||!this.instances.length)return;
+    camera.updateMatrixWorld();this.root.updateMatrixWorld(true);
+    const frustum=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));
+    const start=performance.now();
+    for(let work=0;work<128&&performance.now()-start<2;work++){
+      const entry=this.instances[this.cursor++%this.instances.length],id=entry.shape.object.expressId;
+      if(this.fineObjects.has(id))continue;
+      let state=this.adaptive.get(id);
+      if(!state){
+        const sphere=this.instanceBounds.get(id)!.getBoundingSphere(new THREE.Sphere());
+        state={decision:'box',sphere,prism:null};this.adaptive.set(id,state);
+      }
+      const sphere=state.sphere.clone().applyMatrix4(this.root.matrixWorld),selected=this.selected?.expressId===id;
+      const inView=frustum.intersectsSphere(sphere),shapes=this.prismsById.get(id);
+      let decision=inView||selected?farViewDecision(projectedPreviewPixels(sphere,camera,height),entry.shape.object.ifcType,!!shapes,state.decision,selected):'hidden';
+      if(decision==='prism'&&!state.prism&&this.cachedPrisms>=512){
+        const reusable=[...this.adaptive.entries()].find(([,s])=>s.prism&&s.decision!=='prism')
+          ??(selected?[...this.adaptive.entries()].find(([otherId,s])=>otherId!==id&&s.prism):undefined);
+        if(reusable){const [otherId,victim]=reusable;this.root.remove(victim.prism!);victim.prism!.geometry.dispose();victim.prism=null;victim.decision='box';this.cachedPrisms--;for(const other of this.instances)if(other.shape.object.expressId===otherId)setPreviewInstanceVisible(other,true);}
+        else if(!selected)decision='box';
+      }
+      if(decision==='prism'&&!state.prism&&shapes){
+        const profileStarted=performance.now();
+        const values:number[]=[];
+        for(const shape of shapes){const g=previewShapeGeometry(shape,1,this.data.origin);for(const value of g.getAttribute('position').array)values.push(value);g.dispose();}
+        const g=new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(values,3));g.computeVertexNormals();g.computeBoundingSphere();
+        state.prism=new THREE.Mesh(g,this.material);state.prism.userData={provider:'ifc-preview',modelId:this.modelId,lod:1,approximate:true,triangleExpressIds:new Uint32Array(values.length/9).fill(id)};this.root.add(state.prism);this.cachedPrisms++;
+        this.maxProfileUnitMs=Math.max(this.maxProfileUnitMs,performance.now()-profileStarted);
+      }
+      if(state.prism)state.prism.visible=decision==='prism';
+      setPreviewInstanceVisible(entry,decision==='box');state.decision=decision;
+    }
+    this.maxAdaptiveFrameMs=Math.max(this.maxAdaptiveFrameMs,performance.now()-start);
+  }
+  farViewDiagnostic():{boxes:number;hidden:number;prisms:number;pending:number;cachedPrisms:number;maxFrameMs:number;maxProfileUnitMs:number}{
+    const counts={boxes:0,hidden:0,prisms:0,pending:this.instanceBounds.size-this.adaptive.size,cachedPrisms:this.cachedPrisms,maxFrameMs:this.maxAdaptiveFrameMs,maxProfileUnitMs:this.maxProfileUnitMs};
+    for(const state of this.adaptive.values())if(state.decision==='box')counts.boxes++;else if(state.decision==='hidden')counts.hidden++;else counts.prisms++;
+    return counts;
   }
   findByGlobalId(guid:string):IfcPreviewObject[]{return [...this.byGuid.get(guid)??[]];}
-  objectLOD(object:IfcPreviewObject):IfcLOD {return this.level===2?2:this.level===1&&this.data?.shapes.some(s=>s.object.expressId===object.expressId&&s.profile)?1:0;}
+  objectLOD(object:IfcPreviewObject):IfcLOD {return this.level===2||this.fineObjects.has(object.expressId)?2:this.farView?(this.adaptive.get(object.expressId)?.decision==='prism'?1:0):this.level===1&&this.data?.shapes.some(s=>s.object.expressId===object.expressId&&s.profile)?1:0;}
   async getProperties(expressId:number):Promise<IfcPreviewProperties>{
     if(this.unavailable())throw new Error('Preview released');
+    const cached=this.fineProperties.get(expressId);if(cached)return cached;
+    if(this.objectFineRuntime?.hasModel())return this.objectFineRuntime.properties(expressId);
+    const epoch=this.propertyEpoch;
     if(this.worker)return this.send({type:'properties',expressId});
     if(!this.loadPropertiesBytes)throw new Error('Preview metadata released');
     const bytes=await this.loadPropertiesBytes();if(!bytes)throw new Error('IFC property source unavailable');
     if(this.unavailable())throw new Error('Preview released');
+    if(epoch!==this.propertyEpoch)throw new DOMException('Property read superseded by object refinement','AbortError');
     const worker=new Worker(new URL('./ifcPreviewWorker.ts',import.meta.url),{type:'module'});
     const rawBytes=bytes.byteLength;
     const view=bytes.byteOffset===0&&bytes.byteLength===bytes.buffer.byteLength?bytes:new Uint8Array(bytes);
@@ -195,7 +318,8 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
     this.root.updateMatrixWorld(true);
     for(const hit of raycaster.intersectObjects(this.root.children,false)) {
       const ids=hit.object.userData.triangleExpressIds as Uint32Array|undefined;
-      const object=ids && hit.faceIndex!=null ? this.byId.get(ids[hit.faceIndex]) : null;
+      const instances=hit.object.userData.instanceExpressIds as Uint32Array|undefined;
+      const object=hit.object.userData.expressId?this.byId.get(hit.object.userData.expressId):instances&&hit.instanceId!=null?this.byId.get(instances[hit.instanceId]):ids && hit.faceIndex!=null ? this.byId.get(ids[hit.faceIndex]) : null;
       if(object)return {object,distance:hit.distance};
     }
     return null;
@@ -203,6 +327,14 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
   highlight(object:IfcPreviewObject):void {
     this.clearHighlight();this.selected=object;
     if(this.level===2||!this.data)return;
+    const fine=this.fineObjects.get(object.expressId);
+    if(fine){
+      // One independent overlay for each selected exact submesh; no shared-material mutation.
+      const values:number[]=[];
+      for(const mesh of fine){const source=mesh.geometry.clone().applyMatrix4(mesh.matrix),g=source.toNonIndexed();for(const value of g.getAttribute('position').array)values.push(value);g.dispose();if(g!==source)source.dispose();}
+      const g=new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(values,3));
+      this.overlay=new THREE.Mesh(g,new THREE.MeshBasicMaterial({color:0x00bbdd,side:THREE.DoubleSide,depthTest:false,transparent:true,opacity:.7}));this.overlay.renderOrder=100;this.root.add(this.overlay);return;
+    }
     const shape=this.data.shapes.filter(s=>s.object.expressId===object.expressId);
     const hasPrism=shape.some(s=>s.profile);
     const selected=shape.filter(s=>this.level===1&&hasPrism?!!s.profile:!s.profile);
@@ -213,9 +345,9 @@ export class IfcPreviewProvider implements IfcGeometryProvider {
     this.overlay.userData={...object,lod:this.level};this.overlay.renderOrder=100;this.root.add(this.overlay);
   }
   clearHighlight():void {this.selected=null;if(this.overlay){this.root.remove(this.overlay);this.overlay.geometry.dispose();(this.overlay.material as THREE.Material).dispose();this.overlay=null;}}
-  private clearGeometry():void {this.clearHighlight();for(const mesh of [...this.root.children] as THREE.Mesh[]){this.root.remove(mesh);mesh.geometry?.dispose();}}
+  private clearGeometry():void {if(this.frame!==null){cancelAnimationFrame(this.frame);this.frame=null;}this.clearHighlight();for(const meshes of this.fineObjects.values())for(const mesh of meshes)(mesh.material as THREE.Material).dispose();this.fineObjects.clear();this.fineProperties.clear();disposePreviewMeshes(this.root);this.instances=[];this.adaptive.clear();this.prismsById.clear();this.instanceBounds.clear();this.cachedPrisms=0;}
   private stopWorker(error:Error):void {this.worker?.terminate();this.worker=null;for(const p of this.pending.values())p.reject(error);this.pending.clear();}
   private stopPropertyWorkers():void {for(const [worker,reject] of this.propertyWorkers){worker.terminate();reject(new Error('Preview released'));}this.propertyWorkers.clear();}
-  retire():void {this.clearGeometry();this.level=2;this.root.removeFromParent();this.stopWorker(new Error('Fine geometry available'));this.stopPropertyWorkers();}
+  retire():void {this.objectFineRuntime?.release();this.objectFineRuntime=null;this.objectTasks.clear();this.clearGeometry();this.level=2;this.root.removeFromParent();this.stopWorker(new Error('Fine geometry available'));this.stopPropertyWorkers();}
   release():void {if(this.released)return;this.released=true;this.cancelFine?.();this.retire();this.material.dispose();this.releaseMetadata();this.fineListeners.clear();}
 }

@@ -41,6 +41,14 @@ function provider(loadFine=async()=>{},extra:Record<string,unknown>={}) {
   return {p,worker};
 }
 describe('IFC preview source coordinates and representation identity',()=>{
+  it('instanced LOD0 ray picking and project cleanup retain the original identity',async()=>{
+    const {p,worker}=provider();await p.loadLOD(0);const object=p.findByGlobalId('GUID-A')[0];
+    const mesh=p.root.children[0] as THREE.InstancedMesh;expect(mesh.isInstancedMesh).toBe(true);
+    const ray=new THREE.Raycaster(new THREE.Vector3(11,2,0),new THREE.Vector3(0,0,-1));expect(p.pick(ray)?.object).toEqual(object);
+    p.highlight(object);expect(p.root.children).toHaveLength(2);expect(mesh.material).not.toBe((p.root.children[1] as THREE.Mesh).material);
+    const state=new AppState();state.ifcPreviewProviders.set(p.modelId,p);state.activateProject(2,'next');
+    expect(worker.terminate).toHaveBeenCalledOnce();expect(p.root.children).toHaveLength(0);expect(p.pick(ray)).toBeNull();
+  });
   it('reports Worker metadata and LOD/commit durations without changing identity',async()=>{
     const events:any[]=[];
     const {p}=provider(async()=>{}, {onTiming:(e:any)=>events.push(e)});

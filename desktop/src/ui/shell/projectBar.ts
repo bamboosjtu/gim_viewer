@@ -13,6 +13,8 @@ let currentKind: ProjectKind = null;
 /** 更新工程身份（名称 + 类型徽标）；传 null 恢复未打开状态 */
 export function setProjectIdentity(name: string | null, kind: ProjectKind): void {
   currentKind = kind;
+  // This preference has no role in a powerline project.
+  document.getElementById('btn-ifc-quick-preview')?.classList.toggle('hidden', kind === 'transmission_line');
   const titleEl = document.getElementById('project-title');
   const badgeEl = document.getElementById('project-type-badge');
   if (titleEl) titleEl.textContent = name || '未打开工程';

@@ -7,6 +7,8 @@ import { resolve, dirname, sep } from 'node:path';
 import { inspectIfcPreview } from '../ifcPreviewData.js';
 import { previewShapeGeometry } from '../ifcPreviewProvider.js';
 import * as THREE from 'three';
+import {extractIfcObjectFine} from '../ifcObjectFineData.js';
+import {objectFineGroup} from '../ifcObjectFineRuntime.js';
 
 it('small real substation02 IFC: metadata identity, preview geometry and sample fingerprint',async()=>{
   const require=createRequire(import.meta.url), {IfcAPI}=require('web-ifc');
@@ -27,6 +29,12 @@ it('small real substation02 IFC: metadata identity, preview geometry and sample 
     expect(geometry.boundingBox?.isEmpty()).toBe(false);
     expect(geometry.getAttribute('position').array.every(Number.isFinite)).toBe(true);
     geometry.dispose();
+    const small=data.shapes.find(s=>s.object.expressId===428)!;
+    const fine=extractIfcObjectFine(api,model,428,small.object.globalId),sourceToViewer=new THREE.Matrix4().makeRotationX(-Math.PI/2);
+    const exact=new THREE.Box3().setFromObject(objectFineGroup(fine,small.object,sourceToViewer));
+    const coarse=previewShapeGeometry(small,small.profile?1:0,data.origin);coarse.computeBoundingBox();
+    const expected=coarse.boundingBox!.applyMatrix4(sourceToViewer.clone().multiply(new THREE.Matrix4().makeTranslation(...data.origin as [number,number,number])));
+    expect(exact.min.distanceTo(expected.min)).toBeLessThan(1e-5);expect(exact.max.distanceTo(expected.max)).toBeLessThan(1e-5);coarse.dispose();
     console.info(JSON.stringify({source,bytes:bytes.byteLength,sha,products:data.diagnostics.products,
       represented:data.diagnostics.represented,unsupported:data.diagnostics.unsupported,shapeCount:data.shapes.length,
       prismCount:data.shapes.filter(item=>item.profile).length,expressId:shape.object.expressId,globalId:shape.object.globalId,

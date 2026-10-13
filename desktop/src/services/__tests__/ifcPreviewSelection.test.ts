@@ -9,6 +9,17 @@ beforeEach(()=>{
   vi.resetModules();
   document.body.innerHTML='<div id="viewport"><canvas></canvas></div><button id="btn-toggle-props"></button><button id="btn-close-props"></button><button id="btn-export-props"></button><aside id="props-drawer"><div id="props-drawer-body"></div></aside><span id="status-selection"></span>';
 });
+
+it('object Fine inspector action keeps ExpressId identity and cannot commit an obsolete selection',async()=>{
+  const f=fixture(),gate=deferred<void>(),{selectIfcPreview}=await import('../ifcPreviewService.js');
+  const fine=vi.fn(()=>gate.promise);f.provider.loadObjectFine=fine;
+  f.properties.resolve({attributes:{Name:{value:'Original A'}},propertySets:[]});
+  const a=f.state.beginSelection({kind:'ifc-object',key:f.object.key});await selectIfcPreview(f.ctx,f.state,f.provider,f.object,a);
+  (document.querySelector('[data-preview-refine]') as HTMLButtonElement).click();expect(fine).toHaveBeenCalledWith(f.object);
+  const b=f.state.beginSelection({kind:'ifc-object',key:'ifc:model:object:21'});document.getElementById('props-drawer-body')!.textContent='B current';gate.resolve();
+  await Promise.resolve();await Promise.resolve();await Promise.resolve();
+  expect(f.state.selectionRequest).toBe(b);expect(document.body.textContent).toContain('B current');expect(f.provider.highlight).not.toHaveBeenCalled();expect(f.provider.loadLOD).not.toHaveBeenCalled();
+});
 function fixture(name='A') {
   const state=new AppState();state.activateProject(1,'source');
   const object:IfcPreviewObject={key:`ifc:model:object:${name==='A'?20:21}`,modelId:'model',sourcePath:'CBM/model.ifc',expressId:name==='A'?20:21,globalId:`GUID-${name}`,ifcType:'IFCMEMBER',name,provider:'ifc-preview'};

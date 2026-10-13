@@ -43,6 +43,8 @@ export interface IfcGeometryProvider {
   readonly data: IfcPreviewData | null;
   canProvide(level: IfcLOD): boolean;
   loadLOD(level: IfcLOD): Promise<void>;
+  /** Opt-in experiment. Refines one original ExpressId, without publishing a full-file LOD2. */
+  loadObjectFine?: (object:IfcPreviewObject)=>Promise<void>;
   /** GlobalId collisions remain a candidate set, never an arbitrary first match. */
   findByGlobalId(globalId: string): IfcPreviewObject[];
   objectLOD(object: IfcPreviewObject): IfcLOD;

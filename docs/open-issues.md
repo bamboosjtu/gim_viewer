@@ -45,7 +45,9 @@ P2 为增强或需要场景确认的候选。状态分为待核验、待开发�
 
 现行模板共享和 IFC/Spatial Worker 已存在，不作为待开发项重复立项。
 
-IFC Preview Provider 已有默认关闭的桌面变电原型（见[架构](architecture.md#实验性-ifc-preview-provider桌面变电)），并增加独立默认关闭的 Preview-First / Deferred-Fine 调度模式。尚未实现视距自动切换、对象级 LOD2 转换、预览缓存、MappedItem/BRep 预览主体、带孔/曲线轮廓及 MapConversion。LOD2 当前仍按整文件加载；预览可提前浏览，不代表完整加载耗时已经降低。跨表示坐标与实际 GPU 替换仍需逐样本证据，不沿用研究报告的拟合 T 或 Node 计时作为桌面验收。
+IFC Preview Provider 已有默认关闭的桌面变电原型（见[架构](architecture.md#实验性-ifc-preview-provider桌面变电)），顶部“变电预览”可显式启用 Preview-First / Deferred-Fine。共享盒 LOD0 已作为 Preview 默认实现；视距自动切换和 `GetFlatMesh` 单对象精化已有独立原型，但未通过完整工程验收，不接入生产加载。预览缓存、MappedItem/BRep 预览主体、带孔/曲线轮廓及 MapConversion 尚未实现。正常工程 LOD2 仍按整文件 Fragments 加载，预览可提前浏览不代表完整转换已提速。
+
+大型 IFC 几何实验未关闭的具体问题：完整 02 原路径在 120 秒窗口内尚未提交钢结构 LOD0；自适应候选虽提交预览，实际鼠标目标板件 ExpressId 66438 被另一 MEMBER 566436 遮挡/命中，未完成整站单对象精化验收。不能据此认定 identity 映射错误，也没有足够证据将原因归结为单一坐标或相机问题。视距候选单轮最慢不可中断轮廓构建约 54.4 ms，超过 2 ms 软预算；降低三角面并未同时降低 draw calls。对象精化首请求仍须读入并 OpenModel 整个源文件，局部实验约 16 秒、WASM heap 容量约 808 MB，不能宣称任意对象均可即时精化。结果保留在 `output/ifc-geometry-breakthrough/`，失败不提高超时重跑。跨表示位置与复杂开洞正确性仍需逐对象证据，不使用拟合 T。
 
 小 IFC 的真实 Tauri/WebView 替换已有局部验收证据：独立验收包封装两个未修改的真实 IFC，目标文件 575,414 bytes、SHA-256 `3cfe2f6927511badc4b5ae112a71e994404b83139102d0ea63c4b2be8f7f927d`；语义冷/暖路径均保持同一 GlobalId/ExpressId，LOD0/LOD1/LOD2 包围盒中心误差约 4.21 微米，Preview 退出场景，精细高亮与属性沿用原 SelectionRequest。此证据只覆盖该对象和输入，不证明全站跨表示等价。现有 debug-only 原生路径授权及 CDP 可用于桌面验收，无需改变生产文件权限。
 

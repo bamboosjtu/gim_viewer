@@ -182,6 +182,16 @@ export async function selectIfcPreview(ctx:ViewerContext,state:AppState,provider
     if(!state.isCurrentSelection(request))return;
     setSelectionStatus('正在加载原 IFC 精细几何（LOD2）…');
     try {
+      if(provider.loadObjectFine){
+        await provider.loadObjectFine(object);
+        if(!state.isCurrentSelection(request))return;
+        await commitSelectionHighlight(ctx,state,state.selectionGuard(request),()=>provider.highlight(object));
+        if(!state.isCurrentSelection(request))return;
+        state.selectionGeometry={status:'available',detail:'当前 IFC 构件已精化；其他构件仍为预览，原对象身份保持不变'};
+        await showIfcPreviewProperties(ctx,state,provider,object,request,refine);
+        if(state.isCurrentSelection(request)){setSelectionStatus(state.selectionGeometry.detail);perfMarkProductMoment('selectedFineReady',{modelId:object.modelId,expressId:object.expressId,provider:'web-ifc-object'});}
+        return;
+      }
       await provider.loadLOD(2);
       await captureIfcPreviewReplacementDiagnostic(ctx,state,provider,request,object);
       if(!state.isCurrentSelection(request))return;

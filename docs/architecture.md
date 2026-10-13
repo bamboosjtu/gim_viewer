@@ -54,7 +54,7 @@ IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CB
 
 [`IfcGeometryProvider`](../desktop/src/viewer/ifcGeometryProvider.ts) 定义 `canProvide / loadLOD / release / findByGlobalId`，并提供拾取、属性与高亮接口。对象仍采用现有 `ifc:<logical modelId>:object:<ExpressId>` 身份，保留 GlobalId、ExpressId、IFC 类型和来源 Provider；GlobalId 查询返回候选集合。Provider 不生成新 CBM、空间语义节点或 DEV occurrence，不替代 Fragments Runtime。
 
-原型默认关闭。`localStorage.setItem('gim-debug-ifc-preview','1')` 后重新打开变电工程启用，删除该键后恢复完整几何路径；Fragments 开关和默认值独立。首个完整 IFC 仍先建立生产坐标锚点，后续文件在 metadata Worker 中读取单位、上下文和 LocalPlacement 链，先提交 LOD0，再提交 LOD1，自动完整加载与属性面板的“加载精细几何 LOD2”共用该文件的加载 Promise。
+原型默认关闭。顶部“变电预览”按钮可启用 Preview 与 Deferred-Fine，设置在下一次打开变电 GIM 生效；关闭按钮恢复完整几何路径，不动态改变正在加载的工程。线路工程隐藏该控件且不读取此策略。保留原调试键以兼容诊断；Fragments 开关和默认值独立。首个完整 IFC 仍先建立生产坐标锚点，后续文件在 metadata Worker 中读取单位、上下文和 LocalPlacement 链，先提交 LOD0，再提交 LOD1，自动完整加载与属性面板的“加载精细几何 LOD2”共用该文件的加载 Promise。
 
 另一个独立、默认关闭的实验开关 `gim-debug-ifc-preview-deferred-fine` 必须与 Preview 开关同时启用。该模式不改变原完整加载模式：首个 IFC 仍完整加载并建立坐标锚点，后续文件默认按原顺序生成 Preview，LOD0/LOD1 均完成后标记 `previewReady`，精细状态为 `fineDeferred`，不自动启动 LOD2。已通过 geometry validation 的 DEV 缓存，在首个完整 IFC 的坐标锚点及 interactive 就绪后即可入队恢复，与剩余 IFC/Preview 顺序循环独立；仍等待 Spatial snapshot 恢复完成分类并使用原有互斥重任务与安全检查点。每个打开会话只入队一次，不在 IFC 尾部完成后重复恢复。未命中、部分或失效缓存的 DEV 编译/修复以及 Spatial 重建仍保留 IFC 尾部门禁；语义索引发布不依赖该门禁。`devGeometryReady` 独立于 `allIfcReady`，后者仍等待每个 IFC 精细加载成功或明确失败，延期中的文件不计为 ready。`fullModelReady` 在完整加载模式等待 IFC 与 DEV 均结束；延期精化模式还要求所有 IFC 为 `fineReady`，不以早到的 DEV 缓存冒充完整模型。
 
@@ -70,7 +70,9 @@ IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CB
 
 源坐标使用 IfcProject 长度单位、representation context、递归 LocalPlacement（含 Site 父链）及 solid/profile 放置；矩阵为列主序，先源放置、再单位缩放、再现有工程 source-to-viewer 锚点。metadata-derived 原点仅用于 Float32 精度，根矩阵抵消该平移。禁止使用研究 benchmark 的真值拟合 T；MapConversion、mapped/BRep 主体和其他未覆盖轮廓保留诊断，由 LOD2 处理，不推断空间含义。
 
-预览几何分批合并网格并保留三角面 → ExpressId 映射，高亮使用独立覆盖层。同一 SelectionRequest 沿用至精细表示；属性异步结果和精细高亮提交均检查最新选择/工程会话。精细模型可用后移除预览并释放 metadata Worker；metadata 的释放独立于旧 SelectionRequest 的提交资格。按原 GlobalId 查询精细 LocalId 时，使用 Fragments 公开的 item/GUID 反向查询核对唯一性，避免单值 GUID Map 掩盖重复对象；仅唯一候选可以提升，坐标诊断采用相同约束。无唯一关联时保留原语义选择和未关联/歧义状态，不猜第一个对象。工程切换立即释放 Worker、网格和材质。LOD2 替换诊断对同一 GlobalId 记录首个 IFC 锚点、实际协调矩阵、工程变换、预览世界矩阵、Fragments 世界矩阵/位置/包围盒差值；诊断不拟合或修改矩阵，必须由真实桌面样本验收确认空间等价。预览不持久化，不改变现有缓存域版本。
+LOD0 默认使用共享单位盒的分块 InstancedMesh，实例矩阵保留原始包围盒、局部放置、精度原点和工程坐标锚点；instanceId 映射到原 ExpressId，不产生新语义身份。常规 LOD1 保留分批合并网格和三角面 → ExpressId 映射，高亮使用独立覆盖层。同一 SelectionRequest 沿用至精细表示；属性异步结果和精细高亮提交均检查最新选择/工程会话。精细模型可用后移除预览并释放 metadata Worker；metadata 的释放独立于旧 SelectionRequest 的提交资格。按原 GlobalId 查询精细 LocalId 时，使用 Fragments 公开的 item/GUID 反向查询核对唯一性，避免单值 GUID Map 掩盖重复对象；仅唯一候选可以提升，坐标诊断采用相同约束。无唯一关联时保留原语义选择和未关联/歧义状态，不猜第一个对象。工程切换立即释放 Worker、网格和材质。LOD2 替换诊断对同一 GlobalId 记录首个 IFC 锚点、实际协调矩阵、工程变换、预览世界矩阵、Fragments 世界矩阵/位置/包围盒差值；诊断不拟合或修改矩阵，必须由真实桌面样本验收确认空间等价。预览不持久化，不改变现有缓存域版本。
+
+屏幕空间自动切换与 web-ifc `GetFlatMesh` 单构件精化保留为独立几何原型，生产工程加载不启用这两个选项。局部对象计时和坐标核验不能替代完整工程的实际拾取、后台资源竞争与持续交互验收。正常属性面板的 LOD2 仍调度既有整文件 Fragments 加载。
 
 ## DEV 编译、模板与 occurrence
 
