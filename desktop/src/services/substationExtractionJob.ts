@@ -5,6 +5,22 @@ import { decodeSubstationParseCopy, type ParseCopyReceipt } from '@desktop/subst
 import { perfCurrentSession, perfMark } from '../utils/perfTimings.js';
 
 export const EARLY_SEMANTIC_KEY = 'gim-debug-substation-early-semantic';
+export interface EarlySemanticEligibility {
+  eligible: boolean; reason: string; archiveFormat: string; folderCount: number;
+  coreEntryCount: number; coreBytes: number; streamCoreEntries: number; emptyCoreEntries: number;
+  coreOnlyFolders: number[]; semanticPhysicalOrder: number; checkpointDecodedBytes: number; totalDecodedBytes: number;
+}
+export async function inspectEarlySemanticEligibility(filePath: string, projectId: number, sourceSha256: string): Promise<EarlySemanticEligibility> {
+  return invokeTimed('inspect_substation_early_eligibility', { filePath, projectId, sourceSha256 });
+}
+/** No catch here: safety/identity/decode errors must not select another decoder. */
+export async function withEarlySemanticCapability<T>(capability: EarlySemanticEligibility, early: () => Promise<T>, fullNative: () => Promise<T>): Promise<T> {
+  if (capability.eligible) return early();
+  if (!['not-gs-7z','no-core-inputs','no-early-checkpoint-benefit'].includes(capability.reason)) {
+    throw Error(`Unrecognized early capability result: ${capability.reason}`);
+  }
+  return fullNative();
+}
 interface JobStatus {
   jobId: string; projectId: number; sourceSha256: string; status: string; entries: [string, number][];
   semanticCopy: ParseCopyReceipt | null; semanticReadyAtMs: number | null;

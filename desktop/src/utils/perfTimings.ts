@@ -86,6 +86,7 @@ export type PerfProductMoment =
   | 'firstUsableGeometryReady'
   | 'devGeometryReady'
   | 'selectedFineReady'
+  | 'coldSelectedDeviceGeometryReady'
   | 'firstGeometryReady'
   | 'interactive'
   | 'allIfcPreviewsReady'
@@ -572,6 +573,7 @@ export function perfProductMomentSnapshot(): Record<PerfProductMoment, PerfProdu
     firstUsableGeometryReady: productMoments.get('firstUsableGeometryReady') ?? null,
     devGeometryReady: productMoments.get('devGeometryReady') ?? null,
     selectedFineReady: productMoments.get('selectedFineReady') ?? null,
+    coldSelectedDeviceGeometryReady: productMoments.get('coldSelectedDeviceGeometryReady') ?? null,
     firstGeometryReady: productMoments.get('firstGeometryReady') ?? null,
     interactive: productMoments.get('interactive') ?? null,
     allIfcPreviewsReady: productMoments.get('allIfcPreviewsReady') ?? null,

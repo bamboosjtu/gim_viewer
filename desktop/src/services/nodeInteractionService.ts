@@ -1,3 +1,4 @@
+import { perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 import { isSubstationSourceMaterializing, substationSourcePreparationMessage } from './substationExtractionJob.js';
 import { buildSubstationAliasIndex, deviceOccurrenceScope, type DeviceOccurrenceScope } from '../gim/substationEvidence.js';
 import type { CbmNode } from '../gim/types.js';
@@ -128,7 +129,10 @@ export async function handleNodeClick(
   await syncSelectionNavigation(state,request);
   if (isSubstationSourceMaterializing(state)) {
     await Promise.all([basic, cleared]);
-    if (isSelected()) message(substationSourcePreparationMessage(state));
+    if (isSelected()) {
+      message(substationSourcePreparationMessage(state));
+      perfMark('cold selected device geometry pending',{path:node.path,devPath:node.devPath,reason:'source-materializing'});
+    }
     return;
   }
 
@@ -346,6 +350,9 @@ export async function frameAndHighlightDevice(
   await commitSelectionHighlight(ctx,state,guard,() => highlightModGroups(state,groups));
   if (!guard.isCurrent() || groups.length===0) return;
   const box=new THREE.Box3(); groups.forEach((g) => box.expandByObject(g));
+  if (state.currentProjectType === 'substation' && state.currentFiles && !box.isEmpty() && [box.min.x,box.min.y,box.min.z,box.max.x,box.max.y,box.max.z].every(Number.isFinite)) {
+    perfMarkProductMoment('coldSelectedDeviceGeometryReady',{selectionKey:request.target?.key,devPath,rootOccurrence:scope.rootOccurrence,groups:groups.length});
+  }
   const {frameBox}=await import('../viewer/camera.js');
   const owned=state.highlightedModState;
   const {resetModHighlight}=await import('../viewer/highlight.js');

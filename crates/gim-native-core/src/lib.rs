@@ -654,31 +654,93 @@ pub fn is_core_semantic_path(path: &str) -> bool {
     lower.ends_with(".cbm") || lower.ends_with(".fam") || lower.ends_with(".dev")
 }
 
-/// Preflight for the desktop job. No entry streams are decoded here.
-/// All paths, duplicate identities, and declared quota totals are checked before early use.
+/// Capability absence is an explicit value. Safety, quota and decoder errors remain Err.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubstationEarlyEligibility {
+    pub eligible: bool,
+    pub reason: String,
+    pub archive_format: String,
+    pub folder_count: usize,
+    pub core_entry_count: usize,
+    pub core_bytes: u64,
+    pub stream_core_entries: usize,
+    pub empty_core_entries: usize,
+    pub core_only_folders: Vec<usize>,
+    pub semantic_physical_order: usize,
+    pub checkpoint_decoded_bytes: u64,
+    pub total_decoded_bytes: u64,
+}
+pub fn inspect_substation_eligibility(path: &Path, quota: &ExtractionQuota) -> Result<SubstationEarlyEligibility, String> {
+    Ok(inspect_substation_preflight(path, quota)?.0)
+}
 pub fn inspect_substation_entries(path: &Path, quota: &ExtractionQuota) -> Result<Vec<(String, u64)>, String> {
+    let (capability, entries) = inspect_substation_preflight(path, quota)?;
+    if !capability.eligible { return Err(format!("early capability not supported: {}", capability.reason)); }
+    Ok(entries)
+}
+fn inspect_substation_preflight(path: &Path, quota: &ExtractionQuota) -> Result<(SubstationEarlyEligibility, Vec<(String,u64)>), String> {
     let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
     if metadata.len() > quota.max_archive_bytes { return Err(quota_err("GIM 大小超限".into())); }
     let mut file = File::open(path).map_err(|e| e.to_string())?;
     let mut prefix = vec![0; metadata.len().min(SIGNATURE_SEARCH_LIMIT as u64) as usize];
     file.read_exact(&mut prefix).map_err(|e| e.to_string())?;
     let (offset, info, sevenz) = parse_archive_prefix(&prefix)?;
-    if info.magic != "GIMPKGS" || !sevenz { return Err("experimental job requires substation 7z".into()); }
+    let mut capability = SubstationEarlyEligibility { reason: "not-gs-7z".into(), ..Default::default() };
+    capability.archive_format = if sevenz { "7z" } else { "zip" }.into();
+    if info.magic != "GIMPKGS" || !sevenz { return Ok((capability, Vec::new())); }
     let len = metadata.len() - offset as u64;
     let reader = OffsetReader::new(file, offset as u64, len).map_err(|e| e.to_string())?;
     let archive = sevenz_rust::SevenZReader::new(reader, len, sevenz_rust::Password::empty()).map_err(|e| e.to_string())?;
     let mut paths = std::collections::HashSet::new();
     let mut entries = Vec::new(); let mut count = 0; let mut total = 0;
     for file in &archive.archive().files {
-        if file.is_directory() { continue; }
-        let path = normalize_path(&file.name);
+        let raw_path = normalize_path(&file.name);
+        let path = if file.is_directory() { raw_path.strip_suffix('/').unwrap_or(&raw_path).to_string() } else { raw_path };
         validate_archive_path(&path)?;
         if !paths.insert(path.to_ascii_lowercase()) { return Err("duplicate archive path".into()); }
+        if file.is_directory() { continue; }
         check_declared_size(&mut count, total, &path, file.size, len, quota)?;
         total += file.size;
         entries.push((path, file.size));
     }
-    Ok(entries)
+    let archive = archive.archive();
+    capability.folder_count = archive.folders.len();
+    let mut folder_core = vec![true; archive.folders.len()];
+    let mut order = Vec::new();
+    for (i, f) in archive.files.iter().enumerate().filter(|(_, f)| !f.is_directory()) {
+        let core = is_core_semantic_path(&f.name);
+        if core {
+            capability.core_entry_count += 1;
+            capability.core_bytes += f.size;
+            if f.has_stream { capability.stream_core_entries += 1; }
+            else { capability.empty_core_entries += 1; }
+        }
+        if let Some(folder) = archive.stream_map.file_folder_index[i] {
+            folder_core[folder] &= core;
+        } else { order.push(i); }
+    }
+    capability.core_only_folders = folder_core.iter().enumerate().filter_map(|(i,c)| c.then_some(i)).collect();
+    let mut folders: Vec<_> = (0..archive.folders.len()).collect();
+    folders.sort_by_key(|f| !folder_core[*f]);
+    for folder in folders {
+        order.extend(archive.files.iter().enumerate().filter_map(|(i,f)|
+            (!f.is_directory() && archive.stream_map.file_folder_index[i] == Some(folder)).then_some(i)));
+    }
+    if order.len() != entries.len() { return Err("archive stream layout inconsistent".into()); }
+    let last_core = order.iter().rposition(|i| is_core_semantic_path(&archive.files[*i].name));
+    if let Some(last) = last_core {
+        capability.semantic_physical_order = last + 1;
+        capability.checkpoint_decoded_bytes = order[..=last].iter().map(|i| archive.files[*i].size).sum();
+        capability.total_decoded_bytes = total;
+        // A checkpoint at EOF has no early traversal benefit. Sizes are not time estimates.
+        let remaining = total - capability.checkpoint_decoded_bytes;
+        // Conservatively reject near-EOF checkpoints (<1% of decoded bytes remain).
+        // This is an eligibility bound, not a conversion-cost prediction.
+        capability.eligible = remaining > total / 100;
+        capability.reason = if capability.eligible { "core-prefix-with-remaining-streams" } else { "no-early-checkpoint-benefit" }.into();
+    } else { capability.reason = "no-core-inputs".into(); }
+    Ok((capability, entries))
 }
 
 fn extract_from_path_with_quota_profile_impl<F>(
@@ -1034,6 +1096,44 @@ mod tests {
         assert_eq!(cbm, b"TYPE=TS\nSUBSYSTEM=a.cbm\n");
     }
 
+    #[test]
+    fn early_capability_absence_and_preflight_safety_are_distinct() {
+        let zip_path=std::env::temp_dir().join(format!("early-zip-{}.gim",std::process::id()));
+        let mut zip=zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file("CBM/project.cbm",zip::write::SimpleFileOptions::default()).unwrap();
+        std::io::Write::write_all(&mut zip,b"TYPE=SS").unwrap();
+        let data=zip.finish().unwrap().into_inner();
+        std::fs::write(&zip_path,build_gim_bytes(&data,b'S',"test")).unwrap();
+        let cap=inspect_substation_eligibility(&zip_path,&ExtractionQuota::default()).unwrap();
+        assert!(!cap.eligible);assert_eq!(cap.archive_format,"zip");assert_eq!(cap.reason,"not-gs-7z");
+        std::fs::remove_file(zip_path).unwrap();
+
+        use sevenz_rust::{SevenZWriter,SevenZArchiveEntry};
+        for (label,names,expected_error) in [
+            ("all-core",vec!["CBM/project.cbm","DEV/a.dev"],false),
+            ("near-eof",vec!["CBM/project.cbm","CBM/tail.ifc"],false),
+            ("traversal",vec!["../project.cbm"],true),
+            ("directory-traversal",vec!["../"],true),
+            ("duplicate",vec!["CBM/a.cbm","cbm/A.cbm"],true),
+        ] {
+            let mut archive=Cursor::new(Vec::new());
+            { let mut writer=SevenZWriter::new(&mut archive).unwrap();
+              for name in names { let mut entry=SevenZArchiveEntry::new();entry.name=name.into();entry.has_stream=true;entry.is_directory=name.ends_with('/');
+                writer.push_archive_entry(entry,Some(Cursor::new(if label == "near-eof" && name.ends_with(".cbm") { vec![65u8;4096] } else { b"A=1".to_vec() }))).unwrap(); }
+              writer.finish().unwrap(); }
+            let path=std::env::temp_dir().join(format!("early-cap-{}-{}.gim",label,std::process::id()));
+            std::fs::write(&path,build_gim_bytes(&archive.into_inner(),b'S',"test")).unwrap();
+            let result=inspect_substation_eligibility(&path,&ExtractionQuota::default());
+            if expected_error { assert!(result.is_err(),"{}",label); }
+            else { let c=result.unwrap();assert!(!c.eligible);assert_eq!(c.reason,"no-early-checkpoint-benefit"); }
+            std::fs::remove_file(path).unwrap();
+        }
+        let path=std::env::temp_dir().join(format!("early-corrupt-{}.gim",std::process::id()));
+        std::fs::write(&path,build_gim_bytes(&SEVENZ_SIG,b'S',"test")).unwrap();
+        assert!(inspect_substation_eligibility(&path,&ExtractionQuota::default()).is_err());
+        std::fs::remove_file(path).unwrap();
+    }
+
     /// P1 评审 #4：条目数超配额 → 拒绝解压
     #[test]
     fn quota_rejects_entry_count_overflow() {
@@ -1096,6 +1196,12 @@ mod tests {
         extract_from_path_with_quota(&path, &ExtractionQuota::default(), |p,b| { ordinary.push((p,b)); Ok(()) }).unwrap();
         let preflight = inspect_substation_entries(&path, &ExtractionQuota::default()).unwrap();
         assert_eq!(preflight.len(), 5);
+        let capability = inspect_substation_eligibility(&path, &ExtractionQuota::default()).unwrap();
+        assert!(capability.eligible);
+        assert_eq!(capability.core_entry_count, 3);
+        assert_eq!(capability.empty_core_entries, 1);
+        assert_eq!(capability.core_only_folders, vec![1]);
+        assert_eq!(capability.semantic_physical_order, 3);
         extract_substation_semantic_order(&path, &ExtractionQuota::default(), |p,b| { ordered.push((p,b)); Ok(()) }, &mut |e| trace.push(e)).unwrap();
         assert_eq!(ordered[0].0, "DEV/empty.fam");
         assert_eq!(ordered[1].0, "CBM/project.cbm");

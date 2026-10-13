@@ -104,7 +104,7 @@ fn get(id: &str) -> Result<SharedJob, String> {
         .cloned()
         .ok_or("extraction job unavailable".into())
 }
-fn source_sha(path: &Path) -> Result<String, String> {
+pub(crate) fn source_sha(path: &Path) -> Result<String, String> {
     use std::io::Read;
     let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut hash = Sha256::new();
@@ -117,6 +117,29 @@ fn source_sha(path: &Path) -> Result<String, String> {
         hash.update(&buffer[..n]);
     }
     Ok(format!("{:x}", hash.finalize()))
+}
+
+/// Only explicit capability absence permits full-native fallback. Err is fail-closed.
+#[tauri::command]
+pub async fn inspect_substation_early_eligibility(
+    access: tauri::State<'_, AuthorizedFilePaths>, db: tauri::State<'_, DbState>,
+    file_path: String, project_id: i64, source_sha256: String,
+) -> Result<crate::gim_extract::SubstationEarlyEligibility, String> {
+    let path = require_authorized_path(&access, &file_path, Some("gim"))?;
+    {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        ensure_project_exists(&conn, project_id)?;
+        let (record_path, record_sha): (String,String) = conn.query_row(
+            "SELECT path, sha256 FROM gim_project WHERE id=?1", [project_id], |r| Ok((r.get(0)?,r.get(1)?)))
+            .map_err(|e| e.to_string())?;
+        if record_sha != source_sha256 || crate::canonical_identity(Path::new(&record_path))?.1 != crate::canonical_identity(&path)?.1 {
+            return Err("extraction project/source identity mismatch".into());
+        }
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        if source_sha(&path)? != source_sha256 { return Err("extraction source SHA mismatch".into()); }
+        crate::gim_extract::inspect_substation_eligibility(&path, &ExtractionQuota::default())
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

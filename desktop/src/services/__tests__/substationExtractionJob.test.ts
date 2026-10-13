@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
-import { startSubstationExtractionJob, cancelSubstationExtraction, isSubstationSourceMaterializing } from '../substationExtractionJob.js';
+import { startSubstationExtractionJob, cancelSubstationExtraction, isSubstationSourceMaterializing, withEarlySemanticCapability, type EarlySemanticEligibility } from '../substationExtractionJob.js';
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), decode: vi.fn(), mark: vi.fn() }));
 vi.mock('@desktop/database.js', () => ({ batchReadCachedFiles: async (_id: number, paths: string[]) => new Map(paths.map(p => [p, new TextEncoder().encode('exact')])) }));
 vi.mock('@desktop/invokeTimed.js', () => ({ invokeTimed: mocks.invoke }));
@@ -78,4 +78,22 @@ describe('production early extraction orchestration', () => {
     expect(mocks.decode).not.toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenCalledWith('cancel_substation_extraction', { jobId: 'job-1' });
   });
+});
+
+describe('structured early capability policy',()=>{
+ const capability={eligible:false,reason:'not-gs-7z'} as EarlySemanticEligibility;
+ it('explicit capability absence uses full native once',async()=>{
+  const early=vi.fn(), full=vi.fn().mockResolvedValue('full');
+  expect(await withEarlySemanticCapability(capability,early,full)).toBe('full');
+  expect(early).not.toHaveBeenCalled();expect(full).toHaveBeenCalledTimes(1);
+ });
+ it('unknown negative capability is fail-closed, not a decoder fallback',async()=>{
+  const full=vi.fn();await expect(withEarlySemanticCapability({...capability,reason:'CRC'},vi.fn(),full)).rejects.toThrow('Unrecognized');
+  expect(full).not.toHaveBeenCalled();
+ });
+ it.each(['traversal','duplicate path','quota','CRC','source SHA mismatch','identity mismatch','publication failure'])('never retries %s through full fallback',async reason=>{
+  const early=vi.fn().mockRejectedValue(Error(reason)),full=vi.fn();
+  await expect(withEarlySemanticCapability({...capability,eligible:true},early,full)).rejects.toThrow(reason);
+  expect(full).not.toHaveBeenCalled();
+ });
 });

@@ -379,3 +379,14 @@ it('a declared DEV reference to an empty PHM is empty without falsely claiming D
   expect(runtime.ctx.world.camera.controls.target).toEqual(target);
   expect(document.querySelector('.props-header')!.textContent).toBe('B');
 });
+
+it('cold selected DEV product moment requires real admitted geometry, not an empty result',async()=>{
+ const {state,a,b}=fixture();state.currentProjectType='substation';
+ state.currentFiles!.set('DEV/B.dev',new File(['SOLIDMODELS.NUM=0'],'B.dev'));
+ const perf=await import('../../utils/perfTimings.js');perf.perfReset();
+ const {handleNodeClick}=await import('../nodeInteractionService.js');
+ await handleNodeClick(state,b,()=>{});
+ expect(perf.perfProductMomentSnapshot().coldSelectedDeviceGeometryReady).toBeNull();
+ await handleNodeClick(state,a,()=>{});
+ expect(perf.perfProductMomentSnapshot().coldSelectedDeviceGeometryReady?.meta).toMatchObject({devPath:a.devPath,rootOccurrence:a.path,groups:1});
+});

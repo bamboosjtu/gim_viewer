@@ -305,7 +305,7 @@ export function parseExtractionPayload(
 export async function extractGimArchiveNative(
   filePath: string,
   projectId?: number,
-  experiments: { traceEntries?: boolean; substationParseCopy?: boolean } = {},
+  experiments: { traceEntries?: boolean; substationParseCopy?: boolean; expectedSourceSha256?: string } = {},
 ): Promise<NativeExtractionResult> {
   const buf = await invokeTimed<ArrayBuffer>('extract_gim_archive', { filePath, projectId, ...experiments });
   return parseExtractionPayload(buf, { cacheProjectId: projectId });

@@ -188,3 +188,6 @@ export function isWebIfcMultiThreadingAvailable(): boolean {
     return false;
   }
 }
+
+/** Product gate stays closed until cross-sample early-source acceptance completes. */
+export const SUBSTATION_EARLY_SEMANTIC_DEFAULT = false;

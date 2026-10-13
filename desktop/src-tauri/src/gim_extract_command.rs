@@ -97,6 +97,7 @@ pub async fn extract_gim_archive(
     project_id: Option<i64>,
     trace_entries: Option<bool>,
     substation_parse_copy: Option<bool>,
+    expected_source_sha256: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
     let authorized_path = require_authorized_path(&access, &file_path, Some("gim"))?;
     let metadata = std::fs::metadata(&authorized_path)
@@ -115,6 +116,12 @@ pub async fn extract_gim_archive(
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
         ensure_project_exists(&conn, pid)?;
+        if let Some(expected) = expected_source_sha256.as_ref() {
+            let (record_path,record_sha):(String,String)=conn.query_row("SELECT path,sha256 FROM gim_project WHERE id=?1",[pid],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|e|e.to_string())?;
+            if &record_sha != expected || crate::canonical_identity(std::path::Path::new(&record_path))?.1 != crate::canonical_identity(&authorized_path)?.1 {
+                return Err("extraction project/source identity mismatch".into());
+            }
+        }
     }
     // 解压是 CPU 密集型同步操作（7z LZMA 可达数秒），放入阻塞线程池。
     // 带 project_id 的生产路径使用磁盘优先实现：只读头部窗口，逐条解压并
@@ -134,7 +141,15 @@ pub async fn extract_gim_archive(
     } else {
         (false, false)
     };
+    if expected_source_sha256.is_some() && (!substation_sources || project_id.is_none()) {
+        return Err("source-bound extraction requires GS project identity".into());
+    }
     let payload = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        if let Some(expected) = expected_source_sha256.as_ref() {
+            if crate::substation_extraction_job::source_sha(&authorized_path)? != *expected {
+                return Err("extraction source SHA mismatch".into());
+            }
+        }
         if let Some(pid) = project_id {
             let mut metas: Vec<ExtractedEntryMeta> = Vec::new();
             // 从 staging 创建开始计时，profile.total_ms 与外层 native
@@ -240,6 +255,13 @@ pub async fn extract_gim_archive(
             };
             // An optional acceleration-copy error never prevents source extraction.
             let copy_receipt = parse_copy.and_then(|copy| copy.finish(&staging_root).ok());
+            if let Some(expected) = expected_source_sha256.as_ref() {
+                let checked = crate::substation_extraction_job::source_sha(&authorized_path);
+                if !matches!(checked.as_ref(), Ok(actual) if actual == expected) {
+                    let _ = remove_cache_dir_if_safe(&staging_root, " staging");
+                    return Err(checked.err().unwrap_or_else(|| "extraction source SHA mismatch".into()));
+                }
+            }
             let commit_started = std::time::Instant::now();
             if let Err(error) = commit_cache_staging(&app_handle, pid, &staging_root) {
                 let _ = remove_cache_dir_if_safe(&staging_root, " staging");

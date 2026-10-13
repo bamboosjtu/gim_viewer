@@ -4,6 +4,7 @@ use std::{collections::HashMap, fs, io::Cursor, path::Path, time::Instant};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
+    let eligibility = gim_native_core::inspect_substation_eligibility(Path::new(args.get(1).ok_or("GIM path required")?), &gim_native_core::ExtractionQuota::default())?;
     let input = fs::read(args.get(1).ok_or("GIM path required")?)?;
     if !input.starts_with(b"GIMPKGS") {
         return Err("substation GIM required".into());
@@ -48,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(
         output.join("inventory.json"),
         serde_json::to_vec_pretty(&json!({
-            "inputBytes": input.len(), "payloadOffset": offset, "folders": folders, "files": files
+            "inputBytes": input.len(), "payloadOffset": offset, "folders": folders, "files": files, "eligibility": eligibility
         }))?,
     )?;
     if args.get(3).map(String::as_str) != Some("--decode") {

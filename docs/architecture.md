@@ -56,7 +56,9 @@ IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CB
 
 原型默认关闭。`localStorage.setItem('gim-debug-ifc-preview','1')` 后重新打开变电工程启用，删除该键后恢复完整几何路径；Fragments 开关和默认值独立。首个完整 IFC 仍先建立生产坐标锚点，后续文件在 metadata Worker 中读取单位、上下文和 LocalPlacement 链，先提交 LOD0，再提交 LOD1，自动完整加载与属性面板的“加载精细几何 LOD2”共用该文件的加载 Promise。
 
-另一个独立、默认关闭的实验开关 `gim-debug-ifc-preview-deferred-fine` 必须与 Preview 开关同时启用。该模式不改变原完整加载模式：首个 IFC 仍完整加载并建立坐标锚点，后续文件顺序生成 Preview，LOD0/LOD1 均完成后标记 `previewReady`，精细状态为 `fineDeferred`，不自动启动 LOD2。已通过 geometry validation 的 DEV 缓存，在首个完整 IFC 的坐标锚点及 interactive 就绪后即可入队恢复，与剩余 IFC/Preview 顺序循环独立；仍等待 Spatial snapshot 恢复完成分类并使用原有互斥重任务与安全检查点。每个打开会话只入队一次，不在 IFC 尾部完成后重复恢复。未命中、部分或失效缓存的 DEV 编译/修复以及 Spatial 重建仍保留 IFC 尾部门禁；语义索引发布不依赖该门禁。`devGeometryReady` 独立于 `allIfcReady`，后者仍等待每个 IFC 精细加载成功或明确失败，延期中的文件不计为 ready。`fullModelReady` 在完整加载模式等待 IFC 与 DEV 均结束；延期精化模式还要求所有 IFC 为 `fineReady`，不以早到的 DEV 缓存冒充完整模型。
+另一个独立、默认关闭的实验开关 `gim-debug-ifc-preview-deferred-fine` 必须与 Preview 开关同时启用。该模式不改变原完整加载模式：首个 IFC 仍完整加载并建立坐标锚点，后续文件默认按原顺序生成 Preview，LOD0/LOD1 均完成后标记 `previewReady`，精细状态为 `fineDeferred`，不自动启动 LOD2。已通过 geometry validation 的 DEV 缓存，在首个完整 IFC 的坐标锚点及 interactive 就绪后即可入队恢复，与剩余 IFC/Preview 顺序循环独立；仍等待 Spatial snapshot 恢复完成分类并使用原有互斥重任务与安全检查点。每个打开会话只入队一次，不在 IFC 尾部完成后重复恢复。未命中、部分或失效缓存的 DEV 编译/修复以及 Spatial 重建仍保留 IFC 尾部门禁；语义索引发布不依赖该门禁。`devGeometryReady` 独立于 `allIfcReady`，后者仍等待每个 IFC 精细加载成功或明确失败，延期中的文件不计为 ready。`fullModelReady` 在完整加载模式等待 IFC 与 DEV 均结束；延期精化模式还要求所有 IFC 为 `fineReady`，不以早到的 DEV 缓存冒充完整模型。
+
+独立的 `gim-debug-ifc-preview-queue=conservative-fast-lane` 只在 Preview-First / Deferred-Fine 模式生效，默认关闭。实际坐标锚点和 interactive 建立前完全保留原顺序，包括首个失败时的 anchor fallback；之后将 remaining 来源稳定分为 <1 MiB、普通/未知、≥64 MiB 三组。阈值依据四样本大小分布提出，只作保守调度提示，不能预测重建成本。保持原 IfcEntry/modelId、单个 Preview Worker 和 Fine 调度；记录 entry-ready、unique ExpressId 可表达对象数与源 bytes，anchor 不计入 remaining 对象覆盖分母。该策略的跨样本产品验收尚未关闭，不默认采用。
 
 属性面板中的精细加载请求按逻辑模型 ID 去重，并排在尚未启动的普通重任务之前。已运行的 DEV 管线在完成单个 DEV 的解析、缓存写入和全部 placement 提交后，调用协调器安全检查点；暖路径还在有界 GLB 批读完成后检查。每个检查点最多执行一个用户精化请求，保留 DEV 的重任务调度权，精化完成或失败后继续下一工作单元，不与其他受协调器管理的重任务并行。定向 raw 回退和单 DEV 缓存修复也记录安全边界；完整 manifest/version 仍在管线原有结束位置提交。单个 DEV 内部序列化和已运行的 Spatial/转换不能中途让权。工程关闭会取消排队请求，并由原 ProjectLoadSession 释放活动 Worker。精细转换失败后可重试。LOD1 完成即终止该文件的 Preview metadata Worker；按需属性查询重新读取单个 IFC，并在一次性 Worker 结束或工程关闭后释放。Preview、属性查询和精细转换以转移方式交接各自的一次性 IFC 输入；延期精化重新读取源文件，不使用已释放的预览缓冲区。metadata 就绪 Promise 只持有完成状态，精细替换后清除显式 metadata 所有者。不同文件的 Preview 与精化、一次性属性读取仍可能短暂并行，不保证全工程只有一个 WASM heap。资源事件和进程内存采样用于观测生命周期，Fragments 转换 WASM heap 的精确值仍不由当前公开 API 暴露。
 
@@ -106,6 +108,9 @@ DEV 导出前和静态 GLB 模板恢复时检查有限值与包围盒跨度，�
 ## 变电首次解析实验
 
 桌面 `gim-debug-substation-early-semantic=1` 启用默认关闭的 7z 单遍 job；默认路径仍完整解压后解析。job 先处理无 stream 条目和独立的 core-only folder，不改变同一个 solid folder 内的解码顺序，也不重复解码其前缀。core 输入为 CBM/FAM/DEV，含 FileDevRelation.cbm。
+
+early 请求先调用 Native `inspect_substation_early_eligibility`：能力结果包含 archive/folder、core stream/empty 数、core-only folders 和预计 checkpoint 字节/物理位置。只有 GS 7z 且 checkpoint 后仍保留超过总 decoded bytes 1% 的来源才进入 early job；这个保守收益界限不是耗时预测。明确的非 GS 7z、无 core、无 checkpoint 收益返回 capability absence，使用原完整 native extraction。路径/重复条目、配额、CRC/decode、来源 SHA/工程身份、staging/publication 错误仍是错误，不能以字符串匹配降级为能力缺失或转用 WASM。完整 native fallback 同样校验来源绑定，并在 commit 前复核 SHA。未知的 negative capability 也拒绝 fallback。正式 default policy 尚未通过跨样本及关闭门禁，保持关闭；debug override 只请求实验，不决定 eligibility。
+
 
 `start_substation_extraction → semanticReady → complete / failed / cancelled` 与正式缓存发布分开。早期 File 输入来自同次解码的原字节副本，只能在本次工程会话内使用；其余文件必须等实际 materialize 后读取。首个完整 IFC 的坐标锚点契约保持。准备期间可查看语义与属性，设备定位会明确提示源几何尚在准备。
 

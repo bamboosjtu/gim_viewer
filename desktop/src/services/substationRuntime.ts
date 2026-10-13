@@ -1,3 +1,4 @@
+import { planRemainingIfcPreviews, type PreviewQueueStrategy } from './ifcPreviewQueue.js';
 import type { IfcEntry, CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
@@ -802,6 +803,7 @@ export async function loadAllIfcFiles(
   showMessage: (text: string) => void,
   options: {
     session?: ProjectLoadSession;
+    ifcSourceSizes?: ReadonlyMap<string, number>;
     geometryCacheValid?: boolean;
     geometryCacheManifestValid?: boolean;
     geometryCacheVersionFileMatch?: boolean;
@@ -1067,8 +1069,28 @@ export async function loadAllIfcFiles(
     if (!isCurrent()) return;
 
     let firstIfcLoadStarted = false;
+    const strategy: PreviewQueueStrategy = previewFirstDeferredFine && localStorage.getItem('gim-debug-ifc-preview-queue') === 'conservative-fast-lane'
+      ? 'conservative-fast-lane' : 'original';
+    const sizes = new Map(options.ifcSourceSizes);
     for (const entry of entries) {
+      const file = state.currentFiles && getFileByPath(state.currentFiles,entry.path);
+      if (file) sizes.set(entry.path.toLowerCase(),file.size);
+    }
+    const queue = [...entries];
+    let tailPlanned = false;
+    perfMark('IFC Preview queue requested', {strategy,anchor:entries[0]?.path},perfSession);
+    let previewsReady = 0;
+    for (let queueIndex=0;queueIndex<queue.length;queueIndex++) {
       if (!isCurrent()) return;
+      // Never change fallback anchor discovery. Only reorder after a real
+      // usable IFC has established the existing coordinate anchor and UI.
+      if (!tailPlanned && interactiveInitialized && state.projectSourceToViewerMatrix) {
+        const planned=planRemainingIfcPreviews([queue[queueIndex-1],...queue.slice(queueIndex)],sizes,strategy).slice(1);
+        queue.splice(queueIndex,queue.length-queueIndex,...planned);
+        tailPlanned=true;
+        perfMark('IFC Preview queue',{strategy,anchor:queue[queueIndex-1].path,entries:queue.map(e=>({path:e.path,modelId:e.modelId,sourceBytes:sizes.get(e.path.toLowerCase())??null}))},perfSession);
+      }
+      const entry=queue[queueIndex];
         showLoading(interactiveInitialized ? `后台加载 ${entry.name}...` : `正在加载 ${entry.name}...`);
       let readEnded = false;
       let readProfiled = false;
@@ -1169,6 +1191,10 @@ export async function loadAllIfcFiles(
               if(previewInputOwnership){ifcBytes.value=null;readEnded=false;}
               if(previewFirstDeferredFine)preview.setFineDeferred();
               perfMark('IFC Preview LOD1 ready',{path:entry.path,...preview.data?.diagnostics},perfSession);
+              perfMark('IFC Preview entry ready',{path:entry.path,modelId:entry.modelId,sourceBytes:sizes.get(entry.path.toLowerCase())??null,
+                previewsReady:++previewsReady,totalRemaining:entries.length-1,
+                representableObjects:new Set(preview.data?.shapes.map(s=>s.object.expressId)).size,
+                products:preview.data?.diagnostics.products??null},perfSession);
             }
             endPreview(undefined,{represented:preview?.data?.diagnostics.represented??0});
           } catch(error) {
@@ -1786,6 +1812,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       // loadAllIfcFiles 内部会创建 ViewerRuntime、加载 IFC、渲染树、触发 MOD/STL
       await loadAllIfcFiles(state, cachedIfcEntries, showMessage, {
         session,
+        ifcSourceSizes:new Map([...cachedIfcFiles].map(([path,file])=>[path.toLowerCase(),file.size])),
         startStdSld,
         scheduleSpatialSemantic,
         scheduleStdSld,

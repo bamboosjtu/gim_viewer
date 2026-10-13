@@ -1,3 +1,4 @@
+import { SUBSTATION_EARLY_SEMANTIC_DEFAULT } from '../config/features.js';
 import type { AppState } from '../app/state.js';
 import { btnLoadGim, gimFileInput } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
@@ -147,18 +148,27 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
 
     if (nativeFilePath) {
       let endNative: ReturnType<typeof perfBegin> | null = null;
+      const earlyRequested = source.magic === 'GIMPKGS' && projectId != null
+        && (SUBSTATION_EARLY_SEMANTIC_DEFAULT || localStorage.getItem('gim-debug-substation-early-semantic') === '1');
       try {
         const { extractGimArchiveNative } = await import('@desktop/gimExtract.js');
         endNative = perfBegin('解压（Rust 原生）', undefined, perfSession);
-        const early = source.magic === 'GIMPKGS' && projectId != null
-          && localStorage.getItem('gim-debug-substation-early-semantic') === '1';
-        const native = early
-          ? await (await import('./substationExtractionJob.js')).startSubstationExtractionJob(state, session, nativeFilePath, projectId!)
-          : await extractGimArchiveNative(nativeFilePath, projectId ?? undefined,
+        const early = earlyRequested;
+        const fullNative = () => extractGimArchiveNative(nativeFilePath, projectId ?? undefined,
           source.magic === 'GIMPKGS' ? {
+            ...(earlyRequested ? {expectedSourceSha256:session.sourceSha256!} : {}),
             traceEntries: localStorage.getItem('gim-debug-substation-extraction-trace') === '1',
             substationParseCopy: localStorage.getItem('gim-debug-substation-parse-copy') === '1',
           } : {});
+        let native: Awaited<ReturnType<typeof extractGimArchiveNative>> | ExtractedGimSource;
+        if (early) {
+          const policy = await import('./substationExtractionJob.js');
+          const capability = await policy.inspectEarlySemanticEligibility(nativeFilePath, projectId!, session.sourceSha256!);
+          (await import('../utils/perfTimings.js')).perfMark('early semantic eligibility', {...capability}, perfSession);
+          if (!state.isCurrentSession(session)) return { magic: source.magic, files: new Map() };
+          native = await policy.withEarlySemanticCapability(capability,
+            () => policy.startSubstationExtractionJob(state, session, nativeFilePath, projectId!), fullNative);
+        } else native = await fullNative();
         if (!state.isCurrentSession(session)) {
           endNative?.('（取消）');
           return { magic: source.magic, files: new Map() };
@@ -179,7 +189,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
       } catch (nativeError) {
         const nativeMessage = nativeError instanceof Error ? nativeError.message : String(nativeError);
         endNative?.('（失败）', { error: nativeMessage });
-        if (source.magic === 'GIMPKGS' && localStorage.getItem('gim-debug-substation-early-semantic') === '1') throw nativeError;
+        if (earlyRequested) throw nativeError;
         // 资源配额是安全边界，不得通过 WASM 回退绕过。
         if (/超出资源配额|资源配额|压缩比超限|条目数超限|单文件.*超限|总解压量.*超限/i.test(nativeMessage)) {
           throw nativeError;
