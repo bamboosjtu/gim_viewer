@@ -1,3 +1,4 @@
+import type { ParseCopyReceipt } from './substationParseCopy.js';
 /**
  * 原生解压 Tauri 桥接（acc-plan P0-2）。
  *
@@ -13,6 +14,7 @@ import { invokeTimed } from './invokeTimed.js';
 export interface NativeExtractionResult {
   /** GIM 魔数（GIMPKGS/GIMPKGT） */
   magic: string;
+  earlySemantic?: boolean;
   projectId?: string;
   projectName?: string;
   /** 展平后的文件 Map（与 extractGimFile 输出同构） */
@@ -25,6 +27,9 @@ export interface NativeExtractionResult {
   extractionProfile?: NativeExtractionProfile;
   /** 线路原生解压时写入的连续语义 pack 相对路径；旧 payload 无此字段。 */
   semanticPackPath?: string;
+  parseCopy?: ParseCopyReceipt;
+  entryTrace?: NativeExtractionEntryTiming[];
+  semanticCheckpoint?: Record<string, number | boolean>;
 }
 
 export interface NativeExtractionProfile {
@@ -53,6 +58,12 @@ export interface NativeExtractionProfile {
   maxEntryDecodePath?: string;
 }
 
+export interface NativeExtractionEntryTiming {
+  path: string; archiveIndex: number; folderIndex: number | null; physicalOrder: number;
+  size: number; decodeMs: number; sinkWriteMs: number; decodedAtMs: number;
+  sinkCompleteAtMs: number; cumulativeBytes: number;
+}
+
 /** manifest 条目 */
 interface ExtractManifestEntry {
   path: string;
@@ -71,6 +82,9 @@ interface ExtractManifest {
   entries: ExtractManifestEntry[];
   semantic_pack_path?: string;
   profile?: NativeExtractionProfile;
+  parse_copy?: ParseCopyReceipt;
+  entry_trace?: NativeExtractionEntryTiming[];
+  semantic_checkpoint?: Record<string, number | boolean>;
 }
 
 /**
@@ -276,6 +290,9 @@ export function parseExtractionPayload(
     cacheProjectId: options.cacheProjectId,
     extractionProfile: manifest.profile,
     semanticPackPath: manifest.semantic_pack_path,
+    parseCopy: manifest.parse_copy,
+    entryTrace: manifest.entry_trace,
+    semanticCheckpoint: manifest.semantic_checkpoint,
   };
 }
 
@@ -288,7 +305,8 @@ export function parseExtractionPayload(
 export async function extractGimArchiveNative(
   filePath: string,
   projectId?: number,
+  experiments: { traceEntries?: boolean; substationParseCopy?: boolean } = {},
 ): Promise<NativeExtractionResult> {
-  const buf = await invokeTimed<ArrayBuffer>('extract_gim_archive', { filePath, projectId });
+  const buf = await invokeTimed<ArrayBuffer>('extract_gim_archive', { filePath, projectId, ...experiments });
   return parseExtractionPayload(buf, { cacheProjectId: projectId });
 }

@@ -8,6 +8,7 @@
  * 不读取 IFC，也不引入全局缓存或改变大文件 lazy 语义。
  */
 
+import { readSubstationParseCopy, type ParseCopyReceipt } from '@desktop/substationParseCopy.js';
 import { batchReadCachedFiles } from '@desktop/database.js';
 import { isDiskBackedFile, isSemanticPackBackedFile } from '@desktop/gimExtract.js';
 
@@ -21,6 +22,7 @@ export interface NativeSmallFileHydrationOptions {
   maxFiles?: number;
   maxBytes?: number;
   isCurrent?: () => boolean;
+  parseCopy?: ParseCopyReceipt;
 }
 
 export interface NativeSmallFileHydrationResult {
@@ -113,6 +115,22 @@ export async function hydrateNativeSmallFiles(
     if (extensionOf(path) === 'ifc') continue;
     if (!Number.isFinite(file.size) || file.size < 0 || file.size > NATIVE_SMALL_FILE_MAX_BYTES) continue;
     requestedCandidates.push({ path, file });
+  }
+
+  if (options.parseCopy) {
+    try {
+      const packed = await readSubstationParseCopy(projectId, options.parseCopy, files);
+      if (!isCurrent()) return { files: output, requested: requestedCandidates.length, hydrated: 0, bytes: 0, batches: 1, misses: 0, cancelled: true };
+      // All-or-fallback: never turn a partial acceleration copy into parser inputs.
+      if (!requestedCandidates.every(candidate => packed.has(candidate.path))) throw Error('parse copy missing input');
+      let bytes = 0;
+      for (const candidate of requestedCandidates) {
+        const value = packed.get(candidate.path)!;
+        output.set(candidate.path, toFile(value, candidate.path, candidate.file));
+        bytes += value.byteLength;
+      }
+      return { files: output, requested: requestedCandidates.length, hydrated: requestedCandidates.length, bytes, batches: 1, misses: 0, cancelled: false };
+    } catch { /* Acceleration copy is optional; independent sources remain readable. */ }
   }
 
   const maxFiles = Math.max(1, Math.floor(options.maxFiles ?? NATIVE_SMALL_FILE_BATCH_MAX_FILES));

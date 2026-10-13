@@ -55,6 +55,10 @@ struct ExtractManifest {
     /// 原生磁盘优先路径的 Rust 阶段计时；inline 兼容 payload 可省略。
     #[serde(skip_serializing_if = "Option::is_none")]
     profile: Option<ExtractionProfile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parse_copy: Option<crate::substation_parse_copy::CopyReceipt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entry_trace: Option<Vec<crate::gim_extract::ExtractionEntryTiming>>,
 }
 
 /// 线路 parser 需要的文本文件上限。CBM/DEV/FAM/PHM 通常是小文本；MOD
@@ -91,6 +95,8 @@ pub async fn extract_gim_archive(
     db_state: tauri::State<'_, DbState>,
     file_path: String,
     project_id: Option<i64>,
+    trace_entries: Option<bool>,
+    substation_parse_copy: Option<bool>,
 ) -> Result<tauri::ipc::Response, String> {
     let authorized_path = require_authorized_path(&access, &file_path, Some("gim"))?;
     let metadata = std::fs::metadata(&authorized_path)
@@ -149,10 +155,14 @@ pub async fn extract_gim_archive(
             } else {
                 None
             };
+            let mut parse_copy = (substation_sources && substation_parse_copy == Some(true))
+                .then(crate::substation_parse_copy::ParseCopy::default);
+            let mut entry_trace = Vec::new();
+            let mut observer = |entry| { if substation_sources && trace_entries == Some(true) { entry_trace.push(entry); } };
             let mut write_open_ms = 0.0_f64;
             let mut write_data_ms = 0.0_f64;
             let mut semantic_pack_write_ms = 0.0_f64;
-            let extraction = extract_from_path_with_quota_profile(&authorized_path, &quota, |path, bytes| {
+            let sink = |path: String, bytes: Vec<u8>| {
                 let size = u64::try_from(bytes.len())
                     .map_err(|e| format!("条目大小溢出: {} — {}", path, e))?;
                 let semantic_pack_offset = if line_pack_enabled {
@@ -184,6 +194,9 @@ pub async fn extract_gim_archive(
                 } else {
                     None
                 };
+                if let Some(copy) = parse_copy.as_mut() {
+                    if copy.append(&path, &bytes).is_err() { parse_copy = None; }
+                }
                 metas.push(ExtractedEntryMeta {
                     path,
                     offset: 0,
@@ -192,7 +205,10 @@ pub async fn extract_gim_archive(
                     semantic_pack_offset,
                 });
                 Ok(())
-            });
+            };
+            let extraction = if substation_sources && trace_entries == Some(true) {
+                crate::gim_extract::extract_from_path_with_quota_profile_observed(&authorized_path, &quota, sink, &mut observer)
+            } else { extract_from_path_with_quota_profile(&authorized_path, &quota, sink) };
             let (info, mut profile) = match extraction {
                 Ok(result) => result,
                 Err(error) => {
@@ -222,6 +238,8 @@ pub async fn extract_gim_archive(
             } else {
                 Vec::<LineSemanticPackEntry>::new()
             };
+            // An optional acceleration-copy error never prevents source extraction.
+            let copy_receipt = parse_copy.and_then(|copy| copy.finish(&staging_root).ok());
             let commit_started = std::time::Instant::now();
             if let Err(error) = commit_cache_staging(&app_handle, pid, &staging_root) {
                 let _ = remove_cache_dir_if_safe(&staging_root, " staging");
@@ -239,6 +257,8 @@ pub async fn extract_gim_archive(
                 },
                 Some(profile),
                 command_started,
+                copy_receipt,
+                if entry_trace.is_empty() { None } else { Some(entry_trace) },
             )
         } else {
             let data =
@@ -261,6 +281,8 @@ fn build_manifest_payload(
     semantic_pack_path: Option<String>,
     mut profile: Option<ExtractionProfile>,
     command_started: std::time::Instant,
+    parse_copy: Option<crate::substation_parse_copy::CopyReceipt>,
+    entry_trace: Option<Vec<crate::gim_extract::ExtractionEntryTiming>>,
 ) -> Result<Vec<u8>, String> {
     // 先以零值 profile 序列化一次，测出 manifest 的实际组装耗时；再把
     // 计时写回 manifest。使用借用视图，避免为第二次序列化复制数万条
@@ -278,6 +300,12 @@ fn build_manifest_payload(
         semantic_pack_path: Option<&'a String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         profile: Option<&'a ExtractionProfile>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parse_copy: Option<&'a crate::substation_parse_copy::CopyReceipt>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        entry_trace: Option<&'a Vec<crate::gim_extract::ExtractionEntryTiming>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        semantic_checkpoint: Option<crate::substation_extraction_profile::SemanticCheckpoint>,
     }
     let manifest_without_profile = serde_json::to_vec(&ManifestView {
         magic: &info.magic,
@@ -286,6 +314,9 @@ fn build_manifest_payload(
         entries: &entries,
         semantic_pack_path: semantic_pack_path.as_ref(),
         profile: None,
+        parse_copy: parse_copy.as_ref(),
+        entry_trace: entry_trace.as_ref(),
+        semantic_checkpoint: entry_trace.as_deref().and_then(crate::substation_extraction_profile::checkpoint),
     })
     .map_err(|e| format!("序列化清单失败: {}", e))?;
     if let Some(ref mut p) = profile {
@@ -300,6 +331,9 @@ fn build_manifest_payload(
             entries: &entries,
             semantic_pack_path: semantic_pack_path.as_ref(),
             profile: Some(profile_ref),
+            parse_copy: parse_copy.as_ref(),
+            entry_trace: entry_trace.as_ref(),
+            semantic_checkpoint: entry_trace.as_deref().and_then(crate::substation_extraction_profile::checkpoint),
         })
         .map_err(|e| format!("序列化清单失败: {}", e))?
     } else { manifest_without_profile };
@@ -368,6 +402,8 @@ fn build_payload(
         entries: metas,
         semantic_pack_path: None,
         profile: None,
+        parse_copy: None,
+        entry_trace: None,
     })
     .map_err(|e| format!("序列化清单失败: {}", e))?;
 

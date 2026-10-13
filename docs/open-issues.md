@@ -40,7 +40,7 @@ P2 为增强或需要场景确认的候选。状态分为待核验、待开发�
 | D-13 | P2 / 待核验 | 变电来源文件 validation 保留逐文件 reparse 检查，首轮 OS/文件打开波动仍可显著增加耗时 | 扩充独立进程与部署环境验证；目录安全检查去重须先证明验证期间变化 fail closed，不以降低安全检查换取提速 |
 | D-14 | P2 / 待开发 | transient I/O/写盘失败阻止完整 geometry manifest/version 发布，下一次打开可能重新编译整批 DEV；source-invalid 确定性拒绝不属于该失败 | 测量失败后的实际恢复成本，再决定是否复用未完整发布的确定性子集；保留 retry，不能把临时失败持久化为 source-invalid |
 | D-15 | P1 / 待决策 | 剩余 IFC Preview 顺序处理，重文件可延迟其后的轻量来源；文件大小不是稳定的处理成本指标 | 保持首个 anchor IFC 不变，按逐文件 OpenModel、metadata、LOD/commit 实测建立成本依据，再决定稳定调度；不并行启动多个大型 Preview Worker |
-| D-16 | P1 / 待决策 | 变电原生冷路径在全部来源解压和 staging commit 后才进入语义，小文件语义等待大型 IFC decode/read | 先核验7z条目顺序与solid block；设计semantic-first/delayed materialization时同时证明路径安全、来源完整、配额、原子发布及重解码成本 |
+| D-16 | P0 / 实验待验收 | 单遍 early semantic 已实现且默认关闭；真实 02 两次有效 core 约 28.5 秒、首个 IFC 约 31.9 秒，但完整验收仍有未触发打开和关闭／发布观察失败 | 保留独立 raw source 原子发布与 v26 receipt 前置条件；补最终构建冷端到端观察、较少 IPC 的引用物化结果与更多有效进程；不将历史 46.4 秒替代当前配对基线。连续副本 hydration 有收益，仍不作为权威缓存 |
 | D-12 | P1 / 待核验 | 原生语义发布与 DEV 未完成时正常关闭后的独立暖启动已通过局部验收；WASM 回退及持久化异常的真实桌面闭环未执行 | 在限定预算内核验回退源写入、缺文件、截断索引、写入失败和 A→B；语义 HIT 与部分 DEV 缓存分开，不放宽超时 |
 
 现行模板共享和 IFC/Spatial Worker 已存在，不作为待开发项重复立项。

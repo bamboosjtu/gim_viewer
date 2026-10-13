@@ -1,3 +1,4 @@
+import { isSubstationSourceMaterializing, substationSourcePreparationMessage } from './substationExtractionJob.js';
 import { buildSubstationAliasIndex, deviceOccurrenceScope, type DeviceOccurrenceScope } from '../gim/substationEvidence.js';
 import type { CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession, SelectionRequest, SelectionGeometryState } from '../app/state.js';
@@ -125,6 +126,11 @@ export async function handleNodeClick(
   // reset/apply commit waits behind an already-started external operation.
   const cleared=clearSelectionHighlight(state,request,message);
   await syncSelectionNavigation(state,request);
+  if (isSubstationSourceMaterializing(state)) {
+    await Promise.all([basic, cleared]);
+    if (isSelected()) message(substationSourcePreparationMessage(state));
+    return;
+  }
 
   const refs=collectIfcRefs(node,state.currentIfcEntries);
   const ifcModelId=node.ifcFile ? resolveIfcModelId(node.ifcFile,state.currentIfcEntries) : state.deviceToIfcFile.get(node.path.split('/').pop() || '');

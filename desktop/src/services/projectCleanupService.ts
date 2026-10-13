@@ -29,6 +29,7 @@ import { container } from '../ui/dom.js';
 import { perfCurrentSession, perfReset } from '../utils/perfTimings.js';
 import { sampleSubstationRuntimeResources } from './substationResourceTelemetry.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
+import { cancelSubstationExtraction } from './substationExtractionJob.js';
 import { cancelIfcConversions } from '../viewer/ifcConversion.js';
 import { cancelSubstationSpatialWorkers } from './substationSpatialWorkerClient.js';
 import { resetStatusRight } from '../ui/shell/statusBar.js';
@@ -61,6 +62,7 @@ export async function cleanupBeforeOpenNewProject(
   // （渐进 GLB 管线 / MOD 自动加载），防止旧项目任务把 GLB、版本标记或
   // UI 状态写入新项目。必须在任何 await 之前执行——后续新增逻辑不得移到本行之前。
   state.invalidatePendingLoads();
+  cancelSubstationExtraction(state);
   cancelIfcConversions();
   cancelSubstationSpatialWorkers();
   const cleanupGeneration = state.projectGeneration;

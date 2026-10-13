@@ -150,7 +150,15 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
       try {
         const { extractGimArchiveNative } = await import('@desktop/gimExtract.js');
         endNative = perfBegin('解压（Rust 原生）', undefined, perfSession);
-        const native = await extractGimArchiveNative(nativeFilePath, projectId ?? undefined);
+        const early = source.magic === 'GIMPKGS' && projectId != null
+          && localStorage.getItem('gim-debug-substation-early-semantic') === '1';
+        const native = early
+          ? await (await import('./substationExtractionJob.js')).startSubstationExtractionJob(state, session, nativeFilePath, projectId!)
+          : await extractGimArchiveNative(nativeFilePath, projectId ?? undefined,
+          source.magic === 'GIMPKGS' ? {
+            traceEntries: localStorage.getItem('gim-debug-substation-extraction-trace') === '1',
+            substationParseCopy: localStorage.getItem('gim-debug-substation-parse-copy') === '1',
+          } : {});
         if (!state.isCurrentSession(session)) {
           endNative?.('（取消）');
           return { magic: source.magic, files: new Map() };
@@ -158,12 +166,20 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
         endNative(undefined, {
           files: native.files.size,
           extraction: native.extractionProfile ?? null,
+          entryTrace: native.entryTrace ?? null,
+          parseCopy: native.parseCopy ?? null,
+          earlySemantic: native.earlySemantic ?? false,
+          semanticCheckpoint: native.semanticCheckpoint ?? null,
         });
         recordNativeExtractionStages(native.extractionProfile, perfSession, source.magic === 'GIMPKGS');
+        if (source.magic === 'GIMPKGS' && !native.earlySemantic) {
+          (await import('../utils/perfTimings.js')).perfMark('sourceMaterializationComplete', { files: native.files.size }, perfSession);
+        }
         extracted = native;
       } catch (nativeError) {
         const nativeMessage = nativeError instanceof Error ? nativeError.message : String(nativeError);
         endNative?.('（失败）', { error: nativeMessage });
+        if (source.magic === 'GIMPKGS' && localStorage.getItem('gim-debug-substation-early-semantic') === '1') throw nativeError;
         // 资源配额是安全边界，不得通过 WASM 回退绕过。
         if (/超出资源配额|资源配额|压缩比超限|条目数超限|单文件.*超限|总解压量.*超限/i.test(nativeMessage)) {
           throw nativeError;

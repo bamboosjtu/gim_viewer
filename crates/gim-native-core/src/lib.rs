@@ -379,29 +379,71 @@ fn read_entry_bytes<R: Read + ?Sized>(
     Ok((buf, actual_total))
 }
 
+struct CancelAwareReader<'a> {
+    inner: &'a mut dyn Read,
+    cancelled: &'a std::sync::atomic::AtomicBool,
+}
+impl Read for CancelAwareReader<'_> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        if self.cancelled.load(std::sync::atomic::Ordering::Acquire) {
+            // Interrupted is retried by read_to_end; use a terminal error instead.
+            return Err(io::Error::new(io::ErrorKind::Other, "extraction cancelled"));
+        }
+        let limit = bytes.len().min(64 * 1024);
+        self.inner.read(&mut bytes[..limit])
+    }
+}
+
+/// Passive timings emitted after a complete sink write. The default/mobile API
+/// supplies no observer and retains its extraction and quota contract.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractionEntryTiming {
+    pub path: String,
+    pub archive_index: usize,
+    pub folder_index: Option<usize>,
+    pub physical_order: usize,
+    pub size: u64,
+    pub decode_ms: f64,
+    pub sink_write_ms: f64,
+    pub decoded_at_ms: f64,
+    pub sink_complete_at_ms: f64,
+    pub cumulative_bytes: u64,
+}
+
 /// 从已定位的归档 reader 逐条解压。sink 返回后当前条目的字节立即释放，
 /// 因而原生落盘路径的内存上限约为最大单文件 + 解码器工作集。
 fn extract_archive_reader<R, F>(
-    reader: R,
+    mut reader: R,
     archive_len: u64,
     is_sevenz: bool,
     quota: &ExtractionQuota,
     profile: &mut ExtractionProfile,
     mut sink: F,
+    mut observer: Option<&mut dyn FnMut(ExtractionEntryTiming)>,
+    semantic_order: bool,
+    cancelled: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<(), String>
 where
     R: Read + Seek,
     F: FnMut(String, Vec<u8>) -> Result<(), String>,
 {
+    let trace_started = Instant::now();
     let mut entry_count = 0usize;
     let mut total_uncompressed = 0u64;
 
     if is_sevenz {
-        let mut reader =
-            sevenz_rust::SevenZReader::new(reader, archive_len, sevenz_rust::Password::empty())
+        let mut archive_reader =
+            sevenz_rust::SevenZReader::new(&mut reader, archive_len, sevenz_rust::Password::empty())
                 .map_err(|e| format!("打开 7z 归档失败: {}", e))?;
-        reader
-            .for_each_entries(|entry, stream| {
+        let entry_lookup = if observer.is_some() {
+            archive_reader.archive().files.iter().enumerate().map(|(i, e)|
+                (e.name.clone(), (i, archive_reader.archive().stream_map.file_folder_index[i])))
+                .collect::<std::collections::HashMap<_, _>>()
+        } else { std::collections::HashMap::new() };
+        let archive = semantic_order.then(|| archive_reader.archive().clone());
+        // The borrowed reader is released before ordered independent-folder decoding.
+        let mut each = |entry: &sevenz_rust::SevenZArchiveEntry, stream: &mut dyn Read| {
                 if entry.is_directory() {
                     return Ok(true);
                 }
@@ -417,15 +459,12 @@ where
                 )
                 .map_err(sevenz_rust::Error::other)?;
                 let decode_started = Instant::now();
-                let (bytes, actual_total) = read_entry_bytes(
-                    stream,
-                    &path,
-                    entry.size(),
-                    total_uncompressed,
-                    archive_len,
-                    quota,
-                )
-                .map_err(sevenz_rust::Error::other)?;
+                let (bytes, actual_total) = if let Some(cancelled) = cancelled {
+                    read_entry_bytes(&mut CancelAwareReader { inner: stream, cancelled },
+                        &path, entry.size(), total_uncompressed, archive_len, quota)
+                } else {
+                    read_entry_bytes(stream, &path, entry.size(), total_uncompressed, archive_len, quota)
+                }.map_err(sevenz_rust::Error::other)?;
                 let decode_ms = elapsed_ms(decode_started);
                 profile.decode_ms += decode_ms;
                 if decode_ms > profile.max_entry_decode_ms {
@@ -442,11 +481,48 @@ where
                 profile.write_ms += write_ms;
                 if write_ms > profile.max_entry_write_ms {
                     profile.max_entry_write_ms = write_ms;
-                    profile.max_entry_write_path = Some(path_for_profile);
+                    profile.max_entry_write_path = Some(path_for_profile.clone());
+                }
+                if let Some(callback) = observer.as_deref_mut() {
+                    let (archive_index, folder_index) = entry_lookup[&entry.name];
+                    callback(ExtractionEntryTiming {
+                        path: path_for_profile, archive_index, folder_index,
+                        physical_order: profile.entry_count, size: entry.size(),
+                        decode_ms, sink_write_ms: write_ms,
+                        decoded_at_ms: write_started.duration_since(trace_started).as_secs_f64() * 1000.0,
+                        sink_complete_at_ms: elapsed_ms(trace_started), cumulative_bytes: actual_total,
+                    });
                 }
                 Ok(true)
-            })
-            .map_err(|e| {
+            };
+        let decode_result = if let Some(archive) = archive {
+            drop(archive_reader);
+            // Empty entries have no compressed stream dependency. Decode every folder once;
+            // only independent all-core folders move ahead, never entries inside a solid folder.
+            let mut result = Ok(());
+            for (i, file) in archive.files.iter().enumerate() {
+                if archive.stream_map.file_folder_index[i].is_none() {
+                    if let Err(error) = each(file, &mut &[][..]) { result = Err(error); break; }
+                }
+            }
+            let mut folders: Vec<_> = (0..archive.folders.len()).collect();
+            folders.sort_by_key(|folder| {
+                let start = archive.stream_map.folder_first_file_index[*folder];
+                let count = archive.folders[*folder].num_unpack_sub_streams;
+                !archive.files[start..start + count].iter().all(|e| is_core_semantic_path(&e.name))
+            });
+            if result.is_ok() {
+                for folder in folders {
+                    if let Err(error) = sevenz_rust::BlockDecoder::new(folder, &archive, &[], &mut reader).for_each_entries(&mut each) {
+                        result = Err(error); break;
+                    }
+                }
+            }
+            result
+        } else {
+            archive_reader.for_each_entries(&mut each)
+        };
+        decode_result.map_err(|e| {
                 let msg = e.to_string();
                 if msg.starts_with("解压终止") {
                     msg
@@ -504,7 +580,15 @@ where
             profile.write_ms += write_ms;
             if write_ms > profile.max_entry_write_ms {
                 profile.max_entry_write_ms = write_ms;
-                profile.max_entry_write_path = Some(path_for_profile);
+                profile.max_entry_write_path = Some(path_for_profile.clone());
+            }
+            if let Some(callback) = observer.as_deref_mut() {
+                callback(ExtractionEntryTiming {
+                    path: path_for_profile, archive_index: i, folder_index: None,
+                    physical_order: profile.entry_count, size: declared, decode_ms, sink_write_ms: write_ms,
+                    decoded_at_ms: write_started.duration_since(trace_started).as_secs_f64() * 1000.0,
+                    sink_complete_at_ms: elapsed_ms(trace_started), cumulative_bytes: actual_total,
+                });
             }
         }
     }
@@ -536,6 +620,74 @@ pub fn extract_from_path_with_quota_profile<F>(
 where
     F: FnMut(String, Vec<u8>) -> Result<(), String>,
 {
+    extract_from_path_with_quota_profile_impl(path, quota, sink, None, false, None)
+}
+
+/// Desktop research observer; does not reorder, skip, or retain entry bytes.
+pub fn extract_from_path_with_quota_profile_observed<F>(
+    path: &Path, quota: &ExtractionQuota, sink: F,
+    observer: &mut dyn FnMut(ExtractionEntryTiming),
+) -> Result<(ExtractionMetadata, ExtractionProfile), String>
+where F: FnMut(String, Vec<u8>) -> Result<(), String> {
+    extract_from_path_with_quota_profile_impl(path, quota, sink, Some(observer), false, None)
+}
+
+/// Experimental desktop traversal: independent core-only folders and empty entries first.
+/// Every compressed folder still decodes once, with unchanged internal stream order.
+pub fn extract_substation_semantic_order<F>(
+    path: &Path, quota: &ExtractionQuota, sink: F, observer: &mut dyn FnMut(ExtractionEntryTiming),
+) -> Result<(ExtractionMetadata, ExtractionProfile), String>
+where F: FnMut(String, Vec<u8>) -> Result<(), String> {
+    extract_from_path_with_quota_profile_impl(path, quota, sink, Some(observer), true, None)
+}
+
+pub fn extract_substation_semantic_order_cancellable<F>(
+    path: &Path, quota: &ExtractionQuota, sink: F, observer: &mut dyn FnMut(ExtractionEntryTiming),
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<(ExtractionMetadata, ExtractionProfile), String>
+where F: FnMut(String, Vec<u8>) -> Result<(), String> {
+    extract_from_path_with_quota_profile_impl(path, quota, sink, Some(observer), true, Some(cancelled))
+}
+
+pub fn is_core_semantic_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".cbm") || lower.ends_with(".fam") || lower.ends_with(".dev")
+}
+
+/// Preflight for the desktop job. No entry streams are decoded here.
+/// All paths, duplicate identities, and declared quota totals are checked before early use.
+pub fn inspect_substation_entries(path: &Path, quota: &ExtractionQuota) -> Result<Vec<(String, u64)>, String> {
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    if metadata.len() > quota.max_archive_bytes { return Err(quota_err("GIM 大小超限".into())); }
+    let mut file = File::open(path).map_err(|e| e.to_string())?;
+    let mut prefix = vec![0; metadata.len().min(SIGNATURE_SEARCH_LIMIT as u64) as usize];
+    file.read_exact(&mut prefix).map_err(|e| e.to_string())?;
+    let (offset, info, sevenz) = parse_archive_prefix(&prefix)?;
+    if info.magic != "GIMPKGS" || !sevenz { return Err("experimental job requires substation 7z".into()); }
+    let len = metadata.len() - offset as u64;
+    let reader = OffsetReader::new(file, offset as u64, len).map_err(|e| e.to_string())?;
+    let archive = sevenz_rust::SevenZReader::new(reader, len, sevenz_rust::Password::empty()).map_err(|e| e.to_string())?;
+    let mut paths = std::collections::HashSet::new();
+    let mut entries = Vec::new(); let mut count = 0; let mut total = 0;
+    for file in &archive.archive().files {
+        if file.is_directory() { continue; }
+        let path = normalize_path(&file.name);
+        validate_archive_path(&path)?;
+        if !paths.insert(path.to_ascii_lowercase()) { return Err("duplicate archive path".into()); }
+        check_declared_size(&mut count, total, &path, file.size, len, quota)?;
+        total += file.size;
+        entries.push((path, file.size));
+    }
+    Ok(entries)
+}
+
+fn extract_from_path_with_quota_profile_impl<F>(
+    path: &Path, quota: &ExtractionQuota, sink: F,
+    observer: Option<&mut dyn FnMut(ExtractionEntryTiming)>,
+    semantic_order: bool,
+    cancelled: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<(ExtractionMetadata, ExtractionProfile), String>
+where F: FnMut(String, Vec<u8>) -> Result<(), String> {
     let started = Instant::now();
     let metadata =
         std::fs::metadata(path).map_err(|e| format!("读取 GIM 文件元信息失败: {}", e))?;
@@ -566,7 +718,7 @@ where
         archive_bytes: metadata.len(),
         ..ExtractionProfile::default()
     };
-    extract_archive_reader(reader, archive_len, is_sevenz, quota, &mut profile, sink)?;
+    extract_archive_reader(reader, archive_len, is_sevenz, quota, &mut profile, sink, observer, semantic_order, cancelled)?;
     profile.archive_ms = elapsed_ms(archive_started);
     profile.total_ms = elapsed_ms(started);
     Ok((info, profile))
@@ -904,6 +1056,60 @@ mod tests {
 
         let err = extract_from_bytes_with_quota(&gim, &quota).unwrap_err();
         assert!(err.contains("条目数超限"), "实际错误: {}", err);
+    }
+
+    #[test]
+    fn cancellable_reader_bounds_decode_units_and_does_not_retry_cancel() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct Source<'a> { cancelled: &'a AtomicBool, calls: usize, max: usize }
+        impl Read for Source<'_> {
+            fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
+                self.calls += 1; self.max = self.max.max(b.len());
+                b.fill(1); self.cancelled.store(true, Ordering::Release); Ok(b.len())
+            }
+        }
+        let cancelled = AtomicBool::new(false);
+        let mut source = Source { cancelled: &cancelled, calls: 0, max: 0 };
+        let mut reader = CancelAwareReader { inner: &mut source, cancelled: &cancelled };
+        let error = read_entry_bytes(&mut reader, "CBM/a.ifc", 1024 * 1024, 0, 1024 * 1024, &ExtractionQuota::default()).unwrap_err();
+        assert!(error.contains("cancelled")); assert_eq!(source.calls, 1); assert!(source.max <= 64 * 1024);
+    }
+
+    #[test]
+    fn semantic_order_preserves_solid_bytes_and_emits_core_before_geometry() {
+        use sevenz_rust::{SevenZWriter, SevenZArchiveEntry, SourceReader, SeqReader};
+        let mut archive = Cursor::new(Vec::new());
+        {
+            let mut writer = SevenZWriter::new(&mut archive).unwrap();
+            let names = ["DEV/a.dev", "CBM/a.ifc", "PHM/a.phm"];
+            let data = [b"PHYSICALMODEL=a.phm".to_vec(), b"IFC-byte-content".to_vec(), b"SOLIDMODEL1=a.mod".to_vec()];
+            let entries = names.iter().map(|p| { let mut e = SevenZArchiveEntry::new(); e.name = p.to_string(); e.has_stream = true; e }).collect();
+            let sources = data.into_iter().map(|d| SourceReader::from(Cursor::new(d))).collect::<Vec<_>>();
+            writer.push_archive_entries(entries, SeqReader::from(sources)).unwrap();
+            writer.push_archive_entry({ let mut e = SevenZArchiveEntry::new(); e.name = "CBM/project.cbm".into(); e.has_stream = true; e }, Some(Cursor::new(b"TYPE=SS"))).unwrap();
+            writer.push_archive_entry::<Cursor<Vec<u8>>>({ let mut e = SevenZArchiveEntry::new(); e.name = "DEV/empty.fam".into(); e }, None).unwrap();
+            writer.finish().unwrap();
+        }
+        let path = std::env::temp_dir().join(format!("gim-semantic-order-{}.gim", std::process::id()));
+        std::fs::write(&path, build_gim_bytes(&archive.into_inner(), b'S', "test")).unwrap();
+        let mut ordinary = Vec::new(); let mut ordered = Vec::new(); let mut trace = Vec::new();
+        extract_from_path_with_quota(&path, &ExtractionQuota::default(), |p,b| { ordinary.push((p,b)); Ok(()) }).unwrap();
+        let preflight = inspect_substation_entries(&path, &ExtractionQuota::default()).unwrap();
+        assert_eq!(preflight.len(), 5);
+        extract_substation_semantic_order(&path, &ExtractionQuota::default(), |p,b| { ordered.push((p,b)); Ok(()) }, &mut |e| trace.push(e)).unwrap();
+        assert_eq!(ordered[0].0, "DEV/empty.fam");
+        assert_eq!(ordered[1].0, "CBM/project.cbm");
+        assert_eq!(ordered[2].0, "DEV/a.dev");
+        assert_eq!(ordered[3].0, "CBM/a.ifc");
+        let mut left = ordinary.clone(); left.sort_by(|a,b| a.0.cmp(&b.0));
+        let mut right = ordered.clone(); right.sort_by(|a,b| a.0.cmp(&b.0)); assert_eq!(left, right);
+        assert_eq!(trace.len(), 5); assert_eq!(trace.last().unwrap().cumulative_bytes, left.iter().map(|e| e.1.len() as u64).sum::<u64>());
+        let quota = ExtractionQuota { max_entries: 2, ..ExtractionQuota::default() };
+        assert!(inspect_substation_entries(&path, &quota).unwrap_err().contains("配额"));
+        let mut seen = 0;
+        assert!(extract_substation_semantic_order(&path, &ExtractionQuota::default(), |_,_| { seen += 1; if seen > 3 { Err("cancelled".into()) } else { Ok(()) } }, &mut |_| {}).is_err());
+        assert_eq!(seen, 4);
+        std::fs::remove_file(path).unwrap();
     }
 
     /// P1 评审 #4：单文件超配额 → 拒绝解压（且不发生 with_capacity 巨量分配）

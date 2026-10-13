@@ -12,6 +12,9 @@ import { pushBusy, popBusy } from '../ui/shell/statusBar.js';
 
 export interface ExtractedGimSource {
   magic: string;
+  sourceMaterialization?: Promise<void>;
+  earlySemantic?: boolean;
+  semanticCheckpoint?: Record<string, number | boolean>;
   projectId?: string;
   projectName?: string;
   files: Map<string, File>;
@@ -19,6 +22,8 @@ export interface ExtractedGimSource {
   cacheProjectId?: number;
   extractionProfile?: NativeExtractionProfile;
   semanticPackPath?: string;
+  parseCopy?: import('@desktop/substationParseCopy.js').ParseCopyReceipt;
+  entryTrace?: import('@desktop/gimExtract.js').NativeExtractionEntryTiming[];
 }
 
 /** Shared context passed into exactly one domain runtime after dispatch. */

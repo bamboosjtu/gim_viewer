@@ -1809,7 +1809,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
     const hydrated = await hydrateNativeSmallFiles(
       extracted,
       extractedSource.cacheProjectId,
-      { isCurrent: () => state.isCurrentSession(session) },
+      { isCurrent: () => state.isCurrentSession(session), parseCopy: extractedSource.parseCopy },
     );
     if (hydrated.cancelled || !state.isCurrentSession(session)) return;
     extracted = hydrated.files;
@@ -1872,6 +1872,9 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       persistProjectId != null
         ? (async () => {
       const projectId = persistProjectId;
+      // Early session sources are never a published source cache or a v26 receipt.
+      await preExtracted.sourceMaterialization;
+      if (!state.isCurrentSession(session)) return;
       let localCachePathMap = new Map<string, string>();
       if (!state.isCurrentSession(session)) return;
 

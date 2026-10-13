@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const batchReadMock = vi.hoisted(() => vi.fn());
+const copyReadMock = vi.hoisted(() => vi.fn());
+vi.mock('@desktop/substationParseCopy.js', () => ({ readSubstationParseCopy: copyReadMock }));
 
 vi.mock('@desktop/database.js', () => ({
   batchReadCachedFiles: batchReadMock,
@@ -36,9 +38,44 @@ function nativeFile(
 describe('hydrateNativeSmallFiles', () => {
   beforeEach(() => {
     batchReadMock.mockReset();
+    copyReadMock.mockReset();
     batchReadMock.mockImplementation(async (_projectId: number, paths: string[]) => new Map(
       paths.map((path) => [path, new TextEncoder().encode(`DATA=${path}`)]),
     ));
+  });
+
+  it('validated contiguous copy avoids individual batch reads and preserves exact duplicate rows', async () => {
+    const text = '[设计参数]\r\n材质=材质=铝\r\n材质=材质=制造厂家提供\r\n';
+    const original = nativeFile('DEV/a.fam', text);
+    const files = new Map([['DEV/a.fam', original], ['CBM/a.ifc', nativeFile('CBM/a.ifc', 10)]]);
+    copyReadMock.mockResolvedValue(new Map([['DEV/a.fam', new TextEncoder().encode(text)]]));
+    const result = await hydrateNativeSmallFiles(files, 1, { parseCopy: { size: 1, sha256: 'receipt' } });
+    expect(batchReadMock).not.toHaveBeenCalled();
+    expect(await result.files.get('DEV/a.fam')!.text()).toBe(text);
+    expect(result.files.get('CBM/a.ifc')).toBe(files.get('CBM/a.ifc'));
+    expect(result.batches).toBe(1);
+  });
+
+  it('copy failure or missing entry falls back to original batches without partial input', async () => {
+    for (const failure of ['reject', 'partial']) {
+      batchReadMock.mockClear();
+      const files = new Map([['DEV/a.dev', nativeFile('DEV/a.dev', 3)], ['DEV/b.dev', nativeFile('DEV/b.dev', 3)]]);
+      if (failure === 'reject') copyReadMock.mockRejectedValueOnce(Error('copy corrupt'));
+      else copyReadMock.mockResolvedValueOnce(new Map([['DEV/a.dev', new TextEncoder().encode('bad-copy')]]));
+      const result = await hydrateNativeSmallFiles(files, 1, { parseCopy: { size: 1, sha256: 'receipt' } });
+      expect(batchReadMock).toHaveBeenCalledOnce();
+      expect(await result.files.get('DEV/a.dev')!.text()).toBe('DATA=DEV/a.dev');
+    }
+  });
+
+  it('project switch during copy read prevents all File reconstruction', async () => {
+    let current = true;
+    copyReadMock.mockImplementationOnce(async () => { current = false; return new Map([['DEV/a.dev', new Uint8Array([1])]]); });
+    const file = nativeFile('DEV/a.dev', 1);
+    const result = await hydrateNativeSmallFiles(new Map([['DEV/a.dev', file]]), 1,
+      { parseCopy: { size: 1, sha256: 'receipt' }, isCurrent: () => current });
+    expect(result.cancelled).toBe(true); expect(result.files.get('DEV/a.dev')).toBe(file);
+    expect(batchReadMock).not.toHaveBeenCalled();
   });
 
   it('按文件数/总字节分批，并把命中的 native 文件物化为普通 File', async () => {

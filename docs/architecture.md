@@ -103,6 +103,16 @@ DEV 导出前和静态 GLB 模板恢复时检查有限值与包围盒跨度，�
 
 地图数据从有效 BLHA 提取 `[longitude, latitude]` 和高程等源值。导线挂点、跨越与杆塔坐标的角色分别保存，同塔跳线不构造虚假跨塔档。MapLibre、Canvas、树和搜索共用对象选择状态。弧垂为当前视觉近似，工程语义边界见 [线路 MOD](schema/powerline-mod.md)。
 
+## 变电首次解析实验
+
+桌面 `gim-debug-substation-early-semantic=1` 启用默认关闭的 7z 单遍 job；默认路径仍完整解压后解析。job 先处理无 stream 条目和独立的 core-only folder，不改变同一个 solid folder 内的解码顺序，也不重复解码其前缀。core 输入为 CBM/FAM/DEV，含 FileDevRelation.cbm。
+
+`start_substation_extraction → semanticReady → complete / failed / cancelled` 与正式缓存发布分开。早期 File 输入来自同次解码的原字节副本，只能在本次工程会话内使用；其余文件必须等实际 materialize 后读取。首个完整 IFC 的坐标锚点契约保持。准备期间可查看语义与属性，设备定位会明确提示源几何尚在准备。
+
+job 的 staging 只有全部条目通过路径、配额、大小和解码校验、源 SHA 保持、任务未取消后才由现有原子 commit 发布。v26 索引持久化还须等待 source completion。关闭和新 job 会撤销旧任务的发布权；实验读取按最多 64 KiB 的解码单元检查取消。Source completion 后采用既有有界 batch hydration 准备引用文本，避免逐条 job IPC。
+
+独立的 `gim-debug-substation-parse-copy=1` 为完整解压路径生成连续小文件加速副本；原文件仍独立落盘，副本不是权威源、不进入 v26 必需来源。副本校验包括本次提取 receipt 的大小与 SHA、路径/长度/区间及完整覆盖；失败退回 batch hydration。early job 的可选副本失败则等待完整 materialization 后使用原批量路径。`gim-debug-substation-extraction-trace=1` 仅记录完整解压的逐条时序和虚拟 checkpoint，不提前返回 command。
+
 ## 当前缓存域
 
 下表是文档中唯一的版本定义表。修改持久化含义时只失效受影响域，实际常量以链接源码为准。

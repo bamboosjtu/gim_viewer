@@ -1,6 +1,9 @@
 mod db;
 mod gim_extract;
 mod gim_extract_command;
+mod substation_parse_copy;
+mod substation_extraction_job;
+mod substation_extraction_profile;
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -656,6 +659,21 @@ fn read_file_head(
 pub fn run() {
     ensure_fixed_webview2_acl();
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if substation_extraction_job::has_running_job() {
+                    api.prevent_close();
+                    substation_extraction_job::cancel_all();
+                    let window = window.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        while substation_extraction_job::has_running_job() {
+                            std::thread::sleep(std::time::Duration::from_millis(25));
+                        }
+                        let _ = window.close();
+                    });
+                }
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let conn = db::init_db(app.handle())
@@ -673,6 +691,11 @@ pub fn run() {
             file_dialog_commands::pick_gim_file_path,
             file_dialog_commands::pick_ifc_file_paths,
             gim_extract_command::extract_gim_archive,
+            substation_parse_copy::read_substation_parse_copy,
+            substation_extraction_job::start_substation_extraction,
+            substation_extraction_job::substation_extraction_status,
+            substation_extraction_job::read_substation_extraction_source,
+            substation_extraction_job::cancel_substation_extraction,
             db::upsert_gim_project,
             db::save_gim_index,
             db::write_cache_file_binary,
