@@ -9,8 +9,8 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 
 | 平台          | 当前版本       | 下载                                                         | 主要功能                                                 |
 | ------------- | -------------- | ------------------------------------------------------------ | -------------------------------------------------------- |
-| Windows x64   | v0.0.1 Preview | [下载 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/download/desktop-v0.0.1-preview/GIM-Reader_0.0.1_x64_portable.zip) | 变电站三维模型、输电线路地图、工程层级与属性浏览         |
-| Android ARM64 | v0.1.5 Preview | [下载 APK](https://github.com/bamboosjtu/gim_viewer/releases/download/android-v0.1.5-preview/GIM-Viewer-Android-v0.1.5-arm64.apk) | 输电线路地图、工程树、杆塔与导线属性、来源查看和现场定位 |
+| Windows x64   | v0.0.3 Preview | [下载 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/download/desktop-v0.0.3-preview/GIM-Reader_0.0.3_x64_portable.zip) | 变电站三维模型、输电线路地图、工程层级与属性浏览         |
+| Android ARM64 | v0.1.16 Preview | [下载 APK](https://github.com/bamboosjtu/gim_viewer/releases/download/android-v0.1.6-preview/gim-viewer-android-ae7df06cc83ebde26fc2cb17faf003d7b2fd8a2f.zip) | 输电线路地图、工程树、杆塔与导线属性、来源查看和现场定位 |
 
 历史版本及发布说明：[GitHub Releases](https://github.com/bamboosjtu/gim_viewer/releases)
 
