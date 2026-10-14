@@ -1,5 +1,6 @@
 import type { FamSourceProperty } from '../gim/famParser.js';
 import type { IfcGeometryProvider, IfcPreviewFineState } from '../viewer/ifcGeometryProvider.js';
+import type { IfcRegionalRuntime } from '../viewer/ifcRegionalRuntime.js';
 import type { SubstationCapabilitySummary } from '../gim/substationEvidence.js';
 import type { IfcEntry, CbmNode, FileDevEntry } from '../gim/types.js';
 import type * as OBCF from '@thatopen/fragments';
@@ -155,7 +156,10 @@ export class AppState {
   ifcPreviewFineStates = new Map<string, IfcPreviewFineState>();
   /** Cancels queued per-file IFC fine work before preview resources are released. */
   cancelPendingIfcFine: (() => void) | null = null;
+  ifcRegionalRuntimes=new Map<string,IfcRegionalRuntime>();
   private releaseIfcPreviews(): void {
+    for(const runtime of this.ifcRegionalRuntimes.values())runtime.release();
+    this.ifcRegionalRuntimes.clear();
     this.cancelPendingIfcFine?.();
     this.cancelPendingIfcFine = null;
     for (const provider of this.ifcPreviewProviders.values()) provider.release();

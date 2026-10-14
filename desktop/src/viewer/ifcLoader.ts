@@ -7,7 +7,6 @@ import { debugLog, debugWarn } from '../utils/logger.js';
 import { createIfcModelId } from '../gim/modelIdentity.js';
 import { perfBegin, perfCurrentSession } from '../utils/perfTimings.js';
 import { registerIfcLoadDiagnostic, takeIfcLoadDiagnostic } from './ifcLoadDiagnostics.js';
-import { loadRawIfc } from './ifcConversion.js';
 
 /** 诊断计数：仅反映已返回 Promise 的 Fragments update 是否 settle。 */
 let outstandingFragmentsUpdateCount = 0;
@@ -261,7 +260,7 @@ export async function loadIfcBuffer(
   state: AppState,
   onProgress?: (progress: number) => void,
   identityPath?: string,
-  options: { session?: ProjectLoadSession } = {},
+  options: { session?: ProjectLoadSession; readBytes?:()=>Promise<Uint8Array|null> } = {},
 ): Promise<void> {
   const modelId = createIfcModelId(identityPath || name);
   const session = options.session ?? state.captureProjectSession();
@@ -284,7 +283,11 @@ export async function loadIfcBuffer(
   const reportProgress = (progress: number) => {
     if (isCurrent()) onProgress?.(progress);
   };
-  await loadRawIfc(ctx, state, session, buffer, runtimeModelId, identityPath || name, reportProgress);
+  const {loadBimIfc}=await import('./ifcBimLoader.js');
+  const identity=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new Uint8Array(buffer)))].map(v=>v.toString(16).padStart(2,'0')).join('');
+  const retained=options.readBytes?null:buffer.slice();
+  await loadBimIfc(ctx,state,session,runtimeModelId,modelId,identityPath||name,
+    options.readBytes??(async()=>retained!.slice()),reportProgress,{sourceIdentity:identity,initialBytes:buffer});
   if (!isCurrent()) {
     try { ctx.fragments.core.disposeModel(runtimeModelId); } catch { /* 事件尚未登记时无需清理 */ }
     return;

@@ -5,8 +5,21 @@
  * 验证 manifest 解析、blob 切分、越界校验。
  */
 
-import { describe, expect, it } from 'vitest';
-import { parseExtractionPayload } from '../gimExtract.js';
+import { describe, expect, it, vi } from 'vitest';
+import { parseExtractionPayload, createDiskBackedFile } from '../gimExtract.js';
+const reads = vi.hoisted(() => ({ readCachedEntry: vi.fn() }));
+vi.mock('../database.js', () => reads);
+
+it('full disk reads retain their owned buffer while slices remain precisely bounded', async () => {
+  const input = new Uint8Array([1, 2, 3, 4]);
+  reads.readCachedEntry.mockResolvedValue(input);
+  const file = createDiskBackedFile(1, 'CBM/source.ifc', 4);
+  expect(await file.arrayBuffer()).toBe(input.buffer);
+  expect(new Uint8Array(await file.slice(1, 3).arrayBuffer())).toEqual(new Uint8Array([2, 3]));
+  // A view into a larger IPC allocation must not expose surrounding bytes.
+  reads.readCachedEntry.mockResolvedValue(new Uint8Array([9, 1, 2, 3, 4, 9]).subarray(1, 5));
+  expect(new Uint8Array(await file.arrayBuffer())).toEqual(input);
+});
 
 function buildPayload(
   entries: Array<{ path: string; data: string }>,

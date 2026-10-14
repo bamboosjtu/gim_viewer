@@ -117,7 +117,7 @@ describe('IFC project session race', () => {
       entryA,
       async () => new Uint8Array([1]),
       undefined,
-      { session: sessionA },
+      { session: sessionA, openingPolicy:'full' },
     );
     // 让 A 走到慢速 ifcLoader.load，并确认 owner 已登记。
     await Promise.resolve();
@@ -135,7 +135,7 @@ describe('IFC project session race', () => {
       entryB,
       async () => new Uint8Array([2]),
       undefined,
-      { session: sessionB },
+      { session: sessionB, openingPolicy:'full' },
     );
     await loadingB;
 

@@ -1,6 +1,6 @@
 {
   "name": "gim-reader",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "GIM 浏览器",
   "type": "module",
   "scripts": {
@@ -21,7 +21,9 @@
     "test:ifc-preview:sample": "vitest run --config vitest.ifc-preview.config.ts",
     "test:all": "vitest run --config vitest.sample.config.ts && vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:experimental": "vitest run --config vitest.experimental.config.ts",
+    "test:ifc-critical": "vitest run src/viewer/__tests__/ifcConversion.test.ts src/viewer/__tests__/ifcSessionRace.test.ts src/viewer/__tests__/ifcFragmentsCache.test.ts src/viewer/__tests__/ifcNameIndex.test.ts src/viewer/__tests__/ifcOpeningPolicy.test.ts src/viewer/__tests__/ifcRegionalData.test.ts src/viewer/__tests__/ifcBimLoader.test.ts src/viewer/__tests__/webIfcCompatibility.test.ts src/ui/__tests__/ifcPreviewModeControl.test.ts bridge/__tests__/gimExtract.test.ts src/viewer/__tests__/ifcSharedImport.test.ts src/viewer/__tests__/ifcRegionalInstances.test.ts"
   },
   "author": "bamboosjtu",
   "license": "MIT",
@@ -35,7 +37,7 @@
     "pmtiles": "^4.4.1",
     "three": "^0.184.0",
     "three-bvh-csg": "^0.0.18",
-    "web-ifc": "^0.0.77"
+    "web-ifc": "0.0.78"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.3",

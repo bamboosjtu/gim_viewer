@@ -30,8 +30,8 @@ function context(state:AppState) {
     settings:{wasm:{path:'http://tauri.localhost/wasm/',absolute:true},webIfc:{COORDINATE_TO_ORIGIN:false}},load:vi.fn()},
     fragments:{list:models,core:{settings:{autoCoordinate:false},update:vi.fn(),
       models:{materials:{list:{onItemSet:event()}}},
-      load:vi.fn(async (bytes:Uint8Array,{modelId}:{modelId:string})=>{
-        const model={modelId,object:new THREE.Group(),useCamera:vi.fn(),getBuffer:async()=>bytes.buffer};
+      load:vi.fn(async (bytes:ArrayBuffer,{modelId}:{modelId:string})=>{
+        const model={modelId,object:new THREE.Group(),useCamera:vi.fn(),getBuffer:async()=>bytes};
         models.set(modelId,model);onItemSet.emit({value:model});return model;
       }),disposeModel:vi.fn((id:string)=>{const model=models.get(id);if(model){onBeforeDelete.emit({value:model});models.delete(id);onItemDeleted.emit(id);}})}}};
   registerModelEvents(ctx,state,{onModelAdded:vi.fn(),onModelRemoved:vi.fn()});
@@ -48,7 +48,7 @@ afterEach(()=>{cancelIfcConversions();vi.unstubAllGlobals();localStorage.clear()
 it('raw entry transfers a dedicated input copy, preserves identity/settings and commits through real model events',async()=>{
   const state=new AppState(),session=state.activateProject(1,'sha'),{ctx,scene}=context(state);
   const input=new Uint8Array([1,2,3]),progress=vi.fn();
-  const loading=loadIfcEntry(ctx,state,entry,async()=>input,progress,{session});
+  const loading=loadIfcEntry(ctx,state,entry,async()=>input,progress,{session,openingPolicy:'full'});
   await vi.waitFor(()=>expect(ConversionWorker.instances).toHaveLength(1));
   const worker=ConversionWorker.instances[0];
   expect(worker.options).toEqual({type:'module'});
@@ -58,28 +58,30 @@ it('raw entry transfers a dedicated input copy, preserves identity/settings and 
   state.beginSelection({kind:'cbm',key:'B'}); // Selection cannot cancel reusable project resources.
   worker.reply({type:'complete',bytes:new Uint8Array([9,8]),conversionMs:123});await loading;
   expect(ctx.ifcLoader.load).not.toHaveBeenCalled();
-  expect(ctx.fragments.core.load).toHaveBeenCalledWith(new Uint8Array([9,8]),{modelId:state.getRuntimeModelId(entry.modelId,session)});
+  expect(ctx.fragments.core.load).toHaveBeenCalledWith(new Uint8Array([9,8]).buffer,{modelId:state.getRuntimeModelId(entry.modelId,session)});
   expect(ctx.fragments.core.settings.autoCoordinate).toBe(true);
   expect(state.loadedModels.has(entry.modelId)).toBe(true);expect(scene.children).toHaveLength(1);
   expect(worker.terminate).toHaveBeenCalledTimes(1);expect(input).toEqual(new Uint8Array([1,2,3]));
 });
 
-it('deferred fine mode transfers the sole owned input buffer without a second full-size copy',async()=>{
+it('owned raw input transfers the sole owned input buffer without a second full-size copy',async()=>{
   const state=new AppState(),session=state.activateProject(1,'sha'),{ctx}=context(state);
   const input=new Uint8Array([4,5,6,7]);
-  const loading=loadIfcEntry(ctx,state,entry,async()=>input,undefined,{session,transferInput:true});
+  const loading=loadIfcEntry(ctx,state,entry,async()=>input,undefined,{session,transferInput:true,openingPolicy:'omit-rel-voids'});
   await vi.waitFor(()=>expect(ConversionWorker.instances).toHaveLength(1));
   const worker=ConversionWorker.instances[0];
   expect(Array.from(worker.input!.bytes)).toEqual([4,5,6,7]);
   expect(input.byteLength).toBe(0);
+  expect(worker.input!.openingPolicy).toBe('omit-rel-voids');
   worker.reply({type:'complete',bytes:new Uint8Array([8]),conversionMs:1});
   await loading;
   expect(state.loadedModels.has(entry.modelId)).toBe(true);
+  expect(ctx.fragments.list.get(state.getRuntimeModelId(entry.modelId,session)).object.userData.ifcOpeningPolicy).toBe('omit-rel-voids');
 });
 
 it('project cleanup terminates pending WASM and old messages cannot register into the new project',async()=>{
   const state=new AppState(),session=state.activateProject(1,'A'),{ctx,scene}=context(state);
-  const loading=loadIfcEntry(ctx,state,entry,async()=>new Uint8Array([1]),undefined,{session});
+  const loading=loadIfcEntry(ctx,state,entry,async()=>new Uint8Array([1]),undefined,{session,openingPolicy:'full'});
   const settled=expect(loading).rejects.toThrow('obsolete project');
   await vi.waitFor(()=>expect(ConversionWorker.instances).toHaveLength(1));
   const worker=ConversionWorker.instances[0],late=worker.onmessage!;
@@ -91,12 +93,12 @@ it('project cleanup terminates pending WASM and old messages cannot register int
 
 it('a conversion failure remains a failed file; the next IFC can load without a blocking fallback',async()=>{
   const state=new AppState(),session=state.activateProject(1,'sha'),{ctx}=context(state);
-  const failed=loadIfcEntry(ctx,state,entry,async()=>new Uint8Array([1]),undefined,{session});
+  const failed=loadIfcEntry(ctx,state,entry,async()=>new Uint8Array([1]),undefined,{session,openingPolicy:'full'});
   const rejected=expect(failed).rejects.toThrow('unsupported source');
   await vi.waitFor(()=>expect(ConversionWorker.instances).toHaveLength(1));
   ConversionWorker.instances[0].reply({type:'error',message:'unsupported source'});await rejected;
   const next={...entry,modelId:'ifc-next',path:'CBM/next.ifc'};
-  const loaded=loadIfcEntry(ctx,state,next,async()=>new Uint8Array([2]),undefined,{session});
+  const loaded=loadIfcEntry(ctx,state,next,async()=>new Uint8Array([2]),undefined,{session,openingPolicy:'full'});
   await vi.waitFor(()=>expect(ConversionWorker.instances).toHaveLength(2));
   ConversionWorker.instances[1].reply({type:'complete',bytes:new Uint8Array([8]),conversionMs:1});await loaded;
   expect(state.loadedModels.has(entry.modelId)).toBe(false);expect(state.loadedModels.has(next.modelId)).toBe(true);
@@ -106,6 +108,6 @@ it('a conversion failure remains a failed file; the next IFC can load without a 
 it('worker startup failure reports failure instead of retrying synchronous conversion',async()=>{
   vi.stubGlobal('Worker',class {constructor(){throw new Error('worker unavailable');}});
   const state=new AppState(),session=state.activateProject(1,'sha'),{ctx}=context(state);
-  await expect(loadIfcEntry(ctx,state,entry,async()=>new Uint8Array([1]),undefined,{session})).rejects.toThrow('worker unavailable');
+  await expect(loadIfcEntry(ctx,state,entry,async()=>new Uint8Array([1]),undefined,{session,openingPolicy:'full'})).rejects.toThrow('worker unavailable');
   expect(ctx.ifcLoader.load).not.toHaveBeenCalled();expect(state.loadedModels.size).toBe(0);
 });

@@ -1,6 +1,7 @@
 import * as OBC from '@thatopen/components';
 import type { ViewerContext } from './viewerEngine.js';
 import { loadRawIfc } from './ifcConversion.js';
+import type { IfcOpeningPolicy } from '../config/features.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { isTauri } from '@desktop/runtime.js';
 import { isFragmentsCacheEnabled, FRAGMENTS_CACHE_COMPOSED_KEY } from '../config/features.js';
@@ -111,6 +112,7 @@ export async function loadIfcEntry(
     onLoadSource?: (source: IfcLoadSource) => void;
     /** Transfer the one-shot raw IFC buffer to the conversion worker. */
     transferInput?: boolean;
+    openingPolicy?: IfcOpeningPolicy;
   } = {},
 ): Promise<void> {
   const { modelId, name, path: entryPath } = entry;
@@ -138,13 +140,21 @@ export async function loadIfcEntry(
   if (ctx.fragments.list.has(runtimeModelId)) return;
 
   const projectId = session.projectId;
+  const openingPolicy = options.openingPolicy ?? 'bim-lod';
+  if(openingPolicy==='bim-lod'){
+    const {loadBimIfc}=await import('./ifcBimLoader.js');
+    const model=await loadBimIfc(ctx,state,session,runtimeModelId,modelId,entryPath,getIfcBuffer,reportProgress);
+    if(model)options.onLoadSource?.(model.object.userData.ifcLodCacheHit?'fragments-cache':'ifc');
+    return;
+  }
   const cacheEnabled = isFragmentsCacheEnabled();
   perfSetFragmentsCacheEnabled(cacheEnabled, perfSessionId);
   if (!cacheEnabled) {
     debugLog(DEBUG_IFC_LOAD, '[Fragments Cache] disabled, using IFC loader');
   }
   const sourceGimSha256 = session.sourceSha256?.trim() || '';
-  const canUseCache = cacheEnabled && isTauri() && projectId != null && !!entryPath && !!sourceGimSha256;
+  // Simplified geometry must never read or overwrite a full-fidelity cache.
+  const canUseCache = openingPolicy === 'full' && cacheEnabled && isTauri() && projectId != null && !!entryPath && !!sourceGimSha256;
 
   // 2. 尝试 Fragments 缓存（不读 IFC buffer）
   if (canUseCache && entryPath) {
@@ -191,6 +201,7 @@ export async function loadIfcEntry(
     sessionId: perfSessionId,
   });
   const tIfcLoad = performance.now();
+  const sourceIfcSize = ifcBuffer.byteLength;
   const endWebIfcConversion = perfBegin(
     `变电 IFC web-ifc conversion · ${entryPath}`,
     { entryPath, phase: 'web-ifc conversion', source: 'ifc' },
@@ -200,7 +211,7 @@ export async function loadIfcEntry(
   let model: any;
   try {
     model = await loadRawIfc(ctx, state, session, ifcBuffer, runtimeModelId, entryPath || name, reportProgress, perfSessionId,
-      { transferInput: options.transferInput });
+      { transferInput: options.transferInput, openingPolicy });
   } catch (err) {
     webIfcLoadFailed = true;
     throw err;
@@ -230,22 +241,8 @@ export async function loadIfcEntry(
 
   // onItemSet 事件已更新 loadedModels，此处不重复设置
 
-  // 4b. 后置校验：等待一帧让 onItemSet 完成（state.loadedModels + ctx.fragments.list 更新）
-  // 即使 onItemSet 内部 safeFragmentsUpdate 报了 "Malformed tile"（被 catch），
-  // 模型对象本身应该已经进入 scene + fragments.list + loadedModels
-  const stableStarted = performance.now();
-  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  perfRecordExternalSpan(
-    `变电 IFC RAF/stable validation · ${entryPath}`,
-    performance.now() - stableStarted,
-    { entryPath, phase: 'RAF + Fragments list/model state validation' },
-    perfSessionId,
-  );
-
-  if (!isCurrent()) {
-    try { ctx.fragments.core.disposeModel(runtimeModelId); } catch { /* ignore */ }
-    return;
-  }
+  // core.load awaits setup; onItemSet registration is synchronous. Verify
+  // registration directly instead of delaying each file by an animation frame.
 
   const inFragments = ctx.fragments.list.has(runtimeModelId);
   const loaded = state.loadedModels.has(modelId);
@@ -276,7 +273,7 @@ export async function loadIfcEntry(
       return;
     }
     await tryWriteFragmentsCache(
-      state, model, projectId as number, entryPath, modelId, ifcBuffer.byteLength, sourceGimSha256, session, perfSessionId,
+      state, model, projectId as number, entryPath, modelId, sourceIfcSize, sourceGimSha256, session, perfSessionId,
     ).catch((err) => {
       console.warn(`[Fragments Cache] 写入失败，不影响当前加载: ${entryPath}`, err);
     });
@@ -407,6 +404,7 @@ async function tryLoadFromFragmentsCache(
 
   // 2c. 反序列化加载
   const tLoad = performance.now();
+  const fragmentSize = fragBytes.byteLength;
   try {
     const camera = (ctx.world.camera as unknown as OBC.SimpleCamera).three;
     registerIfcLoadDiagnostic(runtimeModelId, {
@@ -419,9 +417,11 @@ async function tryLoadFromFragmentsCache(
       { entryPath, phase: 'fragments.core.load', source: 'fragments-cache', bytes: fragBytes.byteLength },
       { id: perfSessionId },
     );
+    const fragmentBuffer = fragBytes.buffer instanceof ArrayBuffer && fragBytes.byteOffset === 0 && fragmentSize === fragBytes.buffer.byteLength
+      ? fragBytes.buffer : fragBytes.slice().buffer;
     let coreLoadFailed = false;
     try {
-      await ctx.fragments.core.load(fragBytes, { modelId: runtimeModelId, camera });
+      await ctx.fragments.core.load(fragmentBuffer, { modelId: runtimeModelId, camera });
     } catch (err) {
       coreLoadFailed = true;
       throw err;
@@ -430,12 +430,12 @@ async function tryLoadFromFragmentsCache(
         entryPath,
         phase: 'fragments.core.load',
         source: 'fragments-cache',
-        bytes: fragBytes.byteLength,
+        bytes: fragmentSize,
         failed: coreLoadFailed,
       });
     }
     const loadMs = Math.round(performance.now() - tLoad);
-    perfRecordFragmentsCacheOperation('load', performance.now() - tLoad, fragBytes.byteLength, false, perfSessionId);
+    perfRecordFragmentsCacheOperation('load', performance.now() - tLoad, fragmentSize, false, perfSessionId);
     debugLog(DEBUG_IFC_LOAD, `[Perf] fragment load: ${loadMs} ms`);
     if (!state.isCurrentSession(session)) {
       try { await ctx.fragments.list.delete(runtimeModelId); } catch { /* ignore */ }
@@ -470,7 +470,7 @@ async function tryLoadFromFragmentsCache(
     perfRecordFragmentsCacheOutcome('hit', perfSessionId);
     return true;
   } catch (err) {
-    perfRecordFragmentsCacheOperation('load', performance.now() - tLoad, fragBytes.byteLength, true, perfSessionId);
+    perfRecordFragmentsCacheOperation('load', performance.now() - tLoad, fragmentSize, true, perfSessionId);
     perfRecordFragmentsCacheOutcome('fallback', perfSessionId);
     console.warn(`[Fragments Cache] 反序列化失败，删除坏缓存并回退 IFC: ${entryPath}`, err);
     debugLog(DEBUG_IFC_LOAD, `[Perf] fragment load: ${Math.round(performance.now() - tLoad)} ms (failed)`);

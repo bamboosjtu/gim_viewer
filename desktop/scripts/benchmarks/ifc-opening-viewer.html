@@ -1,0 +1,38 @@
+<!doctype html><meta charset="utf-8"><title>钢结构开洞对照</title>
+<style>body{margin:0;background:#edf0f4;font:16px system-ui;color:#172235}header{padding:16px 22px;background:white}button{padding:9px 14px;margin:0 4px;cursor:pointer}main{display:flex}section{width:50%}h2{font-size:18px;text-align:center;margin:14px}canvas{display:block;width:100%;height:760px}#status{padding:10px 22px;font-size:14px}</style>
+<header><b>0302 钢结构 · 固定相机 / 光照 / 材质</b> <button data-view="far">全景</button><button data-view="71558">多孔板 71558</button><button data-view="68826">四孔板 68826</button><button data-view="66438">板件 66438</button><button data-view="566215">构件 566215</button></header>
+<main><section><h2>原始 IFC · 完整开洞</h2><canvas id="full"></canvas></section><section><h2>浏览表示 · 省略关系开洞（螺栓保留）</h2><canvas id="omit-rel-voids"></canvas></section></main><div id="status">加载几何…</div>
+<script type="module">
+import * as T from '/three.js';
+const modes=['full','omit-rel-voids'], views=[];
+const status=document.querySelector('#status');
+for(const mode of modes){
+ const manifest=await(await fetch('/'+mode+'.json')).json(),binary=await(await fetch('/'+mode+'.bin')).arrayBuffer();
+ const geometries=manifest.geometries.map(g=>{const result=new T.BufferGeometry(),buffer=new T.InterleavedBuffer(new Float32Array(binary,g.vertexOffset,g.vertexLength),6);result.setAttribute('position',new T.InterleavedBufferAttribute(buffer,3,0));result.setAttribute('normal',new T.InterleavedBufferAttribute(buffer,3,3));result.setIndex(new T.BufferAttribute(new Uint32Array(binary,g.indexOffset,g.indexLength),1));result.computeBoundingBox();return result;});
+ const scene=new T.Scene();scene.background=new T.Color('#e8edf3');scene.add(new T.HemisphereLight(0xffffff,0x687684,2));const light=new T.DirectionalLight(0xffffff,2.5);light.position.set(1,2,3);scene.add(light);const fill=new T.DirectionalLight(0xffffff,1);fill.position.set(-2,1,-1);scene.add(fill);
+ const renderer=new T.WebGLRenderer({canvas:document.getElementById(mode),antialias:true,preserveDrawingBuffer:true});renderer.setPixelRatio(1);renderer.setSize(960,760,false);renderer.outputColorSpace=T.SRGBColorSpace;
+ const camera=new T.OrthographicCamera(-1,1,1,-1,.001,10000),root=new T.Group();scene.add(root);
+ const groups=new Map();for(const p of manifest.placements){const key=p.geometry+':'+p.color.join(',');if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p);}
+ const meshes=[];for(const ps of groups.values()){const p=ps[0],material=new T.MeshStandardMaterial({color:new T.Color(...p.color.slice(0,3)),roughness:.75,metalness:.1,side:T.DoubleSide});const mesh=new T.InstancedMesh(geometries[p.geometry],material,ps.length);mesh.userData.placements=ps;mesh.frustumCulled=false;meshes.push(mesh);root.add(mesh);}
+ views.push({mode,manifest,geometries,root,scene,renderer,camera,meshes});
+}
+const sourceBox=(v,ps)=>{const box=new T.Box3();for(const p of ps)box.union(v.geometries[p.geometry].boundingBox.clone().applyMatrix4(new T.Matrix4().fromArray(p.matrix)));return box;};
+const full=views[0],allBounds=sourceBox(full,full.manifest.placements),origin=allBounds.getCenter(new T.Vector3());
+const toWorld=new T.Matrix4().makeRotationX(-Math.PI/2).multiply(new T.Matrix4().makeTranslation(-origin.x,-origin.y,-origin.z));
+function show(view){
+ const target=view==='far'?full.manifest.placements:full.manifest.placements.filter(p=>p.expressId===Number(view));if(!target.length)throw Error('missing target '+view);
+ const box=sourceBox(full,target).applyMatrix4(toWorld),center=box.getCenter(new T.Vector3()),size=box.getSize(new T.Vector3());
+ let direction=new T.Vector3(1,.65,1).normalize(),up=new T.Vector3(0,1,0),radius=size.length()*.55;
+ if(view!=='far'){
+  const p=target[0],localSize=full.geometries[p.geometry].boundingBox.getSize(new T.Vector3()).toArray();const shortest=localSize.indexOf(Math.min(...localSize)),longest=localSize.indexOf(Math.max(...localSize));
+  const m=toWorld.clone().multiply(new T.Matrix4().fromArray(p.matrix));direction=new T.Vector3().setComponent(shortest,1).transformDirection(m);up=new T.Vector3().setComponent(longest,1).transformDirection(m);radius=size.length()*.58;
+ }
+ const records=[];for(const v of views){
+  for(const mesh of v.meshes){const ps=mesh.userData.placements;let count=0;for(const p of ps){if(view!=='far'&&p.expressId!==Number(view))continue;mesh.setMatrixAt(count++,toWorld.clone().multiply(new T.Matrix4().fromArray(p.matrix)));}mesh.count=count;mesh.instanceMatrix.needsUpdate=true;mesh.visible=count>0;}
+  v.camera.left=-radius*960/760;v.camera.right=radius*960/760;v.camera.top=radius;v.camera.bottom=-radius;v.camera.near=.0001;v.camera.far=Math.max(radius*20,100);v.camera.position.copy(center).addScaledVector(direction,Math.max(radius*4,1));v.camera.up.copy(up);v.camera.lookAt(center);v.camera.updateProjectionMatrix();v.renderer.render(v.scene,v.camera);
+  records.push({mode:v.mode,camera:v.camera.position.toArray(),target:center.toArray(),radius,render:{...v.renderer.info.render},globalIds:[...new Set(v.manifest.placements.filter(p=>view==='far'||p.expressId===Number(view)).map(p=>p.globalId))]});
+ }
+ window.comparison={view,records};status.textContent=`视角 ${view} · 相机与原始包围盒固定 · 近景单对象隔离，便于看清孔洞 · 原始 ${full.manifest.streamMs.toFixed(0)} ms / 简化 ${views[1].manifest.streamMs.toFixed(0)} ms 几何流`;
+}
+document.querySelectorAll('button').forEach(button=>button.onclick=()=>show(button.dataset.view));show('far');window.showComparison=show;window.ready=true;
+</script>

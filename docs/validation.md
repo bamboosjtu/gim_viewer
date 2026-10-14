@@ -1,8 +1,6 @@
 # 正确性与验证
 
-验证区分源包事实、源码契约、自动测试、真实桌面交互。每种证据只支持相应范围。
-当前可用复核覆盖十个包的身份、文件清单与相关源码契约，未形成当前构建的完整运行门禁结果。
-当前构建的桌面及性能验收缺口统一见 [未决事项](open-issues.md)。
+验证区分源包事实、源码契约、自动测试、真实桌面交互。每种证据只支持相应范围。 当前可用复核覆盖十个包的身份、文件清单与相关源码契约，未形成当前构建的完整运行门禁结果。 当前构建的桌面及性能验收缺口统一见 [未决事项](open-issues.md)。
 
 ## 当前复核范围
 
@@ -50,8 +48,13 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
 `test:sample` 在缺失本地样本时可跳过；skip 不能算样本通过。
-严格变电门禁要求其配置的样本，使用上述环境变量要求 substation04；`GIM_SAMPLE_ROOT` 可指定另一样本根。样本目录名称和别名见 [台账](schema/sample-corpus.md)。
-命令的覆盖与策略以 [严格门禁脚本](../desktop/scripts/test-substation-strict.mjs) 为准。
+日常 IFC 加载改动使用 `npm run test:ifc-critical`，覆盖转换所有权、工程切换、缓存回退、名称补全、磁盘文件边界、关系记录扫描、区域/孔截面判定、0.0.78 流式接口兼容及产品细节控件。保留关键契约，不用全站样本回归替代单文件性能对照。
+
+单模型复用还须验证源字节和坐标设置一致、借用方不能提前释放所有者、异常后 API 方法恢复，以及归一化包围盒只还原一次。真实单文件复核比较远景对象数、完整区域索引、GlobalId/ExpressId、近景紧固件覆盖、源属性和缓存路径；浏览器证据与 Portable 包启动证据分别记录。
+
+近景实例化检查共享模板、实例槽变化后的身份、单对象高亮、返回远景的释放及镜像回退。构件数量、实例数量、模板数量和绘制提交数分别记录，不能用 draw calls 降低代替对象覆盖或坐标验证。
+`npm test` 不包含默认关闭的 IFC Preview/单对象精化实验；修改这些实验时使用 `npm run test:experimental`。
+真实 Preview 样本仍由 `test:ifc-preview:sample` 单独执行。`test:sample` 只运行真实样本回归，桥接测试由默认入口维护，避免 `test:all` 重复执行。 严格变电门禁要求其配置的样本，使用上述环境变量要求 substation04；`GIM_SAMPLE_ROOT` 可指定另一样本根。样本目录名称和别名见 [台账](schema/sample-corpus.md)。 命令的覆盖与策略以 [严格门禁脚本](../desktop/scripts/test-substation-strict.mjs) 为准。
 
 需要准备解包样本时，从仓库根运行：
 
@@ -59,13 +62,11 @@ cargo check --manifest-path src-tauri/Cargo.toml
 python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation substation02 substation03 substation04 --extract-only
 ```
 
-该命令会写解包目录，不属于只读检查；检查已有目录和源包身份后再使用。
-静态分析方法与脚本输出边界见 [Schema 复核入口](schema/README.md)。
+该命令会写解包目录，不属于只读检查；检查已有目录和源包身份后再使用。 静态分析方法与脚本输出边界见 [Schema 复核入口](schema/README.md)。
 
 ## 真实桌面复核
 
-固定源码提交、源 SHA、EXE/资产哈希、WebView 环境与缓存初始状态。
-通过生产打开入口连续加载，不设置断点暂停解析、设备编译或 IFC 读取。
+固定源码提交、源 SHA、EXE/资产哈希、WebView 环境与缓存初始状态。 通过生产打开入口连续加载，不设置断点暂停解析、设备编译或 IFC 读取。
 
 变电选择一个物理根、其 PARTINDEX、嵌套装配与具有 IFC 关联的对象，检查来源、属性、高亮范围和相机最终状态。制造慢 A/快 B 的受控测试必须与默认运行分开记录；真实点击还需覆盖 A→B、重复 B、搜索、切换工程和关闭。
 
@@ -88,8 +89,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml --lib
 cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --ignored --nocapture
 ```
 
-最后一条是需要真实源包而显式启用的六包测试，必须实际执行并报告零 skip。
-检查源身份、有界解压、空 7z 文件、SQLite、重复导入与删除；常规存储单测另覆盖取消清理、路径限制、语义身份拒绝、有效缓存下源 magic/大小/SHA 改变的拒绝，及损坏数据库由校验后的原包重建。
+最后一条是需要真实源包而显式启用的六包测试，必须实际执行并报告零 skip。 检查源身份、有界解压、空 7z 文件、SQLite、重复导入与删除；常规存储单测另覆盖取消清理、路径限制、语义身份拒绝、有效缓存下源 magic/大小/SHA 改变的拒绝，及损坏数据库由校验后的原包重建。
 
 Android 使用同一 APK，通过系统 DocumentsUI 选择 `.gim`，核对私有工程目录、metadata、源 SHA、语义计数和 UI 来源。API 36 模拟器已完成六包 SAF 导入；P8/LM 的来源、精确前台权限与模拟定位、受控定位超时/系统关闭/后台取消、大屏尺寸切换、系统返回及受控底图回退具有交互证据。签名 Release APK 另检查启动、恢复和 SAF 重复输入，不能用未开启 R8 的诊断构建代替发布配置检查。
 
@@ -119,8 +119,7 @@ HNum 预览须覆盖 P 分散于多个 Body、R 集中于文件尾部的来源�
 
 工程根节点检查概览、属性和来源中的 GIM 头部字段，按原包字节和编码核对工程名称、设计单位、导出软件、时间与标准信息，同时核对源 SHA。无法确认角色的单位保留原值，未知布局保留原始文本，不把已知样本的偏移约定套到其他布局，也不要求清除现有语义缓存才能展示头部。
 
-模拟位置、尺寸调整和 Windows 存储测试只支持相应功能，不能替代真实 GNSS、X Fold5 内外屏或性能验收。设备错误路径及最终发布完成条件只在
-[移动端未决事项](open-issues.md#移动端验收与遗留问题)维护。
+模拟位置、尺寸调整和 Windows 存储测试只支持相应功能，不能替代真实 GNSS、X Fold5 内外屏或性能验收。设备错误路径及最终发布完成条件只在 [移动端未决事项](open-issues.md#移动端验收与遗留问题)维护。
 
 ## 证据记录
 

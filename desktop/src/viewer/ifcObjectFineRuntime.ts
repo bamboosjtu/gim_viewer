@@ -57,7 +57,7 @@ export class IfcObjectFineRuntime {
 }
 
 /** web-ifc flat geometry is already metres / Y-up. Only the production anchor translation remains. */
-export function objectFineGroup(result:ObjectFineResult,object:IfcPreviewObject,sourceToViewer:THREE.Matrix4):THREE.Group {
+export function objectFineGroup(result:ObjectFineResult,object:Omit<IfcPreviewObject,'provider'> & {provider:string},sourceToViewer:THREE.Matrix4):THREE.Group {
   const group=new THREE.Group();group.userData={...object,representationProvider:'web-ifc-object',lod:2,approximate:false};
   group.matrixAutoUpdate=false;
   group.matrix.copy(sourceToViewer).multiply(new THREE.Matrix4().makeRotationX(Math.PI/2));

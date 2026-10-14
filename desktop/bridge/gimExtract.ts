@@ -120,6 +120,9 @@ class DiskBackedBlob {
       throw new Error(`缓存条目长度不足: ${this.entryPath} (expected >= ${this.end}, actual ${bytes.byteLength})`);
     }
     const view = bytes.subarray(this.start, this.end);
+    // The IPC response is freshly owned. A full, exact view can be returned
+    // directly; slices still need their own precisely bounded allocation.
+    if (view.buffer instanceof ArrayBuffer && view.byteOffset === 0 && view.byteLength === view.buffer.byteLength) return view.buffer;
     return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
   }
 

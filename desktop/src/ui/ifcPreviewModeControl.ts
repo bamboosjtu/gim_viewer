@@ -1,21 +1,26 @@
-import { isIfcPreviewEnabled, isIfcPreviewDeferredFineEnabled, setIfcQuickPreviewEnabled } from '../config/features.js';
-
-/** Changes the next-open preference only; never mutates an active loading session. */
+import {
+  IFC_DETAIL_MODE_KEY,
+  isIfcNearDetailEnabled,
+} from '../config/features.js';
+/** Product LOD control; source identity is independent of representation. */
 export function setupIfcPreviewModeControl(): void {
-  const button = document.getElementById('btn-ifc-quick-preview');
+  const button = document.getElementById('btn-ifc-opening-policy');
   if (!button) return;
   const refresh = () => {
-    const enabled = isIfcPreviewEnabled() && isIfcPreviewDeferredFineEnabled();
-    button.textContent = `变电预览：${enabled ? '开启' : '关闭'}`;
-    button.setAttribute('aria-pressed', String(enabled));
+    const near = isIfcNearDetailEnabled();
+    button.textContent = near ? 'IFC 细节：自动（近景30m）' : 'IFC 细节：远景';
+    button.setAttribute('aria-pressed', String(near));
   };
   button.addEventListener('click', () => {
     try {
-      setIfcQuickPreviewEnabled(!(isIfcPreviewEnabled() && isIfcPreviewDeferredFineEnabled()));
+      localStorage.setItem(
+        IFC_DETAIL_MODE_KEY,
+        isIfcNearDetailEnabled() ? 'far' : 'auto'
+      );
       refresh();
-      button.title = '设置已保存，下一次打开变电 GIM 生效。预览为近似几何，精细 IFC 按需加载。';
+      window.dispatchEvent(new Event('gim-ifc-detail-mode'));
     } catch {
-      button.title = '无法保存预览设置，请检查本地存储权限。';
+      button.title = '无法保存细节偏好';
     }
   });
   refresh();

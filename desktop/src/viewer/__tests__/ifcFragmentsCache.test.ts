@@ -87,9 +87,9 @@ function createContext() {
       core: {
         update: vi.fn(),
         disposeModel,
-        load: vi.fn(async (bytes: Uint8Array, _options: unknown) => {
+        load: vi.fn(async (bytes: ArrayBuffer, _options: unknown) => {
           const runtimeModelId = (_options as { modelId: string }).modelId;
-          addModel(runtimeModelId, bytes);
+          addModel(runtimeModelId, new Uint8Array(bytes));
         }),
         models: { materials: { list: { onItemSet: materialOnItemSet } } },
       },
@@ -157,7 +157,7 @@ describe('Fragments cache-on A/B loader', () => {
     const entry = { name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'ifc-a' };
     const getIfcBuffer = vi.fn(async () => new Uint8Array([4, 5]));
 
-    await loadIfcEntry(ctx, state, entry, getIfcBuffer, undefined, { session });
+    await loadIfcEntry(ctx, state, entry, getIfcBuffer, undefined, { session, openingPolicy:'full' });
 
     expect(db.validate).toHaveBeenCalledTimes(1);
     expect(db.read).toHaveBeenCalledTimes(1);
@@ -165,6 +165,20 @@ describe('Fragments cache-on A/B loader', () => {
     expect(ctx.ifcLoader.load).not.toHaveBeenCalled();
     expect(perfSnapshot().fragmentsCache).toMatchObject({ enabled: true, attempts: 1, hits: 1, misses: 0, fallbacks: 0, readBytes: 3 });
     expect(perfSnapshot().fragmentsCache.operations.read).toMatchObject({ count: 1, bytes: 3 });
+  });
+
+  it('simplified geometry bypasses full cache reads and writes', async () => {
+    db.validate.mockResolvedValue(validCache());
+    const { ctx } = createContext();
+    const state = new AppState(), session = state.activateProject(1, 'sha-a');
+    registerModelEvents(ctx, state, { onModelAdded: vi.fn(), onModelRemoved: vi.fn() });
+    await loadIfcEntry(ctx, state, { name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'ifc-a' },
+      async () => new Uint8Array([4, 5]), undefined, { session, openingPolicy: 'omit-rel-voids' });
+    expect(db.validate).not.toHaveBeenCalled();
+    expect(db.read).not.toHaveBeenCalled();
+    expect(db.write).not.toHaveBeenCalled();
+    expect(db.upsert).not.toHaveBeenCalled();
+    expect(ctx.ifcLoader.load).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -180,7 +194,7 @@ describe('Fragments cache-on A/B loader', () => {
     registerModelEvents(ctx, state, { onModelAdded: vi.fn(), onModelRemoved: vi.fn() });
     const entry = { name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'ifc-a' };
 
-    await loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session });
+    await loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session, openingPolicy:'full' });
 
     expect(ctx.ifcLoader.load).toHaveBeenCalledTimes(1);
     expect(perfSnapshot().fragmentsCache).toMatchObject({ attempts: 1, hits: 0, misses: 1, fallbacks: 0 });
@@ -200,7 +214,7 @@ describe('Fragments cache-on A/B loader', () => {
     registerModelEvents(ctx, state, { onModelAdded: vi.fn(), onModelRemoved: vi.fn() });
     const entry = { name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'ifc-a' };
 
-    await loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session });
+    await loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session, openingPolicy:'full' });
 
     expect(db.read).not.toHaveBeenCalled();
     expect(ctx.ifcLoader.load).toHaveBeenCalledTimes(1);
@@ -221,7 +235,7 @@ describe('Fragments cache-on A/B loader', () => {
     registerModelEvents(ctx, state, { onModelAdded: vi.fn(), onModelRemoved: vi.fn() });
     const entry = { name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'ifc-a' };
 
-    await loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session });
+    await loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session, openingPolicy:'full' });
 
     expect(db.remove).toHaveBeenCalledTimes(1);
     expect(ctx.ifcLoader.load).toHaveBeenCalledTimes(1);
@@ -238,7 +252,7 @@ describe('Fragments cache-on A/B loader', () => {
     registerModelEvents(ctx, state, { onModelAdded: vi.fn(), onModelRemoved: vi.fn() });
     const entry = { name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'ifc-a' };
 
-    await loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session });
+    await loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session, openingPolicy:'full' });
 
     expect(db.remove).toHaveBeenCalledTimes(1);
     expect(ctx.fragments.core.load).not.toHaveBeenCalled();
@@ -261,7 +275,7 @@ describe('Fragments cache-on A/B loader', () => {
     registerModelEvents(ctx, state, { onModelAdded: vi.fn(), onModelRemoved: vi.fn() });
     const entry = { name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'ifc-a' };
 
-    await loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session });
+    await loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session, openingPolicy:'full' });
 
     expect(db.remove).toHaveBeenCalledTimes(1);
     expect(ctx.fragments.core.load).toHaveBeenCalledTimes(1);
@@ -286,7 +300,7 @@ describe('Fragments cache-on A/B loader', () => {
     const sessionA = state.activateProject(1, 'sha-a');
     registerModelEvents(ctx, state, { onModelAdded: vi.fn(), onModelRemoved: vi.fn() });
     const entry = { name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'ifc-a' };
-    const pending = loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session: sessionA });
+    const pending = loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4, 5]), undefined, { session: sessionA, openingPolicy:'full' });
 
     // 让 A 的 read 在 B 激活后才失败，模拟跨工程迟到的 IPC reject。
     await Promise.resolve();
@@ -314,7 +328,7 @@ describe('Fragments cache-on A/B loader', () => {
     const sessionA = state.activateProject(1, 'sha-a');
     registerModelEvents(ctx, state, { onModelAdded: vi.fn(), onModelRemoved: vi.fn() });
     const entry = { name: 'a.ifc', path: 'DEV/a.ifc', modelId: 'ifc-a' };
-    const pending = loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4]), undefined, { session: sessionA });
+    const pending = loadIfcEntry(ctx, state, entry, async () => new Uint8Array([4]), undefined, { session: sessionA, openingPolicy:'full' });
 
     state.invalidatePendingLoads();
     state.resetGimState();

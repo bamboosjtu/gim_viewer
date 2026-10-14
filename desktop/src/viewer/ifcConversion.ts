@@ -2,6 +2,8 @@ import type { ViewerContext } from './viewerEngine.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { IfcConversionInput, IfcConversionOutput } from './ifcConversionWorker.js';
 import { perfBegin } from '../utils/perfTimings.js';
+import type { IfcOpeningPolicy } from '../config/features.js';
+import type { RegionalIndex } from './ifcRegionalData.js';
 
 const activeConversions = new Set<() => void>();
 
@@ -16,7 +18,7 @@ export async function loadRawIfc(
   ctx: ViewerContext, state: AppState, session: ProjectLoadSession,
   buffer: Uint8Array, runtimeModelId: string, entryPath: string,
   onProgress?: (progress: number) => void, perfSessionId?: number,
-  options: { transferInput?: boolean } = {},
+  options: { transferInput?: boolean; openingPolicy?: IfcOpeningPolicy; onFarArtifact?:(bytes:Uint8Array<ArrayBuffer>,index:RegionalIndex)=>void } = {},
 ) {
   const isCurrent = () => state.isCurrentSession(session);
   if (!isCurrent()) return;
@@ -24,6 +26,8 @@ export async function loadRawIfc(
   const endConversion = perfBegin(`变电 IFC worker conversion · ${entryPath}`,
     { entryPath, phase: 'ifc.worker conversion', source: 'ifc' }, diagnosticSession);
   let failed = false;
+  let removedOpeningRelations = 0;
+  let coldPipeline:Record<string,number>|undefined;
   let converted: Uint8Array<ArrayBuffer>;
   try {
     converted = await new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
@@ -45,21 +49,23 @@ export async function loadRawIfc(
         if (response.type === 'error') {
           const error = new Error(response.message); error.stack = response.stack ?? error.stack;
           finish(error);
-        } else finish(undefined, response.bytes);
+        } else { removedOpeningRelations = response.removedOpeningRelations ?? 0;coldPipeline=response.coldPipeline;
+          if(response.regionalIndex)options.onFarArtifact?.(response.bytes,response.regionalIndex);
+          finish(undefined, response.bytes); }
       };
       worker.onerror = (event) => finish(new Error(event.message || 'IFC conversion worker failed'));
       worker.onmessageerror = () => finish(new Error('IFC conversion worker returned unreadable data'));
       try {
         const endPrepare = perfBegin(`变电 IFC worker input preparation · ${entryPath}`,
           { entryPath, phase: 'ifc.worker input preparation', bytes: buffer.byteLength }, diagnosticSession);
-        // Deferred preview mode transfers its one-shot source buffer to the
-        // conversion Worker. The caller must re-read the IFC after a failed
+        // A caller can transfer its one-shot source buffer to the conversion
+        // Worker. The caller must re-read the IFC after a failed
         // attempt because a transferred ArrayBuffer is detached.
         const exactBuffer = buffer.buffer instanceof ArrayBuffer
           && buffer.byteOffset === 0 && buffer.byteLength === buffer.buffer.byteLength;
         const owned = (options.transferInput && exactBuffer ? buffer : new Uint8Array(buffer)) as Uint8Array<ArrayBuffer>;
         const input: IfcConversionInput = { bytes: owned, wasm: { ...ctx.ifcLoader.settings.wasm },
-          webIfcSettings: { ...ctx.ifcLoader.settings.webIfc } };
+          webIfcSettings: { ...ctx.ifcLoader.settings.webIfc }, openingPolicy: options.openingPolicy ?? 'full' };
         endPrepare(undefined, {
           entryPath,
           phase: 'ifc.worker input preparation',
@@ -71,14 +77,21 @@ export async function loadRawIfc(
       } catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
     });
   } catch (error) { failed = true; throw error; }
-  finally { endConversion(undefined, { entryPath, phase: 'ifc.worker conversion', failed }); }
+  finally { endConversion(undefined, { entryPath, phase: 'ifc.worker conversion', failed,
+    openingPolicy: options.openingPolicy ?? 'full', removedOpeningRelations }); }
   if (!isCurrent()) return;
   // Same coordinate flag, runtime identity and lifecycle events as OBC load().
   ctx.fragments.core.settings.autoCoordinate = true;
   const endLoad = perfBegin(`变电 IFC fragments core.load · ${entryPath}`,
     { entryPath, phase: 'fragments.core.load', source: 'ifc', bytes: converted.byteLength }, diagnosticSession);
   let loadFailed = false;
-  try { return await ctx.fragments.core.load(converted, { modelId: runtimeModelId }); }
+  try {
+    const model = await ctx.fragments.core.load(converted.buffer, { modelId: runtimeModelId });
+    model.object.userData.ifcOpeningPolicy = options.openingPolicy ?? 'full';
+    model.object.userData.removedOpeningRelations = removedOpeningRelations;
+    model.object.userData.ifcColdPipeline=coldPipeline;
+    return model;
+  }
   catch (error) { loadFailed = true; throw error; }
   finally { endLoad(undefined, { entryPath, phase: 'fragments.core.load', source: 'ifc', failed: loadFailed }); }
 }

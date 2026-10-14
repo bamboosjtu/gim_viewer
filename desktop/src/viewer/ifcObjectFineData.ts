@@ -1,6 +1,7 @@
 import type { IfcAPI } from 'web-ifc';
 
 export interface ObjectFinePart {
+  geometryId?:number;
   vertices:Float32Array;
   indices:Uint32Array;
   matrix:number[];
@@ -11,7 +12,7 @@ export interface ObjectFineResult {
   parts:ObjectFinePart[];geometryMs:number;wasmHeapBytes:number;coordinationMatrix:number[];
 }
 /** Exactly one source product; GetFlatMesh does not stream/convert the entire file. */
-export function extractIfcObjectFine(api:IfcAPI,model:number,expressId:number,globalId:string):ObjectFineResult {
+export function extractIfcObjectFine(api:IfcAPI,model:number,expressId:number,globalId:string,templates?:Map<number,{vertices:Float32Array;indices:Uint32Array}>):ObjectFineResult {
   const entity=api.GetLine(model,expressId,false);
   if(!entity||String(entity.GlobalId?.value??'')!==globalId)throw new Error('IFC object identity mismatch');
   const started=performance.now(),flat=api.GetFlatMesh(model,expressId),parts:ObjectFinePart[]=[];
@@ -19,11 +20,12 @@ export function extractIfcObjectFine(api:IfcAPI,model:number,expressId:number,gl
     for(let i=0;i<flat.geometries.size();i++){
       const placed=flat.geometries.get(i),geometry=api.GetGeometry(model,placed.geometryExpressID);
       try {
-        const vertices=new Float32Array(api.GetVertexArray(geometry.GetVertexData(),geometry.GetVertexDataSize()));
-        const indices=new Uint32Array(api.GetIndexArray(geometry.GetIndexData(),geometry.GetIndexDataSize()));
+        let template=templates?.get(placed.geometryExpressID);
+        if(!template){template={vertices:new Float32Array(api.GetVertexArray(geometry.GetVertexData(),geometry.GetVertexDataSize())),indices:new Uint32Array(api.GetIndexArray(geometry.GetIndexData(),geometry.GetIndexDataSize()))};templates?.set(placed.geometryExpressID,template);}
+        const {vertices,indices}=template;
         if(vertices.length%6||!vertices.every(Number.isFinite))throw new Error('Invalid fine vertices');
         if(placed.flatTransformation.length!==16||!placed.flatTransformation.every(Number.isFinite)||indices.length%3||!indices.every(index=>index<vertices.length/6))throw new Error('Invalid fine placement/indices');
-        parts.push({vertices,indices,matrix:[...placed.flatTransformation],color:[placed.color.x,placed.color.y,placed.color.z,placed.color.w]});
+        parts.push({geometryId:placed.geometryExpressID,vertices,indices,matrix:[...placed.flatTransformation],color:[placed.color.x,placed.color.y,placed.color.z,placed.color.w]});
       } finally {geometry.delete();}
     }
   } finally {

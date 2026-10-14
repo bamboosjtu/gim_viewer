@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicehash/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "GIM 阅读器",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "identifier": "com.bamboosjtu.gimviewer",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,7 +28,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

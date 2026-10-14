@@ -46,7 +46,7 @@ export async function openIfcWithDialog(
           state,
           (p) => showLoading(`${name}: ${Math.round(p * 100)}%`),
           fp,
-          { session },
+          { session,readBytes:async()=>new Uint8Array(await readFileBytes(fp)) },
         );
       }
       if (!state.isCurrentSession(session)) return;
@@ -91,7 +91,7 @@ export async function openIfcWithDialog(
             state,
             (p) => showLoading(`${file.name}: ${Math.round(p * 100)}%`),
             file.webkitRelativePath || file.name,
-            { session },
+            { session,readBytes:async()=>new Uint8Array(await file.arrayBuffer()) },
           );
         }
         if (!state.isCurrentSession(session)) return;

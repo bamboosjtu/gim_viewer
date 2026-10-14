@@ -54,7 +54,7 @@ IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CB
 
 [`IfcGeometryProvider`](../desktop/src/viewer/ifcGeometryProvider.ts) 定义 `canProvide / loadLOD / release / findByGlobalId`，并提供拾取、属性与高亮接口。对象仍采用现有 `ifc:<logical modelId>:object:<ExpressId>` 身份，保留 GlobalId、ExpressId、IFC 类型和来源 Provider；GlobalId 查询返回候选集合。Provider 不生成新 CBM、空间语义节点或 DEV occurrence，不替代 Fragments Runtime。
 
-原型默认关闭。顶部“变电预览”按钮可启用 Preview 与 Deferred-Fine，设置在下一次打开变电 GIM 生效；关闭按钮恢复完整几何路径，不动态改变正在加载的工程。线路工程隐藏该控件且不读取此策略。保留原调试键以兼容诊断；Fragments 开关和默认值独立。首个完整 IFC 仍先建立生产坐标锚点，后续文件在 metadata Worker 中读取单位、上下文和 LocalPlacement 链，先提交 LOD0，再提交 LOD1，自动完整加载与属性面板的“加载精细几何 LOD2”共用该文件的加载 Promise。
+原型默认关闭，保留研究代码与调试键；产品顶部不提供 Preview 入口，默认加载采用下文的 IFC 浏览 LOD。原型的完整路径仍由首个完整 IFC 建立生产坐标锚点，后续文件在 metadata Worker 中读取单位、上下文和 LocalPlacement 链，先提交 LOD0，再提交 LOD1，自动完整加载与属性面板的“加载精细几何 LOD2”共用该文件的加载 Promise。
 
 另一个独立、默认关闭的实验开关 `gim-debug-ifc-preview-deferred-fine` 必须与 Preview 开关同时启用。该模式不改变原完整加载模式：首个 IFC 仍完整加载并建立坐标锚点，后续文件默认按原顺序生成 Preview，LOD0/LOD1 均完成后标记 `previewReady`，精细状态为 `fineDeferred`，不自动启动 LOD2。已通过 geometry validation 的 DEV 缓存，在首个完整 IFC 的坐标锚点及 interactive 就绪后即可入队恢复，与剩余 IFC/Preview 顺序循环独立；仍等待 Spatial snapshot 恢复完成分类并使用原有互斥重任务与安全检查点。每个打开会话只入队一次，不在 IFC 尾部完成后重复恢复。未命中、部分或失效缓存的 DEV 编译/修复以及 Spatial 重建仍保留 IFC 尾部门禁；语义索引发布不依赖该门禁。`devGeometryReady` 独立于 `allIfcReady`，后者仍等待每个 IFC 精细加载成功或明确失败，延期中的文件不计为 ready。`fullModelReady` 在完整加载模式等待 IFC 与 DEV 均结束；延期精化模式还要求所有 IFC 为 `fineReady`，不以早到的 DEV 缓存冒充完整模型。
 
@@ -132,17 +132,38 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 | Spatial snapshot | `substation-spatial-semantic-v2` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 源、链接和序列化结构 |
 | IFC Spatial parser contract | `gim-substation-parser-v23` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | Fragments | `fragments-cache-v6` | [db.rs](../desktop/src-tauri/src/db.rs)、[features](../desktop/src/config/features.ts) | 源/IFC 身份及实际安装的 fragments/web-ifc 版本 |
+| IFC 浏览 LOD 派生 | `bim-lod-v8` 与安装依赖组合 | [features](../desktop/src/config/features.ts)、[LOD 缓存](../desktop/bridge/ifcLodCache.ts) | 源 SHA、条目、浏览精度、单次解析及源属性策略；独立失效远景、索引、近景和属性 |
+| IFC 区域模板几何 | `near-templates-v1`，附加于浏览 LOD 键 | [features](../desktop/src/config/features.ts) | 模板几何 ID 与逐对象放置；仅更新近景产物，不重建有效远景与源属性 |
 | Android 线路语义 | `mobile-powerline-v3` | [移动存储](../app/src-tauri/src/storage.rs)、[领域投影](../packages/powerline-core/src/domain.ts) | 私有源 SHA/大小、业务属性范围、唯一对象、自身 FAM 跨越分类和语义表校验 |
 | Android HNum 预览 | `hnum-xz-v2` | [领域定义](../packages/powerline-core/src/domain.ts) | 源 SHA、MOD 路径；文件全局唯一点号可跨 Body 连接尾部杆件，重复点号仅在当前 Body 解析 |
 
-SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `powerline_*`。
-FAM 来源记录使用 `(project_id, source_path, source_line)` 区分物理行，不用归一化键覆盖重复原文。
+SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `powerline_*`。 FAM 来源记录使用 `(project_id, source_path, source_line)` 区分物理行，不用归一化键覆盖重复原文。
 
 变电原生解压完成后返回全部已落盘条目的缓存路径。核心语义就绪且完整源文件可读时，独立发布 CBM/FAM/DEV/FileDevRelation 与 DEV/PHM 引用索引，不等待 DEV 编译、IFC Preview、Spatial 或 Fragments。发布过程只准备有界批次的小文本，不再次通过 IPC 读取 IFC 字节；WASM 回退必须先完成源文件写入，并沿用重任务协调器以免与用户精化并行争用大量资源。
 
 `save_gim_index` 清空变电域版本与发布凭据，`save_geometry_refs` 在现有事务中最终提交版本和 `substation_index_receipt_json`。凭据记录源 SHA、语义版本及九张语义/引用表行数；恢复时校验凭据、IFC 清单、必需缓存路径、文件大小与可读性。源改变、未完成写入、删行或缺源均不能作为合法语义 HIT。空 FAM 的零字节文件有效。凭据用于完整发布与截断检测，不是逐行内容签名，也不代表 GLB、Spatial 或 Fragments 完成；变电语义旧版本独立失效，不清除其他域。
 
 变电来源文件 validation 使用单次调用内的 `CacheValidationContext`：只规范化可信工程 root 一次，同时接受其 lexical 与 MSIX redirected canonical 两种精确路径形式；不规范化数据库 candidate 来证明归属。Windows root handle 在该调用内禁止 delete sharing，逐 entry 仍检查相对路径、工程身份、两种 root 和所有目录/文件组件的 symlink/reparse 状态，不缓存目录安全结论。路径检查通过后实际打开文件，在同一 handle 上检查 regular-file 和准确大小；Windows 最终文件以 OPEN_REPARSE_POINT 打开，拒绝检查后替换的文件链接。上下文不会跨调用或工程复用，不改变 receipt、版本或缓存发布契约。
+
+### IFC 浏览 LOD
+
+桌面变电 GIM 和独立 IFC 默认使用 `bim-lod`，首次加载直接转换远景 Fragments：在 Worker 拥有的输入中留空 `IFCRELVOIDSELEMENT` 记录，按 IFC 类型排除 `IFCMECHANICALFASTENER` / `IFCFASTENER`。实体 ID、字节位置、原始磁盘输入和语义身份保留；字符串与注释不参与识别。已有轮廓内洞、BRep 内洞及其他 BooleanClipping 保持原有求值。策略依据结构与类型，不依据厂商或文件名。
+
+冷转换只初始化一个 web-ifc API，并打开一次派生模型。STEP 扫描在省略开洞关系时保留宿主与开洞的引用，单位从派生模型读取。Fragments 的几何和属性处理在同一转换 Worker 内借用这个模型，完成或异常退出后恢复 API 方法并由所有者释放。复用适配器依赖当前安装库的 API 状态布局；升级依赖时须复核初始化、坐标、模型 ID 和释放契约。
+
+区域索引在 importer 的几何流中收集包围盒，读取共享几何模板一次；随后只补充尚未观察到的对象，包括远景排除的紧固件。web-ifc 若启用原点归一化，索引先用实际协调矩阵的逆变换还原绝对 Y-up 米坐标，再应用工程锚点，避免重复平移。
+
+远景 Fragments 保留有几何对象的身份、名称及直接属性，并保留空间层级与包含关系。属性集、类型、材料等不在冷加载时整批序列化；远景及近景选择都通过源 IFC 按需读取并缓存这些内容。属性读取期间先显示已就绪的基础属性，读取失败明确提示，不把未加载内容当作源属性缺失。空间语义图仍由原始 IFC 构建。
+
+顶部“IFC细节”在“自动（近景30m）”与“远景”之间即时切换，默认自动。自动模式查询当前相机视锥及 30m 范围相交的构件包围盒，包含跨区域的长构件及范围内的紧固件。只对这些宿主分析开洞；可识别的孔截面最大尺寸 ≤50mm 时省略关系，较大或无法识别的开洞保留，然后逐对象 `GetFlatMesh`。几何生成仍需首次读入并 OpenModel 整个源文件，不等于 IFC 可以按区域直接解析。
+
+区域对象按原 GlobalId/ExpressId 拾取和读取源属性；只有唯一 GlobalId 对应的远景对象才隐藏，歧义不猜测。离开区域或切到远景时释放局部网格、恢复远景可见性。区域工作在各 IFC 间串行，请求结束释放源 Worker；工程会话及相机请求版本拒绝过期提交。此队列仅约束区域任务，不保证与 DEV、Spatial 或远景转换全局互斥。
+
+近景紧固件在同一次源模型会话中共享几何模板，回复按模板复制和转移一次缓冲区，避免多个对象重复复制顶点。渲染按模板和颜色合并为 InstancedMesh，每个实例槽保存原 ExpressId。拾取和高亮仍对应单个源对象；选中时创建独立高亮覆盖层，不改动其他实例。镜像放置保留普通网格路径。离开区域释放未使用的 GPU 模板、材料和实例，逐对象缓存仍保留独立身份与放置。
+
+包围盒使用 web-ifc 的绝对 Y-up 米坐标，区域网格和查询跟随 Fragments 最终发布的工程协调矩阵；缓存 HIT 也需处理锚点异步发布，不额外重复轴转换或拟合研究矩阵。
+
+远景 Fragments/区域索引、逐对象近景网格与属性使用独立 IndexedDB 派生缓存，键绑定源 SHA、条目路径、LOD 策略及实际安装依赖版本。远景 HIT 跳过源读取及转换；近景 HIT 跳过源模型和对象求值。原完整 Fragments 缓存域不与近似表示混用。缓存不可用回退读取源；损坏远景产物删除后重建，源 SHA 改变拒绝近景求值。该路径明确标为近似浏览表示，不能用 `allIfcReady` 证明完整开洞几何。
 
 ## 配置与加载状态
 
@@ -154,9 +175,10 @@ FAM 来源记录使用 `(project_id, source_path, source_line)` 区分物理行�
 | 默认底图 | OSM online；天地图为可配置能力 |
 | PMTiles | 关闭 |
 | 线路弧垂 | 启用视觉示意 |
-| Fragments 缓存 | 默认关闭；`gim-debug-fragments-cache=1` 用于调试对照 |
+| 完整 Fragments 缓存 | 默认关闭；`gim-debug-fragments-cache=1` 用于调试对照 |
+| IFC 浏览 LOD 派生缓存 | 默认使用；键绑定源、LOD 策略及安装依赖版本 |
 
-Fragments 关闭时不读写 `.frag`。开启调试必须记录实际策略，不能与默认路径合并比较。
+完整 Fragments 缓存关闭时不读写该域的 `.frag`，不影响浏览 LOD 的独立派生缓存。开启调试必须记录实际策略，不能与默认路径合并比较。
 
 | 就绪状态 | 定义 |
 |---|---|
@@ -176,5 +198,4 @@ SLD 使用白名单净化与 img 沙箱；删除脚本、事件、foreignObject 
 桌面 npm 命令在 `desktop/` 执行，移动命令在 `app/` 执行。
 `npm run build` 完成各端 TypeScript 和 Vite 构建；
 `npm run tauri:build` 运行 Tauri 构建并通过 post 脚本生成 portable ZIP。
-固定 WebView2 与 WASM 资产由构建脚本准备，产物类型以 Tauri 配置和脚本为准。`desktop/public/worker-bundle.js`、`libarchive.wasm`、`wasm/web-ifc*.wasm` 是随项目维护的运行时资产。
-验证命令见 [验证](validation.md)，性能方法见 [性能](performance.md)。
+固定 WebView2 与 WASM 资产由构建脚本准备，产物类型以 Tauri 配置和脚本为准。`desktop/public/worker-bundle.js`、`libarchive.wasm`、`wasm/web-ifc*.wasm` 是随项目维护的运行时资产。 验证命令见 [验证](validation.md)，性能方法见 [性能](performance.md)。

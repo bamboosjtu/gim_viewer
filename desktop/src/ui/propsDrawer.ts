@@ -221,6 +221,21 @@ export function renderInspectorTabs(titleHtml: string, buckets: InspectorBuckets
   `;
 }
 
+/** Product near representation uses the original IFC identity and source properties. */
+export async function showIfcRegionalProperties(ctx:ViewerContext,state:AppState,
+  runtime:import('../viewer/ifcRegionalRuntime.js').IfcRegionalRuntime,
+  object:import('../viewer/ifcRegionalData.js').RegionalObject,request:SelectionRequest):Promise<void>{
+  const render=(properties:any,error='')=>{
+    if(!state.isCurrentSelection(request))return;openPropsDrawer(ctx);setSelectionStatus(`${object.name||object.ifcType} · IFC 近景`);
+    const rows=properties?Object.entries(properties.attributes).map(([k,v])=>[k,typeof v==='object'?JSON.stringify(v):String(v)] as [string,string]):[];
+    renderInspectorTabs(`<div class="props-header">${escHtml(object.name||object.ifcType)} · 近景</div>`,{
+      overview:sectionHtml('原 IFC 对象',[['GlobalId',object.globalId],['ExpressId',String(object.expressId)],['IFC 类型',object.ifcType],['表示','近景区域；≤50mm 已识别关系孔省略，中型及未知开洞保留']]),
+      params:properties?sectionHtml('IFC 原始属性',rows)+[...properties.propertySets,...(properties.typeProperties??[]),...(properties.materials??[])].map((set:unknown)=>sectionHtml('属性集 / 类型 / 材料',[['原始值',JSON.stringify(set)]],true)).join(''):`<div class="props-note">${escHtml(error||'正在读取属性…')}</div>`,
+      relations:'<div class="props-note">沿用原始 IFC 对象身份。</div>',source:sectionHtml('来源',[['IFC 文件',runtime.sourcePath],['几何','仅相机附近30m区域计算']]),
+    });
+  };render(null);try{render(await runtime.properties(object.expressId));}catch(error){render(null,String(error));}
+}
+
 /** Preview is a representation of the original IFC object, not a new semantic node. */
 export async function showIfcPreviewProperties(ctx:ViewerContext,state:AppState,provider:IfcGeometryProvider,
   object:IfcPreviewObject,request:SelectionRequest,refine:()=>Promise<void>):Promise<void> {
@@ -1020,6 +1035,21 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
     }
   } catch (err) {
     console.warn('读取 IFC 属性失败:', err);
+  }
+  const regional=state.ifcRegionalRuntimes.get(logicalModelId);
+  if(regional&&guid){
+    const matches=regional.index.objects.filter(object=>object.globalId===guid);
+    if(matches.length===1){
+      try{
+        if(!state.isCurrentSelection(request))return;
+        openPropsDrawer(ctx);
+        renderInspectorTabs('<div class="props-header">IFC 构件</div>',{overview,params:params+'<div class="props-note">正在读取源属性集、类型与材料…</div>',relations:'',source:''});
+        const source=await regional.properties(matches[0].expressId);
+        if(!state.isCurrentSelection(request))return;
+        params+=sectionHtml('IFC 原始属性',Object.entries(source.attributes).map(([key,value])=>[key,typeof value==='object'?JSON.stringify(value):String(value)] as [string,string]));
+        for(const item of [...source.propertySets,...(source.typeProperties??[]),...(source.materials??[])])params+=sectionHtml('属性集 / 类型 / 材料',[['原始值',JSON.stringify(item)]],true);
+      }catch(error){params+=`<div class="props-note">${escHtml(`源属性暂不可用：${error}`)}</div>`;}
+    }
   }
   if (gimNode) {
     params += await renderNodeFamDevProperties(state, gimNode);

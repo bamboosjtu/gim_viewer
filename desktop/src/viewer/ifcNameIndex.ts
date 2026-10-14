@@ -16,13 +16,24 @@ function isPlaceholderIfcName(name: string): boolean {
   return tl === 'other' || tl === 'others';
 }
 
-/** IFC 模型加载后，构建 GUID → 名称索引。 */
+const completedModels = new WeakSet<object>();
+const pendingIndexes = new WeakMap<AppState, Promise<void>>();
+
+/** Serialize enrichment per state; completed runtime models are not rescanned. */
 export async function buildIfcNameIndex(
   ctx: ViewerContext,
   state: AppState,
   options: { session?: ProjectLoadSession } = {},
 ): Promise<void> {
   const session = options.session ?? state.captureProjectSession();
+  const previous = pendingIndexes.get(state) ?? Promise.resolve();
+  const task = previous.catch(() => {}).then(() => enrichIfcNames(ctx, state, session));
+  pendingIndexes.set(state, task);
+  try { await task; }
+  finally { if (pendingIndexes.get(state) === task) pendingIndexes.delete(state); }
+}
+
+async function enrichIfcNames(ctx: ViewerContext, state: AppState, session: ProjectLoadSession): Promise<void> {
   const isCurrent = () => state.isCurrentSession(session);
   if (!isCurrent()) return;
 
@@ -40,15 +51,18 @@ export async function buildIfcNameIndex(
     if (!isCurrent()) return;
     const runtimeModelId = state.getRuntimeModelId(modelId, session);
     const model = ctx.fragments.list.get(runtimeModelId);
-    if (!model) continue;
+    if (!model || completedModels.has(model)) continue;
     const guids = entries.map(e => e.guid);
     try {
       const localIds = await model.getLocalIdsByGuids(guids);
       if (!isCurrent()) return;
       const validEntries = entries.filter((_, i) => localIds[i] !== null);
       const validLocalIds = localIds.filter((id): id is number => id !== null);
-      if (validLocalIds.length === 0) continue;
-      const itemsData = await model.getItemsData(validLocalIds, { attributesDefault: true });
+      if (validLocalIds.length === 0) { completedModels.add(model); continue; }
+      const itemsData = await model.getItemsData(validLocalIds, {
+        attributesDefault: false, attributes: ['Name'],
+        relationsDefault: { attributes: false, relations: false },
+      });
       if (!isCurrent()) return;
       for (let i = 0; i < validEntries.length; i++) {
         const data = itemsData[i] as unknown as Record<string, unknown>;
@@ -66,6 +80,7 @@ export async function buildIfcNameIndex(
           validEntries[i].node.name = name;
         }
       }
+      completedModels.add(model);
     } catch (err) {
       console.warn(`构建名称索引失败 (${modelId}):`, err);
     }

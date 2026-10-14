@@ -44,6 +44,7 @@ function getWebIfcWasmBaseCandidates(): string[] {
  * 在 initEngine 前调用，提前暴露 fetch 失败问题。
  */
 export async function resolveWebIfcWasmBaseUrl(): Promise<string> {
+  if (resolvedWasmBaseUrl) return resolvedWasmBaseUrl;
   const candidates = getWebIfcWasmBaseCandidates();
   let lastError: unknown = null;
 
@@ -59,8 +60,12 @@ export async function resolveWebIfcWasmBaseUrl(): Promise<string> {
 
     try {
       const res = await fetch(url);
+      await res.body?.cancel();
       if (!res.ok) {
         throw new Error(`status=${res.status}`);
+      }
+      if (res.headers.get('content-type')?.includes('text/html')) {
+        throw new Error('HTML fallback is not a WASM asset');
       }
 
       const len = Number(res.headers.get('content-length') || '0');

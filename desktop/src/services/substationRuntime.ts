@@ -14,7 +14,7 @@ import { renderFileDevPanel } from '../ui/fileDevView.js';
 import { emptyTipEl } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_GIM_CACHE, DEBUG_IFC_LOAD } from '../config/debug.js';
-import { isFragmentsCacheEnabled, isIfcPreviewEnabled, isIfcPreviewDeferredFineEnabled } from '../config/features.js';
+import { isFragmentsCacheEnabled, isIfcPreviewEnabled, isIfcPreviewDeferredFineEnabled, readIfcOpeningPolicy } from '../config/features.js';
 import { debugLog } from '../utils/logger.js';
 import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBar.js';
 import type { GimRuntimeOpenContext } from './gimOpenCore.js';
@@ -821,6 +821,7 @@ export async function loadAllIfcFiles(
     scheduleCachePersistence?: (coordinator: SubstationBackgroundCoordinator, readinessGate: SubstationBackgroundGate) => void;
   } = {},
 ): Promise<void> {
+  const openingPolicy = readIfcOpeningPolicy();
   const session = options.session ?? state.captureProjectSession();
   const perfSession = perfCurrentSession();
   const isCurrent = () => state.isCurrentSession(session);
@@ -842,7 +843,7 @@ export async function loadAllIfcFiles(
       }, perfSession);
     },
   });
-  const previewFirstDeferredFine = state.currentProjectType==='substation'
+  const previewFirstDeferredFine = openingPolicy==='full' && state.currentProjectType==='substation'
     && isIfcPreviewEnabled() && isIfcPreviewDeferredFineEnabled();
   const backgroundReadinessGate:SubstationBackgroundGate=previewFirstDeferredFine?'allIfcPreviewsReady':'allIfcReady';
   let devGeometryQueued = false;
@@ -877,7 +878,8 @@ export async function loadAllIfcFiles(
     if(previewFirstDeferredFine&&entries.some(entry=>state.ifcPreviewFineStates.get(entry.modelId)!=='fineReady'))return;
     if(perfProductMomentSnapshot().fullModelReady)return;
     const meta={...deferredDevMeta,ifcModels:state.loadedModels.size,deferredFine:0,failedIfcCount:fineFailureCount(),
-      geometryFullyRendered:deferredDevMeta.geometryFullyRendered===true&&fineFailureCount()===0};
+      openingPolicy, geometryApproximate:openingPolicy!=='full',
+      geometryFullyRendered:openingPolicy==='full'&&deferredDevMeta.geometryFullyRendered===true&&fineFailureCount()===0};
     perfMarkProductMoment('fullModelReady',meta,perfSession);
     void sampleSubstationMemory(state,'fullModelReady',perfSession,meta,ctx);
   };
@@ -956,16 +958,6 @@ export async function loadAllIfcFiles(
     await syncCoordinateAnchor('变电 coordinate alignment（首个 IFC）');
     if (!isCurrent()) return;
 
-    // Name index and core UI are intentionally refreshed at the first usable
-    // model.  Later IFCs extend the same indexes in the all-IFC finalize pass.
-    const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
-    if (!isCurrent()) return;
-    const endNameIndex = perfBegin('变电 IFC name index（首个 IFC）', undefined, perfSession);
-    await buildIfcNameIndex(ctx, state, { session }).catch((err) => {
-      console.warn('[GIM] 首个 IFC buildIfcNameIndex failed', err);
-    });
-    if (!isCurrent()) return;
-    endNameIndex(undefined, { models: state.loadedModels.size });
     await renderSubstationCoreUi(state, (text) => showLoading(text), session, perfSession, '变电 navigation/UI（首个 IFC）');
     if (!isCurrent()) return;
 
@@ -994,6 +986,16 @@ export async function loadAllIfcFiles(
     void sampleSubstationMemory(state, 'interactive', perfSession, firstMeta, ctx);
     hideLoading();
     signalInteractive();
+    // CBM/DEV names already support browsing. IFC name enrichment runs after
+    // the interactive commit and shares completed model work with finalization.
+    void import('../viewer/ifcNameIndex.js').then(async ({ buildIfcNameIndex }) => {
+      if (!isCurrent()) return;
+      const end = perfBegin('变电 IFC name index（后台）', undefined, perfSession);
+      try {
+        await buildIfcNameIndex(ctx, state, { session });
+        if (isCurrent()) await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 IFC 名称补全');
+      } finally { end(); }
+    }).catch(err => console.warn('[GIM] IFC name enrichment failed', err));
     const startPostInteractiveTask = (
       label: string,
       starter?: () => void | Promise<unknown>,
@@ -1132,7 +1134,9 @@ export async function loadAllIfcFiles(
           const task=loadIfcEntry(ctx,state,entry,readBytes,
             (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
             {session,perfSessionId:perfSession.id,onLoadSource:(source)=>{loadSource.value=source;},
-              transferInput:previewInputOwnership});
+              // A Preview's explicit fine request always restores original
+              // relation openings; browsing simplification cannot claim LOD2 fidelity.
+              transferInput:true,openingPolicy:preview?'full':openingPolicy});
           const wrapped=task.catch(error=>{
             if(finePromise===wrapped){ifcBytes.value=null;readEnded=false;finePromise=null;}
             throw error;
@@ -1146,7 +1150,7 @@ export async function loadAllIfcFiles(
         // Preserve the first complete IFC/DEV coordinate anchor contract. Preview
         // is opt-in and only attaches later files after that production anchor exists.
         let preview: import('../viewer/ifcGeometryProvider.js').IfcGeometryProvider|null=null;
-        if (state.currentProjectType==='substation' && isIfcPreviewEnabled() && state.projectSourceToViewerMatrix && !state.loadedModels.has(entry.modelId)) {
+        if (openingPolicy==='full' && state.currentProjectType==='substation' && isIfcPreviewEnabled() && state.projectSourceToViewerMatrix && !state.loadedModels.has(entry.modelId)) {
           const endPreview=perfBegin(`变电 IFC Preview · ${entry.path}`,undefined,perfSession);
           try {
             const previewReadStarted=performance.now();
