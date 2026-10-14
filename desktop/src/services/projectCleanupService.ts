@@ -66,6 +66,9 @@ export async function cleanupBeforeOpenNewProject(
   cancelIfcConversions();
   cancelSubstationSpatialWorkers();
   const cleanupGeneration = state.projectGeneration;
+  const { cancelDevGeometryPreprocessing } = await import('./devGeometryWorkerClient.js');
+  if (state.projectGeneration !== cleanupGeneration) return false;
+  cancelDevGeometryPreprocessing(state);
   // 清空场景没有上层 open 请求负责重置性能会话；在无 expectedGeneration
   // 的直接清理路径这里切断旧工程的迟到 span/invoke/Long Task。带代次的
   // 打开流程由 openGimService 在请求开始处重置，并保留本次解压计时。
@@ -158,11 +161,19 @@ export async function cleanupBeforeOpenNewProject(
       attemptedCount = ids.size;
       for (const modelId of ids) {
         try {
-          ctx.fragments.core.disposeModel(modelId);
+          await ctx.fragments.core.disposeModel(modelId);
+          if (!isCurrentCleanup()) return false;
           disposedCount++;
         } catch (err) {
           console.warn('[Cleanup] dispose model failed:', modelId, err);
         }
+      }
+
+      // Fragments clears its shared coordinate anchor only after the last
+      // asynchronous model disposal. Never let the next open race that reset.
+      if (ctx.fragments.list.size !== 0) {
+        console.error('[Cleanup] 旧 IFC 模型尚未释放，停止打开以免复用错误坐标基准');
+        return false;
       }
 
       // dispose MOD/STL 图层根节点 + 所有子 Group

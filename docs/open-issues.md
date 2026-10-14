@@ -78,3 +78,11 @@ substation02 的 Preview/Fine 协作已有局部桌面证据，DEV 单工作单�
 插件只能输出中立 ExternalProjectData，由 Core 转为 MapLayer/ObjectBadge/InspectorSection/Finding，不能取得 MapLibre 实例任意修改。capability 可表达 progress、field-activity、project-facility、coordinate-observation；能力边界以实际首个闭环决定，不预建完整插件生态。
 
 移动端 Plugin Host 属于 P-01 的同一需求，避免另一套数据源 API。
+
+## 设备预处理与 substation01 显示回归
+
+冷路径已接入单个 DEV Worker，最多预取两个未消费的设备结果，已完成结果达到 32 MiB 后停止继续预取；单个设备本身可以超过该阈值。IFC 加载期间生成模板，首个 IFC 坐标基准就绪后允许渐进放置。工程切换等待旧 IFC 释放并取消设备 Worker。以上改动仍需桌面冷暖启动实测，尚不能宣称间隔缩短或位置漂移完全解决。
+
+substation01 的 4,179 份 MOD 已对照 DOM 与 Worker 解析结果，全部一致，实际出现 14 类已识别 primitive。当前仍不生成 PorcelainBushing（1,506）、TerminalBlock（201）、ChannelSteel（129）、Table（109）、RectangularFixedPlate（18）、OffsetRectangularTable（15）、RectangularRing（1）的几何。需要独立确认局部轴、原点及参数语义后实现，并验证 IFC 与设备装配对齐；不能把这些来源误报为文件缺失，也不能以占位形状宣称完整渲染。
+
+打开初期的“核对本地工程记录”仅登记或查询单条工程身份，原提示“写入本地项目索引”容易误导。已增加 path 索引精确查询，历史路径兼容回退和数据库锁等待仍可能耗时，需要实际诊断计时区分。

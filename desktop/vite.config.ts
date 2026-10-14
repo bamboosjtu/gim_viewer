@@ -31,6 +31,7 @@ export default defineConfig(({ mode }) => {
     .find(Boolean) ?? '';
 
   return {
+    worker: { format: 'es' },
     clearScreen: false,
     // Vite 默认以 process.cwd()（desktop/）为 envDir；这里显式指向仓库根，
     // 让根目录 .env 成为文档和实际行为一致的唯一推荐位置。

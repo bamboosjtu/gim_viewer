@@ -62,12 +62,28 @@ export function parseXmlMod(text: string, modPath: string): XmlModDocument {
     throw new Error(`XML parse error in ${modPath}: ${errorNode.textContent?.slice(0, 200) ?? ''}`);
   }
 
-  const device = doc.documentElement;
+  return parseXmlModRoot(toXmlModNode(doc.documentElement), modPath);
+}
+
+export interface XmlModNode {
+  tagName: string;
+  attrs: Record<string, string>;
+  children: XmlModNode[];
+}
+
+function toXmlModNode(node: Element): XmlModNode {
+  return { tagName: node.tagName,
+    attrs: Object.fromEntries(Array.from(node.attributes, a => [a.name, a.value])),
+    children: Array.from(node.children, toXmlModNode) };
+}
+
+/** Same geometry grammar for native DOM and the worker's XML reader. */
+export function parseXmlModRoot(device: XmlModNode, modPath: string): XmlModDocument {
   if (!device || device.tagName !== 'Device') {
     throw new Error(`Expected <Device> root in ${modPath}, got <${device?.tagName ?? 'null'}>`);
   }
 
-  const entitiesNode = device.querySelector(':scope > Entities');
+  const entitiesNode = device.children.find(n => n.tagName === 'Entities');
   if (!entitiesNode) {
     return {
       modPath,
@@ -79,7 +95,7 @@ export function parseXmlMod(text: string, modPath: string): XmlModDocument {
     };
   }
 
-  const entityNodes = Array.from(entitiesNode.querySelectorAll(':scope > Entity'));
+  const entityNodes = entitiesNode.children.filter(n => n.tagName === 'Entity');
   if (entityNodes.length === 0) {
     return {
       modPath,
@@ -117,13 +133,13 @@ export function parseXmlMod(text: string, modPath: string): XmlModDocument {
 }
 
 /** 解析单个 <Entity> 节点 */
-function parseEntity(node: Element): XmlModEntity | null {
-  const id = parseInt(node.getAttribute('ID') ?? '', 10);
+function parseEntity(node: XmlModNode): XmlModEntity | null {
+  const id = parseInt((node.attrs['ID'] ?? null) ?? '', 10);
   if (Number.isNaN(id)) return null;
 
   // 当前样本 Entity.Type 全部为 "simple"，XmlModEntity.type 字段类型亦锁为 "simple" 字面量。
   // 这里显式取值是为了在样本出现其他 Type 时通过 console.warn 暴露异常（不改变行为，仍按 simple 处理）。
-  const typeAttr = node.getAttribute('Type');
+  const typeAttr = (node.attrs['Type'] ?? null);
   if (typeAttr !== null && typeAttr !== 'simple') {
     const normalizedType = typeAttr.trim().toLowerCase();
     if (!warnedEntityTypes.has(normalizedType)) {
@@ -131,7 +147,7 @@ function parseEntity(node: Element): XmlModEntity | null {
       console.warn(`[xmlModParser] 未知的 Entity.Type="${typeAttr}"，按 simple 处理`);
     }
   }
-  const visibleAttr = node.getAttribute('Visible');
+  const visibleAttr = (node.attrs['Visible'] ?? null);
   const visible = visibleAttr === null ? true : visibleAttr.toLowerCase() === 'true';
 
   const transformMatrix = parseTransformMatrix(node);
@@ -151,13 +167,13 @@ function parseEntity(node: Element): XmlModEntity | null {
 }
 
 /** 解析 <TransformMatrix Value="..." /> */
-function parseTransformMatrix(entityNode: Element): number[] {
-  const tmNode = entityNode.querySelector(':scope > TransformMatrix');
+function parseTransformMatrix(entityNode: XmlModNode): number[] {
+  const tmNode = entityNode.children.find(n => n.tagName === 'TransformMatrix');
   if (!tmNode) {
     // 缺失时回退单位矩阵（与 PHM parser 一致）
     return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
   }
-  const value = tmNode.getAttribute('Value') ?? '';
+  const value = (tmNode.attrs['Value'] ?? null) ?? '';
   const parts = value.split(',').map((s) => s.trim()).filter((s) => s !== '');
   if (parts.length !== 16) {
     return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -170,14 +186,14 @@ function parseTransformMatrix(entityNode: Element): number[] {
 }
 
 /** 解析 <Color R="..." G="..." B="..." A="..." /> */
-function parseColor(entityNode: Element): XmlModColor | undefined {
-  const colorNode = entityNode.querySelector(':scope > Color');
+function parseColor(entityNode: XmlModNode): XmlModColor | undefined {
+  const colorNode = entityNode.children.find(n => n.tagName === 'Color');
   if (!colorNode) return undefined;
 
-  const r = parseInt(colorNode.getAttribute('R') ?? '', 10);
-  const g = parseInt(colorNode.getAttribute('G') ?? '', 10);
-  const b = parseInt(colorNode.getAttribute('B') ?? '', 10);
-  const a = parseInt(colorNode.getAttribute('A') ?? '', 10);
+  const r = parseInt((colorNode.attrs['R'] ?? null) ?? '', 10);
+  const g = parseInt((colorNode.attrs['G'] ?? null) ?? '', 10);
+  const b = parseInt((colorNode.attrs['B'] ?? null) ?? '', 10);
+  const a = parseInt((colorNode.attrs['A'] ?? null) ?? '', 10);
 
   if ([r, g, b, a].some((n) => Number.isNaN(n))) return undefined;
   if (r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255) return undefined;
@@ -197,7 +213,7 @@ function parseColor(entityNode: Element): XmlModColor | undefined {
  *
  * 弱 schema 3 类：RectangularFixedPlate / OffsetRectangularTable / RectangularRing
  */
-function parsePrimitive(entityNode: Element): XmlModPrimitive | null {
+function parsePrimitive(entityNode: XmlModNode): XmlModPrimitive | null {
   // 跳过 TransformMatrix 和 Color，找 primitive 节点
   const primitiveNode = Array.from(entityNode.children).find(
     (child) => child.tagName !== 'TransformMatrix' && child.tagName !== 'Color',
@@ -283,12 +299,8 @@ function parsePrimitive(entityNode: Element): XmlModPrimitive | null {
 }
 
 /** 读取元素全部属性为 Record<string, string> */
-function readAttrs(node: Element): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const attr of Array.from(node.attributes)) {
-    result[attr.name] = attr.value;
-  }
-  return result;
+function readAttrs(node: XmlModNode): Record<string, string> {
+  return { ...node.attrs };
 }
 
 /** 解析 "x,y,z;x,y,z;..." 分号分隔点序列为展平数组 [x,y,z,...]，非法 token 跳过 */

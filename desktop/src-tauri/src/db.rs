@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs as stdfs;
@@ -637,7 +637,12 @@ pub fn upsert_gim_project(
     // 检查是否已存在，同时读取旧元信息判断源 GIM 文件是否变化。
     // 先做轻量精确匹配，再对旧版本可能保存的非 canonical 路径做一次
     // canonical identity 比较，避免升级后同一文件出现重复项目记录。
-    let existing: Option<(i64, String, u64, u64, String)> = {
+    let exact: Option<(i64, String, u64, u64, String)> = conn.query_row(
+        "SELECT id, path, size, modified_ms, sha256 FROM gim_project WHERE path = ?1 LIMIT 1",
+        params![path_identity],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+    ).optional().map_err(|e| format!("查询项目记录失败: {}", e))?;
+    let existing: Option<(i64, String, u64, u64, String)> = if exact.is_some() { exact } else {
         let mut stmt = conn
             .prepare("SELECT id, path, size, modified_ms, sha256 FROM gim_project")
             .map_err(|e| format!("查询项目记录失败: {}", e))?;

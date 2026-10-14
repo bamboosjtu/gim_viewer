@@ -363,7 +363,10 @@ export async function runProgressiveDevGlbPipeline(
   // detailed compiler is selected by production defaults or explicitly by a
   // caller; an old byte-only override must not accidentally invoke the real
   // source compiler as a second path.
-  const serializeDetailed = dependencies?.serializeDevToGlbDetailed
+  const preprocessor = !dependencies?.serializeDevToGlbDetailed && !dependencies?.serializeDevToGlb
+    ? (await import('./devGeometryWorkerClient.js')).getDevGeometryPreprocessor(state) : undefined;
+  const serializeDetailed = (preprocessor ? (path: string) => preprocessor.take(path) : undefined)
+    ?? dependencies?.serializeDevToGlbDetailed
     ?? (dependencies?.serializeDevToGlb ? undefined : deps.serializeDevToGlbDetailed);
   // Keep placement-budget yields separate from the existing per-DEV compiler
   // marker.  A caller may use `deps.yieldToMain` to model the boundary between

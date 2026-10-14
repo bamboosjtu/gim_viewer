@@ -174,7 +174,7 @@ export async function loadXmlModFromFiles(
   files: Map<string, File>,
   phmColor?: XmlModColor,
   phmColorMaxA?: number,
-  options?: { strict?: boolean },
+  options?: { strict?: boolean; parseXml?: typeof parseXmlMod },
 ): Promise<THREE.Group | null> {
   const strict = options?.strict === true;
   const file = getFileByPath(files, modPath);
@@ -205,7 +205,7 @@ export async function loadXmlModFromFiles(
       applyPhmColorOverride(group, phmColor, phmColorMaxA);
       return group;
     }
-    const doc = parseXmlMod(text, modPath);
+    const doc = (options?.parseXml ?? parseXmlMod)(text, modPath);
     const group = flattenDocumentToGroup(doc, await collectBakedGeometriesByMaterialAsync(doc));
     applyPhmColorOverride(group, phmColor, phmColorMaxA);
     return group;

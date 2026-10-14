@@ -86,6 +86,7 @@ function getGltfLoader(): GLTFLoader {
 export async function serializeDevToGlbDetailed(
   devPath: string,
   files: Map<string, File>,
+  options: { parseXml?: typeof import('../gim/geometry/xmlModParser.js').parseXmlMod } = {},
 ): Promise<DevGlbSerializationResult> {
   // A missing DEV is a cache failure, not a deterministic empty result. The
   // discovery helper intentionally treats missing references as empty for the
@@ -184,7 +185,7 @@ export async function serializeDevToGlbDetailed(
         files,
         geo.phmColor,
         geo.phmColorMaxA,
-        { strict: true },
+        { strict: true, parseXml: options.parseXml },
       );
       if (!group) continue;
       const xmlDiagnostics = readXmlDiagnostics(group);
@@ -281,7 +282,7 @@ export async function serializeDevToGlbDetailed(
     for (const edge of discovered.mods) {
       const file=getFileByPath(files,edge.modPath);
       if (!file) throw new Error(`Source evidence missing: ${edge.modPath}`);
-      const doc=parseXmlMod(await file.text(),edge.modPath);
+      const doc=(options.parseXml ?? parseXmlMod)(await file.text(),edge.modPath);
       for (const entity of doc.entities) {
         if (!entity.visible) continue;
         const point=new THREE.Vector3().applyMatrix4(new THREE.Matrix4().fromArray(entity.transformMatrix))

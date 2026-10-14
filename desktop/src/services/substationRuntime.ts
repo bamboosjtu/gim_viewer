@@ -913,6 +913,11 @@ export async function loadAllIfcFiles(
   const runtime = await getViewerRuntimeWithUI(state, showMessage);
   if (!isCurrent()) return;
   const { ctx, modelCallbacks } = runtime;
+  if (state.currentFiles && state.currentCbmTree) {
+    const { startDevGeometryPreprocessing } = await import('./devGeometryWorkerClient.js');
+    if (!isCurrent()) return;
+    startDevGeometryPreprocessing(state, session);
+  }
   endEngine();
 
   showLoading('正在加载 IFC 模型...');
@@ -1020,9 +1025,9 @@ export async function loadAllIfcFiles(
     startPostInteractiveTask('缓存持久化', options.startCachePersistence, options.scheduleCachePersistence);
     if (state.projectSourceToViewerMatrix) {
       background.markCoordinateAnchorReady();
-      // Only a validated, complete cache gets this early lane. Cold builds and
-      // incomplete caches retain the existing tail gate and repair contracts.
-      if (options.geometryCacheValid === true && !state.currentFiles) enqueueDevGeometry('coordinateAnchorReady');
+      // Cold source templates are compiled in a bounded worker alongside IFC.
+      // Placement waits only for the shared project anchor, not the IFC tail.
+      if (state.currentFiles || options.geometryCacheValid === true) enqueueDevGeometry('coordinateAnchorReady');
     }
   };
 
