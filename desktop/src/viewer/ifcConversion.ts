@@ -1,3 +1,4 @@
+import { beginIfcGeometryWork } from './geometryWorkGate.js';
 import type { ViewerContext } from './viewerEngine.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { IfcConversionInput, IfcConversionOutput } from './ifcConversionWorker.js';
@@ -21,6 +22,9 @@ export async function loadRawIfc(
   options: { transferInput?: boolean; openingPolicy?: IfcOpeningPolicy; onFarArtifact?:(bytes:Uint8Array<ArrayBuffer>,index:RegionalIndex)=>void } = {},
 ) {
   const isCurrent = () => state.isCurrentSession(session);
+  if (!isCurrent()) return;
+  const releaseGeometry = await beginIfcGeometryWork();
+  try {
   if (!isCurrent()) return;
   const diagnosticSession = perfSessionId === undefined ? undefined : { id: perfSessionId };
   const endConversion = perfBegin(`变电 IFC worker conversion · ${entryPath}`,
@@ -94,4 +98,5 @@ export async function loadRawIfc(
   }
   catch (error) { loadFailed = true; throw error; }
   finally { endLoad(undefined, { entryPath, phase: 'fragments.core.load', source: 'ifc', failed: loadFailed }); }
+  } finally { releaseGeometry(); }
 }

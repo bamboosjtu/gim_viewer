@@ -140,7 +140,7 @@ export interface CbmNodeRecord {
  * 头部：`GIMB` + version(u8) + metadata 长度(u32 LE) + JSON metadata + bytes。
  * 这样大型 IFC/MOD/Fragments 不再经过 JSON 数字数组序列化。
  */
-function packBinaryCacheWrite(
+export function packBinaryCacheWrite(
   projectId: number,
   entryPath: string,
   bytes: Uint8Array,

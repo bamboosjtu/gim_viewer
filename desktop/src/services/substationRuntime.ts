@@ -913,11 +913,6 @@ export async function loadAllIfcFiles(
   const runtime = await getViewerRuntimeWithUI(state, showMessage);
   if (!isCurrent()) return;
   const { ctx, modelCallbacks } = runtime;
-  if (state.currentFiles && state.currentCbmTree) {
-    const { startDevGeometryPreprocessing } = await import('./devGeometryWorkerClient.js');
-    if (!isCurrent()) return;
-    startDevGeometryPreprocessing(state, session);
-  }
   endEngine();
 
   showLoading('正在加载 IFC 模型...');
@@ -1025,9 +1020,9 @@ export async function loadAllIfcFiles(
     startPostInteractiveTask('缓存持久化', options.startCachePersistence, options.scheduleCachePersistence);
     if (state.projectSourceToViewerMatrix) {
       background.markCoordinateAnchorReady();
-      // Cold source templates are compiled in a bounded worker alongside IFC.
-      // Placement waits only for the shared project anchor, not the IFC tail.
-      if (state.currentFiles || options.geometryCacheValid === true) enqueueDevGeometry('coordinateAnchorReady');
+      // Source metadata can start at the anchor. DEV triangulation separately
+      // waits for the current IFC atomic task through geometryWorkGate.
+      enqueueDevGeometry('coordinateAnchorReady');
     }
   };
 
@@ -1036,7 +1031,7 @@ export async function loadAllIfcFiles(
     devGeometryQueued = background.enqueue({
       task: 'devGeometry',
       priority: 2,
-      heavy: true,
+      heavy: false, // Catalog registration is light; DEV compilation owns the IFC exclusion gate.
       startAfter,
       run: async () => {
         state.geometryLoadToken++;
@@ -1442,6 +1437,19 @@ async function autoLoadModStlPostIfc(
       if (!state.isCurrentSession(session)) return;
       scene = (runtime.ctx.world.scene as any).three as import('three').Scene;
       resourceCtx = runtime.ctx;
+    }
+
+    // DEV is an on-demand geometry domain. Both cold and warm consume the same occurrence/catalog/placement runtime.
+    if (resourceCtx && state.currentCbmTree && typeof Worker !== 'undefined') {
+      const { startDeviceLod } = await import('./devLodRuntime.js');
+      if (!state.isCurrentSession(session)) return;
+      await startDeviceLod(state, resourceCtx, session, text => {
+        if (state.isCurrentSession(session)) void import('../ui/shell/statusBar.js').then(({setStatus}) => { if (state.isCurrentSession(session)) setStatus(text, text.includes('准备') ? 'loading' : 'ok'); });
+      });
+      if (!state.isCurrentSession(session)) return;
+      finishModStl(undefined, { path: 'device-lod-directory', onDemand: true });
+      hideLoading();
+      return; // Current-view readiness is recorded by the LOD owner, not a whole-station completion.
     }
 
     // 首次打开：渐进式 DEV GLB 管线（编译→落盘→渐进渲染一体）

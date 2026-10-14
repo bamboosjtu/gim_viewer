@@ -93,6 +93,22 @@ function expectMatrixClose(actual: THREE.Matrix4, expected: THREE.Matrix4, toler
 }
 
 describe('DevGlbTemplate immutable placement runtime', () => {
+  it('places a v10 nested source template once and shares it between distinct occurrences', () => {
+    const scene = new THREE.Group(); scene.matrix.makeTranslation(1, 2, 3); scene.matrixAutoUpdate = false;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+    mesh.position.set(2, 0, 0); mesh.updateMatrix(); scene.add(mesh);
+    const template = new DevGlbTemplate('DEV/shared.dev', scene);
+    const project = new THREE.Matrix4().makeTranslation(5, -6, 7).multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+    const a = template.createPlacement({ contract: 'source-template', rootOccurrence: 'A', placementMatrix: new THREE.Matrix4().makeTranslation(1000, 2000, 3000).toArray(), projectSourceToViewerMatrix: project });
+    const b = template.createPlacement({ contract: 'source-template', rootOccurrence: 'B', placementMatrix: new THREE.Matrix4().makeTranslation(4000, 2000, 3000).toArray(), projectSourceToViewerMatrix: project });
+    const ca = new THREE.Box3().setFromObject(a, true).getCenter(new THREE.Vector3());
+    const cb = new THREE.Box3().setFromObject(b, true).getCenter(new THREE.Vector3());
+    expect(ca.distanceTo(new THREE.Vector3(9, 0, 3))).toBeLessThan(1e-7);
+    expect(cb.distanceTo(new THREE.Vector3(12, 0, 3))).toBeLessThan(1e-7);
+    expect(a.userData.rootOccurrence).toBe('A'); expect(b.userData.rootOccurrence).toBe('B');
+    expect((a.children[0].children[0] as THREE.Mesh).geometry).toBe((b.children[0].children[0] as THREE.Mesh).geometry);
+    template.dispose();
+  });
   it('matches legacy world-space vertices and bbox for affine transform cases', () => {
     const project = new THREE.Matrix4().makeTranslation(4, -2, 1)
       .multiply(new THREE.Matrix4().makeRotationY(0.42));

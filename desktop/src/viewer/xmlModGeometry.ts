@@ -1,12 +1,10 @@
 /**
  * 变电 XML MOD primitive → Three.js BufferGeometry 转换。
  *
- * 14 类 primitive 转换策略：
- * - 基础体（SAFE_PRIMITIVES）：精确几何，经样本验证渲染正确
- * - StretchedBody：按任意平面截面 + 法向拉伸构造精确棱柱
- * - 其余复杂体（PorcelainBushing / TerminalBlock / ChannelSteel / Table）：
- *   MVP 阶段暂停渲染，避免错误几何污染场景
- * - 弱 schema 3 类：暂不渲染，避免占位盒污染场景
+ * 核心八类与 CircularGasket 按源参数生成浏览几何。
+ * StretchedBody 沿完整 Normal 位移拉伸，支持凹截面；L 原值保留在解析层。
+ * PorcelainBushing 的伞裙是浏览近似，LOD0 保留锥形主体。
+ * 尚未支持的复杂体和弱 schema 保留具体类型诊断。
  *
  * TransformMatrix 应用：
  * - GIM 矩阵实测为列主序展开（平移在 m[12], m[13], m[14]）
@@ -24,6 +22,8 @@
  */
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+export type DeviceLod = 0 | 1 | 2;
 import { Brush, Evaluator, ADDITION, INTERSECTION, SUBTRACTION } from 'three-bvh-csg';
 import type {
   XmlModColor,
@@ -135,22 +135,25 @@ export function disposeOwnedXmlModMaterials(group: THREE.Object3D): void {
  *
  * 14 类 primitive：
  * - 6 类基础体：Cylinder/Cuboid/Sphere/TruncatedCone/Ring/CircularGasket — 精确几何
- * - StretchedBody：任意平面多边形沿 Normal 拉伸 L
- * - 4 类暂停：PorcelainBushing/TerminalBlock/ChannelSteel/Table — MVP 跳过
+ * - StretchedBody：任意平面多边形沿完整 Normal 位移拉伸
+ * - PorcelainBushing/TerminalBlock：组合浏览几何
+ * - ChannelSteel/Table：语义未完成，保留诊断
  * - 3 类弱 schema：RectangularFixedPlate/OffsetRectangularTable/RectangularRing — 暂停渲染
  */
-function primitiveToGeometryUncached(p: XmlModPrimitive): THREE.BufferGeometry | null {
+function primitiveToGeometryUncached(p: XmlModPrimitive, lod: DeviceLod): THREE.BufferGeometry | null {
+  const segments = lod === 0 ? 6 : lod === 1 ? 12 : CYLINDER_SEGMENTS;
   switch (p.type) {
     case 'Cylinder':
-      return new THREE.CylinderGeometry(sanitizeNum(p.r), sanitizeNum(p.r), sanitizeNum(p.h), CYLINDER_SEGMENTS);
+      return zCylinder(p.r, p.r, p.h, segments);
     case 'Cuboid':
-      return new THREE.BoxGeometry(sanitizeNum(p.l), sanitizeNum(p.w), sanitizeNum(p.h));
+      return new THREE.BoxGeometry(sanitizeNum(p.l), sanitizeNum(p.w), sanitizeNum(p.h)).translate(0, 0, p.h / 2);
     case 'Sphere':
-      return new THREE.SphereGeometry(sanitizeNum(p.r), SPHERE_WIDTH_SEGMENTS, SPHERE_HEIGHT_SEGMENTS);
+      return new THREE.SphereGeometry(sanitizeNum(p.r), segments, Math.max(4, segments / 2));
     case 'TruncatedCone':
-      return new THREE.CylinderGeometry(sanitizeNum(p.tr), sanitizeNum(p.br), sanitizeNum(p.h), CYLINDER_SEGMENTS);
+      // TR in [0,1] is a ratio; larger values retain the observed absolute-radius dialect.
+      return zCylinder(coneTopRadius(p.br, p.tr), p.br, p.h, segments);
     case 'Ring':
-      return new THREE.TorusGeometry(sanitizeNum(p.r), sanitizeNum(p.dr) / 2, TORUS_RADIAL_SEGMENTS, TORUS_TUBULAR_SEGMENTS, sanitizeNum(p.rad));
+      return new THREE.TorusGeometry(sanitizeNum(p.r), Math.abs(sanitizeNum(p.dr)), lod === 0 ? 4 : TORUS_RADIAL_SEGMENTS, lod === 0 ? 8 : TORUS_TUBULAR_SEGMENTS, sanitizeNum(p.rad));
     case 'CircularGasket':
       return new THREE.TorusGeometry(sanitizeNum(p.or), Math.max(0, (sanitizeNum(p.or) - sanitizeNum(p.ir)) / 2), TORUS_RADIAL_SEGMENTS, TORUS_TUBULAR_SEGMENTS, sanitizeNum(p.rad));
     case 'Wire': {
@@ -178,8 +181,26 @@ function primitiveToGeometryUncached(p: XmlModPrimitive): THREE.BufferGeometry |
       return new THREE.BoxGeometry(100, Math.max(sanitizeNum(p.length), 1), 50);
     case 'StretchedBody':
       return createStretchedBodyGeometry(p.array, p.normal, p.l);
-    case 'PorcelainBushing':
-    case 'TerminalBlock':
+    case 'PorcelainBushing': {
+      const parts: THREE.BufferGeometry[] = [zCylinder(p.r2, p.r, p.h, segments)];
+      // Skirt profiles are a browsing approximation; the tapered core remains at every LOD.
+      const n = Math.min(512, Math.max(0, Math.floor(p.n)));
+      if (lod > 0) for (let k = 0; k < n; k++) {
+        const z = p.h * (k + 0.5) / n;
+        parts.push(zCylinder(p.r2, p.r1, p.h * 0.02, segments).translate(0, 0, z));
+        parts.push(zCylinder(p.r1, p.r1 * 0.98, p.h * 0.06, segments).translate(0, 0, z - p.h * 0.06));
+      }
+      return mergeParts(parts);
+    }
+    case 'TerminalBlock': {
+      const parts: THREE.BufferGeometry[] = [new THREE.BoxGeometry(p.l, p.w, p.t).translate(0, 0, p.t / 2)];
+      const cn = Math.max(0, Math.min(256, Math.floor(p.cn))), rn = Math.max(0, Math.min(256, Math.floor(p.rn)));
+      if (cn * rn > 4096) return null;
+      if (lod > 0) for (let c = 0; c < cn; c++) for (let r = 0; r < rn; r++) {
+        parts.push(zCylinder(p.r, p.r, p.bl, segments).translate((c - (cn - 1) / 2) * p.cs, (r - (rn - 1) / 2) * p.rs, p.t));
+      }
+      return mergeParts(parts);
+    }
     case 'ChannelSteel':
     case 'Table':
       // MVP 阶段暂停渲染 — 返回 null 避免创建空 Mesh
@@ -269,7 +290,7 @@ function parseStretchedBodyNormal(raw: string): THREE.Vector3 | null {
   const values = raw.split(',').map((value) => Number(value.trim()));
   if (values.length !== 3 || values.some((value) => !Number.isFinite(value))) return null;
   const normal = new THREE.Vector3(values[0], values[1], values[2]);
-  return normal.lengthSq() > Number.EPSILON ? normal.normalize() : null;
+  return normal.lengthSq() > Number.EPSILON ? normal : null;
 }
 
 /**
@@ -282,8 +303,10 @@ function parseStretchedBodyNormal(raw: string): THREE.Vector3 | null {
 function createStretchedBodyGeometry(array: string, normalRaw: string, lengthRaw: number): THREE.BufferGeometry | null {
   let points = parseStretchedBodyPoints(array);
   const normal = parseStretchedBodyNormal(normalRaw);
-  const length = Math.abs(sanitizeNum(lengthRaw));
-  if (points.length < 3 || !normal || length <= Number.EPSILON) return null;
+  void lengthRaw; // L retained in IR; displacement is the complete, signed Normal vector.
+  if (points.length < 3 || !normal) return null;
+  const extrusion = normal.clone();
+  normal.normalize();
 
   const reference = Math.abs(normal.z) < 0.9
     ? new THREE.Vector3(0, 0, 1)
@@ -301,7 +324,6 @@ function createStretchedBodyGeometry(array: string, normalRaw: string, lengthRaw
   const capTriangles = THREE.ShapeUtils.triangulateShape(contour, []);
   if (capTriangles.length === 0) return null;
 
-  const extrusion = normal.clone().multiplyScalar(length);
   const positions: number[] = [];
   const pushTriangle = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, expectedNormal: THREE.Vector3) => {
     const actual = new THREE.Vector3().crossVectors(
@@ -360,13 +382,13 @@ function createStretchedBodyGeometry(array: string, normalRaw: string, lengthRaw
  * @param p primitive 描述
  * @param modPath MOD 文件路径（保留参数兼容性，A.1 起不再参与缓存键）
  */
-export function primitiveToGeometry(p: XmlModPrimitive, modPath?: string): THREE.BufferGeometry | null {
+export function primitiveToGeometry(p: XmlModPrimitive, modPath?: string, lod: DeviceLod = 2): THREE.BufferGeometry | null {
   // v3（A.1）：modPath 不再参与缓存键，跨 modPath 全局共享
   void modPath; // 标记参数已废弃，保留兼容性
-  const sig = `${p.type}:${primitiveSignature(p)}`;
+  const sig = `${lod}:${p.type}:${primitiveSignature(p)}`;
   const cached = _sharedGeometryCache.get(sig);
   if (cached) return cached;
-  const geo = primitiveToGeometryUncached(p);
+  const geo = primitiveToGeometryUncached(p, lod);
   if (geo) _sharedGeometryCache.set(sig, geo);
   return geo;
 }
@@ -553,9 +575,9 @@ export function xmlModDocumentToGroup(doc: XmlModDocument): THREE.Group {
  * @returns Map<共享Material, baked BufferGeometry[]>，调用方负责 dispose baked geometry
  */
 export function collectBakedGeometriesByMaterial(
-  doc: XmlModDocument,
+  doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>,
 ): Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]> {
-  const steps = bakeGeometrySteps(doc);
+  const steps = bakeGeometrySteps(doc, lod, timings);
   let step = steps.next();
   while (!step.done) step = steps.next();
   return step.value;
@@ -566,9 +588,9 @@ export function collectBakedGeometriesByMaterial(
  * is still synchronous; this bounds chains, not the cost of an individual CSG.
  */
 export async function collectBakedGeometriesByMaterialAsync(
-  doc: XmlModDocument,
+  doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>,
 ): Promise<Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>> {
-  const steps = bakeGeometrySteps(doc);
+  const steps = bakeGeometrySteps(doc, lod, timings);
   let sliceStarted = performance.now();
   let step = steps.next();
   while (!step.done) {
@@ -582,9 +604,11 @@ export async function collectBakedGeometriesByMaterialAsync(
 }
 
 function* bakeGeometrySteps(
-  doc: XmlModDocument,
+  doc: XmlModDocument, lod: DeviceLod, timings?: Record<string, number>,
 ): Generator<void, Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>, void> {
   const byMaterial = new Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>();
+  const build = (p: XmlModPrimitive) => { const started = performance.now(); const geometry = primitiveToGeometry(p, doc.modPath, lod);
+    if (timings) timings.primitiveMs = (timings.primitiveMs ?? 0) + performance.now() - started; return geometry; };
   if (doc.isEmpty) return byMaterial;
 
   // mm → m 缩放矩阵：烘焙到顶点，避免 group.scale + Object3D.applyMatrix4 decompose 精度损失
@@ -601,7 +625,7 @@ function* bakeGeometrySteps(
   if (booleanEntities.length > 0) {
     for (const entity of doc.entities) {
       if (entity.primitive.type === 'Boolean') continue;
-      const geo = primitiveToGeometry(entity.primitive, doc.modPath);
+      const geo = build(entity.primitive);
       if (!geo) continue;
       const local = geo.clone();
       if (entity.transformMatrix.length === 16) {
@@ -642,7 +666,9 @@ function* bakeGeometrySteps(
       const op =
         prim.op === 'Union' ? ADDITION : prim.op === 'Intersection' ? INTERSECTION : SUBTRACTION;
       const evaluator = getSharedCsgEvaluator();
+      const booleanStarted = performance.now();
       const result = evaluator.evaluate(new Brush(geoA), new Brush(geoB), op);
+      if (timings) timings.booleanMs = (timings.booleanMs ?? 0) + performance.now() - booleanStarted;
       boolMemo.set(id, result.geometry);
       yield;
       return result.geometry;
@@ -661,7 +687,7 @@ function* bakeGeometrySteps(
           ? yield* evalBoolean(entity.id, entity.primitive)
           : null;
     } else {
-      baseGeo = primitiveToGeometry(entity.primitive, doc.modPath);
+      baseGeo = build(entity.primitive);
     }
     if (!baseGeo) continue; // 跳过暂停渲染/求值失败的 primitive
 
@@ -703,4 +729,18 @@ function vec3Array(flat: number[]): THREE.Vector3[] {
 
 function sanitizeNum(n: number): number {
   return Number.isNaN(n) ? 0 : n;
+}
+
+/** GIM cylinders have their base at Z=0 and their axis along +Z. */
+function zCylinder(top: number, bottom: number, height: number, segments: number): THREE.CylinderGeometry {
+  return new THREE.CylinderGeometry(sanitizeNum(top), sanitizeNum(bottom), sanitizeNum(height), segments)
+    .rotateX(Math.PI / 2).translate(0, 0, height / 2);
+}
+export function coneTopRadius(br: number, tr: number): number {
+  return tr >= 0 && tr <= 1 ? br * tr : tr;
+}
+function mergeParts(parts: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
+  const merged = mergeGeometries(parts, false);
+  for (const part of parts) part.dispose();
+  return merged;
 }

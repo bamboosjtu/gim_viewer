@@ -1,3 +1,4 @@
+import { beginIfcGeometryWork } from './geometryWorkGate.js';
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 import type { RegionalIndex, RegionalObject } from './ifcRegionalData.js';
@@ -222,6 +223,7 @@ export class IfcRegionalRuntime {
       started = performance.now(),
       before = this.groups.size;
     const unlock = await acquireRegionalSource();
+    const releaseGeometry = await beginIfcGeometryWork();
     try {
       if (!this.current() || epoch !== this.epoch) return;
       // Fragments publishes its final anchor asynchronously, including HIT.
@@ -390,7 +392,7 @@ export class IfcRegionalRuntime {
       throw error;
     } finally {
       this.closeSource();
-      unlock();
+      unlock(); releaseGeometry();
       this.busy = false;
       if (this.current() && epoch !== this.epoch) this.schedule();
     }
@@ -425,6 +427,7 @@ export class IfcRegionalRuntime {
     const cached = await readIfcLodArtifact<any>(key);
     if (cached?.attributes) return cached;
     const unlock = await acquireRegionalSource();
+    const releaseGeometry = await beginIfcGeometryWork();
     try {
       if (!this.current()) throw Error('Regional model released');
       await this.open();
@@ -433,7 +436,7 @@ export class IfcRegionalRuntime {
       return data;
     } finally {
       this.closeSource();
-      unlock();
+      unlock(); releaseGeometry();
     }
   }
   release() {

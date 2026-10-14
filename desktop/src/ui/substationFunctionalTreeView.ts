@@ -408,7 +408,7 @@ export function renderSubstationFunctionalTree(
       node.path,
       title,
       asset.role === 'component' ? '◇' : asset.role === 'device' ? '◆' : asset.role === 'mixed' ? '◈' : '□',
-      `${ROLE_LABELS[asset.role]} · ${source}`,
+      `${ROLE_LABELS[asset.role]} · ${source}${state.deviceUnknownBounds.has(node.path) ? ' · 范围未确定，选择后加载可支持几何' : ''}`,
       asset.parts.length > 0,
       (childrenEl) => {
         const partsKey = functionalPartsKey(node.path);
@@ -428,6 +428,8 @@ export function renderSubstationFunctionalTree(
         );
       },
       () => onNodeClick(node),
+      false,
+      state.deviceUnknownBounds.has(node.path) ? '范围未确定' : '',
     );
   }
 

@@ -7,6 +7,14 @@ const tick = async (): Promise<void> => {
 };
 
 describe('SubstationBackgroundCoordinator', () => {
+  it('builds the light device catalog at the coordinate anchor while IFC remains pending', async () => {
+    const order: string[] = [];
+    const coordinator = new SubstationBackgroundCoordinator({ session: { id: 10 }, isCurrent: () => true });
+    coordinator.registerRemainingIfc(); coordinator.startRemainingIfc();
+    coordinator.enqueue({ task: 'devGeometry', priority: 2, heavy: false, startAfter: 'coordinateAnchorReady', run: () => { order.push('catalog'); } });
+    coordinator.markInteractive(); await tick(); expect(order).toEqual([]);
+    coordinator.markCoordinateAnchorReady(); await tick(); expect(order).toEqual(['catalog']);
+  });
   it('cached DEV runs at an anchor while Preview stays pending; rebuild retains its tail gate and heavy lease',async()=>{
     let resolve!:()=>void;const held=new Promise<void>(r=>resolve=r),order:string[]=[];
     const coordinator=new SubstationBackgroundCoordinator({session:{id:9},isCurrent:()=>true});

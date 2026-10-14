@@ -89,7 +89,7 @@ describe('primitiveToGeometry', () => {
       expect(g).toBeInstanceOf(THREE.TorusGeometry);
       const tg = g as THREE.TorusGeometry;
       expect(tg.parameters.radius).toBe(100);
-      expect(tg.parameters.tube).toBe(10);
+      expect(tg.parameters.tube).toBe(20);
       expect(tg.parameters.arc).toBe(3.14);
     });
 
@@ -108,7 +108,7 @@ describe('primitiveToGeometry', () => {
       expect(tg.parameters.tube).toBe(10);
     });
 
-    it('PorcelainBushing → MVP 暂停渲染，返回空 BufferGeometry', () => {
+    it('PorcelainBushing → 组合锥柱与伞裙', () => {
       const g = primitiveToGeometry({
         type: 'PorcelainBushing',
         r: 30,
@@ -117,8 +117,7 @@ describe('primitiveToGeometry', () => {
         n: 8,
         h: 500,
       }, TEST_MOD_PATH);
-      // MVP 暂停渲染，返回空几何
-      expect(g).toBeNull();
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
 
     it('TerminalBlock → BoxGeometry 简化', () => {
@@ -137,7 +136,7 @@ describe('primitiveToGeometry', () => {
         rn: 3,
         phase: 'A',
       }, TEST_MOD_PATH);
-      expect(g).toBeNull();
+      expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
 
     it('ChannelSteel → MVP 暂停渲染', () => {
@@ -159,7 +158,7 @@ describe('primitiveToGeometry', () => {
     it('StretchedBody → 沿法向拉伸二维截面', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
-        l: 200, array: '0,0;100,0;100,50;0,50', normal: '0,0,1',
+        l: 200, array: '0,0;100,0;100,50;0,50', normal: '0,0,200',
       }, TEST_MOD_PATH);
       expect(g).toBeInstanceOf(THREE.BufferGeometry);
       g!.computeBoundingBox();
@@ -173,7 +172,7 @@ describe('primitiveToGeometry', () => {
     it('StretchedBody 支持位于 XZ 平面的截面并沿 Y 轴拉伸', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
-        l: 100, array: '0,0,0;50,0,0;50,0,50;0,0,50', normal: '0,1,0',
+        l: 100, array: '0,0,0;50,0,0;50,0,50;0,0,50', normal: '0,100,0',
       }, TEST_MOD_PATH);
       expect(g).toBeInstanceOf(THREE.BufferGeometry);
       g!.computeBoundingBox();
@@ -181,14 +180,14 @@ describe('primitiveToGeometry', () => {
       expect(g!.boundingBox!.max.toArray()).toEqual([50, 100, 50]);
     });
 
-    it('StretchedBody.Normal 会归一化，304.8 不会放大拉伸长度', () => {
+    it('StretchedBody.Normal 模长作为位移，L 不替代拉伸长度', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
         l: 100, array: '0,0;10,0;10,10;0,10', normal: '0,0,304.8',
       }, TEST_MOD_PATH);
       expect(g).toBeInstanceOf(THREE.BufferGeometry);
       g!.computeBoundingBox();
-      expect(g!.boundingBox!.max.z).toBeCloseTo(100);
+      expect(g!.boundingBox!.max.z).toBeCloseTo(304.8);
     });
 
     it('StretchedBody.Array 支持真实样例的三维点格式', () => {
@@ -198,7 +197,7 @@ describe('primitiveToGeometry', () => {
       }, TEST_MOD_PATH);
       expect(g).toBeInstanceOf(THREE.BufferGeometry);
       g!.computeBoundingBox();
-      expect(g!.boundingBox!.max.toArray()).toEqual([20, 10, 50]);
+      expect(g!.boundingBox!.max.toArray()).toEqual([20, 10, 1]);
     });
 
     it('StretchedBody 无有效法向或不足三个点时跳过', () => {
@@ -779,14 +778,14 @@ describe('Boolean CSG（P3-1，three-bvh-csg）', () => {
     const maxZ2 = maxWorldZ(collectBakedGeometriesByMaterial(makeDoc()));
 
     // 期望：平移 +4500mm × mm→m(0.001) + Cuboid 半高 91/2×0.001 = 4.5 + 0.0455
-    expect(maxZ1).toBeCloseTo(4.5 + 0.0455, 3);
+    expect(maxZ1).toBeCloseTo(4.5 + 0.091, 3);
     // 关键断言：第二次加载结果必须与第一次完全一致（缓存未被污染）
     expect(maxZ2).toBeCloseTo(maxZ1, 4);
 
     // 共享缓存中的原始几何必须保持未变换（居中于原点，原始 mm 单位）
     const cached = primitiveToGeometry({ type: 'Cuboid', l: 123, w: 77, h: 91 }, 'MOD/bool-cache-pollution.mod')!;
     cached.computeBoundingBox();
-    expect(cached.boundingBox!.min.z).toBeCloseTo(-45.5, 1);
-    expect(cached.boundingBox!.max.z).toBeCloseTo(45.5, 1);
+    expect(cached.boundingBox!.min.z).toBeCloseTo(0, 1);
+    expect(cached.boundingBox!.max.z).toBeCloseTo(91, 1);
   });
 });

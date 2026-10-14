@@ -86,7 +86,7 @@ function getGltfLoader(): GLTFLoader {
 export async function serializeDevToGlbDetailed(
   devPath: string,
   files: Map<string, File>,
-  options: { parseXml?: typeof import('../gim/geometry/xmlModParser.js').parseXmlMod } = {},
+  options: { parseXml?: typeof import('../gim/geometry/xmlModParser.js').parseXmlMod; discovery?: import('./modGeometryDiscovery.js').GeometryDiscoveryOptions; lod?: import('../viewer/xmlModGeometry.js').DeviceLod; timings?: Record<string, number> } = {},
 ): Promise<DevGlbSerializationResult> {
   // A missing DEV is a cache failure, not a deterministic empty result. The
   // discovery helper intentionally treats missing references as empty for the
@@ -108,7 +108,7 @@ export async function serializeDevToGlbDetailed(
     new Set<string>(),
     0,
     { instances: 0 },
-    { strictDependencies: true },
+    { ...options.discovery, strictDependencies: true },
   );
 
   const diagnostics: DevGlbSerializationDiagnostics = {
@@ -185,7 +185,7 @@ export async function serializeDevToGlbDetailed(
         files,
         geo.phmColor,
         geo.phmColorMaxA,
-        { strict: true, parseXml: options.parseXml },
+        { strict: true, parseXml: options.parseXml, lod: options.lod, timings: options.timings },
       );
       if (!group) continue;
       const xmlDiagnostics = readXmlDiagnostics(group);
@@ -298,6 +298,7 @@ export async function serializeDevToGlbDetailed(
   }
 
   // 3. 序列化 devGroup → GLB
+  const exportStarted = performance.now();
   const exporter = new GLTFExporter();
   return new Promise((resolve, reject) => {
     const cleanup = (): void => {
@@ -310,6 +311,7 @@ export async function serializeDevToGlbDetailed(
       devGroup,
       (gltf) => {
         if (gltf instanceof ArrayBuffer) {
+          if (options.timings) options.timings.exportWallMs = (options.timings.exportWallMs ?? 0) + performance.now() - exportStarted;
           cleanup();
           resolve({ status: diagnostics.status, bytes: new Uint8Array(gltf), diagnostics });
         } else {

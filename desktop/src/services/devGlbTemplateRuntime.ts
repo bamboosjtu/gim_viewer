@@ -40,6 +40,8 @@ export interface DevGlbTemplatePoolMetrics {
 }
 
 export interface DevGlbPlacementOptions {
+  /** v10 source templates bake only DEV/PHM/Entity, never the CBM occurrence. */
+  contract?: 'source-template';
   rootOccurrence?: string;
   instanceKey?: string;
   /** CBM placement in source millimetres, column-major. */
@@ -291,6 +293,19 @@ export class DevGlbTemplate {
     const placement = this.scene.clone(true) as THREE.Group;
     const cbm = createLegacyEquivalentPlacementMatrix(options.placementMatrix);
     const project = options.projectSourceToViewerMatrix;
+
+    if (options.contract === 'source-template') {
+      const wrapper = new THREE.Group();
+      wrapper.matrixAutoUpdate = false;
+      wrapper.matrix.copy((project?.clone() ?? IDENTITY.clone()).multiply(cbm));
+      wrapper.add(placement);
+      wrapper.userData[DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY] = true;
+      wrapper.userData.devPath = this.devPath;
+      wrapper.userData.rootOccurrence = options.rootOccurrence;
+      wrapper.userData.instanceKey = options.instanceKey;
+      wrapper.updateMatrixWorld(true);
+      return wrapper;
+    }
 
     // A legacy geometry bake is equivalent to changing each Mesh local matrix
     // from L to L×CBM.  This is intentionally not a world-matrix assignment:

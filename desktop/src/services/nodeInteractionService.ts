@@ -345,6 +345,8 @@ export async function frameAndHighlightDevice(
   request ??= state.beginSelection({kind:'cbm',key:scope.rootOccurrence});
   const guard=state.selectionGuard(request);
   if (!state.isCurrentSession(session) || !guard.isCurrent()) return;
+  if (state.deviceLodRuntime) await state.deviceLodRuntime.select(scope.rootOccurrence);
+  if (!guard.isCurrent()) return;
   const groups=collectDeviceGroups(state,devPath,scope).filter(hasRenderableGeometry);
   const {commitSelectionHighlight,highlightModGroups}=await import('../viewer/highlight.js');
   await commitSelectionHighlight(ctx,state,guard,() => highlightModGroups(state,groups));
@@ -392,6 +394,17 @@ export async function loadModStlForNode(
   const root=resolveGeometryLoadNode(state.currentCbmTree,node);
   const scope=deviceOccurrenceScope(state.currentCbmTree,node);
   const message=selectionMessage(state,request,showMessage);
+  if (state.deviceLodRuntime) {
+    try { await state.deviceLodRuntime.select(root.path); }
+    catch (error) { if (state.isCurrentSelection(request)) message(`设备几何加载失败: ${String(error)}`); }
+    if (!state.isCurrentSelection(request)) return;
+    state.selectionGeometry=describeNodeSelectionGeometry(state,node,true);
+    message(state.selectionGeometry.detail);
+    const {getViewerRuntimeWithUI}=await import('./viewerUIBinding.js');
+    const {ctx}=await getViewerRuntimeWithUI(state,message);
+    await frameAndHighlightDevice(ctx,state,node.devPath,scope,session,request);
+    return;
+  }
   const known=getGeometryDiagnostic(state,node.devPath);
   const alreadyLoaded=scope.assemblyPaths?.length && scope.assemblyPaths.every((path) => collectDeviceGroups(state,node.devPath,{...scope,assemblyPaths:[path]}).some(hasRenderableGeometry));
   const noLoad=known?.reason==='source-invalid' || getGeometryDiagnostic(state,root.devPath)?.reason==='source-invalid' || alreadyLoaded || scope.assemblyPaths?.length===0 || known?.status==='empty' || known?.status==='unsupported';

@@ -168,7 +168,8 @@ async function bootstrapAsync(): Promise<void> {
               inspectSubstationCapabilities(diagnosticFiles, diagnosticTree, diagnosticIfcEntries))
             : state.substationCapabilities;
           if (!state.isCurrentSession(diagnosticSession)) return;
-          const payload = JSON.stringify({ substationCapabilities: capabilities, dbPath, diagnostic, debug, basemap, timings, webIfcMt }, null, 2);
+          const payload = JSON.stringify({ substationCapabilities: capabilities, dbPath, diagnostic, debug, basemap, timings, webIfcMt,
+            deviceLod: state.deviceLodRuntime?.diagnostics ?? null }, null, 2);
           // Debug-only performance harness: expose the exact diagnostic payload to
           // the local CDP runner.  Production builds intentionally do not publish
           // this global, preserving the existing clipboard-only diagnostic path.

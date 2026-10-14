@@ -96,6 +96,8 @@ export interface DiscoveredGeometries {
  * 后续 warm restore 将永远跳过真实几何。
  */
 export interface GeometryDiscoveryOptions {
+  parseDev?: typeof parseDev;
+  parsePhm?: typeof parsePhm;
   strictDependencies?: boolean;
   rootOccurrence?: string;
   assemblyPath?: string;
@@ -164,7 +166,7 @@ export async function discoverGeometriesFromDevPath(
   // 使用 arrayBuffer + TextDecoder 而非 file.text()，确保跨运行时（浏览器/jsdom）兼容
   const devBuffer = await devFile.arrayBuffer();
   const devText = new TextDecoder().decode(devBuffer);
-  const devDoc = parseDev(devText, normalizedDevPath);
+  const devDoc = (options.parseDev ?? parseDev)(devText, normalizedDevPath);
 
   if (devDoc.isEmpty) return empty;
 
@@ -204,7 +206,7 @@ export async function discoverGeometriesFromDevPath(
     // 使用 arrayBuffer + TextDecoder 而非 file.text()，确保跨运行时（浏览器/jsdom）兼容
     const phmBuffer = await phmFile.arrayBuffer();
     const phmText = new TextDecoder().decode(phmBuffer);
-    const phmDoc = parsePhm(phmText, phmFilePath);
+    const phmDoc = (options.parsePhm ?? parsePhm)(phmText, phmFilePath);
 
     if (phmDoc.isEmpty) return;
 

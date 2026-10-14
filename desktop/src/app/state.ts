@@ -48,6 +48,8 @@ export interface SelectionGeometryState {
 
 /** 应用全局状态（由 bootstrap.ts 创建唯一实例，通过参数注入各模块） */
 export class AppState {
+  deviceUnknownBounds = new Set<string>();
+  deviceLodRuntime: { select(rootOccurrence: string): Promise<THREE.Group[]>; release(): void; clearSelection(): void; diagnostics: Record<string, unknown> } | null = null;
   selectionRequest: SelectionRequest | null = null;
   selectionGeometry: SelectionGeometryState | null = null;
   selectionMessage = '';
@@ -56,6 +58,7 @@ export class AppState {
 
   beginSelection(target: SelectionRequest['target']): SelectionRequest {
     this.selectionAbort?.abort();
+    this.deviceLodRuntime?.clearSelection();
     this.selectionAbort = new AbortController();
     const request: SelectionRequest = { id: ++this.selectionSequence, session: this.captureProjectSession(), signal: this.selectionAbort.signal, target };
     this.selectionRequest = request;
@@ -225,6 +228,7 @@ export class AppState {
 
   /** 使所有在途工程/几何任务失效；必须在切换工程的第一个同步动作调用。 */
   invalidatePendingLoads(): void {
+    this.deviceLodRuntime?.release(); this.deviceLodRuntime = null;
     this.invalidateSelection();
     this.releaseIfcPreviews();
     this.projectGeneration += 1;

@@ -20,6 +20,7 @@ import {
   revealFunctionalSearchTarget,
 } from './substationFunctionalTreeView.js';
 import type { PropertyReferenceDetail } from './propertyDictionary.js';
+import { markDeviceBounds } from './deviceBoundsMarker.js';
 
 const ENTITY_ICONS: Record<string, string> = {
   F1System: '◎', F2System: '□', F3System: '≋', F4System: '◆', PARTINDEX: '•',
@@ -61,6 +62,7 @@ export function renderCbmTreeUI(
   if (node.devPath) tooltipParts.push(`DEV: ${node.devPath}`);
   label.title = tooltipParts.join('\n');
   row.appendChild(toggle); row.appendChild(icon); row.appendChild(label);
+  markDeviceBounds(row, state, node.path);
   nodeEl.appendChild(row);
   const childrenEl = document.createElement('div');
   childrenEl.className = 'tree-children';

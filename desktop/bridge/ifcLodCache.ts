@@ -10,10 +10,7 @@ function open(): Promise<IDBDatabase> {
         request.result.createObjectStore('artifacts');
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
-    }).catch((error) => {
-      database = null;
-      throw error;
-    });
+    }); // Storage absence is stable within this page; source fallback must not repeatedly reopen it.
   return database!;
 }
 export async function readIfcLodArtifact<T>(key: string): Promise<T | null> {

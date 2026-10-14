@@ -15,11 +15,16 @@ function nodes(rows: Array<Record<string, unknown>>): XmlModNode[] {
 }
 
 /** No DOM or UI globals; external entity declarations are not accepted. */
-export function parseWorkerXmlMod(text: string, path: string) {
+export function parseWorkerXmlMod(text: string, path: string, timings?: Record<string, number>) {
   if (/<!DOCTYPE\b/i.test(text)) throw new Error(`XML DOCTYPE is not supported: ${path}`);
+  const validationStarted = performance.now();
   const valid = XMLValidator.validate(text);
+  if (timings) timings.validateMs = (timings.validateMs ?? 0) + performance.now() - validationStarted;
   if (valid !== true) throw new Error(`XML parse error in ${path}: ${valid.err.msg}`);
+  const parseStarted = performance.now();
   const roots = nodes(parser.parse(text));
   if (roots.length !== 1) throw new Error(`Expected one XML root in ${path}`);
-  return parseXmlModRoot(roots[0], path);
+  const doc = parseXmlModRoot(roots[0], path);
+  if (timings) timings.parseMs = (timings.parseMs ?? 0) + performance.now() - parseStarted;
+  return doc;
 }

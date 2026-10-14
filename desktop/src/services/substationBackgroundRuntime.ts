@@ -252,7 +252,8 @@ export class SubstationBackgroundCoordinator {
       .filter((record) => record.state === 'queued'
         && !record.spec.heavy
         && !record.spec.manual
-        && record.spec.startAfter === 'interactive')
+        && (record.spec.startAfter === 'interactive' || record.spec.startAfter === 'coordinateAnchorReady')
+        && this.gateReady(record.spec.startAfter))
       .sort((a, b) => a.spec.priority - b.spec.priority || a.queuedAt - b.queuedAt);
     const next = candidates[0];
     if (!next) return;

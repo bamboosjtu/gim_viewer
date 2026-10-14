@@ -1,5 +1,6 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::collections::{HashMap, HashSet};
 use std::fs as stdfs;
 #[cfg(windows)]
@@ -80,7 +81,7 @@ pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 /// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
 ///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v9-source-invalid";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v10-xml-lod";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GeometryCacheManifestEntry {
@@ -3053,6 +3054,67 @@ pub fn read_glb_file(
     let path = glb_cache_file_path(&app_handle, project_id, &entry_path)?;
     let bytes = stdfs::read(&path).map_err(|e| format!("读取 glb 缓存文件失败: {}", e))?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Per-template derived domain; never publishes the legacy whole-project marker.
+fn device_lod_artifact_path(
+    app: &tauri::AppHandle, project_id: i64, entry: &str, source_sha: &str,
+) -> Result<PathBuf, String> {
+    let (store, key) = entry.split_once('/').ok_or("设备缓存键缺少域")?;
+    let parts: Vec<&str> = key.split('|').collect();
+    let bound_sha = match store {
+        "templates" if parts.len() == 4 && parts[0] == GEOMETRY_CACHE_VERSION => parts[1],
+        "catalog" if parts.len() == 4 && parts[0] == "dev-spatial-catalog-v1" && parts[1] == GEOMETRY_CACHE_VERSION => parts[2],
+        _ => return Err("设备缓存域或版本无效".into()),
+    };
+    if source_sha.len() != 64 || !source_sha.bytes().all(|c| c.is_ascii_hexdigit()) || bound_sha != source_sha {
+        return Err("设备缓存源身份不匹配".into());
+    }
+    let conn = app.state::<DbState>();
+    let guard = conn.0.lock().map_err(|e| e.to_string())?;
+    ensure_project_exists(&guard, project_id)?;
+    ensure_project_source_sha(&guard, project_id, Some(source_sha))?;
+    drop(guard);
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?.join("device-lod");
+    if !base.exists() { stdfs::create_dir_all(&base).map_err(|e| e.to_string())?; }
+    reject_link(&base, "设备派生缓存")?;
+    let root = base.canonicalize().map_err(|e| e.to_string())?;
+    let relative = PathBuf::from(project_id.to_string()).join(store);
+    let parent = ensure_cache_parent(&root, &relative, "设备派生缓存")?;
+    let digest = format!("{:x}", sha2::Sha256::digest(key.as_bytes()));
+    let path = parent.join(format!("{}.bin", digest));
+    reject_link(&path, "设备派生缓存")?;
+    Ok(path)
+}
+
+#[tauri::command]
+pub fn read_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<tauri::ipc::Response, String> {
+    use std::io::Read;
+    let path = device_lod_artifact_path(&app_handle, project_id, &entry_path, &source_gim_sha256)?;
+    let file = match stdfs::File::open(&path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(tauri::ipc::Response::new(Vec::new())),
+        Err(e) => return Err(e.to_string()),
+    };
+    if file.metadata().map_err(|e| e.to_string())?.len() > 128 * 1024 * 1024 { return Err("设备派生缓存超过单条配额".into()); }
+    let mut bytes = Vec::new(); file.take(128 * 1024 * 1024 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    if bytes.len() > 128 * 1024 * 1024 { return Err("设备派生缓存超过单条配额".into()); }
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+pub fn write_device_lod_artifact(app_handle: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let (meta, bytes) = decode_binary_cache_write_request(&request)?;
+    if bytes.len() > 128 * 1024 * 1024 { return Err("设备派生缓存超过单条配额".into()); }
+    let source = meta.source_gim_sha256.as_deref().ok_or("设备缓存缺少源 SHA")?;
+    let path = device_lod_artifact_path(&app_handle, meta.project_id, &meta.entry_path, source)?;
+    atomic_write(&path, &bytes, "设备派生缓存")
+}
+
+#[tauri::command]
+pub fn delete_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<(), String> {
+    let path = device_lod_artifact_path(&app_handle, project_id, &entry_path, &source_gim_sha256)?;
+    match stdfs::remove_file(path) { Ok(()) => Ok(()), Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()), Err(e) => Err(e.to_string()) }
 }
 
 /// Tauri command：批量读取 DEV GLB 缓存文件。
@@ -6355,6 +6417,14 @@ pub fn delete_project_cache(
         }
     }
 
+    let device_lod_dir = app_dir.join("device-lod").join(project_id.to_string());
+    if device_lod_dir.exists() {
+        match remove_cache_dir_if_safe(&device_lod_dir, "设备派生缓存") {
+            Ok(true) => disk_messages.push("设备 LOD/空间目录缓存已删除".to_string()),
+            Ok(false) => {},
+            Err(e) => disk_messages.push(format!("设备派生缓存删除失败: {}", e)),
+        }
+    }
     // GLB 几何缓存目录: app_data_dir/glbcache/{project_id}/
     let glb_dir = app_dir.join("glbcache").join(project_id.to_string());
     if glb_dir.exists() {
