@@ -2,7 +2,9 @@
 export class ByteLru<T> {
   private rows = new Map<string, { value: T; bytes: number }>();
   bytes = 0;
-  constructor(readonly budget: number, private dispose: (value: T) => void = () => {}) {}
+  constructor(public budget: number, private dispose: (value: T) => void = () => {}) {}
+  get size(): number { return this.rows.size; }
+  *values(): IterableIterator<T> { for (const row of this.rows.values()) yield row.value; }
   get(key: string): T | undefined {
     const row = this.rows.get(key); if (!row) return;
     this.rows.delete(key); this.rows.set(key, row); return row.value;

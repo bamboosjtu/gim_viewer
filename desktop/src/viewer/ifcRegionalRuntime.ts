@@ -97,8 +97,6 @@ export class IfcRegionalRuntime {
         this.root.visible = visible;
         this.schedule();
       }
-      if (!this.transform.equals(options.ctx.fragments.baseCoordinationMatrix))
-        this.schedule();
       if (!options.isCurrent()) this.release();
     }, 1000);
     this.schedule();
@@ -226,19 +224,9 @@ export class IfcRegionalRuntime {
     const releaseGeometry = await beginIfcGeometryWork();
     try {
       if (!this.current() || epoch !== this.epoch) return;
-      // Fragments publishes its final anchor asynchronously, including HIT.
-      // Follow that authoritative project matrix; never retain the initial identity.
-      const published = this.options.ctx.fragments.baseCoordinationMatrix;
-      if (published && !this.transform.equals(published)) {
-        const restore = [...this.localIds.values()];
-        if (restore.length) await this.options.model.setVisible(restore, true);
-        if (this.groups.size !== before) this.instances.rebuild(this.transform);
-        for (const group of this.groups.values()) this.disposeGroup(group);
-        this.groups.clear();
-        this.localIds.clear();
-        this.transform.copy(published);
-        this.instances.rebuild(this.transform);
-      }
+      // sourceToViewer was resolved from the first model's public coordinates.
+      // Its frame is immutable for this session; the manager's initially cached
+      // identity must never replace it while its own query is still pending.
       const objects =
         isIfcNearDetailEnabled() && this.options.model.object.visible
           ? queryRegionalObjects(

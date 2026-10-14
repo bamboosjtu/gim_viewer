@@ -38,15 +38,15 @@
 
 | 来源类型 | 关键属性 | 当前解析/渲染 |
 |---|---|---|
-| Cuboid | L,W,H | 强类型；长方体 |
-| Cylinder | R,H | 强类型；圆柱 |
-| Sphere | R | 强类型；球体 |
-| TruncatedCone | BR,TR,H | 强类型；截锥 |
-| Ring | R,DR,Rad | 强类型；环体，依源码参数约定 |
+| Cuboid | L,W,H | 强类型；XY 居中，底面 Z=0，顶面 Z=H |
+| Cylinder | R,H | 强类型；底面圆心为原点，局部 +Z 轴，含端盖 |
+| Sphere | R | 强类型；中心为原点 |
+| TruncatedCone | BR,TR,H | 强类型；0≤TR≤1 时顶半径为 TR×BR，TR>1 保留样本中的绝对半径兼容解释并记录诊断 |
+| Ring | R,DR,Rad | 强类型；DR 为管半径，Rad 为弧度扫掠 |
 | CircularGasket | H,Rad,OR,IR | 强类型；垫圈几何 |
-| StretchedBody | L,Array,Normal | 保留字符串；截面三角化与拉伸 |
-| PorcelainBushing | R,R1,R2,N,H | 强类型；当前无直接几何生成 |
-| TerminalBlock | L,W,H?,T,R,BL,CL,CS,RS,CN,RN,Phase | 强类型；当前无直接几何生成 |
+| StretchedBody | L,Array,Normal | 保留 L 原值，沿完整有符号 Normal 向量拉伸，支持凹截面三角剖分 |
+| PorcelainBushing | R,R1,R2,N,H | 强类型；锥柱与均布伞裙组合，伞裙为浏览近似；远景保留主体 |
+| TerminalBlock | L,W,H?,T,R,BL,CL,CS,RS,CN,RN,Phase | 强类型；基板与 CN×RN 栅格端子组合，远景保留基板 |
 | ChannelSteel | L,Model,D?,H?,B?,T? | 强类型；当前无直接几何生成 |
 | Table | H,LL1,LL2,TL1,TL2 | 强类型；当前无直接几何生成 |
 | RectangularFixedPlate | raw attrs | 弱结构保留；当前无直接几何生成 |
@@ -64,10 +64,12 @@ Insulator、ConePorcelainBushing、SquareGasket、CircularFixedPlate、BendingCy
 
 ## StretchedBody
 
-Array 是分号分隔点序列，每点为逗号三元组；Normal 是源向量字符串，L 为长度来源。
-当前渲染去掉重复截面点并按支持的二维截面路径三角化/拉伸。
+Array 是分号分隔点序列，每点为逗号三元组，二维点兼容为 z=0；Normal 是完整拉伸位移，不能归一化后再用 L 当长度。L 原值保留在 IR，不参与当前长度求值。
+渲染去掉重复截面点，投影用于凹多边形端盖三角剖分，最终顶点使用原始三维点与加上 Normal 的顶层点。
 闭合、退化、非平面截面和任意法向不能仅凭记录数量认定完整支持。
 Normal 与 Entity 矩阵分别生效，不能将 Normal 当整个装配的绝对朝向。
+
+核心类型按 LOD 使用不同圆周分段，孔阵、伞裙和端子为浏览细节。几何与颜色独立处理，继续消费 MOD/PHM 的继承颜色，不强制瓷套颜色。参数组合近似、未支持类型与来源异常保留诊断，不宣称全类型精确重建。
 
 ## Boolean 与实体引用
 

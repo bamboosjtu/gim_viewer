@@ -54,7 +54,7 @@ IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CB
 
 [`IfcGeometryProvider`](../desktop/src/viewer/ifcGeometryProvider.ts) 定义 `canProvide / loadLOD / release / findByGlobalId`，并提供拾取、属性与高亮接口。对象仍采用现有 `ifc:<logical modelId>:object:<ExpressId>` 身份，保留 GlobalId、ExpressId、IFC 类型和来源 Provider；GlobalId 查询返回候选集合。Provider 不生成新 CBM、空间语义节点或 DEV occurrence，不替代 Fragments Runtime。
 
-原型默认关闭，保留研究代码与调试键；产品顶部不提供 Preview 入口，默认加载采用下文的 IFC 浏览 LOD。原型的完整路径仍由首个完整 IFC 建立生产坐标锚点，后续文件在 metadata Worker 中读取单位、上下文和 LocalPlacement 链，先提交 LOD0，再提交 LOD1，自动完整加载与属性面板的“加载精细几何 LOD2”共用该文件的加载 Promise。
+原型默认关闭，保留研究代码与调试键；产品顶部不提供 Preview 入口，默认加载采用下文的 IFC 浏览 LOD。该原型在当前默认路径下不可达：Preview-First / Deferred-Fine 与 Provider 挂载都要求 `openingPolicy === 'full'`，而默认策略是 `bim-lod`，调试键只对完整路径生效。原型的完整路径仍由首个完整 IFC 建立生产坐标锚点，后续文件在 metadata Worker 中读取单位、上下文和 LocalPlacement 链，先提交 LOD0，再提交 LOD1，自动完整加载与属性面板的“加载精细几何 LOD2”共用该文件的加载 Promise。
 
 另一个独立、默认关闭的实验开关 `gim-debug-ifc-preview-deferred-fine` 必须与 Preview 开关同时启用。该模式不改变原完整加载模式：首个 IFC 仍完整加载并建立坐标锚点，后续文件默认按原顺序生成 Preview，LOD0/LOD1 均完成后标记 `previewReady`，精细状态为 `fineDeferred`，不自动启动 LOD2。已通过 geometry validation 的 DEV 缓存，在首个完整 IFC 的坐标锚点及 interactive 就绪后即可入队恢复，与剩余 IFC/Preview 顺序循环独立；仍等待 Spatial snapshot 恢复完成分类并使用原有互斥重任务与安全检查点。每个打开会话只入队一次，不在 IFC 尾部完成后重复恢复。未命中、部分或失效缓存的 DEV 编译/修复以及 Spatial 重建仍保留 IFC 尾部门禁；语义索引发布不依赖该门禁。`devGeometryReady` 独立于 `allIfcReady`，后者仍等待每个 IFC 精细加载成功或明确失败，延期中的文件不计为 ready。`fullModelReady` 在完整加载模式等待 IFC 与 DEV 均结束；延期精化模式还要求所有 IFC 为 `fineReady`，不以早到的 DEV 缓存冒充完整模型。
 
@@ -80,7 +80,21 @@ LOD0 默认使用共享单位盒的分块 InstancedMesh，实例矩阵保留原�
 
 PHM 根据引用扩展名递归，逐边累积矩阵，按当前分支防环。相同模板在不同路径的合法重复出现保留；不能使用全局 visited 集合删除实例。父语义节点的 alias 只在其物理装配子树内查候选，身份优先，歧义保留。
 
-冷路径按唯一 DEV 编译 GLB、落盘并渐进提交 placement。clean static DEV 在会话内只解析一个模板，共享不可变 geometry/material；每个 occurrence 保留独立节点层级和变换。不能把 placement 烘焙写回共享 geometry。无法共享的范围使用局部回退。当前不采用 InstancedMesh。
+设备模板只包含 Entity、DEV/SUBDEVICE、PHM 逐边变换及毫米到米转换；放置根统一应用 `projectSourceToViewer × CBM累积矩阵（平移转米）`，每项各应用一次。冷编译和暖恢复消费同一物理 occurrence 及放置函数，不通过整体偏移或独立居中校准。首个 IFC 锚点由 [公开坐标读取器](../desktop/src/viewer/ifcCoordinateAnchor.ts) 等待 `model.getCoordinates()` 的实际结果构造，避免 Fragments 在异步查询完成前缓存并返回的占位单位矩阵。合法单位矩阵仍被接受，工程切换后旧查询不能提交。区域 IFC 查询和设备放置保持同一工程基准。
+
+同一 DEV、源 SHA 和 LOD 在会话内共享不可变 geometry/material，每个 occurrence 保留独立节点层级和变换；placement 不烘焙回模板。DEV 生产路径不采用 InstancedMesh，模板校验拒绝带动画、实例化网格或非法几何的 GLB。InstancedMesh 仅用于 IFC 浏览 LOD 的近景紧固件表示。
+
+所有物理设备默认自动生成实际参数描述的基础表示，视野外和小投影使用 LOD0，不以点树作为显示前提。范围未确定的设备也自动编译可支持几何，保留范围诊断，不用虚构包围盒剔除或替代实体。原始来源为空、不支持或失败时明确记录状态，不能伪造设备。
+
+可见设备按包围盒距离和投影像素切换细节：选中对象强制 LOD2；距离 ≤30 m 且投影最长边 ≥120 px 时进入 LOD2，退出使用 >35 m 或 <90 px；LOD1 进入使用 ≥40 px，退出使用 <30 px。相机停稳 200 ms 后更新，选择立即排队。视野外不请求 LOD1/2，取消选中后回到相机决定的档位。新表示完成前保留旧表示，所有档位使用同一身份、属性和高亮。
+
+设备目录通过参数和源装配矩阵构建，不依赖三角化或 GLB；STL 扫描顶点范围，Boolean 使用保守范围，未知类型保留 unknown。目录增量提交，按唯一 DEV 复用。模板以源 SHA、DEV、几何版本和 LOD 为键逐条原子落盘；部分合法缓存可直接恢复，不写旧的全站完整几何标记。128 MiB 模板 LRU 按实际顶点/索引缓冲区计量，正在显示和选中的模板受保护，可使驻留值超过软预算；未使用模板被淘汰并释放。
+
+Viewer 创建后即启动设备编译，编译与 IFC 锚点无关，场景提交等待真实锚点。高核数且非低内存环境最多两个 DEV Worker，其余使用一个；全局最多同时执行一个 IFC WASM 任务和两个 DEV 工作单元。完成的 GLB 占用工作槽直到消费方处理完，避免导出结果无限积累。两个 Worker 的来源字节、解码文本、XML IR、DEV/PHM IR 缓存合计预算分别为 64、32、48、12 MiB，单 Worker 也受同一总预算约束；每份驻留文档复用校验和解析结果，几何临时资源在导出后释放。选择、可见近景、可见中景、基础表示依次调度，工程会话、请求 ID 和模板键共同拒绝旧结果。
+
+内存中的不可变 File 通过结构化克隆交给 Worker 直接读取，保留共享的 Blob 后备存储，避免逐文件经过主线程。磁盘惰性 File 仍使用受源身份和路径校验保护的 IPC。模板读取/解析也受有界队列限制，正在创建 placement 的模板受 LRU 保护。原生索引提交、缓存校验及设备派生产物 I/O 在后台线程执行，保持原有事务、源校验、路径防护和原子替换条件。
+
+状态栏独立显示设备就绪/总数、目录进展、模板编译、缓存命中、失败数和正在处理的设备，不被并行 IFC 提示覆盖。诊断区分目录就绪、当前视图就绪、全站基础表示就绪和完整几何完成，基础或 partial 表示不计作完整几何。阶段耗时包含读取/RPC、解码、校验、解析、primitive、Boolean、合并、导出与提交；Worker elapsed 是墙钟时间。
 
 GLB 恢复校验 manifest、源身份、条目状态和文件完整性。单 DEV 文件失败可局部回退原始几何；manifest 无效使几何域失效，不要求删除有效语义域。完成标记只在所有目标条目形成确定状态后提交，瞬时失败不能写为完整版本。确定性 source-invalid 可与其他确定结果共同发布结构有效的缓存，暖恢复不读取其 GLB 或重试 raw；结构有效不等于所有几何显示，fullModelReady 诊断明确记录拒绝数及 geometryFullyRendered。
 
@@ -97,7 +111,7 @@ DEV 导出前和静态 GLB 模板恢复时检查有限值与包围盒跨度，�
 | `source-invalid` | 有类型的确定性源几何异常，零字节且保留来源诊断；禁止渲染，按 SHA/几何版本重新评估 |
 | 运行失败 | 读取/编译异常；不是可接受的完整性终态 |
 
-二进制批读 `batch_read_glb_files` 使用 GIMR 协议；当前批量上限为 256 文件或估算 64 MiB。内部 IR 区分 XmlModDocument、primitive、DEV/PHM 模板、引用边、装配路径和场景资源。类型定义以 [geometry/ir.ts](../desktop/src/gim/geometry/ir.ts) 为准，格式契约见 [几何模型](schema/geometry-model.md)。
+二进制批读 `batch_read_glb_files` 使用 GIMR 协议；当前批量上限为 256 文件或估算 64 MiB。内部 IR 区分 XmlModDocument、primitive、DEV/PHM 模板、引用边、装配路径和场景资源。类型定义以 [powerline-core 的 geometry/ir.ts](../packages/powerline-core/src/geometry/ir.ts) 为准；[desktop 同名文件](../desktop/src/gim/geometry/ir.ts) 只是兼容转发出口，不含定义。格式契约见 [几何模型](schema/geometry-model.md)。
 
 ## 线路运行时
 
@@ -128,7 +142,8 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
 | 变电语义 | `gim-substation-parser-v26` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性、语义引用及索引发布凭据 |
-| DEV 几何 | `geometry-cache-v9-source-invalid` | [db.rs](../desktop/src-tauri/src/db.rs) | occurrence 引用、manifest 和 GLB |
+| DEV 几何 | `geometry-cache-v10-xml-lod` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
+| 设备 LOD 派生 | `geometry-cache-v10-xml-lod` 组合 `dev-spatial-catalog-v1`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
 | Spatial snapshot | `substation-spatial-semantic-v2` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 源、链接和序列化结构 |
 | IFC Spatial parser contract | `gim-substation-parser-v23` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | Fragments | `fragments-cache-v6` | [db.rs](../desktop/src-tauri/src/db.rs)、[features](../desktop/src/config/features.ts) | 源/IFC 身份及实际安装的 fragments/web-ifc 版本 |
@@ -159,9 +174,9 @@ SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `
 
 区域对象按原 GlobalId/ExpressId 拾取和读取源属性；只有唯一 GlobalId 对应的远景对象才隐藏，歧义不猜测。离开区域或切到远景时释放局部网格、恢复远景可见性。区域工作在各 IFC 间串行，请求结束释放源 Worker；工程会话及相机请求版本拒绝过期提交。此队列仅约束区域任务，不保证与 DEV、Spatial 或远景转换全局互斥。
 
-近景紧固件在同一次源模型会话中共享几何模板，回复按模板复制和转移一次缓冲区，避免多个对象重复复制顶点。渲染按模板和颜色合并为 InstancedMesh，每个实例槽保存原 ExpressId。拾取和高亮仍对应单个源对象；选中时创建独立高亮覆盖层，不改动其他实例。镜像放置保留普通网格路径。离开区域释放未使用的 GPU 模板、材料和实例，逐对象缓存仍保留独立身份与放置。
+近景紧固件在同一次源模型会话中共享几何模板，回复按模板复制和转移一次缓冲区，避免多个对象重复复制顶点。渲染按模板和颜色合并为 InstancedMesh（仅此 IFC 浏览 LOD 近景路径使用，DEV 生产路径不采用），每个实例槽保存原 ExpressId。拾取和高亮仍对应单个源对象；选中时创建独立高亮覆盖层，不改动其他实例。镜像放置保留普通网格路径。离开区域释放未使用的 GPU 模板、材料和实例，逐对象缓存仍保留独立身份与放置。
 
-包围盒使用 web-ifc 的绝对 Y-up 米坐标，区域网格和查询跟随 Fragments 最终发布的工程协调矩阵；缓存 HIT 也需处理锚点异步发布，不额外重复轴转换或拟合研究矩阵。
+包围盒使用 web-ifc 的绝对 Y-up 米坐标，归一化几何流的索引先逆变换恢复绝对坐标，再在查询和提交时应用首个 IFC 的真实工程协调矩阵。该矩阵通过公开坐标读取器等待完成并在会话内固定；缓存 HIT 沿用同一方法，占位单位矩阵不得覆盖真实基准。不重复轴转换或拟合研究矩阵。IFC 远景转换、区域求值和源属性读取共享一个 WASM 工作槽，DEV 模板编译可在独立 Worker 内并行。
 
 远景 Fragments/区域索引、逐对象近景网格与属性使用独立 IndexedDB 派生缓存，键绑定源 SHA、条目路径、LOD 策略及实际安装依赖版本。远景 HIT 跳过源读取及转换；近景 HIT 跳过源模型和对象求值。原完整 Fragments 缓存域不与近似表示混用。缓存不可用回退读取源；损坏远景产物删除后重建，源 SHA 改变拒绝近景求值。该路径明确标为近似浏览表示，不能用 `allIfcReady` 证明完整开洞几何。
 
@@ -175,16 +190,20 @@ SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `
 | 默认底图 | OSM online；天地图为可配置能力 |
 | PMTiles | 关闭 |
 | 线路弧垂 | 启用视觉示意 |
-| 完整 Fragments 缓存 | 默认关闭；`gim-debug-fragments-cache=1` 用于调试对照 |
+| 完整 Fragments 缓存 | 默认关闭；且当前默认策略下不可达——`ifcEntryLoader` 在 `bim-lod` 下提前返回，`canUseCache` 又要求 `openingPolicy === 'full'`，而 `readIfcOpeningPolicy()` 固定返回 `bim-lod`，因此 `gim-debug-fragments-cache=1` 当前不改变实际路径（见未决事项 D-03） |
 | IFC 浏览 LOD 派生缓存 | 默认使用；键绑定源、LOD 策略及安装依赖版本 |
 
-完整 Fragments 缓存关闭时不读写该域的 `.frag`，不影响浏览 LOD 的独立派生缓存。开启调试必须记录实际策略，不能与默认路径合并比较。
+完整 Fragments 缓存关闭时不读写该域的 `.frag`，不影响浏览 LOD 的独立派生缓存。该域只在完整路径被显式选中时才会使用；在默认 `bim-lod` 路径下开关不改变行为，不能与默认路径合并比较。
 
 | 就绪状态 | 定义 |
 |---|---|
 | coreSemanticReady | 核心语义可供 UI 使用 |
 | firstUsable / interactive | 首个可用 IFC 与基本交互，不代表全模型 |
 | devGeometryReady | DEV 渲染管线完成，主要设备可定位；拒绝、partial、unsupported 单独记录 |
+| catalogReady | 设备空间目录就绪；按 DEV 增量提交，不等待全部源解析完成 |
+| currentViewReady | 锚点与目录就绪，且当前视锥内 occurrence 均已提交所需档位或已有明确终态 |
+| baseRepresentationsReady | 锚点与目录就绪，且全部 occurrence 已提交表示或为 empty/unsupported 终态；基础与 partial 表示不计作完整几何 |
+| allStationReady | 在基础表示就绪之上，全部 occurrence 为 empty 终态或已达到 LOD2 完整几何 |
 | selectedFineReady | 当前有效选择已唯一关联 LOD2，精细高亮及属性完成提交；另记录每次选择事件 |
 | allIfcReady | 全部 IFC 加载尝试结束，失败数另列 |
 | fullModelReady | DEV 管线结束，unsupported/partial 仍单独记录 |

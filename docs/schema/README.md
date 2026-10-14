@@ -16,7 +16,7 @@
 | [逻辑模型](logical-model.md) | SCH、STD 内容变体、SLD 与关联 |
 
 用户可用行为见 [软件规格](../software-spec.md)，内部缓存和生命周期见
-[架构](../architecture.md)，所有补证据或开发行动见 [未决事项](../open-issues.md)。
+[架构](../architecture.md)，未关闭的代码缺陷见 [未决事项](../open-issues.md)。
 
 ## 复核顺序
 

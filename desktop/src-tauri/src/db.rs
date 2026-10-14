@@ -996,12 +996,15 @@ fn ensure_project_source_sha(
 /// 变电工程索引必须包含 IFC 模型与 IFC entry；
 /// 否则可能是线路工程被误识别为 substation，应走 save_line_gim_graph 而非本命令。
 #[tauri::command]
-pub fn save_gim_index(
-    state: tauri::State<'_, DbState>,
+pub async fn save_gim_index(
+    app_handle: tauri::AppHandle,
     payload: GimIndexPayload,
 ) -> Result<(), String> {
-    let mut conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    save_gim_index_connection(&mut conn, payload)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle.state::<DbState>();
+        let mut conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        save_gim_index_connection(&mut conn, payload)
+    }).await.map_err(|e| format!("索引后台任务失败: {}", e))?
 }
 
 fn save_gim_index_connection(conn: &mut Connection, payload: GimIndexPayload) -> Result<(), String> {
@@ -1483,14 +1486,9 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], label: &str) -> Result<(),
             .map_err(|e| format!("同步缓存{}临时文件失败: {}", label, e))?;
     }
     reject_link(path, label)?;
-    // Windows 的 std::fs::rename 不覆盖已有文件；先删除已验证的普通目标，
-    // 再 rename，避免目标被部分写入。
-    if path.exists() {
-        stdfs::remove_file(path).map_err(|e| {
-            let _ = stdfs::remove_file(&temp);
-            format!("删除旧缓存{}文件失败: {}", label, e)
-        })?;
-    }
+    // std::fs::rename replaces regular files (MoveFileExW with
+    // MOVEFILE_REPLACE_EXISTING on Windows). Keep the old file intact until
+    // replacement succeeds; deleting first would break per-template atomicity.
     if let Err(e) = stdfs::rename(&temp, path) {
         let _ = stdfs::remove_file(&temp);
         return Err(format!("替换缓存{}文件失败: {}", label, e));
@@ -1521,6 +1519,7 @@ pub(crate) fn create_cache_staging_dir(
     if !base.is_dir() {
         return Err(format!("extracted 路径不是目录: {}", base.display()));
     }
+    let base = base.canonicalize().map_err(|e| format!("规范化 extracted 目录失败: {}", e))?;
 
     let final_root = base.join(project_id.to_string());
     // 纳入路径安全检查；旧目录即使存在也只允许是普通目录，提交时会
@@ -2112,6 +2111,11 @@ pub(crate) fn commit_cache_staging(
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?
         .join("extracted");
     reject_link(&base, " extracted")?;
+    let base = base.canonicalize().map_err(|e| format!("规范化 extracted 目录失败: {}", e))?;
+    let staging_root = staging_root.canonicalize().map_err(|e| format!("规范化 staging 目录失败: {}", e))?;
+    if staging_root.parent() != Some(base.as_path()) {
+        return Err("staging 目录不属于当前 extracted 根目录".into());
+    }
     let final_root = base.join(project_id.to_string());
     reject_link(&final_root, "缓存")?;
     let stamp = std::time::SystemTime::now()
@@ -2129,7 +2133,7 @@ pub(crate) fn commit_cache_staging(
         stdfs::rename(&final_root, &backup)
             .map_err(|e| format!("移动旧缓存目录失败: {}", e))?;
     }
-    if let Err(error) = stdfs::rename(staging_root, &final_root) {
+    if let Err(error) = stdfs::rename(&staging_root, &final_root) {
         if had_previous {
             let _ = stdfs::rename(&backup, &final_root);
         }
@@ -3088,7 +3092,11 @@ fn device_lod_artifact_path(
 }
 
 #[tauri::command]
-pub fn read_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<tauri::ipc::Response, String> {
+pub async fn read_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || read_device_lod_artifact_blocking(app_handle, project_id, entry_path, source_gim_sha256))
+        .await.map_err(|e| format!("设备缓存后台读取失败: {}", e))?
+}
+fn read_device_lod_artifact_blocking(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<tauri::ipc::Response, String> {
     use std::io::Read;
     let path = device_lod_artifact_path(&app_handle, project_id, &entry_path, &source_gim_sha256)?;
     let file = match stdfs::File::open(&path) {
@@ -3103,8 +3111,13 @@ pub fn read_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64, e
 }
 
 #[tauri::command]
-pub fn write_device_lod_artifact(app_handle: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+pub async fn write_device_lod_artifact(app_handle: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
     let (meta, bytes) = decode_binary_cache_write_request(&request)?;
+    drop(request);
+    tauri::async_runtime::spawn_blocking(move || write_device_lod_artifact_blocking(app_handle, meta, bytes))
+        .await.map_err(|e| format!("设备缓存后台写入失败: {}", e))?
+}
+fn write_device_lod_artifact_blocking(app_handle: tauri::AppHandle, meta: BinaryCacheWriteMeta, bytes: Vec<u8>) -> Result<(), String> {
     if bytes.len() > 128 * 1024 * 1024 { return Err("设备派生缓存超过单条配额".into()); }
     let source = meta.source_gim_sha256.as_deref().ok_or("设备缓存缺少源 SHA")?;
     let path = device_lod_artifact_path(&app_handle, meta.project_id, &meta.entry_path, source)?;
@@ -5506,7 +5519,17 @@ fn inspect_line_semantic_pack(
 /// - valid 增加 line_fam_source_count > 0 条件（FAM 属性必须存在）
 /// - 输出 line_dev_source_count / line_expected_fam_ref_count / missing_* 诊断字段
 #[tauri::command]
-pub fn validate_gim_cache(
+pub async fn validate_gim_cache(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+    expected_project_type: String,
+) -> Result<GimCacheValidation, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle.state::<DbState>();
+        validate_gim_cache_blocking(app_handle.clone(), state, project_id, expected_project_type)
+    }).await.map_err(|e| format!("缓存后台校验失败: {}", e))?
+}
+fn validate_gim_cache_blocking(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, DbState>,
     project_id: i64,
@@ -6532,12 +6555,15 @@ fn validate_geometry_refs_payload(payload: &GeometryRefsPayload) -> Result<(), S
 /// 引用写入三张缓存表。缓存命中时可直接查询这些表来发现 MOD/STL 几何源，
 /// 无需逐文件读取数千个 DEV/PHM。
 #[tauri::command]
-pub fn save_geometry_refs(
-    state: tauri::State<'_, DbState>,
+pub async fn save_geometry_refs(
+    app_handle: tauri::AppHandle,
     payload: GeometryRefsPayload,
 ) -> Result<(), String> {
-    let mut conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    save_geometry_refs_connection(&mut conn, payload)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle.state::<DbState>();
+        let mut conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        save_geometry_refs_connection(&mut conn, payload)
+    }).await.map_err(|e| format!("几何引用后台任务失败: {}", e))?
 }
 
 fn save_geometry_refs_connection(conn: &mut Connection, payload: GeometryRefsPayload) -> Result<(), String> {
@@ -7217,6 +7243,21 @@ pub fn get_project_diagnostic(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn atomic_cache_write_replaces_file_and_preserves_target_on_failed_replacement() {
+        let root = std::env::temp_dir().join(format!("gim-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("template.bin");
+        std::fs::write(&file, b"previous").unwrap();
+        super::atomic_write(&file, b"next", "test").unwrap();
+        assert_eq!(std::fs::read(&file).unwrap(), b"next");
+        let directory = root.join("must-remain");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("record"), b"valid").unwrap();
+        assert!(super::atomic_write(&directory, b"invalid", "test").is_err());
+        assert_eq!(std::fs::read(directory.join("record")).unwrap(), b"valid");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
     fn validation_context_checks_exact_project_paths_and_both_root_spellings() {
         let root = std::env::temp_dir().join(format!("gim-context-{}", std::process::id()));
         std::fs::create_dir_all(root.join("1/CBM")).unwrap();
@@ -7269,13 +7310,32 @@ mod tests {
         std::fs::rename(root.join("1/old"), root.join("1/CBM")).unwrap();
         let link = root.join("1/CBM/linked.ifc");
         #[cfg(windows)]
-        std::os::windows::fs::symlink_file(&file, &link).unwrap();
+        let is_file_link = match std::os::windows::fs::symlink_file(&file, &link) {
+            Ok(()) => true,
+            Err(error) if error.raw_os_error() == Some(1314) => {
+                // A final-path junction exercises the same reparse-point guard
+                // without requiring SeCreateSymbolicLinkPrivilege. Keep file
+                // symlinks on hosts that support them and assert the precise
+                // rejection reason below, rather than skipping link coverage.
+                let output = std::process::Command::new("cmd").args(["/C", "mklink", "/J"])
+                    .arg(link.to_string_lossy().replace('/', "\\"))
+                    .arg(root.join("outside").to_string_lossy().replace('/', "\\")).output().unwrap();
+                assert!(output.status.success(), "final reparse fixture: {}", String::from_utf8_lossy(&output.stderr));
+                assert_ne!(std::fs::symlink_metadata(&link).unwrap().file_attributes() & 0x0400, 0);
+                false
+            }
+            Err(error) => panic!("file symlink fixture: {}", error),
+        };
         #[cfg(unix)]
         std::os::unix::fs::symlink(&file, &link).unwrap();
-        assert!(context.contains(1, "CBM/linked.ifc", &link).is_err());
+        let rejection = context.contains(1, "CBM/linked.ifc", &link).unwrap_err();
+        assert!(rejection.contains("reparse point"), "unexpected rejection: {}", rejection);
         #[cfg(windows)]
         assert!(!super::readable_source_of_size(&link, 5));
-        std::fs::remove_file(link).unwrap();
+        #[cfg(windows)]
+        if is_file_link { std::fs::remove_file(&link).unwrap(); } else { std::fs::remove_dir(&link).unwrap(); }
+        #[cfg(unix)]
+        std::fs::remove_file(&link).unwrap();
         drop(context);
         std::fs::remove_dir_all(root).unwrap();
     }

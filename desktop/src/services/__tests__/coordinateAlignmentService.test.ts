@@ -19,6 +19,19 @@ function pendingMatrix() {
 }
 
 describe('first IFC coordination readiness', () => {
+  it('does not consume Fragments cached identity while public coordinates are unresolved', async () => {
+    let resolve!: (coordinates: number[]) => void;
+    const placeholder = new THREE.Matrix4();
+    const model = { getCoordinationMatrix: async () => placeholder,
+      getCoordinates: () => new Promise<number[]>(r => { resolve = r; }) };
+    const state = new AppState(), manager = { baseCoordinationModel: 'first', baseCoordinationMatrix: placeholder, list: new Map([['first', model]]) };
+    const pending = syncProjectSourceToViewerFromFragments(state, manager as unknown as FragmentsManager);
+    await Promise.resolve(); expect(state.projectSourceToViewerMatrix).toBeNull();
+    resolve([-17.75, -.73, -.025, 1, 0, 0, 0, 1, 0]);
+    expect(await pending).toBe(true);
+    expect(new THREE.Vector3().applyMatrix4(state.projectSourceToViewerMatrix!).toArray()).toEqual([-17.75, -.73, -.025]);
+    expect(manager.baseCoordinationMatrix).toEqual(new THREE.Matrix4());
+  });
   it('waits for the actual first model matrix despite the already-published ID and identity placeholder', async () => {
     const state=new AppState(), {resolve,fragments}=pendingMatrix();
     const session=state.activateProject(1,'same-source');

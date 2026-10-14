@@ -12,7 +12,7 @@
 | 核心语义 | graph/FAM/DEV 解析与持久化 | Worker wall time 与主线程工作 |
 | IFC conversion | 单文件与总转换 wall time | Worker 并发、输入 copy、文件顺序 |
 | Fragments load | `core.load`、回调与更新 | 与转换时延分别列示 |
-| DEV | 读取、唯一模板编译、GLB I/O、placement、scene commit | unique DEV 与 occurrence 数 |
+| DEV | 来源读取/RPC 等待、校验、解析、primitive、Boolean、合并、GLB 导出与 I/O、placement、scene commit | 唯一 DEV 与 occurrence 数、各 LOD 编译与命中数、实际显示与 partial/失败数；Worker elapsed 是墙钟时间 |
 | Spatial | read/deserialize/hydrate 或 rebuild | hit 与 miss 分开 |
 | 交互 | 输入到最终属性/高亮/相机提交 | 选择 ID、加载阶段、动画 settle |
 | 主线程响应 | Long Task、heartbeat 间隔、输入延迟 | 监测窗口、最长值、分位数 |
@@ -21,6 +21,10 @@
 ready 含义以 [架构](architecture.md#配置与加载状态) 为准。`allIfcReady` 和 `fullModelReady` 都须附加载失败、partial/unsupported 数；达到阶段不能解释为全源模型覆盖。
 
 桌面变电优先报告四个产品时刻：`coreSemanticReady`（树/基础属性）、`firstUsableGeometryReady`（首个可浏览站模型）、`devGeometryReady`（设备恢复或编译结束）、`selectedFineReady`（用户选择的唯一精细关联、高亮和属性提交）。同时报告 anchor 到 DEV ready 的等待与执行时间，不用全部 IFC 就绪替代设备可用性。`selectedFineReady` 产品时刻记录首个成功选择；逐请求事件保留 requestId、GlobalId、ExpressId 与 LocalId，过期或歧义选择不产生成功事件。
+
+设备自动 LOD 另外记录 `catalogReady`（空间目录就绪）、`currentViewReady`（当前视图所需档位就绪）和 `baseRepresentationsReady`（全站基础表示或明确的 empty/unsupported 状态已提交）。`allStationReady` 只在所有可渲染设备都达到完整 LOD2 时成立，基础轮廓或 partial 不计为完整几何。状态栏的已准备实例数不等于完整几何数，报告须附部分表示、失败和未知范围数量。
+
+默认基础表示覆盖全部物理 occurrence，包括视野外和范围未确定的设备；LOD1/2 按视图或选择请求。比较新旧管线时同时列出实际工作量，不能把旧管线遗漏设备得到的较短时间当作同覆盖度的性能基线。最多两个 DEV Worker 与串行 IFC 转换并行，来源缓存预算由 Worker 平分；显示或选中的模板受保护，128 MiB 是可淘汰模板预算，不能解释为整个工程的硬内存上限。
 
 每个 Preview 记录来源 bytes、WASM 初始化、OpenModel、metadata 检查、LOD0/LOD1 生成与 scene commit。LOD 生成 wall 包含时间片让权及 commit，不能与 commit 时长相加；完整 Preview wall 还包含源读取、Worker 启动/传输等。首个完整 IFC 的顺序不改变，剩余 Preview 保持顺序，不用文件大小代替实测成本排序。
 
@@ -46,8 +50,9 @@ ready 含义以 [架构](architecture.md#配置与加载状态) 为准。`allIfc
 | Spatial 暖 | 合法 snapshot，记录 hydrate 与 rebuild 是否发生 |
 | Fragments OFF/build/hit | 明确开关和源/依赖匹配，分别运行 |
 | 浏览 LOD 冷/远景 HIT/区域 HIT | 独立派生缓存；远景表示与完整原始几何分列，首次区域 OpenModel 与缓存恢复分列 |
+| 设备 LOD 冷/暖 | 独立派生缓存；按 DEV 分别记录 LOD 0/1/2 的编译与命中、128 MiB 模板淘汰、工作闸等待，并单列峰值内存 |
 
-不清除原始 GIM 和解包源。样本缓存准备不能算正式冷运行。 部分 GLB 命中不能标为完全 warm。默认 Fragments OFF 的结果不能外推为 HIT。 IFC 浏览 LOD 使用独立默认缓存；远景 HIT 不等于近景全部 HIT，30m 区域只证明该相机视锥和范围内的恢复。直接网格实验的几何流耗时不包含 Fragments 属性、关系、序列化、索引和场景提交，不能作为产品冷打开耗时。区域源任务串行及请求后释放 Worker 限制区域并发堆数，仍须独立测量与其他后台管线的峰值内存。
+不清除原始 GIM 和解包源。样本缓存准备不能算正式冷运行。 部分 GLB 命中不能标为完全 warm。默认 Fragments OFF 的结果不能外推为 HIT。 IFC 浏览 LOD 使用独立默认缓存；远景 HIT 不等于近景全部 HIT，30m 区域只证明该相机视锥和范围内的恢复。直接网格实验的几何流耗时不包含 Fragments 属性、关系、序列化、索引和场景提交，不能作为产品冷打开耗时。区域源任务串行及请求后释放 Worker 限制区域并发堆数，仍须独立测量与其他后台管线的峰值内存。设备 LOD 分级只改变表示精度、不改变 occurrence 身份，报告须同时给出各级 LOD 的 occurrence 数与模板命中；模板 LRU 淘汰会触发重新编译，必须与冷编译分开统计，也不能用 LOD 切换生效替代显示正确性验收。
 
 冷转换诊断中的 `ifcColdPipeline` 记录扫描、WASM 初始化、OpenModel、单位读取、importer 与包围盒收集、剩余索引补齐时长。包围盒收集已计入 importer 时长，不能重复相加；源读取、SHA、Worker 启动、派生缓存写入和 Fragments 场景提交由外层 wall time 计入。`parsedModels` 只统计这次转换拥有的模型，不包括后续近景或属性请求。
 

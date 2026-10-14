@@ -43,6 +43,12 @@ vi.mock('../gimOpenCore.js', () => ({
   resolveProjectName: vi.fn((headerName?: string, headerId?: string, fileName?: string) => headerName || headerId || fileName || ''),
 }));
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => false }));
+// This suite exercises the retained full-policy prototype. Product defaults to
+// bim-lod, so debug Preview flags alone must not implicitly select this path.
+vi.mock('../../config/features.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../config/features.js')>(),
+  readIfcOpeningPolicy: () => 'full',
+}));
 vi.mock('../../viewer/ifcPreviewProvider.js', async () => {
   const { Group } = await import('three');
   return { IfcPreviewProvider: class {

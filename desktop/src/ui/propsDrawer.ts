@@ -519,7 +519,7 @@ function buildCbmOverviewAndSource(state: AppState, node: CbmNode): { overview: 
     ['实体类型', node.entityName],
     ['分类名称', node.classifyName],
   ];
-  if (state.deviceUnknownBounds.has(node.path)) ov.push(['设备范围', '范围未确定，选择后加载可支持的几何']);
+  if (state.deviceUnknownBounds.has(node.path)) ov.push(['设备范围', '完整范围未确定，自动加载可支持几何；选择可查看细节']);
   const spatial = state.substationSpatialIndex?.linksByCbmPath.get(node.path);
   const ifcModelId = findDeviceIfcModel(state, node.path);
   // modelId 是 Fragments 的运行时标识（当前为 ifc_<hash>），不能拼成

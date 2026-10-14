@@ -9,6 +9,7 @@ import { disposeSharedXmlModGeometries, disposeSharedXmlModMaterials } from '../
 const scope = self as unknown as { postMessage: (message: unknown, transfer?: Transferable[]) => void };
 const pending = new Map<number, { resolve: (bytes: ArrayBuffer) => void; reject: (error: Error) => void }>();
 const inflight = new Map<string, Promise<ArrayBuffer>>();
+const blobs = new Map<string, File>();
 const bytesCache = new ByteLru<ArrayBuffer>(64 * 1024 * 1024);
 const texts = new ByteLru<string>(32 * 1024 * 1024);
 const documents = new ByteLru<{ text: string; doc: XmlModDocument }>(48 * 1024 * 1024);
@@ -27,12 +28,19 @@ const discovery = { parseDev: assemblyParser(parseDev), parsePhm: assemblyParser
 let readId = 0, running = false;
 const files = new Map<string, File>();
 let stages: Record<string, number> = {};
-let stats = { readRpcMs: 0, decodeMs: 0, validateParseMs: 0, reads: 0, sourceHits: 0, documentHits: 0 };
+let stats = { readRpcMs: 0, blobReadMs: 0, decodeMs: 0, validateParseMs: 0, reads: 0, rpcReads: 0, sourceHits: 0, documentHits: 0 };
 async function read(path: string): Promise<ArrayBuffer> {
   const key = path.toLowerCase(), cached = bytesCache.get(key);
   if (cached) { stats.sourceHits++; return cached; }
   const old = inflight.get(key); if (old) return old;
   const started = performance.now(); stats.reads++;
+  const blob = blobs.get(key);
+  if (blob) {
+    const promise = blob.arrayBuffer().then(bytes => { stats.blobReadMs += performance.now() - started; bytesCache.set(key, bytes, bytes.byteLength); return bytes; });
+    inflight.set(key, promise);
+    try { return await promise; } finally { inflight.delete(key); }
+  }
+  stats.rpcReads++;
   const promise = new Promise<ArrayBuffer>((resolve, reject) => {
     const id = ++readId; pending.set(id, { resolve, reject }); scope.postMessage({ kind: 'read', id, path });
   }).then(bytes => { stats.readRpcMs += performance.now() - started; bytesCache.set(key, bytes, bytes.byteLength); return bytes; });
@@ -58,15 +66,20 @@ self.onmessage = async ({ data }) => {
     if (data.error) task?.reject(new Error(data.error)); else task?.resolve(data.bytes); return;
   }
   if (data.kind === 'init') {
-    for (const [path, size] of data.files as [string, number][]) files.set(path, {
+    const divisor = Math.min(2, Math.max(1, Number(data.cacheDivisor) || 1));
+    bytesCache.budget /= divisor; texts.budget /= divisor; documents.budget /= divisor; assemblies.budget /= divisor;
+    for (const [path, size, blob] of data.files as [string, number, File | null][]) {
+      if (blob instanceof File) blobs.set(path.toLowerCase(), blob);
+      files.set(path, {
       name: path.split('/').pop()!, size, arrayBuffer: () => read(path), text: () => text(path),
-    } as File);
+      } as File);
+    }
     return;
   }
   if (!['compile', 'bounds'].includes(data.kind) || running) return;
   running = true; const started = performance.now();
   stages = {};
-  stats = { readRpcMs: 0, decodeMs: 0, validateParseMs: 0, reads: 0, sourceHits: 0, documentHits: 0 };
+  stats = { readRpcMs: 0, blobReadMs: 0, decodeMs: 0, validateParseMs: 0, reads: 0, rpcReads: 0, sourceHits: 0, documentHits: 0 };
   try {
     const result = data.kind === 'bounds' ? await buildDevSourceBounds(data.path, files, parse, discovery)
       : await serializeDevToGlbDetailed(data.path, files, { parseXml: parse, discovery, lod: data.lod, timings: stages });

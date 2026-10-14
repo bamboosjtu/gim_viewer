@@ -2,6 +2,7 @@
  * IndexedDB works offline in both the desktop WebView and browser. */
 const databaseName = 'gim-ifc-lod-v1';
 let database: Promise<IDBDatabase> | null = null;
+let warnedUnavailable = false;
 function open(): Promise<IDBDatabase> {
   if (!database)
     database = new Promise<IDBDatabase>((resolve, reject) => {
@@ -41,7 +42,7 @@ export async function writeIfcLodArtifact(
       tx.onerror = () => reject(tx.error);
     });
   } catch (error) {
-    console.warn('[IFC LOD] cache write unavailable', error);
+    if (!warnedUnavailable) { warnedUnavailable = true; console.warn('[IFC LOD] cache write unavailable', error); }
   }
 }
 export async function deleteIfcLodArtifact(key: string): Promise<void> {

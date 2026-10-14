@@ -10,6 +10,7 @@ import {
 import { IfcRegionalRuntime } from './ifcRegionalRuntime.js';
 import type { RegionalIndex } from './ifcRegionalData.js';
 import { resetModHighlight } from './highlight.js';
+import { readIfcCoordinateAnchor } from './ifcCoordinateAnchor.js';
 interface FarArtifact {
   bytes: ArrayBuffer;
   index: RegionalIndex;
@@ -107,7 +108,7 @@ export async function loadBimIfc(
     else throw Error('IFC coordinate anchor unavailable');
     return;
   }
-  const base = await baseModel.getCoordinationMatrix();
+  const base = await readIfcCoordinateAnchor(baseModel);
   if (!current()) {
     ctx.fragments.core.disposeModel(runtimeId);
     return;

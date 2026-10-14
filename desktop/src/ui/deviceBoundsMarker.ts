@@ -6,7 +6,7 @@ export function markDeviceBounds(row: HTMLElement, state: AppState, path: string
   marker.dataset.deviceBounds = 'unknown';
   marker.className = 'functional-badge';
   marker.textContent = '范围未确定';
-  marker.title = '此设备的范围尚未确定，选择设备后加载可支持的几何。';
+  marker.title = '此设备的完整范围尚未确定，已自动加载可支持的几何；选择设备可查看细节。';
   row.appendChild(marker);
 }
 export function refreshDeviceBoundsMarkers(state: AppState): void {

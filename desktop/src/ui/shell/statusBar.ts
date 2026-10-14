@@ -47,9 +47,16 @@ export function setStatusRight(text: string): void {
   if (el) el.textContent = text;
 }
 
+/** Independent device progress survives concurrent IFC/loading messages. */
+export function setDeviceStatus(text: string): void {
+  const el = document.getElementById('status-devices');
+  if (el) { el.textContent = text; el.title = text; el.hidden = !text; }
+}
+
 /** 清理工程时恢复共性状态栏，避免线路统计泄漏到下一工程。 */
 export function resetStatusRight(): void {
   setStatusRight(DEFAULT_STATUS_RIGHT);
+  setDeviceStatus('');
   setSelectionStatus(null);
 }
 

@@ -408,7 +408,7 @@ export function renderSubstationFunctionalTree(
       node.path,
       title,
       asset.role === 'component' ? '◇' : asset.role === 'device' ? '◆' : asset.role === 'mixed' ? '◈' : '□',
-      `${ROLE_LABELS[asset.role]} · ${source}${state.deviceUnknownBounds.has(node.path) ? ' · 范围未确定，选择后加载可支持几何' : ''}`,
+      `${ROLE_LABELS[asset.role]} · ${source}${state.deviceUnknownBounds.has(node.path) ? ' · 完整范围未确定，自动加载可支持几何' : ''}`,
       asset.parts.length > 0,
       (childrenEl) => {
         const partsKey = functionalPartsKey(node.path);

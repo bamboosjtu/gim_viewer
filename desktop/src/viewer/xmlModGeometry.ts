@@ -298,7 +298,7 @@ function parseStretchedBodyNormal(raw: string): THREE.Vector3 | null {
  *
  * Array 中的点已经位于 MOD 局部三维坐标，不能先压成 XY 再靠旋转猜回位置。
  * 这里仅把点投影到与 Normal 正交的二维基底以完成凹多边形三角剖分，最终顶点仍
- * 直接使用原始三维点，并沿归一化 Normal 拉伸 L。
+ * 直接使用原始三维点，并加上完整的有符号 Normal 位移；L 仅保留来源。
  */
 function createStretchedBodyGeometry(array: string, normalRaw: string, lengthRaw: number): THREE.BufferGeometry | null {
   let points = parseStretchedBodyPoints(array);

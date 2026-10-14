@@ -72,4 +72,4 @@ npm run tauri:dev
 - [正确性验证](docs/validation.md)
 - [性能测量](docs/performance.md)
 - [移动端状态](docs/mobile-spec.md)
-- [未决事项与待开发功能](docs/open-issues.md)
+- [未决事项与代码缺陷](docs/open-issues.md)

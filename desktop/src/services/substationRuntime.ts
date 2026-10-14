@@ -915,6 +915,18 @@ export async function loadAllIfcFiles(
   const { ctx, modelCallbacks } = runtime;
   endEngine();
 
+  // DEV templates are local, independent of the first IFC's coordinate anchor.
+  // Start their bounded worker pool now; the LOD owner delays scene commit.
+  if (state.currentCbmTree && typeof Worker !== 'undefined') {
+    const { startDeviceLod } = await import('./devLodRuntime.js');
+    if (!isCurrent()) return;
+    void startDeviceLod(state, ctx, session, text => {
+      if (isCurrent()) void import('../ui/shell/statusBar.js').then(({ setDeviceStatus }) => {
+        if (isCurrent()) setDeviceStatus(text);
+      });
+    }).catch(error => { if (isCurrent()) console.warn('[DEV startup]', error); });
+  }
+
   showLoading('正在加载 IFC 模型...');
   const failed: Array<{ name: string; message: string }> = [];
   let interactiveInitialized = false;
@@ -1020,8 +1032,7 @@ export async function loadAllIfcFiles(
     startPostInteractiveTask('缓存持久化', options.startCachePersistence, options.scheduleCachePersistence);
     if (state.projectSourceToViewerMatrix) {
       background.markCoordinateAnchorReady();
-      // Source metadata can start at the anchor. DEV triangulation separately
-      // waits for the current IFC atomic task through geometryWorkGate.
+      state.deviceLodRuntime?.notifyCoordinateAnchor?.();
       enqueueDevGeometry('coordinateAnchorReady');
     }
   };
@@ -1031,7 +1042,7 @@ export async function loadAllIfcFiles(
     devGeometryQueued = background.enqueue({
       task: 'devGeometry',
       priority: 2,
-      heavy: false, // Catalog registration is light; DEV compilation owns the IFC exclusion gate.
+      heavy: false, // Reuses the already running, bounded DEV pool.
       startAfter,
       run: async () => {
         state.geometryLoadToken++;
@@ -1443,8 +1454,13 @@ async function autoLoadModStlPostIfc(
     if (resourceCtx && state.currentCbmTree && typeof Worker !== 'undefined') {
       const { startDeviceLod } = await import('./devLodRuntime.js');
       if (!state.isCurrentSession(session)) return;
+      if (!state.currentIfcEntries.length && !state.projectSourceToViewerMatrix) {
+        const THREE = await import('three');
+        if (!state.isCurrentSession(session)) return;
+        state.projectSourceToViewerMatrix = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+      }
       await startDeviceLod(state, resourceCtx, session, text => {
-        if (state.isCurrentSession(session)) void import('../ui/shell/statusBar.js').then(({setStatus}) => { if (state.isCurrentSession(session)) setStatus(text, text.includes('准备') ? 'loading' : 'ok'); });
+        if (state.isCurrentSession(session)) void import('../ui/shell/statusBar.js').then(({setDeviceStatus}) => { if (state.isCurrentSession(session)) setDeviceStatus(text); });
       });
       if (!state.isCurrentSession(session)) return;
       finishModStl(undefined, { path: 'device-lod-directory', onDemand: true });

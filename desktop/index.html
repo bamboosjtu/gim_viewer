@@ -316,6 +316,7 @@
       .status-dot.loading { background: var(--warning); }
       .status-dot.error { background: var(--danger); }
       #status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #status-devices { max-width: 48vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a7d6e8; }
       .status-mid { display: flex; gap: 16px; color: var(--text-3); }
       .status-right { padding-right: 14px; text-align: right; color: #b9c6d2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     </style>
@@ -414,7 +415,7 @@
       <!-- 底部状态栏 -->
       <footer id="status-bar">
         <div class="status-left"><span id="status-dot" class="status-dot"></span><span id="status-text">就绪</span></div>
-        <div class="status-mid"><span id="status-selection">未选中</span></div>
+        <div class="status-mid"><span id="status-devices" hidden></span><span id="status-selection">未选中</span></div>
         <div class="status-right" id="status-right">GIM BIM 浏览器</div>
       </footer>
     </div>

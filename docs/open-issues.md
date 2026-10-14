@@ -1,88 +1,40 @@
 # 未决事项
 
-本文件是遗留问题、待验证事项、待决策事项和待开发功能的唯一清单。 只维护未关闭项，不保存开发流水或历史版本。实现与格式正文说明当前行为，本文件维护行动、依赖和完成条件。关闭后删除条目，并更新相应正文。
+本文件只维护**代码缺陷、实现风险和待决策的技术项**。
+样本与格式的进一步研究、设备验收、外部业务候选不在本文件维护。
+只维护未关闭项，不保存开发流水或历史版本。实现与格式正文说明当前行为，本文件维护行动、依赖和完成条件。关闭后删除条目，并更新相应正文。
 
-优先级： P0 为正确性或核心流程阻断，P1 为主要效率、可维护性或拟交付核心需求，P2 为增强或需要场景确认的候选。状态分为待核验、待开发、待决策；列入不代表已排期。同一问题只使用一个 ID，新增证据原地更新，不追加阶段叙事。
+优先级：
+P0 为正确性或核心流程阻断，P1 为主要效率、可维护性或拟交付核心需求，P2 为增强或需要场景确认的候选。状态分为待核验、待开发、待决策；列入不代表已排期。同一问题只使用一个 ID，新增证据原地更新，不追加阶段叙事。
 
-## 桌面性能与几何能力
+## 桌面实现问题
 
 | ID | 优先级/状态 | 当前问题 | 行动与完成条件 |
 |---|---|---|---|
 | D-01 | P1 / 待核验 | 变电原始冷路径完整加载及连续响应没有达标证据，DEV 编译仍有长尾风险 | 固定四包空缓存，分别测 IFC conversion、core.load、模板编译、placement/scene commit；完整模型 ≤600s，interactive 后最长 heartbeat 间隔 ≤2s、输入延迟 ≤1s；同时通过正确性门禁 |
-| D-02 | P1 / 待开发 | 几何状态缺少一致的精确来源原因 | 区分 empty-device-xml、没有自有几何的装配节点、unsupported、malformed 和失败；冷/暖原因可追踪和检索，不能伪造几何 |
-| D-03 | P1 / 待决策 | Fragments 缓存默认关闭，启用策略尚未接受 | 优先定位 substation04 heap 驻留，再跑四包 OFF/build/HIT；数量、GUID、坐标、选择等价，缺失/截断/版本不匹配回退；通过后再决定默认策略 |
+| D-02 | P1 / 待开发 | 几何诊断未把 IR 的细粒度来源原因贯通到诊断存储 | `geometryDiagnostics` 已定义 empty-device-xml、assembly-node-without-own-geometry、phm-no-solidmodel、dev-no-solidmodel、parser-unsupported、missing-dependency、source-invalid、parse-failed、unknown，IR 侧 `NoneReason` 也区分这些情况；但生产代码目前只设置 missing-dependency、parse-failed、parser-unsupported、source-invalid。把 IR 原因映射进诊断，使冷/暖/raw 三路径一致可检索，不能伪造几何 |
+| D-03 | P1 / 待决策 | 完整 Fragments 缓存当前不可达 | `ifcEntryLoader` 在 `bim-lod` 下提前返回并加载浏览 LOD，`canUseCache` 又要求 `openingPolicy === 'full'`，而默认策略恒为 `bim-lod`；调试键开启也已无效。先决定完整缓存与浏览 LOD 的关系，再谈四包 OFF/build/HIT 的数量、GUID、坐标、选择等价与缺失/截断/版本不匹配回退 |
 | D-04 | P1 / 待核验 | 杆塔 HNum/MOD 按需预览有延迟风险 | 拆分 read/parse/render，记录延迟和输入规模；必要时有界缓存或任务隔离；树、地图与快速切换不受阻 |
 | D-05 | P2 / 待核验 | 线路 warm 内存驻留归因不完整 | 独立进程分别测 JS heap、WebView/Worker/Rust RSS，切换与关闭后观察回收；据证据决定属性 lazy load |
 | D-06 | P2 / 待核验 | line03 原生 7z 冷解码需单独评估 | 拆分 decoder、条目写出和调度，不混入 parser 指标；改进须保持配额、路径安全、完整性和源身份 |
-| D-07 | P1 / 待决策 | 导线视觉示意的产品语义和工程公式缺少确认 | 核验 KVALUE、单位、斜档距、MATRIX0 和挂点；决定维持示意、默认关闭或工程模式；文案/开关/算法/异常处理/审计一致，hit-test 使用同一曲线 |
-| D-08 | P1 / 待开发 | XML primitive 覆盖有缺口，部分仅解析或近似 | 对未渲染类型按样本频次和可达对象排优先级；补齐字段语义与真实参考形状；保留 partial/unsupported，验证缓存及变换 |
-| D-09 | P2 / 待决策 | InstancedMesh、几何任务扩展、Compact Line Runtime Cache 等候选缺少收益依据 | 先定位现行模板共享、内存与加载瓶颈；有场景和测量收益再设计，保持 occurrence 和选择身份 |
-| D-10 | P2 / 待决策 | PMTiles 离线底图及独立线路三维没有已批准交付范围 | 确认用户场景、数据许可、空间/存储预算与验收目标后再启动；不把关闭开关算成实现 |
+| D-08 | P1 / 待开发 | XML primitive 覆盖有缺口，部分仅解析或近似 | 对未渲染类型按样本频次和可达对象排优先级；补齐字段语义与真实参考形状；保留 partial/unsupported，验证缓存及变换。当前未生成几何的类型见 [XML MOD](schema/substation-mod.md) |
 | D-11 | P1 / 待决策 | substation02 两个摄像头 DEV 的源 MOD Entity 矩阵含约 10¹⁴ mm 平移，34 个 occurrence 以 source-invalid 确定性缓存并显式拒绝；其他局部实体是否保留未决 | 保持源值及失败来源可追溯；如引入局部保留，必须标记 partial、证明有效子集并复核冷暖与选择，不计为完整恢复 |
-| D-13 | P2 / 待核验 | 变电来源文件 validation 保留逐文件 reparse 检查，首轮 OS/文件打开波动仍可显著增加耗时 | 扩充独立进程与部署环境验证；目录安全检查去重须先证明验证期间变化 fail closed，不以降低安全检查换取提速 |
-| D-14 | P2 / 待开发 | transient I/O/写盘失败阻止完整 geometry manifest/version 发布，下一次打开可能重新编译整批 DEV；source-invalid 确定性拒绝不属于该失败 | 测量失败后的实际恢复成本，再决定是否复用未完整发布的确定性子集；保留 retry，不能把临时失败持久化为 source-invalid |
-| D-15 | P1 / 实验待验收 | Remaining Preview 原顺序与 conservative fast-lane 已有独立 02 桌面阶段对照：轻量 entry 与可表达对象覆盖提前，单 Preview Worker；原顺序受 120 秒窗口删失 | fast-lane 默认关闭；保留首轮 Native 文件 open 长尾及诊断等待失败。补更多有效配对及 01/03/04 成本/交互验收，不用 entry count 或单轮总时间替代对象覆盖、Fine 等待与峰值内存 |
-| D-16 | P0 / 默认策略待验收 | 02 single-pass early semantic 已通过功能 smoke；本轮 Native eligibility 允许 01/02/04，03 因 checkpoint 后仅余 732 bytes 正常 fallback。02 三次完整有效 cold 观察 core 约 31.5–32.2 秒、first 约 34.7–35.3 秒；当前默认关闭 | 01 未在既定 90 秒内完成正式发布观察；早关闭后 v26 receipt 未发布、重开继续 cold，但 MSIX 两种 root spelling 的独立文件/副本清理证据仍需闭环。保留 output/cold-semantic-research 及 output/substation-product-phase2 的历史失败、诊断超时与 HMR 干扰 run；不扩大超时或用结构有效宣称默认门禁通过 |
 | D-12 | P1 / 待核验 | 原生语义发布与 DEV 未完成时正常关闭后的独立暖启动已通过局部验收；WASM 回退及持久化异常的真实桌面闭环未执行 | 在限定预算内核验回退源写入、缺文件、截断索引、写入失败和 A→B；语义 HIT 与部分 DEV 缓存分开，不放宽超时 |
-| D-17 | P1 / 产品局部验收 | IFC 浏览 LOD 已成为默认：远景省略关系开洞及紧固件；自动近景按视域/30m 恢复区域构件，识别的小孔省略，未知开洞保留；独立派生缓存已接入 | 仅单钢结构浏览器路径具有验证证据；需补 Tauri 真实选择/关闭、跨样本、树到近景高亮、全局重任务资源竞争及缓存容量管理。首次远景转换和未缓存近景仍有开销，不能认定全站秒开或全部小孔分类完成 |
+| D-13 | P2 / 待核验 | 变电来源文件 validation 保留逐文件 reparse 检查，首轮 OS/文件打开波动仍可显著增加耗时 | 扩充独立进程与部署环境验证；目录安全检查去重须先证明验证期间变化 fail closed，不以降低安全检查换取提速 |
+| D-14 | P2 / 待开发 | 遗留全量 GLB 回退路径仍依赖完整 manifest/version，transient I/O/写盘失败后的整批恢复成本尚未收敛 | 默认设备 LOD 已逐模板原子提交并复用局部缓存；核对遗留回退路径的适用范围及恢复成本，保留 retry，不能把临时失败持久化为 source-invalid |
+| D-15 | P1 / 实验待验收 | Remaining Preview 原顺序与 conservative fast-lane 的 02 阶段对照产物已不在 `output/` 中，无法就地复核 | fast-lane 默认关闭；重新取得有效配对证据，补 01/03/04 成本/交互验收，不用 entry count 或单轮总时间替代对象覆盖、Fine 等待与峰值内存 |
+| D-16 | P0 / 默认策略待验收 | 02 single-pass early semantic 已通过功能 smoke；Native eligibility 允许 01/02/04，03 因 checkpoint 后仅余 732 bytes 正常 fallback。02 三次完整有效 cold 观察 core 约 31.5–32.2 秒、first 约 34.7–35.3 秒；当前默认关闭 | 01 未在既定 90 秒内完成正式发布观察；早关闭后 v26 receipt 未发布、重开继续 cold，MSIX 两种 root spelling 的独立文件/副本清理证据仍需闭环。不扩大超时，也不用结构有效宣称默认门禁通过 |
+| D-17 | P1 / 待开发 | IFC 浏览 LOD 的首次远景转换、未缓存近景仍有开销，区域派生缓存尚缺容量管理，未知开洞继续保留原求值 | 维持自动视域/30m 恢复与已识别小孔策略；补齐真实树到区域细节高亮、全局重任务资源竞争和缓存容量管理，不把远景缓存命中当成全站细节完成 |
 | D-18 | P1 / 启动待核验 | 当前本机 Portable 启动检查确认了进程和 Tauri 窗口创建，未取得 WebView 页面就绪证据；构建和 ZIP 完整性校验已通过 | 复核普通交互启动、Fixed Runtime 环境和页面就绪；启动方式受控且页面可交互后再判定桌面启动通过，不将检查进程创建等同于软件可用 |
+| D-21 | P1 / 待开发 | 设备细节缓存未命中时，磁盘惰性来源仍按文件经主线程原生 RPC 读取，近景首次补充有长尾风险；全站基础表示的内存驻留也偏高 | 保留当前两 Worker 并发与输出背压，依据请求来源链评估有界批量读取和模板/元数据驻留；保持按需范围、原生安全校验与旧表示连续显示，单列缓存未命中细节、阶段墙钟和连续响应，不能用减少设备覆盖换取提速 |
+| D-22 | P1 / 待定性 | `npm test` 仍有 2 个并发超时失败：`selectionInteraction.test.ts` 的“nested parent → child selections share the physical root load while the child owns the final commit”与“A slow geometry remains a resource but cannot reclaim B camera or material highlight”都以 `Test timed out in 5000ms` 结束；同批次另有 2 个失败来自 Rust 测试无法创建临时 SQLite 库，属环境因素，不计入本条 | 在固定环境复跑并定位任务残留与资源竞争；保留选择提交权与相机断言，不移除失败测试或无限增大 timeout。修复后 `npm test` 除环境因素外应无失败 |
 
 现行模板共享和 IFC/Spatial Worker 已存在，不作为待开发项重复立项。
 
-IFC Preview Provider 保留为默认关闭的研究原型（见[架构](architecture.md#实验性-ifc-preview-provider桌面变电)），产品不提供 Preview 入口。旧原型的完整工程验收、预览缓存、MappedItem/BRep 预览主体、带孔/曲线轮廓及 MapConversion 仍未完成；默认产品采用独立的 IFC 浏览 LOD，不沿用这些原型的完成结论。
+IFC Preview Provider 保留为默认关闭的研究原型（见[架构](architecture.md#实验性-ifc-preview-provider桌面变电)），产品不提供 Preview 入口。因为默认策略是 `bim-lod`，而 Preview-First / Deferred-Fine 与 Preview Provider 挂载都要求 `openingPolicy === 'full'`，该原型在当前默认路径下不可达；调试键只对完整路径生效。旧原型的完整工程验收、预览缓存、MappedItem/BRep 预览主体、带孔/曲线轮廓及 MapConversion 仍未完成；默认产品采用独立的 IFC 浏览 LOD，不沿用这些原型的完成结论。
 
 大型 IFC 几何实验未关闭的具体问题：完整 02 原路径在 120 秒窗口内尚未提交钢结构 LOD0；自适应候选虽提交预览，实际鼠标目标板件 ExpressId 66438 被另一 MEMBER 566436 遮挡/命中，未完成整站单对象精化验收。不能据此认定 identity 映射错误，也没有足够证据将原因归结为单一坐标或相机问题。视距候选单轮最慢不可中断轮廓构建约 54.4 ms，超过 2 ms 软预算；降低三角面并未同时降低 draw calls。对象精化首请求仍须读入并 OpenModel 整个源文件，局部实验约 16 秒、WASM heap 容量约 808 MB，不能宣称任意对象均可即时精化。结果保留在 `output/ifc-geometry-breakthrough/`，失败不提高超时重跑。跨表示位置与复杂开洞正确性仍需逐对象证据，不使用拟合 T。
 
-小 IFC 的真实 Tauri/WebView 替换已有局部验收证据：独立验收包封装两个未修改的真实 IFC，目标文件 575,414 bytes、SHA-256 `3cfe2f6927511badc4b5ae112a71e994404b83139102d0ea63c4b2be8f7f927d`；语义冷/暖路径均保持同一 GlobalId/ExpressId，LOD0/LOD1/LOD2 包围盒中心误差约 4.21 微米，Preview 退出场景，精细高亮与属性沿用原 SelectionRequest。此证据只覆盖该对象和输入，不证明全站跨表示等价。现有 debug-only 原生路径授权及 CDP 可用于桌面验收，无需改变生产文件权限。
+小 IFC 的真实 Tauri/WebView 替换已有局部验收证据：独立验收包封装两个未修改的真实 IFC，目标文件 575,414 bytes、SHA-256 `3cfe2f6927511badc4b5ae112a71e994404b83139102d0ea63c4b2be8f7f927d`；语义冷/暖路径均保持同一 GlobalId/ExpressId，LOD0/LOD1/LOD2 包围盒中心误差约 4.21 微米，Preview 退出场景，精细高亮与属性沿用原 SelectionRequest。此证据只覆盖该对象和输入，不证明全站跨表示等价。
 
-substation02 的 Preview/Fine 协作已有局部桌面证据，DEV 单工作单元仍有不可中断长尾，循环间检查点不能覆盖内部序列化。原生语义持久化已独立于该重任务，暖启动验证不代表完整几何 HIT；缺失或未完成的几何继续按原回退路径处理。连续输入响应观测不覆盖整段预览生成与所有后台工作；进程内存驻留仍较高，完整转换 Worker heap 尚无精确公开测量，未完成与旧实现等条件的内存比较。两个实验开关仍默认关闭。 性能指标见 [性能](performance.md)。
-
-## 格式与样本证据
-
-| ID | 优先级/状态 | 待确认内容 | 完成条件 |
-|---|---|---|---|
-| S-01 | P1 / 待核验 | 头部非 magic 元数据的字段偏移与语义 | 十包按字节分段记录匿名值类型，增加不同长度/ZIP 包；区分样本布局与通用规则，不依赖固定偏移 |
-| S-02 | P1 / 待核验 | 原线路长度与设计长度、物理线路长度、回路里程及几何估算的关系 | 六包建立 F2/FAM 来源和测量口径，处理共享塔与多线并行；明确 CRS、距离方法、缺数据及误差 |
-| S-03 | P1 / 待核验 | GL 的连接字段和独立空间含义 | 核验 ConnectGuid/Direction/ConnectionRules 等与 DEV 的关系；没有证据不自动并入 SOLIDMODEL 主链 |
-| S-04 | P1 / 待核验 | STD SVG 内容下的设备/逻辑关联覆盖 | 对根内容分型、gridId 及图纸实体交叉校验；不能根据扩展名生成虚构电气层级 |
-| S-05 | P2 / 待核验 | 文本 MOD 数值词法、Bolt 多段值及未知 R/KV 记录的覆盖边界 | 正负数、科学计数法、异常 token、2/6 分号段等有明确保留或诊断；不臆测参数工程含义 |
-| S-06 | P2 / 待核验 | 研究脚本内固定头布局、扫描阈值和历史分类口径与现行 parser 不完全一致 | 逐项核验再修脚本；保留原始资产，输出标注 SHA/算法/阈值，不将脚本结果直接认定为格式标准 |
-| S-07 | P2 / 待核验 | 四变电/六线路之外的兼容覆盖和 ZIP 分支样本不足 | 增加匿名、可追溯新样本，检查大小写、缺文件、根类型和资源限额；覆盖结果进入样本台账 |
-
-格式结论只覆盖 [在册样本](schema/sample-corpus.md)，原始研究材料不自动获得标准地位。
-
-## 移动端验收与遗留问题
-
-当前实现见 [移动端规格](mobile-spec.md)。本处仅保留未完成验收和扩展，已落地功能不重复立项。
-
-| ID | 优先级/状态 | 证据缺口 | 行动与完成条件 |
-|---|---|---|---|
-| M-01 | P1 / 待核验 | API 36 六包 SAF 已通过，完整导入错误路径和云文件提供器仍缺覆盖 | 设备取消/重试、拒绝访问、空间不足、损坏/变电容器、半成品恢复和完整删除；云文件提供器输入不能作为普通路径 |
-| M-06 | P1 / 待核验 | API 36 精确权限、模拟位置、受控超时/系统关闭/后台取消与 API 29 权限拒绝已通过，真实 GNSS 与其他权限组合仍缺证据 | 实机 GNSS、近似/再次授权和设备差异；目标切换距离一致，精度时间可见，不保存位置或后台跟踪 |
-| M-07 | P1 / 待核验 | API 29 手机及 API 36 Pixel Fold 的窄屏竖屏限制、展开旋转、沉浸概览与状态保持已通过，不能代替 X Fold5 | 真机外屏固定竖屏、展开解除方向限制、安全区和折叠连续交互；X Fold5 的普通 edge-to-edge 与地图沉浸、对象概览点选、状态栏/Dock 暂时唤回、手势/三键导航分别核验；同一工程的相机、选择、树展开和详情页签保持 |
-| M-08 | P1 / 待核验 | native 受控底图回退与存储损坏单测已通过，仍需完整设备异常与隐私验收 | 检查导入/定位/地图/失败路径，不上传 GIM/GPS，不打印 key；设备损坏/截断/版本不匹配缓存重建或明确失败，拒绝源身份不符 |
-| M-09 | P1 / 待核验 | 指定真机性能与最终发布 Gate 未完成 | X Fold5 的 line02 冷导入 ≤10s、合法缓存打开 ≤3s；记录复制/SHA、解压、Worker、SQLite、首个可交互 Canvas、主线程与内存；六包用户闭环、签名和发布资产一起验收 |
-
-冷计时从 SAF 返回开始，包含复制与 SHA；不包含用户停留在选择器中的时间或网络瓦片等待。 warm 从点击已有工程开始，终点同为树与工程覆盖层可交互。浏览器解析时间和 Windows native 时间不作为真机达标证据。line06 存在 HNum 来源，不能以“无 HNum”作为该包的默认结论； 无形状/未知格式降级需要单独构造或选取对应对象验证。
-
-## 外部业务与产品候选
-
-| ID | 优先级/状态 | 依赖 | 需求与完成条件 |
-|---|---|---|---|
-| P-01 | P1 / 待开发 | 当前仅有中立 API 与 Host 骨架 | 完成首个真实 provider 与用户启用/权限范围，接入中立 badge/Inspector/Finding；插件失败不影响本地 Viewer |
-| P-02 | P1 / 待开发 | P-01 | CSV/Excel 杆塔坐标插件，导入→字段/对象匹配→坐标转换→阈值核验→异常定位→导出；明确未匹配、歧义和超阈值对象，不能只显示两组点 |
-| P-03 | P1 / 待开发 | P-01、对象匹配与实际企业需求 | 私有 DCP Adapter/SDK 输出中立 ProgressObservation，Core 不依赖 DCP 表/字段/凭据；真实线路关联并表达施工进度，离线 Viewer 保持可用 |
-| P-04 | P2 / 待决策 | P-03 实际用户验证 | 计划/实际偏差、滞后、长时间无进展、连续区段断点、数据缺失、无法映射和状态冲突；规则有来源、阈值、对象和可核验 Finding |
-| P-05 | P2 / 待决策 | 真实现场需求、P-01 | 站班会/FieldActivity、项目部/ProjectFacility 等候选；确认对象/空间关联和现场价值，再定义地图事件或标记及隐私范围 |
-
-插件只能输出中立 ExternalProjectData，由 Core 转为 MapLayer/ObjectBadge/InspectorSection/Finding，不能取得 MapLibre 实例任意修改。capability 可表达 progress、field-activity、project-facility、coordinate-observation；能力边界以实际首个闭环决定，不预建完整插件生态。
-
-移动端 Plugin Host 属于 P-01 的同一需求，避免另一套数据源 API。
-
-## 设备预处理与 substation01 显示回归
-
-冷路径已接入单个 DEV Worker，最多预取两个未消费的设备结果，已完成结果达到 32 MiB 后停止继续预取；单个设备本身可以超过该阈值。IFC 加载期间生成模板，首个 IFC 坐标基准就绪后允许渐进放置。工程切换等待旧 IFC 释放并取消设备 Worker。以上改动仍需桌面冷暖启动实测，尚不能宣称间隔缩短或位置漂移完全解决。
-
-substation01 的 4,179 份 MOD 已对照 DOM 与 Worker 解析结果，全部一致，实际出现 14 类已识别 primitive。当前仍不生成 PorcelainBushing（1,506）、TerminalBlock（201）、ChannelSteel（129）、Table（109）、RectangularFixedPlate（18）、OffsetRectangularTable（15）、RectangularRing（1）的几何。需要独立确认局部轴、原点及参数语义后实现，并验证 IFC 与设备装配对齐；不能把这些来源误报为文件缺失，也不能以占位形状宣称完整渲染。
-
-打开初期的“核对本地工程记录”仅登记或查询单条工程身份，原提示“写入本地项目索引”容易误导。已增加 path 索引精确查询，历史路径兼容回退和数据库锁等待仍可能耗时，需要实际诊断计时区分。
+substation02 的 Preview/Fine 协作已有局部桌面证据，DEV 单工作单元仍有不可中断长尾，循环间检查点不能覆盖内部序列化。原生语义持久化已独立于该重任务，暖启动验证不代表完整几何 HIT；缺失或未完成的几何继续按原回退路径处理。连续输入响应观测不覆盖整段预览生成与所有后台工作；进程内存驻留仍较高，完整转换 Worker heap 尚无精确公开测量。 性能指标见 [性能](performance.md)。

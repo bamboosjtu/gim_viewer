@@ -26,6 +26,7 @@ import type * as OBC from '@thatopen/components';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
+import { readIfcCoordinateAnchor } from '../viewer/ifcCoordinateAnchor.js';
 
 export interface ProjectCoordinateAlignment {
   sourceToViewer: THREE.Matrix4;
@@ -131,7 +132,7 @@ export async function syncProjectSourceToViewerFromFragments(
   // Its public baseCoordinationMatrix can still be the initial identity here,
   // even with a non-empty model ID. Read the same first model's actual matrix;
   // a resolved identity is valid and must not be confused with a placeholder.
-  const base = await baseModel.getCoordinationMatrix();
+  const base = await readIfcCoordinateAnchor(baseModel);
   if (!isCurrent() || fragments.baseCoordinationModel !== baseModelId
     || fragments.list.get(baseModelId) !== baseModel || state.projectSourceToViewerMatrix) return false;
 
@@ -140,6 +141,7 @@ export async function syncProjectSourceToViewerFromFragments(
   const combined = base.clone().multiply(Z_UP_TO_Y_UP);
   if (!isCurrent()) return false;
   state.projectSourceToViewerMatrix = combined;
+  state.deviceLodRuntime?.notifyCoordinateAnchor?.();
 
   debugLog(DEBUG_IFC_LOAD, '[CoordAlign] 已从 Fragments baseCoordinationMatrix 同步并组合 Z-up→Y-up 旋转', {
     baseCoordinationModel: fragments.baseCoordinationModel,

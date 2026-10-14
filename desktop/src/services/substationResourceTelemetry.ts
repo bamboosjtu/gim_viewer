@@ -173,6 +173,7 @@ function collectTemplateCounts(state: AppState): {
   sharedMaterialCount: number | null;
   sharedTextureCount: number | null;
 } {
+  if (state.deviceLodRuntime?.resourceCounts) return state.deviceLodRuntime.resourceCounts();
   const pool = state.modRootGroup?.userData?.[DEV_TEMPLATE_POOL_KEY] as TemplatePoolLike | undefined;
   if (!pool || typeof pool !== 'object') {
     return {

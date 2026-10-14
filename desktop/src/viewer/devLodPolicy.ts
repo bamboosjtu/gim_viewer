@@ -2,7 +2,7 @@ import * as THREE from 'three';
 export type DeviceLod = 0 | 1 | 2;
 export function chooseDeviceLod(previous: DeviceLod, visible: boolean, distance: number, pixels: number, selected = false): DeviceLod | null {
   if (selected) return 2;
-  if (!visible) return null;
+  if (!visible) return 0; // Every physical occurrence has an automatic base representation.
   if (previous === 2 && distance <= 35 && pixels >= 90) return 2;
   if (distance <= 30 && pixels >= 120) return 2;
   return pixels >= (previous > 0 ? 30 : 40) ? 1 : 0;

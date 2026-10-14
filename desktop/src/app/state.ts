@@ -49,7 +49,9 @@ export interface SelectionGeometryState {
 /** 应用全局状态（由 bootstrap.ts 创建唯一实例，通过参数注入各模块） */
 export class AppState {
   deviceUnknownBounds = new Set<string>();
-  deviceLodRuntime: { select(rootOccurrence: string): Promise<THREE.Group[]>; release(): void; clearSelection(): void; diagnostics: Record<string, unknown> } | null = null;
+  deviceLodRuntime: { select(rootOccurrence: string): Promise<THREE.Group[]>; release(): void; clearSelection(): void; notifyCoordinateAnchor?(): void;
+    resourceCounts?(): { templateCount: number; templateParseCount: number; sharedGeometryCount: number; sharedMaterialCount: number; sharedTextureCount: number };
+    diagnostics: Record<string, unknown> } | null = null;
   selectionRequest: SelectionRequest | null = null;
   selectionGeometry: SelectionGeometryState | null = null;
   selectionMessage = '';
