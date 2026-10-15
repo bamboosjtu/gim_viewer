@@ -47,6 +47,9 @@ export interface DevGlbSerializationDiagnostics {
   unsupportedSourceCount: number;
   partialSourceCount: number;
   unsupportedPrimitiveTypeCounts: Record<string, number>;
+  failedVisibleRootCount?: number;
+  failedVisibleRoots?: { modPath: string; rootId: number; dependencies: { id: number; reason: string }[] }[];
+  simplifiedBooleans?: number;
 }
 
 export interface DevGlbSerializationResult {
@@ -191,6 +194,11 @@ export async function serializeDevToGlbDetailed(
       const xmlDiagnostics = readXmlDiagnostics(group);
       if (xmlDiagnostics) {
         addUnsupportedCounts(xmlDiagnostics.unsupportedPrimitiveTypeCounts);
+        diagnostics.failedVisibleRootCount = (diagnostics.failedVisibleRootCount ?? 0) + (xmlDiagnostics.failedVisibleRoots?.length ?? 0);
+        diagnostics.failedVisibleRoots ??= [];
+        for (const failure of xmlDiagnostics.failedVisibleRoots ?? []) if (diagnostics.failedVisibleRoots.length < 64)
+          diagnostics.failedVisibleRoots.push({ modPath: geo.modPath, ...failure });
+        diagnostics.simplifiedBooleans = (diagnostics.simplifiedBooleans ?? 0) + (xmlDiagnostics.simplifiedBooleans ?? 0);
       }
       // EMPTY_DEVICE_XML and MODs whose parsed entities have no supported
       // renderable primitive are deterministic empty geometry. Do not add an

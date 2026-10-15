@@ -920,9 +920,9 @@ export async function loadAllIfcFiles(
   if (state.currentCbmTree && typeof Worker !== 'undefined') {
     const { startDeviceLod } = await import('./devLodRuntime.js');
     if (!isCurrent()) return;
-    void startDeviceLod(state, ctx, session, text => {
+    void startDeviceLod(state, ctx, session, (text, detail) => {
       if (isCurrent()) void import('../ui/shell/statusBar.js').then(({ setDeviceStatus }) => {
-        if (isCurrent()) setDeviceStatus(text);
+        if (isCurrent()) setDeviceStatus(text, detail);
       });
     }).catch(error => { if (isCurrent()) console.warn('[DEV startup]', error); });
   }
@@ -1459,8 +1459,8 @@ async function autoLoadModStlPostIfc(
         if (!state.isCurrentSession(session)) return;
         state.projectSourceToViewerMatrix = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
       }
-      await startDeviceLod(state, resourceCtx, session, text => {
-        if (state.isCurrentSession(session)) void import('../ui/shell/statusBar.js').then(({setDeviceStatus}) => { if (state.isCurrentSession(session)) setDeviceStatus(text); });
+      await startDeviceLod(state, resourceCtx, session, (text, detail) => {
+        if (state.isCurrentSession(session)) void import('../ui/shell/statusBar.js').then(({setDeviceStatus}) => { if (state.isCurrentSession(session)) setDeviceStatus(text, detail); });
       });
       if (!state.isCurrentSession(session)) return;
       finishModStl(undefined, { path: 'device-lod-directory', onDemand: true });

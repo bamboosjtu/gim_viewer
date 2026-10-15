@@ -197,7 +197,7 @@ describe('primitiveToGeometry', () => {
       }, TEST_MOD_PATH);
       expect(g).toBeInstanceOf(THREE.BufferGeometry);
       g!.computeBoundingBox();
-      expect(g!.boundingBox!.max.toArray()).toEqual([20, 10, 1]);
+      expect(g!.boundingBox!.max.toArray()).toEqual([20, 10, 50]);
     });
 
     it('StretchedBody 无有效法向或不足三个点时跳过', () => {
@@ -223,15 +223,17 @@ describe('primitiveToGeometry', () => {
       warnSpy.mockRestore();
     });
 
-    it('OffsetRectangularTable → 跳过 + warn', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('OffsetRectangularTable rejects unknown fields and constructs the explicit seven-field solid', () => {
       const g = primitiveToGeometry({
         type: 'OffsetRectangularTable',
         raw: { H: '50', L: '200' },
       }, TEST_MOD_PATH);
       expect(g).toBeNull();
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      warnSpy.mockRestore();
+      const solid = primitiveToGeometry({ type: 'OffsetRectangularTable',
+        raw: { TL: '26', TW: '134', LL: '36', LW: '144', H: '5', XOFF: '0', YOFF: '0' } })!;
+      solid.computeBoundingBox();
+      expect(solid.boundingBox!.min.toArray()).toEqual([-18, -72, 0]);
+      expect(solid.boundingBox!.max.toArray()).toEqual([18, 72, 5]);
     });
 
     it('RectangularRing → 跳过 + warn', () => {
@@ -625,6 +627,69 @@ describe('Boolean CSG（P3-1，three-bvh-csg）', () => {
       'MOD/bool.mod',
     );
   }
+
+  it('applies hidden intermediate and visible root matrices exactly once; LOD0 Union avoids CSG', () => {
+    const tm = (x: number) => `1,0,0,0,0,1,0,0,0,0,1,0,${x},0,0,1`;
+    const doc = makeBoolDoc(`
+      <Entity ID="1" Visible="false"><Cuboid L="100" W="100" H="100"/></Entity>
+      <Entity ID="2" Visible="false"><Cuboid L="40" W="40" H="40"/></Entity>
+      <Entity ID="3" Visible="false"><Boolean Type="Union" Entity1="1" Entity2="2"/><TransformMatrix Value="${tm(200)}"/></Entity>
+      <Entity ID="4" Visible="true"><Boolean Type="Union" Entity1="3" Entity2="2"/><TransformMatrix Value="${tm(1000)}"/></Entity>`);
+    for (const lod of [0, 2] as const) {
+      const timings: Record<string, number> = {};
+      const buckets = collectBakedGeometriesByMaterial(doc, lod, timings);
+      const box = new THREE.Box3();
+      for (const geometries of buckets.values()) for (const g of geometries) { g.computeBoundingBox(); box.union(g.boundingBox!); }
+      expect(box.min.x).toBeCloseTo(.98, 6);
+      expect(box.max.x).toBeCloseTo(1.25, 6);
+      expect(buckets.failures).toEqual([]);
+      expect(timings.booleanEvaluations ?? 0).toBe(lod === 0 ? 0 : 2);
+    }
+  });
+
+  it('retains a large Difference, skips only a small cutter and reports unsupported dependency fan-out', () => {
+    const body = `<Entity ID="1" Visible="false"><Cuboid L="100" W="100" H="100"/></Entity>`;
+    for (const [size, expected] of [[20, 0], [80, 1]]) {
+      const timings: Record<string, number> = {};
+      const doc = makeBoolDoc(`${body}<Entity ID="2" Visible="false"><Cuboid L="${size}" W="${size}" H="100"/></Entity>
+        <Entity ID="3" Visible="true"><Boolean Type="Difference" Entity1="1" Entity2="2"/></Entity>`);
+      expect(collectBakedGeometriesByMaterial(doc, 0, timings).size).toBe(1);
+      expect(timings.booleanEvaluations ?? 0).toBe(expected);
+    }
+    const doc = makeBoolDoc(`${body}<Entity ID="2" Visible="false"><UnknownShape/></Entity>
+      <Entity ID="3" Visible="true"><Boolean Type="Union" Entity1="1" Entity2="2"/></Entity>
+      <Entity ID="4" Visible="true"><Boolean Type="Union" Entity1="3" Entity2="1"/></Entity>`);
+    const result = collectBakedGeometriesByMaterial(doc, 2);
+    expect(result.size).toBeGreaterThan(0); // Supported outline survives detailed failure.
+    expect(result.failures.map(f => f.rootId)).toEqual([3, 4]);
+    expect(result.failures.every(f => f.dependencies.some(d => d.id === 2))).toBe(true);
+  });
+
+  it('keeps reflected operands outward-facing and preserves a large cut through a Union surface assembly', () => {
+    const doc = makeBoolDoc(`
+      <Entity ID="1" Visible="false"><Cuboid L="100" W="100" H="100"/><TransformMatrix Value="-1,0,0,0,0,1,0,0,0,0,1,0,-100,0,0,1"/></Entity>
+      <Entity ID="2" Visible="false"><Cuboid L="100" W="100" H="100"/><TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,100,0,0,1"/></Entity>
+      <Entity ID="3" Visible="false"><Boolean Type="Union" Entity1="1" Entity2="2"/></Entity>
+      <Entity ID="4" Visible="false"><Cuboid L="400" W="200" H="100"/><TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,50,1"/></Entity>
+      <Entity ID="5" Visible="true"><Boolean Type="Difference" Entity1="3" Entity2="4"/></Entity>`);
+    const volume = (lod: 0 | 2) => {
+      const baked = collectBakedGeometriesByMaterial(doc, lod);
+      expect(baked.failures).toEqual([]);
+      let sum = 0;
+      for (const geometries of baked.values()) for (const g of geometries) {
+        const pos = g.getAttribute('position'), index = g.index!;
+        for (let i=0; i<index.count; i+=3) {
+          const a=new THREE.Vector3().fromBufferAttribute(pos,index.getX(i));
+          const b=new THREE.Vector3().fromBufferAttribute(pos,index.getX(i+1));
+          const c=new THREE.Vector3().fromBufferAttribute(pos,index.getX(i+2));
+          sum += a.dot(b.cross(c))/6;
+        }
+      }
+      return sum;
+    };
+    expect(volume(0)).toBeCloseTo(.001, 8);
+    expect(volume(2)).toBeCloseTo(.001, 8);
+  });
 
   it('cooperative nested CSG preserves every vertex/index/color and lets input run before completion', async () => {
     // The visible outer Boolean appears before its hidden operands, so its

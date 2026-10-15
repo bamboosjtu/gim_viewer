@@ -15,6 +15,32 @@ import { buildDevSourceBounds } from '../devSpatialCatalog.js';
 import { chooseDeviceLod, deviceViewMetrics } from '../../viewer/devLodPolicy.js';
 import type { GimIndexResult } from '@desktop/database.js';
 import { parseDev } from '../../gim/geometry/devParser.js';
+import { primitiveToGeometry, collectBakedGeometriesByMaterial } from '../../viewer/xmlModGeometry.js';
+import { primitiveBounds } from '../devSpatialCatalog.js';
+
+it.skipIf(process.env.GIM_VERIFY_SUBSTATION02_LOCAL !== '1')('substation02 body and radiator use direction times length with matching analytic bounds', () => {
+  const cases = [
+    { mod: 'ef0aebb2-b935-4d38-a1f6-911ec066abe2', count: 38, axis: 'x' as const, end: 3860.0013 },
+    { mod: '82728fe2-4b55-42bf-a58b-e2c65882e727', count: 153, axis: 'z' as const, end: 3550.73794529118 },
+  ];
+  for (const fixture of cases) {
+    const path = resolve(`../demo/substation02/MOD/${fixture.mod}.mod`);
+    const doc = parseWorkerXmlMod(readFileSync(path, 'utf8'), path);
+    expect(doc.entities).toHaveLength(fixture.count);
+    expect(doc.entities.some(e => e.primitive.type === 'Boolean')).toBe(false);
+    const first = doc.entities.find(e => e.id === 2)!.primitive;
+    const mesh = primitiveToGeometry(first)!; mesh.computeBoundingBox();
+    expect(Math.abs(mesh.boundingBox!.max[fixture.axis] - fixture.end)).toBeLessThan(.001);
+    const analytic = primitiveBounds(first)!;
+    expect(Math.abs(analytic.max[fixture.axis] - fixture.end)).toBeLessThan(1e-6);
+    for (const lod of [0, 2] as const) {
+      const baked = collectBakedGeometriesByMaterial(doc, lod);
+      expect(baked.failures).toEqual([]);
+      expect([...baked.values()].reduce((n, rows) => n + rows.length, 0)).toBe(fixture.count);
+      for (const rows of baked.values()) for (const geometry of rows) geometry.dispose();
+    }
+  }
+});
 
 it('LOD uses box distance, hysteresis, offscreen selection and a long object crossing the frustum', () => {
   expect(chooseDeviceLod(0, true, 100, 39)).toBe(0);

@@ -52,7 +52,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 单模型复用还须验证源字节和坐标设置一致、借用方不能提前释放所有者、异常后 API 方法恢复，以及归一化包围盒只还原一次。真实单文件复核比较远景对象数、完整区域索引、GlobalId/ExpressId、近景紧固件覆盖、源属性和缓存路径；浏览器证据与 Portable 包启动证据分别记录。
 
-设备变更使用 `vitest run src/services/__tests__/devGeometryWorkerClient.test.ts src/services/__tests__/coordinateAlignmentService.test.ts src/services/__tests__/devGlbTemplateRuntime.test.ts` 验证并发配额、导出结果背压、模板去重、选择优先级、工程取消及占位协调矩阵竞态。真实几何门禁在 `desktop/` 设置 `$env:GIM_VERIFY_SUBSTATION01='1'` 后运行 `vitest run src/services/__tests__/devGeometryGate.test.ts --maxWorkers=1 --minWorkers=1`，覆盖主变、出线间隔和冷暖 occurrence 集合；未启用的 skip 不算样本通过。参考程序的平铺键表、递归深度和独立居中需先与原始分节及装配引用核对，不能为了匹配参考图而改动生产坐标。
+设备变更使用 `vitest run src/services/__tests__/devGeometryWorkerClient.test.ts src/services/__tests__/devLodRuntime.test.ts src/services/__tests__/coordinateAlignmentService.test.ts src/services/__tests__/devGlbTemplateRuntime.test.ts src/viewer/__tests__/xmlModGeometry.test.ts` 验证并发配额、导出结果背压、模板去重、选择优先级、工程取消及占位协调矩阵竞态。真实几何门禁在 `desktop/` 设置 `$env:GIM_VERIFY_SUBSTATION01='1'` 后运行 `vitest run src/services/__tests__/devGeometryGate.test.ts --maxWorkers=1 --minWorkers=1`，覆盖主变、出线间隔和冷暖 occurrence 集合；另设 `$env:GIM_VERIFY_SUBSTATION02_LOCAL='1'`，同一门禁只读取该样本本体和散热器的两个真实 MOD，核对拉伸端点、解析范围和 LOD0/2 可见实体覆盖，不启动全站 IFC。未启用的 skip 不算样本通过。参考程序的平铺键表、递归深度和独立居中需先与原始分节及装配引用核对，不能为了匹配参考图而改动生产坐标。
 
 桌面场景必须在独立缓存中覆盖冷编译、新进程暖启动、同进程关闭重开和同模板不同位置。记录源 SHA、DEV、instanceKey、同档位模板 SHA/局部包围盒、CBM 矩阵、首个 IFC、工程矩阵、世界包围盒和代表点；冷暖代表点误差 ≤0.1 mm，核心几何关键点误差 ≤1 mm，整机包围盒分段误差 ≤10 mm。核对 IFC 对象的 GlobalId、实际世界包围盒及相邻设备中心差，不用自动居中或整体偏移遮掩问题。
 

@@ -90,11 +90,11 @@ PHM 根据引用扩展名递归，逐边累积矩阵，按当前分支防环。�
 
 设备目录通过参数和源装配矩阵构建，不依赖三角化或 GLB；STL 扫描顶点范围，Boolean 使用保守范围，未知类型保留 unknown。目录增量提交，按唯一 DEV 复用。模板以源 SHA、DEV、几何版本和 LOD 为键逐条原子落盘；部分合法缓存可直接恢复，不写旧的全站完整几何标记。128 MiB 模板 LRU 按实际顶点/索引缓冲区计量，正在显示和选中的模板受保护，可使驻留值超过软预算；未使用模板被淘汰并释放。
 
-Viewer 创建后即启动设备编译，编译与 IFC 锚点无关，场景提交等待真实锚点。高核数且非低内存环境最多两个 DEV Worker，其余使用一个；全局最多同时执行一个 IFC WASM 任务和两个 DEV 工作单元。完成的 GLB 占用工作槽直到消费方处理完，避免导出结果无限积累。两个 Worker 的来源字节、解码文本、XML IR、DEV/PHM IR 缓存合计预算分别为 64、32、48、12 MiB，单 Worker 也受同一总预算约束；每份驻留文档复用校验和解析结果，几何临时资源在导出后释放。选择、可见近景、可见中景、基础表示依次调度，工程会话、请求 ID 和模板键共同拒绝旧结果。
+Viewer 创建后即启动设备编译，编译与 IFC 锚点无关，场景提交等待真实锚点。高核数且非低内存环境最多两个 DEV Worker，其余使用一个；全局最多同时执行一个 IFC WASM 任务和两个 DEV 工作单元。完成的 GLB 占用工作槽直到消费方处理完，避免导出结果无限积累。两个 Worker 的来源字节、解码文本、XML IR、DEV/PHM IR 缓存合计预算分别为 64、32、48、12 MiB，单 Worker 也受同一总预算约束；每份驻留文档复用校验和解析结果，几何临时资源在导出后释放。选择、当前视图缺少的基础表示、可见细节、全站其余基础表示依次调度；轻量范围构建优先于普通几何任务，等待任务逐步提升优先级，防止后台基础表示饥饿。工程会话、请求 ID 和模板键共同拒绝旧结果。
 
 内存中的不可变 File 通过结构化克隆交给 Worker 直接读取，保留共享的 Blob 后备存储，避免逐文件经过主线程。磁盘惰性 File 仍使用受源身份和路径校验保护的 IPC。模板读取/解析也受有界队列限制，正在创建 placement 的模板受 LRU 保护。原生索引提交、缓存校验及设备派生产物 I/O 在后台线程执行，保持原有事务、源校验、路径防护和原子替换条件。
 
-状态栏独立显示设备就绪/总数、目录进展、模板编译、缓存命中、失败数和正在处理的设备，不被并行 IFC 提示覆盖。诊断区分目录就绪、当前视图就绪、全站基础表示就绪和完整几何完成，基础或 partial 表示不计作完整几何。阶段耗时包含读取/RPC、解码、校验、解析、primitive、Boolean、合并、导出与提交；Worker elapsed 是墙钟时间。
+状态栏独立显示已处理设备、实际显示与失败数，以及当前视图和后台基础表示阶段，不被并行 IFC 提示覆盖；悬停查看设备范围索引、模板编译、缓存、淘汰、部分表示和活动设备。计数以 occurrence 为单位并按状态去重，模板任务数量另计。currentViewSettled/baseRepresentationsSettled 包含已结束失败，currentViewReady/baseRepresentationsReady 保留成功语义，allStationReady 仍要求完整精细几何；失败结束不能永久显示准备中，也不计作成功。临时失败可通过明确选择重试，确定性 source-invalid 按源证据隔离并缓存，旧档位失败不能污染新请求。阶段耗时包含读取/RPC、解码、校验、解析、primitive、Boolean、合并、导出与提交；Worker elapsed 是墙钟时间。
 
 GLB 恢复校验 manifest、源身份、条目状态和文件完整性。单 DEV 文件失败可局部回退原始几何；manifest 无效使几何域失效，不要求删除有效语义域。完成标记只在所有目标条目形成确定状态后提交，瞬时失败不能写为完整版本。确定性 source-invalid 可与其他确定结果共同发布结构有效的缓存，暖恢复不读取其 GLB 或重试 raw；结构有效不等于所有几何显示，fullModelReady 诊断明确记录拒绝数及 geometryFullyRendered。
 
@@ -142,8 +142,8 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
 | 变电语义 | `gim-substation-parser-v26` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性、语义引用及索引发布凭据 |
-| DEV 几何 | `geometry-cache-v10-xml-lod` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
-| 设备 LOD 派生 | `geometry-cache-v10-xml-lod` 组合 `dev-spatial-catalog-v1`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
+| DEV 几何 | `geometry-cache-v11-stretch-csg` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
+| 设备 LOD 派生 | `geometry-cache-v11-stretch-csg` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
 | Spatial snapshot | `substation-spatial-semantic-v2` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 源、链接和序列化结构 |
 | IFC Spatial parser contract | `gim-substation-parser-v23` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | Fragments | `fragments-cache-v6` | [db.rs](../desktop/src-tauri/src/db.rs)、[features](../desktop/src/config/features.ts) | 源/IFC 身份及实际安装的 fragments/web-ifc 版本 |

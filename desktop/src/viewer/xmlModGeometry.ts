@@ -2,7 +2,7 @@
  * 变电 XML MOD primitive → Three.js BufferGeometry 转换。
  *
  * 核心八类与 CircularGasket 按源参数生成浏览几何。
- * StretchedBody 沿完整 Normal 位移拉伸，支持凹截面；L 原值保留在解析层。
+ * StretchedBody 兼容单位方向 × L 和完整 Normal 位移，支持凹截面。
  * PorcelainBushing 的伞裙是浏览近似，LOD0 保留锥形主体。
  * 尚未支持的复杂体和弱 schema 保留具体类型诊断。
  *
@@ -22,6 +22,8 @@
  */
 
 import * as THREE from 'three';
+import { stretchedBodyDisplacement } from '../gim/geometry/stretchedBody.js';
+import { offsetRectangularTableVertices } from '../gim/geometry/offsetRectangularTable.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 export type DeviceLod = 0 | 1 | 2;
 import { Brush, Evaluator, ADDITION, INTERSECTION, SUBTRACTION } from 'three-bvh-csg';
@@ -209,8 +211,19 @@ function primitiveToGeometryUncached(p: XmlModPrimitive, lod: DeviceLod): THREE.
         console.warn(`[xmlModGeometry] "${p.type}" MVP 暂停渲染（几何解释待完善）`);
       }
       return null;
+    case 'OffsetRectangularTable': {
+      const vertices = offsetRectangularTableVertices(p.raw);
+      if (!vertices) return null;
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(16).fill(0), 2));
+      geometry.setIndex([0,2,1,0,3,2, 4,5,6,4,6,7, 0,1,5,0,5,4, 1,2,6,1,6,5, 2,3,7,2,7,6, 3,0,4,3,4,7]);
+      const flat = geometry.toNonIndexed(); geometry.dispose();
+      flat.computeVertexNormals();
+      flat.setIndex(Array.from({ length: flat.getAttribute('position').count }, (_, index) => index));
+      return flat;
+    }
     case 'RectangularFixedPlate':
-    case 'OffsetRectangularTable':
     case 'RectangularRing':
       if (!_warnedOnce.has(p.type)) {
         _warnedOnce.add(p.type);
@@ -286,24 +299,17 @@ function parseStretchedBodyPoints(raw: string): THREE.Vector3[] {
   return points;
 }
 
-function parseStretchedBodyNormal(raw: string): THREE.Vector3 | null {
-  const values = raw.split(',').map((value) => Number(value.trim()));
-  if (values.length !== 3 || values.some((value) => !Number.isFinite(value))) return null;
-  const normal = new THREE.Vector3(values[0], values[1], values[2]);
-  return normal.lengthSq() > Number.EPSILON ? normal : null;
-}
-
 /**
  * 构造任意平面截面的拉伸体。
  *
  * Array 中的点已经位于 MOD 局部三维坐标，不能先压成 XY 再靠旋转猜回位置。
  * 这里仅把点投影到与 Normal 正交的二维基底以完成凹多边形三角剖分，最终顶点仍
- * 直接使用原始三维点，并加上完整的有符号 Normal 位移；L 仅保留来源。
+ * 直接使用原始三维点，并加上统一解释的有符号拉伸位移。
  */
 function createStretchedBodyGeometry(array: string, normalRaw: string, lengthRaw: number): THREE.BufferGeometry | null {
   let points = parseStretchedBodyPoints(array);
-  const normal = parseStretchedBodyNormal(normalRaw);
-  void lengthRaw; // L retained in IR; displacement is the complete, signed Normal vector.
+  const resolved = stretchedBodyDisplacement(normalRaw, lengthRaw);
+  const normal = resolved ? new THREE.Vector3(...resolved.vector) : null;
   if (points.length < 3 || !normal) return null;
   const extrusion = normal.clone();
   normal.normalize();
@@ -576,7 +582,7 @@ export function xmlModDocumentToGroup(doc: XmlModDocument): THREE.Group {
  */
 export function collectBakedGeometriesByMaterial(
   doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>,
-): Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]> {
+): BakedGeometries {
   const steps = bakeGeometrySteps(doc, lod, timings);
   let step = steps.next();
   while (!step.done) step = steps.next();
@@ -589,7 +595,7 @@ export function collectBakedGeometriesByMaterial(
  */
 export async function collectBakedGeometriesByMaterialAsync(
   doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>,
-): Promise<Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>> {
+): Promise<BakedGeometries> {
   const steps = bakeGeometrySteps(doc, lod, timings);
   let sliceStarted = performance.now();
   let step = steps.next();
@@ -603,10 +609,14 @@ export async function collectBakedGeometriesByMaterialAsync(
   return step.value;
 }
 
+export interface BakedGeometryFailure { rootId: number; dependencies: { id: number; reason: string }[] }
+export type BakedGeometries = Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]> & {
+  failures: BakedGeometryFailure[]; simplifiedBooleans: number;
+};
 function* bakeGeometrySteps(
   doc: XmlModDocument, lod: DeviceLod, timings?: Record<string, number>,
-): Generator<void, Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>, void> {
-  const byMaterial = new Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>();
+): Generator<void, BakedGeometries, void> {
+  const byMaterial = Object.assign(new Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>(), { failures: [] as BakedGeometryFailure[], simplifiedBooleans: 0 });
   const build = (p: XmlModPrimitive) => { const started = performance.now(); const geometry = primitiveToGeometry(p, doc.modPath, lod);
     if (timings) timings.primitiveMs = (timings.primitiveMs ?? 0) + performance.now() - started; return geometry; };
   if (doc.isEmpty) return byMaterial;
@@ -614,98 +624,165 @@ function* bakeGeometrySteps(
   // mm → m 缩放矩阵：烘焙到顶点，避免 group.scale + Object3D.applyMatrix4 decompose 精度损失
   const mmToScene = new THREE.Matrix4().makeScale(MOD_MM_TO_SCENE_UNIT, MOD_MM_TO_SCENE_UNIT, MOD_MM_TO_SCENE_UNIT);
 
-  // Boolean 实体需要同文件内其它 Entity 的局部几何做 CSG 运算：
-  // 仅当存在 Boolean 时才构建 id → 局部几何（含自身 transform、不含 mmToScene）索引
-  // 关键：必须 clone 共享缓存几何后再烘焙 transform。
-  // 直接对 primitiveToGeometry 返回的共享实例 applyMatrix4 会污染全局缓存，
-  // 后续每次加载同参数 primitive 都会在已变换的几何上再叠一次变换，
-  // 形成逐实例累加的"楼梯"错位（substation02 路灯 +9m/实例实证）。
-  const booleanEntities = doc.entities.filter((e) => e.primitive.type === 'Boolean');
-  const localGeoById = new Map<number, THREE.BufferGeometry>();
-  if (booleanEntities.length > 0) {
-    for (const entity of doc.entities) {
-      if (entity.primitive.type === 'Boolean') continue;
-      const geo = build(entity.primitive);
-      if (!geo) continue;
-      const local = geo.clone();
-      if (entity.transformMatrix.length === 16) {
-        local.applyMatrix4(gimMatrixToMatrix4(entity.transformMatrix));
+  const entities = new Map(doc.entities.map(entity => [entity.id, entity]));
+  const memo = new Map<number, THREE.BufferGeometry | null>();
+  const visiting = new Set<number>();
+  const owned = new Set<THREE.BufferGeometry>();
+  const failures = new Map<number, string>();
+  const own = (geometry: THREE.BufferGeometry) => { owned.add(geometry); return geometry; };
+  const transform = (geometry: THREE.BufferGeometry, matrix: THREE.Matrix4) => {
+    geometry.applyMatrix4(matrix);
+    // Reflection reverses triangle winding. Keep outward normals and CSG's
+    // inside/outside classification consistent without touching cached leaves.
+    if (matrix.determinant() < 0) {
+      if (!geometry.index) geometry.setIndex(Array.from({ length: geometry.getAttribute('position').count }, (_, i) => i));
+      const index = geometry.index!;
+      for (let i = 0; i < index.count; i += 3) {
+        const b = index.getX(i + 1); index.setX(i + 1, index.getX(i + 2)); index.setX(i + 2, b);
       }
-      localGeoById.set(entity.id, local);
-      yield;
     }
-  }
-  const boolMemo = new Map<number, THREE.BufferGeometry | null>();
-  const boolStack = new Set<number>();
-
-  /** 求值 Boolean 实体（递归、防环）；操作数缺失返回 null */
-  function* evalBoolean(id: number, prim: Extract<XmlModPrimitive, { type: 'Boolean' }>): Generator<void, THREE.BufferGeometry | null, void> {
-    if (boolMemo.has(id)) return boolMemo.get(id) ?? null;
-    if (boolStack.has(id)) {
-      console.warn(`[xmlModGeometry] Boolean 循环引用（id=${id}），跳过`);
-      return null;
-    }
-    boolStack.add(id);
+    return geometry;
+  };
+  const fail = (id: number, reason: string) => { failures.set(id, reason); return null; };
+  // Every cached result is in its parent's frame, including this Entity's
+  // transform. Root output therefore applies only mm -> m, never that matrix twice.
+  function* evaluate(id: number): Generator<void, THREE.BufferGeometry | null, void> {
+    const key = id;
+    if (memo.has(key)) return memo.get(key)!;
+    const entity = entities.get(id);
+    if (!entity) return fail(id, 'missing-reference');
+    if (visiting.has(id)) return fail(id, 'cycle');
+    visiting.add(id);
+    let result: THREE.BufferGeometry | null = null;
     try {
-      let geoA = localGeoById.get(prim.entity1) ?? null;
-      let geoB = localGeoById.get(prim.entity2) ?? null;
-      // 操作数若本身是 Boolean，先递归求值并回填索引
-      if (!geoA) {
-        const ref1 = doc.entities.find((e) => e.id === prim.entity1);
-        if (ref1?.primitive.type === 'Boolean') geoA = yield* evalBoolean(ref1.id, ref1.primitive);
+      const p = entity.primitive;
+      if (p.type !== 'Boolean') {
+        const base = build(p);
+        if (base) result = own(base.clone());
+        else return fail(id, `unsupported-or-invalid:${p.type}`);
+      } else {
+        const a = yield* evaluate(p.entity1);
+        const b = yield* evaluate(p.entity2);
+        if (!a || !b) return fail(id, 'operand-unavailable');
+        else if (!a.getAttribute('position').count || !b.getAttribute('position').count) {
+          result = own((p.op === 'Intersection' ? (!a.getAttribute('position').count ? a : b)
+            : p.op === 'Difference' ? a : a.getAttribute('position').count ? a : b).clone());
+        } else {
+          const started = performance.now();
+          try {
+            result = own(getSharedCsgEvaluator().evaluate(new Brush(a), new Brush(b),
+              p.op === 'Union' ? ADDITION : p.op === 'Intersection' ? INTERSECTION : SUBTRACTION).geometry);
+          } catch (error) { return fail(id, `csg-failed:${String(error)}`); }
+          finally { if (timings) { timings.booleanMs = (timings.booleanMs ?? 0) + performance.now() - started;
+            timings.booleanEvaluations = (timings.booleanEvaluations ?? 0) + 1; } }
+        }
       }
-      if (!geoB) {
-        const ref2 = doc.entities.find((e) => e.id === prim.entity2);
-        if (ref2?.primitive.type === 'Boolean') geoB = yield* evalBoolean(ref2.id, ref2.primitive);
-      }
-      if (!geoA || !geoB) {
-        console.warn(`[xmlModGeometry] Boolean(id=${id}) 操作数缺失（e1=${prim.entity1}, e2=${prim.entity2}），跳过`);
-        boolMemo.set(id, null);
-        return null;
-      }
-      const op =
-        prim.op === 'Union' ? ADDITION : prim.op === 'Intersection' ? INTERSECTION : SUBTRACTION;
-      const evaluator = getSharedCsgEvaluator();
-      const booleanStarted = performance.now();
-      const result = evaluator.evaluate(new Brush(geoA), new Brush(geoB), op);
-      if (timings) timings.booleanMs = (timings.booleanMs ?? 0) + performance.now() - booleanStarted;
-      boolMemo.set(id, result.geometry);
+      if (result) transform(result, gimMatrixToMatrix4(entity.transformMatrix));
+      memo.set(key, result);
       yield;
-      return result.geometry;
-    } finally {
-      boolStack.delete(id);
-    }
+      return result;
+    } finally { visiting.delete(id); }
   }
-
-  for (const entity of doc.entities) {
-    if (!entity.visible) continue;
-
-    let baseGeo: THREE.BufferGeometry | null;
-    if (entity.primitive.type === 'Boolean') {
-      baseGeo =
-        entity.primitive.type === 'Boolean'
-          ? yield* evalBoolean(entity.id, entity.primitive)
-          : null;
-    } else {
-      baseGeo = build(entity.primitive);
+  // Keep LOD0 Union as surfaces of solid pieces. Set identities distribute
+  // difference/intersection over those pieces; disjoint pairs need no CSG.
+  const surfaces = new Map<number, THREE.BufferGeometry[] | null>();
+  const surfaceStack = new Set<number>();
+  const bounds = new WeakMap<THREE.BufferGeometry, THREE.Box3>();
+  const boxOf = (g: THREE.BufferGeometry) => {
+    let box = bounds.get(g);
+    if (!box) { g.computeBoundingBox(); box = g.boundingBox!.clone(); bounds.set(g, box); }
+    return box;
+  };
+  function* surface(id: number): Generator<void, THREE.BufferGeometry[] | null, void> {
+    if (surfaces.has(id)) return surfaces.get(id)!;
+    const e = entities.get(id);
+    if (!e) { fail(id, 'missing-reference'); return null; }
+    if (surfaceStack.has(id)) { fail(id, 'cycle'); return null; }
+    if (e.primitive.type !== 'Boolean') {
+      const geometry = yield* evaluate(id);
+      const result = geometry ? [geometry] : null; surfaces.set(id, result); return result;
     }
-    if (!baseGeo) continue; // 跳过暂停渲染/求值失败的 primitive
-
-    const material = colorToMaterial(entity.color, doc.colorMaxA);
-
-    // clone base geometry 并直接烘焙 entity transform + mm→m 缩放
-    // 关键：使用 BufferGeometry.applyMatrix4 直接变换顶点，不经过 Object3D.applyMatrix4/decompose
-    // （Boolean 结果已在 MOD 局部空间，其自身 transform 在此统一烘焙）
-    const baked = baseGeo.clone();
-    if (entity.transformMatrix.length === 16) {
-      baked.applyMatrix4(gimMatrixToMatrix4(entity.transformMatrix));
+    surfaceStack.add(id);
+    try {
+      const p = e.primitive, a = yield* surface(p.entity1), b = yield* surface(p.entity2);
+      let pieces: THREE.BufferGeometry[] = [];
+      if (!a || !b) {
+        fail(id, 'operand-unavailable');
+        // Retain supported surfaces as an explicit partial approximation.
+        // Never invent an intersection from an absent operand.
+        pieces = p.op === 'Union' ? [...a ?? [], ...b ?? []] : p.op === 'Difference' ? a ?? [] : [];
+      } else if (p.op === 'Union') { pieces = [...a, ...b]; byMaterial.simplifiedBooleans++; }
+      else {
+        for (const left of a) {
+          let remaining = [left];
+          for (const right of b) {
+            const next: THREE.BufferGeometry[] = [];
+            const size = boxOf(right).getSize(new THREE.Vector3()).toArray().sort((x,y) => x-y);
+            const smallCut = p.op === 'Difference' && size[0] > 0 && size[1] <= 50;
+            for (const part of p.op === 'Intersection' ? [left] : remaining) {
+              if (smallCut) { next.push(part); byMaterial.simplifiedBooleans++; continue; }
+              if (!boxOf(part).intersectsBox(boxOf(right))) {
+                if (p.op === 'Difference') next.push(part);
+                if (timings) timings.disjointBooleanPairs = (timings.disjointBooleanPairs ?? 0) + 1;
+                continue;
+              }
+              if (!part.getAttribute('position').count || !right.getAttribute('position').count) continue;
+              const started = performance.now();
+              try {
+                const cut = own(getSharedCsgEvaluator().evaluate(new Brush(part), new Brush(right),
+                  p.op === 'Difference' ? SUBTRACTION : INTERSECTION).geometry);
+                if (cut.getAttribute('position').count) next.push(cut);
+              } catch (error) {
+                fail(id, `csg-failed:${String(error)}`);
+                if (p.op === 'Difference') next.push(part);
+              } finally { if (timings) {
+                timings.booleanMs = (timings.booleanMs ?? 0) + performance.now() - started;
+                timings.booleanEvaluations = (timings.booleanEvaluations ?? 0) + 1;
+              } }
+              yield;
+            }
+            if (p.op === 'Intersection') pieces.push(...next); else remaining = next;
+          }
+          if (p.op === 'Difference') pieces.push(...remaining);
+        }
+      }
+      const matrix = gimMatrixToMatrix4(e.transformMatrix);
+      if (!matrix.equals(new THREE.Matrix4())) pieces = pieces.map(piece => own(transform(piece.clone(), matrix)));
+      surfaces.set(id, pieces); yield; return pieces;
+    } finally { surfaceStack.delete(id); }
+  }
+  try {
+    for (const entity of doc.entities) {
+      if (!entity.visible) continue;
+      let pieces = lod === 0 ? yield* surface(entity.id) : null;
+      const base = lod === 0 ? null : yield* evaluate(entity.id);
+      const reachable = new Set<number>();
+      const visit = (id: number) => {
+        if (reachable.has(id)) return;
+        reachable.add(id);
+        const p = entities.get(id)?.primitive;
+        if (p?.type === 'Boolean') { visit(p.entity1); visit(p.entity2); }
+      };
+      visit(entity.id);
+      const dependencies = [...failures].filter(([id]) => reachable.has(id)).map(([id, reason]) => ({ id, reason }));
+      if (dependencies.length) byMaterial.failures.push({ rootId: entity.id, dependencies });
+      // A failed detailed Union can still provide its supported browser
+      // outline. Keep the root diagnostic and never label it complete.
+      if (dependencies.length && lod > 0 && entity.primitive.type === 'Boolean')
+        pieces = yield* surface(entity.id);
+      pieces ??= base ? [base] : [];
+      const material = colorToMaterial(entity.color, doc.colorMaxA);
+      for (const piece of pieces) {
+        if (piece.getAttribute('position').count === 0) continue;
+        const baked = piece.clone().applyMatrix4(mmToScene);
+        const bucket = byMaterial.get(material) ?? []; bucket.push(baked); byMaterial.set(material, bucket);
+      }
+      yield;
     }
-    baked.applyMatrix4(mmToScene);
-
-    const arr = byMaterial.get(material) ?? [];
-    arr.push(baked);
-    byMaterial.set(material, arr);
-    yield;
+  } finally { for (const geometry of owned) geometry.dispose(); }
+  if (timings) {
+    timings.simplifiedBooleans = (timings.simplifiedBooleans ?? 0) + byMaterial.simplifiedBooleans;
+    timings.failedVisibleRoots = (timings.failedVisibleRoots ?? 0) + byMaterial.failures.length;
   }
 
   return byMaterial;

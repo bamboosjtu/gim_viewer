@@ -44,13 +44,13 @@
 | TruncatedCone | BR,TR,H | 强类型；0≤TR≤1 时顶半径为 TR×BR，TR>1 保留样本中的绝对半径兼容解释并记录诊断 |
 | Ring | R,DR,Rad | 强类型；DR 为管半径，Rad 为弧度扫掠 |
 | CircularGasket | H,Rad,OR,IR | 强类型；垫圈几何 |
-| StretchedBody | L,Array,Normal | 保留 L 原值，沿完整有符号 Normal 向量拉伸，支持凹截面三角剖分 |
+| StretchedBody | L,Array,Normal | 单位 Normal 使用方向×L，非单位 Normal 使用完整位移；支持凹截面三角剖分 |
 | PorcelainBushing | R,R1,R2,N,H | 强类型；锥柱与均布伞裙组合，伞裙为浏览近似；远景保留主体 |
 | TerminalBlock | L,W,H?,T,R,BL,CL,CS,RS,CN,RN,Phase | 强类型；基板与 CN×RN 栅格端子组合，远景保留基板 |
 | ChannelSteel | L,Model,D?,H?,B?,T? | 强类型；当前无直接几何生成 |
 | Table | H,LL1,LL2,TL1,TL2 | 强类型；当前无直接几何生成 |
 | RectangularFixedPlate | raw attrs | 弱结构保留；当前无直接几何生成 |
-| OffsetRectangularTable | raw attrs | 弱结构保留；当前无直接几何生成 |
+| OffsetRectangularTable | TL,TW,LL,LW,H,XOFF,YOFF | 仅接受显式七字段编码；下矩形 XY 居中且 Z=0，上矩形位于 Z=H 并施加偏移；其他编码保留不支持诊断 |
 | RectangularRing | raw attrs | 弱结构保留；当前无直接几何生成 |
 | Boolean | Type,Entity1,Entity2 | Union/Intersection/Difference；按引用构造 CSG |
 | Wire | D,FitCoordArray | 有效三元点；样条管近似 |
@@ -64,8 +64,8 @@ Insulator、ConePorcelainBushing、SquareGasket、CircularFixedPlate、BendingCy
 
 ## StretchedBody
 
-Array 是分号分隔点序列，每点为逗号三元组，二维点兼容为 z=0；Normal 是完整拉伸位移，不能归一化后再用 L 当长度。L 原值保留在 IR，不参与当前长度求值。
-渲染去掉重复截面点，投影用于凹多边形端盖三角剖分，最终顶点使用原始三维点与加上 Normal 的顶层点。
+Array 是分号分隔点序列，每点为逗号三元组，二维点兼容为 z=0。已观察到两种编码：Normal 模长与 1 的差不超过 10⁻⁶ 时按方向向量解释，位移为归一化 Normal×L；其他非零有限 Normal 按完整位移解释，不使用 L 替换模长。单位方向缺少有效非零 L、非法或零 Normal 均不生成几何。该兼容约定依据字段结构，不依赖厂商或工程名；原值与解释模式保留在解析数据和设备范围诊断中。
+渲染去掉重复截面点，投影用于凹多边形端盖三角剖分，最终顶点使用原始三维点与加上统一解释位移的顶层点；范围索引使用同一解释函数。
 闭合、退化、非平面截面和任意法向不能仅凭记录数量认定完整支持。
 Normal 与 Entity 矩阵分别生效，不能将 Normal 当整个装配的绝对朝向。
 
@@ -75,8 +75,8 @@ Normal 与 Entity 矩阵分别生效，不能将 Normal 当整个装配的绝对
 
 Boolean 的 Type 归一化后只接受 union/intersection/difference，其他操作 Unsupported。
 Entity1/Entity2 通过本文件实体 ID 引用，操作数缺失、环与异常几何不能得到伪造结果。
-CSG 的局部实体变换在统一 MOD 空间处理，再应用单位和外部装配变换。
-合并相同材质只改变场景资源组织，不改变源实体 ID 和支持度记录。
+每个求值节点包含自身 Entity 变换，中间节点和可见根各应用一次，再应用单位和外部装配变换；镜像同步翻转三角面绕序。隐藏操作数可参与求值。LOD1/2 使用递归 CSG；LOD0 将 Union 保留为实体表面组合，将 Difference/Intersection 分配至操作数实体对，只对包围盒相交的组合求值。Difference 切除体的包围盒两个较短边均不大于 50 mm 时可跳过，影响主要轮廓的大切口保留；Intersection 不用单一操作数冒充结果。此策略保留内部重叠面且简化小切口，属于浏览表示。
+可见根诊断记录依赖 ID 与缺失、环、不支持或 CSG 异常；合法空交集是空结果。精细求值失败时可保留可支持的浏览表面并标记 partial，不计作完整几何。合并相同材质只改变场景资源组织，不改变源实体 ID 和支持度记录。
 
 ## 状态与计数
 

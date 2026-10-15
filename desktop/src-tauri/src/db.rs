@@ -81,7 +81,7 @@ pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 /// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
 ///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v10-xml-lod";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v11-stretch-csg";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GeometryCacheManifestEntry {
@@ -3068,7 +3068,7 @@ fn device_lod_artifact_path(
     let parts: Vec<&str> = key.split('|').collect();
     let bound_sha = match store {
         "templates" if parts.len() == 4 && parts[0] == GEOMETRY_CACHE_VERSION => parts[1],
-        "catalog" if parts.len() == 4 && parts[0] == "dev-spatial-catalog-v1" && parts[1] == GEOMETRY_CACHE_VERSION => parts[2],
+        "catalog" if parts.len() == 4 && parts[0] == "dev-spatial-catalog-v2" && parts[1] == GEOMETRY_CACHE_VERSION => parts[2],
         _ => return Err("设备缓存域或版本无效".into()),
     };
     if source_sha.len() != 64 || !source_sha.bytes().all(|c| c.is_ascii_hexdigit()) || bound_sha != source_sha {

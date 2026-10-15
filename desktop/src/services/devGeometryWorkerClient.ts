@@ -5,7 +5,8 @@ import type { DevSourceBounds } from './devSpatialCatalog.js';
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import { perfCurrentSession, perfMark } from '../utils/perfTimings.js';
 import { beginDevGeometryWork } from '../viewer/geometryWorkGate.js';
-interface Slot { id: number; key: string; path: string; kind: 'compile' | 'bounds'; lod: DeviceLod; priority: number;
+import { agedWorkPriority } from '../utils/workPriority.js';
+interface Slot { id: number; key: string; path: string; kind: 'compile' | 'bounds'; lod: DeviceLod; priority: number; queuedAt: number;
   promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void }
 const clients = new WeakMap<AppState, DevGeometryPreprocessor>();
 let serial = 0;
@@ -44,7 +45,9 @@ export class DevGeometryPreprocessor {
     for (const worker of this.workers) {
       if (this.active.has(worker)) continue;
       const running = new Set([...this.active.values()].map(row => row.task.key));
-      const task = [...this.slots.values()].filter(s => !running.has(s.key) && (!this.paused || s.kind === 'bounds')).sort((a, b) => a.priority - b.priority || a.id - b.id)[0];
+      const now = performance.now();
+      const task = [...this.slots.values()].filter(s => !running.has(s.key) && (!this.paused || s.kind === 'bounds')).sort((a, b) =>
+        agedWorkPriority(a.priority, a.queuedAt, now) - agedWorkPriority(b.priority, b.queuedAt, now) || a.id - b.id)[0];
       if (!task) break;
       const release = task.kind === 'compile' ? beginDevGeometryWork() : null;
       if (task.kind === 'compile' && !release) break;
@@ -81,11 +84,11 @@ export class DevGeometryPreprocessor {
     const old = this.slots.get(key); if (old) { old.priority = Math.min(old.priority, priority); return old.promise; }
     let resolve!: Slot['resolve'], reject!: Slot['reject'];
     const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
-    this.slots.set(key, { id: ++this.sequence, key, path, kind, lod, priority, promise, resolve, reject });
+    this.slots.set(key, { id: ++this.sequence, key, path, kind, lod, priority, queuedAt: performance.now(), promise, resolve, reject });
     this.pump(); return promise;
   }
   compile(path: string, lod: DeviceLod, key: string, priority: number): Promise<DevGlbSerializationResult> { return this.request('compile', path, lod, key, priority); }
-  bounds(path: string): Promise<DevSourceBounds> { return this.request('bounds', path, 0, `bounds:${path.toLowerCase()}`, 2.5); }
+  bounds(path: string): Promise<DevSourceBounds> { return this.request('bounds', path, 0, `bounds:${path.toLowerCase()}`, 0.75); }
   promote(key: string, priority: number): void { const slot = this.slots.get(key); if (slot) slot.priority = Math.min(slot.priority, priority); this.pump(); }
   /** Compatibility for explicitly invoked all-device compiler; product uses compile(). */
   take(path: string): Promise<DevGlbSerializationResult> {

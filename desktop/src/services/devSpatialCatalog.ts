@@ -1,11 +1,13 @@
 import * as THREE from 'three';
+import { stretchedBodyDisplacement } from '../gim/geometry/stretchedBody.js';
+import { offsetRectangularTableVertices } from '../gim/geometry/offsetRectangularTable.js';
 import type { XmlModPrimitive } from '../gim/geometry/ir.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import { discoverGeometriesFromDevPath } from './modGeometryDiscovery.js';
 import { getFileByPath } from '../gim/fileLookup.js';
 
-export const DEV_SPATIAL_CATALOG_VERSION = 'dev-spatial-catalog-v1';
-export const DEV_GEOMETRY_VERSION = 'geometry-cache-v10-xml-lod';
+export const DEV_SPATIAL_CATALOG_VERSION = 'dev-spatial-catalog-v2';
+export const DEV_GEOMETRY_VERSION = 'geometry-cache-v11-stretch-csg';
 export type BoundsTuple = [number, number, number, number, number, number];
 export interface DevSourceBounds {
   devPath: string;
@@ -15,6 +17,7 @@ export interface DevSourceBounds {
   unsupportedTypes: string[];
   absoluteConeCount?: number;
   diagnostic?: string;
+  stretchModes?: Record<string, number>;
 }
 export interface DevSpatialOccurrence extends DevSourceBounds {
   instanceKey: string;
@@ -47,15 +50,22 @@ export function primitiveBounds(p: XmlModPrimitive): THREE.Box3 | null {
       return new THREE.Box3(v(-x, -y, 0), v(x, y, p.t + p.bl));
     }
     case 'StretchedBody': {
-      const normal = p.normal.split(',').map(Number);
-      if (normal.length !== 3 || !normal.every(Number.isFinite)) return null;
+      const resolved = stretchedBodyDisplacement(p.normal, p.l);
+      if (!resolved) return null;
       const box = new THREE.Box3();
       for (const raw of p.array.split(';').filter(Boolean)) {
         const a = raw.split(',').map(Number);
         if (a.length < 2 || !a.every(Number.isFinite)) return null;
         const pt = v(a[0], a[1], a[2] ?? 0);
-        box.expandByPoint(pt); box.expandByPoint(pt.clone().add(v(normal[0], normal[1], normal[2])));
+        box.expandByPoint(pt); box.expandByPoint(pt.clone().add(v(...resolved.vector)));
       }
+      return box;
+    }
+    case 'OffsetRectangularTable': {
+      const vertices = offsetRectangularTableVertices(p.raw);
+      if (!vertices) return null;
+      const box = new THREE.Box3();
+      for (let i = 0; i < vertices.length; i += 3) box.expandByPoint(v(vertices[i], vertices[i+1], vertices[i+2]));
       return box;
     }
     case 'Wire': case 'Cable': {
@@ -70,6 +80,7 @@ export function primitiveBounds(p: XmlModPrimitive): THREE.Box3 | null {
 }
 export function documentBounds(doc: XmlModDocument): { box: THREE.Box3; unknown: boolean } {
   const box = new THREE.Box3(), byId = new Map<number, THREE.Box3>();
+  const entities = new Map(doc.entities.map(e => [e.id, e]));
   let unknown = doc.malformedEntityCount > 0;
   for (const e of doc.entities) {
     if (e.primitive.type === 'Boolean') continue;
@@ -84,7 +95,7 @@ export function documentBounds(doc: XmlModDocument): { box: THREE.Box3; unknown:
     if (byId.has(id)) return byId.get(id)!.clone();
     if (stack.has(id)) return null;
     stack.add(id);
-    const e = doc.entities.find(e => e.id === id);
+    const e = entities.get(id);
     if (e?.primitive.type !== 'Boolean') { stack.delete(id); return null; }
     const a = booleanBox(e.primitive.entity1), b = booleanBox(e.primitive.entity2);
     stack.delete(id);
@@ -129,6 +140,10 @@ export async function buildDevSourceBounds(devPath: string, files: Map<string, F
       const file = getFileByPath(files, edge.modPath);
       if (!file) throw Error(`Source missing: ${edge.modPath}`);
       const doc = parse(await file.text(), edge.modPath), bounds = documentBounds(doc);
+      for (const e of doc.entities) if (e.primitive.type === 'StretchedBody') {
+        const mode = stretchedBodyDisplacement(e.primitive.normal, e.primitive.l)?.mode ?? 'invalid';
+        result.stretchModes ??= {}; result.stretchModes[mode] = (result.stretchModes[mode] ?? 0) + 1;
+      }
       unknown ||= bounds.unknown;
       if (!bounds.box.isEmpty()) total.union(bounds.box.applyMatrix4(new THREE.Matrix4().fromArray(edge.placementTransformMatrix)));
       for (const e of doc.entities) if (e.visible) {

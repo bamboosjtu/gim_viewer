@@ -28,6 +28,9 @@ export type GeometryDiagnosticReason =
   | 'unknown';
 
 export type GeometryDiagnosticSource = 'cold' | 'warm' | 'raw';
+export interface GeometryRootFailure {
+  modPath: string; rootId: number; dependencies: { id: number; reason: string }[];
+}
 
 export interface GeometryDiagnostic {
   devPath: string;
@@ -42,6 +45,9 @@ export interface GeometryDiagnostic {
   unsupportedSourceCount?: number;
   partialSourceCount?: number;
   unsupportedPrimitiveTypeCounts: Record<string, number>;
+  failedVisibleRootCount?: number;
+  failedVisibleRoots?: GeometryRootFailure[];
+  simplifiedBooleans?: number;
   /**
    * Human-readable detail is intentionally short and non-sensitive.  It is
    * suitable for the inspector, while raw paths remain in the source tab.
@@ -64,6 +70,9 @@ export interface SerializationDiagnosticInput {
   partialSourceCount?: number;
   unsupportedPrimitiveTypeCounts?: Record<string, number>;
   reason?: GeometryDiagnosticReason;
+  failedVisibleRootCount?: number;
+  failedVisibleRoots?: GeometryRootFailure[];
+  simplifiedBooleans?: number;
 }
 
 export interface ManifestDiagnosticInput {
@@ -135,6 +144,9 @@ export function diagnosticFromSerialization(
     ...(input.unsupportedSourceCount != null ? { unsupportedSourceCount: input.unsupportedSourceCount } : {}),
     ...(input.partialSourceCount != null ? { partialSourceCount: input.partialSourceCount } : {}),
     unsupportedPrimitiveTypeCounts: { ...(input.unsupportedPrimitiveTypeCounts ?? {}) },
+    failedVisibleRootCount: input.failedVisibleRootCount,
+    failedVisibleRoots: input.failedVisibleRoots?.map(root => ({ ...root, dependencies: root.dependencies.map(dep => ({ ...dep })) })),
+    simplifiedBooleans: input.simplifiedBooleans,
     ...(defaultDetail(status) ? { detail: defaultDetail(status) } : {}),
   };
 }

@@ -32,6 +32,8 @@ ready 含义以 [架构](architecture.md#配置与加载状态) 为准。`allIfc
 
 原始 IFC 的百分比由当前 Fragments `IfcImporter` 按几何类别、属性、关系和序列化阶段报告，不是已读取字节或已完成构件的比例。某一类别的同步 `StreamMeshes` 返回前可能没有新的百分比；必须结合 Worker CPU、主线程 heartbeat、输入响应和最终文件状态区分计算长尾与界面阻塞。 Worker 隔离同步转换不等于减少几何计算时间，也不保证后续 DEV 编译没有主线程长任务。
 
+设备 LOD0 的 Boolean 使用实体表面组合与相交对求值，LOD1/2 保留精确 CSG。记录 booleanEvaluations、disjointBooleanPairs、simplifiedBooleans 的次数，并与 booleanMs、合并和导出墙钟分别报告；减少求值工作量不能表述为同一次 CSG 的算法加速。状态统计中的已处理 occurrence 包含失败终态，实际显示、部分表示与当前视图成功状态另计。
+
 桌面 MOD 文件加载在已完成的 primitive 烘焙和递归 Boolean 运算之间按时间片让出主线程；同步文本转换接口仍采用相同的运算顺序。单次 CSG 运算、合并和 GLB 序列化仍需分别测量，时间片预算不能解释为这些操作的最大耗时，也不能替代完整加载和持续响应验收。
 
 ## 样本与运行条件

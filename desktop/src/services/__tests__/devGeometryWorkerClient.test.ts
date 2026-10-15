@@ -16,6 +16,28 @@ class ControlledWorker {
   }
 }
 afterEach(() => { vi.unstubAllGlobals(); ControlledWorker.instances = []; });
+it('selection preempts queued work while old background base requests cannot starve behind fresh visible detail', async () => {
+  vi.stubGlobal('Worker', ControlledWorker); vi.stubGlobal('navigator', { hardwareConcurrency: 8, deviceMemory: 8 });
+  let now = 0;
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+  const client = new DevGeometryPreprocessor([], new Map(), () => true);
+  try {
+    const a = client.compile('DEV/a.dev', 0, 'a', 1), b = client.compile('DEV/b.dev', 0, 'b', 1);
+    const background = client.compile('DEV/bg.dev', 0, 'bg', 4);
+    now = 60000;
+    const detail = client.compile('DEV/detail.dev', 2, 'detail', 2);
+    const selected = client.compile('DEV/selected.dev', 2, 'selected', 0);
+    const [first, second] = ControlledWorker.instances;
+    first.complete(); await a; client.acknowledge('a');
+    expect(first.sent[first.sent.length - 1]).toMatchObject({ key: 'selected' });
+    first.complete(); await selected; client.acknowledge('selected');
+    expect(first.sent[first.sent.length - 1]).toMatchObject({ key: 'bg' });
+    first.complete(); await background; client.acknowledge('bg');
+    expect(first.sent[first.sent.length - 1]).toMatchObject({ key: 'detail' });
+    first.complete(); second.complete(); await Promise.all([detail, b]);
+    client.acknowledge('detail'); client.acknowledge('b');
+  } finally { client.cancel(); clock.mockRestore(); }
+});
 it('compiles alongside IFC, deduplicates templates, prioritizes queued selection and bounds exported results until commit', async () => {
   vi.stubGlobal('Worker', ControlledWorker); vi.stubGlobal('navigator', { hardwareConcurrency: 8, deviceMemory: 8 });
   const releaseIfc = await beginIfcGeometryWork();

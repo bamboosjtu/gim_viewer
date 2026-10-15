@@ -35,6 +35,8 @@ export interface XmlModGeometryDiagnostics {
   malformedEntityCount: number;
   unsupportedEntityCount: number;
   unsupportedPrimitiveTypeCounts: Record<string, number>;
+  failedVisibleRoots?: import('./xmlModGeometry.js').BakedGeometryFailure[];
+  simplifiedBooleans?: number;
 }
 
 export const XML_MOD_GEOMETRY_DIAGNOSTICS_KEY = '__gimXmlModDiagnostics';
@@ -92,7 +94,7 @@ function flattenDocumentToGroup(
   const renderableTypes = new Set([
     'Cuboid', 'Cylinder', 'Sphere', 'TruncatedCone', 'Ring',
     'CircularGasket', 'StretchedBody', 'PorcelainBushing', 'TerminalBlock', 'Wire', 'Cable',
-    'RotationalEllipsoid', 'BeamChannelLike', 'Boolean',
+    'RotationalEllipsoid', 'BeamChannelLike', 'Boolean', 'OffsetRectangularTable',
   ]);
   let unsupportedEntityCount = doc.malformedEntityCount;
   for (const entity of doc.entities) {
@@ -131,10 +133,10 @@ function flattenDocumentToGroup(
     }
   });
   const hasRenderable = renderableEntityCount > 0;
-  const status: XmlModGeometryStatus = doc.declaredEntityCount === 0
+  const status: XmlModGeometryStatus = doc.declaredEntityCount === 0 || (!hasRenderable && unsupportedEntityCount === 0 && byMaterial.failures.length === 0)
     ? 'empty'
     : hasRenderable
-      ? (unsupportedEntityCount > 0 ? 'partial' : 'renderable')
+      ? (unsupportedEntityCount > 0 || byMaterial.failures.length > 0 ? 'partial' : 'renderable')
       : 'unsupported';
   merged.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY] = {
     status,
@@ -143,6 +145,8 @@ function flattenDocumentToGroup(
     malformedEntityCount: doc.malformedEntityCount,
     unsupportedEntityCount,
     unsupportedPrimitiveTypeCounts,
+    failedVisibleRoots: byMaterial.failures,
+    simplifiedBooleans: byMaterial.simplifiedBooleans,
   } satisfies XmlModGeometryDiagnostics;
 
   // 不设置 group.scale：mm→m 缩放已在 collectBakedGeometriesByMaterial 中烘焙到顶点

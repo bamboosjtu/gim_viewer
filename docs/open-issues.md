@@ -26,7 +26,7 @@ P0 为正确性或核心流程阻断，P1 为主要效率、可维护性或拟�
 | D-16 | P0 / 默认策略待验收 | 02 single-pass early semantic 已通过功能 smoke；Native eligibility 允许 01/02/04，03 因 checkpoint 后仅余 732 bytes 正常 fallback。02 三次完整有效 cold 观察 core 约 31.5–32.2 秒、first 约 34.7–35.3 秒；当前默认关闭 | 01 未在既定 90 秒内完成正式发布观察；早关闭后 v26 receipt 未发布、重开继续 cold，MSIX 两种 root spelling 的独立文件/副本清理证据仍需闭环。不扩大超时，也不用结构有效宣称默认门禁通过 |
 | D-17 | P1 / 待开发 | IFC 浏览 LOD 的首次远景转换、未缓存近景仍有开销，区域派生缓存尚缺容量管理，未知开洞继续保留原求值 | 维持自动视域/30m 恢复与已识别小孔策略；补齐真实树到区域细节高亮、全局重任务资源竞争和缓存容量管理，不把远景缓存命中当成全站细节完成 |
 | D-18 | P1 / 启动待核验 | 当前本机 Portable 启动检查确认了进程和 Tauri 窗口创建，未取得 WebView 页面就绪证据；构建和 ZIP 完整性校验已通过 | 复核普通交互启动、Fixed Runtime 环境和页面就绪；启动方式受控且页面可交互后再判定桌面启动通过，不将检查进程创建等同于软件可用 |
-| D-21 | P1 / 待开发 | 设备细节缓存未命中时，磁盘惰性来源仍按文件经主线程原生 RPC 读取，近景首次补充有长尾风险；全站基础表示的内存驻留也偏高 | 保留当前两 Worker 并发与输出背压，依据请求来源链评估有界批量读取和模板/元数据驻留；保持按需范围、原生安全校验与旧表示连续显示，单列缓存未命中细节、阶段墙钟和连续响应，不能用减少设备覆盖换取提速 |
+| D-21 | P1 / 待开发 | 设备细节缓存未命中时，磁盘惰性来源仍按文件经主线程原生 RPC 读取，LOD1/2 深层精确 CSG 仍有不可中断长尾；全站基础表示的内存驻留也偏高 | 保留当前两 Worker 并发与输出背压，依据请求来源链评估有界批量读取和模板/元数据驻留；保持按需范围、原生安全校验与旧表示连续显示，单列缓存未命中细节、阶段墙钟和连续响应，不能用减少设备覆盖换取提速 |
 | D-22 | P1 / 待定性 | `npm test` 仍有 2 个并发超时失败：`selectionInteraction.test.ts` 的“nested parent → child selections share the physical root load while the child owns the final commit”与“A slow geometry remains a resource but cannot reclaim B camera or material highlight”都以 `Test timed out in 5000ms` 结束；同批次另有 2 个失败来自 Rust 测试无法创建临时 SQLite 库，属环境因素，不计入本条 | 在固定环境复跑并定位任务残留与资源竞争；保留选择提交权与相机断言，不移除失败测试或无限增大 timeout。修复后 `npm test` 除环境因素外应无失败 |
 
 现行模板共享和 IFC/Spatial Worker 已存在，不作为待开发项重复立项。
