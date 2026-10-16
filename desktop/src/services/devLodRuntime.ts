@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
-import { chooseDeviceLod, deviceViewMetrics, type DeviceLod } from '../viewer/devLodPolicy.js';
+import { chooseDeviceLod, deviceViewMetrics, createDeviceViewContext, type DeviceLod } from '../viewer/devLodPolicy.js';
 import { ByteLru } from '../utils/byteLru.js';
 import { collectCbmDeviceInstances, parseCbmTransformMatrix, ensureGeometryLayers } from './modAutoLoadService.js';
 import { DevGlbTemplate, createLegacyEquivalentPlacementMatrix, validateDevGlbTemplate } from './devGlbTemplateRuntime.js';
 import { parseDevGlbAsset, type DevGlbSerializationResult } from './glbCacheService.js';
 import { createDevGeometryPreprocessor, type DevGeometryPreprocessor } from './devGeometryWorkerClient.js';
-import { invalidGeometryExtent } from '../viewer/geometryBounds.js';
+import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
 import { DEV_GEOMETRY_VERSION, DEV_SPATIAL_CATALOG_VERSION, boxTuple, tupleBox, type DevSourceBounds, type DevSpatialOccurrence } from './devSpatialCatalog.js';
 import { readDevArtifact, writeDevArtifact, deleteDevArtifact } from '@desktop/devLodCache.js';
 import { readCachedEntry } from '@desktop/database.js';
@@ -18,7 +18,7 @@ import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js'
 import { agedWorkPriority } from '../utils/workPriority.js';
 
 interface CachedTemplate { result: DevGlbSerializationResult; sha: string; sourceInvalid?: { message: string; evidence: string } }
-interface TemplateRow { template: DevGlbTemplate; sha: string; status: DevGlbSerializationResult['status']; diagnostics: DevGlbSerializationResult['diagnostics'] }
+interface TemplateRow { bounds: THREE.Box3; template: DevGlbTemplate; sha: string; status: DevGlbSerializationResult['status']; diagnostics: DevGlbSerializationResult['diagnostics'] }
 interface Occurrence { entry: DevSpatialOccurrence; label: string; inView: boolean; box: THREE.Box3 | null; desired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
 const normalize = (path: string) => /^dev\//i.test(path.replace(/\\/g, '/')) ? path.replace(/\\/g, '/') : `DEV/${path}`;
 const hash = async (bytes: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))].map(v => v.toString(16).padStart(2, '0')).join('');
@@ -30,13 +30,49 @@ const belongsTo = (object: THREE.Object3D, root?: THREE.Object3D) => {
 /** Session owner for catalog, templates and camera-driven occurrence representations. */
 export class DevLodRuntime {
   readonly diagnostics = { catalogReady: false, currentViewReady: false, currentViewSettled: false, baseRepresentationsSettled: false, baseRepresentationsReady: false, allStationReady: false, catalogHits: 0,
-    templateHits: 0, compiled: [0, 0, 0], occurrences: 0, shown: 0, pending: 0, unknownBounds: 0,
+    templateHits: 0, compiled: [0, 0, 0], occurrences: 0, uniqueDevSources: 0, sceneCommitCount: 0, sceneCommitMaxMs: 0, shown: 0, pending: 0, unknownBounds: 0,
     absoluteConeCount: 0, templateResidentBytes: 0, directoryCompleted: 0, readyOccurrences: 0, failedOccurrences: 0,
     emptyOccurrences: 0, unsupportedOccurrences: 0, partialOccurrences: 0, templateParses: 0, templateEvictions: 0, workerCount: 0, activeDevices: [] as string[],
     anchorReady: false, errors: [] as string[], fingerprints: [] as Record<string, unknown>[] };
   private readonly perf = perfCurrentSession();
   private released = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private cameraTimer: ReturnType<typeof setTimeout> | null = null;
+  private statusTimer: ReturnType<typeof setTimeout> | null = null;
+  private commitTimer: ReturnType<typeof setTimeout> | null = null;
+  private commits: Array<{ priority: number; root?: string; run: () => void; reject: (e: Error) => void }> = [];
+  private cameraMovingUntil = 0;
+  private cameraSchedule = () => {
+    this.diagnostics.currentViewReady = false;
+    this.diagnostics.currentViewSettled = false;
+    this.cameraMovingUntil = performance.now() + 200;
+    if (this.cameraTimer) clearTimeout(this.cameraTimer);
+    this.cameraTimer = setTimeout(() => { this.cameraTimer = null; this.update(); }, 200);
+  };
+  private requestReady(): void {
+    if (this.statusTimer || !this.current()) return;
+    this.statusTimer = setTimeout(() => { this.statusTimer = null; this.ready(); }, 100);
+  }
+  private submit(priority: number, run: () => void, root?: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.commits.push({ priority, root, run: () => { try { run(); resolve(); } catch (e) { reject(e); } }, reject });
+      this.drainCommits();
+    });
+  }
+  private drainCommits(): void {
+    if (this.commitTimer || !this.current()) return;
+    this.commitTimer = setTimeout(() => {
+      this.commitTimer = null;
+      const started = performance.now();
+      this.commits.sort((a, b) => a.priority - b.priority);
+      while (this.commits.length && this.current()) {
+        if (performance.now() < this.cameraMovingUntil && this.commits[0].priority > 0) break;
+        this.commits.shift()!.run();
+        if (performance.now() - started >= 4) break;
+      }
+      if (this.commits.length) this.drainCommits();
+    }, 16);
+  }
   private selected = '';
   private pending = new Map<string, Promise<TemplateRow | null>>();
   private nullResults = new Map<string, 'empty' | 'unsupported'>();
@@ -85,8 +121,8 @@ export class DevLodRuntime {
     }
     this.worker = createDevGeometryPreprocessor(this.state, this.session, files);
     this.diagnostics.workerCount = this.worker.workerCount;
-    this.worker.onActivity = () => this.ready();
-    (this.ctx.world.camera as any).controls?.addEventListener('update', this.schedule);
+    this.worker.onActivity = () => this.requestReady();
+    (this.ctx.world.camera as any).controls?.addEventListener('update', this.cameraSchedule);
     const seeds = collectCbmDeviceInstances(this.state.currentCbmTree);
     const byDev = new Map<string, typeof seeds>();
     for (const seed of seeds) {
@@ -96,6 +132,7 @@ export class DevLodRuntime {
         label: seed.name || seed.devSymbolName || '设备', inView: true, box: null, desired: 0, displayed: 0 });
     }
     this.diagnostics.occurrences = seeds.length;
+    this.diagnostics.uniqueDevSources = byDev.size;
     this.notifyCoordinateAnchor(); this.update(); // Compilation can begin before any IFC is ready.
     for (const [dev, instances] of byDev) {
       if (!this.current()) return;
@@ -124,7 +161,7 @@ export class DevLodRuntime {
         }
       }
       this.diagnostics.directoryCompleted += instances.length;
-      this.ready();
+      this.requestReady();
       if (instances.some(seed => seed.path === this.selected)) void this.select(this.selected).catch(error => console.warn('[DEV selected]', error));
       this.schedule(); // Incremental directory, without waiting for the last source.
     }
@@ -227,7 +264,7 @@ export class DevLodRuntime {
         throw Error(`DEV GLB invalid: ${dev}`);
       }
       if (generated && this.session.sourceSha256) await writeDevArtifact('templates', key, artifact, this.session);
-      const row = { template: new DevGlbTemplate(dev, parsed.scene, this.session), sha: artifact.sha, status: artifact.result.status, diagnostics: artifact.result.diagnostics };
+      const row = { bounds: new THREE.Box3().setFromObject(parsed.scene), template: new DevGlbTemplate(dev, parsed.scene, this.session), sha: artifact.sha, status: artifact.result.status, diagnostics: artifact.result.diagnostics };
       this.diagnostics.templateParses++;
       if (!this.current()) { row.template.dispose(); return null; }
       const pinned = this.pinned(); pinned.add(key); // caller commits or releases before next trim
@@ -251,7 +288,7 @@ export class DevLodRuntime {
     if (!this.current()) return;
     this.diagnostics.currentViewReady = false;
     this.diagnostics.currentViewSettled = false;
-    if (this.timer) clearTimeout(this.timer);
+    if (this.timer) return;
     this.timer = setTimeout(() => { this.timer = null; this.update(); }, 200);
   };
   private update(): void {
@@ -260,10 +297,11 @@ export class DevLodRuntime {
     const camera = (this.ctx.world.camera as any).three as THREE.Camera;
     const canvas = (this.ctx.world.renderer as any)?.three?.domElement as HTMLCanvasElement | undefined;
     const rect = canvas?.getBoundingClientRect();
+    const view = createDeviceViewContext(camera, rect?.width || 1000, rect?.height || 800);
     const wanted = new Set<string>();
     for (const row of this.rows.values()) {
       const selected = row.entry.rootOccurrence === this.selected;
-      const metrics = this.anchor && row.box ? deviceViewMetrics(row.box, camera, rect?.width || 1000, rect?.height || 800) : null;
+      const metrics = this.anchor && row.box ? deviceViewMetrics(row.box, camera, rect?.width || 1000, rect?.height || 800, view) : null;
       row.inView = selected || !metrics || metrics.visible;
       // Unknown ranges compile actual supported geometry automatically. No
       // invented box, false culling or tree-selection prerequisite is used.
@@ -276,27 +314,39 @@ export class DevLodRuntime {
       }
       const key = this.key(row.entry.devPath, lod); wanted.add(key);
       const priority = selected ? 0 : !row.group && row.inView ? 1 : lod > 0 ? 2 : 4;
-      if (row.key !== key && row.failedKey !== key) void this.render(row, lod, priority).catch(e => this.failed(row, e, key));
+      if (!['empty', 'unsupported'].includes(row.entry.templateStatus) && row.key !== key && row.failedKey !== key) void this.render(row, lod, priority).catch(e => this.failed(row, e, key));
     }
     this.worker.cancelQueued(wanted); this.templates.trim(this.pinned());
     for (const [key, waiter] of this.templateWaiters) if (!wanted.has(key)) {
       this.templateWaiters.delete(key); waiter.reject(new DOMException('DEV request left the current view', 'AbortError'));
     }
     this.diagnostics.templateResidentBytes = this.templates.bytes;
-    this.ready();
+    this.requestReady();
   }
-  private async render(row: Occurrence, lod: DeviceLod, priority: number): Promise<void> {
+  private rendering = new WeakMap<Occurrence, Map<string, Promise<void>>>();
+  private render(row: Occurrence, lod: DeviceLod, priority: number): Promise<void> {
+    let tasks = this.rendering.get(row);
+    if (!tasks) { tasks = new Map(); this.rendering.set(row, tasks); }
+    const key = this.key(row.entry.devPath, lod);
+    const existing = tasks.get(key); if (existing) return existing;
+    const task = this.renderOnce(row, lod, priority).finally(() => tasks!.delete(key));
+    tasks.set(key, task); return task;
+  }
+  private async renderOnce(row: Occurrence, lod: DeviceLod, priority: number): Promise<void> {
     const key = this.key(row.entry.devPath, lod);
     this.placementUsers.set(key, (this.placementUsers.get(key) ?? 0) + 1);
     try {
     const template = await this.template(row.entry.devPath, lod, priority);
     if (!this.current() || row.desired !== lod || row.key === key) return;
-    if (!template) { row.entry.templateStatus = this.nullResults.get(key) ?? 'failed'; this.ready(); return; }
+    if (!template) { row.entry.templateStatus = this.nullResults.get(key) ?? 'failed'; this.requestReady(); return; }
     if (!this.anchor) return; // Local GLB is usable; scene placement still awaits the first IFC frame.
+    await this.submit(priority, () => {
+    if (!this.current() || row.desired !== lod || row.key === key) return;
     const started = performance.now();
     const group = template.template.createPlacement({ contract: 'source-template', rootOccurrence: row.entry.rootOccurrence,
       instanceKey: row.entry.instanceKey, placementMatrix: row.entry.placementMatrix, projectSourceToViewerMatrix: this.anchor });
-    const invalidPlacement = invalidGeometryExtent(group);
+    const worldBounds = template.bounds.clone().applyMatrix4(group.matrix);
+    const invalidPlacement = ![...worldBounds.min.toArray(), ...worldBounds.max.toArray()].every(Number.isFinite) ? 'non-finite-placement' : Math.max(...worldBounds.getSize(new THREE.Vector3()).toArray()) > GEOMETRY_MAX_EXTENT_M ? 'oversized-placement' : null;
     if (invalidPlacement) { group.clear(); throw Error(`DEV placement rejected: ${row.entry.rootOccurrence}: ${invalidPlacement}`); }
     group.userData.deviceLod = lod;
     group.name = row.entry.instanceKey;
@@ -316,7 +366,7 @@ export class DevLodRuntime {
       highlightModGroups(this.state, replacements);
     }
     if (this.diagnostics.fingerprints.length < 64 || row.entry.rootOccurrence === this.selected) {
-      const local = new THREE.Box3().setFromObject(template.template.scene, true), world = new THREE.Box3().setFromObject(group, true);
+      const local = template.bounds, world = worldBounds;
       const fingerprint = { sourceSha: this.session.sourceSha256, devPath: row.entry.devPath, instanceKey: row.entry.instanceKey, lod,
         templateSha: template.sha, localBounds: tupleBox(local), placementMatrix: row.entry.placementMatrix,
         firstIfc: this.state.currentIfcEntries[0]?.path, projectMatrix: this.state.projectSourceToViewerMatrix?.toArray(),
@@ -326,9 +376,12 @@ export class DevLodRuntime {
       perfMark('DEV placement fingerprint', fingerprint, this.perf);
     }
     this.diagnostics.shown = this.state.loadedXmlModGroups.size;
+    this.diagnostics.sceneCommitCount++;
+    this.diagnostics.sceneCommitMaxMs = Math.max(this.diagnostics.sceneCommitMaxMs, performance.now() - started);
     perfMark('DEV scene commit', { key, instanceKey: row.entry.instanceKey, durationMs: performance.now() - started }, this.perf);
-    this.ready();
+    this.requestReady();
     this.schedule(); // Reconsider detail only after a base representation exists.
+    }, row.entry.rootOccurrence);
     } finally {
       const users = (this.placementUsers.get(key) ?? 1) - 1;
       if (users) this.placementUsers.set(key, users); else this.placementUsers.delete(key);
@@ -345,7 +398,7 @@ export class DevLodRuntime {
     setGeometryDiagnostic(this.state, diagnosticForFailure(row.entry.devPath,
       error instanceof InvalidDevGeometryError && error.sourceEvidence ? 'source-invalid' : 'parse-failed',
       error instanceof InvalidDevGeometryError ? error.source : 'cold', String(error)));
-    this.ready();
+    this.requestReady();
   }
   private ready(): void {
     if (!this.current()) return;
@@ -354,9 +407,9 @@ export class DevLodRuntime {
     const requestedComplete = (r: Occurrence) => r.entry.templateStatus === 'empty' || r.entry.templateStatus === 'unsupported'
       || r.key === this.key(r.entry.devPath, r.desired!);
     const requestFailed = (r: Occurrence) => r.failedKey === this.key(r.entry.devPath, r.desired!);
-    this.diagnostics.currentViewSettled = this.diagnostics.anchorReady && this.diagnostics.catalogReady && visible.every(r => requestedComplete(r) || requestFailed(r));
+    this.diagnostics.currentViewSettled = !this.cameraTimer && this.diagnostics.anchorReady && this.diagnostics.catalogReady && visible.every(r => requestedComplete(r) || requestFailed(r));
     this.diagnostics.baseRepresentationsSettled = this.diagnostics.anchorReady && this.diagnostics.catalogReady && rows.every(r => complete(r) || requestFailed(r));
-    const ready = this.diagnostics.anchorReady && this.diagnostics.catalogReady && visible.every(r => r.entry.templateStatus === 'empty' || r.entry.templateStatus === 'unsupported'
+    const ready = !this.cameraTimer && this.diagnostics.anchorReady && this.diagnostics.catalogReady && visible.every(r => r.entry.templateStatus === 'empty' || r.entry.templateStatus === 'unsupported'
       || r.key === this.key(r.entry.devPath, r.desired!));
     if (ready && !this.diagnostics.currentViewReady) perfMark('DEV current view ready', { shown: this.diagnostics.shown,
       requested: visible.length, compiled: [...this.diagnostics.compiled], failed: this.diagnostics.errors.length }, this.perf);
@@ -398,6 +451,7 @@ export class DevLodRuntime {
   async select(rootOccurrence: string): Promise<THREE.Group[]> {
     if (!this.current()) return [];
     this.selected = rootOccurrence;
+    for (const commit of this.commits) if (commit.root === rootOccurrence) commit.priority = 0;
     if (!this.rows.has(rootOccurrence)) await this.catalogDone;
     const row = this.rows.get(rootOccurrence);
     if (!row || !this.current() || this.selected !== rootOccurrence) return [];
@@ -417,7 +471,12 @@ export class DevLodRuntime {
     for (const waiter of this.templateWaiters.values()) waiter.reject(new DOMException('DEV session expired', 'AbortError'));
     this.templateWaiters.clear();
     if (this.timer) clearTimeout(this.timer);
-    (this.ctx.world.camera as any).controls?.removeEventListener('update', this.schedule);
+    if (this.cameraTimer) clearTimeout(this.cameraTimer);
+    if (this.statusTimer) clearTimeout(this.statusTimer);
+    if (this.commitTimer) clearTimeout(this.commitTimer);
+    for (const commit of this.commits) commit.reject(new DOMException('DEV session expired', 'AbortError'));
+    this.commits = [];
+    (this.ctx.world.camera as any).controls?.removeEventListener('update', this.cameraSchedule);
     this.worker?.cancel();
     for (const row of this.rows.values()) { if (row.group && this.state.highlightedModState?.groups.some(object => belongsTo(object, row.group))) resetModHighlight(this.state); row.group?.removeFromParent(); this.state.loadedXmlModGroups.delete(row.entry.instanceKey); }
     this.templates.clear(); this.rows.clear(); this.catalogByDev.clear(); this.state.deviceUnknownBounds.clear();

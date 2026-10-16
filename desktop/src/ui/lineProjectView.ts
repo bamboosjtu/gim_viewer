@@ -985,7 +985,10 @@ let currentLineInspectorNode: GimGraphNode | null = null;
 let currentLineInspectorSourcePaths = new Set<string>();
 
 /** 销毁线路地图及 MapLibre 资源。 */
+let mapCreationController: AbortController | null = null;
 function destroyLineMapResources(): void {
+  mapCreationController?.abort();
+  mapCreationController = null;
   maplibreProbeGeneration++;
   for (const fn of maplibreInteractionCleanup) {
     try { fn(); } catch { /* ignore */ }
@@ -1615,6 +1618,7 @@ export function renderLineProjectPanels(
     }
     maplibreInteractionCleanup = [];
     const myGen = ++maplibreProbeGeneration;
+    const creation = mapCreationController = new AbortController();
     // 在线 raster 不可用时回退 Canvas-only
     //  - 只触发一次（fallbackToCanvasOnlyCalled 守卫）
     //  - 可能在 probe 创建期间（await 中）或之后触发
@@ -1682,7 +1686,9 @@ export function renderLineProjectPanels(
         const initialBounds: [number, number, number, number] = [
           mapData.bbox.minLng, mapData.bbox.minLat, mapData.bbox.maxLng, mapData.bbox.maxLat,
         ];
+        if (creation.signal.aborted) return;
         const probe = await createMapLibreProbe(container, {
+          signal: creation.signal,
           initialBounds,
           basemapMode: runtimeBasemapMode,
           pmtiles: {
@@ -1760,6 +1766,7 @@ export function renderLineProjectPanels(
         });
         debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2：底图 + Canvas overlay + 交互桥接 初始化成功');
       } catch (err) {
+        if (creation.signal.aborted) return;
         debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] M4-A2：初始化失败，保持 Canvas-only', err);
         // M4-A2 Finalization：初始化失败时状态保持为 Canvas-only（已在外层渲染时设置）
         // 此处不显式 setBasemapStatus，避免覆盖外层的 'canvas-only' 状态
@@ -1958,6 +1965,7 @@ function switchBasemap(
   if (!ENABLE_MAPLIBRE_EXPERIMENT) return;
 
   const myGen = maplibreProbeGeneration;
+  const creation = mapCreationController = new AbortController();
   let fallbackCalled = false;
   function fallback(reason: unknown): void {
     if (fallbackCalled) return;
@@ -1983,6 +1991,7 @@ function switchBasemap(
         mapData.bbox.minLng, mapData.bbox.minLat, mapData.bbox.maxLng, mapData.bbox.maxLat,
       ];
       const probe = await createMapLibreProbe(container, {
+        signal: creation.signal,
         initialBounds,
         basemapMode: newMode,
         pmtiles: {
@@ -2036,6 +2045,7 @@ function switchBasemap(
         currentShowMessage?.(`已切换到${basemapModeLabel(newMode)}`);
       } catch { /* ignore */ }
     } catch (err) {
+      if (creation.signal.aborted) return;
       debugWarn(DEBUG_LINE_MAP, '[MapLibre overlay] 切换底图失败，保持 Canvas-only', err);
       try {
         currentShowMessage?.(`切换到${basemapModeLabel(newMode)}失败`);

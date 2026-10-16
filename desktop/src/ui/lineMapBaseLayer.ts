@@ -97,6 +97,8 @@ export interface PmtilesOptions {
 export interface CreateMapLibreProbeOptions {
   /** 初始视图 bbox [minLng, minLat, maxLng, maxLat]，加载后自动 fitBounds */
   initialBounds?: [number, number, number, number];
+  /** Owns initialization as well as the returned map. */
+  signal?: AbortSignal;
   /** M4-A2 第 2 轮：PMTiles 瓦片配置（默认不启用，需 basemapMode='pmtiles' 才尝试加载） */
   pmtiles?: PmtilesOptions;
   /**
@@ -151,7 +153,9 @@ export async function createMapLibreProbe(
   options?: CreateMapLibreProbeOptions,
 ): Promise<LineMapBaseLayerHandle> {
   // 动态 import：默认关闭时 maplibre-gl 不会进入主 bundle
+  options?.signal?.throwIfAborted();
   const maplibre = await import('maplibre-gl');
+  options?.signal?.throwIfAborted();
 
   // ---- M4-A2 第 3 轮：底图模式选择 ----
   // 优先级：tianditu-* > osm-online > pmtiles > empty
@@ -224,6 +228,7 @@ export async function createMapLibreProbe(
     height: 100%;
     z-index: 0;
   `;
+  if (options?.signal?.aborted) { pmtilesProtocolHandle?.destroy(); options.signal.throwIfAborted(); }
   container.appendChild(mountDiv);
 
   // 创建 MapLibre 实例
@@ -273,8 +278,13 @@ export async function createMapLibreProbe(
     }
   }
 
+  let detachAbort = () => {};
   try {
     await new Promise<void>((resolve, reject) => {
+    const abort = () => reject(new DOMException('Map session expired', 'AbortError'));
+    options?.signal?.addEventListener('abort', abort, { once: true });
+    detachAbort = () => options?.signal?.removeEventListener('abort', abort);
+    if (options?.signal?.aborted) { abort(); return; }
     const onLoad = () => {
       // 在线 raster 模式下 load 后仍需监听 tile error
       // 原因：style load 成功 ≠ 瓦片请求成功；瓦片请求在 load 后才大规模发起
@@ -332,6 +342,7 @@ export async function createMapLibreProbe(
     }
     });
   } catch (error) {
+    detachAbort();
     // 初始化阶段 reject 时调用方尚未拿到 handle，destroyLineMapResources
     // 无法清理这个 mount。这里必须对 map、监听器、mount 和协议做回滚，
     // 否则线路→变电切换会留下不可见但仍占用 WebGL/DOM 的地理图层。
@@ -352,6 +363,7 @@ export async function createMapLibreProbe(
     throw error;
   }
 
+  detachAbort();
   let destroyed = false;
 
   // M4-A2：pointer 事件桥接（mousemove / click / mouseleave）

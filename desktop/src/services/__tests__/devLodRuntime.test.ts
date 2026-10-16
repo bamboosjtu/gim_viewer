@@ -48,3 +48,36 @@ it('late failures cannot poison a newer LOD request; explicit selection retries 
   expect(runtime.diagnostics.currentViewReady).toBe(true);
   expect(runtime.diagnostics.failedOccurrences).toBe(0);
 });
+
+it('commit queue yields between batches, prioritizes selection and cancels expired work', async () => {
+  vi.useFakeTimers();
+  try {
+    const { internal } = fixture(); const calls: number[] = [];
+    internal.cameraMovingUntil = performance.now() + 200;
+    const background = internal.submit(2, () => calls.push(2));
+    const selected = internal.submit(0, () => calls.push(0));
+    await vi.advanceTimersByTimeAsync(16); await selected;
+    expect(calls).toEqual([0]);
+    internal.cameraMovingUntil = 0;
+    await vi.advanceTimersByTimeAsync(16); await background;
+    expect(calls).toEqual([0, 2]);
+    internal.cameraMovingUntil = performance.now() + 200;
+    const expired = internal.submit(2, () => calls.push(9));
+    const rejected = expect(expired).rejects.toMatchObject({ name: 'AbortError' });
+    internal.state.deviceUnknownBounds = new Map(); internal.ctx.world = { camera: {} };
+    internal.release(); await rejected;
+    await vi.advanceTimersByTimeAsync(300); expect(calls).toEqual([0, 2]);
+  } finally { vi.useRealTimers(); }
+});
+
+it('camera motion invalidates readiness until the new view has been evaluated', () => {
+  vi.useFakeTimers();
+  try {
+    const { internal, runtime } = fixture(); internal.rows.set('root', occurrence(1));
+    internal.ready(); expect(runtime.diagnostics.currentViewReady).toBe(true);
+    internal.cameraSchedule(); internal.ready();
+    expect(runtime.diagnostics.currentViewReady).toBe(false);
+    expect(runtime.diagnostics.currentViewSettled).toBe(false);
+    clearTimeout(internal.cameraTimer);
+  } finally { vi.useRealTimers(); }
+});

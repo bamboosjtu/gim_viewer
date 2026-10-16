@@ -1,6 +1,6 @@
 [package]
 name = "gim-viewer"
-version = "0.0.4"
+version = "0.0.5"
 description = "GIM 阅读器"
 authors = ["bamboosjtu"]
 edition = "2021"

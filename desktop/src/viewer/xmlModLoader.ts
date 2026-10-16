@@ -279,6 +279,30 @@ export function applyPlacementTransformToSceneUnits(
     const mesh = obj as THREE.Mesh;
     if (mesh.geometry) {
       mesh.geometry.applyMatrix4(matrix);
+      // A baked reflection reverses orientation; Object3D's determinant-based
+      // front-face handling no longer sees it after the matrix becomes vertices.
+      if (matrix.determinant() < 0) {
+        const geometry = mesh.geometry;
+        if (geometry.index) {
+          const index = geometry.index;
+          for (let i = 0; i < index.count; i += 3) {
+            const b = index.getX(i + 1);
+            index.setX(i + 1, index.getX(i + 2)); index.setX(i + 2, b);
+          }
+          index.needsUpdate = true;
+        } else {
+          for (const attribute of Object.values(geometry.attributes)) {
+            for (let i = 0; i < attribute.count; i += 3) {
+              for (let c = 0; c < attribute.itemSize; c++) {
+                const b = attribute.getComponent(i + 1, c);
+                attribute.setComponent(i + 1, c, attribute.getComponent(i + 2, c));
+                attribute.setComponent(i + 2, c, b);
+              }
+            }
+            attribute.needsUpdate = true;
+          }
+        }
+      }
     }
   });
 }

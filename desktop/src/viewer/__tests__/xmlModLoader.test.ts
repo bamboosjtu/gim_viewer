@@ -5,6 +5,7 @@ import {
   loadXmlModFromFiles,
   columnMajorToMatrix4,
   disposeXmlModGroup,
+  applyPlacementTransformToSceneUnits,
 } from '../xmlModLoader.js';
 
 describe('loadXmlModFromText', () => {
@@ -250,4 +251,23 @@ describe('disposeXmlModGroup', () => {
     const group = new THREE.Group();
     expect(() => disposeXmlModGroup(group)).not.toThrow();
   });
+});
+
+// Bounds alone cannot detect reflected faces disappearing under FrontSide.
+for (const indexed of [true, false]) it(`assembly reflection preserves outward winding (indexed=${indexed})`, () => {
+  const geometry = indexed ? new THREE.BoxGeometry(2, 3, 4) : new THREE.BoxGeometry(2, 3, 4).toNonIndexed();
+  const group = new THREE.Group(); group.add(new THREE.Mesh(geometry));
+  const matrix = new THREE.Matrix4().makeScale(-1, 1, 1).toArray();
+  const check = () => {
+    const p = geometry.getAttribute('position'), n = geometry.getAttribute('normal');
+    for (let i = 0; i < (geometry.index?.count ?? p.count); i += 3) {
+      const ids = [0,1,2].map(j => geometry.index ? geometry.index.getX(i+j) : i+j);
+      const [a,b,c] = ids.map(j => new THREE.Vector3().fromBufferAttribute(p,j));
+      const face = b.sub(a).cross(c.sub(a));
+      expect(face.dot(new THREE.Vector3().fromBufferAttribute(n,ids[0]))).toBeGreaterThan(0);
+    }
+  };
+  applyPlacementTransformToSceneUnits(group, matrix); check();
+  applyPlacementTransformToSceneUnits(group, matrix); check();
+  geometry.dispose();
 });
