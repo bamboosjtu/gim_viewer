@@ -192,3 +192,11 @@ it('BRep arrays classify per connected prism rather than their overall spacing',
   );
   expect(result.small).toEqual([1]);
 });
+
+it('finish only streams omitted fasteners instead of replaying all imported geometry', () => {
+  const all = vi.fn(), streamed = vi.fn(), release = vi.fn();
+  const api: any = { GetLineIDsWithType: () => ({size:()=>1,get:()=>77,delete:release}), StreamMeshes: streamed, StreamAllMeshes: all };
+  new RegionalIndexCollector(api,0).finish({unitScale:1,openingRelations:[]});
+  expect(all).not.toHaveBeenCalled(); expect(streamed).toHaveBeenCalledOnce();
+  expect(streamed.mock.calls[0][1]).toEqual([77,77]); expect(release).toHaveBeenCalledTimes(2);
+});

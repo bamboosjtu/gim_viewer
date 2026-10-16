@@ -7,6 +7,8 @@ import { objectFineGroup } from './ifcObjectFineRuntime.js';
 import type { ObjectFineResult } from './ifcObjectFineData.js';
 import {
   readIfcLodArtifact,
+  readIfcLodArtifacts,
+  writeIfcLodArtifacts,
   writeIfcLodArtifact,
 } from '@desktop/ifcLodCache.js';
 import {
@@ -16,7 +18,8 @@ import {
 import { IfcRegionalInstances } from './ifcRegionalInstances.js';
 
 // A source model can consume hundreds of MB. Serialize regional source work
-// across IFCs, and release its heap after each request; mesh caches outlive it.
+// across IFCs. Keep one source resident for nearby requests, with idle eviction.
+let residentSource: IfcRegionalRuntime | null = null;
 let regionalQueue = Promise.resolve();
 async function acquireRegionalSource(): Promise<() => void> {
   const previous = regionalQueue;
@@ -41,12 +44,18 @@ export class IfcRegionalRuntime {
     skippedSmallOpenings: 0,
     retainedOpenings: 0,
     unknownOpenings: 0,
+    sourceReads:0,sourceBytes:0,sourceChecks:0,sourceOpenCount:0,sourceOpenWallMs:0,
     stage: 'idle',
     error: '',
     regionMs: 0,
   };
   private worker: Worker | null = null;
   private opening: Promise<void> | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private retainSource() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.current() && this.worker) this.idleTimer = setTimeout(() => { if (!this.pending.size) this.closeSource(); }, 30_000);
+  }
   private sequence = 0;
   private pending = new Map<
     number,
@@ -119,6 +128,7 @@ export class IfcRegionalRuntime {
       const bytes = await this.options.readBytes();
       if (!this.current() || !bytes?.byteLength)
         throw Error('Regional source unavailable');
+      this.diagnostics.sourceReads++;this.diagnostics.sourceBytes+=bytes.byteLength;
       this.worker = new Worker(
         new URL('./ifcRegionalWorker.ts', import.meta.url),
         { type: 'module' }
@@ -126,6 +136,9 @@ export class IfcRegionalRuntime {
       this.worker.onmessage = ({ data }) => {
         if (data.stage) {
           this.diagnostics.stage = data.stage;
+          if(data.stage==='source-check')this.diagnostics.sourceChecks++;
+          if(data.stage==='source-open' || data.stage==='source-reopen')this.diagnostics.sourceOpenCount++;
+          if(data.stage==='source-open-complete')this.diagnostics.sourceOpenWallMs+=Number(data.elapsedMs)||0;
           return;
         }
         const p = this.pending.get(data.id);
@@ -210,6 +223,11 @@ export class IfcRegionalRuntime {
     });
   }
   private closeSource() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    if (residentSource === this) residentSource = null;
+    for (const task of this.pending.values()) task.reject(Error("Regional source released"));
+    this.pending.clear();
     this.worker?.terminate();
     this.worker = null;
     this.opening = null;
@@ -222,6 +240,8 @@ export class IfcRegionalRuntime {
       before = this.groups.size;
     const unlock = await acquireRegionalSource();
     const releaseGeometry = await beginIfcGeometryWork();
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (residentSource !== this) { residentSource?.closeSource(); residentSource = this; }
     try {
       if (!this.current() || epoch !== this.epoch) return;
       // sourceToViewer was resolved from the first model's public coordinates.
@@ -250,11 +270,7 @@ export class IfcRegionalRuntime {
       if (this.groups.size !== before) this.instances.rebuild(this.transform);
       if (!this.current() || epoch !== this.epoch) return;
       if (!objects.length) {
-        if (this.pending.size === 0) {
-          this.worker?.terminate();
-          this.worker = null;
-          this.opening = null;
-        }
+
         this.diagnostics.rendered = this.groups.size;
         this.diagnostics.pending = 0;
         return;
@@ -270,10 +286,10 @@ export class IfcRegionalRuntime {
         this.diagnostics.pending = objects.length - start;
         const results = new Map<number, ObjectFineResult>(),
           missing: RegionalObject[] = [];
-        for (const object of batch) {
-          const cached = await readIfcLodArtifact<ObjectFineResult>(
-            `${this.options.cacheKey}|${IFC_NEAR_TEMPLATE_CACHE_VERSION}|${object.expressId}`
-          );
+        const cachedBatch = await readIfcLodArtifacts<ObjectFineResult>(batch.map(object =>
+          `${this.options.cacheKey}|${IFC_NEAR_TEMPLATE_CACHE_VERSION}|${object.expressId}`));
+        for (let i = 0; i < batch.length; i++) {
+          const object = batch[i], cached = cachedBatch[i];
           if (
             cached?.globalId === object.globalId &&
             Array.isArray(cached.parts)
@@ -306,12 +322,10 @@ export class IfcRegionalRuntime {
           for (const result of computed) {
             results.set(result.expressId, result);
             this.diagnostics.computed++;
-            if (this.current())
-              void writeIfcLodArtifact(
-                `${this.options.cacheKey}|${IFC_NEAR_TEMPLATE_CACHE_VERSION}|${result.expressId}`,
-                result
-              );
+
           }
+          if (this.current()) void writeIfcLodArtifacts(computed.map(result => ({
+            key: `${this.options.cacheKey}|${IFC_NEAR_TEMPLATE_CACHE_VERSION}|${result.expressId}`, value: result })));
         }
         if (!this.current() || epoch !== this.epoch) return;
         for (const object of batch) {
@@ -377,9 +391,10 @@ export class IfcRegionalRuntime {
         this.diagnostics.error = String(error);
         this.diagnostics.pending = 0;
       }
+      this.closeSource();
       throw error;
     } finally {
-      this.closeSource();
+      this.retainSource();
       unlock(); releaseGeometry();
       this.busy = false;
       if (this.current() && epoch !== this.epoch) this.schedule();
@@ -416,6 +431,8 @@ export class IfcRegionalRuntime {
     if (cached?.attributes) return cached;
     const unlock = await acquireRegionalSource();
     const releaseGeometry = await beginIfcGeometryWork();
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (residentSource !== this) { residentSource?.closeSource(); residentSource = this; }
     try {
       if (!this.current()) throw Error('Regional model released');
       await this.open();
@@ -423,7 +440,7 @@ export class IfcRegionalRuntime {
       if (this.current()) void writeIfcLodArtifact(key, data);
       return data;
     } finally {
-      this.closeSource();
+      this.retainSource();
       unlock(); releaseGeometry();
     }
   }
@@ -439,8 +456,7 @@ export class IfcRegionalRuntime {
     );
     window.removeEventListener('gim-ifc-detail-mode', this.schedule);
     this.options.ctx.fragments.list.onBeforeDelete.remove(this.disposed);
-    this.worker?.terminate();
-    this.worker = null;
+    this.closeSource();
     for (const p of this.pending.values())
       p.reject(Error('Regional model released'));
     this.pending.clear();

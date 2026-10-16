@@ -708,6 +708,7 @@ pub fn run() {
             db::write_glb_file_binary,
             db::read_glb_file,
             db::read_device_lod_artifact,
+            db::read_device_lod_artifacts,
             db::write_device_lod_artifact,
             db::delete_device_lod_artifact,
             db::batch_read_glb_files,

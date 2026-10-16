@@ -50,9 +50,11 @@ export async function buildSubstationSpatialIndexInWorker(
       if(!isCurrent())throw new DOMException('Spatial parse belongs to an obsolete project','AbortError');
       const file=sources.get(canonical(entry.path)),started=performance.now();
       let bytes:ArrayBuffer|null=null,text:string|null=null,error:string|undefined;
+      const blob=file instanceof Blob ? file : undefined;
       try {
         if(file){
-          if(typeof file.arrayBuffer==='function')bytes=await file.arrayBuffer();
+          if(blob){/* Immutable source backing store is read inside the Worker. */}
+          else if(typeof file.arrayBuffer==='function')bytes=await file.arrayBuffer();
           else if(typeof file.text==='function')text=await file.text();
           else throw new Error('IFC 文件对象不支持 arrayBuffer/text');
         }
@@ -60,7 +62,7 @@ export async function buildSubstationSpatialIndexInWorker(
       const read={modelId:entry.modelId,entryPath:entry.path,bytes:bytes?.byteLength ??
         (text===null ? file?.size??0:new TextEncoder().encode(text).byteLength),readMs:performance.now()-started,
         decodeMs:0,found:file!=null,...(error?{error}:{})};
-      await send({type:'model',entry,bytes,text,read},bytes?[bytes]:[]);
+      await send({type:'model',entry,bytes,text,read,...(blob?{blob}:{})},bytes?[bytes]:[]);
     }
     return (await send({type:'finish'}))!;
   } finally {cancel();worker.onmessage=null;worker.onerror=null;worker.onmessageerror=null;}

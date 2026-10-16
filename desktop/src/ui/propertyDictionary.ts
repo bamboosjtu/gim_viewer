@@ -361,9 +361,6 @@ for (const [component, definitions] of Object.entries(DICTIONARIES) as Array<[Pr
   definitionsByComponent.set(component, map);
 }
 
-/** 导出机器可读字典，供文档/诊断工具使用；UI 不应直接修改。 */
-export const PROPERTY_DICTIONARIES: Readonly<Record<PropertyComponent, readonly PropertyDefinition[]>> = DICTIONARIES;
-
 function def(
   key: string,
   label: string,
@@ -413,9 +410,6 @@ export function getPropertyLabel(component: PropertyComponent, key: string): str
   return getPropertyDefinition(component, key)?.label || key;
 }
 
-export function getPropertyGroup(component: PropertyComponent, key: string): string {
-  return getPropertyDefinition(component, key)?.group || '技术字段';
-}
 
 export function getPropertyPriority(component: PropertyComponent, key: string): PropertyPriority {
   return getPropertyDefinition(component, key)?.priority ?? 2;

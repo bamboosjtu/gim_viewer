@@ -7,7 +7,7 @@
  * third-party Fragments internals are patched.
  */
 
-import type { AppState, ProjectLoadSession } from '../app/state.js';
+import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import {
   perfCurrentSession,
@@ -386,9 +386,4 @@ export function scheduleSubstationResourceCheckpoint(
   setTimeout(() => {
     void sampleSubstationRuntimeResources(state, label, session, ctx, meta, options);
   }, Math.max(0, delayMs));
-}
-
-/** session 是项目身份快照时常用的 state guard，避免只靠 perf id。 */
-export function projectSessionGuard(state: AppState, session: ProjectLoadSession): () => boolean {
-  return () => state.isCurrentSession(session);
 }

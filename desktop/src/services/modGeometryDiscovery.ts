@@ -164,8 +164,7 @@ export async function discoverGeometriesFromDevPath(
     return empty;
   }
   // 使用 arrayBuffer + TextDecoder 而非 file.text()，确保跨运行时（浏览器/jsdom）兼容
-  const devBuffer = await devFile.arrayBuffer();
-  const devText = new TextDecoder().decode(devBuffer);
+  const devText = await devFile.text();
   const devDoc = (options.parseDev ?? parseDev)(devText, normalizedDevPath);
 
   if (devDoc.isEmpty) return empty;
@@ -204,8 +203,7 @@ export async function discoverGeometriesFromDevPath(
       return;
     }
     // 使用 arrayBuffer + TextDecoder 而非 file.text()，确保跨运行时（浏览器/jsdom）兼容
-    const phmBuffer = await phmFile.arrayBuffer();
-    const phmText = new TextDecoder().decode(phmBuffer);
+    const phmText = await phmFile.text();
     const phmDoc = (options.parsePhm ?? parsePhm)(phmText, phmFilePath);
 
     if (phmDoc.isEmpty) return;

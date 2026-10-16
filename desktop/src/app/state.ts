@@ -91,7 +91,7 @@ export class AppState {
   /** 变电 IFC 空间对象图；线路工程保持 null。 */
   substationSpatialIndex: SubstationSpatialIndex | null = null;
   /** 变电模型导航视角：空间优先，功能系统视图为平行投影。 */
-  substationNavMode: 'spatial' | 'functional' = 'spatial';
+  substationNavMode: 'spatial' | 'functional' = 'functional';
   /** GIM 头部提取的工程名称（如"XX变电站"），用于 F1System 根节点显示 */
   projectName: string = '';
 
@@ -321,7 +321,7 @@ export class AppState {
     this.currentIfcEntries = [];
     this.currentCbmTree = null;
     this.substationSpatialIndex = null;
-    this.substationNavMode = 'spatial';
+    this.substationNavMode = 'functional';
     this.projectName = '';
     this.currentProjectType = null;
     this.currentGimGraph = null;

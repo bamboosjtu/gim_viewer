@@ -615,13 +615,22 @@ pub(crate) fn ensure_project_exists(conn: &Connection, project_id: i64) -> Resul
 ///   不删除旧索引表数据；save_gim_index / save_line_gim_graph 会覆盖旧索引。
 /// - 若三者完全一致：仅更新访问时间，不碰 parser_version / project_type。
 #[tauri::command]
-pub fn upsert_gim_project(
+pub async fn upsert_gim_project(app: tauri::AppHandle, info: FileInfoInput) -> Result<GimProjectRecord, String> {
+    use tauri::Manager;
+    tauri::async_runtime::spawn_blocking(move || upsert_gim_project_inner(app.state::<DbState>(), info))
+        .await.map_err(|e| format!("项目登记任务失败: {}", e))?
+}
+
+fn upsert_gim_project_inner(
     state: tauri::State<'_, DbState>,
     info: FileInfoInput,
 ) -> Result<GimProjectRecord, String> {
     // 前端 picker 已返回 canonical path，但 command 也必须在后端重新规范化：
     // 这样大小写、斜杠以及 . / .. 差异不会为同一个 Windows 文件创建多条项目记录。
+    let started = std::time::Instant::now();
     let (canonical_path, path_identity) = crate::canonical_identity(Path::new(&info.path))?;
+    let canonical_ms = started.elapsed().as_millis();
+    let lock_started = std::time::Instant::now();
     let extension = canonical_path
         .extension()
         .and_then(|e| e.to_str())
@@ -633,6 +642,7 @@ pub fn upsert_gim_project(
         .0
         .lock()
         .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let lock_ms = lock_started.elapsed().as_millis();
     let now = now_ms();
 
     // 检查是否已存在，同时读取旧元信息判断源 GIM 文件是否变化。
@@ -643,35 +653,31 @@ pub fn upsert_gim_project(
         params![path_identity],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
     ).optional().map_err(|e| format!("查询项目记录失败: {}", e))?;
-    let existing: Option<(i64, String, u64, u64, String)> = if exact.is_some() { exact } else {
-        let mut stmt = conn
-            .prepare("SELECT id, path, size, modified_ms, sha256 FROM gim_project")
+    // Snapshot legacy rows under the lock; filesystem operations must not hold it.
+    let candidates: Vec<(i64, String, u64, u64, String)> = if exact.is_none() {
+        let mut stmt = conn.prepare("SELECT id, path, size, modified_ms, sha256 FROM gim_project")
             .map_err(|e| format!("查询项目记录失败: {}", e))?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, u64>(2)?,
-                    row.get::<_, u64>(3)?,
-                    row.get::<_, String>(4)?,
-                ))
-            })
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))
             .map_err(|e| format!("读取项目记录失败: {}", e))?;
-        let mut found = None;
-        for row in rows {
-            let candidate = row.map_err(|e| format!("读取项目记录失败: {}", e))?;
-            let matches = candidate.1 == path_identity
-                || crate::canonical_identity(Path::new(&candidate.1))
-                    .map(|(_, identity)| identity == path_identity)
-                    .unwrap_or(false);
-            if matches {
-                found = Some(candidate);
-                break;
-            }
-        }
-        found
-    };
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("读取项目记录失败: {}", e))?
+    } else { Vec::new() };
+    drop(conn);
+    let fallback_started = std::time::Instant::now();
+    let candidate_count = candidates.len();
+    let legacy = candidates.into_iter().find(|candidate| candidate.1 == path_identity
+        || crate::canonical_identity(Path::new(&candidate.1)).map(|(_, id)| id == path_identity).unwrap_or(false));
+    let fallback_ms = fallback_started.elapsed().as_millis();
+    let relock_started = std::time::Instant::now();
+    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    // Recheck after releasing the lock: a concurrent open may have inserted or updated this record.
+    let current: Option<(i64, String, u64, u64, String)> = conn.query_row(
+        "SELECT id, path, size, modified_ms, sha256 FROM gim_project WHERE path = ?1 OR id = ?2 ORDER BY path = ?1 DESC LIMIT 1",
+        params![path_identity, exact.as_ref().or(legacy.as_ref()).map(|r| r.0)],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+    ).optional().map_err(|e| format!("复核项目记录失败: {}", e))?;
+    let existing = current;
+    println!("[GIM project check] canonical_ms={} lock_ms={} fallback_count={} fallback_ms={} relock_ms={} total_ms={}",
+        canonical_ms, lock_ms, candidate_count, fallback_ms, relock_started.elapsed().as_millis(), started.elapsed().as_millis());
 
     if let Some((id, old_path, old_size, old_modified_ms, old_sha256)) = existing {
         // 源 GIM 文件是否变化：size / modified_ms / sha256 任一不同即视为变化
@@ -3061,9 +3067,7 @@ pub fn read_glb_file(
 }
 
 /// Per-template derived domain; never publishes the legacy whole-project marker.
-fn device_lod_artifact_path(
-    app: &tauri::AppHandle, project_id: i64, entry: &str, source_sha: &str,
-) -> Result<PathBuf, String> {
+fn validate_device_lod_entry<'a>(entry: &'a str, source_sha: &str) -> Result<(&'a str, String), String> {
     let (store, key) = entry.split_once('/').ok_or("设备缓存键缺少域")?;
     let parts: Vec<&str> = key.split('|').collect();
     let bound_sha = match store {
@@ -3074,9 +3078,30 @@ fn device_lod_artifact_path(
     if source_sha.len() != 64 || !source_sha.bytes().all(|c| c.is_ascii_hexdigit()) || bound_sha != source_sha {
         return Err("设备缓存源身份不匹配".into());
     }
+    Ok((store, format!("{:x}", sha2::Sha256::digest(key.as_bytes()))))
+}
+#[cfg(test)]
+mod device_lod_key_tests {
+    use super::*;
+    #[test]
+    fn source_bound_keys_accept_only_their_domain_version_and_sha() {
+        let sha="a".repeat(64);
+        let template=format!("templates/{}|{}|DEV/x.dev|lod0",GEOMETRY_CACHE_VERSION,sha);
+        let catalog=format!("catalog/dev-spatial-catalog-v2|{}|{}|DEV/x.dev",GEOMETRY_CACHE_VERSION,sha);
+        assert!(validate_device_lod_entry(&template,&sha).is_ok());
+        assert!(validate_device_lod_entry(&catalog,&sha).is_ok());
+        assert!(validate_device_lod_entry(&template,&"b".repeat(64)).is_err());
+        assert!(validate_device_lod_entry(&template.replace("templates/","../"),&sha).is_err());
+        assert!(validate_device_lod_entry(&catalog.replace("dev-spatial-catalog-v2","old"),&sha).is_err());
+    }
+}
+
+fn device_lod_artifact_path(
+    app: &tauri::AppHandle, project_id: i64, entry: &str, source_sha: &str,
+) -> Result<PathBuf, String> {
+    let (store, digest) = validate_device_lod_entry(entry, source_sha)?;
     let conn = app.state::<DbState>();
     let guard = conn.0.lock().map_err(|e| e.to_string())?;
-    ensure_project_exists(&guard, project_id)?;
     ensure_project_source_sha(&guard, project_id, Some(source_sha))?;
     drop(guard);
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?.join("device-lod");
@@ -3085,10 +3110,62 @@ fn device_lod_artifact_path(
     let root = base.canonicalize().map_err(|e| e.to_string())?;
     let relative = PathBuf::from(project_id.to_string()).join(store);
     let parent = ensure_cache_parent(&root, &relative, "设备派生缓存")?;
-    let digest = format!("{:x}", sha2::Sha256::digest(key.as_bytes()));
     let path = parent.join(format!("{}.bin", digest));
     reject_link(&path, "设备派生缓存")?;
     Ok(path)
+}
+
+/// Bounded read batch: validate project identity and parent directories once per batch.
+#[tauri::command]
+pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id: i64, entry_paths: Vec<String>, source_gim_sha256: String) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Read;
+        if entry_paths.is_empty() || entry_paths.len() > 16 { return Err("设备缓存批量条目数无效".into()); }
+        ensure_cache_project_id(project_id)?;
+        let started = Instant::now();
+        let validated = entry_paths.iter().map(|entry| validate_device_lod_entry(entry,&source_gim_sha256)).collect::<Result<Vec<_>,_>>()?;
+        {
+            let state = app_handle.state::<DbState>();
+            let conn = state.0.lock().map_err(|e|e.to_string())?;
+            ensure_project_source_sha(&conn,project_id,Some(&source_gim_sha256))?;
+        }
+        let base = app_handle.path().app_data_dir().map_err(|e|e.to_string())?.join("device-lod");
+        if !base.exists() { stdfs::create_dir_all(&base).map_err(|e|e.to_string())?; }
+        reject_link(&base,"设备派生缓存")?;
+        let root = base.canonicalize().map_err(|e|e.to_string())?;
+        let mut resolve_ms = started.elapsed().as_secs_f64()*1000.0;
+        let mut read_ms = 0.0_f64;
+        let mut parents = HashMap::new();
+        let mut results = Vec::new(); let mut total = 0_u64; let mut hits = 0_u32;
+        for (entry,(store,digest)) in entry_paths.iter().zip(validated) {
+            let resolve_started=Instant::now();
+            // Reuse canonicalization, not reparse-point trust: recheck mutable directory components per file.
+            reject_link(&base,"设备派生缓存")?;
+            reject_link(&root.join(project_id.to_string()),"设备派生缓存")?;
+            reject_link(&root.join(project_id.to_string()).join(store),"设备派生缓存")?;
+            if !parents.contains_key(store) {
+                let parent = ensure_cache_parent(&root,&PathBuf::from(project_id.to_string()).join(store),"设备派生缓存")?;
+                parents.insert(store,BatchCachePathResolver::new(&parent)?);
+            }
+            let path = parents.get_mut(store).unwrap().resolve(&format!("{}.bin",digest))?;
+            resolve_ms+=resolve_started.elapsed().as_secs_f64()*1000.0;
+            let read_started=Instant::now();
+            let bytes = match stdfs::File::open(path) {
+                Ok(file) => {
+                    if file.metadata().map_err(|e|e.to_string())?.len() > 128*1024*1024 { return Err("设备缓存单条超过配额".into()); }
+                    let mut bytes=Vec::new();file.take(128*1024*1024+1).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
+                    if bytes.len()>128*1024*1024 { return Err("设备缓存单条超过配额".into()); }
+                    total += bytes.len() as u64; if total>512*1024*1024 { return Err("设备缓存批量超过配额".into()); }
+                    hits+=1;Some(bytes)
+                },
+                Err(e) if e.kind()==std::io::ErrorKind::NotFound => None,
+                Err(e) => return Err(e.to_string()),
+            };
+            read_ms+=read_started.elapsed().as_secs_f64()*1000.0;
+            results.push(BatchCacheFileResult{entry_path:entry.clone(),bytes});
+        }
+        Ok(tauri::ipc::Response::new(encode_batch_cache_response(results,total,hits,read_ms,resolve_ms,started)?))
+    }).await.map_err(|e|format!("设备缓存批量读取失败: {}",e))?
 }
 
 #[tauri::command]

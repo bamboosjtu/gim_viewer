@@ -103,7 +103,7 @@ describe('substation functional tree projection', () => {
     expect(index.domains.find((domain) => domain.title === '未归类系统')?.systems).toHaveLength(1);
 
     const electrical = index.domains[0].systems[0];
-    expect(electrical.assets.map((asset) => asset.role)).toEqual(['component', 'device']);
+    expect(electrical.assets.map((asset) => asset.role)).toEqual(['device', 'device']);
     expect(electrical.assets[1].parts).toHaveLength(1);
     expect(electrical.assets[1].parts[0].sourceNodes).toHaveLength(2);
     expect(index.targetByKey.get(virtualPart.path)?.rowKey).toBe(electrical.assets[1].parts[0].key);
@@ -152,4 +152,43 @@ describe('substation functional tree projection', () => {
     expect(clicked).not.toBeNull();
     expect(clicked!.path).toBe('CBM/part.cbm');
   });
+});
+
+it('component labels override equipment words, nested independent units keep their own identity', () => {
+  const actuator = node({path:'actuator',entityName:'PARTINDEX',name:'断路器操动机构',devPath:'actuator.dev'});
+  const nested = node({path:'nested',entityName:'PARTINDEX',name:'汇控柜',devPath:'cabinet.dev'});
+  const breaker = node({path:'breaker',entityName:'F4System',name:'断路器',children:[actuator,nested]});
+  const root = node({children:[node({path:'system',entityName:'F3System',systemNames:['电气系统','220kV系统','进线间隔'],children:[breaker]})]});
+  const assets = buildFunctionalDomainIndex(root).domains[0].systems[0].assets;
+  expect(assets.map(row=>[row.node.path,row.role])).toEqual([['breaker','device'],['nested','device']]);
+  expect(assets[0].parts.map(part=>part.node.path)).toEqual(['actuator']);
+});
+
+it('systems and voltage groups are independent of physical depth and retain repeated parts of the same DEV', () => {
+  const parts=[node({path:'part-1',name:'散热器',entityName:'PARTINDEX',devPath:'shared.dev'}),node({path:'part-2',name:'散热器',entityName:'PARTINDEX',devPath:'shared.dev'})];
+  const device=node({path:'main',name:'主变压器',entityName:'F2System',children:parts});
+  const context=node({path:'context',entityName:'F4System',systemNames:['电气系统','220kV系统','主变间隔'],children:[device]});
+  const index=buildFunctionalDomainIndex(node({children:[context]}));
+  const system=index.domains[0].systems[0];
+  expect(system.title).toBe('主变间隔');expect(system.groupPath).toEqual(['220kV系统']);
+  expect(system.assets.map(row=>row.node.path)).toEqual(['main']);
+  expect(system.assets[0].parts.map(row=>row.node.path)).toEqual(['part-1','part-2']);
+  expect(index.targetByKey.get('part-1')!.rowKey).not.toBe(index.targetByKey.get('part-2')!.rowKey);
+});
+it('FAM corroboration retains source rows and marks conflicting classifications', () => {
+  const source=node({path:'object',name:'对象',devPath:'object.dev',famPath:'Fam/object.fam'});
+  const rows=[{sourcePath:'FAM/object.fam',sourceLine:2,section:'属性',rawKey:'NAME',label:'设备名称',rawValue:'断路器',rawLine:'设备名称=NAME=断路器'}];
+  const root=node({children:[source]});const fam=new Map([['FAM/OBJECT.FAM',rows]]);
+  const asset=buildFunctionalDomainIndex(root,fam).domains[0].systems[0].assets[0];
+  expect(asset.role).toBe('device');expect(asset.classification.famEvidence[0]).toBe(rows[0]);
+  const conflict=node({path:'conflict',name:'主变散热器',devPath:'part.dev',famPath:'Fam/object.fam'});
+  const classified=buildFunctionalDomainIndex(node({children:[conflict]}),fam).domains[0].systems[0].assets[0];
+  expect(classified.role).toBe('component');expect(classified.classification.conflict).toBe(true);
+});
+
+it('a device SYSTEMNAME labels the unit without creating another system group',()=>{
+  const unit=node({path:'breaker',name:'断路器',systemNames:['断路器'],devPath:'breaker.dev'});
+  const root=node({children:[node({path:'bay',name:'主变系统',systemNames:['电气系统','220kV系统','主变间隔'],children:[unit]})]});
+  const index=buildFunctionalDomainIndex(root);const system=index.domains[0].systems[0];
+  expect(index.domains).toHaveLength(1);expect(system.title).toBe('主变间隔');expect(system.assets.map(row=>row.node.path)).toEqual(['breaker']);
 });

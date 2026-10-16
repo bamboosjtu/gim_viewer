@@ -73,6 +73,7 @@ export async function withSharedIfcImport<T>(
             mesh.expressID,
             original.GetLine.call(owner, model, mesh.expressID, false)
           );
+        if (rows.size > 2048) rows.delete(rows.keys().next().value!);
         observe(mesh);
         callback(mesh, index, total);
       },

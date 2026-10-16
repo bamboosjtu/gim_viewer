@@ -476,6 +476,12 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
  * 开始一个计时区间。
  * @returns 结束函数，可传后缀细化标签（如 end('（缓存命中）')）
  */
+const MAX_PERF_SPANS = 8192;
+function appendSpan(span: PerfSpan): void {
+  if (spans.length >= MAX_PERF_SPANS) spans.splice(0, 1024);
+  spans.push(span);
+}
+
 export function perfBegin(
   label: string,
   meta?: Record<string, unknown>,
@@ -484,7 +490,7 @@ export function perfBegin(
   const t0 = performance.now();
   return (labelSuffix?: string, endMeta?: Record<string, unknown>) => {
     if (!perfIsCurrentSession(session)) return;
-    spans.push({
+    appendSpan({
       label: labelSuffix ? `${label}${labelSuffix}` : label,
       startMs: t0 - sessionStartMs,
       durationMs: performance.now() - t0,
@@ -510,7 +516,7 @@ export function perfMark(
     meta,
     sessionId: session.id,
   };
-  spans.push(span);
+  appendSpan(span);
   debugPerf(span);
 }
 
@@ -536,7 +542,7 @@ export function perfRecordExternalSpan(
     meta,
     sessionId,
   };
-  spans.push(span);
+  appendSpan(span);
   debugPerf(span);
 }
 

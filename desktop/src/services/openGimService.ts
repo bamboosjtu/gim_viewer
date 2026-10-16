@@ -357,7 +357,7 @@ async function openTauriGim(
 
     showLoading('正在核对本地工程记录...');
     const { upsertGimProject } = await import('@desktop/database.js');
-    const endUpsert = perfBegin('冷启动：项目索引登记');
+    const endUpsert = perfBegin('项目索引登记');
     const record = await upsertGimProject(info);
     if (state.projectGeneration !== requestGeneration) return;
     endUpsert(undefined, { projectId: record.id });

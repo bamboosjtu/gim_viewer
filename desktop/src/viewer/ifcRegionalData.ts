@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { IFCPROJECT, IFCRELVOIDSELEMENT, type IfcAPI } from 'web-ifc';
+import { IFCPROJECT, IFCRELVOIDSELEMENT, IFCMECHANICALFASTENER, IFCFASTENER, type IfcAPI } from 'web-ifc';
 export interface RegionalObject {
   expressId: number;
   globalId: string;
@@ -154,17 +154,18 @@ export class RegionalIndexCollector {
   ): RegionalIndex {
     // Include types omitted by the far importer, including all fasteners.
     // Already observed products return before any entity/vertex reads.
-    this.api.StreamAllMeshes(this.model, this.observe);
+    if (this.api.GetLineIDsWithType && this.api.StreamMeshes) {
+      const missing: number[] = [];
+      for (const type of [IFCMECHANICALFASTENER, IFCFASTENER]) {
+        const ids = this.api.GetLineIDsWithType(this.model, type);
+        try { for (let i = 0; i < ids.size(); i++) { const id = ids.get(i); if (!this.seen.has(id)) missing.push(id); } }
+        finally { (ids as any).delete?.(); }
+      }
+      for (let offset = 0; offset < missing.length; offset += 1024) this.api.StreamMeshes(this.model, missing.slice(offset,offset+1024),this.observe);
+    } else this.api.StreamAllMeshes(this.model, this.observe);
     this.geometryBoxes.clear();
     return { ...semantics, objects: this.objects };
   }
-}
-export function buildRegionalIndex(
-  api: IfcAPI,
-  model: number,
-  semantics: Pick<RegionalIndex, 'openingRelations' | 'unitScale'>
-): RegionalIndex {
-  return new RegionalIndexCollector(api, model).finish(semantics);
 }
 /** Classifies only requested hosts. Unknown representations retain their cuts. */
 export function classifyRegionalOpenings(
@@ -355,38 +356,40 @@ export function classifyRegionalOpenings(
   return result;
 }
 
-/** Nearest-first region query; bounds intersection includes long crossing members. */
-export function queryRegionalObjects(
-  objects: RegionalObject[],
-  sourceToViewer: THREE.Matrix4,
-  camera: THREE.Camera,
-  radius = 30
-): RegionalObject[] {
+interface RegionalTree { box: THREE.Box3; left?: RegionalTree; right?: RegionalTree; rows?: { object: RegionalObject; box: THREE.Box3 }[] }
+const regionalQueries = new WeakMap<RegionalObject[], { matrix: THREE.Matrix4; tree: RegionalTree }>();
+function buildRegionalTree(rows: { object: RegionalObject; box: THREE.Box3 }[]): RegionalTree {
+  const box = new THREE.Box3(); for (const row of rows) box.union(row.box);
+  if (rows.length <= 16) return { box, rows };
+  const size = box.getSize(new THREE.Vector3());
+  const axis = size.x >= size.y && size.x >= size.z ? 'x' : size.y >= size.z ? 'y' : 'z';
+  rows.sort((a,b) => a.box.min[axis] + a.box.max[axis] - b.box.min[axis] - b.box.max[axis]);
+  const mid = rows.length >>> 1;
+  return { box, left: buildRegionalTree(rows.slice(0,mid)), right: buildRegionalTree(rows.slice(mid)) };
+}
+/** Bounds are transformed and indexed once per immutable source frame. */
+export function queryRegionalObjects(objects: RegionalObject[], sourceToViewer: THREE.Matrix4,
+  camera: THREE.Camera, radius = 30): RegionalObject[] {
+  let cached = regionalQueries.get(objects);
+  if (!cached || !cached.matrix.equals(sourceToViewer)) {
+    cached = { matrix: sourceToViewer.clone(), tree: buildRegionalTree(objects.map(object => ({ object,
+      box: new THREE.Box3(new THREE.Vector3(object.bounds[0],object.bounds[1],object.bounds[2]),
+        new THREE.Vector3(object.bounds[3],object.bounds[4],object.bounds[5])).applyMatrix4(sourceToViewer) }))) };
+    regionalQueries.set(objects,cached);
+  }
   camera.updateMatrixWorld();
-  const position = new THREE.Vector3().setFromMatrixPosition(
-    camera.matrixWorld
-  );
-  const frustum = new THREE.Frustum().setFromProjectionMatrix(
-    new THREE.Matrix4().multiplyMatrices(
-      camera.projectionMatrix,
-      camera.matrixWorldInverse
-    )
-  );
-  return objects
-    .map((object) => ({
-      object,
-      box: new THREE.Box3(
-        new THREE.Vector3(...object.bounds.slice(0, 3)),
-        new THREE.Vector3(...object.bounds.slice(3, 6))
-      ).applyMatrix4(sourceToViewer),
-    }))
-    .filter(
-      ({ box }) =>
-        box.distanceToPoint(position) <= radius && frustum.intersectsBox(box)
-    )
-    .sort(
-      (a, b) =>
-        a.box.distanceToPoint(position) - b.box.distanceToPoint(position)
-    )
-    .map(({ object }) => object);
+  const position = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
+  const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));
+  const candidates: { object: RegionalObject; distance: number }[] = [];
+  const visit = (node: RegionalTree) => {
+    if (node.box.distanceToPoint(position) > radius || !frustum.intersectsBox(node.box)) return;
+    if (node.rows) for (const row of node.rows) {
+      const distance = row.box.distanceToPoint(position);
+      if (distance <= radius && frustum.intersectsBox(row.box)) candidates.push({ object: row.object, distance });
+    }
+    else { visit(node.left!); visit(node.right!); }
+  };
+  visit(cached.tree);
+  candidates.sort((a,b) => a.distance-b.distance);
+  return candidates.map(row => row.object);
 }

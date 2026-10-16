@@ -112,6 +112,21 @@ export function disposeSharedXmlModGeometries(): void {
   _sharedGeometryCache.clear();
 }
 
+/** Worker-only: call after all per-task geometry has been exported and released. */
+export function trimSharedXmlModGeometries(budget: number): void {
+  let bytes = 0;
+  const sizes = new Map<string,number>();
+  for (const [key,geo] of _sharedGeometryCache) {
+    let size = geo.index?.array.byteLength ?? 0;
+    for (const attribute of Object.values(geo.attributes)) size += attribute.array.byteLength;
+    sizes.set(key,size); bytes += size;
+  }
+  for (const [key,geo] of _sharedGeometryCache) {
+    if (bytes <= budget) break;
+    _sharedGeometryCache.delete(key); bytes -= sizes.get(key)!; geo.dispose();
+  }
+}
+
 /**
  * 释放 Group 内由 PHM 颜色覆盖创建的实例材质。
  *
@@ -139,8 +154,9 @@ export function disposeOwnedXmlModMaterials(group: THREE.Object3D): void {
  * - 6 类基础体：Cylinder/Cuboid/Sphere/TruncatedCone/Ring/CircularGasket — 精确几何
  * - StretchedBody：任意平面多边形沿完整 Normal 位移拉伸
  * - PorcelainBushing/TerminalBlock：组合浏览几何
+ * - OffsetRectangularTable：显式七字段编码，下矩形 XY 居中且 Z=0，上矩形按 XOFF/YOFF 偏移
  * - ChannelSteel/Table：语义未完成，保留诊断
- * - 3 类弱 schema：RectangularFixedPlate/OffsetRectangularTable/RectangularRing — 暂停渲染
+ * - 2 类弱 schema：RectangularFixedPlate/RectangularRing — 暂停渲染
  */
 function primitiveToGeometryUncached(p: XmlModPrimitive, lod: DeviceLod): THREE.BufferGeometry | null {
   const segments = lod === 0 ? 6 : lod === 1 ? 12 : CYLINDER_SEGMENTS;
@@ -764,7 +780,8 @@ function* bakeGeometrySteps(
         if (p?.type === 'Boolean') { visit(p.entity1); visit(p.entity2); }
       };
       visit(entity.id);
-      const dependencies = [...failures].filter(([id]) => reachable.has(id)).map(([id, reason]) => ({ id, reason }));
+      const dependencies: { id: number; reason: string }[] = [];
+      for (const id of reachable) { const reason = failures.get(id); if (reason !== undefined) dependencies.push({ id, reason }); }
       if (dependencies.length) byMaterial.failures.push({ rootId: entity.id, dependencies });
       // A failed detailed Union can still provide its supported browser
       // outline. Keep the root diagnostic and never label it complete.

@@ -7,7 +7,7 @@
 
 let statusTextEl: HTMLElement | null = null;
 let statusDotEl: HTMLElement | null = null;
-let busyCount = 0;
+const busyTasks = new Map<string, string>();
 
 /** 空工程时右侧状态栏的稳定默认文案。 */
 export const DEFAULT_STATUS_RIGHT = 'GIM BIM 浏览器';
@@ -29,16 +29,23 @@ export function setStatus(text: string, kind: StatusKind = 'ok'): void {
   statusDotEl.classList.toggle('error', kind === 'error');
 }
 
-/** 进入忙碌态（叠加计数，支持并发任务） */
-export function pushBusy(text: string): void {
-  busyCount++;
-  setStatus(text, 'loading');
+/** Idempotent updates to a named loading task. */
+export function pushBusy(text: string, key = 'project'): void {
+  busyTasks.delete(key); busyTasks.set(key,text); setStatus(text,'loading');
 }
-
-/** 退出忙碌态；全部任务结束后回到就绪 */
-export function popBusy(idleText = '就绪'): void {
-  busyCount = Math.max(0, busyCount - 1);
-  if (busyCount === 0) setStatus(idleText, 'ok');
+export function popBusy(idleText = '就绪', key = 'project'): void {
+  busyTasks.delete(key);
+  const values = [...busyTasks.values()];
+  const remaining = values[values.length - 1];
+  setStatus(remaining ?? idleText, remaining ? 'loading' : 'ok');
+}
+export function setIfcStatus(text: string): void {
+  let el = document.getElementById('status-ifc');
+  if (!el && text) {
+    const sibling = document.getElementById('status-devices');
+    if (sibling?.parentElement) { el = document.createElement('span'); el.id = 'status-ifc'; sibling.before(el); }
+  }
+  if (el) { el.textContent = text; el.hidden = !text; }
 }
 
 /** 更新右侧统计文本（工程统计 / 版本等） */
@@ -55,6 +62,9 @@ export function setDeviceStatus(text: string, detail?: string): void {
 
 /** 清理工程时恢复共性状态栏，避免线路统计泄漏到下一工程。 */
 export function resetStatusRight(): void {
+  busyTasks.clear();
+  setIfcStatus('');
+  setStatus('就绪');
   setStatusRight(DEFAULT_STATUS_RIGHT);
   setDeviceStatus('');
   setSelectionStatus(null);

@@ -42,14 +42,14 @@ beforeEach(() => {
 it('nested parent → child selections share the physical root load while the child owns the final commit', async () => {
   const {files,tree,root,a,b}=await nestedPartFixture(2);
   const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree;
-  const source=files.get('DEV/root.dev')!,read=deferred<ArrayBuffer>(),started=deferred<void>();
+  const source=files.get('DEV/root.dev')!,read=deferred<string>(),started=deferred<void>();
   let reads=0;
-  files.set('DEV/root.dev',{text:()=>source.text(),arrayBuffer:()=>{reads++;started.resolve();return read.promise;}} as File);
+  files.set('DEV/root.dev',{text:()=>{reads++;started.resolve();return read.promise;},arrayBuffer:()=>source.arrayBuffer()} as File);
   const {handleNodeClick}=await import('../nodeInteractionService.js');
   const slow=handleNodeClick(state,a,()=>{}); await started.promise;
   const latest=handleNodeClick(state,b,()=>{});
   expect(reads).toBe(1);
-  read.resolve(await source.arrayBuffer()); await Promise.all([slow,latest]);
+  read.resolve(await source.text()); await Promise.all([slow,latest]);
   expect(state.selectionRequest?.target?.key).toBe(b.path);
   expect(document.querySelector('.props-header')?.textContent).toBe(b.name);
   expect(state.highlightedModState?.groups.map(g=>g.userData.assemblyPath).sort()).toEqual(['sub:0/sub:0','sub:1/sub:0']);
@@ -71,16 +71,16 @@ it('A slow FAM cannot replace B inspector after B has rendered', async () => {
 });
 
 it('A slow geometry remains a resource but cannot reclaim B camera or material highlight', async () => {
-  const {state,a,b}=fixture(),read=deferred<ArrayBuffer>(),started=deferred<void>();
+  const {state,a,b}=fixture(),read=deferred<string>(),started=deferred<void>();
   const source=state.currentFiles!.get('DEV/A.dev')!;
-  state.currentFiles!.set('DEV/A.dev',{text:() => source.text(),arrayBuffer:() => { started.resolve();return read.promise; }} as File);
+  state.currentFiles!.set('DEV/A.dev',{text:() => { started.resolve();return read.promise; },arrayBuffer:() => source.arrayBuffer()} as File);
   const {handleNodeClick}=await import('../nodeInteractionService.js');
   const messages:string[]=[];
   const pending=handleNodeClick(state,a,(text) => messages.push(`A: ${text}`)); await started.promise;
   await handleNodeClick(state,b,(text) => messages.push(`B: ${text}`));
   const target=runtime.ctx.world.camera.controls.target.clone();
   const committedMessages=[...messages],committedMessage=state.selectionMessage;
-  read.resolve(await source.arrayBuffer()); await pending;
+  read.resolve(await source.text()); await pending;
   expect(state.loadedXmlModGroups.size).toBe(2);
   expect(state.highlightedModState?.groups.every((g) => g.userData.rootOccurrence===b.path)).toBe(true);
   expect(runtime.ctx.world.camera.controls.target).toEqual(target);
@@ -164,16 +164,16 @@ it('reversed PARTINDEX children share one in-flight root load but only the last 
     'DEV/a.dev':'SOLIDMODELS.NUM=1\nSOLIDMODEL0=leaf.phm','DEV/b.dev':'SOLIDMODELS.NUM=1\nSOLIDMODEL0=leaf.phm',
   })) state.currentFiles!.set(path,new File([text],path));
   state.currentCbmTree=(await buildCbmTree(state.currentFiles!))!;
-  const source=state.currentFiles!.get('DEV/root.dev')!,read=deferred<ArrayBuffer>(),started=deferred<void>();
+  const source=state.currentFiles!.get('DEV/root.dev')!,read=deferred<string>(),started=deferred<void>();
   const bytes=vi.fn(() => {started.resolve();return read.promise;});
-  state.currentFiles!.set('DEV/root.dev',{text:() => source.text(),arrayBuffer:bytes} as unknown as File);
+  state.currentFiles!.set('DEV/root.dev',{text:bytes,arrayBuffer:()=>source.arrayBuffer()} as unknown as File);
   const root=state.currentCbmTree.children[0],a=root.children[1],b=root.children[0];
   const {handleNodeClick}=await import('../nodeInteractionService.js');
   const token=state.geometryLoadToken;
   const pendingA=handleNodeClick(state,a,() => {});await started.promise;
   const pendingB=handleNodeClick(state,b,() => {});
   expect(state.selectionRequest!.target!.key).toBe(b.path);expect(bytes).toHaveBeenCalledTimes(1);
-  read.resolve(await source.arrayBuffer());await Promise.all([pendingA,pendingB]);
+  read.resolve(await source.text());await Promise.all([pendingA,pendingB]);
   expect(state.highlightedModState!.groups.map((g) => g.userData.assemblyPath)).toEqual(['sub:1']);
   expect(document.querySelector('.props-header')!.textContent).toBe('Part B');
   expect(runtime.ctx.world.camera.controls.target.x).toBeCloseTo(20);

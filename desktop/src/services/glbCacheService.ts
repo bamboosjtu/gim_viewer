@@ -53,6 +53,8 @@ export interface DevGlbSerializationDiagnostics {
 }
 
 export interface DevGlbSerializationResult {
+  /** Computed by the owning Worker before transferring the result. */
+  sha256?: string;
   status: DevGlbSerializationStatus;
   bytes: Uint8Array | null;
   diagnostics: DevGlbSerializationDiagnostics;
@@ -375,10 +377,9 @@ export function parseDevGlbAsset(
   glbBytes: Uint8Array,
 ): Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] } | null> {
   const loader = getGltfLoader();
-  const ab = glbBytes.buffer.slice(
-    glbBytes.byteOffset,
-    glbBytes.byteOffset + glbBytes.byteLength,
-  ) as ArrayBuffer;
+  // GLTFLoader reads the binary input without transferring or modifying it.
+  const ab = glbBytes.buffer instanceof ArrayBuffer && glbBytes.byteOffset === 0 && glbBytes.byteLength === glbBytes.buffer.byteLength
+    ? glbBytes.buffer : glbBytes.slice().buffer as ArrayBuffer;
 
   return new Promise((resolve) => {
     loader.parse(

@@ -190,8 +190,7 @@ export async function loadXmlModFromFiles(
     return null;
   }
   // 使用 arrayBuffer + TextDecoder 而非 file.text()，确保跨运行时（浏览器/jsdom）兼容
-  const buffer = await file.arrayBuffer();
-  const text = new TextDecoder().decode(buffer);
+  const text = await file.text();
   try {
     // 空 MOD 是已知的合法占位文件；其他不含当前可渲染 primitive 的内容
     // 仍交给 XML parser 校验，不能把损坏文件静默伪装成空模型。

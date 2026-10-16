@@ -17,17 +17,6 @@ export function isIfcPreviewDeferredFineEnabled(): boolean {
   try { return localStorage.getItem(IFC_PREVIEW_DEFERRED_FINE_KEY) === '1'; } catch { return false; }
 }
 
-/** Visible opt-in for the existing Preview-First / Deferred-Fine mode. */
-export function setIfcQuickPreviewEnabled(enabled: boolean): void {
-  if (enabled) {
-    localStorage.setItem(IFC_PREVIEW_DEBUG_KEY, '1');
-    localStorage.setItem(IFC_PREVIEW_DEFERRED_FINE_KEY, '1');
-  } else {
-    localStorage.removeItem(IFC_PREVIEW_DEBUG_KEY);
-    localStorage.removeItem(IFC_PREVIEW_DEFERRED_FINE_KEY);
-  }
-}
-
 /** Fragments 缓存灰度开关的 localStorage 覆盖键（设为 '1' 开启实测） */
 export const FRAGMENTS_CACHE_DEBUG_KEY = 'gim-debug-fragments-cache';
 
@@ -205,7 +194,6 @@ export const SUBSTATION_EARLY_SEMANTIC_DEFAULT = false;
 
 /** Default BIM browsing representation; full remains an internal reference path. */
 export type IfcOpeningPolicy = 'full' | 'omit-rel-voids' | 'bim-lod';
-export const IFC_OPENING_POLICY_KEY = 'gim-ifc-opening-policy';
 export function readIfcOpeningPolicy(): IfcOpeningPolicy {
   return 'bim-lod';
 }

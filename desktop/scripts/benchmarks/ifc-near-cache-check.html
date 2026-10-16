@@ -1,0 +1,43 @@
+<!doctype html><meta charset="utf-8"><title>IFC 近景缓存隔离验收</title><link rel="icon" href="data:,">
+<style>body{font:15px system-ui;padding:24px;max-width:960px}pre{white-space:pre-wrap}</style>
+<h1>IFC 近景缓存隔离验收</h1><p>仅在隔离浏览器和独立测试端口运行。本页重建此 origin 的测试缓存，不执行几何转换。</p><pre id="result">运行中</pre>
+<script type="module">
+const report={status:'running',checks:[]};const result=document.querySelector('#result');
+const request=r=>new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+const done=tx=>new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error);});
+const assert=(value,label)=>{if(!value)throw Error(label);report.checks.push(label);};
+try {
+ await request(indexedDB.deleteDatabase('gim-ifc-lod-v1'));
+ const seed=indexedDB.open('gim-ifc-lod-v1',1);seed.onupgradeneeded=()=>seed.result.createObjectStore('artifacts');
+ const db=await request(seed);const tx=db.transaction('artifacts','readwrite');
+ tx.objectStore('artifacts').put({bytes:new Uint8Array([1,2]).buffer,index:{objects:[{expressId:1}]}},'far|sha|steel.ifc');
+ tx.objectStore('artifacts').put({parts:[]},'far|sha|steel.ifc|near-templates-v1|old');await done(tx);db.close();
+ const cache=await import('/bridge/ifcLodCache.ts');
+ assert((await cache.readIfcLodArtifact('far|sha|steel.ifc')).bytes.byteLength===2,'upgrade preserves far fragments');
+ assert(await cache.readIfcLodArtifact('far|sha|steel.ifc|near-templates-v1|old')===null,'upgrade retires only unaccounted legacy near entries');
+ const key=i=>`far|sha|steel.ifc|near-templates-v1|${i}`;const data=new ArrayBuffer(48*1024*1024);
+ for(let i=0;i<6;i++)await cache.writeIfcLodArtifact(key(i),{parts:[{vertices:new Float32Array(data)}]});
+ assert(await cache.readIfcLodArtifact(key(0))===null,'byte pressure evicts oldest geometry');
+ assert((await cache.readIfcLodArtifact(key(1)))!==null,'touch retained geometry');
+ await cache.writeIfcLodArtifact(key(6),{parts:[{vertices:new Float32Array(data)}]});
+ assert(await cache.readIfcLodArtifact(key(2))===null,'access touch changes eviction order');
+ assert((await cache.readIfcLodArtifact(key(1)))!==null,'recently accessed geometry survives');
+ await cache.writeIfcLodArtifact(key('oversized'),{data:new ArrayBuffer(65*1024*1024)});
+ assert(await cache.readIfcLodArtifact(key('oversized'))===null,'oversized geometry is not persisted');
+ await cache.deleteIfcLodArtifact(key(1));assert(await cache.readIfcLodArtifact(key(1))===null,'explicit deletion removes geometry');
+ const check=await request(indexedDB.open('gim-ifc-lod-v1',2));
+ const usage=await request(check.transaction('near-meta').objectStore('near-meta').get('@usage'));
+ assert(usage.bytes<=256*1024*1024 && usage.count===4,'usage remains consistent after eviction and deletion');check.close();
+ assert(cache.ifcNearCacheDiagnostics.bytes===usage.bytes && cache.ifcNearCacheDiagnostics.entries===usage.count,'diagnostics reflect committed deletion');
+ assert((await cache.readIfcLodArtifact('far|sha|steel.ifc'))!==null,'near eviction never deletes far fragments');
+ await cache.writeIfcLodArtifacts(Array.from({length:4097},(_,i)=>({key:key(`tiny-${i}`),value:{value:i}})));
+ assert(await cache.readIfcLodArtifact(key('tiny-0'))===null,'batch admission enforces entry count');
+ assert((await cache.readIfcLodArtifact(key('tiny-4096')))!==null,'latest admitted entry survives');
+ const finalDb=await request(indexedDB.open('gim-ifc-lod-v1',2));
+ const finalUsage=await request(finalDb.transaction('near-meta').objectStore('near-meta').get('@usage'));
+ const count=await request(finalDb.transaction('artifacts').objectStore('artifacts').count());finalDb.close();
+ assert(finalUsage.count===4096 && count===4097,'entry accounting includes exactly managed records and the preserved far artifact');
+ report.status='passed';report.usage=finalUsage;report.diagnostics=cache.ifcNearCacheDiagnostics;
+} catch(error){report.status='failed';report.error=String(error);}
+window.__nearCacheCheck=report;result.textContent=JSON.stringify(report,null,2);
+</script>

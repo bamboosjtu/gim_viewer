@@ -2,7 +2,7 @@
  * no whole-project completion marker is written for an on-demand view. */
 import { isTauri } from './runtime.js';
 import { invokeTimed } from './invokeTimed.js';
-import { packBinaryCacheWrite } from './database.js';
+import { packBinaryCacheWrite, parseBatchCachePayload } from './database.js';
 interface CacheContext { projectId: number | null; sourceSha256: string | null }
 function nativeArgs(store: string, key: string, context?: CacheContext) {
   if (context?.projectId == null || !context.sourceSha256) return null;
@@ -36,10 +36,33 @@ function open(): Promise<IDBDatabase> {
   }); // A failed storage open stays failed for this page; do not retry for every DEV.
   return opening;
 }
+interface NativeRead { entry: string; key: string; resolve: (value: unknown) => void }
+const queuedReads = new Map<string,{args:ReturnType<typeof nativeArgs> & {};rows:NativeRead[]}>();
+function readNativeArtifact<T>(args: NonNullable<ReturnType<typeof nativeArgs>>, key: string): Promise<T|null> {
+  const groupKey=JSON.stringify([args.projectId,args.sourceGimSha256]);
+  let group=queuedReads.get(groupKey);
+  if (!group) {
+    group={args,rows:[]}; queuedReads.set(groupKey,group);
+    setTimeout(() => { const batch=queuedReads.get(groupKey)!;queuedReads.delete(groupKey);void flushNativeReads(batch); },0);
+  }
+  const target=group;
+  return new Promise(resolve=>target.rows.push({entry:args.entryPath,key,resolve:resolve as (value:unknown)=>void}));
+}
+async function flushNativeReads(group: {args:NonNullable<ReturnType<typeof nativeArgs>>;rows:NativeRead[]}): Promise<void> {
+  for (let start=0;start<group.rows.length;start+=16) {
+    const rows=group.rows.slice(start,start+16);
+    try {
+      const payload=await invokeTimed<ArrayBuffer>('read_device_lod_artifacts',{projectId:group.args.projectId,
+        sourceGimSha256:group.args.sourceGimSha256,entryPaths:rows.map(row=>row.entry)});
+      const found=new Map(parseBatchCachePayload(payload).items.map(item=>[item.entry_path,item.bytes]));
+      for (const row of rows) { try { const bytes=found.get(row.entry);row.resolve(bytes ? unpackDevArtifact(row.key,bytes) : null); } catch { row.resolve(null); } }
+    } catch { for (const row of rows) row.resolve(null); }
+  }
+}
 export async function readDevArtifact<T>(store: 'templates' | 'catalog', key: string, context?: CacheContext): Promise<T | null> {
   if (isTauri()) {
     const args = nativeArgs(store, key, context); if (!args) return null;
-    try { return unpackDevArtifact<T>(key, new Uint8Array(await invokeTimed<ArrayBuffer>('read_device_lod_artifact', args))); } catch { return null; }
+    return readNativeArtifact<T>(args,key);
   }
   try { const db = await open(); return await new Promise<T | null>((resolve, reject) => {
     const req = db.transaction(store).objectStore(store).get(key);

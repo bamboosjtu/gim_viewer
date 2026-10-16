@@ -1,3 +1,4 @@
+import { setIfcStatus } from '../ui/shell/statusBar.js';
 import { planRemainingIfcPreviews, type PreviewQueueStrategy } from './ifcPreviewQueue.js';
 import type { IfcEntry, CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
@@ -1104,6 +1105,7 @@ export async function loadAllIfcFiles(
         perfMark('IFC Preview queue',{strategy,anchor:queue[queueIndex-1].path,entries:queue.map(e=>({path:e.path,modelId:e.modelId,sourceBytes:sizes.get(e.path.toLowerCase())??null}))},perfSession);
       }
       const entry=queue[queueIndex];
+      setIfcStatus(`IFC ${queueIndex}/${queue.length} · ${entry.name}`);
         showLoading(interactiveInitialized ? `后台加载 ${entry.name}...` : `正在加载 ${entry.name}...`);
       let readEnded = false;
       let readProfiled = false;
@@ -1143,7 +1145,7 @@ export async function loadAllIfcFiles(
           if(previewInputOwnership)void sampleSubstationMemory(state,'IFC fine worker start',perfSession,
             {entryPath:entry.path,rawBytes:lastIfcReadByteLength,previewFineState:state.ifcPreviewFineStates.get(entry.modelId)},ctx);
           const task=loadIfcEntry(ctx,state,entry,readBytes,
-            (p) => showLoading(`${entry.name}: ${Math.round(p * 100)}%`),
+            (p) => { if (isCurrent()) { setIfcStatus(`IFC ${queueIndex}/${queue.length} · ${entry.name} ${Math.round(p * 100)}%`); showLoading(`${entry.name}: ${Math.round(p * 100)}%`); } },
             {session,perfSessionId:perfSession.id,onLoadSource:(source)=>{loadSource.value=source;},
               // A Preview's explicit fine request always restores original
               // relation openings; browsing simplification cannot claim LOD2 fidelity.
@@ -1308,6 +1310,7 @@ export async function loadAllIfcFiles(
       if (!isCurrent()) return;
     }
 
+    setIfcStatus(`IFC ${entries.length}/${entries.length}${failed.length ? ` · 失败 ${failed.length}` : ' · 已就绪'}`);
     background.completeRemainingIfc();
     // Preview-first has its own readiness barrier. Deferred LOD2 files remain
     // visible in their per-file state and cannot satisfy allIfcReady.
@@ -1361,7 +1364,7 @@ export async function loadAllIfcFiles(
         message: err instanceof Error ? err.message : String(err),
       });
       showLoading(`IFC 加载失败: ${err instanceof Error ? err.message : String(err)}`);
-      setTimeout(hideLoading, 3000);
+      setTimeout(() => { if (isCurrent()) hideLoading(); }, 3000);
       if (!interactiveSignaled) rejectInteractive(err);
       return;
     }
@@ -1371,7 +1374,7 @@ export async function loadAllIfcFiles(
   // loading barrier.
   if (failed.length > 0) {
     showLoading(`部分 IFC 加载失败：${failed.length}/${entries.length}，详见控制台`);
-    setTimeout(hideLoading, 4000);
+    setTimeout(() => { if (isCurrent()) hideLoading(); }, 4000);
   } else {
     hideLoading();
   }
@@ -1382,6 +1385,7 @@ export async function loadAllIfcFiles(
   // sequential IFC tail and post-IFC geometry continue under the same
   // session/token guards after this promise resolves.
   void lifecycleTask.finally(() => {
+    if (isCurrent()) setIfcStatus(`IFC 已结束 · 已加载 ${state.loadedModels.size}/${entries.length}${failed.length ? ` · 失败 ${failed.length}` : ''}`);
     // If every IFC failed (or the session became stale) there is no usable
     // geometry event to signal. Release the caller rather than leaving an
     // unresolved readiness promise behind.
@@ -1910,7 +1914,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   if (!state.isCurrentSession(session)) return;
   if (entries.length === 0) {
     showLoading('该工程未检测到 IFC 文件；如果这是线路工程，请检查工程类型识别日志');
-    setTimeout(hideLoading, 4000);
+    setTimeout(() => { if (state.isCurrentSession(session)) hideLoading(); }, 4000);
     return;
   }
 

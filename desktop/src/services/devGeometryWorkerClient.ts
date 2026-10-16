@@ -10,12 +10,16 @@ interface Slot { id: number; key: string; path: string; kind: 'compile' | 'bound
   promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void }
 const clients = new WeakMap<AppState, DevGeometryPreprocessor>();
 let serial = 0;
-/** Bounded DEV pool, deduplicated by template/LOD. A completed compile occupies
- * its slot until the consumer commits it, so export results cannot accumulate. */
+/** Computation slots and unacknowledged results have separate lifetimes.
+ * Stop starting compiles at 64 MiB of exported results (or 2 results/worker).
+ * Already running tasks may finish; one result is limited to 128 MiB. */
 export class DevGeometryPreprocessor {
   private workers: Worker[] = [];
   private slots = new Map<string, Slot>();
   private active = new Map<Worker, { task: Slot; release: (() => void) | null; finished: boolean }>();
+  private exported = new Map<string, { task: Slot; bytes: number }>();
+  private exportedBytes = 0;
+  private exportedPeakBytes = 0;
   private stopped = false;
   private paused = false;
   private sequence = 0;
@@ -36,6 +40,7 @@ export class DevGeometryPreprocessor {
     }
   }
   get workerCount(): number { return this.workers.length; }
+  get resultPressure() { return { bytes: this.exportedBytes, peakBytes: this.exportedPeakBytes, count: this.exported.size }; }
   get activePaths(): string[] { return [...this.active.values()].map(row => `${row.task.path} · ${row.finished ? '提交' : row.task.kind === 'bounds' ? '目录' : `LOD${row.task.lod}`}`); }
   onActivity: () => void = () => {};
   setPaused(value: boolean): void { this.paused = value; this.pump(); }
@@ -46,8 +51,13 @@ export class DevGeometryPreprocessor {
       if (this.active.has(worker)) continue;
       const running = new Set([...this.active.values()].map(row => row.task.key));
       const now = performance.now();
-      const task = [...this.slots.values()].filter(s => !running.has(s.key) && (!this.paused || s.kind === 'bounds')).sort((a, b) =>
-        agedWorkPriority(a.priority, a.queuedAt, now) - agedWorkPriority(b.priority, b.queuedAt, now) || a.id - b.id)[0];
+      const pressured = this.exportedBytes >= 64 * 1024 * 1024 || this.exported.size >= this.workerCount * 2;
+      let task: Slot | undefined, best = Infinity;
+      for (const candidate of this.slots.values()) {
+        if (running.has(candidate.key) || candidate.kind === 'compile' && (this.paused || pressured)) continue;
+        const priority = agedWorkPriority(candidate.priority, candidate.queuedAt, now);
+        if (!task || priority < best || priority === best && candidate.id < task.id) { task = candidate; best = priority; }
+      }
       if (!task) break;
       const release = task.kind === 'compile' ? beginDevGeometryWork() : null;
       if (task.kind === 'compile' && !release) break;
@@ -74,14 +84,22 @@ export class DevGeometryPreprocessor {
     owner!.release?.(); owner!.release = null;
     perfMark('DEV worker result', { path: task.path, kind: task.kind, lod: task.lod, key: task.key,
       workerWallMs: data.wallMs, stages: data.stages, bytes: data.result?.bytes?.byteLength ?? 0, error: data.error }, this.perf);
+    const bytes = data.result?.bytes?.byteLength ?? 0;
     if (data.error) task.reject(data.sourceEvidence ? new InvalidDevGeometryError(task.path, data.error, data.sourceEvidence) : new Error(data.error));
-    else task.resolve(data.result);
-    if (task.kind === 'bounds' || data.error) this.active.delete(worker);
+    else if (bytes > 128 * 1024 * 1024) task.reject(new Error('DEV compiled result exceeds 128 MiB quota'));
+    else {
+      if (task.kind === 'compile' && bytes) {
+        this.exported.set(task.key, { task, bytes }); this.exportedBytes += bytes;
+        this.exportedPeakBytes = Math.max(this.exportedPeakBytes, this.exportedBytes);
+      }
+      task.resolve(data.result);
+    }
+    this.active.delete(worker);
     this.pump();
   }
   private request(kind: Slot['kind'], path: string, lod: DeviceLod, key: string, priority: number): Promise<any> {
     if (this.stopped || !this.current()) return Promise.reject(new DOMException('DEV session expired', 'AbortError'));
-    const old = this.slots.get(key); if (old) { old.priority = Math.min(old.priority, priority); return old.promise; }
+    const old = this.slots.get(key) ?? this.exported.get(key)?.task; if (old) { old.priority = Math.min(old.priority, priority); return old.promise; }
     let resolve!: Slot['resolve'], reject!: Slot['reject'];
     const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
     this.slots.set(key, { id: ++this.sequence, key, path, kind, lod, priority, queuedAt: performance.now(), promise, resolve, reject });
@@ -96,7 +114,8 @@ export class DevGeometryPreprocessor {
     return this.compile(path, 2, key, 3).finally(() => this.acknowledge(key));
   }
   acknowledge(key: string): void {
-    for (const [worker, row] of this.active) if (row.task.key === key && row.finished) this.active.delete(worker);
+    const result = this.exported.get(key);
+    if (result) { this.exportedBytes -= result.bytes; this.exported.delete(key); }
     this.pump();
   }
   cancelQueued(keep: ReadonlySet<string>): void {
@@ -110,15 +129,12 @@ export class DevGeometryPreprocessor {
     for (const worker of this.workers) worker.terminate();
     for (const row of this.active.values()) row.release?.(); this.active.clear();
     for (const task of this.slots.values()) task.reject(error); this.slots.clear(); this.files = new Map();
+    this.exported.clear(); this.exportedBytes = 0;
   }
 }
 export function createDevGeometryPreprocessor(state: AppState, session: ProjectLoadSession, files: Map<string, File>): DevGeometryPreprocessor {
   clients.get(state)?.cancel();
   const client = new DevGeometryPreprocessor([], files, () => state.isCurrentSession(session)); clients.set(state, client); return client;
-}
-export function startDevGeometryPreprocessing(state: AppState, session: ProjectLoadSession): void {
-  if (clients.has(state) || !state.currentFiles || typeof Worker === 'undefined') return;
-  createDevGeometryPreprocessor(state, session, state.currentFiles);
 }
 export function getDevGeometryPreprocessor(state: AppState) { return clients.get(state); }
 export function cancelDevGeometryPreprocessing(state: AppState): void { clients.get(state)?.cancel(); clients.delete(state); }

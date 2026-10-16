@@ -1,5 +1,5 @@
 import { IfcAPI } from 'web-ifc';
-import { omitIfcOpeningRelations } from './ifcOpeningPolicy.js';
+import { IfcOpeningRelationEditor } from './ifcOpeningPolicy.js';
 import { extractIfcObjectFine } from './ifcObjectFineData.js';
 import {
   classifyRegionalOpenings,
@@ -9,8 +9,8 @@ const api = new IfcAPI();
 let model: number | null = null,
   bytes: Uint8Array<ArrayBuffer>,
   index: RegionalIndex;
-const small = new Set<number>(),
-  classified = new Set<number>();
+const classified = new Set<number>();
+let openingEditor: IfcOpeningRelationEditor;
 const templates = new Map<
   number,
   { vertices: Float32Array; indices: Uint32Array }
@@ -20,6 +20,7 @@ self.onmessage = async ({ data }) => {
   try {
     if (data.type === 'open') {
       bytes = data.bytes;
+      openingEditor = new IfcOpeningRelationEditor(bytes);
       index = data.index;
       objectTypes = new Map(
         index.objects.map((row) => [row.expressId, row.ifcType])
@@ -36,7 +37,9 @@ self.onmessage = async ({ data }) => {
       api.SetWasmPath(data.wasm.path, data.wasm.absolute);
       await api.Init(undefined, true);
       self.postMessage({ stage: 'source-open' });
+      const openStarted=performance.now();
       model = api.OpenModel(bytes, { COORDINATE_TO_ORIGIN: false });
+      self.postMessage({stage:'source-open-complete',elapsedMs:performance.now()-openStarted});
       self.postMessage({ id: data.id, data: { opened: true } });
     } else if (data.type === 'prepare-region') {
       if (model === null) throw Error('Regional source unavailable');
@@ -45,12 +48,14 @@ self.onmessage = async ({ data }) => {
         ),
         result = classifyRegionalOpenings(api, model, index, hosts);
       for (const id of hosts) classified.add(id);
-      for (const id of result.small) small.add(id);
       if (result.small.length) {
         templates.clear();
         api.CloseModel(model);
-        omitIfcOpeningRelations(bytes, (id) => !small.has(id));
+        openingEditor.omit(result.small);
+        self.postMessage({stage:'source-reopen'});
+        const openStarted=performance.now();
         model = api.OpenModel(bytes, { COORDINATE_TO_ORIGIN: false });
+        self.postMessage({stage:'source-open-complete',elapsedMs:performance.now()-openStarted});
       }
       self.postMessage({
         id: data.id,

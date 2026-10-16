@@ -122,10 +122,17 @@ function buildCbmSearchIndex(state: AppState, root: CbmNode): SearchItem[] {
  * 构建并渲染 CBM 层级树。
  * 统一入口：无论首次打开还是缓存命中，都使用 onNodeClick 回调处理交互。
  */
+const renderedTrees = new WeakMap<AppState, { root: CbmNode; spatial: unknown; names: unknown; nameCount: number; fam: unknown; famCount: number; mode: string; host: Element }>();
 export function buildAndRenderCbmTree(
   state: AppState,
   onNodeClick: (node: CbmNode) => void,
 ): void {
+  const previous = renderedTrees.get(state);
+  if (state.currentProjectType === 'substation' && state.currentCbmTree && previous
+    && previous.root === state.currentCbmTree && previous.spatial === state.substationSpatialIndex
+    && previous.names === state.ifcGuidToName && previous.nameCount === state.ifcGuidToName.size
+    && previous.fam === state.cachedFamSourceProperties && previous.famCount === state.cachedFamSourceProperties.size
+    && previous.mode === state.substationNavMode && cbmTreePanel.contains(previous.host)) return;
   cbmTreePanel.innerHTML = '';
   if (!state.currentCbmTree) { cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>'; return; }
   const spatialIndex = state.substationSpatialIndex;
@@ -134,7 +141,7 @@ export function buildAndRenderCbmTree(
   if (isSubstation) {
     // 空间事实缺失时自动降级到功能系统视角；空间能力恢复后仍可由用户显式切回空间。
     if (!hasSpatialTree && state.substationNavMode === 'spatial') state.substationNavMode = 'functional';
-    const functionalIndex = state.currentCbmTree ? buildFunctionalDomainIndex(state.currentCbmTree) : null;
+    const functionalIndex = state.currentCbmTree ? buildFunctionalDomainIndex(state.currentCbmTree,state.cachedFamSourceProperties) : null;
     // 搜索框由 renderSearchBox prepend 到顶部；模式条和树内容放在其后。
     const treeHost = document.createElement('div');
     treeHost.className = 'tree-view-host';
@@ -170,6 +177,8 @@ export function buildAndRenderCbmTree(
     }
     modeBar.append(spatialButton, functionalButton, quality);
     cbmTreePanel.append(modeBar, treeHost);
+    renderedTrees.set(state,{root:state.currentCbmTree,spatial:state.substationSpatialIndex,names:state.ifcGuidToName,
+      nameCount:state.ifcGuidToName.size,fam:state.cachedFamSourceProperties,famCount:state.cachedFamSourceProperties.size,mode:state.substationNavMode,host:treeHost});
 
     const renderMode = (): void => {
       spatialButton.classList.toggle('active', state.substationNavMode === 'spatial' && hasSpatialTree);
@@ -312,7 +321,7 @@ export function syncSelectedTreeRow(state: AppState): void {
   if (!target) return;
   let rowKey=target.key;
   if (target.kind==='cbm' && state.currentCbmTree && state.substationNavMode==='functional') {
-    rowKey=revealFunctionalSearchTarget(buildFunctionalDomainIndex(state.currentCbmTree),target.key) ?? target.key;
+    rowKey=revealFunctionalSearchTarget(buildFunctionalDomainIndex(state.currentCbmTree,state.cachedFamSourceProperties),target.key) ?? target.key;
   } else if (state.substationNavMode==='spatial' && state.substationSpatialIndex && target.kind!=='ifc-element') {
     const paginationKey=revealSpatialSearchTarget(state.substationSpatialIndex,target.key);
     loadSpatialSearchTargetPage(paginationKey,target.key);

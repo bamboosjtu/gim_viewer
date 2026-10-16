@@ -5,7 +5,7 @@ import { ByteLru } from '../utils/byteLru.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
-import { disposeSharedXmlModGeometries, disposeSharedXmlModMaterials } from '../viewer/xmlModGeometry.js';
+import { trimSharedXmlModGeometries, disposeSharedXmlModMaterials } from '../viewer/xmlModGeometry.js';
 const scope = self as unknown as { postMessage: (message: unknown, transfer?: Transferable[]) => void };
 const pending = new Map<number, { resolve: (bytes: ArrayBuffer) => void; reject: (error: Error) => void }>();
 const inflight = new Map<string, Promise<ArrayBuffer>>();
@@ -84,6 +84,7 @@ self.onmessage = async ({ data }) => {
     const result = data.kind === 'bounds' ? await buildDevSourceBounds(data.path, files, parse, discovery)
       : await serializeDevToGlbDetailed(data.path, files, { parseXml: parse, discovery, lod: data.lod, timings: stages });
     const bytes = 'bytes' in result ? result.bytes : null;
+    if (bytes && 'bytes' in result) result.sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>))].map(v => v.toString(16).padStart(2,'0')).join('');
     scope.postMessage({ kind: 'result', id: data.id, session: data.session, key: data.key, path: data.path,
       result, wallMs: performance.now() - started, stages: { ...stats, ...stages } }, bytes ? [bytes.buffer as ArrayBuffer] : []);
   } catch (error) {
@@ -93,6 +94,6 @@ self.onmessage = async ({ data }) => {
   } finally {
     // Worker owns these resources; GLB bytes have already been exported and transferred.
     // Do not retain an unbounded primitive/material cache alongside the bounded source IR caches.
-    disposeSharedXmlModGeometries(); disposeSharedXmlModMaterials(); running = false;
+    trimSharedXmlModGeometries(16 * 1024 * 1024); disposeSharedXmlModMaterials(); running = false;
   }
 };

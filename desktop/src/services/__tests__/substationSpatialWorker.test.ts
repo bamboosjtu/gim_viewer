@@ -14,16 +14,20 @@ class SpatialWorker {
   terminate=vi.fn(); requests:SpatialWorkerRequest[]=[];
   constructor(){SpatialWorker.instances.push(this);}
   postMessage(input:SpatialWorkerRequest,transfer:Transferable[]=[]){
-    const request=structuredClone(input,{transfer});this.requests.push(request);
+    const blob=input.type==='model'?input.blob:undefined;
+    const request=structuredClone(input.type==='model'?{...input,blob:undefined}:input,{transfer}) as SpatialWorkerRequest;
+    if(request.type==='model' && blob)request.blob=blob;
+    this.requests.push(request);
     if(SpatialWorker.hold)return;
-    queueMicrotask(()=>{
+    queueMicrotask(async ()=>{
       const send=(data:SpatialWorkerResponse)=>this.onmessage?.({data} as MessageEvent<SpatialWorkerResponse>);
       if(request.type==='init'){
         const observer:SubstationSpatialIndexObserver={onModelParsed:profile=>send({type:'diagnostic',event:'onModelParsed',profile})};
         this.builder=new SubstationSpatialIndexBuilder(request.tree,request.relations,observer);
       } else if(request.type==='model'){
         send({type:'diagnostic',event:'onModelRead',profile:request.read});
-        this.builder.addIfcModel(request.entry,request.text??(request.bytes?new TextDecoder().decode(request.bytes):null),request.read.bytes);
+        const bytes=request.blob ? await request.blob.arrayBuffer() : request.bytes;
+        this.builder.addIfcModel(request.entry,request.text??(bytes?new TextDecoder().decode(bytes):null),request.read.bytes);
       } else {send({type:'complete',index:structuredClone(this.builder.finalize())});return;}
       send({type:'ready'});
     });
@@ -42,6 +46,9 @@ it('worker transport preserves the full spatial graph, Maps, direct links and pe
   const read=vi.fn(),parsed=vi.fn();
   const actual=await buildSubstationSpatialIndexInWorker(files,entries,tree,[],{onModelRead:read,onModelParsed:parsed},()=>true);
   expect(actual).toEqual(expected);
+  const modelRequest=SpatialWorker.instances[0].requests.find(row=>row.type==='model');
+  expect(modelRequest?.type==='model' && modelRequest.blob).toBeInstanceOf(Blob);
+  expect(modelRequest?.type==='model' && modelRequest.bytes).toBeNull();
   expect(actual.nodeByKey).toBeInstanceOf(Map);
   expect(actual.linksByCbmPath.get(tree.path)?.confidence).toBe('confirmed');
   expect(read).toHaveBeenCalledTimes(3);expect(read.mock.calls[1][0].error).toBe('disk failed');

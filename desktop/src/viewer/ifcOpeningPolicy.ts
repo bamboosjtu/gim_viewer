@@ -4,7 +4,8 @@
 export function omitIfcOpeningRelations(
   bytes: Uint8Array,
   retainRelation: (id: number) => boolean = () => false,
-  onRelation?: (relation: { id: number; host: number; opening: number }) => void
+  onRelation?: (relation: { id: number; host: number; opening: number }) => void,
+  onSpan?: (id: number, start: number, end: number) => void
 ): number {
   let start = -1,
     quoted = false,
@@ -60,6 +61,7 @@ export function omitIfcOpeningRelations(
               .decode(bytes.subarray(start + 1, bytes.indexOf(61, start)))
               .trim()
           );
+          onSpan?.(id, start, i + 1);
           if (onRelation) {
             // References in quoted text/comments are not relation endpoints.
             let quote = false,
@@ -134,4 +136,35 @@ export function omitIfcOpeningRelations(
     start = -1;
   }
   return removed;
+}
+
+/** Owns offsets for one mutable derived input. The first change scans STEP;
+ * subsequent changes touch only relation spans, preserving byte-for-byte
+ * equivalence with repeated omitIfcOpeningRelations calls and stable IDs.
+ * Do not use this editor after replacing or resizing its input. */
+export class IfcOpeningRelationEditor {
+  private spans: Map<number, readonly [number, number]> | null = null;
+  private removed = new Set<number>();
+
+  constructor(private readonly bytes: Uint8Array) {}
+
+  omit(ids: Iterable<number>): number {
+    if (!this.spans) {
+      const spans = new Map<number, readonly [number, number]>();
+      omitIfcOpeningRelations(this.bytes, () => true, undefined,
+        (id, start, end) => spans.set(id, [start, end]));
+      this.spans = spans;
+    }
+    let count = 0;
+    for (const id of ids) {
+      const span = this.spans.get(id);
+      if (!span || this.removed.has(id)) continue;
+      for (let i = span[0]; i < span[1]; i++) {
+        if (this.bytes[i] !== 10 && this.bytes[i] !== 13) this.bytes[i] = 32;
+      }
+      this.removed.add(id);
+      count++;
+    }
+    return count;
+  }
 }

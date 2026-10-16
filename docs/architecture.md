@@ -94,13 +94,15 @@ Viewer 创建后即启动设备编译，编译与 IFC 锚点无关，场景提�
 
 内存中的不可变 File 通过结构化克隆交给 Worker 直接读取，保留共享的 Blob 后备存储，避免逐文件经过主线程。磁盘惰性 File 仍使用受源身份和路径校验保护的 IPC。模板读取/解析也受有界队列限制，正在创建 placement 的模板受 LRU 保护。原生索引提交、缓存校验及设备派生产物 I/O 在后台线程执行，保持原有事务、源校验、路径防护和原子替换条件。
 
-状态栏独立显示已处理设备、实际显示与失败数，以及当前视图和后台基础表示阶段，不被并行 IFC 提示覆盖；悬停查看设备范围索引、模板编译、缓存、淘汰、部分表示和活动设备。计数以 occurrence 为单位并按状态去重，模板任务数量另计。currentViewSettled/baseRepresentationsSettled 包含已结束失败，currentViewReady/baseRepresentationsReady 保留成功语义，allStationReady 仍要求完整精细几何；失败结束不能永久显示准备中，也不计作成功。临时失败可通过明确选择重试，确定性 source-invalid 按源证据隔离并缓存，旧档位失败不能污染新请求。阶段耗时包含读取/RPC、解码、校验、解析、primitive、Boolean、合并、导出与提交；Worker elapsed 是墙钟时间。
+状态栏独立显示已处理几何实例、实际显示与失败数，以及当前视图和后台基础表示阶段，不被并行 IFC 提示覆盖；悬停查看设备范围索引、模板编译、缓存、淘汰、部分表示和活动设备。计数以 occurrence 为单位并按状态去重，模板任务数量另计。currentViewSettled/baseRepresentationsSettled 包含已结束失败，currentViewReady/baseRepresentationsReady 保留成功语义，allStationReady 仍要求完整精细几何；失败结束不能永久显示准备中，也不计作成功。临时失败可通过明确选择重试，确定性 source-invalid 按源证据隔离并缓存，旧档位失败不能污染新请求。阶段耗时包含读取/RPC、解码、校验、解析、primitive、Boolean、合并、导出与提交；Worker elapsed 是墙钟时间。
 
 GLB 恢复校验 manifest、源身份、条目状态和文件完整性。单 DEV 文件失败可局部回退原始几何；manifest 无效使几何域失效，不要求删除有效语义域。完成标记只在所有目标条目形成确定状态后提交，瞬时失败不能写为完整版本。确定性 source-invalid 可与其他确定结果共同发布结构有效的缓存，暖恢复不读取其 GLB 或重试 raw；结构有效不等于所有几何显示，fullModelReady 诊断明确记录拒绝数及 geometryFullyRendered。
 
 source-invalid 的普通选择提示仅解释已跳过渲染、属性与来源仍可查看。完整 diagnostic/detail 保持原样，属性面板提供折叠技术详情和诊断复制，不把原始 Entity 矩阵送到视口消息。相同 SelectionRequest 的属性刷新保留用户当前页签与技术详情展开状态，新对象选择仍重置展示；这属于 UI 展示状态，不改变选择提交权或缓存语义。
 
 DEV 导出前和静态 GLB 模板恢复时检查有限值与包围盒跨度，复用场景既有 500 m 跨度上限，不按设备名称选择规则。异常源矩阵不会被 clamp 或静默删除；导出失败进入现有 failed 路径，不发布正常 GLB 或完整几何版本。运行时仍在应用 occurrence 变换后执行原包围盒守卫。样本验收分别统计候选可恢复、实际提交与异常拒绝 occurrence，不能以文件存在代替显示成功。
+
+XML 烘焙按可见根记录失败明细：每条保留来源 MOD 路径、根 Entity id 及其未解析依赖的 id 与原因，随 DEV 诊断以 `failedVisibleRoots`/`failedVisibleRootCount` 上报，每个 DEV 最多保留 64 条；Boolean 被简化求值的数量记为 `simplifiedBooleans`。这些明细只描述源内求值结果，不改变条目的 partial/unsupported/failed 终态，也不替代 DEV 级来源原因。
 
 | 条目状态 | 含义 |
 |---|---|
@@ -142,8 +144,8 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
 | 变电语义 | `gim-substation-parser-v26` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性、语义引用及索引发布凭据 |
-| DEV 几何 | `geometry-cache-v11-stretch-csg` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
-| 设备 LOD 派生 | `geometry-cache-v11-stretch-csg` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
+| DEV 几何 | `geometry-cache-v12-mirrored-assembly` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
+| 设备 LOD 派生 | `geometry-cache-v12-mirrored-assembly` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
 | Spatial snapshot | `substation-spatial-semantic-v2` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 源、链接和序列化结构 |
 | IFC Spatial parser contract | `gim-substation-parser-v23` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | Fragments | `fragments-cache-v6` | [db.rs](../desktop/src-tauri/src/db.rs)、[features](../desktop/src/config/features.ts) | 源/IFC 身份及实际安装的 fragments/web-ifc 版本 |
@@ -172,7 +174,7 @@ SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `
 
 顶部“IFC细节”在“自动（近景30m）”与“远景”之间即时切换，默认自动。自动模式查询当前相机视锥及 30m 范围相交的构件包围盒，包含跨区域的长构件及范围内的紧固件。只对这些宿主分析开洞；可识别的孔截面最大尺寸 ≤50mm 时省略关系，较大或无法识别的开洞保留，然后逐对象 `GetFlatMesh`。几何生成仍需首次读入并 OpenModel 整个源文件，不等于 IFC 可以按区域直接解析。
 
-区域对象按原 GlobalId/ExpressId 拾取和读取源属性；只有唯一 GlobalId 对应的远景对象才隐藏，歧义不猜测。离开区域或切到远景时释放局部网格、恢复远景可见性。区域工作在各 IFC 间串行，请求结束释放源 Worker；工程会话及相机请求版本拒绝过期提交。此队列仅约束区域任务，不保证与 DEV、Spatial 或远景转换全局互斥。
+区域对象按原 GlobalId/ExpressId 拾取和读取源属性；只有唯一 GlobalId 对应的远景对象才隐藏，歧义不猜测。离开区域或切到远景时释放局部网格、恢复远景可见性。区域工作在各 IFC 间串行，最多驻留一个源 Worker；连续请求复用源模型，切换源、工程释放或空闲 30 秒后销毁；工程会话及相机请求版本拒绝过期提交。此队列仅约束区域任务，不保证与 DEV、Spatial 或远景转换全局互斥。
 
 近景紧固件在同一次源模型会话中共享几何模板，回复按模板复制和转移一次缓冲区，避免多个对象重复复制顶点。渲染按模板和颜色合并为 InstancedMesh（仅此 IFC 浏览 LOD 近景路径使用，DEV 生产路径不采用），每个实例槽保存原 ExpressId。拾取和高亮仍对应单个源对象；选中时创建独立高亮覆盖层，不改动其他实例。镜像放置保留普通网格路径。离开区域释放未使用的 GPU 模板、材料和实例，逐对象缓存仍保留独立身份与放置。
 
@@ -204,6 +206,8 @@ SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `
 | currentViewReady | 锚点与目录就绪，且当前视锥内 occurrence 均已提交所需档位或已有明确终态 |
 | baseRepresentationsReady | 锚点与目录就绪，且全部 occurrence 已提交表示或为 empty/unsupported 终态；基础与 partial 表示不计作完整几何 |
 | allStationReady | 在基础表示就绪之上，全部 occurrence 为 empty 终态或已达到 LOD2 完整几何 |
+| currentViewSettled | 相机已停稳且锚点、目录就绪，当前视锥内 occurrence 均已提交所需档位或已确定失败 |
+| baseRepresentationsSettled | 锚点与目录就绪，全部 occurrence 已提交表示、为 empty/unsupported 或已确定失败 |
 | selectedFineReady | 当前有效选择已唯一关联 LOD2，精细高亮及属性完成提交；另记录每次选择事件 |
 | allIfcReady | 全部 IFC 加载尝试结束，失败数另列 |
 | fullModelReady | DEV 管线结束，unsupported/partial 仍单独记录 |
@@ -218,3 +222,27 @@ SLD 使用白名单净化与 img 沙箱；删除脚本、事件、foreignObject 
 `npm run build` 完成各端 TypeScript 和 Vite 构建；
 `npm run tauri:build` 运行 Tauri 构建并通过 post 脚本生成 portable ZIP。
 固定 WebView2 与 WASM 资产由构建脚本准备，产物类型以 Tauri 配置和脚本为准。`desktop/public/worker-bundle.js`、`libarchive.wasm`、`wasm/web-ifc*.wasm` 是随项目维护的运行时资产。 验证命令见 [验证](validation.md)，性能方法见 [性能](performance.md)。
+
+### 设备场景提交与地图会话
+
+DEV/PHM 累积矩阵烘焙到模板顶点时，负行列式同时修正三角形绕序。保留为 Object3D 矩阵的 occurrence 放置继续交给渲染器处理，避免重复反转。XML 材质按来源保留，不通过全局双面渲染掩盖方向错误。
+
+设备模板缓存局部保守包围盒，实例使用放置矩阵变换包围盒；相机单轮评估复用视锥与投影临时对象。相机更新独立防抖 200 ms，目录与提交重新评估采用合并调度，不因持续提交而重置计时。场景提交按 16 ms 间隔调度，单批使用 4 ms 软预算，单个任务不能中断。相机交互期间暂缓普通提交，选中设备优先；旧表示保持到替换完成。同一 occurrence 同档请求合并，会话释放会拒绝等待中的提交。状态统计最多每 100 ms 合并刷新，仍遍历目录，尚未改为增量计数。
+
+线路地图创建接收 AbortSignal，覆盖动态依赖加载、挂载前检查和等待 load 阶段。工程清理与底图切换取消初始化中的地图，失败或取消释放地图 DOM 和 WebGL 对象。过期创建结果不进入新工程。
+
+项目登记在阻塞任务中执行，兼容旧路径的规范化在数据库锁外处理，重新加锁后复核记录。日志分列源路径规范化、锁等待、兼容候选数及兼容路径处理耗时。IFC 转换的补充范围收集只流式处理未观察到的紧固件，不重放全部几何。区域查询按固定工程矩阵缓存包围盒树，区域缓存按批次事务读写。DEV 来源统一经过 File.text 解码入口，Worker 保留有界解析缓存及 16 MiB primitive 缓存；计算结果移交后释放 Worker，运行时最多并行处理两倍 Worker 数量的模板任务。
+
+默认变电导航采用功能系统投影，分类不参与物理 occurrence 收集与几何剔除。功能系统树根据任意物理层级上的 SYSTEMNAME 建立系统、电压区域与间隔分组，不将 F3 或 F4 当作业务边界。缺少中间层时直接展示下层对象；独立设备名称不提升为额外系统。装配子树中的组成部分保持原始来源，嵌套独立电气单元单独展示。FAM 仅以明确的名称/类型属性补充分类，保留原始行、分节及重复证据，冲突时显示分类证据冲突，不强行覆盖明确名称。PARTINDEX/DEV_SUBDEVICE 仅在同一归属下唯一配对时合并，相同 DEV 的多个真实引用仍保留不同路径。
+
+模板等待队列使用可索引堆，入队、取消和提升为 O(log N)，普通任务按优先级及入队时刻排序，选中任务始终优先。LRU 的保护集合带成员修订号，缓存内容、预算与保护集合不变时跳过重复无效淘汰。Worker 计算槽和结果消费分别管理：未消费结果达到 64 MiB 或每 Worker 两条时，暂停派发普通编译；已启动任务可完成，单条结果上限 128 MiB。此阈值不是工程总内存硬上限，暖缓存读取、解析与 GPU 驻留分别记录。
+
+原生设备派生缓存的并发读取在同一源身份下合并为最多 16 条的小批次。每批验证项目 SHA 一次、复用父目录创建与规范化结果，可变父目录的 reparse 检查和文件检查仍逐条执行，二进制回复沿用 GIMR envelope；每条上限 128 MiB、每批上限 512 MiB。损坏记录逐条回退，源身份或批次读取失败不作为合法缓存使用。磁盘目录布局与持久化键不变。
+
+近景几何与源属性缓存使用 256 MiB 估算载荷预算、4096 条上限和单条 64 MiB 上限。容量元数据与几何在同一 IndexedDB 事务提交，访问会更新淘汰顺序；超预算时从旧条目开始淘汰，超大条目不持久化但仍可显示。数据库升级只清退没有容量账的旧近景/属性条目，保留远景 Fragments 与区域索引，以及独立语义和设备缓存。升级后的首次近景请求可能重新求值，此行为不等于源工程失效。
+
+DEV 暖缓存读取、SHA 校验和 GLTF 解析与冷编译结果的消费共享 128 MiB 输入预算。缓存条目读取前大小未知，按单条上限预留，缓存未命中时先释放预留再编译；冷结果按实际字节申请消费额度。工程关闭拒绝排队申请，已完成任务只释放一次。此预算约束输入消费，不包含已启动 Worker 的产物、解析后的模板和 GPU 驻留；诊断中的预算值表示预留量。
+
+Spatial 构建在来源是真实 Blob/File 时直接把不可变来源交给 Worker，由 Worker 读取字节、解码并报告阶段墙钟。磁盘 shim 保留授权的读取回退。两条路径仍使用同一 STEP 扫描和关系构建，逐文件隔离错误；这项改动减少主线程整文件驻留及跨线程字节转移，不代表已经消除了 Spatial 的重复扫描。
+
+区域 Worker 在首次省略小孔时扫描一次 STEP 并保留开洞关系的字节范围，后续区域仅将新确认的小孔关系替换为空白，保留换行、记录 ID 与偏移。范围表只属于当前源 Worker，随源释放；同源逐批修改与重复全文件过滤的输入字节一致，不改变缓存键和几何策略。开洞策略变化后仍关闭并重新 OpenModel，此成本尚未消除。

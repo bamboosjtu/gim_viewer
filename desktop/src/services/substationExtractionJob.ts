@@ -4,7 +4,6 @@ import { invokeTimed } from '@desktop/invokeTimed.js';
 import { decodeSubstationParseCopy, type ParseCopyReceipt } from '@desktop/substationParseCopy.js';
 import { perfCurrentSession, perfMark } from '../utils/perfTimings.js';
 
-export const EARLY_SEMANTIC_KEY = 'gim-debug-substation-early-semantic';
 export interface EarlySemanticEligibility {
   eligible: boolean; reason: string; archiveFormat: string; folderCount: number;
   coreEntryCount: number; coreBytes: number; streamCoreEntries: number; emptyCoreEntries: number;
