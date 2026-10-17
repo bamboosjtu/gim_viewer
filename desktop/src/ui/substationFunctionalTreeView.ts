@@ -1,5 +1,6 @@
 import type { FamSourceProperty } from '../gim/famParser.js';
-import { classifySubstationNode, type BusinessCategory } from '../gim/substationBusiness.js';
+import { classifySubstationNode, compareSubstationNames as compareFunctionalNames, projectSubstationSystemNames, type BusinessCategory } from '../gim/substationBusiness.js';
+import { setBusinessDeviceCount } from './shell/statusBar.js';
 import type { AppState } from '../app/state.js';
 import { normalizeEntityName } from '../gim/entityName.js';
 import { substationDevIdentity } from '../gim/substationEvidence.js';
@@ -21,6 +22,8 @@ export interface FunctionalPartProjection {
 
 export interface FunctionalAssetProjection {
   node: CbmNode;
+  sourceNodes: CbmNode[];
+  ownerPath?: string;
   role: FunctionalRole;
   parts: FunctionalPartProjection[];
   classification: ReturnType<typeof classifySubstationNode>;
@@ -102,6 +105,7 @@ export function buildFunctionalDomainIndex(root: CbmNode, fam?: ReadonlyMap<stri
   targetByKey.set(FUNCTIONAL_ROOT_KEY, {key:FUNCTIONAL_ROOT_KEY,rowKey:FUNCTIONAL_ROOT_KEY,kind:'root'});
 
   const systemFor = (names: string[], source: CbmNode, container = false): FunctionalSystemProjection => {
+    names = projectSubstationSystemNames(names);
     const first = names[0], normalized = first ? normalizeDomain(first) : null;
     const domainKey = normalized ? `functional:domain:${encodeURIComponent(normalized.key)}` : 'functional:domain:unclassified';
     let domain = domainByKey.get(domainKey);
@@ -124,7 +128,8 @@ export function buildFunctionalDomainIndex(root: CbmNode, fam?: ReadonlyMap<stri
     const classification = classifySubstationNode(node,famByPath.get(sourcePath(node.famPath)));
     const role = classification.category;
     const hasSource = Boolean(node.devPath.trim() || node.ifcFile.trim() || node.ifcGuid.trim());
-    const namedContainer = !hasSource && !isPartNode(node) && /(?:系统|间隔|区域|工程)$/.test(node.name.trim());
+    const namedContainer = !hasSource && !isPartNode(node)
+      && (node.systemNames.length >= 2 || /(?:系统|间隔|区域|工程)$/.test(node.name.trim()));
     const asset = !namedContainer && (hasSource || role !== 'other' || isPartNode(node));
     // SYSTEMNAME is source evidence at any physical depth. Classification codes do not manufacture names.
     let names = inherited;
@@ -144,17 +149,18 @@ export function buildFunctionalDomainIndex(root: CbmNode, fam?: ReadonlyMap<stri
         if ('parts' in owner) owner.parts.push(part); else owner.children.push(part);
         nextOwner = part;
       } else {
-        const projected: FunctionalAssetProjection = {node,role,parts:[],classification};
+        const projected: FunctionalAssetProjection = {node,sourceNodes:[node],ownerPath:owner?.node.path,role,parts:[],classification};
         systemFor(names,node).assets.push(projected); nextOwner = projected;
       }
     }
     for (const child of node.children) visit(child,names,nextOwner);
   };
   visit(root,[]);
+  mergeSemanticAssets([...systemByKey.values()]);
   for (const domain of domainOrder) for (const system of domain.systems) {
     let parent = domain.key;
     system.groupPath.forEach((_title,i) => {
-      const key = functionalGroupKey(domain.key,system.groupPath.slice(0,i+1));
+      const key = functionalBranchKey(domain.key,system.groupPath.slice(0,i+1),systemByKey);
       registerTarget(targetByKey,{key,rowKey:key,kind:'system'});parentByKey.set(key,parent); parent=key;
     });
     parentByKey.set(system.key,parent);
@@ -167,7 +173,7 @@ export function buildFunctionalDomainIndex(root: CbmNode, fam?: ReadonlyMap<stri
       if (roleGroups.size > 1) parentByKey.set(roleKey,system.implicit ? domain.key : system.key);
       for (const asset of assets) {
         // A real object's selection identity takes precedence over an assembly grouping label.
-        targetByKey.set(asset.node.path,{key:asset.node.path,rowKey:asset.node.path,kind:'asset',node:asset.node});
+        for (const source of asset.sourceNodes) targetByKey.set(source.path,{key:source.path,rowKey:asset.node.path,kind:'asset',node:source});
         parentByKey.set(asset.node.path,roleGroups.size > 1 ? roleKey : system.implicit ? domain.key : system.key);
         registerPartTargets(asset.parts,asset.node.path,targetByKey,parentByKey);
       }
@@ -175,6 +181,8 @@ export function buildFunctionalDomainIndex(root: CbmNode, fam?: ReadonlyMap<stri
   }
 
   const sortedDomains = domainOrder.slice().sort(compareDomains);
+  for (const domain of sortedDomains) domain.systems.sort((a,b) => compareFunctionalNames(a.groupPath[0] ?? a.title,b.groupPath[0] ?? b.title)
+    || compareFunctionalNames(a.title,b.title));
   for (const domain of sortedDomains) {
     registerTarget(targetByKey, {
       key: domain.key,
@@ -247,6 +255,8 @@ export function buildFunctionalSearchIndex(
             asset.node.devType || undefined,
           ].filter(Boolean).join(' · '),
         });
+        for (const source of asset.sourceNodes) if (source.path!==asset.node.path) push({key:source.path,title,
+          subtitle:`设备来源别名 · ${system.title} · ${source.path}`});
         for (const part of flattenPartProjections(asset.parts)) {
         const partTitle = getNodeDisplayName(part.node, state.ifcGuidToName, state.currentIfcEntries) || '部件';
           const sourceLabel = part.sourceNodes.map((source) => normalizeEntityName(source.entityName))
@@ -311,6 +321,8 @@ export function renderSubstationFunctionalTree(
     (sum, domain) => sum + domain.systems.reduce((inner, system) => inner + system.assets.length, 0),
     0,
   );
+  setBusinessDeviceCount(index.domains.reduce((sum,domain) => sum + domain.systems.reduce((count,system) =>
+    count + system.assets.filter(asset => asset.role === 'device').length,0),0));
   renderFunctionalNode(
     parentEl,
     index.rootKey,
@@ -339,19 +351,30 @@ export function renderSubstationFunctionalTree(
       },
       undefined,
       false,
-      `${domain.systems.length} 个系统`,
+      `${domainBranchCount(domain)} 个系统`,
     );
   }
 
   function renderGroups(domain: FunctionalDomainProjection, systems: FunctionalSystemProjection[], depth: number, host: HTMLElement): void {
     const groups = new Map<string,FunctionalSystemProjection[]>();
     for (const system of systems) {
-      const title=system.groupPath[depth];
-      if (!title) { renderSystem(system,host);continue; }
+      if (system.implicit) { renderSystemContents(system,host);continue; }
+      const title=[...system.groupPath,system.title][depth];
+      if (!title) continue;
       const rows=groups.get(title) ?? [];rows.push(system);groups.set(title,rows);
     }
-    for (const [title,rows] of groups) renderFunctionalNode(host,functionalGroupKey(domain.key,rows[0].groupPath.slice(0,depth+1)),title,'▦',
-      '来源 SYSTEMNAME 分组',true,el=>renderGroups(domain,rows,depth+1,el),undefined,false,`${rows.length} 个功能组`);
+    for (const [title,rows] of [...groups].sort(([a],[b]) => compareFunctionalNames(a,b))) {
+      const direct = rows.find(row => row.groupPath.length === depth);
+      const children = rows.filter(row => row.groupPath.length > depth);
+      if (!children.length && direct) { renderSystem(direct,host);continue; }
+      const path = [...rows[0].groupPath,rows[0].title].slice(0,depth+1);
+      renderFunctionalNode(host,functionalBranchKey(domain.key,path,index.systemByKey),title,'▦',
+        '按来源功能归属合并；包含间隔与尚未分配间隔的对象',true,el => {
+          renderGroups(domain,children,depth+1,el);
+          if (direct?.assets.length) renderSystemContents(direct,el);
+        },direct ? () => onNodeClick(direct.node) : undefined,false,
+        `${new Set(children.map(row => [...row.groupPath,row.title][depth+1])).size} 个功能组`);
+    }
   }
 
   function renderSystem(system: FunctionalSystemProjection, host: HTMLElement): void {
@@ -589,8 +612,7 @@ function cleanToken(value: string): string | null {
   if (/^\d+$/.test(text)) return null;
   // 带 * 的纯编码（如 0AEC*006、0****001）不作为业务系统名。
   if (/^[0-9a-z_*./-]+$/i.test(text) && text.includes('*')) return null;
-  // 数字开头且没有中文通常是分类/序号，不把它提升为功能域。
-  if (/^\d/.test(text) && !/[\u3400-\u9fff]/.test(text)) return null;
+  // 1PT、1EM PT、10S 等是合法间隔名。纯数字、星号编码已在上方排除。
   return text;
 }
 
@@ -627,7 +649,55 @@ function mergeSemanticParts(parts: FunctionalPartProjection[]): FunctionalPartPr
   }
   return result;
 }
+
+/** Independently functional units can also have PARTINDEX/DEV_SUBDEVICE
+ * aliases. Coalesce only a unique pair under the same semantic owner; repeated
+ * placements and ambiguous same-kind references remain distinct. */
+function mergeSemanticAssets(systems: FunctionalSystemProjection[]): void {
+  const owners = new Map<string,string>();
+  const canonical = (path:string):string => {
+    const seen = new Set<string>();
+    while (owners.has(path) && !seen.has(path)) { seen.add(path);path=owners.get(path)!; }
+    return path;
+  };
+  const noteParts = (parts:FunctionalPartProjection[]):void => {
+    for (const part of parts) { for (const source of part.sourceNodes) if (source.path!==part.node.path) owners.set(source.path,part.node.path);noteParts(part.children); }
+  };
+  for (const system of systems) for (const asset of system.assets) { asset.parts=mergeSemanticParts(asset.parts);noteParts(asset.parts); }
+  let changed:boolean;
+  do {
+    changed=false;
+    for (const system of systems) {
+      const candidates = new Map<string,FunctionalAssetProjection[]>();
+      for (const asset of system.assets) {
+        const dev = substationDevIdentity(asset.node.devPath);
+        if (!asset.ownerPath || !dev || asset.sourceNodes.length!==1 || !isPartNode(asset.node)) continue;
+        const key=JSON.stringify([canonical(asset.ownerPath),dev]);
+        const rows=candidates.get(key) ?? [];rows.push(asset);candidates.set(key,rows);
+      }
+      const removed=new Set<FunctionalAssetProjection>();
+      for (const rows of candidates.values()) {
+        if (rows.length!==2 || !rows.some(row=>normalizeEntityName(row.node.entityName)==='PARTINDEX')
+          || !rows.some(row=>normalizeEntityName(row.node.entityName)==='DEV_SUBDEVICE')) continue;
+        const first=rows.find(row=>normalizeEntityName(row.node.entityName)==='PARTINDEX')!,second=rows.find(row=>row!==first)!;
+        first.sourceNodes.push(...second.sourceNodes);first.parts=mergeSemanticParts([...first.parts,...second.parts]);
+        first.classification={...first.classification,conflict:first.classification.conflict||second.classification.conflict,
+          evidence:[...new Set([...first.classification.evidence,...second.classification.evidence])],
+          famEvidence:[...new Set([...first.classification.famEvidence,...second.classification.famEvidence])]};
+        noteParts(first.parts);owners.set(second.node.path,first.node.path);removed.add(second);changed=true;
+      }
+      if (removed.size) system.assets=system.assets.filter(asset=>!removed.has(asset));
+    }
+  } while (changed);
+}
 function functionalGroupKey(domain: string, labels: string[]): string { return `functional:group:${encodeURIComponent(JSON.stringify([domain,...labels]))}`; }
+function functionalBranchKey(domain: string, labels: string[], systems: Map<string,FunctionalSystemProjection>): string {
+  const direct = functionalSystemKey(JSON.stringify([domain,...labels]));
+  return systems.has(direct) ? direct : functionalGroupKey(domain,labels);
+}
+function domainBranchCount(domain: FunctionalDomainProjection): number {
+  return new Set(domain.systems.filter(system => !system.implicit).map(system => system.groupPath[0] ?? system.title)).size;
+}
 
 function partIdentity(node: CbmNode): string {
   const devPath = substationDevIdentity(node.devPath);
@@ -719,8 +789,8 @@ function domainSubtitle(domain: FunctionalDomainProjection): string {
     ? `来源码 ${domain.sourceCodes.slice(0, 5).join('/')}${domain.sourceCodes.length > 5 ? '等' : ''}`
     : undefined;
   return [
-    `${domain.systems.length} 个系统`,
-    `F4 ${f4}`,
+    `${domainBranchCount(domain)} 个系统`,
+    `对象 ${f4}`,
     discipline,
     source,
   ].filter(Boolean).join(' · ');

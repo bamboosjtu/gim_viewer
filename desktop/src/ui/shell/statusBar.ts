@@ -8,6 +8,8 @@
 let statusTextEl: HTMLElement | null = null;
 let statusDotEl: HTMLElement | null = null;
 const busyTasks = new Map<string, string>();
+let businessDeviceCount: number | null = null;
+let deviceProgress = '', deviceDetail = '';
 
 /** 空工程时右侧状态栏的稳定默认文案。 */
 export const DEFAULT_STATUS_RIGHT = 'GIM BIM 浏览器';
@@ -56,13 +58,22 @@ export function setStatusRight(text: string): void {
 
 /** Independent device progress survives concurrent IFC/loading messages. */
 export function setDeviceStatus(text: string, detail?: string): void {
+  deviceProgress = text; deviceDetail = detail ?? '';
   const el = document.getElementById('status-devices');
-  if (el) { el.textContent = text; el.title = detail ? `${text}\n${detail}` : text; el.hidden = !text; }
+  const display = businessDeviceCount === null ? text : `业务设备 ${businessDeviceCount}${text ? ` · ${text}` : ''}`;
+  if (el) { el.textContent = display; el.title = detail ? `${display}\n${detail}` : display; el.hidden = !display; }
+}
+
+/** Semantic equipment count is independent from renderable occurrences. */
+export function setBusinessDeviceCount(count: number): void {
+  businessDeviceCount = count;
+  setDeviceStatus(deviceProgress,deviceDetail);
 }
 
 /** 清理工程时恢复共性状态栏，避免线路统计泄漏到下一工程。 */
 export function resetStatusRight(): void {
   busyTasks.clear();
+  businessDeviceCount = null;
   setIfcStatus('');
   setStatus('就绪');
   setStatusRight(DEFAULT_STATUS_RIGHT);

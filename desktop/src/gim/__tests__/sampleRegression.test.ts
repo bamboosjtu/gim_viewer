@@ -487,6 +487,16 @@ describe.skipIf(!SUBSTATION_CORPUS.some((item) => existsSync(item.dir)))('样本
       expect(index.domains.map((domain) => domain.title), sample.id).toEqual(baseline.domains);
       expect(index.domains.filter((domain) => domain.key === 'functional:domain:unclassified'), sample.id)
         .toHaveLength(baseline.unclassified ? 1 : 0);
+      const electrical = index.domains.find(domain => /电气系统$/.test(domain.title));
+      const systems = electrical?.systems ?? [];
+      const voltageBays = (voltage:string) => systems.filter(system => system.groupPath[0] === voltage).map(system => system.title);
+      if (sample.id === 'demo-substation') {
+        expect(voltageBays('220kV系统')).toContain('1EM PT');
+        expect(systems.some(system => system.groupPath[0] === '控制及直流/二次系统' && system.title === '公用测控系统')).toBe(true);
+      }
+      console.log('[functional-tree]',sample.id,JSON.stringify({units:[...new Set(systems.map(system => system.groupPath[0] ?? system.title))],
+        voltage220:voltageBays('220kV系统'),voltage10:voltageBays('10kV系统'),
+        businessDevices:index.domains.reduce((sum,domain) => sum+domain.systems.reduce((count,system) => count+system.assets.filter(asset => asset.role === 'device').length,0),0)}));
     }
   }, 120_000);
 

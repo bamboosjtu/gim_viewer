@@ -1,5 +1,42 @@
 use super::*;
 
+/// Manual native registration probe. Each invocation is a fresh Rust process;
+/// it uses a dedicated on-disk DB, never the application's existing cache.
+#[test]
+#[ignore = "requires GIM_PROJECT_CHECK_SOURCE and GIM_PROJECT_CHECK_DIR"]
+fn project_registration_native_profile() {
+    use std::io::Read;
+    let source=PathBuf::from(std::env::var_os("GIM_PROJECT_CHECK_SOURCE").expect("explicit source GIM required"));
+    let directory=PathBuf::from(std::env::var_os("GIM_PROJECT_CHECK_DIR").expect("isolated output directory required"));
+    assert!(source.is_absolute() && directory.is_absolute());
+    stdfs::create_dir_all(&directory).unwrap();
+    let identity_started=Instant::now();
+    let metadata=stdfs::metadata(&source).unwrap();
+    let mut hash=sha2::Sha256::new();let mut file=stdfs::File::open(&source).unwrap();let mut buffer=vec![0_u8;1024*1024];
+    loop {let count=file.read(&mut buffer).unwrap();if count==0 {break;}hash.update(&buffer[..count]);}
+    let sha=format!("{:x}",hash.finalize());
+    let identity_ms=identity_started.elapsed().as_secs_f64()*1000.0;
+    let input=FileInfoInput{path:source.to_string_lossy().to_string(),name:source.file_name().unwrap().to_string_lossy().to_string(),
+        size:metadata.len(),modified_ms:metadata.modified().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64,sha256:sha.clone()};
+    let conn=Connection::open(directory.join("registration.db")).unwrap();
+    conn.busy_timeout(std::time::Duration::from_millis(100)).unwrap();
+    conn.pragma_update(None,"journal_mode","WAL").unwrap();initialize_schema(&conn).unwrap();
+    let count:i64=conn.query_row("SELECT COUNT(*) FROM gim_project",[],|row|row.get(0)).unwrap();
+    let phase=if count==0 {"first-registration"} else {"new-process-registration-hit"};
+    // An unchanged warm registration must stay read-only even with an unrelated
+    // writer holding the WAL write reservation.
+    let writer=Connection::open(directory.join("registration.db")).unwrap();
+    if count>0 {writer.execute_batch("BEGIN IMMEDIATE").unwrap();}
+    let state=DbState(Mutex::new(conn));let started=Instant::now();
+    let record=upsert_gim_project_inner(&state,input).unwrap();let elapsed_ms=started.elapsed().as_secs_f64()*1000.0;
+    if count>0 {writer.execute_batch("ROLLBACK").unwrap();}
+    let result=serde_json::json!({"scope":"Native registration core only; no Tauri WebView, semantic restore or geometry", "pid":std::process::id(),
+        "phase":phase,"source_sha256":sha,"source_bytes":metadata.len(),"identity_ms":identity_ms,"registration_ms":elapsed_ms,"project_id":record.id,
+        "other_writer_reserved":count>0});
+    stdfs::write(directory.join(format!("registration-{}.json",std::process::id())),serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+    println!("NATIVE_PROJECT_PROFILE {}",result);
+}
+
 fn project(conn: &Connection, id: i64, sha: &str) {
     conn.execute("INSERT INTO gim_project(id,path,name,size,modified_ms,sha256,created_at_ms,updated_at_ms,last_opened_at_ms) VALUES(?1,?2,'fixture',0,0,?3,0,0,0)",
         params![id, format!("fixture-{}.gim", id), sha]).unwrap();

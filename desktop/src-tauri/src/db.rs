@@ -617,12 +617,12 @@ pub(crate) fn ensure_project_exists(conn: &Connection, project_id: i64) -> Resul
 #[tauri::command]
 pub async fn upsert_gim_project(app: tauri::AppHandle, info: FileInfoInput) -> Result<GimProjectRecord, String> {
     use tauri::Manager;
-    tauri::async_runtime::spawn_blocking(move || upsert_gim_project_inner(app.state::<DbState>(), info))
+    tauri::async_runtime::spawn_blocking(move || upsert_gim_project_inner(&app.state::<DbState>(), info))
         .await.map_err(|e| format!("项目登记任务失败: {}", e))?
 }
 
 fn upsert_gim_project_inner(
-    state: tauri::State<'_, DbState>,
+    state: &DbState,
     info: FileInfoInput,
 ) -> Result<GimProjectRecord, String> {
     // 前端 picker 已返回 canonical path，但 command 也必须在后端重新规范化：
@@ -679,7 +679,7 @@ fn upsert_gim_project_inner(
     println!("[GIM project check] canonical_ms={} lock_ms={} fallback_count={} fallback_ms={} relock_ms={} total_ms={}",
         canonical_ms, lock_ms, candidate_count, fallback_ms, relock_started.elapsed().as_millis(), started.elapsed().as_millis());
 
-    if let Some((id, old_path, old_size, old_modified_ms, old_sha256)) = existing {
+    let result = if let Some((id, old_path, old_size, old_modified_ms, old_sha256)) = existing {
         // 源 GIM 文件是否变化：size / modified_ms / sha256 任一不同即视为变化
         let file_changed = old_size != info.size
             || old_modified_ms != info.modified_ms
@@ -724,7 +724,9 @@ fn upsert_gim_project_inner(
         .map_err(|e| format!("插入项目记录失败: {}", e))?;
 
         query_record(&conn, conn.last_insert_rowid())
-    }
+    };
+    println!("[GIM project result] total_ms={:.3} success={}",started.elapsed().as_secs_f64()*1000.0,result.is_ok());
+    result
 }
 
 /// 根据 id 查询完整记录

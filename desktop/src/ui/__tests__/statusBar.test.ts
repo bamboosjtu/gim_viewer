@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { pushBusy, popBusy, resetStatusRight, setIfcStatus } from '../shell/statusBar.js';
+import { pushBusy, popBusy, resetStatusRight, setIfcStatus, setBusinessDeviceCount, setDeviceStatus } from '../shell/statusBar.js';
 it('progress updates are idempotent and independent tasks finish without a stuck loading state', () => {
   document.body.innerHTML = '<span id="status-text"></span><span id="status-dot"></span><span id="status-devices"></span>';
   resetStatusRight();
@@ -11,4 +11,7 @@ it('progress updates are idempotent and independent tasks finish without a stuck
   setIfcStatus('IFC 2/3');
   expect(document.getElementById('status-ifc')!.textContent).toBe('IFC 2/3');
   resetStatusRight(); expect(document.getElementById('status-ifc')!.hidden).toBe(true);
+  setBusinessDeviceCount(194);setDeviceStatus('几何实例已处理 2641/3326');
+  expect(document.getElementById('status-devices')!.textContent).toBe('业务设备 194 · 几何实例已处理 2641/3326');
+  resetStatusRight();expect(document.getElementById('status-devices')!.textContent).toBe('');
 });

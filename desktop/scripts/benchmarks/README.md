@@ -24,3 +24,9 @@ node scripts/benchmarks/ifc-lod-source-server.mjs '../demo/substation02/CBM/0302
 源服务可用第三个参数指定 Vite loopback origin，例如 `node scripts/benchmarks/ifc-lod-source-server.mjs '../demo/substation02/CBM/0302-钢结构.ifc' http://127.0.0.1:14339`。只接受 `http://127.0.0.1`，默认 origin 仍为端口 14331。区域诊断中的 sourceReads/sourceChecks 与 sourceOpenCount 分开记录；30 秒空闲后的重读和策略变化导致的重开不得混为一类。
 
 开洞关系范围表在源 Worker 的首次小孔修改时建立，后续批次仅修改新关系范围。若比较关系修改成本，必须使用相同源与累计移除集合，逐批核对修改后的全部字节；首次建表、后续修改和 OpenModel 分别计时。
+
+## 区域依赖子集与登记核心
+
+`node scripts/benchmarks/ifc-regional-mutation-check.mjs '../demo/substation02/CBM/0302-钢结构.ifc' '../output/steel-subset-check.json' subset` 只验证指定钢结构的板件、紧固件和保留开洞对象，对照顶点、索引、颜色及矩阵。省略最后的模式参数时默认使用 subset。mutation 和 catalog 是失败候选的诊断复现入口，分别检查 DeleteLine/ResetCache 和全源开洞预分类，不代表生产路径。生产源文件不改写，输出写入忽略目录，脚本不会覆盖研究报告。
+
+在 `desktop/src-tauri/` 设置绝对路径环境变量 `GIM_PROJECT_CHECK_SOURCE` 与独立目录 `GIM_PROJECT_CHECK_DIR` 后，可运行 `cargo test --lib project_registration_native_profile -- --ignored --nocapture`。首次运行只向该目录的专用数据库登记来源，第二次为新的原生进程命中，并让另一个连接保留 WAL 写锁以核对只读登记；输出 JSON 明确标记不包含 WebView、IPC、语义恢复和几何。不能将此命令的成功作为完整桌面暖启动验收。

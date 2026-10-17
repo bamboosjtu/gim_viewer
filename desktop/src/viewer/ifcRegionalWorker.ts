@@ -1,5 +1,6 @@
 import { IfcAPI } from 'web-ifc';
 import { IfcOpeningRelationEditor } from './ifcOpeningPolicy.js';
+import { RegionalSubsetBuilder } from './ifcRegionalSubset.js';
 import { extractIfcObjectFine } from './ifcObjectFineData.js';
 import {
   classifyRegionalOpenings,
@@ -11,11 +12,28 @@ let model: number | null = null,
   index: RegionalIndex;
 const classified = new Set<number>();
 let openingEditor: IfcOpeningRelationEditor;
+let subsetBuilder:RegionalSubsetBuilder | null = null;
+let subsetModel:number | null = null;
+let subsetUnavailable=false;
+const small=new Set<number>();
+let appliedSmallCount=0;
 const templates = new Map<
   number,
   { vertices: Float32Array; indices: Uint32Array }
 >();
 let objectTypes = new Map<number, string>();
+function useFullSource():void {
+  if(model===null)throw Error('Regional source unavailable');
+  if(subsetModel!==null){api.CloseModel(subsetModel);subsetModel=null;}
+  templates.clear();
+  if(small.size>appliedSmallCount){
+    api.CloseModel(model);model=null;
+    openingEditor.omit(small);appliedSmallCount=small.size;subsetBuilder=null;
+    self.postMessage({stage:'source-reopen'});
+    const started=performance.now();model=api.OpenModel(bytes,{COORDINATE_TO_ORIGIN:false});
+    self.postMessage({stage:'source-open-complete',elapsedMs:performance.now()-started});
+  }
+}
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === 'open') {
@@ -48,15 +66,26 @@ self.onmessage = async ({ data }) => {
         ),
         result = classifyRegionalOpenings(api, model, index, hosts);
       for (const id of hosts) classified.add(id);
-      if (result.small.length) {
-        templates.clear();
-        api.CloseModel(model);
-        openingEditor.omit(result.small);
-        self.postMessage({stage:'source-reopen'});
-        const openStarted=performance.now();
-        model = api.OpenModel(bytes, { COORDINATE_TO_ORIGIN: false });
-        self.postMessage({stage:'source-open-complete',elapsedMs:performance.now()-openStarted});
+      for (const id of result.small) small.add(id);
+      const products=data.objects as number[];
+      let subsetReady=false;
+      // Narrow capability boundary, proven on leaf steel/fastener products.
+      // Unknown product kinds and unsupported closures retain the full path.
+      if(!subsetUnavailable && products.every(id=>/^(IFCPLATE|IFCMEMBER|IFCMECHANICALFASTENER|IFCFASTENER)$/.test(objectTypes.get(id) ?? ''))){
+        try {
+          if(!subsetBuilder){subsetBuilder=new RegionalSubsetBuilder(api,model,index);self.postMessage({stage:'subset-index',elapsedMs:subsetBuilder.indexingMs});}
+          if(subsetModel!==null){api.CloseModel(subsetModel);subsetModel=null;}
+          templates.clear();
+          const subset=subsetBuilder.build(products,small);subsetModel=subset.model;subsetReady=true;
+          self.postMessage({stage:'subset-built',elapsedMs:subset.elapsedMs,records:subset.records});
+        } catch(error) {
+          // A source-specific failure does not disable valid geometry. Keep
+          // the existing full-source evaluator as a conservative fallback.
+          self.postMessage({stage:'subset-fallback',reason:String(error)});
+          subsetUnavailable=true;subsetBuilder=null;
+        }
       }
+      if(!subsetReady)useFullSource();
       self.postMessage({
         id: data.id,
         data: { ...result, classifiedHosts: hosts.size },
@@ -68,11 +97,12 @@ self.onmessage = async ({ data }) => {
         expressId: number;
         globalId: string;
       }[]) {
-        try {
-          results.push(
-            extractIfcObjectFine(
+        const extract=()=>{
+          const active=subsetModel ?? model;
+          if(active===null)throw Error('Regional evaluation model unavailable');
+          return extractIfcObjectFine(
               api,
-              model,
+              active,
               object.expressId,
               object.globalId,
               /^(IFCMECHANICALFASTENER|IFCFASTENER)$/i.test(
@@ -80,8 +110,17 @@ self.onmessage = async ({ data }) => {
               )
                 ? templates
                 : undefined
-            )
-          );
+            );
+        };
+        try {
+          let result;
+          try {result=extract();}
+          catch(error){
+            if(subsetModel===null)throw error;
+            self.postMessage({stage:'subset-fallback',reason:`Object #${object.expressId}: ${String(error)}`});
+            subsetUnavailable=true;subsetBuilder=null;useFullSource();result=extract();
+          }
+          results.push(result);
         } catch (error) {
           console.warn(
             '[IFC regional] object unavailable',

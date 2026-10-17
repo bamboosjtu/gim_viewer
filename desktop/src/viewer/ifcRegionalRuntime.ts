@@ -45,6 +45,7 @@ export class IfcRegionalRuntime {
     retainedOpenings: 0,
     unknownOpenings: 0,
     sourceReads:0,sourceBytes:0,sourceChecks:0,sourceOpenCount:0,sourceOpenWallMs:0,
+    subsetBuilds:0,subsetBuildWallMs:0,subsetIndexWallMs:0,subsetRecords:0,subsetFallbacks:0,subsetFallbackReason:'',
     stage: 'idle',
     error: '',
     regionMs: 0,
@@ -139,6 +140,9 @@ export class IfcRegionalRuntime {
           if(data.stage==='source-check')this.diagnostics.sourceChecks++;
           if(data.stage==='source-open' || data.stage==='source-reopen')this.diagnostics.sourceOpenCount++;
           if(data.stage==='source-open-complete')this.diagnostics.sourceOpenWallMs+=Number(data.elapsedMs)||0;
+          if(data.stage==='subset-index')this.diagnostics.subsetIndexWallMs+=Number(data.elapsedMs)||0;
+          if(data.stage==='subset-built'){this.diagnostics.subsetBuilds++;this.diagnostics.subsetBuildWallMs+=Number(data.elapsedMs)||0;this.diagnostics.subsetRecords=Number(data.records)||0;}
+          if(data.stage==='subset-fallback'){this.diagnostics.subsetFallbacks++;this.diagnostics.subsetFallbackReason=String(data.reason);}
           return;
         }
         const p = this.pending.get(data.id);

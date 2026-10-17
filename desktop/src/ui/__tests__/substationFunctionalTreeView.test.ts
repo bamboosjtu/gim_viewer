@@ -192,3 +192,40 @@ it('a device SYSTEMNAME labels the unit without creating another system group',(
   const index=buildFunctionalDomainIndex(root);const system=index.domains[0].systems[0];
   expect(index.domains).toHaveLength(1);expect(system.title).toBe('主变间隔');expect(system.assets.map(row=>row.node.path)).toEqual(['breaker']);
 });
+
+it('coalesces voltage prefixes, keeps alphanumeric bays, separates secondary systems and sorts numeric bay labels', () => {
+  const bay = (label:string,path:string,unit='220kV系统') => node({path,name:label,systemNames:['交流电气系统',unit,label],
+    children:[node({path:`${path}/breaker`,name:'断路器',devPath:`${path}.dev`})]});
+  const root = node({children:[node({path:'voltage',name:'220kV系统',systemNames:['交流电气系统','220kV系统'],children:[
+    bay('18断路器间隔','bay18'),bay('02断路器间隔','bay2'),bay('01断路器间隔','bay1'),bay('1EM PT','pt'),
+    bay('公用测控系统','secondary','跨电压等级系统'),
+  ]})]});
+  const state = new AppState(); state.currentCbmTree=root;
+  const index = buildFunctionalDomainIndex(root), host = document.createElement('div');document.body.appendChild(host);
+  renderSubstationFunctionalTree(state,index,host,()=>{});
+  host.querySelector<HTMLButtonElement>('.tree-children .tree-toggle[data-toggle-key]')!.click();
+  const labelRows = (label:string) => [...host.querySelectorAll<HTMLElement>('.functional-tree-row')]
+    .filter(row => row.querySelector('.tree-label')?.textContent === label);
+  expect(labelRows('220kV系统')).toHaveLength(1);
+  expect(labelRows('控制及直流/二次系统')).toHaveLength(1);
+  labelRows('220kV系统')[0].querySelector<HTMLButtonElement>('.tree-toggle')!.click();
+  const children = labelRows('220kV系统')[0].nextElementSibling!;
+  expect([...children.children].map(el => el.querySelector('.tree-label')!.textContent))
+    .toEqual(['1EM PT','01断路器间隔','02断路器间隔','18断路器间隔']);
+  expect(children.textContent).not.toContain('公用测控系统');
+  const target = revealFunctionalSearchTarget(index,'bay2/breaker');
+  expect(host.querySelector(`[data-node-path="${target}"]`)).not.toBeNull();
+  document.body.innerHTML='';
+});
+
+it('counts one independent unit for a unique part alias pair while preserving repeated occurrences', () => {
+  const part = (path:string,entityName:string,devPath='switch.dev') => node({path,entityName,name:'隔离开关',devPath});
+  const root = node({children:[node({path:'bay',systemNames:['电气系统','220kV系统','间隔'],children:[
+    node({path:'owner',name:'组合设备',devPath:'owner.dev',children:[part('pi','PARTINDEX'),part('virtual','DEV_SUBDEVICE')]}),
+    node({path:'other-owner',name:'组合设备',devPath:'other.dev',children:[part('repeat-1','PARTINDEX'),part('repeat-2','PARTINDEX')]}),
+  ]})]});
+  const index=buildFunctionalDomainIndex(root),assets=index.domains[0].systems.find(system=>system.title==='间隔')!.assets;
+  expect(assets.filter(asset=>asset.role==='device').map(asset=>asset.node.path)).toEqual(['pi','repeat-1','repeat-2']);
+  expect(index.targetByKey.get('virtual')!.rowKey).toBe('pi');
+  expect(index.targetByKey.get('repeat-1')!.rowKey).not.toBe(index.targetByKey.get('repeat-2')!.rowKey);
+});
