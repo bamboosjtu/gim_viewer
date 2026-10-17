@@ -379,6 +379,7 @@ export class IfcRegionalRuntime {
           this.groups.set(object.expressId, group);
           if (candidates.length === 1) {
             await this.options.model.setVisible(candidates, false);
+            if(this.released){await this.options.model.setVisible(candidates,true);return;}
             this.localIds.set(object.expressId, candidates[0]);
           }
         }
@@ -464,6 +465,8 @@ export class IfcRegionalRuntime {
     for (const p of this.pending.values())
       p.reject(Error('Regional model released'));
     this.pending.clear();
+    const restore=[...this.localIds.values()];this.localIds.clear();
+    if(restore.length)void (async()=>{try{await this.options.model.setVisible(restore,true);}catch{/* Model may already be disposed. */}})();
     for (const group of this.groups.values()) this.disposeGroup(group);
     this.groups.clear();
     this.instances.release();

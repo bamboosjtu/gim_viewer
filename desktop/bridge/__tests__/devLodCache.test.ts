@@ -25,3 +25,10 @@ it('does not reopen unavailable IndexedDB for every device read and write', asyn
     expect(open).toHaveBeenCalledTimes(1);
   } finally { vi.unstubAllGlobals(); }
 });
+
+it('an aborted delete transaction settles so a corrupt template can be rebuilt',async()=>{
+  vi.resetModules();const tx:any={objectStore:()=>({delete:()=>queueMicrotask(()=>tx.onabort())}),error:Error('aborted')};
+  vi.stubGlobal('indexedDB',{open:()=>{const request:any={result:{transaction:()=>tx}};queueMicrotask(()=>request.onsuccess());return request;}});
+  try {const {deleteDevArtifact}=await import('../devLodCache.js');await expect(deleteDevArtifact('templates','bad')).resolves.toBeUndefined();}
+  finally{vi.unstubAllGlobals();}
+});

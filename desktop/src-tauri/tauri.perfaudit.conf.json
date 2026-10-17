@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicehash/tauri/dev/crates/tauri-config-schema/schema.json",
+  "identifier": "com.bamboosjtu.gimviewer.perfaudit",
+  "build": {
+    "beforeDevCommand": "",
+    "devUrl": "http://127.0.0.1:14317"
+  }
+}

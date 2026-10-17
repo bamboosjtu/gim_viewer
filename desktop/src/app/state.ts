@@ -315,6 +315,7 @@ export class AppState {
    * ctx.fragments 中的实际模型需由 projectCleanupService 在调用本方法前显式 dispose。
    */
   resetGimState() {
+    this.deviceUnknownBounds.clear();
     this.releaseIfcPreviews();
     this.invalidateSelection();
     this.currentFiles = null;

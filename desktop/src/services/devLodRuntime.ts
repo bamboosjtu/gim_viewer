@@ -1,4 +1,5 @@
 import { ByteWorkBudget } from '../utils/byteWorkBudget.js';
+import {DevTemplateCacheReader} from './devTemplateCacheReader.js';
 import * as THREE from 'three';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
@@ -35,6 +36,8 @@ export class DevLodRuntime {
     absoluteConeCount: 0, templateResidentBytes: 0, directoryCompleted: 0, readyOccurrences: 0, failedOccurrences: 0,
     emptyOccurrences: 0, unsupportedOccurrences: 0, partialOccurrences: 0, templateParses: 0, templateEvictions: 0, workerCount: 0, activeDevices: [] as string[],
     inputBudgetBytes: 0, inputBudgetPeakBytes: 0,
+    cacheReadBatches:0,cacheReadEntries:0,cacheReadDeferred:0,viewPendingOccurrences:0,
+    readinessBlockers:[] as string[],viewPendingSamples:[] as string[],
     resultQueuedBytes: 0, resultPeakBytes: 0, resultQueueCount: 0,
     anchorReady: false, errors: [] as string[], fingerprints: [] as Record<string, unknown>[] };
   private readonly perf = perfCurrentSession();
@@ -87,6 +90,7 @@ export class DevLodRuntime {
   private priorities = new Map<string, number>();
   private templateSlots = 0;
   private inputBudget = new ByteWorkBudget(128 * 1024 * 1024);
+  private cacheReader:DevTemplateCacheReader<CachedTemplate>;
   private placementUsers = new Map<string, number>();
   private templateWaiters = new Map<string, { queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
   private templateQueue = new WorkQueue<{ queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
@@ -104,6 +108,7 @@ export class DevLodRuntime {
   private finishAnchor!: () => void;
   constructor(private state: AppState, private ctx: ViewerContext, private session: ProjectLoadSession, private status: (text: string, detail?: string) => void) {
     this.sourceIdentity = session.sourceSha256 ?? '';
+    this.cacheReader=new DevTemplateCacheReader(this.inputBudget,session);
     this.catalogDone = new Promise(resolve => { this.finishCatalog = resolve; });
     this.anchorDone = new Promise(resolve => { this.finishAnchor = resolve; });
   }
@@ -161,7 +166,12 @@ export class DevLodRuntime {
         && (!bounds.sourceBounds || bounds.sourceBounds.length === 6 && bounds.sourceBounds.every(Number.isFinite)
           && bounds.sourceBounds.slice(0, 3).every((v, i) => v <= bounds!.sourceBounds![i + 3]))) this.diagnostics.catalogHits++;
       else {
-        bounds = await this.worker.bounds(dev);
+        try {bounds = await this.worker.bounds(dev);}
+        catch(error){
+          if(!this.current())return;
+          bounds={devPath:dev,sourceBounds:null,boundsQuality:'unknown',primitiveCounts:{},unsupportedTypes:[],diagnostic:String(error)};
+          this.diagnostics.errors.push(`目录 ${dev}: ${String(error)}`);if(this.diagnostics.errors.length>32)this.diagnostics.errors.shift();
+        }
         if (!this.current()) return;
         if (!bounds.diagnostic && this.session.sourceSha256) await writeDevArtifact('catalog', this.catalogKey(dev), bounds, this.session);
       }
@@ -213,7 +223,7 @@ export class DevLodRuntime {
     return new Promise((resolve, reject) => { const waiter={queuedAt:performance.now(),resolve,reject}; this.templateWaiters.set(key,waiter); this.templateQueue.set(key,waiter,this.priorities.get(key) ?? 4,waiter.queuedAt); this.drainTemplates(); });
   }
   private drainTemplates(): void {
-    while (this.current() && this.templateSlots < this.worker.workerCount * 2 && this.templateWaiters.size) {
+    while (this.current() && this.templateSlots < Math.max(1,this.worker.workerCount) * 2 && this.templateWaiters.size) {
       const [key,waiter]=this.templateQueue.take()!;
       this.templateWaiters.delete(key); this.templateSlots++;
       let released = false;
@@ -231,11 +241,10 @@ export class DevLodRuntime {
       const releaseSlot = await this.acquireTemplateSlot(key);
       let releaseInput: (()=>void) | undefined;
       try {
-      // Cache entry size is not known before IPC/IDB read. Reserve the full
-      // single-entry quota, bounding warm read + hash + parse as one stage.
-      releaseInput = await this.inputBudget.acquire(this.inputBudget.limit);
+      // Concurrent requests share one bounded native batch reservation.
+      const lease=await this.cacheReader.read(key);releaseInput=lease.release;
       if (!this.current()) return null;
-      let artifact = await readDevArtifact<CachedTemplate>('templates', key, this.session), parsed: Awaited<ReturnType<typeof parseDevGlbAsset>> = null;
+      let artifact = lease.value, parsed: Awaited<ReturnType<typeof parseDevGlbAsset>> = null;
       let generated = false;
       if (!this.current()) return null;
       if (artifact?.sourceInvalid?.evidence) {
@@ -416,8 +425,11 @@ export class DevLodRuntime {
     }
   }
   private failed(row: Occurrence, error: unknown, requestKey: string): void {
-    if (!this.current() || (error as Error)?.name === 'AbortError') return;
+    if (!this.current()) return;
     if (row.desired === null || this.key(row.entry.devPath, row.desired) !== requestKey) return;
+    // A queued request may be cancelled while an earlier evaluation is still
+    // unwinding. If the same key is wanted again, it needs another drive.
+    if((error as Error)?.name==='AbortError'){this.schedule();return;}
     row.entry.templateStatus = 'failed';
     row.failedKey = requestKey;
     this.diagnostics.errors.push(`${row.entry.devPath}: ${String(error)}`);
@@ -429,8 +441,9 @@ export class DevLodRuntime {
   }
   private ready(): void {
     if (!this.current()) return;
-    let total = 0, visible = 0, finished = 0, shown = 0, empty = 0, unsupported = 0, partial = 0, failed = 0;
+    let total = 0, visible = 0, finished = 0, shown = 0, empty = 0, unsupported = 0, partial = 0, failed = 0,viewPending=0;
     let viewSettled = true, viewReady = true, baseSettled = true, baseReady = true, allReady = true;
+    const samples:string[]=[];
     for (const row of this.rows.values()) {
       total++;
       const terminal = row.entry.templateStatus === 'empty' || row.entry.templateStatus === 'unsupported';
@@ -439,14 +452,16 @@ export class DevLodRuntime {
       if (complete || failure) finished++;
       baseSettled &&= complete || failure; baseReady &&= complete;
       allReady &&= row.entry.templateStatus === 'empty' || row.geometryStatus === 'complete' && row.displayed === 2;
-      if (row.inView) { visible++; viewSettled &&= requested || failure; viewReady &&= requested; }
+      if (row.inView) { visible++; viewSettled &&= requested || failure; viewReady &&= requested;if(!requested&&!failure){viewPending++;if(samples.length<8)samples.push(`${row.entry.devPath}: LOD${row.displayed}→${row.desired}`);} }
       if (row.group) shown++;
       if (row.entry.templateStatus === 'empty') empty++;
       if (row.entry.templateStatus === 'unsupported') unsupported++;
       if (row.geometryStatus === 'partial') partial++;
       if (row.entry.templateStatus === 'failed') failed++;
     }
-    const stable = !this.cameraTimer && this.diagnostics.anchorReady && this.diagnostics.catalogReady;
+    const stable = !this.cameraTimer && !this.timer && this.diagnostics.anchorReady && this.diagnostics.catalogReady;
+    const blockers=[!this.diagnostics.anchorReady?'等待坐标锚点':'',!this.diagnostics.catalogReady?'设备范围索引准备中':'',this.cameraTimer?'等待相机停稳':'',
+      this.pending.size?`模板处理中 ${this.pending.size}`:'',this.templateWaiters.size?`模板排队 ${this.templateWaiters.size}`:'',this.commits.length?`场景待提交 ${this.commits.length}`:''].filter(Boolean);
     const ready = stable && viewReady;
     if (ready && !this.diagnostics.currentViewReady) perfMark('DEV current view ready', { shown, requested: visible, compiled: [...this.diagnostics.compiled], failed }, this.perf);
     Object.assign(this.diagnostics, { currentViewSettled: stable && viewSettled, currentViewReady: ready,
@@ -454,7 +469,9 @@ export class DevLodRuntime {
       baseRepresentationsReady: this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseReady,
       allStationReady: this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseReady && allReady,
       readyOccurrences: shown, emptyOccurrences: empty, unsupportedOccurrences: unsupported, partialOccurrences: partial, failedOccurrences: failed,
-      shown: this.state.loadedXmlModGroups.size, activeDevices: this.worker?.activePaths ?? [] });
+      shown: this.state.loadedXmlModGroups.size, activeDevices: this.worker?.activePaths ?? [],viewPendingOccurrences:viewPending,
+      readinessBlockers:blockers,viewPendingSamples:samples,
+      cacheReadBatches:this.cacheReader.diagnostics.batches,cacheReadEntries:this.cacheReader.diagnostics.entries,cacheReadDeferred:this.cacheReader.diagnostics.deferred });
     const active = this.diagnostics.activeDevices.join('、');
     this.diagnostics.inputBudgetBytes=this.inputBudget.bytes;this.diagnostics.inputBudgetPeakBytes=this.inputBudget.peakBytes;
     const pressure=this.worker?.resultPressure;
@@ -462,11 +479,14 @@ export class DevLodRuntime {
     this.diagnostics.resultQueueCount=pressure?.count ?? 0;
     const failures = this.diagnostics.failedOccurrences;
     const phase = this.diagnostics.currentViewSettled
-      ? ready ? '当前视图就绪' : '当前视图已完成，部分设备失败'
-      : '当前视图准备中';
+      ? ready ? '当前视图已完成' : '当前视图已完成，部分实例失败'
+      : `当前视图准备中${viewPending ? ` ${viewPending}` : ''}`;
     const background = this.diagnostics.currentViewSettled && !this.diagnostics.baseRepresentationsSettled ? ' · 后台补充基础表示' : '';
-    this.status(`几何实例已处理 ${finished}/${total} · 已显示 ${this.diagnostics.readyOccurrences}${failures ? ` · 失败 ${failures}` : ''} · ${phase}${background}`,
-      `设备范围索引 ${this.diagnostics.directoryCompleted}/${total} · 模板编译 ${this.diagnostics.compiled.reduce((a,b) => a+b, 0)} · 缓存 ${this.diagnostics.templateHits} · 淘汰 ${this.diagnostics.templateEvictions} · 部分表示 ${this.diagnostics.partialOccurrences}${active ? ` · ${active}` : ''}`);
+    const cold=this.diagnostics.compiled.reduce((a,b)=>a+b,0),warm=this.diagnostics.templateHits;
+    this.status(`几何实例已处理 ${finished}/${total} · 已显示 ${this.diagnostics.readyOccurrences} · 冷编译 ${cold} / 暖恢复 ${warm}${failures ? ` · 失败 ${failures}` : ''} · ${phase}${background}`,
+      `设备范围索引 ${this.diagnostics.directoryCompleted}/${total} · 缓存批读 ${this.diagnostics.cacheReadBatches} 批/${this.diagnostics.cacheReadEntries} 条 · 淘汰 ${this.diagnostics.templateEvictions} · 部分表示 ${this.diagnostics.partialOccurrences}${blockers.length?` · ${blockers.join(' · ')}`:''}${active ? ` · ${active}` : ''}`);
+    // No work owns a still-wanted row: recover a cancelled scheduling turn.
+    if(stable&&viewPending&&!this.pending.size&&!this.templateWaiters.size&&!this.commits.length)this.schedule();
   }
   clearSelection(): void { this.selected = ''; this.schedule(); }
   boundsQuality(rootOccurrence: string): DevSourceBounds['boundsQuality'] | undefined { return this.rows.get(rootOccurrence)?.entry.boundsQuality; }
@@ -501,7 +521,7 @@ export class DevLodRuntime {
     return this.current() && row.group ? [row.group] : [];
   }
   release(): void {
-    if (this.released) return; this.released = true; this.inputBudget.close(); this.finishCatalog(); this.finishAnchor();
+    if (this.released) return; this.released = true; this.inputBudget.close();this.cacheReader.close(); this.finishCatalog(); this.finishAnchor();
     for (const waiter of this.templateWaiters.values()) waiter.reject(new DOMException('DEV session expired', 'AbortError'));
     this.templateWaiters.clear(); this.templateQueue.clear();
     if (this.timer) clearTimeout(this.timer);

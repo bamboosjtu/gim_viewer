@@ -49,6 +49,9 @@ export function compareSubstationNames(a: string, b: string): number {
   const rank = unitRank(a) - unitRank(b);
   if (rank) return rank;
   if (unitRank(a) === 1) return Number(b.match(/[\d.]+/)?.[0]) - Number(a.match(/[\d.]+/)?.[0]) || naturalOrder.compare(a,b);
+  const transformer = (name:string) => name.match(/^[#＃]?(\d+)号(?:备用)?主变(?:压器)?(本体系统|中性点设备)$/);
+  const ta=transformer(a),tb=transformer(b);
+  if(ta&&tb)return Number(ta[1])-Number(tb[1]) || Number(ta[2]==='中性点设备')-Number(tb[2]==='中性点设备') || naturalOrder.compare(a,b);
   // Compare like bay families together, then their numeric identifiers.
   const familyRank = (name:string) => /PT|互感器/i.test(name) ? 0 : /出线/.test(name) ? 1 : /进线/.test(name) ? 2 : 3;
   const family = (name:string) => /PT|互感器/i.test(name) ? 'PT' : name.replace(/[#＃]?\d+(?:\.\d+)?/g,'#');

@@ -60,8 +60,9 @@ export function setStatusRight(text: string): void {
 export function setDeviceStatus(text: string, detail?: string): void {
   deviceProgress = text; deviceDetail = detail ?? '';
   const el = document.getElementById('status-devices');
-  const display = businessDeviceCount === null ? text : `业务设备 ${businessDeviceCount}${text ? ` · ${text}` : ''}`;
-  if (el) { el.textContent = display; el.title = detail ? `${display}\n${detail}` : display; el.hidden = !display; }
+  const display = businessDeviceCount === null ? text : `设备节点 ${businessDeviceCount}${text ? ` · ${text}` : ''}`;
+  const explanation = businessDeviceCount === null ? '' : '设备节点包含装配内部的独立功能单元；几何实例统计整机装配根，两者不是一一对应。';
+  if (el) { el.textContent = display; el.title = [display,explanation,detail].filter(Boolean).join('\n'); el.hidden = !display; }
 }
 
 /** Semantic equipment count is independent from renderable occurrences. */

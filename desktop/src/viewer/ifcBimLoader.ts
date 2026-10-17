@@ -113,6 +113,7 @@ export async function loadBimIfc(
     ctx.fragments.core.disposeModel(runtimeId);
     return;
   }
+  state.ifcRegionalRuntimes.get(logicalId)?.release();
   const runtime = new IfcRegionalRuntime(logicalId, path, artifact!.index, {
     ctx,
     model,

@@ -12,6 +12,7 @@ it('progress updates are idempotent and independent tasks finish without a stuck
   expect(document.getElementById('status-ifc')!.textContent).toBe('IFC 2/3');
   resetStatusRight(); expect(document.getElementById('status-ifc')!.hidden).toBe(true);
   setBusinessDeviceCount(194);setDeviceStatus('几何实例已处理 2641/3326');
-  expect(document.getElementById('status-devices')!.textContent).toBe('业务设备 194 · 几何实例已处理 2641/3326');
+  expect(document.getElementById('status-devices')!.textContent).toBe('设备节点 194 · 几何实例已处理 2641/3326');
+  expect(document.getElementById('status-devices')!.title).toContain('不是一一对应');
   resetStatusRight();expect(document.getElementById('status-devices')!.textContent).toBe('');
 });

@@ -85,3 +85,21 @@ it('exported bytes apply backpressure until consumed, while completed templates 
     client.acknowledge('b');client.acknowledge('c');expect(client.resultPressure.bytes).toBe(0);
   } finally {client.cancel();}
 });
+
+it('a crashed worker fails its task, preserves the healthy worker and bounds pool replacement attempts',async()=>{
+  vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true);
+  try {
+    const a=client.compile('a',0,'a',1),b=client.compile('b',0,'b',1),c=client.compile('c',0,'c',1);
+    const rejected=expect(a).rejects.toThrow('crash');const [broken,healthy]=ControlledWorker.instances;
+    broken.onerror!({message:'crash'});await rejected;
+    expect(healthy.terminate).not.toHaveBeenCalled();expect(client.workerCount).toBe(2);
+    const replacement=ControlledWorker.instances[2];replacement.complete();healthy.complete();await Promise.all([b,c]);
+    client.acknowledge('b');client.acknowledge('c');
+    // One replacement remains; repeated idle crashes then exhaust the pool.
+    replacement.onerror!({message:'crash again'});ControlledWorker.instances[3].onerror!({message:'crash again'});
+    healthy.onerror!({message:'pool unavailable'});expect(client.workerCount).toBe(0);
+    await expect(client.compile('d',0,'d',1)).rejects.toThrow('pool unavailable');
+    expect(ControlledWorker.instances).toHaveLength(4);
+  }finally{client.cancel();}
+});

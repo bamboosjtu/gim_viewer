@@ -25,11 +25,12 @@ it('3326 processed includes 34 failures without reporting success or counting an
   expect(runtime.diagnostics.currentViewReady).toBe(false);
   expect(runtime.diagnostics.baseRepresentationsReady).toBe(false);
   expect(runtime.diagnostics.allStationReady).toBe(false);
-  expect(status.mock.lastCall![0]).toContain('几何实例已处理 3326/3326 · 已显示 3292 · 失败 34');
+  expect(status.mock.lastCall![0]).toContain('几何实例已处理 3326/3326 · 已显示 3292');
+  expect(status.mock.lastCall![0]).toContain('冷编译 0 / 暖恢复 0 · 失败 34');
   expect(status.mock.lastCall![0]).not.toContain('准备中');
   const row = internal.rows.get('3292'); row.group = new THREE.Group();
   internal.ready();
-  expect(status.mock.lastCall![0]).toContain('几何实例已处理 3326/3326 · 已显示 3293 · 失败 34');
+  expect(status.mock.lastCall![0]).toContain('几何实例已处理 3326/3326 · 已显示 3293');
 });
 it('late failures cannot poison a newer LOD request; explicit selection retries a transient failure', async () => {
   const { runtime, internal } = fixture();

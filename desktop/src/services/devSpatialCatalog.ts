@@ -68,13 +68,8 @@ export function primitiveBounds(p: XmlModPrimitive): THREE.Box3 | null {
       for (let i = 0; i < vertices.length; i += 3) box.expandByPoint(v(vertices[i], vertices[i+1], vertices[i+2]));
       return box;
     }
-    case 'Wire': case 'Cable': {
-      const pts = p.type === 'Wire' ? p.fitPoints : p.inflectionPoints;
-      const box = new THREE.Box3();
-      for (let i = 0; i + 2 < pts.length; i += 3) box.expandByPoint(v(pts[i], pts[i + 1], pts[i + 2]));
-      // Catmull-Rom can overshoot its control polygon. These sources remain unknown.
-      return null;
-    }
+    // Catmull-Rom can overshoot its control polygon. These sources remain unknown.
+    case 'Wire': case 'Cable': return null;
     default: return null;
   }
 }

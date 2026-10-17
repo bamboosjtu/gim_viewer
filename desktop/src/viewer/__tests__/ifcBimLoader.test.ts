@@ -57,6 +57,7 @@ function setup() {
 }
 it('far artifact HIT restores without source read or conversion and attaches the original model identity', async () => {
   const { state, session, ctx } = setup();
+  const release=vi.fn();state.ifcRegionalRuntimes.set('logical',{release} as any);
   cache.read.mockResolvedValue({ bytes: new Uint8Array([1, 2]).buffer, index });
   const read = vi.fn();
   await loadBimIfc(
@@ -72,6 +73,7 @@ it('far artifact HIT restores without source read or conversion and attaches the
   expect(cache.raw).not.toHaveBeenCalled();
   expect(ctx.fragments.core.load).toHaveBeenCalledOnce();
   expect(state.ifcRegionalRuntimes.has('logical')).toBe(true);
+  expect(release).toHaveBeenCalledOnce();
 });
 it('a cache read finishing after source switch cannot register a model', async () => {
   const { state, session, ctx } = setup();

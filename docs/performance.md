@@ -90,3 +90,9 @@ Android 模拟器必须标注 API、WebView、native debug/release、ABI、模�
 区域诊断另列 subsetIndexWallMs、subsetBuilds、subsetBuildWallMs、subsetRecords 和 subsetFallbacks/reason。sourceOpenCount 仅统计整份来源的 OpenModel，不包含子集 CreateModel 或数值桥接探测。连续请求即使没有新增整源打开，仍可能有较大依赖闭包和几何开销；按区域分别记录对象数、依赖记录数与墙钟。空闲释放后仍需重新读入和打开来源。源驻留、子集和 GPU 的内存不能用记录数或子集耗时替代实测。
 
 项目登记原生日志分列路径规范化、两次锁等待、兼容候选数、兼容路径耗时及最终返回墙钟。独立进程中的登记核心探针覆盖已有记录命中和另一个连接持有 WAL 写入保留锁的场景，但不包含 WebView、IPC、语义恢复或几何。该探针不能替代完整桌面暖启动计时。
+
+DEV 暖恢复的缓存批读使用共享消费预留，单次最多 16 条并受调用方字节上限约束；本轮模板槽数最多为每 Worker 两个，实际批大小受并发需求约束。预算内不能接纳的条目延后处理，不按 miss 重编译。cacheReadBatches、cacheReadEntries、cacheReadDeferred 与 templateHits、templateParses、compiled 分开记录。批读减少 IPC 往返，逐模板解析与有时间预算的场景提交仍存在；没有同机配对数据时不宣称整体加载提高某个百分比。
+
+状态冷暖指几何实际来源，不能把“语义工程命中”直接标作全暖。设备节点数、整机装配根数、唯一 DEV 数和 LOD 模板数分别解释。当前视图完成允许显式失败，不等待未请求的全站高精度模板；诊断另列 readinessBlockers、viewPendingOccurrences 和有限 viewPendingSamples，区分相机、目录、模板与提交等待。
+
+完整桌面测试依赖可进入页面的原生入口。同一 Portable 的仓库内启动与仓库外完整副本已有不同结果，仓库外副本可进入页面并接受 loopback CDP；隔离调试 EXE 的窗口创建仍报拒绝访问，尚未确定底层权限失败点。开发服务器不可达或端口占用是另一类错误，不能与 WebView 创建失败混为一谈。浏览器单文件、原生登记核心、Portable 页面就绪和完整工程恢复的证据不能互相替代。手动采集时保留缓存，在卡住和稳定后分别用 Ctrl+Shift+D 复制诊断 JSON；新进程暖启动与同进程关闭重开分开保存，先使用单个 substation01。诊断生成和文件选择器停留不计入打开耗时，不需要为了采集关闭安全软件、修改权限或用管理员运行。

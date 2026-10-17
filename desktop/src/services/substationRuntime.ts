@@ -1071,6 +1071,8 @@ export async function loadAllIfcFiles(
     });
   };
 
+  const ifcSources=new Map<string,string>();
+  const ifcCacheProgress=()=>`冷转换 ${[...ifcSources.values()].filter(source=>source==='ifc').length} / 暖恢复 ${[...ifcSources.values()].filter(source=>source==='fragments-cache').length}`;
   const lifecycleTask = (async (): Promise<void> => {
     try {
     const { ensureEngineReady } = await import('../viewer/ifcLoader.js');
@@ -1105,7 +1107,7 @@ export async function loadAllIfcFiles(
         perfMark('IFC Preview queue',{strategy,anchor:queue[queueIndex-1].path,entries:queue.map(e=>({path:e.path,modelId:e.modelId,sourceBytes:sizes.get(e.path.toLowerCase())??null}))},perfSession);
       }
       const entry=queue[queueIndex];
-      setIfcStatus(`IFC ${queueIndex}/${queue.length} · ${entry.name}`);
+      setIfcStatus(`IFC ${queueIndex}/${queue.length} · ${ifcCacheProgress()} · ${entry.name}`);
         showLoading(interactiveInitialized ? `后台加载 ${entry.name}...` : `正在加载 ${entry.name}...`);
       let readEnded = false;
       let readProfiled = false;
@@ -1145,8 +1147,8 @@ export async function loadAllIfcFiles(
           if(previewInputOwnership)void sampleSubstationMemory(state,'IFC fine worker start',perfSession,
             {entryPath:entry.path,rawBytes:lastIfcReadByteLength,previewFineState:state.ifcPreviewFineStates.get(entry.modelId)},ctx);
           const task=loadIfcEntry(ctx,state,entry,readBytes,
-            (p) => { if (isCurrent()) { setIfcStatus(`IFC ${queueIndex}/${queue.length} · ${entry.name} ${Math.round(p * 100)}%`); showLoading(`${entry.name}: ${Math.round(p * 100)}%`); } },
-            {session,perfSessionId:perfSession.id,onLoadSource:(source)=>{loadSource.value=source;},
+            (p) => { if (isCurrent()) { setIfcStatus(`IFC ${queueIndex}/${queue.length} · ${ifcCacheProgress()} · ${entry.name} ${Math.round(p * 100)}%`); showLoading(`${entry.name}: ${Math.round(p * 100)}%`); } },
+            {session,perfSessionId:perfSession.id,onLoadSource:(source)=>{loadSource.value=source;ifcSources.set(entry.path,source);},
               // A Preview's explicit fine request always restores original
               // relation openings; browsing simplification cannot claim LOD2 fidelity.
               transferInput:true,openingPolicy:preview?'full':openingPolicy});
@@ -1385,7 +1387,7 @@ export async function loadAllIfcFiles(
   // sequential IFC tail and post-IFC geometry continue under the same
   // session/token guards after this promise resolves.
   void lifecycleTask.finally(() => {
-    if (isCurrent()) setIfcStatus(`IFC 已结束 · 已加载 ${state.loadedModels.size}/${entries.length}${failed.length ? ` · 失败 ${failed.length}` : ''}`);
+    if (isCurrent()) setIfcStatus(`IFC 已结束 · 已加载 ${state.loadedModels.size}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ''}`);
     // If every IFC failed (or the session became stale) there is no usable
     // geometry event to signal. Release the caller rather than leaving an
     // unresolved readiness promise behind.

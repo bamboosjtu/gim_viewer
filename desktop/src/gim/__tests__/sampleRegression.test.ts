@@ -1,4 +1,4 @@
-import { inspectSubstationCapabilities, buildSubstationAliasIndex } from '../substationEvidence.js';
+import { inspectSubstationCapabilities, buildSubstationAliasIndex, isSubstationGeometryRoot } from '../substationEvidence.js';
 /**
  * 样本级集成回归测试（真实 GIM 解压目录）。
  *
@@ -493,6 +493,11 @@ describe.skipIf(!SUBSTATION_CORPUS.some((item) => existsSync(item.dir)))('样本
       if (sample.id === 'demo-substation') {
         expect(voltageBays('220kV系统')).toContain('1EM PT');
         expect(systems.some(system => system.groupPath[0] === '控制及直流/二次系统' && system.title === '公用测控系统')).toBe(true);
+        const roots=new Set<string>();const walk=(node:CbmNode)=>{if(isSubstationGeometryRoot(node))roots.add(node.path);node.children.forEach(walk);};walk(tree!);
+        const devices=index.domains.flatMap(domain=>domain.systems.flatMap(system=>system.assets.filter(asset=>asset.role==='device')));
+        const rootDevices=devices.filter(asset=>asset.sourceNodes.some(source=>roots.has(source.path))).length;
+        expect(roots.size).toBe(285);expect(devices.length).toBeGreaterThan(roots.size);
+        console.log('[device-count-grain]',JSON.stringify({geometryRoots:roots.size,deviceNodes:devices.length,rootDevices,internalDeviceNodes:devices.length-rootDevices}));
       }
       console.log('[functional-tree]',sample.id,JSON.stringify({units:[...new Set(systems.map(system => system.groupPath[0] ?? system.title))],
         voltage220:voltageBays('220kV系统'),voltage10:voltageBays('10kV系统'),

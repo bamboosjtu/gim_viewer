@@ -65,9 +65,28 @@ export async function readDevArtifact<T>(store: 'templates' | 'catalog', key: st
     return readNativeArtifact<T>(args,key);
   }
   try { const db = await open(); return await new Promise<T | null>((resolve, reject) => {
-    const req = db.transaction(store).objectStore(store).get(key);
-    req.onsuccess = () => resolve(req.result ?? null); req.onerror = () => reject(req.error);
+    const tx=db.transaction(store),req = tx.objectStore(store).get(key);let value:T|null=null;
+    req.onsuccess = () => {value=req.result??null;};req.onerror=()=>reject(req.error);
+    tx.oncomplete=()=>resolve(value);tx.onerror=tx.onabort=()=>reject(tx.error);
   }); } catch { return null; }
+}
+/** Missing rows are deferred by the native byte ceiling; explicit null is a
+ * cache miss. Browser fallback admits one unknown-size record at a time. */
+export async function readDevArtifactBatch<T>(store:'templates'|'catalog',keys:string[],context:CacheContext,maxBytes:number):Promise<Map<string,T|null>> {
+  if(!keys.length)return new Map();
+  const args=nativeArgs(store,keys[0],context);
+  if(!isTauri())return new Map([[keys[0],await readDevArtifact<T>(store,keys[0],context)]]);
+  if(!args)return new Map(keys.map(key=>[key,null]));
+  try {
+    const payload=await invokeTimed<ArrayBuffer>('read_device_lod_artifacts',{projectId:args.projectId,sourceGimSha256:args.sourceGimSha256,
+      entryPaths:keys.map(key=>`${store}/${key}`),maxBytes});
+    const rows=new Map<string,T|null>();
+    for(const item of parseBatchCachePayload(payload).items){
+      const key=item.entry_path.slice(store.length+1);if(!keys.includes(key))continue;
+      try {rows.set(key,item.bytes?unpackDevArtifact<T>(key,item.bytes):null);}catch{rows.set(key,null);}
+    }
+    return rows;
+  } catch {return new Map(keys.map(key=>[key,null]));}
 }
 export async function writeDevArtifact(store: 'templates' | 'catalog', key: string, value: unknown, context?: CacheContext): Promise<boolean> {
   if (isTauri()) {
@@ -87,6 +106,6 @@ export async function deleteDevArtifact(store: 'templates' | 'catalog', key: str
   }
   try { const db = await open(); await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).delete(key);
-    tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error);
+    tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
   }); } catch { /* source rebuild */ }
 }

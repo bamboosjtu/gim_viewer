@@ -76,7 +76,10 @@ self.onmessage = async ({ data }) => {
     }
     return;
   }
-  if (!['compile', 'bounds'].includes(data.kind) || running) return;
+  if (!['compile', 'bounds'].includes(data.kind) || running) {
+    scope.postMessage({kind:'result',id:data.id,session:data.session,key:data.key,path:data.path,
+      error:running?'DEV worker already running':`Unsupported DEV worker task: ${String(data.kind)}`});return;
+  }
   running = true; const started = performance.now();
   stages = {};
   stats = { readRpcMs: 0, blobReadMs: 0, decodeMs: 0, validateParseMs: 0, reads: 0, rpcReads: 0, sourceHits: 0, documentHits: 0 };
@@ -94,6 +97,8 @@ self.onmessage = async ({ data }) => {
   } finally {
     // Worker owns these resources; GLB bytes have already been exported and transferred.
     // Do not retain an unbounded primitive/material cache alongside the bounded source IR caches.
-    trimSharedXmlModGeometries(16 * 1024 * 1024); disposeSharedXmlModMaterials(); running = false;
+    try {trimSharedXmlModGeometries(16 * 1024 * 1024);disposeSharedXmlModMaterials();}
+    catch(error){console.warn('[DEV worker] resource cleanup failed',error);}
+    finally {running=false;}
   }
 };

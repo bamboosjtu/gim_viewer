@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { AppState } from '../../app/state.js';
+import {compareSubstationNames} from '../../gim/substationBusiness.js';
 import type { CbmNode } from '../../gim/types.js';
 import {
   buildFunctionalDomainIndex,
@@ -27,6 +28,11 @@ function node(overrides: Partial<CbmNode> = {}): CbmNode {
     ...overrides,
   };
 }
+
+it('sorts transformer body and neutral equipment by transformer number before standby wording',()=>{
+  expect(['2号备用主变本体系统','3号备用主变本体系统','1号主变本体系统','3号主变中性点设备','1号主变中性点设备','2号主变中性点设备'].sort(compareSubstationNames))
+    .toEqual(['1号主变本体系统','1号主变中性点设备','2号备用主变本体系统','2号主变中性点设备','3号备用主变本体系统','3号主变中性点设备']);
+});
 
 it('child display hints do not promote raw classification codes to functional domains', () => {
   const root = node({ children: [node({ entityName:'F3System', path:'CBM/system.cbm',

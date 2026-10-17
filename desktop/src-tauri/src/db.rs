@@ -7,6 +7,7 @@ use std::fs as stdfs;
 use std::os::windows::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
+use std::io::Write;
 use std::time::Instant;
 use tauri::Manager;
 
@@ -676,8 +677,9 @@ fn upsert_gim_project_inner(
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
     ).optional().map_err(|e| format!("复核项目记录失败: {}", e))?;
     let existing = current;
-    println!("[GIM project check] canonical_ms={} lock_ms={} fallback_count={} fallback_ms={} relock_ms={} total_ms={}",
-        canonical_ms, lock_ms, candidate_count, fallback_ms, relock_started.elapsed().as_millis(), started.elapsed().as_millis());
+    let relock_ms = relock_started.elapsed().as_millis();
+    let check_ms = started.elapsed().as_millis();
+    let mut source_event = None;
 
     let result = if let Some((id, old_path, old_size, old_modified_ms, old_sha256)) = existing {
         // 源 GIM 文件是否变化：size / modified_ms / sha256 任一不同即视为变化
@@ -693,10 +695,7 @@ fn upsert_gim_project_inner(
                 params![path_identity, info.name, info.size, info.modified_ms, info.sha256, now, now, id],
             )
             .map_err(|e| format!("更新项目记录失败: {}", e))?;
-            println!(
-                "[GIM] 源 GIM 文件变化，旧索引失效（path={}, old_size={}, new_size={}, old_sha256={}...）",
-                info.path, old_size, info.size, &old_sha256[..old_sha256.len().min(12)]
-            );
+            source_event = Some("changed");
         } else {
             if old_path != path_identity {
                 conn.execute(
@@ -708,10 +707,7 @@ fn upsert_gim_project_inner(
             // 源文件未变化时不要为了 last_opened_at_ms 强制写库。打开 GIM 的
             // 主流程只需要 project_id 和已有 parser_version；若另一个旧实例
             // 暂时持有 SQLite 写锁，非必要写入会阻断缓存命中和后续读取。
-            println!(
-                "[GIM] 源 GIM 文件未变化，跳过项目访问时间写入（path={}）",
-                info.path
-            );
+            source_event = Some("unchanged");
         }
 
         query_record(&conn, id)
@@ -725,8 +721,25 @@ fn upsert_gim_project_inner(
 
         query_record(&conn, conn.last_insert_rowid())
     };
-    println!("[GIM project result] total_ms={:.3} success={}",started.elapsed().as_secs_f64()*1000.0,result.is_ok());
+    // Never write to stdout while holding the DB mutex. Portable Windows apps may
+    // inherit a closed/broken output handle; println! would panic and poison it.
+    drop(conn);
+    let mut stdout = std::io::stdout().lock();
+    write_project_diagnostic(&mut stdout, format_args!(
+        "[GIM project check] canonical_ms={} lock_ms={} fallback_count={} fallback_ms={} relock_ms={} total_ms={}",
+        canonical_ms, lock_ms, candidate_count, fallback_ms, relock_ms, check_ms));
+    if let Some(event) = source_event {
+        write_project_diagnostic(&mut stdout, format_args!("[GIM project source] {}", event));
+    }
+    write_project_diagnostic(&mut stdout, format_args!(
+        "[GIM project result] total_ms={:.3} success={}",
+        started.elapsed().as_secs_f64()*1000.0, result.is_ok()));
     result
+}
+
+fn write_project_diagnostic(writer: &mut impl Write, message: std::fmt::Arguments<'_>) {
+    let _ = writer.write_fmt(message);
+    let _ = writer.write_all(b"\n");
 }
 
 /// 根据 id 查询完整记录
@@ -1302,8 +1315,6 @@ fn row_to_cbm_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<CbmNodeRecord> {
 }
 
 // ===== 缓存文件落盘 =====
-
-use std::io::Write as _;
 
 /// 二进制缓存写入 IPC 的 envelope：前 9 字节为 `GIMB` + 版本 +
 /// little-endian metadata 长度，随后是 JSON metadata 与原始文件字节。
@@ -3119,10 +3130,12 @@ fn device_lod_artifact_path(
 
 /// Bounded read batch: validate project identity and parent directories once per batch.
 #[tauri::command]
-pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id: i64, entry_paths: Vec<String>, source_gim_sha256: String) -> Result<tauri::ipc::Response, String> {
+pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id: i64, entry_paths: Vec<String>, source_gim_sha256: String, max_bytes: Option<u64>) -> Result<tauri::ipc::Response, String> {
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::Read;
         if entry_paths.is_empty() || entry_paths.len() > 16 { return Err("设备缓存批量条目数无效".into()); }
+        let byte_limit=max_bytes.unwrap_or(512*1024*1024);
+        if byte_limit==0 || byte_limit>512*1024*1024 {return Err("设备缓存批量字节配额无效".into());}
         ensure_cache_project_id(project_id)?;
         let started = Instant::now();
         let validated = entry_paths.iter().map(|entry| validate_device_lod_entry(entry,&source_gim_sha256)).collect::<Result<Vec<_>,_>>()?;
@@ -3154,10 +3167,12 @@ pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id:
             let read_started=Instant::now();
             let bytes = match stdfs::File::open(path) {
                 Ok(file) => {
-                    if file.metadata().map_err(|e|e.to_string())?.len() > 128*1024*1024 { return Err("设备缓存单条超过配额".into()); }
+                    let size=file.metadata().map_err(|e|e.to_string())?.len();
+                    if size > 128*1024*1024 || size>byte_limit { return Err("设备缓存单条超过配额".into()); }
+                    if total+size>byte_limit {continue;} // Omitted rows are deferred, never reported as misses.
                     let mut bytes=Vec::new();file.take(128*1024*1024+1).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
                     if bytes.len()>128*1024*1024 { return Err("设备缓存单条超过配额".into()); }
-                    total += bytes.len() as u64; if total>512*1024*1024 { return Err("设备缓存批量超过配额".into()); }
+                    total += bytes.len() as u64; if total>byte_limit { return Err("设备缓存批量超过配额".into()); }
                     hits+=1;Some(bytes)
                 },
                 Err(e) if e.kind()==std::io::ErrorKind::NotFound => None,
@@ -7321,6 +7336,22 @@ pub fn get_project_diagnostic(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn broken_project_diagnostic_output_cannot_poison_db_lock() {
+        struct BrokenOutput;
+        impl std::io::Write for BrokenOutput {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "closed stdout"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        }
+        let db = std::sync::Mutex::new(());
+        {
+            let _guard = db.lock().unwrap();
+            super::write_project_diagnostic(&mut BrokenOutput, format_args!("project check"));
+        }
+        assert!(db.lock().is_ok());
+    }
     #[test]
     fn atomic_cache_write_replaces_file_and_preserves_target_on_failed_replacement() {
         let root = std::env::temp_dir().join(format!("gim-atomic-{}", std::process::id()));
