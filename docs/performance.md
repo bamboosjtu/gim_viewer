@@ -38,6 +38,11 @@ DEV 缓存读取必须按 `hit`、`miss`、`read-error`、`invalid`、`deferred`
 
 两阶段发布本机实测（substation01，36,112 条目，v0.0.12）：交互发生在 31.8 s；第一阶段 `saveIndexStart` 25.6 s、`saveIndexReady` 28.9 s（entries 36,112 / CBM 12,594 / 关系 4,657）、`coreValid` 29.7 s，即核心索引约 2.5 s 写入 + 0.8 s 校验后即可暖启动；状态栏在 26.6 s 显示“索引发布中”，31.8 s 切换为“暖启动已就绪 · 属性补写中”。第二阶段读取 21,414 个 DEV/FAM/PHM 文本耗时 59.8 s（其中 4,179 个惰性条目走批量 pack 读取），属性解析后一次事务写入 40,867 条 FAM + 36,783 条 DEV 属性耗时 2.8 s，94.5 s 显示“索引已发布”。几何引用链未在第二阶段重解析（暖几何按源回退）。第二阶段被关闭或切换打断时 `substation_properties_complete` 保持 0，下次暖启动会自动补写。
 
+substation03/04 冷启动实测（v0.0.14，IFC LOD 缓存在 IndexedDB 中，工程重置不会清除它）：
+- substation04（19 个 IFC）：解压/解析 4 s，首个 IFC 6 s，IFC 19/19 于 18.6 s 结束，当前视图 22.7 s 完成（532 个几何实例、213 个设备节点）。其中空间索引 finalize 约 12.5 s、234 万资源记录，是 04 冷启动的主要固定成本。
+- substation03（8 个 IFC，其中 `CBM/设备接线.ifc` 452 MB）：解压/解析 14.1 s，首个 IFC 16.4 s，8/8 于 25.4 s 结束（全部命中 IFC LOD 缓存），当前视图 62.9 s 完成。452 MB IFC 的**真冷转换**需要数分钟（实测曾停在“冷转换 10%”超过 5 分钟才完成并写入缓存），现在把它排到队尾，其他模型先完成；转换期间 UI 保持可用。
+- DEV 编译：Worker 数由固定 2 提升为按核数 1–4（本机 4），04 的 532 个实例在 22.7 s 内完成 L0，03 的 162 个实例在 62.9 s 内完成。
+
 IFC 每文件记录 bytes、实际来源（`ifc` 冷转换 / `lod-cache` 远景缓存 / `fragments-cache` 完整缓存）、conversion、`core.load` 与缓存写入耗时；远景缓存命中不等于完整 IFC 几何就绪，区域精化另计。IFC 远景缓存写入不得阻塞 `firstUsableGeometryReady`，写入失败须单独记录且不得形成虚假的暖命中。
 
 Long Task 统计除 count/blocking/max 外保留最多 64 条样本（时间、时长、当时的活动 span），用于把主线程阻塞关联到 `core.load`、GLB 解析、场景提交等阶段；样本上限不代表全量长任务。

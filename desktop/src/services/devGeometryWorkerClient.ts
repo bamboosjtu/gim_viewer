@@ -29,7 +29,13 @@ export class DevGeometryPreprocessor {
   private terminalError:Error|null=null;
   constructor(_paths: string[], private files: Map<string, File>, private current: () => boolean) {
     const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
-    const count = navigator.hardwareConcurrency >= 6 && (memory == null || memory >= 4) ? 2 : 1;
+    const cores = navigator.hardwareConcurrency || 4;
+    // DEV 编译是 CPU 密集的独立任务；按核数给到最多 4 个 Worker，低内存机器仍保守。
+    // localStorage 覆盖用于现场对比（gim-dev-workers=1..8），默认自动。
+    const override = Number(localStorage.getItem('gim-dev-workers'));
+    const memoryCap = memory != null && memory < 4 ? 1 : 4;
+    const auto = Math.max(1, Math.min(memoryCap, Math.floor(cores / 2)));
+    const count = Number.isFinite(override) && override >= 1 && override <= 8 ? Math.floor(override) : auto;
     for (let i = 0; i < count; i++) {
       this.addWorker(count);
     }

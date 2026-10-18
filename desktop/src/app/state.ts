@@ -302,6 +302,29 @@ export class AppState {
   hasFittedCamera = false;
   /** 用户是否手动操作过相机；为 true 时不再自动改全景。 */
   viewerUserInteracted = false;
+  /**
+   * 首个 IFC 交互后仍在后台加载剩余 IFC。
+   * DEV 几何源预取要等它结束，否则大批次 IPC 会挤占剩余 IFC 的读取/转换。
+   */
+  ifcBackgroundPending = false;
+  private ifcBackgroundWaiters: Array<() => void> = [];
+
+  beginIfcBackgroundLoading(): void {
+    this.ifcBackgroundPending = true;
+  }
+
+  endIfcBackgroundLoading(): void {
+    this.ifcBackgroundPending = false;
+    const waiters = this.ifcBackgroundWaiters;
+    this.ifcBackgroundWaiters = [];
+    for (const resolve of waiters) resolve();
+  }
+
+  /** 等待剩余 IFC 加载结束；没有后台 IFC 时立即返回。 */
+  waitForIfcBackgroundLoading(): Promise<void> {
+    if (!this.ifcBackgroundPending) return Promise.resolve();
+    return new Promise((resolve) => this.ifcBackgroundWaiters.push(resolve));
+  }
 
   /**
    * 重置所有 GIM 相关状态（保留引擎初始化状态）。
@@ -356,6 +379,8 @@ export class AppState {
     // （否则切换项目后中间只剩网格，IFC 几何不显示）
     this.hasFittedCamera = false;
     this.viewerUserInteracted = false;
+    this.ifcBackgroundPending = false;
+    this.ifcBackgroundWaiters = [];
     // xml-mod Group 的 dispose 由 projectCleanupService 负责（需要 Viewer scene 引用）
     // 这里只清空索引，避免 stale 引用
     this.loadedXmlModGroups.clear();

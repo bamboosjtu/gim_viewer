@@ -535,6 +535,7 @@ interface InspectorSummary {
   keyRows: Array<{ label: string; value: string }>;
   idRows: Array<{ label: string; value: string }>;
   systemPath: string;
+  componentCount: number;
 }
 
 const PLACEHOLDER_VALUES = new Set(['-', '/', '\\', '—', '&其他', '未填写', 'null', 'undefined']);
@@ -572,23 +573,74 @@ function pickBusinessValue(
   return null;
 }
 
-async function collectPropertySources(state: AppState, node: CbmNode): Promise<Record<string, string>[]> {
+/**
+ * 设备由多个部件（PARTINDEX / DEV_SUBDEVICE）组成。GIM 把部分业务属性写在
+ * 部件自己的 DEV/FAM 上，而用户是按“设备”阅读属性的，所以这里把设备下
+ * 组件的属性并按设备优先合并；组件自身的值只补缺，不覆盖设备值。
+ */
+function collectComponentNodes(node: CbmNode, out: CbmNode[], limit = 120): void {
+  for (const child of node.children) {
+    if (out.length >= limit) return;
+    out.push(child);
+    collectComponentNodes(child, out, limit);
+  }
+}
+
+async function readDevKv(state: AppState, devKey: string): Promise<Record<string, string> | null> {
+  if (state.currentFiles) {
+    const file = getFileByPath(state.currentFiles, devKey);
+    return file ? parseKeyValue(await file.text()) : null;
+  }
+  return getCachedByPath(state.cachedDevProperties, devKey) ?? null;
+}
+
+async function collectPropertySources(
+  state: AppState,
+  node: CbmNode,
+): Promise<{ sources: Record<string, string>[]; componentCount: number }> {
   const cbmKv = node.rawProperties ?? {};
+  const componentNodes: CbmNode[] = [];
+  collectComponentNodes(node, componentNodes);
+  const devMerged: Record<string, string> = {};
   const famKv: Record<string, string> = {};
   const famPaths = new Set<string>();
   if (node.famPath) famPaths.add(withEntryPrefix('CBM', node.famPath));
   for (const ref of resolveBaseFamilyReferences(cbmKv)) famPaths.add(withEntryPrefix('CBM', ref.path));
 
-  let devKv: Record<string, string> | null = null;
+  let componentCount = 0;
+  const devSources: Array<{ key: string; kv: Record<string, string> }> = [];
   if (node.devPath) {
-    const devKey = withEntryPrefix('DEV', node.devPath);
-    if (state.currentFiles) {
-      const file = getFileByPath(state.currentFiles, devKey);
-      if (file) devKv = parseKeyValue(await file.text());
-    } else {
-      devKv = getCachedByPath(state.cachedDevProperties, devKey) ?? null;
+    const key = withEntryPrefix('DEV', node.devPath);
+    const kv = await readDevKv(state, key);
+    if (kv) devSources.push({ key, kv });
+  }
+  for (const component of componentNodes) {
+    if (devSources.length >= 64) break;
+    const refs = new Set<string>();
+    if (component.devPath) refs.add(withEntryPrefix('DEV', component.devPath));
+    for (const ref of resolveBaseFamilyReferences(component.rawProperties ?? {})) {
+      refs.add(withEntryPrefix('DEV', ref.path));
     }
-    for (const ref of resolveBaseFamilyReferences(devKv ?? {})) famPaths.add(withEntryPrefix('DEV', ref.path));
+    for (const key of refs) {
+      if (devSources.some((row) => row.key === key)) continue;
+      const kv = await readDevKv(state, key);
+      if (kv) devSources.push({ key, kv });
+    }
+    if (component.famPath) famPaths.add(withEntryPrefix('CBM', component.famPath));
+    for (const ref of resolveBaseFamilyReferences(component.rawProperties ?? {})) {
+      famPaths.add(withEntryPrefix('CBM', ref.path));
+    }
+  }
+  for (let i = 0; i < devSources.length; i++) {
+    const { kv } = devSources[i];
+    let contributed = false;
+    for (const [key, value] of Object.entries(kv)) {
+      if (devMerged[key] !== undefined) continue;
+      devMerged[key] = value;
+      contributed = true;
+    }
+    if (contributed && i > 0) componentCount++;
+    for (const ref of resolveBaseFamilyReferences(kv)) famPaths.add(withEntryPrefix('DEV', ref.path));
   }
 
   for (const path of famPaths) {
@@ -606,11 +658,11 @@ async function collectPropertySources(state: AppState, node: CbmNode): Promise<R
       }
     }
   }
-  return [famKv, devKv ?? {}, cbmKv];
+  return { sources: [famKv, devMerged, cbmKv], componentCount };
 }
 
 async function buildInspectorSummary(state: AppState, node: CbmNode): Promise<InspectorSummary> {
-  const sources = await collectPropertySources(state, node);
+  const { sources, componentCount } = await collectPropertySources(state, node);
   const cbmKv = sources[2];
 
   const namePick = pickBusinessValue(sources, ['工程中名称', 'PARTNAME', 'SYMBOLNAME', '设备名称', 'NAME']);
@@ -661,6 +713,7 @@ async function buildInspectorSummary(state: AppState, node: CbmNode): Promise<In
     keyRows,
     idRows,
     systemPath,
+    componentCount,
   };
 }
 
@@ -676,7 +729,10 @@ function renderInspectorSummary(summary: InspectorSummary): string {
   const identity = summary.identity
     ? `<div class="inspector-identity">${escHtml(summary.identity)}</div>`
     : '';
-  return `<div class="inspector-summary"><div class="inspector-name" title="${escHtml(summary.name)}">${escHtml(summary.name)}</div>${identity}</div>${keyHtml}${idHtml}`;
+  const components = summary.componentCount > 0
+    ? `<div class="inspector-components">已合并 ${summary.componentCount} 个组件来源的属性</div>`
+    : '';
+  return `<div class="inspector-summary"><div class="inspector-name" title="${escHtml(summary.name)}">${escHtml(summary.name)}</div>${identity}${components}</div>${keyHtml}${idHtml}`;
 }
 
 function buildCbmOverviewAndSource(state: AppState, node: CbmNode, summaryHtml: string = ''): { overview: string; source: string } {

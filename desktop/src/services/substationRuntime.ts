@@ -1,4 +1,4 @@
-﻿import { setIfcStatus } from '../ui/shell/statusBar.js';
+import { setIfcStatus } from '../ui/shell/statusBar.js';
 import { planRemainingIfcPreviews, type PreviewQueueStrategy } from './ifcPreviewQueue.js';
 import type { IfcEntry, CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
@@ -886,6 +886,7 @@ export async function loadAllIfcFiles(
     void sampleSubstationMemory(state,'fullModelReady',perfSession,meta,ctx);
   };
   background.registerRemainingIfc();
+  state.beginIfcBackgroundLoading();
   // 调试入口：从 localStorage 读取手动坐标偏移（GIM_COORD_OFFSET="dx,dy,dz"）
   // 仅作为调试功能，不写入数据库，不作为最终算法。
   // resetGimState 会清空 projectSourceToViewerMatrix，因此每次打开项目时重新解析。
@@ -1141,6 +1142,17 @@ export async function loadAllIfcFiles(
       if (file) sizes.set(entry.path.toLowerCase(),file.size);
     }
     const queue = [...entries];
+    // 超大 IFC（如 452 MB 的设备接线）冷转换可能需要数分钟；把它排到最后，
+    // 先完成其余模型，避免小文件陪它一起“卡在 x/y”。仍会完整加载，不丢弃。
+    const HUGE_IFC_BYTES = 64 * 1024 * 1024;
+    const hugeQueue = queue.filter((entry) => (sizes.get(entry.path.toLowerCase()) ?? 0) > HUGE_IFC_BYTES);
+    if (hugeQueue.length > 0 && hugeQueue.length < queue.length) {
+      const normalQueue = queue.filter((entry) => !hugeQueue.includes(entry));
+      queue.splice(0, queue.length, ...normalQueue, ...hugeQueue);
+      perfMark('IFC 超大文件排到队尾', {
+        huge: hugeQueue.map((entry) => ({ path: entry.path, bytes: sizes.get(entry.path.toLowerCase()) ?? 0 })),
+      }, perfSession);
+    }
     let tailPlanned = false;
     perfMark('IFC Preview queue requested', {strategy,anchor:entries[0]?.path},perfSession);
     let previewsReady = 0;
@@ -1376,6 +1388,7 @@ export async function loadAllIfcFiles(
 
     setIfcStatus(`IFC ${entries.length}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ' · 已就绪'}`);
     background.completeRemainingIfc();
+    state.endIfcBackgroundLoading();
     // Preview-first has its own readiness barrier. Deferred LOD2 files remain
     // visible in their per-file state and cannot satisfy allIfcReady.
     enqueueDevGeometry();

@@ -194,6 +194,21 @@ export class DevLodRuntime {
   private async preloadSources(files: Map<string, File>): Promise<Map<string, File>> {
     const projectId = this.session.projectId;
     if (projectId == null || !this.current()) return files;
+    // 剩余 IFC 仍在后台加载时最多等 8 秒再预取，避免大批次 IPC 长时间挤占
+    // 剩余 IFC 的读取/转换；超时后让预取与 IFC 并行，靠批次让出主线程。
+    if (this.state.ifcBackgroundPending) {
+      const started = performance.now();
+      const deadline = started + 8000;
+      while (this.state.ifcBackgroundPending && this.current() && performance.now() < deadline) {
+        await Promise.race([
+          this.state.waitForIfcBackgroundLoading(),
+          new Promise((resolve) => setTimeout(resolve, 500)),
+        ]);
+      }
+      perfMark('DEV 几何源预取等待 IFC', { waitedMs: Math.round(performance.now() - started) },
+        this.perf);
+      if (!this.current()) return files;
+    }
     const MAX_FILE_BYTES = 8 * 1024 * 1024;
     const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
     const BATCH_FILES = 4096;
@@ -251,7 +266,8 @@ export class DevLodRuntime {
     // 只有刚解压完的冷路径才做几何源预取：此时源在 pack 里、几何缓存为空，
     // 逐条 IPC 会把首次几何阶段拖成数分钟。暖路径的模板/目录缓存命中率高，
     // 预取反而会抢走首屏时间，保持原来的按需读取。
-    const preload = this.state.currentFiles != null;
+    const preload = this.state.currentFiles != null
+      && (() => { try { return localStorage.getItem('gim-dev-preload') !== '0'; } catch { return true; } })();
     this.worker = createDevGeometryPreprocessor(
       this.state,
       this.session,
@@ -332,7 +348,7 @@ export class DevLodRuntime {
         // Drop an LOD0 request that was queued before the directory knew this
         // DEV had no renderable primitive; a running task can finish normally.
         this.wanted.delete(this.key(dev, 0));
-        this.worker.cancelQueued(this.wanted);
+        this.worker?.cancelQueued(this.wanted);
       }
       this.diagnostics.directoryCompleted += instances.length;
       this.requestReady();
@@ -561,7 +577,7 @@ export class DevLodRuntime {
       const priority = selected ? 0 : lod === 0 ? 1 : 2;
       if (row.key !== key && row.failedKey !== key) void this.render(row, lod, priority).catch(e => this.failed(row, e, key));
     }
-    this.worker.cancelQueued(wanted); this.templates.trim(this.pinned());
+    this.worker?.cancelQueued(wanted); this.templates.trim(this.pinned());
     for (const [key, waiter] of this.templateWaiters) if (!wanted.has(key)) {
       this.templateWaiters.delete(key); this.templateQueue.delete(key); waiter.reject(new DOMException('DEV request left the current view', 'AbortError'));
     }
