@@ -5,7 +5,7 @@
 
 | ID | 判定 | 证据 | 处置 |
 |---|---|---|---|
-| D-01 | 部分证据 | substation04 真冷（清 IndexedDB）：首个 IFC 9.6 s，IFC 19/19；50 s 时 DEV 348/532、当前视图准备中 185；heartbeat/输入延迟未采 | 继续补 01/02/03 与延迟门禁 |
+| D-01 | 接近达标 | 四包真冷首屏 23.7/17.5/22.3/9.6 s；heartbeat ≤326 ms、输入 ≤1.5 ms；03 的 452 MB IFC 完整转换未闭环 | 补 03 完整转换与峰值内存 |
 | D-02 | 部分处理 | 已映射 empty-device-xml、assembly-node-without-own-geometry、dev-no-solidmodel、parser-unsupported 到 serialization diagnostics；phm-no-solidmodel 仍无法区分 | 继续补 phm/unknown 与 raw 路径 |
 | D-04 | 有效 | 杆塔 HNum 预览没有 read/parse/render 拆分数据 | 需补测 |
 | D-05 | 有效 | 线路 warm 内存没有独立进程归因 | 需补测 |

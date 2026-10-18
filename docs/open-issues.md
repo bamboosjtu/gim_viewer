@@ -11,7 +11,7 @@ P0 为正确性或核心流程阻断，P1 为主要效率、可维护性或拟�
 
 | ID | 优先级/状态 | 当前问题 | 行动与完成条件 |
 |---|---|---|---|
-| D-01 | P1 / 待核验 | 变电原始冷路径完整加载及连续响应没有达标证据，DEV 编译仍有长尾风险。2026-10-19 真冷（清 WebView IndexedDB）substation04：首个 IFC 9.6 s、IFC 19/19 已加载；50 s 时 DEV 几何 348/532（忽略小构件 185）、“当前视图准备中 185”；heartbeat/输入延迟仍未采 | 固定四包空缓存（含清除 WebView IndexedDB），分别测 IFC conversion、core.load、模板编译、placement/scene commit；完整模型 ≤600s，interactive 后最长 heartbeat 间隔 ≤2s、输入延迟 ≤1s；同时通过正确性门禁 |
+| D-01 | P1 / 待核验 | 2026-10-19 四包真冷（清 IndexedDB）首屏：01 23.7 s / 02 17.5 s / 03 22.3 s / 04 9.6 s；heartbeat 最大间隔 326/276/155/133 ms，输入派发 0.7/1.4/1.0/1.5 ms；01/02/03/04 的 IFC 均已 N/N，DEV 分别为 285/285、3325/3326（34 个 source-invalid）、162/162、505/532。03 的 452 MB IFC 仍显示“冷转换中”，完整转换计时未闭环 | 补 03 超大 IFC 真冷转换完成时间（≤600s）与峰值内存；固定四包矩阵与正确性门禁留档；heartbeat/输入门禁继续按 ≤2s/≤1s 复测 |
 | D-02 | P1 / 待开发 | DEV 级诊断已把 empty-device-xml、assembly-node-without-own-geometry、dev-no-solidmodel、parser-unsupported 写入 serialization diagnostics，并透传到 DEV 诊断；phm-no-solidmodel 仍无法与普通空装配区分，debug/raw 路径尚未统一 | 继续补 phm-no-solidmodel 与 unknown 的区分，验证冷/暖/raw 三路径一致可检索，不能伪造几何 |
 | D-04 | P1 / 待核验 | 杆塔 HNum/MOD 按需预览有延迟风险 | 拆分 read/parse/render，记录延迟和输入规模；必要时有界缓存或任务隔离；树、地图与快速切换不受阻 |
 | D-05 | P2 / 待核验 | 线路 warm 内存驻留归因不完整 | 独立进程分别测 JS heap、WebView/Worker/Rust RSS，切换与关闭后观察回收；据证据决定属性 lazy load |
