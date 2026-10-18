@@ -72,8 +72,16 @@ export async function publishSubstationIndex(input: PublicationInput, deps: Publ
     })));
   }
   deps.onPhase?.('sourceTextReady',{files:candidates.length});
-  const index = await buildGimIndexPayload(input.projectId,prepared,input.ifcs,input.tree,input.relations,input.cachePaths,input.sourceSha256);
-  const refs = await buildGeometryRefsPayload(input.projectId,prepared,input.sourceSha256);
+  let index: Awaited<ReturnType<typeof buildGimIndexPayload>>;
+  let refs: Awaited<ReturnType<typeof buildGeometryRefsPayload>>;
+  try {
+    index = await buildGimIndexPayload(input.projectId,prepared,input.ifcs,input.tree,input.relations,input.cachePaths,input.sourceSha256,current);
+    if (!current()) return false;
+    refs = await buildGeometryRefsPayload(input.projectId,prepared,input.sourceSha256,current);
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') return false;
+    throw error;
+  }
   if (!current()) return false;
   deps.onPhase?.('saveIndexStart');
   await deps.saveIndex(index);

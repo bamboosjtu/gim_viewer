@@ -2693,7 +2693,7 @@ pub fn write_cache_file_binary(
 
 /// Tauri command：读取缓存的 IFC 文件（路径由 project_id + entry_path 计算，不接受任意路径）
 #[tauri::command]
-pub fn read_cached_ifc(
+pub async fn read_cached_ifc(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_path: String,
@@ -2716,7 +2716,7 @@ pub fn read_cached_ifc(
 /// 与 read_cached_ifc 相同，目标路径只由 project_id + entry_path 计算，
 /// 不接受前端传入的绝对路径，供原生解压后的磁盘懒读 File 适配器使用。
 #[tauri::command]
-pub fn read_cached_entry(
+pub async fn read_cached_entry(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_path: String,
@@ -2815,7 +2815,7 @@ fn encode_batch_cache_response(
 /// 用于缓存命中时批量加载 DEV/PHM/MOD/STL 文件，避免数千次 IPC 往返。
 /// 单个文件读取失败不影响其他文件（对应 item.bytes = null）。
 #[tauri::command]
-pub fn batch_read_cached_files(
+pub async fn batch_read_cached_files(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_paths: Vec<String>,
@@ -3273,7 +3273,7 @@ pub fn write_glb_file_binary(
 /// 返回 `tauri::ipc::Response`（原始二进制），避免 `Vec<u8>` 经 JSON 序列化为
 /// 数字数组带来的 3x 体积膨胀和解析开销。JS 侧 `invoke` 返回 `ArrayBuffer`。
 #[tauri::command]
-pub fn read_glb_file(
+pub async fn read_glb_file(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_path: String,
@@ -3443,7 +3443,7 @@ pub fn delete_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64,
 /// 前端根据 manifest 将其判定为对应 DEV 的 fast path 不可用，并仅对
 /// 该 DEV 做 scoped 原始 MOD/STL 回退；manifest 结构本身损坏才整体重建。
 #[tauri::command]
-pub fn batch_read_glb_files(
+pub async fn batch_read_glb_files(
     app_handle: tauri::AppHandle,
     project_id: i64,
     entry_paths: Vec<String>,
@@ -3668,7 +3668,7 @@ fn validate_geometry_manifest_entry_shape(
 /// 读取当前项目的 DEV geometry manifest。manifest 本身只描述 source/status/size；
 /// GLB 文件及 header/长度由 fast path 和 validate_gim_cache 继续独立校验。
 #[tauri::command]
-pub fn read_geometry_cache_manifest(
+pub async fn read_geometry_cache_manifest(
     app_handle: tauri::AppHandle,
     project_id: i64,
 ) -> Result<GeometryCacheManifest, String> {

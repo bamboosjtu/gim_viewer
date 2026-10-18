@@ -691,6 +691,7 @@ pub fn run() {
             file_dialog_commands::pick_gim_file_path,
             file_dialog_commands::pick_ifc_file_paths,
             gim_extract_command::extract_gim_archive,
+            gim_extract_command::read_extraction_manifest,
             substation_parse_copy::read_substation_parse_copy,
             substation_extraction_job::inspect_substation_early_eligibility,
             substation_extraction_job::start_substation_extraction,

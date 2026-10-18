@@ -34,6 +34,8 @@ DEV 缓存读取必须按 `hit`、`miss`、`read-error`、`invalid`、`deferred`
 
 变电几何源在 pack 内是 lazy 的，而 Worker 每次取源都要经主线程往返；几何编译期间主线程繁忙，单次读取实测 30–90 ms，几千次读取会把冷几何阶段拖到数十分钟。冷路径因此在 DEV 调度开始前用少量大批次 IPC 一次取回几何源（DEV/PHM/STL 优先，再 MOD；单文件 8 MiB、总量 128 MiB 上限），暖路径保持按需读取。该预取不改变模板/LOD 判定，只把源读取从“逐条 IPC”换成“批次 + 内存”。
 
+索引未提交就切换工程时，第二次打开改为读取解压清单：源 SHA 匹配就直接复用已解压的 pack/IFC，不再重新解压。实测同一序列（首开未提交 → 打开另一工程 → 再开原工程）从 36 s 降到 24.7 s（解压 8.6 s、hydration 6.0 s、解析 12.7 s）。索引构建在会话切换时会检查取消并中止，避免旧工程属性解析继续占用主线程。读取类命令（`read_cached_entry`、`batch_read_cached_files`、IFC/GLB/manifest 读取）已改为异步命令，避免在主线程繁忙时排队。
+
 IFC 每文件记录 bytes、实际来源（`ifc` 冷转换 / `lod-cache` 远景缓存 / `fragments-cache` 完整缓存）、conversion、`core.load` 与缓存写入耗时；远景缓存命中不等于完整 IFC 几何就绪，区域精化另计。IFC 远景缓存写入不得阻塞 `firstUsableGeometryReady`，写入失败须单独记录且不得形成虚假的暖命中。
 
 Long Task 统计除 count/blocking/max 外保留最多 64 条样本（时间、时长、当时的活动 span），用于把主线程阻塞关联到 `core.load`、GLB 解析、场景提交等阶段；样本上限不代表全量长任务。

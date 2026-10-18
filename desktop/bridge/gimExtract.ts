@@ -320,3 +320,16 @@ export async function extractGimArchiveNative(
   const buf = await invokeTimed<ArrayBuffer>('extract_gim_archive', { filePath, projectId, ...experiments });
   return parseExtractionPayload(buf, { cacheProjectId: projectId });
 }
+
+/** 上次成功解压留下的清单（索引未提交就切换工程时复用已解压文件）。 */
+export interface ExtractionManifest {
+  source_sha256: string;
+  entries: Array<{ path: string; size: number; packed?: boolean; cache_path?: string }>;
+}
+
+export async function readExtractionManifest(projectId: number): Promise<ExtractionManifest | null> {
+  const result = await invokeTimed<ExtractionManifest | null>('read_extraction_manifest', { projectId });
+  if (!result || typeof result.source_sha256 !== 'string' || !Array.isArray(result.entries)) return null;
+  return result;
+}
+

@@ -13,7 +13,7 @@
 //! SQLite 缓存目录（app_data_dir/extracted/{project_id}/），前端只接收
 //! manifest；不会构造完整解压 Vec，也不会通过 IPC 回传条目字节。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::db::{
@@ -45,6 +45,42 @@ struct ExtractedEntryMeta {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// 解压完成后写入项目缓存根的清单，供“索引尚未提交就切换工程”后的再次
+/// 打开直接复用已解压文件，避免重新解压 3.6 万条目。
+pub(crate) const EXTRACTION_MANIFEST_FILE: &str = ".gim-extract-manifest.json";
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct ExtractionManifest {
+    pub source_sha256: String,
+    pub entries: Vec<ExtractionManifestEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub(crate) struct ExtractionManifestEntry {
+    pub path: String,
+    pub size: u64,
+    #[serde(default)]
+    pub packed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_path: Option<String>,
+}
+
+/// 清单元数据命令：只读 small JSON，不触发解压。
+#[tauri::command]
+pub fn read_extraction_manifest(
+    app_handle: tauri::AppHandle,
+    project_id: i64,
+) -> Result<Option<ExtractionManifest>, String> {
+    let path = crate::db::cache_file_path(&app_handle, project_id, EXTRACTION_MANIFEST_FILE)?;
+    match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map(Some)
+            .map_err(|e| format!("解压清单解析失败: {}", e)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("读取解压清单失败: {}", error)),
+    }
 }
 
 #[derive(Serialize)]
@@ -306,6 +342,19 @@ pub async fn extract_gim_archive(
                 if !matches!(checked.as_ref(), Ok(actual) if actual == expected) {
                     let _ = remove_cache_dir_if_safe(&staging_root, " staging");
                     return Err(checked.err().unwrap_or_else(|| "extraction source SHA mismatch".into()));
+                }
+                // 解压清单是可选的加速元数据；写失败不能影响本次成功解压。
+                let manifest = ExtractionManifest {
+                    source_sha256: expected.clone(),
+                    entries: metas.iter().map(|meta| ExtractionManifestEntry {
+                        path: meta.path.clone(),
+                        size: meta.size,
+                        packed: meta.packed,
+                        cache_path: meta.cache_path.clone(),
+                    }).collect(),
+                };
+                if let Ok(bytes) = serde_json::to_vec(&manifest) {
+                    let _ = std::fs::write(staging_root.join(EXTRACTION_MANIFEST_FILE), bytes);
                 }
             }
             let commit_started = std::time::Instant::now();

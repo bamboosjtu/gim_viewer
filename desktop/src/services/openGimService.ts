@@ -77,6 +77,39 @@ function describeType(type: GimRuntimeType | 'unknown'): string {
     : 'unknown';
 }
 
+/**
+ * 复用上次解压结果。
+ *
+ * 变电首开会先解压、再在后台发布语义索引；若用户在发布完成前切换工程，
+ * 索引不会提交，但已解压的 pack/IFC 仍然有效。这里读取解压清单并按同一
+ * 源 SHA 复用，避免把“索引未提交”退化成重新解压全部条目。
+ */
+async function reuseExtractedSources(
+  projectId: number | null,
+  sourceSha256: string | null,
+  magic: string,
+): Promise<ExtractedGimSource | null> {
+  if (projectId == null || !sourceSha256 || magic !== 'GIMPKGS' || !isTauri()) return null;
+  try {
+    const { readExtractionManifest, createDiskBackedFile } = await import('@desktop/gimExtract.js');
+    const manifest = await readExtractionManifest(projectId);
+    if (!manifest || manifest.source_sha256 !== sourceSha256 || manifest.entries.length === 0) return null;
+    const files = new Map<string, File>();
+    const cachePaths = new Map<string, string>();
+    const packedPaths = new Set<string>();
+    for (const entry of manifest.entries) {
+      if (!entry || typeof entry.path !== 'string' || !Number.isFinite(entry.size)) continue;
+      files.set(entry.path, createDiskBackedFile(projectId, entry.path, entry.size));
+      if (entry.packed) packedPaths.add(entry.path);
+      if (entry.cache_path) cachePaths.set(entry.path, entry.cache_path);
+    }
+    if (files.size === 0) return null;
+    return { magic, files, cachePaths, packedPaths, cacheProjectId: projectId };
+  } catch {
+    return null;
+  }
+}
+
 interface OpenSourceInput {
   state: AppState;
   showMessage: (text: string) => void;
@@ -152,11 +185,20 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
         && (SUBSTATION_EARLY_SEMANTIC_DEFAULT || localStorage.getItem('gim-debug-substation-early-semantic') === '1');
       try {
         const { extractGimArchiveNative } = await import('@desktop/gimExtract.js');
+        // 上次解压成功但语义索引尚未提交时（首开期间切换/关闭工程），
+        // 复用同一源 SHA 的已解压文件，避免再次解压 3.6 万条目。
+        const reused = await reuseExtractedSources(projectId, session.sourceSha256, source.magic);
+        if (reused) {
+          (await import('../utils/perfTimings.js')).perfMark('解压复用（已解压缓存，索引未提交）', {
+            files: reused.files.size,
+          }, perfSession);
+          extracted = reused;
+        } else {
         endNative = perfBegin('解压（Rust 原生）', undefined, perfSession);
         const early = earlyRequested;
         const fullNative = () => extractGimArchiveNative(nativeFilePath, projectId ?? undefined,
           source.magic === 'GIMPKGS' ? {
-            ...(earlyRequested ? {expectedSourceSha256:session.sourceSha256!} : {}),
+            ...(session.sourceSha256 ? {expectedSourceSha256: session.sourceSha256} : {}),
             traceEntries: localStorage.getItem('gim-debug-substation-extraction-trace') === '1',
             substationParseCopy: localStorage.getItem('gim-debug-substation-parse-copy') === '1',
           } : {});
@@ -186,6 +228,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
           (await import('../utils/perfTimings.js')).perfMark('sourceMaterializationComplete', { files: native.files.size }, perfSession);
         }
         extracted = native;
+        }
       } catch (nativeError) {
         const nativeMessage = nativeError instanceof Error ? nativeError.message : String(nativeError);
         endNative?.('（失败）', { error: nativeMessage });

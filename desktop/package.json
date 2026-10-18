@@ -1,6 +1,6 @@
 {
   "name": "gim-reader",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "description": "GIM 浏览器",
   "type": "module",
   "scripts": {

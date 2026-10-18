@@ -85,6 +85,14 @@ function collectFamDevRefs(node: CbmNode | null, out: { famPaths: Set<string>; d
  * @param fileDevRelations FileDevRelation 解析结果
  * @param localCachePathMap IFC 文件的本地缓存路径映射（entry_path -> local_cache_path）
  */
+/** 工程会话已切换时中止索引构建，避免把旧工程的解析继续跑完。 */
+export class IndexBuildCancelledError extends Error {
+  constructor() {
+    super('索引构建已取消');
+    this.name = 'AbortError';
+  }
+}
+
 export async function buildGimIndexPayload(
   projectId: number,
   files: Map<string, File>,
@@ -93,7 +101,9 @@ export async function buildGimIndexPayload(
   fileDevRelations: FileDevEntry[],
   localCachePathMap?: Map<string, string>,
   sourceSha256?: string | null,
+  isCurrent?: () => boolean,
 ): Promise<GimIndexPayload> {
+  const cancelled = (): boolean => Boolean(isCurrent && !isCurrent());
   // 1. entries
   const entries: GimEntryPayload[] = [];
   for (const [entryPath, file] of files) {
@@ -148,6 +158,7 @@ export async function buildGimIndexPayload(
   // tree model.  This also handles BASEFAMILYPOINTER when it is not the first
   // value selected for a node.
   for (const [entryPath, file] of files) {
+    if (cancelled()) throw new IndexBuildCancelledError();
     const normalized = normalizeFilePath(entryPath);
     if (!/^cbm\/.*\.cbm$/i.test(normalized)) continue;
     try {
@@ -168,6 +179,7 @@ export async function buildGimIndexPayload(
   const devFamRefs = new Set<string>();
   const devPathsArr = Array.from(refs.devPaths);
   for (let i = 0; i < devPathsArr.length; i += PARSE_CONCURRENCY) {
+    if (cancelled()) throw new IndexBuildCancelledError();
     const chunkPaths = devPathsArr.slice(i, i + PARSE_CONCURRENCY);
     const texts = await Promise.all(
       chunkPaths.map((p) => getFileByPath(files, p)?.text().catch(() => null) ?? Promise.resolve(null)),
@@ -192,6 +204,7 @@ export async function buildGimIndexPayload(
   // 5c. 读取 FAM 文件，解析分节 → fam_property（同样分批并行读取）
   const famPathsArr = Array.from(refs.famPaths);
   for (let i = 0; i < famPathsArr.length; i += PARSE_CONCURRENCY) {
+    if (cancelled()) throw new IndexBuildCancelledError();
     const chunkPaths = famPathsArr.slice(i, i + PARSE_CONCURRENCY);
     const texts = await Promise.all(
       chunkPaths.map((p) => getFileByPath(files, p)?.text().catch(() => null) ?? Promise.resolve(null)),
@@ -247,6 +260,7 @@ export async function buildGeometryRefsPayload(
   projectId: number,
   files: Map<string, File>,
   sourceSha256?: string | null,
+  isCurrent?: () => boolean,
 ): Promise<GeometryRefsPayload> {
   const devSolidModels: DevSolidModelPayload[] = [];
   const devSubDevices: DevSubDevicePayload[] = [];
@@ -268,6 +282,7 @@ export async function buildGeometryRefsPayload(
 
   // 1. 解析 DEV → SOLIDMODEL (→ PHM) + SUBDEVICE (→ child DEV)
   for (const { path, file } of devFiles) {
+    if (isCurrent && !isCurrent()) throw new IndexBuildCancelledError();
     try {
       const text = await file.text();
       const doc = parseDev(text, path);
@@ -300,6 +315,7 @@ export async function buildGeometryRefsPayload(
 
   // 2. 解析 PHM → SOLIDMODEL (→ MOD/GL/STL)
   for (const { path, file } of phmFiles) {
+    if (isCurrent && !isCurrent()) throw new IndexBuildCancelledError();
     try {
       const text = await file.text();
       const doc = parsePhm(text, path);
