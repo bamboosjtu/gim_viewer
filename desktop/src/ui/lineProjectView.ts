@@ -1872,7 +1872,7 @@ function renderBasemapSwitcherIntoLayerPanel(layerPanel: HTMLElement, mapData: L
       btn.disabled = true;
       btn.style.opacity = '0.4';
       btn.style.cursor = 'not-allowed';
-      btn.title = '未配置 VITE_TIANDITU_KEY（.env），无法使用天地图';
+      btn.title = '未配置天地图 API Key，请在“更多 → 设置”中填写';
     }
     btn.addEventListener('mouseenter', () => {
       if (!btn.disabled && runtimeBasemapMode !== opt.mode) {

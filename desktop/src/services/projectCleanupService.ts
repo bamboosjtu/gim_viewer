@@ -132,6 +132,15 @@ export async function cleanupBeforeOpenNewProject(
     console.warn('[Cleanup] clear line MOD runtime cache failed:', err);
   }
 
+  // 关闭/切换工程时终止仍在运行的 IFC 转换 Worker。否则一个卡在 76% 的
+  // 大 IFC 会继续占用 Worker，加载遮罩也不会退场。
+  try {
+    const { cancelIfcConversions } = await import('../viewer/ifcConversion.js');
+    cancelIfcConversions();
+  } catch (err) {
+    console.warn('[Cleanup] cancel IFC conversions failed:', err);
+  }
+
   // ---- 2. dispose ViewerRuntime 中所有 fragments 模型 ----
   // 必须在 resetGimState 之前执行：resetGimState 会清空 state.loadedModels 索引，
   // 但 ctx.fragments.list 中的 Three.js 对象仍残留，需要显式 dispose
@@ -328,6 +337,11 @@ export async function cleanupBeforeOpenNewProject(
   // resetGimState 是集中 mutator，已包含 loadedModels.clear / highlightedItems=null / hasFittedCamera=false
   if (!isCurrentCleanup()) return false;
   state.resetGimState();
+  // 清理完成后必须撤销中央加载遮罩；关闭工程时它可能仍显示“正在加载 建筑…”。
+  try {
+    const { hideLoading } = await import('./gimOpenCore.js');
+    hideLoading();
+  } catch { /* best effort */ }
   if (shouldCaptureSubstationResources && isCurrentCleanup()) {
     const cleanupMeta = {
       cleanupGeneration,

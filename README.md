@@ -9,7 +9,7 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 
 | 平台          | 当前版本       | 下载                                                         | 主要功能                                                 |
 | ------------- | -------------- | ------------------------------------------------------------ | -------------------------------------------------------- |
-| Windows x64   | v0.0.14 Preview | [下载 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站三维模型、输电线路地图、最近工程、工程层级与属性浏览 |
+| Windows x64   | v0.0.15 Preview | [下载 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站三维模型、输电线路地图、最近工程、工程层级与属性浏览 |
 | Android ARM64 | v0.1.16 Preview | [下载 APK](https://github.com/bamboosjtu/gim_viewer/releases/download/android-v0.1.6-preview/gim-viewer-android-ae7df06cc83ebde26fc2cb17faf003d7b2fd8a2f.zip) | 输电线路地图、工程树、杆塔与导线属性、来源查看和现场定位 |
 
 历史版本及发布说明：[GitHub Releases](https://github.com/bamboosjtu/gim_viewer/releases)
@@ -39,7 +39,7 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 - **加载进度**：工程打开前显示阶段进度条与已用秒数；首个 IFC 后转入底部状态栏，不遮挡三维画布。
 - **索引发布**：冷启动首开后状态栏显示“索引发布中 → 暖启动已就绪 · 属性补写中 → 索引已发布”；核心索引提交即可暖启动，属性在后台补写。发布完成前关闭应用不会损坏已解压缓存，下次打开会复用并继续补写。
 - **属性面板**：概览首屏显示设备名称、类型 · 电压等级 · 所属系统，以及 ≤8 个关键参数（名称/电压/厂家/型号/容量/期次等）；工程标识默认折叠，全部原始字段保留在“参数/来源”页签并支持搜索。设计方案见 `research/property-panel-design.md`。
-- **在线底图**：默认使用 OpenStreetMap；天地图密钥可在应用设置中自行配置。在线地图需要网络连接。
+- **在线底图**：默认使用 OpenStreetMap；天地图 API Key 在“更多 → 设置”中填写，保存在本地数据库，不再从 `.env` 读取。在线地图需要网络连接。
 - **工程兼容性**：不同设计软件导出的 GIM 文件可能存在格式差异，当前版本仍在持续完善兼容性。
 - **预览版本**：建议保留原始 GIM 文件，不要将应用内部缓存作为唯一的数据备份。
 
@@ -67,7 +67,7 @@ npm run tauri:dev
 `npm run dev` 可启动浏览器开发模式。构建使用 `npm run build`，桌面打包使用 `npm run tauri:build`，包含 portable ZIP 生成流程。
 运行时资源和发布约束见 [架构](docs/architecture.md)，测试与严格样本门禁见 [验证](docs/validation.md)。
 
-桌面线路默认在线底图为 OSM；桌面与本机浏览器开发预览可在根 `.env` 配置`VITE_TIANDITU_KEY`，不要提交真实 Key。Android 安装包不携带开发密钥，用户在地图设置中手动配置；未配置时使用 OSM。移动端构建和配置方法见 [App README](app/README.md)。
+桌面线路默认在线底图为 OSM；天地图 API Key 在桌面应用“更多 → 设置”中配置，保存在本机 SQLite（`app_setting` 表），不进入构建产物。Android 安装包不携带开发密钥，用户在地图设置中手动配置；未配置时使用 OSM。移动端构建和配置方法见 [App README](app/README.md)。
 
 底图异常时按配置回退 OSM 或 Canvas 工程覆盖层。
 解析与缓存本地运行，在线底图需要网络。

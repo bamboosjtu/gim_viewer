@@ -19,13 +19,21 @@
  * 天地图 _c 系列（EPSG:4326）需要 MapLibre 自定义 projection 支持，本 MVP 不使用。
  * 线路工程 OSM 底图已是 EPSG:3857（MapLibre 默认），天地图 _w 系列无缝兼容。
  *
- * 安全性：key 通过 Vite env 注入到客户端，构建后会出现在产物中。
- * 此 key 仅用于瓦片访问（不可调用付费接口），即便泄露风险较低；
- * 服务端 key 控制不在 MVP 范围（需自建代理服务）。
+ * 安全性：密钥保存在本地 SQLite 的 app_setting 表，由“更多 → 设置”写入；
+ * 不再从 .env / 构建产物读取。密钥只用于瓦片访问（不可调用付费接口），
+ * 仍属于本机配置，不随工程或缓存目录分发。
  */
 
-/** 天地图 API 密钥（构建期从仓库根目录 .env 注入） */
-export const TIANDITU_KEY: string = String(import.meta.env.VITE_TIANDITU_KEY ?? '').trim();
+/** 运行时天地图 API 密钥（由 appSettings 在启动时从本地数据库加载）。 */
+let tiandituKey = '';
+
+export function setTiandituKey(value: string): void {
+  tiandituKey = String(value ?? '').trim();
+}
+
+export function getTiandituKey(): string {
+  return tiandituKey;
+}
 
 /** 天地图可用子域列表 */
 // t5~t7 在当前服务上偶发 502；底图错误达到阈值会触发 Canvas-only 回退，
@@ -56,7 +64,7 @@ export const TIANDITU_ATTRIBUTION = '© 天地图';
  * @param subdomain 子域编号（0-4）
  */
 export function buildTiandituTileUrl(layer: TiandituLayerType, subdomain: number): string {
-  return `https://t${subdomain}.tianditu.gov.cn/DataServer?T=${layer}&x={x}&y={y}&l={z}&tk=${TIANDITU_KEY}`;
+  return `https://t${subdomain}.tianditu.gov.cn/DataServer?T=${layer}&x={x}&y={y}&l={z}&tk=${encodeURIComponent(tiandituKey)}`;
 }
 
 /**
@@ -65,5 +73,5 @@ export function buildTiandituTileUrl(layer: TiandituLayerType, subdomain: number
  * 调用方在初始化前应检查，未配置时回退到 OSM。
  */
 export function isTiandituKeyAvailable(): boolean {
-  return TIANDITU_KEY.length > 0;
+  return tiandituKey.length > 0;
 }

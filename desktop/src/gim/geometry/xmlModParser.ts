@@ -222,8 +222,12 @@ function parsePrimitive(entityNode: XmlModNode): XmlModPrimitive | null {
 
   const tagName = primitiveNode.tagName;
   const attrs = readAttrs(primitiveNode);
+  // 不同导出器对 primitive 标签大小写和别名不统一（Rectangularfixedplate、
+  // H-beam、DoubleChannelSteel 等）。统一映射到既有强类型分支，未知标签仍
+  // 保留原始 sourceType 进入 Unsupported。
+  const canonicalName = PRIMITIVE_CANONICAL_NAMES.get(tagName.trim().toLowerCase()) ?? tagName;
 
-  switch (tagName) {
+  switch (canonicalName) {
     case 'Cuboid':
       return parseCuboid(attrs);
     case 'Cylinder':
@@ -247,9 +251,11 @@ function parsePrimitive(entityNode: XmlModNode): XmlModPrimitive | null {
     case 'CircularGasket':
       return parseCircularGasket(attrs);
     case 'RectangularFixedPlate':
+      return { type: 'RectangularFixedPlate', raw: attrs };
     case 'OffsetRectangularTable':
+      return { type: 'OffsetRectangularTable', raw: attrs };
     case 'RectangularRing':
-      return { type: tagName, raw: attrs };
+      return { type: 'RectangularRing', raw: attrs };
     case 'Boolean': {
       const rawOp = (attrs['Type'] ?? '').trim().toLowerCase();
       if (!['union', 'intersection', 'difference'].includes(rawOp)) {
@@ -298,7 +304,22 @@ function parsePrimitive(entityNode: XmlModNode): XmlModPrimitive | null {
   }
 }
 
-/** 读取元素全部属性为 Record<string, string> */
+/** primitive 标签的小写规范化与导出器别名。 */
+const PRIMITIVE_CANONICAL_NAMES = new Map<string, string>(
+  [
+    'Cuboid', 'Cylinder', 'Sphere', 'TruncatedCone', 'Ring', 'CircularGasket',
+    'Wire', 'Cable', 'RotationalEllipsoid', 'BeamChannelLike', 'BeamChannel',
+    'LightBeamChannel', 'H', 'Boolean', 'PorcelainBushing', 'TerminalBlock',
+    'ChannelSteel', 'Table', 'OffsetRectangularTable', 'RectangularFixedPlate',
+    'RectangularRing', 'StretchedBody',
+  ].map((name) => [name.toLowerCase(), name] as const)
+);
+PRIMITIVE_CANONICAL_NAMES.set('h-beam', 'H');
+PRIMITIVE_CANONICAL_NAMES.set('doublechannelsteel', 'ChannelSteel');
+
+/**
+ * 读取 XML 节点属性。
+ */
 function readAttrs(node: XmlModNode): Record<string, string> {
   return { ...node.attrs };
 }

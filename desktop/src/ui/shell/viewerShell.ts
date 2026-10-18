@@ -144,6 +144,8 @@ export function setupViewerShell(state: AppState): void {
         if (ifcItem) ifcItem.hidden = state.currentProjectType === 'transmission_line';
         const cacheItem = document.getElementById('menu-cache');
         if (cacheItem) cacheItem.hidden = !isTauri();
+        const settingsItem = document.getElementById('menu-settings');
+        if (settingsItem) settingsItem.hidden = !isTauri();
         void refreshRecent();
       }
     });
@@ -160,6 +162,10 @@ export function setupViewerShell(state: AppState): void {
   document.getElementById('menu-ifc-detail')?.addEventListener('click', () => {
     closeMenu();
     void import('../ifcDetailPanel.js').then(({ openIfcDetailPanel }) => openIfcDetailPanel());
+  });
+  document.getElementById('menu-settings')?.addEventListener('click', () => {
+    closeMenu();
+    void import('../settingsPanel.js').then(({ openSettingsPanel }) => openSettingsPanel());
   });
   welcomeOpen?.addEventListener('click', () => btnLoadGim.click());
   continueButton?.addEventListener('click', () => {

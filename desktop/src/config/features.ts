@@ -101,7 +101,7 @@ export const PMTILES_DEMO_URL = '/tiles/demo.pmtiles';
  * - 'tianditu-terrain' : 天地图地形图（ter_w + cta_w 双图层叠加，呈现地形起伏）
  * - 'tianditu-vector'  : 天地图矢量图（vec_w + cva_w 双图层叠加，呈现道路/地名）
  *
- * 天地图三种模式需要 .env 中配置 VITE_TIANDITU_KEY。
+ * 天地图三种模式需要在本应用“更多 → 设置”中配置 API Key（保存在本地数据库）。
  * 未配置 key 时自动回退到 OSM（由 lineProjectView 处理）。
  */
 export type LineBasemapMode =

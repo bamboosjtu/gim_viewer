@@ -40,16 +40,25 @@ export async function loadRawIfc(
       catch (error) { reject(error); return; }
       const finish = (error?: Error, bytes?: Uint8Array<ArrayBuffer>) => {
         activeConversions.delete(cancel);
+        if (watchdog) { clearInterval(watchdog); watchdog = null; }
         worker.onmessage = null; worker.onerror = null; worker.onmessageerror = null;
         worker.terminate();
         if (error) reject(error); else resolve(bytes!);
       };
       const cancel = () => finish(new DOMException('IFC conversion belongs to an obsolete project', 'AbortError'));
       activeConversions.add(cancel);
+      // web-ifc 对个别文件可能长时间停在某个进度（实测 76% 超过 10 分钟）。
+      // 以“无进度”而非总时长判定停滞：持续有进度的大文件仍允许后台长转换。
+      let lastProgressAt = performance.now();
+      let watchdog: ReturnType<typeof setInterval> | null = null;
+      watchdog = setInterval(() => {
+        if (performance.now() - lastProgressAt < 180000) return;
+        finish(new Error('IFC 转换超过 180 秒无进度，已中止；可重试或在设置中跳过超大文件'));
+      }, 15000);
       worker.onmessage = (event: MessageEvent<IfcConversionOutput>) => {
         if (!isCurrent()) { cancel(); return; }
         const response = event.data;
-        if (response.type === 'progress') { onProgress?.(response.progress); return; }
+        if (response.type === 'progress') { lastProgressAt = performance.now(); onProgress?.(response.progress); return; }
         if (response.type === 'error') {
           const error = new Error(response.message); error.stack = response.stack ?? error.stack;
           finish(error);

@@ -308,6 +308,8 @@ export class AppState {
    */
   ifcBackgroundPending = false;
   private ifcBackgroundWaiters: Array<() => void> = [];
+  /** 本次打开被“跳过超大 IFC”设置排除的文件（显式记录，不静默）。 */
+  ifcSkippedLargeIfc: string[] = [];
 
   beginIfcBackgroundLoading(): void {
     this.ifcBackgroundPending = true;
@@ -381,6 +383,7 @@ export class AppState {
     this.viewerUserInteracted = false;
     this.ifcBackgroundPending = false;
     this.ifcBackgroundWaiters = [];
+    this.ifcSkippedLargeIfc = [];
     // xml-mod Group 的 dispose 由 projectCleanupService 负责（需要 Viewer scene 引用）
     // 这里只清空索引，避免 stale 引用
     this.loadedXmlModGroups.clear();

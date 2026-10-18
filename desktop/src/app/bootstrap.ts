@@ -36,6 +36,15 @@ async function bootstrapAsync(): Promise<void> {
   const { installLongTaskObserver } = await import('../utils/perfTimings.js');
   installLongTaskObserver();
 
+  // 应用设置（天地图密钥、IFC 大文件跳过等）保存在本地 SQLite；
+  // 页面启动时先加载，保证地图/工程打开前拿到当前配置。
+  try {
+    const { loadAppSettings } = await import('../services/appSettings.js');
+    await loadAppSettings();
+  } catch (error) {
+    console.warn('[settings] 加载应用设置失败:', error);
+  }
+
   // 全局 unhandledrejection 监听（仅 Fragments 相关）：
   // - Fragments 内部异常（如 "Malformed tile"）会被 preventDefault() 捕获，避免控制台红屏
   // - 真实错误仍通过 ifcLoader.ts 的 safeFragmentsUpdate 局部 catch / console.error 处理

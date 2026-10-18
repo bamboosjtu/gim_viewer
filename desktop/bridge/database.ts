@@ -1368,6 +1368,16 @@ export async function authorizeCachedGimProject(projectId: number): Promise<stri
   return invokeTimed<string>('authorize_cached_gim_project', { projectId });
 }
 
+/** 读取应用设置（本地 SQLite app_setting 表）。 */
+export async function getAppSettings(): Promise<Record<string, string>> {
+  return invokeTimed<Record<string, string>>('get_app_settings');
+}
+
+/** 写入单个应用设置；value 为空字符串表示清除。 */
+export async function setAppSetting(key: string, value: string): Promise<void> {
+  await invokeTimed<void>('set_app_setting', { key, value });
+}
+
 /** 打开成功后异步更新最近打开时间。 */
 export async function touchGimProjectOpened(projectId: number): Promise<void> {
   await invokeTimed<void>('touch_gim_project_opened', { projectId });

@@ -28,7 +28,7 @@ import type { StyleSpecification } from 'maplibre-gl';
 import {
   buildTiandituTileUrl,
   TIANDITU_ATTRIBUTION,
-  TIANDITU_KEY,
+  isTiandituKeyAvailable,
   TIANDITU_SUBDOMAINS,
   type TiandituLayerType,
 } from '../config/tianditu.js';
@@ -103,8 +103,8 @@ export function createOsmOnlineRasterStyle(): StyleSpecification {
  * @throws 当 TIANDITU_KEY 未配置时抛错（由调用方预防）
  */
 export function createTiandituSatelliteStyle(): StyleSpecification {
-  if (!TIANDITU_KEY) {
-    throw new Error('TIANDITU_KEY 未配置，请在 .env 中设置 VITE_TIANDITU_KEY');
+  if (!isTiandituKeyAvailable()) {
+    throw new Error('天地图 API Key 未配置，请在“更多 → 设置”中填写');
   }
   return {
     version: 8,
@@ -153,8 +153,8 @@ export function createTiandituSatelliteStyle(): StyleSpecification {
  * @throws 当 TIANDITU_KEY 未配置时抛错（由调用方预防）
  */
 export function createTiandituTerrainStyle(): StyleSpecification {
-  if (!TIANDITU_KEY) {
-    throw new Error('TIANDITU_KEY 未配置，请在 .env 中设置 VITE_TIANDITU_KEY');
+  if (!isTiandituKeyAvailable()) {
+    throw new Error('天地图 API Key 未配置，请在“更多 → 设置”中填写');
   }
   return {
     version: 8,
@@ -203,8 +203,8 @@ export function createTiandituTerrainStyle(): StyleSpecification {
  * @throws 当 TIANDITU_KEY 未配置时抛错（由调用方预防）
  */
 export function createTiandituVectorStyle(): StyleSpecification {
-  if (!TIANDITU_KEY) {
-    throw new Error('TIANDITU_KEY 未配置，请在 .env 中设置 VITE_TIANDITU_KEY');
+  if (!isTiandituKeyAvailable()) {
+    throw new Error('天地图 API Key 未配置，请在“更多 → 设置”中填写');
   }
   return {
     version: 8,

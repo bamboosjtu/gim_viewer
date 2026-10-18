@@ -735,6 +735,8 @@ pub fn run() {
             db::save_line_project_finish,
             db::get_line_attributes,
             db::list_cached_projects,
+            db::get_app_settings,
+            db::set_app_setting,
             db::authorize_cached_gim_project,
             db::touch_gim_project_opened,
             db::delete_project_cache,

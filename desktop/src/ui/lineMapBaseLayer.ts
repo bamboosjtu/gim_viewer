@@ -173,7 +173,7 @@ export async function createMapLibreProbe(
   // ---- 天地图 key 检查（未配置时回退到 OSM） ----
   let effectiveBasemapMode = basemapMode;
   if ((isTiandituSatelliteMode || isTiandituTerrainMode || isTiandituVectorMode) && !isTiandituKeyAvailable()) {
-    console.warn('[MapLibre probe] TIANDITU_KEY 未配置，回退到 OSM online');
+    console.warn('[MapLibre probe] 未配置天地图 API Key，回退到 OSM online');
     effectiveBasemapMode = 'osm-online';
   }
   const useOsmStyle = effectiveBasemapMode === 'osm-online';

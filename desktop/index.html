@@ -353,6 +353,18 @@
       .lod-table { display: flex; flex-direction: column; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
       .lod-row { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 14px; padding: 12px 14px; background: var(--surface-2); font-size: 12px; color: var(--text-2); }
       .lod-row b { color: var(--text-1); font-weight: 600; }
+      /* ── 设置面板 ── */
+      .settings-section { display: flex; flex-direction: column; gap: 10px; }
+      .settings-title { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); }
+      .settings-desc { font-size: 12px; line-height: 1.6; color: var(--text-2); }
+      .settings-desc a { color: var(--primary); }
+      .settings-input { width: 100%; padding: 8px 10px; font-size: 13px; color: var(--text-1); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; outline: none; }
+      .settings-input:focus { border-color: var(--accent); }
+      .settings-check { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.5; color: var(--text-2); }
+      .settings-check input { margin-top: 2px; }
+      .settings-note { font-size: 11px; color: var(--text-3); }
+      .settings-status { min-height: 18px; font-size: 12px; color: #8fd694; }
+      .settings-status.error { color: #f0a3a3; }
       /* 检查器四页签（概览/参数/关系/来源）*/
       .itabs { display: grid; grid-template-columns: repeat(4, 1fr); height: 38px; margin-bottom: 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
       .itab { display: grid; place-items: center; border: none; background: transparent; color: var(--text-3); font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; }
@@ -477,6 +489,7 @@
             <button id="menu-attach-ifc" role="menuitem">附加 IFC…</button>
             <button id="menu-cache" role="menuitem">缓存管理…</button>
             <button id="menu-ifc-detail" role="menuitem">IFC 细节设置…</button>
+            <button id="menu-settings" role="menuitem">设置…</button>
             <div class="menu-sep" role="separator"></div>
             <label class="menu-check"><input id="menu-auto-open-last" type="checkbox" /> 启动时恢复上次工程</label>
             <label class="menu-check"><input id="menu-show-props" type="checkbox" /> 选择对象时展开属性</label>

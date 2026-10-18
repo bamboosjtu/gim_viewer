@@ -179,6 +179,12 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_gim_project_sha256 ON gim_project(sha256);
         CREATE INDEX IF NOT EXISTS idx_gim_project_path ON gim_project(path);
 
+        CREATE TABLE IF NOT EXISTS app_setting (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at_ms INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS substation_gim_entry (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER NOT NULL,
@@ -6688,10 +6694,61 @@ pub struct CachedProjectSummary {
     pub updated_at_ms: u64,
 }
 
+/// 读取全部应用设置。密钥只保存在本地 SQLite，不进入构建产物。
+#[tauri::command]
+pub fn get_app_settings(
+    state: tauri::State<'_, DbState>,
+) -> Result<HashMap<String, String>, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM app_setting")
+        .map_err(|e| format!("查询应用设置失败: {}", e))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| format!("读取应用设置失败: {}", e))?;
+    let mut settings = HashMap::new();
+    for row in rows {
+        let (key, value) = row.map_err(|e| format!("读取应用设置行失败: {}", e))?;
+        settings.insert(key, value);
+    }
+    Ok(settings)
+}
+
+/// 写入单个应用设置；空值表示清除该项。
+#[tauri::command]
+pub fn set_app_setting(
+    state: tauri::State<'_, DbState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    let key = key.trim();
+    if key.is_empty() || key.len() > 128 {
+        return Err("设置键无效".to_string());
+    }
+    if value.len() > 4096 {
+        return Err("设置值过长".to_string());
+    }
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    conn.execute(
+        "INSERT INTO app_setting(key, value, updated_at_ms) VALUES(?1, ?2, ?3)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at_ms = excluded.updated_at_ms",
+        params![key, value, now_ms() as i64],
+    )
+    .map_err(|e| format!("保存应用设置失败: {}", e))?;
+    Ok(())
+}
+
 /// 列出所有缓存的项目（只读，按最近打开排序）
 #[tauri::command]
-pub fn list_cached_projects(
-    state: tauri::State<'_, DbState>,
+pub fn list_cached_projects(    state: tauri::State<'_, DbState>,
 ) -> Result<Vec<CachedProjectSummary>, String> {
     let conn = state
         .0

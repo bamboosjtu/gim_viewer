@@ -1142,8 +1142,24 @@ export async function loadAllIfcFiles(
       if (file) sizes.set(entry.path.toLowerCase(),file.size);
     }
     const queue = [...entries];
-    // 超大 IFC（如 452 MB 的设备接线）冷转换可能需要数分钟；把它排到最后，
-    // 先完成其余模型，避免小文件陪它一起“卡在 x/y”。仍会完整加载，不丢弃。
+    // 超大 IFC（如 452 MB 的设备接线）冷转换可能需要数分钟；默认允许后台
+    // 长转换并排到队尾。设置里可显式跳过这类非关键文件，跳过后在状态栏和
+    // 控制台列出，绝不静默丢弃。
+    const { shouldSkipLargeIfc, LARGE_IFC_BYTES } = await import('./appSettings.js');
+    const skippedLargeIfc: Array<{ path: string; bytes: number }> = [];
+    if (shouldSkipLargeIfc() && queue.length > 1) {
+      for (let index = queue.length - 1; index >= 1; index--) {
+        const bytes = sizes.get(queue[index].path.toLowerCase()) ?? 0;
+        if (bytes <= LARGE_IFC_BYTES) continue;
+        skippedLargeIfc.push({ path: queue[index].path, bytes });
+        queue.splice(index, 1);
+      }
+      if (skippedLargeIfc.length > 0) {
+        console.warn('[IFC] 已按设置跳过超大文件:', skippedLargeIfc);
+        perfMark('IFC 跳过超大文件', { skipped: skippedLargeIfc }, perfSession);
+      }
+    }
+    state.ifcSkippedLargeIfc = skippedLargeIfc.map((row) => row.path);
     const HUGE_IFC_BYTES = 64 * 1024 * 1024;
     const hugeQueue = queue.filter((entry) => (sizes.get(entry.path.toLowerCase()) ?? 0) > HUGE_IFC_BYTES);
     if (hugeQueue.length > 0 && hugeQueue.length < queue.length) {
@@ -1386,7 +1402,7 @@ export async function loadAllIfcFiles(
       if (!isCurrent()) return;
     }
 
-    setIfcStatus(`IFC ${entries.length}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ' · 已就绪'}`);
+    setIfcStatus(`IFC ${queue.length}/${queue.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ' · 已就绪'}${skippedLargeIfc.length ? ` · 已跳过 ${skippedLargeIfc.length} 个超大 IFC` : ''}`);
     background.completeRemainingIfc();
     state.endIfcBackgroundLoading();
     // Preview-first has its own readiness barrier. Deferred LOD2 files remain
@@ -1462,7 +1478,7 @@ export async function loadAllIfcFiles(
   // sequential IFC tail and post-IFC geometry continue under the same
   // session/token guards after this promise resolves.
   void lifecycleTask.finally(() => {
-    if (isCurrent()) setIfcStatus(`IFC 已结束 · 已加载 ${state.loadedModels.size}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ''}`);
+    if (isCurrent()) setIfcStatus(`IFC 已结束 · 已加载 ${state.loadedModels.size}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ''}${state.ifcSkippedLargeIfc.length ? ` · 已跳过 ${state.ifcSkippedLargeIfc.length} 个超大 IFC` : ''}`);
     // If every IFC failed (or the session became stale) there is no usable
     // geometry event to signal. Release the caller rather than leaving an
     // unresolved readiness promise behind.

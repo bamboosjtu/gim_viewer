@@ -56,10 +56,15 @@
 | Wire | D,FitCoordArray | 有效三元点；样条管近似 |
 | Cable | D,StartCoord,InflectionCoordArray,EndCoord | 拼合有效点；样条管近似 |
 | RotationalEllipsoid | H,LR,WR | 强类型；缩放球体近似 |
-| BeamChannel / LightBeamChannel / H | Length,Model | BeamChannelLike；盒体近似 |
+| BeamChannel / LightBeamChannel / H / H-beam | Length,Model | BeamChannelLike；盒体近似；`H-beam` 为导出器别名 |
+| DoubleChannelSteel | raw attrs | 归一为 ChannelSteel；当前无直接几何生成 |
 | 其他标签 | raw attrs | Unsupported，局部降级并保留来源类型 |
 
-Insulator、ConePorcelainBushing、SquareGasket、CircularFixedPlate、BendingCylindrical 等未进入强类型分支的来源不能因为名字看似熟悉就宣称支持。
+标签匹配按小写规范化，`Rectangularfixedplate`、`RectangularFixedPlate` 等大小写变体进入同一分支。
+
+六组样本实测（substation01–04 与 500-A3-1/B1-1/B1-3/B1-4；B1-2 未取得 pack）的未支持 primitive：
+`Insulator`（01 无、02 1、500 系列 421）、`EccentricTruncatedCone` 99、`ConePorcelainBushing` 55、`VTypeInsulator` 30、`TableGasket` 21、`EllipticRing` 5、`SquareGasket` 4、`Rectangularfixedplate` 4、`BendingCylindrical` 2、`Circularfixedplate` 1、`CircularFixedPlate` 4、`DoubleChannelSteel` 1。01/03 在既有强类型加 `H-beam` 别名后无未支持标签；04 只剩上述小计数类型。
+Insulator、ConePorcelainBushing、SquareGasket、CircularFixedPlate、BendingCylindrical、VTypeInsulator、EccentricTruncatedCone、TableGasket、EllipticRing 等未进入强类型分支的来源不能因为名字看似熟悉就宣称支持；补充时须提供参数映射并标记 simplified。
 全部覆盖以 [parser](../../desktop/src/gim/geometry/xmlModParser.ts) 与[geometry renderer](../../desktop/src/viewer/xmlModGeometry.ts) 的实际分支为准。
 
 ## StretchedBody
