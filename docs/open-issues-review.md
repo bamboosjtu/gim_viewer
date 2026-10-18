@@ -7,7 +7,6 @@
 |---|---|---|---|
 | D-06 | 关闭 | 线路 GIMPKGT 已复用内嵌 7-Zip 流式解压；line03 冷启动 smoke：0.0 s 点击 → 4.1 s 批量读取 → 5.3 s 线路工程已加载 → 9.9 s 地图就绪（111 杆塔/1081 导线段/772 跨越物） | 已实现并验证 |
 | D-12 | 有效 | WASM 回退/截断索引/写入失败闭环无新证据 | 需补测 |
-| D-14 | 有效 | `modAutoLoadService.ts` 仍有 geometry manifest 失效时重建整域的分支 | 评估适用范围 |
 | D-17 | 有效 | IFC 近景区域子集仍不覆盖所有类型/回退路径 | 后续扩展 |
 | D-21 | 有效 | DEV Worker 池已改为逻辑核数 60%（2–8），长尾/内存仍未验收 | 需补测 |
 | D-22 | 偶发 | 全量两次：2 failed/925，随后 0 failed/927；单文件 25/25；devLodLoading 夹具已修正 | 继续复现并行 flake |
@@ -17,6 +16,8 @@
 | D-29 | 有效 | IFC Spatial 仍逐文件扫描；SHA 跨阶段复用未完成 | 后续优化 |
 
 已关闭：
+
+- D-14（遗留 GLB 回退）：仅 manifest/version 失效时整域重建；默认逐模板原子缓存与 retry 保留，现有样本未见 transient 失败导致整批恢复，接受为低频回退路径。
 
 - D-26（空间索引 span）：当前 变电 IFC 空间索引 只包 Worker build；finalize/缓存写入在 span 外，spatialSemanticReady 单独记录 rebuildMs/writeMs，未发现固定主线程成本。
 
