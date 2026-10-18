@@ -101,18 +101,14 @@ function createSubstationSpatialObserver(state: AppState, session: PerfSession):
   };
 }
 
-const cbmNodeCountCache = new WeakMap<CbmNode, number>();
 function collectCbmNodeCount(root: CbmNode | null): number {
   if (!root) return 0;
-  const cached = cbmNodeCountCache.get(root);
-  if (cached !== undefined) return cached;
   let count = 0;
   const walk = (node: CbmNode): void => {
     count += 1;
     for (const child of node.children) walk(child);
   };
   walk(root);
-  cbmNodeCountCache.set(root, count);
   return count;
 }
 
@@ -582,6 +578,7 @@ export async function onGimExtracted(
   if (!state.isCurrentSession(session)) return [];
   if (ifcEntries.length === 0) ifcEntries = scanIfcFiles(files);
   endIfcDiscovery(undefined, { count: ifcEntries.length });
+  await sampleSubstationMemory(state, 'IFC discovery 后', perfSession, { ifcCount: ifcEntries.length });
   state.currentIfcEntries = ifcEntries;
 
   // 构建 CBM 层级树（F1System 根节点名称由 projectTypeName 设置，F2System 保留原始分类码并使用可读来源名称）
@@ -622,6 +619,10 @@ export async function onGimExtracted(
     deviceIfcLinks: state.deviceToIfcFile.size,
   });
   // 诊断采样不能阻塞首屏：冷路径上 await/同步采样曾引入约 30 s 隐性等待。
+  await sampleSubstationMemory(state, 'CBM/FAM/DEV/FileDevRelation 后', perfSession, {
+    cbmNodes: collectCbmNodeCount(cbmTree),
+    fileDevRelations: fileDevRelations.length,
+  });
   markSubstationCoreSemanticReady(state, perfSession);  await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（core semantic）');
   void sampleSubstationMemory(state, 'coreSemanticReady', perfSession, {
     source: 'cold',

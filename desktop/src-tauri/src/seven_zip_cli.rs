@@ -1,30 +1,60 @@
 //! 使用随包分发的 7-Zip 命令行解码器做流式解压。
 //!
 //! 纯 Rust sevenz-rust 的单线程解码在本项目目标样本上约 95 s（327 MB），
-//! 而 7-Zip 原生解码到管道约 2.5 s。这里把归档载荷切片写入临时 .7z，
-//! 由 `7z e -so` 输出连续的条目字节流，再按归档顺序和声明大小切分后交给
-//! 现有 sink（pack/IFC 落盘）。7z.exe/7z.dll 以 LGPL 随包分发，见 README。
+//! 7-Zip 原生解码到管道约 2.5 s。为保持发布版只有一个 `GIM-Reader.exe`，
+//! `7z.exe` / `7z.dll` 以字节形式嵌入主程序，首次使用时释放到临时目录再
+//! 调用；LGPL 许可说明见 README 与 `License.txt`（嵌入资源）。
 
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
-/// 定位随包的 7z.exe：优先 exe 同目录，其次开发目录 third_party。
+const EMBEDDED_7Z_EXE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/third_party/7zip/7z.exe"
+));
+const EMBEDDED_7Z_DLL: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/third_party/7zip/7z.dll"
+));
+
+/// 定位可用的 7z.exe：优先 exe 同目录（开发/调试），否则释放嵌入副本。
 pub fn locate_7z() -> Option<PathBuf> {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("7z.exe");
-            if candidate.is_file() {
-                return Some(candidate);
+    static RESOLVED: OnceLock<Option<PathBuf>> = OnceLock::new();
+    RESOLVED
+        .get_or_init(|| {
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(dir) = exe.parent() {
+                    let candidate = dir.join("7z.exe");
+                    if candidate.is_file() && dir.join("7z.dll").is_file() {
+                        return Some(candidate);
+                    }
+                }
             }
-        }
+            extract_embedded().ok()
+        })
+        .clone()
+}
+
+fn extract_embedded() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir()
+        .join("gim-viewer-7zip")
+        .join(env!("CARGO_PKG_VERSION"));
+    fs::create_dir_all(&dir).map_err(|e| format!("创建 7z 临时目录失败: {e}"))?;
+    let exe = dir.join("7z.exe");
+    let dll = dir.join("7z.dll");
+    let matches = |path: &Path, bytes: &[u8]| -> bool {
+        fs::metadata(path).map(|m| m.len() == bytes.len() as u64).unwrap_or(false)
+    };
+    if !matches(&exe, EMBEDDED_7Z_EXE) {
+        fs::write(&exe, EMBEDDED_7Z_EXE).map_err(|e| format!("释放 7z.exe 失败: {e}"))?;
     }
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("third_party/7zip/7z.exe");
-    if dev.is_file() {
-        return Some(dev);
+    if !matches(&dll, EMBEDDED_7Z_DLL) {
+        fs::write(&dll, EMBEDDED_7Z_DLL).map_err(|e| format!("释放 7z.dll 失败: {e}"))?;
     }
-    None
+    Ok(exe)
 }
 
 pub fn is_available() -> bool {

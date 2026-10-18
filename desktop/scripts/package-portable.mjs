@@ -73,12 +73,6 @@ async function main() {
   rmSync(outputZip, { force: true });
   mkdirSync(outputDir, { recursive: true });
   cpSync(sourceExe, join(outputDir, 'GIM-Reader.exe'));
-  // 7-Zip CLI 用于快速流式解压；LGPL 许可文本随包分发。
-  for (const name of ['7z.exe', '7z.dll', 'License.txt', 'readme.txt']) {
-    const source = join(projectRoot, 'src-tauri', 'third_party', '7zip', name);
-    if (!existsSync(source)) throw new Error(`缺少随包 7-Zip 文件: ${source}`);
-    cpSync(source, join(outputDir, name));
-  }
   cpSync(sourceRuntime, join(outputDir, 'webview2-fixed-runtime'), { recursive: true });
 
   const runtimeStats = walkStats(join(outputDir, 'webview2-fixed-runtime'));

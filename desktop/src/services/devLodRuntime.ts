@@ -23,8 +23,10 @@ import { WorkQueue } from '../utils/workQueue.js';
 interface CachedTemplate { result: DevGlbSerializationResult; sha: string; sourceInvalid?: { message: string; evidence: string } }
 interface TemplateRow { bounds: THREE.Box3; template: DevGlbTemplate; sha: string; status: DevGlbSerializationResult['status']; diagnostics: DevGlbSerializationResult['diagnostics'] }
 interface CacheDecision { key: string; devPath: string; lod: DeviceLod; status: DevArtifactReadStatus | 'compiled' | 'write-failed'; reason?: string }
-interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; desired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
+interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; desired: DeviceLod | null; displayed: DeviceLod; skipTiny?: boolean; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
 const normalize = (path: string) => /^dev\//i.test(path.replace(/\\/g, '/')) ? path.replace(/\\/g, '/') : `DEV/${path}`;
+/** 远景忽略最长边小于该值的构件（螺栓/线夹/间隔棒等），近景仍可按需选中加载。 */
+const FAR_TINY_DEVICE_MAX_METERS = 1.5;
 const hash = async (bytes: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))].map(v => v.toString(16).padStart(2, '0')).join('');
 const belongsTo = (object: THREE.Object3D, root?: THREE.Object3D) => {
   for (let parent: THREE.Object3D | null = object; parent; parent = parent.parent) if (parent === root) return true;
@@ -36,7 +38,7 @@ export class DevLodRuntime {
   readonly diagnostics = { catalogReady: false, currentViewReady: false, currentViewSettled: false, baseRepresentationsSettled: false, baseRepresentationsReady: false, allStationReady: false, catalogHits: 0,
     templateHits: 0, compiled: [0, 0, 0], /** Per-LOD cache/compile facts; index is LOD. */ lodHits: [0, 0, 0], lodCompiled: [0, 0, 0],
     lodReadErrors: [0, 0, 0], lodInvalid: [0, 0, 0], lodWriteFailed: [0, 0, 0], lodPersisted: [0, 0, 0],
-    occurrences: 0, uniqueDevSources: 0, sceneCommitCount: 0, sceneCommitMaxMs: 0, shown: 0, pending: 0, unknownBounds: 0,
+    occurrences: 0, uniqueDevSources: 0, sceneCommitCount: 0, sceneCommitMaxMs: 0, shown: 0, pending: 0, unknownBounds: 0, tinySkipped: 0,
     absoluteConeCount: 0, templateResidentBytes: 0, directoryCompleted: 0, readyOccurrences: 0, failedOccurrences: 0,
     emptyOccurrences: 0, unsupportedOccurrences: 0, partialOccurrences: 0, templateParses: 0, templateEvictions: 0, workerCount: 0, activeDevices: [] as string[],
     inputBudgetBytes: 0, inputBudgetPeakBytes: 0,
@@ -339,6 +341,16 @@ export class DevLodRuntime {
         // A validated empty source is terminal. It must not enter the compile
         // queue or write a second empty template file for the same fact.
         row.entry = { ...entry, templateStatus: emptySource ? 'empty' : row.entry.templateStatus }; row.box = box;
+        if (box) {
+          const extent = box.max.clone().sub(box.min);
+          const maxMeters = Math.max(extent.x, extent.y, extent.z);
+          if (Number.isFinite(maxMeters) && maxMeters < FAR_TINY_DEVICE_MAX_METERS) {
+            // 远景只保留有体量的设备；螺栓、线夹、间隔棒等小构件不进入
+            // L0 编译队列。近景细节仍可通过选中/相机请求按需加载。
+            row.skipTiny = true;
+            this.diagnostics.tinySkipped++;
+          }
+        }
         if (emptySource) this.diagnostics.emptyOccurrences++;
         if (bounds.boundsQuality === 'unknown') {
           this.diagnostics.unknownBounds++; this.state.deviceUnknownBounds.add(seed.path);
@@ -566,7 +578,10 @@ export class DevLodRuntime {
       // automatic LOD0 in the background; only catalogued boxes decide whether
       // the current view is blocked on this occurrence.
       row.inView = selected || (row.box && metrics ? metrics.visible : false);
-      if (terminal) { row.desired = 0; continue; }
+      // 目录边界尚未就绪时不要先编译未知范围设备：B1-4 有 15,526 个
+      // 小构件，若按未知边界全部排入 L0，会在首屏后长时间占用主线程。
+      if (!selected && !row.box && !this.diagnostics.catalogReady) { row.desired = null; continue; }
+      if (terminal || row.skipTiny) { row.desired = 0; continue; }
       // Unknown ranges compile actual supported geometry automatically. No
       // invented box, false culling or tree-selection prerequisite is used.
       const lod = selected ? 2 : !row.group ? 0 : metrics ? chooseDeviceLod(row.displayed, metrics.visible, metrics.distance, metrics.pixels) : 0;
@@ -751,7 +766,7 @@ export class DevLodRuntime {
       + this.diagnostics.lodInvalid.reduce((a,b)=>a+b,0)
       + this.diagnostics.artifactWriteFailures;
     this.status(
-      `几何实例已处理 ${displayedFinished}/${total} · 已显示 ${this.diagnostics.readyOccurrences} · 冷编译 L0 ${cold[0]}/L1 ${cold[1]}/L2 ${cold[2]} · 缓存命中 L0 ${warm[0]}/L1 ${warm[1]}/L2 ${warm[2]}${failedCount ? ` · 失败 ${failedCount}` : ''} · ${phase}${background}`,
+      `几何实例已处理 ${displayedFinished}/${total} · 已显示 ${this.diagnostics.readyOccurrences}${this.diagnostics.tinySkipped ? ` · 忽略小构件 ${this.diagnostics.tinySkipped}` : ''} · 冷编译 L0 ${cold[0]}/L1 ${cold[1]}/L2 ${cold[2]} · 缓存命中 L0 ${warm[0]}/L1 ${warm[1]}/L2 ${warm[2]}${failedCount ? ` · 失败 ${failedCount}` : ''} · ${phase}${background}`,
       `LOD缓存 miss ${this.diagnostics.cacheMisses} · read-error ${this.diagnostics.cacheReadErrorCount} · invalid ${this.diagnostics.cacheInvalidCount} · 写入失败 ${this.diagnostics.artifactWriteFailures}`
         + ` · 目录 ${this.diagnostics.directoryCompleted}/${total}${this.diagnostics.catalogReady?'（就绪）':'（进行中）'}`
         + ` · 批读 ${this.diagnostics.cacheReadBatches} 批/${this.diagnostics.cacheReadEntries} 条（defer ${this.diagnostics.cacheReadDeferred}）`

@@ -47,11 +47,11 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 
 ## 开源协议与第三方组件
 
-本项目源码采用 **MIT License**（见 [desktop/package.json](desktop/package.json) 的 `license` 字段）；发布二进制同时包含以下第三方组件，其许可文本随 Portable ZIP 一并分发：
+本项目源码采用 **MIT License**（见 [desktop/package.json](desktop/package.json) 的 `license` 字段）；发布版只有一个可执行文件 `GIM-Reader.exe`，7-Zip 解码器以字节资源嵌入其中，首次使用时释放到系统临时目录。第三方组件的许可文本见仓库 `desktop/src-tauri/third_party/7zip/License.txt`、`readme.txt` 及下表。
 
 | 组件 | 用途 | 许可 |
 |---|---|---|
-| [7-Zip](https://www.7-zip.org/)（`7z.exe` / `7z.dll`） | 快速流式解压 GIM 内的 7z 归档 | GNU LGPL 2.1+，含 unRAR 限制；见包内 `License.txt`、`readme.txt` |
+| [7-Zip](https://www.7-zip.org/)（`7z.exe` / `7z.dll`，嵌入主程序） | 快速流式解压 GIM 内的 7z 归档 | GNU LGPL 2.1+，含 unRAR 限制；见 `third_party/7zip/License.txt` |
 | [web-ifc](https://github.com/ThatOpen/engine_web-ifc) | IFC 解析与几何转换 | Mozilla Public License 2.0 |
 | [That Open Engine](https://github.com/ThatOpen/engine_components)（components / fragments） | IFC 浏览与 Fragments | MIT |
 | [Three.js](https://threejs.org/) | 三维渲染 | MIT |
@@ -59,7 +59,7 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 | [Tauri](https://tauri.app/) | 桌面运行时 | MIT 或 Apache-2.0 |
 | [sevenz-rust](https://github.com/dyxmobile/sevenz-rust) | 纯 Rust 7z 解码回退 | MIT / Apache-2.0 |
 
-7-Zip 二进制来自 7-Zip 官方发行版，未修改；对应源码可从 <https://www.7-zip.org/download.html> 获取。若不再需要随包分发，可删除包内 `7z.exe`/`7z.dll`，应用会自动回退到纯 Rust 解码（速度较慢）。
+7-Zip 二进制来自 7-Zip 官方发行版，未修改；对应源码可从 <https://www.7-zip.org/download.html> 获取。若不再需要嵌入，可移除 `desktop/src-tauri/third_party/7zip/` 并删除嵌入引用，应用会自动回退到纯 Rust 解码（速度较慢）。
 
 在线底图数据：OpenStreetMap © OpenStreetMap contributors（ODbL）；天地图 © 天地图，需在设置中自行配置 API Key。
 
