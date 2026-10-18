@@ -44,47 +44,32 @@ function formatTime(ms: number): string {
 function createModal(): HTMLElement {
   const modal = document.createElement('div');
   modal.id = 'cache-manager-modal';
-  modal.style.cssText = `
-    position: fixed; inset: 0; z-index: 1000;
-    background: rgba(0,0,0,0.5);
-    display: flex; align-items: center; justify-content: center;
-  `;
+  modal.className = 'cache-modal';
   modal.innerHTML = `
-    <div style="
-      background: #1e1e1e; color: #eee; border-radius: 8px;
-      width: 800px; max-width: 90vw; max-height: 80vh;
-      display: flex; flex-direction: column; overflow: hidden;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    ">
-      <div style="
-        padding: 16px 20px; border-bottom: 1px solid #333;
-        display: flex; justify-content: space-between; align-items: center;
-      ">
-        <h2 style="margin: 0; font-size: 16px; font-weight: 600;">缓存管理</h2>
-        <button id="cache-mgr-close" style="
-          background: none; border: none; color: #aaa; font-size: 20px;
-          cursor: pointer; padding: 0 4px;
-        ">×</button>
-      </div>
-      <div id="cache-mgr-body" style="
-        flex: 1; overflow-y: auto; padding: 16px 20px;
-      ">
-        <div style="margin-bottom: 16px;">
-          <div style="font-size: 12px; color: #aaa; margin-bottom: 4px;">数据库路径</div>
-          <div id="cache-mgr-dbpath" style="
-            font-size: 12px; font-family: monospace; color: #0d84fc;
-            word-break: break-all; background: #2a2a2a; padding: 8px 10px; border-radius: 4px;
-          ">加载中...</div>
+    <div class="cache-dialog" role="dialog" aria-modal="true" aria-label="缓存管理">
+      <div class="cache-head">
+        <div>
+          <h2>缓存管理</h2>
+          <div class="cache-sub">本地 SQLite 缓存 · 删除后下次打开会重新解压</div>
         </div>
-        <div style="font-size: 12px; color: #aaa; margin-bottom: 8px;">缓存项目</div>
-        <div id="cache-mgr-list">加载中...</div>
+        <button id="cache-mgr-close" class="cache-close" aria-label="关闭">×</button>
       </div>
-      <div style="
-        padding: 12px 20px; border-top: 1px solid #333;
-        display: flex; justify-content: flex-end; gap: 8px;
-      ">
-        <button id="cache-mgr-refresh" class="btn btn-secondary btn-small" style="background: #444; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 12px;">刷新</button>
-        <button id="cache-mgr-done" class="btn btn-small" style="background: #0d84fc; color: #fff; border: none; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 12px;">关闭</button>
+      <div class="cache-body">
+        <div class="cache-path-card">
+          <span class="cache-path-label">数据库</span>
+          <span id="cache-mgr-dbpath" class="cache-path-value">加载中…</span>
+        </div>
+        <div class="cache-list-head">
+          <span class="cache-list-title">缓存项目</span>
+          <span id="cache-mgr-count" class="cache-count"></span>
+        </div>
+        <div id="cache-mgr-list" class="cache-list">
+          <div class="cache-empty">加载中…</div>
+        </div>
+      </div>
+      <div class="cache-foot">
+        <button id="cache-mgr-refresh" class="cache-btn">刷新</button>
+        <button id="cache-mgr-done" class="cache-btn primary">关闭</button>
       </div>
     </div>
   `;
@@ -92,53 +77,37 @@ function createModal(): HTMLElement {
   return modal;
 }
 
-/** 创建项目行 DOM */
+/** 创建项目卡片 DOM */
 function createProjectRow(project: CachedProjectSummary): HTMLElement {
   const row = document.createElement('div');
-  row.style.cssText = `
-    background: #2a2a2a; border-radius: 6px; padding: 12px 14px;
-    margin-bottom: 8px; font-size: 13px;
-  `;
+  row.className = 'cache-card';
 
-  const typeLabel = project.project_type ?? '(未识别)';
-  const versionLabel = project.parser_version ?? '(未设置)';
+  const typeLabel = project.project_type === 'transmission_line' ? '线路'
+    : project.project_type === 'substation' ? '变电'
+    : '(未识别)';
+  const versionLabel = project.parser_version ?? '未发布';
   const sizeLabel = formatSize(project.size);
   const timeLabel = formatTime(project.updated_at_ms);
 
   row.innerHTML = `
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-      <div style="font-weight: 600; font-size: 14px;">${escapeHtml(project.name)}</div>
-      <div style="font-size: 11px; color: #888;">ID: ${project.id}</div>
+    <div class="cache-card-head">
+      <span class="cache-name">${escapeHtml(project.name)}</span>
+      <span class="cache-badge id">#${project.id}</span>
+      <span class="cache-badge">${escapeHtml(typeLabel)}</span>
+      <span class="cache-badge${project.parser_version ? ' ok' : ''}">${escapeHtml(versionLabel)}</span>
     </div>
-    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 4px 12px; font-size: 12px; color: #bbb;">
-      <div>类型: <span style="color: #0d84fc;">${escapeHtml(typeLabel)}</span></div>
-      <div>版本: <span style="color: ${project.parser_version ? '#4caf50' : '#ff9800'};">${escapeHtml(versionLabel)}</span></div>
-      <div>大小: ${sizeLabel}</div>
-      <div>更新: ${timeLabel}</div>
+    <div class="cache-meta">
+      <div><b>大小</b>${sizeLabel}</div>
+      <div><b>更新</b>${escapeHtml(timeLabel)}</div>
+      <div><b>路径</b>${escapeHtml(project.path)}</div>
     </div>
-    <div style="font-size: 11px; color: #666; margin-top: 4px; font-family: monospace; word-break: break-all;">${escapeHtml(project.path)}</div>
-    <div class="cache-mgr-status" data-project-id="${project.id}" style="margin-top: 6px; font-size: 11px; color: #888;"></div>
-    <div style="display: flex; gap: 6px; margin-top: 8px;">
-      <button class="cache-mgr-open" data-project-id="${project.id}" style="
-        background: #0d84fc; color: #fff; border: none; border-radius: 4px;
-        padding: 4px 10px; cursor: pointer; font-size: 11px;
-      ">打开工程</button>
-      <button class="cache-mgr-validate" data-project-id="${project.id}" data-project-type="${escapeHtml(project.project_type ?? '')}" style="
-        background: #444; color: #fff; border: none; border-radius: 4px;
-        padding: 4px 10px; cursor: pointer; font-size: 11px;
-      ">校验缓存</button>
-      <button class="cache-mgr-diag" data-project-id="${project.id}" style="
-        background: #444; color: #fff; border: none; border-radius: 4px;
-        padding: 4px 10px; cursor: pointer; font-size: 11px;
-      ">复制诊断 JSON</button>
-      <button class="cache-mgr-diag-summary" data-project-id="${project.id}" style="
-        background: #444; color: #fff; border: none; border-radius: 4px;
-        padding: 4px 10px; cursor: pointer; font-size: 11px;
-      ">复制摘要</button>
-      <button class="cache-mgr-delete" data-project-id="${project.id}" data-project-name="${escapeHtml(project.name)}" style="
-        background: #c0392b; color: #fff; border: none; border-radius: 4px;
-        padding: 4px 10px; cursor: pointer; font-size: 11px;
-      ">删除缓存</button>
+    <div class="cache-mgr-status" data-project-id="${project.id}"></div>
+    <div class="cache-actions">
+      <button class="cache-btn primary cache-mgr-open" data-project-id="${project.id}">打开工程</button>
+      <button class="cache-btn cache-mgr-validate" data-project-id="${project.id}" data-project-type="${escapeHtml(project.project_type ?? '')}">校验缓存</button>
+      <button class="cache-btn cache-mgr-diag" data-project-id="${project.id}">复制诊断 JSON</button>
+      <button class="cache-btn cache-mgr-diag-summary" data-project-id="${project.id}">复制摘要</button>
+      <button class="cache-btn danger cache-mgr-delete" data-project-id="${project.id}" data-project-name="${escapeHtml(project.name)}">删除缓存</button>
     </div>
   `;
 
@@ -147,11 +116,13 @@ function createProjectRow(project: CachedProjectSummary): HTMLElement {
 
 /** 加载并渲染项目列表 */
 async function loadProjects(listContainer: HTMLElement): Promise<void> {
-  listContainer.innerHTML = '<div style="color: #aaa; padding: 8px;">加载中...</div>';
+  const countEl = listContainer.closest('.cache-body')?.querySelector<HTMLElement>('#cache-mgr-count') ?? null;
+  listContainer.innerHTML = '<div class="cache-empty">加载中…</div>';
   try {
     const projects = await listCachedProjects();
+    if (countEl) countEl.textContent = `${projects.length} 个项目`;
     if (projects.length === 0) {
-      listContainer.innerHTML = '<div style="color: #aaa; padding: 8px;">暂无缓存项目。打开 .gim 文件后会自动创建缓存。</div>';
+      listContainer.innerHTML = '<div class="cache-empty">暂无缓存项目。打开 .gim 文件后会自动创建缓存。</div>';
       return;
     }
     listContainer.innerHTML = '';
@@ -159,7 +130,8 @@ async function loadProjects(listContainer: HTMLElement): Promise<void> {
       listContainer.appendChild(createProjectRow(p));
     }
   } catch (err) {
-    listContainer.innerHTML = `<div style="color: #f44336; padding: 8px;">加载失败: ${escapeHtml(err instanceof Error ? err.message : String(err))}</div>`;
+    if (countEl) countEl.textContent = '';
+    listContainer.innerHTML = `<div class="cache-empty">加载失败: ${escapeHtml(err instanceof Error ? err.message : String(err))}</div>`;
   }
 }
 

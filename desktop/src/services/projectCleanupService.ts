@@ -147,10 +147,10 @@ export async function cleanupBeforeOpenNewProject(
       if (!isCurrentCleanup()) return false;
       const ctx = runtime.ctx;
       cleanupViewerContext = ctx;
-      // Preserve the user's camera/tree state before disposing the scene.
+      // Preserve tree expansion before disposing the scene (camera is not restored).
       try {
         const { saveViewState } = await import('./viewStateStore.js');
-        saveViewState(state, ctx);
+        saveViewState(state);
       } catch { /* best effort */ }
       sampleBeforeCleanup(ctx);
 

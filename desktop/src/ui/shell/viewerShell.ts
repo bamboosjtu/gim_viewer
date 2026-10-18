@@ -159,7 +159,7 @@ export function setupViewerShell(state: AppState): void {
   });
   document.getElementById('menu-ifc-detail')?.addEventListener('click', () => {
     closeMenu();
-    (document.getElementById('btn-ifc-opening-policy') as HTMLButtonElement | null)?.click();
+    void import('../ifcDetailPanel.js').then(({ openIfcDetailPanel }) => openIfcDetailPanel());
   });
   welcomeOpen?.addEventListener('click', () => btnLoadGim.click());
   continueButton?.addEventListener('click', () => {

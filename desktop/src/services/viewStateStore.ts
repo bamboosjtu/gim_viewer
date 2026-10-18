@@ -1,13 +1,15 @@
-import * as THREE from 'three';
 import type { AppState } from '../app/state.js';
-import type { ViewerContext } from '../viewer/viewerEngine.js';
 
-const STORAGE_PREFIX = 'gim-view-state-v1';
+/**
+ * 工程视图偏好。
+ *
+ * 变电默认打开是整站远景全景（camera.ts 的 overview），因此这里只保存
+ * 层级树展开状态；不再恢复上次相机和选中对象，避免“上次放大到某台设备”
+ * 把默认全景覆盖掉。选中对象仍可按需查看属性。
+ */
+const STORAGE_PREFIX = 'gim-view-state-v2';
 
 interface StoredViewState {
-  position: [number, number, number];
-  target: [number, number, number];
-  selectedPath: string | null;
   expandedPaths: string[];
   updatedAt: number;
 }
@@ -26,21 +28,8 @@ function findExpandedPaths(): string[] {
   return result;
 }
 
-function selectedPath(): string | null {
-  return document.querySelector<HTMLElement>('#cbm-tree-panel .tree-row.selected')?.dataset.nodePath ?? null;
-}
-
-export function saveViewState(state: AppState, ctx?: ViewerContext | null): void {
-  if (!ctx) return;
-  const controls = ctx.world?.camera?.controls;
-  if (!controls?.getPosition || !controls.getTarget) return;
-  const position = controls.getPosition(new THREE.Vector3(), false);
-  const target = controls.getTarget(new THREE.Vector3(), false);
-  if (!position || !target || ![...position.toArray(), ...target.toArray()].every(Number.isFinite)) return;
+export function saveViewState(state: AppState): void {
   const stored: StoredViewState = {
-    position: position.toArray(),
-    target: target.toArray(),
-    selectedPath: selectedPath(),
     expandedPaths: findExpandedPaths(),
     updatedAt: Date.now(),
   };
@@ -52,41 +41,16 @@ function loadStored(state: AppState): StoredViewState | null {
     const raw = localStorage.getItem(storageKey(state));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as StoredViewState;
-    if (!Array.isArray(parsed.position) || !Array.isArray(parsed.target)) return null;
+    if (!Array.isArray(parsed.expandedPaths)) return null;
     return parsed;
   } catch { return null; }
 }
 
-/** Apply the saved camera immediately; never await camera control work here. */
-export function restoreCameraState(ctx: ViewerContext, state: AppState): boolean {
-  const stored = loadStored(state);
-  const controls = ctx.world?.camera?.controls;
-  if (!stored || !controls?.setLookAt
-    || !stored.position.every(Number.isFinite)
-    || !stored.target.every(Number.isFinite)) return false;
-  try {
-    void controls.setLookAt(
-      stored.position[0], stored.position[1], stored.position[2],
-      stored.target[0], stored.target[1], stored.target[2],
-      false,
-    );
-    state.hasFittedCamera = true;
-    return true;
-  } catch (error) {
-    console.warn('[ViewState] camera restore failed:', error);
-    return false;
-  }
-}
-
-/**
- * Tree expansion/selection is best effort and runs after the first usable
- * frame. It must not read FAM/DEV or delay `hideLoading`.
- */
+/** 恢复层级树展开状态；best effort，不阻塞首帧，也不改变相机或选择。 */
 export function restoreTreeState(state: AppState): void {
   const stored = loadStored(state);
   if (!stored) return;
-  void import('../ui/cbmTreeView.js').then(async ({ expandTreeToPaths, selectTreeRowByPath }) => {
+  void import('../ui/cbmTreeView.js').then(async ({ expandTreeToPaths }) => {
     await expandTreeToPaths((stored.expandedPaths ?? []).slice(0, 48));
-    if (stored.selectedPath) selectTreeRowByPath(stored.selectedPath);
   }).catch(() => { /* tree restore is best effort */ });
 }

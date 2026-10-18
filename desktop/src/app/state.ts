@@ -300,6 +300,8 @@ export class AppState {
   initialized = false;
   eventsRegistered = false;
   hasFittedCamera = false;
+  /** 用户是否手动操作过相机；为 true 时不再自动改全景。 */
+  viewerUserInteracted = false;
 
   /**
    * 重置所有 GIM 相关状态（保留引擎初始化状态）。
@@ -353,6 +355,7 @@ export class AppState {
     // 相机 fit 状态一并重置，确保新项目加载后 fitCameraToScene 能重新执行
     // （否则切换项目后中间只剩网格，IFC 几何不显示）
     this.hasFittedCamera = false;
+    this.viewerUserInteracted = false;
     // xml-mod Group 的 dispose 由 projectCleanupService 负责（需要 Viewer scene 引用）
     // 这里只清空索引，避免 stale 引用
     this.loadedXmlModGroups.clear();

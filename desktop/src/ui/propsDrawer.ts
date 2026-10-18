@@ -202,6 +202,31 @@ export function renderInspectorTabs(titleHtml: string, buckets: InspectorBuckets
     ${pane('relations', buckets.relations, selectedTab === 'relations')}
     ${pane('source', buckets.source, selectedTab === 'source')}
   `;
+
+  // “参数”页签提供字段搜索：按行文本过滤，不重新解析源文件。
+  const paramsPane = propsDrawerBody.querySelector<HTMLElement>('[data-itab-pane="params"]');
+  const hasParams = Boolean(paramsPane && paramsPane.querySelector('tr'));
+  if (paramsPane && hasParams) {
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.className = 'props-search';
+    search.placeholder = '搜索字段或值…';
+    search.setAttribute('aria-label', '搜索参数');
+    paramsPane.prepend(search);
+    search.addEventListener('input', () => {
+      const query = search.value.trim().toLowerCase();
+      const sections = Array.from(paramsPane.querySelectorAll<HTMLElement>('.props-section, details.props-advanced'));
+      for (const section of sections) {
+        let visible = false;
+        for (const row of Array.from(section.querySelectorAll<HTMLElement>('tr'))) {
+          const match = !query || (row.textContent ?? '').toLowerCase().includes(query);
+          row.hidden = !match;
+          if (match) visible = true;
+        }
+        section.hidden = Boolean(query) && !visible;
+      }
+    });
+  }
 }
 
 /** Product near representation uses the original IFC identity and source properties. */
@@ -497,7 +522,164 @@ function appendAuxiliarySources(rows: Array<[string, string | FileReferenceValue
 }
 
 /** CbmNode → 概览 + 来源 内容（基础字段，不含 IFC 原生属性） */
-function buildCbmOverviewAndSource(state: AppState, node: CbmNode): { overview: string; source: string } {
+/**
+ * 属性面板设计（research/property-panel-design.md）第一层：关键参数。
+ *
+ * 业务字段散落在 CBM / FAM / DEV 三类来源中，且大量值带 `-`、`/`、
+ * `&其他` 等占位符或重复键前缀。这里统一归一化、按业务优先级取第一个
+ * 有效值，最多展示 8 行；原始键值仍在“参数/来源”页签完整保留。
+ */
+interface InspectorSummary {
+  name: string;
+  identity: string;
+  keyRows: Array<{ label: string; value: string }>;
+  idRows: Array<{ label: string; value: string }>;
+  systemPath: string;
+}
+
+const PLACEHOLDER_VALUES = new Set(['-', '/', '\\', '—', '&其他', '未填写', 'null', 'undefined']);
+
+/** 去掉占位符与值内重复键名（如 `工程中名称=开关柜`）。 */
+function normalizeBusinessValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  let text = String(value).trim();
+  if (!text) return null;
+  const separator = text.indexOf('=');
+  if (separator > 0 && separator <= 24) {
+    const prefix = text.slice(0, separator).trim();
+    if (prefix && !/\s/.test(prefix) && !/[=,]/.test(prefix)) text = text.slice(separator + 1).trim();
+  }
+  if (!text || PLACEHOLDER_VALUES.has(text)) return null;
+  return text;
+}
+
+function pickBusinessValue(
+  sources: ReadonlyArray<Record<string, string>>,
+  candidates: readonly string[],
+): { value: string; key: string } | null {
+  for (const candidate of candidates) {
+    for (const source of sources) {
+      const normalized = normalizeBusinessValue(source[candidate]);
+      if (normalized) return { value: normalized, key: candidate };
+      const upper = candidate.toUpperCase();
+      for (const [key, raw] of Object.entries(source)) {
+        if (key.toUpperCase() !== upper) continue;
+        const match = normalizeBusinessValue(raw);
+        if (match) return { value: match, key };
+      }
+    }
+  }
+  return null;
+}
+
+async function collectPropertySources(state: AppState, node: CbmNode): Promise<Record<string, string>[]> {
+  const cbmKv = node.rawProperties ?? {};
+  const famKv: Record<string, string> = {};
+  const famPaths = new Set<string>();
+  if (node.famPath) famPaths.add(withEntryPrefix('CBM', node.famPath));
+  for (const ref of resolveBaseFamilyReferences(cbmKv)) famPaths.add(withEntryPrefix('CBM', ref.path));
+
+  let devKv: Record<string, string> | null = null;
+  if (node.devPath) {
+    const devKey = withEntryPrefix('DEV', node.devPath);
+    if (state.currentFiles) {
+      const file = getFileByPath(state.currentFiles, devKey);
+      if (file) devKv = parseKeyValue(await file.text());
+    } else {
+      devKv = getCachedByPath(state.cachedDevProperties, devKey) ?? null;
+    }
+    for (const ref of resolveBaseFamilyReferences(devKv ?? {})) famPaths.add(withEntryPrefix('DEV', ref.path));
+  }
+
+  for (const path of famPaths) {
+    let sections = getCachedByPath(state.cachedFamProperties, path);
+    if (!sections && state.currentFiles) {
+      const file = getFileByPath(state.currentFiles, path);
+      if (file) sections = parseFamSectionsWithDiagnostics(await file.text(), path).sections;
+    }
+    if (!sections) continue;
+    for (const section of sections.values()) {
+      for (const [key, value] of section) {
+        if (famKv[key] !== undefined) continue;
+        const normalized = normalizeBusinessValue(value);
+        if (normalized) famKv[key] = normalized;
+      }
+    }
+  }
+  return [famKv, devKv ?? {}, cbmKv];
+}
+
+async function buildInspectorSummary(state: AppState, node: CbmNode): Promise<InspectorSummary> {
+  const sources = await collectPropertySources(state, node);
+  const cbmKv = sources[2];
+
+  const namePick = pickBusinessValue(sources, ['工程中名称', 'PARTNAME', 'SYMBOLNAME', '设备名称', 'NAME']);
+  const name = namePick?.value
+    ?? getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries);
+  const typeLabel = normalizeBusinessValue(node.entityName)
+    ?? normalizeBusinessValue(cbmKv['ENTITYNAME'])
+    ?? '';
+  const voltage = pickBusinessValue(sources, ['电压等级', 'VOLTAGEGRADE', 'VOLTAGE', '额定电压'])?.value ?? '';
+  const systemPath = ['SYSTEMNAME1', 'SYSTEMNAME2', 'SYSTEMNAME3', 'SYSTEMNAME4']
+    .map((key) => normalizeBusinessValue(cbmKv[key]))
+    .filter((value): value is string => Boolean(value))
+    .join(' / ');
+
+  const keyDefinitions: Array<{ label: string; candidates: string[] }> = [
+    { label: '设备名称', candidates: ['工程中名称', 'PARTNAME', 'SYMBOLNAME', '设备名称', 'NAME'] },
+    { label: '电压等级', candidates: ['电压等级', 'VOLTAGEGRADE', 'VOLTAGE'] },
+    { label: '制造商', candidates: ['生产厂家', '厂家', 'MANUFACTURER', '制造厂家'] },
+    { label: '型号', candidates: ['装置型号', '型号', '设备型号', 'MODEL'] },
+    { label: '额定容量', candidates: ['额定容量', 'RATEDCAPACITY'] },
+    { label: '额定电压', candidates: ['额定电压', 'RATEDVOLTAGE'] },
+    { label: '装置名称', candidates: ['装置名称'] },
+    { label: '建设期次', candidates: ['建设期次', 'CONSTRUCTIONPHASE'] },
+  ];
+  const keyRows: Array<{ label: string; value: string }> = [];
+  for (const definition of keyDefinitions) {
+    if (keyRows.length >= 8) break;
+    const picked = pickBusinessValue(sources, definition.candidates);
+    if (picked) keyRows.push({ label: definition.label, value: picked.value });
+  }
+
+  const idDefinitions: Array<{ label: string; candidates: string[] }> = [
+    { label: '调度编码', candidates: ['调度编码', 'SCHEDULCODE', 'DISPATCHCODE'] },
+    { label: '实物 ID', candidates: ['实物ID', 'MATERIALID', 'ASSETID'] },
+    { label: '电网标识编码', candidates: ['电网工程标识系统编码', 'GRIDIDENTIFICATIONSYSTEMCODE'] },
+    { label: '设计模型编码', candidates: ['三维设计模型编码', 'DESIGNMODELCODE'] },
+    { label: '装置编号', candidates: ['装置编号', '设备编号'] },
+  ];
+  const idRows: Array<{ label: string; value: string }> = [];
+  for (const definition of idDefinitions) {
+    const picked = pickBusinessValue(sources, definition.candidates);
+    if (picked) idRows.push({ label: definition.label, value: picked.value });
+  }
+
+  return {
+    name,
+    identity: [typeLabel, voltage, systemPath].filter(Boolean).join(' · '),
+    keyRows,
+    idRows,
+    systemPath,
+  };
+}
+
+function renderInspectorSummary(summary: InspectorSummary): string {
+  const keyHtml = summary.keyRows.length > 0
+    ? `<div class="props-section inspector-key"><div class="props-section-title">关键参数</div><div class="key-grid">${summary.keyRows.map((row) =>
+      `<div class="key-cell"><span class="key-label">${escHtml(row.label)}</span><span class="key-value" title="${escHtml(row.value)}">${escHtml(row.value)}</span></div>`).join('')}</div></div>`
+    : '';
+  const idHtml = summary.idRows.length > 0
+    ? `<details class="props-section inspector-ids"><summary>工程标识（${summary.idRows.length}）</summary><div class="id-grid">${summary.idRows.map((row) =>
+      `<div class="id-row"><span class="id-label">${escHtml(row.label)}</span><code class="id-value" title="${escHtml(row.value)}">${escHtml(row.value)}</code></div>`).join('')}</div></details>`
+    : '';
+  const identity = summary.identity
+    ? `<div class="inspector-identity">${escHtml(summary.identity)}</div>`
+    : '';
+  return `<div class="inspector-summary"><div class="inspector-name" title="${escHtml(summary.name)}">${escHtml(summary.name)}</div>${identity}</div>${keyHtml}${idHtml}`;
+}
+
+function buildCbmOverviewAndSource(state: AppState, node: CbmNode, summaryHtml: string = ''): { overview: string; source: string } {
   const ov: Array<[string, string | FileReferenceValue]> = [
     ['实体类型', node.entityName],
     ['分类名称', node.classifyName],
@@ -524,7 +706,7 @@ function buildCbmOverviewAndSource(state: AppState, node: CbmNode): { overview: 
   appendSourceDesignRows(src, spatial);
   appendAuxiliarySources(src, state, node);
 
-  return { overview: sectionHtml('基本信息', ov), source: sectionHtml('来源引用', src) };
+  return { overview: summaryHtml + sectionHtml('基本信息', ov), source: sectionHtml('来源引用', src) };
 }
 
 /** CbmNode → FAM/DEV 参数内容 */
@@ -869,7 +1051,9 @@ export function showUnlinkedSldProperties(state: AppState, gridId: string, reque
 export async function showNodePropertiesBasic(state: AppState, node: CbmNode, request: SelectionRequest = state.beginSelection({kind:'cbm',key:node.path})): Promise<void> {
   if (!state.isCurrentSelection(request)) return;
   setSelectionStatus(getNodeDisplayName(node,state.ifcGuidToName,state.currentIfcEntries));
-  const { overview, source } = buildCbmOverviewAndSource(state, node);
+  const summaryHtml = renderInspectorSummary(await buildInspectorSummary(state, node));
+  if (!state.isCurrentSelection(request)) return;
+  const { overview, source } = buildCbmOverviewAndSource(state, node, summaryHtml);
   const title = `<div class="props-header">${escHtml(getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries))}</div>`;
   const owner=`${request.session.generation}:${request.id}:${node.path}`;
   // Same-request geometry refresh must not close a tab/details the user has
@@ -962,8 +1146,10 @@ export async function showNodeProperties(ctx: ViewerContext, state: AppState, no
 
   const title = `<div class="props-header">${escHtml(getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries))}</div>`;
   if (!state.isCurrentSelection(request)) return;
+  const summaryHtml = renderInspectorSummary(await buildInspectorSummary(state, node));
+  if (!state.isCurrentSelection(request)) return;
   renderInspectorTabs(title, {
-    overview,
+    overview: summaryHtml + overview,
     params,
     relations,
     source,

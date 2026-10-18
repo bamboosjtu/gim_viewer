@@ -37,6 +37,77 @@ export function fitCameraToScene(
   return true;
 }
 
+/**
+ * 只统计可渲染网格的场景包围盒，并剔除“地形/场地大平面”这类离群网格。
+ *
+ * IFC 里常带一块覆盖整个站址的场地平面；直接并入包围盒会把相机推到
+ * 数百米外，整站变成一个小点。这里用各网格最大边长的中位数过滤掉
+ * 尺度超过中位数 6 倍的网格。
+ */
+function sceneMeshBounds(ctx: ViewerContext): THREE.Box3 {
+  const box = new THREE.Box3();
+  const scene = (ctx.world.scene as any).three as THREE.Object3D | undefined;
+  if (!scene) return box;
+  scene.updateMatrixWorld(true);
+  const boxes: Array<{ box: THREE.Box3; size: number }> = [];
+  scene.traverse((object: THREE.Object3D) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry) return;
+    const geometry = mesh.geometry as THREE.BufferGeometry;
+    if (!geometry.boundingBox) geometry.computeBoundingBox?.();
+    if (!geometry.boundingBox) return;
+    const world = geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
+    if (world.isEmpty()) return;
+    const size = world.getSize(new THREE.Vector3());
+    boxes.push({ box: world, size: Math.max(size.x, size.y, size.z) });
+  });
+  if (boxes.length === 0) return box;
+  const sorted = boxes.map((entry) => entry.size).sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)] || sorted[0] || 0;
+  const kept = median > 0 ? boxes.filter((entry) => entry.size <= median * 6) : boxes;
+  for (const entry of kept.length > 0 ? kept : boxes) box.union(entry.box);
+  return box;
+}
+
+/**
+ * 变电默认视角：整站远景全景。
+ *
+ * 取全部已加载模型（IFC + DEV）的网格包围盒，按最大边长的 2.2 倍距离、
+ * 约 40° 俯角放置相机；不包含网格/坐标轴，避免“全景”被辅助对象撑爆。
+ */
+export function fitCameraToStationOverview(
+  ctx: ViewerContext,
+  state: { hasFittedCamera: boolean },
+  options?: { force?: boolean; distanceFactor?: number },
+): boolean {
+  if (state.hasFittedCamera && !options?.force) {
+    debugLog(DEBUG_IFC_LOAD, '[Camera] station overview skipped: hasFittedCamera=true');
+    return false;
+  }
+  const box = sceneMeshBounds(ctx);
+  if (box.isEmpty()) {
+    debugLog(DEBUG_IFC_LOAD, '[Camera] station overview skipped: no mesh bounds');
+    return false;
+  }
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  if (!(maxDim > 0) || !Number.isFinite(maxDim)) return false;
+  const factor = options?.distanceFactor ?? 2.2;
+  const distance = maxDim * factor;
+  void ctx.world.camera.controls?.setLookAt(
+    center.x + distance * 0.9,
+    center.y + distance * 0.75,
+    center.z + distance * 0.9,
+    center.x,
+    center.y,
+    center.z,
+  );
+  state.hasFittedCamera = true;
+  debugLog(DEBUG_IFC_LOAD, '[Camera] station overview applied', { center, distance, maxDim });
+  return true;
+}
+
 /** 将相机定位到指定包围盒 */
 export async function frameBox(ctx: ViewerContext, box: THREE.Box3, guard?: SelectionCommitGuard): Promise<void> {
   if (box.isEmpty() || ![...box.min.toArray(),...box.max.toArray()].every(Number.isFinite) || (guard && !guard.isCurrent())) return;

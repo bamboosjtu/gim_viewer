@@ -1,4 +1,4 @@
-import { setIfcStatus } from '../ui/shell/statusBar.js';
+﻿import { setIfcStatus } from '../ui/shell/statusBar.js';
 import { planRemainingIfcPreviews, type PreviewQueueStrategy } from './ifcPreviewQueue.js';
 import type { IfcEntry, CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
@@ -965,6 +965,35 @@ export async function loadAllIfcFiles(
     }
   };
 
+  /**
+   * 变电默认视角为整站远景全景：首个 IFC 就绪时先给一个概览，等其余 IFC
+   * 与设备目录补齐后再校正一次；用户一旦手动操作相机就不再自动改。
+   */
+  const trackCameraInteraction = (): void => {
+    const canvas = (ctx.world.renderer as unknown as { domElement?: HTMLCanvasElement })?.domElement;
+    const marked = canvas as (HTMLCanvasElement & { __gimCameraTracking?: boolean }) | undefined;
+    if (!canvas || marked?.__gimCameraTracking) return;
+    if (marked) marked.__gimCameraTracking = true;
+    const mark = (): void => { state.viewerUserInteracted = true; };
+    for (const eventName of ['pointerdown', 'wheel', 'touchstart'] as const) {
+      canvas.addEventListener(eventName, mark, { passive: true });
+    }
+  };
+  const scheduleStationOverviewRefit = (): void => {
+    // 首个 IFC 只覆盖建筑的一部分；全站 IFC/设备是陆续进入场景的。在冷/暖
+    // 加载窗口内补做几次全景（用户一旦操作相机或选择对象就停止），避免默认
+    // 视角停在“只看得到一栋建筑”的近景。
+    for (const delay of [1500, 5000, 12000]) {
+      window.setTimeout(() => {
+        if (!isCurrent() || state.viewerUserInteracted || state.selectionRequest?.target) return;
+        void import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
+          if (!isCurrent() || state.viewerUserInteracted || state.selectionRequest?.target) return;
+          fitCameraToStationOverview(ctx, state, { force: true, distanceFactor: 1.7 });
+        });
+      }, delay);
+    }
+  };
+
   const initializeInteractiveAfterFirstIfc = async (
     entry: IfcEntry,
     loadSource: 'lod-cache' | 'fragments-cache' | 'ifc' | 'unknown',
@@ -976,13 +1005,17 @@ export async function loadAllIfcFiles(
     await renderSubstationCoreUi(state, (text) => showLoadingBeforeInteractive(text), session, perfSession, '变电 navigation/UI（首个 IFC）');
     if (!isCurrent()) return;
 
-    const { fitCameraToScene } = await import('../viewer/camera.js');
+    const { fitCameraToStationOverview } = await import('../viewer/camera.js');
     if (!isCurrent()) return;
-    const { restoreCameraState, restoreTreeState } = await import('./viewStateStore.js');
-    const restoredView = restoreCameraState(ctx, state);
+    // 变电默认打开为整站远景全景，不再恢复上次相机；层级树展开状态仍恢复。
+    const { restoreTreeState } = await import('./viewStateStore.js');
+    restoreTreeState(state);
     if (!isCurrent()) return;
-    if (!state.selectionRequest?.target && !restoredView) fitCameraToScene(ctx, state);
-    if (restoredView) setTimeout(() => { if (isCurrent()) restoreTreeState(state); }, 0);
+    if (!state.selectionRequest?.target) {
+      trackCameraInteraction();
+      fitCameraToStationOverview(ctx, state, { distanceFactor: 1.6 });
+      scheduleStationOverviewRefit();
+    }
     interactiveInitialized = true;
     substationViewerInteractive = true;
     perfMark('首个 IFC 就绪', {

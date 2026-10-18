@@ -129,14 +129,12 @@ async function bootstrapAsync(): Promise<void> {
   // 首屏 UI 就绪，隐藏 loading
   hideLoading();
 
-  // Persist camera/tree state when the window closes; project cleanup uses the
-  // same store when switching projects.
+  // Persist tree expansion when the window closes; camera is intentionally not
+  // restored for substation (default open is the station overview).
   window.addEventListener('beforeunload', () => {
-    void import('../viewer/viewerRuntime.js').then(async ({ isViewerRuntimeCreated, getViewerRuntime }) => {
-      if (!isViewerRuntimeCreated() || state.currentProjectType !== 'substation') return;
-      const runtime = await getViewerRuntime(document.getElementById('viewport') as HTMLElement);
-      const { saveViewState } = await import('../services/viewStateStore.js');
-      saveViewState(state, runtime.ctx);
+    void import('../services/viewStateStore.js').then(({ saveViewState }) => {
+      if (state.currentProjectType !== 'substation') return;
+      saveViewState(state);
     }).catch(() => { /* best effort */ });
   });
 
