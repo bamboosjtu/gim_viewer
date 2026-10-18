@@ -289,19 +289,22 @@ export class DevLodRuntime {
     this.diagnostics.occurrences = seeds.length;
     this.diagnostics.uniqueDevSources = byDev.size;
     this.notifyCoordinateAnchor(); this.update(); // Compilation can begin before any IFC is ready.
-    const catalogEntries=[...byDev];
-    const catalogReads=new Map<string,Promise<DevArtifactRead<DevSourceBounds>>>();
-    let catalogIndex=0;
-    for (const [dev, instances] of catalogEntries) {
-      if (!this.current()) return;
-      if (catalogIndex%16===0) {
-        catalogReads.clear();
-        for (const [path] of catalogEntries.slice(catalogIndex,catalogIndex+16))
-          catalogReads.set(path,this.catalogHint(path));
+    // TYPE=OTHERS 或命名明确的线路金具/小构件在远景不参与范围目录和 L0 编译；
+    // 选中时仍按需加载。避免 B1-4 对 15,526 个 occurrence 逐个解析 PHM。
+    const smallPartName = /(间隔棒|线夹|悬垂|耐张|金具|螺栓|螺母|垫片|接地|电缆|爬梯|栏杆)|^\d+\s*[x×]\s*\d+/;
+    const catalogEntries = [...byDev].filter(([, instances]) =>
+      !instances.every(seed => seed.devType === 'OTHERS' || smallPartName.test(seed.name)));
+    const catalogDevs = new Set(catalogEntries.map(([dev]) => dev));
+    for (const [dev, instances] of byDev) {
+      if (catalogDevs.has(dev)) continue;
+      for (const seed of instances) {
+        const row = this.rows.get(seed.path);
+        if (row && !row.skipTiny) { row.skipTiny = true; this.diagnostics.tinySkipped++; }
       }
-      catalogIndex++;
-      const catalogRead = await catalogReads.get(dev)!;
-      if (!this.current()) return;
+    }
+    const resolveCatalog = async (dev: string): Promise<DevSourceBounds> => {
+      const catalogRead = await this.catalogHint(dev);
+      if (!this.current()) throw new DOMException('DEV directory left the current view', 'AbortError');
       let bounds = catalogRead.status === 'hit' ? catalogRead.value ?? null : null;
       const validBounds = bounds && bounds.devPath === dev && ['conservative', 'unknown', 'empty'].includes(bounds.boundsQuality)
         && (!bounds.sourceBounds || bounds.sourceBounds.length === 6 && bounds.sourceBounds.every(Number.isFinite)
@@ -321,14 +324,16 @@ export class DevLodRuntime {
         if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
         try {bounds = await this.worker.bounds(dev);}
         catch(error){
-          if(!this.current())return;
+          if(!this.current()) throw new DOMException('DEV directory left the current view', 'AbortError');
           bounds={devPath:dev,sourceBounds:null,boundsQuality:'unknown',primitiveCounts:{},unsupportedTypes:[],diagnostic:String(error)};
           this.diagnostics.errors.push(`目录 ${dev}: ${String(error)}`);if(this.diagnostics.errors.length>32)this.diagnostics.errors.shift();
         }
-        if (!this.current()) return;
+        if (!this.current()) throw new DOMException('DEV directory left the current view', 'AbortError');
         if (!bounds.diagnostic && this.session.sourceSha256) this.persistArtifact('catalog', this.catalogKey(dev), bounds);
       }
-      if (!bounds) bounds = {devPath:dev,sourceBounds:null,boundsQuality:'unknown',primitiveCounts:{},unsupportedTypes:[],diagnostic:'missing-catalog-bounds'};
+      return bounds ?? {devPath:dev,sourceBounds:null,boundsQuality:'unknown',primitiveCounts:{},unsupportedTypes:[],diagnostic:'missing-catalog-bounds'};
+    };
+    const applyCatalog = (dev: string, instances: typeof seeds, bounds: DevSourceBounds): void => {
       this.diagnostics.absoluteConeCount += bounds.absoluteConeCount ?? 0;
       const emptySource = !bounds.diagnostic && bounds.boundsQuality === 'empty';
       for (const seed of instances) {
@@ -338,15 +343,11 @@ export class DevLodRuntime {
         const box = bounds.sourceBounds ? boxTuple(bounds.sourceBounds).applyMatrix4(
           (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(createLegacyEquivalentPlacementMatrix(matrix))) : null;
         const row = this.rows.get(seed.path)!;
-        // A validated empty source is terminal. It must not enter the compile
-        // queue or write a second empty template file for the same fact.
         row.entry = { ...entry, templateStatus: emptySource ? 'empty' : row.entry.templateStatus }; row.box = box;
         if (box) {
           const extent = box.max.clone().sub(box.min);
           const maxMeters = Math.max(extent.x, extent.y, extent.z);
           if (Number.isFinite(maxMeters) && maxMeters < FAR_TINY_DEVICE_MAX_METERS) {
-            // 远景只保留有体量的设备；螺栓、线夹、间隔棒等小构件不进入
-            // L0 编译队列。近景细节仍可通过选中/相机请求按需加载。
             row.skipTiny = true;
             this.diagnostics.tinySkipped++;
           }
@@ -357,14 +358,20 @@ export class DevLodRuntime {
         }
       }
       if (emptySource) {
-        // Drop an LOD0 request that was queued before the directory knew this
-        // DEV had no renderable primitive; a running task can finish normally.
         this.wanted.delete(this.key(dev, 0));
         this.worker?.cancelQueued(this.wanted);
       }
       this.diagnostics.directoryCompleted += instances.length;
       this.requestReady();
       if (instances.some(seed => seed.path === this.selected)) void this.select(this.selected).catch(error => console.warn('[DEV selected]', error));
+    };
+    const CATALOG_BATCH = 8;
+    for (let start = 0; start < catalogEntries.length; start += CATALOG_BATCH) {
+      if (!this.current()) return;
+      const batch = catalogEntries.slice(start, start + CATALOG_BATCH);
+      const boundsList = await Promise.all(batch.map(([dev]) => resolveCatalog(dev)));
+      if (!this.current()) return;
+      batch.forEach(([dev, instances], index) => applyCatalog(dev, instances, boundsList[index]));
       this.schedule(); // Incremental directory, without waiting for the last source.
     }
     if (!this.current()) return;
@@ -578,7 +585,7 @@ export class DevLodRuntime {
       // automatic LOD0 in the background; only catalogued boxes decide whether
       // the current view is blocked on this occurrence.
       row.inView = selected || (row.box && metrics ? metrics.visible : false);
-      if (terminal || row.skipTiny) { row.desired = 0; continue; }
+      if (terminal || (row.skipTiny && !selected)) { row.desired = 0; continue; }
       // Unknown ranges compile actual supported geometry automatically. No
       // invented box, false culling or tree-selection prerequisite is used.
       const lod = selected ? 2 : !row.group ? 0 : metrics ? chooseDeviceLod(row.displayed, metrics.visible, metrics.distance, metrics.pixels) : 0;
