@@ -12,7 +12,7 @@ P0 为正确性或核心流程阻断，P1 为主要效率、可维护性或拟�
 | ID | 优先级/状态 | 当前问题 | 行动与完成条件 |
 |---|---|---|---|
 | D-02 | P2 / 待收尾 | IR→DEV 诊断已覆盖 empty-device-xml、assembly-node-without-own-geometry、phm-no-solidmodel、dev-no-solidmodel、parser-unsupported，并透传 cold/warm serialization diagnostics；raw 回退路径与 unknown 仍未统一 | 补 raw 路径映射；验证四样本诊断可检索，不能伪造几何 |
-| D-04 | P1 / 待核验 | 杆塔 HNum/MOD 按需预览有延迟风险 | 拆分 read/parse/render，记录延迟和输入规模；必要时有界缓存或任务隔离；树、地图与快速切换不受阻 |
+| D-04 | P1 / 待优化 | 杆塔 HNum 预览有可感延迟：line03 搜索选中 GB0 杆塔（P620/R314）到“杆塔形状”预览出现 **2.05 s**；尚未拆 read/parse/render，重复打开也未缓存 | 拆分读取/解析/预览构建；按塔型缓存或把预览延迟到“来源”页签激活；树、地图与快速切换不受阻 |
 | D-05 | P2 / 待核验 | 线路 warm 内存驻留归因不完整。line03 实测：主进程 RSS 52 MB、进程树 628 MB、JS heap 47.5 MB；关闭工程后主进程 49 MB、JS 47.1 MB，回收不明显；WebView/Worker/Rust 三段仍未拆开 | 独立进程拆分 JS/WebView/Worker/Rust RSS，切换与关闭后观察回收；据证据决定属性 lazy load |
 | D-12 | P1 / 待核验 | 原生语义发布与 DEV 未完成时正常关闭后的独立暖启动已通过局部验收；WASM 回退及持久化异常的真实桌面闭环未执行 | 在限定预算内核验回退源写入、缺文件、截断索引、写入失败和 A→B；语义 HIT 与部分 DEV 缓存分开，不放宽超时 |
 | D-14 | P2 / 待开发 | 遗留全量 GLB 回退路径仍依赖完整 manifest/version，transient I/O/写盘失败后的整批恢复成本尚未收敛 | 默认设备 LOD 已逐模板原子提交并复用局部缓存；核对遗留回退路径的适用范围及恢复成本，保留 retry，不能把临时失败持久化为 source-invalid |
