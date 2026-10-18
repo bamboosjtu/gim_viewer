@@ -6485,6 +6485,43 @@ pub fn list_cached_projects(
     Ok(result)
 }
 
+/// 更新最近打开时间；只在成功打开后调用，不参与打开关键路径。
+#[tauri::command]
+pub fn touch_gim_project_opened(state: tauri::State<'_, DbState>, project_id: i64) -> Result<(), String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    conn.execute(
+        "UPDATE gim_project SET last_opened_at_ms = ?1 WHERE id = ?2",
+        params![now_ms(), project_id],
+    )
+    .map_err(|e| format!("更新最近打开时间失败: {}", e))?;
+    Ok(())
+}
+/// 授权打开最近工程：路径只能来自数据库中的 gim_project 记录，
+/// 页面不能传入任意路径。用于“最近工程”/“继续上次工程”。
+#[tauri::command]
+pub fn authorize_cached_gim_project(
+    access: tauri::State<'_, crate::AuthorizedFilePaths>,
+    state: tauri::State<'_, DbState>,
+    project_id: i64,
+) -> Result<String, String> {
+    let conn = state
+        .0
+        .lock()
+        .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let path: String = conn
+        .query_row(
+            "SELECT path FROM gim_project WHERE id = ?1",
+            params![project_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("读取最近工程失败: {}", e))?;
+    drop(conn);
+    crate::authorize_selected_path(&access, Path::new(&path), Some("gim"))
+}
+
 /// 删除指定项目的全部缓存（DB 记录 + 磁盘文件）
 ///
 /// 级联删除 13 张索引表 + gim_project 记录，并尝试删除磁盘缓存目录。

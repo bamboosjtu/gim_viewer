@@ -28,6 +28,7 @@ import {
 } from '../gim/modelIdentity.js';
 import { propsDrawerBody, propsDrawer, btnToggleProps, btnCloseProps, btnExportProps } from './dom.js';
 import { buildCsv, downloadTextFile } from '../shared/csv.js';
+import { shouldAutoShowProps } from './shell/viewerShell.js';
 import {
   ensurePropertyReferenceEvents,
   fileReferenceValue,
@@ -49,14 +50,16 @@ function refreshViewportLayout(ctx: ViewerContext) {
 }
 
 /** 打开属性面板（需要 Viewer 刷新视口） */
-export function openPropsDrawer(ctx: ViewerContext): void {
+export function openPropsDrawer(ctx: ViewerContext, force = false): void {
+  if (!force && !shouldAutoShowProps()) return;
   propsDrawer.classList.remove('collapsed');
   btnToggleProps.style.right = '364px';
   refreshViewportLayout(ctx);
 }
 
 /** 打开属性面板（纯 UI，不刷新视口，用于无 Viewer 场景） */
-export function openPropsDrawerUI(): void {
+export function openPropsDrawerUI(force = false): void {
+  if (!force && !shouldAutoShowProps()) return;
   propsDrawer.classList.remove('collapsed');
   btnToggleProps.style.right = '364px';
 }
@@ -77,7 +80,7 @@ export function closePropsDrawer(ctx: ViewerContext): void {
 /** 切换属性面板 */
 export function togglePropsDrawer(ctx: ViewerContext): void {
   if (propsDrawer.classList.contains('collapsed')) {
-    openPropsDrawer(ctx);
+    openPropsDrawer(ctx, true);
   } else {
     closePropsDrawer(ctx);
   }
@@ -103,7 +106,7 @@ export function setupPropsDrawerInteractions(ctx?: ViewerContext): void {
   btnToggleProps.addEventListener('click', () => {
     if (propsDrawerViewerContext) togglePropsDrawer(propsDrawerViewerContext);
     else {
-      if (propsDrawer.classList.contains('collapsed')) openPropsDrawerUI();
+      if (propsDrawer.classList.contains('collapsed')) openPropsDrawerUI(true);
       else closePropsDrawerUI();
     }
   });

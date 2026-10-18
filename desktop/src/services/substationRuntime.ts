@@ -932,6 +932,7 @@ export async function loadAllIfcFiles(
   showLoading('正在加载 IFC 模型...');
   const failed: Array<{ name: string; message: string }> = [];
   let interactiveInitialized = false;
+  substationViewerInteractive = false;
   let interactiveSignaled = false;
   let resolveInteractive!: () => void;
   let rejectInteractive!: (reason?: unknown) => void;
@@ -972,13 +973,17 @@ export async function loadAllIfcFiles(
     await syncCoordinateAnchor('变电 coordinate alignment（首个 IFC）');
     if (!isCurrent()) return;
 
-    await renderSubstationCoreUi(state, (text) => showLoading(text), session, perfSession, '变电 navigation/UI（首个 IFC）');
+    await renderSubstationCoreUi(state, (text) => showLoadingBeforeInteractive(text), session, perfSession, '变电 navigation/UI（首个 IFC）');
     if (!isCurrent()) return;
 
     const { fitCameraToScene } = await import('../viewer/camera.js');
     if (!isCurrent()) return;
-    if (!state.selectionRequest?.target) fitCameraToScene(ctx, state);
+    const { restoreViewState } = await import('./viewStateStore.js');
+    const restoredView = await restoreViewState(ctx, state);
+    if (!isCurrent()) return;
+    if (!state.selectionRequest?.target && !restoredView) fitCameraToScene(ctx, state);
     interactiveInitialized = true;
+    substationViewerInteractive = true;
     perfMark('首个 IFC 就绪', {
       name: entry.name,
       source: loadSource,
@@ -1118,7 +1123,9 @@ export async function loadAllIfcFiles(
       const entry=queue[queueIndex];
       ifcStages.set(entry.path,ifcStageLabels['checking-cache']);
       setIfcStatus(ifcStatus(entry,queueIndex,queue.length));
-        showLoading(interactiveInitialized ? `后台加载 ${entry.name}...` : `正在加载 ${entry.name}...`);
+        // After the first IFC the viewport and bottom status bar are the
+        // source of truth; do not cover them with the center loading pill.
+        if (!interactiveInitialized) showLoading(`正在加载 ${entry.name}...`);
       let readEnded = false;
       let readProfiled = false;
       let lastIfcReadByteLength=0;
@@ -1162,8 +1169,8 @@ export async function loadAllIfcFiles(
           if(previewInputOwnership)void sampleSubstationMemory(state,'IFC fine worker start',perfSession,
             {entryPath:entry.path,rawBytes:lastIfcReadByteLength,previewFineState:state.ifcPreviewFineStates.get(entry.modelId)},ctx);
           const task=loadIfcEntry(ctx,state,entry,readBytes,
-            (p) => { if (isCurrent()) { setIfcStatus(ifcStatus(entry,queueIndex,queue.length,`${Math.round(p * 100)}%`)); showLoading(`${entry.name}: ${Math.round(p * 100)}%`); } },
-            {session,perfSessionId:perfSession.id,onLoadSource:(source)=>{loadSource.value=source;ifcSources.set(entry.path,source);ifcStages.set(entry.path,source==='ifc'?'冷转换完成':source==='lod-cache'?'LOD缓存恢复完成':'完整缓存恢复完成');},
+            (p) => { if (isCurrent()) { setIfcStatus(ifcStatus(entry,queueIndex,queue.length,`${Math.round(p * 100)}%`)); if (!interactiveInitialized) showLoading(`${entry.name}: ${Math.round(p * 100)}%`); } },
+            {session,perfSessionId:perfSession.id,onLoadSource:(source)=>{substationViewerInteractive=true;loadSource.value=source;ifcSources.set(entry.path,source);ifcStages.set(entry.path,source==='ifc'?'冷转换完成':source==='lod-cache'?'LOD缓存恢复完成':'完整缓存恢复完成');},
               onStage:(stage,meta)=>setIfcStage(stage,meta),
               onProfile:(profile)=>{if(isCurrent())perfRecordIfcLoadProfile(profile,perfSession);},
               // A Preview's explicit fine request always restores original
@@ -1372,7 +1379,7 @@ export async function loadAllIfcFiles(
       if (firstLoaded) await initializeInteractiveAfterFirstIfc(firstLoaded, 'unknown');
       if (!isCurrent()) return;
     }
-    await renderSubstationCoreUi(state, (text) => showLoading(text), session, perfSession, '变电 navigation/UI（all IFC）');
+    await renderSubstationCoreUi(state, (text) => showLoadingBeforeInteractive(text), session, perfSession, '变电 navigation/UI（all IFC）');
     if (!isCurrent()) return;
     // Keep the heavy post-IFC lane behind the final name-index/UI pass.  The
     // allIfcReady product moment is already recorded above, but releasing the
@@ -1505,7 +1512,7 @@ async function autoLoadModStlPostIfc(
         (p) => {
           if (!state.isCurrentSession(session)) return;
           if (p.phase === 'compiling') {
-            showLoading(`正在后台编译几何模型 (${p.compiledDevs}/${p.totalDevs})...`);
+            showLoadingBeforeInteractive(`正在后台编译几何模型 (${p.compiledDevs}/${p.totalDevs})...`);
           } else if (p.phase === 'done') {
             perfMark('渐进式 DEV GLB 管线完成', {
               compiledDevs: p.compiledDevs,
@@ -1544,9 +1551,9 @@ async function autoLoadModStlPostIfc(
             (p) => {
               if (!state.isCurrentSession(session)) return;
               if (p.phase === 'loading_mod') {
-                showLoading(`正在定向回退失败 DEV 的 MOD 模型 ${p.loadedMods}/${p.totalMods}...`);
+                showLoadingBeforeInteractive(`正在定向回退失败 DEV 的 MOD 模型 ${p.loadedMods}/${p.totalMods}...`);
               } else if (p.phase === 'loading_stl') {
-                showLoading(`正在定向回退失败 DEV 的 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
+                showLoadingBeforeInteractive(`正在定向回退失败 DEV 的 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
               }
             },
             result.rawFallbackDevs,
@@ -1624,11 +1631,11 @@ async function autoLoadModStlPostIfc(
       (p) => {
         if (!state.isCurrentSession(session)) return;
         if (p.phase === 'discovering') {
-          showLoading(`正在发现几何引用... (${p.currentPath || ''})`);
+          showLoadingBeforeInteractive(`正在发现几何引用... (${p.currentPath || ''})`);
         } else if (p.phase === 'loading_mod') {
-          showLoading(`正在加载 MOD 模型 ${p.processedMods ?? p.loadedMods}/${p.totalMods}...`);
+          showLoadingBeforeInteractive(`正在加载 MOD 模型 ${p.processedMods ?? p.loadedMods}/${p.totalMods}...`);
         } else if (p.phase === 'loading_stl') {
-          showLoading(`正在加载 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
+          showLoadingBeforeInteractive(`正在加载 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
         } else if (p.phase === 'done') {
           // 后台几何加载结束必须隐藏提示，否则 toast 永久停留在最后一批的批前计数
           hideLoading();
@@ -1715,6 +1722,12 @@ async function autoLoadModStlPostIfc(
  * Substation Runtime owns the CBM/IFC/Fragments/DEV/MOD/STL lifecycle.
  * The Shared Core has already inspected the source and activated the session.
  */
+let substationViewerInteractive = false;
+/** Background DEV/cache progress stays in the status bar after first IFC. */
+function showLoadingBeforeInteractive(text: string): void {
+  if (!substationViewerInteractive) showLoading(text);
+}
+
 export async function openSubstationProject(context: GimRuntimeOpenContext): Promise<void> {
   const { state, session, showMessage } = context;
   const perfSession = perfCurrentSession();
@@ -1988,7 +2001,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         });
       } else {
         // WASM 回退路径：逐文件 IPC 字节回传（慢，仅作兜底）
-        showLoading('正在缓存 IFC 文件...');
+        showLoadingBeforeInteractive('正在缓存 IFC 文件...');
         try {
           const { cacheIfcEntries } = await import('./gimExtractedCacheService.js');
           const cacheResult = await cacheIfcEntries(
@@ -2012,7 +2025,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
 
         // v6: 缓存 DEV/PHM/MOD 几何文件到本地磁盘
         if (filesForPersist) {
-          showLoading('正在缓存几何文件（DEV/PHM/MOD）...');
+          showLoadingBeforeInteractive('正在缓存几何文件（DEV/PHM/MOD）...');
           try {
             const { cacheGeometryFiles } = await import('./gimExtractedCacheService.js');
             const geoCacheResult = await cacheGeometryFiles(

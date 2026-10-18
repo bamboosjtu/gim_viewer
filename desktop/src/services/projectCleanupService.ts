@@ -147,6 +147,11 @@ export async function cleanupBeforeOpenNewProject(
       if (!isCurrentCleanup()) return false;
       const ctx = runtime.ctx;
       cleanupViewerContext = ctx;
+      // Preserve the user's camera/tree state before disposing the scene.
+      try {
+        const { saveViewState } = await import('./viewStateStore.js');
+        saveViewState(state, ctx);
+      } catch { /* best effort */ }
       sampleBeforeCleanup(ctx);
 
       // 合并 state.loadedModels 中记录的 runtime ID 与 ctx.fragments.list 的 key

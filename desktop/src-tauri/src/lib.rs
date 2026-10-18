@@ -733,6 +733,8 @@ pub fn run() {
             db::save_line_project_finish,
             db::get_line_attributes,
             db::list_cached_projects,
+            db::authorize_cached_gim_project,
+            db::touch_gim_project_opened,
             db::delete_project_cache,
             db::get_project_diagnostic,
             db::save_geometry_refs,

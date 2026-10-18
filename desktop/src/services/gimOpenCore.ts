@@ -7,7 +7,7 @@ import {
   perfRecordExternalSpan,
   type PerfSession,
 } from '../utils/perfTimings.js';
-import { loadingEl } from '../ui/dom.js';
+import { loadingEl, emptyTipEl } from '../ui/dom.js';
 import { pushBusy, popBusy } from '../ui/shell/statusBar.js';
 
 export interface ExtractedGimSource {
@@ -41,11 +41,15 @@ export interface GimRuntimeOpenContext {
 export function showLoading(text: string): void {
   loadingEl.textContent = text;
   loadingEl.style.display = 'block';
+  // While a project is opening, replace the empty-state copy with the
+  // viewport skeleton; the bottom status bar carries IFC/DEV progress.
+  emptyTipEl?.classList.add('loading');
   pushBusy(text);
 }
 
 export function hideLoading(): void {
   loadingEl.style.display = 'none';
+  emptyTipEl?.classList.remove('loading');
   popBusy('就绪');
 }
 

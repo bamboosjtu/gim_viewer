@@ -15,11 +15,13 @@ import {
   deleteProjectCache,
   getProjectDiagnostic,
   getDbPath,
+  validateGimCache,
   type CachedProjectSummary,
 } from '@desktop/database.js';
 import { summarizeDiagnostic } from '../shared/diagnosticSummary.js';
 import { escapeHtml } from '../shared/html.js';
 import { getDebugConfigSnapshot } from '../config/debug.js';
+import type { AppState } from '../app/state.js';
 
 let modalEl: HTMLElement | null = null;
 
@@ -110,12 +112,21 @@ function createProjectRow(project: CachedProjectSummary): HTMLElement {
     </div>
     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 4px 12px; font-size: 12px; color: #bbb;">
       <div>类型: <span style="color: #0d84fc;">${escapeHtml(typeLabel)}</span></div>
-      <div>版本: <span style="color: ${versionLabel.includes('v5') ? '#4caf50' : '#ff9800'};">${escapeHtml(versionLabel)}</span></div>
+      <div>版本: <span style="color: ${project.parser_version ? '#4caf50' : '#ff9800'};">${escapeHtml(versionLabel)}</span></div>
       <div>大小: ${sizeLabel}</div>
       <div>更新: ${timeLabel}</div>
     </div>
     <div style="font-size: 11px; color: #666; margin-top: 4px; font-family: monospace; word-break: break-all;">${escapeHtml(project.path)}</div>
+    <div class="cache-mgr-status" data-project-id="${project.id}" style="margin-top: 6px; font-size: 11px; color: #888;"></div>
     <div style="display: flex; gap: 6px; margin-top: 8px;">
+      <button class="cache-mgr-open" data-project-id="${project.id}" style="
+        background: #0d84fc; color: #fff; border: none; border-radius: 4px;
+        padding: 4px 10px; cursor: pointer; font-size: 11px;
+      ">打开工程</button>
+      <button class="cache-mgr-validate" data-project-id="${project.id}" data-project-type="${escapeHtml(project.project_type ?? '')}" style="
+        background: #444; color: #fff; border: none; border-radius: 4px;
+        padding: 4px 10px; cursor: pointer; font-size: 11px;
+      ">校验缓存</button>
       <button class="cache-mgr-diag" data-project-id="${project.id}" style="
         background: #444; color: #fff; border: none; border-radius: 4px;
         padding: 4px 10px; cursor: pointer; font-size: 11px;
@@ -153,7 +164,7 @@ async function loadProjects(listContainer: HTMLElement): Promise<void> {
 }
 
 /** 绑定事件（事件委托） */
-function bindEvents(modal: HTMLElement, onRefresh: () => void): void {
+function bindEvents(modal: HTMLElement, onRefresh: () => void, state?: AppState): void {
   // 关闭按钮
   const closeBtn = modal.querySelector('#cache-mgr-close') as HTMLButtonElement;
   const doneBtn = modal.querySelector('#cache-mgr-done') as HTMLButtonElement;
@@ -178,6 +189,42 @@ function bindEvents(modal: HTMLElement, onRefresh: () => void): void {
   const listEl = modal.querySelector('#cache-mgr-list') as HTMLElement;
   listEl.addEventListener('click', async (e) => {
     const target = e.target as HTMLElement;
+
+    if (target.classList.contains('cache-mgr-open')) {
+      if (!state) return;
+      const projectId = Number(target.dataset.projectId);
+      target.textContent = '打开中...';
+      if (modalEl) { document.body.removeChild(modalEl); modalEl = null; }
+      try {
+        const { openGimProjectFromId } = await import('../services/openGimService.js');
+        await openGimProjectFromId(state, () => {}, projectId);
+      } catch (err) {
+        console.error('[缓存管理] 打开工程失败:', err);
+        target.textContent = '打开失败';
+        setTimeout(() => { target.textContent = '打开工程'; }, 2000);
+      }
+      return;
+    }
+
+    if (target.classList.contains('cache-mgr-validate')) {
+      const projectId = Number(target.dataset.projectId);
+      const domain = target.dataset.projectType === 'transmission_line' ? 'transmission_line' : 'substation';
+      const statusEl = modal.querySelector<HTMLElement>(`.cache-mgr-status[data-project-id="${projectId}"]`);
+      target.textContent = '校验中...';
+      try {
+        const result = await validateGimCache(projectId, domain);
+        if (statusEl) {
+          statusEl.textContent = result.valid
+            ? `缓存有效 · IFC ${result.cached_ifc_count}/${result.ifc_entry_count}`
+            : `缓存需重建 · ${result.cache_miss_reason ?? '未知原因'}`;
+          statusEl.style.color = result.valid ? '#4caf50' : '#ff9800';
+        }
+      } catch (err) {
+        if (statusEl) statusEl.textContent = `校验失败: ${err instanceof Error ? err.message : String(err)}`;
+      }
+      target.textContent = '校验缓存';
+      return;
+    }
 
     // 复制诊断 JSON
     if (target.classList.contains('cache-mgr-diag')) {
@@ -246,7 +293,7 @@ function bindEvents(modal: HTMLElement, onRefresh: () => void): void {
  *
  * 仅在 Tauri 模式下可用。如果已打开则不重复创建。
  */
-export async function openCacheManager(): Promise<void> {
+export async function openCacheManager(state?: AppState): Promise<void> {
   if (modalEl) return; // 已打开
 
   modalEl = createModal();
@@ -267,5 +314,5 @@ export async function openCacheManager(): Promise<void> {
   await refresh();
 
   // 绑定事件
-  bindEvents(modalEl, refresh);
+  bindEvents(modalEl, refresh, state);
 }

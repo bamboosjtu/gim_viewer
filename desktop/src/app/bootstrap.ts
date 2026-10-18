@@ -11,6 +11,7 @@ import { registerPropertyReferenceHandler } from '../ui/propertyDictionary.js';
 import { setupPropsDrawerInteractions } from '../ui/propsDrawer.js';
 import { showLoading, hideLoading } from '../services/gimOpenCore.js';
 import { setupIfcPreviewModeControl } from '../ui/ifcPreviewModeControl.js';
+import { setupViewerShell } from '../ui/shell/viewerShell.js';
 
 /** 异步启动逻辑（轻量，不加载 3D 引擎） */
 async function bootstrapAsync(): Promise<void> {
@@ -55,6 +56,7 @@ async function bootstrapAsync(): Promise<void> {
   // 属性检查器在变电工程会由 Viewer 装配；线路工程不创建 Viewer，
   // 因此必须在轻量启动阶段先安装页签/来源按钮的纯 DOM 事件委托。
   setupPropsDrawerInteractions();
+  setupViewerShell(state);
 
   // 属性面板中的来源按钮统一走工程路由：正文不暴露 GUID 文件名，
   // 点击后再定位到线路业务树或变电 CBM/IFC 节点。
@@ -116,7 +118,7 @@ async function bootstrapAsync(): Promise<void> {
     }
     try {
       const { openCacheManager } = await import('../ui/cacheManagerView.js');
-      await openCacheManager();
+      await openCacheManager(state);
     } catch (err) {
       console.error('[缓存管理] 打开失败:', err);
       showLoading(`打开缓存管理失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -126,6 +128,17 @@ async function bootstrapAsync(): Promise<void> {
 
   // 首屏 UI 就绪，隐藏 loading
   hideLoading();
+
+  // Persist camera/tree state when the window closes; project cleanup uses the
+  // same store when switching projects.
+  window.addEventListener('beforeunload', () => {
+    void import('../viewer/viewerRuntime.js').then(async ({ isViewerRuntimeCreated, getViewerRuntime }) => {
+      if (!isViewerRuntimeCreated() || state.currentProjectType !== 'substation') return;
+      const runtime = await getViewerRuntime(document.getElementById('viewport') as HTMLElement);
+      const { saveViewState } = await import('../services/viewStateStore.js');
+      saveViewState(state, runtime.ctx);
+    }).catch(() => { /* best effort */ });
+  });
 
   // Tauri 模式：显示窗口（配置了 visible:false，消除白屏）
   if (isTauri()) {

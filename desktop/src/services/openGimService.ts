@@ -318,8 +318,9 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
 async function openTauriGim(
   state: AppState,
   showMessage: (text: string) => void,
+  requestedPath?: string,
 ): Promise<void> {
-  const filePath = getDevPerformanceFilePath() ?? await openGimFilePath();
+  const filePath = requestedPath ?? getDevPerformanceFilePath() ?? await openGimFilePath();
   if (!filePath) return;
 
   state.invalidatePendingLoads();
@@ -372,7 +373,7 @@ async function openTauriGim(
       sourceWithIdentity.projectId,
       info.name,
     );
-    await openInspectedSource({
+    const opened = openInspectedSource({
       state,
       showMessage,
       source: sourceWithIdentity,
@@ -383,6 +384,13 @@ async function openTauriGim(
       requestGeneration,
       nativeFilePath: filePath,
     });
+    void opened.then(() => {
+      if (state.projectGeneration !== requestGeneration) return;
+      void import('@desktop/database.js')
+        .then(({ touchGimProjectOpened }) => touchGimProjectOpened(record.id))
+        .catch(() => { /* recency update is best effort */ });
+    });
+    await opened;
   } catch (error) {
     console.error(error);
     showLoading(`GIM 解析失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -465,4 +473,16 @@ export async function openGimWithDialog(
   } else {
     await openBrowserGim(state, showMessage);
   }
+}
+
+/** 打开数据库已知的最近工程；路径由 Rust 从 gim_project 读取并授权。 */
+export async function openGimProjectFromId(
+  state: AppState,
+  showMessage: (text: string) => void,
+  projectId: number,
+): Promise<void> {
+  if (!isTauri()) return;
+  const { authorizeCachedGimProject } = await import('@desktop/database.js');
+  const path = await authorizeCachedGimProject(projectId);
+  await openTauriGim(state, showMessage, path);
 }

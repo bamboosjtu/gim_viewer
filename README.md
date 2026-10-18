@@ -9,7 +9,7 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 
 | 平台          | 当前版本       | 下载                                                         | 主要功能                                                 |
 | ------------- | -------------- | ------------------------------------------------------------ | -------------------------------------------------------- |
-| Windows x64   | v0.0.3 Preview | [下载 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/download/desktop-v0.0.3-preview/GIM-Reader_0.0.3_x64_portable.zip) | 变电站三维模型、输电线路地图、工程层级与属性浏览         |
+| Windows x64   | v0.0.6 Preview | [下载 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站三维模型、输电线路地图、最近工程、工程层级与属性浏览 |
 | Android ARM64 | v0.1.16 Preview | [下载 APK](https://github.com/bamboosjtu/gim_viewer/releases/download/android-v0.1.6-preview/gim-viewer-android-ae7df06cc83ebde26fc2cb17faf003d7b2fd8a2f.zip) | 输电线路地图、工程树、杆塔与导线属性、来源查看和现场定位 |
 
 历史版本及发布说明：[GitHub Releases](https://github.com/bamboosjtu/gim_viewer/releases)
@@ -31,6 +31,9 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 ### 使用说明
 
 - **本地数据**：GIM 文件解析及工程缓存在本地完成，无须登录账号。
+- **最近工程**：首次启动默认恢复最近一次成功登记缓存的工程，可在“更多”菜单关闭；最近工程路径只能来自本地数据库记录。
+- **浏览器布局**：属性抽屉默认折叠，选中对象时按设置展开；“附加 IFC / 缓存 / IFC 细节”收在“更多”菜单。首个 IFC 可用后，加载进度保留在底部状态栏。
+- **缓存诊断**：缓存管理提供逐工程校验、打开与删除；校验只报告有效或 miss reason，不会隐式重建。
 - **在线底图**：默认使用 OpenStreetMap；天地图密钥可在应用设置中自行配置。在线地图需要网络连接。
 - **工程兼容性**：不同设计软件导出的 GIM 文件可能存在格式差异，当前版本仍在持续完善兼容性。
 - **预览版本**：建议保留原始 GIM 文件，不要将应用内部缓存作为唯一的数据备份。

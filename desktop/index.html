@@ -67,9 +67,31 @@
       .top-action:hover { background: var(--surface-3); color: var(--text-1); }
       .top-action.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
       .top-action.primary:hover { background: #2f7de6; }
+      .top-action.top-overflow { display: none; }
+      .more-trigger { min-width: 66px; justify-content: center; }
+      #more-menu-anchor { position: relative; }
+      #more-menu {
+        position: absolute; right: 0; top: 38px; z-index: 80; min-width: 250px;
+        padding: 6px; border: 1px solid #2b3b4c; border-radius: 8px;
+        background: #101923; box-shadow: 0 18px 46px rgba(0,0,0,.45);
+      }
+      #more-menu[hidden] { display: none; }
+      #more-menu button {
+        display: block; width: 100%; text-align: left; border: 0; border-radius: 5px;
+        background: transparent; color: var(--text-2); padding: 8px 10px; font-size: 12px; cursor: pointer;
+      }
+      #more-menu button:hover { background: #1b2a3a; color: var(--text-1); }
+      #more-menu button[hidden] { display: none; }
+      .menu-sep { height: 1px; margin: 5px 4px; background: #263646; }
+      .menu-check { display: flex; align-items: center; gap: 8px; padding: 7px 10px; color: var(--text-2); font-size: 12px; cursor: pointer; }
+      .menu-check input { accent-color: var(--primary); }
+      .menu-recent-title { padding: 7px 10px 4px; color: var(--text-3); font-size: 10px; letter-spacing: .5px; text-transform: uppercase; }
+      .menu-recent { max-height: 220px; overflow: auto; }
+      .menu-recent button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .menu-recent .menu-recent-empty { padding: 8px 10px; color: var(--text-3); font-size: 11px; }
 
       /* ── 主区：rail + navigator + viewport + inspector ── */
-      #main { flex: 1; display: grid; grid-template-columns: 52px 304px 1fr 352px; min-height: 0; }
+      #main { flex: 1; display: grid; grid-template-columns: 52px 304px minmax(0, 1fr) auto; min-height: 0; }
 
       /* 工作区导航轨 */
       #workspace-rail {
@@ -205,11 +227,39 @@
       }
       #empty-tip {
         position: absolute; inset: 0; display: flex; flex-direction: column;
-        align-items: center; justify-content: center; color: var(--text-3); pointer-events: none;
-        background: var(--shell); z-index: 4;
+        align-items: center; justify-content: center; color: var(--text-3);
+        background:
+          radial-gradient(900px 520px at 50% 38%, rgba(58,141,255,.08), transparent 65%),
+          var(--shell);
+        z-index: 4; overflow: hidden;
       }
-      #empty-tip h2 { margin: 0 0 8px; font-weight: 500; font-size: 16px; color: var(--text-2); }
+      #empty-tip .empty-skeleton {
+        position: absolute; inset: 8% 6%; opacity: .32; pointer-events: none;
+        background-image:
+          linear-gradient(rgba(130,160,190,.10) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(130,160,190,.10) 1px, transparent 1px);
+        background-size: 64px 64px;
+        transform: perspective(900px) rotateX(62deg) translateY(24%);
+        transform-origin: center bottom;
+        mask-image: linear-gradient(to bottom, transparent, #000 35%, #000 75%, transparent);
+      }
+      #empty-tip .empty-content { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; max-width: 560px; padding: 20px; }
+      #empty-tip h2 { margin: 0 0 8px; font-weight: 500; font-size: 18px; color: var(--text-2); }
       #empty-tip p { margin: 0; font-size: 13px; }
+      .welcome-actions { display: flex; gap: 8px; margin-top: 16px; pointer-events: auto; }
+      .welcome-actions .btn-secondary { margin-top: 0; }
+      .recent-projects { width: 100%; margin-top: 22px; display: flex; flex-direction: column; gap: 6px; pointer-events: auto; }
+      .recent-project {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        border: 1px solid rgba(45,62,80,.9); border-radius: 7px; background: rgba(18,28,39,.78);
+        padding: 9px 12px; color: var(--text-2); cursor: pointer; text-align: left; font-size: 12px;
+      }
+      .recent-project:hover { border-color: rgba(58,141,255,.55); background: rgba(26,42,60,.92); }
+      .recent-project .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .recent-project .meta { color: var(--text-3); font-size: 11px; flex-shrink: 0; }
+      .recent-empty { color: var(--text-3); font-size: 11px; text-align: center; padding: 4px 0; }
+      #empty-tip.loading .empty-content { opacity: 0; pointer-events: none; }
+      #empty-tip.loading .empty-skeleton { opacity: .55; }
 
       /* ── 右侧对象检查器（352px）── */
       #props-drawer {
@@ -272,7 +322,7 @@
 
       /* 属性面板切换按钮（浮动在视口右侧） */
       #btn-toggle-props {
-        position: fixed; top: 12px; right: 364px; z-index: 9999;
+        position: fixed; top: 12px; right: 12px; z-index: 9999;
         width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border);
         background: rgba(13,19,28,.9); color: var(--text-2); font-size: 15px;
         cursor: pointer; display: flex; align-items: center; justify-content: center;
@@ -332,13 +382,27 @@
         </div>
         <span id="project-type-badge" class="badge hidden"></span>
         <div class="top-spacer"></div>
-        <button id="btn-ifc-opening-policy" class="top-action" aria-pressed="true" title="远景省略关系开洞与螺栓；自动模式仅恢复相机附近30m范围内的中型开洞和螺栓。">IFC 细节：自动（近景30m）</button>
+        <button id="btn-ifc-opening-policy" class="top-action top-overflow" aria-pressed="true" title="远景省略关系开洞与螺栓；自动模式仅恢复相机附近30m范围内的中型开洞和螺栓。">IFC 细节：自动（近景30m）</button>
         <button id="btn-load-gim" class="top-action primary">打开 GIM</button>
         <input id="gim-file-input" class="hidden-input" type="file" accept=".gim" />
-        <button id="btn-load-local" class="top-action">附加 IFC</button>
+        <button id="btn-load-local" class="top-action top-overflow">附加 IFC</button>
         <input id="file-input" class="hidden-input" type="file" accept=".ifc" multiple />
         <button id="btn-clear" class="top-action">关闭工程</button>
-        <button id="btn-cache-manager" class="top-action" title="缓存管理">缓存</button>
+        <button id="btn-cache-manager" class="top-action top-overflow" title="缓存管理">缓存</button>
+        <div id="more-menu-anchor">
+          <button id="btn-more" class="top-action more-trigger" aria-expanded="false" aria-controls="more-menu">更多 ▾</button>
+          <div id="more-menu" role="menu" hidden>
+            <button id="menu-attach-ifc" role="menuitem">附加 IFC…</button>
+            <button id="menu-cache" role="menuitem">缓存管理…</button>
+            <button id="menu-ifc-detail" role="menuitem">IFC 细节设置…</button>
+            <div class="menu-sep" role="separator"></div>
+            <label class="menu-check"><input id="menu-auto-open-last" type="checkbox" /> 启动时恢复上次工程</label>
+            <label class="menu-check"><input id="menu-show-props" type="checkbox" /> 选择对象时展开属性</label>
+            <div class="menu-sep" role="separator"></div>
+            <div class="menu-recent-title">最近工程</div>
+            <div id="menu-recent-projects" class="menu-recent"></div>
+          </div>
+        </div>
       </header>
 
       <!-- 主区 -->
@@ -381,8 +445,16 @@
           <div id="viewport">
             <div id="loading">准备中...</div>
             <div id="empty-tip">
-              <h2>尚未打开工程</h2>
-              <p>点击顶部「打开 GIM」加载工程文件，支持变电与线路两类工程</p>
+              <div class="empty-skeleton" aria-hidden="true"></div>
+              <div class="empty-content">
+                <h2>尚未打开工程</h2>
+                <p>打开 GIM 开始浏览；支持变电与线路两类工程</p>
+                <div class="welcome-actions">
+                  <button id="btn-welcome-open" class="btn">打开 GIM</button>
+                  <button id="btn-welcome-continue" class="btn btn-secondary">继续上次工程</button>
+                </div>
+                <div id="recent-projects" class="recent-projects"></div>
+              </div>
             </div>
             <div id="sld-overlay" class="sld-overlay" aria-hidden="true">
               <div class="sld-overlay-header">
@@ -398,7 +470,7 @@
         </div>
 
         <!-- 右侧对象检查器 -->
-        <aside id="props-drawer">
+        <aside id="props-drawer" class="collapsed">
           <div id="props-drawer-header">
             <h3>属性</h3>
             <div class="header-actions">

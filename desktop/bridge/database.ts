@@ -1347,6 +1347,16 @@ export async function listCachedProjects(): Promise<CachedProjectSummary[]> {
   return invokeTimed<CachedProjectSummary[]>('list_cached_projects');
 }
 
+/** 授权打开 DB 中已有的最近工程，路径不接受页面输入。 */
+export async function authorizeCachedGimProject(projectId: number): Promise<string> {
+  return invokeTimed<string>('authorize_cached_gim_project', { projectId });
+}
+
+/** 打开成功后异步更新最近打开时间。 */
+export async function touchGimProjectOpened(projectId: number): Promise<void> {
+  await invokeTimed<void>('touch_gim_project_opened', { projectId });
+}
+
 /**
  * 删除指定项目的全部缓存（DB 记录 + 磁盘文件）。
  * 返回操作摘要文本。

@@ -70,19 +70,26 @@ export function renderCbmTreeUI(
 
   let expanded = false;
   let childrenRendered = false;
+  const setExpanded = (value: boolean): void => {
+    if (node.children.length === 0) return;
+    expanded = value;
+    toggle.classList.toggle('expanded', expanded);
+    childrenEl.classList.toggle('expanded', expanded);
+    if (expanded && !childrenRendered) {
+      for (const child of node.children) renderCbmTreeUI(state, child, childrenEl, onNodeClick);
+      childrenRendered = true;
+    }
+  };
+  toggle.addEventListener('click', (event) => {
+    // Expanding the tree must not select/load the node.
+    event.stopPropagation();
+    setExpanded(!expanded);
+  });
   row.addEventListener('click', () => {
     document.querySelectorAll('.tree-row.selected').forEach(r => r.classList.remove('selected'));
     row.classList.add('selected');
     onNodeClick(node);
-    if (node.children.length > 0) {
-      expanded = !expanded;
-      toggle.classList.toggle('expanded', expanded);
-      childrenEl.classList.toggle('expanded', expanded);
-      if (expanded && !childrenRendered) {
-        for (const child of node.children) renderCbmTreeUI(state, child, childrenEl, onNodeClick);
-        childrenRendered = true;
-      }
-    }
+    if (node.children.length > 0) setExpanded(!expanded);
   });
   row.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -408,4 +415,22 @@ export function handleSubstationPropertyReference(
   }
   showMessage('该来源文件未映射到可见变电节点');
   return true;
+}
+
+/** Public wrapper for view-state restore. */
+export function selectTreeRowByPath(path: string): void {
+  selectCbmTreeRow(path);
+}
+
+/** Expand every saved ancestor row; unrendered paths are skipped. */
+export async function expandTreeToPaths(paths: readonly string[]): Promise<void> {
+  for (const path of [...paths].sort((a, b) => a.split('/').length - b.split('/').length)) {
+    const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(path) : path.replace(/"/g, '\\"');
+    const row = document.querySelector<HTMLElement>(`#cbm-tree-panel .tree-row[data-node-path="${escaped}"]`);
+    if (!row) continue;
+    const toggle = row.querySelector<HTMLElement>('.tree-toggle');
+    if (!toggle || toggle.classList.contains('leaf') || toggle.classList.contains('expanded')) continue;
+    toggle.click();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
 }

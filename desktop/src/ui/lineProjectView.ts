@@ -987,6 +987,7 @@ let currentLineInspectorSourcePaths = new Set<string>();
 /** 销毁线路地图及 MapLibre 资源。 */
 let mapCreationController: AbortController | null = null;
 function setStationCanvasVisible(visible: boolean): void {
+  if (!container) return;
   for (const canvas of container.querySelectorAll<HTMLCanvasElement>('canvas')) {
     if (canvas.dataset.gimRenderer === 'three' || canvas.dataset.engine?.startsWith('three.js')) {
       canvas.style.display = visible ? 'block' : 'none';
@@ -994,6 +995,7 @@ function setStationCanvasVisible(visible: boolean): void {
   }
 }
 function removeStaleLineDom(): void {
+  if (!container) return;
   // A hidden/stale Three canvas must not bleed its grid through unloaded raster tiles.
   setStationCanvasVisible(false);
   // MapLibre may mount before an aborted async probe observes its generation.
