@@ -24,6 +24,7 @@ export interface LineModRuntimeEntry {
 
 const IDENTITY_SOURCE = 'memory';
 const sourceCache = new WeakMap<AppState, Map<string, LineModRuntimeEntry>>();
+const resolvedPathCache = new WeakMap<AppState, Map<string, string[]>>();
 
 function cacheFor(state: AppState): Map<string, LineModRuntimeEntry> {
   let cache = sourceCache.get(state);
@@ -180,7 +181,14 @@ export async function resolveLineModPaths(state: AppState, node: GimGraphNode): 
 
 /** 加载并解析节点可达的所有线路 MOD，结果按引用顺序去重。 */
 export async function loadLineModSourcesForNode(state: AppState, node: GimGraphNode): Promise<LineModRuntimeEntry[]> {
-  const paths = await resolveLineModPaths(state, node);
+  const key = `${state.currentSourceSha256 || (state.currentProjectId != null ? `project:${state.currentProjectId}` : IDENTITY_SOURCE)}:${node.path}`;
+  let resolveCache = resolvedPathCache.get(state);
+  if (!resolveCache) { resolveCache = new Map(); resolvedPathCache.set(state, resolveCache); }
+  let paths = resolveCache.get(key);
+  if (!paths) {
+    paths = await resolveLineModPaths(state, node);
+    resolveCache.set(key, paths);
+  }
   const entries: LineModRuntimeEntry[] = [];
   for (const path of paths) entries.push(await loadSource(state, path));
   return entries;
@@ -189,4 +197,5 @@ export async function loadLineModSourcesForNode(state: AppState, node: GimGraphN
 /** 工程切换时由 UI/清理流程调用；WeakMap 会自动释放 state，但显式清空便于测试。 */
 export function clearLineModRuntimeCache(state: AppState): void {
   sourceCache.get(state)?.clear();
+  resolvedPathCache.get(state)?.clear();
 }
