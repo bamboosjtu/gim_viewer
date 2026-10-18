@@ -30,6 +30,11 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // selectionInteraction 的 5 s 超时在默认高并发下会因 CPU 抢占偶发超时；
+    // 限制并发 fork 数，保持断言与超时不变（不是用更长 timeout 掩盖）。
+    poolOptions: {
+      forks: { minForks: 1, maxForks: 4 },
+    },
     include: ['src/**/__tests__/**/*.test.ts', 'bridge/__tests__/**/*.test.ts'],
     // P2 评审 #7 测试分层：真实样本回归拆至 vitest.sample.config.ts（npm run test:sample），
     // 默认套件保持快速反馈
