@@ -58,11 +58,19 @@ export interface PerfInvokeCommandStats {
   failures: number;
 }
 
+export interface PerfLongTaskSample {
+  atMs: number;
+  durationMs: number;
+  blockingMs: number;
+  /** Span that was active when the long task was reported, if any. */
+  phase?: string;
+}
 export interface PerfLongTaskStats {
   count: number;
   /** blocking time = max(0, duration - 50ms)，符合 Long Tasks API 口径。 */
   totalBlockingTimeMs: number;
   maxMs: number;
+  samples: PerfLongTaskSample[];
 }
 
 /**
@@ -84,6 +92,9 @@ export type PerfProductMoment =
   | 'spatialSemanticStart'
   | 'spatialSemanticReady'
   | 'firstUsableGeometryReady'
+  | 'devCurrentViewReady'
+  | 'devBaseRepresentationsSettled'
+  | 'devAllStationReady'
   | 'devGeometryReady'
   | 'selectedFineReady'
   | 'coldSelectedDeviceGeometryReady'
@@ -240,7 +251,18 @@ export interface PerfSubstationFinalizeProfile {
   uncontainedIfcObjects: number;
 }
 
+export interface PerfIfcLoadProfile {
+  path: string;
+  bytes: number;
+  source: 'ifc' | 'lod-cache' | 'fragments-cache';
+  cacheHit: boolean;
+  cacheReadMs: number;
+  loadMs: number;
+  cacheWriteMs: number | null;
+  cacheWriteOk: boolean | null;
+}
 export interface PerfSubstationStats {
+  ifcLoads: PerfIfcLoadProfile[];
   ifcReads: PerfSubstationIfcReadProfile[];
   ifcParses: PerfSubstationIfcProfile[];
   finalize: PerfSubstationFinalizeProfile[];
@@ -320,11 +342,13 @@ let sessionSequence = 0;
 let currentSession: PerfSession = { id: 0 };
 let spans: PerfSpan[] = [];
 const invokeStats = new Map<string, InvokeAccumulator>();
-let longTaskStats: PerfLongTaskStats = { count: 0, totalBlockingTimeMs: 0, maxMs: 0 };
+let longTaskStats: PerfLongTaskStats = { count: 0, totalBlockingTimeMs: 0, maxMs: 0, samples: [] };
+let activeSpanLabels: string[] = [];
 const productMoments = new Map<PerfProductMoment, PerfProductMomentInfo>();
 let memorySamples: PerfMemorySample[] = [];
 let runtimeResourceSnapshots: PerfRuntimeResourceSnapshot[] = [];
 let devGeometryProfiles: Array<Record<string, unknown>> = [];
+let substationIfcLoads: PerfIfcLoadProfile[] = [];
 let substationIfcReads: PerfSubstationIfcReadProfile[] = [];
 let substationIfcParses: PerfSubstationIfcProfile[] = [];
 let substationFinalizes: PerfSubstationFinalizeProfile[] = [];
@@ -454,7 +478,8 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
     maxMs: 0,
     durations: [],
   };
-  longTaskStats = { count: 0, totalBlockingTimeMs: 0, maxMs: 0 };
+  longTaskStats = { count: 0, totalBlockingTimeMs: 0, maxMs: 0, samples: [] };
+  activeSpanLabels = [];
   productMoments.clear();
   if (import.meta.env?.DEV) {
     (globalThis as { __GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__?: Record<string, unknown> })
@@ -464,6 +489,7 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
   runtimeResourceSnapshots = [];
   devGeometryProfiles = [];
   substationIfcReads = [];
+  substationIfcLoads = [];
   substationIfcParses = [];
   substationFinalizes = [];
   fragmentsCacheStats = createFragmentsCacheAccumulator();
@@ -488,7 +514,10 @@ export function perfBegin(
   session: PerfSession = currentSession,
 ): (labelSuffix?: string, endMeta?: Record<string, unknown>) => void {
   const t0 = performance.now();
+  activeSpanLabels.push(label);
   return (labelSuffix?: string, endMeta?: Record<string, unknown>) => {
+    const activeIndex = activeSpanLabels.lastIndexOf(label);
+    if (activeIndex >= 0) activeSpanLabels.splice(activeIndex, 1);
     if (!perfIsCurrentSession(session)) return;
     appendSpan({
       label: labelSuffix ? `${label}${labelSuffix}` : label,
@@ -577,6 +606,9 @@ export function perfProductMomentSnapshot(): Record<PerfProductMoment, PerfProdu
     spatialSemanticStart: productMoments.get('spatialSemanticStart') ?? null,
     spatialSemanticReady: productMoments.get('spatialSemanticReady') ?? null,
     firstUsableGeometryReady: productMoments.get('firstUsableGeometryReady') ?? null,
+    devCurrentViewReady: productMoments.get('devCurrentViewReady') ?? null,
+    devBaseRepresentationsSettled: productMoments.get('devBaseRepresentationsSettled') ?? null,
+    devAllStationReady: productMoments.get('devAllStationReady') ?? null,
     devGeometryReady: productMoments.get('devGeometryReady') ?? null,
     selectedFineReady: productMoments.get('selectedFineReady') ?? null,
     coldSelectedDeviceGeometryReady: productMoments.get('coldSelectedDeviceGeometryReady') ?? null,
@@ -699,6 +731,15 @@ export function perfDevGeometrySnapshot(): Array<Record<string, unknown>> {
 }
 
 /** 记录变电 IFC 读取 profile，并单列 read/decode 阶段。 */
+export function perfRecordIfcLoadProfile(
+  profile: PerfIfcLoadProfile,
+  session: PerfSession = currentSession,
+): void {
+  if (!perfIsCurrentSession(session)) return;
+  substationIfcLoads.push({ ...profile });
+  perfRecordExternalSpan(`变电 IFC file profile · ${profile.path}`, profile.loadMs, { ...profile }, session);
+}
+
 export function perfRecordSubstationIfcRead(
   profile: PerfSubstationIfcReadProfile,
   session: PerfSession = currentSession,
@@ -765,6 +806,7 @@ export function perfRecordSubstationFinalizeProfile(
 
 export function perfSubstationSnapshot(): PerfSubstationStats {
   return {
+    ifcLoads: substationIfcLoads.map((item) => ({ ...item })),
     ifcReads: substationIfcReads.map((item) => ({ ...item })),
     ifcParses: substationIfcParses.map((item) => ({ ...item })),
     finalize: substationFinalizes.map((item) => ({ ...item })),
@@ -984,6 +1026,8 @@ export function installLongTaskObserver(): () => void {
         longTaskStats.count += 1;
         longTaskStats.totalBlockingTimeMs += Math.max(0, duration - 50);
         longTaskStats.maxMs = Math.max(longTaskStats.maxMs, duration);
+        longTaskStats.samples.push({ atMs: performance.now() - sessionStartMs, durationMs: duration, blockingMs: Math.max(0, duration - 50), ...(activeSpanLabels.length ? { phase: activeSpanLabels[activeSpanLabels.length - 1] } : {}) });
+        if (longTaskStats.samples.length > 64) longTaskStats.samples.shift();
       }
     });
     observer.observe({ type: 'longtask', buffered: false });
@@ -1009,6 +1053,7 @@ export function perfLongTaskSnapshot(): PerfLongTaskStats {
     count: longTaskStats.count,
     totalBlockingTimeMs: Math.round(longTaskStats.totalBlockingTimeMs * 100) / 100,
     maxMs: Math.round(longTaskStats.maxMs * 100) / 100,
+    samples: longTaskStats.samples.slice(),
   };
 }
 

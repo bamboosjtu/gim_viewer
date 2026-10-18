@@ -15,6 +15,17 @@ interface FarArtifact {
   bytes: ArrayBuffer;
   index: RegionalIndex;
 }
+export type IfcLoadStage = 'checking-cache' | 'lod-cache-hit' | 'cold-convert' | 'far-ready' | 'cache-write-start' | 'cache-written' | 'cache-write-failed';
+export interface IfcFileProfile {
+  path: string;
+  bytes: number;
+  source: 'lod-cache' | 'ifc';
+  cacheHit: boolean;
+  cacheReadMs: number;
+  loadMs: number;
+  cacheWriteMs: number | null;
+  cacheWriteOk: boolean | null;
+}
 export async function loadBimIfc(
   ctx: ViewerContext,
   state: AppState,
@@ -24,9 +35,14 @@ export async function loadBimIfc(
   path: string,
   readBytes: () => Promise<Uint8Array | null>,
   onProgress?: (p: number) => void,
-  options: { sourceIdentity?: string; initialBytes?: Uint8Array } = {}
+  options: { sourceIdentity?: string; initialBytes?: Uint8Array; onStage?: (stage: IfcLoadStage, meta?: Record<string, unknown>) => void; onProfile?: (profile: IfcFileProfile) => void } = {}
 ) {
   const current = () => state.isCurrentSession(session);
+  const startedAt = performance.now();
+  let cacheReadMs = 0;
+  let cacheWriteMs: number | null = null;
+  let cacheWriteOk: boolean | null = null;
+  options.onStage?.('checking-cache', { path });
   let input: Uint8Array | null = options.initialBytes ?? null;
   let identity = options.sourceIdentity ?? session.sourceSha256;
   if (!identity) {
@@ -41,9 +57,11 @@ export async function loadBimIfc(
       .join('');
   }
   const key = `${IFC_LOD_CACHE_VERSION}|${identity}|${path.toLowerCase()}`;
+  const cacheStarted = performance.now();
   let artifact = await readIfcLodArtifact<FarArtifact>(key),
     model: any,
     hit = false;
+  cacheReadMs = performance.now() - cacheStarted;
   if (!current()) return;
   if (
     artifact?.bytes instanceof ArrayBuffer &&
@@ -56,6 +74,7 @@ export async function loadBimIfc(
         modelId: runtimeId,
       });
       hit = true;
+      options.onStage?.('lod-cache-hit', { path, bytes: artifact.bytes.byteLength, readMs: Math.round(cacheReadMs) });
     } catch {
       try { await ctx.fragments.core.disposeModel(runtimeId); }
       catch { /* A rejected load may not have registered a model. */ }
@@ -65,6 +84,7 @@ export async function loadBimIfc(
   }
   if (!model) {
     artifact = null;
+    options.onStage?.('cold-convert', { path });
     input ??= await readBytes();
     if (!input || !current()) return;
     model = await loadRawIfc(
@@ -88,7 +108,30 @@ export async function loadBimIfc(
       if (model) ctx.fragments.core.disposeModel(runtimeId);
       return;
     }
-    await writeIfcLodArtifact(key, artifact);
+    // Return the usable far model immediately. Persisting the derived far
+    // artifact is a cache concern; it must not become part of first-usable.
+    const cached = artifact as FarArtifact;
+    const writeStarted = performance.now();
+    options.onStage?.('cache-write-start', { path, bytes: cached.bytes.byteLength });
+    void Promise.resolve(writeIfcLodArtifact(key, cached)).then((result) => {
+      const ok = (result as { ok?: boolean } | undefined)?.ok !== false;
+      cacheWriteOk = ok;
+      cacheWriteMs = performance.now() - writeStarted;
+      options.onStage?.(ok ? 'cache-written' : 'cache-write-failed', {
+        path, ms: Math.round(cacheWriteMs),
+        ...(ok ? {} : { error: (result as { error?: string } | undefined)?.error ?? 'cache write failed' }),
+      });
+    }).catch((error) => {
+      cacheWriteOk = false;
+      cacheWriteMs = performance.now() - writeStarted;
+      options.onStage?.('cache-write-failed', { path, error: String(error), ms: Math.round(cacheWriteMs) });
+    }).finally(() => {
+      options.onProfile?.({
+        path, bytes: cached.bytes.byteLength, source: 'ifc', cacheHit: false,
+        cacheReadMs: Math.round(cacheReadMs), loadMs: Math.round(performance.now() - startedAt),
+        cacheWriteMs: cacheWriteMs == null ? null : Math.round(cacheWriteMs), cacheWriteOk,
+      });
+    });
   }
   if (!current()) {
     ctx.fragments.core.disposeModel(runtimeId);
@@ -96,6 +139,14 @@ export async function loadBimIfc(
   }
   model.object.userData.ifcOpeningPolicy = 'bim-lod';
   model.object.userData.ifcLodCacheHit = hit;
+  options.onStage?.('far-ready', { path, source: hit ? 'lod-cache' : 'ifc' });
+  if (hit) {
+    options.onProfile?.({
+      path, bytes: artifact?.bytes.byteLength ?? 0, source: 'lod-cache', cacheHit: true,
+      cacheReadMs: Math.round(cacheReadMs), loadMs: Math.round(performance.now() - startedAt),
+      cacheWriteMs: null, cacheWriteOk: null,
+    });
+  }
   let baseModel = ctx.fragments.list.get(ctx.fragments.baseCoordinationModel);
   for (let frame = 0; !baseModel && frame < 60 && current(); frame++) {
     await new Promise<void>((resolve) =>

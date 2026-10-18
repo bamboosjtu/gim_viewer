@@ -10,6 +10,6 @@ it('passes the byte ceiling and keeps deferred entries distinct from missing or 
     {entry_path:'templates/b',bytes:null},{entry_path:'templates/bad',bytes:new Uint8Array([1])},
   ]});
   const rows=await readDevArtifactBatch('templates',['a','b','c','bad'],{projectId:1,sourceSha256:'source'},128);
-  expect(rows.get('a')).toEqual({sha:'ok'});expect(rows.get('b')).toBeNull();expect(rows.get('bad')).toBeNull();expect(rows.has('c')).toBe(false);
+  expect(rows.get('a')).toMatchObject({status:'hit',value:{sha:'ok'}});expect(rows.get('b')).toMatchObject({status:'miss'});expect(rows.get('bad')).toMatchObject({status:'invalid'});expect(rows.get('c')).toMatchObject({status:'deferred'});
   expect(mock.invoke).toHaveBeenCalledWith('read_device_lod_artifacts',expect.objectContaining({maxBytes:128,entryPaths:['templates/a','templates/b','templates/c','templates/bad']}));
 });

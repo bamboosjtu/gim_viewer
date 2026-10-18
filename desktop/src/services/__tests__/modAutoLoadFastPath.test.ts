@@ -594,8 +594,8 @@ describe('DEV GLB fast path v3', () => {
         <Color R="128" G="128" B="128" A="100" />
       </Entity>
     </Entities></Device>`], 'Main.MOD');
-    const devRead = vi.spyOn(devFile, 'arrayBuffer');
-    const phmRead = vi.spyOn(phmFile, 'arrayBuffer');
+    const devRead = vi.spyOn(devFile, 'text');
+    const phmRead = vi.spyOn(phmFile, 'text');
     const files = new Map<string, File>([
       ['dEv/Parent.DEV', devFile],
       ['pHm/Main.PHM', phmFile],
@@ -666,9 +666,9 @@ describe('DEV GLB fast path v3', () => {
       <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
       <Color R="128" G="128" B="128" A="100" /></Entity>
     </Entities></Device>`], 'Child.MOD');
-    const parentRead = vi.spyOn(parent, 'arrayBuffer');
-    const childRead = vi.spyOn(child, 'arrayBuffer');
-    const phmRead = vi.spyOn(phm, 'arrayBuffer');
+    const parentRead = vi.spyOn(parent, 'text');
+    const childRead = vi.spyOn(child, 'text');
+    const phmRead = vi.spyOn(phm, 'text');
     const files = new Map<string, File>([
       // DEV/ 目录使用 PascalCase，文件名大小写与引用故意不同；这是
       // 真实样本的 mixed-case 形态，getFileByPath 应按路径大小写不敏感命中。

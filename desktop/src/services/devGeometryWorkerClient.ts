@@ -16,7 +16,7 @@ let serial = 0;
 export class DevGeometryPreprocessor {
   private workers: Worker[] = [];
   private slots = new Map<string, Slot>();
-  private active = new Map<Worker, { task: Slot; release: (() => void) | null; finished: boolean }>();
+  private active = new Map<Worker, { task: Slot; release: (() => void) | null; finished: boolean; startedAt: number }>();
   private exported = new Map<string, { task: Slot; bytes: number }>();
   private exportedBytes = 0;
   private exportedPeakBytes = 0;
@@ -58,6 +58,11 @@ export class DevGeometryPreprocessor {
     this.onActivity();
   }
   get workerCount(): number { return this.workers.length; }
+  readonly diagnostics = {
+    reads: 0, rpcReads: 0, sourceHits: 0, documentHits: 0,
+    readRpcMs: 0, decodeMs: 0, parseMs: 0, queueWaitMs: 0,
+    boundsTasks: 0, compileTasks: 0, failedTasks: 0,
+  };
   get resultPressure() { return { bytes: this.exportedBytes, peakBytes: this.exportedPeakBytes, count: this.exported.size }; }
   get activePaths(): string[] { return [...this.active.values()].map(row => `${row.task.path} · ${row.finished ? '提交' : row.task.kind === 'bounds' ? '目录' : `LOD${row.task.lod}`}`); }
   onActivity: () => void = () => {};
@@ -79,7 +84,9 @@ export class DevGeometryPreprocessor {
       if (!task) break;
       const release = task.kind === 'compile' ? beginDevGeometryWork() : null;
       if (task.kind === 'compile' && !release) break;
-      this.active.set(worker, { task, release, finished: false });
+      this.active.set(worker, { task, release, finished: false, startedAt: performance.now() });
+      this.diagnostics.queueWaitMs += Math.max(0, performance.now() - task.queuedAt);
+      if (task.kind === 'bounds') this.diagnostics.boundsTasks++; else this.diagnostics.compileTasks++;
       perfMark('DEV worker start', { path: task.path, kind: task.kind, lod: task.lod, key: task.key, concurrency: this.active.size }, this.perf);
       try {worker.postMessage({ kind: task.kind, id: task.id, key: task.key, path: task.path, lod: task.lod, session: this.session });}
       catch(error){this.workerFailed(worker,error instanceof Error?error:Error(String(error)));}
@@ -101,8 +108,17 @@ export class DevGeometryPreprocessor {
     if (data.kind !== 'result' || !task || data.id !== task.id || data.session !== this.session || data.key !== task.key) return;
     this.slots.delete(task.key); owner!.finished = true;
     owner!.release?.(); owner!.release = null;
+    if (data.error) this.diagnostics.failedTasks++;
+    const stages = data.stages ?? {};
+    this.diagnostics.reads += Number(stages.reads) || 0;
+    this.diagnostics.rpcReads += Number(stages.rpcReads) || 0;
+    this.diagnostics.sourceHits += Number(stages.sourceHits) || 0;
+    this.diagnostics.documentHits += Number(stages.documentHits) || 0;
+    this.diagnostics.readRpcMs += Number(stages.readRpcMs) || 0;
+    this.diagnostics.decodeMs += Number(stages.decodeMs) || 0;
+    this.diagnostics.parseMs += Number(stages.validateParseMs) || 0;
     perfMark('DEV worker result', { path: task.path, kind: task.kind, lod: task.lod, key: task.key,
-      workerWallMs: data.wallMs, stages: data.stages, bytes: data.result?.bytes?.byteLength ?? 0, error: data.error }, this.perf);
+      workerWallMs: data.wallMs, queueWaitMs: Math.max(0, owner!.startedAt - task.queuedAt), stages: data.stages, bytes: data.result?.bytes?.byteLength ?? 0, error: data.error }, this.perf);
     const bytes = data.result?.bytes?.byteLength ?? 0;
     if (data.error) task.reject(data.sourceEvidence ? new InvalidDevGeometryError(task.path, data.error, data.sourceEvidence) : new Error(data.error));
     else if (bytes > 128 * 1024 * 1024) task.reject(new Error('DEV compiled result exceeds 128 MiB quota'));
@@ -125,7 +141,7 @@ export class DevGeometryPreprocessor {
     this.pump(); return promise;
   }
   compile(path: string, lod: DeviceLod, key: string, priority: number): Promise<DevGlbSerializationResult> { return this.request('compile', path, lod, key, priority); }
-  bounds(path: string): Promise<DevSourceBounds> { return this.request('bounds', path, 0, `bounds:${path.toLowerCase()}`, 0.75); }
+  bounds(path: string): Promise<DevSourceBounds> { return this.request('bounds', path, 0, `bounds:${path.toLowerCase()}`, 0.4); }
   promote(key: string, priority: number): void { const slot = this.slots.get(key); if (slot) slot.priority = Math.min(slot.priority, priority); this.pump(); }
   /** Whole-DEV LOD2 compile used by the progressive GLB serialization path. */
   take(path: string): Promise<DevGlbSerializationResult> {

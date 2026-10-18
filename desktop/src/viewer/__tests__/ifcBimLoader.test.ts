@@ -99,6 +99,30 @@ it('a cache read finishing after source switch cannot register a model', async (
   expect(state.ifcRegionalRuntimes.size).toBe(0);
 });
 
+it('returns the far model before the derived cache write settles and records the write outcome', async () => {
+  const { state, session, ctx, model } = setup();
+  let finish!: () => void;
+  cache.write.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+  cache.raw.mockImplementation(async (...args: any[]) => {
+    args[8].onFarArtifact(new Uint8Array([2]), index);
+    return model;
+  });
+  const stages: string[] = [];
+  const profiles: any[] = [];
+  const resolved = await loadBimIfc(ctx, state, session, 'runtime', 'logical', 'CBM/a.ifc',
+    vi.fn(async () => new Uint8Array([3])), undefined, {
+      onStage: (stage) => stages.push(stage),
+      onProfile: (profile) => profiles.push(profile),
+    });
+  expect(resolved).toBe(model);
+  expect(stages).toContain('far-ready');
+  expect(stages).toContain('cache-write-start');
+  expect(profiles).toHaveLength(0);
+  finish();
+  await vi.waitFor(() => expect(profiles).toHaveLength(1));
+  expect(profiles[0].cacheWriteOk).toBe(true);
+  expect(stages).toContain('cache-written');
+});
 it('a corrupt artifact retries source even when no failed model can be disposed', async () => {
   const { state, session, ctx, model } = setup();
   cache.read.mockResolvedValue({ bytes: new Uint8Array([1]).buffer, index });

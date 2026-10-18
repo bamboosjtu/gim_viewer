@@ -11,9 +11,9 @@ import { parseDevGlbAsset, type DevGlbSerializationResult } from './glbCacheServ
 import { createDevGeometryPreprocessor, type DevGeometryPreprocessor } from './devGeometryWorkerClient.js';
 import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
 import { DEV_GEOMETRY_VERSION, DEV_SPATIAL_CATALOG_VERSION, boxTuple, tupleBox, type DevSourceBounds, type DevSpatialOccurrence } from './devSpatialCatalog.js';
-import { readDevArtifact, writeDevArtifact, deleteDevArtifact } from '@desktop/devLodCache.js';
+import { readDevArtifactResult, writeDevArtifactDetailed, deleteDevArtifact, type DevArtifactRead, type DevArtifactReadStatus } from '@desktop/devLodCache.js';
 import { readCachedEntry } from '@desktop/database.js';
-import { perfCurrentSession, perfMark } from '../utils/perfTimings.js';
+import { perfCurrentSession, perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 import { diagnosticForFailure, diagnosticFromSerialization, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 import { resetModHighlight, highlightModGroups } from '../viewer/highlight.js';
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
@@ -21,7 +21,8 @@ import { WorkQueue } from '../utils/workQueue.js';
 
 interface CachedTemplate { result: DevGlbSerializationResult; sha: string; sourceInvalid?: { message: string; evidence: string } }
 interface TemplateRow { bounds: THREE.Box3; template: DevGlbTemplate; sha: string; status: DevGlbSerializationResult['status']; diagnostics: DevGlbSerializationResult['diagnostics'] }
-interface Occurrence { entry: DevSpatialOccurrence; label: string; inView: boolean; box: THREE.Box3 | null; desired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
+interface CacheDecision { key: string; devPath: string; lod: DeviceLod; status: DevArtifactReadStatus | 'compiled' | 'write-failed'; reason?: string }
+interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; desired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
 const normalize = (path: string) => /^dev\//i.test(path.replace(/\\/g, '/')) ? path.replace(/\\/g, '/') : `DEV/${path}`;
 const hash = async (bytes: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))].map(v => v.toString(16).padStart(2, '0')).join('');
 const belongsTo = (object: THREE.Object3D, root?: THREE.Object3D) => {
@@ -32,12 +33,18 @@ const belongsTo = (object: THREE.Object3D, root?: THREE.Object3D) => {
 /** Session owner for catalog, templates and camera-driven occurrence representations. */
 export class DevLodRuntime {
   readonly diagnostics = { catalogReady: false, currentViewReady: false, currentViewSettled: false, baseRepresentationsSettled: false, baseRepresentationsReady: false, allStationReady: false, catalogHits: 0,
-    templateHits: 0, compiled: [0, 0, 0], occurrences: 0, uniqueDevSources: 0, sceneCommitCount: 0, sceneCommitMaxMs: 0, shown: 0, pending: 0, unknownBounds: 0,
+    templateHits: 0, compiled: [0, 0, 0], /** Per-LOD cache/compile facts; index is LOD. */ lodHits: [0, 0, 0], lodCompiled: [0, 0, 0],
+    lodReadErrors: [0, 0, 0], lodInvalid: [0, 0, 0], lodWriteFailed: [0, 0, 0], lodPersisted: [0, 0, 0],
+    occurrences: 0, uniqueDevSources: 0, sceneCommitCount: 0, sceneCommitMaxMs: 0, shown: 0, pending: 0, unknownBounds: 0,
     absoluteConeCount: 0, templateResidentBytes: 0, directoryCompleted: 0, readyOccurrences: 0, failedOccurrences: 0,
     emptyOccurrences: 0, unsupportedOccurrences: 0, partialOccurrences: 0, templateParses: 0, templateEvictions: 0, workerCount: 0, activeDevices: [] as string[],
     inputBudgetBytes: 0, inputBudgetPeakBytes: 0,
     cacheReadBatches:0,cacheReadEntries:0,cacheReadDeferred:0,viewPendingOccurrences:0,
-    readinessBlockers:[] as string[],viewPendingSamples:[] as string[],
+    cacheHits:0,cacheMisses:0,cacheReadErrorCount:0,cacheInvalidCount:0,
+    lodMisses:[0,0,0],
+    artifactWriteAttempts:0,artifactWriteFailures:0,catalogWriteFailures:0,
+    workerReads:0,workerRpcReads:0,workerSourceHits:0,workerDocumentHits:0,workerReadRpcMs:0,workerParseMs:0,workerQueueWaitMs:0,
+    cacheDecisions: [] as CacheDecision[], readinessBlockers:[] as string[],viewPendingSamples:[] as string[],
     resultQueuedBytes: 0, resultPeakBytes: 0, resultQueueCount: 0,
     anchorReady: false, errors: [] as string[], fingerprints: [] as Record<string, unknown>[] };
   private readonly perf = perfCurrentSession();
@@ -91,12 +98,16 @@ export class DevLodRuntime {
   private templateSlots = 0;
   private inputBudget = new ByteWorkBudget(128 * 1024 * 1024);
   private cacheReader:DevTemplateCacheReader<CachedTemplate>;
+  /** Cache writes are bounded but never block scene commit. */
+  private writeSlots = 0;
+  private writeWaiters: Array<() => void> = [];
+  private pendingWrites = new Map<string, Promise<void>>();
   private placementUsers = new Map<string, number>();
   private templateWaiters = new Map<string, { queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
   private templateQueue = new WorkQueue<{ queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
   private rows = new Map<string, Occurrence>();
   private sourceFailures = new Map<string, InvalidDevGeometryError>();
-  private catalogByDev = new Map<string, DevSourceBounds>();
+  private catalogHints = new Map<string, Promise<DevArtifactRead<DevSourceBounds>>>();
   private templates = new ByteLru<TemplateRow>(128 * 1024 * 1024, row => { row.template.dispose(); if (!this.released) this.diagnostics.templateEvictions++; });
   private worker!: DevGeometryPreprocessor;
   private anchor: THREE.Matrix4 | null = null;
@@ -115,6 +126,64 @@ export class DevLodRuntime {
   private current = () => !this.released && this.state.isCurrentSession(this.session);
   private key(dev: string, lod: DeviceLod) { return `${DEV_GEOMETRY_VERSION}|${this.sourceIdentity}|${dev.toLowerCase()}|lod${lod}`; }
   private catalogKey(dev: string) { return `${DEV_SPATIAL_CATALOG_VERSION}|${DEV_GEOMETRY_VERSION}|${this.sourceIdentity}|${dev.toLowerCase()}`; }
+  /** A catalog read started before the directory loop reaches this DEV also
+   * short-circuits already-queued LOD0 work for a validated empty source. */
+  private catalogHint(dev: string): Promise<DevArtifactRead<DevSourceBounds>> {
+    const existing = this.catalogHints.get(dev);
+    if (existing) return existing;
+    const pending = readDevArtifactResult<DevSourceBounds>('catalog', this.catalogKey(dev), this.session);
+    this.catalogHints.set(dev, pending);
+    return pending;
+  }
+  private markEmptyDev(dev: string): void {
+    for (const row of this.rows.values()) {
+      if (row.entry.devPath.toLowerCase() !== dev.toLowerCase()) continue;
+      row.entry.templateStatus = 'empty'; row.desired = 0;
+      this.wanted.delete(this.key(dev, 0));
+      this.wanted.delete(this.key(dev, 1));
+      this.wanted.delete(this.key(dev, 2));
+    }
+    this.worker?.cancelQueued(this.wanted);
+  }
+  private recordCacheDecision(devPath: string, lod: DeviceLod, status: CacheDecision['status'], reason?: string): void {
+    this.diagnostics.cacheDecisions.push({ key: this.key(devPath, lod), devPath, lod, status, ...(reason ? { reason } : {}) });
+    if (this.diagnostics.cacheDecisions.length > 1024) this.diagnostics.cacheDecisions.shift();
+  }
+  private async withWriteSlot<T>(work: () => Promise<T>): Promise<T> {
+    while (this.writeSlots >= 4) await new Promise<void>((resolve) => this.writeWaiters.push(resolve));
+    this.writeSlots++;
+    try { return await work(); }
+    finally { this.writeSlots--; this.writeWaiters.shift()?.(); }
+  }
+  /** Persist a derived artifact without blocking geometry availability.
+   * Source SHA, project identity and atomic native replacement still apply. */
+  private persistArtifact(store: 'templates' | 'catalog', key: string, value: unknown, lod?: DeviceLod, devPath?: string): void {
+    if (!this.current() || !this.session.sourceSha256) return;
+    const queueKey = `${store}:${key}`;
+    if (this.pendingWrites.has(queueKey)) return;
+    const task = this.withWriteSlot(async () => {
+      if (!this.current()) return;
+      this.diagnostics.artifactWriteAttempts++;
+      const detail = await writeDevArtifactDetailed(store, key, value, this.session);
+      if (!detail.ok) {
+        if (store === 'catalog') this.diagnostics.catalogWriteFailures++;
+        else if (lod != null) {
+          this.diagnostics.lodWriteFailed[lod]++;
+          this.recordCacheDecision(devPath ?? '', lod, 'write-failed', detail.error);
+        }
+        this.diagnostics.artifactWriteFailures++;
+        this.diagnostics.errors.push(`缓存写入失败 ${store}:${key}: ${detail.error ?? 'unknown'}`);
+        if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
+      } else if (store === 'templates' && lod != null) {
+        this.diagnostics.lodPersisted[lod]++;
+      }
+    }).catch((error) => {
+      this.diagnostics.artifactWriteFailures++;
+      this.diagnostics.errors.push(`缓存写入异常 ${store}:${key}: ${String(error)}`);
+      if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
+    }).finally(() => { this.pendingWrites.delete(queueKey); });
+    this.pendingWrites.set(queueKey, task);
+  }
   async start(): Promise<void> {
     ensureGeometryLayers(this.state, (this.ctx.world.scene as any).three);
     if (!this.sourceIdentity && this.state.currentFiles) {
@@ -144,28 +213,41 @@ export class DevLodRuntime {
       const dev = normalize(seed.devPath), list = byDev.get(dev) ?? []; list.push(seed); byDev.set(dev, list);
       this.rows.set(seed.path, { entry: { devPath: dev, sourceBounds: null, boundsQuality: 'unknown', primitiveCounts: {}, unsupportedTypes: [],
         instanceKey: `dev:${dev}#${seed.path}`, rootOccurrence: seed.path, placementMatrix: parseCbmTransformMatrix(seed.transformMatrix), templateStatus: 'unrequested' },
-        label: seed.name || seed.devSymbolName || '设备', inView: true, box: null, desired: 0, displayed: 0 });
+        inView: true, box: null, desired: 0, displayed: 0 });
     }
     this.diagnostics.occurrences = seeds.length;
     this.diagnostics.uniqueDevSources = byDev.size;
     this.notifyCoordinateAnchor(); this.update(); // Compilation can begin before any IFC is ready.
     const catalogEntries=[...byDev];
-    const catalogReads=new Map<string,Promise<DevSourceBounds|null>>();
+    const catalogReads=new Map<string,Promise<DevArtifactRead<DevSourceBounds>>>();
     let catalogIndex=0;
     for (const [dev, instances] of catalogEntries) {
       if (!this.current()) return;
       if (catalogIndex%16===0) {
         catalogReads.clear();
         for (const [path] of catalogEntries.slice(catalogIndex,catalogIndex+16))
-          catalogReads.set(path,readDevArtifact<DevSourceBounds>('catalog',this.catalogKey(path),this.session));
+          catalogReads.set(path,this.catalogHint(path));
       }
       catalogIndex++;
-      let bounds = await catalogReads.get(dev)!;
+      const catalogRead = await catalogReads.get(dev)!;
       if (!this.current()) return;
-      if (bounds && bounds.devPath === dev && ['conservative', 'unknown', 'empty'].includes(bounds.boundsQuality)
+      let bounds = catalogRead.status === 'hit' ? catalogRead.value ?? null : null;
+      const validBounds = bounds && bounds.devPath === dev && ['conservative', 'unknown', 'empty'].includes(bounds.boundsQuality)
         && (!bounds.sourceBounds || bounds.sourceBounds.length === 6 && bounds.sourceBounds.every(Number.isFinite)
-          && bounds.sourceBounds.slice(0, 3).every((v, i) => v <= bounds!.sourceBounds![i + 3]))) this.diagnostics.catalogHits++;
-      else {
+          && bounds.sourceBounds.slice(0, 3).every((v, i) => v <= bounds!.sourceBounds![i + 3]));
+      if (validBounds) {
+        this.diagnostics.catalogHits++;
+        this.diagnostics.cacheHits++;
+      } else {
+        if (catalogRead.status === 'invalid') {
+          this.diagnostics.cacheInvalidCount++;
+          this.diagnostics.errors.push(`目录缓存无效 ${dev}: ${catalogRead.error ?? ''}`);
+          await deleteDevArtifact('catalog', this.catalogKey(dev), this.session);
+        } else if (catalogRead.status === 'read-error') {
+          this.diagnostics.cacheReadErrorCount++;
+          this.diagnostics.errors.push(`目录缓存读取失败 ${dev}: ${catalogRead.error ?? ''}`);
+        }
+        if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
         try {bounds = await this.worker.bounds(dev);}
         catch(error){
           if(!this.current())return;
@@ -173,10 +255,11 @@ export class DevLodRuntime {
           this.diagnostics.errors.push(`目录 ${dev}: ${String(error)}`);if(this.diagnostics.errors.length>32)this.diagnostics.errors.shift();
         }
         if (!this.current()) return;
-        if (!bounds.diagnostic && this.session.sourceSha256) await writeDevArtifact('catalog', this.catalogKey(dev), bounds, this.session);
+        if (!bounds.diagnostic && this.session.sourceSha256) this.persistArtifact('catalog', this.catalogKey(dev), bounds);
       }
-      this.catalogByDev.set(dev, bounds);
+      if (!bounds) bounds = {devPath:dev,sourceBounds:null,boundsQuality:'unknown',primitiveCounts:{},unsupportedTypes:[],diagnostic:'missing-catalog-bounds'};
       this.diagnostics.absoluteConeCount += bounds.absoluteConeCount ?? 0;
+      const emptySource = !bounds.diagnostic && bounds.boundsQuality === 'empty';
       for (const seed of instances) {
         const matrix = parseCbmTransformMatrix(seed.transformMatrix);
         const entry: DevSpatialOccurrence = { ...bounds, instanceKey: `dev:${dev}#${seed.path}`, rootOccurrence: seed.path,
@@ -184,10 +267,19 @@ export class DevLodRuntime {
         const box = bounds.sourceBounds ? boxTuple(bounds.sourceBounds).applyMatrix4(
           (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(createLegacyEquivalentPlacementMatrix(matrix))) : null;
         const row = this.rows.get(seed.path)!;
-        row.entry = { ...entry, templateStatus: row.entry.templateStatus }; row.box = box;
+        // A validated empty source is terminal. It must not enter the compile
+        // queue or write a second empty template file for the same fact.
+        row.entry = { ...entry, templateStatus: emptySource ? 'empty' : row.entry.templateStatus }; row.box = box;
+        if (emptySource) this.diagnostics.emptyOccurrences++;
         if (bounds.boundsQuality === 'unknown') {
           this.diagnostics.unknownBounds++; this.state.deviceUnknownBounds.add(seed.path);
         }
+      }
+      if (emptySource) {
+        // Drop an LOD0 request that was queued before the directory knew this
+        // DEV had no renderable primitive; a running task can finish normally.
+        this.wanted.delete(this.key(dev, 0));
+        this.worker.cancelQueued(this.wanted);
       }
       this.diagnostics.directoryCompleted += instances.length;
       this.requestReady();
@@ -223,7 +315,7 @@ export class DevLodRuntime {
     return new Promise((resolve, reject) => { const waiter={queuedAt:performance.now(),resolve,reject}; this.templateWaiters.set(key,waiter); this.templateQueue.set(key,waiter,this.priorities.get(key) ?? 4,waiter.queuedAt); this.drainTemplates(); });
   }
   private drainTemplates(): void {
-    while (this.current() && this.templateSlots < Math.max(1,this.worker.workerCount) * 2 && this.templateWaiters.size) {
+    while (this.current() && this.templateSlots < Math.max(8, this.worker.workerCount * 8) && this.templateWaiters.size) {
       const [key,waiter]=this.templateQueue.take()!;
       this.templateWaiters.delete(key); this.templateSlots++;
       let released = false;
@@ -244,16 +336,47 @@ export class DevLodRuntime {
       // Concurrent requests share one bounded native batch reservation.
       const lease=await this.cacheReader.read(key);releaseInput=lease.release;
       if (!this.current()) return null;
-      let artifact = lease.value, parsed: Awaited<ReturnType<typeof parseDevGlbAsset>> = null;
+      let artifact: CachedTemplate | undefined = lease.value;
+      let parsed: Awaited<ReturnType<typeof parseDevGlbAsset>> = null;
       let generated = false;
       if (!this.current()) return null;
+      const cacheStatus = lease.status;
+      if (cacheStatus === 'read-error') {
+        this.diagnostics.lodReadErrors[lod]++;
+        this.diagnostics.cacheReadErrorCount++;
+        this.recordCacheDecision(dev, lod, 'read-error', lease.error);
+        this.diagnostics.errors.push(`模板读取失败 ${dev} LOD${lod}: ${lease.error ?? ''}`);
+        if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
+        artifact = undefined;
+      } else if (cacheStatus === 'invalid') {
+        this.diagnostics.lodInvalid[lod]++;
+        this.diagnostics.cacheInvalidCount++;
+        this.recordCacheDecision(dev, lod, 'invalid', lease.error);
+        this.diagnostics.errors.push(`模板缓存无效 ${dev} LOD${lod}: ${lease.error ?? ''}`);
+        if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
+        artifact = undefined;
+      } else if (cacheStatus === 'miss') {
+        this.diagnostics.lodMisses[lod]++;
+        this.diagnostics.cacheMisses++;
+        this.recordCacheDecision(dev, lod, 'miss');
+        artifact = undefined;
+      } else artifact = lease.value;
       if (artifact?.sourceInvalid?.evidence) {
         const error = new InvalidDevGeometryError(dev, artifact.sourceInvalid.message, artifact.sourceInvalid.evidence, 'warm');
-        this.sourceFailures.set(dev, error); throw error;
+        this.sourceFailures.set(dev, error);
+        this.diagnostics.lodHits[lod]++;
+        this.diagnostics.templateHits++;
+        this.diagnostics.cacheHits++;
+        this.recordCacheDecision(dev, lod, 'hit', 'source-invalid');
+        throw error;
       }
       if (artifact && (!artifact.result || !['complete', 'partial', 'empty', 'unsupported'].includes(artifact.result.status)
         || artifact.result.diagnostics?.status !== artifact.result.status)) {
-        await deleteDevArtifact('templates', key, this.session); artifact = null;
+        this.recordCacheDecision(dev, lod, 'invalid', 'artifact-shape');
+        this.diagnostics.lodInvalid[lod]++;
+        this.diagnostics.cacheInvalidCount++;
+        await deleteDevArtifact('templates', key, this.session);
+        artifact = undefined;
       }
       if (artifact?.result.bytes) {
         try {
@@ -261,20 +384,47 @@ export class DevLodRuntime {
           if (await hash(artifact.result.bytes) !== artifact.sha) throw Error('DEV template SHA mismatch');
           parsed = await parseDevGlbAsset(dev, artifact.result.bytes);
           if (!parsed || !validateDevGlbTemplate(parsed).shareable || invalidGeometryExtent(parsed.scene)) throw Error('Invalid DEV cached template');
+          this.diagnostics.lodHits[lod]++;
           this.diagnostics.templateHits++;
-        } catch { if (parsed) new DevGlbTemplate(dev, parsed.scene, this.session).dispose(); parsed = null; await deleteDevArtifact('templates', key, this.session); artifact = null; }
+          this.diagnostics.cacheHits++;
+          this.recordCacheDecision(dev, lod, 'hit');
+        } catch (error) {
+          if (parsed) new DevGlbTemplate(dev, parsed.scene, this.session).dispose();
+          parsed = null;
+          this.diagnostics.lodInvalid[lod]++;
+          this.diagnostics.cacheInvalidCount++;
+          this.recordCacheDecision(dev, lod, 'invalid', String(error));
+          this.diagnostics.errors.push(`模板缓存校验失败 ${dev} LOD${lod}: ${String(error)}`);
+          if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
+          await deleteDevArtifact('templates', key, this.session);
+          artifact = undefined;
+        }
       } else if (artifact?.result.status === 'empty' || artifact?.result.status === 'unsupported') {
-        setGeometryDiagnostic(this.state, diagnosticFromSerialization(dev, artifact.result.diagnostics, 'warm')); this.nullResults.set(key, artifact.result.status); return null;
-      } else artifact = null;
+        this.diagnostics.lodHits[lod]++;
+        this.diagnostics.templateHits++;
+        this.diagnostics.cacheHits++;
+        this.recordCacheDecision(dev, lod, 'hit', artifact.result.status);
+        setGeometryDiagnostic(this.state, diagnosticFromSerialization(dev, artifact.result.diagnostics, 'warm'));
+        this.nullResults.set(key, artifact.result.status);
+        return null;
+      } else if (artifact) artifact = undefined;
       if (!artifact) {
+        const hint = await this.catalogHint(dev);
+        if (hint.status === 'hit' && hint.value?.devPath === dev && hint.value.boundsQuality === 'empty' && !hint.value.diagnostic) {
+          this.markEmptyDev(dev);
+          this.diagnostics.emptyOccurrences++;
+          this.nullResults.set(key, 'empty');
+          this.recordCacheDecision(dev, lod, 'hit', 'catalog-empty');
+          return null;
+        }
         if (!this.wanted.has(key)) throw new DOMException('DEV request left the view', 'AbortError');
         generated = true;
         releaseInput(); releaseInput=undefined;
         const result = await this.worker.compile(dev, lod, key, this.priorities.get(key) ?? priority).catch(async error => {
           if (error instanceof InvalidDevGeometryError && error.sourceEvidence && this.current()) {
             this.sourceFailures.set(dev, error);
-            if (this.session.sourceSha256) await writeDevArtifact('templates', key,
-              { sourceInvalid: { message: error.reason, evidence: error.sourceEvidence } }, this.session);
+            if (this.session.sourceSha256) this.persistArtifact('templates', key,
+              { sourceInvalid: { message: error.reason, evidence: error.sourceEvidence } }, lod, dev);
           }
           throw error;
         });
@@ -282,6 +432,8 @@ export class DevLodRuntime {
         releaseInput = await this.inputBudget.acquire(result.bytes?.byteLength ?? 0);
         if (!this.current()) return null;
         this.diagnostics.compiled[lod]++;
+        this.diagnostics.lodCompiled[lod]++;
+        this.recordCacheDecision(dev, lod, 'compiled', cacheStatus);
         artifact = { result, sha: result.bytes ? result.sha256 ?? await hash(result.bytes) : '' };
       }
       if (!this.current()) return null;
@@ -289,7 +441,7 @@ export class DevLodRuntime {
       if (!artifact.result.bytes) {
         if (artifact.result.status === 'empty' || artifact.result.status === 'unsupported') {
           this.nullResults.set(key, artifact.result.status);
-          if (this.session.sourceSha256) await writeDevArtifact('templates', key, artifact, this.session);
+          if (this.session.sourceSha256) this.persistArtifact('templates', key, artifact, lod, dev);
         }
         return null;
       }
@@ -298,7 +450,9 @@ export class DevLodRuntime {
         if (parsed) new DevGlbTemplate(dev, parsed.scene, this.session).dispose();
         throw Error(`DEV GLB invalid: ${dev}`);
       }
-      if (generated && this.session.sourceSha256) await writeDevArtifact('templates', key, artifact, this.session);
+      // Show geometry first; persistence is bounded and asynchronous. A failed
+      // write is recorded by persistArtifact and never advertised as warm.
+      if (generated && this.session.sourceSha256) this.persistArtifact('templates', key, artifact, lod, dev);
       const row = { bounds: new THREE.Box3().setFromObject(parsed.scene), template: new DevGlbTemplate(dev, parsed.scene, this.session), sha: artifact.sha, status: artifact.result.status, diagnostics: artifact.result.diagnostics };
       this.diagnostics.templateParses++;
       if (!this.current()) { row.template.dispose(); return null; }
@@ -337,15 +491,22 @@ export class DevLodRuntime {
     this.wanted = wanted;
     for (const row of this.rows.values()) {
       const selected = row.entry.rootOccurrence === this.selected;
+      const terminal = row.entry.templateStatus === 'empty' || row.entry.templateStatus === 'unsupported';
       const metrics = this.anchor && row.box ? deviceViewMetrics(row.box, camera, rect?.width || 1000, rect?.height || 800, view) : null;
-      row.inView = selected || !metrics || metrics.visible;
+      // Unknown bounds are not evidence of visibility. They still receive an
+      // automatic LOD0 in the background; only catalogued boxes decide whether
+      // the current view is blocked on this occurrence.
+      row.inView = selected || (row.box && metrics ? metrics.visible : false);
+      if (terminal) { row.desired = 0; continue; }
       // Unknown ranges compile actual supported geometry automatically. No
       // invented box, false culling or tree-selection prerequisite is used.
       const lod = selected ? 2 : !row.group ? 0 : metrics ? chooseDeviceLod(row.displayed, metrics.visible, metrics.distance, metrics.pixels) : 0;
       row.desired = lod;
       const key = this.key(row.entry.devPath, lod); wanted.add(key);
-      const priority = selected ? 0 : !row.group && row.inView ? 1 : lod > 0 ? 2 : 4;
-      if (!['empty', 'unsupported'].includes(row.entry.templateStatus) && row.key !== key && row.failedKey !== key) void this.render(row, lod, priority).catch(e => this.failed(row, e, key));
+      // Base representation must not sit behind detail compiles. Only an
+      // explicit selection outranks LOD0; LOD1/2 for proximity follow it.
+      const priority = selected ? 0 : lod === 0 ? 1 : 2;
+      if (row.key !== key && row.failedKey !== key) void this.render(row, lod, priority).catch(e => this.failed(row, e, key));
     }
     this.worker.cancelQueued(wanted); this.templates.trim(this.pinned());
     for (const [key, waiter] of this.templateWaiters) if (!wanted.has(key)) {
@@ -370,7 +531,10 @@ export class DevLodRuntime {
     try {
     const template = await this.template(row.entry.devPath, lod, priority);
     if (!this.current() || row.desired !== lod || row.key === key) return;
-    if (!template) { row.entry.templateStatus = this.nullResults.get(key) ?? 'failed'; this.requestReady(); return; }
+    if (!template) {
+      if (row.entry.templateStatus === 'empty') { this.nullResults.set(key, 'empty'); this.requestReady(); return; }
+      row.entry.templateStatus = this.nullResults.get(key) ?? 'failed'; this.requestReady(); return;
+    }
     if (!this.anchor) await this.anchorDone;
     if (!this.current() || row.desired !== lod || row.key === key) return;
     await this.submit(priority, () => {
@@ -426,6 +590,7 @@ export class DevLodRuntime {
   }
   private failed(row: Occurrence, error: unknown, requestKey: string): void {
     if (!this.current()) return;
+    if (row.entry.templateStatus === 'empty') return;
     if (row.desired === null || this.key(row.entry.devPath, row.desired) !== requestKey) return;
     // A queued request may be cancelled while an earlier evaluation is still
     // unwinding. If the same key is wanted again, it needs another drive.
@@ -452,44 +617,83 @@ export class DevLodRuntime {
       if (complete || failure) finished++;
       baseSettled &&= complete || failure; baseReady &&= complete;
       allReady &&= row.entry.templateStatus === 'empty' || row.geometryStatus === 'complete' && row.displayed === 2;
-      if (row.inView) { visible++; viewSettled &&= requested || failure; viewReady &&= requested;if(!requested&&!failure){viewPending++;if(samples.length<8)samples.push(`${row.entry.devPath}: LOD${row.displayed}→${row.desired}`);} }
+      if (row.inView) { visible++; viewSettled &&= requested || failure; viewReady &&= requested && !failure;if(!requested&&!failure){viewPending++;if(samples.length<8)samples.push(`${row.entry.devPath}: LOD${row.displayed}→${row.desired}`);} }
       if (row.group) shown++;
       if (row.entry.templateStatus === 'empty') empty++;
       if (row.entry.templateStatus === 'unsupported') unsupported++;
       if (row.geometryStatus === 'partial') partial++;
       if (row.entry.templateStatus === 'failed') failed++;
     }
-    const stable = !this.cameraTimer && !this.timer && this.diagnostics.anchorReady && this.diagnostics.catalogReady;
+    const stable = !this.cameraTimer && !this.timer && this.diagnostics.anchorReady;
     const blockers=[!this.diagnostics.anchorReady?'等待坐标锚点':'',!this.diagnostics.catalogReady?'设备范围索引准备中':'',this.cameraTimer?'等待相机停稳':'',
       this.pending.size?`模板处理中 ${this.pending.size}`:'',this.templateWaiters.size?`模板排队 ${this.templateWaiters.size}`:'',this.commits.length?`场景待提交 ${this.commits.length}`:''].filter(Boolean);
-    const ready = stable && viewReady;
-    if (ready && !this.diagnostics.currentViewReady) perfMark('DEV current view ready', { shown, requested: visible, compiled: [...this.diagnostics.compiled], failed }, this.perf);
+    const ready = stable && viewReady && failed === 0 && (visible > 0 || this.diagnostics.catalogReady);
+    if (ready && !this.diagnostics.currentViewReady) {
+      perfMark('DEV current view ready', { shown, requested: visible, compiled: [...this.diagnostics.compiled], hits: [...this.diagnostics.lodHits], failed }, this.perf);
+      perfMarkProductMoment('devCurrentViewReady', {
+        path: 'device-lod', shown, requested: visible, compiled: [...this.diagnostics.compiled],
+        lodHits: [...this.diagnostics.lodHits], failed, catalogReady: this.diagnostics.catalogReady,
+      }, this.perf);
+    }
+    const nextBaseSettled = this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseSettled;
+    const nextAllReady = this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseReady && allReady;
+    if (nextBaseSettled && !this.diagnostics.baseRepresentationsSettled) {
+      perfMarkProductMoment('devBaseRepresentationsSettled', {
+        path: 'device-lod', occurrences: total, shown, empty, unsupported, failed,
+        compiled: [...this.diagnostics.compiled], lodHits: [...this.diagnostics.lodHits],
+        templateParses: this.diagnostics.templateParses,
+      }, this.perf);
+      if (failed === 0) perfMarkProductMoment('devGeometryReady', { path: 'device-lod', occurrences: total, shown, empty, unsupported, failed }, this.perf);
+    }
+    if (nextAllReady && !this.diagnostics.allStationReady) {
+      perfMarkProductMoment('devAllStationReady', { path: 'device-lod', occurrences: total, shown, partial, failed }, this.perf);
+      perfMark('DEV all station ready', { total, shown, partial, failed }, this.perf);
+    }
     Object.assign(this.diagnostics, { currentViewSettled: stable && viewSettled, currentViewReady: ready,
-      baseRepresentationsSettled: this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseSettled,
+      baseRepresentationsSettled: nextBaseSettled,
       baseRepresentationsReady: this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseReady,
-      allStationReady: this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseReady && allReady,
+      allStationReady: nextAllReady,
       readyOccurrences: shown, emptyOccurrences: empty, unsupportedOccurrences: unsupported, partialOccurrences: partial, failedOccurrences: failed,
       shown: this.state.loadedXmlModGroups.size, activeDevices: this.worker?.activePaths ?? [],viewPendingOccurrences:viewPending,
       readinessBlockers:blockers,viewPendingSamples:samples,
       cacheReadBatches:this.cacheReader.diagnostics.batches,cacheReadEntries:this.cacheReader.diagnostics.entries,cacheReadDeferred:this.cacheReader.diagnostics.deferred });
     const active = this.diagnostics.activeDevices.join('、');
     this.diagnostics.inputBudgetBytes=this.inputBudget.bytes;this.diagnostics.inputBudgetPeakBytes=this.inputBudget.peakBytes;
+    const ws=this.worker?.diagnostics;
+    if (ws) {
+      this.diagnostics.workerReads=ws.reads;this.diagnostics.workerRpcReads=ws.rpcReads;
+      this.diagnostics.workerSourceHits=ws.sourceHits;this.diagnostics.workerDocumentHits=ws.documentHits;
+      this.diagnostics.workerReadRpcMs=Math.round(ws.readRpcMs);this.diagnostics.workerParseMs=Math.round(ws.parseMs);
+      this.diagnostics.workerQueueWaitMs=Math.round(ws.queueWaitMs);
+    }
     const pressure=this.worker?.resultPressure;
     this.diagnostics.resultQueuedBytes=pressure?.bytes ?? 0;this.diagnostics.resultPeakBytes=pressure?.peakBytes ?? 0;
     this.diagnostics.resultQueueCount=pressure?.count ?? 0;
-    const failures = this.diagnostics.failedOccurrences;
     const phase = this.diagnostics.currentViewSettled
       ? ready ? '当前视图已完成' : '当前视图已完成，部分实例失败'
       : `当前视图准备中${viewPending ? ` ${viewPending}` : ''}`;
     const background = this.diagnostics.currentViewSettled && !this.diagnostics.baseRepresentationsSettled ? ' · 后台补充基础表示' : '';
-    const cold=this.diagnostics.compiled.reduce((a,b)=>a+b,0),warm=this.diagnostics.templateHits;
-    this.status(`几何实例已处理 ${finished}/${total} · 已显示 ${this.diagnostics.readyOccurrences} · 冷编译 ${cold} / 暖恢复 ${warm}${failures ? ` · 失败 ${failures}` : ''} · ${phase}${background}`,
-      `设备范围索引 ${this.diagnostics.directoryCompleted}/${total} · 缓存批读 ${this.diagnostics.cacheReadBatches} 批/${this.diagnostics.cacheReadEntries} 条 · 淘汰 ${this.diagnostics.templateEvictions} · 部分表示 ${this.diagnostics.partialOccurrences}${blockers.length?` · ${blockers.join(' · ')}`:''}${active ? ` · ${active}` : ''}`);
+    const cold = this.diagnostics.compiled, warm = this.diagnostics.lodHits;
+    const failedCount = this.diagnostics.failedOccurrences;
+    const displayedFinished = finished < total ? Math.min(total, finished + 1) : total;
+    const cacheProblems = this.diagnostics.lodReadErrors.reduce((a,b)=>a+b,0)
+      + this.diagnostics.lodInvalid.reduce((a,b)=>a+b,0)
+      + this.diagnostics.artifactWriteFailures;
+    this.status(
+      `几何实例已处理 ${displayedFinished}/${total} · 已显示 ${this.diagnostics.readyOccurrences} · 冷编译 L0 ${cold[0]}/L1 ${cold[1]}/L2 ${cold[2]} · 缓存命中 L0 ${warm[0]}/L1 ${warm[1]}/L2 ${warm[2]}${failedCount ? ` · 失败 ${failedCount}` : ''} · ${phase}${background}`,
+      `LOD缓存 miss ${this.diagnostics.cacheMisses} · read-error ${this.diagnostics.cacheReadErrorCount} · invalid ${this.diagnostics.cacheInvalidCount} · 写入失败 ${this.diagnostics.artifactWriteFailures}`
+        + ` · 目录 ${this.diagnostics.directoryCompleted}/${total}${this.diagnostics.catalogReady?'（就绪）':'（进行中）'}`
+        + ` · 批读 ${this.diagnostics.cacheReadBatches} 批/${this.diagnostics.cacheReadEntries} 条（defer ${this.diagnostics.cacheReadDeferred}）`
+        + ` · 淘汰 ${this.diagnostics.templateEvictions} · 部分表示 ${this.diagnostics.partialOccurrences}`
+        + `${cacheProblems ? ` · 缓存问题 ${cacheProblems}` : ''}`
+        + `${blockers.length?` · ${blockers.join(' · ')}`:''}${active ? ` · ${active}` : ''}`);
+    this.diagnostics.cacheReadBatches=this.cacheReader.diagnostics.batches;
+    this.diagnostics.cacheReadEntries=this.cacheReader.diagnostics.entries;
+    this.diagnostics.cacheReadDeferred=this.cacheReader.diagnostics.deferred;
     // No work owns a still-wanted row: recover a cancelled scheduling turn.
     if(stable&&viewPending&&!this.pending.size&&!this.templateWaiters.size&&!this.commits.length)this.schedule();
   }
   clearSelection(): void { this.selected = ''; this.schedule(); }
-  boundsQuality(rootOccurrence: string): DevSourceBounds['boundsQuality'] | undefined { return this.rows.get(rootOccurrence)?.entry.boundsQuality; }
   resourceCounts() {
     const geometry = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
     for (const row of this.templates.values()) {
@@ -533,7 +737,7 @@ export class DevLodRuntime {
     (this.ctx.world.camera as any).controls?.removeEventListener('update', this.cameraSchedule);
     this.worker?.cancel();
     for (const row of this.rows.values()) { if (row.group && this.state.highlightedModState?.groups.some(object => belongsTo(object, row.group))) resetModHighlight(this.state); row.group?.removeFromParent(); this.state.loadedXmlModGroups.delete(row.entry.instanceKey); }
-    this.templates.clear(); this.rows.clear(); this.catalogByDev.clear(); this.state.deviceUnknownBounds.clear();
+    this.templates.clear(); this.rows.clear(); this.catalogHints.clear(); this.state.deviceUnknownBounds.clear();
   }
 }
 export async function startDeviceLod(state: AppState, ctx: ViewerContext, session: ProjectLoadSession, status: (text: string, detail?: string) => void): Promise<DevLodRuntime> {
@@ -545,4 +749,3 @@ export async function startDeviceLod(state: AppState, ctx: ViewerContext, sessio
   try { runtime.startup = runtime.start(); await runtime.startup; return runtime; }
   catch (error) { runtime.release(); if (state.deviceLodRuntime === runtime) state.deviceLodRuntime = null; throw error; }
 }
-

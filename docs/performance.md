@@ -20,9 +20,18 @@
 
 ready 含义以 [架构](architecture.md#配置与加载状态) 为准。`allIfcReady` 和 `fullModelReady` 都须附加载失败、partial/unsupported 数；达到阶段不能解释为全源模型覆盖。
 
-桌面变电优先报告四个产品时刻：`coreSemanticReady`（树/基础属性）、`firstUsableGeometryReady`（首个可浏览站模型）、`devGeometryReady`（设备恢复或编译结束）、`selectedFineReady`（用户选择的唯一精细关联、高亮和属性提交）。同时报告 anchor 到 DEV ready 的等待与执行时间，不用全部 IFC 就绪替代设备可用性。`selectedFineReady` 产品时刻记录首个成功选择；逐请求事件保留 requestId、GlobalId、ExpressId 与 LocalId，过期或歧义选择不产生成功事件。
+桌面变电优先报告产品时刻：`coreSemanticReady`（树/基础属性）、`firstUsableGeometryReady`（首个可浏览站模型）、`devCurrentViewReady`（当前视图所需档位完成且无失败）、`devBaseRepresentationsSettled`（全站每个 occurrence 均已显示基础表示、明确 empty/unsupported 或失败终态）、`devAllStationReady`（全部可渲染设备完成 LOD2）、`selectedFineReady`（用户选择的唯一精细关联、高亮和属性提交）。`devGeometryReady` 保留为默认 DEV 基础表示收敛的兼容时刻，路径标记 `device-lod`。同时报告 anchor 到 DEV ready 的等待与执行时间，不用全部 IFC 就绪替代设备可用性。`selectedFineReady` 产品时刻记录首个成功选择；逐请求事件保留 requestId、GlobalId、ExpressId 与 LocalId，过期或歧义选择不产生成功事件。
 
-设备自动 LOD 另外记录 `catalogReady`（空间目录就绪）、`currentViewReady`（当前视图所需档位就绪）和 `baseRepresentationsReady`（全站基础表示或明确的 empty/unsupported 状态已提交）。`allStationReady` 只在所有可渲染设备都达到完整 LOD2 时成立，基础轮廓或 partial 不计为完整几何。状态栏的已准备实例数不等于完整几何数，报告须附部分表示、失败和未知范围数量。
+LOD0 基础表示使用优先且更宽的模板缓存读取通道（当前最多 16 个模板槽、最多两个编译 Worker），LOD1/2 不得占满基础表示槽。原生批读按 16 条一批并在失败时拆批重试；模板槽与编译 Worker 数量分开统计，不能用模板槽数推断并行几何编译数。`catalogHint` 在模板槽内复用目录结果，已验证 empty 源不进入编译或空模板写入。
+
+设备自动 LOD 另外记录 `catalogReady`（空间目录就绪）、`currentViewReady`、`currentViewSettled`、`baseRepresentationsReady`、`baseRepresentationsSettled` 和 `allStationReady`。这些状态不可互相替代：`Settled` 允许失败/empty/unsupported 终态，`Ready` 只统计成功达到所需档位的设备；当前视图不能等待全站目录完成。`allStationReady` 只在所有可渲染设备都达到完整 LOD2 时成立，基础轮廓或 partial 不计为完整几何。状态栏的已准备实例数不等于完整几何数，报告须附部分表示、失败和未知范围数量。
+
+DEV 缓存读取必须按 `hit`、`miss`、`read-error`、`invalid`、`deferred` 分开计数；只有 `miss` 可进入冷编译，其余状态保留原因。批量读取失败须按条目隔离并可拆批重试，不能把整批有效模板当作未命中。逐模板记录 `(source SHA, DEV, LOD)` 的命中、编译、读取错误、校验失败和写入失败；编译成功但未持久化不得计为暖缓存。状态栏分别显示 LOD0/LOD1/LOD2 的缓存命中、冷编译、失败与阻塞原因，进度从 1 开始计数。
+
+IFC 每文件记录 bytes、实际来源（`ifc` 冷转换 / `lod-cache` 远景缓存 / `fragments-cache` 完整缓存）、conversion、`core.load` 与缓存写入耗时；远景缓存命中不等于完整 IFC 几何就绪，区域精化另计。IFC 远景缓存写入不得阻塞 `firstUsableGeometryReady`，写入失败须单独记录且不得形成虚假的暖命中。
+
+Long Task 统计除 count/blocking/max 外保留最多 64 条样本（时间、时长、当时的活动 span），用于把主线程阻塞关联到 `core.load`、GLB 解析、场景提交等阶段；样本上限不代表全量长任务。
+
 
 默认基础表示覆盖全部物理 occurrence，包括视野外和范围未确定的设备；LOD1/2 按视图或选择请求。比较新旧管线时同时列出实际工作量，不能把旧管线遗漏设备得到的较短时间当作同覆盖度的性能基线。最多两个 DEV Worker 与串行 IFC 转换并行，来源缓存预算由 Worker 平分；显示或选中的模板受保护，128 MiB 是可淘汰模板预算，不能解释为整个工程的硬内存上限。
 

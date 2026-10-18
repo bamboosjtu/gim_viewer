@@ -38,6 +38,7 @@ import {
   perfRecordExternalSpan,
   perfRecordSubstationIfcRead,
   perfRecordSubstationIfcProfile,
+  perfRecordIfcLoadProfile,
   perfRecordSubstationFinalizeProfile,
   perfRecordDevGeometryProfile,
   type PerfSession,
@@ -965,7 +966,7 @@ export async function loadAllIfcFiles(
 
   const initializeInteractiveAfterFirstIfc = async (
     entry: IfcEntry,
-    loadSource: 'fragments-cache' | 'ifc' | 'unknown',
+    loadSource: 'lod-cache' | 'fragments-cache' | 'ifc' | 'unknown',
   ): Promise<void> => {
     if (interactiveInitialized || !isCurrent()) return;
     await syncCoordinateAnchor('变电 coordinate alignment（首个 IFC）');
@@ -981,13 +982,13 @@ export async function loadAllIfcFiles(
     perfMark('首个 IFC 就绪', {
       name: entry.name,
       source: loadSource,
-      cacheHit: loadSource === 'fragments-cache',
+      cacheHit: loadSource === 'lod-cache' || loadSource === 'fragments-cache',
     }, perfSession);
     const firstMeta = {
       kind: 'ifc',
       name: entry.name,
       source: loadSource,
-      cacheHit: loadSource === 'fragments-cache',
+      cacheHit: loadSource === 'lod-cache' || loadSource === 'fragments-cache',
       coordinateAnchor: state.projectSourceToViewerMatrix != null,
       loadedModels: state.loadedModels.size,
     };
@@ -1072,7 +1073,15 @@ export async function loadAllIfcFiles(
   };
 
   const ifcSources=new Map<string,string>();
-  const ifcCacheProgress=()=>`冷转换 ${[...ifcSources.values()].filter(source=>source==='ifc').length} / 暖恢复 ${[...ifcSources.values()].filter(source=>source==='fragments-cache').length}`;
+  const ifcStages=new Map<string,string>();
+  const ifcCacheProgress=()=>{
+    const cold=[...ifcSources.values()].filter(source=>source==='ifc').length;
+    const lod=[...ifcSources.values()].filter(source=>source==='lod-cache').length;
+    const full=[...ifcSources.values()].filter(source=>source==='fragments-cache').length;
+    return `冷转换 ${cold} · LOD缓存 ${lod}${full?` · 完整缓存 ${full}`:''}`;
+  };
+  const ifcStatus=(entry:IfcEntry,index:number,total:number,extra='')=>`IFC ${index+1}/${total} · ${entry.name} · ${ifcStages.get(entry.path)??'待检查'}${extra?` · ${extra}`:''} · ${ifcCacheProgress()}`;
+  const ifcStageLabels:Record<string,string>={'checking-cache':'查询LOD缓存','lod-cache-hit':'LOD缓存命中','cold-convert':'冷转换中','far-ready':'远景就绪','cache-write-start':'缓存写入中','cache-written':'缓存已写','cache-write-failed':'远景就绪(缓存写入失败)'};
   const lifecycleTask = (async (): Promise<void> => {
     try {
     const { ensureEngineReady } = await import('../viewer/ifcLoader.js');
@@ -1107,13 +1116,19 @@ export async function loadAllIfcFiles(
         perfMark('IFC Preview queue',{strategy,anchor:queue[queueIndex-1].path,entries:queue.map(e=>({path:e.path,modelId:e.modelId,sourceBytes:sizes.get(e.path.toLowerCase())??null}))},perfSession);
       }
       const entry=queue[queueIndex];
-      setIfcStatus(`IFC ${queueIndex}/${queue.length} · ${ifcCacheProgress()} · ${entry.name}`);
+      ifcStages.set(entry.path,ifcStageLabels['checking-cache']);
+      setIfcStatus(ifcStatus(entry,queueIndex,queue.length));
         showLoading(interactiveInitialized ? `后台加载 ${entry.name}...` : `正在加载 ${entry.name}...`);
       let readEnded = false;
       let readProfiled = false;
       let lastIfcReadByteLength=0;
       let loadEnded = false;
-      const loadSource: { value: 'fragments-cache' | 'ifc' | 'unknown' } = { value: 'unknown' };
+      const loadSource: { value: 'lod-cache' | 'fragments-cache' | 'ifc' | 'unknown' } = { value: 'unknown' };
+      const setIfcStage=(stage:string,meta?:Record<string,unknown>)=>{
+        if(!isCurrent())return;
+        ifcStages.set(entry.path,ifcStageLabels[stage]??stage);
+        setIfcStatus(ifcStatus(entry,queueIndex,queue.length,meta?.ms!=null?`${String(meta.ms)}ms`:''));
+      };
       const endRead = perfBegin(`变电 IFC read · ${entry.path}`, undefined, perfSession);
       const endIfcLoad = perfBegin(`变电 web-ifc / Fragments load · ${entry.path}`, undefined, perfSession);
       try {
@@ -1147,8 +1162,10 @@ export async function loadAllIfcFiles(
           if(previewInputOwnership)void sampleSubstationMemory(state,'IFC fine worker start',perfSession,
             {entryPath:entry.path,rawBytes:lastIfcReadByteLength,previewFineState:state.ifcPreviewFineStates.get(entry.modelId)},ctx);
           const task=loadIfcEntry(ctx,state,entry,readBytes,
-            (p) => { if (isCurrent()) { setIfcStatus(`IFC ${queueIndex}/${queue.length} · ${ifcCacheProgress()} · ${entry.name} ${Math.round(p * 100)}%`); showLoading(`${entry.name}: ${Math.round(p * 100)}%`); } },
-            {session,perfSessionId:perfSession.id,onLoadSource:(source)=>{loadSource.value=source;ifcSources.set(entry.path,source);},
+            (p) => { if (isCurrent()) { setIfcStatus(ifcStatus(entry,queueIndex,queue.length,`${Math.round(p * 100)}%`)); showLoading(`${entry.name}: ${Math.round(p * 100)}%`); } },
+            {session,perfSessionId:perfSession.id,onLoadSource:(source)=>{loadSource.value=source;ifcSources.set(entry.path,source);ifcStages.set(entry.path,source==='ifc'?'冷转换完成':source==='lod-cache'?'LOD缓存恢复完成':'完整缓存恢复完成');},
+              onStage:(stage,meta)=>setIfcStage(stage,meta),
+              onProfile:(profile)=>{if(isCurrent())perfRecordIfcLoadProfile(profile,perfSession);},
               // A Preview's explicit fine request always restores original
               // relation openings; browsing simplification cannot claim LOD2 fidelity.
               transferInput:true,openingPolicy:preview?'full':openingPolicy});
@@ -1246,9 +1263,11 @@ export async function loadAllIfcFiles(
           bytes: lastIfcReadByteLength,
           source: loadSource.value,
           fragmentsCacheEnabled: isFragmentsCacheEnabled(),
-          cacheHit: loadSource.value === 'fragments-cache',
+          cacheHit: loadSource.value === 'lod-cache' || loadSource.value === 'fragments-cache',
         });
         loadEnded = true;
+        ifcStages.set(entry.path, loadSource.value==='ifc'?'冷转换完成':'LOD缓存恢复完成');
+        setIfcStatus(ifcStatus(entry,queueIndex,queue.length));
         // The preview's fine delegate survives in the provider map; release its raw input.
         ifcBytes.value = null;
         const runtimeModelId = state.ifcRuntimeModelIds.get(entry.modelId) ?? entry.modelId;
@@ -1272,7 +1291,7 @@ export async function loadAllIfcFiles(
           endIfcLoad('（失败）', {
             source: loadSource.value,
             fragmentsCacheEnabled: isFragmentsCacheEnabled(),
-            cacheHit: loadSource.value === 'fragments-cache',
+            cacheHit: loadSource.value === 'lod-cache' || loadSource.value === 'fragments-cache',
             error: err instanceof Error ? err.message : String(err),
           });
           loadEnded = true;
@@ -1283,6 +1302,8 @@ export async function loadAllIfcFiles(
         // 后续坐标同步、名称索引或 UI 渲染阶段。
         if (!isCurrent()) return;
         state.ifcPreviewFineStates.set(entry.modelId,'fineFailed');
+        ifcStages.set(entry.path,'失败');
+        setIfcStatus(ifcStatus(entry,queueIndex,queue.length,message.slice(0,80)));
         recordAllIfcReady();
         failed.push({ name: entry.name, message });
         // 防御性清理
@@ -1312,7 +1333,7 @@ export async function loadAllIfcFiles(
       if (!isCurrent()) return;
     }
 
-    setIfcStatus(`IFC ${entries.length}/${entries.length}${failed.length ? ` · 失败 ${failed.length}` : ' · 已就绪'}`);
+    setIfcStatus(`IFC ${entries.length}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ' · 已就绪'}`);
     background.completeRemainingIfc();
     // Preview-first has its own readiness barrier. Deferred LOD2 files remain
     // visible in their per-file state and cannot satisfy allIfcReady.

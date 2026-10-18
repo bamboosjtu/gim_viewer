@@ -201,12 +201,15 @@ SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `
 |---|---|
 | coreSemanticReady | 核心语义可供 UI 使用 |
 | firstUsable / interactive | 首个可用 IFC 与基本交互，不代表全模型 |
-| devGeometryReady | DEV 渲染管线完成，主要设备可定位；拒绝、partial、unsupported 单独记录 |
+| devGeometryReady | 默认 DEV 基础表示在无失败时收敛的兼容产品时刻；路径 `device-lod` |
+| devCurrentViewReady | 默认 DEV 当前视图所需档位完成且无失败，不等待全站目录完成 |
+| devBaseRepresentationsSettled | 默认 DEV 每个 occurrence 均已显示基础表示、明确 empty/unsupported 或失败终态 |
+| devAllStationReady | 默认 DEV 全部可渲染设备完成 LOD2 |
 | catalogReady | 设备空间目录就绪；按 DEV 增量提交，不等待全部源解析完成 |
-| currentViewReady | 锚点与目录就绪，且当前视锥内 occurrence 均已提交所需档位或已有明确终态 |
+| currentViewReady | 锚点就绪，当前已获得目录范围的视锥内 occurrence 均已提交所需档位且无失败；未获得范围的设备仍后台补 LOD0 |
 | baseRepresentationsReady | 锚点与目录就绪，且全部 occurrence 已提交表示或为 empty/unsupported 终态；基础与 partial 表示不计作完整几何 |
 | allStationReady | 在基础表示就绪之上，全部 occurrence 为 empty 终态或已达到 LOD2 完整几何 |
-| currentViewSettled | 相机已停稳且锚点、目录就绪，当前视锥内 occurrence 均已提交所需档位或已确定失败 |
+| currentViewSettled | 相机已停稳且锚点就绪，已获得目录范围的视锥内 occurrence 均已提交所需档位或已确定失败；目录可继续增量 |
 | baseRepresentationsSettled | 锚点与目录就绪，全部 occurrence 已提交表示、为 empty/unsupported 或已确定失败 |
 | selectedFineReady | 当前有效选择已唯一关联 LOD2，精细高亮及属性完成提交；另记录每次选择事件 |
 | allIfcReady | 全部 IFC 加载尝试结束，失败数另列 |

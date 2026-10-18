@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { DevLodRuntime } from '../devLodRuntime.js';
 import { DEV_GEOMETRY_VERSION } from '../devSpatialCatalog.js';
+import { perfProductMomentSnapshot, perfReset } from '../../utils/perfTimings.js';
 
 function fixture() {
   const status = vi.fn();
@@ -26,7 +27,7 @@ it('3326 processed includes 34 failures without reporting success or counting an
   expect(runtime.diagnostics.baseRepresentationsReady).toBe(false);
   expect(runtime.diagnostics.allStationReady).toBe(false);
   expect(status.mock.lastCall![0]).toContain('几何实例已处理 3326/3326 · 已显示 3292');
-  expect(status.mock.lastCall![0]).toContain('冷编译 0 / 暖恢复 0 · 失败 34');
+  expect(status.mock.lastCall![0]).toContain('冷编译 L0 0/L1 0/L2 0 · 缓存命中 L0 0/L1 0/L2 0 · 失败 34');
   expect(status.mock.lastCall![0]).not.toContain('准备中');
   const row = internal.rows.get('3292'); row.group = new THREE.Group();
   internal.ready();
@@ -69,6 +70,23 @@ it('commit queue yields between batches, prioritizes selection and cancels expir
     internal.release(); await rejected;
     await vi.advanceTimersByTimeAsync(300); expect(calls).toEqual([0, 2]);
   } finally { vi.useRealTimers(); }
+});
+
+it('current view readiness does not wait for the whole catalog', () => {
+  const { runtime, internal } = fixture();
+  internal.rows.set('root', occurrence(1));
+  runtime.diagnostics.catalogReady = false;
+  internal.ready();
+  expect(runtime.diagnostics.currentViewReady).toBe(true);
+  expect(runtime.diagnostics.baseRepresentationsSettled).toBe(false);
+  expect(internal.status.mock.lastCall![0]).toContain('当前视图已完成');
+});it('records default DEV current-view and base-representation product moments', () => {
+  perfReset(); const { internal } = fixture(); internal.rows.set('root', occurrence(1)); internal.ready();
+  const moments = perfProductMomentSnapshot();
+  expect(moments.devCurrentViewReady).not.toBeNull();
+  expect(moments.devBaseRepresentationsSettled).not.toBeNull();
+  expect(moments.devGeometryReady?.meta?.path).toBe('device-lod');
+  expect(moments.devAllStationReady).toBeNull();
 });
 
 it('camera motion invalidates readiness until the new view has been evaluated', () => {

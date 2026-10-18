@@ -416,9 +416,6 @@ export class IfcRegionalRuntime {
     const object = this.index.objects.find((o) => o.expressId === id);
     return object ? { object, distance: hit.distance } : null;
   }
-  group(expressId: number) {
-    return this.groups.get(expressId);
-  }
   highlightGroup(expressId: number) {
     const group = this.groups.get(expressId);
     if (group) this.instances.highlight(expressId, group);
@@ -426,9 +423,6 @@ export class IfcRegionalRuntime {
   }
   clearHighlight() {
     this.instances.clearHighlight();
-  }
-  get instanceStatistics() {
-    return this.instances.statistics;
   }
   async properties(expressId: number) {
     const key = `${this.options.cacheKey}|properties|${expressId}`;

@@ -87,7 +87,7 @@ export interface IfcEntryLike {
 }
 
 /** 供变电加载性能诊断使用；不改变 IFC/Fragments 业务结果。 */
-export type IfcLoadSource = 'fragments-cache' | 'ifc';
+export type IfcLoadSource = 'fragments-cache' | 'lod-cache' | 'ifc';
 
 /**
  * 加载 GIM IFC entry，优先 Fragments 缓存（命中时不读 IFC buffer）。
@@ -110,6 +110,10 @@ export async function loadIfcEntry(
     perfSessionId?: number;
     /** 加载来源确定后回调一次；调用方可记录 cache hit/miss。 */
     onLoadSource?: (source: IfcLoadSource) => void;
+    /** File-level BIM LOD stages for the status bar. */
+    onStage?: (stage: import('./ifcBimLoader.js').IfcLoadStage, meta?: Record<string, unknown>) => void;
+    /** Per-file size/source/conversion/cache-write profile. */
+    onProfile?: (profile: import('./ifcBimLoader.js').IfcFileProfile) => void;
     /** Transfer the one-shot raw IFC buffer to the conversion worker. */
     transferInput?: boolean;
     openingPolicy?: IfcOpeningPolicy;
@@ -143,8 +147,11 @@ export async function loadIfcEntry(
   const openingPolicy = options.openingPolicy ?? 'bim-lod';
   if(openingPolicy==='bim-lod'){
     const {loadBimIfc}=await import('./ifcBimLoader.js');
-    const model=await loadBimIfc(ctx,state,session,runtimeModelId,modelId,entryPath,getIfcBuffer,reportProgress);
-    if(model)options.onLoadSource?.(model.object.userData.ifcLodCacheHit?'fragments-cache':'ifc');
+    const model=await loadBimIfc(ctx,state,session,runtimeModelId,modelId,entryPath,getIfcBuffer,reportProgress,{
+      onStage: options.onStage,
+      onProfile: options.onProfile,
+    });
+    if(model)options.onLoadSource?.(model.object.userData.ifcLodCacheHit?'lod-cache':'ifc');
     return;
   }
   const cacheEnabled = isFragmentsCacheEnabled();

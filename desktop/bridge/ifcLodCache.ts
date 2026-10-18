@@ -45,8 +45,9 @@ export async function readIfcLodArtifacts<T>(keys:string[]):Promise<(T|null)[]> 
   });void touch(keys.filter((_key,i)=>values[i]!==null));return values;}catch{return keys.map(()=>null);}
 }
 export async function readIfcLodArtifact<T>(key:string):Promise<T|null>{return (await readIfcLodArtifacts<T>([key]))[0];}
-export async function writeIfcLodArtifacts(rows:{key:string;value:unknown}[]):Promise<void> {
-  if(!rows.length)return;
+export interface IfcLodWriteResult { ok: boolean; error?: string }
+export async function writeIfcLodArtifacts(rows:{key:string;value:unknown}[]):Promise<IfcLodWriteResult> {
+  if(!rows.length)return {ok:true};
   const unique=[...new Map(rows.map(row=>[row.key,row])).values()];
   const near=unique.filter(row=>isNearArtifactKey(row.key)).map(row=>({...row,bytes:estimateArtifactBytes(row.value)+row.key.length*2,admit:false}));
   let remainingBytes:number=IFC_NEAR_CACHE_LIMITS.bytes,remainingCount:number=IFC_NEAR_CACHE_LIMITS.entries;
@@ -82,9 +83,9 @@ export async function writeIfcLodArtifacts(rows:{key:string;value:unknown}[]):Pr
         if(--pending===0)prune();
       };}
     };
-  });}catch(error){warn(error);}
+  });return {ok:true};}catch(error){warn(error);return {ok:false,error:String(error)};}
 }
-export async function writeIfcLodArtifact(key:string,value:unknown):Promise<void>{await writeIfcLodArtifacts([{key,value}]);}
+export async function writeIfcLodArtifact(key:string,value:unknown):Promise<IfcLodWriteResult>{return writeIfcLodArtifacts([{key,value}]);}
 export async function deleteIfcLodArtifact(key:string):Promise<void> {
   try{const db=await open();await new Promise<void>((resolve,reject)=>{
     const tx=db.transaction(['artifacts',metaStore],'readwrite'),metadata=tx.objectStore(metaStore);
