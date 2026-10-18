@@ -245,6 +245,23 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     }
 
     const children: CbmNode[] = [];
+    // 大工程（B1-4 的 F3 下 15,526 个 F4）逐个子节点 await 会把 DEV 元数据
+    // 读取串行化到数十秒。兄弟节点相互独立，限制并发读取后在内存中按原顺序
+    // 组装，visited/nodeBudget 仍是同步更新。
+    const buildSiblings = async (refs: string[]): Promise<CbmNode[]> => {
+      if (refs.length === 0) return [];
+      const results: (CbmNode | null)[] = new Array(refs.length).fill(null);
+      let next = 0;
+      const workers = Array.from({ length: Math.min(32, refs.length) }, async () => {
+        while (true) {
+          const index = next++;
+          if (index >= refs.length) return;
+          results[index] = await build(`CBM/${refs[index]}`, depth + 1);
+        }
+      });
+      await Promise.all(workers);
+      return results.filter((node): node is CbmNode => node != null);
+    };
 
     // 1. SUBSYSTEM 单值引用
     const sg = getFirstNonEmptyKv(kv, ['SUBSYSTEM']);
@@ -255,11 +272,20 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
 
     // 2. SUBSYSTEMS.NUM + SUBSYSTEMi 数组引用
     const sn = parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBSYSTEMS.NUM']), 'SUBSYSTEMS.NUM');
-    for (let i = 0; i < sn; i++) {
-      const s = getFirstNonEmptyKv(kv, [`SUBSYSTEM${i}`]);
-      if (s) {
-        const c = await build(`CBM/${s}`, depth + 1);
-        if (c) children.push(c);
+    if (sn > 1) {
+      const refs: string[] = [];
+      for (let i = 0; i < sn; i++) {
+        const s = getFirstNonEmptyKv(kv, [`SUBSYSTEM${i}`]);
+        if (s) refs.push(s);
+      }
+      children.push(...await buildSiblings(refs));
+    } else {
+      for (let i = 0; i < sn; i++) {
+        const s = getFirstNonEmptyKv(kv, [`SUBSYSTEM${i}`]);
+        if (s) {
+          const c = await build(`CBM/${s}`, depth + 1);
+          if (c) children.push(c);
+        }
       }
     }
 
