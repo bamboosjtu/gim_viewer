@@ -13,10 +13,8 @@ P0 为正确性或核心流程阻断，P1 为主要效率、可维护性或拟�
 |---|---|---|---|
 | D-02 | P2 / 待收尾 | IR→DEV 诊断已覆盖 empty-device-xml、assembly-node-without-own-geometry、phm-no-solidmodel、dev-no-solidmodel、parser-unsupported，并透传 cold/warm serialization diagnostics；raw 回退路径与 unknown 仍未统一 | 补 raw 路径映射；验证四样本诊断可检索，不能伪造几何 |
 | D-04 | P1 / 待核验 | 杆塔 HNum/MOD 按需预览有延迟风险 | 拆分 read/parse/render，记录延迟和输入规模；必要时有界缓存或任务隔离；树、地图与快速切换不受阻 |
-| D-05 | P2 / 待核验 | 线路 warm 内存驻留归因不完整 | 独立进程分别测 JS heap、WebView/Worker/Rust RSS，切换与关闭后观察回收；据证据决定属性 lazy load |
-| D-11 | P1 / 待决策 | substation02 两个摄像头 DEV 的源 MOD Entity 矩阵含约 10¹⁴ mm 平移，34 个 occurrence 以 source-invalid 确定性缓存并显式拒绝；其他局部实体是否保留未决 | 保持源值及失败来源可追溯；如引入局部保留，必须标记 partial、证明有效子集并复核冷暖与选择，不计为完整恢复 |
+| D-05 | P2 / 待核验 | 线路 warm 内存驻留归因不完整。line03 实测：主进程 RSS 52 MB、进程树 628 MB、JS heap 47.5 MB；关闭工程后主进程 49 MB、JS 47.1 MB，回收不明显；WebView/Worker/Rust 三段仍未拆开 | 独立进程拆分 JS/WebView/Worker/Rust RSS，切换与关闭后观察回收；据证据决定属性 lazy load |
 | D-12 | P1 / 待核验 | 原生语义发布与 DEV 未完成时正常关闭后的独立暖启动已通过局部验收；WASM 回退及持久化异常的真实桌面闭环未执行 | 在限定预算内核验回退源写入、缺文件、截断索引、写入失败和 A→B；语义 HIT 与部分 DEV 缓存分开，不放宽超时 |
-| D-13 | P2 / 待核验 | 变电来源文件 validation 保留逐文件 reparse 检查，首轮 OS/文件打开波动仍可显著增加耗时。复核：B1-4（87,205 条目）validation 总耗时 1.48 s，其中 `source_scan_path_files` 0.03 s，pack 成员已跳过逐条路径拼接与 reparse；仅 IFC 等独立文件仍逐次 open | 扩充独立进程与部署环境验证；若要继续去重，须先证明验证期间变化 fail closed，不以降低安全检查换取提速 |
 | D-14 | P2 / 待开发 | 遗留全量 GLB 回退路径仍依赖完整 manifest/version，transient I/O/写盘失败后的整批恢复成本尚未收敛 | 默认设备 LOD 已逐模板原子提交并复用局部缓存；核对遗留回退路径的适用范围及恢复成本，保留 retry，不能把临时失败持久化为 source-invalid |
 | D-17 | P1 / 待开发 | IFC 未缓存近景仍有源打开和几何成本；板件、杆件及紧固件已使用区域依赖子集，较大闭包仍有构建长尾，其他类型及回退路径仍可能重开整源 | 维持自动视域/30m 与已识别小孔策略；扩展前证明单位、放置、外观和保留开洞等价，核对预算、回退及峰值内存；补齐真实树到区域细节高亮与重任务资源竞争，不把源复用当成区域即时完成 |
 | D-21 | P1 / 待开发 | 设备细节缓存未命中时，磁盘惰性来源仍按文件经主线程原生 RPC 读取，LOD1/2 深层精确 CSG 仍有不可中断长尾；全站基础表示的内存驻留也偏高 | 保留当前 DEV Worker 池（逻辑核数的 60%，2–8 个，`gim-dev-workers` 可覆盖）与输出背压，依据请求来源链评估有界批量读取和模板/元数据驻留；保持按需范围、原生安全校验与旧表示连续显示，单列缓存未命中细节、阶段墙钟和连续响应，不能用减少设备覆盖换取提速 |

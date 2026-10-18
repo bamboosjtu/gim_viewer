@@ -7,11 +7,9 @@
 |---|---|---|---|
 | D-02 | 接近完成 | IR→DEV 已覆盖 5 类原因并透传 cold/warm；raw/unknown 未统一 | 补 raw 路径 |
 | D-04 | 有效 | 杆塔 HNum 预览没有 read/parse/render 拆分数据 | 需补测 |
-| D-05 | 有效 | 线路 warm 内存没有独立进程归因 | 需补测 |
+| D-05 | 部分证据 | line03 打开：主进程 RSS 52 MB、进程树 628 MB、JS heap 47.5 MB；关闭工程后 JS 47.1 MB，主进程 49 MB；WebView/Worker/Rust 仍未拆分 | 独立进程拆分与回收阈值 |
 | D-06 | 关闭 | 线路 GIMPKGT 已复用内嵌 7-Zip 流式解压；line03 冷启动 smoke：0.0 s 点击 → 4.1 s 批量读取 → 5.3 s 线路工程已加载 → 9.9 s 地图就绪（111 杆塔/1081 导线段/772 跨越物） | 已实现并验证 |
-| D-11 | 有效 | substation02 摄像头 10¹⁴ mm 矩阵仍按 source-invalid 拒绝，局部保留未决策 | 保持现状并记录 |
 | D-12 | 有效 | WASM 回退/截断索引/写入失败闭环无新证据 | 需补测 |
-| D-13 | 收窄 | B1-4 validation 1.48 s，`source_scan_path_files` 0.03 s；pack 成员跳过逐条 reparse，仅 IFC 独立文件仍 open | 保留部署波动验证 |
 | D-14 | 有效 | `modAutoLoadService.ts` 仍有 geometry manifest 失效时重建整域的分支 | 评估适用范围 |
 | D-17 | 有效 | IFC 近景区域子集仍不覆盖所有类型/回退路径 | 后续扩展 |
 | D-21 | 有效 | DEV Worker 池已改为逻辑核数 60%（2–8），长尾/内存仍未验收 | 需补测 |
@@ -25,6 +23,9 @@
 | D-30 | 有效 | B1-4 解压 13.7 s、首屏 74 s；29 s 空档未消除；设备范围目录仍串行 | 继续优化 |
 
 已关闭：
+
+- D-11（摄像头异常矩阵）：决定不做局部保留，保持 source-invalid 可追溯，避免把部分恢复标为完整。
+- D-13（validation reparse）：B1-4 87,205 条目 validation 1.48 s，pack 成员已跳过逐条 reparse；不再作为待优化项。
 
 - D-25（452 MB IFC）：真冷转换 127 s 完成；跳过开关 ON 时 IFC 7/7、状态栏显示“已跳过 1 个超大 IFC”，OFF 时 8/8 正常加载，无静默丢弃。
 
