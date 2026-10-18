@@ -111,6 +111,8 @@ export class DevLodRuntime {
   private rows = new Map<string, Occurrence>();
   private sourceFailures = new Map<string, InvalidDevGeometryError>();
   private catalogHints = new Map<string, Promise<DevArtifactRead<DevSourceBounds>>>();
+  /** 大工程远景不预解析全部 PHM 范围，选中时按需解析该 DEV。 */
+  private deferredCatalog = new Set<string>();
   private templates = new ByteLru<TemplateRow>(128 * 1024 * 1024, row => { row.template.dispose(); if (!this.released) this.diagnostics.templateEvictions++; });
   private worker!: DevGeometryPreprocessor;
   private anchor: THREE.Matrix4 | null = null;
@@ -366,7 +368,13 @@ export class DevLodRuntime {
       if (instances.some(seed => seed.path === this.selected)) void this.select(this.selected).catch(error => console.warn('[DEV selected]', error));
     };
     const CATALOG_BATCH = 8;
-    for (let start = 0; start < catalogEntries.length; start += CATALOG_BATCH) {
+    const deferCatalog = catalogEntries.length > 1000;
+    if (deferCatalog) {
+      this.deferredCatalog = new Set(catalogEntries.map(([dev]) => dev));
+      this.diagnostics.catalogReady = true;
+      this.diagnostics.directoryCompleted = seeds.length;
+    }
+    if (!deferCatalog) for (let start = 0; start < catalogEntries.length; start += CATALOG_BATCH) {
       if (!this.current()) return;
       const batch = catalogEntries.slice(start, start + CATALOG_BATCH);
       const boundsList = await Promise.all(batch.map(([dev]) => resolveCatalog(dev)));
@@ -585,6 +593,7 @@ export class DevLodRuntime {
       // automatic LOD0 in the background; only catalogued boxes decide whether
       // the current view is blocked on this occurrence.
       row.inView = selected || (row.box && metrics ? metrics.visible : false);
+      if (!selected && !row.box && this.deferredCatalog.has(row.entry.devPath)) { row.desired = 0; continue; }
       if (terminal || (row.skipTiny && !selected)) { row.desired = 0; continue; }
       // Unknown ranges compile actual supported geometry automatically. No
       // invented box, false culling or tree-selection prerequisite is used.
@@ -794,6 +803,30 @@ export class DevLodRuntime {
     return { templateCount: this.templates.size, templateParseCount: this.diagnostics.templateParses,
       sharedGeometryCount: geometry.size, sharedMaterialCount: materials.size, sharedTextureCount: textures.size };
   }
+  /** 大工程远景延迟处理：选中时只解析该 DEV 的 PHM 范围。 */
+  private async ensureDeferredBounds(dev: string): Promise<void> {
+    if (!this.deferredCatalog.has(dev) || !this.current()) return;
+    this.deferredCatalog.delete(dev);
+    try {
+      const bounds = await this.worker.bounds(dev);
+      if (!this.current()) return;
+      for (const row of this.rows.values()) {
+        if (row.entry.devPath !== dev) continue;
+        row.entry = { ...row.entry, ...bounds };
+        row.box = bounds.sourceBounds ? boxTuple(bounds.sourceBounds).applyMatrix4(
+          (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(createLegacyEquivalentPlacementMatrix(row.entry.placementMatrix))) : null;
+        if (row.box) {
+          const extent = row.box.max.clone().sub(row.box.min);
+          const maxMeters = Math.max(extent.x, extent.y, extent.z);
+          if (Number.isFinite(maxMeters) && maxMeters < FAR_TINY_DEVICE_MAX_METERS) row.skipTiny = true;
+        }
+      }
+      this.schedule();
+    } catch (error) {
+      this.diagnostics.errors.push(`按需范围 ${dev}: ${String(error)}`);
+      if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
+    }
+  }
   async select(rootOccurrence: string): Promise<THREE.Group[]> {
     if (!this.current()) return [];
     this.selected = rootOccurrence;
@@ -802,6 +835,10 @@ export class DevLodRuntime {
     if (!this.rows.has(rootOccurrence)) await this.catalogDone;
     const row = this.rows.get(rootOccurrence);
     if (!row || !this.current() || this.selected !== rootOccurrence) return [];
+    if (this.deferredCatalog.has(row.entry.devPath)) {
+      await this.ensureDeferredBounds(row.entry.devPath);
+      if (!this.current() || this.selected !== rootOccurrence) return [];
+    }
     row.desired = 2;
     this.wanted.add(this.key(row.entry.devPath, 2));
     row.failedKey = undefined; // Explicit selection retries transient failures; source-invalid stays isolated.
