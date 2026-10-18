@@ -103,7 +103,7 @@ describe('Substation source evidence and normalized projections', () => {
     const sidecars = discoverSubstationGlSidecars(files.keys(), tree);
     expect(sidecars).toHaveLength(1);
     expect(sidecars[0].semanticPaths).toEqual(['CBM/project.cbm']);
-    expect(await discoverGeometriesFromNode(tree!, files)).toEqual({ mods: [], stls: [] });
+    expect(await discoverGeometriesFromNode(tree!, files)).toEqual({ mods: [], stls: [], reason: 'dev-no-solidmodel' });
     expect((await inspectSubstationCapabilities(files, tree, [])).geometry.glSidecars).toBe(1);
   });
 
