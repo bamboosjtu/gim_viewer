@@ -12,23 +12,22 @@ P0 为正确性或核心流程阻断，P1 为主要效率、可维护性或拟�
 | ID | 优先级/状态 | 当前问题 | 行动与完成条件 |
 |---|---|---|---|
 | D-01 | P1 / 待核验 | 变电原始冷路径完整加载及连续响应没有达标证据，DEV 编译仍有长尾风险 | 固定四包空缓存，分别测 IFC conversion、core.load、模板编译、placement/scene commit；完整模型 ≤600s，interactive 后最长 heartbeat 间隔 ≤2s、输入延迟 ≤1s；同时通过正确性门禁 |
-| D-02 | P1 / 待开发 | DEV 级诊断未把 IR 的细粒度来源原因贯通到诊断存储 | `geometryDiagnostics` 已定义 empty-device-xml、assembly-node-without-own-geometry、phm-no-solidmodel、dev-no-solidmodel、parser-unsupported、missing-dependency、source-invalid、parse-failed、unknown，IR 侧 `NoneReason` 也区分这些情况；但 DEV 级 `reason` 目前只设置 missing-dependency、parse-failed、parser-unsupported、source-invalid。XML 烘焙已按可见根上报 `failedVisibleRoots`（含 MOD 路径、根 id 与逐依赖原因，每 DEV 上限 64 条）与 `simplifiedBooleans`，可作为映射来源。把 IR 原因映射进 DEV 诊断，使冷/暖/raw 三路径一致可检索，不能伪造几何 |
+| D-02 | P1 / 待开发 | DEV 级诊断未把 IR 的细粒度来源原因贯通到诊断存储。复核当前代码：`geometryDiagnostics` 已定义 9 种 reason，但 DEV 级只写入 missing-dependency、parse-failed、parser-unsupported、source-invalid；`NoneReason` 的 empty-device-xml、assembly-node-without-own-geometry、phm-no-solidmodel、dev-no-solidmodel、unknown 仍未映射 | 把 IR 原因映射进 DEV 诊断，使冷/暖/raw 三路径一致可检索，不能伪造几何；先覆盖 empty-device-xml、assembly-node-without-own-geometry、phm-no-solidmodel 三类 |
 | D-04 | P1 / 待核验 | 杆塔 HNum/MOD 按需预览有延迟风险 | 拆分 read/parse/render，记录延迟和输入规模；必要时有界缓存或任务隔离；树、地图与快速切换不受阻 |
 | D-05 | P2 / 待核验 | 线路 warm 内存驻留归因不完整 | 独立进程分别测 JS heap、WebView/Worker/Rust RSS，切换与关闭后观察回收；据证据决定属性 lazy load |
-| D-06 | P2 / 待核验 | line03 原生 7z 冷解码需单独评估 | 拆分 decoder、条目写出和调度，不混入 parser 指标；改进须保持配额、路径安全、完整性和源身份 |
+| D-06 | P2 / 待核验 | line03 原生 7z 冷解码需单独评估；复核：随包 7-Zip 流式解压目前只接在 GIMPKGS（变电）路径，线路 GIMPKGT 仍走 sevenz-rust | 复用单 exe 内嵌 7z 到线路归档，拆分 decoder、条目写出和调度，不混入 parser 指标；改进须保持配额、路径安全、完整性和源身份 |
 | D-11 | P1 / 待决策 | substation02 两个摄像头 DEV 的源 MOD Entity 矩阵含约 10¹⁴ mm 平移，34 个 occurrence 以 source-invalid 确定性缓存并显式拒绝；其他局部实体是否保留未决 | 保持源值及失败来源可追溯；如引入局部保留，必须标记 partial、证明有效子集并复核冷暖与选择，不计为完整恢复 |
 | D-12 | P1 / 待核验 | 原生语义发布与 DEV 未完成时正常关闭后的独立暖启动已通过局部验收；WASM 回退及持久化异常的真实桌面闭环未执行 | 在限定预算内核验回退源写入、缺文件、截断索引、写入失败和 A→B；语义 HIT 与部分 DEV 缓存分开，不放宽超时 |
 | D-13 | P2 / 待核验 | 变电来源文件 validation 保留逐文件 reparse 检查，首轮 OS/文件打开波动仍可显著增加耗时 | 扩充独立进程与部署环境验证；目录安全检查去重须先证明验证期间变化 fail closed，不以降低安全检查换取提速 |
 | D-14 | P2 / 待开发 | 遗留全量 GLB 回退路径仍依赖完整 manifest/version，transient I/O/写盘失败后的整批恢复成本尚未收敛 | 默认设备 LOD 已逐模板原子提交并复用局部缓存；核对遗留回退路径的适用范围及恢复成本，保留 retry，不能把临时失败持久化为 source-invalid |
-| D-16 | P0 / 默认策略待验收 | 02 single-pass early semantic 已通过功能 smoke；Native eligibility 允许 01/02/04，03 因 checkpoint 后仅余 732 bytes 正常 fallback。02 三次完整有效 cold 观察 core 约 31.5–32.2 秒、first 约 34.7–35.3 秒；当前默认关闭 | 01 未在既定 90 秒内完成正式发布观察；早关闭后 v26 receipt 未发布、重开继续 cold，MSIX 两种 root spelling 的独立文件/副本清理证据仍需闭环。不扩大超时，也不用结构有效宣称默认门禁通过 |
 | D-17 | P1 / 待开发 | IFC 未缓存近景仍有源打开和几何成本；板件、杆件及紧固件已使用区域依赖子集，较大闭包仍有构建长尾，其他类型及回退路径仍可能重开整源 | 维持自动视域/30m 与已识别小孔策略；扩展前证明单位、放置、外观和保留开洞等价，核对预算、回退及峰值内存；补齐真实树到区域细节高亮与重任务资源竞争，不把源复用当成区域即时完成 |
 | D-21 | P1 / 待开发 | 设备细节缓存未命中时，磁盘惰性来源仍按文件经主线程原生 RPC 读取，LOD1/2 深层精确 CSG 仍有不可中断长尾；全站基础表示的内存驻留也偏高 | 保留当前 DEV Worker 池（逻辑核数的 60%，2–8 个，`gim-dev-workers` 可覆盖）与输出背压，依据请求来源链评估有界批量读取和模板/元数据驻留；保持按需范围、原生安全校验与旧表示连续显示，单列缓存未命中细节、阶段墙钟和连续响应，不能用减少设备覆盖换取提速 |
-| D-22 | P1 / 待定性 | `npm test` 全量并行运行下 `selectionInteraction.test.ts` 偶发超时/相机断言失败；最近一次全量（105 文件 / 932 用例）仍有 1 个 `nested parent → child` 失败，单文件运行 25/25 通过 | 在重复全量运行、不同并发度下复现并定位并行度、任务残留与资源竞争；保留选择提交权与相机断言，不移除失败测试、不提高 timeout 掩盖 |
+| D-22 | P1 / 待定性 | `npm test` 全量并行运行下 `selectionInteraction.test.ts` 偶发超时/相机断言失败；2026-10-19 全量（105 文件 / 925 用例）仍有 2 个 selection 失败；同次 `devLodLoading` 失败已确认由远景小构件过滤的 1 m 测试夹具触发，夹具改为 10 m 后 3/3 通过 | 继续在重复全量、不同并发度下复现 selection 两项，定位并行度、任务残留与资源竞争；保留选择提交权与相机断言，不移除失败测试、不提高 timeout 掩盖 |
 | D-23 | P1 / 场景待验收 | 大规模设备相机交互仍需固定路线验收；已有分批提交、相机评估复用和状态合并刷新，单次提交不可中断 | 记录 draw calls、帧耗时 p95/p99、长任务与驻留内存，依据测量决定实例化或合批，保留 occurrence 和部件选择身份；局部几何通过不等同整站流畅度通过 |
 | D-24 | P2 / 待开发 | 属性面板第一层（摘要、≤8 关键参数、工程标识、参数搜索、组件属性合并）已实现；IFC Pset 业务字段提升、同名多来源冲突提示、全部字段分组计数与虚拟化尚未完成 | 按[属性面板设计](../research/property-panel-design.md)第 8 节继续：IFC 属性集映射到关键参数、同义键冲突标注来源、全部字段按 CBM/FAM/DEV/IFC 分组并保持原始行可追溯；回归四个变电样本，首屏不出现裸 GUID/矩阵 |
 | D-25 | P1 / 已定策略，待验收 | substation03 的 `CBM/设备接线.ifc` 为 452 MB，真冷转换曾停在“冷转换 10%”超过 5 分钟；IFC LOD 缓存在 IndexedDB，`reset_project.py` 无法复现真冷。产品策略：默认允许后台长转换、超大 IFC 排到队尾；180 秒无进度看门狗中止；设置面板提供“跳过 >64 MB 非关键 IFC”开关（已实现） | 继续按 A+B 策略验收真冷分阶段计时与峰值内存（先清 IndexedDB）；流式/分块转换（方案 C）作为后期探索，不在本轮实现；验证跳过开关 ON/OFF 的状态标记与不静默丢弃 |
 | D-26 | P2 / 待归因 | substation04 冷启动的 `变电 IFC 空间索引` span 约 12.5 s（19 个 IFC、2,346,267 资源记录、91 个空间节点），与 IFC 加载并行；该 span 同时包含 Spatial Worker 扫描、finalize 与提交，主线程占比尚未拆分，“固定主线程成本”未获证实 | 先拆分 Worker 扫描、finalize、commit 三段耗时与主线程长任务占比；确认瓶颈后再决定增量构建、移到 Worker 或优化资源索引，不降低 CBM→IFC 空间关联覆盖率 |
-| D-30 | P1 / 待优化 | 500-B1-4 冷启动：接入随包 7-Zip CLI 流式解压后，解压由 106 s 降至 **13.7 s**，首屏由 164 s 降至 **74 s**；剩余为 CBM/DEV 解析约 30 s 与解析后到 coreSemanticReady 的约 29 s。目标 ≤60 s 尚未达成 | 继续拆分“解析后 29 s”段（树/索引构建或采样），评估解析并行化/Worker；不降低路径安全、配额与语义完整性；全量 500/substation 首屏计时作为验收 |
+| D-30 | P1 / 待优化 | 500-B1-4 冷启动：内嵌 7-Zip CLI 流式解压后解压 13.7 s、首屏 74 s；剩余为 CBM/DEV 解析约 30 s 与解析后到 coreSemanticReady 的约 29 s；远景 <1.5 m 小构件已过滤（状态栏显示“忽略小构件”），但设备范围目录仍按 15,526 项串行准备 | 继续拆分“解析后 29 s”段；设备范围目录改为按唯一 DEV 并行/复用已有边界；不降低路径安全、配额与语义完整性；全量 500/substation 首屏计时作为验收 |
 
 现行模板共享和 IFC/Spatial Worker 已存在，不作为待开发项重复立项。
 

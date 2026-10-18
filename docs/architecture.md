@@ -119,7 +119,7 @@ XML 烘焙按可见根记录失败明细：每条保留来源 MOD 路径、根 E
 
 ## 变电首次解析实验
 
-桌面 `gim-debug-substation-early-semantic=1` 启用默认关闭的 7z 单遍 job；默认路径仍完整解压后解析。job 先处理无 stream 条目和独立的 core-only folder，不改变同一个 solid folder 内的解码顺序，也不重复解码其前缀。core 输入为 CBM/FAM/DEV，含 FileDevRelation.cbm。
+桌面 `gim-debug-substation-early-semantic=1` 启用默认关闭的 7z 单遍 job；默认路径仍完整解压后解析。job 先处理无 stream 条目和独立的 core-only folder，不改变同一个 solid folder 内的解码顺序，也不重复解码其前缀。core 输入为 CBM/FAM/DEV，含 FileDevRelation.cbm。该路径仅保留用于调试，不再作为默认发布策略；常规冷启动解压由内嵌 7-Zip 流式路径承担（见 D-30）。
 
 early 请求先调用 Native `inspect_substation_early_eligibility`：能力结果包含 archive/folder、core stream/empty 数、core-only folders 和预计 checkpoint 字节/物理位置。只有 GS 7z 且 checkpoint 后仍保留超过总 decoded bytes 1% 的来源才进入 early job；这个保守收益界限不是耗时预测。明确的非 GS 7z、无 core、无 checkpoint 收益返回 capability absence，使用原完整 native extraction。路径/重复条目、配额、CRC/decode、来源 SHA/工程身份、staging/publication 错误仍是错误，不能以字符串匹配降级为能力缺失或转用 WASM。完整 native fallback 同样校验来源绑定，并在 commit 前复核 SHA。未知的 negative capability 也拒绝 fallback。正式 default policy 尚未通过跨样本及关闭门禁，保持关闭；debug override 只请求实验，不决定 eligibility。
 

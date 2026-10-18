@@ -13,7 +13,7 @@ vi.mock('../modAutoLoadService.js',async(importActual)=>({...await importActual<
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();vi.resetAllMocks();});
 it('a wanted request cancelled during queue turnover retries, places shared warm geometry and reaches completion',async()=>{
   vi.useFakeTimers();vi.stubGlobal('crypto',{subtle:{digest:async()=>new Uint8Array(32).buffer}});
-  mock.catalog.mockResolvedValue({status:'hit',value:{devPath:'DEV/shared.dev',sourceBounds:[-.5,-.5,-.5,.5,.5,.5],boundsQuality:'conservative',primitiveCounts:{},unsupportedTypes:[]}});
+  mock.catalog.mockResolvedValue({status:'hit',value:{devPath:'DEV/shared.dev',sourceBounds:[-5,-5,-5,5,5,5],boundsQuality:'conservative',primitiveCounts:{},unsupportedTypes:[]}});
   const result={result:{status:'complete',bytes:new Uint8Array([1]),diagnostics:{status:'complete'}},sha:'00'.repeat(32)};
   mock.read.mockRejectedValueOnce(new DOMException('queue turnover','AbortError'))
     .mockImplementation(async(_store,keys)=>new Map(keys.map((key:string)=>[key,{status:'hit',value:result}])));

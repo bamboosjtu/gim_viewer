@@ -578,9 +578,6 @@ export class DevLodRuntime {
       // automatic LOD0 in the background; only catalogued boxes decide whether
       // the current view is blocked on this occurrence.
       row.inView = selected || (row.box && metrics ? metrics.visible : false);
-      // 目录边界尚未就绪时不要先编译未知范围设备：B1-4 有 15,526 个
-      // 小构件，若按未知边界全部排入 L0，会在首屏后长时间占用主线程。
-      if (!selected && !row.box && !this.diagnostics.catalogReady) { row.desired = null; continue; }
       if (terminal || row.skipTiny) { row.desired = 0; continue; }
       // Unknown ranges compile actual supported geometry automatically. No
       // invented box, false culling or tree-selection prerequisite is used.
