@@ -13,11 +13,12 @@
 | D-22 | 偶发 | 全量两次：2 failed/925，随后 0 failed/927；单文件 25/25；devLodLoading 夹具已修正 | 继续复现并行 flake |
 | D-23 | 有效 | 大规模相机交互没有固定路线 p95/p99 数据 | 需补测 |
 | D-24 | 有效 | 属性面板第一层已实现；Pset 提升、冲突提示、虚拟化未完成 | 后续实现 |
-| D-26 | 有效 | spatial span 仍未拆分 Worker/finalize/commit | 后续埋点 |
 | D-28 | 有效 | 别名/排序已修，任意层级分类与装配歧义仍待业务复核 | 后续复核 |
 | D-29 | 有效 | IFC Spatial 仍逐文件扫描；SHA 跨阶段复用未完成 | 后续优化 |
 
 已关闭：
+
+- D-26（空间索引 span）：当前 变电 IFC 空间索引 只包 Worker build；finalize/缓存写入在 span 外，spatialSemanticReady 单独记录 rebuildMs/writeMs，未发现固定主线程成本。
 
 - D-27（同进程重开）：substation02 打开 2.4 s / 关闭 121 ms / 重开 2.2 s / 切换 500-B1-2 7.7 s / 关闭 / 重开 2.0 s；无 poisoned，AbortError 为预期取消。
 
