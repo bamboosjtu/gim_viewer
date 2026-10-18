@@ -15,7 +15,7 @@ import type { AppState } from '../app/state.js';
 import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
 import type { LineMapData, WireSegment } from '../gim/lineMapData.js';
 import { escHtml } from '../shared/html.js';
-import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, btnToggleProps, emptyTipEl, container } from './dom.js';
+import { cbmTreePanel, fileDevPanel, modelListEl, propsDrawerBody, propsDrawer, emptyTipEl, container } from './dom.js';
 import { hideTabs } from './tabs.js';
 import type { LineMapRenderPhase, LineMapViewHandle } from './lineMapView.js';
 import type { LineMapBaseLayerHandle } from './lineMapBaseLayer.js';
@@ -970,7 +970,6 @@ function showLineInspector(
 ): void {
   renderInspectorTabs(`<div class="props-header">${escHtml(title)}</div>`, buckets, activeTab);
   propsDrawer.classList.remove('collapsed');
-  btnToggleProps.style.right = '364px';
 }
 
 function activeInspectorTab(): string {
@@ -1190,7 +1189,6 @@ function showWireProperties(wire: WireSegment, state: AppState | null = currentL
 function handleMapWireClick(wire: WireSegment): void {
   showWireProperties(wire, currentLineState);
   propsDrawer.classList.remove('collapsed');
-  btnToggleProps.style.right = '364px';
   const target = lineNavigationIndex
     ? resolveLineNavigationTarget(lineNavigationIndex, wire.nodeRef.path)
     : null;
@@ -1399,7 +1397,6 @@ function handleLineNavigationNode(node: LineNavigationNode): void {
     propsDrawerBody.innerHTML = `<div class="props-empty">${escHtml(node.label)}</div>`;
   }
   propsDrawer.classList.remove('collapsed');
-  btnToggleProps.style.right = '364px';
   focusNavigationNode(node);
 }
 
@@ -1417,7 +1414,6 @@ function handleMapTowerClick(node: GimGraphNode): void {
     : null;
   showLineNodeProperties(node, currentLineState, target?.label);
   propsDrawer.classList.remove('collapsed');
-  btnToggleProps.style.right = '364px';
   if (lineNavigationIndex && node.path) {
     if (target) {
       const targetKey = revealLineNavigationTarget(lineNavigationIndex, target.key);

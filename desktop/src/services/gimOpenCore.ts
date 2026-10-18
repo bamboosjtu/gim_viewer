@@ -19,6 +19,8 @@ export interface ExtractedGimSource {
   projectName?: string;
   files: Map<string, File>;
   cachePaths?: Map<string, string>;
+  /** 变电源 pack 成员：没有独立缓存路径，但仍可作为合法语义源。 */
+  packedPaths?: Set<string>;
   cacheProjectId?: number;
   extractionProfile?: NativeExtractionProfile;
   semanticPackPath?: string;

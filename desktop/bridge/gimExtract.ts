@@ -21,6 +21,8 @@ export interface NativeExtractionResult {
   files: Map<string, File>;
   /** 已由 Rust 直接落盘的缓存路径（entryPath → 绝对路径），可跳过 JS 逐文件字节回传 */
   cachePaths: Map<string, string>;
+  /** 变电源 pack 成员路径：无独立文件，由 pack 索引按 offset 提供字节。 */
+  packedPaths: Set<string>;
   /** 原生解压对应的 SQLite project_id，用于按 entry_path 懒读。 */
   cacheProjectId?: number;
   /** Rust 原生解压阶段计时（冷启动诊断用；旧 payload 可为空）。 */
@@ -72,6 +74,8 @@ interface ExtractManifestEntry {
   cache_path?: string;
   /** 线路语义 pack 中的偏移；有此字段时对应独立小文件未落盘。 */
   semantic_pack_offset?: number;
+  /** 变电源 pack 成员：没有独立落盘文件，读取时按 offset 懒读。 */
+  packed?: boolean;
 }
 
 /** manifest 结构 */
@@ -244,6 +248,7 @@ export function parseExtractionPayload(
 
   const files = new Map<string, File>();
   const cachePaths = new Map<string, string>();
+  const packedPaths = new Set<string>();
   const hasInlineBlob = buf.byteLength > base;
   let totalBytes = 0;
   for (const e of manifest.entries) {
@@ -282,6 +287,7 @@ export function parseExtractionPayload(
       );
     }
     if (e.cache_path) cachePaths.set(e.path, e.cache_path);
+    if (e.packed) packedPaths.add(e.path);
   }
 
   return {
@@ -290,6 +296,7 @@ export function parseExtractionPayload(
     projectName: manifest.project_name,
     files,
     cachePaths,
+    packedPaths,
     cacheProjectId: options.cacheProjectId,
     extractionProfile: manifest.profile,
     semanticPackPath: manifest.semantic_pack_path,

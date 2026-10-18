@@ -15,14 +15,22 @@ import { isDiskBackedFile, isSemanticPackBackedFile } from '@desktop/gimExtract.
 /** 单个条目的上限；substation 的 CBM/DEV/FAM/PHM/小 MOD 均远低于该值。 */
 export const NATIVE_SMALL_FILE_MAX_BYTES = 256 * 1024;
 /** 单批上限，避免一次响应占用过多 WebView 内存。 */
-export const NATIVE_SMALL_FILE_BATCH_MAX_FILES = 512;
-export const NATIVE_SMALL_FILE_BATCH_MAX_BYTES = 16 * 1024 * 1024;
+export const NATIVE_SMALL_FILE_BATCH_MAX_FILES = 2048;
+export const NATIVE_SMALL_FILE_BATCH_MAX_BYTES = 48 * 1024 * 1024;
+/**
+ * 首次打开只需把语义解析要读的文本物化到内存：CBM（层级）、DEV（设备
+ * 关系/BASEFAMILY）、FAM（属性参考）。PHM/MOD/STL 由几何管线按需从源
+ * pack 懒读，提前物化只会放大解析前的等待。
+ */
+const SEMANTIC_HYDRATION_EXTENSIONS: ReadonlySet<string> = new Set(['cbm', 'dev', 'fam']);
 
 export interface NativeSmallFileHydrationOptions {
   maxFiles?: number;
   maxBytes?: number;
   isCurrent?: () => boolean;
   parseCopy?: ParseCopyReceipt;
+  /** 限制本次物化的扩展名；缺省只物化 CBM/DEV/FAM 语义文本。 */
+  includeExtensions?: readonly string[];
 }
 
 export interface NativeSmallFileHydrationResult {
@@ -108,11 +116,16 @@ export async function hydrateNativeSmallFiles(
     };
   }
 
+  const allowed = options.includeExtensions
+    ? new Set(options.includeExtensions.map((ext) => ext.toLowerCase()))
+    : SEMANTIC_HYDRATION_EXTENSIONS;
+
   for (const [path, file] of files) {
     if (!isDiskBackedFile(file) || isSemanticPackBackedFile(file)) continue;
     // IFC 必须保持单独的 lazy read/decode 生命周期；大文件也不应被
     // 物化到全局 Map，避免这条修复重新引入内存峰值。
     if (extensionOf(path) === 'ifc') continue;
+    if (!allowed.has(extensionOf(path))) continue;
     if (!Number.isFinite(file.size) || file.size < 0 || file.size > NATIVE_SMALL_FILE_MAX_BYTES) continue;
     requestedCandidates.push({ path, file });
   }

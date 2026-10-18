@@ -26,7 +26,7 @@ import {
   normalizedIfcBasename,
   resolveIfcModelId,
 } from '../gim/modelIdentity.js';
-import { propsDrawerBody, propsDrawer, btnToggleProps, btnCloseProps, btnExportProps } from './dom.js';
+import { propsDrawerBody, propsDrawer, btnCloseProps, btnExportProps } from './dom.js';
 import { buildCsv, downloadTextFile } from '../shared/csv.js';
 import { shouldAutoShowProps } from './shell/viewerShell.js';
 import {
@@ -53,7 +53,6 @@ function refreshViewportLayout(ctx: ViewerContext) {
 export function openPropsDrawer(ctx: ViewerContext, force = false): void {
   if (!force && !shouldAutoShowProps()) return;
   propsDrawer.classList.remove('collapsed');
-  btnToggleProps.style.right = '364px';
   refreshViewportLayout(ctx);
 }
 
@@ -61,19 +60,16 @@ export function openPropsDrawer(ctx: ViewerContext, force = false): void {
 export function openPropsDrawerUI(force = false): void {
   if (!force && !shouldAutoShowProps()) return;
   propsDrawer.classList.remove('collapsed');
-  btnToggleProps.style.right = '364px';
 }
 
 /** 关闭属性面板（纯 UI，不刷新视口，用于无 Viewer 场景） */
 export function closePropsDrawerUI(): void {
   propsDrawer.classList.add('collapsed');
-  btnToggleProps.style.right = '12px';
 }
 
 /** 关闭属性面板 */
 export function closePropsDrawer(ctx: ViewerContext): void {
   propsDrawer.classList.add('collapsed');
-  btnToggleProps.style.right = '12px';
   refreshViewportLayout(ctx);
 }
 
@@ -103,13 +99,6 @@ export function setupPropsDrawerInteractions(ctx?: ViewerContext): void {
   if (propsDrawerInteractionsReady) return;
   propsDrawerInteractionsReady = true;
   ensurePropertyReferenceEvents();
-  btnToggleProps.addEventListener('click', () => {
-    if (propsDrawerViewerContext) togglePropsDrawer(propsDrawerViewerContext);
-    else {
-      if (propsDrawer.classList.contains('collapsed')) openPropsDrawerUI(true);
-      else closePropsDrawerUI();
-    }
-  });
   btnCloseProps.addEventListener('click', () => {
     if (propsDrawerViewerContext) closePropsDrawer(propsDrawerViewerContext);
     else closePropsDrawerUI();

@@ -7,6 +7,8 @@ interface PublicationInput {
   sourceSha256: string;
   files: Map<string, File>;
   cachePaths: Map<string, string>;
+  /** 变电源 pack 成员：没有独立缓存路径，但索引可证明其已落盘。 */
+  packedPaths?: Set<string>;
   tree: CbmNode | null;
   ifcs: IfcEntry[];
   relations: FileDevEntry[];
@@ -30,11 +32,13 @@ export async function publishSubstationIndex(input: PublicationInput, deps: Publ
     throw new Error('变电索引缺少完整源身份或语义入口');
   }
   const paths = new Map([...input.cachePaths].map(([path,value]) => [path.replace(/\\/g,'/').toLowerCase(),value]));
+  const packed = new Set([...(input.packedPaths ?? [])].map((path) => path.replace(/\\/g,'/').toLowerCase()));
   const missingPaths: string[] = [];
   const missingSemanticPaths: string[] = [];
   for (const [path] of input.files) {
     if (!/\.(ifc|cbm|fam|dev|phm|mod|gl|stl|sch|std|sld)$/i.test(path)) continue;
-    if (paths.get(path.replace(/\\/g,'/').toLowerCase())) continue;
+    const key = path.replace(/\\/g,'/').toLowerCase();
+    if (paths.get(key) || packed.has(key)) continue;
     missingPaths.push(path);
     // Semantic publication only requires the source text needed by the CBM /
     // FAM / DEV / PHM index. A missing MOD/STL/IFC payload can be repaired by

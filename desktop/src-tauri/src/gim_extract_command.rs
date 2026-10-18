@@ -38,6 +38,13 @@ struct ExtractedEntryMeta {
     /// 线路语义 pack 中的偏移；存在时不再创建同名小文件。
     #[serde(skip_serializing_if = "Option::is_none")]
     semantic_pack_offset: Option<u64>,
+    /// 变电源 pack 成员：没有独立落盘文件，读取时按 offset 懒读。
+    #[serde(skip_serializing_if = "is_false")]
+    packed: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Serialize)]
@@ -170,6 +177,15 @@ pub async fn extract_gim_archive(
             } else {
                 None
             };
+            // 变电：CBM/DEV/FAM/PHM/MOD/STL 等源条目写入一个连续 pack，只有
+            // IFC 保留独立文件。这样 3.6 万个条目的 open 成本从数十秒降到两次。
+            let mut substation_writer: Option<LineSemanticPackWriter> = if substation_sources
+                && !line_pack_enabled
+            {
+                Some(LineSemanticPackWriter::new_substation(&staging_root)?)
+            } else {
+                None
+            };
             let mut parse_copy = (substation_sources && substation_parse_copy == Some(true))
                 .then(crate::substation_parse_copy::ParseCopy::default);
             let mut entry_trace = Vec::new();
@@ -193,7 +209,15 @@ pub async fn extract_gim_archive(
                 } else {
                     None
                 };
-                if semantic_pack_offset.is_none() {
+                let mut packed = false;
+                if let Some(writer) = substation_writer.as_mut() {
+                    if !path.to_ascii_lowercase().ends_with(".ifc") {
+                        let timing = writer.append_with_timing(&path, &bytes)?;
+                        semantic_pack_write_ms += timing.data_ms;
+                        packed = true;
+                    }
+                }
+                if semantic_pack_offset.is_none() && !packed {
                     let write_timing = staging_writer.write_with_timing(&path, &bytes)?;
                     write_open_ms += write_timing.open_ms;
                     write_data_ms += write_timing.data_ms;
@@ -201,10 +225,11 @@ pub async fn extract_gim_archive(
                 // path 已由 extract_archive_reader + CacheStagingWriter 做过
                 // 同一套 Normal 组件校验；此处只拼接最终目录，不再次触发磁盘
                 // canonicalize/rename，避免数万条目重复路径解析。
-                // 变电发布凭据需要全部已落盘来源的 cache_path。线路 semantic
-                // pack 条目通过 project_id + entry_path 读取，省去数万条
-                // 绝对路径字符串和不必要的 manifest 序列化成本。
-                let cache_path = if substation_sources || path.to_ascii_lowercase().ends_with(".ifc") {
+                // 变电发布凭据需要全部已落盘来源的 cache_path。pack 条目没有
+                // 独立文件，由索引证明其存在；IFC 仍保留独立路径供尺寸校验。
+                let cache_path = if !packed
+                    && (substation_sources || path.to_ascii_lowercase().ends_with(".ifc"))
+                {
                     Some(final_root.join(Path::new(&path)).to_string_lossy().to_string())
                 } else {
                     None
@@ -218,6 +243,7 @@ pub async fn extract_gim_archive(
                     size,
                     cache_path,
                     semantic_pack_offset,
+                    packed,
                 });
                 Ok(())
             };
@@ -235,6 +261,26 @@ pub async fn extract_gim_archive(
             profile.write_open_ms = write_open_ms;
             profile.write_data_ms = write_data_ms;
             let semantic_pack_entries = if let Some(writer) = semantic_writer {
+                let entries = match writer.finish() {
+                    Ok(entries) => entries,
+                    Err(error) => {
+                        let _ = remove_cache_dir_if_safe(&staging_root, " staging");
+                        return Err(error);
+                    }
+                };
+                profile.semantic_pack_entries = entries.iter().filter(|entry| entry.packed).count();
+                profile.semantic_pack_bytes = entries
+                    .iter()
+                    .filter(|entry| entry.packed)
+                    .map(|entry| entry.size)
+                    .sum();
+                profile.semantic_pack_write_ms = semantic_pack_write_ms;
+                entries
+            } else {
+                Vec::<LineSemanticPackEntry>::new()
+            };
+            // 变电源 pack 必须在 commit 前完成索引落盘，读取路径按索引区间懒读。
+            let _substation_pack_entries = if let Some(writer) = substation_writer {
                 let entries = match writer.finish() {
                     Ok(entries) => entries,
                     Err(error) => {
@@ -272,7 +318,7 @@ pub async fn extract_gim_archive(
             build_manifest_payload(
                 info,
                 metas,
-                if semantic_pack_entries.is_empty() {
+                if semantic_pack_entries.is_empty() || !line_pack_enabled {
                     None
                 } else {
                     Some(LINE_SEMANTIC_PACK_FILE.to_string())
@@ -410,6 +456,7 @@ fn build_payload(
             size,
             cache_path,
             semantic_pack_offset: None,
+            packed: false,
         });
         if !disk_first {
             blob.extend_from_slice(&bytes);

@@ -2053,7 +2053,8 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       const { saveGimIndex, saveGeometryRefs, validateGimCache } = await import('@desktop/database.js');
       await publishSubstationIndex({
         projectId, sourceSha256: session.sourceSha256 ?? '', files: filesForPersist,
-        cachePaths: localCachePathMap, tree: cbmTreeForPersist,
+        cachePaths: localCachePathMap, packedPaths: preExtracted.packedPaths,
+        tree: cbmTreeForPersist,
         ifcs: ifcEntriesForPersist, relations: fileDevRelationsForPersist,
       }, {
         isCurrent: () => state.isCurrentSession(session),

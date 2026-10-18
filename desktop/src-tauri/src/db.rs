@@ -1284,7 +1284,12 @@ fn missing_substation_sources_with_context(conn: &Connection, project_id: i64, c
         let (entry, local, size) = row.map_err(|e|e.to_string())?;
         let ext = entry.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
         if !matches!(ext.as_str(),"cbm"|"fam"|"dev"|"phm"|"mod"|"gl"|"stl"|"sch"|"std"|"sld") { continue; }
-        let valid = local.as_deref().map(|p| {
+        let packed_ok = local.is_none()
+            && size >= 0
+            && context
+                .map(|c| substation_pack_contains(&c.canonical_root, &entry, size as u64))
+                .unwrap_or(false);
+        let valid = packed_ok || local.as_deref().map(|p| {
             let path = std::path::Path::new(p);
             context.map(|c| c.contains(project_id, &entry, path).unwrap_or(false)).unwrap_or(false)
                 && readable_source_of_size(path,size)
@@ -1369,6 +1374,15 @@ const LINE_SEMANTIC_INDEX_FLAG_PACKED: u8 = 0x01;
 /// 当前六个真实线路样本的 pack 约 2--22 MB；512 MiB 足以覆盖正常工程，
 /// 同时把损坏/恶意缓存的单次响应和 Rust 分配控制在明确边界内。
 const MAX_LINE_SEMANTIC_PACK_BYTES: u64 = 512 * 1024 * 1024;
+
+/// 变电原生解压的 CBM/DEV/FAM/PHM/MOD 等源条目同样不再逐条落盘。
+///
+/// 大型变电样本可达 3.6 万个源文件，NTFS 上仅 create/open 每个文件就要
+/// 40 s 以上，暖校验又会逐条 open 读取。把它们连续写入一个 pack，并用
+/// 索引记录 offset，单条读取仍然按路径解析；IFC 保持独立文件，因为缓存
+/// 校验、尺寸比对和 web-ifc 读取都依赖它的独立路径。
+pub(crate) const SUBSTATION_PACK_FILE: &str = ".gim-substation-source.pack";
+pub(crate) const SUBSTATION_PACK_INDEX_FILE: &str = ".gim-substation-source.index";
 
 #[derive(Debug, Deserialize)]
 struct BinaryCacheWriteMeta {
@@ -1700,7 +1714,8 @@ pub(crate) struct LineSemanticPackEntry {
 /// 再一次性读取数据，避免数万次小文件 open。
 pub(crate) struct LineSemanticPackWriter {
     data_file: stdfs::File,
-    data_path: PathBuf,
+    index_path: PathBuf,
+    label: &'static str,
     entries: Vec<LineSemanticPackEntry>,
     seen_paths: HashSet<String>,
     total_bytes: u64,
@@ -1708,16 +1723,41 @@ pub(crate) struct LineSemanticPackWriter {
 
 impl LineSemanticPackWriter {
     pub(crate) fn new(staging_root: &Path) -> Result<Self, String> {
+        Self::new_named(
+            staging_root,
+            LINE_SEMANTIC_PACK_FILE,
+            LINE_SEMANTIC_INDEX_FILE,
+            "线路语义",
+        )
+    }
+
+    /// 变电原生解压：CBM/DEV/FAM/PHM/MOD 等源条目写入同一个连续 pack。
+    pub(crate) fn new_substation(staging_root: &Path) -> Result<Self, String> {
+        Self::new_named(
+            staging_root,
+            SUBSTATION_PACK_FILE,
+            SUBSTATION_PACK_INDEX_FILE,
+            "变电源",
+        )
+    }
+
+    fn new_named(
+        staging_root: &Path,
+        data_name: &str,
+        index_name: &str,
+        label: &'static str,
+    ) -> Result<Self, String> {
         reject_link(staging_root, " staging")?;
-        let data_path = staging_root.join(LINE_SEMANTIC_PACK_FILE);
+        let data_path = staging_root.join(data_name);
         let data_file = stdfs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&data_path)
-            .map_err(|e| format!("创建线路语义 pack 失败: {}", e))?;
+            .map_err(|e| format!("创建{} pack 失败: {}", label, e))?;
         Ok(Self {
             data_file,
-            data_path,
+            index_path: staging_root.join(index_name),
+            label,
             entries: Vec::new(),
             seen_paths: HashSet::new(),
             total_bytes: 0,
@@ -1731,20 +1771,20 @@ impl LineSemanticPackWriter {
     ) -> Result<CacheWriteTiming, String> {
         let normalized_path = normalize_cache_lookup_path(path);
         if !self.seen_paths.insert(normalized_path) {
-            return Err(format!("线路语义 pack 条目重复: {}", path));
+            return Err(format!("{} pack 条目重复: {}", self.label, path));
         }
         let offset = self.total_bytes;
         let size = u64::try_from(bytes.len())
-            .map_err(|e| format!("线路语义 pack 条目大小溢出: {} — {}", path, e))?;
+            .map_err(|e| format!("{} pack 条目大小溢出: {} — {}", self.label, path, e))?;
         let data_started = Instant::now();
         self.data_file
             .write_all(bytes)
-            .map_err(|e| format!("写入线路语义 pack 失败: {} — {}", path, e))?;
+            .map_err(|e| format!("写入{} pack 失败: {} — {}", self.label, path, e))?;
         let data_ms = data_started.elapsed().as_secs_f64() * 1000.0;
         self.total_bytes = self
             .total_bytes
             .checked_add(size)
-            .ok_or_else(|| "线路语义 pack 总大小溢出".to_string())?;
+            .ok_or_else(|| format!("{} pack 总大小溢出", self.label))?;
         self.entries.push(LineSemanticPackEntry {
             path: path.to_string(),
             offset,
@@ -1764,7 +1804,7 @@ impl LineSemanticPackWriter {
     pub(crate) fn record_metadata(&mut self, path: &str, size: u64) -> Result<(), String> {
         let normalized_path = normalize_cache_lookup_path(path);
         if !self.seen_paths.insert(normalized_path) {
-            return Err(format!("线路语义 pack 条目重复: {}", path));
+            return Err(format!("{} pack 条目重复: {}", self.label, path));
         }
         self.entries.push(LineSemanticPackEntry {
             path: path.to_string(),
@@ -1782,30 +1822,30 @@ impl LineSemanticPackWriter {
     pub(crate) fn finish(mut self) -> Result<Vec<LineSemanticPackEntry>, String> {
         self.data_file
             .flush()
-            .map_err(|e| format!("刷新线路语义 pack 失败: {}", e))?;
+            .map_err(|e| format!("刷新{} pack 失败: {}", self.label, e))?;
         drop(self.data_file);
 
-        let index_path = self.data_path.with_file_name(LINE_SEMANTIC_INDEX_FILE);
+        let index_path = self.index_path.clone();
         let mut index_file = stdfs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&index_path)
-            .map_err(|e| format!("创建线路语义 pack 索引失败: {}", e))?;
+            .map_err(|e| format!("创建{} pack 索引失败: {}", self.label, e))?;
         index_file
             .write_all(LINE_SEMANTIC_INDEX_MAGIC)
-            .map_err(|e| format!("写入线路语义 pack 索引失败: {}", e))?;
+            .map_err(|e| format!("写入{} pack 索引失败: {}", self.label, e))?;
         index_file
             .write_all(&[LINE_SEMANTIC_INDEX_VERSION])
-            .map_err(|e| format!("写入线路语义 pack 索引版本失败: {}", e))?;
+            .map_err(|e| format!("写入{} pack 索引版本失败: {}", self.label, e))?;
         let count = u32::try_from(self.entries.len())
-            .map_err(|_| "线路语义 pack 条目数溢出".to_string())?;
+            .map_err(|_| format!("{} pack 条目数溢出", self.label))?;
         index_file
             .write_all(&count.to_le_bytes())
-            .map_err(|e| format!("写入线路语义 pack 条目数失败: {}", e))?;
+            .map_err(|e| format!("写入{} pack 条目数失败: {}", self.label, e))?;
         for entry in &self.entries {
             let path = entry.path.as_bytes();
             let path_len = u32::try_from(path.len())
-                .map_err(|_| format!("线路语义 pack 路径过长: {}", entry.path))?;
+                .map_err(|_| format!("{} pack 路径过长: {}", self.label, entry.path))?;
             index_file
                 .write_all(&path_len.to_le_bytes())
                 .and_then(|_| index_file.write_all(path))
@@ -1814,11 +1854,11 @@ impl LineSemanticPackWriter {
                 .and_then(|_| index_file.write_all(&[
                     if entry.packed { LINE_SEMANTIC_INDEX_FLAG_PACKED } else { 0 },
                 ]))
-                .map_err(|e| format!("写入线路语义 pack 索引项失败: {} — {}", entry.path, e))?;
+                .map_err(|e| format!("写入{} pack 索引项失败: {} — {}", self.label, entry.path, e))?;
         }
         index_file
             .flush()
-            .map_err(|e| format!("刷新线路语义 pack 索引失败: {}", e))?;
+            .map_err(|e| format!("刷新{} pack 索引失败: {}", self.label, e))?;
         Ok(self.entries)
     }
 }
@@ -1827,34 +1867,36 @@ fn normalize_cache_lookup_path(path: &str) -> String {
     path.replace('\\', "/").to_lowercase()
 }
 
-/// 读取并校验线路语义 pack 索引。索引是 staging/commit 产生的受信任文件，
+/// 读取并校验 pack 索引。索引是 staging/commit 产生的受信任文件，
 /// 仍执行长度、路径和 offset 边界检查，避免损坏缓存导致 panic 或越界切片。
-fn read_line_semantic_index(
+fn read_pack_index(
     root: &Path,
+    index_file: &str,
+    label: &str,
 ) -> Result<HashMap<String, LineSemanticPackEntry>, String> {
-    let index_path = root.join(LINE_SEMANTIC_INDEX_FILE);
-    reject_link(&index_path, "线路语义 pack 索引")?;
+    let index_path = root.join(index_file);
+    reject_link(&index_path, label)?;
     let bytes = stdfs::read(&index_path)
-        .map_err(|e| format!("读取线路语义 pack 索引失败: {}", e))?;
+        .map_err(|e| format!("读取{label}索引失败: {e}"))?;
     if bytes.len() < LINE_SEMANTIC_INDEX_HEADER
         || &bytes[..4] != LINE_SEMANTIC_INDEX_MAGIC
         || (bytes[4] != LINE_SEMANTIC_INDEX_VERSION
             && bytes[4] != LINE_SEMANTIC_INDEX_LEGACY_VERSION)
     {
-        return Err("线路语义 pack 索引头无效".to_string());
+        return Err(format!("{label}索引头无效"));
     }
     let count = u32::from_le_bytes(bytes[5..9].try_into().unwrap()) as usize;
     if count > MAX_BATCH_CACHE_FILES {
-        return Err("线路语义 pack 条目数超过安全上限".to_string());
+        return Err(format!("{label}索引条目数超过安全上限"));
     }
     let mut offset = LINE_SEMANTIC_INDEX_HEADER;
     let mut result = HashMap::with_capacity(count);
     for _ in 0..count {
         let path_len_end = offset
             .checked_add(4)
-            .ok_or_else(|| "线路语义 pack 索引偏移溢出".to_string())?;
+            .ok_or_else(|| "pack 索引偏移溢出".to_string())?;
         if path_len_end > bytes.len() {
-            return Err("线路语义 pack 索引路径长度越界".to_string());
+            return Err("pack 索引路径长度越界".to_string());
         }
         let path_len = u32::from_le_bytes(bytes[offset..path_len_end].try_into().unwrap()) as usize;
         offset = path_len_end;
@@ -1868,13 +1910,13 @@ fn read_line_semantic_index(
                     Some(v)
                 }
             })
-            .ok_or_else(|| "线路语义 pack 索引条目偏移溢出".to_string())?;
+            .ok_or_else(|| "pack 索引条目偏移溢出".to_string())?;
         if path_len == 0 || path_len > 4096 || entry_end > bytes.len() {
-            return Err("线路语义 pack 索引路径或长度无效".to_string());
+            return Err("pack 索引路径或长度无效".to_string());
         }
         let path_end = offset + path_len;
         let path = String::from_utf8(bytes[offset..path_end].to_vec())
-            .map_err(|_| "线路语义 pack 索引路径不是 UTF-8".to_string())?;
+            .map_err(|_| "pack 索引路径不是 UTF-8".to_string())?;
         offset = path_end;
         validate_entry_path(&path)?;
         let entry_offset_end = offset + 8;
@@ -1887,7 +1929,7 @@ fn read_line_semantic_index(
             let flags = bytes[offset];
             offset += 1;
             if flags & !LINE_SEMANTIC_INDEX_FLAG_PACKED != 0 {
-                return Err("线路语义 pack 索引 flags 无效".to_string());
+                return Err("pack 索引 flags 无效".to_string());
             }
             flags & LINE_SEMANTIC_INDEX_FLAG_PACKED != 0
         } else {
@@ -1902,11 +1944,11 @@ fn read_line_semantic_index(
         };
         let key = normalize_cache_lookup_path(&path);
         if result.insert(key, entry).is_some() {
-            return Err("线路语义 pack 索引包含重复路径".to_string());
+            return Err("pack 索引包含重复路径".to_string());
         }
     }
     if offset != bytes.len() {
-        return Err("线路语义 pack 索引存在尾随数据".to_string());
+        return Err("pack 索引存在尾随数据".to_string());
     }
     Ok(result)
 }
@@ -2049,7 +2091,7 @@ fn read_line_semantic_pack_files(
     root: &Path,
     validate_metadata: bool,
 ) -> Result<(HashMap<String, LineSemanticPackEntry>, u64), String> {
-    let index = read_line_semantic_index(root)
+    let index = read_pack_index(root, LINE_SEMANTIC_INDEX_FILE, "线路语义 pack ")
         .map_err(|e| semantic_error("INDEX_INVALID", e))?;
     // A syntactically valid but empty index can be produced by truncating both
     // sidecars to their headers.  It is not a usable line semantic source:
@@ -2140,6 +2182,105 @@ fn read_line_semantic_pack_entry(root: &Path, entry_path: &str) -> Result<Option
             )
         })?;
     Ok(Some(data))
+}
+
+/// 变电源 pack 索引的内存缓存。
+///
+/// 一次冷打开会连续发起数十批读取；若每批都重新解析三万条索引，暖路径的
+/// 校验就会退化回秒级。缓存以索引文件的 mtime 与长度作失效条件。
+struct CachedSubstationPackIndex {
+    modified: Option<std::time::SystemTime>,
+    len: u64,
+    index: std::sync::Arc<HashMap<String, LineSemanticPackEntry>>,
+}
+
+static SUBSTATION_PACK_INDEX_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<HashMap<PathBuf, CachedSubstationPackIndex>>,
+> = std::sync::OnceLock::new();
+
+fn substation_pack_index(
+    root: &Path,
+) -> Result<std::sync::Arc<HashMap<String, LineSemanticPackEntry>>, String> {
+    let index_path = root.join(SUBSTATION_PACK_INDEX_FILE);
+    let meta = stdfs::metadata(&index_path)
+        .map_err(|e| format!("读取变电源 pack 索引失败: {e}"))?;
+    let len = meta.len();
+    let modified = meta.modified().ok();
+    let cache = SUBSTATION_PACK_INDEX_CACHE
+        .get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some(entry) = guard.get(&index_path) {
+            if entry.len == len && entry.modified == modified {
+                return Ok(entry.index.clone());
+            }
+        }
+    }
+    let index = std::sync::Arc::new(read_pack_index(
+        root,
+        SUBSTATION_PACK_INDEX_FILE,
+        "变电源 pack ",
+    )?);
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(
+            index_path,
+            CachedSubstationPackIndex { modified, len, index: index.clone() },
+        );
+    }
+    Ok(index)
+}
+
+fn substation_pack_len(root: &Path) -> Option<u64> {
+    let path = root.join(SUBSTATION_PACK_FILE);
+    stdfs::metadata(&path).ok().map(|meta| meta.len())
+}
+
+/// 从已经打开的变电源 pack 读取一个条目；批量读取整批只 open 一次。
+fn read_substation_pack_bytes(
+    root: &Path,
+    index: &HashMap<String, LineSemanticPackEntry>,
+    pack_len: u64,
+    pack_file: &mut Option<stdfs::File>,
+    entry_path: &str,
+) -> Option<Vec<u8>> {
+    let entry = index.get(&normalize_cache_lookup_path(entry_path))?;
+    if !entry.packed {
+        return None;
+    }
+    let end = entry.offset.checked_add(entry.size)?;
+    if end > pack_len {
+        return None;
+    }
+    let file = match pack_file {
+        Some(file) => file,
+        None => {
+            let path = root.join(SUBSTATION_PACK_FILE);
+            let opened = stdfs::File::open(&path).ok()?;
+            pack_file.insert(opened)
+        }
+    };
+    use std::io::{Read, Seek, SeekFrom};
+    let size = usize::try_from(entry.size).ok()?;
+    let mut data = vec![0u8; size];
+    file.seek(SeekFrom::Start(entry.offset)).ok()?;
+    file.read_exact(&mut data).ok()?;
+    Some(data)
+}
+
+/// 单条读取：CBM/DEV/FAM/MOD/STL 等在变电 pack 内按 offset 懒读。
+fn read_substation_pack_entry(root: &Path, entry_path: &str) -> Option<Vec<u8>> {
+    let index = substation_pack_index(root).ok()?;
+    let pack_len = substation_pack_len(root)?;
+    let mut file = None;
+    read_substation_pack_bytes(root, index.as_ref(), pack_len, &mut file, entry_path)
+}
+
+/// 缓存校验用：条目是否存在于 pack 且声明的原始大小一致（不解码数据）。
+fn substation_pack_contains(root: &Path, entry_path: &str, size: u64) -> bool {
+    let Ok(index) = substation_pack_index(root) else { return false };
+    match index.get(&normalize_cache_lookup_path(entry_path)) {
+        Some(entry) => entry.packed && entry.size == size,
+        None => false,
+    }
 }
 
 /// 提交一次完整的 staging 解压结果。
@@ -2596,9 +2737,14 @@ pub fn read_cached_entry(
             // 个小文件 open。source/几何查看仍沿用原来的单条 API；只有
             // pack-backed 条目才在这里按 offset 懒读，普通缓存行为不变。
             let root = cache_project_root_for_batch(&app_handle, project_id)?;
-            match read_line_semantic_pack_entry(&root, &entry_path)? {
-                Some(bytes) => bytes,
-                None => return Err(format!("读取缓存条目失败: {}", error)),
+            if let Some(bytes) = read_line_semantic_pack_entry(&root, &entry_path).ok().flatten() {
+                bytes
+            } else if let Some(bytes) = read_substation_pack_entry(&root, &entry_path) {
+                // 变电原生解压把 CBM/DEV/FAM/PHM/MOD/STL 放进同一个 pack，
+                // 只有 IFC 保留独立文件；这里按 offset 懒读同样的条目。
+                bytes
+            } else {
+                return Err(format!("读取缓存条目失败: {}", error));
             }
         }
         Err(error) => return Err(format!("读取缓存条目失败: {}", error)),
@@ -2690,12 +2836,47 @@ pub fn batch_read_cached_files(
     // 检查，避免重复 app_data_dir/canonicalize 带来的秒级开销。
     let batch_root = cache_project_root_for_batch(&app_handle, project_id)?;
     let mut path_resolver = BatchCachePathResolver::new(&batch_root)?;
+    // 变电原生解压把非 IFC 条目写入连续 pack；命中该 pack 时整批只 open 一次，
+    // 避免对两万多个语义文本条目逐个 open（冷启动的主要写/读成本）。
+    let substation_index = substation_pack_index(&batch_root).ok();
+    let substation_pack_len = substation_pack_len(&batch_root);
+    let mut substation_pack_file: Option<stdfs::File> = None;
+    let read_substation = |entry_path: &str,
+                           pack_file: &mut Option<stdfs::File>|
+     -> Option<Vec<u8>> {
+        match (substation_index.as_deref(), substation_pack_len) {
+            (Some(index), Some(pack_len)) => read_substation_pack_bytes(
+                &batch_root,
+                index,
+                pack_len,
+                pack_file,
+                entry_path,
+            ),
+            _ => None,
+        }
+    };
     let mut results = Vec::with_capacity(entry_paths.len());
     let mut total_bytes: u64 = 0;
     let mut resolve_ms = 0.0_f64;
     let mut read_ms = 0.0_f64;
     let mut hit_count: u32 = 0;
     for entry_path in &entry_paths {
+        // pack 成员直接按索引区间读取，跳过逐条路径拼接与 reparse 检查；
+        // 非 pack 条目（IFC 或旧缓存）仍走原有的受限路径解析。
+        if let Some(bytes) = read_substation(entry_path, &mut substation_pack_file) {
+            hit_count = hit_count.saturating_add(1);
+            total_bytes = total_bytes
+                .checked_add(bytes.len() as u64)
+                .ok_or_else(|| "批量读取缓存文件总量溢出".to_string())?;
+            if total_bytes > MAX_BATCH_CACHE_BYTES {
+                return Err("批量读取缓存文件总量超过安全上限".to_string());
+            }
+            results.push(BatchCacheFileResult {
+                entry_path: entry_path.clone(),
+                bytes: Some(bytes),
+            });
+            continue;
+        }
         let resolve_started = Instant::now();
         let path = match path_resolver.resolve(entry_path) {
             Ok(p) => p,
@@ -2710,7 +2891,9 @@ pub fn batch_read_cached_files(
         };
         resolve_ms += resolve_started.elapsed().as_secs_f64() * 1000.0;
         let read_started = Instant::now();
-        let bytes = stdfs::read(&path).ok();
+        let bytes = stdfs::read(&path)
+            .ok()
+            .or_else(|| read_substation(entry_path, &mut substation_pack_file));
         read_ms += read_started.elapsed().as_secs_f64() * 1000.0;
         if let Some(ref data) = bytes {
             hit_count = hit_count.saturating_add(1);
@@ -8194,6 +8377,37 @@ mod tests {
     }
 
     #[test]
+    fn substation_pack_round_trip_serves_offsets_and_sizes() {
+        let root = std::env::temp_dir().join(format!(
+            "gim-viewer-substation-pack-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        {
+            let mut writer = LineSemanticPackWriter::new_substation(&root).unwrap();
+            writer.append_with_timing("CBM/project.cbm", b"ENTITYNAME=F4System").unwrap();
+            writer.append_with_timing("DEV/a.dev", b"BASEFAMILY=x.fam").unwrap();
+            writer.append_with_timing("MOD/a.stl", b"solid").unwrap();
+            writer.finish().unwrap();
+        }
+        // Pack 成员没有独立文件，但仍可按大小通过缓存校验。
+        assert!(substation_pack_contains(&root, "cbm/project.cbm", 19));
+        assert!(!substation_pack_contains(&root, "cbm/project.cbm", 20));
+        assert!(!substation_pack_contains(&root, "cbm/missing.cbm", 19));
+        // 读取按 offset 懒取，大小写不敏感。
+        let bytes = read_substation_pack_entry(&root, "DEV\\A.DEV").unwrap();
+        assert_eq!(bytes, b"BASEFAMILY=x.fam");
+        assert!(read_substation_pack_entry(&root, "DEV/missing.dev").is_none());
+        let pack = std::fs::read(root.join(SUBSTATION_PACK_FILE)).unwrap();
+        assert_eq!(pack, b"ENTITYNAME=F4SystemBASEFAMILY=x.famsolid");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn line_semantic_pack_round_trip_is_contiguous_and_case_insensitive() {
         let root = std::env::temp_dir().join(format!(
             "gim-viewer-semantic-pack-{}-{}",
@@ -8216,7 +8430,7 @@ mod tests {
         assert_eq!(entries[0].size, 3);
         assert_eq!(entries[1].offset, 3);
 
-        let index = read_line_semantic_index(&root).unwrap();
+        let index = read_pack_index(&root, LINE_SEMANTIC_INDEX_FILE, "线路语义 pack ").unwrap();
         let first = index.get("cbm/project.cbm").unwrap();
         assert_eq!(first.path, "Cbm/project.cbm");
         let first_bytes = read_line_semantic_pack_entry(
@@ -8251,7 +8465,7 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert!(entries[0].packed);
         assert!(!entries[1].packed);
-        let index = read_line_semantic_index(&root).unwrap();
+        let index = read_pack_index(&root, LINE_SEMANTIC_INDEX_FILE, "线路语义 pack ").unwrap();
         assert_eq!(index.len(), 2);
         assert!(index.get("cbm/project.cbm").unwrap().packed);
         assert!(!index.get("mod/tower.stl").unwrap().packed);

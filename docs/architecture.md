@@ -136,6 +136,8 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 
 独立的 `gim-debug-substation-parse-copy=1` 为完整解压路径生成连续小文件加速副本；原文件仍独立落盘，副本不是权威源、不进入 v26 必需来源。副本校验包括本次提取 receipt 的大小与 SHA、路径/长度/区间及完整覆盖；失败退回 batch hydration。early job 的可选副本失败则等待完整 materialization 后使用原批量路径。`gim-debug-substation-extraction-trace=1` 仅记录完整解压的逐条时序和虚拟 checkpoint，不提前返回 command。
 
+变电原生解压把非 IFC 条目连续写入 `.gim-substation-source.pack` 并生成 `.gim-substation-source.index`（path → offset/size），IFC 仍逐条落盘，因为缓存校验、尺寸比对和 web-ifc 读取依赖独立路径。读取时 `read_cached_entry`/`batch_read_cached_files` 先按索引区间懒取，命中 pack 就跳过逐条路径解析与 reparse 检查。3.6 万条目的样本因此只需创建 13 个文件：写入阶段从约 40 s 的逐条 create/open 降到 0.5 s，暖校验也不再逐条 open。首次解析前的 hydration 只物化 CBM/DEV/FAM 语义文本（每批 2048 条），PHM/MOD/STL 由几何管线按需从 pack 读取；发布凭据把 pack 成员作为合法已缓存来源，缺失的 IFC 或未打包文件仍按原规则处理。
+
 ## 当前缓存域
 
 下表是文档中唯一的版本定义表。修改持久化含义时只失效受影响域，实际常量以链接源码为准。

@@ -18,7 +18,6 @@ export const sldOverlayContent = document.getElementById('sld-overlay-content') 
 export const sldOverlayClose = document.getElementById('sld-overlay-close') as HTMLButtonElement;
 export const propsDrawerBody = document.getElementById('props-drawer-body') as HTMLElement;
 export const propsDrawer = document.getElementById('props-drawer') as HTMLElement;
-export const btnToggleProps = document.getElementById('btn-toggle-props') as HTMLButtonElement;
 export const btnCloseProps = document.getElementById('btn-close-props') as HTMLButtonElement;
 export const btnExportProps = document.getElementById('btn-export-props') as HTMLButtonElement;
 
