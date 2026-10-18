@@ -11,6 +11,7 @@ import { debugLog } from '../utils/logger.js';
 import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 import { getFileByPath, hasFileByPath } from '../gim/fileLookup.js';
 import { getGeometryDiagnostic, geometryDiagnosticSummary, diagnosticForFailure, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
+import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
 import {
   attachDevGlbTemplatePool,
@@ -415,7 +416,9 @@ export async function loadModStlForNode(
     if (!task) {
       // No messages, camera or highlight in this shared resource promise.
       task=loadModStlForNodeImpl(state,root,() => {},session).catch((error) => {
-        if (state.isCurrentSession(session)) setGeometryDiagnostic(state,diagnosticForFailure(root.devPath,'parse-failed','raw',error instanceof Error ? error.message : String(error)));
+        if (!state.isCurrentSession(session)) return;
+        const reason = error instanceof InvalidDevGeometryError && error.sourceEvidence ? 'source-invalid' : 'parse-failed';
+        setGeometryDiagnostic(state,diagnosticForFailure(root.devPath,reason,'raw',error instanceof Error ? error.message : String(error)));
       });
       pending.set(key,task);
     }
@@ -498,7 +501,7 @@ async function loadModStlForNodeImpl(
   const parentCbmTransform = geometryNode.entityName === 'DEV_SUBDEVICE'
     ? computeCbmParentTransform(state.currentCbmTree, geometryNode.path)
     : undefined;
-  const { mods, stls } = await discoverGeometriesFromNode(geometryNode, discoveryFiles, parentCbmTransform);
+  const { mods, stls, reason } = await discoverGeometriesFromNode(geometryNode, discoveryFiles, parentCbmTransform);
   if (!state.isCurrentSession(session)) return;
 
   if (mods.length === 0 && stls.length === 0) {
@@ -508,7 +511,7 @@ async function loadModStlForNodeImpl(
     try {
       await discoverGeometriesFromDevPath(geometryNode.devPath,discoveryFiles,new THREE.Matrix4().toArray(),new Set(),0,{instances:0},{strictDependencies:true});
       if (state.isCurrentSession(session) && !getGeometryDiagnostic(state,geometryNode.devPath)) {
-        setGeometryDiagnostic(state,{devPath:geometryNode.devPath,status:'empty',source:'raw',unsupportedPrimitiveTypeCounts:{},detail:'引用遍历已完成，没有可达 MOD/STL 主几何源。'});
+        setGeometryDiagnostic(state,{devPath:geometryNode.devPath,status:'empty',source:'raw',reason:reason ?? 'unknown',unsupportedPrimitiveTypeCounts:{},detail:'引用遍历已完成，没有可达 MOD/STL 主几何源。'});
       }
     } catch (error) {
       if (state.isCurrentSession(session)) setGeometryDiagnostic(state,diagnosticForFailure(geometryNode.devPath,'missing-dependency','raw',String(error)));

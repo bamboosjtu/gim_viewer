@@ -374,7 +374,7 @@ it('a declared DEV reference to an empty PHM is empty without falsely claiming D
   const {getGeometryDiagnostic}=await import('../../gim/geometry/geometryDiagnostics.js');
   const diagnostic=getGeometryDiagnostic(state,b.devPath);
   expect(diagnostic?.status).toBe('empty');
-  expect(diagnostic?.reason).toBeUndefined();
+  expect(diagnostic?.reason).toBe('phm-no-solidmodel');
   expect(state.highlightedModState).toBeNull();
   expect(runtime.ctx.world.camera.controls.target).toEqual(target);
   expect(document.querySelector('.props-header')!.textContent).toBe('B');
