@@ -978,10 +978,11 @@ export async function loadAllIfcFiles(
 
     const { fitCameraToScene } = await import('../viewer/camera.js');
     if (!isCurrent()) return;
-    const { restoreViewState } = await import('./viewStateStore.js');
-    const restoredView = await restoreViewState(ctx, state);
+    const { restoreCameraState, restoreTreeState } = await import('./viewStateStore.js');
+    const restoredView = restoreCameraState(ctx, state);
     if (!isCurrent()) return;
     if (!state.selectionRequest?.target && !restoredView) fitCameraToScene(ctx, state);
+    if (restoredView) setTimeout(() => { if (isCurrent()) restoreTreeState(state); }, 0);
     interactiveInitialized = true;
     substationViewerInteractive = true;
     perfMark('首个 IFC 就绪', {

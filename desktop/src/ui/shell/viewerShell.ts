@@ -8,7 +8,7 @@ const AUTO_OPEN_LAST_KEY = 'gim-auto-open-last';
 const AUTO_SHOW_PROPS_KEY = 'gim-auto-show-props';
 
 export function shouldAutoOpenLastProject(): boolean {
-  try { return localStorage.getItem(AUTO_OPEN_LAST_KEY) !== '0'; } catch { return true; }
+  try { return localStorage.getItem(AUTO_OPEN_LAST_KEY) === '1'; } catch { return false; }
 }
 
 export function shouldAutoShowProps(): boolean {

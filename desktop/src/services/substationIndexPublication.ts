@@ -30,10 +30,23 @@ export async function publishSubstationIndex(input: PublicationInput, deps: Publ
     throw new Error('变电索引缺少完整源身份或语义入口');
   }
   const paths = new Map([...input.cachePaths].map(([path,value]) => [path.replace(/\\/g,'/').toLowerCase(),value]));
+  const missingPaths: string[] = [];
+  const missingSemanticPaths: string[] = [];
   for (const [path] of input.files) {
-    if (/\.(ifc|cbm|fam|dev|phm|mod|gl|stl|sch|std|sld)$/i.test(path) && !paths.get(path.replace(/\\/g,'/').toLowerCase())) {
-      throw new Error(`源文件尚未完成缓存，拒绝发布语义索引: ${path}`);
-    }
+    if (!/\.(ifc|cbm|fam|dev|phm|mod|gl|stl|sch|std|sld)$/i.test(path)) continue;
+    if (paths.get(path.replace(/\\/g,'/').toLowerCase())) continue;
+    missingPaths.push(path);
+    // Semantic publication only requires the source text needed by the CBM /
+    // FAM / DEV / PHM index. A missing MOD/STL/IFC payload can be repaired by
+    // the per-entry geometry path and must not block the semantic cache from
+    // committing forever (which would make every subsequent open cold).
+    if (/\.(cbm|fam|dev|phm)$/i.test(path)) missingSemanticPaths.push(path);
+  }
+  if (missingSemanticPaths.length) {
+    throw new Error(`语义源文件尚未完成缓存，拒绝发布索引: ${missingSemanticPaths.slice(0, 5).join('、')}${missingSemanticPaths.length > 5 ? ` 等 ${missingSemanticPaths.length} 个` : ''}`);
+  }
+  if (missingPaths.length) {
+    deps.onPhase?.('sourceCacheIncomplete', { count: missingPaths.length });
   }
   // Bounded small-text reads, shared only for this publication. Never read
   // IFC bytes here. This also prevents an unreadable FAM/DEV from becoming

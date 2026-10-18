@@ -221,10 +221,33 @@
       .sld-overlay-empty { display: grid; place-items: center; height: 100%; color: #64748b; font-size: 13px; }
       #loading {
         position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
-        padding: 7px 16px; background: rgba(11,16,22,.92); color: var(--text-1);
-        border: 1px solid rgba(255,255,255,.14); border-radius: 6px; font-size: 12px;
-        display: none; z-index: 10; max-width: 70%; text-align: center;
+        min-width: 340px; max-width: min(72%, 640px);
+        padding: 10px 14px 9px; background: rgba(11,16,22,.94); color: var(--text-1);
+        border: 1px solid rgba(255,255,255,.14); border-radius: 8px; font-size: 12px;
+        display: none; z-index: 10; text-align: left;
+        box-shadow: 0 10px 28px rgba(0,0,0,.35);
       }
+      .loading-line { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+      #loading-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #loading-elapsed { color: var(--text-3); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+      .loading-track {
+        position: relative; height: 4px; margin-top: 8px; overflow: hidden;
+        border-radius: 999px; background: rgba(255,255,255,.10);
+      }
+      #loading-bar {
+        display: block; width: 0%; height: 100%; border-radius: inherit;
+        background: repeating-linear-gradient(90deg, #2f7de6 0 14px, #5eb0ff 14px 22px);
+        transition: width .18s ease-out;
+      }
+      #loading.active #loading-bar {
+        box-shadow: 0 0 12px rgba(58,141,255,.35);
+        animation: loading-stripes 1.2s linear infinite;
+      }
+      @keyframes loading-stripes {
+        from { background-position: 0 0; }
+        to { background-position: 22px 0; }
+      }
+      #loading-stage { color: var(--text-3); font-size: 10px; font-variant-numeric: tabular-nums; }
       #empty-tip {
         position: absolute; inset: 0; display: flex; flex-direction: column;
         align-items: center; justify-content: center; color: var(--text-3);
@@ -443,7 +466,14 @@
         <!-- 中央视口 -->
         <div id="center">
           <div id="viewport">
-            <div id="loading">准备中...</div>
+            <div id="loading">
+              <div class="loading-line">
+                <span id="loading-text">准备中...</span>
+                <span id="loading-elapsed"></span>
+              </div>
+              <div class="loading-track"><i id="loading-bar"></i></div>
+              <div class="loading-line"><span id="loading-stage">准备中</span></div>
+            </div>
             <div id="empty-tip">
               <div class="empty-skeleton" aria-hidden="true"></div>
               <div class="empty-content">

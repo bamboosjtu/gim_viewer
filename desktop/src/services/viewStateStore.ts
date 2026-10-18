@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
-import type { CbmNode } from '../gim/types.js';
 
 const STORAGE_PREFIX = 'gim-view-state-v1';
 
@@ -33,7 +32,7 @@ function selectedPath(): string | null {
 
 export function saveViewState(state: AppState, ctx?: ViewerContext | null): void {
   if (!ctx) return;
-  const controls = ctx.world.camera.controls;
+  const controls = ctx.world?.camera?.controls;
   if (!controls?.getPosition || !controls.getTarget) return;
   const position = controls.getPosition(new THREE.Vector3(), false);
   const target = controls.getTarget(new THREE.Vector3(), false);
@@ -58,53 +57,36 @@ function loadStored(state: AppState): StoredViewState | null {
   } catch { return null; }
 }
 
-function findNode(root: CbmNode | null, path: string): CbmNode | null {
-  if (!root) return null;
-  const queue: CbmNode[] = [root];
-  while (queue.length > 0) {
-    const node = queue.shift()!;
-    if (node.path === path) return node;
-    queue.push(...node.children);
+/** Apply the saved camera immediately; never await camera control work here. */
+export function restoreCameraState(ctx: ViewerContext, state: AppState): boolean {
+  const stored = loadStored(state);
+  const controls = ctx.world?.camera?.controls;
+  if (!stored || !controls?.setLookAt
+    || !stored.position.every(Number.isFinite)
+    || !stored.target.every(Number.isFinite)) return false;
+  try {
+    void controls.setLookAt(
+      stored.position[0], stored.position[1], stored.position[2],
+      stored.target[0], stored.target[1], stored.target[2],
+      false,
+    );
+    state.hasFittedCamera = true;
+    return true;
+  } catch (error) {
+    console.warn('[ViewState] camera restore failed:', error);
+    return false;
   }
-  return null;
 }
 
 /**
- * Restore camera + tree state after the first usable IFC.
- * Returns true when a stored camera was applied, so the caller must skip fit.
+ * Tree expansion/selection is best effort and runs after the first usable
+ * frame. It must not read FAM/DEV or delay `hideLoading`.
  */
-export async function restoreViewState(ctx: ViewerContext, state: AppState): Promise<boolean> {
+export function restoreTreeState(state: AppState): void {
   const stored = loadStored(state);
-  if (!stored) return false;
-  let restoredCamera = false;
-  const controls = ctx.world.camera.controls;
-  if (controls?.setLookAt
-    && stored.position.every(Number.isFinite)
-    && stored.target.every(Number.isFinite)) {
-    try {
-      await controls.setLookAt(
-        stored.position[0], stored.position[1], stored.position[2],
-        stored.target[0], stored.target[1], stored.target[2],
-        false,
-      );
-      state.hasFittedCamera = true;
-      restoredCamera = true;
-    } catch (error) {
-      console.warn('[ViewState] camera restore failed:', error);
-    }
-  }
-  const { expandTreeToPaths, selectTreeRowByPath } = await import('../ui/cbmTreeView.js');
-  await expandTreeToPaths(stored.expandedPaths ?? []);
-  if (stored.selectedPath) {
-    selectTreeRowByPath(stored.selectedPath);
-    const node = findNode(state.currentCbmTree, stored.selectedPath);
-    if (node) {
-      // Rebuild the inspector content without forcing the drawer open; the
-      // user's auto-show-props setting remains authoritative.
-      void import('../ui/propsDrawer.js').then(({ showNodePropertiesBasic }) =>
-        showNodePropertiesBasic(state, node, state.beginSelection({ kind: 'cbm', key: node.path })))
-        .catch(() => { /* selection restore is best effort */ });
-    }
-  }
-  return restoredCamera;
+  if (!stored) return;
+  void import('../ui/cbmTreeView.js').then(async ({ expandTreeToPaths, selectTreeRowByPath }) => {
+    await expandTreeToPaths((stored.expandedPaths ?? []).slice(0, 48));
+    if (stored.selectedPath) selectTreeRowByPath(stored.selectedPath);
+  }).catch(() => { /* tree restore is best effort */ });
 }

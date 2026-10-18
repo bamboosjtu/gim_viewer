@@ -1241,6 +1241,35 @@ fn substation_index_receipt_matches(conn: &Connection, project_id: i64) -> bool 
     stored.is_some() && substation_index_receipt(conn,project_id).ok() == stored
 }
 
+/// Warm-open gate for the extracted-source completeness scan.
+///
+/// The receipt already binds the published index counts and parser version, and
+/// every IFC source is verified separately, so a consistent index makes the
+/// full scan of the extracted tree redundant. Geometry-cache structure is
+/// deliberately not part of this decision: a project may publish semantic
+/// index and parser version before DEV GLB caching finishes, and a missing
+/// non-IFC source is recovered per entry by the geometry readers.
+#[allow(clippy::too_many_arguments)]
+fn substation_light_source_scan(
+    has_index: bool,
+    ifc_models_count: i64,
+    cbm_nodes_count: i64,
+    ifc_entry_count: i64,
+    cached_ifc_count: i64,
+    missing_ifc_cache_paths: usize,
+    parser_version_match: bool,
+    receipt_valid: bool,
+) -> bool {
+    has_index
+        && ifc_models_count > 0
+        && cbm_nodes_count > 0
+        && ifc_entry_count > 0
+        && cached_ifc_count == ifc_entry_count
+        && missing_ifc_cache_paths == 0
+        && parser_version_match
+        && receipt_valid
+}
+
 fn missing_substation_sources(conn: &Connection, app: &tauri::AppHandle, project_id: i64) -> Result<Vec<String>,String> {
     let context = CacheValidationContext::for_project(app, project_id).ok();
     missing_substation_sources_with_context(conn, project_id, context.as_ref())
@@ -5805,18 +5834,24 @@ fn validate_gim_cache_blocking(
         }
 
         drop(ifc_timing);
-        // The 17 IFC sources are cheap to verify and are needed for cold far
-        // geometry. The remaining ~2.8k CBM/FAM/DEV/PHM/MOD/STL sources are
-        // not: their absence is isolated by the per-entry geometry readers.
-        let light_source_scan = has_index
-            && ifc_models_count > 0
-            && ifc_entry_count > 0
-            && cbm_nodes_count > 0
-            && cached_ifc_count == ifc_entry_count
-            && missing_cache_paths.is_empty()
-            && parser_version_match
-            && substation_receipt_valid
-            && geometry_structure_valid;
+        // The IFC sources are cheap to verify and are needed for cold far
+        // geometry. The remaining CBM/FAM/DEV/PHM/MOD/STL sources are not:
+        // their absence is isolated by the per-entry geometry readers, and a
+        // project can legitimately publish its semantic index before any GLB
+        // geometry cache exists. Gating this fast path on the geometry cache
+        // structure therefore made every warm open of a large project (tens of
+        // thousands of entries) re-stat the whole extracted tree, which cost
+        // more than the cold validation of an empty index.
+        let light_source_scan = substation_light_source_scan(
+            has_index,
+            ifc_models_count,
+            cbm_nodes_count,
+            ifc_entry_count as i64,
+            cached_ifc_count as i64,
+            missing_cache_paths.len(),
+            parser_version_match,
+            substation_receipt_valid,
+        );
         if !light_source_scan {
             missing_cache_paths.extend(missing_substation_sources_with_context(&conn,project_id,context.as_ref())?);
         }
@@ -7804,6 +7839,32 @@ mod tests {
                 Some("LINE_PARSER_VERSION_MISMATCH:gim-parser-v21 -> gim-line-parser-v1; LINE_SEMANTIC_PACK_INVALID")
             );
             assert_eq!(super::super::cache_miss_reason(Vec::new()), None);
+        }
+
+        #[test]
+        fn warm_source_scan_is_skipped_for_a_consistent_semantic_index() {
+            // Semantic index published, receipt valid, every IFC source cached.
+            assert!(super::super::substation_light_source_scan(
+                true, 12, 12594, 12, 12, 0, true, true
+            ));
+            // A project without any GLB geometry cache still has a complete
+            // semantic index; this helper must not depend on that cache.
+            assert!(super::super::substation_light_source_scan(
+                true, 1, 1, 1, 1, 0, true, true
+            ));
+        }
+
+        #[test]
+        fn warm_source_scan_stays_when_index_or_ifc_sources_are_incomplete() {
+            let complete = super::super::substation_light_source_scan;
+            assert!(!complete(false, 12, 12594, 12, 12, 0, true, true), "no index");
+            assert!(!complete(true, 0, 12594, 12, 12, 0, true, true), "no IFC model");
+            assert!(!complete(true, 12, 0, 12, 12, 0, true, true), "no CBM nodes");
+            assert!(!complete(true, 12, 12594, 12, 0, 0, true, true), "no IFC entries");
+            assert!(!complete(true, 12, 12594, 12, 11, 0, true, true), "missing IFC cache");
+            assert!(!complete(true, 12, 12594, 12, 12, 1, true, true), "unreadable IFC");
+            assert!(!complete(true, 12, 12594, 12, 12, 0, false, true), "parser mismatch");
+            assert!(!complete(true, 12, 12594, 12, 12, 0, true, false), "receipt mismatch");
         }
 
         #[test]
