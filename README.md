@@ -9,7 +9,7 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 
 | 平台          | 当前版本       | 下载                                                         | 主要功能                                                 |
 | ------------- | -------------- | ------------------------------------------------------------ | -------------------------------------------------------- |
-| Windows x64   | v0.0.17 Preview | [下载 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站三维模型、输电线路地图、最近工程、工程层级与属性浏览 |
+| Windows x64   | v0.0.18 Preview | [下载 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站三维模型、输电线路地图、最近工程、工程层级与属性浏览 |
 | Android ARM64 | v0.1.16 Preview | [下载 APK](https://github.com/bamboosjtu/gim_viewer/releases/download/android-v0.1.6-preview/gim-viewer-android-ae7df06cc83ebde26fc2cb17faf003d7b2fd8a2f.zip) | 输电线路地图、工程树、杆塔与导线属性、来源查看和现场定位 |
 
 历史版本及发布说明：[GitHub Releases](https://github.com/bamboosjtu/gim_viewer/releases)
@@ -44,6 +44,24 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 - **预览版本**：建议保留原始 GIM 文件，不要将应用内部缓存作为唯一的数据备份。
 
 详细技术说明见[系统架构](docs/architecture.md)、[正确性验证](docs/validation.md)和[移动端规格](docs/mobile-spec.md)。
+
+## 开源协议与第三方组件
+
+本项目源码采用 **MIT License**（见 [desktop/package.json](desktop/package.json) 的 `license` 字段）；发布二进制同时包含以下第三方组件，其许可文本随 Portable ZIP 一并分发：
+
+| 组件 | 用途 | 许可 |
+|---|---|---|
+| [7-Zip](https://www.7-zip.org/)（`7z.exe` / `7z.dll`） | 快速流式解压 GIM 内的 7z 归档 | GNU LGPL 2.1+，含 unRAR 限制；见包内 `License.txt`、`readme.txt` |
+| [web-ifc](https://github.com/ThatOpen/engine_web-ifc) | IFC 解析与几何转换 | Mozilla Public License 2.0 |
+| [That Open Engine](https://github.com/ThatOpen/engine_components)（components / fragments） | IFC 浏览与 Fragments | MIT |
+| [Three.js](https://threejs.org/) | 三维渲染 | MIT |
+| [MapLibre GL JS](https://maplibre.org/) | 线路地图 | BSD-3-Clause |
+| [Tauri](https://tauri.app/) | 桌面运行时 | MIT 或 Apache-2.0 |
+| [sevenz-rust](https://github.com/dyxmobile/sevenz-rust) | 纯 Rust 7z 解码回退 | MIT / Apache-2.0 |
+
+7-Zip 二进制来自 7-Zip 官方发行版，未修改；对应源码可从 <https://www.7-zip.org/download.html> 获取。若不再需要随包分发，可删除包内 `7z.exe`/`7z.dll`，应用会自动回退到纯 Rust 解码（速度较慢）。
+
+在线底图数据：OpenStreetMap © OpenStreetMap contributors（ODbL）；天地图 © 天地图，需在设置中自行配置 API Key。
 
 ## 目录
 

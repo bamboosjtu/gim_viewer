@@ -286,6 +286,20 @@ impl<R: Read + Seek> Seek for OffsetReader<R> {
     }
 }
 
+/// 只读取 GIM 头部并返回归档起始偏移，不打开压缩数据结构。
+/// 供外部解码器（如 7-Zip CLI）按偏移切片后解压。
+pub fn inspect_archive_header(path: &Path) -> Result<(ExtractionMetadata, u64, bool), String> {
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    if metadata.len() > 4 * 1024 * 1024 * 1024 {
+        return Err("GIM 大小超限".into());
+    }
+    let mut file = File::open(path).map_err(|e| e.to_string())?;
+    let mut prefix = vec![0; metadata.len().min(SIGNATURE_SEARCH_LIMIT as u64) as usize];
+    file.read_exact(&mut prefix).map_err(|e| e.to_string())?;
+    let (offset, info, is_sevenz) = parse_archive_prefix(&prefix)?;
+    Ok((info, offset as u64, is_sevenz))
+}
+
 fn parse_archive_prefix(data: &[u8]) -> Result<(usize, ExtractionMetadata, bool), String> {
     let offset = find_archive_offset(data)
         .ok_or_else(|| "未找到有效的 GIMPKG* 头部或压缩数据签名".to_string())?;

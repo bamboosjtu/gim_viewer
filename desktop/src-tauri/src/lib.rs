@@ -1,6 +1,7 @@
 mod db;
 mod gim_extract;
 mod gim_extract_command;
+mod seven_zip_cli;
 mod substation_parse_copy;
 mod substation_extraction_job;
 mod substation_extraction_profile;
