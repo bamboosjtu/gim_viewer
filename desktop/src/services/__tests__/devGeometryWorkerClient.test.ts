@@ -40,6 +40,8 @@ it('selection preempts queued work while old background base requests cannot sta
 });
 it('compiles alongside IFC, deduplicates templates, prioritizes queued selection and releases computation slots before downstream parsing', async () => {
   vi.stubGlobal('Worker', ControlledWorker); vi.stubGlobal('navigator', { hardwareConcurrency: 8, deviceMemory: 8 });
+  // 固定为 2 个 Worker，保持用例针对双 Worker 调度的既有断言。
+  vi.stubGlobal('localStorage', { getItem: (key: string) => key === 'gim-dev-workers' ? '2' : null, setItem() {}, removeItem() {} });
   const releaseIfc = await beginIfcGeometryWork();
   const source = new File(['<Device/>'], 'a.mod');
   const client = new DevGeometryPreprocessor([], new Map([['MOD/a.mod', source]]), () => true);
@@ -88,6 +90,7 @@ it('exported bytes apply backpressure until consumed, while completed templates 
 
 it('a crashed worker fails its task, preserves the healthy worker and bounds pool replacement attempts',async()=>{
   vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  vi.stubGlobal('localStorage',{getItem:(key:string)=>key==='gim-dev-workers'?'2':null,setItem(){},removeItem(){}});
   const client=new DevGeometryPreprocessor([],new Map(),()=>true);
   try {
     const a=client.compile('a',0,'a',1),b=client.compile('b',0,'b',1),c=client.compile('c',0,'c',1);
@@ -102,4 +105,14 @@ it('a crashed worker fails its task, preserves the healthy worker and bounds poo
     await expect(client.compile('d',0,'d',1)).rejects.toThrow('pool unavailable');
     expect(ControlledWorker.instances).toHaveLength(4);
   }finally{client.cancel();}
+});
+
+it('uses up to four workers on a many-core machine and honors the debug override',()=>{
+  vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:16,deviceMemory:8});
+  vi.stubGlobal('localStorage',{getItem:()=>null,setItem(){},removeItem(){}});
+  const auto=new DevGeometryPreprocessor([],new Map(),()=>true);
+  expect(auto.workerCount).toBe(4);auto.cancel();
+  vi.stubGlobal('localStorage',{getItem:(key:string)=>key==='gim-dev-workers'?'3':null,setItem(){},removeItem(){}});
+  const overridden=new DevGeometryPreprocessor([],new Map(),()=>true);
+  expect(overridden.workerCount).toBe(3);overridden.cancel();
 });

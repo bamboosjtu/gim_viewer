@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   loadManualCoordOffsetFromLocalStorage: vi.fn(),
   buildIfcNameIndex: vi.fn(),
   fitCameraToScene: vi.fn(),
+  fitCameraToStationOverview: vi.fn(),
   autoLoadModAndStlGeometry: vi.fn(),
   buildAndRenderCbmTree: vi.fn(),
   renderFileDevPanel: vi.fn(),
@@ -26,7 +27,10 @@ vi.mock('../../viewer/ifcLoader.js', () => ({ ensureEngineReady: mocks.ensureEng
 vi.mock('../progressiveGeometryService.js', () => ({runProgressiveDevGlbPipeline:mocks.devPipeline}));
 vi.mock('../../viewer/ifcEntryLoader.js', () => ({ loadIfcEntry: mocks.loadIfcEntry }));
 vi.mock('../../viewer/ifcNameIndex.js', () => ({ buildIfcNameIndex: mocks.buildIfcNameIndex }));
-vi.mock('../../viewer/camera.js', () => ({ fitCameraToScene: mocks.fitCameraToScene }));
+vi.mock('../../viewer/camera.js', () => ({
+  fitCameraToScene: mocks.fitCameraToScene,
+  fitCameraToStationOverview: mocks.fitCameraToStationOverview,
+}));
 vi.mock('../viewerUIBinding.js', () => ({ getViewerRuntimeWithUI: mocks.getViewerRuntimeWithUI }));
 vi.mock('../coordinateAlignmentService.js', () => ({
   syncProjectSourceToViewerFromFragments: mocks.syncProjectSourceToViewerFromFragments,
@@ -231,7 +235,7 @@ describe('Substation Loading v2 readiness lifecycle', () => {
     let callerSettled = false;
     void loading.then(() => { callerSettled = true; });
 
-    await vi.waitFor(() => expect(mocks.fitCameraToScene).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(mocks.fitCameraToStationOverview).toHaveBeenCalledTimes(1));
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(callerSettled).toBe(true);
