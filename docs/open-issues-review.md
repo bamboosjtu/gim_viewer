@@ -5,14 +5,14 @@
 
 | ID | 判定 | 证据 | 处置 |
 |---|---|---|---|
-| D-01 | 有效 | `docs/performance.md` 只有 01/03/04/B1-4 的单点数据，没有四包完整加载矩阵与 heartbeat/输入延迟门禁 | 下一轮补四包冷/暖矩阵 |
+| D-01 | 部分证据 | substation04 真冷（清 IndexedDB）：首个 IFC 9.6 s，IFC 19/19；50 s 时 DEV 348/532、当前视图准备中 185；heartbeat/输入延迟未采 | 继续补 01/02/03 与延迟门禁 |
 | D-02 | 部分处理 | 已映射 empty-device-xml、assembly-node-without-own-geometry、dev-no-solidmodel、parser-unsupported 到 serialization diagnostics；phm-no-solidmodel 仍无法区分 | 继续补 phm/unknown 与 raw 路径 |
 | D-04 | 有效 | 杆塔 HNum 预览没有 read/parse/render 拆分数据 | 需补测 |
 | D-05 | 有效 | 线路 warm 内存没有独立进程归因 | 需补测 |
 | D-06 | 关闭 | 线路 GIMPKGT 已复用内嵌 7-Zip 流式解压；line03 冷启动 smoke：0.0 s 点击 → 4.1 s 批量读取 → 5.3 s 线路工程已加载 → 9.9 s 地图就绪（111 杆塔/1081 导线段/772 跨越物） | 已实现并验证 |
 | D-11 | 有效 | substation02 摄像头 10¹⁴ mm 矩阵仍按 source-invalid 拒绝，局部保留未决策 | 保持现状并记录 |
 | D-12 | 有效 | WASM 回退/截断索引/写入失败闭环无新证据 | 需补测 |
-| D-13 | 有效 | validation 仍逐文件 reparse；未见 fail-closed 去重证据 | 需补测后再优化 |
+| D-13 | 收窄 | B1-4 validation 1.48 s，`source_scan_path_files` 0.03 s；pack 成员跳过逐条 reparse，仅 IFC 独立文件仍 open | 保留部署波动验证 |
 | D-14 | 有效 | `modAutoLoadService.ts` 仍有 geometry manifest 失效时重建整域的分支 | 评估适用范围 |
 | D-17 | 有效 | IFC 近景区域子集仍不覆盖所有类型/回退路径 | 后续扩展 |
 | D-21 | 有效 | DEV Worker 池已改为逻辑核数 60%（2–8），长尾/内存仍未验收 | 需补测 |
