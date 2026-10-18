@@ -77,8 +77,14 @@ it('current view readiness does not wait for the whole catalog', () => {
   internal.rows.set('root', occurrence(1));
   runtime.diagnostics.catalogReady = false;
   internal.ready();
+  // 视图本身的 ready 仍不等目录；但状态栏不能在整个目录未就绪时宣称“已完成”。
   expect(runtime.diagnostics.currentViewReady).toBe(true);
+  expect(runtime.diagnostics.currentViewSettled).toBe(false);
   expect(runtime.diagnostics.baseRepresentationsSettled).toBe(false);
+  expect(internal.status.mock.lastCall![0]).toContain('设备范围索引准备中');
+  runtime.diagnostics.catalogReady = true;
+  internal.ready();
+  expect(runtime.diagnostics.currentViewSettled).toBe(true);
   expect(internal.status.mock.lastCall![0]).toContain('当前视图已完成');
 });it('records default DEV current-view and base-representation product moments', () => {
   perfReset(); const { internal } = fixture(); internal.rows.set('root', occurrence(1)); internal.ready();

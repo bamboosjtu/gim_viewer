@@ -13,6 +13,7 @@ import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M } from '../viewer/geometry
 import { DEV_GEOMETRY_VERSION, DEV_SPATIAL_CATALOG_VERSION, boxTuple, tupleBox, type DevSourceBounds, type DevSpatialOccurrence } from './devSpatialCatalog.js';
 import { readDevArtifactResult, writeDevArtifactDetailed, deleteDevArtifact, type DevArtifactRead, type DevArtifactReadStatus } from '@desktop/devLodCache.js';
 import { readCachedEntry } from '@desktop/database.js';
+import { batchReadCachedFiles } from '@desktop/database.js';
 import { perfCurrentSession, perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 import { diagnosticForFailure, diagnosticFromSerialization, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 import { resetModHighlight, highlightModGroups } from '../viewer/highlight.js';
@@ -184,6 +185,50 @@ export class DevLodRuntime {
     }).finally(() => { this.pendingWrites.delete(queueKey); });
     this.pendingWrites.set(queueKey, task);
   }
+  /**
+   * 变电源 pack 下几何源默认是 lazy 的；Worker 按 DEV 逐条请求源字节，而
+   * 每次往返都要排到繁忙的主线程序列（实测单条 30–90 ms），几千次读取会
+   * 把首次几何阶段拖成数分钟。开始调度前用少量大批次 IPC 一次取回几何源，
+   * 让 Worker 后续都从内存读取；批次顺序先 DEV/PHM/STL（包围盒首用），再 MOD。
+   */
+  private async preloadSources(files: Map<string, File>): Promise<Map<string, File>> {
+    const projectId = this.session.projectId;
+    if (projectId == null || !this.current()) return files;
+    const MAX_FILE_BYTES = 8 * 1024 * 1024;
+    const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
+    const BATCH_FILES = 4096;
+    const rank = (path: string): number => {
+      const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
+      return ext === 'dev' ? 0 : ext === 'phm' ? 1 : ext === 'stl' ? 2 : ext === 'gl' ? 3 : 4;
+    };
+    const candidates = [...files.keys()]
+      .filter((path) => /\.(dev|phm|mod|stl|gl)$/i.test(path))
+      .sort((a, b) => rank(a) - rank(b));
+    if (candidates.length === 0) return files;
+    const output = new Map(files);
+    let loaded = 0;
+    for (let i = 0; i < candidates.length && loaded < MAX_TOTAL_BYTES; i += BATCH_FILES) {
+      if (!this.current()) break;
+      const chunk = candidates.slice(i, i + BATCH_FILES);
+      let result: Map<string, Uint8Array | null> | null = null;
+      try {
+        result = await batchReadCachedFiles(projectId, chunk);
+      } catch {
+        result = null;
+      }
+      if (!this.current()) break;
+      if (!result) continue;
+      for (const path of chunk) {
+        const bytes = result.get(path);
+        if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_FILE_BYTES) continue;
+        loaded += bytes.byteLength;
+        if (loaded > MAX_TOTAL_BYTES) break;
+        output.set(path, new File([bytes.slice().buffer as ArrayBuffer], path.split('/').pop() || path));
+      }
+    }
+    return output;
+  }
+
   async start(): Promise<void> {
     ensureGeometryLayers(this.state, (this.ctx.world.scene as any).three);
     if (!this.sourceIdentity && this.state.currentFiles) {
@@ -203,7 +248,15 @@ export class DevLodRuntime {
           } } as File);
       }
     }
-    this.worker = createDevGeometryPreprocessor(this.state, this.session, files);
+    // 只有刚解压完的冷路径才做几何源预取：此时源在 pack 里、几何缓存为空，
+    // 逐条 IPC 会把首次几何阶段拖成数分钟。暖路径的模板/目录缓存命中率高，
+    // 预取反而会抢走首屏时间，保持原来的按需读取。
+    const preload = this.state.currentFiles != null;
+    this.worker = createDevGeometryPreprocessor(
+      this.state,
+      this.session,
+      preload ? await this.preloadSources(files) : files,
+    );
     this.diagnostics.workerCount = this.worker.workerCount;
     this.worker.onActivity = () => this.requestReady();
     (this.ctx.world.camera as any).controls?.addEventListener('update', this.cameraSchedule);
@@ -649,7 +702,7 @@ export class DevLodRuntime {
       perfMarkProductMoment('devAllStationReady', { path: 'device-lod', occurrences: total, shown, partial, failed }, this.perf);
       perfMark('DEV all station ready', { total, shown, partial, failed }, this.perf);
     }
-    Object.assign(this.diagnostics, { currentViewSettled: stable && viewSettled, currentViewReady: ready,
+    Object.assign(this.diagnostics, { currentViewSettled: stable && this.diagnostics.catalogReady && viewSettled, currentViewReady: ready,
       baseRepresentationsSettled: nextBaseSettled,
       baseRepresentationsReady: this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseReady,
       allStationReady: nextAllReady,
@@ -669,9 +722,11 @@ export class DevLodRuntime {
     const pressure=this.worker?.resultPressure;
     this.diagnostics.resultQueuedBytes=pressure?.bytes ?? 0;this.diagnostics.resultPeakBytes=pressure?.peakBytes ?? 0;
     this.diagnostics.resultQueueCount=pressure?.count ?? 0;
-    const phase = this.diagnostics.currentViewSettled
-      ? ready ? '当前视图已完成' : '当前视图已完成，部分实例失败'
-      : `当前视图准备中${viewPending ? ` ${viewPending}` : ''}`;
+    const phase = !this.diagnostics.catalogReady
+      ? `设备范围索引准备中 ${this.diagnostics.directoryCompleted}/${total}`
+      : this.diagnostics.currentViewSettled
+        ? ready ? '当前视图已完成' : '当前视图已完成，部分实例失败'
+        : `当前视图准备中${viewPending ? ` ${viewPending}` : ''}`;
     const background = this.diagnostics.currentViewSettled && !this.diagnostics.baseRepresentationsSettled ? ' · 后台补充基础表示' : '';
     const cold = this.diagnostics.compiled, warm = this.diagnostics.lodHits;
     const failedCount = this.diagnostics.failedOccurrences;
