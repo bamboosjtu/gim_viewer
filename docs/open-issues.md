@@ -11,7 +11,7 @@ P0 为正确性或核心流程阻断，P1 为主要效率、可维护性或拟�
 
 | ID | 优先级/状态 | 当前问题 | 行动与完成条件 |
 |---|---|---|---|
-| D-02 | P1 / 待开发 | DEV 级诊断已把 empty-device-xml、assembly-node-without-own-geometry、dev-no-solidmodel、parser-unsupported 写入 serialization diagnostics，并透传到 DEV 诊断；phm-no-solidmodel 仍无法与普通空装配区分，debug/raw 路径尚未统一 | 继续补 phm-no-solidmodel 与 unknown 的区分，验证冷/暖/raw 三路径一致可检索，不能伪造几何 |
+| D-02 | P2 / 待收尾 | IR→DEV 诊断已覆盖 empty-device-xml、assembly-node-without-own-geometry、phm-no-solidmodel、dev-no-solidmodel、parser-unsupported，并透传 cold/warm serialization diagnostics；raw 回退路径与 unknown 仍未统一 | 补 raw 路径映射；验证四样本诊断可检索，不能伪造几何 |
 | D-04 | P1 / 待核验 | 杆塔 HNum/MOD 按需预览有延迟风险 | 拆分 read/parse/render，记录延迟和输入规模；必要时有界缓存或任务隔离；树、地图与快速切换不受阻 |
 | D-05 | P2 / 待核验 | 线路 warm 内存驻留归因不完整 | 独立进程分别测 JS heap、WebView/Worker/Rust RSS，切换与关闭后观察回收；据证据决定属性 lazy load |
 | D-11 | P1 / 待决策 | substation02 两个摄像头 DEV 的源 MOD Entity 矩阵含约 10¹⁴ mm 平移，34 个 occurrence 以 source-invalid 确定性缓存并显式拒绝；其他局部实体是否保留未决 | 保持源值及失败来源可追溯；如引入局部保留，必须标记 partial、证明有效子集并复核冷暖与选择，不计为完整恢复 |

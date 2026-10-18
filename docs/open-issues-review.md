@@ -5,7 +5,7 @@
 
 | ID | 判定 | 证据 | 处置 |
 |---|---|---|---|
-| D-02 | 部分处理 | 已映射 empty-device-xml、assembly-node-without-own-geometry、dev-no-solidmodel、parser-unsupported 到 serialization diagnostics；phm-no-solidmodel 仍无法区分 | 继续补 phm/unknown 与 raw 路径 |
+| D-02 | 接近完成 | IR→DEV 已覆盖 5 类原因并透传 cold/warm；raw/unknown 未统一 | 补 raw 路径 |
 | D-04 | 有效 | 杆塔 HNum 预览没有 read/parse/render 拆分数据 | 需补测 |
 | D-05 | 有效 | 线路 warm 内存没有独立进程归因 | 需补测 |
 | D-06 | 关闭 | 线路 GIMPKGT 已复用内嵌 7-Zip 流式解压；line03 冷启动 smoke：0.0 s 点击 → 4.1 s 批量读取 → 5.3 s 线路工程已加载 → 9.9 s 地图就绪（111 杆塔/1081 导线段/772 跨越物） | 已实现并验证 |
