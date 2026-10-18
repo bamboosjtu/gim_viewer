@@ -101,6 +101,38 @@ describe('serializeDevToGlb strict dependency semantics', () => {
     )).resolves.toBeNull();
   });
 
+  it('空 DEV 在诊断中记录 IR 原因', async () => {
+    const dev = file([
+      'SOLIDMODELS.NUM=1',
+      'SOLIDMODEL0=device.phm',
+      `TRANSFORMMATRIX0=${IDENTITY}`,
+    ].join('\n'), 'device.dev');
+    const phm = file([
+      'SOLIDMODELS.NUM=1',
+      'SOLIDMODEL0=empty.mod',
+      `TRANSFORMMATRIX0=${IDENTITY}`,
+      'COLOR0=',
+    ].join('\n'), 'device.phm');
+    const emptyMod = file('<?xml version="1.0"?><Device><Entities /></Device>', 'empty.mod');
+    const result = await serializeDevToGlbDetailed(
+      'DEV/device.dev',
+      new Map([
+        ['DEV/device.dev', dev],
+        ['PHM/device.phm', phm],
+        ['MOD/empty.mod', emptyMod],
+      ]),
+    );
+    expect(result.status).toBe('empty');
+    expect(result.diagnostics.reason).toBe('empty-device-xml');
+  });
+
+  it('完全没有 SOLIDMODEL 的 DEV 记录 dev-no-solidmodel', async () => {
+    const dev = file('SOLIDMODELS.NUM=0', 'device.dev');
+    const result = await serializeDevToGlbDetailed('DEV/device.dev', new Map([['DEV/device.dev', dev]]));
+    expect(result.status).toBe('empty');
+    expect(result.diagnostics.reason).toBe('dev-no-solidmodel');
+  });
+
   it('非空但未知 primitive 不会被伪装成 deterministic empty', async () => {
     const dev = file([
       'SOLIDMODELS.NUM=1',

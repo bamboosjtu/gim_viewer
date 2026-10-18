@@ -693,6 +693,52 @@ pub fn inspect_substation_entries(path: &Path, quota: &ExtractionQuota) -> Resul
     if !capability.eligible { return Err(format!("early capability not supported: {}", capability.reason)); }
     Ok(entries)
 }
+
+/// 通用 7z 归档条目清单（GIMPKGS/GIMPKGT 均可），供外部流式解码器按序切分。
+/// 只做路径、重复、配额校验，不要求 single-pass early semantic 能力。
+pub fn inspect_archive_entries(
+    path: &Path,
+    quota: &ExtractionQuota,
+) -> Result<(ExtractionMetadata, u64, Vec<(String, u64)>), String> {
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    if metadata.len() > quota.max_archive_bytes {
+        return Err(quota_err("GIM 大小超限".into()));
+    }
+    let mut file = File::open(path).map_err(|e| e.to_string())?;
+    let mut prefix = vec![0; metadata.len().min(SIGNATURE_SEARCH_LIMIT as u64) as usize];
+    file.read_exact(&mut prefix).map_err(|e| e.to_string())?;
+    let (offset, info, sevenz) = parse_archive_prefix(&prefix)?;
+    if !sevenz {
+        return Err("not-7z-archive".into());
+    }
+    let len = metadata.len() - offset as u64;
+    let reader = OffsetReader::new(file, offset as u64, len).map_err(|e| e.to_string())?;
+    let archive = sevenz_rust::SevenZReader::new(reader, len, sevenz_rust::Password::empty())
+        .map_err(|e| e.to_string())?;
+    let mut paths = std::collections::HashSet::new();
+    let mut entries = Vec::new();
+    let mut count = 0;
+    let mut total = 0;
+    for entry in &archive.archive().files {
+        let raw_path = normalize_path(&entry.name);
+        let path = if entry.is_directory() {
+            raw_path.strip_suffix('/').unwrap_or(&raw_path).to_string()
+        } else {
+            raw_path
+        };
+        validate_archive_path(&path)?;
+        if !paths.insert(path.to_ascii_lowercase()) {
+            return Err("duplicate archive path".into());
+        }
+        if entry.is_directory() {
+            continue;
+        }
+        check_declared_size(&mut count, total, &path, entry.size, len, quota)?;
+        total += entry.size;
+        entries.push((path, entry.size));
+    }
+    Ok((info, offset as u64, entries))
+}
 fn inspect_substation_preflight(path: &Path, quota: &ExtractionQuota) -> Result<(SubstationEarlyEligibility, Vec<(String,u64)>), String> {
     let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
     if metadata.len() > quota.max_archive_bytes { return Err(quota_err("GIM 大小超限".into())); }

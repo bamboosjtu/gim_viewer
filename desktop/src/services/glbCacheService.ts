@@ -32,6 +32,7 @@ import {
   XML_MOD_GEOMETRY_DIAGNOSTICS_KEY,
   type XmlModGeometryDiagnostics,
 } from '../viewer/xmlModLoader.js';
+import type { GeometryDiagnosticReason } from '../gim/geometry/geometryDiagnostics.js';
 
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
@@ -47,6 +48,7 @@ export interface DevGlbSerializationDiagnostics {
   unsupportedSourceCount: number;
   partialSourceCount: number;
   unsupportedPrimitiveTypeCounts: Record<string, number>;
+  reason?: GeometryDiagnosticReason;
   failedVisibleRootCount?: number;
   failedVisibleRoots?: { modPath: string; rootId: number; dependencies: { id: number; reason: string }[] }[];
   simplifiedBooleans?: number;
@@ -121,16 +123,17 @@ export async function serializeDevToGlbDetailed(
     discoveredModCount: discovered.mods.length,
     discoveredStlCount: discovered.stls.length,
     renderableModCount: 0,
-    renderableStlCount: 0,
-    emptySourceCount: 0,
+    renderableStlCount: 0,    emptySourceCount: 0,
     unsupportedSourceCount: 0,
     partialSourceCount: 0,
     unsupportedPrimitiveTypeCounts: {},
   };
 
   if (discovered.mods.length === 0 && discovered.stls.length === 0) {
+    diagnostics.reason = 'dev-no-solidmodel';
     return { status: 'empty', bytes: null, diagnostics };
   }
+  let sawEmptyDeviceXml = false;
 
   // 2. 加载所有 MOD + STL，烘焙 placement 到顶点，合并到 devGroup
   const { loadXmlModFromFiles, applyPlacementTransformToSceneUnits } =
@@ -195,6 +198,7 @@ export async function serializeDevToGlbDetailed(
       if (!group) continue;
       const xmlDiagnostics = readXmlDiagnostics(group);
       if (xmlDiagnostics) {
+        if (xmlDiagnostics.status === 'empty') sawEmptyDeviceXml = true;
         addUnsupportedCounts(xmlDiagnostics.unsupportedPrimitiveTypeCounts);
         diagnostics.failedVisibleRootCount = (diagnostics.failedVisibleRootCount ?? 0) + (xmlDiagnostics.failedVisibleRoots?.length ?? 0);
         diagnostics.failedVisibleRoots ??= [];
@@ -264,6 +268,9 @@ export async function serializeDevToGlbDetailed(
     // empty placeholder MOD).  This is a deterministic empty DEV, not a
     // dependency/parse failure; persist it as the manifest `empty` tombstone.
     diagnostics.status = diagnostics.unsupportedSourceCount > 0 ? 'unsupported' : 'empty';
+    diagnostics.reason = diagnostics.unsupportedSourceCount > 0
+      ? 'parser-unsupported'
+      : sawEmptyDeviceXml ? 'empty-device-xml' : 'assembly-node-without-own-geometry';
     return { status: diagnostics.status, bytes: null, diagnostics };
   }
 

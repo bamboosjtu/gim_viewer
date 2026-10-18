@@ -289,32 +289,28 @@ pub async fn extract_gim_archive(
             // 7-Zip 原生解码比 sevenz-rust 快一个数量级；归档是 7z 且随包
             // 7z.exe 可用时优先走流式外部解码，失败则保留原有解码路径。
             let mut cli_extraction: Option<Result<(crate::gim_extract::ExtractionMetadata, crate::gim_extract::ExtractionProfile), String>> = None;
-            if substation_sources && crate::seven_zip_cli::is_available() {
-                if let Ok((info, offset, true)) =
-                    crate::gim_extract::inspect_archive_header(&authorized_path)
+            if (substation_sources || line_pack_enabled) && crate::seven_zip_cli::is_available() {
+                if let Ok((info, offset, entries)) =
+                    crate::gim_extract::inspect_archive_entries(&authorized_path, &quota)
                 {
-                    if let Ok(entries) =
-                        crate::gim_extract::inspect_substation_entries(&authorized_path, &quota)
-                    {
-                        let cli_started = std::time::Instant::now();
-                        let attempted = crate::seven_zip_cli::extract_stream(
-                            &authorized_path,
-                            offset,
-                            &entries,
-                            &staging_root,
-                            &mut sink,
-                        );
-                        cli_extraction = Some(attempted.map(|()| {
-                            let elapsed = cli_started.elapsed().as_secs_f64() * 1000.0;
-                            let mut profile = crate::gim_extract::ExtractionProfile::default();
-                            profile.archive_ms = elapsed;
-                            profile.decode_ms = (elapsed - sink_ms.get()).max(0.0);
-                            profile.write_ms = sink_ms.get();
-                            profile.entry_count = entries.len();
-                            profile.total_bytes = entries.iter().map(|(_, size)| *size).sum();
-                            (info, profile)
-                        }));
-                    }
+                    let cli_started = std::time::Instant::now();
+                    let attempted = crate::seven_zip_cli::extract_stream(
+                        &authorized_path,
+                        offset,
+                        &entries,
+                        &staging_root,
+                        &mut sink,
+                    );
+                    cli_extraction = Some(attempted.map(|()| {
+                        let elapsed = cli_started.elapsed().as_secs_f64() * 1000.0;
+                        let mut profile = crate::gim_extract::ExtractionProfile::default();
+                        profile.archive_ms = elapsed;
+                        profile.decode_ms = (elapsed - sink_ms.get()).max(0.0);
+                        profile.write_ms = sink_ms.get();
+                        profile.entry_count = entries.len();
+                        profile.total_bytes = entries.iter().map(|(_, size)| *size).sum();
+                        (info, profile)
+                    }));
                 }
             }
             let extraction = match cli_extraction {
