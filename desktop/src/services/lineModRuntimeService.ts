@@ -181,7 +181,11 @@ export async function resolveLineModPaths(state: AppState, node: GimGraphNode): 
 
 /** 加载并解析节点可达的所有线路 MOD，结果按引用顺序去重。 */
 export async function loadLineModSourcesForNode(state: AppState, node: GimGraphNode): Promise<LineModRuntimeEntry[]> {
-  const key = `${state.currentSourceSha256 || (state.currentProjectId != null ? `project:${state.currentProjectId}` : IDENTITY_SOURCE)}:${node.path}`;
+  // 同一塔型的多个塔位共享相同的 MOD/DEV/PHM 引用；用引用签名而不是节点路径
+  // 作为缓存键，避免每个塔位都重新遍历 DEV→PHM 链。
+  const refs = collectLineGeometryRefs(node);
+  const signature = [refs.modPaths.slice().sort().join('|'), refs.devPaths.slice().sort().join('|'), refs.phmPaths.slice().sort().join('|')].join('#');
+  const key = `${state.currentSourceSha256 || (state.currentProjectId != null ? `project:${state.currentProjectId}` : IDENTITY_SOURCE)}:${signature}`;
   let resolveCache = resolvedPathCache.get(state);
   if (!resolveCache) { resolveCache = new Map(); resolvedPathCache.set(state, resolveCache); }
   let paths = resolveCache.get(key);
