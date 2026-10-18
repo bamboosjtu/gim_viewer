@@ -126,6 +126,21 @@ describe('serializeDevToGlb strict dependency semantics', () => {
     expect(result.diagnostics.reason).toBe('empty-device-xml');
   });
 
+  it('PHM 无 SOLIDMODEL 时记录 phm-no-solidmodel', async () => {
+    const dev = file([
+      'SOLIDMODELS.NUM=1',
+      'SOLIDMODEL0=device.phm',
+      `TRANSFORMMATRIX0=${IDENTITY}`,
+    ].join('\n'), 'device.dev');
+    const phm = file('SOLIDMODELS.NUM=0', 'device.phm');
+    const result = await serializeDevToGlbDetailed('DEV/device.dev', new Map([
+      ['DEV/device.dev', dev],
+      ['PHM/device.phm', phm],
+    ]));
+    expect(result.status).toBe('empty');
+    expect(result.diagnostics.reason).toBe('phm-no-solidmodel');
+  });
+
   it('完全没有 SOLIDMODEL 的 DEV 记录 dev-no-solidmodel', async () => {
     const dev = file('SOLIDMODELS.NUM=0', 'device.dev');
     const result = await serializeDevToGlbDetailed('DEV/device.dev', new Map([['DEV/device.dev', dev]]));

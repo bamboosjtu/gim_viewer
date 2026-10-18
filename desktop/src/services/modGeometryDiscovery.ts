@@ -22,6 +22,7 @@
  */
 
 import type { CbmNode } from '../gim/types.js';
+import type { GeometryDiagnosticReason } from '../gim/geometry/geometryDiagnostics.js';
 import type { XmlModColor } from '../gim/geometry/ir.js';
 import * as THREE from 'three';
 import { parseDev } from '../gim/geometry/devParser.js';
@@ -85,6 +86,8 @@ export interface DiscoveredStlGeometry {
 export interface DiscoveredGeometries {
   mods: DiscoveredModGeometry[];
   stls: DiscoveredStlGeometry[];
+  /** 无任何可渲染几何时的来源原因（用于 DEV 诊断）。 */
+  reason?: GeometryDiagnosticReason;
 }
 
 /**
@@ -167,10 +170,11 @@ export async function discoverGeometriesFromDevPath(
   const devText = await devFile.text();
   const devDoc = (options.parseDev ?? parseDev)(devText, normalizedDevPath);
 
-  if (devDoc.isEmpty) return empty;
+  if (devDoc.isEmpty) return { mods: [], stls: [], reason: 'dev-no-solidmodel' };
 
   const mods: DiscoveredModGeometry[] = [];
   const stls: DiscoveredStlGeometry[] = [];
+  let emptyReason: GeometryDiagnosticReason | undefined;
 
   /**
    * PHM 递归遍历（BIMBase 实测嵌套最深 4 层，docs/schema/geometry-model.md）。
@@ -206,7 +210,7 @@ export async function discoverGeometriesFromDevPath(
     const phmText = await phmFile.text();
     const phmDoc = (options.parsePhm ?? parsePhm)(phmText, phmFilePath);
 
-    if (phmDoc.isEmpty) return;
+    if (phmDoc.isEmpty) { emptyReason ??= 'phm-no-solidmodel'; return; }
 
     for (const [ordinal, phmSolid] of phmDoc.solidModels.entries()) {
       const leafReference = `${referencePath}/phm:${ordinal}`;
@@ -318,9 +322,16 @@ export async function discoverGeometriesFromDevPath(
     );
     mods.push(...child.mods);
     stls.push(...child.stls);
+    if (child.reason) emptyReason ??= child.reason;
   }
 
-  return { mods, stls };
+  return {
+    mods,
+    stls,
+    ...(mods.length === 0 && stls.length === 0
+      ? { reason: emptyReason ?? 'assembly-node-without-own-geometry' }
+      : {}),
+  };
 }
 
 function parseOptionalMatrix(raw: string | undefined): number[] {

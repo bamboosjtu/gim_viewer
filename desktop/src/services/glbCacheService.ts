@@ -130,7 +130,7 @@ export async function serializeDevToGlbDetailed(
   };
 
   if (discovered.mods.length === 0 && discovered.stls.length === 0) {
-    diagnostics.reason = 'dev-no-solidmodel';
+    diagnostics.reason = discovered.reason ?? 'dev-no-solidmodel';
     return { status: 'empty', bytes: null, diagnostics };
   }
   let sawEmptyDeviceXml = false;
@@ -270,7 +270,7 @@ export async function serializeDevToGlbDetailed(
     diagnostics.status = diagnostics.unsupportedSourceCount > 0 ? 'unsupported' : 'empty';
     diagnostics.reason = diagnostics.unsupportedSourceCount > 0
       ? 'parser-unsupported'
-      : sawEmptyDeviceXml ? 'empty-device-xml' : 'assembly-node-without-own-geometry';
+      : sawEmptyDeviceXml ? 'empty-device-xml' : (discovered.reason ?? 'assembly-node-without-own-geometry');
     return { status: diagnostics.status, bytes: null, diagnostics };
   }
 
