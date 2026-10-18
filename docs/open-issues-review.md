@@ -14,11 +14,12 @@
 | D-23 | 有效 | 大规模相机交互没有固定路线 p95/p99 数据 | 需补测 |
 | D-24 | 有效 | 属性面板第一层已实现；Pset 提升、冲突提示、虚拟化未完成 | 后续实现 |
 | D-26 | 有效 | spatial span 仍未拆分 Worker/finalize/commit | 后续埋点 |
-| D-27 | 有效 | 同进程关闭重开与 poisoned 首次 panic 证据仍缺 | 需补测 |
 | D-28 | 有效 | 别名/排序已修，任意层级分类与装配歧义仍待业务复核 | 后续复核 |
 | D-29 | 有效 | IFC Spatial 仍逐文件扫描；SHA 跨阶段复用未完成 | 后续优化 |
 
 已关闭：
+
+- D-27（同进程重开）：substation02 打开 2.4 s / 关闭 121 ms / 重开 2.2 s / 切换 500-B1-2 7.7 s / 关闭 / 重开 2.0 s；无 poisoned，AbortError 为预期取消。
 
 - D-02（DEV 诊断原因）：IR 原因已映射 empty-device-xml/assembly/dev-no-solidmodel/phm-no-solidmodel/parser-unsupported，raw 路径同步；selection 测试 25/25。
 
