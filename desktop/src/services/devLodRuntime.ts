@@ -27,6 +27,8 @@ interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.
 const normalize = (path: string) => /^dev\//i.test(path.replace(/\\/g, '/')) ? path.replace(/\\/g, '/') : `DEV/${path}`;
 /** 远景忽略最长边小于该值的构件（螺栓/线夹/间隔棒等），近景仍可按需选中加载。 */
 const FAR_TINY_DEVICE_MAX_METERS = 1.5;
+/** 相机进入该距离后，才按需解析延迟 DEV 的 PHM 范围。 */
+const NEAR_DEFERRED_DEVICE_METERS = 150;
 const hash = async (bytes: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))].map(v => v.toString(16).padStart(2, '0')).join('');
 const belongsTo = (object: THREE.Object3D, root?: THREE.Object3D) => {
   for (let parent: THREE.Object3D | null = object; parent; parent = parent.parent) if (parent === root) return true;
@@ -111,8 +113,9 @@ export class DevLodRuntime {
   private rows = new Map<string, Occurrence>();
   private sourceFailures = new Map<string, InvalidDevGeometryError>();
   private catalogHints = new Map<string, Promise<DevArtifactRead<DevSourceBounds>>>();
-  /** 大工程远景不预解析全部 PHM 范围，选中时按需解析该 DEV。 */
+  /** 大工程远景不预解析全部 PHM 范围，选中或近景时按需解析该 DEV。 */
   private deferredCatalog = new Set<string>();
+  private deferredPending = new Set<string>();
   private templates = new ByteLru<TemplateRow>(128 * 1024 * 1024, row => { row.template.dispose(); if (!this.released) this.diagnostics.templateEvictions++; });
   private worker!: DevGeometryPreprocessor;
   private anchor: THREE.Matrix4 | null = null;
@@ -585,6 +588,21 @@ export class DevLodRuntime {
     const view = createDeviceViewContext(camera, rect?.width || 1000, rect?.height || 800);
     const wanted = new Set<string>();
     this.wanted = wanted;
+    if (this.deferredCatalog.size && this.anchor) {
+      const near: string[] = [];
+      const seen = new Set<string>();
+      for (const row of this.rows.values()) {
+        const dev = row.entry.devPath;
+        if (!this.deferredCatalog.has(dev) || this.deferredPending.has(dev) || seen.has(dev)) continue;
+        const world = this.anchor.clone().multiply(createLegacyEquivalentPlacementMatrix(row.entry.placementMatrix));
+        const position = new THREE.Vector3().setFromMatrixPosition(world);
+        if (camera.position.distanceTo(position) <= NEAR_DEFERRED_DEVICE_METERS) {
+          seen.add(dev);
+          near.push(dev);
+        }
+      }
+      for (const dev of near.slice(0, 2)) void this.ensureDeferredBounds(dev);
+    }
     for (const row of this.rows.values()) {
       const selected = row.entry.rootOccurrence === this.selected;
       const terminal = row.entry.templateStatus === 'empty' || row.entry.templateStatus === 'unsupported';
@@ -807,6 +825,7 @@ export class DevLodRuntime {
   private async ensureDeferredBounds(dev: string): Promise<void> {
     if (!this.deferredCatalog.has(dev) || !this.current()) return;
     this.deferredCatalog.delete(dev);
+    this.deferredPending.add(dev);
     try {
       const bounds = await this.worker.bounds(dev);
       if (!this.current()) return;
@@ -825,6 +844,8 @@ export class DevLodRuntime {
     } catch (error) {
       this.diagnostics.errors.push(`按需范围 ${dev}: ${String(error)}`);
       if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
+    } finally {
+      this.deferredPending.delete(dev);
     }
   }
   async select(rootOccurrence: string): Promise<THREE.Group[]> {
