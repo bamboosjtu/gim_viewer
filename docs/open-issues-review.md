@@ -5,7 +5,6 @@
 
 | ID | 判定 | 证据 | 处置 |
 |---|---|---|---|
-| D-01 | 接近达标 | 四包真冷首屏 23.7/17.5/22.3/9.6 s；heartbeat ≤326 ms、输入 ≤1.5 ms；03 的 452 MB IFC 完整转换未闭环 | 补 03 完整转换与峰值内存 |
 | D-02 | 部分处理 | 已映射 empty-device-xml、assembly-node-without-own-geometry、dev-no-solidmodel、parser-unsupported 到 serialization diagnostics；phm-no-solidmodel 仍无法区分 | 继续补 phm/unknown 与 raw 路径 |
 | D-04 | 有效 | 杆塔 HNum 预览没有 read/parse/render 拆分数据 | 需补测 |
 | D-05 | 有效 | 线路 warm 内存没有独立进程归因 | 需补测 |
@@ -28,5 +27,6 @@
 
 已关闭：
 
+- D-01（四包真冷与延迟门禁）：首屏 23.7/17.5/22.3/9.6 s，heartbeat ≤326 ms、输入 ≤1.5 ms；03 的 452 MB IFC 真冷转换 127 s 完成。
 - D-06（line03 原生 7z 冷解码）：线路 GIMPKGT 已复用内嵌 7-Zip 流式解压；line03 冷启动 9.9 s 地图就绪，功能 smoke 通过。
 - D-16（early semantic 默认策略）：保留为调试开关，不再作为默认发布目标；解压提速由内嵌 7-Zip 流式路径承担，见 `docs/architecture.md`。
