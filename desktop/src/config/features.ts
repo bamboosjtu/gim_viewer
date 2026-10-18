@@ -132,19 +132,34 @@ export const LINE_BASEMAP_MODE: LineBasemapMode = 'osm-online';
  */
 export let runtimeBasemapMode: LineBasemapMode = LINE_BASEMAP_MODE;
 
+const LINE_BASEMAP_STORAGE_KEY = 'gim-line-basemap-mode';
+const LINE_BASEMAP_MODES: readonly LineBasemapMode[] = [
+  'empty', 'osm-online', 'pmtiles', 'tianditu-satellite', 'tianditu-terrain', 'tianditu-vector',
+];
+
+function readStoredBasemapMode(): LineBasemapMode {
+  try {
+    const value = localStorage.getItem(LINE_BASEMAP_STORAGE_KEY);
+    if (value && (LINE_BASEMAP_MODES as readonly string[]).includes(value)) return value as LineBasemapMode;
+  } catch { /* storage unavailable */ }
+  return LINE_BASEMAP_MODE;
+}
+
 /**
  * 设置运行时底图模式。
  *
  * 由 lineProjectView 底图切换控件调用。
  * 仅修改模块内变量，不触发 probe 重建——重建由调用方负责。
+ * 用户选择持久化到 localStorage，重新打开线路工程后沿用。
  */
 export function setRuntimeBasemapMode(mode: LineBasemapMode): void {
   runtimeBasemapMode = mode;
+  try { localStorage.setItem(LINE_BASEMAP_STORAGE_KEY, mode); } catch { /* storage unavailable */ }
 }
 
-/** 重置运行时底图模式为编译期默认值（destroyLineMapView 调用） */
+/** 重置运行时底图模式为用户上次选择（首次为编译期默认值）。 */
 export function resetRuntimeBasemapMode(): void {
-  runtimeBasemapMode = LINE_BASEMAP_MODE;
+  runtimeBasemapMode = readStoredBasemapMode();
 }
 
 /**

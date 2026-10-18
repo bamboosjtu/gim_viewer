@@ -5711,8 +5711,23 @@ fn validate_gim_cache_blocking(
         project_id,
         &source_sha256,
     );
-    let geometry_cache_version_match = geometry_cache_version_file_match
-        && check_geometry_cache_manifest(&app_handle, project_id, &source_sha256);
+    let geometry_structure_valid = geometry_cache_version_file_match && geometry_cache_manifest_valid;
+    // Warm open must not stat/open every DEV GLB and every extracted source file
+    // before it can show the first IFC/DEV progress. A structurally valid
+    // manifest plus a matching parser/index receipt is enough to enter the
+    // per-entry fast path; missing/truncated entries are isolated there.
+    let geometry_cache_version_match = if is_line {
+        false
+    } else if geometry_structure_valid {
+        true
+    } else {
+        check_geometry_cache_manifest(&app_handle, project_id, &source_sha256)
+    };
+    let substation_receipt_valid = if is_line {
+        false
+    } else {
+        substation_index_receipt_matches(&conn, project_id)
+    };
 
     // v4: 根据 project_type 分支校验
     // v5: transmission_line 增加 line_fam_source_count > 0 条件
@@ -5790,7 +5805,21 @@ fn validate_gim_cache_blocking(
         }
 
         drop(ifc_timing);
-        missing_cache_paths.extend(missing_substation_sources_with_context(&conn,project_id,context.as_ref())?);
+        // The 17 IFC sources are cheap to verify and are needed for cold far
+        // geometry. The remaining ~2.8k CBM/FAM/DEV/PHM/MOD/STL sources are
+        // not: their absence is isolated by the per-entry geometry readers.
+        let light_source_scan = has_index
+            && ifc_models_count > 0
+            && ifc_entry_count > 0
+            && cbm_nodes_count > 0
+            && cached_ifc_count == ifc_entry_count
+            && missing_cache_paths.is_empty()
+            && parser_version_match
+            && substation_receipt_valid
+            && geometry_structure_valid;
+        if !light_source_scan {
+            missing_cache_paths.extend(missing_substation_sources_with_context(&conn,project_id,context.as_ref())?);
+        }
         let valid = has_index
             && ifc_models_count > 0
             && ifc_entry_count > 0
@@ -5798,7 +5827,7 @@ fn validate_gim_cache_blocking(
             && cached_ifc_count == ifc_entry_count
             && missing_cache_paths.is_empty()
             && parser_version_match
-            && substation_index_receipt_matches(&conn,project_id);
+            && substation_receipt_valid;
 
         (
             ifc_entry_count,
@@ -5849,7 +5878,7 @@ fn validate_gim_cache_blocking(
         }
     } else {
         if !has_index { miss_reasons.push("SUBSTATION_INDEX_EMPTY".to_string()); }
-        if !substation_index_receipt_matches(&conn,project_id) { miss_reasons.push("SUBSTATION_INDEX_RECEIPT_INVALID".to_string()); }
+        if !substation_receipt_valid { miss_reasons.push("SUBSTATION_INDEX_RECEIPT_INVALID".to_string()); }
         if ifc_models_count == 0 { miss_reasons.push("IFC_MODEL_EMPTY".to_string()); }
         if ifc_entry_count == 0 { miss_reasons.push("IFC_ENTRY_EMPTY".to_string()); }
         if cbm_nodes_count == 0 { miss_reasons.push("CBM_NODE_EMPTY".to_string()); }

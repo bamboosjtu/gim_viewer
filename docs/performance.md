@@ -28,6 +28,8 @@ LOD0 基础表示使用优先且更宽的模板缓存读取通道（当前最多
 
 DEV 缓存读取必须按 `hit`、`miss`、`read-error`、`invalid`、`deferred` 分开计数；只有 `miss` 可进入冷编译，其余状态保留原因。批量读取失败须按条目隔离并可拆批重试，不能把整批有效模板当作未命中。逐模板记录 `(source SHA, DEV, LOD)` 的命中、编译、读取错误、校验失败和写入失败；编译成功但未持久化不得计为暖缓存。状态栏分别显示 LOD0/LOD1/LOD2 的缓存命中、冷编译、失败与阻塞原因，进度从 1 开始计数。
 
+暖启动的“检查本地缓存”与“登记工程记录”是分开计时的阶段。缓存结构、parser/domain 版本和索引 receipt 通过后，不逐个打开全部源文件与 GLB；只验证 17 个 IFC source，GLB 由 DEV 批读按 entry 校验。完整源扫描只用于结构/版本/receipt 失效的修复路径。诊断报告应分别列出登记、校验、索引恢复、首个 IFC、DEV 基础表示，不能把这些时间合并成一个“核对工程记录”。
+
 IFC 每文件记录 bytes、实际来源（`ifc` 冷转换 / `lod-cache` 远景缓存 / `fragments-cache` 完整缓存）、conversion、`core.load` 与缓存写入耗时；远景缓存命中不等于完整 IFC 几何就绪，区域精化另计。IFC 远景缓存写入不得阻塞 `firstUsableGeometryReady`，写入失败须单独记录且不得形成虚假的暖命中。
 
 Long Task 统计除 count/blocking/max 外保留最多 64 条样本（时间、时长、当时的活动 span），用于把主线程阻塞关联到 `core.load`、GLB 解析、场景提交等阶段；样本上限不代表全量长任务。

@@ -986,6 +986,26 @@ let currentLineInspectorSourcePaths = new Set<string>();
 
 /** 销毁线路地图及 MapLibre 资源。 */
 let mapCreationController: AbortController | null = null;
+function setStationCanvasVisible(visible: boolean): void {
+  for (const canvas of container.querySelectorAll<HTMLCanvasElement>('canvas')) {
+    if (canvas.dataset.gimRenderer === 'three' || canvas.dataset.engine?.startsWith('three.js')) {
+      canvas.style.display = visible ? 'block' : 'none';
+    }
+  }
+}
+function removeStaleLineDom(): void {
+  // A hidden/stale Three canvas must not bleed its grid through unloaded raster tiles.
+  setStationCanvasVisible(false);
+  // MapLibre may mount before an aborted async probe observes its generation.
+  // Remove every leftover line-map layer, but never the opaque Three canvas.
+  for (const element of [...container.querySelectorAll<HTMLElement>('.maplibregl-map')]) {
+    element.remove();
+  }
+  for (const canvas of [...container.querySelectorAll<HTMLCanvasElement>('canvas')]) {
+    if (canvas.dataset.gimRenderer === 'three' || canvas.dataset.engine?.startsWith('three.js')) continue;
+    canvas.remove();
+  }
+}
 function destroyLineMapResources(): void {
   mapCreationController?.abort();
   mapCreationController = null;
@@ -995,13 +1015,15 @@ function destroyLineMapResources(): void {
   }
   maplibreInteractionCleanup = [];
   if (lineMapHandle) {
-    lineMapHandle.destroy();
+    try { lineMapHandle.destroy(); } catch (error) { console.warn('[Cleanup] line map destroy failed:', error); }
     lineMapHandle = null;
   }
   if (maplibreProbeHandle) {
-    maplibreProbeHandle.destroy();
+    try { maplibreProbeHandle.destroy(); } catch (error) { console.warn('[Cleanup] MapLibre destroy failed:', error); }
     maplibreProbeHandle = null;
   }
+  removeStaleLineDom();
+  setStationCanvasVisible(true);
 }
 
 function pathMatchesReference(candidate: string, reference: string): boolean {
@@ -1474,7 +1496,8 @@ export function renderLineProjectPanels(
   // 4. 模型面板（清空占位，不显示 IFC 提示）
   renderLineModelPanel();
 
-  // 5. 主视口：渲染线路地图
+  // 5. 主视口：渲染线路地图（隐藏变电 Three canvas，避免透明瓦片透出网格）
+  setStationCanvasVisible(false);
 
   // 共性 UI 契约：状态栏右侧工程统计（docs/software-spec.md）
   setStatusRight(
@@ -1627,57 +1650,21 @@ export function renderLineProjectPanels(
     function fallbackToCanvasOnly(reason: unknown): void {
       if (fallbackToCanvasOnlyCalled) return;
       fallbackToCanvasOnlyCalled = true;
-
-      const modeLabel = basemapModeLabel(runtimeBasemapMode);
-      debugWarn(DEBUG_LINE_MAP, `[MapLibre overlay] ${modeLabel} unavailable, fallback to Canvas-only`, reason);
-
-      // 只在当前 generation 有效时执行（避免过期回调污染新工程）
+      // Tile failures are non-fatal: keep MapLibre alive so already loaded tiles
+      // remain visible and a later pan/zoom/retry can recover. Destroying the
+      // map here was why OSM/Tianditu stayed unavailable after a project switch.
       if (myGen !== maplibreProbeGeneration) return;
-
-      // 清理 interaction listeners（overlay 模式下注册的 4 个 off*）
-      for (const fn of maplibreInteractionCleanup) {
-        try { fn(); } catch { /* ignore */ }
-      }
-      maplibreInteractionCleanup = [];
-
-      // 销毁 overlay canvas handle（如果已切换到 overlay 模式）
-      if (lineMapHandle) {
-        lineMapHandle.destroy();
-        lineMapHandle = null;
-      }
-
-      // 销毁 MapLibre probe（如果已创建）
-      if (maplibreProbeHandle) {
-        maplibreProbeHandle.destroy();
-        maplibreProbeHandle = null;
-      }
-
-      // 重新渲染 Canvas-only（恢复经纬度网格、比例尺、hover/click/tooltip/树联动）
-      // M4-B2：onWireClick 在 fallback 模式下同样生效
-      lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
-        onWireClick: handleMapWireClick,
-        enableCatenary: currentLineCatenaryEnabled,
-        perfSession: perfCurrentSession(),
-      });
-      // fallback 后重新附加底图切换控件到新的图层面板
-      attachBasemapSwitcher(mapData);
-
-      // M4-A2 Finalization：上报回退状态（含可读 reason 供诊断展示）
-      // M4-A2 小修：fallback 后 MapLibre probe 已销毁，实际运行模式为 Canvas-only，
-      //             因此 maplibreEnabled=false（反映"当前是否仍有 MapLibre 在线"而非"是否曾启用过"）
-      const fallbackStatus: BasemapStatus = isTiandituMode(runtimeBasemapMode)
-        ? 'tianditu-unavailable-fallback'
-        : 'osm-unavailable-fallback';
-      setBasemapStatus(fallbackStatus, {
-        mode: runtimeBasemapMode,
-        maplibreEnabled: false,
-        fallbackReason: reason instanceof Error ? reason.message : String(reason),
-      });
-
-      // UI 状态提示
-      try {
-        showMessage(`${modeLabel}不可用，已切换为 Canvas 地图模式`);
-      } catch { /* ignore */ }
+      const modeLabel = basemapModeLabel(runtimeBasemapMode);
+      debugWarn(DEBUG_LINE_MAP, `[MapLibre overlay] ${modeLabel} tile errors`, reason);
+      setBasemapStatus(
+        isTiandituMode(runtimeBasemapMode) ? 'tianditu-unavailable-fallback' : 'osm-unavailable-fallback',
+        {
+          mode: runtimeBasemapMode,
+          maplibreEnabled: true,
+          fallbackReason: reason instanceof Error ? reason.message : String(reason),
+        },
+      );
+      try { showMessage(`${modeLabel}部分瓦片加载失败，地图仍可平移/缩放重试`); } catch { /* ignore */ }
     }
     void (async () => {
       try {
@@ -1697,11 +1684,6 @@ export function renderLineProjectPanels(
           },
           onBasemapUnavailable: fallbackToCanvasOnly,
         });
-        // 如果在 probe 创建期间已触发回退（3 次 tile error），销毁 probe 并放弃 overlay 切换
-        if (fallbackToCanvasOnlyCalled) {
-          try { probe.destroy(); } catch { /* ignore */ }
-          return;
-        }
         // 检查代次：若已过期（用户切换工程/清空场景），销毁并放弃
         if (myGen !== maplibreProbeGeneration) {
           probe.destroy();
@@ -2000,7 +1982,7 @@ function switchBasemap(
         },
         onBasemapUnavailable: fallback,
       });
-      if (fallbackCalled || myGen !== maplibreProbeGeneration) {
+      if (myGen !== maplibreProbeGeneration) {
         try { probe.destroy(); } catch { /* ignore */ }
         return;
       }

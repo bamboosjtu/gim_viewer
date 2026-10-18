@@ -355,12 +355,13 @@ async function openTauriGim(
       console.warn('[GIM] GIM source magic is unknown; content detector will be the fallback');
     }
 
-    showLoading('正在核对本地工程记录...');
+    showLoading('正在登记工程记录...');
     const { upsertGimProject } = await import('@desktop/database.js');
     const endUpsert = perfBegin('项目索引登记');
     const record = await upsertGimProject(info);
     if (state.projectGeneration !== requestGeneration) return;
     endUpsert(undefined, { projectId: record.id });
+    showLoading('正在检查本地缓存...');
 
     const sourceWithIdentity: GimSourceDescriptor = {
       ...source,

@@ -262,7 +262,7 @@ export async function createMapLibreProbe(
   // 在线 raster 模式（OSM + 天地图）下 tile error 计数 + 阈值触发 onBasemapUnavailable
   let onlineTileErrorCount = 0;
   let basemapUnavailableNotified = false;
-  const ONLINE_TILE_ERROR_THRESHOLD = 3;
+  const ONLINE_TILE_ERROR_THRESHOLD = 12;
   // 在线 raster error listener 引用，destroy 时显式清理
   // 在线 raster 模式下 onLoad 不移除 error listener（需持续监听 load 后的 tile error），
   // 因此 destroy() 必须显式 off，避免 map.remove() 之前的回调残留
@@ -281,10 +281,33 @@ export async function createMapLibreProbe(
   let detachAbort = () => {};
   try {
     await new Promise<void>((resolve, reject) => {
-    const abort = () => reject(new DOMException('Map session expired', 'AbortError'));
+    let settled = false;
+    let loadTimer: ReturnType<typeof setTimeout> | null = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (loadTimer) clearTimeout(loadTimer);
+      resolve();
+    };
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      if (loadTimer) clearTimeout(loadTimer);
+      reject(new DOMException('Map session expired', 'AbortError'));
+    };
     options?.signal?.addEventListener('abort', abort, { once: true });
     detachAbort = () => options?.signal?.removeEventListener('abort', abort);
     if (options?.signal?.aborted) { abort(); return; }
+    // Some WebView2/network combinations never deliver map `load` when raster
+    // tile requests stall. The map canvas and style already exist at this point;
+    // resolve after a bounded wait so the transparent overlay can still switch
+    // and show tiles as they arrive (instead of an opaque Canvas-only layer
+    // hiding MapLibre forever).
+    loadTimer = setTimeout(() => {
+      if (settled) return;
+      console.warn('[MapLibre probe] load event timeout; activating overlay without waiting for map.load');
+      finish();
+    }, 5000);
     const onLoad = () => {
       // 在线 raster 模式下 load 后仍需监听 tile error
       // 原因：style load 成功 ≠ 瓦片请求成功；瓦片请求在 load 后才大规模发起
@@ -308,9 +331,12 @@ export async function createMapLibreProbe(
           console.warn('[MapLibre probe] fitBounds 失败:', err);
         }
       }
-      resolve();
+      finish();
     };
     const onError = (e: unknown) => {
+      // Aborted requests during project switch are not a basemap outage.
+      if (options?.signal?.aborted) return;
+      if (/abort|cancel|ERR_ABORTED/i.test(formatMapEvent(e))) return;
       if (isOnlineRasterMode) {
         // 在线 raster 模式下瓦片 404 / 401 / 网络错误计数
         // 达到阈值后触发 onBasemapUnavailable，让调用方回退 Canvas-only
@@ -325,6 +351,8 @@ export async function createMapLibreProbe(
         return;
       }
       map.off('load', onLoad);
+      settled = true;
+      if (loadTimer) clearTimeout(loadTimer);
       reject(new Error(`MapLibre probe 初始化失败: ${formatMapEvent(e)}`));
     };
     map.once('load', onLoad);
@@ -415,6 +443,8 @@ export async function createMapLibreProbe(
         onlineErrorHandler = null;
       }
       try {
+        const glCanvas = mountDiv.querySelector('canvas');
+        if (glCanvas) { glCanvas.width = 0; glCanvas.height = 0; }
         map.remove();
       } catch (err) {
         console.warn('[MapLibre probe] map.remove() 失败:', err);

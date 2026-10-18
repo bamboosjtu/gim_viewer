@@ -78,6 +78,11 @@ export function createOsmOnlineRasterStyle(): StyleSpecification {
     },
     layers: [
       {
+        id: 'background',
+        type: 'background',
+        paint: { 'background-color': '#e6eaee' },
+      },
+      {
         id: 'osm-raster',
         type: 'raster',
         source: 'osm',
@@ -117,6 +122,11 @@ export function createTiandituSatelliteStyle(): StyleSpecification {
       },
     },
     layers: [
+      {
+        id: 'background',
+        type: 'background',
+        paint: { 'background-color': '#e6eaee' },
+      },
       {
         id: 'tianditu-img-raster',
         type: 'raster',
@@ -163,6 +173,11 @@ export function createTiandituTerrainStyle(): StyleSpecification {
     },
     layers: [
       {
+        id: 'background',
+        type: 'background',
+        paint: { 'background-color': '#e6eaee' },
+      },
+      {
         id: 'tianditu-ter-raster',
         type: 'raster',
         source: 'tianditu-ter',
@@ -207,6 +222,11 @@ export function createTiandituVectorStyle(): StyleSpecification {
       },
     },
     layers: [
+      {
+        id: 'background',
+        type: 'background',
+        paint: { 'background-color': '#e6eaee' },
+      },
       {
         id: 'tianditu-vec-raster',
         type: 'raster',

@@ -18,6 +18,17 @@ export function createViewerEngine(container: HTMLElement): ViewerContext {
   ((world as any).scene as OBC.SimpleScene).setup();
   ((world as any).scene as any).three.background = new THREE.Color(0xeeeeee);
   world.renderer = new OBC.SimpleRenderer(components, container);
+  // WebView2 keeps the previous line-map compositor layer behind a transparent
+  // WebGL canvas. OBC's renderer defaults to alpha:true/clearAlpha:0, so after
+  // switching from a line project to a substation project the old map can show
+  // through the station canvas. Force an opaque clear and tag the canvas so
+  // project cleanup preserves it.
+  const threeRenderer = (world.renderer as unknown as { three?: THREE.WebGLRenderer }).three;
+  if (threeRenderer) {
+    threeRenderer.setClearColor(0xeeeeee, 1);
+    threeRenderer.setClearAlpha(1);
+    threeRenderer.domElement.dataset.gimRenderer = 'three';
+  }
   world.camera = new OBC.OrthoPerspectiveCamera(components);
   components.init();
   components.get(OBC.Grids).create(world);

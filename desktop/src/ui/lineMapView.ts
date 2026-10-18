@@ -1824,6 +1824,14 @@ export function renderLineMap(
       cb.onchange = null;
     }
     if (resizeObserver) resizeObserver.disconnect();
+    // WebView2 can retain the last compositor surface of a removed canvas for a
+    // frame. Clear and collapse it before detaching so a line map cannot bleed
+    // its grid/tiles over the next map or the station WebGL canvas.
+    try {
+      // Resizing clears the backing store without a tracked ctx.clearRect.
+      canvas.width = 0;
+      canvas.height = 0;
+    } catch { /* ignore */ }
     if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
     if (tooltip.parentNode) tooltip.parentNode.removeChild(tooltip);
     if (fitBtn.parentNode) fitBtn.parentNode.removeChild(fitBtn);

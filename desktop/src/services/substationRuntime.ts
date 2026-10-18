@@ -1721,13 +1721,26 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   let validation: Awaited<ReturnType<typeof validateGimCache>> | null = null;
 
   if (context.projectId != null && isTauri()) {
+    showLoading('正在检查本地缓存...');
+    const endValidation = perfBegin('变电缓存校验（快速路径）', undefined, perfSession);
     try {
       validation = await validateGimCache(context.projectId, 'substation');
+      endValidation(undefined, {
+        valid: validation.valid,
+        missReason: validation.cache_miss_reason,
+        ifcEntries: validation.ifc_entry_count,
+        cachedIfc: validation.cached_ifc_count,
+        geometryManifest: validation.geometry_cache_manifest_valid,
+        geometryVersion: validation.geometry_cache_version_file_match,
+      });
     } catch (error) {
+      endValidation('（失败）', { error: error instanceof Error ? error.message : String(error) });
       console.warn('[Substation Runtime] cache validation failed, falling back to cold path:', error);
     }
     if (!state.isCurrentSession(session)) return;
   }
+
+  if (!validation?.valid) showLoading('正在解压并校验 GIM 文件...');
 
   if (validation?.valid) {
     try {

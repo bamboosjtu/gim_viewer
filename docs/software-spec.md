@@ -72,7 +72,7 @@ DEV/PHM/MOD/STL 管线自动生成、缓存并显示设备，不需要点击工�
 
 ### 底图
 
-当前默认采用 OSM 在线底图；配置天地图 Key 后可使用对应底图，服务异常时回退 OSM 或 Canvas。 Canvas 保留工程覆盖层的基本交互，不提供地理影像。 在仓库根 `.env` 配置 `VITE_TIANDITU_KEY`，启动或构建时读取；不要提交真实 Key。 底图使用保留服务署名，不进行后台批量下载或离线打包。
+当前默认采用 OSM 在线底图；配置天地图 Key 后可使用对应底图，服务异常时回退 OSM 或 Canvas。 Canvas 保留工程覆盖层的基本交互，不提供地理影像。 底图选择保存在 localStorage，重新打开线路工程不重置为默认；少量瓦片错误不会销毁已加载的 MapLibre 地图。 MapLibre load 超过 5 秒时仍激活透明 overlay，避免 Canvas-only 永久遮挡在线底图。 在仓库根 `.env` 配置 `VITE_TIANDITU_KEY`，启动或构建时读取；不要提交真实 Key。 底图使用保留服务署名，不进行后台批量下载或离线打包。
 
 ### 弧垂
 
