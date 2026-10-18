@@ -393,6 +393,12 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
     let _ = conn.execute("ALTER TABLE substation_fam_property ADD COLUMN raw_property_json TEXT", []);
     let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN substation_capability_summary_json TEXT", []);
     let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN substation_index_receipt_json TEXT", []);
+    // 两阶段发布：第一阶段提交 entries/树/IFC/关系 + receipt，第二阶段补写
+    // 几何引用与 FAM/DEV 属性；该标记让暖启动知道属性是否已补全。
+    let _ = conn.execute(
+        "ALTER TABLE gim_project ADD COLUMN substation_properties_complete INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
 
     // line_fam_property：display_key 为中文展示键，prop_key 为英文键，prop_value 可含 =
     // line_dev_property：普通 KEY=VALUE，无 display_key
@@ -1158,7 +1164,7 @@ fn save_gim_index_connection(conn: &mut Connection, payload: GimIndexPayload) ->
     // 几何引用链尚未写入，不能在此处提交 parser_version；由
     // save_geometry_refs 完成后统一提交 ready 状态。
     tx.execute(
-        "UPDATE gim_project SET parser_version = NULL, substation_parser_version = NULL, substation_index_receipt_json = NULL, project_type = 'substation', updated_at_ms = ?1, substation_capability_summary_json = ?3 WHERE id = ?2",
+        "UPDATE gim_project SET parser_version = NULL, substation_parser_version = NULL, substation_index_receipt_json = NULL, substation_properties_complete = 0, project_type = 'substation', updated_at_ms = ?1, substation_capability_summary_json = ?3 WHERE id = ?2",
         params![now, pid, payload.capability_summary_json],
     )
     .map_err(|e| format!("清空 parser_version 失败: {}", e))?;
@@ -4460,6 +4466,8 @@ pub struct GimCacheValidation {
     pub geometry_cache_manifest_valid: bool,
     /// 变电基础索引/IFC source cache 是否有效（不包含几何版本）。
     pub substation_semantic_cache_valid: bool,
+    /// 两阶段发布的第二阶段是否已完成（几何引用 + FAM/DEV 属性）。
+    pub substation_properties_complete: bool,
     /// DEV GLB geometry cache 是否有效。
     pub geometry_cache_valid: bool,
     /// 所有 IFC Fragments cache 是否完整有效（默认关闭时通常为 false）。
@@ -5940,6 +5948,17 @@ fn validate_gim_cache_blocking(
     } else {
         substation_index_receipt_matches(&conn, project_id)
     };
+    let substation_properties_complete = if is_line {
+        false
+    } else {
+        conn.query_row(
+            "SELECT COALESCE(substation_properties_complete, 0) FROM gim_project WHERE id = ?1",
+            params![project_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|value| value != 0)
+        .unwrap_or(false)
+    };
 
     // v4: 根据 project_type 分支校验
     // v5: transmission_line 增加 line_fam_source_count > 0 条件
@@ -6152,6 +6171,7 @@ fn validate_gim_cache_blocking(
         geometry_cache_version_file_match,
         geometry_cache_manifest_valid,
         substation_semantic_cache_valid,
+        substation_properties_complete,
         geometry_cache_valid: geometry_cache_version_match,
         fragments_cache_valid,
     })
@@ -7042,6 +7062,164 @@ fn save_geometry_refs_connection(conn: &mut Connection, payload: GeometryRefsPay
 
     tx.commit()
         .map_err(|e| format!("提交几何引用链事务失败: {}", e))?;
+    Ok(())
+}
+
+/// 两阶段发布的第二阶段负载：几何引用 + FAM/DEV 属性。
+#[derive(Debug, Deserialize)]
+pub struct SubstationSemanticRestPayload {
+    pub project_id: i64,
+    pub source_sha256: Option<String>,
+    pub refs: GeometryRefsPayload,
+    pub fam_properties: Vec<FamPropertyPayload>,
+    pub dev_properties: Vec<DevPropertyPayload>,
+    #[serde(default)]
+    pub capability_summary_json: Option<String>,
+}
+
+/// Tauri command：补写变电索引的几何引用与 FAM/DEV 属性。
+///
+/// 第一阶段只用内存中的树/关系提交 entries + 树 + IFC + 关系 + receipt，
+/// 让暖启动立即可用；本阶段在后台补写较慢的引用与属性，并在同一事务内
+/// 重算 receipt、置 `substation_properties_complete=1`。失败时第一阶段
+/// 的缓存仍然有效，下次暖启动会重试本阶段。
+#[tauri::command]
+pub async fn save_substation_semantic_rest(
+    app_handle: tauri::AppHandle,
+    payload: SubstationSemanticRestPayload,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app_handle.state::<DbState>();
+        let mut conn = state
+            .0
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        save_substation_semantic_rest_connection(&mut conn, payload)
+    })
+    .await
+    .map_err(|e| format!("索引补写后台任务失败: {}", e))?
+}
+
+fn save_substation_semantic_rest_connection(
+    conn: &mut Connection,
+    payload: SubstationSemanticRestPayload,
+) -> Result<(), String> {
+    if payload.refs.project_id != payload.project_id {
+        return Err("索引补写与引用链的工程标识不一致".to_string());
+    }
+    validate_geometry_refs_payload(&payload.refs)?;
+    ensure_project_exists(conn, payload.project_id)?;
+    ensure_project_source_sha(
+        conn,
+        payload.project_id,
+        payload
+            .source_sha256
+            .as_deref()
+            .or(payload.refs.source_sha256.as_deref()),
+    )?;
+    let version: Option<String> = conn
+        .query_row(
+            "SELECT substation_parser_version FROM gim_project WHERE id = ?1",
+            params![payload.project_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("读取变电版本失败: {}", e))?;
+    if version.as_deref() != Some(SUBSTATION_PARSER_VERSION) {
+        return Err("索引核心尚未提交，拒绝补写引用与属性".to_string());
+    }
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("开启事务失败: {}", e))?;
+    let now = now_ms();
+    let pid = payload.project_id;
+    for table in [
+        "substation_dev_solid_model",
+        "substation_dev_sub_device",
+        "substation_phm_solid_model",
+        "substation_fam_property",
+        "substation_dev_property",
+    ] {
+        tx.execute(&format!("DELETE FROM {} WHERE project_id = ?1", table), params![pid])
+            .map_err(|e| format!("清理 {} 失败: {}", table, e))?;
+    }
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO substation_dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order, created_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .map_err(|e| format!("预处理 substation_dev_solid_model 失败: {}", e))?;
+        for sm in &payload.refs.dev_solid_models {
+            stmt.execute(params![pid, sm.dev_path, sm.solid_model_path, sm.transform_matrix, sm.sort_order, now])
+                .map_err(|e| format!("插入 substation_dev_solid_model 失败: {}", e))?;
+        }
+    }
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO substation_dev_sub_device (project_id, dev_path, child_dev_path, transform_matrix, sort_order, created_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .map_err(|e| format!("预处理 substation_dev_sub_device 失败: {}", e))?;
+        for sd in &payload.refs.dev_sub_devices {
+            stmt.execute(params![pid, sd.dev_path, sd.child_dev_path, sd.transform_matrix, sd.sort_order, now])
+                .map_err(|e| format!("插入 substation_dev_sub_device 失败: {}", e))?;
+        }
+    }
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO substation_phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, phm_color_max_a, sort_order, created_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )
+            .map_err(|e| format!("预处理 substation_phm_solid_model 失败: {}", e))?;
+        for sm in &payload.refs.phm_solid_models {
+            stmt.execute(params![pid, sm.phm_path, sm.solid_model_path, sm.transform_matrix, sm.color, sm.phm_color_max_a, sm.sort_order, now])
+                .map_err(|e| format!("插入 substation_phm_solid_model 失败: {}", e))?;
+        }
+    }
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO substation_fam_property (project_id, source_path, section_name, prop_key, prop_value, sort_order, created_at_ms, raw_property_json, source_line)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            )
+            .map_err(|e| format!("预处理 substation_fam_property 失败: {}", e))?;
+        for fp in &payload.fam_properties {
+            stmt.execute(params![
+                pid,
+                fp.source_path,
+                fp.section_name,
+                fp.prop_key,
+                fp.prop_value,
+                fp.sort_order,
+                now,
+                fp.raw_property_json,
+                fp.source_line.unwrap_or(fp.sort_order + 1)
+            ])
+            .map_err(|e| format!("插入 substation_fam_property 失败: {}", e))?;
+        }
+    }
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO substation_dev_property (project_id, dev_path, prop_key, prop_value, created_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .map_err(|e| format!("预处理 substation_dev_property 失败: {}", e))?;
+        for dp in &payload.dev_properties {
+            stmt.execute(params![pid, dp.dev_path, dp.prop_key, dp.prop_value, now])
+                .map_err(|e| format!("插入 substation_dev_property 失败: {}", e))?;
+        }
+    }
+    let receipt = substation_index_receipt(&tx, pid)?;
+    tx.execute(
+        "UPDATE gim_project SET substation_index_receipt_json = ?1, substation_properties_complete = 1, substation_capability_summary_json = COALESCE(?4, substation_capability_summary_json), updated_at_ms = ?2 WHERE id = ?3",
+        params![receipt, now, pid, payload.capability_summary_json],
+    )
+    .map_err(|e| format!("提交索引补写凭据失败: {}", e))?;
+    tx.commit()
+        .map_err(|e| format!("提交索引补写事务失败: {}", e))?;
     Ok(())
 }
 

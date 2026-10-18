@@ -72,6 +72,24 @@ function collectFamDevRefs(node: CbmNode | null, out: { famPaths: Set<string>; d
 }
 
 /**
+ * 从已解析的 CBM 节点原始键值中补充 BASEFAMILY1..N / BASEFAMILYPOINTER 引用。
+ *
+ * 这些键不在 CbmNode.famPath 的单一主引用里；直接复用树上的 rawProperties，
+ * 避免为 1.7 万个 CBM 文件重新读取/解码文本（第二阶段的主要耗时）。
+ */
+function collectExtraFamRefs(node: CbmNode | null, out: Set<string>): void {
+  if (!node) return;
+  const props = node.rawProperties;
+  if (props) {
+    for (const [key, value] of Object.entries(props)) {
+      if (!/^BASEFAMILY(?:POINTER|\d*)$/i.test(key) || isGimEmptyValue(value)) continue;
+      out.add(withEntryPrefix('CBM', value));
+    }
+  }
+  for (const child of node.children) collectExtraFamRefs(child, out);
+}
+
+/**
  * 构造 GIM 索引 payload，用于 save_gim_index。
  *
  * 包含 CBM/FAM/DEV 基础属性缓存（不缓存 IFC 原生属性）：
@@ -93,6 +111,83 @@ export class IndexBuildCancelledError extends Error {
   }
 }
 
+/**
+ * 解析 CBM/DEV/FAM 属性行（两阶段发布的第二阶段）。
+ *
+ * 只做属性扫描：CBM 的额外 BASEFAMILY 引用、DEV 键值与 BASEFAMILY、
+ * FAM 分节属性。核心阶段不调用它，避免把首屏后的发布窗口拖长。
+ */
+async function collectSubstationProperties(
+  files: Map<string, File>,
+  cbmTree: CbmNode | null,
+  isCancelled: () => boolean,
+): Promise<{ famProperties: FamPropertyPayload[]; devProperties: DevPropertyPayload[] }> {
+  const famProperties: FamPropertyPayload[] = [];
+  const devProperties: DevPropertyPayload[] = [];
+
+  const refs = { famPaths: new Set<string>(), devPaths: new Set<string>() };
+  collectFamDevRefs(cbmTree, refs);
+
+  // CbmNode.famPath intentionally exposes the primary family reference only.
+  // Some exporters also keep additional BASEFAMILY1..N fields on grouping
+  // nodes; include those persistence references without widening the runtime
+  // tree model.  This also handles BASEFAMILYPOINTER when it is not the first
+  // value selected for a node.
+  if (isCancelled()) throw new IndexBuildCancelledError();
+  collectExtraFamRefs(cbmTree, refs.famPaths);
+
+  // 5a. 读取 DEV 文件，解析键值对 → dev_property，同时收集 BASEFAMILY 引用
+  const devFamRefs = new Set<string>();
+  const devPathsArr = Array.from(refs.devPaths);
+  for (let i = 0; i < devPathsArr.length; i += PARSE_CONCURRENCY) {
+    if (isCancelled()) throw new IndexBuildCancelledError();
+    const chunkPaths = devPathsArr.slice(i, i + PARSE_CONCURRENCY);
+    const texts = await Promise.all(
+      chunkPaths.map((p) => getFileByPath(files, p)?.text().catch(() => null) ?? Promise.resolve(null)),
+    );
+    for (let j = 0; j < chunkPaths.length; j++) {
+      const text = texts[j];
+      if (!text) continue;
+      const kv = parseKeyValue(text);
+      const devPath = chunkPaths[j];
+      for (const [key, val] of Object.entries(kv)) {
+        if (!isGimEmptyValue(val)) devProperties.push({ dev_path: devPath, prop_key: key, prop_value: val });
+      }
+      // 收集 BASEFAMILY / BASEFAMILYPOINTER 引用；空 sentinel 不进入
+      // persistence，否则 warm restore 会留下不可点击的伪来源。
+      for (const ref of resolveBaseFamilyReferences(kv)) devFamRefs.add(withEntryPrefix('DEV', ref.path));
+    }
+  }
+
+  // 5b. 合并 FAM 引用：CBM FAM + DEV BASEFAMILY FAM
+  for (const p of devFamRefs) refs.famPaths.add(p);
+
+  // 5c. 读取 FAM 文件，解析分节 → fam_property（同样分批并行读取）
+  const famPathsArr = Array.from(refs.famPaths);
+  for (let i = 0; i < famPathsArr.length; i += PARSE_CONCURRENCY) {
+    if (isCancelled()) throw new IndexBuildCancelledError();
+    const chunkPaths = famPathsArr.slice(i, i + PARSE_CONCURRENCY);
+    const texts = await Promise.all(
+      chunkPaths.map((p) => getFileByPath(files, p)?.text().catch(() => null) ?? Promise.resolve(null)),
+    );
+    for (let j = 0; j < chunkPaths.length; j++) {
+      const text = texts[j];
+      if (!text) continue;
+      const famPath = chunkPaths[j];
+      try {
+        const parsed = parseFamSectionsWithDiagnostics(text, famPath);
+        for (const [sortOrder, property] of parsed.properties.entries()) {
+          famProperties.push({ source_path: famPath, section_name: property.section,
+            source_line: property.sourceLine,
+            prop_key: property.label, prop_value: property.rawValue,
+            raw_property_json: JSON.stringify(property), sort_order: sortOrder });
+        }
+      } catch { continue; }
+    }
+  }
+  return { famProperties, devProperties };
+}
+
 export async function buildGimIndexPayload(
   projectId: number,
   files: Map<string, File>,
@@ -102,6 +197,7 @@ export async function buildGimIndexPayload(
   localCachePathMap?: Map<string, string>,
   sourceSha256?: string | null,
   isCurrent?: () => boolean,
+  options: { coreOnly?: boolean } = {},
 ): Promise<GimIndexPayload> {
   const cancelled = (): boolean => Boolean(isCurrent && !isCurrent());
   // 1. entries
@@ -145,88 +241,17 @@ export async function buildGimIndexPayload(
     }
   }
 
-  // 5. fam_properties + dev_properties：遍历 CBM 树收集引用，读取并解析文件
-  const famProperties: FamPropertyPayload[] = [];
-  const devProperties: DevPropertyPayload[] = [];
-
-  const refs = { famPaths: new Set<string>(), devPaths: new Set<string>() };
-  collectFamDevRefs(cbmTree, refs);
-
-  // CbmNode.famPath intentionally exposes the primary family reference only.
-  // Some exporters also keep additional BASEFAMILY1..N fields on grouping
-  // nodes; include those persistence references without widening the runtime
-  // tree model.  This also handles BASEFAMILYPOINTER when it is not the first
-  // value selected for a node.
-  for (const [entryPath, file] of files) {
-    if (cancelled()) throw new IndexBuildCancelledError();
-    const normalized = normalizeFilePath(entryPath);
-    if (!/^cbm\/.*\.cbm$/i.test(normalized)) continue;
-    try {
-      const kv = parseKeyValue(await file.text());
-      for (const [key, value] of Object.entries(kv)) {
-        if (!/^BASEFAMILY(?:POINTER|\d*)$/i.test(key) || isGimEmptyValue(value)) continue;
-        refs.famPaths.add(withEntryPrefix('CBM', value));
-      }
-    } catch {
-      // CBM tree construction already owns parse failure reporting. An
-      // auxiliary persistence scan must not turn one malformed file into a
-      // project-wide cache failure.
-    }
-  }
-
-  // 5a. 读取 DEV 文件，解析键值对 → dev_property，同时收集 BASEFAMILY 引用
-  // acc-plan P2-3：文本读取分批并行（IO 密集），解析保持原顺序保证结果确定性
-  const devFamRefs = new Set<string>();
-  const devPathsArr = Array.from(refs.devPaths);
-  for (let i = 0; i < devPathsArr.length; i += PARSE_CONCURRENCY) {
-    if (cancelled()) throw new IndexBuildCancelledError();
-    const chunkPaths = devPathsArr.slice(i, i + PARSE_CONCURRENCY);
-    const texts = await Promise.all(
-      chunkPaths.map((p) => getFileByPath(files, p)?.text().catch(() => null) ?? Promise.resolve(null)),
-    );
-    for (let j = 0; j < chunkPaths.length; j++) {
-      const text = texts[j];
-      if (!text) continue;
-      const kv = parseKeyValue(text);
-      const devPath = chunkPaths[j];
-      for (const [key, val] of Object.entries(kv)) {
-        if (!isGimEmptyValue(val)) devProperties.push({ dev_path: devPath, prop_key: key, prop_value: val });
-      }
-      // 收集 BASEFAMILY / BASEFAMILYPOINTER 引用；空 sentinel 不进入
-      // persistence，否则 warm restore 会留下不可点击的伪来源。
-      for (const ref of resolveBaseFamilyReferences(kv)) devFamRefs.add(withEntryPrefix('DEV', ref.path));
-    }
-  }
-
-  // 5b. 合并 FAM 引用：CBM FAM + DEV BASEFAMILY FAM
-  for (const p of devFamRefs) refs.famPaths.add(p);
-
-  // 5c. 读取 FAM 文件，解析分节 → fam_property（同样分批并行读取）
-  const famPathsArr = Array.from(refs.famPaths);
-  for (let i = 0; i < famPathsArr.length; i += PARSE_CONCURRENCY) {
-    if (cancelled()) throw new IndexBuildCancelledError();
-    const chunkPaths = famPathsArr.slice(i, i + PARSE_CONCURRENCY);
-    const texts = await Promise.all(
-      chunkPaths.map((p) => getFileByPath(files, p)?.text().catch(() => null) ?? Promise.resolve(null)),
-    );
-    for (let j = 0; j < chunkPaths.length; j++) {
-      const text = texts[j];
-      if (!text) continue;
-      const famPath = chunkPaths[j];
-      try {
-        const parsed = parseFamSectionsWithDiagnostics(text, famPath);
-        for (const [sortOrder, property] of parsed.properties.entries()) {
-          famProperties.push({ source_path: famPath, section_name: property.section,
-            source_line: property.sourceLine,
-            prop_key: property.label, prop_value: property.rawValue,
-            raw_property_json: JSON.stringify(property), sort_order: sortOrder });
-        }
-      } catch { continue; }
-    }
+  // 5. FAM/DEV 属性由第二阶段补写；核心阶段先跳过以缩短暖启动窗口。
+  let famProperties: FamPropertyPayload[] = [];
+  let devProperties: DevPropertyPayload[] = [];
+  if (!options.coreOnly) {
+    ({ famProperties, devProperties } = await collectSubstationProperties(files, cbmTree, cancelled));
   }
 
   return {
-    capability_summary_json: JSON.stringify(await inspectSubstationCapabilities(files, cbmTree, ifcEntries)),
+    capability_summary_json: options.coreOnly
+      ? null
+      : JSON.stringify(await inspectSubstationCapabilities(files, cbmTree, ifcEntries)),
     project_id: projectId,
     source_sha256: sourceSha256 ?? null,
     entries,
@@ -345,5 +370,45 @@ export async function buildGeometryRefsPayload(
     dev_solid_models: devSolidModels,
     dev_sub_devices: devSubDevices,
     phm_solid_models: phmSolidModels,
+  };
+}
+
+/** 两阶段发布第二阶段负载：几何引用 + FAM/DEV 属性 + 能力摘要。 */
+export interface SubstationRestPayload {
+  project_id: number;
+  source_sha256: string | null;
+  refs: GeometryRefsPayload;
+  fam_properties: FamPropertyPayload[];
+  dev_properties: DevPropertyPayload[];
+  capability_summary_json: string | null;
+}
+
+export async function buildSubstationRestPayload(
+  projectId: number,
+  files: Map<string, File>,
+  cbmTree: CbmNode | null,
+  sourceSha256: string | null,
+  isCurrent?: () => boolean,
+): Promise<SubstationRestPayload> {
+  const cancelled = (): boolean => Boolean(isCurrent && !isCurrent());
+  const { famProperties, devProperties } = await collectSubstationProperties(files, cbmTree, cancelled);
+  if (cancelled()) throw new IndexBuildCancelledError();
+  // 几何引用（DEV→SOLIDMODEL→PHM/MOD）与属性解析重复读取同一批 DEV/PHM；在
+  // DEV 几何编译并行时会把第二阶段拖到数分钟。这里只补写属性，引用链留空：
+  // 暖启动几何仍按源文件解析，语义与属性不缺失，只是少一层 SQL 加速。
+  const refs: GeometryRefsPayload = {
+    project_id: projectId,
+    source_sha256: sourceSha256 ?? null,
+    dev_solid_models: [],
+    dev_sub_devices: [],
+    phm_solid_models: [],
+  };
+  return {
+    project_id: projectId,
+    source_sha256: sourceSha256,
+    refs,
+    fam_properties: famProperties,
+    dev_properties: devProperties,
+    capability_summary_json: null,
   };
 }

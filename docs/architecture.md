@@ -158,9 +158,9 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 
 SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `powerline_*`。 FAM 来源记录使用 `(project_id, source_path, source_line)` 区分物理行，不用归一化键覆盖重复原文。
 
-变电原生解压完成后返回全部已落盘条目的缓存路径。核心语义就绪且完整源文件可读时，独立发布 CBM/FAM/DEV/FileDevRelation 与 DEV/PHM 引用索引，不等待 DEV 编译、IFC Preview、Spatial 或 Fragments。发布过程只准备有界批次的小文本，不再次通过 IPC 读取 IFC 字节；WASM 回退必须先完成源文件写入，并沿用重任务协调器以免与用户精化并行争用大量资源。
+变电原生解压完成后返回全部已落盘条目的缓存路径。核心语义就绪且完整源文件可读时，按两阶段发布索引，不等待 DEV 编译、IFC Preview、Spatial 或 Fragments：第一阶段只使用内存中的 CBM 树、IFC 清单和 FileDevRelation 写入 entries/树/IFC/关系，并用空的引用链提交版本与 receipt（本机交互后约 2–5 s 完成，暖启动立即可用）；第二阶段在后台解析 FAM/DEV 属性，在单事务中替换两张属性表、重算 receipt 并置 `substation_properties_complete=1`。几何引用链（DEV→SOLIDMODEL→PHM/MOD）第二阶段暂不重解析：它与属性解析重复读取同一批 DEV/PHM，暖启动几何按源文件回退解析仍是正确路径，只少一层 SQL 加速。若第二阶段被中断（关闭或切换工程），第一阶段缓存仍有效，下次暖启动检测到标记为 0 时用已解压源补写。状态栏显示“索引发布中 → 暖启动已就绪 · 属性补写中 → 索引已发布”，失败保留原因供悬停查看。发布过程只准备有界批次的小文本，不再次通过 IPC 读取 IFC 字节；WASM 回退必须先完成源文件写入，并沿用重任务协调器以免与用户精化并行争用大量资源。
 
-`save_gim_index` 清空变电域版本与发布凭据，`save_geometry_refs` 在现有事务中最终提交版本和 `substation_index_receipt_json`。凭据记录源 SHA、语义版本及九张语义/引用表行数；恢复时校验凭据、IFC 清单、必需缓存路径、文件大小与可读性。源改变、未完成写入、删行或缺源均不能作为合法语义 HIT。空 FAM 的零字节文件有效。凭据用于完整发布与截断检测，不是逐行内容签名，也不代表 GLB、Spatial 或 Fragments 完成；变电语义旧版本独立失效，不清除其他域。
+`save_gim_index` 清空变电域版本、发布凭据与 `substation_properties_complete`；核心阶段用 `save_geometry_refs` 的空引用提交版本和 `substation_index_receipt_json`；第二阶段 `save_substation_semantic_rest` 在同一事务内补写属性（可同时写引用，当前传空）并刷新凭据。凭据记录源 SHA、语义版本及九张语义/引用表行数；恢复时校验凭据、IFC 清单、必需缓存路径、文件大小与可读性。源改变、未完成写入、删行或缺源均不能作为合法语义 HIT。空 FAM 的零字节文件有效。凭据用于完整发布与截断检测，不是逐行内容签名，也不代表 GLB、Spatial 或 Fragments 完成；变电语义旧版本独立失效，不清除其他域。
 
 变电来源文件 validation 使用单次调用内的 `CacheValidationContext`：只规范化可信工程 root 一次，同时接受其 lexical 与 MSIX redirected canonical 两种精确路径形式；不规范化数据库 candidate 来证明归属。Windows root handle 在该调用内禁止 delete sharing，逐 entry 仍检查相对路径、工程身份、两种 root 和所有目录/文件组件的 symlink/reparse 状态，不缓存目录安全结论。路径检查通过后实际打开文件，在同一 handle 上检查 regular-file 和准确大小；Windows 最终文件以 OPEN_REPARSE_POINT 打开，拒绝检查后替换的文件链接。上下文不会跨调用或工程复用，不改变 receipt、版本或缓存发布契约。
 

@@ -73,15 +73,6 @@ export function closePropsDrawer(ctx: ViewerContext): void {
   refreshViewportLayout(ctx);
 }
 
-/** 切换属性面板 */
-export function togglePropsDrawer(ctx: ViewerContext): void {
-  if (propsDrawer.classList.contains('collapsed')) {
-    openPropsDrawer(ctx, true);
-  } else {
-    closePropsDrawer(ctx);
-  }
-}
-
 let propsDrawerInteractionsReady = false;
 let propsDrawerViewerContext: ViewerContext | null = null;
 

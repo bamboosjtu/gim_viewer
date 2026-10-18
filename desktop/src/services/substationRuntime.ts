@@ -1908,6 +1908,39 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         geometryCacheVersionFileMatch: validation.geometry_cache_version_file_match,
       });
       debugLog(DEBUG_GIM_CACHE, '[Tauri] 变电工程缓存命中：自动加载全部 IFC + MOD + STL');
+      if (validation?.substation_properties_complete === false && context.projectId != null) {
+        // 两阶段发布的第二阶段可能在上次会话被中断：树/IFC 已可暖用，
+        // 这里用已解压源在后台补写属性与几何引用，完成后置为已发布。
+        const projectId = context.projectId;
+        void (async () => {
+          const { publishSubstationRest } = await import('./substationIndexPublication.js');
+          const { saveSubstationSemanticRest } = await import('@desktop/database.js');
+          const { beginCachePublish, setCachePublishPhase, failCachePublish } = await import('./cachePublishStatus.js');
+          const { createDiskBackedFile } = await import('@desktop/gimExtract.js');
+          const files = new Map<string, File>();
+          for (const entry of index.entries) {
+            files.set(entry.entry_path, createDiskBackedFile(projectId, entry.entry_path, entry.file_size));
+          }
+          beginCachePublish('rest', '上次会话未完成属性补写');
+          try {
+            const published = await publishSubstationRest({
+              projectId, sourceSha256: session.sourceSha256 ?? '', files,
+              cachePaths: new Map(), tree: state.currentCbmTree,
+              ifcs: state.currentIfcEntries, relations: state.fileDevRelations,
+            }, {
+              isCurrent: () => state.isCurrentSession(session),
+              saveRest: saveSubstationSemanticRest,
+              onPhase: (phase, counts) => perfMark(`变电 semantic repair · ${phase}`, { projectId, ...counts }, perfSession),
+            });
+            if (published && state.isCurrentSession(session)) setCachePublishPhase('ready');
+            else if (state.isCurrentSession(session)) failCachePublish('属性补写未完成');
+          } catch (error) {
+            if (state.isCurrentSession(session)) {
+              failCachePublish(error instanceof Error ? error.message : String(error));
+            }
+          }
+        })();
+      }
       return; // 缓存命中，短路完成
     } catch (err) {
       if (!state.isCurrentSession(session)) return;
@@ -2049,19 +2082,53 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       }
 
       if (!state.isCurrentSession(session)) return;
-      const { publishSubstationIndex } = await import('./substationIndexPublication.js');
-      const { saveGimIndex, saveGeometryRefs, validateGimCache } = await import('@desktop/database.js');
-      await publishSubstationIndex({
+      const { publishSubstationCore, publishSubstationRest } = await import('./substationIndexPublication.js');
+      const { saveGimIndex, saveGeometryRefs, saveSubstationSemanticRest, validateGimCache } = await import('@desktop/database.js');
+      const { beginCachePublish, setCachePublishPhase, failCachePublish } = await import('./cachePublishStatus.js');
+      const publicationInput = {
         projectId, sourceSha256: session.sourceSha256 ?? '', files: filesForPersist,
         cachePaths: localCachePathMap, packedPaths: preExtracted.packedPaths,
         tree: cbmTreeForPersist,
         ifcs: ifcEntriesForPersist, relations: fileDevRelationsForPersist,
-      }, {
-        isCurrent: () => state.isCurrentSession(session),
-        saveIndex: saveGimIndex, saveRefs: saveGeometryRefs,
-        validate: () => validateGimCache(projectId,'substation'),
-        onPhase: (phase,counts) => perfMark(`变电 semantic persistence · ${phase}`, {projectId,...counts}, perfSession),
-      });
+      };
+      const isCurrent = () => state.isCurrentSession(session);
+      const onPhase = (phase:string, counts?:Record<string, number>) =>
+        perfMark(`变电 semantic persistence · ${phase}`, {projectId,...counts}, perfSession);
+      // 第一阶段：内存中的树/关系/IFC 清单 + receipt，交互后数秒内提交，
+      // 让暖启动立即可用；第二阶段再补写 FAM/DEV 属性与几何引用。
+      if (!isCurrent()) return;
+      beginCachePublish('core');
+      let corePublished = false;
+      try {
+        corePublished = await publishSubstationCore(publicationInput, {
+          isCurrent,
+          saveIndex: saveGimIndex,
+          saveRefs: saveGeometryRefs,
+          validate: () => validateGimCache(projectId,'substation'),
+          onPhase,
+        });
+      } catch (error) {
+        if (!isCurrent()) { failCachePublish('会话已切换'); return; }
+        failCachePublish(error instanceof Error ? error.message : String(error));
+        throw error;
+      }
+      if (!corePublished || !isCurrent()) {
+        if (!isCurrent()) failCachePublish('会话已切换');
+        return;
+      }
+      setCachePublishPhase('rest');
+      try {
+        const restPublished = await publishSubstationRest(publicationInput, {
+          isCurrent,
+          saveRest: saveSubstationSemanticRest,
+          onPhase,
+        });
+        if (restPublished && isCurrent()) setCachePublishPhase('ready');
+        else if (isCurrent()) failCachePublish('属性补写未完成');
+      } catch (error) {
+        if (isCurrent()) failCachePublish(error instanceof Error ? error.message : String(error));
+        throw error;
+      }
         })()
       : Promise.resolve();
     persistPromise = persistTask

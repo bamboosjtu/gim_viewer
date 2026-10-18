@@ -700,6 +700,7 @@ pub fn run() {
             substation_extraction_job::cancel_substation_extraction,
             db::upsert_gim_project,
             db::save_gim_index,
+            db::save_substation_semantic_rest,
             db::write_cache_file_binary,
             db::read_cached_ifc,
             db::read_cached_entry,

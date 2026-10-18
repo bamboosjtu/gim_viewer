@@ -29,8 +29,6 @@ export interface NativeSmallFileHydrationOptions {
   maxBytes?: number;
   isCurrent?: () => boolean;
   parseCopy?: ParseCopyReceipt;
-  /** 限制本次物化的扩展名；缺省只物化 CBM/DEV/FAM 语义文本。 */
-  includeExtensions?: readonly string[];
 }
 
 export interface NativeSmallFileHydrationResult {
@@ -116,9 +114,7 @@ export async function hydrateNativeSmallFiles(
     };
   }
 
-  const allowed = options.includeExtensions
-    ? new Set(options.includeExtensions.map((ext) => ext.toLowerCase()))
-    : SEMANTIC_HYDRATION_EXTENSIONS;
+  const allowed = SEMANTIC_HYDRATION_EXTENSIONS;
 
   for (const [path, file] of files) {
     if (!isDiskBackedFile(file) || isSemanticPackBackedFile(file)) continue;

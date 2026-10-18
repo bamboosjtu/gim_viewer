@@ -103,6 +103,20 @@ export async function saveGimIndex(payload: GimIndexPayload): Promise<void> {
   await invokeTimed<void>('save_gim_index', { payload });
 }
 
+/**
+ * 两阶段发布第二阶段：几何引用 + FAM/DEV 属性。
+ * 单事务替换并重算 receipt，成功后置 `substation_properties_complete=1`。
+ */
+export async function saveSubstationSemanticRest(payload: {
+  project_id: number;
+  source_sha256: string | null;
+  refs: GeometryRefsPayload;
+  fam_properties: unknown[];
+  dev_properties: unknown[];
+}): Promise<void> {
+  await invokeTimed<void>('save_substation_semantic_rest', { payload });
+}
+
 // ===== GIM 索引读取 =====
 
 export interface IfcModelRecord {
@@ -828,6 +842,8 @@ export interface GimCacheValidation {
   geometry_cache_manifest_valid: boolean;
   /** 变电基础索引/IFC source cache 是否有效（不含几何域）。 */
   substation_semantic_cache_valid: boolean;
+  /** 两阶段发布第二阶段（几何引用 + FAM/DEV 属性）是否已完成。 */
+  substation_properties_complete: boolean;
   /** DEV GLB geometry cache 是否有效。 */
   geometry_cache_valid: boolean;
   /** 所有 IFC Fragments cache 是否完整有效。 */

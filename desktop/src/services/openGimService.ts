@@ -147,6 +147,9 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
   const cleanupOk = await cleanupBeforeOpenNewProject(state, requestGeneration);
   if (!cleanupOk) return;
 
+  // 新一次打开：上一工程的索引发布状态不再适用。
+  void import('./cachePublishStatus.js').then(({ resetCachePublishStatus }) => resetCachePublishStatus());
+
   const session = state.activateProject(projectId, sourceSha256);
   perfUpdateSessionIdentity({
     generation: session.generation,
