@@ -49,22 +49,29 @@
 | TerminalBlock | L,W,H?,T,R,BL,CL,CS,RS,CN,RN,Phase | 强类型；基板与 CN×RN 栅格端子组合，远景保留基板 |
 | ChannelSteel | L,Model,D?,H?,B?,T? | 强类型；当前无直接几何生成 |
 | Table | H,LL1,LL2,TL1,TL2 | 强类型；当前无直接几何生成 |
-| RectangularFixedPlate | raw attrs | 弱结构保留；当前无直接几何生成 |
+| RectangularFixedPlate | L,W,T | 矩形板浏览近似；螺栓孔等字段忽略 |
 | OffsetRectangularTable | TL,TW,LL,LW,H,XOFF,YOFF | 仅接受显式七字段编码；下矩形 XY 居中且 Z=0，上矩形位于 Z=H 并施加偏移；其他编码保留不支持诊断 |
-| RectangularRing | raw attrs | 弱结构保留；当前无直接几何生成 |
+| RectangularRing | L1,W1,L2,W2,H | 矩形框浏览近似（四块板）；字段缺失回退为退化的外框 |
 | Boolean | Type,Entity1,Entity2 | Union/Intersection/Difference；按引用构造 CSG |
 | Wire | D,FitCoordArray | 有效三元点；样条管近似 |
 | Cable | D,StartCoord,InflectionCoordArray,EndCoord | 拼合有效点；样条管近似 |
 | RotationalEllipsoid | H,LR,WR | 强类型；缩放球体近似 |
 | BeamChannel / LightBeamChannel / H / H-beam | Length,Model | BeamChannelLike；盒体近似；`H-beam` 为导出器别名 |
 | DoubleChannelSteel | raw attrs | 归一为 ChannelSteel；当前无直接几何生成 |
+| Insulator / VTypeInsulator | N,D,N1,H1,R,R1,R2,FL,AL,LN | 映射 PorcelainBushing（高度 H1×N1），浏览近似；V 串按单串处理 |
+| ConePorcelainBushing | H,BR,TR,BR1,BR2,TR1,TR2,N | 映射 PorcelainBushing（BR2/TR2/TR1），浏览近似 |
+| EccentricTruncatedCone | BR,TR,H（偏心字段忽略） | 映射 TruncatedCone，浏览近似 |
+| SquareGasket / TableGasket | L1,W1,L2,W2,H | 矩形框近似（四块板） |
+| EllipticRing | LR,WR,DR,Rad | 映射 Ring（LR/WR 平均半径），浏览近似 |
+| BendingCylindrical | R,L,Rad | 映射 Cylinder（忽略弯曲），浏览近似 |
+| CircularFixedPlate | L,W,T,CS,N,MH,D | 映射 Cylinder 圆盘，忽略螺栓孔 |
 | 其他标签 | raw attrs | Unsupported，局部降级并保留来源类型 |
 
 标签匹配按小写规范化，`Rectangularfixedplate`、`RectangularFixedPlate` 等大小写变体进入同一分支。
 
-六组样本实测（substation01–04 与 500-A3-1/B1-1/B1-3/B1-4；B1-2 未取得 pack）的未支持 primitive：
-`Insulator`（01 无、02 1、500 系列 421）、`EccentricTruncatedCone` 99、`ConePorcelainBushing` 55、`VTypeInsulator` 30、`TableGasket` 21、`EllipticRing` 5、`SquareGasket` 4、`Rectangularfixedplate` 4、`BendingCylindrical` 2、`Circularfixedplate` 1、`CircularFixedPlate` 4、`DoubleChannelSteel` 1。01/03 在既有强类型加 `H-beam` 别名后无未支持标签；04 只剩上述小计数类型。
-Insulator、ConePorcelainBushing、SquareGasket、CircularFixedPlate、BendingCylindrical、VTypeInsulator、EccentricTruncatedCone、TableGasket、EllipticRing 等未进入强类型分支的来源不能因为名字看似熟悉就宣称支持；补充时须提供参数映射并标记 simplified。
+六组样本实测（substation01–04 与 500-A3-1/B1-1/B1-3/B1-4；B1-2 未取得 pack）已覆盖此前未支持的 `Insulator`、`VTypeInsulator`、`ConePorcelainBushing`、`EccentricTruncatedCone`、`SquareGasket`、`TableGasket`、`EllipticRing`、`BendingCylindrical`、`CircularFixedPlate`、`RectangularFixedPlate`。这些分支只承诺浏览近似，忽略的字段（偏心量、螺栓孔、V 串几何、弯曲半径）在代码注释与本节中列明，不能据此做尺寸或安装测量。
+
+仍未生成直接几何的类型为 `ChannelSteel`、`Table`（解析保留、渲染暂停）以及任何未知标签；它们继续走显式诊断，不伪装成 empty。补充新类型时须提供参数映射并标记 simplified。
 全部覆盖以 [parser](../../desktop/src/gim/geometry/xmlModParser.ts) 与[geometry renderer](../../desktop/src/viewer/xmlModGeometry.ts) 的实际分支为准。
 
 ## StretchedBody

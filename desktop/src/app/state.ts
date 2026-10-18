@@ -1,5 +1,4 @@
 import type { FamSourceProperty } from '../gim/famParser.js';
-import type { IfcGeometryProvider, IfcPreviewFineState } from '../viewer/ifcGeometryProvider.js';
 import type { IfcRegionalRuntime } from '../viewer/ifcRegionalRuntime.js';
 import type { SubstationCapabilitySummary } from '../gim/substationEvidence.js';
 import type { IfcEntry, CbmNode, FileDevEntry } from '../gim/types.js';
@@ -156,20 +155,10 @@ export class AppState {
   // 模型
   /** 以 logical modelId 为 key，值中同时保留 Fragments runtime ID。 */
   loadedModels = new Map<string, { modelId: string; runtimeModelId: string; visible: boolean }>();
-  /** Experimental render resources, never a second semantic graph or cache domain. */
-  ifcPreviewProviders = new Map<string, IfcGeometryProvider>();
-  ifcPreviewFineStates = new Map<string, IfcPreviewFineState>();
-  /** Cancels queued per-file IFC fine work before preview resources are released. */
-  cancelPendingIfcFine: (() => void) | null = null;
   ifcRegionalRuntimes=new Map<string,IfcRegionalRuntime>();
-  private releaseIfcPreviews(): void {
+  private releaseIfcRuntimes(): void {
     for(const runtime of this.ifcRegionalRuntimes.values())runtime.release();
     this.ifcRegionalRuntimes.clear();
-    this.cancelPendingIfcFine?.();
-    this.cancelPendingIfcFine = null;
-    for (const provider of this.ifcPreviewProviders.values()) provider.release();
-    this.ifcPreviewProviders.clear();
-    this.ifcPreviewFineStates.clear();
   }
 
   // xml-mod Group 跟踪（key = instanceKey；同一 MOD 文件可有多个放置实例）
@@ -232,7 +221,7 @@ export class AppState {
   invalidatePendingLoads(): void {
     this.deviceLodRuntime?.release(); this.deviceLodRuntime = null;
     this.invalidateSelection();
-    this.releaseIfcPreviews();
+    this.releaseIfcRuntimes();
     this.projectGeneration += 1;
     this.geometryLoadToken += 1;
   }
@@ -240,7 +229,7 @@ export class AppState {
   /** 激活新工程并返回其身份快照。 */
   activateProject(projectId: number | null, sourceSha256?: string | null): ProjectLoadSession {
     this.invalidateSelection();
-    this.releaseIfcPreviews();
+    this.releaseIfcRuntimes();
     this.projectGeneration += 1;
     this.currentProjectId = projectId;
     this.currentSourceSha256 = sourceSha256 ?? null;
@@ -343,7 +332,7 @@ export class AppState {
    */
   resetGimState() {
     this.deviceUnknownBounds.clear();
-    this.releaseIfcPreviews();
+    this.releaseIfcRuntimes();
     this.invalidateSelection();
     this.currentFiles = null;
     this.currentIfcEntries = [];

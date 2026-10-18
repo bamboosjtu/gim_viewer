@@ -158,6 +158,15 @@ export function disposeOwnedXmlModMaterials(group: THREE.Object3D): void {
  * - ChannelSteel/Table：语义未完成，保留诊断
  * - 2 类弱 schema：RectangularFixedPlate/RectangularRing — 暂停渲染
  */
+function rawNumber(raw: Record<string, string> | undefined, keys: string[], fallback = Number.NaN): number {
+  if (!raw) return fallback;
+  for (const key of keys) {
+    const value = Number(raw[key]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return fallback;
+}
+
 function primitiveToGeometryUncached(p: XmlModPrimitive, lod: DeviceLod): THREE.BufferGeometry | null {
   const segments = lod === 0 ? 6 : lod === 1 ? 12 : CYLINDER_SEGMENTS;
   switch (p.type) {
@@ -219,14 +228,46 @@ function primitiveToGeometryUncached(p: XmlModPrimitive, lod: DeviceLod): THREE.
       }
       return mergeParts(parts);
     }
-    case 'ChannelSteel':
-    case 'Table':
-      // MVP 阶段暂停渲染 — 返回 null 避免创建空 Mesh
-      if (!_warnedOnce.has(p.type)) {
-        _warnedOnce.add(p.type);
-        console.warn(`[xmlModGeometry] "${p.type}" MVP 暂停渲染（几何解释待完善）`);
+    case 'RectangularFixedPlate': {
+      // 弱 schema：L/W/T 直接生成浏览用矩形板；螺栓孔等字段忽略。
+      const l = rawNumber(p.raw, ['L', 'L1'], 1);
+      const w = rawNumber(p.raw, ['W', 'W1'], 1);
+      const t = rawNumber(p.raw, ['T', 'H'], 1);
+      return new THREE.BoxGeometry(l, w, t).translate(0, 0, t / 2);
+    }
+    case 'RectangularRing': {
+      // 矩形框近似（垫圈/密封件）：外框 L1×W1、内框 L2×W2、厚度 H，四块板拼合。
+      const l1 = rawNumber(p.raw, ['L1'], 1);
+      const w1 = rawNumber(p.raw, ['W1'], 1);
+      const l2 = Math.min(rawNumber(p.raw, ['L2'], l1 * 0.8), l1);
+      const w2 = Math.min(rawNumber(p.raw, ['W2'], w1 * 0.8), w1);
+      const h = rawNumber(p.raw, ['H', 'T'], 1);
+      const sideL = (l1 - l2) / 2;
+      const sideW = (w1 - w2) / 2;
+      if (!(sideL > 0 || sideW > 0) || !(h > 0)) return null;
+      const parts: THREE.BufferGeometry[] = [];
+      if (sideL > 0) {
+        parts.push(new THREE.BoxGeometry(sideL, w1, h).translate(-(l1 - sideL) / 2, 0, h / 2));
+        parts.push(new THREE.BoxGeometry(sideL, w1, h).translate((l1 - sideL) / 2, 0, h / 2));
       }
-      return null;
+      if (sideW > 0) {
+        parts.push(new THREE.BoxGeometry(l2, sideW, h).translate(0, -(w1 - sideW) / 2, h / 2));
+        parts.push(new THREE.BoxGeometry(l2, sideW, h).translate(0, (w1 - sideW) / 2, h / 2));
+      }
+      return mergeParts(parts);
+    }
+    case 'ChannelSteel': {
+      // 无截面型号表：按外廓盒体近似（宽 B/D、长 L、高 H/T）。
+      const width = p.b ?? p.d ?? 100;
+      const height = p.h ?? p.t ?? 50;
+      if (!(p.l > 0) || !(width > 0) || !(height > 0)) return null;
+      return new THREE.BoxGeometry(width, p.l, height);
+    }
+    case 'Table': {
+      // 桌面/台架类：按长宽高外廓盒体近似，忽略孔洞与栏栅。
+      if (!(p.ll1 > 0) || !(p.ll2 > 0) || !(p.h > 0)) return null;
+      return new THREE.BoxGeometry(p.ll1, p.ll2, p.h);
+    }
     case 'OffsetRectangularTable': {
       const vertices = offsetRectangularTableVertices(p.raw);
       if (!vertices) return null;
@@ -239,13 +280,7 @@ function primitiveToGeometryUncached(p: XmlModPrimitive, lod: DeviceLod): THREE.
       flat.setIndex(Array.from({ length: flat.getAttribute('position').count }, (_, index) => index));
       return flat;
     }
-    case 'RectangularFixedPlate':
-    case 'RectangularRing':
-      if (!_warnedOnce.has(p.type)) {
-        _warnedOnce.add(p.type);
-        console.warn(`[xmlModGeometry] weak schema primitive "${p.type}" 暂停渲染（字段语义待补充）`);
-      }
-      return null;
+
     case 'Unsupported':
       if (!_warnedOnce.has(`unsupported:${p.sourceType}`)) {
         _warnedOnce.add(`unsupported:${p.sourceType}`);

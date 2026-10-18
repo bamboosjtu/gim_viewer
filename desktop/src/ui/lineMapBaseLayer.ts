@@ -112,7 +112,7 @@ export interface CreateMapLibreProbeOptions {
    *
    * 优先级：tianditu-* > osm-online > pmtiles > empty。
    * 在线 raster 模式（OSM + 天地图）不依赖 PMTiles；PMTiles 模式不影响在线 raster 模式。
-   * 天地图模式在 TIANDITU_KEY 未配置时自动回退到 OSM。
+   * 天地图模式在未配置 API Key 时自动回退到 OSM。
    */
   basemapMode?: LineBasemapMode;
   /**

@@ -44,7 +44,7 @@ async function loadRecentProjects(): Promise<RecentProject[]> {
         path: project.path,
         projectType: project.project_type,
         parserVersion: project.parser_version,
-        updatedAt: project.updated_at_ms,
+        updatedAt: project.last_opened_at_ms || project.updated_at_ms,
       }));
   } catch (error) {
     console.warn('[ViewerShell] recent projects unavailable:', error);
@@ -169,9 +169,15 @@ export function setupViewerShell(state: AppState): void {
   });
   welcomeOpen?.addEventListener('click', () => btnLoadGim.click());
   continueButton?.addEventListener('click', () => {
-    const first = recent[0];
-    if (first) void openRecentProject(state, first.id);
+    void refreshRecent().then(() => {
+      const first = recent[0];
+      if (first) void openRecentProject(state, first.id);
+    });
   });
+
+  // 打开/关闭工程后刷新“最近工程”，避免欢迎页与“继续上次工程”停留在启动时的旧顺序。
+  window.addEventListener('gim:recent-projects-changed', () => { void refreshRecent(); });
+  window.addEventListener('gim:project-closed', () => { void refreshRecent(); });
 
   // Browser drop: a File has no persistent path, but the one-shot input path
   // already owns browser-mode opening. Desktop drag-drop is intentionally not

@@ -139,20 +139,20 @@ describe('primitiveToGeometry', () => {
       expect(g).toBeInstanceOf(THREE.BufferGeometry);
     });
 
-    it('ChannelSteel → MVP 暂停渲染', () => {
+    it('ChannelSteel → 外廓盒体浏览近似', () => {
       const g = primitiveToGeometry({
         type: 'ChannelSteel',
         l: 2000, model: 'C5', d: 50, h: 100, b: 40, t: 8,
       }, TEST_MOD_PATH);
-      expect(g).toBeNull();
+      expect(g).not.toBeNull();
     });
 
-    it('Table → MVP 暂停渲染', () => {
+    it('Table → 外廓盒体浏览近似', () => {
       const g = primitiveToGeometry({
         type: 'Table',
         h: 750, ll1: 800, ll2: 600, tl1: 80, tl2: 60,
       }, TEST_MOD_PATH);
-      expect(g).toBeNull();
+      expect(g).not.toBeNull();
     });
 
     it('StretchedBody → 沿法向拉伸二维截面', () => {
@@ -210,17 +210,13 @@ describe('primitiveToGeometry', () => {
     });
   });
 
-  describe('弱 schema primitive（3 类）', () => {
-    it('RectangularFixedPlate → 跳过 + warn', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  describe('弱 schema primitive（矩形板/框）', () => {
+    it('RectangularFixedPlate → 矩形板浏览近似', () => {
       const g = primitiveToGeometry({
         type: 'RectangularFixedPlate',
         raw: { L: '100', W: '50', T: '10' },
       }, TEST_MOD_PATH);
-      expect(g).toBeNull();
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      expect(warnSpy.mock.calls[0][0]).toContain('RectangularFixedPlate');
-      warnSpy.mockRestore();
+      expect(g).not.toBeNull();
     });
 
     it('OffsetRectangularTable rejects unknown fields and constructs the explicit seven-field solid', () => {
@@ -236,15 +232,12 @@ describe('primitiveToGeometry', () => {
       expect(solid.boundingBox!.max.toArray()).toEqual([18, 72, 5]);
     });
 
-    it('RectangularRing → 跳过 + warn', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('RectangularRing → 矩形框浏览近似', () => {
       const g = primitiveToGeometry({
         type: 'RectangularRing',
-        raw: { R: '100', DR: '20' },
+        raw: { L1: '100', W1: '80', L2: '80', W2: '60', H: '10' },
       }, TEST_MOD_PATH);
-      expect(g).toBeNull();
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-      warnSpy.mockRestore();
+      expect(g).not.toBeNull();
     });
   });
 

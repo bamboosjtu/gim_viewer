@@ -337,11 +337,15 @@ export async function cleanupBeforeOpenNewProject(
   // resetGimState 是集中 mutator，已包含 loadedModels.clear / highlightedItems=null / hasFittedCamera=false
   if (!isCurrentCleanup()) return false;
   state.resetGimState();
-  // 清理完成后必须撤销中央加载遮罩；关闭工程时它可能仍显示“正在加载 建筑…”。
-  try {
-    const { hideLoading } = await import('./gimOpenCore.js');
-    hideLoading();
-  } catch { /* best effort */ }
+  // 用户主动关闭工程时撤销加载遮罩；切换到新工程的清理不能隐藏新工程刚
+  // 显示的进度（expectedGeneration 有值表示本次清理服务于一次新的打开）。
+  if (expectedGeneration === undefined) {
+    try {
+      const { hideLoading } = await import('./gimOpenCore.js');
+      hideLoading();
+    } catch { /* best effort */ }
+    window.dispatchEvent(new CustomEvent('gim:project-closed'));
+  }
   if (shouldCaptureSubstationResources && isCurrentCleanup()) {
     const cleanupMeta = {
       cleanupGeneration,

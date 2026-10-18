@@ -3,7 +3,6 @@ import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 import type { AppState, SelectionRequest } from '../app/state.js';
 import { commitSelectionHighlight, HIGHLIGHT_STYLE } from './highlight.js';
-import type { IfcGeometryProvider, IfcPreviewObject } from './ifcGeometryProvider.js';
 import type { IfcRegionalRuntime } from './ifcRegionalRuntime.js';
 import type { RegionalObject } from './ifcRegionalData.js';
 import { highlightModGroups } from './highlight.js';
@@ -15,7 +14,6 @@ export function setupSelection(
   ctx: ViewerContext, state: AppState, container: HTMLElement,
   onElementSelected: OnElementSelected,
   onSelectionCleared: (request: SelectionRequest) => void = () => {},
-  onPreviewSelected?: (provider: IfcGeometryProvider, object: IfcPreviewObject, request: SelectionRequest) => void,
   onRegionalSelected?: (runtime:IfcRegionalRuntime,object:RegionalObject,request:SelectionRequest)=>void,
 ): void {
   container.addEventListener('click', async (e: MouseEvent) => {
@@ -29,16 +27,6 @@ export function setupSelection(
       if(state.ifcRegionalRuntimes.size){const rect=(canvas||container).getBoundingClientRect();
         if(rect.width>0&&rect.height>0){const ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1),(ctx.world.camera as any).three);
           for(const runtime of state.ifcRegionalRuntimes.values()){const hit=runtime.pick(ray);if(hit)regional.push({runtime,...hit});}regional.sort((a,b)=>a.distance-b.distance);}}
-      const previews: Array<{provider:IfcGeometryProvider;object:IfcPreviewObject;distance:number}>=[];
-      if(state.ifcPreviewProviders.size) {
-        const rect=(canvas || container).getBoundingClientRect();
-        if(rect.width>0 && rect.height>0) {
-          const ray=new THREE.Raycaster();
-          ray.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1),(ctx.world.camera as any).three);
-          for(const provider of state.ifcPreviewProviders.values()){const hit=provider.pick(ray);if(hit)previews.push({provider,...hit});}
-          previews.sort((a,b)=>a.distance-b.distance);
-        }
-      }
       const result=ctx.fragments.list.size===0 ? null : await ctx.fragments.raycast({
         camera:(ctx.world.camera as any).three,mouse:new THREE.Vector2(e.clientX,e.clientY),
         dom:canvas as HTMLCanvasElement || container,
@@ -49,13 +37,6 @@ export function setupSelection(
         request.target={kind:'ifc-object',key:`ifc:${near.runtime.modelId.toLowerCase()}:object:${near.object.expressId}`};
         onRegionalSelected?.(near.runtime,near.object,request);
         await commitSelectionHighlight(ctx,state,guard,()=>{const group=near.runtime.highlightGroup(near.object.expressId);if(group)highlightModGroups(state,[group]);});return;
-      }
-      const preview=previews[0];
-      if (preview && preview.provider.level!==2 && (!result || preview.distance < (result.rayDistance ?? result.distance))) {
-        request.target={kind:'ifc-object',key:preview.object.key};
-        onPreviewSelected?.(preview.provider,preview.object,request);
-        await commitSelectionHighlight(ctx,state,guard,()=>preview.provider.highlight(preview.object));
-        return;
       }
       if (!result) {
         request.target=null;

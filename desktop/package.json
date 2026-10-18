@@ -1,6 +1,6 @@
 {
   "name": "gim-reader",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "description": "GIM 浏览器",
   "type": "module",
   "scripts": {
@@ -18,7 +18,6 @@
     "test": "vitest run",
     "test:sample": "vitest run --config vitest.sample.config.ts",
     "test:substation:strict": "node scripts/test-substation-strict.mjs",
-    "test:ifc-preview:sample": "vitest run --config vitest.ifc-preview.config.ts",
     "test:all": "vitest run --config vitest.sample.config.ts && vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

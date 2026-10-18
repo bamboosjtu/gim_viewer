@@ -178,7 +178,15 @@ describe('Substation source evidence and normalized projections', () => {
     expect(getNodeDisplayName(state.currentCbmTree!, new Map())).toBe('Actual device name');
   });
 
-  it.each(['Insulator', 'ConePorcelainBushing', 'SquareGasket', 'CircularFixedPlate', 'BendingCylindrical', 'GimGeCableConcentration', 'FuturePrimitive'])('retains unknown %s without losing sibling geometry', (type) => {
+  it.each(['Insulator', 'ConePorcelainBushing', 'SquareGasket', 'CircularFixedPlate', 'BendingCylindrical'])('maps %s to a browse approximation without losing sibling geometry', (type) => {
+    const text = `<Device><Entities><Entity ID="1" Visible="TRUE"><${type} FutureAttr="value"/></Entity><Entity ID="2" Visible="True"><Cuboid L="10" W="10" H="10"/></Entity></Entities></Device>`;
+    const doc = parseXmlMod(text, 'MOD/mixed.mod');
+    expect(doc.entities[0].primitive?.type).not.toBe('Unsupported');
+    expect(doc.entities[0].visible).toBe(true);
+    expect(loadXmlModFromText(text, 'MOD/mixed.mod').children.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it.each(['GimGeCableConcentration', 'FuturePrimitive'])('retains unknown %s without losing sibling geometry', (type) => {
     const text = `<Device><Entities><Entity ID="1" Visible="TRUE"><${type} FutureAttr="value"/></Entity><Entity ID="2" Visible="True"><Cuboid L="10" W="10" H="10"/></Entity></Entities></Device>`;
     const doc = parseXmlMod(text, 'MOD/mixed.mod');
     expect(doc.entities[0].primitive).toMatchObject({ type: 'Unsupported', sourceType: type, raw: { FutureAttr: 'value' } });

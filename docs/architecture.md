@@ -50,17 +50,11 @@ IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CB
 
 [Spatial snapshot 服务](../desktop/src/services/substationSpatialSemanticCache.ts) 校验源、域和版本后 hydrate Map。缺失、损坏或不匹配的快照在全部 IFC 尝试完成后重建。它不替代 IFC 几何，也不覆盖变电语义缓存。
 
-### 实验性 IFC Preview Provider（桌面变电）
+### IFC 浏览 LOD（bim-lod）
 
-[`IfcGeometryProvider`](../desktop/src/viewer/ifcGeometryProvider.ts) 定义 `canProvide / loadLOD / release / findByGlobalId`，并提供拾取、属性与高亮接口。对象仍采用现有 `ifc:<logical modelId>:object:<ExpressId>` 身份，保留 GlobalId、ExpressId、IFC 类型和来源 Provider；GlobalId 查询返回候选集合。Provider 不生成新 CBM、空间语义节点或 DEV occurrence，不替代 Fragments Runtime。
+生产默认 `bim-lod`：首个可用 IFC 建立坐标锚点；其余 IFC 按源大小排序，单个超过 64 MB 的排到队尾。每个文件在 Worker 内读取单位、上下文与递归 LocalPlacement，先提交 LOD0，再提交 LOD1；对象 LOD2 由属性面板按需请求整文件 Fragments 加载。Preview-First / Deferred-Fine / Preview Provider 已从产品删除，不再保留入口或调试开关。
 
-原型默认关闭，保留研究代码与调试键；产品顶部不提供 Preview 入口，默认加载采用下文的 IFC 浏览 LOD。该原型在当前默认路径下不可达：Preview-First / Deferred-Fine 与 Provider 挂载都要求 `openingPolicy === 'full'`，而默认策略是 `bim-lod`，调试键只对完整路径生效。原型的完整路径仍由首个完整 IFC 建立生产坐标锚点，后续文件在 metadata Worker 中读取单位、上下文和 LocalPlacement 链，先提交 LOD0，再提交 LOD1，自动完整加载与属性面板的“加载精细几何 LOD2”共用该文件的加载 Promise。
-
-另一个独立、默认关闭的实验开关 `gim-debug-ifc-preview-deferred-fine` 必须与 Preview 开关同时启用。该模式不改变原完整加载模式：首个 IFC 仍完整加载并建立坐标锚点，后续文件默认按原顺序生成 Preview，LOD0/LOD1 均完成后标记 `previewReady`，精细状态为 `fineDeferred`，不自动启动 LOD2。已通过 geometry validation 的 DEV 缓存，在首个完整 IFC 的坐标锚点及 interactive 就绪后即可入队恢复，与剩余 IFC/Preview 顺序循环独立；仍等待 Spatial snapshot 恢复完成分类并使用原有互斥重任务与安全检查点。每个打开会话只入队一次，不在 IFC 尾部完成后重复恢复。未命中、部分或失效缓存的 DEV 编译/修复以及 Spatial 重建仍保留 IFC 尾部门禁；语义索引发布不依赖该门禁。`devGeometryReady` 独立于 `allIfcReady`，后者仍等待每个 IFC 精细加载成功或明确失败，延期中的文件不计为 ready。`fullModelReady` 在完整加载模式等待 IFC 与 DEV 均结束；延期精化模式还要求所有 IFC 为 `fineReady`，不以早到的 DEV 缓存冒充完整模型。
-
-独立的 `gim-debug-ifc-preview-queue=conservative-fast-lane` 只在 Preview-First / Deferred-Fine 模式生效，默认关闭。实际坐标锚点和 interactive 建立前完全保留原顺序，包括首个失败时的 anchor fallback；之后将 remaining 来源稳定分为 <1 MiB、普通/未知、≥64 MiB 三组。阈值依据四样本大小分布提出，只作保守调度提示，不能预测重建成本。保持原 IfcEntry/modelId、单个 Preview Worker 和 Fine 调度；记录 entry-ready、unique ExpressId 可表达对象数与源 bytes，anchor 不计入 remaining 对象覆盖分母。该策略的跨样本产品验收尚未关闭，不默认采用。
-
-属性面板中的精细加载请求按逻辑模型 ID 去重，并排在尚未启动的普通重任务之前。已运行的 DEV 管线在完成单个 DEV 的解析、缓存写入和全部 placement 提交后，调用协调器安全检查点；暖路径还在有界 GLB 批读完成后检查。每个检查点最多执行一个用户精化请求，保留 DEV 的重任务调度权，精化完成或失败后继续下一工作单元，不与其他受协调器管理的重任务并行。定向 raw 回退和单 DEV 缓存修复也记录安全边界；完整 manifest/version 仍在管线原有结束位置提交。单个 DEV 内部序列化和已运行的 Spatial/转换不能中途让权。工程关闭会取消排队请求，并由原 ProjectLoadSession 释放活动 Worker。精细转换失败后可重试。LOD1 完成即终止该文件的 Preview metadata Worker；按需属性查询重新读取单个 IFC，并在一次性 Worker 结束或工程关闭后释放。Preview、属性查询和精细转换以转移方式交接各自的一次性 IFC 输入；延期精化重新读取源文件，不使用已释放的预览缓冲区。metadata 就绪 Promise 只持有完成状态，精细替换后清除显式 metadata 所有者。不同文件的 Preview 与精化、一次性属性读取仍可能短暂并行，不保证全工程只有一个 WASM heap。资源事件和进程内存采样用于观测生命周期，Fragments 转换 WASM heap 的精确值仍不由当前公开 API 暴露。
+属性面板中的 LOD2 请求按逻辑模型 ID 去重，并排在尚未启动的普通重任务之前。已运行的 DEV 管线在完成单个 DEV 的解析、缓存写入和全部 placement 提交后，调用协调器安全检查点；暖路径还在有界 GLB 批读完成后检查。每个检查点最多执行一个用户精化请求，保留 DEV 的重任务调度权，精化完成或失败后继续下一工作单元，不与其他受协调器管理的重任务并行。定向 raw 回退和单 DEV 缓存修复也记录安全边界；完整 manifest/version 仍在管线原有结束位置提交。单个 DEV 内部序列化和已运行的 Spatial/转换不能中途让权。工程关闭会取消排队请求，并由原 ProjectLoadSession 释放活动 Worker。精细转换失败后可重试。按需属性查询重新读取单个 IFC，并在一次性 Worker 结束或工程关闭后释放。不同文件的 LOD2 与一次性属性读取仍可能短暂并行，不保证全工程只有一个 WASM heap。资源事件和进程内存采样用于观测生命周期，Fragments 转换 WASM heap 的精确值仍不由当前公开 API 暴露。
 
 | 级别 | 当前表示与边界 |
 |---|---|
@@ -158,7 +152,7 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 
 SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `powerline_*`。 FAM 来源记录使用 `(project_id, source_path, source_line)` 区分物理行，不用归一化键覆盖重复原文。
 
-变电原生解压完成后返回全部已落盘条目的缓存路径。首个可用 IFC 后，剩余 IFC 按源大小排序；单个超过 64 MB 的 IFC 排到队尾（仍完整加载），避免小模型被超大文件的冷转换拖住。DEV 模板编译使用独立 Worker 池，按 CPU 核数自动选择 1–4 个（`gim-dev-workers` 可覆盖），冷路径的几何源预取在剩余 IFC 未结束前最多等待 8 秒，之后与 IFC 并行。核心语义就绪且完整源文件可读时，按两阶段发布索引，不等待 DEV 编译、IFC Preview、Spatial 或 Fragments：第一阶段只使用内存中的 CBM 树、IFC 清单和 FileDevRelation 写入 entries/树/IFC/关系，并用空的引用链提交版本与 receipt（本机交互后约 2–5 s 完成，暖启动立即可用）；第二阶段在后台解析 FAM/DEV 属性，在单事务中替换两张属性表、重算 receipt 并置 `substation_properties_complete=1`。几何引用链（DEV→SOLIDMODEL→PHM/MOD）第二阶段暂不重解析：它与属性解析重复读取同一批 DEV/PHM，暖启动几何按源文件回退解析仍是正确路径，只少一层 SQL 加速。若第二阶段被中断（关闭或切换工程），第一阶段缓存仍有效，下次暖启动检测到标记为 0 时用已解压源补写。状态栏显示“索引发布中 → 暖启动已就绪 · 属性补写中 → 索引已发布”，失败保留原因供悬停查看。发布过程只准备有界批次的小文本，不再次通过 IPC 读取 IFC 字节；WASM 回退必须先完成源文件写入，并沿用重任务协调器以免与用户精化并行争用大量资源。
+变电原生解压完成后返回全部已落盘条目的缓存路径。首个可用 IFC 后，剩余 IFC 按源大小排序；单个超过 64 MB 的 IFC 排到队尾（仍完整加载），避免小模型被超大文件的冷转换拖住。DEV 模板编译使用独立 Worker 池，按 CPU 核数自动选择 1–4 个（`gim-dev-workers` 可覆盖），冷路径的几何源预取在剩余 IFC 未结束前最多等待 8 秒，之后与 IFC 并行。核心语义就绪且完整源文件可读时，按两阶段发布索引，不等待 DEV 编译、Spatial 或 Fragments：第一阶段只使用内存中的 CBM 树、IFC 清单和 FileDevRelation 写入 entries/树/IFC/关系，并用空的引用链提交版本与 receipt（本机交互后约 2–5 s 完成，暖启动立即可用）；第二阶段在后台解析 FAM/DEV 属性，在单事务中替换两张属性表、重算 receipt 并置 `substation_properties_complete=1`。几何引用链（DEV→SOLIDMODEL→PHM/MOD）第二阶段暂不重解析：它与属性解析重复读取同一批 DEV/PHM，暖启动几何按源文件回退解析仍是正确路径，只少一层 SQL 加速。若第二阶段被中断（关闭或切换工程），第一阶段缓存仍有效，下次暖启动检测到标记为 0 时用已解压源补写。状态栏显示“索引发布中 → 暖启动已就绪 · 属性补写中 → 索引已发布”，失败保留原因供悬停查看。发布过程只准备有界批次的小文本，不再次通过 IPC 读取 IFC 字节；WASM 回退必须先完成源文件写入，并沿用重任务协调器以免与用户精化并行争用大量资源。
 
 `save_gim_index` 清空变电域版本、发布凭据与 `substation_properties_complete`；核心阶段用 `save_geometry_refs` 的空引用提交版本和 `substation_index_receipt_json`；第二阶段 `save_substation_semantic_rest` 在同一事务内补写属性（可同时写引用，当前传空）并刷新凭据。凭据记录源 SHA、语义版本及九张语义/引用表行数；恢复时校验凭据、IFC 清单、必需缓存路径、文件大小与可读性。源改变、未完成写入、删行或缺源均不能作为合法语义 HIT。空 FAM 的零字节文件有效。凭据用于完整发布与截断检测，不是逐行内容签名，也不代表 GLB、Spatial 或 Fragments 完成；变电语义旧版本独立失效，不清除其他域。
 

@@ -70,9 +70,6 @@ export async function getViewerRuntimeWithUI(
         const body=document.getElementById('props-drawer-body');
         if (body) body.innerHTML='<div class="props-empty">尚未选择对象</div>';
       }
-    },(provider,object,request)=>{
-      void syncSelectionNavigation(state,request);
-      void import('./ifcPreviewService.js').then(({selectIfcPreview})=>selectIfcPreview(ctx,state,provider,object,request));
     },(regional,object,request)=>{
       void syncSelectionNavigation(state,request);
       void import('../ui/propsDrawer.js').then(({showIfcRegionalProperties})=>showIfcRegionalProperties(ctx,state,regional,object,request));

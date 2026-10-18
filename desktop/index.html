@@ -305,10 +305,11 @@
       .inspector-identity { margin-top: 4px; font-size: 12px; color: var(--text-3); overflow-wrap: anywhere; }
       .inspector-components { margin-top: 3px; font-size: 11px; color: var(--text-3); }
       .inspector-key { margin-bottom: 8px; }
-      .key-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; }
-      .key-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 6px 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; }
-      .key-label { font-size: 11px; color: var(--text-3); }
-      .key-value { font-size: 13px; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .key-grid { display: flex; flex-direction: column; }
+      .key-cell { display: flex; flex-direction: row; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; padding: 6px 2px; background: none; border: none; border-bottom: 1px solid var(--border); }
+      .key-cell:last-child { border-bottom: none; }
+      .key-label { flex: 0 0 92px; font-size: 12px; color: var(--text-3); }
+      .key-value { flex: 1; min-width: 0; font-size: 13px; color: var(--text-1); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .inspector-ids { margin-bottom: 8px; }
       .id-grid { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
       .id-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; align-items: baseline; }

@@ -100,7 +100,7 @@ export function createOsmOnlineRasterStyle(): StyleSpecification {
  * - 子域 t0~t4 轮询以突破浏览器单域名 6 连接限制
  * - attribution 必须显示（天地图许可要求）
  *
- * @throws 当 TIANDITU_KEY 未配置时抛错（由调用方预防）
+ * @throws 当天地图 API Key 未配置时抛错（由调用方预防）
  */
 export function createTiandituSatelliteStyle(): StyleSpecification {
   if (!isTiandituKeyAvailable()) {
@@ -150,7 +150,7 @@ export function createTiandituSatelliteStyle(): StyleSpecification {
  * - 子域 t0~t4 轮询以突破浏览器单域名 6 连接限制
  * - attribution 必须显示（天地图许可要求）
  *
- * @throws 当 TIANDITU_KEY 未配置时抛错（由调用方预防）
+ * @throws 当天地图 API Key 未配置时抛错（由调用方预防）
  */
 export function createTiandituTerrainStyle(): StyleSpecification {
   if (!isTiandituKeyAvailable()) {
@@ -200,7 +200,7 @@ export function createTiandituTerrainStyle(): StyleSpecification {
  * - 子域 t0~t4 轮询
  * - attribution 必须显示
  *
- * @throws 当 TIANDITU_KEY 未配置时抛错（由调用方预防）
+ * @throws 当天地图 API Key 未配置时抛错（由调用方预防）
  */
 export function createTiandituVectorStyle(): StyleSpecification {
   if (!isTiandituKeyAvailable()) {

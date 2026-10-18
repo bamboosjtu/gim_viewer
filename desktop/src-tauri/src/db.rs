@@ -6692,6 +6692,7 @@ pub struct CachedProjectSummary {
     pub size: u64,
     pub modified_ms: u64,
     pub updated_at_ms: u64,
+    pub last_opened_at_ms: u64,
 }
 
 /// 读取全部应用设置。密钥只保存在本地 SQLite，不进入构建产物。
@@ -6748,15 +6749,14 @@ pub fn set_app_setting(
 
 /// 列出所有缓存的项目（只读，按最近打开排序）
 #[tauri::command]
-pub fn list_cached_projects(    state: tauri::State<'_, DbState>,
-) -> Result<Vec<CachedProjectSummary>, String> {
+pub fn list_cached_projects(state: tauri::State<'_, DbState>) -> Result<Vec<CachedProjectSummary>, String> {
     let conn = state
         .0
         .lock()
         .map_err(|e| format!("获取数据库锁失败: {}", e))?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, name, path, project_type, parser_version, size, modified_ms, updated_at_ms
+            "SELECT id, name, path, project_type, parser_version, size, modified_ms, updated_at_ms, last_opened_at_ms
              FROM gim_project ORDER BY last_opened_at_ms DESC",
         )
         .map_err(|e| format!("查询项目列表失败: {}", e))?;
@@ -6771,6 +6771,7 @@ pub fn list_cached_projects(    state: tauri::State<'_, DbState>,
                 size: row.get(5)?,
                 modified_ms: row.get(6)?,
                 updated_at_ms: row.get(7)?,
+                last_opened_at_ms: row.get(8)?,
             })
         })
         .map_err(|e| format!("映射项目列表失败: {}", e))?;

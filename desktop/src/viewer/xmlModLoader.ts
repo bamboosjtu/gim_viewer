@@ -49,7 +49,7 @@ export {
   applyPhmColorOverride,
 } from './xmlModGeometry.js';
 
-const RENDERABLE_MOD_PRIMITIVE_RE = /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket|StretchedBody)\b/;
+const RENDERABLE_MOD_PRIMITIVE_RE = /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket|StretchedBody|PorcelainBushing|TerminalBlock|Wire|Cable|RotationalEllipsoid|BeamChannel|H|Boolean|OffsetRectangularTable|RectangularFixedPlate|RectangularRing|Insulator|VTypeInsulator|ConePorcelainBushing|EccentricTruncatedCone|EllipticRing|BendingCylindrical|CircularFixedPlate|SquareGasket|TableGasket)\b/i;
 const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
 
 /**
@@ -95,6 +95,7 @@ function flattenDocumentToGroup(
     'Cuboid', 'Cylinder', 'Sphere', 'TruncatedCone', 'Ring',
     'CircularGasket', 'StretchedBody', 'PorcelainBushing', 'TerminalBlock', 'Wire', 'Cable',
     'RotationalEllipsoid', 'BeamChannelLike', 'Boolean', 'OffsetRectangularTable',
+    'RectangularFixedPlate', 'RectangularRing', 'ChannelSteel', 'Table',
   ]);
   let unsupportedEntityCount = doc.malformedEntityCount;
   for (const entity of doc.entities) {

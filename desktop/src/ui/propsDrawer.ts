@@ -3,7 +3,6 @@ import { parseFamSectionsWithDiagnostics, resolveSubstationBusinessIdentity, typ
 import { discoverSubstationGlSidecars, substationDevIdentity, buildSubstationAliasIndex, buildSubstationIfcEvidence, findSubstationSourceDocuments } from '../gim/substationEvidence.js';
 import type { CbmNode } from '../gim/types.js';
 import type { AppState, SelectionRequest } from '../app/state.js';
-import type { IfcGeometryProvider, IfcPreviewObject, IfcPreviewProperties } from '../viewer/ifcGeometryProvider.js';
 import { setSelectionStatus } from './shell/statusBar.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { IfcSpatialNode, IfcSpatialObject, SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
@@ -242,48 +241,6 @@ export async function showIfcRegionalProperties(ctx:ViewerContext,state:AppState
       relations:'<div class="props-note">沿用原始 IFC 对象身份。</div>',source:sectionHtml('来源',[['IFC 文件',runtime.sourcePath],['几何','仅相机附近30m区域计算']]),
     });
   };render(null);try{render(await runtime.properties(object.expressId));}catch(error){render(null,String(error));}
-}
-
-/** Preview is a representation of the original IFC object, not a new semantic node. */
-export async function showIfcPreviewProperties(ctx:ViewerContext,state:AppState,provider:IfcGeometryProvider,
-  object:IfcPreviewObject,request:SelectionRequest,refine:()=>Promise<void>):Promise<void> {
-  const current=()=>state.isCurrentSelection(request) && provider.level!==2;
-  const render=(properties:IfcPreviewProperties|null,error='')=>{
-    if(!current())return;
-    openPropsDrawer(ctx);
-    setSelectionStatus(`${object.name || object.ifcType} · IFC 预览`);
-    const val=(v:unknown):string=>v!=null && typeof v==='object' ? JSON.stringify(v) : String(v??'');
-    const rows=properties ? Object.entries(properties.attributes).map(([key,value])=>[key,val(value)] as [string,string]) : [];
-    const sets=properties?.propertySets.map(set=>sectionHtml('IFC 属性集',[['原始属性',JSON.stringify(set)]],true)).join('')??'';
-    const fineState=provider.fineState;
-    const objectFine=provider.loadObjectFine&&provider.objectLOD(object)===2;
-    const stateText=objectFine?'当前构件已精化；文件其他对象仍为预览':fineState==='fineDeferred'?'LOD0/LOD1 已就绪；LOD2 延期至用户请求'
-      :fineState==='fineLoading'?'LOD2 已排队或正在加载'
-      :fineState==='fineFailed'?'LOD2 加载失败，可重试'
-      :fineState==='fineReady'?'LOD2 已就绪':state.selectionGeometry?.detail??'预览就绪';
-    const action=fineState==='fineReady'||objectFine?'':`<button type="button" data-preview-refine ${fineState==='fineLoading'?'disabled':''}>${provider.loadObjectFine?'精化当前构件（实验）':fineState==='fineFailed'?'重试 LOD2':fineState==='fineLoading'?'正在排队/加载 LOD2…':'加载精细几何 LOD2'}</button>${fineState==='fineLoading'?'<button type="button" data-preview-cancel>取消排队</button>':''}`;
-    renderInspectorTabs(`<div class="props-header">${escHtml(object.name || object.ifcType)} · 预览</div>`,{
-      overview:sectionHtml('原 IFC 对象',[['GlobalId',object.globalId],['ExpressId',String(object.expressId)],['IFC 类型',object.ifcType],['表示',`LOD${provider.objectLOD(object)}`],['精细状态',stateText]])+action,
-      params:properties ? sectionHtml('IFC 原始属性',rows)+sets : `<div class="props-note">${escHtml(error || '正在读取 IFC 属性…')}</div>`,
-      relations:'<div class="props-note">沿用原 IFC 文件与 ExpressId；空间关系由现有空间语义图提供。</div>',
-      source:sectionHtml('来源',[['IFC 文件',object.sourcePath],['Provider',objectFine?'web-ifc-object':object.provider],['对象键',object.key],['近似边界',objectFine?'当前构件使用原 IFC 完整几何；文件其他对象仍为预览':'参数棱柱/OBB 预览，裁剪和精细细节未还原']]),
-    });
-    propsDrawerBody.querySelector('[data-preview-refine]')?.addEventListener('click',()=>{if(current())void refine();});
-    propsDrawerBody.querySelector('[data-preview-cancel]')?.addEventListener('click',()=>{
-      if(!current())return;
-      if(!provider.cancelFineRequest())setSelectionStatus('LOD2 转换已开始；当前阶段不能中断');
-    });
-  };
-  let unsubscribe:(()=>void)|null=null;
-  let loadedProperties:IfcPreviewProperties|null=null;
-  let propertyError='';
-  unsubscribe=provider.subscribeFineState(()=>{
-    if(!current()){unsubscribe?.();unsubscribe=null;return;}
-    render(loadedProperties,propertyError);
-  });
-  render(null);
-  try {loadedProperties=await provider.getProperties(object.expressId);render(loadedProperties);}
-  catch(error){propertyError=error instanceof Error?error.message:String(error);render(null,propertyError);}
 }
 
 /** 渲染 FAM 分节属性为 HTML */

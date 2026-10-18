@@ -408,6 +408,13 @@ async function openTauriGim(
     const record = await upsertGimProject(info);
     if (state.projectGeneration !== requestGeneration) return;
     endUpsert(undefined, { projectId: record.id });
+    // 先更新最近打开时间，再开始加载：用户可能在首屏后立刻关闭/切换工程，
+    // 若等 opened 完成再 touch，代次已变化会被跳过，导致“最近工程”永远停在
+    // 启动时的第一条。
+    void import('@desktop/database.js')
+      .then(({ touchGimProjectOpened }) => touchGimProjectOpened(record.id))
+      .then(() => window.dispatchEvent(new CustomEvent('gim:recent-projects-changed')))
+      .catch(() => { /* recency update is best effort */ });
     showLoading('正在检查本地缓存...');
 
     const sourceWithIdentity: GimSourceDescriptor = {
@@ -429,12 +436,6 @@ async function openTauriGim(
       projectTypeName: getProjectTypeName(sourceWithIdentity.magic),
       requestGeneration,
       nativeFilePath: filePath,
-    });
-    void opened.then(() => {
-      if (state.projectGeneration !== requestGeneration) return;
-      void import('@desktop/database.js')
-        .then(({ touchGimProjectOpened }) => touchGimProjectOpened(record.id))
-        .catch(() => { /* recency update is best effort */ });
     });
     await opened;
   } catch (error) {

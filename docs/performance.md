@@ -50,7 +50,7 @@ Long Task 统计除 count/blocking/max 外保留最多 64 条样本（时间、�
 
 默认基础表示覆盖全部物理 occurrence，包括视野外和范围未确定的设备；LOD1/2 按视图或选择请求。比较新旧管线时同时列出实际工作量，不能把旧管线遗漏设备得到的较短时间当作同覆盖度的性能基线。最多两个 DEV Worker 与串行 IFC 转换并行，来源缓存预算由 Worker 平分；显示或选中的模板受保护，128 MiB 是可淘汰模板预算，不能解释为整个工程的硬内存上限。
 
-每个 Preview 记录来源 bytes、WASM 初始化、OpenModel、metadata 检查、LOD0/LOD1 生成与 scene commit。LOD 生成 wall 包含时间片让权及 commit，不能与 commit 时长相加；完整 Preview wall 还包含源读取、Worker 启动/传输等。首个完整 IFC 的顺序不改变，剩余 Preview 保持顺序，不用文件大小代替实测成本排序。
+每个 IFC 文件记录来源 bytes、WASM 初始化、OpenModel、metadata 检查、LOD0/LOD1 生成与 scene commit。LOD 生成 wall 包含时间片让权及 commit，不能与 commit 时长相加；完整 IFC 加载 wall 还包含源读取、Worker 启动/传输等。首个 IFC 的顺序不改变；剩余文件仅把 >64 MB 的超大文件排到队尾，不以文件大小预测其余文件的成本。
 
 原生冷解压记录 header、archive wall、逐 entry decode/read 累计、sink write/open/data、staging commit、最大 entry decode/write 及路径，前端另记录小文件物化和 CBM/FAM/DEV 解析。archive wall 包含 decode 与 write，不能重复相加；7z solid stream 中单 entry 的读取/解码时长不等于可独立消除的文件成本。阶段解压或延迟 IFC 落盘需要另行评估条目顺序、solid block 和二次解码成本。
 

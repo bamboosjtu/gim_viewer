@@ -1,5 +1,4 @@
 import { setIfcStatus } from '../ui/shell/statusBar.js';
-import { planRemainingIfcPreviews, type PreviewQueueStrategy } from './ifcPreviewQueue.js';
 import type { IfcEntry, CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
@@ -15,7 +14,7 @@ import { renderFileDevPanel } from '../ui/fileDevView.js';
 import { emptyTipEl } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_GIM_CACHE, DEBUG_IFC_LOAD } from '../config/debug.js';
-import { isFragmentsCacheEnabled, isIfcPreviewEnabled, isIfcPreviewDeferredFineEnabled, readIfcOpeningPolicy } from '../config/features.js';
+import { isFragmentsCacheEnabled, readIfcOpeningPolicy } from '../config/features.js';
 import { debugLog } from '../utils/logger.js';
 import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBar.js';
 import type { GimRuntimeOpenContext } from './gimOpenCore.js';
@@ -35,7 +34,6 @@ import {
   perfMark,
   perfMarkProductMoment,
   perfProductMomentSnapshot,
-  perfRecordExternalSpan,
   perfRecordSubstationIfcRead,
   perfRecordSubstationIfcProfile,
   perfRecordIfcLoadProfile,
@@ -831,7 +829,6 @@ export async function loadAllIfcFiles(
   const background = new SubstationBackgroundCoordinator({
     session: perfSession,
     isCurrent,
-    onFineEvent: event => perfMark(`IFC user fine · ${event.state}`, {...event}, perfSession),
     onCheckpoint: unit => perfMark('DEV safe checkpoint', {...unit}, perfSession),
     onEvent: (event) => {
       // One compact span per lifecycle transition is enough for queue wait /
@@ -845,46 +842,7 @@ export async function loadAllIfcFiles(
       }, perfSession);
     },
   });
-  const previewFirstDeferredFine = openingPolicy==='full' && state.currentProjectType==='substation'
-    && isIfcPreviewEnabled() && isIfcPreviewDeferredFineEnabled();
-  const backgroundReadinessGate:SubstationBackgroundGate=previewFirstDeferredFine?'allIfcPreviewsReady':'allIfcReady';
   let devGeometryQueued = false;
-  state.cancelPendingIfcFine=()=>background.cancelPendingUserIfcFine();
-  let allPreviewEntriesReady=false;
-  let allIfcReadyRecorded=false;
-  let deferredDevGeometryReady=false;
-  let deferredDevMeta:Record<string,unknown>|null=null;
-  const terminalFineState=(entry:IfcEntry):boolean=>{
-    const stateValue=state.ifcPreviewFineStates.get(entry.modelId);
-    return stateValue==='fineReady'||stateValue==='fineFailed'||failed.some(item=>item.name===entry.name);
-  };
-  const fineFailureCount=():number=>entries.filter(entry=>
-    state.ifcPreviewFineStates.get(entry.modelId)==='fineFailed'||failed.some(item=>item.name===entry.name)).length;
-  const recordAllIfcReady=():void=>{
-    if(!previewFirstDeferredFine||!allPreviewEntriesReady||!entries.every(terminalFineState))return;
-    if(!allIfcReadyRecorded){
-      allIfcReadyRecorded=true;
-      background.markAllIfcReady();
-      const failures=fineFailureCount();
-      perfMarkProductMoment('allIfcReady',{total:entries.length,loaded:state.loadedModels.size,
-        failed:failures,firstInteractive:interactiveInitialized,deferredFine:0},perfSession);
-      void sampleSubstationMemory(state,'allIfcReady',perfSession,{total:entries.length,loaded:state.loadedModels.size,
-        failed:failures},ctx);
-    }
-    if(deferredDevGeometryReady&&deferredDevMeta)recordDeferredFullModelReady();
-  };
-  const recordDeferredFullModelReady=():void=>{
-    if(!allIfcReadyRecorded||!deferredDevGeometryReady||!deferredDevMeta)return;
-    // A failed file is terminal for allIfcReady, but cannot be described as a
-    // complete model. A later user retry may still satisfy this condition.
-    if(previewFirstDeferredFine&&entries.some(entry=>state.ifcPreviewFineStates.get(entry.modelId)!=='fineReady'))return;
-    if(perfProductMomentSnapshot().fullModelReady)return;
-    const meta={...deferredDevMeta,ifcModels:state.loadedModels.size,deferredFine:0,failedIfcCount:fineFailureCount(),
-      openingPolicy, geometryApproximate:openingPolicy!=='full',
-      geometryFullyRendered:openingPolicy==='full'&&deferredDevMeta.geometryFullyRendered===true&&fineFailureCount()===0};
-    perfMarkProductMoment('fullModelReady',meta,perfSession);
-    void sampleSubstationMemory(state,'fullModelReady',perfSession,meta,ctx);
-  };
   background.registerRemainingIfc();
   state.beginIfcBackgroundLoading();
   // 调试入口：从 localStorage 读取手动坐标偏移（GIM_COORD_OFFSET="dx,dy,dz"）
@@ -1061,7 +1019,7 @@ export async function loadAllIfcFiles(
         // interactive product moment.  They are independent background
         // tasks; one synchronous registration failure must not suppress the
         // other tasks or the sequential IFC tail.
-        if (scheduler) scheduler(background,backgroundReadinessGate);
+        if (scheduler) scheduler(background,'allIfcReady');
         else starter?.();
       } catch (err) {
         console.warn(`[GIM] 启动${label}失败，继续 IFC 后台加载:`, err);
@@ -1079,7 +1037,7 @@ export async function loadAllIfcFiles(
     }
   };
 
-  const enqueueDevGeometry = (startAfter:SubstationBackgroundGate=backgroundReadinessGate): void => {
+  const enqueueDevGeometry = (startAfter:SubstationBackgroundGate='allIfcReady'): void => {
     if (devGeometryQueued) return;
     devGeometryQueued = background.enqueue({
       task: 'devGeometry',
@@ -1099,11 +1057,6 @@ export async function loadAllIfcFiles(
             geometryCacheValid: options.geometryCacheValid,
             geometryCacheManifestValid: options.geometryCacheManifestValid,
             geometryCacheVersionFileMatch: options.geometryCacheVersionFileMatch,
-            // DEV can now finish before the IFC tail even in full-loading mode.
-            // Its product readiness is independent; legacy full readiness still
-            // needs both domains to have finished.
-            deferFullModelReady:true,
-            onGeometryComplete:meta=>{deferredDevMeta=meta;deferredDevGeometryReady=true;recordDeferredFullModelReady();},
           });
         } catch (err) {
           console.warn('[GIM] 后台 MOD 加载失败:', err);
@@ -1134,8 +1087,6 @@ export async function loadAllIfcFiles(
     if (!isCurrent()) return;
 
     let firstIfcLoadStarted = false;
-    const strategy: PreviewQueueStrategy = previewFirstDeferredFine && localStorage.getItem('gim-debug-ifc-preview-queue') === 'conservative-fast-lane'
-      ? 'conservative-fast-lane' : 'original';
     const sizes = new Map(options.ifcSourceSizes);
     for (const entry of entries) {
       const file = state.currentFiles && getFileByPath(state.currentFiles,entry.path);
@@ -1169,19 +1120,8 @@ export async function loadAllIfcFiles(
         huge: hugeQueue.map((entry) => ({ path: entry.path, bytes: sizes.get(entry.path.toLowerCase()) ?? 0 })),
       }, perfSession);
     }
-    let tailPlanned = false;
-    perfMark('IFC Preview queue requested', {strategy,anchor:entries[0]?.path},perfSession);
-    let previewsReady = 0;
     for (let queueIndex=0;queueIndex<queue.length;queueIndex++) {
       if (!isCurrent()) return;
-      // Never change fallback anchor discovery. Only reorder after a real
-      // usable IFC has established the existing coordinate anchor and UI.
-      if (!tailPlanned && interactiveInitialized && state.projectSourceToViewerMatrix) {
-        const planned=planRemainingIfcPreviews([queue[queueIndex-1],...queue.slice(queueIndex)],sizes,strategy).slice(1);
-        queue.splice(queueIndex,queue.length-queueIndex,...planned);
-        tailPlanned=true;
-        perfMark('IFC Preview queue',{strategy,anchor:queue[queueIndex-1].path,entries:queue.map(e=>({path:e.path,modelId:e.modelId,sourceBytes:sizes.get(e.path.toLowerCase())??null}))},perfSession);
-      }
       const entry=queue[queueIndex];
       ifcStages.set(entry.path,ifcStageLabels['checking-cache']);
       setIfcStatus(ifcStatus(entry,queueIndex,queue.length));
@@ -1210,114 +1150,31 @@ export async function loadAllIfcFiles(
         }
         const ifcBytes: { value: Uint8Array | null } = { value: null };
         const readBytes = async (): Promise<Uint8Array|null> => {
-          // The sequential Preview phase can finish after releasing its input.
-          // A deferred user request must re-read, rather than reuse that phase's
-          // readEnded marker as evidence that a source buffer is still owned.
-          if (readEnded && ifcBytes.value?.byteLength) return ifcBytes.value;
-          const started=performance.now();
           ifcBytes.value = await getIfcBufferForEntry(entry, state, session);
           if (!isCurrent()) return null;
           lastIfcReadByteLength=ifcBytes.value?.byteLength??0;
           const readMeta={bytes:ifcBytes.value?.byteLength??0,source:state.currentFiles?'extracted':'disk-cache',found:ifcBytes.value!=null};
           if(!readProfiled){endRead(undefined,readMeta);readProfiled=true;}
-          else perfRecordExternalSpan(`变电 IFC source reread · ${entry.path}`,performance.now()-started,{entryPath:entry.path,...readMeta,reason:'preview input transferred'},perfSession);
           readEnded=true;
           return ifcBytes.value;
         };
-        const previewInputOwnership=state.currentProjectType==='substation'&&isIfcPreviewEnabled();
         let finePromise: Promise<void>|null=null;
         const loadFine = (): Promise<void> => {
           if(finePromise)return finePromise;
-          if(previewInputOwnership)void sampleSubstationMemory(state,'IFC fine worker start',perfSession,
-            {entryPath:entry.path,rawBytes:lastIfcReadByteLength,previewFineState:state.ifcPreviewFineStates.get(entry.modelId)},ctx);
           const task=loadIfcEntry(ctx,state,entry,readBytes,
             (p) => { if (isCurrent()) { setIfcStatus(ifcStatus(entry,queueIndex,queue.length,`${Math.round(p * 100)}%`)); if (!interactiveInitialized) showLoading(`${entry.name}: ${Math.round(p * 100)}%`); } },
             {session,perfSessionId:perfSession.id,onLoadSource:(source)=>{substationViewerInteractive=true;loadSource.value=source;ifcSources.set(entry.path,source);ifcStages.set(entry.path,source==='ifc'?'冷转换完成':source==='lod-cache'?'LOD缓存恢复完成':'完整缓存恢复完成');},
               onStage:(stage,meta)=>setIfcStage(stage,meta),
               onProfile:(profile)=>{if(isCurrent())perfRecordIfcLoadProfile(profile,perfSession);},
-              // A Preview's explicit fine request always restores original
-              // relation openings; browsing simplification cannot claim LOD2 fidelity.
-              transferInput:true,openingPolicy:preview?'full':openingPolicy});
+              transferInput:true,openingPolicy});
           const wrapped=task.catch(error=>{
             if(finePromise===wrapped){ifcBytes.value=null;readEnded=false;finePromise=null;}
             throw error;
-          }).then(()=>{
-            if(previewInputOwnership)void sampleSubstationMemory(state,'IFC fine worker and Fragments load complete',perfSession,
-              {entryPath:entry.path,sourceBytes:lastIfcReadByteLength,loaded:state.loadedModels.has(entry.modelId)},ctx);
           });
           finePromise=wrapped;
           return wrapped;
         };
-        // Preserve the first complete IFC/DEV coordinate anchor contract. Preview
-        // is opt-in and only attaches later files after that production anchor exists.
-        let preview: import('../viewer/ifcGeometryProvider.js').IfcGeometryProvider|null=null;
-        if (openingPolicy==='full' && state.currentProjectType==='substation' && isIfcPreviewEnabled() && state.projectSourceToViewerMatrix && !state.loadedModels.has(entry.modelId)) {
-          const endPreview=perfBegin(`变电 IFC Preview · ${entry.path}`,undefined,perfSession);
-          try {
-            const previewReadStarted=performance.now();
-            const bytes=previewFirstDeferredFine ? await getIfcBufferForEntry(entry,state,session) : await readBytes();
-            if(!isCurrent())return;
-            if(previewFirstDeferredFine&&bytes){
-              lastIfcReadByteLength=bytes.byteLength;
-              const readMeta={bytes:bytes.byteLength,source:state.currentFiles?'extracted':'disk-cache',found:true};
-              if(!readProfiled){endRead(undefined,readMeta);readProfiled=true;}
-              else perfRecordExternalSpan(`变电 IFC Preview source read · ${entry.path}`,performance.now()-previewReadStarted,{entryPath:entry.path,...readMeta,reason:'metadata preview'},perfSession);
-            }
-            if(bytes) {
-              const {IfcPreviewProvider}=await import('../viewer/ifcPreviewProvider.js');
-              if(!isCurrent())return;
-              let fineHandle:{promise:Promise<void>;cancel:()=>boolean}|null=null;
-              preview=new IfcPreviewProvider({modelId:entry.modelId,sourcePath:entry.path,bytes,
-                wasm:{...ctx.ifcLoader.settings.wasm},sourceToViewer:state.projectSourceToViewerMatrix.clone(),
-                transferInput:previewInputOwnership,releaseMetadataAfterPreview:true,
-                loadPropertiesBytes:()=>getIfcBufferForEntry(entry,state,session),
-                cancelFine:()=>fineHandle?.cancel()??false,
-                onResource:event=>perfMark('IFC Preview resource',{path:entry.path,...event},perfSession),
-                onTiming:event=>perfMark('IFC Preview stage',{entryPath:entry.path,modelId:entry.modelId,...event},perfSession),
-                loadFine:async()=>{
-                  const run=async()=>{await loadFine();if(!state.loadedModels.has(entry.modelId))throw new Error('IFC fine model unavailable');};
-                  if(!previewFirstDeferredFine){await run();return;}
-                  fineHandle=background.enqueueUserIfcFine(entry.modelId,run);
-                  try{await fineHandle.promise;}finally{fineHandle=null;}
-                }});
-              state.ifcPreviewProviders.set(entry.modelId,preview);
-              preview.subscribeFineState(value=>{
-                state.ifcPreviewFineStates.set(entry.modelId,value);
-                if(previewFirstDeferredFine&&(value==='fineReady'||value==='fineFailed'))recordAllIfcReady();
-              });
-              (ctx.world.scene as any).three.add(preview.root);
-              await preview.loadLOD(0);
-              if(!isCurrent())return;
-              perfMark('IFC Preview LOD0 ready',{path:entry.path,...preview.data?.diagnostics},perfSession);
-              await preview.loadLOD(1);
-              if(!isCurrent())return;
-              // A preview owns and transfers its input. Do not retain a detached
-              // or duplicate full-size source buffer while fine conversion runs.
-              if(previewInputOwnership){ifcBytes.value=null;readEnded=false;}
-              if(previewFirstDeferredFine)preview.setFineDeferred();
-              perfMark('IFC Preview LOD1 ready',{path:entry.path,...preview.data?.diagnostics},perfSession);
-              perfMark('IFC Preview entry ready',{path:entry.path,modelId:entry.modelId,sourceBytes:sizes.get(entry.path.toLowerCase())??null,
-                previewsReady:++previewsReady,totalRemaining:entries.length-1,
-                representableObjects:new Set(preview.data?.shapes.map(s=>s.object.expressId)).size,
-                products:preview.data?.diagnostics.products??null},perfSession);
-            }
-            endPreview(undefined,{represented:preview?.data?.diagnostics.represented??0});
-          } catch(error) {
-            endPreview('（失败）',{error:error instanceof Error?error.message:String(error)});
-            preview?.release();state.ifcPreviewProviders.delete(entry.modelId);preview=null;
-            if(previewInputOwnership){ifcBytes.value=null;readEnded=false;}
-            if(!isCurrent())return;
-            console.warn('[IFC Preview] unavailable; continuing original fine runtime',entry.path,error);
-          }
-        }
-        if(previewFirstDeferredFine&&preview){
-          state.ifcPreviewFineStates.set(entry.modelId,'fineDeferred');
-          perfMark('IFC Preview fineDeferred',{path:entry.path,logicalModelId:entry.modelId,
-            runtimeModelId:state.ifcRuntimeModelIds.get(entry.modelId)??null},perfSession);
-        } else {
-          await loadFine();
-          state.ifcPreviewFineStates.set(entry.modelId,'fineReady');
-        }
+        await loadFine();
         if (!isCurrent()) return;
         if (!readEnded) {
           // Fragments cache 命中时不会调用 getIfcBuffer；显式记录“未读取 IFC”。
@@ -1337,16 +1194,9 @@ export async function loadAllIfcFiles(
         loadEnded = true;
         ifcStages.set(entry.path, loadSource.value==='ifc'?'冷转换完成':'LOD缓存恢复完成');
         setIfcStatus(ifcStatus(entry,queueIndex,queue.length));
-        // The preview's fine delegate survives in the provider map; release its raw input.
         ifcBytes.value = null;
         const runtimeModelId = state.ifcRuntimeModelIds.get(entry.modelId) ?? entry.modelId;
         const usable = state.loadedModels.has(entry.modelId) && ctx.fragments.list.has(runtimeModelId);
-        if(usable && preview) {
-          const {finishIfcPreview}=await import('./ifcPreviewService.js');
-          await finishIfcPreview(ctx,state,preview,session);
-          if(!isCurrent())return;
-          perfMark('IFC Preview replaced by LOD2',{path:entry.path},perfSession);
-        }
         if (usable && !interactiveInitialized) {
           await initializeInteractiveAfterFirstIfc(entry, loadSource.value);
           if (!isCurrent()) return;
@@ -1370,10 +1220,8 @@ export async function loadAllIfcFiles(
         // IFC 加载可能在工程切换后才 reject；不要让旧工程继续进入
         // 后续坐标同步、名称索引或 UI 渲染阶段。
         if (!isCurrent()) return;
-        state.ifcPreviewFineStates.set(entry.modelId,'fineFailed');
         ifcStages.set(entry.path,'失败');
         setIfcStatus(ifcStatus(entry,queueIndex,queue.length,message.slice(0,80)));
-        recordAllIfcReady();
         failed.push({ name: entry.name, message });
         // 防御性清理
         try {
@@ -1405,25 +1253,11 @@ export async function loadAllIfcFiles(
     setIfcStatus(`IFC ${queue.length}/${queue.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ' · 已就绪'}${skippedLargeIfc.length ? ` · 已跳过 ${skippedLargeIfc.length} 个超大 IFC` : ''}`);
     background.completeRemainingIfc();
     state.endIfcBackgroundLoading();
-    // Preview-first has its own readiness barrier. Deferred LOD2 files remain
-    // visible in their per-file state and cannot satisfy allIfcReady.
     enqueueDevGeometry();
-    if(previewFirstDeferredFine){
-      allPreviewEntriesReady=true;
-      perfMarkProductMoment('allIfcPreviewsReady',{total:entries.length,
-        previewReady:[...state.ifcPreviewProviders.values()].filter(p=>p.level===1).length,
-        fineDeferred:[...state.ifcPreviewProviders.values()].filter(p=>p.fineState==='fineDeferred').length,
-        loadedFine:state.loadedModels.size,failed:failed.length},perfSession);
-      background.markAllIfcPreviewsReady();
-      recordAllIfcReady();
-    } else {
-      allIfcReadyRecorded=true;
-      background.markAllIfcReady();
-      perfMarkProductMoment('allIfcReady', {total:entries.length,loaded:state.loadedModels.size,
-        failed:failed.length,firstInteractive:interactiveInitialized}, perfSession);
-      recordDeferredFullModelReady();
-      void sampleSubstationMemory(state,'allIfcReady',perfSession,{total:entries.length,loaded:state.loadedModels.size,failed:failed.length},ctx);
-    }
+    background.markAllIfcReady();
+    perfMarkProductMoment('allIfcReady', {total:entries.length,loaded:state.loadedModels.size,
+      failed:failed.length,firstInteractive:interactiveInitialized}, perfSession);
+    void sampleSubstationMemory(state,'allIfcReady',perfSession,{total:entries.length,loaded:state.loadedModels.size,failed:failed.length},ctx);
 
     // buildIfcNameIndex 失败不应阻断 UI 渲染
     const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
@@ -1448,7 +1282,7 @@ export async function loadAllIfcFiles(
     // allIfcReady product moment is already recorded above, but releasing the
     // coordinator here avoids DEV geometry or a spatial rebuild competing with
     // the last mandatory UI bookkeeping.
-    if(!previewFirstDeferredFine)background.markAllIfcReady();
+    background.markAllIfcReady();
 
     } catch (err) {
       if (!isCurrent()) return;
@@ -1516,8 +1350,6 @@ async function autoLoadModStlPostIfc(
     geometryCacheValid?: boolean;
     geometryCacheManifestValid?: boolean;
     geometryCacheVersionFileMatch?: boolean;
-    deferFullModelReady?:boolean;
-    onGeometryComplete?:(meta:Record<string,unknown>)=>void;
     onDevCheckpoint?: import('./substationBackgroundRuntime.js').DevCheckpointHandler;
   },
 ): Promise<void> {
@@ -1674,13 +1506,10 @@ async function autoLoadModStlPostIfc(
           stlInstances: scopedRaw.stlCount,
         };
         perfMarkProductMoment('devGeometryReady',{...fullMeta,path:'progressive-dev-glb',renderedInstances:totalGeometryInstances},perfSession);
-        options?.onGeometryComplete?.({...fullMeta,path:'progressive-dev-glb',renderedInstances:totalGeometryInstances});
-        if(!options?.deferFullModelReady){
-          perfMarkProductMoment('fullModelReady',fullMeta,perfSession);
-          await sampleSubstationMemory(state,'fullModelReady',perfSession,{path:'progressive-dev-glb',renderedInstances:totalGeometryInstances},resourceCtx);
-          scheduleSubstationResourceCheckpoint(state,'idleAfterFullModel',perfSession,resourceCtx,
-            {path:'progressive-dev-glb',renderedInstances:totalGeometryInstances},{isCurrent:()=>state.isCurrentSession(session)});
-        }
+        perfMarkProductMoment('fullModelReady',fullMeta,perfSession);
+        await sampleSubstationMemory(state,'fullModelReady',perfSession,{path:'progressive-dev-glb',renderedInstances:totalGeometryInstances},resourceCtx);
+        scheduleSubstationResourceCheckpoint(state,'idleAfterFullModel',perfSession,resourceCtx,
+          {path:'progressive-dev-glb',renderedInstances:totalGeometryInstances},{isCurrent:()=>state.isCurrentSession(session)});
       }
       return;
     }
@@ -1762,13 +1591,10 @@ async function autoLoadModStlPostIfc(
       geometryFullyRendered:![...state.geometryDiagnosticsByDevPath.values()].some(d=>d.status==='failed'||d.status==='partial'||d.status==='unsupported'),
     };
     perfMarkProductMoment('devGeometryReady',{...fullMeta,path:'cached-geometry'},perfSession);
-    options?.onGeometryComplete?.(fullMeta);
-    if(!options?.deferFullModelReady){
-      perfMarkProductMoment('fullModelReady',fullMeta,perfSession);
-      await sampleSubstationMemory(state,'fullModelReady',perfSession,{path:'cached-geometry',modCount:result.modCount,stlCount:result.stlCount},resourceCtx);
-      scheduleSubstationResourceCheckpoint(state,'idleAfterFullModel',perfSession,resourceCtx,
-        {path:'cached-geometry',modCount:result.modCount,stlCount:result.stlCount},{isCurrent:()=>state.isCurrentSession(session)});
-    }
+    perfMarkProductMoment('fullModelReady',fullMeta,perfSession);
+    await sampleSubstationMemory(state,'fullModelReady',perfSession,{path:'cached-geometry',modCount:result.modCount,stlCount:result.stlCount},resourceCtx);
+    scheduleSubstationResourceCheckpoint(state,'idleAfterFullModel',perfSession,resourceCtx,
+      {path:'cached-geometry',modCount:result.modCount,stlCount:result.stlCount},{isCurrent:()=>state.isCurrentSession(session)});
   } catch (err) {
     if (!modStlEnded) {
       endModStl?.('（失败）', { error: err instanceof Error ? err.message : String(err) });
@@ -2254,7 +2080,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   };
 
   // Native extraction already atomically finished source files on disk. The
-  // small semantic/reference transactions do not depend on Preview or DEV.
+  // small semantic/reference transactions do not depend on DEV.
   if (persistProjectId != null && preExtracted?.cachePaths?.size) {
     void startCachePersistence();
   }

@@ -61,8 +61,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 近景实例化检查共享模板、实例槽变化后的身份、单对象高亮、返回远景的释放及镜像回退。构件数量、实例数量、模板数量和绘制提交数分别记录，不能用 draw calls 降低代替对象覆盖或坐标验证。
 
 设备 LOD 分级须按 DEV 核对 0/1/2 的切换条件与粘滞行为、选中强制 2、视野外仍提交 LOD0 基础表示；核对模板键包含源身份、DEV 路径与 LOD 级别，128 MiB LRU 淘汰后能正确重编译；核对工作闸允许最多一个 IFC WASM 任务与两个 DEV 工作单元并行，且模板编译不等待坐标锚点。分级只改变表示精度，occurrence 身份、选择身份、语义层级与冷/暖坐标必须保持一致，不能以 LOD 切换生效替代显示正确性。
-`npm test` 不包含默认关闭的 IFC Preview/单对象精化实验；修改这些实验时使用 `npm run test:experimental`。
-真实 Preview 样本仍由 `test:ifc-preview:sample` 单独执行。`test:sample` 只运行真实样本回归，桥接测试由默认入口维护，避免 `test:all` 重复执行。 严格变电门禁要求其配置的样本，使用上述环境变量要求 substation04；`GIM_SAMPLE_ROOT` 可指定另一样本根。样本目录名称和别名见 [台账](schema/sample-corpus.md)。 命令的覆盖与策略以 [严格门禁脚本](../desktop/scripts/test-substation-strict.mjs) 为准。
+`npm test` 不包含默认关闭的单对象精化实验；修改该实验时使用 `npm run test:experimental`。`test:sample` 只运行真实样本回归，桥接测试由默认入口维护，避免 `test:all` 重复执行。 严格变电门禁要求其配置的样本，使用上述环境变量要求 substation04；`GIM_SAMPLE_ROOT` 可指定另一样本根。样本目录名称和别名见 [台账](schema/sample-corpus.md)。 命令的覆盖与策略以 [严格门禁脚本](../desktop/scripts/test-substation-strict.mjs) 为准。
 
 需要准备解包样本时，从仓库根运行：
 

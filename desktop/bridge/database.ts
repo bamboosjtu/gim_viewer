@@ -1353,6 +1353,7 @@ export interface CachedProjectSummary {
   size: number;
   modified_ms: number;
   updated_at_ms: number;
+  last_opened_at_ms: number;
 }
 
 /**

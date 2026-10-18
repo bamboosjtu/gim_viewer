@@ -213,6 +213,14 @@ function parseColor(entityNode: XmlModNode): XmlModColor | undefined {
  *
  * 弱 schema 3 类：RectangularFixedPlate / OffsetRectangularTable / RectangularRing
  */
+function firstNumericAttr(attrs: Record<string, string>, keys: string[], fallback = 1): number {
+  for (const key of keys) {
+    const value = Number(attrs[key]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return fallback;
+}
+
 function parsePrimitive(entityNode: XmlModNode): XmlModPrimitive | null {
   // 跳过 TransformMatrix 和 Color，找 primitive 节点
   const primitiveNode = Array.from(entityNode.children).find(
@@ -256,6 +264,62 @@ function parsePrimitive(entityNode: XmlModNode): XmlModPrimitive | null {
       return { type: 'OffsetRectangularTable', raw: attrs };
     case 'RectangularRing':
       return { type: 'RectangularRing', raw: attrs };
+    // 以下类型来自 500 系列样本，原导出器标签不在强类型表内。
+    // 统一映射到已有浏览近似几何，忽略无法稳定解释的偏心/孔洞等字段。
+    case 'Insulator':
+    case 'VTypeInsulator': {
+      const units = Math.max(1, firstNumericAttr(attrs, ['N1', 'N'], 1));
+      return {
+        type: 'PorcelainBushing',
+        r: firstNumericAttr(attrs, ['R1', 'R'], 1),
+        r1: firstNumericAttr(attrs, ['R1', 'R'], 1),
+        r2: firstNumericAttr(attrs, ['R2', 'R1', 'R'], 1),
+        n: units,
+        h: firstNumericAttr(attrs, ['H1', 'H'], 1) * units,
+      };
+    }
+    case 'ConePorcelainBushing':
+      return {
+        type: 'PorcelainBushing',
+        r: firstNumericAttr(attrs, ['BR2', 'BR'], 1),
+        r1: firstNumericAttr(attrs, ['TR2', 'TR'], 1),
+        r2: firstNumericAttr(attrs, ['TR1', 'TR'], 1),
+        n: Math.max(1, firstNumericAttr(attrs, ['N'], 1)),
+        h: firstNumericAttr(attrs, ['H'], 1),
+      };
+    case 'EccentricTruncatedCone':
+      return {
+        type: 'TruncatedCone',
+        br: firstNumericAttr(attrs, ['BR'], 1),
+        tr: firstNumericAttr(attrs, ['TR'], 1),
+        h: firstNumericAttr(attrs, ['H'], 1),
+      };
+    case 'SquareGasket':
+    case 'TableGasket':
+      return { type: 'RectangularRing', raw: attrs };
+    case 'EllipticRing': {
+      const lr = firstNumericAttr(attrs, ['LR'], 1);
+      const wr = firstNumericAttr(attrs, ['WR'], lr);
+      return {
+        type: 'Ring',
+        r: (lr + wr) / 2,
+        dr: firstNumericAttr(attrs, ['DR'], 1),
+        rad: Number.isFinite(Number(attrs['Rad'])) && Number(attrs['Rad']) > 0
+          ? Number(attrs['Rad']) : Math.PI * 2,
+      };
+    }
+    case 'BendingCylindrical':
+      return {
+        type: 'Cylinder',
+        r: firstNumericAttr(attrs, ['R'], 1),
+        h: firstNumericAttr(attrs, ['L'], 1),
+      };
+    case 'CircularFixedPlate':
+      return {
+        type: 'Cylinder',
+        r: firstNumericAttr(attrs, ['L', 'D'], 1) / 2,
+        h: firstNumericAttr(attrs, ['T'], 1),
+      };
     case 'Boolean': {
       const rawOp = (attrs['Type'] ?? '').trim().toLowerCase();
       if (!['union', 'intersection', 'difference'].includes(rawOp)) {
@@ -311,7 +375,9 @@ const PRIMITIVE_CANONICAL_NAMES = new Map<string, string>(
     'Wire', 'Cable', 'RotationalEllipsoid', 'BeamChannelLike', 'BeamChannel',
     'LightBeamChannel', 'H', 'Boolean', 'PorcelainBushing', 'TerminalBlock',
     'ChannelSteel', 'Table', 'OffsetRectangularTable', 'RectangularFixedPlate',
-    'RectangularRing', 'StretchedBody',
+    'RectangularRing', 'StretchedBody', 'Insulator', 'VTypeInsulator',
+    'ConePorcelainBushing', 'EccentricTruncatedCone', 'SquareGasket', 'TableGasket',
+    'EllipticRing', 'BendingCylindrical', 'CircularFixedPlate',
   ].map((name) => [name.toLowerCase(), name] as const)
 );
 PRIMITIVE_CANONICAL_NAMES.set('h-beam', 'H');
