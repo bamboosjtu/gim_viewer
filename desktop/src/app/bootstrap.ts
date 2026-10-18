@@ -10,7 +10,7 @@ import { setStatusRight } from '../ui/shell/statusBar.js';
 import { registerPropertyReferenceHandler } from '../ui/propertyDictionary.js';
 import { setupPropsDrawerInteractions } from '../ui/propsDrawer.js';
 import { showLoading, hideLoading } from '../services/gimOpenCore.js';
-import { setupIfcPreviewModeControl } from '../ui/ifcPreviewModeControl.js';
+import { setupIfcDetailModeControl } from '../ui/ifcDetailModeControl.js';
 import { setupViewerShell } from '../ui/shell/viewerShell.js';
 
 /** 异步启动逻辑（轻量，不加载 3D 引擎） */
@@ -61,7 +61,7 @@ async function bootstrapAsync(): Promise<void> {
 
   // 仅绑定轻量 UI
   setupTabs();
-  setupIfcPreviewModeControl();
+  setupIfcDetailModeControl();
   // 属性检查器在变电工程会由 Viewer 装配；线路工程不创建 Viewer，
   // 因此必须在轻量启动阶段先安装页签/来源按钮的纯 DOM 事件委托。
   setupPropsDrawerInteractions();

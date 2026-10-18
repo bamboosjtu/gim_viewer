@@ -14,7 +14,6 @@ let currentKind: ProjectKind = null;
 export function setProjectIdentity(name: string | null, kind: ProjectKind): void {
   currentKind = kind;
   // This preference has no role in a powerline project.
-  document.getElementById('btn-ifc-quick-preview')?.classList.toggle('hidden', kind === 'transmission_line');
   document.getElementById('btn-ifc-opening-policy')?.classList.toggle('hidden', kind === 'transmission_line');
   const titleEl = document.getElementById('project-title');
   const badgeEl = document.getElementById('project-type-badge');

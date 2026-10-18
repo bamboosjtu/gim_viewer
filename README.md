@@ -43,7 +43,7 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 - **工程兼容性**：不同设计软件导出的 GIM 文件可能存在格式差异，当前版本仍在持续完善兼容性。
 - **预览版本**：建议保留原始 GIM 文件，不要将应用内部缓存作为唯一的数据备份。
 
-详细技术说明见[系统架构](docs/architecture.md)、[正确性验证](docs/validation.md)和[移动端规格](docs/mobile-spec.md)。
+详细技术说明见[系统架构](docs/architecture.md)、[正确性验证](docs/validation.md)、[IFC/DEV 分级](docs/impl/performance-lod.md)和[GIM 特殊处理](docs/impl/gim-special-handling.md)。
 
 ## 开源协议与第三方组件
 
@@ -97,5 +97,7 @@ npm run tauri:dev
 - [GIM 格式与匿名样本](docs/schema/README.md)
 - [正确性验证](docs/validation.md)
 - [性能测量](docs/performance.md)
+- [IFC/DEV 分级与加载性能](docs/impl/performance-lod.md)
+- [GIM 特殊格式处理](docs/impl/gim-special-handling.md)
 - [移动端状态](docs/mobile-spec.md)
 - [未决事项与代码缺陷](docs/open-issues.md)

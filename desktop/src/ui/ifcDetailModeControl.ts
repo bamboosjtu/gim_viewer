@@ -3,7 +3,7 @@ import {
   isIfcNearDetailEnabled,
 } from '../config/features.js';
 /** Product LOD control; source identity is independent of representation. */
-export function setupIfcPreviewModeControl(): void {
+export function setupIfcDetailModeControl(): void {
   const button = document.getElementById('btn-ifc-opening-policy');
   if (!button) return;
   const refresh = () => {

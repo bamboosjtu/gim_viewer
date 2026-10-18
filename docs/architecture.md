@@ -52,7 +52,7 @@ IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CB
 
 ### IFC 浏览 LOD（bim-lod）
 
-生产默认 `bim-lod`：首个可用 IFC 建立坐标锚点；其余 IFC 按源大小排序，单个超过 64 MB 的排到队尾。每个文件在 Worker 内读取单位、上下文与递归 LocalPlacement，先提交 LOD0，再提交 LOD1；对象 LOD2 由属性面板按需请求整文件 Fragments 加载。Preview-First / Deferred-Fine / Preview Provider 已从产品删除，不再保留入口或调试开关。
+生产默认 `bim-lod`：首个可用 IFC 建立坐标锚点；其余 IFC 按源大小排序，单个超过 64 MB 的排到队尾。每个文件在 Worker 内读取单位、上下文与递归 LocalPlacement，先提交 LOD0，再提交 LOD1；对象 LOD2 由属性面板按需请求整文件 Fragments 加载。Preview-First / Deferred-Fine / Preview Provider 已从产品删除，不再保留入口或调试开关。分级原因、调度边界与取舍见 [IFC/DEV 分级](impl/performance-lod.md)。
 
 属性面板中的 LOD2 请求按逻辑模型 ID 去重，并排在尚未启动的普通重任务之前。已运行的 DEV 管线在完成单个 DEV 的解析、缓存写入和全部 placement 提交后，调用协调器安全检查点；暖路径还在有界 GLB 批读完成后检查。每个检查点最多执行一个用户精化请求，保留 DEV 的重任务调度权，精化完成或失败后继续下一工作单元，不与其他受协调器管理的重任务并行。定向 raw 回退和单 DEV 缓存修复也记录安全边界；完整 manifest/version 仍在管线原有结束位置提交。单个 DEV 内部序列化和已运行的 Spatial/转换不能中途让权。工程关闭会取消排队请求，并由原 ProjectLoadSession 释放活动 Worker。精细转换失败后可重试。按需属性查询重新读取单个 IFC，并在一次性 Worker 结束或工程关闭后释放。不同文件的 LOD2 与一次性属性读取仍可能短暂并行，不保证全工程只有一个 WASM heap。资源事件和进程内存采样用于观测生命周期，Fragments 转换 WASM heap 的精确值仍不由当前公开 API 暴露。
 
