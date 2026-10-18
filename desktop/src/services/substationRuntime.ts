@@ -1067,7 +1067,10 @@ export async function loadAllIfcFiles(
     const full=[...ifcSources.values()].filter(source=>source==='fragments-cache').length;
     return `冷转换 ${cold} · LOD缓存 ${lod}${full?` · 完整缓存 ${full}`:''}`;
   };
-  const ifcStatus=(entry:IfcEntry,index:number,total:number,extra='')=>`IFC ${index+1}/${total} · ${entry.name} · ${ifcStages.get(entry.path)??'待检查'}${extra?` · ${extra}`:''} · ${ifcCacheProgress()}`;
+  const ifcStatus=(entry:IfcEntry,index:number,total:number,extra='')=>{
+    const skipped=state.ifcSkippedLargeIfc.length;
+    return `IFC ${index+1}/${total} · ${entry.name} · ${ifcStages.get(entry.path)??'待检查'}${extra?` · ${extra}`:''} · ${ifcCacheProgress()}${skipped?` · 已跳过 ${skipped} 个超大 IFC`:''}`;
+  };
   const ifcStageLabels:Record<string,string>={'checking-cache':'查询LOD缓存','lod-cache-hit':'LOD缓存命中','cold-convert':'冷转换中','far-ready':'远景就绪','cache-write-start':'缓存写入中','cache-written':'缓存已写','cache-write-failed':'远景就绪(缓存写入失败)'};
   const lifecycleTask = (async (): Promise<void> => {
     try {
