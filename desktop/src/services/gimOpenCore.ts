@@ -121,6 +121,15 @@ export function hideLoading(): void {
   popBusy('就绪');
 }
 
+/** 新工程开始时把计时和进度归零；不清除遮罩，由后续 showLoading 接管。 */
+export function resetLoadingClock(): void {
+  if (loadingTimer) { clearInterval(loadingTimer); loadingTimer = null; }
+  loadingStartedAt = null;
+  loadingProgress = 0;
+  updateLoadingElapsed();
+  applyLoadingProgress('');
+}
+
 export function currentPerfSession(): PerfSession {
   return perfCurrentSession();
 }

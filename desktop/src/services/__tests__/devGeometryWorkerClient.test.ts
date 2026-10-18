@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+﻿import { afterEach, expect, it, vi } from 'vitest';
 import { DevGeometryPreprocessor } from '../devGeometryWorkerClient.js';
 import { beginIfcGeometryWork, ifcGeometryBusy } from '../../viewer/geometryWorkGate.js';
 
@@ -62,12 +62,12 @@ it('compiles alongside IFC, deduplicates templates, prioritizes queued selection
     expect(client.activePaths).toEqual([]);
   } finally { client.cancel(); releaseIfc(); }
 });
-it('a low-memory device uses one worker and a stale session terminates every worker without another request', async () => {
+it('a low-memory device caps worker pool and a stale session terminates every worker without another request', async () => {
   vi.stubGlobal('Worker', ControlledWorker); vi.stubGlobal('navigator', { hardwareConcurrency: 16, deviceMemory: 2 });
   let current = true;
   const client = new DevGeometryPreprocessor([], new Map(), () => current);
   const task = client.compile('DEV/a.dev', 0, 'a', 3), rejected = expect(task).rejects.toThrow('cancelled');
-  expect(client.workerCount).toBe(1); current = false;
+  expect(client.workerCount).toBe(2); current = false;
   ControlledWorker.instances[0].complete(); await rejected;
   expect(ControlledWorker.instances[0].terminate).toHaveBeenCalledOnce();
 });
@@ -107,11 +107,11 @@ it('a crashed worker fails its task, preserves the healthy worker and bounds poo
   }finally{client.cancel();}
 });
 
-it('uses up to four workers on a many-core machine and honors the debug override',()=>{
+it('uses up to eight workers on a many-core machine and honors the debug override',()=>{
   vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:16,deviceMemory:8});
   vi.stubGlobal('localStorage',{getItem:()=>null,setItem(){},removeItem(){}});
   const auto=new DevGeometryPreprocessor([],new Map(),()=>true);
-  expect(auto.workerCount).toBe(4);auto.cancel();
+  expect(auto.workerCount).toBe(8);auto.cancel();
   vi.stubGlobal('localStorage',{getItem:(key:string)=>key==='gim-dev-workers'?'3':null,setItem(){},removeItem(){}});
   const overridden=new DevGeometryPreprocessor([],new Map(),()=>true);
   expect(overridden.workerCount).toBe(3);overridden.cancel();

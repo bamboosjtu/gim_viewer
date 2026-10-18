@@ -1276,6 +1276,8 @@ let maplibreInteractionCleanup: Array<() => void> = [];
  * renderLineProjectPanels 时保存，destroyLineMapView 时清空。
  */
 let currentShowMessage: ((text: string) => void) | null = null;
+let basemapLayerContext: { layerPanel: HTMLElement; mapData: LineMapData } | null = null;
+let basemapSettingsListenerReady = false;
 
 /**
  * 销毁当前地图视图。
@@ -1589,6 +1591,10 @@ export function renderLineProjectPanels(
 
   // 6. 状态提示
   showMessage('线路工程已加载，当前为地图浏览模式');
+  // 工程已可交互后，底图切换/瓦片提示不再拉起中央加载遮罩，只写底部状态栏。
+  currentShowMessage = (text) => {
+    void import('./shell/statusBar.js').then(({ setStatus }) => setStatus(text));
+  };
   debugLog(DEBUG_LINE_MAP, '[GIM] 线路工程面板已渲染:', {
     type: graph.projectType,
     root: graph.root?.path || null,
@@ -1800,7 +1806,20 @@ function attachBasemapSwitcher(mapData: LineMapData): void {
   if (!lineMapHandle?.getLayerPanel) return;
   const layerPanel = lineMapHandle.getLayerPanel();
   if (!layerPanel) return;
+  basemapLayerContext = { layerPanel, mapData };
   renderBasemapSwitcherIntoLayerPanel(layerPanel, mapData);
+  if (!basemapSettingsListenerReady) {
+    basemapSettingsListenerReady = true;
+    // 设置面板保存天地图 Key 后，当前线路工程立即刷新底图按钮可用性；
+    // 若当前正使用天地图模式，下一次切换会带上新 Key（无需重新打开工程）。
+    window.addEventListener('gim:settings-changed', () => {
+      if (!basemapLayerContext) return;
+      renderBasemapSwitcherIntoLayerPanel(basemapLayerContext.layerPanel, basemapLayerContext.mapData);
+      currentShowMessage?.(isTiandituKeyAvailable()
+        ? '天地图 API Key 已生效，卫星/地形/矢量图层可用'
+        : '天地图 API Key 已清除');
+    });
+  }
 }
 
 /**

@@ -7,7 +7,7 @@ use std::fs as stdfs;
 use std::os::windows::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::time::Instant;
 use tauri::Manager;
 
@@ -1725,7 +1725,7 @@ pub(crate) struct LineSemanticPackEntry {
 /// 时构造固定头部；独立索引也让 `read_line_semantic_pack` 可以先读取索引，
 /// 再一次性读取数据，避免数万次小文件 open。
 pub(crate) struct LineSemanticPackWriter {
-    data_file: stdfs::File,
+    data_file: BufWriter<stdfs::File>,
     index_path: PathBuf,
     label: &'static str,
     entries: Vec<LineSemanticPackEntry>,
@@ -1766,6 +1766,7 @@ impl LineSemanticPackWriter {
             .create_new(true)
             .open(&data_path)
             .map_err(|e| format!("创建{} pack 失败: {}", label, e))?;
+        let data_file = BufWriter::with_capacity(1 << 20, data_file);
         Ok(Self {
             data_file,
             index_path: staging_root.join(index_name),

@@ -149,6 +149,9 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
 
   // 新一次打开：上一工程的索引发布状态不再适用。
   void import('./cachePublishStatus.js').then(({ resetCachePublishStatus }) => resetCachePublishStatus());
+  // 计时从本次打开重新开始，避免沿用上一工程的已用秒数。
+  const { resetLoadingClock } = await import('./gimOpenCore.js');
+  resetLoadingClock();
 
   const session = state.activateProject(projectId, sourceSha256);
   perfUpdateSessionIdentity({
