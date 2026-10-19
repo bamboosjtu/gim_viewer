@@ -83,7 +83,7 @@
 | `RectangularRing` | 4 块板组成的矩形框 | 孔洞/圆角 |
 | `ChannelSteel` / `Table` | 外廓盒体 | 截面细节 |
 | `H` / `h-beam` | H 型钢 | 圆角/坡口 |
-| `Wire` / `Cable` | 拟合点/拐点样条圆管 | 远景 LOD0 最小半径 150 mm、LOD1 50 mm 以保证可见；LOD2 用真实 D |
+| `Wire` / `Cable` | 拟合点/拐点样条圆管 | 电气连接判断关键对象：LOD0/LOD1/LOD2 均保持最小半径 150 mm，不按真实 D 回退到不可见 |
 | `DoubleChannelSteel` | 映射 `ChannelSteel` | 双拼细节 |
 | `Boolean` | union/intersection/difference | 复杂开洞可能计入 simplifiedBooleans |
 
