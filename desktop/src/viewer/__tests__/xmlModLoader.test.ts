@@ -9,6 +9,25 @@ import {
 } from '../xmlModLoader.js';
 
 describe('loadXmlModFromText', () => {
+  it('Wire 保持真实管径并额外生成 1px 连接线', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<Device><Entities><Entity ID="1" Type="simple" Visible="True">
+  <Wire D="24" StartCoord="0,0,0" EndCoord="2000,0,0" FitCoordArray="0,0,0;1000,0,0;2000,0,0" />
+  <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
+  <Color R="48" G="132" B="70" A="100" />
+</Entity></Entities></Device>`;
+
+    const group = loadXmlModFromText(xml, 'MOD/wire.mod');
+    const mesh = group.children.find((child) => (child as THREE.Mesh).isMesh) as THREE.Mesh | undefined;
+    const line = group.children.find((child) => (child as THREE.Line).isLine) as THREE.Line | undefined;
+    expect(mesh).toBeTruthy();
+    expect(line).toBeTruthy();
+    mesh!.geometry.computeBoundingBox();
+    const box = mesh!.geometry.boundingBox!;
+    // 真实直径 24 mm → 场景单位 0.024 m；不能再用 150 mm 浏览半径放大。
+    expect(box.max.z - box.min.z).toBeCloseTo(0.024, 3);
+  });
+
   it('StretchedBody MOD 会生成可渲染网格而不是空 Group', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <Device><Entities><Entity ID="1" Type="simple" Visible="True">

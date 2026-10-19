@@ -21,7 +21,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { parseXmlMod } from '../gim/geometry/xmlModParser.js';
-import { applyPhmColorOverride, collectBakedGeometriesByMaterial, collectBakedGeometriesByMaterialAsync, disposeOwnedXmlModMaterials } from './xmlModGeometry.js';
+import { applyPhmColorOverride, collectBakedGeometriesByMaterial, collectBakedGeometriesByMaterialAsync, disposeOwnedXmlModMaterials, gimMatrixToMatrix4, MOD_MM_TO_SCENE_UNIT } from './xmlModGeometry.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import type { XmlModColor } from '../gim/geometry/ir.js';
 import { getFileByPath } from '../gim/fileLookup.js';
@@ -51,6 +51,46 @@ export {
 
 const RENDERABLE_MOD_PRIMITIVE_RE = /<(Cylinder|Cuboid|Sphere|TruncatedCone|Ring|CircularGasket|StretchedBody|PorcelainBushing|TerminalBlock|Wire|Cable|RotationalEllipsoid|BeamChannel|H|Boolean|OffsetRectangularTable|RectangularFixedPlate|RectangularRing|Insulator|VTypeInsulator|ConePorcelainBushing|EccentricTruncatedCone|EllipticRing|BendingCylindrical|CircularFixedPlate|SquareGasket|TableGasket)\b/i;
 const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
+
+/**
+ * Wire/Cable 的真实管径在远景只有亚像素宽度；单独叠一条 1px 中心线，
+ * 既保留真实直径，又保证电气连接在所有 LOD 都可辨认。线只作为视觉辅助，
+ * 不参与拾取/尺寸测量。
+ */
+function addElectricalConnectionLines(group: THREE.Group, doc: XmlModDocument): void {
+  for (const entity of doc.entities) {
+    if (!entity.visible) continue;
+    const primitive = entity.primitive;
+    const flat = primitive.type === 'Wire' ? primitive.fitPoints
+      : primitive.type === 'Cable' ? primitive.inflectionPoints : null;
+    if (!flat || flat.length < 6) continue;
+    const matrix = new THREE.Matrix4()
+      .makeScale(MOD_MM_TO_SCENE_UNIT, MOD_MM_TO_SCENE_UNIT, MOD_MM_TO_SCENE_UNIT)
+      .multiply(gimMatrixToMatrix4(entity.transformMatrix));
+    const points: THREE.Vector3[] = [];
+    for (let i = 0; i + 2 < flat.length; i += 3) {
+      points.push(new THREE.Vector3(flat[i], flat[i + 1], flat[i + 2]).applyMatrix4(matrix));
+    }
+    if (points.length < 2) continue;
+    const color = entity.color
+      ? new THREE.Color(entity.color.r / 255, entity.color.g / 255, entity.color.b / 255)
+      : new THREE.Color(0x4ade80);
+    const rawAlpha = entity.color ? (entity.color.a > 100 ? entity.color.a / 255 : entity.color.a / 100) : 1;
+    const material = new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity: Math.max(0.55, Math.min(1, rawAlpha)),
+      depthTest: true,
+      depthWrite: false,
+    });
+    material.userData.__gimOwnedInstanceMaterial = true;
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), material);
+    line.name = `xml-wire-line:${entity.id}`;
+    line.renderOrder = 1;
+    line.userData.electricalConnection = true;
+    group.add(line);
+  }
+}
 
 /**
  * 从 XML 文本加载 MOD 文件并转换为 Three.js Group。
@@ -125,6 +165,8 @@ function flattenDocumentToGroup(
       }
     }
   }
+
+  addElectricalConnectionLines(merged, doc);
 
   let renderableEntityCount = 0;
   merged.traverse((object) => {
@@ -276,31 +318,31 @@ export function applyPlacementTransformToSceneUnits(
   matrix.elements[14] *= GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT;
   // 烘焙到顶点：避免 Object3D.applyMatrix4 + decompose 在 placement 含缩放时 corrupt group.scale
   group.traverse((obj) => {
-    const mesh = obj as THREE.Mesh;
-    if (mesh.geometry) {
-      mesh.geometry.applyMatrix4(matrix);
-      // A baked reflection reverses orientation; Object3D's determinant-based
-      // front-face handling no longer sees it after the matrix becomes vertices.
-      if (matrix.determinant() < 0) {
-        const geometry = mesh.geometry;
-        if (geometry.index) {
-          const index = geometry.index;
-          for (let i = 0; i < index.count; i += 3) {
-            const b = index.getX(i + 1);
-            index.setX(i + 1, index.getX(i + 2)); index.setX(i + 2, b);
-          }
-          index.needsUpdate = true;
-        } else {
-          for (const attribute of Object.values(geometry.attributes)) {
-            for (let i = 0; i < attribute.count; i += 3) {
-              for (let c = 0; c < attribute.itemSize; c++) {
-                const b = attribute.getComponent(i + 1, c);
-                attribute.setComponent(i + 1, c, attribute.getComponent(i + 2, c));
-                attribute.setComponent(i + 2, c, b);
-              }
+    const object = obj as THREE.Mesh | THREE.Line;
+    const geometry = object.geometry;
+    if (!geometry) return;
+    geometry.applyMatrix4(matrix);
+    if (!(object as THREE.Mesh).isMesh) return;
+    // A baked reflection reverses orientation; Object3D's determinant-based
+    // front-face handling no longer sees it after the matrix becomes vertices.
+    if (matrix.determinant() < 0) {
+      if (geometry.index) {
+        const index = geometry.index;
+        for (let i = 0; i < index.count; i += 3) {
+          const b = index.getX(i + 1);
+          index.setX(i + 1, index.getX(i + 2)); index.setX(i + 2, b);
+        }
+        index.needsUpdate = true;
+      } else {
+        for (const attribute of Object.values(geometry.attributes)) {
+          for (let i = 0; i < attribute.count; i += 3) {
+            for (let c = 0; c < attribute.itemSize; c++) {
+              const b = attribute.getComponent(i + 1, c);
+              attribute.setComponent(i + 1, c, attribute.getComponent(i + 2, c));
+              attribute.setComponent(i + 2, c, b);
             }
-            attribute.needsUpdate = true;
           }
+          attribute.needsUpdate = true;
         }
       }
     }

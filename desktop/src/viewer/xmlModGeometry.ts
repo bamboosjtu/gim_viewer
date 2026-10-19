@@ -185,21 +185,19 @@ function primitiveToGeometryUncached(p: XmlModPrimitive, lod: DeviceLod): THREE.
       return new THREE.TorusGeometry(sanitizeNum(p.or), Math.max(0, (sanitizeNum(p.or) - sanitizeNum(p.ir)) / 2), TORUS_RADIAL_SEGMENTS, TORUS_TUBULAR_SEGMENTS, sanitizeNum(p.rad));
     case 'Wire': {
       // 变电软母线：拟合点样条管（绝对 mm 坐标，后续烘焙 mm→m）。
-      // 远景用最小可见半径保证连接关系可辨；LOD2（近景/选中）回到真实 D，
-      // 不能把 150 mm 浏览半径当成导线直径。
+      // 管径始终用真实 D；远景可见性由 xmlModLoader 的 1px 连接线叠加保证，
+      // 不能用放大管径换可见性。
       const pts = p.fitPoints;
       if (pts.length < 6) return null;
-      const minRadius = lod === 0 ? 150 : lod === 1 ? 50 : 0;
       const curve = new THREE.CatmullRomCurve3(vec3Array(pts));
-      return new THREE.TubeGeometry(curve, Math.min(Math.max(pts.length / 3, 8), 256), Math.max(sanitizeNum(p.d) / 2, minRadius), 6, false);
+      return new THREE.TubeGeometry(curve, Math.min(Math.max(pts.length / 3, 8), 256), Math.max(sanitizeNum(p.d) / 2, 1), 6, false);
     }
     case 'Cable': {
-      // 电缆敷设路径：拐点折线圆管；远景同样保证最小可见半径，LOD2 真实 D
+      // 电缆敷设路径：拐点折线圆管；管径用真实 D，叠 1px 线保证远景可见
       const pts = p.inflectionPoints;
       if (pts.length < 6) return null;
-      const minRadius = lod === 0 ? 150 : lod === 1 ? 50 : 0;
       const curve = new THREE.CatmullRomCurve3(vec3Array(pts));
-      return new THREE.TubeGeometry(curve, Math.min(Math.max(pts.length / 3, 8), 256), Math.max(sanitizeNum(p.d) / 2, minRadius), 6, false);
+      return new THREE.TubeGeometry(curve, Math.min(Math.max(pts.length / 3, 8), 256), Math.max(sanitizeNum(p.d) / 2, 1), 6, false);
     }
     case 'RotationalEllipsoid': {
       // 近似：单位球按三轴（LR/WR/H 作全长）缩放
