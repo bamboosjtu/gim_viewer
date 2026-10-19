@@ -106,3 +106,9 @@ it('camera motion invalidates readiness until the new view has been evaluated', 
     clearTimeout(internal.cameraTimer);
   } finally { vi.useRealTimers(); }
 });
+
+it('reports exact finished counts without pre-incrementing an unfinished station', () => {
+  const { internal, status }=fixture(); const ready=occurrence(1), waiting=occurrence(2); waiting.group=undefined as any; waiting.key=undefined as any;
+  internal.rows=new Map([['one',ready],['two',waiting]]);internal.ready();
+  expect(status.mock.lastCall![0]).toContain('几何实例已处理 1/2');
+});

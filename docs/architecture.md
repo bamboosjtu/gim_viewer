@@ -140,8 +140,8 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
 | 变电语义 | `gim-substation-parser-v26` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性、语义引用及索引发布凭据 |
-| DEV 几何 | `geometry-cache-v12-mirrored-assembly` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
-| 设备 LOD 派生 | `geometry-cache-v12-mirrored-assembly` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
+| DEV 几何 | `geometry-cache-v14-outline-lod01` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
+| 设备 LOD 派生 | `geometry-cache-v14-outline-lod01` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
 | Spatial snapshot | `substation-spatial-semantic-v2` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 源、链接和序列化结构 |
 | IFC Spatial parser contract | `gim-substation-parser-v23` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | Fragments | `fragments-cache-v6` | [db.rs](../desktop/src-tauri/src/db.rs)、[features](../desktop/src/config/features.ts) | 源/IFC 身份及实际安装的 fragments/web-ifc 版本 |
@@ -188,7 +188,7 @@ SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `
 | 默认底图 | OSM online；天地图为可配置能力 |
 | PMTiles | 关闭 |
 | 线路弧垂 | 启用视觉示意 |
-| 完整 Fragments 缓存 | 默认关闭；且当前默认策略下不可达——`ifcEntryLoader` 在 `bim-lod` 下提前返回，`canUseCache` 又要求 `openingPolicy === 'full'`，而 `readIfcOpeningPolicy()` 固定返回 `bim-lod`，因此 `gim-debug-fragments-cache=1` 当前不改变实际路径（见未决事项 D-03） |
+| 完整 Fragments 缓存 | 默认关闭；且当前默认策略下不可达——`ifcEntryLoader` 在 `bim-lod` 下提前返回，`canUseCache` 又要求 `openingPolicy === 'full'`，而 `readIfcOpeningPolicy()` 固定返回 `bim-lod`，因此 `gim-debug-fragments-cache=1` 当前不改变实际路径 |
 | IFC 浏览 LOD 派生缓存 | 默认使用；键绑定源、LOD 策略及安装依赖版本 |
 
 完整 Fragments 缓存关闭时不读写该域的 `.frag`，不影响浏览 LOD 的独立派生缓存。该域只在完整路径被显式选中时才会使用；在默认 `bim-lod` 路径下开关不改变行为，不能与默认路径合并比较。
@@ -257,3 +257,6 @@ Spatial 构建在来源是真实 Blob/File 时直接把不可变来源交给 Wor
 编号主变的功能组先按主变号排序，同号本体在中性点设备之前，“备用”不改变编号优先级。状态栏称“设备节点”以说明其包含装配内部独立单元；几何实例统计整机装配根，一个根可以展示多个设备节点。IFC 冷转换/暖恢复与 DEV 冷编译/暖恢复分别按实际缓存消费记录，不从工程语义命中推断几何命中。
 
 Worker 协议拒绝未知或忙时的任务并返回错误，清理异常不保留 running 状态。单 Worker 崩溃仅失败当前任务并有限替换，健康 Worker 继续工作；替换耗尽时错误明确传至请求方。目录任务失败保留未知范围，不释放整个设备域。仍被需要的取消请求重新驱动；就绪诊断记录待完成实例、等待原因及有限样本。IFC 区域运行时替换会释放旧实例，退出近景或释放时恢复其隐藏的远景对象。
+
+
+DEV XML MOD 的 L0/L1 采用轮廓表示，CSG 仅在 L2 执行。模板诊断携带 `representationPolicy`、按运算类型计数的 `approximatedBooleans` 和小构件省略统计；正常的轮廓简化不作为 partial，来源缺失、循环和不支持图元仍保留降级诊断。小构件在实体与装配变换之后按外形尺寸过滤，DEV 全部被过滤时只保留最大有效源轮廓，不生成虚构代理体。几何缓存版本由 TS `DEV_GEOMETRY_VERSION` 和 Rust `GEOMETRY_CACHE_VERSION` 同步维护；catalog 键绑定同一几何版本，语义、Spatial、Fragments 域独立。

@@ -82,7 +82,7 @@ pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 /// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
 ///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v12-mirrored-assembly";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v14-outline-lod01";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GeometryCacheManifestEntry {
@@ -1510,7 +1510,13 @@ fn ensure_cache_parent(
         };
         current.push(part);
         if !current.exists() {
-            stdfs::create_dir(&current).map_err(|e| format!("创建缓存{}目录失败: {}", label, e))?;
+            match stdfs::create_dir(&current) {
+                Ok(()) => {}
+                // Concurrent DEV template/catalog writes may create the same
+                // project/store directory between exists() and create_dir().
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(format!("创建缓存{}目录失败: {}", label, error)),
+            }
         }
         reject_link(&current, label)?;
         if !current.is_dir() {
@@ -3357,7 +3363,7 @@ fn device_lod_artifact_path(
 pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id: i64, entry_paths: Vec<String>, source_gim_sha256: String, max_bytes: Option<u64>) -> Result<tauri::ipc::Response, String> {
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::Read;
-        if entry_paths.is_empty() || entry_paths.len() > 16 { return Err("设备缓存批量条目数无效".into()); }
+        if entry_paths.is_empty() || entry_paths.len() > 64 { return Err("设备缓存批量条目数无效".into()); }
         let byte_limit=max_bytes.unwrap_or(512*1024*1024);
         if byte_limit==0 || byte_limit>512*1024*1024 {return Err("设备缓存批量字节配额无效".into());}
         ensure_cache_project_id(project_id)?;

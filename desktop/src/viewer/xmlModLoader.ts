@@ -37,6 +37,10 @@ export interface XmlModGeometryDiagnostics {
   unsupportedPrimitiveTypeCounts: Record<string, number>;
   failedVisibleRoots?: import('./xmlModGeometry.js').BakedGeometryFailure[];
   simplifiedBooleans?: number;
+  representationPolicy?: 'outline' | 'detailed';
+  approximatedBooleans?: Record<'Union' | 'Difference' | 'Intersection', number>;
+  omittedSmallParts?: number;
+  omittedMaxExtentMm?: number;
 }
 
 export const XML_MOD_GEOMETRY_DIAGNOSTICS_KEY = '__gimXmlModDiagnostics';
@@ -242,6 +246,10 @@ function flattenDocumentToGroup(
     unsupportedPrimitiveTypeCounts,
     failedVisibleRoots: byMaterial.failures,
     simplifiedBooleans: byMaterial.simplifiedBooleans,
+    representationPolicy: byMaterial.representationPolicy,
+    approximatedBooleans: byMaterial.approximatedBooleans,
+    omittedSmallParts: byMaterial.omittedSmallParts,
+    omittedMaxExtentMm: byMaterial.omittedMaxExtentMm,
   } satisfies XmlModGeometryDiagnostics;
 
   // 不设置 group.scale：mm→m 缩放已在 collectBakedGeometriesByMaterial 中烘焙到顶点
@@ -273,7 +281,7 @@ export async function loadXmlModFromFiles(
   files: Map<string, File>,
   phmColor?: XmlModColor,
   phmColorMaxA?: number,
-  options?: { strict?: boolean; parseXml?: typeof parseXmlMod; lod?: import('./xmlModGeometry.js').DeviceLod; timings?: Record<string, number> },
+  options?: { strict?: boolean; parseXml?: typeof parseXmlMod; lod?: import('./xmlModGeometry.js').DeviceLod; timings?: Record<string, number>; outline?: import('./xmlModGeometry.js').OutlineGeometryOptions },
 ): Promise<THREE.Group | null> {
   const strict = options?.strict === true;
   const file = getFileByPath(files, modPath);
@@ -304,7 +312,7 @@ export async function loadXmlModFromFiles(
       return group;
     }
     const doc = (options?.parseXml ?? parseXmlMod)(text, modPath);
-    const baked = await collectBakedGeometriesByMaterialAsync(doc, options?.lod, options?.timings);
+    const baked = await collectBakedGeometriesByMaterialAsync(doc, options?.lod, options?.timings, options?.outline);
     const mergeStarted = performance.now();
     const group = flattenDocumentToGroup(doc, baked);
     if (options?.timings) options.timings.mergeMs = (options.timings.mergeMs ?? 0) + performance.now() - mergeStarted;

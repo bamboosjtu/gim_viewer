@@ -633,10 +633,16 @@ export function xmlModDocumentToGroup(doc: XmlModDocument): THREE.Group {
  * @param doc 解析后的 XmlModDocument
  * @returns Map<共享Material, baked BufferGeometry[]>，调用方负责 dispose baked geometry
  */
+export interface OutlineGeometryOptions {
+  /** MOD -> DEV placement, in source millimetres, used only for size filtering. */
+  placementMatrix?: number[];
+  /** Serialization defers the fallback until the whole DEV has been considered. */
+  deferSmallPartFallback?: boolean;
+}
 export function collectBakedGeometriesByMaterial(
-  doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>,
+  doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>, options?: OutlineGeometryOptions,
 ): BakedGeometries {
-  const steps = bakeGeometrySteps(doc, lod, timings);
+  const steps = bakeGeometrySteps(doc, lod, timings, options);
   let step = steps.next();
   while (!step.done) step = steps.next();
   return step.value;
@@ -647,9 +653,9 @@ export function collectBakedGeometriesByMaterial(
  * is still synchronous; this bounds chains, not the cost of an individual CSG.
  */
 export async function collectBakedGeometriesByMaterialAsync(
-  doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>,
+  doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>, options?: OutlineGeometryOptions,
 ): Promise<BakedGeometries> {
-  const steps = bakeGeometrySteps(doc, lod, timings);
+  const steps = bakeGeometrySteps(doc, lod, timings, options);
   let sliceStarted = performance.now();
   let step = steps.next();
   while (!step.done) {
@@ -665,13 +671,22 @@ export async function collectBakedGeometriesByMaterialAsync(
 export interface BakedGeometryFailure { rootId: number; dependencies: { id: number; reason: string }[] }
 export type BakedGeometries = Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]> & {
   failures: BakedGeometryFailure[]; simplifiedBooleans: number;
+  representationPolicy: 'outline' | 'detailed';
+  approximatedBooleans: Record<'Union' | 'Difference' | 'Intersection', number>;
+  omittedSmallParts: number; omittedMaxExtentMm: number;
 };
 function* bakeGeometrySteps(
-  doc: XmlModDocument, lod: DeviceLod, timings?: Record<string, number>,
+  doc: XmlModDocument, lod: DeviceLod, timings?: Record<string, number>, options?: OutlineGeometryOptions,
 ): Generator<void, BakedGeometries, void> {
-  const byMaterial = Object.assign(new Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>(), { failures: [] as BakedGeometryFailure[], simplifiedBooleans: 0 });
-  const build = (p: XmlModPrimitive) => { const started = performance.now(); const geometry = primitiveToGeometry(p, doc.modPath, lod);
-    if (timings) timings.primitiveMs = (timings.primitiveMs ?? 0) + performance.now() - started; return geometry; };
+  const byMaterial = Object.assign(new Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>(), { failures: [] as BakedGeometryFailure[], simplifiedBooleans: 0,
+    representationPolicy: lod < 2 ? 'outline' as const : 'detailed' as const,
+    approximatedBooleans: { Union: 0, Difference: 0, Intersection: 0 }, omittedSmallParts: 0, omittedMaxExtentMm: 0 });
+  const build = (p: XmlModPrimitive) => {
+    const started = performance.now();
+    const geometry = primitiveToGeometry(p, doc.modPath, lod);
+    if (timings) timings.primitiveMs = (timings.primitiveMs ?? 0) + performance.now() - started;
+    return geometry;
+  };
   if (doc.isEmpty) return byMaterial;
 
   // mm → m 缩放矩阵：烘焙到顶点，避免 group.scale + Object3D.applyMatrix4 decompose 精度损失
@@ -726,8 +741,10 @@ function* bakeGeometrySteps(
             result = own(getSharedCsgEvaluator().evaluate(new Brush(a), new Brush(b),
               p.op === 'Union' ? ADDITION : p.op === 'Intersection' ? INTERSECTION : SUBTRACTION).geometry);
           } catch (error) { return fail(id, `csg-failed:${String(error)}`); }
-          finally { if (timings) { timings.booleanMs = (timings.booleanMs ?? 0) + performance.now() - started;
-            timings.booleanEvaluations = (timings.booleanEvaluations ?? 0) + 1; } }
+          finally { if (timings) {
+            timings.booleanMs = (timings.booleanMs ?? 0) + performance.now() - started;
+            timings.booleanEvaluations = (timings.booleanEvaluations ?? 0) + 1;
+          } }
         }
       }
       if (result) transform(result, gimMatrixToMatrix4(entity.transformMatrix));
@@ -736,106 +753,96 @@ function* bakeGeometrySteps(
       return result;
     } finally { visiting.delete(id); }
   }
-  // Keep LOD0 Union as surfaces of solid pieces. Set identities distribute
-  // difference/intersection over those pieces; disjoint pairs need no CSG.
-  const surfaces = new Map<number, THREE.BufferGeometry[] | null>();
-  const surfaceStack = new Set<number>();
-  const bounds = new WeakMap<THREE.BufferGeometry, THREE.Box3>();
-  const boxOf = (g: THREE.BufferGeometry) => {
-    let box = bounds.get(g);
-    if (!box) { g.computeBoundingBox(); box = g.boundingBox!.clone(); bounds.set(g, box); }
-    return box;
-  };
-  function* surface(id: number): Generator<void, THREE.BufferGeometry[] | null, void> {
-    if (surfaces.has(id)) return surfaces.get(id)!;
+  // Outline traversal never calls evaluate(): even a detailed failure fallback
+  // only assembles source leaves. Matrices stay per reference, so shared leaves
+  // can occur under multiple ancestors without double-transforming cached meshes.
+  interface Piece { geometry: THREE.BufferGeometry; matrix: THREE.Matrix4; primitive: XmlModPrimitive }
+  const surfaces = new Map<number, Piece[]>(), surfaceStack = new Set<number>();
+  function* surface(id: number): Generator<void, Piece[], void> {
+    const old = surfaces.get(id); if (old) return old;
     const e = entities.get(id);
-    if (!e) { fail(id, 'missing-reference'); return null; }
-    if (surfaceStack.has(id)) { fail(id, 'cycle'); return null; }
-    if (e.primitive.type !== 'Boolean') {
-      const geometry = yield* evaluate(id);
-      const result = geometry ? [geometry] : null; surfaces.set(id, result); return result;
-    }
+    if (!e) { fail(id, 'missing-reference'); return []; }
+    if (surfaceStack.has(id)) { fail(id, 'cycle'); return []; }
     surfaceStack.add(id);
     try {
-      const p = e.primitive, a = yield* surface(p.entity1), b = yield* surface(p.entity2);
-      let pieces: THREE.BufferGeometry[] = [];
-      if (!a || !b) {
-        fail(id, 'operand-unavailable');
-        // Retain supported surfaces as an explicit partial approximation.
-        // Never invent an intersection from an absent operand.
-        pieces = p.op === 'Union' ? [...a ?? [], ...b ?? []] : p.op === 'Difference' ? a ?? [] : [];
-      } else if (p.op === 'Union') { pieces = [...a, ...b]; byMaterial.simplifiedBooleans++; }
-      else {
-        for (const left of a) {
-          let remaining = [left];
-          for (const right of b) {
-            const next: THREE.BufferGeometry[] = [];
-            const size = boxOf(right).getSize(new THREE.Vector3()).toArray().sort((x,y) => x-y);
-            const smallCut = p.op === 'Difference' && size[0] > 0 && size[1] <= 50;
-            for (const part of p.op === 'Intersection' ? [left] : remaining) {
-              if (smallCut) { next.push(part); byMaterial.simplifiedBooleans++; continue; }
-              if (!boxOf(part).intersectsBox(boxOf(right))) {
-                if (p.op === 'Difference') next.push(part);
-                if (timings) timings.disjointBooleanPairs = (timings.disjointBooleanPairs ?? 0) + 1;
-                continue;
-              }
-              if (!part.getAttribute('position').count || !right.getAttribute('position').count) continue;
-              const started = performance.now();
-              try {
-                const cut = own(getSharedCsgEvaluator().evaluate(new Brush(part), new Brush(right),
-                  p.op === 'Difference' ? SUBTRACTION : INTERSECTION).geometry);
-                if (cut.getAttribute('position').count) next.push(cut);
-              } catch (error) {
-                fail(id, `csg-failed:${String(error)}`);
-                if (p.op === 'Difference') next.push(part);
-              } finally { if (timings) {
-                timings.booleanMs = (timings.booleanMs ?? 0) + performance.now() - started;
-                timings.booleanEvaluations = (timings.booleanEvaluations ?? 0) + 1;
-              } }
-              yield;
-            }
-            if (p.op === 'Intersection') pieces.push(...next); else remaining = next;
-          }
-          if (p.op === 'Difference') pieces.push(...remaining);
-        }
+      const matrix = gimMatrixToMatrix4(e.transformMatrix), p = e.primitive;
+      let pieces: Piece[];
+      if (p.type !== 'Boolean') {
+        const geometry = build(p);
+        if (!geometry) { fail(id, `unsupported-or-invalid:${p.type}`); return []; }
+        pieces = [{ geometry, matrix, primitive: p }];
+      } else {
+        const a = yield* surface(p.entity1);
+        const b = p.op === 'Union' ? yield* surface(p.entity2) : [];
+        pieces = [...a, ...b].map(piece => ({ ...piece, matrix: matrix.clone().multiply(piece.matrix) }));
+        byMaterial.simplifiedBooleans++;
+        byMaterial.approximatedBooleans[p.op]++;
       }
-      const matrix = gimMatrixToMatrix4(e.transformMatrix);
-      if (!matrix.equals(new THREE.Matrix4())) pieces = pieces.map(piece => own(transform(piece.clone(), matrix)));
       surfaces.set(id, pieces); yield; return pieces;
     } finally { surfaceStack.delete(id); }
   }
+  // Validate skipped cutter references without generating their geometry. Source
+  // errors must remain errors, while intentional outline approximations succeed.
+  function validate(id: number, seen: Set<number>, stack = new Set<number>()): void {
+    if (stack.has(id)) { fail(id, 'cycle'); return; }
+    if (seen.has(id)) return;
+    seen.add(id);
+    const e = entities.get(id);
+    if (!e) { fail(id, 'missing-reference'); return; }
+    if (e.primitive.type !== 'Boolean') return;
+    stack.add(id); validate(e.primitive.entity1, seen, stack); validate(e.primitive.entity2, seen, stack); stack.delete(id);
+  }
+  const placement = options?.placementMatrix ? new THREE.Matrix4().fromArray(options.placementMatrix) : new THREE.Matrix4();
+  let fallback: { geometry: THREE.BufferGeometry; material: THREE.MeshStandardMaterial; extent: number } | undefined;
+  const append = (geometry: THREE.BufferGeometry, material: THREE.MeshStandardMaterial) => {
+    const bucket = byMaterial.get(material) ?? []; bucket.push(geometry); byMaterial.set(material, bucket);
+  };
+
   try {
     for (const entity of doc.entities) {
       if (!entity.visible) continue;
-      let pieces = lod === 0 ? yield* surface(entity.id) : null;
-      const base = lod === 0 ? null : yield* evaluate(entity.id);
+      let pieces = lod < 2 ? yield* surface(entity.id) : null;
+      const base = lod < 2 ? null : yield* evaluate(entity.id);
       const reachable = new Set<number>();
-      const visit = (id: number) => {
-        if (reachable.has(id)) return;
-        reachable.add(id);
-        const p = entities.get(id)?.primitive;
-        if (p?.type === 'Boolean') { visit(p.entity1); visit(p.entity2); }
-      };
-      visit(entity.id);
+      validate(entity.id, reachable);
       const dependencies: { id: number; reason: string }[] = [];
       for (const id of reachable) { const reason = failures.get(id); if (reason !== undefined) dependencies.push({ id, reason }); }
       if (dependencies.length) byMaterial.failures.push({ rootId: entity.id, dependencies });
       // A failed detailed Union can still provide its supported browser
       // outline. Keep the root diagnostic and never label it complete.
-      if (dependencies.length && lod > 0 && entity.primitive.type === 'Boolean')
+      if (dependencies.length && lod === 2 && entity.primitive.type === 'Boolean')
         pieces = yield* surface(entity.id);
-      pieces ??= base ? [base] : [];
+      pieces ??= base ? [{ geometry: base, matrix: new THREE.Matrix4(), primitive: entity.primitive }] : [];
       const material = colorToMaterial(entity.color, doc.colorMaxA);
       for (const piece of pieces) {
-        if (piece.getAttribute('position').count === 0) continue;
-        const baked = piece.clone().applyMatrix4(mmToScene);
-        const bucket = byMaterial.get(material) ?? []; bucket.push(baked); byMaterial.set(material, bucket);
+        if (piece.geometry.getAttribute('position').count === 0) continue;
+        const baked = transform(piece.geometry.clone(), piece.matrix);
+        const threshold = smallPartThresholdMm(piece.primitive);
+        if (lod < 2 && threshold) {
+          baked.computeBoundingBox();
+          const box = baked.boundingBox!.clone().applyMatrix4(placement);
+          const size = box.getSize(new THREE.Vector3());
+          const extent = Math.max(size.x, size.y, size.z);
+          if (Number.isFinite(extent) && extent <= threshold) {
+            byMaterial.omittedSmallParts++;
+            byMaterial.omittedMaxExtentMm = Math.max(byMaterial.omittedMaxExtentMm, extent);
+            if (!fallback || extent > fallback.extent) {
+              fallback?.geometry.dispose(); fallback = { geometry: baked, material, extent };
+            } else baked.dispose();
+            continue;
+          }
+        }
+        baked.applyMatrix4(mmToScene); append(baked, material);
       }
       yield;
     }
-  } finally { for (const geometry of owned) geometry.dispose(); }
+    if (!byMaterial.size && fallback && !options?.deferSmallPartFallback) {
+      append(fallback.geometry.clone().applyMatrix4(mmToScene), fallback.material);
+    }
+  } finally { fallback?.geometry.dispose(); for (const geometry of owned) geometry.dispose(); }
   if (timings) {
     timings.simplifiedBooleans = (timings.simplifiedBooleans ?? 0) + byMaterial.simplifiedBooleans;
+    timings.lodOmittedPrimitives = (timings.lodOmittedPrimitives ?? 0) + byMaterial.omittedSmallParts;
     timings.failedVisibleRoots = (timings.failedVisibleRoots ?? 0) + byMaterial.failures.length;
   }
 
@@ -860,6 +867,15 @@ function vec3Array(flat: number[]): THREE.Vector3[] {
 
 function sanitizeNum(n: number): number {
   return Number.isNaN(n) ? 0 : n;
+}
+
+/** Filtering uses the fully placed outer bounds, never wall thickness or DEV size. */
+function smallPartThresholdMm(p: XmlModPrimitive): number {
+  switch (p.type) {
+    case 'Cylinder': case 'Sphere': case 'Ring': case 'CircularGasket': return 100;
+    case 'Cuboid': return 50;
+    default: return 0; // Wire/Cable and structural members always survive.
+  }
 }
 
 /** GIM cylinders have their base at Z=0 and their axis along +Z. */

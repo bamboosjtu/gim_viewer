@@ -64,6 +64,8 @@ export async function cleanupBeforeOpenNewProject(
   state.invalidatePendingLoads();
   cancelSubstationExtraction(state);
   cancelIfcConversions();
+  const { resetIfcWorkCompletion } = await import('../viewer/geometryWorkGate.js');
+  resetIfcWorkCompletion();
   cancelSubstationSpatialWorkers();
   const cleanupGeneration = state.projectGeneration;
   const { cancelDevGeometryPreprocessing } = await import('./devGeometryWorkerClient.js');

@@ -52,6 +52,10 @@ export interface DevGlbSerializationDiagnostics {
   failedVisibleRootCount?: number;
   failedVisibleRoots?: { modPath: string; rootId: number; dependencies: { id: number; reason: string }[] }[];
   simplifiedBooleans?: number;
+  representationPolicy?: 'outline' | 'detailed';
+  approximatedBooleans?: Record<'Union' | 'Difference' | 'Intersection', number>;
+  omittedSmallParts?: number;
+  omittedMaxExtentMm?: number;
 }
 
 export interface DevGlbSerializationResult {
@@ -185,6 +189,7 @@ export async function serializeDevToGlbDetailed(
     else disposeStlGroup(group);
   };
 
+  let smallFallback: { geo: typeof discovered.mods[number]; extent: number } | undefined;
   // 加载 MOD
   for (const geo of discovered.mods) {
     try {
@@ -193,17 +198,26 @@ export async function serializeDevToGlbDetailed(
         files,
         geo.phmColor,
         geo.phmColorMaxA,
-        { strict: true, parseXml: options.parseXml, lod: options.lod, timings: options.timings },
+        { strict: true, parseXml: options.parseXml, lod: options.lod, timings: options.timings,
+          outline: { placementMatrix: geo.placementTransformMatrix, deferSmallPartFallback: true } },
       );
       if (!group) continue;
       const xmlDiagnostics = readXmlDiagnostics(group);
       if (xmlDiagnostics) {
-        if (xmlDiagnostics.status === 'empty') sawEmptyDeviceXml = true;
+        if (xmlDiagnostics.status === 'empty' && !xmlDiagnostics.omittedSmallParts) sawEmptyDeviceXml = true;
         addUnsupportedCounts(xmlDiagnostics.unsupportedPrimitiveTypeCounts);
         diagnostics.failedVisibleRootCount = (diagnostics.failedVisibleRootCount ?? 0) + (xmlDiagnostics.failedVisibleRoots?.length ?? 0);
         diagnostics.failedVisibleRoots ??= [];
         for (const failure of xmlDiagnostics.failedVisibleRoots ?? []) if (diagnostics.failedVisibleRoots.length < 64)
           diagnostics.failedVisibleRoots.push({ modPath: geo.modPath, ...failure });
+        diagnostics.representationPolicy = xmlDiagnostics.representationPolicy;
+        diagnostics.approximatedBooleans ??= { Union: 0, Difference: 0, Intersection: 0 };
+        for (const op of ['Union', 'Difference', 'Intersection'] as const)
+          diagnostics.approximatedBooleans[op] += xmlDiagnostics.approximatedBooleans?.[op] ?? 0;
+        diagnostics.omittedSmallParts = (diagnostics.omittedSmallParts ?? 0) + (xmlDiagnostics.omittedSmallParts ?? 0);
+        const extent = xmlDiagnostics.omittedMaxExtentMm ?? 0;
+        if (xmlDiagnostics.omittedSmallParts && (!smallFallback || extent > smallFallback.extent)) smallFallback = { geo, extent };
+        diagnostics.omittedMaxExtentMm = Math.max(diagnostics.omittedMaxExtentMm ?? 0, extent);
         diagnostics.simplifiedBooleans = (diagnostics.simplifiedBooleans ?? 0) + (xmlDiagnostics.simplifiedBooleans ?? 0);
       }
       // EMPTY_DEVICE_XML and MODs whose parsed entities have no supported
@@ -212,7 +226,7 @@ export async function serializeDevToGlbDetailed(
       // the explicit `empty` manifest state, while mixed DEV content keeps its
       // real meshes only.
       if (!hasRenderableGeometry(group)) {
-        if (!xmlDiagnostics || xmlDiagnostics.status === 'empty') diagnostics.emptySourceCount++;
+        if (!xmlDiagnostics || xmlDiagnostics.status === 'empty' && !xmlDiagnostics.omittedSmallParts) diagnostics.emptySourceCount++;
         if (xmlDiagnostics && xmlDiagnostics.status !== 'empty') diagnostics.unsupportedSourceCount++;
         disposeSourceGroup(group);
         continue;
@@ -262,6 +276,20 @@ export async function serializeDevToGlbDetailed(
     }
   }
 
+  // All-small geometry is not a source-empty DEV. Retry only the largest
+  // omitted source, keeping one real silhouette instead of hiding the device.
+  if (devGroup.children.length === 0 && smallFallback) {
+    const geo = smallFallback.geo;
+    const group = await loadXmlModFromFiles(geo.modPath, files, geo.phmColor, geo.phmColorMaxA,
+      { strict: true, parseXml: options.parseXml, lod: options.lod,
+        outline: { placementMatrix: geo.placementTransformMatrix } });
+    if (group && hasRenderableGeometry(group)) {
+      applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+      group.userData.devPath = geo.devPath; group.userData.assemblyPath = geo.assemblyPath; group.userData.referencePath = geo.referencePath;
+      devGroup.add(group); modLoaded++; diagnostics.renderableModCount++;
+      if (readXmlDiagnostics(group)?.status === 'partial') diagnostics.partialSourceCount++;
+    } else if (group) disposeSourceGroup(group);
+  }
   if (devGroup.children.length === 0) {
     // All referenced files were present and parsed, but none contained a
     // renderable primitive (for example EMPTY_DEVICE_XML or an intentionally

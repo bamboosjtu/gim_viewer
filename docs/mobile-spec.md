@@ -1,7 +1,7 @@
 # 移动端当前规格
 
 `app/` 实现 Android 输电线路查看应用，基于 Tauri 2、TypeScript/Vite 和 MapLibre。
-需求与验收基准是 [软件规格说明](../app/软件规格说明.md)，UI 参考[响应式设计](../app/输电线路GIM地图应用响应式设计展示.png)。当前 minSdk 29、targetSdk 36。构建方法见 [App README](../app/README.md)。移动端验收条件按 [验证](validation.md#移动端验证) 执行；移动端未关闭的代码缺陷见 [未决事项](open-issues.md)。
+需求与验收基准是 [软件规格说明](../app/软件规格说明.md)，UI 参考[响应式设计](../app/输电线路GIM地图应用响应式设计展示.png)。当前 minSdk 29、targetSdk 36。构建方法见 [App README](../app/README.md)。移动端验收条件按 [验证](validation.md#移动端验证) 执行；移动端未关闭缺陷与已接受限制见 [问题与限制](open-issues.md)。
 
 ## 当前能力
 
@@ -84,4 +84,4 @@ API 36 Pixel Fold profile 已通过 line02 的 Release SAF 导入；诊断构建
 
 Release APK 另通过 API 29/36 的启动、缓存恢复和真实 SAF 输入检查，使用内部测试证书签名。
 
-具体测试方法见 [验证](validation.md#移动端验证)，剩余设备与错误路径见未决事项。
+具体测试方法见 [验证](validation.md#移动端验证)，剩余设备与错误路径见 [问题与限制](open-issues.md)。

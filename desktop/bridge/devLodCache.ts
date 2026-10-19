@@ -128,8 +128,8 @@ function readNativeArtifact<T>(args: NonNullable<ReturnType<typeof nativeArgs>>,
   return new Promise((resolve) => target.rows.push({ entry: args.entryPath, key, resolve: resolve as (value: DevArtifactRead<unknown>) => void }));
 }
 async function flushNativeReads(group: { args: NonNullable<ReturnType<typeof nativeArgs>>; rows: NativeRead[] }): Promise<void> {
-  for (let start = 0; start < group.rows.length; start += 16) {
-    const rows = group.rows.slice(start, start + 16);
+  for (let start = 0; start < group.rows.length; start += 64) {
+    const rows = group.rows.slice(start, start + 64);
     const store = rows[0].entry.split('/', 1)[0];
     const keys = rows.map((row) => row.key);
     const values = await readNativeBatchRaw<unknown>(group.args, keys, store);

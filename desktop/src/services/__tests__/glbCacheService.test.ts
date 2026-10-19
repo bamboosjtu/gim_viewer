@@ -181,3 +181,18 @@ describe('serializeDevToGlb strict dependency semantics', () => {
     expect(result.diagnostics.unsupportedPrimitiveTypeCounts).toEqual({ UnknownPrimitive: 1 });
   });
 });
+
+it('outline serialization filters across MOD boundaries and retains one silhouette for an all-small DEV', async () => {
+  const input=(big:boolean)=>new Map(Object.entries({
+    'DEV/test.dev':'SOLIDMODELS.NUM=1\nSOLIDMODEL0=test.phm',
+    'PHM/test.phm':'SOLIDMODELS.NUM=2\nSOLIDMODEL0=a.mod\nSOLIDMODEL1=b.mod',
+    'MOD/a.mod':'<Device><Entities><Entity ID="1"><Cuboid L="20" W="20" H="20"/></Entity></Entities></Device>',
+    'MOD/b.mod':`<Device><Entities><Entity ID="1"><Cuboid L="${big?200:40}" W="40" H="40"/></Entity></Entities></Device>`,
+  }).map(([p,t])=>[p,file(t,p)]));
+  for(const big of [false,true]){
+    const result=await serializeDevToGlbDetailed('DEV/test.dev',input(big),{lod:0});
+    expect(result.status).toBe('complete');expect(result.bytes).not.toBeNull();
+    expect(result.diagnostics).toMatchObject({representationPolicy:'outline',renderableModCount:1,emptySourceCount:0,omittedSmallParts:big?1:2});
+    expect(await parseDevGlbAsset('DEV/test.dev',result.bytes!)).not.toBeNull();
+  }
+});

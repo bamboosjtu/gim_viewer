@@ -44,7 +44,7 @@ export class DevTemplateCacheReader<T> {
         try {
           release = await this.budget.acquire(this.budget.limit);
           if (this.closed) throw new DOMException('DEV cache reader released', 'AbortError');
-          batch = this.queue.splice(0, 16);
+          batch = this.queue.splice(0, 64);
           let values: Map<string, DevArtifactRead<T>>;
           try {
             values = await readDevArtifactBatch<T>('templates', batch.map((row) => row.key), this.context, this.budget.limit);

@@ -23,7 +23,7 @@ it('retains every physical FAM row through production SQLite save/query/restore'
     { modelId: 'a-second', name: 'later', path: 'CBM/later.ifc' }];
   const index = await buildGimIndexPayload(1, files, ifcs, tree, []);
   const refs = await buildGeometryRefsPayload(1, files);
-  const [warm, migrated] = sqliteRoundTrip([{ index, refs },{ index, refs, migrate:true }]);
+  const [warm, migrated] = await sqliteRoundTrip([{ index, refs },{ index, refs, migrate:true }]);
   expect(migrated.index.fam_properties.map((p) => p.raw_property_json)).toEqual(warm.index.fam_properties.map((p) => p.raw_property_json));
   const state = new AppState();
   restoreGimIndexToState(state, warm.index);

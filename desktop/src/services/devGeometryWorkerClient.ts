@@ -4,7 +4,7 @@ import type { DeviceLod } from '../viewer/xmlModGeometry.js';
 import type { DevSourceBounds } from './devSpatialCatalog.js';
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import { perfCurrentSession, perfMark } from '../utils/perfTimings.js';
-import { beginDevGeometryWork } from '../viewer/geometryWorkGate.js';
+import { beginDevGeometryWork, hasCompletedIfcWork, ifcGeometryBusy } from '../viewer/geometryWorkGate.js';
 import { agedWorkPriority } from '../utils/workPriority.js';
 interface Slot { id: number; key: string; path: string; kind: 'compile' | 'bounds'; lod: DeviceLod; priority: number; queuedAt: number;
   promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void }
@@ -77,6 +77,9 @@ export class DevGeometryPreprocessor {
   private pump(): void {
     if (!this.current()) { this.cancel(); return; }
     if (this.stopped) return;
+    // The worker pool itself is capped at ~60% of logical cores, leaving
+    // headroom for IFC/main-thread/UI. Before IFC completes keep the historical
+    // two-compile limit; after IFC has completed, use the whole DEV pool.
     for (const worker of this.workers) {
       if (this.active.has(worker)) continue;
       const running = new Set([...this.active.values()].map(row => row.task.key));
@@ -89,8 +92,21 @@ export class DevGeometryPreprocessor {
         if (!task || priority < best || priority === best && candidate.id < task.id) { task = candidate; best = priority; }
       }
       if (!task) break;
-      const release = task.kind === 'compile' ? beginDevGeometryWork() : null;
-      if (task.kind === 'compile' && !release) break;
+      const ifcBusy = ifcGeometryBusy();
+      const compileLimit = hasCompletedIfcWork() && !ifcBusy ? this.workers.length : 2;
+      const release = task.kind === 'compile' ? beginDevGeometryWork(compileLimit) : null;
+      if (task.kind === 'compile' && !release) {
+        // Do not leave idle workers blocked behind a full compile gate: catalog
+        // bounds are independent and must keep progressing.
+        let boundsTask: Slot | undefined;
+        for (const candidate of this.slots.values()) {
+          if (candidate.kind !== 'bounds' || running.has(candidate.key)) continue;
+          if (!boundsTask || candidate.priority < boundsTask.priority
+            || candidate.priority === boundsTask.priority && candidate.id < boundsTask.id) boundsTask = candidate;
+        }
+        if (!boundsTask) break;
+        task = boundsTask;
+      }
       this.active.set(worker, { task, release, finished: false, startedAt: performance.now() });
       this.diagnostics.queueWaitMs += Math.max(0, performance.now() - task.queuedAt);
       if (task.kind === 'bounds') this.diagnostics.boundsTasks++; else this.diagnostics.compileTasks++;

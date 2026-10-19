@@ -48,6 +48,10 @@ export interface GeometryDiagnostic {
   failedVisibleRootCount?: number;
   failedVisibleRoots?: GeometryRootFailure[];
   simplifiedBooleans?: number;
+  representationPolicy?: 'outline' | 'detailed';
+  approximatedBooleans?: Record<'Union' | 'Difference' | 'Intersection', number>;
+  omittedSmallParts?: number;
+  omittedMaxExtentMm?: number;
   /**
    * Human-readable detail is intentionally short and non-sensitive.  It is
    * suitable for the inspector, while raw paths remain in the source tab.
@@ -73,6 +77,10 @@ export interface SerializationDiagnosticInput {
   failedVisibleRootCount?: number;
   failedVisibleRoots?: GeometryRootFailure[];
   simplifiedBooleans?: number;
+  representationPolicy?: 'outline' | 'detailed';
+  approximatedBooleans?: Record<'Union' | 'Difference' | 'Intersection', number>;
+  omittedSmallParts?: number;
+  omittedMaxExtentMm?: number;
 }
 
 export interface ManifestDiagnosticInput {
@@ -147,6 +155,10 @@ export function diagnosticFromSerialization(
     failedVisibleRootCount: input.failedVisibleRootCount,
     failedVisibleRoots: input.failedVisibleRoots?.map(root => ({ ...root, dependencies: root.dependencies.map(dep => ({ ...dep })) })),
     simplifiedBooleans: input.simplifiedBooleans,
+    representationPolicy: input.representationPolicy,
+    approximatedBooleans: input.approximatedBooleans ? { ...input.approximatedBooleans } : undefined,
+    omittedSmallParts: input.omittedSmallParts,
+    omittedMaxExtentMm: input.omittedMaxExtentMm,
     ...(defaultDetail(status) ? { detail: defaultDetail(status) } : {}),
   };
 }

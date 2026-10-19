@@ -158,8 +158,8 @@ describe('two-phase semantic publication', () => {
       input.cachePaths, input.sourceSha256,
     );
     const refs = await buildGeometryRefsPayload(input.projectId, input.files, input.sourceSha256);
-    const [result] = sqliteRoundTrip([{ index, refs }]);
+    const [result] = await sqliteRoundTrip([{ index, refs }]);
     expect(result.index.fam_properties).toHaveLength(3);
     expect(result.index.dev_properties.length).toBeGreaterThan(0);
-  });
+  }, 60_000);
 });

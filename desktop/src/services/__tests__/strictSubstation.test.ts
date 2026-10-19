@@ -104,7 +104,7 @@ for (const [ordinal, sample] of samples.entries()) {
     const byDev = new Map<string, typeof seeds>();
     for (const seed of seeds) { const key = seed.devPath.replace(/^dev\//i, '').toLowerCase(); byDev.set(key, [...(byDev.get(key) ?? []), seed]); }
     const filter = byDev.keys().next().value!;
-    const [sql] = sqliteRoundTrip([{ index, refs, filter: [filter] }]);
+    const [sql] = await sqliteRoundTrip([{ index, refs, filter: [filter] }]);
     const state = new AppState();
     restoreGimIndexToState(state, sql.index);
     expect(state.currentIfcEntries).toEqual(ifcs); // first IFC anchor survives SQLite restore

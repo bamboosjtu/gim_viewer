@@ -11,7 +11,7 @@ import { parseDevGlbAsset, type DevGlbSerializationResult } from './glbCacheServ
 import { createDevGeometryPreprocessor, type DevGeometryPreprocessor } from './devGeometryWorkerClient.js';
 import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
 import { DEV_GEOMETRY_VERSION, DEV_SPATIAL_CATALOG_VERSION, boxTuple, tupleBox, type DevSourceBounds, type DevSpatialOccurrence } from './devSpatialCatalog.js';
-import { readDevArtifactResult, writeDevArtifactDetailed, deleteDevArtifact, type DevArtifactRead, type DevArtifactReadStatus } from '@desktop/devLodCache.js';
+import { readDevArtifactResult, readDevArtifactBatch, writeDevArtifactDetailed, deleteDevArtifact, type DevArtifactRead, type DevArtifactReadStatus } from '@desktop/devLodCache.js';
 import { readCachedEntry } from '@desktop/database.js';
 import { batchReadCachedFiles } from '@desktop/database.js';
 import { perfCurrentSession, perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
@@ -288,6 +288,12 @@ export class DevLodRuntime {
     this.diagnostics.uniqueDevSources = byDev.size;
     this.notifyCoordinateAnchor(); this.update(); // Compilation can begin before any IFC is ready.
     const catalogEntries = [...byDev];
+    // Main transformers / GIS / arresters are the visual anchors of a station;
+    // their catalog bounds must not be left behind hundreds of small rows.
+    const importantDev = (instances: typeof seeds): number =>
+      instances.some((seed) => /主变|变压器|HGIS|GIS|避雷器|出线|母线/.test(seed.name ?? '')) ? 0 : 1;
+    catalogEntries.sort((a, b) =>
+      importantDev(a[1]) - importantDev(b[1]) || b[1].length - a[1].length);
     const resolveCatalog = async (dev: string): Promise<DevSourceBounds> => {
       const catalogRead = await this.catalogHint(dev);
       if (!this.current()) throw new DOMException('DEV directory left the current view', 'AbortError');
@@ -315,7 +321,7 @@ export class DevLodRuntime {
           this.diagnostics.errors.push(`目录 ${dev}: ${String(error)}`);if(this.diagnostics.errors.length>32)this.diagnostics.errors.shift();
         }
         if (!this.current()) throw new DOMException('DEV directory left the current view', 'AbortError');
-        if (!bounds.diagnostic && this.session.sourceSha256) this.persistArtifact('catalog', this.catalogKey(dev), bounds);
+        if (bounds && !bounds.diagnostic && this.session.sourceSha256) this.persistArtifact('catalog', this.catalogKey(dev), bounds);
       }
       return bounds ?? {devPath:dev,sourceBounds:null,boundsQuality:'unknown',primitiveCounts:{},unsupportedTypes:[],diagnostic:'missing-catalog-bounds'};
     };
@@ -343,15 +349,48 @@ export class DevLodRuntime {
       this.requestReady();
       if (instances.some(seed => seed.path === this.selected)) void this.select(this.selected).catch(error => console.warn('[DEV selected]', error));
     };
-    const CATALOG_BATCH = 8;
-    for (let start = 0; start < catalogEntries.length; start += CATALOG_BATCH) {
-      if (!this.current()) return;
-      const batch = catalogEntries.slice(start, start + CATALOG_BATCH);
-      const boundsList = await Promise.all(batch.map(([dev]) => resolveCatalog(dev)));
-      if (!this.current()) return;
-      batch.forEach(([dev, instances], index) => applyCatalog(dev, instances, boundsList[index]));
-      this.schedule(); // Incremental directory, without waiting for the last source.
+    const CATALOG_CONCURRENCY = Math.max(32, this.worker.workerCount * 8);
+    // Warm start: one bounded native batch per 64 DEV instead of one IPC per
+    // DEV. This removes the 285-round-trip catalog startup from the critical
+    // path; cold start benefits from the same batched lookup (misses cheap).
+    try {
+      const keys = catalogEntries.map(([dev]) => this.catalogKey(dev));
+      for (let start = 0; start < keys.length; start += 64) {
+        if (!this.current()) return;
+        const devs = catalogEntries.slice(start, start + 64).map(([dev]) => dev);
+        const reads = await readDevArtifactBatch<DevSourceBounds>('catalog', keys.slice(start, start + 64), this.session, 256 * 1024 * 1024);
+        if (!(reads instanceof Map)) throw new Error('catalog prefetch returned no map');
+        devs.forEach((dev, index) => {
+          const key = keys[start + index];
+          const read = reads.get(key);
+          // Only hits are prefetched; misses still go through resolveCatalog so
+          // tests/mocks and invalid-entry handling keep the original semantics.
+          if (read?.status === 'hit') this.catalogHints.set(dev, Promise.resolve(read));
+        });
+      }
+    } catch (error) {
+      // A failed prefetch falls back to per-DEV reads in resolveCatalog.
+      console.warn('[DEV catalog prefetch]', error);
     }
+    // Stream catalog bounds: a single slow DEV must not block the next batch.
+    // This was the substation02 1395/3326 stall: Promise.all(batch of 8) waited
+    // for one pathological bounds task while the other workers had no new rows.
+    let nextCatalog = 0;
+    const consumeCatalog = async (): Promise<void> => {
+      while (this.current()) {
+        const index = nextCatalog++;
+        if (index >= catalogEntries.length) return;
+        const [dev, instances] = catalogEntries[index];
+        const bounds = await resolveCatalog(dev);
+        if (!this.current()) return;
+        applyCatalog(dev, instances, bounds);
+        this.schedule();
+      }
+    };
+    await Promise.all(Array.from(
+      { length: Math.min(CATALOG_CONCURRENCY, catalogEntries.length) },
+      () => consumeCatalog(),
+    ));
     if (!this.current()) return;
     this.diagnostics.catalogReady = true; this.finishCatalog();
     const { refreshDeviceBoundsMarkers } = await import('../ui/deviceBoundsMarker.js');
@@ -569,9 +608,9 @@ export class DevLodRuntime {
       const lod = selected ? 2 : !row.group ? 0 : metrics ? chooseDeviceLod(row.displayed, metrics.visible, metrics.distance, metrics.pixels) : 0;
       row.desired = lod;
       const key = this.key(row.entry.devPath, lod); wanted.add(key);
-      // Base representation must not sit behind detail compiles. Only an
-      // explicit selection outranks LOD0; LOD1/2 for proximity follow it.
-      const priority = selected ? 0 : lod === 0 ? 1 : 2;
+      // Visible L0 outranks offscreen L0; offscreen still remains wanted and
+      // is reached later (aged priority prevents permanent starvation).
+      const priority = selected ? 0 : lod === 0 ? (row.inView ? 1 : 3) : 2;
       if (row.key !== key && row.failedKey !== key) void this.render(row, lod, priority).catch(e => this.failed(row, e, key));
     }
     this.worker?.cancelQueued(wanted); this.templates.trim(this.pinned());
@@ -743,12 +782,11 @@ export class DevLodRuntime {
     const background = this.diagnostics.currentViewSettled && !this.diagnostics.baseRepresentationsSettled ? ' · 后台补充基础表示' : '';
     const cold = this.diagnostics.compiled, warm = this.diagnostics.lodHits;
     const failedCount = this.diagnostics.failedOccurrences;
-    const displayedFinished = finished < total ? Math.min(total, finished + 1) : total;
     const cacheProblems = this.diagnostics.lodReadErrors.reduce((a,b)=>a+b,0)
       + this.diagnostics.lodInvalid.reduce((a,b)=>a+b,0)
       + this.diagnostics.artifactWriteFailures;
     this.status(
-      `几何实例已处理 ${displayedFinished}/${total} · 已显示 ${this.diagnostics.readyOccurrences} · 冷编译 L0 ${cold[0]}/L1 ${cold[1]}/L2 ${cold[2]} · 缓存命中 L0 ${warm[0]}/L1 ${warm[1]}/L2 ${warm[2]}${failedCount ? ` · 失败 ${failedCount}` : ''} · ${phase}${background}`,
+      `几何实例已处理 ${finished}/${total} · 已显示 ${this.diagnostics.readyOccurrences} · 冷编译 L0 ${cold[0]}/L1 ${cold[1]}/L2 ${cold[2]} · 缓存命中 L0 ${warm[0]}/L1 ${warm[1]}/L2 ${warm[2]}${failedCount ? ` · 失败 ${failedCount}` : ''} · ${phase}${background}`,
       `LOD缓存 miss ${this.diagnostics.cacheMisses} · read-error ${this.diagnostics.cacheReadErrorCount} · invalid ${this.diagnostics.cacheInvalidCount} · 写入失败 ${this.diagnostics.artifactWriteFailures}`
         + ` · 目录 ${this.diagnostics.directoryCompleted}/${total}${this.diagnostics.catalogReady?'（就绪）':'（进行中）'}`
         + ` · 批读 ${this.diagnostics.cacheReadBatches} 批/${this.diagnostics.cacheReadEntries} 条（defer ${this.diagnostics.cacheReadDeferred}）`

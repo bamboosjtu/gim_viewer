@@ -1095,8 +1095,13 @@ export async function loadAllIfcFiles(
     // 控制台列出，绝不静默丢弃。
     const { shouldSkipLargeIfc, LARGE_IFC_BYTES } = await import('./appSettings.js');
     const skippedLargeIfc: Array<{ path: string; bytes: number }> = [];
+    const isConnectionIfc = (entry: IfcEntry): boolean =>
+      /接线|连接线|软导|导线|wire|cable/i.test(`${entry.name} ${entry.path}`);
     if (shouldSkipLargeIfc() && queue.length > 1) {
       for (let index = queue.length - 1; index >= 1; index--) {
+        // Connection-line IFC is the only source of those lines for some
+        // substations; never silently skip it by size.
+        if (isConnectionIfc(queue[index])) continue;
         const bytes = sizes.get(queue[index].path.toLowerCase()) ?? 0;
         if (bytes <= LARGE_IFC_BYTES) continue;
         skippedLargeIfc.push({ path: queue[index].path, bytes });
@@ -1115,6 +1120,18 @@ export async function loadAllIfcFiles(
       queue.splice(0, queue.length, ...normalQueue, ...hugeQueue);
       perfMark('IFC 超大文件排到队尾', {
         huge: hugeQueue.map((entry) => ({ path: entry.path, bytes: sizes.get(entry.path.toLowerCase()) ?? 0 })),
+      }, perfSession);
+    }
+    // Connection IFC used to sit behind every normal IFC because it is huge.
+    // Put it right after the first interactive IFC so wires appear before the
+    // remaining heavy equipment models finish converting.
+    const connectionEntries = queue.filter(isConnectionIfc);
+    if (connectionEntries.length && connectionEntries.length < queue.length) {
+      const first = queue.find((entry) => !isConnectionIfc(entry));
+      const rest = queue.filter((entry) => entry !== first && !isConnectionIfc(entry));
+      queue.splice(0, queue.length, ...[first, ...connectionEntries, ...rest].filter((entry): entry is IfcEntry => Boolean(entry)));
+      perfMark('IFC 连接线优先', {
+        order: queue.slice(0, 4).map((entry) => entry.path),
       }, perfSession);
     }
     for (let queueIndex=0;queueIndex<queue.length;queueIndex++) {

@@ -1,6 +1,6 @@
-﻿import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { DevGeometryPreprocessor } from '../devGeometryWorkerClient.js';
-import { beginIfcGeometryWork, ifcGeometryBusy } from '../../viewer/geometryWorkGate.js';
+import { beginIfcGeometryWork, ifcGeometryBusy, resetGeometryWorkGateForTests } from '../../viewer/geometryWorkGate.js';
 
 class ControlledWorker {
   static instances: ControlledWorker[] = [];
@@ -15,7 +15,7 @@ class ControlledWorker {
     this.onmessage?.({ data: { ...task, kind: 'result', error, result: { status: 'ready', bytes: {byteLength}, diagnostics: {} }, wallMs: 1, stages: {} } });
   }
 }
-afterEach(() => { vi.unstubAllGlobals(); ControlledWorker.instances = []; });
+afterEach(() => { vi.unstubAllGlobals(); ControlledWorker.instances = []; resetGeometryWorkGateForTests(); });
 it('selection preempts queued work while old background base requests cannot starve behind fresh visible detail', async () => {
   vi.stubGlobal('Worker', ControlledWorker); vi.stubGlobal('navigator', { hardwareConcurrency: 8, deviceMemory: 8 });
   let now = 0;

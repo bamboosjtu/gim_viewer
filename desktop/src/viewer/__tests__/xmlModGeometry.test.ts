@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as THREE from 'three';
+import { Evaluator } from 'three-bvh-csg';
 import {
   primitiveToGeometry,
   entityToMesh,
@@ -40,6 +41,53 @@ function makeEntity(
     color: opts.color,
   };
 }
+
+describe('LOD small-part policy', () => {
+  const xml = `<Device><Entities>
+  <Entity ID="1" Type="simple" Visible="True"><Cylinder R="10" H="30"/><TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1"/></Entity>
+  <Entity ID="2" Type="simple" Visible="True"><Wire D="24" FitCoordArray="0,0,0;1000,0,0;2000,0,0"/><TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1"/></Entity>
+  </Entities></Device>`;
+  it('omits small non-electrical roots at LOD0/LOD1 but keeps Wire', () => {
+    const doc = parseXmlMod(xml, 'MOD/small-policy.mod');
+    const t0: Record<string, number> = {};
+    collectBakedGeometriesByMaterial(doc, 0, t0);
+    expect(t0.lodOmittedPrimitives).toBe(1);
+    const t2: Record<string, number> = {};
+    collectBakedGeometriesByMaterial(doc, 2, t2);
+    expect(t2.lodOmittedPrimitives ?? 0).toBe(0);
+  });
+  it('skips a tiny Difference cutter at LOD1 but keeps exact CSG at LOD2', () => {
+    const booleanXml = `<Device><Entities>
+      <Entity ID="1" Visible="true"><Cuboid L="200" W="200" H="200"/></Entity>
+      <Entity ID="2" Visible="false"><Cuboid L="30" W="30" H="30"/></Entity>
+      <Entity ID="3" Visible="true"><Boolean Type="Difference" Entity1="1" Entity2="2"/></Entity>
+    </Entities></Device>`;
+    const doc = parseXmlMod(booleanXml, 'MOD/lod1-cut.mod');
+    const vertexCount = (baked: ReturnType<typeof collectBakedGeometriesByMaterial>) =>
+      [...baked.values()].flat().reduce((sum, geometry) => sum + (geometry.getAttribute('position')?.count ?? 0), 0);
+    const t1: Record<string, number> = {};
+    const l1 = collectBakedGeometriesByMaterial(doc, 1, t1);
+    expect(t1.simplifiedBooleans).toBeGreaterThan(0);
+    expect(t1.booleanEvaluations ?? 0).toBe(0);
+    const t2: Record<string, number> = {};
+    const l2 = collectBakedGeometriesByMaterial(doc, 2, t2);
+    expect(t2.simplifiedBooleans ?? 0).toBe(0);
+    expect(t2.booleanEvaluations ?? 0).toBeGreaterThan(0);
+    expect(vertexCount(l2)).toBeGreaterThan(vertexCount(l1));
+  });
+  it('omits even long slot cuts in browsing LODs', () => {
+    const slotXml = `<Device><Entities>
+      <Entity ID="1" Visible="true"><Cuboid L="200" W="200" H="200"/></Entity>
+      <Entity ID="2" Visible="false"><Cuboid L="1000" W="20" H="20"/></Entity>
+      <Entity ID="3" Visible="true"><Boolean Type="Difference" Entity1="1" Entity2="2"/></Entity>
+    </Entities></Device>`;
+    const doc = parseXmlMod(slotXml, 'MOD/lod1-slot.mod');
+    const t1: Record<string, number> = {};
+    collectBakedGeometriesByMaterial(doc, 1, t1);
+    expect(t1.simplifiedBooleans).toBeGreaterThan(0);
+    expect(t1.booleanEvaluations ?? 0).toBe(0);
+  });
+});
 
 describe('primitiveToGeometry', () => {
   describe('强类型 primitive（11 类）', () => {
@@ -625,29 +673,29 @@ describe('Boolean CSG（P3-1，three-bvh-csg）', () => {
     const tm = (x: number) => `1,0,0,0,0,1,0,0,0,0,1,0,${x},0,0,1`;
     const doc = makeBoolDoc(`
       <Entity ID="1" Visible="false"><Cuboid L="100" W="100" H="100"/></Entity>
-      <Entity ID="2" Visible="false"><Cuboid L="40" W="40" H="40"/></Entity>
+      <Entity ID="2" Visible="false"><Cuboid L="60" W="60" H="60"/></Entity>
       <Entity ID="3" Visible="false"><Boolean Type="Union" Entity1="1" Entity2="2"/><TransformMatrix Value="${tm(200)}"/></Entity>
       <Entity ID="4" Visible="true"><Boolean Type="Union" Entity1="3" Entity2="2"/><TransformMatrix Value="${tm(1000)}"/></Entity>`);
-    for (const lod of [0, 2] as const) {
+    for (const lod of [0, 1, 2] as const) {
       const timings: Record<string, number> = {};
       const buckets = collectBakedGeometriesByMaterial(doc, lod, timings);
       const box = new THREE.Box3();
       for (const geometries of buckets.values()) for (const g of geometries) { g.computeBoundingBox(); box.union(g.boundingBox!); }
-      expect(box.min.x).toBeCloseTo(.98, 6);
+      expect(box.min.x).toBeCloseTo(.97, 6);
       expect(box.max.x).toBeCloseTo(1.25, 6);
       expect(buckets.failures).toEqual([]);
-      expect(timings.booleanEvaluations ?? 0).toBe(lod === 0 ? 0 : 2);
+      expect(timings.booleanEvaluations ?? 0).toBe(lod < 2 ? 0 : 2);
     }
   });
 
-  it('retains a large Difference, skips only a small cutter and reports unsupported dependency fan-out', () => {
+  it('outlines all Difference cutters and reports unsupported dependency fan-out', () => {
     const body = `<Entity ID="1" Visible="false"><Cuboid L="100" W="100" H="100"/></Entity>`;
-    for (const [size, expected] of [[20, 0], [80, 1]]) {
+    for (const size of [20, 80]) {
       const timings: Record<string, number> = {};
       const doc = makeBoolDoc(`${body}<Entity ID="2" Visible="false"><Cuboid L="${size}" W="${size}" H="100"/></Entity>
         <Entity ID="3" Visible="true"><Boolean Type="Difference" Entity1="1" Entity2="2"/></Entity>`);
       expect(collectBakedGeometriesByMaterial(doc, 0, timings).size).toBe(1);
-      expect(timings.booleanEvaluations ?? 0).toBe(expected);
+      expect(timings.booleanEvaluations ?? 0).toBe(0);
     }
     const doc = makeBoolDoc(`${body}<Entity ID="2" Visible="false"><UnknownShape/></Entity>
       <Entity ID="3" Visible="true"><Boolean Type="Union" Entity1="1" Entity2="2"/></Entity>
@@ -680,7 +728,7 @@ describe('Boolean CSG（P3-1，three-bvh-csg）', () => {
       }
       return sum;
     };
-    expect(volume(0)).toBeCloseTo(.001, 8);
+    expect(volume(0)).toBeCloseTo(.002, 8);
     expect(volume(2)).toBeCloseTo(.001, 8);
   });
 
@@ -845,5 +893,59 @@ describe('Boolean CSG（P3-1，three-bvh-csg）', () => {
     cached.computeBoundingBox();
     expect(cached.boundingBox!.min.z).toBeCloseTo(0, 1);
     expect(cached.boundingBox!.max.z).toBeCloseTo(91, 1);
+  });
+});
+
+
+describe('outline LOD contract', () => {
+  const doc = (inner: string) => parseXmlMod(`<Device><Entities>${inner}</Entities></Device>`, 'outline.mod');
+  const leaf = (id: number, size = 200, matrix = IDENTITY) => `<Entity ID="${id}" Visible="false"><Cuboid L="${size}" W="${size}" H="${size}"/><TransformMatrix Value="${matrix.join(',')}"/></Entity>`;
+  const positions = (out: ReturnType<typeof collectBakedGeometriesByMaterial>) => [...out.values()].flat();
+  it.each(['Union', 'Difference', 'Intersection'] as const)('%s never calls the Evaluator in L0/L1, including nested hidden operands', async (op) => {
+    const input = doc(`<Entity ID="4" Visible="true"><Boolean Type="${op}" Entity1="3" Entity2="2"/></Entity>
+      <Entity ID="3" Visible="false"><Boolean Type="Difference" Entity1="1" Entity2="2"/></Entity>${leaf(1)}${leaf(2,80)}`);
+    const spy = vi.spyOn(Evaluator.prototype, 'evaluate');
+    try {
+      for (const lod of [0,1] as const) {
+        const out = await collectBakedGeometriesByMaterialAsync(input,lod);
+        expect(spy).not.toHaveBeenCalled(); expect(out.failures).toEqual([]);
+        expect(out.representationPolicy).toBe('outline'); expect(out.approximatedBooleans[op]).toBeGreaterThan(0);
+        expect(positions(out).length).toBeGreaterThan(0);
+      }
+      collectBakedGeometriesByMaterial(input,2); expect(spy).toHaveBeenCalled();
+    } finally { spy.mockRestore(); }
+  });
+  it('does not construct a Difference cutter mesh, but diagnoses missing/cyclic cutter references', () => {
+    const spy=vi.spyOn(Evaluator.prototype,'evaluate');
+    try {
+      for (const cutter of ['999','3']) {
+        const out=collectBakedGeometriesByMaterial(doc(`${leaf(1)}<Entity ID="3" Visible="true"><Boolean Type="Difference" Entity1="1" Entity2="${cutter}"/></Entity>`),0);
+        expect(positions(out)).toHaveLength(1); expect(out.failures[0].dependencies.some(d=>d.reason===(cutter==='999'?'missing-reference':'cycle'))).toBe(true);
+      }
+      expect(spy).not.toHaveBeenCalled();
+    } finally {spy.mockRestore();}
+  });
+  it('filters hidden small leaves after ancestor and external scale, preserves per-reference placement', () => {
+    const scale=new THREE.Matrix4().makeScale(4,4,4).toArray();
+    const input=doc(`${leaf(1,40)}${leaf(2,200)}<Entity ID="3" Visible="false"><Boolean Type="Union" Entity1="1" Entity2="2"/><TransformMatrix Value="${scale.join(',')}"/></Entity>
+      <Entity ID="4" Visible="true"><Boolean Type="Union" Entity1="3" Entity2="1"/></Entity>`);
+    const out=collectBakedGeometriesByMaterial(input,0); expect(positions(out)).toHaveLength(2); expect(out.omittedSmallParts).toBe(1);
+    const external=collectBakedGeometriesByMaterial(input,0,{}, {placementMatrix:scale}); expect(positions(external)).toHaveLength(3);
+  });
+  it('keeps only the largest valid outline when everything is small and can defer fallback to the DEV', () => {
+    const input=doc('<Entity ID="1"><Cuboid L="20" W="20" H="20"/></Entity><Entity ID="2"><Sphere R="40"/></Entity>');
+    const out=collectBakedGeometriesByMaterial(input,0); expect(positions(out)).toHaveLength(1); expect(out.omittedSmallParts).toBe(2);
+    expect(positions(collectBakedGeometriesByMaterial(input,0,{}, {deferSmallPartFallback:true}))).toHaveLength(0);
+    expect(positions(collectBakedGeometriesByMaterial(input,2))).toHaveLength(2);
+  });
+  it('keeps Wire/Cable, large flanges and long thin connectors; omits small rings/gaskets at inclusive boundaries', () => {
+    const input=doc(`<Entity ID="1"><Ring R="30" DR="5" Rad="6.283185307"/></Entity>
+      <Entity ID="2"><CircularGasket OR="30" IR="20" Rad="6.283185307"/></Entity>
+      <Entity ID="3"><Cuboid L="1000" W="20" H="20"/></Entity>
+      <Entity ID="4"><Ring R="200" DR="10" Rad="6.283185307"/></Entity>
+      <Entity ID="5"><Wire D="1" FitCoordArray="0,0,0;20,0,0"/></Entity>
+      <Entity ID="6"><Cable D="1" InflectionCoordArray="0,0,0;20,0,0"/></Entity>
+      <Entity ID="7"><Sphere R="50"/></Entity><Entity ID="8"><Cuboid L="50" W="50" H="50"/></Entity>`);
+    const out=collectBakedGeometriesByMaterial(input,0); expect(out.omittedSmallParts).toBe(4); expect(positions(out)).toHaveLength(4);
   });
 });
