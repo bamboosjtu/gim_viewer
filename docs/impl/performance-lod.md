@@ -67,3 +67,79 @@ DEV 几何链：CBM → DEV → PHM → MOD/STL（同 UUID `.gl` 是可选的辅
 - 500 样本真冷首屏：22.8 / 40.2 / 14.7 / 23.1 / 59.2 s；substation：23.7 / 17.5 / 22.3 / 9.6 s。
 - 全量测试与诊断入口见 [验证](../validation.md)。
 - 已接受的边界：IFC 近景其他类型仍可能重开整源；DEV LOD2 缓存未命中仍走主线程 RPC；这些在 [性能](../performance.md#已接受的当前边界) 记录，出现新的现场要求时重新立项。
+
+## 6. 代码索引（新人先看这里）
+
+| 关注点 | 入口 |
+|---|---|
+| 打开工程、解压/IFC 分支 | `desktop/src/services/openGimService.ts`、`gimOpenCore.ts` |
+| 变电首屏、CBM/IFC/DEV 调度 | `desktop/src/services/substationRuntime.ts` |
+| IFC LOD/Fragments 加载 | `desktop/src/viewer/ifcLoader.ts`、`ifcConversion.ts`、`ifcRegionalRuntime.ts` |
+| DEV 范围目录/模板/LOD 调度 | `desktop/src/services/devLodRuntime.ts`、`devLodPolicy.ts`、`devGeometryWorkerClient.ts` |
+| DEV→PHM→MOD/STL 发现 | `desktop/src/services/modGeometryDiscovery.ts` |
+| 设备 GLB 序列化/缓存 | `desktop/src/services/glbCacheService.ts`、`devGlbTemplateRuntime.ts` |
+| CBM 树与并发解析 | `desktop/src/gim/cbmParser.ts` |
+| 线路首屏/地图 | `desktop/src/services/powerlineRuntime.ts`、`ui/lineProjectView.ts` |
+
+## 7. IFC 加载状态机
+
+```
+读源 -> 首个 IFC 坐标锚定 -> LOD0 commit -> firstUsableGeometryReady
+                                   |-> LOD1 后台
+                                   |-> 其余 IFC 按队列
+                                   |-> 对象选中 -> 整文件 Fragments(LOD2)
+```
+
+关键约束：
+
+- **首个 IFC 与其余 IFC 分离**：`firstUsableGeometryReady` 只依赖第一个可用 IFC；其余 IFC 不阻塞 interactive。
+- **LOD0/LOD1 顺序提交**：同一个 Worker 完成 LOD0 后才提交 LOD1，避免首屏被 LOD1 拖住。
+- **LOD2 不自动全站加载**：只在属性面板请求/对象精化时读取整文件，防止全站 IFC 堆内存暴涨。
+- **坐标锚点只建立一次**：后续 IFC 复用同一 `sourceToViewer` 矩阵，锚点未就绪时 DEV/IFC 不提交到场景。
+- **取消语义**：切换工程时旧 conversion 以 `AbortError: IFC conversion belongs to an obsolete project` 结束，这是预期取消，不是失败。
+
+## 8. DEV 目录与模板流水线
+
+```
+CBM seeds
+  -> 按 DEV 路径分组
+  -> 范围目录（catalog）：读取/计算 sourceBounds（PHM/MOD/STL）
+  -> 相机可见性/距离/LOD 决策
+  -> 模板（template）编译：Worker 内 MOD/STL -> GLB
+  -> 模板缓存（按 source SHA + DEV + LOD）
+  -> occurrence 共享模板 + placement 矩阵 -> scene commit
+```
+
+- **范围目录**决定“这个 occurrence 在不在相机内、距离/像素多大”；未知范围仍会给自动 LOD0。
+- **模板编译**是重任务；结果按 `(source SHA, DEV, LOD)` 缓存，同一 DEV 的多个 occurrence 只编译一次。
+- **提交**按优先级队列合并：选中 > LOD0 > LOD1/2；单次 commit 不可中断，但相机移动可以重新决策后续任务。
+- **失败隔离**：单个 DEV 失败只影响该 DEV；`source-invalid` 不重试，临时错误可在选中时重试。
+
+### LOD 决策阈值（`devLodPolicy.ts`）
+
+| 条件 | LOD |
+|---|---|
+| 选中 | LOD2 |
+| 不可见 | LOD0（仍保留基础表示） |
+| 距离 ≤30 m 且投影 ≥120 px | LOD2 |
+| 已是 LOD2、距离 ≤35 m 且投影 ≥90 px | 继续 LOD2（滞回） |
+| 投影 ≥30 px（已有表示）/ ≥40 px（首次） | LOD1 |
+| 其他 | LOD0 |
+
+滞回避免相机抖动导致 LOD 反复升降。
+
+### 缓存键与失效
+
+- DEV 模板：`DEV_GEOMETRY_VERSION | sourceSha | devPath(lower) | lod`。
+- 范围目录：`DEV_SPATIAL_CATALOG_VERSION | DEV_GEOMETRY_VERSION | sourceSha | devPath(lower)`。
+- 语义/几何/parser 域分别 bump 版本；一个域失效不应连带重建无关域。
+- 模板写入失败只影响缓存完整性，不把当前已编译几何标记为 source-invalid。
+
+## 9. 现场排查
+
+1. 打开 `Ctrl+Shift+D` 诊断，先看 timings 中首屏/IFC/DEV 分段。
+2. 看状态栏 `冷编译 / 缓存命中 / 失败 / 阻塞`，区分“没请求”“在排队”“失败”。
+3. 若设备不显示，先确认它是 occurrence 被跳过还是 DEV 本身 empty/unsupported：
+   - `viewPendingOccurrences`、`readinessBlockers`；
+   - DEV 诊断的 reason（empty-device-xml/dev-no-solidmodel/phm-no-solidmodel/parser-unsupported/source-invalid）。
+4. 远景必须保留全部 DEV LOD0；不要用“设备看不到”解释缺失设备，除非它确实不在 CBM/DEV 引用图中。

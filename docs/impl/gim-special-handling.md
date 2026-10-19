@@ -108,7 +108,98 @@
 - 临时 I/O 失败不能被持久化为 `source-invalid`；缓存写入失败只影响缓存完整性，不伪造几何；
 - 失败隔离到 DEV/对象，不能因为一个坏源丢弃整个工程。
 
-## 6. 验证入口
+## 6. 代码索引（新人先看这里）
+
+| 关注点 | 入口 |
+|---|---|
+| GIM 头/归档偏移 | `crates/gim-native-core/src/lib.rs`（`parse_archive_prefix`、`inspect_archive_entries`） |
+| 桌面解压命令/配额/缓存提交 | `desktop/src-tauri/src/gim_extract_command.rs` |
+| 7-Zip CLI 流式解压 | `desktop/src-tauri/src/seven_zip_cli.rs` |
+| 缓存数据库/manifest/pack | `desktop/src-tauri/src/db.rs`、`gim_extract.rs` |
+| CBM 解析/树 | `desktop/src/gim/cbmParser.ts` |
+| DEV/PHM 引用发现 | `desktop/src/services/modGeometryDiscovery.ts` |
+| XML MOD 解析 | `desktop/src/gim/geometry/xmlModParser.ts` |
+| XML primitive → 几何 | `desktop/src/viewer/xmlModGeometry.ts`、`xmlModLoader.ts` |
+| 线路文本 MOD | `desktop/src/gim/geometry/lineModParser.ts` |
+
+## 7. 解压与 manifest 机制
+
+### 7.1 头解析
+
+1. 读取文件前 1 MiB；搜索 7z/zip 签名，得到归档偏移；
+2. 解析 `GIMPKGS`/`GIMPKGT` 及工程编号/名称；
+3. 用 `OffsetReader` 把归档偏移包装成从 0 开始的 Read+Seek 流，7z 解码器不需要知道 GIM 头；
+4. 对 ZIP 使用同样偏移处理，走 zip 分支。
+
+### 7.2 条目校验顺序
+
+每个条目在写入前依次检查：
+
+- 路径规范化与目录穿越；
+- 重复路径（大小写不敏感）；
+- 声明大小/累计大小/归档大小配额；
+- 输出路径安全检查（符号链接/reparse point、staging 根边界）。
+
+任一失败即终止整次解压，不能留下“部分有效”的缓存。
+
+### 7.3 staging 与 manifest
+
+- 解压写入 `staging` 目录，完成后原子 rename 到正式缓存根；
+- manifest 记录条目路径、大小、pack 偏移或独立 IFC 路径；
+- commit 前写 receipt/索引；中断时保留 staging 或已发布第一阶段；
+- 暖启动校验 manifest 与 pack，不通过则重建，不静默跳过。
+
+### 7.4 semantic pack
+
+- 变电：非 IFC 条目（CBM/DEV/FAM/PHM/MOD/STL 等）顺序写入一个 pack；IFC 独立文件；
+- 线路：语义条目写线路 pack；大 MOD/STL 可仅记录 metadata；
+- 读取时按索引区间懒读，避免数万次 open；路径仍按大小写不敏感查找。
+
+## 8. XML MOD 解析机制
+
+### 8.1 解析步骤
+
+1. 轻量 XML tokenizer 读取节点与属性，保留原始属性名；
+2. `tagName` 转小写，查 `PRIMITIVE_CANONICAL_NAMES` 得到规范名；未知标签保留原名；
+3. 按规范名进入强类型 parse 分支；弱 schema 类型保留 raw attrs，由几何层按属性名读取；
+4. 数值字段用 `firstNumericAttr` 依次尝试别名（如 R1/R、H1/H、L/D），缺省时用保守默认值；
+5. 产出的 `XmlModPrimitive` 进入几何烘焙；无法解释的标签变成 `Unsupported`。
+
+### 8.2 为什么用 canonical map
+
+不同导出器会写 `Rectangularfixedplate`、`H-beam`、`DoubleChannelSteel` 等变体。统一转小写并映射，避免每个 parse 分支重复大小写判断；别名只影响标签识别，不改变属性单位。
+
+### 8.3 弱 schema 与近似
+
+- `RectangularFixedPlate`/`RectangularRing`/`OffsetRectangularTable` 在部分样本无强 schema；
+- 宁可用板/框近似，也不构造无法验证的复杂体；
+- 所有近似都保留原始 attrs，属性面板/诊断可回溯；
+- `Boolean` 只接受 union/intersection/difference；其他 op 降级为 Unsupported，简化布尔计入 `simplifiedBooleans`。
+
+### 8.4 单位与矩阵
+
+- XML/PHM 的变换矩阵是逐边累积，不是最终世界矩阵；
+- 几何烘焙把 mm→m 和 DEV×PHM placement 烘焙到顶点；
+- 不要在读取层预乘父矩阵，否则会在 scene commit 时重复变换。
+
+### 8.5 新增 primitive 的步骤
+
+1. 在 `PRIMITIVE_CANONICAL_NAMES` 注册规范名/别名；
+2. 在 `xmlModParser` 增加 parse 分支，明确必填/可选属性与单位；
+3. 在 `xmlModGeometry` 增加几何构造；若近似，写清忽略字段；
+4. 加 parser + geometry 测试（至少一个真实样本属性形状）；
+5. 更新本文件映射表与 [schema/README](../schema/README.md)（如格式定义变化）。
+
+## 9. 常见坑
+
+- **路径大小写**：不能用 `includes('DEV/')` 判断，必须大小写不敏感查找。
+- **数组序号不是身份**：PARTINDEX/SUBDEVICE 必须按指针/身份关联；同 DEV 可多次实例化。
+- **父矩阵**：每个 occurrence 的 placement 独立，模板不烘焙 occurrence 变换。
+- **单位**：CBM/DEV 常见 mm，场景为 m；只在烘焙边界换算一次。
+- **失败不要伪装**：缺依赖、空 DEV、未知 primitive、source-invalid 是不同原因，不能统一成“空”。
+- **近似不是测量**：XML primitive 映射仅用于浏览。
+
+## 10. 验证入口
 
 - 样本与格式统计：[sample-corpus](../schema/sample-corpus.md)
 - CBM/DEV/PHM/MOD 引用与 XML 字段：[geometry-model](../schema/geometry-model.md)、[semantic-model](../schema/semantic-model.md)
