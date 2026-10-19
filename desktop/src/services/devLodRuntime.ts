@@ -23,12 +23,8 @@ import { WorkQueue } from '../utils/workQueue.js';
 interface CachedTemplate { result: DevGlbSerializationResult; sha: string; sourceInvalid?: { message: string; evidence: string } }
 interface TemplateRow { bounds: THREE.Box3; template: DevGlbTemplate; sha: string; status: DevGlbSerializationResult['status']; diagnostics: DevGlbSerializationResult['diagnostics'] }
 interface CacheDecision { key: string; devPath: string; lod: DeviceLod; status: DevArtifactReadStatus | 'compiled' | 'write-failed'; reason?: string }
-interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; desired: DeviceLod | null; displayed: DeviceLod; skipTiny?: boolean; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
+interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; desired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
 const normalize = (path: string) => /^dev\//i.test(path.replace(/\\/g, '/')) ? path.replace(/\\/g, '/') : `DEV/${path}`;
-/** 远景忽略最长边小于该值的构件（螺栓/线夹/间隔棒等），近景仍可按需选中加载。 */
-const FAR_TINY_DEVICE_MAX_METERS = 1.5;
-/** 相机进入该距离后，才按需解析延迟 DEV 的 PHM 范围。 */
-const NEAR_DEFERRED_DEVICE_METERS = 150;
 const hash = async (bytes: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))].map(v => v.toString(16).padStart(2, '0')).join('');
 const belongsTo = (object: THREE.Object3D, root?: THREE.Object3D) => {
   for (let parent: THREE.Object3D | null = object; parent; parent = parent.parent) if (parent === root) return true;
@@ -40,7 +36,7 @@ export class DevLodRuntime {
   readonly diagnostics = { catalogReady: false, currentViewReady: false, currentViewSettled: false, baseRepresentationsSettled: false, baseRepresentationsReady: false, allStationReady: false, catalogHits: 0,
     templateHits: 0, compiled: [0, 0, 0], /** Per-LOD cache/compile facts; index is LOD. */ lodHits: [0, 0, 0], lodCompiled: [0, 0, 0],
     lodReadErrors: [0, 0, 0], lodInvalid: [0, 0, 0], lodWriteFailed: [0, 0, 0], lodPersisted: [0, 0, 0],
-    occurrences: 0, uniqueDevSources: 0, sceneCommitCount: 0, sceneCommitMaxMs: 0, shown: 0, pending: 0, unknownBounds: 0, tinySkipped: 0,
+    occurrences: 0, uniqueDevSources: 0, sceneCommitCount: 0, sceneCommitMaxMs: 0, shown: 0, pending: 0, unknownBounds: 0,
     absoluteConeCount: 0, templateResidentBytes: 0, directoryCompleted: 0, readyOccurrences: 0, failedOccurrences: 0,
     emptyOccurrences: 0, unsupportedOccurrences: 0, partialOccurrences: 0, templateParses: 0, templateEvictions: 0, workerCount: 0, activeDevices: [] as string[],
     inputBudgetBytes: 0, inputBudgetPeakBytes: 0,
@@ -113,9 +109,6 @@ export class DevLodRuntime {
   private rows = new Map<string, Occurrence>();
   private sourceFailures = new Map<string, InvalidDevGeometryError>();
   private catalogHints = new Map<string, Promise<DevArtifactRead<DevSourceBounds>>>();
-  /** 大工程远景不预解析全部 PHM 范围，选中或近景时按需解析该 DEV。 */
-  private deferredCatalog = new Set<string>();
-  private deferredPending = new Set<string>();
   private templates = new ByteLru<TemplateRow>(128 * 1024 * 1024, row => { row.template.dispose(); if (!this.released) this.diagnostics.templateEvictions++; });
   private worker!: DevGeometryPreprocessor;
   private anchor: THREE.Matrix4 | null = null;
@@ -294,19 +287,7 @@ export class DevLodRuntime {
     this.diagnostics.occurrences = seeds.length;
     this.diagnostics.uniqueDevSources = byDev.size;
     this.notifyCoordinateAnchor(); this.update(); // Compilation can begin before any IFC is ready.
-    // TYPE=OTHERS 或命名明确的线路金具/小构件在远景不参与范围目录和 L0 编译；
-    // 选中时仍按需加载。避免 B1-4 对 15,526 个 occurrence 逐个解析 PHM。
-    const smallPartName = /(间隔棒|线夹|悬垂|耐张|金具|螺栓|螺母|垫片|接地|电缆|爬梯|栏杆)|^\d+\s*[x×]\s*\d+/;
-    const catalogEntries = [...byDev].filter(([, instances]) =>
-      !instances.every(seed => seed.devType === 'OTHERS' || smallPartName.test(seed.name)));
-    const catalogDevs = new Set(catalogEntries.map(([dev]) => dev));
-    for (const [dev, instances] of byDev) {
-      if (catalogDevs.has(dev)) continue;
-      for (const seed of instances) {
-        const row = this.rows.get(seed.path);
-        if (row && !row.skipTiny) { row.skipTiny = true; this.diagnostics.tinySkipped++; }
-      }
-    }
+    const catalogEntries = [...byDev];
     const resolveCatalog = async (dev: string): Promise<DevSourceBounds> => {
       const catalogRead = await this.catalogHint(dev);
       if (!this.current()) throw new DOMException('DEV directory left the current view', 'AbortError');
@@ -349,14 +330,6 @@ export class DevLodRuntime {
           (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(createLegacyEquivalentPlacementMatrix(matrix))) : null;
         const row = this.rows.get(seed.path)!;
         row.entry = { ...entry, templateStatus: emptySource ? 'empty' : row.entry.templateStatus }; row.box = box;
-        if (box) {
-          const extent = box.max.clone().sub(box.min);
-          const maxMeters = Math.max(extent.x, extent.y, extent.z);
-          if (Number.isFinite(maxMeters) && maxMeters < FAR_TINY_DEVICE_MAX_METERS) {
-            row.skipTiny = true;
-            this.diagnostics.tinySkipped++;
-          }
-        }
         if (emptySource) this.diagnostics.emptyOccurrences++;
         if (bounds.boundsQuality === 'unknown') {
           this.diagnostics.unknownBounds++; this.state.deviceUnknownBounds.add(seed.path);
@@ -371,13 +344,7 @@ export class DevLodRuntime {
       if (instances.some(seed => seed.path === this.selected)) void this.select(this.selected).catch(error => console.warn('[DEV selected]', error));
     };
     const CATALOG_BATCH = 8;
-    const deferCatalog = catalogEntries.length > 1000;
-    if (deferCatalog) {
-      this.deferredCatalog = new Set(catalogEntries.map(([dev]) => dev));
-      this.diagnostics.catalogReady = true;
-      this.diagnostics.directoryCompleted = seeds.length;
-    }
-    if (!deferCatalog) for (let start = 0; start < catalogEntries.length; start += CATALOG_BATCH) {
+    for (let start = 0; start < catalogEntries.length; start += CATALOG_BATCH) {
       if (!this.current()) return;
       const batch = catalogEntries.slice(start, start + CATALOG_BATCH);
       const boundsList = await Promise.all(batch.map(([dev]) => resolveCatalog(dev)));
@@ -588,21 +555,6 @@ export class DevLodRuntime {
     const view = createDeviceViewContext(camera, rect?.width || 1000, rect?.height || 800);
     const wanted = new Set<string>();
     this.wanted = wanted;
-    if (this.deferredCatalog.size && this.anchor) {
-      const near: string[] = [];
-      const seen = new Set<string>();
-      for (const row of this.rows.values()) {
-        const dev = row.entry.devPath;
-        if (!this.deferredCatalog.has(dev) || this.deferredPending.has(dev) || seen.has(dev)) continue;
-        const world = this.anchor.clone().multiply(createLegacyEquivalentPlacementMatrix(row.entry.placementMatrix));
-        const position = new THREE.Vector3().setFromMatrixPosition(world);
-        if (camera.position.distanceTo(position) <= NEAR_DEFERRED_DEVICE_METERS) {
-          seen.add(dev);
-          near.push(dev);
-        }
-      }
-      for (const dev of near.slice(0, 2)) void this.ensureDeferredBounds(dev);
-    }
     for (const row of this.rows.values()) {
       const selected = row.entry.rootOccurrence === this.selected;
       const terminal = row.entry.templateStatus === 'empty' || row.entry.templateStatus === 'unsupported';
@@ -611,8 +563,7 @@ export class DevLodRuntime {
       // automatic LOD0 in the background; only catalogued boxes decide whether
       // the current view is blocked on this occurrence.
       row.inView = selected || (row.box && metrics ? metrics.visible : false);
-      if (!selected && !row.box && this.deferredCatalog.has(row.entry.devPath)) { row.desired = 0; continue; }
-      if (terminal || (row.skipTiny && !selected)) { row.desired = 0; continue; }
+      if (terminal) { row.desired = 0; continue; }
       // Unknown ranges compile actual supported geometry automatically. No
       // invented box, false culling or tree-selection prerequisite is used.
       const lod = selected ? 2 : !row.group ? 0 : metrics ? chooseDeviceLod(row.displayed, metrics.visible, metrics.distance, metrics.pixels) : 0;
@@ -797,7 +748,7 @@ export class DevLodRuntime {
       + this.diagnostics.lodInvalid.reduce((a,b)=>a+b,0)
       + this.diagnostics.artifactWriteFailures;
     this.status(
-      `几何实例已处理 ${displayedFinished}/${total} · 已显示 ${this.diagnostics.readyOccurrences}${this.diagnostics.tinySkipped ? ` · 忽略小构件 ${this.diagnostics.tinySkipped}` : ''} · 冷编译 L0 ${cold[0]}/L1 ${cold[1]}/L2 ${cold[2]} · 缓存命中 L0 ${warm[0]}/L1 ${warm[1]}/L2 ${warm[2]}${failedCount ? ` · 失败 ${failedCount}` : ''} · ${phase}${background}`,
+      `几何实例已处理 ${displayedFinished}/${total} · 已显示 ${this.diagnostics.readyOccurrences} · 冷编译 L0 ${cold[0]}/L1 ${cold[1]}/L2 ${cold[2]} · 缓存命中 L0 ${warm[0]}/L1 ${warm[1]}/L2 ${warm[2]}${failedCount ? ` · 失败 ${failedCount}` : ''} · ${phase}${background}`,
       `LOD缓存 miss ${this.diagnostics.cacheMisses} · read-error ${this.diagnostics.cacheReadErrorCount} · invalid ${this.diagnostics.cacheInvalidCount} · 写入失败 ${this.diagnostics.artifactWriteFailures}`
         + ` · 目录 ${this.diagnostics.directoryCompleted}/${total}${this.diagnostics.catalogReady?'（就绪）':'（进行中）'}`
         + ` · 批读 ${this.diagnostics.cacheReadBatches} 批/${this.diagnostics.cacheReadEntries} 条（defer ${this.diagnostics.cacheReadDeferred}）`
@@ -821,33 +772,6 @@ export class DevLodRuntime {
     return { templateCount: this.templates.size, templateParseCount: this.diagnostics.templateParses,
       sharedGeometryCount: geometry.size, sharedMaterialCount: materials.size, sharedTextureCount: textures.size };
   }
-  /** 大工程远景延迟处理：选中时只解析该 DEV 的 PHM 范围。 */
-  private async ensureDeferredBounds(dev: string): Promise<void> {
-    if (!this.deferredCatalog.has(dev) || !this.current()) return;
-    this.deferredCatalog.delete(dev);
-    this.deferredPending.add(dev);
-    try {
-      const bounds = await this.worker.bounds(dev);
-      if (!this.current()) return;
-      for (const row of this.rows.values()) {
-        if (row.entry.devPath !== dev) continue;
-        row.entry = { ...row.entry, ...bounds };
-        row.box = bounds.sourceBounds ? boxTuple(bounds.sourceBounds).applyMatrix4(
-          (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(createLegacyEquivalentPlacementMatrix(row.entry.placementMatrix))) : null;
-        if (row.box) {
-          const extent = row.box.max.clone().sub(row.box.min);
-          const maxMeters = Math.max(extent.x, extent.y, extent.z);
-          if (Number.isFinite(maxMeters) && maxMeters < FAR_TINY_DEVICE_MAX_METERS) row.skipTiny = true;
-        }
-      }
-      this.schedule();
-    } catch (error) {
-      this.diagnostics.errors.push(`按需范围 ${dev}: ${String(error)}`);
-      if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
-    } finally {
-      this.deferredPending.delete(dev);
-    }
-  }
   async select(rootOccurrence: string): Promise<THREE.Group[]> {
     if (!this.current()) return [];
     this.selected = rootOccurrence;
@@ -856,10 +780,6 @@ export class DevLodRuntime {
     if (!this.rows.has(rootOccurrence)) await this.catalogDone;
     const row = this.rows.get(rootOccurrence);
     if (!row || !this.current() || this.selected !== rootOccurrence) return [];
-    if (this.deferredCatalog.has(row.entry.devPath)) {
-      await this.ensureDeferredBounds(row.entry.devPath);
-      if (!this.current() || this.selected !== rootOccurrence) return [];
-    }
     row.desired = 2;
     this.wanted.add(this.key(row.entry.devPath, 2));
     row.failedKey = undefined; // Explicit selection retries transient failures; source-invalid stays isolated.
