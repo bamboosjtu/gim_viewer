@@ -64,7 +64,7 @@ DEV 几何链：CBM → DEV → PHM → MOD/STL（同 UUID `.gl` 是可选的辅
 
 ## 5. 验证与边界
 
-- v0.1.0 全样本真冷首屏：500 系列 22.1 / 36.3 / 13.1 / 17.5 / 53.9 s；substation 21.1 / 15.4 / 22.4 / 9.3 s；线路 3.9–10.0 s。全部 15 个样本 <60 s。
+- v0.1.0 三 SLO 冷启动实测：First usable 500 系列 17.5/31.7/11.3/16.8/53.3 s，substation 21.9/13.3/11.2/5.0 s，线路 4.1–10.5 s；Current view/Full fidelity 仅 substation03（66.9 s）和 substation04（37.5 s）在 90 s 内完成，其余样本 >90 s。完整表见 [性能](../performance.md)。
 - 全量测试与诊断入口见 [验证](../validation.md)。
 - 已接受的边界：IFC 近景其他类型仍可能重开整源；DEV LOD2 缓存未命中仍走主线程 RPC；这些在 [性能](../performance.md#已接受的当前边界) 记录，出现新的现场要求时重新立项。
 

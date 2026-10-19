@@ -21,7 +21,6 @@
     "test:all": "vitest run --config vitest.sample.config.ts && vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:experimental": "vitest run --config vitest.experimental.config.ts",
     "test:ifc-critical": "vitest run src/viewer/__tests__/ifcConversion.test.ts src/viewer/__tests__/ifcSessionRace.test.ts src/viewer/__tests__/ifcFragmentsCache.test.ts src/viewer/__tests__/ifcNameIndex.test.ts src/viewer/__tests__/ifcOpeningPolicy.test.ts src/viewer/__tests__/ifcRegionalData.test.ts src/viewer/__tests__/ifcBimLoader.test.ts src/viewer/__tests__/webIfcCompatibility.test.ts src/ui/__tests__/ifcDetailModeControl.test.ts bridge/__tests__/gimExtract.test.ts src/viewer/__tests__/ifcSharedImport.test.ts src/viewer/__tests__/ifcRegionalInstances.test.ts"
   },
   "author": "bamboosjtu",

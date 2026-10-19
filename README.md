@@ -70,7 +70,7 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 | [desktop](desktop/) | 桌面前端、Tauri/Rust 后端、构建和测试 |
 | [app](app/) | Android 线路应用、SAF 导入、地图与本地缓存 |
 | [packages](packages/) / [crates](crates/) | 跨端共享纯线路解析、插件接口、原生解压与 Android 文件导入 |
-| [docs](docs/README.md) | 当前规格、架构、验证、性能、格式和未决事项 |
+| [docs](docs/README.md) | 当前规格、架构、验证、性能、格式、问题与限制 |
 | [demo](demo/) | 本地 GIM 包及解包样本，大型文件由 Git 忽略 |
 | [research](research/) | 原始研究材料，使用前需复核 |
 
@@ -102,4 +102,4 @@ npm run tauri:dev
 - [IFC/DEV 分级与加载性能](docs/impl/performance-lod.md)
 - [GIM 特殊格式处理](docs/impl/gim-special-handling.md)
 - [移动端状态](docs/mobile-spec.md)
-- [未决事项与代码缺陷](docs/open-issues.md)
+- [问题与限制](docs/open-issues.md)
