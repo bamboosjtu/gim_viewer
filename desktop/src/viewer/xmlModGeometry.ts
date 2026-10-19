@@ -190,14 +190,14 @@ function primitiveToGeometryUncached(p: XmlModPrimitive, lod: DeviceLod): THREE.
       const pts = p.fitPoints;
       if (pts.length < 6) return null;
       const curve = new THREE.CatmullRomCurve3(vec3Array(pts));
-      return new THREE.TubeGeometry(curve, Math.min(Math.max(pts.length / 3, 8), 256), Math.max(sanitizeNum(p.d) / 2, 1), 6, false);
+      return new THREE.TubeGeometry(curve, Math.min(Math.max(pts.length / 3, 8), 256), Math.max(sanitizeNum(p.d) / 2, 1e-6), 6, false);
     }
     case 'Cable': {
-      // 电缆敷设路径：拐点折线圆管；管径用真实 D，叠 1px 线保证远景可见
+      // 电缆敷设路径：拐点折线圆管；管径用真实 D（epsilon 仅防零半径）
       const pts = p.inflectionPoints;
       if (pts.length < 6) return null;
       const curve = new THREE.CatmullRomCurve3(vec3Array(pts));
-      return new THREE.TubeGeometry(curve, Math.min(Math.max(pts.length / 3, 8), 256), Math.max(sanitizeNum(p.d) / 2, 1), 6, false);
+      return new THREE.TubeGeometry(curve, Math.min(Math.max(pts.length / 3, 8), 256), Math.max(sanitizeNum(p.d) / 2, 1e-6), 6, false);
     }
     case 'RotationalEllipsoid': {
       // 近似：单位球按三轴（LR/WR/H 作全长）缩放
@@ -500,7 +500,7 @@ export function entityToMesh(
  * - A=0 是 Bentley/BIMBase 的「不透明哨兵」（占绝对主导），不是全透明
  * - 刻度按文件级 maxA 判定：maxA > 100 → 字节制(/255)，否则百分制(/100)
  */
-function resolveOpacity(a: number, maxA: number): { opacity: number; transparent: boolean } {
+export function resolveOpacity(a: number, maxA: number): { opacity: number; transparent: boolean } {
   if (a <= 0) return { opacity: 1, transparent: false };
   const scale = maxA > 100 ? 255 : 100;
   const opacity = Math.min(a / scale, 1);

@@ -21,7 +21,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { parseXmlMod } from '../gim/geometry/xmlModParser.js';
-import { applyPhmColorOverride, collectBakedGeometriesByMaterial, collectBakedGeometriesByMaterialAsync, disposeOwnedXmlModMaterials, gimMatrixToMatrix4, MOD_MM_TO_SCENE_UNIT } from './xmlModGeometry.js';
+import { applyPhmColorOverride, collectBakedGeometriesByMaterial, collectBakedGeometriesByMaterialAsync, disposeOwnedXmlModMaterials, gimMatrixToMatrix4, MOD_MM_TO_SCENE_UNIT, resolveOpacity } from './xmlModGeometry.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import type { XmlModColor } from '../gim/geometry/ir.js';
 import { getFileByPath } from '../gim/fileLookup.js';
@@ -56,8 +56,12 @@ const GIM_MATRIX_TRANSLATION_TO_SCENE_UNIT = 0.001;
  * Wire/Cable 的真实管径在远景只有亚像素宽度；单独叠一条 1px 中心线，
  * 既保留真实直径，又保证电气连接在所有 LOD 都可辨认。线只作为视觉辅助，
  * 不参与拾取/尺寸测量。
+ *
+ * 每条 Wire/Cable 一条 Line 会多一个 draw object；超过阈值时按颜色合并成
+ * LineSegments，避免数千条线时 draw calls 线性膨胀。
  */
 function addElectricalConnectionLines(group: THREE.Group, doc: XmlModDocument): void {
+  const lines: THREE.Line[] = [];
   for (const entity of doc.entities) {
     if (!entity.visible) continue;
     const primitive = entity.primitive;
@@ -75,11 +79,12 @@ function addElectricalConnectionLines(group: THREE.Group, doc: XmlModDocument): 
     const color = entity.color
       ? new THREE.Color(entity.color.r / 255, entity.color.g / 255, entity.color.b / 255)
       : new THREE.Color(0x4ade80);
-    const rawAlpha = entity.color ? (entity.color.a > 100 ? entity.color.a / 255 : entity.color.a / 100) : 1;
+    // 与 Mesh 完全复用同一 A=0 不透明哨兵与百分制/字节制规则。
+    const { opacity, transparent } = resolveOpacity(entity.color?.a ?? 100, doc.colorMaxA);
     const material = new THREE.LineBasicMaterial({
       color,
-      transparent: true,
-      opacity: Math.max(0.55, Math.min(1, rawAlpha)),
+      transparent,
+      opacity,
       depthTest: true,
       depthWrite: false,
     });
@@ -88,7 +93,54 @@ function addElectricalConnectionLines(group: THREE.Group, doc: XmlModDocument): 
     line.name = `xml-wire-line:${entity.id}`;
     line.renderOrder = 1;
     line.userData.electricalConnection = true;
-    group.add(line);
+    lines.push(line);
+  }
+
+  group.userData.electricalConnectionLineCount = lines.length;
+  if (lines.length > 1000) {
+    mergeElectricalConnectionLines(group, lines);
+    group.userData.electricalConnectionMerged = true;
+  } else {
+    for (const line of lines) group.add(line);
+    group.userData.electricalConnectionMerged = false;
+  }
+}
+
+function mergeElectricalConnectionLines(group: THREE.Group, lines: THREE.Line[]): void {
+  const buckets = new Map<string, { positions: number[]; material: THREE.LineBasicMaterial }>();
+  for (const line of lines) {
+    const material = line.material as THREE.LineBasicMaterial;
+    const key = `${material.color.getHexString()}_${material.opacity}_${material.transparent}`;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        positions: [],
+        material: new THREE.LineBasicMaterial({
+          color: material.color.clone(), opacity: material.opacity,
+          transparent: material.transparent, depthTest: true, depthWrite: false,
+        }),
+      };
+      bucket.material.userData.__gimOwnedInstanceMaterial = true;
+      buckets.set(key, bucket);
+    }
+    const positions = line.geometry.getAttribute('position');
+    for (let i = 0; i + 1 < positions.count; i++) {
+      bucket.positions.push(
+        positions.getX(i), positions.getY(i), positions.getZ(i),
+        positions.getX(i + 1), positions.getY(i + 1), positions.getZ(i + 1),
+      );
+    }
+    line.geometry.dispose();
+    material.dispose();
+  }
+  for (const bucket of buckets.values()) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
+    const segments = new THREE.LineSegments(geometry, bucket.material);
+    segments.name = 'xml-wire-lines';
+    segments.renderOrder = 1;
+    segments.userData.electricalConnection = true;
+    group.add(segments);
   }
 }
 

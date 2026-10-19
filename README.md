@@ -76,6 +76,8 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 
 ## 桌面开发
 
+要求 Node.js **>=22**（`camera-controls` 3.1.2 的 engines 约束）；CI 使用 Node 22。
+
 ```powershell
 cd desktop
 npm install

@@ -24,7 +24,9 @@
 ### 2.2 流式解压（桌面）
 
 - 发布版只有一个 `GIM-Reader.exe`；7-Zip 的 `7z.exe`/`7z.dll` 以字节资源嵌入主程序。
-- 首次使用时释放到系统临时目录（`%TEMP%\gim-viewer-7zip/<版本>/`）。
+- 首次使用时释放到系统临时目录，目录按嵌入二进制的 **SHA-256** 命名（`%TEMP%\gim-viewer-7zip/<exe-hash16>-<dll-hash16>/`）；不再只用版本号。
+- 释放完成后再次计算 SHA-256，与嵌入值一致才执行；写入采用临时文件 + 校验 + rename，避免同尺寸半文件/被替换文件被信任。
+- EXE 同目录的 `7z.exe`/`7z.dll` 仅在两个文件 SHA-256 都与随包版本一致时使用；来源不明但大小相同的 sidecar 会被拒绝并回退嵌入副本。
 - 解压时把归档载荷切片写入临时 `.7z`，运行 `7z e -so`，按归档顺序把连续字节流切成条目，再交给现有 sink：
   - IFC 独立文件；
   - 其余变电源条目写入连续 semantic pack；
@@ -83,9 +85,11 @@
 | `RectangularRing` | 4 块板组成的矩形框 | 孔洞/圆角 |
 | `ChannelSteel` / `Table` | 外廓盒体 | 截面细节 |
 | `H` / `h-beam` | H 型钢 | 圆角/坡口 |
-| `Wire` / `Cable` | 拟合点/拐点样条圆管 + 1px 中心线 | 管径始终真实 `D`；中心线保证所有 LOD 可见，不参与尺寸测量 |
+| `Wire` / `Cable` | 拟合点/拐点样条圆管 + 1px 中心线 | 管径使用真实 `D`（`1e-6` mm 只防零半径）；中心线保证所有 LOD 可见，不参与尺寸测量 |
 | `DoubleChannelSteel` | 映射 `ChannelSteel` | 双拼细节 |
 | `Boolean` | union/intersection/difference | 复杂开洞可能计入 simplifiedBooleans |
+
+Wire/Cable 的 1px 中心线默认每条线一个 `Line`；当单文件中心线数超过 **1000** 时按颜色合并为 `LineSegments`，避免 draw calls 线性膨胀。`xmlModLoader` 在 group.userData 记录 `electricalConnectionLineCount` 与 `electricalConnectionMerged` 供 profiling；未来若样本出现数千条连接线，应同时记录 draw calls 和帧时间，再决定是否进一步实例化。
 
 规则：
 

@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
+use sha2::{Digest, Sha256};
+
 const EMBEDDED_7Z_EXE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/third_party/7zip/7z.exe"
@@ -20,15 +22,64 @@ const EMBEDDED_7Z_DLL: &[u8] = include_bytes!(concat!(
     "/third_party/7zip/7z.dll"
 ));
 
-/// 定位可用的 7z.exe：优先 exe 同目录（开发/调试），否则释放嵌入副本。
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn embedded_hashes() -> (&'static str, &'static str) {
+    static HASHES: OnceLock<(String, String)> = OnceLock::new();
+    let (exe, dll) = HASHES.get_or_init(|| {
+        (
+            sha256_hex(EMBEDDED_7Z_EXE),
+            sha256_hex(EMBEDDED_7Z_DLL),
+        )
+    });
+    (exe.as_str(), dll.as_str())
+}
+
+/// 文件内容必须与嵌入副本的 SHA-256 完全一致；大小相同不再视为可信。
+fn file_matches(path: &Path, expected: &str) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    fs::read(path)
+        .map(|bytes| sha256_hex(&bytes) == expected)
+        .unwrap_or(false)
+}
+
+fn write_verified(path: &Path, bytes: &[u8], expected: &str) -> Result<(), String> {
+    if file_matches(path, expected) {
+        return Ok(());
+    }
+    // 先写同目录临时文件并校验，再替换；避免中途失败留下“大小相同”的半文件。
+    let temp = path.with_extension("tmp");
+    fs::write(&temp, bytes).map_err(|e| format!("写入 {} 失败: {e}", temp.display()))?;
+    if !file_matches(&temp, expected) {
+        let _ = fs::remove_file(&temp);
+        return Err(format!("{} 写入后 SHA-256 校验失败", temp.display()));
+    }
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| format!("替换 {} 失败: {e}", path.display()))?;
+    }
+    fs::rename(&temp, path).map_err(|e| format!("提交 {} 失败: {e}", path.display()))?;
+    if !file_matches(path, expected) {
+        return Err(format!("{} 提交后 SHA-256 校验失败", path.display()));
+    }
+    Ok(())
+}
+
+/// 定位可用的 7z.exe：同目录 sidecar 必须与嵌入副本哈希一致；否则释放嵌入副本。
 pub fn locate_7z() -> Option<PathBuf> {
     static RESOLVED: OnceLock<Option<PathBuf>> = OnceLock::new();
     RESOLVED
         .get_or_init(|| {
+            let (exe_hash, dll_hash) = embedded_hashes();
             if let Ok(exe) = std::env::current_exe() {
                 if let Some(dir) = exe.parent() {
                     let candidate = dir.join("7z.exe");
-                    if candidate.is_file() && dir.join("7z.dll").is_file() {
+                    // 不信任“存在且大小相同”的 sidecar；来源不明但哈希一致才可用。
+                    if file_matches(&candidate, exe_hash) && file_matches(&dir.join("7z.dll"), dll_hash) {
                         return Some(candidate);
                     }
                 }
@@ -39,20 +90,19 @@ pub fn locate_7z() -> Option<PathBuf> {
 }
 
 fn extract_embedded() -> Result<PathBuf, String> {
+    let (exe_hash, dll_hash) = embedded_hashes();
+    // 目录按内容哈希命名：不同版本/不同二进制不会复用同一可预测路径。
     let dir = std::env::temp_dir()
         .join("gim-viewer-7zip")
-        .join(env!("CARGO_PKG_VERSION"));
+        .join(format!("{}-{}", &exe_hash[..16], &dll_hash[..16]));
     fs::create_dir_all(&dir).map_err(|e| format!("创建 7z 临时目录失败: {e}"))?;
     let exe = dir.join("7z.exe");
     let dll = dir.join("7z.dll");
-    let matches = |path: &Path, bytes: &[u8]| -> bool {
-        fs::metadata(path).map(|m| m.len() == bytes.len() as u64).unwrap_or(false)
-    };
-    if !matches(&exe, EMBEDDED_7Z_EXE) {
-        fs::write(&exe, EMBEDDED_7Z_EXE).map_err(|e| format!("释放 7z.exe 失败: {e}"))?;
-    }
-    if !matches(&dll, EMBEDDED_7Z_DLL) {
-        fs::write(&dll, EMBEDDED_7Z_DLL).map_err(|e| format!("释放 7z.dll 失败: {e}"))?;
+    write_verified(&exe, EMBEDDED_7Z_EXE, exe_hash)?;
+    write_verified(&dll, EMBEDDED_7Z_DLL, dll_hash)?;
+    // 执行前最后再确认一次，覆盖释放期间被替换的窗口。
+    if !file_matches(&exe, exe_hash) || !file_matches(&dll, dll_hash) {
+        return Err("随包 7z.exe/7z.dll 完整性校验失败".to_string());
     }
     Ok(exe)
 }
@@ -149,4 +199,38 @@ where
 
     let _ = fs::remove_file(&temp_archive);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_hashes_are_sha256_hex() {
+        let (exe, dll) = embedded_hashes();
+        assert_eq!(exe.len(), 64);
+        assert_eq!(dll.len(), 64);
+        assert!(exe.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(dll.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(exe, sha256_hex(EMBEDDED_7Z_EXE));
+    }
+
+    #[test]
+    fn tampered_sidecar_is_not_trusted_even_with_same_size() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("gim-7z-integrity-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("7z.dll");
+        fs::write(&path, vec![0u8; EMBEDDED_7Z_DLL.len()]).unwrap();
+        let (_, dll_hash) = embedded_hashes();
+        let actual = sha256_hex(&fs::read(&path).unwrap());
+        assert_ne!(actual, dll_hash, "tampered file unexpectedly matches embedded hash");
+        assert!(!file_matches(&path, dll_hash), "hash comparison accepted tampered file");
+        let _ = fs::remove_dir_all(dir);
+    }
 }

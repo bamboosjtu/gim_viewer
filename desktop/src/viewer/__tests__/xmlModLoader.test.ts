@@ -14,7 +14,7 @@ describe('loadXmlModFromText', () => {
 <Device><Entities><Entity ID="1" Type="simple" Visible="True">
   <Wire D="24" StartCoord="0,0,0" EndCoord="2000,0,0" FitCoordArray="0,0,0;1000,0,0;2000,0,0" />
   <TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1" />
-  <Color R="48" G="132" B="70" A="100" />
+  <Color R="48" G="132" B="70" A="0" />
 </Entity></Entities></Device>`;
 
     const group = loadXmlModFromText(xml, 'MOD/wire.mod');
@@ -22,6 +22,10 @@ describe('loadXmlModFromText', () => {
     const line = group.children.find((child) => (child as THREE.Line).isLine) as THREE.Line | undefined;
     expect(mesh).toBeTruthy();
     expect(line).toBeTruthy();
+    // A=0 是“不透明”哨兵，中心线必须与 Mesh 使用同一语义。
+    const lineMaterial = line!.material as THREE.LineBasicMaterial;
+    expect(lineMaterial.opacity).toBe(1);
+    expect(lineMaterial.transparent).toBe(false);
     mesh!.geometry.computeBoundingBox();
     const box = mesh!.geometry.boundingBox!;
     // 真实直径 24 mm → 场景单位 0.024 m；不能再用 150 mm 浏览半径放大。
