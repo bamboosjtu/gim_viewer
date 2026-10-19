@@ -220,8 +220,7 @@ export async function createMapLibreProbe(
   }
 
   // 挂载点 div（底图层，z-index:0 在 Canvas overlay 之下）
-  const mountDiv = document.createElement('div');
-  mountDiv.style.cssText = `
+  const mountDiv = document.createElement('div');  mountDiv.style.cssText = `
     position: absolute;
     inset: 0;
     width: 100%;
@@ -247,6 +246,19 @@ export async function createMapLibreProbe(
     // empty/pmtiles 模式不发起瓦片请求；在线 raster 模式请求对应瓦片服务
     hash: false,
   });
+
+  // 地图容器可能在隐藏/零尺寸状态下创建；MapLibre 只在 window resize 时
+  // 自动更新尺寸，容器自身变化会留下空白/只画一部分瓦片。观察容器并显式
+  // resize，保证首次显示和面板尺寸变化后都能完整铺满瓦片。
+  let mapAlive = true;
+  let mapResizeObserver: ResizeObserver | null = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    mapResizeObserver = new ResizeObserver(() => {
+      if (!mapAlive) return;
+      try { map.resize(); } catch (err) { console.warn('[MapLibre probe] resize 失败:', err); }
+    });
+    mapResizeObserver.observe(container);
+  }
 
   // M4-A2：ScaleControl（仅 overlay 模式需要，Canvas-only 不经过此路径）
   let scaleControl: ScaleControl | null = null;
@@ -306,6 +318,19 @@ export async function createMapLibreProbe(
     loadTimer = setTimeout(() => {
       if (settled) return;
       console.warn('[MapLibre probe] load event timeout; activating overlay without waiting for map.load');
+      // 瓦片慢时 load 可能永不触发；仍要按 bbox 定位并校正容器尺寸，
+      // 否则地图停在 (0,0)/zoom 0 或旧尺寸，看起来“打开不加载”。
+      try { map.resize(); } catch (err) { console.warn('[MapLibre probe] timeout resize 失败:', err); }
+      if (options?.initialBounds) {
+        try {
+          map.fitBounds([
+            options.initialBounds[0], options.initialBounds[1],
+            options.initialBounds[2], options.initialBounds[3],
+          ], { padding: 48, duration: 0 });
+        } catch (err) {
+          console.warn('[MapLibre probe] timeout fitBounds 失败:', err);
+        }
+      }
       finish();
     }, 5000);
     const onLoad = () => {
@@ -317,6 +342,9 @@ export async function createMapLibreProbe(
       if (!isOnlineRasterMode) {
         map.off('error', onError);
       }
+      // 容器尺寸在 map 构造后可能才稳定；先同步一次尺寸再 fitBounds，
+      // 否则首帧按旧的 0/小尺寸计算，表现为打开不加载、缩放后只显示一半。
+      try { map.resize(); } catch (err) { console.warn('[MapLibre probe] load resize 失败:', err); }
       // 加载后 fitBounds（如果提供了初始边界），duration:0 无动画
       if (options?.initialBounds) {
         try {
@@ -431,6 +459,9 @@ export async function createMapLibreProbe(
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      mapAlive = false;
+      mapResizeObserver?.disconnect();
+      mapResizeObserver = null;
       // 在线 raster 模式：显式移除 error listener
       // 在线 raster 模式下 onLoad 不移除该 listener（需持续监听 load 后的 tile error），
       // 因此 destroy 时必须显式 off，防止 map.remove() 之前的回调残留或重复触发

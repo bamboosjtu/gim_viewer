@@ -67,6 +67,17 @@ export function createOsmOnlineRasterStyle(): StyleSpecification {
   return {
     version: 8,
     sources: {
+      // OSM 官方瓦片在部分网络下会整块超时/限流；下面垫一层同源 OSM 数据的
+      // CARTO 栅格，OSM 瓦片缺失时仍能看到底图，避免出现整块空白。
+      // 上层加载成功后完全覆盖 fallback，不影响正常 OSM 显示。
+      'osm-fallback': {
+        type: 'raster',
+        tiles: [
+          'https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+        ],
+        tileSize: 256,
+        attribution: '© OpenStreetMap contributors © CARTO',
+      },
       osm: {
         type: 'raster',
         tiles: [
@@ -81,6 +92,11 @@ export function createOsmOnlineRasterStyle(): StyleSpecification {
         id: 'background',
         type: 'background',
         paint: { 'background-color': '#e6eaee' },
+      },
+      {
+        id: 'osm-fallback-raster',
+        type: 'raster',
+        source: 'osm-fallback',
       },
       {
         id: 'osm-raster',

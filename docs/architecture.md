@@ -184,7 +184,7 @@ SQLite 共享 `gim_project`，变电表使用 `substation_*`、线路表使用 `
 
 | 配置/状态 | 当前行为 |
 |---|---|
-| MapLibre | 启用；在线底图不可用时 Canvas 回退 |
+| MapLibre | 启用；OSM 官方瓦片异常时保留地图并用 CARTO 同源栅格垫底，不整块空白/回退 Canvas |
 | 默认底图 | OSM online；天地图为可配置能力 |
 | PMTiles | 关闭 |
 | 线路弧垂 | 启用视觉示意 |
