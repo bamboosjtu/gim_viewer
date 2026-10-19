@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { IfcPreviewObject } from './ifcGeometryProvider.js';
+import type { IfcObjectIdentity } from './ifcObjectIdentity.js';
 import type { ObjectFineResult } from './ifcObjectFineData.js';
 import type { LoaderSettings } from 'web-ifc';
 
@@ -36,7 +36,7 @@ export class IfcObjectFineRuntime {
     const owned=bytes.byteOffset===0&&bytes.byteLength===bytes.buffer.byteLength?bytes:new Uint8Array(bytes);
     const info=await this.send({type:'open',bytes:owned,wasm:this.options.wasm,webIfcSettings:this.options.webIfcSettings},[owned.buffer]);this.options.onTiming?.({stage:'open',...info});
   }
-  load(object:IfcPreviewObject):Promise<ObjectFineResult>{
+  load(object:IfcObjectIdentity):Promise<ObjectFineResult>{
     if(this.released)return Promise.reject(new Error('Object fine released'));
     if(this.idle){clearTimeout(this.idle);this.idle=null;}
     const existing=this.tasks.get(object.expressId);if(existing)return existing.globalId===object.globalId?existing.task:Promise.reject(new Error('IFC object identity mismatch'));
@@ -57,7 +57,7 @@ export class IfcObjectFineRuntime {
 }
 
 /** web-ifc flat geometry is already metres / Y-up. Only the production anchor translation remains. */
-export function objectFineGroup(result:ObjectFineResult,object:Omit<IfcPreviewObject,'provider'> & {provider:string},sourceToViewer:THREE.Matrix4):THREE.Group {
+export function objectFineGroup(result:ObjectFineResult,object:Omit<IfcObjectIdentity,'provider'> & {provider:string},sourceToViewer:THREE.Matrix4):THREE.Group {
   const group=new THREE.Group();group.userData={...object,representationProvider:'web-ifc-object',lod:2,approximate:false};
   group.matrixAutoUpdate=false;
   group.matrix.copy(sourceToViewer).multiply(new THREE.Matrix4().makeRotationX(Math.PI/2));
