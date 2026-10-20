@@ -6,12 +6,14 @@ on:
       - 'app/**'
       - 'packages/**'
       - 'crates/**'
+      - '.gitignore'
       - '.github/workflows/android-ci.yml'
   pull_request:
     paths:
       - 'app/**'
       - 'packages/**'
       - 'crates/**'
+      - '.gitignore'
       - '.github/workflows/android-ci.yml'
   workflow_dispatch:
     inputs:
@@ -38,6 +40,17 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.ref }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Reject tracked Android plugin build outputs
+        shell: pwsh
+        working-directory: .
+        run: |
+          $tracked = @(git ls-files -- ':(glob)crates/**/android/build/**')
+          if ($LASTEXITCODE -ne 0) { throw 'git ls-files failed' }
+          if ($tracked.Count -gt 0) {
+            $tracked | ForEach-Object { Write-Host $_ }
+            throw "Android plugin build outputs must not be tracked ($($tracked.Count) files)"
+          }
 
       # Only the workflow on the default branch may sign packages. The checked-
       # out source must be an existing commit in the history of main.

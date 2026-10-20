@@ -45,11 +45,14 @@
 
 ```powershell
 cd desktop
-npm test                 # 快速单元/集成
+npm test                 # 快速单元测试（不启动 Cargo）
+npm run test:sqlite      # 真实 SQLite 集成：构建一次，直接运行 harness
 npm run test:sample      # 真实样本回归（缺样本时可跳过，skip 不算通过）
 npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
+
+SQLite 集成测试独立于单元测试和样本回归，Windows CI 必须单独执行 `test:sqlite`。准备阶段最多 10 分钟，通过 Cargo JSON 产物消息取得本次测试程序；每次 SQLite 执行最多 30 秒，外层测试最多 60 秒。输入、输出和临时 SQLite 文件位于已忽略的 `desktop/.tmp-vitest/sqlite/`，每次调用独立目录，进程退出后清理。
 
 按改动选择更窄的门禁：
 

@@ -100,7 +100,8 @@ cd desktop            # 所有 npm 命令在 desktop/ 下执行
 npm install
 npm run dev           # Vite 开发服务器（浏览器模式）
 npm run tauri:dev     # Tauri 开发模式（桌面应用）
-npm test              # 单元测试（快速，不含样本回归）
+npm test              # 快速单元测试（不启动 Cargo）
+npm run test:sqlite   # 真实 SQLite 往返（一次构建 Rust harness 后直接运行）
 npm run test:sample   # 真实样本集成回归（需 demo/ 下解压样本，缺失自动跳过）
 npm run build         # TypeScript 编译 + Vite 构建
 cargo check --manifest-path src-tauri/Cargo.toml   # Rust 检查（desktop/ 内）

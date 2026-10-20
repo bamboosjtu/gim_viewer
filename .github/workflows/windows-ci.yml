@@ -6,6 +6,7 @@ on:
       - 'desktop/**'
       - 'packages/**'
       - 'crates/**'
+      - '.gitignore'
       - '.github/workflows/windows-ci.yml'
 
   pull_request:
@@ -13,6 +14,7 @@ on:
       - 'desktop/**'
       - 'packages/**'
       - 'crates/**'
+      - '.gitignore'
       - '.github/workflows/windows-ci.yml'
   workflow_dispatch:
 
@@ -30,6 +32,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Reject tracked Android plugin build outputs
+        shell: pwsh
+        working-directory: .
+        run: |
+          $tracked = @(git ls-files -- ':(glob)crates/**/android/build/**')
+          if ($LASTEXITCODE -ne 0) { throw 'git ls-files failed' }
+          if ($tracked.Count -gt 0) {
+            $tracked | ForEach-Object { Write-Host $_ }
+            throw "Android plugin build outputs must not be tracked ($($tracked.Count) files)"
+          }
+
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
@@ -40,16 +53,14 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # The Vitest SQLite test executes 'cargo test' with a 180-second
-      # spawnSync timeout. Precompile it outside that timeout on a clean runner.
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Precompile Rust SQLite test harness
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib substation_sqlite_exchange --no-run
-
       - name: Run frontend unit tests
         run: npm test
+
+      - name: Run SQLite integration tests
+        run: npm run test:sqlite
 
       - name: Build frontend
         env:

@@ -59,6 +59,7 @@ app/src-tauri/target/
 app/src-tauri/gen/android/.gradle/
 app/src-tauri/gen/android/**/build/
 app/src-tauri/gen/android/local.properties
+/crates/**/android/build/
 crates/**/target/
 app/test-results/
 app/playwright-report/

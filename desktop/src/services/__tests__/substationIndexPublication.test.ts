@@ -5,37 +5,13 @@ import {
   type CoreDependencies,
   type RestDependencies,
 } from '../substationIndexPublication.js';
-import { buildCbmTree } from '../../gim/cbmParser.js';
-import { buildGimIndexPayload, buildGeometryRefsPayload } from '../gimIndexPersistenceService.js';
-import { sqliteRoundTrip } from './sqliteHarness.js';
+import { publicationFixture as fixture } from './substationPublicationFixture.js';
 import type { GimIndexPayload, GeometryRefsPayload } from '@desktop/database.js';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => { resolve = r; });
   return { promise, resolve };
-}
-
-async function fixture() {
-  const files = new Map(Object.entries({
-    'CBM/project.cbm': 'ENTITYNAME=PROJECT\nSYSTEMNAME=fixture\nSUBSYSTEMS.NUM=1\nSUBSYSTEM0=root.cbm',
-    'CBM/root.cbm': 'ENTITYNAME=F4System\nOBJECTMODELPOINTER=root.dev\nBASEFAMILY=props.fam',
-    'CBM/props.fam': '[设计参数]\nkey=value\nkey=value\nkey=other',
-    'DEV/root.dev': 'BASEFAMILYPOINTER=empty.fam\nSOLIDMODELS.NUM=1\nSOLIDMODEL0=root.phm',
-    'DEV/empty.fam': '',
-    'PHM/root.phm': 'SOLIDMODELS.NUM=0',
-    'CBM/model.ifc': 'not-read-by-publication',
-  }).map(([path, text]) => [path, new File([text], path)]));
-  const tree = await buildCbmTree(files);
-  return {
-    projectId: 1,
-    sourceSha256: 'fixture-sha',
-    files,
-    cachePaths: new Map([...files.keys()].map((p) => [p, `cache/${p}`])),
-    tree,
-    ifcs: [{ path: 'CBM/model.ifc', name: 'model', modelId: 'model' }],
-    relations: [],
-  };
 }
 
 function coreDeps() {
@@ -150,16 +126,4 @@ describe('two-phase semantic publication', () => {
     expect(await work).toBe(false);
     expect(deps.saveRest).not.toHaveBeenCalled();
   });
-
-  it('full payload still round-trips through real SQLite', async () => {
-    const input = await fixture();
-    const index = await buildGimIndexPayload(
-      input.projectId, input.files, input.ifcs, input.tree, input.relations,
-      input.cachePaths, input.sourceSha256,
-    );
-    const refs = await buildGeometryRefsPayload(input.projectId, input.files, input.sourceSha256);
-    const [result] = await sqliteRoundTrip([{ index, refs }]);
-    expect(result.index.fam_properties).toHaveLength(3);
-    expect(result.index.dev_properties.length).toBeGreaterThan(0);
-  }, 60_000);
 });
