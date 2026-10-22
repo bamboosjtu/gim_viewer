@@ -146,6 +146,14 @@ export function setupViewerShell(state: AppState): void {
         if (cacheItem) cacheItem.hidden = !isTauri();
         const settingsItem = document.getElementById('menu-settings');
         if (settingsItem) settingsItem.hidden = !isTauri();
+        const viewItem = document.getElementById('menu-previous-view');
+        if (viewItem) viewItem.hidden = !state.viewHistory?.canGoBack;
+        const onlyItem = document.getElementById('menu-only-selected');
+        if (onlyItem) onlyItem.hidden = state.currentProjectType !== 'substation' || !state.selectionRequest?.target || state.onlySelected;
+        const allItem = document.getElementById('menu-show-all');
+        if (allItem) allItem.hidden = state.currentProjectType !== 'substation' || !state.onlySelected;
+        const overviewItem = document.getElementById('menu-station-overview');
+        if (overviewItem) overviewItem.hidden = state.currentProjectType !== 'substation' || !state.stationOverview;
         void refreshRecent();
       }
     });
@@ -166,6 +174,22 @@ export function setupViewerShell(state: AppState): void {
   document.getElementById('menu-settings')?.addEventListener('click', () => {
     closeMenu();
     void import('../settingsPanel.js').then(({ openSettingsPanel }) => openSettingsPanel());
+  });
+  document.getElementById('menu-previous-view')?.addEventListener('click', () => {
+    closeMenu();
+    void state.viewHistory?.back();
+  });
+  document.getElementById('menu-only-selected')?.addEventListener('click', () => {
+    closeMenu();
+    state.setOnlySelected(true);
+  });
+  document.getElementById('menu-show-all')?.addEventListener('click', () => {
+    closeMenu();
+    state.setOnlySelected(false);
+  });
+  document.getElementById('menu-station-overview')?.addEventListener('click', () => {
+    closeMenu();
+    state.stationOverview?.();
   });
   welcomeOpen?.addEventListener('click', () => btnLoadGim.click());
   continueButton?.addEventListener('click', () => {

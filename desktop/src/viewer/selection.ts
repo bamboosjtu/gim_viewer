@@ -15,24 +15,35 @@ export function setupSelection(
   onElementSelected: OnElementSelected,
   onSelectionCleared: (request: SelectionRequest) => void = () => {},
   onRegionalSelected?: (runtime:IfcRegionalRuntime,object:RegionalObject,request:SelectionRequest)=>void,
+  onDevSelected?: (rootOccurrence:string,instanceKey:string,request:SelectionRequest)=>void,
 ): void {
   container.addEventListener('click', async (e: MouseEvent) => {
     if (!state.initialized) return;
     const canvas=container.querySelector('canvas');
     if (e.target!==container && e.target!==canvas) return;
-    const request=state.beginSelection({kind:'ifc-element',key:''});
-    const guard=state.selectionGuard(request);
     try {
       const regional:Array<{runtime:IfcRegionalRuntime;object:RegionalObject;distance:number}>=[];
-      if(state.ifcRegionalRuntimes.size){const rect=(canvas||container).getBoundingClientRect();
+      let devHit: ReturnType<NonNullable<NonNullable<AppState['deviceLodRuntime']>['pick']>> = null;
+      if(state.ifcRegionalRuntimes.size || state.deviceLodRuntime?.pick){const rect=(canvas||container).getBoundingClientRect();
         if(rect.width>0&&rect.height>0){const ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1),(ctx.world.camera as any).three);
+          devHit=state.deviceLodRuntime?.pick?.(ray)??null;
           for(const runtime of state.ifcRegionalRuntimes.values()){const hit=runtime.pick(ray);if(hit)regional.push({runtime,...hit});}regional.sort((a,b)=>a.distance-b.distance);}}
+      // Pick the visible browser representation before beginSelection clears
+      // the previous visibility filter or releases its fine representation.
+      // The new request still owns every asynchronous result below.
+      const request=state.beginSelection({kind:'ifc-element',key:''});
+      const guard=state.selectionGuard(request);
       const result=ctx.fragments.list.size===0 ? null : await ctx.fragments.raycast({
         camera:(ctx.world.camera as any).three,mouse:new THREE.Vector2(e.clientX,e.clientY),
         dom:canvas as HTMLCanvasElement || container,
       });
       if (!guard.isCurrent()) return;
       const near=regional[0];
+      const ifcDistance=result ? (result.rayDistance??result.distance??Infinity) : Infinity;
+      if(onDevSelected && devHit && devHit.distance<Math.min(near?.distance??Infinity,ifcDistance)) {
+        request.target={kind:'cbm',key:devHit.rootOccurrence};
+        onDevSelected?.(devHit.rootOccurrence,devHit.instanceKey,request);return;
+      }
       if(near&&(!result||near.distance<(result.rayDistance??result.distance))){
         request.target={kind:'ifc-object',key:`ifc:${near.runtime.modelId.toLowerCase()}:object:${near.object.expressId}`};
         onRegionalSelected?.(near.runtime,near.object,request);

@@ -9,6 +9,7 @@ import { frameBox } from './camera.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
+import { setDevInstanceHighlight } from './devInstanceBatches.js';
 
 /** 高亮样式 */
 export const HIGHLIGHT_STYLE: OBCF.MaterialDefinition = {
@@ -42,6 +43,7 @@ export function resetModHighlight(state: AppState): void {
       }
     }
     mesh.material = originalMat;
+    setDevInstanceHighlight(mesh, false);
   }
   state.highlightedModState = null;
 }
@@ -71,6 +73,7 @@ export function highlightModGroups(
     group.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (!mesh.isMesh || !mesh.material) return;
+      setDevInstanceHighlight(mesh, true);
 
       // 保存原始材质引用
       originalMaterials.set(mesh, mesh.material);

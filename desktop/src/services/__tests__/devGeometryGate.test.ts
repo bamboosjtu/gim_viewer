@@ -42,16 +42,16 @@ it.skipIf(process.env.GIM_VERIFY_SUBSTATION02_LOCAL !== '1')('substation02 body 
   }
 });
 
-it('LOD uses box distance, hysteresis, offscreen selection and a long object crossing the frustum', () => {
-  expect(chooseDeviceLod(0, true, 100, 39)).toBe(0);
-  expect(chooseDeviceLod(0, true, 100, 40)).toBe(1);
-  expect(chooseDeviceLod(1, true, 100, 31)).toBe(1);
-  expect(chooseDeviceLod(1, true, 100, 29)).toBe(0);
-  expect(chooseDeviceLod(1, true, 29, 120)).toBe(2);
-  expect(chooseDeviceLod(2, true, 34, 95)).toBe(2);
-  expect(chooseDeviceLod(2, true, 36, 120)).toBe(1);
-  expect(chooseDeviceLod(0, false, 1000, 0, true)).toBe(2);
-  expect(chooseDeviceLod(2, false, 0, 100)).toBe(0);
+it('browser LOD uses pixel hysteresis, demotes L2 and retains long objects crossing the frustum', () => {
+  expect(chooseDeviceLod(0, true, 39)).toBe(0);
+  expect(chooseDeviceLod(0, true, 40)).toBe(1);
+  expect(chooseDeviceLod(1, true, 31)).toBe(1);
+  expect(chooseDeviceLod(1, true, 29)).toBe(0);
+  expect(chooseDeviceLod(2, true, 95)).toBe(1);
+  expect(chooseDeviceLod(2, true, 120)).toBe(1);
+  expect(chooseDeviceLod(2, true, 29)).toBe(0);
+  expect(chooseDeviceLod(0, false, 0)).toBe(0);
+  expect(chooseDeviceLod(2, false, 100)).toBe(0);
   const camera = new THREE.PerspectiveCamera(60, 1, .1, 500);
   const box = new THREE.Box3(new THREE.Vector3(-100, -1, -20), new THREE.Vector3(1, 1, -10));
   const view = deviceViewMetrics(box, camera, 1000, 1000);

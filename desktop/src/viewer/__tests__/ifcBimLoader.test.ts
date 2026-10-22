@@ -75,6 +75,21 @@ it('far artifact HIT restores without source read or conversion and attaches the
   expect(state.ifcRegionalRuntimes.has('logical')).toBe(true);
   expect(release).toHaveBeenCalledOnce();
 });
+it('restores a valid empty regional index without treating it as a cache miss', async () => {
+  const { state, session, ctx } = setup();
+  cache.read.mockResolvedValue({ bytes: new Uint8Array([1, 2]).buffer, index: { ...index, objects: [] } });
+  const read = vi.fn();
+  const batches: any[] = [];
+  const complete: any[] = [];
+  await loadBimIfc(ctx, state, session, 'runtime', 'logical', 'CBM/empty.ifc', read, undefined, {
+    onRegionalBatch: (batch) => batches.push(batch),
+    onRegionalComplete: (meta) => complete.push(meta),
+  });
+  expect(read).not.toHaveBeenCalled();
+  expect(cache.raw).not.toHaveBeenCalled();
+  expect(batches).toHaveLength(0);
+  expect(complete).toHaveLength(0); // A far-only hit is not a complete connection-mesh cache.
+});
 it('a cache read finishing after source switch cannot register a model', async () => {
   const { state, session, ctx } = setup();
   let resolve!: (data: any) => void;
@@ -125,7 +140,7 @@ it('returns the far model before the derived cache write settles and records the
 });
 it('a corrupt artifact retries source even when no failed model can be disposed', async () => {
   const { state, session, ctx, model } = setup();
-  cache.read.mockResolvedValue({ bytes: new Uint8Array([1]).buffer, index });
+  cache.read.mockResolvedValueOnce({ bytes: new Uint8Array([1]).buffer, index }).mockResolvedValue(null);
   ctx.fragments.core.load.mockRejectedValue(Error('Invalid artifact'));
   ctx.fragments.core.disposeModel.mockRejectedValue(Error('Not registered'));
   cache.raw.mockImplementation(async (...args: any[]) => {
@@ -138,4 +153,44 @@ it('a corrupt artifact retries source even when no failed model can be disposed'
   expect(cache.remove).toHaveBeenCalledOnce();
   expect(cache.write).toHaveBeenCalledOnce();
   expect(model.object.userData.ifcLodCacheHit).toBe(false);
+});
+
+it('replays a complete connection receipt in the original order on a warm hit after successful far deserialization', async () => {
+  const {state,session,ctx}=setup();
+  const batches=[{sequence:0,objects:[],chunks:[],bytes:0,final:true}];
+  const complete={objectCount:0,sequence:1};
+  cache.read.mockImplementation(async (key:string)=>key.includes('connection-mesh-v1')
+    ? {version:'connection-mesh-v1',batches,complete} : {bytes:new Uint8Array([1]).buffer,index});
+  const order:string[]=[];
+  ctx.fragments.core.load.mockImplementation(async()=>{order.push('far');return {object:new THREE.Group()};});
+  await loadBimIfc(ctx,state,session,'runtime','logical','CBM/a.ifc',vi.fn(),undefined,{
+    onRegionalBatch:batch=>{order.push(`batch-${batch.sequence}`);},onRegionalComplete:()=>{order.push('complete');},
+  });
+  expect(order).toEqual(['far','batch-0','complete']);
+  expect(cache.raw).not.toHaveBeenCalled();
+});
+it('does not publish connection completion or write its receipt for an interrupted source stream', async () => {
+  const {state,session,ctx}=setup();
+  const complete=vi.fn();
+  cache.raw.mockImplementation(async (...args:any[])=>{
+    args[8].onRegionalBatch({sequence:0,objects:[],chunks:[],bytes:0,final:false});
+    throw Error('source interrupted');
+  });
+  await expect(loadBimIfc(ctx,state,session,'runtime','logical','CBM/a.ifc',async()=>new Uint8Array([1]),undefined,
+    {onRegionalComplete:complete})).rejects.toThrow('source interrupted');
+  expect(complete).not.toHaveBeenCalled();expect(cache.write).not.toHaveBeenCalled();
+});
+
+it('a project switch during warm chunk replay disposes the old far model and suppresses its completion', async () => {
+  const {state,session,ctx}=setup();
+  const complete=vi.fn();
+  cache.read.mockImplementation(async(key:string)=>key.includes('connection-mesh-v1')
+    ? {version:'connection-mesh-v1',batches:[{sequence:0,objects:[],chunks:[],bytes:0,final:true}],complete:{objectCount:0,sequence:1}}
+    : {bytes:new Uint8Array([1]).buffer,index});
+  await loadBimIfc(ctx,state,session,'runtime','logical','CBM/a.ifc',vi.fn(),undefined,{
+    onRegionalBatch:()=>{state.activateProject(2,'new-sha');},onRegionalComplete:complete,
+  });
+  expect(complete).not.toHaveBeenCalled();
+  expect(ctx.fragments.core.disposeModel).toHaveBeenCalledWith('runtime');
+  expect(cache.raw).not.toHaveBeenCalled();
 });

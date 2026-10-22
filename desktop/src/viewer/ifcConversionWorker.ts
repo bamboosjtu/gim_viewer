@@ -21,6 +21,7 @@ import {
 } from './ifcRegionalData.js';
 import { installWebIfcStreamCompatibility } from './webIfcCompatibility.js';
 import { withSharedIfcImport } from './ifcSharedImport.js';
+import { streamConnectionGeometry, type ConnectionGeometryBatch } from './ifcConnectionBatches.js';
 installWebIfcStreamCompatibility();
 
 export interface IfcConversionInput {
@@ -31,6 +32,12 @@ export interface IfcConversionInput {
 }
 export type IfcConversionOutput =
   | { type: 'progress'; progress: number }
+  | ({ type: 'regional-batch' } & ConnectionGeometryBatch)
+  | {
+      type: 'regional-complete';
+      objectCount: number;
+      sequence: number;
+    }
   | {
       type: 'complete';
       bytes: Uint8Array<ArrayBuffer>;
@@ -43,27 +50,32 @@ export type IfcConversionOutput =
 
 // IfcImporter.process contains synchronous web-ifc calls even though it returns
 // a Promise. The existing Fragments worker does not isolate this conversion.
-self.onmessage = async (event: MessageEvent<IfcConversionInput>) => {
+const consumed = new Map<number, () => void>();
+self.onmessage = async (event: MessageEvent<IfcConversionInput | { type: 'connection-consumed'; sequence: number }>) => {
+  if ('type' in event.data && event.data.type === 'connection-consumed') {
+    consumed.get(event.data.sequence)?.(); consumed.delete(event.data.sequence); return;
+  }
+  const input = event.data as IfcConversionInput;
   try {
     let regionalIndex: RegionalIndex | undefined;
     const coldPipeline: Record<string, number> = {};
     let removedOpeningRelations = 0;
     const sourceSha256 =
-      event.data.openingPolicy === 'bim-lod'
+      input.openingPolicy === 'bim-lod'
         ? [
             ...new Uint8Array(
-              await crypto.subtle.digest('SHA-256', event.data.bytes)
+              await crypto.subtle.digest('SHA-256', input.bytes)
             ),
           ]
             .map((v) => v.toString(16).padStart(2, '0'))
             .join('')
         : undefined;
-    if (event.data.openingPolicy === 'omit-rel-voids')
-      removedOpeningRelations = omitIfcOpeningRelations(event.data.bytes);
+    if (input.openingPolicy === 'omit-rel-voids')
+      removedOpeningRelations = omitIfcOpeningRelations(input.bytes);
     const importer = new IfcImporter();
-    importer.wasm = event.data.wasm;
-    importer.webIfcSettings = event.data.webIfcSettings;
-    if (event.data.openingPolicy === 'bim-lod') {
+    importer.wasm = input.wasm;
+    importer.webIfcSettings = input.webIfcSettings;
+    if (input.openingPolicy === 'bim-lod') {
       importer.classes.elements.delete(IFCMECHANICALFASTENER);
       importer.classes.elements.delete(IFCFASTENER);
       importer.classes.abstract.clear();
@@ -85,7 +97,7 @@ self.onmessage = async (event: MessageEvent<IfcConversionInput>) => {
     const started = performance.now();
     const process = () =>
       importer.process({
-        bytes: event.data.bytes,
+        bytes: input.bytes,
         progressCallback: (progress) =>
           self.postMessage({
             type: 'progress',
@@ -93,25 +105,25 @@ self.onmessage = async (event: MessageEvent<IfcConversionInput>) => {
           } satisfies IfcConversionOutput),
       });
     let converted: Uint8Array;
-    if (event.data.openingPolicy === 'bim-lod') {
+    if (input.openingPolicy === 'bim-lod') {
       let stage = performance.now();
       const openingRelations: RegionalIndex['openingRelations'] = [];
       removedOpeningRelations = omitIfcOpeningRelations(
-        event.data.bytes,
+        input.bytes,
         () => false,
         (r) => openingRelations.push(r)
       );
       coldPipeline.preparationMs = performance.now() - stage;
       stage = performance.now();
       const api = new IfcAPI();
-      api.SetWasmPath(event.data.wasm.path, event.data.wasm.absolute);
+      api.SetWasmPath(input.wasm.path, input.wasm.absolute);
       await api.Init(undefined, true);
       coldPipeline.wasmInitMs = performance.now() - stage;
       stage = performance.now();
       try {
         const model = api.OpenModel(
-          event.data.bytes,
-          event.data.webIfcSettings
+          input.bytes,
+          input.webIfcSettings
         );
         coldPipeline.openModelMs = performance.now() - stage;
         coldPipeline.parsedModels = 1;
@@ -123,16 +135,25 @@ self.onmessage = async (event: MessageEvent<IfcConversionInput>) => {
         };
         coldPipeline.semanticsMs = performance.now() - stage;
         stage = performance.now();
-        const collector = new RegionalIndexCollector(
-          api,
-          model,
-          event.data.webIfcSettings.COORDINATE_TO_ORIGIN !== false
-        );
+        const connectionStarted = performance.now();
+        const connection = await streamConnectionGeometry(api, model,
+          input.webIfcSettings.COORDINATE_TO_ORIGIN !== false, async batch => {
+            const ack = new Promise<void>(resolve => consumed.set(batch.sequence, resolve));
+            self.postMessage({ type: 'regional-batch', ...batch } satisfies IfcConversionOutput,
+              { transfer: (batch.chunks ?? []).map(chunk => chunk.vertices.buffer as ArrayBuffer) });
+            await ack;
+          });
+        coldPipeline.connectionGeometryMs = performance.now() - connectionStarted;
+        coldPipeline.connectionFailedObjects = connection.failedObjects.length;
+        self.postMessage({ type: 'regional-complete', ...connection } satisfies IfcConversionOutput);
+        const collector = new RegionalIndexCollector(api, model,
+          input.webIfcSettings.COORDINATE_TO_ORIGIN !== false);
+        stage = performance.now();
         converted = await withSharedIfcImport(
           api,
           model,
-          event.data.bytes,
-          event.data.webIfcSettings,
+          input.bytes,
+          input.webIfcSettings,
           collector.observe,
           process
         );
@@ -141,6 +162,7 @@ self.onmessage = async (event: MessageEvent<IfcConversionInput>) => {
         regionalIndex = collector.finish(semantics);
         regionalIndex.sourceSha256 = sourceSha256;
         coldPipeline.remainingIndexMs = performance.now() - stage;
+
       } finally {
         api.Dispose();
       }
@@ -156,7 +178,7 @@ self.onmessage = async (event: MessageEvent<IfcConversionInput>) => {
         removedOpeningRelations,
         regionalIndex,
         coldPipeline:
-          event.data.openingPolicy === 'bim-lod' ? coldPipeline : undefined,
+          input.openingPolicy === 'bim-lod' ? coldPipeline : undefined,
       } satisfies IfcConversionOutput,
       { transfer: [bytes.buffer] }
     );

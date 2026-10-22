@@ -6,6 +6,13 @@
  */
 const ENABLE_FRAGMENTS_CACHE_BASE = false;
 
+/** Trial stays opt-in until native draw-call and interaction gates pass. */
+export const DEV_INSTANCE_BATCHES_DEBUG_KEY = 'gim-debug-dev-instancing';
+export function isDevInstanceBatchesEnabled(): boolean {
+  try { return localStorage.getItem(DEV_INSTANCE_BATCHES_DEBUG_KEY) === '1'; }
+  catch { return false; }
+}
+
 /** Fragments 缓存灰度开关的 localStorage 覆盖键（设为 '1' 开启实测） */
 export const FRAGMENTS_CACHE_DEBUG_KEY = 'gim-debug-fragments-cache';
 

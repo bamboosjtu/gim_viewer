@@ -59,6 +59,9 @@ jobs:
       - name: Run frontend unit tests
         run: npm test
 
+      - name: Check native acceptance tooling
+        run: npm run test:acceptance-tools
+
       - name: Run SQLite integration tests
         run: npm run test:sqlite
 

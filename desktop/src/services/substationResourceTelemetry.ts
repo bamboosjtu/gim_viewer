@@ -18,6 +18,7 @@ import {
   type PerfSession,
 } from '../utils/perfTimings.js';
 import { isTauri } from '@desktop/runtime.js';
+import { privateMemoryPressure, PROCESS_TREE_PRIVATE_LIMIT_BYTES } from '../utils/memoryPressure.js';
 
 type ObjectLike = {
   [key: string]: unknown;
@@ -52,6 +53,7 @@ interface SceneResourceCounts {
   rendererInfoGeometries: number | null;
   rendererInfoTextures: number | null;
   rendererInfoPrograms: number | null;
+  rendererInfoDrawCalls: number | null;
 }
 
 const DEV_TEMPLATE_POOL_KEY = '__gimDevGlbTemplatePool';
@@ -81,6 +83,7 @@ function collectSceneResourceCounts(ctx: ViewerContext | null | undefined): Scen
       rendererInfoGeometries: null,
       rendererInfoTextures: null,
       rendererInfoPrograms: null,
+      rendererInfoDrawCalls: null,
     };
   }
 
@@ -127,6 +130,7 @@ function collectSceneResourceCounts(ctx: ViewerContext | null | undefined): Scen
   const renderer = asObject(world?.renderer);
   const rendererInfo = asObject(renderer?.info) ?? asObject(asObject(renderer?.three)?.info);
   const rendererMemory = asObject(rendererInfo?.memory);
+  const rendererRender = asObject(rendererInfo?.render);
   const programs = rendererInfo?.programs;
   return {
     sceneObjectCount,
@@ -138,6 +142,7 @@ function collectSceneResourceCounts(ctx: ViewerContext | null | undefined): Scen
     rendererInfoGeometries: countOrNull(rendererMemory?.geometries),
     rendererInfoTextures: countOrNull(rendererMemory?.textures),
     rendererInfoPrograms: Array.isArray(programs) ? programs.length : null,
+    rendererInfoDrawCalls: countOrNull(rendererRender?.calls),
   };
 }
 
@@ -225,6 +230,7 @@ export function collectSubstationRuntimeResourceSnapshot(
   const template = collectTemplateCounts(state);
   const placements = collectPlacementCounts(state);
   const spatial = state.substationSpatialIndex;
+  const connection = state.substationConnectionPreview?.diagnostics;
   const fragmentModelCount = getFragmentModelCount(ctx);
   const uniqueGeometryCount = scene.uniqueGeometryCount == null
     ? template.sharedGeometryCount
@@ -253,6 +259,7 @@ export function collectSubstationRuntimeResourceSnapshot(
     rendererInfoGeometries: getRendererInfoCount(scene.rendererInfoGeometries),
     rendererInfoTextures: getRendererInfoCount(scene.rendererInfoTextures),
     rendererInfoPrograms: getRendererInfoCount(scene.rendererInfoPrograms),
+    rendererInfoDrawCalls: getRendererInfoCount(scene.rendererInfoDrawCalls),
     templateCount: template.templateCount,
     templateParseCount: template.templateParseCount,
     sharedPlacementCount: placements.sharedPlacementCount,
@@ -270,6 +277,9 @@ export function collectSubstationRuntimeResourceSnapshot(
     spatialObjectCount: spatial?.objects.length ?? 0,
     spatialLinkCount: spatial?.links.length ?? 0,
     fileDevRelationCount: state.fileDevRelations.length,
+    connectionPreviewBatchCount: countOrNull(connection?.batches),
+    connectionPreviewObjectCount: countOrNull(connection?.objects),
+    connectionPreviewCompleteModels: countOrNull(connection?.completeModels),
     modRootPresent: state.modRootGroup != null,
     stlRootPresent: state.stlRootGroup != null,
     meta: {
@@ -300,6 +310,8 @@ function getJsHeapSample(): {
 export interface SubstationResourceSampleOptions {
   /** State/generation guard in addition to the performance session guard. */
   isCurrent?: () => boolean;
+  /** Continuous memory feedback skips expensive full-scene ownership walks. */
+  includeOwnership?: boolean;
 }
 
 /**
@@ -316,16 +328,17 @@ export async function sampleSubstationRuntimeResources(
   options: SubstationResourceSampleOptions = {},
 ): Promise<void> {
   if (!perfIsCurrentSession(session) || (options.isCurrent && !options.isCurrent())) return;
-  const resourceSnapshot = collectSubstationRuntimeResourceSnapshot(state, label, ctx, meta);
+  const resourceSnapshot = options.includeOwnership === false ? null : collectSubstationRuntimeResourceSnapshot(state, label, ctx, meta);
   const jsHeap = getJsHeapSample();
   // Resource ownership is a synchronous checkpoint.  Record it before the
   // optional Rust IPC so a slow process-memory command cannot move the
   // resource timestamp into a later lifecycle phase.
-  perfRecordRuntimeResourceSnapshot(label, resourceSnapshot, session);
+  if (resourceSnapshot) perfRecordRuntimeResourceSnapshot(label, resourceSnapshot, session);
   let rssBytes: number | null = null;
   let rssSource = 'unavailable-not-tauri';
   let processPid: number | null = null;
   let processTreeRssBytes: number | null = null;
+  let processTreePrivateBytes: number | null = null;
   let processCount: number | null = null;
   let processTreeAvailable = false;
   let processTreeSource = 'unavailable-not-tauri';
@@ -340,6 +353,7 @@ export async function sampleSubstationRuntimeResources(
       rssSource = processMemory.rssSource ?? processMemory.source;
       processPid = processMemory.pid ?? null;
       processTreeRssBytes = processMemory.processTreeRssBytes ?? null;
+      processTreePrivateBytes = processMemory.processTreePrivateBytes ?? null;
       processCount = processMemory.processCount ?? null;
       processTreeAvailable = processMemory.processTreeAvailable === true;
       processTreeSource = processMemory.processTreeSource ?? 'unavailable';
@@ -353,12 +367,24 @@ export async function sampleSubstationRuntimeResources(
   }
 
   if (!perfIsCurrentSession(session) || (options.isCurrent && !options.isCurrent())) return;
+  const externalMemoryPressure = privateMemoryPressure(processTreePrivateBytes, processTreeAvailable);
+  // Native private commit is sampled at lifecycle checkpoints and by the
+  // session-owned non-overlapping monitor. Feed the same pressure to DEV/IFC:
+  // high pressure stops automatic L1 work and trims unprotected templates;
+  // critical pressure also rejects new explicit L2 requests.  Unknown keeps
+  // the browser-only path honest and leaves JS-heap pressure in control.
+  // Perform this only after the session check so an old async IPC response
+  // cannot change the scheduler of a newly opened project.
+  state.substationMemoryPressure = externalMemoryPressure;
+  state.deviceLodRuntime?.setExternalMemoryPressure?.(externalMemoryPressure);
+  for (const runtime of state.ifcRegionalRuntimes.values()) runtime.setMemoryPressure?.(externalMemoryPressure);
   perfRecordMemorySample(label, {
     rssBytes,
     rssSource,
     tauriProcessRssBytes: rssBytes,
     processPid,
     processTreeRssBytes,
+    processTreePrivateBytes,
     processCount,
     processTreeAvailable,
     processTreeSource,
@@ -368,6 +394,9 @@ export async function sampleSubstationRuntimeResources(
     jsHeapLimitBytes: jsHeap.jsHeapSizeLimit,
     meta: {
       ...meta,
+      processTreeMemoryLimitBytes: PROCESS_TREE_PRIVATE_LIMIT_BYTES,
+      processTreePressureMetric: 'windows-private-commit',
+      processTreeMemoryPressure: externalMemoryPressure,
       ...(processError ? { processMemoryError: processError } : {}),
     },
   }, session);
@@ -386,4 +415,24 @@ export function scheduleSubstationResourceCheckpoint(
   setTimeout(() => {
     void sampleSubstationRuntimeResources(state, label, session, ctx, meta, options);
   }, Math.max(0, delayMs));
+}
+
+/** One session owns one non-overlapping native sampler. Releasing the owner
+ * prevents late IPC results from changing the next project's pressure. */
+export function startSubstationResourceMonitor(state: AppState, ctx: ViewerContext, intervalMs = 5000): { release(): void } {
+  state.substationResourceMonitor?.release();
+  const project = state.captureProjectSession(), perf = perfCurrentSession();
+  let released = false, timer: ReturnType<typeof setTimeout> | null = null;
+  const current = () => !released && state.isCurrentSession(project) && perfIsCurrentSession(perf);
+  const sample = async (): Promise<void> => {
+    if (!current()) return;
+    try { await sampleSubstationRuntimeResources(state, 'periodicPrivateMemory', perf, ctx, undefined,
+      { isCurrent: current, includeOwnership: false }); }
+    catch (error) { console.warn('[Memory sample]', error); }
+    finally { if (current()) timer = setTimeout(() => { void sample(); }, Math.max(1000, intervalMs)); }
+  };
+  const owner = { release(): void { released = true; if (timer) clearTimeout(timer); timer = null; } };
+  state.substationResourceMonitor = owner;
+  void sample();
+  return owner;
 }

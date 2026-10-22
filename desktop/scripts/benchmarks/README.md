@@ -1,4 +1,12 @@
-# 单文件 IFC 对照
+# 原生验收与单文件 IFC 对照
+
+## 独立原生 Release 验收
+
+在 `desktop/` 执行 `npm run acceptance:build`，再将生成的清单路径传给 `npm run acceptance:stage -- <acceptance-build.json>`，得到已核验的临时目录副本。`node scripts/benchmarks/acceptance-probe.mjs <暂存后的 acceptance-build.json>` 只检查原生启动、实际独立缓存路径和所属进程清理，不打开工程，也不代表工程性能验收通过。
+
+验收使用独立应用标识，并校验当前源码、EXE 和完整固定运行时；日常应用缓存保持原位。目录相关启动失败的具体原因尚未确认，不修改 ACL 或关闭安全机制来替代验收。冷暖矩阵、真实文件对话框、固定路线及结果判定以[性能测试指南](../../../docs/meassurement.md)为准，当前证据见[性能基线](../../../docs/performance.md)。工具自测入口为 `npm run test:acceptance-tools`。
+
+## 单文件 IFC 对照
 
 这些入口用于手动、有界范围的研究复核，不加入默认单元测试，不代表全站或 Tauri 验收。只处理显式指定的 IFC；当前产品页固定钢结构样本 SHA 和连接板 ExpressId，其他输入应先修改该页的身份与目标。原始 IFC 不修改，输出写入仓库忽略的 `output/`。
 

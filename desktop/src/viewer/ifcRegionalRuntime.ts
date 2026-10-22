@@ -16,6 +16,11 @@ import {
   IFC_NEAR_TEMPLATE_CACHE_VERSION,
 } from '../config/features.js';
 import { IfcRegionalInstances } from './ifcRegionalInstances.js';
+import { IfcObjectFineRuntime } from './ifcObjectFineRuntime.js';
+import type { IfcObjectIdentity } from './ifcObjectIdentity.js';
+import type { SubstationFineQueue } from '../app/state.js';
+import { perfMarkProductMoment } from '../utils/perfTimings.js';
+import type { MemoryPressure } from '../utils/memoryPressure.js';
 
 // A source model can consume hundreds of MB. Serialize regional source work
 // across IFCs. Keep one source resident for nearby requests, with idle eviction.
@@ -49,8 +54,11 @@ export class IfcRegionalRuntime {
     stage: 'idle',
     error: '',
     regionMs: 0,
+    memoryPressure: 'unknown' as MemoryPressure,
+    memoryReclaims: 0,
   };
   private worker: Worker | null = null;
+  private fineRuntime: IfcObjectFineRuntime | null = null;
   private opening: Promise<void> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private retainSource() {
@@ -63,10 +71,20 @@ export class IfcRegionalRuntime {
     { resolve: (data: any) => void; reject: (e: Error) => void }
   >();
   private groups = new Map<number, THREE.Group>();
+  /** Explicit L2 objects remain visible until the user returns to browsing. */
+  private fineRequested = new Set<number>();
+  /** Deduplicate concurrent clicks on the same IFC object. */
+  private finePending = new Map<number, Promise<THREE.Group | undefined>>();
+  private fineQueueCancels = new Map<number, () => boolean>();
+  private fineGeneration = new Map<number, number>();
+  private onlySelected = false;
+  private selectedExpressId: number | null = null;
   private localIds = new Map<number, number>();
   private guidIds: Promise<Map<string, number[]>> | null = null;
   private epoch = 0;
   private released = false;
+  private sourceGeneration = 0;
+  private memoryPressure: MemoryPressure = 'unknown';
   private busy = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private interval: ReturnType<typeof setInterval>;
@@ -85,6 +103,7 @@ export class IfcRegionalRuntime {
       cacheKey: string;
       isCurrent: () => boolean;
       sourceToViewer: THREE.Matrix4;
+      fineQueue?: SubstationFineQueue | null;
       onBeforeDisposeGroup?: (group: THREE.Group) => void;
     }
   ) {
@@ -103,8 +122,9 @@ export class IfcRegionalRuntime {
     options.ctx.fragments.list.onBeforeDelete.add(this.disposed);
     this.interval = setInterval(() => {
       const visible = options.model.object.visible;
-      if (this.root.visible !== visible) {
-        this.root.visible = visible;
+      const regionalVisible = this.onlySelected ? true : visible;
+      if (this.root.visible !== regionalVisible) {
+        this.root.visible = regionalVisible;
         this.schedule();
       }
       if (!options.isCurrent()) this.release();
@@ -126,8 +146,9 @@ export class IfcRegionalRuntime {
   private async open() {
     if (this.opening) return this.opening;
     this.opening = (async () => {
+      const generation = this.sourceGeneration;
       const bytes = await this.options.readBytes();
-      if (!this.current() || !bytes?.byteLength)
+      if (!this.current() || generation !== this.sourceGeneration || !bytes?.byteLength)
         throw Error('Regional source unavailable');
       this.diagnostics.sourceReads++;this.diagnostics.sourceBytes+=bytes.byteLength;
       this.worker = new Worker(
@@ -227,6 +248,7 @@ export class IfcRegionalRuntime {
     });
   }
   private closeSource() {
+    this.sourceGeneration++;
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = null;
     if (residentSource === this) residentSource = null;
@@ -251,7 +273,7 @@ export class IfcRegionalRuntime {
       // sourceToViewer was resolved from the first model's public coordinates.
       // Its frame is immutable for this session; the manager's initially cached
       // identity must never replace it while its own query is still pending.
-      const objects =
+      const candidates =
         isIfcNearDetailEnabled() && this.options.model.object.visible
           ? queryRegionalObjects(
               this.index.objects,
@@ -259,7 +281,14 @@ export class IfcRegionalRuntime {
               (this.options.ctx.world.camera as any).three
             )
           : [];
-      const desired = new Set(objects.map((o) => o.expressId));
+      const pressured = this.memoryPressure === 'high' || this.memoryPressure === 'critical';
+      // Preserve visible existing L1 and the selected object. Under pressure
+      // no new automatic region is admitted; far geometry stays available.
+      const objects = pressured ? candidates.filter(object => this.groups.has(object.expressId)) : candidates;
+      // L1 follows the camera, while an explicitly refined object is retained
+      // until the user releases it.  Ordinary selection never enters this set.
+      const desired = new Set([...objects.map((o) => o.expressId), ...this.fineRequested]);
+      if (this.selectedExpressId !== null) desired.add(this.selectedExpressId);
       this.diagnostics.requested = objects.length;
       const restore: number[] = [];
       for (const [id, group] of this.groups)
@@ -377,6 +406,7 @@ export class IfcRegionalRuntime {
           group.userData.approximate = true;
           this.root.add(group);
           this.groups.set(object.expressId, group);
+          group.visible = !this.onlySelected || object.expressId === this.selectedExpressId;
           if (candidates.length === 1) {
             await this.options.model.setVisible(candidates, false);
             if(this.released){await this.options.model.setVisible(candidates,true);return;}
@@ -417,12 +447,185 @@ export class IfcRegionalRuntime {
     return object ? { object, distance: hit.distance } : null;
   }
   highlightGroup(expressId: number) {
+    this.selectedExpressId = expressId;
     const group = this.groups.get(expressId);
     if (group) this.instances.highlight(expressId, group);
+    this.applyOnlySelected();
     return group;
   }
   clearHighlight() {
     this.instances.clearHighlight();
+  }
+  clearSelectionFilter(): void {
+    this.selectedExpressId = null;
+    this.applyOnlySelected();
+  }
+  private applyOnlySelected(): void {
+    const hasSelectedObject = this.selectedExpressId !== null;
+    this.options.model.object.visible = !this.onlySelected || !hasSelectedObject;
+    this.root.visible = this.onlySelected && hasSelectedObject ? true : this.options.model.object.visible;
+    for (const [expressId, group] of this.groups) {
+      group.visible = !this.onlySelected || !hasSelectedObject || expressId === this.selectedExpressId;
+    }
+  }
+  setOnlySelected(only: boolean): void {
+    this.onlySelected = only;
+    this.applyOnlySelected();
+  }
+  setMemoryPressure(pressure: MemoryPressure): void {
+    if (!this.current()) return;
+    const changed = this.memoryPressure !== pressure;
+    this.memoryPressure = pressure;
+    this.diagnostics.memoryPressure = pressure;
+    if (pressure === 'critical') {
+      // Idle WASM can be discarded without touching any shared in-flight
+      // property request or the source needed by an active region task.
+      if (!this.busy && !this.pending.size && this.worker) { this.closeSource(); this.diagnostics.memoryReclaims++; }
+      if (!this.finePending.size && this.fineRuntime?.hasModel()) {
+        this.fineRuntime.cancel(); this.diagnostics.memoryReclaims++;
+      }
+    }
+    if (changed) this.schedule();
+  }
+  /** Explicit user request for precise IFC object geometry. */
+  async refine(object: RegionalObject): Promise<THREE.Group | undefined> {
+    const existing = this.finePending.get(object.expressId);
+    if (existing) return existing;
+    const ready = this.groups.get(object.expressId);
+    if (ready?.userData.lod === 2) {
+      this.fineRequested.add(object.expressId);
+      return ready;
+    }
+    if (this.memoryPressure === 'critical') throw Error('当前内存压力过高，暂不能加载更多精细模型');
+    this.fineRequested.add(object.expressId);
+    let result: THREE.Group | undefined;
+    const generation = (this.fineGeneration.get(object.expressId) ?? 0) + 1;
+    this.fineGeneration.set(object.expressId, generation);
+    const run = async (): Promise<void> => { result = await this.refineObject(object, generation); };
+    const queued = this.options.fineQueue?.enqueueUserIfcFine(
+      `ifc:${this.modelId.toLowerCase()}:${object.expressId}`, run,
+    );
+    const pending = queued ? queued.promise.then(() => result) : this.refineObject(object, generation);
+    if (queued) this.fineQueueCancels.set(object.expressId, queued.cancel);
+    this.finePending.set(object.expressId, pending);
+    try { return await pending; }
+    catch (error) {
+      // A failed/cancelled precision request must remain an explicit failure;
+      // it must not turn the camera-driven L1 scheduler into an implicit L2
+      // retry loop.  The inspector can issue a fresh request.
+      if (this.fineGeneration.get(object.expressId) === generation) this.fineRequested.delete(object.expressId);
+      this.schedule();
+      throw error;
+    }
+    finally {
+      if (this.finePending.get(object.expressId) === pending) {
+        this.finePending.delete(object.expressId);
+        this.fineQueueCancels.delete(object.expressId);
+      }
+    }
+  }
+  private async refineObject(object: RegionalObject, generation: number): Promise<THREE.Group | undefined> {
+    const wanted = () => this.current() && this.fineRequested.has(object.expressId)
+      && this.fineGeneration.get(object.expressId) === generation;
+    if (!wanted()) return undefined;
+    const existing = this.groups.get(object.expressId);
+    if (existing?.userData.lod === 2) return existing;
+    if (this.memoryPressure === 'critical') throw Error('当前内存压力过高，暂不能加载更多精细模型');
+    if (!this.fineRuntime) {
+      this.fineRuntime = new IfcObjectFineRuntime({
+        wasm: { ...this.options.ctx.ifcLoader.settings.wasm },
+        readBytes: this.options.readBytes,
+        webIfcSettings: undefined,
+        onTiming: (data) => {
+          if (data.stage === 'object') this.diagnostics.regionMs = Number(data.geometryMs) || this.diagnostics.regionMs;
+        },
+      });
+    }
+    const identity: IfcObjectIdentity = {
+      key: `ifc:${this.modelId.toLowerCase()}:object:${object.expressId}`,
+      modelId: this.modelId,
+      sourcePath: this.sourcePath,
+      expressId: object.expressId,
+      globalId: object.globalId,
+      ifcType: object.ifcType,
+      name: object.name,
+      provider: 'ifc-object-fine',
+    };
+    const result = await this.fineRuntime.load(identity);
+    // Selection may have moved while the isolated IFC worker was evaluating.
+    // Do not let a late result resurrect L2 after the user returned to the
+    // browser representation.
+    if (!wanted()) return undefined;
+    const old = this.groups.get(object.expressId);
+    if (old) this.disposeGroup(old);
+    const group = objectFineGroup(
+      result,
+      identity,
+      this.transform.clone().multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2)),
+    );
+    group.userData.lod = 2;
+    group.userData.approximate = false;
+    group.visible = !this.onlySelected || object.expressId === this.selectedExpressId;
+    this.root.add(group);
+    this.groups.set(object.expressId, group);
+    const candidates = (await this.farIds()).get(object.globalId) ?? [];
+    if (!wanted()) {
+      if (candidates.length === 1) await this.options.model.setVisible(candidates, true).catch(() => undefined);
+      this.disposeGroup(group);
+      this.groups.delete(object.expressId);
+      return undefined;
+    }
+    if (candidates.length === 1) {
+      await this.options.model.setVisible(candidates, false);
+      if (!wanted()) {
+        await this.options.model.setVisible(candidates, true).catch(() => undefined);
+        this.disposeGroup(group);
+        this.groups.delete(object.expressId);
+        return undefined;
+      }
+      this.localIds.set(object.expressId, candidates[0]);
+    }
+    this.diagnostics.rendered = this.groups.size;
+    this.instances.rebuild(this.transform);
+    perfMarkProductMoment('selectedFineReady', {
+      kind: 'ifc', modelId: this.modelId, expressId: object.expressId, globalId: object.globalId, lod: 2,
+    });
+    return group;
+  }
+  /** Return one explicit object to the automatic L1/far representation. */
+  releaseFine(expressId: number): void {
+    this.fineGeneration.set(expressId, (this.fineGeneration.get(expressId) ?? 0) + 1);
+    this.finePending.delete(expressId);
+    this.fineRequested.delete(expressId);
+    this.fineQueueCancels.get(expressId)?.();
+    this.fineQueueCancels.delete(expressId);
+    const group = this.groups.get(expressId);
+    if (group?.userData.lod === 2) {
+      this.disposeGroup(group);
+      this.groups.delete(expressId);
+    }
+    const local = this.localIds.get(expressId);
+    if (local !== undefined) {
+      this.localIds.delete(expressId);
+      void this.options.model.setVisible([local], true).catch(() => undefined);
+    }
+    this.fineRuntime?.forget(expressId);
+    if (!this.fineRequested.size) this.fineRuntime?.cancel();
+    // A cancelled selection must not leave a late exact result able to replace
+    // the restored browser representation. The worker request itself remains
+    // session-scoped and is rejected by release/selection guards when needed.
+    this.schedule();
+  }
+  /** Release all precise objects when the application selection moves away.
+   * The browser keeps the cheap regional representation and never treats an
+   * old selection as a permanent L2 residency request. */
+  clearFineSelection(): void {
+    if (!this.fineRequested.size && ![...this.groups.values()].some(group => group.userData.lod === 2)) return;
+    for (const expressId of [...this.fineRequested]) this.releaseFine(expressId);
+    for (const [expressId, group] of [...this.groups]) {
+      if (group.userData.lod !== 2) continue;
+      this.releaseFine(expressId);
+    }
   }
   async properties(expressId: number) {
     const key = `${this.options.cacheKey}|properties|${expressId}`;
@@ -456,6 +659,13 @@ export class IfcRegionalRuntime {
     window.removeEventListener('gim-ifc-detail-mode', this.schedule);
     this.options.ctx.fragments.list.onBeforeDelete.remove(this.disposed);
     this.closeSource();
+    this.fineRuntime?.release();
+    this.fineRuntime = null;
+    this.fineRequested.clear();
+    this.finePending.clear();
+    this.fineGeneration.clear();
+    for (const cancel of this.fineQueueCancels.values()) cancel();
+    this.fineQueueCancels.clear();
     for (const p of this.pending.values())
       p.reject(Error('Regional model released'));
     this.pending.clear();

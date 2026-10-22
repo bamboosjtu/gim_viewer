@@ -1,6 +1,6 @@
 {
   "name": "gim-reader",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "GIM 浏览器",
   "type": "module",
   "scripts": {
@@ -21,6 +21,9 @@
     "test:substation:strict": "node scripts/test-substation-strict.mjs",
     "test:all": "vitest run --config vitest.sample.config.ts && vitest run && npm run test:sqlite",
     "test:watch": "vitest",
+    "acceptance:build": "node scripts/benchmarks/acceptance-build.mjs",
+    "acceptance:stage": "node scripts/benchmarks/acceptance-stage.mjs",
+    "test:acceptance-tools": "node --test scripts/benchmarks/acceptance-build.test.mjs scripts/benchmarks/acceptance-probe.test.mjs",
     "test:coverage": "vitest run --coverage",
     "test:ifc-critical": "vitest run src/viewer/__tests__/ifcConversion.test.ts src/viewer/__tests__/ifcSessionRace.test.ts src/viewer/__tests__/ifcFragmentsCache.test.ts src/viewer/__tests__/ifcNameIndex.test.ts src/viewer/__tests__/ifcOpeningPolicy.test.ts src/viewer/__tests__/ifcRegionalData.test.ts src/viewer/__tests__/ifcBimLoader.test.ts src/viewer/__tests__/webIfcCompatibility.test.ts src/ui/__tests__/ifcDetailModeControl.test.ts bridge/__tests__/gimExtract.test.ts src/viewer/__tests__/ifcSharedImport.test.ts src/viewer/__tests__/ifcRegionalInstances.test.ts"
   },

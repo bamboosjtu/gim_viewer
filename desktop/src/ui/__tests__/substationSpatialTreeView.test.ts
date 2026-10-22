@@ -3,6 +3,7 @@ import { AppState } from '../../app/state.js';
 import type { CbmNode, IfcEntry } from '../../gim/types.js';
 import { buildSubstationSpatialIndexFromTexts } from '../../gim/ifcSpatialParser.js';
 import {
+  loadSpatialSearchTargetPage,
   renderSubstationSpatialTree,
   resolveSpatialSearchCbmPath,
   revealSpatialSearchTarget,
@@ -108,6 +109,31 @@ describe('substation spatial tree', () => {
     more!.click();
     expect(host.querySelectorAll('[data-node-path^="ifc:model:object:"]').length).toBe(205);
     expect(host.querySelector('.spatial-load-more-row')).toBeNull();
+  });
+
+  it('超过 500 个同类对象时使用有限 DOM 窗口，并能按搜索键 materialize 目标行', () => {
+    const walls = Array.from({ length: 601 }, (_, i) =>
+      `#${100 + i}=IFCWALL('virtual-wall-${i}',#99,'墙体 ${i}',$,$,$,$,$,$);`,
+    ).join('\n');
+    const index = buildSubstationSpatialIndexFromTexts([{
+      entry,
+      text: `${ifcText.split("#10=IFCWALL")[0]}${walls}`,
+    }], cbm());
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const state = new AppState();
+    state.currentCbmTree = cbm();
+    renderSubstationSpatialTree(state, index, host, () => undefined);
+    host.querySelector<HTMLElement>('[data-node-path="spatial:quality:status"]')!.click();
+    const group = host.querySelector<HTMLElement>('[data-node-path="spatial:quality:ifc-uncontained"]');
+    expect(group).not.toBeNull();
+    group!.click();
+    expect(host.querySelector('.spatial-virtual-list')).not.toBeNull();
+    expect(host.querySelectorAll('[data-node-path^="ifc:model:object:"]').length).toBeLessThan(601);
+    const target = index.objects.find((object) => object.globalId === 'virtual-wall-600')!;
+    expect(hasRow(host, target.key)).toBe(false);
+    loadSpatialSearchTargetPage('spatial:quality:ifc-uncontained', target.key);
+    expect(hasRow(host, target.key)).toBe(true);
   });
 
   it('坐标推断对象按网格分组，搜索时仍能展开到目标行', () => {

@@ -11,19 +11,89 @@ import { parseDevGlbAsset, type DevGlbSerializationResult } from './glbCacheServ
 import { createDevGeometryPreprocessor, type DevGeometryPreprocessor } from './devGeometryWorkerClient.js';
 import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
 import { DEV_GEOMETRY_VERSION, DEV_SPATIAL_CATALOG_VERSION, boxTuple, tupleBox, type DevSourceBounds, type DevSpatialOccurrence } from './devSpatialCatalog.js';
-import { readDevArtifactResult, readDevArtifactBatch, writeDevArtifactDetailed, deleteDevArtifact, type DevArtifactRead, type DevArtifactReadStatus } from '@desktop/devLodCache.js';
+import { readDevArtifactResult, readDevArtifactBatch, writeDevArtifactDetailed, prepareDevArtifact, deleteDevArtifact, type DevArtifactRead, type DevArtifactReadStatus } from '@desktop/devLodCache.js';
 import { readCachedEntry } from '@desktop/database.js';
 import { batchReadCachedFiles } from '@desktop/database.js';
-import { perfCurrentSession, perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
+import { perfCurrentSession, perfMark, perfMarkProductMoment, perfMeasureTaskPhase, perfRecordTaskPhase, type PerfTaskIdentity } from '../utils/perfTimings.js';
 import { diagnosticForFailure, diagnosticFromSerialization, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 import { resetModHighlight, highlightModGroups } from '../viewer/highlight.js';
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import { WorkQueue } from '../utils/workQueue.js';
+import { startSubstationResourceMonitor } from './substationResourceTelemetry.js';
+import { BoxViewIndex } from '../viewer/boxViewIndex.js';
+import { DevInstanceBatches } from '../viewer/devInstanceBatches.js';
+import { isDevInstanceBatchesEnabled } from '../config/features.js';
 
 interface CachedTemplate { result: DevGlbSerializationResult; sha: string; sourceInvalid?: { message: string; evidence: string } }
-interface TemplateRow { bounds: THREE.Box3; template: DevGlbTemplate; sha: string; status: DevGlbSerializationResult['status']; diagnostics: DevGlbSerializationResult['diagnostics'] }
+interface TemplateRow { bounds: THREE.Box3; template: DevGlbTemplate; sha: string; status: DevGlbSerializationResult['status']; diagnostics: DevGlbSerializationResult['diagnostics']; task?: PerfTaskIdentity }
 interface CacheDecision { key: string; devPath: string; lod: DeviceLod; status: DevArtifactReadStatus | 'compiled' | 'write-failed'; reason?: string }
-interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; desired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
+interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; desired: DeviceLod | null; browseDesired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
+interface ReadinessContribution {
+  visible: boolean;
+  finished: boolean;
+  shown: boolean;
+  empty: boolean;
+  unsupported: boolean;
+  partial: boolean;
+  failed: boolean;
+  viewPending: boolean;
+  viewSettled: boolean;
+  viewReady: boolean;
+  baseSettled: boolean;
+  baseReady: boolean;
+  allReady: boolean;
+}
+type ReadinessCounterKey = keyof ReadinessContribution;
+type ReadinessCounters = Record<ReadinessCounterKey, number> & { total: number };
+
+const READINESS_AUDIT_STORAGE_KEY = 'GIM_READINESS_AUDIT';
+
+function readinessAuditEnabled(): boolean {
+  try { return window.localStorage.getItem(READINESS_AUDIT_STORAGE_KEY) === '1'; } catch { return false; }
+}
+
+function emptyReadinessCounters(): ReadinessCounters {
+  return {
+    total: 0, visible: 0, finished: 0, shown: 0, empty: 0, unsupported: 0,
+    partial: 0, failed: 0, viewPending: 0, viewSettled: 0, viewReady: 0,
+    baseSettled: 0, baseReady: 0, allReady: 0,
+  };
+}
+
+function addReadinessContribution(counters: ReadinessCounters, contribution: ReadinessContribution, sign: 1 | -1): void {
+  for (const key of Object.keys(contribution) as ReadinessCounterKey[]) {
+    if (contribution[key]) counters[key] += sign;
+  }
+}
+
+function contributionForRow(row: Occurrence, keyFor: (dev: string, lod: DeviceLod) => string): ReadinessContribution {
+  const terminal = row.entry.templateStatus === 'empty' || row.entry.templateStatus === 'unsupported';
+  const keyLod = row.desired ?? 0;
+  const key = keyFor(row.entry.devPath, keyLod);
+  const browseKey = keyFor(row.entry.devPath, row.browseDesired ?? Math.min(1, keyLod) as DeviceLod);
+  const complete = !!row.group || terminal;
+  const requested = terminal || (row.group != null && row.displayed >= (row.browseDesired ?? row.desired ?? 0)) || row.key === browseKey;
+  const failure = row.failedKey === key;
+  return {
+    visible: row.inView,
+    finished: complete || failure,
+    shown: !!row.group,
+    empty: row.entry.templateStatus === 'empty',
+    unsupported: row.entry.templateStatus === 'unsupported',
+    partial: row.geometryStatus === 'partial',
+    failed: row.entry.templateStatus === 'failed',
+    viewPending: row.inView && !requested && !failure,
+    viewSettled: !row.inView || requested || failure,
+    viewReady: !row.inView || (requested && !failure),
+    baseSettled: complete || failure,
+    baseReady: complete,
+    allReady: terminal || (row.geometryStatus === 'complete' && row.displayed === 2),
+  };
+}
+type MemoryPressure = 'unknown' | 'normal' | 'high' | 'critical';
+const pressureRank = (pressure: MemoryPressure): number => ({ unknown: -1, normal: 0, high: 1, critical: 2 }[pressure]);
+const maxMemoryPressure = (left: MemoryPressure, right: MemoryPressure): MemoryPressure =>
+  pressureRank(left) >= pressureRank(right) ? left : right;
 const normalize = (path: string) => /^dev\//i.test(path.replace(/\\/g, '/')) ? path.replace(/\\/g, '/') : `DEV/${path}`;
 const hash = async (bytes: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))].map(v => v.toString(16).padStart(2, '0')).join('');
 const belongsTo = (object: THREE.Object3D, root?: THREE.Object3D) => {
@@ -33,6 +103,9 @@ const belongsTo = (object: THREE.Object3D, root?: THREE.Object3D) => {
 
 /** Session owner for catalog, templates and camera-driven occurrence representations. */
 export class DevLodRuntime {
+  private readonly batchEnabled = isDevInstanceBatchesEnabled();
+  private instances?: DevInstanceBatches;
+  private readonly viewIndex = new BoxViewIndex();
   readonly diagnostics = { catalogReady: false, currentViewReady: false, currentViewSettled: false, baseRepresentationsSettled: false, baseRepresentationsReady: false, allStationReady: false, catalogHits: 0,
     templateHits: 0, compiled: [0, 0, 0], /** Per-LOD cache/compile facts; index is LOD. */ lodHits: [0, 0, 0], lodCompiled: [0, 0, 0],
     lodReadErrors: [0, 0, 0], lodInvalid: [0, 0, 0], lodWriteFailed: [0, 0, 0], lodPersisted: [0, 0, 0],
@@ -40,15 +113,35 @@ export class DevLodRuntime {
     absoluteConeCount: 0, templateResidentBytes: 0, directoryCompleted: 0, readyOccurrences: 0, failedOccurrences: 0,
     emptyOccurrences: 0, unsupportedOccurrences: 0, partialOccurrences: 0, templateParses: 0, templateEvictions: 0, workerCount: 0, activeDevices: [] as string[],
     inputBudgetBytes: 0, inputBudgetPeakBytes: 0,
+    cacheWriteReservedBytes: 0, cacheWritePeakBytes: 0, cacheWriteWaitingBytes: 0,
+    cacheWritePendingCount: 0, cacheWritesSettled: true, cacheWritesReady: true, cacheWriteCancelled: 0,
     cacheReadBatches:0,cacheReadEntries:0,cacheReadDeferred:0,viewPendingOccurrences:0,
     cacheHits:0,cacheMisses:0,cacheReadErrorCount:0,cacheInvalidCount:0,
     lodMisses:[0,0,0],
     artifactWriteAttempts:0,artifactWriteFailures:0,catalogWriteFailures:0,
     workerReads:0,workerRpcReads:0,workerSourceHits:0,workerDocumentHits:0,workerReadRpcMs:0,workerParseMs:0,workerQueueWaitMs:0,
+    workerSourceAffinityHits:0, workerSourceAffinityDeferrals:0,
     cacheDecisions: [] as CacheDecision[], readinessBlockers:[] as string[],viewPendingSamples:[] as string[],
     resultQueuedBytes: 0, resultPeakBytes: 0, resultQueueCount: 0,
+    workerScheduling: null as ReturnType<DevGeometryPreprocessor['schedulingSnapshot']> | null,
+    workerStages: {} as Record<string, { count: number; totalMs: number; maxMs: number }>,
+    workerTimedOutTasks: 0, workerStallSnapshots: 0,
+    memoryPressure: 'unknown' as MemoryPressure,
+    externalMemoryPressure: 'unknown' as MemoryPressure,
+    jsHeapUsedBytes: null as number | null, jsHeapLimitBytes: null as number | null,
+    autoLodSuppressed: false, memoryTrimCount: 0,
+    viewIndex: null as BoxViewIndex['diagnostics'] | null,
+    backgroundPaused: false,
+    instancing: null as null | ({enabled: boolean} & DevInstanceBatches['statistics']),
+    browseState: 'loading' as 'loading' | 'browseable' | 'base-settled' | 'partial',
+    fineFailures: [] as string[],
     anchorReady: false, errors: [] as string[], fingerprints: [] as Record<string, unknown>[] };
   private readonly perf = perfCurrentSession();
+  private taskSequence = 0;
+  private taskIdentity(sourcePath: string, kind: string, lod?: DeviceLod, priority?: number): PerfTaskIdentity {
+    return {taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kind, sourcePath,
+      generation: this.session.generation, lod, priority, cacheSource: 'unknown'};
+  }
   private released = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private cameraTimer: ReturnType<typeof setTimeout> | null = null;
@@ -93,20 +186,38 @@ export class DevLodRuntime {
   private displayedPins = new Map<string, number>();
   private pinKeys = new RevisionSet<string>();
   private selected = '';
+  /** Explicit L2 requests owned by the active selection. */
+  private fineRequested = new Set<string>();
+  private memoryPressure: MemoryPressure = 'unknown';
+  private jsMemoryPressure: MemoryPressure = 'unknown';
+  private externalMemoryPressure: MemoryPressure = 'unknown';
+  private readonly pauseEvent = () => this.setBackgroundPaused(!this.diagnostics.backgroundPaused);
+  private onlySelected = false;
   private pending = new Map<string, Promise<TemplateRow | null>>();
   private nullResults = new Map<string, 'empty' | 'unsupported'>();
   private priorities = new Map<string, number>();
   private templateSlots = 0;
   private inputBudget = new ByteWorkBudget(128 * 1024 * 1024);
   private cacheReader:DevTemplateCacheReader<CachedTemplate>;
-  /** Cache writes are bounded but never block scene commit. */
+  /** Admitted writes own at most one maximum asset plus metadata (129 MiB).
+   * Waiting template buffers retain their input lease until writer admission. */
+  private writeBudget = new ByteWorkBudget(129 * 1024 * 1024);
+  private writeWaitingBytes = 0;
   private writeSlots = 0;
-  private writeWaiters: Array<() => void> = [];
+  private writeWaiters: Array<{resolve: () => void; reject: (error: Error) => void}> = [];
   private pendingWrites = new Map<string, Promise<void>>();
+  private writeAdmissions = new Map<string, Promise<void>>();
   private placementUsers = new Map<string, number>();
   private templateWaiters = new Map<string, { queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
   private templateQueue = new WorkQueue<{ queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
   private rows = new Map<string, Occurrence>();
+  /** Readiness is maintained on row state transitions rather than scanning the
+   * full occurrence map on every status refresh.  A bounded opt-in audit can
+   * still recompute the counters to catch future transition omissions. */
+  private readonly readinessRows = new Map<string, ReadinessContribution>();
+  private readonly readinessCounters = emptyReadinessCounters();
+  private readinessRowsSource: Map<string, Occurrence> = this.rows;
+  private readinessAuditCount = 0;
   private sourceFailures = new Map<string, InvalidDevGeometryError>();
   private catalogHints = new Map<string, Promise<DevArtifactRead<DevSourceBounds>>>();
   private templates = new ByteLru<TemplateRow>(128 * 1024 * 1024, row => { row.template.dispose(); if (!this.released) this.diagnostics.templateEvictions++; });
@@ -123,8 +234,125 @@ export class DevLodRuntime {
     this.cacheReader=new DevTemplateCacheReader(this.inputBudget,session);
     this.catalogDone = new Promise(resolve => { this.finishCatalog = resolve; });
     this.anchorDone = new Promise(resolve => { this.finishAnchor = resolve; });
+    window.addEventListener('gim-toggle-background-detail', this.pauseEvent);
   }
   private current = () => !this.released && this.state.isCurrentSession(this.session);
+  private updateReadiness(row: Occurrence): void {
+    const key = row.entry.rootOccurrence ?? row.entry.instanceKey;
+    const previous = this.readinessRows.get(key);
+    if (previous) addReadinessContribution(this.readinessCounters, previous, -1);
+    else this.readinessCounters.total++;
+    const next = contributionForRow(row, (dev, lod) => this.key(dev, lod));
+    addReadinessContribution(this.readinessCounters, next, 1);
+    this.readinessRows.set(key, next);
+  }
+  private removeReadiness(rootOccurrence: string): void {
+    const previous = this.readinessRows.get(rootOccurrence);
+    if (!previous) return;
+    addReadinessContribution(this.readinessCounters, previous, -1);
+    this.readinessCounters.total = Math.max(0, this.readinessCounters.total - 1);
+    this.readinessRows.delete(rootOccurrence);
+  }
+  private recomputeReadinessForAudit(): ReadinessCounters {
+    const counters = emptyReadinessCounters();
+    for (const row of this.rows.values()) {
+      counters.total++;
+      addReadinessContribution(counters, contributionForRow(row, (dev, lod) => this.key(dev, lod)), 1);
+    }
+    return counters;
+  }
+  private readinessCountersMatch(expected: ReadinessCounters): boolean {
+    const keys = Object.keys(expected) as (keyof ReadinessCounters)[];
+    return keys.every((key) => this.readinessCounters[key] === expected[key]);
+  }
+  /**
+   * Keep the transition-maintained counters usable when a diagnostic/test
+   * consumer replaces the occurrence map wholesale. Production transitions
+   * update the counters directly; this repair path is only taken when the
+   * map identity no longer matches the tracked rows (and in Vitest, where
+   * tests intentionally mutate private rows to model late results).
+   */
+  private syncReadinessCounters(): void {
+    const counters = emptyReadinessCounters();
+    const rows = new Map<string, ReadinessContribution>();
+    for (const row of this.rows.values()) {
+      const key = row.entry.rootOccurrence ?? row.entry.instanceKey;
+      const contribution = contributionForRow(row, (dev, lod) => this.key(dev, lod));
+      counters.total++;
+      addReadinessContribution(counters, contribution, 1);
+      rows.set(key, contribution);
+    }
+    Object.assign(this.readinessCounters, counters);
+    this.readinessRows.clear();
+    for (const [key, contribution] of rows) this.readinessRows.set(key, contribution);
+    this.readinessRowsSource = this.rows;
+  }
+  private readinessRowsMatch(): boolean {
+    // Do not scan the full catalog here. The source-map identity catches
+    // wholesale replacement by a diagnostic/test consumer; normal production
+    // mutations are accounted for by updateReadiness on each transition.
+    return this.readinessRowsSource === this.rows
+      && this.readinessRows.size === this.rows.size
+      && this.readinessCounters.total === this.rows.size;
+  }
+  private auditReadinessCounters(): void {
+    if (!readinessAuditEnabled()) return;
+    this.readinessAuditCount++;
+    if (this.readinessAuditCount % 20 !== 0) return;
+    const expected = this.recomputeReadinessForAudit();
+    if (this.readinessCountersMatch(expected)) return;
+    this.diagnostics.errors.push(`readiness counter mismatch: incremental=${JSON.stringify(this.readinessCounters)} full=${JSON.stringify(expected)}`);
+    if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
+  }
+  /** Apply the strongest available browser/process-tree pressure signal. */
+  private applyMemoryPressure(): void {
+    this.memoryPressure = maxMemoryPressure(this.jsMemoryPressure, this.externalMemoryPressure);
+    this.diagnostics.memoryPressure = this.memoryPressure;
+    this.diagnostics.externalMemoryPressure = this.externalMemoryPressure;
+    this.diagnostics.autoLodSuppressed = this.memoryPressure === 'high' || this.memoryPressure === 'critical';
+    this.worker?.setMemoryPressure?.(this.memoryPressure);
+    if (this.memoryPressure === 'high' || this.memoryPressure === 'critical') {
+      const budget = this.templates.budget;
+      if (this.memoryPressure === 'critical') this.templates.budget = 0;
+      this.templates.trim(this.pinned());
+      this.templates.budget = budget;
+      this.diagnostics.memoryTrimCount++;
+    }
+    this.requestReady();
+  }
+  /**
+   * Feed the native process-tree sample back into the browser scheduler.
+   * `unknown` deliberately removes only the external signal; a still-known
+   * JS heap pressure remains in force.  The native value is advisory because
+   * WebView2/GPU allocations are not fully visible to this runtime.
+   */
+  setExternalMemoryPressure(pressure: MemoryPressure): void {
+    if (this.released) return;
+    const changed = this.externalMemoryPressure !== pressure;
+    this.externalMemoryPressure = pressure;
+    this.applyMemoryPressure();
+    if (changed) this.schedule();
+  }
+  /** Browser-visible heap pressure is a feedback signal, never a claim about
+   * the full Tauri process tree or GPU residency. */
+  private refreshMemoryPressure(): void {
+    const memory = (typeof performance !== 'undefined'
+      ? (performance as Performance & { memory?: { usedJSHeapSize?: number; jsHeapSizeLimit?: number } }).memory
+      : undefined);
+    const used = Number(memory?.usedJSHeapSize), limit = Number(memory?.jsHeapSizeLimit);
+    if (!(used > 0) || !(limit > 0)) {
+      this.jsMemoryPressure = 'unknown';
+      this.diagnostics.jsHeapUsedBytes = null;
+      this.diagnostics.jsHeapLimitBytes = null;
+      this.applyMemoryPressure();
+      return;
+    }
+    const ratio = used / limit;
+    this.jsMemoryPressure = ratio >= 0.9 ? 'critical' : ratio >= 0.8 ? 'high' : 'normal';
+    this.diagnostics.jsHeapUsedBytes = used;
+    this.diagnostics.jsHeapLimitBytes = limit;
+    this.applyMemoryPressure();
+  }
   private key(dev: string, lod: DeviceLod) { return `${DEV_GEOMETRY_VERSION}|${this.sourceIdentity}|${dev.toLowerCase()}|lod${lod}`; }
   private catalogKey(dev: string) { return `${DEV_SPATIAL_CATALOG_VERSION}|${DEV_GEOMETRY_VERSION}|${this.sourceIdentity}|${dev.toLowerCase()}`; }
   /** A catalog read started before the directory loop reaches this DEV also
@@ -143,6 +371,7 @@ export class DevLodRuntime {
       this.wanted.delete(this.key(dev, 0));
       this.wanted.delete(this.key(dev, 1));
       this.wanted.delete(this.key(dev, 2));
+      this.updateReadiness(row);
     }
     this.worker?.cancelQueued(this.wanted);
   }
@@ -151,21 +380,58 @@ export class DevLodRuntime {
     if (this.diagnostics.cacheDecisions.length > 1024) this.diagnostics.cacheDecisions.shift();
   }
   private async withWriteSlot<T>(work: () => Promise<T>): Promise<T> {
-    while (this.writeSlots >= 4) await new Promise<void>((resolve) => this.writeWaiters.push(resolve));
+    while (this.writeSlots >= 4) {
+      if (!this.current()) throw new DOMException('DEV cache write cancelled', 'AbortError');
+      await new Promise<void>((resolve, reject) => this.writeWaiters.push({resolve, reject}));
+    }
+    if (!this.current()) throw new DOMException('DEV cache write cancelled', 'AbortError');
     this.writeSlots++;
     try { return await work(); }
-    finally { this.writeSlots--; this.writeWaiters.shift()?.(); }
+    finally { this.writeSlots--; this.writeWaiters.shift()?.resolve(); }
+  }
+  private updateWriteDiagnostics(): void {
+    Object.assign(this.diagnostics, {cacheWriteReservedBytes: this.writeBudget.bytes, cacheWritePeakBytes: this.writeBudget.peakBytes,
+      cacheWriteWaitingBytes: this.writeWaitingBytes, cacheWritePendingCount: this.pendingWrites.size,
+      cacheWritesSettled: this.pendingWrites.size === 0,
+      cacheWritesReady: this.pendingWrites.size === 0 && this.diagnostics.artifactWriteFailures === 0 && this.diagnostics.cacheWriteCancelled === 0});
   }
   /** Persist a derived artifact without blocking geometry availability.
    * Source SHA, project identity and atomic native replacement still apply. */
-  private persistArtifact(store: 'templates' | 'catalog', key: string, value: unknown, lod?: DeviceLod, devPath?: string): void {
-    if (!this.current() || !this.session.sourceSha256) return;
+  private persistArtifact(store: 'templates' | 'catalog', key: string, value: unknown, lod?: DeviceLod, devPath?: string,
+    trace?: PerfTaskIdentity, inputHandoff?: () => void): Promise<void> {
+    let releasedInput = false;
+    const releaseInput = (): void => { if (!releasedInput) { releasedInput = true; inputHandoff?.(); } };
+    if (!this.current() || !this.session.sourceSha256) { releaseInput(); return Promise.resolve(); }
     const queueKey = `${store}:${key}`;
-    if (this.pendingWrites.has(queueKey)) return;
-    const task = this.withWriteSlot(async () => {
+    if (this.pendingWrites.has(queueKey)) { releaseInput(); return this.writeAdmissions.get(queueKey) ?? Promise.resolve(); }
+    const identity = trace ?? this.taskIdentity(devPath ?? key, `${store}-write`, lod);
+    const queuedAt = performance.now();
+    let prepared: ReturnType<typeof prepareDevArtifact>;
+    try { prepared = prepareDevArtifact(key, value); }
+    catch (error) {
+      perfRecordTaskPhase(identity, 'cachePrepare', performance.now() - queuedAt, this.perf, 'failed');
+      releaseInput(); this.diagnostics.artifactWriteFailures++;
+      this.diagnostics.errors.push(`缓存准备失败 ${store}:${key}: ${String(error)}`);
+      if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
+      this.updateWriteDiagnostics(); return Promise.resolve();
+    }
+    perfRecordTaskPhase(identity, 'cachePrepare', performance.now() - queuedAt, this.perf, 'completed', prepared.retainedBytes);
+    this.writeWaitingBytes += prepared.retainedBytes;
+    const admission = this.writeBudget.acquire(prepared.retainedBytes).finally(() => {
+      this.writeWaitingBytes -= prepared.retainedBytes; releaseInput(); this.updateWriteDiagnostics();
+    });
+    const admitted = admission.then(() => undefined, () => undefined);
+    let enteredWrite = false;
+    const task = admission.then(async releaseWrite => { try { await this.withWriteSlot(async () => {
       if (!this.current()) return;
+      enteredWrite = true;
+      perfRecordTaskPhase(identity, 'cacheWriteQueue', performance.now() - queuedAt, this.perf);
       this.diagnostics.artifactWriteAttempts++;
-      const detail = await writeDevArtifactDetailed(store, key, value, this.session);
+      const writeAt = performance.now();
+      let detail: Awaited<ReturnType<typeof writeDevArtifactDetailed>>;
+      try { detail = await writeDevArtifactDetailed(store, key, value, this.session, prepared); }
+      catch (error) { perfRecordTaskPhase(identity, 'cacheWrite', performance.now() - writeAt, this.perf, 'failed'); throw error; }
+      perfRecordTaskPhase(identity, 'cacheWrite', performance.now() - writeAt, this.perf, detail.ok ? 'completed' : 'failed');
       if (!detail.ok) {
         if (store === 'catalog') this.diagnostics.catalogWriteFailures++;
         else if (lod != null) {
@@ -178,12 +444,19 @@ export class DevLodRuntime {
       } else if (store === 'templates' && lod != null) {
         this.diagnostics.lodPersisted[lod]++;
       }
-    }).catch((error) => {
+    }); } finally { releaseWrite(); } }).catch((error) => {
+      if (!enteredWrite) perfRecordTaskPhase(identity, 'cacheWriteQueue', performance.now() - queuedAt, this.perf,
+        (error as Error)?.name === 'AbortError' ? 'cancelled' : 'failed');
+      if ((error as Error)?.name === 'AbortError') { this.diagnostics.cacheWriteCancelled++; return; }
       this.diagnostics.artifactWriteFailures++;
       this.diagnostics.errors.push(`缓存写入异常 ${store}:${key}: ${String(error)}`);
       if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
-    }).finally(() => { this.pendingWrites.delete(queueKey); });
+    }).finally(() => {
+      this.pendingWrites.delete(queueKey); this.writeAdmissions.delete(queueKey); this.updateWriteDiagnostics(); this.requestReady();
+    });
     this.pendingWrites.set(queueKey, task);
+    this.writeAdmissions.set(queueKey, admitted); this.updateWriteDiagnostics();
+    return admitted;
   }
   /**
    * 变电源 pack 下几何源默认是 lazy 的；Worker 按 DEV 逐条请求源字节，而
@@ -193,13 +466,14 @@ export class DevLodRuntime {
    */
   private async preloadSources(files: Map<string, File>): Promise<Map<string, File>> {
     const projectId = this.session.projectId;
-    if (projectId == null || !this.current()) return files;
+    const pressured = (): boolean => this.memoryPressure === 'high' || this.memoryPressure === 'critical';
+    if (projectId == null || !this.current() || pressured()) return files;
     // 剩余 IFC 仍在后台加载时最多等 8 秒再预取，避免大批次 IPC 长时间挤占
     // 剩余 IFC 的读取/转换；超时后让预取与 IFC 并行，靠批次让出主线程。
     if (this.state.ifcBackgroundPending) {
       const started = performance.now();
       const deadline = started + 8000;
-      while (this.state.ifcBackgroundPending && this.current() && performance.now() < deadline) {
+      while (this.state.ifcBackgroundPending && this.current() && !pressured() && performance.now() < deadline) {
         await Promise.race([
           this.state.waitForIfcBackgroundLoading(),
           new Promise((resolve) => setTimeout(resolve, 500)),
@@ -207,7 +481,7 @@ export class DevLodRuntime {
       }
       perfMark('DEV 几何源预取等待 IFC', { waitedMs: Math.round(performance.now() - started) },
         this.perf);
-      if (!this.current()) return files;
+      if (!this.current() || pressured()) return files;
     }
     const MAX_FILE_BYTES = 8 * 1024 * 1024;
     const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
@@ -223,7 +497,7 @@ export class DevLodRuntime {
     const output = new Map(files);
     let loaded = 0;
     for (let i = 0; i < candidates.length && loaded < MAX_TOTAL_BYTES; i += BATCH_FILES) {
-      if (!this.current()) break;
+      if (!this.current() || pressured()) break;
       const chunk = candidates.slice(i, i + BATCH_FILES);
       let result: Map<string, Uint8Array | null> | null = null;
       try {
@@ -231,7 +505,7 @@ export class DevLodRuntime {
       } catch {
         result = null;
       }
-      if (!this.current()) break;
+      if (!this.current() || pressured()) break;
       if (!result) continue;
       for (const path of chunk) {
         const bytes = result.get(path);
@@ -273,6 +547,7 @@ export class DevLodRuntime {
       this.session,
       preload ? await this.preloadSources(files) : files,
     );
+    this.worker.setMemoryPressure?.(this.memoryPressure);
     this.diagnostics.workerCount = this.worker.workerCount;
     this.worker.onActivity = () => this.requestReady();
     (this.ctx.world.camera as any).controls?.addEventListener('update', this.cameraSchedule);
@@ -280,9 +555,11 @@ export class DevLodRuntime {
     const byDev = new Map<string, typeof seeds>();
     for (const seed of seeds) {
       const dev = normalize(seed.devPath), list = byDev.get(dev) ?? []; list.push(seed); byDev.set(dev, list);
-      this.rows.set(seed.path, { entry: { devPath: dev, sourceBounds: null, boundsQuality: 'unknown', primitiveCounts: {}, unsupportedTypes: [],
+      const row: Occurrence = { entry: { devPath: dev, sourceBounds: null, boundsQuality: 'unknown', primitiveCounts: {}, unsupportedTypes: [],
         instanceKey: `dev:${dev}#${seed.path}`, rootOccurrence: seed.path, placementMatrix: parseCbmTransformMatrix(seed.transformMatrix), templateStatus: 'unrequested' },
-        inView: true, box: null, desired: 0, displayed: 0 });
+        inView: true, box: null, desired: 0, browseDesired: 0, displayed: 0 };
+      this.rows.set(seed.path, row);
+      this.updateReadiness(row);
     }
     this.diagnostics.occurrences = seeds.length;
     this.diagnostics.uniqueDevSources = byDev.size;
@@ -294,6 +571,7 @@ export class DevLodRuntime {
       instances.some((seed) => /主变|变压器|HGIS|GIS|避雷器|出线|母线/.test(seed.name ?? '')) ? 0 : 1;
     catalogEntries.sort((a, b) =>
       importantDev(a[1]) - importantDev(b[1]) || b[1].length - a[1].length);
+    const catalogWriteAdmissions = new Map<string, Promise<void>>();
     const resolveCatalog = async (dev: string): Promise<DevSourceBounds> => {
       const catalogRead = await this.catalogHint(dev);
       if (!this.current()) throw new DOMException('DEV directory left the current view', 'AbortError');
@@ -321,7 +599,9 @@ export class DevLodRuntime {
           this.diagnostics.errors.push(`目录 ${dev}: ${String(error)}`);if(this.diagnostics.errors.length>32)this.diagnostics.errors.shift();
         }
         if (!this.current()) throw new DOMException('DEV directory left the current view', 'AbortError');
-        if (bounds && !bounds.diagnostic && this.session.sourceSha256) this.persistArtifact('catalog', this.catalogKey(dev), bounds);
+        if (bounds && !bounds.diagnostic && this.session.sourceSha256) {
+          catalogWriteAdmissions.set(dev, this.persistArtifact('catalog', this.catalogKey(dev), bounds, undefined, dev));
+        }
       }
       return bounds ?? {devPath:dev,sourceBounds:null,boundsQuality:'unknown',primitiveCounts:{},unsupportedTypes:[],diagnostic:'missing-catalog-bounds'};
     };
@@ -336,6 +616,8 @@ export class DevLodRuntime {
           (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(createLegacyEquivalentPlacementMatrix(matrix))) : null;
         const row = this.rows.get(seed.path)!;
         row.entry = { ...entry, templateStatus: emptySource ? 'empty' : row.entry.templateStatus }; row.box = box;
+        this.viewIndex.set(seed.path, box);
+        this.updateReadiness(row);
         if (emptySource) this.diagnostics.emptyOccurrences++;
         if (bounds.boundsQuality === 'unknown') {
           this.diagnostics.unknownBounds++; this.state.deviceUnknownBounds.add(seed.path);
@@ -385,6 +667,9 @@ export class DevLodRuntime {
         if (!this.current()) return;
         applyCatalog(dev, instances, bounds);
         this.schedule();
+        // Rows are available before backpressure. A fixed number of catalog
+        // producers retain their small metadata until writer admission.
+        await catalogWriteAdmissions.get(dev); catalogWriteAdmissions.delete(dev);
       }
     };
     await Promise.all(Array.from(
@@ -411,11 +696,30 @@ export class DevLodRuntime {
     for (const row of this.rows.values()) {
       const placement = matrix.clone().multiply(createLegacyEquivalentPlacementMatrix(row.entry.placementMatrix));
       row.box = row.entry.sourceBounds ? boxTuple(row.entry.sourceBounds).applyMatrix4(placement) : null;
+      this.viewIndex.set(row.entry.rootOccurrence, row.box);
       if (row.group) { row.group.matrix.copy(placement); row.group.updateMatrixWorld(true); }
     }
+    this.instances?.sync();
     this.schedule();
   }
   private pinned(): Set<string> { return this.pinKeys; }
+  private demoteFine(rootOccurrence: string): void {
+    const row = this.rows.get(rootOccurrence);
+    if (!row || row.desired !== 2) return;
+    row.desired = row.browseDesired ?? Math.min(1, row.displayed) as DeviceLod;
+    this.updateReadiness(row);
+    const key = this.key(row.entry.devPath, 2);
+    const shared = [...this.rows.values()].some(other => other !== row
+      && other.desired === 2 && this.key(other.entry.devPath, 2) === key);
+    if (!shared) { this.wanted.delete(key); this.worker?.cancelTask(key); }
+  }
+  private applyOnlySelected(): void {
+    const hasSelected = this.selected.length > 0;
+    for (const [key, row] of this.rows) {
+      if (row.group) row.group.visible = !this.onlySelected || !hasSelected || (row.entry.rootOccurrence ?? key) === this.selected;
+    }
+    this.instances?.sync();
+  }
   private acquireTemplateSlot(key: string): Promise<() => void> {
     return new Promise((resolve, reject) => { const waiter={queuedAt:performance.now(),resolve,reject}; this.templateWaiters.set(key,waiter); this.templateQueue.set(key,waiter,this.priorities.get(key) ?? 4,waiter.queuedAt); this.drainTemplates(); });
   }
@@ -429,17 +733,25 @@ export class DevLodRuntime {
   }
   private async template(dev: string, lod: DeviceLod, priority: number): Promise<TemplateRow | null> {
     if (this.sourceFailures.has(dev)) throw this.sourceFailures.get(dev)!;
-    const key = this.key(dev, lod), cached = this.templates.get(key); if (cached) return cached;
+    const key = this.key(dev, lod), cached = this.templates.get(key);
+    if (cached) {
+      const task = {...(cached.task ?? this.taskIdentity(dev, 'template', lod, priority)), cacheSource: 'memory' as const, priority};
+      perfRecordTaskPhase(task, 'memoryTemplate', 0, this.perf);
+      return {...cached, task};
+    }
     if (this.nullResults.has(key)) return null;
     this.priorities.set(key, Math.min(this.priorities.get(key) ?? priority, priority));
     const waiter=this.templateWaiters.get(key); if (waiter) this.templateQueue.set(key,waiter,this.priorities.get(key)!,waiter.queuedAt);
     const old = this.pending.get(key); if (old) { this.worker.promote(key, priority); return old; }
+    const identity = this.taskIdentity(dev, 'template', lod, priority), taskStarted = performance.now();
     const promise = (async () => {
-      const releaseSlot = await this.acquireTemplateSlot(key);
+      const releaseSlot = await perfMeasureTaskPhase(identity, 'templateQueue', () => this.acquireTemplateSlot(key), this.perf);
       let releaseInput: (()=>void) | undefined;
       try {
       // Concurrent requests share one bounded native batch reservation.
-      const lease=await this.cacheReader.read(key);releaseInput=lease.release;
+      const lease=await perfMeasureTaskPhase(identity, 'cacheRead', () => this.cacheReader.read(key), this.perf);releaseInput=lease.release;
+      identity.priority = this.priorities.get(key) ?? priority;
+      identity.cacheSource = lease.status === 'hit' ? 'disk' : 'compiled';
       if (!this.current()) return null;
       let artifact: CachedTemplate | undefined = lease.value;
       let parsed: Awaited<ReturnType<typeof parseDevGlbAsset>> = null;
@@ -486,8 +798,8 @@ export class DevLodRuntime {
       if (artifact?.result.bytes) {
         try {
           if (artifact.result.bytes.byteLength > this.inputBudget.limit) throw Error('DEV cached input exceeds quota');
-          if (await hash(artifact.result.bytes) !== artifact.sha) throw Error('DEV template SHA mismatch');
-          parsed = await parseDevGlbAsset(dev, artifact.result.bytes);
+          if (await perfMeasureTaskPhase(identity, 'cacheHash', () => hash(artifact!.result.bytes!), this.perf) !== artifact.sha) throw Error('DEV template SHA mismatch');
+          parsed = await perfMeasureTaskPhase(identity, 'deserialize', () => parseDevGlbAsset(dev, artifact!.result.bytes!), this.perf);
           if (!parsed || !validateDevGlbTemplate(parsed).shareable || invalidGeometryExtent(parsed.scene)) throw Error('Invalid DEV cached template');
           this.diagnostics.lodHits[lod]++;
           this.diagnostics.templateHits++;
@@ -514,7 +826,7 @@ export class DevLodRuntime {
         return null;
       } else if (artifact) artifact = undefined;
       if (!artifact) {
-        const hint = await this.catalogHint(dev);
+        const hint = await perfMeasureTaskPhase(identity, 'catalogCacheRead', () => this.catalogHint(dev), this.perf);
         if (hint.status === 'hit' && hint.value?.devPath === dev && hint.value.boundsQuality === 'empty' && !hint.value.diagnostic) {
           this.markEmptyDev(dev);
           this.diagnostics.emptyOccurrences++;
@@ -525,16 +837,17 @@ export class DevLodRuntime {
         if (!this.wanted.has(key)) throw new DOMException('DEV request left the view', 'AbortError');
         generated = true;
         releaseInput(); releaseInput=undefined;
-        const result = await this.worker.compile(dev, lod, key, this.priorities.get(key) ?? priority).catch(async error => {
+        identity.cacheSource = 'compiled';
+        const result = await this.worker.compile(dev, lod, key, this.priorities.get(key) ?? priority, identity.taskId).catch(async error => {
           if (error instanceof InvalidDevGeometryError && error.sourceEvidence && this.current()) {
             this.sourceFailures.set(dev, error);
-            if (this.session.sourceSha256) this.persistArtifact('templates', key,
-              { sourceInvalid: { message: error.reason, evidence: error.sourceEvidence } }, lod, dev);
+            if (this.session.sourceSha256) await this.persistArtifact('templates', key,
+              { sourceInvalid: { message: error.reason, evidence: error.sourceEvidence } }, lod, dev, identity);
           }
           throw error;
         });
         if (!this.current()) return null;
-        releaseInput = await this.inputBudget.acquire(result.bytes?.byteLength ?? 0);
+        releaseInput = await perfMeasureTaskPhase(identity, 'inputBudgetQueue', () => this.inputBudget.acquire(result.bytes?.byteLength ?? 0), this.perf);
         if (!this.current()) return null;
         this.diagnostics.compiled[lod]++;
         this.diagnostics.lodCompiled[lod]++;
@@ -546,19 +859,26 @@ export class DevLodRuntime {
       if (!artifact.result.bytes) {
         if (artifact.result.status === 'empty' || artifact.result.status === 'unsupported') {
           this.nullResults.set(key, artifact.result.status);
-          if (this.session.sourceSha256) this.persistArtifact('templates', key, artifact, lod, dev);
+          if (this.session.sourceSha256) {
+            const inputOwner = releaseInput; releaseInput = undefined;
+            await this.persistArtifact('templates', key, artifact, lod, dev, identity, inputOwner);
+          }
         }
         return null;
       }
-      parsed ??= await parseDevGlbAsset(dev, artifact.result.bytes);
+      parsed ??= await perfMeasureTaskPhase(identity, 'deserialize', () => parseDevGlbAsset(dev, artifact!.result.bytes!), this.perf);
       if (!parsed || !validateDevGlbTemplate(parsed).shareable || invalidGeometryExtent(parsed.scene)) {
         if (parsed) new DevGlbTemplate(dev, parsed.scene, this.session).dispose();
         throw Error(`DEV GLB invalid: ${dev}`);
       }
       // Show geometry first; persistence is bounded and asynchronous. A failed
       // write is recorded by persistArtifact and never advertised as warm.
-      if (generated && this.session.sourceSha256) this.persistArtifact('templates', key, artifact, lod, dev);
-      const row = { bounds: new THREE.Box3().setFromObject(parsed.scene), template: new DevGlbTemplate(dev, parsed.scene, this.session), sha: artifact.sha, status: artifact.result.status, diagnostics: artifact.result.diagnostics };
+      if (generated && this.session.sourceSha256) {
+        const inputOwner = releaseInput; releaseInput = undefined;
+        void this.persistArtifact('templates', key, artifact, lod, dev, identity, inputOwner);
+      }
+      const templateStarted = performance.now();
+      const row = { bounds: new THREE.Box3().setFromObject(parsed.scene), template: new DevGlbTemplate(dev, parsed.scene, this.session), sha: artifact.sha, status: artifact.result.status, diagnostics: artifact.result.diagnostics, task: identity };
       this.diagnostics.templateParses++;
       if (!this.current()) { row.template.dispose(); return null; }
       const pinned = this.pinned(); pinned.add(key); // caller commits or releases before next trim
@@ -572,11 +892,19 @@ export class DevLodRuntime {
         }
       });
       const bytes = [...buffers].reduce((total, buffer) => total + buffer.byteLength, 0);
-      this.templates.set(key, row, bytes, pinned); this.diagnostics.templateResidentBytes = this.templates.bytes; return row;
+      this.templates.set(key, row, bytes, pinned); this.diagnostics.templateResidentBytes = this.templates.bytes;
+      perfRecordTaskPhase(identity, 'templateBuild', performance.now() - templateStarted, this.perf, 'completed', bytes);
+      return row;
       } finally { releaseInput?.(); releaseSlot(); }
     })();
     this.pending.set(key, promise); this.diagnostics.pending = this.pending.size;
-    try { return await promise; } finally { if (this.pending.get(key) === promise) { this.pending.delete(key); this.priorities.delete(key); } this.diagnostics.pending = this.pending.size; this.worker.acknowledge(key); }
+    let outcome: 'completed' | 'failed' | 'cancelled' = 'completed';
+    try { return await promise; }
+    catch (error) { outcome = (error as Error)?.name === 'AbortError' ? 'cancelled' : 'failed'; throw error; }
+    finally {
+      perfRecordTaskPhase(identity, 'templateWall', performance.now() - taskStarted, this.perf, outcome);
+      if (this.pending.get(key) === promise) { this.pending.delete(key); this.priorities.delete(key); } this.diagnostics.pending = this.pending.size; this.worker.acknowledge(key);
+    }
   }
   private schedule = () => {
     if (!this.current()) return;
@@ -587,26 +915,39 @@ export class DevLodRuntime {
   };
   private update(): void {
     if (!this.current()) { this.release(); return; }
+    this.refreshMemoryPressure();
     this.notifyCoordinateAnchor();
     const camera = (this.ctx.world.camera as any).three as THREE.Camera;
     const canvas = (this.ctx.world.renderer as any)?.three?.domElement as HTMLCanvasElement | undefined;
     const rect = canvas?.getBoundingClientRect();
     const view = createDeviceViewContext(camera, rect?.width || 1000, rect?.height || 800);
+    const candidates = this.viewIndex.query(view.frustum);
+    this.diagnostics.viewIndex = {...this.viewIndex.diagnostics};
     const wanted = new Set<string>();
     this.wanted = wanted;
     for (const row of this.rows.values()) {
       const selected = row.entry.rootOccurrence === this.selected;
       const terminal = row.entry.templateStatus === 'empty' || row.entry.templateStatus === 'unsupported';
-      const metrics = this.anchor && row.box ? deviceViewMetrics(row.box, camera, rect?.width || 1000, rect?.height || 800, view) : null;
+      const metrics = this.anchor && row.box && candidates.has(row.entry.rootOccurrence)
+        ? deviceViewMetrics(row.box, camera, rect?.width || 1000, rect?.height || 800, view) : null;
       // Unknown bounds are not evidence of visibility. They still receive an
       // automatic LOD0 in the background; only catalogued boxes decide whether
       // the current view is blocked on this occurrence.
       row.inView = selected || (row.box && metrics ? metrics.visible : false);
-      if (terminal) { row.desired = 0; continue; }
+      if (terminal) { row.desired = 0; this.updateReadiness(row); continue; }
       // Unknown ranges compile actual supported geometry automatically. No
       // invented box, false culling or tree-selection prerequisite is used.
-      const lod = selected ? 2 : !row.group ? 0 : metrics ? chooseDeviceLod(row.displayed, metrics.visible, metrics.distance, metrics.pixels) : 0;
+      // Selection only raises scheduling priority.  L2 is an explicit user
+      // action (refine()); camera proximity and an ordinary click must stay in
+      // the inexpensive browser representation.  This is the key boundary
+      // between browsing and the fine-model workflow.
+      const browseLod: DeviceLod = !row.group ? 0 : this.diagnostics.autoLodSuppressed
+        ? row.inView ? Math.min(1, row.displayed) as DeviceLod : 0
+        : metrics ? chooseDeviceLod(row.displayed, metrics.visible, metrics.pixels) : 0;
+      row.browseDesired = browseLod;
+      const lod = this.fineRequested.has(row.entry.rootOccurrence) ? 2 : browseLod;
       row.desired = lod;
+      this.updateReadiness(row);
       const key = this.key(row.entry.devPath, lod); wanted.add(key);
       // Visible L0 outranks offscreen L0; offscreen still remains wanted and
       // is reached later (aged priority prevents permanent starvation).
@@ -638,13 +979,18 @@ export class DevLodRuntime {
     if (!this.current() || row.desired !== lod || row.key === key) return;
     if (!template) {
       if (row.entry.templateStatus === 'empty') { this.nullResults.set(key, 'empty'); this.requestReady(); return; }
-      row.entry.templateStatus = this.nullResults.get(key) ?? 'failed'; this.requestReady(); return;
+      row.entry.templateStatus = this.nullResults.get(key) ?? 'failed';
+      this.updateReadiness(row);
+      this.requestReady(); return;
     }
-    if (!this.anchor) await this.anchorDone;
+    if (!this.anchor) await perfMeasureTaskPhase(template.task ?? this.taskIdentity(row.entry.devPath, 'placement', lod, priority), 'anchorQueue', () => this.anchorDone, this.perf);
     if (!this.current() || row.desired !== lod || row.key === key) return;
-    await this.submit(priority, () => {
+    const trace = {...(template.task ?? this.taskIdentity(row.entry.devPath, 'placement', lod, priority)), priority, instanceKey: row.entry.instanceKey};
+    const commitQueuedAt = performance.now();
+    await perfMeasureTaskPhase(trace, 'sceneSubmitWall', () => this.submit(priority, () => {
     if (!this.current() || row.desired !== lod || row.key === key) return;
     const started = performance.now();
+    perfRecordTaskPhase(trace, 'sceneCommitQueue', started - commitQueuedAt, this.perf);
     const group = template.template.createPlacement({ contract: 'source-template', rootOccurrence: row.entry.rootOccurrence,
       instanceKey: row.entry.instanceKey, placementMatrix: row.entry.placementMatrix, projectSourceToViewerMatrix: this.anchor });
     const worldBounds = template.bounds.clone().applyMatrix4(group.matrix);
@@ -655,11 +1001,18 @@ export class DevLodRuntime {
     const highlighted = this.state.highlightedModState?.groups.filter(object => belongsTo(object, row.group)) ?? [];
     const highlightScopes = highlighted.map(object => object === row.group ? null : { devPath: object.userData.devPath, assemblyPath: object.userData.assemblyPath, referencePath: object.userData.referencePath });
     if (highlighted.length) resetModHighlight(this.state);
+    if (row.group) this.instances?.remove(row.group);
     this.state.modRootGroup!.add(group); row.group?.removeFromParent();
     if (row.key) { const count = (this.displayedPins.get(row.key) ?? 1) - 1; if (count) this.displayedPins.set(row.key, count); else { this.displayedPins.delete(row.key); if (!this.placementUsers.has(row.key)) this.pinKeys.delete(row.key); } }
     this.displayedPins.set(key, (this.displayedPins.get(key) ?? 0) + 1);
     row.group = group; row.key = key; row.displayed = lod; row.entry.templateStatus = 'ready';
+    group.visible = !this.onlySelected || row.entry.rootOccurrence === this.selected;
+    if (this.batchEnabled) {
+      this.instances ??= new DevInstanceBatches(this.state.modRootGroup!);
+      this.instances.add(group, lod < 2);
+    }
     row.geometryStatus = template.status; row.failedKey = undefined;
+    this.updateReadiness(row);
     this.state.loadedXmlModGroups.set(row.entry.instanceKey, group);
     if (highlighted.length) {
       const replacements: THREE.Object3D[] = [];
@@ -682,10 +1035,10 @@ export class DevLodRuntime {
     this.diagnostics.shown = this.state.loadedXmlModGroups.size;
     this.diagnostics.sceneCommitCount++;
     this.diagnostics.sceneCommitMaxMs = Math.max(this.diagnostics.sceneCommitMaxMs, performance.now() - started);
-    perfMark('DEV scene commit', { key, instanceKey: row.entry.instanceKey, durationMs: performance.now() - started }, this.perf);
+    perfRecordTaskPhase(trace, 'placementCommit', performance.now() - started, this.perf);
     this.requestReady();
     this.schedule(); // Reconsider detail only after a base representation exists.
-    }, row.entry.rootOccurrence);
+    }, row.entry.rootOccurrence), this.perf);
     } finally {
       const users = (this.placementUsers.get(key) ?? 1) - 1;
       if (users) this.placementUsers.set(key, users); else this.placementUsers.delete(key);
@@ -702,6 +1055,7 @@ export class DevLodRuntime {
     if((error as Error)?.name==='AbortError'){this.schedule();return;}
     row.entry.templateStatus = 'failed';
     row.failedKey = requestKey;
+    this.updateReadiness(row);
     this.diagnostics.errors.push(`${row.entry.devPath}: ${String(error)}`);
     if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
     setGeometryDiagnostic(this.state, diagnosticForFailure(row.entry.devPath,
@@ -710,25 +1064,33 @@ export class DevLodRuntime {
     this.requestReady();
   }
   private ready(): void {
+    if (this.instances) this.diagnostics.instancing = {enabled: this.batchEnabled, ...this.instances.statistics};
     if (!this.current()) return;
-    let total = 0, visible = 0, finished = 0, shown = 0, empty = 0, unsupported = 0, partial = 0, failed = 0,viewPending=0;
-    let viewSettled = true, viewReady = true, baseSettled = true, baseReady = true, allReady = true;
-    const samples:string[]=[];
-    for (const row of this.rows.values()) {
-      total++;
-      const terminal = row.entry.templateStatus === 'empty' || row.entry.templateStatus === 'unsupported';
-      const key = this.key(row.entry.devPath, row.desired!);
-      const complete = !!row.group || terminal, requested = terminal || row.key === key, failure = row.failedKey === key;
-      if (complete || failure) finished++;
-      baseSettled &&= complete || failure; baseReady &&= complete;
-      allReady &&= row.entry.templateStatus === 'empty' || row.geometryStatus === 'complete' && row.displayed === 2;
-      if (row.inView) { visible++; viewSettled &&= requested || failure; viewReady &&= requested && !failure;if(!requested&&!failure){viewPending++;if(samples.length<8)samples.push(`${row.entry.devPath}: LOD${row.displayed}→${row.desired}`);} }
-      if (row.group) shown++;
-      if (row.entry.templateStatus === 'empty') empty++;
-      if (row.entry.templateStatus === 'unsupported') unsupported++;
-      if (row.geometryStatus === 'partial') partial++;
-      if (row.entry.templateStatus === 'failed') failed++;
+    // The normal path is O(1): every row transition updates its contribution.
+    // Vitest fixtures and diagnostic callers may replace/mutate the private
+    // map directly; resync there so readiness remains a trustworthy contract.
+    if (!this.readinessRowsMatch() || import.meta.env?.MODE === 'test') this.syncReadinessCounters();
+    const counters = this.readinessCounters;
+    const {
+      total, visible, finished, shown, empty, unsupported, partial, failed,
+      viewPending,
+    } = counters;
+    const viewSettled = counters.viewSettled === total;
+    const viewReady = counters.viewReady === total;
+    const baseSettled = counters.baseSettled === total;
+    const baseReady = counters.baseReady === total;
+    const allReady = counters.allReady === total;
+    const samples: string[] = [];
+    if (viewPending > 0) {
+      for (const row of this.rows.values()) {
+        if (!row.inView) continue;
+        const contribution = contributionForRow(row, (dev, lod) => this.key(dev, lod));
+        if (!contribution.viewPending) continue;
+        samples.push(`${row.entry.devPath}: LOD${row.displayed}→${row.desired}`);
+        if (samples.length >= 8) break;
+      }
     }
+    this.auditReadinessCounters();
     const stable = !this.cameraTimer && !this.timer && this.diagnostics.anchorReady;
     const blockers=[!this.diagnostics.anchorReady?'等待坐标锚点':'',!this.diagnostics.catalogReady?'设备范围索引准备中':'',this.cameraTimer?'等待相机停稳':'',
       this.pending.size?`模板处理中 ${this.pending.size}`:'',this.templateWaiters.size?`模板排队 ${this.templateWaiters.size}`:'',this.commits.length?`场景待提交 ${this.commits.length}`:''].filter(Boolean);
@@ -738,6 +1100,12 @@ export class DevLodRuntime {
       perfMarkProductMoment('devCurrentViewReady', {
         path: 'device-lod', shown, requested: visible, compiled: [...this.diagnostics.compiled],
         lodHits: [...this.diagnostics.lodHits], failed, catalogReady: this.diagnostics.catalogReady,
+      }, this.perf);
+    }
+    const nextViewSettled = stable && this.diagnostics.catalogReady && viewSettled;
+    if (nextViewSettled && !this.diagnostics.currentViewSettled) {
+      perfMarkProductMoment('devCurrentViewSettled', {
+        path: 'device-lod', shown, requested: visible, failed, catalogReady: this.diagnostics.catalogReady,
       }, this.perf);
     }
     const nextBaseSettled = this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseSettled;
@@ -754,7 +1122,7 @@ export class DevLodRuntime {
       perfMarkProductMoment('devAllStationReady', { path: 'device-lod', occurrences: total, shown, partial, failed }, this.perf);
       perfMark('DEV all station ready', { total, shown, partial, failed }, this.perf);
     }
-    Object.assign(this.diagnostics, { currentViewSettled: stable && this.diagnostics.catalogReady && viewSettled, currentViewReady: ready,
+    Object.assign(this.diagnostics, { currentViewSettled: nextViewSettled, currentViewReady: ready,
       baseRepresentationsSettled: nextBaseSettled,
       baseRepresentationsReady: this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseReady,
       allStationReady: nextAllReady,
@@ -762,14 +1130,26 @@ export class DevLodRuntime {
       shown: this.state.loadedXmlModGroups.size, activeDevices: this.worker?.activePaths ?? [],viewPendingOccurrences:viewPending,
       readinessBlockers:blockers,viewPendingSamples:samples,
       cacheReadBatches:this.cacheReader.diagnostics.batches,cacheReadEntries:this.cacheReader.diagnostics.entries,cacheReadDeferred:this.cacheReader.diagnostics.deferred });
+    const browseState = !this.diagnostics.catalogReady || !this.diagnostics.currentViewSettled
+      ? 'loading'
+      : failed > 0 ? 'partial'
+        : nextBaseSettled ? 'base-settled' : 'browseable';
+    this.diagnostics.browseState = browseState;
     const active = this.diagnostics.activeDevices.join('、');
     this.diagnostics.inputBudgetBytes=this.inputBudget.bytes;this.diagnostics.inputBudgetPeakBytes=this.inputBudget.peakBytes;
+    this.updateWriteDiagnostics();
     const ws=this.worker?.diagnostics;
     if (ws) {
       this.diagnostics.workerReads=ws.reads;this.diagnostics.workerRpcReads=ws.rpcReads;
       this.diagnostics.workerSourceHits=ws.sourceHits;this.diagnostics.workerDocumentHits=ws.documentHits;
       this.diagnostics.workerReadRpcMs=Math.round(ws.readRpcMs);this.diagnostics.workerParseMs=Math.round(ws.parseMs);
       this.diagnostics.workerQueueWaitMs=Math.round(ws.queueWaitMs);
+      this.diagnostics.workerSourceAffinityHits=ws.sourceAffinityHits;
+      this.diagnostics.workerSourceAffinityDeferrals=ws.sourceAffinityDeferrals;
+      this.diagnostics.workerScheduling=this.worker.schedulingSnapshot();
+      this.diagnostics.workerStages={...ws.stages};
+      this.diagnostics.workerTimedOutTasks=ws.timedOutTasks;
+      this.diagnostics.workerStallSnapshots=ws.stallSnapshots;
     }
     const pressure=this.worker?.resultPressure;
     this.diagnostics.resultQueuedBytes=pressure?.bytes ?? 0;this.diagnostics.resultPeakBytes=pressure?.peakBytes ?? 0;
@@ -777,7 +1157,7 @@ export class DevLodRuntime {
     const phase = !this.diagnostics.catalogReady
       ? `设备范围索引准备中 ${this.diagnostics.directoryCompleted}/${total}`
       : this.diagnostics.currentViewSettled
-        ? ready ? '当前视图已完成' : '当前视图已完成，部分实例失败'
+        ? ready ? (nextBaseSettled ? '当前视图已完成 · 工程可浏览 · 基础表示已完成' : '当前视图已完成 · 工程可浏览') : '当前视图已完成，部分实例失败 · 工程可浏览'
         : `当前视图准备中${viewPending ? ` ${viewPending}` : ''}`;
     const background = this.diagnostics.currentViewSettled && !this.diagnostics.baseRepresentationsSettled ? ' · 后台补充基础表示' : '';
     const cold = this.diagnostics.compiled, warm = this.diagnostics.lodHits;
@@ -792,14 +1172,35 @@ export class DevLodRuntime {
         + ` · 批读 ${this.diagnostics.cacheReadBatches} 批/${this.diagnostics.cacheReadEntries} 条（defer ${this.diagnostics.cacheReadDeferred}）`
         + ` · 淘汰 ${this.diagnostics.templateEvictions} · 部分表示 ${this.diagnostics.partialOccurrences}`
         + `${cacheProblems ? ` · 缓存问题 ${cacheProblems}` : ''}`
-        + `${blockers.length?` · ${blockers.join(' · ')}`:''}${active ? ` · ${active}` : ''}`);
+        + `${blockers.length?` · ${blockers.join(' · ')}`:''}${active ? ` · ${active}` : ''}`
+        + `${this.diagnostics.memoryPressure !== 'unknown' ? ` · JS内存 ${this.diagnostics.memoryPressure}` : ''}`
+        + `${this.diagnostics.backgroundPaused ? ' · 已暂停后台细化' : ''}`);
     this.diagnostics.cacheReadBatches=this.cacheReader.diagnostics.batches;
     this.diagnostics.cacheReadEntries=this.cacheReader.diagnostics.entries;
     this.diagnostics.cacheReadDeferred=this.cacheReader.diagnostics.deferred;
     // No work owns a still-wanted row: recover a cancelled scheduling turn.
     if(stable&&viewPending&&!this.pending.size&&!this.templateWaiters.size&&!this.commits.length)this.schedule();
   }
-  clearSelection(): void { this.selected = ''; this.schedule(); }
+  clearSelection(): void {
+    const previous = this.selected;
+    this.selected = '';
+    // Fine geometry is tied to the active selection.  Leaving the selection
+    // releases its protection; the normal LOD scheduler may then replace it
+    // with L0/L1 and the template cache can reclaim the fine representation.
+    if (previous) { this.fineRequested.delete(previous); this.demoteFine(previous); }
+    this.schedule();
+  }
+  /** Pause only automatic L1 refinement/prefetch. L0 and catalog/bounds work
+   * remain eligible, and an explicit refine() request can still be promoted. */
+  setBackgroundPaused(paused: boolean): void {
+    this.diagnostics.backgroundPaused = paused;
+    this.worker?.setPaused(paused);
+    this.requestReady();
+  }
+  setOnlySelected(only: boolean): void {
+    this.onlySelected = only;
+    this.applyOnlySelected();
+  }
   resourceCounts() {
     const geometry = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
     for (const row of this.templates.values()) {
@@ -810,28 +1211,147 @@ export class DevLodRuntime {
     return { templateCount: this.templates.size, templateParseCount: this.diagnostics.templateParses,
       sharedGeometryCount: geometry.size, sharedMaterialCount: materials.size, sharedTextureCount: textures.size };
   }
-  async select(rootOccurrence: string): Promise<THREE.Group[]> {
+  pick(ray: THREE.Raycaster): ReturnType<DevInstanceBatches['pick']> {
+    return this.instances?.pick(ray) ?? null;
+  }
+  /** Ensure an occurrence has a browser representation.  This method is used
+   * by ordinary tree/search/selection flows and deliberately never requests
+   * L2.  Keep the historical select name as a compatibility alias below. */
+  async ensureBase(rootOccurrence: string): Promise<THREE.Group[]> {
     if (!this.current()) return [];
+    const previous = this.selected;
+    if (previous && previous !== rootOccurrence) {
+      this.fineRequested.delete(previous);
+      this.demoteFine(previous);
+    }
     this.selected = rootOccurrence;
+    this.fineRequested.delete(rootOccurrence);
+    this.applyOnlySelected();
     for (const commit of this.commits) if (commit.root === rootOccurrence) commit.priority = 0;
     this.commits.sort((a,b) => a.priority-b.priority);
     if (!this.rows.has(rootOccurrence)) await this.catalogDone;
     const row = this.rows.get(rootOccurrence);
     if (!row || !this.current() || this.selected !== rootOccurrence) return [];
+    const target: DeviceLod = row.group ? Math.min(1, row.displayed) as DeviceLod : 0;
+    row.desired = target;
+    this.updateReadiness(row);
+    this.wanted.add(this.key(row.entry.devPath, target));
+    row.failedKey = undefined; // Explicit selection retries transient failures; source-invalid stays isolated.
+    this.updateReadiness(row);
+    try { await this.render(row, target, 0); }
+    catch (error) { this.failed(row, error, this.key(row.entry.devPath, target)); throw error; }
+    if (!this.anchor) {
+      await this.anchorDone;
+      if (!this.current() || this.selected !== rootOccurrence) return [];
+      await this.render(row, target, 0);
+    }
+    return this.current() && row.group ? [row.group] : [];
+  }
+  /** Retry only the selected DEV's failed browser task.  Source-invalid and
+   * deterministic empty/unsupported results remain isolated; they require a
+   * source correction rather than an automatic retry loop. */
+  async retry(rootOccurrence: string): Promise<THREE.Group[]> {
+    if (!this.current()) return [];
+    const row = this.rows.get(rootOccurrence);
+    if (!row) return [];
+    if (this.sourceFailures.has(row.entry.devPath)) throw this.sourceFailures.get(row.entry.devPath)!;
+    if (row.entry.templateStatus === 'empty' || row.entry.templateStatus === 'unsupported') {
+      throw new Error('该设备没有可重试的浏览几何来源');
+    }
+    this.selected = rootOccurrence;
+    row.entry.templateStatus = 'unrequested';
+    row.failedKey = undefined;
+    row.geometryStatus = undefined;
+    this.updateReadiness(row);
+    for (const lod of [0, 1, 2] as const) this.nullResults.delete(this.key(row.entry.devPath, lod));
+    this.applyOnlySelected();
+    if (!row.group) await this.ensureBase(rootOccurrence);
+    if (!this.current() || this.selected !== rootOccurrence) return [];
+    const target = row.browseDesired ?? (row.group ? Math.min(1, row.displayed) : 0) as DeviceLod;
+    row.desired = target;
+    this.updateReadiness(row);
+    this.wanted.add(this.key(row.entry.devPath, target));
+    await this.render(row, target, 0);
+    this.schedule();
+    return this.current() && row.group ? [row.group] : [];
+  }
+  /** Explicit user request for precise DEV geometry. */
+  async refine(rootOccurrence: string): Promise<THREE.Group[]> {
+    if (!this.current()) return [];
+    this.refreshMemoryPressure();
+    if (this.memoryPressure === 'critical') throw new Error('当前内存压力过高，暂不能加载精细模型');
+    const previous = this.selected;
+    if (previous && previous !== rootOccurrence) {
+      this.fineRequested.delete(previous);
+      this.demoteFine(previous);
+    }
+    this.selected = rootOccurrence;
+    this.applyOnlySelected();
+    for (const commit of this.commits) if (commit.root === rootOccurrence) commit.priority = 0;
+    this.commits.sort((a,b) => a.priority-b.priority);
+    if (!this.rows.has(rootOccurrence)) await this.catalogDone;
+    const row = this.rows.get(rootOccurrence);
+    if (!row || !this.current() || this.selected !== rootOccurrence) return [];
+    // A direct inspector request can arrive before the automatic browser
+    // representation has committed.  Admit L0 first so an exact request
+    // never makes the current view blank while it waits for L2.
+    if (!row.group && row.entry.templateStatus !== 'empty' && row.entry.templateStatus !== 'unsupported') {
+      await this.ensureBase(rootOccurrence);
+      if (!this.current() || this.selected !== rootOccurrence) return [];
+    }
+    this.fineRequested.add(rootOccurrence);
     row.desired = 2;
     this.wanted.add(this.key(row.entry.devPath, 2));
-    row.failedKey = undefined; // Explicit selection retries transient failures; source-invalid stays isolated.
+    row.failedKey = undefined;
+    this.updateReadiness(row);
     try { await this.render(row, 2, 0); }
-    catch (error) { this.failed(row, error, this.key(row.entry.devPath, 2)); throw error; }
+    catch (error) {
+      // A precise request is an optional browser action.  Preserve a usable
+      // L0/L1 group and its successful diagnostic when L2 fails; otherwise a
+      // failed refinement would incorrectly turn an already browseable station
+      // into a base-view failure.
+      const hadBase = !!row.group && row.displayed <= 1;
+      if (hadBase) {
+        this.diagnostics.fineFailures.push(`${row.entry.devPath}: ${String(error)}`);
+        if (this.diagnostics.fineFailures.length > 32) this.diagnostics.fineFailures.shift();
+        row.failedKey = undefined;
+        row.entry.templateStatus = 'ready';
+        this.updateReadiness(row);
+        this.requestReady();
+      } else {
+        this.failed(row, error, this.key(row.entry.devPath, 2));
+      }
+      this.fineRequested.delete(rootOccurrence);
+      this.demoteFine(rootOccurrence);
+      throw error;
+    }
+    if (!this.current() || this.selected !== rootOccurrence) return [];
     if (!this.anchor) {
       await this.anchorDone;
       if (!this.current() || this.selected !== rootOccurrence) return [];
       await this.render(row, 2, 0);
     }
+    if (!this.current() || this.selected !== rootOccurrence || !row.group
+      || row.key !== this.key(row.entry.devPath, 2)) return [];
+    perfMarkProductMoment('selectedFineReady', {
+      kind: 'dev', rootOccurrence, devPath: row.entry.devPath, lod: 2,
+    }, this.perf);
     return this.current() && row.group ? [row.group] : [];
   }
+  /** Release an explicitly refined occurrence back to normal browsing LOD. */
+  releaseFine(rootOccurrence: string): void {
+    this.fineRequested.delete(rootOccurrence);
+    if (this.selected === rootOccurrence) {
+      this.demoteFine(rootOccurrence);
+    }
+    this.schedule();
+  }
+  /** Backward-compatible name.  Ordinary selection is base-only now. */
+  async select(rootOccurrence: string): Promise<THREE.Group[]> { return this.ensureBase(rootOccurrence); }
   release(): void {
-    if (this.released) return; this.released = true; this.inputBudget.close();this.cacheReader.close(); this.finishCatalog(); this.finishAnchor();
+    if (this.released) return; this.released = true; this.inputBudget.close();this.writeBudget.close();this.cacheReader.close(); this.finishCatalog(); this.finishAnchor();
+    for (const waiter of this.writeWaiters) waiter.reject(new DOMException('DEV cache write cancelled', 'AbortError'));
+    this.writeWaiters = [];
     for (const waiter of this.templateWaiters.values()) waiter.reject(new DOMException('DEV session expired', 'AbortError'));
     this.templateWaiters.clear(); this.templateQueue.clear();
     if (this.timer) clearTimeout(this.timer);
@@ -841,17 +1361,28 @@ export class DevLodRuntime {
     for (const commit of this.commits) commit.reject(new DOMException('DEV session expired', 'AbortError'));
     this.commits = [];
     (this.ctx.world.camera as any).controls?.removeEventListener('update', this.cameraSchedule);
+    window.removeEventListener('gim-toggle-background-detail', this.pauseEvent);
     this.worker?.cancel();
     for (const row of this.rows.values()) { if (row.group && this.state.highlightedModState?.groups.some(object => belongsTo(object, row.group))) resetModHighlight(this.state); row.group?.removeFromParent(); this.state.loadedXmlModGroups.delete(row.entry.instanceKey); }
-    this.templates.clear(); this.rows.clear(); this.catalogHints.clear(); this.state.deviceUnknownBounds.clear();
+    this.instances?.release(); this.instances = undefined;
+    this.fineRequested.clear(); this.templates.clear();
+    for (const rootOccurrence of this.readinessRows.keys()) this.removeReadiness(rootOccurrence);
+    this.rows.clear(); this.readinessRows.clear();
+    this.viewIndex.clear();
+    Object.assign(this.readinessCounters, emptyReadinessCounters());
+    this.catalogHints.clear(); this.state.deviceUnknownBounds.clear();
   }
 }
 export async function startDeviceLod(state: AppState, ctx: ViewerContext, session: ProjectLoadSession, status: (text: string, detail?: string) => void): Promise<DevLodRuntime> {
+  if (!state.substationResourceMonitor) startSubstationResourceMonitor(state, ctx);
   if (state.deviceLodRuntime instanceof DevLodRuntime && state.deviceLodRuntime.belongsTo(session)) {
+    state.deviceLodRuntime.setOnlySelected(state.onlySelected);
     state.deviceLodRuntime.notifyCoordinateAnchor(); await state.deviceLodRuntime.startup; return state.deviceLodRuntime;
   }
   state.deviceLodRuntime?.release();
   const runtime = new DevLodRuntime(state, ctx, session, status); state.deviceLodRuntime = runtime;
+  runtime.setExternalMemoryPressure(state.substationMemoryPressure);
+  runtime.setOnlySelected(state.onlySelected);
   try { runtime.startup = runtime.start(); await runtime.startup; return runtime; }
   catch (error) { runtime.release(); if (state.deviceLodRuntime === runtime) state.deviceLodRuntime = null; throw error; }
 }

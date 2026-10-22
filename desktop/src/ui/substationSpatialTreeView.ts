@@ -25,6 +25,15 @@ const SPATIAL_ICONS: Record<string, string> = {
 
 /** 单次展开最多生成的行数；其余对象通过“加载更多”继续生成，不能静默丢失。 */
 const PAGE_SIZE = 200;
+/** 超过该数量的同类叶子不一次性挂到 DOM，改用固定行高窗口。 */
+const VIRTUAL_THRESHOLD = 500;
+const VIRTUAL_WINDOW = 80;
+const VIRTUAL_OVERSCAN = 12;
+const VIRTUAL_ROW_HEIGHT = 27;
+
+type VirtualListElement = HTMLElement & {
+  __gimRevealVirtual?: (targetKey: string) => boolean;
+};
 
 /** 空间视图的搜索索引：容器、IFC 构件和 CBM 资产都可搜索。 */
 export function buildSpatialSearchIndex(
@@ -191,6 +200,15 @@ export function loadSpatialSearchTargetPage(containerKey: string | null, targetK
   const targetSelector = `[data-node-path="${escapeAttribute(containerKey)}"]`;
   for (let attempt = 0; attempt < 100; attempt++) {
     if (document.querySelector(`[data-node-path="${escapeAttribute(targetKey)}"]`)) return;
+    // Large branches use a virtual window instead of pagination. Ask the
+    // owning list to materialize the matching row before falling back to the
+    // legacy “加载更多” path used by smaller branches.
+    for (const candidate of document.querySelectorAll<HTMLElement>('.spatial-virtual-list')) {
+      const reveal = (candidate as VirtualListElement).__gimRevealVirtual;
+      if (reveal?.(targetKey)) {
+        if (document.querySelector(`[data-node-path="${escapeAttribute(targetKey)}"]`)) return;
+      }
+    }
     const more = document.querySelector<HTMLElement>(
       `.spatial-load-more-row[data-pagination-key="${escapeAttribute(containerKey)}"]`,
     );
@@ -673,6 +691,10 @@ export function renderSubstationSpatialTree(
     key: string,
     renderItem: (item: T, rowsEl: HTMLElement) => void,
   ): void {
+    if (items.length > VIRTUAL_THRESHOLD) {
+      renderVirtualRows(host, items, key, renderItem);
+      return;
+    }
     let offset = 0;
     let moreRow: HTMLElement | null = null;
     const renderPage = (): void => {
@@ -695,6 +717,113 @@ export function renderSubstationSpatialTree(
       }
     };
     renderPage();
+  }
+
+  /**
+   * Render a large homogeneous leaf branch with a bounded DOM window. The
+   * source array remains the authoritative order, so search and selection can
+   * reveal an off-screen item without expanding hundreds of placeholder rows.
+   * A fixed row height is valid for all callers here: renderItem emits only
+   * spatial leaf rows, whose CSS height is 27px.
+   */
+  function renderVirtualRows<T>(
+    host: HTMLElement,
+    items: T[],
+    key: string,
+    renderItem: (item: T, rowsEl: HTMLElement) => void,
+  ): void {
+    const virtual = document.createElement('div') as VirtualListElement;
+    virtual.className = 'spatial-virtual-list';
+    virtual.dataset.virtualList = key;
+    virtual.dataset.virtualCount = String(items.length);
+    virtual.setAttribute('role', 'group');
+    virtual.setAttribute('aria-label', `${items.length} 个对象，按需显示`);
+    const topSpacer = document.createElement('div');
+    const rowsHost = document.createElement('div');
+    const bottomSpacer = document.createElement('div');
+    topSpacer.setAttribute('aria-hidden', 'true');
+    bottomSpacer.setAttribute('aria-hidden', 'true');
+    virtual.append(topSpacer, rowsHost, bottomSpacer);
+    host.appendChild(virtual);
+
+    const itemKey = (item: T): string => {
+      if (typeof item === 'string') return item;
+      const value = item as T & { key?: unknown; cbmPath?: unknown };
+      return typeof value.key === 'string' ? value.key
+        : typeof value.cbmPath === 'string' ? value.cbmPath : '';
+    };
+    let start = 0;
+    let end = 0;
+    let selectedKey = '';
+    const renderWindow = (requestedIndex = start): void => {
+      const maxStart = Math.max(0, items.length - VIRTUAL_WINDOW);
+      start = Math.max(0, Math.min(maxStart, requestedIndex - VIRTUAL_OVERSCAN));
+      end = Math.min(items.length, start + VIRTUAL_WINDOW + VIRTUAL_OVERSCAN * 2);
+      topSpacer.style.height = `${start * VIRTUAL_ROW_HEIGHT}px`;
+      bottomSpacer.style.height = `${Math.max(0, items.length - end) * VIRTUAL_ROW_HEIGHT}px`;
+      selectedKey = rowsHost.querySelector<HTMLElement>('.selected')?.dataset.nodePath ?? selectedKey;
+      rowsHost.replaceChildren();
+      for (let index = start; index < end; index++) {
+        renderItem(items[index], rowsHost);
+        const row = rowsHost.lastElementChild as HTMLElement | null;
+        if (row?.dataset.nodePath === selectedKey) row.classList.add('selected');
+        row?.setAttribute('aria-posinset', String(index + 1));
+        row?.setAttribute('aria-setsize', String(items.length));
+      }
+    };
+    rowsHost.addEventListener('keydown', event => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const row = (event.target as HTMLElement).closest<HTMLElement>('[data-node-path]');
+      const index = items.findIndex(item => itemKey(item) === row?.dataset.nodePath);
+      if (index < 0) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : Math.max(0, Math.min(items.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+      const target = itemKey(items[next]);
+      virtual.__gimRevealVirtual?.(target);
+      rowsHost.querySelector<HTMLElement>(`[data-node-path="${escapeAttribute(target)}"]`)?.focus();
+    });
+    virtual.__gimRevealVirtual = (targetKey: string): boolean => {
+      const index = items.findIndex((item) => itemKey(item) === targetKey);
+      if (index < 0) return false;
+      renderWindow(index);
+      const row = rowsHost.querySelector<HTMLElement>(`[data-node-path="${escapeAttribute(targetKey)}"]`);
+      row?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+      return true;
+    };
+    renderWindow(0);
+
+    // The tree panel is the scrolling element, but the virtual list may be
+    // created before its parent is attached. Defer lookup one microtask so
+    // expanded branches and test DOM fixtures behave the same way.
+    queueMicrotask(() => {
+      const scroller = virtual.closest<HTMLElement>('.tab-panel');
+      if (!scroller) return;
+      let scheduled = false;
+      let frame = 0;
+      const lifetime = new AbortController();
+      const onScroll = (): void => {
+        if (scheduled) return;
+        scheduled = true;
+        frame = requestAnimationFrame(() => {
+          scheduled = false;
+          if (!virtual.isConnected || !virtual.getClientRects().length) return;
+          const relativeTop = Math.max(0, scroller.getBoundingClientRect().top - virtual.getBoundingClientRect().top);
+          const index = Math.floor(relativeTop / VIRTUAL_ROW_HEIGHT);
+          const nextStart = Math.max(0, Math.min(Math.max(0, items.length - VIRTUAL_WINDOW), index - VIRTUAL_OVERSCAN));
+          if (nextStart !== start) renderWindow(index);
+        });
+      };
+      scroller.addEventListener('scroll', onScroll, { passive: true, signal: lifetime.signal });
+      const observer = new MutationObserver(() => {
+        if (virtual.isConnected) return;
+        lifetime.abort();
+        cancelAnimationFrame(frame);
+        observer.disconnect();
+        delete virtual.__gimRevealVirtual;
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    });
   }
 
   function descendantObjectCount(key: string, active = new Set<string>()): number {

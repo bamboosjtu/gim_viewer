@@ -6,6 +6,51 @@ export interface RegionalObject {
   ifcType: string;
   name: string;
   bounds: number[];
+  /**
+   * A conservative source-level classification used only for the incremental
+   * connection preview.  It is deliberately optional so cached indexes from
+   * older versions remain readable; an absent value means "ordinary asset".
+   */
+  role?: 'connection';
+}
+
+/**
+ * IFC entity evidence that can be rendered as a connection-line preview
+ * before the complete Fragments model is ready.  The classification is based
+ * on the source entity type, never on a vendor/file-name hint.  Keep this set
+ * conservative: an unknown type must stay an ordinary regional object rather
+ * than being guessed into the electrical topology.
+ */
+export const CONNECTION_IFC_TYPES = new Set([
+  'IFCCABLESEGMENT',
+  'IFCCABLECARRIERSEGMENT',
+  'IFCCABLEFITTING',
+  'IFCCABLECARRIERFITTING',
+  'IFCDUCTSEGMENT',
+  'IFCDUCTFITTING',
+  'IFCPIPESEGMENT',
+  'IFCPIPEFITTING',
+  'IFCFLOWSEGMENT',
+  'IFCFLOWFITTING',
+  'IFCROPE',
+  'IFCWIRESEGMENT',
+  'IFCCONDUCTORSEGMENT',
+]);
+
+// Some GIM exporters use IfcBuildingElementProxy for soft conductors and
+// named bus/cable objects.  The name is source entity evidence, whereas the
+// IFC file name is only a scheduling hint and must not classify geometry.
+const CONNECTION_PROXY_NAME = /导线|软导体|电缆|母线|cable|wire|conductor|busbar/i;
+
+export function isRegionalConnectionType(ifcType: string): boolean {
+  return CONNECTION_IFC_TYPES.has(String(ifcType).trim().toUpperCase());
+}
+
+export function isRegionalConnectionObject(object: RegionalObject): boolean {
+  return object.role === 'connection'
+    || isRegionalConnectionType(object.ifcType)
+    || (String(object.ifcType).trim().toUpperCase() === 'IFCBUILDINGELEMENTPROXY'
+      && CONNECTION_PROXY_NAME.test(object.name));
 }
 export interface OpeningRelation {
   id: number;
@@ -91,7 +136,9 @@ export class RegionalIndexCollector {
   constructor(
     private api: IfcAPI,
     private model: number,
-    private normalized = false
+    private normalized = false,
+    /** Called only for objects with a conservative connection role. */
+    private onConnection?: (object: RegionalObject) => void,
   ) {}
   observe = (flat: import('web-ifc').FlatMesh): void => {
     const id = flat.expressID;
@@ -140,14 +187,20 @@ export class RegionalIndexCollector {
           )
       );
     }
-    if (!bounds.isEmpty())
-      this.objects.push({
+    if (!bounds.isEmpty()) {
+      const object: RegionalObject = {
         expressId: id,
         globalId: String(entity.GlobalId.value),
         ifcType: this.api.GetNameFromTypeCode(entity.type).toUpperCase(),
         name: String(entity.Name?.value ?? ''),
         bounds: [...bounds.min.toArray(), ...bounds.max.toArray()],
-      });
+      };
+      if (isRegionalConnectionObject(object)) {
+        object.role = 'connection';
+        this.onConnection?.(object);
+      }
+      this.objects.push(object);
+    }
   };
   finish(
     semantics: Pick<RegionalIndex, 'openingRelations' | 'unitScale'>

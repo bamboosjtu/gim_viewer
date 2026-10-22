@@ -4,6 +4,22 @@ let active = 0;
 let dev = 0;
 let ifcCompleted = false;
 let ifcQueue = Promise.resolve();
+const listeners = new Set<() => void>();
+let notificationPending = false;
+function notifyAvailable(): void {
+  if (notificationPending) return;
+  notificationPending = true;
+  queueMicrotask(() => {
+    notificationPending = false;
+    for (const listener of [...listeners]) listener();
+  });
+}
+/** A pool must wake when another pool releases the shared computation gate. */
+export function onGeometryWorkAvailable(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+export function geometryWorkSnapshot() { return { ifcActive: active, devActive: dev, ifcCompleted }; }
 export const ifcGeometryBusy = () => active > 0;
 /** True once at least one IFC conversion has completed in this process. */
 export const hasCompletedIfcWork = () => ifcCompleted;
@@ -16,12 +32,12 @@ export async function beginIfcGeometryWork(): Promise<() => void> {
   await previous;
   active++;
   let released = false;
-  return () => { if (released) return; released = true; active--; ifcCompleted = true; unlock(); };
+  return () => { if (released) return; released = true; active--; ifcCompleted = true; unlock(); notifyAvailable(); };
 }
 export function beginDevGeometryWork(limit = 2): (() => void) | null {
   if (dev >= Math.max(1, Math.floor(limit))) return null;
   dev++; let released = false;
-  return () => { if (released) return; released = true; dev--; };
+  return () => { if (released) return; released = true; dev--; notifyAvailable(); };
 }
 
 /** Test-only isolation for the process-global gate. */

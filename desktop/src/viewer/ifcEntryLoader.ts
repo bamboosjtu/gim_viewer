@@ -23,6 +23,7 @@ import {
   perfSetFragmentsCacheEnabled,
 } from '../utils/perfTimings.js';
 import { registerIfcLoadDiagnostic } from './ifcLoadDiagnostics.js';
+import type { IfcRegionalConnectionBatch } from './ifcConversion.js';
 
 /**
  * Fragments 缓存版本键（P0-3）：绑定 @thatopen/fragments 与 web-ifc 包版本，
@@ -117,6 +118,9 @@ export async function loadIfcEntry(
     /** Transfer the one-shot raw IFC buffer to the conversion worker. */
     transferInput?: boolean;
     openingPolicy?: IfcOpeningPolicy;
+    /** Incremental source-evidenced connection preview batches. */
+    onRegionalBatch?: (batch: IfcRegionalConnectionBatch) => void;
+    onRegionalComplete?: (meta: { objectCount: number; sequence: number }) => void;
   } = {},
 ): Promise<void> {
   const { modelId, name, path: entryPath } = entry;
@@ -150,6 +154,8 @@ export async function loadIfcEntry(
     const model=await loadBimIfc(ctx,state,session,runtimeModelId,modelId,entryPath,getIfcBuffer,reportProgress,{
       onStage: options.onStage,
       onProfile: options.onProfile,
+      onRegionalBatch: options.onRegionalBatch,
+      onRegionalComplete: options.onRegionalComplete,
     });
     if(model)options.onLoadSource?.(model.object.userData.ifcLodCacheHit?'lod-cache':'ifc');
     return;

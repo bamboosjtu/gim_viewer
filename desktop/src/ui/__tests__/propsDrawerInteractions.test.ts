@@ -237,4 +237,29 @@ describe('属性检查器纯 DOM 交互', () => {
     await drawer.showNodePropertiesBasic(state, node);
     expect(document.querySelector('[data-reference-kind="ifc"]')).toBeNull();
   });
+  it('精化运行中允许取消，迟到成功不覆盖返回浏览状态', async () => {
+    const drawer = await import('../propsDrawer.js');
+    const state = new AppState();
+    const node: CbmNode = { path:'CBM/device.cbm', name:'设备', entityName:'F4System', children:[], famPath:'', devPath:'a.dev',
+      ifcFile:'', ifcGuid:'', classifyName:'', transformMatrix:'', systemNames:[], devSymbolName:'', devType:'', devExpanded:false };
+    state.currentCbmTree = node;
+    let finish!: () => void;
+    const refine = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    const releaseFine = vi.fn();
+    state.deviceLodRuntime = { refine, releaseFine, select:vi.fn(), clearSelection:vi.fn(), release:vi.fn(), diagnostics:{} } as any;
+    await drawer.showNodePropertiesBasic(state, node);
+    const button = document.querySelector<HTMLButtonElement>('[data-dev-refine]')!;
+    const cancel = document.querySelector<HTMLButtonElement>('[data-dev-release-fine]')!;
+    button.click();
+    expect(button.disabled).toBe(true);
+    expect(cancel.disabled).toBe(false);
+    expect(cancel.textContent).toBe('取消精化');
+    cancel.click();
+    expect(releaseFine).toHaveBeenCalledOnce();
+    finish();
+    await Promise.resolve(); await Promise.resolve();
+    expect(document.querySelector('[data-dev-refine-result]')!.textContent).toBe('已返回浏览表示');
+    expect(button.disabled).toBe(false);
+  });
+
 });

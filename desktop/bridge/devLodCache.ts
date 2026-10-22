@@ -14,11 +14,28 @@ function nativeArgs(store: string, key: string, context?: CacheContext) {
   return { projectId: context.projectId, sourceGimSha256: context.sourceSha256, entryPath: `${store}/${key}` };
 }
 /** Metadata stays JSON; GLB bytes stay binary, without a JSON numeric array. */
-export function packDevArtifact(key: string, value: any): Uint8Array {
+export interface PreparedDevArtifact {
+  readonly key: string;
+  readonly metadata: Uint8Array;
+  readonly data: Uint8Array | null;
+  /** Buffers retained before the bounded writer creates its transport copy. */
+  readonly retainedBytes: number;
+}
+export function prepareDevArtifact(key: string, value: any): PreparedDevArtifact {
   const data: Uint8Array | null = value?.result?.bytes ?? null;
+  if (data != null && !(data instanceof Uint8Array)) throw Error('DEV artifact payload must be Uint8Array');
   const json = new TextEncoder().encode(JSON.stringify({ key, value: data ? { ...value, result: { ...value.result, bytes: null } } : value }));
-  const out = new Uint8Array(4 + json.length + (data?.length ?? 0));
-  new DataView(out.buffer).setUint32(0, json.length, true); out.set(json, 4); if (data) out.set(data, 4 + json.length); return out;
+  if (json.length > 1024 * 1024) throw Error('DEV artifact metadata exceeds 1 MiB quota');
+  return {key, metadata: json, data, retainedBytes: json.byteLength + (data?.byteLength ?? 0)};
+}
+function packPreparedDevArtifact(prepared: PreparedDevArtifact): Uint8Array {
+  const out = new Uint8Array(4 + prepared.retainedBytes);
+  new DataView(out.buffer).setUint32(0, prepared.metadata.length, true); out.set(prepared.metadata, 4);
+  if (prepared.data) out.set(prepared.data, 4 + prepared.metadata.length);
+  return out;
+}
+export function packDevArtifact(key: string, value: any): Uint8Array {
+  return packPreparedDevArtifact(prepareDevArtifact(key, value));
 }
 export function unpackDevArtifact<T>(key: string, bytes: Uint8Array): T | null {
   if (!bytes.length) return null;
@@ -118,7 +135,9 @@ async function readNativeBatchRaw<T>(
 }
 
 function readNativeArtifact<T>(args: NonNullable<ReturnType<typeof nativeArgs>>, key: string): Promise<DevArtifactRead<T>> {
-  const groupKey = JSON.stringify([args.projectId, args.sourceGimSha256]);
+  // A flush derives its native paths from one store. Mixing catalog and
+  // template reads would silently query the other store with the same key.
+  const groupKey = JSON.stringify([args.projectId, args.sourceGimSha256, args.entryPath.split('/', 1)[0]]);
   let group = queuedReads.get(groupKey);
   if (!group) {
     group = { args, rows: [] }; queuedReads.set(groupKey, group);
@@ -204,12 +223,15 @@ export async function writeDevArtifactDetailed(
   key: string,
   value: unknown,
   context?: CacheContext,
+  prepared?: PreparedDevArtifact,
 ): Promise<DevArtifactWriteResult> {
+  if (prepared && prepared.key !== key) return {ok: false, error: 'prepared artifact key mismatch'};
   if (isTauri()) {
     const args = nativeArgs(store, key, context);
     if (!args) return { ok: false, error: 'missing-cache-context' };
     try {
-      await invokeTimed('write_device_lod_artifact', packBinaryCacheWrite(args.projectId, args.entryPath, packDevArtifact(key, value), args.sourceGimSha256));
+      await invokeTimed('write_device_lod_artifact', packBinaryCacheWrite(args.projectId, args.entryPath,
+        prepared ? packPreparedDevArtifact(prepared) : packDevArtifact(key, value), args.sourceGimSha256));
       return { ok: true };
     } catch (error) {
       return { ok: false, error: String(error) };

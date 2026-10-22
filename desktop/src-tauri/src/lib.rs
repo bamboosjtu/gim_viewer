@@ -294,6 +294,7 @@ struct ProcessMemorySnapshot {
     source: String,
     rss_source: String,
     process_tree_rss_bytes: Option<u64>,
+    process_tree_private_bytes: Option<u64>,
     process_count: Option<u32>,
     process_tree_available: bool,
     process_tree_source: String,
@@ -333,6 +334,7 @@ mod windows_process_tree {
         quota_non_paged_pool_usage: usize,
         pagefile_usage: usize,
         peak_pagefile_usage: usize,
+        private_usage: usize,
     }
 
     #[repr(C)]
@@ -363,13 +365,14 @@ mod windows_process_tree {
     extern "system" {
         fn GetProcessMemoryInfo(
             process: *mut c_void,
-            counters: *mut ProcessMemoryCounters,
+            counters: *mut c_void,
             size: u32,
         ) -> i32;
     }
 
     pub(super) struct Snapshot {
         pub(super) rss_bytes: Option<u64>,
+        pub(super) private_bytes: Option<u64>,
         pub(super) process_count: Option<u32>,
         pub(super) available: bool,
         pub(super) source: String,
@@ -379,6 +382,7 @@ mod windows_process_tree {
     fn unavailable(reason: impl Into<String>) -> Snapshot {
         Snapshot {
             rss_bytes: None,
+            private_bytes: None,
             process_count: None,
             available: false,
             source: "windows-process-tree-unavailable".to_string(),
@@ -386,7 +390,7 @@ mod windows_process_tree {
         }
     }
 
-    fn query_rss(handle: *mut c_void) -> Option<u64> {
+    fn query_rss(handle: *mut c_void) -> Option<(u64, u64)> {
         // SAFETY: the handle comes from OpenProcess and the output struct is
         // initialized to the exact shape required by GetProcessMemoryInfo.
         unsafe {
@@ -401,9 +405,10 @@ mod windows_process_tree {
                 quota_non_paged_pool_usage: 0,
                 pagefile_usage: 0,
                 peak_pagefile_usage: 0,
+                private_usage: 0,
             };
-            if GetProcessMemoryInfo(handle, &mut counters, counters.cb) != 0 {
-                Some(counters.working_set_size as u64)
+            if GetProcessMemoryInfo(handle, &mut counters as *mut _ as *mut c_void, counters.cb) != 0 {
+                Some((counters.working_set_size as u64, counters.private_usage as u64))
             } else {
                 None
             }
@@ -467,6 +472,7 @@ mod windows_process_tree {
         }
 
         let mut total_rss = 0u64;
+        let mut total_private = 0u64;
         for process_id in &process_ids {
             // SAFETY: OpenProcess receives a PID returned by the process
             // snapshot.  The handle is closed immediately after querying it.
@@ -478,17 +484,22 @@ mod windows_process_tree {
             }
             let rss = query_rss(handle);
             unsafe { CloseHandle(handle); }
-            let Some(rss) = rss else {
+            let Some((rss, private)) = rss else {
                 return unavailable(format!("GetProcessMemoryInfo-failed:{}", process_id));
             };
             let Some(next_total) = total_rss.checked_add(rss) else {
                 return unavailable("process-tree-rss-overflow");
             };
             total_rss = next_total;
+            let Some(next_private) = total_private.checked_add(private) else {
+                return unavailable("process-tree-private-overflow");
+            };
+            total_private = next_private;
         }
 
         Snapshot {
             rss_bytes: Some(total_rss),
+            private_bytes: Some(total_private),
             process_count: Some(process_ids.len() as u32),
             available: true,
             source: "windows-process-tree-working-set".to_string(),
@@ -499,6 +510,7 @@ mod windows_process_tree {
 
 struct ProcessTreeSnapshot {
     rss_bytes: Option<u64>,
+    private_bytes: Option<u64>,
     process_count: Option<u32>,
     available: bool,
     source: String,
@@ -510,6 +522,7 @@ fn process_tree_snapshot(pid: u32) -> ProcessTreeSnapshot {
     let snapshot = windows_process_tree::snapshot(pid);
     ProcessTreeSnapshot {
         rss_bytes: snapshot.rss_bytes,
+        private_bytes: snapshot.private_bytes,
         process_count: snapshot.process_count,
         available: snapshot.available,
         source: snapshot.source,
@@ -521,10 +534,26 @@ fn process_tree_snapshot(pid: u32) -> ProcessTreeSnapshot {
 fn process_tree_snapshot(_pid: u32) -> ProcessTreeSnapshot {
     ProcessTreeSnapshot {
         rss_bytes: None,
+        private_bytes: None,
         process_count: None,
         available: false,
         source: "unavailable-non-windows".to_string(),
         reason: Some("process-tree-enumeration-not-implemented".to_string()),
+    }
+}
+
+#[cfg(all(test, windows))]
+mod memory_private_tests {
+    #[test]
+    fn reads_private_commit_for_current_process_tree() {
+        // Touch pages so this checks committed memory, not just a reserved VA.
+        let committed = vec![17u8; 16 * 1024 * 1024];
+        std::hint::black_box(&committed);
+        let snapshot = super::process_tree_snapshot(super::current_process_id());
+        assert!(snapshot.available, "{:?}", snapshot.reason);
+        assert!(snapshot.rss_bytes.unwrap() > 0);
+        assert!(snapshot.private_bytes.unwrap() >= committed.len() as u64);
+        assert_eq!(snapshot.source, "windows-process-tree-working-set");
     }
 }
 
@@ -555,7 +584,7 @@ fn current_process_rss_bytes() -> Option<u64> {
     extern "system" {
         fn GetProcessMemoryInfo(
             process: *mut c_void,
-            counters: *mut ProcessMemoryCounters,
+            counters: *mut c_void,
             size: u32,
         ) -> i32;
     }
@@ -575,7 +604,7 @@ fn current_process_rss_bytes() -> Option<u64> {
             pagefile_usage: 0,
             peak_pagefile_usage: 0,
         };
-        if GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) != 0 {
+        if GetProcessMemoryInfo(GetCurrentProcess(), &mut counters as *mut _ as *mut c_void, counters.cb) != 0 {
             Some(counters.working_set_size as u64)
         } else {
             None
@@ -620,6 +649,7 @@ fn get_process_memory() -> ProcessMemorySnapshot {
         rss_source: source.clone(),
         source,
         process_tree_rss_bytes: tree.rss_bytes,
+        process_tree_private_bytes: tree.private_bytes,
         process_count: tree.process_count,
         process_tree_available: tree.available,
         process_tree_source: tree.source,

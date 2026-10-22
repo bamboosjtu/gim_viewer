@@ -5,6 +5,10 @@ import type { IfcConversionInput, IfcConversionOutput } from './ifcConversionWor
 import { perfBegin } from '../utils/perfTimings.js';
 import type { IfcOpeningPolicy } from '../config/features.js';
 import type { RegionalIndex } from './ifcRegionalData.js';
+export { IFC_CONNECTION_BATCH_MAX_OBJECTS, IFC_CONNECTION_BATCH_MAX_BYTES } from './ifcConnectionBatches.js';
+
+/** A bounded, ordered batch of source-evidenced connection objects. */
+export type IfcRegionalConnectionBatch = import('./ifcConnectionBatches.js').ConnectionGeometryBatch;
 
 const activeConversions = new Set<() => void>();
 
@@ -19,7 +23,13 @@ export async function loadRawIfc(
   ctx: ViewerContext, state: AppState, session: ProjectLoadSession,
   buffer: Uint8Array, runtimeModelId: string, entryPath: string,
   onProgress?: (progress: number) => void, perfSessionId?: number,
-  options: { transferInput?: boolean; openingPolicy?: IfcOpeningPolicy; onFarArtifact?:(bytes:Uint8Array<ArrayBuffer>,index:RegionalIndex)=>void } = {},
+  options: {
+    transferInput?: boolean;
+    openingPolicy?: IfcOpeningPolicy;
+    onFarArtifact?:(bytes:Uint8Array<ArrayBuffer>,index:RegionalIndex)=>void;
+    onRegionalBatch?: (batch: IfcRegionalConnectionBatch) => void;
+    onRegionalComplete?: (meta: { objectCount: number; sequence: number }) => void;
+  } = {},
 ) {
   const isCurrent = () => state.isCurrentSession(session);
   if (!isCurrent()) return;
@@ -38,7 +48,10 @@ export async function loadRawIfc(
       let worker: Worker;
       try { worker = new Worker(new URL('./ifcConversionWorker.ts', import.meta.url), { type: 'module' }); }
       catch (error) { reject(error); return; }
+      let finished = false;
       const finish = (error?: Error, bytes?: Uint8Array<ArrayBuffer>) => {
+        if (finished) return;
+        finished = true;
         activeConversions.delete(cancel);
         if (watchdog) { clearInterval(watchdog); watchdog = null; }
         worker.onmessage = null; worker.onerror = null; worker.onmessageerror = null;
@@ -56,15 +69,48 @@ export async function loadRawIfc(
         finish(new Error('IFC 转换超过 180 秒无进度，已中止；可重试或在设置中跳过超大文件'));
       }, 15000);
       worker.onmessage = (event: MessageEvent<IfcConversionOutput>) => {
+        if (finished) return;
         if (!isCurrent()) { cancel(); return; }
-        const response = event.data;
-        if (response.type === 'progress') { lastProgressAt = performance.now(); onProgress?.(response.progress); return; }
-        if (response.type === 'error') {
-          const error = new Error(response.message); error.stack = response.stack ?? error.stack;
-          finish(error);
-        } else { removedOpeningRelations = response.removedOpeningRelations ?? 0;coldPipeline=response.coldPipeline;
-          if(response.regionalIndex)options.onFarArtifact?.(response.bytes,response.regionalIndex);
-          finish(undefined, response.bytes); }
+        try {
+          const response = event.data;
+          if (response.type === 'progress') { lastProgressAt = performance.now(); onProgress?.(response.progress); return; }
+          if (response.type === 'regional-batch') {
+            lastProgressAt = performance.now();
+            options.onRegionalBatch?.({
+              sequence: response.sequence,
+              objects: response.objects,
+              chunks: response.chunks,
+              bytes: response.bytes,
+              final: response.final,
+            });
+            // Acknowledge after the bounded scene operation has yielded a turn.
+            setTimeout(() => {
+              if (finished || !isCurrent()) return;
+              try { worker.postMessage({ type: 'connection-consumed', sequence: response.sequence }); }
+              catch (error) { finish(error instanceof Error ? error : Error(String(error))); }
+            }, 0);
+            return;
+          }
+          if (response.type === 'regional-complete') {
+            lastProgressAt = performance.now();
+            options.onRegionalComplete?.({ objectCount: response.objectCount, sequence: response.sequence });
+            return;
+          }
+          if (response.type === 'error') {
+            const error = new Error(response.message); error.stack = response.stack ?? error.stack;
+            finish(error);
+          } else {
+            removedOpeningRelations = response.removedOpeningRelations ?? 0;
+            coldPipeline = response.coldPipeline;
+            if (response.regionalIndex) options.onFarArtifact?.(response.bytes, response.regionalIndex);
+            finish(undefined, response.bytes);
+          }
+        } catch (error) {
+          // Consumer callbacks are part of this task. A failed progress,
+          // preview or artifact consumer must release its Worker and gate
+          // immediately rather than leaving the next IFC behind a watchdog.
+          finish(error instanceof Error ? error : new Error(String(error)));
+        }
       };
       worker.onerror = (event) => finish(new Error(event.message || 'IFC conversion worker failed'));
       worker.onmessageerror = () => finish(new Error('IFC conversion worker returned unreadable data'));

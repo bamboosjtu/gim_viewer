@@ -11,6 +11,7 @@ export class IfcObjectFineRuntime {
   private opened:Promise<unknown>|null=null;
   private tasks=new Map<number,{globalId:string;task:Promise<ObjectFineResult>}>();
   private released=false;
+  private generation=0;
   private idle:ReturnType<typeof setTimeout>|null=null;
   constructor(private options:{wasm:{path:string;absolute:boolean};readBytes:()=>Promise<Uint8Array|null>;
     webIfcSettings?:LoaderSettings;
@@ -25,9 +26,10 @@ export class IfcObjectFineRuntime {
   }
   private async open():Promise<void>{
     if(this.released)throw new Error('Object fine released');
+    const generation=this.generation;
     const started=performance.now();
     const bytes=await this.options.readBytes();
-    if(this.released)throw new Error('Object fine released');
+    if(this.released || generation!==this.generation)throw new DOMException('Object fine cancelled','AbortError');
     if(!bytes)throw new Error('IFC source not materialized');
     this.options.onTiming?.({stage:'source-read',durationMs:performance.now()-started,rawBytes:bytes.byteLength});
     this.worker=this.options.worker?.()??new Worker(new URL('./ifcObjectFineWorker.ts',import.meta.url),{type:'module'});
@@ -40,19 +42,26 @@ export class IfcObjectFineRuntime {
     if(this.released)return Promise.reject(new Error('Object fine released'));
     if(this.idle){clearTimeout(this.idle);this.idle=null;}
     const existing=this.tasks.get(object.expressId);if(existing)return existing.globalId===object.globalId?existing.task:Promise.reject(new Error('IFC object identity mismatch'));
-    if(!this.opened)this.opened=this.open().catch(error=>{this.stop(error);throw error;});
-    const task=this.opened.then(()=>this.send({type:'object',expressId:object.expressId,globalId:object.globalId})).then((result:ObjectFineResult)=>{
+    const generation=this.generation;
+    if(!this.opened)this.opened=this.open().catch(error=>{if(generation===this.generation)this.stop(error);throw error;});
+    const task=this.opened.then(()=>{
+      if(generation!==this.generation)throw new DOMException('Object fine cancelled','AbortError');
+      return this.send({type:'object',expressId:object.expressId,globalId:object.globalId});
+    }).then((result:ObjectFineResult)=>{
       this.options.onTiming?.({stage:'object',expressId:object.expressId,geometryMs:result.geometryMs,wasmHeapBytes:result.wasmHeapBytes});
       this.armIdle();return result;
     });
     this.tasks.set(object.expressId,{globalId:object.globalId,task});
-    void task.catch(()=>{this.tasks.delete(object.expressId);});return task;
+    void task.catch(()=>{if(this.tasks.get(object.expressId)?.task===task)this.tasks.delete(object.expressId);});return task;
   }
   hasModel():boolean{return !!this.opened;}
   forget(expressId:number):void {this.tasks.delete(expressId);}
+  /** The owner calls this after dropping its last consumer. A synchronous
+   * WASM call is interruptible only by terminating its dedicated worker. */
+  cancel():void {this.stop(new DOMException('IFC precision request cancelled','AbortError'));}
   private armIdle():void {if(this.idle)clearTimeout(this.idle);if(!this.released&&this.worker&&this.pending.size===0)this.idle=setTimeout(()=>this.stop(new Error('Object metadata idle released')),60000);}
   properties(expressId:number):Promise<any>{if(this.idle){clearTimeout(this.idle);this.idle=null;}return Promise.resolve(this.opened).then(()=>this.send({type:'properties',expressId})).finally(()=>this.armIdle());}
-  private stop(error:Error):void {if(this.idle){clearTimeout(this.idle);this.idle=null;}this.worker?.terminate();this.worker=null;for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(error);}this.pending.clear();this.opened=null;this.tasks.clear();this.options.onTiming?.({stage:'released',reason:error.message,wasmHeapBytes:0});}
+  private stop(error:Error):void {this.generation++;if(this.idle){clearTimeout(this.idle);this.idle=null;}this.worker?.terminate();this.worker=null;for(const p of this.pending.values()){clearTimeout(p.timer);p.reject(error);}this.pending.clear();this.opened=null;this.tasks.clear();this.options.onTiming?.({stage:'released',reason:error.message,wasmHeapBytes:0});}
   release():void {this.released=true;this.stop(new Error('Object fine released'));}
 }
 

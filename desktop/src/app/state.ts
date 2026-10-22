@@ -16,6 +16,22 @@ import type { StdSldIndex } from '../gim/stdSldIndex.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
 import { createIfcRuntimeModelId } from '../gim/modelIdentity.js';
 import type { GeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
+import type { ViewerViewHistory } from '../viewer/viewHistory.js';
+
+export interface SubstationFineQueue {
+  enqueueUserIfcFine(key: string, run: () => Promise<void>): { promise: Promise<void>; cancel: () => boolean };
+}
+
+/** Session-owned incremental IFC connection preview; optional in browser tests. */
+export interface SubstationConnectionPreview {
+  acceptBatch(batch: unknown): boolean;
+  markComplete(modelId: string, meta: { objectCount: number; sequence: number }): void;
+  markFailed?(modelId: string): void;
+  markModelReady(modelId: string): void;
+  setTransform?(matrix: THREE.Matrix4): void;
+  diagnostics?: Record<string, number>;
+  release(): void;
+}
 
 /** 工程异步任务携带的不可变身份快照。 */
 export interface ProjectLoadSession {
@@ -48,7 +64,19 @@ export interface SelectionGeometryState {
 /** 应用全局状态（由 bootstrap.ts 创建唯一实例，通过参数注入各模块） */
 export class AppState {
   deviceUnknownBounds = new Set<string>();
-  deviceLodRuntime: { select(rootOccurrence: string): Promise<THREE.Group[]>; release(): void; clearSelection(): void; notifyCoordinateAnchor?(): void;
+  /** Session-owned priority lane for explicit IFC precision requests. */
+  substationFineQueue: SubstationFineQueue | null = null;
+  /** Cheap connection-line previews are discarded with the project session. */
+  substationConnectionPreview: SubstationConnectionPreview | null = null;
+  substationResourceMonitor: { release(): void } | null = null;
+  substationMemoryPressure: import('../utils/memoryPressure.js').MemoryPressure = 'unknown';
+  viewHistory: ViewerViewHistory | null = null;
+  stationOverview: (() => void) | null = null;
+  onlySelected = false;
+  deviceLodRuntime: { select(rootOccurrence: string): Promise<THREE.Group[]>; ensureBase?(rootOccurrence: string): Promise<THREE.Group[]>; retry?(rootOccurrence: string): Promise<THREE.Group[]>; refine?(rootOccurrence: string): Promise<THREE.Group[]>; releaseFine?(rootOccurrence: string): void; setOnlySelected?(only: boolean): void; release(): void; clearSelection(): void; notifyCoordinateAnchor?(): void;
+    setBackgroundPaused?(paused: boolean): void;
+    pick?(ray: THREE.Raycaster): {rootOccurrence: string; instanceKey: string; distance: number} | null;
+    setExternalMemoryPressure?(pressure: 'unknown' | 'normal' | 'high' | 'critical'): void;
     resourceCounts?(): { templateCount: number; templateParseCount: number; sharedGeometryCount: number; sharedMaterialCount: number; sharedTextureCount: number };
     diagnostics: Record<string, unknown> } | null = null;
   selectionRequest: SelectionRequest | null = null;
@@ -60,9 +88,12 @@ export class AppState {
   beginSelection(target: SelectionRequest['target']): SelectionRequest {
     this.selectionAbort?.abort();
     this.deviceLodRuntime?.clearSelection();
+    for (const runtime of this.ifcRegionalRuntimes.values()) { runtime.clearFineSelection?.(); runtime.clearSelectionFilter?.(); }
     this.selectionAbort = new AbortController();
     const request: SelectionRequest = { id: ++this.selectionSequence, session: this.captureProjectSession(), signal: this.selectionAbort.signal, target };
     this.selectionRequest = request;
+    this.deviceLodRuntime?.setOnlySelected?.(this.onlySelected);
+    for (const runtime of this.ifcRegionalRuntimes.values()) runtime.setOnlySelected?.(this.onlySelected);
     this.selectionGeometry = null;
     this.selectionMessage = '';
     return request;
@@ -78,10 +109,18 @@ export class AppState {
 
   invalidateSelection(): void {
     this.selectionAbort?.abort();
+    for (const runtime of this.ifcRegionalRuntimes.values()) { runtime.clearFineSelection?.(); runtime.clearSelectionFilter?.(); }
     this.selectionSequence++;
     this.selectionRequest = null;
     this.selectionGeometry = null;
     this.selectionMessage = '';
+  }
+  /** Session-only visibility filter for focused browser inspection. */
+  setOnlySelected(only: boolean): void {
+    this.onlySelected = only;
+    this.deviceLodRuntime?.setOnlySelected?.(only);
+    for (const runtime of this.ifcRegionalRuntimes.values()) runtime.setOnlySelected?.(only);
+    this.viewHistory?.recordVisibility();
   }
   // GIM 文件相关
   currentFiles: Map<string, File> | null = null;
@@ -219,7 +258,14 @@ export class AppState {
 
   /** 使所有在途工程/几何任务失效；必须在切换工程的第一个同步动作调用。 */
   invalidatePendingLoads(): void {
+    this.substationResourceMonitor?.release(); this.substationResourceMonitor = null;
+    this.substationMemoryPressure = 'unknown';
     this.deviceLodRuntime?.release(); this.deviceLodRuntime = null;
+    this.substationFineQueue = null;
+    this.substationConnectionPreview?.release(); this.substationConnectionPreview = null;
+    this.viewHistory?.clear();
+    this.stationOverview = null;
+    this.onlySelected = false;
     this.invalidateSelection();
     this.releaseIfcRuntimes();
     this.projectGeneration += 1;
@@ -228,6 +274,13 @@ export class AppState {
 
   /** 激活新工程并返回其身份快照。 */
   activateProject(projectId: number | null, sourceSha256?: string | null): ProjectLoadSession {
+    this.substationResourceMonitor?.release(); this.substationResourceMonitor = null;
+    this.substationMemoryPressure = 'unknown';
+    this.substationFineQueue = null;
+    this.substationConnectionPreview?.release(); this.substationConnectionPreview = null;
+    this.viewHistory?.clear();
+    this.stationOverview = null;
+    this.onlySelected = false;
     this.invalidateSelection();
     this.releaseIfcRuntimes();
     this.projectGeneration += 1;
@@ -331,7 +384,14 @@ export class AppState {
    * ctx.fragments 中的实际模型需由 projectCleanupService 在调用本方法前显式 dispose。
    */
   resetGimState() {
+    this.substationResourceMonitor?.release(); this.substationResourceMonitor = null;
+    this.substationMemoryPressure = 'unknown';
     this.deviceUnknownBounds.clear();
+    this.substationFineQueue = null;
+    this.substationConnectionPreview?.release(); this.substationConnectionPreview = null;
+    this.viewHistory?.clear();
+    this.stationOverview = null;
+    this.onlySelected = false;
     this.releaseIfcRuntimes();
     this.invalidateSelection();
     this.currentFiles = null;

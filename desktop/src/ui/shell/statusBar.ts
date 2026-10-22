@@ -50,6 +50,16 @@ export function setIfcStatus(text: string): void {
   if (el) { el.textContent = text; el.hidden = !text; }
 }
 
+/** Incremental IFC connection status is independent from device and IFC file progress. */
+export function setConnectionStatus(text: string): void {
+  let el = document.getElementById('status-connections');
+  if (!el && text) {
+    const sibling = document.getElementById('status-ifc') ?? document.getElementById('status-devices');
+    if (sibling?.parentElement) { el = document.createElement('span'); el.id = 'status-connections'; sibling.after(el); }
+  }
+  if (el) { el.textContent = text; el.hidden = !text; el.title = text; }
+}
+
 /** 更新右侧统计文本（工程统计 / 版本等） */
 export function setStatusRight(text: string): void {
   const el = document.getElementById('status-right');
@@ -63,6 +73,18 @@ export function setDeviceStatus(text: string, detail?: string): void {
   const display = businessDeviceCount === null ? text : `设备节点 ${businessDeviceCount}${text ? ` · ${text}` : ''}`;
   const explanation = businessDeviceCount === null ? '' : '设备节点包含装配内部的独立功能单元；几何实例统计整机装配根，两者不是一一对应。';
   if (el) { el.textContent = display; el.title = [display,explanation,detail].filter(Boolean).join('\n'); el.hidden = !display; }
+  let pause = document.getElementById('status-device-pause') as HTMLButtonElement | null;
+  if (!pause && el?.parentElement) {
+    pause = document.createElement('button'); pause.id = 'status-device-pause'; pause.type = 'button';
+    pause.className = 'status-device-pause'; pause.addEventListener('click', () => window.dispatchEvent(new Event('gim-toggle-background-detail')));
+    el.after(pause);
+  }
+  if (pause) {
+    pause.hidden = !display;
+    const paused = display.includes('已暂停后台细化');
+    pause.textContent = paused ? '继续后台细化' : '暂停后台细化';
+    pause.title = paused ? '继续自动 L1 细化；基础表示仍保持可浏览' : '暂停自动 L1 细化；基础表示和连接线继续加载';
+  }
 }
 
 /** Semantic equipment count is independent from renderable occurrences. */
@@ -76,6 +98,7 @@ export function resetStatusRight(): void {
   busyTasks.clear();
   businessDeviceCount = null;
   setIfcStatus('');
+  setConnectionStatus('');
   setStatus('就绪');
   setStatusRight(DEFAULT_STATUS_RIGHT);
   setDeviceStatus('');

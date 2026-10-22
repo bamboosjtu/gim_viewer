@@ -16,6 +16,9 @@ import {
   perfMarkProductMoment,
   perfProductMomentSnapshot,
   perfRecordMemorySample,
+  perfRecordTaskPhase,
+  perfMeasureTaskPhase,
+  perfTaskPhaseSnapshot,
   perfRecordRuntimeResourceSnapshot,
   perfRecordDevGeometryProfile,
   perfRuntimeResourceSnapshot,
@@ -293,6 +296,65 @@ describe('perfTimings', () => {
     expect(snapshot.cleanupProfile[0]?.meta).toMatchObject({ entryPath: 'a.ifc' });
     expect(snapshot.devGeometryProfile[0]?.fallbackDevPaths).toEqual(['bad.dev']);
     expect(snapshot.memorySamples[0]?.meta).toMatchObject({ entryPath: 'a.ifc' });
+  });
+
+  it('keeps session private peak after the bounded sample window rolls over', () => {
+    perfRecordMemorySample('peak', { processTreePrivateBytes: 1000, processTreeAvailable: true });
+    for (let i = 0; i < 600; i++) {
+      perfRecordMemorySample('later', { processTreePrivateBytes: 100, processTreeAvailable: true });
+    }
+    perfRecordMemorySample('unavailable', { processTreePrivateBytes: 5000, processTreeAvailable: false });
+    expect(perfSnapshot().memory).toHaveLength(512);
+    expect(perfSnapshot().memory[0]?.label).toBe('later');
+    expect(perfSnapshot().processTreePrivatePeakBytes).toBe(1000);
+    expect(perfBenchmarkSnapshot().processTreePrivatePeakBytes).toBe(1000);
+    perfReset();
+    expect(perfSnapshot().processTreePrivatePeakBytes).toBeNull();
+  });
+
+  it('aggregates task phases with bounded slow samples, honest failure status and no default per-task spans', async () => {
+    const session = perfCurrentSession();
+    const identity = {taskId:'template-1',domain:'dev' as const,kind:'compile',sourcePath:'MOD/a.mod',lod:0,priority:1};
+    for (let i=0;i<2000;i++) perfRecordTaskPhase({...identity,taskId:String(i)},'workerWall',100+i,session);
+    const failed = perfMeasureTaskPhase(identity, 'cacheRead', async()=>{throw Error('read failed');}, session);
+    await expect(failed).rejects.toThrow('read failed');
+    await expect(perfMeasureTaskPhase(identity, 'queue', async()=>{throw new DOMException('cancel','AbortError');}, session)).rejects.toThrow('cancel');
+    perfRecordTaskPhase(identity,'bad',Number.NaN,session);
+    const snapshot=perfTaskPhaseSnapshot();
+    expect(snapshot.totals['dev:compile:workerWall']).toMatchObject({count:2000,maxMs:2099});
+    expect(snapshot.totals['dev:compile:cacheRead'].failed).toBe(1);
+    expect(snapshot.totals['dev:compile:queue'].cancelled).toBe(1);
+    expect(snapshot.slowSamples).toHaveLength(32);
+    expect(snapshot.slowSamples[0]).toMatchObject({taskId:'template-1',phase:'cacheRead',status:'failed',sessionId:session.id});
+    expect(snapshot.cpuTimeAvailable).toBe(false);
+    expect(perfSnapshot().spans).toHaveLength(0);
+    snapshot.slowSamples[0].taskId='mutated';
+    expect(perfTaskPhaseSnapshot().slowSamples[0].taskId).toBe('template-1');
+    perfReset(); perfRecordTaskPhase(identity,'late',100,session);
+    expect(perfTaskPhaseSnapshot().totals).toEqual({});
+  });
+
+  it('enables correlated task spans only for an explicitly enabled diagnostic session', () => {
+    localStorage.setItem('GIM_PERF_TASK_TRACE','1');
+    try {
+      perfReset();
+      const identity = {taskId:'same-task',domain:'dev' as const,kind:'template',sourcePath:'D:/private/device.dev',cacheSource:'disk' as const};
+      perfRecordTaskPhase(identity,'cacheRead',5);
+      expect(perfSnapshot().spans[0]).toMatchObject({label:'DEV task · cacheRead',meta:{taskId:'same-task',sourcePath:identity.sourcePath,cacheSource:'disk'}});
+      expect(perfBenchmarkSnapshot().taskPhases.detailedTraceEnabled).toBe(true);
+    } finally {localStorage.removeItem('GIM_PERF_TASK_TRACE');perfReset();}
+  });
+
+  it('reports trace eviction while keeping phase totals for the whole session', () => {
+    localStorage.setItem('GIM_PERF_TASK_TRACE','1');
+    try {
+      perfReset();
+      for (let i=0;i<9000;i++) perfRecordTaskPhase({taskId:String(i),domain:'dev',kind:'template',sourcePath:'a.dev'},'cacheRead',0);
+      const phases=perfTaskPhaseSnapshot();
+      expect(phases.totals['dev:template:cacheRead'].count).toBe(9000);
+      expect(phases.spanWindow.evicted).toBeGreaterThan(0);
+      expect(perfSnapshot().spans.length).toBeLessThanOrEqual(phases.spanWindow.limit);
+    } finally {localStorage.removeItem('GIM_PERF_TASK_TRACE');perfReset();}
   });
 
   it('Fragments cache 操作、字节和命中/未命中/回退按会话汇总', () => {

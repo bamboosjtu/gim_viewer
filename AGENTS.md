@@ -81,7 +81,7 @@ crates/tauri-plugin-gim-import/ # Android SAF 流式导入
 - **变电证据边界**：原始 CBM 字段、FAM 原行/内部键/标签、设计文档来源独立保留。`gim/substationEvidence.ts` 提供能力摘要、IFC evidence、PARTINDEX identity alias 和 UUID GL sidecar 投影；摘要只描述文件事实，不决定解析分支。不得按厂商名称选择 parser。
 - **变电几何契约**：PARTINDEX → child DEV 按 OBJECTMODELPOINTER 身份关联，不能按数组序号，PARTINDEX/DEV_SUBDEVICE 不作为第二个 seed。PHM 按扩展名递归、逐边累积矩阵、分支防环；cold/缓存查询/raw fallback 采用同一引用语义。不得假定 DEV=PHM=MOD、STL 必备。同 UUID `.gl` 是可选辅助来源，不自动加入 SOLIDMODEL 主链；SCH/STD/SLD 也是可选能力。
 - **打开流程**：源身份/SHA/magic → validate_gim_cache → 分域恢复 / 未命中解压（原生或 WASM）→ 类型分支；源 magic 不由缓存覆盖
-- **变电首开**：loadAllIfcFiles 自动加载全部 IFC → 渐进式 DEV GLB 管线后台任务（serializeDevToGlb → 落盘 → 渐进渲染；token 防竞态；失败不写版本标记）
+- **变电首开**：核心语义可用后，DEV 目录/基础编译与 IFC 加载并行；DEV 场景放置等待真实坐标锚点，结果提交与缓存落盘有独立预算，显示不等待缓存写完。普通选择、搜索和相机靠近只请求 L0/L1，DEV/IFC L2 由属性面板明确请求；token 与 SelectionRequest 防旧结果提交，失败不写完整缓存标记。
 - **线路首开**：buildLineGimGraph → parseLineAttributes → 三阶段分块入库（begin/chunks/finish，finish 才提交 parser_version）→ Canvas/MapLibre 地图
 - **性能埋点**：utils/perfTimings.ts，Ctrl+Shift+D 诊断 JSON 含 timings 字段
 

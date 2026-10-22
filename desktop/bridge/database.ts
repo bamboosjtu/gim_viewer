@@ -224,6 +224,8 @@ export interface ProcessMemorySnapshot {
   source: string;
   rssSource?: string;
   processTreeRssBytes: number | null;
+  /** Windows PROCESS_MEMORY_COUNTERS_EX.PrivateUsage summed over descendants. */
+  processTreePrivateBytes?: number | null;
   processCount: number | null;
   processTreeAvailable: boolean;
   processTreeSource?: string;

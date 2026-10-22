@@ -3,6 +3,7 @@ import type { ViewerContext } from './viewerEngine.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import type { SelectionCommitGuard } from '../app/state.js';
+import {isDevRenderBatch} from './devInstanceBatches.js';
 
 /** 将相机定位到场景包围盒 */
 export function fitCameraToScene(
@@ -52,7 +53,7 @@ function sceneMeshBounds(ctx: ViewerContext): THREE.Box3 {
   const boxes: Array<{ box: THREE.Box3; size: number }> = [];
   scene.traverse((object: THREE.Object3D) => {
     const mesh = object as THREE.Mesh;
-    if (!mesh.isMesh || !mesh.geometry) return;
+    if (!mesh.isMesh || !mesh.geometry || isDevRenderBatch(mesh)) return;
     const geometry = mesh.geometry as THREE.BufferGeometry;
     if (!geometry.boundingBox) geometry.computeBoundingBox?.();
     if (!geometry.boundingBox) return;

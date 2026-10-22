@@ -1,4 +1,4 @@
-import { setIfcStatus } from '../ui/shell/statusBar.js';
+import { setConnectionStatus, setIfcStatus } from '../ui/shell/statusBar.js';
 import type { IfcEntry, CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
@@ -41,7 +41,7 @@ import {
   perfRecordDevGeometryProfile,
   type PerfSession,
 } from '../utils/perfTimings.js';
-import { sampleSubstationRuntimeResources, scheduleSubstationResourceCheckpoint } from './substationResourceTelemetry.js';
+import { sampleSubstationRuntimeResources, scheduleSubstationResourceCheckpoint, startSubstationResourceMonitor } from './substationResourceTelemetry.js';
 import { showLoading, hideLoading } from './gimOpenCore.js';
 
 
@@ -217,6 +217,18 @@ async function renderSubstationCoreUi(
     ifcModels: state.currentIfcEntries.length,
     spatialIndex: state.substationSpatialIndex != null,
   });
+  // DOM readiness is independent from the first usable 3D representation.
+  // This does not certify paint or input latency; native acceptance verifies
+  // the visible tree/search separately. Later enrichment keeps the first mark.
+  if (state.isCurrentSession(session) && state.currentCbmTree) {
+    perfMarkProductMoment('navigationUiReady', {
+      cbmNodes: collectCbmNodeCount(state.currentCbmTree),
+      ifcEntries: state.currentIfcEntries.length,
+      stage: label,
+      scope: 'navigation-dom',
+      inputLatencyVerified: false,
+    }, perfSession);
+  }
 }
 
 async function buildAndCommitSubstationSpatialSemantic(
@@ -836,6 +848,10 @@ export async function loadAllIfcFiles(
       }, perfSession);
     },
   });
+  // Keep explicit IFC precision requests on the same session-owned priority
+  // lane as the background DEV/Spatial work.  The queue remains an optional
+  // state capability so browser-only and legacy loader paths keep working.
+  state.substationFineQueue = background;
   let devGeometryQueued = false;
   background.registerRemainingIfc();
   state.beginIfcBackgroundLoading();
@@ -868,6 +884,36 @@ export async function loadAllIfcFiles(
   const runtime = await getViewerRuntimeWithUI(state, showMessage);
   if (!isCurrent()) return;
   const { ctx, modelCallbacks } = runtime;
+  startSubstationResourceMonitor(state, ctx);
+  // Connection previews are additive and session-owned.  They are fed by the
+  // IFC conversion worker's source-type batches and disappear as soon as the
+  // authoritative Fragments model for that IFC is ready.
+  const { IfcConnectionPreviewRuntime } = await import('../viewer/ifcConnectionPreviewRuntime.js');
+  const connectionPreview = new IfcConnectionPreviewRuntime(
+    ctx,
+    session,
+    isCurrent,
+  );
+  state.substationConnectionPreview = connectionPreview;
+  const connectionFirstBatches = new Set<string>();
+  const connectionCompletions = new Set<string>();
+  const updateConnectionStatus = (): void => {
+    const d = connectionPreview.diagnostics;
+    if (d.objects === 0 && d.batches === 0 && d.partialModels === 0) {
+      setConnectionStatus('');
+      return;
+    }
+    const completed = d.completeModels > 0 ? ` · ${d.completeModels} 个 IFC 已完成` : ' · 增量加载中';
+    const partial = d.partialModels > 0 ? ` · 部分 ${d.partialModels}` : '';
+    setConnectionStatus(`连接线 ${d.objects} 个 · 源几何增量显示${completed}${partial}`);
+  };
+  if (state.projectSourceToViewerMatrix) connectionPreview.setTransform?.(state.projectSourceToViewerMatrix);
+  state.stationOverview = () => {
+    if (!state.isCurrentSession(session) || state.currentProjectType === 'transmission_line') return;
+    void import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
+      if (state.isCurrentSession(session)) fitCameraToStationOverview(ctx, state, { force: true, distanceFactor: 1.7 });
+    });
+  };
   endEngine();
 
   // DEV templates are local, independent of the first IFC's coordinate anchor.
@@ -907,6 +953,7 @@ export async function loadAllIfcFiles(
       if (!isCurrent()) return;
       await syncProjectSourceToViewerFromFragments(state, ctx.fragments, { session });
       if (!isCurrent()) return;
+      if (state.projectSourceToViewerMatrix) connectionPreview.setTransform?.(state.projectSourceToViewerMatrix);
       endCoordinate(undefined, {
         hasMatrix: state.projectSourceToViewerMatrix != null,
       });
@@ -1180,6 +1227,42 @@ export async function loadAllIfcFiles(
             {session,perfSessionId:perfSession.id,onLoadSource:(source)=>{substationViewerInteractive=true;loadSource.value=source;ifcSources.set(entry.path,source);ifcStages.set(entry.path,source==='ifc'?'冷转换完成':source==='lod-cache'?'LOD缓存恢复完成':'完整缓存恢复完成');},
               onStage:(stage,meta)=>setIfcStage(stage,meta),
               onProfile:(profile)=>{if(isCurrent())perfRecordIfcLoadProfile(profile,perfSession);},
+              onRegionalBatch:(batch)=>{ if (isCurrent()) {
+                const accepted = connectionPreview.acceptBatch({
+                  ...batch,
+                  modelId: entry.modelId,
+                  sourcePath: entry.path,
+                  sourceIdentity: session.sourceSha256 ?? `session:${session.generation}`,
+                  coordinateBasis: 'ifc-y-up-m',
+                });
+                if (accepted && !connectionFirstBatches.has(entry.modelId)
+                  && connectionPreview.diagnostics?.objects) {
+                  connectionFirstBatches.add(entry.modelId);
+                  perfMark('IFC connection preview first batch', {
+                    modelId: entry.modelId,
+                    entryPath: entry.path,
+                    sequence: batch.sequence,
+                    objects: batch.objects.length,
+                    bytes: batch.bytes,
+                    source: 'stream',
+                  }, perfSession);
+                }
+                updateConnectionStatus();
+              } },
+              onRegionalComplete:(meta)=>{ if (isCurrent()) {
+                connectionPreview.markComplete(entry.modelId,meta);
+                if (!connectionCompletions.has(entry.modelId)) {
+                  connectionCompletions.add(entry.modelId);
+                  perfMark('IFC connection preview settled', {
+                    modelId: entry.modelId,
+                    entryPath: entry.path,
+                    objectCount: meta.objectCount,
+                    sequence: meta.sequence,
+                    source: 'regional-index-complete',
+                  }, perfSession);
+                }
+                updateConnectionStatus();
+              } },
               transferInput:true,openingPolicy});
           const wrapped=task.catch(error=>{
             if(finePromise===wrapped){ifcBytes.value=null;readEnded=false;finePromise=null;}
@@ -1190,6 +1273,8 @@ export async function loadAllIfcFiles(
         };
         await loadFine();
         if (!isCurrent()) return;
+        connectionPreview.markModelReady(entry.modelId);
+        updateConnectionStatus();
         if (!readEnded) {
           // Fragments cache 命中时不会调用 getIfcBuffer；显式记录“未读取 IFC”。
           if(!readProfiled)endRead(undefined, {
@@ -1234,6 +1319,8 @@ export async function loadAllIfcFiles(
         // IFC 加载可能在工程切换后才 reject；不要让旧工程继续进入
         // 后续坐标同步、名称索引或 UI 渲染阶段。
         if (!isCurrent()) return;
+        connectionPreview.markFailed?.(entry.modelId);
+        updateConnectionStatus();
         ifcStages.set(entry.path,'失败');
         setIfcStatus(ifcStatus(entry,queueIndex,queue.length,message.slice(0,80)));
         failed.push({ name: entry.name, message });

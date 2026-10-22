@@ -31,6 +31,6 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
-    include: ['src/gim/__tests__/sampleRegression.test.ts', 'src/viewer/__tests__/outlineSamples.test.ts'],
+    include: ['src/gim/__tests__/sampleRegression.test.ts', 'src/viewer/__tests__/outlineSamples.test.ts', 'src/viewer/__tests__/connectionSamples.test.ts'],
   },
 });

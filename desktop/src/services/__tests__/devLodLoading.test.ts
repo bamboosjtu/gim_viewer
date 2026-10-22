@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import {AppState} from '../../app/state.js';
 import {DevLodRuntime} from '../devLodRuntime.js';
 const mock=vi.hoisted(()=>({read:vi.fn(),parse:vi.fn(),compile:vi.fn(),cancel:vi.fn(),catalog:vi.fn(),bounds:vi.fn(),workerCount:2}));
-vi.mock('@desktop/devLodCache.js',()=>({readDevArtifactResult:mock.catalog,
+vi.mock('@desktop/devLodCache.js',async(importActual)=>({...await importActual<any>(),readDevArtifactResult:mock.catalog,
   readDevArtifactBatch:mock.read,writeDevArtifactDetailed:async()=>({ok:true}),deleteDevArtifact:vi.fn()}));
 vi.mock('../glbCacheService.js',()=>({parseDevGlbAsset:mock.parse}));
 vi.mock('../devGeometryWorkerClient.js',()=>({createDevGeometryPreprocessor:()=>({workerCount:mock.workerCount,activePaths:[],compile:mock.compile,cancel:mock.cancel,bounds:mock.bounds,

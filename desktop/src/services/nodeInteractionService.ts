@@ -346,7 +346,10 @@ export async function frameAndHighlightDevice(
   request ??= state.beginSelection({kind:'cbm',key:scope.rootOccurrence});
   const guard=state.selectionGuard(request);
   if (!state.isCurrentSession(session) || !guard.isCurrent()) return;
-  if (state.deviceLodRuntime) await state.deviceLodRuntime.select(scope.rootOccurrence);
+  if (state.deviceLodRuntime) {
+    const ensureBase = state.deviceLodRuntime.ensureBase ?? state.deviceLodRuntime.select;
+    await ensureBase.call(state.deviceLodRuntime, scope.rootOccurrence);
+  }
   if (!guard.isCurrent()) return;
   const groups=collectDeviceGroups(state,devPath,scope).filter(hasRenderableGeometry);
   const {commitSelectionHighlight,highlightModGroups}=await import('../viewer/highlight.js');
@@ -396,7 +399,10 @@ export async function loadModStlForNode(
   const scope=deviceOccurrenceScope(state.currentCbmTree,node);
   const message=selectionMessage(state,request,showMessage);
   if (state.deviceLodRuntime) {
-    try { await state.deviceLodRuntime.select(root.path); }
+    try {
+      const ensureBase = state.deviceLodRuntime.ensureBase ?? state.deviceLodRuntime.select;
+      await ensureBase.call(state.deviceLodRuntime, root.path);
+    }
     catch (error) { if (state.isCurrentSelection(request)) message(`设备几何加载失败: ${String(error)}`); }
     if (!state.isCurrentSelection(request)) return;
     state.selectionGeometry=describeNodeSelectionGeometry(state,node,true);

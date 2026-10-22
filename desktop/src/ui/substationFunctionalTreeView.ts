@@ -7,6 +7,18 @@ import { substationDevIdentity } from '../gim/substationEvidence.js';
 import type { CbmNode } from '../gim/types.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
 import type { SearchItem } from './searchBox.js';
+import { renderVirtualOutline, type OutlineNode, type OutlineElement } from './virtualOutline.js';
+
+const outlineCollectors = new WeakMap<HTMLElement, OutlineNode[]>();
+function collectOutline(render: (host: HTMLElement) => void): OutlineNode[] {
+  const host = document.createElement('div'), nodes: OutlineNode[] = [];
+  outlineCollectors.set(host, nodes); render(host); return nodes;
+}
+function renderFunctionalChildren(host: HTMLElement, render: (host: HTMLElement) => void): void {
+  const nodes = collectOutline(render);
+  if (nodes.length > 500) renderVirtualOutline(host, nodes);
+  else for (const node of nodes) node.render(host);
+}
 
 /** 功能系统树中 F4/部件的业务角色。 */
 export type FunctionalRole = BusinessCategory | 'mixed';
@@ -496,6 +508,15 @@ function renderFunctionalNode(
   initiallyExpanded = false,
   badgeText = '',
 ): void {
+  const collector = outlineCollectors.get(parentEl);
+  if (collector) {
+    collector.push({ key,
+      render: host => renderFunctionalNode(host, key, labelText, iconText, subtitle, hasChildren,
+        renderChildren, onSelect, initiallyExpanded, badgeText),
+      ...(hasChildren ? {children: () => collectOutline(renderChildren)} : {}),
+    });
+    return;
+  }
   const nodeEl = document.createElement('div');
   nodeEl.className = 'tree-node functional-tree-node';
   const row = document.createElement('div');
@@ -543,7 +564,7 @@ function renderFunctionalNode(
     childrenEl.classList.toggle('expanded', expanded);
     row.setAttribute('aria-expanded', String(expanded));
     if (expanded && !rendered) {
-      renderChildren(childrenEl);
+      renderFunctionalChildren(childrenEl, renderChildren);
       rendered = true;
     }
   };
@@ -578,7 +599,13 @@ function ensureFunctionalRowExpanded(key: string): void {
   const escaped = typeof CSS !== 'undefined' && CSS.escape
     ? CSS.escape(key)
     : key.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const row = document.querySelector<HTMLElement>(`.tree-row[data-node-path="${escaped}"]`);
+  let row = document.querySelector<HTMLElement>(`.tree-row[data-node-path="${escaped}"]`);
+  if (!row) {
+    for (const outline of document.querySelectorAll<OutlineElement>('.functional-virtual-outline')) {
+      if (outline.__gimRevealOutline?.(key)) break;
+    }
+    row = document.querySelector<HTMLElement>(`.tree-row[data-node-path="${escaped}"]`);
+  }
   if (!row) return;
   const toggle = row.querySelector<HTMLButtonElement>('.tree-toggle[data-toggle-key]');
   if (!toggle || toggle.classList.contains('expanded')) return;

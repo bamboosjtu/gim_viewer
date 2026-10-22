@@ -3,6 +3,7 @@ import { AppState } from '../../app/state.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../../gim/types.js';
 import type { StdSldParseResult } from '../stdSldService.js';
 import { onGimExtracted } from '../openGimService.js';
+import {perfReset, perfProductMomentSnapshot} from '../../utils/perfTimings.js';
 
 const mocks = vi.hoisted(() => ({
   discoverIfcFromCBM: vi.fn(),
@@ -169,6 +170,7 @@ describe('openGimService AppState commit race', () => {
 
     const state = new AppState();
     const session = state.activateProject(1, 'sha-a');
+    perfReset({generation: session.generation, projectId: session.projectId, sourceSha256: session.sourceSha256});
     const loading = onGimExtracted(
       state,
       files,
@@ -191,12 +193,17 @@ describe('openGimService AppState commit race', () => {
     expect(mocks.renderFileDevPanel).toHaveBeenCalled();
     expect(mocks.buildSubstationSpatialIndexFromFiles).not.toHaveBeenCalled();
     expect(mocks.parseStdSldOnGimExtracted).not.toHaveBeenCalled();
+    const navigation = perfProductMomentSnapshot().navigationUiReady;
+    expect(navigation).toMatchObject({meta:{scope:'navigation-dom', inputLatencyVerified:false, cbmNodes:1, ifcEntries:1}});
+    expect(perfProductMomentSnapshot().firstUsableGeometryReady).toBeNull();
+    expect(perfProductMomentSnapshot().interactive).toBeNull();
 
     startSpatialSemantic();
     spatialGate.resolve(makeSpatial('A'));
     await vi.waitFor(() => {
       expect(state.substationSpatialIndex?.models[0]?.modelId).toBe('model-A');
     });
+    expect(perfProductMomentSnapshot().navigationUiReady).toBe(navigation);
 
     // STD/SLD is also registered as a post-interactive starter.  It must not
     // move back onto the core semantic path merely because CBM parsing ended.

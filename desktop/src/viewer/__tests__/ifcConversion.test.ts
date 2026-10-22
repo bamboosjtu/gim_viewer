@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import { loadIfcEntry } from '../ifcEntryLoader.js';
 import { registerModelEvents } from '../ifcLoader.js';
-import { cancelIfcConversions } from '../ifcConversion.js';
+import { cancelIfcConversions, loadRawIfc } from '../ifcConversion.js';
+import {geometryWorkSnapshot} from '../geometryWorkGate.js';
 import type { IfcConversionInput, IfcConversionOutput } from '../ifcConversionWorker.js';
 
 class ConversionWorker {
@@ -111,3 +112,39 @@ it('worker startup failure reports failure instead of retrying synchronous conve
   await expect(loadIfcEntry(ctx,state,entry,async()=>new Uint8Array([1]),undefined,{session,openingPolicy:'full'})).rejects.toThrow('worker unavailable');
   expect(ctx.ifcLoader.load).not.toHaveBeenCalled();expect(state.loadedModels.size).toBe(0);
 });
+
+it.each(['progress','regional-batch','regional-complete','complete'] as const)(
+  '%s consumer failure terminates once and releases the next IFC without waiting for the watchdog',async(type)=>{
+    const state=new AppState(),session=state.activateProject(1,'sha');
+    const load=vi.fn(async(_bytes:ArrayBuffer,_options:{modelId:string})=>({object:new THREE.Group()}));
+    const ctx={ifcLoader:{settings:{wasm:{path:'/',absolute:true},webIfc:{}}},
+      fragments:{core:{settings:{},load}}} as any;
+    const fail=vi.fn(()=>{throw Error('consumer failed');});
+    const first=loadRawIfc(ctx,state,session,new Uint8Array([1]),'failed','CBM/failed.ifc',
+      type==='progress'?fail:undefined,undefined,{
+        onRegionalBatch:type==='regional-batch'?fail:undefined,
+        onRegionalComplete:type==='regional-complete'?fail:undefined,
+        onFarArtifact:type==='complete'?fail:undefined,
+      });
+    const rejected=expect(first).rejects.toThrow('consumer failed');
+    await vi.waitFor(()=>expect(ConversionWorker.instances).toHaveLength(1));
+    const worker=ConversionWorker.instances[0],late=worker.onmessage!;
+    const next=loadRawIfc(ctx,state,session,new Uint8Array([2]),'next','CBM/next.ifc');
+    const messages:Record<typeof type,IfcConversionOutput>={
+      progress:{type:'progress',progress:0.4},
+      'regional-batch':{type:'regional-batch',sequence:0,objects:[],chunks:[],bytes:0,final:false},
+      'regional-complete':{type:'regional-complete',sequence:0,objectCount:0},
+      complete:{type:'complete',bytes:new Uint8Array([9]),conversionMs:1,regionalIndex:{} as any},
+    };
+    expect(()=>worker.reply(messages[type])).not.toThrow();await rejected;
+    expect(worker.terminate).toHaveBeenCalledTimes(1);expect(worker.onmessage).toBeNull();
+    late({data:messages[type]} as MessageEvent<IfcConversionOutput>);
+    expect(fail).toHaveBeenCalledTimes(1);expect(load).not.toHaveBeenCalled();
+    await vi.waitFor(()=>expect(ConversionWorker.instances).toHaveLength(2));
+    const nextWorker=ConversionWorker.instances[1];
+    nextWorker.reply({type:'complete',bytes:new Uint8Array([8]),conversionMs:1});await next;
+    expect(nextWorker.terminate).toHaveBeenCalledTimes(1);expect(load).toHaveBeenCalledTimes(1);
+    expect(load.mock.calls[0][1]).toEqual({modelId:'next'});
+    expect(geometryWorkSnapshot().ifcActive).toBe(0);
+    cancelIfcConversions();expect(worker.terminate).toHaveBeenCalledTimes(1);
+  });

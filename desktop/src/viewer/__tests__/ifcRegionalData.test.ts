@@ -2,9 +2,49 @@ import { expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import {
   classifyRegionalOpenings,
+  isRegionalConnectionObject,
+  isRegionalConnectionType,
   queryRegionalObjects,
   RegionalIndexCollector,
 } from '../ifcRegionalData.js';
+
+it('classifies only known IFC segment entities for the connection preview lane', () => {
+  expect(isRegionalConnectionType('IFCCABLESEGMENT')).toBe(true);
+  expect(isRegionalConnectionType('ifcwiresegment')).toBe(true);
+  expect(isRegionalConnectionType('IFCTRANSFORMER')).toBe(false);
+  expect(isRegionalConnectionType('')).toBe(false);
+});
+
+it('uses proxy entity names as source evidence without classifying ordinary proxies', () => {
+  expect(isRegionalConnectionObject({ expressId: 1, globalId: '1', ifcType: 'IFCBUILDINGELEMENTPROXY', name: '软导体', bounds: [0, 0, 0, 1, 1, 1] })).toBe(true);
+  expect(isRegionalConnectionObject({ expressId: 2, globalId: '2', ifcType: 'IFCBUILDINGELEMENTPROXY', name: '墙体描述', bounds: [0, 0, 0, 1, 1, 1] })).toBe(false);
+});
+
+it('emits source-evidenced connection objects once while retaining all regional objects', () => {
+  const placed = (id: number) => ({
+    expressID: id,
+    geometries: {
+      size: () => 1,
+      get: () => ({ geometryExpressID: id, flatTransformation: new THREE.Matrix4().elements }),
+    },
+  });
+  const api: any = {
+    GetLine: (_model: number, id: number) => ({ GlobalId: { value: String(id) }, Name: { value: '' }, type: id === 1 ? 'IFCCABLESEGMENT' : 'IFCMEMBER' }),
+    GetNameFromTypeCode: (type: string) => type,
+    GetCoordinationMatrix: () => new THREE.Matrix4().elements,
+    GetGeometry: () => ({ GetVertexData: () => 0, GetVertexDataSize: () => 12, delete: vi.fn() }),
+    GetVertexArray: () => new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]),
+    StreamAllMeshes: vi.fn(),
+  };
+  const observed: any[] = [];
+  const collector = new RegionalIndexCollector(api, 0, true, object => observed.push(object));
+  collector.observe(placed(1) as any);
+  collector.observe(placed(2) as any);
+  const index = collector.finish({ unitScale: 1, openingRelations: [] });
+  expect(index.objects).toHaveLength(2);
+  expect(observed.map(object => object.expressId)).toEqual([1]);
+  expect(observed[0].role).toBe('connection');
+});
 it('streamed index undoes the engine origin once and includes omitted fasteners without rereading shared vertices', () => {
   const placed = (id: number, x: number) => ({
     expressID: id,

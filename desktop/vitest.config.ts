@@ -38,7 +38,7 @@ export default defineConfig({
     include: ['src/**/__tests__/**/*.test.ts', 'bridge/__tests__/**/*.test.ts'],
     // P2 评审 #7 测试分层：真实样本回归拆至 vitest.sample.config.ts（npm run test:sample），
     // 默认套件保持快速反馈
-    exclude: ['src/services/__tests__/substationSqlite.integration.test.ts', 'src/viewer/__tests__/outlineSamples.test.ts', 'src/gim/__tests__/sampleRegression.test.ts', 'src/services/__tests__/strictSubstation.test.ts', 'src/viewer/__tests__/ifcObjectFine.test.ts'],
+    exclude: ['src/viewer/__tests__/connectionSamples.test.ts', 'src/services/__tests__/substationSqlite.integration.test.ts', 'src/viewer/__tests__/outlineSamples.test.ts', 'src/gim/__tests__/sampleRegression.test.ts', 'src/services/__tests__/strictSubstation.test.ts', 'src/viewer/__tests__/ifcObjectFine.test.ts'],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
       // 覆盖率配置（review0709.md §4.3：原项目未安装覆盖率工具，无法量化行/分支覆盖）

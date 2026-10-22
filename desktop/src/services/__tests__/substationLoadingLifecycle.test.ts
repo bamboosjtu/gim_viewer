@@ -81,6 +81,7 @@ describe('Substation Loading readiness lifecycle', () => {
   it('returns at first usable IFC, isolates spatial failure, and keeps the IFC tail sequential', async () => {
     vi.clearAllMocks();
     const secondIfcGate = deferred<void>();
+    const secondIfcStarted = deferred<void>();
     const spatialGate = deferred<void>();
     const spatialStart = vi.fn(() => {
       // A real spatial starter owns its promise and is intentionally not
@@ -130,7 +131,10 @@ describe('Substation Loading readiness lifecycle', () => {
       _onProgress: unknown,
       options: { session?: ReturnType<AppState['captureProjectSession']>; onLoadSource?: (source: 'ifc') => void },
     ) => {
-      if (entry.modelId === 'second') await secondIfcGate.promise;
+      if (entry.modelId === 'second') {
+        secondIfcStarted.resolve();
+        await secondIfcGate.promise;
+      }
       if (entry.modelId === 'first') expect(spatialStart).not.toHaveBeenCalled();
       if (!options.session || !state.isCurrentSession(options.session)) return;
       const runtimeModelId = state.getRuntimeModelId(entry.modelId, options.session);
@@ -155,9 +159,13 @@ describe('Substation Loading readiness lifecycle', () => {
     let callerSettled = false;
     void loading.then(() => { callerSettled = true; });
 
-    await vi.waitFor(() => expect(mocks.fitCameraToStationOverview).toHaveBeenCalledTimes(1));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The public promise must settle while the sequential IFC tail is still
+    // held. Await that contract instead of racing cold dynamic imports against
+    // waitFor's one-second polling deadline.
+    await loading;
+    await secondIfcStarted.promise;
 
+    expect(mocks.fitCameraToStationOverview).toHaveBeenCalledTimes(1);
     expect(callerSettled).toBe(true);
     expect(mocks.loadIfcEntry).toHaveBeenCalledTimes(2);
     expect(spatialStart).toHaveBeenCalledTimes(1);

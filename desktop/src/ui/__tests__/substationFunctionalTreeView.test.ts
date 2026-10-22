@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
 import {compareSubstationNames} from '../../gim/substationBusiness.js';
 import type { CbmNode } from '../../gim/types.js';
@@ -28,6 +28,34 @@ function node(overrides: Partial<CbmNode> = {}): CbmNode {
     ...overrides,
   };
 }
+
+it('windows a large functional branch, retaining nested expansion, search identity and keyboard navigation', async () => {
+  const assets = Array.from({length: 1200}, (_, i) => node({path: `asset-${i}`, name: `设备${i}`, devPath: `${i}.dev`,
+    children: i === 1199 ? [node({path: 'last-part', name: '连接片', entityName: 'PARTINDEX', devPath: 'part.dev'})] : []}));
+  const root = node({children: [node({path: 'system', systemNames: ['电气系统', '设备系统'], children: assets})]});
+  const state = new AppState(); state.currentCbmTree = root;
+  const index = buildFunctionalDomainIndex(root), host = document.createElement('div');
+  host.className = 'tab-panel'; document.body.append(host);
+  const clicked = vi.fn();
+  renderSubstationFunctionalTree(state, index, host, clicked);
+  const key = revealFunctionalSearchTarget(index, 'asset-1199')!;
+  expect(host.querySelector('.functional-virtual-outline')).not.toBeNull();
+  expect(host.querySelectorAll('.functional-tree-row').length).toBeLessThan(140);
+  const last = host.querySelector<HTMLElement>(`[data-node-path="${key}"]`)!;
+  expect(last).not.toBeNull(); last.click(); expect(clicked).toHaveBeenLastCalledWith(assets[1199]);
+  const partKey = revealFunctionalSearchTarget(index, 'last-part')!;
+  expect(host.querySelector(`[data-node-path="${partKey}"]`)).not.toBeNull();
+  const firstKey = revealFunctionalSearchTarget(index, 'asset-0')!;
+  host.querySelector<HTMLElement>(`[data-node-path="${firstKey}"]`)!.dispatchEvent(new KeyboardEvent('keydown', {key: 'End', bubbles: true}));
+  expect((document.activeElement as HTMLElement).dataset.nodePath).toBe(partKey);
+  expect(host.querySelector(`[data-node-path="${key}"]`)?.getAttribute('aria-expanded')).toBe('true');
+  expect(host.querySelectorAll('.functional-tree-row').length).toBeLessThan(140);
+  await Promise.resolve();
+  const remove = vi.spyOn(host, 'removeEventListener');
+  host.remove(); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(remove).toHaveBeenCalledWith('scroll', expect.any(Function));
+  document.body.replaceChildren();
+});
 
 it('sorts transformer body and neutral equipment by transformer number before standby wording',()=>{
   expect(['2号备用主变本体系统','3号备用主变本体系统','1号主变本体系统','3号主变中性点设备','1号主变中性点设备','2号主变中性点设备'].sort(compareSubstationNames))

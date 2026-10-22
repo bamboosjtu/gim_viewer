@@ -83,6 +83,7 @@ export interface PerfLongTaskStats {
  */
 export type PerfProductMoment =
   | 'coreSemanticReady'
+  | 'navigationUiReady'
   | 'semanticReady'
   | 'firstIfcLoadStart'
   | 'stdSldStart'
@@ -93,6 +94,7 @@ export type PerfProductMoment =
   | 'spatialSemanticReady'
   | 'firstUsableGeometryReady'
   | 'devCurrentViewReady'
+  | 'devCurrentViewSettled'
   | 'devBaseRepresentationsSettled'
   | 'devAllStationReady'
   | 'devGeometryReady'
@@ -120,6 +122,7 @@ export interface PerfMemorySample {
   tauriProcessRssBytes: number | null;
   processPid: number | null;
   processTreeRssBytes: number | null;
+  processTreePrivateBytes?: number | null;
   processCount: number | null;
   processTreeAvailable: boolean;
   processTreeSource?: string;
@@ -144,6 +147,8 @@ export interface PerfRuntimeResourceSnapshot {
   rendererInfoGeometries: number | null;
   rendererInfoTextures: number | null;
   rendererInfoPrograms: number | null;
+  /** Renderer draw-call counter when WebGL exposes it; null otherwise. */
+  rendererInfoDrawCalls?: number | null;
   templateCount: number | null;
   templateParseCount: number | null;
   sharedPlacementCount: number | null;
@@ -161,6 +166,10 @@ export interface PerfRuntimeResourceSnapshot {
   spatialObjectCount: number | null;
   spatialLinkCount: number | null;
   fileDevRelationCount: number | null;
+  /** Incremental IFC connection preview ownership, when the path is active. */
+  connectionPreviewBatchCount?: number | null;
+  connectionPreviewObjectCount?: number | null;
+  connectionPreviewCompleteModels?: number | null;
   modRootPresent: boolean;
   stlRootPresent: boolean;
   meta?: Record<string, unknown>;
@@ -191,6 +200,9 @@ export interface PerfBenchmarkSnapshot {
   productMoments: Record<PerfProductMoment, PerfProductMomentInfo | null>;
   longTasks: PerfLongTaskStats;
   memorySamples: PerfMemorySample[];
+  /** Maximum observed private commit over this whole session, including evicted samples. */
+  processTreePrivatePeakBytes: number | null;
+  taskPhases: ReturnType<typeof perfTaskPhaseSnapshot>;
   runtimeResourceSnapshots: PerfRuntimeResourceSnapshot[];
   ifcProfiles: PerfSubstationStats;
   fragmentsCacheProfile: PerfFragmentsCacheStats;
@@ -340,13 +352,36 @@ let sessionStartMs = performance.now();
 let sessionSequence = 0;
 let currentSession: PerfSession = { id: 0 };
 let spans: PerfSpan[] = [];
+let evictedPerfSpans = 0;
 const invokeStats = new Map<string, InvokeAccumulator>();
 let longTaskStats: PerfLongTaskStats = { count: 0, totalBlockingTimeMs: 0, maxMs: 0, samples: [] };
 let activeSpanLabels: string[] = [];
 const productMoments = new Map<PerfProductMoment, PerfProductMomentInfo>();
 let memorySamples: PerfMemorySample[] = [];
+let processTreePrivatePeakBytes: number | null = null;
 let runtimeResourceSnapshots: PerfRuntimeResourceSnapshot[] = [];
 let devGeometryProfiles: Array<Record<string, unknown>> = [];
+export interface PerfTaskIdentity {
+  taskId: string;
+  domain: 'dev' | 'ifc';
+  sourcePath: string;
+  kind: string;
+  lod?: number;
+  priority?: number;
+  cacheSource?: 'unknown' | 'memory' | 'disk' | 'compiled' | 'source';
+  generation?: number;
+  workerSession?: number;
+  workerTaskId?: number;
+  instanceKey?: string;
+}
+type TaskPhaseStatus = 'completed' | 'failed' | 'cancelled';
+interface TaskPhaseSample extends PerfTaskIdentity {
+  phase: string; durationMs: number; atMs: number; sessionId: number; status: TaskPhaseStatus; bytes?: number;
+}
+const taskPhaseTotals = new Map<string, {count: number; totalMs: number; maxMs: number; failed: number; cancelled: number; bytes: number}>();
+let slowTaskPhases: TaskPhaseSample[] = [];
+let detailedTaskTrace = false;
+let taskPhaseOverflow = 0;
 let substationIfcLoads: PerfIfcLoadProfile[] = [];
 let substationIfcReads: PerfSubstationIfcReadProfile[] = [];
 let substationIfcParses: PerfSubstationIfcProfile[] = [];
@@ -463,6 +498,7 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
   currentSession = { id: sessionSequence, ...identity };
   sessionStartMs = performance.now();
   spans = [];
+  evictedPerfSpans = 0;
   invokeStats.clear();
   batchReadStats = {
     count: 0,
@@ -485,8 +521,12 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
       .__GIM_DEV_SUBSTATION_PRODUCT_MOMENTS__ = {};
   }
   memorySamples = [];
+  processTreePrivatePeakBytes = null;
   runtimeResourceSnapshots = [];
   devGeometryProfiles = [];
+  taskPhaseTotals.clear(); slowTaskPhases = []; taskPhaseOverflow = 0;
+  try { detailedTaskTrace = globalThis.localStorage?.getItem('GIM_PERF_TASK_TRACE') === '1'; }
+  catch { detailedTaskTrace = false; }
   substationIfcReads = [];
   substationIfcLoads = [];
   substationIfcParses = [];
@@ -503,8 +543,47 @@ export function perfReset(identity: PerfSessionIdentity = {}): void {
  */
 const MAX_PERF_SPANS = 8192;
 function appendSpan(span: PerfSpan): void {
-  if (spans.length >= MAX_PERF_SPANS) spans.splice(0, 1024);
+  if (spans.length >= MAX_PERF_SPANS) { spans.splice(0, 1024); evictedPerfSpans += 1024; }
   spans.push(span);
+}
+
+/** Existing profiler's correlated task phases: bounded aggregates and slow/
+ * failed samples by default. Detailed spans are opt-in and share the normal
+ * bounded span buffer. Durations may nest/overlap and are never CPU time. */
+export function perfRecordTaskPhase(identity: PerfTaskIdentity, phase: string, durationMs: number,
+  session: PerfSession = currentSession, status: TaskPhaseStatus = 'completed', bytes?: number): void {
+  if (!perfIsCurrentSession(session) || !Number.isFinite(durationMs) || durationMs < 0) return;
+  const key = `${identity.domain}:${identity.kind}:${phase}`;
+  if (!taskPhaseTotals.has(key) && taskPhaseTotals.size >= 128) { taskPhaseOverflow++; return; }
+  const total = taskPhaseTotals.get(key) ?? {count: 0, totalMs: 0, maxMs: 0, failed: 0, cancelled: 0, bytes: 0};
+  total.count++; total.totalMs += durationMs; total.maxMs = Math.max(total.maxMs, durationMs);
+  if (status === 'failed') total.failed++; if (status === 'cancelled') total.cancelled++;
+  const safeBytes = typeof bytes === 'number' && Number.isFinite(bytes) && bytes >= 0 ? bytes : undefined;
+  total.bytes += safeBytes ?? 0; taskPhaseTotals.set(key, total);
+  const sample: TaskPhaseSample = {...identity, phase, durationMs, atMs: performance.now() - sessionStartMs,
+    sessionId: session.id, status, ...(safeBytes == null ? {} : {bytes: safeBytes})};
+  if (durationMs >= 50 || status === 'failed') {
+    slowTaskPhases.push(sample);
+    slowTaskPhases.sort((a,b) => Number(b.status === 'failed') - Number(a.status === 'failed') || b.durationMs - a.durationMs);
+    if (slowTaskPhases.length > 32) slowTaskPhases.length = 32;
+  }
+  if (detailedTaskTrace) appendSpan({label: `${identity.domain.toUpperCase()} task · ${phase}`,
+    startMs: Math.max(0, sample.atMs - durationMs), durationMs, sessionId: session.id, meta: {...sample}});
+}
+
+export async function perfMeasureTaskPhase<T>(identity: PerfTaskIdentity, phase: string, operation: () => Promise<T>,
+  session: PerfSession = currentSession): Promise<T> {
+  const started = performance.now(); let status: TaskPhaseStatus = 'completed';
+  try { return await operation(); }
+  catch (error) { status = (error as Error)?.name === 'AbortError' ? 'cancelled' : 'failed'; throw error; }
+  finally { perfRecordTaskPhase(identity, phase, performance.now() - started, session, status); }
+}
+
+export function perfTaskPhaseSnapshot() {
+  return {detailedTraceEnabled: detailedTaskTrace, cpuTimeAvailable: false, overflow: taskPhaseOverflow,
+    spanWindow: {limit: MAX_PERF_SPANS, evicted: evictedPerfSpans},
+    totals: Object.fromEntries([...taskPhaseTotals].map(([key,value]) => [key,{...value}])),
+    slowSamples: slowTaskPhases.map(sample => ({...sample}))};
 }
 
 export function perfBegin(
@@ -596,6 +675,7 @@ export function perfMarkProductMoment(
 export function perfProductMomentSnapshot(): Record<PerfProductMoment, PerfProductMomentInfo | null> {
   return {
     coreSemanticReady: productMoments.get('coreSemanticReady') ?? null,
+    navigationUiReady: productMoments.get('navigationUiReady') ?? null,
     semanticReady: productMoments.get('semanticReady') ?? null,
     firstIfcLoadStart: productMoments.get('firstIfcLoadStart') ?? null,
     stdSldStart: productMoments.get('stdSldStart') ?? null,
@@ -606,6 +686,7 @@ export function perfProductMomentSnapshot(): Record<PerfProductMoment, PerfProdu
     spatialSemanticReady: productMoments.get('spatialSemanticReady') ?? null,
     firstUsableGeometryReady: productMoments.get('firstUsableGeometryReady') ?? null,
     devCurrentViewReady: productMoments.get('devCurrentViewReady') ?? null,
+    devCurrentViewSettled: productMoments.get('devCurrentViewSettled') ?? null,
     devBaseRepresentationsSettled: productMoments.get('devBaseRepresentationsSettled') ?? null,
     devAllStationReady: productMoments.get('devAllStationReady') ?? null,
     devGeometryReady: productMoments.get('devGeometryReady') ?? null,
@@ -627,6 +708,7 @@ export function perfRecordMemorySample(
     tauriProcessRssBytes?: number | null;
     processPid?: number | null;
     processTreeRssBytes?: number | null;
+    processTreePrivateBytes?: number | null;
     processCount?: number | null;
     processTreeAvailable?: boolean;
     processTreeSource?: string;
@@ -641,6 +723,10 @@ export function perfRecordMemorySample(
   if (!perfIsCurrentSession(session)) return;
   const finiteOrNull = (value: number | null | undefined): number | null =>
     value != null && Number.isFinite(value) && value >= 0 ? value : null;
+  const privateBytes = finiteOrNull(sample.processTreePrivateBytes);
+  if (sample.processTreeAvailable && privateBytes != null) {
+    processTreePrivatePeakBytes = Math.max(processTreePrivatePeakBytes ?? 0, privateBytes);
+  }
   memorySamples.push({
     label,
     atMs: performance.now() - sessionStartMs,
@@ -650,6 +736,7 @@ export function perfRecordMemorySample(
     tauriProcessRssBytes: finiteOrNull(sample.tauriProcessRssBytes ?? sample.rssBytes),
     processPid: finiteOrNull(sample.processPid),
     processTreeRssBytes: finiteOrNull(sample.processTreeRssBytes),
+    processTreePrivateBytes: finiteOrNull(sample.processTreePrivateBytes),
     processCount: finiteOrNull(sample.processCount),
     processTreeAvailable: sample.processTreeAvailable === true,
     ...(sample.processTreeSource ? { processTreeSource: sample.processTreeSource } : {}),
@@ -659,6 +746,8 @@ export function perfRecordMemorySample(
     jsHeapLimitBytes: finiteOrNull(sample.jsHeapLimitBytes),
     meta: sample.meta,
   });
+  // Continuous sampling remains bounded even when a project stays open all day.
+  if (memorySamples.length > 512) memorySamples.splice(0, memorySamples.length - 512);
 }
 
 export function perfMemorySnapshot(): PerfMemorySample[] {
@@ -677,13 +766,14 @@ export function perfRecordRuntimeResourceSnapshot(
   const countFields = [
     'sceneObjectCount', 'groupCount', 'meshCount',
     'uniqueGeometryCount', 'uniqueMaterialCount', 'uniqueTextureCount',
-    'rendererInfoGeometries', 'rendererInfoTextures', 'rendererInfoPrograms',
+    'rendererInfoGeometries', 'rendererInfoTextures', 'rendererInfoPrograms', 'rendererInfoDrawCalls',
     'templateCount', 'templateParseCount', 'sharedPlacementCount',
     'legacyPlacementCount', 'sharedGeometryCount', 'sharedMaterialCount',
     'sharedTextureCount', 'loadedXmlModGroupCount', 'loadedStlGroupCount',
     'fragmentModelCount', 'loadedIfcModelCount', 'currentIfcEntryCount',
     'cbmNodeCount', 'spatialNodeCount', 'spatialObjectCount',
     'spatialLinkCount', 'fileDevRelationCount',
+    'connectionPreviewBatchCount', 'connectionPreviewObjectCount', 'connectionPreviewCompleteModels',
   ] as const;
   const normalized = {} as Omit<PerfRuntimeResourceSnapshot, 'label' | 'atMs' | 'sessionId'>;
   for (const field of countFields) {
@@ -1076,6 +1166,8 @@ export function perfSnapshot(): {
   longTasks: PerfLongTaskStats;
   productMoments: Record<PerfProductMoment, PerfProductMomentInfo | null>;
   memory: PerfMemorySample[];
+  processTreePrivatePeakBytes: number | null;
+  taskPhases: ReturnType<typeof perfTaskPhaseSnapshot>;
   runtimeResources: PerfRuntimeResourceSnapshot[];
   devGeometry: Array<Record<string, unknown>>;
   cleanup: PerfRuntimeResourceSnapshot[];
@@ -1093,6 +1185,8 @@ export function perfSnapshot(): {
     longTasks: perfLongTaskSnapshot(),
     productMoments: perfProductMomentSnapshot(),
     memory: perfMemorySnapshot(),
+    processTreePrivatePeakBytes,
+    taskPhases: perfTaskPhaseSnapshot(),
     runtimeResources: perfRuntimeResourceSnapshot(),
     devGeometry: perfDevGeometrySnapshot(),
     cleanup: perfCleanupSnapshot(),
@@ -1192,6 +1286,8 @@ export function perfBenchmarkSnapshot(metadata: PerfBenchmarkMetadata = {}): Per
     productMoments: perfProductMomentSnapshot(),
     longTasks: perfLongTaskSnapshot(),
     memorySamples: perfMemorySnapshot(),
+    processTreePrivatePeakBytes,
+    taskPhases: perfTaskPhaseSnapshot(),
     runtimeResourceSnapshots: perfRuntimeResourceSnapshot(),
     ifcProfiles: perfSubstationSnapshot(),
     fragmentsCacheProfile: perfFragmentsCacheSnapshot(),

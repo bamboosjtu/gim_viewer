@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { packDevArtifact, readDevArtifactBatch, unpackDevArtifact } from '../devLodCache.js';
+import { packDevArtifact, prepareDevArtifact, writeDevArtifactDetailed, readDevArtifactBatch, unpackDevArtifact } from '../devLodCache.js';
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@desktop/invokeTimed.js', () => ({ invokeTimed: invoke }));
@@ -57,6 +57,26 @@ it('retains binary template bytes and rejects mismatched or truncated cache reco
   expect(() => unpackDevArtifact('other', packed)).toThrow('key mismatch');
   expect(() => unpackDevArtifact('key', packed.subarray(0, 5))).toThrow('metadata invalid');
   expect(unpackDevArtifact('missing', new Uint8Array())).toBeNull();
+});
+
+it('prepares metadata once, retains the original binary buffer and refuses a different write key', async () => {
+  let reads=0;const data=new Uint8Array([4,5,6]);
+  const value={get label(){reads++;return 'source';},result:{status:'complete',bytes:data}};
+  const prepared=prepareDevArtifact('key',value);
+  expect(prepared.data).toBe(data);expect(reads).toBe(1);
+  expect(prepared.retainedBytes).toBe(prepared.metadata.byteLength+data.byteLength);
+  expect(JSON.parse(new TextDecoder().decode(prepared.metadata))).toMatchObject({key:'key',value:{label:'source',result:{bytes:null}}});
+  (window as any).__TAURI_INTERNALS__={};invoke.mockReset();invoke.mockResolvedValue(undefined);
+  try {
+    expect(await writeDevArtifactDetailed('templates','key',value,{projectId:1,sourceSha256:'a'.repeat(64)},prepared)).toEqual({ok:true});
+    expect(reads).toBe(1);expect(invoke).toHaveBeenCalledOnce();
+    expect(await writeDevArtifactDetailed('templates','other',value,undefined,prepared)).toMatchObject({ok:false});
+    expect(invoke).toHaveBeenCalledOnce();
+  } finally {delete (window as any).__TAURI_INTERNALS__;}
+});
+
+it('rejects oversized metadata before it can enter the writer queue', () => {
+  expect(()=>prepareDevArtifact('key',{detail:'x'.repeat(1024*1024)})).toThrow('metadata exceeds');
 });
 
 it('does not reopen unavailable IndexedDB for every device read and write', async () => {

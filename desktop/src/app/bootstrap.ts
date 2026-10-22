@@ -2,10 +2,10 @@ import { AppState } from './state.js';
 import { setupTabs } from '../ui/tabs.js';
 import { btnLoadGim, btnLoadLocal, btnClear, btnCacheManager } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
-import { DEBUG_FRAGMENTS, getDebugConfigSnapshot } from '../config/debug.js';
+import { DEBUG_FRAGMENTS } from '../config/debug.js';
 import { debugWarn } from '../utils/logger.js';
 import { summarizeDiagnostic } from '../shared/diagnosticSummary.js';
-import { getBasemapStatusSnapshot, summarizeBasemapStatus } from '../services/basemapStatusService.js';
+import { summarizeBasemapStatus } from '../services/basemapStatusService.js';
 import { setStatusRight } from '../ui/shell/statusBar.js';
 import { registerPropertyReferenceHandler } from '../ui/propertyDictionary.js';
 import { setupPropsDrawerInteractions } from '../ui/propsDrawer.js';
@@ -160,57 +160,39 @@ async function bootstrapAsync(): Promise<void> {
     document.addEventListener('keydown', async (e) => {
       if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
         e.preventDefault();
+        const diagnosticSession = state.captureProjectSession();
         try {
-          const diagnosticSession = state.captureProjectSession();
-          const diagnosticFiles = state.currentProjectType === 'substation' ? state.currentFiles : null;
-          const diagnosticTree = state.currentCbmTree;
-          const diagnosticIfcEntries = state.currentIfcEntries;
           showLoading('正在生成数据库诊断...');
-          const { getDbPath, getLatestProjectCacheDiagnostic, getProjectDiagnostic } = await import('@desktop/database.js');
-          const dbPath = await getDbPath();
-          // Prefer the active project's diagnostic.  The "latest" record is a
-          // global fallback and can describe another project after a cache-hit
-          // switch, which would mix its semantic counts with current timings.
-          const diagnostic = state.currentProjectId != null
-            ? await getProjectDiagnostic(state.currentProjectId)
-            : await getLatestProjectCacheDiagnostic();
-          const debug = getDebugConfigSnapshot();
-          // M4-A2 Finalization：附带底图运行状态（仅在线路工程场景有意义，无工程时为初始 'canvas-only'）
-          const basemap = getBasemapStatusSnapshot();
-          // acc-plan P0-1：附带性能埋点（各阶段耗时，测量先行）
-          const { perfSnapshot, perfSummary } = await import('../utils/perfTimings.js');
-          // acc-plan P1-3：web-ifc 多线程激活状态检测
-          const { isWebIfcMultiThreadingAvailable } = await import('../config/features.js');
-          const timings = perfSnapshot();
-          const webIfcMt = { available: isWebIfcMultiThreadingAvailable() };
-          const capabilities = diagnosticFiles
-            ? await import('../gim/substationEvidence.js').then(({ inspectSubstationCapabilities }) =>
-              inspectSubstationCapabilities(diagnosticFiles, diagnosticTree, diagnosticIfcEntries))
-            : state.substationCapabilities;
+          const {collectProjectDiagnostic} = await import('../services/projectDiagnosticService.js');
+          const snapshot = await collectProjectDiagnostic(state);
+          if (!snapshot || !state.isCurrentSession(diagnosticSession)) return;
+          const {diagnostic} = snapshot;
+          const {perfSummary} = await import('../utils/perfTimings.js');
           if (!state.isCurrentSession(diagnosticSession)) return;
-          const payload = JSON.stringify({ substationCapabilities: capabilities, dbPath, diagnostic, debug, basemap, timings, webIfcMt,
-            deviceLod: state.deviceLodRuntime?.diagnostics ?? null }, null, 2);
+          const payload = JSON.stringify(snapshot, null, 2);
           // Debug-only performance harness: expose the exact diagnostic payload to
           // the local CDP runner.  Production builds intentionally do not publish
           // this global, preserving the existing clipboard-only diagnostic path.
           if (import.meta.env.DEV) {
             (globalThis as { __GIM_LAST_DIAGNOSTIC__?: string }).__GIM_LAST_DIAGNOSTIC__ = payload;
           }
+          // Keep the collected evidence available if clipboard access fails.
+          console.log('[诊断] 数据库诊断 JSON:\n', payload);
           await navigator.clipboard.writeText(payload);
-          // 完整 JSON 仍输出到控制台（便于排障）
-          console.log('[诊断] 数据库诊断信息已复制到剪贴板:\n', payload);
+          if (!state.isCurrentSession(diagnosticSession)) return;
           // 控制台额外输出人类可读摘要（M4-D1 延伸）
           const summary = summarizeDiagnostic({ diagnostic });
           console.log('[诊断摘要]\n' + summary);
           // M4-A2 Finalization：附加底图状态人类可读摘要
           console.log('[底图状态]\n' + summarizeBasemapStatus());
           console.log('[性能埋点]\n' + perfSummary());
-          showLoading('数据库诊断信息已复制到剪贴板');
-          setTimeout(hideLoading, 2000);
+          showLoading(Object.keys(snapshot.diagnosticReadErrors).length ? '诊断已复制，部分数据未取得；详见诊断内容' : '数据库诊断信息已复制到剪贴板');
+          setTimeout(() => { if (state.isCurrentSession(diagnosticSession)) hideLoading(); }, 2000);
         } catch (err) {
+          if (!state.isCurrentSession(diagnosticSession)) return;
           console.error('[诊断] 生成诊断信息失败:', err);
           showLoading(`诊断失败: ${err instanceof Error ? err.message : String(err)}`);
-          setTimeout(hideLoading, 3000);
+          setTimeout(() => { if (state.isCurrentSession(diagnosticSession)) hideLoading(); }, 3000);
         }
       }
     });

@@ -28,24 +28,28 @@
 |---|---|
 | **First usable** | 工程已打开，主界面可交互，项目名称/状态栏已出现；不要求全部几何完成。 |
 | **Current view** | 当前相机范围内需要的 DEV 基础表示完成；以状态栏“当前视图已完成”或 `deviceLod.currentViewSettled === true` 为准。`currentViewReady === true` 只表示视觉上已显示，catalog 可能仍未 settled，不能替代 Current view SLO。 |
-| **Full fidelity** | 当前工程的全部 DEV/目录工作 settled：没有模板 pending、没有场景提交等待、目录 ready；不是“首屏可见”。 |
+| **基础表示完成（旧表列名 Full fidelity）** | `deviceLod.baseRepresentationsSettled === true`；全站 L0 基础任务及目录已结束。分别报告显示、合法空源、不支持、部分和失败数。用户主动 L2、IFC 与连接线分别计量。 |
 
-Full fidelity 要求上述条件同时成立。若有 `failedOccurrences > 0`、`unknownBounds > 0` 或几何范围拒绝，必须在报告里列出，不能把带失败项的工程写成完整成功。
+`productMoments.navigationUiReady` 单独记录变电树、搜索和文件设备面板完成 DOM 提交的首次时刻，冷解析和暖恢复使用相同入口。它不等待首个 IFC，也不因后续名称或空间语义补全而改写。该字段的 `scope: navigation-dom`、`inputLatencyVerified: false` 明确表示尚未证明绘制或输入响应；工程可操作仍须在原生窗口实际展开、搜索及查看基本信息确认。兼容字段 `interactive` 继续表示首个 IFC 可浏览的旧时刻，`firstUsableGeometryReady` 单独说明首个有效三维画面。不得把新增 DOM 时间点直接当作性能提升，或重算旧记录的 First usable。
+
+基础表示完成采用该 LOD 的 settled 口径，`allStationReady` 只描述 L2，不用作启动完成条件。若有 `failedOccurrences > 0`、`unknownBounds > 0` 或几何范围拒绝，必须在报告里列出，不能把带失败项的工程写成完整成功。
 
 超时统一记为 `>N s`，**不要**用超时时刻反推完成时间。
 
 ### 1.3 冷启动与暖启动
 
-- **冷启动**：删除应用数据目录后重新打开同一个 `.gim`。包含解压、语义解析、IFC 转换、DEV 编译和缓存写入。
-- **暖启动**：冷启动达到 Full fidelity 后，关闭应用进程，**只重启并重新打开同一工程**；不删除应用数据，不清理缓存。
+- **冷启动**：清空已核实的独立验收应用数据目录后重新打开同一个 `.gim`。包含解压、语义解析、IFC 转换、DEV 编译和缓存写入。
+- **暖启动**：冷启动达到基础表示 settled 且对应缓存写入完成后，关闭应用进程，**只重启并重新打开同一工程**；不删除应用数据，不清理缓存。
 
 暖启动有效的硬条件：
 
-1. 上一轮冷启动确实达到 Full fidelity；
+1. 上一轮冷启动确实达到基础表示 settled，并确认基础缓存写入完成；
 2. 使用的是同一个 exe、同一份源码、同一个工程文件；
 3. 只重启进程，没有重新解压、没有改缓存版本、没有改样本。
 
-冷启动未完成时，下一次打开不能标记为暖启动；只能记录“冷启动未完成，暖启动未验证”。
+IFC 浏览 LOD 及连接线的可选缓存位于 WebView 的 IndexedDB，与 profile 绑定；DEV 派生缓存位于原生应用数据目录。暖启动必须同时保留这两处数据及原 profile。仅保留 SQLite/DEV 缓存却创建新 profile 的运行，应记录为混合缓存恢复，并分别列出 DEV 命中和 IFC 转换次数，不能写成完整暖启动。
+
+冷启动未完成时，下一次打开不能标记为暖启动；只能记录“部分缓存恢复”，不能计入完整暖启动。
 
 **计时起点**统一为“向应用发起打开样本的动作”（点击“打开 GIM”或选择样本），不包含双击 exe 到窗口出现的时间。进程启动耗时如需要，单独记录为 launch time，不能混进三个 SLO。
 
@@ -120,7 +124,7 @@ substation03.gim
 substation04.gim
 ```
 
-同一轮测试不要替换样本路径、大小写或内容。变电样本的 `substation03` 含很大的 `设备接线.ifc`，Full fidelity 可能显著晚于 First usable；必须单独注明。
+同一轮测试不要替换样本路径、大小写或内容。变电样本的 `substation03` 含很大的 `设备接线.ifc`，基础表示完成 可能显著晚于 First usable；必须单独注明。
 
 ### 2.4 先跑正确性测试（不是计时）
 
@@ -135,6 +139,27 @@ npm run test:sample
 
 这些命令用于确认构建没有明显回归，**不产生性能结论**。不要在跑性能的同时执行 `npm test`、`npm run build` 或其他 Tauri 构建。
 
+### 2.5 独立数据标识的原生验收预检
+
+在 `desktop/` 下执行：
+
+```powershell
+npm run test:acceptance-tools
+npm run acceptance:build
+# 使用上一步明确打印的 manifest 路径，不按文件名通配选择旧二进制。
+npm run acceptance:stage -- '<构建生成的 acceptance-build.json 绝对路径>'
+# 使用 stage 打印的临时目录清单；其内容和原清单保持一致。
+node scripts/benchmarks/acceptance-probe.mjs '<临时目录 acceptance-build.json 的绝对路径>'
+```
+
+验收构建仍为优化的 Release，沿用同一固定 WebView2，仅用 `tauri.acceptance.conf.json` 改为独立应用标识 `com.bamboosjtu.gimviewer.acceptance`；不修改生产缓存版本。构建入口记录包含已修改及未跟踪文件的源码指纹、exe 哈希和完整固定运行时指纹；构建期间源码改变时拒绝发布清单。产物保存在被忽略的 `output/acceptance/builds/`，不覆盖已有 portable 包。
+
+`acceptance:stage` 校验当前源码、exe 和完整运行时指纹，再将同一验收包复制到 Windows 本地临时目录下的唯一子目录，保留原始构建清单及来源凭据。它不修改目录权限、不修改二进制，也不触及应用缓存。仓库构建目录可能继承开发环境的特殊权限；从临时目录运行可避免把此类目录因素混入应用性能。正式验收仍须记录最终运行路径和指纹；复制成功不等于启动成功。
+
+预检校验当前源码及产物哈希，为本轮创建独立 WebView profile，并通过本实例的 loopback CDP 读取原生 `get_db_path`，校验 Known Folder 目录、实际数据库路径与解析后的真实路径。构建清单中的 `nativeCachePathVerified: false` 不会因目录存在而变成成功；只有运行记录中的原生路径校验通过才算隔离已验证。预检不打开 GIM、不选择对象，结束时清理本次启动的进程树，保留日志和 profile 供排查。
+
+`output/acceptance/runs/` 下的 `native-startup.json` 分别记录原生 setup 失败、浏览器 GPU 子进程启动失败、应用退出和启动超时。即使预检成功，也只证明原生桥接及缓存路径可用，不证明工程可操作、三维可见或任一性能 SLO；`stationPerformanceAccepted` 始终为 false。预检失败后先排查启动环境，不把该运行记为冷启动成绩，也不通过关闭浏览器安全机制来取得验收结果。
+
 ---
 
 ## 3. 冷启动步骤
@@ -142,28 +167,19 @@ npm run test:sample
 ### 3.1 关闭旧进程
 
 ```powershell
-Get-Process GIM-Reader, msedgewebview2 -ErrorAction SilentlyContinue |
-  Stop-Process -Force
+# 正常关闭本轮验收实例，并确认其自身的子进程已退出。
+# 不按 msedgewebview2 进程名称批量结束其他应用。
 ```
 
 注意：`msedgewebview2` 可能被其他应用共用。自动化环境可只结束 GIM 进程树；手工环境确认没有其他 WebView2 应用正在运行。
 
-### 3.2 清空应用数据
+### 3.2 核实独立验收缓存目录
 
-应用标识来自 `desktop/src-tauri/tauri.conf.json` 的 `identifier`，当前为：
+冷启动只能清理独立验收目录，不能清理用户日常的 `com.bamboosjtu.gimviewer` 数据。可使用固定 Release 配置中的独立应用 identifier，记录该配置、exe 和 WebView2 身份；通过应用诊断 `get_db_path` 核实实际数据库及派生缓存均位于该独立目录。
 
-```text
-com.bamboosjtu.gimviewer
-```
+当前安装的 Tauri 2.11.3 在 Windows 使用 Known Folder 解析 `app_data_dir()`，仅修改子进程的 `APPDATA` 环境变量不能证明数据库已经隔离。尚未核实实际目录时，不执行清理，不开始冷启动验收，也不把指定了环境变量的运行标成已隔离。
 
-清空：
-
-```powershell
-$appData = Join-Path $env:APPDATA 'com.bamboosjtu.gimviewer'
-Remove-Item $appData -Recurse -Force -ErrorAction SilentlyContinue
-```
-
-这会删除项目数据库、解压目录和 DEV/IFC 缓存，是真正的冷启动。不要只删某个缓存子目录后仍称“冷启动”。
+正常关闭验收实例并确认其子进程退出后，验收脚本应检查解析后的绝对目标仍位于专用目录，再清理该目录中的数据库、解压内容和派生缓存。只删除某个缓存子目录不算完整冷启动。原始 GIM 与用户日常缓存保留。
 
 ### 3.3 启动并打开样本
 
@@ -174,7 +190,7 @@ Remove-Item $appData -Recurse -Force -ErrorAction SilentlyContinue
 3. 点击打开的瞬间开始计时；
 4. 记录 First usable；
 5. 继续观察状态栏，记录 Current view；
-6. 等到 Full fidelity，记录 Full。
+6. 等到 基础表示完成，记录 Full。
 
 自动化或需要 CDP 时（在仓库根目录）：
 
@@ -209,15 +225,16 @@ Start-Process 'desktop\src-tauri\target\release\gim-viewer.exe'
 - `pending`：模板处理中；
 - `directoryCompleted` / `catalogReady`：目录是否完成；
 - `failedOccurrences`、`unknownBounds`：失败和未知范围；
-- `currentViewReady`、`currentViewSettled`、`allStationReady`；
+- `currentViewReady`、`currentViewSettled`、`baseRepresentationsSettled`；`allStationReady` 另作 L2 诊断；
 - `compiled[0..2]`、`lodHits[0..2]`：各 LOD 冷编译/缓存命中。
 
-Full fidelity 的判定不能只看“已显示 N”：
+基础表示完成 的判定不能只看“已显示 N”：
 
 ```text
 catalogReady === true
-且 pending === 0
-且没有模板/场景提交/目录准备中的阻塞
+且 baseRepresentationsSettled === true
+且已分别报告显示、合法空源、不支持、部分和失败数量
+主动 L2 是否 pending 不影响基础表示 settled
 ```
 
 如果 `failedOccurrences > 0` 或 `unknownBounds > 0`，可以记录“已 settled 但有失败/未知范围”，但不能写成完整成功。
@@ -235,9 +252,23 @@ catalogReady === true
 
 - `schemaVersion`、`commit`、`platform`、`buildMode`；
 - `sample`、`coldWarm`、`sourceSha256`；
-- `productMoments`（如 `interactive`、`devCurrentViewReady`、`devAllStationReady`、`fullModelReady`）；
+- `productMoments`（如 `interactive`、`devCurrentViewReady`、`devBaseRepresentationsSettled`、`fullModelReady`）；
 - `longTasks`、`memorySamples`、`ifcProfiles`、`devGeometryProfile`；
 - `fragmentsCacheProfile`、`cleanupProfile`。
+
+taskPhases 提供有界的任务阶段聚合及慢样本，DEV 的 taskId 关联模板、Worker 与实例提交；sourcePath、LOD、优先级、cacheSource、Worker 会话/序号用于区分来源和调度。默认不逐任务写 console 日志。需要排查完整链路时，在诊断控制台/CDP 中于打开工程前设置 `localStorage.setItem('GIM_PERF_TASK_TRACE', '1')`，检查 Ctrl+Shift+D 的 timings.spans；结束后删除该键。taskPhases.spanWindow 报告窗口上限与淘汰数，存在淘汰时不能把保留窗口当作完整轨迹。阶段可能嵌套或并行，不将 totalMs 相加；cpuTimeAvailable: false 表示未测得 CPU 时间。
+
+`productMoments.devCurrentViewSettled` 记录当前视图真正 settled 的首次时刻，包括已结束但有失败的情况，其 meta 保留失败数；`devCurrentViewReady` 继续表示没有失败的 ready 时刻。两者不能互相替代。启动成绩优先用 benchmark 导出，并在记录中标注额外诊断的触发区间。
+
+`Ctrl+Shift+D` 只读取当前会话已经采集的状态，不重新扫描源文件。`substationCapabilitiesStatus` 区分 `available`、`not-collected` 和线路的 `not-applicable`；未收集不表示源文件异常。数据库路径和工程诊断并行读取，各自等待最多 5 秒，失败记录在 `diagnosticReadErrors`，其余性能状态仍导出。同一工程/性能会话的并发导出合并读取，工程切换后旧结果不提交。JSON 在写入剪贴板前输出到控制台；剪贴板失败仍可保留证据。读取上限不是对主线程阻塞的硬时限，也不取消已经发出的只读原生请求。
+
+DEV diagnostics 的 cacheWriteReservedBytes、cacheWriteWaitingBytes、cacheWritePendingCount 提供缓存队列额度与等待量；waiting 的模板字节仍由输入额度保护，和 inputBudgetBytes 存在重叠。cacheWritesSettled 表示 DEV 写入已结束，cacheWritesReady 还要求没有保存失败或取消；它们不是 IFC、语义缓存或全进程内存的完成证明。基础表示 settled 不等待缓存落盘，暖启动记录还需核对所需缓存实际完成。
+
+内存验收使用 Windows 原生 `processTreePrivateBytes`（当前进程及其后代进程的私有提交量），与 `processTreeRssBytes` 分开。`processTreePrivatePeakBytes` 保存该性能会话观测到的最大私有提交量，即使最早样本已退出最多 512 条的窗口仍保留。连续采样在前一次原生查询结束后等待 5 秒，采样间隔内的瞬时峰值可能遗漏；GPU 内存另行记录。不可用时为 null/unknown，浏览器 JS heap 或 RSS 不能填补私有提交量数据。
+
+DEV `devGeometryProfile` 中的 `viewIndex` 提供 entries/rebuilds/visitedNodes/testedBoxes/candidates，表示空间筛选规模，不等于帧耗时改善。使用同一固定路线比较实际帧间隔和长任务；当前调度仍逐 occurrence 检查基础任务。
+
+DEV 实例化仅作受控 A/B 试点，默认关闭。在验收 profile 中打开工程前设置 `localStorage.setItem('gim-debug-dev-instancing', '1')` 启用，设为 `'0'` 关闭；每次重启进程，保持同一构建、源文件、profile 和缓存。记录实际开关值及 `deviceLod.instancing` 的批次数、网格数、实例缓冲字节与失败数；`avoidedMeshDraws` 只是内部理论差值，实际 draw calls 以 renderer 测量为准。核对两次的 occurrence、LOD、矩阵、颜色和可见对象集合，再以同一相机与 30 秒真实输入路线比较。只有实际 draw calls 至少下降 30%、帧耗时不回退，且拾取、高亮、显隐、精化和工程切换通过，才可默认开启。保留原节点层级意味着场景节点数未必下降，不能只用批次数证明主线程收益。
 
 JSON 会复制到剪贴板并输出到 Console。保存到仓库外或已被忽略的 `output/`，文件名建议：
 
@@ -260,8 +291,9 @@ globalThis.__GIM_BENCHMARK_COLD_WARM__ = 'cold';
 First usable  = productMoments.interactive.atMs
 Current view  = 严格口径用 deviceLod.currentViewSettled（状态栏“当前视图已完成”）；
                 productMoments.devCurrentViewReady 只表示视觉 ready，不能替代严格 SLO
-Full fidelity = productMoments.devAllStationReady.atMs
-               或 devGeometryReady / fullModelReady 中语义最接近的 settled 时刻
+基础表示 = productMoments.devBaseRepresentationsSettled.atMs
+           同时核对 deviceLod.baseRepresentationsSettled 与各终态数量
+           IFC、连接线和用户主动精化分别记录，devAllStationReady 不作启动完成条件
 ```
 
 不同版本的产品时刻命名可能略有差异；以当前 `perfTimings` 的 `PerfProductMoment` 为准，报告时写清用了哪一个字段。没有产品时刻时，退回状态栏和 diagnostics，且要在报告注明。
@@ -270,16 +302,16 @@ Full fidelity = productMoments.devAllStationReady.atMs
 
 ## 4. 暖启动步骤
 
-前提：上一轮冷启动已达到 Full fidelity，并且缓存没有被删除或改写。
+前提：上一轮冷启动已达到基础表示 settled、对应缓存写入完成，并且缓存没有被删除或改写。
 
 1. 关闭应用进程；
-2. **不要**删除 `%APPDATA%\com.bamboosjtu.gimviewer`；
+2. 保留本轮已核实的独立验收缓存，日常缓存始终不清理；
 3. 重新启动同一个 exe；
 4. 打开同一 `demo/<sample>.gim`；
 5. 按冷启动同样的三个 SLO 记录；
 6. `Ctrl+Shift+B` 导出，`coldWarm` 设为 `warm`。
 
-如果冷启动未到 Full fidelity：
+如果冷启动未到 基础表示完成：
 
 - 不允许把下一轮称为暖启动；
 - 只能记录“暖启动未验证”；
@@ -293,8 +325,8 @@ Full fidelity = productMoments.devAllStationReady.atMs
 
 线路样本同样执行冷/暖。因为没有 DEV L0/L1/L2：
 
-- First usable、Current view、Full fidelity 通常重合；
-- 地图瓦片加载不属于启动 SLO，不要用“底图 tiles 加载完”作为 Full fidelity；
+- First usable、Current view、基础表示完成 通常重合；
+- 地图瓦片加载不属于启动 SLO，不要用“底图 tiles 加载完”作为 基础表示完成；
 - 若 OSM/CARTO/Esri 不可达，记录底图状态，但不要把底图失败算作工程启动失败；
 - 地图数据、塔位、导线段、跨越物是否出现，属于线路功能验收，不是本指南的三 SLO。
 
@@ -340,7 +372,7 @@ commit：<sha>
 
 建议直接使用以下表头：
 
-| 样本 | 轮次 | 冷/暖 | First usable | Current view | Full fidelity | DEV 完成/总数 | failed | 备注 |
+| 样本 | 轮次 | 冷/暖 | First usable | Current view | 基础表示完成 | DEV 完成/总数 | failed | 备注 |
 |---|---|---|---:|---:|---:|---:|---:|---|
 
 必须写进备注的内容：
@@ -359,7 +391,7 @@ commit：<sha>
 ## 8. 常见错误
 
 1. **用开发模式测**：`npm run dev` / `tauri:dev` 有 HMR、未压缩资源和不同 Worker，不能与 Release 比较。
-2. **删错目录**：冷启动必须清 `%APPDATA%\com.bamboosjtu.gimviewer`；只删 `device-lod` 或只清 WebView2 缓存不是完整冷启动。
+2. **删错目录**：只允许清理核实过的独立验收缓存；只删 `device-lod` 或只清 WebView2 缓存不是完整冷启动，覆盖 APPDATA 环境变量也不是隔离证据。
 3. **冷启动未完成就测暖启动**：缓存只写了一半，暖启动数字会虚高或虚低。
 4. **换 exe/换 commit 后继续用旧缓存**：缓存域版本可能失配或保留旧几何；性能对比必须固定构建并在变更后重新冷启动。
 5. **把“已显示数”当 Full**：还要看 pending、catalog、failed、unknown 和后台任务。
@@ -376,8 +408,8 @@ commit：<sha>
 1. 确认工作区干净或记录未提交变更；`git rev-parse HEAD`。
 2. `cd desktop && npm ci && npm test && npm run test:sqlite`；样本相关改动再跑 `npm run test:sample`。
 3. `npm run tauri:build`；记录 exe/portable 的 SHA-256 和时间戳。
-4. 对每个样本：清 APPDATA → 启动 → 打开 → 计时 → 导出 `Ctrl+Shift+B` JSON → 关闭。
-5. 只有冷启动 Full 的样本才做暖启动；重启进程但不删缓存。
+4. 对每个样本：核实并清理独立验收目录 → 启动 → 打开 → 计时 → 导出 `Ctrl+Shift+B` JSON → 关闭。
+5. 只有冷启动基础表示 settled 且对应缓存写入完成的样本才做完整暖启动；重启进程但不删缓存。
 6. 每个样本至少 3 次冷/3 次暖；记录中位数和最大值。
 7. 把 JSON 与汇总表放在同一目录，表中引用 JSON 文件名。
 8. 更新 [performance.md](performance.md) 时只写当前构建的实测结果，并保留未达标/失败说明；不要复制历史数字冒充当前结果。
@@ -400,9 +432,8 @@ npm run test:sqlite
 npm run test:sample
 npm run tauri:build
 
-# 冷启动清理（先关进程）
-Get-Process GIM-Reader, msedgewebview2 -ErrorAction SilentlyContinue | Stop-Process -Force
-Remove-Item (Join-Path $env:APPDATA 'com.bamboosjtu.gimviewer') -Recurse -Force -ErrorAction SilentlyContinue
+# 冷启动：先按 3.2 核实独立验收缓存实际路径并关闭所属进程。
+# 本速查不提供清理用户日常 APPDATA 的命令。
 
 # 远程调试启动
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'

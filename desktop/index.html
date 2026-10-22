@@ -375,6 +375,7 @@
       .itab-pane.active { display: block; }
       .mono-val { font-family: var(--mono); font-size: 11px; }
       .props-empty { color: var(--text-3); font-size: 12px; text-align: center; padding: 32px 0; }
+      .props-source-choice { display: block; width: 100%; margin: 8px 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
       .props-header { margin: 0 0 10px; font-size: 15px; font-weight: 650; color: var(--selection); padding-bottom: 8px; border-bottom: 1px solid var(--border); }
       .props-section { margin-bottom: 12px; }
       .props-section-title { font-size: 11px; color: var(--text-3); font-weight: 600; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.6px; }
@@ -399,6 +400,8 @@
       .prop-ref-link:hover { border-color: var(--primary); background: rgba(58,141,255,.18); color: #d6e8ff; }
       .prop-ref-link:focus-visible { outline: 1px solid var(--primary); outline-offset: 1px; }
       .prop-ref-separator { display: inline-block; width: 4px; }
+      .props-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 4px 2px 2px; }
+      .props-actions [role="status"] { color: var(--text-3); font-size: 11px; min-width: 0; }
       .props-advanced { margin: 0 0 12px; border: 1px solid rgba(38,51,66,.72); border-radius: 5px; padding: 5px 7px; }
       .props-advanced > summary { color: var(--text-3); font-size: 11px; cursor: pointer; user-select: none; }
       .props-advanced[open] > summary { color: var(--text-2); margin-bottom: 4px; }
@@ -457,6 +460,9 @@
       .status-dot.error { background: var(--danger); }
       #status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #status-devices { max-width: 48vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a7d6e8; }
+      #status-ifc, #status-connections { max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b7cbe3; }
+      .status-device-pause { margin-left: 8px; padding: 1px 6px; border: 1px solid #4c6477; border-radius: 3px; background: #172536; color: #c9e6f2; font: inherit; font-size: 11px; cursor: pointer; }
+      .status-device-pause:hover { background: #24415a; }
       /* 索引发布/属性补写状态：冷启动完成后用户可据此判断暖启动是否可用。 */
       #status-publish { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
       #status-publish[data-phase="ready"] { color: #8fd694; }
@@ -490,6 +496,10 @@
             <button id="menu-attach-ifc" role="menuitem">附加 IFC…</button>
             <button id="menu-cache" role="menuitem">缓存管理…</button>
             <button id="menu-ifc-detail" role="menuitem">IFC 细节设置…</button>
+            <button id="menu-previous-view" role="menuitem" hidden>上一视角</button>
+            <button id="menu-only-selected" role="menuitem" hidden>仅看选中</button>
+            <button id="menu-show-all" role="menuitem" hidden>恢复全站</button>
+            <button id="menu-station-overview" role="menuitem">恢复整站远景</button>
             <button id="menu-settings" role="menuitem">设置…</button>
             <div class="menu-sep" role="separator"></div>
             <label class="menu-check"><input id="menu-auto-open-last" type="checkbox" /> 启动时恢复上次工程</label>
@@ -589,7 +599,7 @@
       <!-- 底部状态栏 -->
       <footer id="status-bar">
         <div class="status-left"><span id="status-dot" class="status-dot"></span><span id="status-text">就绪</span></div>
-        <div class="status-mid"><span id="status-devices" hidden></span><span id="status-publish" class="status-publish" hidden></span><span id="status-selection">未选中</span></div>
+        <div class="status-mid"><span id="status-devices" hidden></span><span id="status-ifc" hidden></span><span id="status-connections" hidden></span><span id="status-publish" class="status-publish" hidden></span><span id="status-selection">未选中</span></div>
         <div class="status-right" id="status-right">GIM BIM 浏览器</div>
       </footer>
     </div>

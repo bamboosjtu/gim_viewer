@@ -38,11 +38,11 @@ let uiBindingPromise: Promise<ViewerRuntimeWithUI> | null = null;
  * 后续调用：直接返回缓存的 Promise。
  *
  * @param state 全局 AppState（首次装配时用于 selection 回调绑定）
- * @param _showMessage 预留的消息回调（当前未使用，保持签名稳定性）
+ * @param showMessage DEV 视口选择的反馈回调
  */
 export async function getViewerRuntimeWithUI(
   state: AppState,
-  _showMessage: (text: string) => void = () => {},
+  showMessage: (text: string) => void = () => {},
 ): Promise<ViewerRuntimeWithUI> {
   if (uiBindingPromise) return uiBindingPromise;
 
@@ -54,6 +54,11 @@ export async function getViewerRuntimeWithUI(
 
     const runtime = await getViewerRuntime(container);
     const { ctx } = runtime;
+    const { ViewerViewHistory } = await import('../viewer/viewHistory.js');
+    state.viewHistory ??= new ViewerViewHistory(ctx, 20, {
+      getVisibility: () => state.onlySelected ? 'only-selected' : 'all',
+      setVisibility: (value) => state.setOnlySelected(value === 'only-selected'),
+    });
 
     // 装配属性抽屉按钮事件
     setupPropsDrawer(ctx);
@@ -73,6 +78,10 @@ export async function getViewerRuntimeWithUI(
     },(regional,object,request)=>{
       void syncSelectionNavigation(state,request);
       void import('../ui/propsDrawer.js').then(({showIfcRegionalProperties})=>showIfcRegionalProperties(ctx,state,regional,object,request));
+    },(rootOccurrence,instanceKey,request)=>{
+      void import('./devViewportSelection.js').then(({selectViewportDev}) =>
+        selectViewportDev(ctx,state,rootOccurrence,instanceKey,request,showMessage))
+        .catch(error=>console.warn('[DEV selection]',error));
     });
 
     // 构造模型生命周期回调（IFC 加载/卸载时同步更新 model-list UI）
