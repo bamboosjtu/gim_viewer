@@ -43,7 +43,7 @@ it.each(['raw','glb'] as const)('nested PARTINDEX uses the real root and parent 
   const {files,tree,root,b}=await nestedPartFixture(2);
   const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.currentProjectId=1;
   if (mode==='glb') mock.bytes=(await serializeDevToGlbDetailed(root.devPath,files)).bytes!;
-  await loadModStlForNode(state,b,() => {});
+  await loadModStlForNode(state,b);
   const scope=deviceOccurrenceScope(tree,b);
   expect(scope.rootOccurrence).toBe(root.path);
   const groups=collectDeviceGroups(state,b.devPath,scope);
@@ -55,7 +55,7 @@ it.each(['raw','glb'] as const)('nested PARTINDEX uses the real root and parent 
     return owner?.userData.rootOccurrence===root.path;
   })).toBe(true);
   const count=state.loadedXmlModGroups.size;
-  await loadModStlForNode(state,b,() => {});
+  await loadModStlForNode(state,b);
   expect(state.loadedXmlModGroups.size).toBe(count);
   expect([...state.loadedXmlModGroups.values()].every(g=>g.userData.rootOccurrence===root.path)).toBe(true);
 });
@@ -63,10 +63,10 @@ it.each(['raw','glb'] as const)('nested PARTINDEX uses the real root and parent 
 it('a GLB becoming available after raw loading does not duplicate the same occurrence on repeat click', async () => {
   const files = fixture(), tree = (await buildCbmTree(files))!;
   const state = new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.currentProjectId=1;
-  await loadModStlForNode(state,tree.children[0],() => {});
+  await loadModStlForNode(state,tree.children[0]);
   expect(state.loadedXmlModGroups.size).toBe(3);
   mock.bytes = (await serializeDevToGlbDetailed('root.dev',files)).bytes!;
-  await loadModStlForNode(state,tree.children[0],() => {});
+  await loadModStlForNode(state,tree.children[0]);
   expect(state.loadedXmlModGroups.size).toBe(3);
 });
 
@@ -84,16 +84,15 @@ it('A loaded does not let B PARTINDEX skip loading; reverse aliases and repeated
   const files = fixture(), tree = (await buildCbmTree(files))!;
   const state = new AppState(); state.currentFiles = files; state.currentCbmTree = tree;
   const a = tree.children[0], b = tree.children[1];
-  const messages = vi.fn();
-  await Promise.all([loadModStlForNode(state,a,messages),loadModStlForNode(state,a,messages)]);
+  await Promise.all([loadModStlForNode(state,a),loadModStlForNode(state,a)]);
   const part = b.children.find((n) => n.entityName === 'PARTINDEX')!;
   expect(collectDeviceGroups(state,part.devPath,deviceOccurrenceScope(tree,part))).toHaveLength(0);
-  await loadModStlForNode(state,part,messages);
+  await loadModStlForNode(state,part);
   expect(collectDeviceGroups(state,part.devPath,deviceOccurrenceScope(tree,part))).toHaveLength(2);
   expect(state.loadedXmlModGroups.size).toBe(6);
-  await loadModStlForNode(state,part,messages);
+  await loadModStlForNode(state,part);
   expect(state.loadedXmlModGroups.size).toBe(6);
-  expect(messages.mock.calls.some(([m]) => m.includes('2 条装配路径'))).toBe(true);
+  expect(state.selectionMessage).toContain('2 条装配路径');
   const boxA = new THREE.Box3(), boxB = new THREE.Box3();
   collectDeviceGroups(state,a.devPath,deviceOccurrenceScope(tree,a)).forEach((g) => boxA.expandByObject(g));
   collectDeviceGroups(state,b.devPath,deviceOccurrenceScope(tree,b)).forEach((g) => boxB.expandByObject(g));

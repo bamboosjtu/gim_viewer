@@ -13,6 +13,7 @@ import { getFileByPath, hasFileByPath } from '../gim/fileLookup.js';
 import { getGeometryDiagnostic, geometryDiagnosticSummary, diagnosticForFailure, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
+import { setSelectionStatus } from '../ui/shell/statusBar.js';
 import {
   attachDevGlbTemplatePool,
   getDevGlbTemplatePool,
@@ -33,12 +34,13 @@ import {
  *    d. highlightIfcFromNode() + 刷新完整属性
  * 3. 如果节点无 IFC 关联，只显示基础属性
  */
-/** Only the current request may publish selection messages. */
-export function selectionMessage(state: AppState, request: SelectionRequest, sink: (text: string) => void) {
+/** Selection feedback owns no project loading progress or busy task. A caller
+ * may carry an opening callback, but it must never receive browsing messages. */
+export function selectionMessage(state: AppState, request: SelectionRequest) {
   return (text: string): void => {
     if (!state.isCurrentSelection(request)) return;
     state.selectionMessage=text;
-    sink(text);
+    setSelectionStatus(text);
   };
 }
 
@@ -117,7 +119,7 @@ export async function handleNodeClick(
   const isSessionCurrent=() => state.isCurrentSession(session);
   const isSelected=() => state.isCurrentSelection(request);
   if (!isSessionCurrent()) return;
-  const message=selectionMessage(state,request,showMessage);
+  const message=selectionMessage(state,request);
   const {showNodePropertiesBasic,openPropsDrawerUI}=await import('../ui/propsDrawer.js');
   if (isSelected()) {
     state.selectionGeometry=describeNodeSelectionGeometry(state,node);
@@ -141,7 +143,7 @@ export async function handleNodeClick(
   const ifcModelId=node.ifcFile ? resolveIfcModelId(node.ifcFile,state.currentIfcEntries) : state.deviceToIfcFile.get(node.path.split('/').pop() || '');
   try {
     if (refs.size===0 && node.devPath) {
-      await loadModStlForNode(state,node,message,session,request);
+      await loadModStlForNode(state,node,session,request);
       await basic;
       if (isSelected()) await showNodePropertiesBasic(state,node,request);
       return;
@@ -384,12 +386,11 @@ export async function frameAndHighlightDevice(
  *
  * @param state 全局 AppState
  * @param node CBM 节点（必须带 devPath）
- * @param showMessage 消息回调
  */
 const pendingOccurrenceLoads = new WeakMap<AppState, Map<string, Promise<void>>>();
 
 export async function loadModStlForNode(
-  state: AppState, node: CbmNode, showMessage: (text: string) => void,
+  state: AppState, node: CbmNode,
   session: ProjectLoadSession = state.captureProjectSession(),
   request?: SelectionRequest,
 ): Promise<void> {
@@ -397,7 +398,7 @@ export async function loadModStlForNode(
   request ??= state.beginSelection({kind:'cbm',key:node.path});
   const root=resolveGeometryLoadNode(state.currentCbmTree,node);
   const scope=deviceOccurrenceScope(state.currentCbmTree,node);
-  const message=selectionMessage(state,request,showMessage);
+  const message=selectionMessage(state,request);
   if (state.deviceLodRuntime) {
     try {
       const ensureBase = state.deviceLodRuntime.ensureBase ?? state.deviceLodRuntime.select;

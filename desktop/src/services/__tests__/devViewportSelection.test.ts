@@ -51,7 +51,12 @@ it('does not let an old source choice overwrite a newer selection',async()=>{
 });
 it('keeps the picked source highlighted but clears stale properties when no semantic node exists',async()=>{
   const f=fixture([]);
-  await selectViewportDev(f.ctx,f.state,'shared','instance',f.request,()=>{});
+  const status=document.createElement('span');status.id='status-selection';document.body.append(status);
+  const openingFeedback=vi.fn();
+  await selectViewportDev(f.ctx,f.state,'shared','instance',f.request,openingFeedback);
+  expect(openingFeedback).not.toHaveBeenCalled();
+  expect(status.textContent).toContain('没有对应');
+  expect(f.state.selectionMessage).toBe(status.textContent);
   expect(f.state.highlightedModState?.groups).toEqual([f.picked]);
   expect(document.getElementById('props-drawer-body')?.textContent).toContain('没有对应');
   expect(document.querySelectorAll('.props-source-choice')).toHaveLength(0);

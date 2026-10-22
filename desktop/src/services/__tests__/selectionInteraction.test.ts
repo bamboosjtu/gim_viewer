@@ -39,6 +39,25 @@ beforeEach(() => {
     fragments:{list:new Map(),resetHighlight:vi.fn(async () => {}),highlight:vi.fn(async () => {}),core:{update:vi.fn()} } };
 });
 
+it('ordinary selection reports through selection status without reusing project loading feedback', async () => {
+  const {state,a}=fixture();
+  const overlay=document.createElement('div');overlay.id='loading';overlay.style.display='none';document.body.append(overlay);
+  const openingFeedback=vi.fn(() => { overlay.style.display='block'; });
+  const {handleNodeClick,selectionMessage}=await import('../nodeInteractionService.js');
+  await handleNodeClick(state,a,openingFeedback);
+  expect(openingFeedback).not.toHaveBeenCalled();expect(overlay.style.display).toBe('none');
+  expect(state.selectionMessage).not.toBe('');
+  expect(document.getElementById('status-selection')?.textContent).toBe(a.name);
+  const previous=state.selectionRequest!, oldFeedback=selectionMessage(state,previous);
+  const next=state.beginSelection({kind:'cbm',key:'B'});
+  selectionMessage(state,next)('B 的来源不可用');
+  oldFeedback('A 的迟到进度');
+  expect(state.selectionMessage).toBe('B 的来源不可用');
+  expect(document.getElementById('status-selection')?.textContent).toBe('B 的来源不可用');
+  state.invalidateSelection();selectionMessage(state,next)('已取消请求的迟到进度');
+  expect(document.getElementById('status-selection')?.textContent).toBe('B 的来源不可用');
+});
+
 it('nested parent → child selections share the physical root load while the child owns the final commit', async () => {
   const {files,tree,root,a,b}=await nestedPartFixture(2);
   const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree;
@@ -344,7 +363,7 @@ it('a resource helper from an old session cannot create a new user selection', a
   const {state,a,b}=fixture(),old=state.captureProjectSession();state.activateProject(3,'replacement');
   const request=state.beginSelection({kind:'cbm',key:b.path});
   const {loadModStlForNode,frameAndHighlightDevice}=await import('../nodeInteractionService.js');
-  await loadModStlForNode(state,a,() => {},old);
+  await loadModStlForNode(state,a,old);
   await frameAndHighlightDevice(runtime.ctx,state,a.devPath,{rootOccurrence:a.path},old);
   expect(state.selectionRequest).toBe(request);expect(state.loadedXmlModGroups.size).toBe(0);
 });

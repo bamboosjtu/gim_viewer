@@ -98,6 +98,8 @@ GLB 恢复校验 manifest、源身份、条目状态和文件完整性。单 DEV
 
 source-invalid 的普通选择提示仅解释已跳过渲染、属性与来源仍可查看。完整 diagnostic/detail 保持原样，属性面板提供折叠技术详情和诊断复制，不把原始 Entity 矩阵送到视口消息。相同 SelectionRequest 的属性刷新保留用户当前页签与技术详情展开状态，新对象选择仍重置展示；这属于 UI 展示状态，不改变选择提交权或缓存语义。
 
+选择消息由 `selectionMessage` 校验当前 SelectionRequest 后写入选择状态栏，不复用工程打开的 `showLoading` 回调，不创建加载浮层、进度计时或 project busy 项。`loadModStlForNode` 只接受会话与请求身份，不再接受加载消息回调；DEV 无关联/多义来源提示同样只更新选择状态。来源异常仍显示真实原因，旧请求的迟到消息不得改写新选择。
+
 DEV 导出前和静态 GLB 模板恢复时检查有限值与包围盒跨度，复用场景既有 500 m 跨度上限，不按设备名称选择规则。异常源矩阵不会被 clamp 或静默删除；导出失败进入现有 failed 路径，不发布正常 GLB 或完整几何版本。运行时仍在应用 occurrence 变换后执行原包围盒守卫。样本验收分别统计候选可恢复、实际提交与异常拒绝 occurrence，不能以文件存在代替显示成功。
 
 XML 烘焙按可见根记录失败明细：每条保留来源 MOD 路径、根 Entity id 及其未解析依赖的 id 与原因，随 DEV 诊断以 `failedVisibleRoots`/`failedVisibleRootCount` 上报，每个 DEV 最多保留 64 条；Boolean 被简化求值的数量记为 `simplifiedBooleans`。这些明细只描述源内求值结果，不改变条目的 partial/unsupported/failed 终态，也不替代 DEV 级来源原因。

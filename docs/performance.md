@@ -20,6 +20,8 @@ DEV 实例化试点保留源 occurrence、装配层级、颜色和精确放置�
 
 ### 实例化试点的原生 A/B 与交互结论
 
+选择反馈修复已另用源码指纹 `436e2565df35…`、EXE SHA-256 `1a6dcc7448fe23e6c1b394d48795a5d68496b4dfa0257560a7660d1db22e94e4` 的 v0.1.1 Release 复查，默认关闭实例化。独立验收数据库路径经原生 IPC 核实；profile 由已清理的旧验收会话复制，明确标为缓存恢复交互检查，不是正式冷暖运行。搜索选择、切换同源不同 occurrence 以及选择已有 source-invalid 对象后，`#loading` 的计算 display 均为 `none`，属性 owner 正确，L2 编译数保持 0。关闭工程后 selection 为空、DEV 组和 IFC runtime 均为零，所属进程已清理；原始观察位于本地 `output/acceptance/stations/2026-10-22T11-46-32.304Z/`。该修复后的完整单元套件为 115 文件、1025 项通过、3 项跳过，定向交互 38 项通过，TypeScript 与前端/原生 Release 构建通过；没有重跑全站性能矩阵，不据此关闭 O-05/O-07。
+
 两次 A/B 使用同一原生包、substation02 源 SHA、独立验收数据库及同一个 WebView profile。profile 最初由已清理的前一构建验收会话复制，并记录 `cacheSeed`；这是缓存恢复下的受控单次 A/B，不计入正式冷暖矩阵。两次均命中 17 个 IFC LOD 缓存，DEV 无冷编译。通过真实鼠标执行同一组四次往返旋转，记录 30 秒；各有 8 个 pointer 事件，开始/结束窗口可见且有焦点，路线结束相机精确返回起点。
 
 | 指标 | 实例化关闭 | 实例化开启 | 判定 |

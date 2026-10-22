@@ -1,6 +1,7 @@
 import type {AppState, SelectionRequest} from '../app/state.js';
 import type {CbmNode} from '../gim/types.js';
 import type {ViewerContext} from '../viewer/viewerEngine.js';
+import {setSelectionStatus} from '../ui/shell/statusBar.js';
 
 export async function selectViewportDev(ctx: ViewerContext, state: AppState, rootOccurrence: string,
   instanceKey: string, request: SelectionRequest, showMessage: (text: string) => void): Promise<void> {
@@ -31,7 +32,8 @@ export async function selectViewportDev(ctx: ViewerContext, state: AppState, roo
   await highlightPicked(request);
   if (!guard.isCurrent()) return;
   const message = candidates.length ? '请选择对应的模型节点；当前拾取设备与节点的自动关联尚未确认。' : '此设备没有对应的模型导航节点。';
-  showMessage(message);
+  state.selectionMessage = message;
+  setSelectionStatus(message);
   showSelectionSources(message, candidates.map(candidate => ({label: candidate.label, choose: () => {
     if (!guard.isCurrent()) return;
     const selected = state.beginSelection({kind: 'cbm', key: candidate.node.path});
