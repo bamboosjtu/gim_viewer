@@ -14,6 +14,7 @@ import { getGeometryDiagnostic, geometryDiagnosticSummary, diagnosticForFailure,
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
 import { setSelectionStatus } from '../ui/shell/statusBar.js';
+import { beginSelectionStage } from './selectionTiming.js';
 import {
   attachDevGlbTemplatePool,
   getDevGlbTemplatePool,
@@ -82,15 +83,18 @@ export async function clearSelectionHighlight(state: AppState, request: Selectio
 
 /** UI projections follow the request; rendering a tree never starts a selection. */
 export async function syncSelectionNavigation(state: AppState, request: SelectionRequest): Promise<void> {
-  const [{syncSelectedTreeRow},{highlightSldByGridId},{getGridIdByCbmPath}]=await Promise.all([
-    import('../ui/cbmTreeView.js'),import('../ui/sldView.js'),import('../gim/stdSldIndex.js'),
-  ]);
-  if (!state.isCurrentSelection(request)) return;
-  syncSelectedTreeRow(state);
-  const target=request.target;
-  const gridId=target?.kind==='sld' ? target.key : target?.kind==='cbm' && state.currentStdSldIndex
-    ? getGridIdByCbmPath(state.currentStdSldIndex,target.key) : null;
-  highlightSldByGridId(gridId);
+  const end = beginSelectionStage(state, request, 'navigation');
+  try {
+    const [{syncSelectedTreeRow},{highlightSldByGridId},{getGridIdByCbmPath}]=await Promise.all([
+      import('../ui/cbmTreeView.js'),import('../ui/sldView.js'),import('../gim/stdSldIndex.js'),
+    ]);
+    if (!state.isCurrentSelection(request)) return;
+    syncSelectedTreeRow(state);
+    const target=request.target;
+    const gridId=target?.kind==='sld' ? target.key : target?.kind==='cbm' && state.currentStdSldIndex
+      ? getGridIdByCbmPath(state.currentStdSldIndex,target.key) : null;
+    highlightSldByGridId(gridId);
+  } finally { end(); }
 }
 
 /** Spatial navigation already opens the inspector; it has no implicit 3D fit. */
@@ -300,7 +304,11 @@ export function collectDeviceGroups(state: AppState, devPath: string, scope?: De
   if (!normalized) return [];
   const result: THREE.Object3D[] = [];
   const seen = new Set<THREE.Object3D>();
-  for (const root of [...state.loadedXmlModGroups.values(), ...state.loadedStlGroups.values()]) {
+  // The runtime owns one complete placement subtree per physical occurrence.
+  // Legacy/raw loading and template-wide queries retain the full-map path.
+  const loadedRoot = scope ? state.deviceLodRuntime?.getLoadedRoot?.(scope.rootOccurrence) : undefined;
+  const roots = loadedRoot ? [loadedRoot] : [...state.loadedXmlModGroups.values(), ...state.loadedStlGroups.values()];
+  for (const root of roots) {
     root.traverse((object) => {
       // GLTFLoader restores source group nodes as Object3D, which still owns
       // the complete renderable subtree. Identity must not depend on isGroup.
@@ -353,7 +361,10 @@ export async function frameAndHighlightDevice(
     await ensureBase.call(state.deviceLodRuntime, scope.rootOccurrence);
   }
   if (!guard.isCurrent()) return;
-  const groups=collectDeviceGroups(state,devPath,scope).filter(hasRenderableGeometry);
+  const endCollect=beginSelectionStage(state,request,'collectGroups');
+  let groups: THREE.Object3D[];
+  try { groups=collectDeviceGroups(state,devPath,scope).filter(hasRenderableGeometry); }
+  finally { endCollect(); }
   const {commitSelectionHighlight,highlightModGroups}=await import('../viewer/highlight.js');
   await commitSelectionHighlight(ctx,state,guard,() => highlightModGroups(state,groups));
   if (!guard.isCurrent() || groups.length===0) return;
@@ -366,7 +377,8 @@ export async function frameAndHighlightDevice(
   const {resetModHighlight}=await import('../viewer/highlight.js');
   const clearOwned=() => { if (state.highlightedModState===owned) resetModHighlight(state); };
   request.signal.addEventListener('abort',clearOwned,{once:true});
-  try { await frameBox(ctx,box,guard); } finally { request.signal.removeEventListener('abort',clearOwned); }
+  const endFrame=beginSelectionStage(state,request,'frame');
+  try { await frameBox(ctx,box,guard); } finally { endFrame(); request.signal.removeEventListener('abort',clearOwned); }
 }
 
 /**

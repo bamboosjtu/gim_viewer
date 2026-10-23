@@ -3,6 +3,7 @@ import { parseFamSectionsWithDiagnostics, resolveSubstationBusinessIdentity, typ
 import { discoverSubstationGlSidecars, substationDevIdentity, buildSubstationAliasIndex, buildSubstationIfcEvidence, findSubstationSourceDocuments, deviceOccurrenceScope } from '../gim/substationEvidence.js';
 import type { CbmNode } from '../gim/types.js';
 import type { AppState, SelectionRequest } from '../app/state.js';
+import { beginSelectionStage } from '../services/selectionTiming.js';
 import { setSelectionStatus } from './shell/statusBar.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { IfcSpatialNode, IfcSpatialObject, SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
@@ -1228,7 +1229,10 @@ export function showUnlinkedSldProperties(state: AppState, gridId: string, reque
 export async function showNodePropertiesBasic(state: AppState, node: CbmNode, request: SelectionRequest = state.beginSelection({kind:'cbm',key:node.path})): Promise<void> {
   if (!state.isCurrentSelection(request)) return;
   setSelectionStatus(getNodeDisplayName(node,state.ifcGuidToName,state.currentIfcEntries));
-  const summaryHtml = renderInspectorSummary(await buildInspectorSummary(state, node));
+  const endSummary=beginSelectionStage(state,request,'propertySummary');
+  let summaryHtml: string;
+  try { summaryHtml=renderInspectorSummary(await buildInspectorSummary(state,node)); }
+  finally { endSummary(); }
   if (!state.isCurrentSelection(request)) return;
   const { overview, source } = buildCbmOverviewAndSource(state, node, summaryHtml);
   const title = `<div class="props-header">${escHtml(getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries))}</div>`;
@@ -1245,7 +1249,9 @@ export async function showNodePropertiesBasic(state: AppState, node: CbmNode, re
     bindDevGeometryRetryControls(state, node, request);
     if (ifcControl) bindIfcRefinementControls(state, ifcControl.runtime, ifcControl.object, request);
   }
-  const params = await buildCbmParams(state, node);
+  const endParams=beginSelectionStage(state,request,'propertyParams');
+  let params: string;
+  try { params=await buildCbmParams(state,node); } finally { endParams(); }
   if (!state.isCurrentSelection(request)) return;
   const relations = buildCbmRelations(state, node);
   const activeTab=propsDrawerBody.dataset.cbmSelection===owner ? propsDrawerBody.querySelector('[data-itab].active')?.getAttribute('data-itab')??'overview' : 'overview';

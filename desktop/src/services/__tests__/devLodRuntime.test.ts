@@ -20,6 +20,16 @@ function occurrence(id: number, failed = false) {
     failedKey: failed ? key : undefined, group: failed ? undefined : new THREE.Group() };
 }
 
+it('resolves loaded roots from the live row and never retains a replaced or old-session group',()=>{
+  const {runtime,internal}=fixture(),first=new THREE.Group(),second=new THREE.Group();
+  internal.rows.set('root',{group:first});
+  expect(runtime.getLoadedRoot('root')).toBe(first);
+  internal.rows.set('root',{group:second});expect(runtime.getLoadedRoot('root')).toBe(second);
+  internal.rows.delete('root');expect(runtime.getLoadedRoot('root')).toBeUndefined();
+  internal.rows.set('root',{group:second});internal.state.isCurrentSession=()=>false;
+  expect(runtime.getLoadedRoot('root')).toBeUndefined();
+});
+
 it('owns optional instance batches across LOD placement, only-selected visibility and project release',async()=>{
   localStorage.setItem('gim-debug-dev-instancing','1');
   const {runtime,internal}=fixture();

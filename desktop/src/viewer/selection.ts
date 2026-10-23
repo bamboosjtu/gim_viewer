@@ -6,6 +6,7 @@ import { commitSelectionHighlight, HIGHLIGHT_STYLE } from './highlight.js';
 import type { IfcRegionalRuntime } from './ifcRegionalRuntime.js';
 import type { RegionalObject } from './ifcRegionalData.js';
 import { highlightModGroups } from './highlight.js';
+import { raycastVisibleIfc } from './ifcVisibleRaycast.js';
 
 export type OnElementSelected = (modelId: string, localId: number, request: SelectionRequest) => void;
 
@@ -31,12 +32,13 @@ export function setupSelection(
       // Pick the visible browser representation before beginSelection clears
       // the previous visibility filter or releases its fine representation.
       // The new request still owns every asynchronous result below.
-      const request=state.beginSelection({kind:'ifc-element',key:''});
-      const guard=state.selectionGuard(request);
-      const result=ctx.fragments.list.size===0 ? null : await ctx.fragments.raycast({
+      const picking=raycastVisibleIfc(ctx,{
         camera:(ctx.world.camera as any).three,mouse:new THREE.Vector2(e.clientX,e.clientY),
         dom:canvas as HTMLCanvasElement || container,
       });
+      const request=state.beginSelection({kind:'ifc-element',key:''});
+      const guard=state.selectionGuard(request);
+      const result=await picking;
       if (!guard.isCurrent()) return;
       const near=regional[0];
       const ifcDistance=result ? (result.rayDistance??result.distance??Infinity) : Infinity;

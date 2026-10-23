@@ -39,6 +39,23 @@ beforeEach(() => {
   mock.bytes = null;
 });
 
+it('scoped runtime selection visits only its current occurrence subtree and preserves assembly filtering',()=>{
+  const state=new AppState(),root=new THREE.Group(),other=new THREE.Group();
+  root.userData={rootOccurrence:'root',devPath:'DEV/root.dev'};
+  const branch=(path:string)=>{const group=new THREE.Group();group.userData={devPath:'DEV/part.dev',assemblyPath:path};root.add(group);return group;};
+  const a=branch('sub:0'),b=branch('sub:1');
+  const otherTraversal=vi.spyOn(other,'traverse');
+  state.loadedXmlModGroups.set('root',root);state.loadedStlGroups.set('other',other);
+  state.deviceLodRuntime={getLoadedRoot:vi.fn(()=>root)} as any;
+  expect(collectDeviceGroups(state,'part.dev',{rootOccurrence:'root',assemblyPaths:['sub:1']})).toEqual([b]);
+  expect(otherTraversal).not.toHaveBeenCalled();
+  expect(collectDeviceGroups(state,'part.dev',{rootOccurrence:'root'})).toEqual([root]);
+  expect(a.parent).toBe(root);
+  state.deviceLodRuntime=null;
+  expect(collectDeviceGroups(state,'part.dev',{rootOccurrence:'root',assemblyPaths:['sub:1']})).toEqual([b]);
+  expect(otherTraversal).toHaveBeenCalled();
+});
+
 it.each(['raw','glb'] as const)('nested PARTINDEX uses the real root and parent subtree after %s loading', async (mode) => {
   const {files,tree,root,b}=await nestedPartFixture(2);
   const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree; state.currentProjectId=1;

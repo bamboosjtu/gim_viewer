@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from './viewerEngine.js';
+import type { IfcSelectionScope } from './ifcModelVisibility.js';
 import { IFC_CONNECTION_BATCH_MAX_BYTES, IFC_CONNECTION_BATCH_MAX_OBJECTS, connectionChunkBytes, type ConnectionGeometryBatch } from './ifcConnectionBatches.js';
 
 export interface ConnectionPreviewBatch extends ConnectionGeometryBatch {
@@ -24,6 +25,8 @@ export class IfcConnectionPreviewRuntime {
   private streams = new Map<string, Stream>();
   private ready = new Set<string>();
   private released = false;
+  private onlySelected = false;
+  private selectionScopes: ReadonlyMap<string, IfcSelectionScope> = new Map();
   constructor(ctx: ViewerContext, session: ProjectLoadSession, private readonly current: () => boolean) {
     this.root.name = 'IFC source connection previews';
     this.root.userData = { provider: 'ifc-connection-preview', sessionGeneration: session.generation };
@@ -88,6 +91,7 @@ export class IfcConnectionPreviewRuntime {
       mesh.matrix.fromArray(chunk.matrix);
       mesh.userData = { ...chunk.object, modelId: batch.modelId, sourcePath: batch.sourcePath,
         sourceIdentity: batch.sourceIdentity, provider: 'ifc-connection-preview', part: chunk.part, chunk: chunk.chunk };
+      mesh.visible = this.inSelection(batch.modelId, id, chunk.object.globalId);
       group.add(mesh);
       this.diagnostics.meshChunks++;
     }
@@ -132,6 +136,19 @@ export class IfcConnectionPreviewRuntime {
     this.root.updateMatrixWorld(true); this.root.visible = true;
   }
   setVisible(visible: boolean): void { this.root.visible = visible; }
+  private inSelection(modelId: string, expressId: number, globalId: string): boolean {
+    if (!this.onlySelected) return true;
+    const scope = this.selectionScopes.get(modelId);
+    return !!scope && (scope.expressIds.has(expressId) || scope.globalIds.has(globalId));
+  }
+  setSelectionScope(only: boolean, scopes: ReadonlyMap<string, IfcSelectionScope>): void {
+    this.onlySelected = only; this.selectionScopes = scopes;
+    this.root.traverse(object => {
+      const data = object.userData;
+      if (data.provider === 'ifc-connection-preview' && data.modelId)
+        object.visible = this.inSelection(data.modelId, data.expressId, data.globalId);
+    });
+  }
   release(): void {
     if (this.released) return; this.released = true;
     for (const stream of this.streams.values()) for (const group of stream.groups) this.disposeGroup(group);

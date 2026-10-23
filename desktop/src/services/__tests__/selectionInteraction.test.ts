@@ -300,7 +300,7 @@ it.each([false,true])('a spatial IFC second render loses ownership to B; project
 
 it('search selection wins before lazy imports and a slow 3D raycast cannot steal it', async () => {
   const {state,b}=fixture(),ray=deferred<any>(),started=deferred<void>();state.initialized=true;
-  runtime.ctx.fragments.list.set('model',{getGuidsByLocalIds:async () => ['guid'],getItemsData:async () => []});
+  runtime.ctx.fragments.list.set('model',{object:new THREE.Group(),getVisible:async () => [true],raycast:() => runtime.ctx.fragments.raycast(),getGuidsByLocalIds:async () => ['guid'],getItemsData:async () => []});
   runtime.ctx.fragments.raycast=vi.fn(() => {started.resolve();return ray.promise;});
   const {getViewerRuntimeWithUI}=await import('../viewerUIBinding.js');await getViewerRuntimeWithUI(state,() => {});
   document.querySelector<HTMLCanvasElement>('canvas')!.click();await started.promise;
@@ -320,7 +320,7 @@ it('search selection wins before lazy imports and a slow 3D raycast cannot steal
 it('an in-flight 3D IFC apply is reset before B, and blank viewport cancellation clears inspector and selection', async () => {
   const {state,b}=fixture(),apply=deferred<void>(),started=deferred<void>();state.initialized=true;
   let visibleIfc:any=null;
-  runtime.ctx.fragments.list.set('model',{getGuidsByLocalIds:async () => ['guid'],getItemsData:async () => []});
+  runtime.ctx.fragments.list.set('model',{object:new THREE.Group(),getVisible:async () => [true],raycast:() => runtime.ctx.fragments.raycast(),getGuidsByLocalIds:async () => ['guid'],getItemsData:async () => []});
   runtime.ctx.fragments.raycast=vi.fn(async () => ({localId:10,fragments:{modelId:'model'}}));
   runtime.ctx.fragments.highlight.mockImplementationOnce(async (_style:any,items:any) => {started.resolve();await apply.promise;visibleIfc=items;});
   runtime.ctx.fragments.resetHighlight.mockImplementation(async () => {visibleIfc=null;});
@@ -340,7 +340,7 @@ it('an in-flight 3D IFC apply is reset before B, and blank viewport cancellation
 it('SLD topology A → 3D B invalidates A properties and the previous topology highlight', async () => {
   const {state,a}=fixture(),fam=deferred<string>(),started=deferred<void>();state.initialized=true;a.famPath='slow.fam';a.classifyName='0TEST*001';
   state.currentFiles!.set('CBM/slow.fam',{text:() => {started.resolve();return fam.promise;}} as File);
-  runtime.ctx.fragments.list.set('model',{getGuidsByLocalIds:async () => ['guid-B'],getItemsData:async () => [{Name:{value:'Picked B'}}]});
+  runtime.ctx.fragments.list.set('model',{object:new THREE.Group(),getVisible:async () => [true],raycast:() => runtime.ctx.fragments.raycast(),getGuidsByLocalIds:async () => ['guid-B'],getItemsData:async () => [{Name:{value:'Picked B'}}]});
   runtime.ctx.fragments.raycast=vi.fn(async () => ({localId:10,fragments:{modelId:'model'}}));
   const {getViewerRuntimeWithUI}=await import('../viewerUIBinding.js');await getViewerRuntimeWithUI(state,() => {});
   const {parseStd}=await import('../../gim/stdParser.js');

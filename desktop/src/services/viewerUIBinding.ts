@@ -54,6 +54,8 @@ export async function getViewerRuntimeWithUI(
 
     const runtime = await getViewerRuntime(container);
     const { ctx } = runtime;
+    const { createSelectionVisibility } = await import('./selectionVisibility.js');
+    state.selectionVisibility ??= createSelectionVisibility(state, ctx);
     const { ViewerViewHistory } = await import('../viewer/viewHistory.js');
     state.viewHistory ??= new ViewerViewHistory(ctx, 20, {
       getVisibility: () => state.onlySelected ? 'only-selected' : 'all',
@@ -86,8 +88,15 @@ export async function getViewerRuntimeWithUI(
 
     // 构造模型生命周期回调（IFC 加载/卸载时同步更新 model-list UI）
     const modelCallbacks: ModelEventCallbacks = {
-      onModelAdded: (modelId, runtimeModelId) => addModelToUI(ctx, state, modelId, runtimeModelId),
-      onModelRemoved: (modelId, runtimeModelId) => removeModelFromUI(modelId, runtimeModelId),
+      onModelAdded: (modelId, runtimeModelId) => {
+        const model = ctx.fragments.list.get(runtimeModelId);
+        if (model) state.selectionVisibility?.registerModel(modelId, model);
+        addModelToUI(ctx, state, modelId, runtimeModelId);
+      },
+      onModelRemoved: (modelId, runtimeModelId) => {
+        state.selectionVisibility?.removeModel(modelId, runtimeModelId);
+        removeModelFromUI(modelId, runtimeModelId);
+      },
     };
 
     return { ctx, modelCallbacks };

@@ -11,6 +11,13 @@ export class IfcRegionalInstances {
   private materials = new Map<string, THREE.MeshStandardMaterial>();
   private meshes: THREE.InstancedMesh[] = [];
   private overlay: THREE.Group | null = null;
+  private filter: ReadonlySet<number> | null = null;
+  setFilter(ids: ReadonlySet<number> | null, base: THREE.Matrix4): void {
+    if (ids === null && this.filter === null || ids !== null && this.filter !== null
+      && ids.size === this.filter.size && [...ids].every(id => this.filter!.has(id))) return;
+    this.filter = ids === null ? null : new Set(ids);
+    this.rebuild(base);
+  }
   accepts(result: ObjectFineResult): boolean {
     return (
       /^(IFCMECHANICALFASTENER|IFCFASTENER)$/i.test(result.ifcType) &&
@@ -67,7 +74,8 @@ export class IfcRegionalInstances {
       string,
       { part: ObjectFinePart; items: { id: number; matrix: THREE.Matrix4 }[] }
     >();
-    for (const object of this.objects.values())
+    for (const object of this.objects.values()) {
+      if (this.filter && !this.filter.has(object.expressId)) continue;
       for (const part of object.parts) {
         const key = `${part.geometryId}|${part.color.join(',')}`;
         if (!buckets.has(key)) buckets.set(key, { part, items: [] });
@@ -80,6 +88,7 @@ export class IfcRegionalInstances {
               .multiply(new THREE.Matrix4().fromArray(part.matrix)),
           });
       }
+    }
     const used = new Set<number>(),
       usedMaterials = new Set<string>();
     for (const { part, items } of buckets.values()) {

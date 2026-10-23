@@ -8,6 +8,12 @@
 2. [IFC / DEV 分级与加载性能](performance-lod.md)：再理解首屏、LOD、Worker/cache 和远景/近景取舍。
 3. [系统架构](../architecture.md)、[性能](../performance.md)：回到当前长期契约与实测基线。
 
+P0 的本轮实施依据见 [选择查询与大站基线](p0-selection-and-baseline.md)：保留已测得收益的 occurrence 根查询，区分局部收益、选择阶段记录与未通过的大站指标。
+
+未成功技术路线使用 `test-*.md` 独立记录假设、实验边界、结果与回退，不视为已实现能力：
+
+- [提高 DEV Worker 比例](test-dev-worker-overprovision.md)：历史尝试未获收益，当前大站快照也不支持仅凭空闲 Worker 增加并发。
+
 文档边界：
 
 - 本目录解释“为什么/怎么运转/新人从哪里改”；

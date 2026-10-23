@@ -13,7 +13,11 @@ export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: strin
   checkbox.type = 'checkbox'; checkbox.checked = true; checkbox.className = 'model-checkbox'; checkbox.title = '显示/隐藏';
   checkbox.addEventListener('change', () => {
     const model = ctx.fragments.list.get(runtimeModelId);
-    if (model) { model.object.visible = checkbox.checked; const e = state.loadedModels.get(modelId); if (e) e.visible = checkbox.checked; }
+    if (model) {
+      if (state.selectionVisibility) state.selectionVisibility.setModelVisible(modelId, checkbox.checked);
+      else model.object.visible = checkbox.checked;
+      const e = state.loadedModels.get(modelId); if (e) e.visible = checkbox.checked;
+    }
   });
 
   const name = document.createElement('span');

@@ -10,7 +10,8 @@ function fixture() {
   canvas.getBoundingClientRect=()=>({left:0,top:0,width:100,height:100} as DOMRect);
   const pick=vi.fn(),refine=vi.fn();
   state.deviceLodRuntime={pick,refine,clearSelection:vi.fn(),setOnlySelected:vi.fn(),diagnostics:{},select:vi.fn(),release:vi.fn()};
-  const fragments={list:new Map([['model',{}]]),raycast:vi.fn(),highlight:vi.fn(async()=>{}),resetHighlight:vi.fn(async()=>{})};
+  const raycast=vi.fn();
+  const fragments={list:new Map([['model',{object:new THREE.Group(),raycast,getVisible:async()=>[true]}]]),raycast,highlight:vi.fn(async()=>{}),resetHighlight:vi.fn(async()=>{})};
   const ctx={world:{camera:{three:new THREE.PerspectiveCamera()}},fragments} as any;
   const dev=vi.fn(),ifc=vi.fn();setupSelection(ctx,state,container,ifc,vi.fn(),undefined,dev);
   const click=()=>canvas.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:50,clientY:50}));

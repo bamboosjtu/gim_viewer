@@ -214,10 +214,12 @@ export async function loadBimIfc(
     isCurrent: current,
     sourceToViewer: base.clone(),
     fineQueue: state.substationFineQueue,
+    visibility: state.selectionVisibility?.registerModel(logicalId, model),
     onBeforeDisposeGroup:group=>{if(state.highlightedModState?.groups.includes(group))resetModHighlight(state);},
   });
   runtime.setMemoryPressure?.(state.substationMemoryPressure);
   runtime.setOnlySelected?.(state.onlySelected);
   state.ifcRegionalRuntimes.set(logicalId, runtime);
+  void state.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error));
   return model;
 }

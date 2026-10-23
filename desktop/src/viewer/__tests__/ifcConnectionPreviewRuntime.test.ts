@@ -14,6 +14,21 @@ function fixture() {
   const state = new AppState(), session = state.activateProject(1,'sha'), scene = new THREE.Scene();
   return new IfcConnectionPreviewRuntime({world:{scene:{three:scene}}} as any,session,()=>state.isCurrentSession(session));
 }
+it('isolates exact source identities across current and future batches without changing coordinates',()=>{
+  const runtime=fixture();runtime.setTransform(new THREE.Matrix4());runtime.acceptBatch(batch());
+  const scope={localIds:new Set<number>(),globalIds:new Set(['g7']),expressIds:new Set<number>()};
+  runtime.setSelectionScope(true,new Map([['model',scope]]));
+  const selected=runtime.root.children[0].children[0];expect(selected.visible).toBe(true);
+  const other={...object,expressId:8,globalId:'g8'},next=batch(1);
+  const chunks=[{...next.chunks[0],object:other}];
+  runtime.acceptBatch({...next,objects:[other],chunks,bytes:chunks.reduce((sum,chunk)=>sum+connectionChunkBytes(chunk),0)});
+  const hidden=runtime.root.children[1].children[0];expect(hidden.visible).toBe(false);
+  const matrix=hidden.matrix.toArray();runtime.setTransform(new THREE.Matrix4().makeTranslation(1,2,3));
+  expect(hidden.visible).toBe(false);expect(hidden.matrix.toArray()).toEqual(matrix);
+  runtime.setSelectionScope(true,new Map());expect(selected.visible).toBe(false);
+  runtime.setSelectionScope(false,new Map());expect(selected.visible).toBe(true);expect(hidden.visible).toBe(true);
+  runtime.release();
+});
 it('renders the actual bent source triangle, original color and placement with one Y-up conversion', () => {
   const runtime=fixture();
   const project = new THREE.Matrix4().makeTranslation(10,20,30).multiply(new THREE.Matrix4().makeRotationX(-Math.PI/2));

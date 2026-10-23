@@ -29,6 +29,7 @@ export interface SubstationConnectionPreview {
   markFailed?(modelId: string): void;
   markModelReady(modelId: string): void;
   setTransform?(matrix: THREE.Matrix4): void;
+  setSelectionScope?(only: boolean, scopes: ReadonlyMap<string, import('../viewer/ifcModelVisibility.js').IfcSelectionScope>): void;
   diagnostics?: Record<string, number>;
   release(): void;
 }
@@ -73,7 +74,10 @@ export class AppState {
   viewHistory: ViewerViewHistory | null = null;
   stationOverview: (() => void) | null = null;
   onlySelected = false;
+  selectionVisibility: ReturnType<typeof import('../services/selectionVisibility.js').createSelectionVisibility> | null = null;
+  selectionHighlightRequestId: number | null = null;
   deviceLodRuntime: { select(rootOccurrence: string): Promise<THREE.Group[]>; ensureBase?(rootOccurrence: string): Promise<THREE.Group[]>; retry?(rootOccurrence: string): Promise<THREE.Group[]>; refine?(rootOccurrence: string): Promise<THREE.Group[]>; releaseFine?(rootOccurrence: string): void; setOnlySelected?(only: boolean): void; release(): void; clearSelection(): void; notifyCoordinateAnchor?(): void;
+    getLoadedRoot?(rootOccurrence: string): THREE.Group | undefined;
     setBackgroundPaused?(paused: boolean): void;
     pick?(ray: THREE.Raycaster): {rootOccurrence: string; instanceKey: string; distance: number} | null;
     setExternalMemoryPressure?(pressure: 'unknown' | 'normal' | 'high' | 'critical'): void;
@@ -120,6 +124,7 @@ export class AppState {
     this.onlySelected = only;
     this.deviceLodRuntime?.setOnlySelected?.(only);
     for (const runtime of this.ifcRegionalRuntimes.values()) runtime.setOnlySelected?.(only);
+    void this.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error));
     this.viewHistory?.recordVisibility();
   }
   // GIM 文件相关
@@ -198,6 +203,8 @@ export class AppState {
   private releaseIfcRuntimes(): void {
     for(const runtime of this.ifcRegionalRuntimes.values())runtime.release();
     this.ifcRegionalRuntimes.clear();
+    this.selectionVisibility?.reset();
+    this.selectionHighlightRequestId = null;
   }
 
   // xml-mod Group 跟踪（key = instanceKey；同一 MOD 文件可有多个放置实例）

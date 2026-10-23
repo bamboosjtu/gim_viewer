@@ -714,9 +714,8 @@ export class DevLodRuntime {
     if (!shared) { this.wanted.delete(key); this.worker?.cancelTask(key); }
   }
   private applyOnlySelected(): void {
-    const hasSelected = this.selected.length > 0;
     for (const [key, row] of this.rows) {
-      if (row.group) row.group.visible = !this.onlySelected || !hasSelected || (row.entry.rootOccurrence ?? key) === this.selected;
+      if (row.group) row.group.visible = !this.onlySelected || (row.entry.rootOccurrence ?? key) === this.selected;
     }
     this.instances?.sync();
   }
@@ -1213,6 +1212,10 @@ export class DevLodRuntime {
   }
   pick(ray: THREE.Raycaster): ReturnType<DevInstanceBatches['pick']> {
     return this.instances?.pick(ray) ?? null;
+  }
+  /** Read the current placement directly; never retain a second root index. */
+  getLoadedRoot(rootOccurrence: string): THREE.Group | undefined {
+    return this.current() ? this.rows.get(rootOccurrence)?.group : undefined;
   }
   /** Ensure an occurrence has a browser representation.  This method is used
    * by ordinary tree/search/selection flows and deliberately never requests

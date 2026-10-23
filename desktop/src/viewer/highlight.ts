@@ -10,6 +10,7 @@ import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
 import { setDevInstanceHighlight } from './devInstanceBatches.js';
+import { perfBegin } from '../utils/perfTimings.js';
 
 /** 高亮样式 */
 export const HIGHLIGHT_STYLE: OBCF.MaterialDefinition = {
@@ -106,6 +107,9 @@ export async function commitSelectionHighlight(
   ctx: ViewerContext, state: AppState, guard: SelectionCommitGuard,
   apply?: () => Promise<void> | void,
 ): Promise<void> {
+  if (!guard.isCurrent()) return;
+  const meta={selectionId:state.selectionRequest?.id,selectionKind:state.selectionRequest?.target?.kind,sourcePath:state.selectionRequest?.target?.key};
+  const end=perfBegin('selection.highlightCommit',meta);
   const previous = highlightCommits.get(state) ?? Promise.resolve();
   const task = previous.catch(() => {}).then(async () => {
     if (!guard.isCurrent()) return;
@@ -119,9 +123,16 @@ export async function commitSelectionHighlight(
     resetModHighlight(state);
     for (const runtime of state.ifcRegionalRuntimes.values()) runtime.clearHighlight();
     await apply?.();
+    if (guard.isCurrent()) {
+      state.selectionHighlightRequestId = state.selectionRequest?.id ?? null;
+      await state.selectionVisibility?.sync(guard);
+    }
   });
   highlightCommits.set(state,task);
-  try { await task; } finally { if (highlightCommits.get(state) === task) highlightCommits.delete(state); }
+  try { await task; } finally {
+    end(undefined,{...meta,current:guard.isCurrent()});
+    if (highlightCommits.get(state) === task) highlightCommits.delete(state);
+  }
 }
 
 /** 重置当前高亮（IFC + MOD），与选择的外部高亮提交使用同一短队列。 */

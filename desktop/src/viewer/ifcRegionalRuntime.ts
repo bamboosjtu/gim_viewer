@@ -21,6 +21,7 @@ import type { IfcObjectIdentity } from './ifcObjectIdentity.js';
 import type { SubstationFineQueue } from '../app/state.js';
 import { perfMarkProductMoment } from '../utils/perfTimings.js';
 import type { MemoryPressure } from '../utils/memoryPressure.js';
+import type { IfcModelVisibility } from './ifcModelVisibility.js';
 
 // A source model can consume hundreds of MB. Serialize regional source work
 // across IFCs. Keep one source resident for nearby requests, with idle eviction.
@@ -79,6 +80,7 @@ export class IfcRegionalRuntime {
   private fineGeneration = new Map<number, number>();
   private onlySelected = false;
   private selectedExpressId: number | null = null;
+  private isolationIds: ReadonlySet<number> | null = null;
   private localIds = new Map<number, number>();
   private guidIds: Promise<Map<string, number[]>> | null = null;
   private epoch = 0;
@@ -104,6 +106,7 @@ export class IfcRegionalRuntime {
       isCurrent: () => boolean;
       sourceToViewer: THREE.Matrix4;
       fineQueue?: SubstationFineQueue | null;
+      visibility?: IfcModelVisibility;
       onBeforeDisposeGroup?: (group: THREE.Group) => void;
     }
   ) {
@@ -121,12 +124,9 @@ export class IfcRegionalRuntime {
     window.addEventListener('gim-ifc-detail-mode', this.schedule);
     options.ctx.fragments.list.onBeforeDelete.add(this.disposed);
     this.interval = setInterval(() => {
-      const visible = options.model.object.visible;
-      const regionalVisible = this.onlySelected ? true : visible;
-      if (this.root.visible !== regionalVisible) {
-        this.root.visible = regionalVisible;
-        this.schedule();
-      }
+      const visible = this.root.visible;
+      this.refreshVisibility();
+      if (visible !== this.root.visible) this.schedule();
       if (!options.isCurrent()) this.release();
     }, 1000);
     this.schedule();
@@ -214,6 +214,11 @@ export class IfcRegionalRuntime {
       );
     }, 250);
   };
+  private setFarVisible(ids: number[], visible: boolean): Promise<void> {
+    return this.options.visibility
+      ? this.options.visibility.setDetailVisible(ids, visible)
+      : this.options.model.setVisible(ids, visible);
+  }
   private async farIds() {
     if (!this.guidIds)
       this.guidIds = (async () => {
@@ -274,17 +279,18 @@ export class IfcRegionalRuntime {
       // Its frame is immutable for this session; the manager's initially cached
       // identity must never replace it while its own query is still pending.
       const candidates =
-        isIfcNearDetailEnabled() && this.options.model.object.visible
+        isIfcNearDetailEnabled() && this.root.visible
           ? queryRegionalObjects(
               this.index.objects,
               this.transform,
               (this.options.ctx.world.camera as any).three
             )
           : [];
+      const scopedCandidates = this.onlySelected ? candidates.filter(object => this.isIsolatedMember(object.expressId)) : candidates;
       const pressured = this.memoryPressure === 'high' || this.memoryPressure === 'critical';
       // Preserve visible existing L1 and the selected object. Under pressure
       // no new automatic region is admitted; far geometry stays available.
-      const objects = pressured ? candidates.filter(object => this.groups.has(object.expressId)) : candidates;
+      const objects = pressured ? scopedCandidates.filter(object => this.groups.has(object.expressId)) : scopedCandidates;
       // L1 follows the camera, while an explicitly refined object is retained
       // until the user releases it.  Ordinary selection never enters this set.
       const desired = new Set([...objects.map((o) => o.expressId), ...this.fineRequested]);
@@ -299,7 +305,7 @@ export class IfcRegionalRuntime {
           if (local !== undefined) restore.push(local);
           this.localIds.delete(id);
         }
-      if (restore.length) await this.options.model.setVisible(restore, true);
+      if (restore.length) await this.setFarVisible(restore, true);
       if (this.groups.size !== before) this.instances.rebuild(this.transform);
       if (!this.current() || epoch !== this.epoch) return;
       if (!objects.length) {
@@ -406,10 +412,10 @@ export class IfcRegionalRuntime {
           group.userData.approximate = true;
           this.root.add(group);
           this.groups.set(object.expressId, group);
-          group.visible = !this.onlySelected || object.expressId === this.selectedExpressId;
+          group.visible = !this.onlySelected || this.isIsolatedMember(object.expressId);
           if (candidates.length === 1) {
-            await this.options.model.setVisible(candidates, false);
-            if(this.released){await this.options.model.setVisible(candidates,true);return;}
+            await this.setFarVisible(candidates, false);
+            if(this.released){await this.setFarVisible(candidates,true);return;}
             this.localIds.set(object.expressId, candidates[0]);
           }
         }
@@ -440,7 +446,10 @@ export class IfcRegionalRuntime {
   ): { object: RegionalObject; distance: number } | null {
     if (!this.root.visible) return null;
     this.root.updateMatrixWorld(true);
-    const hit = ray.intersectObjects(this.root.children, true)[0];
+    const hit = ray.intersectObjects(this.root.children, true).find(hit => {
+      for (let object: THREE.Object3D | null = hit.object; object; object = object.parent) if (!object.visible) return false;
+      return true;
+    });
     if (!hit) return null;
     const id = this.instances.identity(hit) ?? hit.object.userData.expressId;
     const object = this.index.objects.find((o) => o.expressId === id);
@@ -461,12 +470,26 @@ export class IfcRegionalRuntime {
     this.applyOnlySelected();
   }
   private applyOnlySelected(): void {
-    const hasSelectedObject = this.selectedExpressId !== null;
-    this.options.model.object.visible = !this.onlySelected || !hasSelectedObject;
-    this.root.visible = this.onlySelected && hasSelectedObject ? true : this.options.model.object.visible;
+    this.refreshVisibility();
     for (const [expressId, group] of this.groups) {
-      group.visible = !this.onlySelected || !hasSelectedObject || expressId === this.selectedExpressId;
+      group.visible = !this.onlySelected || this.isIsolatedMember(expressId);
     }
+    this.instances.setFilter(this.onlySelected ? this.isolationIds ?? new Set(this.selectedExpressId === null ? [] : [this.selectedExpressId]) : null, this.transform);
+  }
+  private isIsolatedMember(expressId: number): boolean {
+    return this.isolationIds ? this.isolationIds.has(expressId) : expressId === this.selectedExpressId;
+  }
+  refreshVisibility(): void {
+    const layer = this.options.visibility?.layerVisible ?? this.options.model.object.visible;
+    this.root.visible = layer && (!this.onlySelected || (this.isolationIds ? this.isolationIds.size > 0 : this.selectedExpressId !== null));
+  }
+  setSelectionScope(only: boolean, ids: ReadonlySet<number>): void {
+    const changed = this.onlySelected !== only || this.isolationIds === null || ids.size !== this.isolationIds.size
+      || [...ids].some(id => !this.isolationIds!.has(id));
+    this.onlySelected = only;
+    this.isolationIds = new Set(ids);
+    this.applyOnlySelected();
+    if (changed) this.schedule();
   }
   setOnlySelected(only: boolean): void {
     this.onlySelected = only;
@@ -565,20 +588,20 @@ export class IfcRegionalRuntime {
     );
     group.userData.lod = 2;
     group.userData.approximate = false;
-    group.visible = !this.onlySelected || object.expressId === this.selectedExpressId;
+    group.visible = !this.onlySelected || this.isIsolatedMember(object.expressId);
     this.root.add(group);
     this.groups.set(object.expressId, group);
     const candidates = (await this.farIds()).get(object.globalId) ?? [];
     if (!wanted()) {
-      if (candidates.length === 1) await this.options.model.setVisible(candidates, true).catch(() => undefined);
+      if (candidates.length === 1) await this.setFarVisible(candidates, true).catch(() => undefined);
       this.disposeGroup(group);
       this.groups.delete(object.expressId);
       return undefined;
     }
     if (candidates.length === 1) {
-      await this.options.model.setVisible(candidates, false);
+      await this.setFarVisible(candidates, false);
       if (!wanted()) {
-        await this.options.model.setVisible(candidates, true).catch(() => undefined);
+        await this.setFarVisible(candidates, true).catch(() => undefined);
         this.disposeGroup(group);
         this.groups.delete(object.expressId);
         return undefined;
@@ -607,7 +630,7 @@ export class IfcRegionalRuntime {
     const local = this.localIds.get(expressId);
     if (local !== undefined) {
       this.localIds.delete(expressId);
-      void this.options.model.setVisible([local], true).catch(() => undefined);
+      void this.setFarVisible([local], true).catch(() => undefined);
     }
     this.fineRuntime?.forget(expressId);
     if (!this.fineRequested.size) this.fineRuntime?.cancel();
@@ -670,7 +693,7 @@ export class IfcRegionalRuntime {
       p.reject(Error('Regional model released'));
     this.pending.clear();
     const restore=[...this.localIds.values()];this.localIds.clear();
-    if(restore.length)void (async()=>{try{await this.options.model.setVisible(restore,true);}catch{/* Model may already be disposed. */}})();
+    if(restore.length)void (async()=>{try{await this.setFarVisible(restore,true);}catch{/* Model may already be disposed. */}})();
     for (const group of this.groups.values()) this.disposeGroup(group);
     this.groups.clear();
     this.instances.release();

@@ -67,3 +67,15 @@ it('mirrored placements keep the ordinary mesh path', () => {
   expect(pool.accepts(object)).toBe(false);
   pool.release();
 });
+it('filters instance slots by exact source identity and keeps the filter for later rebuilds',()=>{
+  const pool=new IfcRegionalInstances(),base=new THREE.Matrix4();
+  pool.add(make(10,0));pool.add(make(20,3));pool.rebuild(base);
+  pool.setFilter(new Set([20]),base);
+  expect(pool.statistics.instances).toBe(1);
+  expect(pool.root.children[0].userData.ifcInstanceIds).toEqual([20]);
+  pool.add(make(30,6));pool.rebuild(base);
+  expect(pool.root.children[0].userData.ifcInstanceIds).toEqual([20]);
+  pool.setFilter(new Set(),base);expect(pool.statistics.instances).toBe(0);
+  pool.setFilter(null,base);expect(pool.statistics.instances).toBe(3);
+  pool.release();
+});

@@ -895,6 +895,7 @@ export async function loadAllIfcFiles(
     isCurrent,
   );
   state.substationConnectionPreview = connectionPreview;
+  void state.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error));
   const connectionFirstBatches = new Set<string>();
   const connectionCompletions = new Set<string>();
   const updateConnectionStatus = (): void => {
