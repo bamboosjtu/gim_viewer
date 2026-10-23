@@ -11,7 +11,8 @@ import { IfcRegionalRuntime } from './ifcRegionalRuntime.js';
 import type { RegionalIndex } from './ifcRegionalData.js';
 import type { IfcRegionalConnectionBatch } from './ifcConversion.js';
 import { CONNECTION_GEOMETRY_VERSION, validConnectionArtifact, type ConnectionGeometryArtifact } from './ifcConnectionBatches.js';
-import { resetModHighlight } from './highlight.js';
+import { removeModHighlightGroup } from './highlight.js';
+import { syncIfcRepresentationHighlight } from './ifcRepresentationHighlight.js';
 import { readIfcCoordinateAnchor } from './ifcCoordinateAnchor.js';
 interface FarArtifact {
   bytes: ArrayBuffer;
@@ -215,7 +216,9 @@ export async function loadBimIfc(
     sourceToViewer: base.clone(),
     fineQueue: state.substationFineQueue,
     visibility: state.selectionVisibility?.registerModel(logicalId, model),
-    onBeforeDisposeGroup:group=>{if(state.highlightedModState?.groups.includes(group))resetModHighlight(state);},
+    onBeforeDisposeGroup:group=>removeModHighlightGroup(state,group),
+    onRepresentationChanged:(object,group,localId,isCurrent,prepareHighlight)=>syncIfcRepresentationHighlight(
+      ctx,state,runtimeId,logicalId,object,group,localId,isCurrent,prepareHighlight),
   });
   runtime.setMemoryPressure?.(state.substationMemoryPressure);
   runtime.setOnlySelected?.(state.onlySelected);

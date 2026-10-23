@@ -49,6 +49,22 @@ export function resetModHighlight(state: AppState): void {
   state.highlightedModState = null;
 }
 
+/** Restore only a departing representation, preserving other selected sources. */
+export function removeModHighlightGroup(state: AppState, group: THREE.Object3D): void {
+  const owned = state.highlightedModState;
+  if (!owned?.groups.includes(group)) return;
+  group.traverse(object => {
+    const mesh = object as THREE.Mesh, original = owned.originalMaterials.get(mesh);
+    if (!original) return;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    if (mesh.material !== original) materials.forEach(material => material.dispose());
+    mesh.material = original; setDevInstanceHighlight(mesh, false);
+    owned.originalMaterials.delete(mesh);
+  });
+  owned.groups = owned.groups.filter(value => value !== group);
+  if (!owned.groups.length) state.highlightedModState = null;
+}
+
 /**
  * 高亮一组 MOD/STL Group：克隆每个 mesh 的材质并设置 emissive 发光。
  *
@@ -65,42 +81,54 @@ export function highlightModGroups(
 ): void {
   // 先重置已有高亮（恢复上一次高亮的 mesh 材质）
   resetModHighlight(state);
+  for (const group of groups) addModHighlightGroup(state, group);
+}
 
-  if (groups.length === 0) return;
+/** Add a replacement without recloning unchanged selected meshes. */
+export function addModHighlightGroup(state: AppState, group: THREE.Object3D): void {
+  const owned: NonNullable<AppState['highlightedModState']> = state.highlightedModState
+    ?? {groups: [], originalMaterials: new Map()};
+  if (owned.groups.includes(group)) return;
+  const originalMaterials = owned.originalMaterials;
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.material || originalMaterials.has(mesh)) return;
+    setDevInstanceHighlight(mesh, true);
 
-  const originalMaterials = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
+    // 保存原始材质引用
+    originalMaterials.set(mesh, mesh.material);
 
-  for (const group of groups) {
-    group.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (!mesh.isMesh || !mesh.material) return;
-      setDevInstanceHighlight(mesh, true);
-
-      // 保存原始材质引用
-      originalMaterials.set(mesh, mesh.material);
-
-      // 克隆材质并应用高亮
-      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      const highlighted = mats.map((mat) => {
-        const cloned = mat.clone();
-        // MeshStandardMaterial / MeshPhongMaterial 都有 emissive
-        if ('emissive' in cloned) {
-          (cloned as THREE.MeshStandardMaterial).emissive = HIGHLIGHT_MOD_COLOR.clone();
-          (cloned as THREE.MeshStandardMaterial).emissiveIntensity = 0.8;
-        }
-        cloned.transparent = true;
-        cloned.opacity = 0.85;
-        cloned.needsUpdate = true;
-        return cloned;
-      });
-      mesh.material = highlighted.length === 1 ? highlighted[0] : highlighted;
+    // 克隆材质并应用高亮
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const highlighted = mats.map((mat) => {
+      const cloned = mat.clone();
+      // MeshStandardMaterial / MeshPhongMaterial 都有 emissive
+      if ('emissive' in cloned) {
+        (cloned as THREE.MeshStandardMaterial).emissive = HIGHLIGHT_MOD_COLOR.clone();
+        (cloned as THREE.MeshStandardMaterial).emissiveIntensity = 0.8;
+      }
+      cloned.transparent = true;
+      cloned.opacity = 0.85;
+      cloned.needsUpdate = true;
+      return cloned;
     });
-  }
-
-  state.highlightedModState = { groups, originalMaterials };
+    mesh.material = highlighted.length === 1 ? highlighted[0] : highlighted;
+  });
+  owned.groups.push(group);
+  state.highlightedModState = owned;
 }
 
 const highlightCommits = new WeakMap<AppState, Promise<void>>();
+
+/** Share ordering with representation changes; only the selected meshes change. */
+export async function enqueueHighlightCommit(state: AppState, guard: SelectionCommitGuard,
+  apply: () => Promise<void> | void): Promise<void> {
+  if (!guard.isCurrent()) return;
+  const previous = highlightCommits.get(state) ?? Promise.resolve();
+  const task = previous.catch(() => {}).then(() => { if (guard.isCurrent()) return apply(); });
+  highlightCommits.set(state, task);
+  try { await task; } finally { if (highlightCommits.get(state) === task) highlightCommits.delete(state); }
+}
 
 /** Only the external reset/apply stage is serialized; reads and loads stay concurrent. */
 export async function commitSelectionHighlight(
@@ -110,8 +138,7 @@ export async function commitSelectionHighlight(
   if (!guard.isCurrent()) return;
   const meta={selectionId:state.selectionRequest?.id,selectionKind:state.selectionRequest?.target?.kind,sourcePath:state.selectionRequest?.target?.key};
   const end=perfBegin('selection.highlightCommit',meta);
-  const previous = highlightCommits.get(state) ?? Promise.resolve();
-  const task = previous.catch(() => {}).then(async () => {
+  try { await enqueueHighlightCommit(state,guard,async () => {
     if (!guard.isCurrent()) return;
     const items = state.highlightedItems;
     if (items) {
@@ -127,11 +154,8 @@ export async function commitSelectionHighlight(
       state.selectionHighlightRequestId = state.selectionRequest?.id ?? null;
       await state.selectionVisibility?.sync(guard);
     }
-  });
-  highlightCommits.set(state,task);
-  try { await task; } finally {
+  }); } finally {
     end(undefined,{...meta,current:guard.isCurrent()});
-    if (highlightCommits.get(state) === task) highlightCommits.delete(state);
   }
 }
 

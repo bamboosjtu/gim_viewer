@@ -108,6 +108,8 @@ export class IfcRegionalRuntime {
       fineQueue?: SubstationFineQueue | null;
       visibility?: IfcModelVisibility;
       onBeforeDisposeGroup?: (group: THREE.Group) => void;
+      onRepresentationChanged?: (object: RegionalObject, group: THREE.Group | undefined,
+        localId: number | undefined, isCurrent: () => boolean, prepareHighlight: () => void) => Promise<void>;
     }
   ) {
     const base =
@@ -242,7 +244,7 @@ export class IfcRegionalRuntime {
   }
   private disposeGroup(group: THREE.Group) {
     this.options.onBeforeDisposeGroup?.(group);
-    this.instances.remove(group.userData.expressId);
+    if (this.groups.get(group.userData.expressId) === group) this.instances.remove(group.userData.expressId);
     group.removeFromParent();
     group.traverse((o) => {
       const mesh = o as THREE.Mesh;
@@ -250,6 +252,13 @@ export class IfcRegionalRuntime {
       const material = mesh.material;
       if (Array.isArray(material)) material.forEach((m) => m.dispose());
       else material?.dispose();
+    });
+  }
+  private async representationChanged(object: RegionalObject, group: THREE.Group | undefined,
+    localId: number | undefined): Promise<void> {
+    const current = () => this.current() && this.groups.get(object.expressId) === group;
+    if (current()) await this.options.onRepresentationChanged?.(object,group,localId,current,() => {
+      if (group?.userData.lod === 1) this.instances.highlight(object.expressId,group);
     });
   }
   private closeSource() {
@@ -418,6 +427,7 @@ export class IfcRegionalRuntime {
             if(this.released){await this.setFarVisible(candidates,true);return;}
             this.localIds.set(object.expressId, candidates[0]);
           }
+          await this.representationChanged(object,group,candidates.length === 1 ? candidates[0] : undefined);
         }
         this.diagnostics.rendered = this.groups.size;
         this.instances.rebuild(this.transform);
@@ -579,8 +589,8 @@ export class IfcRegionalRuntime {
     // Do not let a late result resurrect L2 after the user returned to the
     // browser representation.
     if (!wanted()) return undefined;
-    const old = this.groups.get(object.expressId);
-    if (old) this.disposeGroup(old);
+    const candidates = (await this.farIds()).get(object.globalId) ?? [];
+    if (!wanted()) return undefined;
     const group = objectFineGroup(
       result,
       identity,
@@ -589,27 +599,29 @@ export class IfcRegionalRuntime {
     group.userData.lod = 2;
     group.userData.approximate = false;
     group.visible = !this.onlySelected || this.isIsolatedMember(object.expressId);
-    this.root.add(group);
-    this.groups.set(object.expressId, group);
-    const candidates = (await this.farIds()).get(object.globalId) ?? [];
-    if (!wanted()) {
-      if (candidates.length === 1) await this.setFarVisible(candidates, true).catch(() => undefined);
+    // Keep the old highlighted representation until every asynchronous commit
+    // prerequisite succeeds. An obsolete request must not delete a newer group.
+    try {
+      if (candidates.length === 1) await this.setFarVisible(candidates, false);
+    } catch (error) {
       this.disposeGroup(group);
-      this.groups.delete(object.expressId);
+      if (candidates.length === 1) await this.setFarVisible(candidates,!this.groups.has(object.expressId)).catch(()=>undefined);
+      throw error;
+    }
+    if (!wanted()) {
+      this.disposeGroup(group);
+      if (candidates.length === 1) await this.setFarVisible(candidates,!this.groups.has(object.expressId)).catch(()=>undefined);
       return undefined;
     }
-    if (candidates.length === 1) {
-      await this.setFarVisible(candidates, false);
-      if (!wanted()) {
-        await this.setFarVisible(candidates, true).catch(() => undefined);
-        this.disposeGroup(group);
-        this.groups.delete(object.expressId);
-        return undefined;
-      }
-      this.localIds.set(object.expressId, candidates[0]);
-    }
+    const old = this.groups.get(object.expressId);
+    if (old) this.disposeGroup(old);
+    this.root.add(group);
+    this.groups.set(object.expressId, group);
+    if (candidates.length === 1) this.localIds.set(object.expressId, candidates[0]);
     this.diagnostics.rendered = this.groups.size;
     this.instances.rebuild(this.transform);
+    await this.representationChanged(object,group,candidates.length === 1 ? candidates[0] : undefined);
+    if (!wanted()) return undefined;
     perfMarkProductMoment('selectedFineReady', {
       kind: 'ifc', modelId: this.modelId, expressId: object.expressId, globalId: object.globalId, lod: 2,
     });
@@ -630,7 +642,10 @@ export class IfcRegionalRuntime {
     const local = this.localIds.get(expressId);
     if (local !== undefined) {
       this.localIds.delete(expressId);
-      void this.setFarVisible([local], true).catch(() => undefined);
+      void this.setFarVisible([local], true).then(async () => {
+        const object = this.index.objects.find(value => value.expressId === expressId);
+        if (object) await this.representationChanged(object,undefined,local);
+      }).catch(() => undefined);
     }
     this.fineRuntime?.forget(expressId);
     if (!this.fineRequested.size) this.fineRuntime?.cancel();
