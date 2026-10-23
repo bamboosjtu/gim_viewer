@@ -82,18 +82,29 @@ export async function clearSelectionHighlight(state: AppState, request: Selectio
 }
 
 /** UI projections follow the request; rendering a tree never starts a selection. */
+let navigationDependencies: ReturnType<typeof loadNavigationDependencies> | undefined;
+function loadNavigationDependencies() {
+  return Promise.all([
+    import('../ui/cbmTreeView.js'),import('../ui/sldView.js'),import('../gim/stdSldIndex.js'),
+  ]);
+}
 export async function syncSelectionNavigation(state: AppState, request: SelectionRequest): Promise<void> {
   const end = beginSelectionStage(state, request, 'navigation');
   try {
-    const [{syncSelectedTreeRow},{highlightSldByGridId},{getGridIdByCbmPath}]=await Promise.all([
-      import('../ui/cbmTreeView.js'),import('../ui/sldView.js'),import('../gim/stdSldIndex.js'),
-    ]);
+    const endImports=beginSelectionStage(state,request,'navigation.imports');
+    navigationDependencies ??= loadNavigationDependencies().catch(error => { navigationDependencies=undefined; throw error; });
+    const dependencies=await navigationDependencies.finally(endImports);
+    const [{syncSelectedTreeRow},{highlightSldByGridId},{getGridIdByCbmPath}]=dependencies;
     if (!state.isCurrentSelection(request)) return;
-    syncSelectedTreeRow(state);
+    const endTree=beginSelectionStage(state,request,'navigation.tree');
+    try { syncSelectedTreeRow(state); } finally { endTree(); }
     const target=request.target;
-    const gridId=target?.kind==='sld' ? target.key : target?.kind==='cbm' && state.currentStdSldIndex
-      ? getGridIdByCbmPath(state.currentStdSldIndex,target.key) : null;
-    highlightSldByGridId(gridId);
+    const endLookup=beginSelectionStage(state,request,'navigation.sldLookup');
+    let gridId: string | null;
+    try { gridId=target?.kind==='sld' ? target.key : target?.kind==='cbm' && state.currentStdSldIndex
+      ? getGridIdByCbmPath(state.currentStdSldIndex,target.key) : null; } finally { endLookup(); }
+    const endSld=beginSelectionStage(state,request,'navigation.sldCommit');
+    try { highlightSldByGridId(gridId); } finally { endSld(); }
   } finally { end(); }
 }
 

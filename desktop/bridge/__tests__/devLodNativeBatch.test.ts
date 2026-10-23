@@ -15,8 +15,18 @@ it('coalesces native reads in bounded batches, retaining identities and isolatin
   const context={projectId:1,sourceSha256:'a'.repeat(64)};
   const keys=Array.from({length:20},(_,i)=>i===19?'broken':`key-${i}`);
   const results=await Promise.all(keys.map(key=>readDevArtifact<any>('catalog',key,context)));
-  expect(mocks.invoke).toHaveBeenCalledTimes(2);
-  expect(mocks.invoke.mock.calls.map(call=>call[1].entryPaths.length)).toEqual([16,4]);
+  expect(mocks.invoke).toHaveBeenCalledTimes(1);
+  expect(mocks.invoke.mock.calls.map(call=>call[1].entryPaths.length)).toEqual([20]);
   expect(results[0].value).toBe('catalog/key-0');expect(results[19]).toBeNull();
   expect(mocks.invoke.mock.calls[0][1].sourceGimSha256).toBe(context.sourceSha256);
+});
+
+it('keeps larger coalesced requests within the native 64-entry ceiling without losing identities',async()=>{
+  mocks.invoke.mockReset();
+  mocks.invoke.mockImplementation(async (_command:string,args:{entryPaths:string[]})=>envelope(args.entryPaths));
+  const context={projectId:1,sourceSha256:'a'.repeat(64)};
+  const keys=Array.from({length:70},(_,i)=>`boundary-${i}`);
+  const results=await Promise.all(keys.map(key=>readDevArtifact<any>('catalog',key,context)));
+  expect(mocks.invoke.mock.calls.map(call=>call[1].entryPaths.length)).toEqual([64,6]);
+  expect(results.map(row=>row.value)).toEqual(keys.map(key=>`catalog/${key}`));
 });

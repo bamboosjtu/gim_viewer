@@ -8,7 +8,9 @@
 2. [IFC / DEV 分级与加载性能](performance-lod.md)：再理解首屏、LOD、Worker/cache 和远景/近景取舍。
 3. [系统架构](../architecture.md)、[性能](../performance.md)：回到当前长期契约与实测基线。
 
-P0 的本轮实施依据见 [选择查询与大站基线](p0-selection-and-baseline.md)：保留已测得收益的 occurrence 根查询，区分局部收益、选择阶段记录与未通过的大站指标。
+P0 的选择查询依据见 [选择查询与大站基线](p0-selection-and-baseline.md)：保留已测得收益的 occurrence 根查询，区分局部收益、选择阶段记录与未通过的大站指标。
+
+后续受控对照见 [导航等待与缓存批读准入](p0-navigation-and-cache-admission.md)：区分模块导入等待、原生文件缓存批读成本与派生缓存缺失时的逐源读取长尾。
 
 未成功技术路线使用 `test-*.md` 独立记录假设、实验边界、结果与回退，不视为已实现能力：
 

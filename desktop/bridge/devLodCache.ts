@@ -94,16 +94,23 @@ async function readNativeBatchRaw<T>(
 ): Promise<Map<string, DevArtifactRead<T>>> {
   const out = new Map<string, DevArtifactRead<T>>();
   const fullPaths = keys.map((key) => `${store}/${key}`);
+  // One ceiling covers the complete logical batch, including failure splits.
+  let remainingBytes = maxBytes;
   const invokeChunk = async (chunk: string[]): Promise<Map<string, DevArtifactRead<T>>> => {
     const result = new Map<string, DevArtifactRead<T>>();
+    if (remainingBytes === 0) return new Map(chunk.map(entry => [entry.slice(store.length + 1), {status:'deferred' as const}]));
     try {
       const payload = await invokeTimed<ArrayBuffer>('read_device_lod_artifacts', {
         projectId: args.projectId,
         sourceGimSha256: args.sourceGimSha256,
         entryPaths: chunk,
-        ...(maxBytes ? { maxBytes } : {}),
+        ...(remainingBytes != null ? { maxBytes: remainingBytes } : {}),
       });
-      const found = new Map(parseBatchCachePayload(payload).items.map((item) => [item.entry_path, item.bytes]));
+      const items = parseBatchCachePayload(payload).items;
+      const found = new Map(items.map((item) => [item.entry_path, item.bytes]));
+      const consumed = items.reduce((total, item) => total + (item.bytes?.byteLength ?? 0), 0);
+      if (remainingBytes != null && consumed > remainingBytes) throw Error('DEV cache batch exceeded byte ceiling');
+      if (remainingBytes != null) remainingBytes -= consumed;
       for (const entry of chunk) {
         const key = entry.slice(store.length + 1);
         if (!found.has(entry)) {
@@ -126,8 +133,8 @@ async function readNativeBatchRaw<T>(
     }
     return result;
   };
-  for (let start = 0; start < fullPaths.length; start += 16) {
-    const chunk = fullPaths.slice(start, start + 16);
+  for (let start = 0; start < fullPaths.length; start += 64) {
+    const chunk = fullPaths.slice(start, start + 64);
     const values = await invokeChunk(chunk);
     for (const [key, value] of values) out.set(key, value);
   }

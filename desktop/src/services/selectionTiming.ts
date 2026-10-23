@@ -4,7 +4,8 @@ import { perfBegin } from '../utils/perfTimings.js';
 /** Selection wall times share the existing bounded, session-owned profiler.
  * Overlapping stages must not be summed or described as CPU/GPU time. */
 export function beginSelectionStage(state: AppState, request: SelectionRequest,
-  stage: 'navigation' | 'propertySummary' | 'propertyParams' | 'collectGroups' | 'highlightCommit' | 'frame') {
+  stage: 'navigation' | 'navigation.imports' | 'navigation.tree' | 'navigation.sldLookup' | 'navigation.sldCommit'
+    | 'propertySummary' | 'propertyParams' | 'collectGroups' | 'highlightCommit' | 'frame') {
   const meta = {selectionId:request.id,selectionKind:request.target?.kind,sourcePath:request.target?.key};
   const end = perfBegin(`selection.${stage}`, meta);
   let ended = false;
