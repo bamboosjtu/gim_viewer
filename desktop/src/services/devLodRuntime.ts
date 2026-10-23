@@ -222,6 +222,9 @@ export class DevLodRuntime {
   private catalogHints = new Map<string, Promise<DevArtifactRead<DevSourceBounds>>>();
   private templates = new ByteLru<TemplateRow>(128 * 1024 * 1024, row => { row.template.dispose(); if (!this.released) this.diagnostics.templateEvictions++; });
   private worker!: DevGeometryPreprocessor;
+  private sourceFiles?: Map<string, File>;
+  private recoveryMisses = new Set<string>();
+  private sourceRecoveryAttempted = false;
   private anchor: THREE.Matrix4 | null = null;
   startup: Promise<void> = Promise.resolve();
   private sourceIdentity: string;
@@ -458,13 +461,19 @@ export class DevLodRuntime {
     this.writeAdmissions.set(queueKey, admitted); this.updateWriteDiagnostics();
     return admitted;
   }
-  /**
-   * 变电源 pack 下几何源默认是 lazy 的；Worker 按 DEV 逐条请求源字节，而
-   * 每次往返都要排到繁忙的主线程序列（实测单条 30–90 ms），几千次读取会
-   * 把首次几何阶段拖成数分钟。开始调度前用少量大批次 IPC 一次取回几何源，
-   * 让 Worker 后续都从内存读取；批次顺序先 DEV/PHM/STL（包围盒首用），再 MOD。
-   */
+  /** Optional preparation must not strand startup on an unavailable reader. */
+  private async preparationWait<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([work, new Promise<never>((_resolve,reject) => {
+        timer=setTimeout(() => reject(new DOMException('DEV source preparation timed out', 'TimeoutError')), Math.max(1,timeoutMs));
+      })]);
+    } finally {if(timer)clearTimeout(timer);}
+  }
+  /** Share a bounded immutable source workset without holding computation slots.
+   * Unknown/oversized sources and failed reads retain their authorized lazy path. */
   private async preloadSources(files: Map<string, File>): Promise<Map<string, File>> {
+    try { if (localStorage.getItem('gim-dev-preload') === '0') return files; } catch { /* storage unavailable */ }
     const projectId = this.session.projectId;
     const pressured = (): boolean => this.memoryPressure === 'high' || this.memoryPressure === 'critical';
     if (projectId == null || !this.current() || pressured()) return files;
@@ -485,6 +494,7 @@ export class DevLodRuntime {
     }
     const MAX_FILE_BYTES = 8 * 1024 * 1024;
     const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
+    const MAX_BATCH_BYTES = 4 * 1024 * 1024;
     const BATCH_FILES = 4096;
     const rank = (path: string): number => {
       const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
@@ -495,27 +505,67 @@ export class DevLodRuntime {
       .sort((a, b) => rank(a) - rank(b));
     if (candidates.length === 0) return files;
     const output = new Map(files);
+    const deadline = performance.now()+10_000;
     let loaded = 0;
-    for (let i = 0; i < candidates.length && loaded < MAX_TOTAL_BYTES; i += BATCH_FILES) {
-      if (!this.current() || pressured()) break;
-      const chunk = candidates.slice(i, i + BATCH_FILES);
+    let next = 0, admitted = 0;
+    while (next < candidates.length && admitted < MAX_TOTAL_BYTES) {
+      if (!this.current() || pressured() || performance.now() >= deadline) break;
+      const chunk: string[] = [];
+      let batchBytes = 0;
+      while (next < candidates.length && chunk.length < BATCH_FILES) {
+        const path = candidates[next], size = files.get(path)!.size;
+        if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_FILE_BYTES || admitted + size > MAX_TOTAL_BYTES) { next++; continue; }
+        if (chunk.length && batchBytes + size > MAX_BATCH_BYTES) break;
+        next++; admitted += size; batchBytes += size; chunk.push(path);
+      }
+      if (!chunk.length) continue;
       let result: Map<string, Uint8Array | null> | null = null;
       try {
-        result = await batchReadCachedFiles(projectId, chunk);
-      } catch {
+        result = await this.preparationWait(batchReadCachedFiles(projectId, chunk), deadline-performance.now());
+      } catch (error) {
+        perfMark('DEV source preparation fallback', {phase:'source-batch',reason:String(error)}, this.perf);
+        if ((error as Error)?.name === 'TimeoutError') break;
         result = null;
       }
       if (!this.current() || pressured()) break;
       if (!result) continue;
       for (const path of chunk) {
         const bytes = result.get(path);
-        if (!bytes || bytes.byteLength === 0 || bytes.byteLength > MAX_FILE_BYTES) continue;
+        if (!bytes || bytes.byteLength === 0 || bytes.byteLength > files.get(path)!.size) continue;
         loaded += bytes.byteLength;
         if (loaded > MAX_TOTAL_BYTES) break;
-        output.set(path, new File([bytes.slice().buffer as ArrayBuffer], path.split('/').pop() || path));
+        output.set(path, new File([bytes as Uint8Array<ArrayBuffer>], path.split('/').pop() || path));
       }
     }
+    perfMark('DEV source workset ready', { entries: [...output].filter(([path, file]) => file !== files.get(path)).length, bytes: loaded, admittedBytes: admitted }, this.perf);
     return output;
+  }
+
+  private async prepareSources(files: Map<string, File>, catalogReads: DevArtifactRead<DevSourceBounds>[] = []): Promise<Map<string, File>> {
+    // Reuse the normal catalog batch. Healthy warm startup issues no extra probe.
+    const derivedMissing = catalogReads.length > 0 && catalogReads.every(read => read.status === 'miss');
+    return this.state.currentFiles != null || derivedMissing ? this.preloadSources(files) : files;
+  }
+
+  private recoverMissingSources(key: string, lod: DeviceLod): void {
+    if (lod !== 0 || this.sourceRecoveryAttempted || !this.sourceFiles || !this.current()) return;
+    if (this.recoveryMisses.size < 32) this.recoveryMisses.add(key);
+    if (this.recoveryMisses.size < Math.min(32, this.diagnostics.uniqueDevSources) || this.worker.diagnostics.rpcReads < 32) return;
+    this.sourceRecoveryAttempted = true;
+    // Sparse warm misses do not justify reading a large station. Only upgrade
+    // an entire, small, known-size source workset after real RPC work is seen.
+    const files = this.sourceFiles;
+    let bytes = 0;
+    for (const file of files.values()) {
+      if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > 8*1024*1024) return;
+      bytes += file.size;
+      if (bytes > 32*1024*1024) return;
+    }
+    void this.preloadSources(files).then(prepared => {
+      if (!this.current()) return;
+      this.worker.installSources(prepared);
+      perfMark('DEV partial-cache source upgrade', {misses:this.recoveryMisses.size, indexedBytes:bytes}, this.perf);
+    }).catch(error => { if (this.current()) console.warn('[DEV source upgrade]', error); });
   }
 
   async start(): Promise<void> {
@@ -529,7 +579,7 @@ export class DevLodRuntime {
       files = new Map();
       for (const path of this.state.substationEntryPaths) if (/\.(dev|phm|mod|stl|gl)$/i.test(path)) {
         const projectId = this.session.projectId;
-        files.set(path, { name: path.split('/').pop()!, size: 0,
+        files.set(path, { name: path.split('/').pop()!, size: this.state.substationEntrySizes.get(path) ?? 0,
           arrayBuffer: async () => {
             if (projectId == null || !this.current()) throw Error('Device source unavailable');
             const bytes = await readCachedEntry(projectId, path);
@@ -537,21 +587,23 @@ export class DevLodRuntime {
           } } as File);
       }
     }
-    // 只有刚解压完的冷路径才做几何源预取：此时源在 pack 里、几何缓存为空，
-    // 逐条 IPC 会把首次几何阶段拖成数分钟。暖路径的模板/目录缓存命中率高，
-    // 预取反而会抢走首屏时间，保持原来的按需读取。
-    const preload = this.state.currentFiles != null
-      && (() => { try { return localStorage.getItem('gim-dev-preload') !== '0'; } catch { return true; } })();
+    // Healthy warm catalogs do not preload sources. Missing derived catalogs
+    // use the same bounded immutable File workset as freshly extracted sources.
+    const seeds = collectCbmDeviceInstances(this.state.currentCbmTree);
+    const preparingSources = this.state.currentFiles ? this.prepareSources(files) : null;
+    this.sourceFiles = files;
+    // Preparation is optional and overlaps worker initialization/base work.
+    // Suppress a second recovery while this bounded preparation is in flight.
+    this.sourceRecoveryAttempted = true;
     this.worker = createDevGeometryPreprocessor(
       this.state,
       this.session,
-      preload ? await this.preloadSources(files) : files,
+      files,
     );
     this.worker.setMemoryPressure?.(this.memoryPressure);
     this.diagnostics.workerCount = this.worker.workerCount;
     this.worker.onActivity = () => this.requestReady();
     (this.ctx.world.camera as any).controls?.addEventListener('update', this.cameraSchedule);
-    const seeds = collectCbmDeviceInstances(this.state.currentCbmTree);
     const byDev = new Map<string, typeof seeds>();
     for (const seed of seeds) {
       const dev = normalize(seed.devPath), list = byDev.get(dev) ?? []; list.push(seed); byDev.set(dev, list);
@@ -564,6 +616,12 @@ export class DevLodRuntime {
     this.diagnostics.occurrences = seeds.length;
     this.diagnostics.uniqueDevSources = byDev.size;
     this.notifyCoordinateAnchor(); this.update(); // Compilation can begin before any IFC is ready.
+    if (preparingSources) {
+      const prepared = await preparingSources;
+      if (!this.current()) return;
+      if (prepared !== files) this.worker.installSources(prepared);
+    }
+    this.sourceRecoveryAttempted = [...files.values()].every(file => file instanceof File);
     const catalogEntries = [...byDev];
     // Main transformers / GIS / arresters are the visual anchors of a station;
     // their catalog bounds must not be left behind hundreds of small rows.
@@ -636,18 +694,26 @@ export class DevLodRuntime {
     // DEV. This removes the 285-round-trip catalog startup from the critical
     // path; cold start benefits from the same batched lookup (misses cheap).
     try {
-      const keys = catalogEntries.map(([dev]) => this.catalogKey(dev));
-      for (let start = 0; start < keys.length; start += 64) {
+      for (let start = 0; start < catalogEntries.length; start += 64) {
         if (!this.current()) return;
-        const devs = catalogEntries.slice(start, start + 64).map(([dev]) => dev);
-        const reads = await readDevArtifactBatch<DevSourceBounds>('catalog', keys.slice(start, start + 64), this.session, 256 * 1024 * 1024);
+        const devs = catalogEntries.slice(start, start + 64).map(([dev]) => dev).filter(dev => !this.catalogHints.has(dev));
+        if (!devs.length) continue;
+        const reads = await readDevArtifactBatch<DevSourceBounds>('catalog', devs.map(dev => this.catalogKey(dev)), this.session, 4 * 1024 * 1024);
         if (!(reads instanceof Map)) throw new Error('catalog prefetch returned no map');
-        devs.forEach((dev, index) => {
-          const key = keys[start + index];
+        if (start === 0 && !this.state.currentFiles && devs.every(dev => reads.get(this.catalogKey(dev))?.status === 'miss')) {
+          this.sourceRecoveryAttempted = true;
+          // Optional preparation overlaps remaining catalog reads and workers;
+          // failed or late source reads never gate directory consumption.
+          void this.prepareSources(files, devs.map(dev => reads.get(this.catalogKey(dev))!)).then(prepared => {
+            if (this.current()) this.worker.installSources(prepared);
+          }).catch(error => { if (this.current()) console.warn('[DEV source preparation]', error); });
+        }
+        devs.forEach(dev => {
+          const key = this.catalogKey(dev);
           const read = reads.get(key);
-          // Only hits are prefetched; misses still go through resolveCatalog so
-          // tests/mocks and invalid-entry handling keep the original semantics.
-          if (read?.status === 'hit') this.catalogHints.set(dev, Promise.resolve(read));
+          // Reuse terminal statuses too: resolveCatalog retains normal invalid
+          // handling without issuing a second read for every confirmed miss.
+          if (read && read.status !== 'deferred') this.catalogHints.set(dev, Promise.resolve(read));
         });
       }
     } catch (error) {
@@ -775,6 +841,7 @@ export class DevLodRuntime {
         this.diagnostics.lodMisses[lod]++;
         this.diagnostics.cacheMisses++;
         this.recordCacheDecision(dev, lod, 'miss');
+        this.recoverMissingSources(key, lod);
         artifact = undefined;
       } else artifact = lease.value;
       if (artifact?.sourceInvalid?.evidence) {
@@ -1352,6 +1419,7 @@ export class DevLodRuntime {
   /** Backward-compatible name.  Ordinary selection is base-only now. */
   async select(rootOccurrence: string): Promise<THREE.Group[]> { return this.ensureBase(rootOccurrence); }
   release(): void {
+    this.sourceFiles = undefined; this.recoveryMisses.clear();
     if (this.released) return; this.released = true; this.inputBudget.close();this.writeBudget.close();this.cacheReader.close(); this.finishCatalog(); this.finishAnchor();
     for (const waiter of this.writeWaiters) waiter.reject(new DOMException('DEV cache write cancelled', 'AbortError'));
     this.writeWaiters = [];

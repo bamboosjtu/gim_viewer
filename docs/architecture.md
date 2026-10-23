@@ -144,6 +144,12 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 
 变电原生解压把非 IFC 条目连续写入 `.gim-substation-source.pack` 并生成 `.gim-substation-source.index`（path → offset/size），IFC 仍逐条落盘，因为缓存校验、尺寸比对和 web-ifc 读取依赖独立路径。读取时 `read_cached_entry`/`batch_read_cached_files` 先按索引区间懒取，命中 pack 就跳过逐条路径解析与 reparse 检查。3.6 万条目的样本因此只需创建 13 个文件：写入阶段从约 40 s 的逐条 create/open 降到 0.5 s，暖校验也不再逐条 open。首次解析前的 hydration 只物化 CBM/DEV/FAM 语义文本（每批 2048 条），PHM/MOD/STL 由几何管线按需从 pack 读取；发布凭据把 pack 成员作为合法已缓存来源，缺失的 IFC 或未打包文件仍按原规则处理。
 
+### DEV 派生缺失时的源准备
+
+会话从现有语义 entries 恢复源大小。正常目录首批（最多 64 键）全部明确 miss 时，异步准备已知大小的 DEV/PHM/MOD/STL/GL File 工作集，不额外探测目录、不占计算 gate。单源最多 8 MiB，普通批次最多 4 MiB / 4096 源，总额度 128 MiB；高/临界压力停止，可选源准备 10 秒超时后保留受权懒读，原生在途读取不宣称已取消。沿用最多 8 秒 IFC 让步，Worker/基础任务不等待最后一个 IFC。
+
+目录完整而至少 min(32, DEV 源数) 个不同 L0 键明确 miss、并记录至少 32 次源 RPC 时，仅对全部已知且总量不超过 32 MiB 的来源尝试一次运行中升级。不可变 File 补发到现有池，不终止健康活动任务、不清空解析缓存；旧会话不安装迟到结果。未知、过大、损坏或失败来源仍走真实诊断及懒读。此机制不改变坐标链、模板身份、持久化格式和缓存版本。性能边界及未达目标见 [实现报告](impl/dev-recovery-workset.md)。
+
 ## 当前缓存域
 
 下表是文档中唯一的版本定义表。修改持久化含义时只失效受影响域，实际常量以链接源码为准。

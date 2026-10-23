@@ -76,6 +76,12 @@ self.onmessage = async ({ data }) => {
     }
     return;
   }
+  if (data.kind === 'sources') {
+    for (const [path, , blob] of data.files as [string, number, File][]) {
+      if (blob instanceof File && files.has(path)) blobs.set(path.toLowerCase(), blob);
+    }
+    return;
+  }
   if (!['compile', 'bounds'].includes(data.kind) || running) {
     scope.postMessage({kind:'result',id:data.id,session:data.session,key:data.key,path:data.path,
       error:running?'DEV worker already running':`Unsupported DEV worker task: ${String(data.kind)}`});return;

@@ -12,10 +12,15 @@ P0 的选择查询依据见 [选择查询与大站基线](selection-and-baseline
 
 后续受控对照见 [导航等待与缓存批读准入](navigation-and-cache-admission.md)：区分模块导入等待、原生文件缓存批读成本与派生缓存缺失时的逐源读取长尾。
 
+DEV 派生缺失恢复的准入、不可变 File 补发、暖路径对照和真实故障隔离见 [受控源工作集](dev-recovery-workset.md)。
+
 选择与显式 L2 的高亮连续性见 [IFC 表示高亮迁移](selection-l2-highlight.md)：只更新被替换对象，保留其他选中来源，并处理取消、失败及旧提交晚到。
 
 未成功技术路线使用 `test-*.md` 独立记录假设、实验边界、结果与回退，不视为已实现能力：
 
+- [扩展选择依赖与高亮合批](test-selection-dependency-batching.md)：缺少有效端到端收益对照，未混入 DEV 恢复交付。
+- [gate 失败释放顺序](test-dev-gate-release-order.md)：既有微任务唤醒已保证原顺序安全，未证实竞态，改动已撤回。
+- [额外目录探测](test-dev-warm-catalog-probe.md)：完整缓存重复恢复未证明稳定不回退，改为复用正常目录首批。
 - [提高 DEV Worker 比例](test-dev-worker-overprovision.md)：历史尝试未获收益，当前大站快照也不支持仅凭空闲 Worker 增加并发。
 
 文档边界：

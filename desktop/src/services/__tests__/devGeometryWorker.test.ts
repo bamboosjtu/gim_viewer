@@ -4,6 +4,18 @@ vi.mock('../glbCacheService.js',()=>({serializeDevToGlbDetailed:mock.serialize})
 vi.mock('../devSpatialCatalog.js',()=>({buildDevSourceBounds:mock.bounds}));
 vi.mock('../../viewer/xmlModGeometry.js',()=>({trimSharedXmlModGeometries:mock.trim,disposeSharedXmlModMaterials:mock.dispose}));
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();vi.resetAllMocks();});
+it('accepts a source upgrade while a task is waiting for RPC and uses the immutable source for later reads', async()=>{
+  vi.resetModules();const post=vi.fn(),scope={postMessage:post,onmessage:null as any};vi.stubGlobal('self',scope);
+  await import('../devGeometryWorker.js');const send=(data:any)=>scope.onmessage({data});
+  await send({kind:'init',files:[['MOD/a.mod',3,null],['MOD/b.mod',3,null]],cacheDivisor:1});
+  mock.serialize.mockImplementation(async(_path,files)=>({status:'empty',text:await files.get('MOD/a.mod').text(),next:await files.get('MOD/b.mod').text()}));
+  const task=send({kind:'compile',id:1,key:'a',path:'DEV/a.dev',session:1});
+  const read=post.mock.lastCall![0];expect(read).toMatchObject({kind:'read',path:'MOD/a.mod'});
+  await send({kind:'sources',files:[['MOD/a.mod',3,new File(['abc'],'a.mod')],['MOD/b.mod',3,new File(['def'],'b.mod')]]});
+  await send({kind:'read-result',id:read.id,bytes:new TextEncoder().encode('abc').buffer});await task;
+  expect(post.mock.calls.filter(call=>call[0].kind==='read')).toHaveLength(1);
+  expect(post.mock.lastCall![0]).toMatchObject({kind:'result',result:{text:'abc',next:'def'}});
+});
 it('protocol errors settle their task and cleanup exceptions cannot leave the worker running forever',async()=>{
   vi.resetModules();const post=vi.fn(),scope={postMessage:post,onmessage:null as any};vi.stubGlobal('self',scope);
   vi.spyOn(console,'warn').mockImplementation(()=>{});await import('../devGeometryWorker.js');

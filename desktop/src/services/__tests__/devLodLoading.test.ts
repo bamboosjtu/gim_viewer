@@ -11,6 +11,17 @@ vi.mock('../devGeometryWorkerClient.js',()=>({createDevGeometryPreprocessor:()=>
 vi.mock('../modAutoLoadService.js',async(importActual)=>({...await importActual<any>(),collectCbmDeviceInstances:()=>[
   {path:'root/a',devPath:'shared.dev',name:'a',transformMatrix:''},{path:'root/b',devPath:'shared.dev',name:'b',transformMatrix:''}]}));
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();vi.resetAllMocks();});
+it('initializes workers and base rows before optional warm preparation settles, and discards a reply after release',async()=>{
+  let finish!:(value:any)=>void;
+  mock.read.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  const state=new AppState(),session=state.activateProject(1,'sha');state.substationEntryPaths=['DEV/shared.dev'];
+  state.substationEntrySizes.set('DEV/shared.dev',3);state.projectSourceToViewerMatrix=new THREE.Matrix4();
+  const ctx:any={world:{scene:{three:new THREE.Scene()},camera:{three:new THREE.PerspectiveCamera(),controls:new THREE.EventDispatcher()}}};
+  const runtime=new DevLodRuntime(state,ctx,session,()=>{}),start=runtime.start();
+  expect((runtime as any).worker).toBeDefined();expect(runtime.diagnostics.occurrences).toBe(2);
+  runtime.release();finish(new Map());await start;
+  expect(state.loadedXmlModGroups.size).toBe(0);expect(mock.cancel).toHaveBeenCalledOnce();
+});
 it('a wanted request cancelled during queue turnover retries, places shared warm geometry and reaches completion',async()=>{
   vi.useFakeTimers();vi.stubGlobal('crypto',{subtle:{digest:async()=>new Uint8Array(32).buffer}});
   mock.catalog.mockResolvedValue({status:'hit',value:{devPath:'DEV/shared.dev',sourceBounds:[-5,-5,-5,5,5,5],boundsQuality:'conservative',primitiveCounts:{},unsupportedTypes:[]}});
@@ -36,7 +47,8 @@ it('a validated empty catalog entry is terminal and never enters compile or temp
   vi.useFakeTimers();
   mock.workerCount=2;
   mock.catalog.mockResolvedValue({status:'hit',value:{devPath:'DEV/shared.dev',sourceBounds:null,boundsQuality:'empty',primitiveCounts:{},unsupportedTypes:[]}});
-  mock.read.mockImplementation(async(_store,keys)=>new Map(keys.map((key:string)=>[key,{status:'miss' as const}])));
+  mock.read.mockImplementation(async(store,keys)=>new Map(await Promise.all(keys.map(async(key:string)=>[key,
+    store==='catalog' ? await mock.catalog() : {status:'miss' as const}]))));
   const state=new AppState(),session=state.activateProject(1,'sha');state.currentFiles=new Map();state.projectSourceToViewerMatrix=new THREE.Matrix4();
   const camera=new THREE.PerspectiveCamera(60,1,0.1,1000);camera.position.set(0,0,300);camera.lookAt(0,0,0);
   const ctx:any={world:{scene:{three:new THREE.Scene()},camera:{three:camera,controls:new THREE.EventDispatcher()}}},status=vi.fn();

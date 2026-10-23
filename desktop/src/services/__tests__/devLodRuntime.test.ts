@@ -79,7 +79,7 @@ it('indexed view candidates preserve visible and selected detail under pressure 
 
 it('stops source prefetch at high pressure, including a reply already in flight', async () => {
   const {internal} = fixture(); internal.session.projectId = 7;
-  const files = new Map([['MOD/a.mod', new File([], 'a.mod')]]);
+  const files = new Map([['MOD/a.mod', new File(['abc'], 'a.mod')]]);
   const database = await import('@desktop/database.js');
   const read = vi.spyOn(database, 'batchReadCachedFiles').mockImplementation(async () => {
     internal.memoryPressure = 'critical';
@@ -92,6 +92,77 @@ it('stops source prefetch at high pressure, including a reply already in flight'
     const output = await internal.preloadSources(files);
     expect(read).toHaveBeenCalledOnce(); expect(output.get('MOD/a.mod')).toBe(files.get('MOD/a.mod'));
   } finally { read.mockRestore(); }
+});
+
+it('prepares immutable sources only for a confirmed missing derived catalog, retaining authoritative failures and healthy warm reads', async () => {
+  const {internal} = fixture(); internal.session.projectId=7;
+  const cache=await import('@desktop/devLodCache.js'), database=await import('@desktop/database.js');
+  const file={size:3,name:'a.dev',arrayBuffer:vi.fn()} as unknown as File;
+  const files=new Map([['DEV/a.dev',file]]);
+  const catalog=vi.spyOn(cache,'readDevArtifactBatch');
+  const read=vi.spyOn(database,'batchReadCachedFiles').mockResolvedValue(new Map([['DEV/a.dev',new Uint8Array([1,2,3])]]));
+  try {
+    for (const status of ['hit','read-error','invalid','deferred'] as const) {
+      expect(await internal.prepareSources(files,[{status,value:status==='hit'?{}:undefined}])).toBe(files);
+    }
+    expect(read).not.toHaveBeenCalled();
+    const prepared=await internal.prepareSources(files,[{status:'miss'}]);
+    expect(prepared.get('DEV/a.dev')).toBeInstanceOf(File);
+    expect(new Uint8Array(await prepared.get('DEV/a.dev').arrayBuffer())).toEqual(new Uint8Array([1,2,3]));
+    expect(read).toHaveBeenCalledOnce(); expect(file.arrayBuffer).not.toHaveBeenCalled();
+    expect(catalog).not.toHaveBeenCalled();
+    internal.state.isCurrentSession=()=>false;
+    expect(await internal.prepareSources(files,[{status:'miss'}])).toBe(files);
+    expect(read).toHaveBeenCalledOnce();
+  } finally {catalog.mockRestore();read.mockRestore();}
+});
+
+it('bounds source prefetch by indexed bytes, keeps oversized and unknown sources lazy and tolerates individual missing replies', async () => {
+  const {internal}=fixture(); internal.session.projectId=7;
+  const database=await import('@desktop/database.js');
+  const sources=new Map(['DEV/a.dev','MOD/a.mod','MOD/b.mod','MOD/large.mod','MOD/unknown.mod'].map((path,i)=>[path,{size:[3,3*1024*1024,3*1024*1024,9*1024*1024,0][i],name:path} as File]));
+  const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(async(_project,paths)=>new Map(paths.map(path=>[path,path==='MOD/a.mod'?null:new Uint8Array(path==='DEV/a.dev'?3:5)])));
+  try {
+    const prepared=await internal.preloadSources(sources);
+    expect(read.mock.calls.map(call=>call[1])).toEqual([['DEV/a.dev','MOD/a.mod'],['MOD/b.mod']]);
+    expect(prepared.get('DEV/a.dev')).toBeInstanceOf(File);expect(prepared.get('MOD/b.mod')).toBeInstanceOf(File);
+    for(const path of ['MOD/a.mod','MOD/large.mod','MOD/unknown.mod'])expect(prepared.get(path)).toBe(sources.get(path));
+  } finally {read.mockRestore();}
+});
+it('upgrades partial L0 cache recovery once after enough real RPC demand, never for L1 or a large workset', async () => {
+  const {internal}=fixture();internal.diagnostics.uniqueDevSources=100;
+  const source={size:3,name:'a.mod'} as File;
+  internal.sourceFiles=new Map([['MOD/a.mod',source]]);
+  internal.worker={diagnostics:{rpcReads:0},installSources:vi.fn()};
+  const prefetch=vi.spyOn(internal,'preloadSources').mockResolvedValue(new Map([['MOD/a.mod',new File(['abc'],'a.mod')]]));
+  for(let i=0;i<40;i++)internal.recoverMissingSources(String(i),1);
+  expect(prefetch).not.toHaveBeenCalled();
+  for(let i=0;i<32;i++)internal.recoverMissingSources(String(i),0);
+  expect(prefetch).not.toHaveBeenCalled();
+  internal.worker.diagnostics.rpcReads=40;internal.recoverMissingSources('33',0);await Promise.resolve();
+  expect(prefetch).toHaveBeenCalledOnce();expect(internal.worker.installSources).toHaveBeenCalledOnce();
+  internal.recoverMissingSources('34',0);expect(prefetch).toHaveBeenCalledOnce();
+  internal.sourceRecoveryAttempted=false;
+  internal.sourceFiles=new Map(Array.from({length:5},(_,i)=>[`MOD/${i}.mod`,{size:8*1024*1024} as File]));
+  internal.recoverMissingSources('35',0);expect(prefetch).toHaveBeenCalledOnce();
+  internal.sourceRecoveryAttempted=false;internal.sourceFiles=new Map([['MOD/a.mod',source]]);
+  let finish!:(files:Map<string,File>)=>void;prefetch.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+  internal.recoverMissingSources('36',0);internal.state.isCurrentSession=()=>false;
+  finish(new Map([['MOD/a.mod',new File(['abc'],'a.mod')]]));await Promise.resolve();
+  expect(internal.worker.installSources).toHaveBeenCalledOnce();
+});
+it('a stalled optional source batch cannot become a startup gate, and late replies do not install sources', async () => {
+  vi.useFakeTimers();const {internal}=fixture();internal.session.projectId=7;
+  const database=await import('@desktop/database.js');
+  const files=new Map([['DEV/a.dev',{size:3,name:'a.dev'} as File]]);
+  let finishRead!:(value:any)=>void;
+  const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(()=>new Promise(resolve=>{finishRead=resolve;}));
+  try {
+    const preparing=internal.preloadSources(files);await vi.advanceTimersByTimeAsync(10_000);
+    const result=await preparing;expect(result.get('DEV/a.dev')).toBe(files.get('DEV/a.dev'));
+    finishRead(new Map([['DEV/a.dev',new Uint8Array([1,2,3])]]));await Promise.resolve();
+    expect(result.get('DEV/a.dev')).toBe(files.get('DEV/a.dev'));expect(vi.getTimerCount()).toBe(0);
+  } finally {read.mockRestore();vi.useRealTimers();}
 });
 
 it('correlates cold/warm GLB decoding, placement and cache writes without changing geometry identity', async () => {

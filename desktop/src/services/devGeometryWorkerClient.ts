@@ -122,6 +122,18 @@ export class DevGeometryPreprocessor {
   };
   get resultPressure() { return { bytes: this.exportedBytes, peakBytes: this.exportedPeakBytes, count: this.exported.size }; }
   get activePaths(): string[] { return [...this.active.values()].map(row => `${row.task.path} · ${row.finished ? '提交' : row.task.kind === 'bounds' ? '目录' : `LOD${row.task.lod}`}`); }
+  /** Upgrade authorized lazy sources without replacing active computation or
+   * evicting its parse caches. Immutable Files share their backing storage. */
+  installSources(files: Map<string, File>): void {
+    if (this.stopped || !this.current()) return;
+    const loaded = [...files].filter(([path, file]) => file instanceof File && file !== this.files.get(path));
+    if (!loaded.length) return;
+    for (const [path, file] of loaded) this.files.set(path, file);
+    for (const worker of [...this.workers]) {
+      try {worker.postMessage({kind:'sources', files:loaded.map(([path, file])=>[path,file.size,file])});}
+      catch(error){this.workerFailed(worker,error instanceof Error ? error : Error(String(error)));}
+    }
+  }
   onActivity: () => void = () => {};
   setPaused(value: boolean): void { this.paused = value; this.pump(); }
   setMemoryPressure(pressure: MemoryPressure): void {

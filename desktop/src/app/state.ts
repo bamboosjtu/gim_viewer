@@ -157,6 +157,8 @@ export class AppState {
   // 文件-设备关系
   substationCapabilities: SubstationCapabilitySummary | null = null;
   substationEntryPaths: string[] = [];
+  /** Source index sizes, also available when the semantic cache is restored. */
+  substationEntrySizes = new Map<string, number>();
   cachedFamSourceProperties = new Map<string, FamSourceProperty[]>();
   fileDevRelations: FileDevEntry[] = [];
   deviceToIfcFile = new Map<string, string>(); // deviceCbmName → ifcModelId
@@ -417,6 +419,7 @@ export class AppState {
     this.ifcRuntimeModelOwners.clear();
     this.substationCapabilities = null;
     this.substationEntryPaths = [];
+    this.substationEntrySizes.clear();
     this.cachedFamSourceProperties.clear();
     this.fileDevRelations = [];
     this.deviceToIfcFile.clear();

@@ -23,6 +23,7 @@ export function restoreGimIndexToState(state: AppState, index: GimIndexResult): 
   // 1. currentFiles = null
   state.currentFiles = null;
   state.substationEntryPaths = index.entries.map((entry) => entry.entry_path);
+  state.substationEntrySizes = new Map(index.entries.map(entry => [entry.entry_path, entry.file_size]));
   try { state.substationCapabilities = index.capability_summary_json ? JSON.parse(index.capability_summary_json) : null; }
   catch { state.substationCapabilities = null; }
   state.cachedFamSourceProperties.clear();

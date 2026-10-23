@@ -17,6 +17,69 @@ class ControlledWorker {
   }
 }
 afterEach(() => { vi.unstubAllGlobals(); ControlledWorker.instances = []; resetGeometryWorkGateForTests(); });
+it('upgrades immutable sources in active workers and replacement initialization without restarting healthy tasks or accepting stale work', async () => {
+  vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:4,deviceMemory:8});
+  let current=true;
+  const files=new Map([['MOD/a.mod',{size:3,arrayBuffer:vi.fn()} as unknown as File]]);
+  const client=new DevGeometryPreprocessor([],files,()=>current);
+  try {
+    const active=client.compile('DEV/a.dev',0,'a',1);
+    const source=new File(['abc'],'a.mod'),prepared=new Map([['MOD/a.mod',source]]);
+    const [first,second]=ControlledWorker.instances;
+    client.installSources(prepared);
+    expect(first.sent[first.sent.length-1]).toMatchObject({kind:'sources',files:[['MOD/a.mod',3,source]]});
+    expect(first.terminate).not.toHaveBeenCalled();expect(client.schedulingSnapshot().active).toBe(1);
+    second.onerror!({message:'idle crash'});
+    expect(ControlledWorker.instances[2].sent[0].files).toEqual([['MOD/a.mod',3,source]]);
+    first.complete();await active;client.acknowledge('a');
+    const calls=first.sent.length;client.installSources(prepared);expect(first.sent).toHaveLength(calls);
+    current=false;client.installSources(new Map([['MOD/a.mod',new File(['new'],'a.mod')]]));
+    expect(first.sent).toHaveLength(calls);
+  } finally {client.cancel();}
+});
+it('a crash plus a full shared gate drains queued work without retrying the failed source', async () => {
+  vi.stubGlobal('Worker', ControlledWorker);
+  vi.stubGlobal('navigator', {hardwareConcurrency: 4, deviceMemory: 8});
+  const external = beginDevGeometryWork()!;
+  const client = new DevGeometryPreprocessor([], new Map(), () => true);
+  try {
+    const failed = client.compile('failed', 0, 'failed', 1);
+    const rejection = expect(failed).rejects.toThrow('crash');
+    const next = client.compile('next', 0, 'next', 1);
+    const [broken, idle] = ControlledWorker.instances;
+    expect(idle.sent.filter(row => row.kind === 'compile')).toHaveLength(0);
+    broken.onerror!({message:'crash'});
+    await rejection;
+    expect(idle.sent[idle.sent.length-1]).toMatchObject({kind:'compile', path:'next'});
+    expect(ControlledWorker.instances.flatMap(worker => worker.sent).filter(row => row.path === 'failed')).toHaveLength(1);
+    idle.complete(); await next; client.acknowledge('next');
+    expect(client.schedulingSnapshot()).toMatchObject({active:0, queued:0, results:{bytes:0,count:0}});
+    expect(client.diagnostics.failedTasks).toBe(1);
+  } finally { client.cancel(); external(); }
+});
+
+it('bounds drain under output pressure and a full gate, then consumption resumes compiles without retrying failed work', async () => {
+  vi.stubGlobal('Worker', ControlledWorker);
+  vi.stubGlobal('navigator', {hardwareConcurrency:4, deviceMemory:8});
+  const client = new DevGeometryPreprocessor([], new Map(), () => true);
+  let external: (()=>void) | undefined;
+  try {
+    const a = client.compile('a',0,'a',1), b = client.compile('b',0,'b',1);
+    const [first, second] = ControlledWorker.instances;
+    first.complete(undefined,64*1024*1024); await a;
+    external = beginDevGeometryWork()!;
+    const next = client.compile('next',0,'next',1);
+    const bounds = client.bounds('bounds');
+    expect(first.sent[first.sent.length-1]).toMatchObject({kind:'bounds',path:'bounds'});
+    first.complete(); await bounds;
+    second.complete('source failed',0); await expect(b).rejects.toThrow('source failed');
+    expect(client.schedulingSnapshot()).toMatchObject({active:0,queued:1});
+    client.acknowledge('a');
+    expect(first.sent[first.sent.length-1]).toMatchObject({kind:'compile',path:'next'});
+    first.complete(); await next; client.acknowledge('next');
+    expect(client.schedulingSnapshot()).toMatchObject({active:0,queued:0,results:{bytes:0,count:0}});
+  } finally {client.cancel(); external?.();}
+});
 it('links worker phases to the caller task without treating a measured read as a failed phase', async () => {
   perfReset({generation:7});
   vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:4,deviceMemory:8});
