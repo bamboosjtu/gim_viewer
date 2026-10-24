@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { IFCPROJECT, IFCRELVOIDSELEMENT, IFCMECHANICALFASTENER, IFCFASTENER, type IfcAPI } from 'web-ifc';
+import type { ConnectionEndpointEvidence } from '../gim/connectionEndpoints.js';
 export interface RegionalObject {
   expressId: number;
   globalId: string;
@@ -12,6 +13,8 @@ export interface RegionalObject {
    * older versions remain readable; an absent value means "ordinary asset".
    */
   role?: 'connection';
+  /** Undefined is legacy/not collected; [] is a completed supported evidence scan. */
+  connectionEndpoints?: ConnectionEndpointEvidence[];
 }
 
 /**
@@ -139,6 +142,7 @@ export class RegionalIndexCollector {
     private normalized = false,
     /** Called only for objects with a conservative connection role. */
     private onConnection?: (object: RegionalObject) => void,
+    private connectionEndpoints?: ReadonlyMap<number, ConnectionEndpointEvidence[]>,
   ) {}
   observe = (flat: import('web-ifc').FlatMesh): void => {
     const id = flat.expressID;
@@ -197,6 +201,7 @@ export class RegionalIndexCollector {
       };
       if (isRegionalConnectionObject(object)) {
         object.role = 'connection';
+        if (this.connectionEndpoints?.has(id)) object.connectionEndpoints = this.connectionEndpoints.get(id);
         this.onConnection?.(object);
       }
       this.objects.push(object);

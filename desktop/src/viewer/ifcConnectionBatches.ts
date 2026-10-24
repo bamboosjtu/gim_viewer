@@ -5,6 +5,7 @@ export const IFC_CONNECTION_BATCH_MAX_BYTES = 4 * 1024 * 1024;
 import * as THREE from 'three';
 import type { IfcAPI } from 'web-ifc';
 import { isRegionalConnectionObject, CONNECTION_IFC_TYPES, type RegionalObject } from './ifcRegionalData.js';
+import { validEndpointEvidence, type ConnectionEndpointEvidence } from '../gim/connectionEndpoints.js';
 
 export interface ConnectionMeshChunk {
   object: RegionalObject;
@@ -27,7 +28,8 @@ export interface ConnectionGeometryBatch {
  * object overhead as well as the owned vertex buffer. */
 export function connectionChunkBytes(chunk: ConnectionMeshChunk): number {
   return chunk.vertices.byteLength + 512 + 2 * (chunk.object.globalId.length
-    + chunk.object.ifcType.length + chunk.object.name.length);
+    + chunk.object.ifcType.length + chunk.object.name.length)
+    + (chunk.object.connectionEndpoints ? 2 * JSON.stringify(chunk.object.connectionEndpoints).length : 0);
 }
 export const CONNECTION_GEOMETRY_VERSION = 'connection-mesh-v1';
 
@@ -36,7 +38,13 @@ export const CONNECTION_GEOMETRY_VERSION = 'connection-mesh-v1';
  * transferred chunk owns at most 256 KiB. Send the first chunk immediately,
  * then amortize consumption acknowledgements in bounded multi-chunk batches. */
 export async function streamConnectionGeometry(api: IfcAPI, model: number, normalized: boolean,
-  emit: (batch: ConnectionGeometryBatch) => Promise<void>): Promise<{ objectCount: number; sequence: number; failedObjects: number[] }> {
+  emit: (batch: ConnectionGeometryBatch) => Promise<void>, options: {
+    onlyIds?: ReadonlySet<number>;
+    skipIds?: ReadonlySet<number>;
+    startSequence?: number;
+    initialObjectCount?: number;
+    connectionEndpoints?: ReadonlyMap<number, ConnectionEndpointEvidence[]>;
+  } = {}): Promise<{ objectCount: number; sequence: number; failedObjects: number[] }> {
   const ids = new Set<number>();
   for (const type of [...CONNECTION_IFC_TYPES, 'IFCBUILDINGELEMENTPROXY']) {
     const code = api.GetTypeCodeFromName(type);
@@ -45,7 +53,7 @@ export async function streamConnectionGeometry(api: IfcAPI, model: number, norma
     try { for (let i = 0; i < rows.size(); i++) ids.add(rows.get(i)); }
     finally { (rows as any).delete?.(); }
   }
-  let sequence = 0, objectCount = 0;
+  let sequence = options.startSequence ?? 0, objectCount = options.initialObjectCount ?? 0;
   let pendingChunks: ConnectionMeshChunk[] = [], pendingBytes = 0;
   let pendingObjects = new Map<number, RegionalObject>();
   const flush = async (): Promise<void> => {
@@ -66,11 +74,13 @@ export async function streamConnectionGeometry(api: IfcAPI, model: number, norma
   const failedObjects: number[] = [];
   let inverse: THREE.Matrix4 | undefined;
   for (const id of [...ids].sort((a, b) => a - b)) {
+    if (options.onlyIds && !options.onlyIds.has(id) || options.skipIds?.has(id)) continue;
     try {
     const entity = api.GetLine(model, id, false);
     const object: RegionalObject = { expressId: id, globalId: String(entity.GlobalId?.value ?? ''),
       ifcType: api.GetNameFromTypeCode(entity.type).toUpperCase(), name: String(entity.Name?.value ?? ''), bounds: [] };
     if (!object.globalId || !isRegionalConnectionObject(object)) continue;
+    if (options.connectionEndpoints?.has(id)) object.connectionEndpoints = options.connectionEndpoints.get(id);
     const flat = api.GetFlatMesh(model, id);
     try {
       inverse ??= normalized ? new THREE.Matrix4().fromArray(api.GetCoordinationMatrix(model)).invert() : new THREE.Matrix4();
@@ -134,6 +144,7 @@ export function validConnectionArtifact(value: ConnectionGeometryArtifact | null
     for (const chunk of batch.chunks) {
       if (!chunk || !chunk.object || !Number.isInteger(chunk.object.expressId)
         || typeof chunk.object.globalId !== 'string' || typeof chunk.object.ifcType !== 'string' || typeof chunk.object.name !== 'string'
+        || chunk.object.connectionEndpoints !== undefined && !validEndpointEvidence(chunk.object.connectionEndpoints)
         || !(chunk.vertices instanceof Float32Array) || chunk.vertices.length % 18 || !chunk.vertices.every(Number.isFinite)
         || !Array.isArray(chunk.matrix) || chunk.matrix.length !== 16 || !chunk.matrix.every(Number.isFinite)
         || !Array.isArray(chunk.color) || chunk.color.length !== 4 || !chunk.color.every(Number.isFinite)) return false;

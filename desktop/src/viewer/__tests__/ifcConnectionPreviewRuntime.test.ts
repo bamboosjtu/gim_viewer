@@ -14,6 +14,26 @@ function fixture() {
   const state = new AppState(), session = state.activateProject(1,'sha'), scene = new THREE.Scene();
   return new IfcConnectionPreviewRuntime({world:{scene:{three:scene}}} as any,session,()=>state.isCurrentSession(session));
 }
+it('counts authoritative warm connection objects without a mesh receipt, preserving source coordinates and identity', () => {
+  const runtime=fixture();
+  const ordinary={...object,expressId:9,globalId:'building',ifcType:'IFCWALL',name:'wall'};
+  runtime.markModelReady('model',[object,ordinary]);
+  expect(runtime.diagnostics.objects).toBe(1);
+  expect(runtime.diagnostics.readyModels).toBe(1);
+  expect(runtime.diagnostics.completeModels).toBe(0);
+  expect(runtime.diagnostics.batches).toBe(0);
+  expect(runtime.sourceObjects()).toEqual([{modelId:'model',objects:[object]}]);
+  expect(runtime.root.children).toHaveLength(0);
+  runtime.markModelReady('model',[object]); expect(runtime.diagnostics.objects).toBe(1);
+  runtime.release();expect(runtime.sourceObjects()).toEqual([]);
+});
+it('merges streamed and authoritative identities without double counting or claiming a failed preview receipt completed',()=>{
+  const runtime=fixture();runtime.acceptBatch(batch());runtime.markFailed('model');
+  runtime.markModelReady('model',[object]);
+  expect(runtime.diagnostics.objects).toBe(1);expect(runtime.diagnostics.partialModels).toBe(1);
+  expect(runtime.diagnostics.completeModels).toBe(0);expect(runtime.diagnostics.readyModels).toBe(1);
+  expect(runtime.root.children).toHaveLength(0);runtime.release();
+});
 it('isolates exact source identities across current and future batches without changing coordinates',()=>{
   const runtime=fixture();runtime.setTransform(new THREE.Matrix4());runtime.acceptBatch(batch());
   const scope={localIds:new Set<number>(),globalIds:new Set(['g7']),expressIds:new Set<number>()};

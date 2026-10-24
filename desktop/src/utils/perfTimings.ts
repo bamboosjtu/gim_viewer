@@ -170,6 +170,7 @@ export interface PerfRuntimeResourceSnapshot {
   connectionPreviewBatchCount?: number | null;
   connectionPreviewObjectCount?: number | null;
   connectionPreviewCompleteModels?: number | null;
+  connectionPreviewReadyModels?: number | null;
   modRootPresent: boolean;
   stlRootPresent: boolean;
   meta?: Record<string, unknown>;
@@ -773,7 +774,7 @@ export function perfRecordRuntimeResourceSnapshot(
     'fragmentModelCount', 'loadedIfcModelCount', 'currentIfcEntryCount',
     'cbmNodeCount', 'spatialNodeCount', 'spatialObjectCount',
     'spatialLinkCount', 'fileDevRelationCount',
-    'connectionPreviewBatchCount', 'connectionPreviewObjectCount', 'connectionPreviewCompleteModels',
+    'connectionPreviewBatchCount', 'connectionPreviewObjectCount', 'connectionPreviewCompleteModels', 'connectionPreviewReadyModels',
   ] as const;
   const normalized = {} as Omit<PerfRuntimeResourceSnapshot, 'label' | 'atMs' | 'sessionId'>;
   for (const field of countFields) {

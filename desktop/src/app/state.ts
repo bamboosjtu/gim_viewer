@@ -27,7 +27,8 @@ export interface SubstationConnectionPreview {
   acceptBatch(batch: unknown): boolean;
   markComplete(modelId: string, meta: { objectCount: number; sequence: number }): void;
   markFailed?(modelId: string): void;
-  markModelReady(modelId: string): void;
+  markModelReady(modelId: string, sourceObjects?: readonly import('../viewer/ifcRegionalData.js').RegionalObject[]): void;
+  sourceObjects?(): ReadonlyArray<{modelId: string; objects: readonly import('../viewer/ifcRegionalData.js').RegionalObject[]}>;
   setTransform?(matrix: THREE.Matrix4): void;
   setSelectionScope?(only: boolean, scopes: ReadonlyMap<string, import('../viewer/ifcModelVisibility.js').IfcSelectionScope>): void;
   diagnostics?: Record<string, number>;
@@ -69,6 +70,7 @@ export class AppState {
   substationFineQueue: SubstationFineQueue | null = null;
   /** Cheap connection-line previews are discarded with the project session. */
   substationConnectionPreview: SubstationConnectionPreview | null = null;
+  substationConnectionPorts: import('../gim/glConnectionPorts.js').GlConnectionPortIndex | null = null;
   substationResourceMonitor: { release(): void } | null = null;
   substationMemoryPressure: import('../utils/memoryPressure.js').MemoryPressure = 'unknown';
   viewHistory: ViewerViewHistory | null = null;
@@ -272,6 +274,7 @@ export class AppState {
     this.deviceLodRuntime?.release(); this.deviceLodRuntime = null;
     this.substationFineQueue = null;
     this.substationConnectionPreview?.release(); this.substationConnectionPreview = null;
+    this.substationConnectionPorts = null;
     this.viewHistory?.clear();
     this.stationOverview = null;
     this.onlySelected = false;
@@ -287,6 +290,7 @@ export class AppState {
     this.substationMemoryPressure = 'unknown';
     this.substationFineQueue = null;
     this.substationConnectionPreview?.release(); this.substationConnectionPreview = null;
+    this.substationConnectionPorts = null;
     this.viewHistory?.clear();
     this.stationOverview = null;
     this.onlySelected = false;
@@ -398,6 +402,7 @@ export class AppState {
     this.deviceUnknownBounds.clear();
     this.substationFineQueue = null;
     this.substationConnectionPreview?.release(); this.substationConnectionPreview = null;
+    this.substationConnectionPorts = null;
     this.viewHistory?.clear();
     this.stationOverview = null;
     this.onlySelected = false;
