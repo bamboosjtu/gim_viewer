@@ -43,6 +43,8 @@ import {
 } from '../utils/perfTimings.js';
 import { sampleSubstationRuntimeResources, scheduleSubstationResourceCheckpoint, startSubstationResourceMonitor } from './substationResourceTelemetry.js';
 import { showLoading, hideLoading } from './gimOpenCore.js';
+import { prioritizeIfcEntries } from './ifcLoadOrder.js';
+import { resolveIfcModelId } from '../gim/modelIdentity.js';
 
 
 async function sampleSubstationMemory(
@@ -895,6 +897,9 @@ export async function loadAllIfcFiles(
     isCurrent,
   );
   state.substationConnectionPreview = connectionPreview;
+  void import('./connectionOwnershipService.js').then(({prepareConnectionOwnership})=>{
+    if(isCurrent())return prepareConnectionOwnership(state,session);
+  }).catch(error=>{if(isCurrent())console.warn('[Connection source evidence]',error);});
   void state.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error));
   const connectionFirstBatches = new Set<string>();
   const connectionCompletions = new Set<string>();
@@ -904,9 +909,9 @@ export async function loadAllIfcFiles(
       setConnectionStatus('');
       return;
     }
-    const completed = d.completeModels > 0 ? ` · ${d.completeModels} 个 IFC 已完成` : ' · 增量加载中';
+    const completed = d.readyModels > 0 ? ` · ${d.readyModels} 个来源三维就绪` : ' · 增量加载中';
     const partial = d.partialModels > 0 ? ` · 部分 ${d.partialModels}` : '';
-    setConnectionStatus(`连接线 ${d.objects} 个 · 源几何增量显示${completed}${partial}`);
+    setConnectionStatus(`连接构件 ${d.objects} 个${completed}${partial}`);
   };
   if (state.projectSourceToViewerMatrix) connectionPreview.setTransform?.(state.projectSourceToViewerMatrix);
   state.stationOverview = () => {
@@ -1143,8 +1148,19 @@ export async function loadAllIfcFiles(
     // 控制台列出，绝不静默丢弃。
     const { shouldSkipLargeIfc, LARGE_IFC_BYTES } = await import('./appSettings.js');
     const skippedLargeIfc: Array<{ path: string; bytes: number }> = [];
+    const { isRegionalConnectionObject } = await import('../viewer/ifcRegionalData.js');
+    const evidencedConnections = new Set<string>();
+    const visitConnectionEvidence = (node: CbmNode): void => {
+      if (node.ifcFile && node.ifcGuid && isRegionalConnectionObject({expressId:0,globalId:node.ifcGuid,
+        ifcType:'IFCBUILDINGELEMENTPROXY',name:node.name,bounds:[]})) {
+        const id = resolveIfcModelId(node.ifcFile, entries);
+        if (id) evidencedConnections.add(id);
+      }
+      node.children.forEach(visitConnectionEvidence);
+    };
+    if (state.currentCbmTree) visitConnectionEvidence(state.currentCbmTree);
     const isConnectionIfc = (entry: IfcEntry): boolean =>
-      /接线|连接线|软导|导线|wire|cable/i.test(`${entry.name} ${entry.path}`);
+      evidencedConnections.has(entry.modelId) || /接线|连接线|软导|导线|wire|cable/i.test(`${entry.name} ${entry.path}`);
     if (shouldSkipLargeIfc() && queue.length > 1) {
       for (let index = queue.length - 1; index >= 1; index--) {
         // Connection-line IFC is the only source of those lines for some
@@ -1161,25 +1177,13 @@ export async function loadAllIfcFiles(
       }
     }
     state.ifcSkippedLargeIfc = skippedLargeIfc.map((row) => row.path);
-    const HUGE_IFC_BYTES = 64 * 1024 * 1024;
-    const hugeQueue = queue.filter((entry) => (sizes.get(entry.path.toLowerCase()) ?? 0) > HUGE_IFC_BYTES);
-    if (hugeQueue.length > 0 && hugeQueue.length < queue.length) {
-      const normalQueue = queue.filter((entry) => !hugeQueue.includes(entry));
-      queue.splice(0, queue.length, ...normalQueue, ...hugeQueue);
-      perfMark('IFC 超大文件排到队尾', {
-        huge: hugeQueue.map((entry) => ({ path: entry.path, bytes: sizes.get(entry.path.toLowerCase()) ?? 0 })),
-      }, perfSession);
-    }
-    // Connection IFC used to sit behind every normal IFC because it is huge.
-    // Put it right after the first interactive IFC so wires appear before the
-    // remaining heavy equipment models finish converting.
     const connectionEntries = queue.filter(isConnectionIfc);
-    if (connectionEntries.length && connectionEntries.length < queue.length) {
-      const first = queue.find((entry) => !isConnectionIfc(entry));
-      const rest = queue.filter((entry) => entry !== first && !isConnectionIfc(entry));
-      queue.splice(0, queue.length, ...[first, ...connectionEntries, ...rest].filter((entry): entry is IfcEntry => Boolean(entry)));
+    queue.splice(0, queue.length, ...prioritizeIfcEntries(queue, sizes, new Set(connectionEntries.map(entry=>entry.modelId))));
+    if (connectionEntries.length) {
       perfMark('IFC 连接线优先', {
         order: queue.slice(0, 4).map((entry) => entry.path),
+        evidencedModels: [...evidencedConnections],
+        anchorPreserved: queue[0]?.modelId === entries[0]?.modelId,
       }, perfSession);
     }
     for (let queueIndex=0;queueIndex<queue.length;queueIndex++) {
@@ -1237,7 +1241,7 @@ export async function loadAllIfcFiles(
                   coordinateBasis: 'ifc-y-up-m',
                 });
                 if (accepted && !connectionFirstBatches.has(entry.modelId)
-                  && connectionPreview.diagnostics?.objects) {
+                  && batch.chunks?.some(chunk => chunk.vertices.length > 0)) {
                   connectionFirstBatches.add(entry.modelId);
                   perfMark('IFC connection preview first batch', {
                     modelId: entry.modelId,
@@ -1274,7 +1278,7 @@ export async function loadAllIfcFiles(
         };
         await loadFine();
         if (!isCurrent()) return;
-        connectionPreview.markModelReady(entry.modelId);
+        connectionPreview.markModelReady(entry.modelId, state.ifcRegionalRuntimes.get(entry.modelId)?.index.objects);
         updateConnectionStatus();
         if (!readEnded) {
           // Fragments cache 命中时不会调用 getIfcBuffer；显式记录“未读取 IFC”。

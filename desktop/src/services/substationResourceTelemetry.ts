@@ -280,6 +280,7 @@ export function collectSubstationRuntimeResourceSnapshot(
     connectionPreviewBatchCount: countOrNull(connection?.batches),
     connectionPreviewObjectCount: countOrNull(connection?.objects),
     connectionPreviewCompleteModels: countOrNull(connection?.completeModels),
+    connectionPreviewReadyModels: countOrNull(connection?.readyModels),
     modRootPresent: state.modRootGroup != null,
     stlRootPresent: state.stlRootGroup != null,
     meta: {

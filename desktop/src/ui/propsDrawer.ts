@@ -8,6 +8,9 @@ import { setSelectionStatus } from './shell/statusBar.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { IfcSpatialNode, IfcSpatialObject, SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
 import type { RegionalObject } from '../viewer/ifcRegionalData.js';
+import { isRegionalConnectionObject } from '../viewer/ifcRegionalData.js';
+import { ifcConnectionOwnershipIndex, type IfcConnectionOwnership } from '../gim/ifcConnectionOwnership.js';
+import type { ConnectionEndpointEvidence } from '../gim/connectionEndpoints.js';
 import { escHtml } from '../shared/html.js';
 import {
   getFileByPath,
@@ -1137,6 +1140,42 @@ async function loadSpatialIfcItemData(state: AppState, object: IfcSpatialObject)
   }
 }
 
+function connectionOwnershipRows(state: AppState, evidence: IfcConnectionOwnership): Array<[string,string]> {
+  return [
+    ['CBM 来源关联', evidence.status === 'confirmed' ? '源 IFCGUID 已核对'
+      : evidence.status === 'ambiguous' ? `${evidence.semanticNodes.length} 个来源候选` : '源模型未提供可验证关联'],
+    ['DEV 装配归属', evidence.deviceNodes.length === 1
+      ? getNodeDisplayName(evidence.deviceNodes[0], state.ifcGuidToName, state.currentIfcEntries)
+      : evidence.deviceNodes.length ? `${evidence.deviceNodes.length} 个候选，未自动归属` : '未建立'],
+  ];
+}
+function connectionEndpointRows(state: AppState, modelId: string, references?: readonly ConnectionEndpointEvidence[]): Array<[string,string]> {
+  if(references===undefined)return [['设备端点关联','端点证据尚未收集；未据此推断设备归属']];
+  if(!references.length)return [['设备端点关联','未发现可用的已支持引用；整站显示不依赖此关联']];
+  const groups=new Map<string,ConnectionEndpointEvidence[]>();
+  for(const ref of references){const key=`${ref.kind}:${ref.reference}`,items=groups.get(key)??[];items.push(ref);groups.set(key,items);}
+  const index=ifcConnectionOwnershipIndex(state.currentCbmTree,state.currentIfcEntries);
+  return [...groups.values()].slice(0,32).map(items=>{
+    const ref=items[0];
+    if(ref.kind==='ifc-element'){
+      const evidence=index.get(modelId,ref.reference);
+      return ['IFC 端点对象',evidence.semanticNodes.length===1
+        ? `${getNodeDisplayName(evidence.semanticNodes[0],state.ifcGuidToName,state.currentIfcEntries)} · 源连接关系已核对`
+        : `${ref.reference} · ${evidence.semanticNodes.length?`${evidence.semanticNodes.length} 个 CBM 候选`:'尚无 CBM/DEV 映射'}`] as [string,string];
+    }
+    const ports=state.substationConnectionPorts?.get(ref.reference)??[];
+    const owners=[...new Map(ports.map(port=>[port.key,port])).values()];
+    const names=owners.map(owner=>{
+      const node=state.cbmNodeIndex.get(owner.nodePath)??findCbmNodeByPath(state.currentCbmTree,owner.nodePath);
+      return node?getNodeDisplayName(node,state.ifcGuidToName,state.currentIfcEntries):owner.nodePath;
+    });
+    const label=[...new Set(items.map(item=>`${item.propertySet??''} / ${item.propertyName??''}`))].join('；');
+    return [label||'源接线点',owners.length===1?`${names[0]} · GUID 与 DEV 装配引用已核对`
+      : owners.length?`${owners.length} 个实例候选：${names.join('、')}；未自动归属`
+        : `${ref.reference} · ${state.substationConnectionPorts?'没有可验证的 DEV 实例':'接线点 sidecar 证据尚未就绪'}`] as [string,string];
+  });
+}
+
 /** 显示未直接关联 CBM 的 IFC 构件属性，属性详情由 Fragments 按需读取。 */
 export async function showIfcSpatialObjectPropertiesBasic(
   state: AppState,
@@ -1174,7 +1213,10 @@ export async function showIfcSpatialObjectPropertiesBasic(
     ...(spatialPaths.length > 0 ? [['空间路径', spatialPaths.join('；')] as [string, string]] : []),
     ['IFC 几何', object.geometryStatus === 'represented' ? '已提供 Representation' : '未提供 Representation'],
     ...(object.placement ? [['位置', `${object.placement.position.map(formatSpatialNumber).join(', ')}${object.placement.unit ? ` (${object.placement.unit})` : ''}`] as [string, string]] : []),
-  ]) + refinement;
+  ]) + (isRegionalConnectionObject({...object,bounds:[]}) ? sectionHtml('连接对象归属',[
+    ...connectionOwnershipRows(state,ifcConnectionOwnershipIndex(state.currentCbmTree,state.currentIfcEntries).get(object.modelId,object.globalId)),
+    ...connectionEndpointRows(state,object.modelId,regionalObject?.connectionEndpoints),
+  ]) : '') + refinement;
   const relations = sectionHtml('对象关系', [
     ...(linkedCbms.length > 0
       ? [['CBM 关联', linkedCbms.map((node) => getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)).join('、')] as [string, string]]
@@ -1387,15 +1429,25 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
   ];
   if (guid) {
     ov.push(['GUID', guid]);
-    if (gimNode) {
-      ov.push(['GIM 设备', getNodeDisplayName(gimNode, state.ifcGuidToName, state.currentIfcEntries)]);
-      ov.push(['GIM 分类', gimNode.classifyName]);
-    }
   }
   const regional=state.ifcRegionalRuntimes.get(logicalModelId);
   const regionalObject = guid
     ? regional?.index.objects.find((object) => object.globalId === guid)
     : undefined;
+  const connectionEvidence = regionalObject && isRegionalConnectionObject(regionalObject) && guid
+    ? ifcConnectionOwnershipIndex(state.currentCbmTree, state.currentIfcEntries).get(logicalModelId, guid)
+    : undefined;
+  // Connection objects may have a CBM identity without a physical DEV or any
+  // electrical endpoint references. Do not select an arbitrary alias owner.
+  if (connectionEvidence) {
+    gimNode = connectionEvidence.semanticNodes.length === 1 ? connectionEvidence.semanticNodes[0] : null;
+    ov.push(...connectionOwnershipRows(state,connectionEvidence));
+    ov.push(...connectionEndpointRows(state,logicalModelId,regionalObject?.connectionEndpoints));
+  }
+  if (gimNode) {
+    ov.push([connectionEvidence ? 'CBM 来源对象' : 'GIM 设备', getNodeDisplayName(gimNode, state.ifcGuidToName, state.currentIfcEntries)]);
+    ov.push(['GIM 分类', gimNode.classifyName]);
+  }
   const overview = sectionHtml('基本信息', ov)
     + (regionalObject && regional ? ifcRefinementHtml(regional, regionalObject) : '');
 
@@ -1428,7 +1480,13 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
   }
 
   // 关系：GIM 设备关联
-  const relations = gimNode
+  const relations = connectionEvidence
+    ? sectionHtml('连接对象来源证据', [
+        ['CBM 对象', connectionEvidence.semanticNodes.length
+          ? connectionEvidence.semanticNodes.map(node => `${getNodeDisplayName(node, state.ifcGuidToName, state.currentIfcEntries)} · ${node.path}`).join('；') : '没有匹配的源引用'],
+        ['归属规则', '仅采用同一 IFC 来源中的精确 IFCGUID；空间邻近不作为已确认连接'],
+      ])
+    : gimNode
     ? sectionHtml('GIM 设备关联', [
         ['关联设备', getNodeDisplayName(gimNode, state.ifcGuidToName, state.currentIfcEntries)],
         ['分类', gimNode.classifyName],

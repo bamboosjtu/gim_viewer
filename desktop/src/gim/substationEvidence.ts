@@ -114,9 +114,9 @@ export function devAssemblyPath(virtualPath: string): string {
   return [...virtualPath.matchAll(/#dev:(\d+):/g)].map((m) => `sub:${m[1]}`).join('/');
 }
 
-export function deviceOccurrenceScope(root: CbmNode | null, node: CbmNode): DeviceOccurrenceScope {
+export function deviceOccurrenceScope(root: CbmNode | null, node: CbmNode, aliasIndex?: ReturnType<typeof buildSubstationAliasIndex>): DeviceOccurrenceScope {
   if (normalizeEntityName(node.entityName) === 'PARTINDEX') {
-    const aliases = buildSubstationAliasIndex(root);
+    const aliases = aliasIndex ?? buildSubstationAliasIndex(root);
     return { rootOccurrence: aliases.partToRoot.get(node.path)?.path ?? node.path,
       assemblyPaths: (aliases.partToOccurrences.get(node.path) ?? []).map((n) => devAssemblyPath(n.path)) };
   }

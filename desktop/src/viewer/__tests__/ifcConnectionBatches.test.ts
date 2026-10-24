@@ -73,6 +73,17 @@ it('coalesces large meshes without exceeding the byte ceiling',async()=>{
   expect(batches.length).toBeLessThan(10);
   expect(validConnectionArtifact({version:CONNECTION_GEOMETRY_VERSION,batches,complete})).toBe(true);
 });
+it('continues a validated early prefix with one contiguous receipt and no duplicate object geometry',async()=>{
+  const {api}=source();api.GetLine=(_m:number,id:number)=>({type:1,GlobalId:{value:`g${id}`},Name:{value:'软导体'}});
+  const batches:ConnectionGeometryBatch[]=[];
+  const early=await streamConnectionGeometry(api,0,false,async batch=>{batches.push(batch);},{onlyIds:new Set([7])});
+  batches.pop();
+  const complete=await streamConnectionGeometry(api,0,false,async batch=>{batches.push(batch);},
+    {skipIds:new Set([7]),startSequence:early.sequence-1,initialObjectCount:early.objectCount});
+  expect(complete.objectCount).toBe(2);
+  expect(batches.flatMap(b=>b.chunks??[]).filter(c=>c.vertices.length).map(c=>c.object.expressId)).toEqual([7,8]);
+  expect(validConnectionArtifact({version:CONNECTION_GEOMETRY_VERSION,batches,complete})).toBe(true);
+});
 it('isolates a failed source object and refuses a complete cache receipt while other source work continues', async () => {
   const {api}=source();
   api.GetFlatMesh=()=>{throw Error('bad source geometry');};

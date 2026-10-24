@@ -2,7 +2,7 @@ import { beginIfcGeometryWork } from './geometryWorkGate.js';
 import type { ViewerContext } from './viewerEngine.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { IfcConversionInput, IfcConversionOutput } from './ifcConversionWorker.js';
-import { perfBegin } from '../utils/perfTimings.js';
+import { perfBegin, perfRecordExternalSpan } from '../utils/perfTimings.js';
 import type { IfcOpeningPolicy } from '../config/features.js';
 import type { RegionalIndex } from './ifcRegionalData.js';
 export { IFC_CONNECTION_BATCH_MAX_OBJECTS, IFC_CONNECTION_BATCH_MAX_BYTES } from './ifcConnectionBatches.js';
@@ -73,6 +73,12 @@ export async function loadRawIfc(
         if (!isCurrent()) { cancel(); return; }
         try {
           const response = event.data;
+          if (response.type === 'stage') {
+            lastProgressAt = performance.now();
+            perfRecordExternalSpan(`IFC ${response.stage} · ${entryPath}`, response.elapsedMs,
+              {entryPath,phase:response.stage,...response.meta}, perfSessionId);
+            return;
+          }
           if (response.type === 'progress') { lastProgressAt = performance.now(); onProgress?.(response.progress); return; }
           if (response.type === 'regional-batch') {
             lastProgressAt = performance.now();
@@ -125,6 +131,8 @@ export async function loadRawIfc(
         const owned = (options.transferInput && exactBuffer ? buffer : new Uint8Array(buffer)) as Uint8Array<ArrayBuffer>;
         const input: IfcConversionInput = { bytes: owned, wasm: { ...ctx.ifcLoader.settings.wasm },
           webIfcSettings: { ...ctx.ifcLoader.settings.webIfc }, openingPolicy: options.openingPolicy ?? 'full' };
+        input.earlyConnections = state.substationMemoryPressure !== 'high' && state.substationMemoryPressure !== 'critical';
+        try { input.earlyConnections &&= localStorage.getItem('gim-connection-early') !== '0'; } catch { /* defaults apply */ }
         endPrepare(undefined, {
           entryPath,
           phase: 'ifc.worker input preparation',

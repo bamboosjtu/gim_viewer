@@ -2026,7 +2026,7 @@ function toTopTypeCounts(counts: Map<string, number>): Record<string, number> | 
   );
 }
 
-function decodeIfcString(value: string): string {
+export function decodeIfcString(value: string): string {
   const decodedUnicode = value
     .replace(/\\X2\\([0-9a-fA-F]+)\\X0\\/g, (_match, hex: string) => {
       let output = '';

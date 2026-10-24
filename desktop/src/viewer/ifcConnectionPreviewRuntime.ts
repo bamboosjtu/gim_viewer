@@ -3,6 +3,8 @@ import type { ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from './viewerEngine.js';
 import type { IfcSelectionScope } from './ifcModelVisibility.js';
 import { IFC_CONNECTION_BATCH_MAX_BYTES, IFC_CONNECTION_BATCH_MAX_OBJECTS, connectionChunkBytes, type ConnectionGeometryBatch } from './ifcConnectionBatches.js';
+import { isRegionalConnectionObject, type RegionalObject } from './ifcRegionalData.js';
+import { validEndpointEvidence } from '../gim/connectionEndpoints.js';
 
 export interface ConnectionPreviewBatch extends ConnectionGeometryBatch {
   modelId: string;
@@ -21,9 +23,10 @@ interface Stream {
 export class IfcConnectionPreviewRuntime {
   readonly root = new THREE.Group();
   readonly diagnostics = { batches: 0, objects: 0, bytes: 0, duplicates: 0, outOfOrder: 0,
-    completeModels: 0, partialModels: 0, meshChunks: 0, invalid: 0, commitMaxMs: 0 };
+    completeModels: 0, partialModels: 0, readyModels: 0, meshChunks: 0, invalid: 0, commitMaxMs: 0 };
   private streams = new Map<string, Stream>();
   private ready = new Set<string>();
+  private readyObjects = new Map<string, readonly RegionalObject[]>();
   private released = false;
   private onlySelected = false;
   private selectionScopes: ReadonlyMap<string, IfcSelectionScope> = new Map();
@@ -54,6 +57,9 @@ export class IfcConnectionPreviewRuntime {
     if (chunks.some(chunk => !chunk?.object || !(chunk.vertices instanceof Float32Array)
       || typeof chunk.object.globalId !== 'string' || typeof chunk.object.ifcType !== 'string'
       || typeof chunk.object.name !== 'string')) { this.diagnostics.invalid++; return false; }
+    if (chunks.some(chunk => chunk.object.connectionEndpoints !== undefined && !validEndpointEvidence(chunk.object.connectionEndpoints))) {
+      this.diagnostics.invalid++; return false;
+    }
     const bytes = chunks.reduce((sum, chunk) => sum + connectionChunkBytes(chunk), 0);
     if (bytes > IFC_CONNECTION_BATCH_MAX_BYTES || bytes !== batch.bytes) { this.diagnostics.invalid++; return false; }
     // Validate in source order without mutating stream state: a completion
@@ -98,7 +104,7 @@ export class IfcConnectionPreviewRuntime {
     if (group.children.length) { this.root.add(group); stream.groups.push(group); }
     stream.next++; stream.final = batch.final;
     this.diagnostics.batches++;
-    this.diagnostics.objects = [...this.streams.values()].reduce((sum, row) => sum + row.objects.size, 0);
+    this.countObjects();
     this.diagnostics.bytes += batch.bytes;
     this.diagnostics.commitMaxMs = Math.max(this.diagnostics.commitMaxMs, performance.now() - started);
     return true;
@@ -122,11 +128,28 @@ export class IfcConnectionPreviewRuntime {
       for (const material of materials) material.dispose(); });
     group.clear();
   }
-  markModelReady(modelId: string): void {
+  private countObjects(): void {
+    const keys = new Set([...this.streams.keys(), ...this.readyObjects.keys()]);
+    this.diagnostics.objects = [...keys].reduce((sum, key) => sum + new Set([
+      ...(this.streams.get(key)?.objects ?? []), ...(this.readyObjects.get(key) ?? []).map(object => object.expressId),
+    ]).size, 0);
+  }
+  /** Authoritative far/index restoration does not require retaining a large
+   * duplicate preview cache. It is distinct from a complete preview receipt. */
+  markModelReady(modelId: string, sourceObjects?: readonly RegionalObject[]): void {
+    if (this.released || !this.current()) return;
     const key = modelId.toLowerCase();
     this.ready.add(key);
+    if (sourceObjects) this.readyObjects.set(key, sourceObjects.filter(isRegionalConnectionObject));
+    this.diagnostics.readyModels = [...this.readyObjects.values()].filter(objects => objects.length > 0).length;
+    this.countObjects();
     const stream = this.streams.get(key);
     if (stream) { for (const group of stream.groups) this.disposeGroup(group); stream.groups = []; }
+  }
+  /** Small identity/coordinate snapshot for diagnostics and cold/warm checks;
+   * contains source bounds, never owned vertex buffers. */
+  sourceObjects(): ReadonlyArray<{modelId: string; objects: readonly RegionalObject[]}> {
+    return [...this.readyObjects].map(([modelId, objects]) => ({modelId, objects}));
   }
   setTransform(projectSourceToViewer: THREE.Matrix4): void {
     if (this.released) return;
@@ -152,6 +175,6 @@ export class IfcConnectionPreviewRuntime {
   release(): void {
     if (this.released) return; this.released = true;
     for (const stream of this.streams.values()) for (const group of stream.groups) this.disposeGroup(group);
-    this.streams.clear(); this.ready.clear(); this.root.removeFromParent();
+    this.streams.clear(); this.ready.clear(); this.readyObjects.clear(); this.root.removeFromParent();
   }
 }

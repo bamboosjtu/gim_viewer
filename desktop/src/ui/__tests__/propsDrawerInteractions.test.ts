@@ -37,6 +37,30 @@ describe('属性检查器纯 DOM 交互', () => {
     await drawer.showNodePropertiesBasic(state,node);
     expect(document.querySelector('#props-drawer-body')!.innerHTML).toBe(cold);
   });
+  it('connection properties distinguish exact CBM identity from absent DEV/electrical endpoint evidence',async()=>{
+    const drawer=await import('../propsDrawer.js'),state=new AppState();state.activateProject(1,'sha');
+    state.currentIfcEntries=[{modelId:'source',path:'CBM/source.ifc',name:'source'}];
+    const object:any={key:'source:7',modelId:'source',expressId:7,globalId:'GUID',name:'软导体',ifcType:'IFCBUILDINGELEMENTPROXY',
+      sourcePath:'CBM/source.ifc',spatialKeys:[],childObjectKeys:[],geometryStatus:'represented',relationshipCount:0};
+    const index:any={nodeByKey:new Map(),linksByIfcObjectKey:new Map()};
+    await drawer.showIfcSpatialObjectPropertiesBasic(state,object,index);
+    expect(document.body.textContent).toContain('源模型未提供可验证关联');expect(document.body.textContent).toContain('DEV 装配归属');
+    state.currentCbmTree={path:'CBM/connection.cbm',name:'连接对象',entityName:'F4System',children:[],famPath:'',devPath:'',ifcFile:'source.ifc',
+      ifcGuid:'GUID',classifyName:'',transformMatrix:'',systemNames:[],devSymbolName:'',devType:'',devExpanded:false};
+    await drawer.showIfcSpatialObjectPropertiesBasic(state,object,index);
+    expect(document.body.textContent).toContain('源 IFCGUID 已核对');
+    expect(document.body.textContent).toContain('端点证据尚未收集；未据此推断设备归属');
+    const port='87654321-4321-4321-4321-CBA987654321';
+    state.ifcRegionalRuntimes.set('source',{index:{objects:[{expressId:7,globalId:'GUID',
+      connectionEndpoints:[{kind:'gim-connect-guid',reference:port,relationId:10,propertySet:'关联模型接线点GUID',propertyName:'接线点0'}]}]}} as any);
+    const owner={key:'one',nodePath:'CBM/connection.cbm'};
+    state.substationConnectionPorts={get:()=>[owner]} as any;
+    await drawer.showIfcSpatialObjectPropertiesBasic(state,object,index);
+    expect(document.body.textContent).toContain('GUID 与 DEV 装配引用已核对');
+    state.substationConnectionPorts={get:()=>[owner,{...owner,key:'two'}]} as any;
+    await drawer.showIfcSpatialObjectPropertiesBasic(state,object,index);
+    expect(document.body.textContent).toContain('2 个实例候选');expect(document.body.textContent).toContain('未自动归属');
+  });
 
   it('无 Viewer 时也能切换页签并分发来源引用事件', async () => {
     // dom.ts 在模块加载时读取元素，因此必须在动态 import 前创建 DOM。
