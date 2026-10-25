@@ -59,6 +59,27 @@ it('retains binary template bytes and rejects mismatched or truncated cache reco
   expect(unpackDevArtifact('missing', new Uint8Array())).toBeNull();
 });
 
+it('native batch decoding gives each GLB independent ownership without retaining the response or adjacent records', async () => {
+  (window as any).__TAURI_INTERNALS__ = {};
+  const response = envelope(['a', 'b'].map((key, i) => ({ path: `templates/${key}`,
+    bytes: packDevArtifact(key, { result: { bytes: new Uint8Array([i + 1, 7, 9]) } }),
+  })));
+  invoke.mockReset(); invoke.mockResolvedValue(response);
+  try {
+    const values = await readDevArtifactBatch<any>('templates', ['a', 'b'], {
+      projectId: 1, sourceSha256: 'a'.repeat(64),
+    });
+    const a = values.get('a')!.value.result.bytes as Uint8Array;
+    const b = values.get('b')!.value.result.bytes as Uint8Array;
+    expect(a.buffer).not.toBe(response); expect(b.buffer).not.toBe(response);
+    expect(a.buffer).not.toBe(b.buffer);
+    expect(a.byteOffset).toBe(0); expect(a.buffer.byteLength).toBe(a.byteLength);
+    new Uint8Array(response).fill(0);
+    expect(a).toEqual(new Uint8Array([1, 7, 9]));
+    a[0] = 99; expect(b).toEqual(new Uint8Array([2, 7, 9]));
+  } finally { delete (window as any).__TAURI_INTERNALS__; }
+});
+
 it('prepares metadata once, retains the original binary buffer and refuses a different write key', async () => {
   let reads=0;const data=new Uint8Array([4,5,6]);
   const value={get label(){reads++;return 'source';},result:{status:'complete',bytes:data}};

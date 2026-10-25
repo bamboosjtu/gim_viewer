@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DEV cache decode CPU check</title>
+<p>Manual isolated benchmark. Results exclude IPC, rendering and station opening.</p>
+<script type="module">
+import {parseBatchCachePayload} from '../../bridge/database.ts';
+import {unpackDevArtifact} from '../../bridge/devLodCache.ts';
+const hex = bytes => Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
+const sha = bytes => crypto.subtle.digest('SHA-256', bytes).then(hex);
+const stats = values => {
+  const sorted = [...values].sort((a,b) => a-b);
+  return {p50:sorted[Math.ceil(values.length*.5)-1],p95:sorted[Math.ceil(values.length*.95)-1],max:sorted.at(-1)};
+};
+globalThis.runCacheDecodeCheck = async source => {
+  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(source)) throw Error('Owned loopback fixture source required');
+  const results = [];
+  for (const sample of ['substation01','substation02','substation03','substation04']) {
+    const response = await fetch(`${source}/${sample}`); if (!response.ok) throw Error(`${sample}: ${response.status}`);
+    const payload = await response.arrayBuffer();
+    const decode = borrow => parseBatchCachePayload(payload,{copyBytes:!borrow}).items.map(row => ({
+      path:row.entry_path, value:unpackDevArtifact(row.entry_path.slice('templates/'.length),row.bytes),
+    }));
+    const control = decode(false), trial = decode(true);
+    let verified = 0, glbBytes = 0;
+    for (let i=0;i<control.length;i++) {
+      const a=control[i], b=trial[i], ab=a.value.result.bytes, bb=b.value.result.bytes;
+      if (a.path!==b.path || JSON.stringify({...a.value,result:{...a.value.result,bytes:null}})
+        !== JSON.stringify({...b.value,result:{...b.value.result,bytes:null}})) throw Error('Identity/metadata mismatch');
+      if (ab) {
+        if (!bb || bb.buffer===payload || bb.byteOffset!==0 || bb.buffer.byteLength!==bb.length
+          || await sha(ab)!==await sha(bb)) throw Error('GLB byte/ownership mismatch');
+        verified++; glbBytes+=bb.length;
+      }
+    }
+    let checksum=0;
+    const repeats=Math.max(1,Math.min(16,Math.ceil(4*1024*1024/payload.byteLength)));
+    const measure=borrow=>{
+      const start=performance.now();
+      for(let i=0;i<repeats;i++) for(const row of decode(borrow)) checksum+=row.value.result.bytes?.length??0;
+      return (performance.now()-start)/repeats;
+    };
+    for(let i=0;i<10;i++){measure(false);measure(true);}
+    const baseline=[],candidate=[];
+    for(let i=0;i<100;i++){
+      if(i%2){candidate.push(measure(true));baseline.push(measure(false));}
+      else{baseline.push(measure(false));candidate.push(measure(true));}
+      await new Promise(resolve=>setTimeout(resolve,0));
+    }
+    if(!checksum || !verified) throw Error('No renderable samples');
+    results.push({sample,batchBytes:payload.byteLength,templates:control.length,verified,glbBytes,repeats,
+      baselineMs:stats(baseline),candidateMs:stats(candidate),baseline,candidate});
+  }
+  return {userAgent:navigator.userAgent,hardwareConcurrency:navigator.hardwareConcurrency,results,
+    scope:'Isolated headless Edge, CPU decoding only; real artifacts, no IPC or station-open timing'};
+};
+</script>

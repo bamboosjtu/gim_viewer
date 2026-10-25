@@ -106,7 +106,10 @@ async function readNativeBatchRaw<T>(
         entryPaths: chunk,
         ...(remainingBytes != null ? { maxBytes: remainingBytes } : {}),
       });
-      const items = parseBatchCachePayload(payload).items;
+      // Decode borrowed record views synchronously. unpackDevArtifact copies
+      // the final GLB into its own buffer, so neither a template nor a consumer
+      // can retain/detach the batch. Avoid copying the whole record before that.
+      const items = parseBatchCachePayload(payload, { copyBytes: false }).items;
       const found = new Map(items.map((item) => [item.entry_path, item.bytes]));
       const consumed = items.reduce((total, item) => total + (item.bytes?.byteLength ?? 0), 0);
       if (remainingBytes != null && consumed > remainingBytes) throw Error('DEV cache batch exceeded byte ceiling');

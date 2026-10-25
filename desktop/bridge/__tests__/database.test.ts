@@ -52,6 +52,26 @@ function fullEnvelope(
 }
 
 describe('batch_read_cached_files envelope', () => {
+  it('keeps default entries independent and bounds borrowed views to a nonzero-offset payload', () => {
+    const path = new TextEncoder().encode('templates/a'), data = new Uint8Array([3, 4, 5]);
+    const payload = new Uint8Array(9 + 4 + path.length + 9 + data.length);
+    payload.set(new TextEncoder().encode('GIMR')); payload[4] = 1;
+    const view = new DataView(payload.buffer); view.setUint32(5, 1, true);
+    view.setUint32(9, path.length, true); payload.set(path, 13);
+    payload[13 + path.length] = 1; view.setBigUint64(14 + path.length, BigInt(data.length), true);
+    payload.set(data, 22 + path.length);
+    const padded = new Uint8Array(payload.length + 17); padded.set(payload, 7);
+    const input = padded.subarray(7, 7 + payload.length);
+    const owned = parseBatchCachePayload(input).items[0].bytes!;
+    const borrowed = parseBatchCachePayload(input, { copyBytes: false }).items[0].bytes!;
+    expect(borrowed).toEqual(data); expect(borrowed.buffer).toBe(padded.buffer);
+    expect(borrowed.byteOffset).toBe(7 + 22 + path.length);
+    borrowed[0] = 99; expect(owned).toEqual(data);
+    expect(() => parseBatchCachePayload(input.subarray(0, input.length - 1), { copyBytes: false })).toThrow('数据越界');
+    const trailing = new Uint8Array(input.length + 1); trailing.set(input);
+    expect(() => parseBatchCachePayload(trailing, { copyBytes: false })).toThrow('尾随数据');
+  });
+
   it('解析 GIMR v2 Rust 内部计时头', () => {
     const bytes = new Uint8Array(57);
     bytes.set(new TextEncoder().encode('GIMR'), 0);

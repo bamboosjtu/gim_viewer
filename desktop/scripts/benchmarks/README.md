@@ -6,6 +6,12 @@
 
 验收使用独立应用标识，并校验当前源码、EXE 和完整固定运行时；日常应用缓存保持原位。目录相关启动失败的具体原因尚未确认，不修改 ACL 或关闭安全机制来替代验收。冷暖矩阵、真实文件对话框、固定路线及结果判定以[性能测试指南](../../../docs/meassurement.md)为准，当前证据见[性能基线](../../../docs/performance.md)。工具自测入口为 `npm run test:acceptance-tools`。
 
+## DEV 缓存解包对照
+
+准备四站解包样本后，在 `desktop/` 执行 `npx vitest run --config scripts/benchmarks/dev-cache-decode.config.ts`，生成真实 L0 模板，并核对旧/新解包的字节、状态、几何、材质与独立缓冲区。缺少任一样本会失败，不跳过。产物写入忽略目录 `output/parse-reuse/`。
+
+保持 `npm run dev -- --host 127.0.0.1` 运行，再执行 `node scripts/benchmarks/dev-cache-decode-browser.mjs`，在独立 headless Edge/profile 中对固定产物执行 100 对交替解包；可用第一个参数指定 Edge 可执行文件。服务只监听 loopback，结束后关闭所属浏览器，不操作日常缓存。两套入口只测缓存解包 CPU，不代表 IPC、绘制、完整冷暖或内存峰值验收。判定与边界见 [四站对照](../../../docs/impl/test-dev-cache-decode-copy.md)。
+
 ## 单文件 IFC 对照
 
 这些入口用于手动、有界范围的研究复核，不加入默认单元测试，不代表全站或 Tauri 验收。只处理显式指定的 IFC；当前产品页固定钢结构样本 SHA 和连接板 ExpressId，其他输入应先修改该页的身份与目标。原始 IFC 不修改，输出写入仓库忽略的 `output/`。

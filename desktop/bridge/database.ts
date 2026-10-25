@@ -489,8 +489,10 @@ export function parseLineSemanticPackFullPayload(value: ArrayBuffer | Uint8Array
   };
 }
 
-/** 解析 Rust 批量缓存读取的二进制响应（兼容 GIMR v1/v2）。 */
-export function parseBatchCachePayload(value: ArrayBuffer | Uint8Array): {
+/** Parse GIMR v1/v2. By default each entry owns its bytes. Synchronous decoders
+ * may borrow views only while consuming this payload, then retain independent
+ * output; transferring a borrowed entry would detach the entire batch. */
+export function parseBatchCachePayload(value: ArrayBuffer | Uint8Array, options: { copyBytes?: boolean } = {}): {
   items: BatchCacheFileItem[];
   profile?: BatchReadRustProfile;
 } {
@@ -538,7 +540,8 @@ export function parseBatchCachePayload(value: ArrayBuffer | Uint8Array): {
     if (sizeBig > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('批量缓存读取文件过大');
     const size = Number(sizeBig);
     if (offset + size > bytes.byteLength) throw new Error('批量缓存读取数据越界');
-    const data = present ? bytes.slice(offset, offset + size) : null;
+    const data = present ? options.copyBytes === false
+      ? bytes.subarray(offset, offset + size) : bytes.slice(offset, offset + size) : null;
     offset += size;
     results.push({ entry_path: entryPath, bytes: data });
   }

@@ -16,6 +16,8 @@ DEV 派生缺失恢复的准入、不可变 File 补发、暖路径对照和真�
 
 选择与显式 L2 的高亮连续性见 [IFC 表示高亮迁移](selection-l2-highlight.md)：只更新被替换对象，保留其他选中来源，并处理取消、失败及旧提交晚到。
 
+DEV 暖缓存解包的中间复制消除与四站对照见 [记录视图与独立 GLB](test-dev-cache-decode-copy.md)：保留经验证的局部 CPU 收益，区分缓存解包、原生 IPC 与整站启动。
+
 未成功技术路线使用 `test-*.md` 独立记录假设、实验边界、结果与回退，不视为已实现能力：
 
 - [扩展选择依赖与高亮合批](test-selection-dependency-batching.md)：缺少有效端到端收益对照，未混入 DEV 恢复交付。
