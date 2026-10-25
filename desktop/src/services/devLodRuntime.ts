@@ -789,7 +789,7 @@ export class DevLodRuntime {
     return new Promise((resolve, reject) => { const waiter={queuedAt:performance.now(),resolve,reject}; this.templateWaiters.set(key,waiter); this.templateQueue.set(key,waiter,this.priorities.get(key) ?? 4,waiter.queuedAt); this.drainTemplates(); });
   }
   private drainTemplates(): void {
-    while (this.current() && this.templateSlots < Math.max(8, this.worker.workerCount * 8) && this.templateWaiters.size) {
+    while (this.current() && this.templateSlots < (this.worker.cacheConcurrency ?? Math.max(8, this.worker.workerCount * 8)) && this.templateWaiters.size) {
       const [key,waiter]=this.templateQueue.take()!;
       this.templateWaiters.delete(key); this.templateSlots++;
       let released = false;
@@ -1193,7 +1193,7 @@ export class DevLodRuntime {
       baseRepresentationsReady: this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseReady,
       allStationReady: nextAllReady,
       readyOccurrences: shown, emptyOccurrences: empty, unsupportedOccurrences: unsupported, partialOccurrences: partial, failedOccurrences: failed,
-      shown: this.state.loadedXmlModGroups.size, activeDevices: this.worker?.activePaths ?? [],viewPendingOccurrences:viewPending,
+      shown: this.state.loadedXmlModGroups.size, workerCount: this.worker?.workerCount ?? 0, activeDevices: this.worker?.activePaths ?? [],viewPendingOccurrences:viewPending,
       readinessBlockers:blockers,viewPendingSamples:samples,
       cacheReadBatches:this.cacheReader.diagnostics.batches,cacheReadEntries:this.cacheReader.diagnostics.entries,cacheReadDeferred:this.cacheReader.diagnostics.deferred });
     const browseState = !this.diagnostics.catalogReady || !this.diagnostics.currentViewSettled

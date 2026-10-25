@@ -11,6 +11,7 @@ interface Slot { id: number; traceId: string; key: string; path: string; kind: '
   promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void }
 const clients = new WeakMap<AppState, DevGeometryPreprocessor>();
 let serial = 0;
+const IDLE_POOL_TIMEOUT_MS = 30_000;
 /** Computation slots and unacknowledged results have separate lifetimes.
  * Stop starting compiles at 64 MiB of exported results (or 2 results/worker).
  * Already running tasks may finish; one result is limited to 128 MiB. */
@@ -26,6 +27,8 @@ export class DevGeometryPreprocessor {
   private memoryPressure: MemoryPressure = 'unknown';
   private targetWorkerCount = 1;
   private memoryShrunk = false;
+  private idleCompacted = false;
+  private lastUsedWorker: Worker | null = null;
   private sequence = 0;
   private readonly session = ++serial;
   private readonly perf = perfCurrentSession();
@@ -37,6 +40,11 @@ export class DevGeometryPreprocessor {
   private watchdog: ReturnType<typeof setInterval>;
   private unsubscribeGate: () => void;
   private lastProgressAt = performance.now();
+  private idleSince: number | null = performance.now();
+  private trackIdle(now = performance.now()): void {
+    if (this.active.size || this.slots.size || this.exported.size) this.idleSince = null;
+    else this.idleSince ??= now;
+  }
   constructor(_paths: string[], private files: Map<string, File>, private current: () => boolean) {
     const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     const cores = navigator.hardwareConcurrency || 4;
@@ -58,6 +66,24 @@ export class DevGeometryPreprocessor {
     if (this.stopped) return;
     if (!this.current()) { this.cancel(); return; }
     const now = performance.now();
+    this.trackIdle(now);
+    // Rendered templates belong to the main-thread runtime. Once all pool
+    // work and result consumption are done, retain only the most recent
+    // source cache; new computation restores the configured capacity.
+    if (this.idleSince !== null && now - this.idleSince >= IDLE_POOL_TIMEOUT_MS && this.workers.length > 1) {
+      const keep = this.lastUsedWorker && this.workers.includes(this.lastUsedWorker)
+        ? this.lastUsedWorker : this.workers[this.workers.length - 1];
+      for (const worker of [...this.workers]) if (worker !== keep) {
+        worker.terminate(); this.workers = this.workers.filter(value => value !== worker);
+        for (const [path, owner] of this.sourceAffinity) if (owner === worker) this.sourceAffinity.delete(path);
+        this.diagnostics.idleWorkerReclaims++;
+      }
+      this.diagnostics.idlePoolShrinks++;
+      this.lastUsedWorker = keep;
+      this.memoryShrunk = true;
+      this.idleCompacted = true;
+      this.onActivity();
+    }
     if ((this.slots.size || this.exported.size) && now - this.lastProgressAt >= 10_000) {
       this.diagnostics.stallSnapshots++;
       perfMark('DEV waiting snapshot', this.schedulingSnapshot(), this.perf);
@@ -76,6 +102,9 @@ export class DevGeometryPreprocessor {
     return { session: this.session, workers: this.workerCount, active: this.active.size,
       queued: queued.length, oldestQueuedMs: queued.reduce((max, row) => Math.max(max, now - row.queuedAt), 0),
       paused: this.paused, memoryPressure: this.memoryPressure, idleWorkerReclaims: this.diagnostics.idleWorkerReclaims, results: this.resultPressure, gate: geometryWorkSnapshot(),
+      targetWorkers: this.targetWorkerCount, idlePoolShrinks: this.diagnostics.idlePoolShrinks,
+      idleCompacted: this.idleCompacted,
+      idleMs: this.idleSince === null ? 0 : Math.max(0, now - this.idleSince),
       tasks: [...this.active.values()].slice(0, 8).map(({ task, startedAt }) => ({ id: task.id,
         path: task.path, lod: task.lod, kind: task.kind, priority: task.priority, elapsedMs: now - startedAt })) };
   }
@@ -94,6 +123,7 @@ export class DevGeometryPreprocessor {
   private workerFailed(worker:Worker,error:Error):void {
     if(this.stopped||!this.workers.includes(worker))return;
     worker.terminate();this.workers=this.workers.filter(row=>row!==worker);
+    if (this.lastUsedWorker === worker) this.lastUsedWorker = null;
     for (const [path, owner] of this.sourceAffinity) if (owner === worker) this.sourceAffinity.delete(path);
     const owner=this.active.get(worker);this.active.delete(worker);owner?.release?.();
     if(owner){
@@ -107,6 +137,12 @@ export class DevGeometryPreprocessor {
     this.onActivity();
   }
   get workerCount(): number { return this.workers.length; }
+  /** Idle computation threads do not limit warm reads. Pressure retains the
+   * existing lower consumption limit instead of reopening a large batch. */
+  get cacheConcurrency(): number {
+    const unpressured = this.memoryPressure === 'normal' || this.memoryPressure === 'unknown';
+    return Math.max(8, (this.idleCompacted && unpressured ? this.targetWorkerCount : this.workerCount) * 8);
+  }
   private taskIdentity(task: Slot): PerfTaskIdentity {
     return {taskId: task.traceId, domain: 'dev', sourcePath: task.path, kind: task.kind,
       lod: task.lod, priority: task.priority, cacheSource: task.kind === 'bounds' ? 'source' : 'compiled', generation: this.perf.generation,
@@ -116,7 +152,7 @@ export class DevGeometryPreprocessor {
     reads: 0, rpcReads: 0, sourceHits: 0, documentHits: 0,
     readRpcMs: 0, decodeMs: 0, parseMs: 0, queueWaitMs: 0,
     boundsTasks: 0, compileTasks: 0, failedTasks: 0,
-    timedOutTasks: 0, stallSnapshots: 0, idleWorkerReclaims: 0,
+    timedOutTasks: 0, stallSnapshots: 0, idleWorkerReclaims: 0, idlePoolShrinks: 0,
     sourceAffinityHits: 0, sourceAffinityDeferrals: 0,
     stages: {} as Record<string, { count: number; totalMs: number; maxMs: number }>,
   };
@@ -147,8 +183,9 @@ export class DevGeometryPreprocessor {
       if (this.workers.length <= Math.max(1, this.active.size) || this.active.has(worker)) continue;
       worker.terminate();
       this.workers = this.workers.filter(value => value !== worker);
+      if (this.lastUsedWorker === worker) this.lastUsedWorker = null;
       for (const [path, owner] of this.sourceAffinity) if (owner === worker) this.sourceAffinity.delete(path);
-      this.diagnostics.idleWorkerReclaims++; this.memoryShrunk = true;
+      this.diagnostics.idleWorkerReclaims++; this.memoryShrunk = true; this.idleCompacted = false;
     }
   }
   private pump(): void {
@@ -156,10 +193,22 @@ export class DevGeometryPreprocessor {
     if (this.stopped) return;
     this.trimIdleWorkers();
     if (this.memoryShrunk && (this.memoryPressure === 'normal' || this.memoryPressure === 'unknown') && this.slots.size) {
-      this.memoryShrunk = false;
-      while (this.workers.length < this.targetWorkerCount) {
+      let demand = this.targetWorkerCount;
+      if (this.idleCompacted) {
+        demand = 0;
+        const pressured = this.exportedBytes >= 64 * 1024 * 1024 || this.exported.size >= this.workerCount * 2;
+        for (const task of this.slots.values()) {
+          // Paused/background or backpressured compiles are not demand for
+          // new threads. Bounds and explicit user work remain eligible.
+          if (task.kind === 'compile' && (pressured || this.paused && task.lod > 0 && task.priority > 0)) continue;
+          if (++demand >= this.targetWorkerCount) break;
+        }
+      }
+      while (this.workers.length < demand) {
         try { this.addWorker(this.targetWorkerCount); } catch { break; }
       }
+      this.memoryShrunk = this.workers.length < this.targetWorkerCount;
+      if (!this.memoryShrunk) this.idleCompacted = false;
     }
     // The worker pool itself is capped at ~60% of logical cores, leaving
     // headroom for IFC/main-thread/UI. Before IFC completes keep the historical
@@ -217,6 +266,7 @@ export class DevGeometryPreprocessor {
       try {worker.postMessage({ kind: task.kind, id: task.id, key: task.key, path: task.path, lod: task.lod, session: this.session });}
       catch(error){this.workerFailed(worker,error instanceof Error?error:Error(String(error)));}
     }
+    this.trackIdle();
     this.onActivity();
   }
   private async receive(worker: Worker, data: any): Promise<void> {
@@ -237,6 +287,7 @@ export class DevGeometryPreprocessor {
     if (data.kind !== 'result' || !task || data.id !== task.id || data.session !== this.session || data.key !== task.key) return;
     this.slots.delete(task.key); owner!.finished = true;
     this.lastProgressAt = performance.now();
+    this.lastUsedWorker = worker;
     owner!.release?.(); owner!.release = null;
     if (data.error) this.diagnostics.failedTasks++;
     const stages = data.stages ?? {};
@@ -292,7 +343,7 @@ export class DevGeometryPreprocessor {
   }
   acknowledge(key: string): void {
     const result = this.exported.get(key);
-    if (result) { this.exportedBytes -= result.bytes; this.exported.delete(key); }
+    if (result) { this.exportedBytes -= result.bytes; this.exported.delete(key); this.lastProgressAt = performance.now(); }
     this.pump();
   }
   /** Cancel an exclusively owned request, including synchronous geometry work.
@@ -307,6 +358,7 @@ export class DevGeometryPreprocessor {
       owner.release?.();
       worker.terminate();
       this.workers = this.workers.filter(value => value !== worker);
+      if (this.lastUsedWorker === worker) this.lastUsedWorker = null;
       for (const [path, value] of this.sourceAffinity) if (value === worker) this.sourceAffinity.delete(path);
       if (!this.stopped && this.current()) {
         try { this.addWorker(this.workers.length + 1); }
@@ -325,6 +377,7 @@ export class DevGeometryPreprocessor {
       perfRecordTaskPhase(this.taskIdentity(task), 'requestWall', performance.now() - task.queuedAt, this.perf, 'cancelled');
       this.slots.delete(key); task.reject(new DOMException('DEV request left the current view', 'AbortError'));
     }
+    this.trackIdle();
   }
   cancel(error = new Error('DEV preprocessing cancelled')): void {
     if (this.stopped) return; this.stopped = true;
@@ -336,6 +389,8 @@ export class DevGeometryPreprocessor {
       task.reject(error);
     } this.slots.clear(); this.files = new Map();
     this.exported.clear(); this.exportedBytes = 0; this.sourceAffinity.clear();
+    this.lastUsedWorker = null;
+    this.idleSince = null;
   }
 }
 export function createDevGeometryPreprocessor(state: AppState, session: ProjectLoadSession, files: Map<string, File>): DevGeometryPreprocessor {

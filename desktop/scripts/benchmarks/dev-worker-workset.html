@@ -1,0 +1,103 @@
+<!doctype html><meta charset="utf-8"><title>DEV idle worker working set</title>
+<p>Isolated CPU/Worker memory check. No native station-open or GPU benchmark.</p>
+<script type="module">
+import * as THREE from 'three';
+import {DevGeometryPreprocessor as Candidate} from '../../src/services/devGeometryWorkerClient.ts';
+import {parseBatchCachePayload} from '../../bridge/database.ts';
+import {parseDevGlbAsset} from '../../src/services/glbCacheService.ts';
+import {DevGlbTemplate} from '../../src/services/devGlbTemplateRuntime.ts';
+const NativeWorker=globalThis.Worker,live=new Set();
+globalThis.Worker=class extends NativeWorker{
+  constructor(...args){super(...args);live.add(this);}
+  terminate(){super.terminate();live.delete(this);}
+};
+const digest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',
+  typeof value==='string'?new TextEncoder().encode(value):value)),b=>b.toString(16).padStart(2,'0')).join('');
+globalThis.startWorkerWorkset=async ({source,sample,mode})=>{
+  if(!/^http:\/\/127\.0\.0\.1:\d+$/.test(source))throw Error('Owned loopback source required');
+  const metadata=await(await fetch(source+'/manifest')).json();
+  if(metadata.sample!==sample)throw Error('Sample mismatch');
+  const files=await(async()=>{
+    const response=await fetch(source+'/sources');if(!response.ok)throw Error('Source load failed');
+    const payload=await response.arrayBuffer();
+    return new Map(parseBatchCachePayload(payload).items.map(row=>[row.entry_path,new File([row.bytes],row.entry_path.split('/').pop())]));
+  })();
+  const Client=mode==='baseline'?(await import('../../.tmp/dev-worker-workset-baseline.ts')).DevGeometryPreprocessor:Candidate;
+  let current=true,client=new Client([],files,()=>current);
+  const scene=new THREE.Scene(),templates=new Map(),records=new Map();
+  const session={generation:1,projectId:null,sourceSha256:metadata.sha,geometryToken:0};
+  const started=performance.now();
+  const bounds=await Promise.all(metadata.roots.map(path=>client.bounds(path)));
+  const boundsSha=await digest(JSON.stringify(bounds));
+  const build=async path=>{
+    const key=`workset:${path}:lod0`,t=performance.now();
+    try{
+      const result=await client.compile(path,0,key,1), sha=result.bytes?await digest(result.bytes):null;
+      if(result.bytes&&sha!==result.sha256)throw Error('Transferred GLB hash mismatch');
+      if(result.bytes){
+        const parsed=await parseDevGlbAsset(path,result.bytes);if(!parsed)throw Error('GLB parse failed');
+        const template=new DevGlbTemplate(path,parsed.scene,session);templates.set(path,template);
+        for(const row of metadata.instances.filter(row=>row.devPath===path))scene.add(template.createPlacement({
+          contract:'source-template',rootOccurrence:row.rootOccurrence,instanceKey:`dev:${path}#${row.rootOccurrence}`,
+          placementMatrix:row.matrix,projectSourceToViewerMatrix:new THREE.Matrix4(),
+        }));
+      }
+      records.set(path,{path,sha,status:result.status,diagnostics:result.diagnostics,elapsedMs:performance.now()-t});
+    }finally{client.acknowledge(key);}
+  };
+  await Promise.all(metadata.cohort.map(build));
+  const fingerprint=async()=>{
+    scene.updateMatrixWorld(true);let meshes=0;const parts=[],buffers=new Set();
+    const identities=[];
+    scene.traverse(object=>{
+      if(!object.isMesh)return;meshes++;const geometry=object.geometry;
+      identities.push([object.uuid,geometry.uuid,...(Array.isArray(object.material)?object.material:[object.material]).map(m=>m.uuid)]);
+      for(const a of [...Object.values(geometry.attributes),geometry.index].filter(Boolean))buffers.add(('data'in a?a.data.array:a.array).buffer);
+      parts.push([object.userData.devPath,object.userData.assemblyPath,object.userData.referencePath,object.matrixWorld.toArray()]);
+    });
+    const hashes=await Promise.all([...buffers].map(buffer=>digest(buffer)));
+    const box=new THREE.Box3().setFromObject(scene,true);
+    return {meshes,placements:scene.children.length,bufferBytes:[...buffers].reduce((n,b)=>n+b.byteLength,0),
+      geometrySha:await digest(JSON.stringify([parts,hashes,[...box.min.toArray(),...box.max.toArray()]])),
+      identitySha:await digest(JSON.stringify(identities))};
+  };
+  const before=await fingerprint();
+  globalThis.workerWorkset={
+    snapshot:()=>({pool:client.schedulingSnapshot(),liveWorkers:live.size,display:before,stats:{...client.diagnostics}}),
+    verify:async()=>{const after=await fingerprint();if(JSON.stringify(after)!==JSON.stringify(before))throw Error('Displayed representations changed during idle');return after;},
+    resume:async()=>{
+      const paths=metadata.cohort.filter(path=>records.get(path).sha).slice(0,3);
+      const request=async path=>{
+        const key=`resume:${path}`,t=performance.now();
+        try{
+          const result=await client.compile(path,0,key,0),sha=result.bytes?await digest(result.bytes):null;
+          const old=records.get(path);
+          if(sha!==old.sha||result.status!==old.status||JSON.stringify(result.diagnostics)!==JSON.stringify(old.diagnostics))throw Error(`Resume result mismatch: ${path}`);
+          return {path,sha,ms:performance.now()-t};
+        }finally{client.acknowledge(key);}
+      };
+      // One explicit request followed by two concurrent requests. This also
+      // verifies that a single new demand does not recreate the whole pool.
+      const first=await request(paths[0]),singleWorkers=client.workerCount;
+      const result=[first,...await Promise.all(paths.slice(1).map(request))];
+      const after=await fingerprint();if(JSON.stringify(after)!==JSON.stringify(before))throw Error('Existing placements changed on resume');
+      return {requests:result,singleWorkers,pool:client.schedulingSnapshot(),liveWorkers:live.size};
+    },
+    cycle:async()=>{
+      client.cancel();const owner=new Client([],files,()=>current);
+      const path=metadata.cohort.find(path=>records.get(path).sha),key='cycle';
+      try{
+        await Promise.all(metadata.roots.slice(0,7).map(path=>owner.bounds(path)));
+        const result=await owner.compile(path,0,key,0),sha=result.bytes?await digest(result.bytes):null;
+        if(sha!==records.get(path).sha)throw Error('Cycle result mismatch');
+        owner.acknowledge(key);return {sha};
+      }finally{owner.cancel();if(live.size)throw Error('Workers leaked across pool cycles');}
+    },
+    close:()=>{current=false;client.cancel();scene.clear();for(const t of templates.values())t.dispose();templates.clear();files.clear();client=null;
+      return {liveWorkers:live.size,placements:scene.children.length,templates:templates.size};},
+  };
+  return {sample,mode,userAgent:navigator.userAgent,hardwareConcurrency:navigator.hardwareConcurrency,sourceSha:metadata.sha,
+    roots:metadata.roots.length,cohort:metadata.cohort.length,boundsSha,prepareWallMs:performance.now()-started,
+    records:[...records.values()],...globalThis.workerWorkset.snapshot()};
+};
+</script>

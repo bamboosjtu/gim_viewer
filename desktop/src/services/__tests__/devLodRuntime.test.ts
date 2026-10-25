@@ -20,6 +20,17 @@ function occurrence(id: number, failed = false) {
     failedKey: failed ? key : undefined, group: failed ? undefined : new THREE.Group() };
 }
 
+it('keeps warm cache consumption capacity independent of compacted computation workers', async () => {
+  const {internal}=fixture();internal.worker={workerCount:1,cacheConcurrency:32};
+  const releases:Array<()=>void>=[];
+  const requests=Array.from({length:40},(_,i)=>internal.acquireTemplateSlot(`cache-${i}`).then((release:()=>void)=>{releases.push(release);}));
+  await Promise.resolve();expect(releases).toHaveLength(32);
+  expect(internal.templateWaiters.size).toBe(8);
+  for(const release of [...releases])release();
+  await Promise.all(requests);for(const release of releases)release();
+  expect(internal.templateWaiters.size).toBe(0);expect(internal.templateSlots).toBe(0);
+});
+
 it('resolves loaded roots from the live row and never retains a replaced or old-session group',()=>{
   const {runtime,internal}=fixture(),first=new THREE.Group(),second=new THREE.Group();
   internal.rows.set('root',{group:first});

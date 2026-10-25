@@ -16,7 +16,7 @@ class ControlledWorker {
     this.onmessage?.({ data: { ...task, kind: 'result', error, result: { status: 'ready', bytes: {byteLength}, diagnostics: {} }, wallMs: 1, stages } });
   }
 }
-afterEach(() => { vi.unstubAllGlobals(); ControlledWorker.instances = []; resetGeometryWorkGateForTests(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); ControlledWorker.instances = []; resetGeometryWorkGateForTests(); });
 it('upgrades immutable sources in active workers and replacement initialization without restarting healthy tasks or accepting stale work', async () => {
   vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:4,deviceMemory:8});
   let current=true;
@@ -333,5 +333,103 @@ it('critical pressure reclaims idle workers, preserves active base work and rest
     client.setMemoryPressure('normal');expect(client.workerCount).toBe(1);
     const next=client.compile('next',0,'next',1);expect(client.workerCount).toBe(4);
     first.complete();await next;
+  }finally{client.cancel();}
+});
+
+it('shrinks a quiescent pool after 30s, keeps the latest source cache and restores upgraded sources only on new computation', async () => {
+  vi.useFakeTimers({toFake:['setInterval','clearInterval','performance']});
+  vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  vi.stubGlobal('localStorage',{getItem:()=> '4'});
+  const client=new DevGeometryPreprocessor([],new Map([['MOD/a.mod',new File(['old'],'a.mod')]]),()=>true);
+  try {
+    const jobs=Array.from({length:4},(_,i)=>client.bounds(`DEV/${i}.dev`));
+    const original=[...ControlledWorker.instances];
+    for(const i of [0,1,3,2]) original[i].complete();
+    await Promise.all(jobs);
+    vi.advanceTimersByTime(29_999);expect(client.workerCount).toBe(4);
+    vi.advanceTimersByTime(1);expect(client.workerCount).toBe(1);
+    expect(original[2].terminate).not.toHaveBeenCalled();
+    expect([0,1,3].every(i=>original[i].terminate.mock.calls.length===1)).toBe(true);
+    expect(client.schedulingSnapshot()).toMatchObject({targetWorkers:4,idlePoolShrinks:1,active:0,queued:0});
+    const source=new File(['new'],'a.mod');client.installSources(new Map([['MOD/a.mod',source]]));
+    vi.advanceTimersByTime(60_000);expect(client.workerCount).toBe(1);
+    expect(client.cacheConcurrency).toBe(32);
+    client.setMemoryPressure('high');expect(client.cacheConcurrency).toBe(8);
+    client.setMemoryPressure('normal');expect(client.cacheConcurrency).toBe(32);expect(client.workerCount).toBe(1);
+    const next=client.bounds('DEV/0.dev');expect(client.workerCount).toBe(1);
+    const extra=[1,2,3].map(i=>client.bounds(`DEV/next-${i}.dev`));expect(client.workerCount).toBe(4);
+    for(const worker of ControlledWorker.instances.slice(4)) expect(worker.sent[0].files).toEqual([['MOD/a.mod',3,source]]);
+    original[0].complete();expect(client.schedulingSnapshot().active).toBe(4); // retired worker cannot settle new work
+    original[2].complete();await next;
+    for(const worker of ControlledWorker.instances.slice(4))worker.complete();await Promise.all(extra);
+    expect(client.diagnostics.failedTasks).toBe(0);
+  }finally{client.cancel();}
+});
+
+it('keeps unconsumed results and starts the idle window only after the final acknowledgement', async () => {
+  vi.useFakeTimers({toFake:['setInterval','clearInterval','performance']});
+  vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  vi.stubGlobal('localStorage',{getItem:()=> '4'});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true);
+  try {
+    const task=client.compile('DEV/a.dev',0,'a',1);ControlledWorker.instances[0].complete();await task;
+    vi.advanceTimersByTime(40_000);expect(client.workerCount).toBe(4);
+    expect(client.schedulingSnapshot().results.count).toBe(1);
+    client.acknowledge('a');vi.advanceTimersByTime(29_999);expect(client.workerCount).toBe(4);
+    vi.advanceTimersByTime(1);expect(client.workerCount).toBe(1);
+  }finally{client.cancel();}
+});
+
+it('does not regrow a compacted pool for paused detail requests while bounds still advance', async () => {
+  vi.useFakeTimers({toFake:['setInterval','clearInterval','performance']});
+  vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  vi.stubGlobal('localStorage',{getItem:()=> '4'});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true);
+  try {
+    vi.advanceTimersByTime(30_000);expect(client.workerCount).toBe(1);client.setPaused(true);
+    const detail=[0,1,2].map(i=>client.compile(`DEV/detail-${i}.dev`,1,`detail-${i}`,2));
+    expect(client.workerCount).toBe(1);
+    const base=client.bounds('DEV/base.dev');expect(client.workerCount).toBe(1);
+    const keep=ControlledWorker.instances[3];keep.complete();await base;
+    client.setPaused(false);expect(client.workerCount).toBe(3);
+    for(let i=0;i<3;i++){keep.complete();for(const worker of ControlledWorker.instances.slice(4))worker.complete();}
+    await Promise.all(detail);
+  }finally{client.cancel();}
+});
+
+it('does not allocate new workers behind result backpressure and resumes computation after consumption', async () => {
+  vi.useFakeTimers({toFake:['setInterval','clearInterval','performance']});
+  vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  vi.stubGlobal('localStorage',{getItem:()=> '4'});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true);
+  try {
+    vi.advanceTimersByTime(30_000);const keep=ControlledWorker.instances[3];
+    const first=client.compile('DEV/a.dev',0,'a',1);keep.complete(undefined,64*1024*1024);await first;
+    const pending=['b','c'].map(key=>client.compile(`DEV/${key}.dev`,0,key,1));
+    expect(client.workerCount).toBe(1);
+    const bounds=client.bounds('DEV/bounds.dev');keep.complete();await bounds;expect(client.workerCount).toBe(1);
+    client.acknowledge('a');expect(client.workerCount).toBe(2);
+    keep.complete();ControlledWorker.instances[4].complete();await Promise.all(pending);
+    for(const key of ['b','c'])client.acknowledge(key);
+    expect(client.schedulingSnapshot()).toMatchObject({active:0,queued:0,results:{count:0,bytes:0}});
+  }finally{client.cancel();}
+});
+
+it('does not retire active or paused queued work, and a cancelled queue gets a fresh idle window', async () => {
+  vi.useFakeTimers({toFake:['setInterval','clearInterval','performance']});
+  vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  vi.stubGlobal('localStorage',{getItem:()=> '4'});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true);
+  try {
+    const active=client.bounds('DEV/a.dev');vi.advanceTimersByTime(40_000);
+    expect(client.workerCount).toBe(4);ControlledWorker.instances[0].complete();await active;
+    client.setPaused(true);
+    const queued=client.compile('DEV/b.dev',1,'b',2), rejected=expect(queued).rejects.toMatchObject({name:'AbortError'});
+    vi.advanceTimersByTime(40_000);expect(client.workerCount).toBe(4);
+    client.cancelQueued(new Set());await rejected;
+    vi.advanceTimersByTime(29_999);expect(client.workerCount).toBe(4);
+    vi.advanceTimersByTime(1);expect(client.workerCount).toBe(1);
+    const created=ControlledWorker.instances.length;client.cancel();vi.advanceTimersByTime(120_000);
+    expect(ControlledWorker.instances.length).toBe(created);
   }finally{client.cancel();}
 });

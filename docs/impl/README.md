@@ -18,6 +18,8 @@ DEV 派生缺失恢复的准入、不可变 File 补发、暖路径对照和真�
 
 DEV 暖缓存解包的中间复制消除与四站对照见 [记录视图与独立 GLB](test-dev-cache-decode-copy.md)：保留经验证的局部 CPU 收益，区分缓存解包、原生 IPC 与整站启动。
 
+DEV 空闲计算池的回收及按需恢复见 [浏览工作集](test-dev-worker-idle-workset.md)：记录四站进程树私有提交量、缓存变冷代价及小样本波动，不等同于全站峰值或完整工程切换验收。
+
 未成功技术路线使用 `test-*.md` 独立记录假设、实验边界、结果与回退，不视为已实现能力：
 
 - [扩展选择依赖与高亮合批](test-selection-dependency-batching.md)：缺少有效端到端收益对照，未混入 DEV 恢复交付。

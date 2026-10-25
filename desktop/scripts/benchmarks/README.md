@@ -6,6 +6,12 @@
 
 验收使用独立应用标识，并校验当前源码、EXE 和完整固定运行时；日常应用缓存保持原位。目录相关启动失败的具体原因尚未确认，不修改 ACL 或关闭安全机制来替代验收。冷暖矩阵、真实文件对话框、固定路线及结果判定以[性能测试指南](../../../docs/meassurement.md)为准，当前证据见[性能基线](../../../docs/performance.md)。工具自测入口为 `npm run test:acceptance-tools`。
 
+## DEV 计算池工作集
+
+在 Windows、Node 22、Python 和 Edge 环境下，从 `desktop/` 执行 `npx vitest run --config scripts/benchmarks/dev-worker-workset.config.ts`，为四站生成已核对源 SHA 的目录、物理根与真实来源清单。另开 Vite 服务，再逐个执行 `node scripts/benchmarks/dev-worker-workset-browser.mjs substation01 baseline` 和同样本的 `candidate`；其他站替换 ID。控制入口需要 Git 中的 `93b2f2c`，只在忽略的 `.tmp/` 重定位控制模块，不修改生产源码。
+
+该入口使用独立 headless Edge/profile，真实执行 DEV 范围、L0、空闲、重算及十次池级创建/取消；用 Windows `PrivateUsage` 查询所属进程树。不可用采样保留原因，不替代为 0。输出位于 `output/memory-workset/`，不操作日常缓存，不代表 Tauri、完整 IFC/GPU、全站峰值或真实工程切换。判定、波动与恢复代价见 [四站报告](../../../docs/impl/test-dev-worker-idle-workset.md)。
+
 ## DEV 缓存解包对照
 
 准备四站解包样本后，在 `desktop/` 执行 `npx vitest run --config scripts/benchmarks/dev-cache-decode.config.ts`，生成真实 L0 模板，并核对旧/新解包的字节、状态、几何、材质与独立缓冲区。缺少任一样本会失败，不跳过。产物写入忽略目录 `output/parse-reuse/`。
