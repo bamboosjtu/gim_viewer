@@ -41,10 +41,6 @@ export function isSettingEnabled(key: string): boolean {
   return values.get(key) === '1';
 }
 
-export function isTiandituConfigured(): boolean {
-  return getSetting(SETTING_TIANDITU_KEY).trim().length > 0;
-}
-
 export function shouldSkipLargeIfc(): boolean {
   return isSettingEnabled(SETTING_SKIP_LARGE_IFC);
 }

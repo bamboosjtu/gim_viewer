@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const invokeMock = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 
-import { estimateInvokeByteMeasurement, invokeTimed } from '../invokeTimed.js';
+import { invokeTimed } from '../invokeTimed.js';
 import { perfReset, perfSnapshot } from '../../src/utils/perfTimings.js';
 
 describe('invokeTimed', () => {
@@ -52,7 +52,6 @@ describe('invokeTimed', () => {
     await expect(invokeTimed('save_line_graph_begin', request)).resolves.toEqual({ ok: true });
     const stat = perfSnapshot().invokes.find((item) => item.command === 'save_line_graph_begin');
     expect(stat).toMatchObject({ count: 1, bytes: 0, bytesMeasured: false, measuredCalls: 0, unmeasuredCalls: 1 });
-    expect(estimateInvokeByteMeasurement(request, { ok: true })).toEqual({ bytes: 0, measured: false });
   });
 
   it('调用方显式提供请求/响应字节数时完整记录，不触发对象序列化', async () => {

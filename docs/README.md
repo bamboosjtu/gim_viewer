@@ -12,11 +12,10 @@
 | 分层、生命周期、缓存和发布 | [架构](architecture.md) | 当前内部契约及版本 |
 | 未关闭缺陷与已接受限制 | [问题与限制](open-issues.md) | 行动清单与边界 |
 | 正确性不变量与复核方法 | [验证](validation.md) | 检查口径和证据范围 |
-| 性能测量与有效基线 | [性能](performance.md) | 指标定义和可比条件 |
+| 性能测量与有效基线 | [性能](performance.md) | 当前浏览器开发模式基线与原生验收边界 |
 | 性能测试步骤、命令与报告模板 | [性能测试指南](meassurement.md) | 冷/暖启动复现和证据导出 |
-| IFC/DEV 分级与加载取舍 | [IFC/DEV 分级](impl/performance-lod.md) | 分级策略、调度边界和验证 |
-| GIM 容器、XML primitive 与缓存 | [GIM 特殊处理](impl/gim-special-handling.md) | 特殊格式与近似语义 |
 | GIM 格式及样本事实 | [Schema](schema/README.md) | 匿名格式说明 |
+| 已回退与未采用路线（非当前能力） | [探索记录](impl/explorations.md) | 假设、实验边界、结果与未保留原因 |
 
 ## 资料边界
 

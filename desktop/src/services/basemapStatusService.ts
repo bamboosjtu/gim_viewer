@@ -18,7 +18,6 @@ export type BasemapStatus =
   | 'osm-online'
   | 'osm-unavailable-fallback'
   | 'empty'
-  | 'pmtiles'
   | 'tianditu-satellite'
   | 'tianditu-terrain'
   | 'tianditu-vector'
@@ -65,7 +64,7 @@ function nowIso(): string {
  * - lineProjectView Canvas-only 渲染：status='canvas-only'
  * - MapLibre + OSM 成功：status='osm-online'
  * - OSM 回退：status='osm-unavailable-fallback', fallbackReason=...
- * - MapLibre + empty/pmtiles 成功：status='empty'/'pmtiles'
+ * - MapLibre + empty 成功：status='empty'
  */
 export function setBasemapStatus(
   status: BasemapStatus,

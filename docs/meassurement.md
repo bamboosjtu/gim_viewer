@@ -450,4 +450,4 @@ Invoke-RestMethod 'http://127.0.0.1:9222/json' | Select-Object title, url, webSo
 - [performance.md](performance.md)：当前基线、已知未达标项、实现相关性能事实；
 - [validation.md](validation.md)：验证证据边界和验收规则；
 - [open-issues.md](open-issues.md)：未关闭缺陷与已知限制；
-- [impl/performance-lod.md](impl/performance-lod.md)：LOD、Worker、缓存设计。
+- [架构](architecture.md)：IFC/DEV 分级、Worker 与缓存设计；

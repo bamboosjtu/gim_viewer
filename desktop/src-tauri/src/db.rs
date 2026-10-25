@@ -3416,25 +3416,6 @@ pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id:
 }
 
 #[tauri::command]
-pub async fn read_device_lod_artifact(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<tauri::ipc::Response, String> {
-    tauri::async_runtime::spawn_blocking(move || read_device_lod_artifact_blocking(app_handle, project_id, entry_path, source_gim_sha256))
-        .await.map_err(|e| format!("设备缓存后台读取失败: {}", e))?
-}
-fn read_device_lod_artifact_blocking(app_handle: tauri::AppHandle, project_id: i64, entry_path: String, source_gim_sha256: String) -> Result<tauri::ipc::Response, String> {
-    use std::io::Read;
-    let path = device_lod_artifact_path(&app_handle, project_id, &entry_path, &source_gim_sha256)?;
-    let file = match stdfs::File::open(&path) {
-        Ok(file) => file,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(tauri::ipc::Response::new(Vec::new())),
-        Err(e) => return Err(e.to_string()),
-    };
-    if file.metadata().map_err(|e| e.to_string())?.len() > 128 * 1024 * 1024 { return Err("设备派生缓存超过单条配额".into()); }
-    let mut bytes = Vec::new(); file.take(128 * 1024 * 1024 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-    if bytes.len() > 128 * 1024 * 1024 { return Err("设备派生缓存超过单条配额".into()); }
-    Ok(tauri::ipc::Response::new(bytes))
-}
-
-#[tauri::command]
 pub async fn write_device_lod_artifact(app_handle: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
     let (meta, bytes) = decode_binary_cache_write_request(&request)?;
     drop(request);
@@ -4206,43 +4187,6 @@ pub fn upsert_fragment_cache_record(
     )
     .map_err(|e| format!("upsert substation_fragment_cache 失败: {}", e))?;
     Ok(())
-}
-
-/// Tauri command：查询 substation_fragment_cache 记录
-#[tauri::command]
-pub fn get_fragment_cache_record(
-    state: tauri::State<'_, DbState>,
-    project_id: i64,
-    entry_path: String,
-) -> Result<Option<FragmentCacheRecord>, String> {
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    ensure_project_exists(&conn, project_id)?;
-    let res = conn.query_row(
-        "SELECT id, project_id, entry_path, model_id, source_gim_sha256, source_ifc_size, fragment_file_size, fragments_version, created_at_ms, updated_at_ms
-         FROM substation_fragment_cache
-         WHERE project_id = ?1 AND entry_path = ?2",
-        params![project_id, entry_path],
-        |row| Ok(FragmentCacheRecord {
-            id: row.get(0)?,
-            project_id: row.get(1)?,
-            entry_path: row.get(2)?,
-            model_id: row.get(3)?,
-            source_gim_sha256: row.get(4)?,
-            source_ifc_size: row.get(5)?,
-            fragment_file_size: row.get(6)?,
-            fragments_version: row.get(7)?,
-            created_at_ms: row.get(8)?,
-            updated_at_ms: row.get(9)?,
-        }),
-    );
-    match res {
-        Ok(r) => Ok(Some(r)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(format!("查询 substation_fragment_cache 失败: {}", e)),
-    }
 }
 
 /// Tauri command：校验 Fragments 缓存有效性
@@ -5235,7 +5179,6 @@ pub fn save_line_graph_begin(
 }
 
 /// 阶段 2/3：写入一批 FAM/DEV 属性（可多次调用）
-#[tauri::command]
 fn insert_line_attr_chunk(
     tx: &rusqlite::Transaction,
     pid: i64,

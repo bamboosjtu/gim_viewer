@@ -34,19 +34,6 @@ function measureByteLength(value: unknown): ByteMeasurement {
   return { bytes: 0, measured: false };
 }
 
-/** 供埋点/测试查看字节是否完整测得；普通对象会返回 measured=false。 */
-export function estimateInvokeByteMeasurement(request: unknown, response: unknown): {
-  bytes: number;
-  measured: boolean;
-} {
-  const requestMeasurement = typeof request === 'number' ? measuredBytes(request) : measureByteLength(request);
-  const responseMeasurement = measureByteLength(response);
-  return {
-    bytes: requestMeasurement.bytes + responseMeasurement.bytes,
-    measured: requestMeasurement.measured && responseMeasurement.measured,
-  };
-}
-
 export interface InvokeTimedOptions {
   /** 需要显式绑定旧异步任务时传入；默认捕获当前 perf session。 */
   sessionId?: number;

@@ -85,7 +85,7 @@ export default defineConfig(({ mode }) => {
 
             // acc-plan P2-2：按工程类型拆分重依赖，避免单一大 vendor 全量加载
             // - 变电路径：three / camera-controls（3D 视角控制）
-            // - 线路路径：maplibre / pmtiles（地图底图）
+            // - 线路路径：maplibre（地图底图）
             // 两类工程互不加载对方的重依赖
             if (id.includes('camera-controls')) {
               return 'camera-controls';
@@ -93,10 +93,6 @@ export default defineConfig(({ mode }) => {
 
             if (id.includes('maplibre')) {
               return 'maplibre';
-            }
-
-            if (id.includes('pmtiles')) {
-              return 'pmtiles';
             }
 
             if (id.includes('three')) {

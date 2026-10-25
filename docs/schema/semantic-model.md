@@ -140,5 +140,5 @@ IFC 空间归属、分解、host 边界与局部 placement 有独立来源。
 [cbmParser](../../desktop/src/gim/cbmParser.ts)、
 [lineCbmParserCore](../../desktop/src/gim/lineCbmParserCore.ts)、
 [famParser](../../desktop/src/gim/famParser.ts)、
-[lineFamParser](../../desktop/src/gim/lineFamParser.ts)、
+[lineAttrParserCore](../../packages/powerline-core/src/lineAttrParserCore.ts)、
 [substationEvidence](../../desktop/src/gim/substationEvidence.ts)。

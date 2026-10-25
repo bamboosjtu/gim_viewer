@@ -8,7 +8,7 @@
  * - maplibre-gl 能在 Tauri + Vite 中被动态 import
  * - 能创建一个空白地图容器（使用本地空 style）
  * - 能销毁（remove() 释放资源）
- * - empty / pmtiles 模式不访问外网；osm-online 模式访问 https://tile.openstreetmap.org
+ * - empty 模式不访问外网；osm-online 模式访问 https://tile.openstreetmap.org
  *
  * M4-A2 第 1 轮（已完成，原 M4-A2 已升级）：
  * - Handle 新增 project(lng, lat) → 屏幕像素（桥接 Canvas overlay）
@@ -20,16 +20,12 @@
  * - ScaleControl（仅 overlay 模式，bottom-right）
  * - fitBounds 使用 duration:0（无动画，立即同步 Canvas 重绘）
  *
- * M4-A2 第 2 轮（已完成）：
- * - PMTiles 离线瓦片最小预研（默认关闭，ENABLE_PMTILES_EXPERIMENT）
- * - 失败自动回退 empty style
- *
  * M4-A2 第 3 轮（本轮新增）：
- * - 支持 basemapMode 选择底图（empty / osm-online / pmtiles）
+ * - 支持 basemapMode 选择底图（empty / osm-online / tianditu-*）
  * - OSM online 模式：MVP 默认，启用 attributionControl
  * - OSM tile 加载错误计数（阈值 3 次）→ 触发 onBasemapUnavailable 回调
  * - 调用方（lineProjectView）收到回调后销毁 probe + 回退 Canvas-only
- * - 不 reject 主流程，不影响 empty / pmtiles 模式
+ * - 不 reject 主流程，不影响 empty 模式
  *
  * 不做的事（留给后续）：
  * - 不批量下载瓦片 / 不缓存为离线包
@@ -47,7 +43,6 @@ import type { LineBasemapMode } from '../config/features.js';
 import { isTiandituKeyAvailable } from '../config/tianditu.js';
 import {
   createEmptyLineMapStyle,
-  createPmtilesLineMapStyle,
   createOsmOnlineRasterStyle,
   createTiandituSatelliteStyle,
   createTiandituTerrainStyle,
@@ -85,33 +80,20 @@ export type LineMapViewChangeKind = 'move' | 'zoom' | 'resize';
 /** MapLibre 相机停止变化的事件类型。 */
 export type LineMapViewSettledKind = 'moveend' | 'zoomend';
 
-/** PMTiles 配置（M4-A2 第 2 轮） */
-export interface PmtilesOptions {
-  /** 是否启用 PMTiles 瓦片 */
-  enabled: boolean;
-  /** PMTiles 文件 URL（如 `/tiles/demo.pmtiles`） */
-  url: string;
-}
-
 /** createMapLibreProbe 的可选参数 */
 export interface CreateMapLibreProbeOptions {
   /** 初始视图 bbox [minLng, minLat, maxLng, maxLat]，加载后自动 fitBounds */
   initialBounds?: [number, number, number, number];
   /** Owns initialization as well as the returned map. */
   signal?: AbortSignal;
-  /** M4-A2 第 2 轮：PMTiles 瓦片配置（默认不启用，需 basemapMode='pmtiles' 才尝试加载） */
-  pmtiles?: PmtilesOptions;
   /**
    * 底图模式选择。
    * - 'empty'           ：纯色 background，无瓦片（代码兜底）
    * - 'osm-online'      ：OpenStreetMap 在线 raster（MVP 默认，启用 attribution）
-   * - 'pmtiles'        ：本地 PMTiles 矢量瓦片（需配合 pmtiles 选项）
    * - 'tianditu-satellite': 天地图卫星影像（img_w + cia_w 双图层）
    * - 'tianditu-terrain': 天地图地形图（ter_w + cta_w 双图层）
    * - 'tianditu-vector' : 天地图矢量图（vec_w + cva_w 双图层）
    *
-   * 优先级：tianditu-* > osm-online > pmtiles > empty。
-   * 在线 raster 模式（OSM + 天地图）不依赖 PMTiles；PMTiles 模式不影响在线 raster 模式。
    * 天地图模式在未配置 API Key 时自动回退到 OSM。
    */
   basemapMode?: LineBasemapMode;
@@ -137,12 +119,11 @@ export interface CreateMapLibreProbeOptions {
  *
  * 行为：
  * - 在 `container` 内创建一个绝对定位的 div（z-index:0）作为 MapLibre 的挂载点
- * - 初始化 MapLibre map（OSM raster / empty / PMTiles style）
+ * - 初始化 MapLibre map（OSM raster / empty / 天地图 style）
  * - 如果提供 initialBounds，加载后自动 fitBounds（duration:0 无动画）
  * - 等待 `load` 事件后 resolve（证明 WebGL 上下文可用）
  * - 启用交互（pan/zoom），MapLibre 管理视图
  * - 添加 ScaleControl（bottom-right，metric）
- * - PMTiles 启用时注册 protocol，失败自动回退 empty style
  * - 失败时抛出错误（调用方应 catch 并回退到 Canvas 主流程）
  *
  * 注意：本函数仅在 `ENABLE_MAPLIBRE_EXPERIMENT = true` 时被调用，
@@ -158,7 +139,7 @@ export async function createMapLibreProbe(
   options?.signal?.throwIfAborted();
 
   // ---- M4-A2 第 3 轮：底图模式选择 ----
-  // 优先级：tianditu-* > osm-online > pmtiles > empty
+  // 优先级：tianditu-* > osm-online > empty
   const basemapMode: LineBasemapMode = options?.basemapMode ?? 'empty';
   const isOsmMode = basemapMode === 'osm-online';
   const isTiandituSatelliteMode = basemapMode === 'tianditu-satellite';
@@ -181,28 +162,11 @@ export async function createMapLibreProbe(
   const useTiandituTerrainStyle = effectiveBasemapMode === 'tianditu-terrain';
   const useTiandituVectorStyle = effectiveBasemapMode === 'tianditu-vector';
 
-  // ---- M4-A2 第 2 轮：PMTiles protocol 注册（仅 pmtiles 模式尝试） ----
-  let pmtilesProtocolHandle: { destroy(): void } | null = null;
-  let usingPmtiles = false;
-  if (effectiveBasemapMode === 'pmtiles' && options?.pmtiles?.enabled && options.pmtiles.url) {
-    try {
-      const { setupPmtilesProtocol } = await import('./lineMapPmtiles.js');
-      pmtilesProtocolHandle = await setupPmtilesProtocol(maplibre);
-      usingPmtiles = true;
-      console.log(`[PMTiles] using local demo: ${options.pmtiles.url}`);
-    } catch (err) {
-      console.warn('[PMTiles] unavailable, fallback to empty style:', err);
-      pmtilesProtocolHandle = null;
-      usingPmtiles = false;
-    }
-  }
-
   // 选择 style：
   // - tianditu-satellite：img_w + cia_w 双图层
   // - tianditu-terrain：ter_w + cta_w 双图层
   // - tianditu-vector：vec_w + cva_w 双图层
   // - osm-online：OSM raster style
-  // - pmtiles：protocol 注册成功时用 PMTiles style，否则回退 empty
   // - empty / 其他：empty style（最终兜底）
   let style: StyleSpecification;
   if (useTiandituSatelliteStyle) {
@@ -213,8 +177,6 @@ export async function createMapLibreProbe(
     style = createTiandituVectorStyle();
   } else if (useOsmStyle) {
     style = createOsmOnlineRasterStyle();
-  } else if (usingPmtiles && options?.pmtiles?.url) {
-    style = createPmtilesLineMapStyle(options.pmtiles.url);
   } else {
     style = createEmptyLineMapStyle();
   }
@@ -227,7 +189,7 @@ export async function createMapLibreProbe(
     height: 100%;
     z-index: 0;
   `;
-  if (options?.signal?.aborted) { pmtilesProtocolHandle?.destroy(); options.signal.throwIfAborted(); }
+  if (options?.signal?.aborted) { options.signal.throwIfAborted(); }
   container.appendChild(mountDiv);
 
   // 创建 MapLibre 实例
@@ -239,11 +201,11 @@ export async function createMapLibreProbe(
       : [0, 0],
     zoom: options?.initialBounds ? 10 : 0,
     // 在线 raster 模式（OSM + 天地图）启用 attributionControl（许可要求）
-    // empty / pmtiles 模式不显示 attribution
+    // empty 模式不显示 attribution
     attributionControl: isOnlineRasterMode ? { compact: false } : false,
     // M4-A2：启用交互（pan/zoom），MapLibre 管理视图
     interactive: true,
-    // empty/pmtiles 模式不发起瓦片请求；在线 raster 模式请求对应瓦片服务
+    // empty 模式不发起瓦片请求；在线 raster 模式请求对应瓦片服务
     hash: false,
   });
 
@@ -338,7 +300,7 @@ export async function createMapLibreProbe(
       // 原因：style load 成功 ≠ 瓦片请求成功；瓦片请求在 load 后才大规模发起
       // 场景：style JSON 解析完成 → load 事件触发 → 后续瓦片请求失败（net::ERR_CONNECTION_CLOSED / 401）
       // 若此时移除 error listener，onBasemapUnavailable 永不触发，回退失效
-      // 仅 empty / pmtiles 模式在 load 后移除（首个 error 才致命，load 成功即不再需要）
+      // 仅 empty 模式在 load 后移除（首个 error 才致命，load 成功即不再需要）
       if (!isOnlineRasterMode) {
         map.off('error', onError);
       }
@@ -388,7 +350,7 @@ export async function createMapLibreProbe(
     //   - load 前的 error：style/supplier 初始化失败
     //   - load 后的 error：瓦片请求失败（net::ERR_CONNECTION_CLOSED / 401 等）
     //   - onLoad 不移除在线 raster error listener，保证 load 后仍计数
-    // empty / pmtiles 模式：仅首个 error 致命，用 once
+    // empty 模式：仅首个 error 致命，用 once
     if (isOnlineRasterMode) {
       map.on('error', onError);
       // 保存引用，destroy() 时显式 off（onLoad 不移除，需手动清理）
@@ -410,12 +372,6 @@ export async function createMapLibreProbe(
       console.warn('[MapLibre probe] 初始化失败后的 map.remove() 失败:', cleanupError);
     }
     if (mountDiv.parentNode) mountDiv.parentNode.removeChild(mountDiv);
-    if (pmtilesProtocolHandle) {
-      try { pmtilesProtocolHandle.destroy(); } catch (cleanupError) {
-        console.warn('[MapLibre probe] 初始化失败后的 PMTiles cleanup 失败:', cleanupError);
-      }
-      pmtilesProtocolHandle = null;
-    }
     throw error;
   }
 
@@ -482,15 +438,6 @@ export async function createMapLibreProbe(
       }
       if (mountDiv.parentNode) {
         mountDiv.parentNode.removeChild(mountDiv);
-      }
-      // M4-A2 第 2 轮：清理 PMTiles protocol（引用计数 -1，归零时 removeProtocol）
-      if (pmtilesProtocolHandle) {
-        try {
-          pmtilesProtocolHandle.destroy();
-        } catch (err) {
-          console.warn('[MapLibre probe] PMTiles protocol cleanup 失败:', err);
-        }
-        pmtilesProtocolHandle = null;
       }
     },
     getMap() {

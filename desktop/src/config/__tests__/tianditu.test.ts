@@ -10,7 +10,6 @@ describe('天地图配置', () => {
     const config = await import('../tianditu.js');
     config.setTiandituKey('  unit-test-key  ');
 
-    expect(config.getTiandituKey()).toBe('unit-test-key');
     expect(config.isTiandituKeyAvailable()).toBe(true);
     expect(config.buildTiandituTileUrl('img_w', 2)).toBe(
       'https://t2.tianditu.gov.cn/DataServer?T=img_w&x={x}&y={y}&l={z}&tk=unit-test-key',

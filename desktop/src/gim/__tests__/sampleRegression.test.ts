@@ -25,7 +25,6 @@ import { parseXmlMod } from '../geometry/xmlModParser.js';
 import { getFileByPath, normalizeFilePath } from '../fileLookup.js';
 import { isGimEmptyValue, resolveBaseFamilyReference } from '../gimValueSemantics.js';
 import type { CbmNode, IfcEntry } from '../types.js';
-import { buildLineGimGraph } from '../lineCbmParser.js';
 import { buildLineGimGraphFromTexts } from '../lineCbmParserCore.js';
 import { createLineParserCache, parseLineAttributesFromCache } from '../lineAttrParserCore.js';
 import { buildSubstationSpatialIndexFromFiles } from '../ifcSpatialParser.js';
@@ -47,7 +46,6 @@ import type {
   LineFamPropertyRecord,
   LineDevPropertyRecord,
 } from '@desktop/database.js';
-import { parseLineAttributes } from '../../services/lineAttrPersistenceService.js';
 import { buildFunctionalDomainIndex } from '../../ui/substationFunctionalTreeView.js';
 
 /**
@@ -114,18 +112,6 @@ function buildLineAttributeIndex(
     }
   }
   return { famBySourcePath, famByFileNameLower, devBySourcePath, devByFileNameLower };
-}
-
-/** 去除 nodeRef 后比较线路地图的业务输出，避免对象引用掩盖字段差异。 */
-function lineMapBusinessShape(data: ReturnType<typeof extractLineMapData>): unknown {
-  return {
-    towers: data.towers.map(({ nodeRef: _nodeRef, ...tower }) => tower),
-    wires: data.wires.map(({ nodeRef: _nodeRef, ...wire }) => wire),
-    crosses: data.crosses.map(({ nodeRef: _nodeRef, ...cross }) => cross),
-    bbox: data.bbox,
-    stats: data.stats,
-    unresolved: data.unresolved,
-  };
 }
 
 function findFirstFile(files: Map<string, File>, ext: string): string | null {
@@ -567,14 +553,8 @@ describe.skipIf(!hasLine)('样本回归·线路 line02', () => {
     const files = loadFilesFromDir(LINE_DIR);
     expect(files.size).toBeGreaterThan(100);
 
-    // 线路图构建
-    const graph = await buildLineGimGraph(files);
-    expect(graph.root).not.toBeNull();
-    expect(graph.stats.Tower_Device ?? 0).toBeGreaterThan(0);
-    expect(graph.stats.WIRE ?? 0).toBeGreaterThan(0);
-
-    // Line Parser Worker v1 的纯核心与既有 File API parser 结果保持一致。
-    // 这里只读取线路文本类型，模拟 Worker 输入的可序列化 bytes。
+    // 线路图构建与属性解析统一走生产 Worker 的共享纯核心。
+    // 只读取线路文本类型，模拟 Worker 输入的可序列化 bytes。
     const workerTextFiles: Array<{ path: string; text: string }> = [];
     for (const [path, file] of files) {
       if (/\.(cbm|dev|fam|phm|mod)$/i.test(path)) {
@@ -585,34 +565,20 @@ describe.skipIf(!hasLine)('样本回归·线路 line02', () => {
       }
     }
     const workerCache = createLineParserCache(workerTextFiles);
-    const workerGraph = buildLineGimGraphFromTexts(workerTextFiles, workerCache);
-    const workerAttrPayloads = parseLineAttributesFromCache(workerGraph, workerCache);
-    expect(workerGraph.stats).toEqual(graph.stats);
+    const graph = buildLineGimGraphFromTexts(workerTextFiles, workerCache);
+    expect(graph.root).not.toBeNull();
+    expect(graph.stats.Tower_Device ?? 0).toBeGreaterThan(0);
+    expect(graph.stats.WIRE ?? 0).toBeGreaterThan(0);
+    const attributePayloads = parseLineAttributesFromCache(graph, workerCache);
+    expect(attributePayloads.famPayloads.length).toBeGreaterThan(0);
+    expect(attributePayloads.devPayloads.length).toBeGreaterThan(0);
 
-    // FAM/DEV 属性解析
-    const { famPayloads, devPayloads } = await parseLineAttributes(graph, files);
-    expect(famPayloads.length).toBeGreaterThan(0);
-    expect(workerAttrPayloads.famPayloads.length).toBe(famPayloads.length);
-    expect(workerAttrPayloads.devPayloads.length).toBe(devPayloads.length);
-    expect(workerAttrPayloads.famPayloads).toEqual(famPayloads);
-    expect(workerAttrPayloads.devPayloads).toEqual(devPayloads);
-    expect(Array.from(workerGraph.nodesByPath.keys()).sort())
-      .toEqual(Array.from(graph.nodesByPath.keys()).sort());
-
-    // 组装属性索引并提取地图数据；同时用 Worker payload 构建平行索引，
-    // 让回归覆盖塔位、档距、跨越物和导航投影，而不只比较节点计数。
+    // 组装属性索引并提取地图数据，让回归覆盖塔位、档距、跨越物和导航投影。
     const attrs = buildLineAttributeIndex(
-      famPayloads as unknown as LineFamPropertyRecord[],
-      devPayloads as unknown as LineDevPropertyRecord[],
+      attributePayloads.famPayloads as unknown as LineFamPropertyRecord[],
+      attributePayloads.devPayloads as unknown as LineDevPropertyRecord[],
     );
-    const workerAttrs = buildLineAttributeIndex(
-      workerAttrPayloads.famPayloads as unknown as LineFamPropertyRecord[],
-      workerAttrPayloads.devPayloads as unknown as LineDevPropertyRecord[],
-    );
-
     const mapData = extractLineMapData(graph, attrs);
-    const workerMapData = extractLineMapData(workerGraph, workerAttrs);
-    expect(lineMapBusinessShape(workerMapData)).toEqual(lineMapBusinessShape(mapData));
     expect(mapData.towers.length).toBeGreaterThan(0);
     expect(isLineMapDataValid(mapData)).toBe(true);
 
@@ -651,21 +617,6 @@ describe.skipIf(!hasLine)('样本回归·线路 line02', () => {
     // 线路业务导航投影回归：原始 9276 节点不得直接成为左侧树，
     // F3 映射为耐张段，CROSS 无坐标全部保留在待关联组。
     const navigation = buildLineNavigationIndex(graph, mapData, { attrs });
-    const workerNavigation = buildLineNavigationIndex(workerGraph, workerMapData, { attrs: workerAttrs });
-    expect(workerNavigation.stats).toEqual(navigation.stats);
-    expect(Array.from(workerNavigation.nodesByKey.keys()).sort())
-      .toEqual(Array.from(navigation.nodesByKey.keys()).sort());
-    expect(Array.from(workerNavigation.nodesByKey.entries()).map(([key, node]) => [
-      key,
-      node.kind,
-      node.label,
-      node.subtitle,
-    ])).toEqual(Array.from(navigation.nodesByKey.entries()).map(([key, node]) => [
-      key,
-      node.kind,
-      node.label,
-      node.subtitle,
-    ]));
     expect(navigation.stats.sectionCount).toBe(1);
     expect(navigation.stats.strainSectionCount).toBe(47);
     expect(navigation.stats.towerCount).toBe(129);
@@ -684,14 +635,7 @@ describe.skipIf(!LINE_CORPUS.every((sample) => existsSync(sample.dir)))('样本�
       const files = loadFilesFromDir(sample.dir);
       expect(files.size, sample.id).toBeGreaterThan(100);
 
-      const graph = await buildLineGimGraph(files);
-      expect(graph.root, sample.id).not.toBeNull();
-      for (const kind of ['F1System', 'F2System', 'F3System', 'F4System', 'Tower_Device', 'WIRE'] as const) {
-        expect(graph.stats[kind] ?? 0, `${sample.id} ${kind}`).toBeGreaterThan(0);
-      }
-
-      // 复现 Line Parser Worker 的可序列化输入边界，并与兼容主线程 parser
-      // 比较整个图统计及 FAM/DEV payload，而非只比较总节点数。
+      // 复现 Line Parser Worker 的可序列化输入边界，直接消费生产共享纯核心。
       const workerTextFiles: Array<{ path: string; text: string }> = [];
       for (const [path, file] of files) {
         if (/\.(cbm|dev|fam|phm|mod)$/i.test(path)) {
@@ -701,19 +645,19 @@ describe.skipIf(!LINE_CORPUS.every((sample) => existsSync(sample.dir)))('样本�
         }
       }
       const workerCache = createLineParserCache(workerTextFiles);
-      const workerGraph = buildLineGimGraphFromTexts(workerTextFiles, workerCache);
-      expect(workerGraph.stats, sample.id).toEqual(graph.stats);
+      const graph = buildLineGimGraphFromTexts(workerTextFiles, workerCache);
+      expect(graph.root, sample.id).not.toBeNull();
+      for (const kind of ['F1System', 'F2System', 'F3System', 'F4System', 'Tower_Device', 'WIRE'] as const) {
+        expect(graph.stats[kind] ?? 0, `${sample.id} ${kind}`).toBeGreaterThan(0);
+      }
 
-      const { famPayloads, devPayloads } = await parseLineAttributes(graph, files);
-      const workerAttrs = parseLineAttributesFromCache(workerGraph, workerCache);
-      expect(famPayloads.length, `${sample.id} FAM`).toBeGreaterThan(0);
-      expect(devPayloads.length, `${sample.id} DEV`).toBeGreaterThan(0);
-      expect(workerAttrs.famPayloads, `${sample.id} worker FAM`).toEqual(famPayloads);
-      expect(workerAttrs.devPayloads, `${sample.id} worker DEV`).toEqual(devPayloads);
+      const workerAttrs = parseLineAttributesFromCache(graph, workerCache);
+      expect(workerAttrs.famPayloads.length, `${sample.id} FAM`).toBeGreaterThan(0);
+      expect(workerAttrs.devPayloads.length, `${sample.id} DEV`).toBeGreaterThan(0);
 
       const attrs = buildLineAttributeIndex(
-        famPayloads as unknown as LineFamPropertyRecord[],
-        devPayloads as unknown as LineDevPropertyRecord[],
+        workerAttrs.famPayloads as unknown as LineFamPropertyRecord[],
+        workerAttrs.devPayloads as unknown as LineDevPropertyRecord[],
       );
       const mapData = extractLineMapData(graph, attrs);
       expect(isLineMapDataValid(mapData), sample.id).toBe(true);

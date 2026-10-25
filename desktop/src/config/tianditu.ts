@@ -31,10 +31,6 @@ export function setTiandituKey(value: string): void {
   tiandituKey = String(value ?? '').trim();
 }
 
-export function getTiandituKey(): string {
-  return tiandituKey;
-}
-
 /** 天地图可用子域列表 */
 // t5~t7 在当前服务上偶发 502；底图错误达到阈值会触发 Canvas-only 回退，
 // 因而只使用已验证稳定的 t0~t4，仍保留足够的并行连接数。

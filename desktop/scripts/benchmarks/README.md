@@ -10,13 +10,13 @@
 
 在 Windows、Node 22、Python 和 Edge 环境下，从 `desktop/` 执行 `npx vitest run --config scripts/benchmarks/dev-worker-workset.config.ts`，为四站生成已核对源 SHA 的目录、物理根与真实来源清单。另开 Vite 服务，再逐个执行 `node scripts/benchmarks/dev-worker-workset-browser.mjs substation01 baseline` 和同样本的 `candidate`；其他站替换 ID。控制入口需要 Git 中的 `93b2f2c`，只在忽略的 `.tmp/` 重定位控制模块，不修改生产源码。
 
-该入口使用独立 headless Edge/profile，真实执行 DEV 范围、L0、空闲、重算及十次池级创建/取消；用 Windows `PrivateUsage` 查询所属进程树。不可用采样保留原因，不替代为 0。输出位于 `output/memory-workset/`，不操作日常缓存，不代表 Tauri、完整 IFC/GPU、全站峰值或真实工程切换。判定、波动与恢复代价见 [四站报告](../../../docs/impl/test-dev-worker-idle-workset.md)。
+该入口使用独立 headless Edge/profile，真实执行 DEV 范围、L0、空闲、重算及十次池级创建/取消；用 Windows `PrivateUsage` 查询所属进程树。不可用采样保留原因，不替代为 0。输出位于 `output/memory-workset/`，不操作日常缓存，不代表 Tauri、完整 IFC/GPU、全站峰值或真实工程切换。机制见 [架构](../../../docs/architecture.md)，当前性能事实见 [性能](../../../docs/performance.md)。
 
 ## DEV 缓存解包对照
 
 准备四站解包样本后，在 `desktop/` 执行 `npx vitest run --config scripts/benchmarks/dev-cache-decode.config.ts`，生成真实 L0 模板，并核对旧/新解包的字节、状态、几何、材质与独立缓冲区。缺少任一样本会失败，不跳过。产物写入忽略目录 `output/parse-reuse/`。
 
-保持 `npm run dev -- --host 127.0.0.1` 运行，再执行 `node scripts/benchmarks/dev-cache-decode-browser.mjs`，在独立 headless Edge/profile 中对固定产物执行 100 对交替解包；可用第一个参数指定 Edge 可执行文件。服务只监听 loopback，结束后关闭所属浏览器，不操作日常缓存。两套入口只测缓存解包 CPU，不代表 IPC、绘制、完整冷暖或内存峰值验收。判定与边界见 [四站对照](../../../docs/impl/test-dev-cache-decode-copy.md)。
+保持 `npm run dev -- --host 127.0.0.1` 运行，再执行 `node scripts/benchmarks/dev-cache-decode-browser.mjs`，在独立 headless Edge/profile 中对固定产物执行 100 对交替解包；可用第一个参数指定 Edge 可执行文件。服务只监听 loopback，结束后关闭所属浏览器，不操作日常缓存。两套入口只测缓存解包 CPU，不代表 IPC、绘制、完整冷暖或内存峰值验收。机制见 [架构](../../../docs/architecture.md)，当前性能事实见 [性能](../../../docs/performance.md)。
 
 ## 固定场景容器的矩阵更新
 
@@ -24,13 +24,13 @@
 
 保持 Vite 在 `127.0.0.1:14317` 运行，逐站执行 `node scripts/benchmarks/static-container-browser.mjs substation01`，其他站替换 ID。入口核对原包/解包身份、artifact 和 GLB SHA，在独立 headless Edge/profile 中用同一场景交替基线与候选，执行真实 WebGL 绘制、像素和三角形目标拾取检查，保存三轮原始 CPU 时间及截图到 `output/static-container/`。结束关闭所属浏览器树，不操作日常缓存。
 
-CPU render 时间含世界矩阵更新；GPU 排空在计时外，不代表 GPU 时间或帧间隔。每站只加载所选 L0 子集，工程锚点为单位阵，未加载 IFC，也不执行整站原生验收。单项收益、整帧长尾波动及复现文件见 [四站报告](../../../docs/impl/test-static-container-matrices.md)。
+CPU render 时间含世界矩阵更新；GPU 排空在计时外，不代表 GPU 时间或帧间隔。每站只加载所选 L0 子集，工程锚点为单位阵，未加载 IFC，也不执行整站原生验收。机制与当前性能事实见 [架构](../../../docs/architecture.md) 与 [性能](../../../docs/performance.md)。
 
 ## 上一视角与失败恢复
 
 先按前述两组配置生成 `output/parse-reuse/` 的真实 L0 产物与 `output/memory-workset/` 的 CBM 清单。几何/parser 或缓存契约改变后须重建输入。保持 Vite `127.0.0.1:14317` 运行，从 `desktop/` 逐站执行 `node scripts/benchmarks/view-history-browser.mjs substation01`，其他站替换 ID。
 
-入口核对原包/解包与产物身份，在独立 headless Edge/profile 中用实际 CameraControls、真实设备位置及一次性相机异常执行三轮基线/候选。基线固定为 Git `cc05534`，临时模块仅写入忽略的 `.tmp/`；结果写入 `output/view-history/`，结束关闭所属浏览器。七类定向检查、收益及边界见 [四站报告](../../../docs/impl/test-view-history-recovery.md)。固定 1/60 s 推进用于功能验证，不代表真实操作时长、帧耗时或原生 UI 验收，不操作日常缓存。
+入口核对原包/解包与产物身份，在独立 headless Edge/profile 中用实际 CameraControls、真实设备位置及一次性相机异常执行三轮基线/候选。基线固定为 Git `cc05534`，临时模块仅写入忽略的 `.tmp/`；结果写入 `output/view-history/`，结束关闭所属浏览器。固定 1/60 s 推进用于功能验证，不代表真实操作时长、帧耗时或原生 UI 验收，不操作日常缓存。机制见 [架构](../../../docs/architecture.md)。
 
 ## 单文件 IFC 对照
 

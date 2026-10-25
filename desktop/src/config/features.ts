@@ -68,31 +68,10 @@ export function fragmentsCacheKey(fragmentsVer: string, webIfcVer: string): stri
 export const ENABLE_MAPLIBRE_EXPERIMENT = true;
 
 /**
- * PMTiles 离线瓦片预研开关（M4-A2 第 2 轮）。
- *
- * 默认 false：MapLibre 使用 empty style（纯色背景）。
- * 仅当 ENABLE_MAPLIBRE_EXPERIMENT=true 且本开关=true 时才尝试加载本地 PMTiles。
- *
- * 失败时自动回退 empty style，不影响 overlay 交互。
- *
- * 瓦片文件路径由 PMTILES_DEMO_URL 指定，不提交大文件到 git。
- */
-export const ENABLE_PMTILES_EXPERIMENT = false;
-
-/**
- * PMTiles 瓦片文件 URL（相对于 public 目录）。
- *
- * 实际文件放在 `public/tiles/demo.pmtiles`，通过 `/tiles/demo.pmtiles` 访问。
- * 文件不存在时自动回退 empty style。
- */
-export const PMTILES_DEMO_URL = '/tiles/demo.pmtiles';
-
-/**
  * M4-A2 第 3 轮：底图模式定义。
  *
  * - 'empty'            ：纯色 background，无瓦片（兜底模式）
  * - 'osm-online'       ：OpenStreetMap 在线 raster 底图（MVP 默认）
- * - 'pmtiles'          ：本地 PMTiles 矢量瓦片（后续离线方案）
  * - 'tianditu-satellite': 天地图卫星影像（img_w + cia_w 双图层叠加）
  * - 'tianditu-terrain' : 天地图地形图（ter_w + cta_w 双图层叠加，呈现地形起伏）
  * - 'tianditu-vector'  : 天地图矢量图（vec_w + cva_w 双图层叠加，呈现道路/地名）
@@ -103,7 +82,6 @@ export const PMTILES_DEMO_URL = '/tiles/demo.pmtiles';
 export type LineBasemapMode =
   | 'empty'
   | 'osm-online'
-  | 'pmtiles'
   | 'tianditu-satellite'
   | 'tianditu-terrain'
   | 'tianditu-vector';
@@ -130,7 +108,7 @@ export let runtimeBasemapMode: LineBasemapMode = LINE_BASEMAP_MODE;
 
 const LINE_BASEMAP_STORAGE_KEY = 'gim-line-basemap-mode';
 const LINE_BASEMAP_MODES: readonly LineBasemapMode[] = [
-  'empty', 'osm-online', 'pmtiles', 'tianditu-satellite', 'tianditu-terrain', 'tianditu-vector',
+  'empty', 'osm-online', 'tianditu-satellite', 'tianditu-terrain', 'tianditu-vector',
 ];
 
 function readStoredBasemapMode(): LineBasemapMode {

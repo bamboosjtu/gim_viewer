@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { GimGraph, GimGraphNode } from '../../gim/gimGraphTypes.js';
 import type { LineAttributeIndex } from '../../gim/lineAttributeTypes.js';
 import type { LineFamPropertyRecord } from '../../../bridge/database.js';
-import { parseLineFam } from '../../gim/lineFamParser.js';
 import type { CrossMarker, LineMapData, TowerMarker, WireSegment } from '../../gim/lineMapData.js';
 import {
   buildLineNavigationIndex,
@@ -26,6 +25,21 @@ function node(overrides: Partial<GimGraphNode> = {}): GimGraphNode {
     },
     ...overrides,
   };
+}
+
+/** 本文件只需要 FAM 的 display/key/value 行形态；生产解析由 powerline-core 负责。 */
+function parseFamFixture(text: string): Array<{ display_key: string; prop_key: string; prop_value: string; raw_line: string }> {
+  return text.split(/\r?\n/).filter(Boolean).map((raw) => {
+    const first = raw.indexOf('=');
+    const second = first < 0 ? -1 : raw.indexOf('=', first + 1);
+    if (first < 0 || second < 0) return { display_key: raw, prop_key: raw, prop_value: '', raw_line: raw };
+    return {
+      display_key: raw.slice(0, first),
+      prop_key: raw.slice(first + 1, second),
+      prop_value: raw.slice(second + 1),
+      raw_line: raw,
+    };
+  });
 }
 
 function makeLineFixture(): {
@@ -127,7 +141,7 @@ describe('line navigation tree projection', () => {
     const attrs: LineAttributeIndex = { famBySourcePath: new Map(), famByFileNameLower: new Map(), devBySourcePath: new Map(), devByFileNameLower: new Map() };
     for (const [path, text] of families) {
       const rows = new Map<string, LineFamPropertyRecord[]>();
-      for (const row of parseLineFam(text)) { const values = rows.get(row.prop_key) ?? []; values.push({ ...row, source_path: path, normalized_path: path.toLowerCase(), file_name_lower: path.split('/').pop()!.toLowerCase(), sort_order: values.length }); rows.set(row.prop_key, values); }
+      for (const row of parseFamFixture(text)) { const values = rows.get(row.prop_key) ?? []; values.push({ ...row, source_path: path, normalized_path: path.toLowerCase(), file_name_lower: path.split('/').pop()!.toLowerCase(), sort_order: values.length }); rows.set(row.prop_key, values); }
       attrs.famBySourcePath.set(path, rows);
       attrs.famByFileNameLower.set(path.split('/').pop()!.toLowerCase(), rows);
     }

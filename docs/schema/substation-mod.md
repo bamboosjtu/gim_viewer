@@ -83,6 +83,8 @@ Normal 与 Entity 矩阵分别生效，不能将 Normal 当整个装配的绝对
 
 圆周与扫掠分段随浏览档位变化：远景使用最低分段，中景提高一档，近景使用当前固定分段；LOD0 的环体使用更低的双向分段。Wire/Cable 的管道段数、PorcelainBushing 的伞裙片数与 TerminalBlock 的端子栅格数各有上限，超限的对象不生成几何并保留诊断。BeamChannel 类无截面型号查表，按固定盒体近似，不能据此做截面量测。几何与颜色独立处理，继续消费 MOD/PHM 的继承颜色，不强制瓷套颜色。参数组合近似、未支持类型与来源异常保留诊断，不宣称全类型精确重建。
 
+Wire/Cable 另叠加 1 px 中心线保证低档位可见：默认每条线一个 `Line`；当单文件中心线数超过 1000 时按颜色合并为 `LineSegments`，避免 draw calls 线性膨胀。`xmlModLoader` 在 `group.userData` 记录 `electricalConnectionLineCount` 与 `electricalConnectionMerged` 供 profiling。中心线只是视觉辅助，不参与拾取、尺寸测量或电气连接判断；管径仍使用源 `D`。
+
 ## Boolean 与实体引用
 
 Boolean 的 Type 归一化后只接受 union/intersection/difference，其他操作 Unsupported。

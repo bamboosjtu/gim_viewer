@@ -30,7 +30,7 @@ import { buildLineCatenaryAuditExportPayload } from '../services/lineCatenaryAud
 import type { LineCatenaryAuditExportPayload } from '../services/lineCatenaryAuditExportService.js';
 import { formatLineCatenaryAuditMarkdown } from '../services/lineCatenaryAuditExportService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
-import { ENABLE_CATENARY, ENABLE_MAPLIBRE_EXPERIMENT, ENABLE_PMTILES_EXPERIMENT, PMTILES_DEMO_URL, runtimeBasemapMode, setRuntimeBasemapMode, resetRuntimeBasemapMode } from '../config/features.js';
+import { ENABLE_CATENARY, ENABLE_MAPLIBRE_EXPERIMENT, runtimeBasemapMode, setRuntimeBasemapMode, resetRuntimeBasemapMode } from '../config/features.js';
 import type { LineBasemapMode } from '../config/features.js';
 import { isTiandituKeyAvailable } from '../config/tianditu.js';
 import { setBasemapStatus, resetBasemapStatus } from '../services/basemapStatusService.js';
@@ -87,7 +87,6 @@ import { perfBegin, perfCurrentSession, type PerfSession } from '../utils/perfTi
 function basemapStatusFromMode(mode: LineBasemapMode): BasemapStatus {
   switch (mode) {
     case 'osm-online': return 'osm-online';
-    case 'pmtiles': return 'pmtiles';
     case 'tianditu-satellite': return 'tianditu-satellite';
     case 'tianditu-terrain': return 'tianditu-terrain';
     case 'tianditu-vector': return 'tianditu-vector';
@@ -1618,7 +1617,6 @@ export function renderLineProjectPanels(
   //    - 'osm-online'      ：MVP 默认，加载 OSM 在线 raster 瓦片
   //    - 'tianditu-terrain': 天地图地形图（ter_w + cta_w 双图层）
   //    - 'tianditu-vector' : 天地图矢量图（vec_w + cva_w 双图层）
-  //    - 'pmtiles'        ：走 PMTiles 预研路径（默认关闭，需 ENABLE_PMTILES_EXPERIMENT=true）
   //    - 'empty'          ：不加载瓦片，仅显示纯色背景
   //    - 在线 raster 不可用（3 次 tile error）或初始化失败时，自动回退 Canvas-only
   //    底图切换 UI：附加到图层面板下方（OSM / 天地图卫星 / 天地图地形 / 天地图矢量）
@@ -1682,10 +1680,6 @@ export function renderLineProjectPanels(
           signal: creation.signal,
           initialBounds,
           basemapMode: runtimeBasemapMode,
-          pmtiles: {
-            enabled: ENABLE_PMTILES_EXPERIMENT,
-            url: PMTILES_DEMO_URL,
-          },
           onBasemapUnavailable: fallbackToCanvasOnly,
         });
         // 检查代次：若已过期（用户切换工程/清空场景），销毁并放弃
@@ -1777,7 +1771,6 @@ function basemapModeLabel(mode: LineBasemapMode): string {
     case 'tianditu-satellite': return '天地图卫星影像';
     case 'tianditu-terrain': return '天地图地形图';
     case 'tianditu-vector': return '天地图矢量图';
-    case 'pmtiles': return 'PMTiles';
     case 'empty': return '空白底图';
     default: return mode;
   }
@@ -1993,10 +1986,6 @@ function switchBasemap(
         signal: creation.signal,
         initialBounds,
         basemapMode: newMode,
-        pmtiles: {
-          enabled: ENABLE_PMTILES_EXPERIMENT,
-          url: PMTILES_DEMO_URL,
-        },
         onBasemapUnavailable: fallback,
       });
       if (myGen !== maplibreProbeGeneration) {

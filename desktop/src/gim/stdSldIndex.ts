@@ -68,26 +68,6 @@ export function cbmClassifyNameToGridId(classifyName: string): string {
 }
 
 /**
- * 把 STD/SLD gridId 转换为 CBM SYSCLASSIFYNAME。
- *
- * 转换规则：
- * - 简单 gridId（单 `*`，以 `A0` 开头）：`A0AEC*002` → `0AEC*002`（**去除**前缀 `A`）
- * - 复合 gridId（多 `*`，如 `A0AEC*002GSK*010`）：保持原值不变（CBM 中无对应值，仅 STD/SLD 内部使用）
- * - 其他格式：原样返回
- *
- * @param gridId STD/SLD 中的 gridId
- * @returns 转换后的 CBM SYSCLASSIFYNAME
- */
-export function gridIdToCbmClassifyName(gridId: string): string {
-  if (!gridId) return '';
-  const starCount = (gridId.match(/\*/g) || []).length;
-  if (gridId.startsWith('A0') && starCount === 1) {
-    return gridId.slice(1); // 去除前缀 A
-  }
-  return gridId;
-}
-
-/**
  * 从 CBM 树构建 gridId → CbmNode[] 索引。
  *
  * 遍历 CBM 树，对每个节点的 `classifyName` 字段执行 `cbmClassifyNameToGridId` 转换，

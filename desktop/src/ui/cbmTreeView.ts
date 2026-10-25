@@ -417,11 +417,6 @@ export function handleSubstationPropertyReference(
   return true;
 }
 
-/** Public wrapper for view-state restore. */
-export function selectTreeRowByPath(path: string): void {
-  selectCbmTreeRow(path);
-}
-
 /** Expand every saved ancestor row; unrendered paths are skipped. */
 export async function expandTreeToPaths(paths: readonly string[]): Promise<void> {
   for (const path of [...paths].sort((a, b) => a.split('/').length - b.split('/').length)) {

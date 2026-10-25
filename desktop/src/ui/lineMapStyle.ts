@@ -4,13 +4,11 @@
  * 提供六种 style：
  * - empty：纯色背景，不加载瓦片（兜底模式）
  * - osm-online：OpenStreetMap 在线 raster 底图（MVP 默认）
- * - pmtiles：本地 PMTiles vector source（实验性，默认关闭）
  * - tianditu-satellite：天地图卫星影像（img_w + cia_w 双图层）
  * - tianditu-terrain：天地图地形图（ter_w + cta_w 双图层）
  * - tianditu-vector：天地图矢量图（vec_w + cva_w 双图层）
  *
- * empty / pmtiles 都包含一个 background 层，确保即使 PMTiles 加载失败也有底色。
- * PMTiles style 不强制 source-layer，避免因瓦片元数据不匹配而加载失败。
+ * empty 模式包含一个 background 层，确保无瓦片时仍有底色。
  *
  * 天地图三种 style 采用"底图层 + 注记层"双 source 叠加设计：
  * - 底图层：img_w（卫星）/ ter_w（地形）/ vec_w（矢量），提供基础地图信息
@@ -256,37 +254,6 @@ export function createTiandituVectorStyle(): StyleSpecification {
     ],
   };
 }
-
-/**
- * PMTiles style：本地 vector source + background 层。
- *
- * - source URL 使用 `pmtiles://` 协议前缀，由 Protocol 管理
- * - 不添加 vector 图层（避免 source-layer 不匹配导致渲染失败）
- * - 仅保留 background 层，确保有底色
- *
- * @param url PMTiles 文件 URL（如 `/tiles/demo.pmtiles`）
- */
-export function createPmtilesLineMapStyle(url: string): StyleSpecification {
-  return {
-    version: 8,
-    sources: {
-      offline: {
-        type: 'vector',
-        url: `pmtiles://${url}`,
-      },
-    },
-    layers: [
-      {
-        id: 'background',
-        type: 'background',
-        paint: {
-          'background-color': '#f8fafc',
-        },
-      },
-    ],
-  };
-}
-
 
 /** 天地图 tiles 数组：全部子域参与负载均衡，提升瓦片并行加载速度 */
 function tiandituTiles(layer: TiandituLayerType): string[] {

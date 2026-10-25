@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   cbmClassifyNameToGridId,
-  gridIdToCbmClassifyName,
   buildCbmGridIdIndex,
   buildStdSldIndex,
   getGridIdByCbmPath,
@@ -32,21 +31,6 @@ describe('cbmClassifyNameToGridId', () => {
   it('不以 0 开头的值原样返回', () => {
     expect(cbmClassifyNameToGridId('1AEC*002')).toBe('1AEC*002');
     expect(cbmClassifyNameToGridId('A0AEC*002')).toBe('A0AEC*002');
-  });
-});
-
-describe('gridIdToCbmClassifyName', () => {
-  it('标准 gridId → CBM SYSCLASSIFYNAME（去前缀 A）', () => {
-    expect(gridIdToCbmClassifyName('A0AEC*002')).toBe('0AEC*002');
-    expect(gridIdToCbmClassifyName('A0ATA*240')).toBe('0ATA*240');
-  });
-
-  it('不以 A0 开头的 gridId 原样返回（如 GSK 子组）', () => {
-    expect(gridIdToCbmClassifyName('A0AEC*002GSK*010')).toBe('A0AEC*002GSK*010');
-  });
-
-  it('空字符串返回空字符串', () => {
-    expect(gridIdToCbmClassifyName('')).toBe('');
   });
 });
 

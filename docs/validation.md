@@ -2,10 +2,11 @@
 
 本文件维护**正确性门禁、验证边界和证据记录规则**，不重复实现机制或性能数字：
 
-- 机制与取舍见 [实现决策](impl/README.md)；
+- 当前实现机制见 [架构](architecture.md)；
 - 性能 SLO 与实测见 [性能](performance.md)；
 - 未关闭缺陷与已接受限制见 [问题与限制](open-issues.md)；
-- 样本身份/格式统计见 [样本台账](schema/sample-corpus.md)。
+- 样本身份/格式统计见 [样本台账](schema/sample-corpus.md)；
+- 已回退与未采用路线见 [探索记录](impl/explorations.md)。
 
 保留本文件的理由：它定义“什么算通过”和“证据能证明到哪”，与性能、架构文档不可互相替代。
 
@@ -37,6 +38,9 @@
 | IFC 顺序 | 首个 anchor 一致；模型数量、GUID 与 IFC/MOD 相对位置一致 |
 | Spatial | hit 不重扫 STEP；坏 snapshot 拒绝；nodes/objects/links/placement/source 等价 |
 | 选择 | 慢 A/快 B 后属性、高亮、相机、树全部属于 B；重复 B 不新增 occurrence |
+| 视角历史 | 返回前结算待记录移动；失败保留历史；代次拒绝旧完成；取消后不跳回旧目的地 |
+| 静态容器 | 每帧不重算静态子树；动态对象、重挂载与显式锚点更新仍传播世界矩阵 |
+| 缓存视图 | 借用视图只在同一次同步解包内；返回缓冲独立、偏移为 0，不引用相邻条目 |
 | 工程切换 | A 未完成时切 B：A 的 worker、slice、恢复结果不提交 B |
 | 线路图 | 唯一路径节点与引用边分开；共享边界塔不丢；同塔跳线不当跨塔档 |
 | 安全 | SLD 禁执行/外部资源；解压配额；异常局部来源隔离 |
@@ -57,6 +61,9 @@ SQLite 集成测试独立于单元测试和样本回归，Windows CI 必须单�
 按改动选择更窄的门禁：
 
 - IFC 加载/转换：`npm run test:ifc-critical`；
+- 静态容器矩阵：`src/viewer/__tests__/staticContainer.test.ts`；
+- 视角历史：`src/viewer/__tests__/viewHistory.test.ts` 与 `src/ui/__tests__/viewHistoryFeedback.test.ts`；
+- 原生批读/GIMR 协议：`bridge/__tests__/devLodCache.test.ts`、`devLodNativeBatch.test.ts`、`database.test.ts`；
 - DEV 几何/缓存/选择：`devGeometryWorkerClient`、`devLodRuntime`、`devGlbTemplateRuntime`、`xmlModGeometry` 对应测试；
 - 真实几何门禁：`GIM_VERIFY_SUBSTATION01=1` 后运行 `devGeometryGate.test.ts --maxWorkers=1 --minWorkers=1`；
 - 严格变电样本：`GIM_REQUIRE_SUBSTATION04=1 npm run test:substation:strict`，缺样本必须失败，不能 skip 通过。
@@ -80,7 +87,7 @@ python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation
 
 线路至少覆盖：六包根/F2/F3、共享塔位、WIRE/CROSS、塔形预览、搜索、树↔图、缺文件降级；原属性长度与几何长度分列。
 
-性能验收必须同时记录 First usable / Current view ready / Full fidelity settled 三个 SLO，不能只报首屏。
+性能验收必须同时记录 First usable / Current view settled / 基础表示完成 三个 SLO，不能只报首屏；浏览器开发模式与 Release/WebView2 结果分开报告。
 
 ## 5. 移动端验证
 
