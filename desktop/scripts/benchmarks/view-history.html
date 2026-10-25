@@ -1,0 +1,133 @@
+<!doctype html><meta charset="utf-8"><title>Browser navigation recovery check</title>
+<p>Isolated real DEV targets and CameraControls. No native UI or GPU timing.</p>
+<script type="module">
+import * as THREE from 'three';
+import CameraControls from 'camera-controls';
+import {ViewerViewHistory as Candidate} from '../../src/viewer/viewHistory.ts';
+import {unpackDevArtifact} from '../../bridge/devLodCache.ts';
+import {parseDevGlbAsset} from '../../src/services/glbCacheService.ts';
+import {DevGlbTemplate} from '../../src/services/devGlbTemplateRuntime.ts';
+CameraControls.install({THREE});
+const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const digest=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',
+  typeof bytes==='string'?new TextEncoder().encode(bytes):bytes)),v=>v.toString(16).padStart(2,'0')).join('');
+globalThis.runViewHistoryCheck=async source=>{
+  if(!/^http:\/\/127\.0\.0\.1:\d+$/.test(source))throw Error('Owned loopback source required');
+  const input=await(await fetch(source+'/manifest')).json();
+  const Baseline=(await import('../../.tmp/view-history-baseline.ts')).ViewerViewHistory;
+  const layer=new THREE.Group(),templates=[],records=[];
+  const session={generation:1,projectId:null,sourceSha256:input.sha,geometryToken:0};
+  for(const [i,row] of input.artifacts.entries()){
+    const bytes=await(await fetch(source+'/artifact/'+i)).arrayBuffer();
+    if(await digest(bytes)!==row.artifactSha)throw Error('Artifact SHA mismatch');
+    const cached=unpackDevArtifact(row.key,new Uint8Array(bytes));
+    if(!cached||cached.sha!==row.sha)throw Error('Cache identity mismatch');
+    records.push({path:row.path,status:cached.result.status,diagnostics:cached.result.diagnostics,sha:cached.sha});
+    if(!cached.result.bytes)continue;
+    if(await digest(cached.result.bytes)!==row.sha)throw Error('GLB SHA mismatch');
+    const parsed=await parseDevGlbAsset(row.path,cached.result.bytes);if(!parsed)throw Error('GLB parse failed');
+    const template=new DevGlbTemplate(row.path,parsed.scene,session);templates.push(template);
+    for(const row of input.instances.filter(p=>p.devPath===template.devPath))layer.add(template.createPlacement({
+      contract:'source-template',rootOccurrence:row.rootOccurrence,instanceKey:'dev:'+row.devPath+'#'+row.rootOccurrence,
+      placementMatrix:row.matrix,projectSourceToViewerMatrix:new THREE.Matrix4(),
+    }));
+  }
+  layer.updateMatrixWorld(true);
+  const targets=[];
+  for(const group of layer.children){
+    const box=new THREE.Box3().setFromObject(group,true),center=box.getCenter(new THREE.Vector3());
+    if(box.isEmpty()||targets.some(p=>new THREE.Vector3(...p.target).distanceTo(center)<1))continue;
+    const distance=Math.max(1,...box.getSize(new THREE.Vector3()).toArray())*2;
+    targets.push({root:group.userData.rootOccurrence,path:group.userData.devPath,
+      position:center.clone().add(new THREE.Vector3(distance,distance*.8,distance)).toArray(),target:center.toArray()});
+    if(targets.length===3)break;
+  }
+  if(targets.length!==3)throw Error('Three distinct actual device positions required');
+  const fingerprint=async()=>{
+    const rows=[],buffers=new Set();let meshes=0;
+    layer.traverse(o=>{if(!o.isMesh)return;meshes++;rows.push([o.uuid,o.geometry.uuid,o.matrixWorld.toArray()]);
+      for(const a of [...Object.values(o.geometry.attributes),o.geometry.index].filter(Boolean))buffers.add(('data'in a?a.data.array:a.array).buffer);});
+    return {meshes,placements:layer.children.length,sha:await digest(JSON.stringify([rows,await Promise.all([...buffers].map(digest))]))};
+  };
+  const before=await fingerprint();
+  const scenario=async (Client,name)=>{
+    const camera=new THREE.PerspectiveCamera(50,1.5,.01,100000),element=document.createElement('div');
+    element.style.cssText='width:960px;height:640px';document.body.append(element);
+    const controls=new CameraControls(camera,element);
+    const move=p=>{void controls.setLookAt(...p.position,...p.target,false);controls.update(1/60);};
+    const at=p=>controls.getPosition(new THREE.Vector3(),true).distanceTo(new THREE.Vector3(...p.position))<1e-5
+      &&controls.getTarget(new THREE.Vector3(),true).distanceTo(new THREE.Vector3(...p.target))<1e-5;
+    // Pump actual CameraControls damping with deterministic 1/60 s steps.
+    // This is a functional simulation, never an elapsed navigation benchmark.
+    const pump=async promise=>{
+      let done=false,value,error;
+      Promise.resolve(promise).then(v=>{done=true;value=v;},e=>{done=true;error=String(e);});
+      for(let i=0;i<1200&&!done;i++){controls.update(1/60);await Promise.resolve();}
+      if(!done)throw Error('Camera transition did not settle in simulated 20 seconds');
+      for(let i=0;i<120;i++)controls.update(1/60);
+      return {value,error};
+    };
+    let visibility='all';move(targets[0]);
+    const history=new Client({world:{camera:{controls}}},20,{
+      getVisibility:()=>visibility,setVisibility:value=>{visibility=value;history.recordVisibility();},
+    });
+    let result;
+    try{
+      if(name==='first-quick-back'){
+        move(targets[1]);const offered=history.canGoBack,back=await pump(history.back());
+        result={offered,back,correct:at(targets[0]),pass:offered&&back.value===true&&at(targets[0])};
+      }else if(name==='latest-quick-back'){
+        move(targets[1]);await pause(250);move(targets[2]);const back=await pump(history.back());
+        result={back,correct:at(targets[1]),pass:back.value===true&&at(targets[1])};
+      }else if(name==='failure-retry'){
+        visibility='only-selected';history.recordVisibility();
+        const original=controls.setLookAt.bind(controls);let injected=false;
+        controls.setLookAt=(...args)=>{if(args[6]&&!injected){injected=true;return Promise.reject(Error('injected camera unavailable'));}return original(...args);};
+        const failed=await pump(history.back()),retained=history.canGoBack&&visibility==='only-selected';
+        const retry=await pump(history.back());
+        result={failed,retained,retry,visibility,pass:!!failed.error&&retained&&retry.value===true&&visibility==='all'};
+      }else if(name==='duplicate-back'){
+        move(targets[1]);await pause(250);move(targets[2]);await pause(250);
+        const first=history.back(),second=history.back();const a=await pump(first),b=await pump(second);
+        result={first:a,second:b,correct:at(targets[1]),pass:a.value===true&&b.value===false&&at(targets[1])};
+      }else if(name==='project-clear'){
+        move(targets[1]);await pause(250);let settled=false;
+        const pending=history.back();pending.then(()=>{settled=true;},()=>{settled=true;});history.clear();
+        for(let i=0;i<12;i++)await Promise.resolve();
+        const immediate=settled,frozen=at(targets[1]),old=await pump(pending);
+        await pause(250); // A cancelled controller update must not seed old history.
+        move(targets[2]);await pause(250);
+        const clean=!history.canGoBack;
+        result={immediate,frozen,old,clean,pass:immediate&&frozen&&old.value===false&&clean};
+      }else if(name==='superseded-navigation'){
+        move(targets[1]);visibility='only-selected';history.recordVisibility();
+        const pending=history.back();move(targets[2]);const old=await pump(pending);
+        result={old,visibility,correct:at(targets[2]),pass:old.value===false&&visibility==='only-selected'&&at(targets[2])};
+      }else if(name==='newer-visibility'){
+        visibility='only-selected';history.recordVisibility();
+        move(targets[1]);await pause(250);
+        const pending=history.back();visibility='all';history.recordVisibility();const old=await pump(pending);
+        const keptVisibility=visibility==='all';await pause(250);
+        const next=await pump(history.back());
+        result={old,keptVisibility,next,correct:at(targets[1]),pass:old.value===false&&keptVisibility&&next.value===true&&at(targets[1])};
+      }
+      return {name,...result};
+    }finally{history.dispose();controls.dispose();element.remove();}
+  };
+  const names=['first-quick-back','latest-quick-back','failure-retry','duplicate-back','project-clear','superseded-navigation','newer-visibility'];
+  const rounds=[];
+  for(let round=0;round<3;round++){
+    const results={};
+    for(const mode of round%2?['candidate','baseline']:['baseline','candidate']){
+      const checks=[];for(const name of names)checks.push(await scenario(mode==='candidate'?Candidate:Baseline,name));
+      results[mode]=checks;
+    }
+    rounds.push({round:round+1,...results});
+  }
+  const after=await fingerprint();if(JSON.stringify(before)!==JSON.stringify(after))throw Error('Navigation mutated device geometry');
+  if(rounds.some(r=>r.candidate.some(s=>!s.pass)))throw Error('Candidate navigation behavior failed: '+JSON.stringify(rounds));
+  layer.clear();for(const template of templates)template.dispose();
+  return {sample:input.sample,sourceSha:input.sha,userAgent:navigator.userAgent,targets,records,before,after,rounds,
+    closed:{placements:layer.children.length},scope:'Real DEV cohort and CBM targets, actual CameraControls with fixed-step damping, history state and injected camera failure; no WebGL/Tauri/UI clicking or latency claim'};
+};
+</script>

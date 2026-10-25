@@ -3,6 +3,7 @@ import { btnCacheManager, btnLoadGim, btnLoadLocal, gimFileInput } from '../dom.
 import { isTauri } from '@desktop/runtime.js';
 import { hideLoading, showLoading } from '../../services/gimOpenCore.js';
 import { escapeHtml } from '../../shared/html.js';
+import { setSelectionStatus } from './statusBar.js';
 
 const AUTO_OPEN_LAST_KEY = 'gim-auto-open-last';
 const AUTO_SHOW_PROPS_KEY = 'gim-auto-show-props';
@@ -177,7 +178,13 @@ export function setupViewerShell(state: AppState): void {
   });
   document.getElementById('menu-previous-view')?.addEventListener('click', () => {
     closeMenu();
-    void state.viewHistory?.back();
+    const session = state.captureProjectSession();
+    const selection = state.selectionRequest;
+    void state.viewHistory?.back().catch(error => {
+      if (!state.isCurrentSession(session) || state.selectionRequest !== selection) return;
+      console.warn('[View history]', error);
+      setSelectionStatus('暂时无法恢复上一视角，请重试。');
+    });
   });
   document.getElementById('menu-only-selected')?.addEventListener('click', () => {
     closeMenu();

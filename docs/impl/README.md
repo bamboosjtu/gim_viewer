@@ -22,6 +22,8 @@ DEV 空闲计算池的回收及按需恢复见 [浏览工作集](test-dev-worker
 
 固定 Scene 与 MOD/STL 容器减少逐帧世界矩阵强制更新的验证见 [静态容器矩阵](test-static-container-matrices.md)：四站矩阵单项受益，像素和真实目标拾取一致；整帧长尾仍有波动，不等同于全站流畅度达标。
 
+上一视角的快速返回、失败重试及旧运动取消见 [视角状态恢复](test-view-history-recovery.md)：四站真实位置和 CameraControls 定向对照证明状态收益，保留普通失败提示与会话/选择守卫，不将模拟步进作为原生导航延迟。
+
 未成功技术路线使用 `test-*.md` 独立记录假设、实验边界、结果与回退，不视为已实现能力：
 
 - [扩展选择依赖与高亮合批](test-selection-dependency-batching.md)：缺少有效端到端收益对照，未混入 DEV 恢复交付。

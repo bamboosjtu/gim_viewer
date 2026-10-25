@@ -26,6 +26,12 @@
 
 CPU render 时间含世界矩阵更新；GPU 排空在计时外，不代表 GPU 时间或帧间隔。每站只加载所选 L0 子集，工程锚点为单位阵，未加载 IFC，也不执行整站原生验收。单项收益、整帧长尾波动及复现文件见 [四站报告](../../../docs/impl/test-static-container-matrices.md)。
 
+## 上一视角与失败恢复
+
+先按前述两组配置生成 `output/parse-reuse/` 的真实 L0 产物与 `output/memory-workset/` 的 CBM 清单。几何/parser 或缓存契约改变后须重建输入。保持 Vite `127.0.0.1:14317` 运行，从 `desktop/` 逐站执行 `node scripts/benchmarks/view-history-browser.mjs substation01`，其他站替换 ID。
+
+入口核对原包/解包与产物身份，在独立 headless Edge/profile 中用实际 CameraControls、真实设备位置及一次性相机异常执行三轮基线/候选。基线固定为 Git `cc05534`，临时模块仅写入忽略的 `.tmp/`；结果写入 `output/view-history/`，结束关闭所属浏览器。七类定向检查、收益及边界见 [四站报告](../../../docs/impl/test-view-history-recovery.md)。固定 1/60 s 推进用于功能验证，不代表真实操作时长、帧耗时或原生 UI 验收，不操作日常缓存。
+
 ## 单文件 IFC 对照
 
 这些入口用于手动、有界范围的研究复核，不加入默认单元测试，不代表全站或 Tauri 验收。只处理显式指定的 IFC；当前产品页固定钢结构样本 SHA 和连接板 ExpressId，其他输入应先修改该页的身份与目标。原始 IFC 不修改，输出写入仓库忽略的 `output/`。
