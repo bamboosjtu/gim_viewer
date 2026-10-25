@@ -18,6 +18,14 @@
 
 保持 `npm run dev -- --host 127.0.0.1` 运行，再执行 `node scripts/benchmarks/dev-cache-decode-browser.mjs`，在独立 headless Edge/profile 中对固定产物执行 100 对交替解包；可用第一个参数指定 Edge 可执行文件。服务只监听 loopback，结束后关闭所属浏览器，不操作日常缓存。两套入口只测缓存解包 CPU，不代表 IPC、绘制、完整冷暖或内存峰值验收。判定与边界见 [四站对照](../../../docs/impl/test-dev-cache-decode-copy.md)。
 
+## 固定场景容器的矩阵更新
+
+在 `desktop/` 先运行 `npx vitest run --config scripts/benchmarks/dev-cache-decode.config.ts` 与 `npx vitest run --config scripts/benchmarks/dev-worker-workset.config.ts`，准备四站源身份已验证的真实 L0 产物及 CBM occurrence 清单。没有输入会失败，不会跳过样本。几何/parser 或缓存契约改变后应重新生成，不能直接沿用旧产物。
+
+保持 Vite 在 `127.0.0.1:14317` 运行，逐站执行 `node scripts/benchmarks/static-container-browser.mjs substation01`，其他站替换 ID。入口核对原包/解包身份、artifact 和 GLB SHA，在独立 headless Edge/profile 中用同一场景交替基线与候选，执行真实 WebGL 绘制、像素和三角形目标拾取检查，保存三轮原始 CPU 时间及截图到 `output/static-container/`。结束关闭所属浏览器树，不操作日常缓存。
+
+CPU render 时间含世界矩阵更新；GPU 排空在计时外，不代表 GPU 时间或帧间隔。每站只加载所选 L0 子集，工程锚点为单位阵，未加载 IFC，也不执行整站原生验收。单项收益、整帧长尾波动及复现文件见 [四站报告](../../../docs/impl/test-static-container-matrices.md)。
+
 ## 单文件 IFC 对照
 
 这些入口用于手动、有界范围的研究复核，不加入默认单元测试，不代表全站或 Tauri 验收。只处理显式指定的 IFC；当前产品页固定钢结构样本 SHA 和连接板 ExpressId，其他输入应先修改该页的身份与目标。原始 IFC 不修改，输出写入仓库忽略的 `output/`。

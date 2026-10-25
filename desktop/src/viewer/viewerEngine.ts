@@ -1,5 +1,6 @@
 import * as OBC from '@thatopen/components';
 import * as THREE from 'three';
+import { freezeContainerLocalMatrix } from './staticContainer.js';
 
 /** 3D 引擎上下文，统一导出供其他模块使用 */
 export interface ViewerContext {
@@ -16,6 +17,9 @@ export function createViewerEngine(container: HTMLElement): ViewerContext {
   const world = worlds.create();
   (world as any).scene = new OBC.SimpleScene(components);
   ((world as any).scene as OBC.SimpleScene).setup();
+  // The scene is a fixed coordinate container. Re-composing its local identity
+  // each frame otherwise forces all static DEV world matrices to be multiplied.
+  freezeContainerLocalMatrix(world.scene.three);
   ((world as any).scene as any).three.background = new THREE.Color(0xeeeeee);
   world.renderer = new OBC.SimpleRenderer(components, container);
   // WebView2 keeps the previous line-map compositor layer behind a transparent

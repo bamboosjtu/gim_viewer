@@ -1,0 +1,139 @@
+<!doctype html><meta charset="utf-8"><title>Static container frame CPU check</title>
+<style>body{margin:0}canvas{display:block}</style>
+<script type="module">
+import * as THREE from 'three';
+import {unpackDevArtifact} from '../../bridge/devLodCache.ts';
+import {parseDevGlbAsset} from '../../src/services/glbCacheService.ts';
+import {DevGlbTemplate} from '../../src/services/devGlbTemplateRuntime.ts';
+import {freezeContainerLocalMatrix} from '../../src/viewer/staticContainer.ts';
+const digest=async bytes=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',
+  typeof bytes==='string'?new TextEncoder().encode(bytes):bytes)),n=>n.toString(16).padStart(2,'0')).join('');
+const stats=values=>{const a=[...values].sort((a,b)=>a-b);return {n:a.length,p50:a[Math.ceil(a.length*.5)-1],p95:a[Math.ceil(a.length*.95)-1],max:a.at(-1)};};
+globalThis.startStaticContainerCheck=async source=>{
+  if(!/^http:\/\/127\.0\.0\.1:\d+$/.test(source))throw Error('Owned loopback source required');
+  const input=await(await fetch(source+'/manifest')).json();
+  const scene=new THREE.Scene(),layer=new THREE.Group(),templates=[];
+  scene.background=new THREE.Color(0xeeeeee);scene.add(layer);
+  const light=new THREE.DirectionalLight(0xffffff,1.5);light.position.set(5,10,3);
+  scene.add(light,new THREE.AmbientLight(0xffffff,1));
+  const session={generation:1,projectId:null,sourceSha256:input.sha,geometryToken:0};
+  const records=[],start=performance.now();
+  for(const [i,row] of input.artifacts.entries()){
+    const buffer=await(await fetch(`${source}/artifact/${i}`)).arrayBuffer();
+    if(await digest(buffer)!==row.artifactSha)throw Error('Artifact SHA mismatch');
+    const cached=unpackDevArtifact(row.key,new Uint8Array(buffer));
+    if(!cached||cached.sha!==row.sha)throw Error('Artifact identity mismatch');
+    records.push({path:row.path,status:cached.result.status,sha:cached.sha,diagnostics:cached.result.diagnostics});
+    if(!cached.result.bytes)continue;
+    if(await digest(cached.result.bytes)!==row.sha)throw Error('GLB SHA mismatch');
+    const parsed=await parseDevGlbAsset(row.path,cached.result.bytes);if(!parsed)throw Error('GLB parse failed');
+    const template=new DevGlbTemplate(row.path,parsed.scene,session);templates.push(template);
+    for(const instance of input.instances.filter(p=>p.devPath===row.path))layer.add(template.createPlacement({
+      contract:'source-template',rootOccurrence:instance.rootOccurrence,instanceKey:`dev:${row.path}#${instance.rootOccurrence}`,
+      placementMatrix:instance.matrix,projectSourceToViewerMatrix:new THREE.Matrix4(),
+    }));
+  }
+  const prepareMs=performance.now()-start;
+  scene.updateMatrixWorld(true);
+  const box=new THREE.Box3().setFromObject(layer,true),center=box.getCenter(new THREE.Vector3());
+  const radius=Math.max(...box.getSize(new THREE.Vector3()).toArray());
+  if(!Number.isFinite(radius)||radius<=0)throw Error('Invalid scene bounds');
+  const camera=new THREE.PerspectiveCamera(50,960/640,Math.max(.001,radius/10000),radius*20);
+  const renderer=new THREE.WebGLRenderer({antialias:false,alpha:false,preserveDrawingBuffer:true});
+  renderer.setSize(960,640);renderer.setPixelRatio(1);document.body.append(renderer.domElement);
+  const gl=renderer.getContext(),extension=gl.getExtension('WEBGL_debug_renderer_info');
+  const graphics={vendor:gl.getParameter(gl.VENDOR),renderer:gl.getParameter(gl.RENDERER),
+    unmaskedVendor:extension?gl.getParameter(extension.UNMASKED_VENDOR_WEBGL):null,
+    unmaskedRenderer:extension?gl.getParameter(extension.UNMASKED_RENDERER_WEBGL):null};
+  const setMode=mode=>{
+    if(mode==='baseline'){scene.matrixAutoUpdate=true;layer.matrixAutoUpdate=true;}
+    else {freezeContainerLocalMatrix(scene);freezeContainerLocalMatrix(layer);}
+    scene.updateMatrixWorld(); // One-time dirty propagation is outside steady-frame timing.
+  };
+  const pose=i=>{const a=i*Math.PI/6;camera.position.copy(center).add(new THREE.Vector3(Math.cos(a)*radius, radius*.65,Math.sin(a)*radius));
+    camera.lookAt(center);camera.updateMatrixWorld();};
+  let worldMs=0;
+  const update=scene.updateMatrixWorld;
+  scene.updateMatrixWorld=function(...args){const t=performance.now();const result=update.apply(this,args);worldMs=performance.now()-t;return result;};
+  const frame=i=>{pose(i);const t=performance.now();renderer.render(scene,camera);const cpuMs=performance.now()-t;
+    const row={cpuMs,worldMs,calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,lines:renderer.info.render.lines};
+    gl.finish();return row;}; // Drain outside timed CPU submission; no GPU duration claim.
+  const fingerprint=async()=>{
+    const parts=[],buffers=new Set();let meshes=0,nodes=0;
+    layer.traverse(o=>{nodes++;if(!o.isMesh)return;meshes++;
+      parts.push([o.uuid,o.geometry.uuid,(Array.isArray(o.material)?o.material:[o.material]).map(m=>m.uuid),
+        o.userData.devPath,o.userData.assemblyPath,o.userData.referencePath,o.matrixWorld.toArray()]);
+      for(const a of [...Object.values(o.geometry.attributes),o.geometry.index].filter(Boolean))buffers.add(('data'in a?a.data.array:a.array).buffer);
+    });
+    return {nodes,meshes,placements:layer.children.length,bufferBytes:[...buffers].reduce((n,b)=>n+b.byteLength,0),
+      sha:await digest(JSON.stringify([parts,await Promise.all([...buffers].map(digest))]))};
+  };
+  // Orbit-center rays may all miss sparse station layouts. Aim at an actual
+  // nondegenerate source triangle, and require its identity in the hit set.
+  const meshes=[];layer.traverse(o=>{if(o.isMesh)meshes.push(o);});
+  const pickTargets=[];
+  for(let i=0;i<12;i++){
+    const mesh=meshes[Math.floor(i*meshes.length/12)],geometry=mesh.geometry;
+    const position=geometry.getAttribute('position'),index=geometry.index;
+    let target=null;
+    for(let t=0;t<Math.min(index?.count??position.count,300);t+=3){
+      const points=[0,1,2].map(k=>new THREE.Vector3().fromBufferAttribute(position,index?index.getX(t+k):t+k));
+      const normal=points[1].clone().sub(points[0]).cross(points[2].clone().sub(points[0]));
+      if(normal.lengthSq()<1e-16)continue;
+      const group=geometry.groups.find(g=>t>=g.start&&t<g.start+g.count);
+      const material=Array.isArray(mesh.material)?mesh.material[group?.materialIndex??0]:mesh.material;
+      if(material.side===THREE.BackSide)normal.negate();
+      normal.applyMatrix3(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld)).normalize();
+      const center=points[0].add(points[1]).add(points[2]).multiplyScalar(1/3).applyMatrix4(mesh.matrixWorld);
+      target={mesh,origin:center.addScaledVector(normal,radius*2),direction:normal.negate()};break;
+    }
+    if(!target)throw Error('No nondegenerate pick target');pickTargets.push(target);
+  }
+  const verify=async mode=>{
+    setMode(mode);const frames=[],picks=[],ray=new THREE.Raycaster();
+    for(let i=0;i<12;i++){
+      const row=frame(i),pixels=new Uint8Array(960*640*4);gl.readPixels(0,0,960,640,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+      ray.setFromCamera(new THREE.Vector2(0,0),camera);
+      const hits=ray.intersectObject(layer,true).slice(0,8).map(h=>({uuid:h.object.uuid,distance:h.distance,point:h.point.toArray()}));
+      frames.push({calls:row.calls,triangles:row.triangles,lines:row.lines,pixels:await digest(pixels),hits});
+    }
+    for(const target of pickTargets){
+      ray.set(target.origin,target.direction);
+      const hits=ray.intersectObject(layer,true);
+      if(!hits.some(h=>h.object===target.mesh))throw Error('Expected source triangle was not pickable');
+      picks.push({target:target.mesh.uuid,hits:hits.slice(0,8).map(h=>({uuid:h.object.uuid,distance:h.distance,point:h.point.toArray()}))});
+    }
+    let products=0;const multiply=THREE.Matrix4.prototype.multiplyMatrices;
+    THREE.Matrix4.prototype.multiplyMatrices=function(...args){products++;return multiply.apply(this,args);};
+    try{scene.updateMatrixWorld();}finally{THREE.Matrix4.prototype.multiplyMatrices=multiply;}
+    return {display:await fingerprint(),frames,picks,worldProducts:products};
+  };
+  // Warm both modes, including shader compilation, before correctness and timing.
+  for(const mode of ['baseline','candidate']){setMode(mode);for(let i=0;i<12;i++)frame(i);}
+  const baseline=await verify('baseline'),candidate=await verify('candidate');
+  if(JSON.stringify(baseline.display)!==JSON.stringify(candidate.display)||JSON.stringify(baseline.frames)!==JSON.stringify(candidate.frames)
+    ||JSON.stringify(baseline.picks)!==JSON.stringify(candidate.picks))throw Error('Scene, pixels, drawing or picking changed');
+  globalThis.staticContainerCheck={
+    measure:async round=>{
+      const raw={baseline:[],candidate:[]},matrix={baseline:[],candidate:[]};
+      for(let block=0;block<20;block++){
+        const order=(block+round)%2?['candidate','baseline']:['baseline','candidate'];
+        for(const mode of order){setMode(mode);for(let i=0;i<12;i++)raw[mode].push(frame(i));}
+        await new Promise(resolve=>setTimeout(resolve,0));
+      }
+      // Batched matrix-only measurements avoid sub-millisecond clock quantization.
+      for(let block=0;block<20;block++)for(const mode of (block+round)%2?['candidate','baseline']:['baseline','candidate']){
+        setMode(mode);const t=performance.now();for(let i=0;i<200;i++)update.call(scene);matrix[mode].push((performance.now()-t)/200);
+      }
+      const summary=Object.fromEntries(['baseline','candidate'].map(mode=>[mode,{
+        cpuMs:stats(raw[mode].map(r=>r.cpuMs)),worldMs:stats(raw[mode].map(r=>r.worldMs)),matrixPassMs:stats(matrix[mode]),
+      }]));
+      return {round,summary,raw,matrix};
+    },
+    close:()=>{scene.clear();layer.clear();for(const template of templates)template.dispose();templates.length=0;
+      renderer.dispose();renderer.forceContextLoss();return {placements:layer.children.length,templates:templates.length};},
+  };
+  return {sample:input.sample,sourceSha:input.sha,userAgent:navigator.userAgent,hardwareConcurrency:navigator.hardwareConcurrency,
+    prepareMs,graphics,radius,records,baseline,candidate};
+};
+</script>

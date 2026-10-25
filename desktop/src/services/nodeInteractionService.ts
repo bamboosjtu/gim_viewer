@@ -5,6 +5,7 @@ import type { CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession, SelectionRequest, SelectionGeometryState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import * as THREE from 'three';
+import { freezeContainerLocalMatrix } from '../viewer/staticContainer.js';
 import { collectIfcRefs } from '../gim/cbmParser.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
@@ -273,6 +274,7 @@ function ensureModStlLayer(
   if (layer === 'mod') {
     if (!state.modRootGroup) {
       state.modRootGroup = new THREE.Group();
+      freezeContainerLocalMatrix(state.modRootGroup);
       state.modRootGroup.name = '__GIM_MOD_LAYER__';
       state.modRootGroup.visible = true;
       scene.add(state.modRootGroup);
@@ -281,6 +283,7 @@ function ensureModStlLayer(
   } else {
     if (!state.stlRootGroup) {
       state.stlRootGroup = new THREE.Group();
+      freezeContainerLocalMatrix(state.stlRootGroup);
       state.stlRootGroup.name = '__GIM_STL_LAYER__';
       state.stlRootGroup.visible = true;
       scene.add(state.stlRootGroup);
