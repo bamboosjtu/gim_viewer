@@ -228,14 +228,21 @@ describe('primitiveToGeometry', () => {
       expect(g!.boundingBox!.max.toArray()).toEqual([50, 100, 50]);
     });
 
-    it('StretchedBody.Normal 模长作为位移，L 不替代拉伸长度', () => {
+    it('StretchedBody 的一英尺方向基矢使用 L 作为拉伸长度', () => {
       const g = primitiveToGeometry({
         type: 'StretchedBody',
         l: 100, array: '0,0;10,0;10,10;0,10', normal: '0,0,304.8',
       }, TEST_MOD_PATH);
       expect(g).toBeInstanceOf(THREE.BufferGeometry);
       g!.computeBoundingBox();
-      expect(g!.boundingBox!.max.z).toBeCloseTo(304.8);
+      expect(g!.boundingBox!.max.z).toBeCloseTo(100);
+    });
+
+    it('StretchedBody 保留其他非单位 Normal 的完整位移解释', () => {
+      const g = primitiveToGeometry({ type: 'StretchedBody', l: 100,
+        array: '0,0;10,0;10,10;0,10', normal: '0,0,200' }, TEST_MOD_PATH);
+      g!.computeBoundingBox();
+      expect(g!.boundingBox!.max.z).toBeCloseTo(200);
     });
 
     it('StretchedBody.Array 支持真实样例的三维点格式', () => {

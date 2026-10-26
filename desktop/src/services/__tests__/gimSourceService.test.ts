@@ -13,6 +13,13 @@ function bytes(text: string): ArrayBuffer {
 }
 
 describe('GIM source descriptor', () => {
+  it('keeps a bare equipment archive unknown until its semantic content is validated', () => {
+    const source = inspectGimSourceHead('device.gim', new Uint8Array([0x37,0x7a,0xbc,0xaf,0x27,0x1c,0,4]).buffer);
+    expect(source.magic).toBe('7z');
+    expect(source.runtimeType).toBe('unknown');
+    expect(resolveGimRuntimeType(source.runtimeType, 'equipment')).toBe('equipment');
+    expect(resolveGimRuntimeType(source.runtimeType, 'unknown')).toBe('unknown');
+  });
   it('routes GIMPKGT from the source magic', () => {
     const descriptor = inspectGimSourceHead('line.gim', bytes('GIMPKGT'));
     expect(descriptor.magic).toBe('GIMPKGT');

@@ -7,7 +7,7 @@
 GIM（Grid Information Model，电网信息模型）文件浏览器。国家电网的 GIM 标准基于 IFC 扩展而来，`.gim` 文件是电力行业专有的工程信息模型格式。
 
 - **Tauri 2 桌面应用**（Rust 后端 + Vite 前端），离线运行，portable ZIP 发布
-- **两类工程**：变电（CBM 层级树 + IFC 3D + MOD/STL 几何）与线路（地图 + 塔位/导线/跨越点）
+- **三类输入**：变电（CBM 层级树 + IFC 3D + MOD/STL 几何）、线路（地图 + 塔位/导线/跨越点）、独立设备（Device CBM + 递归 DEV 装配 + MOD/STL）
 - **SQLite 缓存**：首次解压解析入库，合法缓存用于加速恢复；实际响应和完整加载分别测量
 
 ## 核心概念
@@ -25,6 +25,7 @@ GIM（Grid Information Model，电网信息模型）文件浏览器。国家电�
 - ZIP 签名：`50 4B 03 04`
 
 常见解包目录：CBM/（工程骨架）、DEV/（设备）、PHM/（装配体）、MOD/（几何图元）。
+独立设备也可使用 GIMPKGS，或直接是裸 7z；按唯一 `ENTITYNAME=Device` CBM 与实际 DEV 引用识别，不要求 `project.cbm`/IFC。设备 CBM/DEV/FAM 存在 GBK，设备运行时兼容解码但不改写原包。设备库中的完整工程结构继续走工程流程。
 IFC 的物理目录是 exporter detail。解析必须基于 CBM 引用 + 全局 entry resolver，不得写死 DEV/ 或 CBM/；文件发现与 IFCGUID 对象关联是独立能力。
 在册变电目录为大写（CBM/DEV/MOD/PHM），线路常为 PascalCase（Cbm/Dev/Mod/Phm），路径处理必须大小写不敏感。
 
@@ -56,7 +57,7 @@ MOD 变电侧为 XML、线路侧为四类文本格式族；SLD 为 SVG；STD 按
 desktop/src/                    # 前端代码（桌面端专属）
 ├─ app/        启动 + AppState（geometryLoadToken 防竞态）
 ├─ gim/        纯解析层：容器/parser/索引/地图数据提取（无 UI/Viewer 依赖）
-├─ viewer/     3D 渲染层（仅变电使用；IFC 加载/高亮/相机/xml-mod 几何）
+├─ viewer/     3D 渲染层（变电/设备使用；IFC 加载/高亮/相机/xml-mod 几何）
 ├─ ui/         纯 DOM UI（shell/ AppShell + 层级树/属性检查器/线路地图/搜索框）
 ├─ services/   业务编排（openGimService 打开流程/渐进式 DEV GLB 管线/SQLite 缓存）
 └─ config/     功能开关（features.ts）与 debug 分类开关
@@ -82,6 +83,7 @@ crates/tauri-plugin-gim-import/ # Android SAF 流式导入
 - **变电几何契约**：PARTINDEX → child DEV 按 OBJECTMODELPOINTER 身份关联，不能按数组序号，PARTINDEX/DEV_SUBDEVICE 不作为第二个 seed。PHM 按扩展名递归、逐边累积矩阵、分支防环；cold/缓存查询/raw fallback 采用同一引用语义。不得假定 DEV=PHM=MOD、STL 必备。同 UUID `.gl` 是可选辅助来源，不自动加入 SOLIDMODEL 主链；SCH/STD/SLD 也是可选能力。
 - **打开流程**：源身份/SHA/magic → validate_gim_cache → 分域恢复 / 未命中解压（原生或 WASM）→ 类型分支；源 magic 不由缓存覆盖
 - **变电首开**：核心语义可用后，DEV 目录/基础编译与 IFC 加载并行；DEV 场景放置等待真实坐标锚点，结果提交与缓存落盘有独立预算，显示不等待缓存写完。普通选择、搜索和相机靠近只请求 L0/L1，DEV/IFC L2 由属性面板明确请求；token 与 SelectionRequest 防旧结果提交，失败不写完整缓存标记。
+- **设备打开**：equipmentRuntime 复用 DEV LOD、树/属性/选择与清理，采用 Z-up→Y-up，不等待不存在的 IFC；无 IFC 的合法工程树也可显示 DEV。设备重开复用提取源和 LOD 派生缓存，重新建立语义树，不冒充完整变电语义缓存。StretchedBody 的单位/304.8 mm 方向基矢均归一化后乘 L，范围与网格共用解释。
 - **线路首开**：buildLineGimGraph → parseLineAttributes → 三阶段分块入库（begin/chunks/finish，finish 才提交 parser_version）→ Canvas/MapLibre 地图
 - **性能埋点**：utils/perfTimings.ts，Ctrl+Shift+D 诊断 JSON 含 timings 字段
 
@@ -89,6 +91,7 @@ crates/tauri-plugin-gim-import/ # Android SAF 流式导入
 
 - **GIM 文件解析**：GIMPKGS/GIMPKGT 头部检测 + 原生/WASM 双路径解压（资源配额防护）
 - **变电工程**：CBM 层级树 + 搜索定位 + IFC 全量自动加载 + 渐进式 MOD/STL 几何 + 属性抽屉 CSV 导出 + SLD 单线图（白名单净化后 img 沙箱渲染）
+- **独立设备**：设备装配树 + UTF-8/GBK 属性 + 自动 MOD/STL 浏览 + 搜索/选择/显式精化 + 源与几何缓存复用
 - **线路工程**：地图（塔位/导线弧垂视觉示意/跨越点）+ 树↔图联动 + 截图/CSV 导出 + 搜索定位
 - **缓存体系**：SQLite 索引/属性/几何引用链/GLB 快速路径 + PARSER_VERSION 失效
 - **安全加固**：SLD 白名单净化、解压资源配额、几何 token 竞态防护、GLB 完成标记门控

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { detectGimProjectType } from '../projectType.js';
+import { findEquipmentEntry, decodeEquipmentText } from '../equipmentModel.js';
+import { buildCbmTree } from '../cbmParser.js';
 
 function lazyTextFile(text: string): File {
   return {
@@ -7,6 +9,32 @@ function lazyTextFile(text: string): File {
     text: vi.fn(async () => text),
   } as unknown as File;
 }
+
+it('recognizes a standalone Device entry without a project.cbm, independent of directory casing', async () => {
+  const files = new Map([
+    ['cbm/root.cbm', new File(['ENTITYNAME=Device\nOBJECTMODELPOINTER=assembly.dev'], 'root.cbm')],
+    ['dev/assembly.dev', new File(['SYMBOLNAME=设备名称\nSUBDEVICES.NUM=0\nSOLIDMODELS.NUM=0'], 'assembly.dev')],
+  ]);
+  expect((await detectGimProjectType(files)).type).toBe('equipment');
+  const entry = await findEquipmentEntry(files);
+  expect(entry).toBe('cbm/root.cbm');
+  const tree = await buildCbmTree(files, undefined, entry!);
+  expect(tree?.name).toBe('设备名称');
+  expect(tree?.devPath).toBe('assembly.dev');
+});
+
+it('does not guess a Device entry with missing or ambiguous DEV references', async () => {
+  const files = new Map<string, File>([['cbm/root.cbm', new File(['ENTITYNAME=Device\nOBJECTMODELPOINTER=missing.dev'], 'root.cbm')]]);
+  expect(await findEquipmentEntry(files)).toBeNull();
+  files.set('one/missing.dev', new File([''], 'missing.dev'));
+  files.set('two/missing.dev', new File([''], 'missing.dev'));
+  expect(await findEquipmentEntry(files)).toBeNull();
+});
+
+it('decodes legacy equipment GBK text while retaining UTF-8 names', () => {
+  expect(decodeEquipmentText(new Uint8Array([0xc9, 0xe8, 0xb1, 0xb8]).buffer)).toBe('设备');
+  expect(decodeEquipmentText(new TextEncoder().encode('设备').buffer)).toBe('设备');
+});
 
 describe('detectGimProjectType', () => {
   it('标准线路目录布局不逐个读取 DiskBackedFile 文本', async () => {

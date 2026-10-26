@@ -73,6 +73,7 @@ function scheduleBaselineBeforeOpen(state: AppState, generation: number): void {
 
 function describeType(type: GimRuntimeType | 'unknown'): string {
   return type === 'transmission_line' ? 'transmission_line'
+    : type === 'equipment' ? 'equipment'
     : type === 'substation' ? 'substation'
     : 'unknown';
 }
@@ -89,7 +90,7 @@ async function reuseExtractedSources(
   sourceSha256: string | null,
   magic: string,
 ): Promise<ExtractedGimSource | null> {
-  if (projectId == null || !sourceSha256 || magic !== 'GIMPKGS' || !isTauri()) return null;
+  if (projectId == null || !sourceSha256 || !isTauri()) return null;
   try {
     const { readExtractionManifest, createDiskBackedFile } = await import('@desktop/gimExtract.js');
     const manifest = await readExtractionManifest(projectId);
@@ -303,6 +304,8 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
     try {
       const projectTypeResult = await detectGimProjectType(extracted.files);
       detectedType = projectTypeResult.type;
+      extracted.projectType = detectedType;
+      if (detectedType === 'equipment') context.projectTypeName = '设备模型';
       endDetect(undefined, { type: projectTypeResult.type });
       debugLog(DEBUG_RUNTIME_LOGS, '[GIM Runtime Detect]', {
         sourceMagic: source.magic,
@@ -331,6 +334,10 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
       if (detectedType === 'hybrid') {
         console.warn('[GIM] hybrid content detected; using Substation Runtime as the diagnostic fallback');
       }
+    } else if (source.runtimeType === 'substation' && detectedType === 'equipment') {
+      // GIMPKGS is shared by stations and standalone equipment. This refines
+      // the family using the actual Device entry, never a cache row.
+      routingType = 'equipment';
     } else if (detectedRuntime !== 'unknown' && detectedRuntime !== source.runtimeType) {
       console.warn('[GIM] source magic/content type mismatch; source magic wins routing:', {
         sourceMagic: source.magic,
@@ -352,12 +359,15 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
   }
 
   if (routingType === 'unknown') {
-    showLoading('无法识别 GIM 工程类型：既未检测到 IFC，也未检测到线路工程特征');
+    showLoading('无法识别 GIM 内容：未检测到变电、线路或独立设备入口');
     setTimeout(hideLoading, 4000);
     return;
   }
 
-  if (routingType === 'transmission_line') {
+  if (routingType === 'equipment') {
+    const { openEquipmentProject } = await import('./equipmentRuntime.js');
+    await openEquipmentProject(context);
+  } else if (routingType === 'transmission_line') {
     await openPowerlineProject(context);
   } else {
     await openSubstationProject(context);

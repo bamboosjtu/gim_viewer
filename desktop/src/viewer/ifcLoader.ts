@@ -100,9 +100,24 @@ function safeFragmentsUpdate(
   }
 }
 
-/** 初始化 IFC 引擎（仅首次调用生效） */
+// Viewer readiness also covers DEV-only projects, which never initialize IFC.
+// Own IFC initialization by its persistent context, including concurrent calls.
+// A rejected setup is removed so the next open can retry in the same window.
+const engineInitializations = new WeakMap<ViewerContext, Promise<void>>();
+
+/** 初始化 IFC 引擎；不以设备视图的交互状态判断 WASM/worker 是否就绪。 */
 export async function initEngine(ctx: ViewerContext, state: AppState): Promise<void> {
-  if (state.initialized) return;
+  let initialization = engineInitializations.get(ctx);
+  if (!initialization) {
+    initialization = initializeIfcEngine(ctx);
+    engineInitializations.set(ctx, initialization);
+    void initialization.catch(() => { engineInitializations.delete(ctx); });
+  }
+  await initialization;
+  state.initialized = true;
+}
+
+async function initializeIfcEngine(ctx: ViewerContext): Promise<void> {
 
   debugLog(DEBUG_IFC_LOAD, '[IFC Engine] init start', {
     href: window.location.href,
@@ -139,7 +154,6 @@ export async function initEngine(ctx: ViewerContext, state: AppState): Promise<v
     // 内部 "Malformed tile" 异常不能变成 Uncaught promise
     safeFragmentsUpdate(ctx, 'camera-controls-update', false);
   });
-  state.initialized = true;
   debugLog(DEBUG_IFC_LOAD, '[IFC Engine] ready');
 }
 

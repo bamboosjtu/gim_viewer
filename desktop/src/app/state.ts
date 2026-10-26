@@ -351,7 +351,7 @@ export class AppState {
       ) === runtimeModelId);
   }
 
-  // 引擎
+  // 视图已可交互（含 DEV-only）；IFC WASM/worker 的初始化由 ifcLoader 独立管理。
   initialized = false;
   eventsRegistered = false;
   hasFittedCamera = false;

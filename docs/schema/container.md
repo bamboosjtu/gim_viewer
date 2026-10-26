@@ -12,19 +12,20 @@ GIMPKG* + 可变元数据/零填充 + 压缩 payload
 |---|---|
 | `GIMPKGS` | 变电源类型 |
 | `GIMPKGT` | 线路源类型 |
+| 无自定义头、偏移零的 7z/ZIP | 容器可解压，类型仍须校验实际语义入口；设备样本实证为裸 7z |
 | `37 7A BC AF 27 1C` | 7z payload 签名 |
 | `50 4B 03 04` | ZIP payload 签名 |
 
 当前实现在头部搜索窗口内定位压缩签名，窗口上限 1 MiB。
 定位后仍须通过解压器和资源/路径约束校验，签名命中本身不证明归档合法。
-十个在册包全部是 7z；ZIP 是实现兼容分支，不能由十包统计宣称已获真实 ZIP 样本验收。
+原十个工程包与新增设备库样本的压缩载荷均为 7z；ZIP 是实现兼容及合成测试分支，不宣称已获真实 ZIP 样本验收。
 包中的 payload 位置见 [台账](sample-corpus.md)。
 
 头部含源工程元数据，字段分段和长度不应写成固定偏移的通用协议。
 移动端在册分段头部识别同时检查 784 字节头长度、NUL 填充、`QGDW2` 标识、年份和导出日期形状；匹配后分别投影工程名、设计单位、原始单位、导出软件/时间与标准标识。
 这仅描述当前六线路源包的布局证据，不覆盖其他导出格式。单位字段的业务角色不由单位名称推定；未知布局保留原始文本段、字节偏移与编码，不赋予未经验证的字段名。
 
-源 magic 用于工程类型，文件名、缓存 projectType 或 ENTITYNAME 大小写不能替代它。
+源 magic 用于类型族，文件名、缓存 projectType 或 ENTITYNAME 大小写不能替代它。GIMPKGS 同时存在工程与独立设备形态，须依据 CBM 入口细分；裸归档没有足以决定类型的 GIM magic，须经内容校验。
 非 magic 元数据可供诊断，不用未经确认的字段布局驱动业务分支。
 
 实现入口：[gimExtractor](../../desktop/src/gim/gimExtractor.ts)、[projectType](../../desktop/src/gim/projectType.ts)、[原生解压](../../desktop/src-tauri/src/gim_extract.rs)。
@@ -60,7 +61,7 @@ STL 不必存在，DEV/PHM/MOD 数量不必相等；SCH/STD/SLD 也不是所有�
 
 ## 文本和空值
 
-文本读取处理 UTF-8 BOM、CRLF/LF 和空行。CBM/DEV/PHM/SCH 常为 `KEY=VALUE` 变体；FAM 使用分节和多段 `=`，HNum 使用逗号记录，XML/SVG 由结构 parser 处理。
+文本读取处理 UTF-8 BOM、CRLF/LF 和空行。独立设备的 CBM/DEV/FAM 还存在 GBK：设备运行时先严格 UTF-8 解码，失败后按 GB18030 兼容读取，原始源字节保留。CBM/DEV/PHM/SCH 常为 `KEY=VALUE` 变体；FAM 使用分节和多段 `=`，HNum 使用逗号记录，XML/SVG 由结构 parser 处理。
 不能用同一个全局 Map 解析全部文本文件。
 
 键和 ENTITYNAME 比较使用各 parser 的归一化规则；XML primitive 标签保留大小写敏感。

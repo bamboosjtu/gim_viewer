@@ -12,17 +12,43 @@ import { cleanupBeforeOpenNewProject } from '../projectCleanupService.js';
 import { perfMemorySnapshot, perfRuntimeResourceSnapshot } from '../../utils/perfTimings.js';
 import { setStatusRight } from '../../ui/shell/statusBar.js';
 import { setProjectIdentity } from '../../ui/shell/projectBar.js';
+import { getViewerRuntime, isViewerRuntimeCreated } from '../../viewer/viewerRuntime.js';
 
 // mock 掉重依赖的动态导入目标，避免 jsdom 下加载 three/maplibre 链路
-vi.mock('../ui/lineProjectView.js', () => ({ destroyLineMapView: vi.fn() }));
-vi.mock('../viewer/viewerRuntime.js', () => ({
+vi.mock('../../ui/lineProjectView.js', () => ({ destroyLineMapView: vi.fn() }));
+vi.mock('../../viewer/viewerRuntime.js', () => ({
   isViewerRuntimeCreated: vi.fn(() => false),
   getViewerRuntime: vi.fn(),
 }));
-vi.mock('../ui/sldView.js', () => ({ clearSldView: vi.fn() }));
-vi.mock('../ui/tabs.js', () => ({ showAllTabs: vi.fn() }));
+vi.mock('../../ui/sldView.js', () => ({ clearSldView: vi.fn() }));
+vi.mock('../../ui/tabs.js', () => ({ showAllTabs: vi.fn() }));
 
 describe('cleanupBeforeOpenNewProject（P1 竞态修复）', () => {
+  it('未初始化 IFC 的设备视图仍完整释放 DEV 场景并记录资源归零', async () => {
+    const state = new AppState(), scene = new THREE.Scene(), root = new THREE.Group();
+    const geometry = new THREE.BoxGeometry(), dispose = vi.spyOn(geometry, 'dispose');
+    root.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial()));
+    scene.add(root);
+    state.currentProjectType = 'equipment';
+    state.initialized = true;
+    state.modRootGroup = root;
+    const ctx = {
+      world: { scene: { three: scene } },
+      fragments: {
+        initialized: false,
+        get list() { throw new Error('FragmentsManager not initialized'); },
+        get core() { throw new Error('FragmentsManager not initialized'); },
+      },
+    };
+    vi.mocked(isViewerRuntimeCreated).mockReturnValueOnce(true);
+    vi.mocked(getViewerRuntime).mockResolvedValueOnce({ ctx } as any);
+    expect(await cleanupBeforeOpenNewProject(state)).toBe(true);
+    expect(root.parent).toBeNull();
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(state.modRootGroup).toBeNull();
+    expect(perfRuntimeResourceSnapshot().find((item) => item.label === 'beforeCleanup')?.fragmentModelCount).toBe(0);
+  });
+
   it('清理线路后重置工程导航与状态栏，避免残留线路统计', async () => {
     document.body.innerHTML = `
       <div id="project-title"></div>

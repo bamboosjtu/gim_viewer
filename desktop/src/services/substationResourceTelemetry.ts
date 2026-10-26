@@ -162,7 +162,10 @@ function collectCbmNodeCount(root: unknown): number {
 }
 
 function getFragmentModelCount(ctx: ViewerContext | null | undefined): number | null {
-  const list = asObject(asObject(ctx)?.fragments)?.list;
+  const fragments = asObject(asObject(ctx)?.fragments);
+  // A DEV-only viewer owns no IFC models and its list getter requires init().
+  if (fragments?.initialized === false) return 0;
+  const list = fragments?.list;
   const size = asObject(list)?.size;
   return countOrNull(size);
 }

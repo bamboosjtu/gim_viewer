@@ -33,6 +33,11 @@ const MAX_ENTRY_PATH_BYTES: usize = 4096;
 
 /// 在头部之后搜索压缩数据偏移（先 7z 后 ZIP，1MB 窗口）
 fn find_archive_offset(data: &[u8]) -> Option<usize> {
+    // Standalone equipment exports may be a bare archive. Content validation
+    // in the desktop runtime still requires a semantic Device entry.
+    if data.starts_with(&SEVENZ_SIG) || data.starts_with(&ZIP_SIG) {
+        return Some(0);
+    }
     if data.len() < GIM_PACKAGE_MAGIC.len() || &data[..GIM_PACKAGE_MAGIC.len()] != GIM_PACKAGE_MAGIC
     {
         return None;
@@ -290,7 +295,9 @@ fn parse_archive_prefix(data: &[u8]) -> Result<(usize, ExtractionMetadata, bool)
     let offset = find_archive_offset(data)
         .ok_or_else(|| "未找到有效的 GIMPKG* 头部或压缩数据签名".to_string())?;
     let (project_id, project_name) = parse_header_fields(data, offset);
-    let magic = String::from_utf8_lossy(&data[..magic_len(data)]).to_string();
+    let magic = if offset == 0 {
+        if data.starts_with(&SEVENZ_SIG) { "7z".to_string() } else { "zip".to_string() }
+    } else { String::from_utf8_lossy(&data[..magic_len(data)]).to_string() };
     let is_sevenz = data[offset..].starts_with(&SEVENZ_SIG);
     Ok((
         offset,
@@ -851,8 +858,9 @@ pub fn extract_from_bytes_with_quota(
     let offset = find_archive_offset(data)
         .ok_or_else(|| "未找到有效的 GIMPKG* 头部或压缩数据签名".to_string())?;
     let (project_id, project_name) = parse_header_fields(data, offset);
-    let magic_bytes = &data[..magic_len(data)];
-    let magic = String::from_utf8_lossy(magic_bytes).to_string();
+    let magic = if offset == 0 {
+        if data.starts_with(&SEVENZ_SIG) { "7z".to_string() } else { "zip".to_string() }
+    } else { String::from_utf8_lossy(&data[..magic_len(data)]).to_string() };
 
     let archive_data = &data[offset..];
     let is_sevenz = archive_data.starts_with(&SEVENZ_SIG);
@@ -1072,6 +1080,16 @@ mod tests {
         std::fs::write(root.join("source/empty.mod"), b"").unwrap();
         std::fs::write(root.join("source/project.cbm"), b"TYPE=TRANS_LINE").unwrap();
         sevenz_rust::compress_to_path(root.join("source"), root.join("archive.7z")).unwrap();
+        let raw = std::fs::read(root.join("archive.7z")).unwrap();
+        let bare = extract_from_bytes_with_quota(&raw, &ExtractionQuota::default()).unwrap();
+        assert_eq!(bare.magic, "7z");
+        assert_eq!(bare.entries.len(), 2);
+        let mut bare_paths = vec![];
+        let bare_meta = extract_from_path_with_quota(&root.join("archive.7z"), &ExtractionQuota::default(),
+            |path, _| { bare_paths.push(path.to_string()); Ok(()) }).unwrap();
+        assert_eq!(bare_meta.magic, "7z");
+        assert_eq!(bare_paths.len(), 2);
+        assert!(extract_from_bytes_with_quota(&raw, &ExtractionQuota { max_entries: 1, ..ExtractionQuota::default() }).is_err());
         let gim = build_gim_bytes(&std::fs::read(root.join("archive.7z")).unwrap(), b'T', "test");
         let decoded = extract_from_bytes_with_quota(&gim, &ExtractionQuota::default()).unwrap();
         assert_eq!(decoded.entries.len(), 2);
@@ -1121,6 +1139,10 @@ mod tests {
             w.finish().unwrap();
         }
         let zip_bytes = zip_buf.into_inner();
+        let bare = extract_from_bytes_with_quota(&zip_bytes, &ExtractionQuota::default()).unwrap();
+        assert_eq!(bare.magic, "zip");
+        assert!(bare.project_name.is_none());
+        assert_eq!(bare.entries.len(), 2);
         let gim = build_gim_bytes(&zip_bytes, b'T', "测试线路");
 
         let result =

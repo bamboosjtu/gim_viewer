@@ -17,6 +17,7 @@
  */
 
 import * as THREE from 'three';
+import { isUsableAffineMatrix } from '../gim/geometry/affineMatrix.js';
 import { freezeContainerLocalMatrix } from '../viewer/staticContainer.js';
 import { GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
 import type { CbmNode } from '../gim/types.js';
@@ -323,7 +324,7 @@ const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 export function parseCbmTransformMatrix(raw: string | undefined): number[] {
   if (!raw) return IDENTITY_MATRIX.slice();
   const values = raw.split(',').map((part) => Number(part.trim()));
-  if (values.length !== 16 || values.some((value) => !Number.isFinite(value))) {
+  if (raw.split(',').some(part => !part.trim()) || !isUsableAffineMatrix(values)) {
     return IDENTITY_MATRIX.slice();
   }
   return values;

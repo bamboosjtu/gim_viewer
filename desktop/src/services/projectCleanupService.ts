@@ -172,12 +172,15 @@ export async function cleanupBeforeOpenNewProject(
       for (const [logicalModelId, loaded] of state.loadedModels) {
         ids.add(loaded.runtimeModelId || state.ifcRuntimeModelIds.get(logicalModelId) || logicalModelId);
       }
-      for (const modelId of ctx.fragments.list.keys()) ids.add(modelId);
+      // DEV-only viewers have no Fragments core yet; list also accesses core.
+      // Still continue below to release their MOD/STL resources and highlights.
+      const fragments = ctx.fragments.initialized ? ctx.fragments : null;
+      if (fragments) for (const modelId of fragments.list.keys()) ids.add(modelId);
 
       attemptedCount = ids.size;
       for (const modelId of ids) {
         try {
-          await ctx.fragments.core.disposeModel(modelId);
+          if (fragments) await fragments.core.disposeModel(modelId);
           if (!isCurrentCleanup()) return false;
           disposedCount++;
         } catch (err) {
@@ -187,7 +190,7 @@ export async function cleanupBeforeOpenNewProject(
 
       // Fragments clears its shared coordinate anchor only after the last
       // asynchronous model disposal. Never let the next open race that reset.
-      if (ctx.fragments.list.size !== 0) {
+      if (fragments && fragments.list.size !== 0) {
         console.error('[Cleanup] 旧 IFC 模型尚未释放，停止打开以免复用错误坐标基准');
         return false;
       }

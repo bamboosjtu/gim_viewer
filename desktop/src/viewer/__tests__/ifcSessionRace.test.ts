@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import { loadIfcEntry } from '../ifcEntryLoader.js';
-import { registerModelEvents } from '../ifcLoader.js';
+import { ensureEngineReady, initEngine, registerModelEvents } from '../ifcLoader.js';
+vi.mock('../wasmAssets.js', () => ({ resolveWebIfcWasmBaseUrl: async () => 'https://localhost/wasm/' }));
 vi.mock('../ifcConversion.js', () => ({ loadRawIfc: (ctx:any,_state:any,_session:any,bytes:Uint8Array,id:string) =>
   ctx.ifcLoader.load(bytes,true,id), cancelIfcConversions:vi.fn() }));
 
@@ -38,6 +39,65 @@ function createModel(modelId: string): Model {
     useCamera: vi.fn(),
   };
 }
+
+function createEngine() {
+  let ready = false;
+  const core = { models: { materials: { list: { onItemSet: { add: vi.fn() } } } } };
+  return {
+    ifcLoader: { setup: vi.fn().mockResolvedValue(undefined) },
+    world: { camera: { controls: { addEventListener: vi.fn() } } },
+    fragments: {
+      init: vi.fn(() => { ready = true; }),
+      get core() {
+        if (!ready) throw new Error('FragmentsManager not initialized. Call init() first.');
+        return core;
+      },
+      list: { onItemSet: { add: vi.fn() }, onBeforeDelete: { add: vi.fn() }, onItemDeleted: { add: vi.fn() } },
+    },
+  };
+}
+
+describe('IFC initialization across project switches', () => {
+  it('设备视图已就绪时仍初始化 IFC，切回变电时复用引擎与监听', async () => {
+    const ctx = createEngine();
+    const state = new AppState();
+    state.initialized = true; // DEV-only equipment made the viewer interactive.
+    const callbacks = { onModelAdded: vi.fn(), onModelRemoved: vi.fn() };
+    await ensureEngineReady(ctx as any, state, callbacks);
+    state.resetGimState(); // station → equipment → station keeps the viewer alive.
+    await ensureEngineReady(ctx as any, state, callbacks);
+    expect(ctx.ifcLoader.setup).toHaveBeenCalledTimes(1);
+    expect(ctx.fragments.init).toHaveBeenCalledTimes(1);
+    expect(ctx.world.camera.controls.addEventListener).toHaveBeenCalledTimes(1);
+    expect(ctx.fragments.list.onItemSet.add).toHaveBeenCalledTimes(1);
+  });
+
+  it('并发初始化只启动一次 WASM/worker', async () => {
+    const ctx = createEngine(), state = new AppState(), setup = deferred<void>();
+    ctx.ifcLoader.setup.mockReturnValue(setup.promise);
+    const first = initEngine(ctx as any, state), second = initEngine(ctx as any, state);
+    await Promise.resolve();
+    expect(ctx.ifcLoader.setup).toHaveBeenCalledTimes(1);
+    expect(state.initialized).toBe(false);
+    setup.resolve(undefined);
+    await Promise.all([first, second]);
+    expect(ctx.fragments.init).toHaveBeenCalledTimes(1);
+    expect(state.initialized).toBe(true);
+  });
+
+  it('初始化失败后可以在同一视图重试', async () => {
+    const ctx = createEngine(), state = new AppState();
+    state.initialized = true;
+    ctx.ifcLoader.setup.mockRejectedValueOnce(new Error('setup failed'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(initEngine(ctx as any, state)).rejects.toThrow('setup failed');
+      await initEngine(ctx as any, state);
+      expect(ctx.ifcLoader.setup).toHaveBeenCalledTimes(2);
+      expect(ctx.fragments.init).toHaveBeenCalledTimes(1);
+    } finally { log.mockRestore(); }
+  });
+});
 
 /**
  * 回归：工程 A 的慢 IFC 在切换到工程 B 后才完成，不得进入 B 的

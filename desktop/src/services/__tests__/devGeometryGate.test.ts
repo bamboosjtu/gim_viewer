@@ -18,6 +18,16 @@ import { parseDev } from '../../gim/geometry/devParser.js';
 import { primitiveToGeometry, collectBakedGeometriesByMaterial } from '../../viewer/xmlModGeometry.js';
 import { primitiveBounds } from '../devSpatialCatalog.js';
 
+it('rejects non-affine/collapsed CBM placements without rejecting reflections or small unit scales', () => {
+  const identity = new THREE.Matrix4().toArray();
+  expect(parseCbmTransformMatrix('1,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1')).toEqual(identity);
+  expect(parseCbmTransformMatrix(new THREE.Matrix4().makeScale(1,0,1).toArray().join(','))).toEqual(identity);
+  for (const scale of [-1, 1e-6]) {
+    const matrix = new THREE.Matrix4().makeScale(scale, scale, scale).toArray();
+    expect(parseCbmTransformMatrix(matrix.join(','))).toEqual(matrix);
+  }
+});
+
 it.skipIf(process.env.GIM_VERIFY_SUBSTATION02_LOCAL !== '1')('substation02 body and radiator use direction times length with matching analytic bounds', () => {
   const cases = [
     { mod: 'ef0aebb2-b935-4d38-a1f6-911ec066abe2', count: 38, axis: 'x' as const, end: 3860.0013 },
