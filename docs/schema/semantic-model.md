@@ -32,6 +32,10 @@ CBM 提供来源骨架与引用图，FAM 提供原始属性。业务身份、图
 非空引用按全局 resolver 解析。引用目标、原键、所属节点和原路径应可追踪。
 缺失目标和无法唯一解析分别记录。FDR/DGN 等设计来源保留文件和设备关联，即使设备列表为空也保留文件事实；它们不是 IFCGUID 对象关联。
 
+## 独立设备入口
+
+独立设备采用唯一的 `ENTITYNAME=Device` CBM，文件可用 UUID 命名而没有 `project.cbm`。通过其 `OBJECTMODELPOINTER` 指向根 DEV，子装配沿 DEV 的 SUBDEVICE 引用展开，不补造 F1–F4 节点，也不把虚拟子设备当作第二个几何 seed。根 DEV 的 SYMBOLNAME 优先作为设备名称，FAM 来源按实际 BASEFAMILY/BASEFAMILYPOINTER 读取。设备库中另有完整 project→F1–F4 形态，按该形态解析，不能仅按所在目录认定都是独立 Device 包。
+
 ## 变电层级
 
 ```text

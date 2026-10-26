@@ -83,7 +83,9 @@ function renderRecentList(
       const button = document.createElement('button');
       button.type = 'button';
       button.className = target.id === 'menu-recent-projects' ? '' : 'recent-project';
-      const typeLabel = project.projectType === 'transmission_line' ? '线路' : '变电';
+      const typeLabel = project.projectType === 'transmission_line' ? '线路'
+        : project.projectType === 'equipment' ? '设备'
+        : project.projectType === 'substation' ? '变电' : 'GIM';
       const ago = formatRelativeTime(project.updatedAt);
       const meta = ago ? `${typeLabel} · ${ago}` : typeLabel;
       if (target.id === 'menu-recent-projects') {
@@ -150,11 +152,11 @@ export function setupViewerShell(state: AppState): void {
         const viewItem = document.getElementById('menu-previous-view');
         if (viewItem) viewItem.hidden = !state.viewHistory?.canGoBack;
         const onlyItem = document.getElementById('menu-only-selected');
-        if (onlyItem) onlyItem.hidden = state.currentProjectType !== 'substation' || !state.selectionRequest?.target || state.onlySelected;
+        if (onlyItem) onlyItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.selectionRequest?.target || state.onlySelected;
         const allItem = document.getElementById('menu-show-all');
-        if (allItem) allItem.hidden = state.currentProjectType !== 'substation' || !state.onlySelected;
+        if (allItem) allItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.onlySelected;
         const overviewItem = document.getElementById('menu-station-overview');
-        if (overviewItem) overviewItem.hidden = state.currentProjectType !== 'substation' || !state.stationOverview;
+        if (overviewItem) overviewItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.stationOverview;
         void refreshRecent();
       }
     });

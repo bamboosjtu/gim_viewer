@@ -327,7 +327,7 @@ export function syncSelectedTreeRow(state: AppState): void {
   const target=state.selectionRequest?.target;
   if (!target) return;
   let rowKey=target.key;
-  if (target.kind==='cbm' && state.currentCbmTree && state.substationNavMode==='functional') {
+  if (target.kind==='cbm' && state.currentProjectType==='substation' && state.currentCbmTree && state.substationNavMode==='functional') {
     rowKey=revealFunctionalSearchTarget(buildFunctionalDomainIndex(state.currentCbmTree,state.cachedFamSourceProperties),target.key) ?? target.key;
   } else if (state.substationNavMode==='spatial' && state.substationSpatialIndex && target.kind!=='ifc-element') {
     const paginationKey=revealSpatialSearchTarget(state.substationSpatialIndex,target.key);
@@ -348,7 +348,7 @@ export function handleSubstationPropertyReference(
   detail: PropertyReferenceDetail,
   showMessage: (text: string) => void = () => undefined,
 ): boolean {
-  if (state.currentProjectType !== 'substation') return false;
+  if (state.currentProjectType !== 'substation' && state.currentProjectType !== 'equipment') return false;
   const normalized = detail.path.replace(/\\/g, '/').toLowerCase();
   const fileName = normalized.split('/').pop() || normalized;
   const nodes: CbmNode[] = [];

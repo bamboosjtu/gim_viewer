@@ -1,6 +1,6 @@
 # 系统架构
 
-当前实现包含 Tauri 2 桌面应用和 Android 线路应用，前端使用 TypeScript/Vite，后端使用 Rust。解析输入、业务编排、视图和持久化有独立职责。变电与线路共享容器与生命周期，使用不同运行时。
+当前实现包含 Tauri 2 桌面应用和 Android 线路应用，前端使用 TypeScript/Vite，后端使用 Rust。解析输入、业务编排、视图和持久化有独立职责。桌面变电、线路与独立设备共享容器与生命周期；设备复用 DEV 浏览运行时，Android 仍只面向线路。
 
 ## 目录与所有权
 
@@ -24,7 +24,9 @@
 
 ## 源身份与打开生命周期
 
-[打开核心](../desktop/src/services/gimOpenCore.ts) 建立源 SHA、大小、magic 和工程会话。源 magic 决定工程类型，缓存记录不能覆盖它。读取期间源发生改变时拒绝继续提交，避免用不同源版本组合索引与几何。
+[打开核心](../desktop/src/services/gimOpenCore.ts) 建立源 SHA、大小、magic 和工程会话。源 magic 决定类型族，GIMPKGS 根据实际 CBM 入口细分独立设备；裸归档必须先验证内容。缓存记录不能覆盖源事实。读取期间源发生改变时拒绝继续提交，避免用不同源版本组合索引与几何。
+
+[设备运行时](../desktop/src/services/equipmentRuntime.ts) 读取唯一 Device CBM，沿原 DEV 装配建立树，复用 DEV LOD、选择、属性、相机和释放逻辑。设备语义文本在本次输入中兼容解码，源文件不重写；MOD/STL 仍由既有工作集按需读取。不等待不存在的 IFC 锚点，直接采用 Z-up→Y-up 旋转；毫米到米转换仍由原几何编译器负责。重复打开复用已验证的源解压清单及版本化 DEV 派生缓存，设备树重新解析，不发布完整变电语义缓存标记。无 IFC 的合法工程层级也复用该几何启动器。
 
 ```text
 选择源文件 → 身份校验 → 清理前工程 → 校验缓存
@@ -160,8 +162,8 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
 | 变电语义 | `gim-substation-parser-v26` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性、语义引用及索引发布凭据 |
-| DEV 几何 | `geometry-cache-v14-outline-lod01` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
-| 设备 LOD 派生 | `geometry-cache-v14-outline-lod01` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
+| DEV 几何 | `geometry-cache-v15-stretch-direction` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
+| 设备 LOD 派生 | `geometry-cache-v15-stretch-direction` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
 | Spatial snapshot | `substation-spatial-semantic-v2` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 源、链接和序列化结构 |
 | IFC Spatial parser contract | `gim-substation-parser-v23` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | Fragments | `fragments-cache-v6` | [db.rs](../desktop/src-tauri/src/db.rs)、[features](../desktop/src/config/features.ts) | 源/IFC 身份及实际安装的 fragments/web-ifc 版本 |

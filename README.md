@@ -1,22 +1,24 @@
 # GIM Viewer
 
 面向电网工程信息模型的本地浏览器：变电工程提供 CBM 层级、IFC/MOD/STL 三维与属性，线路工程提供塔位、导线、跨越对象的地图和来源浏览。
-桌面端支持变电与线路；Android 线路端，提供现场地图、工程树、来源与定位。
+桌面端支持变电、线路与独立设备 GIM；Android 线路端，提供现场地图、工程树、来源与定位。
 
 ## 下载与安装
 
-GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览工具，提供 Windows 桌面版和 Android 移动版。当前桌面源码版本为 **v0.1.1**；下载页面以实际发布附件为准。Android 移动版仍为预览版（Preview），本轮桌面版本不改变 Android 版本。
+GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览工具，提供 Windows 桌面版和 Android 移动版。当前桌面源码版本为 **v0.1.2**；下载页面以实际发布附件为准。Android 移动版仍为预览版（Preview），本轮桌面版本不改变 Android 版本。
 
 | 平台          | 当前版本       | 下载                                                         | 主要功能                                                 |
 | ------------- | -------------- | ------------------------------------------------------------ | -------------------------------------------------------- |
-| Windows x64   | v0.1.1（源码） | [已发布 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站三维模型、输电线路地图、最近工程、工程层级与属性浏览 |
+| Windows x64   | v0.1.2（源码） | [已发布 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站和设备三维模型、输电线路地图、层级与属性浏览 |
 | Android ARM64 | v0.1.16 Preview | [下载 APK](https://github.com/bamboosjtu/gim_viewer/releases/download/android-v0.1.6-preview/gim-viewer-android-ae7df06cc83ebde26fc2cb17faf003d7b2fd8a2f.zip) | 输电线路地图、工程树、杆塔与导线属性、来源查看和现场定位 |
 
 历史版本及发布说明：[GitHub Releases](https://github.com/bamboosjtu/gim_viewer/releases)
 
-### v0.1.1 桌面变更
+### v0.1.2 桌面能力
 
-本版集中改进工程浏览：普通选择、搜索定位及相机靠近采用 L0/L1，DEV 和 IFC 的 L2 由属性面板“查看精细模型”主动触发；基础表示、连接线、当前视图和精化分别记录状态。DEV 调度加入 gate 唤醒、慢任务隔离与结果预算，连接线真实源几何增量显示，诊断读取复用会话状态；新增视角历史、大分支虚拟列表和内存压力反馈。
+支持以独立 Device CBM 为入口的设备 GIM，包括带 GIMPKGS 头和裸 7z 容器；无需 project.cbm 或 IFC。设备层级、中文属性、搜索、三维选择和几何缓存复用现有浏览能力，无 IFC 的工程层级包也可自动显示 DEV 几何。拉伸体兼容单位方向和 304.8 mm 方向基矢，几何与范围计算采用同一解释。
+
+普通选择、搜索定位及相机靠近采用 L0/L1，DEV 和 IFC 的 L2 由属性面板“查看精细模型”主动触发；基础表示、连接线、当前视图和精化分别记录状态。DEV 调度保留 gate 唤醒、慢任务隔离与结果预算，支持视角历史、大分支虚拟列表和内存压力反馈。
 
 DEV 实例化仍为默认关闭的试点：原生对照已减少绘制调用，但基础表示启动存在回退。选择响应、IFC 隔离显示及选择提示仍有未关闭问题，完整冷暖/工程切换矩阵尚未通过。本版不宣称全站性能已达标，也不提供编辑、碰撞或工程校核功能。具体实现、测量和限制分别见[架构](docs/architecture.md)、[性能基线](docs/performance.md)及[问题清单](docs/open-issues.md)。
 

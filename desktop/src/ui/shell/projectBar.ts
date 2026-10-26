@@ -6,7 +6,7 @@
  */
 
 /** 工程类型的显示名与徽标文案 */
-export type ProjectKind = 'substation' | 'transmission_line' | null;
+export type ProjectKind = 'substation' | 'transmission_line' | 'equipment' | null;
 
 let currentKind: ProjectKind = null;
 
@@ -14,7 +14,7 @@ let currentKind: ProjectKind = null;
 export function setProjectIdentity(name: string | null, kind: ProjectKind): void {
   currentKind = kind;
   // This preference has no role in a powerline project.
-  document.getElementById('btn-ifc-opening-policy')?.classList.toggle('hidden', kind === 'transmission_line');
+  document.getElementById('btn-ifc-opening-policy')?.classList.toggle('hidden', kind === 'transmission_line' || kind === 'equipment');
   const titleEl = document.getElementById('project-title');
   const badgeEl = document.getElementById('project-type-badge');
   if (titleEl) titleEl.textContent = name || '未打开工程';
@@ -25,7 +25,7 @@ export function setProjectIdentity(name: string | null, kind: ProjectKind): void
     badgeEl.textContent = '';
     return;
   }
-  badgeEl.textContent = kind === 'substation' ? '变电工程' : '线路工程';
+  badgeEl.textContent = kind === 'equipment' ? '设备模型' : kind === 'substation' ? '变电工程' : '线路工程';
   badgeEl.classList.remove('hidden');
 }
 

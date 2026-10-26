@@ -76,7 +76,7 @@ async function bootstrapAsync(): Promise<void> {
       }).catch((error) => console.warn('[属性引用] 线路路由加载失败:', error));
       return true;
     }
-    if (state.currentProjectType === 'substation') {
+    if (state.currentProjectType === 'substation' || state.currentProjectType === 'equipment') {
       void import('../ui/cbmTreeView.js').then(({ handleSubstationPropertyReference }) => {
         handleSubstationPropertyReference(state, detail, (text) => setStatusRight(text));
       }).catch((error) => console.warn('[属性引用] 变电路由加载失败:', error));

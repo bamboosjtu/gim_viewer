@@ -1944,6 +1944,11 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
 
   const extractedSource = await context.getExtracted();
   if (!state.isCurrentSession(session)) return;
+  if (extractedSource.projectType === 'equipment') {
+    const { openEquipmentProject } = await import('./equipmentRuntime.js');
+    if (state.isCurrentSession(session)) await openEquipmentProject(context);
+    return;
+  }
   let extracted = extractedSource.files;
   if (extractedSource.cacheProjectId != null) {
     const endHydrate = perfBegin('变电小文件批量物化', undefined, perfSession);
@@ -1990,7 +1995,12 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   );
   if (!state.isCurrentSession(session)) return;
   if (entries.length === 0) {
-    showLoading('该工程未检测到 IFC 文件；如果这是线路工程，请检查工程类型识别日志');
+    if (state.currentCbmTree) {
+      const { startGeometryOnlyView } = await import('./equipmentRuntime.js');
+      if (state.isCurrentSession(session)) await startGeometryOnlyView(context);
+      return;
+    }
+    showLoading('该工程没有可用的 CBM 模型入口或 IFC 文件');
     setTimeout(() => { if (state.isCurrentSession(session)) hideLoading(); }, 4000);
     return;
   }

@@ -18,7 +18,6 @@
 
 import type { AppState } from '../app/state.js';
 import type { GimGraph, GimGraphNode } from '../gim/gimGraphTypes.js';
-import type { GimProjectType } from '../gim/projectType.js';
 import type { LineGraphResult } from '@desktop/database.js';
 import { LineRefKind, ARRAY_REF_FIELDS } from '../gim/lineRefKind.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
@@ -162,8 +161,8 @@ export function restoreLineGraphToState(state: AppState, result: LineGraphResult
     other: [],
   };
 
-  const projectType: GimProjectType =
-    (result.project_type as GimProjectType) || 'transmission_line';
+  const projectType: GimGraph['projectType'] =
+    (result.project_type as GimGraph['projectType']) || 'transmission_line';
 
   const graph: GimGraph = {
     projectType,

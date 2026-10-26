@@ -7,7 +7,7 @@ import { discoverGeometriesFromDevPath } from './modGeometryDiscovery.js';
 import { getFileByPath } from '../gim/fileLookup.js';
 
 export const DEV_SPATIAL_CATALOG_VERSION = 'dev-spatial-catalog-v2';
-export const DEV_GEOMETRY_VERSION = 'geometry-cache-v14-outline-lod01';
+export const DEV_GEOMETRY_VERSION = 'geometry-cache-v15-stretch-direction';
 export type BoundsTuple = [number, number, number, number, number, number];
 export interface DevSourceBounds {
   devPath: string;

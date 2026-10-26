@@ -94,7 +94,7 @@ function extractDisplayName(kv: Record<string, string>, path: string): { name: s
  * - DEV_SUBDEVICE：DEV SUBDEVICES 展开的虚拟子设备节点
  */
 function isDeviceLayer(entityName: string): boolean {
-  return entityName === 'F4System' || entityName === 'PARTINDEX' || entityName === 'DEV_SUBDEVICE';
+  return entityName === 'F4System' || entityName === 'PARTINDEX' || entityName === 'DEV_SUBDEVICE' || entityName.toLowerCase() === 'device';
 }
 
 /** 解析 DEV 文件获取 SYMBOLNAME 和 TYPE（失败返回空值） */
@@ -172,7 +172,7 @@ function enhanceF3Name(baseName: string, children: CbmNode[]): string {
 }
 
 /** 从文件集合递归构建 CBM 层级树（含 DEV SYMBOLNAME 回填与 SUBDEVICES 展开） */
-export async function buildCbmTree(files: Map<string, File>, projectTypeName?: string): Promise<CbmNode | null> {
+export async function buildCbmTree(files: Map<string, File>, projectTypeName?: string, equipmentEntry?: string): Promise<CbmNode | null> {
   const visited = new Set<string>();
   const fileByLowerPath = new Map<string, File>();
   for (const [path, file] of files) fileByLowerPath.set(path.replace(/\\/g, '/').toLowerCase(), file);
@@ -334,9 +334,9 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     };
   }
 
-  const entryPath = files.has('CBM/project.cbm')
+  const entryPath = equipmentEntry ?? (files.has('CBM/project.cbm')
     ? 'CBM/project.cbm'
-    : Array.from(files.keys()).find((path) => path.replace(/\\/g, '/').toLowerCase() === 'cbm/project.cbm');
+    : Array.from(files.keys()).find((path) => path.replace(/\\/g, '/').toLowerCase() === 'cbm/project.cbm'));
   if (!entryPath) return null;
   return build(entryPath);
 }

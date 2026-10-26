@@ -1,7 +1,7 @@
 import { extractGimHeader, type GimHeaderInfo } from '../gim/gimExtractor.js';
 
 /** Runtime is selected from the source package, never from a cache row. */
-export type GimRuntimeType = 'transmission_line' | 'substation';
+export type GimRuntimeType = 'transmission_line' | 'substation' | 'equipment';
 export type GimSourceKind = GimRuntimeType | 'unknown';
 export type GimContentProjectType = GimSourceKind | 'hybrid';
 
@@ -68,12 +68,15 @@ export function resolveGimRuntimeType(
 ): GimSourceKind {
   if (sourceType !== 'unknown') return sourceType;
   if (contentType === 'transmission_line') return 'transmission_line';
+  if (contentType === 'equipment') return 'equipment';
   if (contentType === 'substation' || contentType === 'hybrid') return 'substation';
   return 'unknown';
 }
 
 /** Read the fixed-width magic without requiring an archive signature. */
 export function readGimMagic(bytes: Uint8Array): string {
+  if (bytes.length >= 6 && [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c].every((b, i) => bytes[i] === b)) return '7z';
+  if (bytes.length >= 4 && [0x50, 0x4b, 0x03, 0x04].every((b, i) => bytes[i] === b)) return 'zip';
   if (bytes.length < 6) return '';
   const prefix = String.fromCharCode(...bytes.slice(0, 7));
   if (prefix.startsWith('GIMPKGT') || prefix.startsWith('GIMPKGS')) return prefix.slice(0, 7);

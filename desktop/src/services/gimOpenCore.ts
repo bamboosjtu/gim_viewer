@@ -12,6 +12,8 @@ import { pushBusy, popBusy } from '../ui/shell/statusBar.js';
 
 export interface ExtractedGimSource {
   magic: string;
+  /** Content subtype; GIMPKGS also occurs on standalone device packages. */
+  projectType?: import('../gim/projectType.js').GimProjectType;
   sourceMaterialization?: Promise<void>;
   earlySemantic?: boolean;
   semanticCheckpoint?: Record<string, number | boolean>;

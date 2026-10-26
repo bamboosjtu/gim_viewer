@@ -13,9 +13,10 @@
 import { parseKeyValue } from './cbmParser.js';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
+import { findEquipmentEntry } from './equipmentModel.js';
 
 /** GIM 工程类型 */
-export type GimProjectType = 'substation' | 'transmission_line' | 'hybrid' | 'unknown';
+export type GimProjectType = 'substation' | 'transmission_line' | 'equipment' | 'hybrid' | 'unknown';
 
 /** 识别细节，便于日志输出和调试 */
 export interface GimProjectTypeDetails {
@@ -197,11 +198,18 @@ export async function detectGimProjectType(
 
   // hasIfc 判定 1：存在 IFC 文件
   let hasIfc = ifcCount > 0;
+  const scannedText = new Map<File, Promise<string>>();
+  const readText = (file: File): Promise<string> => {
+    let text = scannedText.get(file);
+    if (!text) { text = file.text(); scannedText.set(file, text); }
+    return text;
+  };
+  const equipmentEntry = !hasIfc ? await findEquipmentEntry(files, readText) : null;
 
   // 路径 casing 只用于决定“是否需要检查线路语义”，不能单独把带 IFC
   // 的变电工程判成 hybrid/line。无 IFC 时 PascalCase 布局仍是标准线路
   // 的快速信号。
-  let hasLineArtifacts = !hasIfc && (lineModCount > 0 || lineStlCount > 0);
+  let hasLineArtifacts = !equipmentEntry && !hasIfc && (lineModCount > 0 || lineStlCount > 0);
 
   const lineSignals = new Set<string>();
 
@@ -214,7 +222,7 @@ export async function detectGimProjectType(
     && lineCbmDirCount > 0
     && lineDevDirCount > 0
     && lineModDirCount > 0;
-  if (!hasIfc && (hasLineArtifacts || canonicalLineLayout)) {
+  if (!equipmentEntry && !hasIfc && (hasLineArtifacts || canonicalLineLayout)) {
     hasLineArtifacts = true;
     lineSignals.add('PascalCaseLayout:Cbm/Dev/Mod');
     textFilesToScan.length = 0;
@@ -233,6 +241,7 @@ export async function detectGimProjectType(
   if (canonicalSubstationLayout) {
     textFilesToScan.length = 0;
   }
+  if (equipmentEntry) textFilesToScan.length = 0;
 
   // 混合 casing + IFC 的工程仅做有界语义探测；不要让类型识别退化为
   // 数千次 DiskBackedFile.text() IPC。
@@ -244,7 +253,7 @@ export async function detectGimProjectType(
   for (const { file } of textFilesToScan) {
     let text: string;
     try {
-      text = await file.text();
+      text = await readText(file);
     } catch {
       continue;
     }
@@ -294,7 +303,7 @@ export async function detectGimProjectType(
   // 兜底：即使文本信号未命中（如 .cbm 文件超 256KB 未扫描、或 KEY 未覆盖），
   // 只要存在 PascalCase 布局（Cbm/Dev/Mod 三类目录均有文件）且无 IFC，
   // 即判定为线路工程，避免误走变电流程污染 project_type=substation。
-  if (!hasIfc && !hasLineArtifacts
+  if (!equipmentEntry && !hasIfc && !hasLineArtifacts
     && lineCbmDirCount > 0 && lineDevDirCount > 0 && lineModDirCount > 0) {
     hasLineArtifacts = true;
     lineSignals.add('PascalCaseLayout:Cbm/Dev/Mod');
@@ -305,7 +314,8 @@ export async function detectGimProjectType(
   const hasSemanticLineSignals = Array.from(lineSignals)
     .some((signal) => signal !== 'PascalCaseLayout:Cbm/Dev/Mod');
   let type: GimProjectType;
-  if (hasIfc && hasSemanticLineSignals) type = 'hybrid';
+  if (equipmentEntry) type = 'equipment';
+  else if (hasIfc && hasSemanticLineSignals) type = 'hybrid';
   else if (hasIfc) type = 'substation';
   else if (hasLineArtifacts) type = 'transmission_line';
   else type = 'unknown';
