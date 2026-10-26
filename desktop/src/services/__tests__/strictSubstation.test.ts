@@ -158,7 +158,12 @@ for (const [ordinal, sample] of samples.entries()) {
       for (const [dev, placements] of byDev) {
         let compiled;
         try {
-          compiled = await serializeDevToGlbDetailed(dev, files);
+          // This chain validates the browsing GLB cache written by the cold
+          // pipeline (L0 outline). Exact L2 CSG is a separate explicit
+          // refinement path with known long tails, and serializing 300+
+          // Boolean MODs at L2 in jsdom does not complete; L2 behaviour is
+          // covered by xmlModGeometry tests instead.
+          compiled = await serializeDevToGlbDetailed(dev, files, { lod: 0 });
         } catch (error) {
           if (!(error instanceof InvalidDevGeometryError) || !error.sourceEvidence) throw error;
           persisted.push({entry_path:`DEV/${dev}`,status:'source-invalid',size:0,diagnostic:`${error.message}; ${error.sourceEvidence}`});

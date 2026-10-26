@@ -73,7 +73,7 @@
 - 假设：在严格样本 Vitest 配置中复用统一 SQLite harness 准备，可直接跑通四站样本链。
 - 边界：`test:substation:strict` 真实样本入口；需要构建一次 Rust harness。
 - 结果：配置未接入 `sqliteGlobalSetup`，helper 注入路径为 undefined，四个在册样本均在入口失败；未形成可执行样本链。
-- 未保留：该测试入口的修复未混入本轮清理；缺陷由 [O-09](../open-issues.md) 单独跟踪。
+- 未保留：该测试入口的修复未混入本轮清理；后续已修复并跑通四站严格链，证据见[验证 §4](../validation.md#4-真实桌面复核)。
 - 约束：不能以普通单元测试或独立 `test:sqlite` 通过替代严格样本入口。
 
 ### E-08 PMTiles 离线瓦片

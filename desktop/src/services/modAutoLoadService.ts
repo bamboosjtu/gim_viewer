@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 变电工程 MOD/STL 几何自动加载服务。
  *
  * 在 IFC 加载完成后，遍历 CBM 树收集所有需要非 IFC 几何的节点，
@@ -356,9 +356,17 @@ function matrixToTransformString(matrix: number[]): string {
 async function loadModFile(
   geo: DiscoveredModGeometry,
   files: Map<string, File>,
+  outline?: { placementMatrix?: number[]; deferSmallPartFallback?: boolean },
 ): Promise<THREE.Group | null> {
   const { loadXmlModFromFiles } = await import('../viewer/xmlModLoader.js');
-  return loadXmlModFromFiles(geo.modPath, files, geo.phmColor, geo.phmColorMaxA);
+  // Raw fallback is a browsing representation, never exact L2 CSG. A caller
+  // assembling an entire DEV may defer its all-small silhouette; standalone
+  // MOD callers retain their local fallback.
+  return loadXmlModFromFiles(geo.modPath, files, geo.phmColor, geo.phmColorMaxA, {
+    lod: 0,
+    outline: { placementMatrix: outline?.placementMatrix ?? geo.placementTransformMatrix,
+      deferSmallPartFallback: outline?.deferSmallPartFallback ?? false },
+  });
 }
 
 /**
@@ -1561,6 +1569,7 @@ export async function loadScopedRawFallbackGeometry(
   };
 
   const modGeos: DiscoveredModGeometry[] = [];
+  const modFilterPlacements = new Map<string, number[]>();
   const stlGeos: DiscoveredStlGeometry[] = [];
   let reachableRows = 0;
   let geometryFiles = sourceFiles ?? null;
@@ -1632,6 +1641,7 @@ export async function loadScopedRawFallbackGeometry(
             rootOccurrence: seed.path,
             placementTransformMatrix,
           });
+          modFilterPlacements.set(`raw:${seed.path}${geo.referencePath}`, geo.placementTransformMatrix);
         }
         for (const geo of discovered.stls) {
           if (!includeStl) continue;
@@ -1749,7 +1759,22 @@ export async function loadScopedRawFallbackGeometry(
     profile.partialRawFallbackReadMs = readMs;
   }
 
-  const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
+  const { applyPlacementTransformToSceneUnits, XML_MOD_GEOMETRY_DIAGNOSTICS_KEY } = await import('../viewer/xmlModLoader.js');
+  // SQLite rows include CBM placement; filtering a shared DEV template does not.
+  const inversePlacements = new Map<string, THREE.Matrix4>();
+  const inverseRoots = new Set(modGeos.filter(geo => !modFilterPlacements.has(geo.instanceKey)).map(geo => geo.rootOccurrence));
+  for (const seed of deviceNodes) {
+    if (!inverseRoots.has(seed.path)) continue;
+    const matrix = new THREE.Matrix4().fromArray(parseCbmTransformMatrix(seed.transformMatrix));
+    if (matrix.determinant() !== 0) inversePlacements.set(seed.path, matrix.invert());
+  }
+  const filterPlacement = (geo: DiscoveredModGeometry): number[] => {
+    const known = modFilterPlacements.get(geo.instanceKey);
+    if (known) return known;
+    const inverse = geo.rootOccurrence ? inversePlacements.get(geo.rootOccurrence) : undefined;
+    return inverse ? inverse.clone().multiply(new THREE.Matrix4().fromArray(geo.placementTransformMatrix)).toArray() : geo.placementTransformMatrix;
+  };
+  const smallFallbacks = new Map<string, { geo: DiscoveredModGeometry; extent: number }>();
   const { modRoot, stlRoot } = ensureGeometryLayers(state, scene);
   let loadedMods = 0;
   let loadedStls = 0;
@@ -1782,7 +1807,9 @@ export async function loadScopedRawFallbackGeometry(
     }
     const parseStarted = performance.now();
     try {
-      const group = await loadModFile(geo, geometryFiles ?? new Map());
+      const group = await loadModFile(geo, geometryFiles ?? new Map(), {
+        placementMatrix: filterPlacement(geo), deferSmallPartFallback: true,
+      });
       parseMs += Math.max(0, performance.now() - parseStarted);
       if (!group) {
         loadedMods++;
@@ -1791,6 +1818,12 @@ export async function loadScopedRawFallbackGeometry(
       if (!isCurrent()) {
         disposeFastPathGroup(group);
         return { modCount: loadedMods, stlCount: loadedStls, rows: reachableRows };
+      }
+      const diagnostic = group.userData[XML_MOD_GEOMETRY_DIAGNOSTICS_KEY];
+      if (geo.rootOccurrence && diagnostic?.omittedSmallParts) {
+        const extent = diagnostic.omittedMaxExtentMm ?? 0;
+        if (!smallFallbacks.has(geo.rootOccurrence) || extent > smallFallbacks.get(geo.rootOccurrence)!.extent)
+          smallFallbacks.set(geo.rootOccurrence, { geo, extent });
       }
       if (!prepareModGroupForScene(group, geo.modPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) {
         skippedBadBBox++;
@@ -1876,6 +1909,26 @@ export async function loadScopedRawFallbackGeometry(
     }
   }
 
+  // Deferred filtering is safe only with the same all-small DEV fallback as
+  // GLB compilation. STL/other MOD geometry suppresses this extra silhouette.
+  const shownRoots = new Set<string>();
+  for (const groups of [state.loadedXmlModGroups, state.loadedStlGroups])
+    for (const group of groups.values()) if (group.userData.rootOccurrence) shownRoots.add(group.userData.rootOccurrence);
+  for (const [root, { geo }] of smallFallbacks) {
+    if (!isCurrent()) return { modCount: loadedMods, stlCount: loadedStls, rows: reachableRows };
+    if (shownRoots.has(root)) continue;
+    const fallbackStarted = performance.now();
+    try {
+      const group = await loadModFile(geo, geometryFiles ?? new Map(), { placementMatrix: filterPlacement(geo) });
+      if (!group) continue;
+      if (!isCurrent()) { disposeFastPathGroup(group); return { modCount: loadedMods, stlCount: loadedStls, rows: reachableRows }; }
+      if (!prepareModGroupForScene(group, geo.modPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) continue;
+      Object.assign(group.userData, { devPath: geo.devPath, rootOccurrence: root, assemblyPath: geo.assemblyPath, referencePath: geo.referencePath });
+      modRoot.add(group); state.loadedXmlModGroups.set(geo.instanceKey, group);
+    } catch (error) { console.warn(`[autoLoad] 小设备轮廓回退失败: ${geo.modPath}`, error); }
+    finally { parseMs += performance.now() - fallbackStarted; }
+    await new Promise(resolve => setTimeout(resolve, YIELD_MS));
+  }
   if (profile) {
     profile.partialRawFallbackParseMs = parseMs;
     profile.partialRawFallbackMs = Math.max(0, performance.now() - started);

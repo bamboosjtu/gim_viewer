@@ -22,12 +22,13 @@ import { WorkQueue } from '../utils/workQueue.js';
 import { startSubstationResourceMonitor } from './substationResourceTelemetry.js';
 import { BoxViewIndex } from '../viewer/boxViewIndex.js';
 import { DevInstanceBatches } from '../viewer/devInstanceBatches.js';
+import { pickVisibleDevRoot } from '../viewer/devViewportPick.js';
 import { isDevInstanceBatchesEnabled } from '../config/features.js';
 
 interface CachedTemplate { result: DevGlbSerializationResult; sha: string; sourceInvalid?: { message: string; evidence: string } }
 interface TemplateRow { bounds: THREE.Box3; template: DevGlbTemplate; sha: string; status: DevGlbSerializationResult['status']; diagnostics: DevGlbSerializationResult['diagnostics']; task?: PerfTaskIdentity }
 interface CacheDecision { key: string; devPath: string; lod: DeviceLod; status: DevArtifactReadStatus | 'compiled' | 'write-failed'; reason?: string }
-interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; desired: DeviceLod | null; browseDesired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
+interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; pickBounds?: THREE.Box3; pickLocalBounds?: THREE.Box3; desired: DeviceLod | null; browseDesired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
 interface ReadinessContribution {
   visible: boolean;
   finished: boolean;
@@ -764,6 +765,7 @@ export class DevLodRuntime {
       row.box = row.entry.sourceBounds ? boxTuple(row.entry.sourceBounds).applyMatrix4(placement) : null;
       this.viewIndex.set(row.entry.rootOccurrence, row.box);
       if (row.group) { row.group.matrix.copy(placement); row.group.updateMatrixWorld(true); }
+      if (row.pickBounds && row.pickLocalBounds) row.pickBounds.copy(row.pickLocalBounds).applyMatrix4(placement);
     }
     this.instances?.sync();
     this.schedule();
@@ -1071,7 +1073,8 @@ export class DevLodRuntime {
     this.state.modRootGroup!.add(group); row.group?.removeFromParent();
     if (row.key) { const count = (this.displayedPins.get(row.key) ?? 1) - 1; if (count) this.displayedPins.set(row.key, count); else { this.displayedPins.delete(row.key); if (!this.placementUsers.has(row.key)) this.pinKeys.delete(row.key); } }
     this.displayedPins.set(key, (this.displayedPins.get(key) ?? 0) + 1);
-    row.group = group; row.key = key; row.displayed = lod; row.entry.templateStatus = 'ready';
+    row.group = group; row.pickLocalBounds = template.bounds; row.pickBounds = worldBounds;
+    row.key = key; row.displayed = lod; row.entry.templateStatus = 'ready';
     group.visible = !this.onlySelected || row.entry.rootOccurrence === this.selected;
     if (this.batchEnabled) {
       this.instances ??= new DevInstanceBatches(this.state.modRootGroup!);
@@ -1278,7 +1281,13 @@ export class DevLodRuntime {
       sharedGeometryCount: geometry.size, sharedMaterialCount: materials.size, sharedTextureCount: textures.size };
   }
   pick(ray: THREE.Raycaster): ReturnType<DevInstanceBatches['pick']> {
-    return this.instances?.pick(ray) ?? null;
+    // Instancing batches own picking when enabled; ordinary placements still
+    // need a fallback so clicking a visible DEV cabinet selects that cabinet
+    // instead of the IFC surface behind it.
+    const batched = this.instances?.pick(ray);
+    if (batched) return batched;
+    if (!this.current()) return null;
+    return pickVisibleDevRoot(ray, this.rows.values());
   }
   /** Read the current placement directly; never retain a second root index. */
   getLoadedRoot(rootOccurrence: string): THREE.Group | undefined {

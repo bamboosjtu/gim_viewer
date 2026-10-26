@@ -89,6 +89,34 @@ python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation
 
 性能验收必须同时记录 First usable / Current view settled / 基础表示完成 三个 SLO，不能只报首屏；浏览器开发模式与 Release/WebView2 结果分开报告。
 
+### 2026-10-25 原生 Release 复核（诊断导出、选择隔离、精化与严格链）
+
+构建与状态：便携包 `GIM-Reader.exe`（`b414a59` 加当时工作树，不能视为该提交的干净构建），同一 Fixed WebView2 155.0.4283.62、同一应用数据目录与 WebView profile；窗口移出屏幕但不最小化，通过 CDP 驱动真实 WebView，状态从 `__gimAppState`、`#status-*` 与属性抽屉读取。测量期间未暂停解析/编译；同机另有一个长任务进程运行，计时只用于判断“是否等待全站转换”，不作为 SLO。
+
+- **诊断导出**：打开 substation03 后台加载 3 s 后触发 Ctrl+Shift+D。导出耗时 563 ms；`databaseDiagnosticScope=active-project`、`substationCapabilitiesStatus=not-collected`、`diagnosticReadErrors` 为空；触发时 IFC 仅 2/8，导出不等待全站转换，也未触发能力摘要重扫。导出前后 DEV 缓存批读计数 5→6，该增量与后台 DEV 启动同时发生；导出只读取 SQLite/内存状态。拒绝剪贴板写权限后再次导出，界面显示“诊断失败: … Write permission denied”，未挂起；成功提示可能被后台 IFC 进度提前隐藏（采样中约 0.6 s），失败提示保持可见。导出期间关闭工程：选择、DEV runtime、IFC 模型均清零，状态栏回到“就绪”，迟到结果被会话守卫拒绝。
+- **选择隔离**：搜索选择 DEV“主变有载调压设备”后“仅看选中”，可见 DEV 组 1/285，恢复后 285/285；在隔离状态下直接点击视口中心，DEV 射线回退（新增非实例化 placement 拾取）选中同一 occurrence 并保持 1/285，说明 DEV 视口拾取可用。IFC 视口拾取构件后“仅看选中”：其他 IFC 源的 runtime 根与 model 对象均不可见，DEV 只保留 1 个可见组，恢复后全部 IFC 根/模型与 285/285 DEV 组可见；DEV 选择时 12 个 IFC 源根/模型全部隐藏。关闭工程后两者均为 0。DEV L2 在“查看精细模型/取消精化/完成/返回浏览”四个阶段浮层始终隐藏，抽屉状态依次为“正在生成…/已返回浏览表示/精细模型已显示/已返回浏览表示”，状态栏在选择名与“· 精细模型”之间切换。
+- **选择反馈**：普通 DEV/IFC 选择、快速跨模型两次 IFC 拾取、拾取后立即关闭，均未出现工程加载浮层；选择状态只更新 `#status-selection`，精化进度只更新属性抽屉，不改写工程打开进度。
+- **严格链**：接入 `sqliteGlobalSetup` 后，Cargo harness 0.7–7.4 s 构建并注入。初次运行发现 `STRICT substation02` 在单个 DEV 模板序列化阶段持续 >40 min CPU、无 I/O 增长；定位为测试调用 `serializeDevToGlbDetailed` 时未指定 LOD，默认走 L2 精确 CSG（该 MOD 含 300+ Boolean）。严格链改为验证浏览表示 L0 轮廓，并把源级 raw 回退的 MOD 加载对齐到同一 L0 + placement 过滤；随后 `npm run test:substation:strict` 的 4 个样本全部通过（约 147 s），所需 substation01/02/03 零 skip 通过。L2 CSG 长尾仍属 L-03，不由本链覆盖。
+
+- **冷转换预览隔离**：仅清除 WebView 的 IFC LOD IndexedDB 后重开 substation01，IFC 重新冷转换。检测到第一批预览网格后立即选中 DEV“开关柜”并“仅看选中”：此时预览根 5 个子组、629 个网格（`连接构件 445 个 · 增量加载中`、IFC 3/12 冷转换中）全部不可见（0/629），DEV 组 0/285，IFC 仍在 3/12 冷转换。随后权威模型替换预览组，最终 12/12 加载、`连接构件 1159 个`。说明连接线预览批次未完成时不会在隔离范围外保留可见网格。
+
+- **500-B1-1 冷暖隔离验收**：验收构建 `profile=native-release-acceptance`、独立 identifier，源指纹 `7d407effd680…`（源码 `b414a59` + 工作树）。通过 `upsert_gim_project` 登记 `500-B1-1 三维设计.gim` 后从最近工程打开，未使用文件对话框。冷启动两次（每次重置验收数据）基础表示 213.6/232.2 s，IFC 24/24 于 102.3/101.2 s；DEV 进度从 0 连续推进到 11,250，未出现 `0/0` 长期停留。第二次冷启动缓存累计 5,235 次写入、0 失败，并在关闭前 `cacheWritePendingCount=0`。重启同一构建与 profile 暖启动两次：基础表示 17.98/18.75 s、IFC 24/24 32.8/33.6 s，L0 命中 2617、L1 1、冷编译 0、待写 0、失败 0。验收数据位于独立 `%APPDATA%\com.bamboosjtu.gimviewer.acceptance` 根，未读写日常缓存；本轮未取得进程内存峰值。
+- **substation03 首对象与完整源长尾**：清除 IFC LOD IndexedDB 后重新转换，诊断 span 显示大源 `CBM/设备接线.ifc` 首批连接预览 14.96 s、预览 settled 30.57 s（272 个对象）；8/8 个 IFC 转换状态于 72.6 s 到齐，但 420 s 内 `IFC 已结束` 未出现，权威 Fragments 模型仅 1/8 就绪，272 个预览对象（约 297 MB）仍由预览承载。首对象提前与完整源长尾同时存在。
+
+上述复核覆盖了部分选择/精化操作，但当时工作树的 IFC 拾取跳过可见性查询，未覆盖自动 L1 替换掩码。该捷径现已撤回；O-05 保持待边界验收，不能由上述局部操作关闭。O-07 仍缺少属性概览 DOM 的 p95 与高亮 ≤100 ms 验收。
+
+### 2026-10-26 指定提交与最终候选对照
+
+基线分别为 `7b4d0fc4b8cf9a55e8383a6aad469cc9d989c38d`、`b414a59268ae5a52b61f218a7d6d16b48247cdf5` 的独立 checkout，构建后规范化源码差异为空。最终候选指纹 `f1e187e2b132908839877e24ee5d3166f6cf49baa0e0cecff651630b26019173`；三组实际使用同一份 Fixed WebView2 155.0.4283.62、独立验收数据和兼容缓存，提交标记、EXE、样本 SHA 与实际数据库根逐项核对。
+
+- 执行 33 次暖恢复，正式对照采用 27 次：substation01/B1 每构建三次，其他三站每构建一次；3、4 号站因首轮各有一组新增 L1 编译而补测全命中。选入的运行均语义命中、L0/L1 冷编译 0、全部 IFC 命中、DEV 缓存写入 settled、正常退出。
+- 最终候选另做 substation02/03 原生真冷准备，分别全部 IFC 17/17、8/8 完成，L0 与 IFC 缓存命中 0；substation02 保留 34 个 DEV 失败、561 个空源和 807 个未知范围，不作为完整成功。
+- 每构建固定十点重复点击 20 次，18 次有效 IFC 命中身份序列一致，无新增 L2；候选点击至 RAF p95 427 ms，对照 487.1/491.9 ms。不是 20 个独立来源或 GPU 呈现验收，O-07 仍未通过。
+- 最终候选相关现有 49 项用例再次通过；完整 1122 项及严格四站 SQLite 链通过于撤回临时选择细分埋点之前。没有新增测试文件。严格链本机需将进程级 TEMP/TMP/SQLITE_TMPDIR 指向工作区临时目录；系统临时目录的 SQLite 打开失败日志保留，没有修改断言吞错。
+- O-05 仍待完整组合边界；O-10 跟踪异步缓存回调覆盖 IFC 结束文字。辅助 B1 冷记录的驱动文本等待超时不等于模型加载超时，具体时刻和边界见[性能基线](performance.md)。
+
+原始数据、源码与缓存审计见 `output/review-open-issues/final-audit.json`、`formal-environment.json` 和 `native/`；保留判定见[本轮评审报告](impl/test-performance-regression-rollback.md)。
+
 ## 5. 移动端验证
 
 在 `app/` 运行 `npm test`、`npm run build`；样本测试先准备本地输入，缺包不允许 skip。覆盖唯一对象、共享塔 occurrence、物理档聚合、跳线排除、完整树可达、原始属性与 HNum 预览、JSON 恢复等价。
