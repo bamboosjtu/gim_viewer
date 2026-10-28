@@ -1146,13 +1146,6 @@ export interface LineGraphPayload {
   file_stats: LineFileStatPayload[];
 }
 
-/**
- * 在 Tauri 环境下保存线路工程图缓存（事务：先删后插 + 更新 project_type）。
- */
-export async function saveLineGraph(payload: LineGraphPayload): Promise<void> {
-  await invokeTimed<void>('save_line_gim_graph', { payload });
-}
-
 // ===== v5: 线路工程 FAM/DEV 属性缓存 =====
 
 /** line_fam_property 写入 payload

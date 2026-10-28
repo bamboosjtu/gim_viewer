@@ -6,7 +6,8 @@ import { buildSubstationAliasIndex, buildSubstationIfcEvidence, discoverSubstati
 import { hydrateSubstationGeometryGraph } from '../geometry/substationSourceGraph.js';
 import { discoverGeometriesFromNode } from '../../services/modGeometryDiscovery.js';
 import { parseFamSectionsWithDiagnostics, resolveSubstationBusinessIdentity } from '../famParser.js';
-import { buildGimIndexPayload, buildGeometryRefsPayload } from '../../services/gimIndexPersistenceService.js';
+import { buildGimIndexPayload } from '../../services/gimIndexPersistenceService.js';
+import { buildGeometryRefsPayload } from '../../services/__tests__/geometryRefsFixture.js';
 import { restoreGimIndexToState } from '../../services/gimIndexRestoreService.js';
 import { AppState } from '../../app/state.js';
 import { loadXmlModFromText } from '../../viewer/xmlModLoader.js';

@@ -2,7 +2,7 @@ import {expect,it,vi} from 'vitest';
 const mocks=vi.hoisted(()=>({invoke:vi.fn()}));
 vi.mock('../runtime.js',()=>({isTauri:()=>true}));
 vi.mock('../invokeTimed.js',()=>({invokeTimed:mocks.invoke}));
-import {packDevArtifact,readDevArtifact} from '../devLodCache.js';
+import {packDevArtifact,readDevArtifactBatch} from '../devLodCache.js';
 function envelope(paths:string[],corrupt=false):ArrayBuffer {
   const chunks=paths.map(entry=>({path:new TextEncoder().encode(entry),bytes:packDevArtifact(corrupt && entry.endsWith('broken') ? 'wrong' : entry.slice(entry.indexOf('/')+1),{value:entry})}));
   const out=new Uint8Array(9+chunks.reduce((sum,row)=>sum+4+row.path.length+1+8+row.bytes.length,0));
@@ -14,10 +14,10 @@ it('coalesces native reads in bounded batches, retaining identities and isolatin
   mocks.invoke.mockImplementation(async (_command:string,args:{entryPaths:string[]})=>envelope(args.entryPaths,true));
   const context={projectId:1,sourceSha256:'a'.repeat(64)};
   const keys=Array.from({length:20},(_,i)=>i===19?'broken':`key-${i}`);
-  const results=await Promise.all(keys.map(key=>readDevArtifact<any>('catalog',key,context)));
+  const batch=await readDevArtifactBatch<any>('catalog',keys,context);
   expect(mocks.invoke).toHaveBeenCalledTimes(1);
   expect(mocks.invoke.mock.calls.map(call=>call[1].entryPaths.length)).toEqual([20]);
-  expect(results[0].value).toBe('catalog/key-0');expect(results[19]).toBeNull();
+  expect((batch.get(keys[0])!.value as any).value).toBe('catalog/key-0');expect(batch.get(keys[19])).toMatchObject({status:'invalid'});
   expect(mocks.invoke.mock.calls[0][1].sourceGimSha256).toBe(context.sourceSha256);
 });
 
@@ -26,7 +26,7 @@ it('keeps larger coalesced requests within the native 64-entry ceiling without l
   mocks.invoke.mockImplementation(async (_command:string,args:{entryPaths:string[]})=>envelope(args.entryPaths));
   const context={projectId:1,sourceSha256:'a'.repeat(64)};
   const keys=Array.from({length:70},(_,i)=>`boundary-${i}`);
-  const results=await Promise.all(keys.map(key=>readDevArtifact<any>('catalog',key,context)));
+  const batch=await readDevArtifactBatch<any>('catalog',keys,context);
   expect(mocks.invoke.mock.calls.map(call=>call[1].entryPaths.length)).toEqual([64,6]);
-  expect(results.map(row=>row.value)).toEqual(keys.map(key=>`catalog/${key}`));
+  expect(keys.map(key=>(batch.get(key)!.value as any).value)).toEqual(keys.map(key=>`catalog/${key}`));
 });

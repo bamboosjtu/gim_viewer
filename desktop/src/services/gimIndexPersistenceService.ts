@@ -8,9 +8,6 @@ import type {
   FamPropertyPayload,
   DevPropertyPayload,
   GeometryRefsPayload,
-  DevSolidModelPayload,
-  DevSubDevicePayload,
-  PhmSolidModelPayload,
 } from '@desktop/database.js';
 import { inspectSubstationCapabilities } from '../gim/substationEvidence.js';
 import { parseFamSectionsWithDiagnostics } from '../gim/famParser.js';
@@ -18,8 +15,6 @@ import { parseFamSectionsWithDiagnostics } from '../gim/famParser.js';
 /** 属性文件文本读取并发数（acc-plan P2-3） */
 const PARSE_CONCURRENCY = 32;
 import { parseKeyValue } from '../gim/cbmParser.js';
-import { parseDev } from '../gim/geometry/devParser.js';
-import { parsePhm } from '../gim/geometry/phmParser.js';
 import { getFileByPath, normalizeFilePath } from '../gim/fileLookup.js';
 import { isGimEmptyValue, resolveBaseFamilyReferences } from '../gim/gimValueSemantics.js';
 
@@ -268,109 +263,6 @@ function withEntryPrefix(prefix: string, value: string): string {
   return normalized.toLowerCase().startsWith(`${prefix.toLowerCase()}/`)
     ? normalized
     : `${prefix}/${normalized}`;
-}
-
-// ===== 几何引用链索引（v6） =====
-
-/**
- * 构建几何引用链 payload：解析所有 DEV/PHM 文件的 SOLIDMODEL / SUBDEVICE 引用。
- *
- * 设计动机：缓存命中时无需逐文件读取数千个 DEV/PHM，
- * 直接查询 SQLite 即可得到所有可达的 MOD/GL/STL 几何源路径。
- *
- * @param projectId 数据库 gim_project.id
- * @param files GIM 解压后的文件集合
- */
-export async function buildGeometryRefsPayload(
-  projectId: number,
-  files: Map<string, File>,
-  sourceSha256?: string | null,
-  isCurrent?: () => boolean,
-): Promise<GeometryRefsPayload> {
-  const devSolidModels: DevSolidModelPayload[] = [];
-  const devSubDevices: DevSubDevicePayload[] = [];
-  const phmSolidModels: PhmSolidModelPayload[] = [];
-
-  // 收集所有 DEV 和 PHM 文件
-  const devFiles: Array<{ path: string; file: File }> = [];
-  const phmFiles: Array<{ path: string; file: File }> = [];
-
-  for (const [entryPath, file] of files) {
-    const normalized = normalizeFilePath(entryPath);
-    const lower = normalized.toLowerCase();
-    if (lower.startsWith('dev/') && lower.endsWith('.dev')) {
-      devFiles.push({ path: normalized, file });
-    } else if (lower.startsWith('phm/') && lower.endsWith('.phm')) {
-      phmFiles.push({ path: normalized, file });
-    }
-  }
-
-  // 1. 解析 DEV → SOLIDMODEL (→ PHM) + SUBDEVICE (→ child DEV)
-  for (const { path, file } of devFiles) {
-    if (isCurrent && !isCurrent()) throw new IndexBuildCancelledError();
-    try {
-      const text = await file.text();
-      const doc = parseDev(text, path);
-
-      let smOrder = 0;
-      for (const sm of doc.solidModels) {
-        devSolidModels.push({
-          dev_path: path,
-          solid_model_path: sm.solidModelPath,
-          transform_matrix: sm.transformMatrix.length === 16
-            ? sm.transformMatrix.join(',') : null,
-          sort_order: smOrder++,
-        });
-      }
-
-      let sdOrder = 0;
-      for (const sd of doc.subDevices) {
-        devSubDevices.push({
-          dev_path: path,
-          child_dev_path: sd.devPath,
-          transform_matrix: sd.transformMatrix.length === 16
-            ? sd.transformMatrix.join(',') : null,
-          sort_order: sdOrder++,
-        });
-      }
-    } catch (err) {
-      console.warn(`[index] DEV 解析失败，跳过: ${path}`, err);
-    }
-  }
-
-  // 2. 解析 PHM → SOLIDMODEL (→ MOD/GL/STL)
-  for (const { path, file } of phmFiles) {
-    if (isCurrent && !isCurrent()) throw new IndexBuildCancelledError();
-    try {
-      const text = await file.text();
-      const doc = parsePhm(text, path);
-
-      let smOrder = 0;
-      for (const sm of doc.solidModels) {
-        phmSolidModels.push({
-          phm_path: path,
-          solid_model_path: sm.solidModelPath,
-          transform_matrix: sm.transformMatrix.length === 16
-            ? sm.transformMatrix.join(',') : null,
-          color: sm.color
-            ? `${sm.color.r},${sm.color.g},${sm.color.b},${sm.color.a}`
-            : null,
-          phm_color_max_a: sm.color ? doc.colorMaxA : null,
-          sort_order: smOrder++,
-        });
-      }
-    } catch (err) {
-      console.warn(`[index] PHM 解析失败，跳过: ${path}`, err);
-    }
-  }
-
-  return {
-    project_id: projectId,
-    source_sha256: sourceSha256 ?? null,
-    dev_solid_models: devSolidModels,
-    dev_sub_devices: devSubDevices,
-    phm_solid_models: phmSolidModels,
-  };
 }
 
 /** 两阶段发布第二阶段负载：几何引用 + FAM/DEV 属性 + 能力摘要。 */

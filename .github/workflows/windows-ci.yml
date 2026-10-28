@@ -131,6 +131,32 @@ jobs:
             throw "Portable ZIP checksum missing: $shaPath"
           }
 
+          $expectedHash = ((Get-Content -LiteralPath $shaPath -Raw).Trim() -split '\s+')[0]
+          $actualHash = (Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash
+          if ($expectedHash -notmatch '^[0-9a-fA-F]{64}$' -or $expectedHash -ne $actualHash) {
+            throw 'Portable ZIP checksum mismatch'
+          }
+
+          # Validate the uploaded ZIP itself, not just its source directory.
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try {
+            $prefix = [IO.Path]::GetFileNameWithoutExtension($zip.Name)
+            foreach ($entry in @('GIM-Reader.exe', 'portable-manifest.json', '使用说明.txt',
+                'webview2-fixed-runtime/msedgewebview2.exe', 'webview2-fixed-runtime/msedge.dll',
+                'webview2-fixed-runtime/icudtl.dat', 'webview2-fixed-runtime/resources.pak')) {
+              $archived = $archive.GetEntry("$prefix/$entry")
+              if ($null -eq $archived -or $archived.Length -eq 0) {
+                throw "Portable ZIP entry missing or empty: $entry"
+              }
+            }
+            $reader = [IO.StreamReader]::new($archive.GetEntry("$prefix/portable-manifest.json").Open())
+            try { $archivedManifest = $reader.ReadToEnd() | ConvertFrom-Json }
+            finally { $reader.Dispose() }
+            if ($archivedManifest.commit -ne $env:EXPECTED_COMMIT -or $archivedManifest.buildMode -ne 'benchmark') {
+              throw 'Portable ZIP manifest does not match this benchmark build'
+            }
+          } finally { $archive.Dispose() }
+
           $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $PWD 'benchmark-build-manifest.json') -Encoding utf8
           Write-Host "Validated portable benchmark artifact: $($zip.Name)"
 

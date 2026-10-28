@@ -69,7 +69,7 @@
 
 标签匹配按小写规范化，`Rectangularfixedplate`、`RectangularFixedPlate` 等大小写变体进入同一分支。
 
-六组样本实测（substation01–04 与 500-A3-1/B1-1/B1-3/B1-4；B1-2 未取得 pack）已覆盖此前未支持的 `Insulator`、`VTypeInsulator`、`ConePorcelainBushing`、`EccentricTruncatedCone`、`SquareGasket`、`TableGasket`、`EllipticRing`、`BendingCylindrical`、`CircularFixedPlate`、`RectangularFixedPlate`。这些分支只承诺浏览近似，忽略的字段（偏心量、螺栓孔、V 串几何、弯曲半径）在代码注释与本节中列明，不能据此做尺寸或安装测量。
+六组样本实测（substation01–04 与 500-A3-1/B1-1/B1-3/B1-4；B1-2 未取得 pack）已覆盖 `Insulator`、`VTypeInsulator`、`ConePorcelainBushing`、`EccentricTruncatedCone`、`SquareGasket`、`TableGasket`、`EllipticRing`、`BendingCylindrical`、`CircularFixedPlate`、`RectangularFixedPlate`。这些分支只承诺浏览近似，忽略的字段（偏心量、螺栓孔、V 串几何、弯曲半径）在代码注释与本节中列明，不能据此做尺寸或安装测量。
 
 仍未生成直接几何的类型为 `ChannelSteel`、`Table`（解析保留、渲染暂停）以及任何未知标签；它们继续走显式诊断，不伪装成 empty。补充新类型时须提供参数映射并标记 simplified。
 全部覆盖以 [parser](../../desktop/src/gim/geometry/xmlModParser.ts) 与[geometry renderer](../../desktop/src/viewer/xmlModGeometry.ts) 的实际分支为准。

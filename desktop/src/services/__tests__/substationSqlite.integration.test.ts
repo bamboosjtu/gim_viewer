@@ -1,5 +1,6 @@
 import { it, expect } from 'vitest';
-import { buildGimIndexPayload, buildGeometryRefsPayload } from '../gimIndexPersistenceService.js';
+import { buildGimIndexPayload } from '../gimIndexPersistenceService.js';
+import { buildGeometryRefsPayload } from './geometryRefsFixture.js';
 import { restoreGimIndexToState } from '../gimIndexRestoreService.js';
 import { parseFamSectionsWithDiagnostics } from '../../gim/famParser.js';
 import { buildCbmTree } from '../../gim/cbmParser.js';

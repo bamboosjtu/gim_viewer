@@ -7,6 +7,7 @@ import { createReadStream, cpSync, existsSync, mkdirSync, readdirSync, readFileS
 import { spawnSync } from 'node:child_process';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import sevenZip from '7zip-min';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = dirname(scriptDir);
@@ -61,6 +62,18 @@ async function sha256(filePath) {
   return hash.digest('hex');
 }
 
+function runArchiveTool(args, label) {
+  // Use the binary locked by npm, rather than a runner-dependent tar.exe.
+  const result = spawnSync(sevenZip.getConfig().binaryPath, args, {
+    cwd: portableRoot,
+    stdio: 'inherit',
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(`${label}失败，7-Zip 退出码 ${result.status}，signal=${result.signal ?? 'none'}${result.error ? `: ${result.error.message}` : ''}`);
+  }
+}
+
 async function main() {
   if (!existsSync(sourceExe)) throw new Error(`Tauri release exe 不存在: ${sourceExe}`);
   if (!validateRuntime(sourceRuntime)) {
@@ -71,6 +84,7 @@ async function main() {
   assertInsideWorkspace(outputZip);
   rmSync(outputDir, { recursive: true, force: true });
   rmSync(outputZip, { force: true });
+  rmSync(`${outputZip}.sha256`, { force: true });
   mkdirSync(outputDir, { recursive: true });
   cpSync(sourceExe, join(outputDir, 'GIM-Reader.exe'));
   cpSync(sourceRuntime, join(outputDir, 'webview2-fixed-runtime'), { recursive: true });
@@ -109,11 +123,14 @@ async function main() {
   ].join('\r\n'));
 
   console.log(`[portable] 正在压缩 ${folderName}.zip...`);
-  const tar = spawnSync('tar.exe', ['-a', '-c', '-f', outputZip, '-C', portableRoot, folderName], {
-    stdio: 'inherit',
-    windowsHide: true,
-  });
-  if (tar.status !== 0 || !existsSync(outputZip)) throw new Error(`portable ZIP 生成失败，tar 退出码 ${tar.status}`);
+  try {
+    // Force UTF-8 names so 使用说明.txt does not depend on the host code page.
+    runArchiveTool(['a', '-tzip', '-mx=5', '-mcu=on', '-y', outputZip, folderName], 'portable ZIP 生成');
+    runArchiveTool(['t', outputZip], 'portable ZIP 完整性检查');
+  } catch (error) {
+    rmSync(outputZip, { force: true });
+    throw error;
+  }
 
   const zipHash = await sha256(outputZip);
   writeFileSync(`${outputZip}.sha256`, `${zipHash}  ${folderName}.zip\r\n`);
