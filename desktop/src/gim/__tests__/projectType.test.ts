@@ -36,6 +36,35 @@ it('decodes legacy equipment GBK text while retaining UTF-8 names', () => {
   expect(decodeEquipmentText(new TextEncoder().encode('设备').buffer)).toBe('设备');
 });
 
+it('opens a connected DEV-only assembly without inventing CBM source properties', async () => {
+  const files = new Map([
+    ['DEV/root.dev', new File(['SYMBOLNAME=互感器\nSUBDEVICES.NUM=1\nSUBDEVICE0=CHILD.DEV\nTRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,10,0,0,1'], 'root.dev')],
+    ['DEV/child.dev', new File(['SYMBOLNAME=接线盒\nSOLIDMODELS.NUM=1\nSOLIDMODEL0=shape.phm'], 'child.dev')],
+    ['PHM/shape.phm', new File(['SOLIDMODELS.NUM=1'], 'shape.phm')],
+  ]);
+  expect((await detectGimProjectType(files)).type).toBe('equipment');
+  const entry = await findEquipmentEntry(files);
+  expect(entry).toBe('DEV/root.dev');
+  const tree = await buildCbmTree(files, undefined, entry!);
+  expect(tree?.entityName).toBe('Device');
+  expect(tree?.devPath).toBe('DEV/root.dev');
+  expect(tree?.name).toBe('互感器');
+  expect(tree?.children).toHaveLength(1);
+  expect(tree?.rawProperties?.ENTITYNAME).toBeUndefined();
+});
+
+it('rejects ambiguous or cyclic DEV-only libraries', async () => {
+  const files = new Map([
+    ['a.dev', new File(['SOLIDMODEL0=a.mod'], 'a.dev')],
+    ['b.dev', new File(['SOLIDMODEL0=a.mod'], 'b.dev')],
+    ['a.mod', new File(['<Device/>'], 'a.mod')],
+  ]);
+  expect(await findEquipmentEntry(files)).toBeNull();
+  files.set('a.dev', new File(['SUBDEVICE0=b.dev\nSOLIDMODEL0=a.mod'], 'a.dev'));
+  files.set('b.dev', new File(['SUBDEVICE0=a.dev'], 'b.dev'));
+  expect(await findEquipmentEntry(files)).toBeNull();
+});
+
 describe('detectGimProjectType', () => {
   it('标准线路目录布局不逐个读取 DiskBackedFile 文本', async () => {
     const project = lazyTextFile('SUBSYSTEM=F1.cbm');

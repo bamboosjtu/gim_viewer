@@ -36,6 +36,8 @@ CBM 提供来源骨架与引用图，FAM 提供原始属性。业务身份、图
 
 独立设备采用唯一的 `ENTITYNAME=Device` CBM，文件可用 UUID 命名而没有 `project.cbm`。通过其 `OBJECTMODELPOINTER` 指向根 DEV，子装配沿 DEV 的 SUBDEVICE 引用展开，不补造 F1–F4 节点，也不把虚拟子设备当作第二个几何 seed。根 DEV 的 SYMBOLNAME 优先作为设备名称，FAM 来源按实际 BASEFAMILY/BASEFAMILYPOINTER 读取。设备库中另有完整 project→F1–F4 形态，按该形态解析，不能仅按所在目录认定都是独立 Device 包。
 
+没有 CBM 的独立设备包按实际 DEV 引用图寻找唯一根：DEV 图必须连通且无环，并存在可解析的物理模型引用；多根、断开的库及缺失子 DEV 不猜选。设备导航根投影为 Device，路径与原始属性仍指向实际根 DEV，不伪造 CBM 文件或原始 ENTITYNAME 字段。子 DEV 仅在装配链中展开。
+
 ## 变电层级
 
 ```text

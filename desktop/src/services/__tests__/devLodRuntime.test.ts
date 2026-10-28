@@ -20,6 +20,26 @@ function occurrence(id: number, failed = false) {
     failedKey: failed ? key : undefined, group: failed ? undefined : new THREE.Group() };
 }
 
+it('commits base geometry during camera motion and bounds refinement deferral', async () => {
+  vi.useFakeTimers();
+  const clock=vi.spyOn(performance,'now').mockImplementation(()=>Date.now());
+  try {
+    const {internal}=fixture(),base=vi.fn(),detail=vi.fn();
+    internal.cameraMovingUntil=performance.now()+200;
+    const refinement=internal.submit(2,detail,'detail',true);
+    const initial=internal.submit(3,base,'base',false);
+    await vi.advanceTimersByTimeAsync(16);
+    expect(base).toHaveBeenCalledOnce();
+    expect(detail).not.toHaveBeenCalled();
+    for(let i=0;i<12;i++) {
+      internal.cameraMovingUntil=performance.now()+200;
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    await Promise.all([initial,refinement]);
+    expect(detail).toHaveBeenCalledOnce();
+  } finally {clock.mockRestore();vi.clearAllTimers();vi.useRealTimers();}
+});
+
 it('keeps warm cache consumption capacity independent of compacted computation workers', async () => {
   const {internal}=fixture();internal.worker={workerCount:1,cacheConcurrency:32};
   const releases:Array<()=>void>=[];
@@ -103,6 +123,28 @@ it('stops source prefetch at high pressure, including a reply already in flight'
     const output = await internal.preloadSources(files);
     expect(read).toHaveBeenCalledOnce(); expect(output.get('MOD/a.mod')).toBe(files.get('MOD/a.mod'));
   } finally { read.mockRestore(); }
+});
+
+it('batches only reachable sources for a warm template miss and shares repeated preparation', async () => {
+  const {internal}=fixture();internal.session.projectId=7;
+  const texts=new Map([['DEV/a.dev','SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.phm'],
+    ['PHM/a.phm','SOLIDS.NUM=1\nSOLIDS0=a.mod'],['MOD/a.mod','<Device><Entities/></Device>']]);
+  internal.sourceFiles=new Map([...texts].map(([path,text])=>[path,{size:new TextEncoder().encode(text).length}]));
+  internal.sourceFiles.set('MOD/unrelated.mod',{size:10});
+  internal.worker={installSources:vi.fn()};
+  const database=await import('@desktop/database.js');
+  const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(async(_id,paths)=>
+    new Map(paths.map(path=>[path,new TextEncoder().encode(texts.get(path)!)])));
+  try {
+    await internal.prepareMissingTemplateSources('DEV/a.dev');
+    await internal.prepareMissingTemplateSources('DEV/a.dev');
+    expect(read.mock.calls.map(args=>args[1])).toEqual([['DEV/a.dev'],['PHM/a.phm'],['MOD/a.mod']]);
+    expect(internal.worker.installSources).toHaveBeenCalledOnce();
+    expect([...internal.worker.installSources.mock.calls[0][0].keys()]).toEqual([...texts.keys()]);
+    internal.memoryPressure='high';
+    await internal.prepareMissingTemplateSources('DEV/b.dev');
+    expect(read).toHaveBeenCalledTimes(3);
+  } finally {read.mockRestore();}
 });
 
 it('prepares immutable sources only for a confirmed missing derived catalog, retaining authoritative failures and healthy warm reads', async () => {

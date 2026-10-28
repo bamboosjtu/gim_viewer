@@ -109,10 +109,9 @@ it('does not reopen unavailable IndexedDB for every device read and write', asyn
   vi.stubGlobal('indexedDB', { open });
   try {
     const module = await import('../devLodCache.js');
-    const reads = await module.readDevArtifactBatch('catalog', ['one', 'two']);
-    expect(reads.get('one')).toMatchObject({ status: 'read-error' });
-    expect(reads.get('two')).toMatchObject({ status: 'read-error' });
-    expect(await module.writeDevArtifactDetailed('templates', 'three', {})).toMatchObject({ ok: false });
+    expect(await module.readDevArtifact('catalog', 'one')).toBeNull();
+    expect(await module.readDevArtifact('catalog', 'two')).toBeNull();
+    expect(await module.writeDevArtifact('templates', 'three', {})).toBe(false);
     expect(open).toHaveBeenCalledTimes(1);
   } finally { vi.unstubAllGlobals(); }
 });

@@ -25,7 +25,7 @@ GIMPKG* + 可变元数据/零填充 + 压缩 payload
 移动端在册分段头部识别同时检查 784 字节头长度、NUL 填充、`QGDW2` 标识、年份和导出日期形状；匹配后分别投影工程名、设计单位、原始单位、导出软件/时间与标准标识。
 这仅描述当前六线路源包的布局证据，不覆盖其他导出格式。单位字段的业务角色不由单位名称推定；未知布局保留原始文本段、字节偏移与编码，不赋予未经验证的字段名。
 
-源 magic 用于类型族，文件名、缓存 projectType 或 ENTITYNAME 大小写不能替代它。GIMPKGS 同时存在工程与独立设备形态，须依据 CBM 入口细分；裸归档没有足以决定类型的 GIM magic，须经内容校验。
+源 magic 用于类型族，文件名、缓存 projectType 或 ENTITYNAME 大小写不能替代它。GIMPKGS 同时存在工程与独立设备形态，须依据实际 CBM 入口细分；没有 CBM 的独立设备可按唯一、全部 DEV 可达且无环的 DEV 装配根及实际几何引用识别。裸归档没有足以决定类型的 GIM magic，须经内容校验。
 非 magic 元数据可供诊断，不用未经确认的字段布局驱动业务分支。
 
 实现入口：[gimExtractor](../../desktop/src/gim/gimExtractor.ts)、[projectType](../../desktop/src/gim/projectType.ts)、[原生解压](../../desktop/src-tauri/src/gim_extract.rs)。

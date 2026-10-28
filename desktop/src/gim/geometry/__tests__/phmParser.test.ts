@@ -1,6 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { parsePhm } from '../phmParser.js';
 
+it('keeps SOLIDS leaves and SOLIDMODEL assemblies with independent same-index transforms', () => {
+  const matrix = (z: number) => `1,0,0,0,0,1,0,0,0,0,1,0,0,0,${z},1`;
+  const text = `SOLIDS.NUM=1\nSOLIDMODELS.NUM=1\nSOLIDS0=body.mod\nTRANSFORMMATRIX0=${matrix(10)}\nCOLOR0=1,2,3,100\nSOLIDMODEL0=bolt.phm\nTRANSFORMMATRIX0=${matrix(180)}\nCOLOR0=4,5,6,100`;
+  const doc = parsePhm(text, 'PHM/mixed.phm');
+  expect(doc.solidModels.map(row => row.solidModelPath)).toEqual(['body.mod', 'bolt.phm']);
+  expect(doc.solidModels.map(row => row.transformMatrix[14])).toEqual([10,180]);
+  expect(doc.solidModels.map(row => row.color?.r)).toEqual([1,4]);
+  expect(parsePhm(`SOLIDS.NUM=1\nSOLIDS0=body.mod\nTRANSFORMMATRIX0=${matrix(20)}`, 'PHM/leaf.phm').solidModels[0].transformMatrix[14]).toBe(20);
+});
+
 describe('parsePhm', () => {
   describe('线路工程典型样本', () => {
     it('单 STL 模型（NUM=1，COLOR 非空）', () => {

@@ -202,6 +202,13 @@ export async function readDevArtifactBatch<T>(
   }
 }
 
+/** Backward-compatible value-only view. New callers that need to distinguish
+ * miss/read-error/invalid should use `readDevArtifactResult`. */
+export async function readDevArtifact<T>(store: 'templates' | 'catalog', key: string, context?: CacheContext): Promise<T | null> {
+  const result = await readDevArtifactResult<T>(store, key, context);
+  return result.status === 'hit' ? result.value! : null;
+}
+
 export async function readDevArtifactResult<T>(store: 'templates' | 'catalog', key: string, context?: CacheContext): Promise<DevArtifactRead<T>> {
   if (isTauri()) {
     const args = nativeArgs(store, key, context);
@@ -210,6 +217,15 @@ export async function readDevArtifactResult<T>(store: 'templates' | 'catalog', k
   }
   const values = await readDevArtifactBatch<T>(store, [key], context);
   return values.get(key) ?? { status: 'read-error', error: 'missing idb row' };
+}
+
+export async function writeDevArtifact(
+  store: 'templates' | 'catalog',
+  key: string,
+  value: unknown,
+  context?: CacheContext,
+): Promise<boolean> {
+  return (await writeDevArtifactDetailed(store, key, value, context)).ok;
 }
 
 export async function writeDevArtifactDetailed(

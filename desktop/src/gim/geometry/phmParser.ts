@@ -9,7 +9,7 @@
  *
  * 关键约束：
  * - PHM 不分节，无 [section] 语法
- * - SOLIDMODELn / TRANSFORMMATRIXn / COLORn 三者通过 index 一一对应
+ * - SOLIDSn 和 SOLIDMODELn 两组各自以 index 关联 TRANSFORMMATRIXn / COLORn
  * - COLORn 为空字符串时 color 字段为 undefined（MOD 引用典型）
  * - TRANSFORMMATRIXn 缺失时回退单位矩阵
  * - SOLIDMODELn 目标可为 .mod/.stl/.gl/.phm（.phm 嵌套由遍历层递归处理）
@@ -18,7 +18,6 @@
 import type { PhmDocument, PhmSolidModelEntry, XmlModColor } from './ir.js';
 import { parseBoundedCount } from '../parserLimits.js';
 import {
-  getCaseInsensitiveKv,
   getFirstNonEmptyKv,
   isGimEmptyValue,
 } from '../gimValueSemantics.js';
@@ -40,27 +39,35 @@ const IDENTITY_MATRIX: number[] = [
  */
 export function parsePhm(text: string, phmPath: string): PhmDocument {
   const kv = parseKeyValue(text);
-  const num = parseBoundedCount(getFirstNonEmptyKv(kv, ['SOLIDMODELS.NUM']), 'SOLIDMODELS.NUM');
-  if (num === 0) {
+  const groups = ['SOLIDS', 'SOLIDMODELS'].map(key => ({
+    count: parseBoundedCount(getFirstNonEmptyKv(kv, [`${key}.NUM`]), `${key}.NUM`),
+    values: new Map<string, string>(),
+  }));
+  if (groups.every(group => group.count === 0)) {
     return { phmPath, solidModels: [], isEmpty: true, colorMaxA: 0 };
   }
 
-  const solidModelSlots: Array<PhmSolidModelEntry | undefined> = [];
-  for (let i = 0; i < num; i++) {
-    const solidModelPath = getFirstNonEmptyKv(kv, [`SOLIDMODEL${i}`]);
-    if (!solidModelPath) continue;
-
-    const transformMatrixRaw = getCaseInsensitiveKv(kv, `TRANSFORMMATRIX${i}`);
-    const colorRaw = getCaseInsensitiveKv(kv, `COLOR${i}`);
-
-    solidModelSlots[i] = {
-      solidModelPath,
-      transformMatrix: parseTransformMatrix(typeof transformMatrixRaw === 'string' ? transformMatrixRaw : undefined),
-      color: parseColor(typeof colorRaw === 'string' ? colorRaw : undefined),
-    };
+  // SOLIDSn and SOLIDMODELn have independent indexed matrices/colors. Both
+  // headers may precede all records, so each reference also selects its group.
+  let active = 1;
+  for (const line of text.split(/\r?\n/)) {
+    const at = line.indexOf('=');
+    if (at < 0) continue;
+    const key = line.slice(0, at).replace(/^\uFEFF/, '').trim().toUpperCase();
+    const value = line.slice(at + 1).trim();
+    if (key === 'SOLIDS.NUM') active = 0;
+    else if (key === 'SOLIDMODELS.NUM') active = 1;
+    else if (/^SOLIDS\d+$/.test(key)) { active = 0; groups[active].values.set(key, value); }
+    else if (/^SOLIDMODEL\d+$/.test(key)) { active = 1; groups[active].values.set(key, value); }
+    else if (/^(TRANSFORMMATRIX|COLOR)\d+$/.test(key)) groups[active].values.set(key, value);
   }
-
-  const solidModels = solidModelSlots.filter((entry): entry is PhmSolidModelEntry => entry !== undefined);
+  const solidModels: PhmSolidModelEntry[] = [];
+  for (const [groupIndex, group] of groups.entries()) for (let i = 0; i < group.count; i++) {
+    const solidModelPath = group.values.get(`${groupIndex === 0 ? 'SOLIDS' : 'SOLIDMODEL'}${i}`);
+    if (!solidModelPath || isGimEmptyValue(solidModelPath)) continue;
+    solidModels.push({ solidModelPath, transformMatrix: parseTransformMatrix(group.values.get(`TRANSFORMMATRIX${i}`)),
+      color: parseColor(group.values.get(`COLOR${i}`)) });
+  }
   const colorMaxA = solidModels.reduce((max, entry) => Math.max(max, entry.color?.a ?? 0), 0);
 
   return {

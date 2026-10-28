@@ -24,9 +24,9 @@
 
 ## 源身份与打开生命周期
 
-[打开核心](../desktop/src/services/gimOpenCore.ts) 建立源 SHA、大小、magic 和工程会话。源 magic 决定类型族，GIMPKGS 根据实际 CBM 入口细分独立设备；裸归档必须先验证内容。缓存记录不能覆盖源事实。读取期间源发生改变时拒绝继续提交，避免用不同源版本组合索引与几何。
+[打开核心](../desktop/src/services/gimOpenCore.ts) 建立源 SHA、大小、magic 和工程会话。源 magic 决定类型族，GIMPKGS 根据实际 CBM 或无 CBM 时的合法 DEV 装配入口细分独立设备；裸归档必须先验证内容。缓存记录不能覆盖源事实。读取期间源发生改变时拒绝继续提交，避免用不同源版本组合索引与几何。
 
-[设备运行时](../desktop/src/services/equipmentRuntime.ts) 读取唯一 Device CBM，沿原 DEV 装配建立树，复用 DEV LOD、选择、属性、相机和释放逻辑。设备语义文本在本次输入中兼容解码，源文件不重写；MOD/STL 仍由既有工作集按需读取。不等待不存在的 IFC 锚点，直接采用 Z-up→Y-up 旋转；毫米到米转换仍由原几何编译器负责。重复打开复用已验证的源解压清单及版本化 DEV 派生缓存，设备树重新解析，不发布完整变电语义缓存标记。无 IFC 的合法工程层级也复用该几何启动器。
+[设备运行时](../desktop/src/services/equipmentRuntime.ts) 读取唯一 Device CBM；没有 CBM 时校验唯一、全部 DEV 可达且无环的 DEV 装配根及实际几何引用。沿原 DEV 装配建立树，DEV 根投影为 Device，但不伪造 CBM 文件或原始字段。复用 DEV LOD、选择、属性、相机和释放逻辑。设备语义文本在本次输入中兼容解码，源文件不重写；MOD/STL 仍由既有工作集按需读取。不等待不存在的 IFC 锚点，直接采用 Z-up→Y-up 旋转；毫米到米转换仍由原几何编译器负责。重复打开复用已验证的源解压清单及版本化 DEV 派生缓存，设备树重新解析，不发布完整变电语义缓存标记。无 IFC 的合法工程层级也复用该几何启动器。
 
 ```text
 选择源文件 → 身份校验 → 清理前工程 → 校验缓存
@@ -154,6 +154,8 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 
 会话从现有语义 entries 恢复源大小，工程释放时清空。正常目录首批（最多 64 键）全部明确 miss 时，异步准备已知大小的 DEV/PHM/MOD/STL/GL File 工作集，不额外探测目录、不占计算 gate。单源最多 8 MiB，普通批次最多 4 MiB / 4096 源，总额度 128 MiB；高/临界压力停止，可选源准备 10 秒超时后保留受权懒读，原生在途读取不宣称已取消。catalog 批读的明确 miss/invalid/read-error 交回原有分支复用，不为同一 miss 重读；`deferred` 仍按需重读。沿用最多 8 秒 IFC 让步，Worker/基础任务不等待最后一个 IFC。
 
+暖恢复只有个别模板明确 miss/invalid 时，沿该 DEV 的实际引用批量准备可达源，不扩大为整站预取。该补偿路径每源最多 8 MiB、批次目标 4 MiB、会话累计准入 32 MiB；高/临界压力停止，每批 5 秒超时回到原懒读。DEV/PHM 从已读取字节直接解码供引用遍历，MOD/STL 不在主线程解析；不可变 File 交给 Worker。健康模板命中不走此路径，工程和当前请求有效性在准备后复核，不宣称取消已发出的原生读取。
+
 目录完整而至少 min(32, DEV 源数) 个不同 L0 键明确 miss、并记录至少 32 次源 RPC 时，仅对全部已知且总量不超过 32 MiB 的来源尝试一次运行中升级。不可变 File 补发到现有池，不终止健康活动任务、不清空解析缓存；旧会话不安装迟到结果。未知、过大、损坏或失败来源仍走真实诊断及懒读。此机制不改变坐标链、模板身份、持久化格式和缓存版本。性能边界及未达目标见 [问题与限制](open-issues.md) O-02。
 
 ## 当前缓存域
@@ -164,8 +166,8 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
 | 变电语义 | `gim-substation-parser-v26` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性、语义引用及索引发布凭据 |
-| DEV 几何 | `geometry-cache-v15-stretch-direction` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
-| 设备 LOD 派生 | `geometry-cache-v15-stretch-direction` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
+| DEV 几何 | `geometry-cache-v16-phm-solids` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
+| 设备 LOD 派生 | `geometry-cache-v16-phm-solids` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
 | Spatial snapshot | `substation-spatial-semantic-v2` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 源、链接和序列化结构 |
 | IFC Spatial parser contract | `gim-substation-parser-v23` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | Fragments | `fragments-cache-v6` | [db.rs](../desktop/src-tauri/src/db.rs)、[features](../desktop/src/config/features.ts) | 源/IFC 身份及实际安装的 fragments/web-ifc 版本 |

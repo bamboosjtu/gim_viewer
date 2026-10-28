@@ -204,10 +204,11 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
       throw new Error(`CBM 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
     }
     const kv = parseKeyValue(await f.text());
-    const en = normalizeEntityName(getFirstNonEmptyKv(kv, ['ENTITYNAME']));
+    const devEntry = p === equipmentEntry && /\.dev$/i.test(p);
+    const en = devEntry ? 'Device' : normalizeEntityName(getFirstNonEmptyKv(kv, ['ENTITYNAME']));
     let { name, systemNames } = extractDisplayName(kv, p);
     const cn = getFirstNonEmptyKv(kv, ['SYSCLASSIFYNAME', 'PARTNAME']);
-    const devPath = getFirstNonEmptyKv(kv, ['OBJECTMODELPOINTER']);
+    const devPath = devEntry ? normalizedPath : getFirstNonEmptyKv(kv, ['OBJECTMODELPOINTER']);
 
     // 读取 DEV SYMBOLNAME/TYPE（回填到节点，供 getNodeDisplayName 使用）
     let devSymbolName = '';
@@ -290,7 +291,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     }
 
     // 3. SUBDEVICES.NUM + SUBDEVICEi 数组引用（F4System 内部子设备分组）
-    const dn2 = parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBDEVICES.NUM']), 'SUBDEVICES.NUM');
+    const dn2 = devEntry ? 0 : parseBoundedCount(getFirstNonEmptyKv(kv, ['SUBDEVICES.NUM']), 'SUBDEVICES.NUM');
     for (let i = 0; i < dn2; i++) {
       const s = getFirstNonEmptyKv(kv, [`SUBDEVICE${i}`]);
       if (s) {

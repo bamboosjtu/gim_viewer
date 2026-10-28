@@ -24,6 +24,8 @@ import { BoxViewIndex } from '../viewer/boxViewIndex.js';
 import { DevInstanceBatches } from '../viewer/devInstanceBatches.js';
 import { pickVisibleDevRoot } from '../viewer/devViewportPick.js';
 import { isDevInstanceBatchesEnabled } from '../config/features.js';
+import { hydrateSubstationGeometryGraph } from '../gim/geometry/substationSourceGraph.js';
+import { findFileByPath } from '../gim/fileLookup.js';
 
 interface CachedTemplate { result: DevGlbSerializationResult; sha: string; sourceInvalid?: { message: string; evidence: string } }
 interface TemplateRow { bounds: THREE.Box3; template: DevGlbTemplate; sha: string; status: DevGlbSerializationResult['status']; diagnostics: DevGlbSerializationResult['diagnostics']; task?: PerfTaskIdentity }
@@ -148,7 +150,7 @@ export class DevLodRuntime {
   private cameraTimer: ReturnType<typeof setTimeout> | null = null;
   private statusTimer: ReturnType<typeof setTimeout> | null = null;
   private commitTimer: ReturnType<typeof setTimeout> | null = null;
-  private commits: Array<{ priority: number; root?: string; run: () => void; reject: (e: Error) => void }> = [];
+  private commits: Array<{ priority: number; root?: string; queuedAt: number; deferWhileMoving: boolean; run: () => void; reject: (e: Error) => void }> = [];
   private cameraMovingUntil = 0;
   private cameraSchedule = () => {
     this.diagnostics.currentViewReady = false;
@@ -161,9 +163,9 @@ export class DevLodRuntime {
     if (this.statusTimer || !this.current()) return;
     this.statusTimer = setTimeout(() => { this.statusTimer = null; this.ready(); }, 100);
   }
-  private submit(priority: number, run: () => void, root?: string): Promise<void> {
+  private submit(priority: number, run: () => void, root?: string, deferWhileMoving = true): Promise<void> {
     return new Promise((resolve, reject) => {
-      const commit = { priority, root, run: () => { try { run(); resolve(); } catch (e) { reject(e); } }, reject };
+      const commit = { priority, root, queuedAt: performance.now(), deferWhileMoving, run: () => { try { run(); resolve(); } catch (e) { reject(e); } }, reject };
       const position = this.commits.findIndex(row => row.priority > priority);
       if (position < 0) this.commits.push(commit); else this.commits.splice(position, 0, commit);
       this.drainCommits();
@@ -176,8 +178,14 @@ export class DevLodRuntime {
       const started = performance.now();
 
       while (this.commits.length && this.current()) {
-        if (performance.now() < this.cameraMovingUntil && this.commits[0].priority > 0) break;
-        this.commits.shift()!.run();
+        const now = performance.now();
+        // Camera updates must not gate the first representation. A deferred
+        // refinement must also not block lower-priority L0 behind it, and
+        // continuous controls updates cannot starve a ready commit forever.
+        const index = now >= this.cameraMovingUntil ? 0 : this.commits.findIndex(commit =>
+          !commit.deferWhileMoving || commit.priority === 0 || now - commit.queuedAt >= 1000);
+        if (index < 0) break;
+        this.commits.splice(index, 1)[0].run();
         if (performance.now() - started >= 4) break;
       }
       if (this.commits.length) this.drainCommits();
@@ -569,6 +577,68 @@ export class DevLodRuntime {
     }).catch(error => { if (this.current()) console.warn('[DEV source upgrade]', error); });
   }
 
+  private missedSourcePreparations = new Map<string, Promise<void>>();
+  private missedSourceTail = Promise.resolve();
+  private missedSourceBytes = 0;
+  /** A partial warm cache needs only the missing DEV's reachable sources.
+   * Batch those reads before compiling, instead of serial Worker→UI RPC for
+   * each small file. Healthy hits perform no reads; admission is session-wide. */
+  private prepareMissingTemplateSources(dev: string): Promise<void> {
+    if (this.state.currentFiles != null || !this.sourceFiles || this.session.projectId == null) return Promise.resolve();
+    try { if (localStorage.getItem('gim-dev-preload') === '0') return Promise.resolve(); } catch { /* storage unavailable */ }
+    const key = dev.toLowerCase(), old = this.missedSourcePreparations.get(key);
+    if (old) return old;
+    const pressured = () => this.memoryPressure === 'high' || this.memoryPressure === 'critical';
+    const task = this.missedSourceTail.then(async () => {
+      if (!this.current() || pressured()) return;
+      const before = this.missedSourceBytes;
+      const prepared = await hydrateSubstationGeometryGraph([dev], async paths => {
+        const loaded = new Map<string, File>();
+        let batch: string[] = [], bytes = 0;
+        const flush = async () => {
+          if (!batch.length) return;
+          const result = await this.preparationWait(batchReadCachedFiles(this.session.projectId!, batch), 5000);
+          if (!this.current() || pressured()) return;
+          for (const [path, data] of result) if (data?.byteLength) {
+            const expected = findFileByPath(this.sourceFiles!, path)?.file.size;
+            if (expected != null && data.byteLength <= expected) {
+              const file = new File([data as Uint8Array<ArrayBuffer>], path.split('/').pop()!);
+              // Graph traversal needs these already-read bytes as text. Avoid
+              // another asynchronous Blob read per edge on a busy renderer.
+              // File structured cloning sends its backing data, not this method.
+              if (/\.(dev|phm)$/i.test(path)) {
+                const text = new TextDecoder().decode(data);
+                Object.defineProperty(file, 'text', {value: () => Promise.resolve(text)});
+              }
+              loaded.set(path, file);
+            }
+          }
+          batch = []; bytes = 0;
+        };
+        for (const path of paths) {
+          if (!this.current() || pressured()) break;
+          const source = findFileByPath(this.sourceFiles!, path);
+          if (!source) continue;
+          const file = this.sourceFiles!.get(source.path)!;
+          const size = file.size;
+          if (file instanceof File) { loaded.set(source.path, file); continue; }
+          if (!Number.isSafeInteger(size) || size <= 0 || size > 8*1024*1024 || this.missedSourceBytes + size > 32*1024*1024) continue;
+          if (batch.length && bytes + size > 4*1024*1024) await flush();
+          if (!this.current() || pressured()) break;
+          this.missedSourceBytes += size; bytes += size; batch.push(source.path);
+        }
+        if (this.current() && !pressured()) await flush();
+        return loaded;
+      });
+      if (!this.current() || pressured()) return;
+      this.worker.installSources(prepared);
+      perfMark('DEV missing-template source workset', {dev, entries:prepared.size, admittedBytes:this.missedSourceBytes-before,
+        sessionAdmittedBytes:this.missedSourceBytes}, this.perf);
+    }).catch(error => { perfMark('DEV missing-template source fallback', {dev, reason:String(error)}, this.perf); });
+    this.missedSourcePreparations.set(key, task); this.missedSourceTail = task;
+    return task;
+  }
+
   async start(): Promise<void> {
     ensureGeometryLayers(this.state, (this.ctx.world.scene as any).three);
     if (!this.sourceIdentity && this.state.currentFiles) {
@@ -905,6 +975,9 @@ export class DevLodRuntime {
         if (!this.wanted.has(key)) throw new DOMException('DEV request left the view', 'AbortError');
         generated = true;
         releaseInput(); releaseInput=undefined;
+        await this.prepareMissingTemplateSources(dev);
+        if (!this.current()) return null;
+        if (!this.wanted.has(key)) throw new DOMException('DEV request left the view', 'AbortError');
         identity.cacheSource = 'compiled';
         const result = await this.worker.compile(dev, lod, key, this.priorities.get(key) ?? priority, identity.taskId).catch(async error => {
           if (error instanceof InvalidDevGeometryError && error.sourceEvidence && this.current()) {
@@ -1107,7 +1180,7 @@ export class DevLodRuntime {
     perfRecordTaskPhase(trace, 'placementCommit', performance.now() - started, this.perf);
     this.requestReady();
     this.schedule(); // Reconsider detail only after a base representation exists.
-    }, row.entry.rootOccurrence), this.perf);
+    }, row.entry.rootOccurrence, lod > 0), this.perf);
     } finally {
       const users = (this.placementUsers.get(key) ?? 1) - 1;
       if (users) this.placementUsers.set(key, users); else this.placementUsers.delete(key);

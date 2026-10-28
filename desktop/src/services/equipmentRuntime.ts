@@ -21,7 +21,7 @@ export async function openEquipmentProject(context: GimRuntimeOpenContext): Prom
   if (!current()) return;
   const entry = await findEquipmentEntry(files);
   if (!current()) return;
-  if (!entry) throw new Error('设备包缺少唯一、有效的 Device CBM 入口');
+  if (!entry) throw new Error('设备包缺少唯一、有效的 Device CBM 或 DEV 装配入口');
   const tree = await buildCbmTree(files, undefined, entry);
   if (!current()) return;
   if (!tree) throw new Error('无法构建设备模型层级');
