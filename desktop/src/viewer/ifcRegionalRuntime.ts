@@ -258,7 +258,7 @@ export class IfcRegionalRuntime {
     localId: number | undefined): Promise<void> {
     const current = () => this.current() && this.groups.get(object.expressId) === group;
     if (current()) await this.options.onRepresentationChanged?.(object,group,localId,current,() => {
-      if (group?.userData.lod === 1) this.instances.highlight(object.expressId,group);
+      if (group?.userData.lod === 1) this.instances.highlight(object.expressId,group,true);
     });
   }
   private closeSource() {
@@ -465,12 +465,19 @@ export class IfcRegionalRuntime {
     const object = this.index.objects.find((o) => o.expressId === id);
     return object ? { object, distance: hit.distance } : null;
   }
-  highlightGroup(expressId: number) {
+  highlightGroup(expressId: number, append = false) {
     this.selectedExpressId = expressId;
     const group = this.groups.get(expressId);
-    if (group) this.instances.highlight(expressId, group);
+    if (group) this.instances.highlight(expressId, group, append);
     this.applyOnlySelected();
     return group;
+  }
+  /** Exact source product bounds are available even before its near mesh.
+   * A far Fragments item may batch several products and cannot frame a leaf. */
+  worldBounds(object:RegionalObject):THREE.Box3|undefined {
+    const b=object.bounds;
+    if(!b||b.length!==6||!b.every(Number.isFinite))return;
+    return new THREE.Box3(new THREE.Vector3(b[0],b[1],b[2]),new THREE.Vector3(b[3],b[4],b[5])).applyMatrix4(this.transform);
   }
   clearHighlight() {
     this.instances.clearHighlight();

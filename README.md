@@ -5,22 +5,24 @@
 
 ## 下载与安装
 
-GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览工具，提供 Windows 桌面版和 Android 移动版。当前桌面源码版本为 **v0.1.2**；下载页面以实际发布附件为准。Android 移动版仍为预览版（Preview），本轮桌面版本不改变 Android 版本。
+GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览工具，提供 Windows 桌面版和 Android 移动版。当前桌面源码版本为 **v0.1.3**；下载页面以实际发布附件为准。Android 移动版仍为预览版（Preview），本轮桌面版本不改变 Android 版本。
 
 | 平台          | 当前版本       | 下载                                                         | 主要功能                                                 |
 | ------------- | -------------- | ------------------------------------------------------------ | -------------------------------------------------------- |
-| Windows x64   | v0.1.2（源码） | [已发布 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站和设备三维模型、输电线路地图、层级与属性浏览 |
+| Windows x64   | v0.1.3（源码） | [已发布 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站和设备三维模型、输电线路地图、业务树与属性浏览 |
 | Android ARM64 | v0.1.16 Preview | [下载 APK](https://github.com/bamboosjtu/gim_viewer/releases/download/android-v0.1.6-preview/gim-viewer-android-ae7df06cc83ebde26fc2cb17faf003d7b2fd8a2f.zip) | 输电线路地图、工程树、杆塔与导线属性、来源查看和现场定位 |
 
 历史版本及发布说明：[GitHub Releases](https://github.com/bamboosjtu/gim_viewer/releases)
 
-### v0.1.2 桌面能力
+### v0.1.3 桌面能力
+
+变电工程默认展示安装工程 / 建筑工程业务树，安装侧按主变、配电装置（电压降序）、无功补偿、站用电、电缆及接地、二次排列；间隔按出线、进线、母线设备、母联、分段及数字自然顺序排列。首次后台构建并缓存完整业务投影，合法暖启动直接恢复。IFC 对象可选中高亮和近景，区域及间隔可按成员集合定位、隔离和恢复；证据不足的材料保留待确认，不自动按距离改挂。原始来源和 IFC 空间关系仍可查看。
 
 支持以独立 Device CBM 为入口的设备 GIM，包括带 GIMPKGS 头和裸 7z 容器；无需 project.cbm 或 IFC。设备层级、中文属性、搜索、三维选择和几何缓存复用现有浏览能力，无 IFC 的工程层级包也可自动显示 DEV 几何。拉伸体兼容单位方向和 304.8 mm 方向基矢，几何与范围计算采用同一解释。
 
 普通选择、搜索定位及相机靠近采用 L0/L1，DEV 和 IFC 的 L2 由属性面板“查看精细模型”主动触发；基础表示、连接线、当前视图和精化分别记录状态。DEV 调度保留 gate 唤醒、慢任务隔离与结果预算，支持视角历史、大分支虚拟列表和内存压力反馈。
 
-DEV 实例化仍为默认关闭的试点：原生对照已减少绘制调用，但基础表示启动存在回退。选择响应、IFC 隔离显示及选择提示仍有未关闭问题，完整冷暖/工程切换矩阵尚未通过。本版不宣称全站性能已达标，也不提供编辑、碰撞或工程校核功能。具体实现、测量和限制分别见[架构](docs/architecture.md)、[性能基线](docs/performance.md)及[问题清单](docs/open-issues.md)。
+DEV 实例化仍为默认关闭的试点：原生对照已减少绘制调用，但基础表示启动存在回退。选择响应、IFC 隔离显示及默认业务树的当前视图耗时仍有未关闭问题，完整冷暖/工程切换矩阵尚未通过。本版不宣称全站性能已达标，也不提供编辑、碰撞或工程校核功能。具体实现、测量和限制分别见[架构](docs/architecture.md)、[性能基线](docs/performance.md)及[问题清单](docs/open-issues.md)。
 
 ### Windows 桌面版
 

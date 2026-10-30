@@ -30,6 +30,7 @@ export interface RestDependencies {
   isCurrent(): boolean;
   saveRest(payload: SubstationRestPayload): Promise<void>;
   onPhase?(phase: string, counts?: Record<string, number>): void;
+  onPublished?(payload: SubstationRestPayload): void;
 }
 
 /**
@@ -125,6 +126,7 @@ export async function publishSubstationRest(
   });
   await deps.saveRest(payload);
   if (!current()) return false;
+  deps.onPublished?.(payload);
   deps.onPhase?.('saveRestReady', {
     fam: payload.fam_properties.length,
     dev: payload.dev_properties.length,

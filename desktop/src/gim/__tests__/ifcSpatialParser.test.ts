@@ -33,6 +33,31 @@ function node(overrides: Partial<CbmNode> = {}): CbmNode {
 }
 
 describe('ifc spatial parser', () => {
+  it('preserves case and trailing $ in model-scoped GlobalId and rejects ambiguous physical identities', () => {
+    const refs=['AbC$','abc$','duplicate','only-other-model','door'];
+    const root=node({children:refs.map((guid,i)=>node({path:`cbm-${i}`,entityName:'F4System',ifcFile:entry.path,ifcGuid:guid}))});
+    const index=buildSubstationSpatialIndexFromTexts([
+      {entry,text:[
+        "#10=IFCWALL('AbC$',#99,'A',$,$,$,$,$,$);",
+        "#11=IFCWALL('abc$',#99,'B',$,$,$,$,$,$);",
+        "#12=IFCWALL('duplicate',#99,'C',$,$,$,$,$,$);",
+        "#13=IFCWALL('duplicate',#99,'D',$,$,$,$,$,$);",
+        "#14=IFCDOOR('door',#99,'Door',$,$,$,$,$,$);",
+        "#15=IFCOPENINGELEMENT('door',#99,'Opening',$,$,$,$,$,$);",
+        "#16=IFCDISTRIBUTIONPORT('door',#99,'Port',$,$,$,$,$,$);",
+        "#20=IFCRELVOIDSELEMENT('void',#99,$,$,#10,#15);",
+        "#21=IFCRELFILLSELEMENT('fill',#99,$,$,#15,#14);",
+      ].join('\n')},
+      {entry:{modelId:'other',path:'other.ifc',name:'other'},text:"#10=IFCWALL('only-other-model',#99,'Other',$,$,$,$,$,$);"},
+    ],root);
+    const linked=(path:string)=>index.linksByCbmPath.get(path)?.ifcObjectKey;
+    expect(linked('cbm-0')).toBe(index.objects.find(o=>o.name==='A')!.key);
+    expect(linked('cbm-1')).toBe(index.objects.find(o=>o.name==='B')!.key);
+    expect(linked('cbm-2')).toBeNull();expect(linked('cbm-3')).toBeNull();
+    const door=index.objects.find(o=>o.name==='Door')!,opening=index.objects.find(o=>o.name==='Opening')!;
+    expect(linked('cbm-4')).toBe(door.key);expect(door.hostObjectKey).toBe(opening.key);
+    expect(opening.hostObjectKey).toBe(index.objects.find(o=>o.name==='A')!.key);
+  });
   it('解析空间聚合、包含关系和 IFCGUID → CBM 链接', () => {
     const text = [
       "#1=IFCPROJECT('p',#99,'项目',$,$,$,$,(#90),$);",

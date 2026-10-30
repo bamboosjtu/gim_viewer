@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { webcrypto } from 'node:crypto';
+import { buildBusinessTree } from '../../gim/businessTree.js';
+import type { CbmNode } from '../../gim/types.js';
+import { encodeBusinessTree, decodeBusinessTree, writeBusinessTree, businessCacheEntry } from '../businessTreeCache.js';
 import type { SubstationSpatialIndex } from '../../gim/ifcSpatialParser.js';
 import {
   hydrateSubstationSpatialIndex,
@@ -18,6 +22,42 @@ vi.mock('@desktop/database.js', () => ({
 
 const readCachedEntryMock = vi.mocked(readCachedEntry);
 const writeCacheFileMock = vi.mocked(writeCacheFile);
+
+describe('business projection snapshot',()=>{
+  const root:CbmNode={path:'root.cbm',name:'工程',entityName:'F1System',children:[],famPath:'',devPath:'',ifcFile:'',ifcGuid:'',classifyName:'',transformMatrix:'',systemNames:[],devSymbolName:'',devType:'',devExpanded:false};
+  const id={sourceSha256:'a'.repeat(64),semanticVersion:'semantic-test',modelIds:['ifc_station']};
+  beforeEach(()=>{vi.stubGlobal('crypto',webcrypto);});afterEach(()=>{vi.unstubAllGlobals();});
+  it('restores all source/member indexes and original CBM references without serializing the CBM tree',async()=>{
+    const p=buildBusinessTree(root,new Map(),createIndex()),bytes=await encodeBusinessTree(p,id),restored=await decodeBusinessTree(bytes,id,p.cbmByPath);
+    expect(restored.objects).toEqual(p.objects);expect(restored.members).toEqual(p.members);expect(restored.objectBySource).toEqual(p.objectBySource);
+    expect(restored.cbmByPath.get(root.path)).toBe(root);expect([...restored.objects.values()][0].ifcRefs?.[0].globalId).toBe('GUID-10');
+  });
+  it('rejects source/semantic/model changes, truncated or corrupt content and invalid graph references',async()=>{
+    const p=buildBusinessTree(root,new Map(),createIndex()),bytes=await encodeBusinessTree(p,id);
+    for(const changed of [{...id,sourceSha256:'b'.repeat(64)},{...id,semanticVersion:'next'},{...id,modelIds:['other']}])await expect(decodeBusinessTree(bytes,changed,p.cbmByPath)).rejects.toThrow('identity/version');
+    await expect(decodeBusinessTree(bytes.subarray(0,2),id,p.cbmByPath)).rejects.toThrow('size');
+    const broken=bytes.slice();broken[broken.length-1]^=1;await expect(decodeBusinessTree(broken,id,p.cbmByPath)).rejects.toThrow('checksum');
+    [...p.objects.values()][0].assignment.unitKey='missing';await expect(decodeBusinessTree(await encodeBusinessTree(p,id),id,p.cbmByPath)).rejects.toThrow('object');
+  });
+  it('publishes one source-bound binary artifact and rejects invalid entry identities',async()=>{
+    const p=buildBusinessTree(root,new Map(),createIndex());await writeBusinessTree(7,id,p);
+    expect(writeCacheFileMock).toHaveBeenCalledWith(7,businessCacheEntry(id),expect.any(Uint8Array),id.sourceSha256);
+    expect(()=>businessCacheEntry({...id,sourceSha256:'../bad'})).toThrow('source-sha');
+  });
+  it('retains lazy DEV aliases while binding the primary device to the restored CBM tree',async()=>{
+    const alias={...root,path:root.path+'#dev:0:child.dev',entityName:'DEV_SUBDEVICE',devPath:'child.dev'},cold={...root,devPath:'root.dev',children:[alias]},warm={...cold,children:[]};
+    const p=buildBusinessTree(cold),identity={...id,modelIds:[]},restored=await decodeBusinessTree(await encodeBusinessTree(p,identity),identity,new Map([[warm.path,warm]]));
+    expect(restored.objectBySource.get(alias.path)).toBe(restored.objectBySource.get(root.path));expect(restored.cbmByPath.get(root.path)).toBe(warm);
+  });
+  it('compresses repeated evidence and stops expansion at the declared size',async()=>{
+    const p=buildBusinessTree(root,new Map(),createIndex());[...p.objects.values()][0].context=['重复的来源与工程关系'.repeat(2000)];
+    const bytes=await encodeBusinessTree(p,id),length=new DataView(bytes.buffer).getUint32(0,true),header=JSON.parse(new TextDecoder().decode(bytes.subarray(4,4+length)));
+    expect(bytes.length).toBeLessThan(header.plainBytes/10);expect((await decodeBusinessTree(bytes,id,p.cbmByPath)).objects).toEqual(p.objects);
+    const changed=new TextEncoder().encode(JSON.stringify({...header,plainBytes:1})),invalid=new Uint8Array(4+changed.length+bytes.length-4-length);
+    new DataView(invalid.buffer).setUint32(0,changed.length,true);invalid.set(changed,4);invalid.set(bytes.subarray(4+length),4+changed.length);
+    await expect(decodeBusinessTree(invalid,id,p.cbmByPath)).rejects.toThrow('expanded size');
+  });
+});
 
 function createIndex(): SubstationSpatialIndex {
   const modelId = 'ifc_station';
@@ -208,7 +248,7 @@ describe('substation spatial semantic snapshot', () => {
     expect(written.snapshotBytes).toBeGreaterThan(0);
     const call = writeCacheFileMock.mock.calls[0];
     expect(call?.[0]).toBe(7);
-    expect(call?.[1]).toBe('__derived__/substation-spatial-semantic-v2.json');
+    expect(call?.[1]).toBe('__derived__/substation-spatial-semantic-v3.json');
     expect(call?.[2]).toBeTruthy();
     expect(call?.[3]).toBe('sha-a');
   });

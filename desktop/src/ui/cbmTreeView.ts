@@ -21,6 +21,8 @@ import {
 } from './substationFunctionalTreeView.js';
 import type { PropertyReferenceDetail } from './propertyDictionary.js';
 import { markDeviceBounds } from './deviceBoundsMarker.js';
+import { getBusinessTree } from '../services/businessTreeService.js';
+import { businessSearchItems, renderBusinessTree, revealBusinessTarget } from './businessTreeView.js';
 
 const ENTITY_ICONS: Record<string, string> = {
   F1System: '◎', F2System: '□', F3System: '≋', F4System: '◆', PARTINDEX: '•',
@@ -129,19 +131,59 @@ function buildCbmSearchIndex(state: AppState, root: CbmNode): SearchItem[] {
  * 构建并渲染 CBM 层级树。
  * 统一入口：无论首次打开还是缓存命中，都使用 onNodeClick 回调处理交互。
  */
-const renderedTrees = new WeakMap<AppState, { root: CbmNode; spatial: unknown; names: unknown; nameCount: number; fam: unknown; famCount: number; mode: string; host: Element }>();
+const renderedTrees = new WeakMap<AppState, { root: CbmNode; spatial: unknown; names: unknown; nameCount: number; fam: unknown; famCount: number; mode: string; host: Element; business?:unknown }>();
+function refreshBusinessQuality(state:AppState):void {
+  const quality=cbmTreePanel.querySelector<HTMLElement>('.substation-nav-quality'),p=state.businessTree;
+  if(quality&&p){quality.textContent=state.businessTreePending?'业务树准备中':state.businessTreeError?'业务树未完成':`对象 ${p.objects.size}${state.businessTreeCacheStatus==='hit'?' · 业务缓存命中':state.businessTreeCacheStatus==='saving'?' · 保存业务缓存中':state.businessTreeCacheStatus==='error'?' · 业务缓存保存失败':''}`;quality.title=state.businessTreeError||state.businessTreeCacheError;}
+  const spatial=cbmTreePanel.querySelector<HTMLButtonElement>('[data-business-mode="spatial"]');if(spatial)spatial.disabled=!state.substationSpatialIndex;
+}
 export function buildAndRenderCbmTree(
   state: AppState,
   onNodeClick: (node: CbmNode) => void,
 ): void {
   const previous = renderedTrees.get(state);
+  const immutableBusiness=state.substationNavMode==='business'&&!!state.businessTree&&!state.businessTreePending&&!state.businessTreeError&&previous?.business===state.businessTree;
   if (state.currentProjectType === 'substation' && state.currentCbmTree && previous
-    && previous.root === state.currentCbmTree && previous.spatial === state.substationSpatialIndex
-    && previous.names === state.ifcGuidToName && previous.nameCount === state.ifcGuidToName.size
-    && previous.fam === state.cachedFamSourceProperties && previous.famCount === state.cachedFamSourceProperties.size
-    && previous.mode === state.substationNavMode && cbmTreePanel.contains(previous.host)) return;
+    && previous.root === state.currentCbmTree && (immutableBusiness||previous.spatial === state.substationSpatialIndex)
+    && (state.substationNavMode==='business' || previous.names === state.ifcGuidToName && previous.nameCount === state.ifcGuidToName.size)
+    && (immutableBusiness||previous.fam === state.cachedFamSourceProperties && previous.famCount === state.cachedFamSourceProperties.size)
+    && previous.mode === state.substationNavMode && cbmTreePanel.contains(previous.host)) {if(immutableBusiness)refreshBusinessQuality(state);return;}
+  const expanded = [...cbmTreePanel.querySelectorAll<HTMLElement>('.tree-row[aria-expanded="true"]')].map(row=>row.dataset.nodePath!);
+  const scroll = cbmTreePanel.scrollTop;
+  const query = cbmTreePanel.querySelector<HTMLInputElement>('.search-box-wrap input')?.value ?? '';
   cbmTreePanel.innerHTML = '';
-  if (!state.currentCbmTree) { cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>'; return; }
+  if (!state.currentCbmTree) { renderedTrees.delete(state);cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>'; return; }
+  if(state.currentProjectType==='substation'&&(state.substationNavMode==='business'||state.substationNavMode==='source')){
+    const isBusiness=state.substationNavMode==='business';
+    const projection=isBusiness?getBusinessTree(state,()=>{if(renderedTrees.get(state)?.business===state.businessTree){refreshBusinessQuality(state);return;}renderedTrees.delete(state);buildAndRenderCbmTree(state,onNodeClick);},()=>renderedTrees.delete(state)):null;
+    const bar=document.createElement('div');bar.className='substation-nav-mode';
+    for(const [mode,label]of [['business','业务树'],['source','来源'],['spatial','空间']]as const){
+      const button=document.createElement('button');button.className='substation-nav-mode-btn';button.textContent=label;
+      button.dataset.businessMode=mode;
+      button.classList.toggle('active',mode===state.substationNavMode);button.disabled=mode==='spatial'&&!state.substationSpatialIndex;
+      button.addEventListener('click',()=>{state.substationNavMode=mode;buildAndRenderCbmTree(state,onNodeClick);});bar.append(button);
+    }
+    const host=document.createElement('div');host.className='tree-view-host';cbmTreePanel.append(bar,host);
+    if(projection){const quality=document.createElement('span');quality.className='substation-nav-quality';bar.append(quality);refreshBusinessQuality(state);}
+    host.addEventListener('click',event=>{
+      const target=event.target as Element;if(!target.closest('.tree-toggle'))return;
+      const row=target.closest<HTMLElement>('.tree-row'),key=row?.dataset.nodePath;if(!key)return;
+      if(row?.getAttribute('aria-expanded')==='false')state.businessExpandedRows.add(key);else state.businessExpandedRows.delete(key);
+    },true);
+    const select=(key:string)=>{if(projection)void import('../services/businessTreeSelection.js').then(({selectBusinessTree})=>selectBusinessTree(state,projection,key)).catch(error=>console.warn('[业务树选择]',error));};
+    if(projection){
+      renderSearchBox(cbmTreePanel,businessSearchItems(projection),key=>{selectCbmTreeRow(revealBusinessTarget(projection,key,host));select(key);});
+      renderBusinessTree(projection,host,state.projectName,select);
+    }else{
+      renderSearchBox(cbmTreePanel,buildCbmSearchIndex(state,state.currentCbmTree),key=>{const node=findByPath(state.currentCbmTree,key);if(node)onNodeClick(node);});
+      renderCbmTreeUI(state,state.currentCbmTree,host,onNodeClick);
+    }
+    for(const key of new Set([...state.businessExpandedRows,...expanded])) {const row=[...host.querySelectorAll<HTMLElement>('.tree-row')].find(row=>row.dataset.nodePath===key);if(row?.getAttribute('aria-expanded')==='false')row.querySelector<HTMLButtonElement>('.tree-toggle')?.click();}
+    const input=cbmTreePanel.querySelector<HTMLInputElement>('.search-box-wrap input');if(input&&query){input.value=query;input.dispatchEvent(new Event('input'));}
+    cbmTreePanel.scrollTop=scroll;
+    renderedTrees.set(state,{root:state.currentCbmTree,spatial:state.substationSpatialIndex,names:state.ifcGuidToName,nameCount:state.ifcGuidToName.size,fam:state.cachedFamSourceProperties,famCount:state.cachedFamSourceProperties.size,mode:state.substationNavMode,host,business:projection});
+    syncSelectedTreeRow(state);return;
+  }
   const spatialIndex = state.substationSpatialIndex;
   const isSubstation = state.currentProjectType === 'substation';
   const hasSpatialTree = !!spatialIndex?.coverage.hasSpatialEntities && !!spatialIndex?.coverage.hasSpatialContainment;
@@ -182,7 +224,9 @@ export function buildAndRenderCbmTree(
     } else {
       quality.textContent = '空间索引不可用';
     }
-    modeBar.append(spatialButton, functionalButton, quality);
+    const businessButton=document.createElement('button');businessButton.type='button';businessButton.className='substation-nav-mode-btn';businessButton.textContent='业务树';
+    businessButton.addEventListener('click',()=>{state.substationNavMode='business';buildAndRenderCbmTree(state,onNodeClick);});
+    modeBar.append(businessButton, spatialButton, functionalButton, quality);
     cbmTreePanel.append(modeBar, treeHost);
     renderedTrees.set(state,{root:state.currentCbmTree,spatial:state.substationSpatialIndex,names:state.ifcGuidToName,
       nameCount:state.ifcGuidToName.size,fam:state.cachedFamSourceProperties,famCount:state.cachedFamSourceProperties.size,mode:state.substationNavMode,host:treeHost});
@@ -327,6 +371,9 @@ export function syncSelectedTreeRow(state: AppState): void {
   const target=state.selectionRequest?.target;
   if (!target) return;
   let rowKey=target.key;
+  if(state.substationNavMode==='business'&&state.businessTree){
+    rowKey=revealBusinessTarget(state.businessTree,target.key,cbmTreePanel);selectCbmTreeRow(rowKey);return;
+  }
   if (target.kind==='cbm' && state.currentProjectType==='substation' && state.currentCbmTree && state.substationNavMode==='functional') {
     rowKey=revealFunctionalSearchTarget(buildFunctionalDomainIndex(state.currentCbmTree,state.cachedFamSourceProperties),target.key) ?? target.key;
   } else if (state.substationNavMode==='spatial' && state.substationSpatialIndex && target.kind!=='ifc-element') {

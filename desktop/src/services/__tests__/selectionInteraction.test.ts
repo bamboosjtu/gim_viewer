@@ -39,6 +39,53 @@ beforeEach(() => {
     fragments:{list:new Map(),resetHighlight:vi.fn(async () => {}),highlight:vi.fn(async () => {}),core:{update:vi.fn()} } };
 });
 
+it.each([false,true])('a business IFC leaf highlights and frames its cached identity before Spatial = %s',async withoutSpatial=>{
+  const {state}=fixture();state.initialized=true;state.currentProjectType='substation';
+  const index=await spatialFixture(state),object=index.objects[0];
+  const {buildBusinessTree}=await import('../../gim/businessTree.js');
+  const p=buildBusinessTree(state.currentCbmTree!,new Map(),index);state.businessTree=p;
+  if(withoutSpatial)state.substationSpatialIndex=null;
+  const key=p.objectBySource.get(object.key)!;
+  const box=new THREE.Box3(new THREE.Vector3(1,2,3),new THREE.Vector3(3,4,5));
+  runtime.ctx.fragments.list.set(state.getRuntimeModelId('model'),{getLocalIdsByGuids:vi.fn(async()=>[10]),getMergedBox:vi.fn(async()=>box),getItemsData:async()=>[]});
+  const {selectBusinessTree}=await import('../businessTreeSelection.js');
+  await selectBusinessTree(state,p,key);
+  expect(runtime.ctx.fragments.highlight).toHaveBeenCalled();
+  expect(runtime.ctx.world.camera.controls.setLookAt).toHaveBeenCalled();
+  expect(state.selectionRequest?.target).toEqual({kind:'business',key});
+  expect(state.selectionHighlightRequestId).toBe(state.selectionRequest?.id);
+  expect(document.querySelector('.props-header')?.textContent).toContain('IFC B');
+  state.beginSelection({kind:'cbm',key:'next'});expect(state.businessSelectionRoots).toBeNull();
+});
+it('a late business IFC identity reply cannot highlight over a newer device selection',async()=>{
+  const {state,b}=fixture();state.initialized=true;state.currentProjectType='substation';
+  const index=await spatialFixture(state),object=index.objects[0],ids=deferred<(number|null)[]>(),started=deferred<void>();
+  const {buildBusinessTree}=await import('../../gim/businessTree.js'),p=buildBusinessTree(state.currentCbmTree!,new Map(),index);state.businessTree=p;
+  runtime.ctx.fragments.list.set(state.getRuntimeModelId('model'),{getLocalIdsByGuids:()=>{started.resolve();return ids.promise;},getMergedBox:async()=>new THREE.Box3(),getItemsData:async()=>[]});
+  const {selectBusinessTree}=await import('../businessTreeSelection.js');
+  const pending=selectBusinessTree(state,p,p.objectBySource.get(object.key)!);await started.promise;
+  b.devPath='';const {handleNodeClick}=await import('../nodeInteractionService.js');await handleNodeClick(state,b,()=>{});
+  ids.resolve([10]);await pending;expect(runtime.ctx.fragments.highlight).not.toHaveBeenCalled();expect(document.querySelector('.props-header')?.textContent).toBe('B');
+});
+
+it('uses precise regional bounds for a linked IFC leaf and offers a local view of a long grounding member',async()=>{
+  const {state,a}=fixture();state.initialized=true;state.currentProjectType='substation';
+  a.ifcFile='model.ifc';a.ifcGuid='guid-B';a.devPath='';
+  const index=await spatialFixture(state),object=index.objects[0];
+  const {buildBusinessTree}=await import('../../gim/businessTree.js');
+  const p=buildBusinessTree(state.currentCbmTree!,new Map(),index);state.businessTree=p;
+  const exact=new THREE.Box3(new THREE.Vector3(10,2,3),new THREE.Vector3(117,2.1,3.1));
+  const loaded={getLocalIdsByGuids:vi.fn(async()=>[10]),getMergedBox:vi.fn(async()=>new THREE.Box3(new THREE.Vector3(-100,-100,-100),new THREE.Vector3(200,200,200))),getItemsData:async()=>[]};
+  runtime.ctx.fragments.list.set(state.getRuntimeModelId('model'),loaded);
+  state.ifcRegionalRuntimes.set('model',{index:{objects:[{globalId:object.globalId,expressId:10}]},worldBounds:()=>exact,highlightGroup:()=>null,clearHighlight:()=>{}} as any);
+  const {selectBusinessTree}=await import('../businessTreeSelection.js');await selectBusinessTree(state,p,p.objectBySource.get(a.path)!);
+  expect(loaded.getMergedBox).not.toHaveBeenCalled();expect(runtime.ctx.fragments.highlight).toHaveBeenCalledWith(expect.anything(),{[state.getRuntimeModelId('model')]:[10]});
+  const controls=runtime.ctx.world.camera.controls,near=controls.position.distanceTo(controls.target);
+  expect(controls.target.x).toBeCloseTo(63.5);expect(near).toBeLessThan(70);
+  const button=document.getElementById('business-fit')!;expect(button.textContent).toBe('定位整件');button.click();
+  await vi.waitFor(()=>expect(controls.position.distanceTo(controls.target)).toBeGreaterThan(near*5));
+});
+
 it('ordinary selection reports through selection status without reusing project loading feedback', async () => {
   const {state,a}=fixture();
   const overlay=document.createElement('div');overlay.id='loading';overlay.style.display='none';document.body.append(overlay);

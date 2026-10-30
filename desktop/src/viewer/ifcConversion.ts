@@ -26,6 +26,7 @@ export async function loadRawIfc(
   options: {
     transferInput?: boolean;
     openingPolicy?: IfcOpeningPolicy;
+    onConversionStage?: (stage: string) => void;
     onFarArtifact?:(bytes:Uint8Array<ArrayBuffer>,index:RegionalIndex)=>void;
     onRegionalBatch?: (batch: IfcRegionalConnectionBatch) => void;
     onRegionalComplete?: (meta: { objectCount: number; sequence: number }) => void;
@@ -75,6 +76,7 @@ export async function loadRawIfc(
           const response = event.data;
           if (response.type === 'stage') {
             lastProgressAt = performance.now();
+            options.onConversionStage?.(response.stage);
             perfRecordExternalSpan(`IFC ${response.stage} · ${entryPath}`, response.elapsedMs,
               {entryPath,phase:response.stage,...response.meta}, perfSessionId);
             return;

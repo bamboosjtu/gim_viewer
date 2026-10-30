@@ -30,7 +30,7 @@ import { findFileByPath } from '../gim/fileLookup.js';
 interface CachedTemplate { result: DevGlbSerializationResult; sha: string; sourceInvalid?: { message: string; evidence: string } }
 interface TemplateRow { bounds: THREE.Box3; template: DevGlbTemplate; sha: string; status: DevGlbSerializationResult['status']; diagnostics: DevGlbSerializationResult['diagnostics']; task?: PerfTaskIdentity }
 interface CacheDecision { key: string; devPath: string; lod: DeviceLod; status: DevArtifactReadStatus | 'compiled' | 'write-failed'; reason?: string }
-interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; pickBounds?: THREE.Box3; pickLocalBounds?: THREE.Box3; desired: DeviceLod | null; browseDesired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
+interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; sourceGeometryBounds?:number[]; pickBounds?: THREE.Box3; pickLocalBounds?: THREE.Box3; desired: DeviceLod | null; browseDesired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
 interface ReadinessContribution {
   visible: boolean;
   finished: boolean;
@@ -220,6 +220,13 @@ export class DevLodRuntime {
   private templateWaiters = new Map<string, { queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
   private templateQueue = new WorkQueue<{ queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
   private rows = new Map<string, Occurrence>();
+  /** Semantic consumers reuse the already prepared catalogue, without GLB or scene work. */
+  *getBusinessOccurrences():IterableIterator<Readonly<DevSpatialOccurrence>> {for(const row of this.rows.values())yield row.entry;}
+  /** Fixed L0 representation bounds, in absolute source metres/Z-up. Catalog
+   * bounds can be unknown even though the displayed template is measurable. */
+  *getBusinessShapes():IterableIterator<import('../gim/businessTree.js').BusinessShape> {
+    for(const row of this.rows.values()){const b=row.sourceGeometryBounds;if(b)yield {objectKey:row.entry.rootOccurrence,min:[b[0],b[1],b[2]],max:[b[3],b[4],b[5]],evidence:'geometry'};}
+  }
   /** Readiness is maintained on row state transitions rather than scanning the
    * full occurrence map on every status refresh.  A bounded opt-in audit can
    * still recompute the counters to catch future transition omissions. */
@@ -853,7 +860,7 @@ export class DevLodRuntime {
   }
   private applyOnlySelected(): void {
     for (const [key, row] of this.rows) {
-      if (row.group) row.group.visible = !this.onlySelected || (row.entry.rootOccurrence ?? key) === this.selected;
+      if (row.group) row.group.visible = !this.onlySelected || (this.state.businessSelectionRoots?.has(row.entry.rootOccurrence ?? key) ?? (row.entry.rootOccurrence ?? key) === this.selected);
     }
     this.instances?.sync();
   }
@@ -1137,6 +1144,7 @@ export class DevLodRuntime {
     const worldBounds = template.bounds.clone().applyMatrix4(group.matrix);
     const invalidPlacement = ![...worldBounds.min.toArray(), ...worldBounds.max.toArray()].every(Number.isFinite) ? 'non-finite-placement' : Math.max(...worldBounds.getSize(new THREE.Vector3()).toArray()) > GEOMETRY_MAX_EXTENT_M ? 'oversized-placement' : null;
     if (invalidPlacement) { group.clear(); throw Error(`DEV placement rejected: ${row.entry.rootOccurrence}: ${invalidPlacement}`); }
+    if(lod===0)row.sourceGeometryBounds=tupleBox(template.bounds.clone().applyMatrix4(createLegacyEquivalentPlacementMatrix(row.entry.placementMatrix)))??undefined;
     group.userData.deviceLod = lod;
     group.name = row.entry.instanceKey;
     const highlighted = this.state.highlightedModState?.groups.filter(object => belongsTo(object, row.group)) ?? [];
@@ -1148,7 +1156,7 @@ export class DevLodRuntime {
     this.displayedPins.set(key, (this.displayedPins.get(key) ?? 0) + 1);
     row.group = group; row.pickLocalBounds = template.bounds; row.pickBounds = worldBounds;
     row.key = key; row.displayed = lod; row.entry.templateStatus = 'ready';
-    group.visible = !this.onlySelected || row.entry.rootOccurrence === this.selected;
+    group.visible = !this.onlySelected || (this.state.businessSelectionRoots?.has(row.entry.rootOccurrence) ?? row.entry.rootOccurrence === this.selected);
     if (this.batchEnabled) {
       this.instances ??= new DevInstanceBatches(this.state.modRootGroup!);
       this.instances.add(group, lod < 2);

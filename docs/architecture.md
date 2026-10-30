@@ -168,8 +168,9 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 | 变电语义 | `gim-substation-parser-v26` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性、语义引用及索引发布凭据 |
 | DEV 几何 | `geometry-cache-v16-phm-solids` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
 | 设备 LOD 派生 | `geometry-cache-v16-phm-solids` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
-| Spatial snapshot | `substation-spatial-semantic-v2` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 源、链接和序列化结构 |
-| IFC Spatial parser contract | `gim-substation-parser-v23` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
+| Spatial snapshot | `substation-spatial-semantic-v3` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 精确大小写身份与洞口/填充宿主链 |
+| IFC Spatial parser contract | `gim-substation-parser-v24` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
+| 业务树派生快照 | `business-snapshot-v3` / `business-tree-v5` | [业务缓存](../desktop/src/services/businessTreeCache.ts)、[领域模型](../desktop/src/gim/businessTree.ts) | 源 SHA、原生返回的当前变电语义契约、Spatial 契约、IFC 模型清单摘要、完整标记、压缩/展开长度及内容 SHA；只重建业务域，不新增 SQLite 表 |
 | Fragments | `fragments-cache-v6` | [db.rs](../desktop/src-tauri/src/db.rs)、[features](../desktop/src/config/features.ts) | 源/IFC 身份及实际安装的 fragments/web-ifc 版本 |
 | IFC 浏览 LOD 派生 | `bim-lod-v8` 与安装依赖组合；浏览器上下文固定使用 IndexedDB `gim-ifc-lod-v1` | [features](../desktop/src/config/features.ts)、[LOD 缓存](../desktop/bridge/ifcLodCache.ts) | 源 SHA、条目、浏览精度、单次解析及源属性策略；独立失效远景、索引、近景和属性 |
 | IFC 区域模板几何 | `near-templates-v1`，附加于浏览 LOD 键 | [features](../desktop/src/config/features.ts) | 模板几何 ID 与逐对象放置；仅更新近景产物，不重建有效远景与源属性 |
@@ -271,7 +272,25 @@ Scene 与 MOD/STL 图层是固定局部坐标容器：[staticContainer](../deskt
 
 DEV 池在活动、排队和未消费结果均为空且持续至少 30 秒时，沿现有 10 秒 watchdog 检查回收：保留最近完成任务的健康 Worker，没有记录时保留一个，其余释放。普通空闲缩容后的可执行请求按实际排队需求逐线程恢复，最高为原配置容量；暂停的自动细节和结果背压不触发增线程。主线程模板、实例与来源继续保留，重新计算可能因 Worker 解析缓存变冷而变慢。普通空闲缩容不降低暖模板消费容量，high/critical 仍收紧消费；已有 critical 恢复策略不变。`workerCount` 为实际线程数，`workerScheduling.targetWorkers` 为配置容量，另记录空闲时长和缩容次数。四站局部对照及边界见 [性能](performance.md)。
 
-默认变电导航采用功能系统投影，分类不参与物理 occurrence 收集与几何剔除。功能系统树根据任意物理层级上的 SYSTEMNAME 建立系统、电压区域与间隔分组，不将 F3 或 F4 当作业务边界。缺少中间层时直接展示下层对象；独立设备名称不提升为额外系统。装配子树中的组成部分保持原始来源，嵌套独立电气单元单独展示。FAM 仅以明确的名称/类型属性补充分类，保留原始行、分节及重复证据，冲突时显示分类证据冲突，不强行覆盖明确名称。PARTINDEX/DEV_SUBDEVICE 仅在同一归属下唯一配对时合并，相同 DEV 的多个真实引用仍保留不同路径。
+变电默认业务导航由纯领域 `businessTree` 生成对象、区域、功能单元及归属证据，`businessOwnership` 处理安装材料，`businessBuildings` 处理建筑及系统归属，服务层编排冷构建与暖恢复，UI 只渲染投影。顶层为安装工程/建筑工程，配电区域内的母线整体构成一个母线设备间隔，母联、分段及进出线保留各自来源身份。安装区域按主变、配电装置（电压降序）、无功补偿、站用电、电缆及接地、二次排列；间隔按出线、进线、母线设备、母联、分段及自然数字顺序排列。设备直接位于单元下，主变本体先于中性点装置，后者按电压降序；材料及建筑构件保留类型折叠组。归属状态是属性，不产生待确认层级。原始来源树、既有功能系统视图和 IFC 空间关系仍可查看；分类不参与物理 occurrence 收集或几何剔除。
+
+业务快照使用现有受源身份约束的文件读写桥，存于工程提取根的 `__derived__/business-tree-v5/<source-sha>.bin`，正文契约为 `business-snapshot-v3`，不修改 SQLite 表或其他缓存契约。首次构建复用已解析 CBM、后台语义发布的 FAM 原行以及 Spatial 对象，不重复解析 IFC 或触发 L2；完整 IFC 清单、FAM 就绪后才允许原子发布。快照只保存对象/区域/单元事实及原始来源、归属证据和 IFC 精确身份，不重复保存 CBM 图或几何。正文采用固定列、共享字符串表和 gzip，减少重复字段、来源路径及证据的展开与 I/O 搬运，压缩和展开均限制为 64 MiB；解压逐块核对声明长度，列结构、字符串/对象引用或摘要校验失败都只使业务缓存未命中。
+
+暖路径在原生源/语义缓存校验通过后，并行读取业务快照和核心语义索引，提前解压与反序列化。核心 CBM 恢复后才校验最终 IFC 模型清单，按完整 occurrence 路径绑定原节点，重建成员及来源查找映射；该过程没有分类或推断，预读不能提前安装投影。完整投影在只读工程会话内保持不变，迟到的 FAM/Spatial 发布不再重建业务树。缓存的模型身份、区分大小写的 GlobalId 和 ExpressId 允许 IFC 叶子在完整 Spatial 恢复前选择高亮及近景；几何和属性仍走原有按需服务。选择和异步提交核对工程代次及请求身份，工程切换释放 Worker、延时任务和 UI 引用。源 SHA 进入文件路径和快照头，旧会话写入不能覆盖新源产物。
+
+Spatial 的对象级关联只使用来源模型内精确 GlobalId，保留大小写和合法的尾部 `$`；实际产品重复身份视为歧义，端口及洞口不参与产品身份竞争。`IfcRelFillsElement` 与 `IfcRelVoidsElement` 保留门窗→洞口→墙的宿主链。业务 IFC 叶子优先用 RegionalIndex 的逐对象范围定位，避免 Fragments 批次合并范围拉远相机；超过 30 m 且长宽比超过 10 的构件先显示中心 12 m 局部，并提供“定位整件”，高亮身份仍为完整对象。
+
+建筑专业实体建立固定平面连通范围，按网格筛选跨专业候选；紧固件、室外构架和基础不扩大建筑范围。门窗可继承宿主建筑；基础单独展示，并保留相关主变单元。DEV 的 L0 实际模板范围在首次放置时保存为源坐标米制范围，目录缺少可靠范围时仍可复用，不遍历场景、不额外解析模板。材料候选按功能单元去重，母线的多个段仍只算一个候选。
+
+建筑公用设备的具体用途优先于“箱/柜”通用词。照明箱及空调柜机按浏览业务口径进入所属建筑或站区的照明系统，原始空调类型、暖通来源及楼层信息保留。电缆沟、构架、道路、围墙等明确站区设施的类型优先于建筑平面包含，不因位于楼下而进入楼层；普通支架仍可遵循建筑宿主。基础统一为“基础”区域，按设备基础、建筑基础及用途尚未明确的其他基础归组；明确建筑基础名称不被附近主变的距离推断覆盖。
+
+显式连接关系之后、中心距离比较之前，对平面跨度不超过 12 m 的未确定导线核查是否只与一个兼容主设备单元的平面范围相交。母线整体候选不参与该主设备竞争，因此不会仅凭母线更靠近导线中心而覆盖主设备接引证据。多个主设备、超长或端点冲突仍不能由此单归属，结果始终标为推断；推断导线不扩大主设备或母线边界。候选属性统一显示对象中心到候选范围的平面距离，拒绝对象不再反向计算距离。
+
+唯一对象级 IFC 关联才合并来源，IFC 模型身份及 GUID 大小写保持；多候选不任选第一个。装配子部件来源随物理根保留，不作为第二个 seed。CBM 祖先关系与叶子 SYSTEMNAME 合并，保留所有 BASEFAMILY 引用；优先采用有效的工程中名称。明确二次系统先于名称电压分类；AC12kV 额定值不能建立 12kV 区域，有效的 10kV 工程名称可确定标称电压。建筑使用真实建筑名称、命名楼层与范围证据跨专业归组，IFC 文件或匿名 IfcBuilding 不是物理建筑。缺少名称时，建筑专业的连通范围只能产生标为推断的编号建筑；缺少楼层依据不补造楼层。消防、照明、给排水与楼层并列，歧义构件留在站区。
+
+CBM 基础投影先可用，Spatial 到达时复用已有 CBM 投影；IFC 和基础几何结算后，将必要身份、名称、关系及已有表示范围交给独立 Worker，几何加载不等待业务补充。`businessGeometryEvidence` 将 IFC 的绝对米制 Y-up 范围转换为 Z-up；DEV 本地范围已为米，仅放置平移从毫米转米。端点 GUID 按模型隔离并排除重复身份与端口。完整投影持久化，算法变动只使业务域失效。材料仅在唯一兼容设备包围、受约束范围相交或完整端点集合支持时标为推断；端点冲突优先于几何，跨间隔连接保留共享和关联间隔。表示范围相交不等于实体接触。按材料类别限制源 XY 平面距离、候选区分度和跨度，可产生标为推断的归属；长跨间隔导线保留共享，歧义材料保留区域归属。阈值没有人工真值准确率保证，距离不升级为明确工程事实。推断对象不扩大主设备区域边界。工程释放清理投影、延后任务、Worker 和 UI 投影引用，准备结果和选择提交均检查会话；只查看来源层级不额外启动业务补充。
+
+业务聚合选择使用成员路径和 IFC 身份集合，不通过 DOM 反查几何。普通设备复用原选择路径，IFC 叶子高亮并定位后由既有近景调度管理 L1，精细 L2 继续显式请求。DEV 隔离支持多根成员，IFC 实例化近景高亮覆盖层按 ExpressId 分别持有，表示切换沿用选择提交队列和旧请求守卫。
 
 模板等待队列使用可索引堆，入队、取消和提升为 O(log N)，普通任务按优先级及入队时刻排序，选中任务始终优先。LRU 的保护集合带成员修订号，缓存内容、预算与保护集合不变时跳过重复无效淘汰。Worker 计算槽和结果消费分别管理：未消费结果达到 64 MiB 或每 Worker 两条时，暂停派发后台编译；已启动任务可完成，单条结果上限 128 MiB。用户可暂停自动 L1 细化，L0 与范围目录继续运行，显式 L2 请求仍可提升。此阈值不是工程总内存硬上限，暖缓存读取、解析与 GPU 驻留分别记录。
 
@@ -304,6 +323,8 @@ IFC 连接构件增量表示是独立的会话资源：完整源在同一次 Ope
 连接提前显示的可选路径沿现有性能会话记录 `coldPipeline.earlyPreparationMs` / `earlyIndexMs` / `earlyClosureMs`、`earlyIndexBytes` / `earlySubsetBytes` / `earlyIndexedRecords` / `earlySubsetRecords`、`earlyWasmInitMs` / `earlyOpenModelMs` / `earlyParsedModels` / `earlyMeshBytes`，以及阶段 `source-hash` / `early-connection` / `source-open`。端点证据读取时间与局部不可用分别记为 `connectionEvidenceMs` 和 `connectionEvidenceUnavailable`；小 GL 证据索引记录 `Connection sidecar evidence ready` / `unavailable`。这些阶段可能包含或重叠，不能相加为整源耗时；`parsedModels` 计入真实打开过的临时子集，不能仍记为一次解析。
 
 对于 64–512 MiB 且前 4 MiB 出现受支持连接实体的来源，Worker 可先按原 STEP 字节提取 ExpressId 最小的单个对象闭包，在完整源 OpenModel 前提供第一份表示。索引最多 64 MiB、闭包最多 10 万条 / 8 MiB、首对象网格最多 4 MiB；保留项目单位、放置及外观引用。临时 API 释放后完整源使用新 API，满足当前 Fragments 导入要求的模型编号 0。完整源跳过已发布对象并延续批次序号；临时子集不发布整源完成，不充当工程坐标锚点。索引同时复用既有派生开孔忽略策略的字节范围；不支持语法、缺失引用或超出预算时继续原完整源路径。计算/消费失败和会话取消仍按原任务结算。较高内存压力下不启用可选首对象路径。来源队列保留原首个坐标锚点，其后提高有引用证据的连接源优先级；文件名只可作为调度提示，不决定解析分支。`OpenModelFromCallback` 是回调供给字节的接口，仍返回完整打开后的模型 ID；不能据其名称认定可在 OpenModel 前取得可渲染对象，当前没有流式或可中断的 OpenModel。
+
+队列在首个坐标锚点之后，先处理不超过 64 MiB 的连接源与普通源，再处理超大连接源和普通源，避免一个超大接线源阻挡建筑等有界来源。状态展示真实转换阶段、源大小及该来源等待秒数；前一来源异步写缓存不能覆盖当前来源。等待秒数仅说明墙钟，不能重置 Worker 的无进度看门狗。
 
 连接网格使用独立可选派生键 `${farKey}|near-templates-vconnection-mesh-v1|0`，不更改远景、语义、Spatial 或 DEV 几何版本。完整、连续且通过结构校验的流才写入一个原子记录，沿用近景缓存总量/单项/LRU预算；会话收集的网格字节超过 48 MiB 时停止保留缓存副本，显示仍继续。暖命中在远景成功反序列化后按原序列重放真实网格，模型发布后释放临时网格；旧远景缓存缺少连接凭据仍可使用，不冒充连接网格缓存命中。`readyModels` 与对象数可由已就绪的正式远景索引恢复，`completeModels` 只计完整预览凭据，空最终批次不计作首个几何批次。当前完整凭据不含持久化逐字节摘要；验收边界见 [问题与限制](open-issues.md) O-01/O-03。
 

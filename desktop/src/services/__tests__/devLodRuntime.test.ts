@@ -13,6 +13,16 @@ function fixture() {
   Object.assign(runtime.diagnostics, { anchorReady: true, catalogReady: true });
   return { runtime, internal: runtime as any, status };
 }
+
+it('isolates all business member roots and restores ordinary single-root selection',()=>{
+  const {runtime,internal}=fixture();const a=new THREE.Group(),b=new THREE.Group(),c=new THREE.Group();
+  internal.rows=new Map([['a',{entry:{rootOccurrence:'a'},group:a}],['b',{entry:{rootOccurrence:'b'},group:b}],['c',{entry:{rootOccurrence:'c'},group:c}]]);
+  internal.state.businessSelectionRoots=new Set(['a','c']);runtime.setOnlySelected(true);
+  expect([a.visible,b.visible,c.visible]).toEqual([true,false,true]);
+  internal.state.businessSelectionRoots=null;internal.selected='b';runtime.setOnlySelected(true);
+  expect([a.visible,b.visible,c.visible]).toEqual([false,true,false]);runtime.setOnlySelected(false);
+  expect([a.visible,b.visible,c.visible]).toEqual([true,true,true]);
+});
 function occurrence(id: number, failed = false) {
   const devPath = `DEV/${id}.dev`, key = `${DEV_GEOMETRY_VERSION}|sha|${devPath.toLowerCase()}|lod0`;
   return { entry: { devPath, templateStatus: failed ? 'failed' : 'ready' }, inView: true,

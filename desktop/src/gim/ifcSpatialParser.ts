@@ -493,15 +493,11 @@ export class SubstationSpatialIndexBuilder {
 
   const nodeByKey = new Map(nodes.map((node) => [node.key, node]));
   const objectByKey = new Map(objects.map((object) => [object.key, object]));
-  const objectByGuid = new Map<string, IfcSpatialObject>();
-  const duplicateGuid = new Set<string>();
-  const objectByModelGuid = new Map<string, IfcSpatialObject>();
+  const objectByModelGuid = new Map<string, IfcSpatialObject | null>();
   for (const object of objects) {
-    if (!object.globalId) continue;
-    objectByModelGuid.set(`${normalizeModelId(object.modelId)}:${normalizeGuid(object.globalId)}`, object);
-    const bare = normalizeGuid(object.globalId);
-    if (objectByGuid.has(bare)) duplicateGuid.add(bare);
-    else objectByGuid.set(bare, object);
+    if (!object.globalId || /^(IFCDISTRIBUTIONPORT|IFCOPENINGELEMENT|IFCOPENINGSTANDARDCASE|IFCVOIDINGFEATURE|IFCFEATUREELEMENTSUBTRACTION|IFCFEATUREELEMENTADDITION|IFCPROJECTIONELEMENT)$/.test(object.ifcType)) continue;
+    const key=`${normalizeModelId(object.modelId)}:${normalizeGuid(object.globalId)}`;
+    objectByModelGuid.set(key,objectByModelGuid.has(key)?null:object);
   }
 
   const cbmNodes = collectCbmNodes(this.cbmTree);
@@ -534,11 +530,10 @@ export class SubstationSpatialIndexBuilder {
         ?? (cbm.ifcFile.startsWith('ifc_') ? cbm.ifcFile : null);
       const guid = normalizeGuid(cbm.ifcGuid);
       const placementKind = matrix ? classifyPlacement(matrix) : undefined;
-      // modelId 是首选且通常唯一。只有在整个样本中 GUID 没有跨模型重复时，
-      // 才允许用裸 GUID 兜底，避免把同 GUID 的两个 IFC 模型错误串联。
+      // Compressed IFC GlobalId is case-sensitive (including its trailing $).
+      // A missing/ambiguous object never falls through to another source model.
       const object = modelId
-        ? (objectByModelGuid.get(`${normalizeModelId(modelId)}:${guid}`)
-          ?? (duplicateGuid.has(guid) ? undefined : objectByGuid.get(guid)))
+        ? objectByModelGuid.get(`${normalizeModelId(modelId)}:${guid}`)
         : undefined;
       if (object) {
         directGuidMatches++;
@@ -1484,6 +1479,8 @@ function scanIfcSemanticPass1(text: string): SelectiveIfcScanResult {
         });
       } else if (record.ifcType === 'IFCRELVOIDSELEMENT') {
         addRelationReference(hostObjectIdsByChildId, parseRef(record.args[5]), parseRef(record.args[4]), spatialRelationIds);
+      } else if (record.ifcType === 'IFCRELFILLSELEMENT') {
+        addRelationReference(hostObjectIdsByChildId, parseRef(record.args[5]), parseRef(record.args[4]), spatialRelationIds);
       } else if (record.ifcType === 'IFCRELCONNECTSPORTTOELEMENT') {
         addRelationReference(hostObjectIdsByChildId, parseRef(record.args[4]), parseRef(record.args[5]), spatialRelationIds);
       } else if (record.ifcType.startsWith('IFCRELSPACEBOUNDARY')) {
@@ -1619,6 +1616,7 @@ function isIfcSpatialSemanticRelationship(ifcType: string): boolean {
     || ifcType === 'IFCRELCONTAINEDINSPATIALSTRUCTURE'
     || ifcType === 'IFCRELREFERENCEDINSPATIALSTRUCTURE'
     || ifcType === 'IFCRELVOIDSELEMENT'
+    || ifcType === 'IFCRELFILLSELEMENT'
     || ifcType === 'IFCRELCONNECTSPORTTOELEMENT'
     || ifcType.startsWith('IFCRELSPACEBOUNDARY');
 }
@@ -2268,7 +2266,7 @@ function cbmReferenceKeys(value: string): string[] {
 }
 
 function normalizeGuid(value: string): string {
-  return value.trim().replace(/\$+$/, '').toUpperCase();
+  return value.trim();
 }
 
 function normalizeModelId(value: string): string {

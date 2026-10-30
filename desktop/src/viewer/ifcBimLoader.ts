@@ -131,6 +131,10 @@ export async function loadBimIfc(
       {
         transferInput: true,
         openingPolicy: 'bim-lod',
+        onConversionStage: stage => options.onStage?.('cold-convert', { path, phase: ({
+          'source-hash': '校验来源', 'early-connection': '连接预览已提交',
+          'wasm-init': '读取模型', 'source-open': '生成浏览表示',
+        } as Record<string,string>)[stage] ?? '生成浏览表示' }),
         onFarArtifact: (bytes, index) => {
           artifact = { bytes: bytes.slice().buffer, index };
         },

@@ -49,7 +49,7 @@ export interface SelectionRequest {
   id: number;
   session: ProjectLoadSession;
   signal: AbortSignal;
-  target: { kind: 'cbm' | 'spatial-node' | 'ifc-object' | 'ifc-element' | 'sld'; key: string } | null;
+  target: { kind: 'cbm' | 'spatial-node' | 'ifc-object' | 'ifc-element' | 'sld' | 'business'; key: string } | null;
 }
 
 export interface SelectionCommitGuard {
@@ -80,6 +80,8 @@ export class AppState {
   selectionHighlightRequestId: number | null = null;
   deviceLodRuntime: { select(rootOccurrence: string): Promise<THREE.Group[]>; ensureBase?(rootOccurrence: string): Promise<THREE.Group[]>; retry?(rootOccurrence: string): Promise<THREE.Group[]>; refine?(rootOccurrence: string): Promise<THREE.Group[]>; releaseFine?(rootOccurrence: string): void; setOnlySelected?(only: boolean): void; release(): void; clearSelection(): void; notifyCoordinateAnchor?(): void;
     getLoadedRoot?(rootOccurrence: string): THREE.Group | undefined;
+    getBusinessOccurrences?():Iterable<Readonly<import('../services/devSpatialCatalog.js').DevSpatialOccurrence>>;
+    getBusinessShapes?():Iterable<import('../gim/businessTree.js').BusinessShape>;
     setBackgroundPaused?(paused: boolean): void;
     pick?(ray: THREE.Raycaster): {rootOccurrence: string; instanceKey: string; distance: number} | null;
     setExternalMemoryPressure?(pressure: 'unknown' | 'normal' | 'high' | 'critical'): void;
@@ -93,6 +95,7 @@ export class AppState {
 
   beginSelection(target: SelectionRequest['target']): SelectionRequest {
     this.selectionAbort?.abort();
+    this.businessSelectionRoots = null;
     this.deviceLodRuntime?.clearSelection();
     for (const runtime of this.ifcRegionalRuntimes.values()) { runtime.clearFineSelection?.(); runtime.clearSelectionFilter?.(); }
     this.selectionAbort = new AbortController();
@@ -135,8 +138,18 @@ export class AppState {
   currentCbmTree: CbmNode | null = null;
   /** 变电 IFC 空间对象图；线路工程保持 null。 */
   substationSpatialIndex: SubstationSpatialIndex | null = null;
-  /** 变电模型导航视角：空间优先，功能系统视图为平行投影。 */
-  substationNavMode: 'spatial' | 'functional' = 'functional';
+  /** 默认业务导航；源文件只读，完整业务投影持久化后直接恢复。 */
+  businessTree: import('../gim/businessTree.js').BusinessTreeProjection | null = null;
+  businessTreePending = false;
+  businessTreeError = '';
+  businessTreeInputsReady = true;
+  businessTreeInputVersion = 'transient';
+  businessTreeCacheStatus: 'none'|'hit'|'miss'|'building'|'saving'|'saved'|'error' = 'none';
+  businessTreeCacheError = '';
+  businessTreeCleanup: (()=>void) | null = null;
+  businessExpandedRows = new Set<string>();
+  businessSelectionRoots: Set<string> | null = null;
+  substationNavMode: 'spatial' | 'functional' | 'business' | 'source' = 'business';
   /** GIM 头部提取的工程名称（如"XX变电站"），用于 F1System 根节点显示 */
   projectName: string = '';
 
@@ -412,7 +425,14 @@ export class AppState {
     this.currentIfcEntries = [];
     this.currentCbmTree = null;
     this.substationSpatialIndex = null;
-    this.substationNavMode = 'functional';
+    this.businessTreeCleanup?.();this.businessTreeCleanup=null;
+    this.businessTree = null;
+    this.businessTreePending=false;this.businessTreeError='';
+    this.businessTreeInputsReady=true;this.businessTreeInputVersion='transient';
+    this.businessTreeCacheStatus='none';this.businessTreeCacheError='';
+    this.businessExpandedRows.clear();
+    this.businessSelectionRoots = null;
+    this.substationNavMode = 'business';
     this.projectName = '';
     this.currentProjectType = null;
     this.currentGimGraph = null;

@@ -10,7 +10,7 @@ export class IfcRegionalInstances {
   private templates = new Map<number, THREE.BufferGeometry>();
   private materials = new Map<string, THREE.MeshStandardMaterial>();
   private meshes: THREE.InstancedMesh[] = [];
-  private overlay: THREE.Group | null = null;
+  private overlays = new Map<number, THREE.Group>();
   private filter: ReadonlySet<number> | null = null;
   setFilter(ids: ReadonlySet<number> | null, base: THREE.Matrix4): void {
     if (ids === null && this.filter === null || ids !== null && this.filter !== null
@@ -32,7 +32,7 @@ export class IfcRegionalInstances {
     this.objects.set(result.expressId, result);
   }
   remove(id: number) {
-    if (this.overlay?.userData.expressId === id) this.clearHighlight();
+    const overlay=this.overlays.get(id);if(overlay){overlay.clear();this.overlays.delete(id);}
     this.objects.delete(id);
   }
   private geometry(part: ObjectFinePart): THREE.BufferGeometry {
@@ -124,8 +124,9 @@ export class IfcRegionalInstances {
       ? undefined
       : hit.object.userData.ifcInstanceIds?.[hit.instanceId];
   }
-  highlight(id: number, group: THREE.Group) {
-    this.clearHighlight();
+  highlight(id: number, group: THREE.Group, append = false) {
+    if(!append)this.clearHighlight();
+    else this.overlays.get(id)?.clear();
     const result = this.objects.get(id);
     if (!result) return;
     for (const part of result.parts) {
@@ -135,14 +136,12 @@ export class IfcRegionalInstances {
       mesh.userData = { ...group.userData };
       group.add(mesh);
     }
-    this.overlay = group;
+    this.overlays.set(id,group);
     group.updateMatrixWorld(true);
   }
   clearHighlight() {
-    if (this.overlay) {
-      this.overlay.clear();
-      this.overlay = null;
-    }
+    for(const overlay of this.overlays.values())overlay.clear();
+    this.overlays.clear();
   }
   private clearMeshes() {
     for (const mesh of this.meshes) {

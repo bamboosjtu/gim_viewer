@@ -67,6 +67,14 @@ it('mirrored placements keep the ordinary mesh path', () => {
   expect(pool.accepts(object)).toBe(false);
   pool.release();
 });
+it('retains multiple business members and removes only the disposed member overlay',()=>{
+  const pool=new IfcRegionalInstances(),a=new THREE.Group(),b=new THREE.Group();
+  a.userData.expressId=10;b.userData.expressId=20;pool.add(make(10,0));pool.add(make(20,3));
+  pool.highlight(10,a,true);pool.highlight(20,b,true);
+  expect(a.children).toHaveLength(1);expect(b.children).toHaveLength(1);
+  pool.remove(10);expect(a.children).toHaveLength(0);expect(b.children).toHaveLength(1);
+  pool.clearHighlight();expect(b.children).toHaveLength(0);pool.release();
+});
 it('filters instance slots by exact source identity and keeps the filter for later rebuilds',()=>{
   const pool=new IfcRegionalInstances(),base=new THREE.Matrix4();
   pool.add(make(10,0));pool.add(make(20,3));pool.rebuild(base);

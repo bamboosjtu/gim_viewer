@@ -10,6 +10,7 @@ import {
 } from '../gim/ifcSpatialParser.js';
 import { parseFileDevRelation } from '../gim/fileDevParser.js';
 import { buildAndRenderCbmTree } from '../ui/cbmTreeView.js';
+import { restoreBusinessTree, businessFamiliesPublished, prefetchBusinessTree } from './businessTreeService.js';
 import { renderFileDevPanel } from '../ui/fileDevView.js';
 import { emptyTipEl } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
@@ -1114,6 +1115,7 @@ export async function loadAllIfcFiles(
 
   const ifcSources=new Map<string,string>();
   const ifcStages=new Map<string,string>();
+  let activeIfcPath='';
   const ifcCacheProgress=()=>{
     const cold=[...ifcSources.values()].filter(source=>source==='ifc').length;
     const lod=[...ifcSources.values()].filter(source=>source==='lod-cache').length;
@@ -1189,6 +1191,7 @@ export async function loadAllIfcFiles(
     for (let queueIndex=0;queueIndex<queue.length;queueIndex++) {
       if (!isCurrent()) return;
       const entry=queue[queueIndex];
+      activeIfcPath=entry.path;
       ifcStages.set(entry.path,ifcStageLabels['checking-cache']);
       setIfcStatus(ifcStatus(entry,queueIndex,queue.length));
         // After the first IFC the viewport and bottom status bar are the
@@ -1201,9 +1204,14 @@ export async function loadAllIfcFiles(
       const loadSource: { value: 'lod-cache' | 'fragments-cache' | 'ifc' | 'unknown' } = { value: 'unknown' };
       const setIfcStage=(stage:string,meta?:Record<string,unknown>)=>{
         if(!isCurrent())return;
-        ifcStages.set(entry.path,ifcStageLabels[stage]??stage);
-        setIfcStatus(ifcStatus(entry,queueIndex,queue.length,meta?.ms!=null?`${String(meta.ms)}ms`:''));
+        ifcStages.set(entry.path,(ifcStageLabels[stage]??stage)+(meta?.phase?` · ${String(meta.phase)}`:''));
+        if(activeIfcPath===entry.path)setIfcStatus(ifcStatus(entry,queueIndex,queue.length,meta?.ms!=null?`${String(meta.ms)}ms`:''));
       };
+      const statusStarted=performance.now();
+      const statusTimer=setInterval(()=>{
+        if(isCurrent()&&activeIfcPath===entry.path)setIfcStatus(ifcStatus(entry,queueIndex,queue.length,
+          `${Math.round((sizes.get(entry.path.toLowerCase())??0)/1048576)} MiB · ${Math.floor((performance.now()-statusStarted)/1000)}秒`));
+      },1000);
       const endRead = perfBegin(`变电 IFC read · ${entry.path}`, undefined, perfSession);
       const endIfcLoad = perfBegin(`变电 web-ifc / Fragments load · ${entry.path}`, undefined, perfSession);
       try {
@@ -1344,8 +1352,9 @@ export async function loadAllIfcFiles(
           console.warn('[GIM] cleanup failed model after load error', entry, cleanupErr);
         }
         continue;
-      }
+      } finally { clearInterval(statusTimer); }
     }
+    activeIfcPath='';
 
     // A first usable IFC normally establishes the coordinate anchor.  Retry
     // once after the sequential tail only when that first attempt had no
@@ -1749,8 +1758,11 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   }
 
   if (!validation?.valid) showLoading('正在解压并校验 GIM 文件...');
+  state.businessTreeInputVersion=validation?.current_substation_parser_version??'transient';
+  state.businessTreeInputsReady=validation?.valid?validation.substation_properties_complete!==false:!isTauri();
 
   if (validation?.valid) {
+    const businessPreparation=prefetchBusinessTree(state);
     try {
       const { getGimIndex } = await import('@desktop/database.js');
       // 变电工程缓存命中 → 恢复 GIM 索引（原有逻辑）
@@ -1773,6 +1785,8 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         famProperties: index.fam_properties.length,
         devProperties: index.dev_properties.length,
       });
+      await restoreBusinessTree(state,businessPreparation);
+      if (!state.isCurrentSession(session)) return;
       await sampleSubstationMemory(state, 'CBM/FAM/DEV/FileDevRelation 后（缓存命中）', perfSession, {
         cbmNodes: index.cbm_nodes.length,
         fileDevRelations: index.file_dev_entries.length,
@@ -1924,6 +1938,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
             }, {
               isCurrent: () => state.isCurrentSession(session),
               saveRest: saveSubstationSemanticRest,
+              onPublished: payload => businessFamiliesPublished(state,payload.fam_properties),
               onPhase: (phase, counts) => perfMark(`变电 semantic repair · ${phase}`, { projectId, ...counts }, perfSession),
             });
             if (published && state.isCurrentSession(session)) setCachePublishPhase('ready');
@@ -2125,6 +2140,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         const restPublished = await publishSubstationRest(publicationInput, {
           isCurrent,
           saveRest: saveSubstationSemanticRest,
+          onPublished: payload => businessFamiliesPublished(state,payload.fam_properties),
           onPhase,
         });
         if (restPublished && isCurrent()) setCachePublishPhase('ready');

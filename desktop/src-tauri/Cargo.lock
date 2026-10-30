@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "gim-viewer"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "gim-native-core",
  "rusqlite",

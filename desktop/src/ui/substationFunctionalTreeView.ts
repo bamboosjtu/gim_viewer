@@ -496,7 +496,7 @@ export function renderSubstationFunctionalTree(
   }
 }
 
-function renderFunctionalNode(
+export function renderFunctionalNode(
   parentEl: HTMLElement,
   key: string,
   labelText: string,
