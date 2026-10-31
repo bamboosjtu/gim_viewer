@@ -45,6 +45,7 @@ export function renderCbmTreeUI(
   const row = document.createElement('div');
   row.className = 'tree-row';
   row.setAttribute('role', 'treeitem');
+  row.setAttribute('aria-expanded', 'false');
   row.tabIndex = 0;
   // 搜索结果反查树行用（与线路工程 data-node-path 约定一致）
   row.dataset.nodePath = node.path;
@@ -75,6 +76,7 @@ export function renderCbmTreeUI(
   const setExpanded = (value: boolean): void => {
     if (node.children.length === 0) return;
     expanded = value;
+    row.setAttribute('aria-expanded', String(expanded));
     toggle.classList.toggle('expanded', expanded);
     childrenEl.classList.toggle('expanded', expanded);
     if (expanded && !childrenRendered) {

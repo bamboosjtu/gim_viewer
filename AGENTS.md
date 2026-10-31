@@ -115,5 +115,5 @@ cargo check --manifest-path src-tauri/Cargo.toml   # Rust 检查（desktop/ 内�
 - `demo/` 目录包含大型二进制文件（.gim 及解压目录），已在 .gitignore 中排除；`npm run test:sample` 依赖 demo-substation 与 line02 解压目录
 - `desktop/public/worker-bundle.js`、`desktop/public/libarchive.wasm`、`desktop/public/wasm/web-ifc*.wasm`是运行时资产，由 scripts/copy-web-ifc-wasm.mjs 维护，需随项目提交
 - 修改持久化含义时只 bump 受影响域。当前语义/几何/Spatial/Fragments 契约与权威源码只在[架构](docs/architecture.md#当前缓存域) 维护；Fragments 键绑定实际安装依赖版本。
-- 长期文档只写当前状态，删除过程和历史版本；未关闭的代码缺陷与实现风险统一维护在 [open-issues](docs/open-issues.md)，当前桌面能力见 [规格](docs/software-spec.md)。样本与格式研究、设备验收和外部业务候选不写入 open-issues。
+- 长期文档只写当前状态，删除过程和历史版本；正在开发的功能特性写入 `docs/impl/`（当前为变电模型树三个选项卡），转正后把稳定行为并入正式文档并删除实现过程说明；未关闭的代码缺陷与实现风险统一维护在 [open-issues](docs/open-issues.md)，当前桌面能力见 [规格](docs/software-spec.md)。样本与格式研究、设备验收和外部业务候选不写入 open-issues。
 - 写入 docs/schema/ 的内容不得包含真实工程名与地理归属（匿名化约定）

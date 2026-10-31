@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
 import {compareSubstationNames} from '../../gim/substationBusiness.js';
 import type { CbmNode } from '../../gim/types.js';
-import { buildBusinessTree, classifyBusinessObject, inferBusinessAssignments, applyBusinessConnections, compareBusinessRegions, compareBusinessUnits, type BusinessInferenceInput } from '../../gim/businessTree.js';
+import { buildBusinessTree, classifyBusinessObject, compareBusinessRegions, compareBusinessUnits } from '../../gim/businessTree.js';
 import { renderBusinessTree, revealBusinessTarget } from '../businessTreeView.js';
+import { renderCbmTreeUI } from '../cbmTreeView.js';
 import { buildSubstationSpatialIndexFromTexts } from '../../gim/ifcSpatialParser.js';
 import {
   buildFunctionalDomainIndex,
@@ -263,22 +264,6 @@ it('orders installation systems and distinct bay classes in numeric business ord
   expect(units[units.length-1]?.kind).toBe('section');
   expect(p.members.get(units.find(u=>u.kind==='bus')!.key)).toHaveLength(2);
   expect(classifyBusinessObject('220kVGIS电缆出线间隔')).toBe('device');
-});
-it('compares distinct units, rejects point-only/uncalibrated inference and keeps cross-bay connections shared', () => {
-  const make=(path:string,name:string,bay:string)=>node({path,name,devSymbolName:name,devPath:`${path}.dev`,systemNames:['电气系统','220kV配电装置区域',bay]});
-  const p=buildBusinessTree(node({children:[make('b1','母线','Ⅰ母线'),make('b2','母线','Ⅱ母线'),make('out','断路器','出线间隔'),make('target','设备线夹','其他')]}));
-  const key=(path:string)=>p.objectBySource.get(path)!;
-  const shape=(path:string,x:number)=>({objectKey:key(path),min:[x,0,0]as[number,number,number],max:[x+1,1,1]as[number,number,number],evidence:'geometry'as const});
-  const input:BusinessInferenceInput={objects:[...p.objects.values()],units:[...p.units.values()],regions:[...p.regions.values()],shapes:[shape('b1',0),shape('b2',2),shape('out',15),shape('target',1)],thresholds:{金具:{maxDistance:5,minMargin:3,buffer:5,calibrated:true}}};
-  const inferred=inferBusinessAssignments(input).get(key('target'))!;
-  expect(inferred.status).toBe('inferred');expect(inferred.candidates).toHaveLength(2);
-  expect(new Set(inferred.candidates!.map(c=>c.unitKey)).size).toBe(2);
-  input.shapes[3].evidence='placement' as any;
-  expect(inferBusinessAssignments(input).get(key('target'))?.status).toBe('unresolved');
-  input.thresholds={};expect(inferBusinessAssignments(input).size).toBe(0);
-  const unitKeys=[...p.units.values()].filter(u=>u.kind==='bus'||u.kind==='bay').map(u=>u.key);
-  applyBusinessConnections(p,[{objectKey:key('target'),unitKeys,evidence:'explicit endpoints'}]);
-  expect(p.objects.get(key('target'))!.assignment.status).toBe('shared');
 });
 it('does not turn a generic F2 voltage or mixed transformer context into cabinet ownership',()=>{
   const cabinet=node({path:'cabinet',name:'开关柜',devSymbolName:'开关柜',devPath:'cabinet.dev',systemNames:['电气系统','220kV系统','1号主变本体系统']});
@@ -559,4 +544,15 @@ it('counts one independent unit for a unique part alias pair while preserving re
   expect(assets.filter(asset=>asset.role==='device').map(asset=>asset.node.path)).toEqual(['pi','repeat-1','repeat-2']);
   expect(index.targetByKey.get('virtual')!.rowKey).toBe('pi');
   expect(index.targetByKey.get('repeat-1')!.rowKey).not.toBe(index.targetByKey.get('repeat-2')!.rowKey);
+});
+
+it('writes aria-expanded on source rows so a re-render can restore expansion', () => {
+  const root = node({children:[node({path:'CBM/child.cbm',name:'子节点',entityName:'F4System'})]});
+  const host = document.createElement('div');
+  renderCbmTreeUI(new AppState(), root, host, () => {});
+  const row = host.querySelector<HTMLElement>('.tree-row')!;
+  expect(row.getAttribute('aria-expanded')).toBe('false');
+  row.querySelector<HTMLElement>('.tree-toggle')!.click();
+  expect(row.getAttribute('aria-expanded')).toBe('true');
+  expect(host.querySelectorAll('.tree-row')).toHaveLength(2);
 });

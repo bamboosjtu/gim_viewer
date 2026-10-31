@@ -7,9 +7,9 @@
 
 设备输入逐项匿名身份、SHA、容器、载荷偏移及文件统计见 [equipment-corpus.csv](equipment-corpus.csv)。`equipment-generic-001` 至 `409` 为通用目录按相对路径排序编号；`equipment-vendor-01/02` 为两份独立供应输入。CSV 不保存真实设备名称、工程名或源路径，身份以 SHA 为准。
 
-2018 范围另见 [equipment-2018-corpus.csv](equipment-2018-corpus.csv)，匿名 ID 为 `equipment-2018-001` 至 `508`，不重排原台账。该范围包含 507 个裸 7z、1 个裸 ZIP，载荷偏移均为 0；共 28,039 个物理文件、53,396,036 B 未压缩数据。508 包均无 CBM，具有唯一、全 DEV 可达且无环的 DEV 装配根，入口不依赖目录名称。PHM 同时存在 `SOLIDS.NUM/SOLIDSn` 与 `SOLIDMODELS.NUM/SOLIDMODELn` 两组记录，各组的同下标矩阵与颜色独立。
+2018 范围按同一匿名规则编号为 `equipment-2018-001` 至 `508`，不重排原台账；逐包身份不另设公开 CSV，本文件只维护汇总事实。该范围包含 507 个裸 7z、1 个裸 ZIP，载荷偏移均为 0；共 28,039 个物理文件、53,396,036 B 未压缩数据。508 包均无 CBM，具有唯一、全 DEV 可达且无环的 DEV 装配根，入口不依赖目录名称。PHM 同时存在 `SOLIDS.NUM/SOLIDSn` 与 `SOLIDMODELS.NUM/SOLIDMODELn` 两组记录，各组的同下标矩阵与颜色独立。
 
-该范围的实际 L0 编译为 471 个 complete、36 个 partial、1 个范围校验失败；507 个产生非空 GLB。complete 仅表示当前浏览表示策略完成，包含 Boolean 简化和小部件省略，不代表 L2 精确等价或逐包桌面视觉验收。partial 的未支持图元为 Ellipsoid（43 处）和 TensionInsulator（4 处）。`equipment-2018-019`（SHA `c2d586871de5c71016b2aa5551232576e6499ee1ab87afe3693437b2d1c23025`）混用局部坐标与约 58/68 km 的装配平移，触发既有 500 m 模板范围保护；保留源值及失败诊断，不猜测修正坐标。原包均未改写。原始检查与桌面抽查范围见 [验收记录](../impl/test-laptop-regression-and-2018-equipment.md)。
+该范围的实际 L0 编译为 471 个 complete、36 个 partial、1 个范围校验失败；507 个产生非空 GLB。complete 仅表示当前浏览表示策略完成，包含 Boolean 简化和小部件省略，不代表 L2 精确等价或逐包桌面视觉验收。partial 的未支持图元为 Ellipsoid（43 处）和 TensionInsulator（4 处）。`equipment-2018-019`（SHA `c2d586871de5c71016b2aa5551232576e6499ee1ab87afe3693437b2d1c23025`）混用局部坐标与约 58/68 km 的装配平移，触发既有 500 m 模板范围保护；保留源值及失败诊断，不猜测修正坐标。原包均未改写。原始检查与桌面抽查范围保存在本地验收输出，不作为长期正文维护。
 
 | 新输入范围 | 路径数 | 语义形态 | 容器 |
 |---|---:|---|---|
@@ -75,6 +75,20 @@ PHM 扫描所有 `.phm` 的 SOLIDMODELn→PHM 边和 16 项 TRANSFORMMATRIXn；�
 substation03 的 45 个 GL 为可选 sidecar。substation02 没有 STL，各包 DEV/PHM/MOD 数量不同，不能要求三者一一对应。
 substation01 的 FAM 存在同节重复“材质”行：保留物理行与单值视图两套口径。
 substation04 的 STD 实际为 SVG，不能据扩展名补造 STD 电气层级。
+
+## 扩展变电工程样本
+
+以下五个工程包用于当前九站性能矩阵，不重排原 10 包基线，也不并入原台账计数。源文件均位于 `demo/`；`B1-3` 没有 GIMPKG 头，按裸 7z 工程包登记。逐包文件清单和递归统计不在这张身份表重复，性能口径见[性能基线](../performance.md)。
+
+| ID | 源包 | 大小 B | SHA-256 | magic | 载荷偏移 | IFC |
+|---|---|---|---:|---|---:|---:|
+| substation-a3-1 | `500-A3-1 三维设计.gim` | 15,637,221 | `ea53999fec01bd7440392a21b59baa42547e842bc781cf7d32cff5994212be0b` | GIMPKGS | 776 | 23 |
+| substation-b1-1 | `500-B1-1 三维设计.gim` | 28,511,264 | `903b1271c64fe36b2fdffd0d049c2b07f4449c3ddd980101a76bc3042025d223` | GIMPKGS | 776 | 24 |
+| substation-b1-2 | `500-B1-2 三维设计.gim` | 11,663,698 | `05472e3a029e4185730ed94ef9a2d2779559126c6d04fa657db9cfabe92c6408` | GIMPKGS | 776 | 3 |
+| substation-b1-3 | `500-B1-3 三维设计.gim` | 20,348,466 | `f9f36723e80635daafcc7046f50ba3dc1d912c1b0bc0bf2610dc5f188688b8dc` | 裸 7z | 0 | 30 |
+| substation-b1-4 | `500-B1-4 三维设计.gim` | 31,003,932 | `98cb2ff5902022dd4b4d225e57ac755b34f376de44cd5d2b067f37819b951d7a` | GIMPKGS | 776 | 16 |
+
+五包均已按同一验收 identifier 打开；B1-3 的 30 个 IFC 和 7,067 个 occurrence 在冷启动中全部加载成功，但空间索引未在测量窗口内就绪，不能记为完整暖缓存样本。B1-4 的冷结果见性能基线，暖缓存未形成。
 
 ## 六线路语义规模与原属性
 

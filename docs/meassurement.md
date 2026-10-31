@@ -15,7 +15,7 @@
 
 | 类型 | 样本 | 计时重点 |
 |---|---|---|
-| 变电 | `substation01`–`substation04` | IFC 加载、DEV 目录、DEV L0/L1/L2、场景提交 |
+| 变电 | `substation01`–`substation04`、`A3-1`、`B1-1`–`B1-4` | IFC 加载、DEV 目录、DEV L0/L1/L2、Spatial、场景提交 |
 | 线路 | `line01`–`line06` | 容器解析、线路图/地图数据、首次可交互 |
 
 线路工程没有分阶段 DEV 几何，First/Current/Full 通常相同；不要把变电的“当前视图已完成”状态套到线路工程。
@@ -124,9 +124,14 @@ substation01.gim
 substation02.gim
 substation03.gim
 substation04.gim
+500-A3-1 三维设计.gim
+500-B1-1 三维设计.gim
+500-B1-2 三维设计.gim
+500-B1-3 三维设计.gim
+500-B1-4 三维设计.gim
 ```
 
-同一轮测试不要替换样本路径、大小写或内容。变电样本的 `substation03` 含很大的 `设备接线.ifc`，基础表示完成 可能显著晚于 First usable；必须单独注明。
+同一轮测试不要替换样本路径、大小写或内容。变电样本的 `substation03` 含很大的 `设备接线.ifc`，`B1-1`/`B1-4` 的解压条目数和 DEV 模板数也显著高于其他站；基础表示完成可能显著晚于 First usable，必须单独注明。`500-B1-3` 是没有 GIMPKG 头的裸 7z 工程包，容器类型按 magic 记录，不要因为缺少头部而跳过。
 
 ### 2.4 先跑正确性测试（不是计时）
 
@@ -347,10 +352,11 @@ Current view  = 严格口径用 deviceLod.currentViewSettled（状态栏“当�
 
 正式验收建议：
 
-- 每个样本 **冷启动 3 次**；
-- 每个有效冷启动后各做 **暖启动 3 次**；
+- 完整矩阵为每个样本 **冷启动 3 次**、每个有效冷启动后 **暖启动 3 次**；
+- 工程量大时最低可接受矩阵为每样本 **冷启动 1 次、暖启动 3 次**，但必须写明缺少第二次/第三次冷启动，不能称为完整冷暖矩阵；
 - 报告 **中位数** 和 **最大值**，不要只报最好一次；
-- 冷、暖分开统计，不能把暖启动的最快值填进冷启动列。
+- 冷、暖分开统计，不能把暖启动的最快值填进冷启动列；
+- 暖启动需分别记录 L0 与所需 L1 的冷编译数；只命中 L0/IFC 的运行不能标成严格全命中暖启动。
 
 最小可接受记录：
 
@@ -412,7 +418,7 @@ commit：<sha>
 3. `npm run tauri:build`；记录 exe/portable 的 SHA-256 和时间戳。
 4. 对每个样本：核实并清理独立验收目录 → 启动 → 打开 → 计时 → 导出 `Ctrl+Shift+B` JSON → 关闭。
 5. 只有冷启动基础表示 settled 且对应缓存写入完成的样本才做完整暖启动；重启进程但不删缓存。
-6. 每个样本至少 3 次冷/3 次暖；记录中位数和最大值。
+6. 完整矩阵为每样本 3 次冷/3 次暖；最低矩阵为 1 次冷/3 次暖，并显式写明缺口。记录中位数和最大值。
 7. 把 JSON 与汇总表放在同一目录，表中引用 JSON 文件名。
 8. 更新 [performance.md](performance.md) 时只写当前构建的实测结果，并保留未达标/失败说明；不要复制历史数字冒充当前结果。
 9. 若改变缓存版本、Worker 数量、LOD 策略或 IFC 队列顺序，重新跑完整矩阵，不能只跑受影响样本后宣称全局回归通过。
@@ -453,3 +459,4 @@ Invoke-RestMethod 'http://127.0.0.1:9222/json' | Select-Object title, url, webSo
 - [validation.md](validation.md)：验证证据边界和验收规则；
 - [open-issues.md](open-issues.md)：未关闭缺陷与已知限制；
 - [架构](architecture.md)：IFC/DEV 分级、Worker 与缓存设计；
+- 变电模型树（开发中）：[业务树](impl/model-tree-business.md)、[来源](impl/model-tree-source.md)、[空间](impl/model-tree-spatial.md)；

@@ -6,7 +6,8 @@
 - 性能 SLO 与实测见 [性能](performance.md)；
 - 未关闭缺陷与已接受限制见 [问题与限制](open-issues.md)；
 - 样本身份/格式统计见 [样本台账](schema/sample-corpus.md)；
-- 未采用的性能路线见 [探索记录](impl/explorations.md)。
+- 未采用的性能路线见 [探索记录](impl/explorations.md)；
+- 开发中的变电模型树见[业务树](impl/model-tree-business.md)、[来源](impl/model-tree-source.md)、[空间](impl/model-tree-spatial.md)。
 
 ## 1. 证据边界
 
@@ -89,7 +90,7 @@ python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation
 
 当前已覆盖：
 
-- 变电四站冷/暖打开、选择隔离、L2 精化、空间语义与严格 SQLite/几何链；
+- 变电九站（`substation01`–`substation04`、`A3-1`、`B1-1`–`B1-4`）的冷/暖打开矩阵；`substation01`–`substation04` 另覆盖选择隔离、L2 精化、空间语义与严格 SQLite/几何链；
 - 设备样本的源/派生冷开与缓存重开、树/属性/选择、设备→线路→设备切换；
 - 线路六包地图、导航、搜索和导出；
 - 零 GUID、坏矩阵、异常范围、坏缓存与迟到结果的隔离路径。

@@ -10,7 +10,7 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 | 平台          | 当前版本       | 下载                                                         | 主要功能                                                 |
 | ------------- | -------------- | ------------------------------------------------------------ | -------------------------------------------------------- |
 | Windows x64   | v0.1.3（源码） | [已发布 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站和设备三维模型、输电线路地图、业务树与属性浏览 |
-| Android ARM64 | v0.1.16 Preview | [下载 APK](https://github.com/bamboosjtu/gim_viewer/releases/download/android-v0.1.6-preview/gim-viewer-android-ae7df06cc83ebde26fc2cb17faf003d7b2fd8a2f.zip) | 输电线路地图、工程树、杆塔与导线属性、来源查看和现场定位 |
+| Android ARM64 | v0.1.6 Preview | [下载 APK](https://github.com/bamboosjtu/gim_viewer/releases/download/android-v0.1.6-preview/gim-viewer-android-ae7df06cc83ebde26fc2cb17faf003d7b2fd8a2f.zip) | 输电线路地图、工程树、杆塔与导线属性、来源查看和现场定位 |
 
 历史版本及发布说明：[GitHub Releases](https://github.com/bamboosjtu/gim_viewer/releases)
 
@@ -109,6 +109,7 @@ npm run tauri:dev
 - [GIM 格式与匿名样本](docs/schema/README.md)
 - [正确性验证](docs/validation.md)
 - [性能测量](docs/performance.md)
+- [变电模型树（开发中）：业务树](docs/impl/model-tree-business.md) / [来源](docs/impl/model-tree-source.md) / [空间](docs/impl/model-tree-spatial.md)
 - [已回退与未采用路线](docs/impl/explorations.md)
 - [移动端状态](docs/mobile-spec.md)
 - [问题与限制](docs/open-issues.md)
