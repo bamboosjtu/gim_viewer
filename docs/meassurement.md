@@ -140,9 +140,11 @@ cd desktop
 npm test
 npm run test:sqlite
 npm run test:sample
+npm run test:engineering:nine
+npm run test:engineering:worker
 ```
 
-`npm test` 是快速单元测试；`test:sqlite` 需要 Rust SQLite harness；`test:sample` 依赖 `demo/` 下的解压样本，缺失会跳过。
+`npm test` 是快速单元测试；`test:sqlite` 需要 Rust SQLite harness；`test:sample` 依赖 `demo/` 下的解压样本，缺失会跳过；两个 engineering 入口分别检查九工程来源/实体/投影和生产构建 Worker 夹具。缺少必需输入的 engineering 测试应失败，skip 不算通过；这些也不是原生性能矩阵。
 
 这些命令用于确认构建没有明显回归，**不产生性能结论**。不要在跑性能的同时执行 `npm test`、`npm run build` 或其他 Tauri 构建。
 
@@ -455,8 +457,9 @@ Invoke-RestMethod 'http://127.0.0.1:9222/json' | Select-Object title, url, webSo
 
 ## 11. 相关文档
 
-- [performance.md](performance.md)：当前基线、已知未达标项、实现相关性能事实；
+- [performance.md](performance.md)：0.1.x 基线、已知未达标项、实现相关性能事实；
 - [validation.md](validation.md)：验证证据边界和验收规则；
 - [open-issues.md](open-issues.md)：未关闭缺陷与已知限制；
-- [架构](architecture.md)：IFC/DEV 分级、Worker 与缓存设计；
-- 变电工程组成与来源：[桌面重构计划](impl/desktop-engineering-refactor.md)；
+- [架构索引](architecture.md)：运行主干与主题文档入口；
+- [DEV 几何](architecture/dev-geometry.md)、[IFC 运行时](architecture/ifc-runtime.md)：分级、Worker 与缓存设计；
+- 变电工程组成与来源：[工程实体模型](engineering/README.md)、[工程实体运行时](architecture/engineering-runtime.md)；

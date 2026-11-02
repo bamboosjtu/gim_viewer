@@ -2,12 +2,12 @@
 
 本文件维护**正确性门禁、验证边界和证据记录规则**，不重复实现机制或性能数字：
 
-- 当前实现机制见 [架构](architecture.md)；
+- 当前实现机制见[架构索引](architecture.md)及各主题文档；
+- 工程实体、两视图和目录见[工程实体模型](engineering/README.md)；
 - 性能 SLO 与实测见 [性能](performance.md)；
 - 未关闭缺陷与已接受限制见 [问题与限制](open-issues.md)；
 - 样本身份/格式统计见 [样本台账](schema/sample-corpus.md)；
-- 未采用的性能路线见 [探索记录](impl/explorations.md)；
-- 开发中的变电模型树见[桌面工程实体重构计划](impl/desktop-engineering-refactor.md)。
+- 未采用的性能路线见 [探索记录](impl/explorations.md)。
 
 ## 1. 证据边界
 
@@ -30,6 +30,11 @@
 | 路径 | 大小写、分隔符兼容；全局 resolver；唯一候选才挂接 |
 | FAM | 原文/行号可追溯；重复行不丢；单值视图与原记录分离 |
 | PARTINDEX | 按 DEV 身份关联；限制父装配子树；歧义保留；不增加 seed |
+| 工程来源 | 从实际文件/CBM/DEV/IFC 建图；不接收旧展示树；缺条目/歧义/循环保留；来源完整性可核对 |
+| 工程整体 | 身份不使用 F2/F3/F4、展示名、数组顺序或 Mesh；每份来源唯一主归属；未知/待归保留 |
+| 表示绑定 | 按来源 ID 绑定；同名/同模板/邻近不补造；粗表示跨整体时 ambiguous；变量替换不改变选择身份 |
+| 两视图 | 组成/来源覆盖全部来源与整体；分组计数按实体去重；来源可追溯整体；空声明组不伪造成员 |
+| 点击/拖拽 | 左键单击才选择；移动 >5 px 不选；三维点击不自动定位；相机手势不产生选择请求 |
 | 递归装配 | PHM→PHM 可达；逐边矩阵；分支防环；合法重复路径保留 |
 | 模板共享 | clean DEV 解析数接近 unique DEV；placement 不修改共享 geometry |
 | 变换 | 非单位阵、旋转、缩放、镜像与深层路径保持；单位/轴转换只应用一次 |
@@ -51,9 +56,21 @@ cd desktop
 npm test                 # 快速单元测试（不启动 Cargo）
 npm run test:sqlite      # 真实 SQLite 集成：构建一次，直接运行 harness
 npm run test:sample      # 真实样本回归（缺样本时可跳过，skip 不算通过）
+npm run test:engineering:nine   # 九工程来源/实体/投影严格对照
+npm run test:engineering:worker # 真实 Worker/Blob/缓存/取消（headless Edge）
 npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
+
+工程实体基线先准备独立参考和几何输入：
+
+```powershell
+npm run engineering:baseline
+npm run engineering:geometry-input
+npm run test:engineering:nine
+```
+
+`engineering:baseline`/`geometry-input` 依赖本地 `research/` 和样本；缺少必需输入应失败，不能用旧输出或跳过冒充复跑。`test:engineering:worker` 是功能夹具，不替代原生 IPC、真实渲染或性能验收。
 
 SQLite 集成测试独立于单元测试和样本回归，Windows CI 必须单独执行 `test:sqlite`。准备阶段最多 10 分钟，通过 Cargo JSON 产物消息取得本次测试程序；每次 SQLite 执行最多 30 秒，外层测试最多 60 秒。输入、输出和临时 SQLite 文件位于已忽略的 `desktop/.tmp-vitest/sqlite/`，每次调用独立目录，进程退出后清理。
 
@@ -81,6 +98,8 @@ python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation
 
 - 一个物理根、PARTINDEX、嵌套装配、IFC 关联对象的来源/属性/高亮/相机终态；
 - A→B、重复 B、搜索、关闭、同进程重开；
+- 工程组成/来源切换、来源→整体、分组选择、待归集合、粗表示歧义；
+- 自动定位开/关、树/搜索定位、三维单击不移动相机、拖拽超过 5 px 不选择、Esc 清除/恢复；
 - 冷/暖的根数、unique DEV、occurrence、几何状态、IFC 顺序与空间索引；
 - 默认显示不先点树，覆盖已知/未知范围、视野内外、选择/取消、远近切换、失败重试、坏缓存局部修复。
 
@@ -90,12 +109,15 @@ python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation
 
 当前已覆盖：
 
-- 变电九站（`substation01`–`substation04`、`A3-1`、`B1-1`–`B1-4`）的冷/暖打开矩阵；`substation01`–`substation04` 另覆盖选择隔离、L2 精化、空间语义与严格 SQLite/几何链；
+- 变电九站（`substation01`–`substation04`、`A3-1`、`B1-1`–`B1-4`）的来源扫描、来源到实体归一化、两视图投影与成员覆盖自动对照；来源完整的八工程通过来源/实体/导航缓存往返，a31 保留部分状态；
+- 生产构建的真实浏览器操作覆盖工程组成/来源、搜索、显隐、精化和工程切换；真实桌面原生操作、完整九工程路线与性能矩阵仍未齐备；
+- 旧 0.1.x 九站冷/暖基线（见[性能](performance.md)）只证明旧构建，不能替代 v0.2 工程实体/两视图链路的原生性能；
+- `substation01`–`substation04` 的选择隔离、L2 精化、空间语义与严格 SQLite/几何链；
 - 设备样本的源/派生冷开与缓存重开、树/属性/选择、设备→线路→设备切换；
 - 线路六包地图、导航、搜索和导出；
 - 零 GUID、坏矩阵、异常范围、坏缓存与迟到结果的隔离路径。
 
-未覆盖：设备全库逐个人工显示、大条目设备库性能/内存、全部样本三次冷暖矩阵、自动 L1 与增量连接线的完整组合边界。具体未关闭项见 [问题与限制](open-issues.md)。
+未覆盖：v0.2 原生三次真冷/有效暖、完整集合选择与持续交互、设备全库逐个人工显示、大条目设备库性能/内存、自动 L1 与增量连接线的完整组合边界、逐台套人工归属真值。具体未关闭项见 [问题与限制](open-issues.md)。
 
 ## 5. 移动端验证
 

@@ -139,7 +139,7 @@ CROSS 叶对象的类型由其自身 `BASEFAMILY` 所引用的 FAM 属性键族�
 | 没有对象 GUID/无法解析 | 未关联，不能伪造确定 IFC 对象 |
 
 IFC 空间归属、分解、host 边界与局部 placement 有独立来源。
-文件发现和对象关联不能用一个布尔值代表。详情读取与缓存策略见 [架构](../architecture.md)。
+文件发现和对象关联不能用一个布尔值代表。详情读取与缓存策略见 [IFC 运行时](../architecture/ifc-runtime.md)；来源记录如何进入工程整体见[实体与来源模型](../engineering/entities.md)。
 
 ## 当前实现入口
 

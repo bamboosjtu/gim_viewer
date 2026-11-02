@@ -1,10 +1,12 @@
 # 性能基线
 
-本文件维护桌面原生 Release 的当前性能基线、测量口径和未达标项。方法见[测量指南](meassurement.md)，缺陷与限制见[问题清单](open-issues.md)，未采用的性能路线见[探索记录](impl/explorations.md)。
+本文件维护桌面原生 Release 的性能基线、测量口径和未达标项。方法见[测量指南](meassurement.md)，缺陷与限制见[问题清单](open-issues.md)，未采用的性能路线见[探索记录](impl/explorations.md)。
+
+> **版本边界**：下表是 `0.1.x` 构建（提交 `745e136`）的基线。当前桌面 `0.2.0` 已改为“工程组成 / 来源”两视图并解耦实体与几何，尚未重跑同等冷/暖矩阵；本文件不能作为 v0.2 的 SLO 通过证据。v0.2 的验收缺口见 [O-11](open-issues.md)。
 
 本轮基线为提交 `745e1363ba6bff9d9241b9961c0e6fa89d3c6e19` 的验收 Release：源码指纹 `bc239d67fb93fc7617fc83cc633ed3958c38cbd95c9d3e798ab364e9441a1169`，EXE SHA-256 `5e05ea2aecb29a174513d100475a58cdc23e8a5bee3c17e03b1e7570cb9782f1`，Fixed WebView2 目录 SHA-256 `1bc71a6d464da1cd3f63ac1ff0d1b748f528aa8b3957b5e3a7f9ae28d6df7071`（257 个文件、705,180,410 B）。测量在 2026-10-31 完成，使用九个变电工程样本各一次冷启动，其中七站完成三次暖启动；B1-3/B1-4 因冷缓存未完整发布未形成有效暖矩阵。数据库、页面缓存和 WebView profile 按样本隔离，不读取日常缓存。
 
-本轮不是完整验收：缺少每样本三次真冷、线路六包、固定路线持续交互、工程切换和低配矩阵。默认 12 逻辑核下实际 DEV Worker 为 7–8 个；旧基线的“4 核提示/2 Worker”条件不同，不能直接比较。本文只覆盖该构建、主机和下列样本。测量后删除未引用的空间推断入口及其测试，并修复来源树的 `aria-expanded` 展开恢复；后者不改变本次测量的打开、几何或缓存路径，源码指纹仍对应测量时的干净提交。
+本轮不是完整验收：缺少每样本三次真冷、线路六包、固定路线持续交互、工程切换和低配矩阵。默认 12 逻辑核下实际 DEV Worker 为 7–8 个；旧基线的“4 核提示/2 Worker”条件不同，不能直接比较。本文只覆盖该构建、主机和下列样本；后续 v0.2 改动未重测，不能用本文件证明当前构建。
 
 ## 1. 构建、环境与口径
 
@@ -124,7 +126,7 @@
 | B1-3 | 8,812 | 236,452 | 3,489 | 未形成有效暖 | 未形成有效暖 |
 | B1-4 | 8,158 | 936,996 | 2,313 | 未形成有效暖 | 未形成有效暖 |
 
-长任务来自浏览器 PerformanceObserver，覆盖打开、IFC/DEV 加载、业务补充和缓存发布，不等于业务树单独 CPU 成本。B1-1 和 B1-3 的累计阻塞时间说明冷打开期间输入响应不可接受；B1-3 在基础表示完成后仍持续产生约 70 ms 级长任务，属于缓存/空间/业务长尾。
+长任务来自浏览器 PerformanceObserver，覆盖打开、IFC/DEV 加载、工程实体补充和缓存发布，不等于两视图单独 CPU 成本。B1-1 和 B1-3 的累计阻塞时间说明冷打开期间输入响应不可接受；B1-3 在基础表示完成后仍持续产生约 70 ms 级长任务，属于缓存/空间/业务长尾。
 
 private 峰值：substation01 3,746 MiB、substation02 3,083 MiB、substation03 5,839 MiB、substation04 1,787 MiB、A3-1 3,846 MiB、B1-1 5,976 MiB、B1-2 1,952 MiB、B1-3 3,213 MiB、B1-4 6,894 MiB。该值是测量进程树的 private commit 采样，不是 GPU 驻留或全机峰值。
 
@@ -152,5 +154,5 @@ private 峰值：substation01 3,746 MiB、substation02 3,083 MiB、substation03 
 - [性能测试指南](meassurement.md)：冷/暖启动步骤、命令与报告模板；
 - [问题与限制](open-issues.md)：O-02、O-07、O-11 等未关闭项；
 - [验证](validation.md)：证据分层与不变量；
-- [架构](architecture.md)：DEV/IFC 分级、Spatial、业务快照和 Worker 设计；
-- 变电模型树（开发中）：[桌面工程实体重构计划](impl/desktop-engineering-refactor.md)。
+- [DEV 几何](architecture/dev-geometry.md)、[IFC 运行时](architecture/ifc-runtime.md)、[工程实体运行时](architecture/engineering-runtime.md)：分级、Spatial、实体/两视图和 Worker 设计；
+- [工程实体模型](engineering/README.md)：v0.2 的目录、成员和视图规则。

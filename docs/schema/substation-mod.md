@@ -1,7 +1,6 @@
 # 变电 XML MOD
 
-变电 MOD 的主要内容为 Device XML，包含 Entity、局部矩阵、颜色和 primitive。
-当前 parser 能解析的类型多于实际几何覆盖，解析成功不能等同完整渲染。
+变电 MOD 的主要内容为 Device XML，包含 Entity、局部矩阵、颜色和 primitive。本文件说明文件 grammar、Entity 字段、Boolean/状态边界；具体 primitive 的字段、别名、几何和 LOD 见 [XML primitive](xml-primitives.md)。
 
 ## 文件 grammar
 
@@ -17,84 +16,71 @@
 </Device>
 ```
 
-合成示例不含工程来源标识。Device 与 primitive 标签大小写敏感。
-`<Device><Entities /></Device>` 是合法空内容；有 Entity 但全都 malformed 或 unsupported 不能记成 empty。缺少 Entities 时当前 parser 也返回空文档。
+合成示例不含工程来源标识。`Device`/`Entities`/`Entity`/`TransformMatrix`/`Color` 标签大小写敏感；primitive 标签在 parser 内做小写归一，别名见 [XML primitive](xml-primitives.md#标签归一与导出器别名)。
+
+`<Device><Entities /></Device>` 是合法空内容；有 Entity 但全部 malformed 或 unsupported 不能记成 empty。缺少 `Entities` 时当前 parser 也返回空文档。
+
+## Entity 字段
 
 | 元素/字段 | 当前解析行为 |
 |---|---|
-| Entity.ID | 整数 ID；不可解析则该 Entity 不进入实体集合 |
-| Entity.Type | 不作为 primitive 名称；非 simple 值诊断并按当前 simple IR 处理 |
-| Entity.Visible | 缺失默认为 true；false 不进入可见几何 |
-| TransformMatrix.Value | 16 项数组；缺失/词法异常按单位阵回退 |
-| Color | 可选；通道与刻度规则见几何模型 |
-| primitive | 跳过 TransformMatrix/Color 后取首个子元素；未知保留 Unsupported/raw |
+| `Entity.ID` | 整数 ID；不可解析则该 Entity 不进入实体集合 |
+| `Entity.Type` | 不作为 primitive 名称；非 simple 值诊断并按当前 simple IR 处理 |
+| `Entity.Visible` | 缺失默认为 true；false 不进入可见几何 |
+| `TransformMatrix.Value` | 16 项列主序；缺失、长度不符或含 NaN 时回退单位阵 |
+| `Color` | 可选；RGB 0–255，A 的刻度由文件级 `max(A)` 判定，见[几何模型](geometry-model.md#颜色) |
+| primitive | 跳过 TransformMatrix/Color 后取首个子元素；未知标签保留 `Unsupported/sourceType/raw` |
 
-当前数值读取通常使用 parseFloat，缺字段可能为 NaN，不是隐式合法零值。
-矩阵有限性与数值词法的严格覆盖仍需按源码与测试边界评估，不能由 XML 合法推定几何合法。
+当前数值读取通常使用 `parseFloat`，缺字段可能为 NaN，不是隐式合法零值。矩阵有限性、单位与轴转换不能由 XML 合法推定；Entity 变换只在其父坐标系应用一次。
 
-## primitive 字段及实际覆盖
+## primitive 处理
 
-尺寸按照当前 MOD 消费以毫米处理。表中“渲染”描述当前实现，不能替代设计级形状验证。
+- 强类型：Cuboid、Cylinder、Sphere、TruncatedCone、Ring、CircularGasket、StretchedBody、PorcelainBushing、TerminalBlock、ChannelSteel、Table、Boolean、Wire、Cable、RotationalEllipsoid、BeamChannelLike。
+- 弱 schema：RectangularFixedPlate、OffsetRectangularTable、RectangularRing；字段不可解释时可能用浏览近似或返回 null，不能当作精确源形状。
+- 导出器别名：`Rectangularfixedplate`、`H-beam`、`DoubleChannelSteel`、`Insulator/VTypeInsulator`、`ConePorcelainBushing`、`EccentricTruncatedCone`、`SquareGasket/TableGasket`、`EllipticRing`、`BendingCylindrical`、`CircularFixedPlate` 等，统一映射到既有分支。
+- 未知标签、非法 Boolean Type：`Unsupported`，保留来源类型和 raw；局部降级，不把文件记成 empty。
 
-| 来源类型 | 关键属性 | 当前解析/渲染 |
-|---|---|---|
-| Cuboid | L,W,H | 强类型；XY 居中，底面 Z=0，顶面 Z=H |
-| Cylinder | R,H | 强类型；底面圆心为原点，局部 +Z 轴，含端盖 |
-| Sphere | R | 强类型；中心为原点 |
-| TruncatedCone | BR,TR,H | 强类型；0≤TR≤1 时顶半径为 TR×BR，TR>1 保留样本中的绝对半径兼容解释并记录诊断 |
-| Ring | R,DR,Rad | 强类型；DR 为管半径，Rad 为弧度扫掠 |
-| CircularGasket | H,Rad,OR,IR | 强类型；垫圈几何 |
-| StretchedBody | L,Array,Normal | 单位或一英尺基矢 Normal 使用方向×L，其他非单位 Normal 保留完整位移解释；支持凹截面三角剖分 |
-| PorcelainBushing | R,R1,R2,N,H | 强类型；锥柱与均布伞裙组合，伞裙为浏览近似；远景保留主体 |
-| TerminalBlock | L,W,H?,T,R,BL,CL,CS,RS,CN,RN,Phase | 强类型；基板与 CN×RN 栅格端子组合，远景保留基板 |
-| ChannelSteel | L,Model,D?,H?,B?,T? | 强类型；当前无直接几何生成 |
-| Table | H,LL1,LL2,TL1,TL2 | 强类型；当前无直接几何生成 |
-| RectangularFixedPlate | L,W,T | 矩形板浏览近似；螺栓孔等字段忽略 |
-| OffsetRectangularTable | TL,TW,LL,LW,H,XOFF,YOFF | 仅接受显式七字段编码；下矩形 XY 居中且 Z=0，上矩形位于 Z=H 并施加偏移；其他编码保留不支持诊断 |
-| RectangularRing | L1,W1,L2,W2,H | 矩形框浏览近似（四块板）；字段缺失回退为退化的外框 |
-| Boolean | Type,Entity1,Entity2 | Union/Intersection/Difference；按引用构造 CSG |
-| Wire | D,FitCoordArray | 有效三元点；样条管近似 |
-| Cable | D,StartCoord,InflectionCoordArray,EndCoord | 拼合有效点；样条管近似 |
-| RotationalEllipsoid | H,LR,WR | 强类型；缩放球体近似 |
-| BeamChannel / LightBeamChannel / H / H-beam | Length,Model | BeamChannelLike；盒体近似；`H-beam` 为导出器别名 |
-| DoubleChannelSteel | raw attrs | 归一为 ChannelSteel；当前无直接几何生成 |
-| Insulator / VTypeInsulator | N,D,N1,H1,R,R1,R2,FL,AL,LN | 映射 PorcelainBushing（高度 H1×N1），浏览近似；V 串按单串处理 |
-| ConePorcelainBushing | H,BR,TR,BR1,BR2,TR1,TR2,N | 映射 PorcelainBushing（BR2/TR2/TR1），浏览近似 |
-| EccentricTruncatedCone | BR,TR,H（偏心字段忽略） | 映射 TruncatedCone，浏览近似 |
-| SquareGasket / TableGasket | L1,W1,L2,W2,H | 矩形框近似（四块板） |
-| EllipticRing | LR,WR,DR,Rad | 映射 Ring（LR/WR 平均半径），浏览近似 |
-| BendingCylindrical | R,L,Rad | 映射 Cylinder（忽略弯曲），浏览近似 |
-| CircularFixedPlate | L,W,T,CS,N,MH,D | 映射 Cylinder 圆盘，忽略螺栓孔 |
-| 其他标签 | raw attrs | Unsupported，局部降级并保留来源类型 |
-
-标签匹配按小写规范化，`Rectangularfixedplate`、`RectangularFixedPlate` 等大小写变体进入同一分支。
-
-六组样本实测（substation01–04 与 500-A3-1/B1-1/B1-3/B1-4；B1-2 未取得 pack）已覆盖 `Insulator`、`VTypeInsulator`、`ConePorcelainBushing`、`EccentricTruncatedCone`、`SquareGasket`、`TableGasket`、`EllipticRing`、`BendingCylindrical`、`CircularFixedPlate`、`RectangularFixedPlate`。这些分支只承诺浏览近似，忽略的字段（偏心量、螺栓孔、V 串几何、弯曲半径）在代码注释与本节中列明，不能据此做尺寸或安装测量。
-
-仍未生成直接几何的类型为 `ChannelSteel`、`Table`（解析保留、渲染暂停）以及任何未知标签；它们继续走显式诊断，不伪装成 empty。补充新类型时须提供参数映射并标记 simplified。
-全部覆盖以 [parser](../../desktop/src/gim/geometry/xmlModParser.ts) 与[geometry renderer](../../desktop/src/viewer/xmlModGeometry.ts) 的实际分支为准。
-
-## StretchedBody
-
-Array 是分号分隔点序列，每点为逗号三元组，二维点兼容为 z=0。Normal 模长与 1 的差不超过 10⁻⁶，或与 304.8 mm 的差不超过 10⁻⁵ 时按方向基矢解释，位移为归一化 Normal×L。后一形态以一英尺表达方向，Array 和 L 仍为毫米；例如支柱截面位于 150 mm、L 为 3150 mm 时顶端应位于 3300 mm，不能固定拉伸 304.8 mm。该形态在工程样本和独立设备中均存在。其他非零有限 Normal 继续按完整位移兼容解释，不据此宣称已得到所有导出格式的统一语义。方向形态缺少有效非零 L、非法或零 Normal 均不生成几何。几何构造与设备范围计算复用同一解释，不依赖厂商名；原值和解释模式保留。
-渲染去掉重复截面点，投影用于凹多边形端盖三角剖分，最终顶点使用原始三维点与加上统一解释位移的顶层点；范围索引使用同一解释函数。
-闭合、退化、非平面截面和任意法向不能仅凭记录数量认定完整支持。
-Normal 与 Entity 矩阵分别生效，不能将 Normal 当整个装配的绝对朝向。
-
-圆周与扫掠分段随浏览档位变化：远景使用最低分段，中景提高一档，近景使用当前固定分段；LOD0 的环体使用更低的双向分段。Wire/Cable 的管道段数、PorcelainBushing 的伞裙片数与 TerminalBlock 的端子栅格数各有上限，超限的对象不生成几何并保留诊断。BeamChannel 类无截面型号查表，按固定盒体近似，不能据此做截面量测。几何与颜色独立处理，继续消费 MOD/PHM 的继承颜色，不强制瓷套颜色。参数组合近似、未支持类型与来源异常保留诊断，不宣称全类型精确重建。
-
-Wire/Cable 另叠加 1 px 中心线保证低档位可见：默认每条线一个 `Line`；当单文件中心线数超过 1000 时按颜色合并为 `LineSegments`，避免 draw calls 线性膨胀。`xmlModLoader` 在 `group.userData` 记录 `electricalConnectionLineCount` 与 `electricalConnectionMerged` 供 profiling。中心线只是视觉辅助，不参与拾取、尺寸测量或电气连接判断；管径仍使用源 `D`。
+字段、几何、LOD/近似和上限的完整表见 [XML primitive](xml-primitives.md)。这里只保留格式边界：解析成功不等于几何支持，几何存在也不等于字段被正确理解。
 
 ## Boolean 与实体引用
 
-Boolean 的 Type 归一化后只接受 union/intersection/difference，其他操作 Unsupported。
-Entity1/Entity2 通过本文件实体 ID 引用，操作数缺失、环与异常几何不能得到伪造结果。
-每个求值节点包含自身 Entity 变换，中间节点和可见根各应用一次，再应用单位和外部装配变换；镜像同步翻转三角面绕序。隐藏操作数可参与求值。L0/L1 均不执行 CSG：Union 组合操作数轮廓，Difference 与 Intersection 递归保留第一操作数，孔洞及交集按轮廓近似显示；诊断记录表示策略及各运算的近似次数。隐藏操作数仍按引用关系参与轮廓遍历，跳过的切割分支仅校验引用而不生成网格。L2 使用递归精确 CSG，失败后的轮廓回退仍报告 partial。
-可见根诊断记录依赖 ID 与缺失、环、不支持或 CSG 异常；合法空交集是空结果。精细求值失败时可保留可支持的浏览表面并标记 partial，不计作完整几何。合并相同材质只改变场景资源组织，不改变源实体 ID 和支持度记录。
+Boolean 的 `Type` 归一化后只接受 union/intersection/difference，其他操作 Unsupported。
+
+`Entity1/Entity2` 通过本文件 Entity ID 引用；操作数缺失、环与异常几何不能得到伪造结果。每个求值节点包含自身 Entity 变换，中间节点和可见根各应用一次，再应用单位和外部装配变换；镜像同步翻转三角面绕序。隐藏操作数可参与求值。
+
+L0/L1 不执行 CSG：
+
+- Union 组合操作数轮廓；
+- Difference/Intersection 递归保留第一操作数，孔洞/交集按轮廓近似；
+- 诊断记录 `representationPolicy`、`approximatedBooleans` 和 `simplifiedBooleans`；正常的轮廓简化不作为 partial。
+
+L2 使用递归精确 CSG；失败后的轮廓回退仍报告 partial。可见根诊断记录依赖 ID 与缺失、环、不支持或 CSG 异常；合法空交集是空结果。
 
 ## 状态与计数
 
-XmlModDocument 保留 declaredEntityCount、malformedEntityCount、entities、isEmpty 与 colorMaxA。
-运行时单独统计实际可见几何和 unsupported 类型。合并后的 mesh 数量不等于源 Entity 数量。
+`XmlModDocument` 保留：
+
+- `declaredEntityCount`：XML 声明的 Entity 数；
+- `malformedEntityCount`：缺 ID/primitive 等未进入实体集合的数量；
+- `entities`：可解析实体；
+- `isEmpty`：`<Entities />` 或无 Entity；
+- `colorMaxA`：文件级透明度刻度判定。
+
+运行时另行统计实际可见几何、unsupported 类型和失败原因；合并后的 mesh 数不等于源 Entity 数。
+
+| 状态 | 含义 |
+|---|---|
+| 完整/可渲染 | 至少一个可见根生成表示，未覆盖来源另计 |
+| `partial` | 有可渲染部分，同时有缺失依赖/CSG 回退/未支持图元 |
+| `empty` | 源内容没有自有可渲染几何（合法空） |
+| `unsupported` | 源存在但当前能力不支持；不能算 empty |
+| `source-invalid` / parse failed | 源或解析异常；保留原因，不发布完整几何 |
+
 空文件、解析异常、有内容但不支持、部分可渲染和完整可渲染不能混成一个布尔值。
-颜色和变换的统一契约见 [几何模型](geometry-model.md)，行动见 [未决事项](../open-issues.md)。
+
+## 边界
+
+- XML 是设计/导出表达，不是施工安装真值；不能据浏览几何反推尺寸、间隙或电气参数。
+- `ChannelSteel`、`Table` 当前生成外廓盒体；早期“无直接几何”的描述已失效，以 [XML primitive](xml-primitives.md) 与源码为准。
+- 颜色/材质共享只影响显示，不推断设备类别、带电状态或工程归属。
+- 几何与颜色契约见[几何模型](geometry-model.md)，运行与缓存见[DEV 几何](../architecture/dev-geometry.md)。

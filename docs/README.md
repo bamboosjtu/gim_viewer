@@ -1,44 +1,55 @@
 # GIM Viewer 文档
 
-文档描述仓库当前样本、当前源码和实际能力。桌面端与 Android 线路端均有实现；设备验收范围按验证证据说明。
-格式观察、软件行为、验证结果分别维护，研究结论只有经源包或源码复核后才进入正文。
+本文档库存放当前实现的产品行为、架构契约、工程实体规则、GIM 格式和验证边界。当前桌面版本为 `0.2.0`；文档以源码和实际验证为准，不把研究候选或过程计划写成已实现能力。
+
+```text
+docs/
+├─ software-spec.md / mobile-spec.md      用户行为
+├─ architecture.md                        架构总览与不变量
+├─ architecture/                          分层、生命周期、缓存、实体、表示、DEV、IFC、选择、平台
+├─ engineering/                           工程实体契约、两视图、设备/材料/构件目录
+├─ schema/                                容器、语义、几何、XML MOD/primitive、线路、样本
+├─ validation.md / performance.md / meassurement.md / open-issues.md
+└─ impl/                                 未完成验收计划与未采用的性能路线
+```
 
 ## 阅读入口
 
-| 需要了解的内容 | 文档 | 维护责任 |
-|---|---|---|
-| 桌面功能、操作与限制 | [软件规格](software-spec.md) | 当前用户可用行为 |
-| 移动端能力状态 | [移动端规格](mobile-spec.md) | 当前目录和实现状态 |
-| 分层、生命周期、缓存和发布 | [架构](architecture.md) | 当前内部契约及版本 |
-| 未关闭缺陷与已接受限制 | [问题与限制](open-issues.md) | 行动清单与边界 |
-| 正确性不变量与复核方法 | [验证](validation.md) | 检查口径和证据范围 |
-| 性能测量与有效基线 | [性能](performance.md) | 当前原生验收矩阵、SLO 状态与证据边界 |
-| 性能测试步骤、命令与报告模板 | [性能测试指南](meassurement.md) | 冷/暖启动复现和证据导出 |
-| GIM 格式及样本事实 | [Schema](schema/README.md) | 匿名格式说明 |
-| 桌面工程实体重构（开发中） | [重构计划](impl/desktop-engineering-refactor.md) | 来源、整体、两视图、表示集合及阶段验收 |
-| 已回退与未采用路线（性能探索） | [探索记录](impl/explorations.md) | 假设、实验边界、结果与未保留原因 |
+| 需要了解 | 文档 |
+|---|---|
+| 桌面功能、操作与限制 | [桌面软件规格](software-spec.md) |
+| Android 线路能力 | [移动端规格](mobile-spec.md) |
+| 系统边界与架构索引 | [系统架构](architecture.md) |
+| 分层、打开、缓存、DEV/IFC、选择等机制 | [架构文档目录](architecture.md#架构文档分工) |
+| 工程整体、来源、成员与两视图 | [工程实体模型](engineering/README.md) |
+| 设备目录/装置性材料目录/构件清单 | [目录总则](engineering/catalogs/README.md) |
+| GIM 容器、语义、几何、XML MOD | [Schema](schema/README.md) |
+| 已实现 XML primitive | [XML primitive](schema/xml-primitives.md) |
+| 样本身份与数量 | [样本台账](schema/sample-corpus.md) |
+| 正确性门禁与证据边界 | [验证](validation.md) |
+| 当前性能基线与 SLO | [性能基线](performance.md) |
+| 冷/暖测试步骤与命令 | [性能测试指南](meassurement.md) |
+| 未关闭缺陷与接受限制 | [问题与限制](open-issues.md) |
+| 术语 | [术语表](glossary.md) |
+| v0.2 工程实体重构执行/验收基线（P6 未完成） | [重构计划](impl/desktop-engineering-refactor.md) |
+| 未采用的性能路线 | [探索记录](impl/explorations.md) |
 
-## 资料边界
+`research/` 保存研究结论、复现脚本和样本证据，约束实现但不等于产品行为；`demo/` 保存原始 GIM 包和本地解包样本，大型文件由 Git 忽略。
 
-- `demo/` 保存原始 GIM 包和本地解包样本，大型文件由 Git 忽略。
-- `research/` 保存研究结论、复现脚本及样本证据；结论用于约束重构，产品行为仍需源码和实际运行验证。
-- `docs/schema/` 只使用匿名样本 ID，不写真实工程名、地理归属、建设单位或内部工程标识。
-- 应用能力以源码为准；样本覆盖不等于完整行业标准；单元测试不等于真实桌面验收。
-- 生成统计、性能日志、截图和临时复核文件保存到明确的输出目录，不作为额外长期正文。
+## 结构性约定
 
-## 维护规则
+1. **架构按主题拆分。** [architecture.md](architecture.md) 只做总览和不变量；生命周期、缓存、工程实体、表示、DEV、IFC、选择、线路/移动端、平台各自独立文档。新增机制先判断归属，不往总览里堆细节。
+2. **用户行为与内部契约分开。** [software-spec.md](software-spec.md) 描述用户可见操作和限制；`architecture/` 描述内部实现。规格不复制缓存版本表或算法细节。
+3. **工程实体与格式分开。** `engineering/` 定义项目目录、对象角色、整体/成员/关系；`schema/` 定义 GIM 文件事实和 parser 边界。目录编码是项目映射，不宣称国标编码。
+4. **单一权威表。** 缓存版本只在[缓存域](architecture/caches.md)维护；样本统计只在[样本台账](schema/sample-corpus.md)；未关闭缺陷只在[问题与限制](open-issues.md)；其他文档引用，不复制。
+5. **当前状态，不写过程。** 已关闭问题、修改前后对照、实施阶段流水不进入长期正文；未采用路线放 `impl/explorations.md`。功能转正后把稳定契约并入正式文档并删除过程稿。
+6. **证据分层。** 源包事实、源码/单测、真实浏览器/桌面、性能计时分别记账；skip 不算通过，旧构建结果不能证明当前构建。
+7. **匿名化。** `docs/schema/` 只使用匿名样本 ID，不写真实工程名、地理归属、建设单位或内部工程标识；其他目录同样避免复制真实业务字段。
 
-长期正文按稳定主题维护，不按分析批次或实施阶段拆分。
-修改一个主题时直接更新其权威文档，其他文档引用它；不要复制缓存版本表、样本统计表或待办清单。
+## 维护检查
 
-过程记录、历史版本、修改前后对照和已关闭问题复盘不进入正文。
-`docs/impl/` 保存正在开发的功能实现（当前为变电模型树三个选项卡）与未采用的性能探索；消缺过程与已关闭问题不进入长期文档，仍在跟踪的缺陷统一写入 [问题与限制](open-issues.md)。功能转正后，将其稳定行为和契约并入对应正式文档，并删除 impl 过程说明。
-当前有效版本集中在 [架构](architecture.md)，样本身份与数量集中在[样本台账](schema/sample-corpus.md)，未关闭缺陷与已接受限制集中在 [问题与限制](open-issues.md)。
-Open defect 关闭后删除条目；已接受限制状态变化时原地更新边界；将实现后的行为写入对应规格、架构或 Schema。
-证据更新时原地替换状态和来源，不按日期追加试验流水。
-
-格式文档区分三种陈述：已登记样本中的观察、当前 parser/render 行为、来源尚不足的语义。
-来源不足的语义在正文中标注为当前限制或未覆盖能力，不再另设核验任务清单；正文可说明当前限制，但不另设未来开发章节。
-
-命令在 [验证](validation.md) 与 [架构](architecture.md) 中维护。
-文档变更应检查内部链接、源码路径、匿名化、重复定义与样本/研究资产是否被意外修改。
+- 修改内部机制：更新对应 `architecture/` 文档，并确认[分层](architecture/layers.md)/[缓存](architecture/caches.md)是否受影响。
+- 修改分类/目录：更新 `engineering/catalogs/` 与领域测试，不把新规则写进 UI 或 parser。
+- 修改 XML primitive：更新[XML primitive](schema/xml-primitives.md)与[XML MOD](schema/substation-mod.md)的引用，保留“解析成功≠可渲染”的边界。
+- 修改持久化含义：只 bump 受影响域，更新[缓存域](architecture/caches.md)，不复制旧版本。
+- 文档变更：检查相对链接、源码路径、匿名化、重复定义，以及样本/研究资产是否被意外修改。

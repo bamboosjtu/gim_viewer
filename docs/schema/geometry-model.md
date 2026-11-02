@@ -111,5 +111,5 @@ PHM 可引用 MOD、STL 或混合。没有证据表明它们固定构成某种 L
 
 ## 实现与验证边界
 
-[devParser](../../desktop/src/gim/geometry/devParser.ts)、[phmParser](../../desktop/src/gim/geometry/phmParser.ts)、[sourceGraph](../../desktop/src/gim/geometry/substationSourceGraph.ts)负责原始结构与来源关系；运行时和缓存消费见 [架构](../architecture.md)。
+[devParser](../../desktop/src/gim/geometry/devParser.ts)、[phmParser](../../desktop/src/gim/geometry/phmParser.ts)、[sourceGraph](../../desktop/src/gim/geometry/substationSourceGraph.ts)负责原始结构与来源关系；XML 图元字段见 [XML primitive](xml-primitives.md)，运行时和缓存消费见 [DEV 几何](../architecture/dev-geometry.md)。
 矩阵、alias 和嵌套数量只在 [台账](sample-corpus.md) 维护。

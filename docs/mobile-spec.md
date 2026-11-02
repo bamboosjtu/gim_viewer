@@ -1,7 +1,7 @@
 # 移动端当前规格
 
 `app/` 实现 Android 输电线路查看应用，基于 Tauri 2、TypeScript/Vite 和 MapLibre。
-需求与验收基准是 [软件规格说明](../app/软件规格说明.md)，UI 参考[响应式设计](../app/输电线路GIM地图应用响应式设计展示.png)。当前 minSdk 29、targetSdk 36。构建方法见 [App README](../app/README.md)。移动端验收条件按 [验证](validation.md#移动端验证) 执行；移动端未关闭缺陷与已接受限制见 [问题与限制](open-issues.md)。
+需求与验收基准是 [软件规格说明](../app/软件规格说明.md)，UI 参考[响应式设计](../app/输电线路GIM地图应用响应式设计展示.png)。当前 minSdk 29、targetSdk 36。构建方法见 [App README](../app/README.md)。移动端验收条件按 [验证](validation.md#5-移动端验证) 执行；移动端未关闭缺陷与已接受限制见 [问题与限制](open-issues.md)。
 
 ## 当前能力
 
@@ -37,7 +37,7 @@ CROSS 按自身 FAM 键/展示标签识别电力线、房屋、树木、公路�
 
 属性投影限于业务对象自身 CBM、DEV 及其 FAM；装配体子零件保留完整来源引用，不把螺栓/金具属性混入杆塔属性。原始 FAM 文本仍可逐文件查阅。`Tower_Device` 也用于基础和绝缘子；杆塔自身设备优先按 `TOWER*` 引用确定，缺少该引用时使用声明的 DEV 类型或 HNum 能力证据，不能仅凭实体名合并其属性。
 
-缓存身份包含 SHA、大小及 parser 契约，HNum 预览使用独立契约；有效版本集中维护于 [当前缓存域](architecture.md#当前缓存域)。版本变动不修改桌面 parser 标记。原生 SQLite 保存文本 entries、语义 JSON 与预览 JSON，事务提交后才设置完成标记。启动清理未完成导入；“我的工程”只列已完成工程。打开缓存前重新读取私有原包的 magic、大小与完整 SHA，缓存不能覆盖源类型或掩盖源包替换。然后检查 SQLite 语义表完整性、版本、对象 ID 唯一性及数量。语义无效时重新投影；SQLite 缺失或损坏时校验私有原包 SHA，再有界解压重建数据库。原包身份不符时明确失败，不覆盖原包。重建完成前不替换正式数据库。
+缓存身份包含 SHA、大小及 parser 契约，HNum 预览使用独立契约；有效版本集中维护于[缓存域](architecture/caches.md)。版本变动不修改桌面 parser 标记。原生 SQLite 保存文本 entries、语义 JSON 与预览 JSON，事务提交后才设置完成标记。启动清理未完成导入；“我的工程”只列已完成工程。打开缓存前重新读取私有原包的 magic、大小与完整 SHA，缓存不能覆盖源类型或掩盖源包替换。然后检查 SQLite 语义表完整性、版本、对象 ID 唯一性及数量。语义无效时重新投影；SQLite 缺失或损坏时校验私有原包 SHA，再有界解压重建数据库。原包身份不符时明确失败，不覆盖原包。重建完成前不替换正式数据库。
 
 ```text
 filesDir/projects/<sha256>/
@@ -84,4 +84,4 @@ API 36 Pixel Fold profile 已通过 line02 的 Release SAF 导入；诊断构建
 
 Release APK 另通过 API 29/36 的启动、缓存恢复和真实 SAF 输入检查，使用内部测试证书签名。
 
-具体测试方法见 [验证](validation.md#移动端验证)，剩余设备与错误路径见 [问题与限制](open-issues.md)。
+具体测试方法见 [验证](validation.md#5-移动端验证)，剩余设备与错误路径见 [问题与限制](open-issues.md)。
