@@ -5,8 +5,9 @@ import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { chooseDeviceLod, deviceViewMetrics, createDeviceViewContext, type DeviceLod } from '../viewer/devLodPolicy.js';
 import { ByteLru, RevisionSet } from '../utils/byteLru.js';
-import { collectCbmDeviceInstances, parseCbmTransformMatrix, ensureGeometryLayers } from './modAutoLoadService.js';
-import { DevGlbTemplate, createLegacyEquivalentPlacementMatrix, validateDevGlbTemplate } from './devGlbTemplateRuntime.js';
+import { ensureGeometryLayers } from './modAutoLoadService.js';
+import { getSourceGeometryOccurrences } from './sourceGeometryService.js';
+import { DevGlbTemplate, createSourcePlacementMatrix, validateDevGlbTemplate } from './devGlbTemplateRuntime.js';
 import { parseDevGlbAsset, type DevGlbSerializationResult } from './glbCacheService.js';
 import { createDevGeometryPreprocessor, type DevGeometryPreprocessor } from './devGeometryWorkerClient.js';
 import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
@@ -16,7 +17,7 @@ import { readCachedEntry } from '@desktop/database.js';
 import { batchReadCachedFiles } from '@desktop/database.js';
 import { perfCurrentSession, perfMark, perfMarkProductMoment, perfMeasureTaskPhase, perfRecordTaskPhase, type PerfTaskIdentity } from '../utils/perfTimings.js';
 import { diagnosticForFailure, diagnosticFromSerialization, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
-import { resetModHighlight, highlightModGroups } from '../viewer/highlight.js';
+import { resetModHighlight, addModHighlightGroup, removeModHighlightGroup } from '../viewer/highlight.js';
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import { WorkQueue } from '../utils/workQueue.js';
 import { startSubstationResourceMonitor } from './substationResourceTelemetry.js';
@@ -30,7 +31,7 @@ import { findFileByPath } from '../gim/fileLookup.js';
 interface CachedTemplate { result: DevGlbSerializationResult; sha: string; sourceInvalid?: { message: string; evidence: string } }
 interface TemplateRow { bounds: THREE.Box3; template: DevGlbTemplate; sha: string; status: DevGlbSerializationResult['status']; diagnostics: DevGlbSerializationResult['diagnostics']; task?: PerfTaskIdentity }
 interface CacheDecision { key: string; devPath: string; lod: DeviceLod; status: DevArtifactReadStatus | 'compiled' | 'write-failed'; reason?: string }
-interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; sourceGeometryBounds?:number[]; pickBounds?: THREE.Box3; pickLocalBounds?: THREE.Box3; desired: DeviceLod | null; browseDesired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
+interface Occurrence { entry: DevSpatialOccurrence; inView: boolean; box: THREE.Box3 | null; pickBounds?: THREE.Box3; pickLocalBounds?: THREE.Box3; desired: DeviceLod | null; browseDesired: DeviceLod | null; displayed: DeviceLod; geometryStatus?: DevGlbSerializationResult['status']; group?: THREE.Group; key?: string; failedKey?: string }
 interface ReadinessContribution {
   visible: boolean;
   finished: boolean;
@@ -97,7 +98,7 @@ type MemoryPressure = 'unknown' | 'normal' | 'high' | 'critical';
 const pressureRank = (pressure: MemoryPressure): number => ({ unknown: -1, normal: 0, high: 1, critical: 2 }[pressure]);
 const maxMemoryPressure = (left: MemoryPressure, right: MemoryPressure): MemoryPressure =>
   pressureRank(left) >= pressureRank(right) ? left : right;
-const normalize = (path: string) => /^dev\//i.test(path.replace(/\\/g, '/')) ? path.replace(/\\/g, '/') : `DEV/${path}`;
+const normalize = (path: string) => path.replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
 const hash = async (bytes: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))].map(v => v.toString(16).padStart(2, '0')).join('');
 const belongsTo = (object: THREE.Object3D, root?: THREE.Object3D) => {
   for (let parent: THREE.Object3D | null = object; parent; parent = parent.parent) if (parent === root) return true;
@@ -138,7 +139,7 @@ export class DevLodRuntime {
     instancing: null as null | ({enabled: boolean} & DevInstanceBatches['statistics']),
     browseState: 'loading' as 'loading' | 'browseable' | 'base-settled' | 'partial',
     fineFailures: [] as string[],
-    anchorReady: false, errors: [] as string[], fingerprints: [] as Record<string, unknown>[] };
+    anchorReady: false, sourcePlacementWarnings: 0, errors: [] as string[], fingerprints: [] as Record<string, unknown>[] };
   private readonly perf = perfCurrentSession();
   private taskSequence = 0;
   private taskIdentity(sourcePath: string, kind: string, lod?: DeviceLod, priority?: number): PerfTaskIdentity {
@@ -220,13 +221,6 @@ export class DevLodRuntime {
   private templateWaiters = new Map<string, { queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
   private templateQueue = new WorkQueue<{ queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
   private rows = new Map<string, Occurrence>();
-  /** Semantic consumers reuse the already prepared catalogue, without GLB or scene work. */
-  *getBusinessOccurrences():IterableIterator<Readonly<DevSpatialOccurrence>> {for(const row of this.rows.values())yield row.entry;}
-  /** Fixed L0 representation bounds, in absolute source metres/Z-up. Catalog
-   * bounds can be unknown even though the displayed template is measurable. */
-  *getBusinessShapes():IterableIterator<import('../gim/businessTree.js').BusinessShape> {
-    for(const row of this.rows.values()){const b=row.sourceGeometryBounds;if(b)yield {objectKey:row.entry.rootOccurrence,min:[b[0],b[1],b[2]],max:[b[3],b[4],b[5]],evidence:'geometry'};}
-  }
   /** Readiness is maintained on row state transitions rather than scanning the
    * full occurrence map on every status refresh.  A bounded opt-in audit can
    * still recompute the counters to catch future transition omissions. */
@@ -636,7 +630,7 @@ export class DevLodRuntime {
         }
         if (this.current() && !pressured()) await flush();
         return loaded;
-      });
+      }, this.sourceFiles!.keys());
       if (!this.current() || pressured()) return;
       this.worker.installSources(prepared);
       perfMark('DEV missing-template source workset', {dev, entries:prepared.size, admittedBytes:this.missedSourceBytes-before,
@@ -667,7 +661,9 @@ export class DevLodRuntime {
     }
     // Healthy warm catalogs do not preload sources. Missing derived catalogs
     // use the same bounded immutable File workset as freshly extracted sources.
-    const seeds = collectCbmDeviceInstances(this.state.currentCbmTree);
+    const seeds = await getSourceGeometryOccurrences(this.state, this.session);
+    if (!this.current()) return;
+    this.diagnostics.sourcePlacementWarnings = this.state.engineeringGeometryCatalog?.diagnostics.length ?? 0;
     const preparingSources = this.state.currentFiles ? this.prepareSources(files) : null;
     this.sourceFiles = files;
     // Preparation is optional and overlaps worker initialization/base work.
@@ -686,9 +682,9 @@ export class DevLodRuntime {
     for (const seed of seeds) {
       const dev = normalize(seed.devPath), list = byDev.get(dev) ?? []; list.push(seed); byDev.set(dev, list);
       const row: Occurrence = { entry: { devPath: dev, sourceBounds: null, boundsQuality: 'unknown', primitiveCounts: {}, unsupportedTypes: [],
-        instanceKey: `dev:${dev}#${seed.path}`, rootOccurrence: seed.path, placementMatrix: parseCbmTransformMatrix(seed.transformMatrix), templateStatus: 'unrequested' },
+        instanceKey: `dev:${dev}#${seed.id}`, rootOccurrence: seed.id, placementMatrix: seed.placementMatrix, templateStatus: 'unrequested' },
         inView: true, box: null, desired: 0, browseDesired: 0, displayed: 0 };
-      this.rows.set(seed.path, row);
+      this.rows.set(seed.id, row);
       this.updateReadiness(row);
     }
     this.diagnostics.occurrences = seeds.length;
@@ -745,18 +741,18 @@ export class DevLodRuntime {
       this.diagnostics.absoluteConeCount += bounds.absoluteConeCount ?? 0;
       const emptySource = !bounds.diagnostic && bounds.boundsQuality === 'empty';
       for (const seed of instances) {
-        const matrix = parseCbmTransformMatrix(seed.transformMatrix);
-        const entry: DevSpatialOccurrence = { ...bounds, instanceKey: `dev:${dev}#${seed.path}`, rootOccurrence: seed.path,
+        const matrix = seed.placementMatrix;
+        const entry: DevSpatialOccurrence = { ...bounds, instanceKey: `dev:${dev}#${seed.id}`, rootOccurrence: seed.id,
           placementMatrix: matrix, templateStatus: 'unrequested' };
         const box = bounds.sourceBounds ? boxTuple(bounds.sourceBounds).applyMatrix4(
-          (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(createLegacyEquivalentPlacementMatrix(matrix))) : null;
-        const row = this.rows.get(seed.path)!;
+          (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(createSourcePlacementMatrix(matrix))) : null;
+        const row = this.rows.get(seed.id)!;
         row.entry = { ...entry, templateStatus: emptySource ? 'empty' : row.entry.templateStatus }; row.box = box;
-        this.viewIndex.set(seed.path, box);
+        this.viewIndex.set(seed.id, box);
         this.updateReadiness(row);
         if (emptySource) this.diagnostics.emptyOccurrences++;
         if (bounds.boundsQuality === 'unknown') {
-          this.diagnostics.unknownBounds++; this.state.deviceUnknownBounds.add(seed.path);
+          this.diagnostics.unknownBounds++; this.state.deviceUnknownBounds.add(seed.id);
         }
       }
       if (emptySource) {
@@ -765,7 +761,7 @@ export class DevLodRuntime {
       }
       this.diagnostics.directoryCompleted += instances.length;
       this.requestReady();
-      if (instances.some(seed => seed.path === this.selected)) void this.select(this.selected).catch(error => console.warn('[DEV selected]', error));
+      if (instances.some(seed => seed.id === this.selected)) void this.select(this.selected).catch(error => console.warn('[DEV selected]', error));
     };
     const CATALOG_CONCURRENCY = Math.max(32, this.worker.workerCount * 8);
     // Warm start: one bounded native batch per 64 DEV instead of one IPC per
@@ -838,7 +834,7 @@ export class DevLodRuntime {
     this.anchor = matrix.clone(); this.diagnostics.anchorReady = true;
     this.finishAnchor();
     for (const row of this.rows.values()) {
-      const placement = matrix.clone().multiply(createLegacyEquivalentPlacementMatrix(row.entry.placementMatrix));
+      const placement = matrix.clone().multiply(createSourcePlacementMatrix(row.entry.placementMatrix));
       row.box = row.entry.sourceBounds ? boxTuple(row.entry.sourceBounds).applyMatrix4(placement) : null;
       this.viewIndex.set(row.entry.rootOccurrence, row.box);
       if (row.group) { row.group.matrix.copy(placement); row.group.updateMatrixWorld(true); }
@@ -860,7 +856,10 @@ export class DevLodRuntime {
   }
   private applyOnlySelected(): void {
     for (const [key, row] of this.rows) {
-      if (row.group) row.group.visible = !this.onlySelected || (this.state.businessSelectionRoots?.has(row.entry.rootOccurrence ?? key) ?? (row.entry.rootOccurrence ?? key) === this.selected);
+      if (row.group) {
+        row.group.visible = !this.onlySelected || (this.state.engineeringSelection?.devRoots.has(row.entry.rootOccurrence ?? key) ?? (row.entry.rootOccurrence ?? key) === this.selected);
+        this.state.engineeringGeometryFilter?.(row.group);
+      }
     }
     this.instances?.sync();
   }
@@ -1139,24 +1138,24 @@ export class DevLodRuntime {
     if (!this.current() || row.desired !== lod || row.key === key) return;
     const started = performance.now();
     perfRecordTaskPhase(trace, 'sceneCommitQueue', started - commitQueuedAt, this.perf);
-    const group = template.template.createPlacement({ contract: 'source-template', rootOccurrence: row.entry.rootOccurrence,
+    const group = template.template.createPlacement({ rootOccurrence: row.entry.rootOccurrence,
       instanceKey: row.entry.instanceKey, placementMatrix: row.entry.placementMatrix, projectSourceToViewerMatrix: this.anchor });
     const worldBounds = template.bounds.clone().applyMatrix4(group.matrix);
     const invalidPlacement = ![...worldBounds.min.toArray(), ...worldBounds.max.toArray()].every(Number.isFinite) ? 'non-finite-placement' : Math.max(...worldBounds.getSize(new THREE.Vector3()).toArray()) > GEOMETRY_MAX_EXTENT_M ? 'oversized-placement' : null;
     if (invalidPlacement) { group.clear(); throw Error(`DEV placement rejected: ${row.entry.rootOccurrence}: ${invalidPlacement}`); }
-    if(lod===0)row.sourceGeometryBounds=tupleBox(template.bounds.clone().applyMatrix4(createLegacyEquivalentPlacementMatrix(row.entry.placementMatrix)))??undefined;
     group.userData.deviceLod = lod;
     group.name = row.entry.instanceKey;
     const highlighted = this.state.highlightedModState?.groups.filter(object => belongsTo(object, row.group)) ?? [];
     const highlightScopes = highlighted.map(object => object === row.group ? null : { devPath: object.userData.devPath, assemblyPath: object.userData.assemblyPath, referencePath: object.userData.referencePath });
-    if (highlighted.length) resetModHighlight(this.state);
+    for (const object of highlighted) removeModHighlightGroup(this.state, object);
     if (row.group) this.instances?.remove(row.group);
     this.state.modRootGroup!.add(group); row.group?.removeFromParent();
     if (row.key) { const count = (this.displayedPins.get(row.key) ?? 1) - 1; if (count) this.displayedPins.set(row.key, count); else { this.displayedPins.delete(row.key); if (!this.placementUsers.has(row.key)) this.pinKeys.delete(row.key); } }
     this.displayedPins.set(key, (this.displayedPins.get(key) ?? 0) + 1);
     row.group = group; row.pickLocalBounds = template.bounds; row.pickBounds = worldBounds;
     row.key = key; row.displayed = lod; row.entry.templateStatus = 'ready';
-    group.visible = !this.onlySelected || (this.state.businessSelectionRoots?.has(row.entry.rootOccurrence) ?? row.entry.rootOccurrence === this.selected);
+    group.visible = !this.onlySelected || (this.state.engineeringSelection?.devRoots.has(row.entry.rootOccurrence) ?? row.entry.rootOccurrence === this.selected);
+    this.state.engineeringGeometryFilter?.(group);
     if (this.batchEnabled) {
       this.instances ??= new DevInstanceBatches(this.state.modRootGroup!);
       this.instances.add(group, lod < 2);
@@ -1164,14 +1163,15 @@ export class DevLodRuntime {
     row.geometryStatus = template.status; row.failedKey = undefined;
     this.updateReadiness(row);
     this.state.loadedXmlModGroups.set(row.entry.instanceKey, group);
-    if (highlighted.length) {
+    if (highlighted.length && !this.state.engineeringSelection) {
       const replacements: THREE.Object3D[] = [];
       group.traverse(object => {
         if (replacements.some(parent => belongsTo(object, parent))) return;
         if (highlightScopes.some(scope => scope ? Object.entries(scope).every(([field,value]) => object.userData[field] === value) : object === group)) replacements.push(object);
       });
-      highlightModGroups(this.state, replacements);
+      replacements.forEach(object => addModHighlightGroup(this.state, object));
     }
+    this.state.engineeringRepresentationChanged?.(row.entry.rootOccurrence);
     if (this.diagnostics.fingerprints.length < 64 || row.entry.rootOccurrence === this.selected) {
       const local = template.bounds, world = worldBounds;
       const fingerprint = { sourceSha: this.session.sourceSha256, devPath: row.entry.devPath, instanceKey: row.entry.instanceKey, lod,
@@ -1316,7 +1316,7 @@ export class DevLodRuntime {
       + this.diagnostics.lodInvalid.reduce((a,b)=>a+b,0)
       + this.diagnostics.artifactWriteFailures;
     this.status(
-      `几何实例已处理 ${finished}/${total} · 已显示 ${this.diagnostics.readyOccurrences} · 冷编译 L0 ${cold[0]}/L1 ${cold[1]}/L2 ${cold[2]} · 缓存命中 L0 ${warm[0]}/L1 ${warm[1]}/L2 ${warm[2]}${failedCount ? ` · 失败 ${failedCount}` : ''} · ${phase}${background}`,
+      `几何实例已处理 ${finished}/${total} · 已显示 ${this.diagnostics.readyOccurrences} · 冷编译 L0 ${cold[0]}/L1 ${cold[1]}/L2 ${cold[2]} · 缓存命中 L0 ${warm[0]}/L1 ${warm[1]}/L2 ${warm[2]}${failedCount ? ` · 失败 ${failedCount}` : ''} · ${phase}${background}${this.diagnostics.sourcePlacementWarnings ? ` · 来源位置待确认 ${this.diagnostics.sourcePlacementWarnings}` : ''}`,
       `LOD缓存 miss ${this.diagnostics.cacheMisses} · read-error ${this.diagnostics.cacheReadErrorCount} · invalid ${this.diagnostics.cacheInvalidCount} · 写入失败 ${this.diagnostics.artifactWriteFailures}`
         + ` · 目录 ${this.diagnostics.directoryCompleted}/${total}${this.diagnostics.catalogReady?'（就绪）':'（进行中）'}`
         + ` · 批读 ${this.diagnostics.cacheReadBatches} 批/${this.diagnostics.cacheReadEntries} 条（defer ${this.diagnostics.cacheReadDeferred}）`

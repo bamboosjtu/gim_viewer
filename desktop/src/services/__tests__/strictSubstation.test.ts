@@ -5,15 +5,20 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { GeometryCacheManifestEntry } from '@desktop/database.js';
 import * as THREE from 'three';
+import { collectEquipmentGeometryOccurrences } from '../../gim/equipmentGeometryOccurrences.js';
+import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
+import { collectSourceGeometryOccurrences } from '../../gim/engineering/geometryOccurrences.js';
+import { packEngineeringSource, unpackEngineeringSource } from '../engineeringSourceCodec.js';
+import { hydrateSubstationGeometryGraph } from '../../gim/geometry/substationSourceGraph.js';
 import { buildCbmTree } from '../../gim/cbmParser.js';
 import { discoverIfcFromCBM } from '../../gim/gimIndexer.js';
 import { parseFileDevRelation } from '../../gim/fileDevParser.js';
 import { parseFamSectionsWithDiagnostics } from '../../gim/famParser.js';
-import { buildSubstationAliasIndex, discoverSubstationGlSidecars, deviceOccurrenceScope, devAssemblyPath } from '../../gim/substationEvidence.js';
+import { buildSubstationAliasIndex, discoverSubstationGlSidecars, devAssemblyPath } from '../../gim/substationEvidence.js';
 import { buildGimIndexPayload, buildGeometryRefsPayload } from '../gimIndexPersistenceService.js';
 import { restoreGimIndexToState } from '../gimIndexRestoreService.js';
-import { collectCbmDeviceInstances, tryDevGlbFastPath, loadScopedRawFallbackGeometry, diagnoseGroupBBox } from '../modAutoLoadService.js';
-import { discoverGeometriesFromDevPath, discoverGeometriesFromNode } from '../modGeometryDiscovery.js';
+import { tryDevGlbFastPath, loadScopedRawFallbackGeometry, diagnoseGroupBBox } from '../modAutoLoadService.js';
+import { discoverGeometriesFromDevPath } from '../modGeometryDiscovery.js';
 import { serializeDevToGlbDetailed, parseDevGlbAsset, loadDevGlb, InvalidDevGeometryError } from '../glbCacheService.js';
 import { applyPlacementTransformToSceneUnits } from '../../viewer/xmlModLoader.js';
 import { DevGlbTemplatePool } from '../devGlbTemplateRuntime.js';
@@ -55,7 +60,7 @@ function aliasShape(tree: Parameters<typeof buildSubstationAliasIndex>[0]) {
   return [...aliases.partToOccurrences].map(([path, nodes]) => [path, nodes.map((n) => n.path)]).sort();
 }
 function verifyPhysicalAliases(tree: Parameters<typeof buildSubstationAliasIndex>[0]) {
-  const aliases=buildSubstationAliasIndex(tree),roots=new Set(collectCbmDeviceInstances(tree).map(n=>n.path));
+  const aliases=buildSubstationAliasIndex(tree),roots=new Set(collectEquipmentGeometryOccurrences(tree).map(n=>n.id));
   for (const [path,candidates] of aliases.partToOccurrences) {
     const owner=aliases.partToRoot.get(path);
     if (!candidates.length) continue;
@@ -79,7 +84,7 @@ for (const [ordinal, sample] of samples.entries()) {
   const available = existsSync(join(root, `${sample.id}.gim`));
   // 04 optional does not gate required 01/02/03. Required ones never use skip.
   if (ordinal === 3 && !available && process.env.GIM_REQUIRE_SUBSTATION04!=='1') { console.info('substation04: optional sample unavailable'); continue; }
-  it(`STRICT ${sample.id}: raw → SQLite → restore → Rust/TS geometry → GLB → raw fallback`, async () => {
+  it(`STRICT ${sample.id}: raw → SQLite source facts → source occurrences → cold/warm geometry → GLB → raw fallback`, async () => {
     expect(available, `required ${sample.id}.gim missing from ${root}`).toBe(true);
     expect(createHash('sha256').update(readFileSync(join(root, `${sample.id}.gim`))).digest('hex')).toBe(sample.sha);
     const dir = existsSync(join(root, sample.dir)) ? join(root, sample.dir) : join(root, sample.id);
@@ -93,7 +98,8 @@ for (const [ordinal, sample] of samples.entries()) {
     const fdr = await parseFileDevRelation(files);
     const index = await buildGimIndexPayload(1, files, ifcs, tree, fdr, undefined, sample.sha);
     const refs = await buildGeometryRefsPayload(1, files, sample.sha);
-    const seeds = collectCbmDeviceInstances(tree);
+    const sourceGraph = await extractEngineeringSourceGraph({ paths: [...files.keys()], readText: async p => files.get(p)!.text() });
+    const seeds = collectSourceGeometryOccurrences(sourceGraph).occurrences;
     const physicalAliases=verifyPhysicalAliases(tree);
     if (sample.id==='substation04') {
       const part='CBM/85401e77-4659-47df-847b-ec4d4e8a319d.cbm';
@@ -104,7 +110,7 @@ for (const [ordinal, sample] of samples.entries()) {
     const byDev = new Map<string, typeof seeds>();
     for (const seed of seeds) { const key = seed.devPath.replace(/^dev\//i, '').toLowerCase(); byDev.set(key, [...(byDev.get(key) ?? []), seed]); }
     const filter = byDev.keys().next().value!;
-    const [sql] = await sqliteRoundTrip([{ index, refs, filter: [filter] }]);
+    const [sql] = await sqliteRoundTrip([{ index, refs }]);
     const state = new AppState();
     restoreGimIndexToState(state, sql.index);
     expect(state.currentIfcEntries).toEqual(ifcs); // first IFC anchor survives SQLite restore
@@ -118,8 +124,9 @@ for (const [ordinal, sample] of samples.entries()) {
       const projected = state.cachedFamProperties.get(path)!;
       expect(projected).toEqual(new Map([...sections].filter(([, map]) => map.size || projected.has('默认'))));
     }
-    const warmSeeds = collectCbmDeviceInstances(state.currentCbmTree);
-    expect(warmSeeds.map((s) => [s.path,s.name,s.devPath,s.transformMatrix])).toEqual(seeds.map((s) => [s.path,s.name,s.devPath,s.transformMatrix]));
+    const restoredGraph = unpackEngineeringSource(packEngineeringSource(sourceGraph)) as typeof sourceGraph;
+    const warmSeeds = collectSourceGeometryOccurrences(restoredGraph).occurrences;
+    expect(warmSeeds).toEqual(seeds);
     expect(aliasShape(state.currentCbmTree)).toEqual(aliasShape(tree));
     verifyPhysicalAliases(state.currentCbmTree);
     const local = new Map<string, Awaited<ReturnType<typeof discoverGeometriesFromDevPath>>>();
@@ -128,20 +135,33 @@ for (const [ordinal, sample] of samples.entries()) {
       const graph = await discoverGeometriesFromDevPath(dev, files, identity, new Set());
       local.set(dev, graph);
       for (const seed of placements) {
-        const cbm = new THREE.Matrix4().fromArray(seed.transformMatrix!.split(',').map(Number));
+        const cbm = new THREE.Matrix4().fromArray(seed.placementMatrix);
         for (const geo of [...graph.mods,...graph.stls]) {
-          coldLeaves.push(canonicalLeaf(seed.path,geo.assemblyPath!,geo.referencePath!, 'modPath' in geo ? geo.modPath : geo.stlPath,
+          coldLeaves.push(canonicalLeaf(seed.id,geo.assemblyPath!,geo.referencePath!, 'modPath' in geo ? geo.modPath : geo.stlPath,
             cbm.clone().multiply(new THREE.Matrix4().fromArray(geo.placementTransformMatrix)).toArray(),geo.phmColor));
         }
       }
     }
-    const rustLeaves = sql.reachable.map((r) => canonicalLeaf(r.root_occurrence!,r.assembly_path!,r.reference_path!,r.geometry_path,
-      r.placement_transform_matrix!.split(',').map(Number), r.phm_color ? (() => { const [r1,g,b,a] = r.phm_color.split(',').map(Number); return {r:r1,g,b,a}; })() : null));
-    const sorted = (rows: typeof coldLeaves) => rows.sort((a,b) => `${a.rootOccurrence}${a.referencePath}`.localeCompare(`${b.rootOccurrence}${b.referencePath}`));
-    expect(sorted(rustLeaves)).toEqual(sorted(coldLeaves));
-    expect(sql.reachable.map((r) => r.instance_key).sort()).toEqual(coldLeaves.map((r) => `raw:${r.rootOccurrence}${r.referencePath}`).sort());
+    // Persisted source rows retain their original references and transforms;
+    // the database no longer invents physical roots from its old CBM projection.
+    const order = <T extends {sort_order:number}>(rows:T[], field:keyof T) => [...rows].sort((a,b) =>
+      String(a[field]) < String(b[field]) ? -1 : String(a[field]) > String(b[field]) ? 1 : a.sort_order-b.sort_order);
+    expect(sql.refs.dev_solid_models).toEqual(order(refs.dev_solid_models,'dev_path'));
+    expect(sql.refs.dev_sub_devices).toEqual(order(refs.dev_sub_devices,'dev_path'));
+    expect(sql.refs.phm_solid_models).toEqual(order(refs.phm_solid_models,'phm_path'));
+    const warmFiles = await hydrateSubstationGeometryGraph(seeds.map(row=>row.devPath), async paths =>
+      new Map(paths.filter(path=>files.has(path)).map(path=>[path,files.get(path)!])), files.keys());
+    const warmLeaves: typeof coldLeaves = [];
+    for (const [dev,placements] of byDev) {
+      const local = await discoverGeometriesFromDevPath(dev,warmFiles,identity,new Set());
+      for (const seed of placements) for (const leaf of [...local.mods,...local.stls])
+        warmLeaves.push(canonicalLeaf(seed.id,leaf.assemblyPath!,leaf.referencePath!,'modPath' in leaf?leaf.modPath:leaf.stlPath,
+          new THREE.Matrix4().fromArray(seed.placementMatrix).multiply(new THREE.Matrix4().fromArray(leaf.placementTransformMatrix)).toArray(),leaf.phmColor));
+    }
+    const sorted = (rows: typeof coldLeaves) => rows.sort((a,b)=>`${a.rootOccurrence}${a.referencePath}`.localeCompare(`${b.rootOccurrence}${b.referencePath}`));
+    expect(sorted(warmLeaves)).toEqual(sorted(coldLeaves));
     const sidecars = discoverSubstationGlSidecars(files.keys(),tree);
-    for (const sidecar of sidecars) expect(sql.reachable.some((r) => r.geometry_path.toLowerCase() === sidecar.path.toLowerCase())).toBe(false);
+    for (const sidecar of sidecars) expect(coldLeaves.some(row=>row.path.toLowerCase()===sidecar.path.toLowerCase())).toBe(false);
     const statuses: Record<string, number> = { complete: 0, partial: 0, empty: 0, unsupported: 0, sourceInvalid: 0, transientFailed: 0 };
     const cache = mkdtempSync(join(tmpdir(), `gim-${sample.id}-glb-`));
     const persisted: GeometryCacheManifestEntry[] = [];
@@ -198,8 +218,8 @@ for (const [ordinal, sample] of samples.entries()) {
           const fallback = await loadScopedRawFallbackGeometry(fallbackState,scene,() => {},[path],true,true,
             session.geometryToken,session.generation,session.projectId,session.sourceSha256,session,fast.profile,files,seeds);
           expect(fallback.modCount+fallback.stlCount).toBeGreaterThan(0);
-          const expectedRoots = new Set(placements.map((seed) => seed.path));
-          const expectedKeys = new Set(sql.reachable.filter((r) => expectedRoots.has(r.root_occurrence!)).map((r) => r.instance_key));
+          const expectedRoots = new Set(placements.map((seed) => seed.id));
+          const expectedKeys = new Set(coldLeaves.filter(row=>expectedRoots.has(row.rootOccurrence)).map(row=>`raw:${row.rootOccurrence}${row.referencePath}`));
           for (const [key,group] of [...fallbackState.loadedXmlModGroups,...fallbackState.loadedStlGroups]) {
             expect(expectedKeys.has(key)).toBe(true);
             expect(expectedRoots.has(group.userData.rootOccurrence)).toBe(true);
@@ -208,8 +228,8 @@ for (const [ordinal, sample] of samples.entries()) {
           const count = fallbackState.loadedXmlModGroups.size+fallbackState.loadedStlGroups.size;
           for (const seed of placements) {
             const box = new THREE.Box3();
-            collectDeviceGroups(fallbackState,dev,{rootOccurrence:seed.path}).forEach((g) => box.expandByObject(g));
-            fallbackBoxes.set(seed.path,box);
+            collectDeviceGroups(fallbackState,dev,{rootOccurrence:seed.id}).forEach((g) => box.expandByObject(g));
+            fallbackBoxes.set(seed.id,box);
           }
           await loadScopedRawFallbackGeometry(fallbackState,scene,() => {},[path],true,true,
             session.geometryToken,session.generation,session.projectId,session.sourceSha256,session,fast.profile,files,seeds);
@@ -223,16 +243,16 @@ for (const [ordinal, sample] of samples.entries()) {
         expect(prepared?.kind).toBe('shared');
         if (prepared?.kind !== 'shared') throw new Error(`Non-shareable actual GLB: ${dev}`);
         for (const seed of placements) {
-          const group = prepared.template.createPlacement({ rootOccurrence: seed.path, instanceKey: `dev:${dev}#${seed.path}`, placementMatrix: seed.transformMatrix!.split(',').map(Number) });
+          const group = prepared.template.createPlacement({ rootOccurrence: seed.id, instanceKey: `dev:${dev}#${seed.id}`, placementMatrix: seed.placementMatrix });
           theoreticalRecoverableOccurrences++;
           if (!diagnoseGroupBBox(group,dev,{disposeOnFailure:false})) {
             rejectedOccurrences++;
             continue;
           }
-          state.loadedXmlModGroups.set(seed.path,group);
-          expect(collectDeviceGroups(state,dev,deviceOccurrenceScope(state.currentCbmTree,seed))).toEqual([group]);
+          state.loadedXmlModGroups.set(seed.id,group);
+          expect(collectDeviceGroups(state,dev,{rootOccurrence:seed.id})).toEqual([group]);
           if (dev === damagedDev) {
-            const box = new THREE.Box3().setFromObject(group), rawBox = fallbackBoxes.get(seed.path)!;
+            const box = new THREE.Box3().setFromObject(group), rawBox = fallbackBoxes.get(seed.id)!;
             box.min.toArray().forEach((v,i) => expect(v).toBeCloseTo(rawBox.min.toArray()[i],3));
             box.max.toArray().forEach((v,i) => expect(v).toBeCloseTo(rawBox.max.toArray()[i],3));
           }
@@ -267,9 +287,9 @@ for (const [ordinal, sample] of samples.entries()) {
     // One DEV's cache absence/corruption falls back using the same occurrence keys,
     // matrices and colors from the actual source files, including child closure.
     const fallbackSeed = byDev.get(filter)![0];
-    const fallback = await discoverGeometriesFromNode(fallbackSeed,files);
-    const filteredRoot = sql.filtered.filter((r) => r.root_occurrence === fallbackSeed.path);
-    expect(filteredRoot.map((r) => r.instance_key).sort()).toEqual([...fallback.mods,...fallback.stls].map((g) => g.instanceKey).sort());
+    const fallback = await discoverGeometriesFromDevPath(fallbackSeed.devPath,files,fallbackSeed.placementMatrix,new Set(),0,{instances:0},{rootOccurrence:fallbackSeed.id});
+    const sourceLeaves = coldLeaves.filter(row=>row.rootOccurrence===fallbackSeed.id);
+    expect([...fallback.mods,...fallback.stls].map(row=>row.instanceKey).sort()).toEqual(sourceLeaves.map(row=>`raw:${row.rootOccurrence}${row.referencePath}`).sort());
     const aliases = buildSubstationAliasIndex(tree);
     const repeated = new Map<string, typeof raw>();
     for (const r of raw) { const key = `${r.sourcePath}\0${r.section}\0${r.label}`; repeated.set(key,[...(repeated.get(key) ?? []),r]); }

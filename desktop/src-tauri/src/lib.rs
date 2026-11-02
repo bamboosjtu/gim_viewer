@@ -757,7 +757,6 @@ pub fn run() {
             db::upsert_fragment_cache_record,
             db::validate_fragment_cache,
             db::delete_fragment_cache_record,
-            db::save_line_gim_graph,
             db::get_line_gim_graph,
             db::save_line_graph_begin,
             db::save_line_attrs_chunk,
@@ -771,7 +770,6 @@ pub fn run() {
             db::delete_project_cache,
             db::get_project_diagnostic,
             db::save_geometry_refs,
-            db::get_reachable_geometry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

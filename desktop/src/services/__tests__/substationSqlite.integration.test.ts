@@ -24,12 +24,11 @@ it('retains every physical FAM row through production SQLite save/query/restore'
     { modelId: 'a-second', name: 'later', path: 'CBM/later.ifc' }];
   const index = await buildGimIndexPayload(1, files, ifcs, tree, []);
   const refs = await buildGeometryRefsPayload(1, files);
-  const [warm, migrated] = await sqliteRoundTrip([{ index, refs },{ index, refs, migrate:true }]);
-  expect(migrated.index.fam_properties.map((p) => p.raw_property_json)).toEqual(warm.index.fam_properties.map((p) => p.raw_property_json));
+  const [warm] = await sqliteRoundTrip([{ index, refs }]);
   const state = new AppState();
   restoreGimIndexToState(state, warm.index);
   expect(state.currentIfcEntries).toEqual(ifcs);
-  expect(migrated.index.ifc_models.map(m => m.model_id)).toEqual(ifcs.map(m => m.modelId));
+  expect(warm.index.ifc_models.map(m => m.model_id)).toEqual(ifcs.map(m => m.modelId));
   const parsed = parseFamSectionsWithDiagnostics(text, 'DEV/raw.fam');
   expect(state.cachedFamSourceProperties.get('DEV/raw.fam')).toEqual(parsed.properties);
   expect(warm.index.fam_properties.map((p) => p.source_line)).toEqual([2,3,4,5,7,9]);
@@ -39,7 +38,7 @@ it('retains every physical FAM row through production SQLite save/query/restore'
   expect(warm.index.entries.some((e) => e.entry_path === 'DEV/empty.fam')).toBe(true);
   expect(warm.index.fam_properties.some((p) => p.source_path === 'DEV/empty.fam')).toBe(false);
   expect(state.cachedFamSourceProperties.get('DEV/empty.fam')).toEqual([]);
-  expect(warm.version).toBe('gim-substation-parser-v26');
+  expect(warm.version).toBe('gim-substation-parser-v27');
 }, 60_000);
 
 it('full payload still round-trips through real SQLite', async () => {

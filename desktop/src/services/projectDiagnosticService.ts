@@ -39,6 +39,23 @@ async function collect(state: AppState, session: ProjectLoadSession, perfId: num
     debug: getDebugConfigSnapshot(), basemap: getBasemapStatusSnapshot(), timings: perfSnapshot(),
     webIfcMt: {available: isWebIfcMultiThreadingAvailable()},
     deviceLod: state.deviceLodRuntime?.diagnostics ?? null,
+    engineering: {
+      status: state.engineeringStatus,
+      error: state.engineeringError,
+      cacheStatus: state.engineeringCacheStatus,
+      cacheError: state.engineeringCacheError,
+      complete: state.engineeringSources?.complete ?? false,
+      incompleteReasons: state.engineeringSources?.incompleteReasons ?? [],
+      sourceRecords: state.engineeringSnapshot?.memberships.length ?? 0,
+      wholeCandidates: state.engineeringSnapshot?.entities.length ?? 0,
+      pendingWholes: state.engineeringSnapshot?.pending.length ?? 0,
+      sourceOnly: state.engineeringSnapshot?.memberships.filter(m => m.disposition === 'source_only').length ?? 0,
+      rulesVersion: state.engineeringSnapshot?.rulesVersion ?? null,
+      navigationVersion: state.engineeringNavigation?.version ?? null,
+      navigationCacheHit: state.engineeringNavigationCacheHit,
+      physicalSourceOccurrences: state.engineeringGeometryCatalog?.occurrences.length ?? 0,
+      sourcePlacementWarnings: state.engineeringGeometryCatalog?.diagnostics.length ?? 0,
+    },
   };
 }
 type Snapshot = Awaited<ReturnType<typeof collect>>;

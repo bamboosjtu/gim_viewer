@@ -4,9 +4,15 @@ import type {ViewerContext} from '../viewer/viewerEngine.js';
 import {setSelectionStatus} from '../ui/shell/statusBar.js';
 
 export async function selectViewportDev(ctx: ViewerContext, state: AppState, rootOccurrence: string,
-  instanceKey: string, request: SelectionRequest, showMessage: (text: string) => void): Promise<void> {
+  instanceKey: string, request: SelectionRequest, showMessage: (text: string) => void,
+  hint: import('../engineering/representations.js').DevRepresentationHint = {}): Promise<void> {
   const guard = state.selectionGuard(request);
   if (!guard.isCurrent()) return;
+  request.origin = 'viewport';
+  if (state.currentProjectType === 'substation' || state.engineeringSnapshot) {
+    const { selectEngineeringDevPick } = await import('./engineeringViewportSelection.js');
+    if (!guard.isCurrent() || await selectEngineeringDevPick(state, rootOccurrence, hint, request)) return;
+  }
   const candidates: {node: CbmNode; label: string}[] = [];
   const visit = (node: CbmNode, parents: string[]): void => {
     const trail = [...parents, node.name || node.path];

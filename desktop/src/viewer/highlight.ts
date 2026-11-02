@@ -11,17 +11,18 @@ import { debugLog } from '../utils/logger.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
 import { setDevInstanceHighlight } from './devInstanceBatches.js';
 import { perfBegin } from '../utils/perfTimings.js';
+import { addSelectionOutline, removeSelectionOutline, clearMeshOutlines, clearFragmentOutlines, outlineFragmentItems, SELECTION_AMBER } from './selectionOutline.js';
 
 /** 高亮样式 */
 export const HIGHLIGHT_STYLE: OBCF.MaterialDefinition = {
-  color: new THREE.Color(0x00ccff),
+  color: new THREE.Color(SELECTION_AMBER),
   renderedFaces: OBCF.RenderedFaces.TWO,
-  opacity: 0.6,
+  opacity: 0.08,
   transparent: true,
 };
 
 /** MOD/STL 高亮颜色（与 IFC 高亮保持一致） */
-const HIGHLIGHT_MOD_COLOR = new THREE.Color(0x00ccff);
+const HIGHLIGHT_MOD_COLOR = new THREE.Color(SELECTION_AMBER);
 
 /**
  * 重置 MOD/STL 高亮：恢复所有 mesh 的原始材质并 dispose clone。
@@ -31,6 +32,7 @@ const HIGHLIGHT_MOD_COLOR = new THREE.Color(0x00ccff);
  * 影响其他使用同一共享材质的 mesh。
  */
 export function resetModHighlight(state: AppState): void {
+  clearMeshOutlines(state);
   if (!state.highlightedModState) return;
   const { originalMaterials } = state.highlightedModState;
   for (const [mesh, originalMat] of originalMaterials) {
@@ -56,6 +58,7 @@ export function removeModHighlightGroup(state: AppState, group: THREE.Object3D):
   group.traverse(object => {
     const mesh = object as THREE.Mesh, original = owned.originalMaterials.get(mesh);
     if (!original) return;
+    removeSelectionOutline(state, mesh);
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     if (mesh.material !== original) materials.forEach(material => material.dispose());
     mesh.material = original; setDevInstanceHighlight(mesh, false);
@@ -97,6 +100,7 @@ export function addModHighlightGroup(state: AppState, group: THREE.Object3D): vo
 
     // 保存原始材质引用
     originalMaterials.set(mesh, mesh.material);
+    addSelectionOutline(state, mesh);
 
     // 克隆材质并应用高亮
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
@@ -104,11 +108,9 @@ export function addModHighlightGroup(state: AppState, group: THREE.Object3D): vo
       const cloned = mat.clone();
       // MeshStandardMaterial / MeshPhongMaterial 都有 emissive
       if ('emissive' in cloned) {
-        (cloned as THREE.MeshStandardMaterial).emissive = HIGHLIGHT_MOD_COLOR.clone();
-        (cloned as THREE.MeshStandardMaterial).emissiveIntensity = 0.8;
+        (cloned as THREE.MeshStandardMaterial).emissive.add(HIGHLIGHT_MOD_COLOR.clone().multiplyScalar(.025));
       }
-      cloned.transparent = true;
-      cloned.opacity = 0.85;
+      if ('color' in cloned && (cloned as THREE.MeshStandardMaterial).color?.isColor) (cloned as THREE.MeshStandardMaterial).color.lerp(HIGHLIGHT_MOD_COLOR, .025);
       cloned.needsUpdate = true;
       return cloned;
     });
@@ -148,6 +150,7 @@ export async function commitSelectionHighlight(
     }
     if (!guard.isCurrent()) return;
     resetModHighlight(state);
+    clearFragmentOutlines(state);
     for (const runtime of state.ifcRegionalRuntimes.values()) runtime.clearHighlight();
     await apply?.();
     if (guard.isCurrent()) {
@@ -209,13 +212,13 @@ export async function highlightIfcFromNode(
 
     if (Object.keys(items).length > 0) {
       await commitSelectionHighlight(ctx,state,guard,async () => {
-        await ctx.fragments.highlight(HIGHLIGHT_STYLE, items as any);
+        await outlineFragmentItems(ctx, state, items as any, guard);
         // Bookkeeping includes an already-started apply so the next commit can reset it.
         if (guard.isSessionCurrent()) state.highlightedItems = items as any;
       });
       if (!guard.isCurrent()) return;
       debugLog(DEBUG_IFC_LOAD, `已高亮 ${totalHighlighted} 个 IFC 构件`);
-      if (highlightBoxes.length > 0) {
+      if (highlightBoxes.length > 0 && state.canAutoLocate(request)) {
         const unionBox = highlightBoxes.reduce((acc, b) => acc.union(b), highlightBoxes[0].clone());
         await frameBox(ctx, unionBox, guard);
       }

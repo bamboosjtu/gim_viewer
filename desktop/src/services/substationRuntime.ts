@@ -1,4 +1,4 @@
-import { setConnectionStatus, setIfcStatus } from '../ui/shell/statusBar.js';
+import { setConnectionStatus, setIfcStatus, setSelectionStatus } from '../ui/shell/statusBar.js';
 import type { IfcEntry, CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
@@ -10,7 +10,7 @@ import {
 } from '../gim/ifcSpatialParser.js';
 import { parseFileDevRelation } from '../gim/fileDevParser.js';
 import { buildAndRenderCbmTree } from '../ui/cbmTreeView.js';
-import { restoreBusinessTree, businessFamiliesPublished, prefetchBusinessTree } from './businessTreeService.js';
+import { beginEngineeringBuild, notifyEngineeringIfcEvidence, notifyEngineeringIfcFailure } from './engineeringService.js';
 import { renderFileDevPanel } from '../ui/fileDevView.js';
 import { emptyTipEl } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
@@ -19,7 +19,7 @@ import { isFragmentsCacheEnabled, readIfcOpeningPolicy } from '../config/feature
 import { debugLog } from '../utils/logger.js';
 import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBar.js';
 import type { GimRuntimeOpenContext } from './gimOpenCore.js';
-import { validateGimCache } from '@desktop/database.js';
+import { validateGimCache, type FamPropertyPayload } from '@desktop/database.js';
 import { hydrateNativeSmallFiles } from './nativeSmallFileHydration.js';
 import { buildSubstationSpatialIndexInWorker } from './substationSpatialWorkerClient.js';
 import {
@@ -119,6 +119,20 @@ export function createNodeClickHandler(state: AppState, showMessage: (text: stri
   const session=state.captureProjectSession();
   return (node: CbmNode) => {
     if (!state.isCurrentSession(session)) return;
+    if (state.currentProjectType === 'substation') {
+      const request = state.beginSelection({ kind: 'engineering-source', key: `document:${node.path}` });
+      if (!state.engineeringSources) {
+        state.selectionMessage = '工程来源正在准备，完成后可定位该对象'; setSelectionStatus(state.selectionMessage);
+        void import('./engineeringSelection.js').then(({ clearEngineeringHighlight }) => clearEngineeringHighlight(state, request)); return;
+      }
+      void import('./engineeringCbmSelection.js').then(async ({ selectEngineeringCbmSource }) => {
+        if (state.isCurrentSelection(request) && !await selectEngineeringCbmSource(state, node.path, request) && state.isCurrentSelection(request)) {
+          state.selectionMessage = '该来源尚不能唯一定位，请在来源视图核对'; setSelectionStatus(state.selectionMessage);
+          void import('./engineeringSelection.js').then(({ clearEngineeringHighlight }) => clearEngineeringHighlight(state, request));
+        }
+      }).catch(error => { if (state.isCurrentSelection(request)) { state.selectionMessage = `来源定位未完成：${String(error)}`; setSelectionStatus(state.selectionMessage); } });
+      return;
+    }
     const request=state.beginSelection({kind:'cbm',key:node.path});
     void import('./nodeInteractionService.js').then(({ handleNodeClick }) =>
       handleNodeClick(state,node,showMessage,request),
@@ -151,7 +165,22 @@ export function setupSldGridIdInteraction(
           console.log('[SLD→CBM] gridId 无对应 CBM 节点:', gridId);
           return;
         }
-        // 取首个匹配节点触发联动（高亮 CBM 树 + 加载 IFC + 3D 高亮 + 相机定位）
+        if (state.currentProjectType === 'substation') {
+          if (!state.isCurrentSelection(request)) return;
+          if (!state.engineeringSources) { state.selectionMessage = '工程来源正在准备，完成后可定位单线图对象'; setSelectionStatus(state.selectionMessage); return; }
+          if (nodes.length === 1) {
+            const { selectEngineeringCbmSource } = await import('./engineeringCbmSelection.js');
+            if (state.isCurrentSelection(request)) await selectEngineeringCbmSource(state, nodes[0].path, request);
+          } else {
+            const { clearEngineeringHighlight } = await import('./engineeringSelection.js'); await clearEngineeringHighlight(state, request);
+            const { showSelectionSources } = await import('../ui/selectionSources.js');
+            if (state.isCurrentSelection(request)) showSelectionSources('该单线图对象关联多个来源，请选择要查看的来源', nodes.map(node => ({
+              label: `${node.name || '来源对象'} · ${node.path}`,
+              choose: () => { if (state.isCurrentSelection(request)) createNodeClickHandler(state, showMessage)(node); },
+            })), () => state.isCurrentSelection(request));
+          }
+          return;
+        }
         const { handleNodeClick } = await import('./nodeInteractionService.js');
         if (session && !state.isCurrentSession(session)) return;
         request.target={kind:'cbm',key:nodes[0].path};
@@ -166,6 +195,7 @@ export function setupSldGridIdInteraction(
 }
 
 interface SubstationSemanticOptions {
+  sourcePublication?: Promise<unknown>;
   /**
    * The spatial IFC index is useful for the spatial navigation projection,
    * but it is not part of the minimum CBM/FAM/DEV semantic contract.  Cold
@@ -280,6 +310,7 @@ async function buildAndCommitSubstationSpatialSemantic(
       cbmLinks: spatialIndex.links.length,
     });
     state.substationSpatialIndex = spatialIndex;
+    notifyEngineeringIfcEvidence(state);
     const rebuildMs = Math.max(0, performance.now() - rebuildStarted);
     let writeMs = 0;
     let snapshotBytes = 0;
@@ -326,6 +357,7 @@ async function buildAndCommitSubstationSpatialSemantic(
   } catch (err) {
     if (!state.isCurrentSession(session)) return false;
     state.substationSpatialIndex = null;
+    notifyEngineeringIfcFailure(state, String(err));
     perfMarkProductMoment('spatialSemanticReady', {
       available: false,
       source: 'rebuild',
@@ -360,6 +392,7 @@ async function commitCachedSubstationSpatialSemantic(
     links: result.links,
   }, perfSession);
   state.substationSpatialIndex = result.index;
+  notifyEngineeringIfcEvidence(state);
   if (!state.isCurrentSession(session)) return false;
   await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（空间语义缓存）');
   if (!state.isCurrentSession(session)) return false;
@@ -406,7 +439,13 @@ function scheduleSubstationSpatialSemantic(
   showMessage: (text: string) => void,
   label: string,
   readinessGate: SubstationBackgroundGate = 'allIfcReady',
+  sharedStarter?: () => Promise<boolean>,
 ): void {
+  if (sharedStarter) {
+    coordinator.enqueue({ task: 'spatialSemanticCacheRestore', priority: 1, heavy: false, startAfter: 'interactive',
+      run: async () => { await sharedStarter(); } });
+    return;
+  }
   let cacheMissReason = 'cache-not-tried';
   const enqueueRebuild = (): void => {
     coordinator.enqueue({
@@ -663,12 +702,11 @@ export async function onGimExtracted(
     }
     return spatialSemanticPromise;
   };
+  void beginEngineeringBuild(state, files, { beforeCacheWrite: options.sourcePublication, ensureIfcSemantics: startSpatialSemantic });
   if (options.deferSpatialSemantic) {
-    // The real open path hands this starter to loadAllIfcFiles.  It is not
-    // invoked here: starting the parser would put spatial work back on the
-    // first-IFC critical path even if its promise is not awaited.  A deferred
-    // caller without a starter simply opts out of spatial semantic for this
-    // invocation; there is no safe implicit “start now” fallback.
+    // The entity build and the legacy scene path share this idempotent starter.
+    // Source normalization can request semantics before geometry readiness;
+    // neither caller starts a second IFC semantic parser.
     options.onSpatialSemanticStart?.(startSpatialSemantic);
   } else {
     // Preserve the historical direct-call contract: callers that do not opt
@@ -917,6 +955,7 @@ export async function loadAllIfcFiles(
   if (state.projectSourceToViewerMatrix) connectionPreview.setTransform?.(state.projectSourceToViewerMatrix);
   state.stationOverview = () => {
     if (!state.isCurrentSession(session) || state.currentProjectType === 'transmission_line') return;
+    state.cameraNavigationVersion++;
     void import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
       if (state.isCurrentSession(session)) fitCameraToStationOverview(ctx, state, { force: true, distanceFactor: 1.7 });
     });
@@ -925,7 +964,7 @@ export async function loadAllIfcFiles(
 
   // DEV templates are local, independent of the first IFC's coordinate anchor.
   // Start their bounded worker pool now; the LOD owner delays scene commit.
-  if (state.currentCbmTree && typeof Worker !== 'undefined') {
+  if (state.currentProjectType === 'substation' && typeof Worker !== 'undefined') {
     const { startDeviceLod } = await import('./devLodRuntime.js');
     if (!isCurrent()) return;
     void startDeviceLod(state, ctx, session, (text, detail) => {
@@ -1018,7 +1057,7 @@ export async function loadAllIfcFiles(
     const { restoreTreeState } = await import('./viewStateStore.js');
     restoreTreeState(state);
     if (!isCurrent()) return;
-    if (!state.selectionRequest?.target) {
+    if (!state.selectionRequest?.target && !state.viewerUserInteracted) {
       trackCameraInteraction();
       fitCameraToStationOverview(ctx, state, { distanceFactor: 1.6 });
       scheduleStationOverviewRefit();
@@ -1495,7 +1534,7 @@ async function autoLoadModStlPostIfc(
     }
 
     // DEV is an on-demand geometry domain. Both cold and warm consume the same occurrence/catalog/placement runtime.
-    if (resourceCtx && state.currentCbmTree && typeof Worker !== 'undefined') {
+    if (resourceCtx && state.currentProjectType === 'substation' && typeof Worker !== 'undefined') {
       const { startDeviceLod } = await import('./devLodRuntime.js');
       if (!state.isCurrentSession(session)) return;
       if (!state.currentIfcEntries.length && !state.projectSourceToViewerMatrix) {
@@ -1551,10 +1590,10 @@ async function autoLoadModStlPostIfc(
       if (!result.interrupted && result.rawFallbackDevs.length > 0 && state.currentFiles) {
         try {
           const {
-            collectCbmDeviceInstances,
             loadScopedRawFallbackGeometry,
           } = await import('./modAutoLoadService.js');
-          const fallbackNodes = collectCbmDeviceInstances(state.currentCbmTree);
+          const { getSourceGeometryOccurrences } = await import('./sourceGeometryService.js');
+          const fallbackNodes = await getSourceGeometryOccurrences(state, session);
           scopedRaw = await loadScopedRawFallbackGeometry(
             state,
             scene,
@@ -1732,6 +1771,17 @@ function showLoadingBeforeInteractive(text: string): void {
   if (!substationViewerInteractive) showLoading(text);
 }
 
+/** Semantic publication keeps original FAM rows available to source tools;
+ * it does not launch or invalidate the retired business-tree projection. */
+function publishFamSourceRows(state: AppState, rows: readonly FamPropertyPayload[]): void {
+  const families = new Map<string, import('../gim/famParser.js').FamSourceProperty[]>();
+  for (const row of rows) if (row.raw_property_json) {
+    try { const list = families.get(row.source_path) ?? []; list.push(JSON.parse(row.raw_property_json)); families.set(row.source_path, list); }
+    catch { /* The original database row remains available; malformed JSON is not semantic evidence. */ }
+  }
+  state.cachedFamSourceProperties = families;
+}
+
 export async function openSubstationProject(context: GimRuntimeOpenContext): Promise<void> {
   const { state, session, showMessage } = context;
   const perfSession = perfCurrentSession();
@@ -1758,11 +1808,8 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   }
 
   if (!validation?.valid) showLoading('正在解压并校验 GIM 文件...');
-  state.businessTreeInputVersion=validation?.current_substation_parser_version??'transient';
-  state.businessTreeInputsReady=validation?.valid?validation.substation_properties_complete!==false:!isTauri();
 
   if (validation?.valid) {
-    const businessPreparation=prefetchBusinessTree(state);
     try {
       const { getGimIndex } = await import('@desktop/database.js');
       // 变电工程缓存命中 → 恢复 GIM 索引（原有逻辑）
@@ -1777,6 +1824,10 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       const index = await getGimIndex(context.projectId!);
       if (!state.isCurrentSession(session)) return;
       restoreGimIndexToState(state, index);
+      const { createDiskBackedFile: createEngineeringSourceFile } = await import('@desktop/gimExtract.js');
+      if (!state.isCurrentSession(session)) return;
+      const engineeringFiles = new Map(index.entries.map(entry => [entry.entry_path,
+        createEngineeringSourceFile(context.projectId!, entry.entry_path, entry.file_size)]));
       endRestoreCore(undefined, {
         entries: index.entries.length,
         cbmNodes: index.cbm_nodes.length,
@@ -1785,8 +1836,6 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         famProperties: index.fam_properties.length,
         devProperties: index.dev_properties.length,
       });
-      await restoreBusinessTree(state,businessPreparation);
-      if (!state.isCurrentSession(session)) return;
       await sampleSubstationMemory(state, 'CBM/FAM/DEV/FileDevRelation 后（缓存命中）', perfSession, {
         cbmNodes: index.cbm_nodes.length,
         fileDevRelations: index.file_dev_entries.length,
@@ -1832,9 +1881,8 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         console.warn('[Tauri] 缓存索引中没有文件设备关系');
       }
 
-      // Core semantic is available before restoring IFC spatial semantic.  The
-      // same spatial builder is retained, but it now runs behind the base
-      // navigation/selection path instead of holding first IFC open.
+      // Core navigation is available before optional IFC semantics. Entity
+      // construction and scene navigation share one semantic restore/build.
       markSubstationCoreSemanticReady(state, perfSession, { cacheHit: true });
       await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（core semantic，缓存命中）');
       if (!state.isCurrentSession(session)) return;
@@ -1859,6 +1907,19 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
           createDiskBackedFile(context.projectId!, cachedEntry.entry_path, cachedEntry.file_size),
         );
       }
+
+      let sourceSpatialPromise: Promise<boolean> | undefined;
+      const startSourceSpatial = (): Promise<boolean> => sourceSpatialPromise ??= (async () => {
+        if (!state.isCurrentSession(session)) return false;
+        if (state.substationSpatialIndex) return true;
+        const cached = await readSubstationSpatialSemanticCache(session.projectId, session.sourceSha256, SUBSTATION_PARSER_DOMAIN_VERSION);
+        if (!state.isCurrentSession(session)) return false;
+        if (cached.hit) return commitCachedSubstationSpatialSemantic(state, cached, session, perfSession, showMessage);
+        return buildAndCommitSubstationSpatialSemantic(state, cachedIfcFiles, cachedIfcEntries, cbmTree, fileDevRelations,
+          session, perfSession, showMessage, '变电 IFC 来源语义（缓存重建）',
+          { projectId: session.projectId, sourceSha256: session.sourceSha256, cacheMissReason: cached.reason });
+      })();
+      void beginEngineeringBuild(state, engineeringFiles, { ensureIfcSemantics: startSourceSpatial });
 
       const cachedStdSldEntryPaths = index.entries.map((entry) => entry.entry_path);
       // STD/SLD restore is a feature-local background task.  A missing or
@@ -1886,6 +1947,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
           showMessage,
           '变电 IFC 空间索引（缓存命中）',
           gate,
+          startSourceSpatial,
         );
       };
       const scheduleStdSld = (coordinator: SubstationBackgroundCoordinator): void => {
@@ -1938,7 +2000,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
             }, {
               isCurrent: () => state.isCurrentSession(session),
               saveRest: saveSubstationSemanticRest,
-              onPublished: payload => businessFamiliesPublished(state,payload.fam_properties),
+              onPublished: payload => publishFamSourceRows(state,payload.fam_properties),
               onPhase: (phase, counts) => perfMark(`变电 semantic repair · ${phase}`, { projectId, ...counts }, perfSession),
             });
             if (published && state.isCurrentSession(session)) setCachePublishPhase('ready');
@@ -2000,6 +2062,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
     session,
     {
       deferSpatialSemantic: true,
+      sourcePublication: extractedSource.sourceMaterialization,
       onSpatialSemanticStart: (start) => {
         startSpatialSemantic = start;
       },
@@ -2140,7 +2203,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         const restPublished = await publishSubstationRest(publicationInput, {
           isCurrent,
           saveRest: saveSubstationSemanticRest,
-          onPublished: payload => businessFamiliesPublished(state,payload.fam_properties),
+          onPublished: payload => publishFamSourceRows(state,payload.fam_properties),
           onPhase,
         });
         if (restPublished && isCurrent()) setCachePublishPhase('ready');

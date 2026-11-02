@@ -336,10 +336,10 @@ export class DevGeometryPreprocessor {
   compile(path: string, lod: DeviceLod, key: string, priority: number, traceId?: string): Promise<DevGlbSerializationResult> { return this.request('compile', path, lod, key, priority, traceId); }
   bounds(path: string): Promise<DevSourceBounds> { return this.request('bounds', path, 0, `bounds:${path.toLowerCase()}`, 0.4); }
   promote(key: string, priority: number): void { const slot = this.slots.get(key); if (slot) slot.priority = Math.min(slot.priority, priority); this.pump(); }
-  /** Whole-DEV LOD2 compile used by the progressive GLB serialization path. */
+  /** Whole-DEV browsing compile used by the progressive GLB serialization path. */
   take(path: string): Promise<DevGlbSerializationResult> {
-    const key = `legacy:${path.toLowerCase()}`;
-    return this.compile(path, 2, key, 3).finally(() => this.acknowledge(key));
+    const key = `progressive:${path.toLowerCase()}`;
+    return this.compile(path, 0, key, 3).finally(() => this.acknowledge(key));
   }
   acknowledge(key: string): void {
     const result = this.exported.get(key);

@@ -91,6 +91,7 @@ it('full raw auto load retains occurrence ownership and a subsequent progressive
   const files=fixture(), tree=(await buildCbmTree(files))!;
   const state=new AppState(); state.currentFiles=files; state.currentCbmTree=tree;
   const scene=mock.ctx.world.scene.three;
+  state.currentProjectType='equipment';
   await autoLoadModAndStlGeometry(state,scene,() => {},{includeMod:true});
   expect(state.loadedXmlModGroups.size).toBe(6);
   for (const seed of tree.children) expect(collectDeviceGroups(state,seed.devPath,deviceOccurrenceScope(tree,seed))).toHaveLength(3);

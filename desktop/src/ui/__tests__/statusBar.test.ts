@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { pushBusy, popBusy, resetStatusRight, setConnectionStatus, setIfcStatus, setBusinessDeviceCount, setDeviceStatus } from '../shell/statusBar.js';
+import { pushBusy, popBusy, resetStatusRight, setConnectionStatus, setIfcStatus, setEngineeringDeviceCount, setDeviceStatus } from '../shell/statusBar.js';
 it('progress updates are idempotent and independent tasks finish without a stuck loading state', () => {
   document.body.innerHTML = '<span id="status-text"></span><span id="status-dot"></span><span id="status-devices"></span>';
   resetStatusRight();
@@ -14,8 +14,8 @@ it('progress updates are idempotent and independent tasks finish without a stuck
   expect(document.getElementById('status-connections')!.textContent).toContain('连接线 12 个');
   resetStatusRight(); expect(document.getElementById('status-ifc')!.hidden).toBe(true);
   expect(document.getElementById('status-connections')!.hidden).toBe(true);
-  setBusinessDeviceCount(194);setDeviceStatus('几何实例已处理 2641/3326');
-  expect(document.getElementById('status-devices')!.textContent).toBe('设备节点 194 · 几何实例已处理 2641/3326');
+  setEngineeringDeviceCount(194);setDeviceStatus('几何实例已处理 2641/3326');
+  expect(document.getElementById('status-devices')!.textContent).toBe('设备整体候选 194 · 几何实例已处理 2641/3326');
   expect(document.getElementById('status-devices')!.title).toContain('不是一一对应');
   resetStatusRight();expect(document.getElementById('status-devices')!.textContent).toBe('');
 });

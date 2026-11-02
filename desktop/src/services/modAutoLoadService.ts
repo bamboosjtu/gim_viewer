@@ -20,9 +20,8 @@ import * as THREE from 'three';
 import { isUsableAffineMatrix } from '../gim/geometry/affineMatrix.js';
 import { freezeContainerLocalMatrix } from '../viewer/staticContainer.js';
 import { GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
-import type { CbmNode } from '../gim/types.js';
-import { isSubstationGeometryRoot } from '../gim/substationEvidence.js';
-import type { XmlModColor } from '../gim/geometry/ir.js';
+import type { SourceGeometryOccurrence } from '../gim/engineering/geometryOccurrences.js';
+import { getSourceGeometryOccurrences } from './sourceGeometryService.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { DevCheckpointHandler } from './substationBackgroundRuntime.js';
 import type { GeometryCacheManifest, GeometryCacheManifestEntry } from '@desktop/database.js';
@@ -42,7 +41,8 @@ import {
   getDevGlbTemplatePool,
   DevGlbTemplatePool,
   runBudgetedPlacementWork,
-  DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY,
+  DEV_GLB_EXCLUSIVE_PLACEMENT_USER_DATA_KEY,
+  placeSourceGeometry,
   getLoadedDevOccurrenceKind,
   type DevGlbParsedAsset,
 } from './devGlbTemplateRuntime.js';
@@ -270,55 +270,6 @@ export interface AutoLoadProgress {
   currentPath?: string;
 }
 
-/**
- * 遍历 CBM 树，收集所有 devPath（去重）。
- *
- * 设计决策：收集所有有 devPath 的节点，不论是否有 IFC。
- * 原因：IFC 可能不包含该设备的完整几何（或 GUID 不匹配），
- * MOD/STL 作为补充/回退几何源。仅依赖 IFC 会导致变压器等
- * 关键设备缺失显示。
- *
- * 注意：同一个 devPath 可能挂在多个 CBM 节点下，且父级 CBM transform 不同。
- * 几何发现必须按 CBM 实例处理；仅磁盘读文件阶段才按 devPath 去重。
- */
-/**
- * 判断 CBM 节点能否作为全量几何发现的起点。
- *
- * demo-substation 的 PARTINDEX 是 F4 根 DEV 的 SUBDEVICE 在 CBM 中的
- * 语义别名：二者指向同一个 child DEV，但 PARTINDEX 本身没有
- * SUBDEVICE 的局部矩阵。根 DEV 的递归发现已经会用正确矩阵覆盖它。
- * 若 PARTINDEX 再作为独立 seed，会把同一部件以缺失局部矩阵的位置再渲染一次。
- */
-export function isGeometryAutoLoadSeed(node: CbmNode): boolean {
-  return isSubstationGeometryRoot(node);
-}
-
-export function collectCbmDeviceInstances(root: CbmNode | null): CbmNode[] {
-  const nodes: CbmNode[] = [];
-
-  function walk(node: CbmNode, parentTransform: number[]) {
-    const localTransform = parseCbmTransformMatrix(node.transformMatrix);
-    const currentTransform = multiplyTransformMatrices(parentTransform, localTransform);
-
-    // 自动全量加载仅从真正的设备根节点出发。DEV_SUBDEVICE 与 PARTINDEX
-    // 都是 child DEV 的树节点/语义别名；discoverGeometriesFromNode 会沿
-    // 根 DEV 的 SUBDEVICES 递归，并携带唯一正确的局部装配矩阵。
-    if (isGeometryAutoLoadSeed(node)) {
-      nodes.push({
-        ...node,
-        transformMatrix: matrixToTransformString(currentTransform),
-      });
-    }
-
-    for (const child of node.children) {
-      walk(child, currentTransform);
-    }
-  }
-
-  if (root) walk(root, IDENTITY_MATRIX);
-  return nodes;
-}
-
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 export function parseCbmTransformMatrix(raw: string | undefined): number[] {
@@ -330,23 +281,10 @@ export function parseCbmTransformMatrix(raw: string | undefined): number[] {
   return values;
 }
 
-function parseCachedPhmColor(raw: string | null | undefined): XmlModColor | undefined {
-  if (!raw) return undefined;
-  const values = raw.split(',').map((part) => Number(part.trim()));
-  if (values.length !== 4 || values.some((value) => !Number.isFinite(value))) return undefined;
-  const [r, g, b, a] = values;
-  if ([r, g, b].some((value) => value < 0 || value > 255) || a < 0 || a > 255) return undefined;
-  return { r, g, b, a };
-}
-
 function multiplyTransformMatrices(a: number[], b: number[]): number[] {
   const am = new THREE.Matrix4().fromArray(a.length === 16 ? a : IDENTITY_MATRIX);
   const bm = new THREE.Matrix4().fromArray(b.length === 16 ? b : IDENTITY_MATRIX);
   return am.multiply(bm).toArray();
-}
-
-function matrixToTransformString(matrix: number[]): string {
-  return matrix.map((value) => Number.isFinite(value) ? Number(value.toFixed(10)).toString() : '0').join(',');
 }
 
 /**
@@ -402,8 +340,7 @@ function bytesToFile(bytes: Uint8Array, path: string): File {
 }
 
 function normalizeDevEntryPath(path: string): string {
-  const normalized = path.replace(/\\/g, '/');
-  return normalized.toLowerCase().startsWith('dev/') ? normalized : `DEV/${normalized}`;
+  return path.replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
 }
 
 
@@ -431,6 +368,7 @@ function normalizeDevEntryPath(path: string): string {
 async function buildFileMapFromDiskCache(
   projectId: number,
   uniqueDevPaths: string[],
+  inventory: Iterable<string>,
 ): Promise<Map<string, File> | null> {
   const { batchReadCachedFiles } = await import('@desktop/database.js');
   const { hydrateSubstationGeometryGraph } = await import('../gim/geometry/substationSourceGraph.js');
@@ -438,7 +376,7 @@ async function buildFileMapFromDiskCache(
     const bytes = await batchReadCachedFiles(projectId, paths);
     return new Map([...bytes].filter(([, value]) => value && value.byteLength > 0)
       .map(([path, value]) => [path, bytesToFile(value!, path)]));
-  });
+  }, inventory);
   return files.size ? files : null;
 }
 
@@ -537,7 +475,7 @@ export interface DevGlbFastPathProfile {
   fallbackDevPaths?: string[];
   fallbackReasons?: Record<string, string>;
   sharedPlacementCount?: number;
-  legacyFallbackPlacementCount?: number;
+  exclusiveFallbackPlacementCount?: number;
   sharedGeometryCount?: number;
   sharedMaterialCount?: number;
   sharedTextureCount?: number;
@@ -571,8 +509,6 @@ interface DevGlbFastPathDependencies {
   readGeometryCacheManifest?: (projectId: number) => Promise<GeometryCacheManifest>;
   /** v3：GIMR 二进制 envelope 批读；缺省时由 bridge 动态提供。 */
   batchReadGlbFiles?: (projectId: number, entryPaths: string[]) => Promise<Map<string, Uint8Array | null>>;
-  /** 仅为旧测试/非 Tauri 调用保留的兼容单条读取。生产 fast path 使用 batch。 */
-  readGlbFile?: (projectId: number, entryPath: string) => Promise<Uint8Array | null>;
 }
 
 const GLB_BATCH_MAX_FILES = 256;
@@ -653,7 +589,7 @@ function emptyFastPathProfile(cbmInstanceCount: number, uniqueDevCount: number):
     fallbackDevPaths: [],
     fallbackReasons: {},
     sharedPlacementCount: 0,
-    legacyFallbackPlacementCount: 0,
+    exclusiveFallbackPlacementCount: 0,
     sharedGeometryCount: 0,
     sharedMaterialCount: 0,
     sharedTextureCount: 0,
@@ -671,7 +607,7 @@ function emptyFastPathProfile(cbmInstanceCount: number, uniqueDevCount: number):
 export async function tryDevGlbFastPath(
   state: AppState,
   scene: THREE.Scene,
-  deviceNodes: CbmNode[],
+  deviceNodes: SourceGeometryOccurrence[],
   showProgress: (p: AutoLoadProgress) => void,
   token?: number,
   dependencies?: DevGlbFastPathDependencies,
@@ -692,7 +628,7 @@ export async function tryDevGlbFastPath(
   const failedDevPaths = new Map<string, string>();
   const failureTypes: Record<string, DevGlbFailureType> = {};
   const devOrder: string[] = [];
-  const seedsByDev = new Map<string, CbmNode[]>();
+  const seedsByDev = new Map<string, SourceGeometryOccurrence[]>();
 
   const syncFailureProfile = (): void => {
     const paths = Array.from(failedDevPaths.values());
@@ -791,17 +727,8 @@ export async function tryDevGlbFastPath(
   }
   deepTelemetry.record('discovery', performance.now() - fastPathStarted);
 
-  const useLegacyRead = Boolean(dependencies?.readGlbFile
-    && !dependencies?.readGeometryCacheManifest
-    && !dependencies?.batchReadGlbFiles);
-  let manifestEntries = new Map<string, GeometryCacheManifestEntry>();
-  if (useLegacyRead) {
-    for (const devPath of devOrder) manifestEntries.set(devPath.toLowerCase(), {
-      entry_path: devPath,
-      status: 'glb',
-      size: -1,
-    });
-  } else {
+  const manifestEntries = new Map<string, GeometryCacheManifestEntry>();
+  {
     const readManifest = dependencies?.readGeometryCacheManifest
       ?? (await import('@desktop/database.js')).readGeometryCacheManifest;
     let manifest: GeometryCacheManifest;
@@ -818,7 +745,7 @@ export async function tryDevGlbFastPath(
       if (!entry || typeof entry.entry_path !== 'string') return fail('manifest-entry-invalid');
       const key = normalizeDevEntryPath(entry.entry_path).toLowerCase();
       if (manifestEntries.has(key)
-        || !/^dev\//i.test(entry.entry_path.replace(/\\/g, '/'))
+        || !/\.dev$/i.test(entry.entry_path)
         || !(['glb', 'partial', 'empty', 'unsupported', 'source-invalid'] as string[]).includes(entry.status)
         || (entry.status === 'source-invalid' && (entry.size !== 0 || !entry.diagnostic?.trim()))
         || ((entry.status === 'empty' || entry.status === 'unsupported') && entry.size !== 0)
@@ -878,22 +805,7 @@ export async function tryDevGlbFastPath(
     .map((entry) => entry.entry_path);
   const batchStarted = performance.now();
   try {
-    if (useLegacyRead) {
-      const readGlbFile = dependencies!.readGlbFile!;
-      for (const devPath of glbPaths) {
-        if (!isCurrent()) return fail('session-invalid');
-        const unitStarted = performance.now();
-        let bytes: Uint8Array | null = null;
-        try {
-          bytes = await readGlbFile(capturedProjectId, devPath);
-        } catch {
-          markDevFailure(devPath, 'missing');
-        }
-        if (!isCurrent()) return fail('session-invalid');
-        glbBytesByDev.set(devPath.toLowerCase(), bytes);
-        await context?.onDevCheckpoint?.({phase:'warm-glb-read',path:devPath,durationMs:performance.now()-unitStarted});
-      }
-    } else {
+    {
       const batchReadGlbFiles = dependencies?.batchReadGlbFiles
         ?? (await import('@desktop/database.js')).batchReadGlbFiles;
       for (let start = 0; start < glbPaths.length;) {
@@ -957,7 +869,7 @@ export async function tryDevGlbFastPath(
       markDevFailure(entry.entry_path, 'missing');
       continue;
     }
-    if (!useLegacyRead && (bytes.byteLength !== entry.size || !validateCachedGlbBytes(bytes))) {
+    if ((bytes.byteLength !== entry.size || !validateCachedGlbBytes(bytes))) {
       markDevFailure(entry.entry_path, 'invalid');
       continue;
     }
@@ -976,8 +888,6 @@ export async function tryDevGlbFastPath(
           return group ? { scene: group, animations: [] } : null;
         }
       : glbCache!.parseDevGlbAsset);
-  const applyPlacementTransformToSceneUnits = dependencies?.applyPlacementTransformToSceneUnits
-    ?? (await import('../viewer/xmlModLoader.js')).applyPlacementTransformToSceneUnits;
   const { modRoot } = ensureGeometryLayers(state, scene);
   const templatePool = getDevGlbTemplatePool(modRoot, session) ?? new DevGlbTemplatePool({
     session,
@@ -1097,8 +1007,8 @@ export async function tryDevGlbFastPath(
         devInvalidated = true;
         return;
       }
-      const instanceKey = `dev:${devPath}#${seed.path}`;
-      if (state.loadedXmlModGroups.has(instanceKey) || getLoadedDevOccurrenceKind(state,seed.path)) {
+      const instanceKey = `dev:${devPath}#${seed.id}`;
+      if (state.loadedXmlModGroups.has(instanceKey) || getLoadedDevOccurrenceKind(state,seed.id)) {
         loadedCount++;
         markProcessed();
         return;
@@ -1111,7 +1021,7 @@ export async function tryDevGlbFastPath(
       let loadedGroup: THREE.Group | null = null;
       const shared = preparation.kind === 'shared';
       try {
-        const cbmTransform = parseCbmTransformMatrix(seed.transformMatrix);
+        const cbmTransform = seed.placementMatrix;
         if (preparation.kind === 'shared') {
           const matrixStarted = performance.now();
           loadedGroup = preparation.template.createPlacement({
@@ -1143,8 +1053,8 @@ export async function tryDevGlbFastPath(
             return;
           }
           const transformStarted = performance.now();
-          applyPlacementTransformToSceneUnits(loadedGroup, cbmTransform);
-          applyProjectSourceToViewer(loadedGroup, state.projectSourceToViewerMatrix);
+          loadedGroup = placeSourceGeometry(loadedGroup, { rootOccurrence: seed.id, instanceKey,
+            placementMatrix: cbmTransform, projectSourceToViewerMatrix: state.projectSourceToViewerMatrix });
           deepTelemetry.record('placementTransform', performance.now() - transformStarted, devPath);
         }
 
@@ -1168,13 +1078,13 @@ export async function tryDevGlbFastPath(
         }
 
         loadedGroup.userData.devPath = devPath;
-        if (getLoadedDevOccurrenceKind(state,seed.path)) {
+        if (getLoadedDevOccurrenceKind(state,seed.id)) {
           if (!shared) disposeFastPathGroup(loadedGroup);
           loadedCount++; markProcessed(); return;
         }
-        loadedGroup.userData.rootOccurrence = seed.path;
+        loadedGroup.userData.rootOccurrence = seed.id;
         loadedGroup.userData.instanceKey = instanceKey;
-        if (!shared) loadedGroup.userData[DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY] = true;
+        if (!shared) loadedGroup.userData[DEV_GLB_EXCLUSIVE_PLACEMENT_USER_DATA_KEY] = true;
         const sceneCommitStarted = performance.now();
         modRoot.add(loadedGroup);
         state.loadedXmlModGroups.set(instanceKey, loadedGroup);
@@ -1183,8 +1093,8 @@ export async function tryDevGlbFastPath(
           deepTelemetry.recordSharedPlacement(devPath);
           profile.sharedPlacementCount = (profile.sharedPlacementCount ?? 0) + 1;
         } else {
-          deepTelemetry.recordLegacyFallbackPlacement(devPath);
-          profile.legacyFallbackPlacementCount = (profile.legacyFallbackPlacementCount ?? 0) + 1;
+          deepTelemetry.recordExclusiveFallbackPlacement(devPath);
+          profile.exclusiveFallbackPlacementCount = (profile.exclusiveFallbackPlacementCount ?? 0) + 1;
         }
         const added: AddedGroup = { instanceKey, group: loadedGroup, shared };
         addedGroups.push(added);
@@ -1195,7 +1105,7 @@ export async function tryDevGlbFastPath(
         loadedCount++;
       } catch (err) {
         if (loadedGroup && !shared) disposeFastPathGroup(loadedGroup);
-        console.error(`[autoLoad] DEV GLB placement 加载失败: ${devPath} #${seed.path}`, err);
+        console.error(`[autoLoad] DEV GLB placement 加载失败: ${devPath} #${seed.id}`, err);
         markDevFailure(devPath, 'parse-exception');
         if (shared) templatePool.invalidate(devPath);
         removeDevGroups(devPath);
@@ -1231,7 +1141,7 @@ export async function tryDevGlbFastPath(
   const finalTemplateMetrics = templatePool.metrics();
   const finalTelemetry = deepTelemetry.snapshot(0);
   profile.sharedPlacementCount = finalTelemetry.sharedPlacementCount;
-  profile.legacyFallbackPlacementCount = finalTelemetry.legacyFallbackPlacementCount;
+  profile.exclusiveFallbackPlacementCount = finalTelemetry.exclusiveFallbackPlacementCount;
   profile.placementMatrixMs = finalTelemetry.placementMatrixMs;
   profile.bboxMs = finalTelemetry.bboxMs;
   profile.sceneCommitMs = finalTelemetry.sceneCommitMs;
@@ -1369,7 +1279,7 @@ export async function recoverFailedDevGlbCaches(
   let files = sourceFiles;
   if (!files) {
     try {
-      files = await buildFileMapFromDiskCache(projectId, Array.from(normalizedTargets.values()));
+      files = await buildFileMapFromDiskCache(projectId, Array.from(normalizedTargets.values()), state.substationEntryPaths);
     } catch (error) {
       debugLog(DEBUG_IFC_LOAD, '[autoLoad] DEV GLB recovery 源文件准备失败', error);
       return unresolved();
@@ -1546,7 +1456,7 @@ export async function loadScopedRawFallbackGeometry(
   session: ProjectLoadSession,
   profile?: DevGlbFastPathProfile,
   sourceFiles?: Map<string, File> | null,
-  deviceNodes: CbmNode[] = [],
+  deviceNodes: SourceGeometryOccurrence[] = [],
   onDevCheckpoint?: DevCheckpointHandler,
 ): Promise<ScopedRawFallbackResult> {
   // Source-file fallback is also valid in browser/non-Tauri mode, where no
@@ -1576,7 +1486,10 @@ export async function loadScopedRawFallbackGeometry(
   let geometryFiles = sourceFiles ?? null;
   let readMs = 0;
 
-  if (sourceFiles) {
+  sourceFiles ??= projectId == null ? null : await buildFileMapFromDiskCache(projectId, failedDevPaths, state.substationEntryPaths);
+  if (!isCurrent() || !sourceFiles) return { modCount: 0, stlCount: 0, rows: 0 };
+  geometryFiles = sourceFiles;
+  {
     // 冷路径已经拥有完整 GIM 文件 Map：只从失败 DEV 的 CBM seed 开始
     // 重新发现 DEV→PHM→MOD/STL，不能把成功 GLB 的 DEV 再扫一遍。
     // 同一失败 DEV 可能有很多 CBM placement；几何依赖文本只能解析一次，
@@ -1590,7 +1503,7 @@ export async function loadScopedRawFallbackGeometry(
     const scopedMods = new Map<string, DiscoveredModGeometry>();
     const scopedStls = new Map<string, DiscoveredStlGeometry>();
 
-    const failedSeedsByDev = new Map<string, CbmNode[]>();
+    const failedSeedsByDev = new Map<string, SourceGeometryOccurrence[]>();
     for (const seed of deviceNodes) {
       if (!seed.devPath) continue;
       const key = normalizeDevEntryPath(seed.devPath).toLowerCase();
@@ -1628,7 +1541,7 @@ export async function loadScopedRawFallbackGeometry(
 
       for (const seed of seeds) {
         if (!isCurrent()) return { modCount: 0, stlCount: 0, rows: reachableRows };
-        const cbmTransform = parseCbmTransformMatrix(seed.transformMatrix);
+        const cbmTransform = seed.placementMatrix;
         for (const geo of discovered.mods) {
           // Preserve every child placement belonging to this failed root.
           if (!includeMod) continue;
@@ -1636,13 +1549,13 @@ export async function loadScopedRawFallbackGeometry(
             cbmTransform,
             geo.placementTransformMatrix,
           );
-          scopedMods.set(`raw:${seed.path}${geo.referencePath}`, {
+          scopedMods.set(`raw:${seed.id}${geo.referencePath}`, {
             ...geo,
-            instanceKey: `raw:${seed.path}${geo.referencePath}`,
-            rootOccurrence: seed.path,
+            instanceKey: `raw:${seed.id}${geo.referencePath}`,
+            rootOccurrence: seed.id,
             placementTransformMatrix,
           });
-          modFilterPlacements.set(`raw:${seed.path}${geo.referencePath}`, geo.placementTransformMatrix);
+          modFilterPlacements.set(`raw:${seed.id}${geo.referencePath}`, geo.placementTransformMatrix);
         }
         for (const geo of discovered.stls) {
           if (!includeStl) continue;
@@ -1650,10 +1563,10 @@ export async function loadScopedRawFallbackGeometry(
             cbmTransform,
             geo.placementTransformMatrix,
           );
-          scopedStls.set(`raw:${seed.path}${geo.referencePath}`, {
+          scopedStls.set(`raw:${seed.id}${geo.referencePath}`, {
             ...geo,
-            instanceKey: `raw:${seed.path}${geo.referencePath}`,
-            rootOccurrence: seed.path,
+            instanceKey: `raw:${seed.id}${geo.referencePath}`,
+            rootOccurrence: seed.id,
             placementTransformMatrix,
           });
         }
@@ -1662,98 +1575,6 @@ export async function loadScopedRawFallbackGeometry(
     modGeos.push(...scopedMods.values());
     stlGeos.push(...scopedStls.values());
     reachableRows = modGeos.length + stlGeos.length;
-  } else {
-    // The source-file branch above also supports browser/non-Tauri callers.
-    // Re-narrow explicitly here: this branch has no in-memory source map, so
-    // a project id is required by both database commands.  The runtime guard
-    // at the top keeps this path unreachable for a null id; this local guard
-    // makes that invariant visible to TypeScript as well.
-    if (projectId == null) return { modCount: 0, stlCount: 0, rows: reachableRows };
-    const { getReachableGeometry, batchReadCachedFiles } = await import('@desktop/database.js');
-    if (!isCurrent()) return { modCount: 0, stlCount: 0, rows: 0 };
-    const reachable = await getReachableGeometry(projectId, {
-      includeMod,
-      includeStl,
-      devPaths: failedDevPaths,
-    });
-    if (!isCurrent()) return { modCount: 0, stlCount: 0, rows: reachable.length };
-    const failedKeys = new Set(failedDevPaths.map((path) => normalizeDevEntryPath(path).toLowerCase()));
-    const seedKeys = new Set(
-      deviceNodes
-        .map((seed) => seed.devPath ? normalizeDevEntryPath(seed.devPath).toLowerCase() : '')
-        .filter(Boolean),
-    );
-    const shouldIncludeDev = (devPath: string): boolean => {
-      const key = normalizeDevEntryPath(devPath).toLowerCase();
-      if (seedKeys.has(key) && !failedKeys.has(key)) return false;
-      return failedKeys.has(key) || !seedKeys.has(key);
-    };
-    // The Rust query expands a failed parent DEV through SUBDEVICE edges. A
-    // child may nevertheless have a valid GLB in this same run; its rows must
-    // not be reloaded through the parent's raw fallback.
-    const scopedReachable = reachable.filter((row) =>
-      shouldIncludeDev(row.dev_path),
-    );
-    reachableRows = scopedReachable.length;
-
-    const modPaths = new Set<string>();
-    const stlPaths = new Set<string>();
-    for (const row of scopedReachable) {
-      const lower = row.geometry_path.toLowerCase();
-      if ((lower.endsWith('.mod') || lower.endsWith('.gl')) && includeMod) modPaths.add(row.geometry_path);
-      if (lower.endsWith('.stl') && includeStl) stlPaths.add(row.geometry_path);
-    }
-    const geometryPaths = Array.from(new Set([...modPaths, ...stlPaths]));
-    const readStarted = performance.now();
-    geometryFiles = new Map<string, File>();
-    if (geometryPaths.length > 0) {
-      const bytesMap = await batchReadCachedFiles(projectId, geometryPaths);
-      if (!isCurrent()) return { modCount: 0, stlCount: 0, rows: scopedReachable.length };
-      for (const [path, bytes] of bytesMap) {
-        if (bytes && bytes.byteLength > 0) geometryFiles.set(path, bytesToFile(bytes, path));
-      }
-    }
-    readMs = Math.max(0, performance.now() - readStarted);
-
-    for (const row of scopedReachable) {
-      if (modGeos.length + stlGeos.length >= PARSER_LIMITS.maxGeometryInstances) {
-        throw new Error(`scoped 可达几何实例数超过安全上限 ${PARSER_LIMITS.maxGeometryInstances}`);
-      }
-      const lower = row.geometry_path.toLowerCase();
-      const devPath = row.dev_path || failedDevPaths[0] || '';
-      const devTransformMatrix = parseCbmTransformMatrix(row.dev_transform_matrix ?? undefined);
-      const phmTransformMatrix = parseCbmTransformMatrix(row.phm_transform_matrix ?? undefined);
-      const placementTransformMatrix = parseCbmTransformMatrix(row.placement_transform_matrix ?? undefined);
-      const phmColor = parseCachedPhmColor(row.phm_color);
-      const phmColorMaxA = row.phm_color_max_a ?? phmColor?.a ?? 0;
-      if ((lower.endsWith('.mod') || lower.endsWith('.gl')) && includeMod) {
-        modGeos.push({
-          modPath: row.geometry_path,
-          instanceKey: row.instance_key,
-          rootOccurrence: row.root_occurrence, assemblyPath: row.assembly_path, referencePath: row.reference_path,
-          placementTransformMatrix,
-          devTransformMatrix,
-          phmTransformMatrix,
-          phmColor,
-          phmColorMaxA,
-          devPath,
-          phmPath: '',
-        });
-      } else if (lower.endsWith('.stl') && includeStl) {
-        stlGeos.push({
-          stlPath: row.geometry_path,
-          instanceKey: row.instance_key,
-          rootOccurrence: row.root_occurrence, assemblyPath: row.assembly_path, referencePath: row.reference_path,
-          placementTransformMatrix,
-          devTransformMatrix,
-          phmTransformMatrix,
-          phmColor,
-          phmColorMaxA,
-          devPath,
-          phmPath: '',
-        });
-      }
-    }
   }
   if (profile) {
     profile.partialRawFallbackRows = reachableRows;
@@ -1765,9 +1586,9 @@ export async function loadScopedRawFallbackGeometry(
   const inversePlacements = new Map<string, THREE.Matrix4>();
   const inverseRoots = new Set(modGeos.filter(geo => !modFilterPlacements.has(geo.instanceKey)).map(geo => geo.rootOccurrence));
   for (const seed of deviceNodes) {
-    if (!inverseRoots.has(seed.path)) continue;
-    const matrix = new THREE.Matrix4().fromArray(parseCbmTransformMatrix(seed.transformMatrix));
-    if (matrix.determinant() !== 0) inversePlacements.set(seed.path, matrix.invert());
+    if (!inverseRoots.has(seed.id)) continue;
+    const matrix = new THREE.Matrix4().fromArray(seed.placementMatrix);
+    if (matrix.determinant() !== 0) inversePlacements.set(seed.id, matrix.invert());
   }
   const filterPlacement = (geo: DiscoveredModGeometry): number[] => {
     const known = modFilterPlacements.get(geo.instanceKey);
@@ -1977,7 +1798,6 @@ export async function autoLoadModAndStlGeometry(
   });
 
   let files = state.currentFiles;
-  const cbmTree = state.currentCbmTree;
 
   // 早期 token 校验：项目已切换则立即退出
   if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) {
@@ -1985,14 +1805,9 @@ export async function autoLoadModAndStlGeometry(
     return { modCount: 0, stlCount: 0 };
   }
 
-  if (!cbmTree) {
-    debugLog(DEBUG_IFC_LOAD, '[autoLoad] 跳过：currentCbmTree 为空');
-    return { modCount: 0, stlCount: 0 };
-  }
-
-  // ── Phase 1: 收集 devPath ──
   showProgress({ phase: 'collecting', collectedDevPaths: 0, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
-  const deviceNodes = collectCbmDeviceInstances(cbmTree);
+  const deviceNodes = await getSourceGeometryOccurrences(state, session);
+  if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) return resultWithProfile(0, 0);
   const uniqueDevPaths = Array.from(new Set(deviceNodes.map((node) => node.devPath).filter((path): path is string => !!path)));
 
   debugLog(DEBUG_IFC_LOAD, `[autoLoad] 收集到 ${deviceNodes.length} 个 CBM 设备实例，${uniqueDevPaths.length} 个唯一 devPath`);
@@ -2022,7 +1837,7 @@ export async function autoLoadModAndStlGeometry(
     debugLog(DEBUG_IFC_LOAD, '[autoLoad] geometry cache 失效：从磁盘缓存准备几何源并重建 GLB');
     let rebuildFiles: Map<string, File> | null = null;
     try {
-      rebuildFiles = await buildFileMapFromDiskCache(capturedProjectId, uniqueDevPaths);
+      rebuildFiles = await buildFileMapFromDiskCache(capturedProjectId, uniqueDevPaths, state.substationEntryPaths);
     } catch (error) {
       console.warn('[autoLoad] geometry cache 重建的源文件准备失败，保持语义缓存并停止几何域:', error);
     }
@@ -2227,237 +2042,17 @@ export async function autoLoadModAndStlGeometry(
     return { modCount: fastPathResult.modCount, stlCount: fastPathResult.stlCount, devGlbProfile };
   }
 
-  // ── Phase 1.5: 缓存命中场景 → SQLite 查询 + 仅批量读 MOD/STL ──
-  // 设计动机：demo-substation 有 4179 个 DEV → 3921 个无 SOLIDMODEL，
-  // 逐文件读取是巨大浪费。SQLite 已索引引用链，一次查询即可得到全部 MOD/STL 路径。
-  const isCacheHit = !files;
-  if (isCacheHit && capturedProjectId != null) {
-    debugLog(DEBUG_IFC_LOAD, `[autoLoad] SQLite 查询可到达几何: includeMod=${includeMod} includeStl=${includeStl}`);
-    try {
-      const { getReachableGeometry, batchReadCachedFiles } = await import('@desktop/database.js');
-      const reachable = await getReachableGeometry(capturedProjectId, { includeMod, includeStl });
-      if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) return resultWithProfile(0, 0);
-
-      if (reachable.length === 0) {
-        debugLog(DEBUG_IFC_LOAD, '[autoLoad] 无可到达的 MOD/STL 几何源（SQLite 查询为空）');
-        showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
-        return resultWithProfile(0, 0);
-      }
-
-      // 分离 MOD / STL 并收集唯一路径
-      const modPaths = new Set<string>();
-      const stlPaths = new Set<string>();
-      for (const r of reachable) {
-        const lower = r.geometry_path.toLowerCase();
-        if (lower.endsWith('.mod') || lower.endsWith('.gl')) modPaths.add(r.geometry_path);
-        else if (lower.endsWith('.stl')) stlPaths.add(r.geometry_path);
-      }
-
-      const logExtras: string[] = [`${modPaths.size} MOD`];
-      if (includeStl) logExtras.push(`${stlPaths.size} STL`);
-      debugLog(DEBUG_IFC_LOAD, `[autoLoad] SQLite 查询完成: ${reachable.length} 个几何源 → ${logExtras.join(' + ')}`);
-
-      // 方案 C v2：DEV 粒度 GLB 由 tryDevGlbFastPath 处理；
-      // 此处为回退路径，直接批量读取 MOD/STL 原始字节
-      const modArr = Array.from(modPaths);
-      const stlArr = Array.from(stlPaths);
-      const allGeomPaths = Array.from(new Set([...modArr, ...stlArr]));
-
-      if (allGeomPaths.length > 0) {
-        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 批量读取 ${allGeomPaths.length} 个 MOD/STL 原始字节（1 次 IPC）...`);
-        const bytesMap = await batchReadCachedFiles(capturedProjectId, allGeomPaths);
-        if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) return resultWithProfile(0, 0);
-        files = new Map();
-        let hitCount = 0;
-        for (const [path, bytes] of bytesMap) {
-          if (bytes && bytes.byteLength > 0) {
-            files.set(path, bytesToFile(bytes, path));
-            hitCount++;
-          }
-        }
-        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 原始字节读取完成: ${hitCount}/${allGeomPaths.length} 命中`);
-      }
-
-      if (!files || files.size === 0) {
-        debugLog(DEBUG_IFC_LOAD, '[autoLoad] 无有效 MOD/STL 文件，跳过加载');
-        showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
-        return resultWithProfile(0, 0);
-      }
-
-      debugLog(DEBUG_IFC_LOAD, `[autoLoad] 磁盘读取完成: ${files.size} 个文件（${isCacheHit ? '缓存命中' : '首次打开'}）`);
-
-      // 缓存命中时跳过 Phase 2 的 DEV→PHM→MOD 发现循环，
-      // 直接用 SQLite 返回的结果加载几何
-      const modGeos: DiscoveredModGeometry[] = [];
-      const stlGeos: DiscoveredStlGeometry[] = [];
-
-      for (const r of reachable) {
-        if (modGeos.length + stlGeos.length >= PARSER_LIMITS.maxGeometryInstances) {
-          throw new Error(`可达几何实例数超过安全上限 ${PARSER_LIMITS.maxGeometryInstances}`);
-        }
-        const lower = r.geometry_path.toLowerCase();
-        const devTM = r.dev_transform_matrix
-          ? r.dev_transform_matrix.split(',').map(Number)
-          : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-        const phmTM = r.phm_transform_matrix
-          ? r.phm_transform_matrix.split(',').map(Number)
-          : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-        const phmColor = parseCachedPhmColor(r.phm_color);
-        const phmColorMaxA = r.phm_color_max_a ?? phmColor?.a ?? 0;
-
-        if (lower.endsWith('.mod') || lower.endsWith('.gl')) {
-          const placementTM = r.placement_transform_matrix
-            ? r.placement_transform_matrix.split(',').map(Number)
-            : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-          modGeos.push({
-            modPath: r.geometry_path,
-            instanceKey: r.instance_key,
-            rootOccurrence: r.root_occurrence, assemblyPath: r.assembly_path, referencePath: r.reference_path,
-            placementTransformMatrix: placementTM,
-            devTransformMatrix: devTM,
-            phmTransformMatrix: phmTM,
-            phmColor,
-            phmColorMaxA,
-            devPath: r.dev_path,
-            phmPath: '',
-          });
-        } else if (lower.endsWith('.stl')) {
-          const placementTM = r.placement_transform_matrix
-            ? r.placement_transform_matrix.split(',').map(Number)
-            : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-          stlGeos.push({
-            stlPath: r.geometry_path,
-            instanceKey: r.instance_key,
-            rootOccurrence: r.root_occurrence, assemblyPath: r.assembly_path, referencePath: r.reference_path,
-            placementTransformMatrix: placementTM,
-            devTransformMatrix: devTM,
-            phmTransformMatrix: phmTM,
-            phmColor,
-            phmColorMaxA,
-            devPath: r.dev_path,
-            phmPath: '',
-          });
-        }
-      }
-
-      // 跳过 Phase 2，直接进入加载阶段
-      debugLog(DEBUG_IFC_LOAD, `[autoLoad] DB 直通加载: ${modGeos.length} MOD + ${stlGeos.length} STL`);
-
-      const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
-      const { modRoot, stlRoot } = ensureGeometryLayers(state, scene);
-      let loadedMods = 0;
-      let loadedStls = 0;
-      let skippedBadBBox = 0;
-
-      // 加载 MOD（方案 C：优先 GLB，回退 XML）
-      if (modGeos.length > 0) {
-        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 开始加载 ${modGeos.length} 个 MOD...`);
-        for (let i = 0; i < modGeos.length; i += CONCURRENCY) {
-          if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) { debugLog(DEBUG_IFC_LOAD, '[autoLoad] 工程上下文不匹配，停止 DB MOD 加载'); return resultWithProfile(loadedMods, 0); }
-          const batch = modGeos.slice(i, i + CONCURRENCY);
-          showProgress({ phase: 'loading_mod', collectedDevPaths: deviceNodes.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length, currentPath: batch[0].modPath });
-          for (const geo of batch) {
-            if (state.loadedXmlModGroups.has(geo.instanceKey)) { loadedMods++; continue; }
-            try {
-              const group = await loadModFile(geo, files ?? new Map());
-              if (group) {
-                if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) {
-                  group.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
-                  return resultWithProfile(loadedMods, 0);
-                }
-                if (!prepareModGroupForScene(group, geo.modPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; loadedMods++; continue; }
-                group.userData.devPath = geo.devPath;
-                if (getLoadedDevOccurrenceKind(state,geo.rootOccurrence) === 'glb' || ('modPath' in geo ? state.loadedXmlModGroups : state.loadedStlGroups).has(geo.instanceKey)) {
-                  group.traverse((o) => (o as THREE.Mesh).geometry?.dispose?.()); continue;
-                }
-                group.userData.rootOccurrence = geo.rootOccurrence;
-                group.userData.assemblyPath = geo.assemblyPath;
-                group.userData.referencePath = geo.referencePath;
-                modRoot.add(group);
-                state.loadedXmlModGroups.set(geo.instanceKey, group);
-                loadedMods++;
-              } else {
-                // MOD 解析失败（loadModFile 返回 null），也算已处理
-                loadedMods++;
-              }
-            } catch (err) {
-              console.error(`[autoLoad] MOD 加载失败: ${geo.modPath}`, err);
-              loadedMods++;
-            }
-          }
-          if (i + CONCURRENCY < modGeos.length) await new Promise((r) => setTimeout(r, YIELD_MS));
-        }
-        debugLog(DEBUG_IFC_LOAD, `[autoLoad] MOD 加载完成: ${loadedMods}/${modGeos.length}（跳过异常 bbox: ${skippedBadBBox}）`);
-      }
-
-      // 加载 STL（仅 includeStl=true 时进入，stlGeos 已在 discovery 阶段过滤）
-      if (stlGeos.length > 0) {
-        debugLog(DEBUG_IFC_LOAD, `[autoLoad] 开始加载 ${stlGeos.length} 个 STL...`);
-        for (let i = 0; i < stlGeos.length; i += CONCURRENCY) {
-          if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) { debugLog(DEBUG_IFC_LOAD, '[autoLoad] 工程上下文不匹配，停止 DB STL 加载'); return resultWithProfile(loadedMods, loadedStls); }
-          const batch = stlGeos.slice(i, i + CONCURRENCY);
-          showProgress({ phase: 'loading_stl', collectedDevPaths: deviceNodes.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length, currentPath: batch[0].stlPath });
-          for (const geo of batch) {
-            if (state.loadedStlGroups.has(geo.instanceKey)) { loadedStls++; continue; }
-            try {
-              const group = await loadStlFile(geo, files ?? new Map());
-              if (group) {
-                if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) {
-                  group.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
-                  return resultWithProfile(loadedMods, loadedStls);
-                }
-                if (!prepareStlGroupForScene(group, geo.stlPath, applyPlacementTransformToSceneUnits, geo.placementTransformMatrix, state.projectSourceToViewerMatrix)) { skippedBadBBox++; loadedStls++; continue; }
-                group.userData.devPath = geo.devPath;
-                if (getLoadedDevOccurrenceKind(state,geo.rootOccurrence) === 'glb' || ('modPath' in geo ? state.loadedXmlModGroups : state.loadedStlGroups).has(geo.instanceKey)) {
-                  group.traverse((o) => (o as THREE.Mesh).geometry?.dispose?.()); continue;
-                }
-                group.userData.rootOccurrence = geo.rootOccurrence;
-                group.userData.assemblyPath = geo.assemblyPath;
-                group.userData.referencePath = geo.referencePath;
-                stlRoot.add(group);
-                state.loadedStlGroups.set(geo.instanceKey, group);
-                loadedStls++;
-              } else {
-                loadedStls++;
-              }
-            } catch (err) {
-              console.error(`[autoLoad] STL 加载失败: ${geo.stlPath}`, err);
-              loadedStls++;
-            }
-          }
-          if (i + CONCURRENCY < stlGeos.length) await new Promise((r) => setTimeout(r, YIELD_MS));
-        }
-        debugLog(DEBUG_IFC_LOAD, `[autoLoad] STL 加载完成: ${loadedStls}/${stlGeos.length}`);
-      }
-
-      debugLog(DEBUG_IFC_LOAD, `[autoLoad] 全部几何加载完成 (DB直通): MOD=${loadedMods}, STL=${loadedStls}, 跳过异常bbox=${skippedBadBBox}`);
-      showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: modGeos.length, discoveredStls: stlGeos.length, loadedMods, loadedStls, totalMods: modGeos.length, totalStls: stlGeos.length });
-      return { modCount: loadedMods, stlCount: loadedStls, devGlbProfile };
-    } catch (err) {
-      console.warn('[autoLoad] SQLite 几何查询失败，回退到文件扫描:', err);
-      // 回退：尝试 buildFileMapFromDiskCache（已有进度日志）
-      if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256) || capturedProjectId == null) {
-        return resultWithProfile(0, 0);
-      }
-      files = await buildFileMapFromDiskCache(capturedProjectId, uniqueDevPaths);
-      if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) return resultWithProfile(0, 0);
-      if (!files || files.size === 0) {
-        showProgress({ phase: 'done', collectedDevPaths: deviceNodes.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
-        return resultWithProfile(0, 0);
-      }
-    }
+  if (!files && capturedProjectId != null) {
+    files = await buildFileMapFromDiskCache(capturedProjectId, uniqueDevPaths, state.substationEntryPaths);
+    if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) return resultWithProfile(0, 0);
   }
-
-  if (!files) {
-    debugLog(DEBUG_IFC_LOAD, '[autoLoad] 跳过：无文件来源（currentFiles=null 且 projectId=null）');
-    return resultWithProfile(0, 0);
-  }
+  if (!files) return resultWithProfile(0, 0);
 
   // ── Phase 2: 发现几何源（遍历 CBM 实例 → DEV → PHM → MOD/STL） ──
   // 注意：deviceNodes 可能很大（数千），必须节流 showProgress + 频繁 yield
   showProgress({ phase: 'discovering', collectedDevPaths: deviceNodes.length, discoveredMods: 0, discoveredStls: 0, loadedMods: 0, loadedStls: 0, totalMods: 0, totalStls: 0 });
 
-  const { discoverGeometriesFromNode } = await import('./modGeometryDiscovery.js');
+  const { discoverGeometriesFromDevPath } = await import('./modGeometryDiscovery.js');
 
   // 全局去重集合：key = instanceKey。同一 MOD/STL 文件可有多个 placement 实例。
   const modMap = new Map<string, DiscoveredModGeometry>();
@@ -2499,7 +2094,7 @@ export async function autoLoadModAndStlGeometry(
     }
 
     try {
-      const result = await discoverGeometriesFromNode(node, files);
+      const result = await discoverGeometriesFromDevPath(node.devPath, files, node.placementMatrix, new Set(), 0, { instances: 0 }, { rootOccurrence: node.id });
       if (!isGeometryContextValid(state, token, capturedGeneration, capturedProjectId, capturedSourceSha256)) return resultWithProfile(0, 0);
       for (const modGeo of result.mods) {
         if (modMap.size >= PARSER_LIMITS.maxGeometryInstances && !modMap.has(modGeo.instanceKey)) {

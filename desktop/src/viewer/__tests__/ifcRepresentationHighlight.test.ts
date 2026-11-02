@@ -14,7 +14,8 @@ function group(id=7) {
 }
 function fixture() {
   const state = new AppState();
-  const ctx:any={fragments:{highlight:vi.fn(async()=>{}),resetHighlight:vi.fn(async()=>{})}};
+  const model = {modelId:'runtime',object:new THREE.Group(),setVisible:vi.fn(async()=>{}),getItemsGeometry:vi.fn(async()=>[[{positions:new Float32Array([0,0,0,1,0,0,0,1,0]),indices:new Uint32Array([0,1,2]),transform:new THREE.Matrix4()}]])};
+  const ctx:any={fragments:{list:new Map([['runtime',model]]),highlight:vi.fn(async()=>{}),resetHighlight:vi.fn(async()=>{})}};
   const migrate = (value:THREE.Group|undefined,local=17,current=()=>true,prepare?:()=>void) =>
     syncIfcRepresentationHighlight(ctx,state,'runtime','source',object,value,local,current,prepare);
   const select = async (regional=false) => {
@@ -24,7 +25,7 @@ function fixture() {
       if (!regional) state.highlightedItems={runtime:[17]};
     }); return request;
   };
-  return {state,ctx,migrate,select};
+  return {state,ctx,model,migrate,select};
 }
 afterEach(()=>{vi.restoreAllMocks();});
 
@@ -52,9 +53,9 @@ it('restores only the departing material clones, then returns a regional selecti
   expect(dispose).toHaveBeenCalledOnce();expect((old.children[0] as THREE.Mesh).material).toBe(original);
   expect((other.children[0] as THREE.Mesh).material).toBe(otherMaterial);
   removeModHighlightGroup(f.state,fine);await f.migrate(undefined);
-  expect(f.ctx.fragments.highlight).toHaveBeenCalledOnce();
+  expect(f.model.getItemsGeometry).toHaveBeenCalledOnce(); expect(f.ctx.fragments.highlight).not.toHaveBeenCalled();
   expect(f.state.highlightedItems).toEqual({runtime:[17]});
-  await f.migrate(undefined);expect(f.ctx.fragments.highlight).toHaveBeenCalledOnce();
+  await f.migrate(undefined);expect(f.model.getItemsGeometry).toHaveBeenCalledOnce();
   resetModHighlight(f.state);
 });
 
@@ -86,7 +87,7 @@ it('does not apply a queued A migration after selection moves to B or the projec
 
 it('keeps an in-flight far restore resettable by the next selection',async()=>{
   const f=fixture();await f.select(true);let finish!:()=>void;
-  f.ctx.fragments.highlight.mockImplementationOnce(()=>new Promise<void>(resolve=>{finish=resolve;}));
+  f.model.getItemsGeometry.mockImplementationOnce(()=>new Promise<any>(resolve=>{finish=()=>resolve([]);}));
   const old=f.migrate(undefined);await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
   const b=f.state.beginSelection({kind:'ifc-element',key:'runtime:18'});
   const next=commitSelectionHighlight(f.ctx,f.state,f.state.selectionGuard(b),()=>{f.state.highlightedItems={runtime:[18]};});
@@ -98,9 +99,9 @@ it('keeps an in-flight far restore resettable by the next selection',async()=>{
 function runtimeFixture() {
   const f=fixture();
   Object.assign(f.ctx,{world:{scene:{three:new THREE.Scene()},camera:{controls:{addEventListener:vi.fn(),removeEventListener:vi.fn()}}}});
-  f.ctx.fragments.list={onBeforeDelete:{add:vi.fn(),remove:vi.fn()}};
+  f.ctx.fragments.list.onBeforeDelete={add:vi.fn(),remove:vi.fn()};
   f.ctx.ifcLoader={settings:{wasm:{path:'/',absolute:true}}};
-  const model={modelId:'runtime',object:new THREE.Group(),setVisible:vi.fn(async()=>{})};
+  const model=f.model;
   const runtime=new IfcRegionalRuntime('source','CBM/source.ifc',{objects:[object],unitScale:1,openingRelations:[]},{
     ctx:f.ctx,model,readBytes:vi.fn(),cacheKey:'key',sourceToViewer:new THREE.Matrix4(),isCurrent:()=>true,
     onBeforeDisposeGroup:g=>removeModHighlightGroup(f.state,g),

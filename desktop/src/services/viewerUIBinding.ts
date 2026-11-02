@@ -67,9 +67,16 @@ export async function getViewerRuntimeWithUI(
 
     // 装配 3D 点击拾取 → 显示 IFC 构件属性
     const {syncSelectionNavigation}=await import('./nodeInteractionService.js');
-    setupSelection(ctx,state,container,(modelId,localId,request) => {
+    setupSelection(ctx,state,container,async(modelId,localId,request) => {
+      if (state.currentProjectType === 'substation' || state.engineeringSnapshot) {
+        const { selectEngineeringFragmentPick } = await import('./engineeringViewportSelection.js');
+        const model = ctx.fragments.list.get(modelId);
+        if (!state.isCurrentSelection(request)) return true;
+        if (model && await selectEngineeringFragmentPick(state, modelId, localId, request, model)) return true;
+      }
       void syncSelectionNavigation(state,request);
       void showIfcElementProperties(ctx,state,modelId,localId,request);
+      return false;
     },(request) => {
       void syncSelectionNavigation(state,request);
       if (state.isCurrentSelection(request)) {
@@ -77,12 +84,18 @@ export async function getViewerRuntimeWithUI(
         const body=document.getElementById('props-drawer-body');
         if (body) body.innerHTML='<div class="props-empty">尚未选择对象</div>';
       }
-    },(regional,object,request)=>{
+    },async(regional,object,request)=>{
+      if (state.currentProjectType === 'substation' || state.engineeringSnapshot) {
+        const { selectEngineeringIfcPick } = await import('./engineeringViewportSelection.js');
+        if (!state.isCurrentSelection(request)) return true;
+        if (await selectEngineeringIfcPick(state, regional.modelId, object.expressId, request)) return true;
+      }
       void syncSelectionNavigation(state,request);
       void import('../ui/propsDrawer.js').then(({showIfcRegionalProperties})=>showIfcRegionalProperties(ctx,state,regional,object,request));
-    },(rootOccurrence,instanceKey,request)=>{
+      return false;
+    },(rootOccurrence,instanceKey,request,hint)=>{
       void import('./devViewportSelection.js').then(({selectViewportDev}) =>
-        selectViewportDev(ctx,state,rootOccurrence,instanceKey,request,showMessage))
+        selectViewportDev(ctx,state,rootOccurrence,instanceKey,request,showMessage,hint))
         .catch(error=>console.warn('[DEV selection]',error));
     });
 
@@ -92,6 +105,7 @@ export async function getViewerRuntimeWithUI(
         const model = ctx.fragments.list.get(runtimeModelId);
         if (model) state.selectionVisibility?.registerModel(modelId, model);
         addModelToUI(ctx, state, modelId, runtimeModelId);
+        if (state.engineeringSelection?.ifc.some(ref => ref.modelId === modelId)) state.engineeringRepresentationChanged?.();
       },
       onModelRemoved: (modelId, runtimeModelId) => {
         state.selectionVisibility?.removeModel(modelId, runtimeModelId);

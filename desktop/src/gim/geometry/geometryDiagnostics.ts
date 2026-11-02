@@ -91,7 +91,7 @@ export interface ManifestDiagnosticInput {
 export function normalizeGeometryDiagnosticPath(path: string): string {
   const normalized = path.trim().replace(/\\/g, '/');
   if (!normalized) return '';
-  return normalized.toLowerCase().startsWith('dev/') ? normalized : `DEV/${normalized}`;
+  return normalized.replace(/^(?:\.\/)+/, '');
 }
 
 function diagnosticKey(path: string): string {
@@ -221,7 +221,13 @@ export function getGeometryDiagnostic(
   devPath: string | undefined,
 ): GeometryDiagnostic | undefined {
   if (!devPath) return undefined;
-  return store.geometryDiagnosticsByDevPath?.get(diagnosticKey(devPath));
+  const entries = store.geometryDiagnosticsByDevPath;
+  const key = diagnosticKey(devPath), exact = entries?.get(key);
+  if (exact || key.includes('/')) return exact;
+  // CBM equipment references may be bare filenames. Join only a unique
+  // current diagnostic; custom archive directories never become DEV/ aliases.
+  const matches = [...(entries?.entries() ?? [])].filter(([path]) => path.split('/').pop() === key);
+  return matches.length === 1 ? matches[0][1] : undefined;
 }
 
 export function geometryStatusLabel(status: GeometryDiagnosticStatus): string {

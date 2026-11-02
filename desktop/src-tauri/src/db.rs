@@ -11,68 +11,16 @@ use std::io::Write;
 use std::time::Instant;
 use tauri::Manager;
 
-/// Debug-only 性能日志宏。
-///
-/// `get_reachable_geometry` 等热路径的性能 eprintln! 在 release 构建中无条件输出，
-/// 会污染用户终端且带来微小 I/O 开销（见 review0709.md §3.3 问题 6）。
-/// 使用此宏后，性能日志仅在 debug 构建中输出；release 构建中完全消除。
-///
-/// 注意：初始化阶段的错误日志（如 init_db 中的 WAL 设置失败）仍使用 eprintln!，
-/// 因为它们是启动故障的诊断信息，需要始终可见。
-macro_rules! debug_perf_log {
-    ($($arg:tt)*) => {
-        if cfg!(debug_assertions) {
-            eprintln!($($arg)*);
-        }
-    };
-}
-
-/// 当前解析器版本（变更解析逻辑时递增，用于缓存失效）
-/// v2: 增加 substation_fam_property / substation_dev_property 表，缓存 CBM/FAM/DEV 基础属性
-/// v3: validate cache requires substation_cbm_node index; rebuild incomplete v2 cache
-/// v4: adds transmission_line graph cache (powerline_cbm_node/child/ref/file_stat)
-/// v5: adds transmission_line FAM/DEV attribute cache (powerline_fam_property / powerline_dev_property)
-/// v6: 缓存 DEV/PHM/MOD 几何文件到本地磁盘（缓存命中场景下支持 xml-mod 回放）
-/// v7: 几何引用链递归 DEV SUBDEVICE，并保存 SUBDEVICE 变换矩阵
-/// v8: 几何查询使用 CBM 父链累计 TRANSFORMMATRIX，并按实例级 placement 去重
-/// v9: 层级树名称优化——F1System 根节点用 GIM 头部工程名，F4System/PARTINDEX 设备层用 DEV SYMBOLNAME；过滤 IFC "&其他"占位符
-/// v10: F1System 显示工程类型名（变电工程/建筑工程），F2System 按 SYSCLASSIFYNAME 映射专业名（U=建筑工程等）并按 U→A→S→G 排序
-/// v11: F3System 命名优化——方案A 过滤 SYSTEMNAME 占位符（- / 其它 / 空），方案B 收集 F4 子节点设备名/IFC文件名生成区分性后缀
-/// v12: 修复 DEV SUBDEVICE 虚拟子节点 transformMatrix 为空导致嵌套 DEV 中 MOD 位置错误（丢失 SUBDEVICE 变换）
-/// v13: DEV_SUBDEVICE 虚拟节点仅用于层级树/点击，不作为全量几何查询起点，避免与 DEV SUBDEVICES 递归重复
-/// v14: PARTINDEX 是 DEV SUBDEVICE 的 CBM 语义别名，不作为第二个几何查询起点，避免遗漏局部矩阵的重复部件
-/// v15: IFC 路径解析兼容任意目录（Bentley 导出 IFC 位于 CBM/ 而非 DEV/），旧缓存存有错误的 DEV/ 路径需失效重建
-/// v16: 资源上限、几何 ready 提交协议、线路缓存 session 校验
-/// v19: IFC 空间索引改为逐模型增量构建；运行时 IFC 会话身份与模型事件隔离
-/// v20: 线路 native semantic pack 与大 MOD 仅保留路径元数据，缓存输入边界同步升级
-/// v22: Substation IFC Spatial Semantic Core selective/two-pass scan
-///
-/// `parser_version` 保留为旧版兼容/诊断字段；线路与变电从 v22 起使用
-/// 独立 domain version，避免变电 Semantic Core 升级误伤线路缓存。
-pub const PARSER_VERSION: &str = "gim-parser-v22";
+/// Current database publication marker; semantic validity uses its own domain.
+pub const PARSER_VERSION: &str = "gim-cache-schema-v1";
 pub const LINE_PARSER_VERSION: &str = "gim-line-parser-v1";
-// v25: FAM physical-row identity/provenance and occurrence-aware reachability.
-pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v26";
+pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v27";
 
 #[cfg(test)]
 #[path = "substation_sqlite_tests.rs"]
 mod substation_sqlite_tests;
 
-/// v21/v22 的线路缓存逻辑没有变化。升级到 domain version 时将这些旧的
-/// 共享版本安全迁移为 LINE_PARSER_VERSION，而不是要求线路重新解析。
-const LEGACY_LINE_PARSER_VERSIONS: &[&str] = &["gim-parser-v21", "gim-parser-v22"];
-// Phase 5 changes the persisted substation reference/property semantics.
-// Do not treat pre-Phase-5 shared/domain rows as current when the dedicated
-// substation column is absent; rebuilding is required to populate aliases and
-// case-normalized references correctly.
-const LEGACY_SUBSTATION_PARSER_VERSIONS: &[&str] = &[];
-
-/// Fragments 缓存版本（独立于 GIM parser_version，变更缓存格式时递增）
-/// v2: 修复旧 v1 缓存可能加载不全的问题，强制失效重建
-/// v3: IFC 加载关闭 COORDINATE_TO_ORIGIN，保留工程原始坐标以对齐 MOD（已废弃）
-/// v4: restore IFC coordinateToOrigin=true; MOD/STL alignment handled by project-level sourceToViewer transform
-// 2026-08 P0-3：缓存键由前端传入（fragments-cache-v6|fragments@x.y.z|web-ifc@a.b.c），
-// 绑定 @thatopen/fragments 与 web-ifc 包版本；此常量仅作诊断兜底显示。
+/// Fragments keys supplied by the frontend bind the installed dependencies.
 pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 
 /// GLB 几何缓存版本（方案 C：MOD/STL → glTF 序列化格式版本）
@@ -82,7 +30,7 @@ pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 /// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
 ///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v16-phm-solids";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v17-source-occurrences";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GeometryCacheManifestEntry {
@@ -129,14 +77,14 @@ pub struct GimProjectRecord {
 /// 应用级数据库连接
 pub struct DbState(pub Mutex<Connection>);
 
-/// 获取数据库文件路径：app_data_dir/gim_cache.db
+/// 获取数据库文件路径：app_data_dir/gim_cache_schema_v1.db
 fn db_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
     stdfs::create_dir_all(&dir).map_err(|e| format!("创建应用数据目录失败: {}", e))?;
-    Ok(dir.join("gim_cache.db"))
+    Ok(dir.join("gim_cache_schema_v1.db"))
 }
 
 /// 初始化数据库（建表 + 索引）
@@ -171,6 +119,10 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
             parser_version TEXT,
             line_parser_version TEXT,
             substation_parser_version TEXT,
+            project_type TEXT,
+            substation_capability_summary_json TEXT,
+            substation_index_receipt_json TEXT,
+            substation_properties_complete INTEGER NOT NULL DEFAULT 0,
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL,
             last_opened_at_ms INTEGER NOT NULL,
@@ -191,6 +143,7 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
             entry_path TEXT NOT NULL,
             file_name TEXT NOT NULL,
             entry_type TEXT NOT NULL,
+            local_cache_path TEXT,
             file_size INTEGER NOT NULL,
             created_at_ms INTEGER NOT NULL,
             UNIQUE(project_id, entry_path)
@@ -212,6 +165,7 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
             ifc_file TEXT,
             ifc_guid TEXT,
             transform_matrix TEXT,
+            raw_properties_json TEXT,
             sort_order INTEGER NOT NULL DEFAULT 0,
             created_at_ms INTEGER NOT NULL,
             UNIQUE(project_id, node_key)
@@ -239,6 +193,7 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
             ifc_file TEXT NOT NULL,
             device_count INTEGER NOT NULL,
             device_cbm TEXT NOT NULL,
+            source_design_file TEXT,
             sort_order INTEGER NOT NULL DEFAULT 0,
             created_at_ms INTEGER NOT NULL
         );
@@ -256,6 +211,7 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
             sort_order INTEGER NOT NULL DEFAULT 0,
             created_at_ms INTEGER NOT NULL,
             source_line INTEGER NOT NULL,
+            raw_property_json TEXT,
             UNIQUE(project_id, source_path, source_line)
         );
         CREATE INDEX IF NOT EXISTS idx_substation_fam_property_source ON substation_fam_property(project_id, source_path);
@@ -288,48 +244,6 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_substation_fragment_cache_entry ON substation_fragment_cache(project_id, entry_path);",
     )
     .map_err(|e| format!("初始化数据库表失败: {}", e))?;
-
-    // 兼容旧库：给 substation_gim_entry 增加 local_cache_path 列（已存在则忽略）
-    let _ = conn.execute(
-        "ALTER TABLE substation_gim_entry ADD COLUMN local_cache_path TEXT",
-        [],
-    );
-
-    // 兼容旧库：给 gim_project 增加 parser_version 列（已存在则忽略）
-    let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN parser_version TEXT", []);
-
-    // v22：解析缓存按工程类型隔离。旧库仍只有共享 parser_version；先补列，
-    // 再把 v21/v22 的线路缓存迁移到独立 domain 版本，避免仅因变电
-    // Semantic Core 升级而重建线路 graph/属性/semantic pack。
-    let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN line_parser_version TEXT", []);
-    let _ = conn.execute(
-        "ALTER TABLE gim_project ADD COLUMN substation_parser_version TEXT",
-        [],
-    );
-
-    // v4: 给 gim_project 增加 project_type 列（substation / transmission_line / hybrid / unknown）
-    let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN project_type TEXT", []);
-
-    // 仅迁移可明确识别的旧缓存；未知工程继续由正常校验判定无效，
-    // 不猜测其 domain，避免把变电数据误标为线路或反之。
-    let _ = conn.execute(
-        "UPDATE gim_project
-         SET line_parser_version = ?1
-         WHERE line_parser_version IS NULL
-           AND project_type = 'transmission_line'
-           AND parser_version IN ('gim-parser-v21', 'gim-parser-v22')",
-        params![LINE_PARSER_VERSION],
-    );
-    let _ = conn.execute(
-        "UPDATE gim_project
-         SET substation_parser_version = ?1
-         WHERE substation_parser_version IS NULL
-           AND project_type IN ('substation', 'hybrid')
-           AND parser_version = 'gim-parser-v22'",
-        // This migration records the legacy version, not the current parser.
-        // Old rows lack physical FAM identity and must rebuild under v25.
-        params!["gim-substation-parser-v22"],
-    );
 
     // v4: 线路工程图缓存表
     conn.execute_batch(
@@ -367,6 +281,8 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
             ref_kind TEXT NOT NULL,
             ref_key TEXT,
             ref_value TEXT NOT NULL,
+            normalized_ref_value TEXT,
+            file_name_lower TEXT,
             sort_order INTEGER,
             created_at_ms INTEGER NOT NULL
         );
@@ -380,31 +296,6 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
         );",
     )
     .map_err(|e| format!("初始化线路工程缓存表失败: {}", e))?;
-
-    // v5: powerline_cbm_ref 补字段（归一化结果，避免诊断时再临时猜路径）
-    // 兼容旧库：已存在则忽略
-    let _ = conn.execute(
-        "ALTER TABLE powerline_cbm_ref ADD COLUMN normalized_ref_value TEXT",
-        [],
-    );
-    let _ = conn.execute(
-        "ALTER TABLE powerline_cbm_ref ADD COLUMN file_name_lower TEXT",
-        [],
-    );
-
-    // v5: 线路工程 FAM/DEV 属性缓存表
-    // Substation source evidence is additive; no powerline table/version changes.
-    let _ = conn.execute("ALTER TABLE substation_cbm_node ADD COLUMN raw_properties_json TEXT", []);
-    let _ = conn.execute("ALTER TABLE substation_file_dev_entry ADD COLUMN source_design_file TEXT", []);
-    let _ = conn.execute("ALTER TABLE substation_fam_property ADD COLUMN raw_property_json TEXT", []);
-    let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN substation_capability_summary_json TEXT", []);
-    let _ = conn.execute("ALTER TABLE gim_project ADD COLUMN substation_index_receipt_json TEXT", []);
-    // 两阶段发布：第一阶段提交 entries/树/IFC/关系 + receipt，第二阶段补写
-    // 几何引用与 FAM/DEV 属性；该标记让暖启动知道属性是否已补全。
-    let _ = conn.execute(
-        "ALTER TABLE gim_project ADD COLUMN substation_properties_complete INTEGER NOT NULL DEFAULT 0",
-        [],
-    );
 
     // line_fam_property：display_key 为中文展示键，prop_key 为英文键，prop_value 可含 =
     // line_dev_property：普通 KEY=VALUE，无 display_key
@@ -504,73 +395,7 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("初始化几何引用链缓存表失败: {}", e))?;
 
-    // v7: DEV SUBDEVICE 也有独立 TRANSFORMMATRIXn，旧缓存库需补列。
-    let _ = conn.execute(
-        "ALTER TABLE substation_dev_sub_device ADD COLUMN transform_matrix TEXT",
-        [],
-    );
-    // v8: preserve PHM file-level COLOR.A scale for cache replay (percent vs byte).
-    let _ = conn.execute(
-        "ALTER TABLE substation_phm_solid_model ADD COLUMN phm_color_max_a REAL",
-        [],
-    );
-
-    // v18/P0-3：Fragments 缓存必须绑定源 GIM 内容身份；旧记录填空值并在
-    // validate_fragment_cache 中一律视为失效，由当前工程重新生成。
-    let _ = conn.execute(
-        "ALTER TABLE substation_fragment_cache ADD COLUMN source_gim_sha256 TEXT NOT NULL DEFAULT ''",
-        [],
-    );
-
-    // 2026-08 表名规范化迁移（substation_* / powerline_*）：
-    // 旧表名数据均为可重建的解析缓存，且 PARSER_VERSION 已升版使其失效，
-    // 直接删除回收空间，避免新旧两套表并存。
-    conn.execute_batch(
-        "DROP TABLE IF EXISTS gim_entry;
-         DROP TABLE IF EXISTS cbm_node;
-         DROP TABLE IF EXISTS ifc_model;
-         DROP TABLE IF EXISTS file_dev_entry;
-         DROP TABLE IF EXISTS fam_property;
-         DROP TABLE IF EXISTS dev_property;
-         DROP TABLE IF EXISTS fragment_cache;
-         DROP TABLE IF EXISTS dev_solid_model;
-         DROP TABLE IF EXISTS dev_sub_device;
-         DROP TABLE IF EXISTS phm_solid_model;
-         DROP TABLE IF EXISTS line_cbm_node;
-         DROP TABLE IF EXISTS line_cbm_child;
-         DROP TABLE IF EXISTS line_cbm_ref;
-         DROP TABLE IF EXISTS line_file_stat;
-         DROP TABLE IF EXISTS line_fam_property;
-         DROP TABLE IF EXISTS line_dev_property;",
-    )
-    .map_err(|e| format!("清理旧命名缓存表失败: {}", e))?;
-
-    migrate_fam_rows(conn)?;
     Ok(())
-}
-
-fn migrate_fam_rows(conn: &Connection) -> Result<(), String> {
-    let has_line = conn.prepare("PRAGMA table_info(substation_fam_property)")
-        .map_err(|e| e.to_string())?.query_map([], |row| row.get::<_, String>(1))
-        .map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?.iter().any(|name| name == "source_line");
-    if has_line { return Ok(()); }
-    conn.execute_batch("BEGIN IMMEDIATE;
-        CREATE TABLE substation_fam_property_rows (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL,
-            source_path TEXT NOT NULL, section_name TEXT NOT NULL,
-            prop_key TEXT NOT NULL, prop_value TEXT, sort_order INTEGER NOT NULL DEFAULT 0,
-            created_at_ms INTEGER NOT NULL, raw_property_json TEXT, source_line INTEGER NOT NULL,
-            UNIQUE(project_id, source_path, source_line));
-        INSERT INTO substation_fam_property_rows
-        SELECT id, project_id, source_path, section_name, prop_key, prop_value, sort_order,
-            created_at_ms, raw_property_json,
-            ROW_NUMBER() OVER (PARTITION BY project_id, source_path ORDER BY sort_order, id)
-        FROM substation_fam_property;
-        DROP TABLE substation_fam_property;
-        ALTER TABLE substation_fam_property_rows RENAME TO substation_fam_property;
-        CREATE INDEX idx_substation_fam_property_source ON substation_fam_property(project_id, source_path);
-        COMMIT;") .map_err(|e| { let _ = conn.execute_batch("ROLLBACK"); format!("FAM 原始行迁移失败: {}", e) })
 }
 
 /// 当前时间戳（毫秒，UNIX_EPOCH 起）
@@ -581,19 +406,9 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// 校验 domain 版本；第二个参数用于兼容 domain 列尚未迁移的旧共享
-/// `parser_version`。迁移完成后新缓存只依赖独立列。
-fn parser_domain_version_matches(
-    stored_domain: Option<&str>,
-    stored_legacy: Option<&str>,
-    current: &str,
-    legacy: &[&str],
-) -> bool {
-    stored_domain == Some(current)
-        || (stored_domain.is_none()
-            && stored_legacy
-                .map(|value| legacy.iter().any(|candidate| *candidate == value))
-                .unwrap_or(false))
+/// Only an exact current domain contract can restore a semantic cache.
+fn parser_domain_version_matches(stored: Option<&str>, current: &str) -> bool {
+    stored == Some(current)
 }
 
 fn cache_miss_reason(reasons: Vec<String>) -> Option<String> {
@@ -658,42 +473,16 @@ fn upsert_gim_project_inner(
     let lock_ms = lock_started.elapsed().as_millis();
     let now = now_ms();
 
-    // 检查是否已存在，同时读取旧元信息判断源 GIM 文件是否变化。
-    // 先做轻量精确匹配，再对旧版本可能保存的非 canonical 路径做一次
-    // canonical identity 比较，避免升级后同一文件出现重复项目记录。
-    let exact: Option<(i64, String, u64, u64, String)> = conn.query_row(
-        "SELECT id, path, size, modified_ms, sha256 FROM gim_project WHERE path = ?1 LIMIT 1",
+    // Current records always use the canonical identity computed above.
+    let existing: Option<(i64, u64, u64, String)> = conn.query_row(
+        "SELECT id, size, modified_ms, sha256 FROM gim_project WHERE path = ?1 LIMIT 1",
         params![path_identity],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     ).optional().map_err(|e| format!("查询项目记录失败: {}", e))?;
-    // Snapshot legacy rows under the lock; filesystem operations must not hold it.
-    let candidates: Vec<(i64, String, u64, u64, String)> = if exact.is_none() {
-        let mut stmt = conn.prepare("SELECT id, path, size, modified_ms, sha256 FROM gim_project")
-            .map_err(|e| format!("查询项目记录失败: {}", e))?;
-        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))
-            .map_err(|e| format!("读取项目记录失败: {}", e))?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| format!("读取项目记录失败: {}", e))?
-    } else { Vec::new() };
-    drop(conn);
-    let fallback_started = std::time::Instant::now();
-    let candidate_count = candidates.len();
-    let legacy = candidates.into_iter().find(|candidate| candidate.1 == path_identity
-        || crate::canonical_identity(Path::new(&candidate.1)).map(|(_, id)| id == path_identity).unwrap_or(false));
-    let fallback_ms = fallback_started.elapsed().as_millis();
-    let relock_started = std::time::Instant::now();
-    let conn = state.0.lock().map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    // Recheck after releasing the lock: a concurrent open may have inserted or updated this record.
-    let current: Option<(i64, String, u64, u64, String)> = conn.query_row(
-        "SELECT id, path, size, modified_ms, sha256 FROM gim_project WHERE path = ?1 OR id = ?2 ORDER BY path = ?1 DESC LIMIT 1",
-        params![path_identity, exact.as_ref().or(legacy.as_ref()).map(|r| r.0)],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-    ).optional().map_err(|e| format!("复核项目记录失败: {}", e))?;
-    let existing = current;
-    let relock_ms = relock_started.elapsed().as_millis();
     let check_ms = started.elapsed().as_millis();
     let mut source_event = None;
 
-    let result = if let Some((id, old_path, old_size, old_modified_ms, old_sha256)) = existing {
+    let result = if let Some((id, old_size, old_modified_ms, old_sha256)) = existing {
         // 源 GIM 文件是否变化：size / modified_ms / sha256 任一不同即视为变化
         let file_changed = old_size != info.size
             || old_modified_ms != info.modified_ms
@@ -709,13 +498,6 @@ fn upsert_gim_project_inner(
             .map_err(|e| format!("更新项目记录失败: {}", e))?;
             source_event = Some("changed");
         } else {
-            if old_path != path_identity {
-                conn.execute(
-                    "UPDATE gim_project SET path = ?1, updated_at_ms = ?2 WHERE id = ?3",
-                    params![path_identity, now, id],
-                )
-                .map_err(|e| format!("规范化项目路径失败: {}", e))?;
-            }
             // 源文件未变化时不要为了 last_opened_at_ms 强制写库。打开 GIM 的
             // 主流程只需要 project_id 和已有 parser_version；若另一个旧实例
             // 暂时持有 SQLite 写锁，非必要写入会阻断缓存命中和后续读取。
@@ -738,8 +520,8 @@ fn upsert_gim_project_inner(
     drop(conn);
     let mut stdout = std::io::stdout().lock();
     write_project_diagnostic(&mut stdout, format_args!(
-        "[GIM project check] canonical_ms={} lock_ms={} fallback_count={} fallback_ms={} relock_ms={} total_ms={}",
-        canonical_ms, lock_ms, candidate_count, fallback_ms, relock_ms, check_ms));
+        "[GIM project check] canonical_ms={} lock_ms={} total_ms={}",
+        canonical_ms, lock_ms, check_ms));
     if let Some(event) = source_event {
         write_project_diagnostic(&mut stdout, format_args!("[GIM project source] {}", event));
     }
@@ -1379,7 +1161,6 @@ pub(crate) const LINE_SEMANTIC_PACK_FILE: &str = ".gim-line-semantic.pack";
 pub(crate) const LINE_SEMANTIC_INDEX_FILE: &str = ".gim-line-semantic.index";
 const LINE_SEMANTIC_INDEX_MAGIC: &[u8; 4] = b"GLSI";
 const LINE_SEMANTIC_INDEX_VERSION: u8 = 2;
-const LINE_SEMANTIC_INDEX_LEGACY_VERSION: u8 = 1;
 const LINE_SEMANTIC_INDEX_HEADER: usize = 9; // magic + version + count
 const LINE_SEMANTIC_INDEX_FLAG_PACKED: u8 = 0x01;
 /// semantic pack 是线路首屏语义输入，不应成为一次 IPC 的无界内存源。
@@ -1898,8 +1679,7 @@ fn read_pack_index(
         .map_err(|e| format!("读取{label}索引失败: {e}"))?;
     if bytes.len() < LINE_SEMANTIC_INDEX_HEADER
         || &bytes[..4] != LINE_SEMANTIC_INDEX_MAGIC
-        || (bytes[4] != LINE_SEMANTIC_INDEX_VERSION
-            && bytes[4] != LINE_SEMANTIC_INDEX_LEGACY_VERSION)
+        || bytes[4] != LINE_SEMANTIC_INDEX_VERSION
     {
         return Err(format!("{label}索引头无效"));
     }
@@ -1921,13 +1701,7 @@ fn read_pack_index(
         let entry_end = offset
             .checked_add(path_len)
             .and_then(|v| v.checked_add(16))
-            .and_then(|v| {
-                if bytes[4] == LINE_SEMANTIC_INDEX_VERSION {
-                    v.checked_add(1)
-                } else {
-                    Some(v)
-                }
-            })
+            .and_then(|v| v.checked_add(1))
             .ok_or_else(|| "pack 索引条目偏移溢出".to_string())?;
         if path_len == 0 || path_len > 4096 || entry_end > bytes.len() {
             return Err("pack 索引路径或长度无效".to_string());
@@ -1943,17 +1717,10 @@ fn read_pack_index(
         let entry_size_end = offset + 8;
         let entry_size = u64::from_le_bytes(bytes[offset..entry_size_end].try_into().unwrap());
         offset = entry_size_end;
-        let packed = if bytes[4] == LINE_SEMANTIC_INDEX_VERSION {
-            let flags = bytes[offset];
-            offset += 1;
-            if flags & !LINE_SEMANTIC_INDEX_FLAG_PACKED != 0 {
-                return Err("pack 索引 flags 无效".to_string());
-            }
-            flags & LINE_SEMANTIC_INDEX_FLAG_PACKED != 0
-        } else {
-            // v1 索引只包含 pack 数据，因此旧条目全部视为 packed。
-            true
-        };
+        let flags = bytes[offset];
+        offset += 1;
+        if flags & !LINE_SEMANTIC_INDEX_FLAG_PACKED != 0 { return Err("pack index flags invalid".to_string()); }
+        let packed = flags & LINE_SEMANTIC_INDEX_FLAG_PACKED != 0;
         let entry = LineSemanticPackEntry {
             path: path.clone(),
             offset: entry_offset,
@@ -3309,7 +3076,7 @@ pub async fn read_glb_file(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// Per-template derived domain; never publishes the legacy whole-project marker.
+/// Per-template derived domain; publication is independent of whole-project geometry.
 fn validate_device_lod_entry<'a>(entry: &'a str, source_sha: &str) -> Result<(&'a str, String), String> {
     let (store, key) = entry.split_once('/').ok_or("设备缓存键缺少域")?;
     let parts: Vec<&str> = key.split('|').collect();
@@ -3646,7 +3413,7 @@ fn validate_geometry_manifest_entry_shape(
     let normalized_path = normalize_cache_lookup_path(&entry.entry_path);
     validate_entry_path(&entry.entry_path)
         .map_err(|e| format!("GLB manifest entry_path 无效: {} ({})", entry.entry_path, e))?;
-    if !normalized_path.starts_with("dev/") {
+    if !normalized_path.ends_with(".dev") {
         return Err(format!("GLB manifest 只允许 DEV 条目: {}", entry.entry_path));
     }
     if !seen.insert(normalized_path) {
@@ -3806,7 +3573,7 @@ pub fn invalidate_glb_cache_entry(
 ) -> Result<(), String> {
     ensure_cache_project_id(project_id)?;
     let normalized = normalize_cache_lookup_path(&entry_path);
-    if !normalized.starts_with("dev/") {
+    if !normalized.ends_with(".dev") {
         return Err("GLB 单项失效只允许 DEV 条目".to_string());
     }
     validate_entry_path(&entry_path)?;
@@ -4666,100 +4433,6 @@ pub struct LineGraphPayload {
     pub children: Vec<LineCbmChildPayload>,
     pub refs: Vec<LineCbmRefPayload>,
     pub file_stats: Vec<LineFileStatPayload>,
-}
-
-/// Tauri command：保存线路工程图缓存（事务：先删后插 + 更新 project_type）
-#[tauri::command]
-pub fn save_line_gim_graph(
-    state: tauri::State<'_, DbState>,
-    payload: LineGraphPayload,
-) -> Result<(), String> {
-    validate_line_graph_payload(&payload)?;
-    let mut conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    ensure_project_exists(&conn, payload.project_id)?;
-    ensure_project_source_sha(&conn, payload.project_id, payload.source_sha256.as_deref())?;
-    let tx = conn
-        .transaction()
-        .map_err(|e| format!("开启事务失败: {}", e))?;
-    let now = now_ms();
-    let pid = payload.project_id;
-
-    // 先删除旧线路索引
-    tx.execute(
-        "DELETE FROM powerline_cbm_node WHERE project_id = ?1",
-        params![pid],
-    )
-    .map_err(|e| format!("清理 powerline_cbm_node 失败: {}", e))?;
-    tx.execute(
-        "DELETE FROM powerline_cbm_child WHERE project_id = ?1",
-        params![pid],
-    )
-    .map_err(|e| format!("清理 powerline_cbm_child 失败: {}", e))?;
-    tx.execute(
-        "DELETE FROM powerline_cbm_ref WHERE project_id = ?1",
-        params![pid],
-    )
-    .map_err(|e| format!("清理 powerline_cbm_ref 失败: {}", e))?;
-    tx.execute(
-        "DELETE FROM powerline_file_stat WHERE project_id = ?1",
-        params![pid],
-    )
-    .map_err(|e| format!("清理 powerline_file_stat 失败: {}", e))?;
-
-    // powerline_cbm_node
-    for n in &payload.nodes {
-        tx.execute(
-            "INSERT INTO powerline_cbm_node (project_id, path, name, entity_name, classify_name, raw_props_json, sort_order, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![pid, n.path, n.name, n.entity_name, n.classify_name, n.raw_props_json, n.sort_order, now],
-        )
-        .map_err(|e| format!("插入 powerline_cbm_node 失败: {}", e))?;
-    }
-
-    // powerline_cbm_child
-    for c in &payload.children {
-        tx.execute(
-            "INSERT INTO powerline_cbm_child (project_id, parent_path, child_path, sort_order, ref_type, extra, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![pid, c.parent_path, c.child_path, c.sort_order, c.ref_type, c.extra, now],
-        )
-        .map_err(|e| format!("插入 powerline_cbm_child 失败: {}", e))?;
-    }
-
-    // line_cbm_ref（v5: 同时写入 normalized_ref_value / file_name_lower）
-    for r in &payload.refs {
-        tx.execute(
-            "INSERT INTO powerline_cbm_ref (project_id, node_path, ref_kind, ref_key, ref_value, sort_order, normalized_ref_value, file_name_lower, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![pid, r.node_path, r.ref_kind, r.ref_key, r.ref_value, r.sort_order, r.normalized_ref_value, r.file_name_lower, now],
-        )
-        .map_err(|e| format!("插入 powerline_cbm_ref 失败: {}", e))?;
-    }
-
-    // powerline_file_stat
-    for f in &payload.file_stats {
-        tx.execute(
-            "INSERT INTO powerline_file_stat (project_id, file_type, count)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(project_id, file_type) DO UPDATE SET count = ?3",
-            params![pid, f.file_type, f.count],
-        )
-        .map_err(|e| format!("插入 powerline_file_stat 失败: {}", e))?;
-    }
-
-    // 兼容旧命令仅写入图表，但不再宣称缓存 ready；生产流程必须使用
-    // begin/chunk/finish 三阶段协议完成属性完整性校验。
-    tx.execute(
-        "UPDATE gim_project SET parser_version = NULL, line_parser_version = NULL, project_type = ?1, updated_at_ms = ?2 WHERE id = ?3",
-        params![payload.project_type, now, pid],
-    )
-    .map_err(|e| format!("更新 project_type 失败: {}", e))?;
-
-    tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
-    Ok(())
 }
 
 // ===== v5: 线路工程 FAM/DEV 属性缓存 =====
@@ -5860,15 +5533,11 @@ fn validate_gim_cache_blocking(
         .unwrap_or(true);
     let line_parser_version_match = parser_domain_version_matches(
         stored_line_parser_version.as_deref(),
-        stored_parser_version.as_deref(),
         LINE_PARSER_VERSION,
-        LEGACY_LINE_PARSER_VERSIONS,
     );
     let substation_parser_version_match = parser_domain_version_matches(
         stored_substation_parser_version.as_deref(),
-        stored_parser_version.as_deref(),
         SUBSTATION_PARSER_VERSION,
-        LEGACY_SUBSTATION_PARSER_VERSIONS,
     );
     let parser_version_match = if is_line {
         line_parser_version_match
@@ -6279,15 +5948,11 @@ pub fn get_project_cache_diagnostic(
     let stored_substation_parser_version = project.8.clone();
     let line_parser_version_match = parser_domain_version_matches(
         stored_line_parser_version.as_deref(),
-        project.6.as_deref(),
         LINE_PARSER_VERSION,
-        LEGACY_LINE_PARSER_VERSIONS,
     );
     let substation_parser_version_match = parser_domain_version_matches(
         stored_substation_parser_version.as_deref(),
-        project.6.as_deref(),
         SUBSTATION_PARSER_VERSION,
-        LEGACY_SUBSTATION_PARSER_VERSIONS,
     );
     let parser_version_match = if is_line {
         line_parser_version_match
@@ -7230,567 +6895,6 @@ fn save_substation_semantic_rest_connection(
     Ok(())
 }
 
-/// 可到达的几何源（MOD/STL 路径 + 其变换矩阵来源）
-#[derive(Debug, Serialize)]
-pub struct ReachableGeometry {
-    pub root_occurrence: String,
-    pub assembly_path: String,
-    pub reference_path: String,
-    /// 产生该几何引用的 DEV 路径（规范化为 DEV/ 前缀）。用于 partial
-    /// raw fallback 只恢复失败 DEV 的可达几何。
-    pub dev_path: String,
-    /// MOD/STL 文件路径（如 "MOD/abc.mod"）
-    pub geometry_path: String,
-    /// 几何实例唯一键。同一 MOD/STL 文件可被不同矩阵多次实例化。
-    pub instance_key: String,
-    /// CBM/DEV/SUBDEVICE/PHM 累积放置矩阵（列主序 16 值，逗号分隔）
-    pub placement_transform_matrix: Option<String>,
-    /// DEV SOLIDMODEL 的 TRANSFORMMATRIX（列主序 16 值，逗号分隔）
-    pub dev_transform_matrix: Option<String>,
-    /// PHM SOLIDMODEL 的 TRANSFORMMATRIX（列主序 16 值，逗号分隔）
-    pub phm_transform_matrix: Option<String>,
-    /// PHM COLORn 原始串（如 "128,128,128,100"）
-    pub phm_color: Option<String>,
-    /// PHM 文件内 COLORn.A 的最大值，用于透明度刻度判定
-    pub phm_color_max_a: Option<f64>,
-}
-
-#[derive(Clone)]
-struct CbmGeometryNode {
-    parent_key: Option<String>,
-    entity_name: Option<String>,
-    dev_path: Option<String>,
-    local_matrix: [f64; 16],
-}
-
-/// 查询项目中可从 CBM 到达的 MOD/STL 几何源。
-///
-/// 沿引用链查询：substation_cbm_node.dev_path → substation_dev_solid_model → phm_solid_model，
-/// 以及 substation_cbm_node.dev_path → substation_dev_sub_device → substation_dev_solid_model → phm_solid_model。
-///
-/// 一次 SQL 查询替代数千次逐个文件 I/O。
-///
-/// - include_mod（默认 true）：返回 .mod 文件
-/// - include_stl（默认 false）：返回 .stl 文件
-#[tauri::command]
-pub fn get_reachable_geometry(
-    state: tauri::State<'_, DbState>,
-    project_id: i64,
-    include_mod: Option<bool>,
-    include_stl: Option<bool>,
-    dev_paths: Option<Vec<String>>,
-) -> Result<Vec<ReachableGeometry>, String> {
-    use std::time::Instant;
-
-    let total_t0 = Instant::now();
-    let include_mod = include_mod.unwrap_or(true);
-    let include_stl = include_stl.unwrap_or(false);
-    let dev_filter = if let Some(paths) = dev_paths {
-        if paths.len() > 50_000 {
-            return Err("DEV 过滤路径数量超过安全上限".to_string());
-        }
-        let mut normalized = std::collections::HashSet::with_capacity(paths.len());
-        for path in paths {
-            validate_entry_path(&path)?;
-            if !path.to_ascii_lowercase().ends_with(".dev") {
-                return Err(format!("DEV 过滤路径类型无效: {}", path));
-            }
-            // Comparison keys are case-insensitive; retain the original
-            // spelling only in the returned diagnostic payload.
-            normalized.insert(normalize_dev_path(&path).to_ascii_lowercase());
-        }
-        Some(normalized)
-    } else {
-        None
-    };
-
-    debug_perf_log!(
-        "[get_reachable_geometry] start project_id={} include_mod={} include_stl={}",
-        project_id,
-        include_mod,
-        include_stl
-    );
-
-    let lock_t0 = Instant::now();
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-    ensure_project_exists(&conn, project_id)?;
-    debug_perf_log!(
-        "[get_reachable_geometry] lock acquired: {}ms",
-        lock_t0.elapsed().as_millis()
-    );
-
-    // 快速短路：两个都 false 仍需先完成 project_id 校验，避免把不存在
-    // 的项目静默当成空结果返回。
-    if !include_mod && !include_stl {
-        debug_perf_log!("[get_reachable_geometry] done total=0ms rows=0 (both false)");
-        return Ok(Vec::new());
-    }
-
-    let results = query_reachable_geometry_filtered(
-        &conn,
-        project_id,
-        include_mod,
-        include_stl,
-        dev_filter.as_ref(),
-    )?;
-
-    debug_perf_log!(
-        "[get_reachable_geometry] done total={}ms rows={} include_mod={} include_stl={}",
-        total_t0.elapsed().as_millis(),
-        results.len(),
-        include_mod,
-        include_stl
-    );
-
-    Ok(results)
-}
-
-#[allow(dead_code)]
-fn query_reachable_geometry(
-    conn: &Connection,
-    project_id: i64,
-    include_mod: bool,
-    include_stl: bool,
-) -> Result<Vec<ReachableGeometry>, String> {
-    query_reachable_geometry_filtered(conn, project_id, include_mod, include_stl, None)
-}
-
-fn query_reachable_geometry_filtered(
-    conn: &Connection,
-    project_id: i64,
-    include_mod: bool,
-    include_stl: bool,
-    dev_filter: Option<&std::collections::HashSet<String>>,
-) -> Result<Vec<ReachableGeometry>, String> {
-    use std::collections::{HashMap, HashSet, VecDeque};
-    use std::time::Instant;
-
-    // Keep the helper safe for both the Tauri command and direct internal
-    // callers/tests: normalize again here instead of relying on callers to
-    // have already lower-cased the DEV paths.
-    let normalized_dev_filter = dev_filter.map(|filter| {
-        filter
-            .iter()
-            .map(|path| normalize_dev_path(path).to_ascii_lowercase())
-            .collect::<HashSet<String>>()
-    });
-
-    // Avoid SQLite recursive CTEs / multi-table joins here. In the app this
-    // command runs while rendering is active, and SQLite may spend a long time
-    // materializing a join before yielding the first row. The indexed tables are
-    // small enough to join deterministically in Rust.
-    let cbm_t0 = Instant::now();
-    let mut cbm_stmt = conn
-        .prepare(
-            "SELECT node_key, parent_key, entity_name, dev_path, transform_matrix
-             FROM substation_cbm_node
-             WHERE project_id = ?1
-                AND (entity_name IS NULL OR (LOWER(entity_name) != 'dev_subdevice' AND LOWER(entity_name) != 'partindex'))",
-        )
-        .map_err(|e| format!("预处理 substation_cbm_node dev_path 失败: {}", e))?;
-    let cbm_rows = cbm_stmt
-        .query_map(params![project_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-            ))
-        })
-        .map_err(|e| format!("查询 substation_cbm_node dev_path 失败: {}", e))?;
-    let mut cbm_nodes: HashMap<String, CbmGeometryNode> = HashMap::new();
-    for row in cbm_rows {
-        let (node_key, parent_key, entity_name, dev_path, transform_matrix) =
-            row.map_err(|e| format!("读取 substation_cbm_node 行失败: {}", e))?;
-        cbm_nodes.insert(
-            node_key,
-            CbmGeometryNode {
-                parent_key,
-                entity_name,
-                dev_path,
-                local_matrix: parse_matrix_opt(transform_matrix.as_deref()),
-            },
-        );
-    }
-
-    let mut dev_instances: HashMap<String, Vec<([f64; 16], String, String, String)>> = HashMap::new();
-    let mut dev_instance_seen: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<(String, [f64; 16], HashSet<String>, usize, String, String, String)> = VecDeque::new();
-
-    let mut cbm_matrix_cache: HashMap<String, [f64; 16]> = HashMap::new();
-    for (node_key, node) in &cbm_nodes {
-        let Some(dev_path_raw) = node.dev_path.as_deref() else {
-            continue;
-        };
-        if dev_path_raw.trim().is_empty() {
-            continue;
-        }
-        if is_virtual_dev_subdevice(node.entity_name.as_deref()) {
-            continue;
-        }
-        let dev_path = normalize_dev_path(dev_path_raw).to_ascii_lowercase();
-        let matrix = cumulative_cbm_matrix(
-            node_key,
-            &cbm_nodes,
-            &mut cbm_matrix_cache,
-            &mut HashSet::new(),
-        );
-        let key = node_key.clone();
-        if dev_instance_seen.insert(key) {
-            dev_instances
-                .entry(dev_path.clone())
-                .or_default()
-                .push((matrix, node_key.clone(), String::new(), String::new()));
-            queue.push_back((dev_path.clone(), matrix, HashSet::from([dev_path]), 0, node_key.clone(), String::new(), String::new()));
-        }
-    }
-    debug_perf_log!(
-        "[get_reachable_geometry] cbm dev instances: {}ms devs={} instances={}",
-        cbm_t0.elapsed().as_millis(),
-        dev_instances.len(),
-        dev_instance_seen.len()
-    );
-
-    let sub_t0 = Instant::now();
-    let mut sub_edges: HashMap<String, Vec<(String, [f64; 16], String)>> = HashMap::new();
-    let mut sub_stmt = conn
-        .prepare(
-            "SELECT dev_path, child_dev_path, transform_matrix, 'sub:' || sort_order
-             FROM substation_dev_sub_device
-             WHERE project_id = ?1
-             UNION ALL
-             SELECT dev_path, solid_model_path, transform_matrix, 'solid:' || sort_order FROM substation_dev_solid_model
-             WHERE project_id = ?1 AND LOWER(solid_model_path) LIKE '%.dev'",
-        )
-        .map_err(|e| format!("预处理 substation_dev_sub_device 失败: {}", e))?;
-    let sub_rows = sub_stmt
-        .query_map(params![project_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })
-        .map_err(|e| format!("查询 substation_dev_sub_device 失败: {}", e))?;
-    for row in sub_rows {
-        let (parent, child, transform_matrix, edge) =
-            row.map_err(|e| format!("读取 substation_dev_sub_device 行失败: {}", e))?;
-        sub_edges
-            .entry(normalize_dev_path(&parent).to_ascii_lowercase())
-            .or_default()
-            .push((
-                normalize_dev_path(&child).to_ascii_lowercase(),
-                parse_matrix_opt(transform_matrix.as_deref()),
-                edge,
-            ));
-    }
-
-    let mut child_count = 0usize;
-    while let Some((parent_dev, parent_matrix, ancestors, depth, root, assembly, reference)) = queue.pop_front() {
-        if depth > 512 { return Err("DEV 递归深度超过安全上限".into()); }
-        if let Some(children) = sub_edges.get(&parent_dev) {
-            for (child_dev, child_local_matrix, edge) in children {
-                if ancestors.contains(child_dev) { continue; }
-                let child_matrix = multiply_matrices(&parent_matrix, child_local_matrix);
-                let child_assembly = if assembly.is_empty() { edge.clone() } else { format!("{}/{}", assembly, edge) };
-                let child_reference = format!("{}/{}", reference, edge);
-                let key = format!("{}{}", root, child_reference);
-                if dev_instance_seen.insert(key) {
-                    dev_instances
-                        .entry(child_dev.clone())
-                        .or_default()
-                        .push((child_matrix, root.clone(), child_assembly.clone(), child_reference.clone()));
-                    let mut branch = ancestors.clone();
-                    branch.insert(child_dev.clone());
-                    if dev_instance_seen.len() > 500_000 { return Err("DEV 实例数超过安全上限".into()); }
-                    queue.push_back((child_dev.clone(), child_matrix, branch, depth + 1, root.clone(), child_assembly, child_reference));
-                    child_count += 1;
-                }
-            }
-        }
-    }
-    debug_perf_log!(
-        "[get_reachable_geometry] sub devices: {}ms child_added={} reachable_devs={} instances={}",
-        sub_t0.elapsed().as_millis(),
-        child_count,
-        dev_instances.len(),
-        dev_instance_seen.len()
-    );
-
-    let dsm_t0 = Instant::now();
-    // Filter root occurrences before selecting their nested DEV leaves.
-    let mut phm_refs: Vec<(String, [f64; 16], Option<String>, String, String, String, String)> = Vec::new();
-    let mut dsm_stmt = conn
-        .prepare(
-            "SELECT dev_path, solid_model_path, transform_matrix, sort_order
-             FROM substation_dev_solid_model
-             WHERE project_id = ?1",
-        )
-        .map_err(|e| format!("预处理 substation_dev_solid_model 失败: {}", e))?;
-    let dsm_rows = dsm_stmt
-        .query_map(params![project_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        })
-        .map_err(|e| format!("查询 substation_dev_solid_model 失败: {}", e))?;
-    let mut dsm_count = 0usize;
-    for row in dsm_rows {
-        let (dev_path, solid_model_path, transform_matrix, ordinal) =
-            row.map_err(|e| format!("读取 substation_dev_solid_model 行失败: {}", e))?;
-        if !solid_model_path.to_ascii_lowercase().ends_with(".phm") { continue; }
-        let dev_path_key = normalize_dev_path(&dev_path).to_ascii_lowercase();
-        if let Some(instances) = dev_instances.get(&dev_path_key) {
-            let solid_matrix = parse_matrix_opt(transform_matrix.as_deref());
-            for (base_matrix, root, assembly, reference) in instances {
-                if let Some(filter) = normalized_dev_filter.as_ref() {
-                    let root_dev = cbm_nodes.get(root).and_then(|node| node.dev_path.as_deref()).unwrap_or("");
-                    if !filter.contains(&normalize_dev_path(root_dev).to_ascii_lowercase()) { continue; }
-                }
-                phm_refs.push((
-                    normalize_phm_path(&solid_model_path),
-                    multiply_matrices(base_matrix, &solid_matrix),
-                    transform_matrix.clone(),
-                    normalize_dev_path(&dev_path),
-                    root.clone(), assembly.clone(), format!("{}/solid:{}", reference, ordinal),
-                ));
-                dsm_count += 1;
-            }
-        }
-    }
-    debug_perf_log!(
-        "[get_reachable_geometry] dev solid model refs: {}ms rows={}",
-        dsm_t0.elapsed().as_millis(),
-        dsm_count
-    );
-
-    let psm_t0 = Instant::now();
-    let mut phm_to_geometry: HashMap<
-        String,
-        Vec<(String, Option<String>, Option<String>, Option<f64>, i64)>,
-    > = HashMap::new();
-    let mut psm_stmt = conn
-        .prepare(
-            "SELECT phm_path, solid_model_path, transform_matrix, color, phm_color_max_a, sort_order
-             FROM substation_phm_solid_model
-             WHERE project_id = ?1",
-        )
-        .map_err(|e| format!("预处理 substation_phm_solid_model 失败: {}", e))?;
-    let psm_rows = psm_stmt
-        .query_map(params![project_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<f64>>(4)?,
-                row.get::<_, i64>(5)?,
-            ))
-        })
-        .map_err(|e| format!("查询 substation_phm_solid_model 失败: {}", e))?;
-    let mut psm_count = 0usize;
-    for row in psm_rows {
-        let (phm_path, solid_model_path, transform_matrix, color, color_max_a, ordinal) =
-            row.map_err(|e| format!("读取 substation_phm_solid_model 行失败: {}", e))?;
-        let lower = solid_model_path.to_ascii_lowercase();
-        if lower.ends_with(".phm") || (include_mod && (lower.ends_with(".mod") || lower.ends_with(".gl")))
-            || (include_stl && lower.ends_with(".stl")) {
-            phm_to_geometry
-                .entry(normalize_phm_path(&phm_path).to_ascii_lowercase())
-                .or_default()
-                .push((
-                    if lower.ends_with(".phm") { normalize_phm_path(&solid_model_path) } else { normalize_geometry_path(&solid_model_path) },
-                    transform_matrix,
-                    color,
-                    color_max_a, ordinal,
-                ));
-            psm_count += 1;
-        }
-    }
-    debug_perf_log!(
-        "[get_reachable_geometry] phm solid models: {}ms rows={}",
-        psm_t0.elapsed().as_millis(),
-        psm_count
-    );
-
-    let collect_t0 = Instant::now();
-    let mut results = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    for (phm_path, dev_placement_matrix, dev_transform_matrix, dev_path, root, assembly, reference) in phm_refs {
-        collect_phm_geometry(
-            &phm_path, &dev_placement_matrix, &dev_transform_matrix, &dev_path,
-            &root, &assembly, &reference, &phm_to_geometry, &mut HashSet::new(), 0, &mut seen, &mut results,
-        )?;
-    }
-    results.sort_by(|a, b| a.geometry_path.cmp(&b.geometry_path).then_with(|| a.instance_key.cmp(&b.instance_key)));
-    debug_perf_log!(
-        "[get_reachable_geometry] collect rows: {}ms rows={}",
-        collect_t0.elapsed().as_millis(),
-        results.len()
-    );
-
-    Ok(results)
-}
-
-type PhmGeometryEdges = HashMap<String, Vec<(String, Option<String>, Option<String>, Option<f64>, i64)>>;
-
-// Same parent × edge, branch-local cycle guard and leaf COLOR semantics as TS discovery.
-fn collect_phm_geometry(
-    path: &str, parent: &[f64; 16], dev_transform: &Option<String>, dev_path: &str,
-    root: &str, assembly: &str, reference: &str,
-    edges: &PhmGeometryEdges, visiting: &mut HashSet<String>, depth: usize,
-    seen: &mut HashSet<String>, results: &mut Vec<ReachableGeometry>,
-) -> Result<(), String> {
-    if depth > 512 { return Err("PHM 递归深度超过 512".into()); }
-    let key = normalize_phm_path(path).to_ascii_lowercase();
-    if !visiting.insert(key.clone()) { return Ok(()); }
-    if let Some(targets) = edges.get(&key) {
-        for (target, transform, color, max_a, ordinal) in targets {
-            let leaf_reference = format!("{}/phm:{}", reference, ordinal);
-            let matrix = multiply_matrices(parent, &parse_matrix_opt(transform.as_deref()));
-            if target.to_ascii_lowercase().ends_with(".phm") {
-                collect_phm_geometry(target, &matrix, dev_transform, dev_path, root, assembly, &leaf_reference, edges, visiting, depth + 1, seen, results)?;
-                continue;
-            }
-            let placement = matrix_to_string(&matrix);
-            let instance = format!("raw:{}{}", root, leaf_reference);
-            if seen.insert(instance.clone()) {
-                if results.len() >= 500_000 { return Err("几何实例数超过安全上限".into()); }
-                results.push(ReachableGeometry {
-                    root_occurrence: root.to_string(), assembly_path: assembly.to_string(), reference_path: leaf_reference,
-                    dev_path: dev_path.to_string(), geometry_path: target.clone(), instance_key: instance,
-                    placement_transform_matrix: Some(placement), dev_transform_matrix: dev_transform.clone(),
-                    phm_transform_matrix: transform.clone(), phm_color: color.clone(), phm_color_max_a: *max_a,
-                });
-            }
-        }
-    }
-    visiting.remove(&key);
-    Ok(())
-}
-
-fn identity_matrix() -> [f64; 16] {
-    [
-        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-    ]
-}
-
-fn parse_matrix_opt(raw: Option<&str>) -> [f64; 16] {
-    let Some(raw) = raw else {
-        return identity_matrix();
-    };
-    let values: Vec<f64> = raw
-        .split(',')
-        .map(|part| part.trim().parse::<f64>())
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap_or_default();
-    if values.len() != 16 || values.iter().any(|v| !v.is_finite()) {
-        return identity_matrix();
-    }
-
-    let mut matrix = [0.0; 16];
-    matrix.copy_from_slice(&values);
-    matrix
-}
-
-fn multiply_matrices(a: &[f64; 16], b: &[f64; 16]) -> [f64; 16] {
-    let mut out = [0.0; 16];
-    // Three.js Matrix4 uses column-major storage. This computes out = a * b.
-    for col in 0..4 {
-        for row in 0..4 {
-            out[col * 4 + row] = a[row] /* 0*4+row */ * b[col * 4 + 0]
-                + a[1 * 4 + row] * b[col * 4 + 1]
-                + a[2 * 4 + row] * b[col * 4 + 2]
-                + a[3 * 4 + row] * b[col * 4 + 3];
-        }
-    }
-    out
-}
-
-fn matrix_to_string(matrix: &[f64; 16]) -> String {
-    matrix
-        .iter()
-        .map(|v| format!("{:.6}", v))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-
-fn is_virtual_dev_subdevice(entity_name: Option<&str>) -> bool {
-    entity_name
-        .map(|name| name.eq_ignore_ascii_case("DEV_SUBDEVICE"))
-        .unwrap_or(false)
-}
-
-fn cumulative_cbm_matrix(
-    node_key: &str,
-    nodes: &std::collections::HashMap<String, CbmGeometryNode>,
-    cache: &mut std::collections::HashMap<String, [f64; 16]>,
-    visiting: &mut std::collections::HashSet<String>,
-) -> [f64; 16] {
-    if let Some(matrix) = cache.get(node_key) {
-        return *matrix;
-    }
-    if !visiting.insert(node_key.to_string()) {
-        return identity_matrix();
-    }
-
-    let Some(node) = nodes.get(node_key) else {
-        visiting.remove(node_key);
-        return identity_matrix();
-    };
-
-    let parent_matrix = node
-        .parent_key
-        .as_deref()
-        .and_then(|parent_key| nodes.get(parent_key).map(|_| parent_key.to_string()))
-        .map(|parent_key| cumulative_cbm_matrix(&parent_key, nodes, cache, visiting))
-        .unwrap_or_else(identity_matrix);
-    let matrix = multiply_matrices(&parent_matrix, &node.local_matrix);
-    cache.insert(node_key.to_string(), matrix);
-    visiting.remove(node_key);
-    matrix
-}
-
-fn normalize_dev_path(path: &str) -> String {
-    normalize_prefixed_path(path, "DEV")
-}
-
-fn normalize_phm_path(path: &str) -> String {
-    normalize_prefixed_path(path, "PHM")
-}
-
-fn normalize_geometry_path(path: &str) -> String {
-    let normalized = path.trim().replace('\\', "/");
-    let lower = normalized.to_ascii_lowercase();
-    if lower.starts_with("mod/") || lower.starts_with("stl/") || lower.starts_with("gl/") {
-        normalized
-    } else {
-        format!("MOD/{}", normalized)
-    }
-}
-
-fn normalize_prefixed_path(path: &str, prefix: &str) -> String {
-    let normalized = path.trim().replace('\\', "/");
-    let expected = format!("{}/", prefix);
-    if normalized
-        .to_ascii_lowercase()
-        .starts_with(&expected.to_ascii_lowercase())
-    {
-        format!("{}{}", expected, &normalized[expected.len()..])
-    } else {
-        format!("{}{}", expected, normalized)
-    }
-}
-
 /// 获取指定项目的缓存诊断（供缓存管理 UI 使用）
 ///
 /// 薄包装：复用已有的 get_project_cache_diagnostic 内部函数。
@@ -8130,70 +7234,10 @@ mod tests {
         }
 
         #[test]
-        fn domain_versions_are_isolated_and_legacy_line_versions_migrate() {
-            // 变电 domain 版本升级不应改变线路版本判断；v21/v22 共享字段
-            // 的线路缓存仍视为当前线路缓存，避免无意义重建。
-            assert!(super::super::parser_domain_version_matches(
-                Some(super::super::LINE_PARSER_VERSION),
-                Some("gim-parser-v22"),
-                super::super::LINE_PARSER_VERSION,
-                super::super::LEGACY_LINE_PARSER_VERSIONS,
-            ));
-            assert!(super::super::parser_domain_version_matches(
-                None,
-                Some("gim-parser-v21"),
-                super::super::LINE_PARSER_VERSION,
-                super::super::LEGACY_LINE_PARSER_VERSIONS,
-            ));
-            assert!(!super::super::parser_domain_version_matches(
-                Some("gim-substation-parser-v21"),
-                Some("gim-parser-v22"),
-                super::super::SUBSTATION_PARSER_VERSION,
-                super::super::LEGACY_SUBSTATION_PARSER_VERSIONS,
-            ));
-        }
-
-        #[test]
-        fn substation_domain_upgrade_does_not_invalidate_line_cache() {
-            // 仅变电语义版本变化时，线路自己的 domain 仍然命中；共享旧列
-            // 即使记录了一个未来的变电版本，也不能让线路缓存失效。
-            let line_matches = super::super::parser_domain_version_matches(
-                Some(super::super::LINE_PARSER_VERSION),
-                Some("gim-substation-parser-v25"),
-                super::super::LINE_PARSER_VERSION,
-                super::super::LEGACY_LINE_PARSER_VERSIONS,
-            );
-            assert!(line_matches);
-
-            // 变电 domain 自己升级则应失配并触发变电重建，两个判断彼此独立。
-            let substation_matches = super::super::parser_domain_version_matches(
-                Some("gim-substation-parser-v22"),
-                Some("gim-substation-parser-v22"),
-                "gim-substation-parser-v25",
-                &["gim-parser-v22"],
-            );
-            assert!(!substation_matches);
-        }
-
-        #[test]
-        fn line_domain_upgrade_does_not_invalidate_substation_cache() {
-            // 仅线路语义版本变化时，变电 domain 仍然命中；线路版本不应
-            // 通过旧 parser_version 字段误伤 IFC/几何缓存。
-            let substation_matches = super::super::parser_domain_version_matches(
-                Some(super::super::SUBSTATION_PARSER_VERSION),
-                Some("gim-line-parser-v2"),
-                super::super::SUBSTATION_PARSER_VERSION,
-                super::super::LEGACY_SUBSTATION_PARSER_VERSIONS,
-            );
-            assert!(substation_matches);
-
-            let line_matches = super::super::parser_domain_version_matches(
-                Some("gim-line-parser-v1"),
-                Some("gim-line-parser-v1"),
-                "gim-line-parser-v2",
-                super::super::LEGACY_LINE_PARSER_VERSIONS,
-            );
-            assert!(!line_matches);
+        fn domain_versions_require_their_current_contract() {
+            assert!(super::super::parser_domain_version_matches(Some(super::super::LINE_PARSER_VERSION), super::super::LINE_PARSER_VERSION));
+            assert!(!super::super::parser_domain_version_matches(None, super::super::LINE_PARSER_VERSION));
+            assert!(!super::super::parser_domain_version_matches(Some(super::super::LINE_PARSER_VERSION), super::super::SUBSTATION_PARSER_VERSION));
         }
 
         #[test]
@@ -8277,288 +7321,6 @@ mod tests {
         assert!(!fragment_cache_version_matches(
             "fragments-cache-v60|fragments@0.0.0"
         ));
-    }
-
-    fn setup_geometry_conn() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE substation_cbm_node (
-                project_id INTEGER NOT NULL,
-                node_key TEXT NOT NULL,
-                parent_key TEXT,
-                entity_name TEXT,
-                dev_path TEXT,
-                transform_matrix TEXT
-            );
-            CREATE INDEX idx_substation_cbm_node_project_dev ON substation_cbm_node(project_id, dev_path);
-
-            CREATE TABLE substation_dev_solid_model (
-                project_id INTEGER NOT NULL,
-                dev_path TEXT NOT NULL,
-                solid_model_path TEXT NOT NULL,
-                transform_matrix TEXT,
-                sort_order INTEGER NOT NULL
-            );
-            CREATE INDEX idx_substation_dev_sm_dev ON substation_dev_solid_model(project_id, dev_path);
-
-            CREATE TABLE substation_dev_sub_device (
-                project_id INTEGER NOT NULL,
-                dev_path TEXT NOT NULL,
-                child_dev_path TEXT NOT NULL,
-                transform_matrix TEXT,
-                sort_order INTEGER NOT NULL
-            );
-            CREATE INDEX idx_substation_dev_sub_dev ON substation_dev_sub_device(project_id, dev_path);
-
-            CREATE TABLE substation_phm_solid_model (
-                project_id INTEGER NOT NULL,
-                phm_path TEXT NOT NULL,
-                solid_model_path TEXT NOT NULL,
-                transform_matrix TEXT,
-                color TEXT,
-                phm_color_max_a REAL,
-                sort_order INTEGER NOT NULL
-            );
-            CREATE INDEX idx_substation_phm_sm_phm ON substation_phm_solid_model(project_id, phm_path);",
-        )
-        .unwrap();
-        conn
-    }
-
-    #[test]
-    fn nested_phm_query_composes_edges_isolates_missing_and_cycles_and_preserves_instances() {
-        let conn = setup_geometry_conn();
-        conn.execute_batch("INSERT INTO substation_cbm_node VALUES (1, 'root', NULL, 'F4System', 'root.dev', NULL);
-            INSERT INTO substation_dev_solid_model VALUES (1, 'DEV/root.dev', 'a.phm', NULL, 0);
-            INSERT INTO substation_phm_solid_model VALUES
-            (1, 'PHM/a.phm', 'b.phm', '1,0,0,0,0,1,0,0,0,0,1,0,10,0,0,1', NULL, NULL, 0),
-            (1, 'PHM/a.phm', 'missing.phm', NULL, NULL, NULL, 1),
-            (1, 'PHM/a.phm', 'b.phm', '1,0,0,0,0,1,0,0,0,0,1,0,40,0,0,1', NULL, NULL, 2),
-            (1, 'PHM/b.phm', 'a.phm', NULL, NULL, NULL, 0),
-            (1, 'PHM/b.phm', 'leaf.mod', '1,0,0,0,0,1,0,0,0,0,1,0,20,0,0,1', '20,30,40,100', 100, 1);").unwrap();
-        let rows = query_reachable_geometry(&conn, 1, true, false).unwrap();
-        assert_eq!(rows.len(), 2);
-        let mut placements: Vec<f64> = rows.iter().map(|r| parse_matrix_opt(r.placement_transform_matrix.as_deref())[12]).collect();
-        placements.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(placements, vec![30.0, 60.0]);
-        assert!(rows.iter().all(|r| r.geometry_path == "MOD/leaf.mod" && r.phm_color.as_deref() == Some("20,30,40,100")));
-        assert_ne!(rows[0].instance_key, rows[1].instance_key);
-        assert!(query_reachable_geometry(&conn, 1, false, true).unwrap().is_empty());
-    }
-
-    #[test]
-    fn solid_model_dev_cycle_is_branch_guarded_and_keeps_sibling_placements() {
-        let conn = setup_geometry_conn();
-        conn.execute_batch("INSERT INTO substation_cbm_node VALUES (1, 'root', NULL, 'F4System', 'root.dev', NULL);
-            INSERT INTO substation_dev_solid_model VALUES
-            (1, 'DEV/root.dev', 'child.dev', '1,0,0,0,0,1,0,0,0,0,1,0,10,0,0,1', 0),
-            (1, 'DEV/root.dev', 'child.dev', '1,0,0,0,0,1,0,0,0,0,1,0,40,0,0,1', 1),
-            (1, 'DEV/child.dev', 'root.dev', '1,0,0,0,0,1,0,0,0,0,1,0,99,0,0,1', 0),
-            (1, 'DEV/child.dev', 'leaf.phm', NULL, 1);
-            INSERT INTO substation_phm_solid_model VALUES (1, 'PHM/leaf.phm', 'GL/leaf.gl', NULL, NULL, NULL, 0);").unwrap();
-        let rows = query_reachable_geometry(&conn, 1, true, false).unwrap();
-        assert_eq!(rows.len(), 2);
-        let mut placements: Vec<f64> = rows.iter().map(|r| parse_matrix_opt(r.placement_transform_matrix.as_deref())[12]).collect();
-        placements.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(placements, vec![10.0, 40.0]);
-        assert!(rows.iter().all(|r| r.geometry_path == "GL/leaf.gl"));
-    }
-
-    #[test]
-    fn reachable_geometry_includes_direct_and_child_dev_paths() {
-        let conn = setup_geometry_conn();
-        conn.execute(
-            "INSERT INTO substation_cbm_node (project_id, node_key, parent_key, entity_name, dev_path, transform_matrix)
-             VALUES
-             (1, 'root', NULL, 'F4System', 'root.dev', NULL),
-             (1, 'direct', NULL, 'F4System', 'direct.dev', NULL)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_dev_sub_device (project_id, dev_path, child_dev_path, sort_order)
-             VALUES (1, 'DEV/root.dev', 'child.dev', 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order)
-             VALUES
-             (1, 'DEV/direct.dev', 'direct.phm', 'direct-tm', 0),
-             (1, 'DEV/child.dev', 'child.phm', 'child-tm', 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, sort_order)
-             VALUES
-             (1, 'PHM/direct.phm', 'direct.mod', 'direct-phm-tm', NULL, 0),
-             (1, 'PHM/child.phm', 'child.mod', 'child-phm-tm', '1,2,3,100', 0)",
-            [],
-        )
-        .unwrap();
-
-        let rows = query_reachable_geometry(&conn, 1, true, false).unwrap();
-        let paths: Vec<_> = rows.iter().map(|r| r.geometry_path.as_str()).collect();
-        assert_eq!(paths, vec!["MOD/child.mod", "MOD/direct.mod"]);
-        assert_eq!(rows[0].dev_path, "DEV/child.dev");
-        assert_eq!(rows[0].dev_transform_matrix.as_deref(), Some("child-tm"));
-        assert_eq!(rows[0].phm_color.as_deref(), Some("1,2,3,100"));
-    }
-
-    #[test]
-    fn reachable_geometry_filter_is_case_insensitive_and_expands_child_devs() {
-        let conn = setup_geometry_conn();
-        conn.execute(
-            "INSERT INTO substation_cbm_node (project_id, node_key, parent_key, entity_name, dev_path, transform_matrix)
-             VALUES
-             (1, 'root', NULL, 'F4System', 'ROOT.DEV', NULL),
-             (1, 'other', NULL, 'F4System', 'other.dev', NULL)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_dev_sub_device (project_id, dev_path, child_dev_path, sort_order)
-             VALUES (1, 'dev/root.dev', 'CHILD.DEV', 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order)
-             VALUES
-             (1, 'DEV/root.dev', 'root.phm', NULL, 0),
-             (1, 'DEV/child.dev', 'child.phm', NULL, 0),
-             (1, 'DEV/other.dev', 'other.phm', NULL, 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, sort_order)
-             VALUES
-             (1, 'PHM/root.phm', 'root.mod', NULL, NULL, 0),
-             (1, 'PHM/child.phm', 'child.mod', NULL, NULL, 0),
-             (1, 'PHM/other.phm', 'other.mod', NULL, NULL, 0)",
-            [],
-        )
-        .unwrap();
-
-        let mut filter = HashSet::new();
-        filter.insert("dev/ROOT.DEV".to_string());
-        let rows = query_reachable_geometry_filtered(&conn, 1, true, false, Some(&filter)).unwrap();
-        let paths: Vec<_> = rows.iter().map(|r| r.geometry_path.as_str()).collect();
-        assert_eq!(paths, vec!["MOD/child.mod", "MOD/root.mod"]);
-        assert!(rows.iter().all(|row| row.dev_path == "DEV/root.dev" || row.dev_path == "DEV/child.dev"));
-    }
-
-    #[test]
-    fn reachable_geometry_filters_mod_and_stl() {
-        let conn = setup_geometry_conn();
-        conn.execute(
-            "INSERT INTO substation_cbm_node (project_id, node_key, parent_key, entity_name, dev_path, transform_matrix)
-             VALUES (1, 'device', NULL, 'F4System', 'device.dev', NULL)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order)
-             VALUES (1, 'DEV/device.dev', 'device.phm', NULL, 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, sort_order)
-             VALUES
-             (1, 'PHM/device.phm', 'a.mod', NULL, NULL, 0),
-             (1, 'PHM/device.phm', 'b.stl', NULL, NULL, 1)",
-            [],
-        )
-        .unwrap();
-
-        let mod_rows = query_reachable_geometry(&conn, 1, true, false).unwrap();
-        assert_eq!(mod_rows.len(), 1);
-        assert_eq!(mod_rows[0].geometry_path, "MOD/a.mod");
-
-        let stl_rows = query_reachable_geometry(&conn, 1, false, true).unwrap();
-        assert_eq!(stl_rows.len(), 1);
-        assert_eq!(stl_rows[0].geometry_path, "MOD/b.stl");
-
-        let all_rows = query_reachable_geometry(&conn, 1, true, true).unwrap();
-        assert_eq!(all_rows.len(), 2);
-    }
-
-    #[test]
-    fn reachable_geometry_uses_cumulative_cbm_transform() {
-        let conn = setup_geometry_conn();
-        conn.execute(
-            "INSERT INTO substation_cbm_node (project_id, node_key, parent_key, entity_name, dev_path, transform_matrix)
-             VALUES
-             (1, 'parent', NULL, 'F3System', NULL, '1,0,0,0,0,1,0,0,0,0,1,0,10,0,0,1'),
-             (1, 'child', 'parent', 'F4System', 'device.dev', '1,0,0,0,0,1,0,0,0,0,1,0,0,20,0,1')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order)
-             VALUES (1, 'DEV/device.dev', 'device.phm', NULL, 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, sort_order)
-             VALUES (1, 'PHM/device.phm', 'device.mod', NULL, NULL, 0)",
-            [],
-        )
-        .unwrap();
-
-        let rows = query_reachable_geometry(&conn, 1, true, false).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(
-            rows[0].placement_transform_matrix.as_deref(),
-            Some("1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,10.000000,20.000000,0.000000,1.000000")
-        );
-    }
-
-    #[test]
-    fn reachable_geometry_does_not_seed_from_virtual_or_partindex_alias_nodes() {
-        let conn = setup_geometry_conn();
-        conn.execute(
-            "INSERT INTO substation_cbm_node (project_id, node_key, parent_key, entity_name, dev_path, transform_matrix)
-             VALUES
-             (1, 'parent', NULL, 'F4System', 'root.dev', NULL),
-             (1, 'parent#dev:0:child.dev', 'parent', 'DEV_SUBDEVICE', 'child.dev',
-              '1,0,0,0,0,1,0,0,0,0,1,0,999,0,0,1'),
-             (1, 'part-index', 'parent', 'PARTINDEX', 'child.dev',
-              '1,0,0,0,0,1,0,0,0,0,1,0,888,0,0,1'),
-             (1, 'part-index-mixed', 'parent', 'PartIndex', 'child.dev',
-              '1,0,0,0,0,1,0,0,0,0,1,0,777,0,0,1')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_dev_sub_device (project_id, dev_path, child_dev_path, transform_matrix, sort_order)
-             VALUES (1, 'DEV/root.dev', 'child.dev', '1,0,0,0,0,1,0,0,0,0,1,0,100,0,0,1', 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order)
-             VALUES (1, 'DEV/child.dev', 'child.phm', NULL, 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO substation_phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, sort_order)
-             VALUES (1, 'PHM/child.phm', 'child.mod', NULL, NULL, 0)",
-            [],
-        )
-        .unwrap();
-
-        let rows = query_reachable_geometry(&conn, 1, true, false).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(
-            rows[0].placement_transform_matrix.as_deref(),
-            Some("1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,0.000000,0.000000,0.000000,1.000000,0.000000,100.000000,0.000000,0.000000,1.000000")
-        );
     }
 
     #[test]

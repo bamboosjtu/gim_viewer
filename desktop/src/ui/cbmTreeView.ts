@@ -5,24 +5,9 @@ import { getNodeDisplayName } from '../shared/displayName.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
 import { renderSearchBox } from './searchBox.js';
 import type { SearchItem } from './searchBox.js';
-import type { IfcSpatialNode, IfcSpatialObject } from '../gim/ifcSpatialParser.js';
-import {
-  buildSpatialSearchIndex,
-  renderSubstationSpatialTree,
-  resolveSpatialSearchCbmPath,
-  revealSpatialSearchTarget,
-  loadSpatialSearchTargetPage,
-} from './substationSpatialTreeView.js';
-import {
-  buildFunctionalDomainIndex,
-  buildFunctionalSearchIndex,
-  renderSubstationFunctionalTree,
-  revealFunctionalSearchTarget,
-} from './substationFunctionalTreeView.js';
 import type { PropertyReferenceDetail } from './propertyDictionary.js';
 import { markDeviceBounds } from './deviceBoundsMarker.js';
-import { getBusinessTree } from '../services/businessTreeService.js';
-import { businessSearchItems, renderBusinessTree, revealBusinessTarget } from './businessTreeView.js';
+import { renderEngineeringTree, syncEngineeringTreeSelection } from './engineeringTreeView.js';
 
 const ENTITY_ICONS: Record<string, string> = {
   F1System: '◎', F2System: '□', F3System: '≋', F4System: '◆', PARTINDEX: '•',
@@ -133,214 +118,13 @@ function buildCbmSearchIndex(state: AppState, root: CbmNode): SearchItem[] {
  * 构建并渲染 CBM 层级树。
  * 统一入口：无论首次打开还是缓存命中，都使用 onNodeClick 回调处理交互。
  */
-const renderedTrees = new WeakMap<AppState, { root: CbmNode; spatial: unknown; names: unknown; nameCount: number; fam: unknown; famCount: number; mode: string; host: Element; business?:unknown }>();
-function refreshBusinessQuality(state:AppState):void {
-  const quality=cbmTreePanel.querySelector<HTMLElement>('.substation-nav-quality'),p=state.businessTree;
-  if(quality&&p){quality.textContent=state.businessTreePending?'业务树准备中':state.businessTreeError?'业务树未完成':`对象 ${p.objects.size}${state.businessTreeCacheStatus==='hit'?' · 业务缓存命中':state.businessTreeCacheStatus==='saving'?' · 保存业务缓存中':state.businessTreeCacheStatus==='error'?' · 业务缓存保存失败':''}`;quality.title=state.businessTreeError||state.businessTreeCacheError;}
-  const spatial=cbmTreePanel.querySelector<HTMLButtonElement>('[data-business-mode="spatial"]');if(spatial)spatial.disabled=!state.substationSpatialIndex;
-}
-export function buildAndRenderCbmTree(
-  state: AppState,
-  onNodeClick: (node: CbmNode) => void,
-): void {
-  const previous = renderedTrees.get(state);
-  const immutableBusiness=state.substationNavMode==='business'&&!!state.businessTree&&!state.businessTreePending&&!state.businessTreeError&&previous?.business===state.businessTree;
-  if (state.currentProjectType === 'substation' && state.currentCbmTree && previous
-    && previous.root === state.currentCbmTree && (immutableBusiness||previous.spatial === state.substationSpatialIndex)
-    && (state.substationNavMode==='business' || previous.names === state.ifcGuidToName && previous.nameCount === state.ifcGuidToName.size)
-    && (immutableBusiness||previous.fam === state.cachedFamSourceProperties && previous.famCount === state.cachedFamSourceProperties.size)
-    && previous.mode === state.substationNavMode && cbmTreePanel.contains(previous.host)) {if(immutableBusiness)refreshBusinessQuality(state);return;}
-  const expanded = [...cbmTreePanel.querySelectorAll<HTMLElement>('.tree-row[aria-expanded="true"]')].map(row=>row.dataset.nodePath!);
-  const scroll = cbmTreePanel.scrollTop;
-  const query = cbmTreePanel.querySelector<HTMLInputElement>('.search-box-wrap input')?.value ?? '';
-  cbmTreePanel.innerHTML = '';
-  if (!state.currentCbmTree) { renderedTrees.delete(state);cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>'; return; }
-  if(state.currentProjectType==='substation'&&(state.substationNavMode==='business'||state.substationNavMode==='source')){
-    const isBusiness=state.substationNavMode==='business';
-    const projection=isBusiness?getBusinessTree(state,()=>{if(renderedTrees.get(state)?.business===state.businessTree){refreshBusinessQuality(state);return;}renderedTrees.delete(state);buildAndRenderCbmTree(state,onNodeClick);},()=>renderedTrees.delete(state)):null;
-    const bar=document.createElement('div');bar.className='substation-nav-mode';
-    for(const [mode,label]of [['business','业务树'],['source','来源'],['spatial','空间']]as const){
-      const button=document.createElement('button');button.className='substation-nav-mode-btn';button.textContent=label;
-      button.dataset.businessMode=mode;
-      button.classList.toggle('active',mode===state.substationNavMode);button.disabled=mode==='spatial'&&!state.substationSpatialIndex;
-      button.addEventListener('click',()=>{state.substationNavMode=mode;buildAndRenderCbmTree(state,onNodeClick);});bar.append(button);
-    }
-    const host=document.createElement('div');host.className='tree-view-host';cbmTreePanel.append(bar,host);
-    if(projection){const quality=document.createElement('span');quality.className='substation-nav-quality';bar.append(quality);refreshBusinessQuality(state);}
-    host.addEventListener('click',event=>{
-      const target=event.target as Element;if(!target.closest('.tree-toggle'))return;
-      const row=target.closest<HTMLElement>('.tree-row'),key=row?.dataset.nodePath;if(!key)return;
-      if(row?.getAttribute('aria-expanded')==='false')state.businessExpandedRows.add(key);else state.businessExpandedRows.delete(key);
-    },true);
-    const select=(key:string)=>{if(projection)void import('../services/businessTreeSelection.js').then(({selectBusinessTree})=>selectBusinessTree(state,projection,key)).catch(error=>console.warn('[业务树选择]',error));};
-    if(projection){
-      renderSearchBox(cbmTreePanel,businessSearchItems(projection),key=>{selectCbmTreeRow(revealBusinessTarget(projection,key,host));select(key);});
-      renderBusinessTree(projection,host,state.projectName,select);
-    }else{
-      renderSearchBox(cbmTreePanel,buildCbmSearchIndex(state,state.currentCbmTree),key=>{const node=findByPath(state.currentCbmTree,key);if(node)onNodeClick(node);});
-      renderCbmTreeUI(state,state.currentCbmTree,host,onNodeClick);
-    }
-    for(const key of new Set([...state.businessExpandedRows,...expanded])) {const row=[...host.querySelectorAll<HTMLElement>('.tree-row')].find(row=>row.dataset.nodePath===key);if(row?.getAttribute('aria-expanded')==='false')row.querySelector<HTMLButtonElement>('.tree-toggle')?.click();}
-    const input=cbmTreePanel.querySelector<HTMLInputElement>('.search-box-wrap input');if(input&&query){input.value=query;input.dispatchEvent(new Event('input'));}
-    cbmTreePanel.scrollTop=scroll;
-    renderedTrees.set(state,{root:state.currentCbmTree,spatial:state.substationSpatialIndex,names:state.ifcGuidToName,nameCount:state.ifcGuidToName.size,fam:state.cachedFamSourceProperties,famCount:state.cachedFamSourceProperties.size,mode:state.substationNavMode,host,business:projection});
-    syncSelectedTreeRow(state);return;
-  }
-  const spatialIndex = state.substationSpatialIndex;
-  const isSubstation = state.currentProjectType === 'substation';
-  const hasSpatialTree = !!spatialIndex?.coverage.hasSpatialEntities && !!spatialIndex?.coverage.hasSpatialContainment;
-  if (isSubstation) {
-    // 空间事实缺失时自动降级到功能系统视角；空间能力恢复后仍可由用户显式切回空间。
-    if (!hasSpatialTree && state.substationNavMode === 'spatial') state.substationNavMode = 'functional';
-    const functionalIndex = state.currentCbmTree ? buildFunctionalDomainIndex(state.currentCbmTree,state.cachedFamSourceProperties) : null;
-    // 搜索框由 renderSearchBox prepend 到顶部；模式条和树内容放在其后。
-    const treeHost = document.createElement('div');
-    treeHost.className = 'tree-view-host';
-    const modeBar = document.createElement('div');
-    modeBar.className = 'substation-nav-mode';
-    const spatialButton = document.createElement('button');
-    spatialButton.type = 'button';
-    spatialButton.className = 'substation-nav-mode-btn';
-    spatialButton.textContent = '空间';
-    spatialButton.title = hasSpatialTree
-      ? '按站区 / 建筑 / 楼层 / 空间浏览 IFC 构件'
-      : '当前 IFC 未提供可用空间包含关系';
-    spatialButton.disabled = !hasSpatialTree;
-    spatialButton.setAttribute('aria-pressed', String(state.substationNavMode === 'spatial' && hasSpatialTree));
-    const functionalButton = document.createElement('button');
-    functionalButton.type = 'button';
-    functionalButton.className = 'substation-nav-mode-btn';
-    functionalButton.textContent = '功能系统';
-    functionalButton.title = '按功能系统域 / 系统 / 构件或设备浏览 CBM 对象';
-    functionalButton.setAttribute('aria-pressed', String(state.substationNavMode === 'functional'));
-    const quality = document.createElement('span');
-    quality.className = 'substation-nav-quality';
-    if (spatialIndex) {
-      const c = spatialIndex.coverage;
-      quality.textContent = c.hasSpatialContainment
-        ? `空间关联 ${Math.round(c.spatiallyContainedCbmCoverage * 100)}%`
-        : '空间关系不可用';
-      quality.title = c.hasSpatialContainment
-        ? `CBM→IFC 空间关联 ${Math.round(c.spatiallyContainedCbmCoverage * 100)}% · 未落位 IFC ${c.uncontainedIfcObjects} · 坐标对象 ${c.positionedAssets} · 原点矩阵 ${c.identityPlacementAssets} · 无容器 ${c.confirmedWithoutSpatialContainer} · 未关联对象 ${c.unlocatedAssets}。此百分比仅表示 CBM 节点命中 IFC 空间的比例；空间主树仍保留全部 IFC 构件，推断/未关联对象保留在质量分组中`
-        : '空间关系未提供，当前显示功能系统视图';
-    } else {
-      quality.textContent = '空间索引不可用';
-    }
-    const businessButton=document.createElement('button');businessButton.type='button';businessButton.className='substation-nav-mode-btn';businessButton.textContent='业务树';
-    businessButton.addEventListener('click',()=>{state.substationNavMode='business';buildAndRenderCbmTree(state,onNodeClick);});
-    modeBar.append(businessButton, spatialButton, functionalButton, quality);
-    cbmTreePanel.append(modeBar, treeHost);
-    renderedTrees.set(state,{root:state.currentCbmTree,spatial:state.substationSpatialIndex,names:state.ifcGuidToName,
-      nameCount:state.ifcGuidToName.size,fam:state.cachedFamSourceProperties,famCount:state.cachedFamSourceProperties.size,mode:state.substationNavMode,host:treeHost});
-
-    const renderMode = (): void => {
-      spatialButton.classList.toggle('active', state.substationNavMode === 'spatial' && hasSpatialTree);
-      functionalButton.classList.toggle('active', state.substationNavMode === 'functional' || !hasSpatialTree);
-      spatialButton.setAttribute('aria-pressed', String(state.substationNavMode === 'spatial' && hasSpatialTree));
-      functionalButton.setAttribute('aria-pressed', String(state.substationNavMode === 'functional' || !hasSpatialTree));
-    };
-    renderMode();
-    spatialButton.addEventListener('click', () => {
-      if (!hasSpatialTree) return;
-      state.substationNavMode = 'spatial';
-      buildAndRenderCbmTree(state, onNodeClick);
-    });
-    functionalButton.addEventListener('click', () => {
-      state.substationNavMode = 'functional';
-      buildAndRenderCbmTree(state, onNodeClick);
-    });
-
-    const onSpatialNodeClick = (node: IfcSpatialNode): void => {
-      if (state.substationSpatialIndex?.nodeByKey.get(node.key) !== node) return;
-      const request=state.beginSelection({kind:'spatial-node',key:node.key});
-      void import('../services/nodeInteractionService.js').then(({handleSpatialSelection}) =>
-        handleSpatialSelection(state,node,spatialIndex!,request),
-      ).catch((error) => console.warn('[空间树] 显示空间属性失败:',error));
-    };
-    const onSpatialObjectClick = (object: IfcSpatialObject): void => {
-      if (state.substationSpatialIndex?.objectByKey.get(object.key) !== object) return;
-      const request=state.beginSelection({kind:'ifc-object',key:object.key});
-      void import('../services/nodeInteractionService.js').then(({handleSpatialSelection}) =>
-        handleSpatialSelection(state,object,spatialIndex!,request),
-      ).catch((error) => console.warn('[空间树] 显示 IFC 属性失败:',error));
-    };
-
-    const isSpatialMode = state.substationNavMode === 'spatial' && !!spatialIndex && hasSpatialTree;
-    const searchItems = isSpatialMode
-      ? buildSpatialSearchIndex(state, spatialIndex!)
-      : functionalIndex ? buildFunctionalSearchIndex(state, functionalIndex) : [];
-    renderSearchBox(cbmTreePanel, searchItems, (key) => {
-      if (isSpatialMode && spatialIndex) {
-        const spatialNode = spatialIndex.nodeByKey.get(key);
-        if (spatialNode) {
-          revealSpatialSearchTarget(spatialIndex, key);
-          selectCbmTreeRow(key);
-          onSpatialNodeClick(spatialNode);
-          return;
-        }
-        const spatialObject = spatialIndex.objectByKey.get(key);
-        if (spatialObject) {
-          const paginationKey = revealSpatialSearchTarget(spatialIndex, key);
-          loadSpatialSearchTargetPage(paginationKey, key);
-          selectCbmTreeRow(key);
-          // 空间树命中的是 IFC 构件时优先打开 IFC 检查器，避免把
-          // PropertySet/材质/Representation 等信息覆盖成 CBM 摘要。
-          // 关联 CBM 仍在检查器关系页和“关联设备”行中可继续追踪。
-          onSpatialObjectClick(spatialObject);
-          return;
-        }
-        const spatialLink = spatialIndex.linksByCbmPath.get(key);
-        if (spatialLink) {
-          const paginationKey = revealSpatialSearchTarget(spatialIndex, key);
-          loadSpatialSearchTargetPage(paginationKey, key);
-        }
-      }
-      if (!isSpatialMode && functionalIndex) {
-        const target = functionalIndex.targetByKey.get(key);
-        if (target) {
-          const rowKey = revealFunctionalSearchTarget(functionalIndex, key);
-          if (rowKey) selectCbmTreeRow(rowKey);
-          if (target.node) onNodeClick(target.node);
-          return;
-        }
-      }
-      const node = findByPath(state.currentCbmTree, key);
-      if (node) {
-        onNodeClick(node);
-        selectCbmTreeRow(key);
-        return;
-      }
-      if (isSpatialMode && spatialIndex) {
-        const cbmPath = resolveSpatialSearchCbmPath(spatialIndex, key);
-        const linkedNode = cbmPath ? findByPath(state.currentCbmTree, cbmPath) : null;
-        if (linkedNode) {
-          onNodeClick(linkedNode);
-          selectCbmTreeRow(key);
-        } else {
-          const spatialObject = spatialIndex.objectByKey.get(key);
-          if (spatialObject) onSpatialObjectClick(spatialObject);
-        }
-      }
-    });
-
-    treeHost.innerHTML = '';
-    if (isSpatialMode && spatialIndex) {
-      renderSubstationSpatialTree(state, spatialIndex, treeHost, onNodeClick, onSpatialNodeClick, onSpatialObjectClick);
-    } else if (functionalIndex) {
-      renderSubstationFunctionalTree(state, functionalIndex, treeHost, onNodeClick);
-    } else {
-      renderCbmTreeUI(state, state.currentCbmTree, treeHost, onNodeClick);
-    }
-    syncSelectedTreeRow(state);
-    return;
-  }
-
-  // 线路工程不进入此入口；保留原始 CBM 树的搜索和渲染行为。
-  renderSearchBox(cbmTreePanel, buildCbmSearchIndex(state, state.currentCbmTree), (key) => {
+export function buildAndRenderCbmTree(state: AppState, onNodeClick: (node: CbmNode) => void): void {
+  if (state.currentProjectType === 'substation') { renderEngineeringTree(state); return; }
+  cbmTreePanel.replaceChildren();
+  if (!state.currentCbmTree) { cbmTreePanel.innerHTML = '<div class="props-empty">加载 GIM 文件后显示层级树</div>'; return; }
+  renderSearchBox(cbmTreePanel, buildCbmSearchIndex(state, state.currentCbmTree), key => {
     const node = findByPath(state.currentCbmTree, key);
-    if (!node) return;
-    onNodeClick(node);
-    selectCbmTreeRow(key);
+    if (node) { onNodeClick(node); selectCbmTreeRow(key); }
   });
   renderCbmTreeUI(state, state.currentCbmTree, cbmTreePanel, onNodeClick);
 }
@@ -369,20 +153,11 @@ function selectCbmTreeRow(path: string): void {
 
 /** Restore the current selection after lazy tree/name refresh, without a new request. */
 export function syncSelectedTreeRow(state: AppState): void {
+  if (state.currentProjectType === 'substation') { syncEngineeringTreeSelection(state); return; }
   document.querySelectorAll('#cbm-tree-panel .tree-row.selected').forEach((row) => row.classList.remove('selected'));
   const target=state.selectionRequest?.target;
   if (!target) return;
-  let rowKey=target.key;
-  if(state.substationNavMode==='business'&&state.businessTree){
-    rowKey=revealBusinessTarget(state.businessTree,target.key,cbmTreePanel);selectCbmTreeRow(rowKey);return;
-  }
-  if (target.kind==='cbm' && state.currentProjectType==='substation' && state.currentCbmTree && state.substationNavMode==='functional') {
-    rowKey=revealFunctionalSearchTarget(buildFunctionalDomainIndex(state.currentCbmTree,state.cachedFamSourceProperties),target.key) ?? target.key;
-  } else if (state.substationNavMode==='spatial' && state.substationSpatialIndex && target.kind!=='ifc-element') {
-    const paginationKey=revealSpatialSearchTarget(state.substationSpatialIndex,target.key);
-    loadSpatialSearchTargetPage(paginationKey,target.key);
-  }
-  selectCbmTreeRow(rowKey);
+  selectCbmTreeRow(target.key);
 }
 
 /**
@@ -398,6 +173,18 @@ export function handleSubstationPropertyReference(
   showMessage: (text: string) => void = () => undefined,
 ): boolean {
   if (state.currentProjectType !== 'substation' && state.currentProjectType !== 'equipment') return false;
+  if (state.currentProjectType === 'substation' && state.engineeringSources) {
+    const normalize = (path: string) => path.replace(/\\/g, '/').toLowerCase();
+    const wanted = normalize(detail.path), name = wanted.split('/').pop();
+    const inventory = [...new Set([...state.substationEntryPaths, ...state.engineeringSources.graph.documents.map(doc => doc.path), ...state.engineeringSources.graph.ifcPaths])];
+    const exact = inventory.filter(path => normalize(path) === wanted);
+    const matches = exact.length ? exact : inventory.filter(path => normalize(path).split('/').pop() === name);
+    if (matches.length !== 1) { showMessage(matches.length ? '来源文件有多个候选，请在来源视图核对' : '该来源文件当前不可用'); return true; }
+    state.engineeringNavMode = 'source'; renderEngineeringTree(state);
+    void import('../services/engineeringSourceInspector.js').then(({ inspectEngineeringDocument }) => inspectEngineeringDocument(state, matches[0]))
+      .catch(error => showMessage(`来源未能打开：${String(error)}`));
+    return true;
+  }
   const normalized = detail.path.replace(/\\/g, '/').toLowerCase();
   const fileName = normalized.split('/').pop() || normalized;
   const nodes: CbmNode[] = [];

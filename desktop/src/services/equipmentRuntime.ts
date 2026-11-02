@@ -31,7 +31,6 @@ export async function openEquipmentProject(context: GimRuntimeOpenContext): Prom
   state.substationEntrySizes = new Map([...files].map(([path, file]) => [path, file.size]));
   state.currentCbmTree = tree;
   state.cbmNodeIndex = buildCbmNodeIndex(tree);
-  state.substationNavMode = 'functional';
   state.endIfcBackgroundLoading();
   setProjectIdentity(context.projectName || tree.name, 'equipment');
   refreshNavigatorTitle();

@@ -16,10 +16,10 @@ import { readCachedEntry, writeCacheFile } from '@desktop/database.js';
  * the geometry/Fragments cache versions.  A change to the line parser or to
  * DEV GLB output must not invalidate this derived semantic projection.
  */
-// v3: exact case-sensitive model/GlobalId links and opening/filling host chains.
-export const SUBSTATION_SPATIAL_SEMANTIC_VERSION = 'substation-spatial-semantic-v3';
+// v4: preserve the decoded original IFC Name independently of display fallbacks.
+export const SUBSTATION_SPATIAL_SEMANTIC_VERSION = 'substation-spatial-semantic-v4';
 export const SUBSTATION_SPATIAL_SEMANTIC_CACHE_ENTRY =
-  '__derived__/substation-spatial-semantic-v3.json';
+  '__derived__/substation-spatial-semantic-v4.json';
 
 /** Spatial parser contract; intentionally independent of CBM/FAM domain upgrades. */
 export const SUBSTATION_PARSER_DOMAIN_VERSION = 'gim-substation-parser-v24';

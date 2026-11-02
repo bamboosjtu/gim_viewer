@@ -5,7 +5,7 @@
  * 点击结果回调 onPick(key)。由调用方构建索引并解释 key。
  *
  * 行为：
- * - 大小写不敏感子串匹配 title / subtitle / key，最多展示 MAX_HITS 条
+ * - 大小写不敏感子串匹配 title / subtitle / key 或预编译全文，最多展示 MAX_HITS 条
  * - Escape 清空并收起；输入为空隐藏下拉
  * - 失焦延迟收起（保证结果行 click 先触发）
  */
@@ -19,6 +19,8 @@ export interface SearchItem {
   title: string;
   /** 副标题（可选，如实体类型 / 塔位编号） */
   subtitle?: string;
+  /** 已转为小写的检索全文；内部来源名称可参与检索，无需堆在副标题中。 */
+  searchText?: string;
 }
 
 /** 下拉最多展示的条数（超出时显示提示） */
@@ -30,6 +32,8 @@ export function renderSearchBox(
   items: SearchItem[],
   onPick: (key: string) => void,
 ): void {
+  const index = items.map(item => ({ item, title: item.title.toLowerCase(), subtitle: item.subtitle?.toLowerCase() ?? '',
+    text: item.searchText ?? [item.title, item.subtitle ?? '', item.key].join('\n').toLowerCase() }));
   const wrap = document.createElement('div');
   wrap.className = 'search-box-wrap';
   wrap.style.cssText = 'position:relative;padding:6px 8px 2px;';
@@ -70,18 +74,19 @@ export function renderSearchBox(
       hideList();
       return;
     }
-    const hits: SearchItem[] = [];
+    const ranked: SearchItem[][] = Array.from({ length: 5 }, () => []);
     let total = 0;
-    for (const e of items) {
-      if (
-        e.title.toLowerCase().includes(q)
-        || (e.subtitle && e.subtitle.toLowerCase().includes(q))
-        || e.key.toLowerCase().includes(q)
-      ) {
+    for (const { item: e, title, subtitle, text } of index) {
+      if (text.includes(q)) {
         total++;
-        if (hits.length < MAX_HITS) hits.push(e);
+        // Keep a named whole or its category ahead of matches found only in
+        // system context/internal sources. Otherwise the result cap can hide
+        // the very equipment being searched among hundreds of its neighbours.
+        const rank = title === q ? 0 : title.startsWith(q) ? 1 : subtitle.startsWith(q) ? 2 : title.includes(q) ? 3 : 4;
+        if (ranked[rank].length < MAX_HITS) ranked[rank].push(e);
       }
     }
+    const hits = ranked.flat().slice(0, MAX_HITS);
     list.innerHTML = '';
     if (total === 0) {
       const empty = document.createElement('div');

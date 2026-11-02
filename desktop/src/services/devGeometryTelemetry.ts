@@ -44,7 +44,7 @@ export interface DevGeometryTelemetry {
   fallbackDevPaths: string[];
   fallbackReasons: Record<string, string>;
   sharedPlacementCount: number;
-  legacyFallbackPlacementCount: number;
+  exclusiveFallbackPlacementCount: number;
   sharedGeometryCount: number;
   sharedMaterialCount: number;
   sharedTextureCount: number;
@@ -98,7 +98,7 @@ export function createDevGeometryTelemetry(
   recordPlacementMatrix: (durationMs: number, devPath?: string) => void;
   recordPlacementSlice: (durationMs: number, yielded: boolean, devPath?: string) => void;
   recordSharedPlacement: (devPath?: string) => void;
-  recordLegacyFallbackPlacement: (devPath?: string) => void;
+  recordExclusiveFallbackPlacement: (devPath?: string) => void;
   setTemplateMetrics: (metrics: {
     uniqueGlbDevCount?: number;
     templateParseCount?: number;
@@ -124,7 +124,7 @@ export function createDevGeometryTelemetry(
   let fallbackDevPaths: string[] = [];
   let fallbackReasons: Record<string, string> = {};
   let sharedPlacementCount = 0;
-  let legacyFallbackPlacementCount = 0;
+  let exclusiveFallbackPlacementCount = 0;
   let sharedGeometryCount = 0;
   let sharedMaterialCount = 0;
   let sharedTextureCount = 0;
@@ -190,8 +190,8 @@ export function createDevGeometryTelemetry(
         devs.set(devPath, dev);
       }
     },
-    recordLegacyFallbackPlacement: (devPath) => {
-      legacyFallbackPlacementCount++;
+    recordExclusiveFallbackPlacement: (devPath) => {
+      exclusiveFallbackPlacementCount++;
       if (devPath) {
         const dev = devs.get(devPath) ?? { placementCount: 0, totalMs: 0, phases: {} };
         devs.set(devPath, dev);
@@ -243,7 +243,7 @@ export function createDevGeometryTelemetry(
         fallbackDevPaths: fallbackDevPaths.slice(),
         fallbackReasons: { ...fallbackReasons },
         sharedPlacementCount,
-        legacyFallbackPlacementCount,
+        exclusiveFallbackPlacementCount,
         sharedGeometryCount,
         sharedMaterialCount,
         sharedTextureCount,

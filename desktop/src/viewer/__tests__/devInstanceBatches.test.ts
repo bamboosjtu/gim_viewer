@@ -10,7 +10,7 @@ function fixture() {
   const source=new THREE.Group();source.add(new THREE.Mesh(geometry,material));
   const template=new DevGlbTemplate('DEV/a.dev',source),adapter=new DevInstanceBatches(scene);
   const groups=[10,20,30].map((x,i)=>{
-    const group=template.createPlacement({contract:'source-template',rootOccurrence:`root${i}`,instanceKey:`instance${i}`,
+    const group=template.createPlacement({rootOccurrence:`root${i}`,instanceKey:`instance${i}`,
       placementMatrix:new THREE.Matrix4().makeTranslation(x*1000,0,0).toArray()});
     scene.add(group);return group;
   });
@@ -81,7 +81,7 @@ it('compacts invisible slots, respects inherited visibility and restores the sam
 it('falls back for mirrored, sheared, transparent and multi-material meshes while preserving their geometry',()=>{
   const f=fixture();f.add();
   for(const kind of ['mirror','shear','transparent','multi']) {
-    const group=f.template.createPlacement({contract:'source-template',rootOccurrence:kind,instanceKey:kind});
+    const group=f.template.createPlacement({rootOccurrence:kind,instanceKey:kind});
     const mesh=group.children[0].children[0] as THREE.Mesh;
     if(kind==='mirror')group.matrix.makeScale(-1,1,1);
     if(kind==='shear')group.matrix.elements[4]=.3;
@@ -107,7 +107,7 @@ it('releases only instance buffers, dissolves small buckets and leaves shared ge
 it('updates the batch after a coordinate anchor change and keeps explicit L2 on the ordinary path',()=>{
   const f=fixture();f.add();f.groups.forEach(group=>group.matrix.elements[12]+=100);f.adapter.sync();
   expect(f.pick(20)).toBeNull();expect(f.pick(120)?.rootOccurrence).toBe('root1');
-  const fine=f.template.createPlacement({contract:'source-template',rootOccurrence:'fine',instanceKey:'fine',
+  const fine=f.template.createPlacement({rootOccurrence:'fine',instanceKey:'fine',
     placementMatrix:new THREE.Matrix4().makeTranslation(5000,0,0).toArray()});
   f.scene.add(fine);f.adapter.add(fine,false);
   expect((fine.children[0].children[0] as THREE.Mesh).layers.mask).toBe(1);
@@ -117,7 +117,7 @@ it('updates the batch after a coordinate anchor change and keeps explicit L2 on 
 it('keeps distinct occurrence colors in separate material buckets sharing the same geometry',()=>{
   const f=fixture();f.add();const blue=f.material.clone();blue.color.setHex(0x0055ff);
   for(const x of [5,15,25]) {
-    const group=f.template.createPlacement({contract:'source-template',rootOccurrence:`blue${x}`,instanceKey:`blue${x}`,
+    const group=f.template.createPlacement({rootOccurrence:`blue${x}`,instanceKey:`blue${x}`,
       placementMatrix:new THREE.Matrix4().makeTranslation(x*1000,0,0).toArray()});
     (group.children[0].children[0] as THREE.Mesh).material=blue;f.scene.add(group);f.adapter.add(group);
   }

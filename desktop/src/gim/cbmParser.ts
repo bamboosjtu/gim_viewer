@@ -391,7 +391,7 @@ async function expandDevSubDevices(
     const subDevice = devDoc.subDevices[i];
     const childDevPath = subDevice.devPath;
     const normalizedChildDevPath = normalizeDevReference(childDevPath);
-    const virtualPath = `${parentCbmPath}#dev:${i}:${childDevPath}`;
+    const virtualPath = `${parentCbmPath}#dev:${subDevice.sourceIndex}:${childDevPath}`;
 
     // 从缓存获取子 DEV 的 SYMBOLNAME/TYPE
     let childSymbolName = '';

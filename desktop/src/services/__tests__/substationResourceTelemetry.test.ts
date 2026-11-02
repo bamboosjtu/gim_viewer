@@ -53,7 +53,7 @@ describe('Substation Runtime resource checkpoints', () => {
     const sharedPlacement = new THREE.Group();
     sharedPlacement.userData.__gimDevGlbTemplatePlacement = true;
     const legacyPlacement = new THREE.Group();
-    legacyPlacement.userData.__gimDevGlbLegacyPlacement = true;
+    legacyPlacement.userData.__gimDevGlbExclusivePlacement = true;
     state.loadedXmlModGroups.set('shared', sharedPlacement);
     state.loadedXmlModGroups.set('legacy', legacyPlacement);
     state.loadedStlGroups.set('stl', new THREE.Group());
@@ -91,7 +91,7 @@ describe('Substation Runtime resource checkpoints', () => {
       templateCount: 1,
       templateParseCount: 1,
       sharedPlacementCount: 1,
-      legacyPlacementCount: 1,
+      exclusivePlacementCount: 1,
       sharedGeometryCount: 1,
       sharedMaterialCount: 1,
       sharedTextureCount: 1,

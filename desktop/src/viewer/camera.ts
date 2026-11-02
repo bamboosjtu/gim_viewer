@@ -53,7 +53,7 @@ function sceneMeshBounds(ctx: ViewerContext): THREE.Box3 {
   const boxes: Array<{ box: THREE.Box3; size: number }> = [];
   scene.traverse((object: THREE.Object3D) => {
     const mesh = object as THREE.Mesh;
-    if (!mesh.isMesh || !mesh.geometry || isDevRenderBatch(mesh)) return;
+    if (!mesh.isMesh || !mesh.geometry || mesh.userData.interactionDecoration || isDevRenderBatch(mesh)) return;
     const geometry = mesh.geometry as THREE.BufferGeometry;
     if (!geometry.boundingBox) geometry.computeBoundingBox?.();
     if (!geometry.boundingBox) return;
@@ -115,9 +115,18 @@ export async function frameBox(ctx: ViewerContext, box: THREE.Box3, guard?: Sele
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z, 1);
-  const distance = maxDim * 2.5;
   const controls = ctx.world.camera.controls;
   if (!controls) return;
+  const currentPosition = controls.getPosition?.(new THREE.Vector3(), false);
+  const currentTarget = controls.getTarget?.(new THREE.Vector3(), false);
+  const direction = currentPosition && currentTarget ? currentPosition.clone().sub(currentTarget) : new THREE.Vector3(1, .8, 1);
+  if (direction.lengthSq() < 1e-12) direction.set(1, .8, 1);
+  direction.normalize();
+  const camera = (ctx.world.camera as any).three as THREE.PerspectiveCamera;
+  const fov = Number.isFinite(camera?.fov) ? camera.fov * Math.PI / 180 : Math.PI / 4;
+  const aspect = camera?.aspect > 0 ? camera.aspect : 1;
+  const distance = Math.max(maxDim * 1.1, size.length() * .6 / Math.tan(fov / 2) / Math.min(1, aspect));
+  const position = center.clone().addScaledVector(direction, distance);
   let abort!: () => void;
   const interrupted = new Promise<void>((resolve) => { abort=resolve; });
   const cancel = (): void => {
@@ -134,7 +143,12 @@ export async function frameBox(ctx: ViewerContext, box: THREE.Box3, guard?: Sele
   guard?.signal?.addEventListener('abort',cancel,{once:true});
   try {
     if (guard && !guard.isCurrent()) return;
-    const movement=controls.setLookAt(center.x+distance,center.y+distance*0.8,center.z+distance,center.x,center.y,center.z,false);
+    const movement=controls.setLookAt(position.x,position.y,position.z,center.x,center.y,center.z,false);
+    if ((camera as any)?.isOrthographicCamera) {
+      const orthographic = camera as unknown as THREE.OrthographicCamera;
+      const zoom = Math.min(orthographic.right-orthographic.left, orthographic.top-orthographic.bottom) / Math.max(size.length()*1.15, .01);
+      if (controls.zoomTo) await controls.zoomTo(zoom, false);
+    }
     await (guard?.signal ? Promise.race([movement,interrupted]) : movement);
   } finally { guard?.signal?.removeEventListener('abort',cancel); }
 }

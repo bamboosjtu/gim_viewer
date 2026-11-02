@@ -8,7 +8,7 @@
 let statusTextEl: HTMLElement | null = null;
 let statusDotEl: HTMLElement | null = null;
 const busyTasks = new Map<string, string>();
-let businessDeviceCount: number | null = null;
+let engineeringDeviceCount: number | null = null;
 let deviceProgress = '', deviceDetail = '';
 
 /** 空工程时右侧状态栏的稳定默认文案。 */
@@ -70,8 +70,8 @@ export function setStatusRight(text: string): void {
 export function setDeviceStatus(text: string, detail?: string): void {
   deviceProgress = text; deviceDetail = detail ?? '';
   const el = document.getElementById('status-devices');
-  const display = businessDeviceCount === null ? text : `设备节点 ${businessDeviceCount}${text ? ` · ${text}` : ''}`;
-  const explanation = businessDeviceCount === null ? '' : '设备节点包含装配内部的独立功能单元；几何实例统计整机装配根，两者不是一一对应。';
+  const display = engineeringDeviceCount === null ? text : `设备整体候选 ${engineeringDeviceCount}${text ? ` · ${text}` : ''}`;
+  const explanation = engineeringDeviceCount === null ? '' : '设备整体候选来自工程实体识别，不代表已确认台套；几何实例按来源放置统计，两者不是一一对应。';
   if (el) { el.textContent = display; el.title = [display,explanation,detail].filter(Boolean).join('\n'); el.hidden = !display; }
   let pause = document.getElementById('status-device-pause') as HTMLButtonElement | null;
   if (!pause && el?.parentElement) {
@@ -88,15 +88,15 @@ export function setDeviceStatus(text: string, detail?: string): void {
 }
 
 /** Semantic equipment count is independent from renderable occurrences. */
-export function setBusinessDeviceCount(count: number): void {
-  businessDeviceCount = count;
+export function setEngineeringDeviceCount(count: number | null): void {
+  engineeringDeviceCount = count;
   setDeviceStatus(deviceProgress,deviceDetail);
 }
 
 /** 清理工程时恢复共性状态栏，避免线路统计泄漏到下一工程。 */
 export function resetStatusRight(): void {
   busyTasks.clear();
-  businessDeviceCount = null;
+  engineeringDeviceCount = null;
   setIfcStatus('');
   setConnectionStatus('');
   setStatus('就绪');

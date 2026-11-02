@@ -1,0 +1,220 @@
+import type { AppState, ProjectLoadSession } from '../app/state.js';
+import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
+import { engineeringCacheEntry, type EngineeringCacheIdentity } from './engineeringCacheCodec.js';
+import type { EngineeringBuildResult } from './engineeringWorkerProtocol.js';
+import { EngineeringWorkerClient } from './engineeringWorkerClient.js';
+import { SUBSTATION_PARSER_DOMAIN_VERSION, SUBSTATION_SPATIAL_SEMANTIC_VERSION } from './substationSpatialSemanticCache.js';
+import { isTauri } from '@desktop/runtime.js';
+import { perfMark } from '../utils/perfTimings.js';
+import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
+
+interface EngineeringJob {
+  session: ProjectLoadSession;
+  controller: AbortController;
+  client: EngineeringWorkerClient;
+  ready: Promise<void>;
+  lastSpatial: SubstationSpatialIndex | null;
+  finished: boolean;
+  enriching: boolean;
+  identity?: EngineeringCacheIdentity;
+  update: () => void;
+  beforeCacheWrite?: Promise<unknown>;
+  resolveGeometry(catalog: SourceGeometryOccurrenceCatalog | null): void;
+}
+const jobs = new WeakMap<AppState, EngineeringJob>();
+const current = (state: AppState, job: EngineeringJob) => jobs.get(state) === job && !job.controller.signal.aborted && state.isCurrentSession(job.session);
+const semanticPath = (path: string) => /\.(?:cbm|dev|fam)$/i.test(path);
+export const ENGINEERING_PARSER_CONTRACT = `${SUBSTATION_PARSER_DOMAIN_VERSION}|${SUBSTATION_SPATIAL_SEMANTIC_VERSION}`;
+
+export interface EngineeringBuildOptions {
+  onUpdate?: () => void;
+  /** Dependency injection for lifecycle/integration tests; production uses a real Worker. */
+  createWorker?: (isCurrent: () => boolean, signal: AbortSignal) => EngineeringWorkerClient;
+  /** Native early-open sources are not a published cache until extraction commits. */
+  beforeCacheWrite?: Promise<unknown>;
+  /** Starts shared IFC semantics on demand; has no geometry readiness gate. */
+  ensureIfcSemantics?: () => Promise<unknown>;
+}
+
+async function saveResult(state: AppState, job: EngineeringJob, result: EngineeringBuildResult): Promise<void> {
+  if (!current(state, job) || !job.identity || job.session.projectId == null || (!result.sourceBytes && !result.entityBytes && !result.navigationBytes)) return;
+  state.engineeringCacheStatus = 'saving'; job.update();
+  try {
+    await job.beforeCacheWrite;
+    if (!current(state, job)) return;
+    const { writeCacheFile } = await import('@desktop/database.js');
+    if (!current(state, job)) return;
+    // Atomic files have independent headers and completion receipts. An entity
+    // snapshot binds the exact source body digest, so a partial write cannot mix domains.
+    if (result.sourceBytes) await writeCacheFile(job.session.projectId, engineeringCacheEntry(job.identity, 'sources'), result.sourceBytes, job.identity.sourceSha256);
+    if (!current(state, job)) return;
+    if (result.entityBytes) await writeCacheFile(job.session.projectId, engineeringCacheEntry(job.identity, 'entities'), result.entityBytes, job.identity.sourceSha256);
+    if (!current(state, job)) return;
+    if (result.navigationBytes) await writeCacheFile(job.session.projectId, engineeringCacheEntry(job.identity, 'navigation'), result.navigationBytes, job.identity.sourceSha256);
+    if (current(state, job)) { state.engineeringCacheStatus = result.cacheError ? 'error' : 'saved'; state.engineeringCacheError = result.cacheError ?? ''; job.update(); }
+  } catch (error) {
+    if (current(state, job)) { state.engineeringCacheStatus = 'error'; state.engineeringCacheError = String(error); job.update(); }
+  }
+}
+
+function publish(state: AppState, job: EngineeringJob, result: EngineeringBuildResult): void {
+  if (!current(state, job)) return;
+  state.engineeringSources = result.sources;
+  state.engineeringSnapshot = result.snapshot;
+  state.engineeringNavigation = result.navigation;
+  state.engineeringNavigationCacheHit = result.navigationCacheHit === true;
+  state.engineeringGeometryCatalog = result.geometryOccurrences; job.resolveGeometry(result.geometryOccurrences);
+  state.engineeringRepresentationChanged?.();
+  state.engineeringStatus = result.sources.complete ? 'ready' : 'partial';
+  state.engineeringError = '';
+  if (!result.sources.complete) state.engineeringCacheStatus = 'partial';
+  if (result.cacheError) { state.engineeringCacheStatus = 'error'; state.engineeringCacheError = result.cacheError; }
+  perfMark('工程实体就绪', { complete: result.sources.complete, sources: result.snapshot.memberships.length,
+    entities: result.snapshot.entities.length, pending: result.snapshot.pending.length, entityCacheHit: result.entityCacheHit === true, navigationCacheHit: result.navigationCacheHit === true });
+  job.update();
+}
+
+async function enrich(state: AppState, job: EngineeringJob): Promise<void> {
+  if (!current(state, job) || job.finished || job.enriching) return;
+  job.enriching = true;
+  try {
+    // Notifications can carry a newer immutable spatial snapshot while the
+    // Worker is assembling the previous one. Drain them through one owner;
+    // closing an earlier job must never cancel a later assembly request.
+    while (current(state, job) && !job.finished) {
+      const spatial = state.substationSpatialIndex;
+      if (!spatial || spatial === job.lastSpatial) return;
+      job.lastSpatial = spatial;
+      const result = await job.client.assemble(spatial.objects, spatial.models, job.identity, spatial.nodes);
+      if (!current(state, job)) return;
+      if (state.substationSpatialIndex !== spatial) continue;
+      publish(state, job, result);
+      job.finished = true; job.client.close();
+      await saveResult(state, job, result);
+    }
+  } finally { job.enriching = false; }
+}
+
+/** IFC semantic readiness is independent of rendering and LOD completion. */
+export function notifyEngineeringIfcEvidence(state: AppState): void {
+  const job = jobs.get(state); if (!job) return;
+  void job.ready.then(() => enrich(state, job)).catch(error => fail(state, job, error));
+}
+export function notifyEngineeringIfcFailure(state: AppState, reason: string): void {
+  const job = jobs.get(state); if (!job || !current(state, job) || job.finished) return;
+  job.ready.then(() => {
+    if (!current(state, job) || job.finished) return;
+    job.finished = true; job.client.close();
+    state.engineeringError = reason;
+    state.engineeringStatus = state.engineeringSnapshot ? 'partial' : 'error';
+    state.engineeringCacheStatus = 'partial'; job.update();
+  }).catch(error => fail(state, job, error));
+}
+
+function fail(state: AppState, job: EngineeringJob, error: unknown): void {
+  if (!current(state, job) || job.finished) return;
+  job.client.close();
+  job.resolveGeometry(null);
+  console.warn('[工程来源] 构建失败', error instanceof Error ? error.stack : String(error));
+  job.finished = true;
+  state.engineeringError = String(error);
+  state.engineeringStatus = state.engineeringSnapshot ? 'partial' : 'error';
+  job.update();
+}
+
+/** Start from actual source files, never the old tree's object/grain projection.
+ * Cold File blobs and warm lazy sources share one extraction protocol.
+ */
+export function beginEngineeringBuild(state: AppState, files: Map<string, File>, options: EngineeringBuildOptions = {}): Promise<void> {
+  state.engineeringCleanup?.();
+  let resolveGeometry!: EngineeringJob['resolveGeometry'];
+  state.engineeringGeometryReady = new Promise(resolve => { resolveGeometry = resolve; }); state.engineeringGeometryCatalog = null;
+  const session = state.captureProjectSession(), controller = new AbortController();
+  if (typeof Worker === 'undefined' && !options.createWorker) {
+    resolveGeometry(null);
+    state.engineeringSources = null; state.engineeringSnapshot = null; state.engineeringNavigation = null; state.engineeringNavigationCacheHit = false;
+    state.engineeringStatus = 'error'; state.engineeringError = '当前环境无法启动工程实体构建 Worker';
+    state.notifyEngineeringChanged(); options.onUpdate?.();
+    return Promise.resolve();
+  }
+  const update = () => { if (state.isCurrentSession(session) && !controller.signal.aborted) { state.notifyEngineeringChanged(); options.onUpdate?.(); } };
+  let job: EngineeringJob;
+  const client = (options.createWorker ?? EngineeringWorkerClient.create)(() => !!job && current(state, job), controller.signal);
+  const persistent = isTauri() && session.projectId != null && /^[a-f\d]{64}$/i.test(session.sourceSha256 ?? '');
+  job = { session, controller, client, resolveGeometry, ready: Promise.resolve(), lastSpatial: null, finished: false, enriching: false, update, beforeCacheWrite: options.beforeCacheWrite,
+    identity: persistent ? { sourceSha256: session.sourceSha256!, parserVersion: ENGINEERING_PARSER_CONTRACT, entries: [...files.keys()] } : undefined };
+  jobs.set(state, job);
+  state.engineeringCleanup = () => { resolveGeometry(null); controller.abort(); client.close(); if (jobs.get(state) === job) jobs.delete(state); };
+  state.engineeringSources = null; state.engineeringSnapshot = null; state.engineeringNavigation = null; state.engineeringNavigationCacheHit = false;
+  state.engineeringStatus = 'loading'; state.engineeringError = ''; state.engineeringCacheStatus = 'none'; state.engineeringCacheError = ''; update();
+  const run = async () => {
+    if (job.identity) {
+      const { readCachedEntry } = await import('@desktop/database.js');
+      const reads = await Promise.allSettled([
+        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'sources')),
+        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'entities')),
+        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'navigation')),
+      ]);
+      if (!current(state, job)) return;
+      if (reads[0].status === 'fulfilled') {
+        try {
+          const result = await client.restore(reads[0].value, reads[1].status === 'fulfilled' ? reads[1].value : undefined, job.identity, reads[2].status === 'fulfilled' ? reads[2].value : undefined);
+          if (!current(state, job)) return;
+          state.engineeringCacheStatus = 'hit'; publish(state, job, result);
+          job.finished = true; client.close();
+          await saveResult(state, job, result); return;
+        } catch (error) { if (!current(state, job)) return; state.engineeringCacheError = String(error); }
+      }
+      state.engineeringCacheStatus = 'miss'; update();
+    }
+    const scope = session.sourceSha256 || `session:${session.generation}`;
+    await client.init(scope, [...files.keys()]);
+    const entries = [...files].filter(([path]) => semanticPath(path));
+    // Bounded source batches; native lazy reads use the existing binary batch IPC.
+    for (let offset = 0; offset < entries.length;) {
+      if (!current(state, job)) return;
+      const chunk: Array<[string, File]> = []; let bytes = 0;
+      while (offset < entries.length && chunk.length < 256 && (bytes < 8 * 1024 * 1024 || chunk.length === 0)) {
+        const entry = entries[offset++]; chunk.push(entry); bytes += entry[1].size || 0;
+      }
+      const lazy = chunk.filter(([, file]) => !(file instanceof Blob));
+      let batch: Map<string, Uint8Array | null> | undefined;
+      if (lazy.length && job.identity) {
+        const { batchReadCachedFiles } = await import('@desktop/database.js');
+        batch = await batchReadCachedFiles(session.projectId!, lazy.map(([path]) => path));
+      }
+      const input: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }> = [];
+      for (const [path, file] of chunk) {
+        if (file instanceof Blob) input.push({ path, blob: file });
+        else {
+          const lazyFile = file as unknown as { arrayBuffer?: () => Promise<ArrayBuffer>; text(): Promise<string> };
+          const value = batch?.get(path);
+          if (value) input.push({ path, bytes: value });
+          else input.push({ path, bytes: typeof lazyFile.arrayBuffer === 'function' ? new Uint8Array(await lazyFile.arrayBuffer()) : new TextEncoder().encode(await lazyFile.text()) });
+        }
+      }
+      if (!current(state, job)) return;
+      await client.addFiles(input);
+    }
+    const graph = await client.extract();
+    if (!current(state, job)) return;
+    if (client.geometryOccurrences) { state.engineeringGeometryCatalog = client.geometryOccurrences; resolveGeometry(client.geometryOccurrences); update(); }
+    const spatial = state.substationSpatialIndex;
+    job.lastSpatial = spatial;
+    const result = await client.assemble(spatial?.objects ?? [], spatial?.models ?? [], job.identity, spatial?.nodes ?? []);
+    if (!current(state, job)) return;
+    if (spatial === state.substationSpatialIndex) publish(state, job, result);
+    if ((spatial && spatial === state.substationSpatialIndex) || graph.ifcPaths.length === 0) { job.finished = true; client.close(); }
+    else {
+      // Also catch a spatial publication which arrived during the initial
+      // assembly, before a notification could register against job.ready.
+      void job.ready.then(() => enrich(state, job)).catch(error => fail(state, job, error));
+      if (options.ensureIfcSemantics) void Promise.resolve().then(options.ensureIfcSemantics).then(ready => {
+        if (ready === false && current(state, job)) notifyEngineeringIfcFailure(state, 'IFC 来源语义未能完成');
+      }).catch(error => { if (current(state, job)) notifyEngineeringIfcFailure(state, String(error)); });
+    }
+    if (spatial === state.substationSpatialIndex) await saveResult(state, job, result);
+  };
+  job.ready = run().catch(error => fail(state, job, error));
+  return job.ready;
+}

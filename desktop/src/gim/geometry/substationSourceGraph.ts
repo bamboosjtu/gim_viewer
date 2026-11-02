@@ -2,13 +2,7 @@ import { parseDev } from './devParser.js';
 import { parsePhm } from './phmParser.js';
 import { PARSER_LIMITS } from '../parserLimits.js';
 import { getFileByPath } from '../fileLookup.js';
-
-export function geometryTargetPath(path: string): string {
-  const normalized = path.replace(/\\/g, '/');
-  if (normalized.includes('/')) return normalized;
-  const prefix = /\.dev$/i.test(normalized) ? 'DEV' : /\.phm$/i.test(normalized) ? 'PHM' : 'MOD';
-  return `${prefix}/${normalized}`;
-}
+import { createEntryResolver } from '../entryResolver.js';
 
 /** Source hydration only. Placement/colour remain on parser edges and are consumed by discovery.
  * Batch breadth traversal supports both automatic and click-time cache fallback.
@@ -16,10 +10,12 @@ export function geometryTargetPath(path: string): string {
 export async function hydrateSubstationGeometryGraph(
   devPaths: readonly string[],
   readFiles: (paths: string[]) => Promise<ReadonlyMap<string, File>>,
+  inventory: Iterable<string>,
 ): Promise<Map<string, File>> {
   const files = new Map<string, File>();
   const seen = new Set<string>();
-  let pending = devPaths.map((path) => ({ path: geometryTargetPath(path), depth: 0 }));
+  const resolve = createEntryResolver(inventory);
+  let pending = devPaths.map((path) => ({ path: resolve(path) ?? path, depth: 0 }));
   while (pending.length > 0) {
     const batch = pending.filter(({ path }) => {
       const key = path.toLowerCase();
@@ -48,7 +44,7 @@ export async function hydrateSubstationGeometryGraph(
           targets = parsePhm(await file.text(), path).solidModels.map((s) => s.solidModelPath);
         }
         for (const target of targets) {
-          if (/\.(dev|phm|mod|stl|gl)$/i.test(target)) pending.push({ path: geometryTargetPath(target), depth: depth + 1 });
+          if (/\.(dev|phm|mod|stl|gl)$/i.test(target)) pending.push({ path: resolve(target, path) ?? target, depth: depth + 1 });
         }
       } catch { /* This source is diagnosed by strict compilation/discovery, siblings remain available. */ }
     }

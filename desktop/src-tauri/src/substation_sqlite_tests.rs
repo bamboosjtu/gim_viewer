@@ -75,32 +75,6 @@ fn semantic_source_missing_wrong_size_and_empty_file_are_distinct() {
     std::fs::remove_dir(dir).unwrap();
 }
 
-#[test]
-fn fam_schema_migrates_without_losing_existing_rows() {
-    let conn = Connection::open_in_memory().unwrap();
-    initialize_schema(&conn).unwrap();
-    project(&conn, 1, "old");
-    conn.execute_batch("DROP TABLE substation_fam_property;
-        CREATE TABLE substation_fam_property(id INTEGER PRIMARY KEY,project_id,source_path,section_name,prop_key,prop_value,sort_order,created_at_ms,raw_property_json,
-            UNIQUE(project_id,source_path,section_name,prop_key));
-        INSERT INTO substation_fam_property VALUES(1,1,'DEV/old.fam','design','key','value',7,0,'{\"rawLine\":\"key=value\"}');
-        UPDATE gim_project SET substation_parser_version='gim-substation-parser-v24',line_parser_version='gim-line-parser-v1';").unwrap();
-    migrate_fam_rows(&conn).unwrap();
-    migrate_fam_rows(&conn).unwrap();
-    let old: (String, String, i64) = conn.query_row("SELECT prop_value,raw_property_json,source_line FROM substation_fam_property", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
-    assert_eq!(old, ("value".into(), "{\"rawLine\":\"key=value\"}".into(),1));
-    conn.execute("INSERT INTO substation_fam_property(project_id,source_path,section_name,prop_key,prop_value,sort_order,created_at_ms,source_line) VALUES(1,'DEV/old.fam','design','key','other',8,0,2)", []).unwrap();
-    let versions: (String,String) = conn.query_row("SELECT substation_parser_version,line_parser_version FROM gim_project", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
-    assert_ne!(versions.0, SUBSTATION_PARSER_VERSION); // old semantic domain rebuilds
-    assert_eq!(versions.1, LINE_PARSER_VERSION);
-    project(&conn, 2, "legacy-v22");
-    conn.execute("UPDATE gim_project SET project_type='substation',parser_version='gim-parser-v22' WHERE id=2", []).unwrap();
-    initialize_schema(&conn).unwrap();
-    let migrated_version: String = conn.query_row("SELECT substation_parser_version FROM gim_project WHERE id=2", [], |row| row.get(0)).unwrap();
-    assert_eq!(migrated_version, "gim-substation-parser-v22");
-    assert!(!parser_domain_version_matches(Some(&migrated_version), Some("gim-parser-v22"), SUBSTATION_PARSER_VERSION, LEGACY_SUBSTATION_PARSER_VERSIONS));
-}
-
 /// Test-only file exchange. TS tests feed actual production payloads and restore
 /// only these SELECT results. Strict gate fails if no output file is produced.
 #[test]
@@ -117,13 +91,6 @@ fn substation_sqlite_exchange() {
         let refs: GeometryRefsPayload = serde_json::from_value(request["refs"].clone()).unwrap();
         let pid = index.project_id;
         project(&conn, pid, index.source_sha256.as_deref().unwrap_or("fixture"));
-        if request["migrate"].as_bool().unwrap_or(false) {
-            conn.execute_batch("DROP TABLE substation_fam_property;
-                CREATE TABLE substation_fam_property(id INTEGER PRIMARY KEY,project_id,source_path,section_name,prop_key,prop_value,sort_order,created_at_ms,raw_property_json,
-                    UNIQUE(project_id,source_path,section_name,prop_key));
-                INSERT INTO substation_fam_property VALUES(1,1,'DEV/legacy.fam','design','key','old',0,0,NULL);").unwrap();
-            migrate_fam_rows(&conn).unwrap();
-        }
         // Only production INSERT/SELECT results cross back into the TS restore.
         save_gim_index_connection(&mut conn, index).unwrap();
         assert!(!substation_index_receipt_matches(&conn,pid));
@@ -149,10 +116,14 @@ fn substation_sqlite_exchange() {
             assert!(!substation_index_receipt_matches(&tx,pid));
         }
         let warm = get_gim_index_connection(&conn, pid).unwrap();
-        let reachable = query_reachable_geometry_filtered(&conn,pid,true,true,None).unwrap();
-        let filter = request["filter"].as_array().map(|a| a.iter().map(|v| v.as_str().unwrap().to_string()).collect());
-        let filtered = query_reachable_geometry_filtered(&conn,pid,true,true,filter.as_ref()).unwrap();
-        output.push(serde_json::json!({"index":warm,"reachable":reachable,"filtered":filtered,"version":SUBSTATION_PARSER_VERSION}));
+        let fact = |sql: &str| -> serde_json::Value {
+            let text: String = conn.query_row(sql, params![pid], |row| row.get(0)).unwrap();
+            serde_json::from_str(&text).unwrap()
+        };
+        let dev_solids = fact("SELECT json_group_array(json_object('dev_path',dev_path,'solid_model_path',solid_model_path,'transform_matrix',transform_matrix,'sort_order',sort_order)) FROM (SELECT * FROM substation_dev_solid_model WHERE project_id=?1 ORDER BY dev_path,sort_order)");
+        let dev_children = fact("SELECT json_group_array(json_object('dev_path',dev_path,'child_dev_path',child_dev_path,'transform_matrix',transform_matrix,'sort_order',sort_order)) FROM (SELECT * FROM substation_dev_sub_device WHERE project_id=?1 ORDER BY dev_path,sort_order)");
+        let phm_solids = fact("SELECT json_group_array(json_object('phm_path',phm_path,'solid_model_path',solid_model_path,'transform_matrix',transform_matrix,'color',color,'phm_color_max_a',phm_color_max_a,'sort_order',sort_order)) FROM (SELECT * FROM substation_phm_solid_model WHERE project_id=?1 ORDER BY phm_path,sort_order)");
+        output.push(serde_json::json!({"index":warm,"refs":{"dev_solid_models":dev_solids,"dev_sub_devices":dev_children,"phm_solid_models":phm_solids},"version":SUBSTATION_PARSER_VERSION}));
     }
     std::fs::write(output_path,serde_json::to_vec(&output).unwrap()).unwrap();
 }

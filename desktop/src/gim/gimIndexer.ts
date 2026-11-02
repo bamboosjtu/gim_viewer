@@ -141,11 +141,7 @@ export function buildIfcGuidIndex(node: CbmNode | null, ifcEntries: readonly imp
       const modelId = exact?.modelId || (byName.length === 1 ? byName[0].modelId : null);
       // 重复 basename 且 CBM 只给裸文件名时，拒绝建立可能串模的索引。
       if (modelId) {
-        // 兼容旧 SQLite 索引中由 basename 生成的 model_id；新索引一律使用
-        // ifc_<hash>，不会进入此分支。这样升级旧缓存时仍能读取诊断数据，
-        // 而新工程不会重新引入同名冲突。
-        const indexModelId = modelId.startsWith('ifc_') ? modelId : n.ifcFile;
-        index.set(`${indexModelId}:${n.ifcGuid}`, n);
+        index.set(`${modelId}:${n.ifcGuid}`, n);
       }
     }
     for (const child of n.children) walk(child);

@@ -39,50 +39,51 @@ beforeEach(() => {
     fragments:{list:new Map(),resetHighlight:vi.fn(async () => {}),highlight:vi.fn(async () => {}),core:{update:vi.fn()} } };
 });
 
-it.each([false,true])('a business IFC leaf highlights and frames its cached identity before Spatial = %s',async withoutSpatial=>{
+async function engineeringFixture(state: AppState, index: Awaited<ReturnType<typeof spatialFixture>>) {
+  const { extractEngineeringSourceGraph } = await import('../../gim/engineering/sourceGraph.js');
+  const { buildEngineeringSources } = await import('../../gim/engineering/buildSources.js');
+  const { projectEngineeringNavigation } = await import('../../gim/engineering/navigation.js');
+  const raw: Record<string,string> = { 'project.cbm':'OBJECTMODELPOINTER=B.dev', 'B.dev':'SYMBOLNAME=B', 'CBM/model.ifc':'' };
+  const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async path=>raw[path]});
+  const built=buildEngineeringSources('package',graph,index.objects,index.models,index.nodes);
+  state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
+  return {ifc:built.snapshot.memberships.find(member=>member.sourceId===built.sources.ifcRecords[0].id)!.ownerId!,device:built.snapshot.entities.find(entity=>entity.name==='B')!.id};
+}
+
+it.each([false,true])('an engineering IFC whole highlights and frames its cached identity before Spatial = %s',async withoutSpatial=>{
   const {state}=fixture();state.initialized=true;state.currentProjectType='substation';
-  const index=await spatialFixture(state),object=index.objects[0];
-  const {buildBusinessTree}=await import('../../gim/businessTree.js');
-  const p=buildBusinessTree(state.currentCbmTree!,new Map(),index);state.businessTree=p;
+  const index=await spatialFixture(state),targets=await engineeringFixture(state,index);
   if(withoutSpatial)state.substationSpatialIndex=null;
-  const key=p.objectBySource.get(object.key)!;
   const box=new THREE.Box3(new THREE.Vector3(1,2,3),new THREE.Vector3(3,4,5));
   runtime.ctx.fragments.list.set(state.getRuntimeModelId('model'),{getLocalIdsByGuids:vi.fn(async()=>[10]),getMergedBox:vi.fn(async()=>box),getItemsData:async()=>[]});
-  const {selectBusinessTree}=await import('../businessTreeSelection.js');
-  await selectBusinessTree(state,p,key);
-  expect(runtime.ctx.fragments.highlight).toHaveBeenCalled();
-  expect(runtime.ctx.world.camera.controls.setLookAt).toHaveBeenCalled();
-  expect(state.selectionRequest?.target).toEqual({kind:'business',key});
-  expect(state.selectionHighlightRequestId).toBe(state.selectionRequest?.id);
-  expect(document.querySelector('.props-header')?.textContent).toContain('IFC B');
-  state.beginSelection({kind:'cbm',key:'next'});expect(state.businessSelectionRoots).toBeNull();
+  const {selectEngineeringTarget}=await import('../engineeringSelection.js');
+  await selectEngineeringTarget(state,{kind:'engineering',key:targets.ifc});
+  expect(state.highlightedItems).not.toBeNull(); expect(runtime.ctx.fragments.highlight).not.toHaveBeenCalled(); expect(runtime.ctx.world.camera.controls.setLookAt).toHaveBeenCalled();
+  expect(state.selectionRequest?.target).toEqual({kind:'engineering',key:targets.ifc});
+  expect(state.selectionHighlightRequestId).toBe(state.selectionRequest?.id);expect(document.querySelector('.props-header')?.textContent).toBe('IFC B');
+  state.beginSelection({kind:'cbm',key:'next'});expect(state.engineeringSelection).toBeNull();
 });
-it('a late business IFC identity reply cannot highlight over a newer device selection',async()=>{
-  const {state,b}=fixture();state.initialized=true;state.currentProjectType='substation';
-  const index=await spatialFixture(state),object=index.objects[0],ids=deferred<(number|null)[]>(),started=deferred<void>();
-  const {buildBusinessTree}=await import('../../gim/businessTree.js'),p=buildBusinessTree(state.currentCbmTree!,new Map(),index);state.businessTree=p;
+it('a late engineering IFC identity reply cannot highlight over a newer whole selection',async()=>{
+  const {state}=fixture();state.initialized=true;state.currentProjectType='substation';
+  const index=await spatialFixture(state),targets=await engineeringFixture(state,index),ids=deferred<(number|null)[]>(),started=deferred<void>();
   runtime.ctx.fragments.list.set(state.getRuntimeModelId('model'),{getLocalIdsByGuids:()=>{started.resolve();return ids.promise;},getMergedBox:async()=>new THREE.Box3(),getItemsData:async()=>[]});
-  const {selectBusinessTree}=await import('../businessTreeSelection.js');
-  const pending=selectBusinessTree(state,p,p.objectBySource.get(object.key)!);await started.promise;
-  b.devPath='';const {handleNodeClick}=await import('../nodeInteractionService.js');await handleNodeClick(state,b,()=>{});
-  ids.resolve([10]);await pending;expect(runtime.ctx.fragments.highlight).not.toHaveBeenCalled();expect(document.querySelector('.props-header')?.textContent).toBe('B');
+  const {selectEngineeringTarget}=await import('../engineeringSelection.js');
+  const pending=selectEngineeringTarget(state,{kind:'engineering',key:targets.ifc});await started.promise;
+  await selectEngineeringTarget(state,{kind:'engineering',key:targets.device});ids.resolve([10]);await pending;
+  expect(runtime.ctx.fragments.highlight).not.toHaveBeenCalled();expect(document.querySelector('.props-header')?.textContent).toBe('B');
 });
-
-it('uses precise regional bounds for a linked IFC leaf and offers a local view of a long grounding member',async()=>{
-  const {state,a}=fixture();state.initialized=true;state.currentProjectType='substation';
-  a.ifcFile='model.ifc';a.ifcGuid='guid-B';a.devPath='';
-  const index=await spatialFixture(state),object=index.objects[0];
-  const {buildBusinessTree}=await import('../../gim/businessTree.js');
-  const p=buildBusinessTree(state.currentCbmTree!,new Map(),index);state.businessTree=p;
+it('uses precise regional bounds for an IFC whole and offers a local view of a long member',async()=>{
+  const {state}=fixture();state.initialized=true;state.currentProjectType='substation';
+  const index=await spatialFixture(state),object=index.objects[0],targets=await engineeringFixture(state,index);
   const exact=new THREE.Box3(new THREE.Vector3(10,2,3),new THREE.Vector3(117,2.1,3.1));
   const loaded={getLocalIdsByGuids:vi.fn(async()=>[10]),getMergedBox:vi.fn(async()=>new THREE.Box3(new THREE.Vector3(-100,-100,-100),new THREE.Vector3(200,200,200))),getItemsData:async()=>[]};
   runtime.ctx.fragments.list.set(state.getRuntimeModelId('model'),loaded);
   state.ifcRegionalRuntimes.set('model',{index:{objects:[{globalId:object.globalId,expressId:10}]},worldBounds:()=>exact,highlightGroup:()=>null,clearHighlight:()=>{}} as any);
-  const {selectBusinessTree}=await import('../businessTreeSelection.js');await selectBusinessTree(state,p,p.objectBySource.get(a.path)!);
-  expect(loaded.getMergedBox).not.toHaveBeenCalled();expect(runtime.ctx.fragments.highlight).toHaveBeenCalledWith(expect.anything(),{[state.getRuntimeModelId('model')]:[10]});
+  const {selectEngineeringTarget}=await import('../engineeringSelection.js');await selectEngineeringTarget(state,{kind:'engineering',key:targets.ifc});
+  expect(loaded.getMergedBox).not.toHaveBeenCalled();expect(state.highlightedItems).toEqual({[state.getRuntimeModelId('model')]:[10]});expect(runtime.ctx.fragments.highlight).not.toHaveBeenCalled();
   const controls=runtime.ctx.world.camera.controls,near=controls.position.distanceTo(controls.target);
   expect(controls.target.x).toBeCloseTo(63.5);expect(near).toBeLessThan(70);
-  const button=document.getElementById('business-fit')!;expect(button.textContent).toBe('定位整件');button.click();
+  const button=document.getElementById('engineering-fit')!;expect(button.textContent).toBe('定位整件');button.click();
   await vi.waitFor(()=>expect(controls.position.distanceTo(controls.target)).toBeGreaterThan(near*5));
 });
 
@@ -220,6 +221,7 @@ it('slow FAM read cannot commit after project replacement or an explicit cancell
 
 it('reversed PARTINDEX children share one in-flight root load but only the last part commits UI', async () => {
   const {state}=fixture();
+  state.currentFiles!.delete('DEV/A.dev'); state.currentFiles!.delete('DEV/B.dev');
   const {buildCbmTree}=await import('../../gim/cbmParser.js');
   for (const [path,text] of Object.entries({
     'CBM/project.cbm':'ENTITYNAME=F3System\nSUBSYSTEMS.NUM=1\nSUBSYSTEM0=root.cbm',
@@ -308,29 +310,33 @@ function spatialFixture(state:AppState) {
   });
 }
 
-it('functional tree A → spatial IFC B keeps B row and inspector after A FAM completes', async () => {
+it('a source IFC selection keeps its row and inspector after an earlier FAM request completes', async () => {
   const {state,a}=fixture(),fam=deferred<string>(),started=deferred<void>();a.famPath='slow.fam';
-  state.currentProjectType='substation';state.substationNavMode='functional';
+  state.currentProjectType='substation';
   state.currentFiles!.set('CBM/slow.fam',{text:() => {started.resolve();return fam.promise;}} as File);
   const index=await spatialFixture(state),object=index.objects[0];
-  const {createNodeClickHandler}=await import('../substationRuntime.js');
+  const { extractEngineeringSourceGraph } = await import('../../gim/engineering/sourceGraph.js');
+  const { buildEngineeringSources } = await import('../../gim/engineering/buildSources.js');
+  const raw: Record<string,string> = { 'project.cbm':'SUBSYSTEM0=unit.cbm', 'unit.cbm':'OBJECTMODELPOINTER=A.dev', 'A.dev':'SYMBOLNAME=设备 A', 'CBM/model.ifc':'' };
+  const graph = await extractEngineeringSourceGraph({ paths:Object.keys(raw), readText:async path=>raw[path] });
+  const built = buildEngineeringSources('package',graph,index.objects,index.models,index.nodes); state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;
+  const {projectEngineeringNavigation}=await import('../../gim/engineering/navigation.js');state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
+  const sourceId=built.sources.ifcRecords.find(r=>r.guid===object.globalId)!.id;
+  const {showNodePropertiesBasic}=await import('../../ui/propsDrawer.js');const pending=showNodePropertiesBasic(state,a);await started.promise;
   const {buildAndRenderCbmTree}=await import('../../ui/cbmTreeView.js');
-  buildAndRenderCbmTree(state,createNodeClickHandler(state,() => {}));
-  const {revealFunctionalSearchTarget,buildFunctionalDomainIndex}=await import('../../ui/substationFunctionalTreeView.js');
-  const rowKey=revealFunctionalSearchTarget(buildFunctionalDomainIndex(state.currentCbmTree!),a.path)!;
-  document.querySelector<HTMLElement>(`[data-node-path="${rowKey}"]`)!.click();await started.promise;
-  const modes=[...document.querySelectorAll<HTMLButtonElement>('.substation-nav-mode-btn')];
-  modes.find((button) => button.textContent==='空间')!.click();
-  const {revealSpatialSearchTarget}=await import('../../ui/substationSpatialTreeView.js');revealSpatialSearchTarget(index,object.key);
-  document.querySelector<HTMLElement>(`[data-node-path="${object.key}"]`)!.click();
+  state.engineeringNavMode='source';buildAndRenderCbmTree(state,()=>{});
+  const input=document.querySelector<HTMLInputElement>('[role="combobox"]')!;input.value='IFC B';input.dispatchEvent(new Event('input'));
+  document.querySelector<HTMLElement>('[role="option"]')!.click();
+  expect(state.selectionRequest!.target).toEqual({kind:'engineering-source',key:sourceId});
   await vi.waitFor(() => expect(document.querySelector('.props-header')!.textContent).toBe('IFC B'));
   fam.resolve('[设计参数]\nName=Old A');
-  await vi.waitFor(() => expect(state.loadedXmlModGroups.size).toBe(1));
-  expect(state.selectionRequest!.target).toEqual({kind:'ifc-object',key:object.key});
-  expect(document.querySelector('.tree-row.selected')?.getAttribute('data-node-path')).toBe(object.key);
+  await pending;
+  expect(state.selectionRequest!.target).toEqual({kind:'engineering-source',key:sourceId});
+  const rowKey=`source:record:${sourceId}`;
+  expect(document.querySelector('.tree-row.selected')?.getAttribute('data-node-path')).toBe(rowKey);
   expect(state.highlightedModState).toBeNull();expect(document.querySelector('.props-header')!.textContent).toBe('IFC B');
-  const id=state.selectionRequest!.id;buildAndRenderCbmTree(state,createNodeClickHandler(state,() => {}));
-  expect(state.selectionRequest!.id).toBe(id);expect(document.querySelector('.tree-row.selected')?.getAttribute('data-node-path')).toBe(object.key);
+  const id=state.selectionRequest!.id;buildAndRenderCbmTree(state,()=>{});
+  expect(state.selectionRequest!.id).toBe(id);expect(document.querySelector('.tree-row.selected')?.getAttribute('data-node-path')).toBe(rowKey);
 });
 
 it.each([false,true])('a spatial IFC second render loses ownership to B; project replacement = %s', async (replaceProject) => {
@@ -352,7 +358,7 @@ it('search selection wins before lazy imports and a slow 3D raycast cannot steal
   const {getViewerRuntimeWithUI}=await import('../viewerUIBinding.js');await getViewerRuntimeWithUI(state,() => {});
   document.querySelector<HTMLCanvasElement>('canvas')!.click();await started.promise;
   const {createNodeClickHandler}=await import('../substationRuntime.js');
-  const {buildAndRenderCbmTree}=await import('../../ui/cbmTreeView.js');state.currentProjectType='substation';state.substationNavMode='functional';
+  const {buildAndRenderCbmTree}=await import('../../ui/cbmTreeView.js');state.currentProjectType='equipment';
   buildAndRenderCbmTree(state,createNodeClickHandler(state,() => {}));
   const input=document.querySelector<HTMLInputElement>('[role="combobox"]')!;input.value='B';input.dispatchEvent(new Event('input'));
   const option=[...document.querySelectorAll<HTMLElement>('[role="option"]')].find((o) => o.textContent!.startsWith('B'))!;option.click();
@@ -366,16 +372,14 @@ it('search selection wins before lazy imports and a slow 3D raycast cannot steal
 
 it('an in-flight 3D IFC apply is reset before B, and blank viewport cancellation clears inspector and selection', async () => {
   const {state,b}=fixture(),apply=deferred<void>(),started=deferred<void>();state.initialized=true;
-  let visibleIfc:any=null;
-  runtime.ctx.fragments.list.set('model',{object:new THREE.Group(),getVisible:async () => [true],raycast:() => runtime.ctx.fragments.raycast(),getGuidsByLocalIds:async () => ['guid'],getItemsData:async () => []});
+  const modelRoot=new THREE.Group();
+  runtime.ctx.fragments.list.set('model',{object:modelRoot,getVisible:async () => [true],raycast:() => runtime.ctx.fragments.raycast(),getGuidsByLocalIds:async () => ['guid'],getItemsData:async () => [],getItemsGeometry:async()=>{started.resolve();await apply.promise;return [[{positions:new Float32Array([0,0,0,1,0,0,0,1,0]),transform:new THREE.Matrix4()}]];}});
   runtime.ctx.fragments.raycast=vi.fn(async () => ({localId:10,fragments:{modelId:'model'}}));
-  runtime.ctx.fragments.highlight.mockImplementationOnce(async (_style:any,items:any) => {started.resolve();await apply.promise;visibleIfc=items;});
-  runtime.ctx.fragments.resetHighlight.mockImplementation(async () => {visibleIfc=null;});
   const {getViewerRuntimeWithUI}=await import('../viewerUIBinding.js');await getViewerRuntimeWithUI(state,() => {});
   document.querySelector<HTMLCanvasElement>('canvas')!.click();await started.promise;
   const {handleNodeClick}=await import('../nodeInteractionService.js');const pending=handleNodeClick(state,b,() => {});
   apply.resolve();await pending;
-  expect(visibleIfc).toBeNull();expect(state.highlightedItems).toBeNull();
+  expect(modelRoot.children).toHaveLength(0);expect(state.highlightedItems).toBeNull();expect(runtime.ctx.fragments.highlight).not.toHaveBeenCalled();
   expect(state.highlightedModState!.groups.every((g) => g.userData.rootOccurrence===b.path)).toBe(true);
   const target=runtime.ctx.world.camera.controls.target.clone();
   runtime.ctx.fragments.raycast.mockResolvedValueOnce(null);document.querySelector<HTMLCanvasElement>('canvas')!.click();

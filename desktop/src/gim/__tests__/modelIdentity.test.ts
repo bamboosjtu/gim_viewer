@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { createIfcModelId, createIfcRuntimeModelId, normalizeEntryPath, resolveIfcModelId } from '../modelIdentity.js';
-import { resolveIfcPath, scanIfcFiles } from '../gimIndexer.js';
+import { buildIfcGuidIndex, resolveIfcPath, scanIfcFiles } from '../gimIndexer.js';
+import type { CbmNode } from '../types.js';
 
 function files(entries: Record<string, string>): Map<string, File> {
   return new Map(Object.entries(entries).map(([path, text]) => [path, new File([text], path.split('/').pop() || path)]));
 }
 
 describe('IFC model identity', () => {
+  it('uses the supplied current logical model identity without rewriting it by prefix or basename', () => {
+    const node = { ifcFile: 'DEV/A/model.ifc', ifcGuid: 'object-guid', children: [] } as unknown as CbmNode;
+    const entries = [{ modelId: 'active-model-a', path: 'DEV/A/model.ifc', name: 'model' }, { modelId: 'active-model-b', path: 'DEV/B/model.ifc', name: 'model' }];
+    expect([...buildIfcGuidIndex(node, entries).keys()]).toEqual(['active-model-a:object-guid']);
+    node.ifcFile = 'model.ifc'; expect(buildIfcGuidIndex(node, entries).size).toBe(0);
+  });
   it('同一路径跨平台写法生成同一稳定 ID，不同路径生成不同 ID', () => {
     expect(normalizeEntryPath('./DEV\\A\\foo.ifc')).toBe('dev/a/foo.ifc');
     expect(createIfcModelId('./DEV\\A\\foo.ifc')).toBe(createIfcModelId('dev/a/foo.ifc'));

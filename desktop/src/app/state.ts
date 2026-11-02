@@ -46,10 +46,21 @@ export interface ProjectLoadSession {
 
 /** Runtime-only user intent; it never invalidates the geometry batch or cache. */
 export interface SelectionRequest {
+  origin?: 'tree' | 'viewport' | 'command';
+  cameraNavigationVersion?: number;
   id: number;
   session: ProjectLoadSession;
   signal: AbortSignal;
-  target: { kind: 'cbm' | 'spatial-node' | 'ifc-object' | 'ifc-element' | 'sld' | 'business'; key: string } | null;
+  target: { kind: 'cbm' | 'spatial-node' | 'ifc-object' | 'ifc-element' | 'sld' | 'engineering' | 'engineering-source' | 'engineering-group'; key: string } | null;
+}
+
+export interface EngineeringSelectionScope {
+  requestId: number;
+  snapshot: import('../engineering/types.js').EngineeringSnapshot;
+  ownerIds: Set<string>;
+  sourceIds: Set<string>;
+  devRoots: Set<string>;
+  ifc: Array<{ modelId: string; expressId: number; globalId: string }>;
 }
 
 export interface SelectionCommitGuard {
@@ -76,14 +87,21 @@ export class AppState {
   viewHistory: ViewerViewHistory | null = null;
   stationOverview: (() => void) | null = null;
   onlySelected = false;
+  autoLocate = true;
+  cameraNavigationVersion = 0;
+  hoverCleanup: (() => void) | null = null;
+  selectionDecorationCleanup: (() => void) | null = null;
   selectionVisibility: ReturnType<typeof import('../services/selectionVisibility.js').createSelectionVisibility> | null = null;
   selectionHighlightRequestId: number | null = null;
+  engineeringSelection: EngineeringSelectionScope | null = null;
+  engineeringGeometryFilter: ((root?: THREE.Object3D) => void) | null = null;
+  engineeringRepresentationChanged: ((rootOccurrence?: string) => void) | null = null;
+  engineeringSelectionCleanup: (() => void) | null = null;
+  engineeringNavigationCleanup: (() => void) | null = null;
   deviceLodRuntime: { select(rootOccurrence: string): Promise<THREE.Group[]>; ensureBase?(rootOccurrence: string): Promise<THREE.Group[]>; retry?(rootOccurrence: string): Promise<THREE.Group[]>; refine?(rootOccurrence: string): Promise<THREE.Group[]>; releaseFine?(rootOccurrence: string): void; setOnlySelected?(only: boolean): void; release(): void; clearSelection(): void; notifyCoordinateAnchor?(): void;
     getLoadedRoot?(rootOccurrence: string): THREE.Group | undefined;
-    getBusinessOccurrences?():Iterable<Readonly<import('../services/devSpatialCatalog.js').DevSpatialOccurrence>>;
-    getBusinessShapes?():Iterable<import('../gim/businessTree.js').BusinessShape>;
     setBackgroundPaused?(paused: boolean): void;
-    pick?(ray: THREE.Raycaster): {rootOccurrence: string; instanceKey: string; distance: number} | null;
+    pick?(ray: THREE.Raycaster): {rootOccurrence: string; instanceKey: string; distance: number; object?: THREE.Object3D; hint?: import('../engineering/representations.js').DevRepresentationHint} | null;
     setExternalMemoryPressure?(pressure: 'unknown' | 'normal' | 'high' | 'critical'): void;
     resourceCounts?(): { templateCount: number; templateParseCount: number; sharedGeometryCount: number; sharedMaterialCount: number; sharedTextureCount: number };
     diagnostics: Record<string, unknown> } | null = null;
@@ -93,16 +111,25 @@ export class AppState {
   private selectionSequence = 0;
   private selectionAbort: AbortController | null = null;
 
-  beginSelection(target: SelectionRequest['target']): SelectionRequest {
+  beginSelection(target: SelectionRequest['target'], origin: SelectionRequest['origin'] = 'tree'): SelectionRequest {
+    this.hoverCleanup?.();
     this.selectionAbort?.abort();
-    this.businessSelectionRoots = null;
-    this.deviceLodRuntime?.clearSelection();
-    for (const runtime of this.ifcRegionalRuntimes.values()) { runtime.clearFineSelection?.(); runtime.clearSelectionFilter?.(); }
+    // While a new target is resolving, the previous isolated range remains
+    // visible. Its request is obsolete, so it cannot publish any late results.
+    const retainRange = this.onlySelected && target !== null;
+    if (!retainRange) {
+      this.engineeringSelection = null;
+      this.engineeringGeometryFilter?.();
+      this.deviceLodRuntime?.clearSelection();
+      for (const runtime of this.ifcRegionalRuntimes.values()) { runtime.clearFineSelection?.(); runtime.clearSelectionFilter?.(); }
+    }
     this.selectionAbort = new AbortController();
-    const request: SelectionRequest = { id: ++this.selectionSequence, session: this.captureProjectSession(), signal: this.selectionAbort.signal, target };
+    const request: SelectionRequest = { id: ++this.selectionSequence, session: this.captureProjectSession(), signal: this.selectionAbort.signal, target, origin, cameraNavigationVersion: this.cameraNavigationVersion };
     this.selectionRequest = request;
-    this.deviceLodRuntime?.setOnlySelected?.(this.onlySelected);
-    for (const runtime of this.ifcRegionalRuntimes.values()) runtime.setOnlySelected?.(this.onlySelected);
+    if (!retainRange) {
+      this.deviceLodRuntime?.setOnlySelected?.(this.onlySelected);
+      for (const runtime of this.ifcRegionalRuntimes.values()) runtime.setOnlySelected?.(this.onlySelected);
+    }
     this.selectionGeometry = null;
     this.selectionMessage = '';
     return request;
@@ -110,6 +137,9 @@ export class AppState {
 
   isCurrentSelection(request: SelectionRequest): boolean {
     return this.selectionRequest?.id === request.id && !request.signal.aborted && this.isCurrentSession(request.session);
+  }
+  canAutoLocate(request: SelectionRequest): boolean {
+    return this.autoLocate && request.origin !== 'viewport' && (request.cameraNavigationVersion === undefined || request.cameraNavigationVersion === this.cameraNavigationVersion);
   }
 
   selectionGuard(request: SelectionRequest): SelectionCommitGuard {
@@ -121,12 +151,23 @@ export class AppState {
     for (const runtime of this.ifcRegionalRuntimes.values()) { runtime.clearFineSelection?.(); runtime.clearSelectionFilter?.(); }
     this.selectionSequence++;
     this.selectionRequest = null;
+    this.engineeringSelection = null;
+    this.engineeringGeometryFilter?.();
     this.selectionGeometry = null;
     this.selectionMessage = '';
   }
   /** Session-only visibility filter for focused browser inspection. */
+  get canIsolateSelection(): boolean {
+    const request = this.selectionRequest, kind = request?.target?.kind;
+    if (!request?.target) return false;
+    if (kind !== 'engineering' && kind !== 'engineering-source' && kind !== 'engineering-group') return true;
+    const scope = this.engineeringSelection;
+    return !!scope && scope.requestId === request!.id && scope.snapshot === this.engineeringSnapshot && scope.sourceIds.size > 0;
+  }
   setOnlySelected(only: boolean): void {
+    if (only && !this.canIsolateSelection) return;
     this.onlySelected = only;
+    this.engineeringGeometryFilter?.();
     this.deviceLodRuntime?.setOnlySelected?.(only);
     for (const runtime of this.ifcRegionalRuntimes.values()) runtime.setOnlySelected?.(only);
     void this.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error));
@@ -138,18 +179,21 @@ export class AppState {
   currentCbmTree: CbmNode | null = null;
   /** 变电 IFC 空间对象图；线路工程保持 null。 */
   substationSpatialIndex: SubstationSpatialIndex | null = null;
-  /** 默认业务导航；源文件只读，完整业务投影持久化后直接恢复。 */
-  businessTree: import('../gim/businessTree.js').BusinessTreeProjection | null = null;
-  businessTreePending = false;
-  businessTreeError = '';
-  businessTreeInputsReady = true;
-  businessTreeInputVersion = 'transient';
-  businessTreeCacheStatus: 'none'|'hit'|'miss'|'building'|'saving'|'saved'|'error' = 'none';
-  businessTreeCacheError = '';
-  businessTreeCleanup: (()=>void) | null = null;
-  businessExpandedRows = new Set<string>();
-  businessSelectionRoots: Set<string> | null = null;
-  substationNavMode: 'spatial' | 'functional' | 'business' | 'source' = 'business';
+  engineeringSources: import('../gim/engineering/buildSources.js').EngineeringSources | null = null;
+  engineeringSnapshot: import('../engineering/types.js').EngineeringSnapshot | null = null;
+  engineeringNavigation: import('../gim/engineering/navigation.js').EngineeringNavigationData | null = null;
+  engineeringNavigationCacheHit = false;
+  engineeringGeometryCatalog: import('../gim/engineering/geometryOccurrences.js').SourceGeometryOccurrenceCatalog | null = null;
+  engineeringGeometryReady: Promise<import('../gim/engineering/geometryOccurrences.js').SourceGeometryOccurrenceCatalog | null> | null = null;
+  engineeringStatus: 'none' | 'loading' | 'partial' | 'ready' | 'error' = 'none';
+  engineeringError = '';
+  engineeringCacheStatus: 'none' | 'hit' | 'miss' | 'saving' | 'saved' | 'partial' | 'error' = 'none';
+  engineeringCacheError = '';
+  engineeringCleanup: (() => void) | null = null;
+  engineeringListeners = new Set<() => void>();
+  engineeringNavMode: 'composition' | 'source' = 'composition';
+  engineeringExpandedRows = { composition: new Set<string>(), source: new Set<string>() };
+  notifyEngineeringChanged(): void { for (const listener of [...this.engineeringListeners]) listener(); }
   /** GIM 头部提取的工程名称（如"XX变电站"），用于 F1System 根节点显示 */
   projectName: string = '';
 
@@ -282,6 +326,9 @@ export class AppState {
 
   /** 使所有在途工程/几何任务失效；必须在切换工程的第一个同步动作调用。 */
   invalidatePendingLoads(): void {
+    this.hoverCleanup?.(); this.selectionDecorationCleanup?.();
+    this.engineeringCleanup?.(); this.engineeringCleanup = null;
+    this.engineeringSelectionCleanup?.(); this.engineeringNavigationCleanup?.();
     this.substationResourceMonitor?.release(); this.substationResourceMonitor = null;
     this.substationMemoryPressure = 'unknown';
     this.deviceLodRuntime?.release(); this.deviceLodRuntime = null;
@@ -299,6 +346,9 @@ export class AppState {
 
   /** 激活新工程并返回其身份快照。 */
   activateProject(projectId: number | null, sourceSha256?: string | null): ProjectLoadSession {
+    this.hoverCleanup?.(); this.selectionDecorationCleanup?.();
+    this.engineeringCleanup?.(); this.engineeringCleanup = null;
+    this.engineeringSelectionCleanup?.(); this.engineeringNavigationCleanup?.();
     this.substationResourceMonitor?.release(); this.substationResourceMonitor = null;
     this.substationMemoryPressure = 'unknown';
     this.substationFineQueue = null;
@@ -425,14 +475,17 @@ export class AppState {
     this.currentIfcEntries = [];
     this.currentCbmTree = null;
     this.substationSpatialIndex = null;
-    this.businessTreeCleanup?.();this.businessTreeCleanup=null;
-    this.businessTree = null;
-    this.businessTreePending=false;this.businessTreeError='';
-    this.businessTreeInputsReady=true;this.businessTreeInputVersion='transient';
-    this.businessTreeCacheStatus='none';this.businessTreeCacheError='';
-    this.businessExpandedRows.clear();
-    this.businessSelectionRoots = null;
-    this.substationNavMode = 'business';
+    this.engineeringCleanup?.(); this.engineeringCleanup = null;
+    this.engineeringSources = null; this.engineeringSnapshot = null;
+    this.engineeringSelectionCleanup?.(); this.engineeringNavigationCleanup?.();
+    this.engineeringNavigation = null; this.engineeringNavigationCacheHit = false;
+    this.engineeringGeometryCatalog = null; this.engineeringGeometryReady = null;
+    this.engineeringStatus = 'none'; this.engineeringError = '';
+    this.engineeringCacheStatus = 'none'; this.engineeringCacheError = '';
+    this.engineeringListeners.clear();
+    this.engineeringNavMode = 'composition';
+    this.engineeringExpandedRows = { composition: new Set<string>(), source: new Set<string>() };
+    this.engineeringGeometryFilter = null; this.engineeringRepresentationChanged = null;
     this.projectName = '';
     this.currentProjectType = null;
     this.currentGimGraph = null;

@@ -99,6 +99,7 @@ export function parseDev(text: string, devPath: string): DevDocument {
       currentBlock = 'sub';
       if (i >= 0 && i < subDevicesNum && !isGimEmptyValue(value)) {
         subDeviceSlots[i] = {
+          sourceIndex: i,
           devPath: value,
           transformMatrix: IDENTITY_MATRIX.slice(),
         };

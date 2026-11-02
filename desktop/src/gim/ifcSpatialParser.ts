@@ -53,6 +53,8 @@ export interface IfcSpatialObject {
   ifcType: string;
   globalId: string;
   name: string;
+  /** Original decoded IFC Name, separate from the readable fallback label. */
+  sourceName?: string;
   /** IFC 原生身份字段；Name 为 -- 时仍保留 Description/ObjectType/Tag。 */
   description?: string;
   objectType?: string;
@@ -963,6 +965,7 @@ function parseIfcModel(
         ifcType: record.ifcType,
         globalId: isContained || isIfcRootLikeType(record.ifcType) ? globalId : '',
         name,
+        sourceName: parseString(record.args[2]),
         propertyDataDeferred: true,
         ...ifcObjectMetadata(record.args, undefined, placement ?? undefined, {}),
         parentObjectKey: parentIdByObjectId.has(record.expressId)

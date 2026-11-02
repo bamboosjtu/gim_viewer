@@ -29,6 +29,16 @@ import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
 import { PARSER_LIMITS } from '../gim/parserLimits.js';
 import { getFileByPath } from '../gim/fileLookup.js';
+import { createEntryResolver } from '../gim/entryResolver.js';
+
+const resolvers = new WeakMap<Map<string, File>, { size: number; resolve: ReturnType<typeof createEntryResolver> }>();
+function sourcePath(files: Map<string, File>, reference: string, owner = ''): string {
+  let entry = resolvers.get(files);
+  if (!entry || entry.size !== files.size) {
+    entry = { size: files.size, resolve: createEntryResolver(files.keys()) }; resolvers.set(files, entry);
+  }
+  return entry.resolve(reference, owner) ?? reference.replace(/\\/g, '/');
+}
 
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
@@ -136,7 +146,7 @@ export async function discoverGeometriesFromNode(
   // canonical helper add the prefix exactly once; prepending unconditionally
   // would turn `dev/foo.dev` into `DEV/dev/foo.dev` and make a valid source
   // look missing on mixed-case samples.
-  return discoverGeometriesFromDevPath(normalizeDevPath(node.devPath), files, rootTransform, new Set<string>(), 0, { instances: 0 }, { rootOccurrence: node.path });
+  return discoverGeometriesFromDevPath(sourcePath(files, node.devPath, node.path), files, rootTransform, new Set<string>(), 0, { instances: 0 }, { rootOccurrence: node.path });
 }
 
 export async function discoverGeometriesFromDevPath(
@@ -153,7 +163,7 @@ export async function discoverGeometriesFromDevPath(
   if (depth > PARSER_LIMITS.maxRecursionDepth) {
     throw new Error(`几何 DEV/PHM 递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
   }
-  const normalizedDevPath = normalizeDevPath(devFilePath);
+  const normalizedDevPath = sourcePath(files, devFilePath);
   const devVisitKey = normalizedDevPath.toLowerCase();
   if (visited.has(devVisitKey)) return empty;
   visited.add(devVisitKey);
@@ -219,12 +229,12 @@ export async function discoverGeometriesFromDevPath(
       const placementTransform = multiplyMatrices(parentTransform, phmSolid.transformMatrix);
 
       if (lower.endsWith('.phm')) {
-        await walkPhm(normalizePhmPath(modelFileName), placementTransform, new Set(visited), devEntryMatrix, phmDepth + 1, leafReference);
+        await walkPhm(sourcePath(files, modelFileName, phmFilePath), placementTransform, new Set(visited), devEntryMatrix, phmDepth + 1, leafReference);
         continue;
       }
 
       if (lower.endsWith('.mod') || lower.endsWith('.gl')) {
-        const modPath = normalizeGeometryPath(modelFileName);
+        const modPath = sourcePath(files, modelFileName, phmFilePath);
         if (strictDependencies && !getFileByPath(files, modPath)) {
           const kind = lower.endsWith('.gl') ? 'GL' : 'MOD';
           throw new Error(`${kind} 文件不存在: ${modPath}`);
@@ -246,7 +256,7 @@ export async function discoverGeometriesFromDevPath(
           phmPath: phmFilePath,
         });
       } else if (lower.endsWith('.stl')) {
-        const stlPath = normalizeGeometryPath(modelFileName);
+        const stlPath = sourcePath(files, modelFileName, phmFilePath);
         if (strictDependencies && !getFileByPath(files, stlPath)) {
           throw new Error(`STL 文件不存在: ${stlPath}`);
         }
@@ -284,7 +294,7 @@ export async function discoverGeometriesFromDevPath(
 
     if (solidLower.endsWith('.dev')) {
       const child = await discoverGeometriesFromDevPath(
-        normalizeDevPath(solidModelName),
+        sourcePath(files, solidModelName, normalizedDevPath),
         files,
         devTransform,
         new Set(visited),
@@ -304,21 +314,21 @@ export async function discoverGeometriesFromDevPath(
       continue;
     }
 
-    const phmFilePath = normalizePhmPath(solidModelName);
+    const phmFilePath = sourcePath(files, solidModelName, normalizedDevPath);
     await walkPhm(phmFilePath, devTransform, new Set(visited), devSolid.transformMatrix, depth + 1, referencePath);
   }
 
   // 4. 变电工程 SUBDEVICE → child DEV，矩阵必须向下累积。
-  for (const [ordinal, sub] of devDoc.subDevices.entries()) {
+  for (const sub of devDoc.subDevices) {
     const childTransform = multiplyMatrices(parentTransform, sub.transformMatrix);
     const child = await discoverGeometriesFromDevPath(
-      normalizeDevPath(sub.devPath),
+      sourcePath(files, sub.devPath, normalizedDevPath),
       files,
       childTransform,
       new Set(visited),
       depth + 1,
       budget,
-      { ...options, assemblyPath: `${options.assemblyPath ?? ''}/sub:${ordinal}`.replace(/^\//, ''), referencePath: `${options.referencePath ?? ''}/sub:${ordinal}` },
+      { ...options, assemblyPath: `${options.assemblyPath ?? ''}/sub:${sub.sourceIndex}`.replace(/^\//, ''), referencePath: `${options.referencePath ?? ''}/sub:${sub.sourceIndex}` },
     );
     mods.push(...child.mods);
     stls.push(...child.stls);
@@ -382,27 +392,6 @@ function matrix4(arr: number[]): THREE.Matrix4 {
 
 function multiplyMatrices(a: number[], b: number[]): number[] {
   return matrix4(a).multiply(matrix4(b)).toArray();
-}
-
-function normalizeDevPath(path: string): string {
-  const p = path.replace(/\\/g, '/');
-  return p.toLowerCase().startsWith('dev/') ? p : `DEV/${p}`;
-}
-
-function normalizePhmPath(path: string): string {
-  const p = path.replace(/\\/g, '/');
-  return p.toLowerCase().startsWith('phm/') ? p : `PHM/${p}`;
-}
-
-function normalizeGeometryPath(path: string): string {
-  const p = path.replace(/\\/g, '/');
-  const lower = p.toLowerCase();
-  // `.gl` is normally stored under MOD/ in the four-sample corpus, but keep
-  // an explicit GL/ prefix intact when an exporter uses a separate folder.
-  // The extension still follows the same XML geometry pipeline.
-  return lower.startsWith('mod/') || lower.startsWith('gl/') || lower.startsWith('stl/')
-    ? p
-    : `MOD/${p}`;
 }
 
 export function occurrenceGeometryKey(rootOccurrence: string, referencePath: string): string {

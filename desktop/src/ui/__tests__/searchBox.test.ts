@@ -76,4 +76,25 @@ describe('renderSearchBox', () => {
     inp.dispatchEvent(new Event('input'));
     expect(rows().length).toBe(0);
   });
+  it('matches an internal-source term while displaying only the engineering context', () => {
+    host.replaceChildren(); renderSearchBox(host, [{ key: 'cabinet', title: '出线柜', subtitle: '10千伏配电装置 / 36S间隔', searchText: '出线柜 10千伏配电装置 36s间隔 按钮 cabinet' }], key => picks.push(key));
+    input().value = '按钮'; input().dispatchEvent(new Event('input'));
+    expect(rows()).toHaveLength(1); expect(rows()[0].textContent).toContain('36S间隔'); expect(rows()[0].textContent).not.toContain('按钮');
+    rows()[0].click(); expect(picks).toEqual(['cabinet']);
+    input().value = '36S'; input().dispatchEvent(new Event('input')); expect(rows()).toHaveLength(1);
+  });
+  it('keeps an equipment category and independently named box ahead of more than 50 context-only matches', () => {
+    host.replaceChildren();
+    renderSearchBox(host, [
+      ...Array.from({ length: 60 }, (_, i) => ({ key: `wire:${i}`, title: `导线 ${i}`, subtitle: '导线 · 安装工程 / 主变压器系统', searchText: '导线 主变压器系统 端子箱' })),
+      { key: 'transformer', title: '220kV变压器模型02', subtitle: '主变压器 · 安装工程 / 主变压器系统' },
+      { key: 'box', title: '端子箱', subtitle: '端子箱 · 安装工程 / 主变压器系统' },
+    ], key => picks.push(key));
+    input().value = '主变压器'; input().dispatchEvent(new Event('input'));
+    expect(rows()).toHaveLength(50); expect(rows()[0].textContent).toContain('220kV变压器模型02');
+    rows()[0].click(); expect(picks).toEqual(['transformer']);
+    input().value = '端子箱'; input().dispatchEvent(new Event('input'));
+    expect(rows()[0].firstElementChild?.textContent).toBe('端子箱');
+    rows()[0].click(); expect(picks).toEqual(['transformer', 'box']);
+  });
 });

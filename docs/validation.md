@@ -7,7 +7,7 @@
 - 未关闭缺陷与已接受限制见 [问题与限制](open-issues.md)；
 - 样本身份/格式统计见 [样本台账](schema/sample-corpus.md)；
 - 未采用的性能路线见 [探索记录](impl/explorations.md)；
-- 开发中的变电模型树见[业务树](impl/model-tree-business.md)、[来源](impl/model-tree-source.md)、[空间](impl/model-tree-spatial.md)。
+- 开发中的变电模型树见[桌面工程实体重构计划](impl/desktop-engineering-refactor.md)。
 
 ## 1. 证据边界
 

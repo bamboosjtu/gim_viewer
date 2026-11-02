@@ -1,12 +1,12 @@
 import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { inject, onTestFinished } from 'vitest';
-import type { GimIndexPayload, GimIndexResult, GeometryRefsPayload, ReachableGeometry } from '@desktop/database.js';
+import type { GimIndexPayload, GimIndexResult, GeometryRefsPayload } from '@desktop/database.js';
 import { NativeTestProcessError, runNativeTestProcess } from './nativeTestProcess.js';
 import type {} from './sqliteGlobalSetup.js';
 
-type Request = { index: GimIndexPayload; refs: GeometryRefsPayload; filter?: string[]; migrate?: boolean };
-type Result = { index: GimIndexResult; reachable: ReachableGeometry[]; filtered: ReachableGeometry[]; version: string };
+type Request = { index: GimIndexPayload; refs: GeometryRefsPayload };
+type Result = { index: GimIndexResult; refs: Pick<GeometryRefsPayload, 'dev_solid_models'|'dev_sub_devices'|'phm_solid_models'>; version: string };
 const TEST_NAME = 'db::substation_sqlite_tests::substation_sqlite_exchange';
 
 export async function executeSqliteRoundTrip(requests: Request[], executable: string, options: {
@@ -33,7 +33,7 @@ export async function executeSqliteRoundTrip(requests: Request[], executable: st
     try { value = JSON.parse(readFileSync(output, 'utf8')); }
     catch (error) { throw outputError(`invalid JSON: ${String(error)}`); }
     if (!Array.isArray(value) || value.length !== requests.length || value.some(row =>
-      !row || !row.index || !Array.isArray(row.reachable) || !Array.isArray(row.filtered) || typeof row.version !== 'string')) {
+      !row || !row.index || !row.refs || !Array.isArray(row.refs.dev_solid_models) || !Array.isArray(row.refs.dev_sub_devices) || !Array.isArray(row.refs.phm_solid_models) || typeof row.version !== 'string')) {
       throw outputError(`invalid result shape or request count (expected ${requests.length})`);
     }
     return value as Result[];

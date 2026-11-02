@@ -459,4 +459,4 @@ Invoke-RestMethod 'http://127.0.0.1:9222/json' | Select-Object title, url, webSo
 - [validation.md](validation.md)：验证证据边界和验收规则；
 - [open-issues.md](open-issues.md)：未关闭缺陷与已知限制；
 - [架构](architecture.md)：IFC/DEV 分级、Worker 与缓存设计；
-- 变电模型树（开发中）：[业务树](impl/model-tree-business.md)、[来源](impl/model-tree-source.md)、[空间](impl/model-tree-spatial.md)；
+- 变电工程组成与来源：[桌面重构计划](impl/desktop-engineering-refactor.md)；

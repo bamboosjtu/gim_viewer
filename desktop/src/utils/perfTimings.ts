@@ -152,7 +152,7 @@ export interface PerfRuntimeResourceSnapshot {
   templateCount: number | null;
   templateParseCount: number | null;
   sharedPlacementCount: number | null;
-  legacyPlacementCount: number | null;
+  exclusivePlacementCount: number | null;
   sharedGeometryCount: number | null;
   sharedMaterialCount: number | null;
   sharedTextureCount: number | null;
@@ -769,7 +769,7 @@ export function perfRecordRuntimeResourceSnapshot(
     'uniqueGeometryCount', 'uniqueMaterialCount', 'uniqueTextureCount',
     'rendererInfoGeometries', 'rendererInfoTextures', 'rendererInfoPrograms', 'rendererInfoDrawCalls',
     'templateCount', 'templateParseCount', 'sharedPlacementCount',
-    'legacyPlacementCount', 'sharedGeometryCount', 'sharedMaterialCount',
+    'exclusivePlacementCount', 'sharedGeometryCount', 'sharedMaterialCount',
     'sharedTextureCount', 'loadedXmlModGroupCount', 'loadedStlGroupCount',
     'fragmentModelCount', 'loadedIfcModelCount', 'currentIfcEntryCount',
     'cbmNodeCount', 'spatialNodeCount', 'spatialObjectCount',

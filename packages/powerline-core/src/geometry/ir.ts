@@ -531,6 +531,8 @@ export interface DevSolidModelEntry {
  * SUBDEVICES 块与 SOLIDMODELS 块的 TRANSFORMMATRIX 索引各自独立从 0 开始。
  */
 export interface DevSubDeviceEntry {
+  /** Declared SUBDEVICEn index; filtering empty slots must not change identity. */
+  sourceIndex: number;
   /** 引用的子 DEV 文件名（如 "child.dev"） */
   devPath: string;
   /** 4×4 变换矩阵，列主序 / Three.js Matrix4.elements 布局，长度 16 */

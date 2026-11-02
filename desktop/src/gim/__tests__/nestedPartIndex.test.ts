@@ -1,6 +1,6 @@
 import { expect,it } from 'vitest';
 import { buildSubstationAliasIndex,deviceOccurrenceScope } from '../substationEvidence.js';
-import { collectCbmDeviceInstances } from '../../services/modAutoLoadService.js';
+import { collectEquipmentGeometryOccurrences } from '../equipmentGeometryOccurrences.js';
 import { resolveGeometryLoadNode } from '../../services/nodeInteractionService.js';
 import { nestedPartFixture } from '../../services/__tests__/nestedPartIndexFixture.js';
 
@@ -10,7 +10,7 @@ it.each([1,2])('nested alias is limited to %i parent candidates and excludes unr
   expect(aliases.partToRoot.get(b.path)).toBe(root);
   expect(resolveGeometryLoadNode(tree,b)).toBe(root);
   expect(deviceOccurrenceScope(tree,b)).toEqual({rootOccurrence:root.path,assemblyPaths:Array.from({length:copies},(_,i)=>`sub:${i}/sub:0`)});
-  const seeds=new Set(collectCbmDeviceInstances(tree).map(n=>n.path));
+  const seeds=new Set(collectEquipmentGeometryOccurrences(tree).map(n=>n.id));
   for(const [path,candidates] of aliases.partToOccurrences){
     if(!candidates.length)continue;
     const owner=aliases.partToRoot.get(path)!;

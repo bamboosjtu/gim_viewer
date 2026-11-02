@@ -465,6 +465,7 @@ export class IfcRegionalRuntime {
     const object = this.index.objects.find((o) => o.expressId === id);
     return object ? { object, distance: hit.distance } : null;
   }
+  hoverGroup(expressId: number): THREE.Group | undefined { return this.groups.get(expressId); }
   highlightGroup(expressId: number, append = false) {
     this.selectedExpressId = expressId;
     const group = this.groups.get(expressId);

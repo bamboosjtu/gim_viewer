@@ -2,7 +2,8 @@ import type * as THREE from 'three';
 import type { AppState } from '../app/state.js';
 import type { ViewerContext } from './viewerEngine.js';
 import type { RegionalObject } from './ifcRegionalData.js';
-import { addModHighlightGroup, enqueueHighlightCommit, HIGHLIGHT_STYLE } from './highlight.js';
+import { addModHighlightGroup, enqueueHighlightCommit } from './highlight.js';
+import { outlineFragmentItems } from './selectionOutline.js';
 
 const contains = (ids: Iterable<number> | undefined, id: number): boolean =>
   ids instanceof Set ? ids.has(id) : Array.isArray(ids) && ids.includes(id);
@@ -18,9 +19,11 @@ export async function syncIfcRepresentationHighlight(ctx: ViewerContext, state: 
   const target = request.target;
   const regional = target?.kind === 'ifc-object'
     && target.key === `ifc:${modelId.toLowerCase()}:object:${object.expressId}`;
+  const engineering = state.engineeringSelection?.requestId === request.id &&
+    state.engineeringSelection.ifc.some(ref => ref.modelId === modelId && ref.expressId === object.expressId);
   const far = localId !== undefined && (target?.kind === 'ifc-element' && target.key === `${runtimeId}:${localId}`
     || state.selectionHighlightRequestId === request.id && contains(state.highlightedItems?.[runtimeId],localId));
-  if (!regional && !far) return;
+  if (!regional && !far && !engineering) return;
   const selection = state.selectionGuard(request);
   const guard = {...selection, isCurrent: () => selection.isCurrent() && representationCurrent()};
   await enqueueHighlightCommit(state, guard, async () => {
@@ -31,7 +34,7 @@ export async function syncIfcRepresentationHighlight(ctx: ViewerContext, state: 
     }
     if (localId === undefined || contains(state.highlightedItems?.[runtimeId],localId)) return;
     const items = {[runtimeId]: new Set([localId])};
-    await ctx.fragments.highlight(HIGHLIGHT_STYLE, items);
+    await outlineFragmentItems(ctx,state,items,guard);
     // An external apply already in progress must remain resettable by the next
     // queued selection even if its request was aborted while awaiting Fragments.
     if (selection.isSessionCurrent()) {

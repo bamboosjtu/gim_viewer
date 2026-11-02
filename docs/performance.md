@@ -153,4 +153,4 @@ private 峰值：substation01 3,746 MiB、substation02 3,083 MiB、substation03 
 - [问题与限制](open-issues.md)：O-02、O-07、O-11 等未关闭项；
 - [验证](validation.md)：证据分层与不变量；
 - [架构](architecture.md)：DEV/IFC 分级、Spatial、业务快照和 Worker 设计；
-- 变电模型树（开发中）：[业务树](impl/model-tree-business.md)、[来源](impl/model-tree-source.md)、[空间](impl/model-tree-spatial.md)。
+- 变电模型树（开发中）：[桌面工程实体重构计划](impl/desktop-engineering-refactor.md)。

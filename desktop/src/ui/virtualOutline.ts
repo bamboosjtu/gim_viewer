@@ -7,17 +7,21 @@ export interface OutlineNode {
 export interface OutlineElement extends HTMLElement {
   __gimRevealOutline?: (key: string) => boolean;
 }
+export interface OutlineOptions {
+  expanded?: Set<string>;
+  selectedKey?: () => string;
+}
 
 /** Fixed-height tree rows, including arbitrarily nested expanded branches.
  * Only the visible logical rows are flattened; children stay lazy. */
-export function renderVirtualOutline(host: HTMLElement, roots: OutlineNode[]): void {
+export function renderVirtualOutline(host: HTMLElement, roots: OutlineNode[], options: OutlineOptions = {}): OutlineElement {
   const element = document.createElement('div') as OutlineElement;
   element.className = 'functional-virtual-outline';
   element.setAttribute('role', 'group');
   const top = document.createElement('div'), rows = document.createElement('div'), bottom = document.createElement('div');
   top.setAttribute('aria-hidden', 'true'); bottom.setAttribute('aria-hidden', 'true');
   element.append(top, rows, bottom); host.append(element);
-  const expanded = new Set<string>(), children = new Map<string, OutlineNode[]>();
+  const expanded = options.expanded ?? new Set<string>(), children = new Map<string, OutlineNode[]>();
   let flat: Array<{node: OutlineNode; depth: number; parent?: string; pos: number; size: number}> = [];
   let start = 0, end = 0, selected = '', frame = 0;
   const height = 30, windowSize = 100, overscan = 10;
@@ -38,7 +42,8 @@ export function renderVirtualOutline(host: HTMLElement, roots: OutlineNode[]): v
   };
   const render = (index: number): void => {
     const oldSelection = rows.querySelector<HTMLElement>('.selected');
-    if (oldSelection) selected = oldSelection.dataset.nodePath ?? '';
+    if (options.selectedKey) selected = options.selectedKey();
+    else if (oldSelection) selected = oldSelection.dataset.nodePath ?? '';
     else if (document.querySelector('.tree-row.selected')) selected = '';
     start = Math.max(0, Math.min(Math.max(0, flat.length - windowSize), index - overscan));
     end = Math.min(flat.length, start + windowSize + overscan * 2);
@@ -98,7 +103,13 @@ export function renderVirtualOutline(host: HTMLElement, roots: OutlineNode[]): v
       reveal(flat[next].node.key, true);
     }
   }, {capture: true});
-  element.__gimRevealOutline = key => reveal(key);
+  element.__gimRevealOutline = key => {
+    flatten();
+    const index = flat.findIndex(item => item.node.key === key);
+    if (index < 0) return false;
+    render(index < start || index >= end ? index : start + overscan);
+    return reveal(key);
+  };
   flatten(); render(0);
   // Bind to the panel after its lazy branch has been attached. Disconnect on
   // removal so repeated project switches leave no scroll/observer owners.
@@ -120,9 +131,10 @@ export function renderVirtualOutline(host: HTMLElement, roots: OutlineNode[]): v
     scroller.addEventListener('scroll', onScroll, {passive: true});
     const observer = new MutationObserver(() => {
       if (element.isConnected) return;
-      scroller.removeEventListener('scroll', onScroll); cancelAnimationFrame(frame);
+      scroller.removeEventListener('scroll', onScroll); if (frame) cancelAnimationFrame(frame);
       observer.disconnect(); delete element.__gimRevealOutline;
     });
     observer.observe(document.body, {childList: true, subtree: true});
   });
+  return element;
 }

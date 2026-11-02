@@ -20,7 +20,8 @@ import {
   attachDevGlbTemplatePool,
   getDevGlbTemplatePool,
   DevGlbTemplatePool,
-  DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY,
+  DEV_GLB_EXCLUSIVE_PLACEMENT_USER_DATA_KEY,
+  placeSourceGeometry,
   getLoadedDevOccurrenceKind,
 } from './devGlbTemplateRuntime.js';
 
@@ -381,12 +382,13 @@ export async function frameAndHighlightDevice(
   finally { endCollect(); }
   const {commitSelectionHighlight,highlightModGroups}=await import('../viewer/highlight.js');
   await commitSelectionHighlight(ctx,state,guard,() => highlightModGroups(state,groups));
-  if (!guard.isCurrent() || groups.length===0) return;
+  if (!guard.isCurrent() || groups.length===0 || !state.canAutoLocate(request)) return;
   const box=new THREE.Box3(); groups.forEach((g) => box.expandByObject(g));
   if (state.currentProjectType === 'substation' && state.currentFiles && !box.isEmpty() && [box.min.x,box.min.y,box.min.z,box.max.x,box.max.y,box.max.z].every(Number.isFinite)) {
     perfMarkProductMoment('coldSelectedDeviceGeometryReady',{selectionKey:request.target?.key,devPath,rootOccurrence:scope.rootOccurrence,groups:groups.length});
   }
   const {frameBox}=await import('../viewer/camera.js');
+  if (!state.canAutoLocate(request)) return;
   const owned=state.highlightedModState;
   const {resetModHighlight}=await import('../viewer/highlight.js');
   const clearOwned=() => { if (state.highlightedModState===owned) resetModHighlight(state); };
@@ -687,10 +689,9 @@ async function tryLoadDevGlbForNode(
   const existing = getLoadedDevOccurrenceKind(state,geometryNode.path);
   if (existing) return existing === 'glb';
 
-  const normalized = geometryNode.devPath.replace(/\\/g, '/');
-  const devPath = normalized.toLowerCase().startsWith('dev/')
-    ? normalized
-    : `DEV/${normalized}`;
+  const { createEntryResolver } = await import('../gim/entryResolver.js');
+  const devPath = createEntryResolver(state.currentFiles?.keys() ?? state.substationEntryPaths)(geometryNode.devPath, geometryNode.path);
+  if (!devPath) return false;
 
   // 读取 DEV.glb
   let glbBytes: Uint8Array | null = null;
@@ -711,7 +712,6 @@ async function tryLoadDevGlbForNode(
   }
 
   // 应用 CBM 累积矩阵
-  const { applyPlacementTransformToSceneUnits } = await import('../viewer/xmlModLoader.js');
   const { computeCbmParentTransform } = await import('./modGeometryDiscovery.js');
 
   // DEV_SUBDEVICE 虚拟节点需要父链矩阵
@@ -757,23 +757,21 @@ async function tryLoadDevGlbForNode(
     return true;
   }
 
-  // A non-shareable hierarchy is isolated to this DEV and keeps the exact
-  // legacy per-placement loader semantics.  A parse failure returns false so
-  // the caller can continue with the existing raw MOD/STL path.
-  const group = await loadDevGlb(devPath, glbBytes);
+  // Independently loaded assets preserve animations/skinning ownership.
+  let group = await loadDevGlb(devPath, glbBytes);
   if (!state.isCurrentSession(session)) {
     group?.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
     return false;
   }
   if (!group) return false;
 
-  applyPlacementTransformToSceneUnits(group, cbmTransform);
+  group = placeSourceGeometry(group, { rootOccurrence: geometryNode.path, instanceKey,
+    placementMatrix: cbmTransform, projectSourceToViewerMatrix: state.projectSourceToViewerMatrix });
+  group.userData.devPath = devPath;
   if (!state.isCurrentSession(session)) {
     group.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
     return false;
   }
-  applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
-
   const beforeCommit = getLoadedDevOccurrenceKind(state,geometryNode.path);
   if (beforeCommit) {
     group.traverse((o) => (o as THREE.Mesh).geometry?.dispose?.());
@@ -781,7 +779,7 @@ async function tryLoadDevGlbForNode(
   }
   group.userData.rootOccurrence = geometryNode.path;
   group.userData.instanceKey = instanceKey;
-  group.userData[DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY] = true;
+  group.userData[DEV_GLB_EXCLUSIVE_PLACEMENT_USER_DATA_KEY] = true;
   if (!state.isCurrentSession(session)) {
     group.traverse((object) => (object as THREE.Mesh).geometry?.dispose?.());
     return false;
@@ -857,7 +855,7 @@ async function buildGeometryFilesMapFromCache(
     if (state && session && !state.isCurrentSession(session)) return new Map();
     return new Map([...bytes].filter(([, value]) => value && value.byteLength > 0)
       .map(([path, value]) => [path, bytesToFile(value!, path)]));
-  });
+  }, state?.substationEntryPaths ?? []);
 }
 
 /**

@@ -43,8 +43,53 @@ it('picks the visible DEV before replacing the previous only-selected visibility
   f.pick.mockImplementation(()=>visible ? {rootOccurrence:'A',instanceKey:'instanceA',distance:2} : null);
   f.fragments.raycast.mockResolvedValue(null);
   f.click();await vi.waitFor(()=>expect(f.dev).toHaveBeenCalledOnce());
-  expect(visible).toBe(false);
+  expect(visible).toBe(true);
   expect(f.dev.mock.calls[0].slice(0,2)).toEqual(['A','instanceA']);
   expect(f.state.selectionRequest?.target).toEqual({kind:'cbm',key:'A'});
   expect(f.refine).not.toHaveBeenCalled();f.container.remove();
+});
+
+it('keeps isolation and logical selection on a blank click',async()=>{
+  const f=fixture(); const previous=f.state.beginSelection({kind:'cbm',key:'selected'}); f.state.onlySelected=true;
+  const begin=vi.spyOn(f.state,'beginSelection'); f.state.deviceLodRuntime!.clearSelection=vi.fn(); f.fragments.raycast.mockResolvedValue(null);
+  f.click(); await vi.waitFor(()=>expect(f.fragments.raycast).toHaveBeenCalled()); await Promise.resolve();
+  expect(begin).not.toHaveBeenCalled(); expect(f.state.selectionRequest).toBe(previous); expect(f.state.onlySelected).toBe(true);
+  expect(f.state.deviceLodRuntime!.clearSelection).not.toHaveBeenCalled(); f.container.remove();
+});
+
+it('ignores an orbit drag even if the pointer returns to its initial position',async()=>{
+  const f=fixture(),canvas=f.container.querySelector('canvas')!, previous=f.state.beginSelection({kind:'cbm',key:'selected'});
+  canvas.dispatchEvent(new MouseEvent('pointerdown',{bubbles:true,clientX:50,clientY:50}));
+  window.dispatchEvent(new MouseEvent('pointermove',{clientX:80,clientY:50}));
+  window.dispatchEvent(new MouseEvent('pointerup',{clientX:50,clientY:50}));
+  f.click(); await Promise.resolve(); expect(f.fragments.raycast).not.toHaveBeenCalled(); expect(f.state.selectionRequest).toBe(previous); f.container.remove();
+});
+
+it('does not let a pending viewport hit replace a later tree selection',async()=>{
+  const f=fixture(),pending=deferred<null>();f.fragments.raycast.mockReturnValue(pending.promise);
+  f.pick.mockReturnValue({rootOccurrence:'A',instanceKey:'instanceA',distance:1});f.click();
+  const tree=f.state.beginSelection({kind:'cbm',key:'tree'});pending.resolve(null);await Promise.resolve();await Promise.resolve();
+  expect(f.state.selectionRequest).toBe(tree);expect(f.dev).not.toHaveBeenCalled();f.container.remove();
+});
+
+it('marks viewport hits as selection-only and cancels delayed tree auto-framing after camera input',async()=>{
+  const f=fixture(),tree=f.state.beginSelection({kind:'cbm',key:'tree'}),canvas=f.container.querySelector('canvas')!;
+  expect(f.state.canAutoLocate(tree)).toBe(true);canvas.dispatchEvent(new WheelEvent('wheel',{bubbles:true}));expect(f.state.canAutoLocate(tree)).toBe(false);
+  f.pick.mockReturnValue({rootOccurrence:'A',instanceKey:'instanceA',distance:1});f.fragments.raycast.mockResolvedValue(null);f.click();
+  await vi.waitFor(()=>expect(f.dev).toHaveBeenCalledOnce());expect(f.state.selectionRequest?.origin).toBe('viewport');expect(f.state.canAutoLocate(f.state.selectionRequest!)).toBe(false);f.container.remove();
+});
+
+it('shows a lightweight hover without changing selection, fine geometry or the camera',async()=>{
+  const f=fixture(),canvas=f.container.querySelector('canvas')!,mesh=new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial());
+  const selected=f.state.beginSelection({kind:'cbm',key:'selected'});f.pick.mockReturnValue({rootOccurrence:'A',instanceKey:'instanceA',distance:1,object:mesh});f.fragments.raycast.mockResolvedValue(null);
+  canvas.dispatchEvent(new MouseEvent('pointermove',{bubbles:true,clientX:50,clientY:50}));
+  await vi.waitFor(()=>expect(mesh.children.some(child=>child.userData.interactionDecoration)).toBe(true));expect(f.state.selectionRequest).toBe(selected);expect(f.refine).not.toHaveBeenCalled();
+  f.container.dispatchEvent(new Event('pointerleave'));expect(mesh.children).toHaveLength(0);f.container.remove();
+});
+
+it('allows hovering after a toolbar drag ends on the canvas without interpreting the drag as a selection',async()=>{
+  const f=fixture(),canvas=f.container.querySelector('canvas')!,bar=document.createElement('div'),mesh=new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial());f.container.append(bar);
+  const previous=f.state.beginSelection({kind:'cbm',key:'selected'});f.pick.mockReturnValue({rootOccurrence:'A',instanceKey:'instanceA',distance:1,object:mesh});f.fragments.raycast.mockResolvedValue(null);
+  bar.dispatchEvent(new MouseEvent('pointerdown',{bubbles:true,clientX:10,clientY:10}));canvas.dispatchEvent(new MouseEvent('pointerup',{bubbles:true,clientX:50,clientY:50}));f.click();
+  await vi.waitFor(()=>expect(mesh.children).toHaveLength(1));expect(f.state.selectionRequest).toBe(previous);expect(f.dev).not.toHaveBeenCalled();f.state.hoverCleanup?.();f.container.remove();
 });

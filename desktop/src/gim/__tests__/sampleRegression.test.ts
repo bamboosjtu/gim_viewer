@@ -1,4 +1,4 @@
-import { inspectSubstationCapabilities, buildSubstationAliasIndex, isSubstationGeometryRoot } from '../substationEvidence.js';
+import { inspectSubstationCapabilities, buildSubstationAliasIndex } from '../substationEvidence.js';
 /**
  * 样本级集成回归测试（真实 GIM 解压目录）。
  *
@@ -27,7 +27,7 @@ import { isGimEmptyValue, resolveBaseFamilyReference } from '../gimValueSemantic
 import type { CbmNode, IfcEntry } from '../types.js';
 import { buildLineGimGraphFromTexts } from '../lineCbmParserCore.js';
 import { createLineParserCache, parseLineAttributesFromCache } from '../lineAttrParserCore.js';
-import { buildSubstationSpatialIndexFromFiles } from '../ifcSpatialParser.js';
+import { buildSubstationSpatialIndexFromFiles, type SubstationSpatialIndex } from '../ifcSpatialParser.js';
 import {
   hydrateSubstationSpatialIndex,
   serializeSubstationSpatialIndex,
@@ -46,7 +46,6 @@ import type {
   LineFamPropertyRecord,
   LineDevPropertyRecord,
 } from '@desktop/database.js';
-import { buildFunctionalDomainIndex } from '../../ui/substationFunctionalTreeView.js';
 
 /**
  * 惰性 File shim：parser 纯逻辑层仅消费 name / size / text()，
@@ -162,11 +161,35 @@ const LINE_CORPUS = [
   'line06',
 ].map((id) => ({ id, dir: resolveDemoDir(id) }));
 const SUBSTATION_CORPUS = [
-  { id: 'demo-substation', models: 12, contained: 3111, spatial: 4714, decomposition: 74, host: 1529 },
-  { id: 'substation02', models: 17, contained: 51767, spatial: 62176, decomposition: 38, host: 10371 },
-  { id: 'substation03', models: 8, contained: 9572, spatial: 9572, decomposition: 0, host: 0 },
-  { id: 'substation04', models: 19, contained: 7182, spatial: 7720, decomposition: 44, host: 494 },
+  { id: 'demo-substation', models: 12, contained: 3111, spatial: 4714 },
+  { id: 'substation02', models: 17, contained: 51767, spatial: 62176 },
+  { id: 'substation03', models: 8, contained: 9572, spatial: 9572 },
+  { id: 'substation04', models: 19, contained: 7182, spatial: 7720 },
 ].map((item) => ({ ...item, dir: resolveDemoDir(item.id) }));
+
+function expectSpatialEvidenceCoverage(index: SubstationSpatialIndex): void {
+  const keys = (field: 'directObjectKeys' | 'decompositionObjectKeys' | 'hostObjectKeys' | 'boundaryObjectKeys') =>
+    new Set(index.nodes.flatMap(node => node[field]));
+  const direct = keys('directObjectKeys'), decomposition = keys('decompositionObjectKeys');
+  const host = keys('hostObjectKeys'), boundary = keys('boundaryObjectKeys');
+  const inherited = new Set([...decomposition, ...host]);
+  const located = new Set([...direct, ...inherited, ...boundary]);
+  // Relationships can overlap across spaces and kinds. Compare object identity
+  // sets with both navigation directions instead of adding nonexclusive counts.
+  expect(located).toEqual(new Set(index.objects.filter(object => object.spatialKeys.length > 0).map(object => object.key)));
+  const membersByNode = new Map(index.nodes.map(node => [node.key, new Set(node.objectKeys)]));
+  const missingObjectSpaces: string[] = [], missingNodeMembers: string[] = [];
+  for (const node of index.nodes) for (const key of node.objectKeys)
+    if (!index.objectByKey.get(key)?.spatialKeys.includes(node.key)) missingObjectSpaces.push(`${node.key} → ${key}`);
+  for (const object of index.objects) for (const key of object.spatialKeys)
+    if (!membersByNode.get(key)?.has(object.key)) missingNodeMembers.push(`${object.key} → ${key}`);
+  expect(missingObjectSpaces).toEqual([]); expect(missingNodeMembers).toEqual([]);
+  expect(index.coverage.directContainedIfcObjects).toBe(direct.size);
+  expect(index.coverage.decompositionInheritedIfcObjects).toBe(decomposition.size);
+  expect(index.coverage.hostInheritedIfcObjects).toBe(host.size);
+  expect(index.coverage.boundaryContainedIfcObjects).toBe(boundary.size);
+  expect(index.coverage.inheritedContainedIfcObjects).toBe(inherited.size);
+}
 
 const RENDERABLE_XML_PRIMITIVES = new Set([
   'Cuboid', 'Cylinder', 'Sphere', 'TruncatedCone', 'Ring',
@@ -377,12 +400,7 @@ describe.skipIf(!hasSubstation)('样本回归·变电 demo-substation', () => {
     expect(index.coverage.uncontainedIfcObjects).toBe(
       index.objects.filter((object) => object.spatialKeys.length === 0).length,
     );
-    const boundaryContained = index.objects.filter((object) => object.spatialContainment === 'boundary').length;
-    expect(
-      index.coverage.directContainedIfcObjects
-        + index.coverage.inheritedContainedIfcObjects
-        + boundaryContained,
-    ).toBe(index.objects.filter((object) => object.spatialKeys.length > 0).length);
+    expectSpatialEvidenceCoverage(index);
     expect(index.models.reduce((sum, model) => sum + model.resourceCount, 0)).toBeGreaterThan(0);
     // Spatial Core v1 不再展开 Pset/工程量/材质/分类实体；属性详情由
     // Fragments getItemsData() 在用户选择构件时按需读取。扫描计数仍保留，
@@ -444,10 +462,13 @@ describe.skipIf(!SUBSTATION_CORPUS.some((item) => existsSync(item.dir)))('样本
         .toBe(sample.contained);
       expect(index.models.reduce((sum, model) => sum + (model.spatialObjectCount ?? 0), 0), sample.id)
         .toBe(sample.spatial);
-      expect(index.coverage.decompositionInheritedIfcObjects, sample.id).toBe(sample.decomposition);
-      expect(index.coverage.hostInheritedIfcObjects, sample.id).toBe(sample.host);
-      expect(index.coverage.inheritedContainedIfcObjects, sample.id)
-        .toBe(sample.decomposition + sample.host);
+      // Coverage kinds overlap; the old exclusive category totals cannot be
+      // reused as evidence counts. Keep fixed direct/located source cardinality
+      // above and verify every relationship collection in both directions.
+      expectSpatialEvidenceCoverage(index);
+      console.log('[spatial-evidence]', sample.id, JSON.stringify({ direct: index.coverage.directContainedIfcObjects,
+        decomposition: index.coverage.decompositionInheritedIfcObjects, host: index.coverage.hostInheritedIfcObjects,
+        inherited: index.coverage.inheritedContainedIfcObjects, located: index.objects.filter(object => object.spatialKeys.length > 0).length }));
       expect(index.coverage.uncontainedIfcObjects, sample.id).toBe(0);
       expect(index.nodes.some((node) => node.kind === 'storey'), sample.id).toBe(true);
       expect(index.coverage.hasSpatialContainment, sample.id).toBe(true);
@@ -455,39 +476,6 @@ describe.skipIf(!SUBSTATION_CORPUS.some((item) => existsSync(item.dir)))('样本
       if (fileDevRelations.length > 0) {
         expect(index.links.some((link) => (link.sourceDesignNames?.length ?? 0) > 0), sample.id).toBe(true);
       }
-    }
-  }, 120_000);
-
-  it('功能系统视角四样本只生成稳定域，并将无效 SYSTEMNAME 合并为一个未归类系统', async () => {
-    const expected = new Map([
-      ['demo-substation', { domains: ['交流电气系统', '建筑物', '构筑物', '空调系统', '排水系统'], unclassified: false }],
-      ['substation02', { domains: ['电气系统', '未归类系统'], unclassified: true }],
-      ['substation03', { domains: ['电气系统', '建筑物系统', '未归类系统'], unclassified: true }],
-      ['substation04', { domains: ['交流电气系统', '未归类系统'], unclassified: true }],
-    ]);
-    for (const sample of SUBSTATION_CORPUS.filter((item) => existsSync(item.dir))) {
-      const files = loadFilesFromDir(sample.dir);
-      const tree = await buildCbmTree(files);
-      const index = buildFunctionalDomainIndex(tree!);
-      const baseline = expected.get(sample.id)!;
-      expect(index.domains.map((domain) => domain.title), sample.id).toEqual(baseline.domains);
-      expect(index.domains.filter((domain) => domain.key === 'functional:domain:unclassified'), sample.id)
-        .toHaveLength(baseline.unclassified ? 1 : 0);
-      const electrical = index.domains.find(domain => /电气系统$/.test(domain.title));
-      const systems = electrical?.systems ?? [];
-      const voltageBays = (voltage:string) => systems.filter(system => system.groupPath[0] === voltage).map(system => system.title);
-      if (sample.id === 'demo-substation') {
-        expect(voltageBays('220kV系统')).toContain('1EM PT');
-        expect(systems.some(system => system.groupPath[0] === '控制及直流/二次系统' && system.title === '公用测控系统')).toBe(true);
-        const roots=new Set<string>();const walk=(node:CbmNode)=>{if(isSubstationGeometryRoot(node))roots.add(node.path);node.children.forEach(walk);};walk(tree!);
-        const devices=index.domains.flatMap(domain=>domain.systems.flatMap(system=>system.assets.filter(asset=>asset.role==='device')));
-        const rootDevices=devices.filter(asset=>asset.sourceNodes.some(source=>roots.has(source.path))).length;
-        expect(roots.size).toBe(285);expect(devices.length).toBeGreaterThan(roots.size);
-        console.log('[device-count-grain]',JSON.stringify({geometryRoots:roots.size,deviceNodes:devices.length,rootDevices,internalDeviceNodes:devices.length-rootDevices}));
-      }
-      console.log('[functional-tree]',sample.id,JSON.stringify({units:[...new Set(systems.map(system => system.groupPath[0] ?? system.title))],
-        voltage220:voltageBays('220kV系统'),voltage10:voltageBays('10kV系统'),
-        businessDevices:index.domains.reduce((sum,domain) => sum+domain.systems.reduce((count,system) => count+system.assets.filter(asset => asset.role === 'device').length,0),0)}));
     }
   }, 120_000);
 

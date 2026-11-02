@@ -23,6 +23,7 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { discoverGeometriesFromDevPath } from './modGeometryDiscovery.js';
+import { createEntryResolver } from '../gim/entryResolver.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { getFileByPath } from '../gim/fileLookup.js';
@@ -104,9 +105,7 @@ export async function serializeDevToGlbDetailed(
   // interactive XML fallback, but the geometry manifest must not record that
   // failure as `empty`.
   const normalizedDevPath = devPath.replace(/\\/g, '/');
-  const canonicalDevPath = normalizedDevPath.toLowerCase().startsWith('dev/')
-    ? normalizedDevPath
-    : `DEV/${normalizedDevPath}`;
+  const canonicalDevPath = createEntryResolver(files.keys())(normalizedDevPath) ?? normalizedDevPath;
   if (!getFileByPath(files, canonicalDevPath)) {
     throw new Error(`DEV 文件不存在，无法生成 GLB: ${canonicalDevPath}`);
   }

@@ -23,7 +23,7 @@ export type DevGlbTemplatePreparation =
       template: DevGlbTemplate;
     }
   | {
-      kind: 'legacy';
+      kind: 'exclusive';
       fallbackReason: string;
     };
 
@@ -40,8 +40,6 @@ export interface DevGlbTemplatePoolMetrics {
 }
 
 export interface DevGlbPlacementOptions {
-  /** v10 source templates bake only DEV/PHM/Entity, never the CBM occurrence. */
-  contract?: 'source-template';
   rootOccurrence?: string;
   instanceKey?: string;
   /** CBM placement in source millimetres, column-major. */
@@ -68,7 +66,7 @@ export interface PlacementBudgetResult {
 
 export const DEV_GLB_TEMPLATE_POOL_USER_DATA_KEY = '__gimDevGlbTemplatePool';
 export const DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY = '__gimDevGlbTemplatePlacement';
-export const DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY = '__gimDevGlbLegacyPlacement';
+export const DEV_GLB_EXCLUSIVE_PLACEMENT_USER_DATA_KEY = '__gimDevGlbExclusivePlacement';
 
 /** Query existing placement ownership; raw and GLB must not both own one root. */
 export function getLoadedDevOccurrenceKind(
@@ -81,7 +79,7 @@ export function getLoadedDevOccurrenceKind(
     if (!groups) continue;
     for (const group of groups.values()) {
       if (group.userData.rootOccurrence !== rootOccurrence) continue;
-      if (group.userData[DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY] || group.userData[DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY]) return 'glb';
+      if (group.userData[DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY] || group.userData[DEV_GLB_EXCLUSIVE_PLACEMENT_USER_DATA_KEY]) return 'glb';
       raw = true;
     }
   }
@@ -234,17 +232,10 @@ export function validateDevGlbTemplate(
   return { shareable: true };
 }
 
-/**
- * Preserve the exact legacy affine semantics:
- * - `applyPlacementTransformToSceneUnits` post-multiplies every mesh geometry
- *   by the CBM matrix after converting its translation from mm to m;
- * - `applyProjectSourceToViewer` calls `group.applyMatrix4(project)`.
- *
- * Therefore CBM belongs after each Mesh's original local matrix, while the
- * project matrix belongs before the original root local matrix.  No TRS
- * decomposition is used, so shear and non-uniform scale survive unchanged.
- */
-export function createLegacyEquivalentPlacementMatrix(
+/** Convert only the placement translation from source millimetres to metres.
+ * The cumulative source matrix remains before the template hierarchy; affine
+ * shear, reflection and non-uniform scale are preserved without TRS decomposition. */
+export function createSourcePlacementMatrix(
   rawPlacementMatrix?: number[] | null,
 ): THREE.Matrix4 {
   const placement = new THREE.Matrix4();
@@ -257,6 +248,19 @@ export function createLegacyEquivalentPlacementMatrix(
   placement.elements[13] *= 0.001;
   placement.elements[14] *= 0.001;
   return placement;
+}
+
+/** Own the placement transform outside the immutable source template. This
+ * same contract also applies to assets requiring independent per-instance data. */
+export function placeSourceGeometry(source: THREE.Group, options: DevGlbPlacementOptions): THREE.Group {
+  const wrapper = new THREE.Group(); wrapper.matrixAutoUpdate = false;
+  wrapper.matrix.copy((options.projectSourceToViewerMatrix?.clone() ?? IDENTITY.clone()).multiply(createSourcePlacementMatrix(options.placementMatrix)));
+  wrapper.add(source);
+  wrapper.userData[DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY] = true;
+  wrapper.userData.rootOccurrence = options.rootOccurrence;
+  wrapper.userData.instanceKey = options.instanceKey;
+  wrapper.updateMatrixWorld(true);
+  return wrapper;
 }
 
 function freezeHierarchy(root: THREE.Object3D): void {
@@ -290,42 +294,9 @@ export class DevGlbTemplate {
 
   createPlacement(options: DevGlbPlacementOptions = {}): THREE.Group {
     if (this.disposed) throw new Error(`DEV template 已释放: ${this.devPath}`);
-    const placement = this.scene.clone(true) as THREE.Group;
-    const cbm = createLegacyEquivalentPlacementMatrix(options.placementMatrix);
-    const project = options.projectSourceToViewerMatrix;
-
-    if (options.contract === 'source-template') {
-      const wrapper = new THREE.Group();
-      wrapper.matrixAutoUpdate = false;
-      wrapper.matrix.copy((project?.clone() ?? IDENTITY.clone()).multiply(cbm));
-      wrapper.add(placement);
-      wrapper.userData[DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY] = true;
-      wrapper.userData.devPath = this.devPath;
-      wrapper.userData.rootOccurrence = options.rootOccurrence;
-      wrapper.userData.instanceKey = options.instanceKey;
-      wrapper.updateMatrixWorld(true);
-      return wrapper;
-    }
-
-    // A legacy geometry bake is equivalent to changing each Mesh local matrix
-    // from L to L×CBM.  This is intentionally not a world-matrix assignment:
-    // parent/nested hierarchy transforms must remain in the same order.
-    placement.traverse((object) => {
-      object.matrixAutoUpdate = false;
-      const mesh = object as THREE.Mesh;
-      if (mesh.isMesh) mesh.matrix.copy(mesh.matrix.clone().multiply(cbm));
-    });
-
-    const rootMatrix = (project ? project.clone() : IDENTITY.clone())
-      .multiply(this.scene.matrix);
-    placement.matrixAutoUpdate = false;
-    placement.matrix.copy(rootMatrix);
-    placement.updateMatrixWorld(true);
-    placement.userData[DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY] = true;
-    placement.userData.devPath = this.devPath;
-    if (options.rootOccurrence) placement.userData.rootOccurrence = options.rootOccurrence;
-    if (options.instanceKey) placement.userData.instanceKey = options.instanceKey;
-    return placement;
+    const placed = placeSourceGeometry(this.scene.clone(true) as THREE.Group, options);
+    placed.userData.devPath = this.devPath;
+    return placed;
   }
 
   dispose(): void {
@@ -397,15 +368,15 @@ export class DevGlbTemplatePool {
       const validation = validateDevGlbTemplate(asset);
       if (!validation.shareable) {
         disposeObjectResources(asset.scene);
-        const legacy: DevGlbTemplatePreparation = {
-          kind: 'legacy',
+        const exclusive: DevGlbTemplatePreparation = {
+          kind: 'exclusive',
           fallbackReason: validation.reason,
         };
-        this.preparations.set(key, legacy);
+        this.preparations.set(key, exclusive);
         this.metricsState.templateFallbackCount++;
         this.metricsState.fallbackDevPaths.push(normalizeDevPath(devPath));
         this.metricsState.fallbackReasons[normalizeDevPath(devPath)] = validation.reason;
-        return legacy;
+        return exclusive;
       }
       // Older caches may contain finite but astronomically large vertices.
       // They must use the existing failed-template/raw-repair path, rather
@@ -493,7 +464,7 @@ export class DevGlbTemplatePool {
 
 export function normalizeDevPath(path: string): string {
   const normalized = path.replace(/\\/g, '/');
-  return normalized.toLowerCase().startsWith('dev/') ? normalized : `DEV/${normalized}`;
+  return normalized.replace(/^(?:\.\/)+/, '');
 }
 
 export function attachDevGlbTemplatePool(root: THREE.Group, pool: DevGlbTemplatePool): void {

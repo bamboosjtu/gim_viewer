@@ -80,7 +80,7 @@ describe('discoverGeometriesFromNode', () => {
       ]);
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(1);
-      expect(results[0].modPath).toBe('MOD/main.mod');
+      expect(results[0].modPath).toBe('main.mod');
       expect(results[0].devPath).toBe('DEV/abc.dev');
       expect(results[0].phmPath).toBe('PHM/main.phm');
     });
@@ -94,7 +94,7 @@ describe('discoverGeometriesFromNode', () => {
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(1);
       expect(results[0].devPath.toLowerCase()).toBe('dev/abc.dev');
-      expect(results[0].modPath.toLowerCase()).toBe('mod/main.mod');
+      expect(results[0].modPath.toLowerCase()).toBe('main.mod');
     });
 
     it('多个 SOLIDMODEL → 返回多个几何来源', async () => {
@@ -111,8 +111,8 @@ TRANSFORMMATRIX1=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
       ]);
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(2);
-      expect(results[0].modPath).toBe('MOD/a.mod');
-      expect(results[1].modPath).toBe('MOD/b.mod');
+      expect(results[0].modPath).toBe('a.mod');
+      expect(results[1].modPath).toBe('b.mod');
     });
 
     it('PHM 多个 SOLIDMODEL → 全部发现', async () => {
@@ -133,7 +133,7 @@ COLOR2=`;
       ]);
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(3);
-      expect(results.map((r) => r.modPath)).toEqual(['MOD/a.mod', 'MOD/b.mod', 'MOD/c.mod']);
+      expect(results.map((r) => r.modPath)).toEqual(['a.mod', 'b.mod', 'c.mod']);
     });
   });
 
@@ -207,7 +207,7 @@ COLOR2=`;
       const files = new Map<string, File>();
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toEqual([]);
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('DEV/missing.dev'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('missing.dev'));
       warnSpy.mockRestore();
     });
 
@@ -228,7 +228,7 @@ COLOR2=`;
       ]);
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toEqual([]);
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('PHM/missing.phm'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('missing.phm'));
       warnSpy.mockRestore();
     });
 
@@ -251,7 +251,7 @@ COLOR2=`;
       const { mods, stls } = await discoverGeometriesFromNode(node, files);
       expect(mods).toEqual([]);
       expect(stls).toHaveLength(1);
-      expect(stls[0].stlPath).toBe('MOD/main.stl');
+      expect(stls[0].stlPath).toBe('main.stl');
     });
 
     it('PHM 引用 .gl → 沿 XML MOD pipeline 发现几何来源', async () => {
@@ -264,7 +264,7 @@ COLOR2=`;
       const { mods, stls } = await discoverGeometriesFromNode(node, files);
       expect(stls).toEqual([]);
       expect(mods).toHaveLength(1);
-      expect(mods[0].modPath).toBe('MOD/MAIN.GL');
+      expect(mods[0].modPath).toBe('MOD/main.gl');
     });
 
     it('PHM 引用未知扩展名 → 跳过 + warn', async () => {
@@ -308,7 +308,7 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
       ]);
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(1);
-      expect(results[0].modPath).toBe('MOD/main.mod');
+      expect(results[0].modPath).toBe('main.mod');
     });
   });
 
@@ -329,7 +329,7 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,0,50,0,1`;
       ]);
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(1);
-      expect(results[0].modPath).toBe('MOD/leaf.mod');
+      expect(results[0].modPath).toBe('leaf.mod');
       expect(results[0].phmPath).toBe('PHM/sub.phm');
       const m = results[0].placementTransformMatrix;
       expect(m[12]).toBeCloseTo(100);
@@ -354,7 +354,7 @@ TRANSFORMMATRIX0=1,0,0,0,0,1,0,0,0,0,1,0,20,0,0,1`;
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       // a → leafA 一次 + a→b→(a 已访问跳过)；不会死循环
       expect(results).toHaveLength(1);
-      expect(results[0].modPath).toBe('MOD/leafA.mod');
+      expect(results[0].modPath).toBe('leafA.mod');
     });
 
     it('镜像矩阵（det=-1）正常级联不报错', async () => {
@@ -382,8 +382,8 @@ TRANSFORMMATRIX0=-1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
       ]);
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(1);
-      expect(results[0].devPath).toBe('DEV/abc.dev');
-      expect(results[0].phmPath).toBe('PHM/main.PHM');
+      expect(results[0].devPath).toBe('Dev/abc.dev');
+      expect(results[0].phmPath).toBe('pHm/main.PHM');
     });
 
     it('MOD 文件名大小写不敏感（.MOD 也接受）', async () => {
@@ -394,7 +394,7 @@ TRANSFORMMATRIX0=-1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
       ]);
       const { mods: results } = await discoverGeometriesFromNode(node, files);
       expect(results).toHaveLength(1);
-      expect(results[0].modPath).toBe('MOD/main.MOD');
+      expect(results[0].modPath).toBe('main.MOD');
     });
 
     it('PHM 文件名大小写不敏感（.PHM 也接受）', async () => {
@@ -462,7 +462,7 @@ TRANSFORMMATRIX0=-1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
         strict,
       );
       expect(result.mods).toHaveLength(1);
-      expect(result.mods[0].modPath).toBe('MOD/MAIN.MOD');
+      expect(result.mods[0].modPath).toBe('mOd/MAIN.MOD');
     });
 
     it('strict 模式按大小写不敏感命中 GL，并沿 XML 几何分支', async () => {
@@ -482,7 +482,7 @@ TRANSFORMMATRIX0=-1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1`;
         strict,
       );
       expect(result.mods).toHaveLength(1);
-      expect(result.mods[0].modPath).toBe('MOD/MAIN.GL');
+      expect(result.mods[0].modPath).toBe('mOd/MAIN.GL');
     });
   });
 });

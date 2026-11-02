@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { GlobalSetupContext } from 'vitest/node';
 import { runNativeTestProcess } from './nativeTestProcess.js';
@@ -10,11 +10,16 @@ declare module 'vitest' {
 export default async function setup({ provide }: GlobalSetupContext) {
   const manifest = realpathSync(resolve('src-tauri/Cargo.toml'));
   const executables = new Set<string>();
+  const nativeEnv = { ...process.env };
+  if (process.platform === 'win32') {
+    const nativeTemp = resolve('.tmp-vitest/native-build'); mkdirSync(nativeTemp, { recursive: true });
+    nativeEnv.TEMP = nativeTemp; nativeEnv.TMP = nativeTemp;
+  }
   console.log('[SQLite build] preparing Rust test harness (600s maximum)');
   const result = await runNativeTestProcess({
     command: 'cargo',
     args: ['test', '--manifest-path', manifest, '--locked', '--lib', '--no-run', '--message-format=json'],
-    phase: 'SQLite harness build', timeoutMs: 600_000, env: process.env,
+    phase: 'SQLite harness build', timeoutMs: 600_000, env: nativeEnv,
     onStdoutLine(line) {
       if (!line.startsWith('{')) return;
       const row = JSON.parse(line);

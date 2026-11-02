@@ -403,7 +403,7 @@ export function parseLineSemanticPackFullPayload(value: ArrayBuffer | Uint8Array
   if (count > 200_000) throw new LineSemanticPackError('INDEX_INVALID', '线路语义 pack 条目数超限');
   // A valid line source always contains at least one packed CBM entry.  Treat
   // an empty full response as an invalid index instead of committing an empty
-  // graph when a truncated/legacy Rust endpoint returns only the header.
+  // graph from a truncated header-only response.
   if (count === 0) throw new LineSemanticPackError('INDEX_INVALID', '线路语义 pack 条目为空');
   const indexMs = view.getFloat64(9, true);
   const resolveMs = view.getFloat64(17, true);
@@ -706,34 +706,6 @@ export interface GeometryRefsPayload {
 /** 批量写入 DEV/PHM 几何引用链 */
 export async function saveGeometryRefs(payload: GeometryRefsPayload): Promise<void> {
   await invokeTimed('save_geometry_refs', { payload });
-}
-
-export interface ReachableGeometry {
-  root_occurrence?: string;
-  assembly_path?: string;
-  reference_path?: string;
-  /** 产生该引用的 DEV 路径（DEV/ 前缀，大小写不敏感）。 */
-  dev_path: string;
-  geometry_path: string;
-  instance_key: string;
-  placement_transform_matrix: string | null;
-  dev_transform_matrix: string | null;
-  phm_transform_matrix: string | null;
-  phm_color: string | null;
-  phm_color_max_a: number | null;
-}
-
-/** 查询项目中可从 CBM 到达的 MOD/STL 几何源（一次 SQL 查询） */
-export async function getReachableGeometry(
-  projectId: number,
-  options?: { includeMod?: boolean; includeStl?: boolean; devPaths?: string[] },
-): Promise<ReachableGeometry[]> {
-  return invokeTimed<ReachableGeometry[]>('get_reachable_geometry', {
-    projectId,
-    includeMod: options?.includeMod ?? true,
-    includeStl: options?.includeStl ?? false,
-    devPaths: options?.devPaths ?? null,
-  });
 }
 
 // ===== GIM 索引完整读取 + 缓存校验 =====
@@ -1146,13 +1118,6 @@ export interface LineGraphPayload {
   file_stats: LineFileStatPayload[];
 }
 
-/**
- * 在 Tauri 环境下保存线路工程图缓存（事务：先删后插 + 更新 project_type）。
- */
-export async function saveLineGraph(payload: LineGraphPayload): Promise<void> {
-  await invokeTimed<void>('save_line_gim_graph', { payload });
-}
-
 // ===== v5: 线路工程 FAM/DEV 属性缓存 =====
 
 /** line_fam_property 写入 payload
@@ -1186,7 +1151,7 @@ export interface LineDevPropertyPayload {
  * 生产线路首次导入路径应调用此命令，不得再单独调用 saveLineGraph。
  * 事务内：删除 6 张表旧数据 → 插入 graph + fam + dev → 更新
  * line_parser_version = LINE_PARSER_VERSION（当前 gim-line-parser-v1），同时保留
- * parser_version 作为旧库兼容/诊断字段，project_type = transmission_line。
+ * parser_version 作为当前数据库发布标记，project_type = transmission_line。
  */
 /** 属性分块大小：每批 IPC 传输的记录数（acc-plan P1-2） */
 const LINE_ATTR_CHUNK_SIZE = 4000;

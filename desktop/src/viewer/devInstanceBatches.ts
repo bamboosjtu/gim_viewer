@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { devRepresentationHint } from './devRepresentationIdentity.js';
 
 interface Binding {
   root: THREE.Group;
@@ -166,27 +167,27 @@ export class DevInstanceBatches {
     if (this.released || binding.highlighted === highlighted) return;
     binding.highlighted = highlighted; this.refresh(binding.bucket);
   }
-  pick(ray: THREE.Raycaster): {rootOccurrence: string; instanceKey: string; distance: number} | null {
+  pick(ray: THREE.Raycaster): {rootOccurrence: string; instanceKey: string; distance: number; hint: import('../engineering/representations.js').DevRepresentationHint} | null {
     if (this.released || !visible(this.root)) return null;
     this.root.updateWorldMatrix(true, true);
-    const candidates: {root: THREE.Group; distance: number}[] = [];
+    const candidates: {root: THREE.Group; mesh: THREE.Object3D; distance: number}[] = [];
     const roots = [...this.groups.keys()].filter(visible);
     for (const hit of ray.intersectObjects(roots, true)) {
       if (!(hit.object as THREE.Mesh).isMesh || !visible(hit.object)) continue;
       let owner: THREE.Object3D | null = hit.object;
       while (owner && !this.groups.has(owner as THREE.Group)) owner = owner.parent;
-      if (owner) candidates.push({root: owner as THREE.Group, distance: hit.distance});
+      if (owner) candidates.push({root: owner as THREE.Group, mesh: hit.object, distance: hit.distance});
     }
     for (const bucket of this.buckets.values()) {
       if (!bucket.mesh || !bucket.mesh.count) continue;
       for (const hit of ray.intersectObject(bucket.mesh)) {
         const binding = hit.instanceId == null ? undefined : bucket.active[hit.instanceId];
-        if (binding) candidates.push({root: binding.root, distance: hit.distance});
+        if (binding) candidates.push({root: binding.root, mesh: binding.mesh, distance: hit.distance});
       }
     }
     const nearest = candidates.sort((a,b) => a.distance - b.distance)[0];
     return nearest ? {rootOccurrence: nearest.root.userData.rootOccurrence,
-      instanceKey: nearest.root.userData.instanceKey, distance: nearest.distance} : null;
+      instanceKey: nearest.root.userData.instanceKey, distance: nearest.distance, hint: devRepresentationHint(nearest.mesh, nearest.root)} : null;
   }
   get statistics() {
     const batches = [...this.buckets.values()].filter(bucket => bucket.mesh);

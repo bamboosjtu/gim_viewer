@@ -3,11 +3,12 @@ import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'n
 import { join, resolve } from 'node:path';
 import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
+import { collectEquipmentGeometryOccurrences } from '../../gim/equipmentGeometryOccurrences.js';
 import { buildCbmTree } from '../../gim/cbmParser.js';
 import { buildGimIndexPayload } from '../gimIndexPersistenceService.js';
 import { restoreGimIndexToState } from '../gimIndexRestoreService.js';
-import { collectCbmDeviceInstances, parseCbmTransformMatrix } from '../modAutoLoadService.js';
-import { createLegacyEquivalentPlacementMatrix } from '../devGlbTemplateRuntime.js';
+import { parseCbmTransformMatrix } from '../modAutoLoadService.js';
+import { createSourcePlacementMatrix } from '../devGlbTemplateRuntime.js';
 import { discoverGeometriesFromDevPath } from '../modGeometryDiscovery.js';
 import { parseWorkerXmlMod } from '../../gim/geometry/xmlModWorkerParser.js';
 import { loadXmlModFromFiles, applyPlacementTransformToSceneUnits } from '../../viewer/xmlModLoader.js';
@@ -83,7 +84,7 @@ it.skipIf(process.env.GIM_VERIFY_SUBSTATION01 !== '1')('substation01 core geomet
   const payload = await buildGimIndexPayload(1, files, [], tree, []);
   const warm = new AppState();
   restoreGimIndexToState(warm, { ...payload, fam_properties: payload.fam_properties ?? [], dev_properties: payload.dev_properties ?? [] } as unknown as GimIndexResult);
-  const shape = (state: AppState) => collectCbmDeviceInstances(state.currentCbmTree).map(n => ({ path: n.path, devPath: n.devPath, matrix: n.transformMatrix }));
+  const shape = (state: AppState) => collectEquipmentGeometryOccurrences(state.currentCbmTree).map(n => ({ path: n.id, devPath: n.devPath, matrix: n.placementMatrix }));
   expect(shape(warm)).toEqual(shape(cold));
   const dev = 'DEV/fccd70eb-42de-4987-9a65-1ffb3b040b4e.dev';
   const discovered = await discoverGeometriesFromDevPath(dev, files, new THREE.Matrix4().toArray(), new Set(), 0, { instances: 0 });
@@ -103,14 +104,14 @@ it.skipIf(process.env.GIM_VERIFY_SUBSTATION01 !== '1')('substation01 core geomet
   const bayRoots = new Set(['74816661-eb0e-413b-8845-fc20f04fd33c.cbm', 'ff9342ec-471a-4939-9fd0-0f4cf084373d.cbm',
     '955927d6-337b-4605-8f39-70ccc8406ff2.cbm', 'd2150b2b-12b2-49d5-91be-1beda26212d0.cbm']);
   const bay = new THREE.Group(), bayCounts: Record<string, number> = {};
-  const nodes = collectCbmDeviceInstances(tree).filter(n => bayRoots.has(n.path.split('/').pop()!));
+  const nodes = collectEquipmentGeometryOccurrences(tree).filter(n => bayRoots.has(n.id.split('/').pop()!));
   expect(nodes.length).toBe(4);
   const bayDev = parseDev(await files.get('DEV/4ba27132-1257-48fd-83b6-8e563c1e488d.dev')!.text(), 'DEV/4ba27132-1257-48fd-83b6-8e563c1e488d.dev');
   expect(bayDev.subDevices[0].transformMatrix.slice(12, 15)).toEqual([0, -2549.8520248912, -149.978363990878]);
   expect(bayDev.solidModels[0].transformMatrix.slice(12, 15)).toEqual([0, 0, 0]);
   for (const node of nodes) {
     const assembly = new THREE.Group(); assembly.matrixAutoUpdate = false;
-    assembly.matrix.copy(createLegacyEquivalentPlacementMatrix(parseCbmTransformMatrix(node.transformMatrix)));
+    assembly.matrix.copy(createSourcePlacementMatrix(node.placementMatrix));
     const edges = await discoverGeometriesFromDevPath(node.devPath, files, new THREE.Matrix4().toArray(), new Set(), 0, { instances: 0 });
     for (const edge of edges.mods) {
       const doc = parseWorkerXmlMod(await files.get(edge.modPath)!.text(), edge.modPath);

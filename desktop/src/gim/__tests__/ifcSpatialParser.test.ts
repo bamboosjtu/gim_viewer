@@ -340,6 +340,29 @@ describe('ifc spatial parser', () => {
     expect(storey.decompositionObjectKeys).toEqual(['ifc:model:object:11']);
   });
 
+  it('retains a directly contained port and its decomposition/host evidence in another space without double-counting inherited objects', () => {
+    const text = [
+      "#4=IFCBUILDINGSTOREY('a',#99,'A层',$,$,$,$,$,.ELEMENT.,0.);",
+      "#5=IFCBUILDINGSTOREY('b',#99,'B层',$,$,$,$,$,.ELEMENT.,0.);",
+      "#10=IFCWALL('wall',#99,'宿主',$,$,$,$,$,$);",
+      "#11=IFCDISTRIBUTIONPORT('port',#99,'端口',$,$,$,$,$);",
+      "#20=IFCRELCONTAINEDINSPATIALSTRUCTURE('a',#99,$,$,(#10),#4);",
+      "#21=IFCRELCONTAINEDINSPATIALSTRUCTURE('b',#99,$,$,(#11),#5);",
+      "#22=IFCRELNESTS('assembly',#99,$,$,#10,(#11));",
+      "#23=IFCRELCONNECTSPORTTOELEMENT('host',#99,$,$,#11,#10);",
+    ].join('\n');
+    const index = buildSubstationSpatialIndexFromTexts([{ entry, text }], node());
+    const port = index.objects.find(object => object.globalId === 'port')!;
+    const a = index.nodes.find(space => space.name === 'A层')!, b = index.nodes.find(space => space.name === 'B层')!;
+    expect(new Set(port.spatialKeys)).toEqual(new Set([a.key, b.key]));
+    expect(b.directObjectKeys).toEqual([port.key]);
+    expect(a.decompositionObjectKeys).toContain(port.key); expect(a.hostObjectKeys).toContain(port.key);
+    expect(index.coverage.directContainedIfcObjects).toBe(2);
+    expect(index.coverage.decompositionInheritedIfcObjects).toBe(1); expect(index.coverage.hostInheritedIfcObjects).toBe(1);
+    expect(index.coverage.inheritedContainedIfcObjects).toBe(1); expect(index.coverage.uncontainedIfcObjects).toBe(0);
+    expect(index.objects).toHaveLength(2);
+  });
+
   it('沿开洞/端口宿主关系补齐空间归属，并保留宿主证据', () => {
     const text = [
       "#1=IFCPROJECT('p',#99,'项目',$,$,$,$,(#2),$);",

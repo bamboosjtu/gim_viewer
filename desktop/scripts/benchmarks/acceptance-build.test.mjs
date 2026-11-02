@@ -9,18 +9,18 @@ import {ACCEPTANCE_IDENTIFIER, verifyAcceptanceDatabasePath, sourceFingerprint} 
 test('native database verification rejects normal, sibling, traversal and relative paths', () => {
   const parent = mkdtempSync(join(tmpdir(), 'gim-acceptance-path-')), root = join(parent, ACCEPTANCE_IDENTIFIER);
   try {
-    mkdirSync(root); writeFileSync(join(root, 'gim_cache.db'), 'path fixture');
-    assert.equal(verifyAcceptanceDatabasePath(join(root, 'gim_cache.db'), root), join(root, 'gim_cache.db'));
-    for (const path of [join(parent, 'com.bamboosjtu.gimviewer', 'gim_cache.db'),
-      join(root + '-other', 'gim_cache.db'), join(root, '..', 'gim_cache.db'), 'gim_cache.db']) {
+    mkdirSync(root); writeFileSync(join(root, 'gim_cache_schema_v1.db'), 'path fixture');
+    assert.equal(verifyAcceptanceDatabasePath(join(root, 'gim_cache_schema_v1.db'), root), join(root, 'gim_cache_schema_v1.db'));
+    for (const path of [join(parent, 'com.bamboosjtu.gimviewer', 'gim_cache_schema_v1.db'),
+      join(root + '-other', 'gim_cache_schema_v1.db'), join(root, '..', 'gim_cache_schema_v1.db'), 'gim_cache_schema_v1.db']) {
       assert.throws(() => verifyAcceptanceDatabasePath(path, root));
     }
     const linkedParent = join(parent, 'links'); mkdirSync(linkedParent);
     const normal = join(parent, 'com.bamboosjtu.gimviewer'); mkdirSync(normal);
-    writeFileSync(join(normal, 'gim_cache.db'), 'normal-cache fixture');
+    writeFileSync(join(normal, 'gim_cache_schema_v1.db'), 'normal-cache fixture');
     const alias = join(linkedParent, ACCEPTANCE_IDENTIFIER);
     symlinkSync(normal, alias, process.platform === 'win32' ? 'junction' : 'dir');
-    assert.throws(() => verifyAcceptanceDatabasePath(join(alias, 'gim_cache.db'), alias), /resolves/);
+    assert.throws(() => verifyAcceptanceDatabasePath(join(alias, 'gim_cache_schema_v1.db'), alias), /resolves/);
   } finally {
     assert.ok(parent.startsWith(join(tmpdir(), 'gim-acceptance-path-')));
     rmSync(parent, {recursive: true, force: true});

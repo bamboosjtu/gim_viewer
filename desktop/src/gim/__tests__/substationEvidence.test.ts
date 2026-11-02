@@ -75,7 +75,7 @@ describe('Substation source evidence and normalized projections', () => {
       'PHM/other.phm': 'SOLIDMODELS.NUM=0', 'MOD/leaf.mod': cube,
     });
     const hydrated = await hydrateSubstationGeometryGraph(['root.dev'], async (paths) =>
-      new Map(paths.filter((p) => files.has(p)).map((p) => [p, files.get(p)!])));
+      new Map(paths.filter((p) => files.has(p)).map((p) => [p, files.get(p)!])), files.keys());
     expect(hydrated.has('MOD/leaf.mod')).toBe(true);
     const tree = await buildCbmTree(files);
     const cold = await discoverGeometriesFromNode(tree!, files);

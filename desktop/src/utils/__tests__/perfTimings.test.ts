@@ -249,7 +249,7 @@ describe('perfTimings', () => {
       templateCount: 0,
       templateParseCount: 0,
       sharedPlacementCount: 0,
-      legacyPlacementCount: 0,
+      exclusivePlacementCount: 0,
       sharedGeometryCount: 0,
       sharedMaterialCount: 0,
       sharedTextureCount: 0,

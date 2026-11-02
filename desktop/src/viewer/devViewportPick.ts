@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import { devRepresentationHint } from './devRepresentationIdentity.js';
 
 interface DevPickIdentity {
   rootOccurrence: string;
@@ -11,9 +12,11 @@ export type PickableDevRoot = (DevPickIdentity | { entry: DevPickIdentity }) & {
 };
 
 export interface DevViewportPick {
+  object?: THREE.Object3D;
   rootOccurrence: string;
   instanceKey: string;
   distance: number;
+  hint: import('../engineering/representations.js').DevRepresentationHint;
 }
 
 /** Raycast ordinary DEV placement groups when the instancing pilot is off.
@@ -27,13 +30,14 @@ export function pickVisibleDevRoot(
   let nearest: DevViewportPick | null = null;
   const hits: THREE.Intersection[] = [];
   let identity: DevPickIdentity;
+  let placement: THREE.Group;
   const visit = (object: THREE.Object3D): void => {
     if (!object.visible) return;
     if ((object as THREE.Mesh).isMesh && ray.layers.test(object.layers)) {
       hits.length = 0;
       object.raycast(ray, hits);
       for (const hit of hits) if (!nearest || hit.distance < nearest.distance) {
-        nearest = { rootOccurrence: identity.rootOccurrence, instanceKey: identity.instanceKey, distance: hit.distance };
+        nearest = { rootOccurrence: identity.rootOccurrence, instanceKey: identity.instanceKey, distance: hit.distance, object: hit.object, hint: devRepresentationHint(hit.object, placement) };
       }
     }
     for (const child of object.children) visit(child);
@@ -49,6 +53,7 @@ export function pickVisibleDevRoot(
     if (!visible) continue;
     // Unknown bounds remain eligible; no per-click geometry traversal to build them.
     if (row.pickBounds && !ray.ray.intersectsBox(row.pickBounds)) continue;
+    placement = group;
     visit(group);
   }
   return nearest;

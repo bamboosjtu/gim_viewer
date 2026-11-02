@@ -6,7 +6,6 @@ import {
   DevGlbTemplate,
   DevGlbTemplatePool,
   attachDevGlbTemplatePool,
-  createLegacyEquivalentPlacementMatrix,
   disposeDevGlbTemplatePool,
   getDevGlbTemplatePool,
   runBudgetedPlacementWork,
@@ -50,7 +49,7 @@ function makeNestedTemplate(): THREE.Group {
   return root;
 }
 
-it('rejects a historical GLB with finite astronomical extent before creating any occurrence', async () => {
+it('rejects a GLB with finite astronomical extent before creating any occurrence', async () => {
   const group = new THREE.Group();
   group.add(new THREE.Mesh(new THREE.BoxGeometry(7.57e11,1,1),new THREE.MeshStandardMaterial()));
   const pool = new DevGlbTemplatePool({session:new AppState().captureProjectSession(),isCurrent:()=>true,parse:async()=>({scene:group,animations:[]})});
@@ -58,17 +57,14 @@ it('rejects a historical GLB with finite astronomical extent before creating any
   pool.dispose();
 });
 
-function cloneLegacy(root: THREE.Group, placementRaw: number[], project: THREE.Matrix4 | null): THREE.Group {
-  const clone = root.clone(true) as THREE.Group;
-  clone.traverse((object) => {
-    const mesh = object as THREE.Mesh;
-    if (!mesh.isMesh) return;
-    mesh.geometry = mesh.geometry.clone();
-    mesh.geometry.applyMatrix4(createLegacyEquivalentPlacementMatrix(placementRaw));
-  });
-  if (project) clone.applyMatrix4(project);
-  clone.updateMatrixWorld(true);
-  return clone;
+function referencePlacement(root: THREE.Group, raw: number[], project: THREE.Matrix4): THREE.Group {
+  const result = new THREE.Group(); result.matrixAutoUpdate = false;
+  // Independent matrix oracle: transform metre-coordinate points by T_mm/1000,
+  // preserving the source linear basis and template-local hierarchy order.
+  const source = new THREE.Matrix4().fromArray(raw);
+  source.setPosition(new THREE.Vector3(raw[12]/1000,raw[13]/1000,raw[14]/1000));
+  result.matrix.copy(project.clone().multiply(source)); result.add(root.clone(true));
+  result.updateMatrixWorld(true); return result;
 }
 
 function worldVertexSamples(root: THREE.Group): number[][] {
@@ -93,14 +89,14 @@ function expectMatrixClose(actual: THREE.Matrix4, expected: THREE.Matrix4, toler
 }
 
 describe('DevGlbTemplate immutable placement runtime', () => {
-  it('places a v10 nested source template once and shares it between distinct occurrences', () => {
+  it('places a nested source template once and shares it between distinct occurrences', () => {
     const scene = new THREE.Group(); scene.matrix.makeTranslation(1, 2, 3); scene.matrixAutoUpdate = false;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
     mesh.position.set(2, 0, 0); mesh.updateMatrix(); scene.add(mesh);
     const template = new DevGlbTemplate('DEV/shared.dev', scene);
     const project = new THREE.Matrix4().makeTranslation(5, -6, 7).multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
-    const a = template.createPlacement({ contract: 'source-template', rootOccurrence: 'A', placementMatrix: new THREE.Matrix4().makeTranslation(1000, 2000, 3000).toArray(), projectSourceToViewerMatrix: project });
-    const b = template.createPlacement({ contract: 'source-template', rootOccurrence: 'B', placementMatrix: new THREE.Matrix4().makeTranslation(4000, 2000, 3000).toArray(), projectSourceToViewerMatrix: project });
+    const a = template.createPlacement({ rootOccurrence: 'A', placementMatrix: new THREE.Matrix4().makeTranslation(1000, 2000, 3000).toArray(), projectSourceToViewerMatrix: project });
+    const b = template.createPlacement({ rootOccurrence: 'B', placementMatrix: new THREE.Matrix4().makeTranslation(4000, 2000, 3000).toArray(), projectSourceToViewerMatrix: project });
     const ca = new THREE.Box3().setFromObject(a, true).getCenter(new THREE.Vector3());
     const cb = new THREE.Box3().setFromObject(b, true).getCenter(new THREE.Vector3());
     expect(ca.distanceTo(new THREE.Vector3(9, 0, 3))).toBeLessThan(1e-7);
@@ -109,7 +105,7 @@ describe('DevGlbTemplate immutable placement runtime', () => {
     expect((a.children[0].children[0] as THREE.Mesh).geometry).toBe((b.children[0].children[0] as THREE.Mesh).geometry);
     template.dispose();
   });
-  it('matches legacy world-space vertices and bbox for affine transform cases', () => {
+  it('preserves source-before-template affine order in world vertices and bounds', () => {
     const project = new THREE.Matrix4().makeTranslation(4, -2, 1)
       .multiply(new THREE.Matrix4().makeRotationY(0.42));
     const cases = [
@@ -137,34 +133,27 @@ describe('DevGlbTemplate immutable placement runtime', () => {
         placementMatrix: placementRaw,
         projectSourceToViewerMatrix: project,
       });
-      const legacy = cloneLegacy(source, placementRaw, project);
+      const expected = referencePlacement(source, placementRaw, project);
 
       const actualSamples = worldVertexSamples(actual);
-      const legacySamples = worldVertexSamples(legacy);
-      expect(actualSamples).toHaveLength(legacySamples.length);
+      const expectedSamples = worldVertexSamples(expected);
+      expect(actualSamples).toHaveLength(expectedSamples.length);
       actualSamples.forEach((sample, index) => {
         sample.forEach((value, component) => {
-          expect(Math.abs(value - legacySamples[index]![component]!)).toBeLessThan(1e-6);
+          expect(Math.abs(value - expectedSamples[index]![component]!)).toBeLessThan(1e-6);
         });
       });
       const actualBox = new THREE.Box3().setFromObject(actual, true);
-      const legacyBox = new THREE.Box3().setFromObject(legacy, true);
-      expect(actualBox.min.distanceTo(legacyBox.min)).toBeLessThan(1e-6);
-      expect(actualBox.max.distanceTo(legacyBox.max)).toBeLessThan(1e-6);
+      const expectedBox = new THREE.Box3().setFromObject(expected, true);
+      expect(actualBox.min.distanceTo(expectedBox.min)).toBeLessThan(1e-6);
+      expect(actualBox.max.distanceTo(expectedBox.max)).toBeLessThan(1e-6);
 
-      // Root matrix is represented identically; each mesh matrix carries the
-      // additional post-multiplied CBM affine that legacy baked into vertices.
-      expectMatrixClose(actual.matrixWorld, legacy.matrixWorld);
-      const actualMeshes: THREE.Mesh[] = [];
-      const legacyMeshes: THREE.Mesh[] = [];
-      actual.traverse((object) => { if ((object as THREE.Mesh).isMesh) actualMeshes.push(object as THREE.Mesh); });
-      legacy.traverse((object) => { if ((object as THREE.Mesh).isMesh) legacyMeshes.push(object as THREE.Mesh); });
-      expect(actualMeshes).toHaveLength(legacyMeshes.length);
-      const cbm = createLegacyEquivalentPlacementMatrix(placementRaw);
-      actualMeshes.forEach((mesh, index) => {
-        const expectedWorld = legacyMeshes[index]!.matrixWorld.clone().multiply(cbm);
-        expectMatrixClose(mesh.matrixWorld, expectedWorld);
-      });
+      expectMatrixClose(actual.matrixWorld, expected.matrixWorld);
+      const actualMeshes: THREE.Mesh[] = [], expectedMeshes: THREE.Mesh[] = [];
+      actual.traverse(o => { if ((o as THREE.Mesh).isMesh) actualMeshes.push(o as THREE.Mesh); });
+      expected.traverse(o => { if ((o as THREE.Mesh).isMesh) expectedMeshes.push(o as THREE.Mesh); });
+      expect(actualMeshes).toHaveLength(expectedMeshes.length);
+      actualMeshes.forEach((mesh, i) => expectMatrixClose(mesh.matrixWorld, expectedMeshes[i].matrixWorld));
       template.dispose();
     }
   });
@@ -203,7 +192,7 @@ describe('DevGlbTemplate immutable placement runtime', () => {
       parse: async () => ({ scene: unsafeSource, animations: [] }),
     });
     const unsafePreparation = await unsafePool.prepare('DEV/unsafe.dev', new Uint8Array([1]));
-    expect(unsafePreparation).toMatchObject({ kind: 'legacy', fallbackReason: 'skinned-mesh' });
+    expect(unsafePreparation).toMatchObject({ kind: 'exclusive', fallbackReason: 'skinned-mesh' });
     expect(unsafePool.metrics().templateFallbackCount).toBe(1);
     unsafePool.dispose();
 

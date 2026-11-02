@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CbmNode } from '../../gim/types.js';
-import {
-  collectCbmDeviceInstances,
-  isGeometryAutoLoadSeed,
-} from '../modAutoLoadService.js';
+import { collectEquipmentGeometryOccurrences } from '../../gim/equipmentGeometryOccurrences.js';
+import { isSubstationGeometryRoot } from '../../gim/substationEvidence.js';
 import { resolveGeometryLoadNode } from '../nodeInteractionService.js';
 
 function node(overrides: Partial<CbmNode>): CbmNode {
@@ -26,7 +24,7 @@ function node(overrides: Partial<CbmNode>): CbmNode {
   };
 }
 
-describe('substation geometry seed selection', () => {
+describe('standalone equipment assembly seed adapter', () => {
   it('does not use PARTINDEX or DEV_SUBDEVICE aliases as full-load seeds', () => {
     const partIndex = node({
       path: 'CBM/root.cbm/part.cbm',
@@ -48,17 +46,17 @@ describe('substation geometry seed selection', () => {
       children: [partIndex, virtualChild, independentRoot],
     });
 
-    expect(isGeometryAutoLoadSeed(root)).toBe(true);
-    expect(isGeometryAutoLoadSeed(partIndex)).toBe(false);
-    expect(isGeometryAutoLoadSeed(virtualChild)).toBe(false);
-    expect(collectCbmDeviceInstances(root).map((item) => item.devPath))
+    expect(isSubstationGeometryRoot(root)).toBe(true);
+    expect(isSubstationGeometryRoot(partIndex)).toBe(false);
+    expect(isSubstationGeometryRoot(virtualChild)).toBe(false);
+    expect(collectEquipmentGeometryOccurrences(root).map((item) => item.devPath))
       .toEqual(['root.dev', 'independent.dev']);
   });
 
   it('treats virtual/alias entity names case-insensitively', () => {
-    expect(isGeometryAutoLoadSeed(node({ entityName: 'partIndex', devPath: 'child.dev' }))).toBe(false);
-    expect(isGeometryAutoLoadSeed(node({ entityName: 'dev_subDevice', devPath: 'child.dev' }))).toBe(false);
-    expect(isGeometryAutoLoadSeed(node({ entityName: 'f4system', devPath: 'device.dev' }))).toBe(true);
+    expect(isSubstationGeometryRoot(node({ entityName: 'partIndex', devPath: 'child.dev' }))).toBe(false);
+    expect(isSubstationGeometryRoot(node({ entityName: 'dev_subDevice', devPath: 'child.dev' }))).toBe(false);
+    expect(isSubstationGeometryRoot(node({ entityName: 'f4system', devPath: 'device.dev' }))).toBe(true);
   });
 
   it('resolves a PARTINDEX click to its nearest device ancestor', () => {

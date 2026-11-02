@@ -31,11 +31,9 @@ export interface GeometryCacheResult {
  */
 function isGeometryFile(entryPath: string): boolean {
   const lower = entryPath.toLowerCase();
-  const isGeometryDir = lower.startsWith('dev/') || lower.startsWith('phm/')
-    || lower.startsWith('mod/') || lower.startsWith('gl/');
   const isGeometryExt = lower.endsWith('.dev') || lower.endsWith('.phm')
-    || lower.endsWith('.mod') || lower.endsWith('.gl');
-  return isGeometryDir && isGeometryExt;
+    || lower.endsWith('.mod') || lower.endsWith('.gl') || lower.endsWith('.stl');
+  return isGeometryExt;
 }
 
 /**

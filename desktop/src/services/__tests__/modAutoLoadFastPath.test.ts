@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { SubstationBackgroundCoordinator } from '../substationBackgroundRuntime.js';
 import * as THREE from 'three';
 import type { AppState } from '../../app/state.js';
-import type { CbmNode } from '../../gim/types.js';
+import type { SourceGeometryOccurrence } from '../../gim/engineering/geometryOccurrences.js';
 import type { GeometryCacheManifestStatus } from '@desktop/database.js';
 import {
   tryDevGlbFastPath,
@@ -12,30 +12,12 @@ import {
   type DevGlbFastPathProfile,
 } from '../modAutoLoadService.js';
 
-function seed(path: string, devPath: string): CbmNode {
-  return {
-    path,
-    name: path,
-    entityName: 'F4System',
-    children: [],
-    famPath: '',
-    devPath,
-    ifcFile: '',
-    ifcGuid: '',
-    classifyName: '',
-    transformMatrix: '',
-    systemNames: [],
-    devSymbolName: '',
-    devType: '',
-    devExpanded: false,
-  };
+function seed(path: string, devPath: string): SourceGeometryOccurrence {
+  return { id: path, sourceId: path, sourceContextId: path, name: path,
+    devPath: devPath.includes('/') ? devPath : `DEV/${devPath}`, placementMatrix: new THREE.Matrix4().toArray() };
 }
-
-function seedWithTranslation(path: string, devPath: string, xMm: number): CbmNode {
-  return {
-    ...seed(path, devPath),
-    transformMatrix: `1,0,0,0,0,1,0,0,0,0,1,0,${xMm},0,0,1`,
-  };
+function seedWithTranslation(path: string, devPath: string, xMm: number): SourceGeometryOccurrence {
+  return { ...seed(path, devPath), placementMatrix: new THREE.Matrix4().makeTranslation(xMm, 0, 0).toArray() };
 }
 
 function renderableGroup(name: string): THREE.Group {

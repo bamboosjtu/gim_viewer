@@ -1,0 +1,35 @@
+import type { EngineeringSources } from '../gim/engineering/buildSources.js';
+import type { EngineeringSnapshot } from '../engineering/types.js';
+import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../gim/ifcSpatialParser.js';
+import type { EngineeringNavigationData } from '../gim/engineering/navigation.js';
+import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
+import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
+import type { EngineeringWorkerPayload } from './engineeringWorkerTransport.js';
+
+export interface EngineeringExtractSummary { ifcPaths: string[]; sourceRecords: number }
+
+export interface EngineeringBuildResult {
+  sources: EngineeringSources;
+  snapshot: EngineeringSnapshot;
+  navigation: EngineeringNavigationData;
+  geometryOccurrences: SourceGeometryOccurrenceCatalog;
+  navigationBytes?: Uint8Array;
+  navigationCacheHit?: boolean;
+  sourceBytes?: Uint8Array;
+  entityBytes?: Uint8Array;
+  entityCacheHit?: boolean;
+  cacheError?: string;
+}
+export type EngineeringWorkerCommand =
+  | { type: 'init'; scope: string; paths: string[] }
+  | { type: 'files'; files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }> }
+  | { type: 'extract' }
+  | { type: 'assemble'; objects: IfcSpatialObject[]; models: SpatialModelSummary[]; nodes?: IfcSpatialNode[]; identity?: EngineeringCacheIdentity }
+  | { type: 'restore'; sourceBytes: Uint8Array; entityBytes?: Uint8Array; navigationBytes?: Uint8Array; identity: EngineeringCacheIdentity };
+export type EngineeringWorkerRequest = EngineeringWorkerCommand & { requestId: number };
+export type EngineeringWorkerReply =
+  | { type: 'ready' }
+  | { type: 'graph'; summary: EngineeringExtractSummary; geometryOccurrences: SourceGeometryOccurrenceCatalog }
+  | { type: 'model'; result: EngineeringWorkerPayload }
+  | { type: 'error'; message: string };
+export type EngineeringWorkerResponse = EngineeringWorkerReply & { requestId: number };

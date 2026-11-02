@@ -37,7 +37,16 @@ export function createSelectionVisibility(state: AppState, ctx: ViewerContext) {
       if (guard && !guard.isCurrent()) return;
       const request = state.selectionRequest;
       const ownsHighlight = request && state.selectionHighlightRequestId === request.id;
-      if (guard || selectionOwner !== (request?.id ?? null)) {
+      const engineering = state.engineeringSelection?.requestId === request?.id ? state.engineeringSelection : null;
+      if (engineering) {
+        committedScopes = new Map(); selectionOwner = request?.id ?? null;
+        for (const ref of engineering.ifc) {
+          const id = logical(ref.modelId), row = committedScopes.get(id) ?? empty();
+          row.expressIds.add(ref.expressId);
+          if (ref.globalId) row.globalIds.add(ref.globalId);
+          committedScopes.set(id, row);
+        }
+      } else if (guard || selectionOwner !== (request?.id ?? null)) {
         committedScopes = new Map(); selectionOwner = request?.id ?? null;
         const scope = (id: string) => {
           const key = logical(id); if (!committedScopes.has(key)) committedScopes.set(key, empty());
@@ -65,7 +74,8 @@ export function createSelectionVisibility(state: AppState, ctx: ViewerContext) {
       const scopes = new Map([...committedScopes].map(([id,row]) => [id, {
         localIds:new Set(row.localIds), globalIds:new Set(row.globalIds), expressIds:new Set(row.expressIds),
       }]));
-      if (!state.deviceLodRuntime) {
+      if (engineering) state.engineeringGeometryFilter?.();
+      if (!state.deviceLodRuntime && !engineering) {
         const selected = ownsHighlight ? state.highlightedModState?.groups ?? [] : [];
         for (const group of [...state.loadedXmlModGroups.values(), ...state.loadedStlGroups.values()]) {
           if (state.onlySelected) {

@@ -1,0 +1,82 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Engineering worker integration check</title>
+<p>Isolated functional check of actual Workers, source extraction and cache transport.</p>
+<script type="module">
+import {EngineeringWorkerClient} from '../../src/services/engineeringWorkerClient.ts';
+import {beginEngineeringBuild} from '../../src/services/engineeringService.ts';
+import {AppState} from '../../src/app/state.ts';
+
+globalThis.runEngineeringWorkerCheck = async () => {
+  const check = (condition, message) => {if (!condition) throw Error(message);};
+  const files = new Map([
+    ['project.cbm',new File(['ENTITYNAME=F2System\nOBJECTMODELPOINTER=main.dev'],'project.cbm')],
+    ['main.dev',new File(['SYMBOLNAME=主变压器\nSUBDEVICE0=terminal.dev\nSUBDEVICE1=radiator.dev'],'main.dev')],
+    ['terminal.dev',new File(['SYMBOLNAME=本体端子箱'],'terminal.dev')],
+    ['radiator.dev',new File(['SYMBOLNAME=散热器'],'radiator.dev')],
+  ]);
+  const scope='a'.repeat(64),identity={sourceSha256:scope,parserVersion:'browser-worker-check',entries:[...files.keys()]};
+  const client=EngineeringWorkerClient.create(()=>true);
+  let sourceBytes,entityBytes,navigationBytes,expected,expectedNavigation;
+  try {
+    await client.init(scope,[...files.keys()]);
+    await client.addFiles([...files].map(([path,blob])=>({path,blob})));
+    const graph=await client.extract();check(graph.sourceRecords===3,'actual Worker source extraction summary');
+    check(!('records' in graph),'extraction does not clone the full graph into the Window');
+    check(client.geometryOccurrences?.occurrences.length===1,'independent physical occurrence contract');
+    const result=await client.assemble([],[],identity);
+    check(result.sources.complete&&result.snapshot.entities.length===2,'whole and independent terminal box');
+    check(result.snapshot.memberships.length===3,'source conservation');
+    check(result.sourceBytes?.byteLength&&result.entityBytes?.byteLength,'Worker cache encoding');
+    check(result.navigationBytes?.byteLength&&result.navigation.sourceRows.size===3,'Worker navigation projection and encoding');
+    sourceBytes=result.sourceBytes;entityBytes=result.entityBytes;navigationBytes=result.navigationBytes;expected=result.snapshot;expectedNavigation=result.navigation;
+  } finally {client.close();}
+  const warm=EngineeringWorkerClient.create(()=>true);
+  try {
+    const restored=await warm.restore(sourceBytes.slice(),entityBytes.slice(),identity,navigationBytes.slice());
+    check(restored.entityCacheHit===true,'warm entity cache hit');
+    check(JSON.stringify(restored.snapshot)===JSON.stringify(expected),'cold/warm snapshot equivalence');
+    check(restored.navigationCacheHit===true&&restored.navigation.composition.nodes.size===expectedNavigation.composition.nodes.size,'warm navigation cache hit');
+  } finally {warm.close();}
+  const repair=EngineeringWorkerClient.create(()=>true);
+  try {
+    const restored=await repair.restore(sourceBytes.slice(),new Uint8Array([1,2,3]),identity);
+    check(restored.entityCacheHit===false&&restored.entityBytes?.length,'entity-only repair');
+    check(JSON.stringify(restored.snapshot)===JSON.stringify(expected),'repair does not change engineering boundaries');
+  } finally {repair.close();}
+  const binary=EngineeringWorkerClient.create(()=>true);
+  try {
+    const chunks=await Promise.all([...files].map(async([path,file])=>({path,bytes:new Uint8Array(await file.arrayBuffer())})));
+    const joined=new Uint8Array(chunks.reduce((sum,part)=>sum+part.bytes.length,0));let offset=0;
+    const shared=chunks.map(part=>{joined.set(part.bytes,offset);const bytes=joined.subarray(offset,offset+part.bytes.length);offset+=part.bytes.length;return {path:part.path,bytes};});
+    await binary.init(scope,[...files.keys()]);await binary.addFiles(shared);
+    check(joined.byteLength===0,'native batch buffer ownership transfer');
+    await binary.extract();
+    const result=await binary.assemble([],[]);
+    check(JSON.stringify(result.snapshot)===JSON.stringify(expected),'shared native binary batch');
+  } finally {binary.close();}
+  const controller=new AbortController(),cancel=EngineeringWorkerClient.create(()=>true,controller.signal);
+  const obsolete=cancel.init(scope,[...files.keys()]).then(()=>false,error=>error.name==='AbortError');
+  controller.abort();check(await obsolete,'actual Worker cancellation');
+  const state=new AppState();state.activateProject(7,scope);
+  await beginEngineeringBuild(state,files);
+  check(state.engineeringStatus==='ready'&&state.engineeringSnapshot.entities.length===2,'production service with actual Worker');
+  const fixture=document.createElement('section');fixture.innerHTML='<div id="cbm-tree-panel" class="tab-panel"></div><aside id="props-drawer"><div id="props-drawer-body"></div></aside><button id="btn-close-props"></button><button id="btn-export-props"></button>';
+  document.body.append(fixture);state.currentProjectType='substation';
+  const {renderEngineeringTree}=await import('../../src/ui/engineeringTreeView.ts');renderEngineeringTree(state);
+  check([...fixture.querySelectorAll('.substation-nav-mode-btn')].map(b=>b.textContent).join(',')==='工程组成,来源','actual browser two views');
+  const input=fixture.querySelector('[role="combobox"]');input.value='散热器';input.dispatchEvent(new Event('input'));
+  fixture.querySelector('[role="option"]').click();check(state.selectionRequest.target.kind==='engineering','search claims whole selection before lazy imports');
+  const until=async predicate=>{const end=performance.now()+10000;while(!predicate()){if(performance.now()>end)throw Error('browser navigation did not settle');await new Promise(resolve=>setTimeout(resolve,25));}};
+  await until(()=>fixture.querySelector('.props-header')?.textContent==='主变压器');
+  [...fixture.querySelectorAll('[data-engineering-source-index]')].find(b=>b.textContent==='散热器').click();
+  await until(()=>state.engineeringNavMode==='source'&&fixture.querySelector('.props-header')?.textContent==='散热器');
+  check(fixture.querySelector('.tree-row.selected')?.textContent.includes('散热器'),'source reveal in virtual outline');
+  fixture.querySelector('#engineering-owner').click();
+  await until(()=>state.engineeringNavMode==='composition'&&fixture.querySelector('.props-header')?.textContent==='主变压器');
+  state.invalidatePendingLoads();
+  fixture.remove();
+  return {passed:true,scope:'functional fixture; excludes native IPC, real samples, geometry and performance acceptance',userAgent:navigator.userAgent,
+    checks:['source graph','physical occurrence contract','whole boundary','source conservation','cache transport','warm restore','navigation projection/cache','entity-only repair','shared binary buffer','Worker abort','production service','browser whole search/source round trip']};
+};
+</script>

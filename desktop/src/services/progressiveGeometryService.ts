@@ -24,22 +24,20 @@
 import * as THREE from 'three';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { DevCheckpointHandler } from './substationBackgroundRuntime.js';
-import type { CbmNode } from '../gim/types.js';
+import type { SourceGeometryOccurrence } from '../gim/engineering/geometryOccurrences.js';
+import { getSourceGeometryOccurrences } from './sourceGeometryService.js';
 import type { GeometryCacheManifestEntry } from '@desktop/database.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { isTauri } from '@desktop/runtime.js';
 import {
-  collectCbmDeviceInstances,
   ensureGeometryLayers,
-  parseCbmTransformMatrix,
   diagnoseGroupBBox,
   isGeometryTokenValid,
 } from './modAutoLoadService.js';
 import type { DevGlbFailureType, DevGlbFastPathProfile } from './modAutoLoadService.js';
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import type { DevGlbSerializationResult } from './glbCacheService.js';
-import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 import { createDevGeometryTelemetry } from './devGeometryTelemetry.js';
 import {
   attachDevGlbTemplatePool,
@@ -47,7 +45,8 @@ import {
   getDevGlbTemplatePool,
   DevGlbTemplatePool,
   runBudgetedPlacementWork,
-  DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY,
+  DEV_GLB_EXCLUSIVE_PLACEMENT_USER_DATA_KEY,
+  placeSourceGeometry,
   getLoadedDevOccurrenceKind,
   type DevGlbParsedAsset,
 } from './devGlbTemplateRuntime.js';
@@ -103,8 +102,8 @@ export interface ProgressiveGeometryDependencies {
 
 function defaultDependencies(): ProgressiveGeometryDependencies {
   return {
-    serializeDevToGlb: (devPath, files) => import('./glbCacheService.js').then((m) => m.serializeDevToGlb(devPath, files)),
-    serializeDevToGlbDetailed: (devPath, files) => import('./glbCacheService.js').then((m) => m.serializeDevToGlbDetailed(devPath, files)),
+    serializeDevToGlb: (devPath, files) => import('./glbCacheService.js').then((m) => m.serializeDevToGlbDetailed(devPath, files, { lod: 0 }).then(result => result.bytes)),
+    serializeDevToGlbDetailed: (devPath, files) => import('./glbCacheService.js').then((m) => m.serializeDevToGlbDetailed(devPath, files, { lod: 0 })),
     loadDevGlb: (devPath, bytes) => import('./glbCacheService.js').then((m) => m.loadDevGlb(devPath, bytes)),
     parseDevGlbAsset: (devPath, bytes) => import('./glbCacheService.js').then((m) => m.parseDevGlbAsset(devPath, bytes)),
     writeGlbFile: (projectId, entryPath, bytes, sourceGimSha256) => import('@desktop/database.js').then((m) => m.writeGlbFile(projectId, entryPath, bytes, sourceGimSha256)),
@@ -119,8 +118,7 @@ function defaultDependencies(): ProgressiveGeometryDependencies {
 
 /** 归一化 devPath 为 DEV/ 前缀键（与 tryDevGlbFastPath 一致） */
 function normalizeDevEntryPath(path: string): string {
-  const normalized = path.replace(/\\/g, '/');
-  return normalized.toLowerCase().startsWith('dev/') ? normalized : `DEV/${normalized}`;
+  return path.replace(/\\/g, '/').replace(/^(?:\.\/)+/, '');
 }
 
 /**
@@ -193,7 +191,7 @@ function emptyDevGlbProfile(cbmInstanceCount: number, uniqueDevCount: number): D
     fallbackDevPaths: [],
     fallbackReasons: {},
     sharedPlacementCount: 0,
-    legacyFallbackPlacementCount: 0,
+    exclusiveFallbackPlacementCount: 0,
     sharedGeometryCount: 0,
     sharedMaterialCount: 0,
     sharedTextureCount: 0,
@@ -241,7 +239,6 @@ export async function runProgressiveDevGlbPipeline(
   const deps = { ...defaultDependencies(), ...dependencies };
   const token = options.token;
   const files = options.files ?? state.currentFiles;
-  const tree = state.currentCbmTree;
 
   const interrupted: ProgressiveGeometryResult = {
     compiledDevs: 0,
@@ -268,20 +265,21 @@ export async function runProgressiveDevGlbPipeline(
   // 不再读取可变的 state.currentProjectId（快速切换项目时旧任务不得写新项目）
   // capturedProjectId 已由入口快照固定
 
-  if (!files || !tree) {
-    debugLog(DEBUG_IFC_LOAD, '[progressive] 跳过：currentFiles 或 currentCbmTree 为空（非首次打开场景）');
+  if (!files) {
+    debugLog(DEBUG_IFC_LOAD, '[progressive] 跳过：无几何文件来源');
     return { compiledDevs: 0, renderedInstances: 0, interrupted: false, failedDevs: [], rawFallbackDevs: [] };
   }
 
   // ── 1. 收集 CBM 设备实例并按唯一 DEV 分组（保持树遍历顺序）──
-  const seeds = collectCbmDeviceInstances(tree);
+  const seeds = await getSourceGeometryOccurrences(state, session);
+  if (!isSessionValid()) return interrupted;
   if (seeds.length === 0) {
     debugLog(DEBUG_IFC_LOAD, '[progressive] 无 CBM 设备实例，管线结束');
     return { compiledDevs: 0, renderedInstances: 0, interrupted: false, failedDevs: [], rawFallbackDevs: [] };
   }
 
   const devOrder: string[] = [];
-  const seedsByDev = new Map<string, CbmNode[]>();
+  const seedsByDev = new Map<string, SourceGeometryOccurrence[]>();
   for (const seed of seeds) {
     if (!seed.devPath) continue;
     const devPath = normalizeDevEntryPath(seed.devPath);
@@ -630,14 +628,14 @@ export async function runProgressiveDevGlbPipeline(
     await runBudgetedPlacementWork(devSeeds, async (seed) => {
       if (failedDevKeys.has(devKey)) return;
       if (!isSessionValid()) return;
-      const instanceKey = `dev:${devPath}#${seed.path}`;
-      if (state.loadedXmlModGroups.has(instanceKey) || getLoadedDevOccurrenceKind(state,seed.path)) return;
+      const instanceKey = `dev:${devPath}#${seed.id}`;
+      if (state.loadedXmlModGroups.has(instanceKey) || getLoadedDevOccurrenceKind(state,seed.id)) return;
       if (!preparation) return;
 
       let group: THREE.Group | null = null;
       const shared = preparation.kind === 'shared';
       try {
-        const cbmTransform = parseCbmTransformMatrix(seed.transformMatrix);
+        const cbmTransform = seed.placementMatrix;
         if (shared) {
           const matrixStarted = performance.now();
           group = preparation.template.createPlacement({
@@ -663,10 +661,10 @@ export async function runProgressiveDevGlbPipeline(
             return;
           }
           const transformStarted = performance.now();
-          deps.applyPlacementTransformToSceneUnits(group, cbmTransform);
-          applyProjectSourceToViewer(group, state.projectSourceToViewerMatrix);
+          group = placeSourceGeometry(group, { rootOccurrence: seed.id, instanceKey,
+            placementMatrix: cbmTransform, projectSourceToViewerMatrix: state.projectSourceToViewerMatrix });
           deepTelemetry.record('placementTransform', performance.now() - transformStarted, devPath);
-          group.userData[DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY] = true;
+          group.userData[DEV_GLB_EXCLUSIVE_PLACEMENT_USER_DATA_KEY] = true;
         }
 
         if (!isSessionValid()) {
@@ -683,11 +681,11 @@ export async function runProgressiveDevGlbPipeline(
         }
 
         group.userData.devPath = devPath;
-        if (getLoadedDevOccurrenceKind(state,seed.path)) {
+        if (getLoadedDevOccurrenceKind(state,seed.id)) {
           if (!shared) disposeGroup(group);
           return;
         }
-        group.userData.rootOccurrence = seed.path;
+        group.userData.rootOccurrence = seed.id;
         group.userData.instanceKey = instanceKey;
         const sceneCommitStarted = performance.now();
         modRoot.add(group);
@@ -697,14 +695,14 @@ export async function runProgressiveDevGlbPipeline(
           deepTelemetry.recordSharedPlacement(devPath);
           devGlbProfile.sharedPlacementCount = (devGlbProfile.sharedPlacementCount ?? 0) + 1;
         } else {
-          deepTelemetry.recordLegacyFallbackPlacement(devPath);
-          devGlbProfile.legacyFallbackPlacementCount = (devGlbProfile.legacyFallbackPlacementCount ?? 0) + 1;
+          deepTelemetry.recordExclusiveFallbackPlacement(devPath);
+          devGlbProfile.exclusiveFallbackPlacementCount = (devGlbProfile.exclusiveFallbackPlacementCount ?? 0) + 1;
         }
         devGroups.push({ instanceKey, group, shared });
         renderedInstances++;
       } catch (err) {
         if (group && !shared) disposeGroup(group);
-        console.warn(`[progressive] DEV GLB placement 渲染失败: ${devPath} #${seed.path}`, err);
+        console.warn(`[progressive] DEV GLB placement 渲染失败: ${devPath} #${seed.id}`, err);
         if (err instanceof InvalidDevGeometryError && err.sourceEvidence) {
         if (capturedProjectId != null && isTauri()) glbEntries.push({entry_path:devPath,status:'source-invalid',size:0,diagnostic:`${err.message}; ${err.sourceEvidence}`});
         if (isSessionValid()) setGeometryDiagnostic(state, diagnosticForFailure(devPath, 'source-invalid', 'cold', `${err.message}; ${err.sourceEvidence}`));

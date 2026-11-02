@@ -14,13 +14,13 @@ export function verifyAcceptanceDatabasePath(databasePath, expectedRoot) {
     throw Error('Acceptance database path must be an absolute native path');
   }
   const actual = resolve(databasePath), root = resolve(expectedRoot);
-  if (actual.toLowerCase() !== join(root, 'gim_cache.db').toLowerCase()
+  if (actual.toLowerCase() !== join(root, 'gim_cache_schema_v1.db').toLowerCase()
     || root.split(/[\\/]/).pop()?.toLowerCase() !== ACCEPTANCE_IDENTIFIER) {
     throw Error('Native database is outside the dedicated acceptance root');
   }
   const realRoot = realpathSync(root), realDatabase = realpathSync(actual);
   if (realRoot.split(/[\\/]/).pop()?.toLowerCase() !== ACCEPTANCE_IDENTIFIER
-    || realDatabase.toLowerCase() !== join(realRoot, 'gim_cache.db').toLowerCase()) {
+    || realDatabase.toLowerCase() !== join(realRoot, 'gim_cache_schema_v1.db').toLowerCase()) {
     throw Error('Acceptance cache resolves outside its dedicated root');
   }
   const normal = join(dirname(root), 'com.bamboosjtu.gimviewer');

@@ -7,6 +7,7 @@
 | 目录 | 职责 | 依赖边界 |
 |---|---|---|
 | `desktop/src/app/` | 启动、AppState、工程和选择状态 | 接入业务服务 |
+| `desktop/src/engineering/` | 工程整体身份、分类、来源成员、关系及组成投影 | 不依赖 GIM parser、平台 IO、UI 或 Viewer |
 | `desktop/src/gim/` | 容器、纯 parser、索引和地图数据投影 | 不依赖 services/viewer/ui |
 | `desktop/src/viewer/` | IFC、Fragments、Three.js、MOD/STL 渲染 | 不依赖 services/ui |
 | `desktop/src/ui/` | DOM shell、树、属性、搜索、地图 | 不直接访问数据库 |
@@ -21,6 +22,8 @@
 | `crates/tauri-plugin-gim-import/` | Android SAF、流式复制与 SHA | ContentResolver，不将整个 GIM 传入 JS |
 
 入口和打开服务按需动态 import 重依赖；不静态引入 Three.js、web-ifc、MapLibre。解析分支依据源 magic 和文件结构能力，不依据导出厂商名称。
+
+[工程缓存服务](../desktop/src/services/projectCacheService.ts) 统一读取最近工程和缓存摘要、选择校验域、生成诊断并映射失败。UI 只消费结果和项目 ID；打开仍由原生端按数据库记录授权路径。关闭或连续刷新后，迟到读取不能覆盖新的界面。
 
 ## 源身份与打开生命周期
 
@@ -49,6 +52,8 @@ IFC 的远景、区域 L1 与显式 L2 共用源对象身份；表示提交时�
 ## 变电语义与 IFC
 
 原始 CBM 属性、FAM 物理行和设计文档来源分别保存。[substationEvidence](../desktop/src/gim/substationEvidence.ts) 生成文件能力摘要、IFC 证据、PARTINDEX identity alias 与 GL sidecar 投影。摘要不决定厂商 parser 分支。语义格式与身份规则见 [语义模型](schema/semantic-model.md)。
+
+工程来源、整体识别与两视图由独立 Worker 构建，不以 Viewer、LOD 或文件层级决定工程实体。提取先返回物理放置清单和来源摘要，完整来源图留在 Worker；整体与投影就绪后通过[共享表二进制协议](../desktop/src/services/engineeringWorkerTransport.ts)传回，重复原始属性和身份只编码一次。主线程分批恢复共享事实和 Map 索引，工程切换取消尚未发布的恢复结果；该运行时协议不改变持久化缓存版本。
 
 IFC 文件发现与 IFCGUID 对象挂接独立。全局 entry resolver 解析 CBM 引用及 IFC 清单。转换在 IFC Worker 中执行，主线程仍负责 Fragments `core.load`、模型提交与交互。首个 IFC 的插入顺序是坐标锚点契约；缓存恢复保留持久化顺序，不能按文件名重新排序。
 
@@ -144,9 +149,9 @@ early 请求先调用 Native `inspect_substation_early_eligibility`：能力结�
 
 `start_substation_extraction → semanticReady → complete / failed / cancelled` 与正式缓存发布分开。早期 File 输入来自同次解码的原字节副本，只能在本次工程会话内使用；其余文件必须等实际 materialize 后读取。首个完整 IFC 的坐标锚点契约保持。准备期间可查看语义与属性，设备定位会明确提示源几何尚在准备。
 
-job 的 staging 只有全部条目通过路径、配额、大小和解码校验、源 SHA 保持、任务未取消后才由现有原子 commit 发布。v26 索引持久化还须等待 source completion。关闭和新 job 会撤销旧任务的发布权；实验读取按最多 64 KiB 的解码单元检查取消。Source completion 后采用既有有界 batch hydration 准备引用文本，避免逐条 job IPC。
+job 的 staging 只有全部条目通过路径、配额、大小和解码校验、源 SHA 保持、任务未取消后才由现有原子 commit 发布。当前索引持久化还须等待 source completion。关闭和新 job 会撤销旧任务的发布权；实验读取按最多 64 KiB 的解码单元检查取消。Source completion 后采用既有有界 batch hydration 准备引用文本，避免逐条 job IPC。
 
-独立的 `gim-debug-substation-parse-copy=1` 为完整解压路径生成连续小文件加速副本；原文件仍独立落盘，副本不是权威源、不进入 v26 必需来源。副本校验包括本次提取 receipt 的大小与 SHA、路径/长度/区间及完整覆盖；失败退回 batch hydration。early job 的可选副本失败则等待完整 materialization 后使用原批量路径。`gim-debug-substation-extraction-trace=1` 仅记录完整解压的逐条时序和虚拟 checkpoint，不提前返回 command。
+独立的 `gim-debug-substation-parse-copy=1` 为完整解压路径生成连续小文件加速副本；原文件仍独立落盘，副本不是权威源、不进入 当前必需来源。副本校验包括本次提取 receipt 的大小与 SHA、路径/长度/区间及完整覆盖；失败退回 batch hydration。early job 的可选副本失败则等待完整 materialization 后使用原批量路径。`gim-debug-substation-extraction-trace=1` 仅记录完整解压的逐条时序和虚拟 checkpoint，不提前返回 command。
 
 变电原生解压把非 IFC 条目连续写入 `.gim-substation-source.pack` 并生成 `.gim-substation-source.index`（path → offset/size），IFC 仍逐条落盘，因为缓存校验、尺寸比对和 web-ifc 读取依赖独立路径。读取时 `read_cached_entry`/`batch_read_cached_files` 先按索引区间懒取，命中 pack 就跳过逐条路径解析与 reparse 检查。3.6 万条目的样本因此只需创建 13 个文件：写入阶段从约 40 s 的逐条 create/open 降到 0.5 s，暖校验也不再逐条 open。首次解析前的 hydration 只物化 CBM/DEV/FAM 语义文本（每批 2048 条），PHM/MOD/STL 由几何管线按需从 pack 读取；发布凭据把 pack 成员作为合法已缓存来源，缺失的 IFC 或未打包文件仍按原规则处理。
 
@@ -165,12 +170,14 @@ job 的 staging 只有全部条目通过路径、配额、大小和解码校验�
 | 域 | 当前契约 | 权威定义 | 校验与失效范围 |
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
-| 变电语义 | `gim-substation-parser-v26` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性、语义引用及索引发布凭据 |
-| DEV 几何 | `geometry-cache-v16-phm-solids` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
-| 设备 LOD 派生 | `geometry-cache-v16-phm-solids` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
-| Spatial snapshot | `substation-spatial-semantic-v3` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 精确大小写身份与洞口/填充宿主链 |
+| 变电语义 | `gim-substation-parser-v27` | [db.rs](../desktop/src-tauri/src/db.rs) | 原始属性、语义引用及索引发布凭据 |
+| DEV 几何 | `geometry-cache-v17-source-occurrences` | [db.rs](../desktop/src-tauri/src/db.rs)、[DEV 目录](../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest 和 GLB |
+| 设备 LOD 派生 | `geometry-cache-v17-source-occurrences` 组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../desktop/bridge/devLodCache.ts)、[db.rs](../desktop/src-tauri/src/db.rs) | 源 SHA、DEV 路径、几何版本与 LOD；`templates`/`catalog` 逐条原子提交，局部命中有效，不写整工程完整几何标记；合法语义和 IFC 缓存独立保留 |
+| Spatial snapshot | `substation-spatial-semantic-v4` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 精确大小写身份、洞口/填充宿主链及独立于显示回退的原始 IFC Name |
 | IFC Spatial parser contract | `gim-substation-parser-v24` | [快照服务](../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
-| 业务树派生快照 | `business-snapshot-v3` / `business-tree-v5` | [业务缓存](../desktop/src/services/businessTreeCache.ts)、[领域模型](../desktop/src/gim/businessTree.ts) | 源 SHA、原生返回的当前变电语义契约、Spatial 契约、IFC 模型清单摘要、完整标记、压缩/展开长度及内容 SHA；只重建业务域，不新增 SQLite 表 |
+| 工程来源快照 | `engineering-source-v5` | [来源契约](../desktop/src/gim/engineering/buildSources.ts)、[编码校验](../desktop/src/services/engineeringCacheCodec.ts)、[来源表编码](../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约及来源完整性；CBM/DEV/FAM、IFC 外露、occurrence 地址及空间容器；原值/字段形状去重表保留全部事实，避免重复 FAM 形成超长 JSON；独立原子文件，不改变几何或原始语义域 |
+| 工程实体快照 | `engineering-entity-v1` / `engineering-wholes-2` | [实体编码](../desktop/src/services/engineeringCacheCodec.ts)、[目录规则](../desktop/src/engineering/catalogRules.json) | 绑定工程来源快照内容摘要、实体 schema 和整体规则；类别、成员、待确认集合、关系及守恒校验；来源有效时只重建实体，不重解析 IFC 或重编几何 |
+| 工程导航投影 | `engineering-navigation-v2` / `engineering-composition-v4` | [两视图投影](../desktop/src/gim/engineering/navigation.ts)、[投影缓存](../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源内容摘要及完整实体快照指纹；Worker 构建/恢复两视图及检索全文，校验节点可达性、成员引用及覆盖；工程搜索展示系统/间隔上下文，内部名称只参与检索和来源追溯；投影变化不重编几何 |
 | Fragments | `fragments-cache-v6` | [db.rs](../desktop/src-tauri/src/db.rs)、[features](../desktop/src/config/features.ts) | 源/IFC 身份及实际安装的 fragments/web-ifc 版本 |
 | IFC 浏览 LOD 派生 | `bim-lod-v8` 与安装依赖组合；浏览器上下文固定使用 IndexedDB `gim-ifc-lod-v1` | [features](../desktop/src/config/features.ts)、[LOD 缓存](../desktop/bridge/ifcLodCache.ts) | 源 SHA、条目、浏览精度、单次解析及源属性策略；独立失效远景、索引、近景和属性 |
 | IFC 区域模板几何 | `near-templates-v1`，附加于浏览 LOD 键 | [features](../desktop/src/config/features.ts) | 模板几何 ID 与逐对象放置；仅更新近景产物，不重建有效远景与源属性 |
@@ -272,15 +279,17 @@ Scene 与 MOD/STL 图层是固定局部坐标容器：[staticContainer](../deskt
 
 DEV 池在活动、排队和未消费结果均为空且持续至少 30 秒时，沿现有 10 秒 watchdog 检查回收：保留最近完成任务的健康 Worker，没有记录时保留一个，其余释放。普通空闲缩容后的可执行请求按实际排队需求逐线程恢复，最高为原配置容量；暂停的自动细节和结果背压不触发增线程。主线程模板、实例与来源继续保留，重新计算可能因 Worker 解析缓存变冷而变慢。普通空闲缩容不降低暖模板消费容量，high/critical 仍收紧消费；已有 critical 恢复策略不变。`workerCount` 为实际线程数，`workerScheduling.targetWorkers` 为配置容量，另记录空闲时长和缩容次数。四站局部对照及边界见 [性能](performance.md)。
 
-变电默认业务导航由纯领域 `businessTree` 生成对象、区域、功能单元及归属证据，`businessOwnership` 处理安装材料，`businessBuildings` 处理建筑及系统归属，服务层编排冷构建与暖恢复，UI 只渲染投影。顶层为安装工程/建筑工程；原始来源树、既有功能系统视图和 IFC 空间关系仍可查看；分类不参与物理 occurrence 收集或几何剔除。三个选项卡的数据来源、排序、归属证据和边界分别见[业务树](impl/model-tree-business.md)、[来源](impl/model-tree-source.md)、[空间](impl/model-tree-spatial.md)；本节只维护其与打开生命周期、缓存和选择的交点。
+变电导航采用“工程组成 / 来源”两种独立投影。`gim/engineering` 适配完整来源图、原始字段及外露 IFC；`engineering` 只接收中立对象证据，形成整体、来源成员、关系及待确认集合，不读取 F2/F3/F4 标签。工程组成按建筑工程、安装工程组织：建筑物及楼层、构筑物和建筑设施，与主变、配电装置、无功补偿、站用电、二次及直流、电缆、接地系统分开；末端按目录类别检索整体，不增加设备/材料/构件大层级。来源声明的单元编号不要求含“间隔”，系统归属也不要求对象类别已确认；用途或归属缺证时分别保留待确认。来源保留 CBM 引用、DEV 实际装配及 IFC 文件—空间—外露对象。目录分类、实体身份、视图节点和几何表示分别维护。
 
-业务快照使用现有受源身份约束的文件读写桥，存于工程提取根的 `__derived__/business-tree-v5/<source-sha>.bin`，正文契约为 `business-snapshot-v3`，不修改 SQLite 表或其他缓存契约。首次构建复用已解析 CBM、后台语义发布的 FAM 原行以及 Spatial 对象，不重复解析 IFC 或触发 L2；完整 IFC 清单、FAM 就绪后才允许原子发布。快照只保存对象/区域/单元事实及原始来源、归属证据和 IFC 精确身份，不重复保存 CBM 图或几何。正文采用固定列、共享字符串表和 gzip，压缩和展开均限制为 64 MiB；解压逐块核对声明长度，列结构、字符串/对象引用或摘要校验失败都只使业务缓存未命中。
+物理实例由来源引用图生成 `SourceGeometryOccurrence`，身份为真实来源 occurrence，保留模板实际路径及列主序累计矩阵。DEV LOD、GLB 与 raw 回退共用此输入，同文件多处引用分别放置；集合绑定直接使用同一来源 ID，不通过旧 CBM 展示节点路径连接。几何编译和放置不接收工程组成分组；源矩阵无效时保留原文及位置待确认诊断。SQLite 保留原始引用事实，不再按 CBM 树生成另一套几何根。
 
-暖路径在原生源/语义缓存校验通过后，并行读取业务快照和核心语义索引，提前解压与反序列化。核心 CBM 恢复后才校验最终 IFC 模型清单，按完整 occurrence 路径绑定原节点，重建成员及来源查找映射；该过程没有分类或推断，预读不能提前安装投影。完整投影在只读工程会话内保持不变，迟到的 FAM/Spatial 发布不再重建业务树。缓存的模型身份、区分大小写的 GlobalId 和 ExpressId 允许 IFC 叶子在完整 Spatial 恢复前选择高亮及近景；几何和属性仍走原有按需服务。选择和异步提交核对工程代次及请求身份，工程切换释放 Worker、延时任务和 UI 引用。源 SHA 进入文件路径和快照头，旧会话写入不能覆盖新源产物。
+桌面数据库为 `gim_cache_schema_v1.db`，直接创建完整当前表结构。缓存仅接受当前域契约，不执行旧库迁移、旧 pack 读取或历史版本放行。
 
-Spatial 的对象级关联只使用来源模型内精确 GlobalId，保留大小写和合法的尾部 `$`；实际产品重复身份视为歧义，端口及洞口不参与产品身份竞争。`IfcRelFillsElement` 与 `IfcRelVoidsElement` 保留门窗→洞口→墙的宿主链。业务 IFC 叶子优先用 RegionalIndex 的逐对象范围定位，避免 Fragments 批次合并范围拉远相机；超过 30 m 且长宽比超过 10 的构件先显示中心 12 m 局部，并提供“定位整件”，高亮身份仍为完整对象。
+来源、实体与导航快照由会话所有的 Worker 构建或恢复，按本页缓存域分别验证、失效和原子发布。来源采用原值及字段形状去重表，保留 FAM 原行、重复字段、显式 occurrence 地址和 IFC 空间上下文。有效暖缓存恢复不重做分类或投影；当前契约损坏时只重建受影响域。旧格式直接失效，不迁移或读取旧业务树快照。显示不等待缓存落盘，来源不完整时可浏览部分结果，但不能发布完整凭据。
 
-业务聚合选择使用成员路径和 IFC 身份集合，不通过 DOM 反查几何。普通设备复用原选择路径，IFC 叶子高亮并定位后由既有近景调度管理 L1，精细 L2 继续显式请求。DEV 隔离支持多根成员，IFC 实例化近景高亮覆盖层按 ExpressId 分别持有，表示切换沿用选择提交队列和旧请求守卫。工程释放清理投影、延后任务、Worker 和 UI 投影引用，准备结果和选择提交均检查会话；只查看来源层级不额外启动业务补充。
+Spatial 的对象级关联只使用来源模型内精确 GlobalId，保留大小写和合法的尾部 `$`；实际产品重复身份视为歧义，端口及洞口不参与产品身份竞争。`IfcRelFillsElement` 与 `IfcRelVoidsElement` 保留门窗→洞口→墙的宿主链。工程整体的 IFC 表示优先用 RegionalIndex 的逐对象范围定位，避免 Fragments 批次合并范围拉远相机；超过 30 m 且长宽比超过 10 的构件先显示中心 12 m 局部，并提供“定位整件”，高亮身份仍为完整对象。
+
+整体选择取来源成员的表示并集，分组选择按整体 ID 去重；关联的独立端子箱和基础不自动并入本体。来源选择仍保留来源身份，显式读取详细属性和精细模型。快照更新后按当前身份/来源重新绑定成员；原整体拆成多个候选时撤销旧范围并提示选择。高亮提交同时核对工程会话、选择请求及快照，表示迟到或替换后按当前逻辑范围更新。工程释放清理 Worker、投影监听、虚拟列表及可见性基线引用。物理实例接口与集合渲染的剩余迁移和原生验收见[重构计划](impl/desktop-engineering-refactor.md)。
 
 模板等待队列使用可索引堆，入队、取消和提升为 O(log N)，普通任务按优先级及入队时刻排序，选中任务始终优先。LRU 的保护集合带成员修订号，缓存内容、预算与保护集合不变时跳过重复无效淘汰。Worker 计算槽和结果消费分别管理：未消费结果达到 64 MiB 或每 Worker 两条时，暂停派发后台编译；已启动任务可完成，单条结果上限 128 MiB。用户可暂停自动 L1 细化，L0 与范围目录继续运行，显式 L2 请求仍可提升。此阈值不是工程总内存硬上限，暖缓存读取、解析与 GPU 驻留分别记录。
 
@@ -290,7 +299,7 @@ Spatial 的对象级关联只使用来源模型内精确 GlobalId，保留大小
 
 DEV 的运行时包围盒索引只负责视锥候选筛选：目录范围到达及坐标锚点改变时更新，在查询时按需重建；候选才计算投影角点和屏幕占用。索引保留长构件跨视锥的相交语义，选中对象仍提高优先级，未知范围对象仍请求基础表示。调度对 occurrence 的遍历继续保留，不将此改动描述为完全消除了全目录扫描。索引不持久化，不改变缓存版本。
 
-功能系统树按需展开；单次展开的直接子行超过 500 项时使用逻辑轮廓虚拟窗口，窗口内展开的子树按稳定行键平铺，DOM 回收后保留展开状态。搜索逐层显示祖先并显露目标，方向键及 Home/End 在完整逻辑行集合中移动。空间树的同类叶分支使用独立虚拟窗口。两种窗口移除时清理滚动监听及待执行动画帧，工程切换不保留旧行身份。
+两视图共用固定行高的逻辑轮廓窗口，只生成可见行及预取行，展开状态按各自稳定行键保存。搜索逐层展开祖先并显露目标；内部件名称可命中其所属整体，来源中仍可查看该内部件。方向键及 Home/End 在完整逻辑行集合移动；仅状态变化不重建投影或抢回用户焦点。窗口移除时清理滚动监听和动画帧，工程切换释放所有旧行引用。
 
 DEV 模板任务在现有 perfTimings 内使用会话内 taskId 关联模板队列、派生缓存读取/校验、Worker 队列与内部阶段、反序列化、模板构建、实例放置及异步缓存写入。Worker 保留独立池会话与任务序号，多个 occurrence 共享模板任务并用 instanceKey 区分提交；缓存身份和持久化结构不包含这些诊断 ID。默认记录最多 128 种阶段聚合及 32 条慢阶段/失败样本，不能据默认样本反推全部任务顺序。GIM_PERF_TASK_TRACE=1 在工程性能会话开始时启用逐阶段 span，沿用最多 8192 条的 span 窗口，并报告淘汰数。Worker 上报的阶段位置是收到结果时按持续时间反推的近似位置，内部阶段与外层墙钟可能重叠，不能相加推算工程耗时；CPU 时间不可测时明确报告不可用。IFC 继续沿用读取/转换/源模型 profile，其与 DEV 的完整统一任务关联仍未完成。
 
@@ -321,10 +330,6 @@ IFC 连接构件增量表示是独立的会话资源：完整源在同一次 Ope
 连接对象的来源身份、DEV 装配归属和设备端点是不同证据。对象 IFCGUID 只在同一 IFC 来源内精确关联 CBM，重复引用保留候选。支持的端点元数据来自标准 IFC 连接/端口关系，或明确接线点 GUID 属性的实际值；后者通过 GL ConnectGuid、同 UUID DEV 和既有 occurrence 图核对，GL 不加入几何主链。小 GL 元数据按已知大小批读（单项 ≤1 MiB、总量 ≤4 MiB），等待上限 5 秒，不阻挡几何。`RegionalObject.connectionEndpoints` 为可选兼容元数据：undefined 是未收集/旧缓存，空数组才是当前支持规则扫描后没有引用。多实例保留候选，空间邻近不变成已确认电气连接；端点证据读取失败不使已可用几何失败。工程切换拒绝迟到结果并释放端点索引。
 
 不支持的产品类型、来源能力、预算超限或几何提取失败回退到完整源求值。子集构建在同一源 Worker 内一旦失败即不再重试，后续区域请求直接使用完整源；单个对象在子集内求值异常时，在同一请求内回退整源并重试该对象，不静默丢弃。回退时累计应用已由子集区域识别的小孔关系，不能遗漏这些孔。相机变化触发的区域更新在固定防抖窗口结束后执行，该等待不计入区域墙钟。关系首次修改扫描 STEP 并保存字节范围，后续只修改新增范围；需要更新完整源策略时仍关闭并重新 OpenModel。子集与完整源回退共享现有串行调度和工程会话，切换源、关闭或空闲释放时一起销毁；缓存几何含义与版本不变。
-
-功能树将同一来源语义路径上的系统前缀与间隔父组显示为一行，保留 1PT、1EM PT、1S 等字母数字间隔名。主变系统在前，电压配电系统按电压降序，控制及直流/二次系统独立归组，接地归属优先于名称中的保护词；间隔按类别和自然数字顺序排列。缺少间隔证据的对象保留在现有归属，不制造间隔。独立设备的 PARTINDEX/DEV_SUBDEVICE 也遵循同一归属下唯一配对的别名规则，保留全部来源路径和冲突证据，不合并真实重复实例。业务设备计数来自分类投影，物理几何实例数继续来自渲染目录，两者分别显示。
-
-编号主变的功能组先按主变号排序，同号本体在中性点设备之前，“备用”不改变编号优先级。状态栏称“设备节点”以说明其包含装配内部独立单元；几何实例统计整机装配根，一个根可以展示多个设备节点。IFC 冷转换/暖恢复与 DEV 冷编译/暖恢复分别按实际缓存消费记录，不从工程语义命中推断几何命中。
 
 Worker 协议拒绝未知或忙时的任务并返回错误，清理异常不保留 running 状态。单 Worker 崩溃仅失败当前任务并有限替换，健康 Worker 继续工作；替换耗尽时错误明确传至请求方。目录任务失败保留未知范围，不释放整个设备域。仍被需要的取消请求重新驱动；就绪诊断记录待完成实例、等待原因及有限样本。IFC 区域运行时替换会释放旧实例，退出近景或释放时恢复其隐藏的远景对象。
 

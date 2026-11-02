@@ -1,7 +1,7 @@
 /**
  * 诊断摘要工具：将 ProjectCacheDiagnostic 转为人类可读的 Markdown 风格文本。
  *
- * 位于 shared/ 层，供 app/ 与 ui/ 层共同使用，避免 ui → services 的直接依赖。
+ * 这里只格式化已有数据；持久化读取与诊断编排由 services 负责。
  *
  * 用于：
  * - Ctrl+Shift+D 控制台输出

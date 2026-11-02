@@ -1,0 +1,192 @@
+import type { EngineeringEntity, EngineeringSnapshot, EvidenceValue } from './types.js';
+import type { CompositionAssignment, CompositionGroup, CompositionDeclaration } from './composition.js';
+import { mainNumber } from './classify.js';
+
+/** Format-neutral declarations describe project context, never entity identity. */
+export interface CompositionContextEvidence {
+  entityId: string;
+  declarations: Array<{ names: EvidenceValue[] }>;
+  spaces: Array<{ building: EvidenceValue; storeys: EvidenceValue[] }>;
+  hostEntityIds: string[];
+}
+type Purpose = 'main' | 'distribution' | 'reactive' | 'auxiliary' | 'secondary' | 'cables' | 'ground' | 'lighting' | 'hvac' | 'water' | 'fire';
+interface DeclaredContext { purpose: Purpose; voltage?: number; unit?: string; evidence: string[] }
+const levels = new Set([0.4, 6, 10, 20, 35, 66, 110, 220, 330, 500, 750, 1000]);
+const normalize = (name: string) => name.normalize('NFKC').trim().replace(/\s+/g, ' ');
+const keyOf = (name: string) => normalize(name).replace(/\s/g, '').toLowerCase();
+const valid = (name: string) => !!normalize(name) && !/^(?:-|--|其他|其它|无|未命名|未定义|未指定|默认|NULL\d*|None|Undefined|IFC\w*|Default(?:[ _-]*(?:Building|Storey|Level|Project|Site))?|Building|Storey|Project|Site|建筑|站区)(?:\s*#?\s*\d*)?$/i.test(normalize(name)) && !name.startsWith('&');
+const validBuilding = (name: string) => valid(name)
+  && !/^(?:(?:Building|建筑)\s*s|新建(?:模(?:型)?|筑)\s*\d*|模型\s*\d*)$/i.test(normalize(name))
+  && !/总平面|平面图|立面图|剖面图/.test(name);
+const civil: CompositionGroup = { key: 'civil', title: '建筑工程', kind: 'discipline', order: 0 };
+const installation: CompositionGroup = { key: 'installation', title: '安装工程', kind: 'discipline', order: 1 };
+const systems: Record<Exclude<Purpose, 'distribution'>, { title: string; order: number; civil?: boolean }> = {
+  main: { title: '主变压器系统', order: 10 }, reactive: { title: '无功补偿系统', order: 30 },
+  auxiliary: { title: '站用电系统', order: 40 }, secondary: { title: '二次及直流系统', order: 50 },
+  cables: { title: '电缆', order: 60 }, ground: { title: '接地系统', order: 70 },
+  lighting: { title: '照明', order: 50, civil: true }, hvac: { title: '采暖、通风、空调', order: 60, civil: true },
+  water: { title: '给排水', order: 70, civil: true }, fire: { title: '消防', order: 80, civil: true },
+};
+function purpose(name: string): Purpose | null {
+  const text = keyOf(name);
+  if (/^(?:\d+(?:\.\d+)?(?:kv|千伏))?(?:主变(?:压器)?|变压器)系统\d*$/.test(text)) return 'main';
+  if (/无功补偿|无功系统|静止无功|并联电容器系统/.test(text)) return 'reactive';
+  if (/二次系统|直流系统|直流电源|直流配电|蓄电池|充电柜|继电保护系统|通信系统|控制保护系统|监控系统/.test(text)) return 'secondary';
+  if (/站用(?:电|交流|变压器)系统|所用电系统/.test(text)) return 'auxiliary';
+  if (/接地网|全站接地|防雷接地|^接地系统/.test(text)) return 'ground';
+  if (/电缆系统|电缆工程/.test(text)) return 'cables';
+  if (/消防|火灾报警|灭火/.test(text)) return 'fire';
+  if (/采暖|暖通|通风|空调|风管/.test(text)) return 'hvac';
+  if (/给排水|给水|排水|供水|雨水|污水|生活水/.test(text)) return 'water';
+  if (/照明|路灯/.test(text)) return 'lighting';
+  return null;
+}
+function voltage(name: string): number | undefined {
+  // A range describes a class of systems, not one operating voltage.
+  if (/[<>≤≥]/.test(normalize(name)) || /\d\s*(?:[-~～—]|至|到)\s*\d+(?:\.\d+)?\s*(?:kV|千伏)/i.test(name)) return undefined;
+  const matches = [...name.matchAll(/(\d+(?:\.\d+)?)\s*(?:kV|千伏)/gi)].map(m => Number(m[1])).filter(n => levels.has(n));
+  const unique = [...new Set(matches)]; return unique.length === 1 ? unique[0] : undefined;
+}
+function system(context: DeclaredContext): CompositionGroup {
+  if (context.purpose === 'distribution') return { key: `distribution:${context.voltage}`, title: `${context.voltage}千伏配电装置`, kind: 'system', order: 20 - (context.voltage ?? 0) / 10000 };
+  const definition = systems[context.purpose]; return { key: context.purpose, title: definition.title, kind: 'system', order: definition.order };
+}
+function declared(input: CompositionContextEvidence | undefined): DeclaredContext[] {
+  const result: DeclaredContext[] = [];
+  for (const declaration of input?.declarations ?? []) {
+    const names = declaration.names.filter(n => valid(n.value));
+    let latest: DeclaredContext | undefined;
+    for (let i = 0; i < names.length; i++) {
+      const item = names[i], own = purpose(item.value), kv = voltage(item.value);
+      if (own) latest = { purpose: own, evidence: [item.evidenceId] };
+      else if (kv !== undefined && /配电装置|系统|开关场|区域/.test(item.value)) latest = { purpose: 'distribution', voltage: kv, evidence: [item.evidenceId] };
+      else if (kv !== undefined && /间隔|母线/.test(item.value) && (!latest || latest.purpose === 'distribution')) {
+        // An explicitly named 110kV bay is sufficient project evidence even
+        // when its preceding system label is only a voltage interval. This is
+        // never evaluated against equipment names or rated-voltage fields.
+        if (latest?.voltage !== undefined && latest.voltage !== kv) result.push(latest);
+        latest = { purpose: 'distribution', voltage: kv, unit: normalize(item.value), evidence: [item.evidenceId] };
+      }
+      else if (latest && !latest.unit && !/^(?:电气系统|交流电气系统|建筑系统|建筑物系统|建筑工程)$/.test(item.value)) {
+        // A named unit follows its explicitly declared system in the same
+        // semantic path. It need not contain the word 间隔 (e.g. 36S).
+        latest.unit = normalize(item.value); latest.evidence.push(item.evidenceId);
+      }
+    }
+    if (latest) result.push(latest);
+  }
+  // Context declarations arrive from general to specific. Repeated inherited
+  // copies of the same declaration do not create a second project unit.
+  return result;
+}
+function installationPath(context: DeclaredContext): CompositionGroup[] {
+  const path = [installation, system(context)];
+  if (context.unit) {
+    const number = context.purpose === 'main' ? mainNumber(context.unit) : '';
+    path.push(number ? { key: `main:${number}`, title: `${number}号主变`, kind: 'unit' }
+      : { key: `unit:${keyOf(context.unit)}`, title: context.purpose === 'distribution' && !/间隔|母线|分段|系统|区域/.test(context.unit) ? `${context.unit}间隔` : context.unit, kind: 'unit' });
+  }
+  return path;
+}
+function facility(context: DeclaredContext): CompositionGroup[] { return [civil, system(context)]; }
+function buildingPaths(input: CompositionContextEvidence | undefined): CompositionGroup[][] {
+  const candidates = input?.spaces ?? [];
+  const names = candidates.filter(space => validBuilding(space.building.value) && !purpose(space.building.value) && !/配电装置|开关场|构支架|构架|电缆沟/.test(space.building.value));
+  if (names.length) return names.map(space => [civil,
+    { key: `building:${keyOf(space.building.value)}`, title: normalize(space.building.value), kind: 'building', order: 0 },
+    ...space.storeys.filter(item => valid(item.value) || /^(?:Storey|Level)\s*\d+$/i.test(item.value)).map(item => {
+      const title = normalize(item.value).replace(/^(?:Storey|Level)\s*#?\s*(-?\d+)$/i, '$1层');
+      return { key: `floor:${keyOf(title)}`, title, kind: 'storey' as const };
+    })]);
+  const labels = [...(input?.declarations ?? [])].reverse().flatMap(d => d.names.filter(n => validBuilding(n.value) && /楼|栋|房|室|车间/.test(n.value) && !/系统|区域/.test(n.value)));
+  const first = labels[0];
+  return first ? [[civil, { key: `building:${keyOf(first.value)}`, title: first.value, kind: 'building', order: 0 }]] : [];
+}
+
+/** The construction/operations template organizes existing wholes. Categories,
+ * memberships and physical roots are untouched by business mapping. */
+export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evidence: readonly CompositionContextEvidence[]): CompositionAssignment[] {
+  const facts = new Map(evidence.map(item => [item.entityId, item])), entities = new Map(snapshot.entities.map(entity => [entity.id, entity]));
+  const cache = new Map<string, CompositionAssignment>(), visiting = new Set<string>();
+  function assign(entity: EngineeringEntity): CompositionAssignment {
+    const found = cache.get(entity.id); if (found) return found;
+    if (visiting.has(entity.id)) return { entityId: entity.id, paths: [], evidence: ['view-host-cycle'] };
+    visiting.add(entity.id);
+    const input = facts.get(entity.id);
+    const uniqueContexts = new Map(declared(input).map(context => [JSON.stringify([context.purpose, context.voltage, context.unit]), context]));
+    const contexts = [...uniqueContexts].sort(([a],[b])=>a.localeCompare(b)).map(([,context])=>context);
+    const purposes = new Set(contexts.map(context=>`${context.purpose}:${context.voltage ?? ''}`));
+    const nearest = purposes.size === 1 ? contexts[0] : undefined;
+    let chosen: DeclaredContext | undefined = nearest;
+    const category = entity.category;
+    const ownPurpose = purpose(entity.name) ?? (category === 'E19' && /风机|风口|暖气|制冷/.test(entity.name) ? 'hvac' : null);
+    const ownFacility = ownPurpose && systems[ownPurpose as Exclude<Purpose, 'distribution'>]?.civil ? ownPurpose : null;
+    const hostIds = [...new Set(input?.hostEntityIds ?? [])].filter(id => id !== entity.id && entities.has(id));
+    const host = hostIds.length === 1 ? assign(entities.get(hostIds[0])!) : undefined;
+    const hostPaths = host?.paths.filter(path => path[0]?.key === 'installation') ?? [];
+    const fixed: Partial<Record<string, Purpose>> = { E01: 'main', E02: 'reactive', E03: 'auxiliary', E10: 'reactive', E11: 'reactive', E12: 'reactive', 'E16.protection': 'secondary', M05: 'cables', M06: 'ground', M07: 'cables', 'C-D1': 'lighting', 'C-D2': 'fire', 'C-C2': 'water' };
+    if (fixed[category]) chosen = { purpose: fixed[category]!, evidence: [`catalog-role:${category}`] };
+    if (ownFacility) chosen = { purpose: ownFacility, evidence: [`whole-name:${entity.id}`] };
+    const ownSecondary = ownPurpose === 'secondary' && category.startsWith('E16') && category !== 'E16.terminal_box';
+    if (ownSecondary) chosen = { purpose: 'secondary', evidence: [`whole-name:${entity.id}`] };
+    let paths: CompositionGroup[][] = [], basis = [...(chosen?.evidence ?? [])];
+    const isCivil = category.startsWith('C') || !!(chosen && systems[chosen.purpose as Exclude<Purpose, 'distribution'>]?.civil);
+    if (isCivil) {
+      if (chosen && systems[chosen.purpose as Exclude<Purpose, 'distribution'>]?.civil) paths = [facility(chosen)];
+      else if (category === 'C-C1' || /电缆沟/.test(entity.name)) paths = [[civil, { key: 'cable-trenches', title: '电缆沟', kind: 'facility', order: 30 }]];
+      else if (['C-C4', 'C-C5'].includes(category) || /围墙|围栏|道路|大门/.test(entity.name)) paths = [[civil, { key: 'site-works', title: '站区性建筑', kind: 'facility', order: 40 }]];
+      else {
+        paths = buildingPaths(input);
+        if (!paths.length) {
+          const structure = category.startsWith('C-B') || /支架|基础|构架|桁架/.test(entity.name) || /支架|基础|构架/.test(nearest?.unit ?? '');
+          const related = structure && nearest && ['main', 'distribution', 'reactive', 'auxiliary'].includes(nearest.purpose) ? nearest : undefined;
+          const hostGroup = hostPaths.length === 1 ? hostPaths[0][1] : undefined;
+          const hostSystem = hostGroup?.kind === 'system' && hostGroup.key !== 'installation-unassigned' ? hostGroup : undefined;
+          const group = related ? system(related) : hostSystem;
+          if (group) paths = [[civil, { key: `structure:${group.key}`, title: `${group.title}构支架、独立基础`, kind: 'structure', order: 20 }]];
+          else paths = [[civil, { key: 'civil-unassigned', title: category.startsWith('C-A') ? '建筑物归属待确认' : '构筑物及附属设施归属待确认', kind: 'structure', order: 90 }]];
+        }
+      }
+    } else {
+      // Clear material/system roles stand on their own. An independently
+      // identified cabinet may share its actual host's project context.
+      const fixedPurpose = fixed[category];
+      if (fixedPurpose || ownSecondary) paths = [installationPath(chosen!)];
+      else if (hostPaths.length === 1 && !ownFacility) { paths = hostPaths; basis.push(...host!.evidence); }
+      else if (chosen) paths = contexts.map(installationPath);
+      else {
+        if (category.startsWith('E16')) paths = [installationPath({ purpose: 'secondary', evidence: [] })];
+        else if (category.startsWith('E') || category.startsWith('M')) paths = [[installation, { key: 'installation-unassigned', title: '系统归属待确认', kind: 'system', order: 90 }]];
+        else if (buildingPaths(input).length) paths = buildingPaths(input);
+      }
+    }
+    // Preserve explicit unit context under fixed-purpose systems (main bank,
+    // capacitor bank, station auxiliary unit), without manufacturing identity.
+    if (fixed[category] && chosen && !isCivil && nearest?.purpose === chosen.purpose && nearest.unit) paths = [installationPath({ ...chosen, unit: nearest.unit })];
+    if (category === 'E01') {
+      const number = mainNumber(entity.name);
+      if (number) paths = [[installation, system({purpose:'main',evidence:[]}), { key: `main:${number}`, title: `${number}号主变`, kind: 'unit' }]];
+    }
+    if (contexts.length > 1) basis.push('multiple-declared-business-contexts');
+    for (const space of input?.spaces ?? []) basis.push(space.building.evidenceId,...space.storeys.map(floor=>floor.evidenceId));
+    const unique = new Map(paths.map(path => [path.map(part => part.key).join('/'), path]));
+    const result = { entityId: entity.id, paths: [...unique.values()], evidence: [...new Set(basis)] };
+    cache.set(entity.id, result); visiting.delete(entity.id); return result;
+  }
+  return snapshot.entities.map(assign);
+}
+
+/** A declared project unit may have no reliably associated products yet. It is
+ * still visible as a source-backed group, with zero confirmed whole members. */
+export function declaredEngineeringComposition(inputs: readonly { contextId: string; names: EvidenceValue[] }[]): CompositionDeclaration[] {
+  const result: CompositionDeclaration[] = [];
+  for (const input of inputs) {
+    const evidence: CompositionContextEvidence = { entityId: '', declarations: [{ names: input.names }], spaces: [], hostEntityIds: [] };
+    const contexts = declared(evidence);
+    const civilBuilding = input.names.some(name => /^(?:建构筑物|建筑物|建筑)(?:系统|工程)?$/.test(normalize(name.value)));
+    const buildings = civilBuilding ? buildingPaths(evidence) : [];
+    for (const path of buildings.length ? buildings : contexts.map(context => systems[context.purpose as Exclude<Purpose, 'distribution'>]?.civil ? facility(context) : installationPath(context)))
+      result.push({ path, evidence: input.names.map(name=>name.evidenceId), sourceContextIds: [input.contextId] });
+  }
+  return result;
+}

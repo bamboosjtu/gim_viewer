@@ -8,8 +8,9 @@ vi.mock('@desktop/devLodCache.js',async(importActual)=>({...await importActual<a
 vi.mock('../glbCacheService.js',()=>({parseDevGlbAsset:mock.parse}));
 vi.mock('../devGeometryWorkerClient.js',()=>({createDevGeometryPreprocessor:()=>({workerCount:mock.workerCount,activePaths:[],compile:mock.compile,cancel:mock.cancel,bounds:mock.bounds,
   acknowledge:vi.fn(),promote:vi.fn(),cancelQueued:vi.fn()})}));
-vi.mock('../modAutoLoadService.js',async(importActual)=>({...await importActual<any>(),collectCbmDeviceInstances:()=>[
-  {path:'root/a',devPath:'shared.dev',name:'a',transformMatrix:''},{path:'root/b',devPath:'shared.dev',name:'b',transformMatrix:''}]}));
+vi.mock('../sourceGeometryService.js',()=>({getSourceGeometryOccurrences:async()=>['a','b'].map(name=>({
+  id:`root/${name}`,sourceId:`root/${name}`,sourceContextId:`root/${name}`,devPath:'DEV/shared.dev',name,placementMatrix:new THREE.Matrix4().toArray()}))}));
+
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();vi.resetAllMocks();});
 it('initializes workers and base rows before optional warm preparation settles, and discards a reply after release',async()=>{
   let finish!:(value:any)=>void;
@@ -18,6 +19,7 @@ it('initializes workers and base rows before optional warm preparation settles, 
   state.substationEntrySizes.set('DEV/shared.dev',3);state.projectSourceToViewerMatrix=new THREE.Matrix4();
   const ctx:any={world:{scene:{three:new THREE.Scene()},camera:{three:new THREE.PerspectiveCamera(),controls:new THREE.EventDispatcher()}}};
   const runtime=new DevLodRuntime(state,ctx,session,()=>{}),start=runtime.start();
+  await Promise.resolve(); await Promise.resolve();
   expect((runtime as any).worker).toBeDefined();expect(runtime.diagnostics.occurrences).toBe(2);
   runtime.release();finish(new Map());await start;
   expect(state.loadedXmlModGroups.size).toBe(0);expect(mock.cancel).toHaveBeenCalledOnce();

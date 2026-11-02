@@ -5,7 +5,7 @@ import { runProgressiveDevGlbPipeline } from '../progressiveGeometryService.js';
 import { AppState } from '../../app/state.js';
 import type { ProgressiveGeometryDependencies } from '../progressiveGeometryService.js';
 import type { GeometryCacheManifestEntry } from '@desktop/database.js';
-import type { CbmNode } from '../../gim/types.js';
+import type { SourceGeometryOccurrence } from '../../gim/engineering/geometryOccurrences.js';
 import { isTauri } from '@desktop/runtime.js';
 import { SubstationBackgroundCoordinator } from '../substationBackgroundRuntime.js';
 
@@ -21,46 +21,12 @@ vi.mock('@desktop/runtime.js', () => ({
  *  ├─ devA 实例 2（同 devPath，平移 z=+2000）—— 验证同 DEV 只序列化一次
  *  └─ devB（devPath=b.dev）—— 验证序列化返回 null 时跳过
  */
-function makeSeed(path: string, devPath: string, z: number): CbmNode {
-  return {
-    path,
-    name: path,
-    entityName: 'F4System',
-    children: [],
-    famPath: '',
-    devPath,
-    ifcFile: '',
-    ifcGuid: '',
-    classifyName: '',
-    transformMatrix: `1,0,0,0,0,1,0,0,0,0,1,0,0,0,${z},1`,
-    systemNames: [],
-    devSymbolName: '',
-    devType: '',
-    devExpanded: false,
-  };
+function makeSeed(id: string, devPath: string, z: number): SourceGeometryOccurrence {
+  return { id, sourceId:id, sourceContextId:id, name:id, devPath:`DEV/${devPath}`,
+    placementMatrix:new THREE.Matrix4().makeTranslation(0,0,z).toArray() };
 }
-
-function makeTree(): CbmNode {
-  const a1 = makeSeed('CBM/a1.cbm', 'a.dev', 1000);
-  const a2 = makeSeed('CBM/a2.cbm', 'a.dev', 2000);
-  const b = makeSeed('CBM/b.cbm', 'b.dev', 3000);
-  return {
-    path: 'CBM/project.cbm',
-    name: 'root',
-    entityName: 'F1System',
-    children: [a1, a2, b],
-    famPath: '',
-    devPath: '',
-    ifcFile: '',
-    ifcGuid: '',
-    classifyName: '',
-    transformMatrix: '',
-    systemNames: [],
-    devSymbolName: '',
-    devType: '',
-    devExpanded: false,
-  };
-}
+function makeCatalog() { return {diagnostics:[], occurrences:[
+  makeSeed('physical:a1','a.dev',1000),makeSeed('physical:a2','a.dev',2000),makeSeed('physical:b','b.dev',3000)]}; }
 
 function makeGroup(): THREE.Group {
   const group = new THREE.Group();
@@ -106,7 +72,7 @@ function makeDeps(opts: { serializeNullFor?: string[] } = {}, rec?: DepsRecorder
 function makeState(opts: { projectId?: number } = {}): AppState {
   const state = new AppState();
   state.currentFiles = new Map();
-  state.currentCbmTree = makeTree();
+  state.engineeringGeometryCatalog = makeCatalog();
   state.currentProjectId = opts.projectId ?? null;
   state.currentSourceSha256 = 'sha-test';
   state.geometryLoadToken = 1; // 与测试传入的 token 对齐（真实流程由调用方 ++ 后传入）
@@ -119,7 +85,7 @@ describe('runProgressiveDevGlbPipeline', () => {
     const allPaths=['normal','empty','unsupported','invalid','transient'];
     for (const failWrite of [true,false]) {
       const state=makeState({projectId:7});
-      state.currentCbmTree!.children=allPaths.map((p,i)=>makeSeed(`CBM/${p}.cbm`,`${p}.dev`,i*1000));
+      state.engineeringGeometryCatalog!.occurrences=allPaths.map((p,i)=>makeSeed(`physical:${p}`,`${p}.dev`,i*1000));
       const rec:DepsRecorder={serializeCalls:[],writeCalls:[],versionWrites:0,loadCalls:[],manifestEntries:[]};
       const deps=makeDeps({},rec);
       deps.serializeDevToGlbDetailed=async path=>{
@@ -223,8 +189,8 @@ describe('runProgressiveDevGlbPipeline', () => {
     expect(result.devGlbProfile?.templateParseCount).toBe(2);
     expect(result.devGlbProfile?.sharedPlacementCount).toBe(3);
     // instanceKey 注册（键格式 dev:{devPath}#{seed.path}）
-    expect(state.loadedXmlModGroups.has('dev:DEV/a.dev#CBM/a1.cbm')).toBe(true);
-    expect(state.loadedXmlModGroups.has('dev:DEV/a.dev#CBM/a2.cbm')).toBe(true);
+    expect(state.loadedXmlModGroups.has('dev:DEV/a.dev#physical:a1')).toBe(true);
+    expect(state.loadedXmlModGroups.has('dev:DEV/a.dev#physical:a2')).toBe(true);
     // 进度回调：compiling 若干次 + done 一次
     const phases = progress.mock.calls.map((c) => c[0].phase);
     expect(phases[phases.length - 1]).toBe('done');
@@ -244,7 +210,7 @@ describe('runProgressiveDevGlbPipeline', () => {
     );
     expect(result.compiledDevs).toBe(2);
     expect(result.renderedInstances).toBe(2); // 仅 a1/a2
-    expect(state.loadedXmlModGroups.has('DEV/b.dev#CBM/b.cbm')).toBe(false);
+    expect(state.loadedXmlModGroups.has('DEV/b.dev#physical:b')).toBe(false);
   });
 
   it('无 projectId（浏览器模式）跳过落盘与版本文件，仍渐进渲染', async () => {
@@ -455,10 +421,10 @@ describe('runProgressiveDevGlbPipeline', () => {
     vi.mocked(isTauri).mockReturnValue(true);
     const rec: DepsRecorder = { serializeCalls: [], writeCalls: [], versionWrites: 0, loadCalls: [], manifestEntries: [] };
     const state = makeState({ projectId: 11 });
-    const tree = makeTree();
-    tree.children[0].devPath = 'dev/A.DEV';
-    tree.children[1].devPath = 'DEV/a.dev';
-    state.currentCbmTree = tree;
+    const catalog = makeCatalog();
+    catalog.occurrences[0].devPath = 'dev/A.DEV';
+    catalog.occurrences[1].devPath = 'DEV/a.dev';
+    state.engineeringGeometryCatalog = catalog;
     const result = await runProgressiveDevGlbPipeline(state, new THREE.Scene(), vi.fn(), { token: 1 }, makeDeps({}, rec));
 
     expect(result.failedDevs).toEqual([]);

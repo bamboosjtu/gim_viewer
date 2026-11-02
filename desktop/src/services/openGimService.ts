@@ -32,6 +32,7 @@ import { extractGimFile, getProjectTypeName } from '../gim/gimExtractor.js';
 import { detectGimProjectType } from '../gim/projectType.js';
 import { openPowerlineProject } from './powerlineRuntime.js';
 import { openSubstationProject, onGimExtracted, loadAllIfcFiles } from './substationRuntime.js';
+import { chooseBrowserGimFile } from './browserGimChooser.js';
 
 export { onGimExtracted, loadAllIfcFiles };
 
@@ -464,57 +465,32 @@ async function openBrowserGim(
   state: AppState,
   showMessage: (text: string) => void,
 ): Promise<void> {
+  const chooserGeneration = state.projectGeneration;
+  const file = await chooseBrowserGimFile(gimFileInput);
+  if (!file || state.projectGeneration !== chooserGeneration) return;
   state.invalidatePendingLoads();
   const requestGeneration = state.projectGeneration;
   perfReset({ generation: requestGeneration, projectId: null, sourceSha256: null });
   scheduleBaselineBeforeOpen(state, requestGeneration);
 
-  return new Promise<void>((resolve) => {
-    const handler = async () => {
-      gimFileInput.removeEventListener('change', handler);
-      const files = Array.from(gimFileInput.files || []);
-      if (files.length === 0) {
-        resolve();
-        return;
-      }
-      if (state.projectGeneration !== requestGeneration) {
-        resolve();
-        return;
-      }
-      btnLoadGim.disabled = true;
-      try {
-        const file = files[0];
-        const bytes = await file.arrayBuffer();
-        if (state.projectGeneration !== requestGeneration) return;
-        const source = inspectGimSourceBuffer(file.name, bytes, {
-          size: file.size,
-          modifiedMs: file.lastModified,
-          sha256: null,
-        });
-        await openInspectedSource({
-          state,
-          showMessage,
-          source,
-          projectId: null,
-          sourceSha256: null,
-          projectName: resolveProjectName(source.projectName, source.projectId, file.name),
-          projectTypeName: getProjectTypeName(source.magic),
-          requestGeneration,
-          sourceBuffer: bytes,
-        });
-      } catch (error) {
-        console.error(error);
-        showLoading(`GIM 解析失败: ${error instanceof Error ? error.message : String(error)}`);
-        setTimeout(hideLoading, 3000);
-      } finally {
-        gimFileInput.value = '';
-        btnLoadGim.disabled = false;
-        resolve();
-      }
-    };
-    gimFileInput.addEventListener('change', handler);
-    gimFileInput.click();
-  });
+  btnLoadGim.disabled = true;
+  try {
+    const bytes = await file.arrayBuffer();
+    if (state.projectGeneration !== requestGeneration) return;
+    const source = inspectGimSourceBuffer(file.name, bytes, { size: file.size, modifiedMs: file.lastModified, sha256: null });
+    await openInspectedSource({
+      state, showMessage, source, projectId: null, sourceSha256: null,
+      projectName: resolveProjectName(source.projectName, source.projectId, file.name),
+      projectTypeName: getProjectTypeName(source.magic), requestGeneration, sourceBuffer: bytes,
+    });
+  } catch (error) {
+    console.error(error);
+    showLoading(`GIM 解析失败: ${error instanceof Error ? error.message : String(error)}`);
+    setTimeout(hideLoading, 3000);
+  } finally {
+    gimFileInput.value = '';
+    btnLoadGim.disabled = false;
+  }
 }
 
 /**

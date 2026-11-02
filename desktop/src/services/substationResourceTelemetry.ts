@@ -58,7 +58,7 @@ interface SceneResourceCounts {
 
 const DEV_TEMPLATE_POOL_KEY = '__gimDevGlbTemplatePool';
 const DEV_TEMPLATE_PLACEMENT_KEY = '__gimDevGlbTemplatePlacement';
-const DEV_LEGACY_PLACEMENT_KEY = '__gimDevGlbLegacyPlacement';
+const DEV_EXCLUSIVE_PLACEMENT_KEY = '__gimDevGlbExclusivePlacement';
 
 function countOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
@@ -210,16 +210,16 @@ function collectTemplateCounts(state: AppState): {
 
 function collectPlacementCounts(state: AppState): {
   sharedPlacementCount: number;
-  legacyPlacementCount: number;
+  exclusivePlacementCount: number;
 } {
   let sharedPlacementCount = 0;
-  let legacyPlacementCount = 0;
+  let exclusivePlacementCount = 0;
   for (const group of state.loadedXmlModGroups.values()) {
     const userData = group.userData as Record<string, unknown> | undefined;
     if (userData?.[DEV_TEMPLATE_PLACEMENT_KEY] === true) sharedPlacementCount += 1;
-    if (userData?.[DEV_LEGACY_PLACEMENT_KEY] === true) legacyPlacementCount += 1;
+    if (userData?.[DEV_EXCLUSIVE_PLACEMENT_KEY] === true) exclusivePlacementCount += 1;
   }
-  return { sharedPlacementCount, legacyPlacementCount };
+  return { sharedPlacementCount, exclusivePlacementCount };
 }
 
 /** Synchronous ownership counts; safe to call before/after cleanup. */
@@ -266,7 +266,7 @@ export function collectSubstationRuntimeResourceSnapshot(
     templateCount: template.templateCount,
     templateParseCount: template.templateParseCount,
     sharedPlacementCount: placements.sharedPlacementCount,
-    legacyPlacementCount: placements.legacyPlacementCount,
+    exclusivePlacementCount: placements.exclusivePlacementCount,
     sharedGeometryCount: template.sharedGeometryCount,
     sharedMaterialCount: template.sharedMaterialCount,
     sharedTextureCount: template.sharedTextureCount,

@@ -210,7 +210,7 @@ export async function cleanupBeforeOpenNewProject(
       const {
         disposeDevGlbTemplatePool,
         DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY,
-        DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY,
+        DEV_GLB_EXCLUSIVE_PLACEMENT_USER_DATA_KEY,
       } = await import('./devGlbTemplateRuntime.js');
       if (!isCurrentCleanup()) return false;
 
@@ -222,13 +222,13 @@ export async function cleanupBeforeOpenNewProject(
         disposeDevGlbTemplatePool(state.modRootGroup);
         for (const child of state.modRootGroup.children) {
           if (child.userData?.[DEV_GLB_TEMPLATE_PLACEMENT_USER_DATA_KEY] === true) continue;
-          const legacyGlb = child.userData?.[DEV_GLB_LEGACY_PLACEMENT_USER_DATA_KEY] === true;
+          const exclusiveGlb = child.userData?.[DEV_GLB_EXCLUSIVE_PLACEMENT_USER_DATA_KEY] === true;
           // Legacy XML MOD groups have instance-owned geometry.  Keep the
           // previous cleanup semantics for those groups only.
           child.traverse((obj) => {
             const mesh = obj as THREE.Mesh;
             mesh.geometry?.dispose?.();
-            if (legacyGlb) {
+            if (exclusiveGlb) {
               const materials = Array.isArray(mesh.material)
                 ? mesh.material
                 : mesh.material ? [mesh.material] : [];

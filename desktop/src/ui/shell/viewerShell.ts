@@ -4,6 +4,8 @@ import { isTauri } from '@desktop/runtime.js';
 import { hideLoading, showLoading } from '../../services/gimOpenCore.js';
 import { escapeHtml } from '../../shared/html.js';
 import { setSelectionStatus } from './statusBar.js';
+import { readRecentProjects, type ProjectCacheSummary } from '../../services/projectCacheService.js';
+import { setupSelectionToolbar } from '../selectionToolbar.js';
 
 const AUTO_OPEN_LAST_KEY = 'gim-auto-open-last';
 const AUTO_SHOW_PROPS_KEY = 'gim-auto-show-props';
@@ -16,8 +18,6 @@ export function shouldAutoShowProps(): boolean {
   try { return localStorage.getItem(AUTO_SHOW_PROPS_KEY) !== '0'; } catch { return true; }
 }
 
-interface RecentProject { id: number; name: string; path: string; projectType: string | null; parserVersion: string | null; updatedAt: number; }
-
 function formatRelativeTime(ms: number): string {
   if (!ms) return '';
   const delta = Date.now() - ms;
@@ -29,28 +29,6 @@ function formatRelativeTime(ms: number): string {
 
 function writeSetting(key: string, enabled: boolean): void {
   try { localStorage.setItem(key, enabled ? '1' : '0'); } catch { /* ignore */ }
-}
-
-async function loadRecentProjects(): Promise<RecentProject[]> {
-  if (!isTauri()) return [];
-  try {
-    const { listCachedProjects } = await import('@desktop/database.js');
-    const projects = await listCachedProjects();
-    return projects
-      .filter((project) => /\.gim$/i.test(project.path))
-      .slice(0, 6)
-      .map((project) => ({
-        id: project.id,
-        name: project.name || project.path.split(/[\\/]/).pop() || project.path,
-        path: project.path,
-        projectType: project.project_type,
-        parserVersion: project.parser_version,
-        updatedAt: project.last_opened_at_ms || project.updated_at_ms,
-      }));
-  } catch (error) {
-    console.warn('[ViewerShell] recent projects unavailable:', error);
-    return [];
-  }
 }
 
 async function openRecentProject(state: AppState, projectId: number): Promise<void> {
@@ -67,15 +45,16 @@ async function openRecentProject(state: AppState, projectId: number): Promise<vo
 
 function renderRecentList(
   targets: HTMLElement[],
-  projects: RecentProject[],
+  projects: ProjectCacheSummary[],
   state: AppState,
+  error = '',
 ): void {
   for (const target of targets) {
     target.replaceChildren();
     if (projects.length === 0) {
       const empty = document.createElement('div');
       empty.className = target.id === 'menu-recent-projects' ? 'menu-recent-empty' : 'recent-empty';
-      empty.textContent = '暂无最近工程';
+      empty.textContent = error || '暂无最近工程';
       target.appendChild(empty);
       continue;
     }
@@ -86,7 +65,7 @@ function renderRecentList(
       const typeLabel = project.projectType === 'transmission_line' ? '线路'
         : project.projectType === 'equipment' ? '设备'
         : project.projectType === 'substation' ? '变电' : 'GIM';
-      const ago = formatRelativeTime(project.updatedAt);
+      const ago = formatRelativeTime(project.lastOpenedAt);
       const meta = ago ? `${typeLabel} · ${ago}` : typeLabel;
       if (target.id === 'menu-recent-projects') {
         button.textContent = project.name;
@@ -102,6 +81,7 @@ function renderRecentList(
 }
 
 export function setupViewerShell(state: AppState): void {
+  setupSelectionToolbar(state);
   const moreButton = document.getElementById('btn-more') as HTMLButtonElement | null;
   const menu = document.getElementById('more-menu') as HTMLElement | null;
   const menuRecent = document.getElementById('menu-recent-projects') as HTMLElement | null;
@@ -110,7 +90,8 @@ export function setupViewerShell(state: AppState): void {
   const welcomeOpen = document.getElementById('btn-welcome-open') as HTMLButtonElement | null;
   const autoOpenInput = document.getElementById('menu-auto-open-last') as HTMLInputElement | null;
   const autoPropsInput = document.getElementById('menu-show-props') as HTMLInputElement | null;
-  let recent: RecentProject[] = [];
+  let recent: ProjectCacheSummary[] = [];
+  let recentRequest = 0;
   let autoOpenAttempted = false;
 
   const closeMenu = (): void => {
@@ -118,13 +99,16 @@ export function setupViewerShell(state: AppState): void {
     menu.hidden = true;
     moreButton.setAttribute('aria-expanded', 'false');
   };
-  const refreshRecent = async (): Promise<void> => {
-    recent = await loadRecentProjects();
-    renderRecentList([menuRecent, welcomeRecent].filter((node): node is HTMLElement => !!node), recent, state);
+  const refreshRecent = async (): Promise<boolean> => {
+    const request = ++recentRequest, result = await readRecentProjects();
+    if (request !== recentRequest) return false;
+    recent = result.ok ? result.value : [];
+    renderRecentList([menuRecent, welcomeRecent].filter((node): node is HTMLElement => !!node), recent, state, result.ok ? '' : result.message);
     if (continueButton) {
       continueButton.disabled = recent.length === 0;
-      continueButton.title = recent[0]?.path ?? '暂无最近工程';
+      continueButton.title = result.ok ? recent[0]?.path ?? '暂无最近工程' : result.message;
     }
+    return true;
   };
 
   if (autoOpenInput) autoOpenInput.checked = shouldAutoOpenLastProject();
@@ -152,7 +136,7 @@ export function setupViewerShell(state: AppState): void {
         const viewItem = document.getElementById('menu-previous-view');
         if (viewItem) viewItem.hidden = !state.viewHistory?.canGoBack;
         const onlyItem = document.getElementById('menu-only-selected');
-        if (onlyItem) onlyItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.selectionRequest?.target || state.onlySelected;
+        if (onlyItem) onlyItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.selectionRequest?.target || state.onlySelected || !state.canIsolateSelection;
         const allItem = document.getElementById('menu-show-all');
         if (allItem) allItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.onlySelected;
         const overviewItem = document.getElementById('menu-station-overview');
@@ -202,7 +186,8 @@ export function setupViewerShell(state: AppState): void {
   });
   welcomeOpen?.addEventListener('click', () => btnLoadGim.click());
   continueButton?.addEventListener('click', () => {
-    void refreshRecent().then(() => {
+    void refreshRecent().then(applied => {
+      if (!applied) return;
       const first = recent[0];
       if (first) void openRecentProject(state, first.id);
     });
@@ -229,7 +214,8 @@ export function setupViewerShell(state: AppState): void {
     });
   }
 
-  void refreshRecent().then(() => {
+  void refreshRecent().then(applied => {
+    if (!applied) return;
     if (!shouldAutoOpenLastProject() || autoOpenAttempted) return;
     autoOpenAttempted = true;
     const first = recent.find((project) => project.parserVersion);

@@ -229,7 +229,7 @@ MANUFACTURER=某厂`, 'fam001.fam')],
 
     // --- 验证 4: ifcGuidIndex 还原 ---
     expect(state.ifcGuidIndex.size).toBe(1);
-    expect(state.ifcGuidIndex.has('device.ifc:guid-001')).toBe(true);
+    expect(state.ifcGuidIndex.has('device:guid-001')).toBe(true);
 
     // --- 验证 5: cbmNodeIndex 还原 ---
     expect(state.cbmNodeIndex.size).toBeGreaterThan(0);
