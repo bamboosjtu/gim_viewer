@@ -209,6 +209,8 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
         const row=state.engineeringNavigation?.composition.nodes.get(key); return row?.inferred ? row.evidence : [];
       }) : undefined,
     group: groupNode ? { entityCount: groupNode.entityCount, pendingCount: ownerIds.size - groupNode.entityCount,
+      confirmedCount:'confirmedCount' in groupNode?groupNode.confirmedCount:undefined,
+      attachmentCount:'attachmentCount' in groupNode?groupNode.attachmentCount:undefined,
       declarations: [...new Set((groupNode.declaredContextIds ?? []).flatMap(id => {
         const document = representations.contextDocuments.get(id); return document ? [document] : [];
       }))].map(document => ({ title: groupNode.title, document })) } : undefined,

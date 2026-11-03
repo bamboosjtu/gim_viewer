@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
         self.resize(1360, 860)
         self.setAcceptDrops(True)
 
-        self.settings = QSettings('GIMElement', 'Inventory')
+        self.settings = QSettings(os.path.abspath('smoke-settings.ini'), QSettings.IniFormat) if SMOKE else QSettings('GIMElement', 'Inventory')
         self.worker = None
         self.cur_path = None
         self.result = None
@@ -308,6 +308,10 @@ class MainWindow(QMainWindow):
         self.worker = None
         if w.error:
             self.lb_status.setText('解析失败')
+            if SMOKE:
+                self._smoke_error = w.error
+                print('SMOKE_FAIL_PARSE', w.error, flush=True)
+                return
             QMessageBox.critical(self, '解析失败', w.error)
             return
         self.result = w.result
@@ -751,10 +755,16 @@ def main():
                 return
             if w.worker is None and not w.result:
                 print('SMOKE_FAIL_PARSE', flush=True)
-                app.quit()
+                app.exit(1)
                 return
             if w.worker is None:
-                w.grab().save(outpng, 'PNG')
+                if not w.grab().save(outpng, 'PNG'):
+                    app.exit(1)
+                    return
+                with open(outpng + '.json', 'w', encoding='utf-8') as receipt:
+                    json.dump({'frozen': bool(getattr(sys, 'frozen', False)),
+                               'groups': [w.tree.topLevelItem(i).text(0).strip() for i in range(w.tree.topLevelItemCount())],
+                               'totals': w.result['totals']}, receipt, ensure_ascii=False, indent=2)
                 print('SMOKE_SHOT', outpng, flush=True)
                 app.quit()
 

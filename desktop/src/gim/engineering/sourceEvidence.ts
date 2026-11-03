@@ -1,5 +1,7 @@
 import aliases from './sourceTypeAliases.json';
 import type { EvidenceValue, ObjectEvidence, ObjectNameEvidence } from '../../engineering/types.js';
+import { categoryFromName } from '../../engineering/classify.js';
+import { ENGINEERING_CATEGORY_LABELS } from '../../engineering/catalogLabels.js';
 
 /** Raw source records stay in the source domain, separate from engineering identity. */
 export interface SourceProperty {
@@ -37,7 +39,7 @@ export const isIfcFeatureSourceType = (type: string): boolean => /^(?:IFCDISTRIB
 
 const empty = new Set(['', '-', '/', '-100', '软件自动生成']);
 function values(record: SourceRecord, labels: readonly string[]): EvidenceValue[] {
-  return record.properties.flatMap((p, index) => p.keys?.some(key => labels.includes(key)) && !empty.has(p.value.trim())
+  return record.properties.flatMap((p, index) => p.keys?.some(key => labels.some(label=>label.toUpperCase()===key.toUpperCase())) && !empty.has(p.value.trim())
     ? [{ value: p.value, evidenceId: JSON.stringify([record.id, p.path ?? p.source, p.line ?? index, p.keys]) }] : []);
 }
 
@@ -46,11 +48,27 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   const type = record.source_type;
   const devTypes: Readonly<Record<string, string>> = aliases.dev;
   const ifcTypes: Readonly<Record<string, string>> = aliases.ifc;
-  const devCategory = devTypes[type.toLowerCase()];
+  const devCategory = ENGINEERING_CATEGORY_LABELS[type]?type:devTypes[type.toLowerCase()];
+  const subtypeTypes:Record<string,string>={postinsulator:'支柱绝缘子',acpillarinsulator:'支柱绝缘子',chaininsulation:'绝缘子串',insulatorssring:'绝缘子串',walltubeinsulator:'穿墙套管',acwallbushing:'穿墙套管',cabletray:'电缆桥架'};
+  const categoryValue=(value:string)=>ENGINEERING_CATEGORY_LABELS[value]?value:devTypes[value.toLowerCase()]==='E01'?'E-T':devTypes[value.toLowerCase()]??ifcTypes[value.toUpperCase()]??categoryFromName(value);
+  const propertyCategories=values(record,['设备类型','设备类别','材料类型','构件类型','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','型号','MODEL','MODELSPEC'])
+    .flatMap(p=>{const category=categoryValue(p.value);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];});
+  const typed=devCategory??ifcTypes[type];
+  for(const p of values(record,['用途','设备用途','PURPOSE'])){
+    const category=categoryValue(p.value);
+    // A service target such as “主变控制” is not this cabinet's identity.
+    if((typed==='E01'||typed==='E-T')&&['E01','E03'].includes(category)||typed==='C-B4'&&['C-B2','C-B3'].includes(category)
+      ||['IFCPUMP','IFCVALVE'].includes(type)&&/^(?:给排水设施|排水设施)$/.test(p.value))propertyCategories.push({...p,value:['IFCPUMP','IFCVALVE'].includes(type)?'C-D5':category});
+  }
   return {
     sourceId: record.id, name: record.name, assemblyParentId: record.parent || undefined,
     names: record.nameEvidence,
-    typeCategory: /neutralpointequipment/i.test(type) ? 'neutral_set' : devCategory ?? ifcTypes[type],
+    typeCategory: /neutralpointequipment/i.test(type) ? 'neutral_set' : devCategory==='E01'&&type!=='E01'?'E-T':devCategory ?? ifcTypes[type.toUpperCase()],
+    typeEvidenceId: `${record.id}:source_type:${type}`,
+    propertyCategories,
+    typeRefinements:['IFCPUMP','IFCVALVE'].includes(type)?['C-D5']:[],
+    subtypeNames:[...values(record,['材料子类','设备子类','MATERIALSUBTYPE','EQUIPMENTSUBTYPE']),...(subtypeTypes[type.toLowerCase()]?[{value:subtypeTypes[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[])],
+    objectRoles:[...values(record,['对象角色','组件角色','OBJECTROLE','COMPONENTROLE']).flatMap(p=>/内部|组成|部件|component|part/i.test(p.value)?[{...p,value:'part'}]:/独立|independent/i.test(p.value)?[{...p,value:'independent'}]:[]),...(type==='IFCPILE'?[{value:'part',evidenceId:`${record.id}:pile_foundation_component`}]:[])],
     traits: {
       fastener: ['IFCMECHANICALFASTENER', 'IFCFASTENER'].includes(type),
       assemblyContainer: ['IFCELEMENTASSEMBLY', 'IFCBUILDINGELEMENTPROXY'].includes(type),
@@ -60,6 +78,7 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     designations: values(record, ['工程中名称', 'PROJECTNAME', 'Projectname']),
     identityCodes: values(record, ['电网工程标识系统编码', '设备编码', 'GRIDIDENTIFICATIONSYSTEMCODE']),
     identityNames: values(record, ['设备名称', '工程中名称', 'PROJECTNAME', 'Projectname']),
-    phases: values(record, ['相数']),
+    phases: values(record, ['相数','PHASECOUNT']).map(p=>({...p,value:/^(?:1|单相)$/.test(p.value)?'单相':p.value})),
+    phaseLabels:values(record,['相别','PHASE','PHASELABEL']),
   };
 }

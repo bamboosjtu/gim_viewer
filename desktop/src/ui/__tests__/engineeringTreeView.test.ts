@@ -28,6 +28,34 @@ beforeEach(() => {
 });
 const search = (value: string) => { const input = document.querySelector<HTMLInputElement>('[role="combobox"]')!; input.value = value; input.dispatchEvent(new Event('input')); };
 describe('engineering composition and provenance navigation', () => {
+  it('shows four top-level groups and selects an unresolved neutral attachment without selecting a main body',async()=>{
+    const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=body.cbm\nSUBSYSTEM1=neutral.cbm','body.cbm':'OBJECTMODELPOINTER=body.dev','body.dev':'SYMBOLNAME=主变压器',
+      'neutral.cbm':'OBJECTMODELPOINTER=neutral.dev','neutral.dev':'TYPE=OpenGroundingEquipment/NeutralPointEquipment\nSYMBOLNAME=220kV中性点成套装置'};
+    const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),built=buildEngineeringSources('p',graph,[],[]);
+    const state=new AppState();state.activateProject(1,'p');state.currentProjectType='substation';state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;
+    state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);state.engineeringNavMode='inventory';
+    const inventory=state.engineeringNavigation.inventory!;
+    for(const node of inventory.nodes.values())if(node.kind==='group'||node.kind==='project')state.engineeringExpandedRows.inventory.add(node.key);
+    const {renderEngineeringTree}=await import('../engineeringTreeView.js');renderEngineeringTree(state);
+    expect(inventory.nodes.get(inventory.rootKey)!.children.map(key=>inventory.nodes.get(key)!.title)).toEqual(['设备','装置性材料','构件','其他']);
+    const group=[...inventory.nodes.values()].find(n=>n.title==='附件（并入本体）')!;
+    [...document.querySelectorAll<HTMLElement>('.tree-row')].find(r=>r.dataset.nodePath===group.key)!.click();
+    await vi.dynamicImportSettled();await vi.waitFor(()=>expect(state.engineeringSelection?.ownerIds).toEqual(new Set([built.snapshot.pending[0].id])));
+    expect(document.getElementById('props-drawer-body')?.textContent).toContain('中性点成套附件');
+    expect(state.engineeringSelection!.ownerIds.has(built.snapshot.entities[0].id)).toBe(false);
+  });
+  it('renders inventory subtype groups with its own catalog search and selectable whole range',async()=>{
+    const f=await fixture(),view=f.state.engineeringNavigation!,inventory=view.inventory!,key=inventory.rowsByEntity.get(f.box.id)![0];
+    let cursor:string|undefined=key;
+    while(cursor){f.state.engineeringExpandedRows.inventory.add(cursor);cursor=inventory.nodes.get(cursor)?.parent;}
+    f.state.engineeringNavMode='inventory';const {renderEngineeringTree}=await import('../engineeringTreeView.js');renderEngineeringTree(f.state);
+    const group=inventory.nodes.get(inventory.nodes.get(key)!.parent!)!;
+    expect(group.title).toBe('控制柜');expect(view.inventorySearch!.find(r=>r.key===f.box.id)?.subtitle).toBe('设备材料清册 / 设备 / 二次设备 / 控制柜');
+    const item=[...document.querySelectorAll<HTMLElement>('.tree-row')].find(r=>r.dataset.nodePath===group.key)!;
+    item.click();await vi.dynamicImportSettled();
+    await vi.waitFor(()=>expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.box.id])));
+    expect(document.querySelector('.props-header')?.textContent).toBe('控制柜');
+  });
   it('labels inferred composition rows and exposes the evidence in the inspector',async()=>{
     const f=await fixture(),view=f.state.engineeringNavigation!.composition,key=view.rowsByEntity.get(f.main.id)![0],node=view.nodes.get(key)!;
     node.inferred=true;node.evidence=['spatial-building-footprint','composition-spatial-v1'];

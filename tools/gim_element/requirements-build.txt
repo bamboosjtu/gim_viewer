@@ -1,0 +1,4 @@
+# Windows x64 / Python 3.12; QtCore, QtGui and QtWidgets are in Essentials.
+PyInstaller==6.22.3
+PySide6-Essentials==6.12.0
+py7zr==1.1.4

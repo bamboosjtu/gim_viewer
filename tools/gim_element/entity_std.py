@@ -14,6 +14,9 @@
 本模块只读词表、不改词表：devtype_class 仍是词域唯一真源（03-模型渲染 同源副本）。
 """
 import re
+import json
+import sys
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # 1. 目录编码
@@ -86,6 +89,15 @@ CON_CODE = {
     ('附属设施', '其他附属设施'): ('C-D6', '其他附属设施'),
     ('建筑本体构件', '其他构件'): ('U-OBJECT', '构件（未细分）'),
 }
+
+# Category labels are the shared project catalog; occurrence/ledger policies
+# intentionally remain independent between this reference tool and desktop.
+_catalog_path = (Path(sys._MEIPASS) / 'catalog.json') if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[2] / 'desktop/src/engineering/catalog.json'
+_catalog = json.loads(_catalog_path.read_text(encoding='utf-8'))
+_labels = {entry['code']: entry['label'] for entry in _catalog['categories']}
+DEV_CODE = {key: (code, _labels[code]) for key, (code, _) in DEV_CODE.items()}
+MAT_CODE = {key: (code, _labels[code]) for key, (code, _) in MAT_CODE.items()}
+CON_CODE = {key: (code, _labels[code] if code != 'U-OBJECT' else label) for key, (code, label) in CON_CODE.items()}
 
 # 其他组的性质编码（01 §2 分层：来源 / 组织包装 / 未识别）
 OTH_CODE = {

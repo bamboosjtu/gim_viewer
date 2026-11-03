@@ -41,4 +41,10 @@ describe('independent navigation cache', () => {
     delete (f.view.compositionSearch[0] as Partial<typeof f.view.compositionSearch[number]>).searchText;
     await expect(encodeEngineeringNavigation(f.view, f.sources, f.snapshot, f.source.digest, f.id)).rejects.toThrow('engineering search text');
   });
+  it('rejects stale independent template versions and missing inventory search',async()=>{
+    const f=await fixture();f.view.projectionVersions!.inventory='stale-inventory';
+    await expect(encodeEngineeringNavigation(f.view,f.sources,f.snapshot,f.source.digest,f.id)).rejects.toThrow('projection versions');
+    const fresh=projectEngineeringNavigation(f.sources,f.snapshot);fresh.inventorySearch=[];
+    await expect(encodeEngineeringNavigation(fresh,f.sources,f.snapshot,f.source.digest,f.id)).rejects.toThrow('inventory search');
+  });
 });

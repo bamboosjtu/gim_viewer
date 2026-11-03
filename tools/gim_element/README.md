@@ -82,23 +82,29 @@ python element_core.py "D:/工程/xxx.gim" --html 报告.html --json 台账.json
 
 ## 6. 构建与自检
 
-依赖：Python 3.13、PySide6、py7zr；打包另需 PyInstaller。本机系统解释器为
-`C:/Users/Lenovo/AppData/Local/Programs/Python/Python313/python.exe`（bash 默认的 `python` 没有三方库）。
+Windows x64 使用 Python 3.12，项目依赖固定在 `requirements-build.txt`。QtCore、QtGui、QtWidgets 使用 PySide6-Essentials，不需要 WebEngine/Addons。打包 spec 位于 `_build/GIM实体盘点器.spec` 并随源码提交，公共目录 JSON 通过 spec 的 datas 一起打包。此 Qt 构建使用 Windows 原生 ICU API；spec 排除从 Poppler/Conda 等 PATH 环境误收集的同名 ICU DLL，避免打包后 QtCore 报“找不到指定的程序”。
 
-```bash
-cd gim_element
+从工具目录执行 PowerShell：
 
-# 语法自检（Windows 下别用 py_compile 传 cfile）
-python -c "compile(open('element_core.py',encoding='utf-8').read(),'x','exec')"
-
-# 界面冒烟：解析 + 截图，不弹模态框
-python element_app.py --smoke "D:/三维设计/sample/substation01" _build/smoke.png
-
-# 重新打包（必须前台跑，后台会在 COLLECT 落盘前被回收）
-pyinstaller --clean -y --workpath ./_build --distpath ./dist _build/GIM实体盘点器.spec
+```powershell
+.\build.ps1
 ```
 
-`--smoke` 会把截图路径打到 stdout（`SMOKE_SHOT`），失败时打 `SMOKE_FAIL_OPEN` / `SMOKE_FAIL_PARSE`。
+脚本自动创建工具自己的 `.venv`、安装依赖，再通过该解释器的模块入口调用 PyInstaller，不依赖全局 `pyinstaller` 命令或 PATH。已安装项目环境时可使用 `.\build.ps1 -SkipInstall`。
+
+等价的手动入口：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+.\.venv\Scripts\python.exe -m PyInstaller --clean -y --workpath ./_build --distpath ./dist _build/GIM实体盘点器.spec
+```
+
+产物为 `dist/GIM实体盘点器/GIM实体盘点器.exe`，分发时保留整个目录，包括 `_internal` 中的 Qt 插件、Python 运行时和 catalog.json。
+
+冒烟测试可从独立输出目录运行源程序或打包 EXE 的 `--smoke <gim或解包目录> <png>`。无显示测试设置 `QT_QPA_PLATFORM=offscreen`；成功生成截图并退出，失败以非零状态退出且不弹解析错误对话框。测试偏好写入当前目录的 smoke-settings.ini，不改用户正式偏好；截图旁写入 `.png.json` 回执。
+
+运行 `.\.venv\Scripts\python.exe .\smoke_packaged.py` 可用自动生成的 GIM/7z 夹具验证冻结 EXE、共享目录、Qt 平台插件、四类盘点和中性点附件口径。
 
 ## 7. 已知边界
 
@@ -115,3 +121,10 @@ pyinstaller --clean -y --workpath ./_build --distpath ./dist _build/GIM实体盘
 | 2026-11-03 | 材料析出 `M07 套管 / M08 槽盒`；C-B2 基础三分；C-D4 拆暖通/给排水；`消防探测与报警` 扩为 `C-D2 消防设施`；检修孔爬梯/避雷针归 `C-B7`；树与报告统一按目录编码排序 |
 | 2026-11-01 | 引入 `entity_std` 编码/状态层，E16 细分四类，`E-T` 用途待确认 |
 | 2026-10-31 | 修 GUID 大小写与 `\X2\` 逐字转义导致的整站识别失败 |
+
+
+## 共享产品目录
+
+编码与标签读取仓库的 `desktop/src/engineering/catalog.json`，通过桌面目录检查脚本与生成文档做一致性校验。参考工具继续使用自己的名称优先与聚合台账策略；不能用其桶计数校准桌面 occurrence/成员/实体数量，主变内部端子箱与独立端子箱也按各自明确边界对照。
+
+重新构建 PyInstaller 包时，spec 的 `datas` 必须将上述共享 JSON 以 `catalog.json` 放入打包根目录（`sys._MEIPASS`）。普通源码运行从仓库读取；缺少目录数据直接报错，不回退到另一份硬编码标签。

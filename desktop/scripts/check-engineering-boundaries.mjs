@@ -33,6 +33,14 @@ for (const layer of ['engineering','gim','viewer']) for (const path of files(res
         : layer === 'gim' ? /^(?:app|services|viewer|ui|@desktop|@tauri-apps)/ : /^(?:services|ui|@desktop|@tauri-apps)/;
       const exception = viewerBridgeImports.has(`${relative(root,path).replaceAll('\\','/')}:${name}`);
       if (banned.test(target) && !exception) failures.push(`${relative(root,path)}: forbidden import ${name}`);
+      const local=relative(root,path).replaceAll('\\','/');
+      const projection=local==='engineering/inventoryTemplate.ts'||local==='gim/engineering/inventory.ts'?'inventory'
+        :['engineering/composition.ts','engineering/compositionTemplate.ts'].includes(local)?'composition'
+        :local==='gim/engineering/sourceProjection.ts'?'source':undefined;
+      const cross=projection==='inventory'?/composition|sourceProjection|navigation/
+        :projection==='composition'?/inventory|sourceProjection|navigation/
+        :projection==='source'?/composition|inventory|normalize|classify|navigation/:undefined;
+      if(cross?.test(name))failures.push(`${local}: projection template imports another projection ${name}`);
     }
     if (layer === 'viewer' && ts.isPropertyAccessExpression(node) && /^engineering(?:Selection|Snapshot|Sources|Navigation)$/.test(node.name.text)) {
       failures.push(`${relative(root,path)}: renderer reads ${node.name.text}`);

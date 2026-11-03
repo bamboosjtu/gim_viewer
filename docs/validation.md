@@ -120,6 +120,8 @@ python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation
 
 未覆盖：v0.2 原生三次真冷/有效暖、完整集合选择与持续交互、设备全库逐个人工显示、大条目设备库性能/内存、自动 L1 与增量连接线的完整组合边界、逐台套人工归属真值。具体未关闭项见 [问题与限制](open-issues.md)。
 
+分类/清册验收使用 `npm run test:engineering:classification`，四包直接走当前来源适配和实体归一化，核对目录编码、子类、来源分区、三模板版本及缓存往返；输出独立写入 `output/v020-stage2`。`npm run check:engineering-catalog -- --python` 检查共享目录与参考工具标签一致，不能证明两者归并策略一致。模板测试单独检查组成路径变化不影响清册/来源、清册使用自己的搜索索引、同名实例不合并。完整九工程人工实体边界真值仍未建立。
+
 ## 5. 移动端验证
 
 在 `app/` 运行 `npm test`、`npm run build`；样本测试先准备本地输入，缺包不允许 skip。覆盖唯一对象、共享塔 occurrence、物理档聚合、跳线排除、完整树可达、原始属性与 HNum 预览、JSON 恢复等价。

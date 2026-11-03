@@ -202,7 +202,7 @@ export function renderEngineeringTree(state: AppState): void {
     } };
   };
   nav.outline = renderVirtualOutline(host, [outlineNode(root)], { expanded, selectedKey: () => rowKey(state, data) });
-  renderSearchBox(cbmTreePanel, mode === 'composition' || mode==='inventory' ? data.compositionSearch : data.sourceSearch, key => {
+  renderSearchBox(cbmTreePanel, mode === 'composition' ? data.compositionSearch : mode==='inventory' ? data.inventorySearch??[] : data.sourceSearch, key => {
     const row = mode === 'composition' ? data.composition.rowsByEntity.get(key)?.[0] : mode==='inventory'?data.inventory!.rowsByEntity.get(key)?.[0]:key;
     if (row) void select(row);
   });

@@ -17,6 +17,13 @@ export interface ObjectEvidence {
   /** A real composition edge; a source navigation ancestor is not a composition edge. */
   assemblyParentId?: string;
   typeCategory?: string;
+  typeEvidenceId?: string;
+  /** Category/role facts interpreted from current-object structured fields. */
+  propertyCategories?: readonly EvidenceValue[];
+  objectRoles?: readonly EvidenceValue[];
+  phaseLabels?: readonly EvidenceValue[];
+  subtypeNames?: readonly EvidenceValue[];
+  typeRefinements?: readonly string[];
   traits: {
     fastener?: boolean;
     assemblyContainer?: boolean;
@@ -40,6 +47,11 @@ export interface ObjectInterpretation {
   basis: string;
   conflict: string;
   independent: boolean;
+  classificationStatus?: 'confirmed' | 'candidate' | 'unresolved';
+  classificationEvidence?: string[];
+  unknownReason?: string;
+  subtype?: string;
+  subtypeLabel?: string;
   /** Optional role inside a composite source such as a cable trench. */
   role?: SourceComponentRole;
   assemblyCategory: string;
@@ -55,6 +67,12 @@ export interface EngineeringEntity {
   classificationState: 'identified' | 'unknown';
   sourceIds: string[];
   classificationConflicts: number;
+  classificationStatus?: 'confirmed' | 'candidate' | 'unresolved';
+  boundaryStatus?: 'confirmed' | 'candidate' | 'unresolved';
+  subtype?: string;
+  subtypeLabel?: string;
+  unknownReason?: string;
+  grain?: 'item' | 'segment';
   phaseBodyCount?: number;
   compositionState?: 'declared_identity_physical_completeness_unverified' | 'phase_completeness_unverified';
 }

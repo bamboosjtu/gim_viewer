@@ -42,6 +42,26 @@ describe('construction and operation engineering wholes', () => {
     expect(build([source('box','独立端子箱')]).entities[0].category).toBe('E16.terminal_box');
   });
 
+  it('keeps operating boxes and terminal boxes in actual equipment assemblies while preserving standalone boxes',()=>{
+    const model=build([
+      source('gis','组合电器GIS',{typeCategory:'E05'}),
+      source('actuator','操动机构箱',{assemblyParentId:'gis'}),
+      source('capacitor','并联电容器成套装置',{typeCategory:'E10'}),
+      source('wrapper','Group',{assemblyParentId:'capacitor',traits:{assemblyContainer:true}}),
+      source('attached','端子箱',{assemblyParentId:'wrapper'}),
+      source('standalone','端子箱模型01:Null:2754317'),
+    ]);
+    expect(model.entities.map(e=>e.category).sort()).toEqual(['E05','E10','E16.terminal_box']);
+    const bySource=new Map(model.memberships.map(m=>[m.sourceId,m]));
+    expect(bySource.get('actuator')).toMatchObject({ownerId:bySource.get('gis')!.ownerId,interpretation:{meaning:'part',basis:'equipment_actuator_composition',independent:false}});
+    expect(bySource.get('attached')).toMatchObject({ownerId:bySource.get('capacitor')!.ownerId,interpretation:{meaning:'part',basis:'equipment_terminal_composition',independent:false}});
+    expect(model.entities.find(e=>e.category==='E16.terminal_box')!.sourceIds).toEqual(['standalone']);
+    expect(build([source('free','独立机构箱')]).entities[0].category).toBe('E17');
+    expect(build([source('bay','组合电器GIS'),source('explicit','端子箱',{assemblyParentId:'bay',objectRoles:[value('independent')]})]).entities).toHaveLength(2);
+    expect(build([source('cabin','预制舱'),source('field-box','端子箱',{assemblyParentId:'cabin'})]).entities).toHaveLength(2);
+    expect(build([source('other','未知对象'),source('box','端子箱',{assemblyParentId:'other'})]).entities).toHaveLength(2);
+  });
+
   it('joins numbered peer fragments using engineering evidence', () => {
     const props = { designations: [value('1#电容器组')], identityCodes: [value('GN201')] };
     const rows = ['网栏及网门', '支柱绝缘子', '放电线圈'].map((part, i) => source(String(i), `10kV框架式电容器组模型11_${part}`, props));
@@ -102,7 +122,7 @@ describe('construction and operation engineering wholes', () => {
   });
 
   it('interprets the functional cabinet noun before its service prefix', () => {
-    expect(interpretObject(source('x', 'HGIS智能控制柜', { typeCategory: 'E09' })).category).toBe('E16.control_cabinet');
+    expect(interpretObject(source('x', 'HGIS智能控制柜', { typeCategory: 'E09' }))).toMatchObject({category:'E09',conflict:'E09!=E16.control_cabinet'});
     expect(interpretObject(source('x', '二次屏柜')).category).toBe('E16.panel_cabinet');
     expect(interpretObject(source('x', '通信柜')).category).toBe('E16.panel_cabinet');
     expect(interpretObject(source('x', '蓄电池组')).category).toBe('E16.battery_set');
@@ -120,10 +140,10 @@ describe('construction and operation engineering wholes', () => {
     expect(model.entities.map(entity => entity.category).sort()).toEqual(['E16.battery_set', 'E16.control_cabinet', 'E16.panel_cabinet', 'E16.terminal_box']);
   });
 
-  it('uses the documented M07 fallback only for explicit or material-typed other materials', () => {
-    expect(interpretObject(source('x', '其他材料'))).toMatchObject({ category: 'M07', basis: 'object_name' });
-    expect(interpretObject(source('x', '未细分材料'))).toMatchObject({ category: 'M07' });
-    expect(interpretObject(source('x', '未知物料', { traits: { materialType: true } }))).toMatchObject({ category: 'M07', basis: 'material_type_fallback' });
+  it('uses M09 only for explicit or material-typed other materials', () => {
+    expect(interpretObject(source('x', '其他材料'))).toMatchObject({ category: 'M09', basis: 'object_name' });
+    expect(interpretObject(source('x', '未细分材料'))).toMatchObject({ category: 'M09' });
+    expect(interpretObject(source('x', '未知物料', { traits: { materialType: true } }))).toMatchObject({ category: 'M09', basis: 'material_type_fallback' });
     expect(interpretObject(source('x', '未知物料'))).toMatchObject({ category: 'U-OBJECT' });
   });
 

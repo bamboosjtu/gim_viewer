@@ -68,6 +68,7 @@
 - **工程组成**：`assignEngineeringComposition` 读取声明的系统名、空间建筑/楼层、真实宿主关系，按内置模板分配到建筑工程/安装工程；没有可靠归属的整体进入“未分类”的 DEV/IFC 轨道和类别桶。`projectEngineeringComposition` 生成树、分组计数、待归集合和已声明但无成员的分组。
 - **来源**：`projectEngineeringNavigation` 按 CBM 的 F1/F2/F3/F4 与 DEV 装配生成 DEV 轨道，按每个 IFC 文件及其空间容器/外露记录生成 IFC 轨道；来源行可跳转所属整体。
 - **设备材料清册**：按设备、装置性材料、构件及目录类别列整体，并展示实际组成来源。
+- 三个模板独立：组成使用领域组成模板，来源由 `sourceProjection` 仅按来源组织投影，清册由 `inventoryTemplate` 按目录及子类投影。导航模块只组合结果，三者分别记录版本并建立各自搜索索引；[清册模型树契约](../engineering/inventory-template.md)定义分组、计数与选择。
 - 三页共用搜索、选择、属性路由和虚拟列表；搜索只是投影索引，不是新实体。
 - 视图节点 ID 与实体 ID 分离；分组计数按实体去重，不冒充台套。
 - `compositionProjectionService` 将运行时范围作为显式输入交给 `services/projections/compositionSpatial`，自动细化组成路径并标注推断。此插件不修改快照/来源/表示索引；重复细化从语义视图计算，失效分组撤销选择，旧轮次和旧会话拒绝提交。

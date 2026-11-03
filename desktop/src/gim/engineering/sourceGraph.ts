@@ -90,7 +90,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   const scalar = (doc: SourceDocument, key: string) => doc.fields.find(p => p.keys[0].toUpperCase() === key)?.value ?? '';
   // Object fields are attached only to their actual OMP occurrence. SYSTEMNAME
   // and PARTNAME remain organizational context in the source documents.
-  const objectFields = (doc: SourceDocument) => doc.fields.filter(p => /^(?:SYMBOLNAME|NAME|OBJECTNAME|PROJECTNAME|设备名称|工程中名称|设备编码|电网工程标识系统编码|GRIDIDENTIFICATIONSYSTEMCODE|相数)$/i.test(p.keys[0]));
+  const objectFields = (doc: SourceDocument) => doc.fields.filter(p => /^(?:SYMBOLNAME|NAME|OBJECTNAME|PROJECTNAME|设备名称|工程中名称|设备编码|电网工程标识系统编码|GRIDIDENTIFICATIONSYSTEMCODE|材料子类|设备子类|MATERIALSUBTYPE|EQUIPMENTSUBTYPE|相数|相别|PHASE|PHASECOUNT|PHASELABEL|设备类型|设备类别|材料类型|构件类型|用途|设备用途|EQUIPMENTTYPE|MATERIALTYPE|PURPOSE|型号|MODEL|MODELSPEC|对象角色|组件角色|OBJECTROLE|COMPONENTROLE)$/i.test(p.keys[0]));
   function updateNames(row: SourceRecord): void {
     const names: ObjectNameEvidence[] = [];
     for (const [kind, labels] of [

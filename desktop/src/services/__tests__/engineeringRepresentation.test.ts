@@ -41,6 +41,27 @@ async function fixture(shared = false, declaredBuilding = false) {
 }
 
 describe('source-to-physical representation adapter and filters', () => {
+  it('selects integrated GIS boxes with the host while keeping a standalone terminal box outside its isolated range',async()=>{
+    const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=gis.cbm\nSUBSYSTEM1=free.cbm','gis.cbm':'OBJECTMODELPOINTER=gis.dev',
+      'gis.dev':'TYPE=GIS\nSYMBOLNAME=组合电器GIS\nSUBDEVICE0=actuator.dev\nSUBDEVICE1=terminal.dev',
+      'actuator.dev':'SYMBOLNAME=操动机构箱','terminal.dev':'SYMBOLNAME=端子箱','free.cbm':'OBJECTMODELPOINTER=free.dev','free.dev':'SYMBOLNAME=端子箱模型01:Null:2754317'};
+    const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),built=buildEngineeringSources('p',graph,[],[]),state=new AppState();
+    state.activateProject(1,'p');state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
+    const gis=built.snapshot.entities.find(e=>e.category==='E05')!,free=built.snapshot.entities.find(e=>e.category==='E16.terminal_box')!;
+    const mesh=(root:THREE.Group,assemblyPath:string)=>{const wrapper=new THREE.Group();wrapper.userData.assemblyPath=assemblyPath;const value=new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshBasicMaterial());wrapper.add(value);root.add(wrapper);return value;};
+    const gisRoot=new THREE.Group();gisRoot.userData.rootOccurrence=graph.records.find(r=>r.source==='gis.dev')!.id;
+    const body=mesh(gisRoot,''),actuator=mesh(gisRoot,'sub:0'),terminal=mesh(gisRoot,'sub:1');
+    const freeRoot=new THREE.Group();freeRoot.userData.rootOccurrence=graph.records.find(r=>r.source==='free.dev')!.id;const freeMesh=mesh(freeRoot,'');
+    state.loadedXmlModGroups.set('gis',gisRoot);state.loadedXmlModGroups.set('free',freeRoot);
+    const index=getEngineeringRepresentations(state)!.index;
+    expect(index.resolveDev(gisRoot.userData.rootOccurrence,{assemblyPath:'sub:0'}).ownerIds).toEqual([gis.id]);
+    expect(index.resolveDev(gisRoot.userData.rootOccurrence,{assemblyPath:'sub:1'}).ownerIds).toEqual([gis.id]);
+    await selectEngineeringTarget(state,{kind:'engineering',key:gis.id});state.setOnlySelected(true);
+    expect([body.visible,actuator.visible,terminal.visible,freeMesh.visible]).toEqual([true,true,true,false]);
+    await selectEngineeringTarget(state,{kind:'engineering',key:free.id});
+    expect([body.visible,actuator.visible,terminal.visible,freeMesh.visible]).toEqual([false,false,false,true]);
+    state.setOnlySelected(false);
+  });
   it('binds actual assembly paths independently of F labels', async () => {
     const f = await fixture(), representation = getEngineeringRepresentations(f.state)!;
     expect(representation.issues).toEqual([]);

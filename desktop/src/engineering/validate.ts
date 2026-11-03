@@ -13,6 +13,10 @@ export function assertEngineeringPartition(snapshot: EngineeringSnapshot, source
     requireShape(object(entity) && typeof entity.id === 'string' && entity.id && typeof entity.name === 'string' && typeof entity.category === 'string' &&
       typeof entity.boundaryEvidence === 'string' && strings(entity.sourceIds) && ['whole', 'set', 'transformer_bank'].includes(entity.kind) &&
       ['identified', 'unknown'].includes(entity.classificationState) && Number.isSafeInteger(entity.classificationConflicts) && entity.classificationConflicts >= 0, 'entity');
+    requireShape((entity.classificationStatus===undefined||['confirmed','candidate','unresolved'].includes(entity.classificationStatus))
+      &&(entity.boundaryStatus===undefined||['confirmed','candidate','unresolved'].includes(entity.boundaryStatus))
+      &&['subtype','subtypeLabel','unknownReason'].every(key=>entity[key as keyof typeof entity]===undefined||typeof entity[key as keyof typeof entity]==='string')
+      &&(entity.grain===undefined||['item','segment'].includes(entity.grain)),'entity classification');
   }
   for (const pending of snapshot.pending) requireShape(object(pending) && typeof pending.id === 'string' && pending.id && typeof pending.reason === 'string' && strings(pending.sourceIds), 'pending');
   const sources = new Set(sourceIds);
@@ -29,6 +33,9 @@ export function assertEngineeringPartition(snapshot: EngineeringSnapshot, source
   for (const member of snapshot.memberships) {
     requireShape(object(member) && typeof member.sourceId === 'string' && (member.ownerId === null || typeof member.ownerId === 'string') && object(member.interpretation), 'membership');
     const interpretation = member.interpretation;
+    requireShape((interpretation.classificationStatus===undefined||['confirmed','candidate','unresolved'].includes(interpretation.classificationStatus))
+      &&(interpretation.classificationEvidence===undefined||strings(interpretation.classificationEvidence))
+      &&['subtype','subtypeLabel','unknownReason'].every(key=>interpretation[key as keyof typeof interpretation]===undefined||typeof interpretation[key as keyof typeof interpretation]==='string'),'classification evidence');
     requireShape(typeof interpretation.category === 'string' && typeof interpretation.basis === 'string' && typeof interpretation.conflict === 'string' &&
       typeof interpretation.independent === 'boolean' && typeof interpretation.assemblyCategory === 'string' && typeof interpretation.assemblySignature === 'string' &&
       ['object', 'part', 'fragment', 'neutral_set', 'container', 'detail', 'source_only'].includes(interpretation.meaning) &&

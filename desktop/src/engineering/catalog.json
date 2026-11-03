@@ -1,0 +1,445 @@
+{
+  "version": "engineering-catalog-v2",
+  "categories": [
+    {
+      "code": "E01",
+      "label": "主变压器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E02",
+      "label": "高压并联电抗器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E03",
+      "label": "站用变压器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E04",
+      "label": "消弧线圈、小电阻及接地变成套装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E05",
+      "label": "组合电器 GIS/HGIS",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E06",
+      "label": "断路器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E07",
+      "label": "隔离开关",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E08",
+      "label": "接地开关",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E09",
+      "label": "开关柜",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E10",
+      "label": "并联电容器成套装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E11",
+      "label": "低压并联电抗器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E12",
+      "label": "静止无功发生器 SVG",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E13",
+      "label": "电流互感器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E14",
+      "label": "电压互感器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E15",
+      "label": "避雷器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E16",
+      "label": "二次设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E17",
+      "label": "动力辅助设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E18",
+      "label": "预制舱开关设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E19",
+      "label": "水工暖通设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "M01",
+      "label": "导线",
+      "group": "materials",
+      "grain": "segment",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "M02",
+      "label": "母线",
+      "group": "materials",
+      "grain": "segment",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "M03",
+      "label": "金具",
+      "group": "materials",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "M04",
+      "label": "绝缘子",
+      "group": "materials",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "M05",
+      "label": "电缆",
+      "group": "materials",
+      "grain": "segment",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "M06",
+      "label": "接地材料",
+      "group": "materials",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "M07",
+      "label": "套管",
+      "group": "materials",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "M08",
+      "label": "槽盒",
+      "group": "materials",
+      "grain": "segment",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "M09",
+      "label": "其他材料",
+      "group": "materials",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-A1",
+      "label": "墙体",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-A2",
+      "label": "楼板",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-A3",
+      "label": "柱",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-A4",
+      "label": "梁",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-A5",
+      "label": "板",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-A6",
+      "label": "屋面",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-A7",
+      "label": "门",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-A8",
+      "label": "窗",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-A9",
+      "label": "楼梯与栏杆",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-A10",
+      "label": "面层与装修",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-B1",
+      "label": "设备支架",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-B2",
+      "label": "设备基础",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-B3",
+      "label": "建筑物基础",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-B4",
+      "label": "基础（未分）",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-B5",
+      "label": "型钢与钢板",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-B6",
+      "label": "檩条",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-B7",
+      "label": "构架与支撑",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-C1",
+      "label": "电缆沟",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-C2",
+      "label": "排水沟",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-C3",
+      "label": "检查井与池",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-C4",
+      "label": "围墙与围栏",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-C5",
+      "label": "道路与地坪",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-D1",
+      "label": "照明器具",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-D2",
+      "label": "消防设施",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-D3",
+      "label": "安防监控",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-D4",
+      "label": "暖通设施",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-D5",
+      "label": "给排水设施",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "C-D6",
+      "label": "其他附属设施",
+      "group": "components",
+      "grain": "item",
+      "reference": "research/03-材料与构件目录.md"
+    },
+    {
+      "code": "E-T",
+      "label": "变压器（用途待确认）",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "research/02-设备目录与组合边界.md"
+    },
+    {
+      "code": "E16.terminal_box",
+      "label": "端子箱",
+      "group": "equipment",
+      "parent": "E16",
+      "grain": "item"
+    },
+    {
+      "code": "E16.panel_cabinet",
+      "label": "屏柜",
+      "group": "equipment",
+      "parent": "E16",
+      "grain": "item"
+    },
+    {
+      "code": "E16.control_cabinet",
+      "label": "控制柜",
+      "group": "equipment",
+      "parent": "E16",
+      "grain": "item"
+    },
+    {
+      "code": "E16.battery_set",
+      "label": "蓄电池组",
+      "group": "equipment",
+      "parent": "E16",
+      "grain": "item"
+    },
+    {
+      "code": "E16.protection",
+      "label": "保护设备",
+      "group": "equipment",
+      "parent": "E16",
+      "grain": "item"
+    },
+    {
+      "code": "U-OBJECT",
+      "label": "待识别对象",
+      "group": "unknown",
+      "grain": "item"
+    }
+  ]
+}

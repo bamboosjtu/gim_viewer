@@ -2,13 +2,13 @@ import { openPropsDrawerUI, renderInspectorTabs, sectionHtml } from './propsDraw
 import { escHtml } from '../shared/html.js';
 import type { EngineeringEntity, PendingWhole, EntityRelationship } from '../engineering/types.js';
 import type { SourceRecord } from '../gim/engineering/sourceEvidence.js';
-import { categoryLabel } from '../engineering/catalogLabels.js';
+import { categoryLabel,classificationReasonLabel } from '../engineering/catalogLabels.js';
 
 export interface EngineeringInspectorInput {
   title: string;
   entity?: EngineeringEntity;
   pending?: PendingWhole;
-  group?: { entityCount: number; pendingCount: number; declarations?: Array<{ title: string; document: string }> };
+  group?: { entityCount: number; pendingCount: number; confirmedCount?:number; attachmentCount?:number; declarations?: Array<{ title: string; document: string }> };
   sources: readonly SourceRecord[];
   relationships: readonly EntityRelationship[];
   relatedNames: ReadonlyMap<string, string>;
@@ -37,15 +37,22 @@ export function renderEngineeringInspector(input: EngineeringInspectorInput): vo
   const rows: [string, string][] = [
     ['浏览对象', entity ? '工程整体' : pending ? '待归整体集合' : input.group ? '工程分组范围' : '来源范围'],
     ...(input.group ? [['整体候选', String(input.group.entityCount)], ['待归集合', String(input.group.pendingCount)]] as [string, string][] : []),
+    ...(input.group?.confirmedCount!==undefined?[['分类与边界均确认',String(input.group.confirmedCount)]] as [string,string][]:[]),
+    ...(input.group?.attachmentCount?[['中性点成套附件',String(input.group.attachmentCount)],['附件口径','作为主变组成，不增加独立设备台数；具体宿主按来源证据确认']] as [string,string][]:[]),
     ...(unassignedDeclaration ? [['工程归属', '来源已声明此工程单元，尚无可靠的整体归属']] as [string, string][] : []),
     ...(entity ? [['类别', categoryLabel(entity.category)], ['类别识别', entity.classificationState === 'unknown' ? '待识别' : '已识别'],
+      ['子类',entity.subtypeLabel??'无独立子类'],['分类证据状态',entity.classificationStatus==='confirmed'?'已确认':entity.classificationStatus==='candidate'?'候选':'未确认'],
+      ['整体边界状态',entity.boundaryStatus==='confirmed'?'已确认':'待确认'],
+      ...(entity.classificationConflicts?[['分类冲突来源数',String(entity.classificationConflicts)]]:[]),
+      ...(entity.unknownReason?[['待确认说明',classificationReasonLabel(entity.unknownReason)]]:[]),
       ['整体依据', ({ object_identity: '对象本身的工程含义', independent_function_identity: '具有独立功能的对象',
         independent_installation_object: '独立安装的对象', 'engineering_code+designation+assembly_signature': '工程编码、编号名称和成套组成相互支持',
         'explicit_main_designation+single_phase_bodies': '明确主变编号及多个单相本体', outward_object_boundary_unconfirmed: '外露对象，整体边界尚待确认',
         object_identity_parent_boundary_unknown: '对象可识别，上级整体边界未知' } as Record<string, string>)[entity.boundaryEvidence] ?? '按来源对象和组成证据识别'],
       ['组成状态', entity.compositionState ? '按交付声明归组，实物组成完整性尚未核对' : '按现有交付表达']] as [string, string][] : []),
     ...(pending ? [['待确认原因', ({ neutral_set_main_unresolved: '尚不能确定中性点装置对应的主变', component_whole_unresolved: '内部组成尚无明确整体宿主',
-      unnumbered_set_identity_requires_confirmation: '缺少明确编号，不能确认属于同一套装置', peer_fragment_engineering_identity_insufficient: '分散组成缺少足够的整体身份依据' } as Record<string, string>)[pending.reason] ?? '整体身份或归属依据不足']] as [string, string][] : []),
+      unnumbered_set_identity_requires_confirmation: '缺少明确编号，不能确认属于同一套装置', peer_fragment_engineering_identity_insufficient: '分散组成缺少足够的整体身份依据',
+      object_attributes_conflict:'当前对象的有效类别属性相互矛盾',assembly_identity_conflict:'成套工程身份或装配证据发生冲突',transformer_bank_identity_conflict:'主变编号、相别或本体数证据存在冲突' } as Record<string, string>)[pending.reason] ?? '整体身份或归属依据不足']] as [string, string][] : []),
     ['来源记录', String(sources.length)], ['来源状态', input.partial ? '部分来源尚未完成' : '当前来源已就绪'],
     ...(input.projectionEvidence?.length ? [['投影归属', '空间推断，工程归属待确认'], ['投影依据', input.projectionEvidence.join('；')]] as [string,string][] : []),
   ];

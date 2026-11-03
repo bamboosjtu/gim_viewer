@@ -65,6 +65,9 @@ jobs:
       - name: Check engineering layer boundaries
         run: npm run check:engineering-boundaries
 
+      - name: Check engineering catalog documentation
+        run: npm run check:engineering-catalog
+
       - name: Check native acceptance tooling
         run: npm run test:acceptance-tools
 

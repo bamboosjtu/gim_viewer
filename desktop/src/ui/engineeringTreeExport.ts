@@ -19,6 +19,14 @@ export interface ExportedEngineeringTreeNode {
   inferred?: boolean;
   declaredContextIds?: string[];
   category?:string;
+  subtype?:string;
+  subtypeLabel?:string;
+  classificationStatus?:string;
+  boundaryStatus?:string;
+  unknownReason?:string;
+  grain?:string;
+  confirmedCount?:number;
+  attachmentCount?:number;
   sourceCount?:number;
   children: ExportedEngineeringTreeNode[];
 }
@@ -27,6 +35,7 @@ export interface ExportedEngineeringTree {
   schema: 'gim-engineering-tree-v1';
   project: string;
   mode: EngineeringTreeMode;
+  templateVersion?:string;
   root: ExportedEngineeringTreeNode;
   metadata?:EngineeringNavigationData['metadata'];
 }
@@ -73,10 +82,10 @@ export function engineeringTreeExport(data: EngineeringNavigationData, mode: Eng
   if(mode==='inventory'){
     const inventory=data.inventory;if(!inventory)throw Error('设备材料清册尚未准备好');
     const visit=(key:string):ExportedEngineeringTreeNode=>{const node=inventory.nodes.get(key)!;return {...node,children:node.children.map(visit)};};
-    return {schema:'gim-engineering-tree-v1',project,mode,root:visit(inventory.rootKey),metadata:data.metadata};
+    return {schema:'gim-engineering-tree-v1',project,mode,root:visit(inventory.rootKey),metadata:data.metadata,templateVersion:inventory.version};
   }
   const result=mode === 'composition' ? exportComposition(data, project) : exportSource(data, project);
-  result.metadata=data.metadata;return result;
+  result.metadata=data.metadata;result.templateVersion=data.projectionVersions?.[mode];return result;
 }
 
 /** Browser-only download wrapper; the serializer above is pure and testable. */

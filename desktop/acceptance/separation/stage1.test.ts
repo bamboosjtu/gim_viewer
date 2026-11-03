@@ -10,6 +10,7 @@ import { createIfcModelId } from '../../src/gim/modelIdentity.js';
 import { projectEngineeringNavigation } from '../../src/gim/engineering/navigation.js';
 import { assertEngineeringNavigation, encodeEngineeringNavigation, decodeEngineeringNavigation } from '../../src/services/engineeringNavigationCache.js';
 import { encodeEngineeringSources, decodeEngineeringSources, encodeEngineeringEntities, decodeEngineeringEntities } from '../../src/services/engineeringCacheCodec.js';
+import { ENGINEERING_CATEGORY_LABELS } from '../../src/engineering/catalogLabels.js';
 
 const hash=(data:Uint8Array|string)=>createHash('sha256').update(data).digest('hex');
 const digest=(data:unknown)=>hash(JSON.stringify(data));
@@ -35,6 +36,37 @@ for(const [sample,folder,packageName] of [
   expect(view.sourceRows.size).toBe(snapshot.memberships.length);
   expect(view.composition.nodes.get(view.composition.rootKey)?.entityCount).toBe(snapshot.entities.length);
   expect([...view.composition.nodes.values()].every(n=>!n.inferred)).toBe(true);
+  expect(snapshot.entities.every(e=>!!ENGINEERING_CATEGORY_LABELS[e.category])).toBe(true);
+  expect(view.inventory!.rowsBySource.size).toBe(snapshot.memberships.length);
+  expect(view.inventorySearch).toHaveLength(snapshot.entities.length+snapshot.pending.length);
+  expect(view.inventory!.nodes.get(view.inventory!.rootKey)!.children.map(key=>view.inventory!.nodes.get(key)!.title)).toEqual(['设备','装置性材料','构件','其他']);
+  const neutralSets=snapshot.memberships.filter(m=>m.interpretation.meaning==='neutral_set');
+  let attachmentCorrections:Record<string,number>|undefined;
+  expect(view.inventory!.nodes.get(view.inventory!.rootKey)?.attachmentCount??0).toBe(neutralSets.length);
+  if(sample==='s01'){
+    expect(neutralSets).toHaveLength(6);
+    for(const member of neutralSets){
+      expect(member.interpretation).toMatchObject({category:'E01',subtype:'neutral_set',classificationStatus:'confirmed'});
+      expect(snapshot.pending.find(p=>p.id===member.ownerId)?.reason).toBe('neutral_set_main_unresolved');
+      const titles:string[]=[];
+      for(let key:string|undefined=view.inventory!.rowsByEntity.get(member.ownerId!)![0];key;key=view.inventory!.nodes.get(key)?.parent)titles.unshift(view.inventory!.nodes.get(key)!.title);
+      expect(titles.slice(1,5)).toEqual(['设备','主变压器','附件（并入本体）','中性点成套装置']);
+    }
+    const memberships=new Map(snapshot.memberships.map(m=>[m.sourceId,m])),entities=new Map(snapshot.entities.map(e=>[e.id,e]));
+    const records=new Map([...graph.records,...sources.ifcRecords].map(r=>[r.id,r]));
+    const actuators=graph.records.filter(r=>r.name==='操动机构箱');expect(actuators).toHaveLength(3);
+    for(const r of actuators){const m=memberships.get(r.id)!;expect(m.ownerId).toBe(memberships.get(r.parent)!.ownerId);expect(m.interpretation).toMatchObject({meaning:'part',basis:'equipment_actuator_composition',independent:false});expect(entities.get(m.ownerId!)?.category).toBe('E05');}
+    const terminals=graph.records.filter(r=>/端子箱/.test(r.name)&&records.has(r.parent)&&memberships.get(r.parent)!.interpretation.category==='E10');expect(terminals).toHaveLength(12);
+    for(const r of terminals){const m=memberships.get(r.id)!;expect(m.ownerId).toBe(memberships.get(r.parent)!.ownerId);expect(m.interpretation.meaning).toBe('part');}
+    const independent=sources.ifcRecords.filter(r=>/端子箱模型01:Null:275431[79]/.test(r.name));expect(independent).toHaveLength(2);
+    for(const r of independent){expect(r.parent).toBe('');const m=memberships.get(r.id)!;expect(entities.get(m.ownerId!)?.category).toBe('E16.terminal_box');expect(entities.get(m.ownerId!)?.sourceIds).toEqual([r.id]);}
+    const sprinklers=sources.ifcRecords.filter(r=>/喷淋头/.test(r.name));expect(sprinklers).toHaveLength(80);
+    expect(sprinklers.filter(r=>/边墙型.*ZSTB-/.test(r.name))).toHaveLength(76);
+    for(const r of sprinklers)expect(memberships.get(r.id)!.interpretation.category,r.name).toBe('C-D5');
+    const secondary=snapshot.entities.filter(e=>e.category==='E16'&&e.subtype==='unresolved');
+    for(const e of secondary){const row=view.inventory!.nodes.get(view.inventory!.rowsByEntity.get(e.id)![0])!;expect(view.inventory!.nodes.get(row.parent!)!.title).toBe('二次设备');}
+    attachmentCorrections={gisActuatorsJoined:actuators.length,capacitorTerminalsJoined:terminals.length,standaloneTerminals:independent.length,sprinklersClassified:sprinklers.length,genericSecondaryDirect:secondary.length};
+  }
   const changed={...sources,graph:{...graph,documents:graph.documents.map(doc=>({...doc,fields:doc.fields.map(field=>/^SYSTEMNAME\d*$/i.test(field.keys[0])?{...field,value:'99号备用主变系统'}:field)}))}};
   expect(digest(normalizeEngineeringSources(sha,changed))).toBe(digest(snapshot));
   expect(collectSourceGeometryOccurrences(changed.graph)).toEqual(catalog);
@@ -52,6 +84,8 @@ for(const [sample,folder,packageName] of [
   }
   results.push({sample,sha,magic:'GIMPKGS',files:entries.length,sourceVersion:sources.version,rulesVersion:snapshot.rulesVersion,navigationVersion:view.version,compositionVersion:view.composition.version,
     devOccurrences:graph.records.length,geometryRoots:catalog.occurrences.length,ifcProducts:spatial.objects.length,entities:snapshot.entities.length,pending:snapshot.pending.length,
-    unresolvedReferences:graph.references.filter(r=>r.status!=='resolved').length,complete:sources.complete,organizationInvariant:true,geometryInvariant:true,sourceOrderInvariant:true});
+    unresolvedReferences:graph.references.filter(r=>r.status!=='resolved').length,complete:sources.complete,organizationInvariant:true,geometryInvariant:true,sourceOrderInvariant:true,
+    projectionVersions:view.projectionVersions,categoryCounts:Object.fromEntries([...new Set(snapshot.entities.map(e=>e.category))].sort().map(c=>[c,snapshot.entities.filter(e=>e.category===c).length])),
+    subtypes:[...new Set(snapshot.entities.map(e=>e.subtypeLabel).filter(Boolean))].sort(),classificationConflicts:snapshot.entities.reduce((n,e)=>n+e.classificationConflicts,0),neutralSets:neutralSets.length,inventoryAttachmentCount:view.inventory!.nodes.get(view.inventory!.rootKey)?.attachmentCount??0,attachmentCorrections});
 });
-afterAll(()=>{const out=resolve('../output/v020-stage1');mkdirSync(out,{recursive:true});writeFileSync(join(out,'sample-separation.json'),JSON.stringify({complete:results.length===4,scope:'Four actual substation packages: source identity, extraction, partition, projection, organization/geometry independence; not native rendering or entity goldens',samples:results},null,2));});
+afterAll(()=>{const out=resolve(process.env.GIM_ENGINEERING_OUTPUT??'../output/v020-stage1');mkdirSync(out,{recursive:true});writeFileSync(join(out,'sample-separation.json'),JSON.stringify({complete:results.length===4,scope:'Four actual substation packages: source identity, extraction, partition, catalog/subtypes, independent projections, organization/geometry independence; not native rendering or entity goldens',samples:results},null,2));});

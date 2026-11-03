@@ -9,7 +9,7 @@ const fact = (entityId: string, values: string[] = []): CompositionContextEviden
 
 it('separates buildings and storeys, site works and civil facilities from primary installation systems', () => {
   const model = snapshot([entity('floor1', 'C-A4'), entity('floor2', 'C-A4'), entity('road', 'C-C5'), entity('trench', 'C-C1'), entity('lamp', 'C-D1'),
-    entity('hvac', 'E19', '中央空调'), entity('water', 'C-D4', '给水管'), entity('fire', 'C-D2'), entity('capacitor', 'E10'), entity('aux', 'E03'), entity('secondary', 'E16'), entity('cable', 'M05'), entity('earth', 'M06')]);
+    entity('hvac', 'E19', '中央空调'), entity('water', 'C-D5', '给水管'), entity('fire', 'C-D2'), entity('capacitor', 'E10'), entity('aux', 'E03'), entity('secondary', 'E16'), entity('cable', 'M05'), entity('earth', 'M06')]);
   const evidence = model.entities.map(e => fact(e.id));
   for (let i = 0; i < 2; i++) evidence[i].spaces = [{ building: { value: '继保通信楼', evidenceId: 'building' }, storeys: [{ value: `${i + 1}层`, evidenceId: `floor:${i}` }] }];
   const original = structuredClone(model), assignments = assignEngineeringComposition(model, evidence);

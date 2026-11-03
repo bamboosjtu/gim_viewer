@@ -37,7 +37,7 @@ export interface EngineeringComposition {
   nodes: Map<string, CompositionNode>;
   rowsByEntity: Map<string, string[]>;
 }
-export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v5';
+export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v6';
 const childKey = (parent: string, kind: string, value: string) => `${parent}/${encodeURIComponent(kind)}:${encodeURIComponent(value)}`;
 
 /** A view references whole entities; neither a row nor a group becomes a new

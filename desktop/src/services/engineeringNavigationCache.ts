@@ -1,5 +1,7 @@
 import { ENGINEERING_NAVIGATION_VERSION, type EngineeringNavigationData } from '../gim/engineering/navigation.js';
 import { ENGINEERING_COMPOSITION_VERSION } from '../engineering/composition.js';
+import { INVENTORY_TEMPLATE_VERSION } from '../engineering/inventoryTemplate.js';
+import { SOURCE_TREE_TEMPLATE_VERSION } from '../gim/engineering/sourceProjection.js';
 import type { EngineeringSnapshot } from '../engineering/types.js';
 import type { EngineeringSources } from '../gim/engineering/buildSources.js';
 import { decodeEngineeringArtifact, encodeEngineeringArtifact, type EngineeringCacheIdentity } from './engineeringCacheCodec.js';
@@ -16,6 +18,7 @@ async function dependency(snapshot: EngineeringSnapshot, sourceDigest: string): 
  * reachability. A malformed projection is rebuilt independently of facts. */
 export function assertEngineeringNavigation(view: EngineeringNavigationData, sources: EngineeringSources, snapshot: EngineeringSnapshot): void {
   valid(object(view) && view.version === ENGINEERING_NAVIGATION_VERSION && object(view.composition) && view.composition.version === ENGINEERING_COMPOSITION_VERSION, 'version');
+  valid(view.projectionVersions?.composition===ENGINEERING_COMPOSITION_VERSION&&view.projectionVersions?.inventory===INVENTORY_TEMPLATE_VERSION&&view.projectionVersions?.source===SOURCE_TREE_TEMPLATE_VERSION&&view.inventory?.version===INVENTORY_TEMPLATE_VERSION,'projection versions');
   const entities = new Set([...snapshot.entities, ...snapshot.pending].map(e => e.id));
   const sourceIds = new Set([...sources.graph.records, ...sources.ifcRecords].map(r => r.id));
   const contexts = new Set(sources.graph.cbmOccurrences.map(node=>node.id));
@@ -27,6 +30,7 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
       valid(key === root ? node.parent === undefined : typeof node.parent === 'string' && nodes.has(node.parent), 'parent');
       for (const child of node.children) valid(nodes.get(child)?.parent === key, 'child edge');
       if (composition) valid(Number.isSafeInteger(node.entityCount) && node.entityCount >= 0 && (node.targetId === undefined || entities.has(node.targetId)), 'entity reference');
+      if(inventory&&node.confirmedCount!==undefined)valid(Number.isSafeInteger(node.confirmedCount)&&node.confirmedCount>=0&&node.confirmedCount<=node.entityCount,'inventory confirmed count');
       if(!composition||inventory) valid(node.sourceId === undefined || sourceIds.has(node.sourceId), 'source reference');
       if (composition && node.declaredContextIds !== undefined) valid(strings(node.declaredContextIds) && new Set(node.declaredContextIds).size === node.declaredContextIds.length && node.declaredContextIds.every((id:string)=>contexts.has(id)), 'declared context');
     }
@@ -46,10 +50,15 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
   valid(view.inventory?.nodes instanceof Map && view.inventory.rowsByEntity instanceof Map && view.inventory.rowsBySource instanceof Map,'inventory');
   valid(view.inventory!.rowsByEntity.size===entities.size&&[...entities].every(id=>view.inventory!.rowsByEntity.has(id)),'inventory entity coverage');
   const inventory=view.inventory!;tree(inventory.nodes,inventory.rootKey,true,true);
+  valid(inventory.nodes.get(inventory.rootKey)!.children.map(key=>inventory.nodes.get(key)?.title).join('|')==='设备|装置性材料|构件|其他','inventory root groups');
+  for(const node of inventory.nodes.values())if(node.attachmentCount!==undefined)valid(Number.isSafeInteger(node.attachmentCount)&&node.attachmentCount>=0,'inventory attachment count');
   for(const [id,rows]of inventory.rowsByEntity)valid(entities.has(id)&&strings(rows)&&rows.length===1&&rows.every(key=>inventory.nodes.get(key)?.targetId===id),'inventory entity rows');
-  const owned=snapshot.memberships.filter(m=>m.ownerId);
-  valid(inventory.rowsBySource.size===owned.length,'inventory source coverage');
-  for(const member of owned){const row=inventory.nodes.get(inventory.rowsBySource.get(member.sourceId)??'');valid(row?.sourceId===member.sourceId,'inventory source row');}
+  for(const entity of snapshot.entities){const node=inventory.nodes.get(inventory.rowsByEntity.get(entity.id)![0])!;
+    valid(['category','subtype','subtypeLabel','classificationStatus','boundaryStatus','unknownReason','grain'].every(key=>node[key as keyof typeof node]===entity[key as keyof typeof entity])&&node.sourceCount===entity.sourceIds.length,'inventory entity facts');
+  }
+  valid(inventory.rowsBySource.size===sourceIds.size,'inventory source coverage');
+  for(const member of snapshot.memberships){const row=inventory.nodes.get(inventory.rowsBySource.get(member.sourceId)??'');valid(row?.sourceId===member.sourceId,'inventory source row');}
+  valid(Array.isArray(view.inventorySearch)&&view.inventorySearch.length===entities.size&&new Set(view.inventorySearch.map(r=>r.key)).size===entities.size&&view.inventorySearch.every(r=>entities.has(r.key)&&typeof r.title==='string'&&typeof r.subtitle==='string'&&typeof r.searchText==='string'),'inventory search');
   const input=view.compositionInput;valid(input&&Array.isArray(input.facts)&&input.facts.length===snapshot.entities.length&&new Set(input.facts.map(f=>f.entityId)).size===snapshot.entities.length&&input.facts.every(f=>entities.has(f.entityId)&&Array.isArray(f.spaces)&&Array.isArray(f.declarations)&&strings(f.hostEntityIds)
     && (f.sourceHints===undefined||strings(f.sourceHints))
     && (f.deliveryBuildingNames===undefined||Array.isArray(f.deliveryBuildingNames)&&f.deliveryBuildingNames.every(n=>object(n)&&typeof n.value==='string'&&typeof n.evidenceId==='string'))
