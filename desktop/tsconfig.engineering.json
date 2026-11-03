@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["scripts/engineering/corpus-task.ts", "scripts/engineering/geometry-task.ts", "acceptance/engineering/golden.ts"]
+}

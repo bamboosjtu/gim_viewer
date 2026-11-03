@@ -21,7 +21,7 @@ const viewerBridgeImports = new Set([
   'viewer/ifcEntryLoader.ts:@desktop/database.js',
   'viewer/ifcRegionalRuntime.ts:@desktop/ifcLodCache.js',
 ]);
-for (const layer of ['engineering','gim','viewer']) for (const path of files(resolve(root,layer))) {
+for (const layer of ['engineering','gim','viewer','ui']) for (const path of files(resolve(root,layer))) {
   const ast = ts.createSourceFile(path, readFileSync(path,'utf8'), ts.ScriptTarget.Latest, true);
   function visit(node) {
     const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
@@ -30,7 +30,7 @@ for (const layer of ['engineering','gim','viewer']) for (const path of files(res
       const name = specifier.text;
       const target = name.startsWith('.') ? relative(root,resolve(dirname(path),name)).replaceAll('\\','/').split('/')[0] : name;
       const banned = layer === 'engineering' ? /^(?:app|gim|viewer|ui|services|@desktop|@tauri-apps|three|web-ifc|maplibre)/
-        : layer === 'gim' ? /^(?:app|services|viewer|ui|@desktop|@tauri-apps)/ : /^(?:services|ui|@desktop|@tauri-apps)/;
+        : layer === 'gim' ? /^(?:app|services|viewer|ui|@desktop|@tauri-apps)/ : layer==='ui'?/^(?:@desktop|@tauri-apps)/:/^(?:services|ui|@desktop|@tauri-apps)/;
       const exception = viewerBridgeImports.has(`${relative(root,path).replaceAll('\\','/')}:${name}`);
       if (banned.test(target) && !exception) failures.push(`${relative(root,path)}: forbidden import ${name}`);
       const local=relative(root,path).replaceAll('\\','/');

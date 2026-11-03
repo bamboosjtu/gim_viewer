@@ -5,12 +5,13 @@ import { SOURCE_TREE_TEMPLATE_VERSION } from '../gim/engineering/sourceProjectio
 import type { EngineeringSnapshot } from '../engineering/types.js';
 import type { EngineeringSources } from '../gim/engineering/buildSources.js';
 import { decodeEngineeringArtifact, encodeEngineeringArtifact, type EngineeringCacheIdentity } from './engineeringCacheCodec.js';
+import {packEngineeringSource} from './engineeringSourceCodec.js';
 
 const valid = (condition: unknown, reason: string): void => { if (!condition) throw Error(`工程视图缓存无效：${reason}`); };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(item => typeof item === 'string');
 async function dependency(snapshot: EngineeringSnapshot, sourceDigest: string): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify([sourceDigest, snapshot]));
+  const bytes = new TextEncoder().encode(JSON.stringify([sourceDigest,packEngineeringSource(snapshot)]));
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(v => v.toString(16).padStart(2, '0')).join('');
 }
 

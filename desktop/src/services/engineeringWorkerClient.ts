@@ -1,6 +1,6 @@
 import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../gim/ifcSpatialParser.js';
 import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
-import type { EngineeringBuildResult, EngineeringExtractSummary, EngineeringWorkerCommand, EngineeringWorkerRequest, EngineeringWorkerResponse } from './engineeringWorkerProtocol.js';
+import type { EngineeringBuildResult, EngineeringCacheDomain, EngineeringCacheResult, EngineeringExtractSummary, EngineeringWorkerCommand, EngineeringWorkerRequest, EngineeringWorkerResponse } from './engineeringWorkerProtocol.js';
 import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
 import { decodeEngineeringWorkerResult } from './engineeringWorkerTransport.js';
 
@@ -61,6 +61,11 @@ export class EngineeringWorkerClient {
     if (response.type !== 'graph') throw Error('Engineering graph response expected');
     this.geometryOccurrences = response.geometryOccurrences;
     return response.summary;
+  }
+  async encodeCache(buildId:number,domain:EngineeringCacheDomain):Promise<EngineeringCacheResult>{
+    const response=await this.request({type:'encode-cache',buildId,domain});
+    if(response.type!=='cache'||response.result.buildId!==buildId||response.result.domain!==domain)throw Error('Engineering cache response identity mismatch');
+    return response.result;
   }
   async assemble(objects: IfcSpatialObject[], models: SpatialModelSummary[], identity?: EngineeringCacheIdentity, nodes: IfcSpatialNode[] = []): Promise<EngineeringBuildResult> {
     const response = await this.request({ type: 'assemble', objects, models, identity, nodes });

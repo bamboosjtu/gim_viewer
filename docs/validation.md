@@ -112,7 +112,7 @@ python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation
 - `npm run test:engineering:separation` 直接读取四个在册变电包及具有匹配 SHA 标记的解包目录，验证来源分区、三视图覆盖、组织声明变更和输入顺序不影响实体、几何 occurrence 不变，并对 s04 执行来源/实体/导航三域往返。缺样本直接失败，结果写入 `output/v020-stage1/sample-separation.json`；不证明实体人工金标准或原生渲染；
 - 九工程入口的研究台账守恒、固定案例与来源扫描对照属于不同验收项；旧输出与当前 parser/规则指纹不一致时不能作为本版通过证据。完整实体/成员/投影金标准尚待建立；
 - 生产构建的真实浏览器操作覆盖工程组成/来源、搜索、显隐、精化和工程切换；真实桌面原生操作、完整九工程路线与性能矩阵仍未齐备；
-- 旧 0.1.x 九站冷/暖基线（见[性能](performance.md)）只证明旧构建，不能替代 v0.2 工程实体/两视图链路的原生性能；
+- 旧 0.1.x 九站冷/暖基线（见[性能](performance.md)）只证明旧构建，不能替代 v0.2 工程实体/三视图链路的原生性能；
 - `substation01`–`substation04` 的选择隔离、L2 精化、空间语义与严格 SQLite/几何链；
 - 设备样本的源/派生冷开与缓存重开、树/属性/选择、设备→线路→设备切换；
 - 线路六包地图、导航、搜索和导出；

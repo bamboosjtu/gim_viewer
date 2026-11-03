@@ -38,30 +38,34 @@ export interface EngineeringBuildOptions {
 }
 
 async function saveResult(state: AppState, job: EngineeringJob, result: EngineeringBuildResult): Promise<void> {
-  if (result.cacheDisabled) {
-    state.engineeringCacheStatus = 'disabled';
-    state.engineeringCacheError = result.cacheDisabled;
-    job.update();
-    return;
-  }
-  if (!current(state, job) || !job.identity || job.session.projectId == null || (!result.sourceBytes && !result.entityBytes && !result.navigationBytes)) return;
+  if(!current(state,job)||!job.identity||job.session.projectId==null||!result.cachePlan?.length||!result.buildId)return;
   state.engineeringCacheStatus = 'saving'; job.update();
   try {
     await job.beforeCacheWrite;
     if (!current(state, job)) return;
     const { writeCacheFile } = await import('@desktop/database.js');
     if (!current(state, job)) return;
-    // Atomic files have independent headers and completion receipts. An entity
-    // snapshot binds the exact source body digest, so a partial write cannot mix domains.
-    if (result.sourceBytes) await writeCacheFile(job.session.projectId, engineeringCacheEntry(job.identity, 'sources'), result.sourceBytes, job.identity.sourceSha256);
-    if (!current(state, job)) return;
-    if (result.entityBytes) await writeCacheFile(job.session.projectId, engineeringCacheEntry(job.identity, 'entities'), result.entityBytes, job.identity.sourceSha256);
-    if (!current(state, job)) return;
-    if (result.navigationBytes) await writeCacheFile(job.session.projectId, engineeringCacheEntry(job.identity, 'navigation'), result.navigationBytes, job.identity.sourceSha256);
-    if (current(state, job)) { state.engineeringCacheStatus = result.cacheError ? 'error' : 'saved'; state.engineeringCacheError = result.cacheError ?? ''; job.update(); }
+    // Request only after publication and the source commit barrier. Persist and
+    // release each buffer before asking the Worker to encode the next domain.
+    for(const domain of result.cachePlan){
+      if(!current(state,job))return;
+      const encoded=await job.client.encodeCache(result.buildId,domain);
+      if(!current(state,job))return;
+      perfMark('工程缓存域编码',{domain,...encoded.metrics});
+      state.engineeringPipelineMetrics?.caches.push({domain,...encoded.metrics});
+      if(encoded.error||!encoded.bytes){state.engineeringCacheStatus=encoded.disabled?'disabled':'error';state.engineeringCacheError=encoded.disabled??encoded.error??'工程缓存编码未返回内容';job.update();return;}
+      await writeCacheFile(job.session.projectId,engineeringCacheEntry(job.identity,domain),encoded.bytes,job.identity.sourceSha256);
+      encoded.bytes=undefined;
+    }
+    if (current(state, job)) { state.engineeringCacheStatus = 'saved'; state.engineeringCacheError = ''; job.update(); }
   } catch (error) {
     if (current(state, job)) { state.engineeringCacheStatus = 'error'; state.engineeringCacheError = String(error); job.update(); }
   }
+}
+
+async function finishBuild(state:AppState,job:EngineeringJob,result:EngineeringBuildResult):Promise<void>{
+  job.finished=true;
+  try{await saveResult(state,job,result);}finally{job.client.close();}
 }
 
 function publish(state: AppState, job: EngineeringJob, result: EngineeringBuildResult): void {
@@ -70,6 +74,7 @@ function publish(state: AppState, job: EngineeringJob, result: EngineeringBuildR
   state.engineeringSnapshot = result.snapshot;
   state.engineeringNavigation = result.navigation;
   state.engineeringNavigationCacheHit = result.navigationCacheHit === true;
+  state.engineeringPipelineMetrics=result.metrics?{...result.metrics,caches:[]}:null;
   state.engineeringGeometryCatalog = result.geometryOccurrences; job.resolveGeometry(result.geometryOccurrences);
   state.engineeringRepresentationChanged?.();
   state.engineeringStatus = result.sources.complete ? 'ready' : 'partial';
@@ -98,8 +103,7 @@ async function enrich(state: AppState, job: EngineeringJob): Promise<void> {
       if (!current(state, job)) return;
       if (state.substationSpatialIndex !== spatial) continue;
       publish(state, job, result);
-      job.finished = true; job.client.close();
-      await saveResult(state, job, result);
+      await finishBuild(state,job,result);
     }
   } finally { job.enriching = false; }
 }
@@ -157,6 +161,7 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
   state.engineeringCleanup = () => { disposeProjection();resolveGeometry(null); controller.abort(); client.close(); if (jobs.get(state) === job) jobs.delete(state); };
   state.engineeringSources = null; state.engineeringSnapshot = null; state.engineeringNavigation = null; state.engineeringNavigationCacheHit = false;
   state.engineeringStatus = 'loading'; state.engineeringError = ''; state.engineeringCacheStatus = 'none'; state.engineeringCacheError = ''; update();
+  state.engineeringPipelineMetrics=null;
   const run = async () => {
     if (job.identity) {
       const { readCachedEntry } = await import('@desktop/database.js');
@@ -177,8 +182,7 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
             state.engineeringCacheError = '缓存来源未覆盖当前 IFC 清单，已从来源重建';
           } else {
             state.engineeringCacheStatus = 'hit'; publish(state, job, result);
-            job.finished = true; client.close();
-            await saveResult(state, job, result); return;
+            await finishBuild(state,job,result); return;
           }
         } catch (error) { if (!current(state, job)) return; state.engineeringCacheError = String(error); }
       }
@@ -221,7 +225,7 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
     const result = await client.assemble(spatial?.objects ?? [], spatial?.models ?? [], job.identity, spatial?.nodes ?? []);
     if (!current(state, job)) return;
     if (spatial === state.substationSpatialIndex) publish(state, job, result);
-    if ((spatial && spatial === state.substationSpatialIndex) || graph.ifcPaths.length === 0) { job.finished = true; client.close(); }
+    if ((spatial && spatial === state.substationSpatialIndex) || graph.ifcPaths.length === 0) { await finishBuild(state,job,result); }
     else {
       // Also catch a spatial publication which arrived during the initial
       // assembly, before a notification could register against job.ready.
@@ -235,7 +239,6 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
         else notifyEngineeringIfcEvidence(state);
       }).catch(error => { if (current(state, job)) notifyEngineeringIfcFailure(state, String(error)); });
     }
-    if (spatial === state.substationSpatialIndex) await saveResult(state, job, result);
   };
   job.ready = run().catch(error => fail(state, job, error));
   return job.ready;

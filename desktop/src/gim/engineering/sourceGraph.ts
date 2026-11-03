@@ -95,7 +95,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     const names: ObjectNameEvidence[] = [];
     for (const [kind, labels] of [
       ['object', ['SYMBOLNAME']], ['engineering', ['工程中名称', 'PROJECTNAME']],
-      ['family', ['设备名称']], ['source', ['NAME', 'OBJECTNAME']],
+      ['family', ['设备名称','DEVICENAME']], ['source', ['NAME', 'OBJECTNAME']],
     ] as const) {
       for (const p of row.properties) if (p.keys?.some(k => (labels as readonly string[]).includes(k.toUpperCase())) && p.value.trim() && !['-', '/', '-100', '软件自动生成'].includes(p.value.trim())) {
         names.push({ kind, value: p.value, evidenceId: JSON.stringify([row.id, p.path, p.line, p.keys]) });

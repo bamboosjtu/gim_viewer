@@ -68,6 +68,9 @@ jobs:
       - name: Check engineering catalog documentation
         run: npm run check:engineering-catalog
 
+      - name: Check engineering documentation contracts
+        run: npm run check:engineering-docs
+
       - name: Check native acceptance tooling
         run: npm run test:acceptance-tools
 

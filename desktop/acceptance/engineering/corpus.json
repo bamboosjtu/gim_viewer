@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "samples": [
+    {
+      "id": "s01",
+      "path": "demo/substation01.gim",
+      "sha256": "711259814db95999f5282af1871da9cb50db4548b71626637b33038b062fc390",
+      "bytes": 14381403,
+      "payloadOffset": 784
+    },
+    {
+      "id": "s02",
+      "path": "demo/substation02.gim",
+      "sha256": "a1c0990162e769f678f2fe5eeb275b1266fb8640776399289197d1998d372f29",
+      "bytes": 34176631,
+      "payloadOffset": 776
+    },
+    {
+      "id": "s03",
+      "path": "demo/substation03.gim",
+      "sha256": "3197c03ef2c6c423cbb85447f71491a4112db0f9a8cea0c9f72f0b410b8175ab",
+      "bytes": 71831575,
+      "payloadOffset": 776
+    },
+    {
+      "id": "s04",
+      "path": "demo/substation04.gim",
+      "sha256": "00b7746d5ea6ab3b92c215c1e42ffc7eec5a9f0517c1c555fa27a596d4d800dc",
+      "bytes": 11789608,
+      "payloadOffset": 784
+    },
+    {
+      "id": "a31",
+      "path": "demo/500-A3-1 三维设计.gim",
+      "sha256": "ea53999fec01bd7440392a21b59baa42547e842bc781cf7d32cff5994212be0b",
+      "bytes": 15637221,
+      "payloadOffset": 776
+    },
+    {
+      "id": "b11",
+      "path": "demo/500-B1-1 三维设计.gim",
+      "sha256": "903b1271c64fe36b2fdffd0d049c2b07f4449c3ddd980101a76bc3042025d223",
+      "bytes": 28511264,
+      "payloadOffset": 776
+    },
+    {
+      "id": "b12",
+      "path": "demo/500-B1-2 三维设计.gim",
+      "sha256": "05472e3a029e4185730ed94ef9a2d2779559126c6d04fa657db9cfabe92c6408",
+      "bytes": 11663698,
+      "payloadOffset": 776
+    },
+    {
+      "id": "b13",
+      "path": "demo/500-B1-3 三维设计.gim",
+      "sha256": "f9f36723e80635daafcc7046f50ba3dc1d912c1b0bc0bf2610dc5f188688b8dc",
+      "bytes": 20348466,
+      "payloadOffset": 0
+    },
+    {
+      "id": "b14",
+      "path": "demo/500-B1-4 三维设计.gim",
+      "sha256": "98cb2ff5902022dd4b4d225e57ac755b34f376de44cd5d2b067f37819b951d7a",
+      "bytes": 31003932,
+      "payloadOffset": 776
+    }
+  ]
+}

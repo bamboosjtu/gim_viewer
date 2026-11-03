@@ -76,7 +76,7 @@ import type {
   WireModFile,
 } from '../gim/geometry/ir.js';
 import type { LineAttributeIndex } from '../gim/lineAttributeTypes.js';
-import type { LineFamPropertyRecord, LineDevPropertyRecord } from '@desktop/database.js';
+import type { LineFamPropertyRecord, LineDevPropertyRecord } from '../gim/lineAttributeRecords.js';
 import { perfBegin, perfCurrentSession, type PerfSession } from '../utils/perfTimings.js';
 
 /**

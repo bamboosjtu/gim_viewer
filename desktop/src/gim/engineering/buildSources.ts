@@ -8,7 +8,7 @@ import { engineeringObjectEvidence } from './objectEvidence.js';
 import type { EngineeringSnapshot } from '../../engineering/types.js';
 import { collectSourceGeometryOccurrences } from './geometryOccurrences.js';
 
-export const ENGINEERING_SOURCE_VERSION = 'engineering-source-v8';
+export const ENGINEERING_SOURCE_VERSION = 'engineering-source-v9';
 export type EngineeringSpatialContext = Pick<IfcSpatialNode, 'key' | 'modelId' | 'expressId' | 'ifcType' | 'kind' | 'globalId' | 'name' | 'sourcePath' | 'parentKey' | 'longName'> & { elevationMetres?: number };
 export interface EngineeringSources {
   version: string;

@@ -20,6 +20,8 @@ class LoopbackPort implements EngineeringWorkerPort {
   holdExtract = false;
   resume: (() => void) | null = null;
   holdAssemble = false;
+  holdCache = false;
+  resumeCache: (()=>void)|null=null;
   resumeAssembly: (() => void) | null = null;
   private handle = createEngineeringWorkerHandler();
   postMessage(request: EngineeringWorkerRequest): void {
@@ -27,6 +29,7 @@ class LoopbackPort implements EngineeringWorkerPort {
     void (async () => {
       if (this.holdExtract && request.type === 'extract') await new Promise<void>(resolve => { this.resume = resolve; });
       if (this.holdAssemble && request.type === 'assemble') await new Promise<void>(resolve => { this.resumeAssembly = resolve; });
+      if (this.holdCache && request.type === 'encode-cache') await new Promise<void>(resolve => { this.resumeCache=resolve; });
       try {
         const reply = await this.handle(request);
         this.onmessage?.({ data: { ...reply, requestId: request.requestId } as EngineeringWorkerResponse } as MessageEvent<EngineeringWorkerResponse>);
@@ -81,7 +84,7 @@ describe('session-owned production engineering build', () => {
     store.set(entry, new Uint8Array([1, 2, 3]));
     const port = new LoopbackPort();
     await beginEngineeringBuild(app, files, { createWorker: portFactory(port) });
-    expect(port.commands).toEqual(['restore']);
+    expect(port.commands).toEqual(['restore','encode-cache']);
     expect(app.engineeringSnapshot).toEqual(cold); expect(app.engineeringNavigation).toEqual(view);
     expect(app.engineeringNavigationCacheHit).toBe(false); expect(app.engineeringCacheStatus).toBe('saved');
     const next = new LoopbackPort(); await beginEngineeringBuild(app, files, { createWorker: portFactory(next) });
@@ -115,7 +118,7 @@ describe('session-owned production engineering build', () => {
     const port = new LoopbackPort();
     await beginEngineeringBuild(app, files, { createWorker: portFactory(port) });
     expect(app.engineeringSnapshot).toEqual(cold);
-    expect(port.commands).toEqual(['restore']);
+    expect(port.commands).toEqual(['restore','encode-cache']);
     expect(app.engineeringCacheStatus).toBe('saved');
   });
 
@@ -230,6 +233,18 @@ describe('session-owned production engineering build', () => {
     expect(app.engineeringCacheError).toContain('disk-full');
   });
 
+  it('cancels a cache request on project switch without saving a late old-domain result',async()=>{
+    const app=state(),old=new LoopbackPort();old.holdCache=true;
+    const pending=beginEngineeringBuild(app,sourceFiles(),{createWorker:portFactory(old)});
+    await expect.poll(()=>old.resumeCache!==null).toBe(true);
+    expect(app.engineeringStatus).toBe('ready');expect(store.size).toBe(0);
+    app.activateProject(8,'b'.repeat(64));
+    await beginEngineeringBuild(app,sourceFiles('断路器'),{createWorker:portFactory(new LoopbackPort())});
+    const newest=app.engineeringSnapshot;old.resumeCache!();await pending;
+    expect(old.terminated).toBe(true);expect(app.engineeringSnapshot).toBe(newest);
+    expect([...store.keys()].every(path=>path.includes('b'.repeat(64)))).toBe(true);
+  });
+
   it('keeps normalization available when cache encoding fails', async () => {
     vi.stubGlobal('CompressionStream', class { constructor() { throw Error('compression-unavailable'); } });
     const app = state();
@@ -244,9 +259,10 @@ describe('session-owned production engineering build', () => {
   it('publishes the in-memory model before source extraction commits, then saves its cache', async () => {
     const app = state(); let commit!: () => void;
     const barrier = new Promise<void>(resolve => { commit = resolve; });
-    const build = beginEngineeringBuild(app, sourceFiles(), { createWorker: portFactory(new LoopbackPort()), beforeCacheWrite: barrier });
+    const port=new LoopbackPort();const build = beginEngineeringBuild(app, sourceFiles(), { createWorker: portFactory(port), beforeCacheWrite: barrier });
     await expect.poll(() => app.engineeringStatus).toBe('ready');
     expect(store.size).toBe(0);
+    expect(port.commands).not.toContain('encode-cache');
     commit(); await build;
     expect(store.size).toBe(3);
     expect(app.engineeringCacheStatus).toBe('saved');

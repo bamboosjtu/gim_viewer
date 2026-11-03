@@ -77,7 +77,7 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     },
     designations: values(record, ['工程中名称', 'PROJECTNAME', 'Projectname']),
     identityCodes: values(record, ['电网工程标识系统编码', '设备编码', 'GRIDIDENTIFICATIONSYSTEMCODE']),
-    identityNames: values(record, ['设备名称', '工程中名称', 'PROJECTNAME', 'Projectname']),
+    identityNames: values(record, ['设备名称','DEVICENAME', '工程中名称', 'PROJECTNAME', 'Projectname']),
     phases: values(record, ['相数','PHASECOUNT']).map(p=>({...p,value:/^(?:1|单相)$/.test(p.value)?'单相':p.value})),
     phaseLabels:values(record,['相别','PHASE','PHASELABEL']),
   };

@@ -16,16 +16,16 @@ async function fixture() {
 }
 
 it('transfers owned buffers once and restores source facts, whole membership, maps and placement matrices', async () => {
-  const result = await fixture(), cached = new Uint8Array([1,2,3,4,5,6]);
-  const wire = encodeEngineeringWorkerResult({ ...result, sourceBytes: cached.subarray(0,3), entityBytes: cached.subarray(3), entityCacheHit: true });
-  const buffers = engineeringWorkerResultTransfers(wire); expect(buffers).toHaveLength(2);
+  const result = await fixture();
+  const wire = encodeEngineeringWorkerResult({ ...result, buildId:1,cachePlan:['sources','entities','navigation'],entityCacheHit:true });
+  const buffers = engineeringWorkerResultTransfers(wire); expect(buffers).toHaveLength(1);
   const received = structuredClone(wire, { transfer: buffers });
-  expect(wire.body.byteLength).toBe(0); expect(cached.byteLength).toBe(0);
+  expect(wire.body.byteLength).toBe(0);expect('sourceBytes' in wire).toBe(false);
   const restored = await decodeEngineeringWorkerResult(received, () => true);
   expect(restored.sources).toEqual(result.sources); expect(restored.snapshot).toEqual(result.snapshot);
   expect(restored.navigation).toEqual(result.navigation); expect(restored.navigation.sourceNodes).toBeInstanceOf(Map);
   expect(restored.geometryOccurrences).toEqual(result.geometryOccurrences);
-  expect([...restored.sourceBytes!]).toEqual([1,2,3]); expect([...restored.entityBytes!]).toEqual([4,5,6]); expect(restored.entityCacheHit).toBe(true);
+  expect(restored.cachePlan).toEqual(['sources','entities','navigation']);expect(restored.entityCacheHit).toBe(true);expect(restored.metrics?.transportBytes).toBeGreaterThan(0);
 });
 
 it('interns repeated family lines instead of expanding each occurrence across the Worker boundary', async () => {

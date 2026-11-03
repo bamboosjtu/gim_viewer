@@ -192,6 +192,7 @@ export class AppState {
   engineeringStatus: 'none' | 'loading' | 'partial' | 'ready' | 'error' = 'none';
   engineeringError = '';
   engineeringCacheStatus: 'none' | 'hit' | 'miss' | 'saving' | 'saved' | 'partial' | 'disabled' | 'error' = 'none';
+  engineeringPipelineMetrics: (NonNullable<import('../services/engineeringWorkerProtocol.js').EngineeringBuildResult['metrics']> & {caches:Array<{domain:string;encodeMs:number;plainBytes:number;encodedBytes:number}>}) | null = null;
   engineeringCacheError = '';
   engineeringCleanup: (() => void) | null = null;
   engineeringListeners = new Set<() => void>();
@@ -486,6 +487,7 @@ export class AppState {
     this.engineeringGeometryCatalog = null; this.engineeringGeometryReady = null;
     this.engineeringStatus = 'none'; this.engineeringError = '';
     this.engineeringCacheStatus = 'none'; this.engineeringCacheError = '';
+    this.engineeringPipelineMetrics=null;
     this.engineeringListeners.clear();
     this.engineeringNavMode = 'composition';
     this.engineeringExpandedRows = { composition: new Set<string>(), source: new Set<string>(), inventory:new Set<string>() };

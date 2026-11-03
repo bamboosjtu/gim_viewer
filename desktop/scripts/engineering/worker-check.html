@@ -27,9 +27,10 @@ globalThis.runEngineeringWorkerCheck = async () => {
     const result=await client.assemble([],[],identity);
     check(result.sources.complete&&result.snapshot.entities.length===1,'transformer includes its embedded terminal box');
     check(result.snapshot.memberships.length===3,'source conservation');
-    check(result.sourceBytes?.byteLength&&result.entityBytes?.byteLength,'Worker cache encoding');
-    check(result.navigationBytes?.byteLength&&result.navigation.sourceRows.size===3,'Worker navigation projection and encoding');
-    sourceBytes=result.sourceBytes;entityBytes=result.entityBytes;navigationBytes=result.navigationBytes;expected=result.snapshot;expectedNavigation=result.navigation;
+    check(!('sourceBytes' in result)&&result.cachePlan.join(',')==='sources,entities,navigation','display-first transport has no cache bodies');
+    const caches={};
+    for(const domain of result.cachePlan){const artifact=await client.encodeCache(result.buildId,domain);check(artifact.bytes?.length&&!artifact.error,'deferred '+domain+' cache');caches[domain]=artifact.bytes;}
+    sourceBytes=caches.sources;entityBytes=caches.entities;navigationBytes=caches.navigation;expected=result.snapshot;expectedNavigation=result.navigation;
   } finally {client.close();}
   const warm=EngineeringWorkerClient.create(()=>true);
   try {
@@ -41,7 +42,7 @@ globalThis.runEngineeringWorkerCheck = async () => {
   const repair=EngineeringWorkerClient.create(()=>true);
   try {
     const restored=await repair.restore(sourceBytes.slice(),new Uint8Array([1,2,3]),identity);
-    check(restored.entityCacheHit===false&&restored.entityBytes?.length,'entity-only repair');
+    check(restored.entityCacheHit===false&&(await repair.encodeCache(restored.buildId,'entities')).bytes?.length,'entity-only repair');
     check(JSON.stringify(restored.snapshot)===JSON.stringify(expected),'repair does not change engineering boundaries');
   } finally {repair.close();}
   const binary=EngineeringWorkerClient.create(()=>true);

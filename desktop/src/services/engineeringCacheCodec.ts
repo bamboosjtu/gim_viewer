@@ -9,7 +9,7 @@ import { SOURCE_TREE_TEMPLATE_VERSION } from '../gim/engineering/sourceProjectio
 import { ENGINEERING_CATALOG_VERSION } from '../engineering/catalogLabels.js';
 import { packEngineeringSource, unpackEngineeringSource } from './engineeringSourceCodec.js';
 
-export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v2';
+export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v3';
 export const MAX_ENGINEERING_CACHE_BYTES = 384 * 1024 * 1024;
 export interface EngineeringCacheIdentity {
   sourceSha256: string;
@@ -54,11 +54,11 @@ async function gzip(bytes: Uint8Array, decompress = false, limit = MAX_ENGINEERI
 async function encode(kind: Kind, payload: unknown, id: EngineeringCacheIdentity, sourceDigest?: string): Promise<{ bytes: Uint8Array; digest: string }> {
   engineeringCacheEntry(id, kind);
   requireValid(id.parserVersion.length > 0, 'parser contract');
-  const plain = encoder.encode(JSON.stringify(kind === 'sources' ? packEngineeringSource(payload) : payload));
+  const plain = encoder.encode(JSON.stringify(packEngineeringSource(payload)));
   requireValid(plain.length <= MAX_ENGINEERING_CACHE_BYTES, 'plain size');
   const body = await gzip(plain), digest = await sha(body);
   const header = encoder.encode(JSON.stringify({ kind, contract: contract(kind), source: id.sourceSha256.toLowerCase(), parser: id.parserVersion,
-    manifest: await manifestDigest(id), complete: true, encoding: 'gzip', plainBytes: plain.length, bytes: body.length, digest, sourceDigest }));
+    manifest: await manifestDigest(id), complete: true, encoding: kind==='sources'?'gzip':'gzip-table-v1', plainBytes: plain.length, bytes: body.length, digest, sourceDigest }));
   const bytes = new Uint8Array(4 + header.length + body.length);
   new DataView(bytes.buffer).setUint32(0, header.length, true); bytes.set(header, 4); bytes.set(body, 4 + header.length);
   return { bytes, digest };
@@ -72,14 +72,21 @@ async function decode(kind: Kind, bytes: Uint8Array, id: EngineeringCacheIdentit
   const header: unknown = JSON.parse(decoder.decode(bytes.subarray(4, 4 + length)));
   requireValid(record(header), 'header');
   const meta = header as Record<string, unknown>, body = bytes.subarray(4 + length);
-  requireValid(meta.kind === kind && meta.contract === contract(kind) && meta.source === id.sourceSha256.toLowerCase() && meta.parser === id.parserVersion && meta.complete === true && meta.encoding === 'gzip', 'identity / version');
+  requireValid(meta.kind === kind && meta.contract === contract(kind) && meta.source === id.sourceSha256.toLowerCase() && meta.parser === id.parserVersion && meta.complete === true && meta.encoding === (kind==='sources'?'gzip':'gzip-table-v1'), 'identity / version');
   requireValid(meta.manifest === await manifestDigest(id) && meta.sourceDigest === sourceDigest, 'input dependencies');
   requireValid(meta.bytes === body.length && Number.isSafeInteger(meta.plainBytes) && (meta.plainBytes as number) > 0 && (meta.plainBytes as number) <= MAX_ENGINEERING_CACHE_BYTES, 'body length');
   requireValid(meta.digest === await sha(body), 'checksum');
   const plain = await gzip(body, true, meta.plainBytes as number);
   requireValid(plain.length === meta.plainBytes, 'expanded length');
   const parsed: unknown = JSON.parse(decoder.decode(plain));
-  return { payload: kind === 'sources' ? unpackEngineeringSource(parsed) : parsed, digest: meta.digest as string };
+  return { payload: unpackEngineeringSource(parsed), digest: meta.digest as string };
+}
+
+/** Sizes of a newly encoded artifact, without decoding its model again. */
+export function engineeringCacheSizes(bytes:Uint8Array):{plainBytes:number;encodedBytes:number}{
+  const length=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength).getUint32(0,true);
+  const header=JSON.parse(decoder.decode(bytes.subarray(4,4+length))) as {plainBytes:number};
+  return {plainBytes:header.plainBytes,encodedBytes:bytes.byteLength};
 }
 
 export function assertEngineeringSources(value: unknown): asserts value is EngineeringSources {

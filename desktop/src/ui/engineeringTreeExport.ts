@@ -1,7 +1,6 @@
 import type { EngineeringNavigationData, EngineeringSourceNode } from '../services/engineeringViewService.js';
 import type { CompositionNode } from '../engineering/composition.js';
-import { downloadTextFile } from '../shared/csv.js';
-import { isTauri } from '@desktop/runtime.js';
+import { saveTreeExport } from '../services/treeExportService.js';
 
 export type EngineeringTreeMode = 'composition' | 'source' | 'inventory';
 
@@ -92,8 +91,7 @@ export function engineeringTreeExport(data: EngineeringNavigationData, mode: Eng
 export async function downloadEngineeringTree(data: EngineeringNavigationData, mode: EngineeringTreeMode, project: string): Promise<string | null> {
   const payload = engineeringTreeExport(data, mode, project);
   const text=JSON.stringify(payload,null,2),name=`${project.replace(/[<>:"/\\|?*]/g,'_').slice(0,100)||'工程'}-${mode==='composition'?'工程组成':mode==='source'?'来源模型树':'设备材料清册'}.json`;
-  if(isTauri()) { const {saveEngineeringTreeJson}=await import('@desktop/treeExport.js');return saveEngineeringTreeJson(name,text); }
-  downloadTextFile(name,text,'application/json;charset=utf-8');return name;
+  return saveTreeExport(name,text);
 }
 
 export async function copyEngineeringTree(data: EngineeringNavigationData, mode: EngineeringTreeMode, project: string): Promise<void> {

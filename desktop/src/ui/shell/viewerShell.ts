@@ -1,6 +1,6 @@
 import type { AppState } from '../../app/state.js';
 import { btnCacheManager, btnLoadGim, btnLoadLocal, gimFileInput } from '../dom.js';
-import { isTauri } from '@desktop/runtime.js';
+import { isTauri } from '../../services/platformService.js';
 import { hideLoading, showLoading } from '../../services/gimOpenCore.js';
 import { escapeHtml } from '../../shared/html.js';
 import { setSelectionStatus } from './statusBar.js';

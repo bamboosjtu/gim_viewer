@@ -8,6 +8,15 @@ const extract = (entries: Record<string,string>) => extractEngineeringSourceGrap
 const model = (graph: Awaited<ReturnType<typeof extract>>) => normalizeEngineeringModel('p',engineeringObjectEvidence(graph,graph.records),graph.aliases);
 
 describe('object evidence independent of organization and geometry',()=>{
+  it('retains DeviceName-only family channels for current roots and uniquely matched actual child occurrences',async()=>{
+    const graph=await extract({'project.cbm':'OBJECTMODELPOINTER=assembly.dev\nSUBSYSTEM0=part.cbm','assembly.dev':'SYMBOLNAME=组合电器GIS\nSUBDEVICE0=part.dev',
+      'part.dev':'BASEFAMILY=part.fam','part.fam':'[设备]\nDeviceName=端子箱','part.cbm':'OBJECTMODELPOINTER=part.dev'});
+    const child=graph.records.find(r=>r.source==='part.dev')!;
+    expect(child.name).toBe('端子箱');expect(child.nameEvidence?.[0]).toMatchObject({kind:'family',value:'端子箱'});
+    expect(engineeringObjectEvidence(graph,[child])[0].identityNames[0].value).toBe('端子箱');
+    const alone=await extract({'project.cbm':'OBJECTMODELPOINTER=part.dev','part.dev':'BASEFAMILY=part.fam','part.fam':'[设备]\nDeviceName=独立端子箱'});
+    expect(model(alone).entities[0].category).toBe('E16.terminal_box');
+  });
   it('ancestor names cannot declare main identity, reserve status or a neutral host',async()=>{
     const input={
       'project.cbm':'SUBSYSTEM0=unit.cbm\nSYSTEMNAME1=2号备用主变系统',
