@@ -75,8 +75,9 @@ export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectI
   if(!hasIdentity&&/螺母|螺钉|垫圈|销轴|开口销|膨胀螺栓|^螺栓$/.test(ownName))return result('detail','internal_fastener');
   if(group.test(name)&&hasChildren&&object.traits.assemblyContainer)return result('container','source_container');
   const named=categoryFromName(ownName),namedIndependent=independent.test(ownName)&&named!=='U-OBJECT';
+  const mechanicalBox=/机构箱$/.test(ownName);
   if(typed==='neutral_set')return neutral('neutral_set_identity',[object.typeEvidenceId??`type:${object.sourceId}`],true);
-  if(!hasIdentity&&part.test(ownName)&&!namedIndependent&&!(named==='M07'&&!object.assemblyParentId)){
+  if(!hasIdentity&&part.test(ownName)&&!namedIndependent&&!mechanicalBox&&!(named==='M07'&&!object.assemblyParentId)){
     return fragment?{...result('fragment','declared_design_fragment'),assemblyCategory,assemblySignature:prefix![1]}:result('part','component_head');
   }
   if(!hasIdentity){

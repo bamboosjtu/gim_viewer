@@ -27,10 +27,11 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
     valid(nodes instanceof Map && typeof root === 'string' && nodes.has(root), 'root');
     for (const [key, node] of nodes) {
       valid(typeof key === 'string' && object(node) && node.key === key && typeof node.title === 'string' && strings(node.children) && new Set(node.children).size === node.children.length, 'node');
-      valid((inventory ? ['project','group','entity','pending','record']:composition ? ['project', 'group', 'entity', 'pending'] : ['group', 'cbm', 'record', 'ifc-file', 'spatial']).includes(node.kind), 'node kind');
+      valid((inventory ? ['project','group','template','entity','pending','record']:composition ? ['project', 'group', 'entity', 'pending'] : ['group', 'cbm', 'record', 'ifc-file', 'spatial']).includes(node.kind), 'node kind');
       valid(key === root ? node.parent === undefined : typeof node.parent === 'string' && nodes.has(node.parent), 'parent');
       for (const child of node.children) valid(nodes.get(child)?.parent === key, 'child edge');
       if (composition) valid(Number.isSafeInteger(node.entityCount) && node.entityCount >= 0 && (node.targetId === undefined || entities.has(node.targetId)), 'entity reference');
+      if(inventory&&node.kind==='template')valid(typeof node.template==='string'&&node.template.length>0,'inventory template');
       if(inventory&&node.confirmedCount!==undefined)valid(Number.isSafeInteger(node.confirmedCount)&&node.confirmedCount>=0&&node.confirmedCount<=node.entityCount,'inventory confirmed count');
       if(!composition||inventory) valid(node.sourceId === undefined || sourceIds.has(node.sourceId), 'source reference');
       if (composition && node.declaredContextIds !== undefined) valid(strings(node.declaredContextIds) && new Set(node.declaredContextIds).size === node.declaredContextIds.length && node.declaredContextIds.every((id:string)=>contexts.has(id)), 'declared context');

@@ -1,6 +1,6 @@
 import type { EngineeringSnapshot, EvidenceValue } from '../../engineering/types.js';
-import type { CompositionAssignment, CompositionDeclaration } from '../../engineering/composition.js';
-import { assignEngineeringComposition, canonicalBuildingName, declaredEngineeringComposition, type CompositionContextEvidence } from '../../engineering/compositionTemplate.js';
+import type { CompositionDeclaration } from '../../engineering/composition.js';
+import { canonicalBuildingName, declaredEngineeringComposition, type CompositionContextEvidence } from '../../engineering/compositionTemplate.js';
 import type { EngineeringSources, EngineeringSpatialContext } from './buildSources.js';
 
 /** File/placement hints belong to source adaptation and spatial refinement,
@@ -80,10 +80,6 @@ export function collectCompositionEvidence(sources: EngineeringSources, snapshot
       track: tracks.size === 1 ? [...tracks][0] : 'mixed'};
   });
   return evidence;
-}
-
-export function collectCompositionContexts(sources: EngineeringSources,snapshot:EngineeringSnapshot,spatial:ReadonlyMap<string,EngineeringSpatialContext>):CompositionAssignment[]{
-  return assignEngineeringComposition(snapshot,collectCompositionEvidence(sources,snapshot,spatial));
 }
 
 export function collectDeclaredCompositionContexts(sources: EngineeringSources): CompositionDeclaration[] {

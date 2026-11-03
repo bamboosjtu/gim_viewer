@@ -20,6 +20,7 @@ export interface ExportedEngineeringTreeNode {
   category?:string;
   subtype?:string;
   subtypeLabel?:string;
+  template?:string;
   classificationStatus?:string;
   boundaryStatus?:string;
   unknownReason?:string;

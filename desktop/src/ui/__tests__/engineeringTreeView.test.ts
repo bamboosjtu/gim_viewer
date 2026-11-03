@@ -49,15 +49,18 @@ describe('engineering composition and provenance navigation', () => {
     let cursor:string|undefined=key;
     while(cursor){f.state.engineeringExpandedRows.inventory.add(cursor);cursor=inventory.nodes.get(cursor)?.parent;}
     f.state.engineeringNavMode='inventory';const {renderEngineeringTree}=await import('../engineeringTreeView.js');renderEngineeringTree(f.state);
-    const group=inventory.nodes.get(inventory.nodes.get(key)!.parent!)!;
-    expect(group.title).toBe('控制柜');expect(view.inventorySearch!.find(r=>r.key===f.box.id)?.subtitle).toBe('设备材料清册 / 设备 / 二次设备 / 控制柜');
-    const item=[...document.querySelectorAll<HTMLElement>('.tree-row')].find(r=>r.dataset.nodePath===group.key)!;
+    const template=inventory.nodes.get(inventory.nodes.get(key)!.parent!)!;
+    const group=inventory.nodes.get(template.parent!)!;
+    expect(template.kind).toBe('template');expect(template.title).toBe('主变测控柜');
+    expect(group.title).toBe('控制柜');expect(view.inventorySearch!.find(r=>r.key===f.box.id)?.subtitle).toBe('设备材料清册 / 设备 / 二次设备 / 控制柜 / 主变测控柜');
+    const item=[...document.querySelectorAll<HTMLElement>('.tree-row')].find(r=>r.dataset.nodePath===template.key)!;
     item.click();await vi.dynamicImportSettled();
     await vi.waitFor(()=>expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.box.id])));
-    expect(document.querySelector('.props-header')?.textContent).toBe('控制柜');
+    expect(document.querySelector('.props-header')?.textContent).toBe('主变测控柜');
   });
   it('labels inferred composition rows and exposes the evidence in the inspector',async()=>{
     const f=await fixture(),view=f.state.engineeringNavigation!.composition,key=view.rowsByEntity.get(f.main.id)![0],node=view.nodes.get(key)!;
+    f.state.engineeringNavMode='composition';
     node.inferred=true;node.evidence=['spatial-building-footprint','composition-spatial-v1'];
     let cursor:string|undefined=key;
     while(cursor){f.state.engineeringExpandedRows.composition.add(cursor);cursor=view.nodes.get(cursor)?.parent;}
@@ -84,6 +87,7 @@ describe('engineering composition and provenance navigation', () => {
     const graph = await extractEngineeringSourceGraph({ paths: Object.keys(raw), readText: async path => raw[path] });
     const built = buildEngineeringSources('package', graph, [], []), state = new AppState(); state.activateProject(1, 'package'); state.currentProjectType = 'substation';
     state.engineeringSources = built.sources; state.engineeringSnapshot = built.snapshot; state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
+    state.engineeringNavMode = 'composition';
     const { renderEngineeringTree } = await import('../engineeringTreeView.js'); renderEngineeringTree(state); search('按钮');
     const hits = [...document.querySelectorAll<HTMLElement>('[role="option"]')]; expect(hits).toHaveLength(2);
     expect(hits.map(hit => hit.textContent).join(' / ')).toContain('24S间隔');
@@ -99,6 +103,7 @@ describe('engineering composition and provenance navigation', () => {
     const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async path=>raw[path]}), built=buildEngineeringSources('package',graph,[],[]);
     const state=new AppState();state.activateProject(1,'package');state.currentProjectType='substation';
     state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);state.engineeringStatus='ready';
+    state.engineeringNavMode='composition';
     const data=state.engineeringNavigation.composition, building=[...data.nodes.values()].find(node=>node.title==='主控通信楼01')!;
     state.engineeringExpandedRows.composition.add(data.rootKey);state.engineeringExpandedRows.composition.add(building.parent!);
     const {renderEngineeringTree}=await import('../engineeringTreeView.js');renderEngineeringTree(state);
@@ -125,6 +130,7 @@ describe('engineering composition and provenance navigation', () => {
     for (let i = 0; i < 600; i++) { raw[`item${i}.cbm`] = `OBJECTMODELPOINTER=item${i}.dev`; raw[`item${i}.dev`] = `SYMBOLNAME=钢梁${i}`; }
     const graph = await extractEngineeringSourceGraph({ paths: Object.keys(raw), readText: async path => raw[path] }), built = buildEngineeringSources('package', graph, [], []);
     const state = new AppState(); state.currentProjectType = 'substation'; state.engineeringSnapshot = built.snapshot; state.engineeringSources = built.sources; state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
+    state.engineeringNavMode = 'composition';
     const { renderEngineeringTree } = await import('../engineeringTreeView.js'); renderEngineeringTree(state);
     search('钢梁599'); document.querySelector<HTMLElement>('[role="option"]')!.click(); await vi.dynamicImportSettled();
     const row = document.querySelector<HTMLElement>('.tree-row.selected')!;
@@ -138,14 +144,14 @@ describe('engineering composition and provenance navigation', () => {
   it('offers three independent views while source facts are still preparing', async () => {
     const state = new AppState(); state.currentProjectType = 'substation';
     const { buildAndRenderCbmTree } = await import('../cbmTreeView.js'); buildAndRenderCbmTree(state, vi.fn());
-    expect([...document.querySelectorAll('.substation-nav-mode-btn')].map(b => b.textContent)).toEqual(['工程组成', '来源', '设备材料清册']);
+    expect([...document.querySelectorAll('.substation-nav-mode-btn')].map(b => b.textContent)).toEqual(['设备材料清册', '工程组成', '来源']);
     expect(document.body.textContent).toContain('正在识别工程整体');
     document.querySelector<HTMLButtonElement>('[data-engineering-mode="source"]')!.click();
     expect(document.body.textContent).toContain('正在读取来源引用与装配');
   });
   it('searches an internal source into its whole, then traces it to the actual assembly and back', async () => {
     const f = await fixture();
-    const { buildAndRenderCbmTree } = await import('../cbmTreeView.js'); buildAndRenderCbmTree(f.state, vi.fn());
+    const { buildAndRenderCbmTree } = await import('../cbmTreeView.js'); f.state.engineeringNavMode='composition'; buildAndRenderCbmTree(f.state, vi.fn());
     search('散热器'); const hits = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
     expect(hits).toHaveLength(1); expect(hits[0].textContent).toContain('主变压器'); hits[0].click();
     expect(f.state.selectionRequest?.target).toEqual({ kind: 'engineering', key: f.main.id });
@@ -164,7 +170,7 @@ describe('engineering composition and provenance navigation', () => {
     expect(f.state.engineeringSnapshot?.entities).toHaveLength(2);
   });
   it('preserves an independent nested control cabinet and expanded rows when views refresh', async () => {
-    const f = await fixture(), { renderEngineeringTree } = await import('../engineeringTreeView.js'); renderEngineeringTree(f.state);
+    const f = await fixture(), { renderEngineeringTree } = await import('../engineeringTreeView.js'); f.state.engineeringNavMode='composition'; renderEngineeringTree(f.state);
     search('测控柜'); document.querySelector<HTMLElement>('[role="option"]')!.click();
     await vi.waitFor(() => expect(document.querySelector('.props-header')?.textContent).toBe('1号主变测控柜'));
     expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.box.id]));

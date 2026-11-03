@@ -17,7 +17,7 @@ GIM 包
 三条链只通过稳定身份相交：
 
 - 来源链：文件条目、CBM 引用、DEV 实际装配、IFC 外露对象和空间容器；不依赖展示树深度。
-- 实体链：包内来源 occurrence → 中立对象证据 → 工程整体/待归集合/成员关系 → 两视图。
+- 实体链：包内来源 occurrence → 中立对象证据 → 工程整体/待归集合/成员关系 → 三视图。
 - 表示链：真实来源 occurrence → 模板、放置、LOD、IFC 对象；工程整体只绑定来源 ID，不生成新的几何种子。
 
 几何可以先于工程实体完成编译；实体规则变化只重建成员绑定、组成和导航，不强制重新三角化。反过来，实体识别不等待 Viewer、网格、LOD 或 IFC 几何加载。
@@ -45,7 +45,7 @@ flowchart TD
 | [分层与依赖](architecture/layers.md) | 目录所有权、依赖边界、入口与平台共享面 |
 | [打开与生命周期](architecture/lifecycle.md) | 源身份、解压/解析分支、会话、取消、首开阶段与清理 |
 | [缓存域](architecture/caches.md) | SQLite/文件/IndexedDB 域、版本、原子发布与失效 |
-| [工程实体运行时](architecture/engineering-runtime.md) | 来源图、实体 Worker、快照、两视图、质量状态 |
+| [工程实体运行时](architecture/engineering-runtime.md) | 来源图、实体 Worker、快照、三视图、质量状态 |
 | [表示与绑定](architecture/representations.md) | occurrence、工程整体到表示的绑定、反向拾取与歧义 |
 | [DEV 几何运行时](architecture/dev-geometry.md) | DEV/PHM/MOD/STL、模板、放置、LOD、Worker 与预算 |
 | [IFC 运行时](architecture/ifc-runtime.md) | IFC 发现、空间语义、bim-lod、区域近景、连接构件 |
@@ -53,7 +53,7 @@ flowchart TD
 | [线路与移动端](architecture/line-mobile.md) | 线路图/地图/缓存、共享 core、Android 边界 |
 | [平台与发布](architecture/platform.md) | 安全、配置、诊断、内存压力、打包与验证命令 |
 
-工程实体本身的契约、两视图规则和目录见 [工程实体](engineering/README.md)；GIM 格式与 primitive 见 [Schema](schema/README.md)。
+工程实体本身的契约、三视图规则和目录见 [工程实体](engineering/README.md)；GIM 格式与 primitive 见 [Schema](schema/README.md)。
 
 ## 跨主题不变量
 
@@ -68,7 +68,7 @@ flowchart TD
 ## 阅读路径
 
 - 想了解用户可见行为： [桌面软件规格](software-spec.md)。
-- 想改工程实体/目录/两视图： [工程实体模型](engineering/README.md) → [目录](engineering/catalogs/README.md) → [工程实体运行时](architecture/engineering-runtime.md)。
+- 想改工程实体/目录/三视图： [工程实体模型](engineering/README.md) → [目录](engineering/catalogs/README.md) → [工程实体运行时](architecture/engineering-runtime.md)。
 - 想改 DEV/XML 几何： [DEV 几何运行时](architecture/dev-geometry.md) → [XML primitive](schema/xml-primitives.md) → [几何模型](schema/geometry-model.md)。
 - 想改 IFC/Spatial： [IFC 运行时](architecture/ifc-runtime.md) → [语义模型](schema/semantic-model.md)。
 - 想改选择/交互： [选择与交互](architecture/selection.md) → [桌面软件规格](software-spec.md)。

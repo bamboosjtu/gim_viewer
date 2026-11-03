@@ -120,7 +120,7 @@ export function renderEngineeringTree(state: AppState): void {
   cbmTreePanel.replaceChildren();
   const bar = document.createElement('div'); bar.className = 'substation-nav-mode'; nav.bar = bar;
   bar.style.flexWrap='wrap';
-  for (const [value, label] of [['composition', '工程组成'], ['source', '来源'],['inventory','设备材料清册']] as const) {
+  for (const [value, label] of [['inventory', '设备材料清册'], ['composition', '工程组成'], ['source', '来源']] as const) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'substation-nav-mode-btn';
     button.dataset.engineeringMode = value; button.textContent = label; button.classList.toggle('active', value === mode);
     button.setAttribute('aria-pressed', String(value === mode));
@@ -186,12 +186,16 @@ export function renderEngineeringTree(state: AppState): void {
       const row = document.createElement('div'); row.className = 'tree-row'; row.dataset.nodePath = key; row.tabIndex = 0; row.setAttribute('role', 'treeitem');
       const toggle = document.createElement('span'); toggle.className = `tree-toggle${node.children.length ? '' : ' leaf'}`; toggle.textContent = '▶';
       const icon = document.createElement('span'); icon.className = 'tree-icon'; icon.textContent = node.kind === 'entity' ? '◆' : node.kind === 'record' ? '◇' : '□';
-      const label = document.createElement('span'); label.className = 'tree-label'; label.textContent = key === root ? state.projectName || node.title : node.title; label.title = label.textContent;
+      const label = document.createElement('span'); label.className = 'tree-label'; label.textContent = key === root ? state.projectName || node.title : node.title;
       if (mode === 'composition') {
         const group = data.composition.nodes.get(key)!;
         if (group.inferred) { label.textContent += ' · 空间推断'; label.title = `空间范围推断，工程归属待确认\n${group.evidence.join('\n')}`; }
         if (group.declaredContextIds?.length && group.entityCount === 0) { label.textContent += ' · 归属待确认'; label.title = '来源已声明此工程单元，整体归属尚未确认'; }
       }
+      if (mode === 'inventory' && 'entityCount' in node && (node.kind === 'group' || node.kind === 'template') && node.entityCount) {
+        label.textContent += ` · ${node.entityCount}`;
+      }
+      if (!label.title) label.title = label.textContent;
       row.append(toggle, icon, label); wrapper.append(row); parent.append(wrapper);
       row.addEventListener('click', () => {
         if (mode === 'composition' || mode==='inventory') { void select(key); }

@@ -174,7 +174,7 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   const single = engineeringSourceRecord(state, target.key);
   const groupNodes=state.engineeringNavigation?.inventory?.nodes.has(target.key)?state.engineeringNavigation.inventory.nodes:state.engineeringNavigation?.composition.nodes;
   const groupNode = target.kind === 'engineering-group' ? groupNodes?.get(target.key) : undefined;
-  if (target.kind === 'engineering' ? !entity && !pending : target.kind === 'engineering-source' ? !single : !groupNode || !['group', 'project'].includes(groupNode.kind)) return false;
+  if (target.kind === 'engineering' ? !entity && !pending : target.kind === 'engineering-source' ? !single : !groupNode || !['group', 'project', 'template'].includes(groupNode.kind)) return false;
   const request = existing ?? state.beginSelection(target), baseGuard = state.selectionGuard(request);
   const guard = { ...baseGuard, isCurrent: () => baseGuard.isCurrent() && state.engineeringSnapshot === snapshot };
   if (!guard.isCurrent()) return true;
@@ -201,6 +201,7 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   else tree.syncEngineeringTreeSelection(state);
   state.deviceLodRuntime?.setOnlySelected?.(state.onlySelected); applyGeometryFilter(state);
   const selectedSources: SourceRecord[] = [...sourceIds].flatMap(id => { const source = engineeringSourceRecord(state, id); return source ? [source] : []; });
+  const declaredContexts = groupNode && 'declaredContextIds' in groupNode ? groupNode.declaredContextIds : undefined;
   const { renderEngineeringInspector } = await import('../ui/engineeringInspector.js');
   if (!guard.isCurrent()) return true;
   renderEngineeringInspector({ title: groupNode?.title ?? entity?.name ?? single?.name ?? '待归整体集合', entity, pending, sources: selectedSources,
@@ -211,7 +212,7 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
     group: groupNode ? { entityCount: groupNode.entityCount, pendingCount: ownerIds.size - groupNode.entityCount,
       confirmedCount:'confirmedCount' in groupNode?groupNode.confirmedCount:undefined,
       attachmentCount:'attachmentCount' in groupNode?groupNode.attachmentCount:undefined,
-      declarations: [...new Set((groupNode.declaredContextIds ?? []).flatMap(id => {
+      declarations: [...new Set((declaredContexts ?? []).flatMap((id:string) => {
         const document = representations.contextDocuments.get(id); return document ? [document] : [];
       }))].map(document => ({ title: groupNode.title, document })) } : undefined,
     partial: !sources.complete, geometryNote: '按来源成员解析表示；缺失或不可分离的范围保留状态。',

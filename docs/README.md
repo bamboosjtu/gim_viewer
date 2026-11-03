@@ -7,7 +7,7 @@ docs/
 ├─ software-spec.md / mobile-spec.md      用户行为
 ├─ architecture.md                        架构总览与不变量
 ├─ architecture/                          分层、生命周期、缓存、实体、表示、DEV、IFC、选择、平台
-├─ engineering/                           工程实体契约、两视图、设备/材料/构件目录
+├─ engineering/                           工程实体契约、三视图、设备/材料/构件目录
 ├─ schema/                                容器、语义、几何、XML MOD/primitive、线路、样本
 ├─ validation.md / performance.md / meassurement.md / open-issues.md
 └─ impl/                                 未完成验收计划与未采用的性能路线
@@ -21,7 +21,7 @@ docs/
 | Android 线路能力 | [移动端规格](mobile-spec.md) |
 | 系统边界与架构索引 | [系统架构](architecture.md) |
 | 分层、打开、缓存、DEV/IFC、选择等机制 | [架构文档目录](architecture.md#架构文档分工) |
-| 工程整体、来源、成员与两视图 | [工程实体模型](engineering/README.md) |
+| 工程整体、来源、成员与三视图 | [工程实体模型](engineering/README.md) |
 | 设备目录/装置性材料目录/构件清单 | [目录总则](engineering/catalogs/README.md) |
 | GIM 容器、语义、几何、XML MOD | [Schema](schema/README.md) |
 | 已实现 XML primitive | [XML primitive](schema/xml-primitives.md) |

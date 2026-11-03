@@ -196,7 +196,7 @@ export class AppState {
   engineeringCacheError = '';
   engineeringCleanup: (() => void) | null = null;
   engineeringListeners = new Set<() => void>();
-  engineeringNavMode: 'composition' | 'source' | 'inventory' = 'composition';
+  engineeringNavMode: 'composition' | 'source' | 'inventory' = 'inventory';
   engineeringExpandedRows = { composition: new Set<string>(), source: new Set<string>(), inventory:new Set<string>() };
   notifyEngineeringChanged(): void { for (const listener of [...this.engineeringListeners]) listener(); }
   /** GIM 头部提取的工程名称（如"XX变电站"），用于 F1System 根节点显示 */
@@ -489,7 +489,7 @@ export class AppState {
     this.engineeringCacheStatus = 'none'; this.engineeringCacheError = '';
     this.engineeringPipelineMetrics=null;
     this.engineeringListeners.clear();
-    this.engineeringNavMode = 'composition';
+    this.engineeringNavMode = 'inventory';
     this.engineeringExpandedRows = { composition: new Set<string>(), source: new Set<string>(), inventory:new Set<string>() };
     this.engineeringGeometryFilter = null; this.engineeringRepresentationChanged = null;
     this.projectName = '';

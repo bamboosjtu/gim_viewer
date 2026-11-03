@@ -50,12 +50,24 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   const ifcTypes: Readonly<Record<string, string>> = aliases.ifc;
   const devCategory = ENGINEERING_CATEGORY_LABELS[type]?type:devTypes[type.toLowerCase()];
   const subtypeTypes:Record<string,string>={postinsulator:'支柱绝缘子',acpillarinsulator:'支柱绝缘子',chaininsulation:'绝缘子串',insulatorssring:'绝缘子串',walltubeinsulator:'穿墙套管',acwallbushing:'穿墙套管',cabletray:'电缆桥架'};
-  const categoryValue=(value:string)=>ENGINEERING_CATEGORY_LABELS[value]?value:devTypes[value.toLowerCase()]==='E01'?'E-T':devTypes[value.toLowerCase()]??ifcTypes[value.toUpperCase()]??categoryFromName(value);
-  const propertyCategories=values(record,['设备类型','设备类别','材料类型','构件类型','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE','型号','MODEL','MODELSPEC'])
-    .flatMap(p=>{const category=categoryValue(p.value);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];});
+  const categoryValue=(value:string,allowName:boolean):string=>{
+    const direct=ENGINEERING_CATEGORY_LABELS[value]?value:undefined;
+    const alias=devTypes[value.toLowerCase()]??ifcTypes[value.toUpperCase()];
+    if(direct)return direct;
+    if(alias)return alias==='E01'?'E-T':alias;
+    // Model/spec strings are free text ("220kV变压器模型04_散热器"), not a
+    // category fact. Only explicit category/type fields may fall back to a name.
+    return allowName?categoryFromName(value):'U-OBJECT';
+  };
+  const typeProperties=values(record,['设备类型','设备类别','材料类型','构件类型','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE']);
+  const modelProperties=values(record,['型号','MODEL','MODELSPEC']);
+  const propertyCategories=[
+    ...typeProperties.flatMap(p=>{const category=categoryValue(p.value,true);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
+    ...modelProperties.flatMap(p=>{const category=categoryValue(p.value,false);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
+  ];
   const typed=devCategory??ifcTypes[type];
   for(const p of values(record,['用途','设备用途','PURPOSE'])){
-    const category=categoryValue(p.value);
+    const category=categoryValue(p.value,true);
     // A service target such as “主变控制” is not this cabinet's identity.
     if((typed==='E01'||typed==='E-T')&&['E01','E03'].includes(category)||typed==='C-B4'&&['C-B2','C-B3'].includes(category)
       ||['IFCPUMP','IFCVALVE'].includes(type)&&/^(?:给排水设施|排水设施)$/.test(p.value))propertyCategories.push({...p,value:['IFCPUMP','IFCVALVE'].includes(type)?'C-D5':category});

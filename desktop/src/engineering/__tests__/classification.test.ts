@@ -87,6 +87,20 @@ it('does not merge four single-phase bodies or repeated phase labels, and retain
  expect(terminal.entities[0].category).toBe('E16.terminal_box');
 });
 
+it('keeps free-text model strings out of category evidence',()=>{
+ const source=toObjectEvidence({id:'x',track:'dev',source:'x.dev',name:'散热器',source_type:'OTHERS',parent:'',properties:[{keys:['型号'],value:'220kV变压器模型04_散热器(冷却器)'}],sources:['x.dev'],context:[],guid:''});
+ expect(interpretObject(source)).toMatchObject({meaning:'part'});
+});
+it('keeps standalone mechanism boxes as E17 and assembled boxes as host components',()=>{
+ expect(interpretObject(row('操作机构箱'))).toMatchObject({category:'E17',meaning:'object',independent:true});
+ const model=normalizeEngineeringModel('p',[row('组合电器GIS',{sourceId:'gis',typeCategory:'E05'}),row('操作机构箱',{sourceId:'box',assemblyParentId:'gis'})]);
+ expect(model.entities).toHaveLength(1);
+ expect(model.memberships.find(m=>m.sourceId==='box')).toMatchObject({ownerId:model.entities[0].id,interpretation:{meaning:'part',independent:false,basis:'equipment_actuator_composition'}});
+});
+it('classifies monitors and switch boxes by their function, not by a host noun',()=>{
+ expect(categoryFromName('防火门监控器')).toBe('C-D3');
+ expect(categoryFromName('电源切换箱')).toBe('E17');
+});
 it('interprets structured purpose as this object usage, rather than the equipment it serves',()=>{
  const source=(source_type:string,name:string,properties:Array<{keys:string[];value:string}>)=>toObjectEvidence({id:'x',track:'dev',source:'x.dev',source_type,name,parent:'',properties,sources:['x.dev'],context:[],guid:''});
  expect(interpretObject(source('SecondaryCabinet','控制柜',[{keys:['设备用途'],value:'主变控制'}]))).toMatchObject({category:'E16.control_cabinet'});

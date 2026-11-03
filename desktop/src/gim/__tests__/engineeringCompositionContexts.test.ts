@@ -2,7 +2,8 @@ import { expect, it } from 'vitest';
 import { extractEngineeringSourceGraph } from '../engineering/sourceGraph.js';
 import { buildEngineeringSources } from '../engineering/buildSources.js';
 import { projectEngineeringNavigation } from '../engineering/navigation.js';
-import { collectCompositionContexts } from '../engineering/compositionContexts.js';
+import { collectCompositionEvidence } from '../engineering/compositionContexts.js';
+import { assignEngineeringComposition } from '../../engineering/compositionTemplate.js';
 import type { CompositionNode } from '../../engineering/composition.js';
 
 async function fixture(raw: Record<string, string>) {
@@ -75,7 +76,7 @@ it('maps confirmed IFC object context through its exact source link and retains 
   const source = { id: 'ifc:m#1', track: 'ifc' as const, source: 'model.ifc', name: '未知交付产品', source_type: 'IFCBUILDINGELEMENTPROXY', parent: '', properties: [], sources: ['model.ifc'], context: [], guid: 'g' };
   f.sources.ifcRecords.push(source); f.sources.ifcMatches.push({ cbmOccurrenceId: occurrence, sourcePath: 'bay.cbm', rawGuid: 'g', status: 'confirmed', ifcSourceIds: [source.id], devSourceIds: [] });
   f.snapshot.entities.push({ id: 'whole:unknown', name: source.name, category: 'U-OBJECT', kind: 'whole', sourceIds: [source.id], boundaryEvidence: 'source-instance', classificationState: 'unknown', classificationConflicts: 0 });
-  const assignment = collectCompositionContexts(f.sources, f.snapshot, new Map()).find(row => row.entityId === 'whole:unknown')!;
+  const assignment = assignEngineeringComposition(f.snapshot,collectCompositionEvidence(f.sources, f.snapshot, new Map())).find(row => row.entityId === 'whole:unknown')!;
   expect(assignment.paths[0].map(group => group.title)).toEqual(['安装工程', '10千伏配电装置', '36S间隔']);
   expect(f.snapshot.entities[0].classificationState).toBe('unknown');
 });

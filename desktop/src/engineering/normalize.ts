@@ -9,6 +9,10 @@ const identity = (scope: string, kind: string, seed: string) => `${kind}:${JSON.
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const transformer = (category: string | undefined) => !!category && ['E01','E-T','E03'].includes(category);
 const reserve = (row: ObjectEvidence) => row.designations.some(p=>/备用|预留/.test(p.value));
+/** Names that describe a component of the host when a real DEV assembly edge
+ * exists. A standalone source keeps its independent catalog role. */
+const embeddedAccessory = /端子箱|端子排|机构箱|操动机构|操作机构|电动机构|散热器|油枕|冷却器|风扇|分接开关|吸湿器|温控器|压力释放|柜体|门扇|门框|电缆终端|电源切换箱|动力箱|分支箱|灯具|指示灯|监控器|监控终端|监控模块/;
+const explicitIndependent = (row: ObjectEvidence) => row.objectRoles?.some(p=>p.value==='independent') ?? false;
 function wholeName(row:ObjectEvidence,category:string):string {
   const number=explicitMain(row);
   if(category==='E01'&&number)return `${number}号${reserve(row)?'备用':''}主变`;
@@ -158,6 +162,12 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     } else if (m.category==='E17'&&m.subtype==='机构箱'&&above&&aboveCategory?.startsWith('E')&&aboveCategory!=='E18'
       &&!row.objectRoles?.some(p=>p.value==='independent')) {
       m.meaning='part';m.independent=false;m.basis='equipment_actuator_composition';
+      owners.set(sourceId,above);
+    } else if (above && aboveCategory?.startsWith('E') && aboveCategory!=='E18'
+      && !explicitIndependent(row) && embeddedAccessory.test(row.name)) {
+      // Terminal boxes, operating mechanisms, radiators and other assembled
+      // accessories are components of the host, never a second device whole.
+      m.meaning='part';m.independent=false;m.basis='equipment_accessory_composition';
       owners.set(sourceId,above);
     } else if (['source_only', 'container', 'detail'].includes(m.meaning)) {
       owners.set(sourceId, above);

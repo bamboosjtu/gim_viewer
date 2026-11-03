@@ -5,8 +5,10 @@ import { projectEngineeringNavigation } from '../engineering/navigation.js';
 import { projectEngineeringSource } from '../engineering/sourceProjection.js';
 import { projectEngineeringInventory } from '../engineering/inventory.js';
 import { projectEngineeringComposition } from '../../engineering/composition.js';
+import { INVENTORY_TEMPLATE } from '../../engineering/inventoryTemplate.js';
 
 it('groups catalog subtypes while preserving distinct instances, internal members, and source-only rows',async()=>{
+ expect(INVENTORY_TEMPLATE.levels).toEqual(['group','category','subtype','template','entity','source']);
  const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=box.cbm\nSUBSYSTEM1=box.cbm\nSUBSYSTEM2=text.cbm',
   'box.cbm':'SYSTEMNAME1=10kV系统\nSYSTEMNAME2=36S\nOBJECTMODELPOINTER=box.dev',
   'box.dev':'TYPE=TerminalBox\nSYMBOLNAME=端子箱\nSUBDEVICE0=bolt.dev',
@@ -15,7 +17,9 @@ it('groups catalog subtypes while preserving distinct instances, internal member
  const built=buildEngineeringSources('p',graph,[],[]),before=JSON.stringify(built.snapshot),view=projectEngineeringNavigation(built.sources,built.snapshot),inventory=view.inventory!;
  expect(built.snapshot.entities).toHaveLength(2);
  const subtypes=[...inventory.nodes.values()].filter(n=>n.kind==='group'&&n.title==='端子箱');
- expect(subtypes).toHaveLength(1);expect(subtypes[0].entityCount).toBe(2);expect(subtypes[0].children).toHaveLength(2);
+ expect(subtypes).toHaveLength(1);expect(subtypes[0].entityCount).toBe(2);expect(subtypes[0].children).toHaveLength(1);
+ const templates=[...inventory.nodes.values()].filter(n=>n.kind==='template'&&n.template==='端子箱');
+ expect(templates).toHaveLength(1);expect(templates[0].children).toHaveLength(2);
  expect(inventory.rowsBySource.size).toBe(5);expect(inventory.nodes.get(inventory.rootKey)?.entityCount).toBe(2);
  expect(inventory.nodes.get(inventory.rootKey)!.children.map(key=>inventory.nodes.get(key)!.title)).toEqual(['设备','装置性材料','构件','其他']);
  expect([...inventory.nodes.values()].some(n=>n.title==='仅来源（不计整体）')).toBe(true);
@@ -56,8 +60,9 @@ it('projects generic secondary equipment directly under E16 without changing its
  const before=JSON.stringify(built.snapshot),view=projectEngineeringNavigation(built.sources,built.snapshot),inventory=view.inventory!;
  const entity=built.snapshot.entities[0],node=inventory.nodes.get(inventory.rowsByEntity.get(entity.id)![0])!;
  expect(entity).toMatchObject({category:'E16',subtype:'unresolved'});
- expect(inventory.nodes.get(node.parent!)!.title).toBe('二次设备');
+ expect(inventory.nodes.get(node.parent!)!.kind).toBe('template');
+ expect(inventory.nodes.get(inventory.nodes.get(node.parent!)!.parent!)!.title).toBe('二次设备');
  expect([...inventory.nodes.values()].some(n=>n.kind==='group'&&n.title==='具体类型待确认')).toBe(false);
  expect(JSON.stringify(built.snapshot)).toBe(before);
- expect(view.inventorySearch![0].subtitle).toBe('设备材料清册 / 设备 / 二次设备');
+ expect(view.inventorySearch![0].subtitle).toBe('设备材料清册 / 设备 / 二次设备 / 二次单元');
 });
