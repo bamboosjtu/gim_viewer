@@ -49,6 +49,14 @@ describe('engineering model tree export', () => {
     expect(out.root.children[0].children[0]).toMatchObject({ title: '1号主变', targetId: 'entity:1' });
   });
 
+  it('exports inferred projection status and its evidence without changing entity references',()=>{
+    const view={...data,composition:{...data.composition,nodes:new Map(data.composition.nodes)}};
+    view.composition.nodes.set('whole',{...view.composition.nodes.get('whole')!,inferred:true,evidence:['spatial-building-footprint','composition-spatial-v1']});
+    const out=engineeringTreeExport(view,'composition','P').root.children[0].children[0];
+    expect(out).toMatchObject({targetId:'entity:1',inferred:true,evidence:['spatial-building-footprint','composition-spatial-v1']});
+    expect(data.composition.nodes.get('whole')?.inferred).toBeUndefined();
+  });
+
   it('exports the source tree with F level and IFC file nodes', () => {
     const out = engineeringTreeExport(data, 'source', 'P');
     expect(out.mode).toBe('source');

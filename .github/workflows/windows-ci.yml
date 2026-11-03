@@ -62,6 +62,9 @@ jobs:
       - name: Run frontend unit tests
         run: npm test
 
+      - name: Check engineering layer boundaries
+        run: npm run check:engineering-boundaries
+
       - name: Check native acceptance tooling
         run: npm run test:acceptance-tools
 

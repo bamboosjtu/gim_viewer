@@ -29,6 +29,19 @@ function fixture() {
 }
 afterEach(()=>{vi.restoreAllMocks();});
 
+it('consumes a neutral representation scope and rejects stale scopes even with old far highlights',async()=>{
+  const f=fixture(),request=f.state.beginSelection({kind:'engineering',key:'whole'});
+  let current=true;
+  f.state.representationSelection={requestId:request.id,devRoots:new Set(),ifc:[{modelId:'source',expressId:7,globalId:'g7'}],isCurrent:()=>current};
+  await commitSelectionHighlight(f.ctx,f.state,f.state.selectionGuard(request),()=>{});
+  const fine=group();await f.migrate(fine);
+  expect(f.state.highlightedModState?.groups).toEqual([fine]);
+  resetModHighlight(f.state);
+  f.state.highlightedItems={runtime:[17]};current=false;
+  await f.migrate(group());expect(f.state.highlightedModState).toBeNull();
+  f.state.invalidateSelection();expect(f.state.representationSelection).toBeNull();
+});
+
 it('migrates far highlight to L2 without resetting Fragments, re-highlighting other meshes or changing selection ownership',async()=>{
   const f=fixture();await f.select(); const fine=group(),other=group(8);
   addModHighlightGroup(f.state,other); const otherMaterial=(other.children[0] as THREE.Mesh).material;

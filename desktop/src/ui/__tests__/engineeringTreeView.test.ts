@@ -28,6 +28,19 @@ beforeEach(() => {
 });
 const search = (value: string) => { const input = document.querySelector<HTMLInputElement>('[role="combobox"]')!; input.value = value; input.dispatchEvent(new Event('input')); };
 describe('engineering composition and provenance navigation', () => {
+  it('labels inferred composition rows and exposes the evidence in the inspector',async()=>{
+    const f=await fixture(),view=f.state.engineeringNavigation!.composition,key=view.rowsByEntity.get(f.main.id)![0],node=view.nodes.get(key)!;
+    node.inferred=true;node.evidence=['spatial-building-footprint','composition-spatial-v1'];
+    let cursor:string|undefined=key;
+    while(cursor){f.state.engineeringExpandedRows.composition.add(cursor);cursor=view.nodes.get(cursor)?.parent;}
+    const {renderEngineeringTree}=await import('../engineeringTreeView.js');renderEngineeringTree(f.state);
+    const row=[...document.querySelectorAll<HTMLElement>('.tree-row')].find(r=>r.dataset.nodePath===key)!;
+    expect(row.textContent).toContain('空间推断');row.click();
+    await vi.dynamicImportSettled();
+    await vi.waitFor(()=>expect(document.querySelector('.props-header')?.textContent).toBe(f.main.name));
+    expect(document.getElementById('props-drawer-body')?.textContent).toContain('空间推断，工程归属待确认');
+    expect(document.getElementById('props-drawer-body')?.textContent).toContain('composition-spatial-v1');
+  });
   it('keeps DEV F levels explicit and exposes the JSON export action', async () => {
     const f = await fixture(), { renderEngineeringTree } = await import('../engineeringTreeView.js');
     f.state.engineeringNavMode = 'source'; renderEngineeringTree(f.state);

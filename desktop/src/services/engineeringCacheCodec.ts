@@ -87,6 +87,8 @@ export function assertEngineeringSources(value: unknown): asserts value is Engin
   for (const source of [...data.graph.records, ...data.ifcRecords]) {
     requireValid(record(source) && typeof source.id === 'string' && source.id && !ids.has(source.id) && typeof source.name === 'string' && typeof source.source === 'string' && typeof source.source_type === 'string' && typeof source.parent === 'string' && Array.isArray(source.properties) && strings(source.sources) && strings(source.context), 'source record');
     requireValid(source.properties.every(p => record(p) && typeof p.value === 'string' && (p.keys === undefined || strings(p.keys))), 'source properties');
+    requireValid(source.nameEvidence === undefined || Array.isArray(source.nameEvidence) && source.nameEvidence.every(n => record(n)
+      && ['object','engineering','family','source'].includes(n.kind) && typeof n.value === 'string' && typeof n.evidenceId === 'string' && n.evidenceId.length > 0), 'source name evidence');
     ids.add(source.id);
   }
   const cbm = new Set(data.graph.cbmOccurrences.map(node => node.id)), modelIds = new Set(data.models.map(model => model.modelId));

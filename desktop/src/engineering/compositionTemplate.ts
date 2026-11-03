@@ -7,8 +7,8 @@ export interface CompositionContextEvidence {
   entityId: string;
   declarations: Array<{ names: EvidenceValue[] }>;
   spaces: Array<{ building: EvidenceValue; storeys: Array<EvidenceValue & {elevationMetres?:number}> }>;
-  sourceHints?:string[];
-  positions?:number[][];
+  /** Named delivery context, adapted before entering the domain projection. */
+  deliveryBuildingNames?: EvidenceValue[];
   hostEntityIds: string[];
   /** Source track only breaks out unclassified members; it never changes identity. */
   track?: 'dev' | 'ifc' | 'mixed';
@@ -129,7 +129,7 @@ export function buildingPaths(input: CompositionContextEvidence | undefined): Co
   const floors=candidates.flatMap(space=>space.storeys.map(floor=>({floor,name:canonicalBuildingName(floor.value)}))).filter(row=>row.name);
   if(floors.length)return floors.map(({floor,name})=>[civil,{key:`building:${keyOf(name)}`,title:name,kind:'building',order:0},
     {key:`floor:${keyOf(floor.value)}`,title:floor.value,kind:'storey'}]);
-  const fileNames=[...new Set((input?.sourceHints??[]).map(canonicalBuildingName).filter(Boolean))];
+  const fileNames=[...new Set((input?.deliveryBuildingNames??[]).map(n=>n.value).filter(Boolean))];
   if(fileNames.length===1)return [[civil,{key:`building:${keyOf(fileNames[0])}`,title:fileNames[0],kind:'building',order:0},
     ...candidates.flatMap(space=>space.storeys.filter(f=>valid(f.value)).map(f=>({key:`floor:${keyOf(f.value)}`,title:f.value,kind:'storey' as const})))]];
   const labels = [...(input?.declarations ?? [])].reverse().flatMap(d => d.names.filter(n => validBuilding(n.value) && /楼|栋|房|室|车间/.test(n.value) && !/系统|区域/.test(n.value)));

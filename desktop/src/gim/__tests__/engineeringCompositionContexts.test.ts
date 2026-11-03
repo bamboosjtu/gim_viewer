@@ -20,13 +20,13 @@ function paths(f: Awaited<ReturnType<typeof fixture>>, name: string): string[][]
   });
 }
 
-it('recognizes s03-style semantic main designation independently of F levels', async () => {
+it('projects a declared main unit without promoting the transformer purpose from organization labels', async () => {
   const f = await fixture({ 'project.cbm': 'SUBSYSTEM0=main.cbm\nSUBSYSTEM1=foundation.cbm',
     'main.cbm': 'ENTITYNAME=F3System\nSYSTEMNAME1=电气系统\nSYSTEMNAME2=主变系统01\nSYSTEMNAME3=主变01\nOBJECTMODELPOINTER=main.dev',
     'main.dev': 'TYPE=OilFilledTransformer\nSYMBOLNAME=220kV变压器模型ZJ01_1\nSUBDEVICE0=box.dev', 'box.dev': 'SYMBOLNAME=独立端子箱',
     'foundation.cbm': 'ENTITYNAME=F2System\nSYSTEMNAME2=主变系统01\nOBJECTMODELPOINTER=foundation.dev', 'foundation.dev': 'SYMBOLNAME=独立基础' });
-  const main = f.snapshot.entities.find(entity => entity.name === '1号主变')!;
-  expect(main.category).toBe('E01');
+  const main = f.snapshot.entities.find(entity => entity.category === 'E-T')!;
+  expect(main.name).toBe('220kV变压器模型ZJ01_1');
   expect(paths(f, main.name)[0]).toEqual(expect.arrayContaining(['安装工程', '主变压器系统', '1号主变']));
   expect(main.sourceIds).toHaveLength(2);
   expect(paths(f, '独立基础')[0]).toEqual(expect.arrayContaining(['建筑工程', '主变压器系统构支架、独立基础']));

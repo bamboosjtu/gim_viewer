@@ -1,5 +1,5 @@
 import aliases from './sourceTypeAliases.json';
-import type { EvidenceValue, ObjectEvidence } from '../../engineering/types.js';
+import type { EvidenceValue, ObjectEvidence, ObjectNameEvidence } from '../../engineering/types.js';
 
 /** Raw source records stay in the source domain, separate from engineering identity. */
 export interface SourceProperty {
@@ -19,6 +19,7 @@ export interface SourceRecord {
   track: 'dev' | 'ifc';
   source: string;
   name: string;
+  nameEvidence?: ObjectNameEvidence[];
   source_type: string;
   /** Only a real DEV assembly or IFC object decomposition edge. */
   parent: string;
@@ -48,6 +49,7 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   const devCategory = devTypes[type.toLowerCase()];
   return {
     sourceId: record.id, name: record.name, assemblyParentId: record.parent || undefined,
+    names: record.nameEvidence,
     typeCategory: /neutralpointequipment/i.test(type) ? 'neutral_set' : devCategory ?? ifcTypes[type],
     traits: {
       fastener: ['IFCMECHANICALFASTENER', 'IFCFASTENER'].includes(type),

@@ -11,6 +11,8 @@ export interface CompositionAssignment {
   entityId: string;
   paths: CompositionGroup[][];
   evidence: string[];
+  /** A projection estimate, never an entity identity or membership assertion. */
+  inferred?: boolean;
 }
 export interface CompositionDeclaration {
   path: CompositionGroup[];
@@ -26,6 +28,7 @@ export interface CompositionNode {
   parent?: string;
   entityCount: number;
   evidence: string[];
+  inferred?: boolean;
   declaredContextIds?: string[];
 }
 export interface EngineeringComposition {
@@ -34,7 +37,7 @@ export interface EngineeringComposition {
   nodes: Map<string, CompositionNode>;
   rowsByEntity: Map<string, string[]>;
 }
-export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v4';
+export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v5';
 const childKey = (parent: string, kind: string, value: string) => `${parent}/${encodeURIComponent(kind)}:${encodeURIComponent(value)}`;
 
 /** A view references whole entities; neither a row nor a group becomes a new
@@ -46,12 +49,12 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
   const orders = new Map<string, number>();
   nodes.set(rootKey, { key: rootKey, title: title || '工程组成', kind: 'project', children: [], entityCount: 0, evidence: [] });
   const byEntity = new Map(assignments.map(a => [a.entityId, a]));
-  function group(parent: string, kind: string, value: string, name: string, evidence: string[]): string {
+  function group(parent: string, kind: string, value: string, name: string, evidence: string[], inferred = false): string {
     const key = childKey(parent, kind, value);
     if (!nodes.has(key)) {
-      nodes.set(key, { key, parent, title: name, kind: 'group', children: [], entityCount: 0, evidence });
+      nodes.set(key, { key, parent, title: name, kind: 'group', children: [], entityCount: 0, evidence, ...(inferred ? {inferred:true} : {}) });
       nodes.get(parent)!.children.push(key);
-    }
+    } else if (!inferred) delete nodes.get(key)!.inferred;
     return key;
   }
   const anchors = new Map<string, Set<string>>();
@@ -68,12 +71,12 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
     for (const path of paths) {
       let parent = rootKey;
       if (!path.length) parent = group(parent, 'unresolved', 'context', '工程归属待确认', []);
-      for (const part of path) { parent = group(parent, part.kind, part.key, part.title, assignment?.evidence ?? []); if (part.order !== undefined) orders.set(parent, part.order); }
+      for (const part of path) { parent = group(parent, part.kind, part.key, part.title, assignment?.evidence ?? [], !!assignment?.inferred && ['building','storey'].includes(part.kind)); if (part.order !== undefined) orders.set(parent, part.order); }
       const terminalBucket = path[path.length - 1]?.kind === 'bucket';
       if (!terminalBucket) parent = group(parent, 'category', entity.category, categoryLabel(entity.category), []);
       if (seen.has(parent)) continue; seen.add(parent);
       const key = childKey(parent, 'entity', entity.id);
-      nodes.set(key, { key, title: entity.name || categoryLabel(entity.category), kind: 'entity', targetId: entity.id, parent, children: [], entityCount: 1, evidence: assignment?.evidence ?? [] });
+      nodes.set(key, { key, title: entity.name || categoryLabel(entity.category), kind: 'entity', targetId: entity.id, parent, children: [], entityCount: 1, evidence: assignment?.evidence ?? [], ...(assignment?.inferred ? {inferred:true} : {}) });
       nodes.get(parent)!.children.push(key);
       const rows = rowsByEntity.get(entity.id) ?? []; rows.push(key); rowsByEntity.set(entity.id, rows);
       for (let cursor: string | undefined = parent; cursor; cursor = nodes.get(cursor)?.parent) {

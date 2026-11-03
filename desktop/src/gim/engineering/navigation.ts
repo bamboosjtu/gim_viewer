@@ -1,7 +1,7 @@
 import type { EngineeringSources } from './buildSources.js';
 import type { EngineeringSnapshot } from '../../engineering/types.js';
-import { collectCompositionEvidence, collectDeclaredCompositionContexts } from './compositionContexts.js';
-import { assignEngineeringComposition, type CompositionContextEvidence } from '../../engineering/compositionTemplate.js';
+import { collectCompositionEvidence, collectDeclaredCompositionContexts, type SourceCompositionEvidence } from './compositionContexts.js';
+import { assignEngineeringComposition } from '../../engineering/compositionTemplate.js';
 import type { CompositionDeclaration } from '../../engineering/composition.js';
 import { projectEngineeringComposition, type EngineeringComposition } from '../../engineering/composition.js';
 import { categoryLabel } from '../../engineering/catalogLabels.js';
@@ -29,7 +29,7 @@ export interface EngineeringNavigationData {
   sourceSearch: Array<{ key: string; title: string; subtitle: string }>;
   inventory?: EngineeringInventory;
   metadata?: {scope:string;rulesVersion:string;sourceComplete:boolean;sourceVersion:string};
-  compositionInput?:{facts:CompositionContextEvidence[];declarations:CompositionDeclaration[]};
+  compositionInput?:{facts:SourceCompositionEvidence[];declarations:CompositionDeclaration[]};
 }
 export const ENGINEERING_NAVIGATION_VERSION = 'engineering-navigation-v3';
 const recordKey = (id: string) => `source:record:${id}`;

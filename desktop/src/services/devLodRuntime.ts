@@ -857,7 +857,7 @@ export class DevLodRuntime {
   private applyOnlySelected(): void {
     for (const [key, row] of this.rows) {
       if (row.group) {
-        row.group.visible = !this.onlySelected || (this.state.engineeringSelection?.devRoots.has(row.entry.rootOccurrence ?? key) ?? (row.entry.rootOccurrence ?? key) === this.selected);
+        row.group.visible = !this.onlySelected || (this.state.representationSelection?.devRoots.has(row.entry.rootOccurrence ?? key) ?? (row.entry.rootOccurrence ?? key) === this.selected);
         this.state.engineeringGeometryFilter?.(row.group);
       }
     }
@@ -1154,7 +1154,7 @@ export class DevLodRuntime {
     this.displayedPins.set(key, (this.displayedPins.get(key) ?? 0) + 1);
     row.group = group; row.pickLocalBounds = template.bounds; row.pickBounds = worldBounds;
     row.key = key; row.displayed = lod; row.entry.templateStatus = 'ready';
-    group.visible = !this.onlySelected || (this.state.engineeringSelection?.devRoots.has(row.entry.rootOccurrence) ?? row.entry.rootOccurrence === this.selected);
+    group.visible = !this.onlySelected || (this.state.representationSelection?.devRoots.has(row.entry.rootOccurrence) ?? row.entry.rootOccurrence === this.selected);
     this.state.engineeringGeometryFilter?.(group);
     if (this.batchEnabled) {
       this.instances ??= new DevInstanceBatches(this.state.modRootGroup!);
@@ -1163,7 +1163,7 @@ export class DevLodRuntime {
     row.geometryStatus = template.status; row.failedKey = undefined;
     this.updateReadiness(row);
     this.state.loadedXmlModGroups.set(row.entry.instanceKey, group);
-    if (highlighted.length && !this.state.engineeringSelection) {
+    if (highlighted.length && !this.state.representationSelection) {
       const replacements: THREE.Object3D[] = [];
       group.traverse(object => {
         if (replacements.some(parent => belongsTo(object, parent))) return;

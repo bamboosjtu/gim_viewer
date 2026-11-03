@@ -186,7 +186,12 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   }
   const sourceIds = single && target.kind === 'engineering-source' ? new Set([single.id]) : representations.index.sourcesForOwners(ownerIds);
   const scope = makeScope(state, request, ownerIds, sourceIds); if (!scope) return false;
-  state.engineeringSelection = scope; context(state);
+  state.engineeringSelection = scope;
+  state.representationSelection = {
+    requestId: request.id, devRoots: scope.devRoots, ifc: scope.ifc,
+    isCurrent: () => state.isCurrentSelection(request) && state.engineeringSelection === scope && state.engineeringSnapshot === snapshot,
+  };
+  context(state);
   // A declaration without members has no isolation range. Leave a previous
   // isolation before inspecting it, so the whole scene does not disappear.
   if (groupNode && !sourceIds.size && state.onlySelected) state.setOnlySelected(false);
@@ -199,6 +204,10 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   const { renderEngineeringInspector } = await import('../ui/engineeringInspector.js');
   if (!guard.isCurrent()) return true;
   renderEngineeringInspector({ title: groupNode?.title ?? entity?.name ?? single?.name ?? '待归整体集合', entity, pending, sources: selectedSources,
+    projectionEvidence: groupNode && 'inferred' in groupNode && groupNode.inferred ? groupNode.evidence : entity
+      ? state.engineeringNavigation?.composition.rowsByEntity.get(entity.id)?.flatMap(key => {
+        const row=state.engineeringNavigation?.composition.nodes.get(key); return row?.inferred ? row.evidence : [];
+      }) : undefined,
     group: groupNode ? { entityCount: groupNode.entityCount, pendingCount: ownerIds.size - groupNode.entityCount,
       declarations: [...new Set((groupNode.declaredContextIds ?? []).flatMap(id => {
         const document = representations.contextDocuments.get(id); return document ? [document] : [];
@@ -272,7 +281,7 @@ export async function reconcileEngineeringSelection(state: AppState, request: Se
   const ownerIds = new Set([...snapshot.entities, ...snapshot.pending].map(entity => entity.id));
   const validTarget = target.kind === 'engineering' ? ownerIds.has(target.key)
     : target.kind === 'engineering-source' ? snapshot.memberships.some(member => member.sourceId === target.key)
-      : target.kind === 'engineering-group' && state.engineeringNavigation?.composition.nodes.has(target.key);
+      : target.kind === 'engineering-group' && (state.engineeringNavigation?.composition.nodes.has(target.key) || state.engineeringNavigation?.inventory?.nodes.has(target.key));
   if (validTarget && (target.kind === 'engineering' || target.kind === 'engineering-source' || target.kind === 'engineering-group')) {
     await selectEngineeringTarget(state, { kind: target.kind, key: target.key }, request, { fit: false, load: false }); return;
   }
@@ -282,7 +291,7 @@ export async function reconcileEngineeringSelection(state: AppState, request: Se
   if (target.kind === 'engineering' && complete && candidates.size === 1) {
     await selectEngineeringTarget(state, { kind: 'engineering', key: [...candidates][0] }, request, { fit: false, load: false }); return;
   }
-  state.engineeringSelection = null; applyGeometryFilter(state); state.deviceLodRuntime?.clearSelection();
+  state.engineeringSelection = null; state.representationSelection = null; applyGeometryFilter(state); state.deviceLodRuntime?.clearSelection();
   const baseGuard = state.selectionGuard(request), guard = { ...baseGuard, isCurrent: () => baseGuard.isCurrent() && state.engineeringSnapshot === snapshot };
   if (state.initialized) {
     const [{ getViewerRuntimeWithUI }, { commitSelectionHighlight }] = await Promise.all([import('./viewerUIBinding.js'), import('../viewer/highlight.js')]);

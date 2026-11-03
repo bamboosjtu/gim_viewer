@@ -50,7 +50,10 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
   const owned=snapshot.memberships.filter(m=>m.ownerId);
   valid(inventory.rowsBySource.size===owned.length,'inventory source coverage');
   for(const member of owned){const row=inventory.nodes.get(inventory.rowsBySource.get(member.sourceId)??'');valid(row?.sourceId===member.sourceId,'inventory source row');}
-  const input=view.compositionInput;valid(input&&Array.isArray(input.facts)&&input.facts.length===snapshot.entities.length&&new Set(input.facts.map(f=>f.entityId)).size===snapshot.entities.length&&input.facts.every(f=>entities.has(f.entityId)&&Array.isArray(f.spaces)&&Array.isArray(f.declarations)&&strings(f.hostEntityIds))&&Array.isArray(input.declarations),'composition input');
+  const input=view.compositionInput;valid(input&&Array.isArray(input.facts)&&input.facts.length===snapshot.entities.length&&new Set(input.facts.map(f=>f.entityId)).size===snapshot.entities.length&&input.facts.every(f=>entities.has(f.entityId)&&Array.isArray(f.spaces)&&Array.isArray(f.declarations)&&strings(f.hostEntityIds)
+    && (f.sourceHints===undefined||strings(f.sourceHints))
+    && (f.deliveryBuildingNames===undefined||Array.isArray(f.deliveryBuildingNames)&&f.deliveryBuildingNames.every(n=>object(n)&&typeof n.value==='string'&&typeof n.evidenceId==='string'))
+    && (f.positions===undefined||Array.isArray(f.positions)&&f.positions.every(p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite))))&&Array.isArray(input.declarations),'composition input');
 }
 
 export const engineeringNavigationToWire = (view: EngineeringNavigationData) => ({ ...view, composition: { ...view.composition, nodes: [...view.composition.nodes], rowsByEntity: [...view.composition.rowsByEntity] }, sourceNodes: [...view.sourceNodes], sourceRows: [...view.sourceRows],

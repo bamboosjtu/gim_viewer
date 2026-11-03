@@ -21,7 +21,7 @@
 | `desktop/src/gim/engineering/` | 把 CBM/DEV/FAM/IFC 来源适配成中立证据和来源图 | gim 纯 parser、engineering 契约 | Viewer、UI、DB |
 | `desktop/src/gim/` | 容器、CBM/DEV/PHM/MOD/IFC 纯解析、索引和地图数据 | 共享纯库 | services、viewer、ui |
 | `desktop/src/viewer/` | Three.js、Fragments、web-ifc、MOD/STL 编译与渲染 | three、geometry 纯函数、类型 | services、ui、DB |
-| `desktop/src/ui/` | DOM shell、两视图、属性、搜索、地图、工具栏 | services 暴露的结果、纯类型 | 数据库、原生 IPC |
+| `desktop/src/ui/` | DOM shell、三视图、属性、搜索、地图、工具栏 | services 暴露的结果、纯类型 | 数据库、原生 IPC |
 | `desktop/src/services/` | 打开、缓存、Worker、后台任务、选择与生命周期编排 | gim、viewer、bridge、ui 回调 | 把领域规则塞回 UI |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
 | `desktop/bridge/` | Tauri IPC DTO/命令封装 | `@tauri-apps/api` | UI、Viewer |
@@ -39,13 +39,11 @@
 
 ### 已知边界例外
 
-当前选择/表示绑定仍有少量跨层引用，属于待收敛项，不是实体分类依赖：
+`DevRepresentationHint` 已是纯类型，Viewer 可以共享地址契约。services 将整体成员转换为 `shared/representationSelection.ts` 的渲染范围：DEV root、IFC model/expressId、请求 ID 与有效性守卫；Viewer 不读取实体快照或 `engineeringSelection`，DEV LOD 的根显隐也消费此中立范围。细部可见性由 services 计算并通过回调应用。
 
-- `viewer/devRepresentationIdentity.ts`、`devInstanceBatches.ts`、`selection.ts` 只 import `DevRepresentationHint` 类型；
-- `viewer/ifcRepresentationHighlight.ts` 读取 `state.engineeringSelection`，用于判断当前 IFC 对象是否在整体选择范围内；
-- `services/devLodRuntime.ts` 应用 `engineeringSelection.devRoots` 和 `engineeringGeometryFilter` 实现隔离/显隐。
+自动空间细化放在 `services/projections/`，只接收显式范围与投影证据，输出路径与推断标记；不属于实体归一化。
 
-这些引用让“表示绑定/可见性”与实体选择共享状态；收敛方向是引入中立的 `SelectionScope`/可见性谓词，而不是让 Viewer 判断工程类别。实体识别、两视图投影和几何编译本身不读取这些字段。
+既有 IFC loader/runtime 仍直接使用 bridge 的缓存/运行时适配器；`ifcBimLoader.ts` 的 `ifcLodCache`、`ifcEntryLoader.ts` 的 `runtime/database`、`ifcRegionalRuntime.ts` 的 `ifcLodCache` 是边界检查中的精确例外，不放宽为整个目录通行。
 
 ## 入口与接线
 
@@ -66,6 +64,8 @@ bootstrap
 ## 边界检查
 
 改动后至少确认：
+
+执行 `desktop/` 下的 `npm run check:engineering-boundaries` 自动检查纯领域、来源和 Viewer 边界；Windows CI 同步执行。
 
 - `engineering/` 没有 import `gim/`、`viewer/`、`ui/`、`services/` 或 `@desktop/database`；
 - `gim/` 没有 import `services/`、`viewer/`、`ui/`；

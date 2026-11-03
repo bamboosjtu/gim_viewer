@@ -6,7 +6,7 @@ import type { EngineeringEntity, EngineeringSnapshot, ObjectEvidence, PendingWho
 const identity = (scope: string, kind: string, seed: string) => `${kind}:${JSON.stringify([scope, seed])}`;
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const transformer = (category: string | undefined) => !!category && ['E01','E-T','E03'].includes(category);
-const reserve = (row: ObjectEvidence) => [...row.designations,...row.unitDesignations??[]].some(p=>/备用|预留/.test(p.value));
+const reserve = (row: ObjectEvidence) => row.designations.some(p=>/备用|预留/.test(p.value));
 function wholeName(row:ObjectEvidence,category:string):string {
   const number=explicitMain(row);
   if(category==='E01'&&number)return `${number}号${reserve(row)?'备用':''}主变`;

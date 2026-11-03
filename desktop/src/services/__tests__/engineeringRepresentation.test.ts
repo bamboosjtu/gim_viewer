@@ -57,6 +57,8 @@ describe('source-to-physical representation adapter and filters', () => {
   it('isolates body members and preserves a nested control cabinet as an independent selection', async () => {
     const f = await fixture();
     await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id });
+    expect(f.state.representationSelection?.isCurrent()).toBe(true);
+    expect(f.state.representationSelection?.devRoots).toEqual(f.state.engineeringSelection?.devRoots);
     f.state.setOnlySelected(true);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, false, true]);
     await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.terminal.id });
@@ -115,8 +117,10 @@ describe('source-to-physical representation adapter and filters', () => {
     next.entities.find(entity => entity.id === f.main.id)!.sourceIds = f.main.sourceIds.filter(id => id !== source);
     next.entities.find(entity => entity.id === f.terminal.id)!.sourceIds.push(source);
     f.state.engineeringSnapshot = next; f.state.engineeringNavigation = projectEngineeringNavigation(f.state.engineeringSources!, next);
+    expect(f.state.representationSelection?.isCurrent()).toBe(false);
     await reconcileEngineeringSelection(f.state, request);
     expect(f.state.selectionRequest?.id).toBe(request.id); expect(f.state.engineeringSelection?.snapshot).toBe(next);
+    expect(f.state.representationSelection?.isCurrent()).toBe(true);
     expect([f.body.visible, f.box.visible, f.radiator.visible]).toEqual([true, false, false]);
   });
   it('clears an obsolete member range and offers candidates when a selected whole splits', async () => {

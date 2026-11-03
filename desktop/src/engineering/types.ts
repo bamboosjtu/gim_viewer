@@ -4,10 +4,16 @@ export interface EvidenceValue {
   evidenceId: string;
 }
 
+/** Names belonging to this occurrence, with their original evidence address. */
+export interface ObjectNameEvidence extends EvidenceValue {
+  kind: 'object' | 'engineering' | 'family' | 'source';
+}
+
 export interface ObjectEvidence {
   /** Package-local occurrence identity, never a template or display-name identity. */
   sourceId: string;
   name: string;
+  names?: readonly ObjectNameEvidence[];
   /** A real composition edge; a source navigation ancestor is not a composition edge. */
   assemblyParentId?: string;
   typeCategory?: string;
@@ -17,11 +23,12 @@ export interface ObjectEvidence {
     materialType?: boolean;
     nonphysical?: boolean;
   };
+  /** Explicit designations of this object, never inherited organization labels. */
   designations: readonly EvidenceValue[];
   identityCodes: readonly EvidenceValue[];
   identityNames: readonly EvidenceValue[];
-  /** Semantic unit declarations, independent of source level tags. */
-  unitDesignations?: readonly EvidenceValue[];
+  /** Audit/context only. Cannot establish identity, grouping or attachment hosts. */
+  inheritedContextDesignations?: readonly EvidenceValue[];
   phases: readonly EvidenceValue[];
 }
 

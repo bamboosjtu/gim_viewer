@@ -16,6 +16,7 @@ export interface ExportedEngineeringTreeNode {
   sourceId?: string;
   documentPath?: string;
   evidence?: string[];
+  inferred?: boolean;
   declaredContextIds?: string[];
   category?:string;
   sourceCount?:number;
@@ -42,6 +43,7 @@ function exportComposition(data: EngineeringNavigationData, project: string): Ex
       ...(node.targetId ? { targetId: node.targetId } : {}),
       entityCount: node.entityCount,
       ...(node.evidence.length ? { evidence: [...node.evidence] } : {}),
+      ...(node.inferred ? { inferred: true } : {}),
       ...(node.declaredContextIds?.length ? { declaredContextIds: [...node.declaredContextIds] } : {}),
       children: node.children.map(visit),
     };

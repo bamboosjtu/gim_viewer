@@ -94,6 +94,7 @@ export class AppState {
   selectionVisibility: ReturnType<typeof import('../services/selectionVisibility.js').createSelectionVisibility> | null = null;
   selectionHighlightRequestId: number | null = null;
   engineeringSelection: EngineeringSelectionScope | null = null;
+  representationSelection: import('../shared/representationSelection.js').RepresentationSelectionScope | null = null;
   engineeringGeometryFilter: ((root?: THREE.Object3D) => void) | null = null;
   engineeringRepresentationChanged: ((rootOccurrence?: string) => void) | null = null;
   engineeringGeometryEvidenceChanged: (()=>void) | null = null;
@@ -120,6 +121,7 @@ export class AppState {
     const retainRange = this.onlySelected && target !== null;
     if (!retainRange) {
       this.engineeringSelection = null;
+      this.representationSelection = null;
       this.engineeringGeometryFilter?.();
       this.deviceLodRuntime?.clearSelection();
       for (const runtime of this.ifcRegionalRuntimes.values()) { runtime.clearFineSelection?.(); runtime.clearSelectionFilter?.(); }
@@ -153,6 +155,7 @@ export class AppState {
     this.selectionSequence++;
     this.selectionRequest = null;
     this.engineeringSelection = null;
+    this.representationSelection = null;
     this.engineeringGeometryFilter?.();
     this.selectionGeometry = null;
     this.selectionMessage = '';

@@ -20,7 +20,7 @@
 | [engineeringWorker](../../desktop/src/services/engineeringWorker.ts) | 在 Worker 内执行抽取/归一化/投影/编解码 |
 | [engineeringService](../../desktop/src/services/engineeringService.ts) | 会话、Worker 生命周期、缓存恢复/发布、IFC Spatial 补建 |
 | [engineeringSelection](../../desktop/src/services/engineeringSelection.ts) | 整体/分组/来源选择与表示绑定 |
-| [engineeringTreeView](../../desktop/src/ui/engineeringTreeView.ts) | “工程组成 / 来源 / 设备材料清册”两页、搜索、虚拟列表、选择同步 |
+| [engineeringTreeView](../../desktop/src/ui/engineeringTreeView.ts) | “工程组成 / 来源 / 设备材料清册”三页、搜索、虚拟列表、选择同步 |
 
 ## 构建流程
 
@@ -59,6 +59,7 @@
 - 先判对象角色（source_only/container/detail/part/fragment/neutral/object），再判目录类别。
 - 建立整体、待归集合、成员关系、独立对象关系和别名。
 - 分区校验：每份来源恰有一个主归属，成员 disposition 与 owner 一致，独立对象不丢失整体。
+- 对象自身声明和继承组织上下文分开；祖先系统名不能提供确定性主变编号、备用状态、成组或宿主关系。FAM/CBM 名称只补充其明确对应 occurrence，不跨装配下传。
 
 详细规则见[实体与来源模型](../engineering/entities.md)。
 
@@ -69,6 +70,7 @@
 - **设备材料清册**：按设备、装置性材料、构件及目录类别列整体，并展示实际组成来源。
 - 三页共用搜索、选择、属性路由和虚拟列表；搜索只是投影索引，不是新实体。
 - 视图节点 ID 与实体 ID 分离；分组计数按实体去重，不冒充台套。
+- `compositionProjectionService` 将运行时范围作为显式输入交给 `services/projections/compositionSpatial`，自动细化组成路径并标注推断。此插件不修改快照/来源/表示索引；重复细化从语义视图计算，失效分组撤销选择，旧轮次和旧会话拒绝提交。
 
 ### 4. 发布与补建
 

@@ -19,13 +19,16 @@ export async function syncIfcRepresentationHighlight(ctx: ViewerContext, state: 
   const target = request.target;
   const regional = target?.kind === 'ifc-object'
     && target.key === `ifc:${modelId.toLowerCase()}:object:${object.expressId}`;
-  const engineering = state.engineeringSelection?.requestId === request.id &&
-    state.engineeringSelection.ifc.some(ref => ref.modelId === modelId && ref.expressId === object.expressId);
+  const scope = state.representationSelection;
+  if (scope?.requestId === request.id && !scope.isCurrent()) return;
+  const selected = scope?.requestId === request.id && scope.isCurrent() &&
+    scope.ifc.some(ref => ref.modelId === modelId && ref.expressId === object.expressId);
   const far = localId !== undefined && (target?.kind === 'ifc-element' && target.key === `${runtimeId}:${localId}`
     || state.selectionHighlightRequestId === request.id && contains(state.highlightedItems?.[runtimeId],localId));
-  if (!regional && !far && !engineering) return;
+  if (!regional && !far && !selected) return;
   const selection = state.selectionGuard(request);
-  const guard = {...selection, isCurrent: () => selection.isCurrent() && representationCurrent()};
+  const guard = {...selection, isCurrent: () => selection.isCurrent() && representationCurrent()
+    && (!selected || state.representationSelection === scope && scope.isCurrent())};
   await enqueueHighlightCommit(state, guard, async () => {
     if (state.selectionHighlightRequestId !== request.id) return;
     if (group) {

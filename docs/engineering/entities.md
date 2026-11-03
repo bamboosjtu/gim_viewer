@@ -30,6 +30,7 @@
 - `track`：`dev` 或 `ifc`。
 - `parent`：真实 DEV 装配或 IFC 对象分解边；CBM 展示祖先不是装配父。
 - `properties`：原始字段/行/节，保留重复。
+- `nameEvidence`：当前 occurrence 的对象名、工程中名称、设备名称及明确关联 CBM 名称，逐项保存证据地址。根 CBM 的字段不下传所有子 DEV；只有唯一的实际装配别名可以补充对应子件证据。
 - `devOccurrence`：`rootSourceId`、`cbmOccurrenceId`、`assemblyPath`。
 - `ifcOccurrence`：`modelId`、`expressId`、`globalId`。
 - `relations`：宿住/空间关系是证据，不自动变成装配成员。
@@ -52,13 +53,16 @@
 | `assemblyParentId` | 真实装配父 |
 | `typeCategory` | 设备/IFC 类型枚举的目录映射 |
 | `traits` | fastener / assemblyContainer / materialType / nonphysical |
-| `designations` | 工程中名称、PROJECTNAME 等 |
-| `unitDesignations` | 来源上下文中显式的主变编号/系统声明，不含 F 层级 |
+| `names` | 当前对象的名称通道及证据地址；原值与显示名称分别保留 |
+| `designations` | 当前对象自身的工程中名称、PROJECTNAME 等明确声明 |
+| `inheritedContextDesignations` | 组织上下文，仅供审计；不能确定主变编号、备用状态、成组或中性点宿主 |
 | `identityCodes` | 电网工程标识/设备编码 |
 | `identityNames` | 设备名称等别名 |
 | `phases` | 相数 |
 
 证据值都带 `evidenceId`（来源 ID + 文件/行/键），可追溯到原始字段。
+
+CBM 祖先或当前组织节点的 SYSTEMNAME/NAME/PARTNAME 保留为上下文，不因含“主变系统”而成为对象声明。主变编号与备用状态只使用对象自身声明；缺少明确宿主的中性点保留待归。组织改名不改变 occurrence ID 或实体成员；插入引用包装层会改变路径型 occurrence ID，验收按对应来源验证整体边界等价，不承诺引用路径改变后的 ID 原样不变。
 
 对象角色先于目录类别判断；类别优先类型枚举与身份属性，再用名称补充用途。通用二次柜类型可按功能细分，不能被“主变”前缀覆盖：
 

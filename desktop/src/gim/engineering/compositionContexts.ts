@@ -1,12 +1,19 @@
 import type { EngineeringSnapshot, EvidenceValue } from '../../engineering/types.js';
 import type { CompositionAssignment, CompositionDeclaration } from '../../engineering/composition.js';
-import { assignEngineeringComposition, declaredEngineeringComposition, type CompositionContextEvidence } from '../../engineering/compositionTemplate.js';
+import { assignEngineeringComposition, canonicalBuildingName, declaredEngineeringComposition, type CompositionContextEvidence } from '../../engineering/compositionTemplate.js';
 import type { EngineeringSources, EngineeringSpatialContext } from './buildSources.js';
+
+/** File/placement hints belong to source adaptation and spatial refinement,
+ * rather than the format-neutral composition template. */
+export interface SourceCompositionEvidence extends CompositionContextEvidence {
+  sourceHints?: string[];
+  positions?: number[][];
+}
 
 /** Adapt only declared source context and real composition/association edges.
  * Domain mapping receives no F labels, file hierarchy depth, viewer or bounds. */
 export function collectCompositionEvidence(sources: EngineeringSources, snapshot: EngineeringSnapshot,
-  spatial: ReadonlyMap<string, EngineeringSpatialContext>): CompositionContextEvidence[] {
+  spatial: ReadonlyMap<string, EngineeringSpatialContext>): SourceCompositionEvidence[] {
   const records = new Map([...sources.graph.records, ...sources.ifcRecords].map(record => [record.id, record]));
   const cbm = new Map(sources.graph.cbmOccurrences.map(node => [node.id, node]));
   const docs = new Map(sources.graph.documents.map(doc => [doc.path, doc]));
@@ -57,7 +64,7 @@ export function collectCompositionEvidence(sources: EngineeringSources, snapshot
   const locations=new Map((sources.locations??[]).map(row=>[row.sourceId,row.position]));
   const relationships=new Map<string,string[]>();
   for(const relation of snapshot.relationships){const ids=relationships.get(relation.from)??[];ids.push(relation.to);relationships.set(relation.from,ids);}
-  const evidence:CompositionContextEvidence[]=snapshot.entities.map(entity=>{
+  const evidence:SourceCompositionEvidence[]=snapshot.entities.map(entity=>{
     const declarations=new Map<string,Declaration>(), ownSpaces=new Map<string,CompositionContextEvidence['spaces'][number]>(), hostIds=new Set(relationships.get(entity.id)??[]);
     for(const id of entity.sourceIds) {
       for(const declaration of sourceContext(id)) declarations.set(declaration.names.map(name=>name.evidenceId).join('|'),declaration);
@@ -66,8 +73,9 @@ export function collectCompositionEvidence(sources: EngineeringSources, snapshot
       while(parent&&!seen.has(parent)){seen.add(parent);const owner=owners.get(parent);if(owner&&owner!==entity.id){hostIds.add(owner);break;}parent=records.get(parent)?.parent;}
     }
     const tracks = new Set(entity.sourceIds.map(id => records.get(id)?.track).filter((track): track is 'dev' | 'ifc' => !!track));
+    const sourceHints=[...new Set(entity.sourceIds.flatMap(id=>records.get(id)?.sources??[]))];
     return {entityId:entity.id,declarations:[...declarations.values()],spaces:[...ownSpaces.values()],hostEntityIds:[...hostIds],
-      sourceHints:[...new Set(entity.sourceIds.flatMap(id=>records.get(id)?.sources??[]))],
+      sourceHints,deliveryBuildingNames:sourceHints.flatMap(path=>{const value=canonicalBuildingName(path);return value?[{value,evidenceId:path}]:[];}),
       positions:entity.sourceIds.flatMap(id=>locations.has(id)?[locations.get(id)!]:[]),
       track: tracks.size === 1 ? [...tracks][0] : 'mixed'};
   });

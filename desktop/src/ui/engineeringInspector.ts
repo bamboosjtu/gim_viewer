@@ -14,6 +14,7 @@ export interface EngineeringInspectorInput {
   relatedNames: ReadonlyMap<string, string>;
   partial: boolean;
   geometryNote: string;
+  projectionEvidence?: readonly string[];
   onFit(): void;
   onIsolate(): void;
   onRestore(): void;
@@ -46,6 +47,7 @@ export function renderEngineeringInspector(input: EngineeringInspectorInput): vo
     ...(pending ? [['待确认原因', ({ neutral_set_main_unresolved: '尚不能确定中性点装置对应的主变', component_whole_unresolved: '内部组成尚无明确整体宿主',
       unnumbered_set_identity_requires_confirmation: '缺少明确编号，不能确认属于同一套装置', peer_fragment_engineering_identity_insufficient: '分散组成缺少足够的整体身份依据' } as Record<string, string>)[pending.reason] ?? '整体身份或归属依据不足']] as [string, string][] : []),
     ['来源记录', String(sources.length)], ['来源状态', input.partial ? '部分来源尚未完成' : '当前来源已就绪'],
+    ...(input.projectionEvidence?.length ? [['投影归属', '空间推断，工程归属待确认'], ['投影依据', input.projectionEvidence.join('；')]] as [string,string][] : []),
   ];
   const params: [string, string][] = single
     ? single.properties.map(p => [[...(p.keys ?? []), ...(p.key ? [p.key] : [])].join(' / '), p.value])

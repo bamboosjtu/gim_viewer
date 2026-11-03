@@ -1,8 +1,9 @@
-import { projectSpatialComposition, type CompositionBounds } from '../engineering/compositionSpatial.js';
-import { projectEngineeringComposition, type CompositionDeclaration } from '../engineering/composition.js';
+import { projectSpatialComposition, type CompositionBounds } from './projections/compositionSpatial.js';
+import { projectEngineeringComposition, type CompositionDeclaration, type EngineeringComposition } from '../engineering/composition.js';
 import type { EngineeringSnapshot } from '../engineering/types.js';
-import type { CompositionContextEvidence } from '../engineering/compositionTemplate.js';
-export interface ProjectionInput {snapshot:EngineeringSnapshot;facts:CompositionContextEvidence[];declarations:CompositionDeclaration[];bounds:CompositionBounds[]}
+import type { SourceCompositionEvidence } from '../gim/engineering/compositionContexts.js';
+export interface ProjectionInput {snapshot:EngineeringSnapshot;facts:SourceCompositionEvidence[];declarations:CompositionDeclaration[];bounds:CompositionBounds[]}
+export type ProjectionOutput = {composition:EngineeringComposition;contexts:Array<[string,string]>} | {error:string};
 self.onmessage=(event:MessageEvent<ProjectionInput>)=>{try{
   const {snapshot,facts,declarations,bounds}=event.data;
   const assignments=projectSpatialComposition(snapshot,facts,bounds);

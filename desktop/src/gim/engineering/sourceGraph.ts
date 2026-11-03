@@ -1,6 +1,6 @@
 import { parseFamSectionsWithDiagnostics } from '../famParser.js';
 import { resolveBaseFamilyReferences } from '../gimValueSemantics.js';
-import type { SourceAlias } from '../../engineering/types.js';
+import type { ObjectNameEvidence, SourceAlias } from '../../engineering/types.js';
 import type { SourceProperty, SourceRecord } from './sourceEvidence.js';
 
 export interface SourceFileReader {
@@ -88,6 +88,22 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     return promise;
   }
   const scalar = (doc: SourceDocument, key: string) => doc.fields.find(p => p.keys[0].toUpperCase() === key)?.value ?? '';
+  // Object fields are attached only to their actual OMP occurrence. SYSTEMNAME
+  // and PARTNAME remain organizational context in the source documents.
+  const objectFields = (doc: SourceDocument) => doc.fields.filter(p => /^(?:SYMBOLNAME|NAME|OBJECTNAME|PROJECTNAME|设备名称|工程中名称|设备编码|电网工程标识系统编码|GRIDIDENTIFICATIONSYSTEMCODE|相数)$/i.test(p.keys[0]));
+  function updateNames(row: SourceRecord): void {
+    const names: ObjectNameEvidence[] = [];
+    for (const [kind, labels] of [
+      ['object', ['SYMBOLNAME']], ['engineering', ['工程中名称', 'PROJECTNAME']],
+      ['family', ['设备名称']], ['source', ['NAME', 'OBJECTNAME']],
+    ] as const) {
+      for (const p of row.properties) if (p.keys?.some(k => (labels as readonly string[]).includes(k.toUpperCase())) && p.value.trim() && !['-', '/', '-100', '软件自动生成'].includes(p.value.trim())) {
+        names.push({ kind, value: p.value, evidenceId: JSON.stringify([row.id, p.path, p.line, p.keys]) });
+      }
+    }
+    row.nameEvidence = names;
+    row.name = names[0]?.value ?? '';
+  }
   const familyCache = new Map<string, Promise<SourceProperty[]>>();
   async function family(doc: SourceDocument): Promise<SourceProperty[]> {
     let promise = familyCache.get(doc.path);
@@ -118,13 +134,15 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     check(depth);
     if (ancestry.has(path)) { result.diagnostics.push({ kind: 'cycle', source: id }); return []; }
     const doc = await document(path);
-    const props = [...(!parent ? await family(await document(cbm.documentPath)) : []), ...await family(doc)];
+    const cbmDoc = await document(cbm.documentPath);
+    const props = [...(!parent ? await family(cbmDoc) : []), ...await family(doc), ...objectFields(doc), ...(!parent ? objectFields(cbmDoc) : [])];
     const row: SourceRecord = {
-      id, track: 'dev', source: path, name: scalar(doc, 'SYMBOLNAME') || props.find(p => p.keys?.some(k => ['工程中名称', 'PROJECTNAME', '设备名称'].includes(k)))?.value || '',
+      id, track: 'dev', source: path, name: '',
       source_type: scalar(doc, 'TYPE') || scalar(doc, 'DEVICETYPE'), parent, properties: props,
       sources: [cbm.documentPath, path], context: [cbm.id], guid: '',
       devOccurrence: { rootSourceId, cbmOccurrenceId: cbm.id, assemblyPath },
     };
+    updateNames(row);
     result.records.push(row);
     const subtree = [row];
     const next = new Set(ancestry); next.add(path);
@@ -160,7 +178,8 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
           result.aliases.push({ sourceId: id, status: candidates.length === 1 ? 'confirmed' : 'ambiguous', candidates: candidates.map(row => row.id) });
           if (candidates.length === 1) {
             const row = candidates[0];
-            row.sources = [...row.sources, path]; row.properties = [...row.properties, ...await family(doc)];
+            row.sources = [...row.sources, path]; row.properties = [...row.properties, ...await family(doc), ...objectFields(doc)];
+            updateNames(row);
           }
           // Limit subsequent aliases to this real part subtree, not sibling instances.
           const ids = new Set(candidates.map(row => row.id));

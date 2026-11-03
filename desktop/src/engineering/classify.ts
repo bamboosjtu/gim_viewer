@@ -20,7 +20,7 @@ export function mainNumber(value: string): string {
 }
 
 export function explicitMain(object: ObjectEvidence): string {
-  const tokens = new Set([...object.designations, ...object.unitDesignations ?? []].map(p => mainNumber(p.value)).filter(Boolean));
+  const tokens = new Set(object.designations.map(p => mainNumber(p.value)).filter(Boolean));
   return tokens.size === 1 ? [...tokens][0] : '';
 }
 

@@ -30,6 +30,7 @@ export function ifcSourceRecords(objects: readonly IfcSpatialObject[]): SourceRe
     const hostId = byKey.get(object.hostObjectKey ?? '');
     return {
       id, track: 'ifc', source: `${object.sourcePath}#${object.expressId}`, name: object.name,
+      nameEvidence: [{ kind: 'object', value: object.sourceName ?? object.name, evidenceId: `${object.sourcePath}#${object.expressId}:Name` }],
       source_type: object.ifcType,
       parent: byKey.get(object.parentObjectKey ?? '') ?? (isIfcFeatureSourceType(object.ifcType) ? hostId : undefined) ?? '',
       properties, sources: [object.sourcePath], context: [...object.spatialKeys], guid: object.globalId,

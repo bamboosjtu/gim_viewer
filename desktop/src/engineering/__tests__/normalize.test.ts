@@ -16,9 +16,9 @@ describe('construction and operation engineering wholes', () => {
     expect(model.entities[0].category).toBe('E16.control_cabinet');
     expect(model.entities[0].name).toBe('2号主变压器测控柜');
   });
-  it('uses semantic unit declarations for body and neutral sources without a file level',()=>{
-    const unitDesignations=[value('2号备用主变本体系统')];
-    const model=build([source('body','220kV变压器模型04',{typeCategory:'E-T',unitDesignations,phases:[value('单相')]}),source('box','端子箱',{assemblyParentId:'body'}),source('neutral','中性点成套装置',{unitDesignations})]);
+  it('uses object-owned designations for body and neutral sources without a file level',()=>{
+    const designations=[value('2号备用主变')];
+    const model=build([source('body','220kV变压器模型04',{typeCategory:'E-T',designations,phases:[value('单相')]}),source('box','端子箱',{assemblyParentId:'body'}),source('neutral','中性点成套装置',{designations})]);
     expect(model.entities).toHaveLength(1);expect(model.entities[0]).toMatchObject({category:'E01',name:'2号备用主变',sourceIds:['body','box','neutral']});
   });
   it('does not let local family names promote an internal instrument', () => {
