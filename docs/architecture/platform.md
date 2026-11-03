@@ -21,6 +21,7 @@
 - 固定 WebView2 与 WASM 资产由构建脚本准备；`desktop/public/worker-bundle.js`、`libarchive.wasm`、`wasm/web-ifc*.wasm` 是随项目维护的运行时资产。
 - 缓存数据库为 `gim_cache_schema_v1.db`，直接创建当前完整表结构；不接受旧库迁移或历史版本放行。
 - 发布前需核对 EXE、固定运行时、源码指纹和验收 manifest；测量构建不能混用日常缓存。
+- 桌面应用版本以 `desktop/package.json` 为准；Tauri 的 `version` 引用 `../package.json`，NSIS 和 portable manifest 使用同一版本。`npm run check:version` 校验 npm 锁文件与 Cargo 清单/锁文件的一致性；前端构建、桌面构建和 portable 组包均先检查，版本不一致时停止。Windows portable 组包还读取真实 EXE 的 ProductVersion，拒绝把旧程序标为新版本。升级版本时同步 npm 与 Cargo 的根包版本，不修改依赖包或 Android 版本。
 
 ## 3. 配置与状态
 
@@ -52,12 +53,15 @@ cd desktop
 npm install
 npm run dev                 # Vite 浏览器开发
 npm run tauri:dev           # Tauri 开发
+npm run check:version       # 桌面发布元数据一致性
+npm run test:version        # 版本校验与漂移拒绝测试
 npm test                    # 快速单元测试
 npm run test:sqlite         # 真实 SQLite 往返
 npm run test:sample         # 真实样本回归（缺样本跳过不算通过）
 npm run test:engineering:nine
 npm run test:engineering:worker
 npm run build
+npm run tauri:build         # Release EXE + NSIS + portable ZIP/校验文件
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 

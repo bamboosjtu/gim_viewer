@@ -20,16 +20,21 @@ export interface ObjectEvidence {
   designations: readonly EvidenceValue[];
   identityCodes: readonly EvidenceValue[];
   identityNames: readonly EvidenceValue[];
+  /** Semantic unit declarations, independent of source level tags. */
+  unitDesignations?: readonly EvidenceValue[];
   phases: readonly EvidenceValue[];
 }
 
 export type SourceMeaning = 'object' | 'part' | 'fragment' | 'neutral_set' | 'container' | 'detail' | 'source_only';
+export type SourceComponentRole = 'cover' | 'sidewall' | 'base';
 export interface ObjectInterpretation {
   category: string;
   meaning: SourceMeaning;
   basis: string;
   conflict: string;
   independent: boolean;
+  /** Optional role inside a composite source such as a cable trench. */
+  role?: SourceComponentRole;
   assemblyCategory: string;
   assemblySignature: string;
 }

@@ -123,6 +123,17 @@ function assertSourceInventory(sources: EngineeringSources, id: EngineeringCache
   requireValid(ifc.length === sources.graph.ifcPaths.length && sources.graph.ifcPaths.every(path => paths.has(path)), 'delivered IFC inventory');
 }
 
+/** A source cache may decode successfully yet be a DEV-only snapshot written
+ * before IFC spatial evidence existed. Check the delivered IFC inventory and
+ * outward records before treating it as a hit. */
+export function engineeringSourceCacheMatchesFiles(sources: EngineeringSources, files: Iterable<string>): boolean {
+  const normalize = (path: string) => path.replace(/\\/g, '/').toLowerCase();
+  const delivered = new Set([...files].filter(path => /\.ifc$/i.test(path)).map(normalize));
+  const cached = new Set(sources.graph.ifcPaths.map(normalize));
+  if (delivered.size !== cached.size || [...delivered].some(path => !cached.has(path))) return false;
+  return delivered.size === 0 || (sources.models.length === delivered.size && sources.ifcRecords.length > 0);
+}
+
 export async function encodeEngineeringSources(sources: EngineeringSources, id: EngineeringCacheIdentity): Promise<{ bytes: Uint8Array; digest: string }> {
   assertEngineeringSources(sources);
   assertSourceInventory(sources, id);

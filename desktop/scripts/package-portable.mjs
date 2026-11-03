@@ -3,20 +3,21 @@
  * portable 不是单文件：WebView2 Runtime 目录必须和 exe 保持相对位置。
  */
 import { createHash } from 'node:crypto';
-import { createReadStream, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sevenZip from '7zip-min';
+import { checkDesktopVersion, validateDesktopVersions } from './check-desktop-version.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = dirname(scriptDir);
-const packageJson = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8'));
+const appVersion = checkDesktopVersion(projectRoot);
 const releaseDir = resolve(projectRoot, 'src-tauri', 'target', 'release');
 const sourceExe = join(releaseDir, 'gim-viewer.exe');
 const sourceRuntime = join(releaseDir, 'webview2-fixed-runtime');
 const portableRoot = join(releaseDir, 'bundle', 'portable');
-const folderName = `GIM-Reader_${packageJson.version}_x64_portable`;
+const folderName = `GIM-Reader_${appVersion}_x64_portable`;
 const outputDir = join(portableRoot, folderName);
 const outputZip = join(portableRoot, `${folderName}.zip`);
 const buildCommit = [
@@ -76,6 +77,18 @@ function runArchiveTool(args, label) {
 
 async function main() {
   if (!existsSync(sourceExe)) throw new Error(`Tauri release exe 不存在: ${sourceExe}`);
+  if (process.platform === 'win32') {
+    // Read the real PE resource. Renaming/repackaging an old EXE must not
+    // produce a ZIP whose manifest claims the new source version.
+    const metadata = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      '[System.Diagnostics.FileVersionInfo]::GetVersionInfo($env:GIM_PACKAGING_EXE).ProductVersion'], {
+      env: { ...process.env, GIM_PACKAGING_EXE: sourceExe }, encoding: 'utf8', windowsHide: true,
+    });
+    if (metadata.error || metadata.status !== 0) throw Error(`无法读取 EXE 版本：${metadata.error?.message ?? metadata.stderr}`);
+    const executableVersion = metadata.stdout.trim();
+    validateDesktopVersions({ 'package.json': appVersion, 'gim-viewer.exe ProductVersion': executableVersion });
+    console.log(`[portable] EXE ProductVersion 已核对：${executableVersion}`);
+  }
   if (!validateRuntime(sourceRuntime)) {
     throw new Error(`release 目录未包含完整 WebView2 Fixed Runtime，拒绝生成伪 portable 包: ${sourceRuntime}`);
   }
@@ -92,7 +105,7 @@ async function main() {
   const runtimeStats = walkStats(join(outputDir, 'webview2-fixed-runtime'));
   const manifest = {
     product: 'GIM 阅读器',
-    version: packageJson.version,
+    version: appVersion,
     commit: buildCommit,
     buildMode,
     architecture: 'x64',

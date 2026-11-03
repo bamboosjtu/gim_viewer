@@ -2,12 +2,14 @@
 import { describe, expect, it } from 'vitest';
 import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
 import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
-import { decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheEntry } from '../engineeringCacheCodec.js';
+import { decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheEntry, engineeringSourceCacheMatchesFiles } from '../engineeringCacheCodec.js';
+import { markCacheFailure } from '../engineeringWorker.js';
+import type { EngineeringBuildResult } from '../engineeringWorkerProtocol.js';
 
 const id = { sourceSha256: 'a'.repeat(64), parserVersion: 'parser-contract', entries: ['project.cbm', 'unit.dev', 'terminal.dev'] };
 async function fixture(extra: Record<string, string> = {}) {
   const files: Record<string, string> = { 'project.cbm': 'OBJECTMODELPOINTER=unit.dev', 'unit.dev': 'SYMBOLNAME=主变压器\nSUBDEVICE0=terminal.dev',
-    'terminal.dev': 'SYMBOLNAME=本体端子箱', ...extra };
+    'terminal.dev': 'SYMBOLNAME=测控柜', ...extra };
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(files), readText: async p => files[p] });
   return buildEngineeringSources(id.sourceSha256, graph, [], []);
 }
@@ -21,6 +23,25 @@ describe('independent source and entity cache contracts', () => {
     expect(sources.sources).toEqual(model.sources);
     expect(await decodeEngineeringEntities(entities, sources, id)).toEqual(model.snapshot);
     expect(engineeringCacheEntry(id, 'entities')).not.toBe(engineeringCacheEntry(id, 'sources'));
+  });
+
+  it('rejects a decoded DEV-only source body when delivered IFC files are present', async () => {
+    const model = await fixture();
+    const partial = structuredClone(model.sources);
+    partial.graph.ifcPaths = ['delivery.ifc'];
+    partial.models = [];
+    partial.ifcRecords = [];
+    expect(engineeringSourceCacheMatchesFiles(partial, ['project.cbm', 'delivery.ifc'])).toBe(false);
+    partial.models = [{ modelId: 'm', path: 'delivery.ifc' }];
+    partial.ifcRecords = [{} as never];
+    expect(engineeringSourceCacheMatchesFiles(partial, ['project.cbm', 'delivery.ifc'])).toBe(true);
+  });
+
+  it('marks an over-budget cache as explicitly disabled, not an error-only failure', () => {
+    const result = {} as EngineeringBuildResult;
+    markCacheFailure(result, Error('工程缓存无效：plain size'));
+    expect(result.cacheError).toContain('plain size');
+    expect(result.cacheDisabled).toContain('384 MiB');
   });
 
   it('rejects source/parser/inventory changes and corrupt bytes', async () => {

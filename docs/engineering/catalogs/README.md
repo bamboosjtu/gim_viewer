@@ -38,8 +38,8 @@
 | 3 | 来源包装 | 名称 `Group、模型组、组、组合、Default` + 有子 + `traits.assemblyContainer` | `container` |
 | 4 | 部件头词 | 名称命中 `part` 表（柜体、端子排、散热器、油枕、电动机构、在线监测仪等）且非独立头词 | `part`；带 `…模型N_` 前缀且前缀属 E 类时为 `fragment` |
 | 5 | 中性点成套 | 名称含 `中性点` 且带 `成套/装置/设备`，或来源类型 `neutralpointequipment` | `neutral_set`，归 E01 宿主 |
-| 6 | 独立功能 | 名称命中 `independent` 表（端子箱、汇控柜、控制柜、保护柜、屏柜、配电箱等） | 必建独立实体 |
-| 7 | 类别判定 | 独立头词 > 材料类型 > 对象名称 > 类型别名 > 家族身份候选 | 写入 `category` |
+| 6 | 独立功能 | 名称命中 `independent` 表（端子箱、汇控柜、控制柜、保护柜、屏柜、配电箱等） | 独立功能保留；主变/中性点内部端子箱作为主变成员 |
+| 7 | 类别判定 | 类型/材料枚举 > 身份属性 > 对象名称；二次柜按功能细分，明确独立控制头词可细分泛化开关柜类型 | 写入 `category` |
 | 8 | 主变强化 | 类别为 `E01`/`E-T` 时，工程中名称含 `#n主变`、`n号主变`、`主变n`，或 `E-T` 名称含“主变” | 归一 E01 |
 | 9 | 兜底 | 以上均无命中 | `U-OBJECT` |
 
@@ -69,11 +69,11 @@
 | 中性点装置宿主不明 | 待归集合，`neutral_set_main_unresolved`；随后按唯一显式主变编号重定向 |
 | 组件别名跨候选 | `WholeAlias` 为 `whole_unresolved`、`whole_resolved_component_ambiguous` 或 `pending_bundle_resolved` |
 
-待归集合在工程组成中显示为“整体归属待确认”，只用于聚合来源，不折算成已确认台套。
+待归集合在工程组成中显示为 `未分类/其他/整体归属待确认`，只用于聚合来源，不折算成已确认台套。
 
 ## 规则版本与目录稳定性
 
-- 当前版本 `engineering-wholes-2`，定义在 [catalogRules.json](../../../desktop/src/engineering/catalogRules.json) 的 `version`，由 [classify.ts](../../../desktop/src/engineering/classify.ts) 导出为 `ENGINEERING_RULES_VERSION`，随快照写入 `rulesVersion`。
+- 当前版本 `engineering-wholes-3`，定义在 [catalogRules.json](../../../desktop/src/engineering/catalogRules.json) 的 `version`，由 [classify.ts](../../../desktop/src/engineering/classify.ts) 导出为 `ENGINEERING_RULES_VERSION`，随快照写入 `rulesVersion`。本次变更新增 E16 屏柜/控制柜/蓄电池组、M07 兜底和 C-C1 角色。
 - 实体缓存契约绑定该版本；规则变化只重建实体与导航，来源有效时不重读 IFC，几何和 IFC 表示可复用。
 - 版本号不参与整体 ID；ID 只由包内作用域与来源种子生成，换规则不会把同一来源改成另一台设备。
 

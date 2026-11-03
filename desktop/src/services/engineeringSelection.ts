@@ -172,7 +172,8 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   if (!snapshot || !sources || !representations) return false;
   const entity = snapshot.entities.find(entity => entity.id === target.key), pending = snapshot.pending.find(p => p.id === target.key);
   const single = engineeringSourceRecord(state, target.key);
-  const groupNode = target.kind === 'engineering-group' ? state.engineeringNavigation?.composition.nodes.get(target.key) : undefined;
+  const groupNodes=state.engineeringNavigation?.inventory?.nodes.has(target.key)?state.engineeringNavigation.inventory.nodes:state.engineeringNavigation?.composition.nodes;
+  const groupNode = target.kind === 'engineering-group' ? groupNodes?.get(target.key) : undefined;
   if (target.kind === 'engineering' ? !entity && !pending : target.kind === 'engineering-source' ? !single : !groupNode || !['group', 'project'].includes(groupNode.kind)) return false;
   const request = existing ?? state.beginSelection(target), baseGuard = state.selectionGuard(request);
   const guard = { ...baseGuard, isCurrent: () => baseGuard.isCurrent() && state.engineeringSnapshot === snapshot };
@@ -180,7 +181,7 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   request.target = target;
   const ownerIds = new Set(target.kind === 'engineering' ? [target.key] : []);
   if (groupNode) {
-    const nodes = state.engineeringNavigation!.composition.nodes, stack = [groupNode];
+    const nodes = groupNodes!, stack = [groupNode];
     while (stack.length) { const node = stack.pop()!; if (node.targetId) ownerIds.add(node.targetId); for (const key of node.children) stack.push(nodes.get(key)!); }
   }
   const sourceIds = single && target.kind === 'engineering-source' ? new Set([single.id]) : representations.index.sourcesForOwners(ownerIds);
@@ -211,7 +212,7 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
     onSource: sourceId => { if (guard.isCurrent()) void selectEngineeringTarget(state, { kind: 'engineering-source', key: sourceId }); },
     onOwner: single && representations.index.ownerBySource.get(single.id) ? () => {
       if (!guard.isCurrent()) return;
-      state.engineeringNavMode = 'composition'; tree.renderEngineeringTree(state);
+      state.engineeringNavMode = state.engineeringNavMode==='inventory'?'inventory':'composition'; tree.renderEngineeringTree(state);
       void selectEngineeringTarget(state, { kind: 'engineering', key: representations.index.ownerBySource.get(single.id)! });
     } : undefined,
     onDocument: path => { if (guard.isCurrent()) void import('./engineeringSourceInspector.js').then(({ inspectEngineeringDocument }) => {

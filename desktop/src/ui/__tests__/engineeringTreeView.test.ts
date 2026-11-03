@@ -10,7 +10,7 @@ async function fixture() {
     'project.cbm': 'SUBSYSTEM0=unit.cbm',
     'unit.cbm': 'ENTITYNAME=F2System\nOBJECTMODELPOINTER=body.dev\nNAME=主变系统',
     'body.dev': 'SYMBOLNAME=1号主变压器\nSUBDEVICE0=box.dev\nSUBDEVICE1=radiator.dev',
-    'box.dev': 'SYMBOLNAME=1号主变端子箱', 'radiator.dev': 'SYMBOLNAME=散热器',
+    'box.dev': 'SYMBOLNAME=1号主变测控柜', 'radiator.dev': 'SYMBOLNAME=散热器',
   };
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(files), readText: async p => files[p] });
   const state = new AppState(); state.activateProject(1, 'package'); state.currentProjectType = 'substation';
@@ -20,7 +20,7 @@ async function fixture() {
   state.projectName = '测试变电工程';
   const node = (path: string, children: CbmNode[] = []): CbmNode => ({ path, children, rawProperties: {}, name: path, entityName: 'F4System', famPath: '', devPath: '', ifcFile: '', ifcGuid: '', classifyName: '', transformMatrix: '', systemNames: [], devSymbolName: '', devType: '', devExpanded: false });
   state.currentCbmTree = node('project.cbm', [node('unit.cbm')]);
-  return { state, graph, main: built.snapshot.entities.find(e => e.category === 'E01')!, box: built.snapshot.entities.find(e => e.category === 'E16.terminal_box')! };
+  return { state, graph, main: built.snapshot.entities.find(e => e.category === 'E01')!, box: built.snapshot.entities.find(e => e.category === 'E16.control_cabinet')! };
 }
 beforeEach(() => {
   vi.resetModules(); HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -28,6 +28,13 @@ beforeEach(() => {
 });
 const search = (value: string) => { const input = document.querySelector<HTMLInputElement>('[role="combobox"]')!; input.value = value; input.dispatchEvent(new Event('input')); };
 describe('engineering composition and provenance navigation', () => {
+  it('keeps DEV F levels explicit and exposes the JSON export action', async () => {
+    const f = await fixture(), { renderEngineeringTree } = await import('../engineeringTreeView.js');
+    f.state.engineeringNavMode = 'source'; renderEngineeringTree(f.state);
+    expect(document.body.textContent).toContain('DEV 轨道（F1 / F2 / F3 / F4）');
+    expect([...f.state.engineeringNavigation!.sourceNodes.values()].some(node => node.fLevel === 'F2' && node.documentPath === 'unit.cbm')).toBe(true);
+    expect(document.querySelector('.substation-nav-export')?.textContent).toBe('导出 JSON');
+  });
   it('distinguishes same-name cabinets by their engineering bay when searching an internal button', async () => {
     const raw: Record<string, string> = { 'project.cbm': 'SUBSYSTEM0=36.cbm\nSUBSYSTEM1=24.cbm',
       '36.cbm': 'SYSTEMNAME2=10kV系统\nSYSTEMNAME3=36S\nOBJECTMODELPOINTER=cabinet.dev',
@@ -87,10 +94,10 @@ describe('engineering composition and provenance navigation', () => {
     first.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     expect(document.activeElement?.textContent).toContain('钢梁599');
   });
-  it('offers exactly two views while source facts are still preparing', async () => {
+  it('offers three independent views while source facts are still preparing', async () => {
     const state = new AppState(); state.currentProjectType = 'substation';
     const { buildAndRenderCbmTree } = await import('../cbmTreeView.js'); buildAndRenderCbmTree(state, vi.fn());
-    expect([...document.querySelectorAll('.substation-nav-mode-btn')].map(b => b.textContent)).toEqual(['工程组成', '来源']);
+    expect([...document.querySelectorAll('.substation-nav-mode-btn')].map(b => b.textContent)).toEqual(['工程组成', '来源', '设备材料清册']);
     expect(document.body.textContent).toContain('正在识别工程整体');
     document.querySelector<HTMLButtonElement>('[data-engineering-mode="source"]')!.click();
     expect(document.body.textContent).toContain('正在读取来源引用与装配');
@@ -115,20 +122,20 @@ describe('engineering composition and provenance navigation', () => {
     expect(f.state.engineeringNavMode).toBe('composition');
     expect(f.state.engineeringSnapshot?.entities).toHaveLength(2);
   });
-  it('preserves an independent nested terminal box and expanded rows when views refresh', async () => {
+  it('preserves an independent nested control cabinet and expanded rows when views refresh', async () => {
     const f = await fixture(), { renderEngineeringTree } = await import('../engineeringTreeView.js'); renderEngineeringTree(f.state);
-    search('端子箱'); document.querySelector<HTMLElement>('[role="option"]')!.click();
-    await vi.waitFor(() => expect(document.querySelector('.props-header')?.textContent).toBe('1号主变端子箱'));
+    search('测控柜'); document.querySelector<HTMLElement>('[role="option"]')!.click();
+    await vi.waitFor(() => expect(document.querySelector('.props-header')?.textContent).toBe('1号主变测控柜'));
     expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.box.id]));
     const expanded = [...f.state.engineeringExpandedRows.composition];
     f.state.notifyEngineeringChanged();
     expect([...f.state.engineeringExpandedRows.composition]).toEqual(expanded);
-    expect(document.querySelector('.tree-row.selected')?.textContent).toContain('端子箱');
+    expect(document.querySelector('.tree-row.selected')?.textContent).toContain('测控柜');
     const request = f.state.selectionRequest!.id;
     document.querySelector<HTMLButtonElement>('[data-engineering-mode="source"]')!.click();
     document.querySelector<HTMLButtonElement>('[data-engineering-mode="composition"]')!.click();
     expect(f.state.selectionRequest?.id).toBe(request);
-    expect(document.querySelector<HTMLInputElement>('[role="combobox"]')?.value).toBe('端子箱');
+    expect(document.querySelector<HTMLInputElement>('[role="combobox"]')?.value).toBe('测控柜');
   });
   it('reads all raw source lines by pages and rejects stale document page actions', async () => {
     const f = await fixture(), doc = f.graph.documents.find(d => d.path === 'unit.cbm')!;
@@ -159,6 +166,7 @@ describe('engineering composition and provenance navigation', () => {
     await vi.dynamicImportSettled();
     expect(document.querySelector('.props-header')?.textContent).toBe('主控楼');
     expect(document.body.textContent).toContain('IFC 交付空间容器'); expect(document.body.textContent).toContain('主控楼墙');
+    expect([...f.state.engineeringNavigation!.sourceNodes.values()].some(node => node.kind === 'ifc-file' && node.title === 'delivery' && node.documentPath === 'delivery.ifc')).toBe(true);
     expect(f.state.engineeringSnapshot?.entities).toHaveLength(count);
   });
   it('loads detailed IFC source properties explicitly and refuses a late reply after another whole is selected', async () => {

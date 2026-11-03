@@ -1,8 +1,12 @@
 import type { EngineeringSources } from './buildSources.js';
 import type { EngineeringSnapshot } from '../../engineering/types.js';
-import { collectCompositionContexts, collectDeclaredCompositionContexts } from './compositionContexts.js';
+import { collectCompositionEvidence, collectDeclaredCompositionContexts } from './compositionContexts.js';
+import { assignEngineeringComposition, type CompositionContextEvidence } from '../../engineering/compositionTemplate.js';
+import type { CompositionDeclaration } from '../../engineering/composition.js';
 import { projectEngineeringComposition, type EngineeringComposition } from '../../engineering/composition.js';
 import { categoryLabel } from '../../engineering/catalogLabels.js';
+import { projectEngineeringInventory, type EngineeringInventory } from './inventory.js';
+import { sourceDocumentTitle, sourceRecordTitle } from './sourceTitles.js';
 
 export interface EngineeringSourceNode {
   key: string;
@@ -12,6 +16,8 @@ export interface EngineeringSourceNode {
   children: string[];
   sourceId?: string;
   documentPath?: string;
+  /** GIM F1/F2/F3/F4 or PARTINDEX for the source view; never an entity level. */
+  fLevel?: string;
 }
 export interface EngineeringNavigationData {
   version: string;
@@ -21,8 +27,11 @@ export interface EngineeringNavigationData {
   sourceRows: Map<string, string>;
   compositionSearch: Array<{ key: string; title: string; subtitle: string; searchText: string }>;
   sourceSearch: Array<{ key: string; title: string; subtitle: string }>;
+  inventory?: EngineeringInventory;
+  metadata?: {scope:string;rulesVersion:string;sourceComplete:boolean;sourceVersion:string};
+  compositionInput?:{facts:CompositionContextEvidence[];declarations:CompositionDeclaration[]};
 }
-export const ENGINEERING_NAVIGATION_VERSION = 'engineering-navigation-v2';
+export const ENGINEERING_NAVIGATION_VERSION = 'engineering-navigation-v3';
 const recordKey = (id: string) => `source:record:${id}`;
 const cbmKey = (id: string) => `source:cbm:${id}`;
 const ifcKey = (path: string) => `source:ifc:${path}`;
@@ -33,22 +42,30 @@ const spatialKey = (key: string) => `source:spatial:${key}`;
  */
 export function projectEngineeringNavigation(sources: EngineeringSources, snapshot: EngineeringSnapshot): EngineeringNavigationData {
   const spatialNodes = new Map(sources.spatialNodes.map(node => [node.key, node]));
-  const assignments = collectCompositionContexts(sources, snapshot, spatialNodes);
-  const composition = projectEngineeringComposition(snapshot, assignments, '工程组成', collectDeclaredCompositionContexts(sources));
+  const facts=collectCompositionEvidence(sources,snapshot,spatialNodes),declarations=collectDeclaredCompositionContexts(sources);
+  const assignments = assignEngineeringComposition(snapshot,facts);
+  const composition = projectEngineeringComposition(snapshot, assignments, '工程组成', declarations);
   const records = new Map([...sources.graph.records, ...sources.ifcRecords].map(record => [record.id, record]));
   const sourceNodes = new Map<string, EngineeringSourceNode>(), sourceRoot = 'source:project', sourceRows = new Map<string, string>();
   function add(node: EngineeringSourceNode) { sourceNodes.set(node.key, node); }
-  add({ key: sourceRoot, title: 'GIM 来源', kind: 'group', children: [] });
-  add({ key: 'source:cbm', title: 'CBM 引用与 DEV 装配', kind: 'group', parent: sourceRoot, children: [] });
-  add({ key: 'source:ifc', title: 'IFC 交付文件', kind: 'group', parent: sourceRoot, children: [] });
+  add({ key: sourceRoot, title: 'GIM 来源（DEV / IFC）', kind: 'group', children: [] });
+  add({ key: 'source:cbm', title: 'DEV 轨道（F1 / F2 / F3 / F4）', kind: 'group', parent: sourceRoot, children: [] });
+  add({ key: 'source:ifc', title: 'IFC 轨道（逐文件）', kind: 'group', parent: sourceRoot, children: [] });
   const docs = new Map(sources.graph.documents.map(doc => [doc.path, doc]));
+  const rootsByCbm=new Map(sources.graph.records.filter(record=>!record.parent&&record.devOccurrence).map(record=>[record.devOccurrence!.cbmOccurrenceId,record]));
+  const aliasTitles=new Map(sources.graph.aliases.map(alias=>{const titles=[...new Set(alias.candidates.map(id=>records.get(id)).filter((r):r is NonNullable<typeof r>=>!!r).map(sourceRecordTitle))];return [alias.sourceId,titles.length===1?titles[0]:undefined];}));
   for (const node of sources.graph.cbmOccurrences) {
     const doc = docs.get(node.documentPath);
     const names = doc?.fields.filter(field => /^SYSTEMNAME\d+$/i.test(field.keys[0])).map(field => field.value).filter(value => value && !/^(?:-|其他|其它|NULL\d*)$/i.test(value) && !value.startsWith('&'));
-    const title = names?.join(' / ') || doc?.fields.find(field => /^(?:NAME|PARTNAME)$/i.test(field.keys[0]))?.value || node.documentPath.split('/').pop()!;
-    add({ key: cbmKey(node.id), title, kind: 'cbm', documentPath: node.documentPath, parent: node.parentId ? cbmKey(node.parentId) : 'source:cbm', children: [] });
+    const rootRecord=rootsByCbm.get(node.id);
+    const ownName=doc?.fields.some(field=>/^(?:NAME|PARTNAME|PROJECTNAME)$/i.test(field.keys[0])&&field.value.trim()&&!/^(?:-|--|无|其他|NULL\d*)$/i.test(field.value)&&!field.value.startsWith('&'));
+    const raw = names?.length||ownName ? sourceDocumentTitle(doc,node.documentPath) : rootRecord ? sourceRecordTitle(rootRecord) : aliasTitles.get(node.id)??sourceDocumentTitle(doc,node.documentPath);
+    const entityName = node.entityName ?? doc?.fields.find(field => /^ENTITYNAME$/i.test(field.keys[0]))?.value ?? '';
+    const level = /^F[1-4](?:System)?$/i.test(entityName) ? entityName.slice(0, 2).toUpperCase() : entityName.toUpperCase() === 'PARTINDEX' ? 'PARTINDEX' : '';
+    const title = level ? `${level} ${raw}` : raw;
+    add({ key: cbmKey(node.id), title, kind: 'cbm', documentPath: node.documentPath, ...(level ? { fLevel: level } : {}), parent: node.parentId ? cbmKey(node.parentId) : 'source:cbm', children: [] });
   }
-  for (const path of sources.graph.ifcPaths) add({ key: ifcKey(path), title: path.split('/').pop()!, documentPath: path, kind: 'ifc-file', parent: 'source:ifc', children: [] });
+  for (const path of sources.graph.ifcPaths) add({ key: ifcKey(path), title: sourceDocumentTitle(undefined,path), documentPath: path, kind: 'ifc-file', parent: 'source:ifc', children: [] });
   const spatial = { nodes: sources.spatialNodes, nodeByKey: spatialNodes };
   for (const node of spatial?.nodes ?? []) add({ key: spatialKey(node.key), title: node.name || node.ifcType, kind: 'spatial', documentPath: node.sourcePath,
     parent: node.parentKey && spatial?.nodeByKey.has(node.parentKey) ? spatialKey(node.parentKey) : ifcKey(node.sourcePath), children: [] });
@@ -58,7 +75,7 @@ export function projectEngineeringNavigation(sources: EngineeringSources, snapsh
     const parent = source.parent && records.has(source.parent) ? recordKey(source.parent)
       : source.track === 'dev' && source.devOccurrence ? cbmKey(source.devOccurrence.cbmOccurrenceId)
         : source.track === 'ifc' ? containers.length ? spatialKey(containers[0]) : ifcKey(source.sources[0]) : 'source:cbm';
-    add({ key, title: source.name || source.source_type || source.source, kind: 'record', sourceId: source.id, documentPath: source.source, parent, children: [] });
+    add({ key, title: sourceRecordTitle(source), kind: 'record', sourceId: source.id, documentPath: source.source, parent, children: [] });
     sourceRows.set(source.id, key);
     if (!source.parent) for (const container of containers.slice(1)) add({ key: `${key}:spatial:${container}`, title: source.name || source.source_type,
       kind: 'record', sourceId: source.id, documentPath: source.source, parent: spatialKey(container), children: [] });
@@ -88,5 +105,7 @@ export function projectEngineeringNavigation(sources: EngineeringSources, snapsh
     compositionSearch.push({ key: pending.id, title, subtitle,
       searchText: [title, subtitle, pending.id, ...pending.sourceIds.map(id => records.get(id)?.name ?? '')].join('\n').toLowerCase() });
   }
-  return { version: ENGINEERING_NAVIGATION_VERSION, composition, sourceNodes, sourceRoot, sourceRows, compositionSearch, sourceSearch };
+  return { version: ENGINEERING_NAVIGATION_VERSION, composition, sourceNodes, sourceRoot, sourceRows, compositionSearch, sourceSearch,
+    compositionInput:{facts,declarations},
+    inventory:projectEngineeringInventory(snapshot,[...records.values()]),metadata:{scope:snapshot.scope,rulesVersion:snapshot.rulesVersion,sourceComplete:sources.complete,sourceVersion:sources.version} };
 }

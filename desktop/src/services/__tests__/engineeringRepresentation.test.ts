@@ -22,7 +22,7 @@ async function fixture(shared = false, declaredBuilding = false) {
     'project.cbm': `SUBSYSTEM0=unit.cbm${shared ? '\nSUBSYSTEM1=unit.cbm' : ''}${declaredBuilding ? '\nSUBSYSTEM2=building.cbm' : ''}`,
     'unit.cbm': 'OBJECTMODELPOINTER=body.dev',
     'body.dev': 'SYMBOLNAME=主变压器\nSUBDEVICE0=box.dev\nSUBDEVICE1=radiator.dev',
-    'box.dev': 'SYMBOLNAME=本体端子箱', 'radiator.dev': 'SYMBOLNAME=散热器',
+    'box.dev': 'SYMBOLNAME=测控柜', 'radiator.dev': 'SYMBOLNAME=散热器',
   };
   if (declaredBuilding) data['building.cbm'] = 'SYSTEMNAME1=建筑物系统\nSYSTEMNAME2=生产建筑物\nSYSTEMNAME3=主控通信楼01';
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(data), readText: async p => data[p] });
@@ -36,7 +36,7 @@ async function fixture(shared = false, declaredBuilding = false) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()); group.add(mesh); root.add(group); return mesh; };
   const body = mesh(''), box = mesh('sub:0'), radiator = mesh('sub:1');
   state.loadedXmlModGroups.set('physical', root);
-  const main = built.snapshot.entities.find(e => e.category === 'E01')!, terminal = built.snapshot.entities.find(e => e.category === 'E16.terminal_box')!;
+  const main = built.snapshot.entities.find(e => e.category === 'E01')!, terminal = built.snapshot.entities.find(e => e.category === 'E16.control_cabinet')!;
   return { state, graph, rootId, root, body, box, radiator, main, terminal };
 }
 
@@ -54,7 +54,7 @@ describe('source-to-physical representation adapter and filters', () => {
     for (const root of roots) expect(representation.index.resolveDev(root.id, { assemblyPath: '' }).sourceIds).toContain(root.id);
     expect(representation.index.resolveDev('unit.cbm', { assemblyPath: '' }).sourceIds).toEqual([]);
   });
-  it('isolates body members and preserves a nested terminal box as an independent selection', async () => {
+  it('isolates body members and preserves a nested control cabinet as an independent selection', async () => {
     const f = await fixture();
     await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id });
     f.state.setOnlySelected(true);
@@ -68,7 +68,7 @@ describe('source-to-physical representation adapter and filters', () => {
     const f = await fixture(); f.radiator.visible = false;
     const previous = selectEngineeringTarget(f.state, { kind: 'engineering', key: f.main.id });
     await selectEngineeringTarget(f.state, { kind: 'engineering', key: f.terminal.id }); await previous;
-    expect(document.querySelector('.props-header')?.textContent).toBe('本体端子箱');
+    expect(document.querySelector('.props-header')?.textContent).toBe('测控柜');
     f.state.setOnlySelected(true); f.state.setOnlySelected(false);
     expect(f.radiator.visible).toBe(false);
     expect(f.state.selectionRequest?.target?.key).toBe(f.terminal.id);

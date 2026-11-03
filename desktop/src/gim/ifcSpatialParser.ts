@@ -1,5 +1,6 @@
 import type { CbmNode, FileDevEntry, IfcEntry } from './types.js';
 import { resolveIfcModelId } from './modelIdentity.js';
+import { isIfcInternalDefinitionType } from './ifcOutwardProduct.js';
 
 /** IFC 空间容器的业务类型。 */
 export type SpatialKind = 'project' | 'site' | 'building' | 'storey' | 'space' | 'zone' | 'container';
@@ -956,7 +957,7 @@ function parseIfcModel(
     // 只将 IFC 产品/构件和空间关系明确引用的记录纳入可浏览对象集合。
     // `isContained` 允许兼容厂商扩展的 IFC 产品类型；产品类型判断则补齐
     // 没有空间容器但仍应在“未落入空间”分组中可检索的实体。
-    if (isContained || (globalId && isIfcNavigationObjectType(record.ifcType))) {
+    if (!isIfcInternalDefinitionType(record.ifcType) && (isContained || (globalId && isIfcNavigationObjectType(record.ifcType)))) {
       const placement = placementResolver.resolve(parseRef(record.args[5]));
       objects.push({
         key: objectKey(entry.modelId, record.expressId),
@@ -2009,7 +2010,7 @@ const IFC_PRODUCT_PREFIXES = [
 ];
 
 function isIfcNavigationObjectType(ifcType: string): boolean {
-  if (!ifcType.startsWith('IFC') || ifcType.endsWith('TYPE')) return false;
+  if (!ifcType.startsWith('IFC') || isIfcInternalDefinitionType(ifcType)) return false;
   if (IFC_PRODUCT_TYPES.has(ifcType)) return true;
   return IFC_PRODUCT_PREFIXES.some((prefix) => ifcType.startsWith(prefix));
 }

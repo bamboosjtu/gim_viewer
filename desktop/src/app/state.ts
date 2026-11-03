@@ -96,6 +96,7 @@ export class AppState {
   engineeringSelection: EngineeringSelectionScope | null = null;
   engineeringGeometryFilter: ((root?: THREE.Object3D) => void) | null = null;
   engineeringRepresentationChanged: ((rootOccurrence?: string) => void) | null = null;
+  engineeringGeometryEvidenceChanged: (()=>void) | null = null;
   engineeringSelectionCleanup: (() => void) | null = null;
   engineeringNavigationCleanup: (() => void) | null = null;
   deviceLodRuntime: { select(rootOccurrence: string): Promise<THREE.Group[]>; ensureBase?(rootOccurrence: string): Promise<THREE.Group[]>; retry?(rootOccurrence: string): Promise<THREE.Group[]>; refine?(rootOccurrence: string): Promise<THREE.Group[]>; releaseFine?(rootOccurrence: string): void; setOnlySelected?(only: boolean): void; release(): void; clearSelection(): void; notifyCoordinateAnchor?(): void;
@@ -187,12 +188,12 @@ export class AppState {
   engineeringGeometryReady: Promise<import('../gim/engineering/geometryOccurrences.js').SourceGeometryOccurrenceCatalog | null> | null = null;
   engineeringStatus: 'none' | 'loading' | 'partial' | 'ready' | 'error' = 'none';
   engineeringError = '';
-  engineeringCacheStatus: 'none' | 'hit' | 'miss' | 'saving' | 'saved' | 'partial' | 'error' = 'none';
+  engineeringCacheStatus: 'none' | 'hit' | 'miss' | 'saving' | 'saved' | 'partial' | 'disabled' | 'error' = 'none';
   engineeringCacheError = '';
   engineeringCleanup: (() => void) | null = null;
   engineeringListeners = new Set<() => void>();
-  engineeringNavMode: 'composition' | 'source' = 'composition';
-  engineeringExpandedRows = { composition: new Set<string>(), source: new Set<string>() };
+  engineeringNavMode: 'composition' | 'source' | 'inventory' = 'composition';
+  engineeringExpandedRows = { composition: new Set<string>(), source: new Set<string>(), inventory:new Set<string>() };
   notifyEngineeringChanged(): void { for (const listener of [...this.engineeringListeners]) listener(); }
   /** GIM 头部提取的工程名称（如"XX变电站"），用于 F1System 根节点显示 */
   projectName: string = '';
@@ -484,7 +485,7 @@ export class AppState {
     this.engineeringCacheStatus = 'none'; this.engineeringCacheError = '';
     this.engineeringListeners.clear();
     this.engineeringNavMode = 'composition';
-    this.engineeringExpandedRows = { composition: new Set<string>(), source: new Set<string>() };
+    this.engineeringExpandedRows = { composition: new Set<string>(), source: new Set<string>(), inventory:new Set<string>() };
     this.engineeringGeometryFilter = null; this.engineeringRepresentationChanged = null;
     this.projectName = '';
     this.currentProjectType = null;

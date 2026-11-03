@@ -32,8 +32,8 @@ for (const sample of ['s01', 's02', 's03', 's04', 'a31', 'b11', 'b12', 'b13', 'b
   if (sample === 's01') expect(bays.map(node => node.title)).toEqual(expect.arrayContaining(['36S间隔', '24S间隔']));
   if (sample === 's03') {
     expect(main?.entityCount).toBeGreaterThan(0);
-    const transformer = built.snapshot.entities.find(entity => entity.name === '220kV变压器模型ZJ01_1')!;
-    expect(transformer.category).toBe('E-T');
+    const transformer = built.snapshot.entities.find(entity => entity.name === '1号主变')!;
+    expect(transformer.category).toBe('E01');
     const rows = view.composition.rowsByEntity.get(transformer.id)!;
     expect(rows.some(row => row.startsWith(`${main!.key}/`))).toBe(true);
     expect(bays.some(node => node.title === '出线间隔02')).toBe(true);

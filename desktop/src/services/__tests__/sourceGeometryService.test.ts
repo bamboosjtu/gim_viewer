@@ -18,7 +18,7 @@ it('renders repeated actual source instances without a CBM display tree or entit
     'right.cbm': `SUBSYSTEM0=shared.cbm\nTRANSFORMMATRIX=${tx(5000)}`,
     'shared.cbm': 'ENTITYNAME=F2System\nOBJECTMODELPOINTER=assets/main.dev',
     'assets/main.dev': 'SYMBOLNAME=主变压器\nSUBDEVICES.NUM=3\nSUBDEVICE0=\nSUBDEVICE2=terminal.dev',
-    'assets/terminal.dev': 'SYMBOLNAME=端子箱\nSOLIDMODELS.NUM=1\nSOLIDMODEL0=shell.phm',
+    'assets/terminal.dev': 'SYMBOLNAME=测控柜\nSOLIDMODELS.NUM=1\nSOLIDMODEL0=shell.phm',
     'parts/shell.phm': 'SOLIDMODELS.NUM=1\nSOLIDMODEL0=box.mod',
     'surfaces/box.mod': '<Device/>',
   };

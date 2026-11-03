@@ -6,8 +6,12 @@ import { mainNumber } from './classify.js';
 export interface CompositionContextEvidence {
   entityId: string;
   declarations: Array<{ names: EvidenceValue[] }>;
-  spaces: Array<{ building: EvidenceValue; storeys: EvidenceValue[] }>;
+  spaces: Array<{ building: EvidenceValue; storeys: Array<EvidenceValue & {elevationMetres?:number}> }>;
+  sourceHints?:string[];
+  positions?:number[][];
   hostEntityIds: string[];
+  /** Source track only breaks out unclassified members; it never changes identity. */
+  track?: 'dev' | 'ifc' | 'mixed';
 }
 type Purpose = 'main' | 'distribution' | 'reactive' | 'auxiliary' | 'secondary' | 'cables' | 'ground' | 'lighting' | 'hvac' | 'water' | 'fire';
 interface DeclaredContext { purpose: Purpose; voltage?: number; unit?: string; evidence: string[] }
@@ -17,9 +21,24 @@ const keyOf = (name: string) => normalize(name).replace(/\s/g, '').toLowerCase()
 const valid = (name: string) => !!normalize(name) && !/^(?:-|--|其他|其它|无|未命名|未定义|未指定|默认|NULL\d*|None|Undefined|IFC\w*|Default(?:[ _-]*(?:Building|Storey|Level|Project|Site))?|Building|Storey|Project|Site|建筑|站区)(?:\s*#?\s*\d*)?$/i.test(normalize(name)) && !name.startsWith('&');
 const validBuilding = (name: string) => valid(name)
   && !/^(?:(?:Building|建筑)\s*s|新建(?:模(?:型)?|筑)\s*\d*|模型\s*\d*)$/i.test(normalize(name))
-  && !/总平面|平面图|立面图|剖面图/.test(name);
+  && !/总平面|总轴网|平面图|立面图|剖面图/.test(name);
 const civil: CompositionGroup = { key: 'civil', title: '建筑工程', kind: 'discipline', order: 0 };
 const installation: CompositionGroup = { key: 'installation', title: '安装工程', kind: 'discipline', order: 1 };
+const unclassified: CompositionGroup = { key: 'unclassified', title: '未分类', kind: 'discipline', order: 2 };
+type SourceTrack = 'dev' | 'ifc' | 'mixed';
+function trackGroup(track: SourceTrack): CompositionGroup {
+  return { key: `track:${track}`, title: track === 'ifc' ? 'IFC 轨道' : track === 'dev' ? 'DEV 轨道' : 'DEV+IFC 轨道', kind: 'track', order: 0 };
+}
+function categoryBucket(category: string): string {
+  if (category.startsWith('E')) return '设备';
+  if (category.startsWith('M')) return '装置性材料';
+  if (category.startsWith('C')) return '构件';
+  return '其他';
+}
+function unclassifiedPath(track: SourceTrack, category: string): CompositionGroup[] {
+  const bucket = categoryBucket(category);
+  return [unclassified, trackGroup(track), { key: `unclassified:${bucket}`, title: bucket, kind: 'bucket', order: bucket === '设备' ? 10 : bucket === '装置性材料' ? 20 : bucket === '构件' ? 30 : 40 }];
+}
 const systems: Record<Exclude<Purpose, 'distribution'>, { title: string; order: number; civil?: boolean }> = {
   main: { title: '主变压器系统', order: 10 }, reactive: { title: '无功补偿系统', order: 30 },
   auxiliary: { title: '站用电系统', order: 40 }, secondary: { title: '二次及直流系统', order: 50 },
@@ -31,7 +50,7 @@ function purpose(name: string): Purpose | null {
   const text = keyOf(name);
   if (/^(?:\d+(?:\.\d+)?(?:kv|千伏))?(?:主变(?:压器)?|变压器)系统\d*$/.test(text)) return 'main';
   if (/无功补偿|无功系统|静止无功|并联电容器系统/.test(text)) return 'reactive';
-  if (/二次系统|直流系统|直流电源|直流配电|蓄电池|充电柜|继电保护系统|通信系统|控制保护系统|监控系统/.test(text)) return 'secondary';
+  if (/二次系统|直流系统|直流电源|直流配电|蓄电池|充电柜|继电保护系统|通信系统|控制保护系统|监控系统|测控.*(?:柜|屏)|保护.*(?:柜|屏)|录波柜/.test(text)) return 'secondary';
   if (/站用(?:电|交流|变压器)系统|所用电系统/.test(text)) return 'auxiliary';
   if (/接地网|全站接地|防雷接地|^接地系统/.test(text)) return 'ground';
   if (/电缆系统|电缆工程/.test(text)) return 'cables';
@@ -89,15 +108,30 @@ function installationPath(context: DeclaredContext): CompositionGroup[] {
   return path;
 }
 function facility(context: DeclaredContext): CompositionGroup[] { return [civil, system(context)]; }
-function buildingPaths(input: CompositionContextEvidence | undefined): CompositionGroup[][] {
+export function canonicalBuildingName(text:string):string {
+  const value=normalize(text);
+  const voltage=value.match(/(\d+)\s*(?:kV|千伏)?\s*配电(?:装置)?楼/i);
+  if(voltage)return `${voltage[1]}千伏配电装置楼`;
+  const named=value.match(/警卫室|门卫室|主控(?:通信)?楼\d*|辅助用房|配电(?:装置)?楼|配电室\d*|综合楼|生产(?:综合)?楼|控制楼/);
+  return named?.[0]??'';
+}
+export function buildingPaths(input: CompositionContextEvidence | undefined): CompositionGroup[][] {
   const candidates = input?.spaces ?? [];
   const names = candidates.filter(space => validBuilding(space.building.value) && !purpose(space.building.value) && !/配电装置|开关场|构支架|构架|电缆沟/.test(space.building.value));
   if (names.length) return names.map(space => [civil,
-    { key: `building:${keyOf(space.building.value)}`, title: normalize(space.building.value), kind: 'building', order: 0 },
+    { key: `building:${keyOf(canonicalBuildingName(space.building.value)||space.building.value)}`, title: canonicalBuildingName(space.building.value)||normalize(space.building.value), kind: 'building', order: 0 },
     ...space.storeys.filter(item => valid(item.value) || /^(?:Storey|Level)\s*\d+$/i.test(item.value)).map(item => {
       const title = normalize(item.value).replace(/^(?:Storey|Level)\s*#?\s*(-?\d+)$/i, '$1层');
       return { key: `floor:${keyOf(title)}`, title, kind: 'storey' as const };
     })]);
+  // A placeholder IfcBuilding does not erase named storeys or the model's
+  // architectural delivery name. Both remain source-backed building evidence.
+  const floors=candidates.flatMap(space=>space.storeys.map(floor=>({floor,name:canonicalBuildingName(floor.value)}))).filter(row=>row.name);
+  if(floors.length)return floors.map(({floor,name})=>[civil,{key:`building:${keyOf(name)}`,title:name,kind:'building',order:0},
+    {key:`floor:${keyOf(floor.value)}`,title:floor.value,kind:'storey'}]);
+  const fileNames=[...new Set((input?.sourceHints??[]).map(canonicalBuildingName).filter(Boolean))];
+  if(fileNames.length===1)return [[civil,{key:`building:${keyOf(fileNames[0])}`,title:fileNames[0],kind:'building',order:0},
+    ...candidates.flatMap(space=>space.storeys.filter(f=>valid(f.value)).map(f=>({key:`floor:${keyOf(f.value)}`,title:f.value,kind:'storey' as const})))]];
   const labels = [...(input?.declarations ?? [])].reverse().flatMap(d => d.names.filter(n => validBuilding(n.value) && /楼|栋|房|室|车间/.test(n.value) && !/系统|区域/.test(n.value)));
   const first = labels[0];
   return first ? [[civil, { key: `building:${keyOf(first.value)}`, title: first.value, kind: 'building', order: 0 }]] : [];
@@ -113,6 +147,7 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
     if (visiting.has(entity.id)) return { entityId: entity.id, paths: [], evidence: ['view-host-cycle'] };
     visiting.add(entity.id);
     const input = facts.get(entity.id);
+    const track: SourceTrack = input?.track ?? 'mixed';
     const uniqueContexts = new Map(declared(input).map(context => [JSON.stringify([context.purpose, context.voltage, context.unit]), context]));
     const contexts = [...uniqueContexts].sort(([a],[b])=>a.localeCompare(b)).map(([,context])=>context);
     const purposes = new Set(contexts.map(context=>`${context.purpose}:${context.voltage ?? ''}`));
@@ -124,7 +159,8 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
     const hostIds = [...new Set(input?.hostEntityIds ?? [])].filter(id => id !== entity.id && entities.has(id));
     const host = hostIds.length === 1 ? assign(entities.get(hostIds[0])!) : undefined;
     const hostPaths = host?.paths.filter(path => path[0]?.key === 'installation') ?? [];
-    const fixed: Partial<Record<string, Purpose>> = { E01: 'main', E02: 'reactive', E03: 'auxiliary', E10: 'reactive', E11: 'reactive', E12: 'reactive', 'E16.protection': 'secondary', M05: 'cables', M06: 'ground', M07: 'cables', 'C-D1': 'lighting', 'C-D2': 'fire', 'C-C2': 'water' };
+    const fixed: Partial<Record<string, Purpose>> = { E01: 'main', E02: 'reactive', E03: 'auxiliary', E10: 'reactive', E11: 'reactive', E12: 'reactive', 'E16.protection': 'secondary', M05: 'cables', M06: 'ground', 'C-D1': 'lighting', 'C-D2': 'fire', 'C-C2': 'water' };
+    if(category==='M07'&&/电缆|槽盒|桥架/.test(entity.name))fixed.M07='cables';
     if (fixed[category]) chosen = { purpose: fixed[category]!, evidence: [`catalog-role:${category}`] };
     if (ownFacility) chosen = { purpose: ownFacility, evidence: [`whole-name:${entity.id}`] };
     const ownSecondary = ownPurpose === 'secondary' && category.startsWith('E16') && category !== 'E16.terminal_box';
@@ -144,7 +180,7 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
           const hostSystem = hostGroup?.kind === 'system' && hostGroup.key !== 'installation-unassigned' ? hostGroup : undefined;
           const group = related ? system(related) : hostSystem;
           if (group) paths = [[civil, { key: `structure:${group.key}`, title: `${group.title}构支架、独立基础`, kind: 'structure', order: 20 }]];
-          else paths = [[civil, { key: 'civil-unassigned', title: category.startsWith('C-A') ? '建筑物归属待确认' : '构筑物及附属设施归属待确认', kind: 'structure', order: 90 }]];
+          else paths = [unclassifiedPath(track, category)];
         }
       }
     } else {
@@ -156,8 +192,8 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
       else if (chosen) paths = contexts.map(installationPath);
       else {
         if (category.startsWith('E16')) paths = [installationPath({ purpose: 'secondary', evidence: [] })];
-        else if (category.startsWith('E') || category.startsWith('M')) paths = [[installation, { key: 'installation-unassigned', title: '系统归属待确认', kind: 'system', order: 90 }]];
         else if (buildingPaths(input).length) paths = buildingPaths(input);
+        else paths = [unclassifiedPath(track, category)];
       }
     }
     // Preserve explicit unit context under fixed-purpose systems (main bank,

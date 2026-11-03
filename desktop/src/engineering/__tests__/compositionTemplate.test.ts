@@ -30,18 +30,18 @@ it('does not use neutral-point grounding as evidence of the station ground grid,
   const a = assignEngineeringComposition(model, [first, second]), b = assignEngineeringComposition(model, [first, { ...second, declarations: [...second.declarations].reverse() }]);
   expect(a.map(item => item.paths)).toEqual(b.map(item => item.paths));
   expect(a[0].paths[0].map(g => g.title)).toEqual(['安装工程', '10千伏配电装置', '接地变间隔01']);
-  expect(a[1].paths[0].map(g => g.title)).toEqual(['安装工程', '系统归属待确认']);
+  expect(a[1].paths[0].map(g => g.title)).toEqual(['未分类', 'DEV+IFC 轨道', '设备']);
 });
 
 it('does not infer operating voltage from an equipment rating or a building/storey from exporter placeholders', () => {
   const model = snapshot([entity('insulator', 'M04', '20kV支柱绝缘子'), entity('proxy', 'U-OBJECT')]);
   const proxy = fact('proxy'); proxy.spaces = [{ building: { value: 'Default Building', evidenceId: 'b' }, storeys: [{ value: '无', evidenceId: 's' }] }];
   const assigned = assignEngineeringComposition(model, [fact('insulator'), proxy]);
-  expect(assigned[0].paths[0].map(group=>group.title)).toEqual(['安装工程', '系统归属待确认']);
-  expect(assigned[1].paths).toEqual([]);
+  expect(assigned[0].paths[0].map(group=>group.title)).toEqual(['未分类', 'DEV+IFC 轨道', '装置性材料']);
+  expect(assigned[1].paths[0].map(group=>group.title)).toEqual(['未分类', 'DEV+IFC 轨道', '其他']);
   for (const value of ['Building s', '建筑s', '新建模 1', '新建模1', '新建筑 1', '新建筑1', 'HN-220-B-2总平面']) {
     proxy.spaces[0].building.value = value;
-    expect(assignEngineeringComposition(model, [proxy])[1].paths).toEqual([]);
+    expect(assignEngineeringComposition(model, [proxy])[1].paths[0].map(group=>group.title)).toEqual(['未分类', 'DEV+IFC 轨道', '其他']);
   }
 });
 
@@ -49,7 +49,7 @@ it('keeps a foundation unresolved when its host has no confirmed installation sy
   const model = snapshot([entity('host', 'E09'), entity('foundation', 'C-B2', '独立基础')]);
   const foundation = fact('foundation'); foundation.hostEntityIds = ['host'];
   const result = assignEngineeringComposition(model, [fact('host'), foundation]);
-  expect(result[1].paths[0].map(group => group.title)).toEqual(['建筑工程', '构筑物及附属设施归属待确认']);
+  expect(result[1].paths[0].map(group => group.title)).toEqual(['未分类', 'DEV+IFC 轨道', '构件']);
 });
 
 it('uses the explicitly named bay voltage beneath an interval without inventing a voltage from the interval alone', () => {
@@ -66,7 +66,21 @@ it('uses the explicitly named bay voltage beneath an interval without inventing 
   expect(titles('line')).toEqual(['安装工程', '110千伏配电装置', '110kV1号变压器线路间隔']);
   expect(titles('switchgear')).toEqual(['安装工程', '35千伏配电装置', '35kV1号变压开关柜线路间隔']);
   expect(titles('bus')).toEqual(['安装工程', '10千伏配电装置', '10kV1段母线间隔']);
-  expect(titles('range')).toEqual(['安装工程', '系统归属待确认']);
+  expect(titles('range')).toEqual(['未分类', 'DEV+IFC 轨道', '设备']);
   expect(titles('neutral')).toEqual(['安装工程', '主变压器系统', '110kV中性点设备间隔1']);
-  expect(titles('conflict')).toEqual(['安装工程', '系统归属待确认']);
+  expect(titles('conflict')).toEqual(['未分类', 'DEV+IFC 轨道', '设备']);
+});
+
+it('projects unclassified wholes as track and category buckets without an extra category level', () => {
+  const model = snapshot([entity('orphan', 'E09')]);
+  const assignments = assignEngineeringComposition(model, [fact('orphan')]);
+  const view = projectEngineeringComposition(model, assignments, '工程');
+  const root = view.nodes.get(view.rootKey)!;
+  expect(root.children.map(key => view.nodes.get(key)!.title)).toEqual(['未分类']);
+  const unclassified = view.nodes.get(root.children[0])!;
+  expect(unclassified.children.map(key => view.nodes.get(key)!.title)).toEqual(['DEV+IFC 轨道']);
+  const track = view.nodes.get(unclassified.children[0])!;
+  expect(track.children.map(key => view.nodes.get(key)!.title)).toEqual(['设备']);
+  expect(view.nodes.get(track.children[0])!.children).toHaveLength(1);
+  expect(view.nodes.get(track.children[0])!.children.map(key => view.nodes.get(key)!.title)).toEqual(['orphan']);
 });

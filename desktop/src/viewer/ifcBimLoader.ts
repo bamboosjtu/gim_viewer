@@ -227,6 +227,7 @@ export async function loadBimIfc(
   runtime.setMemoryPressure?.(state.substationMemoryPressure);
   runtime.setOnlySelected?.(state.onlySelected);
   state.ifcRegionalRuntimes.set(logicalId, runtime);
+  state.engineeringGeometryEvidenceChanged?.();
   void state.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error));
   return model;
 }

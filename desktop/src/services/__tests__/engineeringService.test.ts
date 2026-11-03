@@ -38,7 +38,7 @@ class LoopbackPort implements EngineeringWorkerPort {
 const sourceFiles = (name = '主变压器', ifc = false) => new Map([
   ['project.cbm', new File(['OBJECTMODELPOINTER=unit.dev'], 'project.cbm')],
   ['unit.dev', new File([`SYMBOLNAME=${name}\nSUBDEVICE0=terminal.dev`], 'unit.dev')],
-  ['terminal.dev', new File(['SYMBOLNAME=本体端子箱'], 'terminal.dev')],
+  ['terminal.dev', new File(['SYMBOLNAME=测控柜'], 'terminal.dev')],
   ...(ifc ? [['delivery.ifc', new File(['IFC'], 'delivery.ifc')] as [string, File]] : []),
 ]);
 const state = (sha = 'a'.repeat(64)) => { const state = new AppState(); state.activateProject(7, sha); return state; };

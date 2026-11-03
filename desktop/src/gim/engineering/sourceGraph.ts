@@ -27,6 +27,8 @@ export interface CbmOccurrence {
   documentPath: string;
   parentId: string | null;
   viaField: string;
+  /** Original GIM entity level, used only for the source view. */
+  entityName?: string;
 }
 export interface EngineeringSourceGraph {
   documents: SourceDocument[];
@@ -140,9 +142,10 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   async function visitCbm(path: string, id: string, parentId: string | null, viaField: string, ancestors: Set<string>, physicalScopes: PhysicalScope[], depth: number): Promise<void> {
     check(depth);
     if (ancestors.has(path)) { result.diagnostics.push({ kind: 'cycle', source: id }); return; }
-    const node = { id, documentPath: path, parentId, viaField };
-    result.cbmOccurrences.push(node);
     const doc = await document(path);
+    const entityName = scalar(doc, 'ENTITYNAME')?.trim() || undefined;
+    const node = { id, documentPath: path, parentId, viaField, ...(entityName ? { entityName } : {}) };
+    result.cbmOccurrences.push(node);
     let scopes = physicalScopes;
     const omp = scalar(doc, 'OBJECTMODELPOINTER');
     if (omp) {

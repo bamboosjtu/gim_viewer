@@ -7,6 +7,14 @@ import { decodeEngineeringNavigation, encodeEngineeringNavigation } from './engi
 import { collectSourceGeometryOccurrences } from '../gim/engineering/geometryOccurrences.js';
 import { encodeEngineeringWorkerResult, engineeringWorkerResultTransfers } from './engineeringWorkerTransport.js';
 
+/** Distinguish a bounded cache rejection from a broken snapshot. The model is
+ * still complete and usable; only persistence is explicitly disabled. */
+export function markCacheFailure(result: EngineeringBuildResult, error: unknown): void {
+  const text = String(error);
+  result.cacheError = text;
+  if (/plain size|expanded length/i.test(text)) result.cacheDisabled = '工程实体缓存超过 384 MiB，已禁用大站实体缓存';
+}
+
 /** Also used without a Worker in pure integration tests. No database or Viewer. */
 export function createEngineeringWorkerHandler() {
   let scope = '';
@@ -55,11 +63,11 @@ export function createEngineeringWorkerHandler() {
       const result: EngineeringBuildResult = { sources: artifact.sources, snapshot, navigation, geometryOccurrences: collectSourceGeometryOccurrences(graph), entityCacheHit, navigationCacheHit };
       if (!entityCacheHit) {
         try { result.entityBytes = await encodeEngineeringEntities(snapshot, artifact, request.identity); }
-        catch (error) { result.cacheError = String(error); }
+        catch (error) { markCacheFailure(result, error); }
       }
       if (!navigationCacheHit) {
         try { result.navigationBytes = await encodeEngineeringNavigation(navigation, artifact.sources, snapshot, artifact.digest, request.identity); }
-        catch (error) { result.cacheError = String(error); }
+        catch (error) { markCacheFailure(result, error); }
       }
       return { type: 'model', result: encodeEngineeringWorkerResult(result) };
     }
@@ -72,7 +80,7 @@ export function createEngineeringWorkerHandler() {
         result.sourceBytes = encoded.bytes;
         result.entityBytes = await encodeEngineeringEntities(result.snapshot, { sources: result.sources, digest: encoded.digest }, request.identity);
         result.navigationBytes = await encodeEngineeringNavigation(result.navigation, result.sources, result.snapshot, encoded.digest, request.identity);
-      } catch (error) { result.cacheError = String(error); }
+      } catch (error) { markCacheFailure(result, error); }
     }
     return { type: 'model', result: encodeEngineeringWorkerResult(result) };
   };
@@ -98,3 +106,4 @@ if (typeof document === 'undefined' && typeof self !== 'undefined' && typeof sel
     });
   };
 }
+

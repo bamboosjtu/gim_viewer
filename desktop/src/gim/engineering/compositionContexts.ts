@@ -5,8 +5,8 @@ import type { EngineeringSources, EngineeringSpatialContext } from './buildSourc
 
 /** Adapt only declared source context and real composition/association edges.
  * Domain mapping receives no F labels, file hierarchy depth, viewer or bounds. */
-export function collectCompositionContexts(sources: EngineeringSources, snapshot: EngineeringSnapshot,
-  spatial: ReadonlyMap<string, EngineeringSpatialContext>): CompositionAssignment[] {
+export function collectCompositionEvidence(sources: EngineeringSources, snapshot: EngineeringSnapshot,
+  spatial: ReadonlyMap<string, EngineeringSpatialContext>): CompositionContextEvidence[] {
   const records = new Map([...sources.graph.records, ...sources.ifcRecords].map(record => [record.id, record]));
   const cbm = new Map(sources.graph.cbmOccurrences.map(node => [node.id, node]));
   const docs = new Map(sources.graph.documents.map(doc => [doc.path, doc]));
@@ -45,7 +45,7 @@ export function collectCompositionContexts(sources: EngineeringSources, snapshot
       const seen=new Set<string>(), floors:EvidenceValue[]=[];let cursor:string|null=key;
       while(cursor&&!seen.has(cursor)) {
         seen.add(cursor);const node=spatial.get(cursor);if(!node)break;
-        const value={value:node.name,evidenceId:`${node.sourcePath}#${node.expressId}`};
+        const value={value:node.longName||node.name,evidenceId:`${node.sourcePath}#${node.expressId}`,...(node.elevationMetres!==undefined?{elevationMetres:node.elevationMetres}:{})};
         if(node.kind==='storey')floors.unshift(value);
         if(node.kind==='building'){result.push({building:value,storeys:floors});break;}
         cursor=node.parentKey;
@@ -54,6 +54,7 @@ export function collectCompositionContexts(sources: EngineeringSources, snapshot
     spaces.set(id,result);return result;
   }
   const owners=new Map(snapshot.memberships.map(member=>[member.sourceId,member.ownerId]));
+  const locations=new Map((sources.locations??[]).map(row=>[row.sourceId,row.position]));
   const relationships=new Map<string,string[]>();
   for(const relation of snapshot.relationships){const ids=relationships.get(relation.from)??[];ids.push(relation.to);relationships.set(relation.from,ids);}
   const evidence:CompositionContextEvidence[]=snapshot.entities.map(entity=>{
@@ -64,9 +65,17 @@ export function collectCompositionContexts(sources: EngineeringSources, snapshot
       let parent=records.get(id)?.parent;const seen=new Set<string>();
       while(parent&&!seen.has(parent)){seen.add(parent);const owner=owners.get(parent);if(owner&&owner!==entity.id){hostIds.add(owner);break;}parent=records.get(parent)?.parent;}
     }
-    return {entityId:entity.id,declarations:[...declarations.values()],spaces:[...ownSpaces.values()],hostEntityIds:[...hostIds]};
+    const tracks = new Set(entity.sourceIds.map(id => records.get(id)?.track).filter((track): track is 'dev' | 'ifc' => !!track));
+    return {entityId:entity.id,declarations:[...declarations.values()],spaces:[...ownSpaces.values()],hostEntityIds:[...hostIds],
+      sourceHints:[...new Set(entity.sourceIds.flatMap(id=>records.get(id)?.sources??[]))],
+      positions:entity.sourceIds.flatMap(id=>locations.has(id)?[locations.get(id)!]:[]),
+      track: tracks.size === 1 ? [...tracks][0] : 'mixed'};
   });
-  return assignEngineeringComposition(snapshot,evidence);
+  return evidence;
+}
+
+export function collectCompositionContexts(sources: EngineeringSources,snapshot:EngineeringSnapshot,spatial:ReadonlyMap<string,EngineeringSpatialContext>):CompositionAssignment[]{
+  return assignEngineeringComposition(snapshot,collectCompositionEvidence(sources,snapshot,spatial));
 }
 
 export function collectDeclaredCompositionContexts(sources: EngineeringSources): CompositionDeclaration[] {

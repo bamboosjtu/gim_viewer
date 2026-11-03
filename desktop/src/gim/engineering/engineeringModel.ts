@@ -2,7 +2,7 @@ import { normalizeEngineeringModel } from '../../engineering/normalize.js';
 import type { EngineeringSnapshot } from '../../engineering/types.js';
 import type { IfcSpatialObject } from '../ifcSpatialParser.js';
 import { ifcSourceRecords } from './ifcSourceRecords.js';
-import { toObjectEvidence } from './sourceEvidence.js';
+import { engineeringObjectEvidence } from './objectEvidence.js';
 import type { SourceRecord } from './sourceEvidence.js';
 import type { EngineeringSourceGraph } from './sourceGraph.js';
 
@@ -62,5 +62,5 @@ export function buildEngineeringSourceModel(scope: string, graph: EngineeringSou
       status: hits.length === 1 ? 'confirmed' : hits.length ? 'ambiguous' : 'not_found',
       ifcSourceIds: [...hits], devSourceIds: [...aliases.get(cbm.id) ?? devByCbm.get(cbm.id) ?? []] });
   }
-  return { sources, snapshot: normalizeEngineeringModel(scope, sources.map(toObjectEvidence), graph.aliases), ifcMatches };
+  return { sources, snapshot: normalizeEngineeringModel(scope, engineeringObjectEvidence(graph,sources), graph.aliases), ifcMatches };
 }

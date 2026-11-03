@@ -6,9 +6,9 @@ const evidence = (sourceId: string, name: string, assemblyParentId?: string): Ob
   traits: {}, designations: [], identityCodes: [], identityNames: [], phases: [] });
 describe('whole-only composition projection', () => {
   it('keeps an independently identified cabinet out of the main transformer while hiding its radiator design part', () => {
-    const snapshot = normalizeEngineeringModel('package', [evidence('body', '主变压器'), evidence('radiator', '散热器', 'body'), evidence('box', '端子箱', 'body')], []);
+    const snapshot = normalizeEngineeringModel('package', [evidence('body', '主变压器'), evidence('radiator', '散热器', 'body'), evidence('box', '测控柜', 'body')], []);
     const view = projectEngineeringComposition(snapshot, [], '工程');
-    expect([...view.nodes.values()].filter(n => n.kind === 'entity').map(n => n.title).sort()).toEqual(['主变压器', '端子箱']);
+    expect([...view.nodes.values()].filter(n => n.kind === 'entity').map(n => n.title).sort()).toEqual(['主变压器', '测控柜']);
     expect(view.nodes.get(view.rootKey)?.entityCount).toBe(2);
     expect(snapshot.memberships.find(m => m.sourceId === 'radiator')?.ownerId).toBe(snapshot.memberships.find(m => m.sourceId === 'body')?.ownerId);
   });

@@ -11,6 +11,16 @@ const source = (sourceId: string, name: string, extra: Partial<ObjectEvidence> =
 const build = (rows: ObjectEvidence[]) => normalizeEngineeringModel('test-package', rows);
 
 describe('construction and operation engineering wholes', () => {
+  it('prefers secondary type over a transformer name and family identity',()=>{
+    const model=build([source('cabinet','2号主变压器测控柜',{typeCategory:'E16',identityNames:[value('主变压器')],designations:[value('2号主变')]} )]);
+    expect(model.entities[0].category).toBe('E16.control_cabinet');
+    expect(model.entities[0].name).toBe('2号主变压器测控柜');
+  });
+  it('uses semantic unit declarations for body and neutral sources without a file level',()=>{
+    const unitDesignations=[value('2号备用主变本体系统')];
+    const model=build([source('body','220kV变压器模型04',{typeCategory:'E-T',unitDesignations,phases:[value('单相')]}),source('box','端子箱',{assemblyParentId:'body'}),source('neutral','中性点成套装置',{unitDesignations})]);
+    expect(model.entities).toHaveLength(1);expect(model.entities[0]).toMatchObject({category:'E01',name:'2号备用主变',sourceIds:['body','box','neutral']});
+  });
   it('does not let local family names promote an internal instrument', () => {
     const instrument = source('i', '在线监测仪', { assemblyParentId: 'n', identityNames: [value('110kV中性点装置')] });
     const model = build([instrument, source('n', '110kV中性点装置')]);
@@ -19,7 +29,7 @@ describe('construction and operation engineering wholes', () => {
     expect(model.pending[0].sourceIds).toEqual(['i', 'n']);
   });
 
-  it('keeps terminal boxes independent across detail depth and wrappers', () => {
+  it('keeps embedded terminal boxes within the transformer across wrappers', () => {
     const main = source('main', '主变压器');
     const terminal = source('terminal', '本体端子箱', { assemblyParentId: 'main' });
     const coarse = build([main, terminal]);
@@ -27,8 +37,9 @@ describe('construction and operation engineering wholes', () => {
       source('wrapper', 'Group', { assemblyParentId: 'main', traits: { assemblyContainer: true } }),
       source('radiator', '散热器', { assemblyParentId: 'wrapper' })]);
     expect(fine.entities.map(e => [e.id, e.category])).toEqual(coarse.entities.map(e => [e.id, e.category]));
-    expect(fine.entities.find(e => e.category === 'E01')?.sourceIds).toEqual(['main', 'radiator', 'wrapper']);
-    expect(fine.entities.find(e => e.category === 'E16.terminal_box')?.sourceIds).toEqual(['terminal']);
+    expect(fine.entities.find(e => e.category === 'E01')?.sourceIds).toEqual(['main', 'radiator', 'terminal', 'wrapper']);
+    expect(fine.entities).toHaveLength(1);
+    expect(build([source('box','独立端子箱')]).entities[0].category).toBe('E16.terminal_box');
   });
 
   it('joins numbered peer fragments using engineering evidence', () => {
@@ -65,16 +76,16 @@ describe('construction and operation engineering wholes', () => {
     expect(build(rows.reverse())).toEqual(model);
   });
 
-  it('resolves neutral attachments after hosts, including independent nested boxes', () => {
+  it('resolves neutral attachments with their nested terminal boxes after hosts', () => {
     const model = build([source('a-neutral', '中性点成套装置', { designations: [value('#2主变')] }),
       source('z-main', '主变压器', { designations: [value('#2主变')] }),
       source('instrument', '电动机构', { assemblyParentId: 'a-neutral' }),
       source('terminal', '端子箱', { assemblyParentId: 'a-neutral' })]);
     expect(model.pending).toHaveLength(0);
-    expect(model.entities).toHaveLength(2);
+    expect(model.entities).toHaveLength(1);
     const main = model.entities.find(e => e.category === 'E01')!;
-    expect(main.sourceIds).toEqual(['a-neutral', 'instrument', 'z-main']);
-    expect(model.relationships[0].to).toBe(main.id);
+    expect(main.sourceIds).toEqual(['a-neutral', 'instrument', 'terminal', 'z-main']);
+    expect(model.relationships).toEqual([]);
   });
 
   it('preserves reused material instances', () => {
@@ -91,9 +102,38 @@ describe('construction and operation engineering wholes', () => {
   });
 
   it('interprets the functional cabinet noun before its service prefix', () => {
-    expect(interpretObject(source('x', 'HGIS智能控制柜', { typeCategory: 'E09' })).category).toBe('E16.control');
+    expect(interpretObject(source('x', 'HGIS智能控制柜', { typeCategory: 'E09' })).category).toBe('E16.control_cabinet');
+    expect(interpretObject(source('x', '二次屏柜')).category).toBe('E16.panel_cabinet');
+    expect(interpretObject(source('x', '通信柜')).category).toBe('E16.panel_cabinet');
+    expect(interpretObject(source('x', '蓄电池组')).category).toBe('E16.battery_set');
     expect(interpretObject(source('x', '变压器保护装置')).category).toBe('E16.protection');
     expect(interpretObject(source('x', '二次屏柜模型02_柜体'))).toMatchObject({ meaning: 'fragment', independent: false });
+  });
+
+  it('keeps fire alarm buttons out of the component-button branch', () => {
+    expect(interpretObject(source('x', '手动报警按钮'))).toMatchObject({ category: 'C-D2', independent: true, meaning: 'object' });
+    expect(build([source('button', '手动报警按钮')]).entities.map(entity => entity.category)).toEqual(['C-D2']);
+  });
+
+  it('creates distinct E16 wholes for terminal box, panel, control cabinet and battery set', () => {
+    const model = build([source('term', '独立端子箱'), source('panel', '二次屏柜'), source('control', 'HGIS智能控制柜'), source('battery', '蓄电池组')]);
+    expect(model.entities.map(entity => entity.category).sort()).toEqual(['E16.battery_set', 'E16.control_cabinet', 'E16.panel_cabinet', 'E16.terminal_box']);
+  });
+
+  it('uses the documented M07 fallback only for explicit or material-typed other materials', () => {
+    expect(interpretObject(source('x', '其他材料'))).toMatchObject({ category: 'M07', basis: 'object_name' });
+    expect(interpretObject(source('x', '未细分材料'))).toMatchObject({ category: 'M07' });
+    expect(interpretObject(source('x', '未知物料', { traits: { materialType: true } }))).toMatchObject({ category: 'M07', basis: 'material_type_fallback' });
+    expect(interpretObject(source('x', '未知物料'))).toMatchObject({ category: 'U-OBJECT' });
+  });
+
+  it('records cable trench component roles without creating new wholes', () => {
+    const model = build([source('trench', '电缆沟'), source('cover', '沟盖板', { assemblyParentId: 'trench' })]);
+    expect(interpretObject(source('cover', '沟盖板')).role).toBe('cover');
+    expect(interpretObject(source('side', '沟壁')).role).toBe('sidewall');
+    expect(interpretObject(source('base', '沟底')).role).toBe('base');
+    expect(model.entities).toHaveLength(1);
+    expect(model.memberships.find(m => m.sourceId === 'cover')?.interpretation.role).toBe('cover');
   });
 
   it('preserves unknown proxies and known equipment nested under them', () => {

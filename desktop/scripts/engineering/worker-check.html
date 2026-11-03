@@ -25,7 +25,7 @@ globalThis.runEngineeringWorkerCheck = async () => {
     check(!('records' in graph),'extraction does not clone the full graph into the Window');
     check(client.geometryOccurrences?.occurrences.length===1,'independent physical occurrence contract');
     const result=await client.assemble([],[],identity);
-    check(result.sources.complete&&result.snapshot.entities.length===2,'whole and independent terminal box');
+    check(result.sources.complete&&result.snapshot.entities.length===1,'transformer includes its embedded terminal box');
     check(result.snapshot.memberships.length===3,'source conservation');
     check(result.sourceBytes?.byteLength&&result.entityBytes?.byteLength,'Worker cache encoding');
     check(result.navigationBytes?.byteLength&&result.navigation.sourceRows.size===3,'Worker navigation projection and encoding');
@@ -60,11 +60,12 @@ globalThis.runEngineeringWorkerCheck = async () => {
   controller.abort();check(await obsolete,'actual Worker cancellation');
   const state=new AppState();state.activateProject(7,scope);
   await beginEngineeringBuild(state,files);
-  check(state.engineeringStatus==='ready'&&state.engineeringSnapshot.entities.length===2,'production service with actual Worker');
+  check(state.engineeringStatus==='ready'&&state.engineeringSnapshot.entities.length===1,'production service with actual Worker');
   const fixture=document.createElement('section');fixture.innerHTML='<div id="cbm-tree-panel" class="tab-panel"></div><aside id="props-drawer"><div id="props-drawer-body"></div></aside><button id="btn-close-props"></button><button id="btn-export-props"></button>';
   document.body.append(fixture);state.currentProjectType='substation';
   const {renderEngineeringTree}=await import('../../src/ui/engineeringTreeView.ts');renderEngineeringTree(state);
-  check([...fixture.querySelectorAll('.substation-nav-mode-btn')].map(b=>b.textContent).join(',')==='工程组成,来源','actual browser two views');
+  check([...fixture.querySelectorAll('.substation-nav-mode-btn')].map(b=>b.textContent).join(',')==='工程组成,来源,设备材料清册','actual browser three views');
+  check(state.engineeringNavigation.inventory.rowsBySource.size===3,'inventory includes actual component sources');
   const input=fixture.querySelector('[role="combobox"]');input.value='散热器';input.dispatchEvent(new Event('input'));
   fixture.querySelector('[role="option"]').click();check(state.selectionRequest.target.kind==='engineering','search claims whole selection before lazy imports');
   const until=async predicate=>{const end=performance.now()+10000;while(!predicate()){if(performance.now()>end)throw Error('browser navigation did not settle');await new Promise(resolve=>setTimeout(resolve,25));}};

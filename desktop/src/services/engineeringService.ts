@@ -1,12 +1,13 @@
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
-import { engineeringCacheEntry, type EngineeringCacheIdentity } from './engineeringCacheCodec.js';
+import { engineeringCacheEntry, engineeringSourceCacheMatchesFiles, type EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import type { EngineeringBuildResult } from './engineeringWorkerProtocol.js';
 import { EngineeringWorkerClient } from './engineeringWorkerClient.js';
 import { SUBSTATION_PARSER_DOMAIN_VERSION, SUBSTATION_SPATIAL_SEMANTIC_VERSION } from './substationSpatialSemanticCache.js';
 import { isTauri } from '@desktop/runtime.js';
 import { perfMark } from '../utils/perfTimings.js';
 import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
+import { installCompositionProjection } from './compositionProjectionService.js';
 
 interface EngineeringJob {
   session: ProjectLoadSession;
@@ -37,6 +38,12 @@ export interface EngineeringBuildOptions {
 }
 
 async function saveResult(state: AppState, job: EngineeringJob, result: EngineeringBuildResult): Promise<void> {
+  if (result.cacheDisabled) {
+    state.engineeringCacheStatus = 'disabled';
+    state.engineeringCacheError = result.cacheDisabled;
+    job.update();
+    return;
+  }
   if (!current(state, job) || !job.identity || job.session.projectId == null || (!result.sourceBytes && !result.entityBytes && !result.navigationBytes)) return;
   state.engineeringCacheStatus = 'saving'; job.update();
   try {
@@ -69,9 +76,11 @@ function publish(state: AppState, job: EngineeringJob, result: EngineeringBuildR
   state.engineeringError = '';
   if (!result.sources.complete) state.engineeringCacheStatus = 'partial';
   if (result.cacheError) { state.engineeringCacheStatus = 'error'; state.engineeringCacheError = result.cacheError; }
+  if (result.cacheDisabled) { state.engineeringCacheStatus = 'disabled'; state.engineeringCacheError = result.cacheDisabled; }
   perfMark('工程实体就绪', { complete: result.sources.complete, sources: result.snapshot.memberships.length,
     entities: result.snapshot.entities.length, pending: result.snapshot.pending.length, entityCacheHit: result.entityCacheHit === true, navigationCacheHit: result.navigationCacheHit === true });
   job.update();
+  state.engineeringGeometryEvidenceChanged?.();
 }
 
 async function enrich(state: AppState, job: EngineeringJob): Promise<void> {
@@ -144,7 +153,8 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
   job = { session, controller, client, resolveGeometry, ready: Promise.resolve(), lastSpatial: null, finished: false, enriching: false, update, beforeCacheWrite: options.beforeCacheWrite,
     identity: persistent ? { sourceSha256: session.sourceSha256!, parserVersion: ENGINEERING_PARSER_CONTRACT, entries: [...files.keys()] } : undefined };
   jobs.set(state, job);
-  state.engineeringCleanup = () => { resolveGeometry(null); controller.abort(); client.close(); if (jobs.get(state) === job) jobs.delete(state); };
+  const disposeProjection=installCompositionProjection(state);
+  state.engineeringCleanup = () => { disposeProjection();resolveGeometry(null); controller.abort(); client.close(); if (jobs.get(state) === job) jobs.delete(state); };
   state.engineeringSources = null; state.engineeringSnapshot = null; state.engineeringNavigation = null; state.engineeringNavigationCacheHit = false;
   state.engineeringStatus = 'loading'; state.engineeringError = ''; state.engineeringCacheStatus = 'none'; state.engineeringCacheError = ''; update();
   const run = async () => {
@@ -160,9 +170,16 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
         try {
           const result = await client.restore(reads[0].value, reads[1].status === 'fulfilled' ? reads[1].value : undefined, job.identity, reads[2].status === 'fulfilled' ? reads[2].value : undefined);
           if (!current(state, job)) return;
-          state.engineeringCacheStatus = 'hit'; publish(state, job, result);
-          job.finished = true; client.close();
-          await saveResult(state, job, result); return;
+          if (!result.sources.complete || !engineeringSourceCacheMatchesFiles(result.sources, files.keys())) {
+            // Never turn a decoded-but-IFC-less body into a partial "hit".
+            // Fall through to a controlled rebuild from the actual inventory.
+            state.engineeringCacheStatus = 'partial';
+            state.engineeringCacheError = '缓存来源未覆盖当前 IFC 清单，已从来源重建';
+          } else {
+            state.engineeringCacheStatus = 'hit'; publish(state, job, result);
+            job.finished = true; client.close();
+            await saveResult(state, job, result); return;
+          }
         } catch (error) { if (!current(state, job)) return; state.engineeringCacheError = String(error); }
       }
       state.engineeringCacheStatus = 'miss'; update();
@@ -210,7 +227,12 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
       // assembly, before a notification could register against job.ready.
       void job.ready.then(() => enrich(state, job)).catch(error => fail(state, job, error));
       if (options.ensureIfcSemantics) void Promise.resolve().then(options.ensureIfcSemantics).then(ready => {
-        if (ready === false && current(state, job)) notifyEngineeringIfcFailure(state, 'IFC 来源语义未能完成');
+        if (!current(state, job)) return;
+        if (ready === false) notifyEngineeringIfcFailure(state, 'IFC 来源语义未能完成');
+        // A warm cache hit or a deferred IFC semantic build can publish the
+        // spatial index without going through the cold commit callback. Ask the
+        // engineering job to enrich IFC records explicitly in both cases.
+        else notifyEngineeringIfcEvidence(state);
       }).catch(error => { if (current(state, job)) notifyEngineeringIfcFailure(state, String(error)); });
     }
     if (spatial === state.substationSpatialIndex) await saveResult(state, job, result);

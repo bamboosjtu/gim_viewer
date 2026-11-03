@@ -31,7 +31,8 @@ export function assertEngineeringPartition(snapshot: EngineeringSnapshot, source
     const interpretation = member.interpretation;
     requireShape(typeof interpretation.category === 'string' && typeof interpretation.basis === 'string' && typeof interpretation.conflict === 'string' &&
       typeof interpretation.independent === 'boolean' && typeof interpretation.assemblyCategory === 'string' && typeof interpretation.assemblySignature === 'string' &&
-      ['object', 'part', 'fragment', 'neutral_set', 'container', 'detail', 'source_only'].includes(interpretation.meaning), 'source interpretation');
+      ['object', 'part', 'fragment', 'neutral_set', 'container', 'detail', 'source_only'].includes(interpretation.meaning) &&
+      (interpretation.role === undefined || ['cover', 'sidewall', 'base'].includes(interpretation.role)), 'source interpretation');
     if (!sources.has(member.sourceId) || seen.has(member.sourceId)) throw new Error(`Duplicated or unknown source membership: ${member.sourceId}`);
     seen.add(member.sourceId);
     if ((fromOwners.get(member.sourceId) ?? null) !== member.ownerId) throw new Error(`Source ownership is inconsistent: ${member.sourceId}`);

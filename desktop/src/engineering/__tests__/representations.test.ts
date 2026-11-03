@@ -6,7 +6,7 @@ import type { ObjectEvidence } from '../types.js';
 const source = (sourceId: string, name: string, assemblyParentId?: string): ObjectEvidence => ({ sourceId, name, assemblyParentId,
   traits: {}, designations: [], identityCodes: [], identityNames: [], phases: [] });
 function fixture() {
-  const snapshot = normalizeEngineeringModel('package', [source('body', '主变压器'), source('box', '本体端子箱', 'body'), source('radiator', '散热器', 'body')]);
+  const snapshot = normalizeEngineeringModel('package', [source('body', '主变压器'), source('box', '测控柜', 'body'), source('radiator', '散热器', 'body')]);
   const index = new EngineeringRepresentationIndex(snapshot, [
     { kind: 'dev', sourceId: 'body', rootOccurrence: 'physical', assemblyPath: '', devPath: 'body.dev' },
     { kind: 'dev', sourceId: 'box', rootOccurrence: 'physical', assemblyPath: 'sub:0', devPath: 'box.dev' },
@@ -24,7 +24,7 @@ describe('engineering representation membership', () => {
     expect(index.includesDev('physical', { assemblyPath: '' }, selected)).toBe(true);
     expect(index.includesDev('physical', { assemblyPath: 'sub:1/sub:2' }, selected)).toBe(true);
     expect(index.includesDev('physical', { assemblyPath: 'sub:0' }, selected)).toBe(false);
-    expect(index.resolveDev('physical', { assemblyPath: 'sub:0' }).ownerIds).toEqual([snapshot.entities.find(e => e.category === 'E16.terminal_box')!.id]);
+    expect(index.resolveDev('physical', { assemblyPath: 'sub:0' }).ownerIds).toEqual([snapshot.entities.find(e => e.category === 'E16.control_cabinet')!.id]);
   });
   it('keeps an unseparated mixed representation ambiguous', () => {
     const { index, snapshot } = fixture();
@@ -49,7 +49,7 @@ describe('engineering representation membership', () => {
     expect(index.resolveIfc('other', 1).status).toBe('unassociated');
   });
   it('uses path segment boundaries, the nearest ancestor and all same-address candidates', () => {
-    const snapshot = normalizeEngineeringModel('p', [source('root', '主变压器'), source('a', '端子箱'), source('b', '端子箱'), source('other', '端子箱')]);
+    const snapshot = normalizeEngineeringModel('p', [source('root', '主变压器'), source('a', '测控柜'), source('b', '测控柜'), source('other', '测控柜')]);
     const index = new EngineeringRepresentationIndex(snapshot, [
       { kind: 'dev', sourceId: 'root', rootOccurrence: 'r', assemblyPath: '', devPath: 'body.dev' },
       { kind: 'dev', sourceId: 'a', rootOccurrence: 'r', assemblyPath: 'sub:2', devPath: 'Custom/Box.DEV' },

@@ -19,15 +19,15 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
   const entities = new Set([...snapshot.entities, ...snapshot.pending].map(e => e.id));
   const sourceIds = new Set([...sources.graph.records, ...sources.ifcRecords].map(r => r.id));
   const contexts = new Set(sources.graph.cbmOccurrences.map(node=>node.id));
-  function tree(nodes: Map<string, any>, root: string, composition: boolean) {
+  function tree(nodes: Map<string, any>, root: string, composition: boolean, inventory=false) {
     valid(nodes instanceof Map && typeof root === 'string' && nodes.has(root), 'root');
     for (const [key, node] of nodes) {
       valid(typeof key === 'string' && object(node) && node.key === key && typeof node.title === 'string' && strings(node.children) && new Set(node.children).size === node.children.length, 'node');
-      valid((composition ? ['project', 'group', 'entity', 'pending'] : ['group', 'cbm', 'record', 'ifc-file', 'spatial']).includes(node.kind), 'node kind');
+      valid((inventory ? ['project','group','entity','pending','record']:composition ? ['project', 'group', 'entity', 'pending'] : ['group', 'cbm', 'record', 'ifc-file', 'spatial']).includes(node.kind), 'node kind');
       valid(key === root ? node.parent === undefined : typeof node.parent === 'string' && nodes.has(node.parent), 'parent');
       for (const child of node.children) valid(nodes.get(child)?.parent === key, 'child edge');
       if (composition) valid(Number.isSafeInteger(node.entityCount) && node.entityCount >= 0 && (node.targetId === undefined || entities.has(node.targetId)), 'entity reference');
-      else valid(node.sourceId === undefined || sourceIds.has(node.sourceId), 'source reference');
+      if(!composition||inventory) valid(node.sourceId === undefined || sourceIds.has(node.sourceId), 'source reference');
       if (composition && node.declaredContextIds !== undefined) valid(strings(node.declaredContextIds) && new Set(node.declaredContextIds).size === node.declaredContextIds.length && node.declaredContextIds.every((id:string)=>contexts.has(id)), 'declared context');
     }
     const visited = new Set<string>(), stack = [root];
@@ -43,9 +43,18 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
     valid(Array.isArray(items) && items.every(item => object(item) && typeof item.key === 'string' && ids.has(item.key) && typeof item.title === 'string' && typeof item.subtitle === 'string'), 'search');
   }
   valid(view.compositionSearch.every(item => typeof item.searchText === 'string'), 'engineering search text');
+  valid(view.inventory?.nodes instanceof Map && view.inventory.rowsByEntity instanceof Map && view.inventory.rowsBySource instanceof Map,'inventory');
+  valid(view.inventory!.rowsByEntity.size===entities.size&&[...entities].every(id=>view.inventory!.rowsByEntity.has(id)),'inventory entity coverage');
+  const inventory=view.inventory!;tree(inventory.nodes,inventory.rootKey,true,true);
+  for(const [id,rows]of inventory.rowsByEntity)valid(entities.has(id)&&strings(rows)&&rows.length===1&&rows.every(key=>inventory.nodes.get(key)?.targetId===id),'inventory entity rows');
+  const owned=snapshot.memberships.filter(m=>m.ownerId);
+  valid(inventory.rowsBySource.size===owned.length,'inventory source coverage');
+  for(const member of owned){const row=inventory.nodes.get(inventory.rowsBySource.get(member.sourceId)??'');valid(row?.sourceId===member.sourceId,'inventory source row');}
+  const input=view.compositionInput;valid(input&&Array.isArray(input.facts)&&input.facts.length===snapshot.entities.length&&new Set(input.facts.map(f=>f.entityId)).size===snapshot.entities.length&&input.facts.every(f=>entities.has(f.entityId)&&Array.isArray(f.spaces)&&Array.isArray(f.declarations)&&strings(f.hostEntityIds))&&Array.isArray(input.declarations),'composition input');
 }
 
-export const engineeringNavigationToWire = (view: EngineeringNavigationData) => ({ ...view, composition: { ...view.composition, nodes: [...view.composition.nodes], rowsByEntity: [...view.composition.rowsByEntity] }, sourceNodes: [...view.sourceNodes], sourceRows: [...view.sourceRows] });
+export const engineeringNavigationToWire = (view: EngineeringNavigationData) => ({ ...view, composition: { ...view.composition, nodes: [...view.composition.nodes], rowsByEntity: [...view.composition.rowsByEntity] }, sourceNodes: [...view.sourceNodes], sourceRows: [...view.sourceRows],
+  inventory:view.inventory?{...view.inventory,nodes:[...view.inventory.nodes],rowsByEntity:[...view.inventory.rowsByEntity],rowsBySource:[...view.inventory.rowsBySource]}:undefined });
 function map(value: unknown): Map<string, any> {
   valid(Array.isArray(value) && value.every(row => Array.isArray(row) && row.length === 2 && typeof row[0] === 'string'), 'map shape');
   const result = new Map(value as Array<[string, unknown]>); valid(result.size === (value as unknown[]).length, 'duplicate map identity'); return result;
@@ -57,7 +66,8 @@ export async function encodeEngineeringNavigation(view: EngineeringNavigationDat
 export function engineeringNavigationFromWire(payload: unknown, sources: EngineeringSources, snapshot: EngineeringSnapshot): EngineeringNavigationData {
   valid(object(payload) && object(payload.composition), 'payload');
   const raw = payload as ReturnType<typeof engineeringNavigationToWire>;
-  const view = { ...raw, composition: { ...raw.composition, nodes: map(raw.composition.nodes), rowsByEntity: map(raw.composition.rowsByEntity) }, sourceNodes: map(raw.sourceNodes), sourceRows: map(raw.sourceRows) } as EngineeringNavigationData;
+  const view = { ...raw, composition: { ...raw.composition, nodes: map(raw.composition.nodes), rowsByEntity: map(raw.composition.rowsByEntity) }, sourceNodes: map(raw.sourceNodes), sourceRows: map(raw.sourceRows),
+    inventory:raw.inventory?{...raw.inventory,nodes:map(raw.inventory.nodes),rowsByEntity:map(raw.inventory.rowsByEntity),rowsBySource:map(raw.inventory.rowsBySource)}:undefined } as EngineeringNavigationData;
   assertEngineeringNavigation(view, sources, snapshot); return view;
 }
 export async function decodeEngineeringNavigation(bytes: Uint8Array, sources: EngineeringSources, snapshot: EngineeringSnapshot, sourceDigest: string, id: EngineeringCacheIdentity): Promise<EngineeringNavigationData> {

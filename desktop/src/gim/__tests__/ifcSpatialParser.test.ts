@@ -12,6 +12,11 @@ import {
 
 const entry: IfcEntry = { modelId: 'model', name: 'model', path: 'DEV/model.ifc' };
 
+it('keeps door/window internal property definitions out of outward product occurrences even when a relation references them',()=>{
+ const result=buildSubstationSpatialIndexFromTexts([{entry,text:["#1=IFCBUILDING('b',$,'建筑',$,$,$,$,$,.ELEMENT.,$,$,$);","#2=IFCDOOR('door',$,'门',$,$,$,$,$,2.,1.);","#3=IFCDOORLININGPROPERTIES('lining',$,'门框参数',$,$,0.1,0.2,$,$,$,$,$,$,$,$,$,$);","#4=IFCRELCONTAINEDINSPATIALSTRUCTURE('r',$,$,$,(#2,#3),#1);"].join('\n')}],null);
+ expect(result.objects.map(o=>o.ifcType)).toEqual(['IFCDOOR']);
+});
+
 function node(overrides: Partial<CbmNode> = {}): CbmNode {
   return {
     path: 'CBM/project.cbm',

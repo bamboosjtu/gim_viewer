@@ -25,7 +25,7 @@
 | E13 | 电流互感器 | 2018 `06`；2025 `14` | 一个明确设备单元 | 名称 `电流互感器`；DEV `currenttransformer`、`electromagneticcurrenttransformer` | 相别、单相/三相组合另存，不按单相件计台数 |
 | E14 | 电压互感器 | 2018 `07`；2025 `15` | 一个明确设备单元 | 名称 `电压互感器`；DEV `voltagetransformer`、`potentialtransformer`、`capacitivetv` | 同上；名称尾号不改变整机数，也不按尾号拆分 |
 | E15 | 避雷器 | 2018 `10`；2025 `16` | 一个明确设备单元 | 名称 `避雷器`；DEV `surgearrestor`、`surgearrester`、`arrester`、`lightningarrester`、`lightningprotector` | 中性点装置内避雷器并作主变来源，不另算整机；独立“避雷针”归 C-D5 |
-| E16 | 二次设备 | 2018 `15`；2025 无独立条目 | 独立屏柜、端子箱、控制柜、蓄电池组等 | 名称 `屏柜、二次屏、机柜、通信柜、通讯柜、蓄电池、馈线箱、电源.*屏、电源.*箱`；DEV `secondarycabinet`、`screencabinetsandinstallations` | 子类见表；名称前缀“主变、HGIS、监控”不改变独立功能 |
+| E16 | 二次设备 | 2018 `15`；2025 无独立条目 | 独立屏柜、端子箱、控制柜、保护设备、蓄电池组等 | 名称 `屏柜、二次屏、机柜、通信柜、通讯柜、蓄电池、控制柜、端子箱`；DEV `secondarycabinet`、`screencabinetsandinstallations` | 子类见表；名称前缀“主变、HGIS、监控”不改变独立功能；不再把屏柜/蓄电池并入基础 E16 |
 | E17 | 动力辅助设备 | 2018 `16`；2025 无独立条目 | 一个屏/箱/终端设备 | 名称 `检修箱、照明箱、配电箱、接地箱、低压配电屏、电缆终端`；DEV `powerbox/lightingbox/maintenancebox` | 电缆终端在此；电缆本体 M05、电缆沟 C-C1 |
 | E18 | 预制舱开关设备 | 2018 无独立条目；2025 `10` | 一套交付装置，舱体与内部柜各自保留角色 | 名称 `预制舱` | 舱内 E09 独立关联（`associated_with`）；舱级与柜级汇总分别标口径，不相加 |
 | E19 | 水工暖通设备 | 2018 `17`；2025 无独立条目 | 一台独立设备 | 名称 `风机、水泵、空调、消防栓、灭火器、除湿机、闸阀`；IFC `IFCFAN、IFCPUMP、IFCVALVE` | 管段、管件、末端归 C-D4；不把全部附属对象显示成“辅助设施” |
@@ -37,11 +37,11 @@
 
 | 编码 | 类别 | 兼容口径 | 目标整体粒度 | 名称/类型证据 | 边界 |
 |---|---|---|---|---|---|
-| E16.terminal_box | 端子箱 | 2018 `15`；2025 无独立条目 | 一个端子箱 | 名称 `端子箱`；DEV `terminalbox`；命中 `independent` 表 | 嵌在主变/中性点 DEV 内也建独立实体并关联宿主 |
-| E16.control | 控制柜 | 2018 `15`；2025 无独立条目 | 一面控制柜 | 名称 `汇控柜、控制柜、监控系统柜、智能辅助.*柜` | “HGIS 智能控制柜”按当前对象头词判控制柜，不因 HGIS 前缀归 E05 |
-| E16.protection | 保护设备 | 2018 `15`；2025 无独立条目 | 一个保护屏柜；保护装置按证据决定是否独立 | 名称 `保护装置、保护屏、保护.*柜、录波柜` | 按当前对象头词判保护类；“保护屏/保护柜/屏柜”在独立头词表内，可另建整体；“保护装置”只判类别，父级存在时默认作为宿主成员，不强行另立台套 |
-
-`panel_cabinet`（屏柜）、`battery_set`（蓄电池组）目前并入 `E16` 基础类，不单列编码；本表三个子类是当前实现的全部 E16 子类。
+| E16.terminal_box | 端子箱 | 2018 `15`；2025 无独立条目 | 一个端子箱 | 名称 `端子箱`；DEV `terminalbox`；命中 `independent` 表 | 嵌在主变/中性点 DEV 内作为主变来源；独立设置才建整体 |
+| E16.panel_cabinet | 屏柜 | 2018 `15`；2025 无独立条目 | 一面屏柜 | 名称 `屏柜、二次屏、机柜、通信柜、通讯柜、馈线屏、电源屏、电源柜`；命中 `independent` 表 | 屏柜是独立整体；不带“保护/控制”限定词时落此子类，不并入基础 E16 |
+| E16.control_cabinet | 控制柜 | 2018 `15`；2025 无独立条目 | 一面控制柜 | 名称 `汇控柜、控制柜、监控系统柜、智能辅助.*柜`；命中 `independent` 表 | “HGIS 智能控制柜”按当前对象头词判控制柜，不因 HGIS 前缀归 E05 |
+| E16.battery_set | 蓄电池组 | 2018 `15`；2025 无独立条目 | 一组蓄电池 | 名称 `蓄电池组、蓄电池、电池组`；命中 `independent` 表 | 一组蓄电池为一个整体；不按单节电池或屏柜内空间继续拆分 |
+| E16.protection | 保护设备 | 2018 `15`；2025 无独立条目 | 一个保护屏柜；保护装置按证据决定是否独立 | 名称 `保护装置、保护屏、保护.*柜、录波柜` | 按当前对象头词判保护类；“保护屏/保护柜”在独立头词表内，可另建整体；“保护装置”只判类别，父级存在时默认作为宿主成员，不强行另立台套 |
 
 ## 主变、中性点、端子箱
 
@@ -50,7 +50,7 @@
 | 主变本体 | E01 主体来源 | 否 | 归属 E01 整体；相数、本体标识留在来源与参数 |
 | 多个单相本体 | E01 组成 | 否（组成一台） | 同一显式主变编号 + 相数“单相”且成员 ≥2，建 `transformer_bank`，记录 `phaseBodyCount` 与 `phase_completeness_unverified` |
 | 中性点成套装置 | E01 组成 | 否 | 父级为 E01 时并入；宿主不明进待归集合；随后按唯一显式主变编号重定向 |
-| 端子箱 | E16.terminal_box | **是** | 命中独立功能头词，建独立实体并 `associated_with` 宿主，嵌在主变 DEV 内也保留 |
+| 端子箱 | E16.terminal_box | **是** | 嵌入主变/中性点 DEV 则为主变组成来源；其他独立端子箱保留整体 |
 | 散热器、油枕、升高座、分接开关、电动机构 | E01 内部来源 | 否 | 命中 `part`，随宿主，不生成普通工程树节点 |
 | 主变基础、支架 | C-B2、C-B1 | **是** | 父级为 E 类时按 `independent_installation_object` 关联，不并入主变几何 |
 
@@ -58,7 +58,7 @@
 - 只交付本体时以其代表主变整体，不制造空的内部实体；本体数与相别完整性另存，不把本体数当主变组数。
 - 中性点归属优先用明确装配或工程标识；共同 F3、邻近位置、相同型号只生成候选，不能确定宿主。
 - “中性点套管”只是普通组件或材料名称，不因“中性点”关键词判成中性点成套装置。
-- 中性点装置内避雷器并作主变来源，不另计 E15；装置内端子箱仍按独立实体保留。
+- 中性点装置内避雷器并作主变来源，不另计 E15；装置内端子箱随中性点装置归主变整体。
 
 ## 成套设备边界
 
@@ -83,7 +83,7 @@ DEV `source_type` 与 IFC 类型只是类型证据：名称命中时名称优先
 | E09 | `hvswitchcabinet`、`switchcabinet` | 与 E18 的舱内柜关系由装配与关联决定 |
 | E10、E11 | `framecapacitor`、`framecapacitorbank`；`lowvoltageshuntreactor`、`dryreactor`、`drytypereactor` | 单台与成套由名称和成员证据区分 |
 | E13、E14、E15 | `currenttransformer`、`electromagneticcurrenttransformer`；`voltagetransformer`、`potentialtransformer`、`capacitivetv`；`surgearrestor`、`surgearrester`、`arrester`、`lightningarrester`、`lightningprotector` | 类型不表达相别与安装位置 |
-| E16、E16.terminal_box | `secondarycabinet`、`screencabinetsandinstallations`；`terminalbox` | 端子箱别名直接落子类 |
+| E16 及子类 | `secondarycabinet`、`screencabinetsandinstallations`；`terminalbox` | 类型只作 E16 证据；端子箱/屏柜/控制柜/蓄电池组由名称与独立头词细分 |
 | E17 | `powerbox/lightingbox/maintenancebox` | 一个别名覆盖配电箱、照明箱、检修箱 |
 | C-B1、C-C4、C-D1 | `equipmentsupportandfoundation`、`metalfence`、`lampsandlanterns` | 非设备专用别名，按构件/设施处理，见[构件目录](components.md) |
 

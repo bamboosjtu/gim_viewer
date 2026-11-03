@@ -1,10 +1,17 @@
-import { ENGINEERING_RULES_VERSION, explicitMain, interpretObject, isNumberedDesignation } from './classify.js';
+import { ENGINEERING_RULES_VERSION, explicitMain, interpretObject, isNumberedDesignation, categoryFromName } from './classify.js';
 import { assertEngineeringPartition } from './validate.js';
 import type { EngineeringEntity, EngineeringSnapshot, ObjectEvidence, PendingWhole, SourceAlias } from './types.js';
 
 /** Lossless package-local identity. No class version, tree parent or traversal counter. */
 const identity = (scope: string, kind: string, seed: string) => `${kind}:${JSON.stringify([scope, seed])}`;
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
+const transformer = (category: string | undefined) => !!category && ['E01','E-T','E03'].includes(category);
+const reserve = (row: ObjectEvidence) => [...row.designations,...row.unitDesignations??[]].some(p=>/备用|预留/.test(p.value));
+function wholeName(row:ObjectEvidence,category:string):string {
+  const number=explicitMain(row);
+  if(category==='E01'&&number)return `${number}号${reserve(row)?'备用':''}主变`;
+  return row.identityNames.find(p=>{const c=categoryFromName(p.value);return c===category||category.startsWith('E16')&&c.startsWith('E16');})?.value??row.name;
+}
 
 export function normalizeEngineeringModel(scope: string, input: readonly ObjectEvidence[], aliases: readonly SourceAlias[] = []): EngineeringSnapshot {
   if (!scope) throw new Error('Engineering scope is required');
@@ -89,12 +96,16 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     const m = meaning.get(row.sourceId)!;
     const number = explicitMain(row);
     if (owners.has(row.sourceId) || m.meaning !== 'object' || m.category !== 'E01' || !number || !row.phases.some(p => p.value === '单相')) continue;
-    const members = banks.get(number) ?? [];
-    members.push(row); banks.set(number, members);
+    let parent=row.assemblyParentId,contained=false;
+    while(parent&&raw.has(parent)){const ancestor=meaning.get(parent)!;if(ancestor.meaning==='object'&&transformer(ancestor.category)){contained=true;break;}parent=raw.get(parent)?.assemblyParentId;}
+    if(contained)continue;
+    const unit=`${number}${reserve(row)?':reserve':''}`;
+    const members = banks.get(unit) ?? [];
+    members.push(row); banks.set(unit, members);
   }
   for (const [number, members] of [...banks].sort(([a], [b]) => compare(a, b))) {
     if (members.length < 2) continue;
-    const entity = addEntity(`main-bank:${number}`, 'E01', `${number}号主变`, 'explicit_main_designation+single_phase_bodies', members.map(row => row.sourceId), 'transformer_bank');
+    const entity = addEntity(`main-bank:${number}`, 'E01', wholeName(members[0],'E01'), 'explicit_main_designation+single_phase_bodies', members.map(row => row.sourceId), 'transformer_bank');
     entity.phaseBodyCount = members.length;
     entity.compositionState = 'phase_completeness_unverified';
   }
@@ -109,13 +120,19 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     const above = row.assemblyParentId && raw.has(row.assemblyParentId) ? assign(row.assemblyParentId) : null;
     const aboveCategory = above ? entities.get(above)?.category : undefined;
     const associate = (proof: string, evidence: string) => {
-      const entity = addEntity(sourceId, m.category, row.name, proof, [sourceId]);
+      const entity = addEntity(sourceId, m.category, wholeName(row,m.category), proof, [sourceId]);
       if (above) relationships.push({ from: entity.id, to: above, kind: 'associated_with', evidence });
     };
     if (m.meaning === 'neutral_set') {
       // Resolve external attachments after all bodies and their identities exist.
-      if (aboveCategory === 'E01') owners.set(sourceId, above);
+      if (transformer(aboveCategory)) owners.set(sourceId, above);
       else bundle(sourceId, 'neutral_set_main_unresolved', [sourceId]);
+    } else if (m.category==='E16.terminal_box' && above && (transformer(aboveCategory)||pending.has(above)&&meaning.get(row.assemblyParentId!)?.meaning==='neutral_set')) {
+      m.meaning='part';m.independent=false;m.basis='transformer_terminal_composition';
+      owners.set(sourceId,above);
+    } else if (m.category==='E16.terminal_box' && /本体端子箱|主变.*端子箱|变压器.*端子箱/.test(row.name)) {
+      m.meaning='part';m.independent=false;m.basis='transformer_terminal_host_pending';
+      bundle(sourceId,'transformer_terminal_host_unresolved',[sourceId]);
     } else if (['source_only', 'container', 'detail'].includes(m.meaning)) {
       owners.set(sourceId, above);
     } else if (m.meaning === 'part') {
@@ -136,7 +153,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     } else if (above && pending.has(above)) {
       owners.set(sourceId, above);
     } else {
-      addEntity(sourceId, m.category, row.name, m.category === 'U-OBJECT' ? 'outward_object_boundary_unconfirmed' : 'object_identity', [sourceId]);
+      addEntity(sourceId, m.category, wholeName(row,m.category), m.category === 'U-OBJECT' ? 'outward_object_boundary_unconfirmed' : 'object_identity', [sourceId]);
     }
     visiting.delete(sourceId);
     return owners.get(sourceId)!;
@@ -150,14 +167,14 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
   for (const row of ordered) {
     const owner = owners.get(row.sourceId);
     const number = explicitMain(row);
-    if (owner && number && entities.get(owner)?.category === 'E01' && meaning.get(row.sourceId)!.meaning !== 'neutral_set') {
+    if (owner && number && entities.get(owner)?.category === 'E01' && meaning.get(row.sourceId)!.meaning === 'object' && transformer(meaning.get(row.sourceId)!.category)) {
       const ids = mainEntities.get(number) ?? new Set<string>();
       ids.add(owner); mainEntities.set(number, ids);
     }
   }
   const redirects = new Map<string, string>();
   for (const row of ordered) {
-    if (meaning.get(row.sourceId)!.meaning !== 'neutral_set') continue;
+    if (meaning.get(row.sourceId)!.meaning !== 'neutral_set' && meaning.get(row.sourceId)!.category!=='E16.terminal_box') continue;
     const previous = owners.get(row.sourceId);
     if (!previous || !pending.has(previous)) continue;
     const candidates = mainEntities.get(explicitMain(row));

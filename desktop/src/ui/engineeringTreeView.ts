@@ -4,6 +4,7 @@ import { renderSearchBox } from './searchBox.js';
 import { renderVirtualOutline, type OutlineElement, type OutlineNode } from './virtualOutline.js';
 import { getEngineeringNavigation, type EngineeringNavigationData } from '../services/engineeringViewService.js';
 import { setEngineeringDeviceCount } from './shell/statusBar.js';
+import { downloadEngineeringTree, copyEngineeringTree } from './engineeringTreeExport.js';
 
 interface Navigation {
   generation: number;
@@ -12,8 +13,8 @@ interface Navigation {
   bar: HTMLElement;
   quality: HTMLElement;
   outline?: OutlineElement;
-  query: { composition: string; source: string };
-  scroll: { composition: number; source: number };
+  query: { composition: string; source: string; inventory:string };
+  scroll: { composition: number; source: number; inventory:number };
   listener: () => void;
 }
 const navigations = new WeakMap<AppState, Navigation>();
@@ -21,6 +22,11 @@ const navigations = new WeakMap<AppState, Navigation>();
 function rowKey(state: AppState, data: EngineeringNavigationData): string {
   const target = state.selectionRequest?.target;
   if (!target) return '';
+  if(state.engineeringNavMode==='inventory'){
+    if(target.kind==='engineering-group')return data.inventory?.nodes.has(target.key)?target.key:'';
+    if(target.kind==='engineering-source')return data.inventory?.rowsBySource.get(target.key)??'';
+    return target.kind==='engineering'?data.inventory?.rowsByEntity.get(target.key)?.[0]??'':'';
+  }
   if (state.engineeringNavMode === 'composition') {
     if (target.kind === 'engineering-group') return data.composition.nodes.has(target.key) ? target.key : '';
     const owner = target.kind === 'engineering' ? target.key
@@ -78,7 +84,7 @@ export function syncEngineeringTreeSelection(state: AppState): void {
     return;
   }
   const expanded = state.engineeringExpandedRows[state.engineeringNavMode];
-  const nodes = state.engineeringNavMode === 'composition' ? nav.data.composition.nodes : nav.data.sourceNodes;
+  const nodes = state.engineeringNavMode === 'composition' ? nav.data.composition.nodes : state.engineeringNavMode==='inventory'?nav.data.inventory!.nodes:nav.data.sourceNodes;
   let cursor = nodes.get(key)?.parent;
   const seen = new Set<string>();
   while (cursor && !seen.has(cursor)) { seen.add(cursor); expanded.add(cursor); cursor = nodes.get(cursor)?.parent; }
@@ -93,7 +99,7 @@ export function renderEngineeringTree(state: AppState): void {
     state.engineeringNavigationCleanup?.();
     const listener = () => renderEngineeringTree(state);
     nav = { generation: state.projectGeneration, data: null, mode: state.engineeringNavMode,
-      bar: document.createElement('div'), quality: document.createElement('span'), query: { composition: '', source: '' }, scroll: { composition: 0, source: 0 }, listener };
+      bar: document.createElement('div'), quality: document.createElement('span'), query: { composition: '', source: '', inventory:'' }, scroll: { composition: 0, source: 0, inventory:0 }, listener };
     navigations.set(state, nav); state.engineeringListeners.add(listener);
     const owned = nav;
     state.engineeringNavigationCleanup = () => {
@@ -113,7 +119,8 @@ export function renderEngineeringTree(state: AppState): void {
   nav.data = data; nav.mode = mode; nav.outline = undefined;
   cbmTreePanel.replaceChildren();
   const bar = document.createElement('div'); bar.className = 'substation-nav-mode'; nav.bar = bar;
-  for (const [value, label] of [['composition', '工程组成'], ['source', '来源']] as const) {
+  bar.style.flexWrap='wrap';
+  for (const [value, label] of [['composition', '工程组成'], ['source', '来源'],['inventory','设备材料清册']] as const) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'substation-nav-mode-btn';
     button.dataset.engineeringMode = value; button.textContent = label; button.classList.toggle('active', value === mode);
     button.setAttribute('aria-pressed', String(value === mode));
@@ -121,6 +128,16 @@ export function renderEngineeringTree(state: AppState): void {
   }
   const quality = document.createElement('span'); quality.className = 'substation-nav-quality'; quality.textContent = qualityText(state);
   quality.title = qualityDetail(state); nav.quality = quality; bar.append(quality);
+  const generationForExport=state.projectGeneration;
+  const feedback=document.createElement('span');feedback.id='engineering-tree-feedback';feedback.setAttribute('role','status');feedback.style.cssText='flex-basis:100%;font-size:11px;color:#94a3b8';
+  const message=(text:string)=>{if(state.projectGeneration===generationForExport){const target=cbmTreePanel.querySelector<HTMLElement>('#engineering-tree-feedback');if(target)target.textContent=text;}};
+  for(const copy of [false,true]){
+    const button=document.createElement('button');button.type='button';button.className='substation-nav-export';button.textContent=copy?'复制 JSON':'导出 JSON';button.setAttribute('aria-label',copy?'复制当前模型树为 JSON':'导出当前模型树为 JSON');button.disabled=!data;
+    button.style.cssText='padding:3px 7px;font-size:12px;background:#1e293b;color:#e2e8f0;border:1px solid #475569;border-radius:4px';
+    button.addEventListener('click',()=>{if(!data)return;button.disabled=true;message(copy?'正在复制模型树…':'正在导出模型树…');
+      void(copy?copyEngineeringTree(data,mode,state.projectName).then(()=>message('模型树 JSON 已复制到剪贴板')):downloadEngineeringTree(data,mode,state.projectName).then(path=>message(path?`模型树已保存/下载：${path}`:'已取消导出')))
+        .catch(error=>{message(`${copy?'复制':'导出'}失败：${String(error)}`);console.warn('[模型树导出]',error);}).finally(()=>{button.disabled=false;});});bar.append(button);
+  }bar.append(feedback);
   const host = document.createElement('div'); host.className = 'tree-view-host'; host.setAttribute('role', 'tree'); cbmTreePanel.append(bar, host);
   if (!data) {
     const empty = document.createElement('div'); empty.className = 'props-empty';
@@ -130,9 +147,10 @@ export function renderEngineeringTree(state: AppState): void {
   const select = async (key: string) => {
     if (generation !== state.projectGeneration || navigations.get(state)?.data !== data) return;
     try {
-      if (mode === 'composition') {
-        const node = data.composition.nodes.get(key);
+      if (mode === 'composition' || mode==='inventory') {
+        const node = mode==='inventory'?data.inventory!.nodes.get(key):data.composition.nodes.get(key);
         if (!node) return;
+        if('sourceId' in node && node.sourceId){const target={kind:'engineering-source' as const,key:node.sourceId},request=state.beginSelection(target);syncEngineeringTreeSelection(state);const {selectEngineeringTarget}=await import('../services/engineeringSelection.js');if(state.isCurrentSelection(request))await selectEngineeringTarget(state,target,request);return;}
         const target = node.targetId ? { kind: 'engineering' as const, key: node.targetId } : { kind: 'engineering-group' as const, key };
         const request = state.beginSelection(target); syncEngineeringTreeSelection(state);
         const { selectEngineeringTarget } = await import('../services/engineeringSelection.js');
@@ -159,10 +177,10 @@ export function renderEngineeringTree(state: AppState): void {
     if (generation === state.projectGeneration) syncEngineeringTreeSelection(state);
   };
   const expanded = state.engineeringExpandedRows[mode];
-  const root = mode === 'composition' ? data.composition.rootKey : data.sourceRoot;
+  const root = mode === 'composition' ? data.composition.rootKey : mode==='inventory'?data.inventory!.rootKey:data.sourceRoot;
   expanded.add(root);
   const outlineNode = (key: string): OutlineNode => {
-    const node = mode === 'composition' ? data.composition.nodes.get(key)! : data.sourceNodes.get(key)!;
+    const node = mode === 'composition' ? data.composition.nodes.get(key)! : mode==='inventory'?data.inventory!.nodes.get(key)!:data.sourceNodes.get(key)!;
     return { key, ...(node.children.length ? { children: () => node.children.map(outlineNode) } : {}), render: parent => {
       const wrapper = document.createElement('div'); wrapper.className = 'tree-node';
       const row = document.createElement('div'); row.className = 'tree-row'; row.dataset.nodePath = key; row.tabIndex = 0; row.setAttribute('role', 'treeitem');
@@ -175,7 +193,7 @@ export function renderEngineeringTree(state: AppState): void {
       }
       row.append(toggle, icon, label); wrapper.append(row); parent.append(wrapper);
       row.addEventListener('click', () => {
-        if (mode === 'composition') { void select(key); }
+        if (mode === 'composition' || mode==='inventory') { void select(key); }
         else if (node.kind === 'group') { if (node.children.length) toggle.click(); }
         else void select(key);
       });
@@ -183,8 +201,8 @@ export function renderEngineeringTree(state: AppState): void {
     } };
   };
   nav.outline = renderVirtualOutline(host, [outlineNode(root)], { expanded, selectedKey: () => rowKey(state, data) });
-  renderSearchBox(cbmTreePanel, mode === 'composition' ? data.compositionSearch : data.sourceSearch, key => {
-    const row = mode === 'composition' ? data.composition.rowsByEntity.get(key)?.[0] : key;
+  renderSearchBox(cbmTreePanel, mode === 'composition' || mode==='inventory' ? data.compositionSearch : data.sourceSearch, key => {
+    const row = mode === 'composition' ? data.composition.rowsByEntity.get(key)?.[0] : mode==='inventory'?data.inventory!.rowsByEntity.get(key)?.[0]:key;
     if (row) void select(row);
   });
   const input = cbmTreePanel.querySelector<HTMLInputElement>('.search-box-wrap input');
@@ -194,6 +212,7 @@ export function renderEngineeringTree(state: AppState): void {
 }
 
 export function revealEngineeringSource(state: AppState, sourceId: string): void {
+  if(state.engineeringNavMode==='inventory'){renderEngineeringTree(state);syncEngineeringTreeSelection(state);return;}
   state.engineeringNavMode = 'source'; renderEngineeringTree(state); syncEngineeringTreeSelection(state);
   const nav = navigations.get(state), key = nav?.data?.sourceRows.get(sourceId);
   if (key) nav?.outline?.__gimRevealOutline?.(key);

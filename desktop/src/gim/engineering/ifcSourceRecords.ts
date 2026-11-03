@@ -1,6 +1,7 @@
 import type { IfcSpatialObject } from '../ifcSpatialParser.js';
 import type { SourceProperty, SourceRecord } from './sourceEvidence.js';
 import { isIfcFeatureSourceType } from './sourceEvidence.js';
+import { isIfcInternalDefinitionType } from '../ifcOutwardProduct.js';
 
 /** Consumes only the parser's outward products. Never traverses STEP internals,
  * representations, type definitions or geometry. File discovery remains separate.
@@ -16,7 +17,7 @@ export function ifcSourceRecords(objects: readonly IfcSpatialObject[]): SourceRe
     throw new Error('Duplicate IFC outward occurrence identity');
   }
   return records.map(({ object, id }) => {
-    if (/TYPE$|^IFC(?:MATERIAL|PROPERTY|QUANTITY|SHAPE|REPRESENTATION|BOOLEAN|CARTESIAN|DIRECTION|LOCALPLACEMENT|PROFILE|EXTRUDED|REL)/.test(object.ifcType)) {
+    if (isIfcInternalDefinitionType(object.ifcType)) {
       throw new Error(`IFC internal definition is not an outward source: ${object.ifcType}`);
     }
     const properties: SourceProperty[] = (object.propertySets ?? []).flatMap(group => group.values.map(property => ({

@@ -53,6 +53,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Check desktop release versions
+        run: npm run test:version
+
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 

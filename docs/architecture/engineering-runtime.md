@@ -1,6 +1,6 @@
 # 工程实体运行时
 
-本文件描述 v0.2 的工程实体构建、缓存和两视图发布。领域契约、分类规则和目录分别见[工程实体模型](../engineering/README.md)与[目录](../engineering/catalogs/README.md)；本文件不重复分类表。
+本文件描述 v0.2 的工程实体构建、缓存和三视图发布。领域契约、分类规则和目录分别见[工程实体模型](../engineering/README.md)与[目录](../engineering/catalogs/README.md)；本文件不重复分类表。
 
 ## 目标与边界
 
@@ -15,12 +15,12 @@
 
 | 模块 | 职责 |
 |---|---|
-| [gim/engineering](../../desktop/src/gim/engineering/) | 来源图、DEV/FAM/IFC 证据适配、来源到中立对象证据、两视图投影 |
+| [gim/engineering](../../desktop/src/gim/engineering/) | 来源图、DEV/FAM/IFC 证据适配、来源到中立对象证据、三视图投影 |
 | [engineering](../../desktop/src/engineering/) | 纯领域：分类、整体归一化、成员分区、关系、组成模板、目录 |
 | [engineeringWorker](../../desktop/src/services/engineeringWorker.ts) | 在 Worker 内执行抽取/归一化/投影/编解码 |
 | [engineeringService](../../desktop/src/services/engineeringService.ts) | 会话、Worker 生命周期、缓存恢复/发布、IFC Spatial 补建 |
 | [engineeringSelection](../../desktop/src/services/engineeringSelection.ts) | 整体/分组/来源选择与表示绑定 |
-| [engineeringTreeView](../../desktop/src/ui/engineeringTreeView.ts) | “工程组成 / 来源”两页、搜索、虚拟列表、选择同步 |
+| [engineeringTreeView](../../desktop/src/ui/engineeringTreeView.ts) | “工程组成 / 来源 / 设备材料清册”两页、搜索、虚拟列表、选择同步 |
 
 ## 构建流程
 
@@ -62,11 +62,12 @@
 
 详细规则见[实体与来源模型](../engineering/entities.md)。
 
-### 3. 两视图投影
+### 3. 三视图投影
 
-- **工程组成**：`assignEngineeringComposition` 读取声明的系统名、空间建筑/楼层、真实宿主关系，按内置模板分配到建筑工程/安装工程；`projectEngineeringComposition` 生成树、分组计数、未归属分组和已声明但无成员的分组。
-- **来源**：`projectEngineeringNavigation` 直接按 CBM 引用、DEV 装配、IFC 文件/空间容器/外露记录生成来源树；来源行可跳转所属整体。
-- 两页共用搜索、选择、属性路由和虚拟列表；搜索只是投影索引，不是新实体。
+- **工程组成**：`assignEngineeringComposition` 读取声明的系统名、空间建筑/楼层、真实宿主关系，按内置模板分配到建筑工程/安装工程；没有可靠归属的整体进入“未分类”的 DEV/IFC 轨道和类别桶。`projectEngineeringComposition` 生成树、分组计数、待归集合和已声明但无成员的分组。
+- **来源**：`projectEngineeringNavigation` 按 CBM 的 F1/F2/F3/F4 与 DEV 装配生成 DEV 轨道，按每个 IFC 文件及其空间容器/外露记录生成 IFC 轨道；来源行可跳转所属整体。
+- **设备材料清册**：按设备、装置性材料、构件及目录类别列整体，并展示实际组成来源。
+- 三页共用搜索、选择、属性路由和虚拟列表；搜索只是投影索引，不是新实体。
 - 视图节点 ID 与实体 ID 分离；分组计数按实体去重，不冒充台套。
 
 ### 4. 发布与补建
@@ -92,7 +93,7 @@
 | 状态 | 含义 |
 |---|---|
 | `loading` | 正在读取来源/建立实体 |
-| `ready` | 来源完整，实体和两视图已发布 |
+| `ready` | 来源完整，实体和三视图已发布 |
 | `partial` | 来源有缺失/IFC 失败/空间不完整；已有部分结果可浏览 |
 | `error` | 来源图或 Worker 失败，当前没有可用实体结果 |
 
@@ -100,6 +101,10 @@
 
 ## 验证边界
 
-- 纯领域单测覆盖分类、归一化、分区、组成模板和两视图投影；九工程严格样本检查来源去向和成员覆盖。
+- 纯领域单测覆盖分类、归一化、分区、组成模板和三视图投影；九工程严格样本检查来源去向和成员覆盖。
 - Worker 真实浏览器检查覆盖 Blob/共享缓冲区传输、缓存恢复与取消；不替代原生 IPC、真实渲染和性能验收。
 - 当前不证明逐台套人工归属准确率、所有样本的原生冷暖性能或完整持续交互；见[问题与限制](../open-issues.md) O-11 与 L-12。
+
+## 几何完成后的组成细化
+
+工程来源/实体快照先独立发布。已加载的 IFC RegionalIndex 提供绝对源坐标包围盒，`compositionProjectionService` 在独立 Worker 中细化建筑范围；不读取可见性，不合并实体，不增加几何 seed。楼层名、文件建筑名、系统声明与推断依据继续保留。几何细化结果只保存在当前会话，不能写成独立于几何版本的语义缓存。关闭/切换工程终止 Worker，旧投影不能提交；重新绑定分组选择时不自动定位。

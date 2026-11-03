@@ -19,6 +19,9 @@ export interface EngineeringBuildResult {
   entityBytes?: Uint8Array;
   entityCacheHit?: boolean;
   cacheError?: string;
+  /** Set when a complete source/entity body exceeds the cache budget. The
+   * snapshot remains usable; persistence is explicitly disabled, not partial. */
+  cacheDisabled?: string;
 }
 export type EngineeringWorkerCommand =
   | { type: 'init'; scope: string; paths: string[] }

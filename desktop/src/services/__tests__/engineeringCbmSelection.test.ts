@@ -11,20 +11,20 @@ beforeEach(() => {
 async function fixture(shared = false) {
   const raw: Record<string, string> = { 'project.cbm': `SUBSYSTEM0=unit.cbm${shared ? '\nSUBSYSTEM1=unit.cbm' : ''}`,
     'unit.cbm': 'ENTITYNAME=F2System\nOBJECTMODELPOINTER=root.dev\nSUBSYSTEM0=alias.cbm', 'root.dev': 'SYMBOLNAME=主变压器\nSUBDEVICE0=box.dev',
-    'box.dev': 'SYMBOLNAME=端子箱', 'alias.cbm': 'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=box.dev' };
+    'box.dev': 'SYMBOLNAME=测控柜', 'alias.cbm': 'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=box.dev' };
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(raw), readText: async path => raw[path] });
   const built = buildEngineeringSources('package', graph, [], []), state = new AppState(); state.activateProject(1, 'package'); state.currentProjectType = 'substation';
   state.engineeringSources = built.sources; state.engineeringSnapshot = built.snapshot; state.engineeringNavigation = projectEngineeringNavigation(built.sources, built.snapshot);
   return { state, ...built };
 }
 describe('source address links use the engineering identity chain', () => {
-  it('routes a real PARTINDEX alias to its independently identified terminal box', async () => {
+  it('routes a real PARTINDEX alias to its independently identified control cabinet', async () => {
     const f = await fixture(), { selectEngineeringCbmSource } = await import('../engineeringCbmSelection.js');
     const request = f.state.beginSelection({ kind: 'engineering-source', key: 'alias.cbm' });
     expect(await selectEngineeringCbmSource(f.state, 'alias.cbm', request)).toBe(true);
-    const box = f.snapshot.entities.find(entity => entity.category === 'E16.terminal_box')!;
+    const box = f.snapshot.entities.find(entity => entity.category === 'E16.control_cabinet')!;
     expect(f.state.selectionRequest?.target).toEqual({ kind: 'engineering', key: box.id });
-    expect(document.querySelector('.props-header')?.textContent).toBe('端子箱');
+    expect(document.querySelector('.props-header')?.textContent).toBe('测控柜');
   });
   it('keeps multiple occurrences of one source document as explicit candidates', async () => {
     const f = await fixture(true), { selectEngineeringCbmSource } = await import('../engineeringCbmSelection.js');

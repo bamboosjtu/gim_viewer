@@ -1,4 +1,5 @@
 mod db;
+mod tree_export;
 mod gim_extract;
 mod gim_extract_command;
 mod seven_zip_cli;
@@ -714,6 +715,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            tree_export::save_engineering_tree_json,
             read_file_bytes,
             read_file_head,
             get_file_info,

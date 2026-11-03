@@ -20,17 +20,17 @@ function paths(f: Awaited<ReturnType<typeof fixture>>, name: string): string[][]
   });
 }
 
-it('recognizes s03-style declared main system even when the transformer purpose category is still unconfirmed', async () => {
+it('recognizes s03-style semantic main designation independently of F levels', async () => {
   const f = await fixture({ 'project.cbm': 'SUBSYSTEM0=main.cbm\nSUBSYSTEM1=foundation.cbm',
     'main.cbm': 'ENTITYNAME=F3System\nSYSTEMNAME1=电气系统\nSYSTEMNAME2=主变系统01\nSYSTEMNAME3=主变01\nOBJECTMODELPOINTER=main.dev',
     'main.dev': 'TYPE=OilFilledTransformer\nSYMBOLNAME=220kV变压器模型ZJ01_1\nSUBDEVICE0=box.dev', 'box.dev': 'SYMBOLNAME=独立端子箱',
     'foundation.cbm': 'ENTITYNAME=F2System\nSYSTEMNAME2=主变系统01\nOBJECTMODELPOINTER=foundation.dev', 'foundation.dev': 'SYMBOLNAME=独立基础' });
-  const main = f.snapshot.entities.find(entity => entity.name === '220kV变压器模型ZJ01_1')!;
-  expect(main.category).toBe('E-T');
+  const main = f.snapshot.entities.find(entity => entity.name === '1号主变')!;
+  expect(main.category).toBe('E01');
   expect(paths(f, main.name)[0]).toEqual(expect.arrayContaining(['安装工程', '主变压器系统', '1号主变']));
-  expect(paths(f, '独立端子箱')[0]).toEqual(expect.arrayContaining(['安装工程', '主变压器系统', '1号主变']));
+  expect(main.sourceIds).toHaveLength(2);
   expect(paths(f, '独立基础')[0]).toEqual(expect.arrayContaining(['建筑工程', '主变压器系统构支架、独立基础']));
-  expect(f.snapshot.entities).toHaveLength(3);
+  expect(f.snapshot.entities).toHaveLength(2);
 });
 
 it('preserves declared buildings with unconfirmed members instead of replacing them by generic IFC containers', async () => {

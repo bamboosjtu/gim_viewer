@@ -4,7 +4,7 @@ import { categoryLabel } from './catalogLabels.js';
 export interface CompositionGroup {
   key: string;
   title: string;
-  kind: 'discipline' | 'system' | 'area' | 'unit' | 'building' | 'storey' | 'structure' | 'facility';
+  kind: 'discipline' | 'system' | 'area' | 'unit' | 'building' | 'storey' | 'structure' | 'facility' | 'track' | 'category' | 'bucket';
   order?: number;
 }
 export interface CompositionAssignment {
@@ -69,7 +69,8 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
       let parent = rootKey;
       if (!path.length) parent = group(parent, 'unresolved', 'context', '工程归属待确认', []);
       for (const part of path) { parent = group(parent, part.kind, part.key, part.title, assignment?.evidence ?? []); if (part.order !== undefined) orders.set(parent, part.order); }
-      parent = group(parent, 'category', entity.category, categoryLabel(entity.category), []);
+      const terminalBucket = path[path.length - 1]?.kind === 'bucket';
+      if (!terminalBucket) parent = group(parent, 'category', entity.category, categoryLabel(entity.category), []);
       if (seen.has(parent)) continue; seen.add(parent);
       const key = childKey(parent, 'entity', entity.id);
       nodes.set(key, { key, title: entity.name || categoryLabel(entity.category), kind: 'entity', targetId: entity.id, parent, children: [], entityCount: 1, evidence: assignment?.evidence ?? [] });
@@ -81,7 +82,10 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
     }
   }
   if (snapshot.pending.length) {
-    const parent = group(rootKey, 'pending', 'wholes', '整体归属待确认', []);
+    const unresolved = group(rootKey, 'discipline', 'unclassified', '未分类', []);
+    orders.set(unresolved, 2);
+    const other = group(unresolved, 'category', 'pending-other', '其他', []);
+    const parent = group(other, 'pending', 'wholes', '整体归属待确认', []);
     for (const pending of snapshot.pending) {
       const key = childKey(parent, 'pending', pending.id);
       nodes.set(key, { key, title: `待归整体集合 · ${pending.sourceIds.length} 个来源`, kind: 'pending', targetId: pending.id, parent, children: [], entityCount: 0, evidence: [pending.reason] });
