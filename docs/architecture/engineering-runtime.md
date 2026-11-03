@@ -20,7 +20,7 @@
 | [engineeringWorker](../../desktop/src/services/engineeringWorker.ts) | 在 Worker 内执行抽取/归一化/投影/编解码 |
 | [engineeringService](../../desktop/src/services/engineeringService.ts) | 会话、Worker 生命周期、缓存恢复/发布、IFC Spatial 补建 |
 | [engineeringSelection](../../desktop/src/services/engineeringSelection.ts) | 整体/分组/来源选择与表示绑定 |
-| [engineeringTreeView](../../desktop/src/ui/engineeringTreeView.ts) | “设备材料清册 / 工程组成 / 来源”三页、搜索、虚拟列表、选择同步 |
+| [engineeringTreeView](../../desktop/src/ui/engineeringTreeView.ts) | “清册 / 工程 / 来源”三页、搜索、虚拟列表、选择同步 |
 
 ## 构建流程
 

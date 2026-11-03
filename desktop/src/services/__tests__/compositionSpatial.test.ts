@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {normalizeEngineeringModel} from '../../engineering/normalize.js';
-import {projectSpatialComposition} from '../projections/compositionSpatial.js';
+import {compareCompositionAssignments,fromIfcYUpBounds,projectSpatialComposition} from '../projections/compositionSpatial.js';
 import type {ObjectEvidence} from '../../engineering/types.js';
 const object=(sourceId:string,name:string):ObjectEvidence=>({sourceId,name,traits:{},designations:[],identityCodes:[],identityNames:[],phases:[]});
 it('uses named storeys in a placeholder building and projects other architectural files into its footprint without merging wholes',()=>{
@@ -11,6 +11,24 @@ it('uses named storeys in a placeholder building and projects other architectura
  expect(result.every(a=>a.paths[0].some(g=>g.title==='110千伏配电装置楼'))).toBe(true);
  expect(JSON.stringify(snapshot)).toBe(before);
  expect(result.filter(a=>a.inferred).every(a=>a.evidence.includes('actual-shape')&&a.evidence.includes('composition-spatial-v1'))).toBe(true);
+});
+it('converts runtime Y-up bounds to the source Z-up frame exactly once',()=>{
+ expect(fromIfcYUpBounds([1,2,3,4,5,6])).toEqual([1,-6,2,4,-3,5]);
+ expect(fromIfcYUpBounds([0,0,0,1,1,NaN])).toBeUndefined();
+ expect(fromIfcYUpBounds([0,0,0,1,1])).toBeUndefined();
+});
+it('compares static and runtime projections by entity and reports path mismatches with source IDs',()=>{
+ const snapshot=normalizeEngineeringModel('p',[object('a','墙'),object('b','板'),object('c','柱')]);
+ const facts=snapshot.entities.map(e=>({entityId:e.id,hostEntityIds:[],declarations:[],sourceHints:['建筑.ifc'],spaces:[]}));
+ const sourceBounds=snapshot.entities.map((e,i)=>({entityId:e.id,bounds:i<2?[0,0,0,10,10,4]:[20,0,0,30,10,4],evidence:e.id}));
+ const expected=projectSpatialComposition(snapshot,facts,sourceBounds);
+ const yUp=sourceBounds.map(row=>({...row,bounds:[row.bounds[0],row.bounds[2],-row.bounds[4],row.bounds[3],row.bounds[5],-row.bounds[1]]}));
+ const actual=projectSpatialComposition(snapshot,facts,yUp.flatMap(row=>{const bounds=fromIfcYUpBounds(row.bounds);return bounds?[{...row,bounds}]:[];}));
+ expect(compareCompositionAssignments(expected,actual,new Map(snapshot.entities.map(e=>[e.id,e.sourceIds])))).toEqual({missing:[],extra:[],mismatches:[]});
+ const changed=actual.map(row=>row.entityId===snapshot.entities[0].id?{...row,paths:[row.paths[0].slice(0,-1)]}:row);
+ const diff=compareCompositionAssignments(expected,changed,new Map([[snapshot.entities[0].id,['a']]]));
+ expect(diff.mismatches).toHaveLength(1);
+ expect(diff.mismatches[0]).toMatchObject({entityId:snapshot.entities[0].id,sourceIds:['a']});
 });
 it('keeps a shared footprint ambiguous when explicit building names disagree',()=>{
  const snapshot=normalizeEngineeringModel('p',[object('a','墙'),object('b','板'),object('c','柱')]);

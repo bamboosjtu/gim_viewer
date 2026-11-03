@@ -9,6 +9,9 @@ export interface CompositionContextEvidence {
   spaces: Array<{ building: EvidenceValue; storeys: Array<EvidenceValue & {elevationMetres?:number}> }>;
   /** Named delivery context, adapted before entering the domain projection. */
   deliveryBuildingNames?: EvidenceValue[];
+  /** Project-level building names from IFC delivery; used only to place a
+   * room/MEP file under an already named building, never to invent identity. */
+  availableBuildings?: EvidenceValue[];
   hostEntityIds: string[];
   /** Source track only breaks out unclassified members; it never changes identity. */
   track?: 'dev' | 'ifc' | 'mixed';
@@ -112,12 +115,21 @@ export function canonicalBuildingName(text:string):string {
   const value=normalize(text);
   const voltage=value.match(/(\d+)\s*(?:kV|千伏)?\s*配电(?:装置)?楼/i);
   if(voltage)return `${voltage[1]}千伏配电装置楼`;
-  const named=value.match(/警卫室|门卫室|主控(?:通信)?楼\d*|辅助用房|配电(?:装置)?楼|配电室\d*|综合楼|生产(?:综合)?楼|控制楼/);
+  const named=value.match(/警卫室|门卫室|警传室|消防泵房|主控(?:通信)?楼\d*|辅助用房|配电(?:装置)?楼|配电室\d*|综合楼|生产(?:综合)?楼|控制楼/);
   return named?.[0]??'';
 }
 export function buildingPaths(input: CompositionContextEvidence | undefined): CompositionGroup[][] {
   const candidates = input?.spaces ?? [];
   const names = candidates.filter(space => validBuilding(space.building.value) && !purpose(space.building.value) && !/配电装置|开关场|构支架|构架|电缆沟/.test(space.building.value));
+  // A room/electrical-mechanical delivery file is not a peer building when a
+  // project-level building name is available. Keep the room as a child storey.
+  const room=candidates.map(space=>({space,name:canonicalBuildingName(space.building.value)||normalize(space.building.value)}))
+    .find(row=>/室$/.test(row.name)&&!/楼$/.test(row.name));
+  const projectBuildings=[...new Map((input?.availableBuildings??[]).map(row=>[row.value,row])).values()]
+    .filter(row=>canonicalBuildingName(row.value)&&!(/室$/.test(canonicalBuildingName(row.value))&&!/楼$/.test(canonicalBuildingName(row.value))));
+  const roomBuilding=room&&projectBuildings.length?[...projectBuildings].sort((a,b)=>Number(/楼$/.test(canonicalBuildingName(b.value)))-Number(/楼$/.test(canonicalBuildingName(a.value))))[0]:undefined;
+  if(room&&roomBuilding)return [[civil,{key:`building:${keyOf(canonicalBuildingName(roomBuilding.value))}`,title:canonicalBuildingName(roomBuilding.value),kind:'building',order:0},
+    {key:`room:${keyOf(room.name)}`,title:room.name,kind:'storey',order:0}]];
   if (names.length) return names.map(space => [civil,
     { key: `building:${keyOf(canonicalBuildingName(space.building.value)||space.building.value)}`, title: canonicalBuildingName(space.building.value)||normalize(space.building.value), kind: 'building', order: 0 },
     ...space.storeys.filter(item => valid(item.value) || /^(?:Storey|Level)\s*\d+$/i.test(item.value)).map(item => {
@@ -178,8 +190,15 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
           const hostGroup = hostPaths.length === 1 ? hostPaths[0][1] : undefined;
           const hostSystem = hostGroup?.kind === 'system' && hostGroup.key !== 'installation-unassigned' ? hostGroup : undefined;
           const group = related ? system(related) : hostSystem;
-          if (group) paths = [[civil, { key: `structure:${group.key}`, title: `${group.title}构支架、独立基础`, kind: 'structure', order: 20 }]];
-          else paths = [unclassifiedPath(track, category)];
+          if (group) {
+            const foundation = ['C-B2','C-B3','C-B4'].includes(category)
+              || !['C-B1','C-B5','C-B6','C-B7'].includes(category)
+                && /基础|杯口|支墩|桩|承台|筏板|垫层/.test(entity.name) && !/支架|构架/.test(entity.name);
+            paths = [[civil,
+              { key: `area:${group.key}`, title: `${group.title}区域`, kind: 'area', order: 20 },
+              { key: `area:${group.key}:${foundation ? 'foundation' : 'frame'}`, title: foundation ? '基础' : '构支架', kind: 'structure', order: foundation ? 20 : 10 },
+            ]];
+          } else paths = [unclassifiedPath(track, category)];
         }
       }
     } else {

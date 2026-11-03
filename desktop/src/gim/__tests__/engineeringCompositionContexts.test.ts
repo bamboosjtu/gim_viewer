@@ -30,7 +30,7 @@ it('projects a declared main unit without promoting the transformer purpose from
   expect(main.name).toBe('220kV变压器模型ZJ01_1');
   expect(paths(f, main.name)[0]).toEqual(expect.arrayContaining(['安装工程', '主变压器系统', '1号主变']));
   expect(main.sourceIds).toHaveLength(2);
-  expect(paths(f, '独立基础')[0]).toEqual(expect.arrayContaining(['建筑工程', '主变压器系统构支架、独立基础']));
+  expect(paths(f, '独立基础')[0]).toEqual(expect.arrayContaining(['建筑工程', '主变压器系统区域', '基础']));
   expect(f.snapshot.entities).toHaveLength(2);
 });
 
@@ -66,8 +66,17 @@ it('keeps a main-transformer incoming bay in its distribution installation and i
     'bay.cbm': 'SYSTEMNAME1=电气系统\nSYSTEMNAME2=10kV系统\nSYSTEMNAME3=主变进线间隔01\nOBJECTMODELPOINTER=cabinet.dev\nSUBSYSTEM0=support.cbm',
     'cabinet.dev': 'TYPE=SwitchCabinet\nSYMBOLNAME=10kV主变进线柜', 'support.cbm': 'OBJECTMODELPOINTER=support.dev', 'support.dev': 'SYMBOLNAME=设备支架' });
   expect(paths(f, '10kV主变进线柜')[0]).toEqual(expect.arrayContaining(['安装工程', '10千伏配电装置', '主变进线间隔01']));
-  expect(paths(f, '设备支架')[0]).toEqual(expect.arrayContaining(['建筑工程', '10千伏配电装置构支架、独立基础']));
+  expect(paths(f, '设备支架')[0]).toEqual(expect.arrayContaining(['建筑工程', '10千伏配电装置区域', '构支架']));
   expect([...f.view.composition.nodes.values()].map(row => row.title)).not.toContain('主变压器系统');
+});
+
+it('falls back from a placeholder IfcBuilding name to the delivery building name', async () => {
+  const graph=await extractEngineeringSourceGraph({paths:['project.cbm','body.dev'],readText:async p=>p==='project.cbm'?'OBJECTMODELPOINTER=body.dev':'SYMBOLNAME=主体'});
+  const object={key:'object',modelId:'m',expressId:1,ifcType:'IFCWALL',globalId:'g',name:'墙',sourcePath:'CBM/04-建筑配电楼.ifc',parentObjectKey:null,childObjectKeys:[],relationshipCount:0,spatialKey:'building',spatialKeys:['building'],spatialContainment:null,geometryStatus:'represented'};
+  const node={key:'building',modelId:'m',expressId:2,ifcType:'IFCBUILDING',kind:'building',globalId:'b',name:'HN-220-B-2总平面',sourcePath:'CBM/04-建筑配电楼.ifc',parentKey:null,longName:''};
+  const built=buildEngineeringSources('sample',graph,[object as never],[{modelId:'m',path:'CBM/04-建筑配电楼.ifc'}] as never,[node as never]);
+  const facts=collectCompositionEvidence(built.sources,built.snapshot,new Map([[node.key,node as never]]));
+  expect(facts.find(fact=>fact.spaces.length)?.spaces[0].building.value).toBe('配电楼');
 });
 
 it('maps confirmed IFC object context through its exact source link and retains its engineering category', async () => {

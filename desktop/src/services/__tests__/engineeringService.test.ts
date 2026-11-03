@@ -76,6 +76,19 @@ describe('session-owned production engineering build', () => {
     expect(app.engineeringGeometryCatalog?.occurrences).toHaveLength(1);
   });
 
+  it('does not report a full hit when only the source cache restored and entity/navigation were rebuilt', async () => {
+    const app = state(), files = sourceFiles();
+    await beginEngineeringBuild(app, files, { createWorker: portFactory(new LoopbackPort()) });
+    const cold = app.engineeringSnapshot;
+    for (const path of [...store.keys()]) if (/engineering-(?:entity|navigation)-/.test(path)) store.delete(path);
+    const port = new LoopbackPort();
+    await beginEngineeringBuild(app, files, { createWorker: portFactory(port) });
+    expect(app.engineeringSnapshot).toEqual(cold);
+    expect(app.engineeringNavigationCacheHit).toBe(false);
+    expect(app.engineeringCacheStatus).toBe('saved');
+    expect(port.commands.filter(command => command === 'encode-cache')).toHaveLength(2);
+  });
+
   it('rebuilds a corrupt navigation artifact without reextracting or renormalizing valid sources and entities', async () => {
     const app = state(), files = sourceFiles();
     await beginEngineeringBuild(app, files, { createWorker: portFactory(new LoopbackPort()) });

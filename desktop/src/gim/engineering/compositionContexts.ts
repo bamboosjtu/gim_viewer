@@ -52,7 +52,12 @@ export function collectCompositionEvidence(sources: EngineeringSources, snapshot
       const seen=new Set<string>(), floors:EvidenceValue[]=[];let cursor:string|null=key;
       while(cursor&&!seen.has(cursor)) {
         seen.add(cursor);const node=spatial.get(cursor);if(!node)break;
-        const value={value:node.longName||node.name,evidenceId:`${node.sourcePath}#${node.expressId}`,...(node.elevationMetres!==undefined?{elevationMetres:node.elevationMetres}:{})};
+        const declared=node.longName||node.name;
+        const usable=!!declared&&!/总平面|Default Building|^(?:Building|Storey|Project|Site|建筑|模型\s*\d*)$/i.test(declared.trim())&&!declared.startsWith('&');
+        // IFC building names are frequently exporter placeholders such as
+        // "总平面"/"Default Building"; the delivery file name is a valid
+        // source-backed fallback, but only when it names a building.
+        const value={value:canonicalBuildingName(declared)||(usable?declared:'')||canonicalBuildingName(node.sourcePath)||declared,evidenceId:`${node.sourcePath}#${node.expressId}`,...(node.elevationMetres!==undefined?{elevationMetres:node.elevationMetres}:{})};
         if(node.kind==='storey')floors.unshift(value);
         if(node.kind==='building'){result.push({building:value,storeys:floors});break;}
         cursor=node.parentKey;
@@ -64,6 +69,12 @@ export function collectCompositionEvidence(sources: EngineeringSources, snapshot
   const locations=new Map((sources.locations??[]).map(row=>[row.sourceId,row.position]));
   const relationships=new Map<string,string[]>();
   for(const relation of snapshot.relationships){const ids=relationships.get(relation.from)??[];ids.push(relation.to);relationships.set(relation.from,ids);}
+  const availableBuildings:EvidenceValue[]=[];
+  const seenBuildings=new Set<string>();
+  for(const record of sources.ifcRecords) for(const path of record.sources){
+    const value=canonicalBuildingName(path);
+    if(value&&!seenBuildings.has(value)){seenBuildings.add(value);availableBuildings.push({value,evidenceId:path});}
+  }
   const evidence:SourceCompositionEvidence[]=snapshot.entities.map(entity=>{
     const declarations=new Map<string,Declaration>(), ownSpaces=new Map<string,CompositionContextEvidence['spaces'][number]>(), hostIds=new Set(relationships.get(entity.id)??[]);
     for(const id of entity.sourceIds) {
@@ -76,6 +87,7 @@ export function collectCompositionEvidence(sources: EngineeringSources, snapshot
     const sourceHints=[...new Set(entity.sourceIds.flatMap(id=>records.get(id)?.sources??[]))];
     return {entityId:entity.id,declarations:[...declarations.values()],spaces:[...ownSpaces.values()],hostEntityIds:[...hostIds],
       sourceHints,deliveryBuildingNames:sourceHints.flatMap(path=>{const value=canonicalBuildingName(path);return value?[{value,evidenceId:path}]:[];}),
+      availableBuildings,
       positions:entity.sourceIds.flatMap(id=>locations.has(id)?[locations.get(id)!]:[]),
       track: tracks.size === 1 ? [...tracks][0] : 'mixed'};
   });

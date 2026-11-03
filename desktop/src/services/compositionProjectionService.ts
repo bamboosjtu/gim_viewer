@@ -1,5 +1,6 @@
 import type { AppState } from '../app/state.js';
 import type { CompositionBounds } from './projections/compositionSpatial.js';
+import { fromIfcYUpBounds } from './projections/compositionSpatial.js';
 import type { EngineeringNavigationData } from '../gim/engineering/navigation.js';
 import type { ProjectionInput, ProjectionOutput } from './compositionProjectionWorker.js';
 import { categoryLabel } from '../engineering/catalogLabels.js';
@@ -58,8 +59,8 @@ export function installCompositionProjection(state: AppState): () => void {
     };
     const owners = new Map(snapshot.memberships.map(m => [m.sourceId, m.ownerId])), bounds: CompositionBounds[] = [];
     for (const [model, runtime] of state.ifcRegionalRuntimes) for (const object of runtime.index.objects) {
-      const sourceId = `ifc:${JSON.stringify([model, object.expressId])}`, owner = owners.get(sourceId), b = object.bounds;
-      if (owner) bounds.push({ entityId: owner, bounds: [b[0], -b[5], b[1], b[3], -b[2], b[4]], evidence: sourceId });
+      const sourceId = `ifc:${JSON.stringify([model, object.expressId])}`, owner = owners.get(sourceId), sourceBounds = fromIfcYUpBounds(object.bounds);
+      if (owner && sourceBounds) bounds.push({ entityId: owner, bounds: sourceBounds, evidence: sourceId });
     }
     if (!bounds.length) {
       restore();

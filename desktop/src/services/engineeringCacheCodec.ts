@@ -140,10 +140,22 @@ function assertSourceInventory(sources: EngineeringSources, id: EngineeringCache
  * outward records before treating it as a hit. */
 export function engineeringSourceCacheMatchesFiles(sources: EngineeringSources, files: Iterable<string>): boolean {
   const normalize = (path: string) => path.replace(/\\/g, '/').toLowerCase();
-  const delivered = new Set([...files].filter(path => /\.ifc$/i.test(path)).map(normalize));
+  const deliveredFiles = [...files];
+  const delivered = new Set(deliveredFiles.filter(path => /\.ifc$/i.test(path)).map(normalize));
   const cached = new Set(sources.graph.ifcPaths.map(normalize));
   if (delivered.size !== cached.size || [...delivered].some(path => !cached.has(path))) return false;
-  return delivered.size === 0 || (sources.models.length === delivered.size && sources.ifcRecords.length > 0);
+  if (delivered.size > 0 && (sources.models.length !== delivered.size || sources.ifcRecords.length === 0)) return false;
+  // A decoded cache can still be a subset of the delivered semantic inventory.
+  // Require every delivered CBM/DEV path to be referenced by the graph;
+  // source record count alone is not trustworthy because one file can yield
+  // several records. FAM is optional because an unreferenced family is not a
+  // source record and may legitimately be absent from a semantic snapshot.
+  const covered = new Set<string>();
+  for (const path of sources.graph.documents.map(document => document.path)) covered.add(normalize(path));
+  for (const record of [...sources.graph.records, ...sources.ifcRecords]) for (const path of record.sources) covered.add(normalize(path));
+  for (const reference of sources.graph.references) if (reference.status === 'resolved') covered.add(normalize(reference.value));
+  for (const path of deliveredFiles) if (/\.(?:cbm|dev)$/i.test(path) && !covered.has(normalize(path))) return false;
+  return true;
 }
 
 export async function encodeEngineeringSources(sources: EngineeringSources, id: EngineeringCacheIdentity): Promise<{ bytes: Uint8Array; digest: string }> {

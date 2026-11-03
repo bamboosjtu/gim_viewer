@@ -17,6 +17,43 @@ const policy = SPATIAL_PROJECTION_POLICY;
 export interface CompositionBounds {entityId:string;bounds:number[];evidence:string}
 export interface CompositionSpatialDiagnostics {footprints:Array<{bounds:number[];members:number;names:string[];votes:Array<[string,number]>;chosen:string}>}
 type Box=number[];
+/** web-ifc/RegionalIndex bounds are absolute Y-up metres. The composition
+ * projection consumes the source Z-up metre frame; keep this conversion in one
+ * place so static and runtime evidence cannot drift. */
+export function fromIfcYUpBounds(bounds: readonly number[]): number[] | undefined {
+  if (bounds.length !== 6 || !bounds.every(Number.isFinite)) return undefined;
+  const [minX, minY, minZ, maxX, maxY, maxZ] = bounds;
+  return [minX, -maxZ, minY, maxX, -minZ, maxY];
+}
+
+export interface CompositionParityMismatch {
+  entityId: string;
+  sourceIds: string[];
+  expectedPaths: string[];
+  actualPaths: string[];
+}
+
+/** Aligns independent static/runtime projections by engineering entity and
+ * reports path-level differences, retaining source IDs for offline evidence. */
+export function compareCompositionAssignments(
+  expected: readonly CompositionAssignment[],
+  actual: readonly CompositionAssignment[],
+  sourceIdsByEntity: ReadonlyMap<string, readonly string[]> = new Map(),
+): { missing: string[]; extra: string[]; mismatches: CompositionParityMismatch[] } {
+  const key = (rows: readonly CompositionAssignment[]) => new Map(rows.map(row => [row.entityId, row]));
+  const left = key(expected), right = key(actual), missing: string[] = [], extra: string[] = [], mismatches: CompositionParityMismatch[] = [];
+  for (const [entityId, row] of left) {
+    const other = right.get(entityId);
+    if (!other) { missing.push(entityId); continue; }
+    const paths = (value: CompositionAssignment) => value.paths.map(path => path.map(group => `${group.kind}:${group.key}`).join('/')).sort();
+    const expectedPaths = paths(row), actualPaths = paths(other);
+    if (JSON.stringify(expectedPaths) !== JSON.stringify(actualPaths)) mismatches.push({
+      entityId, sourceIds: [...(sourceIdsByEntity.get(entityId) ?? [])], expectedPaths, actualPaths,
+    });
+  }
+  for (const entityId of right.keys()) if (!left.has(entityId)) extra.push(entityId);
+  return { missing, extra, mismatches };
+}
 const center=(b:Box)=>[(b[0]+b[3])/2,(b[1]+b[4])/2,(b[2]+b[5])/2];
 const contains=(b:Box,p:number[],margin=0)=>p[0]>=b[0]-margin&&p[0]<=b[3]+margin&&p[1]>=b[1]-margin&&p[1]<=b[4]+margin;
 const area=(b:Box)=>(b[3]-b[0])*(b[4]-b[1]);

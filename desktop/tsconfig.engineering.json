@@ -1,4 +1,4 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["scripts/engineering/corpus-task.ts", "scripts/engineering/geometry-task.ts", "acceptance/engineering/golden.ts"]
+  "include": ["scripts/engineering/corpus-task.ts", "scripts/engineering/geometry-task.ts", "scripts/engineering/export-review-trees.ts", "scripts/engineering/compare-review-trees.ts", "acceptance/engineering/golden.ts"]
 }

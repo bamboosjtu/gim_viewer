@@ -52,6 +52,23 @@ it('keeps a foundation unresolved when its host has no confirmed installation sy
   expect(result[1].paths[0].map(group => group.title)).toEqual(['未分类', 'DEV+IFC 轨道', '构件']);
 });
 
+it('groups a distribution area before splitting supports and foundations', () => {
+  const model = snapshot([entity('host', 'E09'), entity('support', 'C-B1', '设备支架'), entity('foundation', 'C-B2', '独立基础')]);
+  const host = fact('host', ['10kV系统', '36S']);
+  const support = fact('support'); support.hostEntityIds = ['host'];
+  const foundation = fact('foundation'); foundation.hostEntityIds = ['host'];
+  const result = assignEngineeringComposition(model, [host, support, foundation]);
+  const titles = (id: string) => result.find(row => row.entityId === id)!.paths[0].map(group => group.title);
+  expect(titles('support')).toEqual(['建筑工程', '10千伏配电装置区域', '构支架']);
+  expect(titles('foundation')).toEqual(['建筑工程', '10千伏配电装置区域', '基础']);
+});
+
+it('nests a room/MEP delivery under a project building instead of creating a peer building', () => {
+  const model = snapshot([entity('room', 'C-A1', '35kV配电室')]);
+  const fact = (entityId: string): CompositionContextEvidence => ({ entityId, declarations: [], spaces: [{ building: { value: '配电室', evidenceId: 'room-building' }, storeys: [] }], hostEntityIds: [], availableBuildings: [{ value: '辅助用房', evidenceId: 'aux' }, { value: '配电楼', evidenceId: 'main' }] });
+  expect(assignEngineeringComposition(model, [fact('room')])[0].paths[0].map(group => group.title)).toEqual(['建筑工程', '配电楼', '配电室']);
+});
+
 it('uses the explicitly named bay voltage beneath an interval without inventing a voltage from the interval alone', () => {
   const model = snapshot([entity('line', 'E09'), entity('switchgear', 'E09'), entity('bus', 'M09'), entity('range', 'E09'), entity('neutral', 'E16.terminal_box'), entity('conflict', 'E09')]);
   const result = assignEngineeringComposition(model, [

@@ -25,6 +25,15 @@ describe('independent source and entity cache contracts', () => {
     expect(engineeringCacheEntry(id, 'entities')).not.toBe(engineeringCacheEntry(id, 'sources'));
   });
 
+  it('rejects a source cache whose decoded records do not cover every delivered semantic file', async () => {
+    const model = await fixture(), partial = structuredClone(model.sources);
+    partial.graph.documents = partial.graph.documents.filter(document => document.path !== 'terminal.dev');
+    partial.graph.records = partial.graph.records.filter(record => record.source !== 'terminal.dev')
+      .map(record => ({ ...record, sources: record.sources.filter(path => path !== 'terminal.dev') }));
+    partial.graph.references = partial.graph.references.filter(reference => reference.value !== 'terminal.dev');
+    expect(engineeringSourceCacheMatchesFiles(partial, ['project.cbm', 'unit.dev', 'terminal.dev'])).toBe(false);
+  });
+
   it('rejects a decoded DEV-only source body when delivered IFC files are present', async () => {
     const model = await fixture();
     const partial = structuredClone(model.sources);

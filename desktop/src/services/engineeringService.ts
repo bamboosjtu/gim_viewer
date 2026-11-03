@@ -181,7 +181,12 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
             state.engineeringCacheStatus = 'partial';
             state.engineeringCacheError = '缓存来源未覆盖当前 IFC 清单，已从来源重建';
           } else {
-            state.engineeringCacheStatus = 'hit'; publish(state, job, result);
+            // A source-only restore is not a full warm hit: entity/navigation
+            // were rebuilt from the source body and still need re-encoding.
+            const completeHit = result.entityCacheHit === true && result.navigationCacheHit === true;
+            state.engineeringCacheStatus = completeHit ? 'hit' : 'partial';
+            if (!completeHit) state.engineeringCacheError = '部分缓存命中：实体/导航缓存已从来源重建';
+            publish(state, job, result);
             await finishBuild(state,job,result); return;
           }
         } catch (error) { if (!current(state, job)) return; state.engineeringCacheError = String(error); }

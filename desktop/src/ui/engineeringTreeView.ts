@@ -120,7 +120,9 @@ export function renderEngineeringTree(state: AppState): void {
   cbmTreePanel.replaceChildren();
   const bar = document.createElement('div'); bar.className = 'substation-nav-mode'; nav.bar = bar;
   bar.style.flexWrap='wrap';
-  for (const [value, label] of [['inventory', '设备材料清册'], ['composition', '工程组成'], ['source', '来源']] as const) {
+  bar.setAttribute('aria-label', '工程实体识别结果的业务投影视图');
+  bar.title = '按工程实体识别结果和业务规则投影，不是原始文件或模型层级';
+  for (const [value, label] of [['inventory', '清册'], ['composition', '工程'], ['source', '来源']] as const) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'substation-nav-mode-btn';
     button.dataset.engineeringMode = value; button.textContent = label; button.classList.toggle('active', value === mode);
     button.setAttribute('aria-pressed', String(value === mode));
@@ -210,6 +212,10 @@ export function renderEngineeringTree(state: AppState): void {
     const row = mode === 'composition' ? data.composition.rowsByEntity.get(key)?.[0] : mode==='inventory'?data.inventory!.rowsByEntity.get(key)?.[0]:key;
     if (row) void select(row);
   });
+  // Keep the projection switch directly below the navigator title; search and
+  // tree stay below it. The switch is a projection choice, not a source level.
+  const search = cbmTreePanel.querySelector<HTMLElement>('.search-box-wrap');
+  if (search && search.previousElementSibling !== bar) cbmTreePanel.insertBefore(search, host);
   const input = cbmTreePanel.querySelector<HTMLInputElement>('.search-box-wrap input');
   if (input && nav.query[mode]) { input.value = nav.query[mode]; input.dispatchEvent(new Event('input')); }
   cbmTreePanel.scrollTop = nav.scroll[mode];

@@ -49,6 +49,8 @@ describe('engineering composition and provenance navigation', () => {
     let cursor:string|undefined=key;
     while(cursor){f.state.engineeringExpandedRows.inventory.add(cursor);cursor=inventory.nodes.get(cursor)?.parent;}
     f.state.engineeringNavMode='inventory';const {renderEngineeringTree}=await import('../engineeringTreeView.js');renderEngineeringTree(f.state);
+    const panel=document.getElementById('cbm-tree-panel')!;
+    expect(panel.querySelector('.substation-nav-mode')?.nextElementSibling?.classList.contains('search-box-wrap')).toBe(true);
     const template=inventory.nodes.get(inventory.nodes.get(key)!.parent!)!;
     const group=inventory.nodes.get(template.parent!)!;
     expect(template.kind).toBe('template');expect(template.title).toBe('主变测控柜');
@@ -144,7 +146,8 @@ describe('engineering composition and provenance navigation', () => {
   it('offers three independent views while source facts are still preparing', async () => {
     const state = new AppState(); state.currentProjectType = 'substation';
     const { buildAndRenderCbmTree } = await import('../cbmTreeView.js'); buildAndRenderCbmTree(state, vi.fn());
-    expect([...document.querySelectorAll('.substation-nav-mode-btn')].map(b => b.textContent)).toEqual(['设备材料清册', '工程组成', '来源']);
+    expect([...document.querySelectorAll('.substation-nav-mode-btn')].map(b => b.textContent)).toEqual(['清册', '工程', '来源']);
+    expect(document.getElementById('cbm-tree-panel')?.firstElementChild?.classList.contains('substation-nav-mode')).toBe(true);
     expect(document.body.textContent).toContain('正在识别工程整体');
     document.querySelector<HTMLButtonElement>('[data-engineering-mode="source"]')!.click();
     expect(document.body.textContent).toContain('正在读取来源引用与装配');
