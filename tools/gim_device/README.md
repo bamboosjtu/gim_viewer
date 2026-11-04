@@ -37,7 +37,7 @@ gim_device/
 首次启动约 5–10 秒（单文件 exe 需先解压到临时目录），之后秒开。
 
 > 根目录那份与 `dist/` 里的**是同一个文件的两份拷贝**，都保留：前者图方便，后者是打包标准输出位。
-> 重打包后记得同步根目录：`cp dist/GIM设备查看器.exe ../`。
+> `build.ps1` 打包完成后会自动同步根目录，不需要手动复制。
 
 菜单里可导出三维视图 PNG（`Ctrl+S`，按画布 2 倍分辨率，不含界面）。
 
@@ -54,9 +54,26 @@ GIM_SMOKE_MODE=edge python viewer_app.py --smoke a.gim out.png   # 自检线框�
 
 ## 三、重新打包
 
-```bash
-cd gim_device
-python -m PyInstaller --noconfirm viewer.spec
+从工具目录执行 PowerShell：
+
+```powershell
+.\build.ps1
+```
+
+脚本会创建工具自己的 `.venv`、安装 `requirements-build.txt` 中的完整 PySide6（含 QtWebEngine）、PyInstaller 和 py7zr，并调用 `viewer.spec`：
+
+```powershell
+.\build.ps1 -SkipInstall   # 已安装项目环境时
+```
+
+不要复用 `gim_element` 的 `.venv`：它使用 PySide6-Essentials，不包含本查看器需要的 QtWebEngine。
+
+等价手动入口：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --workpath .\_build --distpath .\dist viewer.spec
 # 产物：dist/GIM设备查看器.exe
 ```
 

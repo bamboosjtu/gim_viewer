@@ -1,0 +1,5 @@
+# Windows x64 / Python 3.12. Use the full PySide6 distribution: QtWebEngine is
+# required by viewer_app.py, unlike the element tool's Essentials-only runtime.
+PyInstaller==6.22.3
+PySide6==6.12.0
+py7zr==1.1.4

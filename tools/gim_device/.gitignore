@@ -1,6 +1,7 @@
 # ---- 打包产物（单文件 exe 约 190 MB，可用 README「三、重新打包」重建）----
 dist/
 build/
+_build/
 *.exe
 
 # ---- 回归截图（tools/test_render.py 的输出，随时可删，脚本会自动重建）----
