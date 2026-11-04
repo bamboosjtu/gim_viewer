@@ -1,6 +1,6 @@
 import type { EngineeringSnapshot } from '../../engineering/types.js';
 import type { CompositionAssignment, CompositionGroup } from '../../engineering/composition.js';
-import { assignEngineeringComposition, buildingPaths } from '../../engineering/compositionTemplate.js';
+import { assignEngineeringComposition, buildingPaths, canonicalBuildingName, isRoomBuildingName } from '../../engineering/compositionTemplate.js';
 import type { SourceCompositionEvidence } from '../../gim/engineering/compositionContexts.js';
 
 /** Projection heuristics, not engineering identity rules. Distances are metres.
@@ -121,6 +121,23 @@ export function projectSpatialComposition(snapshot:EngineeringSnapshot,facts:rea
     else path.push({key:'floor:unconfirmed',title:'楼层待确认',kind:'storey'});
     const refs=[...new Set([e.id,...building.ids.slice(0,3)].flatMap(id=>boundsEvidence.get(id)??[]))];
     assignment.set(e.id,{entityId:e.id,paths:[path],evidence:[...old.evidence,'spatial-building-footprint',policy.version,...refs],inferred:true});
+  }
+  // Room/MEP delivery files which only expose a room name can be placed under a
+  // single physical building when their source bounds are fully contained.
+  for(const e of snapshot.entities){
+    if(!boxes.has(e.id)||/^C-A|^C-B/.test(e.category))continue;
+    const room=(evidence.get(e.id)?.spaces??[]).map(space=>canonicalBuildingName(space.building.value)||space.building.value).find(name=>isRoomBuildingName(name));
+    if(!room)continue;
+    const semantic=buildingPaths(evidence.get(e.id));
+    if(semantic.some(path=>path.some(group=>group.kind==='building'&&!isRoomBuildingName(group.title))))continue;
+    const b=boxes.get(e.id)!,p=center(b),hits=buildings.filter(c=>!c.ambiguous&&contains(c.box,p,policy.joinMargin)
+      &&b[0]>=c.box[0]-policy.containmentMargin&&b[3]<=c.box[3]+policy.containmentMargin&&b[1]>=c.box[1]-policy.containmentMargin&&b[4]<=c.box[4]+policy.containmentMargin);
+    if(hits.length!==1)continue;
+    const building=hits[0],old=assignment.get(e.id)!;
+    assignment.set(e.id,{entityId:e.id,paths:[[civil,building.name,
+      {key:`room:${room}`,title:room,kind:'storey',order:0}]],
+      evidence:[...old.evidence,'spatial-room-footprint',policy.version,...(boundsEvidence.get(e.id)??[])],
+    });
   }
   return snapshot.entities.map(e=>assignment.get(e.id)!);
 }

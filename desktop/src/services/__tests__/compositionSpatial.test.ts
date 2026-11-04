@@ -30,6 +30,18 @@ it('compares static and runtime projections by entity and reports path mismatche
  expect(diff.mismatches).toHaveLength(1);
  expect(diff.mismatches[0]).toMatchObject({entityId:snapshot.entities[0].id,sourceIds:['a']});
 });
+it('places a room-only delivery under a containing building footprint',()=>{
+ const entities=['w1','w2','w3','room'].map((id,i)=>({id,name:id,category:i===3?'E01':'C-A1',sourceIds:[id],kind:'whole',boundaryEvidence:'x',classificationState:'identified',classificationConflicts:0}));
+ const snapshot={scope:'p',rulesVersion:'r',entities,memberships:[],pending:[],aliases:[],relationships:[],diagnostics:[]} as never;
+ const facts=entities.map((entity,index)=>({entityId:entity.id,hostEntityIds:[],declarations:[],sourceHints:[index===3?'35kV配电室通风.ifc':'建筑.ifc'],
+   spaces:[{building:{value:index===3?'配电室':'配电楼',evidenceId:`b${index}`},storeys:[]}]}));
+ const bounds=entities.map((entity,index)=>({entityId:entity.id,bounds:index===3?[2,2,0,3,3,3]:[0,0,0,10,10,4],evidence:entity.id}));
+ const result=projectSpatialComposition(snapshot,facts,bounds);
+ const room=result.find(row=>row.entityId==='room')!;
+ expect(room.paths[0].map(group=>group.title)).toEqual(['建筑工程','配电楼','配电室']);
+ expect(room.evidence).toContain('spatial-room-footprint');
+});
+
 it('keeps a shared footprint ambiguous when explicit building names disagree',()=>{
  const snapshot=normalizeEngineeringModel('p',[object('a','墙'),object('b','板'),object('c','柱')]);
  const facts=snapshot.entities.map((e,i)=>({entityId:e.id,hostEntityIds:[],declarations:[],sourceHints:['建筑.ifc'],spaces:[{building:{value:i===0?'综合楼':'主控楼',evidenceId:'building'},storeys:[]}]}));

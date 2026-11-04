@@ -63,10 +63,29 @@ it('groups a distribution area before splitting supports and foundations', () =>
   expect(titles('foundation')).toEqual(['建筑工程', '10千伏配电装置区域', '基础']);
 });
 
+it('marks declared composition anchors without a confirmed whole as unbound', () => {
+  const view = projectEngineeringComposition(snapshot([]), [], '工程', [{
+    path: [{ key: 'building:配电楼', title: '配电楼', kind: 'building' }], evidence: ['declared'], sourceContextIds: ['c1'],
+  }]);
+  const group = [...view.nodes.values()].find(node => node.title === '配电楼')!;
+  expect(group).toMatchObject({ kind: 'group', entityCount: 0, unbound: true });
+});
+
 it('nests a room/MEP delivery under a project building instead of creating a peer building', () => {
   const model = snapshot([entity('room', 'C-A1', '35kV配电室')]);
   const fact = (entityId: string): CompositionContextEvidence => ({ entityId, declarations: [], spaces: [{ building: { value: '配电室', evidenceId: 'room-building' }, storeys: [] }], hostEntityIds: [], availableBuildings: [{ value: '辅助用房', evidenceId: 'aux' }, { value: '配电楼', evidenceId: 'main' }] });
   expect(assignEngineeringComposition(model, [fact('room')])[0].paths[0].map(group => group.title)).toEqual(['建筑工程', '配电楼', '配电室']);
+});
+
+it('keeps a standalone 警传室 or 消防泵房 as its own building, not a room', () => {
+  const model = snapshot([entity('guard', 'C-A1', '警传室'), entity('fire', 'C-A1', '消防泵房')]);
+  const facts: CompositionContextEvidence[] = [
+    { entityId: 'guard', declarations: [], spaces: [{ building: { value: '警传室', evidenceId: 'g' }, storeys: [] }], hostEntityIds: [], availableBuildings: [{ value: '配电楼', evidenceId: 'main' }] },
+    { entityId: 'fire', declarations: [], spaces: [{ building: { value: '消防泵房', evidenceId: 'f' }, storeys: [] }], hostEntityIds: [], availableBuildings: [{ value: '配电楼', evidenceId: 'main' }] },
+  ];
+  expect(assignEngineeringComposition(model, facts).map(row => row.paths[0].map(group => group.title))).toEqual([
+    ['建筑工程', '警传室'], ['建筑工程', '消防泵房'],
+  ]);
 });
 
 it('uses the explicitly named bay voltage beneath an interval without inventing a voltage from the interval alone', () => {

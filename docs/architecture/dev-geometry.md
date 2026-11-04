@@ -34,6 +34,36 @@ projectSourceToViewer × CBM 累计矩阵（平移转米） × 本地装配矩�
 - 镜像（负行列式）同时修正三角形绕序；不在渲染器重复翻转。
 - 首个 IFC 的真实坐标锚点是场景基准；DEV 编译可早于锚点，场景提交等待锚点。
 
+### 2.1 来源/装配索引、两条流水线与表示绑定
+
+工程实体、几何编译和模型树是三个不同粒度，不能强制共用同一个 GLB 身份：
+
+```text
+GIM 原始文件
+      │
+      ▼
+Source / Assembly Index
+      │
+      ├───────────────┐
+      ▼               ▼
+工程语义分析        几何编译
+EngineeringEntity   GeometryAsset（来源模板复用）
+      │               │
+      └───────┬───────┘
+              ▼
+      RepresentationBinding（EngineeringRepresentationIndex）
+              │
+              ▼
+          模型树投影
+```
+
+- 几何资产按**来源 DEV 模板**复用；同一模板的多个 occurrence 只改变 placement，不复制或按工程实体重新编译。
+- 工程实体只拥有来源成员和业务身份；它可以通过多个 occurrence / 多个模板表示，但不能直接等同于一个 GLB。
+- `EngineeringRepresentationIndex` 由来源归属和物理 occurrence catalog 独立连接，保留 `sourceId`、DEV `rootOccurrence/assemblyPath/devPath` 或 IFC `modelId/expressId`；绑定不生成新的几何身份。
+- 模型树读取语义与表示索引的投影；切换视图、搜索和选择不能反向改变几何模板键。
+- 单 occurrence 与多 occurrence 都走同一条 DEV 模板路径；不再创建实体级 GLB bundle，也不存在 `entity-glb-v1` 持久化域。
+
+
 ## 3. MOD/PHM 与 primitive
 
 - MOD 为 `Device/Entities/Entity` XML；每个 Entity 有可选 TransformMatrix、Color 和首个子 primitive。
@@ -71,6 +101,16 @@ projectSourceToViewer × CBM 累计矩阵（平移转米） × 本地装配矩�
 - 内存压力：6 GiB 的 80% 暂停预取和自动 L1，90% 回收未保护模板/空闲 Worker；可见或选中表示受保护。
 
 ## 7. 缓存与失效
+
+L0/L1/L2 的编译和持久化策略：
+
+| 层级 | 编译 | 持久化 |
+|---|---|---|
+| L0 | 优先构建、优先显示全站最低成本表示 | 默认持久化 |
+| L1 | 进入有效视域后按需构建 | 按使用频率和空间预算选择性持久化 |
+| L2 | 用户显式精化 | 默认不持久化，只保留有限热点 |
+
+DEV 模板是共享资产，不是工程实体资产：小任务合批，大 DEV 按装配子树/MOD 任务拆分并行，重复模板共享同一缓存；最后按 occurrence placement 复用。模板拆分不能改变来源身份或实体成员。
 
 | 缓存 | 键/内容 | 失效 |
 |---|---|---|

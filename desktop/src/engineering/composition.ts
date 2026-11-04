@@ -30,6 +30,8 @@ export interface CompositionNode {
   evidence: string[];
   inferred?: boolean;
   declaredContextIds?: string[];
+  /** A declared composition anchor with no confirmed engineering whole. */
+  unbound?: boolean;
 }
 export interface EngineeringComposition {
   version: string;
@@ -37,7 +39,7 @@ export interface EngineeringComposition {
   nodes: Map<string, CompositionNode>;
   rowsByEntity: Map<string, string[]>;
 }
-export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v7';
+export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v8';
 const childKey = (parent: string, kind: string, value: string) => `${parent}/${encodeURIComponent(kind)}:${encodeURIComponent(value)}`;
 
 /** A view references whole entities; neither a row nor a group becomes a new
@@ -97,6 +99,7 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
   }
   for (const [key, node] of nodes) {
     if (node.kind === 'group' || node.kind === 'project') node.entityCount = members.get(key)?.size ?? 0;
+    if (node.kind === 'group' && node.declaredContextIds?.length && node.entityCount === 0) node.unbound = true;
     node.children.sort((a, b) => (orders.get(a) ?? 100) - (orders.get(b) ?? 100) || nodes.get(a)!.title.localeCompare(nodes.get(b)!.title, 'zh-CN', { numeric: true }) || a.localeCompare(b));
   }
   return { version: ENGINEERING_COMPOSITION_VERSION, rootKey, nodes, rowsByEntity };

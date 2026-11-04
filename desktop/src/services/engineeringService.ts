@@ -86,6 +86,9 @@ function publish(state: AppState, job: EngineeringJob, result: EngineeringBuildR
     entities: result.snapshot.entities.length, pending: result.snapshot.pending.length, entityCacheHit: result.entityCacheHit === true, navigationCacheHit: result.navigationCacheHit === true });
   job.update();
   state.engineeringGeometryEvidenceChanged?.();
+  // Engineering semantics publish is independent of geometry compilation.
+  // Source-template GLB assets are materialized by the DEV path; no entity GLB
+  // is scheduled here.
 }
 
 async function enrich(state: AppState, job: EngineeringJob): Promise<void> {

@@ -64,7 +64,7 @@ for(const [sample,folder,packageName] of [
     expect(sprinklers.filter(r=>/边墙型.*ZSTB-/.test(r.name))).toHaveLength(76);
     for(const r of sprinklers)expect(memberships.get(r.id)!.interpretation.category,r.name).toBe('C-D5');
     const secondary=snapshot.entities.filter(e=>e.category==='E16'&&e.subtype==='unresolved');
-    for(const e of secondary){const row=view.inventory!.nodes.get(view.inventory!.rowsByEntity.get(e.id)![0])!;expect(view.inventory!.nodes.get(row.parent!)!.title).toBe('二次设备');}
+    for(const e of secondary){const row=view.inventory!.nodes.get(view.inventory!.rowsByEntity.get(e.id)![0])!;const titles=[];for(let key=row.parent;key;){const node=view.inventory!.nodes.get(key);if(!node)break;titles.push(node.title);key=node.parent;}expect(titles).toContain('二次设备');}
     attachmentCorrections={gisActuatorsJoined:actuators.length,capacitorTerminalsJoined:terminals.length,standaloneTerminals:independent.length,sprinklersClassified:sprinklers.length,genericSecondaryDirect:secondary.length};
   }
   const changed={...sources,graph:{...graph,documents:graph.documents.map(doc=>({...doc,fields:doc.fields.map(field=>/^SYSTEMNAME\d*$/i.test(field.keys[0])?{...field,value:'99号备用主变系统'}:field)}))}};

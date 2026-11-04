@@ -9,8 +9,12 @@ import { SOURCE_TREE_TEMPLATE_VERSION } from '../gim/engineering/sourceProjectio
 import { ENGINEERING_CATALOG_VERSION } from '../engineering/catalogLabels.js';
 import { packEngineeringSource, unpackEngineeringSource } from './engineeringSourceCodec.js';
 
-export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v3';
+export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v4';
 export const MAX_ENGINEERING_CACHE_BYTES = 384 * 1024 * 1024;
+/** JSON bodies above this size are split into independently compressed parts.
+ * The compressed artifact still respects MAX_ENGINEERING_CACHE_BYTES. */
+export const MAX_ENGINEERING_CACHE_PLAIN_BYTES = 1024 * 1024 * 1024;
+const CACHE_PART_BYTES = 64 * 1024 * 1024;
 export interface EngineeringCacheIdentity {
   sourceSha256: string;
   /** Source decoding / IFC semantic parser contracts, independent of geometry. */
@@ -55,10 +59,25 @@ async function encode(kind: Kind, payload: unknown, id: EngineeringCacheIdentity
   engineeringCacheEntry(id, kind);
   requireValid(id.parserVersion.length > 0, 'parser contract');
   const plain = encoder.encode(JSON.stringify(packEngineeringSource(payload)));
-  requireValid(plain.length <= MAX_ENGINEERING_CACHE_BYTES, 'plain size');
-  const body = await gzip(plain), digest = await sha(body);
+  requireValid(plain.length <= MAX_ENGINEERING_CACHE_PLAIN_BYTES, 'plain size');
+  let body: Uint8Array, partSizes: number[] | undefined;
+  if (plain.length <= CACHE_PART_BYTES) body = await gzip(plain);
+  else {
+    const parts: Uint8Array[] = [];
+    for (let offset = 0; offset < plain.length; offset += CACHE_PART_BYTES)
+      parts.push(await gzip(plain.subarray(offset, Math.min(plain.length, offset + CACHE_PART_BYTES))));
+    const bodyLength = parts.reduce((sum, part) => sum + part.length, 0);
+    requireValid(bodyLength <= MAX_ENGINEERING_CACHE_BYTES, 'encoded size');
+    body = new Uint8Array(bodyLength);
+    let bodyOffset = 0;
+    for (const part of parts) { body.set(part, bodyOffset); bodyOffset += part.length; }
+    partSizes = parts.map(part => part.length);
+  }
+  requireValid(body.length <= MAX_ENGINEERING_CACHE_BYTES, 'encoded size');
+  const digest = await sha(body);
   const header = encoder.encode(JSON.stringify({ kind, contract: contract(kind), source: id.sourceSha256.toLowerCase(), parser: id.parserVersion,
-    manifest: await manifestDigest(id), complete: true, encoding: kind==='sources'?'gzip':'gzip-table-v1', plainBytes: plain.length, bytes: body.length, digest, sourceDigest }));
+    manifest: await manifestDigest(id), complete: true, encoding: kind==='sources'?'gzip':'gzip-table-v1', plainBytes: plain.length, bytes: body.length,
+    ...(partSizes && partSizes.length > 1 ? { parts: partSizes } : {}), digest, sourceDigest }));
   const bytes = new Uint8Array(4 + header.length + body.length);
   new DataView(bytes.buffer).setUint32(0, header.length, true); bytes.set(header, 4); bytes.set(body, 4 + header.length);
   return { bytes, digest };
@@ -74,9 +93,27 @@ async function decode(kind: Kind, bytes: Uint8Array, id: EngineeringCacheIdentit
   const meta = header as Record<string, unknown>, body = bytes.subarray(4 + length);
   requireValid(meta.kind === kind && meta.contract === contract(kind) && meta.source === id.sourceSha256.toLowerCase() && meta.parser === id.parserVersion && meta.complete === true && meta.encoding === (kind==='sources'?'gzip':'gzip-table-v1'), 'identity / version');
   requireValid(meta.manifest === await manifestDigest(id) && meta.sourceDigest === sourceDigest, 'input dependencies');
-  requireValid(meta.bytes === body.length && Number.isSafeInteger(meta.plainBytes) && (meta.plainBytes as number) > 0 && (meta.plainBytes as number) <= MAX_ENGINEERING_CACHE_BYTES, 'body length');
+  requireValid(meta.bytes === body.length && Number.isSafeInteger(meta.plainBytes) && (meta.plainBytes as number) > 0 && (meta.plainBytes as number) <= MAX_ENGINEERING_CACHE_PLAIN_BYTES, 'body length');
   requireValid(meta.digest === await sha(body), 'checksum');
-  const plain = await gzip(body, true, meta.plainBytes as number);
+  const partSizes = meta.parts as number[] | undefined;
+  let plain: Uint8Array;
+  if (partSizes === undefined) plain = await gzip(body, true, meta.plainBytes as number);
+  else {
+    requireValid(Array.isArray(partSizes) && partSizes.length > 1 && partSizes.length <= 128
+      && partSizes.every(size => Number.isSafeInteger(size) && size > 0 && size <= MAX_ENGINEERING_CACHE_BYTES)
+      && partSizes.reduce((sum, size) => sum + (size as number), 0) === body.length, 'parts');
+    const decoded: Uint8Array[] = [];
+    let offset = 0, total = 0;
+    for (const size of partSizes) {
+      const part = await gzip(body.subarray(offset, offset + (size as number)), true, MAX_ENGINEERING_CACHE_PLAIN_BYTES);
+      offset += size as number; total += part.length;
+      requireValid(total <= MAX_ENGINEERING_CACHE_PLAIN_BYTES, 'expanded size');
+      decoded.push(part);
+    }
+    plain = new Uint8Array(total);
+    let plainOffset = 0;
+    for (const part of decoded) { plain.set(part, plainOffset); plainOffset += part.length; }
+  }
   requireValid(plain.length === meta.plainBytes, 'expanded length');
   const parsed: unknown = JSON.parse(decoder.decode(plain));
   return { payload: unpackEngineeringSource(parsed), digest: meta.digest as string };
@@ -140,22 +177,10 @@ function assertSourceInventory(sources: EngineeringSources, id: EngineeringCache
  * outward records before treating it as a hit. */
 export function engineeringSourceCacheMatchesFiles(sources: EngineeringSources, files: Iterable<string>): boolean {
   const normalize = (path: string) => path.replace(/\\/g, '/').toLowerCase();
-  const deliveredFiles = [...files];
-  const delivered = new Set(deliveredFiles.filter(path => /\.ifc$/i.test(path)).map(normalize));
+  const delivered = new Set([...files].filter(path => /\.ifc$/i.test(path)).map(normalize));
   const cached = new Set(sources.graph.ifcPaths.map(normalize));
-  if (delivered.size !== cached.size || [...delivered].some(path => !cached.has(path))) return false;
-  if (delivered.size > 0 && (sources.models.length !== delivered.size || sources.ifcRecords.length === 0)) return false;
-  // A decoded cache can still be a subset of the delivered semantic inventory.
-  // Require every delivered CBM/DEV path to be referenced by the graph;
-  // source record count alone is not trustworthy because one file can yield
-  // several records. FAM is optional because an unreferenced family is not a
-  // source record and may legitimately be absent from a semantic snapshot.
-  const covered = new Set<string>();
-  for (const path of sources.graph.documents.map(document => document.path)) covered.add(normalize(path));
-  for (const record of [...sources.graph.records, ...sources.ifcRecords]) for (const path of record.sources) covered.add(normalize(path));
-  for (const reference of sources.graph.references) if (reference.status === 'resolved') covered.add(normalize(reference.value));
-  for (const path of deliveredFiles) if (/\.(?:cbm|dev)$/i.test(path) && !covered.has(normalize(path))) return false;
-  return true;
+  return delivered.size === cached.size && [...delivered].every(path => cached.has(path))
+    && (delivered.size === 0 || (sources.models.length === delivered.size && sources.ifcRecords.length > 0));
 }
 
 export async function encodeEngineeringSources(sources: EngineeringSources, id: EngineeringCacheIdentity): Promise<{ bytes: Uint8Array; digest: string }> {

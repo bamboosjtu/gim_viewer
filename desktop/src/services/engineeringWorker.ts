@@ -10,7 +10,7 @@ import { encodeEngineeringWorkerResult, engineeringWorkerResultTransfers } from 
 
 export function markCacheFailure(result:Pick<EngineeringBuildResult,'cacheError'|'cacheDisabled'>,error:unknown):void{
   result.cacheError=String(error);
-  if(/plain size|expanded length/i.test(String(error)))result.cacheDisabled='工程缓存超过单域 384 MiB 预算，已停止本次缓存写入';
+  if(/plain size|encoded size|expanded length/i.test(String(error)))result.cacheDisabled='工程缓存超过单域 384 MiB 预算，已停止本次缓存写入';
 }
 
 /** Display and persistence have separate requests. Only the latest immutable

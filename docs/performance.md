@@ -2,6 +2,19 @@
 
 本文件记录桌面原生 Release 的当前性能基线、测量口径和未达标项。方法见[测量指南](meassurement.md)，缺陷见[问题清单](open-issues.md)。本文件替代 `0.1.x` 的旧矩阵，旧数据不再作为当前构建的通过证据。
 
+## 2026-11-04 Playwright 浏览器探针
+
+原生 Release 链接在本环境连续超时，因此用 `scripts/engineering/web-perf-browser.mjs`（Vite + Playwright/Edge）做独立于原生 SLO 的浏览器级回归。结果目录为 `output/engineering-web-perf/`，包含 benchmark JSON、工程导航就绪时间、长任务和 JS heap；它不是 Tauri/WebView2 原生数据。
+
+| 样本 | 工程导航就绪 | allIfcReady / 基础几何完成 | 长任务 | JS heap 峰值 |
+|---|---:|---:|---:|---:|
+| substation04 | 3.42 s | allIfcReady 未完成；devGeometryReady 12.33 s | 11 个，最大 500 ms | 199 MB |
+| substation02 | 13.89 s | allIfcReady 139.49 s | 215 个，单次最大 3,545 ms | 1.14 GB |
+
+- s04 的完整探针最终为 `devGeometryReady=12.33 s`、`treeRows=6`、页面 `就绪`；s02 为 `allIfcReady=139.49 s`、`treeRows=40`、页面 `就绪`。
+- s02 的长任务主要集中在 `CBM/0302-钢结构.ifc` / `0303-檩条系统.ifc` 的 IFC worker conversion 与空间索引，属于浏览器/软件 WebGL 下的 IFC 长尾，不能直接推导原生 WebView2。
+- 该探针只验证浏览器路径没有出现比既有 Node 候选更严重的异常；原生冷暖矩阵仍以本文件 §3–§6 的 Release 数据为准。
+
 > **版本边界**：矩阵使用 `0.2.0` 构建，提交 `8c2aab5`（工作区 dirty），源码指纹 `13b73f5bae0ce62c036590ec2eba059d904c61cd7b540e101aaaf12a29a39128`，EXE SHA-256 `ac7d068aa2d39d76855f7423f7e7cf2aa5808d429cc4077d274a94cf8ac34dc6`，Fixed WebView2 SHA-256 `1bc71a6d464da1cd3f63ac1ff0d1b748f528aa8b3957b5e3a7f9ae28d6df7071`。测量日期 2026-11-03。矩阵后修正了 E16 的“二次设备”泛词误吞建筑名、B1-3 partial 来源命中校验和 B1-4 超限缓存的显式禁用，并重建最终验收包（源指纹 `0a8f3882ea82`）；这些修正不改变几何路径，最终包仅对 substation04 做了冷启动烟测（基础表示 11.72 s、全部 IFC 27.21 s），未重跑整张矩阵。
 
 ## 1. 结论

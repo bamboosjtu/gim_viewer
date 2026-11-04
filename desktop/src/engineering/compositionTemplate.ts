@@ -118,15 +118,31 @@ export function canonicalBuildingName(text:string):string {
   const named=value.match(/警卫室|门卫室|警传室|消防泵房|主控(?:通信)?楼\d*|辅助用房|配电(?:装置)?楼|配电室\d*|综合楼|生产(?:综合)?楼|控制楼/);
   return named?.[0]??'';
 }
+/** A room-like delivery name, but not a standalone small building. */
+export function isRoomBuildingName(text:string):boolean {
+  const value=canonicalBuildingName(text)||normalize(text);
+  return /室$/.test(value)&&!isStandaloneBuildingName(value);
+}
+export function isStandaloneBuildingName(text:string):boolean {
+  const value=canonicalBuildingName(text)||normalize(text);
+  return /消防泵房|警传室|警卫室|门卫室/.test(value);
+}
 export function buildingPaths(input: CompositionContextEvidence | undefined): CompositionGroup[][] {
   const candidates = input?.spaces ?? [];
-  const names = candidates.filter(space => validBuilding(space.building.value) && !purpose(space.building.value) && !/配电装置|开关场|构支架|构架|电缆沟/.test(space.building.value));
+  const names = candidates.filter(space => validBuilding(space.building.value)
+    && (!purpose(space.building.value) || isStandaloneBuildingName(space.building.value))
+    && !/配电装置|开关场|构支架|构架|电缆沟/.test(space.building.value));
   // A room/electrical-mechanical delivery file is not a peer building when a
   // project-level building name is available. Keep the room as a child storey.
   const room=candidates.map(space=>({space,name:canonicalBuildingName(space.building.value)||normalize(space.building.value)}))
-    .find(row=>/室$/.test(row.name)&&!/楼$/.test(row.name));
+    .find(row=>isRoomBuildingName(row.name))
+    ?? [...(input?.declarations??[])].reverse().flatMap(declaration=>declaration.names)
+      .map(name=>({name:canonicalBuildingName(name.value)||normalize(name.value),evidenceId:name.evidenceId}))
+      .find(row=>isRoomBuildingName(row.name))
+    ?? (input?.deliveryBuildingNames??[]).map(row=>({name:row.value,evidenceId:row.evidenceId}))
+      .find(row=>isRoomBuildingName(row.name));
   const projectBuildings=[...new Map((input?.availableBuildings??[]).map(row=>[row.value,row])).values()]
-    .filter(row=>canonicalBuildingName(row.value)&&!(/室$/.test(canonicalBuildingName(row.value))&&!/楼$/.test(canonicalBuildingName(row.value))));
+    .filter(row=>canonicalBuildingName(row.value)&&!isRoomBuildingName(canonicalBuildingName(row.value)));
   const roomBuilding=room&&projectBuildings.length?[...projectBuildings].sort((a,b)=>Number(/楼$/.test(canonicalBuildingName(b.value)))-Number(/楼$/.test(canonicalBuildingName(a.value))))[0]:undefined;
   if(room&&roomBuilding)return [[civil,{key:`building:${keyOf(canonicalBuildingName(roomBuilding.value))}`,title:canonicalBuildingName(roomBuilding.value),kind:'building',order:0},
     {key:`room:${keyOf(room.name)}`,title:room.name,kind:'storey',order:0}]];
@@ -178,12 +194,16 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
     if (ownSecondary) chosen = { purpose: 'secondary', evidence: [`whole-name:${entity.id}`] };
     let paths: CompositionGroup[][] = [], basis = [...(chosen?.evidence ?? [])];
     const isCivil = category.startsWith('C') || !!(chosen && systems[chosen.purpose as Exclude<Purpose, 'distribution'>]?.civil);
+    const explicitBuilding = buildingPaths(input);
     if (isCivil) {
-      if (chosen && systems[chosen.purpose as Exclude<Purpose, 'distribution'>]?.civil) paths = [facility(chosen)];
+      // An actual IFC/delivery building name wins over a facility purpose such
+      // as "消防" derived from the same name.
+      if (explicitBuilding.length) paths = explicitBuilding;
+      else if (chosen && systems[chosen.purpose as Exclude<Purpose, 'distribution'>]?.civil) paths = [facility(chosen)];
       else if (category === 'C-C1' || /电缆沟/.test(entity.name)) paths = [[civil, { key: 'cable-trenches', title: '电缆沟', kind: 'facility', order: 30 }]];
       else if (['C-C4', 'C-C5'].includes(category) || /围墙|围栏|道路|大门/.test(entity.name)) paths = [[civil, { key: 'site-works', title: '站区性建筑', kind: 'facility', order: 40 }]];
       else {
-        paths = buildingPaths(input);
+        paths = explicitBuilding;
         if (!paths.length) {
           const structure = category.startsWith('C-B') || /支架|基础|构架|桁架/.test(entity.name) || /支架|基础|构架/.test(nearest?.unit ?? '');
           const related = structure && nearest && ['main', 'distribution', 'reactive', 'auxiliary'].includes(nearest.purpose) ? nearest : undefined;

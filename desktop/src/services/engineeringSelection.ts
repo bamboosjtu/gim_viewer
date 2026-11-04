@@ -175,6 +175,14 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   const groupNodes=state.engineeringNavigation?.inventory?.nodes.has(target.key)?state.engineeringNavigation.inventory.nodes:state.engineeringNavigation?.composition.nodes;
   const groupNode = target.kind === 'engineering-group' ? groupNodes?.get(target.key) : undefined;
   if (target.kind === 'engineering' ? !entity && !pending : target.kind === 'engineering-source' ? !single : !groupNode || !['group', 'project', 'template'].includes(groupNode.kind)) return false;
+  const unbound = !!groupNode && 'unbound' in groupNode && groupNode.unbound === true;
+  const declaredUnbound = !!groupNode && 'declaredContextIds' in groupNode
+    && !!groupNode.declaredContextIds?.length && groupNode.entityCount === 0;
+  if (groupNode?.kind === 'group' && (unbound || declaredUnbound)) {
+    // Keep the empty declaration inspectable; it has no geometry scope, so the
+    // normal empty-group path must not create isolation or a fake highlight.
+    state.selectionMessage = '该分组来自来源声明，尚未绑定工程整体，暂不可选择空间范围。';
+  }
   const request = existing ?? state.beginSelection(target), baseGuard = state.selectionGuard(request);
   const guard = { ...baseGuard, isCurrent: () => baseGuard.isCurrent() && state.engineeringSnapshot === snapshot };
   if (!guard.isCurrent()) return true;

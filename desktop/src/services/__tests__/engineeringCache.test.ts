@@ -25,13 +25,18 @@ describe('independent source and entity cache contracts', () => {
     expect(engineeringCacheEntry(id, 'entities')).not.toBe(engineeringCacheEntry(id, 'sources'));
   });
 
-  it('rejects a source cache whose decoded records do not cover every delivered semantic file', async () => {
+  it('does not reject a source cache for unreferenced DEV files outside the semantic graph', async () => {
     const model = await fixture(), partial = structuredClone(model.sources);
     partial.graph.documents = partial.graph.documents.filter(document => document.path !== 'terminal.dev');
     partial.graph.records = partial.graph.records.filter(record => record.source !== 'terminal.dev')
       .map(record => ({ ...record, sources: record.sources.filter(path => path !== 'terminal.dev') }));
     partial.graph.references = partial.graph.references.filter(reference => reference.value !== 'terminal.dev');
-    expect(engineeringSourceCacheMatchesFiles(partial, ['project.cbm', 'unit.dev', 'terminal.dev'])).toBe(false);
+    expect(engineeringSourceCacheMatchesFiles(partial, ['project.cbm', 'unit.dev', 'terminal.dev'])).toBe(true);
+  });
+
+  it('accepts a one-shot iterator only after materializing the delivered inventory once', async () => {
+    const model = await fixture();
+    expect(engineeringSourceCacheMatchesFiles(model.sources, new Map([['project.cbm', 1], ['unit.dev', 1], ['terminal.dev', 1]]).keys())).toBe(true);
   });
 
   it('rejects a decoded DEV-only source body when delivered IFC files are present', async () => {

@@ -52,6 +52,7 @@ import {
   setGeometryDiagnostic,
 } from '../gim/geometry/geometryDiagnostics.js';
 
+
 /** 自动加载选项 */
 export interface GeometryAutoLoadOptions {
   onDevCheckpoint?: DevCheckpointHandler;
@@ -552,7 +553,7 @@ function hasRenderableGlbGeometry(group: THREE.Group): boolean {
   return found;
 }
 
-function emptyFastPathProfile(cbmInstanceCount: number, uniqueDevCount: number): DevGlbFastPathProfile {
+export function emptyFastPathProfile(cbmInstanceCount: number, uniqueDevCount: number): DevGlbFastPathProfile {
   return {
     cbmInstanceCount,
     uniqueDevCount,
@@ -1927,11 +1928,14 @@ export async function autoLoadModAndStlGeometry(
         debugLog(DEBUG_IFC_LOAD, '[autoLoad] geometry rebuild scoped raw fallback 失败，保留成功 GLB', error);
       }
     }
+    // Rebuild path uses the same source-template DEV fast path; no entity GLB
+    // bundle is generated or keyed by an engineering entity.
     return resultWithProfile(rebuilt.renderedInstances + scopedCount.modCount, scopedCount.stlCount);
   }
 
-  // ── Phase 1.2 (方案 C v2): DEV 粒度 GLB 快速路径 ──
-  // 如果所有 seed 的 DEV.glb 缓存全部命中，直接加载 DEV.glb，跳过 XML 解析
+  // ── Phase 1.2: source-template GLB fast path ──
+  // Geometry assets are keyed by source DEV template and reused across all
+  // engineering-entity occurrences. Entity identity never becomes a GLB key.
   const devGlbResult = await tryDevGlbFastPath(state, scene, deviceNodes, showProgress, token, undefined, {
     generation: capturedGeneration,
     projectId: capturedProjectId,

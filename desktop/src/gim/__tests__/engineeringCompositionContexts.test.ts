@@ -74,7 +74,7 @@ it('falls back from a placeholder IfcBuilding name to the delivery building name
   const graph=await extractEngineeringSourceGraph({paths:['project.cbm','body.dev'],readText:async p=>p==='project.cbm'?'OBJECTMODELPOINTER=body.dev':'SYMBOLNAME=主体'});
   const object={key:'object',modelId:'m',expressId:1,ifcType:'IFCWALL',globalId:'g',name:'墙',sourcePath:'CBM/04-建筑配电楼.ifc',parentObjectKey:null,childObjectKeys:[],relationshipCount:0,spatialKey:'building',spatialKeys:['building'],spatialContainment:null,geometryStatus:'represented'};
   const node={key:'building',modelId:'m',expressId:2,ifcType:'IFCBUILDING',kind:'building',globalId:'b',name:'HN-220-B-2总平面',sourcePath:'CBM/04-建筑配电楼.ifc',parentKey:null,longName:''};
-  const built=buildEngineeringSources('sample',graph,[object as never],[{modelId:'m',path:'CBM/04-建筑配电楼.ifc'}] as never,[node as never]);
+  const built=buildEngineeringSources('sample',graph,[object as never],[{modelId:'m',entryPath:'CBM/04-建筑配电楼.ifc'}] as never,[node as never]);
   const facts=collectCompositionEvidence(built.sources,built.snapshot,new Map([[node.key,node as never]]));
   expect(facts.find(fact=>fact.spaces.length)?.spaces[0].building.value).toBe('配电楼');
 });

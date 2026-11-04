@@ -31,6 +31,7 @@
     "test:engineering:geometry": "node scripts/engineering/run-geometry.mjs",
     "engineering:golden-candidates": "node scripts/engineering/run-nine.mjs --candidates",
     "test:engineering:worker": "node scripts/engineering/check-worker-browser.mjs",
+    "test:web-performance": "node scripts/engineering/web-perf-browser.mjs",
     "test:engineering:separation": "vitest run --config vitest.separation.config.ts",
     "test:engineering:classification": "node scripts/engineering/check-classification-samples.mjs",
     "test:substation:strict": "node scripts/test-substation-strict.mjs",
@@ -45,7 +46,7 @@
   "author": "bamboosjtu",
   "license": "MIT",
   "dependencies": {
-    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-dialog": "2.7.1",
     "@thatopen/components": "^3.4.6",
     "@thatopen/fragments": "^3.4.0",
     "camera-controls": "^3.1.2",
@@ -58,6 +59,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.3",
+    "playwright-core": "1.64.1",
     "@types/jsdom": "^28.0.3",
     "@types/three": "^0.184.0",
     "@vitest/coverage-v8": "^2.0.0",
