@@ -54,6 +54,8 @@ function rowKey(state: AppState, data: EngineeringNavigationData): string {
 }
 
 function qualityText(state: AppState): string {
+  if(state.engineeringTreeStatus==='loading')return '模型树加载中…';
+  if(state.engineeringTreeStatus==='error')return '模型树加载未完成';
   const snapshot = state.engineeringSnapshot;
   if (!snapshot) return state.engineeringStatus === 'error' ? '工程来源未能建立' : '正在建立工程来源…';
   return `整体候选 ${snapshot.entities.length.toLocaleString()} · 待归集合 ${snapshot.pending.length.toLocaleString()}`
@@ -107,7 +109,7 @@ export function renderEngineeringTree(state: AppState): void {
       if (navigations.get(state) === owned) { navigations.delete(state); state.engineeringNavigationCleanup = null; }
     };
   }
-  const data = getEngineeringNavigation(state), mode = state.engineeringNavMode;
+  const data = state.engineeringTreeStatus==='loading'||state.engineeringTreeStatus==='error'?null:getEngineeringNavigation(state), mode = state.engineeringNavMode;
   if (nav.data === data && nav.mode === mode && cbmTreePanel.contains(nav.bar)) {
     nav.quality.textContent = qualityText(state); nav.quality.title = qualityDetail(state);
     return;
@@ -143,7 +145,7 @@ export function renderEngineeringTree(state: AppState): void {
   const host = document.createElement('div'); host.className = 'tree-view-host'; host.setAttribute('role', 'tree'); cbmTreePanel.append(bar, host);
   if (!data) {
     const empty = document.createElement('div'); empty.className = 'props-empty';
-    empty.textContent = state.engineeringError || (mode === 'source' ? '正在读取来源引用与装配…' : '正在识别工程整体…'); host.append(empty); return;
+    empty.textContent = state.engineeringError || '模型树加载中，正在准备完整工程组成…'; host.append(empty); return;
   }
   const generation = state.projectGeneration;
   const select = async (key: string) => {

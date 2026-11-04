@@ -131,6 +131,7 @@ export async function updateEngineeringHighlight(state: AppState, request: Selec
     if (!guard.isCurrent()) return;
     if (ids.length) { items[runtimeId] = ids; if (!state.ifcRegionalRuntimes.has(model)) bounds.push(await loaded.getMergedBox(ids)); }
   }
+  let rangeOutlined=false;
   await highlight.commitSelectionHighlight(ctx, state, guard, async () => {
     for (const ref of scope.ifc) {
       const group = state.ifcRegionalRuntimes.get(ref.modelId)?.highlightGroup(ref.expressId, true);
@@ -138,12 +139,18 @@ export async function updateEngineeringHighlight(state: AppState, request: Selec
     }
     highlight.highlightModGroups(state, selected);
     if (Object.keys(items).length) { const { outlineFragmentItems } = await import('../viewer/selectionOutline.js'); await outlineFragmentItems(ctx,state,items,guard); if (guard.isSessionCurrent()) state.highlightedItems = items; }
+    if(guard.isCurrent() && request.target?.kind==='engineering-group'){
+      const range=new graphics.Box3();bounds.forEach(box=>range.union(box));
+      for(const object of selected)if(visible(object))range.expandByObject(object);
+      if(!range.isEmpty()){const {outlineSelectionRange}=await import('../viewer/selectionOutline.js');if(guard.isCurrent()){outlineSelectionRange(ctx,state,range);rangeOutlined=true;}}
+    }
   });
   if (!guard.isCurrent()) return;
   const available = selected.length + Object.values(items).reduce((sum, ids) => sum + ids.length, 0);
   const missingBindings = [...scope.sourceIds].filter(id => !representations.index.bySource.has(id)).length;
-  state.selectionGeometry = { status: ambiguousMeshes || missingBindings ? 'partial' : available ? 'available' : 'not-loaded',
+  state.selectionGeometry = { status: ambiguousMeshes || missingBindings || rangeOutlined&&!available ? 'partial' : available ? 'available' : 'not-loaded',
     detail: ambiguousMeshes ? '部分粗表示包含多个整体，范围尚未分离。' : missingBindings ? '部分来源尚未映射到可选表示。' : available ? '按工程整体的来源成员选择可用表示。' : '当前来源尚无可用表示；来源与整体仍可查看。' };
+  if(rangeOutlined&&!available)state.selectionGeometry.detail='已标出所选来源的空间范围，构件表示尚在恢复。';
   const note = document.querySelector<HTMLElement>('[data-engineering-geometry-note]'); if (note) note.textContent = state.selectionGeometry.detail;
   if (fit && (!automatic || state.canAutoLocate(request))) {
     const box = new graphics.Box3();

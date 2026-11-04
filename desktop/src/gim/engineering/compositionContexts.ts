@@ -87,6 +87,13 @@ export function collectCompositionEvidence(sources: EngineeringSources, snapshot
     const sourceHints=[...new Set(entity.sourceIds.flatMap(id=>records.get(id)?.sources??[]))];
     return {entityId:entity.id,declarations:[...declarations.values()],spaces:[...ownSpaces.values()],hostEntityIds:[...hostIds],
       sourceHints,deliveryBuildingNames:sourceHints.flatMap(path=>{const value=canonicalBuildingName(path);return value?[{value,evidenceId:path}]:[];}),
+      deliveryAreaNames:sourceHints.flatMap(path=>{
+        const name=path.split(/[\\/]/).pop()??'';
+        const main=/^主变(?:压器)?(?:区域|基础)/.test(name);
+        const distribution=name.match(/^(\d+)\s*(?:kV|千伏)?(?:配电装置|区域构架)/i);
+        const value=main?'主变区域':distribution?`${distribution[1]}千伏配电装置区域`:'';
+        return value?[{value,evidenceId:path}]:[];
+      }),
       availableBuildings,
       positions:entity.sourceIds.flatMap(id=>locations.has(id)?[locations.get(id)!]:[]),
       track: tracks.size === 1 ? [...tracks][0] : 'mixed'};

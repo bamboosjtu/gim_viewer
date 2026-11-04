@@ -12,6 +12,7 @@ export interface CompositionContextEvidence {
   /** Project-level building names from IFC delivery; used only to place a
    * room/MEP file under an already named building, never to invent identity. */
   availableBuildings?: EvidenceValue[];
+  deliveryAreaNames?: EvidenceValue[];
   hostEntityIds: string[];
   /** Source track only breaks out unclassified members; it never changes identity. */
   track?: 'dev' | 'ifc' | 'mixed';
@@ -51,7 +52,7 @@ const systems: Record<Exclude<Purpose, 'distribution'>, { title: string; order: 
 };
 function purpose(name: string): Purpose | null {
   const text = keyOf(name);
-  if (/^(?:\d+(?:\.\d+)?(?:kv|千伏))?(?:主变(?:压器)?|变压器)系统\d*$/.test(text)) return 'main';
+  if (/^(?:\d+(?:\.\d+)?(?:kv|千伏))?(?:主变(?:压器)?|变压器)(?:系统\d*|区域)$/.test(text)) return 'main';
   if (/无功补偿|无功系统|静止无功|并联电容器系统/.test(text)) return 'reactive';
   if (/二次系统|直流系统|直流电源|直流配电|蓄电池|充电柜|继电保护系统|通信系统|控制保护系统|监控系统|测控.*(?:柜|屏)|保护.*(?:柜|屏)|录波柜/.test(text)) return 'secondary';
   if (/站用(?:电|交流|变压器)系统|所用电系统/.test(text)) return 'auxiliary';
@@ -76,10 +77,10 @@ function system(context: DeclaredContext): CompositionGroup {
 function areaTitle(group: CompositionGroup): string {
   return group.key === 'main' ? '主变区域' : `${group.title}区域`;
 }
-function supportTitle(entity: EngineeringEntity, category: string): string {
+export function supportTitle(entity: EngineeringEntity, category: string): string {
   if (category === 'C-B1' || /支架/.test(entity.name)) return '支架';
   if (category === 'C-B7' || /构架|桁架/.test(entity.name)) return '构架';
-  return '构支架';
+  return '构架';
 }
 function declared(input: CompositionContextEvidence | undefined): DeclaredContext[] {
   const result: DeclaredContext[] = [];
@@ -151,7 +152,9 @@ export function buildingPaths(input: CompositionContextEvidence | undefined): Co
       .find(row=>isRoomBuildingName(row.name));
   const projectBuildings=[...new Map((input?.availableBuildings??[]).map(row=>[row.value,row])).values()]
     .filter(row=>canonicalBuildingName(row.value)&&!isRoomBuildingName(canonicalBuildingName(row.value)));
-  const roomBuilding=room&&projectBuildings.length?[...projectBuildings].sort((a,b)=>Number(/楼$/.test(canonicalBuildingName(b.value)))-Number(/楼$/.test(canonicalBuildingName(a.value))))[0]:undefined;
+  const towers=projectBuildings.filter(row=>/楼$/.test(canonicalBuildingName(row.value)));
+  const candidatesForRoom=towers.length?towers:projectBuildings;
+  const roomBuilding=room&&candidatesForRoom.length===1?candidatesForRoom[0]:undefined;
   if(room&&roomBuilding)return [[civil,{key:`building:${keyOf(canonicalBuildingName(roomBuilding.value))}`,title:canonicalBuildingName(roomBuilding.value),kind:'building',order:0},
     {key:`room:${keyOf(room.name)}`,title:room.name,kind:'storey',order:0}]];
   if (names.length) return names.map(space => [civil,
@@ -186,6 +189,7 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
     const track: SourceTrack = input?.track ?? 'mixed';
     const uniqueContexts = new Map(declared(input).map(context => [JSON.stringify([context.purpose, context.voltage, context.unit]), context]));
     const contexts = [...uniqueContexts].sort(([a],[b])=>a.localeCompare(b)).map(([,context])=>context);
+    if (!contexts.length && input?.deliveryAreaNames?.length) contexts.push(...declared({ ...input, declarations: input.deliveryAreaNames.map(name => ({names:[name]})) }));
     const purposes = new Set(contexts.map(context=>`${context.purpose}:${context.voltage ?? ''}`));
     const nearest = purposes.size === 1 ? contexts[0] : undefined;
     let chosen: DeclaredContext | undefined = nearest;
@@ -213,7 +217,7 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
       else {
         paths = explicitBuilding;
         if (!paths.length) {
-          const structure = category.startsWith('C-B') || /支架|基础|构架|桁架/.test(entity.name) || /支架|基础|构架/.test(nearest?.unit ?? '');
+          const structure = category.startsWith('C-B') || category.startsWith('C-A') && !!input?.deliveryAreaNames?.length || /支架|基础|构架|桁架/.test(entity.name) || /支架|基础|构架/.test(nearest?.unit ?? '');
           const related = structure && nearest && ['main', 'distribution', 'reactive', 'auxiliary'].includes(nearest.purpose) ? nearest : undefined;
           const hostGroup = hostPaths.length === 1 ? hostPaths[0][1] : undefined;
           const hostSystem = hostGroup?.kind === 'system' && hostGroup.key !== 'installation-unassigned' ? hostGroup : undefined;
@@ -270,6 +274,14 @@ export function declaredEngineeringComposition(inputs: readonly { contextId: str
     const buildings = civilBuilding ? buildingPaths(evidence) : [];
     for (const path of buildings.length ? buildings : contexts.map(context => systems[context.purpose as Exclude<Purpose, 'distribution'>]?.civil ? facility(context) : installationPath(context)))
       result.push({ path, evidence: input.names.map(name=>name.evidenceId), sourceContextIds: [input.contextId] });
+    for (const context of contexts.filter(c=>c.purpose==='main'||c.purpose==='distribution')) {
+      const group=system(context);
+      for(const [index,title] of ['构架','支架','基础'].entries()) result.push({
+        path:[civil,{key:`area:${group.key}`,title:areaTitle(group),kind:'area',order:20},
+          {key:`area:${group.key}:${title==='基础'?'foundation':title}`,title,kind:'structure',order:index*10}],
+        evidence:context.evidence,sourceContextIds:[input.contextId],
+      });
+    }
   }
   return result;
 }

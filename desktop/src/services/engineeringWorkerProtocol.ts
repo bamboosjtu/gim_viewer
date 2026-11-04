@@ -36,7 +36,7 @@ export type EngineeringWorkerCommand =
   | { type: 'init'; scope: string; paths: string[] }
   | { type: 'files'; files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }> }
   | { type: 'extract' }
-  | { type: 'encode-cache'; buildId: number; domain: EngineeringCacheDomain }
+  | { type: 'encode-cache'; buildId: number; domain: EngineeringCacheDomain; navigation?: EngineeringNavigationData }
   | { type: 'assemble'; objects: IfcSpatialObject[]; models: SpatialModelSummary[]; nodes?: IfcSpatialNode[]; identity?: EngineeringCacheIdentity }
   | { type: 'restore'; sourceBytes: Uint8Array; entityBytes?: Uint8Array; navigationBytes?: Uint8Array; identity: EngineeringCacheIdentity };
 export type EngineeringWorkerRequest = EngineeringWorkerCommand & { requestId: number };

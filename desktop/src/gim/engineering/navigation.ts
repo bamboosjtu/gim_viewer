@@ -12,6 +12,7 @@ import type { EngineeringSourceNode } from './sourceProjection.js';
 import { projectEngineeringSource, SOURCE_TREE_TEMPLATE_VERSION } from './sourceProjection.js';
 export interface EngineeringNavigationData {
   version: string;
+  compositionComplete?: boolean;
   composition: EngineeringComposition;
   sourceNodes: Map<string, EngineeringSourceNode>;
   sourceRoot: string;
@@ -24,7 +25,7 @@ export interface EngineeringNavigationData {
   metadata?: {scope:string;rulesVersion:string;sourceComplete:boolean;sourceVersion:string};
   compositionInput?:{facts:SourceCompositionEvidence[];declarations:CompositionDeclaration[]};
 }
-export const ENGINEERING_NAVIGATION_VERSION = 'engineering-navigation-v8';
+export const ENGINEERING_NAVIGATION_VERSION = 'engineering-navigation-v9';
 /** Independent engineering and provenance projections share only source/entity
  * references. No business-tree object, physical seed or render group is input.
  */

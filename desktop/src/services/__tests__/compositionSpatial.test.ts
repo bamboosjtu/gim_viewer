@@ -10,7 +10,7 @@ it('uses named storeys in a placeholder building and projects other architectura
  const result=projectSpatialComposition(snapshot,facts,snapshot.entities.map((e,i)=>({entityId:e.id,bounds:boxes[i],evidence:'actual-shape'})));
  expect(result.every(a=>a.paths[0].some(g=>g.title==='110千伏配电装置楼'))).toBe(true);
  expect(JSON.stringify(snapshot)).toBe(before);
- expect(result.filter(a=>a.inferred).every(a=>a.evidence.includes('actual-shape')&&a.evidence.includes('composition-spatial-v1'))).toBe(true);
+ expect(result.filter(a=>a.inferred).every(a=>a.evidence.includes('actual-shape')&&a.evidence.includes('composition-spatial-v2'))).toBe(true);
 });
 it('converts runtime Y-up bounds to the source Z-up frame exactly once',()=>{
  expect(fromIfcYUpBounds([1,2,3,4,5,6])).toEqual([1,-6,2,4,-3,5]);
@@ -61,4 +61,37 @@ it('keeps separate buildings separate and rejects invalid or oversized source bo
    expect(projectSpatialComposition(snapshot,facts,bounds.map(b=>({...b,bounds:box}))).every(a=>!a.inferred)).toBe(true);
  }
  expect(JSON.stringify(snapshot)).toBe(before);
+});
+it('projects an outdoor main-transformer footprint as an area, not an anonymous building',()=>{
+ const snapshot=normalizeEngineeringModel('p',[object('a','墙'),object('b','柱'),object('c','梁'),object('m1','主变压器'),object('m2','主变压器')]);
+ const facts=snapshot.entities.map(e=>({entityId:e.id,hostEntityIds:[],declarations:[],spaces:[],sourceHints:['建筑.ifc'],positions:e.sourceIds[0]==='m1'?[[3,3,0]]:e.sourceIds[0]==='m2'?[[7,3,0]]:[]}));
+ const bounds=snapshot.entities.slice(0,3).map(e=>({entityId:e.id,bounds:[0,0,0,10,10,5],evidence:'shape'}));
+ const before=JSON.stringify(snapshot),rows=projectSpatialComposition(snapshot,facts,bounds);
+ expect(rows.slice(0,3).every(r=>r.paths[0][1].title==='主变区域'&&r.inferred)).toBe(true);
+ expect(JSON.stringify(snapshot)).toBe(before);
+});
+it('keeps equidistant outdoor structures unassigned and accepts a unique nearby system',()=>{
+ const snapshot=normalizeEngineeringModel('p',[object('s','设备支架'),object('a','主变压器'),object('b','断路器')]);
+ const facts=snapshot.entities.map(e=>({entityId:e.id,hostEntityIds:[],spaces:[],declarations:e.sourceIds[0]==='b'?[{names:[{value:'110kV系统',evidenceId:'decl'}]}]:[],positions:e.sourceIds[0]==='a'?[[0,0,0]]:e.sourceIds[0]==='b'?[[10,0,0]]:[]}));
+ const support=snapshot.entities.find(e=>e.sourceIds[0]==='s')!;
+ const bounds=[{entityId:support.id,bounds:[4,-1,0,6,1,3],evidence:'shape'}];
+ expect(projectSpatialComposition(snapshot,facts,bounds).find(r=>r.entityId===support.id)!.paths[0][0].title).toBe('未分类');
+ bounds[0].bounds=[0,-1,0,1,1,3];
+ expect(projectSpatialComposition(snapshot,facts,bounds).find(r=>r.entityId===support.id)!.paths[0].map(g=>g.title)).toEqual(['建筑工程','主变区域','支架']);
+});
+it('does not bind two physical footprints to the same declared distribution room',()=>{
+ const snapshot=normalizeEngineeringModel('p',Array.from({length:6},(_,i)=>object(`wall${i}`,'墙')).concat(Array.from({length:4},(_,i)=>object(`switch${i}`,'开关柜'))));
+ const facts=snapshot.entities.map(e=>({entityId:e.id,hostEntityIds:[],spaces:[],sourceHints:['建筑.ifc'],
+  declarations:e.sourceIds[0].startsWith('switch')?[{names:[{value:'10kV系统',evidenceId:'system'}]}]:[],
+  positions:e.sourceIds[0].startsWith('switch')?[[Number(e.sourceIds[0].slice(-1))<2?5:25,5,0]]:[]}));
+ const bounds=snapshot.entities.filter(e=>e.sourceIds[0].startsWith('wall')).map(e=>({entityId:e.id,bounds:Number(e.sourceIds[0].slice(-1))<3?[0,0,0,10,10,4]:[20,0,0,30,10,4],evidence:'shape'}));
+ const rows=projectSpatialComposition(snapshot,facts,bounds,undefined,[{path:[{key:'building:配电室01',title:'配电室01',kind:'building'}],evidence:['declared-room'],sourceContextIds:['room']}]);
+ expect(rows.every(r=>r.paths.every(p=>p.every(g=>g.title!=='配电室01')))).toBe(true);
+});
+it('keeps indoor supports in their containing building even with an area delivery hint',()=>{
+ const snapshot=normalizeEngineeringModel('p',[object('a','墙'),object('b','楼板'),object('c','柱'),object('support','设备支架')]);
+ const facts=snapshot.entities.map(e=>({entityId:e.id,hostEntityIds:[],declarations:[],spaces:e.sourceIds[0]==='support'?[]:[{building:{value:'220千伏配电楼',evidenceId:'building'},storeys:[]}],sourceHints:['建筑.ifc'],deliveryAreaNames:e.sourceIds[0]==='support'?[{value:'主变区域',evidenceId:'file'}]:[]}));
+ const bounds=snapshot.entities.map(e=>({entityId:e.id,bounds:e.sourceIds[0]==='support'?[2,2,0,3,3,2]:[0,0,0,10,10,5],evidence:'shape'}));
+ const row=projectSpatialComposition(snapshot,facts,bounds).find(r=>r.entityId===snapshot.entities.find(e=>e.sourceIds[0]==='support')!.id)!;
+ expect(row.paths[0].some(g=>g.kind==='building')).toBe(true);expect(row.paths[0].some(g=>g.kind==='area')).toBe(false);
 });

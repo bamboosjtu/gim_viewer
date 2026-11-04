@@ -460,3 +460,13 @@ it('cold selected DEV product moment requires real admitted geometry, not an emp
  await handleNodeClick(state,a,()=>{});
  expect(perf.perfProductMomentSnapshot().coldSelectedDeviceGeometryReady?.meta).toMatchObject({devPath:a.devPath,rootOccurrence:a.path,groups:1});
 });
+it('marks a source-backed group range even when no individual far or near representation is available',async()=>{
+ const {state}=fixture();state.initialized=true;state.currentProjectType='substation';
+ const index=await spatialFixture(state);await engineeringFixture(state,index);
+ const box=new THREE.Box3(new THREE.Vector3(1,2,3),new THREE.Vector3(11,12,13));
+ state.ifcRegionalRuntimes.set('model',{index:{objects:[{expressId:10}]},worldBounds:()=>box,highlightGroup:()=>null,clearHighlight:()=>{}} as any);
+ const {selectEngineeringTarget}=await import('../engineeringSelection.js');
+ await selectEngineeringTarget(state,{kind:'engineering-group',key:state.engineeringNavigation!.composition.rootKey},undefined,{fit:false,load:false});
+ expect(runtime.ctx.world.scene.three.children.some((g:THREE.Group)=>g.children.some(c=>c.type==='Box3Helper'))).toBe(true);
+ expect(state.selectionGeometry?.detail).toContain('空间范围');
+});

@@ -30,7 +30,7 @@ export async function reconcileProjectionSelection(state: AppState): Promise<voi
 
 /** Bounds refine only the composition projection. The semantic cache and all
  * entity/source/representation identities remain independent of runtime geometry. */
-export function installCompositionProjection(state: AppState): () => void {
+export function installCompositionProjection(state: AppState, onReady?: (complete:boolean)=>void): () => void {
   const session = state.captureProjectSession();
   let timer: ReturnType<typeof setTimeout> | undefined, worker: Worker | undefined;
   let disposed = false, revision = 0;
@@ -42,15 +42,24 @@ export function installCompositionProjection(state: AppState): () => void {
     // refinement for this source identity. Rewarming must not run the
     // composition worker again just because the renderer publishes the same
     // regional bounds.
-    if (!current() || state.engineeringNavigationCacheHit) return;
+    if (!current()) return;
+    if(state.engineeringNavigationCacheHit && state.engineeringNavigation?.compositionComplete){reconcile();return;}
     revision++;
     worker?.terminate(); worker = undefined;
     clearTimeout(timer); timer = setTimeout(run, 500);
   };
   function run() {
-    if (!current() || state.engineeringNavigationCacheHit) return;
+    if (!current() || state.engineeringNavigationCacheHit && state.engineeringNavigation?.compositionComplete) return;
     const snapshot = state.engineeringSnapshot, view = state.engineeringNavigation, input = view?.compositionInput;
     if (!snapshot || !view || !input) return;
+    const sources=state.engineeringSources;
+    if(sources?.incompleteReasons.includes('ifc-manifest-incomplete'))return;
+    const models=sources?.models??[];
+    const missing=models.filter(model=>!state.ifcRegionalRuntimes.has(model.modelId));
+    if(missing.length){
+      if(state.engineeringIfcGeometryFinished){state.engineeringTreeStatus='error';state.engineeringError='模型树加载未完成：部分 IFC 几何范围不可用';state.notifyEngineeringChanged();onReady?.(false);}
+      return;
+    }
     // Start from semantic paths/search strings, rather than accumulating earlier
     // spatial estimates. A new semantic publication resets this base.
     if (view !== publishedView) baseView = view;
@@ -67,33 +76,36 @@ export function installCompositionProjection(state: AppState): () => void {
       if (owner && sourceBounds) bounds.push({ entityId: owner, bounds: sourceBounds, evidence: sourceId });
     }
     if (!bounds.length) {
+      if(models.length){state.engineeringTreeStatus='error';state.engineeringError='模型树加载未完成：没有可用的空间范围';state.notifyEngineeringChanged();onReady?.(false);}
       restore();
       return;
     }
     const runRevision = revision;
     let owned: Worker;
     try { owned = worker = new Worker(new URL('./compositionProjectionWorker.ts', import.meta.url), { type: 'module' }); }
-    catch (error) { console.warn('[工程组成投影]', error); restore(); return; }
+    catch (error) { console.warn('[工程组成投影]', error); restore();state.engineeringTreeStatus='error';state.engineeringError='模型树空间计算失败';state.notifyEngineeringChanged();onReady?.(false); return; }
     owned.onmessage = (event: MessageEvent<ProjectionOutput>) => {
       if (!current() || worker !== owned || revision !== runRevision || snapshot !== state.engineeringSnapshot || view !== state.engineeringNavigation) { owned.terminate(); return; }
       owned.terminate(); worker = undefined;
-      if ('error' in event.data) { console.warn('[工程组成投影]', event.data.error); restore(); return; }
+      if ('error' in event.data) { console.warn('[工程组成投影]', event.data.error); restore();state.engineeringTreeStatus='error';state.engineeringError='模型树空间计算失败';state.notifyEngineeringChanged();onReady?.(false); return; }
       const { composition } = event.data, contexts = new Map(event.data.contexts), entities = new Map(snapshot.entities.map(e => [e.id, e]));
-      publishedView = { ...base, composition, compositionSearch: base.compositionSearch.map(row => {
+      publishedView = { ...base, compositionComplete:true, composition, compositionSearch: base.compositionSearch.map(row => {
         const entity = entities.get(row.key); if (!entity) return row;
         const inferred = composition.rowsByEntity.get(entity.id)?.some(key => composition.nodes.get(key)?.inferred);
         const subtitle = `${categoryLabel(entity.category)} · ${contexts.get(row.key) ?? '工程归属待确认'}${inferred ? ' · 空间推断' : ''}`;
         return { ...row, subtitle, searchText: `${row.searchText}\n${subtitle.toLowerCase()}` };
       }) };
       state.engineeringNavigation = publishedView;
+      state.engineeringTreeStatus='ready';
       for (const key of state.engineeringExpandedRows.composition) if (!composition.nodes.has(key)) state.engineeringExpandedRows.composition.delete(key);
       state.notifyEngineeringChanged();
+      onReady?.(true);
       reconcile();
     };
-    owned.onerror = event => { if (current()) console.warn('[工程组成投影]', event.message); owned.terminate(); if (worker === owned) { worker = undefined; restore(); } };
+    owned.onerror = event => { if (current()) console.warn('[工程组成投影]', event.message); owned.terminate(); if (worker === owned) { worker = undefined; restore();state.engineeringTreeStatus='error';state.engineeringError='模型树空间计算失败';state.notifyEngineeringChanged();onReady?.(false); } };
     const message: ProjectionInput = { snapshot: { ...snapshot, entities: snapshot.entities.map(e => ({ ...e, sourceIds: [] })), memberships: [], relationships: [], aliases: [], diagnostics: [] }, facts: input.facts, declarations: input.declarations, bounds };
     try { owned.postMessage(message); }
-    catch (error) { owned.terminate(); if (worker === owned) worker = undefined; console.warn('[工程组成投影]', error); restore(); }
+    catch (error) { owned.terminate(); if (worker === owned) worker = undefined; console.warn('[工程组成投影]', error); restore();state.engineeringTreeStatus='error';state.engineeringError='模型树空间计算失败';state.notifyEngineeringChanged();onReady?.(false); }
   }
   state.engineeringGeometryEvidenceChanged = update;
   return () => { disposed = true; revision++; clearTimeout(timer); worker?.terminate(); if (state.engineeringGeometryEvidenceChanged === update) state.engineeringGeometryEvidenceChanged = null; };

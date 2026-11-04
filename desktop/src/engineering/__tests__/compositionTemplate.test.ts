@@ -133,3 +133,11 @@ it('projects unclassified wholes as track and category buckets without an extra 
   expect(view.nodes.get(track.children[0])!.children).toHaveLength(1);
   expect(view.nodes.get(track.children[0])!.children.map(key => view.nodes.get(key)!.title)).toEqual(['orphan']);
 });
+it('uses area delivery evidence for civil members and preserves ambiguous delivery areas',()=>{
+ const model=snapshot([entity('beam','C-A4','三角梁'),entity('foundation','C-B4','独立基础')]);
+ const facts=model.entities.map(e=>({...fact(e.id),deliveryAreaNames:[{value:'主变区域',evidenceId:'delivery'}]}));
+ const rows=assignEngineeringComposition(model,facts);
+ expect(rows.map(r=>r.paths[0].map(g=>g.title))).toEqual([['建筑工程','主变区域','构架'],['建筑工程','主变区域','基础']]);
+ facts[0].deliveryAreaNames.push({value:'110千伏配电装置区域',evidenceId:'other'});
+ expect(assignEngineeringComposition(model,facts)[0].paths[0][0].title).toBe('未分类');
+});

@@ -65,6 +65,22 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     ...typeProperties.flatMap(p=>{const category=categoryValue(p.value,true);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
     ...modelProperties.flatMap(p=>{const category=categoryValue(p.value,false);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
   ];
+  // Generic IFC proxies may still carry explicit authoring categories. Keep
+  // this conservative: generic models/electrical equipment are not a type.
+  const proxyCategories: Record<string, string> = {
+    '墙(Walls)':'C-A1', Walls:'C-A1', '楼板(Floors)':'C-A2', '地板(Floors)':'C-A2', Floors:'C-A2',
+    '结构柱(Structural Columns)':'C-A3', 'Structural Columns':'C-A3',
+    '结构框架(Structural Framing)':'C-A4', 'Structural Framing':'C-A4',
+    '门(Doors)':'C-A7', Doors:'C-A7', '窗(Windows)':'C-A8', '窗户(Windows)':'C-A8', Windows:'C-A8',
+    '屋顶(Roofs)':'C-A6', Roofs:'C-A6',
+  };
+  if (type === 'IFCBUILDINGELEMENTPROXY') for (const p of values(record, ['类别(Category)', '类别', 'Category'])) {
+    const category = proxyCategories[p.value.trim()];
+    if (category) propertyCategories.push({...p, value:category});
+  }
+  const proxyCategory = new Set(propertyCategories.map(p => p.value));
+  const proxyName = type === 'IFCBUILDINGELEMENTPROXY' && /^(?:代理构件|IfcBuildingElementProxy)$/i.test(record.name)
+    && proxyCategory.size === 1 ? ENGINEERING_CATEGORY_LABELS[[...proxyCategory][0]] : undefined;
   const typed=devCategory??ifcTypes[type];
   for(const p of values(record,['用途','设备用途','PURPOSE'])){
     const category=categoryValue(p.value,true);
@@ -73,7 +89,7 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
       ||['IFCPUMP','IFCVALVE'].includes(type)&&/^(?:给排水设施|排水设施)$/.test(p.value))propertyCategories.push({...p,value:['IFCPUMP','IFCVALVE'].includes(type)?'C-D5':category});
   }
   return {
-    sourceId: record.id, name: record.name, assemblyParentId: record.parent || undefined,
+    sourceId: record.id, name: proxyName || record.name, assemblyParentId: record.parent || undefined,
     names: record.nameEvidence,
     typeCategory: /neutralpointequipment/i.test(type) ? 'neutral_set' : devCategory==='E01'&&type!=='E01'?'E-T':devCategory ?? ifcTypes[type.toUpperCase()],
     typeEvidenceId: `${record.id}:source_type:${type}`,

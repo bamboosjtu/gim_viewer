@@ -4,7 +4,7 @@ import { decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringE
 import type { EngineeringBuildResult, EngineeringCacheDomain, EngineeringCacheResult, EngineeringWorkerCommand, EngineeringWorkerReply, EngineeringWorkerRequest, EngineeringWorkerResponse } from './engineeringWorkerProtocol.js';
 import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import { projectEngineeringNavigation } from '../gim/engineering/navigation.js';
-import { decodeEngineeringNavigation, encodeEngineeringNavigation } from './engineeringNavigationCache.js';
+import { assertEngineeringNavigation, decodeEngineeringNavigation, encodeEngineeringNavigation } from './engineeringNavigationCache.js';
 import { collectSourceGeometryOccurrences } from '../gim/engineering/geometryOccurrences.js';
 import { encodeEngineeringWorkerResult, engineeringWorkerResultTransfers } from './engineeringWorkerTransport.js';
 
@@ -45,6 +45,11 @@ export function createEngineeringWorkerHandler(){
       const response:EngineeringCacheResult={buildId:request.buildId,domain:request.domain,metrics:{encodeMs:0,plainBytes:0,encodedBytes:0}};
       try{
         const {result,identity}=current;
+        if(request.navigation){
+          if(request.domain!=='navigation')throw Error('Navigation override for non-navigation domain');
+          assertEngineeringNavigation(request.navigation,result.sources,result.snapshot);
+          result.navigation=request.navigation;
+        }
         if(request.domain==='sources'){const encoded=await encodeEngineeringSources(result.sources,identity);current.digest=encoded.digest;response.bytes=encoded.bytes;}
         else {
           if(!current.digest)throw Error('工程缓存缺少来源摘要');

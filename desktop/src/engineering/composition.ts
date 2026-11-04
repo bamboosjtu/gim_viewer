@@ -39,7 +39,17 @@ export interface EngineeringComposition {
   nodes: Map<string, CompositionNode>;
   rowsByEntity: Map<string, string[]>;
 }
-export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v8';
+export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v10';
+function groupOrder(part:CompositionGroup):number|undefined {
+  if(part.kind==='area')return part.key==='area:main'?20:21-(Number(part.title.match(/\d+/)?.[0])||0)/10000;
+  if(part.kind==='building'){
+    if(/主控|通信|控制楼/.test(part.title))return 0;
+    const voltage=part.title.match(/(\d+)\s*(?:千伏|kV)/i);
+    if(voltage)return 1-Number(voltage[1])/10000;
+    return /辅助/.test(part.title)?9:5;
+  }
+  return part.order;
+}
 const childKey = (parent: string, kind: string, value: string) => `${parent}/${encodeURIComponent(kind)}:${encodeURIComponent(value)}`;
 
 /** A view references whole entities; neither a row nor a group becomes a new
@@ -62,7 +72,7 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
   const anchors = new Map<string, Set<string>>();
   for (const declaration of declarations) {
     let parent = rootKey;
-    for (const part of declaration.path) { parent = group(parent, part.kind, part.key, part.title, declaration.evidence); if (part.order !== undefined) orders.set(parent, part.order); }
+    for (const part of declaration.path) { parent = group(parent, part.kind, part.key, part.title, declaration.evidence); const order=groupOrder(part);if (order !== undefined) orders.set(parent, order); }
     const ids = anchors.get(parent) ?? new Set<string>(); declaration.sourceContextIds.forEach(id => ids.add(id)); anchors.set(parent, ids);
   }
   for (const [key, contexts] of anchors) nodes.get(key)!.declaredContextIds = [...contexts].sort();
@@ -73,7 +83,7 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
     for (const path of paths) {
       let parent = rootKey;
       if (!path.length) parent = group(parent, 'unresolved', 'context', '工程归属待确认', []);
-      for (const part of path) { parent = group(parent, part.kind, part.key, part.title, assignment?.evidence ?? [], !!assignment?.inferred && ['building','storey'].includes(part.kind)); if (part.order !== undefined) orders.set(parent, part.order); }
+      for (const part of path) { parent = group(parent, part.kind, part.key, part.title, assignment?.evidence ?? [], !!assignment?.inferred && ['building','storey','area','structure'].includes(part.kind)); const order=groupOrder(part);if (order !== undefined) orders.set(parent, order); }
       const terminalBucket = path[path.length - 1]?.kind === 'bucket';
       if (!terminalBucket) parent = group(parent, 'category', entity.category, categoryLabel(entity.category), []);
       if (seen.has(parent)) continue; seen.add(parent);
@@ -103,4 +113,16 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
     node.children.sort((a, b) => (orders.get(a) ?? 100) - (orders.get(b) ?? 100) || nodes.get(a)!.title.localeCompare(nodes.get(b)!.title, 'zh-CN', { numeric: true }) || a.localeCompare(b));
   }
   return { version: ENGINEERING_COMPOSITION_VERSION, rootKey, nodes, rowsByEntity };
+}
+
+/** Final composition shows represented membership, while empty source
+ * declarations remain available in the independent provenance view. */
+export function finalizeEngineeringComposition(view:EngineeringComposition):EngineeringComposition {
+  function prune(key:string):boolean {
+    const node=view.nodes.get(key)!;
+    node.children=node.children.filter(prune);
+    if(node.kind==='group'&&node.entityCount===0&&node.children.length===0){view.nodes.delete(key);return false;}
+    return true;
+  }
+  prune(view.rootKey);return view;
 }

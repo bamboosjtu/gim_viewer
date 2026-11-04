@@ -856,12 +856,13 @@ function parseIfcModel(
   const spatialEntities: IfcSpatialNode[] = [];
   const spatialById = new Map<number, IfcSpatialNode>();
   const objects: IfcSpatialObject[] = [];
-  // 属性/材质/分类/类型/组在 Spatial Core 中只保留计数；实际面板详情
-  // 由 Fragments getItemsData() 在选择时按需读取。
-  const propertyMs = 0;
+  const identityStarted = performance.now();
+  const identityProperties = collectProxyIdentityProperties(text, selectedRecords, relationships);
+  // 代理对象只提前读取分类必需的类别字段；其余面板详情仍按需读取。
+  const propertyMs = performance.now() - identityStarted;
   const propertyEntityCount = scan.propertyEntityCount;
   const quantityEntityCount = scan.quantityEntityCount;
-  const propertyValueCount = 0;
+  const propertyValueCount = [...identityProperties.values()].reduce((sum, groups) => sum + groups.reduce((n, group) => n + group.values.length, 0), 0);
   const quantityValueCount = 0;
   const materialEntityCount = scan.materialEntityCount;
   const classificationEntityCount = scan.classificationEntityCount;
@@ -968,7 +969,7 @@ function parseIfcModel(
         name,
         sourceName: parseString(record.args[2]),
         propertyDataDeferred: true,
-        ...ifcObjectMetadata(record.args, undefined, placement ?? undefined, {}),
+        ...ifcObjectMetadata(record.args, identityProperties.get(record.expressId), placement ?? undefined, {}),
         parentObjectKey: parentIdByObjectId.has(record.expressId)
           ? objectKey(entry.modelId, parentIdByObjectId.get(record.expressId)!)
           : null,
@@ -1251,9 +1252,8 @@ function parseIfcModel(
       lengthUnitScaleToMetres: lengthUnit.scaleToMetres,
       propertyValueCount,
       quantityValueCount,
-      // 属性/材质等在启动 Spatial Core 延迟到 Fragments getItemsData；
-      // 这里明确为 0，避免把“发现实体数量”误报成已加载属性。
-      objectsWithProperties: 0,
+      // 这里只计实际提前读取的代理分类字段，详细属性仍延迟加载。
+      objectsWithProperties: identityProperties.size,
       objectsWithMaterials: 0,
     },
     spatialEntities,
@@ -1682,6 +1682,44 @@ function parseRefs(value: string | undefined): number[] {
 function parseRef(value: string | undefined): number | null {
   const match = value?.match(/^#(\d+)$/);
   return match ? Number(match[1]) : null;
+}
+
+/** Only object-linked proxy classification fields are eager. Full property
+ * sets remain deferred; neither file names nor unrelated Psets imply identity. */
+function collectProxyIdentityProperties(text: string, products: RawIfcEntity[], relationships: RawIfcEntity[]): Map<number, IfcPropertyGroup[]> {
+  const proxies = new Set(products.filter(p => p.ifcType === 'IFCBUILDINGELEMENTPROXY').map(p => p.expressId));
+  const links = new Map<number, number[]>();
+  for (const rel of relationships) if (rel.ifcType === 'IFCRELDEFINESBYPROPERTIES') {
+    const ids = parseRefs(rel.args[4]).filter(id => proxies.has(id)), pset = parseRef(rel.args[5]);
+    if (ids.length && pset != null) links.set(pset, [...(links.get(pset) ?? []), ...ids]);
+  }
+  const result = new Map<number, IfcPropertyGroup[]>();
+  if (!links.size) return result;
+  const sets = new Map<number, RawIfcEntity>(), wanted = new Set<number>();
+  scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
+    if (ifcType !== 'IFCPROPERTYSET' || !links.has(expressId)) return;
+    const record = materializeIfcEntity(text, {expressId, ifcType, bodyStart, bodyEnd});
+    sets.set(expressId, record); parseRefs(record.args[4]).forEach(id => wanted.add(id));
+  });
+  const values = new Map<number, IfcPropertyValue>();
+  scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
+    if (ifcType !== 'IFCPROPERTYSINGLEVALUE' || !wanted.has(expressId)) return;
+    const record = materializeIfcEntity(text, {expressId, ifcType, bodyStart, bodyEnd});
+    const name = parseString(record.args[0]);
+    if (!/^(?:类别(?:\(Category\))?|Category)$/i.test(name)) return;
+    const nominal = record.args[2]?.match(/^(IFC\w+)\((.*)\)$/i);
+    const value = parseString(nominal?.[2] ?? record.args[2]);
+    if (value) values.set(expressId, {name, value, ...(nominal ? {dataType:nominal[1]} : {})});
+  });
+  for (const [id, record] of sets) {
+    const selected = parseRefs(record.args[4]).flatMap(key => values.has(key) ? [values.get(key)!] : []);
+    if (!selected.length) continue;
+    for (const product of links.get(id)!) {
+      const groups = result.get(product) ?? [];
+      groups.push({id, name:parseString(record.args[2]), kind:'property', values:selected, truncated:true}); result.set(product, groups);
+    }
+  }
+  return result;
 }
 
 function parseString(value: string | undefined): string {

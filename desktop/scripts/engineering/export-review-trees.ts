@@ -10,9 +10,9 @@ import {SubstationSpatialIndexBuilder} from '../../src/gim/ifcSpatialParser.js';
 import {createIfcModelId} from '../../src/gim/modelIdentity.js';
 import {buildEngineeringSources} from '../../src/gim/engineering/buildSources.js';
 import {projectEngineeringNavigation} from '../../src/gim/engineering/navigation.js';
-import {projectEngineeringComposition} from '../../src/engineering/composition.js';
+import {finalizeEngineeringComposition,projectEngineeringComposition} from '../../src/engineering/composition.js';
 import {projectSpatialComposition,type CompositionBounds} from '../../src/services/projections/compositionSpatial.js';
-import {assertEngineeringNavigation} from '../../src/services/engineeringNavigationCache.js';
+import {assertEngineeringNavigation,encodeEngineeringNavigation,decodeEngineeringNavigation,engineeringNavigationToWire} from '../../src/services/engineeringNavigationCache.js';
 
 const desktop=resolve('.');
 const root=resolve('..');
@@ -37,6 +37,9 @@ for(const sample of corpus.samples){
   const sourcePath=join(root,sample.path), sourceBytes=readFileSync(sourcePath);
   if(sourceBytes.length!==sample.bytes||sha(sourceBytes)!==sample.sha256) throw Error(`${sample.id}: source identity mismatch`);
   const raw=join(rawRoot,sample.id,'files');
+  const receipt=JSON.parse(readFileSync(join(rawRoot,sample.id,'identity.json'),'utf8'));
+  if(receipt.sha256!==sample.sha256)throw Error(`${sample.id}: raw corpus source mismatch`);
+  for(const item of receipt.semantic)if(sha(readFileSync(join(raw,item.path)))!==item.sha256)throw Error(`${sample.id}: raw file mismatch ${item.path}`);
   if(!readdirSync(raw).length) throw Error(`${sample.id}: missing raw corpus; run prepare-corpus.py`);
   const paths=files(raw).map(path=>path.replace(/\\/g,'/'));
   if(!paths.some(path=>/^CBM\/project\.cbm$/i.test(path))) throw Error(`${sample.id}: raw corpus has no CBM/project.cbm`);
@@ -56,7 +59,7 @@ for(const sample of corpus.samples){
   for(const model of geometric){
     if(!graph.ifcPaths.includes(model.path)) throw Error(`${sample.id}: unknown IFC model ${model.path}`);
     const modelPath=join(raw,model.path), modelSha=sha(readFileSync(modelPath));
-    if(model.sha256&&model.sha256!==modelSha) throw Error(`${sample.id}: stale IFC bounds ${model.path}`);
+    if(model.sha256!==modelSha) throw Error(`${sample.id}: missing/stale IFC bounds ${model.path}`);
     for(const object of model.objects??[]){
       const sourceId=`ifc:${JSON.stringify([createIfcModelId(model.path),object.expressId])}`,owner=owners.get(sourceId);
       if(owner) bounds.push({entityId:owner,bounds:object.bounds,evidence:sourceId});
@@ -65,9 +68,18 @@ for(const sample of corpus.samples){
   const diagnostics={footprints:[]};
   const input=view.compositionInput;
   if(!input) throw Error(`${sample.id}: missing composition input`);
-  const assignments=projectSpatialComposition(rebuilt.snapshot,input.facts,bounds,diagnostics);
-  view.composition=projectEngineeringComposition(rebuilt.snapshot,assignments,'工程组成',input.declarations);
+  const assignments=projectSpatialComposition(rebuilt.snapshot,input.facts,bounds,diagnostics,input.declarations);
+  if(process.env.GIM_REVIEW_EVIDENCE)writeFileSync(join(out,`${sample.id}-evidence.json`),JSON.stringify({entities:rebuilt.snapshot.entities,facts:input.facts,bounds,assignments,declarations:input.declarations}));
+  view.composition=finalizeEngineeringComposition(projectEngineeringComposition(rebuilt.snapshot,assignments,'工程组成',input.declarations));
+  view.compositionComplete=true;
   assertEngineeringNavigation(view,rebuilt.sources,rebuilt.snapshot);
+  if(process.env.GIM_REVIEW_CACHE){
+    const identity={sourceSha256:sample.sha256,parserVersion:'review-final-projection',entries:paths};
+    const bytes=await encodeEngineeringNavigation(view,rebuilt.sources,rebuilt.snapshot,sample.sha256,identity);
+    const restored=await decodeEngineeringNavigation(bytes,rebuilt.sources,rebuilt.snapshot,sample.sha256,identity);
+    if(JSON.stringify(engineeringNavigationToWire(restored))!==JSON.stringify(engineeringNavigationToWire(view)))throw Error(`${sample.id}: final navigation cache roundtrip mismatch`);
+    writeFileSync(join(out,`${sample.id}-navigation-cache.json`),JSON.stringify({sample:sample.id,complete:restored.compositionComplete,bytes:bytes.length,identical:true}));
+  }
   const visit=(key:string):unknown=>{const node=view.composition.nodes.get(key)!;return {title:node.title,kind:node.kind,...(node.targetId?{targetId:node.targetId}:{}),entityCount:node.entityCount,...(node.kind==='group'&&node.evidence.length?{evidence:node.evidence.filter(e=>!e.startsWith('entity:'))}:{}),children:node.children.map(visit)};};
   writeFileSync(join(out,`${sample.id}-composition.json`),JSON.stringify({schema:'gim-engineering-composition-review-v1',sample:sample.id,sourceSha256:sample.sha256,metadata:view.metadata,root:visit(view.composition.rootKey)},null,2));
   const groups=[...view.composition.nodes.values()].filter(node=>node.kind==='group');

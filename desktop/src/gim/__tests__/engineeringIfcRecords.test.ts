@@ -76,3 +76,24 @@ it('retains duplicate GUID ambiguity and all IFC sources even without a unique C
   expect(model.snapshot.entities).toHaveLength(2);
   expect(model.ifcMatches[0].devSourceIds).toHaveLength(0);
 });
+it('classifies proxies from their own category Pset without loading unrelated properties or changing source names', () => {
+  const index = buildSubstationSpatialIndexFromTexts([{entry:{modelId:'m',path:'arbitrary.ifc',name:'model'},text:`
+#1=IFCBUILDINGELEMENTPROXY('a',$,'代理构件',$,$,$,$,$,$);
+#2=IFCBUILDINGELEMENTPROXY('b',$,'代理构件',$,$,$,$,$,$);
+#3=IFCBUILDINGELEMENTPROXY('c',$,'代理构件',$,$,$,$,$,$);
+#10=IFCRELDEFINESBYPROPERTIES('r',$,$,$,(#1),#20);
+#11=IFCRELDEFINESBYPROPERTIES('s',$,$,$,(#2),#21);
+#20=IFCPROPERTYSET('p',$,'默认',$,(#30,#31));
+#21=IFCPROPERTYSET('q',$,'默认',$,(#32));
+#30=IFCPROPERTYSINGLEVALUE('类别(Category)',$,IFCLABEL('墙(Walls)'),$);
+#31=IFCPROPERTYSINGLEVALUE('任意详细属性',$,IFCLABEL('不得提前加载'),$);
+#32=IFCPROPERTYSINGLEVALUE('类别(Category)',$,IFCLABEL('常规模型(Generic Models)'),$);
+`}],null);
+  const records=ifcSourceRecords(index.objects), model=normalizeEngineeringModel('p',records.map(toObjectEvidence));
+  expect(model.entities.map(e=>e.category)).toEqual(['C-A1','U-OBJECT','U-OBJECT']);
+  expect(model.entities[0].name).toBe('墙体');
+  expect(records[0].name).toBe('代理构件');
+  expect(records[0].properties.some(p=>p.value==='不得提前加载')).toBe(false);
+  expect(index.objects[0].propertyDataDeferred).toBe(true);
+  expect(index.objects[0].propertySets?.[0].truncated).toBe(true);
+});

@@ -21,6 +21,8 @@ interface EngineeringJob {
   update: () => void;
   beforeCacheWrite?: Promise<unknown>;
   resolveGeometry(catalog: SourceGeometryOccurrenceCatalog | null): void;
+  projectionReady: Promise<boolean>;
+  resolveProjection(complete: boolean): void;
 }
 const jobs = new WeakMap<AppState, EngineeringJob>();
 const current = (state: AppState, job: EngineeringJob) => jobs.get(state) === job && !job.controller.signal.aborted && state.isCurrentSession(job.session);
@@ -49,7 +51,11 @@ async function saveResult(state: AppState, job: EngineeringJob, result: Engineer
     // release each buffer before asking the Worker to encode the next domain.
     for(const domain of result.cachePlan){
       if(!current(state,job))return;
-      const encoded=await job.client.encodeCache(result.buildId,domain);
+      if(domain==='navigation' && !await job.projectionReady){
+        if(current(state,job)){state.engineeringCacheStatus='partial';job.update();}return;
+      }
+      if(!current(state,job))return;
+      const encoded=await job.client.encodeCache(result.buildId,domain,domain==='navigation'?state.engineeringNavigation??undefined:undefined);
       if(!current(state,job))return;
       perfMark('工程缓存域编码',{domain,...encoded.metrics});
       state.engineeringPipelineMetrics?.caches.push({domain,...encoded.metrics});
@@ -74,6 +80,9 @@ function publish(state: AppState, job: EngineeringJob, result: EngineeringBuildR
   state.engineeringSnapshot = result.snapshot;
   state.engineeringNavigation = result.navigation;
   state.engineeringNavigationCacheHit = result.navigationCacheHit === true;
+  const finalNavigation=result.navigationCacheHit===true&&result.navigation.compositionComplete===true || result.sources.graph.ifcPaths.length===0;
+  state.engineeringTreeStatus=finalNavigation?'ready':'loading';
+  if(finalNavigation){result.navigation.compositionComplete=true;job.resolveProjection(true);}
   state.engineeringPipelineMetrics=result.metrics?{...result.metrics,caches:[]}:null;
   state.engineeringGeometryCatalog = result.geometryOccurrences; job.resolveGeometry(result.geometryOccurrences);
   state.engineeringRepresentationChanged?.();
@@ -121,6 +130,7 @@ export function notifyEngineeringIfcFailure(state: AppState, reason: string): vo
   job.ready.then(() => {
     if (!current(state, job) || job.finished) return;
     job.finished = true; job.client.close();
+    job.resolveProjection(false);state.engineeringTreeStatus='error';
     state.engineeringError = reason;
     state.engineeringStatus = state.engineeringSnapshot ? 'partial' : 'error';
     state.engineeringCacheStatus = 'partial'; job.update();
@@ -133,6 +143,7 @@ function fail(state: AppState, job: EngineeringJob, error: unknown): void {
   job.resolveGeometry(null);
   console.warn('[工程来源] 构建失败', error instanceof Error ? error.stack : String(error));
   job.finished = true;
+  job.resolveProjection(false);state.engineeringTreeStatus='error';
   state.engineeringError = String(error);
   state.engineeringStatus = state.engineeringSnapshot ? 'partial' : 'error';
   job.update();
@@ -144,12 +155,14 @@ function fail(state: AppState, job: EngineeringJob, error: unknown): void {
 export function beginEngineeringBuild(state: AppState, files: Map<string, File>, options: EngineeringBuildOptions = {}): Promise<void> {
   state.engineeringCleanup?.();
   let resolveGeometry!: EngineeringJob['resolveGeometry'];
+  let resolveProjection!: EngineeringJob['resolveProjection'];
+  const projectionReady=new Promise<boolean>(resolve=>{resolveProjection=resolve;});
   state.engineeringGeometryReady = new Promise(resolve => { resolveGeometry = resolve; }); state.engineeringGeometryCatalog = null;
   const session = state.captureProjectSession(), controller = new AbortController();
   if (typeof Worker === 'undefined' && !options.createWorker) {
     resolveGeometry(null);
     state.engineeringSources = null; state.engineeringSnapshot = null; state.engineeringNavigation = null; state.engineeringNavigationCacheHit = false;
-    state.engineeringStatus = 'error'; state.engineeringError = '当前环境无法启动工程实体构建 Worker';
+    state.engineeringTreeStatus='error';state.engineeringStatus = 'error'; state.engineeringError = '当前环境无法启动工程实体构建 Worker';
     state.notifyEngineeringChanged(); options.onUpdate?.();
     return Promise.resolve();
   }
@@ -157,13 +170,14 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
   let job: EngineeringJob;
   const client = (options.createWorker ?? EngineeringWorkerClient.create)(() => !!job && current(state, job), controller.signal);
   const persistent = isTauri() && session.projectId != null && /^[a-f\d]{64}$/i.test(session.sourceSha256 ?? '');
-  job = { session, controller, client, resolveGeometry, ready: Promise.resolve(), lastSpatial: null, finished: false, enriching: false, update, beforeCacheWrite: options.beforeCacheWrite,
+  job = { session, controller, client, resolveGeometry, projectionReady, resolveProjection, ready: Promise.resolve(), lastSpatial: null, finished: false, enriching: false, update, beforeCacheWrite: options.beforeCacheWrite,
     identity: persistent ? { sourceSha256: session.sourceSha256!, parserVersion: ENGINEERING_PARSER_CONTRACT, entries: [...files.keys()] } : undefined };
   jobs.set(state, job);
-  const disposeProjection=installCompositionProjection(state);
-  state.engineeringCleanup = () => { disposeProjection();resolveGeometry(null); controller.abort(); client.close(); if (jobs.get(state) === job) jobs.delete(state); };
+  const disposeProjection=installCompositionProjection(state,complete=>job.resolveProjection(complete));
+  state.engineeringCleanup = () => { disposeProjection();resolveGeometry(null);resolveProjection(false); controller.abort(); client.close(); if (jobs.get(state) === job) jobs.delete(state); };
   state.engineeringSources = null; state.engineeringSnapshot = null; state.engineeringNavigation = null; state.engineeringNavigationCacheHit = false;
   state.engineeringStatus = 'loading'; state.engineeringError = ''; state.engineeringCacheStatus = 'none'; state.engineeringCacheError = ''; update();
+  state.engineeringTreeStatus = 'loading';
   state.engineeringPipelineMetrics=null;
   const run = async () => {
     if (job.identity) {

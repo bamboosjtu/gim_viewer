@@ -1416,6 +1416,8 @@ export async function loadAllIfcFiles(
     // buildIfcNameIndex 失败不应阻断 UI 渲染
     const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
     if (!isCurrent()) return;
+    state.engineeringIfcGeometryFinished = true;
+    state.engineeringGeometryEvidenceChanged?.();
     const endNameIndex = perfBegin('变电 IFC name index', undefined, perfSession);
     await buildIfcNameIndex(ctx, state, { session }).catch((err) => {
       console.warn('[GIM] buildIfcNameIndex failed', err);
@@ -1440,6 +1442,7 @@ export async function loadAllIfcFiles(
 
     } catch (err) {
       if (!isCurrent()) return;
+      state.engineeringIfcGeometryFinished=true;state.engineeringGeometryEvidenceChanged?.();
       console.error('[GIM] IFC 加载失败 (outer)', {
         error: err,
         message: err instanceof Error ? err.message : String(err),

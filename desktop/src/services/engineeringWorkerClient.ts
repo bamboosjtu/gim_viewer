@@ -62,8 +62,8 @@ export class EngineeringWorkerClient {
     this.geometryOccurrences = response.geometryOccurrences;
     return response.summary;
   }
-  async encodeCache(buildId:number,domain:EngineeringCacheDomain):Promise<EngineeringCacheResult>{
-    const response=await this.request({type:'encode-cache',buildId,domain});
+  async encodeCache(buildId:number,domain:EngineeringCacheDomain,navigation?:import('../gim/engineering/navigation.js').EngineeringNavigationData):Promise<EngineeringCacheResult>{
+    const response=await this.request({type:'encode-cache',buildId,domain,navigation});
     if(response.type!=='cache'||response.result.buildId!==buildId||response.result.domain!==domain)throw Error('Engineering cache response identity mismatch');
     return response.result;
   }

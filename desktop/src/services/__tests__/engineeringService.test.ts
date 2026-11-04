@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { projectSpatialComposition } from '../projections/compositionSpatial.js';
+import { projectEngineeringComposition, finalizeEngineeringComposition } from '../../engineering/composition.js';
+import type { ProjectionInput } from '../compositionProjectionWorker.js';
 import { AppState } from '../../app/state.js';
 import { buildSubstationSpatialIndexFromTexts } from '../../gim/ifcSpatialParser.js';
 import { beginEngineeringBuild, notifyEngineeringIfcEvidence } from '../engineeringService.js';
@@ -44,12 +47,16 @@ const sourceFiles = (name = '主变压器', ifc = false) => new Map([
   ['terminal.dev', new File(['SYMBOLNAME=测控柜'], 'terminal.dev')],
   ...(ifc ? [['delivery.ifc', new File(['IFC'], 'delivery.ifc')] as [string, File]] : []),
 ]);
-const state = (sha = 'a'.repeat(64)) => { const state = new AppState(); state.activateProject(7, sha); return state; };
+const state = (sha = 'a'.repeat(64)) => { const state = new AppState(); state.activateProject(7, sha); state.ifcRegionalRuntimes.set('m',{index:{objects:[1,10].map(expressId=>({expressId,bounds:[0,0,-10,10,4,0]}))},release:vi.fn()} as never);return state; };
 const portFactory = (port: LoopbackPort) => (isCurrent: () => boolean, signal: AbortSignal) => new EngineeringWorkerClient(port, isCurrent, signal);
 const store = new Map<string, Uint8Array>();
 afterEach(() => { vi.unstubAllGlobals(); });
 beforeEach(() => {
   vi.clearAllMocks(); store.clear();
+  vi.stubGlobal('Worker',class {
+    onmessage:((event:MessageEvent)=>void)|null=null;terminate(){}
+    postMessage(input:ProjectionInput){queueMicrotask(()=>{const rows=projectSpatialComposition(input.snapshot,input.facts,input.bounds,undefined,input.declarations);this.onmessage?.({data:{composition:finalizeEngineeringComposition(projectEngineeringComposition(input.snapshot,rows,'工程组成',input.declarations)),contexts:rows.map(r=>[r.entityId,'test'])}} as MessageEvent);});}
+  });
   vi.mocked(readCachedEntry).mockImplementation(async (_project, path) => {
     const bytes = store.get(path); if (!bytes) throw Error('cache-missing'); return bytes.slice();
   });
@@ -104,7 +111,7 @@ describe('session-owned production engineering build', () => {
     expect(app.engineeringNavigationCacheHit).toBe(true);
   });
 
-  it('restores named IFC building/storey contexts and source rows without a Spatial runtime or Viewer', async () => {
+  it('persists the final projected tree and restores it without IFC semantics or geometry runtimes', async () => {
     const app = state(), files = sourceFiles('主变压器', true);
     app.substationSpatialIndex = buildSubstationSpatialIndexFromTexts([{ entry: { modelId: 'm', path: 'delivery.ifc', name: 'delivery' }, text: [
       "#1=IFCPROJECT('p',$,'工程',$,$,$,$,$,$);", "#2=IFCBUILDING('b',$,'主控楼',$,$,$,$,$,.ELEMENT.,$,$,$);",
@@ -112,8 +119,8 @@ describe('session-owned production engineering build', () => {
       "#20=IFCRELAGGREGATES('r1',$,$,$,#1,(#2));", "#21=IFCRELAGGREGATES('r2',$,$,$,#2,(#3));", "#22=IFCRELCONTAINEDINSPATIALSTRUCTURE('r3',$,$,$,(#10),#3);",
     ].join('\n') }], null);
     await beginEngineeringBuild(app, files, { createWorker: portFactory(new LoopbackPort()) });
-    expect(app.engineeringCacheStatus).toBe('saved'); const cold = app.engineeringNavigation;
-    app.substationSpatialIndex = null;
+    expect(app.engineeringCacheStatus).toBe('saved'); const cold = app.engineeringNavigation;expect(cold?.compositionComplete).toBe(true);expect(app.engineeringTreeStatus).toBe('ready');
+    app.substationSpatialIndex = null;app.ifcRegionalRuntimes.clear();
     const port = new LoopbackPort(), start = vi.fn();
     await beginEngineeringBuild(app, files, { createWorker: portFactory(port), ensureIfcSemantics: start });
     expect(port.commands).toEqual(['restore']); expect(start).not.toHaveBeenCalled();
@@ -157,10 +164,10 @@ describe('session-owned production engineering build', () => {
     expect(app.engineeringStatus).toBe('ready');
   });
 
-  it('publishes partial DEV wholes before IFC semantics, then completes without a geometry gate', async () => {
+  it('keeps DEV semantics available internally and publishes the tree only after IFC projection completes', async () => {
     const app = state(), port = new LoopbackPort();
     await beginEngineeringBuild(app, sourceFiles('主变压器', true), { createWorker: portFactory(port) });
-    expect(app.engineeringStatus).toBe('partial');
+    expect(app.engineeringStatus).toBe('partial');expect(app.engineeringTreeStatus).toBe('loading');
     expect(store.size).toBe(0);
     expect(port.terminated).toBe(false);
     app.substationSpatialIndex = buildSubstationSpatialIndexFromTexts([{ entry: { modelId: 'm', path: 'delivery.ifc', name: 'delivery' },

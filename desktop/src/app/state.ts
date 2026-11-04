@@ -187,6 +187,8 @@ export class AppState {
   engineeringSnapshot: import('../engineering/types.js').EngineeringSnapshot | null = null;
   engineeringNavigation: import('../gim/engineering/navigation.js').EngineeringNavigationData | null = null;
   engineeringNavigationCacheHit = false;
+  engineeringTreeStatus: 'none' | 'loading' | 'ready' | 'error' = 'none';
+  engineeringIfcGeometryFinished = false;
   engineeringGeometryCatalog: import('../gim/engineering/geometryOccurrences.js').SourceGeometryOccurrenceCatalog | null = null;
   engineeringGeometryReady: Promise<import('../gim/engineering/geometryOccurrences.js').SourceGeometryOccurrenceCatalog | null> | null = null;
   engineeringStatus: 'none' | 'loading' | 'partial' | 'ready' | 'error' = 'none';
@@ -485,6 +487,7 @@ export class AppState {
     this.engineeringSelectionCleanup?.(); this.engineeringNavigationCleanup?.();
     this.engineeringNavigation = null; this.engineeringNavigationCacheHit = false;
     this.engineeringGeometryCatalog = null; this.engineeringGeometryReady = null;
+    this.engineeringTreeStatus = 'none'; this.engineeringIfcGeometryFinished = false;
     this.engineeringStatus = 'none'; this.engineeringError = '';
     this.engineeringCacheStatus = 'none'; this.engineeringCacheError = '';
     this.engineeringPipelineMetrics=null;

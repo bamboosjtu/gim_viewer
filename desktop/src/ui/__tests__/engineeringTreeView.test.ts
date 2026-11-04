@@ -148,9 +148,9 @@ describe('engineering composition and provenance navigation', () => {
     const { buildAndRenderCbmTree } = await import('../cbmTreeView.js'); buildAndRenderCbmTree(state, vi.fn());
     expect([...document.querySelectorAll('.substation-nav-mode-btn')].map(b => b.textContent)).toEqual(['清册', '工程', '来源']);
     expect(document.getElementById('cbm-tree-panel')?.firstElementChild?.classList.contains('substation-nav-mode')).toBe(true);
-    expect(document.body.textContent).toContain('正在识别工程整体');
+    expect(document.body.textContent).toContain('模型树加载中');
     document.querySelector<HTMLButtonElement>('[data-engineering-mode="source"]')!.click();
-    expect(document.body.textContent).toContain('正在读取来源引用与装配');
+    expect(document.body.textContent).toContain('模型树加载中');
   });
   it('searches an internal source into its whole, then traces it to the actual assembly and back', async () => {
     const f = await fixture();

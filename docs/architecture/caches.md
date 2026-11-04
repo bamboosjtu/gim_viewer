@@ -22,13 +22,13 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 | 变电语义 | `gim-substation-parser-v27` | [db.rs](../../desktop/src-tauri/src/db.rs) | 原始属性、CBM/DEV/IFC 引用、索引 receipt |
 | DEV 几何 | `geometry-cache-v17-source-occurrences` | [db.rs](../../desktop/src-tauri/src/db.rs)、[DEV 目录](../../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest、GLB 完整性 |
 | DEV LOD 派生 | 几何版本组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../../desktop/bridge/devLodCache.ts) | 源 SHA、DEV 路径、几何版本与 LOD；模板/目录逐条原子提交 |
-| 变电 Spatial | `substation-spatial-semantic-v5` | [Spatial 快照](../../desktop/src/services/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
+| 变电 Spatial | `substation-spatial-semantic-v6` | [Spatial 快照](../../desktop/src/services/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
 | IFC Spatial parser | `gim-substation-parser-v25` | [Spatial 快照](../../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
-| 工程来源 | `engineering-source-v10` | [来源契约](../../desktop/src/gim/engineering/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；独立原子文件 |
+| 工程来源 | `engineering-source-v11` | [来源契约](../../desktop/src/gim/engineering/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；独立原子文件 |
 | 工程实体 | `engineering-entity-v4` + `engineering-wholes-9` + `engineering-catalog-v2` | [实体编码](../../desktop/src/services/engineeringCacheCodec.ts)、[目录规则](../../desktop/src/engineering/catalogRules.json) | 绑定来源内容摘要、实体 schema、规则版本；只重建实体 |
 
 工程来源/实体/导航的单域 JSON 超过 64 MiB 时按 64 MiB 分片独立 gzip，压缩体仍受 384 MiB 上限；解码后总 plain 上限 1 GiB。分片只在编码/恢复时存在，不改变 artifact 的身份或来源 SHA。
-| 工程导航 | `engineering-navigation-v8` + `engineering-composition-v8` + `engineering-source-tree-v1` + `engineering-inventory-v5` + 目录版本 | [三视图投影](../../desktop/src/gim/engineering/navigation.ts)、[导航缓存](../../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹；校验节点可达性/覆盖 |
+| 工程导航 | `engineering-navigation-v8` + `engineering-composition-v9` + `engineering-source-tree-v1` + `engineering-inventory-v5` + 目录版本 | [三视图投影](../../desktop/src/gim/engineering/navigation.ts)、[导航缓存](../../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹；校验节点可达性/覆盖 |
 | Fragments | `fragments-cache-v6` | [features](../../desktop/src/config/features.ts)、[db.rs](../../desktop/src-tauri/src/db.rs) | 源/IFC 身份及实际 fragments/web-ifc 版本；默认路径不启用 |
 | IFC 浏览 LOD | `bim-lod-v8` 组合 | [features](../../desktop/src/config/features.ts)、[LOD 缓存](../../desktop/bridge/ifcLodCache.ts) | 源 SHA、条目、LOD 策略、单次解析、依赖版本；分远景/近景/属性独立失效 |
 | IFC 区域模板 | `near-templates-v1`，附加于浏览 LOD 键 | [features](../../desktop/src/config/features.ts) | 模板几何与逐对象放置；不重建有效远景 |

@@ -61,6 +61,19 @@ export function clearFragmentOutlines(state: AppState): void {
   fragmentGroups.delete(state);
 }
 
+/** A group is a source-backed range, not a single render mesh. Its envelope
+ * stays selectable while far items are batched or near meshes are absent. */
+export function outlineSelectionRange(ctx:ViewerContext,state:AppState,box:THREE.Box3):void {
+  if(box.isEmpty())return;
+  let groups=fragmentGroups.get(state);if(!groups){groups=new Map();fragmentGroups.set(state,groups);}
+  const key='selection-range',old=groups.get(key);if(old)disposeGroup(old);
+  const group=new THREE.Group(),helper=new THREE.Box3Helper(box,SELECTION_AMBER);
+  helper.raycast=()=>{};helper.userData.interactionDecoration=true;
+  (helper.material as THREE.Material).depthTest=false;
+  group.userData.interactionDecoration=true;group.add(helper);ctx.world.scene.three.add(group);groups.set(key,group);
+  state.selectionDecorationCleanup=()=>{clearMeshOutlines(state);clearFragmentOutlines(state);clearHoverOutline(state);};
+}
+
 /** Geometry comes from the already loaded Fragments representation, with its
  * original transform; no IFC parsing, precision upgrade or camera action. */
 async function fragmentGroup(model: any, ids: number[], color: number, opacity: number): Promise<THREE.Group> {
