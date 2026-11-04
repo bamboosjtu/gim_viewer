@@ -59,8 +59,21 @@ it('groups a distribution area before splitting supports and foundations', () =>
   const foundation = fact('foundation'); foundation.hostEntityIds = ['host'];
   const result = assignEngineeringComposition(model, [host, support, foundation]);
   const titles = (id: string) => result.find(row => row.entityId === id)!.paths[0].map(group => group.title);
-  expect(titles('support')).toEqual(['建筑工程', '10千伏配电装置区域', '构支架']);
+  expect(titles('support')).toEqual(['建筑工程', '10千伏配电装置区域', '支架']);
   expect(titles('foundation')).toEqual(['建筑工程', '10千伏配电装置区域', '基础']);
+});
+
+it('groups main-transformer supports and foundations under 主变区域', () => {
+  const model = snapshot([entity('host', 'E01'), entity('support', 'C-B1', '设备支架'), entity('frame', 'C-B7', '构架'), entity('foundation', 'C-B2', '独立基础')]);
+  const host = fact('host', ['110kV主变压器系统']);
+  const support = fact('support'); support.hostEntityIds = ['host'];
+  const frame = fact('frame'); frame.hostEntityIds = ['host'];
+  const foundation = fact('foundation'); foundation.hostEntityIds = ['host'];
+  const result = assignEngineeringComposition(model, [host, support, frame, foundation]);
+  const titles = (id: string) => result.find(row => row.entityId === id)!.paths[0].map(group => group.title);
+  expect(titles('support')).toEqual(['建筑工程', '主变区域', '支架']);
+  expect(titles('frame')).toEqual(['建筑工程', '主变区域', '构架']);
+  expect(titles('foundation')).toEqual(['建筑工程', '主变区域', '基础']);
 });
 
 it('marks declared composition anchors without a confirmed whole as unbound', () => {

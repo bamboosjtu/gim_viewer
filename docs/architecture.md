@@ -49,6 +49,8 @@ GIM 包
 - 实体链：包内来源 occurrence → 中立对象证据 → 工程整体/待归集合/成员关系 → 三视图。
 - 表示链：真实来源 occurrence → 模板、放置、LOD、IFC 对象；工程整体只绑定来源 ID，不生成新的几何种子。
 
+专题文档：[几何资产与表示索引](architecture/geometry-assets.md)、[建筑推断](engineering/building-inference.md)、[DEV 几何](architecture/dev-geometry.md)、[缓存域](architecture/caches.md)。
+
 几何可以先于工程实体完成编译；实体规则变化只重建成员绑定、组成和导航，不强制重新三角化。反过来，实体识别不等待 Viewer、网格、LOD 或 IFC 几何加载。
 
 ```mermaid

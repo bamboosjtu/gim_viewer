@@ -73,6 +73,14 @@ function system(context: DeclaredContext): CompositionGroup {
   if (context.purpose === 'distribution') return { key: `distribution:${context.voltage}`, title: `${context.voltage}千伏配电装置`, kind: 'system', order: 20 - (context.voltage ?? 0) / 10000 };
   const definition = systems[context.purpose]; return { key: context.purpose, title: definition.title, kind: 'system', order: definition.order };
 }
+function areaTitle(group: CompositionGroup): string {
+  return group.key === 'main' ? '主变区域' : `${group.title}区域`;
+}
+function supportTitle(entity: EngineeringEntity, category: string): string {
+  if (category === 'C-B1' || /支架/.test(entity.name)) return '支架';
+  if (category === 'C-B7' || /构架|桁架/.test(entity.name)) return '构架';
+  return '构支架';
+}
 function declared(input: CompositionContextEvidence | undefined): DeclaredContext[] {
   const result: DeclaredContext[] = [];
   for (const declaration of input?.declarations ?? []) {
@@ -214,9 +222,10 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
             const foundation = ['C-B2','C-B3','C-B4'].includes(category)
               || !['C-B1','C-B5','C-B6','C-B7'].includes(category)
                 && /基础|杯口|支墩|桩|承台|筏板|垫层/.test(entity.name) && !/支架|构架/.test(entity.name);
+            const structureTitle = supportTitle(entity, category);
             paths = [[civil,
-              { key: `area:${group.key}`, title: `${group.title}区域`, kind: 'area', order: 20 },
-              { key: `area:${group.key}:${foundation ? 'foundation' : 'frame'}`, title: foundation ? '基础' : '构支架', kind: 'structure', order: foundation ? 20 : 10 },
+              { key: `area:${group.key}`, title: areaTitle(group), kind: 'area', order: 20 },
+              { key: `area:${group.key}:${foundation ? 'foundation' : structureTitle}`, title: foundation ? '基础' : structureTitle, kind: 'structure', order: foundation ? 20 : 10 },
             ]];
           } else paths = [unclassifiedPath(track, category)];
         }

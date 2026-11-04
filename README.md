@@ -115,6 +115,5 @@ npm run tauri:dev
 - [XML primitive](docs/schema/xml-primitives.md)
 - [正确性验证](docs/validation.md)
 - [性能测量](docs/performance.md)
-- [已回退与未采用路线](docs/impl/explorations.md)
 - [移动端状态](docs/mobile-spec.md)
 - [问题与限制](docs/open-issues.md)

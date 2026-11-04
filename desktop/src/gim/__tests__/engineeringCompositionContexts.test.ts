@@ -30,7 +30,7 @@ it('projects a declared main unit without promoting the transformer purpose from
   expect(main.name).toBe('220kV变压器模型ZJ01_1');
   expect(paths(f, main.name)[0]).toEqual(expect.arrayContaining(['安装工程', '主变压器系统', '1号主变']));
   expect(main.sourceIds).toHaveLength(2);
-  expect(paths(f, '独立基础')[0]).toEqual(expect.arrayContaining(['建筑工程', '主变压器系统区域', '基础']));
+  expect(paths(f, '独立基础')[0]).toEqual(expect.arrayContaining(['建筑工程', '主变区域', '基础']));
   expect(f.snapshot.entities).toHaveLength(2);
 });
 
@@ -66,7 +66,7 @@ it('keeps a main-transformer incoming bay in its distribution installation and i
     'bay.cbm': 'SYSTEMNAME1=电气系统\nSYSTEMNAME2=10kV系统\nSYSTEMNAME3=主变进线间隔01\nOBJECTMODELPOINTER=cabinet.dev\nSUBSYSTEM0=support.cbm',
     'cabinet.dev': 'TYPE=SwitchCabinet\nSYMBOLNAME=10kV主变进线柜', 'support.cbm': 'OBJECTMODELPOINTER=support.dev', 'support.dev': 'SYMBOLNAME=设备支架' });
   expect(paths(f, '10kV主变进线柜')[0]).toEqual(expect.arrayContaining(['安装工程', '10千伏配电装置', '主变进线间隔01']));
-  expect(paths(f, '设备支架')[0]).toEqual(expect.arrayContaining(['建筑工程', '10千伏配电装置区域', '构支架']));
+  expect(paths(f, '设备支架')[0]).toEqual(expect.arrayContaining(['建筑工程', '10千伏配电装置区域', '支架']));
   expect([...f.view.composition.nodes.values()].map(row => row.title)).not.toContain('主变压器系统');
 });
 

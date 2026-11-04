@@ -10,7 +10,6 @@ docs/
 ├─ engineering/                           工程实体契约、三视图、设备/材料/构件目录
 ├─ schema/                                容器、语义、几何、XML MOD/primitive、线路、样本
 ├─ validation.md / performance.md / meassurement.md / open-issues.md
-└─ impl/                                 未完成验收计划与未采用的性能路线
 ```
 
 ## 阅读入口
@@ -31,8 +30,8 @@ docs/
 | 冷/暖测试步骤与命令 | [性能测试指南](meassurement.md) |
 | 未关闭缺陷与接受限制 | [问题与限制](open-issues.md) |
 | 术语 | [术语表](glossary.md) |
-| v0.2 工程实体重构执行/验收基线（P6 未完成） | [重构计划](impl/desktop-engineering-refactor.md) |
-| 未采用的性能路线 | [探索记录](impl/explorations.md) |
+| 建筑推断规则 | [建筑推断](engineering/building-inference.md) |
+| 几何资产与表示索引 | [几何资产](architecture/geometry-assets.md) |
 
 `research/` 保存研究结论、复现脚本和样本证据，约束实现但不等于产品行为；`demo/` 保存原始 GIM 包和本地解包样本，大型文件由 Git 忽略。
 
@@ -42,7 +41,7 @@ docs/
 2. **用户行为与内部契约分开。** [software-spec.md](software-spec.md) 描述用户可见操作和限制；`architecture/` 描述内部实现。规格不复制缓存版本表或算法细节。
 3. **工程实体与格式分开。** `engineering/` 定义项目目录、对象角色、整体/成员/关系；`schema/` 定义 GIM 文件事实和 parser 边界。目录编码是项目映射，不宣称国标编码。
 4. **单一权威表。** 缓存版本只在[缓存域](architecture/caches.md)维护；样本统计只在[样本台账](schema/sample-corpus.md)；未关闭缺陷只在[问题与限制](open-issues.md)；其他文档引用，不复制。
-5. **当前状态，不写过程。** 已关闭问题、修改前后对照、实施阶段流水不进入长期正文；未采用路线放 `impl/explorations.md`。功能转正后把稳定契约并入正式文档并删除过程稿。
+5. **当前状态，不写过程。** 已关闭问题、修改前后对照、实施阶段流水不进入长期正文；功能转正后把稳定契约并入正式文档并删除过程稿。
 6. **证据分层。** 源包事实、源码/单测、真实浏览器/桌面、性能计时分别记账；skip 不算通过，旧构建结果不能证明当前构建。
 7. **匿名化。** `docs/schema/` 只使用匿名样本 ID，不写真实工程名、地理归属、建设单位或内部工程标识；其他目录同样避免复制真实业务字段。
 

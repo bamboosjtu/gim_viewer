@@ -255,10 +255,18 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   });
   if (!state.initialized) return true;
   await updateEngineeringHighlight(state, request, false);
-  if (options.load !== false) for (const root of scope.devRoots) {
-    if (!guard.isCurrent()) break;
-    try { await state.deviceLodRuntime?.ensureBase?.(root); }
-    catch (error) { if (guard.isCurrent()) state.selectionMessage = `部分来源表示未能准备：${String(error)}`; }
+  if (options.load !== false) {
+    // A whole/building can own hundreds of DEV occurrences. Loading them
+    // serially made the first coarse highlight wait for every root; keep a
+    // small bounded pool so the browser can paint the already-available range.
+    const roots = [...scope.devRoots];
+    for (let offset = 0; offset < roots.length; offset += 4) {
+      if (!guard.isCurrent()) break;
+      await Promise.all(roots.slice(offset, offset + 4).map(async root => {
+        try { await state.deviceLodRuntime?.ensureBase?.(root); }
+        catch (error) { if (guard.isCurrent()) state.selectionMessage = `部分来源表示未能准备：${String(error)}`; }
+      }));
+    }
   }
   if (guard.isCurrent()) await updateEngineeringHighlight(state, request, options.fit ?? state.canAutoLocate(request), false, options.fit === undefined);
   return true;

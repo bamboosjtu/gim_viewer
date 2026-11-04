@@ -58,6 +58,17 @@ it('refines only composition, preserves semantic inputs and does not accumulate 
   }finally{f.dispose();}
 });
 
+it('does not rebuild a cached navigation projection on warm geometry evidence',async()=>{
+  const f=await fixture();
+  try {
+    f.state.engineeringNavigationCacheHit=true;
+    f.state.engineeringGeometryEvidenceChanged?.();
+    vi.advanceTimersByTime(500);
+    expect(ProjectionWorker.instances).toHaveLength(0);
+    expect(f.state.engineeringNavigation).toBeTruthy();
+  } finally { f.dispose(); }
+});
+
 it('rejects workers superseded during debounce, snapshot replacement, project switch and disposal',async()=>{
   const f=await fixture(),base=f.state.engineeringNavigation;
   const first=f.run();f.state.engineeringGeometryEvidenceChanged?.();first.reply();expect(f.state.engineeringNavigation).toBe(base);

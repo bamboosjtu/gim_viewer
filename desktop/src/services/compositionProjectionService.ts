@@ -38,13 +38,17 @@ export function installCompositionProjection(state: AppState): () => void {
   const current = () => !disposed && state.isCurrentSession(session);
   const reconcile = () => { void reconcileProjectionSelection(state).catch(error => { if (current()) console.warn('[工程投影选择]', error); }); };
   const update = () => {
-    if (!current()) return;
+    // A persisted navigation projection already contains the geometry/space
+    // refinement for this source identity. Rewarming must not run the
+    // composition worker again just because the renderer publishes the same
+    // regional bounds.
+    if (!current() || state.engineeringNavigationCacheHit) return;
     revision++;
     worker?.terminate(); worker = undefined;
     clearTimeout(timer); timer = setTimeout(run, 500);
   };
   function run() {
-    if (!current()) return;
+    if (!current() || state.engineeringNavigationCacheHit) return;
     const snapshot = state.engineeringSnapshot, view = state.engineeringNavigation, input = view?.compositionInput;
     if (!snapshot || !view || !input) return;
     // Start from semantic paths/search strings, rather than accumulating earlier
