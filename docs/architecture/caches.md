@@ -26,8 +26,6 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 | IFC Spatial parser | `gim-substation-parser-v25` | [Spatial 快照](../../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | 工程来源 | `engineering-source-v12` | [来源契约](../../desktop/src/gim/engineering/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；独立原子文件 |
 | 工程实体 | `engineering-entity-v4` + `engineering-wholes-10` + `engineering-catalog-v2` | [实体编码](../../desktop/src/services/engineeringCacheCodec.ts)、[目录规则](../../desktop/src/engineering/catalogRules.json) | 绑定来源内容摘要、实体 schema、规则版本；只重建实体 |
-
-工程来源/实体/导航的单域 JSON 超过 64 MiB 时按 64 MiB 分片独立 gzip，压缩体仍受 384 MiB 上限；解码后总 plain 上限 1 GiB。分片只在编码/恢复时存在，不改变 artifact 的身份或来源 SHA。
 | 工程导航 | `engineering-navigation-v9` + `engineering-composition-v10` + `engineering-source-tree-v1` + `engineering-inventory-v5` + 目录版本 | [三视图投影](../../desktop/src/gim/engineering/navigation.ts)、[导航缓存](../../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹和空间投影策略版本；校验节点可达性、完整投影标记与覆盖率；部分范围不写导航缓存 |
 | Fragments | `fragments-cache-v6` | [features](../../desktop/src/config/features.ts)、[db.rs](../../desktop/src-tauri/src/db.rs) | 源/IFC 身份及实际 fragments/web-ifc 版本；默认路径不启用 |
 | IFC 浏览 LOD | `bim-lod-v8` 组合 | [features](../../desktop/src/config/features.ts)、[LOD 缓存](../../desktop/bridge/ifcLodCache.ts) | 源 SHA、条目、LOD 策略、单次解析、依赖版本；分远景/近景/属性独立失效 |
@@ -38,12 +36,38 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 
 ## 3. 发布与恢复
 
-- **原子文件**：每个缓存文件有独立头、源 SHA 和完成凭据；先写临时文件，校验后 rename。工程来源、实体、导航各自独立，不能把部分写当成完整发布。导航只持久化具备全部 IFC 范围且投影完成的树；来源/实体仍可单独保存。
+### 3.1 先发布、后写缓存
+
+工程实体构建完成后先提交 `engineeringSources/snapshot/navigation`，再进入 `finishBuild → saveResult`。缓存编码/写入失败只改变 `engineeringCacheStatus`，不回滚已发布模型；工程切换或取消后，迟到的缓存结果不得提交。
+
+保存按 `sources → entities → navigation` 逐域请求 Worker 编码：
+
+- Worker 的 `encode-cache` 绑定 `buildId`，并要求请求域等于当前 `plan[0]`；
+- 编码成功才 `plan.shift()`，失败清空 plan；
+- 每域写入后立即释放 `encoded.bytes`，再编码下一域，避免三个域的压缩缓冲同时驻留；
+- 每次 `await` 后检查当前会话/构建身份；旧构建结果不写。
+
+### 3.2 分片与上限
+
+单域 JSON 超过 64 MiB 时按 64 MiB 分片独立 gzip；压缩体上限 384 MiB，解码后总 plain 上限 1 GiB。分片只在编码/恢复时存在，不改变 artifact 身份、来源 SHA 或域版本。读取时校验每片长度、顺序、总 plain 大小和 gzip 边界，任何一片缺失/损坏按整域失败处理。
+
+### 3.3 恢复判定
+
+- `sources`、`entities`、`navigation` 分别尝试；缺失/损坏的域按依赖重建，不删除其他有效域。
+- 只有实体和导航都命中时才标 `hit`；仅来源恢复（实体/导航仍需重建）标 `partial`，并写入明确原因。
+- 导航只持久化具备全部 IFC 范围且投影完成的树；部分 IFC 范围、空间投影未完成或组成覆盖率不足时不写导航缓存。
+- 来源恢复后仍校验来源清单/IFC 清单与域版本；只有来源文件存在不足以证明完整命中。
+
+### 3.4 原子性与暖恢复顺序
+
+- **原子文件**：每个缓存文件有独立头、源 SHA 和完成凭据；先写临时文件，校验后 rename。工程来源、实体、导航各自独立，不能把部分写当成完整发布。
 - **来源域**：原值/字段形状去重表保留 FAM 原行、重复字段、occurrence 地址和 IFC 空间上下文；缺条目/解析失败时不写完整来源凭据。
 - **实体/导航域**：绑定来源内容摘要；来源有效而实体规则变化时，只重建实体和导航，不重解析 IFC 或重编几何。实体快照未变时导航可独立重建。
 - **DEV 域**：模板和目录分别原子提交；manifest 损坏使几何域失效，但不删除有效语义域。单 DEV 坏 GLB 可局部回退原始几何。大 DEV 的装配子树部分只在 Worker 内存中存在，合并后仍写同一 DEV 模板键；部分不拥有独立持久化身份。L0 生成即持久化；L1 只在选中/显式提升或淘汰后再次请求时写入；L2、空、unsupported 与 source-invalid 终态默认不持久化。
 - **IFC 域**：远景 Fragments 或 bim-lod 产物、区域模板、按需属性分别缓存；远景 HIT 跳过源读取，近景 HIT 跳过源模型和对象求值；源 SHA 改变拒绝近景。
 - **暖恢复顺序**：语义/来源 → 实体 → 导航 → 几何/IFC。任何一步失败只影响该域，不能回滚已合法提交的其他域。
+
+原生 B1-3/B1-4 的冷暖、真实 SQLite/WebView 缓存体积和内存峰值仍未复测；Node/Worker 候选通过不能替代原生验收，见[问题与限制](../open-issues.md)。
 
 ## 4. 失效规则
 

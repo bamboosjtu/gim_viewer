@@ -31,9 +31,10 @@ docs/
 | 未关闭缺陷与接受限制 | [问题与限制](open-issues.md) |
 | 术语 | [术语表](glossary.md) |
 | 建筑推断规则 | [建筑推断](engineering/building-inference.md) |
+| 空间推断算法 | [空间推断](engineering/spatial-inference.md) |
 | 几何资产与表示索引 | [几何资产](architecture/geometry-assets.md) |
 
-`research/` 保存研究结论、复现脚本和样本证据，约束实现但不等于产品行为；`demo/` 保存原始 GIM 包和本地解包样本，大型文件由 Git 忽略。
+`research/` 只保留未关闭研究缺口、原始证据、复现脚本和规范参考；已实现结论维护在本 `docs/`，过程稿不长期保留。`demo/` 保存原始 GIM 包和本地解包样本，大型文件由 Git 忽略。
 
 ## 结构性约定
 

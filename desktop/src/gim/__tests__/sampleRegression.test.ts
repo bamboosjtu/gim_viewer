@@ -402,11 +402,19 @@ describe.skipIf(!hasSubstation)('样本回归·变电 demo-substation', () => {
     );
     expectSpatialEvidenceCoverage(index);
     expect(index.models.reduce((sum, model) => sum + model.resourceCount, 0)).toBeGreaterThan(0);
-    // Spatial Core v1 不再展开 Pset/工程量/材质/分类实体；属性详情由
-    // Fragments getItemsData() 在用户选择构件时按需读取。扫描计数仍保留，
-    // 用于诊断和验证没有把 IFC 属性误当成导航对象。
-    expect(index.models.reduce((sum, model) => sum + model.objectsWithProperties, 0)).toBe(0);
-    expect(index.models.reduce((sum, model) => sum + model.propertyValueCount, 0)).toBe(0);
+    // Only proxy classification fields are eager; full Psets/quantities stay
+    // deferred for Fragments getItemsData() on explicit selection.
+    expect(index.models.reduce((sum, model) => sum + model.objectsWithProperties, 0)).toBe(
+      index.objects.filter(object => object.propertySets?.length).length,
+    );
+    expect(index.models.reduce((sum, model) => sum + model.propertyValueCount, 0)).toBe(
+      index.objects.reduce((sum, object) => sum + (object.propertySets ?? [])
+        .reduce((count, group) => count + group.values.length, 0), 0),
+    );
+    expect(index.objects.filter(object => object.propertySets?.length).every(object =>
+      object.ifcType === 'IFCBUILDINGELEMENTPROXY'
+      && object.propertySets!.every(group => group.truncated === true
+        && group.values.every(value => /^(?:类别(?:\(Category\))?|Category)$/i.test(value.name))))).toBe(true);
     expect(index.models.reduce((sum, model) => sum + model.quantityValueCount, 0)).toBe(0);
     expect(index.objects.every((object) => object.propertyDataDeferred === true)).toBe(true);
     expect(index.nodes.every((node) => node.propertyDataDeferred === true)).toBe(true);

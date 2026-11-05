@@ -18,6 +18,8 @@
 - 表示索引由 `engineeringRepresentationService.ts` 构建：DEV 使用 `sourceId/rootOccurrence/assemblyPath/devPath`，IFC 使用 `sourceId/modelId/expressId`。
 - 模型树不反向改变模板键；切换三视图、搜索和选择不能触发几何重编译。
 - 单 occurrence 与多 occurrence 使用同一条 DEV 模板路径。
+- 暖启动成本由**唯一 DEV 模板数 + placement 数**驱动，不按工程实体数计价；同一模板的多个实例只增加 placement，不增加模板读取/解析。
+- IFC 按模型文件 LOD 与逐对象 `modelId/expressId` 绑定，不按工程实体编译；IFC 外露产品可以参与实体成员和选择，但不存在“一个实体一个 IFC 表示包”。
 
 ## 缓存层级
 
@@ -29,7 +31,7 @@
 
 全站最终都要生成全部设备的 L0，只是先生成视野内的设备；视野外 L0 仍留在请求集合中后台补齐。L1 只在视野内按投影大小生成，L2 只在用户请求时计算。远景 L0 与中景 L1 都跳过小构件和小布尔开孔，L1 增加可见分段，L2 才精确 CSG。
 
-很小的 DEV 由 Worker 队列合批调度，不拆模板键；大 DEV 按装配子树/MOD 任务拆分并行，再合并为单个 DEV 模板，最后按 occurrence placement 组装。重复来源模板共享缓存，不能按工程实体复制。
+很小的 DEV 由 Worker 队列合批调度，不拆模板键；大 DEV 优先按真实装配子树划分，对过重的子树继续拆分，没有更深装配边时按 MOD/STL 引用划分。计划分别估计唯一源文件读取量和重复引用的实例工作量，最多四个 Part、同时最多两个 Part Worker。临时 Part 输出共享 64 MiB 积压预算；合并前按输入字节预留三倍工作量，内存压力高或 Part 超额时回退整体编译。合并仍产出单个 DEV 模板，最后按 occurrence placement 组装；重复来源模板共享缓存，不能按工程实体复制。
 
 ## 当前限制
 

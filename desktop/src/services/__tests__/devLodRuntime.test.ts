@@ -565,3 +565,33 @@ it('reports exact finished counts without pre-incrementing an unfinished station
   internal.rows=new Map([['one',ready],['two',waiting]]);internal.ready();
   expect(status.mock.lastCall![0]).toContain('几何实例已处理 1/2');
 });
+it('persists a non-selected L1 after eviction, a second cache miss and recompilation',async()=>{
+ const {webcrypto}=await import('node:crypto');vi.stubGlobal('crypto',webcrypto);
+ const {serializeDevToGlbDetailed}=await import('../glbCacheService.js');
+ const files=new Map(Object.entries({
+  'DEV/hot.dev':'SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.phm',
+  'PHM/body.phm':'SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.mod',
+  'MOD/body.mod':'<Device><Entities><Entity ID="1"><Cuboid L="1000" W="1000" H="1000"/></Entity></Entities></Device>',
+ }).map(([path,text])=>[path,new File([text],path)]));
+ const result=await serializeDevToGlbDetailed('DEV/hot.dev',files,{lod:1});
+ const {internal}=fixture(),key=internal.key('DEV/hot.dev',1);
+ internal.cacheReader.read=vi.fn(async()=>({status:'miss',release:()=>{}}));
+ internal.catalogHint=vi.fn(async()=>({status:'miss'}));
+ internal.prepareMissingTemplateSources=vi.fn(async()=>{});
+ internal.worker={workerCount:1,cacheConcurrency:8,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn()};
+ const persist=vi.spyOn(internal,'persistArtifact').mockResolvedValue(undefined);
+ try{
+  internal.wanted.add(key);
+  const first=await internal.template('DEV/hot.dev',1,2);
+  expect(first).not.toBeNull();expect(internal.templateDemand.get(key)).toBe(1);
+  expect(persist).not.toHaveBeenCalled();
+  internal.templates.delete(key); // simulate the L1 memory eviction
+  const second=await internal.template('DEV/hot.dev',1,2);
+  expect(second).not.toBeNull();
+  expect(internal.cacheReader.read).toHaveBeenCalledTimes(2);
+  expect(internal.worker.compile).toHaveBeenCalledTimes(2);
+  expect(internal.templateDemand.get(key)).toBe(2);
+  await vi.waitFor(()=>expect(persist).toHaveBeenCalledOnce());
+  expect(persist.mock.calls[0][0]).toBe('templates');expect(persist.mock.calls[0][1]).toBe(key);
+ }finally{persist.mockRestore();vi.unstubAllGlobals();}
+});

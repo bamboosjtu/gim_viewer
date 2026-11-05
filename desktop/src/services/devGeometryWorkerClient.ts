@@ -13,12 +13,14 @@ interface SplitState {
   results: Array<DevGlbSerializationResult | undefined>;
   completed: number;
   fallbackTried: boolean;
+  heldBytes: number;
+  mergeReservation: number;
 }
 interface Slot { id: number; traceId: string; key: string; path: string; kind: 'compile' | 'bounds' | 'merge'; lod: DeviceLod; priority: number; queuedAt: number;
   promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void;
   /** Assembly-subtree child of a split template. */
   parent?: string;
-  partition?: { referencePaths: readonly string[]; canonicalDevPath: string; discovered: DiscoveredGeometries };
+  partition?: { referencePaths: readonly string[]; canonicalDevPath: string; discovered: DiscoveredGeometries; maxBytes: number };
   /** A merge fallback must use the monolithic compiler, never split again. */
   noSplit?: boolean;
   /** Parent-only state while real subtree parts are in flight. */
@@ -30,9 +32,10 @@ interface Slot { id: number; traceId: string; key: string; path: string; kind: '
 const clients = new WeakMap<AppState, DevGeometryPreprocessor>();
 let serial = 0;
 const IDLE_POOL_TIMEOUT_MS = 30_000;
+const SPLIT_MERGE_INPUT_BUDGET = 64 * 1024 * 1024;
 /** Computation slots and unacknowledged results have separate lifetimes.
- * Stop starting compiles at 64 MiB of exported results (or 2 results/worker).
- * Already running tasks may finish; one result is limited to 128 MiB. */
+ * The 64 MiB gate includes split buffers and the merge reservation as well as
+ * ordinary exported results. Each final result remains limited to 128 MiB. */
 export class DevGeometryPreprocessor {
   private workers: Worker[] = [];
   private slots = new Map<string, Slot>();
@@ -40,6 +43,8 @@ export class DevGeometryPreprocessor {
   private exported = new Map<string, { task: Slot; bytes: number }>();
   private exportedBytes = 0;
   private exportedPeakBytes = 0;
+  private splitHeldBytes = 0;
+  private mergeReservedBytes = 0;
   private stopped = false;
   private paused = false;
   private memoryPressure: MemoryPressure = 'unknown';
@@ -189,6 +194,7 @@ export class DevGeometryPreprocessor {
     if (task.settled) return;
     task.settled = true;
     this.slots.delete(task.key);
+    if(task.split)this.releaseSplitBuffers(task.split);
     task.mergeParts = undefined;
     for (const child of this.childrenOf(task.key)) this.cancelTaskTree(child, reason, terminateActive);
     if (terminateActive) {
@@ -207,11 +213,19 @@ export class DevGeometryPreprocessor {
     }
     task.reject(reason);
   }
+  private releaseSplitBuffers(split:SplitState):void {
+    this.splitHeldBytes-=split.heldBytes;split.heldBytes=0;split.results=[];
+    this.mergeReservedBytes-=split.mergeReservation;split.mergeReservation=0;
+  }
+  private updatePeak():void {this.exportedPeakBytes=Math.max(this.exportedPeakBytes,this.resultPressure.bytes);}
   private startSplit(task: Slot, plan: DevGeometryCompilePlan): void {
     if (task.settled) return;
     if (plan.parts.length < 2) { this.cancelTaskTree(task, new Error('DEV split plan has fewer than two parts'), false); return; }
-    const split: SplitState = task.split = { plan, results: new Array(plan.parts.length), completed: 0, fallbackTried: false };
+    const split: SplitState = task.split = { plan, results: new Array(plan.parts.length), completed: 0, fallbackTried: false,heldBytes:0,mergeReservation:0 };
     this.diagnostics.splitCompiles++;
+    if(this.memoryPressure==='high'||this.memoryPressure==='critical'){
+      this.fallbackSplit(task,new Error('DEV split disabled under memory pressure'));return;
+    }
     plan.parts.forEach((part, index) => {
       const partKey = `${task.key}::part${index}`;
       const child = this.createSlot('compile', task.path, task.lod, partKey, task.priority, undefined, {
@@ -220,6 +234,7 @@ export class DevGeometryPreprocessor {
           referencePaths: part.referencePaths,
           canonicalDevPath: split.plan.canonicalDevPath,
           discovered: { mods: part.mods, stls: part.stls },
+          maxBytes: Math.floor(SPLIT_MERGE_INPUT_BUDGET/plan.parts.length),
         },
       });
       this.diagnostics.splitParts++;
@@ -232,9 +247,14 @@ export class DevGeometryPreprocessor {
   private partFinished(parent: Slot, index: number, result: DevGlbSerializationResult): void {
     const split = parent.split;
     if (!split || parent.settled || split.results[index]) return;
+    const bytes=result.bytes?.byteLength??0;
+    split.heldBytes+=bytes;this.splitHeldBytes+=bytes;this.updatePeak();
+    if(split.heldBytes>SPLIT_MERGE_INPUT_BUDGET){
+      this.fallbackSplit(parent,new Error('DEV split merge input exceeds 64 MiB budget'));return;
+    }
     split.results[index] = result;
     split.completed++;
-    if (split.completed < split.plan.parts.length) return;
+    if (split.completed < split.plan.parts.length){this.pump();return;}
     const results = split.results.filter((row): row is DevGlbSerializationResult => !!row);
     const diagnostics = aggregateDevGlbDiagnostics(results);
     const parts = results.flatMap(row => row.bytes ? [row.bytes] : []);
@@ -243,25 +263,42 @@ export class DevGeometryPreprocessor {
       this.finishSplit(parent, { status: diagnostics.status, bytes: null, diagnostics });
       return;
     }
-    if (totalBytes > DEV_GLB_MAX_BYTES) {
-      this.cancelTaskTree(parent, new Error(`DEV split result exceeds ${DEV_GLB_MAX_BYTES} bytes: ${parent.path}`), true);
-      this.pump();
-      return;
+    if (this.memoryPressure==='high'||this.memoryPressure==='critical'){
+      this.fallbackSplit(parent,new Error('DEV split merge deferred under memory pressure'));return;
     }
     split.results = []; // buffers move to the merge worker; results are no longer needed
+    this.splitHeldBytes-=split.heldBytes;split.heldBytes=0;
+    split.mergeReservation=totalBytes*3;this.mergeReservedBytes+=split.mergeReservation;this.updatePeak();
     const merge = this.createSlot('merge', parent.path, parent.lod, `${parent.key}::merge`, parent.priority, undefined,
       { parent: parent.key, mergeParts: parts });
     this.diagnostics.splitMerges++;
     merge.promise.then(
-      merged => this.finishSplit(parent, { status: diagnostics.status, bytes: merged?.bytes ?? null, diagnostics }),
+      merged => this.finishSplit(parent, { status: diagnostics.status, bytes: merged?.bytes ?? null,sha256:merged?.sha256, diagnostics }),
       error => this.mergeFailed(parent, error),
     );
     this.pump();
   }
   private partFailed(parent: Slot, error: unknown): void {
     if (parent.settled) return;
+    if(parent.split?.fallbackTried)return;
     const reason = error instanceof Error ? error : new Error(String(error));
+    if(/split part exceeds reserved output budget/.test(reason.message)){
+      this.fallbackSplit(parent,reason);return;
+    }
     this.cancelTaskTree(parent, reason, true);
+    this.pump();
+  }
+  private fallbackSplit(parent:Slot,reason:Error):void {
+    const split=parent.split;
+    if(!split||parent.settled||split.fallbackTried)return;
+    split.fallbackTried=true;this.diagnostics.splitFallbacks++;
+    this.releaseSplitBuffers(split);
+    for(const child of this.childrenOf(parent.key))this.cancelTaskTree(child,reason,true);
+    const fallback=this.createSlot('compile',parent.path,parent.lod,`${parent.key}::fallback`,parent.priority,undefined,
+      {parent:parent.key,noSplit:true});
+    fallback.promise.then(result=>this.finishSplit(parent,result),error=>{
+      if(!parent.settled)this.cancelTaskTree(parent,error instanceof Error?error:new Error(String(error)),false);
+    });
     this.pump();
   }
   private mergeFailed(parent: Slot, error: unknown): void {
@@ -277,6 +314,7 @@ export class DevGeometryPreprocessor {
     // renders; this path is rare and never used for normal templates.
     split.fallbackTried = true;
     this.diagnostics.splitFallbacks++;
+    this.releaseSplitBuffers(split);
     const fallback = this.createSlot('compile', parent.path, parent.lod, `${parent.key}::fallback`, parent.priority, undefined,
       { parent: parent.key, noSplit: true });
     fallback.promise.then(
@@ -293,11 +331,12 @@ export class DevGeometryPreprocessor {
     if (parent.settled) return;
     parent.settled = true;
     this.slots.delete(parent.key);
+    if(parent.split)this.releaseSplitBuffers(parent.split);
     parent.split = undefined;
     if (result.bytes) {
       this.exported.set(parent.key, { task: parent, bytes: result.bytes.byteLength });
       this.exportedBytes += result.bytes.byteLength;
-      this.exportedPeakBytes = Math.max(this.exportedPeakBytes, this.exportedBytes);
+      this.updatePeak();
     }
     this.lastProgressAt = performance.now();
     parent.resolve(result);
@@ -312,7 +351,7 @@ export class DevGeometryPreprocessor {
     sourceAffinityHits: 0, sourceAffinityDeferrals: 0,
     stages: {} as Record<string, { count: number; totalMs: number; maxMs: number }>,
   };
-  get resultPressure() { return { bytes: this.exportedBytes, peakBytes: this.exportedPeakBytes, count: this.exported.size }; }
+  get resultPressure() { return { bytes: this.exportedBytes+this.splitHeldBytes+this.mergeReservedBytes, peakBytes: this.exportedPeakBytes, count: this.exported.size }; }
   get activePaths(): string[] { return [...this.active.values()].map(row => `${row.task.path} · ${row.finished ? '提交' : row.task.kind === 'bounds' ? '目录' : row.task.kind === 'merge' ? '合并' : `LOD${row.task.lod}`}`); }
   /** Upgrade authorized lazy sources without replacing active computation or
    * evicting its parse caches. Immutable Files share their backing storage. */
@@ -352,7 +391,7 @@ export class DevGeometryPreprocessor {
       let demand = this.targetWorkerCount;
       if (this.idleCompacted) {
         demand = 0;
-        const pressured = this.exportedBytes >= 64 * 1024 * 1024 || this.exported.size >= this.workerCount * 2;
+        const pressured = this.resultPressure.bytes >= 64 * 1024 * 1024 || this.exported.size >= this.workerCount * 2;
         for (const task of this.slots.values()) {
           // Paused/background or backpressured compiles are not demand for
           // new threads. Bounds and explicit user work remain eligible.
@@ -374,12 +413,16 @@ export class DevGeometryPreprocessor {
       if (this.active.has(worker)) continue;
       const running = new Set([...this.active.values()].map(row => row.task.key));
       const now = performance.now();
-      const pressured = this.exportedBytes >= 64 * 1024 * 1024 || this.exported.size >= this.workerCount * 2;
+      const pressured = this.resultPressure.bytes >= 64 * 1024 * 1024 || this.exported.size >= this.workerCount * 2;
+      const activeSplitParts=[...this.active.values()].filter(row=>!!row.task.partition).length;
       let task: Slot | undefined, best = Infinity;
       for (const candidate of this.slots.values()) {
         // Pausing background refinement leaves L0 and bounds work eligible so
         // the browser remains usable and the base representation can settle.
         if (candidate.split || running.has(candidate.key)) continue;
+        // A part can transiently hold its full 128 MiB serializer quota before
+        // the smaller transfer cap is checked. Keep at most two such workers.
+        if(candidate.partition && activeSplitParts>=2)continue;
         // Split parts and the final merge belong to an in-flight template. They
         // must not wait behind the exported-result gate: the template that owns
         // them cannot consume/acknowledge anything until they finish.
@@ -431,7 +474,7 @@ export class DevGeometryPreprocessor {
       try {
         const payload: Record<string, unknown> = { kind: task.kind, id: task.id, key: task.key, path: task.path, lod: task.lod, session: this.session };
         if (task.partition) payload.partition = task.partition;
-        if (task.noSplit) payload.noSplit = true;
+        if (task.noSplit || this.memoryPressure==='high' || this.memoryPressure==='critical') payload.noSplit = true;
         const transfer: Transferable[] = [];
         if (task.kind === 'merge') {
           const parts = task.mergeParts ?? [];
@@ -515,6 +558,9 @@ export class DevGeometryPreprocessor {
       this.pump();
       return;
     }
+    if(task.parent&&task.partition&&bytes>task.partition.maxBytes){
+      this.cancelTaskTree(task,new Error('DEV split part exceeds reserved output budget'),false);return;
+    }
     if (task.kind === 'merge') {
       task.settled = true; this.slots.delete(task.key); task.resolve(result);
       this.pump();
@@ -522,13 +568,12 @@ export class DevGeometryPreprocessor {
     }
     if (task.parent) {
       task.settled = true; this.slots.delete(task.key); task.resolve(result);
-      this.pump();
       return;
     }
     this.slots.delete(task.key);
     if (task.kind === 'compile' && bytes) {
       this.exported.set(task.key, { task, bytes }); this.exportedBytes += bytes;
-      this.exportedPeakBytes = Math.max(this.exportedPeakBytes, this.exportedBytes);
+      this.updatePeak();
     }
     task.resolve(result);
     this.pump();
@@ -588,7 +633,7 @@ export class DevGeometryPreprocessor {
       perfRecordTaskPhase(this.taskIdentity(task), 'requestWall', performance.now() - task.queuedAt, this.perf, 'cancelled');
       task.settled = true; task.reject(error); task.mergeParts = undefined;
     } this.slots.clear(); this.files = new Map();
-    this.exported.clear(); this.exportedBytes = 0; this.sourceAffinity.clear();
+    this.exported.clear(); this.exportedBytes = 0; this.splitHeldBytes=0;this.mergeReservedBytes=0;this.sourceAffinity.clear();
     this.lastUsedWorker = null;
     this.idleSince = null;
   }

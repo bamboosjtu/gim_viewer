@@ -911,7 +911,7 @@ export class DevLodRuntime {
       let artifact: CachedTemplate | undefined = lease.value;
       let parsed: Awaited<ReturnType<typeof parseDevGlbAsset>> = null;
       let generated = false;
-      let demand = 0;
+      let demand = lod === 1 ? this.templateDemand.get(key) ?? 0 : 0;
       if (!this.current()) return null;
       const cacheStatus = lease.status;
       if (cacheStatus === 'read-error') {

@@ -9,6 +9,7 @@
 | [实体与来源模型](entities.md) | 来源图、对象证据、整体/成员/关系/待归集合、身份与归一化顺序 |
 | [工程组成与三视图](composition.md) | 建筑工程/安装工程模板、分组依据、来源树、计数与搜索 |
 | [建筑推断](building-inference.md) | IFC/交付建筑名、楼层/房间、unbound 和同 GUID 边界 |
+| [空间推断](spatial-inference.md) | 建筑轮廓、命名投票、房间/区域归属、防火墙墙片与阈值 |
 | [清册模型树模板](inventory-template.md) | 独立分类/子类投影、计数、搜索与选择 |
 | [目录总则](catalogs/README.md) | 分类优先级、目录版本、未知/冲突处理 |
 | [设备目录](catalogs/equipment.md) | E01–E19、E-T、二次设备子类与成套边界 |

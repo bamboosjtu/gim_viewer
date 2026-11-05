@@ -17,6 +17,89 @@ class ControlledWorker {
   }
 }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); ControlledWorker.instances = []; resetGeometryWorkGateForTests(); });
+class SplitWorker {
+  static instances:SplitWorker[]=[];
+  onmessage:((event:{data:any})=>void)|null=null;
+  onerror:((event:any)=>void)|null=null;
+  sent:any[]=[];
+  terminate=vi.fn();
+  constructor(){SplitWorker.instances.push(this);}
+  postMessage(data:any){this.sent.push(data);}
+  complete(task:any,result:any){this.onmessage?.({data:{kind:'result',id:task.id,key:task.key,path:task.path,
+    session:task.session,result,wallMs:1,stages:{}}});}
+}
+it('charges each split buffer and merge reservation, then returns the merge SHA without a second scan',async()=>{
+  vi.stubGlobal('Worker',SplitWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true),internal=client as any;
+  const plan={canonicalDevPath:'DEV/large.dev',modCount:4,stlCount:0,estimatedBytes:4,estimatedInstanceWork:4,
+    parts:Array.from({length:4},(_,i)=>({key:`solid:${i}`,referencePaths:[`solid:${i}/mod:0`],modCount:1,stlCount:0,
+      estimatedBytes:1,estimatedInstanceWork:1,mods:[],stls:[]}))};
+  const pending=client.compile('DEV/large.dev',0,'large',1);
+  const partDiagnostics={status:'complete',discoveredModCount:1,discoveredStlCount:0,renderableModCount:1,
+    renderableStlCount:0,emptySourceCount:0,unsupportedSourceCount:0,partialSourceCount:0,unsupportedPrimitiveTypeCounts:{}};
+  try{
+    const root=[...internal.active].find(([,row]:any)=>row.task.key==='large') as [SplitWorker,any];
+    const rootInput=root[0].sent.find(row=>row.key==='large');
+    root[0].complete(rootInput,{status:'empty',bytes:null,plan,diagnostics:{status:'empty'}});
+    let first=true;
+    for(let i=0;i<4;i++){
+      const active=[...internal.active].find(([,row]:any)=>row.task.parent==='large'&&row.task.kind==='compile') as [SplitWorker,any];
+      expect(active).toBeTruthy();
+      const task=active[0].sent.find(row=>row.key===active[1].task.key);
+      expect(task.partition.maxBytes).toBe(16*1024*1024);
+      active[0].complete(task,{status:'complete',bytes:new Uint8Array(8*1024*1024),diagnostics:partDiagnostics});
+      await Promise.resolve();await Promise.resolve();
+      if(first){expect(client.resultPressure.bytes).toBe(8*1024*1024);first=false;}
+    }
+    const merge=[...internal.active].find(([,row]:any)=>row.task.kind==='merge') as [SplitWorker,any];
+    expect(merge).toBeTruthy();
+    expect(client.resultPressure.bytes).toBe(96*1024*1024); // 3x merge reservation
+    merge[0].complete(merge[0].sent.find(row=>row.key===merge[1].task.key),
+      {status:'complete',bytes:new Uint8Array(16),sha256:'merged-sha',diagnostics:{status:'complete'}});
+    const result=await pending;
+    expect(result.sha256).toBe('merged-sha');
+    expect(client.resultPressure).toMatchObject({bytes:16,count:1});
+    client.acknowledge('large');expect(client.resultPressure.bytes).toBe(0);
+  }finally{client.cancel();SplitWorker.instances=[];}
+});
+it('falls back to one compile when a split part exceeds its reserved transfer budget',async()=>{
+  vi.stubGlobal('Worker',SplitWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true),internal=client as any;
+  const plan={canonicalDevPath:'DEV/heavy.dev',modCount:2,stlCount:0,estimatedBytes:2,estimatedInstanceWork:2,
+    parts:[0,1].map(i=>({key:`solid:${i}`,referencePaths:[`solid:${i}/mod:0`],modCount:1,stlCount:0,
+      estimatedBytes:1,estimatedInstanceWork:1,mods:[],stls:[]}))};
+  const pending=client.compile('DEV/heavy.dev',0,'heavy',1);
+  try{
+    const root=[...internal.active].find(([,row]:any)=>row.task.key==='heavy') as [SplitWorker,any];
+    root[0].complete(root[0].sent.find(row=>row.key==='heavy'),{status:'empty',bytes:null,plan,diagnostics:{status:'empty'}});
+    const child=[...internal.active].find(([,row]:any)=>row.task.parent==='heavy') as [SplitWorker,any];
+    expect(child[0].sent.find(row=>row.key===child[1].task.key).partition.maxBytes).toBe(32*1024*1024);
+    child[0].complete(child[0].sent.find(row=>row.key===child[1].task.key),
+      {status:'complete',bytes:new Uint8Array(33*1024*1024),diagnostics:{status:'complete'}});
+    await Promise.resolve();await Promise.resolve();
+    const fallback=[...internal.active].find(([,row]:any)=>row.task.key==='heavy::fallback') as [SplitWorker,any];
+    expect(fallback).toBeTruthy();
+    expect(fallback[0].sent.find(row=>row.key==='heavy::fallback').noSplit).toBe(true);
+    expect(client.resultPressure.bytes).toBe(0);
+    fallback[0].complete(fallback[0].sent.find(row=>row.key==='heavy::fallback'),
+      {status:'complete',bytes:new Uint8Array(3),sha256:'fallback-sha',diagnostics:{status:'complete'}});
+    expect((await pending).sha256).toBe('fallback-sha');
+    expect(client.diagnostics.splitFallbacks).toBe(1);
+  }finally{client.cancel();SplitWorker.instances=[];}
+});
+it('disables split planning on a high-memory-pressure compile request',async()=>{
+  vi.stubGlobal('Worker',SplitWorker);vi.stubGlobal('navigator',{hardwareConcurrency:4,deviceMemory:4});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true),internal=client as any;
+  try{
+    client.setMemoryPressure('high');
+    const pending=client.compile('DEV/large.dev',0,'large',1);
+    const active=[...internal.active].find(([,row]:any)=>row.task.key==='large') as [SplitWorker,any];
+    const task=active[0].sent.find(row=>row.key==='large');expect(task.noSplit).toBe(true);
+    active[0].complete(task,{status:'complete',bytes:new Uint8Array(2),diagnostics:{status:'complete'}});
+    expect((await pending).bytes?.byteLength).toBe(2);
+    client.acknowledge('large');
+  }finally{client.cancel();SplitWorker.instances=[];}
+});
 it('upgrades immutable sources in active workers and replacement initialization without restarting healthy tasks or accepting stale work', async () => {
   vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:4,deviceMemory:8});
   let current=true;

@@ -129,6 +129,8 @@ self.onmessage = async ({ data }) => {
       }
     }
     const bytes = 'bytes' in result ? result.bytes : null;
+    if(data.partition?.maxBytes&&bytes&&bytes.byteLength>data.partition.maxBytes)
+      throw Error('DEV split part exceeds reserved output budget');
     if (bytes && 'bytes' in result) result.sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>))].map(v => v.toString(16).padStart(2,'0')).join('');
     scope.postMessage({ kind: 'result', id: data.id, session: data.session, key: data.key, path: data.path,
       result, wallMs: performance.now() - started, stages: { ...stats, ...stages } }, bytes ? [bytes.buffer as ArrayBuffer] : []);

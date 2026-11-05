@@ -89,6 +89,8 @@ export interface DevGeometryPart {
   modCount: number;
   stlCount: number;
   estimatedBytes: number;
+  /** Repeated occurrences count even when they reuse one source file. */
+  estimatedInstanceWork: number;
   /** Exact discovered edges for this part. A part can compile without walking
    * the whole DEV/PHM graph again; identity stays the source DEV template. */
   mods: DiscoveredModGeometry[];
@@ -101,6 +103,7 @@ export interface DevGeometryCompilePlan {
   modCount: number;
   stlCount: number;
   estimatedBytes: number;
+  estimatedInstanceWork: number;
 }
 
 export interface DevCompilationAnalysis {
@@ -113,8 +116,8 @@ type GeometryEdge = DiscoveredModGeometry | DiscoveredStlGeometry;
 const edgeReference = (edge: GeometryEdge): string => edge.referencePath || edge.instanceKey;
 const edgeFile = (edge: GeometryEdge): string => 'modPath' in edge ? edge.modPath : edge.stlPath;
 
-/** Unique referenced file bytes, used only for scheduling; never a geometry
- * completeness claim. Repeated instances of one MOD count once. */
+/** Unique referenced file bytes estimate parsing cost. Repeated instances of
+ * one MOD count once here and separately in estimateInstanceWork(). */
 function estimateEdgeBytes(edges: readonly GeometryEdge[], files: Map<string, File>): number {
   const paths = new Set<string>();
   let total = 0;
@@ -126,6 +129,11 @@ function estimateEdgeBytes(edges: readonly GeometryEdge[], files: Map<string, Fi
   }
   return total;
 }
+function estimateInstanceWork(edges: readonly GeometryEdge[], files: Map<string, File>): number {
+  return edges.reduce((total, edge) => total + Math.max(16 * 1024,
+    Math.min(2 * 1024 * 1024, getFileByPath(files, edgeFile(edge))?.size ?? 0)), 0);
+}
+const partWork = (part: DevGeometryPart) => part.estimatedBytes + part.estimatedInstanceWork;
 
 function partFromEdges(key: string, edges: readonly GeometryEdge[], files: Map<string, File>): DevGeometryPart {
   return {
@@ -134,6 +142,7 @@ function partFromEdges(key: string, edges: readonly GeometryEdge[], files: Map<s
     modCount: edges.filter(edge => 'modPath' in edge).length,
     stlCount: edges.filter(edge => 'stlPath' in edge).length,
     estimatedBytes: estimateEdgeBytes(edges, files),
+    estimatedInstanceWork: estimateInstanceWork(edges, files),
     mods: edges.filter((edge): edge is DiscoveredModGeometry => 'modPath' in edge),
     stls: edges.filter((edge): edge is DiscoveredStlGeometry => 'stlPath' in edge),
   };
@@ -142,12 +151,29 @@ function partFromEdges(key: string, edges: readonly GeometryEdge[], files: Map<s
 /** Keep real assembly subtrees intact while bounding the number of parts. */
 function balanceParts(parts: DevGeometryPart[], maxParts: number): DevGeometryPart[] {
   if (parts.length <= maxParts) return parts;
+  if(parts.length>64){
+    // The source may expose thousands of direct children. The adjacent-pair
+    // search below is quadratic; coalesce source-order runs in one pass first.
+    const target=parts.reduce((sum,part)=>sum+partWork(part),0)/maxParts;
+    const runs:DevGeometryPart[][]=[];let run:DevGeometryPart[]=[],work=0;
+    for(const part of parts){
+      run.push(part);work+=partWork(part);
+      if(work>=target&&runs.length<maxParts-1){runs.push(run);run=[];work=0;}
+    }
+    if(run.length)runs.push(run);
+    return runs.map(rows=>rows.reduce((left,right)=>({
+      key:`${left.key}+${right.key}`,referencePaths:[...left.referencePaths,...right.referencePaths].sort(),
+      modCount:left.modCount+right.modCount,stlCount:left.stlCount+right.stlCount,
+      estimatedBytes:left.estimatedBytes+right.estimatedBytes,
+      estimatedInstanceWork:left.estimatedInstanceWork+right.estimatedInstanceWork,
+      mods:[...left.mods,...right.mods],stls:[...left.stls,...right.stls],
+    })));
+  }
   const list = parts.slice();
   while (list.length > maxParts) {
     let best = -1, bestCost = Infinity;
     for (let i = 0; i < list.length - 1; i++) {
-      const cost = (list[i].referencePaths.length + list[i + 1].referencePaths.length) * 1024
-        + list[i].estimatedBytes + list[i + 1].estimatedBytes;
+      const cost = partWork(list[i]) + partWork(list[i + 1]);
       if (cost < bestCost) { bestCost = cost; best = i; }
     }
     const [left, right] = [list[best], list[best + 1]];
@@ -157,6 +183,7 @@ function balanceParts(parts: DevGeometryPart[], maxParts: number): DevGeometryPa
       modCount: left.modCount + right.modCount,
       stlCount: left.stlCount + right.stlCount,
       estimatedBytes: left.estimatedBytes + right.estimatedBytes,
+      estimatedInstanceWork: left.estimatedInstanceWork + right.estimatedInstanceWork,
       mods: [...left.mods, ...right.mods],
       stls: [...left.stls, ...right.stls],
     });
@@ -179,46 +206,50 @@ export function buildDevCompilePlan(
   const edges: GeometryEdge[] = [...discovered.mods, ...discovered.stls];
   if (edges.length < DEV_SPLIT_MIN_EDGES) return null;
   const estimatedBytes = estimateEdgeBytes(edges, files);
-  // Splitting has a real per-part export + merge cost. It only pays when the
-  // referenced source bytes are large; a device with many tiny instances stays
-  // one template task, matching the pre-split path.
-  if (estimatedBytes < DEV_SPLIT_MIN_BYTES) return null;
+  const estimatedInstanceWork = estimateInstanceWork(edges, files);
+  // Split only when parsing or repeated occurrence/export work can amortize
+  // the per-part GLB export and final merge cost.
+  if (estimatedBytes < DEV_SPLIT_MIN_BYTES && estimatedInstanceWork < DEV_SPLIT_MIN_BYTES) return null;
   const cap = Math.max(2, Math.min(DEV_SPLIT_MAX_PARTS, Math.floor(maxParts)));
   const segments = (edge: GeometryEdge): string[] => edgeReference(edge).split('/').filter(Boolean);
 
-  let grouped: Map<string, GeometryEdge[]> | null = null;
-  for (let depth = 1; depth <= 3; depth++) {
-    const groups = new Map<string, GeometryEdge[]>();
-    for (const edge of edges) {
-      const key = segments(edge).slice(0, depth).join('/');
-      const bucket = groups.get(key) ?? [];
-      bucket.push(edge); groups.set(key, bucket);
-    }
-    if (groups.size >= 2) {
-      grouped = groups;
-      // Descend one more level when one subtree still dominates, so a single
-      // dense PHM does not become one oversized part beside a tiny sibling.
-      const largest = Math.max(...[...groups.values()].map(rows => rows.length));
-      if (largest <= edges.length * 0.6) break;
-    } else if (segments(edges[0]).length <= depth) break;
+  const first = new Map<string, GeometryEdge[]>();
+  for (const edge of edges) {
+    const key = segments(edge)[0] ?? edgeReference(edge);
+    const rows = first.get(key) ?? []; rows.push(edge); first.set(key, rows);
   }
-
-  let parts: DevGeometryPart[];
-  if (grouped && grouped.size >= 2) {
-    parts = [...grouped.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
-      .map(([key, rows]) => partFromEdges(key, rows, files));
-  } else {
-    // Single dense subtree: contiguous MOD-task batches, never a synthetic
-    // assembly identity.
-    const chunks = Math.max(2, Math.min(cap, Math.ceil(edges.length / 8)));
-    const sorted = edges.slice().sort((a, b) => edgeReference(a) < edgeReference(b) ? -1 : 1);
-    const size = Math.ceil(sorted.length / chunks);
-    parts = [];
-    for (let start = 0; start < sorted.length; start += size) {
-      parts.push(partFromEdges(`mod-task:${parts.length}`, sorted.slice(start, start + size), files));
+  let parts = balanceParts([...first].sort(([a],[b])=>a.localeCompare(b))
+    .map(([key,rows])=>partFromEdges(key,rows,files)),cap);
+  // Repeatedly split the heaviest *actual* subtree. At capacity merge the two
+  // lightest neighboring parts first, then spend the freed slot on that subtree.
+  for(let attempts=0;attempts<cap*4;attempts++){
+    const total=parts.reduce((sum,part)=>sum+partWork(part),0);
+    const largest=[...parts].sort((a,b)=>partWork(b)-partWork(a))[0];
+    if(!largest||largest.referencePaths.length<2||parts.length>1&&partWork(largest)<=total/cap*1.5)break;
+    const refs=new Map<string,GeometryEdge[]>();
+    for(const edge of [...largest.mods,...largest.stls]){
+      const key=edgeReference(edge),rows=refs.get(key)??[];rows.push(edge);refs.set(key,rows);
     }
+    if(refs.size<2)break; // one indivisible source occurrence
+    const depth=largest.key.split('/').filter(Boolean).length;
+    const branches=new Map<string,GeometryEdge[]>();
+    for(const [,rows] of refs){const key=segments(rows[0])[depth]??'';const branch=branches.get(key)??[];branch.push(...rows);branches.set(key,branch);}
+    let children:DevGeometryPart[];
+    if(branches.size>=2 && branches.size<=cap && !branches.has('')) children=[...branches].sort(([a],[b])=>a.localeCompare(b))
+      .map(([key,rows])=>partFromEdges(`${largest.key}/${key}`,rows,files));
+    else {
+      // No deeper assembly node: balance atomic MOD/STL occurrence references.
+      const atomic=[...refs].sort(([a],[b])=>a.localeCompare(b));
+      const target=partWork(largest)/2;let sum=0,splitAt=0;
+      for(let i=0;i<atomic.length-1;i++){sum+=partWork(partFromEdges(atomic[i][0],atomic[i][1],files));splitAt=i+1;if(sum>=target)break;}
+      const left=atomic.slice(0,splitAt).flatMap(([,rows])=>rows),right=atomic.slice(splitAt).flatMap(([,rows])=>rows);
+      children=[partFromEdges(`${largest.key}/mod-task:0`,left,files),partFromEdges(`${largest.key}/mod-task:1`,right,files)];
+    }
+    if(children.length<2)break;
+    const next=parts.filter(part=>part!==largest).concat(children);
+    parts=balanceParts(next,cap);
   }
-  parts = balanceParts(parts, cap).filter(part => part.referencePaths.length > 0);
+  parts=parts.filter(part=>part.referencePaths.length>0);
   if (parts.length < 2) return null;
   return {
     canonicalDevPath,
@@ -226,6 +257,7 @@ export function buildDevCompilePlan(
     modCount: discovered.mods.length,
     stlCount: discovered.stls.length,
     estimatedBytes,
+    estimatedInstanceWork,
   };
 }
 

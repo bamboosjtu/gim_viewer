@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { serializeDevToGlb, serializeDevToGlbDetailed, parseDevGlbAsset, analyzeDevCompilation, mergeDevGlbParts, InvalidDevGeometryError } from '../glbCacheService.js';
+import { serializeDevToGlb, serializeDevToGlbDetailed, parseDevGlbAsset, analyzeDevCompilation, buildDevCompilePlan, mergeDevGlbParts, InvalidDevGeometryError } from '../glbCacheService.js';
+import type { DiscoveredGeometries, DiscoveredModGeometry } from '../modGeometryDiscovery.js';
 import { collectDeviceGroups } from '../nodeInteractionService.js';
 import { AppState } from '../../app/state.js';
 
@@ -236,4 +237,90 @@ it('keeps a small DEV on the single-template compiler path', async () => {
   const analysis = await analyzeDevCompilation('DEV/small.dev', files);
   expect(analysis.plan).toBeNull();
   expect((await serializeDevToGlbDetailed('DEV/small.dev', files)).status).toBe('complete');
+});
+
+it('subdivides a dominant PHM and counts repeated MOD occurrences separately from unique source bytes',()=>{
+  const paths=['a','b','c','d'];
+  const discovered:DiscoveredGeometries={mods:paths.flatMap((part,g)=>Array.from({length:g===0?1000:10},(_,i)=>({
+    modPath:`MOD/${part}.mod`,referencePath:`solid:${g}/phm:0/mod:${i}`,instanceKey:`${part}:${i}`,
+  } as DiscoveredModGeometry))),stls:[]};
+  const files=new Map(paths.map(part=>[`MOD/${part}.mod`,file(' '.repeat(128*1024),`${part}.mod`)]));
+  const plan=buildDevCompilePlan(discovered,files);
+  expect(plan).not.toBeNull();expect(plan!.parts.length).toBeGreaterThanOrEqual(3);
+  expect(plan!.parts.length).toBeLessThanOrEqual(4);
+  expect(Math.max(...plan!.parts.map(part=>part.estimatedInstanceWork))).toBeLessThan(plan!.estimatedInstanceWork*0.6);
+  expect(plan!.parts.flatMap(part=>part.referencePaths).sort()).toEqual(discovered.mods.map(edge=>edge.referencePath!).sort());
+  const repeated:DiscoveredGeometries={mods:Array.from({length:1000},(_,i)=>({
+    modPath:'MOD/reused.mod',referencePath:`solid:0/phm:0/mod:${i}`,instanceKey:`repeat:${i}`,
+  } as DiscoveredModGeometry)),stls:[]};
+  const shared=buildDevCompilePlan(repeated,new Map([['MOD/reused.mod',file(' '.repeat(128*1024),'reused.mod')]]));
+  expect(shared).not.toBeNull();expect(shared!.estimatedBytes).toBe(128*1024);
+  expect(shared!.estimatedInstanceWork).toBeGreaterThan(DEV_SPLIT_MIN_BYTES_FOR_TEST);
+  expect(Math.max(...shared!.parts.map(part=>part.modCount))).toBeLessThan(600);
+});
+
+const DEV_SPLIT_MIN_BYTES_FOR_TEST=6*1024*1024;
+
+it('matches monolithic and split+merge world geometry across nested PHM, repeated MOD, STL, empty and unsupported leaves',async()=>{
+  const move=(x:number,y:number,z:number)=>`1,0,0,0,0,1,0,0,0,0,1,0,${x},${y},${z},1`;
+  const stl=new ArrayBuffer(134),stlView=new DataView(stl);
+  stlView.setUint32(80,1,true);
+  [[0,0,0],[1000,0,0],[0,1000,0]].forEach((point,i)=>point.forEach((value,j)=>stlView.setFloat32(96+i*12+j*4,value,true)));
+  const content=new Map<string,File>([
+    ['DEV/complex.dev',file(`SOLIDMODELS.NUM=2\nSOLIDMODEL0=a.phm\nTRANSFORMMATRIX0=${move(1000,0,0)}\nSOLIDMODEL1=b.phm`,'complex.dev')],
+    ['PHM/a.phm',file(`SOLIDMODELS.NUM=1\nSOLIDMODEL0=nested.phm\nTRANSFORMMATRIX0=${move(0,2000,0)}`,'a.phm')],
+    ['PHM/nested.phm',file(`SOLIDMODELS.NUM=2\nSOLIDMODEL0=reused.mod\nTRANSFORMMATRIX0=${move(0,0,0)}\nSOLIDMODEL1=reused.mod\nTRANSFORMMATRIX1=${move(2000,0,0)}`,'nested.phm')],
+    ['PHM/b.phm',file(`SOLIDMODELS.NUM=3\nSOLIDMODEL0=piece.stl\nCOLOR0=220,30,40,255\nTRANSFORMMATRIX0=${move(0,0,1000)}\nSOLIDMODEL1=empty.mod\nSOLIDMODEL2=unknown.mod`,'b.phm')],
+    ['MOD/reused.mod',file('<Device><Entities><Entity ID="1" Visible="true"><Cuboid L="1000" W="500" H="700"/></Entity></Entities></Device>','reused.mod')],
+    ['MOD/empty.mod',file('<Device><Entities/></Device>','empty.mod')],
+    ['MOD/unknown.mod',file('<Device><Entities><Entity ID="1" Visible="true"><UnknownPrimitive/></Entity></Entities></Device>','unknown.mod')],
+    ['MOD/piece.stl',new File([stl],'piece.stl')],
+  ]);
+  const analysis=await analyzeDevCompilation('DEV/complex.dev',content);
+  expect(analysis.discovered.mods).toHaveLength(4);
+  expect(analysis.discovered.stls).toHaveLength(1);
+  const mono=await serializeDevToGlbDetailed('DEV/complex.dev',content,{lod:2,canonicalDevPath:analysis.canonicalDevPath,discovered:analysis.discovered});
+  const groups=[analysis.discovered.mods.filter(edge=>edge.phmPath.endsWith('nested.phm')),
+    analysis.discovered.mods.filter(edge=>edge.phmPath.endsWith('b.phm'))];
+  const partitions=[{mods:groups[0],stls:[]},{mods:groups[1],stls:analysis.discovered.stls}];
+  const parts=await Promise.all(partitions.map(part=>serializeDevToGlbDetailed('DEV/complex.dev',content,{
+    lod:2,canonicalDevPath:analysis.canonicalDevPath,discovered:analysis.discovered,
+    partition:{referencePaths:[...part.mods,...part.stls].map(edge=>edge.referencePath!)},
+  })));
+  const merged=await mergeDevGlbParts('DEV/complex.dev',parts.filter(part=>part.bytes).map(part=>part.bytes!));
+  const first=await parseDevGlbAsset('DEV/complex.dev',mono.bytes!);
+  const second=await parseDevGlbAsset('DEV/complex.dev',merged);
+  expect(first&&second).toBeTruthy();
+  expect(parts.reduce((count,part)=>count+part.diagnostics.discoveredModCount,0)).toBe(mono.diagnostics.discoveredModCount);
+  expect(parts.reduce((count,part)=>count+part.diagnostics.discoveredStlCount,0)).toBe(mono.diagnostics.discoveredStlCount);
+  expect(parts.reduce((count,part)=>count+part.diagnostics.unsupportedSourceCount,0)).toBe(mono.diagnostics.unsupportedSourceCount);
+  const summarize=(root:THREE.Object3D)=>{
+    root.updateMatrixWorld(true);
+    const triangles:string[]=[],materials=new Map<string,number>();let meshCount=0;
+    root.traverse(object=>{
+      const mesh=object as THREE.Mesh;
+      if(!mesh.isMesh||!mesh.geometry?.getAttribute('position'))return;
+      meshCount++;
+      const geometry=mesh.geometry,position=geometry.getAttribute('position'),index=geometry.getIndex();
+      const material=mesh.material as THREE.MeshStandardMaterial;
+      const color=`${material.color?.getHexString()??'none'}:${Math.round((material.opacity??1)*1000)}`;
+      const count=index?.count??position.count;
+      for(let i=0;i+2<count;i+=3){
+        const vertex=[0,1,2].map(offset=>new THREE.Vector3().fromBufferAttribute(position,index?.getX(i+offset)??i+offset)
+          .applyMatrix4(mesh.matrixWorld).toArray().map(n=>Math.round(n*10000)).join(','));
+        triangles.push(`${color}:${vertex.sort().join('|')}`);
+      }
+      materials.set(color,(materials.get(color)??0)+Math.floor(count/3));
+    });
+    return {meshCount,triangles:triangles.sort(),materials:[...materials].sort(),bounds:[...new THREE.Box3().setFromObject(root).min.toArray(),...new THREE.Box3().setFromObject(root).max.toArray()]};
+  };
+  const left=summarize(first!.scene),right=summarize(second!.scene);
+  expect(mono.status).toBe('partial');
+  expect(parts.map(part=>part.status)).toEqual(['complete','partial']);
+  expect(left.triangles.length).toBeGreaterThan(0);
+  expect(right.triangles).toEqual(left.triangles);
+  expect(right.materials).toEqual(left.materials);
+  expect(right.bounds).toEqual(left.bounds);
+  expect(left.meshCount).toBeGreaterThan(0);
+  expect(right.meshCount).toBe(left.meshCount);
 });
