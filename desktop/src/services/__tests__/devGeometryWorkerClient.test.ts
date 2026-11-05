@@ -433,3 +433,73 @@ it('does not retire active or paused queued work, and a cancelled queue gets a f
     expect(ControlledWorker.instances.length).toBe(created);
   }finally{client.cancel();}
 });
+
+const splitDiagnostics = (mods: number) => ({ status: 'complete' as const, discoveredModCount: mods, discoveredStlCount: 0,
+  renderableModCount: mods, renderableStlCount: 0, emptySourceCount: 0, unsupportedSourceCount: 0,
+  partialSourceCount: 0, unsupportedPrimitiveTypeCounts: {} });
+function sentTasks(predicate: (data: any) => boolean) {
+  return ControlledWorker.instances.flatMap(worker => worker.sent.filter(predicate).map(data => ({ worker, data })));
+}
+function deliver(worker: ControlledWorker, task: any, result: any, error?: string) {
+  worker.onmessage?.({ data: { kind: 'result', id: task.id, key: task.key, path: task.path,
+    session: task.session, result, error, wallMs: 1, stages: {} } });
+}
+
+it('runs a large DEV as assembly-subtree parts on the whole pool and merges one template', async () => {
+  vi.stubGlobal('Worker', ControlledWorker);
+  vi.stubGlobal('navigator', { hardwareConcurrency: 4, deviceMemory: 8 });
+  vi.stubGlobal('localStorage', { getItem: (key: string) => key === 'gim-dev-workers' ? '2' : null, setItem() {}, removeItem() {} });
+  const client = new DevGeometryPreprocessor([], new Map(), () => true);
+  try {
+    const pending = client.compile('DEV/huge.dev', 0, 'key', 0);
+    const first = sentTasks(data => data.kind === 'compile')[0];
+    const plan = { canonicalDevPath: 'DEV/huge.dev', parts: [
+      { key: 'solid:0', referencePaths: ['solid:0/phm:0'], modCount: 12, stlCount: 0, estimatedBytes: 1, mods: [], stls: [] },
+      { key: 'solid:1', referencePaths: ['solid:1/phm:0'], modCount: 12, stlCount: 0, estimatedBytes: 1, mods: [], stls: [] },
+    ], modCount: 24, stlCount: 0, estimatedBytes: 2 };
+    deliver(first.worker, first.data, { status: 'empty', bytes: null, diagnostics: splitDiagnostics(24), plan });
+    const parts = sentTasks(data => data.kind === 'compile' && data.key.includes('::part'));
+    expect(parts).toHaveLength(2);
+    expect(new Set(parts.map(part => part.worker)).size).toBe(2);
+    deliver(parts[0].worker, parts[0].data, { status: 'complete', bytes: new Uint8Array([1]), diagnostics: splitDiagnostics(12) });
+    deliver(parts[1].worker, parts[1].data, { status: 'complete', bytes: new Uint8Array([2]), diagnostics: splitDiagnostics(12) });
+    await Promise.resolve(); await Promise.resolve();
+    const merge = sentTasks(data => data.kind === 'merge')[0];
+    expect(merge.data.parts).toHaveLength(2);
+    deliver(merge.worker, merge.data, { status: 'complete', bytes: new Uint8Array([9, 9]), diagnostics: splitDiagnostics(0) });
+    const result = await pending;
+    expect(result.bytes).toEqual(new Uint8Array([9, 9]));
+    expect(result.diagnostics.discoveredModCount).toBe(24);
+    expect(client.diagnostics).toMatchObject({ splitCompiles: 1, splitParts: 2, splitMerges: 1, splitFallbacks: 0 });
+    client.acknowledge('key');
+  } finally { client.cancel(); }
+});
+
+it('falls back once to the monolithic compiler when a split merge fails', async () => {
+  vi.stubGlobal('Worker', ControlledWorker);
+  vi.stubGlobal('navigator', { hardwareConcurrency: 4, deviceMemory: 8 });
+  vi.stubGlobal('localStorage', { getItem: (key: string) => key === 'gim-dev-workers' ? '2' : null, setItem() {}, removeItem() {} });
+  const client = new DevGeometryPreprocessor([], new Map(), () => true);
+  try {
+    const pending = client.compile('DEV/huge.dev', 0, 'key', 0);
+    const first = sentTasks(data => data.kind === 'compile')[0];
+    deliver(first.worker, first.data, { status: 'empty', bytes: null, diagnostics: splitDiagnostics(24), plan: { canonicalDevPath: 'DEV/huge.dev', parts: [
+      { key: 'a', referencePaths: ['solid:0'], modCount: 12, stlCount: 0, estimatedBytes: 1, mods: [], stls: [] },
+      { key: 'b', referencePaths: ['solid:1'], modCount: 12, stlCount: 0, estimatedBytes: 1, mods: [], stls: [] },
+    ], modCount: 24, stlCount: 0, estimatedBytes: 2 } });
+    const parts = sentTasks(data => data.kind === 'compile' && data.key.includes('::part'));
+    deliver(parts[0].worker, parts[0].data, { status: 'complete', bytes: new Uint8Array([1]), diagnostics: splitDiagnostics(12) });
+    deliver(parts[1].worker, parts[1].data, { status: 'complete', bytes: new Uint8Array([2]), diagnostics: splitDiagnostics(12) });
+    await Promise.resolve(); await Promise.resolve();
+    const merge = sentTasks(data => data.kind === 'merge')[0];
+    deliver(merge.worker, merge.data, undefined, 'merge exploded');
+    await Promise.resolve(); await Promise.resolve();
+    const fallback = sentTasks(data => data.kind === 'compile' && data.key.includes('::fallback'))[0];
+    expect(fallback.data.noSplit).toBe(true);
+    deliver(fallback.worker, fallback.data, { status: 'complete', bytes: new Uint8Array([7]), diagnostics: splitDiagnostics(24) });
+    const result = await pending;
+    expect(result.bytes).toEqual(new Uint8Array([7]));
+    expect(client.diagnostics).toMatchObject({ splitCompiles: 1, splitFallbacks: 1 });
+    client.acknowledge('key');
+  } finally { client.cancel(); }
+});

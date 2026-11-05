@@ -57,7 +57,16 @@ describe('construction and operation engineering wholes', () => {
     expect(bySource.get('attached')).toMatchObject({ownerId:bySource.get('capacitor')!.ownerId,interpretation:{meaning:'part',basis:'equipment_terminal_composition',independent:false}});
     expect(model.entities.find(e=>e.category==='E16.terminal_box')!.sourceIds).toEqual(['standalone']);
     expect(build([source('free','独立机构箱')]).entities[0].category).toBe('E17');
-    expect(build([source('bay','组合电器GIS'),source('explicit','端子箱',{assemblyParentId:'bay',objectRoles:[value('independent')]})]).entities).toHaveLength(2);
+    // The host category must not decide the boundary. A real assembly edge makes
+    // a terminal box a host component even when a source declares it independent.
+    const gisBox=build([source('bay','组合电器GIS'),source('explicit','端子箱',{assemblyParentId:'bay',objectRoles:[value('independent')]})]);
+    expect(gisBox.entities).toHaveLength(1);
+    expect(gisBox.memberships.find(m=>m.sourceId==='explicit')).toMatchObject({ownerId:gisBox.entities[0].id,interpretation:{meaning:'part',basis:'equipment_terminal_composition',independent:false}});
+    for (const [host,category] of [['main','主变压器'],['cap','并联电容器成套装置']] as const) {
+      const embedded=build([source(host,category,{typeCategory:host==='main'?'E01':'E10'}),source(`${host}-box`,'端子箱',{assemblyParentId:host,objectRoles:[value('independent')]})]);
+      expect(embedded.entities).toHaveLength(1);
+      expect(embedded.entities[0].sourceIds).toEqual([host,`${host}-box`]);
+    }
     expect(build([source('cabin','预制舱'),source('field-box','端子箱',{assemblyParentId:'cabin'})]).entities).toHaveLength(2);
     expect(build([source('other','未知对象'),source('box','端子箱',{assemblyParentId:'other'})]).entities).toHaveLength(2);
   });

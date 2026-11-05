@@ -1,5 +1,6 @@
 import type { AppState, ProjectLoadSession } from '../app/state.js';
-import type { DevGlbSerializationResult } from './glbCacheService.js';
+import { DEV_GLB_MAX_BYTES, aggregateDevGlbDiagnostics, type DevGeometryCompilePlan, type DevGlbSerializationResult } from './glbCacheService.js';
+import type { DiscoveredGeometries } from './modGeometryDiscovery.js';
 import type { DeviceLod } from '../viewer/xmlModGeometry.js';
 import type { DevSourceBounds } from './devSpatialCatalog.js';
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
@@ -7,8 +8,25 @@ import { perfCurrentSession, perfMark, perfRecordTaskPhase, perfMeasureTaskPhase
 import { beginDevGeometryWork, hasCompletedIfcWork, ifcGeometryBusy, onGeometryWorkAvailable, geometryWorkSnapshot } from '../viewer/geometryWorkGate.js';
 import { agedWorkPriority } from '../utils/workPriority.js';
 import type { MemoryPressure } from '../utils/memoryPressure.js';
-interface Slot { id: number; traceId: string; key: string; path: string; kind: 'compile' | 'bounds'; lod: DeviceLod; priority: number; queuedAt: number;
-  promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void }
+interface SplitState {
+  plan: DevGeometryCompilePlan;
+  results: Array<DevGlbSerializationResult | undefined>;
+  completed: number;
+  fallbackTried: boolean;
+}
+interface Slot { id: number; traceId: string; key: string; path: string; kind: 'compile' | 'bounds' | 'merge'; lod: DeviceLod; priority: number; queuedAt: number;
+  promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void;
+  /** Assembly-subtree child of a split template. */
+  parent?: string;
+  partition?: { referencePaths: readonly string[]; canonicalDevPath: string; discovered: DiscoveredGeometries };
+  /** A merge fallback must use the monolithic compiler, never split again. */
+  noSplit?: boolean;
+  /** Parent-only state while real subtree parts are in flight. */
+  split?: SplitState;
+  /** Pending part buffers handed to the merge worker once. */
+  mergeParts?: Uint8Array[];
+  settled?: boolean;
+}
 const clients = new WeakMap<AppState, DevGeometryPreprocessor>();
 let serial = 0;
 const IDLE_POOL_TIMEOUT_MS = 30_000;
@@ -104,6 +122,8 @@ export class DevGeometryPreprocessor {
       paused: this.paused, memoryPressure: this.memoryPressure, idleWorkerReclaims: this.diagnostics.idleWorkerReclaims, results: this.resultPressure, gate: geometryWorkSnapshot(),
       targetWorkers: this.targetWorkerCount, idlePoolShrinks: this.diagnostics.idlePoolShrinks,
       idleCompacted: this.idleCompacted,
+      splitCompiles: this.diagnostics.splitCompiles, splitParts: this.diagnostics.splitParts,
+      splitMerges: this.diagnostics.splitMerges, splitFallbacks: this.diagnostics.splitFallbacks,
       idleMs: this.idleSince === null ? 0 : Math.max(0, now - this.idleSince),
       tasks: [...this.active.values()].slice(0, 8).map(({ task, startedAt }) => ({ id: task.id,
         path: task.path, lod: task.lod, kind: task.kind, priority: task.priority, elapsedMs: now - startedAt })) };
@@ -148,16 +168,152 @@ export class DevGeometryPreprocessor {
       lod: task.lod, priority: task.priority, cacheSource: task.kind === 'bounds' ? 'source' : 'compiled', generation: this.perf.generation,
       workerSession: this.session, workerTaskId: task.id};
   }
+  private createSlot(kind: Slot['kind'], path: string, lod: DeviceLod, key: string, priority: number,
+    traceId?: string, extra: Partial<Slot> = {}): { task: Slot; promise: Promise<any> } {
+    let resolve!: Slot['resolve'], reject!: Slot['reject'];
+    const promise = new Promise<any>((res, rej) => { resolve = res; reject = rej; });
+    const id = ++this.sequence;
+    const task: Slot = { id, traceId: traceId ?? `${this.perf.id}:dev-worker:${this.session}:${id}`, key, path, kind, lod, priority,
+      queuedAt: performance.now(), promise, resolve, reject };
+    Object.assign(task, extra);
+    this.slots.set(key, task);
+    return { task, promise };
+  }
+  private childrenOf(key: string): Slot[] {
+    return [...this.slots.values()].filter(task => task.parent === key);
+  }
+  /** Reject one task and its split children. Active subtree workers are
+   * terminated only for an explicit cancellation, not for a source failure
+   * that already has a definite result. */
+  private cancelTaskTree(task: Slot, reason: Error, terminateActive: boolean): void {
+    if (task.settled) return;
+    task.settled = true;
+    this.slots.delete(task.key);
+    task.mergeParts = undefined;
+    for (const child of this.childrenOf(task.key)) this.cancelTaskTree(child, reason, terminateActive);
+    if (terminateActive) {
+      for (const [worker, owner] of [...this.active]) {
+        if (owner.task !== task) continue;
+        this.active.delete(worker);
+        owner.release?.(); owner.release = null;
+        worker.terminate();
+        this.workers = this.workers.filter(value => value !== worker);
+        if (this.lastUsedWorker === worker) this.lastUsedWorker = null;
+        for (const [path, value] of this.sourceAffinity) if (value === worker) this.sourceAffinity.delete(path);
+        if (!this.stopped && this.current()) {
+          try { this.addWorker(this.workers.length + 1); } catch { /* healthy workers drain */ }
+        }
+      }
+    }
+    task.reject(reason);
+  }
+  private startSplit(task: Slot, plan: DevGeometryCompilePlan): void {
+    if (task.settled) return;
+    if (plan.parts.length < 2) { this.cancelTaskTree(task, new Error('DEV split plan has fewer than two parts'), false); return; }
+    const split: SplitState = task.split = { plan, results: new Array(plan.parts.length), completed: 0, fallbackTried: false };
+    this.diagnostics.splitCompiles++;
+    plan.parts.forEach((part, index) => {
+      const partKey = `${task.key}::part${index}`;
+      const child = this.createSlot('compile', task.path, task.lod, partKey, task.priority, undefined, {
+        parent: task.key,
+        partition: {
+          referencePaths: part.referencePaths,
+          canonicalDevPath: split.plan.canonicalDevPath,
+          discovered: { mods: part.mods, stls: part.stls },
+        },
+      });
+      this.diagnostics.splitParts++;
+      child.promise.then(
+        result => this.partFinished(task, index, result),
+        error => this.partFailed(task, error),
+      );
+    });
+  }
+  private partFinished(parent: Slot, index: number, result: DevGlbSerializationResult): void {
+    const split = parent.split;
+    if (!split || parent.settled || split.results[index]) return;
+    split.results[index] = result;
+    split.completed++;
+    if (split.completed < split.plan.parts.length) return;
+    const results = split.results.filter((row): row is DevGlbSerializationResult => !!row);
+    const diagnostics = aggregateDevGlbDiagnostics(results);
+    const parts = results.flatMap(row => row.bytes ? [row.bytes] : []);
+    const totalBytes = parts.reduce((total, bytes) => total + bytes.byteLength, 0);
+    if (!parts.length) {
+      this.finishSplit(parent, { status: diagnostics.status, bytes: null, diagnostics });
+      return;
+    }
+    if (totalBytes > DEV_GLB_MAX_BYTES) {
+      this.cancelTaskTree(parent, new Error(`DEV split result exceeds ${DEV_GLB_MAX_BYTES} bytes: ${parent.path}`), true);
+      this.pump();
+      return;
+    }
+    split.results = []; // buffers move to the merge worker; results are no longer needed
+    const merge = this.createSlot('merge', parent.path, parent.lod, `${parent.key}::merge`, parent.priority, undefined,
+      { parent: parent.key, mergeParts: parts });
+    this.diagnostics.splitMerges++;
+    merge.promise.then(
+      merged => this.finishSplit(parent, { status: diagnostics.status, bytes: merged?.bytes ?? null, diagnostics }),
+      error => this.mergeFailed(parent, error),
+    );
+    this.pump();
+  }
+  private partFailed(parent: Slot, error: unknown): void {
+    if (parent.settled) return;
+    const reason = error instanceof Error ? error : new Error(String(error));
+    this.cancelTaskTree(parent, reason, true);
+    this.pump();
+  }
+  private mergeFailed(parent: Slot, error: unknown): void {
+    const split = parent.split;
+    if (!split || parent.settled) return;
+    if (split.fallbackTried) {
+      this.cancelTaskTree(parent, error instanceof Error ? error : new Error(String(error)), false);
+      this.pump();
+      return;
+    }
+    // A merge failure is a merge-machinery problem, not a source failure. Fall
+    // back once to the established monolithic compiler so a huge DEV still
+    // renders; this path is rare and never used for normal templates.
+    split.fallbackTried = true;
+    this.diagnostics.splitFallbacks++;
+    const fallback = this.createSlot('compile', parent.path, parent.lod, `${parent.key}::fallback`, parent.priority, undefined,
+      { parent: parent.key, noSplit: true });
+    fallback.promise.then(
+      result => this.finishSplit(parent, result),
+      reason => {
+        if (parent.settled) return;
+        this.cancelTaskTree(parent, reason instanceof Error ? reason : new Error(String(reason)), false);
+        this.pump();
+      },
+    );
+    this.pump();
+  }
+  private finishSplit(parent: Slot, result: DevGlbSerializationResult): void {
+    if (parent.settled) return;
+    parent.settled = true;
+    this.slots.delete(parent.key);
+    parent.split = undefined;
+    if (result.bytes) {
+      this.exported.set(parent.key, { task: parent, bytes: result.bytes.byteLength });
+      this.exportedBytes += result.bytes.byteLength;
+      this.exportedPeakBytes = Math.max(this.exportedPeakBytes, this.exportedBytes);
+    }
+    this.lastProgressAt = performance.now();
+    parent.resolve(result);
+    this.pump();
+  }
   readonly diagnostics = {
     reads: 0, rpcReads: 0, sourceHits: 0, documentHits: 0,
     readRpcMs: 0, decodeMs: 0, parseMs: 0, queueWaitMs: 0,
     boundsTasks: 0, compileTasks: 0, failedTasks: 0,
+    splitCompiles: 0, splitParts: 0, splitMerges: 0, splitFallbacks: 0,
     timedOutTasks: 0, stallSnapshots: 0, idleWorkerReclaims: 0, idlePoolShrinks: 0,
     sourceAffinityHits: 0, sourceAffinityDeferrals: 0,
     stages: {} as Record<string, { count: number; totalMs: number; maxMs: number }>,
   };
   get resultPressure() { return { bytes: this.exportedBytes, peakBytes: this.exportedPeakBytes, count: this.exported.size }; }
-  get activePaths(): string[] { return [...this.active.values()].map(row => `${row.task.path} · ${row.finished ? '提交' : row.task.kind === 'bounds' ? '目录' : `LOD${row.task.lod}`}`); }
+  get activePaths(): string[] { return [...this.active.values()].map(row => `${row.task.path} · ${row.finished ? '提交' : row.task.kind === 'bounds' ? '目录' : row.task.kind === 'merge' ? '合并' : `LOD${row.task.lod}`}`); }
   /** Upgrade authorized lazy sources without replacing active computation or
    * evicting its parse caches. Immutable Files share their backing storage. */
   installSources(files: Map<string, File>): void {
@@ -201,6 +357,7 @@ export class DevGeometryPreprocessor {
           // Paused/background or backpressured compiles are not demand for
           // new threads. Bounds and explicit user work remain eligible.
           if (task.kind === 'compile' && (pressured || this.paused && task.lod > 0 && task.priority > 0)) continue;
+          if (task.split) continue;
           if (++demand >= this.targetWorkerCount) break;
         }
       }
@@ -222,12 +379,19 @@ export class DevGeometryPreprocessor {
       for (const candidate of this.slots.values()) {
         // Pausing background refinement leaves L0 and bounds work eligible so
         // the browser remains usable and the base representation can settle.
-        if (running.has(candidate.key) || candidate.kind === 'compile' && (((this.paused || this.memoryPressure === 'high' || this.memoryPressure === 'critical') && candidate.lod > 0 && candidate.priority > 0) || pressured)) continue;
+        if (candidate.split || running.has(candidate.key)) continue;
+        // Split parts and the final merge belong to an in-flight template. They
+        // must not wait behind the exported-result gate: the template that owns
+        // them cannot consume/acknowledge anything until they finish.
+        const ownTemplate = !!candidate.parent || candidate.kind === 'merge';
+        const gated = candidate.kind === 'compile' || candidate.kind === 'merge';
+        if (!ownTemplate && gated && (((this.paused || this.memoryPressure === 'high' || this.memoryPressure === 'critical') && candidate.lod > 0 && candidate.priority > 0) || pressured)) continue;
         const affinity = this.sourceAffinity.get(candidate.path.toLowerCase());
-        // Keep one source serial on its preferred worker.  Unrelated sources
-        // still fill the remaining workers, so a pathological source cannot
-        // become a global scheduling gate.
-        if (affinity && affinity !== worker && this.workers.includes(affinity)) {
+        // Keep one source serial on its preferred worker. Split parts are the
+        // exception: they must use the whole pool or a large DEV would still
+        // compile on one worker. Unrelated sources still fill the remaining
+        // workers, so a pathological source cannot become a global gate.
+        if (!candidate.parent && affinity && affinity !== worker && this.workers.includes(affinity)) {
           this.diagnostics.sourceAffinityDeferrals++;
           continue;
         }
@@ -242,8 +406,9 @@ export class DevGeometryPreprocessor {
       if (!task) continue;
       const ifcBusy = ifcGeometryBusy();
       const compileLimit = hasCompletedIfcWork() && !ifcBusy ? this.workers.length : 2;
-      const release = task.kind === 'compile' ? beginDevGeometryWork(compileLimit) : null;
-      if (task.kind === 'compile' && !release) {
+      const gated = task.kind === 'compile' || task.kind === 'merge';
+      const release = gated ? beginDevGeometryWork(compileLimit) : null;
+      if (gated && !release) {
         // Do not leave idle workers blocked behind a full compile gate: catalog
         // bounds are independent and must keep progressing.
         let boundsTask: Slot | undefined;
@@ -263,7 +428,19 @@ export class DevGeometryPreprocessor {
       this.diagnostics.queueWaitMs += Math.max(0, performance.now() - task.queuedAt);
       if (task.kind === 'bounds') this.diagnostics.boundsTasks++; else this.diagnostics.compileTasks++;
       perfRecordTaskPhase(this.taskIdentity(task), 'workerQueue', Math.max(0, performance.now() - task.queuedAt), this.perf);
-      try {worker.postMessage({ kind: task.kind, id: task.id, key: task.key, path: task.path, lod: task.lod, session: this.session });}
+      try {
+        const payload: Record<string, unknown> = { kind: task.kind, id: task.id, key: task.key, path: task.path, lod: task.lod, session: this.session };
+        if (task.partition) payload.partition = task.partition;
+        if (task.noSplit) payload.noSplit = true;
+        const transfer: Transferable[] = [];
+        if (task.kind === 'merge') {
+          const parts = task.mergeParts ?? [];
+          payload.parts = parts;
+          for (const bytes of parts) transfer.push(bytes.buffer as ArrayBuffer);
+          task.mergeParts = undefined;
+        }
+        worker.postMessage(payload, transfer);
+      }
       catch(error){this.workerFailed(worker,error instanceof Error?error:Error(String(error)));}
     }
     this.trackIdle();
@@ -285,7 +462,8 @@ export class DevGeometryPreprocessor {
     }
     const owner = this.active.get(worker), task = owner?.task;
     if (data.kind !== 'result' || !task || data.id !== task.id || data.session !== this.session || data.key !== task.key) return;
-    this.slots.delete(task.key); owner!.finished = true;
+    owner!.finished = true;
+    this.active.delete(worker);
     this.lastProgressAt = performance.now();
     this.lastUsedWorker = worker;
     owner!.release?.(); owner!.release = null;
@@ -311,31 +489,64 @@ export class DevGeometryPreprocessor {
     this.diagnostics.parseMs += Number(stages.validateParseMs) || 0;
     perfRecordTaskPhase(this.taskIdentity(task), 'workerWall', data.wallMs ?? performance.now() - owner!.startedAt,
       this.perf, data.error ? 'failed' : 'completed', data.result?.bytes?.byteLength ?? 0);
-    const bytes = data.result?.bytes?.byteLength ?? 0;
-    if (data.error) task.reject(data.sourceEvidence ? new InvalidDevGeometryError(task.path, data.error, data.sourceEvidence) : new Error(data.error));
-    else if (bytes > 128 * 1024 * 1024) task.reject(new Error('DEV compiled result exceeds 128 MiB quota'));
-    else {
-      if (task.kind === 'compile' && bytes) {
-        this.exported.set(task.key, { task, bytes }); this.exportedBytes += bytes;
-        this.exportedPeakBytes = Math.max(this.exportedPeakBytes, this.exportedBytes);
-      }
-      task.resolve(data.result);
+    if (data.error) {
+      const error = data.sourceEvidence
+        ? new InvalidDevGeometryError(task.path, data.error, data.sourceEvidence)
+        : new Error(data.error);
+      this.cancelTaskTree(task, error, false);
+      this.pump();
+      return;
     }
-    this.active.delete(worker);
+    const result = data.result as DevGlbSerializationResult;
+    // A large DEV returns a real assembly-subtree plan instead of bytes. The
+    // parent stays in the slot map as the single template owner while its
+    // parts run on the same bounded pool.
+    if (task.kind === 'compile' && !task.parent && result?.plan) {
+      try { this.startSplit(task, result.plan); }
+      catch (error) {
+        this.cancelTaskTree(task, error instanceof Error ? error : new Error(String(error)), false);
+      }
+      this.pump();
+      return;
+    }
+    const bytes = result?.bytes?.byteLength ?? 0;
+    if (bytes > DEV_GLB_MAX_BYTES) {
+      this.cancelTaskTree(task, new Error('DEV compiled result exceeds 128 MiB quota'), false);
+      this.pump();
+      return;
+    }
+    if (task.kind === 'merge') {
+      task.settled = true; this.slots.delete(task.key); task.resolve(result);
+      this.pump();
+      return;
+    }
+    if (task.parent) {
+      task.settled = true; this.slots.delete(task.key); task.resolve(result);
+      this.pump();
+      return;
+    }
+    this.slots.delete(task.key);
+    if (task.kind === 'compile' && bytes) {
+      this.exported.set(task.key, { task, bytes }); this.exportedBytes += bytes;
+      this.exportedPeakBytes = Math.max(this.exportedPeakBytes, this.exportedBytes);
+    }
+    task.resolve(result);
     this.pump();
   }
   private request(kind: Slot['kind'], path: string, lod: DeviceLod, key: string, priority: number, traceId?: string): Promise<any> {
     if (this.stopped || !this.current()) return Promise.reject(this.terminalError ?? new DOMException('DEV session expired', 'AbortError'));
     const old = this.slots.get(key) ?? this.exported.get(key)?.task; if (old) { old.priority = Math.min(old.priority, priority); return old.promise; }
-    let resolve!: Slot['resolve'], reject!: Slot['reject'];
-    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
-    const id = ++this.sequence;
-    this.slots.set(key, { id, traceId: traceId ?? `${this.perf.id}:dev-worker:${this.session}:${id}`, key, path, kind, lod, priority, queuedAt: performance.now(), promise, resolve, reject });
+    const { promise } = this.createSlot(kind, path, lod, key, priority, traceId);
     this.pump(); return promise;
   }
   compile(path: string, lod: DeviceLod, key: string, priority: number, traceId?: string): Promise<DevGlbSerializationResult> { return this.request('compile', path, lod, key, priority, traceId); }
   bounds(path: string): Promise<DevSourceBounds> { return this.request('bounds', path, 0, `bounds:${path.toLowerCase()}`, 0.4); }
-  promote(key: string, priority: number): void { const slot = this.slots.get(key); if (slot) slot.priority = Math.min(slot.priority, priority); this.pump(); }
+  promote(key: string, priority: number): void {
+    for (const task of this.slots.values()) {
+      if (task.key === key || task.parent === key) task.priority = Math.min(task.priority, priority);
+    }
+    this.pump();
+  }
   /** Whole-DEV browsing compile used by the progressive GLB serialization path. */
   take(path: string): Promise<DevGlbSerializationResult> {
     const key = `progressive:${path.toLowerCase()}`;
@@ -351,31 +562,20 @@ export class DevGeometryPreprocessor {
   cancelTask(key: string): void {
     const task = this.slots.get(key);
     if (!task) return;
-    this.slots.delete(key);
-    for (const [worker, owner] of this.active) {
-      if (owner.task !== task) continue;
-      this.active.delete(worker);
-      owner.release?.();
-      worker.terminate();
-      this.workers = this.workers.filter(value => value !== worker);
-      if (this.lastUsedWorker === worker) this.lastUsedWorker = null;
-      for (const [path, value] of this.sourceAffinity) if (value === worker) this.sourceAffinity.delete(path);
-      if (!this.stopped && this.current()) {
-        try { this.addWorker(this.workers.length + 1); }
-        catch { /* Cancellation still settles; healthy workers keep draining. */ }
-      }
-      break;
-    }
-    task.reject(new DOMException('DEV precision request cancelled', 'AbortError'));
+    const reason = new DOMException('DEV precision request cancelled', 'AbortError');
     perfRecordTaskPhase(this.taskIdentity(task), 'requestWall', performance.now() - task.queuedAt, this.perf, 'cancelled');
+    this.cancelTaskTree(task, reason, true);
     if (!this.workers.length) { this.cancel(new Error('DEV worker replacement unavailable')); return; }
     this.pump();
   }
   cancelQueued(keep: ReadonlySet<string>): void {
     const running = new Set([...this.active.values()].map(row => row.task));
-    for (const [key, task] of this.slots) if (!running.has(task) && task.kind === 'compile' && !keep.has(key)) {
+    for (const task of [...this.slots.values()]) {
+      if (running.has(task) || task.kind !== 'compile' && task.kind !== 'merge') continue;
+      // A split part is owned by its template key, not by a public view key.
+      if (keep.has(task.parent ?? task.key)) continue;
       perfRecordTaskPhase(this.taskIdentity(task), 'requestWall', performance.now() - task.queuedAt, this.perf, 'cancelled');
-      this.slots.delete(key); task.reject(new DOMException('DEV request left the current view', 'AbortError'));
+      this.cancelTaskTree(task, new DOMException('DEV request left the current view', 'AbortError'), false);
     }
     this.trackIdle();
   }
@@ -386,7 +586,7 @@ export class DevGeometryPreprocessor {
     for (const row of this.active.values()) row.release?.(); this.active.clear();
     for (const task of this.slots.values()) {
       perfRecordTaskPhase(this.taskIdentity(task), 'requestWall', performance.now() - task.queuedAt, this.perf, 'cancelled');
-      task.reject(error);
+      task.settled = true; task.reject(error); task.mergeParts = undefined;
     } this.slots.clear(); this.files = new Map();
     this.exported.clear(); this.exportedBytes = 0; this.sourceAffinity.clear();
     this.lastUsedWorker = null;

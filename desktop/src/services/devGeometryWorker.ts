@@ -1,6 +1,6 @@
-import { serializeDevToGlbDetailed } from './glbCacheService.js';
+import { analyzeDevCompilation, mergeDevGlbParts, serializeDevToGlbDetailed, type DevGlbSerializationResult } from './glbCacheService.js';
 import { parseWorkerXmlMod } from '../gim/geometry/xmlModWorkerParser.js';
-import { buildDevSourceBounds } from './devSpatialCatalog.js';
+import { buildDevSourceBounds, type DevSourceBounds } from './devSpatialCatalog.js';
 import { ByteLru } from '../utils/byteLru.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import { parseDev } from '../gim/geometry/devParser.js';
@@ -82,7 +82,7 @@ self.onmessage = async ({ data }) => {
     }
     return;
   }
-  if (!['compile', 'bounds'].includes(data.kind) || running) {
+  if (!['compile', 'bounds', 'merge'].includes(data.kind) || running) {
     scope.postMessage({kind:'result',id:data.id,session:data.session,key:data.key,path:data.path,
       error:running?'DEV worker already running':`Unsupported DEV worker task: ${String(data.kind)}`});return;
   }
@@ -90,8 +90,44 @@ self.onmessage = async ({ data }) => {
   stages = {};
   stats = { readRpcMs: 0, blobReadMs: 0, decodeMs: 0, validateParseMs: 0, reads: 0, rpcReads: 0, sourceHits: 0, documentHits: 0 };
   try {
-    const result = data.kind === 'bounds' ? await buildDevSourceBounds(data.path, files, parse, discovery)
-      : await serializeDevToGlbDetailed(data.path, files, { parseXml: parse, discovery, lod: data.lod, timings: stages });
+    let result: DevGlbSerializationResult | DevSourceBounds;
+    if (data.kind === 'bounds') {
+      result = await buildDevSourceBounds(data.path, files, parse, discovery);
+    } else if (data.kind === 'merge') {
+      const bytes = await mergeDevGlbParts(data.path, data.parts as Uint8Array[]);
+      result = { status: 'complete', bytes, diagnostics: {
+        status: 'complete', discoveredModCount: 0, discoveredStlCount: 0, renderableModCount: 0,
+        renderableStlCount: 0, emptySourceCount: 0, unsupportedSourceCount: 0, partialSourceCount: 0,
+        unsupportedPrimitiveTypeCounts: {},
+      } };
+    } else {
+      if (data.partition) {
+        // The plan already discovered the whole DEV/PHM graph once. Part
+        // workers reuse their exact edge slice instead of re-traversing it.
+        const partition = data.partition as { referencePaths: string[]; canonicalDevPath: string; discovered: import('./modGeometryDiscovery.js').DiscoveredGeometries };
+        result = await serializeDevToGlbDetailed(data.path, files, {
+          parseXml: parse, discovery, lod: data.lod, timings: stages,
+          canonicalDevPath: partition.canonicalDevPath, discovered: partition.discovered,
+          partition: { referencePaths: partition.referencePaths },
+        });
+      } else {
+        const analysis = await analyzeDevCompilation(data.path, files, { discovery });
+        if (!data.noSplit && analysis.plan) {
+          // Ask the main thread to run real assembly-subtree parts in parallel.
+          // No template bytes are published for the plan itself.
+          result = { status: 'empty', bytes: null, plan: analysis.plan, diagnostics: {
+            status: 'empty', discoveredModCount: analysis.plan.modCount, discoveredStlCount: analysis.plan.stlCount,
+            renderableModCount: 0, renderableStlCount: 0, emptySourceCount: 0, unsupportedSourceCount: 0,
+            partialSourceCount: 0, unsupportedPrimitiveTypeCounts: {},
+          } };
+        } else {
+          result = await serializeDevToGlbDetailed(data.path, files, {
+            parseXml: parse, discovery, lod: data.lod, timings: stages,
+            canonicalDevPath: analysis.canonicalDevPath, discovered: analysis.discovered,
+          });
+        }
+      }
+    }
     const bytes = 'bytes' in result ? result.bytes : null;
     if (bytes && 'bytes' in result) result.sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>))].map(v => v.toString(16).padStart(2,'0')).join('');
     scope.postMessage({ kind: 'result', id: data.id, session: data.session, key: data.key, path: data.path,

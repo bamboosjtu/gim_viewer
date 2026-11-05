@@ -13,6 +13,12 @@ const reserve = (row: ObjectEvidence) => row.designations.some(p=>/备用|预留
  * exists. A standalone source keeps its independent catalog role. */
 const embeddedAccessory = /端子箱|端子排|机构箱|操动机构|操作机构|电动机构|散热器|油枕|冷却器|风扇|分接开关|吸湿器|温控器|压力释放|柜体|门扇|门框|电缆终端|电源切换箱|动力箱|分支箱|灯具|指示灯|监控器|监控终端|监控模块/;
 const explicitIndependent = (row: ObjectEvidence) => row.objectRoles?.some(p=>p.value==='independent') ?? false;
+/** A real DEV assembly edge into an equipment host. Host category is not a
+ * discriminator: transformers, GIS, capacitor banks and other equipment embed
+ * their accessories the same way. A prefabricated cabin (E18) is a building
+ * boundary, and unknown hosts cannot prove device composition. */
+const embeddedEquipmentHost = (category: string | undefined) =>
+  !!category && category.startsWith('E') && category !== 'E18';
 function wholeName(row:ObjectEvidence,category:string):string {
   const number=explicitMain(row);
   if(category==='E01'&&number)return `${number}号${reserve(row)?'备用':''}主变`;
@@ -156,7 +162,10 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       else bundle(sourceId, 'neutral_set_main_unresolved', [sourceId]);
     } else if (m.category==='E16.terminal_box' && above && (
       transformer(aboveCategory)||pending.get(above)?.reason==='neutral_set_main_unresolved'
-      ||aboveCategory?.startsWith('E')&&aboveCategory!=='E18'&&!row.objectRoles?.some(p=>p.value==='independent'))) {
+      ||embeddedEquipmentHost(aboveCategory))) {
+      // A genuinely embedded terminal box is part of its host assembly. An
+      // explicit independent role does not detach it, and the host being a
+      // main transformer, GIS or capacitor bank does not change the boundary.
       m.meaning='part';m.independent=false;m.basis=transformer(aboveCategory)||pending.get(above)?.reason==='neutral_set_main_unresolved'?'transformer_terminal_composition':'equipment_terminal_composition';
       owners.set(sourceId,above);
     } else if (m.category==='E17'&&m.subtype==='机构箱'&&above&&aboveCategory?.startsWith('E')&&aboveCategory!=='E18'

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { serializeDevToGlb, serializeDevToGlbDetailed, parseDevGlbAsset, InvalidDevGeometryError } from '../glbCacheService.js';
+import * as THREE from 'three';
+import { serializeDevToGlb, serializeDevToGlbDetailed, parseDevGlbAsset, analyzeDevCompilation, mergeDevGlbParts, InvalidDevGeometryError } from '../glbCacheService.js';
 import { collectDeviceGroups } from '../nodeInteractionService.js';
 import { AppState } from '../../app/state.js';
 
@@ -195,4 +196,44 @@ it('outline serialization filters across MOD boundaries and retains one silhouet
     expect(result.diagnostics).toMatchObject({representationPolicy:'outline',renderableModCount:1,emptySourceCount:0,omittedSmallParts:big?1:2});
     expect(await parseDevGlbAsset('DEV/test.dev',result.bytes!)).not.toBeNull();
   }
+});
+
+it('splits a large DEV by real assembly subtrees, compiles parts and merges one template', async () => {
+  const rows: [string, string][] = [
+    ['DEV/huge.dev', 'SOLIDMODELS.NUM=4\nSOLIDMODEL0=a.phm\nSOLIDMODEL1=b.phm\nSOLIDMODEL2=c.phm\nSOLIDMODEL3=d.phm'],
+  ];
+  for (const group of ['a', 'b', 'c', 'd']) {
+    rows.push([`PHM/${group}.phm`, `SOLIDMODELS.NUM=12\n${Array.from({ length: 12 }, (_, i) => `SOLIDMODEL${i}=${group}${i}.mod`).join('\n')}`]);
+    for (let i = 0; i < 12; i++) {
+      // Source bytes (not instance count) decide the split. Pad each MOD past
+      // 128 KiB so this fixture represents a real multi-megabyte assembly.
+      rows.push([`MOD/${group}${i}.mod`, `${' '.repeat(128 * 1024)}<Device><Entities><Entity ID="1"><Cuboid L="1000" W="1000" H="1000"/></Entity></Entities></Device>`]);
+    }
+  }
+  const files = new Map(rows.map(([path, text]) => [path, file(text, path)]));
+  const analysis = await analyzeDevCompilation('DEV/huge.dev', files);
+  expect(analysis.plan?.parts).toHaveLength(4);
+  expect(analysis.plan?.parts.map(part => part.referencePaths.length)).toEqual([12, 12, 12, 12]);
+  const parts = await Promise.all(analysis.plan!.parts.map(part => serializeDevToGlbDetailed('DEV/huge.dev', files, {
+    lod: 0, canonicalDevPath: analysis.canonicalDevPath, discovered: analysis.discovered,
+    partition: { referencePaths: part.referencePaths },
+  })));
+  expect(parts.every(part => part.status === 'complete' && part.bytes)).toBe(true);
+  expect(parts.reduce((total, part) => total + part.diagnostics.discoveredModCount, 0)).toBe(48);
+  const merged = await mergeDevGlbParts('DEV/huge.dev', parts.map(part => part.bytes!));
+  const asset = await parseDevGlbAsset('DEV/huge.dev', merged);
+  expect(asset).not.toBeNull();
+  expect(new THREE.Box3().setFromObject(asset!.scene).isEmpty()).toBe(false);
+});
+
+it('keeps a small DEV on the single-template compiler path', async () => {
+  const files = new Map(Object.entries({
+    'DEV/small.dev': 'SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.phm',
+    'PHM/a.phm': 'SOLIDMODELS.NUM=2\nSOLIDMODEL0=a.mod\nSOLIDMODEL1=b.mod',
+    'MOD/a.mod': '<Device><Entities><Entity ID="1"><Cuboid L="10" W="10" H="10"/></Entity></Entities></Device>',
+    'MOD/b.mod': '<Device><Entities><Entity ID="1"><Cuboid L="10" W="10" H="10"/></Entity></Entities></Device>',
+  }).map(([path, text]) => [path, file(text, path)]));
+  const analysis = await analyzeDevCompilation('DEV/small.dev', files);
+  expect(analysis.plan).toBeNull();
+  expect((await serializeDevToGlbDetailed('DEV/small.dev', files)).status).toBe('complete');
 });

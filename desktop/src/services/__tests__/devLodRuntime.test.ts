@@ -536,6 +536,18 @@ it('current view readiness does not wait for the whole catalog', () => {
   expect(moments.devAllStationReady).toBeNull();
 });
 
+it('persists durable L0, only hot L1 and no generated L2 template', () => {
+  const { internal } = fixture();
+  expect(internal.persistsTemplate(0, true, 3, 0)).toBe(true);
+  expect(internal.persistsTemplate(0, false, 3, 0)).toBe(false);
+  expect(internal.persistsTemplate(1, true, 2, 1)).toBe(false);
+  expect(internal.persistsTemplate(1, true, 0, 1)).toBe(true);
+  expect(internal.persistsTemplate(1, true, 2, 2)).toBe(true);
+  expect(internal.persistsTemplate(2, true, 0, 8)).toBe(false);
+  internal.session.sourceSha256 = null;
+  expect(internal.persistsTemplate(0, true, 3, 0)).toBe(false);
+});
+
 it('camera motion invalidates readiness until the new view has been evaluated', () => {
   vi.useFakeTimers();
   try {

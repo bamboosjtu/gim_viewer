@@ -5,9 +5,11 @@
  * 逐 DEV 调用：序列化 → 落盘 → 逐 CBM 实例渲染一体化。
  * 二次打开时可直接用 GLTFLoader 加载 .glb，跳过全部 XML 解析。
  *
- * 关键设计（当前 DEV 粒度缓存契约见 docs/architecture.md）：
+ * 关键设计（当前 DEV 粒度缓存契约见 docs/architecture/dev-geometry.md）：
  * - 按 DEV 文件粒度缓存（非按 MOD 文件粒度）
  *   理由：DEV 粒度大幅减少加载次数（5982 → 数百）
+ * - 超大型 DEV 可按装配子树并行编译，但合并后仍是一个 DEV 模板；拆分部分
+ *   没有独立缓存身份
  * - 序列化时烘焙 DEV 内部所有 transform（DEV × PHM × SUBDEVICE × Entity + mm→m）
  * - CBM 累积矩阵运行时应用（同一 DEV 可被多 CBM 引用）
  * - 数学等价性：两次 applyPlacementTransformToSceneUnits（各 ×0.001）
@@ -16,13 +18,13 @@
  * 缓存路径：app_data_dir/glbcache/{project_id}/{devPath}.glb
  * 版本化：通过 GEOMETRY_CACHE_VERSION 失效
  *
- * 关联文档：docs/architecture.md、docs/software-spec.md
+ * 关联文档：docs/architecture/dev-geometry.md、docs/software-spec.md
  */
 
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { discoverGeometriesFromDevPath } from './modGeometryDiscovery.js';
+import { discoverGeometriesFromDevPath, type DiscoveredGeometries, type DiscoveredModGeometry, type DiscoveredStlGeometry } from './modGeometryDiscovery.js';
 import { createEntryResolver } from '../gim/entryResolver.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
@@ -36,6 +38,14 @@ import {
 import type { GeometryDiagnosticReason } from '../gim/geometry/geometryDiagnostics.js';
 
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+/** One compiled DEV result is never larger than this. Split parts are bounded
+ * by the same ceiling before the merged template is accepted. */
+export const DEV_GLB_MAX_BYTES = 128 * 1024 * 1024;
+/** Assembly-subtree split gate. Normal DEV templates stay one compile task. */
+export const DEV_SPLIT_MIN_EDGES = 12;
+export const DEV_SPLIT_MIN_BYTES = 6 * 1024 * 1024;
+export const DEV_SPLIT_MAX_PARTS = 4;
 
 export type DevGlbSerializationStatus = 'complete' | 'partial' | 'empty' | 'unsupported';
 
@@ -65,6 +75,177 @@ export interface DevGlbSerializationResult {
   status: DevGlbSerializationStatus;
   bytes: Uint8Array | null;
   diagnostics: DevGlbSerializationDiagnostics;
+  /** Present only when the compiler asks the pool to split a very large DEV.
+   * Split parts are merged back into one template before caching. */
+  plan?: DevGeometryCompilePlan;
+}
+
+/** A balanced group of real assembly-subtree leaves. `referencePaths` identify
+ * the discovered MOD/STL occurrences without inventing a second template
+ * identity. */
+export interface DevGeometryPart {
+  key: string;
+  referencePaths: string[];
+  modCount: number;
+  stlCount: number;
+  estimatedBytes: number;
+  /** Exact discovered edges for this part. A part can compile without walking
+   * the whole DEV/PHM graph again; identity stays the source DEV template. */
+  mods: DiscoveredModGeometry[];
+  stls: DiscoveredStlGeometry[];
+}
+
+export interface DevGeometryCompilePlan {
+  canonicalDevPath: string;
+  parts: DevGeometryPart[];
+  modCount: number;
+  stlCount: number;
+  estimatedBytes: number;
+}
+
+export interface DevCompilationAnalysis {
+  canonicalDevPath: string;
+  discovered: DiscoveredGeometries;
+  plan: DevGeometryCompilePlan | null;
+}
+
+type GeometryEdge = DiscoveredModGeometry | DiscoveredStlGeometry;
+const edgeReference = (edge: GeometryEdge): string => edge.referencePath || edge.instanceKey;
+const edgeFile = (edge: GeometryEdge): string => 'modPath' in edge ? edge.modPath : edge.stlPath;
+
+/** Unique referenced file bytes, used only for scheduling; never a geometry
+ * completeness claim. Repeated instances of one MOD count once. */
+function estimateEdgeBytes(edges: readonly GeometryEdge[], files: Map<string, File>): number {
+  const paths = new Set<string>();
+  let total = 0;
+  for (const edge of edges) {
+    const path = edgeFile(edge);
+    if (paths.has(path)) continue;
+    paths.add(path);
+    total += Math.max(0, getFileByPath(files, path)?.size ?? 0);
+  }
+  return total;
+}
+
+function partFromEdges(key: string, edges: readonly GeometryEdge[], files: Map<string, File>): DevGeometryPart {
+  return {
+    key,
+    referencePaths: [...new Set(edges.map(edgeReference))].sort(),
+    modCount: edges.filter(edge => 'modPath' in edge).length,
+    stlCount: edges.filter(edge => 'stlPath' in edge).length,
+    estimatedBytes: estimateEdgeBytes(edges, files),
+    mods: edges.filter((edge): edge is DiscoveredModGeometry => 'modPath' in edge),
+    stls: edges.filter((edge): edge is DiscoveredStlGeometry => 'stlPath' in edge),
+  };
+}
+
+/** Keep real assembly subtrees intact while bounding the number of parts. */
+function balanceParts(parts: DevGeometryPart[], maxParts: number): DevGeometryPart[] {
+  if (parts.length <= maxParts) return parts;
+  const list = parts.slice();
+  while (list.length > maxParts) {
+    let best = -1, bestCost = Infinity;
+    for (let i = 0; i < list.length - 1; i++) {
+      const cost = (list[i].referencePaths.length + list[i + 1].referencePaths.length) * 1024
+        + list[i].estimatedBytes + list[i + 1].estimatedBytes;
+      if (cost < bestCost) { bestCost = cost; best = i; }
+    }
+    const [left, right] = [list[best], list[best + 1]];
+    list.splice(best, 2, {
+      key: `${left.key}+${right.key}`,
+      referencePaths: [...new Set([...left.referencePaths, ...right.referencePaths])].sort(),
+      modCount: left.modCount + right.modCount,
+      stlCount: left.stlCount + right.stlCount,
+      estimatedBytes: left.estimatedBytes + right.estimatedBytes,
+      mods: [...left.mods, ...right.mods],
+      stls: [...left.stls, ...right.stls],
+    });
+  }
+  return list;
+}
+
+/**
+ * Decide whether a DEV is large enough to compile by assembly subtree.
+ * Grouping starts at the real `solid:` / `sub:` edge, then descends into PHM
+ * segments. A single dense PHM has no intermediate subtree node, so its
+ * leaves are chunked in source order as the documented MOD-task fallback.
+ */
+export function buildDevCompilePlan(
+  discovered: DiscoveredGeometries,
+  files: Map<string, File>,
+  maxParts = DEV_SPLIT_MAX_PARTS,
+  canonicalDevPath = '',
+): DevGeometryCompilePlan | null {
+  const edges: GeometryEdge[] = [...discovered.mods, ...discovered.stls];
+  if (edges.length < DEV_SPLIT_MIN_EDGES) return null;
+  const estimatedBytes = estimateEdgeBytes(edges, files);
+  // Splitting has a real per-part export + merge cost. It only pays when the
+  // referenced source bytes are large; a device with many tiny instances stays
+  // one template task, matching the pre-split path.
+  if (estimatedBytes < DEV_SPLIT_MIN_BYTES) return null;
+  const cap = Math.max(2, Math.min(DEV_SPLIT_MAX_PARTS, Math.floor(maxParts)));
+  const segments = (edge: GeometryEdge): string[] => edgeReference(edge).split('/').filter(Boolean);
+
+  let grouped: Map<string, GeometryEdge[]> | null = null;
+  for (let depth = 1; depth <= 3; depth++) {
+    const groups = new Map<string, GeometryEdge[]>();
+    for (const edge of edges) {
+      const key = segments(edge).slice(0, depth).join('/');
+      const bucket = groups.get(key) ?? [];
+      bucket.push(edge); groups.set(key, bucket);
+    }
+    if (groups.size >= 2) {
+      grouped = groups;
+      // Descend one more level when one subtree still dominates, so a single
+      // dense PHM does not become one oversized part beside a tiny sibling.
+      const largest = Math.max(...[...groups.values()].map(rows => rows.length));
+      if (largest <= edges.length * 0.6) break;
+    } else if (segments(edges[0]).length <= depth) break;
+  }
+
+  let parts: DevGeometryPart[];
+  if (grouped && grouped.size >= 2) {
+    parts = [...grouped.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+      .map(([key, rows]) => partFromEdges(key, rows, files));
+  } else {
+    // Single dense subtree: contiguous MOD-task batches, never a synthetic
+    // assembly identity.
+    const chunks = Math.max(2, Math.min(cap, Math.ceil(edges.length / 8)));
+    const sorted = edges.slice().sort((a, b) => edgeReference(a) < edgeReference(b) ? -1 : 1);
+    const size = Math.ceil(sorted.length / chunks);
+    parts = [];
+    for (let start = 0; start < sorted.length; start += size) {
+      parts.push(partFromEdges(`mod-task:${parts.length}`, sorted.slice(start, start + size), files));
+    }
+  }
+  parts = balanceParts(parts, cap).filter(part => part.referencePaths.length > 0);
+  if (parts.length < 2) return null;
+  return {
+    canonicalDevPath,
+    parts,
+    modCount: discovered.mods.length,
+    stlCount: discovered.stls.length,
+    estimatedBytes,
+  };
+}
+
+/** Canonicalize and discover once. The caller can then either split the work or
+ * serialize the already-discovered edges without traversing DEV/PHM twice. */
+export async function analyzeDevCompilation(
+  devPath: string,
+  files: Map<string, File>,
+  options: { discovery?: import('./modGeometryDiscovery.js').GeometryDiscoveryOptions } = {},
+): Promise<DevCompilationAnalysis> {
+  const normalizedDevPath = devPath.replace(/\\/g, '/');
+  const canonicalDevPath = createEntryResolver(files.keys())(normalizedDevPath) ?? normalizedDevPath;
+  if (!getFileByPath(files, canonicalDevPath)) {
+    throw new Error(`DEV 文件不存在，无法生成 GLB: ${canonicalDevPath}`);
+  }
+  const discovered = await discoverGeometriesFromDevPath(
+    canonicalDevPath, files, IDENTITY_MATRIX.slice(), new Set<string>(), 0, { instances: 0 },
+    { ...options.discovery, strictDependencies: true },
+  );
+  return { canonicalDevPath, discovered, plan: buildDevCompilePlan(discovered, files, DEV_SPLIT_MAX_PARTS, canonicalDevPath) };
 }
 
 export { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
@@ -98,20 +279,31 @@ function getGltfLoader(): GLTFLoader {
 export async function serializeDevToGlbDetailed(
   devPath: string,
   files: Map<string, File>,
-  options: { parseXml?: typeof import('../gim/geometry/xmlModParser.js').parseXmlMod; discovery?: import('./modGeometryDiscovery.js').GeometryDiscoveryOptions; lod?: import('../viewer/xmlModGeometry.js').DeviceLod; timings?: Record<string, number> } = {},
+  options: {
+    parseXml?: typeof import('../gim/geometry/xmlModParser.js').parseXmlMod;
+    discovery?: import('./modGeometryDiscovery.js').GeometryDiscoveryOptions;
+    lod?: import('../viewer/xmlModGeometry.js').DeviceLod;
+    timings?: Record<string, number>;
+    /** Pre-discovered edges from analyzeDevCompilation. */
+    canonicalDevPath?: string;
+    discovered?: DiscoveredGeometries;
+    /** Compile one assembly-subtree part; exact occurrence reference paths. */
+    partition?: { referencePaths: readonly string[] };
+  } = {},
 ): Promise<DevGlbSerializationResult> {
   // A missing DEV is a cache failure, not a deterministic empty result. The
   // discovery helper intentionally treats missing references as empty for the
   // interactive XML fallback, but the geometry manifest must not record that
   // failure as `empty`.
   const normalizedDevPath = devPath.replace(/\\/g, '/');
-  const canonicalDevPath = createEntryResolver(files.keys())(normalizedDevPath) ?? normalizedDevPath;
+  const canonicalDevPath = options.canonicalDevPath
+    ?? createEntryResolver(files.keys())(normalizedDevPath) ?? normalizedDevPath;
   if (!getFileByPath(files, canonicalDevPath)) {
     throw new Error(`DEV 文件不存在，无法生成 GLB: ${canonicalDevPath}`);
   }
 
   // 1. 发现 DEV 内部所有 MOD/STL 几何（parentTransform = IDENTITY，不含 CBM）
-  const discovered = await discoverGeometriesFromDevPath(
+  const analyzed = options.discovered ?? await discoverGeometriesFromDevPath(
     canonicalDevPath,
     files,
     IDENTITY_MATRIX.slice(),
@@ -120,6 +312,14 @@ export async function serializeDevToGlbDetailed(
     { instances: 0 },
     { ...options.discovery, strictDependencies: true },
   );
+  // A split part filters real discovered occurrences. The DEV/PHM traversal is
+  // shared, so a part cannot invent references or lose sibling identity.
+  const allowed = options.partition ? new Set(options.partition.referencePaths) : null;
+  const discovered: DiscoveredGeometries = allowed ? {
+    mods: analyzed.mods.filter(edge => allowed.has(edgeReference(edge))),
+    stls: analyzed.stls.filter(edge => allowed.has(edgeReference(edge))),
+    ...(analyzed.reason ? { reason: analyzed.reason } : {}),
+  } : analyzed;
 
   const diagnostics: DevGlbSerializationDiagnostics = {
     status: 'empty',
@@ -343,34 +543,125 @@ export async function serializeDevToGlbDetailed(
 
   // 3. 序列化 devGroup → GLB
   const exportStarted = performance.now();
-  const exporter = new GLTFExporter();
+  try {
+    const bytes = await exportGroupToGlb(devGroup, canonicalDevPath);
+    if (options.timings) options.timings.exportWallMs = (options.timings.exportWallMs ?? 0) + performance.now() - exportStarted;
+    return { status: diagnostics.status, bytes, diagnostics };
+  } finally {
+    for (const child of [...devGroup.children]) {
+      devGroup.remove(child);
+      disposeSourceGroup(child as THREE.Group);
+    }
+  }
+}
+
+function exportGroupToGlb(group: THREE.Group, devPath: string): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
-    const cleanup = (): void => {
-      for (const child of [...devGroup.children]) {
-        devGroup.remove(child);
-        disposeSourceGroup(child as THREE.Group);
-      }
-    };
-    exporter.parse(
-      devGroup,
+    new GLTFExporter().parse(
+      group,
       (gltf) => {
-        if (gltf instanceof ArrayBuffer) {
-          if (options.timings) options.timings.exportWallMs = (options.timings.exportWallMs ?? 0) + performance.now() - exportStarted;
-          cleanup();
-          resolve({ status: diagnostics.status, bytes: new Uint8Array(gltf), diagnostics });
-        } else {
-          cleanup();
-          reject(new Error(`GLTFExporter 输出类型无效: ${canonicalDevPath}`));
-        }
+        if (gltf instanceof ArrayBuffer) resolve(new Uint8Array(gltf));
+        else reject(new Error(`GLTFExporter 输出类型无效: ${devPath}`));
       },
       (error) => {
-        cleanup();
         const detail = error instanceof Error ? error.message : String(error);
-        reject(new Error(`DEV 序列化失败: ${canonicalDevPath}: ${detail}`));
+        reject(new Error(`DEV 序列化失败: ${devPath}: ${detail}`));
       },
       { binary: true },
     );
   });
+}
+
+/** Sum the diagnostics of assembly-subtree parts without pretending each part
+ * was a complete DEV. */
+export function aggregateDevGlbDiagnostics(results: readonly DevGlbSerializationResult[]): DevGlbSerializationDiagnostics {
+  const aggregate: DevGlbSerializationDiagnostics = {
+    status: 'empty',
+    discoveredModCount: 0,
+    discoveredStlCount: 0,
+    renderableModCount: 0,
+    renderableStlCount: 0,
+    emptySourceCount: 0,
+    unsupportedSourceCount: 0,
+    partialSourceCount: 0,
+    unsupportedPrimitiveTypeCounts: {},
+    failedVisibleRootCount: 0,
+    failedVisibleRoots: [],
+    approximatedBooleans: { Union: 0, Difference: 0, Intersection: 0 },
+    omittedSmallParts: 0,
+    omittedMaxExtentMm: 0,
+    simplifiedBooleans: 0,
+  };
+  const hasBytes = results.some(result => !!result.bytes?.byteLength);
+  for (const result of results) {
+    const d = result.diagnostics;
+    aggregate.discoveredModCount += d.discoveredModCount;
+    aggregate.discoveredStlCount += d.discoveredStlCount;
+    aggregate.renderableModCount += d.renderableModCount;
+    aggregate.renderableStlCount += d.renderableStlCount;
+    aggregate.emptySourceCount += d.emptySourceCount;
+    aggregate.unsupportedSourceCount += d.unsupportedSourceCount;
+    aggregate.partialSourceCount += d.partialSourceCount;
+    aggregate.omittedSmallParts = (aggregate.omittedSmallParts ?? 0) + (d.omittedSmallParts ?? 0);
+    aggregate.omittedMaxExtentMm = Math.max(aggregate.omittedMaxExtentMm ?? 0, d.omittedMaxExtentMm ?? 0);
+    aggregate.simplifiedBooleans = (aggregate.simplifiedBooleans ?? 0) + (d.simplifiedBooleans ?? 0);
+    aggregate.failedVisibleRootCount = (aggregate.failedVisibleRootCount ?? 0) + (d.failedVisibleRootCount ?? 0);
+    if (!aggregate.representationPolicy || d.representationPolicy === 'detailed') aggregate.representationPolicy = d.representationPolicy;
+    for (const [type, count] of Object.entries(d.unsupportedPrimitiveTypeCounts)) {
+      aggregate.unsupportedPrimitiveTypeCounts[type] = (aggregate.unsupportedPrimitiveTypeCounts[type] ?? 0) + count;
+    }
+    for (const op of ['Union', 'Difference', 'Intersection'] as const) {
+      aggregate.approximatedBooleans![op] += d.approximatedBooleans?.[op] ?? 0;
+    }
+    for (const failure of d.failedVisibleRoots ?? []) {
+      if ((aggregate.failedVisibleRoots?.length ?? 0) < 64) aggregate.failedVisibleRoots!.push(failure);
+    }
+    if (!aggregate.reason && d.reason) aggregate.reason = d.reason;
+  }
+  if (!aggregate.failedVisibleRoots?.length) delete aggregate.failedVisibleRoots;
+  if (!aggregate.failedVisibleRootCount) delete aggregate.failedVisibleRootCount;
+  if (!aggregate.approximatedBooleans || !Object.values(aggregate.approximatedBooleans).some(Boolean)) delete aggregate.approximatedBooleans;
+  if (!aggregate.omittedSmallParts) delete aggregate.omittedSmallParts;
+  if (!aggregate.omittedMaxExtentMm) delete aggregate.omittedMaxExtentMm;
+  if (!aggregate.simplifiedBooleans) delete aggregate.simplifiedBooleans;
+  aggregate.status = hasBytes
+    ? results.some(result => result.status !== 'complete') ? 'partial' : 'complete'
+    : results.some(result => result.status === 'unsupported') ? 'unsupported' : 'empty';
+  return aggregate;
+}
+
+function disposeLoadedScene(scene: THREE.Object3D): void {
+  scene.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    mesh.geometry?.dispose?.();
+    const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
+    for (const material of materials) material?.dispose?.();
+  });
+}
+
+/**
+ * Merge independently compiled assembly-subtree GLBs into one DEV template.
+ * Each part already has its DEV × PHM placement baked, so adding the parsed
+ * scenes under one root preserves the exact world geometry. The result keeps
+ * the single-template cache contract; parts never become second identities.
+ */
+export async function mergeDevGlbParts(devPath: string, parts: readonly Uint8Array[]): Promise<Uint8Array> {
+  if (!parts.length) throw new Error(`DEV GLB split has no parts: ${devPath}`);
+  const merged = new THREE.Group();
+  merged.name = `glb-dev:${devPath}`;
+  const scenes: THREE.Object3D[] = [];
+  try {
+    for (const bytes of parts) {
+      const asset = await parseDevGlbAsset(devPath, bytes);
+      if (!asset) throw new Error(`DEV GLB part parse failed: ${devPath}`);
+      scenes.push(asset.scene); merged.add(asset.scene);
+    }
+    const invalidExtent = invalidGeometryExtent(merged);
+    if (invalidExtent) throw new Error(`DEV merged geometry rejected: ${devPath}: ${invalidExtent}`);
+    return await exportGroupToGlb(merged, devPath);
+  } finally {
+    for (const scene of scenes) { merged.remove(scene); disposeLoadedScene(scene); }
+  }
 }
 
 /** Compatibility wrapper retained for the existing progressive/runtime APIs. */

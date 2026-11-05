@@ -206,6 +206,10 @@ export class DevLodRuntime {
   private pending = new Map<string, Promise<TemplateRow | null>>();
   private nullResults = new Map<string, 'empty' | 'unsupported'>();
   private priorities = new Map<string, number>();
+  /** L1 demand counter for the session. A repeated L1 compile after an eviction
+   * marks the template as hot enough to persist; the first near-view compile
+   * stays in memory only. */
+  private templateDemand = new Map<string, number>();
   private templateSlots = 0;
   private inputBudget = new ByteWorkBudget(128 * 1024 * 1024);
   private cacheReader:DevTemplateCacheReader<CachedTemplate>;
@@ -367,6 +371,14 @@ export class DevLodRuntime {
     this.applyMemoryPressure();
   }
   private key(dev: string, lod: DeviceLod) { return `${DEV_GEOMETRY_VERSION}|${this.sourceIdentity}|${dev.toLowerCase()}|lod${lod}`; }
+  /** Persistence tier: L0 is the durable whole-station baseline; L1 is a hot
+   * near-view cache written only for selected or repeatedly requested
+   * templates; L2 stays session-local by default. */
+  private persistsTemplate(lod: DeviceLod, generated: boolean, priority: number, demand: number): boolean {
+    if (!generated || !this.session.sourceSha256) return false;
+    if (lod === 0) return true;
+    return lod === 1 && (priority === 0 || demand >= 2);
+  }
   private catalogKey(dev: string) { return `${DEV_SPATIAL_CATALOG_VERSION}|${DEV_GEOMETRY_VERSION}|${this.sourceIdentity}|${dev.toLowerCase()}`; }
   /** A catalog read started before the directory loop reaches this DEV also
    * short-circuits already-queued LOD0 work for a validated empty source. */
@@ -899,6 +911,7 @@ export class DevLodRuntime {
       let artifact: CachedTemplate | undefined = lease.value;
       let parsed: Awaited<ReturnType<typeof parseDevGlbAsset>> = null;
       let generated = false;
+      let demand = 0;
       if (!this.current()) return null;
       const cacheStatus = lease.status;
       if (cacheStatus === 'read-error') {
@@ -988,7 +1001,7 @@ export class DevLodRuntime {
         const result = await this.worker.compile(dev, lod, key, this.priorities.get(key) ?? priority, identity.taskId).catch(async error => {
           if (error instanceof InvalidDevGeometryError && error.sourceEvidence && this.current()) {
             this.sourceFailures.set(dev, error);
-            if (this.session.sourceSha256) await this.persistArtifact('templates', key,
+            if (this.session.sourceSha256 && lod === 0) await this.persistArtifact('templates', key,
               { sourceInvalid: { message: error.reason, evidence: error.sourceEvidence } }, lod, dev, identity);
           }
           throw error;
@@ -1000,13 +1013,18 @@ export class DevLodRuntime {
         this.diagnostics.lodCompiled[lod]++;
         this.recordCacheDecision(dev, lod, 'compiled', cacheStatus);
         artifact = { result, sha: result.bytes ? result.sha256 ?? await hash(result.bytes) : '' };
+        if (lod === 1) {
+          demand += 1; this.templateDemand.set(key, demand);
+        }
       }
       if (!this.current()) return null;
       setGeometryDiagnostic(this.state, diagnosticFromSerialization(dev, artifact.result.diagnostics, generated ? 'cold' : 'warm'));
       if (!artifact.result.bytes) {
         if (artifact.result.status === 'empty' || artifact.result.status === 'unsupported') {
           this.nullResults.set(key, artifact.result.status);
-          if (this.session.sourceSha256) {
+          // Only L0 keeps the terminal tombstone. L1/L2 empty states are
+          // recoverable from the catalog and must not grow the cache.
+          if (this.session.sourceSha256 && lod === 0) {
             const inputOwner = releaseInput; releaseInput = undefined;
             await this.persistArtifact('templates', key, artifact, lod, dev, identity, inputOwner);
           }
@@ -1020,7 +1038,8 @@ export class DevLodRuntime {
       }
       // Show geometry first; persistence is bounded and asynchronous. A failed
       // write is recorded by persistArtifact and never advertised as warm.
-      if (generated && this.session.sourceSha256) {
+      // Tiering: L0 persists, hot L1 persists selectively, L2 stays in memory.
+      if (this.persistsTemplate(lod, generated, priority, demand)) {
         const inputOwner = releaseInput; releaseInput = undefined;
         void this.persistArtifact('templates', key, artifact, lod, dev, identity, inputOwner);
       }
@@ -1526,7 +1545,7 @@ export class DevLodRuntime {
     this.worker?.cancel();
     for (const row of this.rows.values()) { if (row.group && this.state.highlightedModState?.groups.some(object => belongsTo(object, row.group))) resetModHighlight(this.state); row.group?.removeFromParent(); this.state.loadedXmlModGroups.delete(row.entry.instanceKey); }
     this.instances?.release(); this.instances = undefined;
-    this.fineRequested.clear(); this.templates.clear();
+    this.fineRequested.clear(); this.templates.clear(); this.templateDemand.clear();
     for (const rootOccurrence of this.readinessRows.keys()) this.removeReadiness(rootOccurrence);
     this.rows.clear(); this.readinessRows.clear();
     this.viewIndex.clear();

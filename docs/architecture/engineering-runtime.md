@@ -76,7 +76,7 @@
 ### 4. 发布与补建
 
 - 来源不完整时 `engineeringStatus=partial`，仍可浏览已解析部分；不写完整来源凭据。
-- Spatial 尚未就绪时先发布不含建筑楼层的组成；Spatial 到达后 `notifyEngineeringIfcEvidence` 触发重新 assemble，补充空间容器和外露 IFC 对象。这里等待的是 IFC 空间/外露语义，不是 Mesh、LOD 或相机。
+- Spatial 尚未就绪时先在内部建立不含建筑楼层的来源和实体；模型树显示加载中；Spatial 到达后 `notifyEngineeringIfcEvidence` 触发重新 assemble，补充空间容器和外露 IFC 对象。这里等待的是 IFC 空间/外露语义，不是 Mesh、LOD 或相机。
 - IFC 语义失败只影响 IFC 来源部分，不把已有 DEV 实体回滚。
 - `engineeringGeometryReady` 在来源图返回 occurrence 目录时解析；DEV 编译可早于实体完成。
 - 工程切换/关闭取消 Worker、请求和缓存写槽；迟到结果按会话守卫拒绝。
@@ -110,4 +110,4 @@
 
 ## 几何完成后的组成细化
 
-工程来源/实体快照先独立发布。已加载的 IFC RegionalIndex 提供绝对源坐标包围盒，`compositionProjectionService` 在独立 Worker 中细化建筑范围；不读取可见性，不合并实体，不增加几何 seed。楼层名、文件建筑名、系统声明与推断依据继续保留。几何细化结果只保存在当前会话，不能写成独立于几何版本的语义缓存。关闭/切换工程终止 Worker，旧投影不能提交；重新绑定分组选择时不自动定位。
+工程来源/实体快照先独立发布。已加载的 IFC RegionalIndex 提供绝对源坐标包围盒，`compositionProjectionService` 在独立 Worker 中细化建筑范围；不读取可见性，不合并实体，不增加几何 seed。楼层名、文件建筑名、系统声明与推断依据继续保留。全部 IFC 范围可用时，最终细化树写入工程导航缓存；缓存契约绑定空间投影策略版本。任一 IFC 跳过或加载失败时发布带范围缺失提示的部分树，来源/实体仍可浏览，导航不写完整缓存。关闭/切换工程终止 Worker，旧投影不能提交；重新绑定分组选择时不自动定位。
