@@ -59,6 +59,7 @@ function qualityText(state: AppState): string {
   const snapshot = state.engineeringSnapshot;
   if (!snapshot) return state.engineeringStatus === 'error' ? '工程来源未能建立' : '正在建立工程来源…';
   return `整体候选 ${snapshot.entities.length.toLocaleString()} · 待归集合 ${snapshot.pending.length.toLocaleString()}`
+    + (state.engineeringNavigation?.compositionCoverage === 'partial' ? ' · 部分 IFC 范围不可用' : '')
     + (state.engineeringStatus === 'partial' ? ' · 来源未完成' : state.engineeringStatus === 'error' ? ' · 来源未完成' : '');
 }
 

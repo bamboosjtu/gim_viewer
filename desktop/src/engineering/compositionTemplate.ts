@@ -13,6 +13,7 @@ export interface CompositionContextEvidence {
    * room/MEP file under an already named building, never to invent identity. */
   availableBuildings?: EvidenceValue[];
   deliveryAreaNames?: EvidenceValue[];
+  deliveryStructureNames?: EvidenceValue[];
   hostEntityIds: string[];
   /** Source track only breaks out unclassified members; it never changes identity. */
   track?: 'dev' | 'ifc' | 'mixed';
@@ -217,7 +218,7 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
       else {
         paths = explicitBuilding;
         if (!paths.length) {
-          const structure = category.startsWith('C-B') || category.startsWith('C-A') && !!input?.deliveryAreaNames?.length || /支架|基础|构架|桁架/.test(entity.name) || /支架|基础|构架/.test(nearest?.unit ?? '');
+          const structure = category.startsWith('C-B') || category.startsWith('C-A') && !!input?.deliveryAreaNames?.length || /支架|基础|构架|桁架|防火墙/.test(entity.name) || /支架|基础|构架/.test(nearest?.unit ?? '');
           const related = structure && nearest && ['main', 'distribution', 'reactive', 'auxiliary'].includes(nearest.purpose) ? nearest : undefined;
           const hostGroup = hostPaths.length === 1 ? hostPaths[0][1] : undefined;
           const hostSystem = hostGroup?.kind === 'system' && hostGroup.key !== 'installation-unassigned' ? hostGroup : undefined;
@@ -226,10 +227,11 @@ export function assignEngineeringComposition(snapshot: EngineeringSnapshot, evid
             const foundation = ['C-B2','C-B3','C-B4'].includes(category)
               || !['C-B1','C-B5','C-B6','C-B7'].includes(category)
                 && /基础|杯口|支墩|桩|承台|筏板|垫层/.test(entity.name) && !/支架|构架/.test(entity.name);
-            const structureTitle = supportTitle(entity, category);
+            const structureTitle = !foundation && (input?.deliveryStructureNames?.some(name=>name.value==='防火墙') || category==='C-A1' && /防火墙|防火.*墙|墙.*防火/.test(entity.name))
+              ? '防火墙' : supportTitle(entity, category);
             paths = [[civil,
               { key: `area:${group.key}`, title: areaTitle(group), kind: 'area', order: 20 },
-              { key: `area:${group.key}:${foundation ? 'foundation' : structureTitle}`, title: foundation ? '基础' : structureTitle, kind: 'structure', order: foundation ? 20 : 10 },
+              { key: `area:${group.key}:${structureTitle==='防火墙'?'firewall':foundation ? 'foundation' : structureTitle}`, title: structureTitle==='防火墙'?'防火墙':foundation ? '基础' : structureTitle, kind: 'structure', order: structureTitle==='防火墙'?30:foundation ? 20 : 10 },
             ]];
           } else paths = [unclassifiedPath(track, category)];
         }
@@ -276,9 +278,9 @@ export function declaredEngineeringComposition(inputs: readonly { contextId: str
       result.push({ path, evidence: input.names.map(name=>name.evidenceId), sourceContextIds: [input.contextId] });
     for (const context of contexts.filter(c=>c.purpose==='main'||c.purpose==='distribution')) {
       const group=system(context);
-      for(const [index,title] of ['构架','支架','基础'].entries()) result.push({
+      for(const [index,title] of (context.purpose==='main'?['构架','支架','基础','防火墙']:['构架','支架','基础']).entries()) result.push({
         path:[civil,{key:`area:${group.key}`,title:areaTitle(group),kind:'area',order:20},
-          {key:`area:${group.key}:${title==='基础'?'foundation':title}`,title,kind:'structure',order:index*10}],
+          {key:`area:${group.key}:${title==='基础'?'foundation':title==='防火墙'?'firewall':title}`,title,kind:'structure',order:index*10}],
         evidence:context.evidence,sourceContextIds:[input.contextId],
       });
     }

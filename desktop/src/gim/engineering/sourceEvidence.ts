@@ -2,6 +2,7 @@ import aliases from './sourceTypeAliases.json';
 import type { EvidenceValue, ObjectEvidence, ObjectNameEvidence } from '../../engineering/types.js';
 import { categoryFromName } from '../../engineering/classify.js';
 import { ENGINEERING_CATEGORY_LABELS } from '../../engineering/catalogLabels.js';
+import proxyCategories from './proxyCategories.json';
 
 /** Raw source records stay in the source domain, separate from engineering identity. */
 export interface SourceProperty {
@@ -67,20 +68,14 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   ];
   // Generic IFC proxies may still carry explicit authoring categories. Keep
   // this conservative: generic models/electrical equipment are not a type.
-  const proxyCategories: Record<string, string> = {
-    '墙(Walls)':'C-A1', Walls:'C-A1', '楼板(Floors)':'C-A2', '地板(Floors)':'C-A2', Floors:'C-A2',
-    '结构柱(Structural Columns)':'C-A3', 'Structural Columns':'C-A3',
-    '结构框架(Structural Framing)':'C-A4', 'Structural Framing':'C-A4',
-    '门(Doors)':'C-A7', Doors:'C-A7', '窗(Windows)':'C-A8', '窗户(Windows)':'C-A8', Windows:'C-A8',
-    '屋顶(Roofs)':'C-A6', Roofs:'C-A6',
-  };
   if (type === 'IFCBUILDINGELEMENTPROXY') for (const p of values(record, ['类别(Category)', '类别', 'Category'])) {
-    const category = proxyCategories[p.value.trim()];
+    const category = (proxyCategories.categories as Record<string,string>)[p.value.trim()];
     if (category) propertyCategories.push({...p, value:category});
   }
   const proxyCategory = new Set(propertyCategories.map(p => p.value));
   const proxyName = type === 'IFCBUILDINGELEMENTPROXY' && /^(?:代理构件|IfcBuildingElementProxy)$/i.test(record.name)
-    && proxyCategory.size === 1 ? ENGINEERING_CATEGORY_LABELS[[...proxyCategory][0]] : undefined;
+    && proxyCategory.size === 1 && !['E19','C-D6'].includes([...proxyCategory][0])
+    ? ENGINEERING_CATEGORY_LABELS[[...proxyCategory][0]] : undefined;
   const typed=devCategory??ifcTypes[type];
   for(const p of values(record,['用途','设备用途','PURPOSE'])){
     const category=categoryValue(p.value,true);

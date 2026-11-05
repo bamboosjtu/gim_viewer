@@ -31,7 +31,7 @@ async function fixture(){
   const graph=await extractEngineeringSourceGraph({paths:['project.cbm','建筑.ifc'],readText:async()=>''});
   const objects:IfcSpatialObject[]=['墙','楼板','柱'].map((name,i)=>({key:`m#${i+1}`,modelId:'m',expressId:i+1,ifcType:['IFCWALL','IFCSLAB','IFCCOLUMN'][i],name,globalId:`g${i}`,geometryStatus:'unrepresented',parentObjectKey:null,childObjectKeys:[],relationshipCount:0,hostObjectKey:null,spatialKey:null,spatialKeys:[],spatialContainment:null,sourcePath:'建筑.ifc'}));
   const built=buildEngineeringSources('p',graph,objects,[]);
-  built.sources.incompleteReasons=[];state.engineeringStatus='ready';state.engineeringSnapshot=built.snapshot;state.engineeringSources=built.sources;
+  built.sources.incompleteReasons=[];state.engineeringStatus='ready';built.sources.models=[{modelId:'m',path:'建筑.ifc'}];state.engineeringSnapshot=built.snapshot;state.engineeringSources=built.sources;
   state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
   state.ifcRegionalRuntimes.set('m',{index:{objects:objects.map(o=>({...o,bounds:[0,0,-10,10,4,0]}))},release:vi.fn()} as never);
   vi.useFakeTimers();ProjectionWorker.instances=[];vi.stubGlobal('Worker',ProjectionWorker);
@@ -54,14 +54,14 @@ it('refines only composition, preserves semantic inputs and does not accumulate 
     expect(f.state.engineeringExpandedRows.composition).toEqual(new Set([base.composition.rootKey]));
     f.run().reply();expect(f.state.engineeringNavigation!.compositionSearch).toEqual(first.compositionSearch);
     expect(f.state.engineeringSnapshot).toBe(snapshot);expect(JSON.stringify(snapshot)).toBe(before);expect(f.state.engineeringSources).toBe(sources);
-    f.state.ifcRegionalRuntimes.clear();f.run();expect(f.state.engineeringNavigation).toBe(base);
+    f.state.ifcRegionalRuntimes.clear();f.run();expect(f.state.engineeringNavigation).not.toBeNull();
   }finally{f.dispose();}
 });
 
 it('does not rebuild a cached navigation projection on warm geometry evidence',async()=>{
   const f=await fixture();
   try {
-    f.state.engineeringNavigationCacheHit=true;f.state.engineeringNavigation!.compositionComplete=true;
+    f.state.engineeringNavigationCacheHit=true;f.state.engineeringNavigation!.compositionComplete=true;f.state.engineeringNavigation!.compositionCoverage='full';
     f.state.engineeringGeometryEvidenceChanged?.();
     vi.advanceTimersByTime(500);
     expect(ProjectionWorker.instances).toHaveLength(0);
@@ -99,9 +99,9 @@ it('keeps the semantic view usable if the projection worker cannot start or retu
   try{
     f.run().reply();expect(f.state.engineeringNavigation).not.toBe(base);
     const owned=f.run();owned.onmessage?.({data:{error:'projection failed'}} as MessageEvent);
-    expect(f.state.engineeringNavigation).toBe(base);
+    expect(f.state.engineeringNavigation?.compositionCoverage).toBe('partial');
     vi.stubGlobal('Worker',class{constructor(){throw Error('worker unavailable');}});
-    expect(()=>f.run()).not.toThrow();expect(f.state.engineeringNavigation).toBe(base);
+    expect(()=>f.run()).not.toThrow();expect(f.state.engineeringNavigation?.compositionCoverage).toBe('partial');
     expect(f.state.engineeringSnapshot).not.toBeNull();expect(log).toHaveBeenCalledTimes(2);
   }finally{f.dispose();log.mockRestore();}
 });
@@ -115,9 +115,26 @@ it('waits for every IFC range before publishing one complete navigation',async()
 });
 it('reapplies a warm selection as geometry arrives without rebuilding the cached tree',async()=>{
  const f=await fixture();try{
-  const view=f.state.engineeringNavigation!;view.compositionComplete=true;f.state.engineeringNavigationCacheHit=true;
+  const view=f.state.engineeringNavigation!;view.compositionComplete=true;view.compositionCoverage='full';f.state.engineeringNavigationCacheHit=true;
   const target={kind:'engineering' as const,key:f.state.engineeringSnapshot!.entities[0].id};f.state.beginSelection(target);
   f.run();await Promise.resolve();expect(ProjectionWorker.instances).toHaveLength(0);expect(f.state.engineeringNavigation).toBe(view);
   await vi.waitFor(()=>expect(selectEngineeringTarget).toHaveBeenCalledWith(f.state,target,expect.anything(),{fit:false,load:false}));
+ }finally{f.dispose();}
+});
+
+it('publishes a partial tree after one IFC is skipped and keeps the source and inventory pages',async()=>{
+ const f=await fixture();try{
+  f.state.engineeringTreeStatus='loading';f.state.engineeringIfcGeometryFinished=true;
+  f.state.engineeringSources!.models=[{modelId:'m',path:'建筑.ifc'},{modelId:'n',path:'skipped.ifc'}];
+  const ready=vi.fn();f.dispose();
+  const dispose=installCompositionProjection(f.state,ready);
+  try{
+   f.run().reply();
+   expect(f.state.engineeringTreeStatus).toBe('ready');
+   expect(f.state.engineeringNavigation?.compositionCoverage).toBe('partial');
+   expect(f.state.engineeringNavigation?.sourceNodes.size).toBeGreaterThan(0);
+   expect(f.state.engineeringNavigation?.inventory?.nodes.size).toBeGreaterThan(0);
+   expect(ready).toHaveBeenCalledWith(false);
+  }finally{dispose();}
  }finally{f.dispose();}
 });

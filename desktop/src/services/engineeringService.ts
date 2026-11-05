@@ -80,9 +80,10 @@ function publish(state: AppState, job: EngineeringJob, result: EngineeringBuildR
   state.engineeringSnapshot = result.snapshot;
   state.engineeringNavigation = result.navigation;
   state.engineeringNavigationCacheHit = result.navigationCacheHit === true;
-  const finalNavigation=result.navigationCacheHit===true&&result.navigation.compositionComplete===true || result.sources.graph.ifcPaths.length===0;
+  const noIfc=result.sources.graph.ifcPaths.length===0;
+  const finalNavigation=result.navigationCacheHit===true&&result.navigation.compositionComplete===true&&result.navigation.compositionCoverage==='full' || noIfc;
   state.engineeringTreeStatus=finalNavigation?'ready':'loading';
-  if(finalNavigation){result.navigation.compositionComplete=true;job.resolveProjection(true);}
+  if(finalNavigation){result.navigation.compositionComplete=true;result.navigation.compositionCoverage='full';job.resolveProjection(true);}
   state.engineeringPipelineMetrics=result.metrics?{...result.metrics,caches:[]}:null;
   state.engineeringGeometryCatalog = result.geometryOccurrences; job.resolveGeometry(result.geometryOccurrences);
   state.engineeringRepresentationChanged?.();
@@ -130,7 +131,9 @@ export function notifyEngineeringIfcFailure(state: AppState, reason: string): vo
   job.ready.then(() => {
     if (!current(state, job) || job.finished) return;
     job.finished = true; job.client.close();
-    job.resolveProjection(false);state.engineeringTreeStatus='error';
+    job.resolveProjection(false);
+    state.engineeringTreeStatus=state.engineeringNavigation?'ready':'error';
+    if(state.engineeringNavigation)state.engineeringNavigation={...state.engineeringNavigation,compositionCoverage:'partial'};
     state.engineeringError = reason;
     state.engineeringStatus = state.engineeringSnapshot ? 'partial' : 'error';
     state.engineeringCacheStatus = 'partial'; job.update();
@@ -143,7 +146,9 @@ function fail(state: AppState, job: EngineeringJob, error: unknown): void {
   job.resolveGeometry(null);
   console.warn('[工程来源] 构建失败', error instanceof Error ? error.stack : String(error));
   job.finished = true;
-  job.resolveProjection(false);state.engineeringTreeStatus='error';
+  job.resolveProjection(false);
+  state.engineeringTreeStatus=state.engineeringNavigation?'ready':'error';
+  if(state.engineeringNavigation)state.engineeringNavigation={...state.engineeringNavigation,compositionCoverage:'partial'};
   state.engineeringError = String(error);
   state.engineeringStatus = state.engineeringSnapshot ? 'partial' : 'error';
   job.update();

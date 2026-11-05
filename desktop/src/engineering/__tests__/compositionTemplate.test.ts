@@ -141,3 +141,13 @@ it('uses area delivery evidence for civil members and preserves ambiguous delive
  facts[0].deliveryAreaNames.push({value:'110千伏配电装置区域',evidenceId:'other'});
  expect(assignEngineeringComposition(model,facts)[0].paths[0][0].title).toBe('未分类');
 });
+it('places an explicitly identified outdoor transformer firewall in its own structure group',()=>{
+ const model=snapshot([entity('firewall','C-A1','墙体')]);
+ const evidence=[{...fact('firewall'),deliveryAreaNames:[{value:'主变区域',evidenceId:'delivery:area'}],deliveryStructureNames:[{value:'防火墙',evidenceId:'delivery:firewall'}]}];
+ expect(assignEngineeringComposition(model,evidence)[0].paths[0].map(g=>g.title)).toEqual(['建筑工程','主变区域','防火墙']);
+});
+it('does not label foundations or stairs as firewalls merely because one IFC file contains both',()=>{
+ const model=snapshot([entity('base','C-B4','独立基础'),entity('ladder','C-B7','防火墙钢梯'),entity('wall','C-A1','基本墙:防火墙')]);
+ const rows=assignEngineeringComposition(model,model.entities.map(e=>({...fact(e.id),deliveryAreaNames:[{value:'主变区域',evidenceId:'mixed-file'}]})));
+ expect(rows.map(r=>r.paths[0][r.paths[0].length-1]?.title)).toEqual(['基础','构架','防火墙']);
+});

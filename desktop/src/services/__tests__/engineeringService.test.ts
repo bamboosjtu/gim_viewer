@@ -288,3 +288,18 @@ describe('session-owned production engineering build', () => {
     expect(app.engineeringCacheStatus).toBe('saved');
   });
 });
+it('keeps all three engineering views browseable when a declared IFC is skipped by geometry loading',async()=>{
+ const app=state(),files=sourceFiles('主变压器',true);files.set('skipped.ifc',new File(['IFC'],'skipped.ifc'));
+ app.engineeringIfcGeometryFinished=true;
+ app.substationSpatialIndex=buildSubstationSpatialIndexFromTexts([
+  {entry:{modelId:'m',path:'delivery.ifc',name:'delivery'},text:"#1=IFCWALL('wall',$,'墙',$,$,$,$,$);"},
+  {entry:{modelId:'n',path:'skipped.ifc',name:'skipped'},text:"#2=IFCWALL('wall2',$,'墙2',$,$,$,$,$);"},
+ ],null);
+ await beginEngineeringBuild(app,files,{createWorker:portFactory(new LoopbackPort())});
+ expect(app.engineeringTreeStatus).toBe('ready');
+ expect(app.engineeringNavigation?.compositionCoverage).toBe('partial');
+ expect(app.engineeringNavigation?.composition.nodes.size).toBeGreaterThan(0);
+ expect(app.engineeringNavigation?.inventory?.nodes.size).toBeGreaterThan(0);
+ expect(app.engineeringNavigation?.sourceNodes.size).toBeGreaterThan(0);
+ expect(app.engineeringCacheStatus).toBe('partial');
+});

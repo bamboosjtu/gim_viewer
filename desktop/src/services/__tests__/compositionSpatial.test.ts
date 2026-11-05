@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {normalizeEngineeringModel} from '../../engineering/normalize.js';
-import {compareCompositionAssignments,fromIfcYUpBounds,projectSpatialComposition} from '../projections/compositionSpatial.js';
+import {type CompositionSpatialDiagnostics,compareCompositionAssignments,fromIfcYUpBounds,projectSpatialComposition} from '../projections/compositionSpatial.js';
 import type {ObjectEvidence} from '../../engineering/types.js';
 const object=(sourceId:string,name:string):ObjectEvidence=>({sourceId,name,traits:{},designations:[],identityCodes:[],identityNames:[],phases:[]});
 it('uses named storeys in a placeholder building and projects other architectural files into its footprint without merging wholes',()=>{
@@ -10,7 +10,7 @@ it('uses named storeys in a placeholder building and projects other architectura
  const result=projectSpatialComposition(snapshot,facts,snapshot.entities.map((e,i)=>({entityId:e.id,bounds:boxes[i],evidence:'actual-shape'})));
  expect(result.every(a=>a.paths[0].some(g=>g.title==='110千伏配电装置楼'))).toBe(true);
  expect(JSON.stringify(snapshot)).toBe(before);
- expect(result.filter(a=>a.inferred).every(a=>a.evidence.includes('actual-shape')&&a.evidence.includes('composition-spatial-v2'))).toBe(true);
+ expect(result.filter(a=>a.inferred).every(a=>a.evidence.includes('actual-shape')&&a.evidence.includes('composition-spatial-v4'))).toBe(true);
 });
 it('converts runtime Y-up bounds to the source Z-up frame exactly once',()=>{
  expect(fromIfcYUpBounds([1,2,3,4,5,6])).toEqual([1,-6,2,4,-3,5]);
@@ -94,4 +94,26 @@ it('keeps indoor supports in their containing building even with an area deliver
  const bounds=snapshot.entities.map(e=>({entityId:e.id,bounds:e.sourceIds[0]==='support'?[2,2,0,3,3,2]:[0,0,0,10,10,5],evidence:'shape'}));
  const row=projectSpatialComposition(snapshot,facts,bounds).find(r=>r.entityId===snapshot.entities.find(e=>e.sourceIds[0]==='support')!.id)!;
  expect(row.paths[0].some(g=>g.kind==='building')).toBe(true);expect(row.paths[0].some(g=>g.kind==='area')).toBe(false);
+});
+it('keeps a named firewall inside its actual building footprint',()=>{
+ const snapshot=normalizeEngineeringModel('p',[object('a','墙'),object('b','楼板'),object('c','柱'),object('firewall','防火墙')]);
+ const facts=snapshot.entities.map(e=>({entityId:e.id,hostEntityIds:[],declarations:[],spaces:e.sourceIds[0]==='firewall'?[]:[{building:{value:'配电楼',evidenceId:'building'},storeys:[]}],sourceHints:['建筑.ifc'],deliveryAreaNames:e.sourceIds[0]==='firewall'?[{value:'主变区域',evidenceId:'area'}]:[]}));
+ const bounds=snapshot.entities.map(e=>({entityId:e.id,bounds:e.sourceIds[0]==='firewall'?[2,2,0,3,3,3]:[0,0,0,10,10,4],evidence:'shape'}));
+ const row=projectSpatialComposition(snapshot,facts,bounds).find(r=>r.entityId===snapshot.entities.find(e=>e.sourceIds[0]==='firewall')!.id)!;
+ expect(row.paths[0].some(g=>g.title==='配电楼')).toBe(true);
+ expect(row.paths[0].some(g=>g.kind==='area')).toBe(false);
+});
+it('finds two stacked main-transformer fire walls in a mixed file without swallowing foundations or the ladder',()=>{
+ const entities=[...Array.from({length:14},(_,i)=>({id:`wall${i}`,name:'基本墙:预制',category:'C-A1',sourceIds:[`wall${i}`],kind:'whole',boundaryEvidence:'x',classificationState:'identified',classificationConflicts:0})),
+  {id:'low',name:'基本墙:常规',category:'C-A1',sourceIds:['low'],kind:'whole',boundaryEvidence:'x',classificationState:'identified',classificationConflicts:0},
+  {id:'ladder',name:'防火墙钢梯',category:'C-B7',sourceIds:['ladder'],kind:'whole',boundaryEvidence:'x',classificationState:'identified',classificationConflicts:0}];
+ const snapshot={scope:'p',rulesVersion:'r',entities,memberships:[],pending:[],aliases:[],relationships:[],diagnostics:[]} as never;
+ const facts=entities.map(e=>({entityId:e.id,hostEntityIds:[],spaces:[],declarations:[],sourceHints:['DEV/主变基础及防火墙.ifc'],deliveryAreaNames:[{value:'主变区域',evidenceId:'source'}]}));
+ const bounds=entities.map((e,i)=>({entityId:e.id,bounds:i<14?[i<7?24:53,20,(i%7)*0.8,i<7?24.18:53.18,29,(i%7+1)*0.8]:i===14?[25,20,-0.8,25.2,29,0.1]:[23,21,0,24,22,6],evidence:e.id}));
+ const diagnostics:CompositionSpatialDiagnostics & {firewallStacks:NonNullable<CompositionSpatialDiagnostics['firewallStacks']>}={footprints:[],firewallStacks:[]};const original=JSON.stringify(snapshot);
+ const rows=projectSpatialComposition(snapshot,facts,bounds,diagnostics);
+ expect(diagnostics.firewallStacks.map(s=>s.members)).toEqual([7,7]);
+ expect(rows.filter(r=>r.paths[0][r.paths[0].length-1]?.title==='防火墙')).toHaveLength(14);
+ expect(rows.filter(r=>['low','ladder'].includes(r.entityId)).map(r=>r.paths[0][r.paths[0].length-1]?.title)).toEqual(['构架','构架']);
+ expect(JSON.stringify(snapshot)).toBe(original);
 });

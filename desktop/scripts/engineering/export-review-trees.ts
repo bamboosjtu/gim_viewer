@@ -65,13 +65,13 @@ for(const sample of corpus.samples){
       if(owner) bounds.push({entityId:owner,bounds:object.bounds,evidence:sourceId});
     }
   }
-  const diagnostics={footprints:[]};
+  const diagnostics={footprints:[],firewallStacks:[]};
   const input=view.compositionInput;
   if(!input) throw Error(`${sample.id}: missing composition input`);
   const assignments=projectSpatialComposition(rebuilt.snapshot,input.facts,bounds,diagnostics,input.declarations);
   if(process.env.GIM_REVIEW_EVIDENCE)writeFileSync(join(out,`${sample.id}-evidence.json`),JSON.stringify({entities:rebuilt.snapshot.entities,facts:input.facts,bounds,assignments,declarations:input.declarations}));
   view.composition=finalizeEngineeringComposition(projectEngineeringComposition(rebuilt.snapshot,assignments,'工程组成',input.declarations));
-  view.compositionComplete=true;
+  view.compositionComplete=true;view.compositionCoverage='full';
   assertEngineeringNavigation(view,rebuilt.sources,rebuilt.snapshot);
   if(process.env.GIM_REVIEW_CACHE){
     const identity={sourceSha256:sample.sha256,parserVersion:'review-final-projection',entries:paths};
@@ -85,7 +85,16 @@ for(const sample of corpus.samples){
   const groups=[...view.composition.nodes.values()].filter(node=>node.kind==='group');
   const buildings=groups.filter(node=>{const parts=node.key.split('/');return parts[parts.length-1]?.startsWith('building:');}).map(node=>({name:node.title,entityCount:node.entityCount}));
   const mains=rebuilt.snapshot.entities.filter(entity=>entity.category==='E01').map(entity=>({name:entity.name,sourceCount:entity.sourceIds.length,roots:graph.records.filter(row=>!row.parent&&entity.sourceIds.includes(row.id)).map(row=>({name:row.name,type:row.source_type}))}));
-  const row={sample:sample.id,sourceSha256:sample.sha256,rulesVersion:rebuilt.snapshot.rulesVersion,sourceVersion:rebuilt.sources.version,navigationVersion:view.version,sourceComplete:rebuilt.sources.complete,incompleteReasons:rebuilt.sources.incompleteReasons,outwardSources:rebuilt.snapshot.memberships.length,entities:rebuilt.snapshot.entities.length,pending:rebuilt.snapshot.pending.length,geometryBounds:bounds.length,buildings,mains,wrongMainCabinets:rebuilt.snapshot.entities.filter(entity=>entity.category==='E01'&&/柜|屏/.test(entity.name)).length};
+  const ownersBySource=new Map(rebuilt.snapshot.memberships.map(member=>[member.sourceId,member.ownerId]));
+  const entitiesById=new Map(rebuilt.snapshot.entities.map(entity=>[entity.id,entity]));
+  const unmappedProxyCategories=new Map<string,number>();
+  for(const record of rebuilt.sources.ifcRecords.filter(record=>record.source_type==='IFCBUILDINGELEMENTPROXY')){
+    const values=new Set(record.properties.filter(p=>p.keys?.some(k=>/^(?:类别(?:\(Category\))?|Category)$/i.test(k))).map(p=>p.value));
+    for(const value of values)if(!/常规模型\(Generic Models\)|^Generic Models$/i.test(value)&&entitiesById.get(ownersBySource.get(record.id)??'')?.category==='U-OBJECT')
+      unmappedProxyCategories.set(value,(unmappedProxyCategories.get(value)??0)+1);
+  }
+  const proxyAudit={unmappedNonGeneric:[...unmappedProxyCategories.values()].reduce((a,b)=>a+b,0),categories:Object.fromEntries(unmappedProxyCategories)};
+  const row={sample:sample.id,sourceSha256:sample.sha256,rulesVersion:rebuilt.snapshot.rulesVersion,sourceVersion:rebuilt.sources.version,navigationVersion:view.version,sourceComplete:rebuilt.sources.complete,incompleteReasons:rebuilt.sources.incompleteReasons,outwardSources:rebuilt.snapshot.memberships.length,entities:rebuilt.snapshot.entities.length,pending:rebuilt.snapshot.pending.length,geometryBounds:bounds.length,buildings,mains,wrongMainCabinets:rebuilt.snapshot.entities.filter(entity=>entity.category==='E01'&&/柜|屏/.test(entity.name)).length,proxyAudit};
   writeFileSync(join(out,`${sample.id}-checks.json`),JSON.stringify({...row,diagnostics},null,2));results.push(row);console.log(JSON.stringify(row));
 }
 writeFileSync(join(out,process.env.GIM_REVIEW_SAMPLE?'partial-manifest.json':'manifest.json'),JSON.stringify({complete:results.length===corpus.samples.length,scope:'all outward DEV/IFC sources; actual IFC geometry for composition only; classification requires engineering review',boundsRoot,rawRoot,results},null,2));

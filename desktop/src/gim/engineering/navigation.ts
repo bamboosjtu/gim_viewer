@@ -13,6 +13,8 @@ import { projectEngineeringSource, SOURCE_TREE_TEMPLATE_VERSION } from './source
 export interface EngineeringNavigationData {
   version: string;
   compositionComplete?: boolean;
+  /** Full geometry-backed projection or an explicitly partial semantic/range view. */
+  compositionCoverage?: 'full' | 'partial';
   composition: EngineeringComposition;
   sourceNodes: Map<string, EngineeringSourceNode>;
   sourceRoot: string;

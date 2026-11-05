@@ -97,3 +97,17 @@ it('classifies proxies from their own category Pset without loading unrelated pr
   expect(index.objects[0].propertyDataDeferred).toBe(true);
   expect(index.objects[0].propertySets?.[0].truncated).toBe(true);
 });
+import proxyCategories from '../engineering/proxyCategories.json';
+
+it('maps explicit proxy authoring categories and leaves broad electrical/generic equipment unresolved',()=>{
+ const cases=[['喷头(Sprinklers)','C-D2'],['火警设备(Fire Alarm Devices)','C-D2'],['照明设备(Lighting Fixtures)','C-D1'],['楼梯(Stairs)','C-A9'],['栏杆(Railings)','C-A9'],['管道(Pipes)','C-D6'],['线管(Conduit Fittings)','C-D6'],['机械设备(Mechanical Equipment)','E19']];
+ for(const [raw,category] of cases){
+  const record=ifcSourceRecords([object(1,'IFCBUILDINGELEMENTPROXY','代理构件',{propertySets:[{id:10,name:'默认',kind:'property',values:[{name:'类别(Category)',value:raw}]}]})])[0];
+  expect(toObjectEvidence(record).propertyCategories?.map(p=>p.value)).toContain(category);
+ }
+ for(const raw of ['常规模型(Generic Models)','电气设备(Electrical Equipment)','专用设备(Specialty Equipment)']){
+  const record=ifcSourceRecords([object(2,'IFCBUILDINGELEMENTPROXY','代理构件',{propertySets:[{id:11,name:'默认',kind:'property',values:[{name:'类别(Category)',value:raw}]}]})])[0];
+  expect(toObjectEvidence(record).propertyCategories).toEqual([]);
+ }
+ expect(proxyCategories.version).toBe('ifc-proxy-category-v1');
+});

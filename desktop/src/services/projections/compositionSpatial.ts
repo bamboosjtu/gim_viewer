@@ -6,7 +6,7 @@ import type { SourceCompositionEvidence } from '../../gim/engineering/compositio
 /** Projection heuristics, not engineering identity rules. Distances are metres.
  * The projection never changes engineering whole/source identity. */
 export const SPATIAL_PROJECTION_POLICY = Object.freeze({
-  version: 'composition-spatial-v2', maxExtent: 500, gridSize: 8,
+  version: 'composition-spatial-v4', maxExtent: 500, gridSize: 8,
   joinMargin: 0.6, voteMargin: 0.5, containmentMargin: 1,
   minMembers: 3, minArea: 12, minWidth: 2, minTop: 2,
   minVotes: 2, highVoltageKv: 66,
@@ -16,7 +16,10 @@ const policy = SPATIAL_PROJECTION_POLICY;
 
 /** Absolute source Z-up metres; no scene visibility, mesh identity or F depth. */
 export interface CompositionBounds {entityId:string;bounds:number[];evidence:string}
-export interface CompositionSpatialDiagnostics {footprints:Array<{bounds:number[];members:number;names:string[];votes:Array<[string,number]>;chosen:string}>}
+export interface CompositionSpatialDiagnostics {
+  footprints:Array<{bounds:number[];members:number;names:string[];votes:Array<[string,number]>;chosen:string}>;
+  firewallStacks?:Array<{bounds:number[];members:number;evidence:string[]}>;
+}
 type Box=number[];
 /** web-ifc/RegionalIndex bounds are absolute Y-up metres. The composition
  * projection consumes the source Z-up metre frame; keep this conversion in one
@@ -71,6 +74,32 @@ export function projectSpatialComposition(snapshot:EngineeringSnapshot,facts:rea
     boxes.set(row.entityId,boxes.has(row.entityId)?union(boxes.get(row.entityId)!,row.bounds):row.bounds.slice());
     const refs=boundsEvidence.get(row.entityId)??[];refs.push(row.evidence);boundsEvidence.set(row.entityId,refs);
   }
+  // A mixed "main foundation and fire wall" delivery file is not a wall
+  // declaration for every product. A thin, long wall repeated at the same XY
+  // footprint across contiguous elevations is a source-backed wall stack.
+  const wallStacks=new Map<string,Array<{id:string;box:Box;file:string}>>();
+  for(const entity of snapshot.entities){
+    if(entity.category!=='C-A1')continue;
+    const box=boxes.get(entity.id);
+    if(!box)continue;
+    const width=Math.min(box[3]-box[0],box[4]-box[1]),length=Math.max(box[3]-box[0],box[4]-box[1]);
+    if(width>0.35||length<6||box[5]-box[2]<0.5)continue;
+    for(const file of evidence.get(entity.id)?.sourceHints??[]){
+      if(!/主变.*基础.*防火墙/.test(file))continue;
+      const key=JSON.stringify([file,...[box[0],box[1],box[3],box[4]].map(n=>Math.round(n*4))]);
+      const group=wallStacks.get(key)??[];group.push({id:entity.id,box,file});wallStacks.set(key,group);
+    }
+  }
+  const firewallMembers=new Map<string,string[]>();
+  for(const group of wallStacks.values()){
+    if(group.length<3)continue;
+    const ordered=[...group].sort((a,b)=>a.box[2]-b.box[2]);
+    if(ordered[ordered.length-1].box[5]-ordered[0].box[2]<4)continue;
+    if(ordered.slice(1).some((row,i)=>row.box[2]>ordered[i].box[5]+0.08))continue;
+    const ids=ordered.map(row=>row.id);
+    ids.forEach(id=>firewallMembers.set(id,ids));
+    diagnostics?.firewallStacks?.push({bounds:ordered.map(row=>row.box).reduce(union),members:ids.length,evidence:[group[0].file,...ids]});
+  }
   const anchors = snapshot.entities.flatMap(e => {
     if (!e.category.startsWith('E')) return [];
     const groups = new Map((assignment.get(e.id)?.paths ?? []).flatMap(path => path.filter(g => g.kind === 'system' && (g.key === 'main' || g.key.startsWith('distribution:')))).map(g => [g.key,g]));
@@ -80,9 +109,11 @@ export function projectSpatialComposition(snapshot:EngineeringSnapshot,facts:rea
   });
   const areaPath = (entity:EngineeringSnapshot['entities'][number], group:CompositionGroup):CompositionGroup[] => {
     const foundation = ['C-B2','C-B3','C-B4'].includes(entity.category) || /基础|杯口|承台|垫层/.test(entity.name) && !/支架|构架/.test(entity.name);
-    const title = foundation ? '基础' : supportTitle(entity, entity.category);
+    const firewall = !foundation && (firewallMembers.has(entity.id)||evidence.get(entity.id)?.deliveryStructureNames?.some(n=>n.value==='防火墙')
+      || entity.category==='C-A1' && /防火墙|防火.*墙|墙.*防火/.test(entity.name));
+    const title = firewall ? '防火墙' : foundation ? '基础' : supportTitle(entity, entity.category);
     return [civil,{key:`area:${group.key}`,title:group.key==='main'?'主变区域':`${group.title}区域`,kind:'area',order:20},
-      {key:`area:${group.key}:${foundation?'foundation':title}`,title,kind:'structure',order:foundation?20:10}];
+      {key:`area:${group.key}:${firewall?'firewall':foundation?'foundation':title}`,title,kind:'structure',order:firewall?30:foundation?20:10}];
   };
   const architecturalSeeds=new Set(['C-A1','C-A2','C-A3','C-A4','C-A5','C-A6']);
   const seeds=snapshot.entities.filter(e=>architecturalSeeds.has(e.category)&&boxes.has(e.id)&&
@@ -185,6 +216,13 @@ export function projectSpatialComposition(snapshot:EngineeringSnapshot,facts:rea
     const ranked=[...distances.values()].sort((a,b)=>a.distance-b.distance);
     if(!ranked.length || ranked.length>1&&ranked[1].distance-ranked[0].distance<policy.areaSeparation)continue;
     assignment.set(e.id,{entityId:e.id,paths:[areaPath(e,ranked[0].group)],evidence:[...old.evidence,'spatial-equipment-area',policy.version,ranked[0].id,...(boundsEvidence.get(e.id)??[])],inferred:true});
+  }
+  for(const e of snapshot.entities){
+    const stack=firewallMembers.get(e.id),old=assignment.get(e.id);
+    if(!stack||!old||old.paths.some(path=>path.some(group=>group.kind==='building')))continue;
+    if(!old.paths.some(path=>path.some(group=>group.key==='area:main')))continue;
+    assignment.set(e.id,{entityId:e.id,paths:[areaPath(e,{key:'main',title:'主变压器系统',kind:'system'})],
+      evidence:[...new Set([...old.evidence,'spatial-firewall-stack',policy.version,...stack,...(boundsEvidence.get(e.id)??[])])],inferred:true});
   }
   return snapshot.entities.map(e=>assignment.get(e.id)!);
 }

@@ -53,13 +53,12 @@ export function installCompositionProjection(state: AppState, onReady?: (complet
     const snapshot = state.engineeringSnapshot, view = state.engineeringNavigation, input = view?.compositionInput;
     if (!snapshot || !view || !input) return;
     const sources=state.engineeringSources;
-    if(sources?.incompleteReasons.includes('ifc-manifest-incomplete'))return;
+    if(sources?.incompleteReasons.includes('ifc-manifest-incomplete')&&!state.engineeringIfcGeometryFinished)return;
     const models=sources?.models??[];
+    if(!models.length)return;
     const missing=models.filter(model=>!state.ifcRegionalRuntimes.has(model.modelId));
-    if(missing.length){
-      if(state.engineeringIfcGeometryFinished){state.engineeringTreeStatus='error';state.engineeringError='模型树加载未完成：部分 IFC 几何范围不可用';state.notifyEngineeringChanged();onReady?.(false);}
-      return;
-    }
+    if(missing.length&&!state.engineeringIfcGeometryFinished)return;
+    const complete=missing.length===0;
     // Start from semantic paths/search strings, rather than accumulating earlier
     // spatial estimates. A new semantic publication resets this base.
     if (view !== publishedView) baseView = view;
@@ -75,21 +74,16 @@ export function installCompositionProjection(state: AppState, onReady?: (complet
       const sourceId = `ifc:${JSON.stringify([model, object.expressId])}`, owner = owners.get(sourceId), sourceBounds = fromIfcYUpBounds(object.bounds);
       if (owner && sourceBounds) bounds.push({ entityId: owner, bounds: sourceBounds, evidence: sourceId });
     }
-    if (!bounds.length) {
-      if(models.length){state.engineeringTreeStatus='error';state.engineeringError='模型树加载未完成：没有可用的空间范围';state.notifyEngineeringChanged();onReady?.(false);}
-      restore();
-      return;
-    }
     const runRevision = revision;
     let owned: Worker;
     try { owned = worker = new Worker(new URL('./compositionProjectionWorker.ts', import.meta.url), { type: 'module' }); }
-    catch (error) { console.warn('[工程组成投影]', error); restore();state.engineeringTreeStatus='error';state.engineeringError='模型树空间计算失败';state.notifyEngineeringChanged();onReady?.(false); return; }
+    catch (error) { console.warn('[工程组成投影]', error); restore();state.engineeringTreeStatus='ready';state.engineeringNavigation={...base,compositionCoverage:'partial'};state.notifyEngineeringChanged();onReady?.(false); return; }
     owned.onmessage = (event: MessageEvent<ProjectionOutput>) => {
       if (!current() || worker !== owned || revision !== runRevision || snapshot !== state.engineeringSnapshot || view !== state.engineeringNavigation) { owned.terminate(); return; }
       owned.terminate(); worker = undefined;
-      if ('error' in event.data) { console.warn('[工程组成投影]', event.data.error); restore();state.engineeringTreeStatus='error';state.engineeringError='模型树空间计算失败';state.notifyEngineeringChanged();onReady?.(false); return; }
+      if ('error' in event.data) { console.warn('[工程组成投影]', event.data.error); restore();state.engineeringTreeStatus='ready';state.engineeringNavigation={...base,compositionCoverage:'partial'};state.notifyEngineeringChanged();onReady?.(false); return; }
       const { composition } = event.data, contexts = new Map(event.data.contexts), entities = new Map(snapshot.entities.map(e => [e.id, e]));
-      publishedView = { ...base, compositionComplete:true, composition, compositionSearch: base.compositionSearch.map(row => {
+      publishedView = { ...base, compositionComplete:true, compositionCoverage:complete&&!!bounds.length?'full':'partial', composition, compositionSearch: base.compositionSearch.map(row => {
         const entity = entities.get(row.key); if (!entity) return row;
         const inferred = composition.rowsByEntity.get(entity.id)?.some(key => composition.nodes.get(key)?.inferred);
         const subtitle = `${categoryLabel(entity.category)} · ${contexts.get(row.key) ?? '工程归属待确认'}${inferred ? ' · 空间推断' : ''}`;
@@ -99,13 +93,13 @@ export function installCompositionProjection(state: AppState, onReady?: (complet
       state.engineeringTreeStatus='ready';
       for (const key of state.engineeringExpandedRows.composition) if (!composition.nodes.has(key)) state.engineeringExpandedRows.composition.delete(key);
       state.notifyEngineeringChanged();
-      onReady?.(true);
+      onReady?.(publishedView.compositionCoverage==='full');
       reconcile();
     };
-    owned.onerror = event => { if (current()) console.warn('[工程组成投影]', event.message); owned.terminate(); if (worker === owned) { worker = undefined; restore();state.engineeringTreeStatus='error';state.engineeringError='模型树空间计算失败';state.notifyEngineeringChanged();onReady?.(false); } };
+    owned.onerror = event => { if (current()) console.warn('[工程组成投影]', event.message); owned.terminate(); if (worker === owned) { worker = undefined; restore();state.engineeringTreeStatus='ready';state.engineeringNavigation={...base,compositionCoverage:'partial'};state.notifyEngineeringChanged();onReady?.(false); } };
     const message: ProjectionInput = { snapshot: { ...snapshot, entities: snapshot.entities.map(e => ({ ...e, sourceIds: [] })), memberships: [], relationships: [], aliases: [], diagnostics: [] }, facts: input.facts, declarations: input.declarations, bounds };
     try { owned.postMessage(message); }
-    catch (error) { owned.terminate(); if (worker === owned) worker = undefined; console.warn('[工程组成投影]', error); restore();state.engineeringTreeStatus='error';state.engineeringError='模型树空间计算失败';state.notifyEngineeringChanged();onReady?.(false); }
+    catch (error) { owned.terminate(); if (worker === owned) worker = undefined; console.warn('[工程组成投影]', error); restore();state.engineeringTreeStatus='ready';state.engineeringNavigation={...base,compositionCoverage:'partial'};state.notifyEngineeringChanged();onReady?.(false); }
   }
   state.engineeringGeometryEvidenceChanged = update;
   return () => { disposed = true; revision++; clearTimeout(timer); worker?.terminate(); if (state.engineeringGeometryEvidenceChanged === update) state.engineeringGeometryEvidenceChanged = null; };

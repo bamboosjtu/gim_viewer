@@ -68,7 +68,9 @@ export function createEngineeringWorkerHandler(){
       try{if(!request.entityBytes)throw Error('entity-cache-missing');snapshot=await decodeEngineeringEntities(request.entityBytes,artifact,request.identity);entityCacheHit=true;}
       catch{snapshot=normalizeEngineeringSources(scope,artifact.sources);}
       let navigation,navigationCacheHit=false;
-      try{if(!request.navigationBytes)throw Error('navigation-cache-missing');navigation=await decodeEngineeringNavigation(request.navigationBytes,artifact.sources,snapshot,artifact.digest,request.identity);navigationCacheHit=true;}
+      try{if(!request.navigationBytes)throw Error('navigation-cache-missing');navigation=await decodeEngineeringNavigation(request.navigationBytes,artifact.sources,snapshot,artifact.digest,request.identity);
+        if(graph.ifcPaths.length && (navigation.compositionComplete!==true||navigation.compositionCoverage!=='full'))throw Error('navigation-projection-incomplete');
+        navigationCacheHit=true;}
       catch{navigation=projectEngineeringNavigation(artifact.sources,snapshot);}
       // Drop incoming cache buffers before constructing the display transport.
       request.sourceBytes=new Uint8Array();delete request.entityBytes;delete request.navigationBytes;
