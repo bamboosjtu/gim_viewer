@@ -16,6 +16,15 @@ import shutil
 import tempfile
 import traceback
 
+_SMOKE_OUTPUT = None
+if '--smoke' in sys.argv:
+    index = sys.argv.index('--smoke')
+    _SMOKE_OUTPUT = os.path.abspath(sys.argv[index + 2] if len(sys.argv) > index + 2 else 'smoke.png')
+    os.makedirs(os.path.dirname(_SMOKE_OUTPUT), exist_ok=True)
+    # Windowed PyInstaller has no stdout/stderr. Preserve diagnostics and keep
+    # test settings beside the requested output, never in the user's profile.
+    sys.stdout = sys.stderr = open(_SMOKE_OUTPUT + '.log', 'w', encoding='utf-8', buffering=1)
+
 os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS',
                       '--ignore-gpu-blocklist --enable-unsafe-swiftshader '
                       '--disable-features=TranslateUI,MediaRouter')
@@ -112,7 +121,7 @@ class MainWindow(QMainWindow):
         self.resize(1480, 940)
         self.setAcceptDrops(True)
 
-        self.settings = (QSettings(os.path.abspath('smoke-settings.ini'), QSettings.IniFormat)
+        self.settings = (QSettings(os.path.join(os.path.dirname(_SMOKE_OUTPUT), 'smoke-settings.ini'), QSettings.IniFormat)
                          if '--smoke' in sys.argv else QSettings('GIMViewer', 'Viewer'))
         self.worker = None
         self.cur_path = None
@@ -472,11 +481,20 @@ class MainWindow(QMainWindow):
 def main():
     if '--self-check' in sys.argv:
         return  # Imports above exercise QtWebEngine and the parser.
+    if '--smoke' in sys.argv:
+        from PySide6.QtCore import qInstallMessageHandler
+        qInstallMessageHandler(lambda _kind, _context, message: print('[Qt]', message, flush=True))
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setWindowIcon(app_icon())
     w = MainWindow()
+    if '--smoke' in sys.argv:
+        # WebEngine must receive expose events. Keep the test window outside
+        # the desktop without activation instead of suppressing its surface.
+        w.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        w.setWindowFlag(Qt.WindowDoesNotAcceptFocus, True)
+        w.move(-10000, -10000)
     w.show()
 
     # 自检：自动打开指定模型并截图退出
@@ -488,27 +506,71 @@ def main():
         def go():
             if target and os.path.isfile(target):
                 w.open_gim(target)
+        deadline = time.monotonic() + 45
+        finished = False
+
+        def finish(ok, stats=None, error=''):
+            nonlocal finished
+            if finished:
+                return
+            finished = True
+            receipt = {'ok': ok, 'frozen': bool(getattr(sys, 'frozen', False)),
+                       'stats': stats, 'error': error, 'source': target}
+            with open(outpng + '.json', 'w', encoding='utf-8') as stream:
+                json.dump(receipt, stream, ensure_ascii=False, indent=2)
+            app.exit(0 if ok else 1)
+
         def shot():
             # 用画布导出验证真实渲染结果（窗口截图抓不到 GPU 合成层）
-            def cb(url):
-                try:
-                    import base64
-                    if url and isinstance(url, str):
-                        open(outpng, 'wb').write(base64.b64decode(url.split(',',1)[1]))
-                        print('SMOKE_SHOT', outpng, flush=True)
+            def ready(stats):
+                if isinstance(stats, str):
+                    stats = json.loads(stats)
+                if not isinstance(stats, dict) or not stats.get('meshes'):
+                    if time.monotonic() < deadline:
+                        QTimer.singleShot(500, shot)
                     else:
-                        print('SMOKE_EMPTY_CANVAS', flush=True)
-                except Exception as e:
-                    print('SMOKE_FAIL', e, flush=True)
-                app.quit()
-            if smode == 'solid':
-                w.view.page().runJavaScript('window.__api.snapshot()', cb)
-            else:
-                w.view.page().runJavaScript("window.__api.mode('%s')" % smode, lambda _: None)
-                QTimer.singleShot(900, lambda: w.view.page().runJavaScript(
-                    'window.__api.snapshot()', cb))
-        QTimer.singleShot(2500, go)
+                        finish(False, stats, 'No rendered geometry before smoke deadline')
+                    return
+
+                def cb(url):
+                    try:
+                        import base64
+                        if not isinstance(url, str) or not url.startswith('data:image/png;base64,'):
+                            raise RuntimeError('Empty canvas snapshot')
+                        png = base64.b64decode(url.split(',', 1)[1])
+                        if not png.startswith(b'\x89PNG\r\n\x1a\n'):
+                            raise RuntimeError('Invalid PNG snapshot')
+                        with open(outpng, 'wb') as stream:
+                            stream.write(png)
+                        def rendered(after):
+                            if isinstance(after, str):
+                                after = json.loads(after)
+                            if not isinstance(after, dict) or not after.get('drawCalls'):
+                                finish(False, after, 'Snapshot contains no geometry draw calls')
+                            else:
+                                finish(True, after)
+                        w.view.page().runJavaScript('JSON.stringify(window.__api.stats())', rendered)
+                    except Exception as error:
+                        finish(False, stats, str(error))
+
+                if smode == 'solid':
+                    w.view.page().runJavaScript('window.__api.snapshot()', cb)
+                else:
+                    w.view.page().runJavaScript("window.__api.mode('%s')" % smode, lambda _: None)
+                    QTimer.singleShot(900, lambda: w.view.page().runJavaScript('window.__api.snapshot()', cb))
+
+            w.view.page().runJavaScript('JSON.stringify(window.__api ? window.__api.stats() : null)', ready)
+        def open_when_ready():
+            def ready(value):
+                if value:
+                    go()
+                elif time.monotonic() < deadline:
+                    QTimer.singleShot(250, open_when_ready)
+            w.view.page().runJavaScript('window.__ready === true', ready)
+
+        QTimer.singleShot(100, open_when_ready)
         QTimer.singleShot(9000, shot)
+        QTimer.singleShot(50_000, lambda: finish(False, error='Smoke watchdog: renderer callback did not finish'))
 
     sys.exit(app.exec())
 

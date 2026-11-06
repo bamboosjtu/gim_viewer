@@ -33,6 +33,36 @@ NAME2CODE = {v: k for k, v in TYPE_NAME.items()}
 TREE_CAP = 3000          # 单目录一次最多列 3000 个文件，超出用搜索
 
 
+def choose_pointer_candidate(parent, candidates):
+    """No initial selection: only an explicit choice authorizes navigation."""
+    from PySide6 import QtWidgets
+
+    dialog = QtWidgets.QDialog(parent)
+    dialog.setWindowTitle('多义指针：选择目标文件')
+    dialog.resize(640, 300)
+    layout = QtWidgets.QVBoxLayout(dialog)
+    layout.addWidget(QtWidgets.QLabel('此指针有多个候选，请核对完整路径后选择：'))
+    paths = QtWidgets.QListWidget()
+    paths.setObjectName('pointer-candidates')
+    paths.addItems(list(candidates))
+    layout.addWidget(paths)
+    buttons = QtWidgets.QDialogButtonBox(
+        QtWidgets.QDialogButtonBox.Open | QtWidgets.QDialogButtonBox.Cancel)
+    buttons.setObjectName('pointer-candidate-actions')
+    open_button = buttons.button(QtWidgets.QDialogButtonBox.Open)
+    open_button.setEnabled(False)
+    paths.setCurrentRow(-1)
+    buttons.button(QtWidgets.QDialogButtonBox.Cancel).setFocus()
+    paths.currentRowChanged.connect(lambda row: open_button.setEnabled(row >= 0))
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    paths.itemDoubleClicked.connect(lambda _item: dialog.accept())
+    layout.addWidget(buttons)
+    if dialog.exec() == QtWidgets.QDialog.Accepted and paths.currentItem():
+        return paths.currentItem().text()
+    return None
+
+
 def run_browser(init_dir=None, selftest=False):
     from PySide6 import QtWidgets, QtCore, QtGui
 
@@ -283,8 +313,18 @@ def run_browser(init_dir=None, selftest=False):
             return
         rel = data[1]
         ix = state['ix']
+        pointers = {p.key: p for p in ix.pointers(rel)}
         for how, key, tgt, ok in ix.edges(rel):
-            add_chain_child(item, tgt, how, key, ok)
+            pointer = pointers.get(key)
+            if pointer and pointer.status == 'ambiguous':
+                child = QtWidgets.QTreeWidgetItem(['多义：%s' % key, how,
+                                                  '%d 候选' % len(pointer.candidates)])
+                child.setData(0, QtCore.Qt.UserRole, ('ambiguous', pointer.candidates, rel))
+                child.setToolTip(0, '双击后选择目标；未确定归属\n' + '\n'.join(pointer.candidates))
+                child.setForeground(0, QtGui.QBrush(QtGui.QColor('#a66300')))
+                item.addChild(child)
+            else:
+                add_chain_child(item, tgt, how, key, ok)
         if item.childCount() == 0:
             item.setChildIndicatorPolicy(
                 QtWidgets.QTreeWidgetItem.ChildIndicatorPolicy.DontShowIndicator)
@@ -568,15 +608,18 @@ def run_browser(init_dir=None, selftest=False):
                         a.setForeground(QtGui.QBrush(QtGui.QColor('#6b7684')))
                     # XML 属性值本身也可能是指针，仍按单击跳转处理
                     if is_pointer_value(line):
-                        tgt, st = ix.resolve(rel, line)
-                        if st != 'missing' and tgt in ix.files:
+                        resolution = ix.resolve(rel, line)
+                        tgt, st = resolution
+                        if st == 'ambiguous' or st in ('ok', 'cross') and tgt in ix.files:
                             link = QtGui.QFont(mono)
                             link.setUnderline(True)
                             b.setFont(link)
                             b.setForeground(QtGui.QBrush(QtGui.QColor('#1a5fb4')))
-                            b.setToolTip('单击跳到 %s' % tgt)
-                            b.setData(QtCore.Qt.UserRole, tgt)
-                            targets[i] = tgt
+                            destination = resolution.candidates if st == 'ambiguous' else tgt
+                            b.setToolTip('单击选择目标（多义）\n' + '\n'.join(resolution.candidates)
+                                         if st == 'ambiguous' else '单击跳到 %s' % tgt)
+                            b.setData(QtCore.Qt.UserRole, destination)
+                            targets[i] = destination
                 else:
                     a.setForeground(QtGui.QBrush(QtGui.QColor('#6b7684')))
                 atv.setItem(i, 0, a)
@@ -628,7 +671,12 @@ def run_browser(init_dir=None, selftest=False):
                 if p is not None:
                     col = QtGui.QColor(KIND_COLOR.get(p.kind, '#1a5fb4'))
                     ki.setToolTip(kind_tooltip(p.kind))
-                    if p.status == 'missing' or p.target not in ix.files:
+                    if p.status == 'ambiguous':
+                        vi.setForeground(QtGui.QBrush(QtGui.QColor('#a66300')))
+                        vi.setToolTip('多义指针，单击选择目标；未确定归属\n' + '\n'.join(p.candidates))
+                        vi.setData(QtCore.Qt.UserRole, p.candidates)
+                        targets[i] = p.candidates
+                    elif p.status == 'missing' or p.target not in ix.files:
                         # 文件未随包下载：红色，tooltip 给出应取的准确路径
                         vi.setForeground(QtGui.QBrush(QtGui.QColor('#b3261e')))
                         vi.setToolTip('%s\n未下载，按引用链应取：%s'
@@ -669,7 +717,7 @@ def run_browser(init_dir=None, selftest=False):
             for cidx in (1, 2):
                 btv.setItem(0, cidx, QtWidgets.QTableWidgetItem(''))
             return
-        refs = ix.back_refs(rel)
+        refs = ix.back_refs(rel) + ix.possible_back_refs(rel)
         btv.setRowCount(len(refs) or 1)
         if not refs:
             btv.setItem(0, 0, QtWidgets.QTableWidgetItem('（没有文件指向它）'))
@@ -677,7 +725,7 @@ def run_browser(init_dir=None, selftest=False):
             btv.setItem(0, 2, QtWidgets.QTableWidgetItem(''))
             return
         for i, (src, p) in enumerate(refs):
-            a = QtWidgets.QTableWidgetItem(src)
+            a = QtWidgets.QTableWidgetItem(src + ('（多义候选，未确认）' if p.status == 'ambiguous' else ''))
             b = QtWidgets.QTableWidgetItem(p.key)
             c = QtWidgets.QTableWidgetItem(str(p.value))
             b.setToolTip(kind_tooltip(p.kind))
@@ -727,6 +775,11 @@ def run_browser(init_dir=None, selftest=False):
         只屏蔽「同一目标」在 0.2s 内的重复触发（双击的第二下），
         不再用全局时间锁——那会把用户紧接着点的下一个指针也吃掉。
         """
+        if isinstance(tgt, (tuple, list)):
+            ix = state['ix']
+            tgt = choose_pointer_candidate(win, tgt)
+            if not tgt or state['ix'] is not ix:
+                return
         now = time.time()
         if tgt == state['last_tgt'] and now - state['last_jump'] < 0.2:
             return
@@ -761,6 +814,8 @@ def run_browser(init_dir=None, selftest=False):
         data = item.data(0, QtCore.Qt.UserRole)
         if data and data[0] == 'file':
             open_rel(data[1])
+        elif data and data[0] == 'ambiguous':
+            jump(data[1], data[2])
 
     atv.cellClicked.connect(on_attr_click)
     atv.cellDoubleClicked.connect(atv_activated)
@@ -983,12 +1038,15 @@ def run_browser(init_dir=None, selftest=False):
                 if state['quit_waits'] < 80:
                     QtCore.QTimer.singleShot(300, _quit)
                     return
+            receipt = {'ok': False}
             try:
                 ix = state['ix']
                 msg = 'files=%d' % (len(ix.files) if ix else 0)
                 ifc = ''
                 mod = ''
                 root = ix._root_cbm() if ix else ''
+                if not root:
+                    raise RuntimeError('GUI self-test requires a nonempty fixture with a root CBM')
                 if root and not ix.built:
                     st = ix.build_refs(lambda m: None)      # 自检顺带验证索引/反向引用
                     msg += ' idx=%s/%s' % (st['指针'], st['悬空'])
@@ -1037,8 +1095,9 @@ def run_browser(init_dir=None, selftest=False):
                     open_rel(root)
                     msg += ' cols=%d links=%d' % (
                         atv.columnCount(), len(state['targets']))
-                    if state['targets']:
-                        on_attr_click(sorted(state['targets'])[0], 1)
+                    unique_links = [row for row, target in state['targets'].items() if isinstance(target, str)]
+                    if unique_links:
+                        on_attr_click(sorted(unique_links)[0], 1)
                         msg += ' click=%s' % state['cur'].split('/')[-1][:8]
                     # 展开到 F4，检查细分类型出边（层级下钻 / 属性族 / 模型锚点…）
                     f4 = next((r for r, _n, _k in ch
@@ -1074,12 +1133,20 @@ def run_browser(init_dir=None, selftest=False):
                     msg += ' xmlview=%s/rows=%d' % (
                         state['attr_mode'], atv.rowCount())
                     win.grab().save('_xml_view.png')
+                receipt = {'ok': True, 'frozen': bool(getattr(__import__('sys'), 'frozen', False)),
+                           'files': len(ix.files), 'pointers': st['指针'], 'ambiguous': st['多义'],
+                           'historyEntries': len(state['hist']), 'columns': atv.columnCount(),
+                           'rootChildren': rel2item[root].childCount(), 'detail': msg}
                 print('BROWSE-OK %s' % msg, flush=True)
             except Exception:
                 _log('自检异常:\n' + traceback.format_exc())
+                receipt['error'] = traceback.format_exc()
                 print('BROWSE-FAIL', flush=True)
-            app.quit()
+            import json
+            from pathlib import Path
+            Path('browse-selftest.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding='utf-8')
+            app.exit(0 if receipt['ok'] else 1)
         QtCore.QTimer.singleShot(6000 if not init_dir else 8000, _quit)
 
     win.show()
-    app.exec()
+    return app.exec()

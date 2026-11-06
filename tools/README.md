@@ -55,11 +55,38 @@
 - `--self-check` 只检查启动和依赖加载，不打开正式窗口、不修改用户偏好。`gim_element` 还校验归档内嵌目录数据及 ICU 排除情况；完整功能验证使用下面的冒烟入口。
 - `_build/`、`dist/`、`.venv/` 和工具生成的截图、日志不提交。发布只取当前 `dist` 产物。
 
+## CI
+
+[Windows Tools CI](../.github/workflows/tools-ci.yml) 为 `gim_device`、`gim_element`、`gim_info` 分别建立 Windows x64 / Python 3.12 矩阵作业，支持 push、pull request 和手动触发。`tools/`、共享工程目录 `desktop/src/engineering/catalog.json` 或工作流变化时执行。
+
+每个工具使用自己的 `requirements-build.txt`，依次运行合成输入测试、实际 onefile 构建/启动检查、冻结版功能冒烟和 ZIP 内容校验。CI 的每个矩阵作业拥有独立 runner，因此构建使用该作业的 Python 环境及 `-NoVenv`；本地继续使用各工具自己的 `.venv`。
+
+| 作业 | 合成测试与冻结版验证 |
+|---|---|
+| `gim_device` | ZIP / GIMPKGS+7z、重复 MOD 的不同装配矩阵；冻结版创建两个 Mesh，检查实际绘制统计并导出画布 PNG |
+| `gim_element` | 设备/附件归属、IFC 构件、目录/ZIP 一致性、HTML 转义；冻结版读取合成 GIM+7z，核对内嵌目录 SHA、分类回执和截图 |
+| `gim_info` | 唯一/显式路径、多义候选、不自动选择、反向引用、重复引用边；冻结版检查链树、跳转/返回、XML/文本视图和截图 |
+| `build-safety` | 共享构建脚本的路径边界、目录联接拒绝及失败时保留旧产物 |
+
+全部夹具由 [fixtures.py](tests/fixtures.py) 生成，不依赖未入库的 `demo/` 样本。每次上传测试日志、截图和 JSON 回执，手动触发成功后额外上传各工具的单文件 ZIP，保留 7 天。回执同时记录被测试 EXE 的 SHA-256，并验证 ZIP 内只有该 EXE 且字节一致。
+
+设备冻结冒烟在 Windows 原生图形平台上创建屏幕外、不抢焦点的测试窗口，以保留 WebEngine 所需的暴露事件；普通 Qt Widgets 测试使用 `offscreen`。冒烟设置、日志和截图放在指定输出目录，临时目录使用正常的用户/runner TEMP。没有渲染结果、没有回执、错误退出或超时都会使作业失败。
+
 ## 验证
 
 ```powershell
 # 构建路径越界、目录联接及失败时保留旧产物的回归
 powershell.exe -NoProfile -File .\tools\tests\build-safety.ps1
+
+# 每个工具的合成输入测试（分别运行，避免同名 gim_core 模块互相覆盖）
+.\tools\gim_device\.venv\Scripts\python.exe -m unittest discover -s tools/gim_device/tests -v
+.\tools\gim_element\.venv\Scripts\python.exe -m unittest discover -s tools/gim_element/tests -v
+.\tools\gim_info\.venv\Scripts\python.exe -m unittest discover -s tools/gim_info/tests -v
+
+# 先用 -Publish 构建；以下命令核对 ZIP 并运行真正的冻结 EXE
+.\tools\gim_device\.venv\Scripts\python.exe tools/tests/smoke_tool.py --tool gim_device --out output/tools-ci/gim_device
+.\tools\gim_element\.venv\Scripts\python.exe tools/tests/smoke_tool.py --tool gim_element --out output/tools-ci/gim_element
+.\tools\gim_info\.venv\Scripts\python.exe tools/tests/smoke_tool.py --tool gim_info --out output/tools-ci/gim_info
 
 # 冻结版实体识别：自动构造 GIM/7z 夹具，检查截图、目录数据与识别回执
 .\tools\gim_element\.venv\Scripts\python.exe .\tools\gim_element\smoke_packaged.py

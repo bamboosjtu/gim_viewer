@@ -16,7 +16,8 @@
 指针判定（与教程 Step 6/8 同口径，类型以 `ptr_kinds.py` 为唯一真源）
     · 键以 `.NUM` 结尾 → 计数键，不是指针；
     · 值去空白后以模型/逻辑/资料后缀结尾 → 指针，共 **9 种语义类型**；
-    · 解析顺序：同目录同名 → 后缀约定目录（.cbm 一律在 CBM/）→ 全库同名 → 悬空；
+    · 解析顺序：显式路径 / 相对路径 → 全库唯一同名 → 多义或悬空；
+      后缀约定目录仅提供悬空下载提示，不能裁决多义目标；
     · 悬空时 target 给「期望路径」（如 CBM/xxx.cbm）——样本只下载到 F2 时，
       这些就是按引用链继续下载所需的文件名，链与导出清单都会保留它们；
     · 引用链 `edges()` 覆盖**每一个指针**（含 BASEFAMILY1..n / IFCFILE / IFCn / SCHn），
@@ -25,6 +26,7 @@
       界面只标注不跳转，避免被误判成悬空指针。
 """
 import collections
+from dataclasses import dataclass
 import os
 import posixpath
 import re
@@ -232,16 +234,34 @@ class Entry:
         self.text = None
 
 
+@dataclass(frozen=True)
+class Resolution:
+    """Unique target or all unresolved candidates; ambiguity never selects a file.
+
+    Two-value unpacking remains compatible with existing callers. New callers
+    can inspect candidates and expected without interpreting them as targets.
+    """
+    target: str
+    status: str
+    candidates: tuple[str, ...] = ()
+    expected: str = ''
+
+    def __iter__(self):
+        yield self.target
+        yield self.status
+
+
 class Ptr:
     """一条指针：键 → 目标。status: ok / cross / ambiguous / missing。
 
     kind 是 `ptr_kinds.PTR_KINDS` 的 9 种类型码（L1/L2/M/G/A/I/U/S/D）。
     """
-    __slots__ = ('key', 'value', 'target', 'status', 'note', 'kind')
+    __slots__ = ('key', 'value', 'target', 'status', 'note', 'kind', 'candidates', 'expected')
 
-    def __init__(self, key, value, target, status, note='', kind='D'):
+    def __init__(self, key, value, target, status, note='', kind='D', candidates=(), expected=''):
         self.key, self.value, self.target = key, value, target
         self.status, self.note, self.kind = status, note, kind
+        self.candidates, self.expected = tuple(candidates), expected
 
     @property
     def type_name(self):
@@ -254,7 +274,8 @@ class Ptr:
     def as_dict(self):
         return {'key': self.key, 'value': self.value, 'target': self.target,
                 'status': self.status, 'note': self.note,
-                'kind': self.kind, 'type': self.type_name}
+                'kind': self.kind, 'type': self.type_name,
+                'candidates': list(self.candidates), 'expected': self.expected}
 
 
 class Index:
@@ -266,10 +287,12 @@ class Index:
         self.files = {}                # rel('CBM/x.cbm') -> Entry
         self.by_stem = collections.defaultdict(list)   # 小写 stem -> [rel]
         self.by_name = collections.defaultdict(list)   # 小写文件名 -> [rel]
+        self.by_path = collections.defaultdict(list)   # 小写完整路径 -> [rel]
         self.refs = {}                 # rel -> [Ptr]
         self.kinds = {}                # rel -> {键: 9 种类型码}
         self.marks = {}                # rel -> [(键, 值, 类型码)]：非跳转标识/占位
         self.back = collections.defaultdict(list)      # rel -> [(src_rel, Ptr)]
+        self.possible_back = collections.defaultdict(list)  # 多义候选，不属于确定反向引用
         self.built = False
         self.lock = threading.Lock()
         self.progress = None
@@ -301,6 +324,7 @@ class Index:
                 self.files[rel] = Entry(rel, os.path.getsize(p))
                 self.by_stem[posixpath.splitext(fn)[0].lower()].append(rel)
                 self.by_name[fn.lower()].append(rel)
+                self.by_path[rel.lower()].append(rel)
         # 各后缀实际集中放在哪个目录（不同样本 ifc 可能在 DEV/ 也可能在 CBM/ 下）
         homes = collections.defaultdict(collections.Counter)
         for rel, e in self.files.items():
@@ -448,27 +472,33 @@ class Index:
         return '%s/%s' % (d, base) if d else base
 
     def resolve(self, src_rel, value):
-        """→ (target_rel, status)。status: ok/cross/ambiguous/missing。
+        """Return Resolution; only explicit/relative paths or unique names resolve.
 
-        missing 时 target 仍是期望路径（便于按引用链下载），不再是裸值。
+        A conventional directory is a missing-file hint, never a tie-breaker.
         """
         v = (value or '').strip().strip('"').replace('\\', '/')
         if not v:
-            return '', 'missing'
+            return Resolution('', 'missing')
         base = posixpath.basename(v)
-        ext = ext_of(v)
-        same = posixpath.join(posixpath.dirname(src_rel), base)
-        if same in self.files:
-            return same, 'ok'
         exp = self.expected_rel(v, src_rel)
-        if exp in self.files:
-            return exp, 'cross'
-        hits = list(self.by_name.get(base.lower(), []))
+        paths = []
+        if '/' in v:
+            paths.append(posixpath.normpath(v))
+        paths.append(posixpath.normpath(posixpath.join(posixpath.dirname(src_rel), v)))
+        for path in paths:
+            hits = tuple(sorted(set(self.by_path.get(path.lower(), []))))
+            if len(hits) == 1:
+                target = hits[0]
+                status = 'ok' if posixpath.dirname(target).lower() == posixpath.dirname(src_rel).lower() else 'cross'
+                return Resolution(target, status, hits, exp)
+            if len(hits) > 1:
+                return Resolution('', 'ambiguous', hits, exp)
+        hits = tuple(sorted(set(self.by_name.get(base.lower(), []))))
         if len(hits) == 1:
-            return hits[0], 'cross'
+            return Resolution(hits[0], 'cross', hits, exp)
         if len(hits) > 1:
-            return hits[0], 'ambiguous'
-        return exp, 'missing'
+            return Resolution('', 'ambiguous', hits, exp)
+        return Resolution(exp, 'missing', (), exp)
 
     def classify_ptr(self, rel, key, value, target='', status='ok'):
         """单条指针 → 9 种类型码。只在 cbm→cbm 且需要区分 PARTINDEX 时读目标。"""
@@ -477,7 +507,7 @@ class Index:
         te = ext_of(value).lstrip('.')
         ent = ''
         ku = key.upper()
-        if te == 'cbm' and status != 'missing' and target in self.files:
+        if te == 'cbm' and status in ('ok', 'cross') and target in self.files:
             if ku.startswith('SUBDEVICE') or 'PARTINDEX' in ku:
                 ent = self.read(target).get('ENTITYNAME', '')
         return classify(key, value, se, te, ent, posixpath.basename(rel))
@@ -499,10 +529,12 @@ class Index:
                     continue
             if not is_pointer_value(v):
                 continue
-            tgt, st = self.resolve(rel, v)
+            resolution = self.resolve(rel, v)
+            tgt, st = resolution
             kind = self.classify_ptr(rel, k, v, tgt, st)
             kmap[k] = kind
-            out.append(Ptr(k, v, tgt, st, kind=kind))
+            out.append(Ptr(k, v, tgt, st, kind=kind, candidates=resolution.candidates,
+                           expected=resolution.expected))
         self.refs[rel] = out
         self.kinds[rel] = kmap
         self.marks[rel] = marks
@@ -544,11 +576,15 @@ class Index:
             return r
 
         self.back = collections.defaultdict(list)
+        self.possible_back = collections.defaultdict(list)
         with ThreadPoolExecutor(max_workers=workers) as ex:
             for rel, ptrs in ex.map(one, rels):
                 for p in ptrs:
-                    if p.status in ('ok', 'cross', 'ambiguous') and p.target in self.files:
+                    if p.status in ('ok', 'cross') and p.target in self.files:
                         self.back[p.target].append((rel, p))
+                    elif p.status == 'ambiguous':
+                        for candidate in p.candidates:
+                            self.possible_back[candidate].append((rel, p))
         self.built = True
         self.progress('指针索引完成：文件 %d · 指针 %d · 有反向引用的文件 %d'
                       % (len(rels), sum(len(v) for v in self.refs.values()),
@@ -557,6 +593,10 @@ class Index:
 
     def back_refs(self, rel):
         return self.back.get(rel, [])
+
+    def possible_back_refs(self, rel):
+        """Unconfirmed references, kept separate even after a navigation choice."""
+        return self.possible_back.get(rel, [])
 
     # ---------- 统计 ----------
     def check(self, scan=True):
@@ -623,9 +663,10 @@ class Index:
             tgt, st = self.resolve(rel, v)
             if st == 'missing':
                 tgt = self.expected_rel(v, rel)
-            if tgt in seen:
+            identity = (rel, k, tgt)
+            if identity in seen:
                 continue
-            seen.add(tgt)
+            seen.add(identity)
             ok = tgt in self.files
             out.append((k, tgt, self.level_name(tgt) if ok else '', ok))
         return out
@@ -650,7 +691,7 @@ class Index:
         if not is_pointer_value(v):
             return None
         tgt, st = self.resolve(rel, v)
-        return tgt if st in ('ok', 'cross', 'ambiguous') else None
+        return tgt if st in ('ok', 'cross') else None
 
     def attr_ptr(self, rel):
         """任意文件 → fam（属性边 BASEFAMILY）。"""
@@ -658,7 +699,7 @@ class Index:
         if not is_pointer_value(v):
             return None
         tgt, st = self.resolve(rel, v)
-        return tgt if st in ('ok', 'cross', 'ambiguous') else None
+        return tgt if st in ('ok', 'cross') else None
 
     def geo_edges(self, rel):
         """dev/phm → 子装配与几何（SOLIDMODELn / SUBDEVICEn）。
@@ -695,7 +736,8 @@ class Index:
         """某文件的**全部指针出边** → [(指针类型, 键, 目标/期望路径, 是否存在)]。
 
         类型名取自 `ptr_kinds.PTR_KINDS`（9 种），是引用链树与下载清单的唯一数据源。
-        口径不变：属性表里每个能点的链接都必须在这里有一条边，否则链上会漏文件
+        不同来源键保留不同边；多义边 target 为空，候选见 pointers()，不自动遍历。
+        属性表里每个能点的链接都必须在这里有一条边，否则链上会漏文件
         （实测 s01 的 `BASEFAMILY1..4`、`IFCFILE`、`IFCn`、`SCHn` 曾被漏掉）。
         """
         e = self.files.get(rel)
@@ -711,9 +753,10 @@ class Index:
             tgt, st = self.resolve(rel, v)
             if st == 'missing':
                 tgt = self.expected_rel(v, rel)
-            if not tgt or tgt in seen:
+            identity = (rel, k, tgt)
+            if identity in seen:
                 return
-            seen.add(tgt)
+            seen.add(identity)
             out.append((how, k, tgt, tgt in self.files))
 
         # 层级边放最前，保证树里是 F1→F2→F3→F4 的自然次序
@@ -733,6 +776,7 @@ class Index:
 
         未下载的引用也列进去（路径是约定的期望路径），这样「只下载到 F2」的
         样本仍能导出 F3/F4/PARTINDEX 待取文件名，按清单继续下载。
+        这是文件清单：同一文件只列一次，多义候选不作为已确定的引用或待下载文件。
         """
         out, seen = [], set()
         stack = [(rel, 0, '根', '', rel in self.files)]
@@ -747,7 +791,7 @@ class Index:
             if not ok or cur not in self.files:
                 continue
             for how2, key2, tgt, ok2 in reversed(self.edges(cur)):
-                if tgt not in seen:
+                if tgt and tgt not in seen:
                     stack.append((tgt, d + 1, how2, key2, ok2))
         return out
 
@@ -774,7 +818,9 @@ class Index:
             cands.append((k, v))
         for k, v in cands:
             tgt, st = self.resolve(rel, v)
-            if st in ('ok', 'cross', 'ambiguous'):
+            if st == 'ambiguous':
+                return k, ''
+            if st in ('ok', 'cross'):
                 return k, tgt
         return '', ''
 

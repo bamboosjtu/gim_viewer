@@ -1436,7 +1436,8 @@ window.__api = {
     camera.position.copy(controls.target).add(dir.normalize().multiplyScalar(d));
     controls.update();
   },
-  stats: () => ({ meshes: meshes.length, size: SIZE })
+  stats: () => ({ meshes: meshes.length, size: SIZE,
+                  triangles: renderer.info.render.triangles, drawCalls: renderer.info.render.calls })
 };
 
 /* ---------- 渲染循环 ---------- */

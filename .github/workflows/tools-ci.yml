@@ -1,0 +1,103 @@
+name: Windows Tools CI
+
+on:
+  push:
+    paths:
+      - 'tools/**'
+      - 'desktop/src/engineering/catalog.json'
+      - '.github/workflows/tools-ci.yml'
+      - '.gitignore'
+  pull_request:
+    paths:
+      - 'tools/**'
+      - 'desktop/src/engineering/catalog.json'
+      - '.github/workflows/tools-ci.yml'
+      - '.gitignore'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tools-ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-safety:
+    name: Shared build path safety
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Reject unsafe build paths and preserve previous outputs
+        shell: pwsh
+        # Negative fixtures intentionally invoke Python with exit 17. A child
+        # shell isolates that expected status from GitHub's LASTEXITCODE check.
+        run: |
+          powershell.exe -NoProfile -File ./tools/tests/build-safety.ps1 -Python (Get-Command python).Source
+          if ($LASTEXITCODE -ne 0) { throw 'Shared build safety tests failed' }
+
+  tool:
+    name: ${{ matrix.tool }} / test + onefile + frozen smoke
+    needs: build-safety
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [gim_device, gim_element, gim_info]
+    env:
+      TOOL: ${{ matrix.tool }}
+      TOOL_OUT: output/tools-ci/${{ matrix.tool }}
+      PYTHONUTF8: '1'
+      QT_QPA_PLATFORM: offscreen
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Install the tool's pinned build dependencies
+        run: |
+          python -m pip --isolated install --disable-pip-version-check --index-url https://pypi.org/simple --no-cache-dir --only-binary :all: -r "tools/$env:TOOL/requirements-build.txt"
+          if ($LASTEXITCODE -ne 0) { throw 'Tool dependency installation failed' }
+      - name: Run synthetic core and UI contract tests
+        run: |
+          New-Item -ItemType Directory -Force $env:TOOL_OUT | Out-Null
+          python -m unittest discover -s "tools/$env:TOOL/tests" -v 2>&1 | Tee-Object "$env:TOOL_OUT/unit-tests.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Tool unit tests failed' }
+      - name: Build and startup-check the actual onefile EXE
+        run: |
+          & "./tools/$env:TOOL/build.ps1" -Python (Get-Command python).Source -NoVenv -Publish
+      - name: Verify ZIP and exercise frozen application on synthetic inputs
+        run: |
+          python tools/tests/smoke_tool.py --tool $env:TOOL --out $env:TOOL_OUT 2>&1 | Tee-Object "$env:TOOL_OUT/smoke.log"
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen tool smoke failed' }
+      - name: Upload tested onefile ZIP
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.tool }}-windows-x64-${{ github.sha }}
+          path: tools/${{ matrix.tool }}/dist/*.zip
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.tool }}-evidence-${{ github.sha }}
+          path: output/tools-ci/${{ matrix.tool }}/
+          retention-days: 7
+          if-no-files-found: warn

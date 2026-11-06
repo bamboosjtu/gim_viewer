@@ -911,13 +911,15 @@ th{background:#f4f7fc}.n{text-align:right;font-variant-numeric:tabular-nums}
 
 
 def build_html(result):
+    from html import escape
+    text = lambda value: escape(str(value), quote=True)
     m, st, tt, rows = result['meta'], result['stats'], result['totals'], result['rows']
     out = ['<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">',
            '<title>GIM 实体盘点报告</title><style>', _STYLE, '</style></head><body>']
     out.append('<h1>GIM 实体盘点报告</h1>')
     out.append('<p class="small">来源：%s（%s%s） · 用时 %.1f 秒 · 生成 %s</p>'
-               % (m['source'], m['kind'],
-                  '，容器 ' + m['container'] if m['container'] else '',
+               % (text(m['source']), text(m['kind']),
+                  '，容器 ' + text(m['container']) if m['container'] else '',
                   m['elapsed'], time.strftime('%Y-%m-%d %H:%M')))
     out.append('<div class="kpi">')
     out.append('<div><b>%s</b><span>设备（台，已确认 %s · 候选 %s；另附件 %s + 部件上卷 %s）</span></div>'
@@ -960,10 +962,10 @@ def build_html(result):
             out.append('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>'
                        '<td class="n">%s</td><td class="n">%s</td><td class="n">%s</td>'
                        '<td class="small">%s</td></tr>'
-                       % (r.get('code', ''), r['cat'], r['sub'] or '—',
-                          r['template'] or '—',
+                       % (text(r.get('code', '')), text(r['cat']), text(r['sub'] or '—'),
+                          text(r['template'] or '—'),
                           format(r['dev'], ','), format(r['ifc'], ','),
-                          format(r['total'], ','), stxt or '—'))
+                          format(r['total'], ','), text(stxt or '—')))
         out.append('</table>')
     out.append('</body></html>')
     return '\n'.join(out)

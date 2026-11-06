@@ -28,6 +28,97 @@ class SplitWorker {
   complete(task:any,result:any){this.onmessage?.({data:{kind:'result',id:task.id,key:task.key,path:task.path,
     session:task.session,result,wallMs:1,stages:{}}});}
 }
+const MiB = 1024 * 1024;
+const parentPlan = (name: string) => ({canonicalDevPath:`DEV/${name}.dev`,modCount:4,stlCount:0,
+  estimatedBytes:4,estimatedInstanceWork:4,parts:Array.from({length:4},(_,i)=>({key:`solid:${i}`,
+    referencePaths:[`solid:0/phm:${i}`],modCount:1,stlCount:0,estimatedBytes:1,estimatedInstanceWork:1,mods:[],stls:[]}))});
+function activeSplitTask(internal:any,key:string):[SplitWorker,any] {
+  const [worker,row]=[...internal.active].find(([,row]:any)=>row.task.key===key) as [SplitWorker,any];
+  return [worker,worker.sent.find(task=>task.id===row.task.id)];
+}
+async function completeSplitParts(internal:any,parent:string,size:number):Promise<void> {
+  for(let i=0;i<4;i++){
+    const [,row]=[...internal.active].find(([,row]:any)=>row.task.parent===parent&&row.task.partition) as [SplitWorker,any];
+    const [worker,task]=activeSplitTask(internal,row.task.key);
+    worker.complete(task,{status:'complete',bytes:new Uint8Array(size),diagnostics:splitDiagnostics(1)});
+    await Promise.resolve();await Promise.resolve();
+  }
+}
+it('admits only one split parent, drains its merge and waits for consumption before the next parent',async()=>{
+  vi.stubGlobal('Worker',SplitWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true),internal=client as any;
+  const a=client.compile('DEV/a.dev',0,'a',1),b=client.compile('DEV/b.dev',0,'b',1);
+  try{
+    const [aw,at]=activeSplitTask(internal,'a');
+    aw.complete(at,{status:'empty',bytes:null,plan:parentPlan('a'),diagnostics:{status:'empty'}});
+    expect([...internal.active.values()].some((row:any)=>row.task.parent)).toBe(false); // b analysis must drain
+    const [bw,bt]=activeSplitTask(internal,'b');
+    bw.complete(bt,{status:'empty',bytes:null,plan:parentPlan('b'),diagnostics:{status:'empty'}});
+    expect(client.resultPressure.splitOwner).toBe('a');
+    const small=client.compile('DEV/small.dev',0,'small',1);
+    await completeSplitParts(internal,'a',16*MiB);
+    expect(client.resultPressure).toMatchObject({bytes:192*MiB,admittedBytes:192*MiB});
+    expect([...internal.active.values()].map((row:any)=>row.task.key)).toEqual(['a::merge']);
+    expect(SplitWorker.instances.flatMap(w=>w.sent).some(task=>task.key?.startsWith('b::'))).toBe(false);
+    const [mw,mt]=activeSplitTask(internal,'a::merge');
+    mw.complete(mt,{status:'complete',bytes:new Uint8Array(64*MiB),diagnostics:{status:'complete'}});
+    await a;
+    expect(client.resultPressure.splitOwner).toBeNull();
+    expect([...internal.active.values()].some((row:any)=>row.task.parent==='b')).toBe(false);
+    client.acknowledge('a');
+    expect(client.resultPressure.splitOwner).toBe('b');
+    await completeSplitParts(internal,'b',1);
+    const [bmw,bmt]=activeSplitTask(internal,'b::merge');
+    bmw.complete(bmt,{status:'complete',bytes:new Uint8Array(4),diagnostics:{status:'complete'}});
+    await b;client.acknowledge('b');
+    const [sw,st]=activeSplitTask(internal,'small');
+    sw.complete(st,{status:'complete',bytes:new Uint8Array(1),diagnostics:{status:'complete'}});
+    await small;client.acknowledge('small');
+    expect(client.resultPressure).toMatchObject({bytes:0,splitReservationBytes:0,admittedBytes:0});
+  }finally{client.cancel();SplitWorker.instances=[];}
+});
+it('subtracts another DEV unconsumed result from a split parent reservation and part quotas',async()=>{
+  vi.stubGlobal('Worker',SplitWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true),internal=client as any;
+  try{
+    const a=client.compile('DEV/a.dev',0,'a',1),[aw,at]=activeSplitTask(internal,'a');
+    aw.complete(at,{status:'complete',bytes:new Uint8Array(32*MiB),diagnostics:{status:'complete'}});await a;
+    const b=client.compile('DEV/b.dev',0,'b',1),[bw,bt]=activeSplitTask(internal,'b');
+    bw.complete(bt,{status:'empty',bytes:null,plan:parentPlan('b'),diagnostics:{status:'empty'}});
+    const quota=Math.floor(Math.floor(160*MiB/3)/4);
+    expect(activeSplitTask(internal,'b::part0')[1].partition.maxBytes).toBe(quota);
+    expect(client.resultPressure).toMatchObject({splitReservationBytes:160*MiB,admittedBytes:192*MiB});
+    await completeSplitParts(internal,'b',quota);
+    expect(client.resultPressure.bytes).toBeLessThanOrEqual(192*MiB);
+    const [mw,mt]=activeSplitTask(internal,'b::merge');
+    mw.complete(mt,{status:'complete',bytes:new Uint8Array(1),diagnostics:{status:'complete'}});await b;
+    client.acknowledge('a');client.acknowledge('b');
+    expect(client.resultPressure.admittedBytes).toBe(0);
+  }finally{client.cancel();SplitWorker.instances=[];}
+});
+it('releases a cancelled parent admission and keeps the next admission through a failed merge fallback',async()=>{
+  vi.stubGlobal('Worker',SplitWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true),internal=client as any;
+  const a=client.compile('DEV/a.dev',0,'a',1),rejected=expect(a).rejects.toThrow('cancelled');
+  const b=client.compile('DEV/b.dev',0,'b',1);
+  try{
+    for(const key of ['a','b']){
+      const [worker,task]=activeSplitTask(internal,key);
+      worker.complete(task,{status:'empty',bytes:null,plan:parentPlan(key),diagnostics:{status:'empty'}});
+    }
+    client.cancelTask('a');await rejected;
+    expect(client.resultPressure.splitOwner).toBe('b');
+    await completeSplitParts(internal,'b',1);
+    const [worker,task]=activeSplitTask(internal,'b::merge');
+    worker.onmessage?.({data:{...task,kind:'result',error:'merge failed',session:task.session}});
+    await Promise.resolve();await Promise.resolve();
+    expect(client.resultPressure).toMatchObject({bytes:0,splitOwner:'b',splitReservationBytes:192*MiB});
+    const [fw,ft]=activeSplitTask(internal,'b::fallback');
+    fw.complete(ft,{status:'complete',bytes:new Uint8Array(1),diagnostics:{status:'complete'}});await b;
+    client.acknowledge('b');
+    expect(client.resultPressure).toMatchObject({bytes:0,splitOwner:null,admittedBytes:0});
+  }finally{client.cancel();SplitWorker.instances=[];}
+});
 it('charges each split buffer and merge reservation, then returns the merge SHA without a second scan',async()=>{
   vi.stubGlobal('Worker',SplitWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
   const client=new DevGeometryPreprocessor([],new Map(),()=>true),internal=client as any;
@@ -98,6 +189,30 @@ it('disables split planning on a high-memory-pressure compile request',async()=>
     active[0].complete(task,{status:'complete',bytes:new Uint8Array(2),diagnostics:{status:'complete'}});
     expect((await pending).bytes?.byteLength).toBe(2);
     client.acknowledge('large');
+  }finally{client.cancel();SplitWorker.instances=[];}
+});
+it('wakes the next split parent after a failed monolithic fallback without requiring acknowledgement',async()=>{
+  vi.stubGlobal('Worker',SplitWorker);vi.stubGlobal('navigator',{hardwareConcurrency:8,deviceMemory:8});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true),internal=client as any;
+  const a=client.compile('DEV/a.dev',0,'a',1),rejected=expect(a).rejects.toThrow('fallback failed');
+  const b=client.compile('DEV/b.dev',0,'b',1);
+  try{
+    for(const key of ['a','b']){
+      const [worker,task]=activeSplitTask(internal,key);
+      worker.complete(task,{status:'empty',bytes:null,plan:parentPlan(key),diagnostics:{status:'empty'}});
+    }
+    const [pw,pt]=activeSplitTask(internal,'a::part0');
+    pw.complete(pt,{status:'complete',bytes:new Uint8Array(17*MiB),diagnostics:splitDiagnostics(1)});
+    await Promise.resolve();await Promise.resolve();
+    const [fw,ft]=activeSplitTask(internal,'a::fallback');
+    fw.onmessage?.({data:{...ft,kind:'result',error:'fallback failed',session:ft.session}});
+    await rejected;
+    expect(client.resultPressure.splitOwner).toBe('b');
+    await completeSplitParts(internal,'b',1);
+    const [mw,mt]=activeSplitTask(internal,'b::merge');
+    mw.complete(mt,{status:'complete',bytes:new Uint8Array(1),diagnostics:{status:'complete'}});
+    await b;client.acknowledge('b');
+    expect(client.resultPressure.admittedBytes).toBe(0);
   }finally{client.cancel();SplitWorker.instances=[];}
 });
 it.each(['body','all-small'] as const)('uses one DEV-wide outline decision for %s split results',async scenario=>{
@@ -648,5 +763,6 @@ it('releases held split buffers and cancels part workers on project disposal',as
   expect(client.resultPressure.bytes).toBe(8);
   client.cancel(new Error('project switched'));await rejection;
   expect(client.resultPressure.bytes).toBe(0);
+  expect(client.resultPressure).toMatchObject({splitOwner:null,splitReservationBytes:0,admittedBytes:0});
   expect(ControlledWorker.instances.every(worker=>worker.terminate.mock.calls.length>0)).toBe(true);
 });

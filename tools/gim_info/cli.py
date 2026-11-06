@@ -61,8 +61,8 @@ def main():
         smoke(args[0] if args else '.')
         return
     from browse_gui import run_browser
-    run_browser(args[0] if args else None, selftest='--guitest' in sys.argv)
+    return run_browser(args[0] if args else None, selftest='--guitest' in sys.argv)
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

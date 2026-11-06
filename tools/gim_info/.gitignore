@@ -10,6 +10,7 @@ _build/
 # ---- 界面自检 / 回归截图（--guitest、冒烟脚本输出，随时可重建）----
 _*.png
 _screenshots/
+browse-selftest.json
 
 # ---- 本地导出（引用链清单 CSV、BTV 分轨 JSON）----
 *_链清单.csv
