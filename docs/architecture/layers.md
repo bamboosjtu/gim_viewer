@@ -47,6 +47,8 @@
 
 ## 入口与接线
 
+大型服务和数据库入口的内部职责、资源所有权与兼容导出见[运行时与数据库模块](runtime-modules.md)。
+
 ```text
 bootstrap
   ├─ viewerShell（空态、最近工程、菜单、属性抽屉）

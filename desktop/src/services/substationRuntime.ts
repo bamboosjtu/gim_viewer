@@ -1,198 +1,28 @@
-import { setConnectionStatus, setIfcStatus, setSelectionStatus } from '../ui/shell/statusBar.js';
-import type { IfcEntry, CbmNode } from '../gim/types.js';
+/** Substation cold/warm project orchestration and core semantic publication. */
+import type { IfcEntry } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
-import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { scanIfcFiles, discoverIfcFromCBM, buildIfcGuidIndex } from '../gim/gimIndexer.js';
-import { getFileByPath } from '../gim/fileLookup.js';
 import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
-import {
-  type SubstationSpatialIndexObserver,
-} from '../gim/ifcSpatialParser.js';
 import { parseFileDevRelation } from '../gim/fileDevParser.js';
-import { buildAndRenderCbmTree } from '../ui/cbmTreeView.js';
-import { beginEngineeringBuild, notifyEngineeringIfcEvidence, notifyEngineeringIfcFailure } from './engineeringService.js';
-import { renderFileDevPanel } from '../ui/fileDevView.js';
-import { emptyTipEl } from '../ui/dom.js';
+import { beginEngineeringBuild } from './engineeringService.js';
 import { isTauri } from '@desktop/runtime.js';
-import { DEBUG_GIM_CACHE, DEBUG_IFC_LOAD } from '../config/debug.js';
-import { isFragmentsCacheEnabled, readIfcOpeningPolicy } from '../config/features.js';
+import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBar.js';
 import type { GimRuntimeOpenContext } from './gimOpenCore.js';
 import { validateGimCache, type FamPropertyPayload } from '@desktop/database.js';
 import { hydrateNativeSmallFiles } from './nativeSmallFileHydration.js';
-import { buildSubstationSpatialIndexInWorker } from './substationSpatialWorkerClient.js';
-import {
-  readSubstationSpatialSemanticCache,
-  writeSubstationSpatialSemanticCache,
-  SUBSTATION_PARSER_DOMAIN_VERSION,
-  type SubstationSpatialCacheHit,
-} from './substationSpatialSemanticCache.js';
+import { readSubstationSpatialSemanticCache, SUBSTATION_PARSER_DOMAIN_VERSION } from './substationSpatialSemanticCache.js';
 import { SubstationBackgroundCoordinator, type SubstationBackgroundGate } from './substationBackgroundRuntime.js';
-import {
-  perfCurrentSession,
-  perfBegin,
-  perfMark,
-  perfMarkProductMoment,
-  perfProductMomentSnapshot,
-  perfRecordSubstationIfcRead,
-  perfRecordSubstationIfcProfile,
-  perfRecordIfcLoadProfile,
-  perfRecordSubstationFinalizeProfile,
-  perfRecordDevGeometryProfile,
-  type PerfSession,
-} from '../utils/perfTimings.js';
-import { sampleSubstationRuntimeResources, scheduleSubstationResourceCheckpoint, startSubstationResourceMonitor } from './substationResourceTelemetry.js';
+import { perfCurrentSession, perfBegin, perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 import { showLoading, hideLoading } from './gimOpenCore.js';
-import { prioritizeIfcEntries } from './ifcLoadOrder.js';
-import { resolveIfcModelId } from '../gim/modelIdentity.js';
-
-
-async function sampleSubstationMemory(
-  state: AppState,
-  label: string,
-  session: PerfSession,
-  meta?: Record<string, unknown>,
-  ctx?: ViewerContext | null,
-): Promise<void> {
-  await sampleSubstationRuntimeResources(state, label, session, ctx, meta, {
-    isCurrent: () => state.isCurrentSession({
-      generation: session.generation ?? -1,
-      projectId: session.projectId ?? null,
-      sourceSha256: session.sourceSha256 ?? null,
-      geometryToken: state.geometryLoadToken,
-    }),
-  });
-}
-
-function createSubstationSpatialObserver(state: AppState, session: PerfSession): SubstationSpatialIndexObserver {
-  // 只采一次阶段内存，避免大型工程的每个 IFC 都增加一个 RSS IPC。
-  // 回调本身保持同步，采样异步执行且在 sampleSubstationMemory 内再次做
-  // session 校验；这样不会阻塞纯解析层。
-  let textSampled = false;
-  let stepSampled = false;
-  return {
-    onModelRead: (profile) => {
-      perfRecordSubstationIfcRead(profile, session);
-      if (!textSampled && profile.bytes > 0) {
-        textSampled = true;
-        void sampleSubstationMemory(state, 'IFC text 读入后', session, {
-          entryPath: profile.entryPath,
-          bytes: profile.bytes,
-          readMs: profile.readMs,
-          decodeMs: profile.decodeMs,
-        });
-      }
-    },
-    onStepScan: (profile) => {
-      if (!stepSampled) {
-        stepSampled = true;
-        void sampleSubstationMemory(state, 'STEP scan 后', session, {
-          entryPath: profile.entryPath,
-          bytes: profile.sourceBytes,
-          rawEntityCount: profile.rawEntityCount,
-          stepScanMs: profile.stepScanMs,
-        });
-      }
-    },
-    onModelParsed: (profile) => {
-      perfRecordSubstationIfcProfile(profile, session);
-    },
-    onFinalize: (profile) => {
-      perfRecordSubstationFinalizeProfile(profile, session);
-    },
-  };
-}
-
-function collectCbmNodeCount(root: CbmNode | null): number {
-  if (!root) return 0;
-  let count = 0;
-  const walk = (node: CbmNode): void => {
-    count += 1;
-    for (const child of node.children) walk(child);
-  };
-  walk(root);
-  return count;
-}
-
-export function createNodeClickHandler(state: AppState, showMessage: (text: string) => void): (node: CbmNode) => void {
-  const session=state.captureProjectSession();
-  return (node: CbmNode) => {
-    if (!state.isCurrentSession(session)) return;
-    if (state.currentProjectType === 'substation') {
-      const request = state.beginSelection({ kind: 'engineering-source', key: `document:${node.path}` });
-      if (!state.engineeringSources) {
-        state.selectionMessage = '工程来源正在准备，完成后可定位该对象'; setSelectionStatus(state.selectionMessage);
-        void import('./engineeringSelection.js').then(({ clearEngineeringHighlight }) => clearEngineeringHighlight(state, request)); return;
-      }
-      void import('./engineeringCbmSelection.js').then(async ({ selectEngineeringCbmSource }) => {
-        if (state.isCurrentSelection(request) && !await selectEngineeringCbmSource(state, node.path, request) && state.isCurrentSelection(request)) {
-          state.selectionMessage = '该来源尚不能唯一定位，请在来源视图核对'; setSelectionStatus(state.selectionMessage);
-          void import('./engineeringSelection.js').then(({ clearEngineeringHighlight }) => clearEngineeringHighlight(state, request));
-        }
-      }).catch(error => { if (state.isCurrentSelection(request)) { state.selectionMessage = `来源定位未完成：${String(error)}`; setSelectionStatus(state.selectionMessage); } });
-      return;
-    }
-    const request=state.beginSelection({kind:'cbm',key:node.path});
-    void import('./nodeInteractionService.js').then(({ handleNodeClick }) =>
-      handleNodeClick(state,node,showMessage,request),
-    ).catch((error) => console.warn('[选择] 节点交互失败:',error));
-  };
-}
-
-export function setupSldGridIdInteraction(
-  state: AppState,
-  showMessage: (text: string) => void,
-  session?: ProjectLoadSession,
-): Promise<void> {
-  return import('../ui/sldView.js').then(({ setSldGridIdClickHandler }) => {
-    if (session && !state.isCurrentSession(session)) return;
-    setSldGridIdClickHandler(async (gridId: string) => {
-      if (session && !state.isCurrentSession(session)) return;
-      if (!state.currentStdSldIndex) return;
-      const request=state.beginSelection({kind:'sld',key:gridId});
-      try {
-        const { getCbmNodesByGridId } = await import('../gim/stdSldIndex.js');
-        if (session && !state.isCurrentSession(session)) return;
-        const nodes = getCbmNodesByGridId(state.currentStdSldIndex, gridId);
-        if (nodes.length === 0) {
-          const [{clearSelectionHighlight,syncSelectionNavigation},{showUnlinkedSldProperties}]=await Promise.all([
-            import('./nodeInteractionService.js'),import('../ui/propsDrawer.js'),
-          ]);
-          if (!state.isCurrentSelection(request)) return;
-          showUnlinkedSldProperties(state,gridId,request);
-          await Promise.all([clearSelectionHighlight(state,request,showMessage),syncSelectionNavigation(state,request)]);
-          console.log('[SLD→CBM] gridId 无对应 CBM 节点:', gridId);
-          return;
-        }
-        if (state.currentProjectType === 'substation') {
-          if (!state.isCurrentSelection(request)) return;
-          if (!state.engineeringSources) { state.selectionMessage = '工程来源正在准备，完成后可定位单线图对象'; setSelectionStatus(state.selectionMessage); return; }
-          if (nodes.length === 1) {
-            const { selectEngineeringCbmSource } = await import('./engineeringCbmSelection.js');
-            if (state.isCurrentSelection(request)) await selectEngineeringCbmSource(state, nodes[0].path, request);
-          } else {
-            const { clearEngineeringHighlight } = await import('./engineeringSelection.js'); await clearEngineeringHighlight(state, request);
-            const { showSelectionSources } = await import('../ui/selectionSources.js');
-            if (state.isCurrentSelection(request)) showSelectionSources('该单线图对象关联多个来源，请选择要查看的来源', nodes.map(node => ({
-              label: `${node.name || '来源对象'} · ${node.path}`,
-              choose: () => { if (state.isCurrentSelection(request)) createNodeClickHandler(state, showMessage)(node); },
-            })), () => state.isCurrentSelection(request));
-          }
-          return;
-        }
-        const { handleNodeClick } = await import('./nodeInteractionService.js');
-        if (session && !state.isCurrentSession(session)) return;
-        request.target={kind:'cbm',key:nodes[0].path};
-        await handleNodeClick(state,nodes[0],showMessage,request);
-      } catch (err) {
-        console.warn('[SLD→CBM] 联动失败:', err);
-      }
-    });
-  }).catch((err) => {
-    console.warn('[SLD→CBM] 注册联动回调失败:', err);
-  });
-}
+import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
+import { collectCbmNodeCount, markSubstationCoreSemanticReady, renderSubstationCoreUi, showLoadingBeforeInteractive } from './substationPresentation.js';
+import { buildAndCommitSubstationSpatialSemantic, commitCachedSubstationSpatialSemantic, scheduleSubstationSpatialSemantic } from './substationSpatialRuntime.js';
+import { buildAndCommitSubstationStdSld } from './substationDocumentRuntime.js';
+import { loadAllIfcFiles } from './substationIfcRuntime.js';
+export { createNodeClickHandler, setupSldGridIdInteraction } from './substationPresentation.js';
+export { loadAllIfcFiles } from './substationIfcRuntime.js';
 
 interface SubstationSemanticOptions {
   sourcePublication?: Promise<unknown>;
@@ -212,403 +42,6 @@ interface SubstationSemanticOptions {
   onSpatialSemanticStart?: (start: () => Promise<boolean>) => void;
   /** Start STD/SLD parsing or cache restore only after first interactive. */
   onStdSldStart?: (start: () => Promise<boolean>) => void;
-}
-
-function markSubstationCoreSemanticReady(
-  state: AppState,
-  perfSession: PerfSession,
-  meta: Record<string, unknown> = {},
-): void {
-  const coreMeta = {
-    ...meta,
-    cbmNodes: collectCbmNodeCount(state.currentCbmTree),
-    ifcEntries: state.currentIfcEntries.length,
-    fileDevRelations: state.fileDevRelations.length,
-    deviceIfcLinks: state.deviceToIfcFile.size,
-  };
-  perfMarkProductMoment('coreSemanticReady', coreMeta, perfSession);
-  // Keep the old product moment as a compatibility alias for existing
-  // diagnostics/scripts.  New consumers should use coreSemanticReady.
-  perfMarkProductMoment('semanticReady', { ...coreMeta, compatibilityAlias: 'coreSemanticReady' }, perfSession);
-}
-
-async function renderSubstationCoreUi(
-  state: AppState,
-  showMessage: (text: string) => void,
-  session: ProjectLoadSession,
-  perfSession: PerfSession,
-  label: string,
-): Promise<void> {
-  if (!state.isCurrentSession(session)) return;
-  const endUi = perfBegin(label, undefined, perfSession);
-  const clickHandler = createNodeClickHandler(state, showMessage);
-  buildAndRenderCbmTree(state, clickHandler);
-  renderFileDevPanel(state, clickHandler);
-  if (emptyTipEl) emptyTipEl.style.display = 'none';
-  endUi(undefined, {
-    cbmNodes: collectCbmNodeCount(state.currentCbmTree),
-    ifcModels: state.currentIfcEntries.length,
-    spatialIndex: state.substationSpatialIndex != null,
-  });
-  // DOM readiness is independent from the first usable 3D representation.
-  // This does not certify paint or input latency; native acceptance verifies
-  // the visible tree/search separately. Later enrichment keeps the first mark.
-  if (state.isCurrentSession(session) && state.currentCbmTree) {
-    perfMarkProductMoment('navigationUiReady', {
-      cbmNodes: collectCbmNodeCount(state.currentCbmTree),
-      ifcEntries: state.currentIfcEntries.length,
-      stage: label,
-      scope: 'navigation-dom',
-      inputLatencyVerified: false,
-    }, perfSession);
-  }
-}
-
-async function buildAndCommitSubstationSpatialSemantic(
-  state: AppState,
-  files: Map<string, File>,
-  ifcEntries: IfcEntry[],
-  cbmTree: CbmNode,
-  fileDevRelations: Awaited<ReturnType<typeof parseFileDevRelation>>,
-  session: ProjectLoadSession,
-  perfSession: PerfSession,
-  showMessage: (text: string) => void,
-  label: string,
-  options: {
-    projectId?: number | null;
-    sourceSha256?: string | null;
-    cacheMissReason?: string;
-  } = {},
-): Promise<boolean> {
-  if (!state.isCurrentSession(session)) return false;
-  const rebuildStarted = performance.now();
-  const cacheMissReason = options.cacheMissReason ?? 'cache-not-tried';
-  try {
-    perfMarkProductMoment('spatialSemanticStart', {
-      label,
-      source: 'rebuild',
-      cacheHit: false,
-      cacheMissReason,
-      models: ifcEntries.length,
-    }, perfSession);
-    const endSpatial = perfBegin(label, undefined, perfSession);
-    const spatialIndex = await buildSubstationSpatialIndexInWorker(
-      files,
-      ifcEntries,
-      cbmTree,
-      fileDevRelations,
-      createSubstationSpatialObserver(state, perfSession),
-      () => state.isCurrentSession(session),
-    );
-    if (!state.isCurrentSession(session)) return false;
-    endSpatial(undefined, {
-      models: spatialIndex.models.length,
-      spatialNodes: spatialIndex.nodes.length,
-      containedObjects: spatialIndex.models.reduce((sum, model) => sum + model.containedObjectCount, 0),
-      uncontainedIfcObjects: spatialIndex.coverage.uncontainedIfcObjects,
-      resourceRecords: spatialIndex.models.reduce((sum, model) => sum + model.resourceCount, 0),
-      cbmLinks: spatialIndex.links.length,
-    });
-    state.substationSpatialIndex = spatialIndex;
-    notifyEngineeringIfcEvidence(state);
-    const rebuildMs = Math.max(0, performance.now() - rebuildStarted);
-    let writeMs = 0;
-    let snapshotBytes = 0;
-    if (options.projectId != null && options.sourceSha256 && state.isCurrentSession(session)) {
-      try {
-        const cacheWrite = await writeSubstationSpatialSemanticCache(
-          options.projectId,
-          options.sourceSha256,
-          spatialIndex,
-          SUBSTATION_PARSER_DOMAIN_VERSION,
-        );
-        writeMs = cacheWrite.writeMs;
-        snapshotBytes = cacheWrite.snapshotBytes;
-      } catch (writeError) {
-        // The complete in-memory projection remains usable.  A failed write
-        // is deliberately not reported as a valid cache; the next open will
-        // rebuild it again.
-        console.warn('[GIM] 空间语义缓存写入失败，本次运行继续:', writeError);
-      }
-    }
-    perfMarkProductMoment('spatialSemanticReady', {
-      available: true,
-      source: 'rebuild',
-      cacheHit: false,
-      cacheMissReason,
-      readMs: 0,
-      deserializeMs: 0,
-      hydrateMs: 0,
-      rebuildMs,
-      writeMs,
-      snapshotBytes,
-      models: spatialIndex.models.length,
-      spatialNodes: spatialIndex.nodes.length,
-      objects: spatialIndex.objects.length,
-      links: spatialIndex.links.length,
-    }, perfSession);
-    await sampleSubstationMemory(state, 'SpatialIndex finalize 后', perfSession, {
-      models: spatialIndex.models.length,
-      spatialNodes: spatialIndex.nodes.length,
-      objects: spatialIndex.objects.length,
-    });
-    await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（空间语义）');
-    return true;
-  } catch (err) {
-    if (!state.isCurrentSession(session)) return false;
-    state.substationSpatialIndex = null;
-    notifyEngineeringIfcFailure(state, String(err));
-    perfMarkProductMoment('spatialSemanticReady', {
-      available: false,
-      source: 'rebuild',
-      cacheHit: false,
-      cacheMissReason,
-      error: err instanceof Error ? err.message : String(err),
-    }, perfSession);
-    console.warn('[GIM] IFC 空间索引构建失败，保留功能系统视图:', err);
-    return false;
-  }
-}
-
-async function commitCachedSubstationSpatialSemantic(
-  state: AppState,
-  result: SubstationSpatialCacheHit,
-  session: ProjectLoadSession,
-  perfSession: PerfSession,
-  showMessage: (text: string) => void,
-): Promise<boolean> {
-  if (!state.isCurrentSession(session)) return false;
-  const endRestore = perfBegin('变电空间语义缓存恢复', undefined, perfSession);
-  perfMarkProductMoment('spatialSemanticStart', {
-    source: 'cache',
-    cacheHit: true,
-    readMs: result.readMs,
-    deserializeMs: result.deserializeMs,
-    hydrateMs: result.hydrateMs,
-    snapshotBytes: result.snapshotBytes,
-    models: result.models,
-    nodes: result.nodes,
-    objects: result.objects,
-    links: result.links,
-  }, perfSession);
-  state.substationSpatialIndex = result.index;
-  notifyEngineeringIfcEvidence(state);
-  if (!state.isCurrentSession(session)) return false;
-  await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（空间语义缓存）');
-  if (!state.isCurrentSession(session)) return false;
-  endRestore(undefined, {
-    source: 'cache',
-    models: result.models,
-    nodes: result.nodes,
-    objects: result.objects,
-    links: result.links,
-  });
-  perfMarkProductMoment('spatialSemanticReady', {
-    available: true,
-    source: 'cache',
-    cacheHit: true,
-    readMs: result.readMs,
-    deserializeMs: result.deserializeMs,
-    hydrateMs: result.hydrateMs,
-    rebuildMs: 0,
-    writeMs: 0,
-    snapshotBytes: result.snapshotBytes,
-    models: result.models,
-    spatialNodes: result.nodes,
-    objects: result.objects,
-    links: result.links,
-  }, perfSession);
-  await sampleSubstationMemory(state, 'SpatialIndex cache hydrate 后', perfSession, {
-    source: 'cache',
-    models: result.models,
-    spatialNodes: result.nodes,
-    objects: result.objects,
-  });
-  return true;
-}
-
-function scheduleSubstationSpatialSemantic(
-  coordinator: SubstationBackgroundCoordinator,
-  state: AppState,
-  files: Map<string, File>,
-  ifcEntries: IfcEntry[],
-  cbmTree: CbmNode,
-  fileDevRelations: Awaited<ReturnType<typeof parseFileDevRelation>>,
-  session: ProjectLoadSession,
-  perfSession: PerfSession,
-  showMessage: (text: string) => void,
-  label: string,
-  readinessGate: SubstationBackgroundGate = 'allIfcReady',
-  sharedStarter?: () => Promise<boolean>,
-): void {
-  if (sharedStarter) {
-    coordinator.enqueue({ task: 'spatialSemanticCacheRestore', priority: 1, heavy: false, startAfter: 'interactive',
-      run: async () => { await sharedStarter(); } });
-    return;
-  }
-  let cacheMissReason = 'cache-not-tried';
-  const enqueueRebuild = (): void => {
-    coordinator.enqueue({
-      task: 'spatialSemanticRebuild',
-      priority: 1,
-      heavy: true,
-      startAfter: readinessGate,
-      run: async () => {
-        const ready = await buildAndCommitSubstationSpatialSemantic(
-          state,
-          files,
-          ifcEntries,
-          cbmTree,
-          fileDevRelations,
-          session,
-          perfSession,
-          showMessage,
-          label,
-          {
-            projectId: session.projectId,
-            sourceSha256: session.sourceSha256,
-            cacheMissReason,
-          },
-        );
-        if (!ready && state.isCurrentSession(session)) {
-          throw new Error('空间语义 rebuild 未生成可用索引');
-        }
-      },
-    });
-  };
-  coordinator.enqueue({
-    task: 'spatialSemanticCacheRestore',
-    priority: 1,
-    heavy: false,
-    startAfter: 'interactive',
-    blocksHeavy: true,
-    run: async () => {
-      const cache = await readSubstationSpatialSemanticCache(
-        session.projectId,
-        session.sourceSha256,
-        SUBSTATION_PARSER_DOMAIN_VERSION,
-      );
-      if (!state.isCurrentSession(session)) return;
-      if (cache.hit) {
-        const committed = await commitCachedSubstationSpatialSemantic(
-          state,
-          cache,
-          session,
-          perfSession,
-          showMessage,
-        );
-        if (!committed && state.isCurrentSession(session)) {
-          cacheMissReason = 'cache-commit-failed';
-          enqueueRebuild();
-        }
-        return;
-      }
-      cacheMissReason = cache.reason;
-      enqueueRebuild();
-    },
-  });
-}
-
-async function buildAndCommitSubstationStdSld(
-  state: AppState,
-  files: Map<string, File> | null,
-  cacheEntryPaths: readonly string[],
-  session: ProjectLoadSession,
-  perfSession: PerfSession,
-  showMessage: (text: string) => void,
-  source: 'cold' | 'warm',
-): Promise<boolean> {
-  if (!state.isCurrentSession(session)) return false;
-  const label = source === 'cold' ? '变电 STD/SLD 解析' : '变电 STD/SLD 缓存恢复';
-  perfMarkProductMoment('stdSldStart', { source }, perfSession);
-  const endStdSld = perfBegin(label, undefined, perfSession);
-  try {
-    const {
-      commitStdSldResult,
-      findMissingStdSldCacheParts,
-      parseStdSldOnGimExtracted,
-      restoreStdSldFromCache,
-    } = await import('./stdSldService.js');
-    if (!state.isCurrentSession(session)) return false;
-
-    const result = files
-      ? await parseStdSldOnGimExtracted(state, files)
-      : await restoreStdSldFromCache(state);
-    if (!state.isCurrentSession(session)) return false;
-
-    if (!files) {
-      const missingParts = findMissingStdSldCacheParts(cacheEntryPaths, result);
-      if (missingParts.length > 0) {
-        throw new Error(`本地缓存缺少电气图数据（${missingParts.join('/')}）`);
-      }
-    }
-
-    // STD/SLD services return a local result and do not commit AppState.  The
-    // session fence immediately before/after this commit is intentional:
-    // delayed A results must never become B's source-tracing state.
-    commitStdSldResult(state, result);
-    if (!state.isCurrentSession(session)) return false;
-
-    let rendered = false;
-    try {
-      const { renderSldView } = await import('../ui/sldView.js');
-      if (!state.isCurrentSession(session)) return false;
-      renderSldView(state);
-      rendered = true;
-    } catch (err) {
-      if (state.isCurrentSession(session)) {
-        console.warn(`[GIM] SLD 视图渲染失败（${source}）:`, err);
-      }
-    }
-    if (!state.isCurrentSession(session)) return false;
-
-    // Register the callback only after the corresponding documents/index have
-    // been committed.  The callback itself keeps a session guard for clicks
-    // that arrive while another project is opening.
-    if (result) {
-      setupSldGridIdInteraction(state, showMessage, session);
-    }
-    endStdSld(undefined, {
-      source,
-      available: result != null,
-      schEntries: result?.schEntries.length ?? 0,
-      hasStd: result?.stdDoc != null,
-      hasSld: result?.sldDoc != null,
-      rendered,
-    });
-    perfMarkProductMoment('stdSldReady', {
-      source,
-      available: result != null,
-      schEntries: result?.schEntries.length ?? 0,
-      hasStd: result?.stdDoc != null,
-      hasSld: result?.sldDoc != null,
-      rendered,
-    }, perfSession);
-    return result != null;
-  } catch (err) {
-    if (!state.isCurrentSession(session)) return false;
-    // Do not leave a partial document/index from a failed current-session
-    // attempt visible.  This clears only the STD/SLD projection; IFC and core
-    // semantic state remain intact.
-    try {
-      const { commitStdSldResult } = await import('./stdSldService.js');
-      if (!state.isCurrentSession(session)) return false;
-      commitStdSldResult(state, null);
-    } catch (clearErr) {
-      console.warn('[GIM] 清理失败的 STD/SLD 状态失败:', clearErr);
-    }
-    endStdSld('（失败）', {
-      source,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    perfMarkProductMoment('stdSldReady', {
-      source,
-      available: false,
-      error: err instanceof Error ? err.message : String(err),
-    }, perfSession);
-    console.warn(`[GIM] STD/SLD 后台任务失败（${source}），不影响 IFC interactive:`, err);
-    return false;
-  }
 }
 
 export async function onGimExtracted(
@@ -677,7 +110,7 @@ export async function onGimExtracted(
     cbmNodes: collectCbmNodeCount(cbmTree),
     fileDevRelations: fileDevRelations.length,
   });
-  markSubstationCoreSemanticReady(state, perfSession);  await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（core semantic）');
+  markSubstationCoreSemanticReady(state, perfSession); await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（core semantic）');
   void sampleSubstationMemory(state, 'coreSemanticReady', perfSession, {
     source: 'cold',
     cbmNodes: collectCbmNodeCount(cbmTree),
@@ -742,1025 +175,6 @@ export async function onGimExtracted(
   return ifcEntries;
 }
 
-/**
- * 获取 IFC 文件内容。
- * 1. 优先从完整解压流程的 currentFiles 读取
- * 2. 缓存命中时从 cachedIfcPaths + readCachedIfc 读取
- * 3. 找不到返回 null（调用方跳过）
- */
-
-async function getIfcBufferForEntry(
-  entry: IfcEntry,
-  state: AppState,
-  session: ProjectLoadSession = state.captureProjectSession(),
-): Promise<Uint8Array | null> {
-  if (!state.isCurrentSession(session)) return null;
-  // 1. 完整解压流程
-  if (state.currentFiles) {
-    const file = getFileByPath(state.currentFiles, entry.path);
-    if (file) {
-      debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用 GIM 解压内存文件:', {
-        name: entry.name,
-        path: entry.path,
-      });
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      return state.isCurrentSession(session) ? bytes : null;
-    }
-  }
-
-  // 2. Tauri 缓存命中
-  const cachedEntryPath = findCachedPath(state.cachedIfcPaths, entry.path);
-  if (isTauri() && cachedEntryPath) {
-    const projectId = session.projectId;
-    if (projectId != null) {
-      const cachePath = state.cachedIfcPaths.get(cachedEntryPath)!;
-      debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] 使用本地 IFC 缓存:', {
-        name: entry.name,
-        path: entry.path,
-        cachePath,
-      });
-      const { readCachedIfc } = await import('@desktop/database.js');
-      const bytes = await readCachedIfc(projectId, cachedEntryPath);
-      if (!state.isCurrentSession(session)) return null;
-
-      // 可疑缓存定位日志：MVP 阶段用于排查缓存 IFC 是否被截断/损坏
-      // IFC 文件应以 "ISO-103021;;" 文本头开头（HEX: 49 53 4F 2D 31 30 33 32 31 3B）
-      // byteLength === 0 或 head 不符 → 缓存损坏，返回 null 让上层回退/报错
-      const byteLength = bytes?.byteLength ?? 0;
-      const head = bytes
-        ? Array.from(bytes.slice(0, 32))
-            .map((b) => b.toString(16).padStart(2, '0'))
-            .join(' ')
-        : '';
-      debugLog(DEBUG_IFC_LOAD, '[IFC Buffer] cached IFC bytes', {
-        name: entry.name,
-        path: entry.path,
-        byteLength,
-        head,
-      });
-      if (byteLength === 0) {
-        // 缓存损坏：始终输出（非 debug），便于用户定位
-        console.warn(`[IFC Buffer] 缓存 IFC 字节为空，缓存损坏: ${entry.path}`);
-        return null;
-      }
-      // IFC 文件头 ASCII "ISO-103021;;" 前 4 字节应为 49 53 4F 2D（"ISO-"）
-      // 不强制校验（部分 IFC 可能含 BOM 或前导空白），仅 warn 提示可疑
-      if (
-        bytes.length >= 4 &&
-        !(bytes[0] === 0x49 && bytes[1] === 0x53 && bytes[2] === 0x4f && bytes[3] === 0x2d)
-      ) {
-        console.warn(`[IFC Buffer] 缓存 IFC 文件头非 'ISO-' 前缀，可能损坏: ${entry.path}`, { head });
-      }
-      return bytes;
-    }
-  }
-
-  // 3. 找不到：始终输出（非 debug），便于定位
-  console.warn('[IFC Buffer] 找不到 IFC 文件内容或缓存:', entry);
-  return null;
-}
-
-/** cachedIfcPaths 保留磁盘/SQLite 的原始 entry_path；查找时仍按 GIM 引用规则忽略大小写和分隔符。 */
-function findCachedPath(paths: Map<string, string>, requestedPath: string): string | undefined {
-  if (paths.has(requestedPath)) return requestedPath;
-  const normalized = requestedPath.replace(/\\/g, '/').toLowerCase();
-  for (const path of paths.keys()) {
-    if (path.replace(/\\/g, '/').toLowerCase() === normalized) return path;
-  }
-  return undefined;
-}
-
-/**
- * 自动加载全部 IFC 文件 + MOD/STL 几何（无需弹窗选择）。
- *
- * 用于 GIM 文件打开流程：GIM 被视为一个整体，
- * 打开后直接显示所有 IFC + MOD + STL，无需用户手动选择。
- *
- * - 内部创建 ViewerRuntime（调用方无需预先持有 ctx）
- * - 同时适用于首次打开（currentFiles 非空）和缓存命中（currentFiles=null）
- *
- * @param state 全局 AppState（currentIfcEntries / currentFiles / cachedIfcPaths 必须就绪）
- * @param entries 要加载的 IFC 条目列表（全部，而非用户选择子集）
- * @param showMessage 消息回调（更新 loading 文案）
- */
-
-export async function loadAllIfcFiles(
-  state: AppState,
-  entries: IfcEntry[],
-  showMessage: (text: string) => void,
-  options: {
-    session?: ProjectLoadSession;
-    ifcSourceSizes?: ReadonlyMap<string, number>;
-    geometryCacheValid?: boolean;
-    geometryCacheManifestValid?: boolean;
-    geometryCacheVersionFileMatch?: boolean;
-    /** Start optional spatial semantic only after first interactive. */
-    startSpatialSemantic?: () => void | Promise<unknown>;
-    /** Start STD/SLD parsing or cache restore only after first interactive. */
-    startStdSld?: () => void | Promise<unknown>;
-    /** Start cold cache persistence only after first interactive. */
-    startCachePersistence?: () => void | Promise<unknown>;
-    /** Schedule optional spatial work through the substation coordinator. */
-    scheduleSpatialSemantic?: (coordinator: SubstationBackgroundCoordinator, readinessGate: SubstationBackgroundGate) => void;
-    /** Schedule STD/SLD through the substation coordinator. */
-    scheduleStdSld?: (coordinator: SubstationBackgroundCoordinator) => void;
-    /** Schedule cold persistence through the substation coordinator. */
-    scheduleCachePersistence?: (coordinator: SubstationBackgroundCoordinator, readinessGate: SubstationBackgroundGate) => void;
-  } = {},
-): Promise<void> {
-  const openingPolicy = readIfcOpeningPolicy();
-  const session = options.session ?? state.captureProjectSession();
-  const perfSession = perfCurrentSession();
-  const isCurrent = () => state.isCurrentSession(session);
-  if (!isCurrent()) return;
-  const background = new SubstationBackgroundCoordinator({
-    session: perfSession,
-    isCurrent,
-    onCheckpoint: unit => perfMark('DEV safe checkpoint', {...unit}, perfSession),
-    onEvent: (event) => {
-      // One compact span per lifecycle transition is enough for queue wait /
-      // cancellation diagnostics; do not trace individual placements here.
-      perfMark(`变电 background task · ${event.task} · ${event.state}`, {
-        priority: event.priority,
-        heavy: event.heavy,
-        ...(event.queueWaitMs != null ? { queueWaitMs: event.queueWaitMs } : {}),
-        ...(event.durationMs != null ? { durationMs: event.durationMs } : {}),
-        ...(event.error ? { error: event.error } : {}),
-      }, perfSession);
-    },
-  });
-  // Keep explicit IFC precision requests on the same session-owned priority
-  // lane as the background DEV/Spatial work.  The queue remains an optional
-  // state capability so browser-only and legacy loader paths keep working.
-  state.substationFineQueue = background;
-  let devGeometryQueued = false;
-  background.registerRemainingIfc();
-  state.beginIfcBackgroundLoading();
-  // 调试入口：从 localStorage 读取手动坐标偏移（GIM_COORD_OFFSET="dx,dy,dz"）
-  // 仅作为调试功能，不写入数据库，不作为最终算法。
-  // resetGimState 会清空 projectSourceToViewerMatrix，因此每次打开项目时重新解析。
-  try {
-    const { loadManualCoordOffsetFromLocalStorage } = await import('./coordinateAlignmentService.js');
-    if (!isCurrent()) return;
-    loadManualCoordOffsetFromLocalStorage(state);
-  } catch {
-    // 忽略：coordinateAlignmentService 不可用时不影响主流程
-  }
-
-  if (entries.length === 0) {
-    // 无 IFC 但仍触发 MOD/STL 自动加载（纯 xml-mod 工程）
-    await autoLoadModStlPostIfc(state, showMessage, undefined, {
-      session,
-      geometryCacheValid: options.geometryCacheValid,
-      geometryCacheManifestValid: options.geometryCacheManifestValid,
-      geometryCacheVersionFileMatch: options.geometryCacheVersionFileMatch,
-    });
-    return;
-  }
-
-  showLoading('正在加载 3D 引擎...');
-  const endEngine = perfBegin('3D 引擎创建', undefined, perfSession);
-  const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
-  if (!isCurrent()) return;
-  const runtime = await getViewerRuntimeWithUI(state, showMessage);
-  if (!isCurrent()) return;
-  const { ctx, modelCallbacks } = runtime;
-  startSubstationResourceMonitor(state, ctx);
-  // Connection previews are additive and session-owned.  They are fed by the
-  // IFC conversion worker's source-type batches and disappear as soon as the
-  // authoritative Fragments model for that IFC is ready.
-  const { IfcConnectionPreviewRuntime } = await import('../viewer/ifcConnectionPreviewRuntime.js');
-  const connectionPreview = new IfcConnectionPreviewRuntime(
-    ctx,
-    session,
-    isCurrent,
-  );
-  state.substationConnectionPreview = connectionPreview;
-  void import('./connectionOwnershipService.js').then(({prepareConnectionOwnership})=>{
-    if(isCurrent())return prepareConnectionOwnership(state,session);
-  }).catch(error=>{if(isCurrent())console.warn('[Connection source evidence]',error);});
-  void state.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error));
-  const connectionFirstBatches = new Set<string>();
-  const connectionCompletions = new Set<string>();
-  const updateConnectionStatus = (): void => {
-    const d = connectionPreview.diagnostics;
-    if (d.objects === 0 && d.batches === 0 && d.partialModels === 0) {
-      setConnectionStatus('');
-      return;
-    }
-    const completed = d.readyModels > 0 ? ` · ${d.readyModels} 个来源三维就绪` : ' · 增量加载中';
-    const partial = d.partialModels > 0 ? ` · 部分 ${d.partialModels}` : '';
-    setConnectionStatus(`连接构件 ${d.objects} 个${completed}${partial}`);
-  };
-  if (state.projectSourceToViewerMatrix) connectionPreview.setTransform?.(state.projectSourceToViewerMatrix);
-  state.stationOverview = () => {
-    if (!state.isCurrentSession(session) || state.currentProjectType === 'transmission_line') return;
-    state.cameraNavigationVersion++;
-    void import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
-      if (state.isCurrentSession(session)) fitCameraToStationOverview(ctx, state, { force: true, distanceFactor: 1.7 });
-    });
-  };
-  endEngine();
-
-  // DEV templates are local, independent of the first IFC's coordinate anchor.
-  // Start their bounded worker pool now; the LOD owner delays scene commit.
-  if (state.currentProjectType === 'substation' && typeof Worker !== 'undefined') {
-    const { startDeviceLod } = await import('./devLodRuntime.js');
-    if (!isCurrent()) return;
-    void startDeviceLod(state, ctx, session, (text, detail) => {
-      if (isCurrent()) void import('../ui/shell/statusBar.js').then(({ setDeviceStatus }) => {
-        if (isCurrent()) setDeviceStatus(text, detail);
-      });
-    }).catch(error => { if (isCurrent()) console.warn('[DEV startup]', error); });
-  }
-
-  showLoading('正在加载 IFC 模型...');
-  const failed: Array<{ name: string; message: string }> = [];
-  let interactiveInitialized = false;
-  substationViewerInteractive = false;
-  let interactiveSignaled = false;
-  let resolveInteractive!: () => void;
-  let rejectInteractive!: (reason?: unknown) => void;
-  const interactiveReady = new Promise<void>((resolve, reject) => {
-    resolveInteractive = resolve;
-    rejectInteractive = reject;
-  });
-  const signalInteractive = (): void => {
-    if (interactiveSignaled) return;
-    interactiveSignaled = true;
-    resolveInteractive();
-  };
-
-  const syncCoordinateAnchor = async (label: string): Promise<void> => {
-    if (!isCurrent() || state.projectSourceToViewerMatrix) return;
-    const endCoordinate = perfBegin(label, undefined, perfSession);
-    try {
-      const { syncProjectSourceToViewerFromFragments } = await import('./coordinateAlignmentService.js');
-      if (!isCurrent()) return;
-      await syncProjectSourceToViewerFromFragments(state, ctx.fragments, { session });
-      if (!isCurrent()) return;
-      if (state.projectSourceToViewerMatrix) connectionPreview.setTransform?.(state.projectSourceToViewerMatrix);
-      endCoordinate(undefined, {
-        hasMatrix: state.projectSourceToViewerMatrix != null,
-      });
-    } catch (err) {
-      endCoordinate('（失败）', { error: err instanceof Error ? err.message : String(err) });
-      if (isCurrent()) {
-        console.warn('[CoordAlign] IFC 基准坐标同步失败，MOD/STL 将使用原始坐标或手工 offset:', err);
-      }
-    }
-  };
-
-  /**
-   * 变电默认视角为整站远景全景：首个 IFC 就绪时先给一个概览，等其余 IFC
-   * 与设备目录补齐后再校正一次；用户一旦手动操作相机就不再自动改。
-   */
-  const trackCameraInteraction = (): void => {
-    const canvas = (ctx.world.renderer as unknown as { domElement?: HTMLCanvasElement })?.domElement;
-    const marked = canvas as (HTMLCanvasElement & { __gimCameraTracking?: boolean }) | undefined;
-    if (!canvas || marked?.__gimCameraTracking) return;
-    if (marked) marked.__gimCameraTracking = true;
-    const mark = (): void => { state.viewerUserInteracted = true; };
-    for (const eventName of ['pointerdown', 'wheel', 'touchstart'] as const) {
-      canvas.addEventListener(eventName, mark, { passive: true });
-    }
-  };
-  const scheduleStationOverviewRefit = (): void => {
-    // 首个 IFC 只覆盖建筑的一部分；全站 IFC/设备是陆续进入场景的。在冷/暖
-    // 加载窗口内补做几次全景（用户一旦操作相机或选择对象就停止），避免默认
-    // 视角停在“只看得到一栋建筑”的近景。
-    for (const delay of [1500, 5000, 12000]) {
-      window.setTimeout(() => {
-        if (!isCurrent() || state.viewerUserInteracted || state.selectionRequest?.target) return;
-        void import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
-          if (!isCurrent() || state.viewerUserInteracted || state.selectionRequest?.target) return;
-          fitCameraToStationOverview(ctx, state, { force: true, distanceFactor: 1.7 });
-        });
-      }, delay);
-    }
-  };
-
-  const initializeInteractiveAfterFirstIfc = async (
-    entry: IfcEntry,
-    loadSource: 'lod-cache' | 'fragments-cache' | 'ifc' | 'unknown',
-  ): Promise<void> => {
-    if (interactiveInitialized || !isCurrent()) return;
-    await syncCoordinateAnchor('变电 coordinate alignment（首个 IFC）');
-    if (!isCurrent()) return;
-
-    await renderSubstationCoreUi(state, (text) => showLoadingBeforeInteractive(text), session, perfSession, '变电 navigation/UI（首个 IFC）');
-    if (!isCurrent()) return;
-
-    const { fitCameraToStationOverview } = await import('../viewer/camera.js');
-    if (!isCurrent()) return;
-    // 变电默认打开为整站远景全景，不再恢复上次相机；层级树展开状态仍恢复。
-    const { restoreTreeState } = await import('./viewStateStore.js');
-    restoreTreeState(state);
-    if (!isCurrent()) return;
-    if (!state.selectionRequest?.target && !state.viewerUserInteracted) {
-      trackCameraInteraction();
-      fitCameraToStationOverview(ctx, state, { distanceFactor: 1.6 });
-      scheduleStationOverviewRefit();
-    }
-    interactiveInitialized = true;
-    substationViewerInteractive = true;
-    perfMark('首个 IFC 就绪', {
-      name: entry.name,
-      source: loadSource,
-      cacheHit: loadSource === 'lod-cache' || loadSource === 'fragments-cache',
-    }, perfSession);
-    const firstMeta = {
-      kind: 'ifc',
-      name: entry.name,
-      source: loadSource,
-      cacheHit: loadSource === 'lod-cache' || loadSource === 'fragments-cache',
-      coordinateAnchor: state.projectSourceToViewerMatrix != null,
-      loadedModels: state.loadedModels.size,
-    };
-    perfMarkProductMoment('firstUsableGeometryReady', firstMeta, perfSession);
-    // Compatibility alias retained for existing baseline reports/scripts.
-    perfMarkProductMoment('firstGeometryReady', { ...firstMeta, compatibilityAlias: 'firstUsableGeometryReady' }, perfSession);
-    perfMarkProductMoment('interactive', firstMeta, perfSession);
-    perfMark('变电工程可交互（首个 IFC 就绪）', firstMeta, perfSession);
-    void sampleSubstationMemory(state, 'interactive', perfSession, firstMeta, ctx);
-    hideLoading();
-    signalInteractive();
-    // CBM/DEV names already support browsing. IFC name enrichment runs after
-    // the interactive commit and shares completed model work with finalization.
-    void import('../viewer/ifcNameIndex.js').then(async ({ buildIfcNameIndex }) => {
-      if (!isCurrent()) return;
-      const end = perfBegin('变电 IFC name index（后台）', undefined, perfSession);
-      try {
-        await buildIfcNameIndex(ctx, state, { session });
-        if (isCurrent()) await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 IFC 名称补全');
-      } finally { end(); }
-    }).catch(err => console.warn('[GIM] IFC name enrichment failed', err));
-    const startPostInteractiveTask = (
-      label: string,
-      starter?: () => void | Promise<unknown>,
-      scheduler?: (coordinator: SubstationBackgroundCoordinator,gate:SubstationBackgroundGate) => void,
-    ): void => {
-      if (!starter && !scheduler) return;
-      try {
-        // All three starters are deliberately invoked only after the
-        // interactive product moment.  They are independent background
-        // tasks; one synchronous registration failure must not suppress the
-        // other tasks or the sequential IFC tail.
-        if (scheduler) scheduler(background,'allIfcReady');
-        else starter?.();
-      } catch (err) {
-        console.warn(`[GIM] 启动${label}失败，继续 IFC 后台加载:`, err);
-      }
-    };
-    background.startRemainingIfc();
-    background.markInteractive();
-    startPostInteractiveTask('IFC 空间语义', options.startSpatialSemantic, options.scheduleSpatialSemantic);
-    startPostInteractiveTask('STD/SLD', options.startStdSld, options.scheduleStdSld);
-    startPostInteractiveTask('缓存持久化', options.startCachePersistence, options.scheduleCachePersistence);
-    if (state.projectSourceToViewerMatrix) {
-      background.markCoordinateAnchorReady();
-      state.deviceLodRuntime?.notifyCoordinateAnchor?.();
-      enqueueDevGeometry('coordinateAnchorReady');
-    }
-  };
-
-  const enqueueDevGeometry = (startAfter:SubstationBackgroundGate='allIfcReady'): void => {
-    if (devGeometryQueued) return;
-    devGeometryQueued = background.enqueue({
-      task: 'devGeometry',
-      priority: 2,
-      heavy: false, // Reuses the already running, bounded DEV pool.
-      startAfter,
-      run: async () => {
-        state.geometryLoadToken++;
-        const token = state.geometryLoadToken;
-        try {
-          await autoLoadModStlPostIfc(state, showMessage, ctx, {
-            onDevCheckpoint: unit => background.servicePendingUserFineAtCheckpoint(unit),
-            token,
-            includeMod: true,
-            includeStl: false,
-            session,
-            geometryCacheValid: options.geometryCacheValid,
-            geometryCacheManifestValid: options.geometryCacheManifestValid,
-            geometryCacheVersionFileMatch: options.geometryCacheVersionFileMatch,
-          });
-        } catch (err) {
-          console.warn('[GIM] 后台 MOD 加载失败:', err);
-        }
-      },
-    });
-  };
-
-  const ifcSources=new Map<string,string>();
-  const ifcStages=new Map<string,string>();
-  let activeIfcPath='';
-  const ifcCacheProgress=()=>{
-    const cold=[...ifcSources.values()].filter(source=>source==='ifc').length;
-    const lod=[...ifcSources.values()].filter(source=>source==='lod-cache').length;
-    const full=[...ifcSources.values()].filter(source=>source==='fragments-cache').length;
-    return `冷转换 ${cold} · LOD缓存 ${lod}${full?` · 完整缓存 ${full}`:''}`;
-  };
-  const ifcStatus=(entry:IfcEntry,index:number,total:number,extra='')=>{
-    const skipped=state.ifcSkippedLargeIfc.length;
-    return `IFC ${index+1}/${total} · ${entry.name} · ${ifcStages.get(entry.path)??'待检查'}${extra?` · ${extra}`:''} · ${ifcCacheProgress()}${skipped?` · 已跳过 ${skipped} 个超大 IFC`:''}`;
-  };
-  const ifcStageLabels:Record<string,string>={'checking-cache':'查询LOD缓存','lod-cache-hit':'LOD缓存命中','cold-convert':'冷转换中','far-ready':'远景就绪','cache-write-start':'缓存写入中','cache-written':'缓存已写','cache-write-failed':'远景就绪(缓存写入失败)'};
-  const lifecycleTask = (async (): Promise<void> => {
-    try {
-    const { ensureEngineReady } = await import('../viewer/ifcLoader.js');
-    if (!isCurrent()) return;
-    const endEngineInit = perfBegin('web-ifc / Fragments engine 初始化', undefined, perfSession);
-    await ensureEngineReady(ctx, state, modelCallbacks);
-    if (!isCurrent()) return;
-    endEngineInit(undefined, { initialized: true });
-    const { loadIfcEntry } = await import('../viewer/ifcEntryLoader.js');
-    if (!isCurrent()) return;
-
-    let firstIfcLoadStarted = false;
-    const sizes = new Map(options.ifcSourceSizes);
-    for (const entry of entries) {
-      const file = state.currentFiles && getFileByPath(state.currentFiles,entry.path);
-      if (file) sizes.set(entry.path.toLowerCase(),file.size);
-    }
-    const queue = [...entries];
-    // 超大 IFC（如 452 MB 的设备接线）冷转换可能需要数分钟；默认允许后台
-    // 长转换并排到队尾。设置里可显式跳过这类非关键文件，跳过后在状态栏和
-    // 控制台列出，绝不静默丢弃。
-    const { shouldSkipLargeIfc, LARGE_IFC_BYTES } = await import('./appSettings.js');
-    const skippedLargeIfc: Array<{ path: string; bytes: number }> = [];
-    const { isRegionalConnectionObject } = await import('../viewer/ifcRegionalData.js');
-    const evidencedConnections = new Set<string>();
-    const visitConnectionEvidence = (node: CbmNode): void => {
-      if (node.ifcFile && node.ifcGuid && isRegionalConnectionObject({expressId:0,globalId:node.ifcGuid,
-        ifcType:'IFCBUILDINGELEMENTPROXY',name:node.name,bounds:[]})) {
-        const id = resolveIfcModelId(node.ifcFile, entries);
-        if (id) evidencedConnections.add(id);
-      }
-      node.children.forEach(visitConnectionEvidence);
-    };
-    if (state.currentCbmTree) visitConnectionEvidence(state.currentCbmTree);
-    const isConnectionIfc = (entry: IfcEntry): boolean =>
-      evidencedConnections.has(entry.modelId) || /接线|连接线|软导|导线|wire|cable/i.test(`${entry.name} ${entry.path}`);
-    if (shouldSkipLargeIfc() && queue.length > 1) {
-      for (let index = queue.length - 1; index >= 1; index--) {
-        // Connection-line IFC is the only source of those lines for some
-        // substations; never silently skip it by size.
-        if (isConnectionIfc(queue[index])) continue;
-        const bytes = sizes.get(queue[index].path.toLowerCase()) ?? 0;
-        if (bytes <= LARGE_IFC_BYTES) continue;
-        skippedLargeIfc.push({ path: queue[index].path, bytes });
-        queue.splice(index, 1);
-      }
-      if (skippedLargeIfc.length > 0) {
-        console.warn('[IFC] 已按设置跳过超大文件:', skippedLargeIfc);
-        perfMark('IFC 跳过超大文件', { skipped: skippedLargeIfc }, perfSession);
-      }
-    }
-    state.ifcSkippedLargeIfc = skippedLargeIfc.map((row) => row.path);
-    const connectionEntries = queue.filter(isConnectionIfc);
-    queue.splice(0, queue.length, ...prioritizeIfcEntries(queue, sizes, new Set(connectionEntries.map(entry=>entry.modelId))));
-    if (connectionEntries.length) {
-      perfMark('IFC 连接线优先', {
-        order: queue.slice(0, 4).map((entry) => entry.path),
-        evidencedModels: [...evidencedConnections],
-        anchorPreserved: queue[0]?.modelId === entries[0]?.modelId,
-      }, perfSession);
-    }
-    for (let queueIndex=0;queueIndex<queue.length;queueIndex++) {
-      if (!isCurrent()) return;
-      const entry=queue[queueIndex];
-      activeIfcPath=entry.path;
-      ifcStages.set(entry.path,ifcStageLabels['checking-cache']);
-      setIfcStatus(ifcStatus(entry,queueIndex,queue.length));
-        // After the first IFC the viewport and bottom status bar are the
-        // source of truth; do not cover them with the center loading pill.
-        if (!interactiveInitialized) showLoading(`正在加载 ${entry.name}...`);
-      let readEnded = false;
-      let readProfiled = false;
-      let lastIfcReadByteLength=0;
-      let loadEnded = false;
-      const loadSource: { value: 'lod-cache' | 'fragments-cache' | 'ifc' | 'unknown' } = { value: 'unknown' };
-      const setIfcStage=(stage:string,meta?:Record<string,unknown>)=>{
-        if(!isCurrent())return;
-        ifcStages.set(entry.path,(ifcStageLabels[stage]??stage)+(meta?.phase?` · ${String(meta.phase)}`:''));
-        if(activeIfcPath===entry.path)setIfcStatus(ifcStatus(entry,queueIndex,queue.length,meta?.ms!=null?`${String(meta.ms)}ms`:''));
-      };
-      const statusStarted=performance.now();
-      const statusTimer=setInterval(()=>{
-        if(isCurrent()&&activeIfcPath===entry.path)setIfcStatus(ifcStatus(entry,queueIndex,queue.length,
-          `${Math.round((sizes.get(entry.path.toLowerCase())??0)/1048576)} MiB · ${Math.floor((performance.now()-statusStarted)/1000)}秒`));
-      },1000);
-      const endRead = perfBegin(`变电 IFC read · ${entry.path}`, undefined, perfSession);
-      const endIfcLoad = perfBegin(`变电 web-ifc / Fragments load · ${entry.path}`, undefined, perfSession);
-      try {
-        if (!firstIfcLoadStarted) {
-          firstIfcLoadStarted = true;
-          perfMarkProductMoment('firstIfcLoadStart', {
-            name: entry.name,
-            path: entry.path,
-          }, perfSession);
-        }
-        const ifcBytes: { value: Uint8Array | null } = { value: null };
-        const readBytes = async (): Promise<Uint8Array|null> => {
-          ifcBytes.value = await getIfcBufferForEntry(entry, state, session);
-          if (!isCurrent()) return null;
-          lastIfcReadByteLength=ifcBytes.value?.byteLength??0;
-          const readMeta={bytes:ifcBytes.value?.byteLength??0,source:state.currentFiles?'extracted':'disk-cache',found:ifcBytes.value!=null};
-          if(!readProfiled){endRead(undefined,readMeta);readProfiled=true;}
-          readEnded=true;
-          return ifcBytes.value;
-        };
-        let finePromise: Promise<void>|null=null;
-        const loadFine = (): Promise<void> => {
-          if(finePromise)return finePromise;
-          const task=loadIfcEntry(ctx,state,entry,readBytes,
-            (p) => { if (isCurrent()) { setIfcStatus(ifcStatus(entry,queueIndex,queue.length,`${Math.round(p * 100)}%`)); if (!interactiveInitialized) showLoading(`${entry.name}: ${Math.round(p * 100)}%`); } },
-            {session,perfSessionId:perfSession.id,onLoadSource:(source)=>{substationViewerInteractive=true;loadSource.value=source;ifcSources.set(entry.path,source);ifcStages.set(entry.path,source==='ifc'?'冷转换完成':source==='lod-cache'?'LOD缓存恢复完成':'完整缓存恢复完成');},
-              onStage:(stage,meta)=>setIfcStage(stage,meta),
-              onProfile:(profile)=>{if(isCurrent())perfRecordIfcLoadProfile(profile,perfSession);},
-              onRegionalBatch:(batch)=>{ if (isCurrent()) {
-                const accepted = connectionPreview.acceptBatch({
-                  ...batch,
-                  modelId: entry.modelId,
-                  sourcePath: entry.path,
-                  sourceIdentity: session.sourceSha256 ?? `session:${session.generation}`,
-                  coordinateBasis: 'ifc-y-up-m',
-                });
-                if (accepted && !connectionFirstBatches.has(entry.modelId)
-                  && batch.chunks?.some(chunk => chunk.vertices.length > 0)) {
-                  connectionFirstBatches.add(entry.modelId);
-                  perfMark('IFC connection preview first batch', {
-                    modelId: entry.modelId,
-                    entryPath: entry.path,
-                    sequence: batch.sequence,
-                    objects: batch.objects.length,
-                    bytes: batch.bytes,
-                    source: 'stream',
-                  }, perfSession);
-                }
-                updateConnectionStatus();
-              } },
-              onRegionalComplete:(meta)=>{ if (isCurrent()) {
-                connectionPreview.markComplete(entry.modelId,meta);
-                if (!connectionCompletions.has(entry.modelId)) {
-                  connectionCompletions.add(entry.modelId);
-                  perfMark('IFC connection preview settled', {
-                    modelId: entry.modelId,
-                    entryPath: entry.path,
-                    objectCount: meta.objectCount,
-                    sequence: meta.sequence,
-                    source: 'regional-index-complete',
-                  }, perfSession);
-                }
-                updateConnectionStatus();
-              } },
-              transferInput:true,openingPolicy});
-          const wrapped=task.catch(error=>{
-            if(finePromise===wrapped){ifcBytes.value=null;readEnded=false;finePromise=null;}
-            throw error;
-          });
-          finePromise=wrapped;
-          return wrapped;
-        };
-        await loadFine();
-        if (!isCurrent()) return;
-        connectionPreview.markModelReady(entry.modelId, state.ifcRegionalRuntimes.get(entry.modelId)?.index.objects);
-        updateConnectionStatus();
-        if (!readEnded) {
-          // Fragments cache 命中时不会调用 getIfcBuffer；显式记录“未读取 IFC”。
-          if(!readProfiled)endRead(undefined, {
-              bytes: 0,
-              source: loadSource.value === 'fragments-cache' ? 'fragments-cache' : 'not-read',
-              found: false,
-            });
-          readEnded = true;
-        }
-        endIfcLoad(undefined, {
-          bytes: lastIfcReadByteLength,
-          source: loadSource.value,
-          fragmentsCacheEnabled: isFragmentsCacheEnabled(),
-          cacheHit: loadSource.value === 'lod-cache' || loadSource.value === 'fragments-cache',
-        });
-        loadEnded = true;
-        ifcStages.set(entry.path, loadSource.value==='ifc'?'冷转换完成':'LOD缓存恢复完成');
-        setIfcStatus(ifcStatus(entry,queueIndex,queue.length));
-        ifcBytes.value = null;
-        const runtimeModelId = state.ifcRuntimeModelIds.get(entry.modelId) ?? entry.modelId;
-        const usable = state.loadedModels.has(entry.modelId) && ctx.fragments.list.has(runtimeModelId);
-        if (usable && !interactiveInitialized) {
-          await initializeInteractiveAfterFirstIfc(entry, loadSource.value);
-          if (!isCurrent()) return;
-        }
-      } catch (err) {
-        if (!readEnded) {
-          endRead('（失败）', { source: loadSource.value, error: err instanceof Error ? err.message : String(err) });
-          readEnded = true;
-        }
-        if (!loadEnded) {
-          endIfcLoad('（失败）', {
-            source: loadSource.value,
-            fragmentsCacheEnabled: isFragmentsCacheEnabled(),
-            cacheHit: loadSource.value === 'lod-cache' || loadSource.value === 'fragments-cache',
-            error: err instanceof Error ? err.message : String(err),
-          });
-          loadEnded = true;
-        }
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('[GIM] IFC 加载失败:', entry, err);
-        // IFC 加载可能在工程切换后才 reject；不要让旧工程继续进入
-        // 后续坐标同步、名称索引或 UI 渲染阶段。
-        if (!isCurrent()) return;
-        connectionPreview.markFailed?.(entry.modelId);
-        updateConnectionStatus();
-        ifcStages.set(entry.path,'失败');
-        setIfcStatus(ifcStatus(entry,queueIndex,queue.length,message.slice(0,80)));
-        failed.push({ name: entry.name, message });
-        // 防御性清理
-        try {
-          const modelId = entry.modelId;
-          const runtimeModelId = state.ifcRuntimeModelIds.get(modelId) ?? modelId;
-          if (ctx.fragments.list.has(runtimeModelId)) {
-            ctx.fragments.core.disposeModel(runtimeModelId);
-          }
-          state.loadedModels.delete(modelId);
-          const modelRow = document.getElementById(`model-${modelId}`)
-            ?? document.getElementById(`model-${runtimeModelId}`);
-          if (modelRow) modelRow.remove();
-        } catch (cleanupErr) {
-          console.warn('[GIM] cleanup failed model after load error', entry, cleanupErr);
-        }
-        continue;
-      } finally { clearInterval(statusTimer); }
-    }
-    activeIfcPath='';
-
-    // A first usable IFC normally establishes the coordinate anchor.  Retry
-    // once after the sequential tail only when that first attempt had no
-    // usable Fragments base; this retry is a diagnostic fallback, not an
-    // interactive barrier.
-    if (!state.projectSourceToViewerMatrix) {
-      await syncCoordinateAnchor('变电 coordinate alignment（all IFC fallback）');
-      if (!isCurrent()) return;
-    }
-
-    setIfcStatus(`IFC ${queue.length}/${queue.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ' · 已就绪'}${skippedLargeIfc.length ? ` · 已跳过 ${skippedLargeIfc.length} 个超大 IFC` : ''}`);
-    background.completeRemainingIfc();
-    state.endIfcBackgroundLoading();
-    enqueueDevGeometry();
-    background.markAllIfcReady();
-    perfMarkProductMoment('allIfcReady', {total:entries.length,loaded:state.loadedModels.size,
-      failed:failed.length,firstInteractive:interactiveInitialized}, perfSession);
-    void sampleSubstationMemory(state,'allIfcReady',perfSession,{total:entries.length,loaded:state.loadedModels.size,failed:failed.length},ctx);
-
-    // buildIfcNameIndex 失败不应阻断 UI 渲染
-    const { buildIfcNameIndex } = await import('../viewer/ifcNameIndex.js');
-    if (!isCurrent()) return;
-    state.engineeringIfcGeometryFinished = true;
-    state.engineeringGeometryEvidenceChanged?.();
-    const endNameIndex = perfBegin('变电 IFC name index', undefined, perfSession);
-    await buildIfcNameIndex(ctx, state, { session }).catch((err) => {
-      console.warn('[GIM] buildIfcNameIndex failed', err);
-    });
-    if (!isCurrent()) return;
-    endNameIndex(undefined, { models: state.loadedModels.size });
-
-    if (!interactiveInitialized && state.loadedModels.size > 0) {
-      // Defensive fallback for a loader that populated state without the
-      // usual first-model event.  Normal IFC paths initialize above.
-      const firstLoaded = entries.find((entry) => state.loadedModels.has(entry.modelId));
-      if (firstLoaded) await initializeInteractiveAfterFirstIfc(firstLoaded, 'unknown');
-      if (!isCurrent()) return;
-    }
-    await renderSubstationCoreUi(state, (text) => showLoadingBeforeInteractive(text), session, perfSession, '变电 navigation/UI（all IFC）');
-    if (!isCurrent()) return;
-    // Keep the heavy post-IFC lane behind the final name-index/UI pass.  The
-    // allIfcReady product moment is already recorded above, but releasing the
-    // coordinator here avoids DEV geometry or a spatial rebuild competing with
-    // the last mandatory UI bookkeeping.
-    background.markAllIfcReady();
-
-    } catch (err) {
-      if (!isCurrent()) return;
-      state.engineeringIfcGeometryFinished=true;state.engineeringGeometryEvidenceChanged?.();
-      console.error('[GIM] IFC 加载失败 (outer)', {
-        error: err,
-        message: err instanceof Error ? err.message : String(err),
-      });
-      showLoading(`IFC 加载失败: ${err instanceof Error ? err.message : String(err)}`);
-      setTimeout(() => { if (isCurrent()) hideLoading(); }, 3000);
-      if (!interactiveSignaled) rejectInteractive(err);
-      return;
-    }
-
-  // Interactive is reached after the first usable IFC.  The sequential tail
-  // may still have failed entries, but it must no longer own the first-use
-  // loading barrier.
-  if (failed.length > 0) {
-    showLoading(`部分 IFC 加载失败：${failed.length}/${entries.length}，详见控制台`);
-    setTimeout(() => { if (isCurrent()) hideLoading(); }, 4000);
-  } else {
-    hideLoading();
-  }
-
-  })();
-
-  // The first usable IFC is the caller-visible readiness boundary. The
-  // sequential IFC tail and post-IFC geometry continue under the same
-  // session/token guards after this promise resolves.
-  void lifecycleTask.finally(() => {
-    if (isCurrent()) setIfcStatus(`IFC 已结束 · 已加载 ${state.loadedModels.size}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ''}${state.ifcSkippedLargeIfc.length ? ` · 已跳过 ${state.ifcSkippedLargeIfc.length} 个超大 IFC` : ''}`);
-    // If every IFC failed (or the session became stale) there is no usable
-    // geometry event to signal. Release the caller rather than leaving an
-    // unresolved readiness promise behind.
-    if (!interactiveSignaled) signalInteractive();
-  }).catch(() => undefined);
-
-  try {
-    await interactiveReady;
-  } catch {
-    return;
-  }
-}
-
-/**
- * MOD/STL 自动加载（IFC 加载后置步骤，同时用于无 IFC 的纯 MOD 工程）。
- *
- * 若 ctx 未传入（无 IFC 场景），内部创建 ViewerRuntime。
- *
- * 双路径：
- * - 首次打开（currentFiles 非空）→ 渐进式 DEV GLB 管线：
- *   序列化 → 落盘 → 逐 CBM 实例渲染一体化，MOD 只解析 1 遍（原流程解析 2 遍）
- * - 缓存命中（currentFiles=null）→ 原有 autoLoadModAndStlGeometry
- *   （GLB 快速路径 → SQLite 直通回退）
- */
-
-async function autoLoadModStlPostIfc(
-  state: AppState,
-  showMessage: (text: string) => void,
-  existingCtx?: ViewerContext,
-  options?: {
-    token?: number;
-    includeMod?: boolean;
-    includeStl?: boolean;
-    session?: ProjectLoadSession;
-    geometryCacheValid?: boolean;
-    geometryCacheManifestValid?: boolean;
-    geometryCacheVersionFileMatch?: boolean;
-    onDevCheckpoint?: import('./substationBackgroundRuntime.js').DevCheckpointHandler;
-  },
-): Promise<void> {
-  let endModStl: ((labelSuffix?: string, endMeta?: Record<string, unknown>) => void) | null = null;
-  let modStlEnded = false;
-  try {
-    const session = options?.session ?? state.captureProjectSession();
-    const perfSession = perfCurrentSession();
-    if (!state.isCurrentSession(session)) return;
-    endModStl = perfBegin('变电 MOD/STL', undefined, perfSession);
-    const finishModStl = (suffix?: string, meta?: Record<string, unknown>): void => {
-      if (modStlEnded) return;
-      modStlEnded = true;
-      endModStl?.(suffix, meta);
-    };
-    // 获取 scene：优先用已有 ctx，否则创建 ViewerRuntime
-    let scene: import('three').Scene;
-    let resourceCtx: ViewerContext | null = existingCtx ?? null;
-    if (existingCtx) {
-      scene = (existingCtx.world.scene as any).three as import('three').Scene;
-    } else {
-      const { getViewerRuntimeWithUI } = await import('./viewerUIBinding.js');
-      if (!state.isCurrentSession(session)) return;
-      const runtime = await getViewerRuntimeWithUI(state, showMessage);
-      if (!state.isCurrentSession(session)) return;
-      scene = (runtime.ctx.world.scene as any).three as import('three').Scene;
-      resourceCtx = runtime.ctx;
-    }
-
-    // DEV is an on-demand geometry domain. Both cold and warm consume the same occurrence/catalog/placement runtime.
-    if (resourceCtx && state.currentProjectType === 'substation' && typeof Worker !== 'undefined') {
-      const { startDeviceLod } = await import('./devLodRuntime.js');
-      if (!state.isCurrentSession(session)) return;
-      if (!state.currentIfcEntries.length && !state.projectSourceToViewerMatrix) {
-        const THREE = await import('three');
-        if (!state.isCurrentSession(session)) return;
-        state.projectSourceToViewerMatrix = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
-      }
-      await startDeviceLod(state, resourceCtx, session, (text, detail) => {
-        if (state.isCurrentSession(session)) void import('../ui/shell/statusBar.js').then(({setDeviceStatus}) => { if (state.isCurrentSession(session)) setDeviceStatus(text, detail); });
-      });
-      if (!state.isCurrentSession(session)) return;
-      finishModStl(undefined, { path: 'device-lod-directory', onDemand: true });
-      hideLoading();
-      return; // Current-view readiness is recorded by the LOD owner, not a whole-station completion.
-    }
-
-    // 首次打开：渐进式 DEV GLB 管线（编译→落盘→渐进渲染一体）
-    if (state.currentFiles) {
-      const { runProgressiveDevGlbPipeline } = await import('./progressiveGeometryService.js');
-      if (!state.isCurrentSession(session)) return;
-      const result = await runProgressiveDevGlbPipeline(
-        state,
-        scene,
-        (p) => {
-          if (!state.isCurrentSession(session)) return;
-          if (p.phase === 'compiling') {
-            showLoadingBeforeInteractive(`正在后台编译几何模型 (${p.compiledDevs}/${p.totalDevs})...`);
-          } else if (p.phase === 'done') {
-            perfMark('渐进式 DEV GLB 管线完成', {
-              compiledDevs: p.compiledDevs,
-              renderedInstances: p.renderedInstances,
-            }, perfSession);
-            hideLoading();
-          }
-        },
-        {
-          token: options?.token,
-          generation: session.generation,
-          projectId: session.projectId,
-          sourceSha256: session.sourceSha256,
-          session,
-          onDevCheckpoint: options?.onDevCheckpoint,
-        },
-      );
-
-      if (!state.isCurrentSession(session)) return;
-
-      // 渐进 GLB 编译同样按 DEV 做失败隔离。无法产生 GLB 的 DEV 只在
-      // 当前解压文件源上做定向 raw fallback；已成功渲染的其它 DEV 不得
-      // 被清理或重新解析。
-      const devGlbProfile = result.devGlbProfile;
-      let scopedRaw = { modCount: 0, stlCount: 0, rows: 0 };
-      if (!result.interrupted && result.rawFallbackDevs.length > 0 && state.currentFiles) {
-        try {
-          const {
-            loadScopedRawFallbackGeometry,
-          } = await import('./modAutoLoadService.js');
-          const { getSourceGeometryOccurrences } = await import('./sourceGeometryService.js');
-          const fallbackNodes = await getSourceGeometryOccurrences(state, session);
-          scopedRaw = await loadScopedRawFallbackGeometry(
-            state,
-            scene,
-            (p) => {
-              if (!state.isCurrentSession(session)) return;
-              if (p.phase === 'loading_mod') {
-                showLoadingBeforeInteractive(`正在定向回退失败 DEV 的 MOD 模型 ${p.loadedMods}/${p.totalMods}...`);
-              } else if (p.phase === 'loading_stl') {
-                showLoadingBeforeInteractive(`正在定向回退失败 DEV 的 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
-              }
-            },
-            result.rawFallbackDevs,
-            true,
-            false,
-            options?.token,
-            session.generation,
-            session.projectId,
-            session.sourceSha256,
-            session,
-            devGlbProfile,
-            state.currentFiles,
-            fallbackNodes,
-            options?.onDevCheckpoint,
-          );
-        } catch (error) {
-          // 定向回退失败不应清理已经成功的 GLB；把错误留在控制台与
-          // 性能 span 中，后续诊断可以区分“部分回退失败”和全项目失败。
-          console.warn('[GIM] 渐进几何 scoped raw fallback 失败:', error);
-        }
-      }
-
-      if (devGlbProfile) {
-        perfRecordDevGeometryProfile(devGlbProfile as unknown as Record<string, unknown>, perfSession);
-      }
-      finishModStl(undefined, {
-        path: 'progressive-dev-glb',
-        compiledDevs: result.compiledDevs,
-        renderedInstances: result.renderedInstances,
-        rawFallbackDevs: result.rawFallbackDevs.length,
-        rawFallbackInstances: scopedRaw.modCount + scopedRaw.stlCount,
-        rawFallbackRows: scopedRaw.rows,
-        interrupted: result.interrupted,
-        ...(devGlbProfile ? { devGlbProfile } : {}),
-      });
-      const totalGeometryInstances = result.renderedInstances
-        + scopedRaw.modCount
-        + scopedRaw.stlCount;
-      if (!result.interrupted && totalGeometryInstances > 0) {
-        debugLog(DEBUG_IFC_LOAD, '[GIM] 渐进几何管线完成', result);
-        // 编译完成后强制重新 fit 相机（bbox 可能显著变化）
-        if (existingCtx) {
-          const { fitCameraToScene } = await import('../viewer/camera.js');
-          if (!state.isCurrentSession(session)) return;
-          if (!state.selectionRequest?.target) fitCameraToScene(existingCtx, state, { force: true });
-        }
-      }
-      if (!result.interrupted) {
-        const fullMeta={
-          ifcModels: state.loadedModels.size,
-          modInstances: result.renderedInstances + scopedRaw.modCount,
-          compiledDevs: result.compiledDevs,
-          sourceInvalidDevCount: result.sourceInvalidDevs?.length ?? 0,
-          geometryFullyRendered:![...state.geometryDiagnosticsByDevPath.values()].some(d=>d.status==='failed'||d.status==='partial'||d.status==='unsupported'),
-          stlInstances: scopedRaw.stlCount,
-        };
-        perfMarkProductMoment('devGeometryReady',{...fullMeta,path:'progressive-dev-glb',renderedInstances:totalGeometryInstances},perfSession);
-        perfMarkProductMoment('fullModelReady',fullMeta,perfSession);
-        await sampleSubstationMemory(state,'fullModelReady',perfSession,{path:'progressive-dev-glb',renderedInstances:totalGeometryInstances},resourceCtx);
-        scheduleSubstationResourceCheckpoint(state,'idleAfterFullModel',perfSession,resourceCtx,
-          {path:'progressive-dev-glb',renderedInstances:totalGeometryInstances},{isCurrent:()=>state.isCurrentSession(session)});
-      }
-      return;
-    }
-
-    // 缓存命中：原有路径（GLB 快速路径 → SQLite 直通回退）
-    const { autoLoadModAndStlGeometry } = await import('./modAutoLoadService.js');
-    if (!state.isCurrentSession(session)) return;
-    const result = await autoLoadModAndStlGeometry(
-      state,
-      scene,
-      (p) => {
-        if (!state.isCurrentSession(session)) return;
-        if (p.phase === 'discovering') {
-          showLoadingBeforeInteractive(`正在发现几何引用... (${p.currentPath || ''})`);
-        } else if (p.phase === 'loading_mod') {
-          showLoadingBeforeInteractive(`正在加载 MOD 模型 ${p.processedMods ?? p.loadedMods}/${p.totalMods}...`);
-        } else if (p.phase === 'loading_stl') {
-          showLoadingBeforeInteractive(`正在加载 STL 模型 ${p.loadedStls}/${p.totalStls}...`);
-        } else if (p.phase === 'done') {
-          // 后台几何加载结束必须隐藏提示，否则 toast 永久停留在最后一批的批前计数
-          hideLoading();
-        }
-      },
-      {
-        token: options?.token,
-        generation: session.generation,
-        projectId: session.projectId,
-        sourceSha256: session.sourceSha256,
-        session,
-        geometryCacheValid: options?.geometryCacheValid,
-        geometryCacheManifestValid: options?.geometryCacheManifestValid,
-        geometryCacheVersionFileMatch: options?.geometryCacheVersionFileMatch,
-        onDevCheckpoint: options?.onDevCheckpoint,
-        includeMod: options?.includeMod ?? true,
-        includeStl: options?.includeStl ?? false,
-      },
-    );
-
-    if (!state.isCurrentSession(session)) return;
-
-    if (result.modCount > 0 || result.stlCount > 0) {
-      debugLog(DEBUG_IFC_LOAD, '[GIM] MOD/STL 自动加载完成', result);
-      // MOD/STL 加载后强制重新 fit 相机（bbox 可能显著变化）
-      if (existingCtx) {
-        const { fitCameraToScene } = await import('../viewer/camera.js');
-        if (!state.isCurrentSession(session)) return;
-        if (!state.selectionRequest?.target) fitCameraToScene(existingCtx, state, { force: true });
-      }
-    }
-    finishModStl(undefined, {
-      path: 'cached-geometry',
-      modCount: result.modCount,
-      stlCount: result.stlCount,
-      ...(result.devGlbProfile ? { devGlbProfile: result.devGlbProfile } : {}),
-    });
-    if (result.devGlbProfile) {
-      perfRecordDevGeometryProfile(result.devGlbProfile as unknown as Record<string, unknown>, perfSession);
-    }
-    if (!state.isCurrentSession(session)) return;
-    if (!perfProductMomentSnapshot().firstGeometryReady
-      && (result.modCount > 0 || result.stlCount > 0)) {
-      perfMarkProductMoment('firstGeometryReady', {
-        kind: 'mod-stl',
-        modCount: result.modCount,
-        stlCount: result.stlCount,
-      }, perfSession);
-      void sampleSubstationMemory(state, '第一个几何模型后', perfSession, {
-        kind: 'mod-stl',
-        modCount: result.modCount,
-        stlCount: result.stlCount,
-      });
-    }
-    const fullMeta={
-      ifcModels: state.loadedModels.size,
-      modInstances: result.modCount,
-      stlInstances: result.stlCount,
-      path: 'cached-geometry',
-      sourceInvalidDevCount:[...state.geometryDiagnosticsByDevPath.values()].filter(d=>d.reason==='source-invalid').length,
-      geometryFullyRendered:![...state.geometryDiagnosticsByDevPath.values()].some(d=>d.status==='failed'||d.status==='partial'||d.status==='unsupported'),
-    };
-    perfMarkProductMoment('devGeometryReady',{...fullMeta,path:'cached-geometry'},perfSession);
-    perfMarkProductMoment('fullModelReady',fullMeta,perfSession);
-    await sampleSubstationMemory(state,'fullModelReady',perfSession,{path:'cached-geometry',modCount:result.modCount,stlCount:result.stlCount},resourceCtx);
-    scheduleSubstationResourceCheckpoint(state,'idleAfterFullModel',perfSession,resourceCtx,
-      {path:'cached-geometry',modCount:result.modCount,stlCount:result.stlCount},{isCurrent:()=>state.isCurrentSession(session)});
-  } catch (err) {
-    if (!modStlEnded) {
-      endModStl?.('（失败）', { error: err instanceof Error ? err.message : String(err) });
-      modStlEnded = true;
-    }
-    console.warn('[GIM] MOD/STL 自动加载失败:', err);
-  }
-}
-
 /** 从 ArrayBuffer 加载 GIM 文件的完整流程（浏览器和 Tauri 共用，不创建 Viewer） */
 
 
@@ -1768,11 +182,7 @@ async function autoLoadModStlPostIfc(
  * Substation Runtime owns the CBM/IFC/Fragments/DEV/MOD/STL lifecycle.
  * The Shared Core has already inspected the source and activated the session.
  */
-let substationViewerInteractive = false;
-/** Background DEV/cache progress stays in the status bar after first IFC. */
-function showLoadingBeforeInteractive(text: string): void {
-  if (!substationViewerInteractive) showLoading(text);
-}
+
 
 /** Semantic publication keeps original FAM rows available to source tools;
  * it does not launch or invalidate the retired business-tree projection. */
@@ -1830,7 +240,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       const { createDiskBackedFile: createEngineeringSourceFile } = await import('@desktop/gimExtract.js');
       if (!state.isCurrentSession(session)) return;
       const engineeringFiles = new Map(index.entries.map(entry => [entry.entry_path,
-        createEngineeringSourceFile(context.projectId!, entry.entry_path, entry.file_size)]));
+      createEngineeringSourceFile(context.projectId!, entry.entry_path, entry.file_size)]));
       endRestoreCore(undefined, {
         entries: index.entries.length,
         cbmNodes: index.cbm_nodes.length,
@@ -1929,15 +339,15 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       // stale STD/SLD cache must not discard an otherwise valid IFC cache hit;
       // the helper records the degradation and clears only that projection.
       const startStdSld = (): Promise<boolean> => buildAndCommitSubstationStdSld(
-          state,
-          null,
-          cachedStdSldEntryPaths,
-          session,
-          perfSession,
-          showMessage,
-          'warm',
-        );
-      const scheduleSpatialSemantic = (coordinator: SubstationBackgroundCoordinator,gate:SubstationBackgroundGate): void => {
+        state,
+        null,
+        cachedStdSldEntryPaths,
+        session,
+        perfSession,
+        showMessage,
+        'warm',
+      );
+      const scheduleSpatialSemantic = (coordinator: SubstationBackgroundCoordinator, gate: SubstationBackgroundGate): void => {
         scheduleSubstationSpatialSemantic(
           coordinator,
           state,
@@ -1957,22 +367,22 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         coordinator.enqueue({
           task: 'stdSld',
           priority: 2,
-           heavy: false,
-           startAfter: 'interactive',
-           run: async () => {
-             const ready = await startStdSld();
-             if (!ready && state.isCurrentSession(session)) {
-               throw new Error('STD/SLD 未生成可用结果');
-             }
-           },
-         });
+          heavy: false,
+          startAfter: 'interactive',
+          run: async () => {
+            const ready = await startStdSld();
+            if (!ready && state.isCurrentSession(session)) {
+              throw new Error('STD/SLD 未生成可用结果');
+            }
+          },
+        });
       };
 
       // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
       // loadAllIfcFiles 内部会创建 ViewerRuntime、加载 IFC、渲染树、触发 MOD/STL
       await loadAllIfcFiles(state, cachedIfcEntries, showMessage, {
         session,
-        ifcSourceSizes:new Map([...cachedIfcFiles].map(([path,file])=>[path.toLowerCase(),file.size])),
+        ifcSourceSizes: new Map([...cachedIfcFiles].map(([path, file]) => [path.toLowerCase(), file.size])),
         startStdSld,
         scheduleSpatialSemantic,
         scheduleStdSld,
@@ -2003,7 +413,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
             }, {
               isCurrent: () => state.isCurrentSession(session),
               saveRest: saveSubstationSemanticRest,
-              onPublished: payload => publishFamSourceRows(state,payload.fam_properties),
+              onPublished: payload => publishFamSourceRows(state, payload.fam_properties),
               onPhase: (phase, counts) => perfMark(`变电 semantic repair · ${phase}`, { projectId, ...counts }, perfSession),
             });
             if (published && state.isCurrentSession(session)) setCachePublishPhase('ready');
@@ -2103,120 +513,120 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
     const persistTask =
       persistProjectId != null
         ? (async () => {
-      const projectId = persistProjectId;
-      // Early session sources are never a published source cache or a v26 receipt.
-      await preExtracted.sourceMaterialization;
-      if (!state.isCurrentSession(session)) return;
-      let localCachePathMap = new Map<string, string>();
-      if (!state.isCurrentSession(session)) return;
-
-      if (preExtracted && preExtracted.cachePaths && preExtracted.cachePaths.size > 0) {
-        // 原生解压已由 Rust 直接落盘全部条目——直接复用路径，
-        // 跳过逐文件 IPC 字节回传（writeCacheFile Array.from 路径会
-        // 把数百 MB IFC 序列化为 JSON 数组，主线程长时间假死）
-        localCachePathMap = preExtracted.cachePaths ?? localCachePathMap;
-        debugLog(DEBUG_GIM_CACHE, '[Tauri] 原生解压已落盘缓存文件:', {
-          cached: localCachePathMap.size,
-        });
-      } else {
-        // WASM 回退路径：逐文件 IPC 字节回传（慢，仅作兜底）
-        showLoadingBeforeInteractive('正在缓存 IFC 文件...');
-        try {
-          const { cacheIfcEntries } = await import('./gimExtractedCacheService.js');
-          const cacheResult = await cacheIfcEntries(
-            projectId,
-            filesForPersist,
-            ifcEntriesForPersist,
-          );
+          const projectId = persistProjectId;
+          // Early session sources are never a published source cache or a v26 receipt.
+          await preExtracted.sourceMaterialization;
           if (!state.isCurrentSession(session)) return;
-          localCachePathMap = cacheResult.pathMap;
-          debugLog(DEBUG_GIM_CACHE, '[Tauri] IFC 缓存结果:', {
-            expected: ifcEntriesForPersist.length,
-            cached: localCachePathMap.size,
-            errors: cacheResult.errors,
-          });
-          if (cacheResult.errors.length > 0) {
-            console.warn('[Tauri] 部分 IFC 缓存失败:', cacheResult.errors);
-          }
-        } catch (err) {
-          console.error('[Tauri] IFC 文件缓存失败:', err);
-        }
+          let localCachePathMap = new Map<string, string>();
+          if (!state.isCurrentSession(session)) return;
 
-        // v6: 缓存 DEV/PHM/MOD 几何文件到本地磁盘
-        if (filesForPersist) {
-          showLoadingBeforeInteractive('正在缓存几何文件（DEV/PHM/MOD）...');
-          try {
-            const { cacheGeometryFiles } = await import('./gimExtractedCacheService.js');
-            const geoCacheResult = await cacheGeometryFiles(
-              projectId,
-              filesForPersist,
-            );
-            if (!state.isCurrentSession(session)) return;
-            debugLog(DEBUG_GIM_CACHE, '[Tauri] 几何文件缓存结果:', {
-              cached: geoCacheResult.cachedCount,
-              errors: geoCacheResult.errors,
+          if (preExtracted && preExtracted.cachePaths && preExtracted.cachePaths.size > 0) {
+            // 原生解压已由 Rust 直接落盘全部条目——直接复用路径，
+            // 跳过逐文件 IPC 字节回传（writeCacheFile Array.from 路径会
+            // 把数百 MB IFC 序列化为 JSON 数组，主线程长时间假死）
+            localCachePathMap = preExtracted.cachePaths ?? localCachePathMap;
+            debugLog(DEBUG_GIM_CACHE, '[Tauri] 原生解压已落盘缓存文件:', {
+              cached: localCachePathMap.size,
             });
-            for (const [path,localPath] of geoCacheResult.pathMap) localCachePathMap.set(path,localPath);
-            if (geoCacheResult.errors.length > 0) {
-              console.warn('[Tauri] 部分几何文件缓存失败:', geoCacheResult.errors);
+          } else {
+            // WASM 回退路径：逐文件 IPC 字节回传（慢，仅作兜底）
+            showLoadingBeforeInteractive('正在缓存 IFC 文件...');
+            try {
+              const { cacheIfcEntries } = await import('./gimExtractedCacheService.js');
+              const cacheResult = await cacheIfcEntries(
+                projectId,
+                filesForPersist,
+                ifcEntriesForPersist,
+              );
+              if (!state.isCurrentSession(session)) return;
+              localCachePathMap = cacheResult.pathMap;
+              debugLog(DEBUG_GIM_CACHE, '[Tauri] IFC 缓存结果:', {
+                expected: ifcEntriesForPersist.length,
+                cached: localCachePathMap.size,
+                errors: cacheResult.errors,
+              });
+              if (cacheResult.errors.length > 0) {
+                console.warn('[Tauri] 部分 IFC 缓存失败:', cacheResult.errors);
+              }
+            } catch (err) {
+              console.error('[Tauri] IFC 文件缓存失败:', err);
             }
-          } catch (err) {
-            console.error('[Tauri] 几何文件缓存失败:', err);
-          }
-        }
-      }
 
-      if (!state.isCurrentSession(session)) return;
-      const { publishSubstationCore, publishSubstationRest } = await import('./substationIndexPublication.js');
-      const { saveGimIndex, saveGeometryRefs, saveSubstationSemanticRest, validateGimCache } = await import('@desktop/database.js');
-      const { beginCachePublish, setCachePublishPhase, failCachePublish } = await import('./cachePublishStatus.js');
-      const publicationInput = {
-        projectId, sourceSha256: session.sourceSha256 ?? '', files: filesForPersist,
-        cachePaths: localCachePathMap, packedPaths: preExtracted.packedPaths,
-        tree: cbmTreeForPersist,
-        ifcs: ifcEntriesForPersist, relations: fileDevRelationsForPersist,
-      };
-      const isCurrent = () => state.isCurrentSession(session);
-      const onPhase = (phase:string, counts?:Record<string, number>) =>
-        perfMark(`变电 semantic persistence · ${phase}`, {projectId,...counts}, perfSession);
-      // 第一阶段：内存中的树/关系/IFC 清单 + receipt，交互后数秒内提交，
-      // 让暖启动立即可用；第二阶段再补写 FAM/DEV 属性与几何引用。
-      if (!isCurrent()) return;
-      beginCachePublish('core');
-      let corePublished = false;
-      try {
-        corePublished = await publishSubstationCore(publicationInput, {
-          isCurrent,
-          saveIndex: saveGimIndex,
-          saveRefs: saveGeometryRefs,
-          validate: () => validateGimCache(projectId,'substation'),
-          onPhase,
-        });
-      } catch (error) {
-        if (!isCurrent()) { failCachePublish('会话已切换'); return; }
-        failCachePublish(error instanceof Error ? error.message : String(error));
-        throw error;
-      }
-      if (!corePublished || !isCurrent()) {
-        if (!isCurrent()) failCachePublish('会话已切换');
-        return;
-      }
-      setCachePublishPhase('rest');
-      try {
-        const restPublished = await publishSubstationRest(publicationInput, {
-          isCurrent,
-          saveRest: saveSubstationSemanticRest,
-          onPublished: payload => publishFamSourceRows(state,payload.fam_properties),
-          onPhase,
-        });
-        if (restPublished && isCurrent()) setCachePublishPhase('ready');
-        else if (isCurrent()) failCachePublish('属性补写未完成');
-      } catch (error) {
-        if (isCurrent()) failCachePublish(error instanceof Error ? error.message : String(error));
-        throw error;
-      }
+            // v6: 缓存 DEV/PHM/MOD 几何文件到本地磁盘
+            if (filesForPersist) {
+              showLoadingBeforeInteractive('正在缓存几何文件（DEV/PHM/MOD）...');
+              try {
+                const { cacheGeometryFiles } = await import('./gimExtractedCacheService.js');
+                const geoCacheResult = await cacheGeometryFiles(
+                  projectId,
+                  filesForPersist,
+                );
+                if (!state.isCurrentSession(session)) return;
+                debugLog(DEBUG_GIM_CACHE, '[Tauri] 几何文件缓存结果:', {
+                  cached: geoCacheResult.cachedCount,
+                  errors: geoCacheResult.errors,
+                });
+                for (const [path, localPath] of geoCacheResult.pathMap) localCachePathMap.set(path, localPath);
+                if (geoCacheResult.errors.length > 0) {
+                  console.warn('[Tauri] 部分几何文件缓存失败:', geoCacheResult.errors);
+                }
+              } catch (err) {
+                console.error('[Tauri] 几何文件缓存失败:', err);
+              }
+            }
+          }
+
+          if (!state.isCurrentSession(session)) return;
+          const { publishSubstationCore, publishSubstationRest } = await import('./substationIndexPublication.js');
+          const { saveGimIndex, saveGeometryRefs, saveSubstationSemanticRest, validateGimCache } = await import('@desktop/database.js');
+          const { beginCachePublish, setCachePublishPhase, failCachePublish } = await import('./cachePublishStatus.js');
+          const publicationInput = {
+            projectId, sourceSha256: session.sourceSha256 ?? '', files: filesForPersist,
+            cachePaths: localCachePathMap, packedPaths: preExtracted.packedPaths,
+            tree: cbmTreeForPersist,
+            ifcs: ifcEntriesForPersist, relations: fileDevRelationsForPersist,
+          };
+          const isCurrent = () => state.isCurrentSession(session);
+          const onPhase = (phase: string, counts?: Record<string, number>) =>
+            perfMark(`变电 semantic persistence · ${phase}`, { projectId, ...counts }, perfSession);
+          // 第一阶段：内存中的树/关系/IFC 清单 + receipt，交互后数秒内提交，
+          // 让暖启动立即可用；第二阶段再补写 FAM/DEV 属性与几何引用。
+          if (!isCurrent()) return;
+          beginCachePublish('core');
+          let corePublished = false;
+          try {
+            corePublished = await publishSubstationCore(publicationInput, {
+              isCurrent,
+              saveIndex: saveGimIndex,
+              saveRefs: saveGeometryRefs,
+              validate: () => validateGimCache(projectId, 'substation'),
+              onPhase,
+            });
+          } catch (error) {
+            if (!isCurrent()) { failCachePublish('会话已切换'); return; }
+            failCachePublish(error instanceof Error ? error.message : String(error));
+            throw error;
+          }
+          if (!corePublished || !isCurrent()) {
+            if (!isCurrent()) failCachePublish('会话已切换');
+            return;
+          }
+          setCachePublishPhase('rest');
+          try {
+            const restPublished = await publishSubstationRest(publicationInput, {
+              isCurrent,
+              saveRest: saveSubstationSemanticRest,
+              onPublished: payload => publishFamSourceRows(state, payload.fam_properties),
+              onPhase,
+            });
+            if (restPublished && isCurrent()) setCachePublishPhase('ready');
+            else if (isCurrent()) failCachePublish('属性补写未完成');
+          } catch (error) {
+            if (isCurrent()) failCachePublish(error instanceof Error ? error.message : String(error));
+            throw error;
+          }
         })()
-      : Promise.resolve();
+        : Promise.resolve();
     persistPromise = persistTask
       .then(() => {
         if (!state.isCurrentSession(session)) return;
@@ -2239,7 +649,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
     return persistPromise;
   };
 
-  const scheduleSpatialSemantic = (coordinator: SubstationBackgroundCoordinator,gate:SubstationBackgroundGate): void => {
+  const scheduleSpatialSemantic = (coordinator: SubstationBackgroundCoordinator, gate: SubstationBackgroundGate): void => {
     const cbmTree = state.currentCbmTree;
     if (!cbmTree) return;
     scheduleSubstationSpatialSemantic(
@@ -2267,7 +677,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       run: async () => { await starter(); },
     });
   };
-  const scheduleCachePersistence = (coordinator: SubstationBackgroundCoordinator,_gate:SubstationBackgroundGate): void => {
+  const scheduleCachePersistence = (coordinator: SubstationBackgroundCoordinator, _gate: SubstationBackgroundGate): void => {
     coordinator.enqueue({
       task: 'cachePersistence',
       priority: 10,

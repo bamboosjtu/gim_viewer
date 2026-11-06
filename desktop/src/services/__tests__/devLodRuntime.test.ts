@@ -53,12 +53,12 @@ it('commits base geometry during camera motion and bounds refinement deferral', 
 it('keeps warm cache consumption capacity independent of compacted computation workers', async () => {
   const {internal}=fixture();internal.worker={workerCount:1,cacheConcurrency:32};
   const releases:Array<()=>void>=[];
-  const requests=Array.from({length:40},(_,i)=>internal.acquireTemplateSlot(`cache-${i}`).then((release:()=>void)=>{releases.push(release);}));
+  const requests=Array.from({length:40},(_,i)=>internal.templateStore.acquireTemplateSlot(`cache-${i}`).then((release:()=>void)=>{releases.push(release);}));
   await Promise.resolve();expect(releases).toHaveLength(32);
-  expect(internal.templateWaiters.size).toBe(8);
+  expect(internal.templateStore.templateWaiters.size).toBe(8);
   for(const release of [...releases])release();
   await Promise.all(requests);for(const release of releases)release();
-  expect(internal.templateWaiters.size).toBe(0);expect(internal.templateSlots).toBe(0);
+  expect(internal.templateStore.templateWaiters.size).toBe(0);expect(internal.templateStore.templateSlots).toBe(0);
 });
 
 it('resolves loaded roots from the live row and never retains a replaced or old-session group',()=>{
@@ -128,9 +128,9 @@ it('stops source prefetch at high pressure, including a reply already in flight'
   });
   try {
     internal.memoryPressure = 'high';
-    expect(await internal.preloadSources(files)).toBe(files); expect(read).not.toHaveBeenCalled();
+    expect(await internal.sources.preloadSources(files)).toBe(files); expect(read).not.toHaveBeenCalled();
     internal.memoryPressure = 'normal';
-    const output = await internal.preloadSources(files);
+    const output = await internal.sources.preloadSources(files);
     expect(read).toHaveBeenCalledOnce(); expect(output.get('MOD/a.mod')).toBe(files.get('MOD/a.mod'));
   } finally { read.mockRestore(); }
 });
@@ -139,8 +139,8 @@ it('batches only reachable sources for a warm template miss and shares repeated 
   const {internal}=fixture();internal.session.projectId=7;
   const texts=new Map([['DEV/a.dev','SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.phm'],
     ['PHM/a.phm','SOLIDS.NUM=1\nSOLIDS0=a.mod'],['MOD/a.mod','<Device><Entities/></Device>']]);
-  internal.sourceFiles=new Map([...texts].map(([path,text])=>[path,{size:new TextEncoder().encode(text).length}]));
-  internal.sourceFiles.set('MOD/unrelated.mod',{size:10});
+  internal.sources.sourceFiles=new Map([...texts].map(([path,text])=>[path,{size:new TextEncoder().encode(text).length}]));
+  internal.sources.sourceFiles.set('MOD/unrelated.mod',{size:10});
   internal.worker={installSources:vi.fn()};
   const database=await import('@desktop/database.js');
   const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(async(_id,paths)=>
@@ -186,7 +186,7 @@ it('bounds source prefetch by indexed bytes, keeps oversized and unknown sources
   const sources=new Map(['DEV/a.dev','MOD/a.mod','MOD/b.mod','MOD/large.mod','MOD/unknown.mod'].map((path,i)=>[path,{size:[3,3*1024*1024,3*1024*1024,9*1024*1024,0][i],name:path} as File]));
   const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(async(_project,paths)=>new Map(paths.map(path=>[path,path==='MOD/a.mod'?null:new Uint8Array(path==='DEV/a.dev'?3:5)])));
   try {
-    const prepared=await internal.preloadSources(sources);
+    const prepared=await internal.sources.preloadSources(sources);
     expect(read.mock.calls.map(call=>call[1])).toEqual([['DEV/a.dev','MOD/a.mod'],['MOD/b.mod']]);
     expect(prepared.get('DEV/a.dev')).toBeInstanceOf(File);expect(prepared.get('MOD/b.mod')).toBeInstanceOf(File);
     for(const path of ['MOD/a.mod','MOD/large.mod','MOD/unknown.mod'])expect(prepared.get(path)).toBe(sources.get(path));
@@ -195,9 +195,9 @@ it('bounds source prefetch by indexed bytes, keeps oversized and unknown sources
 it('upgrades partial L0 cache recovery once after enough real RPC demand, never for L1 or a large workset', async () => {
   const {internal}=fixture();internal.diagnostics.uniqueDevSources=100;
   const source={size:3,name:'a.mod'} as File;
-  internal.sourceFiles=new Map([['MOD/a.mod',source]]);
+  internal.sources.sourceFiles=new Map([['MOD/a.mod',source]]);
   internal.worker={diagnostics:{rpcReads:0},installSources:vi.fn()};
-  const prefetch=vi.spyOn(internal,'preloadSources').mockResolvedValue(new Map([['MOD/a.mod',new File(['abc'],'a.mod')]]));
+  const prefetch=vi.spyOn(internal.sources,'preloadSources').mockResolvedValue(new Map([['MOD/a.mod',new File(['abc'],'a.mod')]]));
   for(let i=0;i<40;i++)internal.recoverMissingSources(String(i),1);
   expect(prefetch).not.toHaveBeenCalled();
   for(let i=0;i<32;i++)internal.recoverMissingSources(String(i),0);
@@ -205,10 +205,10 @@ it('upgrades partial L0 cache recovery once after enough real RPC demand, never 
   internal.worker.diagnostics.rpcReads=40;internal.recoverMissingSources('33',0);await Promise.resolve();
   expect(prefetch).toHaveBeenCalledOnce();expect(internal.worker.installSources).toHaveBeenCalledOnce();
   internal.recoverMissingSources('34',0);expect(prefetch).toHaveBeenCalledOnce();
-  internal.sourceRecoveryAttempted=false;
-  internal.sourceFiles=new Map(Array.from({length:5},(_,i)=>[`MOD/${i}.mod`,{size:8*1024*1024} as File]));
+  internal.sources.sourceRecoveryAttempted=false;
+  internal.sources.sourceFiles=new Map(Array.from({length:5},(_,i)=>[`MOD/${i}.mod`,{size:8*1024*1024} as File]));
   internal.recoverMissingSources('35',0);expect(prefetch).toHaveBeenCalledOnce();
-  internal.sourceRecoveryAttempted=false;internal.sourceFiles=new Map([['MOD/a.mod',source]]);
+  internal.sources.sourceRecoveryAttempted=false;internal.sources.sourceFiles=new Map([['MOD/a.mod',source]]);
   let finish!:(files:Map<string,File>)=>void;prefetch.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
   internal.recoverMissingSources('36',0);internal.state.isCurrentSession=()=>false;
   finish(new Map([['MOD/a.mod',new File(['abc'],'a.mod')]]));await Promise.resolve();
@@ -221,7 +221,7 @@ it('a stalled optional source batch cannot become a startup gate, and late repli
   let finishRead!:(value:any)=>void;
   const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(()=>new Promise(resolve=>{finishRead=resolve;}));
   try {
-    const preparing=internal.preloadSources(files);await vi.advanceTimersByTimeAsync(10_000);
+    const preparing=internal.sources.preloadSources(files);await vi.advanceTimersByTimeAsync(10_000);
     const result=await preparing;expect(result.get('DEV/a.dev')).toBe(files.get('DEV/a.dev'));
     finishRead(new Map([['DEV/a.dev',new Uint8Array([1,2,3])]]));await Promise.resolve();
     expect(result.get('DEV/a.dev')).toBe(files.get('DEV/a.dev'));expect(vi.getTimerCount()).toBe(0);
@@ -251,10 +251,10 @@ it('correlates cold/warm GLB decoding, placement and cache writes without changi
       internal.anchor=new THREE.Matrix4(); internal.state.projectSourceToViewerMatrix=internal.anchor;
       internal.schedule=vi.fn(); internal.requestReady=vi.fn();
       internal.submit=async(_priority:number,run:()=>void)=>run();
-      internal.cacheReader.read=async()=>({status:mode==='cold'?'miss':'hit',value:mode==='cold'?undefined:stored,release:()=>{}});
+      internal.templateStore.cacheReader.read=async()=>({status:mode==='cold'?'miss':'hit',value:mode==='cold'?undefined:stored,release:()=>{}});
       internal.catalogHint=async()=>({status:'miss'});
       internal.worker={workerCount:1,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn(),cancel:vi.fn()};
-      let releaseWriter: (()=>void)|undefined=mode==='cold'?await internal.writeBudget.acquire(internal.writeBudget.limit):undefined;
+      let releaseWriter: (()=>void)|undefined=mode==='cold'?await internal.artifactWriter.writeBudget.acquire(internal.artifactWriter.writeBudget.limit):undefined;
       const row={...occurrence(1),entry:{devPath:'DEV/a.dev',rootOccurrence:'root',instanceKey:'root-instance',
         placementMatrix:new THREE.Matrix4().toArray(),templateStatus:'unrequested'},group:undefined,key:undefined};
       const key=internal.key('DEV/a.dev',0); internal.wanted.add(key); internal.rows.set('root',row);
@@ -262,12 +262,12 @@ it('correlates cold/warm GLB decoding, placement and cache writes without changi
         await internal.renderOnce(row,0,0);
         if(mode==='cold') {
           expect(internal.state.loadedXmlModGroups.has('root-instance')).toBe(true);
-          expect(internal.inputBudget.bytes).toBe(result.bytes!.byteLength);
+          expect(internal.templateStore.inputBudget.bytes).toBe(result.bytes!.byteLength);
           expect(write).not.toHaveBeenCalled();
           expect(runtime.diagnostics.cacheWritesReady).toBe(false);
           releaseWriter?.();releaseWriter=undefined;
         }
-        await Promise.all([...internal.pendingWrites.values()]);
+        await Promise.all([...internal.artifactWriter.pendingWrites.values()]);
         const phases=perfSnapshot().spans.filter(span=>span.label.startsWith('DEV task'));
         const taskId=phases.find(span=>span.label==='DEV task · cacheRead')?.meta?.taskId;
         expect(typeof taskId).toBe('string');
@@ -297,34 +297,34 @@ function cacheWriterFixture() {
   return value;
 }
 it('transfers pending serialized buffers between input and write budgets and records a failed native write', async () => {
-  const {runtime,internal}=cacheWriterFixture();internal.inputBudget=new ByteWorkBudget(1024);internal.writeBudget=new ByteWorkBudget(1100);
+  const {runtime,internal}=cacheWriterFixture();internal.templateStore.inputBudget=new ByteWorkBudget(1024);internal.artifactWriter.writeBudget=new ByteWorkBudget(1100);
   const cache=await import('@desktop/devLodCache.js');const finish:Array<(value:{ok:boolean;error?:string})=>void>=[];
   const write=vi.spyOn(cache,'writeDevArtifactDetailed').mockImplementation((_store,_key,value,_context,prepared)=>{
     expect(prepared!.data).toBe((value as any).result.bytes);
     return new Promise(resolve=>finish.push(resolve));
   });
-  const releaseA=vi.fn(await internal.inputBudget.acquire(500)),releaseB=vi.fn(await internal.inputBudget.acquire(500));
+  const releaseA=vi.fn(await internal.templateStore.inputBudget.acquire(500)),releaseB=vi.fn(await internal.templateStore.inputBudget.acquire(500));
   const artifact=()=>({result:{status:'complete',bytes:new Uint8Array(500)}});
   try {
     await internal.persistArtifact('templates','a',artifact(),0,'a.dev',undefined,releaseA);
     const b=internal.persistArtifact('templates','b',artifact(),0,'b.dev',undefined,releaseB);
     await vi.waitFor(()=>expect(write).toHaveBeenCalledOnce());
     expect(releaseA).toHaveBeenCalledOnce();expect(releaseB).not.toHaveBeenCalled();
-    expect(internal.inputBudget.bytes).toBe(500);expect(runtime.diagnostics.cacheWriteWaitingBytes).toBeGreaterThan(500);
-    expect(internal.writeBudget.bytes).toBeLessThanOrEqual(1100);
+    expect(internal.templateStore.inputBudget.bytes).toBe(500);expect(runtime.diagnostics.cacheWriteWaitingBytes).toBeGreaterThan(500);
+    expect(internal.artifactWriter.writeBudget.bytes).toBeLessThanOrEqual(1100);
     finish[0]({ok:true});await b;await vi.waitFor(()=>expect(write).toHaveBeenCalledTimes(2));
-    expect(releaseB).toHaveBeenCalledOnce();expect(internal.inputBudget.bytes).toBe(0);
-    finish[1]({ok:false,error:'disk failure'});await Promise.all([...internal.pendingWrites.values()]);
-    expect(internal.writeBudget.bytes).toBe(0);expect(internal.writeBudget.peakBytes).toBeLessThanOrEqual(1100);
+    expect(releaseB).toHaveBeenCalledOnce();expect(internal.templateStore.inputBudget.bytes).toBe(0);
+    finish[1]({ok:false,error:'disk failure'});await Promise.all([...internal.artifactWriter.pendingWrites.values()]);
+    expect(internal.artifactWriter.writeBudget.bytes).toBe(0);expect(internal.artifactWriter.writeBudget.peakBytes).toBeLessThanOrEqual(1100);
     expect(runtime.diagnostics).toMatchObject({cacheWritesSettled:true,cacheWritesReady:false,artifactWriteFailures:1,cacheWritePendingCount:0});
   } finally {finish.forEach(resolve=>resolve({ok:true}));runtime.release();write.mockRestore();}
 });
 
 it('cancels an unadmitted write on release but retains the active buffer reservation until native completion', async () => {
-  const {runtime,internal}=cacheWriterFixture();internal.inputBudget=new ByteWorkBudget(1024);internal.writeBudget=new ByteWorkBudget(700);
+  const {runtime,internal}=cacheWriterFixture();internal.templateStore.inputBudget=new ByteWorkBudget(1024);internal.artifactWriter.writeBudget=new ByteWorkBudget(700);
   const cache=await import('@desktop/devLodCache.js');let complete!:(value:{ok:boolean})=>void;
   const write=vi.spyOn(cache,'writeDevArtifactDetailed').mockImplementation(()=>new Promise(resolve=>{complete=resolve;}));
-  const a=vi.fn(await internal.inputBudget.acquire(500)),b=vi.fn(await internal.inputBudget.acquire(500));
+  const a=vi.fn(await internal.templateStore.inputBudget.acquire(500)),b=vi.fn(await internal.templateStore.inputBudget.acquire(500));
   const artifact={result:{status:'complete',bytes:new Uint8Array(500)}};
   try {
     await internal.persistArtifact('templates','a',artifact,0,'a.dev',undefined,a);
@@ -332,9 +332,9 @@ it('cancels an unadmitted write on release but retains the active buffer reserva
     await vi.waitFor(()=>expect(write).toHaveBeenCalledOnce());runtime.release();await pending;
     await vi.waitFor(()=>expect(runtime.diagnostics.cacheWriteCancelled).toBe(1));
     expect(b).toHaveBeenCalledOnce();expect(a).toHaveBeenCalledOnce();expect(write).toHaveBeenCalledOnce();
-    expect(internal.inputBudget.bytes).toBe(0);expect(internal.writeBudget.bytes).toBeGreaterThan(500);
-    complete({ok:true});await Promise.all([...internal.pendingWrites.values()]);
-    expect(internal.writeBudget.bytes).toBe(0);expect(runtime.diagnostics.cacheWritePendingCount).toBe(0);
+    expect(internal.templateStore.inputBudget.bytes).toBe(0);expect(internal.artifactWriter.writeBudget.bytes).toBeGreaterThan(500);
+    complete({ok:true});await Promise.all([...internal.artifactWriter.pendingWrites.values()]);
+    expect(internal.artifactWriter.writeBudget.bytes).toBe(0);expect(runtime.diagnostics.cacheWritePendingCount).toBe(0);
   } finally {complete?.({ok:true});runtime.release();write.mockRestore();}
 });
 
@@ -344,11 +344,11 @@ it('releases admitted write-slot waiters on project close without starting addit
   const write=vi.spyOn(cache,'writeDevArtifactDetailed').mockImplementation(()=>new Promise(resolve=>completions.push(resolve)));
   try {
     await Promise.all(Array.from({length:6},(_,i)=>internal.persistArtifact('catalog',String(i),{bounds:[0,0,0,1,1,1]})));
-    expect(write).toHaveBeenCalledTimes(4);expect(internal.writeWaiters).toHaveLength(2);
+    expect(write).toHaveBeenCalledTimes(4);expect(internal.artifactWriter.writeWaiters).toHaveLength(2);
     runtime.release();await vi.waitFor(()=>expect(runtime.diagnostics.cacheWriteCancelled).toBe(2));
-    expect(internal.writeWaiters).toHaveLength(0);expect(write).toHaveBeenCalledTimes(4);
-    completions.forEach(resolve=>resolve({ok:true}));await Promise.all([...internal.pendingWrites.values()]);
-    expect(internal.writeBudget.bytes).toBe(0);expect(internal.pendingWrites.size).toBe(0);
+    expect(internal.artifactWriter.writeWaiters).toHaveLength(0);expect(write).toHaveBeenCalledTimes(4);
+    completions.forEach(resolve=>resolve({ok:true}));await Promise.all([...internal.artifactWriter.pendingWrites.values()]);
+    expect(internal.artifactWriter.writeBudget.bytes).toBe(0);expect(internal.artifactWriter.pendingWrites.size).toBe(0);
   } finally {completions.forEach(resolve=>resolve({ok:true}));runtime.release();write.mockRestore();}
 });
 it('3326 processed includes 34 failures without reporting success or counting an existing coarse group twice', () => {
@@ -575,7 +575,7 @@ it('persists a non-selected L1 after eviction, a second cache miss and recompila
  }).map(([path,text])=>[path,new File([text],path)]));
  const result=await serializeDevToGlbDetailed('DEV/hot.dev',files,{lod:1});
  const {internal}=fixture(),key=internal.key('DEV/hot.dev',1);
- internal.cacheReader.read=vi.fn(async()=>({status:'miss',release:()=>{}}));
+ internal.templateStore.cacheReader.read=vi.fn(async()=>({status:'miss',release:()=>{}}));
  internal.catalogHint=vi.fn(async()=>({status:'miss'}));
  internal.prepareMissingTemplateSources=vi.fn(async()=>{});
  internal.worker={workerCount:1,cacheConcurrency:8,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn()};
@@ -583,14 +583,14 @@ it('persists a non-selected L1 after eviction, a second cache miss and recompila
  try{
   internal.wanted.add(key);
   const first=await internal.template('DEV/hot.dev',1,2);
-  expect(first).not.toBeNull();expect(internal.templateDemand.get(key)).toBe(1);
+  expect(first).not.toBeNull();expect(internal.templateStore.templateDemand.get(key)).toBe(1);
   expect(persist).not.toHaveBeenCalled();
-  internal.templates.delete(key); // simulate the L1 memory eviction
+  internal.templateStore.templates.delete(key); // simulate the L1 memory eviction
   const second=await internal.template('DEV/hot.dev',1,2);
   expect(second).not.toBeNull();
-  expect(internal.cacheReader.read).toHaveBeenCalledTimes(2);
+  expect(internal.templateStore.cacheReader.read).toHaveBeenCalledTimes(2);
   expect(internal.worker.compile).toHaveBeenCalledTimes(2);
-  expect(internal.templateDemand.get(key)).toBe(2);
+  expect(internal.templateStore.templateDemand.get(key)).toBe(2);
   await vi.waitFor(()=>expect(persist).toHaveBeenCalledOnce());
   expect(persist.mock.calls[0][0]).toBe('templates');expect(persist.mock.calls[0][1]).toBe(key);
  }finally{persist.mockRestore();vi.unstubAllGlobals();}

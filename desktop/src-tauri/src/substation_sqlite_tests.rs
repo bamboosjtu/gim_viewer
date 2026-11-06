@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::time::Instant;
+use sha2::Digest;
 use super::*;
 
 /// Manual native registration probe. Each invocation is a fresh Rust process;
