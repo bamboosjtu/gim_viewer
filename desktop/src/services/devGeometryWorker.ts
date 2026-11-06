@@ -104,11 +104,11 @@ self.onmessage = async ({ data }) => {
       if (data.partition) {
         // The plan already discovered the whole DEV/PHM graph once. Part
         // workers reuse their exact edge slice instead of re-traversing it.
-        const partition = data.partition as { referencePaths: string[]; canonicalDevPath: string; discovered: import('./modGeometryDiscovery.js').DiscoveredGeometries };
+        const partition = data.partition as { referencePaths: string[]; canonicalDevPath: string; discovered: import('./modGeometryDiscovery.js').DiscoveredGeometries; allowSmallFallback?: boolean };
         result = await serializeDevToGlbDetailed(data.path, files, {
           parseXml: parse, discovery, lod: data.lod, timings: stages,
           canonicalDevPath: partition.canonicalDevPath, discovered: partition.discovered,
-          partition: { referencePaths: partition.referencePaths },
+          partition: { referencePaths: partition.referencePaths, allowSmallFallback: partition.allowSmallFallback },
         });
       } else {
         const analysis = await analyzeDevCompilation(data.path, files, { discovery });

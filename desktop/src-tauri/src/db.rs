@@ -30,7 +30,7 @@ pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 /// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
 ///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v17-source-occurrences";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v18-dev-wide-outline";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GeometryCacheManifestEntry {

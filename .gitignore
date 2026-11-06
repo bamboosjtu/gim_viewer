@@ -55,11 +55,10 @@ output/
 app/src-tauri/target/
 app/src-tauri/gen/android/.gradle/
 app/src-tauri/gen/android/**/build/
-app/src-tauri/gen/android/local.properties
-/crates/**/android/build/
-crates/**/target/
-app/test-results/
+app/src-tauri/gen/android/local.propertie
 app/playwright-report/
-
 app/src-tauri/gen/android/app/src/main/jniLibs/
 app/src-tauri/gen/android/.tauri/
+crates/**/android/build/
+crates/**/target/
+app/test-results/

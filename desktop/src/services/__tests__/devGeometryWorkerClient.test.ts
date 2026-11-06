@@ -100,6 +100,48 @@ it('disables split planning on a high-memory-pressure compile request',async()=>
     client.acknowledge('large');
   }finally{client.cancel();SplitWorker.instances=[];}
 });
+it.each(['body','all-small'] as const)('uses one DEV-wide outline decision for %s split results',async scenario=>{
+  vi.stubGlobal('Worker',SplitWorker);vi.stubGlobal('navigator',{hardwareConcurrency:4,deviceMemory:8});
+  const refs=['solid:0/phm:0/mod:0','solid:1/phm:0/mod:0'];
+  const plan={canonicalDevPath:'DEV/outlines.dev',modCount:2,stlCount:0,estimatedBytes:2,estimatedInstanceWork:2,
+    parts:refs.map((ref,i)=>({key:`solid:${i}`,referencePaths:[ref],modCount:1,stlCount:0,
+      estimatedBytes:1,estimatedInstanceWork:1,mods:[{referencePath:ref,modPath:`MOD/${i}.mod`,instanceKey:ref}],stls:[]}))};
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true),internal=client as any;
+  const pending=client.compile('DEV/outlines.dev',0,'outline-root',1);
+  const diagnostic=(status:'empty'|'complete')=>({status,discoveredModCount:1,discoveredStlCount:0,
+    renderableModCount:status==='complete'?1:0,renderableStlCount:0,emptySourceCount:0,
+    unsupportedSourceCount:0,partialSourceCount:0,unsupportedPrimitiveTypeCounts:{},omittedSmallParts:status==='empty'?1:0});
+  try{
+    const root=[...internal.active].find(([,row]:any)=>row.task.key==='outline-root') as [SplitWorker,any];
+    root[0].complete(root[0].sent.find(row=>row.key==='outline-root'),{status:'empty',bytes:null,plan,diagnostics:diagnostic('empty')});
+    for(let i=0;i<2;i++){
+      const active=[...internal.active].find(([,row]:any)=>row.task.parent==='outline-root'&&row.task.kind==='compile') as [SplitWorker,any];
+      const task=active[0].sent.find(row=>row.key===active[1].task.key);
+      const hasBody=scenario==='body'&&i===1;
+      active[0].complete(task,{status:hasBody?'complete':'empty',bytes:hasBody?new Uint8Array(2):null,
+        smallFallback:hasBody?undefined:{referencePath:refs[i],extent:i===0?20:40},diagnostics:diagnostic(hasBody?'complete':'empty')});
+      await Promise.resolve();await Promise.resolve();
+    }
+    if(scenario==='body'){
+      const merge=[...internal.active].find(([,row]:any)=>row.task.kind==='merge') as [SplitWorker,any];
+      expect(merge).toBeTruthy();expect(merge[0].sent.find(row=>row.key===merge[1].task.key).parts).toHaveLength(1);
+      expect(SplitWorker.instances.flatMap(worker=>worker.sent).some(task=>task.key==='outline-root::outline')).toBe(false);
+      merge[0].complete(merge[0].sent.find(row=>row.key===merge[1].task.key),
+        {status:'complete',bytes:new Uint8Array(3),sha256:'body-hash',diagnostics:diagnostic('complete')});
+    }else{
+      const outline=[...internal.active].find(([,row]:any)=>row.task.key==='outline-root::outline') as [SplitWorker,any];
+      expect(outline).toBeTruthy();
+      const task=outline[0].sent.find(row=>row.key==='outline-root::outline');
+      expect(task.partition).toMatchObject({referencePaths:[refs[1]],allowSmallFallback:true});
+      expect(SplitWorker.instances.flatMap(worker=>worker.sent).some(row=>row.kind==='merge')).toBe(false);
+      outline[0].complete(task,{status:'complete',bytes:new Uint8Array(3),sha256:'outline-hash',diagnostics:diagnostic('complete')});
+    }
+    const result=await pending;
+    expect(result.status).toBe('complete');expect(result.diagnostics.discoveredModCount).toBe(2);
+    expect(result.diagnostics.renderableModCount).toBe(1);
+    client.acknowledge('outline-root');
+  }finally{client.cancel();SplitWorker.instances=[];}
+});
 it('upgrades immutable sources in active workers and replacement initialization without restarting healthy tasks or accepting stale work', async () => {
   vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:4,deviceMemory:8});
   let current=true;
@@ -574,9 +616,11 @@ it('falls back once to the monolithic compiler when a split merge fails', async 
     deliver(parts[0].worker, parts[0].data, { status: 'complete', bytes: new Uint8Array([1]), diagnostics: splitDiagnostics(12) });
     deliver(parts[1].worker, parts[1].data, { status: 'complete', bytes: new Uint8Array([2]), diagnostics: splitDiagnostics(12) });
     await Promise.resolve(); await Promise.resolve();
+    expect(client.resultPressure.bytes).toBe(6); // 2 input bytes, 3x merge reservation
     const merge = sentTasks(data => data.kind === 'merge')[0];
     deliver(merge.worker, merge.data, undefined, 'merge exploded');
     await Promise.resolve(); await Promise.resolve();
+    expect(client.resultPressure.bytes).toBe(0);
     const fallback = sentTasks(data => data.kind === 'compile' && data.key.includes('::fallback'))[0];
     expect(fallback.data.noSplit).toBe(true);
     deliver(fallback.worker, fallback.data, { status: 'complete', bytes: new Uint8Array([7]), diagnostics: splitDiagnostics(24) });
@@ -584,5 +628,25 @@ it('falls back once to the monolithic compiler when a split merge fails', async 
     expect(result.bytes).toEqual(new Uint8Array([7]));
     expect(client.diagnostics).toMatchObject({ splitCompiles: 1, splitFallbacks: 1 });
     client.acknowledge('key');
+    expect(client.resultPressure.bytes).toBe(0);
   } finally { client.cancel(); }
+});
+it('releases held split buffers and cancels part workers on project disposal',async()=>{
+  vi.stubGlobal('Worker',ControlledWorker);vi.stubGlobal('navigator',{hardwareConcurrency:4,deviceMemory:8});
+  const client=new DevGeometryPreprocessor([],new Map(),()=>true);
+  const pending=client.compile('DEV/large.dev',0,'large',0);
+  const rejection=expect(pending).rejects.toThrow('project switched');
+  const first=sentTasks(data=>data.kind==='compile')[0];
+  deliver(first.worker,first.data,{status:'empty',bytes:null,diagnostics:splitDiagnostics(2),plan:{
+    canonicalDevPath:'DEV/large.dev',parts:[0,1].map(i=>({key:`solid:${i}`,referencePaths:[`solid:${i}/phm:0`],
+      modCount:1,stlCount:0,estimatedBytes:1,estimatedInstanceWork:1,mods:[],stls:[]})),
+    modCount:2,stlCount:0,estimatedBytes:2,estimatedInstanceWork:2,
+  }});
+  const part=sentTasks(data=>data.kind==='compile'&&data.key.includes('::part'))[0];
+  deliver(part.worker,part.data,{status:'complete',bytes:new Uint8Array(8),diagnostics:splitDiagnostics(1)});
+  await Promise.resolve();await Promise.resolve();
+  expect(client.resultPressure.bytes).toBe(8);
+  client.cancel(new Error('project switched'));await rejection;
+  expect(client.resultPressure.bytes).toBe(0);
+  expect(ControlledWorker.instances.every(worker=>worker.terminate.mock.calls.length>0)).toBe(true);
 });

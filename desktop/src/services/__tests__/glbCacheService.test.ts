@@ -199,6 +199,52 @@ it('outline serialization filters across MOD boundaries and retains one silhouet
   }
 });
 
+it.each([0,1] as const)('LOD%d split parts defer small silhouettes until the DEV result is known',async lod=>{
+  const rows:Record<string,string>={
+    'DEV/outline.dev':'SOLIDMODELS.NUM=2\nSOLIDMODEL0=a.phm\nSOLIDMODEL1=b.phm',
+    'PHM/a.phm':'SOLIDMODELS.NUM=2\nSOLIDMODEL0=small20.mod\nSOLIDMODEL1=small40.mod',
+    'PHM/b.phm':'SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.mod',
+    'MOD/small20.mod':'<Device><Entities><Entity ID="1"><Cuboid L="20" W="20" H="20"/></Entity></Entities></Device>',
+    'MOD/small40.mod':'<Device><Entities><Entity ID="1"><Cuboid L="40" W="40" H="40"/></Entity></Entities></Device>',
+    'MOD/body.mod':'<Device><Entities><Entity ID="1"><Cuboid L="200" W="100" H="100"/></Entity></Entities></Device>',
+  };
+  const files=new Map(Object.entries(rows).map(([path,text])=>[path,file(text,path)]));
+  const analysis=await analyzeDevCompilation('DEV/outline.dev',files);
+  const references=(phm:string)=>analysis.discovered.mods.filter(edge=>edge.phmPath.endsWith(phm)).map(edge=>edge.referencePath!);
+  const mono=await serializeDevToGlbDetailed('DEV/outline.dev',files,{lod,discovered:analysis.discovered});
+  const small=await serializeDevToGlbDetailed('DEV/outline.dev',files,{lod,discovered:analysis.discovered,partition:{referencePaths:references('a.phm')}});
+  const body=await serializeDevToGlbDetailed('DEV/outline.dev',files,{lod,discovered:analysis.discovered,partition:{referencePaths:references('b.phm')}});
+  expect(small.bytes).toBeNull();expect(small.smallFallback?.extent).toBeGreaterThan(0);
+  expect(body.bytes).not.toBeNull();
+  const merged=await mergeDevGlbParts('DEV/outline.dev',[body.bytes!]);
+  const vertices=async(bytes:Uint8Array)=>{
+    const asset=await parseDevGlbAsset('DEV/outline.dev',bytes),points:string[]=[];
+    asset!.scene.updateMatrixWorld(true);
+    asset!.scene.traverse(object=>{
+      const mesh=object as THREE.Mesh,attr=mesh.geometry?.getAttribute?.('position');
+      if(!mesh.isMesh||!attr)return;
+      for(let i=0;i<attr.count;i++)points.push(new THREE.Vector3().fromBufferAttribute(attr,i).applyMatrix4(mesh.matrixWorld)
+        .toArray().map(n=>Math.round(n*10000)).join(','));
+    });
+    return points.sort();
+  };
+  expect(await vertices(merged)).toEqual(await vertices(mono.bytes!));
+  expect(mono.diagnostics.renderableModCount).toBe(1);
+  // Now every part is small: exactly the largest source occurrence survives.
+  rows['MOD/body.mod']='<Device><Entities><Entity ID="1"><Cuboid L="50" W="50" H="50"/></Entity></Entities></Device>';
+  files.set('MOD/body.mod',file(rows['MOD/body.mod'],'body.mod'));
+  const allSmall=await serializeDevToGlbDetailed('DEV/outline.dev',files,{lod,discovered:analysis.discovered});
+  const partA=await serializeDevToGlbDetailed('DEV/outline.dev',files,{lod,discovered:analysis.discovered,partition:{referencePaths:references('a.phm')}});
+  const partB=await serializeDevToGlbDetailed('DEV/outline.dev',files,{lod,discovered:analysis.discovered,partition:{referencePaths:references('b.phm')}});
+  expect(partA.bytes).toBeNull();expect(partB.bytes).toBeNull();
+  expect(partB.smallFallback!.extent).toBeGreaterThan(partA.smallFallback!.extent);
+  const recovered=await serializeDevToGlbDetailed('DEV/outline.dev',files,{lod,discovered:analysis.discovered,
+    partition:{referencePaths:[partB.smallFallback!.referencePath],allowSmallFallback:true}});
+  expect(recovered.bytes).not.toBeNull();
+  expect(await vertices(recovered.bytes!)).toEqual(await vertices(allSmall.bytes!));
+  expect(allSmall.diagnostics.renderableModCount).toBe(1);
+});
+
 it('splits a large DEV by real assembly subtrees, compiles parts and merges one template', async () => {
   const rows: [string, string][] = [
     ['DEV/huge.dev', 'SOLIDMODELS.NUM=4\nSOLIDMODEL0=a.phm\nSOLIDMODEL1=b.phm\nSOLIDMODEL2=c.phm\nSOLIDMODEL3=d.phm'],
@@ -242,7 +288,7 @@ it('keeps a small DEV on the single-template compiler path', async () => {
 it('subdivides a dominant PHM and counts repeated MOD occurrences separately from unique source bytes',()=>{
   const paths=['a','b','c','d'];
   const discovered:DiscoveredGeometries={mods:paths.flatMap((part,g)=>Array.from({length:g===0?1000:10},(_,i)=>({
-    modPath:`MOD/${part}.mod`,referencePath:`solid:${g}/phm:0/mod:${i}`,instanceKey:`${part}:${i}`,
+    modPath:`MOD/${part}.mod`,referencePath:`solid:${g}/phm:${i}`,instanceKey:`${part}:${i}`,
   } as DiscoveredModGeometry))),stls:[]};
   const files=new Map(paths.map(part=>[`MOD/${part}.mod`,file(' '.repeat(128*1024),`${part}.mod`)]));
   const plan=buildDevCompilePlan(discovered,files);
@@ -251,7 +297,7 @@ it('subdivides a dominant PHM and counts repeated MOD occurrences separately fro
   expect(Math.max(...plan!.parts.map(part=>part.estimatedInstanceWork))).toBeLessThan(plan!.estimatedInstanceWork*0.6);
   expect(plan!.parts.flatMap(part=>part.referencePaths).sort()).toEqual(discovered.mods.map(edge=>edge.referencePath!).sort());
   const repeated:DiscoveredGeometries={mods:Array.from({length:1000},(_,i)=>({
-    modPath:'MOD/reused.mod',referencePath:`solid:0/phm:0/mod:${i}`,instanceKey:`repeat:${i}`,
+    modPath:'MOD/reused.mod',referencePath:`solid:0/phm:${i}`,instanceKey:`repeat:${i}`,
   } as DiscoveredModGeometry)),stls:[]};
   const shared=buildDevCompilePlan(repeated,new Map([['MOD/reused.mod',file(' '.repeat(128*1024),'reused.mod')]]));
   expect(shared).not.toBeNull();expect(shared!.estimatedBytes).toBe(128*1024);
@@ -263,12 +309,15 @@ const DEV_SPLIT_MIN_BYTES_FOR_TEST=6*1024*1024;
 
 it('matches monolithic and split+merge world geometry across nested PHM, repeated MOD, STL, empty and unsupported leaves',async()=>{
   const move=(x:number,y:number,z:number)=>`1,0,0,0,0,1,0,0,0,0,1,0,${x},${y},${z},1`;
+  const rotateScale=new THREE.Matrix4().compose(new THREE.Vector3(0,2000,0),
+    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),Math.PI/2),
+    new THREE.Vector3(-1,1.5,0.75)).toArray().join(',');
   const stl=new ArrayBuffer(134),stlView=new DataView(stl);
   stlView.setUint32(80,1,true);
   [[0,0,0],[1000,0,0],[0,1000,0]].forEach((point,i)=>point.forEach((value,j)=>stlView.setFloat32(96+i*12+j*4,value,true)));
   const content=new Map<string,File>([
     ['DEV/complex.dev',file(`SOLIDMODELS.NUM=2\nSOLIDMODEL0=a.phm\nTRANSFORMMATRIX0=${move(1000,0,0)}\nSOLIDMODEL1=b.phm`,'complex.dev')],
-    ['PHM/a.phm',file(`SOLIDMODELS.NUM=1\nSOLIDMODEL0=nested.phm\nTRANSFORMMATRIX0=${move(0,2000,0)}`,'a.phm')],
+    ['PHM/a.phm',file(`SOLIDMODELS.NUM=1\nSOLIDMODEL0=nested.phm\nTRANSFORMMATRIX0=${rotateScale}`,'a.phm')],
     ['PHM/nested.phm',file(`SOLIDMODELS.NUM=2\nSOLIDMODEL0=reused.mod\nTRANSFORMMATRIX0=${move(0,0,0)}\nSOLIDMODEL1=reused.mod\nTRANSFORMMATRIX1=${move(2000,0,0)}`,'nested.phm')],
     ['PHM/b.phm',file(`SOLIDMODELS.NUM=3\nSOLIDMODEL0=piece.stl\nCOLOR0=220,30,40,255\nTRANSFORMMATRIX0=${move(0,0,1000)}\nSOLIDMODEL1=empty.mod\nSOLIDMODEL2=unknown.mod`,'b.phm')],
     ['MOD/reused.mod',file('<Device><Entities><Entity ID="1" Visible="true"><Cuboid L="1000" W="500" H="700"/></Entity></Entities></Device>','reused.mod')],
@@ -303,12 +352,23 @@ it('matches monolithic and split+merge world geometry across nested PHM, repeate
       meshCount++;
       const geometry=mesh.geometry,position=geometry.getAttribute('position'),index=geometry.getIndex();
       const material=mesh.material as THREE.MeshStandardMaterial;
-      const color=`${material.color?.getHexString()??'none'}:${Math.round((material.opacity??1)*1000)}`;
+      const color=[material.type,material.color?.getHexString()??'none',material.emissive?.getHexString()??'none',
+        material.side,material.transparent,material.depthWrite,
+        Math.round((material.opacity??1)*1000),Math.round((material.metalness??0)*1000),
+        Math.round((material.roughness??0)*1000)].join(':');
       const count=index?.count??position.count;
       for(let i=0;i+2<count;i+=3){
-        const vertex=[0,1,2].map(offset=>new THREE.Vector3().fromBufferAttribute(position,index?.getX(i+offset)??i+offset)
-          .applyMatrix4(mesh.matrixWorld).toArray().map(n=>Math.round(n*10000)).join(','));
-        triangles.push(`${color}:${vertex.sort().join('|')}`);
+        const normal=geometry.getAttribute('normal'),normalMatrix=new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
+        const vertex=[0,1,2].map(offset=>{
+          const at=index?.getX(i+offset)??i+offset;
+          const point=new THREE.Vector3().fromBufferAttribute(position,at).applyMatrix4(mesh.matrixWorld)
+            .toArray().map(n=>Math.round(n*10000)).join(',');
+          const n=normal?new THREE.Vector3().fromBufferAttribute(normal,at).applyMatrix3(normalMatrix).normalize()
+            .toArray().map(value=>Math.round(value*1000)).join(','):'none';
+          return `${point}/${n}`;
+        });
+        const cyclic=[vertex.join('|'),[vertex[1],vertex[2],vertex[0]].join('|'),[vertex[2],vertex[0],vertex[1]].join('|')].sort()[0];
+        triangles.push(`${color}:${cyclic}`);
       }
       materials.set(color,(materials.get(color)??0)+Math.floor(count/3));
     });

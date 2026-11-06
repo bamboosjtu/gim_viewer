@@ -20,7 +20,7 @@ interface Slot { id: number; traceId: string; key: string; path: string; kind: '
   promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void;
   /** Assembly-subtree child of a split template. */
   parent?: string;
-  partition?: { referencePaths: readonly string[]; canonicalDevPath: string; discovered: DiscoveredGeometries; maxBytes: number };
+  partition?: { referencePaths: readonly string[]; canonicalDevPath: string; discovered: DiscoveredGeometries; maxBytes: number; allowSmallFallback?: boolean };
   /** A merge fallback must use the monolithic compiler, never split again. */
   noSplit?: boolean;
   /** Parent-only state while real subtree parts are in flight. */
@@ -256,10 +256,36 @@ export class DevGeometryPreprocessor {
     split.completed++;
     if (split.completed < split.plan.parts.length){this.pump();return;}
     const results = split.results.filter((row): row is DevGlbSerializationResult => !!row);
-    const diagnostics = aggregateDevGlbDiagnostics(results);
+    const combinedParts=results.map(row=>!row.bytes&&row.smallFallback&&row.diagnostics.emptySourceCount===0
+      &&row.diagnostics.unsupportedSourceCount===0&&row.diagnostics.partialSourceCount===0
+      ? {...row,status:'complete' as const,diagnostics:{...row.diagnostics,status:'complete' as const}}:row);
+    const diagnostics = aggregateDevGlbDiagnostics(combinedParts);
     const parts = results.flatMap(row => row.bytes ? [row.bytes] : []);
     const totalBytes = parts.reduce((total, bytes) => total + bytes.byteLength, 0);
     if (!parts.length) {
+      if(this.memoryPressure==='high'||this.memoryPressure==='critical'){
+        this.fallbackSplit(parent,new Error('DEV split outline deferred under memory pressure'));return;
+      }
+      const candidates=results.flatMap(row=>row.smallFallback?[row.smallFallback]:[])
+        .sort((a,b)=>b.extent-a.extent||(a.referencePath<b.referencePath?-1:a.referencePath>b.referencePath?1:0));
+      if(candidates.length){
+        const candidate=candidates[0],edge=split.plan.parts.flatMap(part=>part.mods)
+          .find(mod=>(mod.referencePath||mod.instanceKey)===candidate.referencePath);
+        if(!edge){this.cancelTaskTree(parent,new Error('DEV split outline candidate lost its source occurrence'),false);return;}
+        this.releaseSplitBuffers(split);
+        const outline=this.createSlot('compile',parent.path,parent.lod,`${parent.key}::outline`,parent.priority,undefined,{
+          parent:parent.key,partition:{referencePaths:[candidate.referencePath],canonicalDevPath:split.plan.canonicalDevPath,
+            discovered:{mods:[edge],stls:[]},maxBytes:SPLIT_MERGE_INPUT_BUDGET,allowSmallFallback:true},
+        });
+        outline.promise.then(result=>{
+          const recovered={status:result.status,discoveredModCount:0,discoveredStlCount:0,
+            renderableModCount:result.diagnostics.renderableModCount,renderableStlCount:result.diagnostics.renderableStlCount,
+            emptySourceCount:0,unsupportedSourceCount:0,partialSourceCount:0,unsupportedPrimitiveTypeCounts:{}};
+          const summary=aggregateDevGlbDiagnostics([...combinedParts,{...result,diagnostics:recovered}]);
+          this.finishSplit(parent,{...result,status:summary.status,diagnostics:summary});
+        },error=>this.partFailed(parent,error));
+        this.pump();return;
+      }
       this.finishSplit(parent, { status: diagnostics.status, bytes: null, diagnostics });
       return;
     }

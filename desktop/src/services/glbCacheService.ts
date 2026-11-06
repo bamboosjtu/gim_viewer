@@ -75,6 +75,9 @@ export interface DevGlbSerializationResult {
   status: DevGlbSerializationStatus;
   bytes: Uint8Array | null;
   diagnostics: DevGlbSerializationDiagnostics;
+  /** A real omitted outline candidate. Split parts report it but never add
+   * their own silhouette; the DEV owner decides once after all parts finish. */
+  smallFallback?: { referencePath: string; extent: number };
   /** Present only when the compiler asks the pool to split a very large DEV.
    * Split parts are merged back into one template before caching. */
   plan?: DevGeometryCompilePlan;
@@ -320,7 +323,7 @@ export async function serializeDevToGlbDetailed(
     canonicalDevPath?: string;
     discovered?: DiscoveredGeometries;
     /** Compile one assembly-subtree part; exact occurrence reference paths. */
-    partition?: { referencePaths: readonly string[] };
+    partition?: { referencePaths: readonly string[]; allowSmallFallback?: boolean };
   } = {},
 ): Promise<DevGlbSerializationResult> {
   // A missing DEV is a cache failure, not a deterministic empty result. The
@@ -447,7 +450,8 @@ export async function serializeDevToGlbDetailed(
           diagnostics.approximatedBooleans[op] += xmlDiagnostics.approximatedBooleans?.[op] ?? 0;
         diagnostics.omittedSmallParts = (diagnostics.omittedSmallParts ?? 0) + (xmlDiagnostics.omittedSmallParts ?? 0);
         const extent = xmlDiagnostics.omittedMaxExtentMm ?? 0;
-        if (xmlDiagnostics.omittedSmallParts && (!smallFallback || extent > smallFallback.extent)) smallFallback = { geo, extent };
+        if (xmlDiagnostics.omittedSmallParts && (!smallFallback || extent > smallFallback.extent
+          || extent === smallFallback.extent && edgeReference(geo) < edgeReference(smallFallback.geo))) smallFallback = { geo, extent };
         diagnostics.omittedMaxExtentMm = Math.max(diagnostics.omittedMaxExtentMm ?? 0, extent);
         diagnostics.simplifiedBooleans = (diagnostics.simplifiedBooleans ?? 0) + (xmlDiagnostics.simplifiedBooleans ?? 0);
       }
@@ -509,7 +513,7 @@ export async function serializeDevToGlbDetailed(
 
   // All-small geometry is not a source-empty DEV. Retry only the largest
   // omitted source, keeping one real silhouette instead of hiding the device.
-  if (devGroup.children.length === 0 && smallFallback) {
+  if (devGroup.children.length === 0 && smallFallback && (!options.partition || options.partition.allowSmallFallback)) {
     const geo = smallFallback.geo;
     const group = await loadXmlModFromFiles(geo.modPath, files, geo.phmColor, geo.phmColorMaxA,
       { strict: true, parseXml: options.parseXml, lod: options.lod,
@@ -530,7 +534,8 @@ export async function serializeDevToGlbDetailed(
     diagnostics.reason = diagnostics.unsupportedSourceCount > 0
       ? 'parser-unsupported'
       : sawEmptyDeviceXml ? 'empty-device-xml' : (discovered.reason ?? 'assembly-node-without-own-geometry');
-    return { status: diagnostics.status, bytes: null, diagnostics };
+    return { status: diagnostics.status, bytes: null, diagnostics,
+      ...(smallFallback ? {smallFallback:{referencePath:edgeReference(smallFallback.geo),extent:smallFallback.extent}} : {}) };
   }
 
   diagnostics.status = diagnostics.unsupportedSourceCount > 0

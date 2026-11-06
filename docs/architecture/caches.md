@@ -20,7 +20,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 |---|---|---|---|
 | 线路语义 | `gim-line-parser-v1` | [db.rs](../../desktop/src-tauri/src/db.rs) | 源 SHA、完整事务、graph/属性 |
 | 变电语义 | `gim-substation-parser-v27` | [db.rs](../../desktop/src-tauri/src/db.rs) | 原始属性、CBM/DEV/IFC 引用、索引 receipt |
-| DEV 几何 | `geometry-cache-v17-source-occurrences` | [db.rs](../../desktop/src-tauri/src/db.rs)、[DEV 目录](../../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest、GLB 完整性 |
+| DEV 几何 | `geometry-cache-v18-dev-wide-outline` | [db.rs](../../desktop/src-tauri/src/db.rs)、[DEV 目录](../../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest、GLB 完整性 |
 | DEV LOD 派生 | 几何版本组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../../desktop/bridge/devLodCache.ts) | 源 SHA、DEV 路径、几何版本与 LOD；L0 持久化、仅热点 L1 选择性持久化、L2 默认内存；模板/目录逐条原子提交 |
 | 变电 Spatial | `substation-spatial-semantic-v6` | [Spatial 快照](../../desktop/src/services/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
 | IFC Spatial parser | `gim-substation-parser-v25` | [Spatial 快照](../../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
