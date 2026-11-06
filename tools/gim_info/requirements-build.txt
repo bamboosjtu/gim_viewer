@@ -1,0 +1,4 @@
+# Windows x64 / Python 3.12; QtCore, QtGui, QtWidgets are in Essentials.
+# gimbrowse.py / ptr_kinds.py only use the standard library.
+PyInstaller==6.22.3
+PySide6-Essentials==6.12.0

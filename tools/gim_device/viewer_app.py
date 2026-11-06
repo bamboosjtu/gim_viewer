@@ -20,12 +20,17 @@ os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS',
                       '--ignore-gpu-blocklist --enable-unsafe-swiftshader '
                       '--disable-features=TranslateUI,MediaRouter')
 
-from PySide6.QtCore import Qt, QUrl, QTimer, QThread, QSettings, QSize, QPoint
-from PySide6.QtGui import QAction, QKeySequence, QIcon, QGuiApplication, QPainter, QPixmap, QColor, QPen, QFont
-from PySide6.QtWidgets import (QApplication, QMainWindow, QFileDialog, QMessageBox,
-                               QWidget, QVBoxLayout, QLabel, QProgressBar, QFrame)
-from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
+try:
+    from PySide6.QtCore import Qt, QUrl, QTimer, QThread, QSettings, QSize, QPoint
+    from PySide6.QtGui import QAction, QKeySequence, QIcon, QGuiApplication, QPainter, QPixmap, QColor, QPen, QFont
+    from PySide6.QtWidgets import (QApplication, QMainWindow, QFileDialog, QMessageBox,
+                                   QWidget, QVBoxLayout, QLabel, QProgressBar, QFrame)
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
+except ImportError:
+    if '--self-check' in sys.argv:
+        sys.exit(1)  # A failed build check must not open a modal error dialog.
+    raise
 
 APP_NAME = 'GIM 设备三维查看器'
 APP_VER = '1.0'
@@ -107,7 +112,8 @@ class MainWindow(QMainWindow):
         self.resize(1480, 940)
         self.setAcceptDrops(True)
 
-        self.settings = QSettings('GIMViewer', 'Viewer')
+        self.settings = (QSettings(os.path.abspath('smoke-settings.ini'), QSettings.IniFormat)
+                         if '--smoke' in sys.argv else QSettings('GIMViewer', 'Viewer'))
         self.worker = None
         self.cur_path = None
         self.recent = self.settings.value('recent', []) or []
@@ -464,6 +470,8 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    if '--self-check' in sys.argv:
+        return  # Imports above exercise QtWebEngine and the parser.
     QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)

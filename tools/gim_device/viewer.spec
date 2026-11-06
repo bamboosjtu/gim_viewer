@@ -2,6 +2,7 @@
 """PyInstaller 打包配置 —— 单文件 exe，内嵌 QtWebEngine 与 three.js 渲染层"""
 from PyInstaller.utils.hooks import collect_all
 import os
+from pathlib import Path
 
 try:                                    # PyInstaller 注入 SPECPATH；直接 python 打开时回退
     HERE = SPECPATH
@@ -52,6 +53,11 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+# Qt uses the Windows native ICU API. A PATH copy from Poppler/Conda can
+# expose versioned entry points and break QtCore in the frozen executable.
+_ICU = {'icuuc.dll', 'icuin.dll', 'icudt.dll', 'icu.dll'}
+a.binaries = [entry for entry in a.binaries if Path(entry[0]).name.lower() not in _ICU]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

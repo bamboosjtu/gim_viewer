@@ -35,7 +35,8 @@ def make_page(gim_path):
         html = html.replace(f'<script src="{fn}"></script>',
                             f'<script>/* {fn} */\n{code}\n</script>')
 
-    payload = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+    # Model text must not terminate the script element in the generated page.
+    payload = json.dumps(data, ensure_ascii=False, separators=(',', ':')).replace('<', '\\u003c')
     html = html.replace('</body>', f'<script>window.loadModel({payload});</script></body>')
 
     out = os.path.join(work, 'render.html')
@@ -86,7 +87,7 @@ def main():
             v = v.strip()
             if not v:
                 continue
-            pg.evaluate(f"() => window.__api.view('{v}')")
+            pg.evaluate('(view) => window.__api.view(view)', v)
             pg.wait_for_timeout(700)
             name = f'_r_{out_base}_{v}.png'
             os.makedirs(OUTDIR, exist_ok=True)

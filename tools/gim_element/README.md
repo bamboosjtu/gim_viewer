@@ -1,8 +1,10 @@
-# GIM 实体盘点器
+# gim_element —— 简易实体识别工具
 
 把一座变电 GIM 工程（`.gim` 包或已解包目录）里的全部对象，盘成 **设备 / 装置性材料 / 构件 / 其他** 四本账，并给出目录编码、证据状态与来源文件。
 
-- 桌面版：`dist/GIM实体盘点器/GIM实体盘点器.exe`（PySide6 + PyInstaller onedir，免安装）
+统一构建参数、产物约定、安全边界及 Windows 排查见 [tools 总览](../README.md)。
+
+- 桌面版：`dist/GIM实体盘点器.exe`（PySide6 + PyInstaller 单文件，免安装）
 - 命令行：`python element_core.py <路径> --html/--json/--csv`
 - 分类标准：同目录 `01-分类与粒度总则.md`、`02-设备目录与组合边界.md`、`03-材料与构件目录.md`
 
@@ -12,7 +14,7 @@
 
 ## 1. 快速开始
 
-1. 双击 `dist/GIM实体盘点器/GIM实体盘点器.exe`。
+1. 双击 `dist/GIM实体盘点器.exe`（每次启动先把运行时解压到临时目录，数秒；系统缓存后再次启动更快）。
 2. `Ctrl+O` 选 `.gim` 文件或已解包目录（也可直接拖进窗口）。
 3. 右上树按 `组 → 类别 → 子类 → 名称模板` 展开；右下显示该分类下的名称实例（名称、轨道、状态、IFC 类型、来源文件）。
 4. 选中右下任一实例，**左侧属性面板**显示它的全部属性：实例（名称/轨道/状态/IFC 类型/来源文件）、归属（分组/编码/标准类别/子类/名称模板）、模板统计（两轨计数/合计/状态分布/主要来源）。
@@ -82,7 +84,7 @@ python element_core.py "D:/工程/xxx.gim" --html 报告.html --json 台账.json
 
 ## 6. 构建与自检
 
-Windows x64 使用 Python 3.12，项目依赖固定在 `requirements-build.txt`。QtCore、QtGui、QtWidgets 使用 PySide6-Essentials，不需要 WebEngine/Addons。打包 spec 位于 `_build/GIM实体盘点器.spec` 并随源码提交，公共目录 JSON 通过 spec 的 datas 一起打包。此 Qt 构建使用 Windows 原生 ICU API；spec 排除从 Poppler/Conda 等 PATH 环境误收集的同名 ICU DLL，避免打包后 QtCore 报“找不到指定的程序”。
+Windows x64 使用 Python 3.12，项目依赖固定在 `requirements-build.txt`。QtCore、QtGui、QtWidgets 使用 PySide6-Essentials，不需要 WebEngine/Addons。打包 spec 为工具根目录的 `element.spec` 并随源码提交，采用 PyInstaller 单文件（onefile）配置；公共目录 `catalog.json` 通过 spec 的 datas 打进 exe，运行时从 `sys._MEIPASS` 读取。此 Qt 构建使用 Windows 原生 ICU API；spec 排除从 Poppler/Conda 等 PATH 环境误收集的同名 ICU DLL，避免打包后 QtCore 报“找不到指定的程序”。
 
 从工具目录执行 PowerShell：
 
@@ -90,21 +92,21 @@ Windows x64 使用 Python 3.12，项目依赖固定在 `requirements-build.txt`�
 .\build.ps1
 ```
 
-脚本自动创建工具自己的 `.venv`、安装依赖，再通过该解释器的模块入口调用 PyInstaller，不依赖全局 `pyinstaller` 命令或 PATH。已安装项目环境时可使用 `.\build.ps1 -SkipInstall`。
+脚本通过 `../build-common.ps1` 创建工具自己的 `.venv`、安装依赖，再通过该解释器的模块入口调用 PyInstaller，不依赖全局 `pyinstaller` 命令或 PATH。已安装项目环境时可使用 `.\build.ps1 -SkipInstall`。
 
 等价的手动入口：
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
-.\.venv\Scripts\python.exe -m PyInstaller --clean -y --workpath ./_build --distpath ./dist _build/GIM实体盘点器.spec
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --workpath ./_build --distpath ./dist element.spec
 ```
 
-产物为 `dist/GIM实体盘点器/GIM实体盘点器.exe`，分发时保留整个目录，包括 `_internal` 中的 Qt 插件、Python 运行时和 catalog.json。
+产物为单个 `dist/GIM实体盘点器.exe`，可直接拷走，不再生成 `_internal` 目录。`build.ps1` 暂存旧产物，打包后检查 `dist` 中只有一个 exe，通过 `verify_package.py` 确认归档内嵌 `catalog.json`、没有误收集的 ICU DLL，再实际运行 `--self-check`；全部成功后删除旧产物，失败时保留备份。
 
 冒烟测试可从独立输出目录运行源程序或打包 EXE 的 `--smoke <gim或解包目录> <png>`。无显示测试设置 `QT_QPA_PLATFORM=offscreen`；成功生成截图并退出，失败以非零状态退出且不弹解析错误对话框。测试偏好写入当前目录的 smoke-settings.ini，不改用户正式偏好；截图旁写入 `.png.json` 回执。
 
-运行 `.\.venv\Scripts\python.exe .\smoke_packaged.py` 可用自动生成的 GIM/7z 夹具验证冻结 EXE、共享目录、Qt 平台插件、四类盘点和中性点附件口径。
+运行 `.\.venv\Scripts\python.exe .\smoke_packaged.py` 可用自动生成的 GIM/7z 夹具验证冻结 EXE、内嵌 `catalog.json`（按归档内容比对 SHA-256）、Qt 平台插件、四类盘点和中性点附件口径。
 
 ## 7. 已知边界
 

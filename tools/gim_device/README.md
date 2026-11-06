@@ -1,7 +1,7 @@
-# gim_device —— GIM 设备三维查看器
+# gim_device —— 设备 GIM 简易查看器
 
-把任意变电设备 `.gim` 解析成三维模型并交互浏览的完整源码，可打包为单文件 exe。
-日常教学/汇报直接用 `GIM设备查看器.exe`，改代码看本目录。
+把设备 `.gim` 解析成三维模型并交互浏览，可打包为单文件 exe。
+统一构建参数、产物约定、安全边界及 Windows 排查见 [tools 总览](../README.md)。
 
 ---
 
@@ -21,7 +21,6 @@ gim_device/
 ├── tools/
 │   ├── test_render.py      无头浏览器回归测试（不开 GUI 快速验证任意 gim）
 │   └── survey_prim.py      图元普查：抽样统计规范库的 primitive 类型分布
-├── _probe_bbox.py          装配调试：按 z 分层统计网格数，定位「某段没有几何」
 └── _probe_bbox.py          装配调试：按 z 分层统计网格数，定位「某段没有几何」
 ```
 
@@ -33,11 +32,10 @@ gim_device/
 
 线框源码的棱边阈值为 1°：保留圆柱/圆台侧面的纵向棱线，同时排除共面三角剖分对角线；细线和屏幕空间粗线使用同一阈值。不能用 24° 的锐边阈值代替完整分段线框，否则圆柱侧面会被滤掉，只剩端部圆环。修改源码后需重新打包，已有 dist 中的 exe 不会自动更新。
 
-双击根目录的 `GIM设备查看器.exe`（日常入口，工程根一层就能看到），或 `dist/GIM设备查看器.exe`（PyInstaller 产物位），把 `.gim` 拖进窗口，或 `Ctrl+O` 选择文件。
+双击 `dist/GIM设备查看器.exe`，把 `.gim` 拖进窗口，或 `Ctrl+O` 选择文件。
 首次启动约 5–10 秒（单文件 exe 需先解压到临时目录），之后秒开。
 
-> 根目录那份与 `dist/` 里的**是同一个文件的两份拷贝**，都保留：前者图方便，后者是打包标准输出位。
-> `build.ps1` 打包完成后会自动同步根目录，不需要手动复制。
+构建只保留 `dist/` 下的单文件产物，不再向工具根目录复制第二份 EXE。可直接拷走该文件。
 
 菜单里可导出三维视图 PNG（`Ctrl+S`，按画布 2 倍分辨率，不含界面）。
 
@@ -60,13 +58,15 @@ GIM_SMOKE_MODE=edge python viewer_app.py --smoke a.gim out.png   # 自检线框�
 .\build.ps1
 ```
 
-脚本会创建工具自己的 `.venv`、安装 `requirements-build.txt` 中的完整 PySide6（含 QtWebEngine）、PyInstaller 和 py7zr，并调用 `viewer.spec`：
+脚本通过 `../build-common.ps1` 创建工具自己的 `.venv`、安装 `requirements-build.txt` 中的完整 PySide6（含 QtWebEngine）、PyInstaller 和 py7zr，并调用 `viewer.spec`。打包后实际运行 `--self-check` 验证启动，成功后清理旧产物：
 
 ```powershell
 .\build.ps1 -SkipInstall   # 已安装项目环境时
 ```
 
 不要复用 `gim_element` 的 `.venv`：它使用 PySide6-Essentials，不包含本查看器需要的 QtWebEngine。
+
+`viewer.spec` 排除 PATH 中误收集的无版本 ICU DLL，使用 Windows 原生 ICU，避免冻结版 QtCore 的 DLL 入口不匹配。
 
 等价手动入口：
 

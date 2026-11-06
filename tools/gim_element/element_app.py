@@ -737,6 +737,8 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    if '--self-check' in sys.argv:
+        return  # Imports above exercise Qt, the parser and the bundled catalog.
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setWindowIcon(app_icon())

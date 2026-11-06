@@ -1,0 +1,55 @@
+# gim_info —— GIM 文件信息阅读器
+# 源码、算法文档与打包配置入库；构建产物、自检截图、本地导出不入库。
+
+# ---- 打包产物（onefile 单 exe + 可选发布 zip，可用 README「打包与发布」/ build.ps1 重建）----
+dist/
+build/
+_build/
+*.exe
+
+# ---- 界面自检 / 回归截图（--guitest、冒烟脚本输出，随时可重建）----
+_*.png
+_screenshots/
+
+# ---- 本地导出（引用链清单 CSV、BTV 分轨 JSON）----
+*_链清单.csv
+链清单*.csv
+导出_*.csv
+导出_*.json
+btv_dev.json
+btv_ifc.json
+btv_fused.json
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 临时文件 ----
+*.tmp
+_tmp/
+*.bak
+
+# ---- IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 日志 ----
+*.log
+
+# 注：本地解包的 GIM 样本目录（如 s01/、line04/）由使用者自行命名，
+#     若放在本目录内，请按实际目录名在下方追加忽略规则。

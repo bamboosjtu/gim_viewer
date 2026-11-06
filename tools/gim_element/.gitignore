@@ -1,9 +1,7 @@
-# ---- 打包产物（onedir，可用 README §6 的命令重建）----
+# ---- 打包产物（单文件 exe，可用 README §6 的命令重建）----
 dist/
 build/
-_build/*
-# 打包配置本身要入库，其余 _build 内容（分析缓存、warn 文件、冒烟截图）不入库
-!_build/GIM实体盘点器.spec
+_build/
 
 # ---- Python ----
 __pycache__/

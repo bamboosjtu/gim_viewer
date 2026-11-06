@@ -1152,18 +1152,24 @@ function select(mesh){
 }
 
 /* ---------- 列表 / 详情 ---------- */
+function escapeHtml(value){
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[ch]);
+}
+
 function renderDetail(e){
   const a = e.attrs || {};
   const rows = Object.keys(a).map(k =>
-    `<div class="kv"><span class="k">${k}</span><span class="v">${String(a[k]).slice(0,60)}</span></div>`).join('');
+    `<div class="kv"><span class="k">${escapeHtml(k)}</span><span class="v">${escapeHtml(String(a[k]).slice(0,60))}</span></div>`).join('');
   const m = e.m ? `<div class="kv"><span class="k">局部矩阵</span><span class="v">${e.m.slice(12,15).map(v=>v.toFixed(1)).join(', ')}</span></div>` : '';
   const wm = e.wm ? `<div class="kv"><span class="k">装配后就位</span><span class="v">${e.wm.slice(12,15).map(v=>v.toFixed(1)).join(', ')}</span></div>` : '';
   document.getElementById('detail').innerHTML = `
-    <div class="hd"><span class="id">#${e.id}</span><span class="fam">${e.type}</span></div>
+    <div class="hd"><span class="id">#${escapeHtml(e.id)}</span><span class="fam">${escapeHtml(e.type)}</span></div>
     ${e.hidden ? '<div class="kv"><span class="k" style="color:#b5701f">可见性</span><span class="v" style="color:#b5701f">Visible=false</span></div>' : ''}
-    ${e.color ? `<div class="kv"><span class="k">颜色</span><span class="v">rgb(${e.color.slice(0,3).join(',')})</span></div>` : ''}
-    ${e.part ? `<div class="kv"><span class="k">所属零件</span><span class="v">${e.part}</span></div>` : ''}
-    <div class="kv"><span class="k">所属 mod</span><span class="v">${(e.mod||'').slice(0,16)}</span></div>
+    ${e.color ? `<div class="kv"><span class="k">颜色</span><span class="v">rgb(${escapeHtml(e.color.slice(0,3).join(','))})</span></div>` : ''}
+    ${e.part ? `<div class="kv"><span class="k">所属零件</span><span class="v">${escapeHtml(e.part)}</span></div>` : ''}
+    <div class="kv"><span class="k">所属 mod</span><span class="v">${escapeHtml((e.mod||'').slice(0,16))}</span></div>
     ${m}${wm}
     ${rows}
   `;
@@ -1206,16 +1212,16 @@ function buildList(){
   const order = [...byKey.entries()].sort((a,b) => b[1].length - a[1].length);
   let html = '';
   for (const [t, arr] of order){
-    html += `<div class="grp">${t} · ${arr.length}</div>`;
+    html += `<div class="grp">${escapeHtml(t)} · ${arr.length}</div>`;
     const cap = Math.min(arr.length, 60);
     for (let i=0;i<cap;i++){
       const e = arr[i];
       const sub = listMode === 'part' ? e.type : (e.part || e.type);
-      html += `<div class="item${e.hidden?' hid':''}" data-id="${e.id}" data-type="${e.type}">
+      html += `<div class="item${e.hidden?' hid':''}" data-id="${escapeHtml(e.id)}" data-type="${escapeHtml(e.type)}">
         <span class="sw" style="background:${typeColor(e.type || '(空)')}"></span>
-        <span class="id">#${e.oid != null ? e.oid : e.id}</span>
-        <span class="nm">${attrSummary(e)}</span>
-        <span class="pt">${sub}</span>
+        <span class="id">#${escapeHtml(e.oid != null ? e.oid : e.id)}</span>
+        <span class="nm">${escapeHtml(attrSummary(e))}</span>
+        <span class="pt">${escapeHtml(sub)}</span>
       </div>`;
     }
     if (arr.length > cap)
@@ -1358,8 +1364,8 @@ window.loadModel = function(json){
   // 类型分布（可点击筛选）
   const types = Object.entries(m.types || {}).sort((a,b)=>b[1]-a[1]);
   document.getElementById('typelist').innerHTML = types.map(([t,n]) =>
-    `<div class="trow" data-t="${t}"><span class="sw" style="background:${typeColor(t)}"></span>
-      <span class="nm">${t}</span><span class="ct">${n}</span></div>`).join('') ||
+    `<div class="trow" data-t="${escapeHtml(t)}"><span class="sw" style="background:${typeColor(t)}"></span>
+      <span class="nm">${escapeHtml(t)}</span><span class="ct">${n}</span></div>`).join('') ||
     '<div class="trow"><span class="nm">无</span></div>';
   document.querySelectorAll('.trow').forEach(el => {
     el.onclick = () => {
