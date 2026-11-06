@@ -84,20 +84,19 @@ jobs:
         run: |
           python tools/tests/smoke_tool.py --tool $env:TOOL --out $env:TOOL_OUT 2>&1 | Tee-Object "$env:TOOL_OUT/smoke.log"
           if ($LASTEXITCODE -ne 0) { throw 'Frozen tool smoke failed' }
-      - name: Upload tested onefile ZIP
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload tested onefile EXE
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.tool }}-windows-x64-${{ github.sha }}
-          path: tools/${{ matrix.tool }}/dist/*.zip
+          path: tools/${{ matrix.tool }}/dist/*.exe
+          archive: false
+          overwrite: true
           retention-days: 7
-          compression-level: 0
           if-no-files-found: error
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.tool }}-evidence-${{ github.sha }}
+          name: ${{ matrix.tool }}-evidence-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: output/tools-ci/${{ matrix.tool }}/
           retention-days: 7
           if-no-files-found: warn

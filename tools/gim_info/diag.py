@@ -2,7 +2,7 @@
 """diag —— 诊断日志（写入 %TEMP%/gim_reader.log，无控制台模式也可排查）。"""
 import os, time, tempfile
 
-LOG_PATH = os.path.join(tempfile.gettempdir(), 'gim_reader.log')
+LOG_PATH = os.environ.get('GIM_READER_LOG_PATH') or os.path.join(tempfile.gettempdir(), 'gim_reader.log')
 
 def _log(msg):
     try:

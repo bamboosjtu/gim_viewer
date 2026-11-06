@@ -68,7 +68,7 @@
 | `gim_info` | 唯一/显式路径、多义候选、不自动选择、反向引用、重复引用边；冻结版检查链树、跳转/返回、XML/文本视图和截图 |
 | `build-safety` | 共享构建脚本的路径边界、目录联接拒绝及失败时保留旧产物 |
 
-全部夹具由 [fixtures.py](tests/fixtures.py) 生成，不依赖未入库的 `demo/` 样本。每次上传测试日志、截图和 JSON 回执，手动触发成功后额外上传各工具的单文件 ZIP，保留 7 天。回执同时记录被测试 EXE 的 SHA-256，并验证 ZIP 内只有该 EXE 且字节一致。
+全部夹具由 [fixtures.py](tests/fixtures.py) 生成，不依赖未入库的 `demo/` 样本。push、pull request 和手动运行在各工具校验成功后直接上传单文件 EXE（`archive: false`），产物名称就是 `GIM设备查看器.exe`、`GIM实体盘点器.exe`、`GIM信息阅读器.exe`。测试日志、截图和 JSON 回执另存于带 `evidence` 和运行 attempt 标记的产物，均保留 7 天。重新运行会更新同名 EXE，保留各 attempt 的独立证据。回执同时记录被测试 EXE 的 SHA-256，并验证本地 ZIP 内只有该 EXE 且字节一致。
 
 设备冻结冒烟在 Windows 原生图形平台上创建屏幕外、不抢焦点的测试窗口，以保留 WebEngine 所需的暴露事件；普通 Qt Widgets 测试使用 `offscreen`。冒烟设置、日志和截图放在指定输出目录，临时目录使用正常的用户/runner TEMP。没有渲染结果、没有回执、错误退出或超时都会使作业失败。
 

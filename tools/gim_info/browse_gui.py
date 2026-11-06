@@ -1140,6 +1140,7 @@ def run_browser(init_dir=None, selftest=False):
                 print('BROWSE-OK %s' % msg, flush=True)
             except Exception:
                 _log('自检异常:\n' + traceback.format_exc())
+                receipt['ok'] = False
                 receipt['error'] = traceback.format_exc()
                 print('BROWSE-FAIL', flush=True)
             import json

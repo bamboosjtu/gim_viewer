@@ -131,6 +131,8 @@ python gim_reader.py --guitest <目录>      # 界面自检：跳转/返回/自�
 python gim_reader.py --legacy <目录>       # 旧界面（实体四本账 / 融合树），仅源码运行
 ```
 
+自动化入口显式将 stdout/stderr 设为 UTF-8，兼容英文 Windows 及冻结解释器忽略 `PYTHONUTF8` 的情况。`--smoke`、`--guitest`、`--self-check` 的异常返回非零状态并记录日志，避免弹出冻结版错误对话框而阻塞 CI。CI 将本轮运行日志写入证据目录的 `info-runtime.log`；普通运行仍使用 `%TEMP%/gim_reader.log`。
+
 `--smoke` 输出示例（s01）：
 
 ```

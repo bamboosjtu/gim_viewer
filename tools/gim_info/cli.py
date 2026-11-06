@@ -8,7 +8,9 @@
 """
 import sys
 import time
+import traceback
 
+from diag import _log
 from gimbrowse import Index
 from ptr_kinds import PTR_KINDS, KIND_ORDER, KIND_GROUP, KIND_NAME
 
@@ -48,7 +50,20 @@ def smoke(d):
     print('总用时 %.1fs' % (time.time() - t0))
 
 
-def main():
+def configure_stdio():
+    """Frozen Python may ignore PYTHONUTF8 and inherit a cp1252 pipe."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, 'reconfigure', None)
+        if reconfigure:
+            try:
+                reconfigure(encoding='utf-8', errors='backslashreplace')
+            except (OSError, ValueError):
+                # Embedded/captured streams may already be closed or fixed.
+                # Dispatch still reports any subsequent failure below.
+                pass
+
+
+def _dispatch():
     if '--self-check' in sys.argv:
         from PySide6 import QtWidgets
         return
@@ -62,6 +77,26 @@ def main():
         return
     from browse_gui import run_browser
     return run_browser(args[0] if args else None, selftest='--guitest' in sys.argv)
+
+
+def main():
+    configure_stdio()
+    automated = any(flag in sys.argv for flag in ('--smoke', '--guitest', '--self-check'))
+    if not automated:
+        return _dispatch()
+    try:
+        return _dispatch()
+    except Exception:
+        # An unhandled exception in a windowed onefile EXE opens a modal
+        # PyInstaller error dialog. Automation must instead exit nonzero.
+        detail = traceback.format_exc()
+        _log(detail)
+        try:
+            if sys.stderr is not None:
+                print(detail, file=sys.stderr, flush=True)
+        except (OSError, ValueError):
+            pass  # A missing/closed windowed stream must not open another error dialog.
+        return 1
 
 
 if __name__ == '__main__':

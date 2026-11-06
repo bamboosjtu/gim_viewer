@@ -90,6 +90,10 @@ def main():
             # WebEngine uses a native surface outside the screen; suppressing
             # the QPA surface would prevent the actual WebGL smoke contract.
             env['QT_QPA_PLATFORM'] = 'windows'
+    if args.tool == 'gim_info':
+        runtime_log = out / 'info-runtime.log'
+        runtime_log.write_text('', encoding='utf-8')
+        env['GIM_READER_LOG_PATH'] = str(runtime_log)
     run_owned([str(exe), '--self-check'], out, env, timeout=60)
     if args.tool == 'gim_element':
         run_owned([os.sys.executable, str(ROOT / 'tools/gim_element/smoke_packaged.py'), '--out', str(out)], out, env)
