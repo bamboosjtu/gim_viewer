@@ -754,11 +754,6 @@ pub fn run() {
             db::validate_gim_cache,
             db::get_db_path,
             db::get_latest_project_cache_diagnostic,
-            db::write_fragment_cache_file_binary,
-            db::read_fragment_cache_file,
-            db::upsert_fragment_cache_record,
-            db::validate_fragment_cache,
-            db::delete_fragment_cache_record,
             db::get_line_gim_graph,
             db::save_line_graph_begin,
             db::save_line_attrs_chunk,
@@ -775,4 +770,16 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+fn workspace_test_temp() -> std::path::PathBuf {
+    let root=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/tests/native");
+    std::fs::create_dir_all(&root).expect("workspace test directory must be writable");root
+}
+
+/// Acceptance executables embed a workspace-only data root; production keeps Tauri's normal location.
+pub(crate) fn application_data_dir(app:&tauri::AppHandle)->Result<PathBuf,String> {
+    if let Some(root)=option_env!("GIM_ACCEPTANCE_DATA_ROOT") {return Ok(PathBuf::from(root));}
+    app.path().app_data_dir().map_err(|error|error.to_string())
 }

@@ -1,3 +1,4 @@
+import { parseFamPhysicalRecords } from '../../../packages/powerline-core/src/famRecords.js';
 import { isGimEmptyValue } from './gimValueSemantics.js';
 
 /**
@@ -28,6 +29,7 @@ export interface FamSourceProperty {
   label: string;
   rawValue: string;
   rawLine: string;
+  segments?: readonly string[];
 }
 
 /** A candidate business identity is source evidence, never a synthesized code. */
@@ -55,13 +57,10 @@ export function parseFamSectionsWithDiagnostics(
   sections.set(cur, map);
   let malformedLineCount = 0;
   let propertyCount = 0;
-  for (const [lineIndex, raw] of text.split(/\r?\n/).entries()) {
-    const line = raw.replace(/^\uFEFF/, '').trim();
-    if (!line) continue;
-    const m = line.match(/^\[(.+)\]$/);
-    if (m) { cur = m[1]; map = sections.get(cur) ?? new Map(); sections.set(cur, map); continue; }
-
-    const parts = line.split('=');
+  for (const record of parseFamPhysicalRecords(text)) {
+    const {rawLine:raw,sourceLine,segments:parts,section}=record;
+    cur=section;map=sections.get(cur)??new Map();sections.set(cur,map);
+    if (record.kind === 'section') continue;
     if (parts.length < 2) { malformedLineCount++; continue; }
     const value = parts[parts.length - 1].trim();
     const key = parts
@@ -72,7 +71,7 @@ export function parseFamSectionsWithDiagnostics(
     // 通过样本/诊断统计发现 malformed，而不是制造空字符串 Map key。
     if (key === undefined) { malformedLineCount++; continue; }
     const keys = parts.slice(0, -1).map((part) => part.trim()).filter((part) => !isGimEmptyValue(part));
-    properties.push({ sourceLine: lineIndex + 1, sourcePath, section: cur, label: key, rawKey: keys[keys.length - 1], rawValue: value, rawLine: raw });
+    properties.push({ sourceLine, segments: parts, sourcePath, section: cur, label: key, rawKey: keys[keys.length - 1], rawValue: value, rawLine: raw });
     // Derived single-value view: last physical row wins, including empty values.
     map.set(key, value);
     propertyCount++;

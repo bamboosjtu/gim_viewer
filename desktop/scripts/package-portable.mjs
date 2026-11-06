@@ -100,6 +100,7 @@ async function main() {
   rmSync(`${outputZip}.sha256`, { force: true });
   mkdirSync(outputDir, { recursive: true });
   cpSync(sourceExe, join(outputDir, 'GIM-Reader.exe'));
+  cpSync(join(projectRoot, '..', 'LICENSE'), join(outputDir, 'LICENSE'));
   cpSync(sourceRuntime, join(outputDir, 'webview2-fixed-runtime'), { recursive: true });
 
   const runtimeStats = walkStats(join(outputDir, 'webview2-fixed-runtime'));

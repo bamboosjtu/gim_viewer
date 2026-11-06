@@ -1,3 +1,6 @@
+import type { DevDocument } from './geometry/ir.js';
+import { getFileEntryResolver } from './entryResolver.js';
+import { readGimText } from '../shared/textDecode.js';
 import type { CbmNode, IfcEntry } from './types.js';
 import { resolveIfcModelId } from './modelIdentity.js';
 import { stripIfcExtension } from './modelIdentity.js';
@@ -97,21 +100,7 @@ function isDeviceLayer(entityName: string): boolean {
   return entityName === 'F4System' || entityName === 'PARTINDEX' || entityName === 'DEV_SUBDEVICE' || entityName.toLowerCase() === 'device';
 }
 
-/** 解析 DEV 文件获取 SYMBOLNAME 和 TYPE（失败返回空值） */
-async function readDevInfo(
-  devPath: string,
-  files: Map<string, File>,
-): Promise<{ symbolName: string; type: string } | null> {
-  const normalized = normalizeDevReference(devPath);
-  const devFile = getFileByPath(files, normalized);
-  if (!devFile) return null;
-  try {
-    const doc = parseDev(await devFile.text(), normalized);
-    return { symbolName: doc.symbolName || '', type: doc.type || '' };
-  } catch {
-    return null;
-  }
-}
+type DevDocumentReader = (path: string) => Promise<DevDocument | null>;
 
 /**
  * 为 F3System 节点生成区分性后缀（方案 B：F4 子节点信息反推）。
@@ -173,21 +162,32 @@ function enhanceF3Name(baseName: string, children: CbmNode[]): string {
 
 /** 从文件集合递归构建 CBM 层级树（含 DEV SYMBOLNAME 回填与 SUBDEVICES 展开） */
 export async function buildCbmTree(files: Map<string, File>, projectTypeName?: string, equipmentEntry?: string): Promise<CbmNode | null> {
+  const resolve = getFileEntryResolver(files);
+  const reference = (ref: string, owner = ''): string => {
+    const path = resolve(ref, owner);
+    if (!path) console.warn('[CBM] 引用缺失或歧义', { ref, owner });
+    return path ?? '';
+  };
   const visited = new Set<string>();
   const fileByLowerPath = new Map<string, File>();
   for (const [path, file] of files) fileByLowerPath.set(path.replace(/\\/g, '/').toLowerCase(), file);
   const nodeBudget = { count: 0 };
-  // DEV 文件缓存（同一 DEV 可能被多个 CBM 节点引用，避免重复解析）
-  const devInfoCache = new Map<string, { symbolName: string; type: string } | null>();
-
-  async function readDevCached(devPath: string): Promise<{ symbolName: string; type: string } | null> {
-    const normalized = normalizeDevReference(devPath);
-    const cacheKey = normalized.toLowerCase();
-    if (devInfoCache.has(cacheKey)) return devInfoCache.get(cacheKey)!;
-    const info = await readDevInfo(devPath, files);
-    devInfoCache.set(cacheKey, info);
-    return info;
-  }
+  // A DEV source may occur under many CBMs/assemblies. Share the in-flight
+  // read/parse as well as the completed document for this tree build only.
+  const devDocuments = new Map<string, Promise<DevDocument | null>>();
+  const readDevDocument: DevDocumentReader = path => {
+    const key = path.replace(/\\/g, '/').toLowerCase();
+    let pending = devDocuments.get(key);
+    if (!pending) {
+      pending = (async () => {
+        const file = getFileByPath(files, path);
+        if (!file) return null;
+        try { return parseDev(await readGimText(file), path); } catch { return null; }
+      })();
+      devDocuments.set(key, pending);
+    }
+    return pending;
+  };
 
   async function build(p: string, depth = 0): Promise<CbmNode | null> {
     if (depth > PARSER_LIMITS.maxRecursionDepth) {
@@ -203,7 +203,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     if (nodeBudget.count > PARSER_LIMITS.maxCbmNodes) {
       throw new Error(`CBM 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
     }
-    const kv = parseKeyValue(await f.text());
+    const kv = parseKeyValue(await readGimText(f));
     const devEntry = p === equipmentEntry && /\.dev$/i.test(p);
     const en = devEntry ? 'Device' : normalizeEntityName(getFirstNonEmptyKv(kv, ['ENTITYNAME']));
     let { name, systemNames } = extractDisplayName(kv, p);
@@ -214,7 +214,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     let devSymbolName = '';
     let devType = '';
     if (devPath) {
-      const info = await readDevCached(devPath);
+      const info = await readDevDocument(reference(devPath,p) || normalizeDevReference(devPath));
       if (info) {
         devSymbolName = info.symbolName;
         devType = info.type;
@@ -235,10 +235,10 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     // Do not interpret classification codes as a standard discipline vocabulary.
     for (const ref of (systemNames.length === 0 || en === 'PARTINDEX') ? resolveBaseFamilyReferences(kv) : []) {
       const famPath = ref.path.replace(/\\/g, '/');
-      const famFile = getFileByPath(files, famPath.includes('/') ? famPath : `CBM/${famPath}`);
+      const famFile = getFileByPath(files, reference(famPath, p));
       if (!famFile) continue;
       let sections;
-      try { sections = parseFamSections(await famFile.text()); } catch { continue; }
+      try { sections = parseFamSections(await readGimText(famFile)); } catch { continue; }
       const values = [...sections.values()].flatMap((section) => [...section.entries()]);
       const readable = ['工程中名称', '系统名称', '设备名称', 'ShowName', 'LevelName', 'NAME', '名称'].map((key) =>
         values.find(([k, v]) => k.toUpperCase() === key.toUpperCase() && !isPlaceholderSystemName(v))?.[1]).find(Boolean);
@@ -257,7 +257,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
         while (true) {
           const index = next++;
           if (index >= refs.length) return;
-          results[index] = await build(`CBM/${refs[index]}`, depth + 1);
+          results[index] = await build(reference(refs[index], p), depth + 1);
         }
       });
       await Promise.all(workers);
@@ -267,7 +267,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     // 1. SUBSYSTEM 单值引用
     const sg = getFirstNonEmptyKv(kv, ['SUBSYSTEM']);
     if (sg) {
-      const c = await build(`CBM/${sg}`, depth + 1);
+      const c = await build(reference(sg, p), depth + 1);
       if (c) children.push(c);
     }
 
@@ -284,7 +284,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
       for (let i = 0; i < sn; i++) {
         const s = getFirstNonEmptyKv(kv, [`SUBSYSTEM${i}`]);
         if (s) {
-          const c = await build(`CBM/${s}`, depth + 1);
+          const c = await build(reference(s, p), depth + 1);
           if (c) children.push(c);
         }
       }
@@ -295,7 +295,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     for (let i = 0; i < dn2; i++) {
       const s = getFirstNonEmptyKv(kv, [`SUBDEVICE${i}`]);
       if (s) {
-        const c = await build(`CBM/${s}`, depth + 1);
+        const c = await build(reference(s, p), depth + 1);
         if (c) children.push(c);
       }
     }
@@ -303,7 +303,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     // 4. 方向 B：若此节点有 devPath，展开 DEV SUBDEVICES 块为虚拟子节点
     let devExpanded = false;
     if (devPath) {
-      const devChildren = await expandDevSubDevices(devPath, files, p, devInfoCache, undefined, depth + 1, nodeBudget);
+      const devChildren = await expandDevSubDevices(reference(devPath,p) || devPath, files, p, readDevDocument, undefined, depth + 1, nodeBudget);
       if (devChildren.length > 0) {
         children.push(...devChildren);
         devExpanded = true;
@@ -335,9 +335,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     };
   }
 
-  const entryPath = equipmentEntry ?? (files.has('CBM/project.cbm')
-    ? 'CBM/project.cbm'
-    : Array.from(files.keys()).find((path) => path.replace(/\\/g, '/').toLowerCase() === 'cbm/project.cbm'));
+  const entryPath = equipmentEntry ?? reference('project.cbm');
   if (!entryPath) return null;
   return build(entryPath);
 }
@@ -348,7 +346,7 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
  * @param devPath 当前节点的 OBJECTMODELPOINTER（DEV 文件名）
  * @param files GIM 解压文件集合
  * @param parentCbmPath 父 CBM 节点路径（用于生成虚拟子节点 path）
- * @param devInfoCache DEV 信息缓存（避免重复解析同一 DEV 文件）
+ * @param readDevDocument 当前树构建共享的 DEV 文档读取器
  * @param devVisited 循环引用防护
  * @returns 虚拟 CbmNode 列表
  */
@@ -356,7 +354,7 @@ async function expandDevSubDevices(
   devPath: string,
   files: Map<string, File>,
   parentCbmPath: string,
-  devInfoCache: Map<string, { symbolName: string; type: string } | null>,
+  readDevDocument: DevDocumentReader,
   devVisited?: Set<string>,
   depth = 0,
   nodeBudget: { count: number } = { count: 0 },
@@ -366,21 +364,13 @@ async function expandDevSubDevices(
   }
   if (!devVisited) devVisited = new Set<string>();
 
-  const normalizedDevPath = normalizeDevReference(devPath);
+  const normalizedDevPath = getFileEntryResolver(files)(devPath, parentCbmPath) ?? normalizeDevReference(devPath);
   const devVisitKey = normalizedDevPath.toLowerCase();
   if (devVisited.has(devVisitKey)) return [];
   devVisited.add(devVisitKey);
 
-  // 从缓存读取 DEV 文档（若已解析过）
-  const devFile = getFileByPath(files, normalizedDevPath);
-  if (!devFile) return [];
-
-  let devDoc;
-  try {
-    devDoc = parseDev(await devFile.text(), normalizedDevPath);
-  } catch {
-    return [];
-  }
+  const devDoc = await readDevDocument(normalizedDevPath);
+  if (!devDoc) return [];
 
   const children: CbmNode[] = [];
   for (let i = 0; i < devDoc.subDevices.length; i++) {
@@ -398,19 +388,7 @@ async function expandDevSubDevices(
     let childType = '';
     let grandChildren: CbmNode[] = [];
     try {
-      // 优先查缓存
-      const childCacheKey = normalizedChildDevPath.toLowerCase();
-      let childInfo = devInfoCache.get(childCacheKey);
-      if (childInfo === undefined) {
-        const childFile = getFileByPath(files, normalizedChildDevPath);
-        if (childFile) {
-          const childDoc = parseDev(await childFile.text(), normalizedChildDevPath);
-          childInfo = { symbolName: childDoc.symbolName || '', type: childDoc.type || '' };
-        } else {
-          childInfo = null;
-        }
-        devInfoCache.set(childCacheKey, childInfo);
-      }
+      const childInfo = await readDevDocument(normalizedChildDevPath);
       if (childInfo) {
         childSymbolName = childInfo.symbolName;
         childType = childInfo.type;
@@ -418,7 +396,7 @@ async function expandDevSubDevices(
       // 递归展开孙 SUBDEVICES。
       // 每个 sibling 需要独立 visited 分支；同一个 child DEV 可被多次实例化，
       // 但矩阵不同，不能因为同名 DEV 被前一个 sibling 访问过就跳过。
-      grandChildren = await expandDevSubDevices(childDevPath, files, virtualPath, devInfoCache, new Set(devVisited), depth + 1, nodeBudget);
+      grandChildren = await expandDevSubDevices(childDevPath, files, virtualPath, readDevDocument, new Set(devVisited), depth + 1, nodeBudget);
     } catch {
       // 子 DEV 解析失败，跳过
     }

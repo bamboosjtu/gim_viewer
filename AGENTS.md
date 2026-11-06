@@ -65,7 +65,7 @@ desktop/src/                    # 前端代码（桌面端专属）
 desktop/                      # 桌面端
 ├─ bridge/                     # Tauri IPC 桥接层（TS）
 └─ src-tauri/src/
-   ├─ db.rs                    SQLite 操作（线路/变电语义、几何、Fragments 独立版本）
+   ├─ db.rs                    SQLite 操作（线路/变电语义、几何独立版本）
    ├─ gim_extract.rs           原生解压（配额防压缩炸弹）
    ├─ gim_extract_command.rs   解压 Tauri 命令
    └─ lib.rs                   命令注册
@@ -116,8 +116,12 @@ cargo check --manifest-path src-tauri/Cargo.toml   # Rust 检查（desktop/ 内�
 
 ## 注意事项
 
+- 全包路径/引用索引必须按源文件 Map 共享复用；禁止在逐节点、逐 DEV/PHM、逐属性或逐几何请求中重新枚举整包建立索引。文件物化只替换值；路径键集合变更使用新 Map。修改相关流程必须通过全清单枚举次数回归：节点/查询数量增长不增加全包扫描次数，同一 DEV 在一次树构建中只读/解析一次，装配实例仍各自保留路径、矩阵与分支防环。`check:engineering-boundaries` 禁止绕过共享索引的直接 `createEntryResolver(files.keys())` 调用；测试断言扫描/读取次数，不使用绝对耗时阈值。
+- 测试必须使用工作区内的临时目录（统一位于 `.tmp/` 或 `desktop/.tmp-vitest/`），任何时候不允许将系统目录作为测试输入、输出、暂存或清理目标；不得回退到系统 TEMP/TMP。测试启动器及其子进程的 TEMP/TMP/TMPDIR 也必须指向工作区。
+- 本项目面向复杂工程模型，测试集及对照基线由开发者自行构建。`docs/performance.md` 只代表作者在所述环境、样本和构建上的测试结果；因样本知识产权限制，远程 CI 不运行真实或合成样本，也不复跑性能。CI 只运行不依赖工程样本的单元测试、静态检查和构建。
+- SQLite 物理 schema 在首次正式发布前统一为 v1；快速迭代不维护旧开发库的迁移和兼容分支。结构变更后由开发者删除旧数据库并重建，语义与几何派生缓存仍按各自契约失效。
 - `demo/` 目录包含大型二进制文件（.gim 及解压目录），已在 .gitignore 中排除；`npm run test:sample` 依赖 demo-substation 与 line02 解压目录
 - `desktop/public/worker-bundle.js`、`desktop/public/libarchive.wasm`、`desktop/public/wasm/web-ifc*.wasm`是运行时资产，由 scripts/copy-web-ifc-wasm.mjs 维护，需随项目提交
-- 修改持久化含义时只 bump 受影响域。当前缓存契约与权威源码只在[缓存域](docs/architecture/caches.md)维护；Fragments 键绑定实际安装依赖版本。
+- 修改持久化含义时只 bump 受影响域。当前缓存契约与权威源码只在[缓存域](docs/architecture/caches.md)维护；IFC LOD 键绑定实际安装依赖版本。
 - 长期文档只写当前状态，删除过程和历史版本。架构按主题维护在 `docs/architecture/`，入口是短[架构总览](docs/architecture.md)；工程实体/目录在 `docs/engineering/`，格式在 `docs/schema/`。未关闭缺陷统一维护在 [open-issues](docs/open-issues.md)，当前桌面能力见 [规格](docs/software-spec.md)。样本与格式研究、设备验收和外部业务候选不写入 open-issues。
 - 写入 docs/schema/ 的内容不得包含真实工程名与地理归属（匿名化约定）

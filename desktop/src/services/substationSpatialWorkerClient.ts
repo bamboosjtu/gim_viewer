@@ -1,3 +1,4 @@
+import { WorkerRequests } from './workerRequests.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
 import { buildSubstationSpatialIndexFromFiles, type SubstationSpatialIndex,
   type SubstationSpatialIndexObserver } from '../gim/ifcSpatialParser.js';
@@ -16,11 +17,12 @@ export async function buildSubstationSpatialIndexInWorker(
 ):Promise<SubstationSpatialIndex> {
   if(typeof Worker==='undefined') return buildSubstationSpatialIndexFromFiles(files,entries,tree,relations,observer);
   const worker=new Worker(new URL('./substationSpatialWorker.ts',import.meta.url),{type:'module'});
-  let pending:{resolve:(result?:SubstationSpatialIndex)=>void;reject:(error:Error)=>void}|undefined;
+  let sequence=0;
+  const requests=new WorkerRequests<SubstationSpatialIndex|undefined>(120_000,()=>cancel());
   let terminated=false;
   const cancel=()=>{
     terminated=true;worker.terminate();active.delete(cancel);
-    pending?.reject(new DOMException('Spatial parse belongs to an obsolete project','AbortError'));pending=undefined;
+    requests.rejectAll(new DOMException('Spatial parse belongs to an obsolete project','AbortError'));
   };
   active.add(cancel);
   worker.onmessage=(event:MessageEvent<SpatialWorkerResponse>)=>{
@@ -31,17 +33,14 @@ export async function buildSubstationSpatialIndexInWorker(
       const callback=observer[response.event] as ((profile:unknown)=>void)|undefined;
       callback?.(response.profile);return;
     }
-    const request=pending;pending=undefined;
-    if(response.type==='error')request?.reject(new Error(response.message));
-    else request?.resolve(response.type==='complete'?response.index:undefined);
+    requests.settle(sequence,response.type==='complete'?response.index:undefined,response.type==='error'?new Error(response.message):undefined);
   };
-  worker.onerror=event=>{pending?.reject(new Error(event.message||'Spatial worker failed'));pending=undefined;};
-  worker.onmessageerror=()=>{pending?.reject(new Error('Spatial worker returned unreadable data'));pending=undefined;};
-  const send=(request:SpatialWorkerRequest,transfer:Transferable[]=[])=>new Promise<SubstationSpatialIndex|undefined>((resolve,reject)=>{
-    if(terminated||!isCurrent()){reject(new DOMException('Spatial parse belongs to an obsolete project','AbortError'));return;}
-    pending={resolve,reject};
-    try {worker.postMessage(request,transfer);} catch(error){pending=undefined;reject(error instanceof Error?error:new Error(String(error)));}
-  });
+  worker.onerror=event=>{requests.rejectAll(new Error(event.message||'Spatial worker failed'));cancel();};
+  worker.onmessageerror=()=>{requests.rejectAll(new Error('Spatial worker returned unreadable data'));cancel();};
+  const send=(request:SpatialWorkerRequest,transfer:Transferable[]=[])=>{
+    if(terminated||!isCurrent())return Promise.reject(new DOMException('Spatial parse belongs to an obsolete project','AbortError'));
+    return requests.request(++sequence,()=>worker.postMessage(request,transfer));
+  };
   try {
     await send({type:'init',tree,relations});
     const canonical=(path:string)=>path.replace(/\\/g,'/').toLowerCase();

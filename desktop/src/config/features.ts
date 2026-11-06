@@ -1,54 +1,8 @@
-/**
- * 功能开关配置。
- *
- * Fragments 缓存目前为实验功能，默认关闭。
- * 关闭时 loadIfcEntry 完全走 ctx.ifcLoader.load 路径，不读/写 .frag 文件。
- */
-const ENABLE_FRAGMENTS_CACHE_BASE = false;
-
 /** Trial stays opt-in until native draw-call and interaction gates pass. */
 export const DEV_INSTANCE_BATCHES_DEBUG_KEY = 'gim-debug-dev-instancing';
 export function isDevInstanceBatchesEnabled(): boolean {
   try { return localStorage.getItem(DEV_INSTANCE_BATCHES_DEBUG_KEY) === '1'; }
   catch { return false; }
-}
-
-/** Fragments 缓存灰度开关的 localStorage 覆盖键（设为 '1' 开启实测） */
-export const FRAGMENTS_CACHE_DEBUG_KEY = 'gim-debug-fragments-cache';
-
-/** 缓存键基础版本（语义变更时手动 bump，配合依赖包版本自动失效） */
-export const FRAGMENTS_CACHE_KEY_VERSION = 'fragments-cache-v6';
-
-/**
- * Fragments 缓存是否启用（acc-plan P0-3 灰度开关）。
- *
- * 默认关闭；localStorage 设 FRAGMENTS_CACHE_DEBUG_KEY='1' 可临时开启，
- * 用于真机灰度实测，无需重新构建。
- */
-export function isFragmentsCacheEnabled(): boolean {
-  if (ENABLE_FRAGMENTS_CACHE_BASE) return true;
-  try {
-    // eslint-disable-next-line no-restricted-globals
-    return localStorage.getItem(FRAGMENTS_CACHE_DEBUG_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-/**
- * 组合 Fragments 缓存版本键：绑定 @thatopen/fragments 与 web-ifc 包版本。
- *
- * 任一依赖升级都会生成新的版本串 → 旧 .frag 缓存全部失效重建，
- * 避免「升级后加载旧格式缓存」导致的 Malformed tile 类错误。
- */
-/** 实际安装版本的缓存键（构建期注入，非 package.json 的 semver 范围） */
-export const FRAGMENTS_CACHE_COMPOSED_KEY = fragmentsCacheKey(
-  __FRAGMENTS_PKG_VERSION__,
-  __WEB_IFC_PKG_VERSION__,
-);
-
-export function fragmentsCacheKey(fragmentsVer: string, webIfcVer: string): string {
-  return `${FRAGMENTS_CACHE_KEY_VERSION}|fragments@${fragmentsVer}|web-ifc@${webIfcVer}`;
 }
 
 /**
@@ -183,9 +137,6 @@ export const SUBSTATION_EARLY_SEMANTIC_DEFAULT = false;
 
 /** Default BIM browsing representation; full remains an internal reference path. */
 export type IfcOpeningPolicy = 'full' | 'omit-rel-voids' | 'bim-lod';
-export function readIfcOpeningPolicy(): IfcOpeningPolicy {
-  return 'bim-lod';
-}
 export const IFC_DETAIL_MODE_KEY='gim-ifc-detail-mode';
 /** 近景 LOD1 的相机半径与中小开洞门槛（口径说明见 IFC 细节设置面板）。 */
 export const IFC_NEAR_DETAIL_RADIUS_M = 30;

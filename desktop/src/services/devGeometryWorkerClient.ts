@@ -143,7 +143,7 @@ export class DevGeometryPreprocessor {
   }
   private addWorker(count:number):void {
       const worker = new Worker(new URL('./devGeometryWorker.ts', import.meta.url), { type: 'module' });
-      worker.onmessage = ({ data }) => { void this.receive(worker, data); };
+      worker.onmessage = ({ data }) => { void this.receive(worker, data).catch(error => this.workerFailed(worker,error instanceof Error ? error : new Error(String(error)))); };
       worker.onerror = event => {event.preventDefault?.();this.workerFailed(worker,new Error(event.message || 'DEV geometry worker failed'));};
       worker.onmessageerror = () => this.workerFailed(worker,new Error('DEV geometry worker message could not be decoded'));
       // File/Blob is immutable and structured-clonable: share its backing store,

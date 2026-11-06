@@ -117,3 +117,7 @@ npm run tauri:dev
 - [性能测量](docs/performance.md)
 - [移动端状态](docs/mobile-spec.md)
 - [问题与限制](docs/open-issues.md)
+
+## 许可
+
+本项目源码采用 [MIT License](LICENSE)。随包第三方组件及其许可证见上方依赖清单与第三方许可文件；工程样本不属于本项目源码许可证的授权范围。

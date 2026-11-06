@@ -4,7 +4,6 @@ use rusqlite::{params, Connection};
 use std::fs as stdfs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::Manager;
 #[path = "db/geometry_cache.rs"]
 mod geometry_cache;
 pub use geometry_cache::*;
@@ -34,9 +33,6 @@ pub use semantic_pack::*;
 #[path = "db/cache_transport.rs"]
 mod cache_transport;
 pub use cache_transport::*;
-#[path = "db/fragments_cache.rs"]
-mod fragments_cache;
-pub use fragments_cache::*;
 #[path = "db/cache_validation.rs"]
 mod cache_validation;
 pub use cache_validation::*;
@@ -61,10 +57,8 @@ pub const PARSER_VERSION: &str = "gim-cache-schema-v1";
 
 pub const LINE_PARSER_VERSION: &str = "gim-line-parser-v1";
 
-pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v27";
+pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v28";
 
-/// Fragments keys supplied by the frontend bind the installed dependencies.
-pub const FRAGMENTS_CACHE_VERSION: &str = "fragments-cache-v6";
 
 /// GLB 几何缓存版本（方案 C：MOD/STL → glTF 序列化格式版本）
 /// 独立于 PARSER_VERSION，用于在 MOD 解析逻辑变更时单独失效 glb 缓存。
@@ -80,9 +74,7 @@ pub struct DbState(pub Mutex<Connection>);
 
 /// 获取数据库文件路径：app_data_dir/gim_cache_schema_v1.db
 fn db_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app_handle
-        .path()
-        .app_data_dir()
+    let dir = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
     stdfs::create_dir_all(&dir).map_err(|e| format!("创建应用数据目录失败: {}", e))?;
     Ok(dir.join("gim_cache_schema_v1.db"))

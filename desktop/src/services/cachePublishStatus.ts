@@ -1,3 +1,6 @@
+export interface PublicationView {phase: CachePublishPhase; text:string; detail:string;}
+let renderPublication:(view:PublicationView)=>void=()=>{};
+export function bindPublicationView(render:typeof renderPublication):void {renderPublication=render;}
 /**
  * 状态栏“索引发布”状态。
  *
@@ -8,14 +11,11 @@
  */
 export type CachePublishPhase = 'idle' | 'core' | 'rest' | 'ready' | 'failed';
 
+export function createCachePublishStatus(isCurrent: () => boolean) {
 let phase: CachePublishPhase = 'idle';
 let startedAt: number | null = null;
 let detail = '';
 let timer: ReturnType<typeof setInterval> | null = null;
-
-function element(): HTMLElement | null {
-  return document.getElementById('status-publish');
-}
 
 function elapsedSeconds(): string {
   if (startedAt == null) return '';
@@ -23,25 +23,13 @@ function elapsedSeconds(): string {
 }
 
 function render(): void {
-  const el = element();
-  if (!el) return;
+  if (!isCurrent()) { stopTimer(); return; }
   const active = phase === 'core' || phase === 'rest';
-  if (phase === 'idle') {
-    el.hidden = true;
-    el.textContent = '';
-    el.removeAttribute('title');
-    el.removeAttribute('data-phase');
-    return;
-  }
-  el.hidden = false;
-  el.dataset.phase = phase;
   const seconds = active ? elapsedSeconds() : '';
-  if (phase === 'core') el.textContent = `索引发布中 ${seconds}`.trim();
-  else if (phase === 'rest') el.textContent = `暖启动已就绪 · 属性补写中 ${seconds}`.trim();
-  else if (phase === 'ready') el.textContent = '索引已发布 · 暖启动可用';
-  else el.textContent = '索引发布未完成';
-  if (detail) el.title = detail;
-  else el.removeAttribute('title');
+  const text = phase === 'idle' ? '' : phase === 'core' ? `索引发布中 ${seconds}`.trim()
+    : phase === 'rest' ? `暖启动已就绪 · 属性补写中 ${seconds}`.trim()
+    : phase === 'ready' ? '索引已发布 · 暖启动可用' : '索引发布未完成';
+  renderPublication({phase,text,detail});
 }
 
 function stopTimer(): void {
@@ -57,7 +45,8 @@ function startTimer(): void {
 }
 
 /** 开始一次发布（core/rest 都会重置计时，便于观察该阶段耗时）。 */
-export function beginCachePublish(next: 'core' | 'rest', reason?: string): void {
+function beginCachePublish(next: 'core' | 'rest', reason?: string): void {
+  if (!isCurrent()) return;
   phase = next;
   startedAt = performance.now();
   detail = reason ?? '';
@@ -65,7 +54,8 @@ export function beginCachePublish(next: 'core' | 'rest', reason?: string): void 
   render();
 }
 
-export function setCachePublishPhase(next: CachePublishPhase, reason?: string): void {
+function setCachePublishPhase(next: CachePublishPhase, reason?: string): void {
+  if (!isCurrent()) return;
   phase = next;
   if (reason !== undefined) detail = reason;
   if (next === 'ready' || next === 'failed' || next === 'idle') {
@@ -76,14 +66,17 @@ export function setCachePublishPhase(next: CachePublishPhase, reason?: string): 
   render();
 }
 
-export function failCachePublish(reason: string): void {
+function failCachePublish(reason: string): void {
   setCachePublishPhase('failed', reason);
 }
 
-export function resetCachePublishStatus(): void {
+function resetCachePublishStatus(): void {
   stopTimer();
   phase = 'idle';
   startedAt = null;
   detail = '';
   render();
+}
+
+return { beginCachePublish, setCachePublishPhase, failCachePublish, resetCachePublishStatus };
 }

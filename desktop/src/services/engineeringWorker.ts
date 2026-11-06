@@ -1,3 +1,4 @@
+import { decodeGimText } from '../shared/textDecode.js';
 import { extractEngineeringSourceGraph, type EngineeringSourceGraph } from '../gim/engineering/sourceGraph.js';
 import { buildEngineeringSources, normalizeEngineeringSources } from '../gim/engineering/buildSources.js';
 import { decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheSizes } from './engineeringCacheCodec.js';
@@ -35,7 +36,7 @@ export function createEngineeringWorkerHandler(){
       graph=await extractEngineeringSourceGraph({paths,readText:async path=>{
         const source=files.get(path);if(!source)throw Error(`Engineering source unavailable: ${path}`);
         const bytes=source instanceof Uint8Array?source:await source.arrayBuffer();
-        try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{return new TextDecoder('gb18030',{fatal:true}).decode(bytes);}
+        return decodeGimText(bytes).text;
       }});files.clear();
       return {type:'graph',summary:{ifcPaths:graph.ifcPaths,sourceRecords:graph.records.length},geometryOccurrences:collectSourceGeometryOccurrences(graph)};
     }

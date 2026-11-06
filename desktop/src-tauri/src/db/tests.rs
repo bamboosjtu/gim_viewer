@@ -19,7 +19,7 @@ use std::os::windows::fs::MetadataExt;
     }
     #[test]
     fn atomic_cache_write_replaces_file_and_preserves_target_on_failed_replacement() {
-        let root = std::env::temp_dir().join(format!("gim-atomic-{}", std::process::id()));
+        let root = crate::workspace_test_temp().join(format!("gim-atomic-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let file = root.join("template.bin");
         std::fs::write(&file, b"previous").unwrap();
@@ -34,7 +34,7 @@ use std::os::windows::fs::MetadataExt;
     }
     #[test]
     fn validation_context_checks_exact_project_paths_and_both_root_spellings() {
-        let root = std::env::temp_dir().join(format!("gim-context-{}", std::process::id()));
+        let root = crate::workspace_test_temp().join(format!("gim-context-{}", std::process::id()));
         std::fs::create_dir_all(root.join("1/CBM")).unwrap();
         std::fs::create_dir_all(root.join("2/CBM")).unwrap();
         let file = root.join("1/CBM/model.ifc");
@@ -59,7 +59,7 @@ use std::os::windows::fs::MetadataExt;
 
     #[test]
     fn validation_context_rechecks_changed_directory_and_rejects_links() {
-        let root = std::env::temp_dir().join(format!("gim-context-links-{}", std::process::id()));
+        let root = crate::workspace_test_temp().join(format!("gim-context-links-{}", std::process::id()));
         std::fs::create_dir_all(root.join("1/CBM")).unwrap();
         std::fs::create_dir_all(root.join("outside")).unwrap();
         let file = root.join("1/CBM/model.ifc");
@@ -117,7 +117,7 @@ use std::os::windows::fs::MetadataExt;
 
     #[test]
     fn ifc_cache_path_accepts_trusted_lexical_and_canonical_root_names() {
-        let root = std::env::temp_dir().join(format!("gim-ifc-root-{}-{}", std::process::id(),
+        let root = crate::workspace_test_temp().join(format!("gim-ifc-root-{}-{}", std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         std::fs::create_dir_all(root.join("CBM")).unwrap();
         let file = root.join("CBM").join("模型.ifc");
@@ -394,30 +394,8 @@ use std::os::windows::fs::MetadataExt;
     use super::*;
 
     #[test]
-    fn fragment_cache_requires_exact_nonzero_file_size() {
-        assert!(fragment_file_size_matches(128, 128));
-        assert!(!fragment_file_size_matches(128, 127));
-        assert!(!fragment_file_size_matches(128, 0));
-        assert!(!fragment_file_size_matches(0, 128));
-        assert!(!fragment_file_size_matches(-1, 128));
-    }
-
-    #[test]
-    fn fragment_cache_diagnostic_accepts_composed_runtime_version() {
-        assert!(fragment_cache_version_matches(FRAGMENTS_CACHE_VERSION));
-        let composed = format!("{}|fragments@0.0.0|web-ifc@0.0.0", FRAGMENTS_CACHE_VERSION);
-        assert!(fragment_cache_version_matches(&composed));
-        assert!(!fragment_cache_version_matches(
-            "fragments-cache-v5|fragments@0.0.0"
-        ));
-        assert!(!fragment_cache_version_matches(
-            "fragments-cache-v60|fragments@0.0.0"
-        ));
-    }
-
-    #[test]
     fn substation_pack_round_trip_serves_offsets_and_sizes() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::workspace_test_temp().join(format!(
             "gim-viewer-substation-pack-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -448,7 +426,7 @@ use std::os::windows::fs::MetadataExt;
 
     #[test]
     fn line_semantic_pack_round_trip_is_contiguous_and_case_insensitive() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::workspace_test_temp().join(format!(
             "gim-viewer-semantic-pack-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -486,7 +464,7 @@ use std::os::windows::fs::MetadataExt;
 
     #[test]
     fn line_semantic_pack_v2_keeps_metadata_only_entries() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::workspace_test_temp().join(format!(
             "gim-viewer-semantic-pack-meta-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -520,7 +498,7 @@ use std::os::windows::fs::MetadataExt;
 
     #[test]
     fn line_semantic_pack_integrity_errors_are_classified_without_panic() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::workspace_test_temp().join(format!(
             "gim-viewer-semantic-pack-invalid-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -647,3 +625,48 @@ use std::os::windows::fs::MetadataExt;
             assert!(!error.is_empty());
         }
     }
+
+#[test]
+fn project_table_registry_matches_schema() {
+    let conn = Connection::open_in_memory().unwrap();
+    initialize_schema(&conn).unwrap();
+    let tables: Vec<String> = conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").unwrap()
+        .query_map([], |r| r.get(0)).unwrap().collect::<Result<_,_>>().unwrap();
+    let mut discovered = Vec::new();
+    for table in tables {
+        let names:Vec<String> = conn.prepare(&format!("PRAGMA table_info({table})")).unwrap()
+            .query_map([],|r|r.get(1)).unwrap().collect::<Result<_,_>>().unwrap();
+        if names.iter().any(|name|name=="project_id") { discovered.push(table); }
+    }
+    discovered.sort();
+    let mut registered:Vec<String> = PER_PROJECT_TABLES.iter().map(|s|s.to_string()).collect();registered.sort();
+    assert_eq!(discovered, registered);
+}
+
+#[test]
+fn project_reference_deletion_is_isolated() {
+    let conn=Connection::open_in_memory().unwrap();initialize_schema(&conn).unwrap();
+    for pid in [1,2] {
+        conn.execute("INSERT INTO substation_dev_solid_model VALUES(?1,'a.dev','b.phm',NULL,0,0)",[pid]).unwrap();
+        conn.execute("INSERT INTO substation_dev_sub_device VALUES(?1,'a.dev','b.dev',NULL,0,0)",[pid]).unwrap();
+        conn.execute("INSERT INTO substation_phm_solid_model VALUES(?1,'b.phm','c.mod',NULL,NULL,NULL,0,0)",[pid]).unwrap();
+    }
+    clear_project_tables(&conn,1).unwrap();
+    for table in ["substation_dev_solid_model","substation_dev_sub_device","substation_phm_solid_model"] {
+        assert_eq!(count_rows(&conn,table,1).unwrap(),0);assert_eq!(count_rows(&conn,table,2).unwrap(),1);
+    }
+}
+
+#[test]
+fn cache_validation_snapshot_does_not_block_or_accept_later_publication() {
+    let root=crate::workspace_test_temp().join(format!("gim-snapshot-{}",std::process::id()));std::fs::create_dir_all(&root).unwrap();
+    let path=root.join("cache.db");let conn=Connection::open(&path).unwrap();
+    conn.pragma_update(None,"journal_mode","WAL").unwrap();initialize_schema(&conn).unwrap();
+    conn.execute("INSERT INTO app_setting VALUES('probe','old',0)",[]).unwrap();
+    let snapshot=super::cache_validation::validation_snapshot(&conn).unwrap();
+    let revision:i64=conn.query_row("SELECT total_changes()",[],|r|r.get(0)).unwrap();
+    conn.execute("UPDATE app_setting SET value='new' WHERE key='probe'",[]).unwrap();
+    assert_ne!(revision,conn.query_row("SELECT total_changes()",[],|r|r.get::<_,i64>(0)).unwrap());
+    assert_eq!(snapshot.query_row("SELECT value FROM app_setting",[],|r|r.get::<_,String>(0)).unwrap(),"old");
+    drop(snapshot);drop(conn);std::fs::remove_dir_all(root).unwrap();
+}

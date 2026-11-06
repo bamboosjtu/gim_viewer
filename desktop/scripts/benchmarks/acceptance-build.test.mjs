@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {workspaceTemp as tmpdir} from '../test-workspace.mjs';
 import {join, resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {ACCEPTANCE_IDENTIFIER, verifyAcceptanceDatabasePath, sourceFingerprint} from './acceptance-build.mjs';

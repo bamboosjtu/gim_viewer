@@ -1,3 +1,5 @@
+import { GIM_LIMITS } from '../shared/gimLimits.js';
+import { decodeGimText } from '../shared/textDecode.js';
 let archiveInitialized = false;
 
 async function getArchive() {
@@ -14,16 +16,7 @@ const ARCHIVE_SIGNATURE_SEARCH_LIMIT = 1024 * 1024;
 const UTF8_ENCODER = new TextEncoder();
 
 /** 与 Rust 原生解压保持一致的前端防护上限。 */
-export const EXTRACTION_LIMITS = Object.freeze({
-  maxArchiveBytes: 2 * 1024 * 1024 * 1024,
-  maxEntries: 200_000,
-  maxFileBytes: 1024 * 1024 * 1024,
-  maxTotalUncompressedBytes: 8 * 1024 * 1024 * 1024,
-  /** 解压展开总量 / 压缩 payload 大小上限，防止高压缩比炸弹。 */
-  maxCompressionRatio: 1000,
-  maxPathBytes: 4096,
-  maxNestingDepth: 256,
-});
+export const EXTRACTION_LIMITS = GIM_LIMITS;
 
 /** GIM 头部解析结果 */
 export interface GimHeaderInfo {
@@ -113,7 +106,7 @@ export function extractGimHeader(buffer: ArrayBuffer): GimHeaderInfo | null {
       if (i > fieldStart) {
         const fieldBytes = headerBytes.slice(fieldStart, i);
         try {
-          fields.push(new TextDecoder('utf-8', { fatal: false }).decode(fieldBytes).trim());
+          fields.push(decodeGimText(fieldBytes).text.trim());
         } catch {
           fields.push('');
         }

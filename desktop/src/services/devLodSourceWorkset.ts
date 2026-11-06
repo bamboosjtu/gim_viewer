@@ -1,7 +1,7 @@
 /** Owns bounded immutable source prefetch and partial-cache source recovery for one session. */
 import { batchReadCachedFiles } from '@desktop/database.js';
 import { type DevArtifactRead } from '@desktop/devLodCache.js';
-import type { ProjectLoadSession } from '../app/state.js';
+import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { findFileByPath } from '../gim/fileLookup.js';
 import { hydrateSubstationGeometryGraph } from '../gim/geometry/substationSourceGraph.js';
 import { perfCurrentSession, perfMark } from '../utils/perfTimings.js';

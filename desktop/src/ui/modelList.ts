@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { modelListEl } from './dom.js';
 import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
@@ -33,7 +34,7 @@ export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: strin
   actions.className = 'actions';
   const removeBtn = document.createElement('button');
   removeBtn.className = 'icon-btn'; removeBtn.textContent = '×'; removeBtn.title = '移除模型';
-  removeBtn.addEventListener('click', () => { ctx.fragments.core.disposeModel(runtimeModelId); });
+  removeBtn.addEventListener('click', () => { void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(reportBackgroundError); });
 
   actions.appendChild(removeBtn);
   item.appendChild(checkbox); item.appendChild(name); item.appendChild(actions);

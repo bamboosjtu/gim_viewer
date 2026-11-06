@@ -1,10 +1,10 @@
-/** Stage a verified native acceptance package in the Windows temp directory.
+/** Stage a verified native acceptance package in the workspace temporary directory.
  * Directory-dependent startup is observed; its ACL cause is not established.
  * This copies only the verified package; it never edits ACLs or cache data. */
-import {cpSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
+import {cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {ACCEPTANCE_IDENTIFIER, directoryFingerprint, fileSha256, sourceFingerprint, windowsKnownFolder} from './acceptance-build.mjs';
+import {ACCEPTANCE_IDENTIFIER, directoryFingerprint, fileSha256, sourceFingerprint} from './acceptance-build.mjs';
 
 export async function stageAcceptanceBuild(manifestPath) {
   manifestPath = resolve(manifestPath);
@@ -17,7 +17,8 @@ export async function stageAcceptanceBuild(manifestPath) {
   const runtime = join(source, 'webview2-fixed-runtime');
   if (await fileSha256(executable) !== build.executableSha256
     || (await directoryFingerprint(runtime)).sha256 !== build.runtime.sha256) throw Error('Acceptance package hash mismatch');
-  const destination = mkdtempSync(join(windowsKnownFolder('LocalApplicationData'), 'Temp', 'gim-native-acceptance-'));
+  const temporary=join(root,'.tmp','native-acceptance-stage');mkdirSync(temporary,{recursive:true});
+  const destination = mkdtempSync(join(temporary,'package-'));
   cpSync(executable, join(destination, 'GIM-Reader.exe'));
   cpSync(runtime, join(destination, 'webview2-fixed-runtime'), {recursive: true});
   // Leave the original manifest byte-for-byte intact; the probe checks the

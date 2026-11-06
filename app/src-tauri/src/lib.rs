@@ -53,3 +53,9 @@ pub fn run() {
         }).invoke_handler(tauri::generate_handler![list_projects,prepare_project,cancel_import,discard_import,get_project_cache,read_text_entries,commit_project,read_source,read_project_header,delete_project,preview_cache,get_settings,save_settings])
         .run(tauri::generate_context!()).expect("无法启动线路 GIM 应用");
 }
+
+#[cfg(test)]
+fn workspace_test_temp() -> std::path::PathBuf {
+    let root=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/tests/native");
+    std::fs::create_dir_all(&root).expect("workspace test directory must be writable");root
+}

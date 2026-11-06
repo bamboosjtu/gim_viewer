@@ -4,7 +4,6 @@ use rusqlite::params;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
-use tauri::Manager;
 use super::cache_paths::{remove_cache_dir_if_safe};
 use super::projects::{ensure_project_exists};
 use super::{DbState, now_ms};
@@ -149,7 +148,7 @@ pub fn authorize_cached_gim_project(
 
 /// 删除指定项目的全部缓存（DB 记录 + 磁盘文件）
 ///
-/// 级联删除 13 张索引表 + gim_project 记录，并尝试删除磁盘缓存目录。
+/// 删除全部项目索引表 + gim_project 记录，并尝试删除磁盘缓存目录。
 /// 磁盘文件删除为 best-effort，失败不影响 DB 清理。
 #[tauri::command]
 pub fn delete_project_cache(
@@ -166,27 +165,7 @@ pub fn delete_project_cache(
         .transaction()
         .map_err(|e| format!("开启事务失败: {}", e))?;
 
-    // 级联删除所有索引表（变电 6 张 + 线路 6 张 + fragments 1 张）
-    for table in &[
-        "substation_gim_entry",
-        "substation_cbm_node",
-        "substation_ifc_model",
-        "substation_file_dev_entry",
-        "substation_fam_property",
-        "substation_dev_property",
-        "powerline_cbm_node",
-        "powerline_cbm_child",
-        "powerline_cbm_ref",
-        "powerline_file_stat",
-        "powerline_fam_property",
-        "powerline_dev_property",
-        "powerline_cache_session",
-        "substation_fragment_cache",
-    ] {
-        let sql = format!("DELETE FROM {} WHERE project_id = ?1", table);
-        tx.execute(&sql, params![project_id])
-            .map_err(|e| format!("清理 {} 失败: {}", table, e))?;
-    }
+    super::schema::clear_project_tables(&tx, project_id)?;
 
     // 删除项目记录
     let deleted = tx
@@ -200,9 +179,7 @@ pub fn delete_project_cache(
 
     // 尝试删除磁盘缓存目录（best-effort）
     let mut disk_messages: Vec<String> = Vec::new();
-    let app_dir = app_handle
-        .path()
-        .app_data_dir()
+    let app_dir = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取 app_data_dir 失败: {}", e))?;
 
     // IFC 缓存目录: app_data_dir/extracted/{project_id}/
@@ -212,16 +189,6 @@ pub fn delete_project_cache(
             Ok(true) => disk_messages.push("IFC 磁盘缓存已删除".to_string()),
             Ok(false) => {}
             Err(e) => disk_messages.push(format!("IFC 磁盘缓存删除失败（需后续手动清理）: {}", e)),
-        }
-    }
-
-    // Fragments 缓存目录: app_data_dir/fragments/{project_id}/
-    let frag_dir = app_dir.join("fragments").join(project_id.to_string());
-    if frag_dir.exists() {
-        match remove_cache_dir_if_safe(&frag_dir, " Fragments") {
-            Ok(true) => disk_messages.push("Fragments 磁盘缓存已删除".to_string()),
-            Ok(false) => {}
-            Err(e) => disk_messages.push(format!("Fragments 磁盘缓存删除失败: {}", e)),
         }
     }
 

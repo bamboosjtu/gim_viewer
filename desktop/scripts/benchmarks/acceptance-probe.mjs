@@ -3,7 +3,7 @@ import {createServer} from 'node:net';
 import {closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {ACCEPTANCE_IDENTIFIER, directoryFingerprint, fileSha256, sourceFingerprint, verifyAcceptanceDatabasePath, windowsKnownFolder} from './acceptance-build.mjs';
+import {ACCEPTANCE_IDENTIFIER, directoryFingerprint, fileSha256, sourceFingerprint, verifyAcceptanceDatabasePath} from './acceptance-build.mjs';
 
 export function classifyNativeStartup(log, exitCode) {
   const gpuLaunchErrorCodes = [...new Set([...log.matchAll(/GPU process launch failed: error_code=(\d+)/g)].map(match => Number(match[1])))];
@@ -77,9 +77,9 @@ export async function probeAcceptance(manifestPath, timeoutMs = 30000) {
   manifestPath = resolve(manifestPath);
   const build = JSON.parse(readFileSync(manifestPath, 'utf8')), folder = dirname(manifestPath);
   if (build.identifier !== ACCEPTANCE_IDENTIFIER || build.profile !== 'native-release-acceptance') throw Error('Not an acceptance build');
-  const expected = join(windowsKnownFolder('ApplicationData'), ACCEPTANCE_IDENTIFIER);
-  const local = join(windowsKnownFolder('LocalApplicationData'), ACCEPTANCE_IDENTIFIER);
-  if (resolve(build.expectedDataRoot).toLowerCase() !== expected.toLowerCase()) throw Error('Acceptance Known Folder differs from manifest');
+  const expected = join(root,'.tmp','native-acceptance-data',ACCEPTANCE_IDENTIFIER);
+  const local = expected;
+  if (resolve(build.expectedDataRoot).toLowerCase() !== expected.toLowerCase()) throw Error('Acceptance workspace data root differs from manifest');
   if (sourceFingerprint(root) !== build.sourceFingerprint) throw Error('Current source fingerprint differs from this build');
   const executable = join(folder, 'GIM-Reader.exe'), runtime = join(folder, 'webview2-fixed-runtime');
   if (await fileSha256(executable) !== build.executableSha256 || (await directoryFingerprint(runtime)).sha256 !== build.runtime.sha256) {
@@ -89,7 +89,7 @@ export async function probeAcceptance(manifestPath, timeoutMs = 30000) {
   mkdirSync(run, {recursive: true}); mkdirSync(expected, {recursive: true}); mkdirSync(local, {recursive: true});
   const profile = join(run, 'webview-profile'); mkdirSync(profile);
   const port = await unusedPort(), browserLog = join(run, 'webview-startup.log');
-  const env = {...process.env, WEBVIEW2_USER_DATA_FOLDER: profile, WEBVIEW2_BROWSER_EXECUTABLE_FOLDER: runtime,
+  const env = {...process.env, TEMP:profile,TMP:profile,TMPDIR:profile, WEBVIEW2_USER_DATA_FOLDER: profile, WEBVIEW2_BROWSER_EXECUTABLE_FOLDER: runtime,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1 --enable-logging --log-file="${browserLog}" --v=1`};
   const started = performance.now(), child = spawn(executable, [], {cwd: folder, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']});
   const output = {stdout: '', stderr: ''};

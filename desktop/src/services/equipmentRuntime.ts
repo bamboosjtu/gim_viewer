@@ -2,10 +2,10 @@ import type { GimRuntimeOpenContext } from './gimOpenCore.js';
 import { hideLoading, showLoading } from './gimOpenCore.js';
 import { findEquipmentEntry, prepareEquipmentFiles } from '../gim/equipmentModel.js';
 import { buildCbmTree, buildCbmNodeIndex } from '../gim/cbmParser.js';
-import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBar.js';
-import { setDeviceStatus, setIfcStatus } from '../ui/shell/statusBar.js';
-import { emptyTipEl } from '../ui/dom.js';
-import { buildAndRenderCbmTree } from '../ui/cbmTreeView.js';
+import { setProjectIdentity, refreshNavigatorTitle } from './presentation/shell_projectBar.js';
+import { setDeviceStatus, setIfcStatus } from './presentation/shell_statusBar.js';
+import { emptyTipEl } from './presentation/dom.js';
+import { buildAndRenderCbmTree } from './presentation/cbmTreeView.js';
 import { perfMarkProductMoment } from '../utils/perfTimings.js';
 import { isUsableAffineMatrix } from '../gim/geometry/affineMatrix.js';
 
@@ -15,6 +15,7 @@ export async function openEquipmentProject(context: GimRuntimeOpenContext): Prom
   const { state, session, showMessage } = context;
   const current = () => state.isCurrentSession(session);
   const source = await context.getExtracted();
+  if (source.status === 'cancelled') return;
   if (!current()) return;
   showLoading('正在解析设备模型...');
   const files = await prepareEquipmentFiles(source.files, current);

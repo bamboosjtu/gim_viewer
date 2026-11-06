@@ -1,3 +1,5 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { loadPresentation } from './presentationPort.js';
 import { perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 import { isSubstationSourceMaterializing, substationSourcePreparationMessage } from './substationExtractionJob.js';
 import { buildSubstationAliasIndex, deviceOccurrenceScope, type DeviceOccurrenceScope } from '../gim/substationEvidence.js';
@@ -14,7 +16,7 @@ import { getFileByPath, hasFileByPath } from '../gim/fileLookup.js';
 import { getGeometryDiagnostic, geometryDiagnosticSummary, diagnosticForFailure, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';
-import { setSelectionStatus } from '../ui/shell/statusBar.js';
+import { setSelectionStatus } from './presentation/shell_statusBar.js';
 import { beginSelectionStage } from './selectionTiming.js';
 import {
   attachDevGlbTemplatePool,
@@ -87,7 +89,7 @@ export async function clearSelectionHighlight(state: AppState, request: Selectio
 let navigationDependencies: ReturnType<typeof loadNavigationDependencies> | undefined;
 function loadNavigationDependencies() {
   return Promise.all([
-    import('../ui/cbmTreeView.js'),import('../ui/sldView.js'),import('../gim/stdSldIndex.js'),
+    loadPresentation('cbmTreeView'),loadPresentation('sldView'),import('../gim/stdSldIndex.js'),
   ]);
 }
 export async function syncSelectionNavigation(state: AppState, request: SelectionRequest): Promise<void> {
@@ -118,7 +120,7 @@ export async function handleSpatialSelection(
   request: SelectionRequest,
 ): Promise<void> {
   if (!state.isCurrentSelection(request)) return;
-  const {showSpatialNodePropertiesBasic,showIfcSpatialObjectPropertiesBasic,openPropsDrawerUI}=await import('../ui/propsDrawer.js');
+  const {showSpatialNodePropertiesBasic,showIfcSpatialObjectPropertiesBasic,openPropsDrawerUI}=await loadPresentation('propsDrawer');
   if (!state.isCurrentSelection(request)) return;
   openPropsDrawerUI();
   await Promise.all([
@@ -137,7 +139,7 @@ export async function handleNodeClick(
   const isSelected=() => state.isCurrentSelection(request);
   if (!isSessionCurrent()) return;
   const message=selectionMessage(state,request);
-  const {showNodePropertiesBasic,openPropsDrawerUI}=await import('../ui/propsDrawer.js');
+  const {showNodePropertiesBasic,openPropsDrawerUI}=await loadPresentation('propsDrawer');
   if (isSelected()) {
     state.selectionGeometry=describeNodeSelectionGeometry(state,node);
     openPropsDrawerUI();
@@ -192,16 +194,16 @@ export async function handleNodeClick(
       const {buildIfcNameIndex}=await import('../viewer/ifcNameIndex.js');
       await buildIfcNameIndex(ctx,state,{session});
       if (!isSessionCurrent()) return;
-      const {buildAndRenderCbmTree}=await import('../ui/cbmTreeView.js');
-      const {renderFileDevPanel}=await import('../ui/fileDevView.js');
+      const {buildAndRenderCbmTree}=await loadPresentation('cbmTreeView');
+      const {renderFileDevPanel}=await loadPresentation('fileDevView');
       // This callback handles future user clicks; it is scoped to the project,
       // not to the old selection which happened to refresh the names.
-      const click=(n:CbmNode) => { if (isSessionCurrent()) void handleNodeClick(state,n,showMessage); };
+      const click=(n:CbmNode) => { if (isSessionCurrent()) void Promise.resolve(handleNodeClick(state,n,showMessage)).catch(reportBackgroundError); };
       buildAndRenderCbmTree(state,click); renderFileDevPanel(state,click);
     }
     if (!isSelected()) return;
     const {highlightIfcFromNode}=await import('../viewer/highlight.js');
-    const {showNodeProperties,openPropsDrawer}=await import('../ui/propsDrawer.js');
+    const {showNodeProperties,openPropsDrawer}=await loadPresentation('propsDrawer');
     await highlightIfcFromNode(ctx,state,node,message,request);
     if (!isSelected()) return;
     state.selectionGeometry=refs.size>0 && state.highlightedItems
@@ -689,8 +691,8 @@ async function tryLoadDevGlbForNode(
   const existing = getLoadedDevOccurrenceKind(state,geometryNode.path);
   if (existing) return existing === 'glb';
 
-  const { createEntryResolver } = await import('../gim/entryResolver.js');
-  const devPath = createEntryResolver(state.currentFiles?.keys() ?? state.substationEntryPaths)(geometryNode.devPath, geometryNode.path);
+  const { createEntryResolver, getFileEntryResolver } = await import('../gim/entryResolver.js');
+  const devPath = (state.currentFiles ? getFileEntryResolver(state.currentFiles) : createEntryResolver(state.substationEntryPaths))(geometryNode.devPath, geometryNode.path);
   if (!devPath) return false;
 
   // 读取 DEV.glb

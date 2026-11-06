@@ -1,7 +1,8 @@
+import { scheduleHideLoading } from './gimOpenCore.js';
 import type { AppState } from '../app/state.js';
 import { ensureEngineReady, loadIfcBuffer } from '../viewer/ifcLoader.js';
 import { fitCameraToScene } from '../viewer/camera.js';
-import { emptyTipEl, fileInput, btnLoadLocal } from '../ui/dom.js';
+import { emptyTipEl, fileInput, btnLoadLocal } from './presentation/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { openIfcFilePaths } from '@desktop/fileDialog.js';
 import { showLoading, hideLoading } from './gimOpenCore.js';
@@ -53,12 +54,13 @@ export async function openIfcWithDialog(
       emptyTipEl.style.display = 'none';
       fitCameraToScene(runtime.ctx, state);
     } catch (err) {
+      if (!state.isCurrentSession(session)) return;
       console.error(err);
       showLoading(`IFC 加载失败: ${err instanceof Error ? err.message : String(err)}`);
-      setTimeout(hideLoading, 3000);
+      scheduleHideLoading(() => state.isCurrentSession(session), 3000);
     } finally {
       btnLoadLocal.disabled = false;
-      hideLoading();
+      if (state.isCurrentSession(session)) hideLoading();
     }
     return;
   }
@@ -98,13 +100,14 @@ export async function openIfcWithDialog(
         emptyTipEl.style.display = 'none';
         fitCameraToScene(runtime.ctx, state);
       } catch (err) {
-        console.error(err);
+        if (!state.isCurrentSession(session)) return;
+      console.error(err);
         showLoading(`IFC 加载失败: ${err instanceof Error ? err.message : String(err)}`);
-        setTimeout(hideLoading, 3000);
+        scheduleHideLoading(() => state.isCurrentSession(session), 3000);
       } finally {
         fileInput.value = '';
         btnLoadLocal.disabled = false;
-        hideLoading();
+        if (state.isCurrentSession(session)) hideLoading();
         resolve();
       }
     };

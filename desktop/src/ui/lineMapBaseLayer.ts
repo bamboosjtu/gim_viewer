@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /**
  * M4-A1/A2：MapLibre 底图层模块。
  *
@@ -345,7 +346,7 @@ export async function createMapLibreProbe(
       if (loadTimer) clearTimeout(loadTimer);
       reject(new Error(`MapLibre probe 初始化失败: ${formatMapEvent(e)}`));
     };
-    map.once('load', onLoad);
+    void Promise.resolve(map.once('load', onLoad)).catch(reportBackgroundError);
     // 在线 raster 模式：可能有多个 tile 错误，用 on 持续监听（计数 + 阈值）
     //   - load 前的 error：style/supplier 初始化失败
     //   - load 后的 error：瓦片请求失败（net::ERR_CONNECTION_CLOSED / 401 等）
@@ -356,7 +357,7 @@ export async function createMapLibreProbe(
       // 保存引用，destroy() 时显式 off（onLoad 不移除，需手动清理）
       onlineErrorHandler = onError;
     } else {
-      map.once('error', onError);
+      void Promise.resolve(map.once('error', onError)).catch(reportBackgroundError);
     }
     });
   } catch (error) {

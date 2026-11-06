@@ -5,7 +5,6 @@ use std::fs as stdfs;
 use std::path::{Component, Path, PathBuf};
 use std::io::Write;
 use std::time::Instant;
-use tauri::Manager;
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 use super::{now_ms};
@@ -179,9 +178,7 @@ pub(crate) fn create_cache_staging_dir(
     project_id: i64,
 ) -> Result<(PathBuf, PathBuf), String> {
     ensure_cache_project_id(project_id)?;
-    let base = app_handle
-        .path()
-        .app_data_dir()
+    let base = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?
         .join("extracted");
     if !base.exists() {
@@ -317,9 +314,7 @@ pub(crate) fn commit_cache_staging(
 ) -> Result<(), String> {
     ensure_cache_project_id(project_id)?;
     reject_link(staging_root, " staging")?;
-    let base = app_handle
-        .path()
-        .app_data_dir()
+    let base = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?
         .join("extracted");
     reject_link(&base, " extracted")?;
@@ -389,9 +384,7 @@ pub(crate) fn cache_file_path(
     entry_path: &str,
 ) -> Result<PathBuf, String> {
     ensure_cache_project_id(project_id)?;
-    let base = app_handle
-        .path()
-        .app_data_dir()
+    let base = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
 
     let safe_rel = validate_entry_path(entry_path)?;
@@ -435,9 +428,7 @@ pub(super) fn is_expected_cache_path(
 ) -> Result<bool, String> {
     let _timing = ValidationSpan::new("cache_root_resolution");
     ensure_cache_project_id(project_id)?;
-    let base = app_handle
-        .path()
-        .app_data_dir()
+    let base = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
     let root = base.join("extracted").join(project_id.to_string());
     is_expected_cache_path_in_root(&root, entry_path, candidate)
@@ -471,7 +462,7 @@ impl CacheValidationContext {
     pub(super) fn for_project(app: &tauri::AppHandle, project_id: i64) -> Result<Self, String> {
         let _timing = ValidationSpan::new("cache_root_resolution");
         ensure_cache_project_id(project_id)?;
-        let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        let base = crate::application_data_dir(&app).map_err(|e| e.to_string())?;
         Self::new(project_id, &base.join("extracted").join(project_id.to_string()))
     }
 
@@ -612,9 +603,7 @@ pub(crate) fn cache_project_root_for_batch(
     project_id: i64,
 ) -> Result<PathBuf, String> {
     ensure_cache_project_id(project_id)?;
-    let base = app_handle
-        .path()
-        .app_data_dir()
+    let base = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?
         .join("extracted");
     if !base.exists() {

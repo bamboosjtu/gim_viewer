@@ -70,7 +70,7 @@ fn semantic_receipt_rejects_truncation_changed_sha_and_pending_or_failed_publica
 
 #[test]
 fn semantic_source_missing_wrong_size_and_empty_file_are_distinct() {
-    let dir=std::env::temp_dir().join(format!("gim-source-readability-{}",std::process::id()));
+    let dir=crate::workspace_test_temp().join(format!("gim-source-readability-{}",std::process::id()));
     std::fs::create_dir_all(&dir).unwrap(); let path=dir.join("empty.fam");
     std::fs::write(&path,b"").unwrap();
     assert!(readable_source_of_size(&path,0)); assert!(!readable_source_of_size(&path,1));

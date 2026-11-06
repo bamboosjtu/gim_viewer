@@ -168,6 +168,7 @@ export function validateDevGlbTemplate(
     return { shareable: false, reason: 'animation-dependency' };
   }
 
+  const checkedPositions=new Set<THREE.BufferAttribute|THREE.InterleavedBufferAttribute>();
   let renderable = false;
   let reason: string | null = null;
   asset.scene.updateMatrixWorld(true);
@@ -220,10 +221,11 @@ export function validateDevGlbTemplate(
     }
     const position = geometry.getAttribute('position');
     if (!position || position.count === 0) return;
-    if (!finiteAttribute(position)) {
+    if (!checkedPositions.has(position) && !finiteAttribute(position)) {
       reason = 'non-finite-geometry';
       return;
     }
+    checkedPositions.add(position);
     renderable = true;
   });
 

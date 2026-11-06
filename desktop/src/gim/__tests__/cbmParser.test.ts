@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   parseKeyValue,
   buildCbmTree,
@@ -10,6 +10,30 @@ import type { CbmNode } from '../types.js';
 function textFile(text: string, name: string): File {
   return new File([text], name, { type: 'text/plain' });
 }
+
+it.each([2, 16])('bounds full-inventory scans across %i DEV assembly occurrences', async occurrences => {
+  const ids = Array.from({ length: occurrences }, (_, index) => `part${index}`);
+  const files = new Map([
+    ['CBM/project.cbm', textFile(`ENTITYNAME=F1System\nSUBSYSTEMS.NUM=${occurrences}\n${ids.map((id, index) => `SUBSYSTEM${index}=${id}.cbm`).join('\n')}`, 'project.cbm')],
+    ...ids.map(id => [`CBM/${id}.cbm`, textFile('ENTITYNAME=F4System\nOBJECTMODELPOINTER=root.dev', `${id}.cbm`)] as [string, File]),
+    ['DEV/root.dev', textFile('SYMBOLNAME=Root\nSUBDEVICES.NUM=1\nSUBDEVICE0=leaf.dev', 'root.dev')],
+    ['DEV/leaf.dev', textFile('SYMBOLNAME=Leaf', 'leaf.dev')],
+  ]);
+  const rootReads = vi.spyOn(files.get('DEV/root.dev')!, 'arrayBuffer');
+  const leafReads = vi.spyOn(files.get('DEV/leaf.dev')!, 'arrayBuffer');
+  // Watch every Map enumeration entrypoint, including scans outside the resolver.
+  const scans = [vi.spyOn(files, 'keys'), vi.spyOn(files, 'entries'), vi.spyOn(files, 'values'),
+    vi.spyOn(files, 'forEach'), vi.spyOn(files, Symbol.iterator)];
+  const tree = await buildCbmTree(files);
+  expect(tree?.children.map(node => node.children[0]?.devSymbolName)).toEqual(ids.map(() => 'Leaf'));
+  expect(new Set(tree?.children.map(node => node.children[0].path)).size).toBe(occurrences);
+  expect(scans[0]).toHaveBeenCalledTimes(1);
+  // Resolver, normalized path lookup and optional case-insensitive file lookup:
+  // constant work per archive, regardless of the number of node references.
+  expect(scans.reduce((count, scan) => count + scan.mock.calls.length, 0)).toBeLessThanOrEqual(3);
+  expect(rootReads).toHaveBeenCalledTimes(1);
+  expect(leafReads).toHaveBeenCalledTimes(1);
+});
 
 // ===== parseKeyValue =====
 

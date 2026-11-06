@@ -1,3 +1,4 @@
+import { GIM_LIMITS } from '../shared/gimLimits.js';
 /**
  * 线路解析输入读取协调器。
  *
@@ -23,7 +24,7 @@ const TEXT_EXTENSIONS = new Set(['cbm', 'dev', 'fam', 'phm']);
  * 用户查看来源时通过 currentFiles/缓存懒加载。原生 manifest-only File
  * 的 size 来自 Rust 清单，因此可在发起批量读取前安全跳过大几何条目。
  */
-export const LINE_PARSER_SMALL_MOD_MAX_BYTES = 256 * 1024;
+export const LINE_PARSER_SMALL_MOD_MAX_BYTES = GIM_LIMITS.smallTextBytes;
 
 export interface LineParserBatchOptions {
   maxFiles?: number;

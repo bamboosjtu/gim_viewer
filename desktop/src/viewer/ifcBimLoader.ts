@@ -1,5 +1,7 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import type { ViewerContext } from './viewerEngine.js';
-import type { AppState, ProjectLoadSession } from '../app/state.js';
+import type { ViewerState as AppState } from '../shared/viewerState.js';
+import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { loadRawIfc } from './ifcConversion.js';
 import { IFC_LOD_CACHE_VERSION } from '../config/features.js';
 import {
@@ -148,7 +150,7 @@ export async function loadBimIfc(
       }
     );
     if (!model || !artifact || !current()) {
-      if (model) ctx.fragments.core.disposeModel(runtimeId);
+      if (model) void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);
       return;
     }
     // Return the usable far model immediately. Persisting the derived far
@@ -156,7 +158,7 @@ export async function loadBimIfc(
     const cached = artifact as FarArtifact;
     // Independent optional derived domain. No receipt or partial stream is
     // written on interruption; oversized streams remain usable in memory.
-    if (current() && validConnectionArtifact(connectionArtifact)) void writeIfcLodArtifact(connectionKey, connectionArtifact);
+    if (current() && validConnectionArtifact(connectionArtifact)) void Promise.resolve(writeIfcLodArtifact(connectionKey, connectionArtifact)).catch(reportBackgroundError);
     const writeStarted = performance.now();
     options.onStage?.('cache-write-start', { path, bytes: cached.bytes.byteLength });
     void Promise.resolve(writeIfcLodArtifact(key, cached)).then((result) => {
@@ -180,7 +182,7 @@ export async function loadBimIfc(
     });
   }
   if (!current()) {
-    ctx.fragments.core.disposeModel(runtimeId);
+    void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);
     return;
   }
   model.object.userData.ifcOpeningPolicy = 'bim-lod';
@@ -201,13 +203,13 @@ export async function loadBimIfc(
     baseModel = ctx.fragments.list.get(ctx.fragments.baseCoordinationModel);
   }
   if (!baseModel || !current()) {
-    if (!current()) ctx.fragments.core.disposeModel(runtimeId);
+    if (!current()) void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);
     else throw Error('IFC coordinate anchor unavailable');
     return;
   }
   const base = await readIfcCoordinateAnchor(baseModel);
   if (!current()) {
-    ctx.fragments.core.disposeModel(runtimeId);
+    void Promise.resolve(ctx.fragments.core.disposeModel(runtimeId)).catch(reportBackgroundError);
     return;
   }
   state.ifcRegionalRuntimes.get(logicalId)?.release();
@@ -228,6 +230,6 @@ export async function loadBimIfc(
   runtime.setOnlySelected?.(state.onlySelected);
   state.ifcRegionalRuntimes.set(logicalId, runtime);
   state.engineeringGeometryEvidenceChanged?.();
-  void state.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error));
+  void Promise.resolve(state.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error))).catch(reportBackgroundError);
   return model;
 }

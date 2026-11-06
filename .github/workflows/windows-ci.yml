@@ -6,6 +6,7 @@ on:
       - 'desktop/**'
       - 'packages/**'
       - 'crates/**'
+      - 'contracts/**'
       - '.gitignore'
       - '.github/workflows/windows-ci.yml'
 
@@ -14,6 +15,7 @@ on:
       - 'desktop/**'
       - 'packages/**'
       - 'crates/**'
+      - 'contracts/**'
       - '.gitignore'
       - '.github/workflows/windows-ci.yml'
   workflow_dispatch:
@@ -50,6 +52,13 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
+      - name: Prepare workspace temporary directory
+        run: |
+          New-Item -ItemType Directory -Path ../.tmp/ci -Force | Out-Null
+          "TEMP=$((Resolve-Path ../.tmp/ci).Path)" >> $env:GITHUB_ENV
+          "TMP=$((Resolve-Path ../.tmp/ci).Path)" >> $env:GITHUB_ENV
+          "TMPDIR=$((Resolve-Path ../.tmp/ci).Path)" >> $env:GITHUB_ENV
+
       - name: Install frontend dependencies
         run: npm ci
 
@@ -58,6 +67,20 @@ jobs:
 
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Check Promise ownership and cache contracts
+        run: |
+          npm run lint
+          npm run check:caches
+
+      - name: Run native library tests
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
+          cargo test --manifest-path ../crates/gim-native-core/Cargo.toml --locked
 
       - name: Run frontend unit tests
         run: npm test

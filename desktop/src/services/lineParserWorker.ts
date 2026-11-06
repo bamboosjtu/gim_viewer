@@ -1,3 +1,4 @@
+import { decodeGimText } from '../shared/textDecode.js';
 /**
  * Line Parser Worker v1。
  *
@@ -70,10 +71,9 @@ workerScope.onmessage = (event) => {
   const totalStart = performance.now();
   try {
     const decodeStart = performance.now();
-    const decoder = new TextDecoder();
     const textFiles = request.files.map((file) => ({
       path: file.path,
-      text: decoder.decode(new Uint8Array(file.bytes)),
+      text: decodeGimText(new Uint8Array(file.bytes)).text,
     }));
     const decodeMs = performance.now() - decodeStart;
     const cache = createLineParserCache(textFiles);

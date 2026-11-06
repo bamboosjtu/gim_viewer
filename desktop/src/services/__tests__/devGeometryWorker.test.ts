@@ -6,7 +6,7 @@ vi.mock('../../viewer/xmlModGeometry.js',()=>({trimSharedXmlModGeometries:mock.t
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();vi.resetAllMocks();});
 it('accepts a source upgrade while a task is waiting for RPC and uses the immutable source for later reads', async()=>{
   vi.resetModules();const post=vi.fn(),scope={postMessage:post,onmessage:null as any};vi.stubGlobal('self',scope);
-  await import('../devGeometryWorker.js');const send=(data:any)=>scope.onmessage({data});
+  await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../devGeometryWorker.js'); });const send=(data:any)=>scope.onmessage({data});
   await send({kind:'init',files:[['MOD/a.mod',3,null],['MOD/b.mod',3,null]],cacheDivisor:1});
   mock.analyze.mockResolvedValue({canonicalDevPath:'DEV/a.dev',discovered:{mods:[],stls:[]},plan:null});
   mock.serialize.mockImplementation(async(_path,files)=>({status:'empty',text:await files.get('MOD/a.mod').text(),next:await files.get('MOD/b.mod').text()}));
@@ -20,7 +20,7 @@ it('accepts a source upgrade while a task is waiting for RPC and uses the immuta
 });
 it('protocol errors settle their task and cleanup exceptions cannot leave the worker running forever',async()=>{
   vi.resetModules();const post=vi.fn(),scope={postMessage:post,onmessage:null as any};vi.stubGlobal('self',scope);
-  vi.spyOn(console,'warn').mockImplementation(()=>{});await import('../devGeometryWorker.js');
+  vi.spyOn(console,'warn').mockImplementation(()=>{});await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../devGeometryWorker.js'); });
   const send=(data:any)=>scope.onmessage({data});
   await send({kind:'unknown',id:1,session:1,key:'unknown'});expect(post.mock.lastCall![0]).toMatchObject({id:1,error:expect.stringContaining('Unsupported')});
   mock.analyze.mockResolvedValue({canonicalDevPath:'DEV/a.dev',discovered:{mods:[],stls:[]},plan:null});

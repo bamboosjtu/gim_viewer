@@ -29,7 +29,7 @@ const GIM_PACKAGE_MAGIC: &[u8] = b"GIMPKG";
 const SEVENZ_SIG: [u8; 6] = [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C];
 const ZIP_SIG: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
 const SIGNATURE_SEARCH_LIMIT: usize = 1024 * 1024;
-const MAX_ENTRY_PATH_BYTES: usize = 4096;
+
 
 /// 在头部之后搜索压缩数据偏移（先 7z 后 ZIP，1MB 窗口）
 fn find_archive_offset(data: &[u8]) -> Option<usize> {
@@ -87,9 +87,7 @@ fn parse_header_fields(data: &[u8], offset: usize) -> (Option<String>, Option<St
         if header[i] == 0 {
             if i > field_start {
                 fields.push(
-                    String::from_utf8_lossy(&header[field_start..i])
-                        .trim()
-                        .to_string(),
+                    decode_header_text(&header[field_start..i]),
                 );
             }
             field_start = i + 1;
@@ -121,10 +119,10 @@ fn normalize_path(name: &str) -> String {
 /// 归档条目路径安全校验。压缩包内路径不应被当作绝对路径或带 `..` 的
 /// 文件系统路径；同时限制长度，避免异常长键污染内存/数据库。
 fn validate_archive_path(path: &str) -> Result<(), String> {
-    if path.is_empty() || path.len() > MAX_ENTRY_PATH_BYTES {
+    if path.is_empty() || path.len() > extraction_limits().max_path_bytes {
         return Err(format!(
             "归档条目路径无效或过长（>{} 字节）",
-            MAX_ENTRY_PATH_BYTES
+            extraction_limits().max_path_bytes
         ));
     }
     if path.starts_with('/') || path.starts_with('\\') || path.contains('\0') {
@@ -143,7 +141,8 @@ fn validate_archive_path(path: &str) -> Result<(), String> {
 }
 
 /// 解压资源配额（P1 评审 #4：防压缩炸弹 / 异常大包 / OOM）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all="camelCase")]
 pub struct ExtractionQuota {
     /// 输入归档本身的大小上限（解压前）。
     pub max_archive_bytes: u64,
@@ -159,12 +158,11 @@ pub struct ExtractionQuota {
 
 impl Default for ExtractionQuota {
     fn default() -> Self {
+        let limits = extraction_limits();
         Self {
-            max_archive_bytes: 2 * 1024 * 1024 * 1024, // 2 GiB
-            max_entries: 200_000,
-            max_file_bytes: 1024 * 1024 * 1024, // 单文件 1 GiB
-            max_total_uncompressed_bytes: 8 * 1024 * 1024 * 1024, // 总量 8 GiB
-            max_compression_ratio: 1000,        // 真实 GIM 样本实测 ~12×
+            max_archive_bytes: limits.max_archive_bytes, max_entries: limits.max_entries,
+            max_file_bytes: limits.max_file_bytes, max_total_uncompressed_bytes: limits.max_total_uncompressed_bytes,
+            max_compression_ratio: limits.max_compression_ratio,
         }
     }
 }
@@ -1075,7 +1073,7 @@ mod tests {
 
     #[test]
     fn sevenz_empty_files_count_and_survive_both_inputs() {
-        let root = std::env::temp_dir().join(format!("gim-empty-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let root = workspace_test_temp().join(format!("gim-empty-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         std::fs::create_dir_all(root.join("source")).unwrap();
         std::fs::write(root.join("source/empty.mod"), b"").unwrap();
         std::fs::write(root.join("source/project.cbm"), b"TYPE=TRANS_LINE").unwrap();
@@ -1166,7 +1164,7 @@ mod tests {
 
     #[test]
     fn early_capability_absence_and_preflight_safety_are_distinct() {
-        let zip_path=std::env::temp_dir().join(format!("early-zip-{}.gim",std::process::id()));
+        let zip_path=workspace_test_temp().join(format!("early-zip-{}.gim",std::process::id()));
         let mut zip=zip::ZipWriter::new(Cursor::new(Vec::new()));
         zip.start_file("CBM/project.cbm",zip::write::SimpleFileOptions::default()).unwrap();
         std::io::Write::write_all(&mut zip,b"TYPE=SS").unwrap();
@@ -1189,14 +1187,14 @@ mod tests {
               for name in names { let mut entry=SevenZArchiveEntry::new();entry.name=name.into();entry.has_stream=true;entry.is_directory=name.ends_with('/');
                 writer.push_archive_entry(entry,Some(Cursor::new(if label == "near-eof" && name.ends_with(".cbm") { vec![65u8;4096] } else { b"A=1".to_vec() }))).unwrap(); }
               writer.finish().unwrap(); }
-            let path=std::env::temp_dir().join(format!("early-cap-{}-{}.gim",label,std::process::id()));
+            let path=workspace_test_temp().join(format!("early-cap-{}-{}.gim",label,std::process::id()));
             std::fs::write(&path,build_gim_bytes(&archive.into_inner(),b'S',"test")).unwrap();
             let result=inspect_substation_eligibility(&path,&ExtractionQuota::default());
             if expected_error { assert!(result.is_err(),"{}",label); }
             else { let c=result.unwrap();assert!(!c.eligible);assert_eq!(c.reason,"no-early-checkpoint-benefit"); }
             std::fs::remove_file(path).unwrap();
         }
-        let path=std::env::temp_dir().join(format!("early-corrupt-{}.gim",std::process::id()));
+        let path=workspace_test_temp().join(format!("early-corrupt-{}.gim",std::process::id()));
         std::fs::write(&path,build_gim_bytes(&SEVENZ_SIG,b'S',"test")).unwrap();
         assert!(inspect_substation_eligibility(&path,&ExtractionQuota::default()).is_err());
         std::fs::remove_file(path).unwrap();
@@ -1258,7 +1256,7 @@ mod tests {
             writer.push_archive_entry::<Cursor<Vec<u8>>>({ let mut e = SevenZArchiveEntry::new(); e.name = "DEV/empty.fam".into(); e }, None).unwrap();
             writer.finish().unwrap();
         }
-        let path = std::env::temp_dir().join(format!("gim-semantic-order-{}.gim", std::process::id()));
+        let path = workspace_test_temp().join(format!("gim-semantic-order-{}.gim", std::process::id()));
         std::fs::write(&path, build_gim_bytes(&archive.into_inner(), b'S', "test")).unwrap();
         let mut ordinary = Vec::new(); let mut ordered = Vec::new(); let mut trace = Vec::new();
         extract_from_path_with_quota(&path, &ExtractionQuota::default(), |p,b| { ordinary.push((p,b)); Ok(()) }).unwrap();
@@ -1366,7 +1364,7 @@ mod tests {
             w.finish().unwrap();
         }
         let gim = build_gim_bytes(&zip_buf.into_inner(), b'S', "stream-test");
-        let path = std::env::temp_dir().join(format!(
+        let path = workspace_test_temp().join(format!(
             "gim-viewer-stream-{}-{}.gim",
             std::process::id(),
             std::time::SystemTime::now()
@@ -1399,6 +1397,7 @@ mod tests {
     /// 真实样本验证：对 demo/line02.gim 执行完整解压，校验条目规模与关键文件。
     /// 样本缺失时静默跳过（CI 无 demo 数据）。
     #[test]
+    #[ignore = "private engineering samples are developer supplied; never run in CI"]
     fn extracts_real_line02_sample() {
         let candidates = [
             "../../demo/line02.gim",
@@ -1436,4 +1435,39 @@ mod tests {
         assert!(entry_count > 1000, "条目数异常: {}", entry_count);
         assert!(has_project_cbm);
     }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct ExtractionLimits {
+    pub mobile:ExtractionQuota,
+    pub max_archive_bytes:u64, pub max_entries:usize, pub max_file_bytes:u64,
+    pub max_total_uncompressed_bytes:u64, pub max_compression_ratio:u64,
+    pub max_path_bytes:usize, pub max_nesting_depth:usize, pub small_text_bytes:usize,
+}
+pub fn extraction_limits() -> &'static ExtractionLimits {
+    static LIMITS:std::sync::OnceLock<ExtractionLimits> = std::sync::OnceLock::new();
+    LIMITS.get_or_init(||serde_json::from_str(include_str!("../../../contracts/gim-limits.json")).expect("bundled GIM limits must be valid"))
+}
+
+
+fn decode_header_text(bytes:&[u8])->String {
+    if let Ok(text)=std::str::from_utf8(bytes){return text.trim().to_string();}
+    let encoding=encoding_rs::Encoding::for_label(b"gb18030").expect("GB18030 is bundled");
+    let (text,invalid)=encoding.decode_without_bom_handling(bytes);
+    if invalid {String::new()} else {text.trim().to_string()}
+}
+#[cfg(test)]
+mod text_contract_tests {
+    #[test]
+    fn legacy_header_is_decoded_without_replacement() {
+        assert_eq!(super::decode_header_text(&[0xb2,0xe2,0xca,0xd4]),"测试");
+        assert_eq!(super::decode_header_text("测试".as_bytes()),"测试");
+    }
+}
+
+#[cfg(test)]
+fn workspace_test_temp() -> std::path::PathBuf {
+    let root=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/tests/native");
+    std::fs::create_dir_all(&root).expect("workspace test directory must be writable");root
 }

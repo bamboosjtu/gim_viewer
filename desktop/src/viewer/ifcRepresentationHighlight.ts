@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import type { AppState } from '../app/state.js';
+import type { ViewerState as AppState } from '../shared/viewerState.js';
 import type { ViewerContext } from './viewerEngine.js';
 import type { RegionalObject } from './ifcRegionalData.js';
 import { addModHighlightGroup, enqueueHighlightCommit } from './highlight.js';

@@ -1,3 +1,4 @@
+import { GIM_LIMITS } from '../shared/gimLimits.js';
 /**
  * GIM 工程类型识别。
  *
@@ -191,7 +192,7 @@ export async function detectGimProjectType(
     }
 
     // 文本文件收集起来做关键字扫描：仅 CBM/DEV/FAM（这些文件通常很小）
-    if ((ext === 'cbm' || ext === 'dev' || ext === 'fam') && file.size < 256 * 1024) {
+    if ((ext === 'cbm' || ext === 'dev' || ext === 'fam') && file.size < GIM_LIMITS.smallTextBytes) {
       textFilesToScan.push({ path, file });
     }
   }

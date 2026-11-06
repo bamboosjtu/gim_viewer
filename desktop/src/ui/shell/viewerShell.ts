@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../../utils/backgroundErrors.js';
 import type { AppState } from '../../app/state.js';
 import { btnCacheManager, btnLoadGim, btnLoadLocal, gimFileInput } from '../dom.js';
 import { isTauri } from '../../services/platformService.js';
@@ -74,7 +75,7 @@ function renderRecentList(
         button.innerHTML = `<span class="name">${escapeHtml(project.name)}</span><span class="meta">${escapeHtml(meta)}</span>`;
         button.title = project.path;
       }
-      button.addEventListener('click', () => { void openRecentProject(state, project.id); });
+      button.addEventListener('click', () => { void Promise.resolve(openRecentProject(state, project.id)).catch(reportBackgroundError); });
       target.appendChild(button);
     }
   }
@@ -141,7 +142,7 @@ export function setupViewerShell(state: AppState): void {
         if (allItem) allItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.onlySelected;
         const overviewItem = document.getElementById('menu-station-overview');
         if (overviewItem) overviewItem.hidden = !['substation', 'equipment'].includes(state.currentProjectType ?? '') || !state.stationOverview;
-        void refreshRecent();
+        void Promise.resolve(refreshRecent()).catch(reportBackgroundError);
       }
     });
     menu.addEventListener('click', (event) => event.stopPropagation());
@@ -156,21 +157,21 @@ export function setupViewerShell(state: AppState): void {
   });
   document.getElementById('menu-ifc-detail')?.addEventListener('click', () => {
     closeMenu();
-    void import('../ifcDetailPanel.js').then(({ openIfcDetailPanel }) => openIfcDetailPanel());
+    void Promise.resolve(import('../ifcDetailPanel.js').then(({ openIfcDetailPanel }) => openIfcDetailPanel())).catch(reportBackgroundError);
   });
   document.getElementById('menu-settings')?.addEventListener('click', () => {
     closeMenu();
-    void import('../settingsPanel.js').then(({ openSettingsPanel }) => openSettingsPanel());
+    void Promise.resolve(import('../settingsPanel.js').then(({ openSettingsPanel }) => openSettingsPanel())).catch(reportBackgroundError);
   });
   document.getElementById('menu-previous-view')?.addEventListener('click', () => {
     closeMenu();
     const session = state.captureProjectSession();
     const selection = state.selectionRequest;
-    void state.viewHistory?.back().catch(error => {
+    void Promise.resolve(state.viewHistory?.back().catch(error => {
       if (!state.isCurrentSession(session) || state.selectionRequest !== selection) return;
       console.warn('[View history]', error);
       setSelectionStatus('暂时无法恢复上一视角，请重试。');
-    });
+    })).catch(reportBackgroundError);
   });
   document.getElementById('menu-only-selected')?.addEventListener('click', () => {
     closeMenu();
@@ -186,16 +187,15 @@ export function setupViewerShell(state: AppState): void {
   });
   welcomeOpen?.addEventListener('click', () => btnLoadGim.click());
   continueButton?.addEventListener('click', () => {
-    void refreshRecent().then(applied => {
+    void refreshRecent().then(async applied => {
       if (!applied) return;
-      const first = recent[0];
-      if (first) void openRecentProject(state, first.id);
-    });
+      const first=recent[0];if(first)await openRecentProject(state,first.id);
+    }).catch(reportBackgroundError);
   });
 
   // 打开/关闭工程后刷新“最近工程”，避免欢迎页与“继续上次工程”停留在启动时的旧顺序。
-  window.addEventListener('gim:recent-projects-changed', () => { void refreshRecent(); });
-  window.addEventListener('gim:project-closed', () => { void refreshRecent(); });
+  window.addEventListener('gim:recent-projects-changed', () => { void Promise.resolve(refreshRecent()).catch(reportBackgroundError); });
+  window.addEventListener('gim:project-closed', () => { void Promise.resolve(refreshRecent()).catch(reportBackgroundError); });
 
   // Browser drop: a File has no persistent path, but the one-shot input path
   // already owns browser-mode opening. Desktop drag-drop is intentionally not
@@ -214,13 +214,10 @@ export function setupViewerShell(state: AppState): void {
     });
   }
 
-  void refreshRecent().then(applied => {
-    if (!applied) return;
-    if (!shouldAutoOpenLastProject() || autoOpenAttempted) return;
-    autoOpenAttempted = true;
-    const first = recent.find((project) => project.parserVersion);
-    if (first && state.currentProjectType == null) {
-      void openRecentProject(state, first.id);
-    }
-  });
+  void refreshRecent().then(async applied => {
+    if (!applied || !shouldAutoOpenLastProject() || autoOpenAttempted) return;
+    autoOpenAttempted=true;
+    const first=recent.find(project=>project.parserVersion);
+    if(first && state.currentProjectType==null)await openRecentProject(state,first.id);
+  }).catch(reportBackgroundError);
 }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ProjectLoadSession } from '../app/state.js';
+import type { ProjectLoadSession } from '../shared/projectSession.js';
 import type { ViewerContext } from './viewerEngine.js';
 import type { IfcSelectionScope } from './ifcModelVisibility.js';
 import { IFC_CONNECTION_BATCH_MAX_BYTES, IFC_CONNECTION_BATCH_MAX_OBJECTS, connectionChunkBytes, type ConnectionGeometryBatch } from './ifcConnectionBatches.js';

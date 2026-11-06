@@ -1,6 +1,8 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { configurePresentation } from './presentationBindings.js';
 import { AppState } from './state.js';
 import { setupTabs } from '../ui/tabs.js';
-import { btnLoadGim, btnLoadLocal, btnClear, btnCacheManager } from '../ui/dom.js';
+import { btnLoadGim, btnLoadLocal, btnClear, btnCacheManager, assertShellDom } from '../ui/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_FRAGMENTS } from '../config/debug.js';
 import { debugWarn } from '../utils/logger.js';
@@ -15,11 +17,14 @@ import { setupViewerShell } from '../ui/shell/viewerShell.js';
 
 /** 异步启动逻辑（轻量，不加载 3D 引擎） */
 async function bootstrapAsync(): Promise<void> {
+  assertShellDom();
+  configurePresentation();
   const state = new AppState();
 
   // 仅供本地 Playwright acceptance harness 读取当前工程所有权计数；
   // 不参与业务判断、缓存键或调度行为。
-  (globalThis as { __gimAppState?: AppState }).__gimAppState = state;
+  if (import.meta.env.DEV || import.meta.env.VITE_GIM_DIAGNOSTICS === '1')
+    (globalThis as { __gimAppState?: AppState }).__gimAppState = state;
 
   // 开发期 A/B 采集需要区分“同一 WebView 连续打开”和“应用重启后打开”。
   // 该标识只暴露给 DEV harness，不参与业务状态或缓存键。
@@ -264,5 +269,5 @@ async function bootstrapAsync(): Promise<void> {
 
 /** 应用启动入口（同步包装） */
 export function bootstrap(): void {
-  bootstrapAsync();
+  void Promise.resolve(bootstrapAsync()).catch(reportBackgroundError);
 }

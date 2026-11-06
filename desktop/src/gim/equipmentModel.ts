@@ -1,9 +1,11 @@
+import { GIM_LIMITS } from '../shared/gimLimits.js';
+import { decodeGimText, readGimText } from '../shared/textDecode.js';
 import { getFileByPath, findFileByPath } from './fileLookup.js';
 import { parseKeyValue } from './kvParser.js';
 
 /** Device packages have a semantic Device entry, not an F1–F4 project tree.
  * Directory casing and the exporter/vendor are not classification signals. */
-export async function findEquipmentEntry(files: Map<string, File>, readText: (file: File) => Promise<string> = file => file.text()): Promise<string | null> {
+export async function findEquipmentEntry(files: Map<string, File>, readText: (file: File) => Promise<string> = readGimText): Promise<string | null> {
   const entries = [...files].filter(([path]) => /\.cbm$/i.test(path));
   if (entries.length === 0) {
     // Some standalone archives start at DEV, without a CBM wrapper. Require
@@ -20,7 +22,7 @@ export async function findEquipmentEntry(files: Map<string, File>, readText: (fi
     const children = new Map<string, string[]>(), referenced = new Set<string>();
     let hasGeometry = false;
     for (const [path, file] of devs) {
-      if (file.size > 256 * 1024) return null;
+      if (file.size > GIM_LIMITS.smallTextBytes) return null;
       const kv = parseKeyValue(await readText(file)), refs: string[] = [];
       for (const [key, value] of Object.entries(kv)) {
         if (/^SUBDEVICE\d+$/i.test(key) && value.trim()) {
@@ -48,7 +50,7 @@ export async function findEquipmentEntry(files: Map<string, File>, readText: (fi
   // inside a project. A standalone package has one semantic entry.
   if (entries.length !== 1) return null;
   const [path, file] = entries[0];
-  if (file.size > 256 * 1024) return null;
+  if (file.size > GIM_LIMITS.smallTextBytes) return null;
   const kv = parseKeyValue(await readText(file));
   if (kv.ENTITYNAME?.trim().toLowerCase() !== 'device') return null;
   const dev = kv.OBJECTMODELPOINTER?.trim();
@@ -62,8 +64,7 @@ export async function findEquipmentEntry(files: Map<string, File>, readText: (fi
 /** UTF-8 first; the equipment corpus also contains legacy GBK text. Keep
  * source bytes on disk unchanged and normalize only the device runtime input. */
 export function decodeEquipmentText(bytes: ArrayBuffer): string {
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
-  catch { return new TextDecoder('gb18030').decode(bytes); }
+  return decodeGimText(bytes).text;
 }
 
 export async function prepareEquipmentFiles(files: Map<string, File>, isCurrent: () => boolean): Promise<Map<string, File>> {

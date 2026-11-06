@@ -1,7 +1,8 @@
 import * as OBC from '@thatopen/components';
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
-import type { AppState, SelectionRequest } from '../app/state.js';
+import type { ViewerState as AppState } from '../shared/viewerState.js';
+import type { SelectionRequest } from '../shared/selectionContracts.js';
 import { commitSelectionHighlight } from './highlight.js';
 import type { IfcRegionalRuntime } from './ifcRegionalRuntime.js';
 import type { RegionalObject } from './ifcRegionalData.js';

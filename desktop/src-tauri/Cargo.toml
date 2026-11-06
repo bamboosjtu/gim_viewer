@@ -1,4 +1,5 @@
 [package]
+license = "MIT"
 name = "gim-viewer"
 version = "0.2.0"
 description = "GIM 阅读器"
@@ -14,11 +15,11 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 gim-native-core = { path = "../../crates/gim-native-core" }
-tauri = { version = "2", features = [] }
+tauri = { version = "~2.11.3", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
 sevenz-rust = "0.6"
 zip = { version = "2", default-features = false, features = ["deflate"] }

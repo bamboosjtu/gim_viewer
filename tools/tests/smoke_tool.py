@@ -11,6 +11,9 @@ from PyInstaller.archive.readers import CArchiveReader
 from fixtures import device_sources, information_sources, write_sources, write_zip
 
 ROOT = Path(__file__).resolve().parents[2]
+_TEMP = ROOT / '.tmp/tests/tools-smoke'
+_TEMP.mkdir(parents=True,exist_ok=True)
+os.environ.update(TEMP=str(_TEMP),TMP=str(_TEMP),TMPDIR=str(_TEMP))
 EXES = {'gim_device': 'GIM设备查看器.exe', 'gim_element': 'GIM实体盘点器.exe',
         'gim_info': 'GIM信息阅读器.exe'}
 

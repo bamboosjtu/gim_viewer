@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../src/utils/backgroundErrors.js';
 /** Separate derived device domain. Each template/catalog row commits atomically;
  * no whole-project completion marker is written for an on-demand view.
  *
@@ -151,7 +152,7 @@ function readNativeArtifact<T>(args: NonNullable<ReturnType<typeof nativeArgs>>,
   let group = queuedReads.get(groupKey);
   if (!group) {
     group = { args, rows: [] }; queuedReads.set(groupKey, group);
-    setTimeout(() => { const batch = queuedReads.get(groupKey)!; queuedReads.delete(groupKey); void flushNativeReads(batch); }, 0);
+    setTimeout(() => { const batch = queuedReads.get(groupKey)!; queuedReads.delete(groupKey); void Promise.resolve(flushNativeReads(batch)).catch(reportBackgroundError); }, 0);
   }
   const target = group;
   return new Promise((resolve) => target.rows.push({ entry: args.entryPath, key, resolve: resolve as (value: DevArtifactRead<unknown>) => void }));

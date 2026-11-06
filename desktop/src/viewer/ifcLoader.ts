@@ -1,6 +1,8 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import fragmentsWorkerUrl from '@thatopen/fragments/worker?url';
 import type { ViewerContext } from './viewerEngine.js';
-import type { AppState, ProjectLoadSession } from '../app/state.js';
+import type { ViewerState as AppState } from '../shared/viewerState.js';
+import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { resolveWebIfcWasmBaseUrl } from './wasmAssets.js';
 import { DEBUG_IFC_LOAD, DEBUG_FRAGMENTS } from '../config/debug.js';
 import { debugLog, debugWarn } from '../utils/logger.js';
@@ -69,7 +71,7 @@ function safeFragmentsUpdate(
     });
   };
   try {
-    const result = ctx.fragments.core.update(force);
+    const result: unknown = ctx.fragments.core.update(force);
     // 不同 OBC 版本 update 可能返回 void 或 Promise<void>
     if (result && typeof (result as Promise<void>).then === 'function') {
       outstandingFragmentsUpdateCount += 1;
@@ -191,7 +193,7 @@ export function registerModelEvents(
     if (!state.isCurrentRuntimeModel(runtimeModelId)) {
       debugWarn(DEBUG_FRAGMENTS, `[Fragments] 拒绝过期/未知模型: ${runtimeModelId}`);
       queueMicrotask(() => {
-        try { ctx.fragments.core.disposeModel(runtimeModelId); } catch { /* 模型可能尚未完全登记 */ }
+        try { void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(reportBackgroundError); } catch { /* 模型可能尚未完全登记 */ }
       });
       finishModelAdded(true);
       return;
@@ -303,7 +305,7 @@ export async function loadIfcBuffer(
   await loadBimIfc(ctx,state,session,runtimeModelId,modelId,identityPath||name,
     options.readBytes??(async()=>retained!.slice()),reportProgress,{sourceIdentity:identity,initialBytes:buffer});
   if (!isCurrent()) {
-    try { ctx.fragments.core.disposeModel(runtimeModelId); } catch { /* 事件尚未登记时无需清理 */ }
+    try { void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(reportBackgroundError); } catch { /* 事件尚未登记时无需清理 */ }
     return;
   }
   // onItemSet 事件已更新 state.loadedModels

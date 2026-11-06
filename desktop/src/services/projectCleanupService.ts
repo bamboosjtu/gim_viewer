@@ -1,3 +1,5 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { loadPresentation } from './presentationPort.js';
 /**
  * 统一项目切换清理服务。
  *
@@ -22,17 +24,17 @@
  */
 
 import type { AppState } from '../app/state.js';
-import * as THREE from 'three';
+import type * as THREE from 'three';
 import { DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
-import { container } from '../ui/dom.js';
+import { container } from './presentation/dom.js';
 import { perfCurrentSession, perfReset } from '../utils/perfTimings.js';
 import { sampleSubstationRuntimeResources } from './substationResourceTelemetry.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { cancelSubstationExtraction } from './substationExtractionJob.js';
 import { cancelIfcConversions } from '../viewer/ifcConversion.js';
 import { cancelSubstationSpatialWorkers } from './substationSpatialWorkerClient.js';
-import { resetStatusRight } from '../ui/shell/statusBar.js';
+import { resetStatusRight } from './presentation/shell_statusBar.js';
 
 /**
  * 在打开新 GIM 项目前 / 清空场景时执行统一清理。
@@ -62,12 +64,13 @@ export async function cleanupBeforeOpenNewProject(
   // （渐进 GLB 管线 / MOD 自动加载），防止旧项目任务把 GLB、版本标记或
   // UI 状态写入新项目。必须在任何 await 之前执行——后续新增逻辑不得移到本行之前。
   state.invalidatePendingLoads();
+  const cleanupGeneration = state.projectGeneration;
   cancelSubstationExtraction(state);
   cancelIfcConversions();
   const { resetIfcWorkCompletion } = await import('../viewer/geometryWorkGate.js');
+  if(state.projectGeneration !== cleanupGeneration)return false;
   resetIfcWorkCompletion();
   cancelSubstationSpatialWorkers();
-  const cleanupGeneration = state.projectGeneration;
   const { cancelDevGeometryPreprocessing } = await import('./devGeometryWorkerClient.js');
   if (state.projectGeneration !== cleanupGeneration) return false;
   cancelDevGeometryPreprocessing(state);
@@ -84,19 +87,19 @@ export async function cleanupBeforeOpenNewProject(
   const sampleBeforeCleanup = (ctx?: ViewerContext | null): void => {
     if (!shouldCaptureSubstationResources || beforeCleanupSampled) return;
     beforeCleanupSampled = true;
-    void sampleSubstationRuntimeResources(
+    void Promise.resolve(sampleSubstationRuntimeResources(
       state,
       'beforeCleanup',
       cleanupPerfSession,
       ctx,
       { cleanupGeneration },
       { isCurrent: isCurrentCleanup },
-    );
+    )).catch(reportBackgroundError);
   };
 
   // 共性 UI 契约：清理即重置顶栏工程身份与状态栏（纯 UI，位于 token 递增之后）
   try {
-    const { setProjectIdentity, refreshNavigatorTitle } = await import('../ui/shell/projectBar.js');
+    const { setProjectIdentity, refreshNavigatorTitle } = await loadPresentation('shell_projectBar');
     if (!isCurrentCleanup()) return false;
     setProjectIdentity(null, null);
     refreshNavigatorTitle();
@@ -107,7 +110,7 @@ export async function cleanupBeforeOpenNewProject(
   // ---- 1. 销毁线路地图 canvas / tooltip / 图层控件 / 事件监听 ----
   // 即使 ViewerRuntime 未创建，线路地图也可能存在（线路工程不创建 Viewer）
   try {
-    const { destroyLineMapView } = await import('../ui/lineProjectView.js');
+    const { destroyLineMapView } = await loadPresentation('lineProjectView');
     if (!isCurrentCleanup()) return false;
     destroyLineMapView();
   } catch (err) {
@@ -321,7 +324,7 @@ export async function cleanupBeforeOpenNewProject(
 
   // 重置 SLD 视图模块内单例状态（selectedGridId / activeMode）
   try {
-    const { clearSldView } = await import('../ui/sldView.js');
+    const { clearSldView } = await loadPresentation('sldView');
     if (!isCurrentCleanup()) return false;
     clearSldView();
   } catch (err) {
@@ -330,7 +333,7 @@ export async function cleanupBeforeOpenNewProject(
 
   // 恢复左侧 tab 可见性（lineProjectView.hideTabs 隐藏的 tab 在切换工程时需恢复）
   try {
-    const { showAllTabs } = await import('../ui/tabs.js');
+    const { showAllTabs } = await loadPresentation('tabs');
     if (!isCurrentCleanup()) return false;
     showAllTabs();
   } catch (err) {
@@ -341,13 +344,13 @@ export async function cleanupBeforeOpenNewProject(
   // 必须在 dispose 之后执行：resetGimState 会清空 state.loadedModels 索引
   // resetGimState 是集中 mutator，已包含 loadedModels.clear / highlightedItems=null / hasFittedCamera=false
   if (!isCurrentCleanup()) return false;
-  state.resetGimState();
+  state.resetGimState(false);
   // 用户主动关闭工程时撤销加载遮罩；切换到新工程的清理不能隐藏新工程刚
   // 显示的进度（expectedGeneration 有值表示本次清理服务于一次新的打开）。
   if (expectedGeneration === undefined) {
     try {
       const { hideLoading } = await import('./gimOpenCore.js');
-      hideLoading();
+      if(isCurrentCleanup())hideLoading();
     } catch { /* best effort */ }
     window.dispatchEvent(new CustomEvent('gim:project-closed'));
   }
@@ -359,24 +362,24 @@ export async function cleanupBeforeOpenNewProject(
       xmlModGroups: xmlModDisposedCount,
       stlGroups: stlDisposedCount,
     };
-    void sampleSubstationRuntimeResources(
+    void Promise.resolve(sampleSubstationRuntimeResources(
       state,
       'afterCleanup',
       cleanupPerfSession,
       cleanupViewerContext,
       cleanupMeta,
       { isCurrent: isCurrentCleanup },
-    );
+    )).catch(reportBackgroundError);
     setTimeout(() => {
       if (!isCurrentCleanup()) return;
-      void sampleSubstationRuntimeResources(
+      void Promise.resolve(sampleSubstationRuntimeResources(
         state,
         'settledAfterCleanup',
         cleanupPerfSession,
         cleanupViewerContext,
         cleanupMeta,
         { isCurrent: isCurrentCleanup },
-      );
+      )).catch(reportBackgroundError);
     }, 250);
   }
   return true;

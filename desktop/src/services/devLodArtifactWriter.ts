@@ -1,6 +1,6 @@
 /** Owns bounded asynchronous artifact admission, persistence and cancellation. */
 import { prepareDevArtifact, writeDevArtifactDetailed } from '@desktop/devLodCache.js';
-import type { ProjectLoadSession } from '../app/state.js';
+import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { ByteWorkBudget } from '../utils/byteWorkBudget.js';
 import { perfCurrentSession, perfRecordTaskPhase, type PerfTaskIdentity } from '../utils/perfTimings.js';
 import { type DeviceLod } from '../viewer/devLodPolicy.js';

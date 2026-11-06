@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /** Substation cold/warm project orchestration and core semantic publication. */
 import type { IfcEntry } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
@@ -8,7 +9,7 @@ import { beginEngineeringBuild } from './engineeringService.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
-import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBar.js';
+import { setProjectIdentity, refreshNavigatorTitle } from './presentation/shell_projectBar.js';
 import type { GimRuntimeOpenContext } from './gimOpenCore.js';
 import { validateGimCache, type FamPropertyPayload } from '@desktop/database.js';
 import { hydrateNativeSmallFiles } from './nativeSmallFileHydration.js';
@@ -111,12 +112,12 @@ export async function onGimExtracted(
     fileDevRelations: fileDevRelations.length,
   });
   markSubstationCoreSemanticReady(state, perfSession); await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（core semantic）');
-  void sampleSubstationMemory(state, 'coreSemanticReady', perfSession, {
+  void Promise.resolve(sampleSubstationMemory(state, 'coreSemanticReady', perfSession, {
     source: 'cold',
     cbmNodes: collectCbmNodeCount(cbmTree),
     ifcEntries: ifcEntries.length,
     fileDevRelations: fileDevRelations.length,
-  });
+  })).catch(reportBackgroundError);
 
   let spatialSemanticPromise: Promise<boolean> | null = null;
   const startSpatialSemantic = (): Promise<boolean> => {
@@ -135,7 +136,7 @@ export async function onGimExtracted(
     }
     return spatialSemanticPromise;
   };
-  void beginEngineeringBuild(state, files, { beforeCacheWrite: options.sourcePublication, ensureIfcSemantics: startSpatialSemantic });
+  void Promise.resolve(beginEngineeringBuild(state, files, { beforeCacheWrite: options.sourcePublication, ensureIfcSemantics: startSpatialSemantic })).catch(reportBackgroundError);
   if (options.deferSpatialSemantic) {
     // The entity build and the legacy scene path share this idempotent starter.
     // Source normalization can request semantics before geometry readiness;
@@ -299,13 +300,13 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       markSubstationCoreSemanticReady(state, perfSession, { cacheHit: true });
       await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（core semantic，缓存命中）');
       if (!state.isCurrentSession(session)) return;
-      void sampleSubstationMemory(state, 'coreSemanticReady', perfSession, {
+      void Promise.resolve(sampleSubstationMemory(state, 'coreSemanticReady', perfSession, {
         source: 'warm',
         cacheHit: true,
         cbmNodes: state.currentCbmTree ? collectCbmNodeCount(state.currentCbmTree) : 0,
         ifcEntries: state.currentIfcEntries.length,
         fileDevRelations: state.fileDevRelations.length,
-      });
+      })).catch(reportBackgroundError);
 
       const cbmTree = state.currentCbmTree;
       if (!cbmTree) throw new Error('缓存索引中没有 CBM 层级树');
@@ -332,7 +333,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
           session, perfSession, showMessage, '变电 IFC 来源语义（缓存重建）',
           { projectId: session.projectId, sourceSha256: session.sourceSha256, cacheMissReason: cached.reason });
       })();
-      void beginEngineeringBuild(state, engineeringFiles, { ensureIfcSemantics: startSourceSpatial });
+      void Promise.resolve(beginEngineeringBuild(state, engineeringFiles, { ensureIfcSemantics: startSourceSpatial })).catch(reportBackgroundError);
 
       const cachedStdSldEntryPaths = index.entries.map((entry) => entry.entry_path);
       // STD/SLD restore is a feature-local background task.  A missing or
@@ -395,10 +396,13 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         // 两阶段发布的第二阶段可能在上次会话被中断：树/IFC 已可暖用，
         // 这里用已解压源在后台补写属性与几何引用，完成后置为已发布。
         const projectId = context.projectId;
-        void (async () => {
+        void Promise.resolve((async () => {
           const { publishSubstationRest } = await import('./substationIndexPublication.js');
           const { saveSubstationSemanticRest } = await import('@desktop/database.js');
-          const { beginCachePublish, setCachePublishPhase, failCachePublish } = await import('./cachePublishStatus.js');
+          const { createCachePublishStatus } = await import('./cachePublishStatus.js');
+          const publication = createCachePublishStatus(() => state.isCurrentSession(session));
+          state.sessionDisposables.add(publication.resetCachePublishStatus);
+          const { beginCachePublish, setCachePublishPhase, failCachePublish } = publication;
           const { createDiskBackedFile } = await import('@desktop/gimExtract.js');
           const files = new Map<string, File>();
           for (const entry of index.entries) {
@@ -423,7 +427,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
               failCachePublish(error instanceof Error ? error.message : String(error));
             }
           }
-        })();
+        })()).catch(reportBackgroundError);
       }
       return; // 缓存命中，短路完成
     } catch (err) {
@@ -433,6 +437,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   }
 
   const extractedSource = await context.getExtracted();
+  if (extractedSource.status === 'cancelled') return;
   if (!state.isCurrentSession(session)) return;
   if (extractedSource.projectType === 'equipment') {
     const { openEquipmentProject } = await import('./equipmentRuntime.js');
@@ -579,7 +584,10 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
           if (!state.isCurrentSession(session)) return;
           const { publishSubstationCore, publishSubstationRest } = await import('./substationIndexPublication.js');
           const { saveGimIndex, saveGeometryRefs, saveSubstationSemanticRest, validateGimCache } = await import('@desktop/database.js');
-          const { beginCachePublish, setCachePublishPhase, failCachePublish } = await import('./cachePublishStatus.js');
+          const { createCachePublishStatus } = await import('./cachePublishStatus.js');
+          const publication = createCachePublishStatus(() => state.isCurrentSession(session));
+          state.sessionDisposables.add(publication.resetCachePublishStatus);
+          const { beginCachePublish, setCachePublishPhase, failCachePublish } = publication;
           const publicationInput = {
             projectId, sourceSha256: session.sourceSha256 ?? '', files: filesForPersist,
             cachePaths: localCachePathMap, packedPaths: preExtracted.packedPaths,
@@ -690,7 +698,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   // Native extraction already atomically finished source files on disk. The
   // small semantic/reference transactions do not depend on DEV.
   if (persistProjectId != null && preExtracted?.cachePaths?.size) {
-    void startCachePersistence();
+    void Promise.resolve(startCachePersistence()).catch(reportBackgroundError);
   }
 
   // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框。

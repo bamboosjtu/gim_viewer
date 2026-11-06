@@ -1,7 +1,8 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /** Owns template deduplication, cache input leases, compilation, validation and LRU lifetime. */
 import { deleteDevArtifact, type DevArtifactRead, type DevArtifactReadStatus } from '@desktop/devLodCache.js';
 import * as THREE from 'three';
-import type { ProjectLoadSession } from '../app/state.js';
+import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { diagnosticFromSerialization } from '../gim/geometry/geometryDiagnostics.js';
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import { ByteLru } from '../utils/byteLru.js';
@@ -104,6 +105,16 @@ export class DevLodTemplateStore {
         if (!this.options.current()) return null;
         let artifact: CachedTemplate | undefined = lease.value;
         let parsed: Awaited<ReturnType<typeof parseDevGlbAsset>> = null;
+        let validated:Awaited<ReturnType<typeof parseDevGlbAsset>>=null;
+        const validate=()=>{
+          if(!parsed)return false;
+          if(validated===parsed)return true;
+          const started=performance.now();
+          const valid=validateDevGlbTemplate(parsed).shareable && !invalidGeometryExtent(parsed.scene);
+          perfRecordTaskPhase(identity,'vertexValidation',performance.now()-started,this.options.perf,valid?'completed':'failed');
+          if(valid)validated=parsed;
+          return valid;
+        };
         let generated = false;
         let demand = lod === 1 ? this.templateDemand.get(key) ?? 0 : 0;
         if (!this.options.current()) return null;
@@ -151,7 +162,7 @@ export class DevLodTemplateStore {
             if (artifact.result.bytes.byteLength > this.inputBudget.limit) throw Error('DEV cached input exceeds quota');
             if (await perfMeasureTaskPhase(identity, 'cacheHash', () => hash(artifact!.result.bytes!), this.options.perf) !== artifact.sha) throw Error('DEV template SHA mismatch');
             parsed = await perfMeasureTaskPhase(identity, 'deserialize', () => parseDevGlbAsset(dev, artifact!.result.bytes!), this.options.perf);
-            if (!parsed || !validateDevGlbTemplate(parsed).shareable || invalidGeometryExtent(parsed.scene)) throw Error('Invalid DEV cached template');
+            if (!parsed || !validate()) throw Error('Invalid DEV cached template');
             this.options.diagnostics.lodHits[lod]++;
             this.options.diagnostics.templateHits++;
             this.options.diagnostics.cacheHits++;
@@ -226,7 +237,7 @@ export class DevLodTemplateStore {
           return null;
         }
         parsed ??= await perfMeasureTaskPhase(identity, 'deserialize', () => parseDevGlbAsset(dev, artifact!.result.bytes!), this.options.perf);
-        if (!parsed || !validateDevGlbTemplate(parsed).shareable || invalidGeometryExtent(parsed.scene)) {
+        if (!parsed || !validate()) {
           if (parsed) new DevGlbTemplate(dev, parsed.scene, this.options.session).dispose();
           throw Error(`DEV GLB invalid: ${dev}`);
         }
@@ -235,7 +246,7 @@ export class DevLodTemplateStore {
         // Tiering: L0 persists, hot L1 persists selectively, L2 stays in memory.
         if (this.options.persistsTemplate(lod, generated, priority, demand)) {
           const inputOwner = releaseInput; releaseInput = undefined;
-          void this.options.persistArtifact('templates', key, artifact, lod, dev, identity, inputOwner);
+          void Promise.resolve(this.options.persistArtifact('templates', key, artifact, lod, dev, identity, inputOwner)).catch(reportBackgroundError);
         }
         const templateStarted = performance.now();
         const row = { bounds: new THREE.Box3().setFromObject(parsed.scene), template: new DevGlbTemplate(dev, parsed.scene, this.options.session), sha: artifact.sha, status: artifact.result.status, diagnostics: artifact.result.diagnostics, task: identity };

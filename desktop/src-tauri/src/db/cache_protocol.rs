@@ -16,9 +16,9 @@ const BINARY_CACHE_REQUEST_HEADER: usize = 9;
 
 const MAX_BINARY_CACHE_METADATA_BYTES: usize = 16 * 1024;
 
-pub(super) const MAX_BATCH_CACHE_FILES: usize = 200_000;
 
-pub(super) const MAX_BATCH_CACHE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+
+
 
 #[derive(Debug, Deserialize)]
 pub(super) struct BinaryCacheWriteMeta {

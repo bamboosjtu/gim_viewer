@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import type { AppState, SelectionCommitGuard } from '../app/state.js';
+import type { ViewerState as AppState } from '../shared/viewerState.js';
+import type { SelectionCommitGuard } from '../shared/selectionContracts.js';
 import type { ViewerContext } from './viewerEngine.js';
 
 export const SELECTION_AMBER = 0xf59e0b;

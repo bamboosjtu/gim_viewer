@@ -21,18 +21,40 @@ const viewerBridgeImports = new Set([
   'viewer/ifcEntryLoader.ts:@desktop/database.js',
   'viewer/ifcRegionalRuntime.ts:@desktop/ifcLodCache.js',
 ]);
-for (const layer of ['engineering','gim','viewer','ui']) for (const path of files(resolve(root,layer))) {
+for (const layer of ['engineering','gim','viewer','ui','services','app']) for (const path of files(resolve(root,layer))) {
   const ast = ts.createSourceFile(path, readFileSync(path,'utf8'), ts.ScriptTarget.Latest, true);
+  const localPath = relative(root, path).replaceAll('\\', '/');
+  const resolverFactories = new Set(['createEntryResolver']);
+  for (const statement of ast.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)
+      || !statement.moduleSpecifier.text.endsWith('/entryResolver.js')) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (bindings && ts.isNamedImports(bindings)) for (const binding of bindings.elements) {
+      if ((binding.propertyName ?? binding.name).text === 'createEntryResolver') resolverFactories.add(binding.name.text);
+    }
+  }
   function visit(node) {
+    if (localPath !== 'gim/entryResolver.ts' && ts.isCallExpression(node)
+      && (ts.isIdentifier(node.expression) ? resolverFactories.has(node.expression.text)
+        : ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'createEntryResolver')) {
+      let enumeratesKeys = false;
+      const inspect = child => {
+        if (ts.isCallExpression(child) && ts.isPropertyAccessExpression(child.expression)
+          && child.expression.name.text === 'keys') enumeratesKeys = true;
+        ts.forEachChild(child, inspect);
+      };
+      node.arguments.forEach(inspect);
+      if (enumeratesKeys) failures.push(`${localPath}: full archive index bypasses reuse; use getFileEntryResolver(files) instead of createEntryResolver(files.keys())`);
+    }
     const specifier = ts.isImportDeclaration(node) || ts.isExportDeclaration(node) ? node.moduleSpecifier
       : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
     if (specifier && ts.isStringLiteral(specifier)) {
       const name = specifier.text;
       const target = name.startsWith('.') ? relative(root,resolve(dirname(path),name)).replaceAll('\\','/').split('/')[0] : name;
       const banned = layer === 'engineering' ? /^(?:app|gim|viewer|ui|services|@desktop|@tauri-apps|three|web-ifc|maplibre)/
-        : layer === 'gim' ? /^(?:app|services|viewer|ui|@desktop|@tauri-apps)/ : layer==='ui'?/^(?:@desktop|@tauri-apps)/:/^(?:services|ui|@desktop|@tauri-apps)/;
+        : layer === 'gim' ? /^(?:app|services|viewer|ui|@desktop|@tauri-apps)/ : layer==='ui'?/^(?:@desktop|@tauri-apps)/:layer==='services'?/^(?:ui)/:layer==='app'?/^(?:gim)/:/^(?:app|services|ui|@desktop|@tauri-apps)/;
       const exception = viewerBridgeImports.has(`${relative(root,path).replaceAll('\\','/')}:${name}`);
-      if (banned.test(target) && !exception) failures.push(`${relative(root,path)}: forbidden import ${name}`);
+      if (banned.test(target) && !exception && !((layer==='services'||layer==='app') && ts.isImportDeclaration(node) && node.importClause?.isTypeOnly)) failures.push(`${relative(root,path)}: forbidden import ${name}`);
       const local=relative(root,path).replaceAll('\\','/');
       const projection=local==='engineering/inventoryTemplate.ts'||local==='gim/engineering/inventory.ts'?'inventory'
         :['engineering/composition.ts','engineering/compositionTemplate.ts'].includes(local)?'composition'
@@ -93,5 +115,35 @@ for (const family of runtimeFamilies) {
   }
   paths.forEach(visit);
 }
+
+// Whole-source static value graph. Dynamic and type dependencies are counted,
+// but cannot create an eager module-initialization cycle by themselves.
+const all=[...files(root)], graph=new Map(all.map(path=>[path,new Set()]));
+let typeEdges=0,dynamicEdges=0;
+for(const path of all){
+ const ast=ts.createSourceFile(path,readFileSync(path,'utf8'),ts.ScriptTarget.Latest,true);
+ const scan=node=>{
+  const dynamic=ts.isCallExpression(node)&&node.expression.kind===ts.SyntaxKind.ImportKeyword;
+  const declaration=ts.isImportDeclaration(node)||ts.isExportDeclaration(node);
+  const specifier=declaration?node.moduleSpecifier:dynamic?node.arguments[0]:undefined;
+  if(specifier&&ts.isStringLiteral(specifier)&&specifier.text.startsWith('.')){
+   const target=resolve(dirname(path),specifier.text.replace(/\.js$/,'.ts'));
+   const clause=ts.isImportDeclaration(node)?node.importClause:undefined;
+   const typeOnly=node.isTypeOnly||clause?.isTypeOnly||
+     (clause&&!clause.name&&clause.namedBindings&&ts.isNamedImports(clause.namedBindings)&&clause.namedBindings.elements.every(item=>item.isTypeOnly));
+   if(dynamic)dynamicEdges++;else if(typeOnly)typeEdges++;else if(graph.has(target))graph.get(path).add(target);
+  }
+  ts.forEachChild(node,scan);
+ };scan(ast);
+}
+const visiting=new Set(),visited=new Set();
+function checkCycle(path,trail=[]){
+ if(visiting.has(path)){failures.push(`Static value cycle: ${[...trail,path].map(p=>relative(root,p)).join(' -> ')}`);return;}
+ if(visited.has(path))return;visiting.add(path);
+ for(const target of graph.get(path))checkCycle(target,[...trail,path]);
+ visiting.delete(path);visited.add(path);
+}
+all.forEach(path=>checkCycle(path));
+console.log(`Dependency graph: ${all.length} modules, ${typeEdges} type edges, ${dynamicEdges} dynamic edges`);
 if (failures.length) { console.error(failures.join('\n')); process.exitCode=1; }
 else console.log('Engineering, source, viewer and runtime module boundaries passed.');

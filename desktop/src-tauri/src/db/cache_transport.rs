@@ -11,8 +11,7 @@ use super::cache_paths::{
 };
 use super::cache_protocol::{
     BatchCacheFileResult,
-    MAX_BATCH_CACHE_BYTES,
-    MAX_BATCH_CACHE_FILES,
+
     decode_binary_cache_write_request,
     encode_batch_cache_response,
 };
@@ -134,7 +133,7 @@ pub async fn batch_read_cached_files(
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
         ensure_project_exists(&guard, project_id)?;
     }
-    if entry_paths.len() > MAX_BATCH_CACHE_FILES {
+    if entry_paths.len() > gim_native_core::extraction_limits().max_entries {
         return Err("批量读取缓存文件数量超过安全上限".to_string());
     }
     // 同一批次共享 project 根目录；逐条只做相对路径和 reparse-point
@@ -173,7 +172,7 @@ pub async fn batch_read_cached_files(
             total_bytes = total_bytes
                 .checked_add(bytes.len() as u64)
                 .ok_or_else(|| "批量读取缓存文件总量溢出".to_string())?;
-            if total_bytes > MAX_BATCH_CACHE_BYTES {
+            if total_bytes > gim_native_core::extraction_limits().max_total_uncompressed_bytes {
                 return Err("批量读取缓存文件总量超过安全上限".to_string());
             }
             results.push(BatchCacheFileResult {
@@ -205,7 +204,7 @@ pub async fn batch_read_cached_files(
             total_bytes = total_bytes
                 .checked_add(data.len() as u64)
                 .ok_or_else(|| "批量读取缓存文件总量溢出".to_string())?;
-            if total_bytes > MAX_BATCH_CACHE_BYTES {
+            if total_bytes > gim_native_core::extraction_limits().max_total_uncompressed_bytes {
                 return Err("批量读取缓存文件总量超过安全上限".to_string());
             }
         }

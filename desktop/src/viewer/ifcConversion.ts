@@ -1,6 +1,7 @@
 import { beginIfcGeometryWork } from './geometryWorkGate.js';
 import type { ViewerContext } from './viewerEngine.js';
-import type { AppState, ProjectLoadSession } from '../app/state.js';
+import type { ViewerState as AppState } from '../shared/viewerState.js';
+import type { ProjectLoadSession } from '../shared/projectSession.js';
 import type { IfcConversionInput, IfcConversionOutput } from './ifcConversionWorker.js';
 import { perfBegin, perfRecordExternalSpan } from '../utils/perfTimings.js';
 import type { IfcOpeningPolicy } from '../config/features.js';

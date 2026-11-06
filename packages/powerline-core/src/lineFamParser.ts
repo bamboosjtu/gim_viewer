@@ -1,3 +1,5 @@
+import { parseFamPhysicalRecords } from './famRecords.js';
+export { parseFamPhysicalRecords } from './famRecords.js';
 /**
  * 线路工程 FAM 文件解析器（v5）。
  *
@@ -63,8 +65,10 @@ export function parseLineFam(text: string): LineFamProperty[] {
 
   // 清理 BOM（全文）
   const cleaned = text.replace(BOM_RE, '');
+  const records = parseFamPhysicalRecords(cleaned);
 
-  for (const [lineIndex, raw] of cleaned.split(/\r?\n/).entries()) {
+  for (const {sourceLine,rawLine:raw} of records) {
+    const lineIndex=sourceLine-1;
     // 清理不可见控制字符，保留可见内容
     const line = raw.replace(CTRL_RE, '').trim();
     if (!line) continue;

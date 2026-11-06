@@ -1,3 +1,4 @@
+import { loadPresentation } from './presentationPort.js';
 import { readCachedEntry } from '@desktop/database.js';
 import { deleteDevArtifact, readDevArtifactBatch, readDevArtifactResult, type DevArtifactRead } from '@desktop/devLodCache.js';
 import * as THREE from 'three';
@@ -95,7 +96,13 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     });
   }
   private drainCommits(): void {
-    if (this.commitTimer || !this.current()) return;
+    if (!this.current()) {
+      if (this.commitTimer) clearTimeout(this.commitTimer);
+      this.commitTimer = null;
+      for (const commit of this.commits.splice(0)) commit.reject(new DOMException('Geometry session expired', 'AbortError'));
+      return;
+    }
+    if (this.commitTimer) return;
     this.commitTimer = setTimeout(() => {
       this.commitTimer = null;
       const started = performance.now();
@@ -417,7 +424,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     ));
     if (!this.current()) return;
     this.diagnostics.catalogReady = true; this.finishCatalog();
-    const { refreshDeviceBoundsMarkers } = await import('../ui/deviceBoundsMarker.js');
+    const { refreshDeviceBoundsMarkers } = await loadPresentation('deviceBoundsMarker');
     if (!this.current()) return;
     refreshDeviceBoundsMarkers(this.state);
     perfMark('DEV directory ready', { ...this.diagnostics, fingerprints: undefined }, this.perf);

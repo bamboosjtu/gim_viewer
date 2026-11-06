@@ -1,35 +1,19 @@
-import * as OBC from '@thatopen/components';
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import type { ViewerContext } from './viewerEngine.js';
 import { loadRawIfc } from './ifcConversion.js';
 import type { IfcOpeningPolicy } from '../config/features.js';
-import type { AppState, ProjectLoadSession } from '../app/state.js';
-import { isTauri } from '@desktop/runtime.js';
-import { isFragmentsCacheEnabled, FRAGMENTS_CACHE_COMPOSED_KEY } from '../config/features.js';
+import type { ViewerState as AppState } from '../shared/viewerState.js';
+import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
-import {
-  validateFragmentCache,
-  readFragmentCacheFile,
-  writeFragmentCacheFile,
-  upsertFragmentCacheRecord,
-  deleteFragmentCacheRecord,
-} from '@desktop/database.js';
 import {
   perfCurrentSession,
   perfBegin,
   perfRecordExternalSpan,
-  perfRecordFragmentsCacheOperation,
-  perfRecordFragmentsCacheOutcome,
-  perfSetFragmentsCacheEnabled,
 } from '../utils/perfTimings.js';
 import { registerIfcLoadDiagnostic } from './ifcLoadDiagnostics.js';
 import type { IfcRegionalConnectionBatch } from './ifcConversion.js';
 
-/**
- * Fragments 缓存版本键（P0-3）：绑定 @thatopen/fragments 与 web-ifc 包版本，
- * 任一依赖升级自动失效全部 .frag 缓存，避免跨版本加载旧格式。
- */
-const FRAG_CACHE_VERSION = FRAGMENTS_CACHE_COMPOSED_KEY;
 
 /**
  * 输出 IFC 模型的位置诊断日志（仅 debug 模式）。
@@ -60,27 +44,7 @@ function logIfcModelBBox(ctx: ViewerContext, modelId: string, label: string): vo
   });
 }
 
-/**
- * 面向 GIM IFC entry 的加载器。
- *
- * 核心改进：Fragments 缓存命中时不读取 IFC buffer（lazy getIfcBuffer）。
- *
- * 流程：
- * 1. modelId 已加载 → return
- * 2. ENABLE_FRAGMENTS_CACHE=true 且 Tauri 且 currentProjectId 存在：
- *    a. validateFragmentCache（不读 IFC）
- *    b. valid → readFragmentCacheFile → ctx.fragments.core.load
- *    c. 加载后校验 loadedModels / fragments.list，失败则回退
- * 3. 缓存无效或加载失败 → 调用 getIfcBuffer() → ctx.ifcLoader.load
- * 4. IFC 加载成功且 ENABLE_FRAGMENTS_CACHE=true → 写 .frag
- * 5. 任何 Fragments 失败回退 IFC；IFC 失败才抛出
- *
- * 日志策略（M3-Final 降噪）：
- * - [Perf] / [IFC Loader] / [Fragments Cache] 命中/未命中 → debugLog（仅开发环境）
- * - 缓存损坏 / 读取失败 / 校验失败 → console.warn（始终输出）
- * - 错误抛出 → 上层 try/catch 捕获并 console.error
- */
-
+/** Source-backed IFC loading with explicit opening policy and session ownership. */
 export interface IfcEntryLike {
   name: string;
   path: string;
@@ -88,15 +52,15 @@ export interface IfcEntryLike {
 }
 
 /** 供变电加载性能诊断使用；不改变 IFC/Fragments 业务结果。 */
-export type IfcLoadSource = 'fragments-cache' | 'lod-cache' | 'ifc';
+export type IfcLoadSource = 'lod-cache' | 'ifc';
 
 /**
- * 加载 GIM IFC entry，优先 Fragments 缓存（命中时不读 IFC buffer）。
+ * 加载 GIM IFC entry，按浏览 LOD 或显式开洞策略读取源文件。
  *
  * @param ctx Viewer 上下文
  * @param state 应用状态
  * @param entry IFC entry（含 name/path/modelId）
- * @param getIfcBuffer lazy 函数，仅在 Fragments 缓存未命中时调用
+ * @param getIfcBuffer lazy 源读取函数
  * @param onProgress IFC 转换进度回调
  */
 export async function loadIfcEntry(
@@ -147,7 +111,6 @@ export async function loadIfcEntry(
   state.registerIfcRuntimeModel(modelId, runtimeModelId, session);
   if (ctx.fragments.list.has(runtimeModelId)) return;
 
-  const projectId = session.projectId;
   const openingPolicy = options.openingPolicy ?? 'bim-lod';
   if(openingPolicy==='bim-lod'){
     const {loadBimIfc}=await import('./ifcBimLoader.js');
@@ -160,41 +123,7 @@ export async function loadIfcEntry(
     if(model)options.onLoadSource?.(model.object.userData.ifcLodCacheHit?'lod-cache':'ifc');
     return;
   }
-  const cacheEnabled = isFragmentsCacheEnabled();
-  perfSetFragmentsCacheEnabled(cacheEnabled, perfSessionId);
-  if (!cacheEnabled) {
-    debugLog(DEBUG_IFC_LOAD, '[Fragments Cache] disabled, using IFC loader');
-  }
-  const sourceGimSha256 = session.sourceSha256?.trim() || '';
-  // Simplified geometry must never read or overwrite a full-fidelity cache.
-  const canUseCache = openingPolicy === 'full' && cacheEnabled && isTauri() && projectId != null && !!entryPath && !!sourceGimSha256;
-
-  // 2. 尝试 Fragments 缓存（不读 IFC buffer）
-  if (canUseCache && entryPath) {
-    const cacheStarted = performance.now();
-    const cacheHit = await tryLoadFromFragmentsCache(
-      ctx, state, runtimeModelId, modelId, entryPath, sourceGimSha256, session, perfSessionId,
-    );
-    perfRecordExternalSpan(
-      `变电 IFC Fragments cache restore composite · ${entryPath}`,
-      performance.now() - cacheStarted,
-      { entryPath, cacheHit, phase: 'cache-read/deserialize/model-callback composite' },
-      perfSessionId,
-    );
-    if (!isCurrent()) return;
-    if (cacheHit) {
-      options.onLoadSource?.('fragments-cache');
-      debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 命中: ${entryPath} (modelId=${modelId})`);
-      // 诊断：缓存命中路径同样输出 IFC bbox（与 MOD/STL bbox 对比）
-      logIfcModelBBox(ctx, runtimeModelId, 'cache-hit');
-      return;
-    }
-  }
-
   if (!isCurrent()) return;
-
-  // 3. 缓存无效或未启用 → lazy 读取 IFC buffer
-  debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 未命中: ${entryPath ?? '(无 entryPath)'} (modelId=${modelId})`);
   options.onLoadSource?.('ifc');
 
   const tIfcRead = performance.now();
@@ -214,16 +143,14 @@ export async function loadIfcEntry(
     sessionId: perfSessionId,
   });
   const tIfcLoad = performance.now();
-  const sourceIfcSize = ifcBuffer.byteLength;
   const endWebIfcConversion = perfBegin(
     `变电 IFC web-ifc conversion · ${entryPath}`,
     { entryPath, phase: 'web-ifc conversion', source: 'ifc' },
     { id: perfSessionId },
   );
   let webIfcLoadFailed = false;
-  let model: any;
   try {
-    model = await loadRawIfc(ctx, state, session, ifcBuffer, runtimeModelId, entryPath || name, reportProgress, perfSessionId,
+    await loadRawIfc(ctx, state, session, ifcBuffer, runtimeModelId, entryPath || name, reportProgress, perfSessionId,
       { transferInput: options.transferInput, openingPolicy });
   } catch (err) {
     webIfcLoadFailed = true;
@@ -248,7 +175,7 @@ export async function loadIfcEntry(
   // load() 可能在旧工程失效后才完成；模型已进入 Fragments 时必须立即销毁，
   // 后续不能继续写缓存或刷新当前工程 UI。
   if (!isCurrent()) {
-    try { ctx.fragments.core.disposeModel(runtimeModelId); } catch { /* 尚未登记时无需清理 */ }
+    try { void Promise.resolve(ctx.fragments.core.disposeModel(runtimeModelId)).catch(reportBackgroundError); } catch { /* 尚未登记时无需清理 */ }
     return;
   }
 
@@ -279,306 +206,4 @@ export async function loadIfcEntry(
   // 4c. 诊断：输出 IFC model 的 bbox（与 MOD/STL bbox 对比，辅助估算 projectSourceToViewer offset）
   logIfcModelBBox(ctx, runtimeModelId, 'ifc-load');
 
-  // 5. 写 .frag 缓存（失败不影响主流程）
-  if (canUseCache && entryPath) {
-    if (!isCurrent()) {
-      try { ctx.fragments.core.disposeModel(runtimeModelId); } catch { /* ignore */ }
-      return;
-    }
-    await tryWriteFragmentsCache(
-      state, model, projectId as number, entryPath, modelId, sourceIfcSize, sourceGimSha256, session, perfSessionId,
-    ).catch((err) => {
-      console.warn(`[Fragments Cache] 写入失败，不影响当前加载: ${entryPath}`, err);
-    });
-  }
-}
-
-/**
- * 尝试从 Fragments 缓存加载模型（不读 IFC buffer）。
- * @returns true 表示加载成功且通过运行时校验；false 表示未命中或加载失败
- */
-async function tryLoadFromFragmentsCache(
-  ctx: ViewerContext,
-  state: AppState,
-  runtimeModelId: string,
-  logicalModelId: string,
-  entryPath: string,
-  sourceGimSha256: string,
-  session: ProjectLoadSession,
-  perfSessionId: number,
-): Promise<boolean> {
-  const projectId = session.projectId;
-  if (projectId == null || !state.isCurrentSession(session)) return false;
-
-  // 2a. 校验缓存（不读 IFC）
-  const tValidate = performance.now();
-  const endValidate = perfBegin(
-    `变电 Fragments cache validate · ${entryPath}`,
-    { entryPath, phase: 'fragments.validate' },
-    { id: perfSessionId },
-  );
-  let validation;
-  try {
-    perfRecordFragmentsCacheOutcome('attempt', perfSessionId);
-    validation = await validateFragmentCache(
-      projectId,
-      entryPath,
-      0,
-      FRAG_CACHE_VERSION,
-      sourceGimSha256,
-      { sessionId: perfSessionId },
-    );
-    perfRecordFragmentsCacheOperation('validate', performance.now() - tValidate, 0, false, perfSessionId);
-    endValidate(undefined, { entryPath, phase: 'fragments.validate', valid: validation.valid });
-  } catch (err) {
-    perfRecordFragmentsCacheOperation('validate', performance.now() - tValidate, 0, true, perfSessionId);
-    endValidate(undefined, { entryPath, phase: 'fragments.validate', failed: true });
-    perfRecordFragmentsCacheOutcome('fallback', perfSessionId);
-    console.warn(`[Fragments Cache] 校验失败，回退 IFC: ${entryPath}`, err);
-    return false;
-  }
-  debugLog(DEBUG_IFC_LOAD, `[Perf] fragment validate: ${Math.round(performance.now() - tValidate)} ms`);
-  if (!state.isCurrentSession(session)) return false;
-
-  // sourceIfcSize 传 0 表示不校验 IFC 大小（因为不读 IFC buffer），但源 GIM
-  // SHA-256 是强身份条件，必须在 Rust 侧完成匹配。
-  if (!validation.valid) {
-    perfRecordFragmentsCacheOutcome('miss', perfSessionId);
-    // 校验已确认记录或文件存在但实际大小不一致时，先删除坏记录和文件。
-    // 这样“截断但非空”的 .frag 不会在每次打开时重复命中同一坏缓存，
-    // 也满足损坏缓存自愈后回退 IFC 的语义；版本/SHA 不匹配则保留旧
-    // 记录，便于诊断并由后续成功写入覆盖。
-    if (validation.has_record
-      && validation.fragment_file_exists
-      && !validation.fragment_file_size_match) {
-      const tDelete = performance.now();
-      let deleteFailed = false;
-      await deleteFragmentCacheRecord(projectId, entryPath, { sessionId: perfSessionId }).catch((err) => {
-        deleteFailed = true;
-        console.warn(`[Fragments Cache] 删除尺寸不一致的缓存失败，继续回退 IFC: ${entryPath}`, err);
-      });
-      perfRecordFragmentsCacheOperation('delete', performance.now() - tDelete, 0, deleteFailed, perfSessionId);
-    }
-    if (validation.has_record && !validation.fragments_version_match) {
-      console.warn(`[Fragments Cache] 版本不匹配: ${entryPath} (stored=${validation.stored_fragments_version}, current=${validation.current_fragments_version})`);
-    }
-    return false;
-  }
-
-  // 2b. 读取 .frag
-  const tRead = performance.now();
-  const endRead = perfBegin(
-    `变电 Fragments cache read · ${entryPath}`,
-    { entryPath, phase: 'fragments.read' },
-    { id: perfSessionId },
-  );
-  let fragBytes: Uint8Array;
-  try {
-    fragBytes = await readFragmentCacheFile(projectId, entryPath, { sessionId: perfSessionId });
-    perfRecordFragmentsCacheOperation('read', performance.now() - tRead, fragBytes.byteLength, false, perfSessionId);
-    endRead(undefined, { entryPath, phase: 'fragments.read', bytes: fragBytes.byteLength });
-  } catch (err) {
-    perfRecordFragmentsCacheOperation('read', performance.now() - tRead, 0, true, perfSessionId);
-    endRead(undefined, { entryPath, phase: 'fragments.read', failed: true });
-    perfRecordFragmentsCacheOutcome('fallback', perfSessionId);
-    console.warn(`[Fragments Cache] 读取失败，删除坏缓存并回退 IFC: ${entryPath}`, err);
-    // 读取失败可能是在工程切换后才返回；旧 session 不得删除新工程
-    // （同一 projectId 换源文件时尤其重要）的缓存记录。
-    if (state.isCurrentSession(session)) {
-      const tDelete = performance.now();
-      let deleteFailed = false;
-      await deleteFragmentCacheRecord(projectId, entryPath, { sessionId: perfSessionId }).catch(() => { deleteFailed = true; });
-      perfRecordFragmentsCacheOperation('delete', performance.now() - tDelete, 0, deleteFailed, perfSessionId);
-    }
-    return false;
-  }
-  debugLog(DEBUG_IFC_LOAD, `[Perf] fragment read: ${Math.round(performance.now() - tRead)} ms`);
-  if (!state.isCurrentSession(session)) return false;
-
-  // validate 与 read 之间文件可能被截断（另一个进程清理缓存、磁盘故障
-  // 或 IPC 传输异常）。不要把短 buffer 交给 Fragments；否则某些版本可能
-  // 接受它并产生一个“命中但模型不完整”的假成功。
-  const expectedFragmentSize = Number(validation.fragment_file_size);
-  if (fragBytes.byteLength === 0
-    || (Number.isFinite(expectedFragmentSize)
-      && expectedFragmentSize > 0
-      && fragBytes.byteLength !== expectedFragmentSize)) {
-    perfRecordFragmentsCacheOutcome('fallback', perfSessionId);
-    const reason = fragBytes.byteLength === 0
-      ? '缓存文件为空'
-      : `缓存文件尺寸变化（expected=${expectedFragmentSize}, actual=${fragBytes.byteLength}）`;
-    console.warn(`[Fragments Cache] ${reason}，删除坏缓存并回退 IFC: ${entryPath}`);
-    const tDelete = performance.now();
-    let deleteFailed = false;
-    await deleteFragmentCacheRecord(projectId, entryPath, { sessionId: perfSessionId }).catch(() => { deleteFailed = true; });
-    perfRecordFragmentsCacheOperation('delete', performance.now() - tDelete, 0, deleteFailed, perfSessionId);
-    return false;
-  }
-
-  // 2c. 反序列化加载
-  const tLoad = performance.now();
-  const fragmentSize = fragBytes.byteLength;
-  try {
-    const camera = (ctx.world.camera as unknown as OBC.SimpleCamera).three;
-    registerIfcLoadDiagnostic(runtimeModelId, {
-      entryPath,
-      source: 'fragments-cache',
-      sessionId: perfSessionId,
-    });
-    const endCoreLoad = perfBegin(
-      `变电 Fragments cache core.load · ${entryPath}`,
-      { entryPath, phase: 'fragments.core.load', source: 'fragments-cache', bytes: fragBytes.byteLength },
-      { id: perfSessionId },
-    );
-    const fragmentBuffer = fragBytes.buffer instanceof ArrayBuffer && fragBytes.byteOffset === 0 && fragmentSize === fragBytes.buffer.byteLength
-      ? fragBytes.buffer : fragBytes.slice().buffer;
-    let coreLoadFailed = false;
-    try {
-      await ctx.fragments.core.load(fragmentBuffer, { modelId: runtimeModelId, camera });
-    } catch (err) {
-      coreLoadFailed = true;
-      throw err;
-    } finally {
-      endCoreLoad(undefined, {
-        entryPath,
-        phase: 'fragments.core.load',
-        source: 'fragments-cache',
-        bytes: fragmentSize,
-        failed: coreLoadFailed,
-      });
-    }
-    const loadMs = Math.round(performance.now() - tLoad);
-    perfRecordFragmentsCacheOperation('load', performance.now() - tLoad, fragmentSize, false, perfSessionId);
-    debugLog(DEBUG_IFC_LOAD, `[Perf] fragment load: ${loadMs} ms`);
-    if (!state.isCurrentSession(session)) {
-      try { await ctx.fragments.list.delete(runtimeModelId); } catch { /* ignore */ }
-      return false;
-    }
-
-    // 2d. 运行时校验：确认模型确实进入 loadedModels 和 fragments.list
-    const inLoadedModels = state.loadedModels.has(logicalModelId);
-    const inFragmentsList = ctx.fragments.list.has(runtimeModelId);
-    let childCount = 0;
-    const model = ctx.fragments.list.get(runtimeModelId);
-    if (model) {
-      childCount = model.object.children.length;
-    }
-
-    debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 运行时校验: modelId=${logicalModelId}, runtimeModelId=${runtimeModelId}, fragBytes=${fragBytes.byteLength}, inLoadedModels=${inLoadedModels}, inFragmentsList=${inFragmentsList}, children=${childCount}, loadMs=${loadMs}`);
-
-    if (!inLoadedModels || !inFragmentsList) {
-      perfRecordFragmentsCacheOutcome('fallback', perfSessionId);
-      console.warn(`[Fragments Cache] 运行时校验失败：模型未进入 loadedModels 或 fragments.list，回退 IFC: ${entryPath}`);
-      // 尝试清理失败的加载
-      try {
-        if (inFragmentsList) {
-          await ctx.fragments.list.delete(runtimeModelId);
-        }
-      } catch {
-        // 忽略清理失败
-      }
-      return false;
-    }
-
-    perfRecordFragmentsCacheOutcome('hit', perfSessionId);
-    return true;
-  } catch (err) {
-    perfRecordFragmentsCacheOperation('load', performance.now() - tLoad, fragmentSize, true, perfSessionId);
-    perfRecordFragmentsCacheOutcome('fallback', perfSessionId);
-    console.warn(`[Fragments Cache] 反序列化失败，删除坏缓存并回退 IFC: ${entryPath}`, err);
-    debugLog(DEBUG_IFC_LOAD, `[Perf] fragment load: ${Math.round(performance.now() - tLoad)} ms (failed)`);
-    // core.load 也可能在工程切换后才 reject；不让旧任务清理当前
-    // 工程同路径的新缓存。当前工程仍有效时才执行自愈删除。
-    if (state.isCurrentSession(session)) {
-      const tDelete = performance.now();
-      let deleteFailed = false;
-      await deleteFragmentCacheRecord(projectId, entryPath, { sessionId: perfSessionId }).catch(() => { deleteFailed = true; });
-      perfRecordFragmentsCacheOperation('delete', performance.now() - tDelete, 0, deleteFailed, perfSessionId);
-    }
-    return false;
-  }
-}
-
-/**
- * 尝试将已加载的 Fragments 模型写入缓存。
- * 任何步骤失败均 console.warn 并返回，不抛出。
- */
-async function tryWriteFragmentsCache(
-  state: AppState,
-  model: { getBuffer(raw?: boolean): Promise<ArrayBuffer> },
-  projectId: number,
-  entryPath: string,
-  modelId: string,
-  sourceIfcSize: number,
-  sourceGimSha256: string,
-  session: ProjectLoadSession,
-  perfSessionId: number,
-): Promise<void> {
-  if (!state.isCurrentSession(session)) return;
-  // 序列化
-  const tSerialize = performance.now();
-  const endSerialize = perfBegin(
-    `变电 Fragments cache serialize · ${entryPath}`,
-    { entryPath, phase: 'fragments.serialize', source: 'ifc' },
-    { id: perfSessionId },
-  );
-  let buffer: ArrayBuffer;
-  try {
-    buffer = await model.getBuffer();
-    perfRecordFragmentsCacheOperation('serialize', performance.now() - tSerialize, buffer.byteLength, false, perfSessionId);
-    endSerialize(undefined, { entryPath, phase: 'fragments.serialize', bytes: buffer.byteLength });
-  } catch (err) {
-    perfRecordFragmentsCacheOperation('serialize', performance.now() - tSerialize, 0, true, perfSessionId);
-    endSerialize(undefined, { entryPath, phase: 'fragments.serialize', failed: true });
-    console.warn(`[Fragments Cache] 序列化失败，跳过缓存写入: ${entryPath}`, err);
-    return;
-  }
-  if (!state.isCurrentSession(session)) return;
-  debugLog(DEBUG_IFC_LOAD, `[Perf] fragment serialize: ${Math.round(performance.now() - tSerialize)} ms`);
-
-  const bytes = new Uint8Array(buffer);
-  if (bytes.byteLength === 0) {
-    console.warn(`[Fragments Cache] 序列化结果为空，跳过缓存写入: ${entryPath}`);
-    return;
-  }
-
-  // 写文件
-  const tWrite = performance.now();
-  const endWrite = perfBegin(
-    `变电 Fragments cache write · ${entryPath}`,
-    { entryPath, phase: 'fragments.write', source: 'ifc' },
-    { id: perfSessionId },
-  );
-  let writeResult: { path: string; size: number };
-  try {
-    writeResult = await writeFragmentCacheFile(projectId, entryPath, bytes, sourceGimSha256, { sessionId: perfSessionId });
-    perfRecordFragmentsCacheOperation('write', performance.now() - tWrite, writeResult.size, false, perfSessionId);
-    endWrite(undefined, { entryPath, phase: 'fragments.write', bytes: writeResult.size });
-  } catch (err) {
-    perfRecordFragmentsCacheOperation('write', performance.now() - tWrite, 0, true, perfSessionId);
-    endWrite(undefined, { entryPath, phase: 'fragments.write', failed: true });
-    console.warn(`[Fragments Cache] 写入文件失败，不影响当前加载: ${entryPath}`, err);
-    return;
-  }
-  if (!state.isCurrentSession(session)) return;
-  debugLog(DEBUG_IFC_LOAD, `[Perf] fragment write: ${Math.round(performance.now() - tWrite)} ms`);
-
-  // 写记录
-  const tUpsert = performance.now();
-  const endUpsert = perfBegin(
-    `变电 Fragments cache upsert · ${entryPath}`,
-    { entryPath, phase: 'fragments.upsert', source: 'ifc' },
-    { id: perfSessionId },
-  );
-  try {
-    await upsertFragmentCacheRecord(projectId, entryPath, modelId, sourceIfcSize, writeResult.size, FRAG_CACHE_VERSION, sourceGimSha256, { sessionId: perfSessionId });
-    perfRecordFragmentsCacheOperation('upsert', performance.now() - tUpsert, 0, false, perfSessionId);
-    endUpsert(undefined, { entryPath, phase: 'fragments.upsert' });
-    debugLog(DEBUG_IFC_LOAD, `[Fragments Cache] 写入成功: ${entryPath} (size=${writeResult.size})`);
-  } catch (err) {
-    perfRecordFragmentsCacheOperation('upsert', performance.now() - tUpsert, 0, true, perfSessionId);
-    endUpsert(undefined, { entryPath, phase: 'fragments.upsert', failed: true });
-    console.warn(`[Fragments Cache] 写入记录失败，不影响当前加载: ${entryPath}`, err);
-  }
-  debugLog(DEBUG_IFC_LOAD, `[Perf] fragment upsert: ${Math.round(performance.now() - tUpsert)} ms`);
 }

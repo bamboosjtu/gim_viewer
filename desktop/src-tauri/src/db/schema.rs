@@ -2,7 +2,7 @@
 
 use rusqlite::Connection;
 
-pub(super) fn initialize_schema(conn: &Connection) -> Result<(), String> {
+fn create_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS gim_project (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,21 +122,7 @@ pub(super) fn initialize_schema(conn: &Connection) -> Result<(), String> {
         );
         CREATE INDEX IF NOT EXISTS idx_substation_dev_property_path ON substation_dev_property(project_id, dev_path);
 
-        CREATE TABLE IF NOT EXISTS substation_fragment_cache (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER NOT NULL,
-            entry_path TEXT NOT NULL,
-            model_id TEXT NOT NULL,
-            source_gim_sha256 TEXT NOT NULL DEFAULT '',
-            source_ifc_size INTEGER NOT NULL,
-            fragment_file_size INTEGER NOT NULL,
-            fragments_version TEXT NOT NULL,
-            created_at_ms INTEGER NOT NULL,
-            updated_at_ms INTEGER NOT NULL,
-            UNIQUE(project_id, entry_path)
-        );
-        CREATE INDEX IF NOT EXISTS idx_substation_fragment_cache_project ON substation_fragment_cache(project_id);
-        CREATE INDEX IF NOT EXISTS idx_substation_fragment_cache_entry ON substation_fragment_cache(project_id, entry_path);",
+        ",
     )
     .map_err(|e| format!("初始化数据库表失败: {}", e))?;
 
@@ -290,5 +276,25 @@ pub(super) fn initialize_schema(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| format!("初始化几何引用链缓存表失败: {}", e))?;
 
+    Ok(())
+}
+
+/// Unreleased physical schema. Remove the development database after structural changes.
+pub(super) fn initialize_schema(conn: &Connection) -> Result<(), String> {
+    create_schema(conn)?;
+    conn.pragma_update(None,"user_version",1).map_err(|e|e.to_string())
+}
+
+pub(super) const PER_PROJECT_TABLES: &[&str] = &[
+    "substation_gim_entry", "substation_cbm_node", "substation_ifc_model",
+    "substation_file_dev_entry", "substation_fam_property", "substation_dev_property",
+    "substation_dev_solid_model", "substation_dev_sub_device", "substation_phm_solid_model",
+    "powerline_cbm_node", "powerline_cbm_child", "powerline_cbm_ref", "powerline_file_stat",
+    "powerline_fam_property", "powerline_dev_property", "powerline_cache_session",
+];
+pub(super) fn clear_project_tables(conn: &Connection, project_id: i64) -> Result<(), String> {
+    for table in PER_PROJECT_TABLES {
+        conn.execute(&format!("DELETE FROM {table} WHERE project_id=?1"), [project_id]).map_err(|e|e.to_string())?;
+    }
     Ok(())
 }

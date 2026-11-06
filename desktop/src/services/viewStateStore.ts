@@ -1,3 +1,4 @@
+import { loadPresentation } from './presentationPort.js';
 import type { AppState } from '../app/state.js';
 
 /**
@@ -50,7 +51,7 @@ function loadStored(state: AppState): StoredViewState | null {
 export function restoreTreeState(state: AppState): void {
   const stored = loadStored(state);
   if (!stored) return;
-  void import('../ui/cbmTreeView.js').then(async ({ expandTreeToPaths }) => {
+  void loadPresentation('cbmTreeView').then(async ({ expandTreeToPaths }) => {
     await expandTreeToPaths((stored.expandedPaths ?? []).slice(0, 48));
   }).catch(() => { /* tree restore is best effort */ });
 }

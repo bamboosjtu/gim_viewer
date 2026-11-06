@@ -8,7 +8,6 @@ use super::cache_paths::{
     cache_project_root_for_batch,
     readable_source_of_size,
 };
-use super::fragments_cache::{check_fragments_cache_complete};
 use super::geometry_cache::{
     check_geometry_cache_manifest,
     check_geometry_cache_manifest_structure,
@@ -102,8 +101,6 @@ pub struct GimCacheValidation {
     pub substation_properties_complete: bool,
     /// DEV GLB geometry cache 是否有效。
     pub geometry_cache_valid: bool,
-    /// 所有 IFC Fragments cache 是否完整有效（默认关闭时通常为 false）。
-    pub fragments_cache_valid: bool,
 }
 
 /// v5: 线路工程 FAM/DEV 属性缓存诊断结果（内部辅助结构，供 validate/diagnostic 共用）
@@ -311,10 +308,11 @@ fn validate_gim_cache_blocking(
     let _profile = if expected_project_type == "substation" { Some(ValidationProfile::begin()) } else { None };
     let _total = ValidationSpan::new("total");
     let lock_timing = ValidationSpan::new("database_lock_wait");
-    let conn = state
-        .0
-        .lock()
-        .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+    let locked = state.0.lock().map_err(|e| format!("获取数据库锁失败: {e}"))?;
+    let revision = locked.query_row("SELECT total_changes()", [], |row| row.get::<_, i64>(0)).map_err(|e|e.to_string())?;
+    let data_version:i64=locked.pragma_query_value(None,"data_version",|r|r.get(0)).map_err(|e|e.to_string())?;
+    let conn=validation_snapshot(&locked)?;
+    drop(locked);
     drop(lock_timing);
     ensure_project_exists(&conn, project_id)?;
 
@@ -529,17 +527,6 @@ fn validate_gim_cache_blocking(
         )
     };
 
-    let fragments_cache_valid = if is_line {
-        false
-    } else {
-        check_fragments_cache_complete(
-            &app_handle,
-            &conn,
-            project_id,
-            &source_sha256,
-            ifc_entry_count,
-        )
-    };
     let valid = semantic_cache_valid && stored_project_type_match;
     let substation_semantic_cache_valid = !is_line && semantic_cache_valid && stored_project_type_match;
 
@@ -589,6 +576,12 @@ fn validate_gim_cache_blocking(
         }
     }
 
+    // The snapshot must not outlive a concurrent publish/delete on the owner connection.
+    let locked = state.0.lock().map_err(|e|e.to_string())?;
+    if locked.query_row("SELECT total_changes()", [], |row| row.get::<_, i64>(0)).map_err(|e|e.to_string())? != revision || locked.pragma_query_value(None,"data_version",|r|r.get::<_,i64>(0)).map_err(|e|e.to_string())? != data_version {
+        return Err("缓存校验期间数据库已更新，请重试".to_string());
+    }
+    super::ensure_project_source_sha(&locked, project_id, Some(&source_sha256))?;
     Ok(GimCacheValidation {
         project_id,
         has_index,
@@ -628,6 +621,19 @@ fn validate_gim_cache_blocking(
         substation_semantic_cache_valid,
         substation_properties_complete,
         geometry_cache_valid: geometry_cache_version_match,
-        fragments_cache_valid,
     })
+}
+
+pub(super) fn validation_snapshot(locked:&rusqlite::Connection)->Result<rusqlite::Connection,String> {
+    let mut conn = if let Some(path) = locked.path().filter(|path|!path.is_empty()) {
+        let snapshot=rusqlite::Connection::open_with_flags(path,rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e|e.to_string())?;
+        snapshot.execute_batch("BEGIN").map_err(|e|e.to_string())?;
+        snapshot.query_row("SELECT COUNT(*) FROM sqlite_master",[],|r|r.get::<_,i64>(0)).map_err(|e|e.to_string())?;
+        snapshot
+    } else {rusqlite::Connection::open_in_memory().map_err(|e|e.to_string())?};
+    if locked.path().map(|path|path.is_empty()).unwrap_or(true) {
+        let backup=rusqlite::backup::Backup::new(locked,&mut conn).map_err(|e|e.to_string())?;
+        backup.run_to_completion(256,std::time::Duration::ZERO,None).map_err(|e|e.to_string())?;
+    }
+    Ok(conn)
 }

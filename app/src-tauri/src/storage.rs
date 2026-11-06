@@ -59,7 +59,7 @@ pub fn list(root: &Path) -> Vec<ProjectMeta> {
 }
 pub fn source(root: &Path, id: &str, path: &str) -> Result<String, String> {
     if path.len() > 4096 || !["cbm", "fam", "dev", "phm", "mod"].contains(&path.rsplit('.').next().unwrap_or("").to_lowercase().as_str()) { return Err("只允许查看业务对象关联的文本来源".into()); }
-    database(root, id)?.query_row("SELECT text FROM entries WHERE key=?1", [path.replace('\\', "/").to_lowercase()], |r| r.get(0)).map_err(error)
+    database(root, id)?.query_row("SELECT text FROM entries WHERE key=?1", [normalize_entry_key(path)], |r| r.get(0)).map_err(error)
 }
 fn stored_text_entries(root: &Path, id: &str) -> Result<Vec<TextEntry>, String> {
     let db = database(root, id)?;
@@ -84,11 +84,11 @@ fn rebuild_entries(root: &Path, id: &str) -> Result<(), String> {
         let mut db = Connection::open(&pending).map_err(error)?;
         db.execute_batch("PRAGMA journal_mode=DELETE; CREATE TABLE entries(key TEXT PRIMARY KEY,path TEXT NOT NULL,text TEXT NOT NULL); CREATE TABLE semantics(parser TEXT PRIMARY KEY,json TEXT NOT NULL); CREATE TABLE previews(key TEXT PRIMARY KEY,json TEXT NOT NULL);").map_err(error)?;
         let tx = db.transaction().map_err(error)?;
-        let quota = ExtractionQuota { max_archive_bytes: 256*1024*1024, max_entries: 100000, max_file_bytes: 64*1024*1024, max_total_uncompressed_bytes: 512*1024*1024, max_compression_ratio: 200 };
+        let quota = gim_native_core::extraction_limits().mobile.clone();
         let decoded = extract_from_path_with_quota(&source, &quota, |path, bytes| {
             if ["cbm","fam","dev","phm","mod"].contains(&path.rsplit('.').next().unwrap_or("").to_lowercase().as_str()) {
                 let text = String::from_utf8(bytes).map_err(|_| format!("文本编码无效: {}", path))?;
-                tx.execute("INSERT INTO entries(key,path,text) VALUES(?1,?2,?3)",params![path.replace('\\',"/").to_lowercase(),path,text.trim_start_matches('\u{feff}')]).map_err(error)?;
+                tx.execute("INSERT INTO entries(key,path,text) VALUES(?1,?2,?3)",params![normalize_entry_key(&path),path,text.trim_start_matches('\u{feff}')]).map_err(error)?;
             }
             Ok(())
         })?;
@@ -169,13 +169,13 @@ pub fn prepare(root: &Path, input: ImportFile, cancelled: &AtomicBool, mut progr
         db.execute_batch("PRAGMA journal_mode=DELETE; CREATE TABLE entries(key TEXT PRIMARY KEY,path TEXT NOT NULL,text TEXT NOT NULL); CREATE TABLE semantics(parser TEXT PRIMARY KEY,json TEXT NOT NULL); CREATE TABLE previews(key TEXT PRIMARY KEY,json TEXT NOT NULL);").map_err(error)?;
         let tx = db.transaction().map_err(error)?; let mut count = 0u64;
         progress("解压归档", 0, None);
-        let quota = ExtractionQuota { max_archive_bytes: 256*1024*1024, max_entries: 100000, max_file_bytes: 64*1024*1024, max_total_uncompressed_bytes: 512*1024*1024, max_compression_ratio: 200 };
+        let quota = gim_native_core::extraction_limits().mobile.clone();
         let metadata = extract_from_path_with_quota(&input_path, &quota, |path, bytes| {
             if cancelled.load(Ordering::Relaxed) { return Err("导入已取消".into()); }
             count += 1;
             if ["cbm", "fam", "dev", "phm", "mod"].contains(&path.rsplit('.').next().unwrap_or("").to_lowercase().as_str()) {
                 let text = String::from_utf8(bytes).map_err(|_| format!("文本编码无效: {}", path))?;
-                tx.execute("INSERT INTO entries(key,path,text) VALUES (?1,?2,?3)", params![path.to_lowercase(), path, text.trim_start_matches('\u{feff}')]).map_err(error)?;
+                tx.execute("INSERT INTO entries(key,path,text) VALUES (?1,?2,?3)", params![normalize_entry_key(&path), path, text.trim_start_matches('\u{feff}')]).map_err(error)?;
             }
             if count % 200 == 0 { progress("解压归档", count, None); } Ok(())
         })?;
@@ -223,7 +223,7 @@ mod tests {
         serde_json::json!({"id":id,"sourceSha256":id,"sourceSize":size,"parserVersion":PARSER,"name":name,"objects":[{"id":"root","kind":"project"}],"rawWires":[],"tree":{"objectId":"root","children":[]},"counts":{"project":1,"line":0,"strain":0,"tower":0,"span":0,"cross":0}})
     }
     #[test] fn damaged_cache_rebuild_preserves_original_source_and_cleans_pending_database() {
-        let root = std::env::temp_dir().join(format!("gim-repair-{}-{}", std::process::id(), now())); clean_imports(&root).unwrap();
+        let root = crate::workspace_test_temp().join(format!("gim-repair-{}-{}", std::process::id(), now())); clean_imports(&root).unwrap();
         let mut archive = std::io::Cursor::new(Vec::new());
         { let mut zip = zip::ZipWriter::new(&mut archive); zip.start_file("Cbm/project.cbm",zip::write::SimpleFileOptions::default()).unwrap(); std::io::Write::write_all(&mut zip,b"ENTITYNAME=F1System").unwrap(); zip.finish().unwrap(); }
         let mut bytes = b"GIMPKGT".to_vec(); bytes.extend([0u8;32]); bytes.extend(archive.into_inner());
@@ -237,7 +237,7 @@ mod tests {
     }
     #[test] fn project_ids_cannot_escape_private_root() { assert!(validate_id("../../outside").is_err()); assert!(validate_id(&"a".repeat(64)).is_ok()); assert!(validate_id(&"A".repeat(64)).is_err()); }
     #[test] fn cancellation_cleans_staging_and_discard_cannot_leave_import_scope() {
-        let root = std::env::temp_dir().join(format!("gim-cancel-{}-{}", std::process::id(), now()));
+        let root = crate::workspace_test_temp().join(format!("gim-cancel-{}-{}", std::process::id(), now()));
         clean_imports(&root).unwrap(); let stage = root.join("projects/.imports/one"); fs::create_dir(&stage).unwrap();
         let bytes = b"GIMPKGTcancel-test"; let path = stage.join("original.gim"); fs::write(&path, bytes).unwrap();
         let input = ImportFile { path: path.to_string_lossy().into(), name: "test.gim".into(), size: bytes.len() as u64, sha256: format!("{:x}", Sha256::digest(bytes)) };
@@ -248,7 +248,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test] fn semantic_commit_checks_source_identity() {
-        let root = std::env::temp_dir().join(format!("gim-mobile-test-{}", now())); let bytes = b"GIMPKGT"; let id = format!("{:x}", Sha256::digest(bytes)); let p = dir(&root, &id).unwrap(); fs::create_dir_all(p.join("cache")).unwrap(); fs::create_dir_all(p.join("source")).unwrap(); fs::write(p.join("source/original.gim"),bytes).unwrap();
+        let root = crate::workspace_test_temp().join(format!("gim-mobile-test-{}", now())); let bytes = b"GIMPKGT"; let id = format!("{:x}", Sha256::digest(bytes)); let p = dir(&root, &id).unwrap(); fs::create_dir_all(p.join("cache")).unwrap(); fs::create_dir_all(p.join("source")).unwrap(); fs::write(p.join("source/original.gim"),bytes).unwrap();
         let m = ProjectMeta { id: id.clone(), name: "test".into(), sha256: id.clone(), size: 7, imported_at: 0, last_opened_at: 0, parser_version: String::new(), counts: serde_json::json!({}) }; write_meta(&p, &m).unwrap();
         let db = Connection::open(p.join("cache/project.sqlite")).unwrap(); db.execute_batch("CREATE TABLE semantics(parser TEXT PRIMARY KEY,json TEXT NOT NULL);").unwrap(); drop(db);
         let bad = serde_json::json!({"id":id,"sourceSha256":"wrong","sourceSize":7,"parserVersion":PARSER}); assert!(commit(&root, &id, bad).is_err()); assert!(cached(&root, &id).unwrap().is_none());
@@ -272,7 +272,7 @@ mod tests {
     }
     #[test]
     fn header_reads_only_prefix_and_rejects_changed_source() {
-        let root = std::env::temp_dir().join(format!("gim-header-test-{}", now()));
+        let root = crate::workspace_test_temp().join(format!("gim-header-test-{}", now()));
         let mut bytes = vec![0u8; 784]; bytes[..7].copy_from_slice(b"GIMPKGT");
         bytes.extend_from_slice(&[0x37,0x7a,0xbc,0xaf,0x27,0x1c]); bytes.extend_from_slice(b"archive bytes");
         let id = format!("{:x}", Sha256::digest(&bytes)); let p = dir(&root,&id).unwrap();
@@ -306,3 +306,5 @@ mod tests {
         }
     }
 }
+
+fn normalize_entry_key(path: &str) -> String { path.replace('\\', "/").to_lowercase() }

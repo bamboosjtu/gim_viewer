@@ -1,3 +1,4 @@
+import { GIM_LIMITS } from '../src/shared/gimLimits.js';
 import type { ParseCopyReceipt } from './substationParseCopy.js';
 /**
  * 原生解压 Tauri 桥接（acc-plan P0-2）。
@@ -207,10 +208,10 @@ export function isSemanticPackBackedFile(value: File | undefined): boolean {
   return Boolean(value && (value as File & { __gimSemanticPackBacked?: boolean }).__gimSemanticPackBacked === true);
 }
 
-const MAX_NATIVE_ENTRIES = 200_000;
-const MAX_NATIVE_FILE_BYTES = 1024 * 1024 * 1024;
-const MAX_NATIVE_TOTAL_BYTES = 8 * 1024 * 1024 * 1024;
-const MAX_NATIVE_PATH_BYTES = 4096;
+const MAX_NATIVE_ENTRIES = GIM_LIMITS.maxEntries;
+const MAX_NATIVE_FILE_BYTES = GIM_LIMITS.maxFileBytes;
+const MAX_NATIVE_TOTAL_BYTES = GIM_LIMITS.maxTotalUncompressedBytes;
+const MAX_NATIVE_PATH_BYTES = GIM_LIMITS.maxPathBytes;
 const UTF8_ENCODER = new TextEncoder();
 
 function assertSafeEntryPath(path: string): void {

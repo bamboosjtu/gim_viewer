@@ -19,7 +19,7 @@ async function fixture(shared = false) {
 }
 describe('source address links use the engineering identity chain', () => {
   it('routes a real PARTINDEX alias to its independently identified control cabinet', async () => {
-    const f = await fixture(), { selectEngineeringCbmSource } = await import('../engineeringCbmSelection.js');
+    const f = await fixture(), { selectEngineeringCbmSource } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringCbmSelection.js'); });
     const request = f.state.beginSelection({ kind: 'engineering-source', key: 'alias.cbm' });
     expect(await selectEngineeringCbmSource(f.state, 'alias.cbm', request)).toBe(true);
     const box = f.snapshot.entities.find(entity => entity.category === 'E16.control_cabinet')!;
@@ -27,14 +27,14 @@ describe('source address links use the engineering identity chain', () => {
     expect(document.querySelector('.props-header')?.textContent).toBe('测控柜');
   });
   it('keeps multiple occurrences of one source document as explicit candidates', async () => {
-    const f = await fixture(true), { selectEngineeringCbmSource } = await import('../engineeringCbmSelection.js');
+    const f = await fixture(true), { selectEngineeringCbmSource } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringCbmSelection.js'); });
     const request = f.state.beginSelection({ kind: 'engineering-source', key: 'unit.cbm' });
     await selectEngineeringCbmSource(f.state, 'unit.cbm', request);
     expect(f.state.engineeringSelection).toBeNull(); expect(f.state.selectionRequest?.target?.key).toBe('document:unit.cbm');
     expect(document.querySelectorAll('[data-source-candidate]')).toHaveLength(2);
   });
   it('does not apply a late source link after a newer user selection', async () => {
-    const f = await fixture(), { selectEngineeringCbmSource } = await import('../engineeringCbmSelection.js');
+    const f = await fixture(), { selectEngineeringCbmSource } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringCbmSelection.js'); });
     const request = f.state.beginSelection({ kind: 'engineering-source', key: 'unit.cbm' });
     f.state.beginSelection({ kind: 'engineering', key: 'newer' });
     expect(await selectEngineeringCbmSource(f.state, 'unit.cbm', request)).toBe(false);

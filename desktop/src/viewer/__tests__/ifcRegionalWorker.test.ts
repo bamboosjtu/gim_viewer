@@ -18,7 +18,7 @@ beforeEach(async()=>{
   });
   const scope={postMessage:fixture.post,onmessage:null as any};vi.stubGlobal('self',scope);
   vi.stubGlobal('crypto',{subtle:{digest:async()=>new ArrayBuffer(32)}});
-  await import('../ifcRegionalWorker.js');send=async data=>scope.onmessage({data});
+  await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../ifcRegionalWorker.js'); });send=async data=>scope.onmessage({data});
   await send({type:'open',id:1,bytes:new Uint8Array([1]),wasm:{path:'/',absolute:true},index:{sourceSha256:'00'.repeat(32),
     objects:[{expressId:1,ifcType:'IFCPLATE'},{expressId:3,ifcType:'IFCWALL'}],openingRelations:[],unitScale:1}});
   await send({type:'prepare-region',id:2,objects:[1]});

@@ -1,3 +1,4 @@
+import { loadPresentation } from './presentationPort.js';
 import type { AppState } from '../app/state.js';
 import type { CompositionBounds } from './projections/compositionSpatial.js';
 import { fromIfcYUpBounds } from './projections/compositionSpatial.js';
@@ -18,7 +19,7 @@ export async function reconcileProjectionSelection(state: AppState): Promise<voi
     const { clearEngineeringHighlight } = await import('./engineeringSelection.js');
     await clearEngineeringHighlight(state, cleared);
     if (!state.isCurrentSelection(cleared)) return;
-    const { renderInspectorTabs, sectionHtml } = await import('../ui/propsDrawer.js');
+    const { renderInspectorTabs, sectionHtml } = await loadPresentation('propsDrawer');
     if (state.isCurrentSelection(cleared)) renderInspectorTabs('<div class="props-header">工程分组已更新</div>', {
       overview: sectionHtml('选择范围', [['状态', state.selectionMessage]]), params: '', relations: '', source: '',
     });

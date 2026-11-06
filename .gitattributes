@@ -1,0 +1,5 @@
+# 自动识别文本文件
+* text=auto
+
+# PowerShell 脚本统一使用 LF
+*.ps1 text eol=lf

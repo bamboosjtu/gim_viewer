@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1421",
-    "build": "tsc --noEmit && vite build",
-    "test": "vitest run",
-    "test:sample": "vitest run --config vitest.samples.config.ts",
+    "build": "node ../desktop/scripts/with-workspace-temp.mjs node_modules/typescript/bin/tsc --noEmit && node ../desktop/scripts/with-workspace-temp.mjs node_modules/vite/bin/vite.js build",
+    "test": "node ../desktop/scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run",
+    "test:sample": "node ../desktop/scripts/with-workspace-temp.mjs node_modules/vitest/vitest.mjs run --config vitest.samples.config.ts",
     "tauri": "tauri",
     "android:init": "tauri android init",
     "android:dev": "tauri android dev",

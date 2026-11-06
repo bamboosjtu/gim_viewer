@@ -33,7 +33,7 @@ describe('Line Parser Worker session race', () => {
     vi.stubGlobal('Worker', FakeWorker);
     // 不使用 Vite 专用的 query suffix：tsc 无法为该虚拟模块解析声明，且
     // terminateLineParserWorker 已确保每次测试结束时模块状态被清理。
-    const { parseLineInWorker, terminateLineParserWorker } = await import('../lineParserWorkerClient.js');
+    const { parseLineInWorker, terminateLineParserWorker } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../lineParserWorkerClient.js'); });
     const sessionA = { generation: 1, projectId: 1, sourceSha256: 'A', geometryToken: 1 };
     const sessionB = { generation: 2, projectId: 2, sourceSha256: 'B', geometryToken: 2 };
     const files = [{ path: 'CBM/project.cbm', bytes: new TextEncoder().encode('').buffer }];

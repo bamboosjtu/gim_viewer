@@ -1,3 +1,5 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { loadPresentation } from './presentationPort.js';
 import type { AppState, EngineeringSelectionScope, SelectionRequest } from '../app/state.js';
 import type * as THREE from 'three';
 import { getEngineeringRepresentations } from './engineeringRepresentationService.js';
@@ -39,7 +41,7 @@ function context(state: AppState): Context {
   state.engineeringRepresentationChanged = rootOccurrence => {
     const owned = contexts.get(state)!;
     if (state.engineeringSelection && state.engineeringSelection.snapshot !== state.engineeringSnapshot && state.selectionRequest) {
-      void reconcileEngineeringSelection(state, state.selectionRequest); return;
+      void Promise.resolve(reconcileEngineeringSelection(state, state.selectionRequest)).catch(reportBackgroundError); return;
     }
     if (rootOccurrence && !state.engineeringSelection?.devRoots.has(rootOccurrence)) return;
     applyGeometryFilter(state);
@@ -48,7 +50,7 @@ function context(state: AppState): Context {
     queueMicrotask(() => {
       owned.refreshing = false;
       const request = state.selectionRequest;
-      if (request && state.engineeringSelection?.requestId === request.id) void updateEngineeringHighlight(state, request, false);
+      if (request && state.engineeringSelection?.requestId === request.id) void Promise.resolve(updateEngineeringHighlight(state, request, false)).catch(reportBackgroundError);
     });
   };
   return value;
@@ -210,14 +212,14 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   // A declaration without members has no isolation range. Leave a previous
   // isolation before inspecting it, so the whole scene does not disappear.
   if (groupNode && !sourceIds.size && state.onlySelected) state.setOnlySelected(false);
-  const tree = await import('../ui/engineeringTreeView.js');
+  const tree = await loadPresentation('engineeringTreeView');
   if (!guard.isCurrent()) return true;
   if (target.kind === 'engineering-source') tree.revealEngineeringSource(state, target.key);
   else tree.syncEngineeringTreeSelection(state);
   state.deviceLodRuntime?.setOnlySelected?.(state.onlySelected); applyGeometryFilter(state);
   const selectedSources: SourceRecord[] = [...sourceIds].flatMap(id => { const source = engineeringSourceRecord(state, id); return source ? [source] : []; });
   const declaredContexts = groupNode && 'declaredContextIds' in groupNode ? groupNode.declaredContextIds : undefined;
-  const { renderEngineeringInspector } = await import('../ui/engineeringInspector.js');
+  const { renderEngineeringInspector } = await loadPresentation('engineeringInspector');
   if (!guard.isCurrent()) return true;
   renderEngineeringInspector({ title: groupNode?.title ?? entity?.name ?? single?.name ?? '待归整体集合', entity, pending, sources: selectedSources,
     projectionEvidence: groupNode && 'inferred' in groupNode && groupNode.inferred ? groupNode.evidence : entity
@@ -233,18 +235,21 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
     partial: !sources.complete, geometryNote: '按来源成员解析表示；缺失或不可分离的范围保留状态。',
     relationships: snapshot.relationships.filter(r => ownerIds.has(r.from) || ownerIds.has(r.to)),
     relatedNames: new Map(snapshot.entities.map(entity => [entity.id, entity.name])),
-    onFit: () => { if (guard.isCurrent()) void updateEngineeringHighlight(state, request, true, true); },
+    onFit: () => { if (guard.isCurrent()) void Promise.resolve(updateEngineeringHighlight(state, request, true, true)).catch(reportBackgroundError); },
     onIsolate: () => { if (guard.isCurrent()) state.setOnlySelected(true); },
     onRestore: () => { if (guard.isCurrent()) state.setOnlySelected(false); },
-    onSource: sourceId => { if (guard.isCurrent()) void selectEngineeringTarget(state, { kind: 'engineering-source', key: sourceId }); },
+    onSource: sourceId => { if (guard.isCurrent()) void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering-source', key: sourceId })).catch(reportBackgroundError); },
     onOwner: single && representations.index.ownerBySource.get(single.id) ? () => {
       if (!guard.isCurrent()) return;
       state.engineeringNavMode = state.engineeringNavMode==='inventory'?'inventory':'composition'; tree.renderEngineeringTree(state);
-      void selectEngineeringTarget(state, { kind: 'engineering', key: representations.index.ownerBySource.get(single.id)! });
+      void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering', key: representations.index.ownerBySource.get(single.id)! })).catch(reportBackgroundError);
     } : undefined,
-    onDocument: path => { if (guard.isCurrent()) void import('./engineeringSourceInspector.js').then(({ inspectEngineeringDocument }) => {
-      if (guard.isCurrent()) void inspectEngineeringDocument(state, path);
-    }); },
+    onDocument: path => {
+      if (!guard.isCurrent()) return;
+      void import('./engineeringSourceInspector.js').then(async ({inspectEngineeringDocument}) => {
+        if (guard.isCurrent()) await inspectEngineeringDocument(state,path);
+      }).catch(reportBackgroundError);
+    },
     onRefine: scope.devRoots.size || scope.ifc.length ? progress => refineEngineeringRange(state, request, scope, progress) : undefined,
     onReleaseFine: () => {
       if (!guard.isCurrent() || state.engineeringSelection !== scope) return;
@@ -328,13 +333,13 @@ export async function reconcileEngineeringSelection(state: AppState, request: Se
   if (!guard.isCurrent()) return;
   state.setOnlySelected(state.onlySelected);
   state.selectionGeometry = { status: 'not-loaded', detail: '来源更新后，原选择的整体边界需要重新确认。' };
-  const [{ renderInspectorTabs, sectionHtml, openPropsDrawerUI }, { escHtml }] = await Promise.all([import('../ui/propsDrawer.js'), import('../shared/html.js')]);
+  const [{ renderInspectorTabs, sectionHtml, openPropsDrawerUI }, { escHtml }] = await Promise.all([loadPresentation('propsDrawer'), import('../shared/html.js')]);
   if (!guard.isCurrent()) return;
   const choices = [...candidates], names = new Map(snapshot.entities.map(entity => [entity.id, entity.name]));
   openPropsDrawerUI(); renderInspectorTabs('<div class="props-header">选择范围待确认</div>', {
     overview: sectionHtml('范围变化', [['状态', state.selectionGeometry.detail]]) + choices.map((id, index) => `<button class="prop-ref-link" data-engineering-choice="${index}">${escHtml(names.get(id) ?? '待归整体集合')}</button>`).join(''), params: '', relations: '', source: '',
   });
   document.querySelectorAll<HTMLElement>('[data-engineering-choice]').forEach(button => button.addEventListener('click', () => {
-    if (guard.isCurrent()) void selectEngineeringTarget(state, { kind: 'engineering', key: choices[Number(button.dataset.engineeringChoice)] });
+    if (guard.isCurrent()) void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering', key: choices[Number(button.dataset.engineeringChoice)] })).catch(reportBackgroundError);
   }));
 }

@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /** Session-guarded substation memory and Spatial parser observations. */
 import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
@@ -33,23 +34,23 @@ export function createSubstationSpatialObserver(state: AppState, session: PerfSe
       perfRecordSubstationIfcRead(profile, session);
       if (!textSampled && profile.bytes > 0) {
         textSampled = true;
-        void sampleSubstationMemory(state, 'IFC text 读入后', session, {
+        void Promise.resolve(sampleSubstationMemory(state, 'IFC text 读入后', session, {
           entryPath: profile.entryPath,
           bytes: profile.bytes,
           readMs: profile.readMs,
           decodeMs: profile.decodeMs,
-        });
+        })).catch(reportBackgroundError);
       }
     },
     onStepScan: (profile) => {
       if (!stepSampled) {
         stepSampled = true;
-        void sampleSubstationMemory(state, 'STEP scan 后', session, {
+        void Promise.resolve(sampleSubstationMemory(state, 'STEP scan 后', session, {
           entryPath: profile.entryPath,
           bytes: profile.sourceBytes,
           rawEntityCount: profile.rawEntityCount,
           stepScanMs: profile.stepScanMs,
-        });
+        })).catch(reportBackgroundError);
       }
     },
     onModelParsed: (profile) => {

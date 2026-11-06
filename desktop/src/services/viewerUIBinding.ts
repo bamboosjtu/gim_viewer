@@ -1,3 +1,5 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { loadPresentation } from './presentationPort.js';
 /**
  * Viewer UI 绑定服务（编排层）。
  *
@@ -16,7 +18,7 @@
 import type { AppState } from '../app/state.js';
 import type { ModelEventCallbacks } from '../viewer/ifcLoader.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
-import { container } from '../ui/dom.js';
+import { container } from './presentation/dom.js';
 
 /** Viewer 运行时 + UI 集成回调 */
 export interface ViewerRuntimeWithUI {
@@ -49,8 +51,8 @@ export async function getViewerRuntimeWithUI(
   uiBindingPromise = (async () => {
     const { getViewerRuntime } = await import('../viewer/viewerRuntime.js');
     const { setupSelection } = await import('../viewer/selection.js');
-    const { setupPropsDrawer, showIfcElementProperties } = await import('../ui/propsDrawer.js');
-    const { addModelToUI, removeModelFromUI } = await import('../ui/modelList.js');
+    const { setupPropsDrawer, showIfcElementProperties } = await loadPresentation('propsDrawer');
+    const { addModelToUI, removeModelFromUI } = await loadPresentation('modelList');
 
     const runtime = await getViewerRuntime(container);
     const { ctx } = runtime;
@@ -74,13 +76,13 @@ export async function getViewerRuntimeWithUI(
         if (!state.isCurrentSelection(request)) return true;
         if (model && await selectEngineeringFragmentPick(state, modelId, localId, request, model)) return true;
       }
-      void syncSelectionNavigation(state,request);
-      void showIfcElementProperties(ctx,state,modelId,localId,request);
+      void Promise.resolve(syncSelectionNavigation(state,request)).catch(reportBackgroundError);
+      void Promise.resolve(showIfcElementProperties(ctx,state,modelId,localId,request)).catch(reportBackgroundError);
       return false;
     },(request) => {
-      void syncSelectionNavigation(state,request);
+      void Promise.resolve(syncSelectionNavigation(state,request)).catch(reportBackgroundError);
       if (state.isCurrentSelection(request)) {
-        void import('../ui/shell/statusBar.js').then(({setSelectionStatus}) => { if (state.isCurrentSelection(request)) setSelectionStatus(null); });
+        void Promise.resolve(loadPresentation('shell_statusBar').then(({setSelectionStatus}) => { if (state.isCurrentSelection(request)) setSelectionStatus(null); })).catch(reportBackgroundError);
         const body=document.getElementById('props-drawer-body');
         if (body) body.innerHTML='<div class="props-empty">尚未选择对象</div>';
       }
@@ -90,8 +92,8 @@ export async function getViewerRuntimeWithUI(
         if (!state.isCurrentSelection(request)) return true;
         if (await selectEngineeringIfcPick(state, regional.modelId, object.expressId, request)) return true;
       }
-      void syncSelectionNavigation(state,request);
-      void import('../ui/propsDrawer.js').then(({showIfcRegionalProperties})=>showIfcRegionalProperties(ctx,state,regional,object,request));
+      void Promise.resolve(syncSelectionNavigation(state,request)).catch(reportBackgroundError);
+      void Promise.resolve(loadPresentation('propsDrawer').then(({showIfcRegionalProperties})=>showIfcRegionalProperties(ctx,state,regional,object,request))).catch(reportBackgroundError);
       return false;
     },(rootOccurrence,instanceKey,request,hint)=>{
       void import('./devViewportSelection.js').then(({selectViewportDev}) =>

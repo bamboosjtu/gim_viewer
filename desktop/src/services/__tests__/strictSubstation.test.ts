@@ -2,7 +2,7 @@ import { it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+const tmpdir = () => process.env.TEMP!;
 import type { GeometryCacheManifestEntry } from '@desktop/database.js';
 import * as THREE from 'three';
 import { collectEquipmentGeometryOccurrences } from '../../gim/equipmentGeometryOccurrences.js';

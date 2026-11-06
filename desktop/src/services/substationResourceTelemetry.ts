@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /**
  * Low-frequency Substation Runtime ownership sampling.
  *
@@ -417,7 +418,7 @@ export function scheduleSubstationResourceCheckpoint(
   delayMs = 250,
 ): void {
   setTimeout(() => {
-    void sampleSubstationRuntimeResources(state, label, session, ctx, meta, options);
+    void Promise.resolve(sampleSubstationRuntimeResources(state, label, session, ctx, meta, options)).catch(reportBackgroundError);
   }, Math.max(0, delayMs));
 }
 
@@ -433,10 +434,10 @@ export function startSubstationResourceMonitor(state: AppState, ctx: ViewerConte
     try { await sampleSubstationRuntimeResources(state, 'periodicPrivateMemory', perf, ctx, undefined,
       { isCurrent: current, includeOwnership: false }); }
     catch (error) { console.warn('[Memory sample]', error); }
-    finally { if (current()) timer = setTimeout(() => { void sample(); }, Math.max(1000, intervalMs)); }
+    finally { if (current()) timer = setTimeout(() => { void Promise.resolve(sample()).catch(reportBackgroundError); }, Math.max(1000, intervalMs)); }
   };
   const owner = { release(): void { released = true; if (timer) clearTimeout(timer); timer = null; } };
   state.substationResourceMonitor = owner;
-  void sample();
+  void Promise.resolve(sample()).catch(reportBackgroundError);
   return owner;
 }

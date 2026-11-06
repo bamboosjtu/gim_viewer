@@ -1,7 +1,12 @@
+from pathlib import Path
+import os
+_TEST_TEMP = Path(__file__).resolve().parents[3] / '.tmp/tests/python'
+_TEST_TEMP.mkdir(parents=True, exist_ok=True)
+os.environ.update(TEMP=str(_TEST_TEMP), TMP=str(_TEST_TEMP), TMPDIR=str(_TEST_TEMP), GIM_READER_LOG_PATH=str(_TEST_TEMP / 'gim-reader.log'))
 import sys
 import tempfile
+tempfile.tempdir = str(_TEST_TEMP)
 import unittest
-from pathlib import Path
 
 TOOL = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(TOOL), str(TOOL.parent / 'tests')]

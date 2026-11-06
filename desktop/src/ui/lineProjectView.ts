@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /**
  * 线路工程 UI 渲染层。
  *
@@ -1592,7 +1593,7 @@ export function renderLineProjectPanels(
   showMessage('线路工程已加载，当前为地图浏览模式');
   // 工程已可交互后，底图切换/瓦片提示不再拉起中央加载遮罩，只写底部状态栏。
   currentShowMessage = (text) => {
-    void import('./shell/statusBar.js').then(({ setStatus }) => setStatus(text));
+    void Promise.resolve(import('./shell/statusBar.js').then(({ setStatus }) => setStatus(text))).catch(reportBackgroundError);
   };
   debugLog(DEBUG_LINE_MAP, '[GIM] 线路工程面板已渲染:', {
     type: graph.projectType,
@@ -1668,7 +1669,7 @@ export function renderLineProjectPanels(
       );
       try { showMessage(`${modeLabel}部分瓦片加载失败，地图仍可平移/缩放重试`); } catch { /* ignore */ }
     }
-    void (async () => {
+    void Promise.resolve((async () => {
       try {
         const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
         // 传入初始 bbox，让 MapLibre 加载后自动 fitBounds（duration:0）
@@ -1751,7 +1752,7 @@ export function renderLineProjectPanels(
         // M4-A2 Finalization：初始化失败时状态保持为 Canvas-only（已在外层渲染时设置）
         // 此处不显式 setBasemapStatus，避免覆盖外层的 'canvas-only' 状态
       }
-    })();
+    })()).catch(reportBackgroundError);
   }
 }
 
@@ -1975,7 +1976,7 @@ function switchBasemap(
     } catch { /* ignore */ }
   }
 
-  void (async () => {
+  void Promise.resolve((async () => {
     try {
       const { createMapLibreProbe } = await import('./lineMapBaseLayer.js');
       if (myGen !== maplibreProbeGeneration) return;
@@ -2039,5 +2040,5 @@ function switchBasemap(
         currentShowMessage?.(`切换到${basemapModeLabel(newMode)}失败`);
       } catch { /* ignore */ }
     }
-  })();
+  })()).catch(reportBackgroundError);
 }

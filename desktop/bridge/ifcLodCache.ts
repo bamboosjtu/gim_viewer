@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../src/utils/backgroundErrors.js';
 /** Far artifacts remain independent. Near geometry/properties use a bounded derived cache. */
 import {IFC_NEAR_CACHE_LIMITS,estimateArtifactBytes,isNearArtifactKey} from './ifcNearCachePolicy.js';
 const databaseName='gim-ifc-lod-v1';
@@ -42,7 +43,7 @@ export async function readIfcLodArtifacts<T>(keys:string[]):Promise<(T|null)[]> 
     const tx=db.transaction('artifacts'),store=tx.objectStore('artifacts');const rows:(T|null)[]=keys.map(()=>null);
     keys.forEach((key,i)=>{const request=store.get(key);request.onsuccess=()=>{rows[i]=request.result??null;};});
     tx.oncomplete=()=>resolve(rows);tx.onerror=tx.onabort=()=>reject(tx.error);
-  });void touch(keys.filter((_key,i)=>values[i]!==null));return values;}catch{return keys.map(()=>null);}
+  });void Promise.resolve(touch(keys.filter((_key,i)=>values[i]!==null))).catch(reportBackgroundError);return values;}catch{return keys.map(()=>null);}
 }
 export async function readIfcLodArtifact<T>(key:string):Promise<T|null>{return (await readIfcLodArtifacts<T>([key]))[0];}
 export interface IfcLodWriteResult { ok: boolean; error?: string }

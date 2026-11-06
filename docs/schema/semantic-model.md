@@ -148,3 +148,5 @@ IFC 空间归属、分解、host 边界与局部 placement 有独立来源。
 [famParser](../../desktop/src/gim/famParser.ts)、
 [lineAttrParserCore](../../packages/powerline-core/src/lineAttrParserCore.ts)、
 [substationEvidence](../../desktop/src/gim/substationEvidence.ts)。
+
+FAM 物理记录保留原行、行号、分节和全部等号分段。变电属性投影使用首个有效标签、最后一个键候选和末段值；线路投影使用展示键、内部键及第三段起拼回的值。两者是明确的格式族投影，不用工程名称或厂商选择解析分支；物理行证据不因单值查询覆盖而丢失。

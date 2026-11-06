@@ -1,5 +1,5 @@
 import type { FileInfo } from './fileReader.js';
-import { invokeTimed, type InvokeTimedOptions } from './invokeTimed.js';
+import { invokeTimed } from './invokeTimed.js';
 import { perfCurrentSession, perfRecordBatchRead } from '../src/utils/perfTimings.js';
 
 const utf8Encoder = new TextEncoder();
@@ -823,8 +823,6 @@ export interface GimCacheValidation {
   substation_properties_complete: boolean;
   /** DEV GLB geometry cache 是否有效。 */
   geometry_cache_valid: boolean;
-  /** 所有 IFC Fragments cache 是否完整有效。 */
-  fragments_cache_valid: boolean;
 }
 
 /**
@@ -856,21 +854,6 @@ export interface IfcCacheFileDiagnostic {
   file_size: number | null;
 }
 
-export interface FragmentCacheFileDiagnostic {
-  entry_path: string;
-  model_id: string;
-  source_gim_sha256: string;
-  source_gim_sha256_match: boolean;
-  source_ifc_size: number;
-  fragment_file_size_stored: number;
-  fragment_file_size_actual: number;
-  fragment_file_size_match: boolean;
-  stored_fragments_version: string;
-  current_fragments_cache_version: string;
-  fragments_version_match: boolean;
-  fragment_file_exists: boolean;
-  valid: boolean;
-}
 
 export interface ProjectCacheDiagnostic {
   project_id: number;
@@ -911,17 +894,10 @@ export interface ProjectCacheDiagnostic {
   geometry_cache_manifest_valid: boolean;
   substation_semantic_cache_valid: boolean;
   geometry_cache_valid: boolean;
-  fragments_cache_valid: boolean;
   valid: boolean;
 
   ifc_cache_files: IfcCacheFileDiagnostic[];
 
-  // Fragments 缓存诊断
-  fragment_cache_count: number;
-  valid_fragment_cache_count: number;
-  missing_fragment_cache_paths: string[];
-  current_fragments_cache_version: string;
-  fragment_cache_files: FragmentCacheFileDiagnostic[];
 
   // v4: 线路工程图缓存诊断
   project_type: string | null;
@@ -949,121 +925,6 @@ export async function getDbPath(): Promise<string> {
 /** 获取最近打开项目的缓存诊断 */
 export async function getLatestProjectCacheDiagnostic(): Promise<ProjectCacheDiagnostic | null> {
   return invokeTimed<ProjectCacheDiagnostic | null>('get_latest_project_cache_diagnostic');
-}
-
-// ==================== Fragments 缓存 ====================
-
-
-/** Fragments 缓存校验结果 */
-export interface FragmentCacheValidation {
-  project_id: number;
-  entry_path: string;
-  has_record: boolean;
-  stored_fragments_version: string | null;
-  current_fragments_version: string;
-  fragments_version_match: boolean;
-  source_gim_sha256: string | null;
-  source_gim_sha256_match: boolean;
-  source_ifc_size_match: boolean;
-  fragment_file_exists: boolean;
-  fragment_file_size: number;
-  fragment_file_size_match: boolean;
-  valid: boolean;
-}
-
-/** 写入 Fragments 缓存文件的结果 */
-export interface FragmentCacheWriteResult {
-  path: string;
-  size: number;
-}
-
-/**
- * 写入 Fragments 缓存文件到 app_data_dir/fragments/{projectId}/{entryPath}.frag。
- * 路径由 Rust 侧根据 project_id + entry_path 计算，不接受前端传入的绝对路径。
- */
-export async function writeFragmentCacheFile(
-  projectId: number,
-  entryPath: string,
-  bytes: Uint8Array,
-  sourceGimSha256: string,
-  options: Pick<InvokeTimedOptions, 'sessionId'> = {},
-): Promise<FragmentCacheWriteResult> {
-  return invokeTimed<FragmentCacheWriteResult>(
-    'write_fragment_cache_file_binary',
-    packBinaryCacheWrite(projectId, entryPath, bytes, sourceGimSha256),
-    options,
-  );
-}
-
-/**
- * 读取 Fragments 缓存文件（路径由 projectId + entryPath 计算）。
- */
-export async function readFragmentCacheFile(
-  projectId: number,
-  entryPath: string,
-  options: Pick<InvokeTimedOptions, 'sessionId'> = {},
-): Promise<Uint8Array> {
-  const bytes = await invokeTimed<ArrayBuffer>('read_fragment_cache_file', { projectId, entryPath }, options);
-  return toUint8Array(bytes);
-}
-
-/**
- * upsert fragment_cache 记录（版本由前端写入包含 Fragments/web-ifc 实际版本的组合键；
- * Rust 侧会再次核对源 GIM SHA）。
- */
-export async function upsertFragmentCacheRecord(
-  projectId: number,
-  entryPath: string,
-  modelId: string,
-  sourceIfcSize: number,
-  fragmentFileSize: number,
-  cacheVersion: string,
-  sourceGimSha256: string,
-  options: Pick<InvokeTimedOptions, 'sessionId'> = {},
-): Promise<void> {
-  await invokeTimed<void>('upsert_fragment_cache_record', {
-    projectId,
-    entryPath,
-    modelId,
-    sourceIfcSize,
-    fragmentFileSize,
-    cacheVersion,
-    sourceGimSha256,
-  }, options);
-}
-
-/**
- * 校验 Fragments 缓存有效性（只读，不修复）。
- * 检查项：记录存在、版本匹配、源 GIM SHA 匹配、Fragments 文件存在且实际大小
- * 与记录一致（source_ifc_size 仅作辅助诊断）。
- */
-export async function validateFragmentCache(
-  projectId: number,
-  entryPath: string,
-  sourceIfcSize: number,
-  cacheVersion: string,
-  sourceGimSha256: string,
-  options: Pick<InvokeTimedOptions, 'sessionId'> = {},
-): Promise<FragmentCacheValidation> {
-  return invokeTimed<FragmentCacheValidation>('validate_fragment_cache', {
-    projectId,
-    entryPath,
-    sourceIfcSize,
-    cacheVersion,
-    sourceGimSha256,
-  }, options);
-}
-
-/**
- * 删除损坏的 Fragments 缓存记录与 .frag 文件（P0-3 自愈）。
- * 加载/校验失败时调用，避免下次打开继续命中坏缓存。
- */
-export async function deleteFragmentCacheRecord(
-  projectId: number,
-  entryPath: string,
-  options: Pick<InvokeTimedOptions, 'sessionId'> = {},
-): Promise<void> {
-  await invokeTimed<void>('delete_fragment_cache_record', { projectId, entryPath }, options);
 }
 
 // ==================== 线路工程图缓存（v4） ====================

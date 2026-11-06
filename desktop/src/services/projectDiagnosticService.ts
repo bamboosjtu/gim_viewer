@@ -1,3 +1,4 @@
+import { backgroundErrorSnapshot } from '../utils/backgroundErrors.js';
 import type {AppState, ProjectLoadSession} from '../app/state.js';
 import {getDbPath, getLatestProjectCacheDiagnostic, getProjectDiagnostic} from '@desktop/database.js';
 import {getDebugConfigSnapshot} from '../config/debug.js';
@@ -36,7 +37,7 @@ async function collect(state: AppState, session: ProjectLoadSession, perfId: num
     diagnostic: database.status === 'fulfilled' ? database.value : null,
     databaseDiagnosticScope: session.projectId != null ? 'active-project' : 'latest-project',
     diagnosticReadErrors,
-    debug: getDebugConfigSnapshot(), basemap: getBasemapStatusSnapshot(), timings: perfSnapshot(),
+    debug: getDebugConfigSnapshot(), basemap: getBasemapStatusSnapshot(), timings: perfSnapshot(), backgroundFailures: backgroundErrorSnapshot(),
     webIfcMt: {available: isWebIfcMultiThreadingAvailable()},
     deviceLod: state.deviceLodRuntime?.diagnostics ?? null,
     engineering: {

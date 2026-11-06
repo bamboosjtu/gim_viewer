@@ -133,7 +133,7 @@ export class IfcRegionalInstances {
       const mesh = new THREE.Mesh(this.geometry(part), this.material(part));
       mesh.matrixAutoUpdate = false;
       mesh.matrix.fromArray(part.matrix);
-      mesh.userData = { ...group.userData };
+      mesh.userData = { ...group.userData, owned: false };
       group.add(mesh);
     }
     this.overlays.set(id,group);

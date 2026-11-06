@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AppState } from '../../app/state.js';
 import { setupSelectionToolbar } from '../selectionToolbar.js';
 let dispose: (()=>void) | undefined;
-beforeEach(()=>{localStorage.clear();document.body.innerHTML='<div id="viewport"></div><div id="cbm-tree-panel"></div><div id="sld-panel"></div><div id="props-drawer-body">selected</div><span id="status-selection"></span>';});
+beforeEach(async ()=>{vi.resetModules();localStorage.clear();document.body.innerHTML='<div id="viewport"></div><div id="cbm-tree-panel"></div><div id="sld-panel"></div><div id="props-drawer-body">selected</div><span id="status-selection"></span>';(await import('../../app/presentationBindings.js')).configurePresentation();});
 afterEach(()=>{dispose?.();dispose=undefined;document.body.replaceChildren();});
 
 it('controls only tree auto-location and remembers the preference',()=>{

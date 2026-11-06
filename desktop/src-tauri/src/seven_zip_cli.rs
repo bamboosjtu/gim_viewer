@@ -92,7 +92,7 @@ pub fn locate_7z() -> Option<PathBuf> {
 fn extract_embedded() -> Result<PathBuf, String> {
     let (exe_hash, dll_hash) = embedded_hashes();
     // 目录按内容哈希命名：不同版本/不同二进制不会复用同一可预测路径。
-    let dir = std::env::temp_dir()
+    let dir = embedded_runtime_root()
         .join("gim-viewer-7zip")
         .join(format!("{}-{}", &exe_hash[..16], &dll_hash[..16]));
     fs::create_dir_all(&dir).map_err(|e| format!("创建 7z 临时目录失败: {e}"))?;
@@ -151,8 +151,8 @@ where
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         }
-        let mut child = command.spawn().map_err(|e| format!("启动 7z.exe 失败: {e}"))?;
-        let mut stdout = child.stdout.take().ok_or_else(|| "7z stdout 不可用".to_string())?;
+        let mut child = ReapedChild(command.spawn().map_err(|e| format!("启动 7z.exe 失败: {e}"))?);
+        let mut stdout = child.0.stdout.take().ok_or_else(|| "7z stdout 不可用".to_string())?;
         let mut buffer = vec![0u8; 1 << 20];
         let mut pending: Vec<u8> = Vec::new();
         let mut entry_index = 0usize;
@@ -190,7 +190,7 @@ where
                 break;
             }
         }
-        let status = child.wait().map_err(|e| format!("等待 7z 退出失败: {e}"))?;
+        let status = child.0.wait().map_err(|e| format!("等待 7z 退出失败: {e}"))?;
         if !status.success() {
             return Err(format!("7z 解压失败（{status}）"));
         }
@@ -232,5 +232,45 @@ mod tests {
         assert_ne!(actual, dll_hash, "tampered file unexpectedly matches embedded hash");
         assert!(!file_matches(&path, dll_hash), "hash comparison accepted tampered file");
         let _ = fs::remove_dir_all(dir);
+    }
+}
+
+/// Owns a running child until it has been reaped, including sink/read errors.
+struct ReapedChild(std::process::Child);
+impl Drop for ReapedChild {
+    fn drop(&mut self) {
+        drop(self.0.stdout.take());
+        if !matches!(self.0.try_wait(), Ok(Some(_))) { let _ = self.0.kill(); }
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(all(test, windows))]
+mod process_guard_tests {
+    use super::*;
+    #[link(name="kernel32")]
+    extern "system" {
+        fn OpenProcess(access:u32,inherit:i32,pid:u32)->*mut std::ffi::c_void;
+        fn WaitForSingleObject(handle:*mut std::ffi::c_void,milliseconds:u32)->u32;
+        fn CloseHandle(handle:*mut std::ffi::c_void)->i32;
+    }
+    #[test]
+    fn early_sink_error_reaps_running_child() {
+        use std::os::windows::process::CommandExt;
+        let child=Command::new("powershell.exe").args(["-NoProfile","-Command","Start-Sleep -Seconds 60"])
+            .creation_flags(0x08000000).stdout(Stdio::piped()).spawn().unwrap();
+        let handle=unsafe{OpenProcess(0x00100000,0,child.id())};assert!(!handle.is_null());
+        let fail=||->Result<(),String>{let _owned=ReapedChild(child);Err("sink failure".into())};
+        assert!(fail().is_err());
+        assert_eq!(unsafe{WaitForSingleObject(handle,0)},0,"child must be terminated and reaped before returning");
+        unsafe{CloseHandle(handle);}
+    }
+}
+
+fn embedded_runtime_root()->PathBuf {
+    #[cfg(test)] { crate::workspace_test_temp() }
+    #[cfg(not(test))] {
+        if let Some(root)=option_env!("GIM_ACCEPTANCE_DATA_ROOT") {PathBuf::from(root).join("temporary")}
+        else {std::env::temp_dir()}
     }
 }

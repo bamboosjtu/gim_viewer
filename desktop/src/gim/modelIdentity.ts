@@ -44,21 +44,7 @@ export function createIfcModelId(entryPath: string): string {
  * generation 用于区分“同一 GIM 关闭后再次打开”的两个 Viewer 会话；它不
  * 参与数据库/业务索引，只是运行时生命周期盐。
  */
-export function createIfcRuntimeModelId(
-  sourceIdentity: string,
-  logicalModelId: string,
-  generation?: number,
-): string {
-  const generationSalt = generation == null ? '' : `\u0000generation:${generation}`;
-  const input = `${sourceIdentity.trim().toLowerCase()}\u0000${logicalModelId.trim().toLowerCase()}${generationSalt}`;
-  let hash = 0xcbf29ce484222325n;
-  const prime = 0x100000001b3n;
-  for (let i = 0; i < input.length; i++) {
-    hash ^= BigInt(input.charCodeAt(i));
-    hash = BigInt.asUintN(64, hash * prime);
-  }
-  return `ifc_rt_${hash.toString(16).padStart(16, '0')}`;
-}
+export { createIfcRuntimeModelId } from '../shared/projectSession.js';
 
 /** 返回路径的 basename（小写、去 IFC 后缀）。 */
 export function normalizedIfcBasename(value: string): string {

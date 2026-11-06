@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {workspaceTemp as tmpdir} from './test-workspace.mjs';
 import { join } from 'node:path';
 
 const dir = mkdtempSync(join(tmpdir(),'gim-strict-report-'));

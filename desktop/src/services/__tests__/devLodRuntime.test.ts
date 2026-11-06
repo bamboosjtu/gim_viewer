@@ -595,3 +595,11 @@ it('persists a non-selected L1 after eviction, a second cache miss and recompila
   expect(persist.mock.calls[0][0]).toBe('templates');expect(persist.mock.calls[0][1]).toBe(key);
  }finally{persist.mockRestore();vi.unstubAllGlobals();}
 });
+
+it('rejects queued commits when the session expires before the timer fires',async()=>{
+ vi.useFakeTimers();const {internal}=fixture();let current=true;
+ internal.state.isCurrentSession=()=>current;
+ const pending=expect(internal.submit(0,()=>{throw Error('must not run');})).rejects.toMatchObject({name:'AbortError'});
+ current=false;await vi.advanceTimersByTimeAsync(16);await pending;
+ expect(internal.commits).toHaveLength(0);vi.useRealTimers();
+});

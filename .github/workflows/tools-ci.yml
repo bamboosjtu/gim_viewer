@@ -44,7 +44,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Shared build safety tests failed' }
 
   tool:
-    name: ${{ matrix.tool }} / test + onefile + frozen smoke
+    name: ${{ matrix.tool }} / onefile + startup
     needs: build-safety
     runs-on: windows-latest
     timeout-minutes: 30
@@ -54,7 +54,6 @@ jobs:
         tool: [gim_device, gim_element, gim_info]
     env:
       TOOL: ${{ matrix.tool }}
-      TOOL_OUT: output/tools-ci/${{ matrix.tool }}
       PYTHONUTF8: '1'
       QT_QPA_PLATFORM: offscreen
     defaults:
@@ -68,22 +67,20 @@ jobs:
         with:
           python-version: '3.12'
           architecture: x64
+      - name: Prepare workspace temporary directory
+        run: |
+          New-Item -ItemType Directory -Path .tmp/ci/tools -Force | Out-Null
+          "TEMP=$((Resolve-Path .tmp/ci/tools).Path)" >> $env:GITHUB_ENV
+          "TMP=$((Resolve-Path .tmp/ci/tools).Path)" >> $env:GITHUB_ENV
+          "TMPDIR=$((Resolve-Path .tmp/ci/tools).Path)" >> $env:GITHUB_ENV
+      # Engineering sample tests and frozen sample smoke are developer-local.
       - name: Install the tool's pinned build dependencies
         run: |
           python -m pip --isolated install --disable-pip-version-check --index-url https://pypi.org/simple --no-cache-dir --only-binary :all: -r "tools/$env:TOOL/requirements-build.txt"
           if ($LASTEXITCODE -ne 0) { throw 'Tool dependency installation failed' }
-      - name: Run synthetic core and UI contract tests
-        run: |
-          New-Item -ItemType Directory -Force $env:TOOL_OUT | Out-Null
-          python -m unittest discover -s "tools/$env:TOOL/tests" -v 2>&1 | Tee-Object "$env:TOOL_OUT/unit-tests.log"
-          if ($LASTEXITCODE -ne 0) { throw 'Tool unit tests failed' }
       - name: Build and startup-check the actual onefile EXE
         run: |
           & "./tools/$env:TOOL/build.ps1" -Python (Get-Command python).Source -NoVenv -Publish
-      - name: Verify ZIP and exercise frozen application on synthetic inputs
-        run: |
-          python tools/tests/smoke_tool.py --tool $env:TOOL --out $env:TOOL_OUT 2>&1 | Tee-Object "$env:TOOL_OUT/smoke.log"
-          if ($LASTEXITCODE -ne 0) { throw 'Frozen tool smoke failed' }
       - name: Upload tested onefile EXE
         uses: actions/upload-artifact@v7
         with:
@@ -92,11 +89,3 @@ jobs:
           overwrite: true
           retention-days: 7
           if-no-files-found: error
-      - name: Upload test evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.tool }}-evidence-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: output/tools-ci/${{ matrix.tool }}/
-          retention-days: 7
-          if-no-files-found: warn

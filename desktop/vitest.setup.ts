@@ -1,3 +1,8 @@
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+const workspaceTemp=resolve(import.meta.dirname,'.tmp/test-runtime');
+mkdirSync(workspaceTemp,{recursive:true});
+process.env.TEMP=workspaceTemp;process.env.TMP=workspaceTemp;process.env.TMPDIR=workspaceTemp;
 /**
  * Vitest 全局 setup（jsdom 环境）。
  *
@@ -54,3 +59,6 @@ if (typeof Blob !== 'undefined') {
     };
   }
 }
+
+import { beforeEach } from 'vitest';
+beforeEach(async () => { if(typeof document==='undefined')return; (await import('./src/app/presentationBindings.js')).configurePresentation(); });

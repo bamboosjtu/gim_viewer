@@ -57,7 +57,7 @@ const MAX_SINGLE_GLB_BYTES: u64 = 512 * 1024 * 1024;
 
 /// 计算 GLB 缓存文件路径：app_data_dir/glbcache/{project_id}/{entry_path}.glb
 ///
-/// 与 `cache_file_path`（extracted/）和 `fragment_cache_file_path`（fragments/）并列，
+/// 与源文件缓存 `cache_file_path`（extracted/）并列，
 /// 独立目录存放序列化后的 glTF 二进制，便于版本失效时整体删除。
 ///
 /// entry_path 通过组件级校验（只允许 Normal 组件），防止 ../ 和 \..\ 穿越。
@@ -67,9 +67,7 @@ fn glb_cache_file_path(
     entry_path: &str,
 ) -> Result<PathBuf, String> {
     ensure_cache_project_id(project_id)?;
-    let base = app_handle
-        .path()
-        .app_data_dir()
+    let base = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
 
     let safe_rel = validate_entry_path(entry_path)?;
@@ -196,7 +194,7 @@ fn device_lod_artifact_path(
     let guard = conn.0.lock().map_err(|e| e.to_string())?;
     ensure_project_source_sha(&guard, project_id, Some(source_sha))?;
     drop(guard);
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?.join("device-lod");
+    let base = crate::application_data_dir(&app).map_err(|e| e.to_string())?.join("device-lod");
     if !base.exists() { stdfs::create_dir_all(&base).map_err(|e| e.to_string())?; }
     reject_link(&base, "设备派生缓存")?;
     let root = base.canonicalize().map_err(|e| e.to_string())?;
@@ -223,7 +221,7 @@ pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id:
             let conn = state.0.lock().map_err(|e|e.to_string())?;
             ensure_project_source_sha(&conn,project_id,Some(&source_gim_sha256))?;
         }
-        let base = app_handle.path().app_data_dir().map_err(|e|e.to_string())?.join("device-lod");
+        let base = crate::application_data_dir(&app_handle).map_err(|e|e.to_string())?.join("device-lod");
         if !base.exists() { stdfs::create_dir_all(&base).map_err(|e|e.to_string())?; }
         reject_link(&base,"设备派生缓存")?;
         let root = base.canonicalize().map_err(|e|e.to_string())?;
@@ -380,7 +378,7 @@ pub async fn batch_read_glb_files(
 /// 注意：false 只表示 geometry domain 不可用；调用方不得据此删除整个
 /// 项目 source/index cache，应进入 DEV geometry rebuild。
 pub(super) fn check_geometry_cache_version_file(app_handle: &tauri::AppHandle, project_id: i64) -> bool {
-    let base = match app_handle.path().app_data_dir() {
+    let base = match crate::application_data_dir(&app_handle) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -469,9 +467,7 @@ fn geometry_manifest_path(
     project_id: i64,
 ) -> Result<PathBuf, String> {
     ensure_cache_project_id(project_id)?;
-    let base = app_handle
-        .path()
-        .app_data_dir()
+    let base = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
     let root = base.join("glbcache").join(project_id.to_string());
     if !root.exists() {
@@ -624,9 +620,7 @@ pub fn write_geometry_cache_manifest(
         }
     }
     let path = geometry_manifest_path(&app_handle, project_id).or_else(|_| {
-        let base = app_handle
-            .path()
-            .app_data_dir()
+        let base = crate::application_data_dir(&app_handle)
             .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
         let root = base.join("glbcache").join(project_id.to_string());
         stdfs::create_dir_all(&root).map_err(|e| format!("创建 GLB 目录失败: {}", e))?;
@@ -728,9 +722,7 @@ pub fn write_geometry_cache_version(
         // task cannot publish a current-version marker for a different GIM.
         ensure_project_source_sha(&guard, project_id, source_sha256.as_deref())?;
     }
-    let base = app_handle
-        .path()
-        .app_data_dir()
+    let base = crate::application_data_dir(&app_handle)
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
     let dir = base.join("glbcache").join(project_id.to_string());
     if !dir.exists() {

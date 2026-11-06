@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { beginIfcGeometryWork } from './geometryWorkGate.js';
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
@@ -18,7 +19,7 @@ import {
 import { IfcRegionalInstances } from './ifcRegionalInstances.js';
 import { IfcObjectFineRuntime } from './ifcObjectFineRuntime.js';
 import type { IfcObjectIdentity } from './ifcObjectIdentity.js';
-import type { SubstationFineQueue } from '../app/state.js';
+import type { SubstationFineQueue } from '../shared/selectionContracts.js';
 import { perfMarkProductMoment } from '../utils/perfTimings.js';
 import type { MemoryPressure } from '../utils/memoryPressure.js';
 import type { IfcModelVisibility } from './ifcModelVisibility.js';
@@ -248,6 +249,7 @@ export class IfcRegionalRuntime {
     group.removeFromParent();
     group.traverse((o) => {
       const mesh = o as THREE.Mesh;
+      if(mesh.userData.owned === false)return;
       mesh.geometry?.dispose();
       const material = mesh.material;
       if (Array.isArray(material)) material.forEach((m) => m.dispose());
@@ -372,8 +374,8 @@ export class IfcRegionalRuntime {
             this.diagnostics.computed++;
 
           }
-          if (this.current()) void writeIfcLodArtifacts(computed.map(result => ({
-            key: `${this.options.cacheKey}|${IFC_NEAR_TEMPLATE_CACHE_VERSION}|${result.expressId}`, value: result })));
+          if (this.current()) void Promise.resolve(writeIfcLodArtifacts(computed.map(result => ({
+            key: `${this.options.cacheKey}|${IFC_NEAR_TEMPLATE_CACHE_VERSION}|${result.expressId}`, value: result })))).catch(reportBackgroundError);
         }
         if (!this.current() || epoch !== this.epoch) return;
         for (const object of batch) {
@@ -685,7 +687,7 @@ export class IfcRegionalRuntime {
       if (!this.current()) throw Error('Regional model released');
       await this.open();
       const data = await this.send({ type: 'properties', expressId });
-      if (this.current()) void writeIfcLodArtifact(key, data);
+      if (this.current()) void Promise.resolve(writeIfcLodArtifact(key, data)).catch(reportBackgroundError);
       return data;
     } finally {
       this.retainSource();
@@ -716,7 +718,7 @@ export class IfcRegionalRuntime {
       p.reject(Error('Regional model released'));
     this.pending.clear();
     const restore=[...this.localIds.values()];this.localIds.clear();
-    if(restore.length)void (async()=>{try{await this.setFarVisible(restore,true);}catch{/* Model may already be disposed. */}})();
+    if(restore.length)void Promise.resolve((async()=>{try{await this.setFarVisible(restore,true);}catch{/* Model may already be disposed. */}})()).catch(reportBackgroundError);
     for (const group of this.groups.values()) this.disposeGroup(group);
     this.groups.clear();
     this.instances.release();

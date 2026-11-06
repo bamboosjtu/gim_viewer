@@ -1,3 +1,5 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { loadPresentation } from './presentationPort.js';
 /** Optional STD/SLD parsing and cache restore. */
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { perfBegin, perfMarkProductMoment, type PerfSession } from '../utils/perfTimings.js';
@@ -45,7 +47,7 @@ export async function buildAndCommitSubstationStdSld(
 
     let rendered = false;
     try {
-      const { renderSldView } = await import('../ui/sldView.js');
+      const { renderSldView } = await loadPresentation('sldView');
       if (!state.isCurrentSession(session)) return false;
       renderSldView(state);
       rendered = true;
@@ -60,7 +62,7 @@ export async function buildAndCommitSubstationStdSld(
     // been committed.  The callback itself keeps a session guard for clicks
     // that arrive while another project is opening.
     if (result) {
-      setupSldGridIdInteraction(state, showMessage, session);
+      void Promise.resolve(setupSldGridIdInteraction(state, showMessage, session)).catch(reportBackgroundError);
     }
     endStdSld(undefined, {
       source,

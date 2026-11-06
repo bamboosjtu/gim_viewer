@@ -7,8 +7,8 @@ import {
   perfRecordExternalSpan,
   type PerfSession,
 } from '../utils/perfTimings.js';
-import { loadingEl, emptyTipEl } from '../ui/dom.js';
-import { pushBusy, popBusy } from '../ui/shell/statusBar.js';
+import { loadingEl, emptyTipEl } from './presentation/dom.js';
+import { pushBusy, popBusy } from './presentation/shell_statusBar.js';
 
 export interface ExtractedGimSource {
   magic: string;
@@ -30,6 +30,8 @@ export interface ExtractedGimSource {
   entryTrace?: import('@desktop/gimExtract.js').NativeExtractionEntryTiming[];
 }
 
+export type ExtractionResult = ({ status: 'ok' } & ExtractedGimSource) | { status: 'cancelled' };
+
 /** Shared context passed into exactly one domain runtime after dispatch. */
 export interface GimRuntimeOpenContext {
   state: AppState;
@@ -39,9 +41,10 @@ export interface GimRuntimeOpenContext {
   projectName: string;
   projectTypeName: string;
   showMessage: (text: string) => void;
-  getExtracted: () => Promise<ExtractedGimSource>;
+  getExtracted: () => Promise<ExtractionResult>;
 }
 
+let loadingRevision = 0;
 let loadingStartedAt: number | null = null;
 let loadingTimer: ReturnType<typeof setInterval> | null = null;
 let loadingProgress = 0;
@@ -90,6 +93,7 @@ function applyLoadingProgress(text: string): void {
 }
 
 export function showLoading(text: string): void {
+  loadingRevision += 1;
   const textEl = document.getElementById('loading-text');
   if (textEl) textEl.textContent = text;
   else loadingEl.textContent = text;
@@ -114,6 +118,7 @@ export function showLoading(text: string): void {
 }
 
 export function hideLoading(): void {
+  loadingRevision += 1;
   loadingEl.style.display = 'none';
   loadingEl.classList.remove('active');
   if (loadingTimer) { clearInterval(loadingTimer); loadingTimer = null; }
@@ -169,4 +174,10 @@ export function recordNativeExtractionStages(
   for (const [label, durationMs, meta] of stages) {
     if (durationMs > 0) perfRecordExternalSpan(label, durationMs, meta, session);
   }
+}
+
+/** Delayed UI changes must retain the identity captured when scheduled. */
+export function scheduleHideLoading(isCurrent: () => boolean, delay: number): ReturnType<typeof setTimeout> {
+  const revision = loadingRevision;
+  return setTimeout(() => { if (revision === loadingRevision && isCurrent()) hideLoading(); }, delay);
 }

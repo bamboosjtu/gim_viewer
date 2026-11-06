@@ -27,10 +27,6 @@ import {
   perfRecordSubstationIfcRead,
   perfRecordSubstationIfcProfile,
   perfRecordSubstationFinalizeProfile,
-  perfSetFragmentsCacheEnabled,
-  perfRecordFragmentsCacheOperation,
-  perfRecordFragmentsCacheOutcome,
-  perfFragmentsCacheSnapshot,
   installLongTaskObserver,
   perfLongTaskSnapshot,
 } from '../perfTimings.js';
@@ -355,59 +351,5 @@ describe('perfTimings', () => {
       expect(phases.spanWindow.evicted).toBeGreaterThan(0);
       expect(perfSnapshot().spans.length).toBeLessThanOrEqual(phases.spanWindow.limit);
     } finally {localStorage.removeItem('GIM_PERF_TASK_TRACE');perfReset();}
-  });
-
-  it('Fragments cache 操作、字节和命中/未命中/回退按会话汇总', () => {
-    const oldSession = perfCurrentSession();
-    perfSetFragmentsCacheEnabled(true, oldSession.id);
-    perfRecordFragmentsCacheOutcome('attempt', oldSession.id);
-    perfRecordFragmentsCacheOperation('validate', 4, 0, false, oldSession.id);
-    perfRecordFragmentsCacheOutcome('hit', oldSession.id);
-    perfRecordFragmentsCacheOperation('read', 8, 1024, false, oldSession.id);
-    perfRecordFragmentsCacheOperation('load', 12, 1024, false, oldSession.id);
-    perfRecordFragmentsCacheOperation('serialize', 3, 2048, false, oldSession.id);
-    perfRecordFragmentsCacheOperation('write', 5, 2048, false, oldSession.id);
-    perfRecordFragmentsCacheOperation('upsert', 1, 0, true, oldSession.id);
-    perfRecordFragmentsCacheOutcome('attempt', oldSession.id);
-    perfRecordFragmentsCacheOutcome('miss', oldSession.id);
-    perfRecordFragmentsCacheOutcome('fallback', oldSession.id);
-
-    const snapshot = perfFragmentsCacheSnapshot();
-    expect(snapshot).toMatchObject({
-      enabled: true,
-      attempts: 2,
-      hits: 1,
-      misses: 1,
-      fallbacks: 1,
-      readBytes: 1024,
-      serializedBytes: 2048,
-      writtenBytes: 2048,
-    });
-    expect(snapshot.operations.read).toMatchObject({ count: 1, bytes: 1024, totalMs: 8 });
-    expect(snapshot.operations.upsert).toMatchObject({ count: 1, failures: 1 });
-
-    perfReset({ generation: 2 });
-    perfRecordFragmentsCacheOperation('read', 99, 999, false, oldSession.id);
-    perfRecordFragmentsCacheOutcome('hit', oldSession.id);
-    expect(perfSnapshot().fragmentsCache).toMatchObject({
-      enabled: null,
-      attempts: 0,
-      hits: 0,
-      readBytes: 0,
-    });
-  });
-
-  it('cache disabled 只记录 bypass 条目且不虚构 miss/fallback', () => {
-    const session = perfCurrentSession();
-    perfSetFragmentsCacheEnabled(false, session.id);
-    perfSetFragmentsCacheEnabled(false, session.id);
-    expect(perfFragmentsCacheSnapshot()).toMatchObject({
-      enabled: false,
-      disabled: 2,
-      attempts: 0,
-      misses: 0,
-      fallbacks: 0,
-      hits: 0,
-    });
   });
 });

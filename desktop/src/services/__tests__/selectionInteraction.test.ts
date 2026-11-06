@@ -40,9 +40,9 @@ beforeEach(() => {
 });
 
 async function engineeringFixture(state: AppState, index: Awaited<ReturnType<typeof spatialFixture>>) {
-  const { extractEngineeringSourceGraph } = await import('../../gim/engineering/sourceGraph.js');
-  const { buildEngineeringSources } = await import('../../gim/engineering/buildSources.js');
-  const { projectEngineeringNavigation } = await import('../../gim/engineering/navigation.js');
+  const { extractEngineeringSourceGraph } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/sourceGraph.js'); });
+  const { buildEngineeringSources } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/buildSources.js'); });
+  const { projectEngineeringNavigation } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/navigation.js'); });
   const raw: Record<string,string> = { 'project.cbm':'OBJECTMODELPOINTER=B.dev', 'B.dev':'SYMBOLNAME=B', 'CBM/model.ifc':'' };
   const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async path=>raw[path]});
   const built=buildEngineeringSources('package',graph,index.objects,index.models,index.nodes);
@@ -56,7 +56,7 @@ it.each([false,true])('an engineering IFC whole highlights and frames its cached
   if(withoutSpatial)state.substationSpatialIndex=null;
   const box=new THREE.Box3(new THREE.Vector3(1,2,3),new THREE.Vector3(3,4,5));
   runtime.ctx.fragments.list.set(state.getRuntimeModelId('model'),{getLocalIdsByGuids:vi.fn(async()=>[10]),getMergedBox:vi.fn(async()=>box),getItemsData:async()=>[]});
-  const {selectEngineeringTarget}=await import('../engineeringSelection.js');
+  const {selectEngineeringTarget}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringSelection.js'); });
   await selectEngineeringTarget(state,{kind:'engineering',key:targets.ifc});
   expect(state.highlightedItems).not.toBeNull(); expect(runtime.ctx.fragments.highlight).not.toHaveBeenCalled(); expect(runtime.ctx.world.camera.controls.setLookAt).toHaveBeenCalled();
   expect(state.selectionRequest?.target).toEqual({kind:'engineering',key:targets.ifc});
@@ -67,7 +67,7 @@ it('a late engineering IFC identity reply cannot highlight over a newer whole se
   const {state}=fixture();state.initialized=true;state.currentProjectType='substation';
   const index=await spatialFixture(state),targets=await engineeringFixture(state,index),ids=deferred<(number|null)[]>(),started=deferred<void>();
   runtime.ctx.fragments.list.set(state.getRuntimeModelId('model'),{getLocalIdsByGuids:()=>{started.resolve();return ids.promise;},getMergedBox:async()=>new THREE.Box3(),getItemsData:async()=>[]});
-  const {selectEngineeringTarget}=await import('../engineeringSelection.js');
+  const {selectEngineeringTarget}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringSelection.js'); });
   const pending=selectEngineeringTarget(state,{kind:'engineering',key:targets.ifc});await started.promise;
   await selectEngineeringTarget(state,{kind:'engineering',key:targets.device});ids.resolve([10]);await pending;
   expect(runtime.ctx.fragments.highlight).not.toHaveBeenCalled();expect(document.querySelector('.props-header')?.textContent).toBe('B');
@@ -79,7 +79,7 @@ it('uses precise regional bounds for an IFC whole and offers a local view of a l
   const loaded={getLocalIdsByGuids:vi.fn(async()=>[10]),getMergedBox:vi.fn(async()=>new THREE.Box3(new THREE.Vector3(-100,-100,-100),new THREE.Vector3(200,200,200))),getItemsData:async()=>[]};
   runtime.ctx.fragments.list.set(state.getRuntimeModelId('model'),loaded);
   state.ifcRegionalRuntimes.set('model',{index:{objects:[{globalId:object.globalId,expressId:10}]},worldBounds:()=>exact,highlightGroup:()=>null,clearHighlight:()=>{}} as any);
-  const {selectEngineeringTarget}=await import('../engineeringSelection.js');await selectEngineeringTarget(state,{kind:'engineering',key:targets.ifc});
+  const {selectEngineeringTarget}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringSelection.js'); });await selectEngineeringTarget(state,{kind:'engineering',key:targets.ifc});
   expect(loaded.getMergedBox).not.toHaveBeenCalled();expect(state.highlightedItems).toEqual({[state.getRuntimeModelId('model')]:[10]});expect(runtime.ctx.fragments.highlight).not.toHaveBeenCalled();
   const controls=runtime.ctx.world.camera.controls,near=controls.position.distanceTo(controls.target);
   expect(controls.target.x).toBeCloseTo(63.5);expect(near).toBeLessThan(70);
@@ -91,7 +91,7 @@ it('ordinary selection reports through selection status without reusing project 
   const {state,a}=fixture();
   const overlay=document.createElement('div');overlay.id='loading';overlay.style.display='none';document.body.append(overlay);
   const openingFeedback=vi.fn(() => { overlay.style.display='block'; });
-  const {handleNodeClick,selectionMessage}=await import('../nodeInteractionService.js');
+  const {handleNodeClick,selectionMessage}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   await handleNodeClick(state,a,openingFeedback);
   expect(openingFeedback).not.toHaveBeenCalled();expect(overlay.style.display).toBe('none');
   expect(state.selectionMessage).not.toBe('');
@@ -112,7 +112,7 @@ it('nested parent → child selections share the physical root load while the ch
   const source=files.get('DEV/root.dev')!,read=deferred<string>(),started=deferred<void>();
   let reads=0;
   files.set('DEV/root.dev',{text:()=>{reads++;started.resolve();return read.promise;},arrayBuffer:()=>source.arrayBuffer()} as File);
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   const slow=handleNodeClick(state,a,()=>{}); await started.promise;
   const latest=handleNodeClick(state,b,()=>{});
   expect(reads).toBe(1);
@@ -129,7 +129,7 @@ it('nested parent → child selections share the physical root load while the ch
 it('A slow FAM cannot replace B inspector after B has rendered', async () => {
   const {state,a,b}=fixture(), read=deferred<string>(),started=deferred<void>(); a.famPath='slow.fam';
   state.currentFiles!.set('CBM/slow.fam',{text:() => { started.resolve();return read.promise; }} as File);
-  const drawer=await import('../../ui/propsDrawer.js');
+  const drawer=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/propsDrawer.js'); });
   const pending=drawer.showNodePropertiesBasic(state,a); await started.promise;
   await drawer.showNodePropertiesBasic(state,b);
   read.resolve('[设计参数]\n材质=材质=旧A'); await pending;
@@ -141,7 +141,7 @@ it('A slow geometry remains a resource but cannot reclaim B camera or material h
   const {state,a,b}=fixture(),read=deferred<string>(),started=deferred<void>();
   const source=state.currentFiles!.get('DEV/A.dev')!;
   state.currentFiles!.set('DEV/A.dev',{text:() => { started.resolve();return read.promise; },arrayBuffer:() => source.arrayBuffer()} as File);
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   const messages:string[]=[];
   const pending=handleNodeClick(state,a,(text) => messages.push(`A: ${text}`)); await started.promise;
   await handleNodeClick(state,b,(text) => messages.push(`B: ${text}`));
@@ -160,7 +160,7 @@ it('selecting unsupported B clears A highlight, preserves geometry and camera, a
   const {state,a,b}=fixture();
   state.currentFiles!.set('DEV/B.dev',new File(['SOLIDMODELS.NUM=0'],'B.dev'));
   state.geometryDiagnosticsByDevPath.set('dev/b.dev',{devPath:'DEV/B.dev',status:'unsupported',source:'warm',reason:'parser-unsupported',unsupportedPrimitiveTypeCounts:{Unknown:1}});
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   await handleNodeClick(state,a,() => {});
   const count=state.loadedXmlModGroups.size, target=runtime.ctx.world.camera.controls.target.clone();
   await handleNodeClick(state,b,() => {});
@@ -180,7 +180,7 @@ it.each(['empty','failed','partial'] as const)('A → %s B uses the known diagno
     state.currentFiles!.set('MOD/partial.mod',new File(['<Device><Entities><Entity ID="1" Visible="true"><Cuboid L="100" W="100" H="100"/></Entity><Entity ID="2" Visible="true"><Unknown/></Entity></Entities></Device>'],'partial.mod'));
   }
   state.geometryDiagnosticsByDevPath.set('dev/b.dev',{devPath:'DEV/B.dev',status,source:'cold',reason:status==='failed'?'parse-failed':undefined,unsupportedPrimitiveTypeCounts:{},detail:`known-${status}`});
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   await handleNodeClick(state,a,() => {});
   const target=runtime.ctx.world.camera.controls.target.clone();
   await handleNodeClick(state,b,() => {});
@@ -196,7 +196,7 @@ it.each(['empty','failed','partial'] as const)('A → %s B uses the known diagno
 it('file-level IFC B stays a semantic selection without inventing a GUID or another template instance', async () => {
   const {state,a,b}=fixture(); b.devPath='';b.ifcFile='model.ifc';
   state.currentIfcEntries=[{modelId:'model',name:'model',path:'CBM/model.ifc'}];state.loadedModels.set('model',{modelId:'model',runtimeModelId:'model',visible:true});
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   await handleNodeClick(state,a,() => {});
   const target=runtime.ctx.world.camera.controls.target.clone();
   await handleNodeClick(state,b,() => {});
@@ -209,7 +209,7 @@ it('file-level IFC B stays a semantic selection without inventing a GUID or anot
 it('slow FAM read cannot commit after project replacement or an explicit cancellation', async () => {
   const {state,a,b}=fixture(),read=deferred<string>(),started=deferred<void>();a.famPath='slow.fam';a.devPath='';
   state.currentFiles!.set('CBM/slow.fam',{text:() => {started.resolve();return read.promise;}} as File);
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   const pending=handleNodeClick(state,a,() => {});await started.promise;
   state.activateProject(2,'new-project');b.devPath='';
   await handleNodeClick(state,b,() => {});
@@ -222,7 +222,7 @@ it('slow FAM read cannot commit after project replacement or an explicit cancell
 it('reversed PARTINDEX children share one in-flight root load but only the last part commits UI', async () => {
   const {state}=fixture();
   state.currentFiles!.delete('DEV/A.dev'); state.currentFiles!.delete('DEV/B.dev');
-  const {buildCbmTree}=await import('../../gim/cbmParser.js');
+  const {buildCbmTree}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/cbmParser.js'); });
   for (const [path,text] of Object.entries({
     'CBM/project.cbm':'ENTITYNAME=F3System\nSUBSYSTEMS.NUM=1\nSUBSYSTEM0=root.cbm',
     'CBM/root.cbm':'ENTITYNAME=F4System\nOBJECTMODELPOINTER=root.dev\nSUBDEVICES.NUM=2\nSUBDEVICE0=b.cbm\nSUBDEVICE1=a.cbm',
@@ -236,7 +236,7 @@ it('reversed PARTINDEX children share one in-flight root load but only the last 
   const bytes=vi.fn(() => {started.resolve();return read.promise;});
   state.currentFiles!.set('DEV/root.dev',{text:bytes,arrayBuffer:()=>source.arrayBuffer()} as unknown as File);
   const root=state.currentCbmTree.children[0],a=root.children[1],b=root.children[0];
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   const token=state.geometryLoadToken;
   const pendingA=handleNodeClick(state,a,() => {});await started.promise;
   const pendingB=handleNodeClick(state,b,() => {});
@@ -248,7 +248,7 @@ it('reversed PARTINDEX children share one in-flight root load but only the last 
   expect(state.geometryLoadToken).toBe(token);
   const count=state.loadedXmlModGroups.size;
   await handleNodeClick(state,b,() => {});expect(state.loadedXmlModGroups.size).toBe(count);
-  const {resetModHighlight}=await import('../../viewer/highlight.js');resetModHighlight(state);
+  const {resetModHighlight}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../viewer/highlight.js'); });resetModHighlight(state);
   for (const group of state.loadedXmlModGroups.values()) group.traverse((o) => {
     const mesh=o as THREE.Mesh;if (mesh.isMesh) expect((mesh.material as THREE.MeshStandardMaterial).emissiveIntensity).not.toBe(0.8);
   });
@@ -259,7 +259,7 @@ it('an unlinked PARTINDEX clears A and never falls back to global DEV matching',
   // B is a semantic child of a different root which has no child assembly.
   const owner=node('Owner');owner.children=[b];state.currentFiles!.set('DEV/Owner.dev',new File(['SUBDEVICES.NUM=0'],'Owner.dev'));
   state.currentCbmTree!.children=[a,owner];
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   await handleNodeClick(state,a,() => {});const target=runtime.ctx.world.camera.controls.target.clone();
   await handleNodeClick(state,b,() => {});
   expect(state.selectionGeometry!.status).toBe('unlinked');expect(state.highlightedModState).toBeNull();
@@ -270,7 +270,7 @@ it('an already-started IFC reset completes before the latest MOD apply, without 
   const {state,a,b}=fixture(),reset=deferred<void>(),started=deferred<void>();
   state.highlightedItems={old:[1]};
   runtime.ctx.fragments.resetHighlight.mockImplementationOnce(() => {started.resolve();return reset.promise;});
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   const pendingA=handleNodeClick(state,a,() => {});await started.promise;
   const pendingB=handleNodeClick(state,b,() => {});
   reset.resolve();await Promise.all([pendingA,pendingB]);
@@ -288,7 +288,7 @@ it('a pending camera operation is replaced when B selects, and cannot jump back 
     if (owned===1) {started.resolve();return movement.promise.then(() => {if (owned===generation) controls.target.set(tx,ty,tz);});}
     controls.target.set(tx,ty,tz);controls.position.set(x,y,z);return Promise.resolve();
   });
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   const pendingA=handleNodeClick(state,a,() => {});await started.promise;
   await handleNodeClick(state,b,() => {});movement.resolve();await pendingA;
   expect(controls.stop).toHaveBeenCalledTimes(1);expect(controls.target.x).toBeCloseTo(20);
@@ -296,7 +296,7 @@ it('a pending camera operation is replaced when B selects, and cannot jump back 
 });
 
 function spatialFixture(state:AppState) {
-  return import('../../gim/ifcSpatialParser.js').then(({buildSubstationSpatialIndexFromTexts}) => {
+  return import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/ifcSpatialParser.js'); }).then(({buildSubstationSpatialIndexFromTexts}) => {
     const entry={modelId:'model',name:'model',path:'CBM/model.ifc'};
     state.currentIfcEntries=[entry];state.ifcRuntimeModelIds.set('model','model');
     state.substationSpatialIndex=buildSubstationSpatialIndexFromTexts([{entry,text:[
@@ -315,15 +315,15 @@ it('a source IFC selection keeps its row and inspector after an earlier FAM requ
   state.currentProjectType='substation';
   state.currentFiles!.set('CBM/slow.fam',{text:() => {started.resolve();return fam.promise;}} as File);
   const index=await spatialFixture(state),object=index.objects[0];
-  const { extractEngineeringSourceGraph } = await import('../../gim/engineering/sourceGraph.js');
-  const { buildEngineeringSources } = await import('../../gim/engineering/buildSources.js');
+  const { extractEngineeringSourceGraph } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/sourceGraph.js'); });
+  const { buildEngineeringSources } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/buildSources.js'); });
   const raw: Record<string,string> = { 'project.cbm':'SUBSYSTEM0=unit.cbm', 'unit.cbm':'OBJECTMODELPOINTER=A.dev', 'A.dev':'SYMBOLNAME=设备 A', 'CBM/model.ifc':'' };
   const graph = await extractEngineeringSourceGraph({ paths:Object.keys(raw), readText:async path=>raw[path] });
   const built = buildEngineeringSources('package',graph,index.objects,index.models,index.nodes); state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;
-  const {projectEngineeringNavigation}=await import('../../gim/engineering/navigation.js');state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
+  const {projectEngineeringNavigation}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/engineering/navigation.js'); });state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
   const sourceId=built.sources.ifcRecords.find(r=>r.guid===object.globalId)!.id;
-  const {showNodePropertiesBasic}=await import('../../ui/propsDrawer.js');const pending=showNodePropertiesBasic(state,a);await started.promise;
-  const {buildAndRenderCbmTree}=await import('../../ui/cbmTreeView.js');
+  const {showNodePropertiesBasic}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/propsDrawer.js'); });const pending=showNodePropertiesBasic(state,a);await started.promise;
+  const {buildAndRenderCbmTree}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/cbmTreeView.js'); });
   state.engineeringNavMode='source';buildAndRenderCbmTree(state,()=>{});
   const input=document.querySelector<HTMLInputElement>('[role="combobox"]')!;input.value='IFC B';input.dispatchEvent(new Event('input'));
   document.querySelector<HTMLElement>('[role="option"]')!.click();
@@ -343,8 +343,8 @@ it.each([false,true])('a spatial IFC second render loses ownership to B; project
   const {state,b}=fixture(),data=deferred<any[]>(),started=deferred<void>();
   const index=await spatialFixture(state),object=index.objects[0];
   runtime.ctx.fragments.list.set('model',{getLocalIdsByGuids:async () => [10],getItemsData:() => {started.resolve();return data.promise;}});
-  const drawer=await import('../../ui/propsDrawer.js');drawer.setupPropsDrawer(runtime.ctx);
-  const {handleSpatialSelection,handleNodeClick}=await import('../nodeInteractionService.js');
+  const drawer=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/propsDrawer.js'); });drawer.setupPropsDrawer(runtime.ctx);
+  const {handleSpatialSelection,handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   const pending=handleSpatialSelection(state,object,index,state.beginSelection({kind:'ifc-object',key:object.key}));
   await started.promise;if (replaceProject) state.activateProject(2,'next');b.devPath='';
   await handleNodeClick(state,b,() => {});data.resolve([{Name:{value:'Old IFC'}}]);await pending;
@@ -355,10 +355,10 @@ it('search selection wins before lazy imports and a slow 3D raycast cannot steal
   const {state,b}=fixture(),ray=deferred<any>(),started=deferred<void>();state.initialized=true;
   runtime.ctx.fragments.list.set('model',{object:new THREE.Group(),getVisible:async () => [true],raycast:() => runtime.ctx.fragments.raycast(),getGuidsByLocalIds:async () => ['guid'],getItemsData:async () => []});
   runtime.ctx.fragments.raycast=vi.fn(() => {started.resolve();return ray.promise;});
-  const {getViewerRuntimeWithUI}=await import('../viewerUIBinding.js');await getViewerRuntimeWithUI(state,() => {});
+  const {getViewerRuntimeWithUI}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../viewerUIBinding.js'); });await getViewerRuntimeWithUI(state,() => {});
   document.querySelector<HTMLCanvasElement>('canvas')!.click();await started.promise;
-  const {createNodeClickHandler}=await import('../substationRuntime.js');
-  const {buildAndRenderCbmTree}=await import('../../ui/cbmTreeView.js');state.currentProjectType='equipment';
+  const {createNodeClickHandler}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../substationRuntime.js'); });
+  const {buildAndRenderCbmTree}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/cbmTreeView.js'); });state.currentProjectType='equipment';
   buildAndRenderCbmTree(state,createNodeClickHandler(state,() => {}));
   const input=document.querySelector<HTMLInputElement>('[role="combobox"]')!;input.value='B';input.dispatchEvent(new Event('input'));
   const option=[...document.querySelectorAll<HTMLElement>('[role="option"]')].find((o) => o.textContent!.startsWith('B'))!;option.click();
@@ -375,9 +375,9 @@ it('an in-flight 3D IFC apply is reset before B, and blank viewport cancellation
   const modelRoot=new THREE.Group();
   runtime.ctx.fragments.list.set('model',{object:modelRoot,getVisible:async () => [true],raycast:() => runtime.ctx.fragments.raycast(),getGuidsByLocalIds:async () => ['guid'],getItemsData:async () => [],getItemsGeometry:async()=>{started.resolve();await apply.promise;return [[{positions:new Float32Array([0,0,0,1,0,0,0,1,0]),transform:new THREE.Matrix4()}]];}});
   runtime.ctx.fragments.raycast=vi.fn(async () => ({localId:10,fragments:{modelId:'model'}}));
-  const {getViewerRuntimeWithUI}=await import('../viewerUIBinding.js');await getViewerRuntimeWithUI(state,() => {});
+  const {getViewerRuntimeWithUI}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../viewerUIBinding.js'); });await getViewerRuntimeWithUI(state,() => {});
   document.querySelector<HTMLCanvasElement>('canvas')!.click();await started.promise;
-  const {handleNodeClick}=await import('../nodeInteractionService.js');const pending=handleNodeClick(state,b,() => {});
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });const pending=handleNodeClick(state,b,() => {});
   apply.resolve();await pending;
   expect(modelRoot.children).toHaveLength(0);expect(state.highlightedItems).toBeNull();expect(runtime.ctx.fragments.highlight).not.toHaveBeenCalled();
   expect(state.highlightedModState!.groups.every((g) => g.userData.rootOccurrence===b.path)).toBe(true);
@@ -393,13 +393,13 @@ it('SLD topology A → 3D B invalidates A properties and the previous topology h
   state.currentFiles!.set('CBM/slow.fam',{text:() => {started.resolve();return fam.promise;}} as File);
   runtime.ctx.fragments.list.set('model',{object:new THREE.Group(),getVisible:async () => [true],raycast:() => runtime.ctx.fragments.raycast(),getGuidsByLocalIds:async () => ['guid-B'],getItemsData:async () => [{Name:{value:'Picked B'}}]});
   runtime.ctx.fragments.raycast=vi.fn(async () => ({localId:10,fragments:{modelId:'model'}}));
-  const {getViewerRuntimeWithUI}=await import('../viewerUIBinding.js');await getViewerRuntimeWithUI(state,() => {});
-  const {parseStd}=await import('../../gim/stdParser.js');
+  const {getViewerRuntimeWithUI}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../viewerUIBinding.js'); });await getViewerRuntimeWithUI(state,() => {});
+  const {parseStd}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/stdParser.js'); });
   state.currentStdDoc=parseStd('<STD><Substation name="Station"><VoltageLevel name="10kV"><Bay name="A" gridId="A0TEST*001"/></VoltageLevel></Substation></STD>');
-  const {buildStdSldIndex}=await import('../../gim/stdSldIndex.js');
+  const {buildStdSldIndex}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/stdSldIndex.js'); });
   state.currentStdSldIndex=buildStdSldIndex(state.currentCbmTree,state.currentStdDoc,null);
-  const {setupSldGridIdInteraction}=await import('../substationRuntime.js');await setupSldGridIdInteraction(state,() => {},state.captureProjectSession());
-  const {renderSldView}=await import('../../ui/sldView.js');renderSldView(state);
+  const {setupSldGridIdInteraction}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../substationRuntime.js'); });await setupSldGridIdInteraction(state,() => {},state.captureProjectSession());
+  const {renderSldView}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../ui/sldView.js'); });renderSldView(state);
   [...document.querySelectorAll<HTMLButtonElement>('#sld-panel button')].find((button) => button.textContent!.includes('拓扑'))!.click();
   [...document.querySelectorAll<HTMLElement>('.sld-topo-item')].find((item) => item.textContent!.includes('A0TEST*001'))!.click();
   await started.promise;document.querySelector<HTMLCanvasElement>('canvas')!.click();
@@ -413,7 +413,7 @@ it('SLD topology A → 3D B invalidates A properties and the previous topology h
 it('a resource helper from an old session cannot create a new user selection', async () => {
   const {state,a,b}=fixture(),old=state.captureProjectSession();state.activateProject(3,'replacement');
   const request=state.beginSelection({kind:'cbm',key:b.path});
-  const {loadModStlForNode,frameAndHighlightDevice}=await import('../nodeInteractionService.js');
+  const {loadModStlForNode,frameAndHighlightDevice}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   await loadModStlForNode(state,a,old);
   await frameAndHighlightDevice(runtime.ctx,state,a.devPath,{rootOccurrence:a.path},old);
   expect(state.selectionRequest).toBe(request);expect(state.loadedXmlModGroups.size).toBe(0);
@@ -424,7 +424,7 @@ it.each(['empty','unsupported','failed'] as const)('raw %s is classified from tr
   if (expected==='empty') state.currentFiles!.set('DEV/B.dev',new File(['SOLIDMODELS.NUM=0'],'B.dev'));
   if (expected==='unsupported') state.currentFiles!.set('MOD/leaf.mod',new File(['<Device><Entities><Entity ID="1" Visible="true"><Unknown/></Entity></Entities></Device>'],'leaf.mod'));
   if (expected==='failed') state.currentFiles!.set('DEV/B.dev',new File(['SOLIDMODELS.NUM=1\nSOLIDMODEL0=missing.phm'],'B.dev'));
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   if (expected!=='unsupported') await handleNodeClick(state,a,() => {});
   const target=runtime.ctx.world.camera.controls.target.clone();
   await handleNodeClick(state,b,() => {});
@@ -436,12 +436,12 @@ it('a declared DEV reference to an empty PHM is empty without falsely claiming D
   const {state,a,b}=fixture();
   state.currentFiles!.set('DEV/B.dev',new File(['SOLIDMODELS.NUM=1\nSOLIDMODEL0=empty.phm'],'B.dev'));
   state.currentFiles!.set('PHM/empty.phm',new File(['SOLIDMODELS.NUM=0'],'empty.phm'));
-  const {handleNodeClick}=await import('../nodeInteractionService.js');
+  const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
   await handleNodeClick(state,a,() => {});
   const target=runtime.ctx.world.camera.controls.target.clone();
   await handleNodeClick(state,b,() => {});
   expect(state.selectionGeometry!.status).toBe('empty');
-  const {getGeometryDiagnostic}=await import('../../gim/geometry/geometryDiagnostics.js');
+  const {getGeometryDiagnostic}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../gim/geometry/geometryDiagnostics.js'); });
   const diagnostic=getGeometryDiagnostic(state,b.devPath);
   expect(diagnostic?.status).toBe('empty');
   expect(diagnostic?.reason).toBe('phm-no-solidmodel');
@@ -453,8 +453,8 @@ it('a declared DEV reference to an empty PHM is empty without falsely claiming D
 it('cold selected DEV product moment requires real admitted geometry, not an empty result',async()=>{
  const {state,a,b}=fixture();state.currentProjectType='substation';
  state.currentFiles!.set('DEV/B.dev',new File(['SOLIDMODELS.NUM=0'],'B.dev'));
- const perf=await import('../../utils/perfTimings.js');perf.perfReset();
- const {handleNodeClick}=await import('../nodeInteractionService.js');
+ const perf=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../../utils/perfTimings.js'); });perf.perfReset();
+ const {handleNodeClick}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../nodeInteractionService.js'); });
  await handleNodeClick(state,b,()=>{});
  expect(perf.perfProductMomentSnapshot().coldSelectedDeviceGeometryReady).toBeNull();
  await handleNodeClick(state,a,()=>{});
@@ -465,7 +465,7 @@ it('marks a source-backed group range even when no individual far or near repres
  const index=await spatialFixture(state);await engineeringFixture(state,index);
  const box=new THREE.Box3(new THREE.Vector3(1,2,3),new THREE.Vector3(11,12,13));
  state.ifcRegionalRuntimes.set('model',{index:{objects:[{expressId:10}]},worldBounds:()=>box,highlightGroup:()=>null,clearHighlight:()=>{}} as any);
- const {selectEngineeringTarget}=await import('../engineeringSelection.js');
+ const {selectEngineeringTarget}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringSelection.js'); });
  await selectEngineeringTarget(state,{kind:'engineering-group',key:state.engineeringNavigation!.composition.rootKey},undefined,{fit:false,load:false});
  expect(runtime.ctx.world.scene.three.children.some((g:THREE.Group)=>g.children.some(c=>c.type==='Box3Helper'))).toBe(true);
  expect(state.selectionGeometry?.detail).toContain('空间范围');

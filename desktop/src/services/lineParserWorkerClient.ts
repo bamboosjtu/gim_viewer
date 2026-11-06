@@ -1,6 +1,8 @@
+import { WorkerRequests } from './workerRequests.js';
+import { decodeGimText } from '../shared/textDecode.js';
 /** Line Parser Worker v1 客户端与同步兼容回退。 */
 
-import type { ProjectLoadSession } from '../app/state.js';
+import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { createLineParserCache } from '../gim/lineAttrParserCore.js';
 import { buildLineGimGraphFromTexts } from '../gim/lineCbmParserCore.js';
 import { parseLineAttributesFromCache, type LineAttributePayloadsCore } from '../gim/lineAttrParserCore.js';
@@ -18,15 +20,10 @@ export interface LineParserWorkerResult {
   timings: LineParserWorkerSuccess['timings'] & { worker: boolean };
 }
 
-interface PendingRequest {
-  sessionKey: string;
-  resolve: (result: LineParserWorkerResult) => void;
-  reject: (error: Error) => void;
-}
-
 let worker: Worker | null = null;
 let requestSequence = 0;
-const pending = new Map<number, PendingRequest>();
+const requestSessions = new Map<number,string>();
+const requests = new WorkerRequests<LineParserWorkerResult>(120_000, () => terminateLineParserWorker());
 let activeSessionKey: string | null = null;
 
 function toWorkerSession(session: ProjectLoadSession): LineParserWorkerSession {
@@ -54,30 +51,29 @@ function ensureWorker(): Worker | null {
     const instance = new Worker(new URL('./lineParserWorker.ts', import.meta.url), { type: 'module' });
     instance.onmessage = (event: MessageEvent<LineParserWorkerResponse>) => {
       const response = event.data;
-      const request = pending.get(response.requestId);
-      if (!request) return;
-      pending.delete(response.requestId);
-      if (request.sessionKey !== activeSessionKey || request.sessionKey !== sessionKey(response.session)) {
-        request.reject(new Error('线路解析 Worker 结果已过期'));
+      const key = requestSessions.get(response.requestId);
+      if (!key) return;
+      requestSessions.delete(response.requestId);
+      if (key !== activeSessionKey || key !== sessionKey(response.session)) {
+        requests.settle(response.requestId, undefined, new Error('线路解析 Worker 结果已过期'));
         return;
       }
       if (response.type === 'error') {
-        request.reject(deserializeError(response.message, response.stack));
+        requests.settle(response.requestId, undefined, deserializeError(response.message, response.stack));
         return;
       }
-      request.resolve({
+      requests.settle(response.requestId, {
         graph: response.graph,
         attributes: response.attributes,
         timings: { ...response.timings, worker: true },
       });
     };
-    instance.onerror = (event) => {
-      const error = new Error(event.message || '线路解析 Worker 发生错误');
-      for (const request of pending.values()) request.reject(error);
-      pending.clear();
-      instance.terminate();
-      worker = null;
+    const fail = (error:Error) => {
+      requests.rejectAll(error); requestSessions.clear(); instance.terminate();
+      if(worker===instance) worker=null;
     };
+    instance.onerror = event => fail(new Error(event.message || '线路解析 Worker 发生错误'));
+    instance.onmessageerror = () => fail(new Error('线路解析 Worker 返回无法读取的数据，请重试'));
     worker = instance;
     return instance;
   } catch (error) {
@@ -89,8 +85,7 @@ function ensureWorker(): Worker | null {
 function parseOnMainThread(files: LineParserWorkerFile[]): LineParserWorkerResult {
   const totalStart = performance.now();
   const decodeStart = performance.now();
-  const decoder = new TextDecoder();
-  const textFiles = files.map((file) => ({ path: file.path, text: decoder.decode(new Uint8Array(file.bytes)) }));
+  const textFiles = files.map((file) => ({ path: file.path, text: decodeGimText(new Uint8Array(file.bytes)).text }));
   const decodeMs = performance.now() - decodeStart;
   const cache = createLineParserCache(textFiles);
   const graphStart = performance.now();
@@ -137,23 +132,16 @@ export function parseLineInWorker(
     session: serializableSession,
     files,
   };
-  return new Promise<LineParserWorkerResult>((resolve, reject) => {
-    pending.set(requestId, { sessionKey: key, resolve, reject });
-    try {
-      // 每个输入 ArrayBuffer 只转移一次，避免 structured clone 复制大文本。
-      workerInstance.postMessage(request, files.map((file) => file.bytes));
-    } catch (error) {
-      pending.delete(requestId);
-      reject(error instanceof Error ? error : new Error(String(error)));
-    }
-  });
+  requestSessions.set(requestId, key);
+  return requests.request(requestId, () => workerInstance.postMessage(request, files.map(file => file.bytes)))
+    .finally(() => { requestSessions.delete(requestId); });
 }
 
 /** 工程清理时可主动停止 Worker，避免窗口关闭后保留后台线程。 */
 export function terminateLineParserWorker(): void {
   activeSessionKey = null;
-  for (const request of pending.values()) request.reject(new Error('线路解析 Worker 已终止'));
-  pending.clear();
+  requests.rejectAll(new Error('线路解析 Worker 已终止'));
+  requestSessions.clear();
   worker?.terminate();
   worker = null;
 }

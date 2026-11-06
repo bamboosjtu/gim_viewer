@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /**
  * 应用设置面板。
  *
@@ -92,12 +93,12 @@ export function openSettingsPanel(): void {
     }
   };
 
-  modal.querySelector('#settings-save')?.addEventListener('click', () => { void save(); });
+  modal.querySelector('#settings-save')?.addEventListener('click', () => { void Promise.resolve(save()).catch(reportBackgroundError); });
   modal.querySelector('#settings-clear')?.addEventListener('click', () => {
     keyInput.value = '';
     setStatus('Key 已清空，点击“保存”生效');
   });
   keyInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') void save();
+    if (event.key === 'Enter') void Promise.resolve(save()).catch(reportBackgroundError);
   });
 }

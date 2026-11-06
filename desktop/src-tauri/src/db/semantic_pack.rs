@@ -14,8 +14,7 @@ use super::cache_paths::{
 };
 use super::cache_protocol::{
     BatchCacheFileResult,
-    MAX_BATCH_CACHE_BYTES,
-    MAX_BATCH_CACHE_FILES,
+
     encode_batch_cache_response,
 };
 use super::projects::{ensure_project_exists};
@@ -240,7 +239,7 @@ pub(super) fn read_pack_index(
         return Err(format!("{label}索引头无效"));
     }
     let count = u32::from_le_bytes(bytes[5..9].try_into().unwrap()) as usize;
-    if count > MAX_BATCH_CACHE_FILES {
+    if count > gim_native_core::extraction_limits().max_entries {
         return Err(format!("{label}索引条目数超过安全上限"));
     }
     let mut offset = LINE_SEMANTIC_INDEX_HEADER;
@@ -644,7 +643,7 @@ pub fn read_line_semantic_pack(
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
         ensure_project_exists(&guard, project_id)?;
     }
-    if entry_paths.len() > MAX_BATCH_CACHE_FILES {
+    if entry_paths.len() > gim_native_core::extraction_limits().max_entries {
         return Err("线路语义 pack 读取条目数超过安全上限".to_string());
     }
     let root = cache_project_root_for_batch(&app_handle, project_id)?;
@@ -701,7 +700,7 @@ pub fn read_line_semantic_pack(
             total_bytes = total_bytes
                 .checked_add(data.len() as u64)
                 .ok_or_else(|| "线路语义 pack 读取总量溢出".to_string())?;
-            if total_bytes > MAX_BATCH_CACHE_BYTES {
+            if total_bytes > gim_native_core::extraction_limits().max_total_uncompressed_bytes {
                 return Err("线路语义 pack 读取总量超过安全上限".to_string());
             }
             Some(data)

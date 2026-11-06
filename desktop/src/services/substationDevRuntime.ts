@@ -1,3 +1,5 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { loadPresentation } from './presentationPort.js';
 /** DEV post-IFC LOD startup and legacy geometry recovery. */
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
@@ -72,7 +74,7 @@ export async function autoLoadModStlPostIfc(
         state.projectSourceToViewerMatrix = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
       }
       await startDeviceLod(state, resourceCtx, session, (text, detail) => {
-        if (state.isCurrentSession(session)) void import('../ui/shell/statusBar.js').then(({ setDeviceStatus }) => { if (state.isCurrentSession(session)) setDeviceStatus(text, detail); });
+        if (state.isCurrentSession(session)) void Promise.resolve(loadPresentation('shell_statusBar').then(({ setDeviceStatus }) => { if (state.isCurrentSession(session)) setDeviceStatus(text, detail); })).catch(reportBackgroundError);
       });
       if (!state.isCurrentSession(session)) return;
       finishModStl(undefined, { path: 'device-lod-directory', onDemand: true });
@@ -259,11 +261,11 @@ export async function autoLoadModStlPostIfc(
         modCount: result.modCount,
         stlCount: result.stlCount,
       }, perfSession);
-      void sampleSubstationMemory(state, '第一个几何模型后', perfSession, {
+      void Promise.resolve(sampleSubstationMemory(state, '第一个几何模型后', perfSession, {
         kind: 'mod-stl',
         modCount: result.modCount,
         stlCount: result.stlCount,
-      });
+      })).catch(reportBackgroundError);
     }
     const fullMeta = {
       ifcModels: state.loadedModels.size,

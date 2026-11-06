@@ -73,11 +73,6 @@ export async function directoryFingerprint(root) {
   await visit(root); return {sha256: hash.digest('hex'), files, bytes};
 }
 
-export function windowsKnownFolder(folder) {
-  if (!['ApplicationData', 'LocalApplicationData'].includes(folder)) throw Error('Unsupported Known Folder');
-  return command('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    `[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); [Environment]::GetFolderPath([Environment+SpecialFolder]::${folder})`]);
-}
 
 export async function buildAcceptance(root) {
   if (process.platform !== 'win32') throw Error('Native acceptance build requires Windows');
@@ -86,7 +81,8 @@ export async function buildAcceptance(root) {
   const config = join(desktop, 'src-tauri', 'tauri.acceptance.conf.json');
   if (JSON.parse(readFileSync(config, 'utf8')).identifier !== ACCEPTANCE_IDENTIFIER) throw Error('Invalid acceptance identifier');
   const temporary = join(root, '.tmp', 'native-acceptance-build'); mkdirSync(temporary, {recursive: true});
-  const env = {...process.env, TEMP: temporary, TMP: temporary, TMPDIR: temporary};
+  const dataRoot=join(root,'.tmp','native-acceptance-data',ACCEPTANCE_IDENTIFIER);
+  const env = {...process.env, TEMP: temporary, TMP: temporary, TMPDIR: temporary, GIM_ACCEPTANCE_DATA_ROOT:dataRoot, VITE_GIM_DIAGNOSTICS:'1'};
   const head = command('git', ['rev-parse', 'HEAD'], {cwd: root});
   const dirty = Boolean(command('git', ['status', '--porcelain', '--untracked-files=normal'], {cwd: root}));
   env.VITE_GIM_COMMIT = head + (dirty ? '-dirty' : '');
@@ -105,14 +101,12 @@ export async function buildAcceptance(root) {
   const release = join(desktop, 'src-tauri', 'target', 'release');
   cpSync(join(release, 'gim-viewer.exe'), join(output, 'GIM-Reader.exe'));
   cpSync(join(desktop, 'src-tauri', 'webview2-fixed-runtime'), join(output, 'webview2-fixed-runtime'), {recursive: true});
-  const knownFolder = windowsKnownFolder('ApplicationData');
-  if (!isAbsolute(knownFolder)) throw Error('Windows roaming Known Folder unavailable');
   const manifest = {schemaVersion: 1, profile: 'native-release-acceptance', identifier: ACCEPTANCE_IDENTIFIER,
     commit: head, dirty, sourceFingerprint: fingerprint, createdAt: new Date().toISOString(),
     executable: 'GIM-Reader.exe', executableSha256: await fileSha256(join(output, 'GIM-Reader.exe')),
     runtime: await directoryFingerprint(join(output, 'webview2-fixed-runtime')),
-    expectedDataRoot: join(knownFolder, ACCEPTANCE_IDENTIFIER), nativeCachePathVerified: false,
-    expectedLocalDataRoot: join(windowsKnownFolder('LocalApplicationData'), ACCEPTANCE_IDENTIFIER),
+    expectedDataRoot: dataRoot, nativeCachePathVerified: false,
+    expectedLocalDataRoot: dataRoot,
     config: {identifier: ACCEPTANCE_IDENTIFIER, bundle: 'fixedRuntime', mode: 'release'},
   };
   const path = join(output, 'acceptance-build.json'); writeFileSync(path, JSON.stringify(manifest, null, 2));

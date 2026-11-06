@@ -1,0 +1,47 @@
+import type { SubstationFineQueue } from './selectionContracts.js';
+import type { IfcRegionalRuntime } from '../viewer/ifcRegionalRuntime.js';
+import type { IfcEntry, CbmNode } from '../gim/types.js';
+import type * as OBCF from '@thatopen/fragments';
+import type * as THREE from 'three';
+
+import type { ProjectLoadSession } from './projectSession.js';
+import type { SelectionRequest, SelectionCommitGuard } from './selectionContracts.js';
+export interface ViewerState {
+  substationFineQueue: SubstationFineQueue | null;
+  substationMemoryPressure: import("../utils/memoryPressure.js").MemoryPressure;
+  onlySelected: boolean;
+  cameraNavigationVersion: number;
+  hoverCleanup: (() => void) | null;
+  selectionDecorationCleanup: (() => void) | null;
+  selectionVisibility: { registerModel(id: string, model: import("../viewer/ifcModelVisibility.js").IfcVisibilityModel): import("../viewer/ifcModelVisibility.js").IfcModelVisibility; removeModel(id: string, runtimeId: string): void; setModelVisible(id: string, visible: boolean): void; sync(guard?: SelectionCommitGuard): Promise<void>; reset(): void; } | null;
+  selectionHighlightRequestId: number | null;
+  representationSelection: import("../shared/representationSelection.js").RepresentationSelectionScope | null;
+  engineeringGeometryEvidenceChanged: (() => void) | null;
+  deviceLodRuntime: { select(rootOccurrence: string): Promise<THREE.Group[]>; ensureBase?(rootOccurrence: string): Promise<THREE.Group[]>; retry?(rootOccurrence: string): Promise<THREE.Group[]>; refine?(rootOccurrence: string): Promise<THREE.Group[]>; releaseFine?(rootOccurrence: string): void; setOnlySelected?(only: boolean): void; release(): void; clearSelection(): void; notifyCoordinateAnchor?(): void; getLoadedRoot?(rootOccurrence: string): THREE.Group | undefined; setBackgroundPaused?(paused: boolean): void; pick?(ray: THREE.Raycaster): { rootOccurrence: string; instanceKey: string; distance: number; object?: THREE.Object3D; hint?: import("../engineering/representations.js").DevRepresentationHint; } | null; setExternalMemoryPressure?(pressure: "unknown" | "normal" | "high" | "critical"): void; resourceCounts?(): { templateCount: number; templateParseCount: number; sharedGeometryCount: number; sharedMaterialCount: number; sharedTextureCount: number; }; diagnostics: Record<string, unknown>; } | null;
+  selectionRequest: SelectionRequest | null;
+  beginSelection: (target: SelectionRequest["target"], origin?: SelectionRequest["origin"]) => SelectionRequest;
+  isCurrentSelection: (request: SelectionRequest) => boolean;
+  canAutoLocate: (request: SelectionRequest) => boolean;
+  selectionGuard: (request: SelectionRequest) => SelectionCommitGuard;
+  currentIfcEntries: IfcEntry[];
+  ifcGuidIndex: Map<string, CbmNode>;
+  ifcGuidToName: Map<string, string>;
+  ifcRuntimeModelIds: Map<string, string>;
+  ifcLogicalModelIds: Map<string, string>;
+  ifcRuntimeModelOwners: Map<string, ProjectLoadSession>;
+  deviceToIfcFile: Map<string, string>;
+  loadedModels: Map<string, { modelId: string; runtimeModelId: string; visible: boolean; }>;
+  ifcRegionalRuntimes: Map<string, IfcRegionalRuntime>;
+  highlightedItems: OBCF.ModelIdMap | null;
+  highlightedModState: { groups: THREE.Object3D[]; originalMaterials: Map<THREE.Mesh, THREE.Material | THREE.Material[]>; } | null;
+  captureProjectSession: () => ProjectLoadSession;
+  isCurrentSession: (session: ProjectLoadSession) => boolean;
+  getRuntimeModelId: (logicalModelId: string, session?: ProjectLoadSession) => string;
+  registerIfcRuntimeModel: (logicalModelId: string, runtimeModelId: string, owner: ProjectLoadSession) => void;
+  resolveLogicalModelId: (runtimeModelId: string) => string | null;
+  isCurrentRuntimeModel: (runtimeModelId: string) => boolean;
+  initialized: boolean;
+  eventsRegistered: boolean;
+  hasFittedCamera: boolean;
+  viewerUserInteracted: boolean;
+}

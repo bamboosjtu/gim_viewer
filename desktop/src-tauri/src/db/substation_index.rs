@@ -899,81 +899,7 @@ pub(super) fn save_geometry_refs_connection(conn: &mut Connection, payload: Geom
     let now = now_ms();
     let pid = payload.project_id;
 
-    // 1. 清空旧数据
-    tx.execute(
-        "DELETE FROM substation_dev_solid_model WHERE project_id = ?1",
-        params![pid],
-    )
-    .map_err(|e| format!("清理 substation_dev_solid_model 失败: {}", e))?;
-    tx.execute(
-        "DELETE FROM substation_dev_sub_device WHERE project_id = ?1",
-        params![pid],
-    )
-    .map_err(|e| format!("清理 substation_dev_sub_device 失败: {}", e))?;
-    tx.execute(
-        "DELETE FROM substation_phm_solid_model WHERE project_id = ?1",
-        params![pid],
-    )
-    .map_err(|e| format!("清理 substation_phm_solid_model 失败: {}", e))?;
-
-    // 2. dev_solid_model（DEV SOLIDMODEL → PHM）
-    {
-        let mut stmt = tx.prepare(
-            "INSERT INTO substation_dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
-        ).map_err(|e| format!("预处理 substation_dev_solid_model 失败: {}", e))?;
-        for sm in &payload.dev_solid_models {
-            stmt.execute(params![
-                pid,
-                sm.dev_path,
-                sm.solid_model_path,
-                sm.transform_matrix,
-                sm.sort_order,
-                now
-            ])
-            .map_err(|e| format!("插入 substation_dev_solid_model 失败: {}", e))?;
-        }
-    }
-
-    // 3. dev_sub_device（DEV SUBDEVICE → child DEV）
-    {
-        let mut stmt = tx.prepare(
-            "INSERT INTO substation_dev_sub_device (project_id, dev_path, child_dev_path, transform_matrix, sort_order, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
-        ).map_err(|e| format!("预处理 substation_dev_sub_device 失败: {}", e))?;
-        for sd in &payload.dev_sub_devices {
-            stmt.execute(params![
-                pid,
-                sd.dev_path,
-                sd.child_dev_path,
-                sd.transform_matrix,
-                sd.sort_order,
-                now
-            ])
-            .map_err(|e| format!("插入 substation_dev_sub_device 失败: {}", e))?;
-        }
-    }
-
-    // 4. phm_solid_model（PHM SOLIDMODEL → MOD/STL）
-    {
-        let mut stmt = tx.prepare(
-            "INSERT INTO substation_phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, phm_color_max_a, sort_order, created_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
-        ).map_err(|e| format!("预处理 substation_phm_solid_model 失败: {}", e))?;
-        for sm in &payload.phm_solid_models {
-            stmt.execute(params![
-                pid,
-                sm.phm_path,
-                sm.solid_model_path,
-                sm.transform_matrix,
-                sm.color,
-                sm.phm_color_max_a,
-                sm.sort_order,
-                now
-            ])
-            .map_err(|e| format!("插入 substation_phm_solid_model 失败: {}", e))?;
-        }
-    }
+    replace_geometry_refs(&tx, &payload, now)?;
 
     // 几何引用链写入成功后才提交变电缓存 ready 状态；任何前置索引或
     // 引用链失败都保持 parser_version=NULL，下次打开会完整重建。
@@ -1056,51 +982,9 @@ fn save_substation_semantic_rest_connection(
         .map_err(|e| format!("开启事务失败: {}", e))?;
     let now = now_ms();
     let pid = payload.project_id;
-    for table in [
-        "substation_dev_solid_model",
-        "substation_dev_sub_device",
-        "substation_phm_solid_model",
-        "substation_fam_property",
-        "substation_dev_property",
-    ] {
-        tx.execute(&format!("DELETE FROM {} WHERE project_id = ?1", table), params![pid])
-            .map_err(|e| format!("清理 {} 失败: {}", table, e))?;
-    }
-    {
-        let mut stmt = tx
-            .prepare(
-                "INSERT INTO substation_dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order, created_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            )
-            .map_err(|e| format!("预处理 substation_dev_solid_model 失败: {}", e))?;
-        for sm in &payload.refs.dev_solid_models {
-            stmt.execute(params![pid, sm.dev_path, sm.solid_model_path, sm.transform_matrix, sm.sort_order, now])
-                .map_err(|e| format!("插入 substation_dev_solid_model 失败: {}", e))?;
-        }
-    }
-    {
-        let mut stmt = tx
-            .prepare(
-                "INSERT INTO substation_dev_sub_device (project_id, dev_path, child_dev_path, transform_matrix, sort_order, created_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            )
-            .map_err(|e| format!("预处理 substation_dev_sub_device 失败: {}", e))?;
-        for sd in &payload.refs.dev_sub_devices {
-            stmt.execute(params![pid, sd.dev_path, sd.child_dev_path, sd.transform_matrix, sd.sort_order, now])
-                .map_err(|e| format!("插入 substation_dev_sub_device 失败: {}", e))?;
-        }
-    }
-    {
-        let mut stmt = tx
-            .prepare(
-                "INSERT INTO substation_phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, phm_color_max_a, sort_order, created_at_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            )
-            .map_err(|e| format!("预处理 substation_phm_solid_model 失败: {}", e))?;
-        for sm in &payload.refs.phm_solid_models {
-            stmt.execute(params![pid, sm.phm_path, sm.solid_model_path, sm.transform_matrix, sm.color, sm.phm_color_max_a, sm.sort_order, now])
-                .map_err(|e| format!("插入 substation_phm_solid_model 失败: {}", e))?;
-        }
+    replace_geometry_refs(&tx, &payload.refs, now)?;
+    for table in ["substation_fam_property", "substation_dev_property"] {
+        tx.execute(&format!("DELETE FROM {table} WHERE project_id=?1"), params![pid]).map_err(|e|e.to_string())?;
     }
     {
         let mut stmt = tx
@@ -1144,5 +1028,86 @@ fn save_substation_semantic_rest_connection(
     .map_err(|e| format!("提交索引补写凭据失败: {}", e))?;
     tx.commit()
         .map_err(|e| format!("提交索引补写事务失败: {}", e))?;
+    Ok(())
+}
+
+fn replace_geometry_refs(tx: &Connection, payload: &GeometryRefsPayload, now: u64) -> Result<(), String> {
+    let pid = payload.project_id;
+    // 1. 清空旧数据
+    tx.execute(
+        "DELETE FROM substation_dev_solid_model WHERE project_id = ?1",
+        params![pid],
+    )
+    .map_err(|e| format!("清理 substation_dev_solid_model 失败: {}", e))?;
+    tx.execute(
+        "DELETE FROM substation_dev_sub_device WHERE project_id = ?1",
+        params![pid],
+    )
+    .map_err(|e| format!("清理 substation_dev_sub_device 失败: {}", e))?;
+    tx.execute(
+        "DELETE FROM substation_phm_solid_model WHERE project_id = ?1",
+        params![pid],
+    )
+    .map_err(|e| format!("清理 substation_phm_solid_model 失败: {}", e))?;
+
+    // 2. dev_solid_model（DEV SOLIDMODEL → PHM）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO substation_dev_solid_model (project_id, dev_path, solid_model_path, transform_matrix, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+        ).map_err(|e| format!("预处理 substation_dev_solid_model 失败: {}", e))?;
+        for sm in &payload.dev_solid_models {
+            stmt.execute(params![
+                pid,
+                sm.dev_path,
+                sm.solid_model_path,
+                sm.transform_matrix,
+                sm.sort_order,
+                now
+            ])
+            .map_err(|e| format!("插入 substation_dev_solid_model 失败: {}", e))?;
+        }
+    }
+
+    // 3. dev_sub_device（DEV SUBDEVICE → child DEV）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO substation_dev_sub_device (project_id, dev_path, child_dev_path, transform_matrix, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+        ).map_err(|e| format!("预处理 substation_dev_sub_device 失败: {}", e))?;
+        for sd in &payload.dev_sub_devices {
+            stmt.execute(params![
+                pid,
+                sd.dev_path,
+                sd.child_dev_path,
+                sd.transform_matrix,
+                sd.sort_order,
+                now
+            ])
+            .map_err(|e| format!("插入 substation_dev_sub_device 失败: {}", e))?;
+        }
+    }
+
+    // 4. phm_solid_model（PHM SOLIDMODEL → MOD/STL）
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO substation_phm_solid_model (project_id, phm_path, solid_model_path, transform_matrix, color, phm_color_max_a, sort_order, created_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+        ).map_err(|e| format!("预处理 substation_phm_solid_model 失败: {}", e))?;
+        for sm in &payload.phm_solid_models {
+            stmt.execute(params![
+                pid,
+                sm.phm_path,
+                sm.solid_model_path,
+                sm.transform_matrix,
+                sm.color,
+                sm.phm_color_max_a,
+                sm.sort_order,
+                now
+            ])
+            .map_err(|e| format!("插入 substation_phm_solid_model 失败: {}", e))?;
+        }
+    }
+
     Ok(())
 }

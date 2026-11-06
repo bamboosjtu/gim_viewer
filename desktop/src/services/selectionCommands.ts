@@ -1,3 +1,4 @@
+import { loadPresentation } from './presentationPort.js';
 import type { AppState } from '../app/state.js';
 
 /** Explicit clearing leaves isolation before invalidating its selected range. */
@@ -16,5 +17,5 @@ export async function clearCurrentSelection(state: AppState): Promise<void> {
   if (!guard.isCurrent()) return;
   const body = document.getElementById('props-drawer-body');
   if (body) body.innerHTML = '<div class="props-empty">尚未选择对象</div>';
-  const { setSelectionStatus } = await import('../ui/shell/statusBar.js'); if (guard.isCurrent()) setSelectionStatus(null);
+  const { setSelectionStatus } = await loadPresentation('shell_statusBar'); if (guard.isCurrent()) setSelectionStatus(null);
 }

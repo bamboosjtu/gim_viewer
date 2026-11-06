@@ -95,6 +95,7 @@ export function setEngineeringDeviceCount(count: number | null): void {
 
 /** 清理工程时恢复共性状态栏，避免线路统计泄漏到下一工程。 */
 export function resetStatusRight(): void {
+  renderCachePublication({phase:'idle',text:'',detail:''});
   busyTasks.clear();
   engineeringDeviceCount = null;
   setIfcStatus('');
@@ -109,4 +110,11 @@ export function resetStatusRight(): void {
 export function setSelectionStatus(label: string | null): void {
   const element=document.getElementById('status-selection');
   if (element) element.textContent=label ?? '未选中';
+}
+
+export function renderCachePublication(view:import('../../services/cachePublishStatus.js').PublicationView):void {
+  const el=document.getElementById('status-publish');if(!el)return;
+  el.hidden=view.phase==='idle';el.textContent=view.text;
+  if(view.phase==='idle')el.removeAttribute('data-phase');else el.dataset.phase=view.phase;
+  if(view.detail)el.title=view.detail;else el.removeAttribute('title');
 }

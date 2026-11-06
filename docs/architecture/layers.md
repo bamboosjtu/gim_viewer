@@ -22,7 +22,7 @@
 | `desktop/src/gim/` | 容器、CBM/DEV/PHM/MOD/IFC 纯解析、索引和地图数据 | 共享纯库 | services、viewer、ui |
 | `desktop/src/viewer/` | Three.js、Fragments、web-ifc、MOD/STL 编译与渲染 | three、geometry 纯函数、类型 | services、ui、DB |
 | `desktop/src/ui/` | DOM shell、三视图、属性、搜索、地图、工具栏 | services 暴露的结果、纯类型 | 数据库、原生 IPC |
-| `desktop/src/services/` | 打开、缓存、Worker、后台任务、选择与生命周期编排 | gim、viewer、bridge、ui 回调 | 把领域规则塞回 UI |
+| `desktop/src/services/` | 打开、缓存、Worker、后台任务、选择与生命周期编排 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
 | `desktop/bridge/` | Tauri IPC DTO/命令封装 | `@tauri-apps/api` | UI、Viewer |
 | `desktop/src-tauri/src/` | SQLite、SHA、解压、文件校验 | Rust crates | 前端状态 |
@@ -60,6 +60,8 @@ bootstrap
   │    └─ line runtime（线路图/地图）
   └─ viewerUIBinding（选择/高亮/相机/属性路由）
 ```
+
+`app/presentationBindings` 将 DOM 句柄、展示回调和惰性视图加载器注入 services；services 不直接值导入 ui。Viewer 使用 `shared/viewerState`、会话和选择契约，不引用 AppState。
 
 `AppState` 只持有会话、请求和已发布结果；工程实体、导航、几何目录的构建由服务层启动，UI 通过订阅/回调刷新。工程切换后，旧 Worker、旧请求和旧投影必须释放或拒绝提交。
 

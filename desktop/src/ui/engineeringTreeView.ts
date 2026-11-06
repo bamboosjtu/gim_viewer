@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import type { AppState } from '../app/state.js';
 import { cbmTreePanel } from './dom.js';
 import { renderSearchBox } from './searchBox.js';
@@ -203,9 +204,9 @@ export function renderEngineeringTree(state: AppState): void {
       if (!label.title) label.title = label.textContent;
       row.append(toggle, icon, label); wrapper.append(row); parent.append(wrapper);
       row.addEventListener('click', () => {
-        if (mode === 'composition' || mode==='inventory') { void select(key); }
+        if (mode === 'composition' || mode==='inventory') { void Promise.resolve(select(key)).catch(reportBackgroundError); }
         else if (node.kind === 'group') { if (node.children.length) toggle.click(); }
-        else void select(key);
+        else void Promise.resolve(select(key)).catch(reportBackgroundError);
       });
       row.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); row.click(); } });
     } };
@@ -213,7 +214,7 @@ export function renderEngineeringTree(state: AppState): void {
   nav.outline = renderVirtualOutline(host, [outlineNode(root)], { expanded, selectedKey: () => rowKey(state, data) });
   renderSearchBox(cbmTreePanel, mode === 'composition' ? data.compositionSearch : mode==='inventory' ? data.inventorySearch??[] : data.sourceSearch, key => {
     const row = mode === 'composition' ? data.composition.rowsByEntity.get(key)?.[0] : mode==='inventory'?data.inventory!.rowsByEntity.get(key)?.[0]:key;
-    if (row) void select(row);
+    if (row) void Promise.resolve(select(row)).catch(reportBackgroundError);
   });
   // Keep the projection switch directly below the navigator title; search and
   // tree stay below it. The switch is a projection choice, not a source level.

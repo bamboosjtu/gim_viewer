@@ -108,7 +108,7 @@ struct ExtractManifest {
 /// 中只有小型文本族（例如包含 CROSS CODE 的文件）需要进入 parser，较大
 /// MOD/STL 仍以独立文件保存，避免把几何复制进 semantic pack。
 const LINE_SEMANTIC_MAX_ENTRY_BYTES: usize = 8 * 1024 * 1024;
-const LINE_SEMANTIC_MAX_MOD_BYTES: usize = 256 * 1024;
+
 
 fn is_line_semantic_entry(path: &str, size: usize) -> bool {
     if size > LINE_SEMANTIC_MAX_ENTRY_BYTES {
@@ -116,7 +116,7 @@ fn is_line_semantic_entry(path: &str, size: usize) -> bool {
     }
     let lower = path.to_ascii_lowercase();
     if lower.ends_with(".mod") {
-        size <= LINE_SEMANTIC_MAX_MOD_BYTES
+        size <= gim_native_core::extraction_limits().small_text_bytes
     } else {
         lower.ends_with(".cbm")
             || lower.ends_with(".dev")

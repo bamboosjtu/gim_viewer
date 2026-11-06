@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import type { PerfSession } from '../utils/perfTimings.js';
 
 export type SubstationBackgroundTaskName =
@@ -258,10 +259,10 @@ export class SubstationBackgroundCoordinator {
     const next = candidates[0];
     if (!next) return;
     this.lightRunning = true;
-    void this.run(next).finally(() => {
+    void Promise.resolve(this.run(next).finally(() => {
       this.lightRunning = false;
       this.scheduleDrain();
-    });
+    })).catch(reportBackgroundError);
   }
 
   private drainHeavy(): void {
@@ -269,7 +270,7 @@ export class SubstationBackgroundCoordinator {
     if(this.interactive&&!this.priorityRunning&&this.priorityWork.size){
       const next=this.nextUserFine();
       if(next){this.heavyRunning=true;
-        void this.runUserFine(next[0],next[1]).finally(()=>{this.heavyRunning=false;this.scheduleDrain();});return;}
+        void Promise.resolve(this.runUserFine(next[0],next[1]).finally(()=>{this.heavyRunning=false;this.scheduleDrain();})).catch(reportBackgroundError);return;}
     }
     // Do not choose DEV geometry before a spatial cache restore has classified
     // hit/miss.  A miss queues the rebuild ahead of DEV geometry.
@@ -286,11 +287,11 @@ export class SubstationBackgroundCoordinator {
     if (next) {
       this.heavyRunning = true;
       this.activeHeavyTask = next.spec.task;
-      void this.run(next).finally(() => {
+      void Promise.resolve(this.run(next).finally(() => {
         this.activeHeavyTask = null;
         this.heavyRunning = false;
         this.scheduleDrain();
-      });
+      })).catch(reportBackgroundError);
       return;
     }
     this.drainLowPriority();
@@ -306,10 +307,10 @@ export class SubstationBackgroundCoordinator {
     const next = candidates[0];
     if (!next) return;
     this.lightRunning = true;
-    void this.run(next).finally(() => {
+    void Promise.resolve(this.run(next).finally(() => {
       this.lightRunning = false;
       this.scheduleDrain();
-    });
+    })).catch(reportBackgroundError);
   }
 
   private gateReady(gate:SubstationBackgroundGate):boolean {

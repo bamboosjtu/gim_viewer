@@ -1,9 +1,12 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { loadPresentation } from './presentationPort.js';
+import { scheduleHideLoading } from './gimOpenCore.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { LineParserWorkerResult } from './lineParserWorkerClient.js';
 import type { LineParserWorkerFile } from './lineParserWorker.js';
 import type { GimRuntimeOpenContext } from './gimOpenCore.js';
 import { currentPerfSession, hideLoading, showLoading } from './gimOpenCore.js';
-import { emptyTipEl } from '../ui/dom.js';
+import { emptyTipEl } from './presentation/dom.js';
 import { isTauri } from '@desktop/runtime.js';
 import { DEBUG_GIM_CACHE, DEBUG_RUNTIME_LOGS } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
@@ -11,7 +14,7 @@ import {
   perfBegin,
   perfMark,
 } from '../utils/perfTimings.js';
-import { setProjectIdentity, refreshNavigatorTitle } from '../ui/shell/projectBar.js';
+import { setProjectIdentity, refreshNavigatorTitle } from './presentation/shell_projectBar.js';
 import { validateGimCache } from '@desktop/database.js';
 
 function getDevLineBatchOptions(): { maxFiles?: number; maxBytes?: number } {
@@ -191,7 +194,7 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
               }
             }
 
-            const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
+            const { renderLineProjectPanels } = await loadPresentation('lineProjectView');
             if (!state.isCurrentSession(session)) return;
             const endRestoreMap = perfBegin(
               usedSemanticFastPath ? '线路面板+地图渲染（semantic warm）' : '线路面板+地图渲染（SQLite 缓存命中）',
@@ -217,7 +220,7 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
 
             hideLoading();
             showLoading(usedSemanticFastPath ? '已从 semantic pack 恢复线路工程' : '已从本地缓存恢复线路工程索引');
-            setTimeout(hideLoading, 3000);
+            scheduleHideLoading(() => state.isCurrentSession(session), 3000);
             if (import.meta.env.DEV) {
               (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
             }
@@ -238,6 +241,7 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
   }
 
   const extractedSource = await context.getExtracted();
+  if (extractedSource.status === 'cancelled') return;
   if (!state.isCurrentSession(session)) return;
   const extracted = extractedSource.files;
   state.projectName = context.projectName;
@@ -367,7 +371,7 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
         }
       };
       // 让浏览器先完成首帧绘制并返回可交互状态，再开始 JSON/SQLite IPC。
-      window.setTimeout(() => { void persistLineCache(); }, 0);
+      window.setTimeout(() => { void Promise.resolve(persistLineCache()).catch(reportBackgroundError); }, 0);
     } else if (import.meta.env.DEV) {
       (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
     }
@@ -375,7 +379,7 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
     // 渲染面板（在属性恢复之后，确保地图 tooltip/标签有完整 FAM/DEV 属性）
     if (!state.isCurrentSession(session)) return;
     const endRender = perfBegin('线路面板+地图渲染', undefined, perfSession);
-    const { renderLineProjectPanels } = await import('../ui/lineProjectView.js');
+    const { renderLineProjectPanels } = await loadPresentation('lineProjectView');
     renderLineProjectPanels(state, graph, showMessage, {
       perfSession,
       enableCatenary: getDevLineCatenaryMode(),
@@ -386,7 +390,7 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
     hideLoading();
     // 轻量状态提示
     showLoading('线路工程已加载，当前为地图浏览模式');
-    setTimeout(hideLoading, 3000);
+    scheduleHideLoading(() => state.isCurrentSession(session), 3000);
     debugLog(DEBUG_RUNTIME_LOGS, '[GIM] 线路工程已加载（地图浏览模式），跳过 IFC 模态框');
     return;
 

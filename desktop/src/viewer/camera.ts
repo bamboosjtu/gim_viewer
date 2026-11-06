@@ -1,8 +1,9 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
-import type { SelectionCommitGuard } from '../app/state.js';
+import type { SelectionCommitGuard } from '../shared/selectionContracts.js';
 import {isDevRenderBatch} from './devInstanceBatches.js';
 
 /** 将相机定位到场景包围盒 */
@@ -32,7 +33,7 @@ export function fitCameraToScene(
     return false;
   }
   const distance = maxDim * 1.2;
-  void ctx.world.camera.controls?.setLookAt(center.x + distance, center.y + distance * 0.8, center.z + distance, center.x, center.y, center.z);
+  void Promise.resolve(ctx.world.camera.controls?.setLookAt(center.x + distance, center.y + distance * 0.8, center.z + distance, center.x, center.y, center.z)).catch(reportBackgroundError);
   state.hasFittedCamera = true;
   debugLog(DEBUG_IFC_LOAD, '[Camera] fitCameraToScene done: camera set to', { center, distance });
   return true;
@@ -96,14 +97,14 @@ export function fitCameraToStationOverview(
   if (!(maxDim > 0) || !Number.isFinite(maxDim)) return false;
   const factor = options?.distanceFactor ?? 2.2;
   const distance = maxDim * factor;
-  void ctx.world.camera.controls?.setLookAt(
+  void Promise.resolve(ctx.world.camera.controls?.setLookAt(
     center.x + distance * 0.9,
     center.y + distance * 0.75,
     center.z + distance * 0.9,
     center.x,
     center.y,
     center.z,
-  );
+  )).catch(reportBackgroundError);
   state.hasFittedCamera = true;
   debugLog(DEBUG_IFC_LOAD, '[Camera] station overview applied', { center, distance, maxDim });
   return true;
@@ -135,7 +136,7 @@ export async function frameBox(ctx: ViewerContext, box: THREE.Box3, guard?: Sele
     if (controls.getPosition && controls.getTarget) {
       const position=controls.getPosition(new THREE.Vector3(),false);
       const target=controls.getTarget(new THREE.Vector3(),false);
-      void controls.setLookAt(position.x,position.y,position.z,target.x,target.y,target.z,false);
+      void Promise.resolve(controls.setLookAt(position.x,position.y,position.z,target.x,target.y,target.z,false)).catch(reportBackgroundError);
     }
     controls.stop?.();
     abort();

@@ -1,6 +1,7 @@
 import type { CbmNode } from '../gim/types.js';
 import type { ViewerContext } from './viewerEngine.js';
-import type { AppState, ProjectLoadSession } from '../app/state.js';
+import type { ViewerState as AppState } from '../shared/viewerState.js';
+import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { resolveIfcModelId } from '../gim/modelIdentity.js';

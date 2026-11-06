@@ -1,3 +1,4 @@
+import { GIM_LIMITS } from '../shared/gimLimits.js';
 /**
  * Native manifest-only 解压后的变电小文件物化。
  *
@@ -13,7 +14,7 @@ import { batchReadCachedFiles } from '@desktop/database.js';
 import { isDiskBackedFile, isSemanticPackBackedFile } from '@desktop/gimExtract.js';
 
 /** 单个条目的上限；substation 的 CBM/DEV/FAM/PHM/小 MOD 均远低于该值。 */
-export const NATIVE_SMALL_FILE_MAX_BYTES = 256 * 1024;
+export const NATIVE_SMALL_FILE_MAX_BYTES = GIM_LIMITS.smallTextBytes;
 /** 单批上限，避免一次响应占用过多 WebView 内存。 */
 export const NATIVE_SMALL_FILE_BATCH_MAX_FILES = 2048;
 export const NATIVE_SMALL_FILE_BATCH_MAX_BYTES = 48 * 1024 * 1024;

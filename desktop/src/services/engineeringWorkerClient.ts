@@ -1,3 +1,4 @@
+import { WorkerRequests } from './workerRequests.js';
 import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../gim/ifcSpatialParser.js';
 import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import type { EngineeringBuildResult, EngineeringCacheDomain, EngineeringCacheResult, EngineeringExtractSummary, EngineeringWorkerCommand, EngineeringWorkerRequest, EngineeringWorkerResponse } from './engineeringWorkerProtocol.js';
@@ -17,16 +18,13 @@ export class EngineeringWorkerClient {
   geometryOccurrences: SourceGeometryOccurrenceCatalog | null = null;
   private sequence = 0;
   private closed = false;
-  private pending = new Map<number, { resolve(value: EngineeringWorkerResponse): void; reject(error: Error): void }>();
+  private pending = new WorkerRequests<EngineeringWorkerResponse>(120_000, error => this.close(error));
   private abort = () => this.close();
   constructor(private readonly port: EngineeringWorkerPort, private readonly isCurrent: () => boolean, private readonly signal?: AbortSignal) {
     port.onmessage = event => {
       if (!this.isCurrent() || this.signal?.aborted) { this.close(); return; }
-      const response = event.data, request = this.pending.get(response.requestId);
-      if (!request) return;
-      this.pending.delete(response.requestId);
-      if (response.type === 'error') request.reject(new Error(response.message));
-      else request.resolve(response);
+      const response = event.data;
+      this.pending.settle(response.requestId, response, response.type === 'error' ? new Error(response.message) : undefined);
     };
     port.onerror = event => this.close(new Error(event.message || 'Engineering worker failed'));
     port.onmessageerror = () => this.close(new Error('Engineering worker returned unreadable data'));
@@ -40,17 +38,12 @@ export class EngineeringWorkerClient {
     if (this.closed) return;
     this.closed = true; this.signal?.removeEventListener('abort', this.abort);
     this.port.onmessage = null; this.port.onerror = null; this.port.onmessageerror = null; this.port.terminate();
-    for (const request of this.pending.values()) request.reject(error);
-    this.pending.clear();
+    this.pending.rejectAll(error);
   }
   private request(command: EngineeringWorkerCommand, transfer: Transferable[] = []): Promise<EngineeringWorkerResponse> {
     if (this.closed || !this.isCurrent() || this.signal?.aborted) { this.close(); return Promise.reject(new DOMException('Engineering build cancelled', 'AbortError')); }
     const requestId = ++this.sequence;
-    return new Promise((resolve, reject) => {
-      this.pending.set(requestId, { resolve, reject });
-      try { this.port.postMessage({ ...command, requestId }, transfer); }
-      catch (error) { this.pending.delete(requestId); reject(error); }
-    });
+    return this.pending.request(requestId, () => this.port.postMessage({ ...command, requestId }, transfer));
   }
   async init(scope: string, paths: string[]): Promise<void> { await this.request({ type: 'init', scope, paths }); }
   async addFiles(files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }>): Promise<void> {

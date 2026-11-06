@@ -9,7 +9,9 @@ function Assert-Rejected {
     if (-not $rejected) { throw "Expected rejection: $Message" }
 }
 
-$tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+$tempParent = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../.tmp/tests/build-safety'))
+New-Item -ItemType Directory -Path $tempParent -Force | Out-Null
+$env:TEMP = $tempParent; $env:TMP = $tempParent; $env:TMPDIR = $tempParent
 $root = Join-Path $tempParent ('gim-build-safety-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root -Force | Out-Null
 try {

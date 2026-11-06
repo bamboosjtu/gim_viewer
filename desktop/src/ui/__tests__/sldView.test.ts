@@ -42,7 +42,7 @@ describe('SLD 主视口叠加层', () => {
 
   it('切换图纸只显示覆盖层，不移除三维运行时容器', async () => {
     vi.resetModules();
-    const { renderSldView } = await import('../sldView.js');
+    const { renderSldView } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../sldView.js'); });
     const state = new AppState();
     state.currentSldDoc = makeSld();
 
@@ -63,7 +63,7 @@ describe('SLD 主视口叠加层', () => {
 
   it('关闭工程时清空覆盖层，但不触碰主视口节点', async () => {
     vi.resetModules();
-    const { renderSldView, clearSldView } = await import('../sldView.js');
+    const { renderSldView, clearSldView } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../sldView.js'); });
     const state = new AppState();
     state.currentSldDoc = makeSld();
     renderSldView(state);

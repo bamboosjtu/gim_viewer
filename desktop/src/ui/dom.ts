@@ -22,3 +22,9 @@ export const btnCloseProps = document.getElementById('btn-close-props') as HTMLB
 export const btnExportProps = document.getElementById('btn-export-props') as HTMLButtonElement;
 
 // 模态框
+
+export function assertShellDom():void {
+  for(const id of ["viewport", "loading", "empty-tip", "model-list", "file-input", "gim-file-input", "btn-load-local", "btn-load-gim", "btn-clear", "btn-cache-manager", "cbm-tree-panel", "file-dev-panel", "sld-panel", "sld-overlay", "sld-overlay-content", "sld-overlay-close", "props-drawer-body", "props-drawer", "btn-close-props", "btn-export-props"]) {
+    if(!document.getElementById(id))throw new Error(`应用页面缺少必需元素 #${id}`);
+  }
+}

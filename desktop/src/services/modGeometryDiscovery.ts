@@ -29,15 +29,10 @@ import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
 import { PARSER_LIMITS } from '../gim/parserLimits.js';
 import { getFileByPath } from '../gim/fileLookup.js';
-import { createEntryResolver } from '../gim/entryResolver.js';
+import { getFileEntryResolver } from '../gim/entryResolver.js';
 
-const resolvers = new WeakMap<Map<string, File>, { size: number; resolve: ReturnType<typeof createEntryResolver> }>();
 function sourcePath(files: Map<string, File>, reference: string, owner = ''): string {
-  let entry = resolvers.get(files);
-  if (!entry || entry.size !== files.size) {
-    entry = { size: files.size, resolve: createEntryResolver(files.keys()) }; resolvers.set(files, entry);
-  }
-  return entry.resolve(reference, owner) ?? reference.replace(/\\/g, '/');
+  return getFileEntryResolver(files)(reference, owner) ?? reference.replace(/\\/g, '/');
 }
 
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];

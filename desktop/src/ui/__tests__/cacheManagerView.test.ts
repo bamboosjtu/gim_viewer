@@ -19,7 +19,7 @@ const button = (selector: string) => document.querySelector<HTMLButtonElement>(s
 it('closes immediately while reads wait and keeps late replies from touching a reopened manager', async () => {
   const list = pending<CacheResult<ProjectCacheSummary[]>>(), path = pending<CacheResult<string>>();
   service.list.mockReturnValueOnce(list.promise); service.path.mockReturnValueOnce(path.promise);
-  const { openCacheManager } = await import('../cacheManagerView.js');
+  const { openCacheManager } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../cacheManagerView.js'); });
   const first = openCacheManager(); button('#cache-mgr-close').click();
   expect(document.getElementById('cache-manager-modal')).toBeNull();
   await openCacheManager(); expect(document.body.textContent).toContain('工程7');
@@ -30,7 +30,7 @@ it('closes immediately while reads wait and keeps late replies from touching a r
 });
 it('keeps the newest refresh when an earlier listing returns later', async () => {
   const old = pending<CacheResult<ProjectCacheSummary[]>>(); service.list.mockReturnValueOnce(old.promise);
-  const { openCacheManager } = await import('../cacheManagerView.js'); const opening = openCacheManager();
+  const { openCacheManager } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../cacheManagerView.js'); }); const opening = openCacheManager();
   button('#cache-mgr-refresh').click(); await vi.waitFor(() => expect(document.body.textContent).toContain('工程7'));
   old.resolve(success([project(1)])); await opening;
   expect(document.body.textContent).toContain('工程7'); expect(document.body.textContent).not.toContain('工程1');
@@ -38,7 +38,7 @@ it('keeps the newest refresh when an earlier listing returns later', async () =>
 it('shows service failures as text and distinguishes them from an empty cache', async () => {
   service.path.mockResolvedValue({ ok: false, message: '读取缓存位置失败' });
   service.list.mockResolvedValueOnce({ ok: false, message: '读取缓存项目失败：<script>busy</script>' });
-  const { openCacheManager } = await import('../cacheManagerView.js'); await openCacheManager();
+  const { openCacheManager } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../cacheManagerView.js'); }); await openCacheManager();
   expect(document.body.textContent).toContain('读取缓存项目失败：<script>busy</script>');
   expect(document.querySelector('script')).toBeNull(); expect(document.body.textContent).not.toContain('暂无缓存项目');
   service.list.mockResolvedValue(success([])); button('#cache-mgr-refresh').click();
@@ -46,7 +46,7 @@ it('shows service failures as text and distinguishes them from an empty cache', 
 });
 it('delegates validation by project ID and prevents duplicate requests while it waits', async () => {
   const check = pending<CacheResult<{ state: 'valid'; text: string }>>(); service.check.mockReturnValueOnce(check.promise);
-  const { openCacheManager } = await import('../cacheManagerView.js'); await openCacheManager();
+  const { openCacheManager } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../cacheManagerView.js'); }); await openCacheManager();
   const target = button('.cache-mgr-validate'); target.click(); target.click();
   expect(target.disabled).toBe(true); expect(service.check).toHaveBeenCalledTimes(1); expect(service.check).toHaveBeenCalledWith(7);
   check.resolve(success({ state: 'valid', text: '缓存有效' }));
@@ -57,7 +57,7 @@ it('delegates validation by project ID and prevents duplicate requests while it 
 });
 it('requires the existing delete decision and keeps a failed deletion retryable without issuing duplicates', async () => {
   const decision = vi.fn(() => false); vi.stubGlobal('confirm', decision);
-  const { openCacheManager } = await import('../cacheManagerView.js'); await openCacheManager();
+  const { openCacheManager } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../cacheManagerView.js'); }); await openCacheManager();
   const target = button('.cache-mgr-delete'); target.click(); expect(service.remove).not.toHaveBeenCalled();
   const removal = pending<CacheResult<void>>(); service.remove.mockReturnValueOnce(removal.promise); decision.mockReturnValue(true);
   target.click(); target.click(); expect(service.remove).toHaveBeenCalledTimes(1); expect(service.remove).toHaveBeenCalledWith(7);

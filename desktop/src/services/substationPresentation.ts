@@ -1,11 +1,13 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { loadPresentation } from './presentationPort.js';
 import { isSubstationViewerInteractive } from './substationLoadingState.js';
 /** Substation navigation, selection callbacks and loading presentation. */
-import { setSelectionStatus } from '../ui/shell/statusBar.js';
+import { setSelectionStatus } from './presentation/shell_statusBar.js';
 import type { CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
-import { buildAndRenderCbmTree } from '../ui/cbmTreeView.js';
-import { renderFileDevPanel } from '../ui/fileDevView.js';
-import { emptyTipEl } from '../ui/dom.js';
+import { buildAndRenderCbmTree } from './presentation/cbmTreeView.js';
+import { renderFileDevPanel } from './presentation/fileDevView.js';
+import { emptyTipEl } from './presentation/dom.js';
 import { perfBegin, perfMarkProductMoment, type PerfSession } from '../utils/perfTimings.js';
 import { showLoading } from './gimOpenCore.js';
 
@@ -29,12 +31,12 @@ export function createNodeClickHandler(state: AppState, showMessage: (text: stri
       const request = state.beginSelection({ kind: 'engineering-source', key: `document:${node.path}` });
       if (!state.engineeringSources) {
         state.selectionMessage = '工程来源正在准备，完成后可定位该对象'; setSelectionStatus(state.selectionMessage);
-        void import('./engineeringSelection.js').then(({ clearEngineeringHighlight }) => clearEngineeringHighlight(state, request)); return;
+        void Promise.resolve(import('./engineeringSelection.js').then(({ clearEngineeringHighlight }) => clearEngineeringHighlight(state, request))).catch(reportBackgroundError); return;
       }
       void import('./engineeringCbmSelection.js').then(async ({ selectEngineeringCbmSource }) => {
         if (state.isCurrentSelection(request) && !await selectEngineeringCbmSource(state, node.path, request) && state.isCurrentSelection(request)) {
           state.selectionMessage = '该来源尚不能唯一定位，请在来源视图核对'; setSelectionStatus(state.selectionMessage);
-          void import('./engineeringSelection.js').then(({ clearEngineeringHighlight }) => clearEngineeringHighlight(state, request));
+          void Promise.resolve(import('./engineeringSelection.js').then(({ clearEngineeringHighlight }) => clearEngineeringHighlight(state, request))).catch(reportBackgroundError);
         }
       }).catch(error => { if (state.isCurrentSelection(request)) { state.selectionMessage = `来源定位未完成：${String(error)}`; setSelectionStatus(state.selectionMessage); } });
       return;
@@ -51,7 +53,7 @@ export function setupSldGridIdInteraction(
   showMessage: (text: string) => void,
   session?: ProjectLoadSession,
 ): Promise<void> {
-  return import('../ui/sldView.js').then(({ setSldGridIdClickHandler }) => {
+  return loadPresentation('sldView').then(({ setSldGridIdClickHandler }) => {
     if (session && !state.isCurrentSession(session)) return;
     setSldGridIdClickHandler(async (gridId: string) => {
       if (session && !state.isCurrentSession(session)) return;
@@ -63,7 +65,7 @@ export function setupSldGridIdInteraction(
         const nodes = getCbmNodesByGridId(state.currentStdSldIndex, gridId);
         if (nodes.length === 0) {
           const [{ clearSelectionHighlight, syncSelectionNavigation }, { showUnlinkedSldProperties }] = await Promise.all([
-            import('./nodeInteractionService.js'), import('../ui/propsDrawer.js'),
+            import('./nodeInteractionService.js'), loadPresentation('propsDrawer'),
           ]);
           if (!state.isCurrentSelection(request)) return;
           showUnlinkedSldProperties(state, gridId, request);
@@ -79,7 +81,7 @@ export function setupSldGridIdInteraction(
             if (state.isCurrentSelection(request)) await selectEngineeringCbmSource(state, nodes[0].path, request);
           } else {
             const { clearEngineeringHighlight } = await import('./engineeringSelection.js'); await clearEngineeringHighlight(state, request);
-            const { showSelectionSources } = await import('../ui/selectionSources.js');
+            const { showSelectionSources } = await loadPresentation('selectionSources');
             if (state.isCurrentSelection(request)) showSelectionSources('该单线图对象关联多个来源，请选择要查看的来源', nodes.map(node => ({
               label: `${node.name || '来源对象'} · ${node.path}`,
               choose: () => { if (state.isCurrentSelection(request)) createNodeClickHandler(state, showMessage)(node); },

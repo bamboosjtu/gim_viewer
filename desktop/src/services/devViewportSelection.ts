@@ -1,7 +1,8 @@
+import { loadPresentation } from './presentationPort.js';
 import type {AppState, SelectionRequest} from '../app/state.js';
 import type {CbmNode} from '../gim/types.js';
 import type {ViewerContext} from '../viewer/viewerEngine.js';
-import {setSelectionStatus} from '../ui/shell/statusBar.js';
+import {setSelectionStatus} from './presentation/shell_statusBar.js';
 
 export async function selectViewportDev(ctx: ViewerContext, state: AppState, rootOccurrence: string,
   instanceKey: string, request: SelectionRequest, showMessage: (text: string) => void,
@@ -26,7 +27,7 @@ export async function selectViewportDev(ctx: ViewerContext, state: AppState, roo
     return;
   }
   const [{commitSelectionHighlight, highlightModGroups}, {showSelectionSources}] = await Promise.all([
-    import('../viewer/highlight.js'), import('../ui/selectionSources.js'),
+    import('../viewer/highlight.js'), loadPresentation('selectionSources'),
   ]);
   const highlightPicked = async (selected: SelectionRequest): Promise<void> => {
     const selectedGuard = state.selectionGuard(selected);
@@ -44,7 +45,7 @@ export async function selectViewportDev(ctx: ViewerContext, state: AppState, roo
     if (!guard.isCurrent()) return;
     const selected = state.beginSelection({kind: 'cbm', key: candidate.node.path});
     state.selectionGeometry = {status: 'ambiguous', detail: '已显示您选择的节点属性；与当前拾取设备的自动关联尚未确认。'};
-    void Promise.all([highlightPicked(selected), import('../ui/propsDrawer.js').then(({showNodePropertiesBasic}) => {
+    void Promise.all([highlightPicked(selected), loadPresentation('propsDrawer').then(({showNodePropertiesBasic}) => {
       if (state.isCurrentSelection(selected)) return showNodePropertiesBasic(state, candidate.node, selected);
     })]).catch(error => console.warn('[DEV source choice]', error));
   }})), guard.isCurrent);

@@ -1,4 +1,8 @@
-import type { FamSourceProperty } from '../gim/famParser.js';
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { ProjectPropertyCache } from '../services/projectPropertyCache.js';
+import { ProjectViewState } from '../shared/projectViewState.js';
+import { RuntimeSlot } from '../shared/runtimeSlot.js';
+import type { DeviceRuntime } from '../shared/deviceRuntime.js';
 import type { IfcRegionalRuntime } from '../viewer/ifcRegionalRuntime.js';
 import type { SubstationCapabilitySummary } from '../gim/substationEvidence.js';
 import type { IfcEntry, CbmNode, FileDevEntry } from '../gim/types.js';
@@ -6,21 +10,16 @@ import type * as OBCF from '@thatopen/fragments';
 import type * as THREE from 'three';
 import type { GimProjectType } from '../gim/projectType.js';
 import type { GimGraph } from '../gim/gimGraphTypes.js';
-import type {
-  LineFamPropertyRecord,
-  LineDevPropertyRecord,
-} from '@desktop/database.js';
 import type { StdDocument } from '../gim/stdParser.js';
 import type { SldDocument } from '../gim/sldParser.js';
 import type { StdSldIndex } from '../gim/stdSldIndex.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
-import { createIfcRuntimeModelId } from '../gim/modelIdentity.js';
+import { createIfcRuntimeModelId } from '../shared/projectSession.js';
 import type { GeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 import type { ViewerViewHistory } from '../viewer/viewHistory.js';
 
-export interface SubstationFineQueue {
-  enqueueUserIfcFine(key: string, run: () => Promise<void>): { promise: Promise<void>; cancel: () => boolean };
-}
+import type { SubstationFineQueue } from '../shared/selectionContracts.js';
+export type { SubstationFineQueue } from '../shared/selectionContracts.js';
 
 /** Session-owned incremental IFC connection preview; optional in browser tests. */
 export interface SubstationConnectionPreview {
@@ -35,47 +34,15 @@ export interface SubstationConnectionPreview {
   release(): void;
 }
 
-/** 工程异步任务携带的不可变身份快照。 */
-export interface ProjectLoadSession {
-  generation: number;
-  projectId: number | null;
-  sourceSha256: string | null;
-  /** 创建快照时的几何批次 token；可在同一工程内递增。 */
-  geometryToken: number;
-}
-
-/** Runtime-only user intent; it never invalidates the geometry batch or cache. */
-export interface SelectionRequest {
-  origin?: 'tree' | 'viewport' | 'command';
-  cameraNavigationVersion?: number;
-  id: number;
-  session: ProjectLoadSession;
-  signal: AbortSignal;
-  target: { kind: 'cbm' | 'spatial-node' | 'ifc-object' | 'ifc-element' | 'sld' | 'engineering' | 'engineering-source' | 'engineering-group'; key: string } | null;
-}
-
-export interface EngineeringSelectionScope {
-  requestId: number;
-  snapshot: import('../engineering/types.js').EngineeringSnapshot;
-  ownerIds: Set<string>;
-  sourceIds: Set<string>;
-  devRoots: Set<string>;
-  ifc: Array<{ modelId: string; expressId: number; globalId: string }>;
-}
-
-export interface SelectionCommitGuard {
-  isCurrent: () => boolean;
-  isSessionCurrent: () => boolean;
-  signal?: AbortSignal;
-}
-
-export interface SelectionGeometryState {
-  status: 'not-loaded' | 'unknown' | 'available' | 'renderable' | 'empty' | 'unsupported' | 'partial' | 'failed' | 'unlinked' | 'ambiguous' | 'file-only' | 'unassociated';
-  detail: string;
-}
+import type { ProjectLoadSession } from '../shared/projectSession.js';
+export type { ProjectLoadSession } from '../shared/projectSession.js';
+import type { SelectionRequest, EngineeringSelectionScope, SelectionCommitGuard, SelectionGeometryState } from '../shared/selectionContracts.js';
+export type { SelectionRequest, EngineeringSelectionScope, SelectionCommitGuard, SelectionGeometryState } from '../shared/selectionContracts.js';
 
 /** 应用全局状态（由 bootstrap.ts 创建唯一实例，通过参数注入各模块） */
 export class AppState {
+  readonly properties = new ProjectPropertyCache();
+  readonly sessionDisposables = new Set<() => void>();
   deviceUnknownBounds = new Set<string>();
   /** Session-owned priority lane for explicit IFC precision requests. */
   substationFineQueue: SubstationFineQueue | null = null;
@@ -100,13 +67,9 @@ export class AppState {
   engineeringGeometryEvidenceChanged: (()=>void) | null = null;
   engineeringSelectionCleanup: (() => void) | null = null;
   engineeringNavigationCleanup: (() => void) | null = null;
-  deviceLodRuntime: { select(rootOccurrence: string): Promise<THREE.Group[]>; ensureBase?(rootOccurrence: string): Promise<THREE.Group[]>; retry?(rootOccurrence: string): Promise<THREE.Group[]>; refine?(rootOccurrence: string): Promise<THREE.Group[]>; releaseFine?(rootOccurrence: string): void; setOnlySelected?(only: boolean): void; release(): void; clearSelection(): void; notifyCoordinateAnchor?(): void;
-    getLoadedRoot?(rootOccurrence: string): THREE.Group | undefined;
-    setBackgroundPaused?(paused: boolean): void;
-    pick?(ray: THREE.Raycaster): {rootOccurrence: string; instanceKey: string; distance: number; object?: THREE.Object3D; hint?: import('../engineering/representations.js').DevRepresentationHint} | null;
-    setExternalMemoryPressure?(pressure: 'unknown' | 'normal' | 'high' | 'critical'): void;
-    resourceCounts?(): { templateCount: number; templateParseCount: number; sharedGeometryCount: number; sharedMaterialCount: number; sharedTextureCount: number };
-    diagnostics: Record<string, unknown> } | null = null;
+  private readonly deviceRuntimeSlot = new RuntimeSlot<DeviceRuntime>();
+  get deviceLodRuntime():DeviceRuntime|null { return this.deviceRuntimeSlot.value; }
+  set deviceLodRuntime(runtime:DeviceRuntime|null) { this.deviceRuntimeSlot.value=runtime; }
   selectionRequest: SelectionRequest | null = null;
   selectionGeometry: SelectionGeometryState | null = null;
   selectionMessage = '';
@@ -174,7 +137,7 @@ export class AppState {
     this.engineeringGeometryFilter?.();
     this.deviceLodRuntime?.setOnlySelected?.(only);
     for (const runtime of this.ifcRegionalRuntimes.values()) runtime.setOnlySelected?.(only);
-    void this.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error));
+    void Promise.resolve(this.selectionVisibility?.sync().catch(error => console.warn('[Selection visibility]', error))).catch(reportBackgroundError);
     this.viewHistory?.recordVisibility();
   }
   // GIM 文件相关
@@ -198,8 +161,11 @@ export class AppState {
   engineeringCacheError = '';
   engineeringCleanup: (() => void) | null = null;
   engineeringListeners = new Set<() => void>();
-  engineeringNavMode: 'composition' | 'source' | 'inventory' = 'inventory';
-  engineeringExpandedRows = { composition: new Set<string>(), source: new Set<string>(), inventory:new Set<string>() };
+  readonly viewState = new ProjectViewState();
+  get engineeringNavMode() {return this.viewState.mode;}
+  set engineeringNavMode(mode:ProjectViewState['mode']) {this.viewState.mode=mode;}
+  get engineeringExpandedRows() {return this.viewState.expanded;}
+  set engineeringExpandedRows(rows:ProjectViewState['expanded']) {this.viewState.expanded=rows;}
   notifyEngineeringChanged(): void { for (const listener of [...this.engineeringListeners]) listener(); }
   /** GIM 头部提取的工程名称（如"XX变电站"），用于 F1System 根节点显示 */
   projectName: string = '';
@@ -225,7 +191,8 @@ export class AppState {
   substationEntryPaths: string[] = [];
   /** Source index sizes, also available when the semantic cache is restored. */
   substationEntrySizes = new Map<string, number>();
-  cachedFamSourceProperties = new Map<string, FamSourceProperty[]>();
+  get cachedFamSourceProperties() { return this.properties.cachedFamSourceProperties; }
+  set cachedFamSourceProperties(value:ProjectPropertyCache['cachedFamSourceProperties']) {this.properties.cachedFamSourceProperties=value;}
   fileDevRelations: FileDevEntry[] = [];
   deviceToIfcFile = new Map<string, string>(); // deviceCbmName → ifcModelId
 
@@ -237,21 +204,27 @@ export class AppState {
   currentStdSldIndex: StdSldIndex | null = null;
 
   // 缓存命中时的 IFC 本地缓存路径（entry_path → local_cache_path）
-  cachedIfcPaths = new Map<string, string>();
+  get cachedIfcPaths() { return this.properties.cachedIfcPaths; }
+  set cachedIfcPaths(value:ProjectPropertyCache['cachedIfcPaths']) {this.properties.cachedIfcPaths=value;}
 
   // 缓存命中时的 FAM/DEV 基础属性（currentFiles = null 时使用）
   // cachedFamProperties: sourcePath → sectionName → key → value
-  cachedFamProperties = new Map<string, Map<string, Map<string, string>>>();
+  get cachedFamProperties() { return this.properties.cachedFamProperties; }
+  set cachedFamProperties(value:ProjectPropertyCache['cachedFamProperties']) {this.properties.cachedFamProperties=value;}
   // cachedDevProperties: devPath → key → value
-  cachedDevProperties = new Map<string, Record<string, string>>();
+  get cachedDevProperties() { return this.properties.cachedDevProperties; }
+  set cachedDevProperties(value:ProjectPropertyCache['cachedDevProperties']) {this.properties.cachedDevProperties=value;}
 
   // v5: 线路工程 FAM/DEV 属性缓存（缓存命中 + 首次导入后均写入）
   // cachedLineFamProperties: normalizedPath → propKey → LineFamPropertyRecord[]
-  cachedLineFamProperties = new Map<string, Map<string, LineFamPropertyRecord[]>>();
+  get cachedLineFamProperties() { return this.properties.cachedLineFamProperties; }
+  set cachedLineFamProperties(value:ProjectPropertyCache['cachedLineFamProperties']) {this.properties.cachedLineFamProperties=value;}
   // cachedLineFamDisplayKeys: normalizedPath → propKey → displayKey（中文展示键）
-  cachedLineFamDisplayKeys = new Map<string, Map<string, string | null>>();
+  get cachedLineFamDisplayKeys() { return this.properties.cachedLineFamDisplayKeys; }
+  set cachedLineFamDisplayKeys(value:ProjectPropertyCache['cachedLineFamDisplayKeys']) {this.properties.cachedLineFamDisplayKeys=value;}
   // cachedLineDevProperties: normalizedPath → propKey → LineDevPropertyRecord[]
-  cachedLineDevProperties = new Map<string, Map<string, LineDevPropertyRecord[]>>();
+  get cachedLineDevProperties() { return this.properties.cachedLineDevProperties; }
+  set cachedLineDevProperties(value:ProjectPropertyCache['cachedLineDevProperties']) {this.properties.cachedLineDevProperties=value;}
 
   // 当前 GIM 项目数据库 ID（Tauri 缓存命中时使用）
   currentProjectId: number | null = null;
@@ -269,9 +242,9 @@ export class AppState {
   loadedModels = new Map<string, { modelId: string; runtimeModelId: string; visible: boolean }>();
   ifcRegionalRuntimes=new Map<string,IfcRegionalRuntime>();
   private releaseIfcRuntimes(): void {
-    for(const runtime of this.ifcRegionalRuntimes.values())runtime.release();
+    for(const runtime of this.ifcRegionalRuntimes.values())this.safelyRelease(() => runtime.release());
     this.ifcRegionalRuntimes.clear();
-    this.selectionVisibility?.reset();
+    this.safelyRelease(() => this.selectionVisibility?.reset());
     this.selectionHighlightRequestId = null;
   }
 
@@ -331,45 +304,42 @@ export class AppState {
     };
   }
 
-  /** 使所有在途工程/几何任务失效；必须在切换工程的第一个同步动作调用。 */
-  invalidatePendingLoads(): void {
-    this.hoverCleanup?.(); this.selectionDecorationCleanup?.();
-    this.engineeringCleanup?.(); this.engineeringCleanup = null;
-    this.engineeringSelectionCleanup?.(); this.engineeringNavigationCleanup?.();
-    this.substationResourceMonitor?.release(); this.substationResourceMonitor = null;
-    this.substationMemoryPressure = 'unknown';
-    this.deviceLodRuntime?.release(); this.deviceLodRuntime = null;
-    this.substationFineQueue = null;
-    this.substationConnectionPreview?.release(); this.substationConnectionPreview = null;
-    this.substationConnectionPorts = null;
-    this.viewHistory?.clear();
-    this.stationOverview = null;
-    this.onlySelected = false;
-    this.invalidateSelection();
-    this.releaseIfcRuntimes();
-    this.projectGeneration += 1;
-    this.geometryLoadToken += 1;
+  private safelyRelease(run: () => void): void {
+    try { run(); } catch (error) { console.error('[Session] 资源释放失败', error); }
   }
 
-  /** 激活新工程并返回其身份快照。 */
-  activateProject(projectId: number | null, sourceSha256?: string | null): ProjectLoadSession {
-    this.hoverCleanup?.(); this.selectionDecorationCleanup?.();
-    this.engineeringCleanup?.(); this.engineeringCleanup = null;
-    this.engineeringSelectionCleanup?.(); this.engineeringNavigationCleanup?.();
-    this.substationResourceMonitor?.release(); this.substationResourceMonitor = null;
-    this.substationMemoryPressure = 'unknown';
-    this.substationFineQueue = null;
-    this.substationConnectionPreview?.release(); this.substationConnectionPreview = null;
-    this.substationConnectionPorts = null;
-    this.viewHistory?.clear();
-    this.stationOverview = null;
-    this.onlySelected = false;
-    this.invalidateSelection();
-    this.releaseIfcRuntimes();
+  /** Invalidate first: release callbacks cannot publish into the outgoing session. */
+  invalidatePendingLoads(): void {
     this.projectGeneration += 1;
+    this.geometryLoadToken += 1;
+    this.releaseSessionResources();
+  }
+
+  private releaseSessionResources(): void {
+    const disposables = [...this.sessionDisposables]; this.sessionDisposables.clear();
+    for (const dispose of disposables) this.safelyRelease(dispose);
+    for (const key of ['hoverCleanup', 'selectionDecorationCleanup', 'engineeringCleanup',
+      'engineeringSelectionCleanup', 'engineeringNavigationCleanup'] as const) {
+      const cleanup = this[key]; this[key] = null;
+      if (cleanup) this.safelyRelease(cleanup);
+    }
+    this.deviceLodRuntime = null;
+    const monitor = this.substationResourceMonitor; this.substationResourceMonitor = null;
+    if (monitor) this.safelyRelease(() => monitor.release());
+    const preview = this.substationConnectionPreview; this.substationConnectionPreview = null;
+    if (preview) this.safelyRelease(() => preview.release());
+    this.substationMemoryPressure = 'unknown';
+    this.substationFineQueue = null; this.substationConnectionPorts = null;
+    this.safelyRelease(() => this.viewHistory?.clear());
+    this.stationOverview = null; this.onlySelected = false;
+    this.safelyRelease(() => this.invalidateSelection());
+    this.releaseIfcRuntimes();
+  }
+
+  activateProject(projectId: number | null, sourceSha256?: string | null): ProjectLoadSession {
+    this.invalidatePendingLoads();
     this.currentProjectId = projectId;
     this.currentSourceSha256 = sourceSha256 ?? null;
-    this.geometryLoadToken += 1;
     return this.captureProjectSession();
   }
 
@@ -466,25 +436,14 @@ export class AppState {
    * 注意：loadedModels.clear() 仅清空 state 侧索引，不 dispose Three.js 对象；
    * ctx.fragments 中的实际模型需由 projectCleanupService 在调用本方法前显式 dispose。
    */
-  resetGimState() {
-    this.substationResourceMonitor?.release(); this.substationResourceMonitor = null;
-    this.substationMemoryPressure = 'unknown';
+  resetGimState(invalidate = true) {
+    if (invalidate) this.invalidatePendingLoads(); else this.releaseSessionResources();
     this.deviceUnknownBounds.clear();
-    this.substationFineQueue = null;
-    this.substationConnectionPreview?.release(); this.substationConnectionPreview = null;
-    this.substationConnectionPorts = null;
-    this.viewHistory?.clear();
-    this.stationOverview = null;
-    this.onlySelected = false;
-    this.releaseIfcRuntimes();
-    this.invalidateSelection();
     this.currentFiles = null;
     this.currentIfcEntries = [];
     this.currentCbmTree = null;
     this.substationSpatialIndex = null;
-    this.engineeringCleanup?.(); this.engineeringCleanup = null;
     this.engineeringSources = null; this.engineeringSnapshot = null;
-    this.engineeringSelectionCleanup?.(); this.engineeringNavigationCleanup?.();
     this.engineeringNavigation = null; this.engineeringNavigationCacheHit = false;
     this.engineeringGeometryCatalog = null; this.engineeringGeometryReady = null;
     this.engineeringTreeStatus = 'none'; this.engineeringIfcGeometryFinished = false;

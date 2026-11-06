@@ -1,0 +1,17 @@
+{
+  "maxArchiveBytes": 2147483648,
+  "maxEntries": 200000,
+  "maxFileBytes": 1073741824,
+  "maxTotalUncompressedBytes": 8589934592,
+  "maxCompressionRatio": 1000,
+  "maxPathBytes": 4096,
+  "maxNestingDepth": 256,
+  "smallTextBytes": 262144,
+  "mobile": {
+    "maxArchiveBytes": 268435456,
+    "maxEntries": 100000,
+    "maxFileBytes": 67108864,
+    "maxTotalUncompressedBytes": 536870912,
+    "maxCompressionRatio": 200
+  }
+}

@@ -1,3 +1,5 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { loadPresentation } from './presentationPort.js';
 import type { AppState, SelectionRequest } from '../app/state.js';
 import { engineeringSourceRecord } from './engineeringViewService.js';
 import { selectEngineeringTarget } from './engineeringSelection.js';
@@ -13,10 +15,10 @@ export async function inspectEngineeringDocument(state: AppState, path: string, 
   if (!inventory.has(path)) return;
   const request = existing ?? state.beginSelection({ kind: 'engineering-source', key: cbmOccurrenceId ?? `document:${path}` }), guard = state.selectionGuard(request);
   if (!guard.isCurrent()) return;
-  const tree = await import('../ui/engineeringTreeView.js');
+  const tree = await loadPresentation('engineeringTreeView');
   if (!guard.isCurrent()) return;
   state.engineeringNavMode = 'source'; tree.renderEngineeringTree(state); tree.syncEngineeringTreeSelection(state);
-  const { openPropsDrawerUI, renderInspectorTabs, sectionHtml } = await import('../ui/propsDrawer.js');
+  const { openPropsDrawerUI, renderInspectorTabs, sectionHtml } = await loadPresentation('propsDrawer');
   if (!guard.isCurrent()) return;
   openPropsDrawerUI();
   let doc = sources.graph.documents.find(doc => doc.path === path);
@@ -78,9 +80,9 @@ export async function inspectEngineeringDocument(state: AppState, path: string, 
     document.querySelector('[data-itab-pane="overview"]')?.insertAdjacentHTML('beforeend', candidates.map((id, i) => `<button class="prop-ref-link" data-source-candidate="${i}">${escHtml(engineeringSourceRecord(state, id)?.name ?? '关联来源')}</button>`).join(''));
     if (candidateIds.size > 100) document.querySelector('[data-itab-pane="overview"]')?.insertAdjacentHTML('beforeend', '<p class="props-note">全部实例可在来源视图逐项查看。</p>');
     document.querySelectorAll<HTMLElement>('[data-source-page]').forEach(button => button.addEventListener('click', () => render(Number(button.dataset.sourcePage), button.closest('[data-itab-pane]')?.getAttribute('data-itab-pane') ?? 'source')));
-    document.querySelectorAll<HTMLElement>('[data-source-candidate]').forEach(button => button.addEventListener('click', () => { if (guard.isCurrent()) void selectEngineeringTarget(state, { kind: 'engineering-source', key: candidates[Number(button.dataset.sourceCandidate)] }); }));
+    document.querySelectorAll<HTMLElement>('[data-source-candidate]').forEach(button => button.addEventListener('click', () => { if (guard.isCurrent()) void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering-source', key: candidates[Number(button.dataset.sourceCandidate)] })).catch(reportBackgroundError); }));
     document.querySelectorAll<HTMLElement>('[data-engineering-document-ref]').forEach(button => button.addEventListener('click', () => {
-      const reference = references[Number(button.dataset.engineeringDocumentRef)]; if (guard.isCurrent() && reference.target) void inspectEngineeringDocument(state, reference.target);
+      const reference = references[Number(button.dataset.engineeringDocumentRef)]; if (guard.isCurrent() && reference.target) void Promise.resolve(inspectEngineeringDocument(state, reference.target)).catch(reportBackgroundError);
     }));
   };
   render();
@@ -97,7 +99,7 @@ export async function inspectEngineeringContext(state: AppState, key: string, ex
   if (!sources || !node) return;
   const request = existing ?? state.beginSelection({ kind: 'engineering-source', key: `context:${key}` }), guard = state.selectionGuard(request);
   if (!guard.isCurrent()) return;
-  const [{ renderInspectorTabs, sectionHtml, openPropsDrawerUI }, tree] = await Promise.all([import('../ui/propsDrawer.js'), import('../ui/engineeringTreeView.js')]);
+  const [{ renderInspectorTabs, sectionHtml, openPropsDrawerUI }, tree] = await Promise.all([loadPresentation('propsDrawer'), loadPresentation('engineeringTreeView')]);
   if (!guard.isCurrent()) return;
   state.engineeringNavMode = 'source'; tree.renderEngineeringTree(state); tree.syncEngineeringTreeSelection(state);
   const children = new Map<string, string[]>();
@@ -113,9 +115,9 @@ export async function inspectEngineeringContext(state: AppState, key: string, ex
     source: sectionHtml('文件', [['路径', node.sourcePath]]) + '<button class="prop-ref-link" id="engineering-context-document">查看交付文件</button>' +
       members.slice(0, 100).map((member, index) => `<button class="prop-ref-link" data-context-member="${index}">${escHtml(member.name)}</button>`).join('') + (members.length > 100 ? '<p class="props-note">全部对象可在来源树展开或搜索。</p>' : ''),
   });
-  document.getElementById('engineering-context-document')?.addEventListener('click', () => { if (guard.isCurrent()) void inspectEngineeringDocument(state, node.sourcePath); });
+  document.getElementById('engineering-context-document')?.addEventListener('click', () => { if (guard.isCurrent()) void Promise.resolve(inspectEngineeringDocument(state, node.sourcePath)).catch(reportBackgroundError); });
   document.querySelectorAll<HTMLElement>('[data-context-member]').forEach(button => button.addEventListener('click', () => {
-    if (guard.isCurrent()) void selectEngineeringTarget(state, { kind: 'engineering-source', key: members[Number(button.dataset.contextMember)].id });
+    if (guard.isCurrent()) void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering-source', key: members[Number(button.dataset.contextMember)].id })).catch(reportBackgroundError);
   }));
   if (state.initialized) {
     const [{ getViewerRuntimeWithUI }, { commitSelectionHighlight }] = await Promise.all([import('./viewerUIBinding.js'), import('../viewer/highlight.js')]);

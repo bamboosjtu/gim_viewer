@@ -1,3 +1,4 @@
+import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { readDevArtifactBatch, type DevArtifactRead, type DevArtifactReadStatus } from '@desktop/devLodCache.js';
 import { ByteWorkBudget } from '../utils/byteWorkBudget.js';
 interface Lease<T> { status: DevArtifactReadStatus; value?: T; error?: string; release: () => void }
@@ -25,7 +26,7 @@ export class DevTemplateCacheReader<T> {
   read(key: string): Promise<Lease<T>> {
     if (this.closed) return Promise.reject(new DOMException('DEV cache reader released', 'AbortError'));
     const promise = new Promise<Lease<T>>((resolve, reject) => this.queue.push({ key, resolve, reject }));
-    if (!this.running && !this.timer) this.timer = setTimeout(() => { this.timer = null; void this.drain(); }, 0);
+    if (!this.running && !this.timer) this.timer = setTimeout(() => { this.timer = null; void Promise.resolve(this.drain()).catch(reportBackgroundError); }, 0);
     return promise;
   }
   private record(status: DevArtifactReadStatus): void {

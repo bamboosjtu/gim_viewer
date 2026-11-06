@@ -9,11 +9,6 @@ use super::cache_validation::{
     compute_line_attr_diagnostic,
     inspect_line_semantic_pack,
 };
-use super::fragments_cache::{
-    fragment_cache_file_path,
-    fragment_cache_version_matches,
-    fragment_file_size_matches,
-};
 use super::geometry_cache::{
     check_geometry_cache_manifest,
     check_geometry_cache_manifest_structure,
@@ -21,7 +16,6 @@ use super::geometry_cache::{
 };
 use super::{
     DbState,
-    FRAGMENTS_CACHE_VERSION,
     GEOMETRY_CACHE_VERSION,
     LINE_PARSER_VERSION,
     PARSER_VERSION,
@@ -44,23 +38,6 @@ pub struct IfcCacheFileDiagnostic {
     pub file_size: Option<u64>,
 }
 
-/// 单个 Fragments 缓存文件诊断
-#[derive(Debug, Serialize)]
-pub struct FragmentCacheFileDiagnostic {
-    pub entry_path: String,
-    pub model_id: String,
-    pub source_gim_sha256: String,
-    pub source_gim_sha256_match: bool,
-    pub source_ifc_size: i64,
-    pub fragment_file_size_stored: i64,
-    pub fragment_file_size_actual: u64,
-    pub stored_fragments_version: String,
-    pub current_fragments_cache_version: String,
-    pub fragments_version_match: bool,
-    pub fragment_file_exists: bool,
-    pub fragment_file_size_match: bool,
-    pub valid: bool,
-}
 
 /// 项目缓存完整诊断
 #[derive(Debug, Serialize)]
@@ -104,17 +81,11 @@ pub struct ProjectCacheDiagnostic {
     pub geometry_cache_manifest_valid: bool,
     pub substation_semantic_cache_valid: bool,
     pub geometry_cache_valid: bool,
-    pub fragments_cache_valid: bool,
     pub valid: bool,
 
     pub ifc_cache_files: Vec<IfcCacheFileDiagnostic>,
 
     // Fragments 缓存诊断
-    pub fragment_cache_count: u64,
-    pub valid_fragment_cache_count: u64,
-    pub missing_fragment_cache_paths: Vec<String>,
-    pub current_fragments_cache_version: String,
-    pub fragment_cache_files: Vec<FragmentCacheFileDiagnostic>,
 
     // v4: 线路工程图缓存诊断
     pub project_type: Option<String>,
@@ -297,83 +268,6 @@ pub fn get_project_cache_diagnostic(
         });
     }
 
-    // 4. 查询 substation_fragment_cache 记录并诊断每个 fragments 缓存文件
-    let mut frag_stmt = conn
-        .prepare(
-            "SELECT entry_path, model_id, source_gim_sha256, source_ifc_size, fragment_file_size, fragments_version
-             FROM substation_fragment_cache
-             WHERE project_id = ?1
-             ORDER BY entry_path ASC",
-        )
-        .map_err(|e| format!("预处理 substation_fragment_cache 失败: {}", e))?;
-    let frag_rows = frag_stmt
-        .query_map(params![project_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, i64>(4)?,
-                row.get::<_, String>(5)?,
-            ))
-        })
-        .map_err(|e| format!("查询 substation_fragment_cache 失败: {}", e))?;
-
-    let mut fragment_cache_count: u64 = 0;
-    let mut valid_fragment_cache_count: u64 = 0;
-    let mut missing_fragment_cache_paths: Vec<String> = Vec::new();
-    let mut fragment_cache_files: Vec<FragmentCacheFileDiagnostic> = Vec::new();
-
-    for r in frag_rows {
-        let (
-            entry_path,
-            model_id,
-            source_gim_sha256,
-            source_ifc_size,
-            frag_size_stored,
-            stored_version,
-        ) = r.map_err(|e| format!("读取 substation_fragment_cache 失败: {}", e))?;
-        fragment_cache_count += 1;
-
-        let version_match = fragment_cache_version_matches(&stored_version);
-        let source_gim_sha256_match =
-            !source_gim_sha256.is_empty() && source_gim_sha256.eq_ignore_ascii_case(&project.5);
-        let (file_exists, file_size_actual) =
-            match fragment_cache_file_path(app_handle, project_id, &entry_path) {
-                Ok(path) => match stdfs::metadata(&path) {
-                    Ok(meta) => (true, meta.len()),
-                    Err(_) => (false, 0),
-                },
-                Err(_) => (false, 0),
-            };
-
-        let fragment_file_size_match =
-            fragment_file_size_matches(frag_size_stored, file_size_actual);
-        let frag_valid =
-            version_match && source_gim_sha256_match && file_exists && fragment_file_size_match;
-        if frag_valid {
-            valid_fragment_cache_count += 1;
-        } else {
-            missing_fragment_cache_paths.push(entry_path.clone());
-        }
-
-        fragment_cache_files.push(FragmentCacheFileDiagnostic {
-            entry_path,
-            model_id,
-            source_gim_sha256,
-            source_gim_sha256_match,
-            source_ifc_size,
-            fragment_file_size_stored: frag_size_stored,
-            fragment_file_size_actual: file_size_actual,
-            stored_fragments_version: stored_version,
-            current_fragments_cache_version: FRAGMENTS_CACHE_VERSION.to_string(),
-            fragments_version_match: version_match,
-            fragment_file_exists: file_exists,
-            fragment_file_size_match,
-            valid: frag_valid,
-        });
-    }
-
     // v4: 根据 project_type 分支 valid 判断
     // v5: transmission_line 增加 line_fam_source_count > 0 条件
     // - substation（或 null/unknown）：保持原有 IFC 缓存校验逻辑
@@ -400,9 +294,6 @@ pub fn get_project_cache_diagnostic(
     };
     let valid = semantic_cache_valid;
     let substation_semantic_cache_valid = !is_line && semantic_cache_valid;
-    let fragments_cache_valid = !is_line
-        && ifc_entry_count > 0
-        && valid_fragment_cache_count == ifc_entry_count;
 
     let mut miss_reasons = Vec::new();
     if !parser_version_match {
@@ -472,14 +363,8 @@ pub fn get_project_cache_diagnostic(
         geometry_cache_manifest_valid,
         substation_semantic_cache_valid,
         geometry_cache_valid: geometry_cache_version_match,
-        fragments_cache_valid,
         valid,
         ifc_cache_files,
-        fragment_cache_count,
-        valid_fragment_cache_count,
-        missing_fragment_cache_paths,
-        current_fragments_cache_version: FRAGMENTS_CACHE_VERSION.to_string(),
-        fragment_cache_files,
         // v4: 线路工程图缓存诊断
         project_type,
         line_cbm_node_count: line_cbm_node_count as u64,

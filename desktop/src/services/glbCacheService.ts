@@ -25,7 +25,7 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { discoverGeometriesFromDevPath, type DiscoveredGeometries, type DiscoveredModGeometry, type DiscoveredStlGeometry } from './modGeometryDiscovery.js';
-import { createEntryResolver } from '../gim/entryResolver.js';
+import { getFileEntryResolver } from '../gim/entryResolver.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { getFileByPath } from '../gim/fileLookup.js';
@@ -272,7 +272,7 @@ export async function analyzeDevCompilation(
   options: { discovery?: import('./modGeometryDiscovery.js').GeometryDiscoveryOptions } = {},
 ): Promise<DevCompilationAnalysis> {
   const normalizedDevPath = devPath.replace(/\\/g, '/');
-  const canonicalDevPath = createEntryResolver(files.keys())(normalizedDevPath) ?? normalizedDevPath;
+  const canonicalDevPath = getFileEntryResolver(files)(normalizedDevPath) ?? normalizedDevPath;
   if (!getFileByPath(files, canonicalDevPath)) {
     throw new Error(`DEV 文件不存在，无法生成 GLB: ${canonicalDevPath}`);
   }
@@ -332,7 +332,7 @@ export async function serializeDevToGlbDetailed(
   // failure as `empty`.
   const normalizedDevPath = devPath.replace(/\\/g, '/');
   const canonicalDevPath = options.canonicalDevPath
-    ?? createEntryResolver(files.keys())(normalizedDevPath) ?? normalizedDevPath;
+    ?? getFileEntryResolver(files)(normalizedDevPath) ?? normalizedDevPath;
   if (!getFileByPath(files, canonicalDevPath)) {
     throw new Error(`DEV 文件不存在，无法生成 GLB: ${canonicalDevPath}`);
   }

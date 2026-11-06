@@ -21,8 +21,13 @@
 - 解压优先原生 Tauri 命令，浏览器开发模式或原生不可用才走 WASM。两者都执行路径、重复条目、声明/累计大小和资源配额检查。
 - 解压先写 staging，全部条目通过校验后再原子提交；中断不能留下“部分有效”的正式缓存。
 - 变电/设备语义和几何可以分域恢复；缓存命中不等于所有 IFC/DEV 表示立即可见。
+- 包内引用索引按提取文件 Map 复用，CBM/DEV 递归、几何与属性读取共享索引，不在每次引用查询时重新扫描归档清单。物化可替换 Map 中的文件值；修改路径键集合应创建新 Map，条目数量变化也会重建索引。索引由 WeakMap 持有，不延长源文件 Map 的生命周期。
+- 单次 CBM 树构建按实际 DEV 路径复用文档和在途读取，只读/解析每份 DEV 一次；每个装配 occurrence 仍独立展开，保留实例路径、逐边矩阵和分支 visited。索引性能回归对比不同引用数量下的 Map 全清单枚举次数，并覆盖物化、清单变更与源 Map 隔离；不以机器相关的毫秒阈值代替资源计数。`check:engineering-boundaries` 拦截直接从 `files.keys()` 重建索引的调用，统一使用 `getFileEntryResolver(files)`。
+
 - 设备重开复用提取源和 DEV/LOD 派生缓存，但重新建立小型设备树，不发布完整变电语义凭据。
 - 线路缓存以 `begin/chunks/finish` 三阶段提交，`finish` 才写入有效 parser 标记；半成品不能作为合法缓存。
+
+索引回归入口为 [entryResolver.test.ts](../../desktop/src/gim/__tests__/entryResolver.test.ts) 与 [cbmParser.test.ts](../../desktop/src/gim/__tests__/cbmParser.test.ts)：重复查询、多个装配 occurrence 不得增加索引构建次数；同时监测 `keys/entries/values/forEach/[Symbol.iterator]` 全清单枚举入口，避免换一种遍历写法绕过资源计数。
 
 ## 3. 会话与取消
 
@@ -98,3 +103,5 @@
 | 工程切换时旧任务完成 | 会话守卫拒绝提交，释放旧资源 |
 
 空源、unsupported、partial、运行失败是不同终态，不能用一个 `settled` 或“工程已打开”合并。
+
+会话失效先递增工程代次和几何 token，再逐项释放资源；单项释放异常不会中断其余清理。DEV runtime 槽替换时释放旧实例；工程和几何批次分别校验，几何换代不取消同工程语义任务。解压返回 `ok | cancelled`，空归档报错。发布状态、定时器和 Worker pending 请求均由会话清理终止，过期提交队列必须 reject 等待者。
