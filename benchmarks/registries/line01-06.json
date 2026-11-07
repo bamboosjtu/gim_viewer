@@ -2,23 +2,33 @@
   "version": "gim-batch-input-v1",
   "samples": [
     {
-      "path": "../../demo/line01.gim",
+      "path": "../../demo/lines/line01.gim",
       "sourceSha256": "97a5699005b6a03d7c4304da61d10b216c5804d6fc61032432a6bd72547aa829",
       "sampleTier": "L1"
     },
     {
-      "path": "../../demo/line02.gim",
+      "path": "../../demo/lines/line02.gim",
       "sourceSha256": "89bd14b15bc89bfc3fb0d916965a36a294cac7288647132c1d9ab35d97d05fd4",
       "sampleTier": "L1"
     },
     {
-      "path": "../../demo/line03.gim",
+      "path": "../../demo/lines/line03.gim",
       "sourceSha256": "67695245738fc5a5577656d182115942bc7d5c9997210458f1a9d20e3163c32f",
       "sampleTier": "L1"
     },
     {
-      "path": "../../demo/line04.gim",
+      "path": "../../demo/lines/line04.gim",
       "sourceSha256": "cdec033a76badb4086fa3a912350f52c08b65dc7bc0cb7f85bd985ab6a1f64d5",
+      "sampleTier": "L1"
+    },
+    {
+      "path": "../../demo/lines/line05.gim",
+      "sourceSha256": "4074ce6020316b858b61c37c9092e36f3dbb5158c2435352433939ba302fd217",
+      "sampleTier": "L1"
+    },
+    {
+      "path": "../../demo/lines/line06.gim",
+      "sourceSha256": "f1618c11b228cd059cb382ac246982e6a92fa3cb108691855e272b68686a97f0",
       "sampleTier": "L1"
     }
   ]

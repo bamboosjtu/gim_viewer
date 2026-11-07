@@ -39,7 +39,7 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
   "version": "gim-batch-input-v1",
   "samples": [
     {
-      "path": "../demo/substation01.gim",
+      "path": "../demo/substations/substation01.gim",
       "sampleTier": "L1"
     },
     {

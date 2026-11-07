@@ -1,9 +1,11 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, resolve, relative } from 'node:path';
+import { dirname, resolve, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../src');
+const measurementCoreRoot = resolve(root, '../../packages/measurement-core/src');
+const measurementFacade = resolve(root, 'measurement/core.ts');
 function* files(dir) {
   for (const entry of readdirSync(dir, {withFileTypes:true})) {
     if (entry.name === '__tests__') continue;
@@ -13,6 +15,27 @@ function* files(dir) {
   }
 }
 const failures = [];
+// The measurement core is deliberately inlined as source until SDK packaging.
+// All desktop access goes through one facade; the core cannot import runtime layers.
+for (const path of files(measurementCoreRoot)) {
+  const ast = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
+  for (const node of ast.statements) if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
+    const specifier = node.moduleSpecifier.text;
+    if (!specifier.startsWith('.') || !resolve(dirname(path), specifier.replace(/\.js$/, '.ts')).startsWith(`${measurementCoreRoot}${sep}`)) {
+      failures.push(`${relative(root, path)}: measurement core imports outside its own source package`);
+    }
+  }
+  function rejectDynamic(node) {
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      failures.push(`${relative(root, path)}: measurement core cannot dynamically import runtime packages`);
+    }
+    ts.forEachChild(node,rejectDynamic);
+  }
+  ts.forEachChild(ast,rejectDynamic);
+}
+if (readFileSync(measurementFacade, 'utf8').trim() !== "export * from '../../../packages/measurement-core/src/index.js';") {
+  failures.push('measurement/core.ts: measurement source facade changed; update the explicit boundary contract');
+}
 // Existing IFC persistence adapters are outside the engineering refactor. Keep
 // exact exceptions visible so this check rejects any additional IO dependency.
 const viewerBridgeImports = new Set([
@@ -33,7 +56,7 @@ const uiPresentationValues = new Map([
 for (const layer of ['engineering','gim','viewer','ui','services','app']) for (const path of files(resolve(root,layer))) {
   const ast = ts.createSourceFile(path, readFileSync(path,'utf8'), ts.ScriptTarget.Latest, true);
   const localPath = relative(root, path).replaceAll('\\', '/');
-  const pureLineProjection = ['services/lineInspectorProjection.ts','services/lineMapGeometry.ts','services/propertyPresentation.ts'].includes(localPath);
+  const pureLineProjection = ['services/lineInspectorProjection.ts','services/lineMapGeometry.ts','services/lineMapHitTesting.ts','services/lineMapStages.ts','services/inspectorMarkup.ts','services/propertyPresentation.ts'].includes(localPath);
   const resolverFactories = new Set(['createEntryResolver']);
   for (const statement of ast.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)
@@ -63,6 +86,10 @@ for (const layer of ['engineering','gim','viewer','ui','services','app']) for (c
       : ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword ? node.arguments[0] : undefined;
     if (specifier && ts.isStringLiteral(specifier)) {
       const name = specifier.text;
+      const resolved = name.startsWith('.') ? resolve(dirname(path), name.replace(/\.js$/, '.ts')) : null;
+      if (path !== measurementFacade && (resolved?.startsWith(`${measurementCoreRoot}${sep}`) || name === '@gim/measurement-core')) {
+        failures.push(`${localPath}: import measurement core through measurement/core.ts`);
+      }
       const target = name.startsWith('.') ? relative(root,resolve(dirname(path),name)).replaceAll('\\','/').split('/')[0] : name;
       if (pureLineProjection && /^(?:app|ui|viewer|@desktop|@tauri-apps|three|web-ifc|maplibre)/.test(target)) {
         failures.push(`${localPath}: pure line projection imports runtime dependency ${name}`);

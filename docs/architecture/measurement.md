@@ -2,6 +2,8 @@
 
 测量协议为 `gim-measurement-v1`。纯 TypeScript 核心位于 `packages/measurement-core`，不依赖 DOM、Tauri、Three 或应用状态。桌面适配器位于 `desktop/src/measurement`；原有 `perfTimings` 继续提供产品阶段与诊断，其任务阶段和原生进程内存检查点接入同一 Collector。
 
+当前工作区采用**源码内联**：桌面端只通过 `desktop/src/measurement/core.ts` 引用测量核心源码。`check:engineering-boundaries` 禁止其他桌面模块深层引用该包，并禁止核心向桌面、DOM、Tauri、Three 或外部包导入。`package.json` 的 `exports`/`dist` 尚不是产品实际消费的安装契约；SDK 阶段会单独验证打包、声明文件和独立安装后再改为包名消费。
+
 ## 身份与时钟
 
 事件保留 run、匿名 sample、源 SHA、构建、工程代次、几何批次、请求、Worker 实例、任务、attempt、父任务及来源匿名 ID。来源路径映射单独保存在私有侧；事件不带工程名、设备名、对象名称或文件路径。没有取得的身份是 `null`，不能推断为已经关联。Worker ID 不随池槽位复用；宿主探针捕获创建时的 Collector，旧 Worker 的迟到事件留在原 run。

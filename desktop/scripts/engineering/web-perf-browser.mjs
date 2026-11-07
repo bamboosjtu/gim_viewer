@@ -1,7 +1,7 @@
 /** Local web performance probe: serve the browser build, open a real .gim via
  * Playwright, and export the same stable benchmark contract as Ctrl+Shift+B.
  * This is a browser/WebView-adjacent measurement, not the Tauri native SLO.
- * Usage: node scripts/engineering/web-perf-browser.mjs ../demo/substation04.gim
+ * Usage: node scripts/engineering/web-perf-browser.mjs ../demo/substations/substation04.gim
  */
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {resolve, dirname, isAbsolute} from 'node:path';
@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
-const sample=resolve(process.argv[2]??'../demo/substation04.gim');
+const sample=resolve(process.argv[2]??'../demo/substations/substation04.gim');
 const base=process.env.GIM_WEB_BASE??'http://127.0.0.1:14358';
 const out=resolve(root,'../output/engineering-web-perf');
 const edge=process.env.EDGE_PATH??'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';

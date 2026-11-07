@@ -40,7 +40,7 @@ export function defaultSources(root) {
   return [
     {sampleTier:'L0',group:'common-design',paths:walk(join(root,'demo','变电站通用设计模型')).filter(p=>/三维设计\.gim$/i.test(p)),expected:48},
     {sampleTier:'L0',group:'common-model',paths:walk(join(root,'demo','通用模型')),expected:917},
-    {sampleTier:'L1',group:'development-regression',paths:[...Array.from({length:4},(_,i)=>`substation0${i+1}.gim`),...Array.from({length:6},(_,i)=>`line0${i+1}.gim`)].map(name=>join(root,'demo',name)).filter(existsSync),expected:10},
+    {sampleTier:'L1',group:'development-regression',paths:[...Array.from({length:4},(_,i)=>join(root,'demo','substations',`substation0${i+1}.gim`)),...Array.from({length:6},(_,i)=>join(root,'demo','lines',`line0${i+1}.gim`))].filter(existsSync),expected:10},
     {sampleTier:'L2',group:'complex-engineering',paths:walk(join(root,'demo','真实工程')),expected:19},
     {sampleTier:'L2',group:'complex-equipment',paths:walk(join(root,'demo','真实设备模型')),expected:7},
   ];

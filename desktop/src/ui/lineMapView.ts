@@ -1,4 +1,9 @@
-import { prepareLineMapGeometry, niceStep, niceRound, clamp, formatLat, formatLng, type RuntimeGeoPoint, type RuntimeWire } from '../services/lineMapGeometry.js';
+import { paintEmptyHint, paintBorder, paintGrid, paintLegend, paintScaleBar, COLOR_BG, COLOR_TOWER_STRAIGHT, COLOR_TOWER_STRAIGHT_FILL, COLOR_TOWER_TENSION, COLOR_TOWER_TENSION_FILL, COLOR_CROSS, COLOR_LABEL, WIRE_COLORS, WIRE_COLOR_UNKNOWN } from './lineMapBackground.js';
+import { nearestTower, nearestWire } from '../services/lineMapHitTesting.js';
+import { mountLineMapControls, LAYER_ITEMS, type LayerState } from './lineMapControls.js';
+import { wireLayerKey, wireScreenPoints, isTensionTower, towerLabel } from '../services/lineMapGeometry.js';
+import { lineMapStageBatchSize, runLineMapStageSlice, type LineMapStage } from '../services/lineMapStages.js';
+import { prepareLineMapGeometry, clamp, type RuntimeGeoPoint, type RuntimeWire } from '../services/lineMapGeometry.js';
 /**
  * M3-5：线路工程地图渲染层（纯 UI/DOM，Canvas 2D）。
  *
@@ -18,10 +23,8 @@ import { prepareLineMapGeometry, niceStep, niceRound, clamp, formatLat, formatLn
  * - 不创建 ViewerRuntime
  * - 不依赖 IFC / web-ifc / Fragments
  *
- * 等距矩形投影（小范围近似）：
- *   worldX(lng) = (lng - centerLng) * cos(centerLatRad)
- *   worldY(lat) = lat - centerLat
- *   再线性 fit 到 canvas 像素（bbox 居中、四周留边距，Canvas Y 轴向下需反转纬度）。
+ * Canvas-only 使用 Web Mercator；MapLibre overlay 使用当前相机投影。
+ * 绘制和命中共用导线屏幕路径，分帧任务与地图实例一同释放。
  *
  * BLHA 已在 M3-4 解析为 lat/lng，此处不再重新解析 BLHA。
  */
@@ -87,35 +90,9 @@ export interface RenderLineMapOptions {
   perfSession?: PerfSession;
 }
 
-/** 图层开关状态（仅内存，不入库） */
-interface LayerState {
-  conductor: boolean;
-  groundwire: boolean;
-  opgw: boolean;
-  unknownWire: boolean;
-  tower: boolean;
-  cross: boolean;
-  label: boolean;
-}
-
-/** 图层配置（供 UI + legend 共用） */
-const LAYER_ITEMS: { key: keyof LayerState; label: string; color: string }[] = [
-  { key: 'conductor', label: '导线 CONDUCTOR', color: '#3b82f6' },
-  { key: 'groundwire', label: '地线 GROUNDWIRE', color: '#6b7280' },
-  { key: 'opgw', label: 'OPGW', color: '#10b981' },
-  { key: 'unknownWire', label: '未知导线', color: '#9ca3af' },
-  { key: 'tower', label: '塔位', color: '#3b82f6' },
-  { key: 'cross', label: '跨越点', color: '#f59e0b' },
-  { key: 'label', label: '标签', color: '#334155' },
-];
-
 /** 导线类型颜色 */
-const WIRE_COLORS: Record<string, string> = {
-  CONDUCTOR: '#3b82f6',
-  GROUNDWIRE: '#6b7280',
-  OPGW: '#10b981',
-};
-const WIRE_COLOR_UNKNOWN = '#9ca3af';
+
+
 const WIRE_WIDTH = 1.5;
 /** M4-B2：导线样式增强常量 */
 const WIRE_WIDTH_SPLIT = 2.5;          // SPLIT > 1 加粗
@@ -125,35 +102,35 @@ const WIRE_HIT_DIST = 6;               // 导线命中距离阈值（像素）
 const WIRE_HIT_DIST_HOVER = 8;         // hover 容差略放宽
 
 /** 背景 / 网格 / 边框颜色 */
-const COLOR_BG = '#f8fafc';
-const COLOR_GRID = '#e2e8f0';
-const COLOR_GRID_MAJOR = '#cbd5e1';
-const COLOR_BORDER = '#94a3b8';
+
+
+
+
 
 /** 塔位颜色 */
-const COLOR_TOWER_STRAIGHT = '#1d4ed8';
-const COLOR_TOWER_STRAIGHT_FILL = '#3b82f6';
-const COLOR_TOWER_TENSION = '#dc2626';
-const COLOR_TOWER_TENSION_FILL = '#ef4444';
+
+
+
+
 const COLOR_TOWER_SELECTED = '#f59e0b';
 const TOWER_RADIUS = 5;
 const HIT_RADIUS = 11;
 
 /** 跨越点颜色 */
-const COLOR_CROSS = '#f59e0b';
+
 
 /** 标签颜色 */
-const COLOR_LABEL = '#334155';
+
 const LABEL_FONT = '11px sans-serif';
 const LABEL_SHOW_ZOOM = 1.8; // 缩放达到此倍数以上才显示标签，避免 327 标签拥挤
 
 /** 图例 */
-const LEGEND_PAD = 10;
-const LEGEND_LINE_H = 18;
-const LEGEND_BOTTOM_MARGIN = 16; // 防止图例底部被裁切
+
+
+ // 防止图例底部被裁切
 
 /** 比例尺 */
-const COLOR_SCALE = '#475569';
+
 
 /** fit 边距 */
 const FIT_PADDING = 48;
@@ -172,11 +149,6 @@ const FOCUS_TOWER_ZOOM = 12;
  * 在低端 WebView 中连续占满事件循环。首帧只画背景/网格/图例，业务
  * 对象随后按塔位、导线、跨越物、标签分帧补齐。
  */
-const PROGRESSIVE_FRAME_BUDGET_MS = 8;
-const PROGRESSIVE_TOWER_BATCH = 256;
-const PROGRESSIVE_WIRE_BATCH = 64;
-const PROGRESSIVE_CROSS_BATCH = 128;
-const PROGRESSIVE_LABEL_BATCH = 256;
 
 type ScheduledFrame = {
   id: number;
@@ -254,100 +226,7 @@ export function renderLineMap(
   const enableCatenary = options?.enableCatenary ?? ENABLE_CATENARY;
   const perfSession = options?.perfSession ?? perfCurrentSession();
 
-  // ---- DOM：canvas + tooltip + fit 按钮 + 图层面板 ----
-  const canvas = document.createElement('canvas');
-  canvas.style.display = 'block';
-  canvas.style.width = '100%';
-  canvas.style.height = '100%';
-  canvas.style.position = 'absolute';
-  canvas.style.inset = '0';
-  canvas.style.zIndex = '2';
-  canvas.style.cursor = 'grab';
-  // M4-A2：overlay 模式下 Canvas 不接收鼠标事件（MapLibre 管理 pan/zoom）
-  if (overlayMode) {
-    canvas.style.pointerEvents = 'none';
-  }
-  container.appendChild(canvas);
-  const ctx = canvas.getContext('2d')!;
-
-  // tooltip
-  const tooltip = document.createElement('div');
-  tooltip.style.position = 'absolute';
-  tooltip.style.pointerEvents = 'none';
-  tooltip.style.zIndex = '20';
-  tooltip.style.maxWidth = '280px';
-  tooltip.style.padding = '8px 10px';
-  tooltip.style.borderRadius = '6px';
-  tooltip.style.background = 'rgba(15,23,42,0.92)';
-  tooltip.style.color = '#e2e8f0';
-  tooltip.style.fontSize = '12px';
-  tooltip.style.lineHeight = '1.5';
-  tooltip.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-  tooltip.style.display = 'none';
-  tooltip.style.whiteSpace = 'nowrap';
-  container.appendChild(tooltip);
-
-  // fit 按钮（左上角，避免与右上角 loading 重叠）
-  const fitBtn = document.createElement('button');
-  fitBtn.textContent = '全景';
-  fitBtn.title = '回到全景（双击画布亦可）';
-  fitBtn.style.position = 'absolute';
-  fitBtn.style.left = '10px';
-  fitBtn.style.top = '10px';
-  fitBtn.style.zIndex = '20';
-  fitBtn.style.padding = '4px 10px';
-  fitBtn.style.borderRadius = '4px';
-  fitBtn.style.border = '1px solid #cbd5e1';
-  fitBtn.style.background = 'rgba(255,255,255,0.92)';
-  fitBtn.style.cursor = 'pointer';
-  fitBtn.style.fontSize = '12px';
-  container.appendChild(fitBtn);
-
-  // 图层面板（左上角，fit 按钮下方）
-  const layerPanel = document.createElement('div');
-  layerPanel.style.position = 'absolute';
-  layerPanel.style.left = '10px';
-  layerPanel.style.top = '42px';
-  layerPanel.style.zIndex = '20';
-  layerPanel.style.padding = '8px 10px';
-  layerPanel.style.borderRadius = '6px';
-  layerPanel.style.background = 'rgba(255,255,255,0.92)';
-  layerPanel.style.border = '1px solid #cbd5e1';
-  layerPanel.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
-  layerPanel.style.fontSize = '12px';
-  layerPanel.style.maxHeight = 'calc(100% - 60px)';
-  layerPanel.style.overflowY = 'auto';
-  container.appendChild(layerPanel);
-
-  const layerTitle = document.createElement('div');
-  layerTitle.textContent = '图层';
-  layerTitle.style.fontWeight = '600';
-  layerTitle.style.marginBottom = '4px';
-  layerTitle.style.color = '#334155';
-  layerPanel.appendChild(layerTitle);
-
-  const layerCheckboxes: HTMLInputElement[] = [];
-  for (const item of LAYER_ITEMS) {
-    const label = document.createElement('label');
-    label.style.display = 'flex';
-    label.style.alignItems = 'center';
-    label.style.gap = '4px';
-    label.style.cursor = 'pointer';
-    label.style.padding = '1px 0';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = true;
-    cb.style.accentColor = item.color;
-    cb.style.margin = '0';
-    cb.style.cursor = 'pointer';
-    const span = document.createElement('span');
-    span.textContent = item.label;
-    span.style.color = '#334155';
-    label.appendChild(cb);
-    label.appendChild(span);
-    layerPanel.appendChild(label);
-    layerCheckboxes.push(cb);
-  }
+  const { canvas, ctx, tooltip, fitBtn, layerPanel, layerCheckboxes } = mountLineMapControls(container, overlayMode);
 
   // ---- 投影参数（fit 基准） ----
   // Canvas-only 兜底路径采用 Web Mercator（与 MapLibre/OSM 一致），
@@ -646,7 +525,7 @@ export function renderLineMap(
   function scheduleProgressive(
     generation: number,
     cameraSnapshot: number,
-    stage: 'towers' | 'wires' | 'crosses' | 'labels',
+    stage: LineMapStage,
     offset: number,
     instrument: boolean,
   ): void {
@@ -668,12 +547,11 @@ export function renderLineMap(
   function runProgressiveStage(
     generation: number,
     cameraSnapshot: number,
-    stage: 'towers' | 'wires' | 'crosses' | 'labels',
+    stage: LineMapStage,
     offset: number,
     instrument: boolean,
   ): void {
     if (destroyed || generation !== renderGeneration || cameraSnapshot !== cameraRevision) return;
-    const started = performance.now();
     const sourceLength = stage === 'towers'
       ? runtimeTowers.length
       : stage === 'wires'
@@ -681,33 +559,20 @@ export function renderLineMap(
         : stage === 'crosses'
           ? runtimeCrosses.length
           : (layerState.label && zoom >= LABEL_SHOW_ZOOM ? labelQueue.length : 0);
-    const batchSize = stage === 'towers'
-      ? PROGRESSIVE_TOWER_BATCH
-      : stage === 'wires'
-        ? PROGRESSIVE_WIRE_BATCH
-        : stage === 'crosses'
-        ? PROGRESSIVE_CROSS_BATCH
-        : PROGRESSIVE_LABEL_BATCH;
+    const batchSize = lineMapStageBatchSize(stage);
     // 同时设置数量上限和时间预算，避免一条复杂悬链线或低端 WebView
     // 中的 Canvas 实现把一帧再次拉成长任务。
-    const hardEnd = Math.min(sourceLength, offset + batchSize);
-    const deadline = started + PROGRESSIVE_FRAME_BUDGET_MS;
-    let next = offset;
-    while (next < hardEnd) {
+    const next = runLineMapStageSlice(offset, sourceLength, batchSize, (index) => {
       if (stage === 'towers') {
-        drawTowerRange(next, next + 1);
+        drawTowerRange(index, index + 1);
       } else if (stage === 'wires') {
-        drawWireRange(next, next + 1);
+        drawWireRange(index, index + 1);
       } else if (stage === 'crosses') {
-        drawCrossRange(next, next + 1);
+        drawCrossRange(index, index + 1);
       } else {
-        drawLabelRange(next, next + 1);
+        drawLabelRange(index, index + 1);
       }
-      next += 1;
-      // 至少完成少量工作后再检查时钟，减少 performance.now() 调用；
-      // 下一帧继续，不回滚已绘制像素。
-      if (next - offset >= 8 && performance.now() >= deadline) break;
-    }
+    });
 
     if (next < sourceLength) {
       scheduleProgressive(generation, cameraSnapshot, stage, next, instrument);
@@ -823,69 +688,11 @@ export function renderLineMap(
     });
   }
 
-  function drawEmptyHint(text: string): void {
-    ctx.fillStyle = '#64748b';
-    ctx.font = '15px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(text, cssW / 2, cssH / 2);
-  }
+  function drawEmptyHint(text: string): void { paintEmptyHint(ctx, cssW, cssH, text); }
 
-  function drawBorder(): void {
-    ctx.strokeStyle = COLOR_BORDER;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0.5, 0.5, cssW - 1, cssH - 1);
-  }
+  function drawBorder(): void { paintBorder(ctx, cssW, cssH); }
 
-  function drawGrid(): void {
-    const latStep = niceStep(bbox.maxLat - bbox.minLat, 8);
-    const lngStep = niceStep(bbox.maxLng - bbox.minLng, 8);
-    ctx.lineWidth = 1;
-
-    // 竖线（经度）
-    const startLng = Math.ceil(bbox.minLng / lngStep) * lngStep;
-    for (let lng = startLng; lng <= bbox.maxLng + 1e-9; lng += lngStep) {
-      const top = geoToScreen(bbox.maxLat, lng);
-      const bottom = geoToScreen(bbox.minLat, lng);
-      ctx.strokeStyle = COLOR_GRID;
-      ctx.beginPath();
-      ctx.moveTo(top.x, 0);
-      ctx.lineTo(bottom.x, cssH);
-      ctx.stroke();
-      // 经度标签
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '10px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(formatLng(lng), Math.min(Math.max(top.x + 2, 2), cssW - 50), 2);
-    }
-
-    // 横线（纬度）
-    const startLat = Math.ceil(bbox.minLat / latStep) * latStep;
-    for (let lat = startLat; lat <= bbox.maxLat + 1e-9; lat += latStep) {
-      const left = geoToScreen(lat, bbox.minLng);
-      const right = geoToScreen(lat, bbox.maxLng);
-      ctx.strokeStyle = COLOR_GRID;
-      ctx.beginPath();
-      ctx.moveTo(0, left.y);
-      ctx.lineTo(cssW, right.y);
-      ctx.stroke();
-      // 纬度标签
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '10px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(formatLat(lat), 2, Math.min(Math.max(left.y + 2, 2), cssH - 14));
-    }
-  }
-
-  /** 根据 wireType 判断属于哪个图层 */
-  function wireLayerKey(wireType: string): keyof LayerState {
-    if (wireType === 'CONDUCTOR') return 'conductor';
-    if (wireType === 'GROUNDWIRE') return 'groundwire';
-    if (wireType === 'OPGW') return 'opgw';
-    return 'unknownWire';
-  }
+  function drawGrid(): void { paintGrid(ctx, bbox, cssW, cssH, geoToScreen); }
 
   function drawWireRange(start: number, end: number, simplified = false): void {
     ctx.lineCap = 'round';
@@ -1013,81 +820,6 @@ export function renderLineMap(
   }
 
   /**
-   * 悬链线渲染判定（绘制与 hit-test 共享，保证两者形态一致）。
-   *
-   * 条件：enableCatenary 且非跳线且 inter-point 真实档距且档距 > 1m
-   */
-  function shouldUseCatenary(runtimeWire: RuntimeWire): boolean {
-    return runtimeWire.useCatenary;
-  }
-
-  /**
-   * 计算弧垂像素值。返回 null 表示弦长过短无法计算。
-   *
-   * 弧垂（米）：KVALUE>0 时 KVALUE*L²，否则 3% 经验弧垂；上限 10%*L，下限 1m。
-   */
-  function computeSagPx(
-    s: { x: number; y: number },
-    e: { x: number; y: number },
-    w: WireSegment,
-  ): number | null {
-    const L = w.spanMeters!;
-    let sagMeters: number;
-    const kValueNum = w.kValue ? parseFloat(w.kValue) : NaN;
-    if (Number.isFinite(kValueNum) && kValueNum > 0) {
-      sagMeters = kValueNum * L * L;
-    } else {
-      sagMeters = L * 0.03; // 3% 经验弧垂
-    }
-    if (sagMeters > L * 0.1) sagMeters = L * 0.1; // 防 KVALUE 异常
-    if (sagMeters < 1) sagMeters = 1; // 至少 1 米下垂，保证视觉可辨
-
-    const dx = e.x - s.x;
-    const dy = e.y - s.y;
-    const chordPx = Math.sqrt(dx * dx + dy * dy);
-    if (chordPx < 2) return null;
-    return sagMeters * (chordPx / L);
-  }
-
-  /**
-   * 计算导线屏幕路径采样点（绘制与 hit-test 共享）。
-   *
-   * 直线 → [s, e]；悬链线 → 沿弦线按屏幕长度 4–24 段抛物线
-   * f(t)=4t(1-t) 下垂采样。
-   * 与 drawWirePath 的可见形态完全一致，hit-test 不再有直线/曲线偏差。
-   */
-  function wireScreenPoints(
-    s: { x: number; y: number },
-    e: { x: number; y: number },
-    runtimeWire: RuntimeWire,
-    simplified = false,
-  ): Array<{ x: number; y: number }> {
-    if (simplified) return [s, e];
-    const w = runtimeWire.wire;
-    if (!shouldUseCatenary(runtimeWire) || w.spanMeters == null || w.spanMeters <= 0) {
-      return [s, e];
-    }
-    const sagPx = computeSagPx(s, e, w);
-    if (sagPx == null) return [s, e];
-    const dx = e.x - s.x;
-    const dy = e.y - s.y;
-    const chordPx = Math.sqrt(dx * dx + dy * dy);
-    // 近距离/低缩放时少采样，放大后最多保持原来的 24 段；
-    // 视觉形态仍由同一采样结果供绘制与 hit-test 共用。
-    const N = Math.min(24, Math.max(4, Math.ceil(chordPx / 20)));
-    const pts: Array<{ x: number; y: number }> = [];
-    for (let i = 0; i <= N; i++) {
-      const t = i / N;
-      pts.push({
-        x: s.x + dx * t,
-        // Canvas Y 轴向下，下垂 = +y
-        y: s.y + dy * t + sagPx * 4 * t * (1 - t),
-      });
-    }
-    return pts;
-  }
-
-  /**
    * M4-B3C：绘制导线路径（直线或抛物线悬链线）。
    *
    * 形态由 wireScreenPoints 统一给出（与 hit-test 一致）；
@@ -1134,25 +866,6 @@ export function renderLineMap(
     }
   }
 
-  function isTensionTower(t: TowerMarker): boolean {
-    const tt = (t.towerType || '').toLowerCase();
-    if (tt.includes('耐张') || tt.includes('转角') || tt.includes('tension') || tt.includes('angle')) {
-      return true;
-    }
-    if (t.turnAngle) {
-      const a = parseFloat(t.turnAngle);
-      if (isFinite(a) && Math.abs(a) > 0.01) return true;
-    }
-    return false;
-  }
-
-  function towerLabel(t: TowerMarker): string {
-    if (t.towerNumber) return t.towerNumber;
-    if (t.nodeRef && t.nodeRef.name) return t.nodeRef.name;
-    const fn = t.cbmPath.split('/').pop() || t.cbmPath;
-    return fn.replace(/\.(cbm|dev|fam)$/i, '');
-  }
-
   function drawLabelRange(start: number, end: number): void {
     ctx.font = LABEL_FONT;
     ctx.textAlign = 'left';
@@ -1171,175 +884,16 @@ export function renderLineMap(
     }
   }
 
-  function drawLegend(): void {
-    // 导线图例项（与图层状态一致：关闭时半透明）
-    const wireItems: [string, string, boolean][] = [
-      ['导线 CONDUCTOR', WIRE_COLORS['CONDUCTOR'] || WIRE_COLOR_UNKNOWN, layerState.conductor],
-      ['地线 GROUNDWIRE', WIRE_COLORS['GROUNDWIRE'] || WIRE_COLOR_UNKNOWN, layerState.groundwire],
-      ['OPGW', WIRE_COLORS['OPGW'] || WIRE_COLOR_UNKNOWN, layerState.opgw],
-      ['未知导线', WIRE_COLOR_UNKNOWN, layerState.unknownWire],
-    ];
-    const totalLines = wireItems.length + 3; // +直线塔 +耐张塔 +跨越点
-    const x0 = LEGEND_PAD + 4;
-    let y0 = cssH - LEGEND_PAD - LEGEND_BOTTOM_MARGIN - totalLines * LEGEND_LINE_H;
+  function drawLegend(): void { paintLegend(ctx, layerState, cssH); }
 
-    // 背板（增加底部 padding 防裁切）
-    const boxH = totalLines * LEGEND_LINE_H + LEGEND_PAD + LEGEND_BOTTOM_MARGIN;
-    const boxW = 158;
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.strokeStyle = COLOR_GRID_MAJOR;
-    ctx.lineWidth = 1;
-    ctx.fillRect(LEGEND_PAD, y0 - 4, boxW, boxH);
-    ctx.strokeRect(LEGEND_PAD, y0 - 4, boxW, boxH);
-
-    ctx.font = '11px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    // 导线图例
-    for (const [label, color, visible] of wireItems) {
-      ctx.globalAlpha = visible ? 1 : 0.3;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.moveTo(x0, y0 + 6);
-      ctx.lineTo(x0 + 22, y0 + 6);
-      ctx.stroke();
-      ctx.fillStyle = COLOR_LABEL;
-      ctx.fillText(label, x0 + 28, y0 + 6);
-      y0 += LEGEND_LINE_H;
-    }
-    ctx.globalAlpha = 1;
-    // 塔位图例（圆形/菱形）
-    ctx.globalAlpha = layerState.tower ? 1 : 0.3;
-    ctx.fillStyle = COLOR_TOWER_STRAIGHT_FILL;
-    ctx.strokeStyle = COLOR_TOWER_STRAIGHT;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(x0 + 11, y0 + 6, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = COLOR_LABEL;
-    ctx.fillText('直线塔（圆）', x0 + 28, y0 + 6);
-    y0 += LEGEND_LINE_H;
-    ctx.fillStyle = COLOR_TOWER_TENSION_FILL;
-    ctx.strokeStyle = COLOR_TOWER_TENSION;
-    ctx.beginPath();
-    ctx.moveTo(x0 + 11, y0 + 2);
-    ctx.lineTo(x0 + 15, y0 + 6);
-    ctx.lineTo(x0 + 11, y0 + 10);
-    ctx.lineTo(x0 + 7, y0 + 6);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = COLOR_LABEL;
-    ctx.fillText('耐张塔（菱）', x0 + 28, y0 + 6);
-    y0 += LEGEND_LINE_H;
-    ctx.globalAlpha = 1;
-    // 跨越点图例
-    ctx.globalAlpha = layerState.cross ? 1 : 0.3;
-    ctx.fillStyle = COLOR_CROSS;
-    ctx.beginPath();
-    ctx.moveTo(x0 + 11, y0 + 2);
-    ctx.lineTo(x0 + 7, y0 + 10);
-    ctx.lineTo(x0 + 15, y0 + 10);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = COLOR_LABEL;
-    ctx.fillText('跨越点', x0 + 28, y0 + 6);
-    ctx.globalAlpha = 1;
-  }
-
-  function drawScaleBar(): void {
-    // Web Mercator：地面米/像素 = R·cos(φ) / pxPerMercYUnit（随中心纬度变化）
-    // 替代原等距投影的 111km/° 常数，中高纬度比例尺不再失真
-    const pxPerMerc = baseScale * zoom;
-    const metersPerPx = ((6371000 * Math.cos(centerLatRad)) / pxPerMerc);
-    const kmPerPx = metersPerPx / 1000;
-    // 目标 80px 的 km 数，取整
-    const targetKm = kmPerPx * 80;
-    const niceKm = niceRound(targetKm);
-    const barPx = (niceKm * 1000) / metersPerPx;
-    if (!isFinite(barPx) || barPx < 20) return;
-
-    const x = cssW - barPx - LEGEND_PAD - 8;
-    const y = cssH - LEGEND_PAD - 8;
-    ctx.strokeStyle = COLOR_SCALE;
-    ctx.fillStyle = COLOR_SCALE;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + barPx, y);
-    ctx.moveTo(x, y - 3);
-    ctx.lineTo(x, y + 3);
-    ctx.moveTo(x + barPx, y - 3);
-    ctx.lineTo(x + barPx, y + 3);
-    ctx.stroke();
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(niceKm >= 1 ? `${niceKm} km` : `${Math.round(niceKm * 1000)} m`, x + barPx / 2, y - 4);
-  }
+  function drawScaleBar(): void { paintScaleBar(ctx, cssW, cssH, baseScale, zoom, centerLatRad); }
 
   // ---- 命中测试 ----
-  function hitTestTower(sx: number, sy: number): TowerMarker | null {
+    function hitTestTower(sx: number, sy: number): TowerMarker | null {
     if (!layerState.tower) return null;
-    let best: TowerMarker | null = null;
-    let bestDist = HIT_RADIUS;
-    if (overlayMode) {
-      // 不依赖上一 progressive pass 的 towerScreen 快照。MapLibre 相机
-      // 事件到达后，交互 RAF 可能尚未执行；此处直接按当前 revision 投影，
-      // 使 hover/click 在那一个 RAF 窗口内也不会命中旧屏幕坐标。
-      for (const runtimeTower of runtimeTowers) {
-        const p = geoToScreenPoint(runtimeTower.point);
-        const dx = p.x - sx;
-        const dy = p.y - sy;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d <= bestDist) {
-          bestDist = d;
-          best = runtimeTower.tower;
-        }
-      }
-    } else {
-      // Canvas-only 保持原有行为：仅对已经绘制并缓存的塔位做命中检测。
-      for (const ts of towerScreen) {
-        const dx = ts.x - sx;
-        const dy = ts.y - sy;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d <= bestDist) {
-          bestDist = d;
-          best = ts.tower;
-        }
-      }
-    }
-    return best;
-  }
-
-  /**
-   * M4-B2：点到线段距离（像素）。
-   * 用于导线 hit-test，鼠标点到线段距离小于阈值则命中。
-   */
-  function pointToSegmentDist(
-    px: number, py: number,
-    x1: number, y1: number,
-    x2: number, y2: number,
-  ): number {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const len2 = dx * dx + dy * dy;
-    if (len2 === 0) {
-      // 退化情况：线段长度为 0，按点到点处理
-      const dpx = px - x1;
-      const dpy = py - y1;
-      return Math.sqrt(dpx * dpx + dpy * dpy);
-    }
-    // 投影参数 t，限制在 [0, 1] 内（线段，非直线）
-    let t = ((px - x1) * dx + (py - y1) * dy) / len2;
-    t = Math.max(0, Math.min(1, t));
-    const projX = x1 + t * dx;
-    const projY = y1 + t * dy;
-    const dpx = px - projX;
-    const dpy = py - projY;
-    return Math.sqrt(dpx * dpx + dpy * dpy);
+    return overlayMode
+      ? nearestTower(runtimeTowers, row => geoToScreenPoint(row.point), sx, sy, HIT_RADIUS)
+      : nearestTower(towerScreen, row => row, sx, sy, HIT_RADIUS);
   }
 
   /**
@@ -1354,32 +908,8 @@ export function renderLineMap(
    *
    * @param threshold 像素阈值，点击用 WIRE_HIT_DIST，hover 用 WIRE_HIT_DIST_HOVER
    */
-  function hitTestWire(sx: number, sy: number, threshold: number): WireSegment | null {
-    let best: WireSegment | null = null;
-    let bestDist = threshold;
-    for (const runtimeWire of runtimeWires) {
-      const w = runtimeWire.wire;
-      if (!layerState[wireLayerKey(w.wireType)]) continue;
-      const s = geoToScreenPoint(runtimeWire.start);
-      const e = geoToScreenPoint(runtimeWire.end);
-      // 视口剔除（与 drawWires 一致）
-      if ((s.x < 0 && e.x < 0) || (s.x > cssW && e.x > cssW)) continue;
-      if ((s.y < 0 && e.y < 0) || (s.y > cssH && e.y > cssH)) continue;
-      // 沿实际可见路径（直线或悬链线采样折线）逐段求最小距离
-      const pts = wireScreenPoints(s, e, runtimeWire);
-      let d = Infinity;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const segDist = pointToSegmentDist(
-          sx, sy, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y,
-        );
-        if (segDist < d) d = segDist;
-      }
-      if (d <= bestDist) {
-        bestDist = d;
-        best = w;
-      }
-    }
-    return best;
+    function hitTestWire(sx: number, sy: number, threshold: number): WireSegment | null {
+    return nearestWire(runtimeWires, layer => layerState[layer], geoToScreenPoint, cssW, cssH, sx, sy, threshold);
   }
 
   // ---- tooltip ----

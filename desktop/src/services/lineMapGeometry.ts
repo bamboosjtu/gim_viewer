@@ -180,3 +180,142 @@ export function prepareLineMapGeometry(mapData: LineMapData, enableCatenary: boo
 
   return { bbox, valid, mercY, centerLng, centerLatRad, invMercY, centerWYAbs, worldW, worldH, centerWX, centerWY, getRuntimePoint, runtimeTowers, runtimeWires, runtimeCrosses };
 }
+
+export type WireLayerKey = 'conductor' | 'groundwire' | 'opgw' | 'unknownWire';
+
+
+  /** 根据 wireType 判断属于哪个图层 */
+  export function wireLayerKey(wireType: string): WireLayerKey {
+    if (wireType === 'CONDUCTOR') return 'conductor';
+    if (wireType === 'GROUNDWIRE') return 'groundwire';
+    if (wireType === 'OPGW') return 'opgw';
+    return 'unknownWire';
+  }
+
+
+  /**
+   * 悬链线渲染判定（绘制与 hit-test 共享，保证两者形态一致）。
+   *
+   * 条件：enableCatenary 且非跳线且 inter-point 真实档距且档距 > 1m
+   */
+  function shouldUseCatenary(runtimeWire: RuntimeWire): boolean {
+    return runtimeWire.useCatenary;
+  }
+
+
+  /**
+   * 计算弧垂像素值。返回 null 表示弦长过短无法计算。
+   *
+   * 弧垂（米）：KVALUE>0 时 KVALUE*L²，否则 3% 经验弧垂；上限 10%*L，下限 1m。
+   */
+  function computeSagPx(
+    s: { x: number; y: number },
+    e: { x: number; y: number },
+    w: WireSegment,
+  ): number | null {
+    const L = w.spanMeters!;
+    let sagMeters: number;
+    const kValueNum = w.kValue ? parseFloat(w.kValue) : NaN;
+    if (Number.isFinite(kValueNum) && kValueNum > 0) {
+      sagMeters = kValueNum * L * L;
+    } else {
+      sagMeters = L * 0.03; // 3% 经验弧垂
+    }
+    if (sagMeters > L * 0.1) sagMeters = L * 0.1; // 防 KVALUE 异常
+    if (sagMeters < 1) sagMeters = 1; // 至少 1 米下垂，保证视觉可辨
+
+    const dx = e.x - s.x;
+    const dy = e.y - s.y;
+    const chordPx = Math.sqrt(dx * dx + dy * dy);
+    if (chordPx < 2) return null;
+    return sagMeters * (chordPx / L);
+  }
+
+
+  /**
+   * 计算导线屏幕路径采样点（绘制与 hit-test 共享）。
+   *
+   * 直线 → [s, e]；悬链线 → 沿弦线按屏幕长度 4–24 段抛物线
+   * f(t)=4t(1-t) 下垂采样。
+   * 与 drawWirePath 的可见形态完全一致，hit-test 不再有直线/曲线偏差。
+   */
+  export function wireScreenPoints(
+    s: { x: number; y: number },
+    e: { x: number; y: number },
+    runtimeWire: RuntimeWire,
+    simplified = false,
+  ): Array<{ x: number; y: number }> {
+    if (simplified) return [s, e];
+    const w = runtimeWire.wire;
+    if (!shouldUseCatenary(runtimeWire) || w.spanMeters == null || w.spanMeters <= 0) {
+      return [s, e];
+    }
+    const sagPx = computeSagPx(s, e, w);
+    if (sagPx == null) return [s, e];
+    const dx = e.x - s.x;
+    const dy = e.y - s.y;
+    const chordPx = Math.sqrt(dx * dx + dy * dy);
+    // 近距离/低缩放时少采样，放大后最多保持原来的 24 段；
+    // 视觉形态仍由同一采样结果供绘制与 hit-test 共用。
+    const N = Math.min(24, Math.max(4, Math.ceil(chordPx / 20)));
+    const pts: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      pts.push({
+        x: s.x + dx * t,
+        // Canvas Y 轴向下，下垂 = +y
+        y: s.y + dy * t + sagPx * 4 * t * (1 - t),
+      });
+    }
+    return pts;
+  }
+
+
+  export function isTensionTower(t: TowerMarker): boolean {
+    const tt = (t.towerType || '').toLowerCase();
+    if (tt.includes('耐张') || tt.includes('转角') || tt.includes('tension') || tt.includes('angle')) {
+      return true;
+    }
+    if (t.turnAngle) {
+      const a = parseFloat(t.turnAngle);
+      if (isFinite(a) && Math.abs(a) > 0.01) return true;
+    }
+    return false;
+  }
+
+
+  export function towerLabel(t: TowerMarker): string {
+    if (t.towerNumber) return t.towerNumber;
+    if (t.nodeRef && t.nodeRef.name) return t.nodeRef.name;
+    const fn = t.cbmPath.split('/').pop() || t.cbmPath;
+    return fn.replace(/\.(cbm|dev|fam)$/i, '');
+  }
+
+
+  /**
+   * M4-B2：点到线段距离（像素）。
+   * 用于导线 hit-test，鼠标点到线段距离小于阈值则命中。
+   */
+  export function pointToSegmentDist(
+    px: number, py: number,
+    x1: number, y1: number,
+    x2: number, y2: number,
+  ): number {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) {
+      // 退化情况：线段长度为 0，按点到点处理
+      const dpx = px - x1;
+      const dpy = py - y1;
+      return Math.sqrt(dpx * dpx + dpy * dpy);
+    }
+    // 投影参数 t，限制在 [0, 1] 内（线段，非直线）
+    let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const projX = x1 + t * dx;
+    const projY = y1 + t * dy;
+    const dpx = px - projX;
+    const dpy = py - projY;
+    return Math.sqrt(dpx * dpx + dpy * dpy);
+  }
