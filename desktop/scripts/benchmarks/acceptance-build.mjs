@@ -6,6 +6,7 @@ import {createReadStream, cpSync, existsSync, mkdirSync, readFileSync, readdirSy
 import {spawnSync} from 'node:child_process';
 import {dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {prepareFixedRuntimeSecurity} from '../fixed-runtime-security.mjs';
 
 export const ACCEPTANCE_IDENTIFIER = 'com.bamboosjtu.gimviewer.acceptance';
 
@@ -74,15 +75,16 @@ export async function directoryFingerprint(root) {
 }
 
 
-export async function buildAcceptance(root) {
+export async function buildAcceptance(root, {benchmark = false} = {}) {
   if (process.platform !== 'win32') throw Error('Native acceptance build requires Windows');
   root = resolve(root);
   const desktop = join(root, 'desktop');
   const config = join(desktop, 'src-tauri', 'tauri.acceptance.conf.json');
   if (JSON.parse(readFileSync(config, 'utf8')).identifier !== ACCEPTANCE_IDENTIFIER) throw Error('Invalid acceptance identifier');
-  const temporary = join(root, '.tmp', 'native-acceptance-build'); mkdirSync(temporary, {recursive: true});
-  const dataRoot=join(root,'.tmp','native-acceptance-data',ACCEPTANCE_IDENTIFIER);
+  const temporary = join(root, 'tmp', 'native-acceptance-build'); mkdirSync(temporary, {recursive: true});
+  const dataRoot=join(root,'tmp','native-acceptance-data',ACCEPTANCE_IDENTIFIER);
   const env = {...process.env, TEMP: temporary, TMP: temporary, TMPDIR: temporary, GIM_ACCEPTANCE_DATA_ROOT:dataRoot, VITE_GIM_DIAGNOSTICS:'1'};
+  if(benchmark){env.VITE_GIM_BENCHMARK='1';env.GIM_BENCHMARK_WORKSPACE=root;}
   const head = command('git', ['rev-parse', 'HEAD'], {cwd: root});
   const dirty = Boolean(command('git', ['status', '--porcelain', '--untracked-files=normal'], {cwd: root}));
   env.VITE_GIM_COMMIT = head + (dirty ? '-dirty' : '');
@@ -92,19 +94,24 @@ export async function buildAcceptance(root) {
   }
   const fingerprint = sourceFingerprint(root);
   command(process.execPath, [join(desktop, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'build',
-    '--config', join(desktop, 'src-tauri', 'tauri.portable.conf.json'), '--config', config, '--no-bundle', '--ci'],
+    '--config', join(desktop, 'src-tauri', 'tauri.portable.conf.json'), '--config', config, '--no-bundle', '--ci', ...(benchmark?['--features','benchmark']:[])],
     {cwd: desktop, env, stdio: 'inherit'});
+  if(benchmark)command('cargo',['build','--manifest-path',join(desktop,'src-tauri/Cargo.toml'),'--release','--features','benchmark','--example','measurement_sampler'],{cwd:desktop,env,stdio:'inherit'});
   if (sourceFingerprint(root) !== fingerprint) throw Error('Source changed during acceptance build; no manifest published');
   const tag = new Date().toISOString().replaceAll(':', '-');
-  const output = join(root, 'output', 'acceptance', 'builds', `${tag}-${fingerprint.slice(0,12)}`);
+  const output = join(root, ...(benchmark?['tmp','gim-bench']:['output','acceptance']), 'builds', `${tag}-${fingerprint.slice(0,12)}`);
   mkdirSync(output, {recursive: true});
   const release = join(desktop, 'src-tauri', 'target', 'release');
   cpSync(join(release, 'gim-viewer.exe'), join(output, 'GIM-Reader.exe'));
+  if(benchmark)cpSync(join(release,'examples','measurement_sampler.exe'),join(output,'measurement_sampler.exe'));
   cpSync(join(desktop, 'src-tauri', 'webview2-fixed-runtime'), join(output, 'webview2-fixed-runtime'), {recursive: true});
-  const manifest = {schemaVersion: 1, profile: 'native-release-acceptance', identifier: ACCEPTANCE_IDENTIFIER,
+  const runtimeSecurity=prepareFixedRuntimeSecurity(root,join(output,'webview2-fixed-runtime'));
+  const manifest = {schemaVersion: 1, profile: benchmark?'native-release-benchmark':'native-release-acceptance', identifier: ACCEPTANCE_IDENTIFIER,
     commit: head, dirty, sourceFingerprint: fingerprint, createdAt: new Date().toISOString(),
     executable: 'GIM-Reader.exe', executableSha256: await fileSha256(join(output, 'GIM-Reader.exe')),
     runtime: await directoryFingerprint(join(output, 'webview2-fixed-runtime')),
+    runtimeSecurity,
+    ...(benchmark?{samplerSha256:await fileSha256(join(output,'measurement_sampler.exe'))}:{}),
     expectedDataRoot: dataRoot, nativeCachePathVerified: false,
     expectedLocalDataRoot: dataRoot,
     config: {identifier: ACCEPTANCE_IDENTIFIER, bundle: 'fixedRuntime', mode: 'release'},

@@ -6,6 +6,8 @@ export interface ViewerRuntime {
 }
 
 let runtimePromise: Promise<ViewerRuntime> | null = null;
+/** Observe an existing renderer without creating one. */
+export function peekViewerRuntime():Promise<ViewerRuntime>|null{return runtimePromise;}
 
 /** 检查 Viewer runtime 是否已创建（不触发创建） */
 export function isViewerRuntimeCreated(): boolean {

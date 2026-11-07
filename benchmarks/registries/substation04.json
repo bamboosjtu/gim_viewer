@@ -1,0 +1,10 @@
+{
+  "version": "gim-batch-input-v1",
+  "samples": [
+    {
+      "path": "../../demo/substation04.gim",
+      "sourceSha256": "00b7746d5ea6ab3b92c215c1e42ffc7eec5a9f0517c1c555fa27a596d4d800dc",
+      "sampleTier": "L1"
+    }
+  ]
+}

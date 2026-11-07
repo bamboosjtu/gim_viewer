@@ -1,0 +1,25 @@
+{
+  "version": "gim-batch-input-v1",
+  "samples": [
+    {
+      "path": "../../demo/substation01.gim",
+      "sourceSha256": "711259814db95999f5282af1871da9cb50db4548b71626637b33038b062fc390",
+      "sampleTier": "L1"
+    },
+    {
+      "path": "../../demo/substation02.gim",
+      "sourceSha256": "a1c0990162e769f678f2fe5eeb275b1266fb8640776399289197d1998d372f29",
+      "sampleTier": "L1"
+    },
+    {
+      "path": "../../demo/substation03.gim",
+      "sourceSha256": "3197c03ef2c6c423cbb85447f71491a4112db0f9a8cea0c9f72f0b410b8175ab",
+      "sampleTier": "L1"
+    },
+    {
+      "path": "../../demo/substation04.gim",
+      "sourceSha256": "00b7746d5ea6ab3b92c215c1e42ffc7eec5a9f0517c1c555fa27a596d4d800dc",
+      "sampleTier": "L1"
+    }
+  ]
+}

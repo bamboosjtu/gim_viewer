@@ -44,7 +44,7 @@ export async function publishSubstationCore(
 ): Promise<boolean> {
   const current = (): boolean => deps.isCurrent();
   if (!current()) return false;
-  if (!input.sourceSha256 || input.projectId <= 0 || !input.tree || !input.ifcs.length) {
+  if (!input.sourceSha256 || input.projectId <= 0 || !input.tree) {
     throw new Error('变电索引缺少完整源身份或语义入口');
   }
   assertSemanticSourcesCached(input, deps.onPhase);

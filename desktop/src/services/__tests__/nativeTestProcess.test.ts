@@ -15,7 +15,7 @@ it('reports build failures with bounded output and a reaped process', async () =
 });
 
 it('fails a missing command without waiting for the execution deadline', async () => {
-  await expect(runNativeTestProcess({ command: resolve('.tmp-vitest/missing-native-command'), args: [],
+  await expect(runNativeTestProcess({ command: resolve('../tmp/native-process-tests/missing-native-command'), args: [],
     phase: 'SQLite harness build', timeoutMs: 5000 })).rejects.toMatchObject({ childExited: true });
 });
 
@@ -35,8 +35,8 @@ it('cancellation waits for process exit before resolving cleanup', async () => {
 });
 
 it('rejects missing harness, missing output, invalid JSON and mismatched results without leaking fixtures', async () => {
-  await expect(executeSqliteRoundTrip([], resolve('.tmp-vitest/missing-harness'))).rejects.toThrow('executable missing');
-  const root = resolve('.tmp-vitest'); mkdirSync(root, { recursive: true });
+  await expect(executeSqliteRoundTrip([], resolve('../tmp/native-process-tests/missing-harness'))).rejects.toThrow('executable missing');
+  const root = resolve('../tmp/native-process-tests'); mkdirSync(root, { recursive: true });
   const tempRoot = mkdtempSync(join(root, 'harness-errors-'));
   try {
     for (const [script, message] of [

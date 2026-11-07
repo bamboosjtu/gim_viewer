@@ -28,7 +28,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 | IFC Spatial parser | `gim-substation-parser-v25` | [Spatial 快照](../../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | 工程来源 | `engineering-source-v12` | [来源契约](../../desktop/src/gim/engineering/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；独立原子文件 |
 | 工程实体 | `engineering-entity-v4` + `engineering-wholes-10` + `engineering-catalog-v2` | [实体编码](../../desktop/src/services/engineeringCacheCodec.ts)、[目录规则](../../desktop/src/engineering/catalogRules.json)、[目录契约](../../desktop/src/engineering/catalog.json) | 绑定来源内容摘要、实体 schema、规则版本；只重建实体 |
-| 工程导航 | `engineering-navigation-v9` + `engineering-composition-v10` + `engineering-source-tree-v1` + `engineering-inventory-v5` + 目录版本 | [三视图投影](../../desktop/src/gim/engineering/navigation.ts)、[组成](../../desktop/src/engineering/composition.ts)、[来源树](../../desktop/src/gim/engineering/sourceProjection.ts)、[清册](../../desktop/src/engineering/inventoryTemplate.ts)、[导航缓存](../../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹和空间投影策略版本；校验节点可达性、完整投影标记与覆盖率；部分范围不写导航缓存 |
+| 工程导航 | `engineering-navigation-v9` + `engineering-composition-v11` + `engineering-source-tree-v1` + `engineering-inventory-v5` + 目录版本 | [三视图投影](../../desktop/src/gim/engineering/navigation.ts)、[组成](../../desktop/src/engineering/composition.ts)、[来源树](../../desktop/src/gim/engineering/sourceProjection.ts)、[清册](../../desktop/src/engineering/inventoryTemplate.ts)、[导航缓存](../../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹和空间投影策略版本；校验节点可达性、完整投影标记与覆盖率；部分范围不写导航缓存 |
 | IFC 浏览 LOD | `bim-lod-v8` 组合 | [features](../../desktop/src/config/features.ts)、[LOD 缓存](../../desktop/bridge/ifcLodCache.ts) | 源 SHA、条目、LOD 策略、单次解析、依赖版本；分远景/近景/属性独立失效 |
 | IFC 区域模板 | `near-templates-v1`，附加于浏览 LOD 键 | [features](../../desktop/src/config/features.ts) | 模板几何与逐对象放置；不重建有效远景 |
 | Android 线路语义 | `mobile-powerline-v3` | [移动存储](../../app/src-tauri/src/storage.rs)、[领域投影](../../packages/powerline-core/src/domain.ts) | 私有源 SHA/大小、对象与属性范围、FAM 分类 |
@@ -89,3 +89,5 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 缓存状态至少区分：`none`、`miss`、`hit`、`partial`、`saving`、`saved`、`error`。诊断需包含域版本、源 SHA、条目/节点计数和失败原因，不能用一个布尔值代表全部恢复。
 
 相关实现：[projectCacheService](../../desktop/src/services/projectCacheService.ts)、[engineeringCacheCodec](../../desktop/src/services/engineeringCacheCodec.ts)、[substationSpatialSemanticCache](../../desktop/src/services/substationSpatialSemanticCache.ts)、[devSpatialCatalog](../../desktop/src/services/devSpatialCatalog.ts)。
+
+工程组成投影只持久化路径、归属引用与推断状态，不包含 `evidence` 投影依据数组。导航 JSON 位于工程导航派生文件，SQLite 提供工程身份授权，没有独立的投影依据列；原始来源证据与实体识别字段保持各自契约。

@@ -319,6 +319,7 @@ export async function serializeDevToGlbDetailed(
     discovery?: import('./modGeometryDiscovery.js').GeometryDiscoveryOptions;
     lod?: import('../viewer/xmlModGeometry.js').DeviceLod;
     timings?: Record<string, number>;
+    onStage?:import('../measurement/core.js').StageObserver;
     /** Pre-discovered edges from analyzeDevCompilation. */
     canonicalDevPath?: string;
     discovered?: DiscoveredGeometries;
@@ -432,7 +433,7 @@ export async function serializeDevToGlbDetailed(
         files,
         geo.phmColor,
         geo.phmColorMaxA,
-        { strict: true, parseXml: options.parseXml, lod: options.lod, timings: options.timings,
+        { strict: true, parseXml: options.parseXml, lod: options.lod, timings: options.timings, onStage:options.onStage,
           outline: { placementMatrix: geo.placementTransformMatrix, deferSmallPartFallback: true } },
       );
       if (!group) continue;

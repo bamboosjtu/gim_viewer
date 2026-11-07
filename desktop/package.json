@@ -4,6 +4,8 @@
   "description": "GIM 浏览器",
   "type": "module",
   "scripts": {
+    "bench": "node scripts/with-workspace-temp.mjs scripts/benchmarks/cli.mjs",
+    "test:measurement-tools": "node scripts/with-workspace-temp.mjs --test scripts/benchmarks/measurement.test.mjs scripts/benchmarks/batch.test.mjs",
     "predev": "node scripts/copy-web-ifc-wasm.mjs",
     "dev": "vite",
     "check:version": "node scripts/check-desktop-version.mjs",

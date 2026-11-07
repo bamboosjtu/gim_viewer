@@ -1,4 +1,5 @@
 import { IfcImporter } from '@thatopen/fragments';
+import { createWorkerProbe, sampleWasmCapacity } from '../measurement/workerProbe.js';
 import type { LoaderSettings } from 'web-ifc';
 import { omitIfcOpeningRelations } from './ifcOpeningPolicy.js';
 import type { IfcOpeningPolicy } from '../config/features.js';
@@ -56,7 +57,7 @@ export type IfcConversionOutput =
 // IfcImporter.process contains synchronous web-ifc calls even though it returns
 // a Promise. The existing Fragments worker does not isolate this conversion.
 const consumed = new Map<number, () => void>();
-self.onmessage = async (event: MessageEvent<IfcConversionInput | { type: 'connection-consumed'; sequence: number }>) => {
+self.onmessage = createWorkerProbe().wrap(async (event: MessageEvent<IfcConversionInput | { type: 'connection-consumed'; sequence: number }>, trace) => {
   if ('type' in event.data && event.data.type === 'connection-consumed') {
     consumed.get(event.data.sequence)?.(); consumed.delete(event.data.sequence); return;
   }
@@ -121,12 +122,12 @@ self.onmessage = async (event: MessageEvent<IfcConversionInput | { type: 'connec
         const ack = new Promise<void>(resolve => consumed.set(batch.sequence, resolve));
         self.postMessage({ type: 'regional-batch', ...batch } satisfies IfcConversionOutput,
           { transfer: (batch.chunks ?? []).map(chunk => chunk.vertices.buffer as ArrayBuffer) });
-        await ack;
+        await trace.measure('ifc.output-backpressure', () => ack);
       };
       const createApi = async (): Promise<IfcAPI> => {
         const api = new IfcAPI();
         api.SetWasmPath(input.wasm.path, input.wasm.absolute);
-        try { await api.Init(undefined, true); return api; }
+        try { await trace.measure('ifc.wasm-init', () => api.Init(undefined, true)); sampleWasmCapacity(trace,api); return api; }
         catch (error) { try { api.Dispose(); } catch { /* Preserve initialization failure. */ } throw error; }
       };
       // The optional prefix owns and disposes its API. A fresh full-source API
@@ -199,12 +200,15 @@ self.onmessage = async (event: MessageEvent<IfcConversionInput | { type: 'connec
         coldPipeline.remainingIndexMs = performance.now() - stage;
 
       } finally {
+        sampleWasmCapacity(trace,api);
         api.Dispose();
       }
     } else converted = await process();
     // The builder may return a view into a larger allocation. Transfer only the
     // final fragment bytes; the caller terminates this file's WASM worker.
     const bytes = new Uint8Array(converted);
+    for(const [stage,ms] of Object.entries(coldPipeline))if(stage.endsWith('Ms'))trace.record(`ifc.${stage}`,ms);
+    trace.produced({ outputBytes: bytes.byteLength, inputBytes: input.bytes.byteLength });
     self.postMessage(
       {
         type: 'complete',
@@ -218,10 +222,11 @@ self.onmessage = async (event: MessageEvent<IfcConversionInput | { type: 'connec
       { transfer: [bytes.buffer] }
     );
   } catch (error) {
+    trace.fail(error);
     self.postMessage({
       type: 'error',
       message: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     } satisfies IfcConversionOutput);
   }
-};
+});

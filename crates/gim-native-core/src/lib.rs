@@ -1468,6 +1468,6 @@ mod text_contract_tests {
 
 #[cfg(test)]
 fn workspace_test_temp() -> std::path::PathBuf {
-    let root=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/tests/native");
+    let root=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tmp/tests/native");
     std::fs::create_dir_all(&root).expect("workspace test directory must be writable");root
 }

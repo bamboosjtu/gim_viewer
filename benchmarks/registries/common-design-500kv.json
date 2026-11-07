@@ -1,0 +1,30 @@
+{
+  "version": "gim-batch-input-v1",
+  "samples": [
+    {
+      "path": "../../demo/变电站通用设计模型/500-A3-1 三维设计.gim",
+      "sourceSha256": "ea53999fec01bd7440392a21b59baa42547e842bc781cf7d32cff5994212be0b",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/500-B1-1 三维设计.gim",
+      "sourceSha256": "903b1271c64fe36b2fdffd0d049c2b07f4449c3ddd980101a76bc3042025d223",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/500-B1-2 三维设计.gim",
+      "sourceSha256": "05472e3a029e4185730ed94ef9a2d2779559126c6d04fa657db9cfabe92c6408",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/500-B1-3 三维设计.gim",
+      "sourceSha256": "f9f36723e80635daafcc7046f50ba3dc1d912c1b0bc0bf2610dc5f188688b8dc",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/500-B1-4 三维设计.gim",
+      "sourceSha256": "98cb2ff5902022dd4b4d225e57ac755b34f376de44cd5d2b067f37819b951d7a",
+      "sampleTier": "L0"
+    }
+  ]
+}

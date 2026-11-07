@@ -52,3 +52,19 @@ it('full payload still round-trips through real SQLite', async () => {
   expect(result.index.fam_properties).toHaveLength(3);
   expect(result.index.dev_properties.length).toBeGreaterThan(0);
 }, 60_000);
+
+it('DEV-only project publishes a receipt and restores without an IFC placeholder', async () => {
+  const input = await fixture();
+  input.files.delete('CBM/model.ifc');
+  input.ifcs = [];
+  const index = await buildGimIndexPayload(input.projectId, input.files, [], input.tree, [], input.cachePaths, input.sourceSha256);
+  const refs = await buildGeometryRefsPayload(input.projectId, input.files, input.sourceSha256);
+  const [result] = await sqliteRoundTrip([{ index, refs }]);
+  const state = new AppState();
+  restoreGimIndexToState(state, result.index);
+  expect(result.version).toBe('gim-substation-parser-v28');
+  expect(result.index.entries).toHaveLength(input.files.size);
+  expect(state.currentIfcEntries).toEqual([]);
+  expect(state.currentCbmTree?.path).toBe(input.tree?.path);
+  expect(result.refs.dev_solid_models.length).toBeGreaterThan(0);
+}, 60_000);

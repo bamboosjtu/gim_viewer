@@ -9,6 +9,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sevenZip from '7zip-min';
 import { checkDesktopVersion, validateDesktopVersions } from './check-desktop-version.mjs';
+import {prepareFixedRuntimeSecurity} from './fixed-runtime-security.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = dirname(scriptDir);
@@ -102,6 +103,7 @@ async function main() {
   cpSync(sourceExe, join(outputDir, 'GIM-Reader.exe'));
   cpSync(join(projectRoot, '..', 'LICENSE'), join(outputDir, 'LICENSE'));
   cpSync(sourceRuntime, join(outputDir, 'webview2-fixed-runtime'), { recursive: true });
+  prepareFixedRuntimeSecurity(projectRoot,join(outputDir,'webview2-fixed-runtime'));
 
   const runtimeStats = walkStats(join(outputDir, 'webview2-fixed-runtime'));
   const manifest = {

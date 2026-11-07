@@ -41,6 +41,18 @@ function restDeps() {
 }
 
 describe('two-phase semantic publication', () => {
+  it('publishes a CBM/DEV project without inventing IFC sources', async () => {
+    const input = await fixture();
+    input.ifcs = [];
+    input.files.delete('CBM/model.ifc');
+    input.cachePaths.delete('CBM/model.ifc');
+    const deps = coreDeps();
+    expect(await publishSubstationCore(input, deps)).toBe(true);
+    expect(deps.saveIndex.mock.calls[0][0].ifc_models).toEqual([]);
+    expect(deps.saveIndex.mock.calls[0][0].cbm_nodes.length).toBeGreaterThan(0);
+    expect(deps.saveRefs).toHaveBeenCalledOnce();
+    expect(deps.validate).toHaveBeenCalledOnce();
+  });
   it('core publishes entries/tree/IFC/relations without reading source bytes', async () => {
     const input = await fixture();
     const deps = coreDeps();

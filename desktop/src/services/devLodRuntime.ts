@@ -77,6 +77,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
   private commits: Array<{ priority: number; root?: string; queuedAt: number; deferWhileMoving: boolean; run: () => void; reject: (e: Error) => void }> = [];
   private cameraMovingUntil = 0;
   private cameraSchedule = () => {
+    if (!this.current()) return;
     this.diagnostics.currentViewReady = false;
     this.diagnostics.currentViewSettled = false;
     this.cameraMovingUntil = performance.now() + 200;
@@ -478,9 +479,12 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
   };
   private update(): void {
     if (!this.current()) { this.release(); return; }
+    // A renderer may be torn down before an already queued camera callback.
+    // No view computation is meaningful until a live camera exists.
+    const camera = this.ctx.world?.camera?.three as THREE.Camera | undefined;
+    if (!camera) return;
     this.refreshMemoryPressure();
     this.notifyCoordinateAnchor();
-    const camera = (this.ctx.world.camera as any).three as THREE.Camera;
     const canvas = (this.ctx.world.renderer as any)?.three?.domElement as HTMLCanvasElement | undefined;
     const rect = canvas?.getBoundingClientRect();
     const view = createDeviceViewContext(camera, rect?.width || 1000, rect?.height || 800);
@@ -572,6 +576,8 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         this.displayedPins.set(key, (this.displayedPins.get(key) ?? 0) + 1);
         row.group = group; row.pickLocalBounds = template.bounds; row.pickBounds = worldBounds;
         row.key = key; row.displayed = lod; row.entry.templateStatus = 'ready';
+        if(import.meta.env.VITE_GIM_BENCHMARK==='1'&&lod===0)row.baseEvidence={id:row.entry.rootOccurrence,sha:template.sha,
+          bounds:[...template.bounds.min.toArray(),...template.bounds.max.toArray()],matrix:this.anchor!.clone().invert().multiply(group.matrix).elements.slice(),status:template.status,simplifiedBooleans:template.diagnostics.simplifiedBooleans??0};
         group.visible = !this.onlySelected || (this.state.representationSelection?.devRoots.has(row.entry.rootOccurrence) ?? row.entry.rootOccurrence === this.selected);
         this.state.engineeringGeometryFilter?.(group);
         if (this.batchEnabled) {
@@ -798,6 +804,14 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
   getLoadedRoot(rootOccurrence: string): THREE.Group | undefined {
     return this.current() ? this.rows.get(rootOccurrence)?.group : undefined;
   }
+  /** Explicit diagnostic checkpoint; no source IO or representation creation. */
+  forEachLoadedRoot(visit:(occurrence:string,root:THREE.Group,lod:number)=>void):void {
+    if(!this.current())return;
+    for(const [id,row]of this.rows)if(row.group)visit(id,row.group,row.displayed);
+  }
+  baseRepresentationEvidence():readonly import('../shared/deviceRuntime.js').DevBaseEvidence[]{
+    return this.current()?[...this.rows.values()].flatMap(row=>row.baseEvidence?[row.baseEvidence]:[]):[];
+  }
   /** Ensure an occurrence has a browser representation.  This method is used
    * by ordinary tree/search/selection flows and deliberately never requests
    * L2.  Keep the historical select name as a compatibility alias below. */
@@ -941,7 +955,8 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     if (this.commitTimer) clearTimeout(this.commitTimer);
     for (const commit of this.commits) commit.reject(new DOMException('DEV session expired', 'AbortError'));
     this.commits = [];
-    (this.ctx.world.camera as any).controls?.removeEventListener('update', this.cameraSchedule);
+    this.timer = this.cameraTimer = this.statusTimer = this.commitTimer = null;
+    this.ctx.world?.camera?.controls?.removeEventListener('update', this.cameraSchedule);
     window.removeEventListener('gim-toggle-background-detail', this.pauseEvent);
     this.worker?.cancel();
     for (const row of this.rows.values()) { if (row.group && this.state.highlightedModState?.groups.some(object => belongsTo(object, row.group))) resetModHighlight(this.state); row.group?.removeFromParent(); this.state.loadedXmlModGroups.delete(row.entry.instanceKey); }

@@ -17,7 +17,7 @@ export async function stageAcceptanceBuild(manifestPath) {
   const runtime = join(source, 'webview2-fixed-runtime');
   if (await fileSha256(executable) !== build.executableSha256
     || (await directoryFingerprint(runtime)).sha256 !== build.runtime.sha256) throw Error('Acceptance package hash mismatch');
-  const temporary=join(root,'.tmp','native-acceptance-stage');mkdirSync(temporary,{recursive:true});
+  const temporary=join(root,'tmp','native-acceptance-stage');mkdirSync(temporary,{recursive:true});
   const destination = mkdtempSync(join(temporary,'package-'));
   cpSync(executable, join(destination, 'GIM-Reader.exe'));
   cpSync(runtime, join(destination, 'webview2-fixed-runtime'), {recursive: true});

@@ -60,10 +60,10 @@ describe('engineering composition and provenance navigation', () => {
     await vi.waitFor(()=>expect(f.state.engineeringSelection?.ownerIds).toEqual(new Set([f.box.id])));
     expect(document.querySelector('.props-header')?.textContent).toBe('主变测控柜');
   });
-  it('labels inferred composition rows and exposes the evidence in the inspector',async()=>{
+  it('labels inferred composition rows without exposing projection basis',async()=>{
     const f=await fixture(),view=f.state.engineeringNavigation!.composition,key=view.rowsByEntity.get(f.main.id)![0],node=view.nodes.get(key)!;
     f.state.engineeringNavMode='composition';
-    node.inferred=true;node.evidence=['spatial-building-footprint','composition-spatial-v1'];
+    node.inferred=true;
     let cursor:string|undefined=key;
     while(cursor){f.state.engineeringExpandedRows.composition.add(cursor);cursor=view.nodes.get(cursor)?.parent;}
     const {renderEngineeringTree}=await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringTreeView.js'); });renderEngineeringTree(f.state);
@@ -72,7 +72,7 @@ describe('engineering composition and provenance navigation', () => {
     await vi.dynamicImportSettled();
     await vi.waitFor(()=>expect(document.querySelector('.props-header')?.textContent).toBe(f.main.name));
     expect(document.getElementById('props-drawer-body')?.textContent).toContain('空间推断，工程归属待确认');
-    expect(document.getElementById('props-drawer-body')?.textContent).toContain('composition-spatial-v1');
+    expect(document.getElementById('props-drawer-body')?.textContent).not.toContain('投影依据');
   });
   it('keeps DEV F levels explicit and exposes the JSON export action', async () => {
     const f = await fixture(), { renderEngineeringTree } = await import('../../app/presentationBindings.js').then(({configurePresentation}) => { configurePresentation(); return import('../engineeringTreeView.js'); });

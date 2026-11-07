@@ -281,7 +281,7 @@ export async function loadXmlModFromFiles(
   files: Map<string, File>,
   phmColor?: XmlModColor,
   phmColorMaxA?: number,
-  options?: { strict?: boolean; parseXml?: typeof parseXmlMod; lod?: import('./xmlModGeometry.js').DeviceLod; timings?: Record<string, number>; outline?: import('./xmlModGeometry.js').OutlineGeometryOptions },
+  options?: { strict?: boolean; parseXml?: typeof parseXmlMod; lod?: import('./xmlModGeometry.js').DeviceLod; timings?: Record<string, number>; outline?: import('./xmlModGeometry.js').OutlineGeometryOptions; onStage?:import('../measurement/core.js').StageObserver },
 ): Promise<THREE.Group | null> {
   const strict = options?.strict === true;
   const file = getFileByPath(files, modPath);
@@ -312,7 +312,7 @@ export async function loadXmlModFromFiles(
       return group;
     }
     const doc = (options?.parseXml ?? parseXmlMod)(text, modPath);
-    const baked = await collectBakedGeometriesByMaterialAsync(doc, options?.lod, options?.timings, options?.outline);
+    const baked = await collectBakedGeometriesByMaterialAsync(doc, options?.lod, options?.timings, options?.outline,options?.onStage);
     const mergeStarted = performance.now();
     const group = flattenDocumentToGroup(doc, baked);
     if (options?.timings) options.timings.mergeMs = (options.timings.mergeMs ?? 0) + performance.now() - mergeStarted;

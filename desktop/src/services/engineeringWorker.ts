@@ -1,4 +1,5 @@
 import { decodeGimText } from '../shared/textDecode.js';
+import { createWorkerProbe, NOOP_TASK, type WorkerTaskProbe } from '../measurement/workerProbe.js';
 import { extractEngineeringSourceGraph, type EngineeringSourceGraph } from '../gim/engineering/sourceGraph.js';
 import { buildEngineeringSources, normalizeEngineeringSources } from '../gim/engineering/buildSources.js';
 import { decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheSizes } from './engineeringCacheCodec.js';
@@ -25,7 +26,7 @@ export function createEngineeringWorkerHandler(){
     latest={result,identity,digest,plan:[...plan]};
     return {type:'model',result:encodeEngineeringWorkerResult(result)};
   }
-  return async(request:EngineeringWorkerCommand):Promise<EngineeringWorkerReply>=>{
+  return async(request:EngineeringWorkerCommand, trace:WorkerTaskProbe=NOOP_TASK):Promise<EngineeringWorkerReply>=>{
     const started=performance.now();
     if(request.type==='init'){scope=request.scope;paths=request.paths;files.clear();graph=null;latest=undefined;return {type:'ready'};}
     if(request.type==='files'){
@@ -33,11 +34,11 @@ export function createEngineeringWorkerHandler(){
       return {type:'ready'};
     }
     if(request.type==='extract'){
-      graph=await extractEngineeringSourceGraph({paths,readText:async path=>{
+      graph=await trace.measure('engineering.extract', () => extractEngineeringSourceGraph({paths,readText:async path=>{
         const source=files.get(path);if(!source)throw Error(`Engineering source unavailable: ${path}`);
-        const bytes=source instanceof Uint8Array?source:await source.arrayBuffer();
-        return decodeGimText(bytes).text;
-      }});files.clear();
+        const bytes=source instanceof Uint8Array?source:await trace.measureObserved('engineering.source-read', () => source.arrayBuffer());
+        return trace.syncObserved('engineering.decode', () => decodeGimText(bytes).text);
+      }}));files.clear();
       return {type:'graph',summary:{ifcPaths:graph.ifcPaths,sourceRecords:graph.records.length},geometryOccurrences:collectSourceGeometryOccurrences(graph)};
     }
     if(request.type==='encode-cache'){
@@ -60,6 +61,7 @@ export function createEngineeringWorkerHandler(){
         Object.assign(response.metrics,engineeringCacheSizes(response.bytes));current.plan.shift();
       }catch(error){const failure:Pick<EngineeringBuildResult,'cacheError'|'cacheDisabled'>={};markCacheFailure(failure,error);response.error=failure.cacheError;response.disabled=failure.cacheDisabled;current.plan=[];}
       response.metrics.encodeMs=performance.now()-started;
+      trace.record('engineering.cache-encode', response.metrics.encodeMs, { bytes: response.bytes?.byteLength ?? 0 });
       return {type:'cache',result:response};
     }
     if(request.type==='restore'){
@@ -80,8 +82,8 @@ export function createEngineeringWorkerHandler(){
     }
     if(!graph||!scope)throw Error('Engineering source graph is not ready');
     latest=undefined;
-    const built=buildEngineeringSources(scope,graph,request.objects,request.models,request.nodes);
-    return publish({...built,navigation:projectEngineeringNavigation(built.sources,built.snapshot),geometryOccurrences:collectSourceGeometryOccurrences(graph)},started,request.identity,undefined,
+    const built=trace.sync('engineering.normalize', () => buildEngineeringSources(scope,graph!,request.objects,request.models,request.nodes));
+    return publish({...built,navigation:trace.sync('engineering.projection', () => projectEngineeringNavigation(built.sources,built.snapshot)),geometryOccurrences:collectSourceGeometryOccurrences(graph)},started,request.identity,undefined,
       request.identity&&built.sources.complete?['sources','entities','navigation']:[]);
   };
 }
@@ -89,11 +91,14 @@ export function createEngineeringWorkerHandler(){
 if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMessage==='function'){
   const handle=createEngineeringWorkerHandler(),send=self.postMessage.bind(self) as (response:EngineeringWorkerResponse,transfer?:Transferable[])=>void;
   let chain=Promise.resolve();
+  const probe=createWorkerProbe();
   self.onmessage=(event:MessageEvent<EngineeringWorkerRequest>)=>{
-    chain=chain.then(async()=>{const request=event.data;try{
-      const reply=await handle(request),response={...reply,requestId:request.requestId} as EngineeringWorkerResponse;
+    if(probe.control(event))return;
+    chain=chain.then(async()=>{await probe.run(event, async trace=>{const request=event.data;try{
+      const reply=await handle(request, trace),response={...reply,requestId:request.requestId} as EngineeringWorkerResponse;
       const transfers=response.type==='model'?engineeringWorkerResultTransfers(response.result):response.type==='cache'&&response.result.bytes?[response.result.bytes.buffer as ArrayBuffer]:[];
+      trace.produced({ transferBuffers: transfers.length });
       send(response,transfers);
-    }catch(error){send({type:'error',requestId:request.requestId,message:String(error)});}});
+    }catch(error){trace.fail(error);send({type:'error',requestId:request.requestId,message:String(error)});}});});
   };
 }

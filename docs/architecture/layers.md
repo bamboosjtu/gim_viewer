@@ -80,3 +80,5 @@ bootstrap
 - 分类规则变化先改目录/领域测试，再改 UI 展示。
 
 线路导航的数据装配位于 `services/lineNavigationProjection.ts`，不依赖 DOM、AppState 或平台 IO；搜索 DTO 位于 `shared/searchTypes.ts`。`ui/lineNavigationTreeView` 只负责按需渲染、展开和交互，返回幂等 destroy 句柄；替换或关闭线路工程会撤销监听并释放树，旧句柄不能清除新树。地图绘制/交互/渐进调度仍由现有地图 handle 管理。
+
+线路属性分桶、来源关系与 HNum 预览格式化由 `services/lineInspectorProjection.ts` 提供；字典与纯字符串格式化在 `services/propertyPresentation.ts`，DOM 引用事件桥保留于 UI。地图唯一坐标工作集、Mercator 计算与导线样式语义由 `services/lineMapGeometry.ts` 提供。三者无 DOM、AppState、平台 IO 依赖。线路工程视图返回有代次保护的 `destroy()` 句柄，并由会话登记释放地图、导航、搜索及设置监听；旧句柄不得销毁新视图。

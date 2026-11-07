@@ -13,6 +13,9 @@ crate-type = ["lib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+benchmark = []
+
 [dependencies]
 gim-native-core = { path = "../../crates/gim-native-core" }
 tauri = { version = "~2.11.3", features = [] }

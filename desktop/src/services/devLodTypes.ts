@@ -36,6 +36,7 @@ export interface CacheDecision {
 export type MemoryPressure = 'unknown' | 'normal' | 'high' | 'critical';
 
 export interface Occurrence {
+  baseEvidence?:import('../shared/deviceRuntime.js').DevBaseEvidence;
   entry: DevSpatialOccurrence;
   inView: boolean;
   box: THREE.Box3 | null;

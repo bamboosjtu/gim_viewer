@@ -1,3 +1,5 @@
+import measuredWorkerAsset from './compositionProjectionWorker.ts?worker&url';
+import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import { loadPresentation } from './presentationPort.js';
 import type { AppState } from '../app/state.js';
 import type { CompositionBounds } from './projections/compositionSpatial.js';
@@ -73,11 +75,11 @@ export function installCompositionProjection(state: AppState, onReady?: (complet
     const owners = new Map(snapshot.memberships.map(m => [m.sourceId, m.ownerId])), bounds: CompositionBounds[] = [];
     for (const [model, runtime] of state.ifcRegionalRuntimes) for (const object of runtime.index.objects) {
       const sourceId = `ifc:${JSON.stringify([model, object.expressId])}`, owner = owners.get(sourceId), sourceBounds = fromIfcYUpBounds(object.bounds);
-      if (owner && sourceBounds) bounds.push({ entityId: owner, bounds: sourceBounds, evidence: sourceId });
+      if (owner && sourceBounds) bounds.push({ entityId: owner, bounds: sourceBounds });
     }
     const runRevision = revision;
     let owned: Worker;
-    try { owned = worker = new Worker(new URL('./compositionProjectionWorker.ts', import.meta.url), { type: 'module' }); }
+    try { owned = worker = createMeasuredWorker('engineering', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})})); }
     catch (error) { console.warn('[工程组成投影]', error); restore();state.engineeringTreeStatus='ready';state.engineeringNavigation={...base,compositionCoverage:'partial'};state.notifyEngineeringChanged();onReady?.(false); return; }
     owned.onmessage = (event: MessageEvent<ProjectionOutput>) => {
       if (!current() || worker !== owned || revision !== runRevision || snapshot !== state.engineeringSnapshot || view !== state.engineeringNavigation) { owned.terminate(); return; }

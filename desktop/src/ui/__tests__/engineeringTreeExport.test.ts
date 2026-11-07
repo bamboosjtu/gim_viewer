@@ -12,9 +12,9 @@ const data: EngineeringNavigationData = {
   composition: {
     version: 'test', rootKey: 'root',
     nodes: new Map([
-      ['root', { key: 'root', title: '工程组成', kind: 'project', children: ['group'], entityCount: 1, evidence: [] }],
-      ['group', { key: 'group', title: '主变压器系统', kind: 'group', parent: 'root', children: ['whole'], entityCount: 1, evidence: ['declared'] }],
-      ['whole', { key: 'whole', title: '1号主变', kind: 'entity', parent: 'group', children: [], entityCount: 1, targetId: 'entity:1', evidence: [] }],
+      ['root', { key: 'root', title: '工程组成', kind: 'project', children: ['group'], entityCount: 1 }],
+      ['group', { key: 'group', title: '主变压器系统', kind: 'group', parent: 'root', children: ['whole'], entityCount: 1 }],
+      ['whole', { key: 'whole', title: '1号主变', kind: 'entity', parent: 'group', children: [], entityCount: 1, targetId: 'entity:1' }],
     ]),
     rowsByEntity: new Map([['entity:1', ['whole']]]),
   },
@@ -49,11 +49,11 @@ describe('engineering model tree export', () => {
     expect(out.root.children[0].children[0]).toMatchObject({ title: '1号主变', targetId: 'entity:1' });
   });
 
-  it('exports inferred projection status and its evidence without changing entity references',()=>{
+  it('exports inferred status without projection basis or changed entity references',()=>{
     const view={...data,composition:{...data.composition,nodes:new Map(data.composition.nodes)}};
-    view.composition.nodes.set('whole',{...view.composition.nodes.get('whole')!,inferred:true,evidence:['spatial-building-footprint','composition-spatial-v1']});
+    view.composition.nodes.set('whole',{...view.composition.nodes.get('whole')!,inferred:true});
     const out=engineeringTreeExport(view,'composition','P').root.children[0].children[0];
-    expect(out).toMatchObject({targetId:'entity:1',inferred:true,evidence:['spatial-building-footprint','composition-spatial-v1']});
+    expect(out).toMatchObject({targetId:'entity:1',inferred:true});expect(out).not.toHaveProperty('evidence');
     expect(data.composition.nodes.get('whole')?.inferred).toBeUndefined();
   });
 

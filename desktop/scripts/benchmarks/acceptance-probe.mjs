@@ -77,7 +77,7 @@ export async function probeAcceptance(manifestPath, timeoutMs = 30000) {
   manifestPath = resolve(manifestPath);
   const build = JSON.parse(readFileSync(manifestPath, 'utf8')), folder = dirname(manifestPath);
   if (build.identifier !== ACCEPTANCE_IDENTIFIER || build.profile !== 'native-release-acceptance') throw Error('Not an acceptance build');
-  const expected = join(root,'.tmp','native-acceptance-data',ACCEPTANCE_IDENTIFIER);
+  const expected = join(root,'tmp','native-acceptance-data',ACCEPTANCE_IDENTIFIER);
   const local = expected;
   if (resolve(build.expectedDataRoot).toLowerCase() !== expected.toLowerCase()) throw Error('Acceptance workspace data root differs from manifest');
   if (sourceFingerprint(root) !== build.sourceFingerprint) throw Error('Current source fingerprint differs from this build');

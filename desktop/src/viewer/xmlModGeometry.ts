@@ -22,6 +22,7 @@
  */
 
 import * as THREE from 'three';
+import type {StageObserver} from '../measurement/core.js';
 import { stretchedBodyDisplacement } from '../gim/geometry/stretchedBody.js';
 import { offsetRectangularTableVertices } from '../gim/geometry/offsetRectangularTable.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -640,9 +641,9 @@ export interface OutlineGeometryOptions {
   deferSmallPartFallback?: boolean;
 }
 export function collectBakedGeometriesByMaterial(
-  doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>, options?: OutlineGeometryOptions,
+  doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>, options?: OutlineGeometryOptions, onStage?:StageObserver,
 ): BakedGeometries {
-  const steps = bakeGeometrySteps(doc, lod, timings, options);
+  const steps = bakeGeometrySteps(doc, lod, timings, options, onStage);
   let step = steps.next();
   while (!step.done) step = steps.next();
   return step.value;
@@ -653,9 +654,9 @@ export function collectBakedGeometriesByMaterial(
  * is still synchronous; this bounds chains, not the cost of an individual CSG.
  */
 export async function collectBakedGeometriesByMaterialAsync(
-  doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>, options?: OutlineGeometryOptions,
+  doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>, options?: OutlineGeometryOptions, onStage?:StageObserver,
 ): Promise<BakedGeometries> {
-  const steps = bakeGeometrySteps(doc, lod, timings, options);
+  const steps = bakeGeometrySteps(doc, lod, timings, options, onStage);
   let sliceStarted = performance.now();
   let step = steps.next();
   while (!step.done) {
@@ -676,7 +677,7 @@ export type BakedGeometries = Map<THREE.MeshStandardMaterial, THREE.BufferGeomet
   omittedSmallParts: number; omittedMaxExtentMm: number;
 };
 function* bakeGeometrySteps(
-  doc: XmlModDocument, lod: DeviceLod, timings?: Record<string, number>, options?: OutlineGeometryOptions,
+  doc: XmlModDocument, lod: DeviceLod, timings?: Record<string, number>, options?: OutlineGeometryOptions, onStage?:StageObserver,
 ): Generator<void, BakedGeometries, void> {
   const byMaterial = Object.assign(new Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>(), { failures: [] as BakedGeometryFailure[], simplifiedBooleans: 0,
     representationPolicy: lod < 2 ? 'outline' as const : 'detailed' as const,
@@ -684,7 +685,9 @@ function* bakeGeometrySteps(
   const build = (p: XmlModPrimitive) => {
     const started = performance.now();
     const geometry = primitiveToGeometry(p, doc.modPath, lod);
-    if (timings) timings.primitiveMs = (timings.primitiveMs ?? 0) + performance.now() - started;
+    const elapsed=timings||onStage?performance.now()-started:0;
+    if (timings) timings.primitiveMs = (timings.primitiveMs ?? 0) + elapsed;
+    onStage?.('dev.primitive',elapsed,{primitives:1,verticesReferenced:geometry?.getAttribute('position')?.count??0});
     return geometry;
   };
   if (doc.isEmpty) return byMaterial;
@@ -741,8 +744,8 @@ function* bakeGeometrySteps(
             result = own(getSharedCsgEvaluator().evaluate(new Brush(a), new Brush(b),
               p.op === 'Union' ? ADDITION : p.op === 'Intersection' ? INTERSECTION : SUBTRACTION).geometry);
           } catch (error) { return fail(id, `csg-failed:${String(error)}`); }
-          finally { if (timings) {
-            timings.booleanMs = (timings.booleanMs ?? 0) + performance.now() - started;
+          finally { const elapsed=performance.now()-started;onStage?.('dev.boolean',elapsed,{evaluations:1});if (timings) {
+            timings.booleanMs = (timings.booleanMs ?? 0) + elapsed;
             timings.booleanEvaluations = (timings.booleanEvaluations ?? 0) + 1;
           } }
         }

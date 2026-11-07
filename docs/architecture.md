@@ -76,6 +76,7 @@ flowchart TD
 | [分层与依赖](architecture/layers.md) | 目录所有权、依赖边界、入口与平台共享面 |
 | [打开与生命周期](architecture/lifecycle.md) | 源身份、解压/解析分支、会话、取消、首开阶段与清理 |
 | [缓存域](architecture/caches.md) | SQLite/文件/IndexedDB 域、版本、原子发布与失效 |
+| [测量与 Benchmark](architecture/measurement.md) | 测量协议、Worker/内存口径、本地 CLI 与 SDK 前置门禁 |
 | [工程实体运行时](architecture/engineering-runtime.md) | 来源图、实体 Worker、快照、三视图、质量状态 |
 | [表示与绑定](architecture/representations.md) | occurrence、工程整体到表示的绑定、反向拾取与歧义 |
 | [DEV 几何运行时](architecture/dev-geometry.md) | DEV/PHM/MOD/STL、模板、放置、LOD、Worker 与预算 |

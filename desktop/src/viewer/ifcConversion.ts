@@ -1,3 +1,5 @@
+import measuredWorkerAsset from './ifcConversionWorker.ts?worker&url';
+import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import { beginIfcGeometryWork } from './geometryWorkGate.js';
 import type { ViewerContext } from './viewerEngine.js';
 import type { ViewerState as AppState } from '../shared/viewerState.js';
@@ -48,7 +50,7 @@ export async function loadRawIfc(
   try {
     converted = await new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
       let worker: Worker;
-      try { worker = new Worker(new URL('./ifcConversionWorker.ts', import.meta.url), { type: 'module' }); }
+      try { worker = createMeasuredWorker('ifc-conversion', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})}), entryPath); }
       catch (error) { reject(error); return; }
       let finished = false;
       const finish = (error?: Error, bytes?: Uint8Array<ArrayBuffer>) => {

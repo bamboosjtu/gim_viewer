@@ -1,4 +1,5 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
+import { bindMeasurementSession } from '../measurement/runtime.js';
 import { configurePresentation } from './presentationBindings.js';
 import { AppState } from './state.js';
 import { setupTabs } from '../ui/tabs.js';
@@ -20,6 +21,7 @@ async function bootstrapAsync(): Promise<void> {
   assertShellDom();
   configurePresentation();
   const state = new AppState();
+  bindMeasurementSession(()=>state.captureProjectSession());
 
   // 仅供本地 Playwright acceptance harness 读取当前工程所有权计数；
   // 不参与业务判断、缓存键或调度行为。
@@ -264,6 +266,9 @@ async function bootstrapAsync(): Promise<void> {
         }
       }
     });
+  }
+  if(import.meta.env.VITE_GIM_BENCHMARK === '1') {
+    const {installBenchmarkHost}=await import('../measurement/benchmarkHost.js');installBenchmarkHost(state);
   }
 }
 

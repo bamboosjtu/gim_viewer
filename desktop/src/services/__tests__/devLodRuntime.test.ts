@@ -1,4 +1,4 @@
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { DevLodRuntime } from '../devLodRuntime.js';
 import { DEV_GEOMETRY_VERSION } from '../devSpatialCatalog.js';
@@ -6,10 +6,18 @@ import { perfProductMomentSnapshot, perfReset, perfSnapshot } from '../../utils/
 import {ByteWorkBudget} from '../../utils/byteWorkBudget.js';
 import {DevGlbTemplate} from '../devGlbTemplateRuntime.js';
 
+const ownedRuntimes = new Set<DevLodRuntime>();
+afterEach(() => {
+  for (const runtime of ownedRuntimes) runtime.release();
+  ownedRuntimes.clear();
+  vi.clearAllTimers();
+  vi.useRealTimers();
+});
 function fixture() {
   const status = vi.fn();
   const state = { isCurrentSession: () => true, loadedXmlModGroups: new Map(), geometryDiagnostics: new Map(), deviceUnknownBounds: new Set() } as any;
   const runtime = new DevLodRuntime(state, {} as any, { sourceSha256: 'sha', generation: 1 } as any, status);
+  ownedRuntimes.add(runtime);
   Object.assign(runtime.diagnostics, { anchorReady: true, catalogReady: true });
   return { runtime, internal: runtime as any, status };
 }
@@ -51,7 +59,7 @@ it('commits base geometry during camera motion and bounds refinement deferral', 
 });
 
 it('keeps warm cache consumption capacity independent of compacted computation workers', async () => {
-  const {internal}=fixture();internal.worker={workerCount:1,cacheConcurrency:32};
+  const {internal}=fixture();internal.worker={cancel:vi.fn(),workerCount:1,cacheConcurrency:32};
   const releases:Array<()=>void>=[];
   const requests=Array.from({length:40},(_,i)=>internal.templateStore.acquireTemplateSlot(`cache-${i}`).then((release:()=>void)=>{releases.push(release);}));
   await Promise.resolve();expect(releases).toHaveLength(32);
@@ -63,11 +71,11 @@ it('keeps warm cache consumption capacity independent of compacted computation w
 
 it('resolves loaded roots from the live row and never retains a replaced or old-session group',()=>{
   const {runtime,internal}=fixture(),first=new THREE.Group(),second=new THREE.Group();
-  internal.rows.set('root',{group:first});
+  internal.rows.set('root',{entry:{instanceKey:'root'},group:first});
   expect(runtime.getLoadedRoot('root')).toBe(first);
-  internal.rows.set('root',{group:second});expect(runtime.getLoadedRoot('root')).toBe(second);
+  internal.rows.set('root',{entry:{instanceKey:'root'},group:second});expect(runtime.getLoadedRoot('root')).toBe(second);
   internal.rows.delete('root');expect(runtime.getLoadedRoot('root')).toBeUndefined();
-  internal.rows.set('root',{group:second});internal.state.isCurrentSession=()=>false;
+  internal.rows.set('root',{entry:{instanceKey:'root'},group:second});internal.state.isCurrentSession=()=>false;
   expect(runtime.getLoadedRoot('root')).toBeUndefined();
 });
 
@@ -141,7 +149,7 @@ it('batches only reachable sources for a warm template miss and shares repeated 
     ['PHM/a.phm','SOLIDS.NUM=1\nSOLIDS0=a.mod'],['MOD/a.mod','<Device><Entities/></Device>']]);
   internal.sources.sourceFiles=new Map([...texts].map(([path,text])=>[path,{size:new TextEncoder().encode(text).length}]));
   internal.sources.sourceFiles.set('MOD/unrelated.mod',{size:10});
-  internal.worker={installSources:vi.fn()};
+  internal.worker={cancel:vi.fn(),installSources:vi.fn()};
   const database=await import('@desktop/database.js');
   const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(async(_id,paths)=>
     new Map(paths.map(path=>[path,new TextEncoder().encode(texts.get(path)!)])));
@@ -196,7 +204,7 @@ it('upgrades partial L0 cache recovery once after enough real RPC demand, never 
   const {internal}=fixture();internal.diagnostics.uniqueDevSources=100;
   const source={size:3,name:'a.mod'} as File;
   internal.sources.sourceFiles=new Map([['MOD/a.mod',source]]);
-  internal.worker={diagnostics:{rpcReads:0},installSources:vi.fn()};
+  internal.worker={cancel:vi.fn(),diagnostics:{rpcReads:0},installSources:vi.fn()};
   const prefetch=vi.spyOn(internal.sources,'preloadSources').mockResolvedValue(new Map([['MOD/a.mod',new File(['abc'],'a.mod')]]));
   for(let i=0;i<40;i++)internal.recoverMissingSources(String(i),1);
   expect(prefetch).not.toHaveBeenCalled();
@@ -225,7 +233,7 @@ it('a stalled optional source batch cannot become a startup gate, and late repli
     const result=await preparing;expect(result.get('DEV/a.dev')).toBe(files.get('DEV/a.dev'));
     finishRead(new Map([['DEV/a.dev',new Uint8Array([1,2,3])]]));await Promise.resolve();
     expect(result.get('DEV/a.dev')).toBe(files.get('DEV/a.dev'));expect(vi.getTimerCount()).toBe(0);
-  } finally {read.mockRestore();vi.useRealTimers();}
+  } finally {read.mockRestore();vi.clearAllTimers();vi.useRealTimers();}
 });
 
 it('correlates cold/warm GLB decoding, placement and cache writes without changing geometry identity', async () => {
@@ -253,7 +261,7 @@ it('correlates cold/warm GLB decoding, placement and cache writes without changi
       internal.submit=async(_priority:number,run:()=>void)=>run();
       internal.templateStore.cacheReader.read=async()=>({status:mode==='cold'?'miss':'hit',value:mode==='cold'?undefined:stored,release:()=>{}});
       internal.catalogHint=async()=>({status:'miss'});
-      internal.worker={workerCount:1,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn(),cancel:vi.fn()};
+      internal.worker={cancel:vi.fn(),workerCount:1,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn()};
       let releaseWriter: (()=>void)|undefined=mode==='cold'?await internal.artifactWriter.writeBudget.acquire(internal.artifactWriter.writeBudget.limit):undefined;
       const row={...occurrence(1),entry:{devPath:'DEV/a.dev',rootOccurrence:'root',instanceKey:'root-instance',
         placementMatrix:new THREE.Matrix4().toArray(),templateStatus:'unrequested'},group:undefined,key:undefined};
@@ -509,7 +517,7 @@ it('commit queue yields between batches, prioritizes selection and cancels expir
     internal.state.deviceUnknownBounds = new Map(); internal.ctx.world = { camera: {} };
     internal.release(); await rejected;
     await vi.advanceTimersByTimeAsync(300); expect(calls).toEqual([0, 2]);
-  } finally { vi.useRealTimers(); }
+  } finally { vi.clearAllTimers();vi.useRealTimers(); }
 });
 
 it('current view readiness does not wait for the whole catalog', () => {
@@ -557,7 +565,7 @@ it('camera motion invalidates readiness until the new view has been evaluated', 
     expect(runtime.diagnostics.currentViewReady).toBe(false);
     expect(runtime.diagnostics.currentViewSettled).toBe(false);
     clearTimeout(internal.cameraTimer);
-  } finally { vi.useRealTimers(); }
+  } finally { vi.clearAllTimers();vi.useRealTimers(); }
 });
 
 it('reports exact finished counts without pre-incrementing an unfinished station', () => {
@@ -578,7 +586,7 @@ it('persists a non-selected L1 after eviction, a second cache miss and recompila
  internal.templateStore.cacheReader.read=vi.fn(async()=>({status:'miss',release:()=>{}}));
  internal.catalogHint=vi.fn(async()=>({status:'miss'}));
  internal.prepareMissingTemplateSources=vi.fn(async()=>{});
- internal.worker={workerCount:1,cacheConcurrency:8,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn()};
+ internal.worker={cancel:vi.fn(),workerCount:1,cacheConcurrency:8,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn()};
  const persist=vi.spyOn(internal,'persistArtifact').mockResolvedValue(undefined);
  try{
   internal.wanted.add(key);
@@ -601,5 +609,17 @@ it('rejects queued commits when the session expires before the timer fires',asyn
  internal.state.isCurrentSession=()=>current;
  const pending=expect(internal.submit(0,()=>{throw Error('must not run');})).rejects.toMatchObject({name:'AbortError'});
  current=false;await vi.advanceTimersByTimeAsync(16);await pending;
- expect(internal.commits).toHaveLength(0);vi.useRealTimers();
+ expect(internal.commits).toHaveLength(0);vi.clearAllTimers();vi.useRealTimers();
+});
+
+it('late view callbacks are harmless after renderer disposal and release cancels all timers', async () => {
+  vi.useFakeTimers();
+  const { runtime, internal } = fixture();
+  internal.schedule(); internal.cameraSchedule();
+  expect(vi.getTimerCount()).toBeGreaterThan(0);
+  await vi.advanceTimersByTimeAsync(200);
+  runtime.release(); runtime.release();
+  internal.cameraSchedule();
+  expect(vi.getTimerCount()).toBe(0);
+  await vi.advanceTimersByTimeAsync(1000);
 });

@@ -12,7 +12,7 @@ export default async function setup({ provide }: GlobalSetupContext) {
   const executables = new Set<string>();
   const nativeEnv = { ...process.env };
   if (process.platform === 'win32') {
-    const nativeTemp = resolve('.tmp-vitest/native-build'); mkdirSync(nativeTemp, { recursive: true });
+    const nativeTemp = resolve('../tmp/sqlite-tests/native-build'); mkdirSync(nativeTemp, { recursive: true });
     nativeEnv.TEMP = nativeTemp; nativeEnv.TMP = nativeTemp;
   }
   console.log('[SQLite build] preparing Rust test harness (600s maximum)');

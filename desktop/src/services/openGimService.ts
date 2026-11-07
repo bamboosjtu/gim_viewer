@@ -526,3 +526,9 @@ export async function openGimProjectFromId(
   const path = await authorizeCachedGimProject(projectId);
   await openTauriGim(state, showMessage, path);
 }
+
+/** Path has already been checked against the private native benchmark manifest. */
+export async function openGimForBenchmark(state:AppState,path:string):Promise<void>{
+  if(import.meta.env.VITE_GIM_BENCHMARK !== '1')throw Error('benchmark-build-required');
+  await openTauriGim(state,()=>{},path);
+}

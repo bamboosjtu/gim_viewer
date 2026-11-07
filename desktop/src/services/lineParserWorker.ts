@@ -1,4 +1,6 @@
 import { decodeGimText } from '../shared/textDecode.js';
+import { createWorkerProbe } from '../measurement/workerProbe.js';
+import { uniqueBufferCapacity } from '../measurement/core.js';
 /**
  * Line Parser Worker v1。
  *
@@ -65,7 +67,7 @@ interface WorkerScope {
 
 const workerScope = self as unknown as WorkerScope;
 
-workerScope.onmessage = (event) => {
+workerScope.onmessage = createWorkerProbe().wrap((event: MessageEvent<LineParserWorkerRequest>, trace) => {
   const request = event.data;
   if (!request || request.type !== 'parse') return;
   const totalStart = performance.now();
@@ -86,7 +88,11 @@ workerScope.onmessage = (event) => {
     const attributes = parseLineAttributesFromCache(graph, cache);
     const attributesMs = performance.now() - attrStart;
     const bytes = request.files.reduce((sum, file) => sum + file.bytes.byteLength, 0);
-
+    trace.record('line.decode', decodeMs, { files: request.files.length, bytes });
+    trace.record('line.graph', graphMs);
+    trace.record('line.attributes', attributesMs, { cacheEntries: cache.size });
+    trace.memory({ name: 'input-buffer-capacity', scope: 'worker', method: 'unique-backing-buffers', quality: 'measured-capacity', availability: 'available', bytes: uniqueBufferCapacity(request.files.map(file => file.bytes)), sampleDelayMs: 0 });
+    trace.produced();
     workerScope.postMessage({
       type: 'result',
       requestId: request.requestId,
@@ -104,6 +110,7 @@ workerScope.onmessage = (event) => {
       },
     });
   } catch (error) {
+    trace.fail(error);
     const message = error instanceof Error ? error.message : String(error);
     workerScope.postMessage({
       type: 'error',
@@ -113,4 +120,4 @@ workerScope.onmessage = (event) => {
       stack: error instanceof Error ? error.stack : undefined,
     });
   }
-};
+});

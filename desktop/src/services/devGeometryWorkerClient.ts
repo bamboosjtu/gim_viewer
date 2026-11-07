@@ -1,3 +1,6 @@
+import measuredWorkerAsset from './devGeometryWorker.ts?worker&url';
+import { createMeasuredWorker, measurementWorkerUrl,measurementWorkerTask } from '../measurement/hostWorker.js';
+import {OutputResources} from '../measurement/outputResources.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { DEV_GLB_MAX_BYTES, aggregateDevGlbDiagnostics, type DevGeometryCompilePlan, type DevGlbSerializationResult } from './glbCacheService.js';
 import type { DiscoveredGeometries } from './modGeometryDiscovery.js';
@@ -9,6 +12,7 @@ import { beginDevGeometryWork, hasCompletedIfcWork, ifcGeometryBusy, onGeometryW
 import { agedWorkPriority } from '../utils/workPriority.js';
 import type { MemoryPressure } from '../utils/memoryPressure.js';
 interface SplitState {
+  measuredOwners?:string[];
   plan: DevGeometryCompilePlan;
   results: Array<DevGlbSerializationResult | undefined>;
   completed: number;
@@ -20,6 +24,8 @@ interface SplitState {
   reservation: number;
 }
 interface Slot { id: number; traceId: string; key: string; path: string; kind: 'compile' | 'bounds' | 'merge'; lod: DeviceLod; priority: number; queuedAt: number;
+  measuredInputs?:string[];
+  measuredContext?:import('../measurement/core.js').TraceContext;
   promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void;
   /** Assembly-subtree child of a split template. */
   parent?: string;
@@ -48,6 +54,7 @@ export class DevGeometryPreprocessor {
   private active = new Map<Worker, { task: Slot; release: (() => void) | null; finished: boolean; startedAt: number }>();
   private exported = new Map<string, { task: Slot; bytes: number }>();
   private exportedBytes = 0;
+  private outputResources=new OutputResources();
   private exportedPeakBytes = 0;
   private splitHeldBytes = 0;
   private mergeReservedBytes = 0;
@@ -142,7 +149,7 @@ export class DevGeometryPreprocessor {
         path: task.path, lod: task.lod, kind: task.kind, priority: task.priority, elapsedMs: now - startedAt })) };
   }
   private addWorker(count:number):void {
-      const worker = new Worker(new URL('./devGeometryWorker.ts', import.meta.url), { type: 'module' });
+      const worker = createMeasuredWorker('dev', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})}));
       worker.onmessage = ({ data }) => { void this.receive(worker, data).catch(error => this.workerFailed(worker,error instanceof Error ? error : new Error(String(error)))); };
       worker.onerror = event => {event.preventDefault?.();this.workerFailed(worker,new Error(event.message || 'DEV geometry worker failed'));};
       worker.onmessageerror = () => this.workerFailed(worker,new Error('DEV geometry worker message could not be decoded'));
@@ -205,6 +212,7 @@ export class DevGeometryPreprocessor {
     if(task.split)this.releaseSplitBuffers(task.split);
     this.releaseSplitAdmission(task);
     task.mergeParts = undefined;
+    for(const owner of task.measuredInputs??[])this.outputResources.release(owner,'cancelled');task.measuredInputs=[];
     for (const child of this.childrenOf(task.key)) this.cancelTaskTree(child, reason, terminateActive);
     if (terminateActive) {
       for (const [worker, owner] of [...this.active]) {
@@ -223,10 +231,11 @@ export class DevGeometryPreprocessor {
     task.reject(reason);
   }
   private releaseSplitBuffers(split:SplitState):void {
+    for(const owner of split.measuredOwners??[])this.outputResources.release(owner,'discarded');split.measuredOwners=[];
     this.splitHeldBytes-=split.heldBytes;split.heldBytes=0;split.results=[];
     this.mergeReservedBytes-=split.mergeReservation;split.mergeReservation=0;
   }
-  private updatePeak():void {this.exportedPeakBytes=Math.max(this.exportedPeakBytes,this.resultPressure.bytes);}
+  private updatePeak():void {this.exportedPeakBytes=Math.max(this.exportedPeakBytes,this.resultPressure.bytes);this.outputResources.budget(this.mergeReservedBytes);}
   private releaseSplitAdmission(parent: Slot): void {
     if (parent.split) parent.split.reservation = 0;
     if (this.splitOwner === parent) this.splitOwner = null;
@@ -278,6 +287,7 @@ export class DevGeometryPreprocessor {
     const split = parent.split;
     if (!split || parent.settled || split.results[index]) return;
     const bytes=result.bytes?.byteLength??0;
+    if(result.bytes){const owner=`part:${parent.traceId}:${index}`;this.outputResources.hold(owner,result.bytes,{...this.taskIdentity(parent),context:parent.measuredContext},'part');(split.measuredOwners??=[]).push(owner);}
     split.heldBytes+=bytes;this.splitHeldBytes+=bytes;this.updatePeak();
     if(split.heldBytes>split.inputBudget){
       this.fallbackSplit(parent,new Error(`DEV split merge input exceeds reserved budget (${split.inputBudget} bytes)`));return;
@@ -326,7 +336,8 @@ export class DevGeometryPreprocessor {
     this.splitHeldBytes-=split.heldBytes;split.heldBytes=0;
     split.mergeReservation=totalBytes*3;this.mergeReservedBytes+=split.mergeReservation;this.updatePeak();
     const merge = this.createSlot('merge', parent.path, parent.lod, `${parent.key}::merge`, parent.priority, undefined,
-      { parent: parent.key, mergeParts: parts });
+      { parent: parent.key, mergeParts: parts,measuredInputs:split.measuredOwners });
+    split.measuredOwners=[];
     this.diagnostics.splitMerges++;
     merge.promise.then(
       merged => this.finishSplit(parent, { status: diagnostics.status, bytes: merged?.bytes ?? null,sha256:merged?.sha256, diagnostics }),
@@ -392,6 +403,7 @@ export class DevGeometryPreprocessor {
     this.releaseSplitAdmission(parent);
     parent.split = undefined;
     if (result.bytes) {
+      this.outputResources.hold(`output:${parent.key}`,result.bytes,{...this.taskIdentity(parent),context:parent.measuredContext},'output');
       this.exported.set(parent.key, { task: parent, bytes: result.bytes.byteLength });
       this.exportedBytes += result.bytes.byteLength;
       this.updatePeak();
@@ -537,7 +549,8 @@ export class DevGeometryPreprocessor {
       if (task.kind === 'bounds') this.diagnostics.boundsTasks++; else this.diagnostics.compileTasks++;
       perfRecordTaskPhase(this.taskIdentity(task), 'workerQueue', Math.max(0, performance.now() - task.queuedAt), this.perf);
       try {
-        const payload: Record<string, unknown> = { kind: task.kind, id: task.id, key: task.key, path: task.path, lod: task.lod, session: this.session };
+        const payload: Record<string, unknown> = { kind: task.kind, id: task.id, traceId: task.traceId, key: task.key, path: task.path, lod: task.lod, session: this.session };
+        if(task.parent)payload.parentTaskId=this.slots.get(task.parent)?.traceId;
         if (task.partition) payload.partition = task.partition;
         if (task.noSplit || this.memoryPressure==='high' || this.memoryPressure==='critical') payload.noSplit = true;
         const transfer: Transferable[] = [];
@@ -548,6 +561,8 @@ export class DevGeometryPreprocessor {
           task.mergeParts = undefined;
         }
         worker.postMessage(payload, transfer);
+        task.measuredContext=measurementWorkerTask(worker);
+        for(const owner of task.measuredInputs??[])this.outputResources.release(owner,'transferred','transport');task.measuredInputs=[];
       }
       catch(error){this.workerFailed(worker,error instanceof Error?error:Error(String(error)));}
     }
@@ -638,6 +653,7 @@ export class DevGeometryPreprocessor {
     }
     this.slots.delete(task.key);
     if (task.kind === 'compile' && bytes) {
+      this.outputResources.hold(`output:${task.key}`,result.bytes!,{...this.taskIdentity(task),context:task.measuredContext},'output');
       this.exported.set(task.key, { task, bytes }); this.exportedBytes += bytes;
       this.updatePeak();
     }
@@ -664,6 +680,7 @@ export class DevGeometryPreprocessor {
     return this.compile(path, 0, key, 3).finally(() => this.acknowledge(key));
   }
   acknowledge(key: string): void {
+    this.outputResources.release(`output:${key}`);
     const result = this.exported.get(key);
     if (result) { this.exportedBytes -= result.bytes; this.exported.delete(key); this.lastProgressAt = performance.now(); }
     this.pump();
@@ -702,6 +719,7 @@ export class DevGeometryPreprocessor {
       if (task.split) { this.releaseSplitBuffers(task.split); task.split.reservation = 0; }
     } this.slots.clear(); this.files = new Map();
     this.exported.clear(); this.exportedBytes = 0; this.splitHeldBytes=0;this.mergeReservedBytes=0;this.sourceAffinity.clear();
+    this.outputResources.clear();
     this.splitOwner = null;
     this.lastUsedWorker = null;
     this.idleSince = null;

@@ -1,3 +1,5 @@
+import measuredWorkerAsset from './ifcRegionalWorker.ts?worker&url';
+import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { beginIfcGeometryWork } from './geometryWorkGate.js';
 import * as THREE from 'three';
@@ -154,10 +156,7 @@ export class IfcRegionalRuntime {
       if (!this.current() || generation !== this.sourceGeneration || !bytes?.byteLength)
         throw Error('Regional source unavailable');
       this.diagnostics.sourceReads++;this.diagnostics.sourceBytes+=bytes.byteLength;
-      this.worker = new Worker(
-        new URL('./ifcRegionalWorker.ts', import.meta.url),
-        { type: 'module' }
-      );
+      this.worker = createMeasuredWorker('ifc-regional', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})}),this.sourcePath);
       this.worker.onmessage = ({ data }) => {
         if (data.stage) {
           this.diagnostics.stage = data.stage;
@@ -576,6 +575,7 @@ export class IfcRegionalRuntime {
     if (this.memoryPressure === 'critical') throw Error('当前内存压力过高，暂不能加载更多精细模型');
     if (!this.fineRuntime) {
       this.fineRuntime = new IfcObjectFineRuntime({
+        sourcePath:this.sourcePath,
         wasm: { ...this.options.ctx.ifcLoader.settings.wasm },
         readBytes: this.options.readBytes,
         webIfcSettings: undefined,

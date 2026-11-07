@@ -285,8 +285,7 @@ pub fn get_project_cache_diagnostic(
             && line_semantic_pack_status != "invalid"
     } else {
         has_index
-            && ifc_models_count > 0
-            && ifc_entry_count > 0
+            && cbm_nodes_count > 0
             && cached_ifc_count == ifc_entry_count
             && missing_cache_paths.is_empty()
             && parser_version_match
@@ -315,8 +314,7 @@ pub fn get_project_cache_diagnostic(
         }
     } else {
         if !has_index { miss_reasons.push("SUBSTATION_INDEX_EMPTY".to_string()); }
-        if ifc_models_count == 0 { miss_reasons.push("IFC_MODEL_EMPTY".to_string()); }
-        if ifc_entry_count == 0 { miss_reasons.push("IFC_ENTRY_EMPTY".to_string()); }
+        if cbm_nodes_count == 0 { miss_reasons.push("CBM_NODE_EMPTY".to_string()); }
         if !missing_cache_paths.is_empty() {
             miss_reasons.push(format!("IFC_CACHE_MISSING:{}", missing_cache_paths.len()));
         }

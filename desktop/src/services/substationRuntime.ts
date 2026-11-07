@@ -287,10 +287,6 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         throw new Error('缓存索引中没有 CBM 层级树');
       }
 
-      if (state.currentIfcEntries.length === 0) {
-        throw new Error('缓存索引中没有 IFC 文件');
-      }
-
       if (state.fileDevRelations.length === 0) {
         console.warn('[Tauri] 缓存索引中没有文件设备关系');
       }
@@ -381,7 +377,13 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
 
       // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框
       // loadAllIfcFiles 内部会创建 ViewerRuntime、加载 IFC、渲染树、触发 MOD/STL
-      await loadAllIfcFiles(state, cachedIfcEntries, showMessage, {
+      if (cachedIfcEntries.length === 0) {
+        state.endIfcBackgroundLoading();
+        const { startGeometryOnlyView } = await import('./equipmentRuntime.js');
+        if (!state.isCurrentSession(session)) return;
+        await startGeometryOnlyView(context);
+        if (state.isCurrentSession(session)) void startStdSld().catch(reportBackgroundError);
+      } else await loadAllIfcFiles(state, cachedIfcEntries, showMessage, {
         session,
         ifcSourceSizes: new Map([...cachedIfcFiles].map(([path, file]) => [path.toLowerCase(), file.size])),
         startStdSld,
@@ -490,12 +492,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
     },
   );
   if (!state.isCurrentSession(session)) return;
-  if (entries.length === 0) {
-    if (state.currentCbmTree) {
-      const { startGeometryOnlyView } = await import('./equipmentRuntime.js');
-      if (state.isCurrentSession(session)) await startGeometryOnlyView(context);
-      return;
-    }
+  if (entries.length === 0 && !state.currentCbmTree) {
     showLoading('该工程没有可用的 CBM 模型入口或 IFC 文件');
     setTimeout(() => { if (state.isCurrentSession(session)) hideLoading(); }, 4000);
     return;
@@ -699,6 +696,18 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
   // small semantic/reference transactions do not depend on DEV.
   if (persistProjectId != null && preExtracted?.cachePaths?.size) {
     void Promise.resolve(startCachePersistence()).catch(reportBackgroundError);
+  }
+
+  if (entries.length === 0) {
+    // A project represented entirely by DEV has the same semantic publication
+    // contract. Rendering remains independent of background cache completion.
+    void startCachePersistence().catch(reportBackgroundError);
+    state.endIfcBackgroundLoading();
+    const { startGeometryOnlyView } = await import('./equipmentRuntime.js');
+    if (!state.isCurrentSession(session)) return;
+    await startGeometryOnlyView(context);
+    if (state.isCurrentSession(session) && startStdSld) void startStdSld().catch(reportBackgroundError);
+    return;
   }
 
   // GIM 视为整体：直接加载全部 IFC + MOD + STL，不弹选择框。

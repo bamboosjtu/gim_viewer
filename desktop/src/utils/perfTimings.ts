@@ -1,3 +1,4 @@
+import { resetMeasurementRun, updateMeasurementIdentity, recordLegacyPhase, recordHostMemory } from '../measurement/runtime.js';
 /**
  * 性能埋点体系（acc-plan.md P0-1）。
  *
@@ -392,6 +393,7 @@ export function perfCurrentSession(): PerfSession {
  */
 export function perfUpdateSessionIdentity(identity: PerfSessionIdentity): PerfSession {
   currentSession = { ...currentSession, ...identity };
+  updateMeasurementIdentity({ generation: currentSession.generation ?? null, sourceSha256: currentSession.sourceSha256 ?? null });
   return cloneSession(currentSession);
 }
 
@@ -407,6 +409,7 @@ export function perfIsCurrentSession(session: PerfSession | number | undefined):
 export function perfReset(identity: PerfSessionIdentity = {}): void {
   sessionSequence += 1;
   currentSession = { id: sessionSequence, ...identity };
+  resetMeasurementRun({ generation: identity.generation ?? null, sourceSha256: identity.sourceSha256 ?? null });
   sessionStartMs = performance.now();
   spans = [];
   evictedPerfSpans = 0;
@@ -463,6 +466,7 @@ function appendSpan(span: PerfSpan): void {
 export function perfRecordTaskPhase(identity: PerfTaskIdentity, phase: string, durationMs: number,
   session: PerfSession = currentSession, status: TaskPhaseStatus = 'completed', bytes?: number): void {
   if (!perfIsCurrentSession(session) || !Number.isFinite(durationMs) || durationMs < 0) return;
+  recordLegacyPhase(identity, phase, durationMs, status, bytes);
   const key = `${identity.domain}:${identity.kind}:${phase}`;
   if (!taskPhaseTotals.has(key) && taskPhaseTotals.size >= 128) { taskPhaseOverflow++; return; }
   const total = taskPhaseTotals.get(key) ?? {count: 0, totalMs: 0, maxMs: 0, failed: 0, cancelled: 0, bytes: 0};
@@ -634,6 +638,10 @@ export function perfRecordMemorySample(
   const finiteOrNull = (value: number | null | undefined): number | null =>
     value != null && Number.isFinite(value) && value >= 0 ? value : null;
   const privateBytes = finiteOrNull(sample.processTreePrivateBytes);
+  recordHostMemory({ name: 'private-bytes', scope: 'process-tree', method: 'native-process-tree', quality: 'runtime-sampled',
+    availability: sample.processTreeAvailable && privateBytes !== null ? 'available' : 'unavailable',
+    bytes: sample.processTreeAvailable ? privateBytes : null, sampleDelayMs: 0,
+    ...(!sample.processTreeAvailable || privateBytes === null ? { reason: 'native-process-tree-unavailable' } : {}) });
   if (sample.processTreeAvailable && privateBytes != null) {
     processTreePrivatePeakBytes = Math.max(processTreePrivatePeakBytes ?? 0, privateBytes);
   }
@@ -810,6 +818,8 @@ export function perfSubstationSnapshot(): PerfSubstationStats {
     finalize: substationFinalizes.map((item) => ({ ...item })),
   };
 }
+/** Publication summaries are independent from visible-model readiness. */
+export function perfIfcPublicationSnapshot(){return {settled:substationIfcLoads.length,failed:substationIfcLoads.filter(row=>row.cacheWriteOk===false).length};}
 
 /**
  * 记录一次 Tauri invoke。由 bridge/invokeTimed.ts 调用，不能把旧 session

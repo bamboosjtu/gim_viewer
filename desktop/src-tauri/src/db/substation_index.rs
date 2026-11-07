@@ -238,9 +238,7 @@ fn validate_index_payload(payload: &GimIndexPayload) -> Result<(), String> {
 
 /// Tauri command：保存 GIM 索引（事务：先删后插）
 ///
-/// 防御：拒绝为空 IFC 索引打 parser_version=v4。
-/// 变电工程索引必须包含 IFC 模型与 IFC entry；
-/// 否则可能是线路工程被误识别为 substation，应走 save_line_gim_graph 而非本命令。
+/// Publish a CBM project index; DEV-only projects legitimately have no IFC.
 #[tauri::command]
 pub async fn save_gim_index(
     app_handle: tauri::AppHandle,
@@ -255,13 +253,6 @@ pub async fn save_gim_index(
 
 pub(super) fn save_gim_index_connection(conn: &mut Connection, payload: GimIndexPayload) -> Result<(), String> {
 
-    // 防御校验：变电工程索引必须包含 IFC 模型或 IFC entry
-    if payload.ifc_models.is_empty() || !payload.entries.iter().any(|e| e.entry_type == "IFC") {
-        return Err(
-            "拒绝写入 substation 索引：未发现 IFC 模型或 IFC entry（可能为线路工程被误识别，应走 save_line_gim_graph）"
-                .to_string(),
-        );
-    }
     validate_index_payload(&payload)?;
 
     ensure_project_exists(&conn, payload.project_id)?;
@@ -438,7 +429,7 @@ fn substation_index_receipt(conn: &Connection, project_id: i64) -> Result<String
         "substation_dev_solid_model", "substation_dev_sub_device", "substation_phm_solid_model"] {
         counts.insert(table, count_rows(conn,table,project_id)?);
     }
-    if counts["substation_cbm_node"] == 0 || counts["substation_ifc_model"] == 0 {
+    if counts["substation_cbm_node"] == 0 || counts["substation_gim_entry"] == 0 {
         return Err("拒绝发布不完整变电语义索引".to_string());
     }
     serde_json::to_string(&serde_json::json!({"sha256":sha,"version":SUBSTATION_PARSER_VERSION,"counts":counts}))
@@ -458,10 +449,8 @@ pub(super) fn substation_index_receipt_matches(conn: &Connection, project_id: i6
 /// deliberately not part of this decision: a project may publish semantic
 /// index and parser version before DEV GLB caching finishes, and a missing
 /// non-IFC source is recovered per entry by the geometry readers.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn substation_light_source_scan(
     has_index: bool,
-    ifc_models_count: i64,
     cbm_nodes_count: i64,
     ifc_entry_count: i64,
     cached_ifc_count: i64,
@@ -470,9 +459,7 @@ pub(super) fn substation_light_source_scan(
     receipt_valid: bool,
 ) -> bool {
     has_index
-        && ifc_models_count > 0
         && cbm_nodes_count > 0
-        && ifc_entry_count > 0
         && cached_ifc_count == ifc_entry_count
         && missing_ifc_cache_paths == 0
         && parser_version_match

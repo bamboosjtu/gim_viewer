@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-const workspaceTemp=resolve(import.meta.dirname,'.tmp/test-runtime');
+const workspaceTemp=resolve(import.meta.dirname,'../tmp/test-runtime');
 mkdirSync(workspaceTemp,{recursive:true});
 process.env.TEMP=workspaceTemp;process.env.TMP=workspaceTemp;process.env.TMPDIR=workspaceTemp;
 /**

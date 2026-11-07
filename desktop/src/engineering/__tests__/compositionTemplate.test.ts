@@ -78,7 +78,7 @@ it('groups main-transformer supports and foundations under 主变区域', () => 
 
 it('marks declared composition anchors without a confirmed whole as unbound', () => {
   const view = projectEngineeringComposition(snapshot([]), [], '工程', [{
-    path: [{ key: 'building:配电楼', title: '配电楼', kind: 'building' }], evidence: ['declared'], sourceContextIds: ['c1'],
+    path: [{ key: 'building:配电楼', title: '配电楼', kind: 'building' }], sourceContextIds: ['c1'],
   }]);
   const group = [...view.nodes.values()].find(node => node.title === '配电楼')!;
   expect(group).toMatchObject({ kind: 'group', entityCount: 0, unbound: true });

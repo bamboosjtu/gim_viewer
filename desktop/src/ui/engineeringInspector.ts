@@ -14,7 +14,7 @@ export interface EngineeringInspectorInput {
   relatedNames: ReadonlyMap<string, string>;
   partial: boolean;
   geometryNote: string;
-  projectionEvidence?: readonly string[];
+  projectionInferred?: boolean;
   onFit(): void;
   onIsolate(): void;
   onRestore(): void;
@@ -54,7 +54,7 @@ export function renderEngineeringInspector(input: EngineeringInspectorInput): vo
       unnumbered_set_identity_requires_confirmation: '缺少明确编号，不能确认属于同一套装置', peer_fragment_engineering_identity_insufficient: '分散组成缺少足够的整体身份依据',
       object_attributes_conflict:'当前对象的有效类别属性相互矛盾',assembly_identity_conflict:'成套工程身份或装配证据发生冲突',transformer_bank_identity_conflict:'主变编号、相别或本体数证据存在冲突' } as Record<string, string>)[pending.reason] ?? '整体身份或归属依据不足']] as [string, string][] : []),
     ['来源记录', String(sources.length)], ['来源状态', input.partial ? '部分来源尚未完成' : '当前来源已就绪'],
-    ...(input.projectionEvidence?.length ? [['投影归属', '空间推断，工程归属待确认'], ['投影依据', input.projectionEvidence.join('；')]] as [string,string][] : []),
+    ...(input.projectionInferred ? [['投影归属', '空间推断，工程归属待确认']] as [string,string][] : []),
   ];
   const params: [string, string][] = single
     ? single.properties.map(p => [[...(p.keys ?? []), ...(p.key ? [p.key] : [])].join(' / '), p.value])

@@ -1,3 +1,5 @@
+import measuredWorkerAsset from './lineParserWorker.ts?worker&url';
+import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import { WorkerRequests } from './workerRequests.js';
 import { decodeGimText } from '../shared/textDecode.js';
 /** Line Parser Worker v1 客户端与同步兼容回退。 */
@@ -48,7 +50,7 @@ function ensureWorker(): Worker | null {
   if (typeof Worker === 'undefined') return null;
   if (worker) return worker;
   try {
-    const instance = new Worker(new URL('./lineParserWorker.ts', import.meta.url), { type: 'module' });
+    const instance = createMeasuredWorker('line', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})}));
     instance.onmessage = (event: MessageEvent<LineParserWorkerResponse>) => {
       const response = event.data;
       const key = requestSessions.get(response.requestId);

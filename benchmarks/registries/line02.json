@@ -1,0 +1,10 @@
+{
+  "version": "gim-batch-input-v1",
+  "samples": [
+    {
+      "path": "../../demo/line02.gim",
+      "sourceSha256": "89bd14b15bc89bfc3fb0d916965a36a294cac7288647132c1d9ab35d97d05fd4",
+      "sampleTier": "L1"
+    }
+  ]
+}

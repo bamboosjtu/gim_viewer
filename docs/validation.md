@@ -8,7 +8,7 @@
 - 未关闭缺陷与已接受限制见 [问题与限制](open-issues.md)；
 - 样本身份/格式统计见 [样本台账](schema/sample-corpus.md)；
 
-测试临时输入、输出、子进程 TEMP/TMP/TMPDIR 统一使用工作区 `.tmp/` 或 `desktop/.tmp-vitest/`，禁止访问系统目录作为测试数据或清理目标。Node 测试入口通过工作区临时目录启动器运行，Rust 测试从编译期工作区路径取得临时目录。
+测试临时输入、输出、子进程 TEMP/TMP/TMPDIR 统一使用工作区根目录 `tmp/`，报告位于 `output/`，禁止访问系统目录作为测试数据或清理目标。Node 测试入口通过工作区临时目录启动器运行，Rust 测试从编译期工作区路径取得临时目录。
 
 测试集和对照基线由开发者自行构建。远程 CI 仅运行不依赖工程样本的单元测试、静态检查和构建；真实与合成工程样本、九工程对照和性能矩阵均不纳入 CI。`performance.md` 只描述作者的本地结果，不能将缺样本跳过或单元测试通过表述为复杂工程验收通过。
 
@@ -75,7 +75,7 @@ npm run test:engineering:nine
 
 `engineering:baseline`/`geometry-input` 依赖本地 `research/` 和样本；缺少必需输入应失败，不能用旧输出或跳过冒充复跑。`test:engineering:worker` 是功能夹具，不替代原生 IPC、真实渲染或性能验收。
 
-SQLite 集成测试独立于单元测试和样本回归，Windows CI 必须单独执行 `test:sqlite`。准备阶段最多 10 分钟，通过 Cargo JSON 产物消息取得本次测试程序；每次 SQLite 执行最多 30 秒，外层测试最多 60 秒。输入、输出和临时 SQLite 文件位于已忽略的 `desktop/.tmp-vitest/sqlite/`，每次调用独立目录，进程退出后清理。
+SQLite 集成测试独立于单元测试和样本回归，Windows CI 必须单独执行 `test:sqlite`。准备阶段最多 10 分钟，通过 Cargo JSON 产物消息取得本次测试程序；每次 SQLite 执行最多 30 秒，外层测试最多 60 秒。输入、输出和临时 SQLite 文件位于已忽略的 `tmp/sqlite-tests/sqlite/`，每次调用独立目录，进程退出后清理。
 
 按改动选择更窄的门禁：
 

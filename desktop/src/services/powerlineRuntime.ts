@@ -13,6 +13,7 @@ import { debugLog } from '../utils/logger.js';
 import {
   perfBegin,
   perfMark,
+  perfMarkProductMoment,
 } from '../utils/perfTimings.js';
 import { setProjectIdentity, refreshNavigatorTitle } from './presentation/shell_projectBar.js';
 import { validateGimCache } from '@desktop/database.js';
@@ -211,6 +212,8 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
               wires: graph.stats.WIRE,
               crosses: graph.stats.CROSS,
             });
+            perfMarkProductMoment('navigationUiReady',{domain:'line',cache:true},perfSession);
+            perfMarkProductMoment('interactive',{domain:'line',cache:true},perfSession);
             perfMark(
               usedSemanticFastPath ? '线路工程可交互（semantic warm）' : '线路工程可交互（SQLite 缓存命中）',
               undefined,
@@ -385,6 +388,8 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
       enableCatenary: getDevLineCatenaryMode(),
     });
     endRender();
+    perfMarkProductMoment('navigationUiReady',{domain:'line',cache:false},perfSession);
+    perfMarkProductMoment('interactive',{domain:'line',cache:false},perfSession);
     perfMark('线路工程可交互', undefined, perfSession);
 
     hideLoading();

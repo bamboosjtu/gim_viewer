@@ -235,14 +235,17 @@ export async function writeDevArtifactDetailed(
   value: unknown,
   context?: CacheContext,
   prepared?: PreparedDevArtifact,
+  observe?:import('../src/measurement/core.js').BufferObserver,
 ): Promise<DevArtifactWriteResult> {
   if (prepared && prepared.key !== key) return {ok: false, error: 'prepared artifact key mismatch'};
   if (isTauri()) {
     const args = nativeArgs(store, key, context);
     if (!args) return { ok: false, error: 'missing-cache-context' };
     try {
-      await invokeTimed('write_device_lod_artifact', packBinaryCacheWrite(args.projectId, args.entryPath,
-        prepared ? packPreparedDevArtifact(prepared) : packDevArtifact(key, value), args.sourceGimSha256));
+      const packet=(()=>{const data=prepared?packPreparedDevArtifact(prepared):packDevArtifact(key,value);const release=observe?.('artifact-pack-copy',[data]);
+        try{return packBinaryCacheWrite(args.projectId,args.entryPath,data,args.sourceGimSha256);}finally{release?.();}})();
+      const releasePacket=observe?.('ipc-wire-copy',[packet]);
+      try{await invokeTimed('write_device_lod_artifact',packet);}finally{releasePacket?.();}
       return { ok: true };
     } catch (error) {
       return { ok: false, error: String(error) };

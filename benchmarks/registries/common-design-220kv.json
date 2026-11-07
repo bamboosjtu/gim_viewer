@@ -1,0 +1,80 @@
+{
+  "version": "gim-batch-input-v1",
+  "samples": [
+    {
+      "path": "../../demo/变电站通用设计模型/220-A2-1 三维设计.gim",
+      "sourceSha256": "adf14f043b8c863bfbebca5b8211a517ee4445f1c2882ae8055f90dcdefefec4",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-A2-2 三维设计.gim",
+      "sourceSha256": "29d1c360ddb18e10a8cfb29a746688b13afb31833882ea63a7850203255ef52f",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-A2-3 三维设计.gim",
+      "sourceSha256": "1bdd6dac89d96e3bb84d75ed7dccd1ea6b74281769a94f8eb3747ee37e7375f8",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-A2-4 三维设计.gim",
+      "sourceSha256": "9c9e6a1f7449dd75d70ec2ed4ee11e8525b587b6267b9d80744a1a4c905f5834",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-A2-5 三维设计.gim",
+      "sourceSha256": "51f98998c009b83f1bfad79a2e955774ea3fc26834be24398e2991ef992026cc",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-A2-6 三维设计.gim",
+      "sourceSha256": "d8ba76a5f33e5aa66664f9647407d2445f235ef61c4f41a89805b9bce9721481",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-A2-7 三维设计.gim",
+      "sourceSha256": "2be43ac45c9808ed9a26c548e8b5cea41695c98bb1fd43ca6ffbbe5daa675097",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-A2-8 三维设计.gim",
+      "sourceSha256": "0dd393f4c09dd5e8ae7c30e7e808c975f92d43acb8f4b804380503e6f7c3a3cc",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-A3-1 三维设计.gim",
+      "sourceSha256": "77fbe1cc4fd25422f48c1348092e24fdd08f50429628af0b5ffe0cdbe0d8a524",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-A3-2 三维设计.gim",
+      "sourceSha256": "86677ed51d394cbb734d914a0cea36bd4f3cb8494584b3e6d490ab3602b185a9",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-A3-3 三维设计.gim",
+      "sourceSha256": "a5b75e4015e5a400430b230e23a0dfbcbfeb5c86bbcfdb1de777cf250999cdba",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-A3-4 三维设计.gim",
+      "sourceSha256": "c3c9f8955b0177360bb42857f926443158ae8bdbc53177bd527be57408c80e5f",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-B1-1 三维设计.gim",
+      "sourceSha256": "7f2097b8d949e521b456fcb40969df8ee86143815af7723fe07b7d0cd9b34f94",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-B1-2 三维设计.gim",
+      "sourceSha256": "484e1787af2a4dd59f42dbdf10bb018e0ae5b37d177b3fd47cc024cc1ff2b390",
+      "sampleTier": "L0"
+    },
+    {
+      "path": "../../demo/变电站通用设计模型/220-B1-3 三维设计.gim",
+      "sourceSha256": "9a3cb0a1f24444da75bc1a3aff858d49f024ba58fc9605f1f20c4a0ffec1422d",
+      "sampleTier": "L0"
+    }
+  ]
+}

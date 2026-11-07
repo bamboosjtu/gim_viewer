@@ -1,3 +1,5 @@
+import measuredWorkerAsset from './ifcObjectFineWorker.ts?worker&url';
+import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import * as THREE from 'three';
 import type { IfcObjectIdentity } from './ifcObjectIdentity.js';
 import type { ObjectFineResult } from './ifcObjectFineData.js';
@@ -14,7 +16,7 @@ export class IfcObjectFineRuntime {
   private generation=0;
   private idle:ReturnType<typeof setTimeout>|null=null;
   constructor(private options:{wasm:{path:string;absolute:boolean};readBytes:()=>Promise<Uint8Array|null>;
-    webIfcSettings?:LoaderSettings;
+    webIfcSettings?:LoaderSettings; sourcePath?:string;
     timeoutMs?:number;worker?:()=>Worker;onTiming?:(data:Record<string,unknown>)=>void}){}
   private send(message:Record<string,unknown>,transfer:Transferable[]=[]):Promise<any>{
     if(!this.worker)return Promise.reject(new Error('Object fine model unavailable'));
@@ -32,7 +34,7 @@ export class IfcObjectFineRuntime {
     if(this.released || generation!==this.generation)throw new DOMException('Object fine cancelled','AbortError');
     if(!bytes)throw new Error('IFC source not materialized');
     this.options.onTiming?.({stage:'source-read',durationMs:performance.now()-started,rawBytes:bytes.byteLength});
-    this.worker=this.options.worker?.()??new Worker(new URL('./ifcObjectFineWorker.ts',import.meta.url),{type:'module'});
+    this.worker=this.options.worker?.()??createMeasuredWorker('ifc-fine', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})}),this.options.sourcePath);
     this.worker.onmessage=({data})=>{const p=this.pending.get(data.id);if(!p)return;this.pending.delete(data.id);clearTimeout(p.timer);data.error?p.reject(new Error(data.error)):p.resolve(data.data);};
     this.worker.onerror=e=>this.stop(new Error(e.message));
     const owned=bytes.byteOffset===0&&bytes.byteLength===bytes.buffer.byteLength?bytes:new Uint8Array(bytes);

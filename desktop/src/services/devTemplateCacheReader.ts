@@ -1,12 +1,14 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { readDevArtifactBatch, type DevArtifactRead, type DevArtifactReadStatus } from '@desktop/devLodCache.js';
 import { ByteWorkBudget } from '../utils/byteWorkBudget.js';
+import {measurementRun,trackHostBuffers} from '../measurement/runtime.js';
 interface Lease<T> { status: DevArtifactReadStatus; value?: T; error?: string; release: () => void }
 interface Request<T> { key: string; resolve: (lease: Lease<T>) => void; reject: (error: unknown) => void }
 /** One reservation covers the whole batch until its last consumer finishes.
  * Native reads defer rows that exceed the remaining byte ceiling. Neither
  * prefetch nor concurrent parsing can bypass the shared cold/warm budget. */
 export class DevTemplateCacheReader<T> {
+  private measurement=measurementRun();
   readonly diagnostics = {
     batches: 0,
     entries: 0,
@@ -86,8 +88,10 @@ export class DevTemplateCacheReader<T> {
           release = undefined;
           const finish = (): void => { if (--remaining === 0) reservation(); };
           for (const { row, value } of terminal) {
+            const data=(value.value as {result?:{bytes?:Uint8Array}}|undefined)?.result?.bytes;
+            const releaseBuffers=data?trackHostBuffers('cache-input',[data],this.measurement):()=>{};
             let done = false;
-            const consume = (): void => { if (done) return; done = true; this.leases.delete(consume); finish(); };
+            const consume = (): void => { if (done) return; done = true; releaseBuffers();this.leases.delete(consume); finish(); };
             this.leases.add(consume);
             this.record(value.status);
             row.resolve({ status: value.status, value: value.value, error: value.error, release: consume });

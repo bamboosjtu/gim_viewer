@@ -54,10 +54,10 @@ jobs:
 
       - name: Prepare workspace temporary directory
         run: |
-          New-Item -ItemType Directory -Path ../.tmp/ci -Force | Out-Null
-          "TEMP=$((Resolve-Path ../.tmp/ci).Path)" >> $env:GITHUB_ENV
-          "TMP=$((Resolve-Path ../.tmp/ci).Path)" >> $env:GITHUB_ENV
-          "TMPDIR=$((Resolve-Path ../.tmp/ci).Path)" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Path ../tmp/ci -Force | Out-Null
+          "TEMP=$((Resolve-Path ../tmp/ci).Path)" >> $env:GITHUB_ENV
+          "TMP=$((Resolve-Path ../tmp/ci).Path)" >> $env:GITHUB_ENV
+          "TMPDIR=$((Resolve-Path ../tmp/ci).Path)" >> $env:GITHUB_ENV
 
       - name: Install frontend dependencies
         run: npm ci
@@ -96,6 +96,9 @@ jobs:
 
       - name: Check native acceptance tooling
         run: npm run test:acceptance-tools
+
+      - name: Check measurement value and protocol contracts (no model samples)
+        run: npm run test:measurement-tools
 
       - name: Run SQLite integration tests
         run: npm run test:sqlite

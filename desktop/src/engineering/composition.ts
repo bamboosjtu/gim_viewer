@@ -10,13 +10,10 @@ export interface CompositionGroup {
 export interface CompositionAssignment {
   entityId: string;
   paths: CompositionGroup[][];
-  evidence: string[];
-  /** A projection estimate, never an entity identity or membership assertion. */
   inferred?: boolean;
 }
 export interface CompositionDeclaration {
   path: CompositionGroup[];
-  evidence: string[];
   sourceContextIds: string[];
 }
 export interface CompositionNode {
@@ -27,7 +24,6 @@ export interface CompositionNode {
   children: string[];
   parent?: string;
   entityCount: number;
-  evidence: string[];
   inferred?: boolean;
   declaredContextIds?: string[];
   /** A declared composition anchor with no confirmed engineering whole. */
@@ -39,7 +35,7 @@ export interface EngineeringComposition {
   nodes: Map<string, CompositionNode>;
   rowsByEntity: Map<string, string[]>;
 }
-export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v10';
+export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v11';
 function groupOrder(part:CompositionGroup):number|undefined {
   if(part.kind==='area')return part.key==='area:main'?20:21-(Number(part.title.match(/\d+/)?.[0])||0)/10000;
   if(part.kind==='building'){
@@ -59,12 +55,12 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
   const rootKey = 'engineering:project', nodes = new Map<string, CompositionNode>(), rowsByEntity = new Map<string, string[]>();
   const members = new Map<string, Set<string>>();
   const orders = new Map<string, number>();
-  nodes.set(rootKey, { key: rootKey, title: title || '工程组成', kind: 'project', children: [], entityCount: 0, evidence: [] });
+  nodes.set(rootKey, { key: rootKey, title: title || '工程组成', kind: 'project', children: [], entityCount: 0 });
   const byEntity = new Map(assignments.map(a => [a.entityId, a]));
-  function group(parent: string, kind: string, value: string, name: string, evidence: string[], inferred = false): string {
+  function group(parent: string, kind: string, value: string, name: string, inferred = false): string {
     const key = childKey(parent, kind, value);
     if (!nodes.has(key)) {
-      nodes.set(key, { key, parent, title: name, kind: 'group', children: [], entityCount: 0, evidence, ...(inferred ? {inferred:true} : {}) });
+      nodes.set(key, { key, parent, title: name, kind: 'group', children: [], entityCount: 0, ...(inferred ? {inferred:true} : {}) });
       nodes.get(parent)!.children.push(key);
     } else if (!inferred) delete nodes.get(key)!.inferred;
     return key;
@@ -72,7 +68,7 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
   const anchors = new Map<string, Set<string>>();
   for (const declaration of declarations) {
     let parent = rootKey;
-    for (const part of declaration.path) { parent = group(parent, part.kind, part.key, part.title, declaration.evidence); const order=groupOrder(part);if (order !== undefined) orders.set(parent, order); }
+    for (const part of declaration.path) { parent = group(parent, part.kind, part.key, part.title); const order=groupOrder(part);if (order !== undefined) orders.set(parent, order); }
     const ids = anchors.get(parent) ?? new Set<string>(); declaration.sourceContextIds.forEach(id => ids.add(id)); anchors.set(parent, ids);
   }
   for (const [key, contexts] of anchors) nodes.get(key)!.declaredContextIds = [...contexts].sort();
@@ -82,13 +78,13 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
     const seen = new Set<string>();
     for (const path of paths) {
       let parent = rootKey;
-      if (!path.length) parent = group(parent, 'unresolved', 'context', '工程归属待确认', []);
-      for (const part of path) { parent = group(parent, part.kind, part.key, part.title, assignment?.evidence ?? [], !!assignment?.inferred && ['building','storey','area','structure'].includes(part.kind)); const order=groupOrder(part);if (order !== undefined) orders.set(parent, order); }
+      if (!path.length) parent = group(parent, 'unresolved', 'context', '工程归属待确认');
+      for (const part of path) { parent = group(parent, part.kind, part.key, part.title, !!assignment?.inferred && ['building','storey','area','structure'].includes(part.kind)); const order=groupOrder(part);if (order !== undefined) orders.set(parent, order); }
       const terminalBucket = path[path.length - 1]?.kind === 'bucket';
-      if (!terminalBucket) parent = group(parent, 'category', entity.category, categoryLabel(entity.category), []);
+      if (!terminalBucket) parent = group(parent, 'category', entity.category, categoryLabel(entity.category));
       if (seen.has(parent)) continue; seen.add(parent);
       const key = childKey(parent, 'entity', entity.id);
-      nodes.set(key, { key, title: entity.name || categoryLabel(entity.category), kind: 'entity', targetId: entity.id, parent, children: [], entityCount: 1, evidence: assignment?.evidence ?? [], ...(assignment?.inferred ? {inferred:true} : {}) });
+      nodes.set(key, { key, title: entity.name || categoryLabel(entity.category), kind: 'entity', targetId: entity.id, parent, children: [], entityCount: 1, ...(assignment?.inferred ? {inferred:true} : {}) });
       nodes.get(parent)!.children.push(key);
       const rows = rowsByEntity.get(entity.id) ?? []; rows.push(key); rowsByEntity.set(entity.id, rows);
       for (let cursor: string | undefined = parent; cursor; cursor = nodes.get(cursor)?.parent) {
@@ -97,13 +93,13 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
     }
   }
   if (snapshot.pending.length) {
-    const unresolved = group(rootKey, 'discipline', 'unclassified', '未分类', []);
+    const unresolved = group(rootKey, 'discipline', 'unclassified', '未分类');
     orders.set(unresolved, 2);
-    const other = group(unresolved, 'category', 'pending-other', '其他', []);
-    const parent = group(other, 'pending', 'wholes', '整体归属待确认', []);
+    const other = group(unresolved, 'category', 'pending-other', '其他');
+    const parent = group(other, 'pending', 'wholes', '整体归属待确认');
     for (const pending of snapshot.pending) {
       const key = childKey(parent, 'pending', pending.id);
-      nodes.set(key, { key, title: `待归整体集合 · ${pending.sourceIds.length} 个来源`, kind: 'pending', targetId: pending.id, parent, children: [], entityCount: 0, evidence: [pending.reason] });
+      nodes.set(key, { key, title: `待归整体集合 · ${pending.sourceIds.length} 个来源`, kind: 'pending', targetId: pending.id, parent, children: [], entityCount: 0 });
       nodes.get(parent)!.children.push(key); rowsByEntity.set(pending.id, [key]);
     }
   }

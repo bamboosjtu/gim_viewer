@@ -19,6 +19,9 @@ describe('independent navigation cache', () => {
     const f = await fixture(), bytes = await encodeEngineeringNavigation(f.view, f.sources, f.snapshot, f.source.digest, f.id);
     expect(await decodeEngineeringNavigation(bytes, f.sources, f.snapshot, f.source.digest, f.id)).toEqual(f.view);
     expect(f.view.sourceNodes.get(f.view.sourceRoot)?.children).toHaveLength(2);
+    const restored=await decodeEngineeringNavigation(bytes, f.sources, f.snapshot, f.source.digest, f.id);
+    expect([...restored.composition.nodes.values()].every(node=>!('evidence' in node))).toBe(true);
+    expect(restored.compositionInput?.declarations.every(row=>!('evidence' in row))).toBe(true);
   });
   it('rejects changed normalized membership or source contents even when the package identity is unchanged', async () => {
     const f = await fixture(), bytes = await encodeEngineeringNavigation(f.view, f.sources, f.snapshot, f.source.digest, f.id);

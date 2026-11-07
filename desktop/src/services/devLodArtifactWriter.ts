@@ -2,6 +2,7 @@
 import { prepareDevArtifact, writeDevArtifactDetailed } from '@desktop/devLodCache.js';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { ByteWorkBudget } from '../utils/byteWorkBudget.js';
+import {measurementRun,measurementContext,measurementSourceId,trackHostBuffers} from '../measurement/runtime.js';
 import { perfCurrentSession, perfRecordTaskPhase, type PerfTaskIdentity } from '../utils/perfTimings.js';
 import { type DeviceLod } from '../viewer/devLodPolicy.js';
 import type { DevLodDiagnostics } from './devLodDiagnostics.js';
@@ -16,6 +17,7 @@ export interface DevLodArtifactWriterOptions {
   recordCacheDecision: (dev: string, lod: DeviceLod, status: 'write-failed', reason?: string) => void;
 }
 export class DevLodArtifactWriter {
+  private measurement=measurementRun();
   constructor(private readonly options: DevLodArtifactWriterOptions) { }
   /** Admitted writes own at most one maximum asset plus metadata (129 MiB).
     * Waiting template buffers retain their input lease until writer admission. */
@@ -72,6 +74,12 @@ cacheWriteReservedBytes: this.writeBudget.bytes, cacheWritePeakBytes: this.write
       this.updateWriteDiagnostics(); return Promise.resolve();
     }
     perfRecordTaskPhase(identity, 'cachePrepare', performance.now() - queuedAt, this.options.perf, 'completed', prepared.retainedBytes);
+    let observe:import('../measurement/core.js').BufferObserver|undefined;
+    if(this.measurement.collector.mode!=='off'){
+      const context={...measurementContext(this.measurement.collector),taskId:identity.taskId,sourceId:measurementSourceId(identity.sourcePath,this.measurement.collector),geometryLod:lod??null};
+      observe=(role,buffers)=>trackHostBuffers(role,buffers,this.measurement,context);
+    }
+    const releasePrepared=observe?.('cache-prepared',prepared.data?[prepared.metadata,prepared.data]:[prepared.metadata]);
     this.writeWaitingBytes += prepared.retainedBytes;
     const admission = this.writeBudget.acquire(prepared.retainedBytes).finally(() => {
       this.writeWaitingBytes -= prepared.retainedBytes; releaseInput(); this.updateWriteDiagnostics();
@@ -87,7 +95,7 @@ cacheWriteReservedBytes: this.writeBudget.bytes, cacheWritePeakBytes: this.write
           this.options.diagnostics.artifactWriteAttempts++;
           const writeAt = performance.now();
           let detail: Awaited<ReturnType<typeof writeDevArtifactDetailed>>;
-          try { detail = await writeDevArtifactDetailed(store, key, value, this.options.session, prepared); }
+          try { detail = await writeDevArtifactDetailed(store, key, value, this.options.session, prepared,observe); }
           catch (error) { perfRecordTaskPhase(identity, 'cacheWrite', performance.now() - writeAt, this.options.perf, 'failed'); throw error; }
           perfRecordTaskPhase(identity, 'cacheWrite', performance.now() - writeAt, this.options.perf, detail.ok ? 'completed' : 'failed');
           if (!detail.ok) {
@@ -112,6 +120,7 @@ cacheWriteReservedBytes: this.writeBudget.bytes, cacheWritePeakBytes: this.write
       this.options.diagnostics.errors.push(`缓存写入异常 ${store}:${key}: ${String(error)}`);
       if (this.options.diagnostics.errors.length > 32) this.options.diagnostics.errors.shift();
     }).finally(() => {
+      releasePrepared?.();
       this.pendingWrites.delete(queueKey); this.writeAdmissions.delete(queueKey); this.updateWriteDiagnostics(); this.options.requestReady();
     });
     this.pendingWrites.set(queueKey, task);

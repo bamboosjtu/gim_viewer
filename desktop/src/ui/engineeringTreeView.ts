@@ -195,7 +195,7 @@ export function renderEngineeringTree(state: AppState): void {
       const label = document.createElement('span'); label.className = 'tree-label'; label.textContent = key === root ? state.projectName || node.title : node.title;
       if (mode === 'composition') {
         const group = data.composition.nodes.get(key)!;
-        if (group.inferred) { label.textContent += ' · 空间推断'; label.title = `空间范围推断，工程归属待确认\n${group.evidence.join('\n')}`; }
+        if (group.inferred) { label.textContent += ' · 空间推断'; label.title = '空间范围推断，工程归属待确认'; }
         if (group.unbound || (group.declaredContextIds?.length && group.entityCount === 0)) { label.textContent += ' · 归属待确认'; label.title = '来源已声明此工程单元，整体归属尚未确认'; }
       }
       if (mode === 'inventory' && 'entityCount' in node && (node.kind === 'group' || node.kind === 'template') && node.entityCount) {

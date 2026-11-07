@@ -347,28 +347,31 @@ use std::os::windows::fs::MetadataExt;
 
         #[test]
         fn warm_source_scan_is_skipped_for_a_consistent_semantic_index() {
+            // IFC is optional. Existing referenced source files still must be readable.
+            assert!(super::super::substation_light_source_scan(
+                true, 5, 0, 0, 0, true, true
+            ));
             // Semantic index published, receipt valid, every IFC source cached.
             assert!(super::super::substation_light_source_scan(
-                true, 12, 12594, 12, 12, 0, true, true
+                true, 12594, 12, 12, 0, true, true
             ));
             // A project without any GLB geometry cache still has a complete
             // semantic index; this helper must not depend on that cache.
             assert!(super::super::substation_light_source_scan(
-                true, 1, 1, 1, 1, 0, true, true
+                true, 1, 1, 1, 0, true, true
             ));
         }
 
         #[test]
         fn warm_source_scan_stays_when_index_or_ifc_sources_are_incomplete() {
             let complete = super::super::substation_light_source_scan;
-            assert!(!complete(false, 12, 12594, 12, 12, 0, true, true), "no index");
-            assert!(!complete(true, 0, 12594, 12, 12, 0, true, true), "no IFC model");
-            assert!(!complete(true, 12, 0, 12, 12, 0, true, true), "no CBM nodes");
-            assert!(!complete(true, 12, 12594, 12, 0, 0, true, true), "no IFC entries");
-            assert!(!complete(true, 12, 12594, 12, 11, 0, true, true), "missing IFC cache");
-            assert!(!complete(true, 12, 12594, 12, 12, 1, true, true), "unreadable IFC");
-            assert!(!complete(true, 12, 12594, 12, 12, 0, false, true), "parser mismatch");
-            assert!(!complete(true, 12, 12594, 12, 12, 0, true, false), "receipt mismatch");
+            assert!(!complete(false, 12594, 12, 12, 0, true, true), "no index");
+            assert!(!complete(true, 0, 12, 12, 0, true, true), "no CBM nodes");
+            assert!(!complete(true, 12594, 12, 0, 0, true, true), "no IFC entries");
+            assert!(!complete(true, 12594, 12, 11, 0, true, true), "missing IFC cache");
+            assert!(!complete(true, 12594, 12, 12, 1, true, true), "unreadable IFC");
+            assert!(!complete(true, 12594, 12, 12, 0, false, true), "parser mismatch");
+            assert!(!complete(true, 12594, 12, 12, 0, true, false), "receipt mismatch");
         }
 
         #[test]

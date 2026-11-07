@@ -33,6 +33,7 @@ const uiPresentationValues = new Map([
 for (const layer of ['engineering','gim','viewer','ui','services','app']) for (const path of files(resolve(root,layer))) {
   const ast = ts.createSourceFile(path, readFileSync(path,'utf8'), ts.ScriptTarget.Latest, true);
   const localPath = relative(root, path).replaceAll('\\', '/');
+  const pureLineProjection = ['services/lineInspectorProjection.ts','services/lineMapGeometry.ts','services/propertyPresentation.ts'].includes(localPath);
   const resolverFactories = new Set(['createEntryResolver']);
   for (const statement of ast.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)
@@ -43,6 +44,9 @@ for (const layer of ['engineering','gim','viewer','ui','services','app']) for (c
     }
   }
   function visit(node) {
+    if (pureLineProjection && ts.isIdentifier(node) && ['document','window','localStorage','sessionStorage'].includes(node.text)) {
+      failures.push(`${localPath}: pure line projection references browser global ${node.text}`);
+    }
     if (localPath !== 'gim/entryResolver.ts' && ts.isCallExpression(node)
       && (ts.isIdentifier(node.expression) ? resolverFactories.has(node.expression.text)
         : ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'createEntryResolver')) {
@@ -60,6 +64,9 @@ for (const layer of ['engineering','gim','viewer','ui','services','app']) for (c
     if (specifier && ts.isStringLiteral(specifier)) {
       const name = specifier.text;
       const target = name.startsWith('.') ? relative(root,resolve(dirname(path),name)).replaceAll('\\','/').split('/')[0] : name;
+      if (pureLineProjection && /^(?:app|ui|viewer|@desktop|@tauri-apps|three|web-ifc|maplibre)/.test(target)) {
+        failures.push(`${localPath}: pure line projection imports runtime dependency ${name}`);
+      }
       if(layer==='ui' && name.startsWith('.')) {
         const module=relative(root,resolve(dirname(path),name.replace(/\.js$/,'.ts'))).replaceAll('\\','/');
         if(/^(?:engineering|gim|viewer)\//.test(module)||module==='shared/gimParsing.ts') {

@@ -1,0 +1,25 @@
+{
+  "version": "gim-batch-input-v1",
+  "samples": [
+    {
+      "path": "../../demo/line01.gim",
+      "sourceSha256": "97a5699005b6a03d7c4304da61d10b216c5804d6fc61032432a6bd72547aa829",
+      "sampleTier": "L1"
+    },
+    {
+      "path": "../../demo/line02.gim",
+      "sourceSha256": "89bd14b15bc89bfc3fb0d916965a36a294cac7288647132c1d9ab35d97d05fd4",
+      "sampleTier": "L1"
+    },
+    {
+      "path": "../../demo/line03.gim",
+      "sourceSha256": "67695245738fc5a5577656d182115942bc7d5c9997210458f1a9d20e3163c32f",
+      "sampleTier": "L1"
+    },
+    {
+      "path": "../../demo/line04.gim",
+      "sourceSha256": "cdec033a76badb4086fa3a912350f52c08b65dc7bc0cb7f85bd985ab6a1f64d5",
+      "sampleTier": "L1"
+    }
+  ]
+}

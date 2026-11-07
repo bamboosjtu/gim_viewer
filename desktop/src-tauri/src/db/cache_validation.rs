@@ -499,7 +499,6 @@ fn validate_gim_cache_blocking(
         // more than the cold validation of an empty index.
         let light_source_scan = substation_light_source_scan(
             has_index,
-            ifc_models_count,
             cbm_nodes_count,
             ifc_entry_count as i64,
             cached_ifc_count as i64,
@@ -511,8 +510,6 @@ fn validate_gim_cache_blocking(
             missing_cache_paths.extend(missing_substation_sources_with_context(&conn,project_id,context.as_ref())?);
         }
         let valid = has_index
-            && ifc_models_count > 0
-            && ifc_entry_count > 0
             && cbm_nodes_count > 0
             && cached_ifc_count == ifc_entry_count
             && missing_cache_paths.is_empty()
@@ -558,8 +555,6 @@ fn validate_gim_cache_blocking(
     } else {
         if !has_index { miss_reasons.push("SUBSTATION_INDEX_EMPTY".to_string()); }
         if !substation_receipt_valid { miss_reasons.push("SUBSTATION_INDEX_RECEIPT_INVALID".to_string()); }
-        if ifc_models_count == 0 { miss_reasons.push("IFC_MODEL_EMPTY".to_string()); }
-        if ifc_entry_count == 0 { miss_reasons.push("IFC_ENTRY_EMPTY".to_string()); }
         if cbm_nodes_count == 0 { miss_reasons.push("CBM_NODE_EMPTY".to_string()); }
         if !missing_cache_paths.is_empty() {
             miss_reasons.push(format!("IFC_CACHE_MISSING:{}", missing_cache_paths.len()));

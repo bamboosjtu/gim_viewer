@@ -1,4 +1,5 @@
 import { backgroundErrorSnapshot } from '../utils/backgroundErrors.js';
+import { measurementSnapshot } from '../measurement/runtime.js';
 import type {AppState, ProjectLoadSession} from '../app/state.js';
 import {getDbPath, getLatestProjectCacheDiagnostic, getProjectDiagnostic} from '@desktop/database.js';
 import {getDebugConfigSnapshot} from '../config/debug.js';
@@ -30,6 +31,7 @@ async function collect(state: AppState, session: ProjectLoadSession, perfId: num
   const capabilities = state.currentProjectType === 'substation' ? state.substationCapabilities : null;
   return {
     projectSession: session,
+    measurement: measurementSnapshot(),
     substationCapabilities: capabilities,
     substationCapabilitiesStatus: state.currentProjectType !== 'substation' ? 'not-applicable'
       : capabilities ? 'available' : 'not-collected',

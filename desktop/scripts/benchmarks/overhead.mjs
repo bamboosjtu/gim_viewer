@@ -1,0 +1,26 @@
+import {mkdirSync,writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {runNative} from './native-run.mjs';
+import {median} from './compare.mjs';
+
+export async function measureProbeOverhead({root,buildManifest,sample,profile,caseSpec,repetitions=3,retest=false}){
+  const runs=[];const out=join(root,'output','gim-bench',`overhead-${Date.now()}`);mkdirSync(out,{recursive:true});
+  for(let round=0;round<repetitions;round++)for(const mode of round%2?['benchmark','off']:['off','benchmark']){
+    writeFileSync(join(out,'progress.json'),JSON.stringify({round,mode,completed:runs.length},null,2));
+    const result=await runNative({root,buildManifest,sample,profileDigest:profile.digest,scenario:caseSpec.scenario,actions:caseSpec.actions,timeoutMs:caseSpec.timeoutMs,mode});runs.push(result.report);
+  }
+  const off=runs.filter(r=>r.conditions.mode==='off'),on=runs.filter(r=>r.conditions.mode==='benchmark');
+  const complete=repetitions>=3&&runs.every(r=>r.correctness==='passed'&&r.cacheVerified&&r.processSampling.complete&&!r.reason)
+    &&on.every(r=>r.measurementComplete)&&runs.every(r=>r.conditions.workloadDigest===runs[0].conditions.workloadDigest&&r.conditions.routeDigest===runs[0].conditions.routeDigest);
+  const metrics=['firstResponseMs','automaticLoadMs','processPrivatePeakBytes'].map(name=>{
+    const base=median(off.map(r=>r.metrics[name])),value=median(on.map(r=>r.metrics[name]));return {name,off:base,benchmark:value,regression:base>0?value/base-1:null};
+  });
+  const outcome=!complete?'INCONCLUSIVE':metrics.some(row=>row.regression===null||row.regression>0.1)?'FAIL':'PASS';
+  const result={kind:'same-build-probe-overhead',outcome,profileDigest:profile.digest,metrics,runs,independentProcesses:true,alternatingOrder:true};
+  if(outcome==='FAIL'&&!retest){
+    const second=await measureProbeOverhead({root,buildManifest,sample,profile,caseSpec,repetitions,retest:true});
+    result.retest={outcome:second.result.outcome,metrics:second.result.metrics};result.outcome=second.result.outcome;
+    result.regressionConfirmed=second.result.outcome==='FAIL';
+  }
+  writeFileSync(join(out,'overhead.json'),JSON.stringify(result,null,2));return {out,result};
+}

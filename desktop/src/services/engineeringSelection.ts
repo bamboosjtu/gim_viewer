@@ -222,10 +222,8 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   const { renderEngineeringInspector } = await loadPresentation('engineeringInspector');
   if (!guard.isCurrent()) return true;
   renderEngineeringInspector({ title: groupNode?.title ?? entity?.name ?? single?.name ?? '待归整体集合', entity, pending, sources: selectedSources,
-    projectionEvidence: groupNode && 'inferred' in groupNode && groupNode.inferred ? groupNode.evidence : entity
-      ? state.engineeringNavigation?.composition.rowsByEntity.get(entity.id)?.flatMap(key => {
-        const row=state.engineeringNavigation?.composition.nodes.get(key); return row?.inferred ? row.evidence : [];
-      }) : undefined,
+    projectionInferred: groupNode && 'inferred' in groupNode ? groupNode.inferred : entity
+      ? state.engineeringNavigation?.composition.rowsByEntity.get(entity.id)?.some(key => state.engineeringNavigation?.composition.nodes.get(key)?.inferred) : false,
     group: groupNode ? { entityCount: groupNode.entityCount, pendingCount: ownerIds.size - groupNode.entityCount,
       confirmedCount:'confirmedCount' in groupNode?groupNode.confirmedCount:undefined,
       attachmentCount:'attachmentCount' in groupNode?groupNode.attachmentCount:undefined,

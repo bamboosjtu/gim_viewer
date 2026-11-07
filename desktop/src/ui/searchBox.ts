@@ -24,7 +24,9 @@ export function renderSearchBox(
   host: HTMLElement,
   items: SearchItem[],
   onPick: (key: string) => void,
-): void {
+): { destroy(): void } {
+  let blurTimer: number | undefined;
+  let destroyed = false;
   const index = items.map(item => ({ item, title: item.title.toLowerCase(), subtitle: item.subtitle?.toLowerCase() ?? '',
     text: item.searchText ?? [item.title, item.subtitle ?? '', item.key].join('\n').toLowerCase() }));
   const wrap = document.createElement('div');
@@ -102,6 +104,7 @@ export function renderSearchBox(
           rowEl.style.background = 'transparent';
         });
         rowEl.addEventListener('click', () => {
+          if (destroyed) return;
           hideList();
           onPick(e.key);
         });
@@ -154,7 +157,9 @@ export function renderSearchBox(
 
   // 失焦收起（延迟以允许结果行 click 先触发）
   input.addEventListener('blur', () => {
-    window.setTimeout(hideList, 150);
+    if (destroyed) return;
+    if (blurTimer !== undefined) window.clearTimeout(blurTimer);
+    blurTimer = window.setTimeout(() => { blurTimer = undefined; hideList(); }, 150);
   });
   input.addEventListener('focus', () => {
     if (list.childElementCount > 0) list.style.display = 'block';
@@ -163,4 +168,10 @@ export function renderSearchBox(
   wrap.appendChild(input);
   wrap.appendChild(list);
   host.prepend(wrap);
+  return { destroy() {
+    if (destroyed) return;
+    destroyed = true;
+    if (blurTimer !== undefined) window.clearTimeout(blurTimer);
+    wrap.remove();
+  } };
 }

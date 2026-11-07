@@ -62,7 +62,7 @@ for(const sample of corpus.samples){
     if(model.sha256!==modelSha) throw Error(`${sample.id}: missing/stale IFC bounds ${model.path}`);
     for(const object of model.objects??[]){
       const sourceId=`ifc:${JSON.stringify([createIfcModelId(model.path),object.expressId])}`,owner=owners.get(sourceId);
-      if(owner) bounds.push({entityId:owner,bounds:object.bounds,evidence:sourceId});
+      if(owner) bounds.push({entityId:owner,bounds:object.bounds});
     }
   }
   const diagnostics={footprints:[],firewallStacks:[]};
@@ -80,7 +80,7 @@ for(const sample of corpus.samples){
     if(JSON.stringify(engineeringNavigationToWire(restored))!==JSON.stringify(engineeringNavigationToWire(view)))throw Error(`${sample.id}: final navigation cache roundtrip mismatch`);
     writeFileSync(join(out,`${sample.id}-navigation-cache.json`),JSON.stringify({sample:sample.id,complete:restored.compositionComplete,bytes:bytes.length,identical:true}));
   }
-  const visit=(key:string):unknown=>{const node=view.composition.nodes.get(key)!;return {title:node.title,kind:node.kind,...(node.targetId?{targetId:node.targetId}:{}),entityCount:node.entityCount,...(node.kind==='group'&&node.evidence.length?{evidence:node.evidence.filter(e=>!e.startsWith('entity:'))}:{}),children:node.children.map(visit)};};
+  const visit=(key:string):unknown=>{const node=view.composition.nodes.get(key)!;return {title:node.title,kind:node.kind,...(node.targetId?{targetId:node.targetId}:{}),entityCount:node.entityCount,children:node.children.map(visit)};};
   writeFileSync(join(out,`${sample.id}-composition.json`),JSON.stringify({schema:'gim-engineering-composition-review-v1',sample:sample.id,sourceSha256:sample.sha256,metadata:view.metadata,root:visit(view.composition.rootKey)},null,2));
   const groups=[...view.composition.nodes.values()].filter(node=>node.kind==='group');
   const buildings=groups.filter(node=>{const parts=node.key.split('/');return parts[parts.length-1]?.startsWith('building:');}).map(node=>({name:node.title,entityCount:node.entityCount}));

@@ -13,7 +13,7 @@ export async function executeSqliteRoundTrip(requests: Request[], executable: st
   args?: string[]; signal?: AbortSignal; timeoutMs?: number; tempRoot?: string;
 } = {}): Promise<Result[]> {
   if (!executable || !existsSync(executable)) throw new Error(`SQLite execution: harness executable missing: ${executable}`);
-  const tempRoot = options.tempRoot ?? resolve('.tmp-vitest/sqlite');
+  const tempRoot = options.tempRoot ?? resolve('../tmp/sqlite-tests/sqlite');
   mkdirSync(tempRoot, { recursive: true });
   const dir = mkdtempSync(join(tempRoot, 'gim-sqlite-'));
   const input = join(dir, 'input.json'), output = join(dir, 'output.json');

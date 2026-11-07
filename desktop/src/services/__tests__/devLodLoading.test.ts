@@ -11,7 +11,7 @@ vi.mock('../devGeometryWorkerClient.js',()=>({createDevGeometryPreprocessor:()=>
 vi.mock('../sourceGeometryService.js',()=>({getSourceGeometryOccurrences:async()=>['a','b'].map(name=>({
   id:`root/${name}`,sourceId:`root/${name}`,sourceContextId:`root/${name}`,devPath:'DEV/shared.dev',name,placementMatrix:new THREE.Matrix4().toArray()}))}));
 
-afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();vi.resetAllMocks();});
+afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();vi.resetAllMocks();});
 it('initializes workers and base rows before optional warm preparation settles, and discards a reply after release',async()=>{
   let finish!:(value:any)=>void;
   mock.read.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));

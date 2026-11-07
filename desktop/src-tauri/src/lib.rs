@@ -1,4 +1,5 @@
 mod db;
+mod benchmark;
 mod tree_export;
 mod gim_extract;
 mod gim_extract_command;
@@ -44,6 +45,12 @@ fn ensure_fixed_webview2_acl() {
         .to_string_lossy()
         .to_ascii_lowercase()
         .hash(&mut path_hasher);
+    // A replacement at the same portable path must not inherit an old marker.
+    if let Ok(metadata)=fs::metadata(runtime_dir.join("msedgewebview2.exe")) {
+        metadata.len().hash(&mut path_hasher);
+        metadata.modified().ok().hash(&mut path_hasher);
+    }
+    "appcontainer-rx-medium-integrity-v1".hash(&mut path_hasher);
     let marker_dir = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
@@ -68,6 +75,15 @@ fn ensure_fixed_webview2_acl() {
             .unwrap_or(false);
         all_succeeded &= succeeded;
     }
+
+    // Sandboxed child creation blocks Low-labelled executable images. Files
+    // extracted into a Low-labelled workspace inherit that label even when
+    // the AppContainer RX ACL is correct. Keep Chromium mitigations enabled.
+    all_succeeded &= Command::new("icacls.exe")
+        .arg(&runtime_dir)
+        .args(["/setintegritylevel", "(OI)(CI)M", "/T", "/C", "/Q"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status().map(|status|status.success()).unwrap_or(false);
 
     if all_succeeded {
         let _ = fs::create_dir_all(&marker_dir);
@@ -313,201 +329,7 @@ fn current_process_id() -> u32 {
 }
 
 #[cfg(windows)]
-mod windows_process_tree {
-    use std::collections::HashMap;
-    use std::ffi::c_void;
-    use std::mem::size_of;
-
-    const TH32CS_SNAPPROCESS: u32 = 0x0000_0002;
-    const ERROR_NO_MORE_FILES: u32 = 18;
-    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
-    const PROCESS_VM_READ: u32 = 0x0010;
-
-    #[repr(C)]
-    struct ProcessMemoryCounters {
-        cb: u32,
-        page_fault_count: u32,
-        peak_working_set_size: usize,
-        working_set_size: usize,
-        quota_peak_paged_pool_usage: usize,
-        quota_paged_pool_usage: usize,
-        quota_peak_non_paged_pool_usage: usize,
-        quota_non_paged_pool_usage: usize,
-        pagefile_usage: usize,
-        peak_pagefile_usage: usize,
-        private_usage: usize,
-    }
-
-    #[repr(C)]
-    struct ProcessEntry32W {
-        dw_size: u32,
-        cnt_usage: u32,
-        th32_process_id: u32,
-        th32_default_heap_id: usize,
-        th32_module_id: u32,
-        cnt_threads: u32,
-        th32_parent_process_id: u32,
-        pc_pri_class_base: i32,
-        dw_flags: u32,
-        sz_exe_file: [u16; 260],
-    }
-
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn CreateToolhelp32Snapshot(flags: u32, process_id: u32) -> *mut c_void;
-        fn Process32FirstW(snapshot: *mut c_void, entry: *mut ProcessEntry32W) -> i32;
-        fn Process32NextW(snapshot: *mut c_void, entry: *mut ProcessEntry32W) -> i32;
-        fn GetLastError() -> u32;
-        fn OpenProcess(access: u32, inherit_handle: i32, process_id: u32) -> *mut c_void;
-        fn CloseHandle(handle: *mut c_void) -> i32;
-    }
-
-    #[link(name = "psapi")]
-    extern "system" {
-        fn GetProcessMemoryInfo(
-            process: *mut c_void,
-            counters: *mut c_void,
-            size: u32,
-        ) -> i32;
-    }
-
-    pub(super) struct Snapshot {
-        pub(super) rss_bytes: Option<u64>,
-        pub(super) private_bytes: Option<u64>,
-        pub(super) process_count: Option<u32>,
-        pub(super) available: bool,
-        pub(super) source: String,
-        pub(super) reason: Option<String>,
-    }
-
-    fn unavailable(reason: impl Into<String>) -> Snapshot {
-        Snapshot {
-            rss_bytes: None,
-            private_bytes: None,
-            process_count: None,
-            available: false,
-            source: "windows-process-tree-unavailable".to_string(),
-            reason: Some(reason.into()),
-        }
-    }
-
-    fn query_rss(handle: *mut c_void) -> Option<(u64, u64)> {
-        // SAFETY: the handle comes from OpenProcess and the output struct is
-        // initialized to the exact shape required by GetProcessMemoryInfo.
-        unsafe {
-            let mut counters = ProcessMemoryCounters {
-                cb: size_of::<ProcessMemoryCounters>() as u32,
-                page_fault_count: 0,
-                peak_working_set_size: 0,
-                working_set_size: 0,
-                quota_peak_paged_pool_usage: 0,
-                quota_paged_pool_usage: 0,
-                quota_peak_non_paged_pool_usage: 0,
-                quota_non_paged_pool_usage: 0,
-                pagefile_usage: 0,
-                peak_pagefile_usage: 0,
-                private_usage: 0,
-            };
-            if GetProcessMemoryInfo(handle, &mut counters as *mut _ as *mut c_void, counters.cb) != 0 {
-                Some((counters.working_set_size as u64, counters.private_usage as u64))
-            } else {
-                None
-            }
-        }
-    }
-
-    pub(super) fn snapshot(root_pid: u32) -> Snapshot {
-        // SAFETY: Toolhelp32 APIs write only to the initialized entry and
-        // return a handle that is closed on every completed enumeration path.
-        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-        if snapshot as isize == -1 {
-            return unavailable("CreateToolhelp32Snapshot-failed");
-        }
-
-        let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-        let mut entry = ProcessEntry32W {
-            dw_size: size_of::<ProcessEntry32W>() as u32,
-            cnt_usage: 0,
-            th32_process_id: 0,
-            th32_default_heap_id: 0,
-            th32_module_id: 0,
-            cnt_threads: 0,
-            th32_parent_process_id: 0,
-            pc_pri_class_base: 0,
-            dw_flags: 0,
-            sz_exe_file: [0; 260],
-        };
-        let first_ok = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
-        if !first_ok {
-            unsafe { CloseHandle(snapshot); }
-            return unavailable("Process32FirstW-failed");
-        }
-        loop {
-            children
-                .entry(entry.th32_parent_process_id)
-                .or_default()
-                .push(entry.th32_process_id);
-            if unsafe { Process32NextW(snapshot, &mut entry) } == 0 {
-                let error = unsafe { GetLastError() };
-                if error != ERROR_NO_MORE_FILES {
-                    unsafe { CloseHandle(snapshot); }
-                    return unavailable(format!("Process32NextW-failed:{}", error));
-                }
-                break;
-            }
-        }
-        unsafe { CloseHandle(snapshot); }
-
-        let mut process_ids = vec![root_pid];
-        let mut cursor = 0;
-        while cursor < process_ids.len() {
-            let parent = process_ids[cursor];
-            if let Some(descendants) = children.get(&parent) {
-                for child in descendants {
-                    if *child != parent && !process_ids.contains(child) {
-                        process_ids.push(*child);
-                    }
-                }
-            }
-            cursor += 1;
-        }
-
-        let mut total_rss = 0u64;
-        let mut total_private = 0u64;
-        for process_id in &process_ids {
-            // SAFETY: OpenProcess receives a PID returned by the process
-            // snapshot.  The handle is closed immediately after querying it.
-            let handle = unsafe {
-                OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, *process_id)
-            };
-            if handle.is_null() {
-                return unavailable(format!("OpenProcess-failed:{}", process_id));
-            }
-            let rss = query_rss(handle);
-            unsafe { CloseHandle(handle); }
-            let Some((rss, private)) = rss else {
-                return unavailable(format!("GetProcessMemoryInfo-failed:{}", process_id));
-            };
-            let Some(next_total) = total_rss.checked_add(rss) else {
-                return unavailable("process-tree-rss-overflow");
-            };
-            total_rss = next_total;
-            let Some(next_private) = total_private.checked_add(private) else {
-                return unavailable("process-tree-private-overflow");
-            };
-            total_private = next_private;
-        }
-
-        Snapshot {
-            rss_bytes: Some(total_rss),
-            private_bytes: Some(total_private),
-            process_count: Some(process_ids.len() as u32),
-            available: true,
-            source: "windows-process-tree-working-set".to_string(),
-            reason: None,
-        }
-    }
-}
+mod windows_process_tree;
 
 struct ProcessTreeSnapshot {
     rss_bytes: Option<u64>,
@@ -721,6 +543,7 @@ pub fn run() {
             get_file_info,
             get_process_memory,
             file_dialog_commands::authorize_gim_file_path_for_dev,
+            benchmark::benchmark_authorize_sample,
             file_dialog_commands::pick_gim_file_path,
             file_dialog_commands::pick_ifc_file_paths,
             gim_extract_command::extract_gim_archive,
@@ -774,12 +597,17 @@ pub fn run() {
 
 #[cfg(test)]
 fn workspace_test_temp() -> std::path::PathBuf {
-    let root=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.tmp/tests/native");
+    let root=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tmp/tests/native");
     std::fs::create_dir_all(&root).expect("workspace test directory must be writable");root
 }
 
 /// Acceptance executables embed a workspace-only data root; production keeps Tauri's normal location.
 pub(crate) fn application_data_dir(app:&tauri::AppHandle)->Result<PathBuf,String> {
-    if let Some(root)=option_env!("GIM_ACCEPTANCE_DATA_ROOT") {return Ok(PathBuf::from(root));}
-    app.path().app_data_dir().map_err(|error|error.to_string())
+    #[cfg(feature = "benchmark")]
+    { let _=app; benchmark::data_root() }
+    #[cfg(not(feature = "benchmark"))]
+    {
+        if let Some(root)=option_env!("GIM_ACCEPTANCE_DATA_ROOT") {return Ok(PathBuf::from(root));}
+        app.path().app_data_dir().map_err(|error|error.to_string())
+    }
 }

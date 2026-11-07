@@ -1,6 +1,7 @@
 import { SubstationSpatialIndexBuilder, type SubstationSpatialIndex,
   type SubstationSpatialIndexObserver, type IfcSpatialReadProfile } from '../gim/ifcSpatialParser.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
+import { createWorkerProbe } from '../measurement/workerProbe.js';
 
 export type SpatialWorkerRequest =
   | { type:'init'; tree:CbmNode|null; relations:FileDevEntry[] }
@@ -18,7 +19,7 @@ const observer:SubstationSpatialIndexObserver={
   onModelParsed:profile=>self.postMessage({type:'diagnostic',event:'onModelParsed',profile} satisfies SpatialWorkerResponse),
   onFinalize:profile=>self.postMessage({type:'diagnostic',event:'onFinalize',profile} satisfies SpatialWorkerResponse),
 };
-self.onmessage=async (event:MessageEvent<SpatialWorkerRequest>)=>{
+self.onmessage=createWorkerProbe().wrap(async (event:MessageEvent<SpatialWorkerRequest>, trace)=>{
   try {
     const request=event.data;
     if(request.type==='init') builder=new SubstationSpatialIndexBuilder(request.tree,request.relations,observer);
@@ -29,13 +30,18 @@ self.onmessage=async (event:MessageEvent<SpatialWorkerRequest>)=>{
       const text=request.text ?? (bytes===null ? null:new TextDecoder().decode(bytes));
       const sourceBytes=bytes?.byteLength ?? request.read.bytes;
       self.postMessage({type:'diagnostic',event:'onModelRead',profile:{...request.read,bytes:sourceBytes,readMs,decodeMs:performance.now()-started,...(error?{error}:{})}} satisfies SpatialWorkerResponse);
-      builder.addIfcModel(request.entry,text,sourceBytes);
+      trace.record('spatial.source-read', readMs, { bytes: sourceBytes });
+      trace.sync('spatial.scan-and-model', () => builder.addIfcModel(request.entry,text,sourceBytes));
     } else {
-      self.postMessage({type:'complete',index:builder.finalize()} satisfies SpatialWorkerResponse);
+      const index = trace.sync('spatial.finalize', () => builder.finalize());
+      trace.produced();
+      self.postMessage({type:'complete',index} satisfies SpatialWorkerResponse);
       return;
     }
+    trace.produced();
     self.postMessage({type:'ready'} satisfies SpatialWorkerResponse);
   } catch(error) {
+    trace.fail(error);
     self.postMessage({type:'error',message:error instanceof Error?error.message:String(error)} satisfies SpatialWorkerResponse);
   }
-};
+});

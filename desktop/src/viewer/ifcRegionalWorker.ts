@@ -1,4 +1,5 @@
 import { IfcAPI } from 'web-ifc';
+import { createWorkerProbe, sampleWasmCapacity } from '../measurement/workerProbe.js';
 import { IfcOpeningRelationEditor } from './ifcOpeningPolicy.js';
 import { RegionalSubsetBuilder } from './ifcRegionalSubset.js';
 import { extractIfcObjectFine } from './ifcObjectFineData.js';
@@ -34,7 +35,7 @@ function useFullSource():void {
     self.postMessage({stage:'source-open-complete',elapsedMs:performance.now()-started});
   }
 }
-self.onmessage = async ({ data }) => {
+self.onmessage = createWorkerProbe().wrap(async ({ data }, trace) => {
   try {
     if (data.type === 'open') {
       bytes = data.bytes;
@@ -53,18 +54,19 @@ self.onmessage = async ({ data }) => {
         throw Error('IFC source identity changed');
       self.postMessage({ stage: 'wasm-init' });
       api.SetWasmPath(data.wasm.path, data.wasm.absolute);
-      await api.Init(undefined, true);
+      await trace.measure('ifc.wasm-init', () => api.Init(undefined, true));
       self.postMessage({ stage: 'source-open' });
       const openStarted=performance.now();
-      model = api.OpenModel(bytes, { COORDINATE_TO_ORIGIN: false });
+      model = trace.sync('ifc.open-model', () => api.OpenModel(bytes, { COORDINATE_TO_ORIGIN: false }));
       self.postMessage({stage:'source-open-complete',elapsedMs:performance.now()-openStarted});
+      sampleWasmCapacity(trace,api);trace.produced({ inputBytes: bytes.byteLength });
       self.postMessage({ id: data.id, data: { opened: true } });
     } else if (data.type === 'prepare-region') {
       if (model === null) throw Error('Regional source unavailable');
       const hosts = new Set<number>(
           (data.objects as number[]).filter((id) => !classified.has(id))
         ),
-        result = classifyRegionalOpenings(api, model, index, hosts);
+        result = trace.sync('ifc.relationships', () => classifyRegionalOpenings(api, model!, index, hosts));
       for (const id of hosts) classified.add(id);
       for (const id of result.small) small.add(id);
       const products=data.objects as number[];
@@ -76,7 +78,7 @@ self.onmessage = async ({ data }) => {
           if(!subsetBuilder){subsetBuilder=new RegionalSubsetBuilder(api,model,index);self.postMessage({stage:'subset-index',elapsedMs:subsetBuilder.indexingMs});}
           if(subsetModel!==null){api.CloseModel(subsetModel);subsetModel=null;}
           templates.clear();
-          const subset=subsetBuilder.build(products,small);subsetModel=subset.model;subsetReady=true;
+          const subset=trace.sync('ifc.subset', () => subsetBuilder!.build(products,small));subsetModel=subset.model;subsetReady=true;
           self.postMessage({stage:'subset-built',elapsedMs:subset.elapsedMs,records:subset.records});
         } catch(error) {
           // A source-specific failure does not disable valid geometry. Keep
@@ -86,6 +88,7 @@ self.onmessage = async ({ data }) => {
         }
       }
       if(!subsetReady)useFullSource();
+      sampleWasmCapacity(trace,api);trace.produced({ objects: products.length });
       self.postMessage({
         id: data.id,
         data: { ...result, classifiedHosts: hosts.size },
@@ -114,11 +117,11 @@ self.onmessage = async ({ data }) => {
         };
         try {
           let result;
-          try {result=extract();}
+          try {result=trace.sync('ifc.mesh-extraction', extract);}
           catch(error){
             if(subsetModel===null)throw error;
             self.postMessage({stage:'subset-fallback',reason:`Object #${object.expressId}: ${String(error)}`});
-            subsetUnavailable=true;subsetBuilder=null;useFullSource();result=extract();
+            subsetUnavailable=true;subsetBuilder=null;useFullSource();result=trace.sync('ifc.mesh-extraction-fallback', extract);
           }
           results.push(result);
         } catch (error) {
@@ -149,6 +152,7 @@ self.onmessage = async ({ data }) => {
             part.vertices = copy.vertices;
             part.indices = copy.indices;
           }
+      sampleWasmCapacity(trace,api);trace.produced({ objects: results.length });
       self.postMessage(
         { id: data.id, data: results },
         {
@@ -187,6 +191,7 @@ self.onmessage = async ({ data }) => {
         true,
         true
       );
+      trace.produced();
       self.postMessage({
         id: data.id,
         data: JSON.parse(
@@ -201,6 +206,7 @@ self.onmessage = async ({ data }) => {
       });
     }
   } catch (error) {
+    trace.fail(error);
     self.postMessage({ id: data.id, error: String(error) });
   }
-};
+});

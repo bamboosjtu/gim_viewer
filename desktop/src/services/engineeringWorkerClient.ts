@@ -1,3 +1,5 @@
+import measuredWorkerAsset from './engineeringWorker.ts?worker&url';
+import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import { WorkerRequests } from './workerRequests.js';
 import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../gim/ifcSpatialParser.js';
 import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
@@ -32,7 +34,7 @@ export class EngineeringWorkerClient {
     if (signal?.aborted) this.close();
   }
   static create(isCurrent: () => boolean, signal?: AbortSignal) {
-    return new EngineeringWorkerClient(new Worker(new URL('./engineeringWorker.ts', import.meta.url), { type: 'module' }), isCurrent, signal);
+    return new EngineeringWorkerClient(createMeasuredWorker('engineering', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})})), isCurrent, signal);
   }
   close(error: Error = new DOMException('Engineering build cancelled', 'AbortError')): void {
     if (this.closed) return;

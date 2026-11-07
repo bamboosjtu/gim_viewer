@@ -1,3 +1,5 @@
+import measuredWorkerAsset from './substationSpatialWorker.ts?worker&url';
+import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import { WorkerRequests } from './workerRequests.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
 import { buildSubstationSpatialIndexFromFiles, type SubstationSpatialIndex,
@@ -16,7 +18,7 @@ export async function buildSubstationSpatialIndexInWorker(
   observer:SubstationSpatialIndexObserver,isCurrent:()=>boolean,
 ):Promise<SubstationSpatialIndex> {
   if(typeof Worker==='undefined') return buildSubstationSpatialIndexFromFiles(files,entries,tree,relations,observer);
-  const worker=new Worker(new URL('./substationSpatialWorker.ts',import.meta.url),{type:'module'});
+  const worker=createMeasuredWorker('spatial', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})}));
   let sequence=0;
   const requests=new WorkerRequests<SubstationSpatialIndex|undefined>(120_000,()=>cancel());
   let terminated=false;

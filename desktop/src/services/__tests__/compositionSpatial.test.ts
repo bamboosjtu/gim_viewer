@@ -10,7 +10,7 @@ it('uses named storeys in a placeholder building and projects other architectura
  const result=projectSpatialComposition(snapshot,facts,snapshot.entities.map((e,i)=>({entityId:e.id,bounds:boxes[i],evidence:'actual-shape'})));
  expect(result.every(a=>a.paths[0].some(g=>g.title==='110千伏配电装置楼'))).toBe(true);
  expect(JSON.stringify(snapshot)).toBe(before);
- expect(result.filter(a=>a.inferred).every(a=>a.evidence.includes('actual-shape')&&a.evidence.includes('composition-spatial-v4'))).toBe(true);
+ expect(result.every(row => !('evidence' in row))).toBe(true);
 });
 it('converts runtime Y-up bounds to the source Z-up frame exactly once',()=>{
  expect(fromIfcYUpBounds([1,2,3,4,5,6])).toEqual([1,-6,2,4,-3,5]);
@@ -39,7 +39,6 @@ it('places a room-only delivery under a containing building footprint',()=>{
  const result=projectSpatialComposition(snapshot,facts,bounds);
  const room=result.find(row=>row.entityId==='room')!;
  expect(room.paths[0].map(group=>group.title)).toEqual(['建筑工程','配电楼','配电室']);
- expect(room.evidence).toContain('spatial-room-footprint');
 });
 
 it('keeps a shared footprint ambiguous when explicit building names disagree',()=>{
@@ -61,6 +60,7 @@ it('keeps separate buildings separate and rejects invalid or oversized source bo
    expect(projectSpatialComposition(snapshot,facts,bounds.map(b=>({...b,bounds:box}))).every(a=>!a.inferred)).toBe(true);
  }
  expect(JSON.stringify(snapshot)).toBe(before);
+
 });
 it('projects an outdoor main-transformer footprint as an area, not an anonymous building',()=>{
  const snapshot=normalizeEngineeringModel('p',[object('a','墙'),object('b','柱'),object('c','梁'),object('m1','主变压器'),object('m2','主变压器')]);
@@ -69,6 +69,7 @@ it('projects an outdoor main-transformer footprint as an area, not an anonymous 
  const before=JSON.stringify(snapshot),rows=projectSpatialComposition(snapshot,facts,bounds);
  expect(rows.slice(0,3).every(r=>r.paths[0][1].title==='主变区域'&&r.inferred)).toBe(true);
  expect(JSON.stringify(snapshot)).toBe(before);
+
 });
 it('keeps equidistant outdoor structures unassigned and accepts a unique nearby system',()=>{
  const snapshot=normalizeEngineeringModel('p',[object('s','设备支架'),object('a','主变压器'),object('b','断路器')]);
@@ -85,7 +86,7 @@ it('does not bind two physical footprints to the same declared distribution room
   declarations:e.sourceIds[0].startsWith('switch')?[{names:[{value:'10kV系统',evidenceId:'system'}]}]:[],
   positions:e.sourceIds[0].startsWith('switch')?[[Number(e.sourceIds[0].slice(-1))<2?5:25,5,0]]:[]}));
  const bounds=snapshot.entities.filter(e=>e.sourceIds[0].startsWith('wall')).map(e=>({entityId:e.id,bounds:Number(e.sourceIds[0].slice(-1))<3?[0,0,0,10,10,4]:[20,0,0,30,10,4],evidence:'shape'}));
- const rows=projectSpatialComposition(snapshot,facts,bounds,undefined,[{path:[{key:'building:配电室01',title:'配电室01',kind:'building'}],evidence:['declared-room'],sourceContextIds:['room']}]);
+ const rows=projectSpatialComposition(snapshot,facts,bounds,undefined,[{path:[{key:'building:配电室01',title:'配电室01',kind:'building'}],sourceContextIds:['room']}]);
  expect(rows.every(r=>r.paths.every(p=>p.every(g=>g.title!=='配电室01')))).toBe(true);
 });
 it('keeps indoor supports in their containing building even with an area delivery hint',()=>{
