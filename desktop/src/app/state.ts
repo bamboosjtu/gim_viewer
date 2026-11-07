@@ -14,7 +14,7 @@ import type { StdDocument } from '../gim/stdParser.js';
 import type { SldDocument } from '../gim/sldParser.js';
 import type { StdSldIndex } from '../gim/stdSldIndex.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
-import { createIfcRuntimeModelId } from '../shared/projectSession.js';
+import { createIfcRuntimeModelId, isCurrentProject } from '../shared/projectSession.js';
 import type { GeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 import type { ViewerViewHistory } from '../viewer/viewHistory.js';
 
@@ -345,9 +345,7 @@ export class AppState {
 
   /** 检查快照是否仍代表当前工程；几何 token 可单独由后台批次递增。 */
   isCurrentSession(session: ProjectLoadSession): boolean {
-    return this.projectGeneration === session.generation
-      && this.currentProjectId === session.projectId
-      && this.currentSourceSha256 === session.sourceSha256;
+    return isCurrentProject(this, session);
   }
 
   /** 为当前会话取得 logical → runtime 的映射，并登记反向索引。 */

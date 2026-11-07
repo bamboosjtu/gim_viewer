@@ -1,9 +1,12 @@
+import { isRegionalConnectionObject, type RegionalObject } from '../viewer/ifcRegionalData.js';
+import { ifcConnectionOwnershipIndex, type IfcConnectionOwnership } from '../gim/ifcConnectionOwnership.js';
+import type { ConnectionEndpointEvidence } from '../gim/connectionEndpoints.js';
 import { discoverSubstationGlSidecars, substationDevIdentity, buildSubstationAliasIndex, buildSubstationIfcEvidence, findSubstationSourceDocuments } from '../gim/substationEvidence.js';
 export { deviceOccurrenceScope } from '../gim/substationEvidence.js';
 import type { AppState } from '../app/state.js';
 import type { CbmNode } from '../gim/types.js';
 import { resolveBaseFamilyReferences } from '../gim/gimValueSemantics.js';
-import { parseFamSectionsWithDiagnostics } from '../gim/famParser.js';
+import { parseFamSectionsWithDiagnostics, resolveSubstationBusinessIdentity, type FamSourceProperty } from '../gim/famParser.js';
 import { getFileByPath } from '../gim/fileLookup.js';
 import { parseKeyValue } from '../gim/kvParser.js';
 import { getNodeDisplayName } from '../shared/displayName.js';
@@ -235,4 +238,80 @@ export function inspectAuxiliarySources(state:AppState,node:CbmNode):Array<{labe
   const child=buildSubstationAliasIndex(state.currentCbmTree).partToChildDev.get(node.path);
   if(child)rows.push({label:'部件语义别名',kind:'dev',value:`DEV/${child}`});
   return rows;
+}
+
+export interface InspectorFamilyData {
+  path:string;
+  sections?:Map<string,Map<string,string>>;
+  properties:FamSourceProperty[];
+}
+/** Resolve/read/classify parameter sources before the view renders any rows. */
+export async function inspectNodeParameters(state:AppState,node:CbmNode) {
+  const seen=new Set<string>(),properties:FamSourceProperty[]=[];
+  const readFamily=async(path:string):Promise<InspectorFamilyData|null>=>{
+    if(seen.has(path.toLowerCase()))return null;seen.add(path.toLowerCase());
+    const parsed=state.currentFiles ? await readInspectorFamily(state,path) : null;
+    const records=parsed?.properties ?? (!state.currentFiles ? getCachedByPath(state.cachedFamSourceProperties,path) : undefined) ?? [];
+    properties.push(...records);
+    return {path,sections:parsed?.sections ?? (!state.currentFiles ? getCachedByPath(state.cachedFamProperties,path) : undefined),properties:records};
+  };
+  const cbmFamilies:InspectorFamilyData[]=[],devFamilies:InspectorFamilyData[]=[];
+  const refs=resolveBaseFamilyReferences(node.rawProperties??{});
+  if(node.famPath&&!refs.some(ref=>ref.path===node.famPath))refs.unshift({key:'BASEFAMILY',path:node.famPath});
+  for(const ref of refs){const family=await readFamily(withEntryPrefix('CBM',ref.path));if(family)cbmFamilies.push(family);}
+  const dev=node.devPath ? await readDevKv(state,withEntryPrefix('DEV',node.devPath)) : null;
+  for(const ref of resolveBaseFamilyReferences(dev??{})){const family=await readFamily(withEntryPrefix('DEV',ref.path));if(family)devFamilies.push(family);}
+  return {cbmFamilies,devFamilies,dev,identity:resolveSubstationBusinessIdentity(properties)};
+}
+export function inspectRegionalConnectionOwnership(state:AppState,modelId:string,object:RegionalObject):IfcConnectionOwnership|undefined {
+  return isRegionalConnectionObject(object)
+    ? ifcConnectionOwnershipIndex(state.currentCbmTree,state.currentIfcEntries).get(modelId,object.globalId) : undefined;
+}
+
+export function findCbmNodeByPath(root: CbmNode | null, path: string): CbmNode | null {
+  if (!root) return null;
+  const queue: CbmNode[] = [root];
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    if (node.path === path) return node;
+    queue.push(...node.children);
+  }
+  return null;
+}
+
+export function connectionOwnershipRows(state: AppState, evidence: IfcConnectionOwnership): Array<[string,string]> {
+  return [
+    ['CBM 来源关联', evidence.status === 'confirmed' ? '源 IFCGUID 已核对'
+      : evidence.status === 'ambiguous' ? `${evidence.semanticNodes.length} 个来源候选` : '源模型未提供可验证关联'],
+    ['DEV 装配归属', evidence.deviceNodes.length === 1
+      ? getNodeDisplayName(evidence.deviceNodes[0], state.ifcGuidToName, state.currentIfcEntries)
+      : evidence.deviceNodes.length ? `${evidence.deviceNodes.length} 个候选，未自动归属` : '未建立'],
+  ];
+}
+
+export function connectionEndpointRows(state: AppState, modelId: string, references?: readonly ConnectionEndpointEvidence[]): Array<[string,string]> {
+  if(references===undefined)return [['设备端点关联','端点证据尚未收集；未据此推断设备归属']];
+  if(!references.length)return [['设备端点关联','未发现可用的已支持引用；整站显示不依赖此关联']];
+  const groups=new Map<string,ConnectionEndpointEvidence[]>();
+  for(const ref of references){const key=`${ref.kind}:${ref.reference}`,items=groups.get(key)??[];items.push(ref);groups.set(key,items);}
+  const index=ifcConnectionOwnershipIndex(state.currentCbmTree,state.currentIfcEntries);
+  return [...groups.values()].slice(0,32).map(items=>{
+    const ref=items[0];
+    if(ref.kind==='ifc-element'){
+      const evidence=index.get(modelId,ref.reference);
+      return ['IFC 端点对象',evidence.semanticNodes.length===1
+        ? `${getNodeDisplayName(evidence.semanticNodes[0],state.ifcGuidToName,state.currentIfcEntries)} · 源连接关系已核对`
+        : `${ref.reference} · ${evidence.semanticNodes.length?`${evidence.semanticNodes.length} 个 CBM 候选`:'尚无 CBM/DEV 映射'}`] as [string,string];
+    }
+    const ports=state.substationConnectionPorts?.get(ref.reference)??[];
+    const owners=[...new Map(ports.map(port=>[port.key,port])).values()];
+    const names=owners.map(owner=>{
+      const node=state.cbmNodeIndex.get(owner.nodePath)??findCbmNodeByPath(state.currentCbmTree,owner.nodePath);
+      return node?getNodeDisplayName(node,state.ifcGuidToName,state.currentIfcEntries):owner.nodePath;
+    });
+    const label=[...new Set(items.map(item=>`${item.propertySet??''} / ${item.propertyName??''}`))].join('；');
+    return [label||'源接线点',owners.length===1?`${names[0]} · GUID 与 DEV 装配引用已核对`
+      : owners.length?`${owners.length} 个实例候选：${names.join('、')}；未自动归属`
+        : `${ref.reference} · ${state.substationConnectionPorts?'没有可验证的 DEV 实例':'接线点 sidecar 证据尚未就绪'}`] as [string,string];
+  });
 }

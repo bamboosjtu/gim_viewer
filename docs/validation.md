@@ -174,3 +174,12 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 - 把 Worker 墙钟当 CPU 时间，或把工作量变化当单模板提速。
 
 可重复运行材料独立保存，不追加为正文流水。
+
+
+## 纯逻辑质量门禁
+
+远程 CI 的覆盖率只来自不依赖工程样本的单元测试。`npm run test:coverage` 对 `engineering/` 执行行/语句/函数 95%、分支 90% 下限；对 `gim/` 执行行/语句/函数 90%、分支 80% 下限。其余层报告覆盖率，不自动提高或更新阈值；该门禁不代表真实工程或原生性能通过。
+
+Python 工具的 `tests/test_pure.py` 只检查普通值的矩阵、文本、编码等契约。CI 显式按此文件名执行，不能改成不加过滤的 discover：原有 `test_core.py` 与指针/UI 测试含模型目录或归档构造，应由开发者在工作区本地运行。
+
+静态 CSS 类承载属性诊断和搜索副标题；主文档 CSP 仍兼容现有运行时样式。大量 CSSOM `cssText`、第三方视图组件及 SLD 的独立 SVG 样式需要完整兼容验证，因此移除少数 HTML style 属性不等于可以直接删 `unsafe-inline`。约束依据见 [MDN style-src](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/style-src)；收紧策略需逐项迁移运行时样式并验证地图、SLD 与 Viewer。

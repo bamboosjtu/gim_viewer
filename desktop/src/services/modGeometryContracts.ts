@@ -1,8 +1,8 @@
 /** Geometry loading options, progress and captured-session guards. */
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { DevCheckpointHandler } from './substationBackgroundRuntime.js';
+import { isCurrentGeometry } from '../shared/projectSession.js';
 
-/** 自动加载选项 */
 /** 自动加载选项 */
 export interface GeometryAutoLoadOptions {
   onDevCheckpoint?: DevCheckpointHandler;
@@ -28,7 +28,6 @@ export interface GeometryAutoLoadOptions {
   geometryCacheVersionFileMatch?: boolean;
 }
 
-/** 自动加载进度 */
 /** 自动加载进度 */
 export interface AutoLoadProgress {
   phase: 'collecting' | 'discovering' | 'loading_mod' | 'loading_stl' | 'done';
@@ -57,6 +56,9 @@ export function isGeometryContextValid(
   projectId: number | null | undefined,
   sourceSha256?: string | null,
 ): boolean {
+  if (token !== undefined && generation !== undefined && projectId !== undefined && sourceSha256 !== undefined) {
+    return isCurrentGeometry(state, { geometryToken: token, generation, projectId, sourceSha256 });
+  }
   if (!isGeometryTokenValid(state, token)) return false;
   if (generation !== undefined && state.projectGeneration !== generation) return false;
   if (projectId !== undefined && state.currentProjectId !== projectId) return false;

@@ -23,7 +23,7 @@ import type { LineMapBaseLayerHandle } from './lineMapBaseLayer.js';
 import type { LineMapProjection, GeoBBox } from './lineMapProjection.js';
 import { createMapLibreProjection } from './lineMapProjection.js';
 import { renderLineMap } from './lineMapView.js';
-import { extractLineMapData, isLineMapDataValid } from '../gim/lineMapData.js';
+import {buildLineMapProjection} from '../services/lineMapProjection.js';
 import { buildLineAttributeIndex } from '../services/lineAttrRestoreService.js';
 import { buildWireSemanticInfo } from '../services/lineWireSemanticService.js';
 import type { WireSemanticInfo } from '../services/lineWireSemanticService.js';
@@ -40,14 +40,10 @@ import { debugLog, debugWarn } from '../utils/logger.js';
 import { renderSearchBox } from './searchBox.js';
 import { setStatusRight } from './shell/statusBar.js';
 import { getFileNameLower, normalizeGimPath } from '../gim/linePathNormalize.js';
-import {
-  buildLineNavigationIndex,
-  buildLineNavigationSearchIndex,
-  renderLineNavigationTree,
-  resolveLineNavigationTarget,
-  revealLineNavigationTarget,
-} from './lineNavigationTreeView.js';
-import type { LineNavigationIndex, LineNavigationNode } from './lineNavigationTreeView.js';
+import { buildLineNavigationIndex, buildLineNavigationSearchIndex, resolveLineNavigationTarget } from '../services/lineNavigationProjection.js';
+import type { LineNavigationIndex, LineNavigationNode } from '../services/lineNavigationProjection.js';
+import { renderLineNavigationTree, revealLineNavigationTarget } from './lineNavigationTreeView.js';
+import type { LineNavigationTreeHandle } from './lineNavigationTreeView.js';
 import {
   fileReferenceValue,
   getPropertyDefinition,
@@ -1204,6 +1200,7 @@ function handleMapWireClick(wire: WireSegment): void {
 
 /** 当前地图视图 handle（模块级，避免重复打开 GIM 后残留） */
 let lineMapHandle: LineMapViewHandle | null = null;
+let lineNavigationHandle:LineNavigationTreeHandle|null=null;
 
 /** 当前地图数据（供左侧树点击定位地图时反查 TowerMarker nodePath 用） */
 let lineMapData: LineMapData | null = null;
@@ -1290,6 +1287,7 @@ let basemapSettingsListenerReady = false;
  * 幂等：handle 为空时直接返回。
  */
 export function destroyLineMapView(): void {
+  lineNavigationHandle?.destroy();lineNavigationHandle=null;
   // 使仍在读取线路 MOD 的异步检查器结果失效，避免旧工程覆盖新工程面板。
   lineInspectorGeneration++;
   currentLineState = null;
@@ -1456,7 +1454,8 @@ export function renderLineProjectPanels(
   currentLineState = state;
   const attrs = buildLineAttributeIndex(state);
   const endMapData = perfBegin('线路地图数据提取', undefined, perfSession);
-  const mapData = extractLineMapData(graph, attrs);
+  const mapProjection=buildLineMapProjection(graph,attrs);
+  const {mapData}=mapProjection;
   endMapData(undefined, {
     towers: mapData.stats.towerTotal,
     wires: mapData.stats.wireTotal,
@@ -1483,7 +1482,7 @@ export function renderLineProjectPanels(
   if (!lineNavigationIndex) {
     cbmTreePanel.innerHTML = '<div class="props-empty">线路工程未找到 CBM 层级树</div>';
   } else {
-    renderLineNavigationTree(lineNavigationIndex, cbmTreePanel, handleLineNavigationNode);
+    lineNavigationHandle = renderLineNavigationTree(lineNavigationIndex, cbmTreePanel, handleLineNavigationNode);
   }
   endNavigationDom(undefined, {
     nodes: lineNavigationIndex?.nodesByKey.size ?? 0,
@@ -1539,7 +1538,7 @@ export function renderLineProjectPanels(
   renderMapStats(mapData);
 
   const endCanvasMap = perfBegin('线路 Canvas 地图绘制', undefined, perfSession);
-  if (isLineMapDataValid(mapData)) {
+  if (mapProjection.renderable) {
     // 地图点击塔位走 handleMapTowerClick：显示属性 + 选中左侧树行
     // M4-B2：onWireClick 处理导线点击（命中导线且未命中塔位时触发）
     lineMapHandle = renderLineMap(mapData, container, handleMapTowerClick, {
@@ -1575,7 +1574,7 @@ export function renderLineProjectPanels(
     wires: mapData.wires.length,
     crosses: mapData.crosses.length,
     catenary: catenaryEnabled,
-    valid: isLineMapDataValid(mapData),
+    valid: mapProjection.renderable,
   });
   // M4-A2 Finalization：先报告 Canvas-only 状态
   // - 无论 ENABLE_MAPLIBRE_EXPERIMENT 是否开启，主视口已先以 Canvas-only 形式就绪
@@ -1622,7 +1621,7 @@ export function renderLineProjectPanels(
   //    - 在线 raster 不可用（3 次 tile error）或初始化失败时，自动回退 Canvas-only
   //    底图切换 UI：附加到图层面板下方（OSM / 天地图卫星 / 天地图地形 / 天地图矢量）
   attachBasemapSwitcher(mapData);
-  if (ENABLE_MAPLIBRE_EXPERIMENT && isLineMapDataValid(mapData)) {
+  if (ENABLE_MAPLIBRE_EXPERIMENT && mapProjection.renderable) {
     debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] enabled:', ENABLE_MAPLIBRE_EXPERIMENT);
     debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] basemap mode:', runtimeBasemapMode);
     if (runtimeBasemapMode === 'osm-online') {

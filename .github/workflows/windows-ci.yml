@@ -82,8 +82,8 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
           cargo test --manifest-path ../crates/gim-native-core/Cargo.toml --locked
 
-      - name: Run frontend unit tests
-        run: npm test
+      - name: Run frontend unit tests with pure-layer coverage gates
+        run: npm run test:coverage
 
       - name: Check engineering layer boundaries
         run: npm run check:engineering-boundaries

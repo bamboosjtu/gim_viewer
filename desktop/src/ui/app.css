@@ -463,3 +463,6 @@
       #status-publish[data-phase="core"], #status-publish[data-phase="rest"] { color: #e8d18a; }
       .status-mid { display: flex; gap: 16px; color: var(--text-3); }
       .status-right { padding-right: 14px; text-align: right; color: #b9c6d2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.geometry-diagnostic-details { max-height:240px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+.search-result-subtitle { color:#94a3b8; font-size:11px; }

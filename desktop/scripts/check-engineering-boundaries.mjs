@@ -21,6 +21,15 @@ const viewerBridgeImports = new Set([
   'viewer/ifcEntryLoader.ts:@desktop/database.js',
   'viewer/ifcRegionalRuntime.ts:@desktop/ifcLodCache.js',
 ]);
+// Views may use explicit presentation selectors/formatters, never parsers or business classifiers.
+const uiPresentationValues = new Map([
+  ['engineering/catalogLabels.ts',new Set(['categoryLabel','classificationReasonLabel'])],
+  ['gim/modelIdentity.ts',new Set(['resolveIfcModelId','findIfcEntryByModelId','normalizeEntryPath','normalizedIfcBasename'])],
+  ['gim/linePathNormalize.ts',new Set(['getFileNameLower','normalizeGimPath'])],
+  ['gim/gimValueSemantics.ts',new Set(['isGimEmptyValue'])],
+  ['gim/geometry/geometryDiagnostics.ts',new Set(['getGeometryDiagnostic','geometryReasonLabel','geometryStatusLabel'])],
+  ['shared/gimParsing.ts',new Set(['getFirstNonEmptyKv','isGimEmptyValue'])],
+]);
 for (const layer of ['engineering','gim','viewer','ui','services','app']) for (const path of files(resolve(root,layer))) {
   const ast = ts.createSourceFile(path, readFileSync(path,'utf8'), ts.ScriptTarget.Latest, true);
   const localPath = relative(root, path).replaceAll('\\', '/');
@@ -51,6 +60,17 @@ for (const layer of ['engineering','gim','viewer','ui','services','app']) for (c
     if (specifier && ts.isStringLiteral(specifier)) {
       const name = specifier.text;
       const target = name.startsWith('.') ? relative(root,resolve(dirname(path),name)).replaceAll('\\','/').split('/')[0] : name;
+      if(layer==='ui' && name.startsWith('.')) {
+        const module=relative(root,resolve(dirname(path),name.replace(/\.js$/,'.ts'))).replaceAll('\\','/');
+        if(/^(?:engineering|gim|viewer)\//.test(module)||module==='shared/gimParsing.ts') {
+          const clause=ts.isImportDeclaration(node)?node.importClause:undefined;
+          const bindings=clause?.namedBindings;
+          const names=bindings&&ts.isNamedImports(bindings)?bindings.elements.filter(item=>!item.isTypeOnly).map(item=>(item.propertyName??item.name).text):null;
+          if(!node.isTypeOnly && !clause?.isTypeOnly && (!names||names.some(value=>!uiPresentationValues.get(module)?.has(value))))
+            failures.push(`${localPath}: UI must consume service projections; forbidden value import ${name}`);
+        }
+      }
+
       const banned = layer === 'engineering' ? /^(?:app|gim|viewer|ui|services|@desktop|@tauri-apps|three|web-ifc|maplibre)/
         : layer === 'gim' ? /^(?:app|services|viewer|ui|@desktop|@tauri-apps)/ : layer==='ui'?/^(?:@desktop|@tauri-apps)/:layer==='services'?/^(?:ui)/:layer==='app'?/^(?:gim)/:/^(?:app|services|ui|@desktop|@tauri-apps)/;
       const exception = viewerBridgeImports.has(`${relative(root,path).replaceAll('\\','/')}:${name}`);

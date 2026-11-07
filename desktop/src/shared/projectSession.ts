@@ -10,9 +10,12 @@ export interface ProjectLoadSession {
 export interface SessionOwner {
   projectGeneration: number; currentProjectId: number | null; currentSourceSha256: string | null; geometryLoadToken: number;
 }
-export function isCurrentGeometry(owner: SessionOwner, session: ProjectLoadSession): boolean {
+export function isCurrentProject(owner: Pick<SessionOwner, 'projectGeneration' | 'currentProjectId' | 'currentSourceSha256'>, session: ProjectLoadSession): boolean {
   return owner.projectGeneration === session.generation && owner.currentProjectId === session.projectId
-    && owner.currentSourceSha256 === session.sourceSha256 && owner.geometryLoadToken === session.geometryToken;
+    && owner.currentSourceSha256 === session.sourceSha256;
+}
+export function isCurrentGeometry(owner: SessionOwner, session: ProjectLoadSession): boolean {
+  return isCurrentProject(owner, session) && owner.geometryLoadToken === session.geometryToken;
 }
 
 export function createIfcRuntimeModelId(

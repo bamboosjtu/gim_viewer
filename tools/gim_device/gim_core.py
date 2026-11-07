@@ -19,6 +19,7 @@ import shutil
 import zipfile
 import xml.etree.ElementTree as ET
 import collections
+import math
 
 MAGIC_7Z = b'7z\xbc\xaf\x27\x1c'
 SKIP_TAGS = {'TransformMatrix', 'Color'}
@@ -158,6 +159,10 @@ def parse_matrix(s, notes=None):
         if notes is not None and len(v):
             notes['badMatrixLen'] += 1
         return _identity()
+    if not all(math.isfinite(value) for value in v):
+        if notes is not None:
+            notes['nonFinite'] += 1
+        return _identity()
     if abs(v[3]) > 1e-6 or abs(v[7]) > 1e-6 or abs(v[11]) > 1e-6 or abs(v[15] - 1) > 1e-6:
         if notes is not None:
             notes['nonAffine'] += 1
@@ -260,7 +265,7 @@ def parse_dev(path, notes=None):
 
 def is_affine(m):
     """16 项列主序矩阵是否可直接用于 compose（仿射 + 非奇异）"""
-    if not m or len(m) != 16:
+    if not m or len(m) != 16 or not all(math.isfinite(value) for value in m):
         return False
     if abs(m[3]) > 1e-6 or abs(m[7]) > 1e-6 or abs(m[11]) > 1e-6 or abs(m[15] - 1) > 1e-6:
         return False

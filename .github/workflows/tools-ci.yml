@@ -78,6 +78,10 @@ jobs:
         run: |
           python -m pip --isolated install --disable-pip-version-check --index-url https://pypi.org/simple --no-cache-dir --only-binary :all: -r "tools/$env:TOOL/requirements-build.txt"
           if ($LASTEXITCODE -ne 0) { throw 'Tool dependency installation failed' }
+      - name: Run pure Python contracts without model samples
+        run: |
+          python -m unittest discover -s "tools/$env:TOOL/tests" -p test_pure.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Pure Python contracts failed' }
       - name: Build and startup-check the actual onefile EXE
         run: |
           & "./tools/$env:TOOL/build.ps1" -Python (Get-Command python).Source -NoVenv -Publish

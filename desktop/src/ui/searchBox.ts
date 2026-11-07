@@ -12,16 +12,9 @@
 
 import { escapeHtml } from '../shared/html.js';
 
-export interface SearchItem {
-  /** 唯一键（通常为节点路径），onPick 回传 */
-  key: string;
-  /** 主标题 */
-  title: string;
-  /** 副标题（可选，如实体类型 / 塔位编号） */
-  subtitle?: string;
-  /** 已转为小写的检索全文；内部来源名称可参与检索，无需堆在副标题中。 */
-  searchText?: string;
-}
+import type { SearchItem } from '../shared/searchTypes.js';
+export type { SearchItem } from '../shared/searchTypes.js';
+
 
 /** 下拉最多展示的条数（超出时显示提示） */
 const MAX_HITS = 50;
@@ -101,7 +94,7 @@ export function renderSearchBox(
         rowEl.setAttribute('aria-selected', 'false');
         rowEl.style.cssText = 'padding:6px 10px;cursor:pointer;font-size:12px;color:#e2e8f0;line-height:1.5;';
         rowEl.innerHTML = `<div>${escapeHtml(e.title)}</div>`
-          + (e.subtitle ? `<div style="color:#94a3b8;font-size:11px;">${escapeHtml(e.subtitle)}</div>` : '');
+          + (e.subtitle ? `<div class="search-result-subtitle">${escapeHtml(e.subtitle)}</div>` : '');
         rowEl.addEventListener('mouseenter', () => {
           rowEl.style.background = '#334155';
         });

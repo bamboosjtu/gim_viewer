@@ -105,3 +105,5 @@
 空源、unsupported、partial、运行失败是不同终态，不能用一个 `settled` 或“工程已打开”合并。
 
 会话失效先递增工程代次和几何 token，再逐项释放资源；单项释放异常不会中断其余清理。DEV runtime 槽替换时释放旧实例；工程和几何批次分别校验，几何换代不取消同工程语义任务。解压返回 `ok | cancelled`，空归档报错。发布状态、定时器和 Worker pending 请求均由会话清理终止，过期提交队列必须 reject 等待者。
+
+工程身份检查统一使用 `shared/projectSession.isCurrentProject`；携带完整批次身份的几何上下文使用 `isCurrentGeometry`，额外核对 token。几何换代不失效同工程的语义任务。现有异步入口仍保留提交前的显式守卫，资源作用域与可注入 SessionScope 随后续 SDK 边界抽取推进，不将几何 token 混入所有语义守卫。

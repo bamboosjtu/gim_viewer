@@ -55,22 +55,13 @@
 - `--self-check` 只检查启动和依赖加载，不打开正式窗口、不修改用户偏好。`gim_element` 还校验归档内嵌目录数据及 ICU 排除情况；完整功能验证使用下面的冒烟入口。
 - `_build/`、`dist/`、`.venv/` 和工具生成的截图、日志不提交。发布只取当前 `dist` 产物。
 
-## CI
+## 定位与 CI
 
-[Windows Tools CI](../.github/workflows/tools-ci.yml) 为 `gim_device`、`gim_element`、`gim_info` 分别建立 Windows x64 / Python 3.12 矩阵作业，支持 push、pull request 和手动触发。`tools/`、共享工程目录 `desktop/src/engineering/catalog.json` 或工作流变化时执行。
+三个工具当前是独立交付的诊断/浏览工具，保留各自的 Python 实现。它们的分类和解析结果限于各自规则，不作为 Viewer、未来 SDK 或 Validate 的权威真值；跨实现一致性仍需开发者本地真实来源复核。后续共享核心迁移随 SDK 边界推进，不另写一套 Benchmark parser。
 
-每个工具使用自己的 `requirements-build.txt`，依次运行合成输入测试、实际 onefile 构建/启动检查、冻结版功能冒烟和 ZIP 内容校验。CI 的每个矩阵作业拥有独立 runner，因此构建使用该作业的 Python 环境及 `-NoVenv`；本地继续使用各工具自己的 `.venv`。
+CI 只运行 `tests/test_pure.py` 中的纯函数契约，以及构建路径安全、实际 onefile 构建和启动检查。纯函数检查不构造 GIM 包、不生成工程目录、不读取真实或合成工程样本。矩阵、IFC 文本和编码等普通值测试使用工作区临时目录作为所有子进程 TEMP/TMP/TMPDIR；错误退出即失败。
 
-| 作业 | 合成测试与冻结版验证 |
-|---|---|
-| `gim_device` | ZIP / GIMPKGS+7z、重复 MOD 的不同装配矩阵；冻结版创建两个 Mesh，检查实际绘制统计并导出画布 PNG |
-| `gim_element` | 设备/附件归属、IFC 构件、目录/ZIP 一致性、HTML 转义；冻结版读取合成 GIM+7z，核对内嵌目录 SHA、分类回执和截图 |
-| `gim_info` | 唯一/显式路径、多义候选、不自动选择、反向引用、重复引用边；冻结版检查链树、跳转/返回、XML/文本视图和截图 |
-| `build-safety` | 共享构建脚本的路径边界、目录联接拒绝及失败时保留旧产物 |
-
-全部夹具由 [fixtures.py](tests/fixtures.py) 生成，不依赖未入库的 `demo/` 样本。push、pull request 和手动运行在各工具校验成功后直接上传单文件 EXE（`archive: false`），产物名称就是 `GIM设备查看器.exe`、`GIM实体盘点器.exe`、`GIM信息阅读器.exe`。测试日志、截图和 JSON 回执另存于带 `evidence` 和运行 attempt 标记的产物，均保留 7 天。重新运行会更新同名 EXE，保留各 attempt 的独立证据。回执同时记录被测试 EXE 的 SHA-256，并验证本地 ZIP 内只有该 EXE 且字节一致。
-
-设备冻结冒烟在 Windows 原生图形平台上创建屏幕外、不抢焦点的测试窗口，以保留 WebEngine 所需的暴露事件；普通 Qt Widgets 测试使用 `offscreen`。冒烟设置、日志和截图放在指定输出目录，临时目录使用正常的用户/runner TEMP。没有渲染结果、没有回执、错误退出或超时都会使作业失败。
+现有 `test_core.py`、指针目录测试及冻结版工程 smoke 属于开发者本地任务，不加入远程 CI。它们仍可用下面命令显式运行。构建成功的单文件 EXE 以原文件名上传；CI 不声称工程正确性或性能验收通过。
 
 ## 验证
 

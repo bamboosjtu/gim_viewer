@@ -1,7 +1,6 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
-import { buildInspectorSummary, readDevKv, readInspectorFamily, withEntryPrefix, getCachedByPath, type InspectorSummary } from '../services/inspectorService.js';
-import { resolveBaseFamilyReferences } from '../gim/gimValueSemantics.js';
-import { resolveSubstationBusinessIdentity, type FamSourceProperty } from '../gim/famParser.js';
+import { buildInspectorSummary, inspectNodeParameters, type InspectorFamilyData, type InspectorSummary } from '../services/inspectorService.js';
+import type { FamSourceProperty } from '../gim/famParser.js';
 import { inspectAuxiliarySources, deviceOccurrenceScope } from '../services/inspectorService.js';
 import type { CbmNode } from '../gim/types.js';
 import type { AppState, SelectionRequest } from '../app/state.js';
@@ -10,12 +9,9 @@ import { setSelectionStatus } from './shell/statusBar.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import type { IfcSpatialNode, IfcSpatialObject, SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
 import type { RegionalObject } from '../viewer/ifcRegionalData.js';
-import { isRegionalConnectionObject } from '../viewer/ifcRegionalData.js';
-import { ifcConnectionOwnershipIndex, type IfcConnectionOwnership } from '../gim/ifcConnectionOwnership.js';
-import type { ConnectionEndpointEvidence } from '../gim/connectionEndpoints.js';
+import { inspectRegionalConnectionOwnership, connectionOwnershipRows, connectionEndpointRows, findCbmNodeByPath } from '../services/inspectorService.js';
 import { escHtml } from '../shared/html.js';
 import {
-  getFileByPath,
   getFirstNonEmptyKv,
   isGimEmptyValue,
 } from '../shared/gimParsing.js';
@@ -327,7 +323,7 @@ function renderNodeGeometryDiagnostics(state: AppState, node: CbmNode): string {
     rows.push({ key: '子设备 DEV 入口', value: String(childDevCount) });
   }
   const technical=diagnostic?.reason==='source-invalid' && diagnostic.detail
-    ? `<div data-geometry-details class="props-section"><details><summary>查看技术详情</summary><pre style="max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere">${escHtml(`${diagnostic.devPath}\n${diagnostic.reason}\n${diagnostic.detail}`)}</pre></details><button type="button" class="prop-ref-link" data-copy-geometry-diagnostic>复制诊断信息</button><span role="status" data-copy-result></span></div>` : '';
+    ? `<div data-geometry-details class="props-section"><details><summary>查看技术详情</summary><pre class="geometry-diagnostic-details">${escHtml(`${diagnostic.devPath}\n${diagnostic.reason}\n${diagnostic.detail}`)}</pre></details><button type="button" class="prop-ref-link" data-copy-geometry-diagnostic>复制诊断信息</button><span role="status" data-copy-result></span></div>` : '';
   const retry = diagnostic?.status === 'failed' && diagnostic.reason !== 'source-invalid' && node.devPath && state.deviceLodRuntime?.retry
     ? `<div class="props-actions" data-geometry-retry-box><button type="button" class="prop-ref-link" data-geometry-retry>局部重试</button><span role="status" data-geometry-retry-result>只重试该设备的浏览表示</span></div>`
     : '';
@@ -496,26 +492,10 @@ function nodeIfcRefinement(state: AppState, node: CbmNode): { runtime: IfcRefine
 async function renderNodeFamDevProperties(state: AppState, node: CbmNode): Promise<string> {
   let html = renderNodeGeometryDiagnostics(state, node);
 
-  const properties: FamSourceProperty[] = [];
-  const rendered = new Set<string>();
-  const renderFamily = async (path: string): Promise<void> => {
-    if (rendered.has(path.toLowerCase())) return;
-    rendered.add(path.toLowerCase());
-    let records: FamSourceProperty[] = [];
-    if (state.currentFiles) {
-      const file = getFileByPath(state.currentFiles, path);
-      if (file) {
-        const parsed = await readInspectorFamily(state,path);
-        if (!parsed) return;
-        records = parsed.properties;
-        html += renderFamSections(parsed.sections, 'substation-fam');
-      }
-    } else {
-      records = getCachedByPath(state.cachedFamSourceProperties, path) ?? [];
-      const sections = getCachedByPath(state.cachedFamProperties, path);
-      if (sections) html += renderFamSections(sections, 'substation-fam');
-    }
-    properties.push(...records);
+  const data=await inspectNodeParameters(state,node);
+  const renderFamily = (family:InspectorFamilyData):void => {
+    const {path,sections,properties:records}=family;
+    if(sections)html+=renderFamSections(sections,'substation-fam');
     html += sectionHtml('属性来源', [['FAM 文件', fileReferenceValue('fam', path)]]);
     if (records.length > 0) {
       const duplicates = new Map<string, FamSourceProperty[]>();
@@ -530,20 +510,8 @@ async function renderNodeFamDevProperties(state: AppState, node: CbmNode): Promi
         `<tr title="${escHtml(p.rawLine)}"><td>${p.sourceLine ?? ''}</td><td>${escHtml(p.section)}</td><td>${escHtml(p.label)}</td><td>${escHtml(p.rawKey)}</td><td>${escHtml(p.rawValue)}</td></tr>`).join('')}</tbody></table></details>`;
     }
   };
-  const cbmRefs = node.rawProperties ? resolveBaseFamilyReferences(node.rawProperties) : [];
-  if (node.famPath && !cbmRefs.some((r) => r.path === node.famPath)) cbmRefs.unshift({ key: 'BASEFAMILY', path: node.famPath });
-  for (const ref of cbmRefs) await renderFamily(withEntryPrefix('CBM', ref.path));
-
-  // DEV 属性（DEV/{devPath}）
-  if (node.devPath) {
-    const devKey = withEntryPrefix('DEV', node.devPath);
-    let kv: Record<string, string> | null = null;
-    if (state.currentFiles) {
-      const f = getFileByPath(state.currentFiles, devKey);
-      if (f) kv = await readDevKv(state,devKey);
-    } else {
-      kv = getCachedByPath(state.cachedDevProperties, devKey) ?? null;
-    }
+  for(const family of data.cbmFamilies)renderFamily(family);
+  const kv=data.dev;
     if (kv) {
       const deviceRows: PropertyRow[] = [
         ...(isUsefulPropertyValue(getFirstNonEmptyKv(kv, ['SYMBOLNAME'])) ? [{ key: 'SYMBOLNAME', value: getFirstNonEmptyKv(kv, ['SYMBOLNAME']) }] : []),
@@ -559,11 +527,9 @@ async function renderNodeFamDevProperties(state: AppState, node: CbmNode): Promi
         html += renderPropertySection('DEV 参数', 'substation-dev', primaryDevRows);
         html += renderTechnicalSection('DEV 技术字段', 'substation-dev', technicalDevRows);
       }
-      for (const ref of resolveBaseFamilyReferences(kv)) await renderFamily(withEntryPrefix('DEV', ref.path));
     }
-  }
-
-  const identity = resolveSubstationBusinessIdentity(properties);
+  for(const family of data.devFamilies)renderFamily(family);
+  const identity=data.identity;
   if (identity) html += sectionHtml('业务身份候选', [
     ['身份值', identity.value], ['身份类型', identity.kind],
     ['来源', fileReferenceValue('fam', identity.source.path)], ['原始键', identity.source.key],
@@ -827,17 +793,6 @@ function collectSourceDesigns(
   return { names, files };
 }
 
-function findCbmNodeByPath(root: CbmNode | null, path: string): CbmNode | null {
-  if (!root) return null;
-  const queue: CbmNode[] = [root];
-  while (queue.length > 0) {
-    const node = queue.shift()!;
-    if (node.path === path) return node;
-    queue.push(...node.children);
-  }
-  return null;
-}
-
 /** 显示 IFC 空间容器属性（空间树点击或搜索命中触发）。 */
 export function showSpatialNodePropertiesBasic(
   state: AppState,
@@ -925,42 +880,6 @@ async function loadSpatialIfcItemData(state: AppState, object: IfcSpatialObject)
   }
 }
 
-function connectionOwnershipRows(state: AppState, evidence: IfcConnectionOwnership): Array<[string,string]> {
-  return [
-    ['CBM 来源关联', evidence.status === 'confirmed' ? '源 IFCGUID 已核对'
-      : evidence.status === 'ambiguous' ? `${evidence.semanticNodes.length} 个来源候选` : '源模型未提供可验证关联'],
-    ['DEV 装配归属', evidence.deviceNodes.length === 1
-      ? getNodeDisplayName(evidence.deviceNodes[0], state.ifcGuidToName, state.currentIfcEntries)
-      : evidence.deviceNodes.length ? `${evidence.deviceNodes.length} 个候选，未自动归属` : '未建立'],
-  ];
-}
-function connectionEndpointRows(state: AppState, modelId: string, references?: readonly ConnectionEndpointEvidence[]): Array<[string,string]> {
-  if(references===undefined)return [['设备端点关联','端点证据尚未收集；未据此推断设备归属']];
-  if(!references.length)return [['设备端点关联','未发现可用的已支持引用；整站显示不依赖此关联']];
-  const groups=new Map<string,ConnectionEndpointEvidence[]>();
-  for(const ref of references){const key=`${ref.kind}:${ref.reference}`,items=groups.get(key)??[];items.push(ref);groups.set(key,items);}
-  const index=ifcConnectionOwnershipIndex(state.currentCbmTree,state.currentIfcEntries);
-  return [...groups.values()].slice(0,32).map(items=>{
-    const ref=items[0];
-    if(ref.kind==='ifc-element'){
-      const evidence=index.get(modelId,ref.reference);
-      return ['IFC 端点对象',evidence.semanticNodes.length===1
-        ? `${getNodeDisplayName(evidence.semanticNodes[0],state.ifcGuidToName,state.currentIfcEntries)} · 源连接关系已核对`
-        : `${ref.reference} · ${evidence.semanticNodes.length?`${evidence.semanticNodes.length} 个 CBM 候选`:'尚无 CBM/DEV 映射'}`] as [string,string];
-    }
-    const ports=state.substationConnectionPorts?.get(ref.reference)??[];
-    const owners=[...new Map(ports.map(port=>[port.key,port])).values()];
-    const names=owners.map(owner=>{
-      const node=state.cbmNodeIndex.get(owner.nodePath)??findCbmNodeByPath(state.currentCbmTree,owner.nodePath);
-      return node?getNodeDisplayName(node,state.ifcGuidToName,state.currentIfcEntries):owner.nodePath;
-    });
-    const label=[...new Set(items.map(item=>`${item.propertySet??''} / ${item.propertyName??''}`))].join('；');
-    return [label||'源接线点',owners.length===1?`${names[0]} · GUID 与 DEV 装配引用已核对`
-      : owners.length?`${owners.length} 个实例候选：${names.join('、')}；未自动归属`
-        : `${ref.reference} · ${state.substationConnectionPorts?'没有可验证的 DEV 实例':'接线点 sidecar 证据尚未就绪'}`] as [string,string];
-  });
-}
-
 /** 显示未直接关联 CBM 的 IFC 构件属性，属性详情由 Fragments 按需读取。 */
 export async function showIfcSpatialObjectPropertiesBasic(
   state: AppState,
@@ -981,6 +900,7 @@ export async function showIfcSpatialObjectPropertiesBasic(
     .filter((node): node is CbmNode => !!node);
   const sourceDesign = collectSourceDesigns(links);
   const modelPath = ifcReferencePath(object.modelId, state.currentIfcEntries);
+  const connectionOwnership=inspectRegionalConnectionOwnership(state,object.modelId,{...object,bounds:[]});
   const overview = sectionHtml('IFC 构件', [
     ['名称', object.name],
     ['IFC 类型', object.ifcType],
@@ -998,8 +918,8 @@ export async function showIfcSpatialObjectPropertiesBasic(
     ...(spatialPaths.length > 0 ? [['空间路径', spatialPaths.join('；')] as [string, string]] : []),
     ['IFC 几何', object.geometryStatus === 'represented' ? '已提供 Representation' : '未提供 Representation'],
     ...(object.placement ? [['位置', `${object.placement.position.map(formatSpatialNumber).join(', ')}${object.placement.unit ? ` (${object.placement.unit})` : ''}`] as [string, string]] : []),
-  ]) + (isRegionalConnectionObject({...object,bounds:[]}) ? sectionHtml('连接对象归属',[
-    ...connectionOwnershipRows(state,ifcConnectionOwnershipIndex(state.currentCbmTree,state.currentIfcEntries).get(object.modelId,object.globalId)),
+  ]) + (connectionOwnership ? sectionHtml('连接对象归属',[
+    ...connectionOwnershipRows(state,connectionOwnership),
     ...connectionEndpointRows(state,object.modelId,regionalObject?.connectionEndpoints),
   ]) : '') + refinement;
   const relations = sectionHtml('对象关系', [
@@ -1219,8 +1139,8 @@ export async function showIfcElementProperties(ctx: ViewerContext, state: AppSta
   const regionalObject = guid
     ? regional?.index.objects.find((object) => object.globalId === guid)
     : undefined;
-  const connectionEvidence = regionalObject && isRegionalConnectionObject(regionalObject) && guid
-    ? ifcConnectionOwnershipIndex(state.currentCbmTree, state.currentIfcEntries).get(logicalModelId, guid)
+  const connectionEvidence = regionalObject && guid
+    ? inspectRegionalConnectionOwnership(state,logicalModelId,regionalObject)
     : undefined;
   // Connection objects may have a CBM identity without a physical DEV or any
   // electrical endpoint references. Do not select an arbitrary alias owner.
