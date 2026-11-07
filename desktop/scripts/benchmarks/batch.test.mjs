@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdirSync,mkdtempSync,readFileSync,writeFileSync} from 'node:fs';
-import {resolve,join} from 'node:path';
+import {resolve,join,dirname,relative} from 'node:path';
 import {artifactDirectory,loadBatchInputs} from './batch-input.mjs';
 import {executeBatch} from './batch.mjs';
 import {csv,summarize} from './batch-report.mjs';
@@ -40,6 +40,31 @@ test('registry accepts existing workspace registries and records missing paths w
   const options=setup(),registry=join(options.out,'input.json');writeFileSync(registry,'\uFEFF'+JSON.stringify({samples:[{path:'missing.gim'},{}]}));
   const result=await loadBatchInputs(root,{registry});assert.equal(result.entries.length,2);assert.ok(result.entries.every(entry=>entry.status==='INPUT_ERROR'));
   assert.throws(()=>artifactDirectory(root,join(root,'desktop','not-artifacts')),/tmp/);
+});
+test('L0/L1 committed registries require full source SHA without reading GIM files',async()=>{
+  for(const [tier,names]of [['l0',['common-design-500kv','common-design-220kv','common-design-110kv','common-design-35kv']],['l1',['substation01-04','line01-06']]]){
+    for(const name of names){
+      const file=join(root,'benchmarks',tier,`${name}.json`),registry=JSON.parse(readFileSync(file,'utf8'));
+      assert.ok(registry.samples.length>0);
+      for(const row of registry.samples){
+        assert.equal(row.sampleTier,tier.toUpperCase());assert.match(row.sourceSha256,/^[a-f0-9]{64}$/);
+        assert.ok(!relative(root,resolve(dirname(file),row.path)).startsWith('..'));
+      }
+    }
+  }
+  const options=setup(),file=join(options.out,'missing-hash.json');
+  writeFileSync(file,JSON.stringify({version:'gim-batch-input-v1',samples:[{path:'missing.gim',sampleTier:'L0'}]}));
+  const result=await loadBatchInputs(root,{registry:file});
+  assert.equal(result.entries[0].error,'source-sha-required');
+});
+test('L2 directory registry reports a missing directory without per-file hashes',async()=>{
+  const options=setup(),file=join(options.out,'l2.json');
+  writeFileSync(file,JSON.stringify({version:'gim-batch-directories-v1',sampleTier:'L2',directories:[{group:'complex-engineering',path:'missing-directory'}]}));
+  const result=await loadBatchInputs(root,{registry:file});
+  assert.deepEqual(result.entries.map(row=>[row.sampleTier,row.group,row.error]),[['L2','complex-engineering','directory-missing']]);
+  writeFileSync(file,JSON.stringify({version:'gim-batch-directories-v1',sampleTier:'L2',directories:[{group:'complex-engineering',path:'.'}]}));
+  const empty=await loadBatchInputs(root,{registry:file});
+  assert.equal(empty.entries[0].error,'directory-empty');
 });
 test('CSV handles delimiters/newlines/formula injection and summaries exclude failed trials',()=>{
   assert.equal(csv([{value:'=1,"x"\nnext'}],['value']),'\uFEFF"value"\r\n"\'=1,""x""\nnext"\r\n');

@@ -6,23 +6,7 @@ export function isDevInstanceBatchesEnabled(): boolean {
 }
 
 /**
- * MVP 阶段默认启用 MapLibre overlay。
- *
- * 当前策略（M4-A2 第 3 轮 Patch）：
- * - MVP 不区分开发 / 生产；
- * - 默认使用 OSM online raster；
- * - OSM 不可用时由 lineProjectView 回退 Canvas-only；
- * - 如需强制关闭，可临时改为 false 或后续接入 env flag。
- *
- * 已实现（M4-A2 第 1 轮）：
- * - MapLibre 底图 + Canvas overlay + 交互桥接（hover/click/联动）
- * - ScaleControl + fitBounds(duration:0)
- * - 失败自动降级为 Canvas-only
- */
-export const ENABLE_MAPLIBRE_EXPERIMENT = true;
-
-/**
- * M4-A2 第 3 轮：底图模式定义。
+ * 线路底图模式。
  *
  * - 'empty'            ：纯色 background，无瓦片（兜底模式）
  * - 'osm-online'       ：OpenStreetMap 在线 raster 底图（MVP 默认）
@@ -41,13 +25,12 @@ export type LineBasemapMode =
   | 'tianditu-vector';
 
 /**
- * MVP 默认底图模式：OpenStreetMap online。
+ * 默认底图模式：OpenStreetMap online。
  *
  * 用户可通过 UI 切换到天地图地形图 / 矢量图（lineProjectView 底图切换控件）。
  * OSM 不可用时由 lineProjectView 回退 Canvas-only。
  *
- * 注意：LINE_BASEMAP_MODE 仅在 ENABLE_MAPLIBRE_EXPERIMENT=true 时生效。
- *       若 ENABLE_MAPLIBRE_EXPERIMENT=false，仍走纯 Canvas 渲染。
+ * 地图始终先显示 Canvas；在线底图可用时再切换 MapLibre overlay。
  */
 export const LINE_BASEMAP_MODE: LineBasemapMode = 'osm-online';
 

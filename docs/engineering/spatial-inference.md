@@ -109,6 +109,6 @@ IFC 的 web-ifc/RegionalIndex 范围是绝对 Y-up 米制；进入投影前统�
 - `desktop/src/services/__tests__/compositionSpatial.test.ts`：Y-up→Z-up 转换、建筑轮廓、主变室外区域、房间/区域、防火墙、未分类保持、快照不变；
 - `compositionProjection.test.ts`：静态/运行时投影一致性；
 - `engineeringService.test.ts`：投影插件接入工程组成；
-- 九工程回归入口：`npm run test:engineering:nine`。
+- 本地工程回归入口：`npm run test:local -- --build <原生构建清单>`，样本由开发者在私有注册表中登记。
 
 当前不证明：建筑轮廓的完整 Site→Building→Storey→Space 语义图谱、同 GUID 多文件 footprint 拆分/合并、真实桌面空间推断性能；这些仍是[问题与限制](../open-issues.md)中的未关闭项。

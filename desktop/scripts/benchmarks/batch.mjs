@@ -13,7 +13,7 @@ function recordReport(row,report,state){
   const readiness=runReadiness(report);
   Object.assign(row,{status:readiness.outcome,error:[report.reason,...readiness.reasons].filter(Boolean).join(';'),runId:report.runId,
     conditions:report.conditions,checks:report.evidence?.checks??[],workload:report.evidence?.progress?.workload??null,
-    correctness:report.correctness,cacheVerified:report.cacheVerified,measurementComplete:report.measurementComplete,
+    projectType:report.projectType??null,correctness:report.correctness,cacheVerified:report.cacheVerified,measurementComplete:report.measurementComplete,
     processSamples:report.processSampling?.samples,processSamplesAvailable:report.processSampling?.available,
     missingWorkerHeaps:report.missingWorkerMemory?.length,failedGeometry:report.evidence?.progress?.workload?.failed,
     pendingTasks:report.measurement?.activeTasks?.length,backgroundSettled:report.evidence?.progress?.backgroundSettled,

@@ -57,15 +57,15 @@ npm run check:version       # 桌面发布元数据一致性
 npm run test:version        # 版本校验与漂移拒绝测试
 npm test                    # 快速单元测试
 npm run test:sqlite         # 真实 SQLite 往返
-npm run test:sample         # 真实样本回归（缺样本跳过不算通过）
-npm run test:engineering:nine
+npm run local-tests:check   # 跟踪的 mini-samples.example.json 核验
+npm run test:local -- --build <原生构建清单>
 npm run test:engineering:worker
 npm run build
 npm run tauri:build         # Release EXE + NSIS + portable ZIP/校验文件
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-`npm run test:substation:strict` 需要本地严格样本；`npm run acceptance:build`/`acceptance:stage` 用于独立验收构建。完整门禁见[验证](../validation.md)，性能步骤见[性能测试指南](../meassurement.md)。
+专项变电样本测试仍需相应本地资料；三类型最低本地验收见[本地注册表](../../desktop/local-tests/README.md)。完整门禁见[验证](../validation.md)，性能步骤见[性能测试指南](../meassurement.md)。
 
 ## 6. 发布边界
 

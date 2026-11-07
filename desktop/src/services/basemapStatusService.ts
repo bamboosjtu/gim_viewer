@@ -29,7 +29,7 @@ export interface BasemapStatusSnapshot {
   status: BasemapStatus;
   /** LINE_BASEMAP_MODE 配置值 */
   mode: string;
-  /** ENABLE_MAPLIBRE_EXPERIMENT 配置值 */
+  /** 当前地图实例是否启用了 MapLibre overlay 路线 */
   maplibreEnabled: boolean;
   /** OSM tile error 计数（仅 OSM 模式有意义） */
   tileErrorCount?: number;

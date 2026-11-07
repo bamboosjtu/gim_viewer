@@ -1,0 +1,14 @@
+{
+  "version": "gim-batch-directories-v1",
+  "sampleTier": "L2",
+  "directories": [
+    {
+      "group": "complex-engineering",
+      "path": "../../demo/真实工程"
+    },
+    {
+      "group": "complex-equipment",
+      "path": "../../demo/真实设备模型"
+    }
+  ]
+}

@@ -195,7 +195,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:'gim-measurement-v1',mode,scenario,cacheState,
     sampleId:sample.sampleId,sourceSha256:sample.sourceSha256,profileDigest,routeDigest:digest(actionTargets),viewportDigest:digest(observation?.viewport??null),viewport:observation?.viewport??null,
     workloadDigest:evidence?digest({workload:evidence.progress.workload,semantic:evidence.semanticDigest,placement:evidence.placementDigest}):null};
-  const report={version:'gim-benchmark-v1',runId,kind:doctor?'native-capability-probe':'native-scene',conditions,buildFingerprint:build.sourceFingerprint,processInstanceId:runId,
+  const report={version:'gim-benchmark-v1',runId,kind:doctor?'native-capability-probe':'native-scene',projectType:observation?.projectType??null,conditions,buildFingerprint:build.sourceFingerprint,processInstanceId:runId,
     correctness:actionResults.some(row=>row.status==='failed')||reason==='project-open-failed'||reason==='project-open-unavailable'?'failed':evidence?(evidence.passed?'passed':'failed'):'unverified',
     cacheVerified:cacheVerified(evidence,cacheState,observation?.projectType),
     measurementComplete:!reason&&processMemoryComplete&&streamFailures===0&&cleanupComplete&&!!measurement?.detailComplete&&!measurement.activeTasks.length&&!missingWorkers.length,

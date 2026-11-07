@@ -139,12 +139,12 @@ substation04.gim
 cd desktop
 npm test
 npm run test:sqlite
-npm run test:sample
-npm run test:engineering:nine
+npm run local-tests:check
+npm run test:local -- --build <原生构建清单>
 npm run test:engineering:worker
 ```
 
-`npm test` 是快速单元测试；`test:sqlite` 需要 Rust SQLite harness；`test:sample` 依赖 `demo/` 下的解压样本，缺失会跳过；两个 engineering 入口分别检查九工程来源/实体/投影和生产构建 Worker 夹具。缺少必需输入的 engineering 测试应失败，skip 不算通过；这些也不是原生性能矩阵。
+`npm test` 是快速单元测试；`test:sqlite` 需要 Rust SQLite harness；`test:local` 要求开发者登记一变、一线、一设备 GIM 和 SHA，缺失即失败；`test:engineering:worker` 检查 Worker 功能夹具。该入口也不是原生性能矩阵。
 
 这些命令用于确认构建没有明显回归，**不产生性能结论**。不要在跑性能的同时执行 `npm test`、`npm run build` 或其他 Tauri 构建。
 

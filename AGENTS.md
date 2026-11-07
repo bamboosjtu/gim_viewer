@@ -107,8 +107,8 @@ npm run dev           # Vite 开发服务器（浏览器模式）
 npm run tauri:dev     # Tauri 开发模式（桌面应用）
 npm test              # 快速单元测试（不启动 Cargo）
 npm run test:sqlite   # 真实 SQLite 往返（一次构建 Rust harness 后直接运行）
-npm run test:sample   # 真实样本集成回归（需 demo/ 下解压样本，缺失自动跳过）
-npm run test:engineering:nine    # 九工程来源/实体/投影严格对照
+npm run local-tests:check   # 检查仓库 mini-samples.example.json；缺样本明确跳过
+npm run test:local -- --build <原生构建清单>  # 跑可用样本并核对工程类型
 npm run test:engineering:worker  # 工程实体 Worker/缓存/取消（headless Edge）
 npm run build         # TypeScript 编译 + Vite 构建
 cargo check --manifest-path src-tauri/Cargo.toml   # Rust 检查（desktop/ 内）
@@ -120,7 +120,7 @@ cargo check --manifest-path src-tauri/Cargo.toml   # Rust 检查（desktop/ 内�
 - 测试与验证使用工作区根目录的 `tmp/` 和 `output/`；任何时候不允许将系统目录作为测试输入、输出、暂存或清理目标，不得回退到系统 TEMP/TMP。测试启动器及其子进程的 TEMP/TMP/TMPDIR 也必须指向上述工作区目录。
 - 本项目面向复杂工程模型，测试集及对照基线由开发者自行构建。`docs/performance.md` 只代表作者在所述环境、样本和构建上的测试结果；因样本知识产权限制，远程 CI 不运行真实或合成样本，也不复跑性能。CI 只运行不依赖工程样本的单元测试、静态检查和构建。
 - SQLite 物理 schema 在首次正式发布前统一为 v1；快速迭代不维护旧开发库的迁移和兼容分支。结构变更后由开发者删除旧数据库并重建，语义与几何派生缓存仍按各自契约失效。
-- `demo/` 目录包含大型二进制文件（.gim 及解压目录），已在 .gitignore 中排除；`npm run test:sample` 依赖 demo-substation 与 line02 解压目录
+- `demo/` 可存放开发者自备的大型模型，已从 Git 排除；基础测试位置与 SHA 由跟踪的 `desktop/local-tests/mini-samples.example.json` 登记。其他开发者可修改该模板；缺本地样本时显式跳过，不把 skip 算通过。
 - `desktop/public/worker-bundle.js`、`desktop/public/libarchive.wasm`、`desktop/public/wasm/web-ifc*.wasm`是运行时资产，由 scripts/copy-web-ifc-wasm.mjs 维护，需随项目提交
 - 修改持久化含义时只 bump 受影响域。当前缓存契约与权威源码只在[缓存域](docs/architecture/caches.md)维护；IFC LOD 键绑定实际安装依赖版本。
 - 长期文档只写当前状态，删除过程和历史版本。架构按主题维护在 `docs/architecture/`，入口是短[架构总览](docs/architecture.md)；工程实体/目录在 `docs/engineering/`，格式在 `docs/schema/`。未关闭缺陷统一维护在 [open-issues](docs/open-issues.md)，当前桌面能力见 [规格](docs/software-spec.md)。样本与格式研究、设备验收和外部业务候选不写入 open-issues。

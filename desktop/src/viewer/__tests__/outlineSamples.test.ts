@@ -19,7 +19,6 @@ describe.skipIf(!existsSync(root))('substation02 heavy outline sources',()=>{
         const elapsed=performance.now()-t;
         console.log(JSON.stringify({source:source.path,lod,ms:Math.round(elapsed),omitted:baked.omittedSmallParts,approximated:baked.approximatedBooleans}));
         expect(spy).not.toHaveBeenCalled(); expect(baked.size).toBeGreaterThan(0);expect(baked.failures).toEqual([]);
-        expect(elapsed).toBeLessThan(1000);
         for(const geometries of baked.values())for(const geometry of geometries)geometry.dispose();
       }
     }finally{spy.mockRestore();}

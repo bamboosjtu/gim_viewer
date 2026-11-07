@@ -58,22 +58,14 @@
 cd desktop
 npm test                 # 快速单元测试（不启动 Cargo）
 npm run test:sqlite      # 真实 SQLite 集成：构建一次，直接运行 harness
-npm run test:sample      # 真实样本回归（缺样本时可跳过，skip 不算通过）
-npm run test:engineering:nine   # 九工程来源/实体/投影严格对照
+npm run local-tests:check  # 检查跟踪的 mini-samples.example.json，缺样本明确跳过
+npm run test:local -- --build <原生构建清单>  # 运行可用样本，skip 不计通过
 npm run test:engineering:worker # 真实 Worker/Blob/缓存/取消（headless Edge）
 npm run build
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-工程实体基线先准备独立参考和几何输入：
-
-```powershell
-npm run engineering:baseline
-npm run engineering:geometry-input
-npm run test:engineering:nine
-```
-
-`engineering:baseline`/`geometry-input` 依赖本地 `research/` 和样本；缺少必需输入应失败，不能用旧输出或跳过冒充复跑。`test:engineering:worker` 是功能夹具，不替代原生 IPC、真实渲染或性能验收。
+本地入口和可编辑的跟踪注册表见 [开发者本地验收](../desktop/local-tests/README.md)。`test:engineering:worker` 是无工程样本的功能夹具，不替代原生 IPC、真实渲染或性能验收。
 
 SQLite 集成测试独立于单元测试和样本回归，Windows CI 必须单独执行 `test:sqlite`。准备阶段最多 10 分钟，通过 Cargo JSON 产物消息取得本次测试程序；每次 SQLite 执行最多 30 秒，外层测试最多 60 秒。输入、输出和临时 SQLite 文件位于已忽略的 `tmp/sqlite-tests/sqlite/`，每次调用独立目录，进程退出后清理。
 
@@ -93,27 +85,7 @@ SQLite 集成测试独立于单元测试和样本回归，Windows CI 必须单�
 python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation substation02 substation03 substation04 --extract-only
 ```
 
-### 九工程归一化研究
-
-研究阶段对九个变电包做过全量来源扫描和独立归一化（不调用产品业务树、粒度判定或渲染结果）。方法边界：
-
-- 输入为 s01–s04、a31、b11–b14；只读源 ID、原始名称/类型、属性原行、实际父引用、GUID 和来源路径，忽略扫描快照中的既有分类列。
-- F2/F3/F4 标签、当前软件节点层级不参与整体边界；IFC 内部类型不新建工程对象。
-- 先解释当前对象角色（整体/内部件/独立功能/装置拆件/来源诊断），再按共同工程标识、编号名称和兼容签名跨平级来源归一；不足时进入待归集合。
-- 每份来源恰有一个主去向：整体、待归集合或仅来源；内部件不要求细分类，来源必须守恒。
-- 组织等价性测试改变输入顺序、包装层、F 层级和设计拆分深度，整体集合应保持一致；粗模型没有装配边时不能补造配件。
-
-研究阶段得到的关键判断（不是当前工程台套真值）：
-
-| 场景 | 结论 |
-|---|---|
-| 局部 FAM 借用上级名称 | 在线监测仪、放电间隙、电动机构等先判当前对象角色，12 个来源未被中性点装置吞并。 |
-| 单相本体成组 | 明确主变编号 + 单相证据可组成一个工程主变；本体数、相别完整性另存，不按“三份”机械拆组。 |
-| 跨平级 CBM 成套 | 共同工程编码 + 编号名称 + 兼容装置签名可建立声明整体；泛称“接地变”仍聚为待确认集合。 |
-| 组件级歧义 | 候选都落在同一整体时可在整体层挂属性；不按数组下标强配零件，跨整体歧义保留。 |
-| 装配内配件 | 真实 DEV 装配边内的端子箱、机构箱、散热器等归宿主；无装配边的独立安装对象才另建整体。 |
-
-研究阶段的整体候选数、未知类别数和待归集合数记录在 `research/data/engineering-wholes/`，只作研究台账，不是当前产品计数或验收期望。当前回归以 `npm run test:engineering:nine` 和实体/投影测试为准；没有人工逐台套真值时，不宣称归属准确率。
+研究阶段的九工程归一化记录保存在 `research/data/engineering-wholes/`，不作为当前产品的验收输入或人工真值。当前本地门禁由开发者私有注册表与原生运行报告确定。
 
 ## 4. 真实桌面复核
 

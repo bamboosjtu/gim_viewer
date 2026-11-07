@@ -4,7 +4,7 @@ import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 
 /** 添加模型到 UI 列表 */
-export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: string, runtimeModelId = modelId): void {
+export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: string, runtimeModelId: string): void {
   if (document.getElementById(`model-${modelId}`)) return;
   const item = document.createElement('div');
   item.id = `model-${modelId}`;
@@ -42,8 +42,6 @@ export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: strin
 }
 
 /** 从 UI 列表移除模型 */
-export function removeModelFromUI(modelId: string, runtimeModelId = modelId): void {
+export function removeModelFromUI(modelId: string): void {
   document.getElementById(`model-${modelId}`)?.remove();
-  // 兼容旧版本曾以 runtime ID 直接作为 DOM key 的残留行。
-  if (runtimeModelId !== modelId) document.getElementById(`model-${runtimeModelId}`)?.remove();
 }

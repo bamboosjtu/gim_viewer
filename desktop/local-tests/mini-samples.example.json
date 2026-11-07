@@ -1,0 +1,20 @@
+{
+  "version": "gim-local-tests-v1",
+  "samples": [
+    {
+      "role": "substation",
+      "path": "../../demo/substations/substation01.gim",
+      "sourceSha256": "711259814db95999f5282af1871da9cb50db4548b71626637b33038b062fc390"
+    },
+    {
+      "role": "line",
+      "path": "../../demo/lines/line01.gim",
+      "sourceSha256": "97a5699005b6a03d7c4304da61d10b216c5804d6fc61032432a6bd72547aa829"
+    },
+    {
+      "role": "equipment",
+      "path": "../../demo/equipment.gim",
+      "sourceSha256": "<SHA256>"
+    }
+  ]
+}

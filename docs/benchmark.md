@@ -2,6 +2,8 @@
 
 Benchmark 使用固定 WebView2 的原生 Release 应用，每次运行启动独立进程，顺序执行注册的工程；不以 Node 微基准代替产品加载。目录或 JSON 注册表可以直接作为输入，不需要逐个手动调用。实际工程、性能与内存测试只在开发者本地运行，CI 不运行真实或合成工程样本。
 
+开发者基础功能集合由 [`test:local`](../desktop/local-tests/README.md) 验证：仓库跟踪 [mini-samples.example.json](../desktop/local-tests/mini-samples.example.json)，开发者可直接修改为自己的变电、线路、设备 GIM 路径及 SHA。缺失样本显式跳过，已有来源的 SHA 或运行时工程类型不符则失败。L0/L1/L2 性能样本沿用独立登记。
+
 ## 命令行
 
 在 `desktop/` 执行。所有输入必须位于工作区内；产物只能写入工作区根目录的 `tmp/`、`output/`。样本目录仅被读取，系统 TEMP/TMP 不作为测试目录。
@@ -28,7 +30,7 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
 
 运行中可按 Ctrl+C，或在该报告目录新建空的 `stop.request`。控制器取消当前任务、回收本次拥有的应用进程树，余项标为 `CANCELLED`。结果随每次状态变化落盘，浏览器刷新 HTML 即可看到进度；不覆盖已有批次目录。强制结束控制器或机器断电可能留下 `RUNNING/PENDING`，它们不属于成功结果。
 
-预置通用设计与开发回归注册表见 [注册表清单](../benchmarks/registries/README.md)。
+L0/L1 的逐文件 SHA 注册表与 L2 目录清单见 [性能样本登记](../benchmarks/README.md)。
 
 ## JSON 注册表
 
@@ -40,18 +42,21 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
   "samples": [
     {
       "path": "../demo/substations/substation01.gim",
+      "sourceSha256": "711259814db95999f5282af1871da9cb50db4548b71626637b33038b062fc390",
       "sampleTier": "L1"
     },
     {
-      "path": "../demo/another-model.gim",
-      "sourceSha256": "填写该文件的完整 SHA256",
+      "path": "../demo/变电站通用设计模型/500-A3-1 三维设计.gim",
+      "sourceSha256": "ea53999fec01bd7440392a21b59baa42547e842bc781cf7d32cff5994212be0b",
       "sampleTier": "L0"
     }
   ]
 }
 ```
 
-SHA 可省略，运行前会计算并冻结；填写后不匹配会报错，不自动更新。`sampleTier` 是资料形成目的，允许未登记，不能从模型粒度推断。现有 `gim-samples-v1` 私有注册表可直接输入，它的 `paths` 沿用相对工作区的语义，每个路径都列入结果。去掉路径后的匿名注册表不能用来打开源文件。
+L0/L1 的 `gim-batch-input-v1` 登记必须有完整 SHA；填写后不匹配会报错，不自动更新。`sampleTier` 是资料形成目的，允许未登记，不能从模型粒度推断。现有 `gim-samples-v1` 私有注册表可直接输入，它的 `paths` 沿用相对工作区的语义，每个路径都列入结果。去掉路径后的匿名注册表不能用来打开源文件。
+
+L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directories` 列出工作区内的目录和通用组名。CLI 递归发现 GIM、计算本次 SHA 并冻结到 Profile；目录缺失、为空、链接或不可读会作为输入错误报告。参见 [目录示例](../benchmarks/l2/directories.example.json)。
 
 默认场景为打开工程并等待自动请求的表示与缓存任务结束，不自动请求全部 L2。需要精化的条目可显式加入：
 

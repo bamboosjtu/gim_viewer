@@ -1,66 +1,7 @@
-# 原生验收与单文件 IFC 对照
+# 桌面 Benchmark 工具
 
-## 独立原生 Release 验收
+当前原生测量入口为 `npm run bench -- ...`，包括固定 WebView2 构建、能力检查、目录/JSON 批量运行、冷暖比较、探针开销和生命周期测试。命令、报告口径与匿名化规则见 [Benchmark 使用说明](../../../docs/benchmark.md) 和 [测量架构](../../../docs/architecture/measurement.md)。
 
-在 `desktop/` 执行 `npm run acceptance:build`，再将生成的清单路径传给 `npm run acceptance:stage -- <acceptance-build.json>`，得到已核验的临时目录副本。`node scripts/benchmarks/acceptance-probe.mjs <暂存后的 acceptance-build.json>` 只检查原生启动、实际独立缓存路径和所属进程清理，不打开工程，也不代表工程性能验收通过。
+来源层级在 [`benchmarks/`](../../../benchmarks/README.md) 登记：L0/L1 的文件绑定 SHA；L2 以本地目录发现文件，运行时计算 SHA。原始 profile、日志和私有路径映射仅写入工作区 `tmp/`，分享报告写入 `output/`。普通 CI 只运行值与协议测试，不运行模型或性能矩阵。
 
-验收使用独立应用标识，并校验当前源码、EXE 和完整固定运行时；日常应用缓存保持原位。目录相关启动失败的具体原因尚未确认，不修改 ACL 或关闭安全机制来替代验收。冷暖矩阵、真实文件对话框、固定路线及结果判定以[性能测试指南](../../../docs/meassurement.md)为准，当前证据见[性能基线](../../../docs/performance.md)。工具自测入口为 `npm run test:acceptance-tools`。
-
-## DEV 计算池工作集
-
-在 Windows、Node 22、Python 和 Edge 环境下，从 `desktop/` 执行 `npx vitest run --config scripts/benchmarks/dev-worker-workset.config.ts`，为四站生成已核对源 SHA 的目录、物理根与真实来源清单。另开 Vite 服务，再逐个执行 `node scripts/benchmarks/dev-worker-workset-browser.mjs substation01 baseline` 和同样本的 `candidate`；其他站替换 ID。控制入口需要 Git 中的 `93b2f2c`，只在忽略的 `.tmp/` 重定位控制模块，不修改生产源码。
-
-该入口使用独立 headless Edge/profile，真实执行 DEV 范围、L0、空闲、重算及十次池级创建/取消；用 Windows `PrivateUsage` 查询所属进程树。不可用采样保留原因，不替代为 0。输出位于 `output/memory-workset/`，不操作日常缓存，不代表 Tauri、完整 IFC/GPU、全站峰值或真实工程切换。机制见 [DEV 几何](../../../docs/architecture/dev-geometry.md)，当前性能事实见 [性能](../../../docs/performance.md)。
-
-## DEV 缓存解包对照
-
-准备四站解包样本后，在 `desktop/` 执行 `npx vitest run --config scripts/benchmarks/dev-cache-decode.config.ts`，生成真实 L0 模板，并核对旧/新解包的字节、状态、几何、材质与独立缓冲区。缺少任一样本会失败，不跳过。产物写入忽略目录 `output/parse-reuse/`。
-
-保持 `npm run dev -- --host 127.0.0.1` 运行，再执行 `node scripts/benchmarks/dev-cache-decode-browser.mjs`，在独立 headless Edge/profile 中对固定产物执行 100 对交替解包；可用第一个参数指定 Edge 可执行文件。服务只监听 loopback，结束后关闭所属浏览器，不操作日常缓存。两套入口只测缓存解包 CPU，不代表 IPC、绘制、完整冷暖或内存峰值验收。机制见 [DEV 几何](../../../docs/architecture/dev-geometry.md)，当前性能事实见 [性能](../../../docs/performance.md)。
-
-## 固定场景容器的矩阵更新
-
-在 `desktop/` 先运行 `npx vitest run --config scripts/benchmarks/dev-cache-decode.config.ts` 与 `npx vitest run --config scripts/benchmarks/dev-worker-workset.config.ts`，准备四站源身份已验证的真实 L0 产物及 CBM occurrence 清单。没有输入会失败，不会跳过样本。几何/parser 或缓存契约改变后应重新生成，不能直接沿用旧产物。
-
-保持 Vite 在 `127.0.0.1:14317` 运行，逐站执行 `node scripts/benchmarks/static-container-browser.mjs substation01`，其他站替换 ID。入口核对原包/解包身份、artifact 和 GLB SHA，在独立 headless Edge/profile 中用同一场景交替基线与候选，执行真实 WebGL 绘制、像素和三角形目标拾取检查，保存三轮原始 CPU 时间及截图到 `output/static-container/`。结束关闭所属浏览器树，不操作日常缓存。
-
-CPU render 时间含世界矩阵更新；GPU 排空在计时外，不代表 GPU 时间或帧间隔。每站只加载所选 L0 子集，工程锚点为单位阵，未加载 IFC，也不执行整站原生验收。机制与当前性能事实见 [DEV 几何](../../../docs/architecture/dev-geometry.md) 与 [性能](../../../docs/performance.md)。
-
-## 上一视角与失败恢复
-
-先按前述两组配置生成 `output/parse-reuse/` 的真实 L0 产物与 `output/memory-workset/` 的 CBM 清单。几何/parser 或缓存契约改变后须重建输入。保持 Vite `127.0.0.1:14317` 运行，从 `desktop/` 逐站执行 `node scripts/benchmarks/view-history-browser.mjs substation01`，其他站替换 ID。
-
-入口核对原包/解包与产物身份，在独立 headless Edge/profile 中用实际 CameraControls、真实设备位置及一次性相机异常执行三轮基线/候选。基线固定为 Git `cc05534`，临时模块仅写入忽略的 `.tmp/`；结果写入 `output/view-history/`，结束关闭所属浏览器。固定 1/60 s 推进用于功能验证，不代表真实操作时长、帧耗时或原生 UI 验收，不操作日常缓存。机制见[选择与交互](../../../docs/architecture/selection.md)。
-
-## 单文件 IFC 对照
-
-这些入口用于手动、有界范围的研究复核，不加入默认单元测试，不代表全站或 Tauri 验收。只处理显式指定的 IFC；当前产品页固定钢结构样本 SHA 和连接板 ExpressId，其他输入应先修改该页的身份与目标。原始 IFC 不修改，输出写入仓库忽略的 `output/`。
-
-在 `desktop/` 启动两个终端：
-
-```powershell
-node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 14331
-node scripts/benchmarks/ifc-lod-source-server.mjs '../demo/substation02/CBM/0302-钢结构.ifc'
-```
-
-打开 `http://127.0.0.1:14331/scripts/benchmarks/ifc-lod-product.html`。页面调用当前产品的 Fragments、Worker、AppState 和区域运行时；不是 Preview。源服务仅监听 loopback，允许此开发端口读取指定文件；结束后关闭服务。
-
-检查首次远景、近景连接板、返回远景、缓存重新打开，并记录 `window.__steelLod` 的 sourceReads、cacheHit、farMs 与 regional.diagnostics。区域统计是当前运行时累计值；HIT 没有重新分类开洞，因此开洞分类计数为零不代表缓存几何没有省略孔。相机/视口变化会改变区域对象数，需记录相同视角后再比较。
-
-近景分类、几何和属性请求复用单一源 Worker，切源、关闭或空闲 30 秒后释放；返回远景应清空局部网格并恢复远景对象。验证期间禁止改源触发 HMR、并发构建或运行其他基准。首次源读取/OpenModel 与缓存恢复分别报告；本组不设置 300 秒超时。
-
-`ifc-opening-visual.mjs` 导出原始和省略关系开洞的真实网格；`ifc-opening-view-server.mjs` / `ifc-opening-viewer.html` 负责同相机效果对照。`ifc-opening-cost.mjs` 是只测 web-ifc 的独立 Node 子进程探针，`ifc-opening-import.mjs` 只测 Node importer。它们的结果不能替代产品场景提交和选择验证。
-
-## 近景缓存容量验收
-
-在隔离 Playwright 浏览器和独立 loopback 端口打开 `scripts/benchmarks/ifc-near-cache-check.html`。页面会重建该隔离 origin 的测试数据库，验证旧远景保留、旧近景迁移、字节及条目上限、访问淘汰顺序、超大条目和删除容量账；不在日常开发浏览器的既有缓存中运行。它调用实际 IndexedDB 桥接实现，不进入默认单元测试。
-
-源服务可用第三个参数指定 Vite loopback origin，例如 `node scripts/benchmarks/ifc-lod-source-server.mjs '../demo/substation02/CBM/0302-钢结构.ifc' http://127.0.0.1:14339`。只接受 `http://127.0.0.1`，默认 origin 仍为端口 14331。区域诊断中的 sourceReads/sourceChecks 与 sourceOpenCount 分开记录；30 秒空闲后的重读和策略变化导致的重开不得混为一类。
-
-开洞关系范围表在源 Worker 的首次小孔修改时建立，后续批次仅修改新关系范围。若比较关系修改成本，必须使用相同源与累计移除集合，逐批核对修改后的全部字节；首次建表、后续修改和 OpenModel 分别计时。
-
-## 区域依赖子集与登记核心
-
-`node scripts/benchmarks/ifc-regional-mutation-check.mjs '../demo/substation02/CBM/0302-钢结构.ifc' '../output/steel-subset-check.json' subset` 只验证指定钢结构的板件、紧固件和保留开洞对象，对照顶点、索引、颜色及矩阵。省略最后的模式参数时默认使用 subset。mutation 和 catalog 是失败候选的诊断复现入口，分别检查 DeleteLine/ResetCache 和全源开洞预分类，不代表生产路径。生产源文件不改写，输出写入忽略目录，脚本不会覆盖研究报告。
-
-在 `desktop/src-tauri/` 设置绝对路径环境变量 `GIM_PROJECT_CHECK_SOURCE` 与独立目录 `GIM_PROJECT_CHECK_DIR` 后，可运行 `cargo test --lib project_registration_native_profile -- --ignored --nocapture`。首次运行只向该目录的专用数据库登记来源，第二次为新的原生进程命中，并让另一个连接保留 WAL 写锁以核对只读登记；输出 JSON 明确标记不包含 WebView、IPC、语义恢复和几何。不能将此命令的成功作为完整桌面暖启动验收。
+旧的固定样本浏览器与 IFC 单文件探针已退役。原生启动、Worker/CDP 能力使用不需要 GIM 输入的 `bench doctor` 检查；性能或内存结论以注册表批次为准。

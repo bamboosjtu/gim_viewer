@@ -1,6 +1,6 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { loadPresentation } from './presentationPort.js';
-/** DEV post-IFC LOD startup and legacy geometry recovery. */
+/** DEV post-IFC LOD startup and geometry recovery. */
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';

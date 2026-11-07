@@ -111,7 +111,7 @@ export async function getViewerRuntimeWithUI(
       },
       onModelRemoved: (modelId, runtimeModelId) => {
         state.selectionVisibility?.removeModel(modelId, runtimeModelId);
-        removeModelFromUI(modelId, runtimeModelId);
+        removeModelFromUI(modelId);
       },
     };
 

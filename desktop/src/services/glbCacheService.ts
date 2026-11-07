@@ -732,8 +732,8 @@ export function loadDevGlb(
 
 /**
  * Parse a DEV GLB and retain the small amount of GLTF metadata needed by the
- * session-local template validator.  `loadDevGlb` remains the compatibility
- * helper for legacy callers and returns only the scene.
+ * session-local template validator. `loadDevGlb` serves callers that need
+ * only the scene.
  */
 export function parseDevGlbAsset(
   devPath: string,

@@ -243,7 +243,7 @@ export async function cleanupBeforeOpenNewProject(
         scene.remove(state.modRootGroup);
         xmlModDisposedCount = state.loadedXmlModGroups.size;
       } else {
-        // 回退：旧版本没有图层根节点，逐个移除
+        // 初始化中途失败也可能留下独立 Group；根节点尚未建立时逐个释放。
         for (const [modPath, group] of state.loadedXmlModGroups) {
           try {
             scene.remove(group);

@@ -1,17 +1,16 @@
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /**
- * M4-A1/A2：MapLibre 底图层模块。
+ * MapLibre 底图层模块。
  *
- * 仅在 `ENABLE_MAPLIBRE_EXPERIMENT = true` 时由调用方动态 import 使用。
- * 默认功能关闭，主流程仍走 `lineMapView.ts` 纯 Canvas 渲染。
+ * 由调用方动态 import；Canvas 首帧先显示，底图可用时切换 overlay。
  *
- * M4-A1（已完成）：
+ * 当前能力：
  * - maplibre-gl 能在 Tauri + Vite 中被动态 import
  * - 能创建一个空白地图容器（使用本地空 style）
  * - 能销毁（remove() 释放资源）
  * - empty 模式不访问外网；osm-online 模式访问 https://tile.openstreetmap.org
  *
- * M4-A2 第 1 轮（已完成，原 M4-A2 已升级）：
+ * Overlay 交互：
  * - Handle 新增 project(lng, lat) → 屏幕像素（桥接 Canvas overlay）
  * - Handle 新增 onViewChange(callback) → 监听 move/zoom/resize
  * - Handle 新增 onViewSettled(callback) → 监听 moveend/zoomend
@@ -21,7 +20,7 @@ import { reportBackgroundError } from '../utils/backgroundErrors.js';
  * - ScaleControl（仅 overlay 模式，bottom-right）
  * - fitBounds 使用 duration:0（无动画，立即同步 Canvas 重绘）
  *
- * M4-A2 第 3 轮（本轮新增）：
+ * 底图模式：
  * - 支持 basemapMode 选择底图（empty / osm-online / tianditu-*）
  * - OSM online 模式：MVP 默认，启用 attributionControl
  * - OSM tile 加载错误计数（阈值 3 次）→ 触发 onBasemapUnavailable 回调
@@ -127,7 +126,7 @@ export interface CreateMapLibreProbeOptions {
  * - 添加 ScaleControl（bottom-right，metric）
  * - 失败时抛出错误（调用方应 catch 并回退到 Canvas 主流程）
  *
- * 注意：本函数仅在 `ENABLE_MAPLIBRE_EXPERIMENT = true` 时被调用，
+ * 本函数仅由可定位的线路地图按需调用，
  * 调用方负责 feature flag 判断，本模块不做 flag 检查。
  */
 export async function createMapLibreProbe(

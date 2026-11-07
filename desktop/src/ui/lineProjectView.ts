@@ -33,7 +33,7 @@ import { buildLineCatenaryAuditExportPayload } from '../services/lineCatenaryAud
 import type { LineCatenaryAuditExportPayload } from '../services/lineCatenaryAuditExportService.js';
 import { formatLineCatenaryAuditMarkdown } from '../services/lineCatenaryAuditExportService.js';
 import { DEBUG_LINE_MAP } from '../config/debug.js';
-import { ENABLE_CATENARY, ENABLE_MAPLIBRE_EXPERIMENT, runtimeBasemapMode, setRuntimeBasemapMode, resetRuntimeBasemapMode } from '../config/features.js';
+import { ENABLE_CATENARY, runtimeBasemapMode, setRuntimeBasemapMode, resetRuntimeBasemapMode } from '../config/features.js';
 import type { LineBasemapMode } from '../config/features.js';
 import { isTiandituKeyAvailable } from '../config/tianditu.js';
 import { setBasemapStatus, resetBasemapStatus } from '../services/basemapStatusService.js';
@@ -460,12 +460,7 @@ export function formatLatestCatenaryAuditMarkdown(): string | null {
   return payload ? formatLineCatenaryAuditMarkdown(payload) : null;
 }
 
-/**
- * M4-A1：MapLibre probe handle（实验性，默认关闭）。
- *
- * 仅在 ENABLE_MAPLIBRE_EXPERIMENT=true 时创建，与 Canvas 主地图并存。
- * 不替换 Canvas 主流程，仅验证 MapLibre 能在 Tauri + Vite 中初始化/销毁。
- */
+/** 当前线路地图的可选在线底图句柄；Canvas 首帧始终先就绪。 */
 let maplibreProbeHandle: LineMapBaseLayerHandle | null = null;
 
 /**
@@ -804,12 +799,12 @@ export function renderLineProjectPanels(
     valid: mapProjection.renderable,
   });
   // M4-A2 Finalization：先报告 Canvas-only 状态
-  // - 无论 ENABLE_MAPLIBRE_EXPERIMENT 是否开启，主视口已先以 Canvas-only 形式就绪
+  // - 主视口先以 Canvas-only 形式就绪
   // - 后续 MapLibre overlay 成功时状态会被更新为对应在线 raster 状态
   // - 在线 raster 失败回退时状态会被更新为 '*-unavailable-fallback'
   setBasemapStatus('canvas-only', {
     mode: runtimeBasemapMode,
-    maplibreEnabled: ENABLE_MAPLIBRE_EXPERIMENT,
+    maplibreEnabled: true,
   });
 
   // 5. 隐藏空提示（线路工程使用地图视口，不需要 3D 空提示）
@@ -837,7 +832,7 @@ export function renderLineProjectPanels(
 
   // 7. M4-A2：MapLibre 底图层 + Canvas overlay
   //    - Canvas-only 已在上方渲染完成，确保地图立即可见
-  //    - flag=true 时异步创建 MapLibre probe，成功后切换为 overlay 模式
+  //    - 异步创建 MapLibre probe，成功后切换为 overlay 模式
   //    - overlay 模式恢复完整交互：hover/click/联动（pointer 事件桥接）
   //    - 失败时保持 Canvas-only，不影响主流程
   //    底图模式（runtimeBasemapMode，可由 UI 切换）：
@@ -848,8 +843,7 @@ export function renderLineProjectPanels(
   //    - 在线 raster 不可用（3 次 tile error）或初始化失败时，自动回退 Canvas-only
   //    底图切换 UI：附加到图层面板下方（OSM / 天地图卫星 / 天地图地形 / 天地图矢量）
   attachBasemapSwitcher(mapData);
-  if (ENABLE_MAPLIBRE_EXPERIMENT && mapProjection.renderable) {
-    debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] enabled:', ENABLE_MAPLIBRE_EXPERIMENT);
+  if (mapProjection.renderable) {
     debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] basemap mode:', runtimeBasemapMode);
     if (runtimeBasemapMode === 'osm-online') {
       debugLog(DEBUG_LINE_MAP, '[MapLibre overlay] using OSM online raster tiles');
@@ -1095,10 +1089,8 @@ function switchBasemap(
   attachBasemapSwitcher(mapData);
   setBasemapStatus('canvas-only', {
     mode: runtimeBasemapMode,
-    maplibreEnabled: ENABLE_MAPLIBRE_EXPERIMENT,
+    maplibreEnabled: true,
   });
-
-  if (!ENABLE_MAPLIBRE_EXPERIMENT) return;
 
   const myGen = maplibreProbeGeneration;
   const creation = mapCreationController = new AbortController();

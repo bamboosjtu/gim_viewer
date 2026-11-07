@@ -62,19 +62,11 @@ const _sharedMaterialCache = new Map<string, THREE.MeshStandardMaterial>();
 let _sharedDefaultMaterial: THREE.MeshStandardMaterial | null = null;
 
 /**
- * 共享 Geometry 缓存：按 (primitiveType, primitiveParamsSignature) 全局聚类。
- *
- * 演进历程：
- * - v1（FIX-3 后续）：每 Entity 独立 new BufferGeometry → 78000+ Geometry，OOM
- * - v2（方案 A.0）：按 (modPath, type, params) 缓存 → 同 modPath 多实例共享，-40%
- * - v3（方案 A.1，当前）：移除 modPath，全局共享 → 跨 modPath 同参数 primitive 共享，-80%+
+ * 共享 Geometry 缓存：按 (LOD, primitiveType, primitiveParamsSignature) 全局聚类。
  *
  * 安全性：BufferGeometry 仅含顶点数据（position/normal/uv），由 primitive 参数决定。
  * Entity.TransformMatrix 烘焙到 mesh.matrix，不影响 geometry 顶点。
- * 因此"同参数 → 同顶点数据"无论来自哪个 modPath，共享都安全。
- *
- * 实证收益：变电站工程中 Cylinder/Cuboid 等基础体在多个 MOD 文件中重复出现，
- * 全局共享后 Geometry 数从 ~46000 降到几千个。
+ * 因此同 LOD、同参数的图元可跨 MOD 共用几何；项目清理时统一释放。
  */
 const _sharedGeometryCache = new Map<string, THREE.BufferGeometry>();
 
@@ -436,15 +428,10 @@ function createStretchedBodyGeometry(array: string, normalRaw: string, lengthRaw
  * - 变电站工程中基础体参数重复率高，全局共享后 Geometry 数 -80%+
  * - Entity.TransformMatrix 不影响 geometry 顶点，由 entityToMesh 烘焙到 Mesh.matrix
  *
- * v3（A.1）变更：移除 modPath 缓存键，跨 modPath 共享。
- * 安全性：BufferGeometry 仅含顶点数据，由 primitive 参数决定，与 modPath 无关。
- *
  * @param p primitive 描述
- * @param modPath MOD 文件路径（保留参数兼容性，A.1 起不再参与缓存键）
+ * @param lod 浏览层级；缓存键只由层级、图元类型和参数决定
  */
-export function primitiveToGeometry(p: XmlModPrimitive, modPath?: string, lod: DeviceLod = 2): THREE.BufferGeometry | null {
-  // v3（A.1）：modPath 不再参与缓存键，跨 modPath 全局共享
-  void modPath; // 标记参数已废弃，保留兼容性
+export function primitiveToGeometry(p: XmlModPrimitive, lod: DeviceLod = 2): THREE.BufferGeometry | null {
   const sig = `${lod}:${p.type}:${primitiveSignature(p)}`;
   const cached = _sharedGeometryCache.get(sig);
   if (cached) return cached;
@@ -469,19 +456,18 @@ export function gimMatrixToMatrix4(arr: number[]): THREE.Matrix4 {
 /**
  * 将 Entity 转换为 Three.Mesh。
  *
- * - primitive → geometry（共享缓存，需传入 modPath）
+ * - primitive → geometry（按图元参数共享缓存）
  * - color → material（共享缓存）
  * - transformMatrix → fromArray（列主序，与 GIM 实测布局一致）
  *
  * @param e entity 描述
- * @param modPath MOD 文件路径（用于 Geometry 共享缓存键）
+ * @param colorMaxA 当前文件的颜色 A 刻度上限
  */
 export function entityToMesh(
   e: XmlModEntity,
-  modPath: string,
   colorMaxA = 100,
 ): THREE.Mesh | null {
-  const geometry = primitiveToGeometry(e.primitive, modPath);
+  const geometry = primitiveToGeometry(e.primitive);
   if (!geometry) return null;
 
   const material = colorToMaterial(e.color, colorMaxA);
@@ -611,7 +597,7 @@ export function xmlModDocumentToGroup(doc: XmlModDocument): THREE.Group {
   if (doc.isEmpty) return group;
 
   for (const entity of doc.entities) {
-    const mesh = entityToMesh(entity, doc.modPath, doc.colorMaxA);
+    const mesh = entityToMesh(entity, doc.colorMaxA);
     if (!mesh) continue; // 跳过暂停渲染的 primitive
     mesh.visible = entity.visible;
     group.add(mesh);
@@ -684,7 +670,7 @@ function* bakeGeometrySteps(
     approximatedBooleans: { Union: 0, Difference: 0, Intersection: 0 }, omittedSmallParts: 0, omittedMaxExtentMm: 0 });
   const build = (p: XmlModPrimitive) => {
     const started = performance.now();
-    const geometry = primitiveToGeometry(p, doc.modPath, lod);
+    const geometry = primitiveToGeometry(p, lod);
     const elapsed=timings||onStage?performance.now()-started:0;
     if (timings) timings.primitiveMs = (timings.primitiveMs ?? 0) + elapsed;
     onStage?.('dev.primitive',elapsed,{primitives:1,verticesReferenced:geometry?.getAttribute('position')?.count??0});

@@ -54,9 +54,8 @@ export function commitStdSldResult(
 /**
  * 校验缓存恢复结果是否覆盖了 GIM 索引中声明的电气图文件。
  *
- * 旧版本缓存只落盘 IFC/几何文件，SQLite 的 gim_entry 虽然仍记录
- * project.sch、*.std、*.sld，但 extracted/{projectId} 下没有对应文件。
- * 这种缓存不能继续走短路路径，否则电气图面板只能显示空状态。
+ * 索引可能声明 project.sch、*.std、*.sld，但对应源文件缺失或读取失败。
+ * 这种不完整缓存不能继续走短路路径，否则电气图面板只能显示空状态。
  */
 export function findMissingStdSldCacheParts(
   entryPaths: Iterable<string>,
