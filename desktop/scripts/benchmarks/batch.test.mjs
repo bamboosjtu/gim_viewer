@@ -1,11 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdirSync,mkdtempSync,readFileSync,writeFileSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync,readdirSync,writeFileSync} from 'node:fs';
 import {resolve,join,dirname,relative} from 'node:path';
 import {artifactDirectory,loadBatchInputs} from './batch-input.mjs';
 import {executeBatch} from './batch.mjs';
 import {csv,summarize} from './batch-report.mjs';
 import {compareSuites} from './compare.mjs';
+import {spawnSync} from 'node:child_process';
+import {isStartupInfrastructureFailure} from './startup-retry.mjs';
 
 const root=resolve('..');
 function setup(){const parent=artifactDirectory(root,join(root,'tmp','batch-protocol-tests')),out=mkdtempSync(join(parent,'run-'));
@@ -13,7 +15,7 @@ function setup(){const parent=artifactDirectory(root,join(root,'tmp','batch-prot
 function inputs(){return {entries:['a','b','c'].map((id,index)=>({inputId:id,sampleId:id,sourceSha256:id,privatePath:'private-name',status:'READY'})),
   samples:['a','b','c'].map(id=>({inputId:id,sampleId:id,sourceSha256:id,paths:[],actions:[]}))};}
 function run(sample,profileDigest){return {out:'private-run',dataRoot:'private-cache',report:{runId:sample.inputId,processInstanceId:sample.inputId,
-  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:'v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
+  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
     profileDigest,workloadDigest:'w',routeDigest:'r',viewportDigest:'v'},correctness:'passed',cacheVerified:true,measurementComplete:true,requiredMetrics:['firstResponseMs'],metrics:{firstResponseMs:12},
   evidence:{progress:{workload:{failed:0}}}}};}
 
@@ -25,11 +27,130 @@ test('batch continues after execution exceptions and exports every result and fa
   const json=readFileSync(join(options.out,'results.json'),'utf8');assert.ok(!json.includes('secret'));assert.ok(!json.includes('private-name'));
   for(const name of ['results.csv','errors.csv','summary.csv','stages.csv','workers.csv','report.html'])assert.ok(readFileSync(join(options.out,name),'utf8').length>0);
 });
+test('frozen batch profile contains sample selection but no sample-specific correctness allowlist',async()=>{
+  const options=setup();
+  await executeBatch({...options,inputs:{entries:[inputs().entries[0]],samples:[inputs().samples[0]]},
+    execute:async({sample,profileDigest})=>run(sample,profileDigest)});
+  const profile=JSON.parse(readFileSync(join(options.out,'profile.json'),'utf8'));
+  assert.equal('expectedCoverageDigest' in profile,false);
+  assert.equal('expectedDefectsDigest' in profile,false);
+});
 test('baseline skips only unprepared warm runs, continues remaining sources and keeps all planned rows',async()=>{
-  const called=[];const result=await executeBatch({...setup(),inputs:inputs(),preset:'baseline',execute:async({sample,profileDigest,cacheState})=>{
+  const called=[];const result=await executeBatch({...setup(),inputs:inputs(),preset:'baseline',repetitions:3,execute:async({sample,profileDigest,cacheState})=>{
     called.push(sample.inputId+cacheState);const result=run(sample,profileDigest);if(sample.inputId==='a')result.report.correctness='failed';return result;}});
   assert.equal(called.length,15);assert.equal(result.result.rows.length,18);assert.equal(result.result.rows.filter(row=>row.status==='SKIPPED').length,3);
   assert.equal(result.result.baselineEligible,false);
+});
+test('baseline defaults to one cold/warm pair and keeps a verified source-defect partial warm run',async()=>{
+  const selected={entries:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),status:'READY'}],
+    samples:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),paths:[],actions:[]}]};
+  const calls=[];
+  const result=await executeBatch({...setup(),inputs:selected,preset:'baseline',execute:async({sample,profileDigest,cacheState})=>{
+    calls.push(cacheState);const value=run(sample,profileDigest);value.report.correctness='partial';
+    value.report.runId=`s-${cacheState}`;value.report.processInstanceId=`s-${cacheState}`;value.report.conditions.cacheState=cacheState;
+    value.report.defectAssessment={kind:'source-geometry',status:'evidence-backed',sourceSha256:sample.sourceSha256,sourceSetDigest:'b'.repeat(64),failedOccurrences:34};
+    value.report.evidence={semanticDigest:'semantic',placementDigest:'placement',baseGeometryDigest:'geometry',baseArtifactDigest:'artifact',
+      progress:{workload:{shown:2731,failed:34}}};return value;
+  }});
+  assert.deepEqual(calls,['cold','warm']);assert.deepEqual(result.result.rows.map(row=>row.status),['PARTIAL','PARTIAL']);
+  assert.equal(result.result.pairs[0].outcome,'PARTIAL');assert.equal(result.result.outcome,'PARTIAL');
+  assert.equal(result.result.baselineEligible,true);
+});
+test('evidence-backed engineering coverage remains partial while cold and warm use a published semantic cache',async()=>{
+  const selected={entries:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),status:'READY'}],
+    samples:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),paths:[],actions:[]}]};
+  const calls=[],result=await executeBatch({...setup(),inputs:selected,preset:'baseline',execute:async({sample,profileDigest,cacheState})=>{
+    calls.push(cacheState);const value=run(sample,profileDigest);value.report.runId=`coverage-${cacheState}`;
+    value.report.processInstanceId=value.report.runId;value.report.conditions.cacheState=cacheState;
+    value.report.correctness='partial';value.report.cachePublished=true;value.report.coverageComplete=false;
+    value.report.defectAssessment={kind:'coverage',status:'evidence-backed',sourceSha256:sample.sourceSha256,
+      coverageDigest:'b'.repeat(64),partialOccurrences:1046};
+    value.report.evidence={semanticDigest:'semantic',placementDigest:'placement',baseGeometryDigest:'geometry',baseArtifactDigest:'artifact',
+      progress:{workload:{shown:2944,failed:0,partial:1046}}};return value;
+  }});
+  assert.deepEqual(calls,['cold','warm']);assert.deepEqual(result.result.rows.map(row=>row.status),['PARTIAL','PARTIAL']);
+  assert.equal(result.result.pairs[0].outcome,'PARTIAL');
+});
+test('a readable bare archive without a persistent cache reports its variant and skips unsupported warm',async()=>{
+  const selected={entries:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),status:'READY'}],
+    samples:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),paths:[],actions:[]}]};
+  let calls=0;
+  const result=await executeBatch({...setup(),inputs:selected,preset:'baseline',execute:async({sample,profileDigest})=>{
+    calls++;const value=run(sample,profileDigest);value.report.correctness='partial';value.report.cacheVerified=false;
+    value.report.inputVariant='bare-7z';value.report.inputVariantCode='INPUT_VARIANT';value.report.cacheFailureCode='CACHE_NOT_PERSISTABLE';
+    value.report.defectAssessment={kind:'input-variant',status:'cache-not-persistable',sourceSha256:sample.sourceSha256,variant:'bare-7z'};
+    return value;
+  }});
+  assert.equal(calls,1);assert.deepEqual(result.result.rows.map(row=>row.status),['PARTIAL','SKIPPED']);
+  assert.equal(result.result.rows[1].error,'WARM_UNSUPPORTED:CACHE_NOT_PERSISTABLE');
+  assert.equal(result.result.baselineEligible,false);
+});
+test('pre-open infrastructure failure retries with a new run and preserves cold/warm coverage',async()=>{
+  const selected={entries:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),status:'READY'}],
+    samples:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),paths:[],actions:[]}]};
+  const calls=[],result=await executeBatch({...setup(),inputs:selected,preset:'baseline',waitRetry:async()=>{},
+    execute:async({sample,profileDigest,cacheState})=>{
+      calls.push(cacheState);const value=run(sample,profileDigest);
+      value.report.runId=`run-${calls.length}`;value.report.processInstanceId=value.report.runId;
+      value.report.conditions.cacheState=cacheState;
+      if(calls.length===1)Object.assign(value.report,{reason:'native-cdp-unavailable',openAttempted:false,evidence:null,
+        correctness:'unverified',cacheVerified:false,measurementComplete:false});
+      return value;
+    }});
+  assert.deepEqual(calls,['cold','cold','warm']);
+  assert.deepEqual(result.result.rows.map(row=>row.status),['PASS','PASS']);
+  assert.equal(result.result.rows[0].attempts,2);
+  assert.deepEqual(result.result.rows[0].startupFailures,['native-cdp-unavailable']);
+  assert.equal(result.result.attempts.length,3);
+  const summaries=JSON.parse(readFileSync(join(result.out,'results.json'),'utf8')).summaries;
+  assert.equal(summaries[0].validRepetitions,1);
+  assert.equal(summaries[0].startupRetries,1);
+  assert.equal(result.result.baselineEligible,true);
+  const html=readFileSync(join(result.out,'report.html'),'utf8');
+  assert.ok(html.includes('有效 / 计划'));assert.ok(html.includes("table.tBodies[0]"));
+});
+test('startup retry exhaustion retains infrastructure cause; product failures run once',async()=>{
+  const selected={entries:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),status:'READY'}],
+    samples:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),paths:[],actions:[]}]};
+  let calls=0;
+  const exhausted=await executeBatch({...setup(),inputs:selected,preset:'baseline',waitRetry:async()=>{},execute:async({sample,profileDigest})=>{
+    calls++;const value=run(sample,profileDigest);value.report.runId=`failed-${calls}`;
+    Object.assign(value.report,{reason:'native-cdp-unavailable',openAttempted:false,evidence:null,
+      correctness:'unverified',cacheVerified:false,measurementComplete:false});return value;
+  }});
+  assert.equal(calls,3);
+  assert.deepEqual(exhausted.result.rows.map(row=>row.status),['INCONCLUSIVE','SKIPPED']);
+  assert.match(exhausted.result.rows[1].error,/cold-startup-infrastructure-unavailable:native-cdp-unavailable/);
+  calls=0;
+  const product=await executeBatch({...setup(),inputs:selected,preset:'baseline',waitRetry:async()=>{},execute:async({sample,profileDigest})=>{
+    calls++;const value=run(sample,profileDigest);
+    Object.assign(value.report,{reason:'project-open-failed',openAttempted:true,correctness:'failed'});return value;
+  }});
+  assert.equal(calls,1);assert.equal(product.result.rows[0].status,'FAIL');
+  assert.equal(isStartupInfrastructureFailure({reason:'native-cdp-unavailable',openAttempted:true,evidence:null}),false);
+  assert.equal(isStartupInfrastructureFailure({reason:'native-cdp-unavailable',openAttempted:false,evidence:{}}),false);
+});
+test('cancellation during retry backoff cannot launch another native process',async()=>{
+  const selected={entries:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),status:'READY'}],
+    samples:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),paths:[],actions:[]}]};
+  const controller=new AbortController();let calls=0;
+  const result=await executeBatch({...setup(),inputs:selected,preset:'baseline',signal:controller.signal,
+    waitRetry:async()=>controller.abort(),execute:async({sample,profileDigest})=>{
+      calls++;const value=run(sample,profileDigest);
+      Object.assign(value.report,{reason:'native-cdp-unavailable',openAttempted:false,evidence:null,
+        correctness:'unverified',cacheVerified:false,measurementComplete:false});return value;
+    }});
+  assert.equal(calls,1);assert.equal(result.result.status,'CANCELLED');
+  assert.deepEqual(result.result.rows.map(row=>row.status),['CANCELLED','CANCELLED']);
+});
+test('CLI accepts -repeat 3 and freezes three paired attempts',()=>{
+  const options=setup(),registry=join(options.out,'missing.json');
+  writeFileSync(registry,JSON.stringify({samples:[{path:'missing.gim'}]}));
+  const child=spawnSync(process.execPath,['scripts/benchmarks/cli.mjs','batch','--build',options.buildManifest,
+    '--registry',registry,'--preset','baseline','-repeat','3','--output',options.out],
+    {cwd:join(root,'desktop'),env:process.env,encoding:'utf8',windowsHide:true});
+  assert.equal(child.status,1); // INPUT_ERROR, no GIM or native process is launched.
+  assert.equal(JSON.parse(readFileSync(join(options.out,'profile.json'),'utf8')).repetitions,3);
 });
 test('cancellation settles current run and records all remaining inputs',async()=>{
   const controller=new AbortController();let count=0;
@@ -42,9 +163,12 @@ test('registry accepts existing workspace registries and records missing paths w
   assert.throws(()=>artifactDirectory(root,join(root,'desktop','not-artifacts')),/tmp/);
 });
 test('L0/L1 committed registries require full source SHA without reading GIM files',async()=>{
-  for(const [tier,names]of [['l0',['common-design-500kv','common-design-220kv','common-design-110kv','common-design-35kv']],['l1',['substation01-04','line01-06']]]){
-    for(const name of names){
-      const file=join(root,'benchmarks',tier,`${name}.json`),registry=JSON.parse(readFileSync(file,'utf8'));
+  for(const tier of ['l0','l1']){
+    const directory=join(root,'benchmarks',tier),files=readdirSync(directory).filter(name=>name.endsWith('.json'));
+    assert.ok(files.length>0);
+    for(const name of files){
+      const file=join(directory,name),registry=JSON.parse(readFileSync(file,'utf8'));
+      assert.equal(registry.version,'gim-batch-input-v1');
       assert.ok(registry.samples.length>0);
       for(const row of registry.samples){
         assert.equal(row.sampleTier,tier.toUpperCase());assert.match(row.sourceSha256,/^[a-f0-9]{64}$/);

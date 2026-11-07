@@ -30,9 +30,25 @@ describe('measurement contracts (no engineering samples)',()=>{
     expect(collector.snapshot()).toMatchObject({detailComplete:false,loss:{detailEvents:8,foreignRun:1},phases:{'dev:parse':{count:10,totalMs:45}}});expect(collector.drain()).toHaveLength(2);
   });
   it('detects transport sequence gaps and never invents missing heap samples',()=>{
-    const {collector,probe}=setup();probe.memory(context,{name:'heap',scope:'isolate',method:'cdp',quality:'runtime-sampled',availability:'unavailable',bytes:null,reason:'target-busy',sampleDelayMs:1000});
+    const collector=new Collector({...context},'diagnostic'),probe=new Probe('worker-1','clock-1','diagnostic',()=>0,collector);
+    probe.memory(context,{name:'heap',scope:'isolate',method:'cdp',quality:'runtime-sampled',availability:'unavailable',bytes:null,reason:'target-busy',sampleDelayMs:1000});
     const event=collector.drain()[0];collector.accept({...event,sequence:3});
     expect(collector.snapshot().loss.sequenceGaps).toBe(1);expect(Object.values(collector.snapshot().memory)[0]).toMatchObject({observedPeakBytes:null,latest:{bytes:null,reason:'target-busy'}});
+  });
+  it('keeps exact memory and counter aggregates without flooding benchmark detail',()=>{
+    const {collector,probe}=setup(128);
+    for(let i=0;i<20000;i++){
+      probe.event(context,{kind:'counter',name:'resource.acquire',workload:{buffers:1}});
+      probe.memory(context,{name:'tracked-host-buffer-capacity',scope:'host',method:'ledger',quality:'measured-capacity',availability:'available',bytes:i,sampleDelayMs:0});
+    }
+    probe.record(context,'host.commit',2);
+    const snapshot=collector.snapshot();
+    expect(snapshot.loss.detailEvents).toBe(0);
+    expect(snapshot.detailComplete).toBe(true);
+    expect(snapshot.aggregatedDetail).toEqual({memory:20000,counter:20000});
+    expect(snapshot.counters['dev:resource.acquire'].buffers).toBe(20000);
+    expect(Object.values(snapshot.memory)[0].observedPeakBytes).toBe(19999);
+    expect(collector.drain()).toHaveLength(1);
   });
   it('deduplicates shared views and conserves unique ownership across transfer/copy/eviction',()=>{
     const buffer=new ArrayBuffer(64);expect(uniqueBufferCapacity([new Uint8Array(buffer),new Float32Array(buffer),buffer])).toBe(64);

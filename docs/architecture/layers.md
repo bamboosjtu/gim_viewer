@@ -11,6 +11,8 @@
 | 共享线路 core | `packages/powerline-core/` | 纯 parser、图、领域投影、HNum 预览；无平台 UI/DB |
 | 共享原生容器 | `crates/gim-native-core/` | 有界解压、路径与资源配额 |
 | Android 导入插件 | `crates/tauri-plugin-gim-import/` | SAF 流式复制与 SHA |
+| 测量核心 | `packages/measurement-core/` | 无 DOM、Tauri、Three 依赖的事件、阶段、统计与内存契约 |
+| 插件接口 | `packages/plugin-api/` | 跨端插件类型与边界 |
 
 ## 桌面目录
 
@@ -24,8 +26,11 @@
 | `desktop/src/ui/` | DOM shell、三视图、属性、搜索、地图、工具栏 | services 暴露的结果、纯类型、白名单展示选择器 | 数据库、原生 IPC |
 | `desktop/src/services/` | 打开、缓存、Worker、后台任务、选择与生命周期编排 | gim、viewer、bridge、注入的展示端口 | 把领域规则塞回 UI |
 | `desktop/src/config/` | 功能与调试开关 | 无 | 业务状态 |
+| `desktop/src/measurement/` | 宿主与 Worker 探针、产品证据、采样适配 | measurement-core、只读运行时快照 | 把测量状态变成产品业务状态 |
 | `desktop/bridge/` | Tauri IPC DTO/命令封装 | `@tauri-apps/api` | UI、Viewer |
 | `desktop/src-tauri/src/` | SQLite、SHA、解压、文件校验 | Rust crates | 前端状态 |
+
+Benchmark 注册表位于根目录 `benchmarks/l0|l1|l2/`，CLI 和无样本协议测试位于 `desktop/scripts/benchmarks/`，本地功能夹具位于 `desktop/tests/`，原生场景与报告放在工作区 `tmp/`、`output/`。这些目录不承担应用运行时业务逻辑。
 
 ## 依赖规则
 

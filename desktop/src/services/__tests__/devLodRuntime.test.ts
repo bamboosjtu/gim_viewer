@@ -5,6 +5,7 @@ import { DEV_GEOMETRY_VERSION } from '../devSpatialCatalog.js';
 import { perfProductMomentSnapshot, perfReset, perfSnapshot } from '../../utils/perfTimings.js';
 import {ByteWorkBudget} from '../../utils/byteWorkBudget.js';
 import {DevGlbTemplate} from '../devGlbTemplateRuntime.js';
+import {InvalidDevGeometryError} from '../../gim/geometry/sourceGeometryError.js';
 
 const ownedRuntimes = new Set<DevLodRuntime>();
 afterEach(() => {
@@ -394,6 +395,16 @@ it('late failures cannot poison a newer LOD request; explicit refinement retries
   expect(await runtime.refine('root')).toEqual([row.group]);
   expect(runtime.diagnostics.currentViewReady).toBe(true);
   expect(runtime.diagnostics.failedOccurrences).toBe(0);
+});
+
+it('retains source evidence when isolating a failed DEV template', () => {
+  const {internal}=fixture(),row=occurrence(8,true);
+  internal.rows.set('root',row);
+  const evidence='source-origin-span-v1: invalid source extent';
+  internal.failed(row,new InvalidDevGeometryError(row.entry.devPath,'extent-exceeds-500m',evidence,'warm'),row.failedKey);
+  expect(internal.state.geometryDiagnosticsByDevPath.get('dev/8.dev')).toMatchObject({
+    status:'failed',reason:'source-invalid',source:'warm',detail:evidence,
+  });
 });
 
 it('ordinary selection stays at L0/L1 and only explicit refinement requests L2', async () => {

@@ -6,6 +6,25 @@
 
 桌面变电、线路、独立设备共享容器、打开和缓存基础能力；Android 仍只面向线路。
 
+## 项目目录与模块归属
+
+新代码按运行面和依赖方向放置，避免把测量、样本登记或平台适配塞进 UI 与 parser。细粒度允许依赖关系见[分层与依赖](architecture/layers.md)，开发与测试目录见[开发指南](development.md)。
+
+| 目录 | 归属与新增代码位置 |
+|---|---|
+| `desktop/src/` | 桌面应用；`gim/` 解析、`engineering/` 纯领域、`services/` 编排、`viewer/` 渲染、`ui/` DOM、`measurement/` 产品探针、`app/` 启动与会话 |
+| `desktop/bridge/`、`desktop/src-tauri/` | 桌面 TS IPC 与 Rust 原生实现，平台读写不进入纯领域层 |
+| `desktop/scripts/benchmarks/`、`desktop/acceptance/` | 本地 Benchmark CLI、报告与无样本协议测试、专项验收；浏览器功能夹具在 `desktop/tests/` |
+| `desktop/local-tests/`、`benchmarks/l0、l1、l2/` | 开发者基础功能注册表与分级性能注册表；不存放 GIM 字节或运行报告 |
+| `app/` | Android 线路应用、SAF 导入与移动端界面 |
+| `packages/powerline-core/`、`packages/measurement-core/`、`packages/plugin-api/` | 跨端纯线路核心、无平台依赖的测量协议、插件接口 |
+| `crates/`、`contracts/` | 原生共享解压与 Android 导入插件；跨语言资源限制契约 |
+| `tools/` | 独立 Python 工具；其 QtWebEngine 页面不属于桌面或 Android 前端 |
+| `docs/`、`research/` | 当前契约与待复核研究；研究结论不能直接充当产品事实 |
+| `tmp/`、`output/`、`demo/` | 忽略的本地暂存、报告与自备工程样本；不进入发布包 |
+
+当前目录已经按平台、纯领域和本地测量分开。新增 SDK 前先遵循现有包边界；需要跨端复用时再迁入 `packages/`，不为减少目录数量合并运行面。测量产出的 HTML 属于 `output/` 或 `tmp/`，不是应用入口。
+
 ```
 GIM 原始文件
        │

@@ -15,6 +15,8 @@ test('actual product branch must match each registered role',()=>{
   const results=rows.map((source,i)=>({status:'PASS',sourceSha256:source.sourceSha256,projectType:i===1?'substation':i===0?'substation':'equipment'}));
   assert.equal(applyProjectRoleChecks(results,rows),1);
   assert.equal(results[1].status,'FAIL');assert.equal(results[1].error,'registered-project-type-mismatch');
+  const partial=[{status:'PARTIAL',sourceSha256:rows[2].sourceSha256,projectType:'substation'}];
+  assert.equal(applyProjectRoleChecks(partial,rows),1);
 });
 test('committed mini example declares all roles and marks unconfigured equipment',()=>{
   const example=JSON.parse(readFileSync(new URL('../../local-tests/mini-samples.example.json',import.meta.url),'utf8'));

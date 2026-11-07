@@ -7,6 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {prepareFixedRuntimeSecurity} from '../fixed-runtime-security.mjs';
+import {assertBenchmarkFrontend,assertBenchmarkExecutable} from './benchmark-build-attestation.mjs';
 
 export const ACCEPTANCE_IDENTIFIER = 'com.bamboosjtu.gimviewer.acceptance';
 
@@ -92,6 +93,15 @@ export async function buildAcceptance(root, {benchmark = false} = {}) {
   for (const script of ['copy-web-ifc-wasm.mjs', 'prepare-webview2-fixed-runtime.mjs']) {
     command(process.execPath, [join(desktop, 'scripts', script)], {cwd: desktop, env, stdio: 'inherit'});
   }
+  // Tauri may reuse a previously built frontend. Build and attest the probe
+  // explicitly before Rust embeds assets; do not publish a benchmark manifest
+  // for an executable carrying the ordinary release frontend.
+  let benchmarkChunk;
+  if(benchmark){
+    command(process.execPath,[join(desktop,'node_modules','typescript','bin','tsc')],{cwd:desktop,env,stdio:'inherit'});
+    command(process.execPath,[join(desktop,'node_modules','vite','bin','vite.js'),'build'],{cwd:desktop,env,stdio:'inherit'});
+    benchmarkChunk=assertBenchmarkFrontend(join(desktop,'dist'));
+  }
   const fingerprint = sourceFingerprint(root);
   command(process.execPath, [join(desktop, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'build',
     '--config', join(desktop, 'src-tauri', 'tauri.portable.conf.json'), '--config', config, '--no-bundle', '--ci', ...(benchmark?['--features','benchmark']:[])],
@@ -103,6 +113,7 @@ export async function buildAcceptance(root, {benchmark = false} = {}) {
   mkdirSync(output, {recursive: true});
   const release = join(desktop, 'src-tauri', 'target', 'release');
   cpSync(join(release, 'gim-viewer.exe'), join(output, 'GIM-Reader.exe'));
+  if(benchmark)assertBenchmarkExecutable(join(output,'GIM-Reader.exe'),benchmarkChunk);
   if(benchmark)cpSync(join(release,'examples','measurement_sampler.exe'),join(output,'measurement_sampler.exe'));
   cpSync(join(desktop, 'src-tauri', 'webview2-fixed-runtime'), join(output, 'webview2-fixed-runtime'), {recursive: true});
   const runtimeSecurity=prepareFixedRuntimeSecurity(root,join(output,'webview2-fixed-runtime'));
@@ -111,7 +122,8 @@ export async function buildAcceptance(root, {benchmark = false} = {}) {
     executable: 'GIM-Reader.exe', executableSha256: await fileSha256(join(output, 'GIM-Reader.exe')),
     runtime: await directoryFingerprint(join(output, 'webview2-fixed-runtime')),
     runtimeSecurity,
-    ...(benchmark?{samplerSha256:await fileSha256(join(output,'measurement_sampler.exe'))}:{}),
+    ...(benchmark?{samplerSha256:await fileSha256(join(output,'measurement_sampler.exe')),
+      frontendProbeVerified:true,benchmarkChunk}:{}),
     expectedDataRoot: dataRoot, nativeCachePathVerified: false,
     expectedLocalDataRoot: dataRoot,
     config: {identifier: ACCEPTANCE_IDENTIFIER, bundle: 'fixedRuntime', mode: 'release'},

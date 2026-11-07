@@ -16,7 +16,8 @@ export class Collector implements MetricsSink {
   private detailSink?:{ available():boolean; send(events:MeasurementEvent[]):void };
   private clock = new Map<string, NonNullable<MeasurementEvent['clock']>>();
   private loss = { sequenceGaps: 0, invalid: 0, duplicate: 0, foreignRun: 0, detailEvents: 0, aggregateGroups: 0, interruptedTasks: 0, lateEvents: 0 };
-  constructor(readonly identity: RunIdentity, readonly mode: MeasurementMode, private readonly detailLimit = 8192) {}
+  private aggregatedDetail={memory:0,counter:0};
+  constructor(readonly identity: RunIdentity, readonly mode: MeasurementMode, private readonly detailLimit = mode==='benchmark'?32768:8192) {}
   emit(event: MeasurementEvent): void { this.accept(event); }
   accept(event: MeasurementEvent): void {
     if (this.mode === 'off') return;
@@ -94,6 +95,10 @@ export class Collector implements MetricsSink {
     } else if (event.kind === 'clock' && event.clock) {
       this.clock.set(event.clock.remoteClockId, { ...event.clock });
     } else if (event.kind === 'loss') this.loss.detailEvents += Math.max(0, event.workload?.events ?? 0);
+    if(this.mode==='benchmark'&&(event.kind==='memory'||event.kind==='counter')){
+      this.aggregatedDetail[event.kind]++;
+      return;
+    }
     if (this.mode === 'benchmark' || this.mode === 'diagnostic') {
       if (this.events.length >= this.detailLimit) this.loss.detailEvents++;
       else this.events.push(event);
@@ -122,6 +127,7 @@ export class Collector implements MetricsSink {
       activeTasks: [...this.active.values()].map(event => ({ ...event.context })),
       taskOutcomes: { ...this.outcomes }, counters: Object.fromEntries([...this.counters].map(([key,values]) => [key,{...values}])),
       bufferedEvents:this.events.length,
+      detailPolicy:this.mode==='benchmark'?'task-phase-timeline-v1':'full-detail',aggregatedDetail:{...this.aggregatedDetail},
       clockCalibration: Object.fromEntries(this.clock), loss: { ...this.loss },
       detailComplete: this.loss.detailEvents === 0 && this.loss.sequenceGaps === 0 && this.loss.invalid === 0 && this.loss.aggregateGroups === 0,
       cpuTimeAvailable: false, memoryTotalsAreAdditive: false };

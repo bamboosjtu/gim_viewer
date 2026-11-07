@@ -53,7 +53,7 @@ export function applyProjectRoleChecks(rows,samples){
   for(const row of rows){
     const role=roles.get(row.sourceSha256?.toLowerCase());
     row.expectedRole=role??null;
-    if(row.status!=='PASS')continue;
+    if(row.status!=='PASS'&&row.status!=='PARTIAL')continue;
     if(!role||row.projectType!==PRODUCT_TYPE[role]){
       row.status='FAIL';row.error='registered-project-type-mismatch';mismatches++;
     }

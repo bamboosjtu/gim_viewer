@@ -57,7 +57,6 @@ export async function registerSamples(root, out, sources=defaultSources(root)) {
       if(!sample){sample={sampleId:`gim-${sha.slice(0,16)}`,sourceSha256:sha,bytes:after.size,container:container(path),memberships:[],paths:[],inventory:{status:'not-collected'}};bySha.set(sha,sample);}
       if(!sample.memberships.some(x=>x.group===source.group))sample.memberships.push({sampleTier:source.sampleTier,group:source.group});
       sample.paths.push(relative(root,path).replaceAll('\\','/'));
-      if(/[/\\]substation01\.gim$/i.test(path))sample.requiredRegression='full-package-index';
     }
   }
   const samples=[...bySha.values()].sort((a,b)=>a.sourceSha256.localeCompare(b.sourceSha256));

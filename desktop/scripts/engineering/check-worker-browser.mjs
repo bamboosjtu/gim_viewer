@@ -14,7 +14,7 @@ try{
   let ready=false;
   for(let i=0;i<100;i++){
     if(vite.exitCode!==null)throw Error(`Owned Vite exited: ${vite.exitCode}`);
-    try {const r=await fetch(`${origin}/scripts/engineering/worker-check.html`);if(r.ok){ready=true;break;}}catch{}
+    try {const r=await fetch(`${origin}/tests/engineering/worker-check.html`);if(r.ok){ready=true;break;}}catch{}
     await delay(100);
   }
   if(!ready)throw Error('Owned Vite did not become ready');
@@ -33,7 +33,7 @@ try{
     pending.delete(message.id);clearTimeout(request.timer);message.error?request.reject(Error(JSON.stringify(message.error))):request.resolve(message.result);});
   const send=(method,params={})=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error(`CDP timeout: ${method}`));},30000);
     pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params}));});
-  await send('Page.navigate',{url:`${origin}/scripts/engineering/worker-check.html`});
+  await send('Page.navigate',{url:`${origin}/tests/engineering/worker-check.html`});
   ready=false;
   for(let i=0;i<150;i++){const r=await send('Runtime.evaluate',{expression:'typeof globalThis.runEngineeringWorkerCheck',returnByValue:true});
     if(r.result?.value==='function'){ready=true;break;}await delay(100);}

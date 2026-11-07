@@ -209,11 +209,11 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
         endNative = perfBegin('解压（Rust 原生）', undefined, perfSession);
         const early = earlyRequested;
         const fullNative = () => extractGimArchiveNative(nativeFilePath, projectId ?? undefined,
-          source.magic === 'GIMPKGS' ? {
+          {
             ...(session.sourceSha256 ? {expectedSourceSha256: session.sourceSha256} : {}),
             traceEntries: localStorage.getItem('gim-debug-substation-extraction-trace') === '1',
             substationParseCopy: localStorage.getItem('gim-debug-substation-parse-copy') === '1',
-          } : {});
+          });
         let native: Awaited<ReturnType<typeof extractGimArchiveNative>> | ExtractedGimSource;
         if (early) {
           const policy = await import('./substationExtractionJob.js');
@@ -249,6 +249,13 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
         if (/超出资源配额|资源配额|压缩比超限|条目数超限|单文件.*超限|总解压量.*超限/i.test(nativeMessage)) {
           throw nativeError;
         }
+        // The native command may have committed its source cache before a
+        // manifest transport error. Its SHA-bound receipt is authoritative;
+        // do not decode the same archive again or abandon a reusable cache.
+        const recovered = await reuseExtractedSources(projectId, session.sourceSha256, source.magic);
+        if (recovered) {
+          extracted = recovered;
+        } else {
         console.warn('[Shared Core] 原生解压不可用，回退 libarchive.js WASM 路径:', nativeError);
         const { readFileBytes } = await import('@desktop/fileReader.js');
         showLoading('正在读取 GIM 文件...');
@@ -268,6 +275,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
           projectName: observed.projectName || source.projectName,
           files,
         };
+        }
       }
     } else {
       if (!sourceBuffer) throw new Error('缺少浏览器 GIM 数据');

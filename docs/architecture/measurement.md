@@ -35,7 +35,9 @@
 
 新增采集当前默认 off；原生探针开销验收完成前，不改变普通产品的采集负担。专用 Benchmark/诊断调用显式选择模式。已有 perfTimings 不受该开关影响。
 
-当前 CLI 的原生场景记录只有在正确性、缓存域、必要指标与任务闭环均证实时才允许门禁通过。未证实的字段保持 unverified/false，输出 INCONCLUSIVE；不能手工把汇总状态改成 PASS 代替缺少的证据。完整迁移门禁还要求固定动作路线、三轮独立进程交替冷暖比较、探针开销对照和十轮资源回落验收。
+当前 CLI 的原生场景记录只有在正确性、缓存域、必要指标与任务闭环均证实时才允许门禁通过。未证实的字段保持 unverified/false，输出 INCONCLUSIVE；不能手工把汇总状态改成 PASS 代替缺少的证据。来源几何异常只有在全部失败均有明确 `source-invalid` 原始范围证据、没有其他失败时记为 PARTIAL；工程来源覆盖不足只有在缺失/歧义引用等来源证据完整且无 IFC/产品失败时记为 PARTIAL。规则对所有样本相同，匿名缺口摘要由本次证据计算，冷暖及基线比较必须一致。SQLite 核心索引发布与 Engineering Worker 派生来源缓存分开测；来源图 partial 不自动判定 SQLite 缓存失效，也不冒充完整的工程来源缓存命中。`baseline` 默认一冷一暖，`-repeat 3` 可取得三组独立配对；完整迁移门禁还要求固定动作路线、探针开销对照和十轮资源回落验收。
+
+批量 CLI 仅对 `open` 前的基础设施启动故障有限重试，尝试记录与最终测量分开；产品打开、解析、缓存或已开始测量后的故障不自动重试。报告区分计划轮次、有效轮次与实际尝试次数。原生启动诊断留在工作区私有目录，公开报告只含原因码和次数。
 
 CDP 能力以固定运行时实测为准，协议参考 [Runtime](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/) 和 [Target](https://chromedevtools.github.io/devtools-protocol/tot/Target/)。`getHeapUsage` 是 isolate 口径，`performance.memory` 不能替代独立 Worker 堆。重型 CPU profile/heap snapshot 不与普通 Benchmark 数值直接比较。
 
@@ -47,11 +49,11 @@ Windows 固定运行时的文件既需要 AppContainer 读取权限，也不能�
 
 模块 Worker 的业务入口保持规范 URL；身份放在独立 bootstrap 中，通过宿主登记关联 CDP target。不能在入口模块 URL 添加身份 fragment/query：分块动态导入可能再次引用不带标记的同一入口，产生第二个模块实例和消息处理器。bootstrap 在导入期间缓冲消息，安装处理器后按顺序交付；创建失败、初始化完成与终止都会回收其 Blob URL。
 
-高频解析与图元阶段在 Worker 内生成可合并的调用直方图，保留调用数、累计时长和分位区间。Benchmark 明细通过带确认、限额的 CDP binding 传输；采集端阻塞时保留丢失计数，不把聚合通过当作明细完整。进程树使用独立原生采样器，即使 WebView 主线程阻塞也继续采样。
+高频解析与图元阶段在 Worker 内生成可合并的调用直方图，保留调用数、累计时长和分位区间。Benchmark 的 counter/memory 事件先精确进入 Collector 聚合、资源账本和观测峰值，再按 `task-phase-timeline-v1` 策略省略其逐事件 CDP 明细；任务、阶段、Worker 和时钟事件仍通过带确认的 CDP binding 传输。报告列出按类型聚合的明细数和真正丢弃的明细数；丢弃导致相应测量 INCONCLUSIVE，不把聚合成功冒充明细完整。`diagnostic` 模式仍传全部可用事件。进程树使用独立原生采样器，即使 WebView 主线程阻塞也继续采样。
 
-一次线路 Worker 转移可能包含万级 ArrayBuffer。资源账本仍逐 backing buffer 去重并结算；普通 Benchmark 在超过 8 个缓冲时，把该批的 acquire/transfer/release 各压成一条带 `buffers` 和 `referencedBytes` 的事件，避免挤满 8,192 条明细容量。`diagnostic` 模式保留逐缓冲事件，发生丢弃时仍报告不完整。
+一次线路 Worker 转移可能包含万级 ArrayBuffer。资源账本仍逐 backing buffer 去重并结算；普通 Benchmark 在超过 8 个缓冲时，把该批的 acquire/transfer/release 各压成一条带 `buffers` 和 `referencedBytes` 的聚合事件。任务/阶段明细缓冲为 32,768 条，真正截断仍明确记录。`diagnostic` 模式保留逐缓冲事件，发生丢弃时仍报告不完整。
 
-线路首屏后持久化有 `idle/saving/saved/failed` 会话状态；原生 Benchmark 等待 SQLite finish 提交，失败为明确的失败状态。`cachePublishMs` 取线路完成时刻而非首屏后的静默窗口。变电自动表示的时间仍独立记录，原生运行结束另等待 Spatial 终态和三秒静默；尾部出现新任务时继续有界等待，未闭环则保持 INCONCLUSIVE。暖开 IFC 校验依据来源缓存数量、缺失数和 parser 版本；没有请求远景 LOD 的 `open` 场景不要求 `ifcFarHits`。几何失败原因只汇总受控 reason/status 与数量，不输出 DEV 路径和原始诊断文本。
+线路首屏后持久化有 `idle/saving/saved/failed` 会话状态；原生 Benchmark 等待 SQLite finish 提交，失败为明确的失败状态。`cachePublishMs` 取线路完成时刻而非首屏后的静默窗口。冷开变电另等待 `cachePersistenceReady` 的成功或失败终态，再读取 SQLite 证据；工程 Worker 的 `cacheSettled` 只表示该域安静，不代表变电核心索引已发布。`cachePublishMs` 使用实际发布时刻，失败时留空。变电自动表示的时间仍独立记录，原生运行结束另等待 Spatial 终态和三秒静默；尾部出现新任务时继续有界等待，未闭环则保持 INCONCLUSIVE。暖开 IFC 校验依据来源缓存数量、缺失数和 parser 版本；没有请求远景 LOD 的 `open` 场景不要求 `ifcFarHits`。几何失败原因只汇总受控 reason/status 与数量，不输出 DEV 路径和原始诊断文本。
 
 在 `desktop/` 执行：
 
@@ -78,9 +80,9 @@ npm run bench -- report --input <运行报告JSON>
 
 `run --mode diagnostic --capture cpu|allocations|heap --worker-family <类型>` 只针对一个 Worker 采集私有诊断产物。诊断模式不参加性能比较或基线认可。原生内存采样仅查询必要的进程信息权限，核对创建时间后才接受父子关系，避免 PID 重用将不相关进程计入。主线程轮询缺口与原生采样缺口分别记录，后者不允许用启动时的一次小数值掩盖。
 
-`bench build` 创建显式 Cargo `benchmark` feature 与 Vite Benchmark 构建。原生命令只授权私有运行清单指定的匿名样本，并重新核对源 SHA；清单、源、缓存根必须在编译时绑定的工作区，清单/缓存在 `tmp/gim-bench` 下。普通产品构建拒绝 Benchmark 授权，且不导出 Benchmark UI 控制面。
+`bench build` 显式构建并核验 Vite Benchmark 前端，再创建 Cargo `benchmark` feature 的原生产物；发布清单前核验 EXE 确实内嵌探针 chunk。运行器拒绝没有 `frontendProbeVerified` 凭据的旧构建，避免 CDP 已连接普通页面却重复等待 Benchmark API。原生命令只授权私有运行清单指定的匿名样本，并重新核对源 SHA；清单、源、缓存根必须在编译时绑定的工作区，清单/缓存在 `tmp/gim-bench` 下。普通产品构建拒绝 Benchmark 授权，且不导出 Benchmark UI 控制面。
 
-`approve-baseline` 要求明确的候选文件、认可者、冻结选择和完整三轮数据。run/report/compare 不调用它。超过 10% 的回退需独立复测，仍超限为 FAIL；运行条件、必要测量或认可基线缺失为 INCONCLUSIVE。协议/值单元测试进入 CI；样本、性能与内存曲线只在本地执行。
+`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选还须显式 `--accept-partial`，不能自动升级成完整 PASS。run/report/compare 不调用它。超过 10% 的回退需独立复测，仍超限为 FAIL；运行条件、必要测量或认可基线缺失为 INCONCLUSIVE。协议/值单元测试进入 CI；样本、性能与内存曲线只在本地执行。
 
 ## SDK 与进程边界
 

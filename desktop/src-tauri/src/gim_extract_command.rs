@@ -170,22 +170,22 @@ pub async fn extract_gim_archive(
     // 带 project_id 的生产路径使用磁盘优先实现：只读头部窗口，逐条解压并
     // 原子写入 extracted/{project_id}，IPC 只返回 manifest。无 project_id
     // 的兼容调用保留旧的 inline payload 行为。
-    // GIMPKGT 头部已经足以确定线路语义 pack；只额外读取 7 个字节，避免
-    // 等待完整归档后才决定是否可以跳过数万次小文本文件 open。
-    let (line_pack_enabled, substation_sources) = if project_id.is_some() {
+    // 头部决定 GIMPKGT/GIMPKGS 的 pack 类型；裸 7z 只启用快速解码，
+    // 不根据容器签名猜测工程语义，内容类型仍由前端验证。
+    let (line_pack_enabled, substation_sources, bare_sevenz) = if project_id.is_some() {
         let mut magic = [0u8; 7];
         match std::fs::File::open(&authorized_path).and_then(|mut file| {
             use std::io::Read as _;
             file.read_exact(&mut magic)
         }) {
-            Ok(()) => (magic == *b"GIMPKGT", magic == *b"GIMPKGS"),
-            Err(_) => (false, false),
+            Ok(()) => (magic == *b"GIMPKGT", magic == *b"GIMPKGS", magic[..6] == [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]),
+            Err(_) => (false, false, false),
         }
     } else {
-        (false, false)
+        (false, false, false)
     };
-    if expected_source_sha256.is_some() && (!substation_sources || project_id.is_none()) {
-        return Err("source-bound extraction requires GS project identity".into());
+    if expected_source_sha256.is_some() && project_id.is_none() {
+        return Err("source-bound extraction requires project identity".into());
     }
     let payload = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
         if let Some(expected) = expected_source_sha256.as_ref() {
@@ -265,8 +265,7 @@ pub async fn extract_gim_archive(
                 // canonicalize/rename，避免数万条目重复路径解析。
                 // 变电发布凭据需要全部已落盘来源的 cache_path。pack 条目没有
                 // 独立文件，由索引证明其存在；IFC 仍保留独立路径供尺寸校验。
-                let cache_path = if !packed
-                    && (substation_sources || path.to_ascii_lowercase().ends_with(".ifc"))
+                let cache_path = if should_publish_cache_path(line_pack_enabled,packed,&path)
                 {
                     Some(final_root.join(Path::new(&path)).to_string_lossy().to_string())
                 } else {
@@ -289,7 +288,7 @@ pub async fn extract_gim_archive(
             // 7-Zip 原生解码比 sevenz-rust 快一个数量级；归档是 7z 且随包
             // 7z.exe 可用时优先走流式外部解码，失败则保留原有解码路径。
             let mut cli_extraction: Option<Result<(crate::gim_extract::ExtractionMetadata, crate::gim_extract::ExtractionProfile), String>> = None;
-            if (substation_sources || line_pack_enabled) && crate::seven_zip_cli::is_available() {
+            if (substation_sources || line_pack_enabled || bare_sevenz) && crate::seven_zip_cli::is_available() {
                 if let Ok((info, offset, entries)) =
                     crate::gim_extract::inspect_archive_entries(&authorized_path, &quota)
                 {
@@ -425,6 +424,25 @@ pub async fn extract_gim_archive(
     .map_err(|e| format!("解压任务执行失败: {}", e))??;
 
     Ok(tauri::ipc::Response::new(payload))
+}
+
+fn should_publish_cache_path(line_pack_enabled: bool, packed: bool, path: &str) -> bool {
+    !packed && (!line_pack_enabled || path.to_ascii_lowercase().ends_with(".ifc"))
+}
+
+#[cfg(test)]
+mod bare_manifest_tests {
+    use super::should_publish_cache_path;
+
+    #[test]
+    fn bare_archives_publish_every_independent_source_path() {
+        assert!(should_publish_cache_path(false,false,"CBM/project.cbm"));
+        assert!(should_publish_cache_path(false,false,"EXTRA/source.txt"));
+        assert!(should_publish_cache_path(false,false,"DEV/model.ifc"));
+        assert!(!should_publish_cache_path(false,true,"DEV/packed.dev"));
+        assert!(!should_publish_cache_path(true,false,"MOD/large.mod"));
+        assert!(should_publish_cache_path(true,false,"IFC/model.IFC"));
+    }
 }
 
 /// 组装磁盘优先路径的 manifest。没有条目 blob，前端只创建延迟读取的

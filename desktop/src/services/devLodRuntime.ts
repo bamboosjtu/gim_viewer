@@ -636,7 +636,8 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
     setGeometryDiagnostic(this.state, diagnosticForFailure(row.entry.devPath,
       error instanceof InvalidDevGeometryError && error.sourceEvidence ? 'source-invalid' : 'parse-failed',
-      error instanceof InvalidDevGeometryError ? error.source : 'cold', String(error)));
+      error instanceof InvalidDevGeometryError ? error.source : 'cold',
+      error instanceof InvalidDevGeometryError && error.sourceEvidence ? error.sourceEvidence : String(error)));
     this.requestReady();
   }
   private ready(): void {

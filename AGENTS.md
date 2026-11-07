@@ -1,127 +1,23 @@
-# AGENTS.md — 项目上下文
+# AGENTS.md — 编码助手工作约定
 
-> 本文件为 AI 编码助手提供项目上下文，帮助理解项目结构和约定。
+本项目是 GIM 文件浏览器：`desktop/` 为 Tauri 2 桌面端（变电、线路、独立设备），`app/` 为 Android 线路端。当前运行面、目录所有权和依赖方向见[架构](docs/architecture.md)与[分层](docs/architecture/layers.md)；格式事实见[Schema](docs/schema/README.md)。不要把研究材料直接当成已验证契约。
 
-## 项目定位
+## 工作区和证据
 
-GIM（Grid Information Model，电网信息模型）文件浏览器。国家电网的 GIM 标准基于 IFC 扩展而来，`.gim` 文件是电力行业专有的工程信息模型格式。
+- 测试与验证只使用工作区 `tmp/` 和 `output/`。不得读取、写入或清理系统目录作为测试数据；子进程 `TEMP/TMP/TMPDIR` 也必须指向工作区。命令与本地样本规则见[开发指南](docs/development.md)及[验证](docs/validation.md)。
+- 工程样本和对照基线由开发者自行构建。远程 CI 不运行真实或合成工程样本及性能矩阵；缺样本的跳过不是通过。`docs/performance.md` 只代表作者所述环境的结果。
+- `demo/`、`tmp/`、`output/` 不随仓库分发。L0/L1/L2 注册表位于 `benchmarks/`，CLI 和报告契约见[Benchmark](docs/benchmark.md)。报告默认匿名；不要将真实工程名、地理归属或原始 profile 写入可分享文档。
 
-- **Tauri 2 桌面应用**（Rust 后端 + Vite 前端），离线运行，portable ZIP 发布
-- **三类输入**：变电（CBM/DEV/IFC 来源 + 工程组成/来源/清册三视图 + IFC/MOD/STL 几何）、线路（地图 + 塔位/导线/跨越点）、独立设备（Device CBM + 递归 DEV 装配 + MOD/STL）
-- **SQLite 缓存**：首次解压解析入库，合法缓存用于加速恢复；实际响应和完整加载分别测量
+## 代码边界
 
-## 核心概念
+- `desktop/src/engineering/` 是纯领域；`gim/` 做来源解析与适配；`services/` 编排；`viewer/` 管理渲染；`ui/` 管理 DOM；`measurement/` 是探针和只读证据。测量核心在 `packages/measurement-core/`，不得依赖 DOM、Tauri 或 Three。新跨端能力先确认是否属于现有 `packages/` 或 `crates/` 契约。
+- `gim/` 不依赖 services/viewer/ui；`viewer/` 不依赖 services/ui；`ui/` 不直接访问数据库或原生 IPC。入口与打开服务不能静态引入 Three、web-ifc、MapLibre。变更后运行 `desktop/` 下的 `npm run check:engineering-boundaries`。
+- 源 SHA 和 magic 决定输入身份，缓存不能覆盖源事实。工程实体、来源 occurrence 与几何表示保持独立；表示只按来源 ID 绑定，不靠同名、邻近或数组序号补配。会话、几何批次和选择请求均须拒绝旧结果提交。具体语义见[架构](docs/architecture.md)及[验证不变量](docs/validation.md)。
+- 全包路径/引用索引按源文件 Map 共享。逐节点、逐 DEV/PHM、逐属性或逐几何请求不得重新枚举整包；文件物化仅替换值，路径键集合变化使用新 Map。相关变更用扫描/读取次数回归验证，不使用绝对耗时阈值。
+- IFC 物理目录不能写死；CBM 引用使用全局 entry resolver。路径大小写和分隔符兼容，歧义保留。DEV/PHM/MOD 装配按真实引用递归、逐边矩阵和分支防环，失败按来源局部隔离。
 
-### GIM 文件结构
+## 持久化和文档
 
-`.gim` 文件不是标准 ZIP，而是自定义格式：
-
-```
-偏移 0:    GIMPKG* 头部（变长，含项目编号和名称，零填充；GIMPKGS=变电 / GIMPKGT=线路）
-偏移 N:    7z 或 ZIP 压缩数据（1MB 窗口内搜索签名定位）
-```
-
-- 7z 签名：`37 7A BC AF 27 1C`
-- ZIP 签名：`50 4B 03 04`
-
-常见解包目录：CBM/（工程骨架）、DEV/（设备）、PHM/（装配体）、MOD/（几何图元）。
-独立设备也可使用 GIMPKGS，或直接是裸 7z；按唯一 `ENTITYNAME=Device` CBM 与实际 DEV 引用识别，不要求 `project.cbm`/IFC。设备 CBM/DEV/FAM 存在 GBK，设备运行时兼容解码但不改写原包。设备库中的完整工程结构继续走工程流程。
-IFC 的物理目录是 exporter detail。解析必须基于 CBM 引用 + 全局 entry resolver，不得写死 DEV/ 或 CBM/；文件发现与 IFCGUID 对象关联是独立能力。
-在册变电目录为大写（CBM/DEV/MOD/PHM），线路常为 PascalCase（Cbm/Dev/Mod/Phm），路径处理必须大小写不敏感。
-
-### CBM 层级
-
-CBM 引用构成图，工程树是展示投影，入口为 `project.cbm`：
-- 变电站工程：F1System → F2System → F3System → F4System/PARTINDEX → 设备
-- 线路工程：F1-F3System → F4System(GROUPTYPE=TOWER) → TOWER/WIRE/CROSS
-
-### 文件格式
-
-CBM/DEV/PHM/SCH 常使用键值文本，FAM 使用分节和多段等号记录。
-MOD 变电侧为 XML、线路侧为四类文本格式族；SLD 为 SVG；STD 按实际 root 区分电气 XML 与 SVG。
-详细格式见 [Schema](docs/schema/README.md)，样本身份和统计见 [台账](docs/schema/sample-corpus.md)。
-
-## 技术栈与架构
-
-| 层 | 技术 |
-|---|---|
-| 桌面框架 | Tauri 2（Rust：SQLite rusqlite / sha256 / 原生 7z+ZIP 解压） |
-| 3D 渲染 | @thatopen/components (OBC) + web-ifc + Three.js + three-bvh-csg |
-| 压缩包解压 | Tauri 原生命令（首选，带资源配额）/ libarchive.js WASM（回退） |
-| 地图 | MapLibre GL JS + OSM 在线（Canvas-only 兜底）；天地图卫星/地形/矢量 |
-| 本地数据库 | SQLite（表名前缀：变电 `substation_*`、线路 `powerline_*`，共享 `gim_project`） |
-
-### 分层结构（强制边界）
-
-```
-desktop/src/                    # 前端代码（桌面端专属）
-├─ app/          启动 + AppState（geometryLoadToken 防竞态）
-├─ engineering/  纯领域：工程整体/成员/关系/组成模板/目录（无 GIM/UI/Viewer/DB 依赖）
-├─ gim/          纯解析层：容器/parser/索引/来源适配/地图数据（无 UI/Viewer 依赖）
-├─ viewer/       3D 渲染层（变电/设备使用；IFC 加载/高亮/相机/xml-mod 几何）
-├─ ui/           纯 DOM UI（shell + 工程组成/来源/清册三视图/属性/线路地图/搜索框）
-├─ services/     业务编排（打开/工程实体 Worker/DEV/IFC/缓存/选择）
-└─ config/       功能开关（features.ts）与 debug 分类开关
-desktop/                      # 桌面端
-├─ bridge/                     # Tauri IPC 桥接层（TS）
-└─ src-tauri/src/
-   ├─ db.rs                    SQLite 操作（线路/变电语义、几何独立版本）
-   ├─ gim_extract.rs           原生解压（配额防压缩炸弹）
-   ├─ gim_extract_command.rs   解压 Tauri 命令
-   └─ lib.rs                   命令注册
-app/                           # Android 线路端（Tauri Mobile，独立 npm/SQLite）
-packages/powerline-core/        # 跨端纯线路解析、领域投影和 HNum 预览
-crates/gim-native-core/         # 跨端原生有界解压
-crates/tauri-plugin-gim-import/ # Android SAF 流式导入
-```
-
-分层规则：`gim/` 不依赖 services/viewer/ui；`viewer/` 不依赖 services/ui；`ui/` 不直接碰数据库；`services/` 编排全部。重依赖按需动态 import——
-入口与 openGimService 不静态引用 three/web-ifc/maplibre。
-
-## 关键设计
-
-- **变电证据边界**：原始 CBM 字段、FAM 原行/内部键/标签、设计文档来源独立保留。`gim/substationEvidence.ts` 提供能力摘要、IFC evidence、PARTINDEX identity alias 和 UUID GL sidecar 投影；摘要只描述文件事实，不决定解析分支。不得按厂商名称选择 parser。
-- **变电几何契约**：PARTINDEX → child DEV 按 OBJECTMODELPOINTER 身份关联，不能按数组序号，PARTINDEX/DEV_SUBDEVICE 不作为第二个 seed。PHM 按扩展名递归、逐边累积矩阵、分支防环；cold/缓存查询/raw fallback 采用同一引用语义。不得假定 DEV=PHM=MOD、STL 必备。同 UUID `.gl` 是可选辅助来源，不自动加入 SOLIDMODEL 主链；SCH/STD/SLD 也是可选能力。
-- **工程实体解耦**：`engineering/` 是无格式领域层，`gim/engineering/` 只把 CBM/DEV/FAM/IFC 适配成中立证据。工程整体身份不来自 F2/F3/F4、展示树深度、显示名或 Mesh；每份来源最多一个主归属；整体通过来源 ID 绑定 DEV/IFC 表示，不按邻近/同名补配。规则变化只重建实体/三视图，不强制重编几何。目录是项目映射，不是国标编码。
-- **打开流程**：源身份/SHA/magic → validate_gim_cache → 分域恢复 / 未命中解压（原生或 WASM）→ 类型分支；源 magic 不由缓存覆盖
-- **变电首开**：核心语义可用后，工程实体 Worker、DEV 目录/基础编译与 IFC 加载并行；DEV 场景放置等待真实坐标锚点，结果提交与缓存落盘有独立预算，显示不等待缓存写完。普通选择、搜索和相机靠近只请求 L0/L1，DEV/IFC L2 由属性面板明确请求；token 与 SelectionRequest 防旧结果提交，失败不写完整缓存标记。
-- **设备打开**：equipmentRuntime 复用 DEV LOD、树/属性/选择与清理，采用 Z-up→Y-up，不等待不存在的 IFC；无 IFC 的合法工程树也可显示 DEV。设备重开复用提取源和 LOD 派生缓存，重新建立语义树，不冒充完整变电语义缓存。StretchedBody 的单位/304.8 mm 方向基矢均归一化后乘 L，范围与网格共用解释。
-- **线路首开**：buildLineGimGraph → parseLineAttributes → 三阶段分块入库（begin/chunks/finish，finish 才提交 parser_version）→ Canvas/MapLibre 地图
-- **性能埋点**：utils/perfTimings.ts，Ctrl+Shift+D 诊断 JSON 含 timings 字段
-
-## 已实现功能
-
-- **GIM 文件解析**：GIMPKGS/GIMPKGT 头部检测 + 原生/WASM 双路径解压（资源配额防护）
-- **变电工程**：工程组成/来源/清册三视图 + 搜索定位 + IFC 全量自动加载 + 渐进式 MOD/STL 几何 + 工程整体属性 + 属性抽屉 CSV 导出 + SLD 单线图（白名单净化后 img 沙箱渲染）
-- **独立设备**：设备装配树 + UTF-8/GBK 属性 + 自动 MOD/STL 浏览 + 搜索/选择/显式精化 + 源与几何缓存复用
-- **线路工程**：地图（塔位/导线弧垂视觉示意/跨越点）+ 树↔图联动 + 截图/CSV 导出 + 搜索定位
-- **缓存体系**：SQLite 索引/属性/几何引用链/GLB 快速路径 + PARSER_VERSION 失效
-- **安全加固**：SLD 白名单净化、解压资源配额、几何 token 竞态防护、GLB 完成标记门控
-
-## 开发命令
-
-```bash
-cd desktop            # 所有 npm 命令在 desktop/ 下执行
-npm install
-npm run dev           # Vite 开发服务器（浏览器模式）
-npm run tauri:dev     # Tauri 开发模式（桌面应用）
-npm test              # 快速单元测试（不启动 Cargo）
-npm run test:sqlite   # 真实 SQLite 往返（一次构建 Rust harness 后直接运行）
-npm run local-tests:check   # 检查仓库 mini-samples.example.json；缺样本明确跳过
-npm run test:local -- --build <原生构建清单>  # 跑可用样本并核对工程类型
-npm run test:engineering:worker  # 工程实体 Worker/缓存/取消（headless Edge）
-npm run build         # TypeScript 编译 + Vite 构建
-cargo check --manifest-path src-tauri/Cargo.toml   # Rust 检查（desktop/ 内）
-```
-
-## 注意事项
-
-- 全包路径/引用索引必须按源文件 Map 共享复用；禁止在逐节点、逐 DEV/PHM、逐属性或逐几何请求中重新枚举整包建立索引。文件物化只替换值；路径键集合变更使用新 Map。修改相关流程必须通过全清单枚举次数回归：节点/查询数量增长不增加全包扫描次数，同一 DEV 在一次树构建中只读/解析一次，装配实例仍各自保留路径、矩阵与分支防环。`check:engineering-boundaries` 禁止绕过共享索引的直接 `createEntryResolver(files.keys())` 调用；测试断言扫描/读取次数，不使用绝对耗时阈值。
-- 测试与验证使用工作区根目录的 `tmp/` 和 `output/`；任何时候不允许将系统目录作为测试输入、输出、暂存或清理目标，不得回退到系统 TEMP/TMP。测试启动器及其子进程的 TEMP/TMP/TMPDIR 也必须指向上述工作区目录。
-- 本项目面向复杂工程模型，测试集及对照基线由开发者自行构建。`docs/performance.md` 只代表作者在所述环境、样本和构建上的测试结果；因样本知识产权限制，远程 CI 不运行真实或合成样本，也不复跑性能。CI 只运行不依赖工程样本的单元测试、静态检查和构建。
-- SQLite 物理 schema 在首次正式发布前统一为 v1；快速迭代不维护旧开发库的迁移和兼容分支。结构变更后由开发者删除旧数据库并重建，语义与几何派生缓存仍按各自契约失效。
-- `demo/` 可存放开发者自备的大型模型，已从 Git 排除；基础测试位置与 SHA 由跟踪的 `desktop/local-tests/mini-samples.example.json` 登记。其他开发者可修改该模板；缺本地样本时显式跳过，不把 skip 算通过。
-- `desktop/public/worker-bundle.js`、`desktop/public/libarchive.wasm`、`desktop/public/wasm/web-ifc*.wasm`是运行时资产，由 scripts/copy-web-ifc-wasm.mjs 维护，需随项目提交
-- 修改持久化含义时只 bump 受影响域。当前缓存契约与权威源码只在[缓存域](docs/architecture/caches.md)维护；IFC LOD 键绑定实际安装依赖版本。
-- 长期文档只写当前状态，删除过程和历史版本。架构按主题维护在 `docs/architecture/`，入口是短[架构总览](docs/architecture.md)；工程实体/目录在 `docs/engineering/`，格式在 `docs/schema/`。未关闭缺陷统一维护在 [open-issues](docs/open-issues.md)，当前桌面能力见 [规格](docs/software-spec.md)。样本与格式研究、设备验收和外部业务候选不写入 open-issues。
-- 写入 docs/schema/ 的内容不得包含真实工程名与地理归属（匿名化约定）
+- 首次正式发布前 SQLite 物理 schema 固定 v1；开发库结构变化由开发者删除重建，不增加迁移分支。语义、几何等派生缓存独立失效，权威版本契约见[缓存域](docs/architecture/caches.md)。
+- 长期文档只描述当前状态；架构在 `docs/architecture/`，工程实体在 `docs/engineering/`，格式在 `docs/schema/`，未关闭产品缺陷在 `docs/open-issues.md`。`docs/schema/` 不写真实工程名或地理归属。
+- 运行时资产和开发命令由[开发指南](docs/development.md)维护。源码和生成报告、测试夹具、独立 Python 工具的目录归属见[项目目录](docs/architecture.md#项目目录与模块归属)。

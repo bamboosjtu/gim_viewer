@@ -49,6 +49,8 @@ export function installBenchmarkHost(state:AppState):void {
       openElapsedMs:openStarted===null?null:performance.now()-openStarted,visibility:document.visibilityState,viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},
       progress:benchmarkProgress(state),
       moments:Object.fromEntries(Object.entries(perfProductMomentSnapshot()).map(([key,value])=>[key,value?.atMs??null])),
+      cachePersistence:((moment)=>({observed:moment!==null,available:moment?.meta?.available!==false}))
+        (perfProductMomentSnapshot().cachePersistenceReady),
       engineering:{status:state.engineeringStatus,cacheStatus:state.engineeringCacheStatus,complete:state.engineeringSources?.complete??false}};},
     evidence(){return benchmarkEvidence(state);},
     targets(){return scenarioTargets(state);},

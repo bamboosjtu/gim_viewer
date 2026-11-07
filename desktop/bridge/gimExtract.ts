@@ -241,7 +241,7 @@ export function parseExtractionPayload(
   const base = 4 + manifestLen;
   if (base > buf.byteLength) throw new Error('manifest 长度越界');
   const manifest: ExtractManifest = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, manifestLen)));
-  if (typeof manifest.magic !== 'string' || !manifest.magic.startsWith('GIMPKG')) {
+  if (typeof manifest.magic !== 'string' || !['GIMPKGS','GIMPKGT','7z','zip'].includes(manifest.magic)) {
     throw new Error('manifest GIM 魔数无效');
   }
   if (!Array.isArray(manifest.entries)) throw new Error('manifest 缺少 entries');

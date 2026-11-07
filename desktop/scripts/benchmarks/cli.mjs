@@ -5,7 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {registerSamples,inventorySamples,selectSamples,workspacePath} from './samples.mjs';
 import {buildAcceptance} from './acceptance-build.mjs';
 import {runNative} from './native-run.mjs';
-import {approveBaseline,compareSuites} from './compare.mjs';
+import {approveBaseline,baselineApprovalIssue,compareSuites} from './compare.mjs';
 import {freezeProfile,verifyProfile} from './profiles.mjs';
 import {runMatrix} from './matrix.mjs';
 import {lifecycleExercise} from './lifecycle.mjs';
@@ -15,7 +15,7 @@ import {runBatch} from './batch.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..'),home=join(root,'tmp','gim-bench'),corpus=join(home,'corpus');
 const [command,...args]=process.argv.slice(2);
-const option=name=>{const index=args.indexOf(`--${name}`);return index<0?undefined:args[index+1];};
+const option=name=>{const index=args.findIndex(value=>value===`--${name}`||value===`-${name}`);return index<0?undefined:args[index+1];};
 const read=path=>JSON.parse(readFileSync(workspacePath(root,resolve(path)),'utf8'));
 const write=(name,value)=>{mkdirSync(home,{recursive:true});const path=join(home,name);writeFileSync(path,JSON.stringify(value,null,2));console.log(path);return path;};
 mkdirSync(home,{recursive:true});for(const name of ['TEMP','TMP','TMPDIR'])process.env[name]=home;
@@ -45,25 +45,25 @@ try{
     try{
       const result=await runBatch({root,buildManifest:workspacePath(root,resolve(option('build'))),directory:option('directory'),registry:option('registry'),
         ...(option('output')?{out:resolve(option('output'))}:{}),preset:option('preset')??'survey',anonymize:anonymize==='true',
-        ...(option('repetitions')?{repetitions:Number(option('repetitions'))}:{}),
+        ...(option('repeat')??option('repetitions')?{repetitions:Number(option('repeat')??option('repetitions'))}:{}),
         ...(option('timeout-seconds')?{timeoutMs:Number(option('timeout-seconds'))*1000}:{}),signal:controller.signal,
         onProgress:row=>console.log(JSON.stringify(row))});
       console.log(JSON.stringify({outcome:result.result.outcome,status:result.result.status,html:join(result.out,'report.html'),csv:join(result.out,'results.csv')}));
-      process.exitCode=result.result.status==='CANCELLED'?130:result.result.outcome==='PASS'?0:result.result.outcome==='FAIL'?1:2;
+      process.exitCode=result.result.status==='CANCELLED'?130:['PASS','PARTIAL'].includes(result.result.outcome)?0:result.result.outcome==='FAIL'?1:2;
     }finally{process.removeListener('SIGINT',cancel);process.removeListener('SIGTERM',cancel);}
   }else if(command==='matrix'){
     if(!option('build')||!option('profile'))throw Error('--build and --profile required');
     const profile=verifyProfile(read(option('profile')));
     const result=await runMatrix({root,buildManifest:workspacePath(root,resolve(option('build'))),registry:read(join(corpus,'registry.private.json')),profile,
       repetitions:Number(option('repetitions')??profile.repetitions),mode:option('mode')??profile.mode});
-    console.log(JSON.stringify({outcome:result.result.outcome,candidate:join(result.out,'candidate.json')}));process.exitCode=result.result.outcome==='PASS'?0:2;
+    console.log(JSON.stringify({outcome:result.result.outcome,candidate:join(result.out,'candidate.json')}));process.exitCode=['PASS','PARTIAL'].includes(result.result.outcome)?0:2;
   }else if(command==='overhead'){
     if(!option('build')||!option('profile')||!option('sample'))throw Error('--build, --profile and --sample required');
     const profile=verifyProfile(read(option('profile'))),caseSpec=profile.cases.find(row=>row.sampleId===option('sample'));
     const sample=read(join(corpus,'registry.private.json')).samples.find(row=>row.sampleId===option('sample'));
     if(!sample||!caseSpec)throw Error('Sample must belong to the frozen profile');
     const result=await measureProbeOverhead({root,buildManifest:workspacePath(root,resolve(option('build'))),sample,profile,caseSpec});
-    console.log(JSON.stringify({outcome:result.result.outcome,report:join(result.out,'overhead.json')}));process.exitCode=result.result.outcome==='PASS'?0:2;
+    console.log(JSON.stringify({outcome:result.result.outcome,report:join(result.out,'overhead.json')}));process.exitCode=['PASS','PARTIAL'].includes(result.result.outcome)?0:2;
   }else if(command==='build'){
     console.log(await buildAcceptance(root,{benchmark:true}));
   }else if(command==='doctor'||command==='run'||command==='lifecycle'){
@@ -81,18 +81,19 @@ try{
   }else if(command==='compare'||command==='gate'){
     if(!option('baseline')||!option('candidate'))throw Error('--baseline and --candidate are required');
     const baseline=read(option('baseline')),candidate=read(option('candidate'));
-    const result=command==='gate'&&!baseline.approval?{outcome:'INCONCLUSIVE',reasons:['baseline-not-approved']}:compareSuites(baseline.runs??[baseline],candidate.runs??[candidate],{
+    const approvalIssue=command==='gate'?baselineApprovalIssue(baseline):null;
+    const result=approvalIssue?{outcome:'INCONCLUSIVE',reasons:[approvalIssue]}:compareSuites(baseline.runs??[baseline],candidate.runs??[candidate],{
       retestBaseline:option('retest-baseline')?read(option('retest-baseline')).runs:[],retestCandidate:option('retest-candidate')?read(option('retest-candidate')).runs:[],
     });
-    write('comparison.json',result);process.exitCode=result.outcome==='PASS'?0:result.outcome==='FAIL'?1:2;
+    write('comparison.json',result);process.exitCode=['PASS','PARTIAL'].includes(result.outcome)?0:result.outcome==='FAIL'?1:2;
   }else if(command==='approve-baseline'){
     if(!option('candidate')||!option('approver'))throw Error('Explicit --candidate and --approver required');
-    write('baseline.approved.json',approveBaseline(read(option('candidate')),option('approver')));
+    write('baseline.approved.json',approveBaseline(read(option('candidate')),option('approver'),{acceptPartial:args.includes('--accept-partial')}));
   }else if(command==='report'){
     if(!option('input'))throw Error('--input required');
     console.log(await renderReport(workspacePath(root,resolve(option('input'))),join(root,'output','gim-bench',`report-${Date.now()}`)));
   }else{
-    console.log('gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [--repetitions <n>] [--timeout-seconds <n>]\ninit | samples | inventory | select | freeze-profile [--name commit-gate] | build | doctor --build <manifest> | run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev] | matrix --build <manifest> --profile <json> | overhead --build <manifest> --profile <json> --sample <id> | lifecycle --build <manifest> --sample <id> [--second-sample <id>] | compare|gate --baseline <json> --candidate <json> | report --input <json> | approve-baseline --candidate <json> --approver <name>');
+    console.log('gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [-repeat <n>] [--timeout-seconds <n>]\ninit | samples | inventory | select | freeze-profile [--name commit-gate] | build | doctor --build <manifest> | run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev] | matrix --build <manifest> --profile <json> | overhead --build <manifest> --profile <json> --sample <id> | lifecycle --build <manifest> --sample <id> [--second-sample <id>] | compare|gate --baseline <json> --candidate <json> | report --input <json> | approve-baseline --candidate <json> --approver <name> [--accept-partial]');
     if(command)process.exitCode=1;
   }
 }catch(error){console.error(`[gim-bench] ${error.message}`);process.exitCode=1;}

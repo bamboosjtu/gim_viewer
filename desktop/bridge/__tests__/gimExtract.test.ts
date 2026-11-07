@@ -56,6 +56,13 @@ function buildPayload(
 }
 
 describe('parseExtractionPayload', () => {
+  it('accepts native bare 7z/ZIP manifests without assigning a project type from magic', () => {
+    for (const magic of ['7z','zip']) {
+      const result=parseExtractionPayload(buildPayload([{path:'CBM/project.cbm',data:'ENTITYNAME=F1System'}],magic));
+      expect(result.magic).toBe(magic);
+      expect(result.files.has('CBM/project.cbm')).toBe(true);
+    }
+  });
   it('磁盘优先 manifest 不创建内联 blob，条目按需读取', () => {
     const enc = new TextEncoder();
     const manifest = enc.encode(JSON.stringify({

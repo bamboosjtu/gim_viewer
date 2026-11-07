@@ -85,6 +85,11 @@ DEV 实例化仍为默认关闭的试点。v0.2 的工程实体/三视图链路�
 | [docs](docs/README.md) | 当前规格、架构、验证、性能、格式、问题与限制 |
 | [demo](demo/) | 本地 GIM 包及解包样本，大型文件由 Git 忽略 |
 | [research](research/) | 原始研究材料，使用前需复核 |
+| [benchmarks](benchmarks/README.md) | L0/L1/L2 本地样本登记，不含 GIM 文件；测量 CLI 见 [Benchmark](docs/benchmark.md) |
+| [tools](tools/README.md) | 独立 Python 辅助工具及其界面，不属于桌面或 Android 应用前端 |
+| [contracts](contracts/) | 跨语言资源限制等共享契约 |
+
+`tmp/` 保存忽略的测试暂存与私有诊断，`output/` 保存本地报告；其中大量 HTML 是 Benchmark 生成的报告，不是产品页面。源码目录职责见[架构目录表](docs/architecture.md#项目目录与模块归属)，测试与样本约定见[开发指南](docs/development.md)。
 
 ## 桌面开发
 

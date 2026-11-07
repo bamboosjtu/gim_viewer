@@ -15,7 +15,7 @@ export async function runMatrix({root,buildManifest,registry,profile,repetitions
     save({sampleId:sample.sampleId,repetition,cacheState:'cold'});
     const cold=await runNative({root,buildManifest,sample,profileDigest:profile.digest,scenario:row.scenario,actions:row.actions,timeoutMs:row.timeoutMs,mode});
     runs.push({...cold.report,repetition});writeFileSync(join(out,'runs.partial.json'),JSON.stringify(runs));save({sampleId:sample.sampleId,repetition,cacheState:'warm'});
-    if(cold.report.reason||cold.report.correctness!=='passed'||!cold.report.evidence?.progress.cacheSettled){
+    if(cold.report.reason||!['PASS','PARTIAL'].includes(runReadiness(cold.report).outcome)||!cold.report.evidence?.progress.cacheSettled){
       pairs.push({sampleId:sample.sampleId,repetition,outcome:cold.report.correctness==='failed'?'FAIL':'INCONCLUSIVE',reasons:['warm-preparation-incomplete']});continue;
     }
     const warm=await runNative({root,buildManifest,sample,profileDigest:profile.digest,scenario:row.scenario,actions:row.actions,timeoutMs:row.timeoutMs,mode,cacheState:'warm',dataRoot:cold.dataRoot});
@@ -25,7 +25,8 @@ export async function runMatrix({root,buildManifest,registry,profile,repetitions
   const families=new Set(runs.flatMap(run=>Object.values(run.measurement?.workers??{}).map(worker=>worker.family)));
   const missingFamilies=profile.requiredWorkerFamilies.filter(family=>!families.has(family));
   const checks=runs.map(runReadiness),failed=checks.some(check=>check.outcome==='FAIL')||pairs.some(pair=>pair.outcome==='FAIL');
-  const outcome=failed?'FAIL':runs.length===required&&repetitions>=3&&!missingFamilies.length&&checks.every(check=>check.outcome==='PASS')&&pairs.every(pair=>pair.outcome==='PASS')?'PASS':'INCONCLUSIVE';
+  const complete=runs.length===required&&repetitions>=3&&!missingFamilies.length&&checks.every(check=>['PASS','PARTIAL'].includes(check.outcome))&&pairs.every(pair=>['PASS','PARTIAL'].includes(pair.outcome));
+  const outcome=failed?'FAIL':complete?(checks.some(check=>check.outcome==='PARTIAL')||pairs.some(pair=>pair.outcome==='PARTIAL')?'PARTIAL':'PASS'):'INCONCLUSIVE';
   const summaries=[];for(const row of profile.cases)for(const cacheState of ['cold','warm']){
     const samples=runs.filter(run=>run.conditions.sampleId===row.sampleId&&run.conditions.cacheState===cacheState);
     const metrics={};for(const key of ['firstResponseMs','firstGeometryMs','automaticLoadMs','processPrivatePeakBytes']){

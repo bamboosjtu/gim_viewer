@@ -13,8 +13,8 @@ export interface IfcCacheResult {
   }>;
 }
 
-/** 几何文件缓存结果（DEV/PHM/MOD/GL） */
-export interface GeometryCacheResult {
+/** WASM 回退的完整来源缓存结果。 */
+export interface ExtractedCacheResult {
   pathMap: Map<string, string>;
   /** 已缓存的 entry_path 数量 */
   cachedCount: number;
@@ -26,53 +26,21 @@ export interface GeometryCacheResult {
 }
 
 /**
- * 判断 entry_path 是否为几何发现需要的文件（DEV/PHM/MOD/GL）。
- * 用于缓存命中场景下从磁盘读取这些文件以回放 xml-mod 几何。
+ * WASM 回退必须持久化整个归档清单。只缓存已知扩展名会让未登记条目
+ * 没有 source cache，随后 SQLite 核心索引的完整性校验无法通过。
+ * 已缓存的 IFC 不重复写；失败条目由发布阶段明确拒绝，不标记完整。
  */
-function isGeometryFile(entryPath: string): boolean {
-  const lower = entryPath.toLowerCase();
-  const isGeometryExt = lower.endsWith('.dev') || lower.endsWith('.phm')
-    || lower.endsWith('.mod') || lower.endsWith('.gl') || lower.endsWith('.stl');
-  return isGeometryExt;
-}
-
-/**
- * 判断 entry_path 是否为 STD/SLD 拓扑与单线图文件。
- * - CBM/project.sch：SCH 入口
- * - CBM/*.std：STD 拓扑定义（XML）
- * - CBM/*.sld：SLD 电气单线图（SVG）
- *
- * 用于缓存命中场景下从磁盘读取这些文件以重新解析 STD/SLD。
- */
-function isStdSldFile(entryPath: string): boolean {
-  const lower = entryPath.toLowerCase();
-  if (lower === 'cbm/project.sch') return true;
-  if (!lower.startsWith('cbm/')) return false;
-  return lower.endsWith('.std') || lower.endsWith('.sld');
-}
-
-/**
- * 缓存 GIM 解压后的几何文件（DEV/PHM/MOD/GL）到本地磁盘。
- *
- * 与 cacheIfcEntries 的差异：
- * - cacheIfcEntries 以 ifcEntries 为准，仅缓存 IFC 文件
- * - 本函数遍历 files Map，缓存所有 DEV/PHM/MOD/GL 文件
- * - 用于缓存命中场景下从磁盘读取这些文件以回放 xml-mod 几何
- *
- * @param projectId 数据库 gim_project.id
- * @param files GIM 解压后的文件集合
- */
-export async function cacheGeometryFiles(
+export async function cacheExtractedFiles(
   projectId: number,
   files: Map<string, File>,
-): Promise<GeometryCacheResult> {
+  alreadyCached: ReadonlyMap<string,string> = new Map(),
+): Promise<ExtractedCacheResult> {
   const errors: Array<{ entryPath: string; message: string }> = [];
   let cachedCount = 0;
   const pathMap = new Map<string,string>();
 
   for (const [entryPath, file] of files) {
-    if (!isGeometryFile(entryPath) && !isStdSldFile(entryPath)
-      && !/\.(cbm|fam|stl|sch)$/i.test(entryPath)) continue;
+    if (alreadyCached.has(entryPath)) continue;
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const localPath = await writeCacheFile(projectId, entryPath, bytes);

@@ -10,14 +10,16 @@ export function benchmarkProgress(state:AppState){
   const ifcPublication=perfIfcPublicationSnapshot();
   const line=state.currentProjectType==='transmission_line';
   const linePersistence=state.lineCachePersistence;
-  const spatialMoment=perfProductMomentSnapshot().spatialSemanticReady;
+  const moments=perfProductMomentSnapshot(),spatialMoment=moments.spatialSemanticReady;
   const backgroundStatus=state.currentProjectType!=='substation'||state.currentIfcEntries.length===0?'not-applicable'
     :spatialMoment===null?'pending':spatialMoment.meta?.available===false?'failed':'ready';
+  const cachePersistenceStatus=state.currentProjectType!=='substation'?'not-applicable':
+    moments.cachePersistenceReady?.meta?.available===false?'failed':moments.cachePersistenceReady?'ready':'not-observed';
   const backgroundSettled=backgroundStatus!=='pending';
   const semantic=line?!!state.currentGimGraph:state.currentProjectType==='equipment'?!!state.currentCbmTree:state.engineeringStatus==='ready'||state.engineeringStatus==='partial';
   const baseSettled=dev?dev.baseRepresentationsSettled===true:!state.ifcBackgroundPending&&state.loadedModels.size===state.currentIfcEntries.length;
   return {semantic,automaticSettled:semantic&&!state.ifcBackgroundPending&&(line||baseSettled)&&n(dev?.pending)===0&&n(dev?.viewPendingOccurrences)===0,
-    backgroundSettled,backgroundStatus,
+    backgroundSettled,backgroundStatus,cachePersistenceStatus,
     cacheSettled:(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineeringCacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
       &&(!line||linePersistence==='saved'||linePersistence==='failed'||linePersistence==='not-applicable'),
     workload:{cbmNodes:state.cbmNodeIndex.size,lineNodes:state.currentGimGraph?.nodesByPath.size??0,
@@ -59,12 +61,41 @@ async function geometryEvidence(state:AppState){
 }
 export async function benchmarkEvidence(state:AppState){
   const session=state.captureProjectSession(),snapshot=state.engineeringSnapshot,progress=benchmarkProgress(state);
-  const geometryDiagnostics={templates:state.geometryDiagnosticsByDevPath.size,statuses:{} as Record<string,number>,reasons:{} as Record<string,number>,failedVisibleRoots:0};
+  const sources=state.engineeringSources;
+  const referenceStatuses:Record<string,number>={};
+  for(const reference of sources?.graph.references??[])referenceStatuses[reference.status]=(referenceStatuses[reference.status]??0)+1;
+  const canonicalIfc=(path:string)=>path.replace(/\\/g,'/').toLowerCase();
+  const archiveIfc=new Set((sources?.graph.ifcPaths??[]).map(canonicalIfc));
+  const spatialIfc=new Set((sources?.models??[]).map(model=>canonicalIfc(model.path)));
+  const ifcManifest=sources?{
+    archiveSources:archiveIfc.size,spatialModels:sources.models.length,
+    missing:[...archiveIfc].filter(path=>!spatialIfc.has(path)).length,
+    extra:[...spatialIfc].filter(path=>!archiveIfc.has(path)).length,
+    duplicate:sources.models.length-spatialIfc.size,
+    parseErrors:sources.models.filter(model=>!!model.error).length,
+  }:null;
+  const engineeringCoverage=state.currentProjectType==='substation'?{
+    complete:sources?.complete??null,incompleteReasons:[...(sources?.incompleteReasons??[])].sort(),
+    referenceStatuses,graphDiagnostics:sources?.graph.diagnostics.length??null,
+    ifcManifest,
+    sourceCount:progress.workload.sources,entityCount:progress.workload.entities,
+    partialOccurrences:progress.workload.partial,
+  }:null;
+  const geometryDiagnostics={templates:state.geometryDiagnosticsByDevPath.size,statuses:{} as Record<string,number>,nonFailureReasons:{} as Record<string,number>};
+  const failedGeometryReasons:Record<string,number>={};
+  const failedSourcePaths:string[]=[];
+  let failedVisibleRoots=0,sourceEvidenceComplete=true;
   for(const diagnostic of state.geometryDiagnosticsByDevPath.values()){
     geometryDiagnostics.statuses[diagnostic.status]=(geometryDiagnostics.statuses[diagnostic.status]??0)+1;
-    if(diagnostic.reason)geometryDiagnostics.reasons[diagnostic.reason]=(geometryDiagnostics.reasons[diagnostic.reason]??0)+1;
-    geometryDiagnostics.failedVisibleRoots+=diagnostic.failedVisibleRootCount??0;
+    if(diagnostic.status==='failed'){
+      const reason=diagnostic.reason??'unknown';failedGeometryReasons[reason]=(failedGeometryReasons[reason]??0)+1;
+      failedSourcePaths.push(diagnostic.devPath.replace(/\\/g,'/').toLowerCase());
+      failedVisibleRoots+=diagnostic.failedVisibleRootCount??0;
+      if(reason!=='source-invalid'||!diagnostic.detail?.startsWith('source-origin-span-v1'))sourceEvidenceComplete=false;
+    }else if(diagnostic.reason)geometryDiagnostics.nonFailureReasons[diagnostic.reason]=(geometryDiagnostics.nonFailureReasons[diagnostic.reason]??0)+1;
   }
+  const geometryDefects={failedSourceCount:failedSourcePaths.length,failedSourceSetDigest:failedSourcePaths.length?await hash(failedSourcePaths.sort()):null,
+    failedOccurrences:progress.workload.failed,failedVisibleRoots,failedReasons:failedGeometryReasons,sourceEvidenceComplete};
   const checks:{name:string;passed:boolean}[]=[{name:'source-identity',passed:!!session.sourceSha256},{name:'automatic-settled',passed:progress.automaticSettled},{name:'ifc-source-count',passed:progress.workload.loadedIfcSources===progress.workload.ifcSources},
     {name:'no-failed-geometry-occurrences',passed:progress.workload.failed===0},
     {name:'line-cache-persistence',passed:state.currentProjectType!=='transmission_line'||state.lineCachePersistence!=='failed'},
@@ -100,6 +131,8 @@ export async function benchmarkEvidence(state:AppState){
     cache.ifcFarHits=viewer?[...state.loadedModels.values()].filter(row=>viewer.ctx.fragments.list.get(row.runtimeModelId)?.object.userData.ifcLodCacheHit===true).length:0;
   }
   checks.push({name:'session-stable',passed:state.isCurrentSession(session)},{name:'cache-source-matches',passed:cache?.sourceMatches===true});
-  return {version:'gim-runtime-evidence-v1',scope:'runtime-regression-invariants-not-standard-compliance',checks,semanticDigest,placementDigest,
-    progress,cache,geometry,geometryDiagnostics,baseGeometryDigest,baseArtifactDigest,baseEvidenceCount:baseRows.length,sourceSha256:session.sourceSha256,passed:checks.every(c=>c.passed)};
+  return {version:'gim-runtime-evidence-v1',scope:'runtime-regression-invariants-not-standard-compliance',projectType:state.currentProjectType,
+    engineeringCoverage,checks,semanticDigest,placementDigest,
+    progress,cache,geometry,geometryDiagnostics,geometryStatuses:geometryDiagnostics.statuses,
+    failedGeometryReasons,geometryDefects,baseGeometryDigest,baseArtifactDigest,baseEvidenceCount:baseRows.length,sourceSha256:session.sourceSha256,passed:checks.every(c=>c.passed)};
 }

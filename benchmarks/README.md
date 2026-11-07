@@ -16,6 +16,8 @@ L2 的 [目录清单](l2/directories.example.json)只登记通用组名和本地
 
 L1/L2 报告默认匿名，`--anonymize false` 需由开发者自行决定是否分享。
 
+`benchmarks/` 只登记输入集合、路径、SHA、层级和运行场景，不保存样本专用的正确性例外。`PASS/PARTIAL/FAIL` 由统一运行证据规则判定；来源缺口的匿名摘要随每次报告记录，冷暖及基线比较检查摘要和工作量一致。
+
 从 `desktop/` 执行，先取得当前代码的 `npm run bench -- build` 构建清单：
 
 ```powershell
@@ -24,4 +26,4 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
 npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json --registry ../benchmarks/l2/directories.example.json --output ../output/l2-survey --preset baseline --anonymize true
 ```
 
-默认一轮冷开；正式候选增加 `--preset baseline`。全部结果、错误码和测量完整性见 [Benchmark 使用说明](../docs/benchmark.md)。基础功能测试的可编辑三模型示例在 [`desktop/local-tests/`](../desktop/local-tests/)，它不是 L0/L1/L2 性能样本登记。
+默认一轮冷开；`--preset baseline` 默认一冷一暖，需要重复三组时增加 `-repeat 3`。全部结果、错误码和测量完整性见 [Benchmark 使用说明](../docs/benchmark.md)。基础功能测试的可编辑三模型示例在 [`desktop/local-tests/`](../desktop/local-tests/)，它不是 L0/L1/L2 性能样本登记。

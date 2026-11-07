@@ -554,26 +554,28 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
               console.error('[Tauri] IFC 文件缓存失败:', err);
             }
 
-            // v6: 缓存 DEV/PHM/MOD 几何文件到本地磁盘
+            // WASM 回退把全部原始条目持久化，避免只缓存已知扩展名
+            // 造成索引清单与可恢复来源不一致。
             if (filesForPersist) {
-              showLoadingBeforeInteractive('正在缓存几何文件（DEV/PHM/MOD）...');
+              showLoadingBeforeInteractive('正在缓存 GIM 来源文件...');
               try {
-                const { cacheGeometryFiles } = await import('./gimExtractedCacheService.js');
-                const geoCacheResult = await cacheGeometryFiles(
+                const { cacheExtractedFiles } = await import('./gimExtractedCacheService.js');
+                const geoCacheResult = await cacheExtractedFiles(
                   projectId,
                   filesForPersist,
+                  localCachePathMap,
                 );
                 if (!state.isCurrentSession(session)) return;
-                debugLog(DEBUG_GIM_CACHE, '[Tauri] 几何文件缓存结果:', {
+                debugLog(DEBUG_GIM_CACHE, '[Tauri] 来源文件缓存结果:', {
                   cached: geoCacheResult.cachedCount,
                   errors: geoCacheResult.errors,
                 });
                 for (const [path, localPath] of geoCacheResult.pathMap) localCachePathMap.set(path, localPath);
                 if (geoCacheResult.errors.length > 0) {
-                  console.warn('[Tauri] 部分几何文件缓存失败:', geoCacheResult.errors);
+                  console.warn('[Tauri] 部分来源文件缓存失败:', geoCacheResult.errors);
                 }
               } catch (err) {
-                console.error('[Tauri] 几何文件缓存失败:', err);
+                console.error('[Tauri] 来源文件缓存失败:', err);
               }
             }
           }
