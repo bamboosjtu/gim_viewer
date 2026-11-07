@@ -222,6 +222,8 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
             emptyTipEl.style.display = 'none';
 
             hideLoading();
+            state.lineCachePersistence = 'saved';
+            perfMarkProductMoment('lineCachePersistenceReady', { source: 'warm', status: 'saved' }, perfSession);
             showLoading(usedSemanticFastPath ? '已从 semantic pack 恢复线路工程' : '已从本地缓存恢复线路工程索引');
             scheduleHideLoading(() => state.isCurrentSession(session), 3000);
             if (import.meta.env.DEV) {
@@ -308,6 +310,7 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
     // 阻塞数秒；save_line_project_finish 仍是缓存提交点，写入失败不会把
     // 半成品标记为有效缓存。
     if (context.projectId != null && isTauri()) {
+      state.lineCachePersistence = 'saving';
       if (import.meta.env.DEV) {
         // 真实 Tauri 性能采集需要知道后台入库何时完成，才能在诊断快照中
         // 同时看到该 span，并避免下一次 cold run 删除缓存时与旧写入交错。
@@ -359,12 +362,16 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
             graphPayloadBytes,
           );
           if (!state.isCurrentSession(session)) return;
+          state.lineCachePersistence = 'saved';
+          perfMarkProductMoment('lineCachePersistenceReady', { source: 'cold', status: 'saved' }, perfSession);
           const elapsedMs = Math.round(performance.now() - t0);
           endSave(undefined, { ms: elapsedMs, background: true });
           debugLog(DEBUG_GIM_CACHE, '[LineCache] 后台 save_line_project_cache 完成，耗时', elapsedMs, 'ms');
         } catch (err) {
           // 工程切换后的旧任务不应在新工程控制台制造错误噪声。
           if (state.isCurrentSession(session)) {
+            state.lineCachePersistence = 'failed';
+            perfMarkProductMoment('lineCachePersistenceReady', { source: 'cold', status: 'failed' }, perfSession);
             console.error('[Tauri] 线路工程缓存后台写入失败:', err);
           }
         } finally {
@@ -375,8 +382,9 @@ export async function openPowerlineProject(context: GimRuntimeOpenContext): Prom
       };
       // 让浏览器先完成首帧绘制并返回可交互状态，再开始 JSON/SQLite IPC。
       window.setTimeout(() => { void Promise.resolve(persistLineCache()).catch(reportBackgroundError); }, 0);
-    } else if (import.meta.env.DEV) {
-      (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
+    } else {
+      state.lineCachePersistence = 'not-applicable';
+      if (import.meta.env.DEV) (globalThis as { __GIM_DEV_LINE_CACHE_PERSIST_DONE__?: boolean }).__GIM_DEV_LINE_CACHE_PERSIST_DONE__ = true;
     }
 
     // 渲染面板（在属性恢复之后，确保地图 tooltip/标签有完整 FAM/DEV 属性）

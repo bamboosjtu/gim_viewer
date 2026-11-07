@@ -16,7 +16,9 @@ function recordReport(row,report,state){
     correctness:report.correctness,cacheVerified:report.cacheVerified,measurementComplete:report.measurementComplete,
     processSamples:report.processSampling?.samples,processSamplesAvailable:report.processSampling?.available,
     missingWorkerHeaps:report.missingWorkerMemory?.length,failedGeometry:report.evidence?.progress?.workload?.failed,
-    pendingTasks:report.measurement?.activeTasks?.length});
+    pendingTasks:report.measurement?.activeTasks?.length,backgroundSettled:report.evidence?.progress?.backgroundSettled,
+    cachePublication:report.evidence?.progress?.cache?.linePersistence??null,linePackAssessment:report.evidence?.cache?.linePackAssessment??null,
+    geometryFailureReasons:Object.entries(report.evidence?.geometryDiagnostics?.reasons??{}).map(([reason,count])=>`${reason}:${count}`).join(';')});
   for(const key of ['firstResponseMs','firstGeometryMs','automaticLoadMs','cachePublishMs','processPrivatePeakBytes'])row[key]=report.metrics?.[key]??null;
   const context={runId:report.runId,sampleId:row.sampleId,sampleLabel:row.sampleLabel,sourceSha256:row.sourceSha256,repetition:row.repetition,cacheState:row.cacheState};
   for(const [stage,stats]of Object.entries(report.measurement?.phases??{}))state.stages.push({...context,stage,count:stats.count,totalMs:stats.totalMs,maxMs:stats.maxMs,

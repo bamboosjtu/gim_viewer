@@ -24,7 +24,7 @@ export function lifecycleExercise({sample,secondSample,cycles=10,timeoutMs=90000
       await cdp.evaluate(`globalThis.__gimBenchmark.open(...${JSON.stringify([target.sampleId,manifest.nonce,config])}).catch(()=>{});undefined`);
     };
     for(let i=0;i<cycles;i++){
-      if(i){await open(sample,`cycle-${i+1}`);await waitFor(cdp,s=>!s.opening&&s.progress.automaticSettled&&s.progress.cacheSettled&&!s.measurement.activeTasks.length,timeoutMs);}
+      if(i){await open(sample,`cycle-${i+1}`);await waitFor(cdp,s=>!s.opening&&s.progress.automaticSettled&&s.progress.cacheSettled&&s.progress.backgroundSettled&&!s.measurement.activeTasks.length,timeoutMs);}
       const actual=await cdp.evaluate('globalThis.__gimBenchmark.evidence()',undefined,30000);
       const equivalent=actual.passed&&['semanticDigest','placementDigest','baseGeometryDigest','baseArtifactDigest'].every(key=>actual[key]===expected[key]);
       rows.push({cycle:i+1,equivalent,...await closeAndCheck(cdp,processSampler)});
@@ -38,7 +38,7 @@ export function lifecycleExercise({sample,secondSample,cycles=10,timeoutMs=90000
     if(secondSample){
       previous=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
       await open(sample,'replace-a');await waitFor(cdp,s=>s.session.generation!==previous.session.generation&&s.session.sourceSha256===sample.sourceSha256&&!s.progress.automaticSettled,30000);
-      await open(secondSample,'replace-b');await waitFor(cdp,s=>!s.opening&&s.session.sourceSha256===secondSample.sourceSha256&&s.progress.automaticSettled&&s.progress.cacheSettled&&!s.measurement.activeTasks.length,timeoutMs);
+      await open(secondSample,'replace-b');await waitFor(cdp,s=>!s.opening&&s.session.sourceSha256===secondSample.sourceSha256&&s.progress.automaticSettled&&s.progress.cacheSettled&&s.progress.backgroundSettled&&!s.measurement.activeTasks.length,timeoutMs);
       const result=await cdp.evaluate('globalThis.__gimBenchmark.evidence()',undefined,30000),closed=await closeAndCheck(cdp,processSampler);
       replacement={sourceMatches:result.sourceSha256===secondSample.sourceSha256,evidencePassed:result.passed,...closed,passed:result.passed&&closed.passed};
     }

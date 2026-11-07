@@ -49,6 +49,10 @@ Windows 固定运行时的文件既需要 AppContainer 读取权限，也不能�
 
 高频解析与图元阶段在 Worker 内生成可合并的调用直方图，保留调用数、累计时长和分位区间。Benchmark 明细通过带确认、限额的 CDP binding 传输；采集端阻塞时保留丢失计数，不把聚合通过当作明细完整。进程树使用独立原生采样器，即使 WebView 主线程阻塞也继续采样。
 
+一次线路 Worker 转移可能包含万级 ArrayBuffer。资源账本仍逐 backing buffer 去重并结算；普通 Benchmark 在超过 8 个缓冲时，把该批的 acquire/transfer/release 各压成一条带 `buffers` 和 `referencedBytes` 的事件，避免挤满 8,192 条明细容量。`diagnostic` 模式保留逐缓冲事件，发生丢弃时仍报告不完整。
+
+线路首屏后持久化有 `idle/saving/saved/failed` 会话状态；原生 Benchmark 等待 SQLite finish 提交，失败为明确的失败状态。`cachePublishMs` 取线路完成时刻而非首屏后的静默窗口。变电自动表示的时间仍独立记录，原生运行结束另等待 Spatial 终态和三秒静默；尾部出现新任务时继续有界等待，未闭环则保持 INCONCLUSIVE。暖开 IFC 校验依据来源缓存数量、缺失数和 parser 版本；没有请求远景 LOD 的 `open` 场景不要求 `ifcFarHits`。几何失败原因只汇总受控 reason/status 与数量，不输出 DEV 路径和原始诊断文本。
+
 在 `desktop/` 执行：
 
 ```powershell

@@ -26,10 +26,11 @@ export function coldWarmEquivalent(cold,warm){
 }
 export function cacheVerified(evidence,cacheState,projectType){
   if(!evidence?.cache?.sourceMatches||evidence.progress.cache.writeFailures||evidence.progress.cache.readFailures||!evidence.progress.cacheSettled)return false;
-  if(projectType==='transmission_line')return evidence.cache.linePack==='valid';
+  if(projectType==='transmission_line')return evidence.cache.linePersistence==='saved'&&evidence.cache.projectTypeCommitted===true&&evidence.cache.linePackAssessment==='valid';
   if(projectType==='substation'&&(!evidence.cache.semanticValid||!['hit','saved'].includes(evidence.progress.cache.engineering)))return false;
   if(cacheState==='cold')return true;
   if(projectType==='substation'&&evidence.progress.cache.engineering!=='hit')return false;
-  if(evidence.progress.workload.ifcSources&&(evidence.cache.ifcFarHits??0)!==evidence.progress.workload.ifcSources)return false;
+  if(projectType==='substation'&&evidence.progress.workload.ifcSources&&(
+    evidence.cache.parserMatches!==true||evidence.cache.cachedIfc!==evidence.progress.workload.ifcSources||evidence.cache.missingIfc!==0))return false;
   return !evidence.progress.workload.devSources||evidence.progress.cache.devCatalogHits>=evidence.progress.workload.devSources;
 }

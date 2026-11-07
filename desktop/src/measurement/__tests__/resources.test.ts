@@ -13,3 +13,16 @@ it('shared output/cache ownership is counted once, copy is distinct and late rel
   expect(run.buffers.bytes).toBe(0);expect(measurementSnapshot()?.hostResources?.uniqueAllocations).toBe(0);
   expect(measurementSnapshot(run.collector.identity.runId)?.hostResources?.peakUniqueBytesByKind['buffer-capacity']).toBe(256);
 });
+it('a large transfer preserves exact buffer ownership without flooding detail events',()=>{
+  (globalThis as any).__GIM_MEASUREMENT_CONFIG__={mode:'benchmark'};resetMeasurementRun({generation:1});
+  const run=measurementRun(),buffers=Array.from({length:12000},()=>new ArrayBuffer(4));
+  const release=trackHostBuffers('in-flight',buffers,run);
+  expect(run.buffers.bytes).toBe(48000);
+  expect(measurementSnapshot()?.counters['host:resource.acquire']).toMatchObject({buffers:12000,referencedBytes:48000});
+  release('worker');
+  expect(run.buffers.bytes).toBe(0);
+  const snapshot=measurementSnapshot()!;
+  expect(snapshot.counters['host:resource.transfer']).toMatchObject({buffers:12000,referencedBytes:48000});
+  expect(snapshot.loss.detailEvents).toBe(0);
+  expect(snapshot.detailComplete).toBe(true);
+});

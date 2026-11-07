@@ -66,9 +66,16 @@ export function trackHostBuffers(role:string,values:Iterable<ArrayBufferLike|Arr
   const context=providedContext??measurementContext(run.collector);
   const owner=run.newOwner(role),unique=new Set<ArrayBufferLike>();for(const value of values)unique.add(ArrayBuffer.isView(value)?value.buffer:value);
   const rows=[...unique].map(buffer=>({id:run.buffers.retain(buffer,owner),bytes:buffer.byteLength}));
-  for(const row of rows)run.probe.event(context,{kind:'counter',name:'resource.acquire',resource:{id:`${context.runId}:host:${row.id}`,action:role.endsWith('copy')?'copy':'acquire',owner,bytes:row.bytes},workload:{buffers:1,referencedBytes:row.bytes}});
+  const batched=rows.length>8&&run.collector.mode!=='diagnostic';
+  const referencedBytes=rows.reduce((sum,row)=>sum+row.bytes,0);
+  const batchId=`${context.runId}:host:batch:${owner}`;
+  if(batched)run.probe.event(context,{kind:'counter',name:'resource.acquire',resource:{id:batchId,action:role.endsWith('copy')?'copy':'acquire',owner,bytes:referencedBytes},workload:{buffers:rows.length,referencedBytes}});
+  else for(const row of rows)run.probe.event(context,{kind:'counter',name:'resource.acquire',resource:{id:`${context.runId}:host:${row.id}`,action:role.endsWith('copy')?'copy':'acquire',owner,bytes:row.bytes},workload:{buffers:1,referencedBytes:row.bytes}});
   sampleHostBuffers(run);let released=false;
-  return (to?:string)=>{if(released)return;released=true;for(const row of rows){run.buffers.releaseId(row.id,owner);run.probe.event(context,{kind:'counter',name:to?'resource.transfer':'resource.release',resource:{id:`${context.runId}:host:${row.id}`,action:to?'transfer':'release',owner,bytes:row.bytes,...(to?{to}:{})},workload:{buffers:1,referencedBytes:row.bytes}});}sampleHostBuffers(run);};
+  return (to?:string)=>{if(released)return;released=true;for(const row of rows)run.buffers.releaseId(row.id,owner);
+    if(batched)run.probe.event(context,{kind:'counter',name:to?'resource.transfer':'resource.release',resource:{id:batchId,action:to?'transfer':'release',owner,bytes:referencedBytes,...(to?{to}:{})},workload:{buffers:rows.length,referencedBytes}});
+    else for(const row of rows)run.probe.event(context,{kind:'counter',name:to?'resource.transfer':'resource.release',resource:{id:`${context.runId}:host:${row.id}`,action:to?'transfer':'release',owner,bytes:row.bytes,...(to?{to}:{})},workload:{buffers:1,referencedBytes:row.bytes}});
+    sampleHostBuffers(run);};
 }
 export function recordLegacyPhase(identity: { taskId: string; sourcePath: string; domain: 'dev' | 'ifc'; lod?: number }, phase: string, ms: number, status: 'completed' | 'failed' | 'cancelled', bytes?: number): void {
   if(current.collector.mode==='off')return;

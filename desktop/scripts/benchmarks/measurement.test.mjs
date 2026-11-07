@@ -4,6 +4,7 @@ import {compareRuns,approveBaseline} from './compare.mjs';
 import {selectSamples} from './samples.mjs';
 import {CdpConnection} from './cdp.mjs';
 import {cacheVerified,coldWarmEquivalent,verifyProfile} from './profiles.mjs';
+import {readyForSettle,cachePublicationMoment} from './completion.mjs';
 import {prepareFixedRuntimeSecurity} from '../fixed-runtime-security.mjs';
 import {mkdirSync,mkdtempSync,writeFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
@@ -27,14 +28,28 @@ test('baseline promotion is explicit and refuses incomplete or unfrozen candidat
   assert.ok(approveBaseline(candidate,'developer').approval.candidateDigest);
 });
 test('warm cache proof is domain-specific and misses cannot masquerade as a warm run',()=>{
-  const evidence={cache:{sourceMatches:true,semanticValid:true,ifcFarHits:2,linePack:'valid'},progress:{cacheSettled:true,
+  const evidence={cache:{sourceMatches:true,semanticValid:true,ifcFarHits:2,cachedIfc:2,missingIfc:0,parserMatches:true,
+    linePack:'valid',linePackAssessment:'valid',linePersistence:'saved',projectTypeCommitted:true},progress:{cacheSettled:true,
     workload:{devSources:3,ifcSources:2},cache:{engineering:'hit',devCatalogHits:3,writeFailures:0,readFailures:0}}};
-  assert.equal(cacheVerified(evidence,'warm','substation'),true);evidence.cache.ifcFarHits=1;assert.equal(cacheVerified(evidence,'warm','substation'),false);
+  assert.equal(cacheVerified(evidence,'warm','substation'),true);evidence.cache.ifcFarHits=0;assert.equal(cacheVerified(evidence,'warm','substation'),true);
+  evidence.cache.cachedIfc=1;assert.equal(cacheVerified(evidence,'warm','substation'),false);evidence.cache.cachedIfc=2;
   evidence.progress.workload.ifcSources=0;evidence.progress.cache.engineering='none';assert.equal(cacheVerified(evidence,'warm','equipment'),true);
-  evidence.cache.linePack='missing';assert.equal(cacheVerified(evidence,'warm','transmission_line'),false);
+  evidence.cache.linePackAssessment='uncommitted';assert.equal(cacheVerified(evidence,'warm','transmission_line'),false);
+  evidence.cache.linePackAssessment='valid';evidence.cache.linePersistence='saving';assert.equal(cacheVerified(evidence,'cold','transmission_line'),false);
   assert.throws(()=>verifyProfile({frozen:true,digest:'edited'}),/digest mismatch/);
   const run={conditions:{sourceSha256:'sha'},evidence:{semanticDigest:'semantic',baseArtifactDigest:'a',progress:{workload:{shown:1}}},actionTargetDigests:[]};
   assert.equal(coldWarmEquivalent(run,{...run,evidence:{...run.evidence,baseArtifactDigest:'b'}}).outcome,'FAIL');
+});
+test('completion waits for background and line publication, then uses the actual finish moment',()=>{
+  const observation={projectType:'transmission_line',openElapsedMs:2300,moments:{lineCachePersistenceReady:2100},
+    progress:{automaticSettled:true,cacheSettled:false,backgroundSettled:true,cache:{linePersistence:'saving'}},
+    measurement:{activeTasks:[]}};
+  assert.equal(readyForSettle(observation),false);
+  observation.progress.cacheSettled=true;assert.equal(readyForSettle(observation),true);
+  assert.equal(cachePublicationMoment(observation),2100);
+  observation.progress.backgroundSettled=false;assert.equal(readyForSettle(observation),false);
+  observation.progress.backgroundSettled=true;observation.measurement.activeTasks=[{taskId:'spatial'}];assert.equal(readyForSettle(observation),false);
+  observation.measurement.activeTasks=[];observation.progress.cache.linePersistence='failed';assert.equal(cachePublicationMoment(observation),null);
 });
 test('selection is deterministic, mandatory regression survives and no timing is consulted',()=>{
   const s=(id,tier,group,extra={})=>({sampleId:id,sourceSha256:id,bytes:100,container:{payload:'7z',magic:'GIMPKGS'},memberships:[{sampleTier:tier,group}],inventory:{status:'available',files:10,extensions:{cbm:1,dev:1,mod:1}},...extra});

@@ -80,6 +80,8 @@ DEV 布尔专项也接受 `canonical-first-boolean-base-v1`。找不到要求的
 
 CSV 使用 UTF-8 BOM、标准引号转义；时间字段后缀 `Ms`、内存字段后缀 `Bytes`。HTML 显示秒与 GiB。不可用字段留空，不填零。汇总中位数仅使用 PASS 轮次，失败轮次不会被悄悄纳入中位数；读取中位数时必须同时读取通过轮数。
 
+线路行另显示缓存发布状态和 pack 评估：`uncommitted` 表示 SQLite 工程类型尚未提交，不能误读为 pack 文件缺失。失败几何按原因计数，不包含私有 DEV 路径。首次响应与自动表示完成时刻不等待线路 SQLite 写入；缓存就绪时刻必须等到 `finish` 提交。变电的原生结束条件另含后台 Spatial 终态，避免最后一次快照碰到刚启动的 Worker。
+
 状态包括 `PENDING`、`RUNNING`、`PASS`、`FAIL`、`INCONCLUSIVE`、`INPUT_ERROR`、`ERROR`、`SKIPPED`、`DUPLICATE`、`CANCELLED`。`FAIL` 是已取得证据的产品/一致性失败；`INCONCLUSIVE` 是缓存、指标、任务闭环等必要证据不齐。`INPUT_ERROR/ERROR` 分别是输入与执行环境错误。退出码：0 表示本次计划运行均通过，1 表示存在失败，2 表示不完整，130 表示取消。
 
 `--anonymize true`（默认）以完整文件 SHA256 展示样本，不显示源文件名和路径；`--anonymize false` 显示文件名与工作区相对路径，同时保留完整 SHA256。该开关只影响报告展示，不改变 Profile、动作或测量口径。源路径映射、原始错误堆栈、授权 nonce、日志与 WebView profile 保存在 `tmp/gim-bench/`，不混入可分享的 `output/` 报告。分享包含真实工程名的实名报告前，应切换匿名模式或仅分享匿名产物。堆采样与 Private Bytes 不是同一口径；阶段 wall time 不等于 CPU time。

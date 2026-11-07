@@ -91,6 +91,7 @@ export type PerfProductMoment =
   | 'stdSldReady'
   | 'cachePersistenceStart'
   | 'cachePersistenceReady'
+  | 'lineCachePersistenceReady'
   | 'spatialSemanticStart'
   | 'spatialSemanticReady'
   | 'firstUsableGeometryReady'
@@ -596,6 +597,7 @@ export function perfProductMomentSnapshot(): Record<PerfProductMoment, PerfProdu
     stdSldReady: productMoments.get('stdSldReady') ?? null,
     cachePersistenceStart: productMoments.get('cachePersistenceStart') ?? null,
     cachePersistenceReady: productMoments.get('cachePersistenceReady') ?? null,
+    lineCachePersistenceReady: productMoments.get('lineCachePersistenceReady') ?? null,
     spatialSemanticStart: productMoments.get('spatialSemanticStart') ?? null,
     spatialSemanticReady: productMoments.get('spatialSemanticReady') ?? null,
     firstUsableGeometryReady: productMoments.get('firstUsableGeometryReady') ?? null,

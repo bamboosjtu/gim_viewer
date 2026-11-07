@@ -10,6 +10,7 @@ import {digest,runReadiness} from './compare.mjs';
 import {workspacePath,sha256} from './samples.mjs';
 import {startProcessSampler} from './process-sampler.mjs';
 import {cacheVerified} from './profiles.mjs';
+import {readyForSettle,cachePublicationMoment} from './completion.mjs';
 
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const reasonCode=error=>/^[a-z][a-z0-9-]{0,80}$/.test(error?.message??'')?error.message:/^CDP /.test(error?.message??'')?'cdp-request-failed':'native-run-failed';
@@ -130,14 +131,16 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
           automaticMs=Math.max(...['coreSemanticReady','navigationUiReady','allIfcReady','devBaseRepresentationsSettled','devGeometryReady'].map(key=>moments[key]??0))||observation.openElapsedMs;
         }
         if(observation.openError)throw Error('project-open-failed');
-        if(automaticMs!==null&&observation.progress.automaticSettled&&observation.progress.cacheSettled&&!observation.measurement.activeTasks.length){
-          cachePublishMs??=observation.openElapsedMs;stableSince??=performance.now();if(performance.now()-stableSince>=1000){completed=true;break;}
+        if(automaticMs!==null&&readyForSettle(observation)){
+          cachePublishMs??=cachePublicationMoment(observation);
+          stableSince??=performance.now();if(performance.now()-stableSince>=3000){completed=true;break;}
         }else stableSince=null;
         if(!observation.opening&&!observation.projectType)throw Error('project-open-unavailable');
         await delay(1000);
       }
       if(automaticMs===null)reason='automatic-completion-not-observed';
       else if(!observation.progress.cacheSettled)reason='cache-publication-not-observed';
+      else if(!observation.progress.backgroundSettled)reason='background-completion-not-observed';
       else if(!completed)reason='automatic-settle-timeout';
       if(!reason&&actions.length){
         const targets=await cdp.evaluate('globalThis.__gimBenchmark.targets()');writeFileSync(join(out,'targets.private.json'),JSON.stringify(targets,null,2));
@@ -152,7 +155,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
         stableSince=null;
         for(let i=0;i<120&&!reason;i++){
           observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
-          if(observation.progress.automaticSettled&&observation.progress.cacheSettled&&!observation.measurement.activeTasks.length){stableSince??=performance.now();if(performance.now()-stableSince>=1000)break;}else stableSince=null;
+          if(readyForSettle(observation)){stableSince??=performance.now();if(performance.now()-stableSince>=3000)break;}else stableSince=null;
           await delay(1000);if(i===119)reason='scenario-settle-timeout';
         }
       }
@@ -169,6 +172,20 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     if(acknowledgements.size)streamFailures++;
     await sampler.completeDiagnostics();
     observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
+    for(let attempt=0;attempt<30&&observation.measurement.activeTasks.length&&!reason;attempt++){
+      await delay(1000);observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
+    }
+    if(observation.measurement.activeTasks.length&&!reason)reason='post-settle-task-incomplete';
+    // A task that finished during the tail may have emitted new detail batches.
+    // Drain those too before checking completeness and closing the binding.
+    for(let attempt=0;attempt<50;attempt++){
+      await flushAcks();
+      const transport=await cdp.evaluate('globalThis.__gimBenchmark.transport()');
+      if(transport.every(row=>row.pending===0&&row.buffered===0))break;
+      await delay(100);if(attempt===49)streamFailures++;
+    }
+    if(acknowledgements.size)streamFailures++;
+    observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
   }catch(error){reason=reasonCode(error);try{writeFileSync(join(out,'failure.private.log'),String(error?.stack??error));}catch{logFailures++;}}
   finally{clearInterval(ackTimer);sampler?.stop();cdp?.close();const sampling=await processSampler.stop();if(sampling.failures)streamFailures+=sampling.failures;try{await stop(child);cleanupComplete=true;}catch{reason='owned-process-cleanup-failed';}}
   writeFileSync(join(out,'process-memory.json'),JSON.stringify(processSamples,null,2));
@@ -183,7 +200,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     cacheVerified:cacheVerified(evidence,cacheState,observation?.projectType),
     measurementComplete:!reason&&processMemoryComplete&&streamFailures===0&&cleanupComplete&&!!measurement?.detailComplete&&!measurement.activeTasks.length&&!missingWorkers.length,
     requiredMetrics:['firstResponseMs','automaticLoadMs','processPrivatePeakBytes'],metrics:{firstResponseMs:observation?.moments.navigationUiReady??observation?.moments.coreSemanticReady??null,firstGeometryMs:observation?.moments.firstGeometryReady??observation?.moments.firstUsableGeometryReady??null,automaticLoadMs:automaticMs,cachePublishMs,processPrivatePeakBytes:productPeak??processPeak,wholeRunPrivatePeakBytes:processPeak},
-    completionDefinition:'all-automatic-requested-representations-settled-not-all-L2',evidence,eventFormat:'context-table-v1',streamFailures,
+    completionDefinition:'automatic-representations-then-cache-and-spatial-terminal-with-quiet-window-not-all-L2',evidence,eventFormat:'context-table-v1',streamFailures,
     actionResults,actionTargetDigests:actionTargets,diagnostic:sampler?.diagnosticResult??null,logFailures,
     exercise:exerciseResult,
     processSampling:{complete:processMemoryComplete,samples:processSamples.length,available:processSamples.filter(row=>row.availability==='available').length},

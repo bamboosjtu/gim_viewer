@@ -172,6 +172,7 @@ export class AppState {
 
   // 工程类型 + 线路图（线路工程专用；变电工程保持 null）
   currentProjectType: GimProjectType | null = null;
+  lineCachePersistence: 'idle' | 'saving' | 'saved' | 'failed' | 'not-applicable' = 'idle';
   currentGimGraph: GimGraph | null = null;
 
   // 索引
@@ -454,6 +455,7 @@ export class AppState {
     this.engineeringGeometryFilter = null; this.engineeringRepresentationChanged = null;
     this.projectName = '';
     this.currentProjectType = null;
+    this.lineCachePersistence = 'idle';
     this.currentGimGraph = null;
     this.ifcGuidIndex.clear();
     this.cbmNodeIndex.clear();
