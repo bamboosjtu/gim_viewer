@@ -40,6 +40,7 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
   let sequence = 0, stopped = false, clockReady = false;
   let activeContext:TraceContext=context, producedContext:TraceContext|undefined;
   const sentAt=new Map<string,number>();
+  let receivedBatchId=0,lastBatchSequence=0,flushedBatchId=0,flushedSequence=0,taskSeen=false;
   const taskContexts=new Map<string,TraceContext>();
   cancelTaskMeasurement.set(worker,(taskId,reason)=>{
     const task=taskContexts.get(taskId);
@@ -66,17 +67,30 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
       const flight=flights.get(message.flightId);if(flight){flights.delete(message.flightId);flight.release(workerId);run.probe.record(flight.context,'host.delivery-and-worker-queue',performance.now()-flight.at);}
     }else if (message?.[MEASUREMENT_CHANNEL] === 'batch') {
       event.stopImmediatePropagation();
-      if (message.workerId !== workerId || !Array.isArray(message.events)) return;
-      for (const record of message.events.slice(0, 256) as MeasurementEvent[]) {
-        if (record.context?.workerId !== workerId) continue;
+      if(message.workerId!==workerId||!Array.isArray(message.events)||message.events.length<1||message.events.length>128||
+        !Number.isSafeInteger(message.batchId)||message.batchId!==receivedBatchId+1||
+        message.lastSequence!==message.events.at(-1)?.sequence){
+        run.probe.event(context,{kind:'loss',name:'worker-batch-invalid',workload:{events:1}});return;
+      }
+      receivedBatchId=message.batchId;lastBatchSequence=message.lastSequence;
+      for (const record of message.events as MeasurementEvent[]) {
+        if (record.context?.workerId !== workerId) {run.probe.event(context,{kind:'loss',name:'worker-event-foreign',workload:{events:1}});continue;}
         run.collector.accept(record);
-        if(record.kind==='task'&&record.name==='started')activeContext=record.context;
+        if(record.kind==='task'&&record.name==='started'){activeContext=record.context;taskSeen=true;}
         if(record.kind==='task'&&record.name==='produced')producedContext=record.context;
         if(record.kind==='task'&&record.name==='ended'){
           taskContexts.delete(record.context.taskId!);
           if(record.context.taskId!==producedContext?.taskId)sentAt.delete(record.context.taskId!);
         }
       }
+      try{send({[MEASUREMENT_CHANNEL]:'ack',workerId,batchId:message.batchId});}
+      catch{run.probe.event(context,{kind:'loss',name:'worker-batch-ack-failed',workload:{events:1}});}
+    } else if(message?.[MEASUREMENT_CHANNEL]==='flushed'){
+      event.stopImmediatePropagation();
+      if(message.workerId!==workerId||message.batchId!==receivedBatchId||message.lastSequence!==lastBatchSequence){
+        run.probe.event(context,{kind:'loss',name:'worker-flush-unconfirmed',workload:{events:1}});return;
+      }
+      flushedBatchId=message.batchId;flushedSequence=message.lastSequence;
     } else if (message?.[MEASUREMENT_CHANNEL] === 'clock') {
       event.stopImmediatePropagation();
       if (message.workerId !== workerId) return;
@@ -126,6 +140,9 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
   }) as Worker['postMessage'];
   worker.terminate = () => {
     if (stopped) return; stopped = true;
+    const active=run.collector.snapshot().activeTasks.some(task=>task.workerId===workerId);
+    if(taskSeen&&!active&&(receivedBatchId!==flushedBatchId||lastBatchSequence!==flushedSequence))
+      run.probe.event(context,{kind:'loss',name:'worker-terminal-tail-unconfirmed',workload:{events:1}});
     run.probe.event(context, { kind: 'worker', name: 'terminated', status: 'aborted', workload: { clockReady: Number(clockReady) } });
     sentAt.clear();taskContexts.clear();cancelTaskMeasurement.delete(worker);producedContext=undefined;
     for(const flight of flights.values())flight.release();flights.clear();

@@ -14,3 +14,11 @@ export function cachePublicationMoment(observation){
       ?observation?.cachePersistence?.observed?observation.moments?.cachePersistenceReady??null:null
       :observation?.openElapsedMs??null;
 }
+/** Final runtime evidence must describe the same settled state as the final snapshot. */
+export function finalEvidenceAligned(evidence,observation){
+  return evidence?.checks?.some(check=>check.name==='session-stable'&&check.passed===true)===true&&
+    Number.isFinite(evidence.evidenceAtMs)&&Number.isFinite(observation?.snapshotAtMs)&&
+    observation.snapshotAtMs>=evidence.evidenceAtMs&&!!evidence.progress&&!!observation.progress&&
+    observation.measurement?.activeTasks?.length===0&&
+    JSON.stringify(evidence.progress)===JSON.stringify(observation.progress);
+}

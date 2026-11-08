@@ -2,10 +2,11 @@ import {mkdirSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {runNative} from './native-run.mjs';
 import {verifyProfile,coldWarmEquivalent} from './profiles.mjs';
-import {median,runReadiness} from './compare.mjs';
+import {median,runReadiness,partialSignature} from './compare.mjs';
+import {warmPreparation} from './warm-preparation.mjs';
 
 /** No sample substitution or promotion. Every frozen case retains its outcome. */
-export async function runMatrix({root,buildManifest,registry,profile,repetitions=profile.repetitions,mode=profile.mode}){
+export async function runMatrix({root,buildManifest,registry,profile,repetitions=profile.repetitions,mode=profile.mode,execute=runNative}){
   verifyProfile(profile);if(!Number.isInteger(repetitions)||repetitions<1)throw Error('Invalid repetitions');
   const out=join(root,'output','gim-bench',`matrix-${Date.now()}`);mkdirSync(out,{recursive:true});
   const runs=[],pairs=[],required=profile.cases.length*repetitions*2;
@@ -13,12 +14,16 @@ export async function runMatrix({root,buildManifest,registry,profile,repetitions
   for(let repetition=0;repetition<repetitions;repetition++)for(const row of profile.cases){
     const sample=registry.samples.find(s=>s.sampleId===row.sampleId&&s.sourceSha256===row.sourceSha256);if(!sample)throw Error('Frozen sample missing');
     save({sampleId:sample.sampleId,repetition,cacheState:'cold'});
-    const cold=await runNative({root,buildManifest,sample,profileDigest:profile.digest,scenario:row.scenario,actions:row.actions,timeoutMs:row.timeoutMs,mode});
+    const cold=await execute({root,buildManifest,sample,profileDigest:profile.digest,scenario:row.scenario,actions:row.actions,timeoutMs:row.timeoutMs,mode});
     runs.push({...cold.report,repetition});writeFileSync(join(out,'runs.partial.json'),JSON.stringify(runs));save({sampleId:sample.sampleId,repetition,cacheState:'warm'});
-    if(cold.report.reason||!['PASS','PARTIAL'].includes(runReadiness(cold.report).outcome)||!cold.report.evidence?.progress.cacheSettled){
-      pairs.push({sampleId:sample.sampleId,repetition,outcome:cold.report.correctness==='failed'?'FAIL':'INCONCLUSIVE',reasons:['warm-preparation-incomplete']});continue;
+    const preparation=warmPreparation(cold.report);
+    if(!preparation.ready){
+      pairs.push({sampleId:sample.sampleId,repetition,outcome:cold.report.correctness==='failed'?'FAIL':'INCONCLUSIVE',
+        reasons:[preparation.reason],cacheFailureCode:cold.report.cacheFailureCode??null,
+        inputVariant:cold.report.inputVariant??null,
+        partialSignature:cold.report.correctness==='partial'?partialSignature(cold.report):null});continue;
     }
-    const warm=await runNative({root,buildManifest,sample,profileDigest:profile.digest,scenario:row.scenario,actions:row.actions,timeoutMs:row.timeoutMs,mode,cacheState:'warm',dataRoot:cold.dataRoot});
+    const warm=await execute({root,buildManifest,sample,profileDigest:profile.digest,scenario:row.scenario,actions:row.actions,timeoutMs:row.timeoutMs,mode,cacheState:'warm',dataRoot:cold.dataRoot});
     runs.push({...warm.report,repetition});pairs.push({sampleId:sample.sampleId,repetition,...coldWarmEquivalent(cold.report,warm.report)});save();
     writeFileSync(join(out,'runs.partial.json'),JSON.stringify(runs));
   }

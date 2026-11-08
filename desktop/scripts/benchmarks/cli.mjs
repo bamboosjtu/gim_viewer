@@ -12,6 +12,7 @@ import {lifecycleExercise} from './lifecycle.mjs';
 import {measureProbeOverhead} from './overhead.mjs';
 import {renderReport} from './reporter.mjs';
 import {runBatch} from './batch.mjs';
+import {nativeExitCode} from './cli-outcome.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..'),home=join(root,'tmp','gim-bench'),corpus=join(home,'corpus');
 const [command,...args]=process.argv.slice(2);
@@ -76,8 +77,9 @@ try{
     const result=await runNative({root,buildManifest:workspacePath(root,resolve(option('build'))),sample,mode,doctor:command==='doctor',
       ...(command==='lifecycle'?{scenario:'lifecycle-ten-open-close',additionalSamples:secondSample?[secondSample]:[],exercise:lifecycleExercise({sample,secondSample})}:{}),
       ...(option('capture')?{diagnostic:{kind:option('capture'),family:option('worker-family')??'dev'}}:{})});
-    console.log(JSON.stringify({report:join(result.out,'report.json'),outcome:command==='doctor'?result.report.capabilityOutcome:result.report.outcome,reason:result.report.reason}));
-    process.exitCode=(command==='doctor'?result.report.capabilityOutcome:command==='lifecycle'?result.report.exercise?.outcome:result.report.outcome)==='PASS'?0:2;
+    const outcome=command==='doctor'?result.report.capabilityOutcome:command==='lifecycle'?result.report.exercise?.outcome:result.report.outcome;
+    console.log(JSON.stringify({report:join(result.out,'report.json'),outcome,reason:result.report.reason}));
+    process.exitCode=nativeExitCode(command,outcome);
   }else if(command==='compare'||command==='gate'){
     if(!option('baseline')||!option('candidate'))throw Error('--baseline and --candidate are required');
     const baseline=read(option('baseline')),candidate=read(option('candidate'));
@@ -89,12 +91,15 @@ try{
     write('comparison.json',result);process.exitCode=['PASS','PARTIAL'].includes(result.outcome)?0:result.outcome==='FAIL'?1:2;
   }else if(command==='approve-baseline'){
     if(!option('candidate')||!option('approver'))throw Error('Explicit --candidate and --approver required');
-    write('baseline.approved.json',approveBaseline(read(option('candidate')),option('approver'),{acceptPartial:args.includes('--accept-partial')}));
+    write('baseline.approved.json',approveBaseline(read(option('candidate')),option('approver'),{
+      acceptPartial:args.includes('--accept-partial'),partialReason:option('partial-reason')??'',
+      sourceReviewed:args.includes('--source-reviewed'),
+      previousBaseline:option('previous-baseline')?read(option('previous-baseline')):null}));
   }else if(command==='report'){
     if(!option('input'))throw Error('--input required');
     console.log(await renderReport(workspacePath(root,resolve(option('input'))),join(root,'output','gim-bench',`report-${Date.now()}`)));
   }else{
-    console.log('gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [-repeat <n>] [--timeout-seconds <n>]\ninit | samples | inventory | select | freeze-profile [--name commit-gate] | build | doctor --build <manifest> | run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev] | matrix --build <manifest> --profile <json> | overhead --build <manifest> --profile <json> --sample <id> | lifecycle --build <manifest> --sample <id> [--second-sample <id>] | compare|gate --baseline <json> --candidate <json> | report --input <json> | approve-baseline --candidate <json> --approver <name> [--accept-partial]');
+    console.log('gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [-repeat <n>] [--timeout-seconds <n>]\ninit | samples | inventory | select | freeze-profile [--name commit-gate] | build | doctor --build <manifest> | run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev] | matrix --build <manifest> --profile <json> | overhead --build <manifest> --profile <json> --sample <id> | lifecycle --build <manifest> --sample <id> [--second-sample <id>] | compare|gate --baseline <json> --candidate <json> | report --input <json> | approve-baseline --candidate <json> --approver <name> [--accept-partial --source-reviewed --partial-reason <reason>] [--previous-baseline <json>]');
     if(command)process.exitCode=1;
   }
 }catch(error){console.error(`[gim-bench] ${error.message}`);process.exitCode=1;}

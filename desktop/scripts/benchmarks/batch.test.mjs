@@ -15,8 +15,8 @@ function setup(){const parent=artifactDirectory(root,join(root,'tmp','batch-prot
 function inputs(){return {entries:['a','b','c'].map((id,index)=>({inputId:id,sampleId:id,sourceSha256:id,privatePath:'private-name',status:'READY'})),
   samples:['a','b','c'].map(id=>({inputId:id,sampleId:id,sourceSha256:id,paths:[],actions:[]}))};}
 function run(sample,profileDigest){return {out:'private-run',dataRoot:'private-cache',report:{runId:sample.inputId,processInstanceId:sample.inputId,
-  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
-    profileDigest,workloadDigest:'w',routeDigest:'r',viewportDigest:'v'},correctness:'passed',cacheVerified:true,measurementComplete:true,requiredMetrics:['firstResponseMs'],metrics:{firstResponseMs:12},
+  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
+    profileDigest,workloadDigest:'w',routeDigest:'r',viewportDigest:'v'},correctness:'passed',cacheVerified:true,cachePublished:true,measurementComplete:true,requiredMetrics:['firstResponseMs'],metrics:{firstResponseMs:12},
   evidence:{progress:{workload:{failed:0}}}}};}
 
 test('batch continues after execution exceptions and exports every result and failure',async()=>{
@@ -223,6 +223,14 @@ test('CSV handles delimiters/newlines/formula injection and summaries exclude fa
   assert.equal(csv([{value:'=1,"x"\nnext'}],['value']),'\uFEFF"value"\r\n"\'=1,""x""\nnext"\r\n');
   const result=summarize([{inputId:'a',cacheState:'cold',status:'PASS',firstResponseMs:10},{inputId:'a',cacheState:'cold',status:'FAIL',firstResponseMs:1}]);
   assert.equal(result[0].firstResponseMsMedian,10);assert.equal(result[0].failed,1);
+});
+test('summary never combines distinct PARTIAL source signatures',()=>{
+  const rows=[{inputId:'a',cacheState:'cold',status:'PARTIAL',partialSignature:'coverage:a',firstResponseMs:10},
+    {inputId:'a',cacheState:'cold',status:'PARTIAL',partialSignature:'coverage:b',firstResponseMs:20}];
+  const summary=summarize(rows)[0];
+  assert.equal(summary.coverageGroups,2);
+  assert.equal(summary.firstResponseMsMedian,null);
+  assert.equal(summary.partialSignatures,'coverage:a;coverage:b');
 });
 
 test('multi-sample comparisons keep independent triplets and report missing cases',()=>{

@@ -3,6 +3,7 @@ import {createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, real
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {join, relative, resolve, sep} from 'node:path';
+import {bareContainerKind} from './container-magic.mjs';
 
 export function workspacePath(root, path, mustExist = true) {
   const absolute = resolve(path), base = realpathSync(root);
@@ -31,24 +32,24 @@ function container(path) {
   try{readSync(fd,data,0,data.length,0);}finally{closeSync(fd);}
   const magic=data.subarray(0,7).toString('ascii');
   const seven=Buffer.from([0x37,0x7a,0xbc,0xaf,0x27,0x1c]),zip=Buffer.from([0x50,0x4b,0x03,0x04]);
-  const bare=data.subarray(0,6).equals(seven)?'7z':data.subarray(0,4).equals(zip)?'zip':null;
+  const bare=bareContainerKind(data);
   const offset=bare?0:magic.startsWith('GIMPKG')?data.indexOf(seven):-1;
   const zipOffset=offset<0&&magic.startsWith('GIMPKG')?data.indexOf(zip):-1;
   return {magic:/^GIMPKG[ST]?$/.test(magic)?magic:bare?'bare':'unknown',payload:bare??(offset>=0?'7z':zipOffset>=0?'zip':'unknown'),offset:offset>=0?offset:zipOffset>=0?zipOffset:null};
 }
 export function defaultSources(root) {
   return [
-    {sampleTier:'L0',group:'common-design',paths:walk(join(root,'demo','变电站通用设计模型')).filter(p=>/三维设计\.gim$/i.test(p)),expected:48},
-    {sampleTier:'L0',group:'common-model',paths:walk(join(root,'demo','通用模型')),expected:917},
-    {sampleTier:'L1',group:'development-regression',paths:[...Array.from({length:4},(_,i)=>join(root,'demo','substations',`substation0${i+1}.gim`)),...Array.from({length:6},(_,i)=>join(root,'demo','lines',`line0${i+1}.gim`))].filter(existsSync),expected:10},
-    {sampleTier:'L2',group:'complex-engineering',paths:walk(join(root,'demo','真实工程')),expected:19},
-    {sampleTier:'L2',group:'complex-equipment',paths:walk(join(root,'demo','真实设备模型')),expected:7},
+    {sampleTier:'L0',group:'common-design',paths:walk(join(root,'demo','变电站通用设计模型')).filter(p=>/三维设计\.gim$/i.test(p))},
+    {sampleTier:'L0',group:'common-model',paths:walk(join(root,'demo','通用模型'))},
+    {sampleTier:'L1',group:'development-regression',paths:[...walk(join(root,'demo','substations')),...walk(join(root,'demo','lines'))]},
+    {sampleTier:'L2',group:'complex-engineering',paths:walk(join(root,'demo','真实工程'))},
+    {sampleTier:'L2',group:'complex-equipment',paths:walk(join(root,'demo','真实设备模型'))},
   ];
 }
 export async function registerSamples(root, out, sources=defaultSources(root)) {
   const groups=[],bySha=new Map(); let paths=0;
   for(const source of sources){
-    groups.push({group:source.group,sampleTier:source.sampleTier,paths:source.paths.length,expected:source.expected??null});
+    groups.push({group:source.group,sampleTier:source.sampleTier,paths:source.paths.length});
     for(const input of source.paths){
       const path=workspacePath(root,input),before=statSync(path),sha=await sha256(path),after=statSync(path);
       if(before.size!==after.size||before.mtimeMs!==after.mtimeMs)throw Error('Sample changed during hashing');
@@ -112,7 +113,7 @@ export function selectSamples(registry){
     return tags;
   };
   const take=(sample,reason)=>{if(mandatory.has(sample.sampleId))return;mandatory.add(sample.sampleId);features(sample).forEach(tag=>coverage.add(tag));selected.push({sampleId:sample.sampleId,sourceSha256:sample.sourceSha256,reason,features:features(sample)});};
-  for(const sample of registry.samples)if(sample.requiredRegression)take(sample,sample.requiredRegression);
+  for(const sample of registry.samples)if(sample.workloadProfile)take(sample,sample.workloadProfile);
   const eligible=registry.samples.filter(s=>s.inventory.status==='available'&&((s.inventory.extensions?.cbm??0)+(s.inventory.extensions?.dev??0)>0));
   for(const group of ['common-design','common-model','complex-engineering','complex-equipment']){
     const rows=eligible.filter(s=>s.memberships.some(m=>m.group===group)).sort((a,b)=>b.inventory.files-a.inventory.files||a.sourceSha256.localeCompare(b.sourceSha256));

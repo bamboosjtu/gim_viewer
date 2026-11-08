@@ -6,14 +6,15 @@ import {existsSync,mkdirSync,readFileSync,writeFileSync,appendFileSync,cpSync,re
 import {dirname,join,resolve} from 'node:path';
 import {fileSha256,directoryFingerprint} from './acceptance-build.mjs';
 import {CdpConnection,WorkerHeapSampler} from './cdp.mjs';
+import {bareContainerKind} from './container-magic.mjs';
 import {digest,runReadiness} from './compare.mjs';
 import {workspacePath,sha256} from './samples.mjs';
 import {startProcessSampler} from './process-sampler.mjs';
 import {cachePublicationAssessment} from './profiles.mjs';
-import {readyForSettle,cachePublicationMoment} from './completion.mjs';
+import {readyForSettle,cachePublicationMoment,finalEvidenceAligned} from './completion.mjs';
 import {assessCorrectness} from './correctness.mjs';
 import {assertBenchmarkExecutable} from './benchmark-build-attestation.mjs';
-import {classifyWorkerHeapCoverage} from './worker-memory-completeness.mjs';
+import {classifyWorkerHeapEvidence} from './worker-memory-completeness.mjs';
 import {confirmedEnvironmentSuspend} from './environment.mjs';
 
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -47,8 +48,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     source=join(inputRoot,`${sample.sampleId}.gim`);if(!existsSync(source))cpSync(original,source);
     if(await sha256(source)!==sample.sourceSha256)throw Error('Input snapshot SHA changed');
     const descriptor=openSync(source,'r');try{const head=Buffer.alloc(6);readSync(descriptor,head,0,6,0);
-      if(head.equals(Buffer.from([0x37,0x7a,0xbc,0xaf,0x27,0x1c])))inputVariant='bare-7z';
-      else if(head.subarray(0,4).equals(Buffer.from([0x50,0x4b,0x03,0x04])))inputVariant='bare-zip';
+      const kind=bareContainerKind(head);if(kind)inputVariant=`bare-${kind}`;
     }finally{closeSync(descriptor);}}
   const runId=`run-${Date.now().toString(36)}-${randomBytes(5).toString('hex')}`,out=join(root,'tmp','gim-bench','runs',runId);
   mkdirSync(out,{recursive:true});const profile=join(out,'webview-profile');mkdirSync(profile);
@@ -75,7 +75,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   for(const name of ['stdout','stderr']){let bytes=0;child[name].on('data',data=>{try{if(bytes<4*1024*1024)appendFileSync(join(out,`${name}.private.log`),data);}catch{logFailures++;}bytes+=data.length;});}
   let cdp,sampler,observation=null,cleanupComplete=false,reason=null,crashed=false,heapRows=0,processPeak=null,settledMs=null;
   let openAttempted=false,endpointError=null,exitBeforeCleanup=null;
-  const heaps=new Map(),processSamples=[];let events=0,hostSamplingFailures=0,streamFailures=0,evidence=null,automaticMs=null,cachePublishMs=null,productPeak=null;
+  const heaps=new Map(),heapRecords=new Map(),processSamples=[];let events=0,hostSamplingFailures=0,streamFailures=0,evidence=null,automaticMs=null,cachePublishMs=null,productPeak=null;
   const processSampler=startProcessSampler(samplerExecutable,child,executable,env,row=>{processSamples.push(row);if(row.availability==='available'&&Number.isFinite(row.bytes))processPeak=Math.max(processPeak??0,row.bytes);});
   const acknowledgements=new Map();let ackRunning=false,ackTimer,hostGapStart=null;const hostSamplingGaps=[];
   const flushAcks=async()=>{
@@ -116,6 +116,10 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     if(resolve(database).toLowerCase()!==join(dataRoot,'gim_cache_schema_v1.db').toLowerCase())throw Error('native-cache-root-mismatch');
     sampler=new WorkerHeapSampler(cdp,row=>{
       appendFileSync(join(out,'heap.jsonl'),JSON.stringify(row)+'\n');heapRows++;
+      if(row.kind==='heap-sample'&&row.workerId){const previous=heapRecords.get(row.workerId);
+        heapRecords.set(row.workerId,{workerId:row.workerId,family:row.family??previous?.family??null,
+          availability:row.availability,reason:row.availability==='available'?null:row.reason??'unknown',
+          samples:(previous?.samples??0)+1});}
       if(row.availability==='available'){const old=heaps.get(row.workerId);heaps.set(row.workerId,{workerId:row.workerId,family:row.family,isolateId:row.isolateId,samples:(old?.samples??0)+1,observedPeakBytes:Math.max(old?.observedPeakBytes??0,row.bytes),maxSampleDelayMs:Math.max(old?.maxSampleDelayMs??0,row.sampleDelayMs)});}
     });
     if(diagnostic){sampler.configureDiagnostic({...diagnostic,mode,
@@ -187,7 +191,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
         }
       }
       await processSampler.checkpoint('product-settled');productPeak=processPeak;
-      if(!reason)evidence=await cdp.evaluate('globalThis.__gimBenchmark.evidence()',undefined,30000);
+      if(!reason&&exercise)evidence=await cdp.evaluate('globalThis.__gimBenchmark.evidence()',undefined,30000);
     }
     if(exercise&&!reason)exerciseResult=await exercise({cdp,processSampler,sampler,manifest,runId,build,out,evidence});
     for(let attempt=0;attempt<50;attempt++){
@@ -213,6 +217,11 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     }
     if(acknowledgements.size)streamFailures++;
     observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
+    if(!reason&&!doctor&&!exercise){
+      evidence=await cdp.evaluate('globalThis.__gimBenchmark.evidence()',undefined,30000);
+      observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
+      if(!finalEvidenceAligned(evidence,observation))reason='final-evidence-drift';
+    }
   }catch(error){reason=reasonCode(error);try{writeFileSync(join(out,'failure.private.log'),String(error?.stack??error));}catch{logFailures++;}}
   finally{clearInterval(ackTimer);sampler?.stop();cdp?.close();const sampling=await processSampler.stop();if(sampling.failures)streamFailures+=sampling.failures;
     exitBeforeCleanup={code:child.exitCode,signal:child.signalCode};
@@ -230,9 +239,9 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   const workerMemory=[...heaps.values()],measurement=observation?.measurement??null;
   const processMemoryComplete=processSamples.length>=2&&processSamples.every(row=>row.availability==='available');
   const mappedIds=new Set(sampler?.snapshot().mappedWorkerIds??[]);
-  const {required:missingWorkers,shortLived:shortLivedWorkerMemory}=classifyWorkerHeapCoverage(
-    measurement?.workers,new Set(heaps.keys()),mappedIds,sampler?.periodMs??1000);
-  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:'gim-measurement-v1',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',mode,scenario,cacheState,
+  const {missing:missingWorkers,unavailable:unavailableWorkers,shortLived:shortLivedWorkerMemory}=classifyWorkerHeapEvidence(
+    measurement?.workers,new Set(heaps.keys()),heapRecords,mappedIds,sampler?.periodMs??1000);
+  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:'gim-measurement-v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',mode,scenario,cacheState,
     sampleId:sample.sampleId,sourceSha256:sample.sourceSha256,profileDigest,routeDigest:digest(actionTargets),viewportDigest:digest(observation?.viewport??null),viewport:observation?.viewport??null,
     workloadDigest:evidence?digest({workload:evidence.progress.workload,semantic:evidence.semanticDigest,placement:evidence.placementDigest}):null};
   const assessment=assessCorrectness(evidence);
@@ -244,6 +253,8 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     ?'failed':variantPartialEligible?'partial':assessment.correctness;
   const defectAssessment=variantPartialEligible?{kind:'input-variant',status:'cache-not-persistable',sourceSha256:sample.sourceSha256,variant:inputVariant}:assessment.defectAssessment;
   const report={version:'gim-benchmark-v1',runId,kind:doctor?'native-capability-probe':'native-scene',projectType:observation?.projectType??null,conditions,buildFingerprint:build.sourceFingerprint,processInstanceId:runId,
+    evidenceAtMs:evidence?.evidenceAtMs??null,finalSnapshotAtMs:observation?.snapshotAtMs??null,
+    semanticDigest:evidence?.semanticDigest??null,
     semanticDigestScope:evidence?.semanticDigestScope??null,pendingDigest:evidence?.pendingDigest??null,
     pendingCount:evidence?.pendingCount??null,pendingSourceCount:evidence?.pendingSourceCount??null,
     geometryStructuralFingerprint:evidence?.geometryStructuralFingerprint??null,
@@ -257,7 +268,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     measurementLifecycleComplete:measurement?.lifecycleComplete===true,
     measurementLifecycleIssues:measurement?.lifecycleIssues??[],
     measurementComplete:!reason&&processMemoryComplete&&streamFailures===0&&cleanupComplete&&!!measurement?.detailComplete&&
-      measurement?.lifecycleComplete===true&&!measurement.activeTasks.length&&!missingWorkers.length,
+      measurement?.lifecycleComplete===true&&!measurement.activeTasks.length&&!missingWorkers.length&&!unavailableWorkers.length,
     requiredMetrics:['firstResponseMs','automaticLoadMs','processPrivatePeakBytes'],metrics:{firstResponseMs:observation?.moments.navigationUiReady??observation?.moments.coreSemanticReady??null,firstGeometryMs:observation?.moments.firstGeometryReady??observation?.moments.firstUsableGeometryReady??null,automaticLoadMs:automaticMs,cachePublishMs,
       settledMs,writeDrainMs:automaticMs!==null&&observation?.devArtifactWriteElapsedMs!=null
         ?Math.max(0,observation.devArtifactWriteElapsedMs-automaticMs):null,
@@ -268,6 +279,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     processSampling:{complete:processMemoryComplete,samples:processSamples.length,available:processSamples.filter(row=>row.availability==='available').length},
     crashed,reason,environmentSuspend:suspended?{code:'INFRA_SUSPEND',observationGapMs}:null,
     openAttempted,cleanupComplete,measurement,workerMemory,missingWorkerMemory:missingWorkers,
+    unavailableWorkerMemory:unavailableWorkers,
     shortLivedWorkerMemory,sampling:sampler?.snapshot()??null,heapRows,events,hostSamplingFailures,hostSamplingGaps,
     capabilityResult:observation?.capabilityResult??null,
     capabilityOutcome:doctor&&processMemoryComplete&&workerMemory.some(w=>w.family==='measurement-probe')&&

@@ -170,7 +170,7 @@ export class Collector implements MetricsSink {
       activeTasks: [...this.active.values()].map(event => ({ ...event.context })),
       taskOutcomes: { ...this.outcomes }, counters: Object.fromEntries([...this.counters].map(([key,values]) => [key,{...values}])),
       bufferedEvents:this.events.length,
-      detailPolicy:this.mode==='benchmark'?'task-phase-timeline-v1':'full-detail',aggregatedDetail:{...this.aggregatedDetail},
+      detailPolicy:this.mode==='benchmark'?'task-phase-timeline-v2':'full-detail',aggregatedDetail:{...this.aggregatedDetail},
       clockCalibration: Object.fromEntries(this.clock), loss: { ...this.loss },
       lifecycleComplete:lifecycleIssues.length===0,lifecycleIssues,
       lifecycleCancellationReasons:{...this.cancellationReasons},

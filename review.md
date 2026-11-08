@@ -1,5 +1,7 @@
 # 测量框架架构与实现评审
 
+> 整改复核（2026-11-08）：下文是整改前的评审快照。本轮已处理 13 项：P1-1 的覆盖域隔离与 P2-3 的 IFC manifest 文档在本轮前已落实；其余条目已修改代码、契约用例或文档。新 Worker 明细协议为 `task-phase-timeline-v2`，旧基线不可直接比较。TypeScript 检查及脚本语法检查通过；按开发者要求，未运行单元测试、原生样本或性能矩阵。PARTIAL 的首次来源核对仍须由开发者在认可基线时完成，不能由程序自证。
+
 > 评审对象：`gim-measurement-v1` 及本地 Benchmark 工具链
 > 代码基线：`28e1a36` + 工作区未提交的测量重构（`correctness.mjs`、input variant、cache publication split 等）
 > 评审日期：2026-11-08

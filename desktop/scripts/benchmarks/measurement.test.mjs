@@ -1,20 +1,62 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {compareRuns,approveBaseline,baselineApprovalIssue,runReadiness} from './compare.mjs';
+import {compareRuns,approveBaseline,baselineApprovalIssue,runReadiness,digest} from './compare.mjs';
 import {selectSamples} from './samples.mjs';
 import {CdpConnection} from './cdp.mjs';
 import {cacheVerified,coldWarmEquivalent,freezeProfile,verifyProfile} from './profiles.mjs';
-import {readyForSettle,cachePublicationMoment} from './completion.mjs';
+import {readyForSettle,cachePublicationMoment,finalEvidenceAligned} from './completion.mjs';
 import {prepareFixedRuntimeSecurity} from '../fixed-runtime-security.mjs';
+import {warmPreparation} from './warm-preparation.mjs';
+import {bareContainerKind} from './container-magic.mjs';
+import {runMatrix} from './matrix.mjs';
+import {nativeExitCode} from './cli-outcome.mjs';
 import {mkdirSync,mkdtempSync,writeFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
-const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
+const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
 const contentEvidence={scope:'DEV-L0-GLB-artifacts',method:'worker-output-or-validated-cache-sha256',
   availability:'available',coveredOccurrences:1,expectedShownOccurrences:1,missingArtifactSha:0,
   duplicateArtifactIds:0,digest:'a'.repeat(64),placementFingerprint:'b'.repeat(64),complete:true};
 const runs=(prefix,value)=>Array.from({length:3},(_,i)=>({conditions:{...conditions},processInstanceId:`${prefix}-${i}`,
   projectType:'substation',contentEvidence:{...contentEvidence},correctness:'passed',cacheVerified:true,
   measurementComplete:true,requiredMetrics:['openMs'],metrics:{openMs:value+i}}));
+test('warm preparation follows cache publication for both batch and matrix',()=>{
+  const cold={correctness:'partial',cachePublished:true,cacheFailureCount:0,reason:null,crashed:false};
+  assert.equal(warmPreparation(cold).ready,true);
+  assert.equal(warmPreparation({...cold,cachePublished:false,cacheFailureCode:'CACHE_NOT_PERSISTABLE'}).reason,
+    'WARM_UNSUPPORTED:CACHE_NOT_PERSISTABLE');
+  assert.equal(warmPreparation({...cold,cachePublished:false}).ready,false);
+});
+test('bare archive variant probe covers ZIP local, empty and split signatures',()=>{
+  for(const suffix of ['0304','0506','0708'])assert.equal(bareContainerKind(Buffer.from(`504b${suffix}`,'hex')),'zip');
+  assert.equal(bareContainerKind(Buffer.from('377abcaF271c','hex')),'7z');
+});
+test('single native run returns success for evidence-backed PARTIAL',()=>{
+  assert.equal(nativeExitCode('run','PARTIAL'),0);
+  assert.equal(nativeExitCode('run','FAIL'),1);
+  assert.equal(nativeExitCode('run','INCONCLUSIVE'),2);
+  assert.equal(nativeExitCode('doctor','PARTIAL'),2);
+});
+test('matrix never attempts warm for a non-persistable input variant',async()=>{
+  const workspace=resolve('..','tmp','matrix-protocol-tests');mkdirSync(workspace,{recursive:true});
+  const root=mkdtempSync(join(workspace,'case-'));
+  const sample={sampleId:'sample',sourceSha256:'a'.repeat(64)};
+  const body={frozen:true,repetitions:1,mode:'benchmark',requiredWorkerFamilies:[],
+    cases:[{sampleId:sample.sampleId,sourceSha256:sample.sourceSha256,scenario:'open',actions:[],timeoutMs:1000}]};
+  const profile={...body,digest:digest(body)};let calls=0;
+  const result=await runMatrix({root,buildManifest:'unused',registry:{samples:[sample]},profile,
+    execute:async()=>{calls++;return {dataRoot:'unused',report:{...runs('cold',10)[0],
+      cachePublished:false,cacheFailureCode:'CACHE_NOT_PERSISTABLE',correctness:'partial',
+      defectAssessment:{kind:'input-variant',variant:'bare-zip'}}};}});
+  assert.equal(calls,1);
+  assert.deepEqual(result.result.pairs[0].reasons,['WARM_UNSUPPORTED:CACHE_NOT_PERSISTABLE']);
+});
+test('final evidence rejects a task that changes progress during tail drain',()=>{
+  const evidence={evidenceAtMs:10,checks:[{name:'session-stable',passed:true}],progress:{workload:{shown:1}}};
+  const snapshot={snapshotAtMs:11,measurement:{activeTasks:[]},progress:{workload:{shown:2}}};
+  assert.equal(finalEvidenceAligned(evidence,snapshot),false);
+  assert.equal(finalEvidenceAligned({...evidence,progress:snapshot.progress},snapshot),true);
+  assert.equal(finalEvidenceAligned({...evidence,evidenceAtMs:12,progress:snapshot.progress},snapshot),false);
+});
 test('missing evidence is inconclusive, explicit correctness failure is fail',()=>{
   const b=runs('base',100),c=runs('candidate',100);c[0].measurementComplete=false;assert.equal(compareRuns(b,c).outcome,'INCONCLUSIVE');c[0].correctness='failed';assert.equal(compareRuns(b,c).outcome,'FAIL');
 });
@@ -85,10 +127,16 @@ test('single paired process is comparable; partial coverage needs explicit basel
   assert.equal(compareRuns(b.map(partial),c.map(row=>({...partial(row),evidence:{progress:{cache:{writeFailures:1}}}}))).outcome,'FAIL');
   const candidate={version:'gim-benchmark-candidate-v1',outcome:'PARTIAL',selectionFrozen:true,runs:b.map(partial),measurementAcceptance:{outcome:'PASS'}};
   assert.throws(()=>approveBaseline(candidate,'developer'),/explicit approver/);
-  const approved=approveBaseline(candidate,'developer',{acceptPartial:true});
+  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true}),/source review/);
+  const approved=approveBaseline(candidate,'developer',{acceptPartial:true,sourceReviewed:true,partialReason:'Source evidence checked against archive'});
   assert.equal(approved.approval.partialAccepted,true);
   assert.equal(baselineApprovalIssue(approved),null);
-  assert.equal(baselineApprovalIssue({...approved,approval:{...approved.approval,partialAccepted:false}}),'partial-baseline-not-accepted');
+  assert.equal(baselineApprovalIssue({...approved,approval:{...approved.approval,partialReason:'changed'}}),
+    'baseline-approval-metadata-mismatch');
+  const previous=approveBaseline({outcome:'PASS',selectionFrozen:true,runs:b},'developer');
+  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true,sourceReviewed:true,
+    partialReason:'Source evidence checked against archive',previousBaseline:previous}),/differs from the previous approved baseline/);
+  assert.equal(baselineApprovalIssue({...approved,approval:{...approved.approval,partialAccepted:false}}),'baseline-approval-metadata-mismatch');
   assert.equal(baselineApprovalIssue({...approved,outcome:'PASS'}),'baseline-approval-digest-mismatch');
 });
 test('warm cache proof is domain-specific and misses cannot masquerade as a warm run',()=>{
@@ -132,7 +180,7 @@ test('completion waits for background and line publication, then uses the actual
 });
 test('selection is deterministic, mandatory regression survives and no timing is consulted',()=>{
   const s=(id,tier,group,extra={})=>({sampleId:id,sourceSha256:id,bytes:100,container:{payload:'7z',magic:'GIMPKGS'},memberships:[{sampleTier:tier,group}],inventory:{status:'available',files:10,extensions:{cbm:1,dev:1,mod:1}},...extra});
-  const registry={samples:[s('a','L1','development-regression',{requiredRegression:'full-package-index',timing:999}),s('b','L0','common-model',{timing:1}),s('c','L2','complex-equipment')]};
+  const registry={samples:[s('a','L1','development-regression',{workloadProfile:'full-package-index',timing:999}),s('b','L0','common-model',{timing:1}),s('c','L2','complex-equipment')]};
   const first=selectSamples(registry);registry.samples.reverse();assert.deepEqual(selectSamples(registry),first);assert.equal(first.profiles['commit-gate'][0].sampleId,'a');assert.equal(first.frozen,false);
 });
 test('geometry profile uses registered feature selection rather than a fixed sample identity',()=>{

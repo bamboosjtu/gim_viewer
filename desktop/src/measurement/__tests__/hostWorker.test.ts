@@ -26,6 +26,25 @@ it('control telemetry is consumed before application message listeners',()=>{
   port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:context.workerId,events:[]}}));expect(callback).not.toHaveBeenCalled();
   port.dispatchEvent(new MessageEvent('message',{data:{kind:'result',id:1}}));expect(callback).toHaveBeenCalledOnce();
 });
+it('requires the final Worker batch marker before accepting an idle Worker termination',()=>{
+  const {port,worker}=start();worker.postMessage({kind:'compile',traceId:'task-one'});
+  const task=(port.messages[1] as any)._gimMeasurement.context;
+  const event=(sequence:number,name:string)=>({version:'gim-measurement-v1',context:task,producerId:task.workerId,
+    sequence,clockId:'worker-clock',atMs:sequence,kind:'task',name,
+    ...(name==='ended'?{status:'completed'}:{})});
+  port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:task.workerId,
+    batchId:1,lastSequence:2,events:[event(1,'started'),event(2,'ended')]}}));
+  worker.terminate();
+  expect(measurementSnapshot()).toMatchObject({detailComplete:false,loss:{detailEvents:1}});
+  const second=start();second.worker.postMessage({kind:'compile',traceId:'task-two'});
+  const next=(second.port.messages[1] as any)._gimMeasurement.context;
+  const nextEvent=(sequence:number,name:string)=>({...event(sequence,name),context:next,producerId:next.workerId});
+  second.port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:next.workerId,
+    batchId:1,lastSequence:2,events:[nextEvent(1,'started'),nextEvent(2,'ended')]}}));
+  second.port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'flushed',workerId:next.workerId,batchId:1,lastSequence:2}}));
+  second.worker.terminate();
+  expect(measurementSnapshot()?.detailComplete).toBe(true);
+});
 it('an explicit suite run ID never overwrites a prior session collector',()=>{
   (globalThis as any).__GIM_MEASUREMENT_CONFIG__={mode:'benchmark',runId:'fixed-suite'};
   resetMeasurementRun({generation:1});const first=measurementSnapshot()!.identity.runId;

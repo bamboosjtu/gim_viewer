@@ -46,7 +46,7 @@ export function installBenchmarkHost(state:AppState):void {
         openErrorCode=/INPUT_CORRUPT:/.test(String(error))?'INPUT_CORRUPT':null;}throw error;}finally{if(sequence===openSequence)opening=false;}
     },
     snapshot(){const lastCacheWriteAtMs=state.deviceLodRuntime?.diagnostics.lastCacheWriteAtMs;
-      return {opening,openError,openErrorCode,projectType:state.currentProjectType,session:perfCurrentSession(),measurement:measurementSnapshot(),
+      return {snapshotAtMs:performance.now(),opening,openError,openErrorCode,projectType:state.currentProjectType,session:perfCurrentSession(),measurement:measurementSnapshot(),
       capabilityResult,
       openElapsedMs:openStarted===null?null:performance.now()-openStarted,
       devArtifactWriteElapsedMs:openStarted===null||typeof lastCacheWriteAtMs!=='number'||!Number.isFinite(lastCacheWriteAtMs)?null:
@@ -57,7 +57,7 @@ export function installBenchmarkHost(state:AppState):void {
       cachePersistence:((moment)=>({observed:moment!==null,available:moment?.meta?.available!==false}))
         (perfProductMomentSnapshot().cachePersistenceReady),
       engineering:{status:state.engineeringStatus,cacheStatus:state.engineeringCacheStatus,complete:state.engineeringSources?.complete??false}};},
-    evidence(){return benchmarkEvidence(state);},
+    async evidence(){const evidence=await benchmarkEvidence(state);return {...evidence,evidenceAtMs:performance.now()};},
     targets(){return scenarioTargets(state);},
     action(action:Parameters<typeof runScenarioAction>[1]){return runScenarioAction(state,action);},
     resources(){return projectResourceState(state);},

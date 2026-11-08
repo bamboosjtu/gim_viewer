@@ -70,7 +70,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | `compare` | 比较基线与候选 | `--baseline <json>`、`--candidate <json>`；可选 `--retest-baseline <json>`、`--retest-candidate <json>` |
 | `gate` | 门禁比较，要求基线带有效批准摘要 | 同 `compare` |
 | `report` | 从已有结果 JSON 重新生成 HTML 报告 | `--input <json>` |
-| `approve-baseline` | 显式批准候选为基线 | `--candidate <json>`、`--approver <名称>`；PARTIAL 需 `--accept-partial` |
+| `approve-baseline` | 显式批准候选为基线 | `--candidate <json>`、`--approver <名称>`；PARTIAL 还需 `--accept-partial --source-reviewed --partial-reason <原因>`，可用 `--previous-baseline <已批准基线>` 防止签名倒退 |
 | `batch` | 按目录或注册表批量执行冷开、暖开与重复轮次 | `--build <清单>`；`--directory <目录>` 或 `--registry <json>`；可选 `--output <目录>`、`--anonymize`（`true`/`false`）、`--preset`（`survey`/`baseline`）、`-repeat`/`--repeat <n>`、`--timeout-seconds <n>` |
 
 ## 命令与退出码
@@ -82,7 +82,8 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | 批量 | `batch` | `PASS`/`PARTIAL`→0；`FAIL`→1；其他→2；`CANCELLED`→130 |
 | 比较与门禁 | `compare`、`gate` | `PASS`/`PARTIAL`→0；`FAIL`→1；其他（含 `INCONCLUSIVE`）→2 |
 | 矩阵与开销 | `matrix`、`overhead` | `PASS`/`PARTIAL`→0；其他→2；`FAIL` 也是 2 |
-| 单样本与自检 | `run`、`doctor`、`lifecycle` | 只有 `PASS`→0；`PARTIAL`、`FAIL`、`INCONCLUSIVE` 等→2 |
+| 单样本 | `run` | `PASS`/`PARTIAL`→0；`FAIL`→1；其他→2 |
+| 自检 | `doctor`、`lifecycle` | 只有 `PASS`→0；其他→2 |
 | 辅助命令 | `init`、`samples`、`inventory`、`select`、`freeze-profile`、`build`、`report`、`approve-baseline` | 成功→0；参数或执行异常→1 |
 
 - 缺少必需参数、未知命令或未捕获异常走统一异常路径，返回 1；上表描述的是命令完成后的结果映射。
@@ -159,17 +160,9 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 
 ## 在册登记与本地默认发现
 
-仓库登记与 `npm run bench -- samples` 的默认发现是两套来源；数量不同不表示任何一方错误。
+仓库登记是精确路径集合，L2 使用目录示例。`npm run bench -- samples` 扫描开发者本地 `demo/` 的约定目录，包括 `substations/` 与 `lines/` 下全部 GIM，并报告实际发现数；它不内置期望数量。两套来源的数量可以不同。
 
-| 来源 | L0 | L1 | L2 |
-|---|---|---|---|
-| 仓库在册 `benchmarks/` | 34 个路径（110 kV 10、220 kV 15、35 kV 4、500 kV 5） | 10 个路径（4 变电 + 6 线路） | 目录示例（复杂工程、复杂设备两组） |
-| `samples` 默认发现的 `expected` | `common-design` 48、`common-model` 917 | `development-regression` 10 | `complex-engineering` 19、`complex-equipment` 7 |
-
-- 在册登记是精确路径集合，L2 只登记目录；`samples` 则扫描开发者本地 `demo/` 下的约定目录，按组输出发现数和 `expected` 提示。
-- `expected` 只是登记提示，不参与 `PASS`/`PARTIAL`/`FAIL` 判定；实际参与判定的是发现并计算 SHA 的输入。
-- 48 和 917 不是仓库在册 L0 数量：在册 L0 是 34 个路径，48 是本地 `common-design` 的 `expected`，917 是 `common-model` 的 `expected`。
-- L2 同理：在册是目录示例，19 和 7 是本地默认发现的 `expected`，不是固定文件清单。
+登记项的 `workloadProfile` 仅选择冻结的场景和动作，例如全包索引回归；不修改 `PASS`/`PARTIAL`/`FAIL` 的统一判定规则。
 - 批次样本只由 `--directory` 或 `--registry` 取。在册登记只选择输入，不提供判定例外；`PASS`/`PARTIAL`/`FAIL` 由统一运行证据规则判定。
 
 ## 报告文件与判读边界
@@ -187,14 +180,14 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 
 - CSV 使用 UTF-8 BOM、标准引号转义；时间字段后缀 `Ms`、内存字段后缀 `Bytes`。HTML 显示秒与 GiB。不可用字段留空，不填零。
 - 字段名以本次构建生成的 `results.json` 与 `results.csv` 表头为准；本页只维护文件用途与判读边界，不逐列冻结字段名。
-- 汇总分别计数 `PASS` 与 `PARTIAL`；只对相同覆盖状态的有效轮次取中位数，不混合完整表示与来源缺陷造成的部分表示。
+- 汇总分别计数 `PASS` 与 `PARTIAL`；同组轮次的 PARTIAL 签名不同时中位数留空，`coverageGroups` 与 `partialSignatures` 给出分组证据。
 - 覆盖汇总同时给出有效轮次和计划轮次，以及基础设施重试次数。少于计划轮次的中位数可供诊断，但不能冒充完整基线。
-- 测量明细丢失数表示真正的截断，不包含有意聚合的事件。
+- 测量明细丢失数表示真正的截断或未确认的 Worker 尾批，不包含有意聚合的事件。Worker 批次有连续 ID、确认和任务结束标记，异常截断不能静默通过。
 - `measurementLifecycleComplete` 与 `measurementComplete` 分开：意外 Worker 终止的在途任务、超时、无理由取消和异常迟到事件使生命周期不完整；有受控原因的项目切换/关闭或 AbortError 取消可以正常结算。DEV 精细请求主动终止 Worker 时按任务身份登记取消，不豁免池内其他任务。外来 run 和重复序号使事件传输不完整，不能被静默忽略。
 - `pendingCount`、`pendingSourceCount`、`pendingDigest` 单列；语义摘要已包括待归对象的身份、原因、来源、类别和 disposition。冷暖逐项比较 pending 证据。
 - `geometryStructuralFingerprint` 是结构指纹，不是顶点/索引内容校验。`devContentDigest` 聚合 DEV L0 GLB 的字节 SHA，`devContentCovered` 与 `devContentComplete` 标注实际覆盖；IFC/L2 内容不在该证据范围。
 - `automaticLoadMs` 是自动表示终态；`settledMs` 是任务、缓存、后台及静默窗口全部完成时刻。`writeDrainMs` 只量最后一笔 DEV 产物写晚于自动表示的部分，不代表全部写入时间。样本覆盖 tab 同时列出自动表示、缓存发布和完全结算的中位数。
-- 关联的 Worker 若在两个堆采样周期内终止且只有一次任务，堆值标为 `unavailable / ended-before-heap-sample`；不填零，也不把这类短生命周期缺口当作产品失败。其他 Worker 堆证据缺失仍使测量不完整。
+- 关联的 Worker 若在两个堆采样周期内终止且只有一次任务，堆值标为 `short-lived / ended-before-heap-sample`；不填零。其余 Worker 区分 `unavailable`（收到失败原因）与 `missing`（从未收到记录），两者均使测量不完整。
 - 原始端点错误、调试端口、应用 PID/退出状态、进程采样尾部和 WebView2 日志尾部只写入私有运行目录（如 `tmp/gim-bench/runs/<runId>/startup.private.json`），不进入可分享报告。
 
 | 对象 | 判读 |
@@ -287,7 +280,7 @@ npm run bench -- gate --baseline ../tmp/gim-bench/baseline.approved.json --candi
 - 普通 `compare` 可读取结构指纹和已有内容证据，但不把缺少内容证明作为普通测量失败。正式 `approve-baseline` 和 `gate` 要求 DEV L0 内容摘要覆盖所有已显示根；字节摘要或放置指纹变化为 INCONCLUSIVE，不能仅凭相同包围盒自动通过。无 DEV 表示的输入标为不适用，不伪造内容 SHA。
 - 超过 10% 要求独立复测，仍超限为 `FAIL`。
 - 摸底批次的 `PASS`/`PARTIAL` 仅表示该次计划执行结果。`baseline` 批次要求冷暖等价、来源缺口摘要及工作量一致；正式认可仍需探针开销、十轮生命周期与测量能力等验收。
-- 认可 `PARTIAL` 基线须显式使用 `approve-baseline --accept-partial` 和认可者，不会自动提升为完整 `PASS` 基线。
+- 完整正确性基线只接受 `PASS`。`PARTIAL` 是显式接受的覆盖基线：认可者必须核对来源证据，提供 `--source-reviewed --partial-reason`；理由不得包含私有工程名或路径。有上一次已批准基线时可指定 `--previous-baseline`，相同来源从 PASS 退到 PARTIAL 或 PARTIAL 签名变化会被拒绝。首次接受仍依赖人工核对，不能由候选报告自证。
 - SDK 迁移不在本轮 Benchmark 范围内。完整指标口径见[测量架构](architecture/measurement.md)。
 
 ## 相关文档

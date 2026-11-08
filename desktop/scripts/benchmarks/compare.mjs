@@ -48,7 +48,7 @@ export function runReadiness(run){
   }
   if(run.version==='gim-benchmark-v1'&&run.projectType==='substation'&&
     (run.semanticDigestScope!=='engineering-with-pending-v2'||
-      !/^[a-f0-9]{64}$/.test(run.evidence?.semanticDigest??'')||
+      !/^[a-f0-9]{64}$/.test(run.semanticDigest??run.evidence?.semanticDigest??'')||
       !/^[a-f0-9]{64}$/.test(run.pendingDigest??'')||!Number.isSafeInteger(run.pendingCount)||run.pendingCount<0||
       !Number.isSafeInteger(run.pendingSourceCount)||run.pendingSourceCount<0))reasons.push('pending-evidence-missing');
   if(run.measurementComplete!==true)reasons.push('measurement-incomplete');
@@ -112,25 +112,43 @@ export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidat
   return {outcome:retest.outcome,reasons:retest.reasons,metrics,retest:retest.metrics};
 }
 /** Promotion is an explicit CLI action; run/report/compare never invoke this. */
-export function approveBaseline(candidate,approver,{acceptPartial=false}={}){
+export function approveBaseline(candidate,approver,{acceptPartial=false,partialReason='',sourceReviewed=false,previousBaseline=null}={}){
   if(!approver?.trim()||!['PASS','PARTIAL'].includes(candidate.outcome)||candidate.outcome==='PARTIAL'&&!acceptPartial||candidate.selectionFrozen!==true||!candidate.runs?.length)throw Error('Complete frozen candidate and explicit approver required');
   const groups=new Map();for(const run of candidate.runs){const key=digest(run.conditions);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(run);}
   if([...groups.values()].some(runs=>!['PASS','PARTIAL'].includes(checkGroup(runs).outcome)))throw Error('Baseline runs are incomplete');
   if(candidate.outcome==='PARTIAL'&&candidate.runs.some(run=>run.correctness==='partial'&&run.defectAssessment?.status!=='evidence-backed'))
     throw Error('Partial coverage lacks runtime evidence');
+  if(candidate.outcome==='PARTIAL'){
+    if(!sourceReviewed||partialReason.trim().length<8)throw Error('Partial baseline requires source review and a reason');
+    if(previousBaseline){
+      const issue=baselineApprovalIssue(previousBaseline);if(issue)throw Error(`Previous baseline ${issue}`);
+      const prior=new Map(previousBaseline.runs.map(run=>[digest([run.conditions?.sourceSha256,run.conditions?.scenario,run.conditions?.cacheState]),run]));
+      for(const run of candidate.runs){
+        const old=prior.get(digest([run.conditions?.sourceSha256,run.conditions?.scenario,run.conditions?.cacheState]));
+        if(old&&run.correctness==='partial'&&(old.correctness!=='partial'||partialSignature(old)!==partialSignature(run)))
+          throw Error('Partial coverage differs from the previous approved baseline');
+      }
+    }
+  }
   if(candidate.runs.some(run=>run.cacheFailureCode==='CACHE_NOT_PERSISTABLE'))throw Error('Non-persistable cache cannot become a baseline');
   for(const run of candidate.runs){const issue=contentEvidenceIssue(run);if(issue)throw Error(`Baseline ${issue}`);}
   if([...groups.values()].some(runs=>new Set(runs.map(contentSignature)).size>1))throw Error('Baseline DEV content differs between repetitions');
   if(candidate.version==='gim-batch-results-v1'&&!candidate.baselineEligible)throw Error('Complete baseline batch required');
   if((candidate.version==='gim-benchmark-candidate-v1'||candidate.runs.some(run=>run.version==='gim-benchmark-v1'))&&candidate.measurementAcceptance?.outcome!=='PASS')throw Error('Measurement acceptance evidence required before baseline approval');
-  return {...candidate,approval:{approver:approver.trim(),at:new Date().toISOString(),candidateDigest:digest(candidate),partialAccepted:candidate.outcome==='PARTIAL'}};
+  const approval={approver:approver.trim(),at:new Date().toISOString(),candidateDigest:digest(candidate),
+    partialAccepted:candidate.outcome==='PARTIAL',...(candidate.outcome==='PARTIAL'?{
+      partialReason:partialReason.trim(),sourceReviewed:true,previousBaselineDigest:previousBaseline?digest(previousBaseline):null}: {})};
+  return {...candidate,approval:{...approval,approvalDigest:digest(approval)}};
 }
 
 export function baselineApprovalIssue(baseline){
   if(!baseline.approval)return 'baseline-not-approved';
   const {approval,...candidate}=baseline;
   if(approval.candidateDigest!==digest(candidate))return 'baseline-approval-digest-mismatch';
-  if((baseline.outcome==='PARTIAL'||(baseline.runs??[]).some(run=>run.correctness==='partial'))&&approval.partialAccepted!==true)
+  const {approvalDigest,...metadata}=approval;
+  if(approvalDigest!==digest(metadata))return 'baseline-approval-metadata-mismatch';
+  if((baseline.outcome==='PARTIAL'||(baseline.runs??[]).some(run=>run.correctness==='partial'))&&
+    (approval.partialAccepted!==true||approval.sourceReviewed!==true||!approval.partialReason?.trim()))
     return 'partial-baseline-not-accepted';
   return null;
 }

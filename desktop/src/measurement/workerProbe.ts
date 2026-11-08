@@ -39,15 +39,23 @@ export const NOOP_TASK = new WorkerTaskProbe(offContext, offProbe);
 export function createWorkerProbe() {
   let probe = offProbe, context = offContext, mode: MeasurementMode = 'off';
   let events: MeasurementEvent[] = [];
+  let batchId=0,lastSequence=0;
+  const pendingAcks=new Set<number>();
   const target = typeof self === 'undefined' ? undefined : self;
   const post = target?.postMessage?.bind(target) as ((data: unknown) => void) | undefined;
   const flush = () => {
     if (!events.length || !post) return;
     const batch = events; events = [];
-    post({ [CHANNEL]: 'batch', workerId: context.workerId, events: batch });
+    const id=++batchId;lastSequence=batch[batch.length-1].sequence;pendingAcks.add(id);
+    post({ [CHANNEL]: 'batch', workerId: context.workerId, batchId:id,lastSequence,events: batch });
+    if(pendingAcks.size>128){pendingAcks.clear();probe.event(context,{kind:'loss',name:'worker-batch-ack-overflow',workload:{events:1}});flush();}
   };
   const control = (event: MessageEvent): boolean => {
     const data = event.data;
+    if(data?.[CHANNEL]==='ack'){
+      if(data.workerId===context.workerId&&Number.isSafeInteger(data.batchId))pendingAcks.delete(data.batchId);
+      return true;
+    }
     if(data?._gimMeasurementTransfer){
       const flightId=data._gimMeasurementTransfer;delete data._gimMeasurementTransfer;
       post?.({[CHANNEL]:'transfer-received',workerId:context.workerId,flightId});
@@ -78,6 +86,7 @@ export function createWorkerProbe() {
       capturedProbe.event(captured, { kind: 'task', name: 'ended', status: task.status,
         ...(task.reasonCode?{reasonCode:task.reasonCode}:{}) });
       flush();
+      post?.({[CHANNEL]:'flushed',workerId:captured.workerId,batchId,lastSequence});
     };
     const task = new WorkerTaskProbe(captured, capturedProbe, finish);
     probe.event(captured, { kind: 'task', name: 'started' });

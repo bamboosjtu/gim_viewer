@@ -11,3 +11,8 @@ export function classifyWorkerHeapCoverage(workers,observedIds,mappedIds,periodM
   }
   return {required,shortLived};
 }
+export function classifyWorkerHeapEvidence(workers,availableIds,records,mappedIds,periodMs=1000){
+  const {required,shortLived}=classifyWorkerHeapCoverage(workers,availableIds,mappedIds,periodMs);
+  return {missing:required.filter(id=>!records.has(id)),
+    unavailable:required.filter(id=>records.has(id)).map(id=>records.get(id)),shortLived};
+}
