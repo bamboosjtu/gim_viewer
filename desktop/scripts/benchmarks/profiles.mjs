@@ -10,7 +10,7 @@ export function freezeProfile(registry,selection,name='commit-gate'){
       actions:name==='geometry'?[{kind:'dev-fine',selector:'canonical-first-boolean-base-v1'}]:isIndexRegression?[{kind:'dev-fine',selector:'canonical-first-base-v1'},{kind:'ifc-near',selector:'smallest-source-canonical-small-object-v1'},{kind:'ifc-fine',selector:'smallest-source-canonical-small-object-v1'}]:[],
       timeoutMs:sample.inventory.files>=50000?3600000:900000,reason:row.reason??'registered-regression'};
   });
-  const body={version:'gim-benchmark-profile-v2',name,frozen:true,repetitions:3,cacheStates:['cold','warm'],mode:'benchmark',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',samplingPeriodMs:1000,viewProtocol:'near-inspect-and-restore-v1',
+  const body={version:'gim-benchmark-profile-v2',name,frozen:true,repetitions:3,cacheStates:['cold','warm'],mode:'benchmark',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',webviewProfilePolicy:'paired-webview-profile-v1',samplingPeriodMs:1000,viewProtocol:'near-inspect-and-restore-v1',
     completion:'automatic-representations-and-cache-publication',correctness:'source-invariants-and-cold-warm-base-equivalence',
     requiredWorkerFamilies:name==='commit-gate'?['dev','engineering','spatial','line','ifc-conversion','ifc-regional','ifc-fine']:[],cases};
   return {...body,digest:digest(body)};

@@ -15,7 +15,7 @@ function setup(){const parent=artifactDirectory(root,join(root,'tmp','batch-prot
 function inputs(){return {entries:['a','b','c'].map((id,index)=>({inputId:id,sampleId:id,sourceSha256:id,privatePath:'private-name',status:'READY'})),
   samples:['a','b','c'].map(id=>({inputId:id,sampleId:id,sourceSha256:id,paths:[],actions:[]}))};}
 function run(sample,profileDigest){return {out:'private-run',dataRoot:'private-cache',report:{runId:sample.inputId,processInstanceId:sample.inputId,
-  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
+  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
     profileDigest,workloadDigest:'w',routeDigest:'r',viewportDigest:'v'},correctness:'passed',cacheVerified:true,cachePublished:true,measurementComplete:true,requiredMetrics:['firstResponseMs'],metrics:{firstResponseMs:12},
   evidence:{progress:{workload:{failed:0}}}}};}
 
@@ -25,7 +25,7 @@ test('batch continues after execution exceptions and exports every result and fa
   assert.deepEqual(called,['a','b','c']);assert.equal(result.result.outcome,'FAIL');
   assert.deepEqual(result.result.rows.map(row=>row.status),['PASS','ERROR','PASS']);
   const json=readFileSync(join(options.out,'results.json'),'utf8');assert.ok(!json.includes('secret'));assert.ok(!json.includes('private-name'));
-  for(const name of ['results.csv','errors.csv','summary.csv','stages.csv','workers.csv','report.html'])assert.ok(readFileSync(join(options.out,name),'utf8').length>0);
+  for(const name of ['results.csv','errors.csv','summary.csv','stages.csv','slow-tasks.csv','slow-phases.csv','workers.csv','report.html'])assert.ok(readFileSync(join(options.out,name),'utf8').length>0);
   const html=readFileSync(join(options.out,'report.html'),'utf8');
   assert.match(html,/id="tab-results"[^>]*role="tab"/);
   assert.match(html,/id="tab-coverage"[^>]*role="tab"/);
@@ -71,9 +71,13 @@ test('evidence-backed engineering coverage remains partial while cold and warm u
     value.report.defectAssessment={kind:'coverage',status:'evidence-backed',sourceSha256:sample.sourceSha256,
       coverageDigest:'b'.repeat(64)};
     value.report.evidence={semanticDigest:'semantic',placementDigest:'placement',baseGeometryDigest:'geometry',baseArtifactDigest:'artifact',
+      engineeringCoverage:{incompleteReasons:['source-reference-unresolved'],referenceStatuses:{resolved:12172,missing:258}},
       progress:{workload:{shown:2944,failed:0,partial:1046}}};return value;
   }});
   assert.deepEqual(calls,['cold','warm']);assert.deepEqual(result.result.rows.map(row=>row.status),['PARTIAL','PARTIAL']);
+  assert.equal(result.result.rows[0].coverageIncompleteReasons,'source-reference-unresolved');
+  assert.equal(result.result.rows[0].unresolvedReferenceCount,258);
+  assert.match(readFileSync(join(result.out,'report.html'),'utf8'),/未解析引用 258/);
   assert.equal(result.result.pairs[0].outcome,'PARTIAL');
 });
 test('measurement-only gaps do not discard a valid warm-cache opportunity',async()=>{

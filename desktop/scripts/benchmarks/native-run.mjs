@@ -7,11 +7,12 @@ import {dirname,join,resolve} from 'node:path';
 import {fileSha256,directoryFingerprint} from './acceptance-build.mjs';
 import {CdpConnection,WorkerHeapSampler} from './cdp.mjs';
 import {bareContainerKind} from './container-magic.mjs';
+import {pairedWebviewProfile} from './cache-roots.mjs';
 import {digest,runReadiness} from './compare.mjs';
 import {workspacePath,sha256} from './samples.mjs';
 import {startProcessSampler} from './process-sampler.mjs';
 import {cachePublicationAssessment} from './profiles.mjs';
-import {readyForSettle,cachePublicationMoment,finalEvidenceAligned} from './completion.mjs';
+import {readyForSettle,cachePublicationMoment,finalEvidenceIssue} from './completion.mjs';
 import {assessCorrectness} from './correctness.mjs';
 import {assertBenchmarkExecutable} from './benchmark-build-attestation.mjs';
 import {classifyWorkerHeapEvidence} from './worker-memory-completeness.mjs';
@@ -28,7 +29,7 @@ function fileTail(path,maxBytes=8192){
 async function port(){const server=createServer();await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});const value=server.address().port;await new Promise(resolve=>server.close(resolve));return value;}
 async function stop(child){if(!child?.pid||child.exitCode!==null||child.signalCode!==null)return;spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});await Promise.race([new Promise(resolve=>child.once('exit',resolve)),delay(5000)]);if(child.exitCode===null&&child.signalCode===null)throw Error('Owned application cleanup failed');}
 
-/** Each call owns one native process, profile, manifest, cache root and raw report. */
+/** Each call owns one native process and raw report; cold/warm share cache and WebView profile. */
 export async function runNative({root,buildManifest,sample,profileDigest='unfrozen',mode='benchmark',scenario='open',cacheState='cold',dataRoot,timeoutMs=300000,doctor=false,actions=[],diagnostic,additionalSamples=[],exercise,signal}){
   if(process.platform!=='win32')throw Error('Native benchmark requires Windows');
   if(doctor)sample={sampleId:'capability-probe',sourceSha256:null,paths:[]};
@@ -51,9 +52,12 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       const kind=bareContainerKind(head);if(kind)inputVariant=`bare-${kind}`;
     }finally{closeSync(descriptor);}}
   const runId=`run-${Date.now().toString(36)}-${randomBytes(5).toString('hex')}`,out=join(root,'tmp','gim-bench','runs',runId);
-  mkdirSync(out,{recursive:true});const profile=join(out,'webview-profile');mkdirSync(profile);
+  mkdirSync(out,{recursive:true});
   dataRoot=dataRoot?workspacePath(root,dataRoot):join(out,'cache');mkdirSync(dataRoot,{recursive:true});
   if(cacheState==='cold'&&readdirSync(dataRoot).length)throw Error('Cold cache root must be new/empty');
+  // The product's IFC LOD cache lives in WebView2 IndexedDB. A warm process
+  // must reuse the cold process's profile as well as its SQLite data root.
+  const profile=pairedWebviewProfile(dataRoot);mkdirSync(profile,{recursive:true});
   const manifest={nonce:randomBytes(32).toString('hex'),sampleId:sample.sampleId,sourcePath:source,sourceSha256:sample.sourceSha256??'',dataRoot,probeOnly:doctor};
   manifest.samples=[];
   for(const extra of additionalSamples){
@@ -73,7 +77,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   // Raw output is private. Cap bytes; logs are never copied into report.json.
   let logFailures=0;
   for(const name of ['stdout','stderr']){let bytes=0;child[name].on('data',data=>{try{if(bytes<4*1024*1024)appendFileSync(join(out,`${name}.private.log`),data);}catch{logFailures++;}bytes+=data.length;});}
-  let cdp,sampler,observation=null,cleanupComplete=false,reason=null,crashed=false,heapRows=0,processPeak=null,settledMs=null;
+  let cdp,sampler,observation=null,cleanupComplete=false,reason=null,finalEvidenceFailure=null,lateBackgroundTasks=false,crashed=false,heapRows=0,processPeak=null,settledMs=null;
   let openAttempted=false,endpointError=null,exitBeforeCleanup=null;
   const heaps=new Map(),heapRecords=new Map(),processSamples=[];let events=0,hostSamplingFailures=0,streamFailures=0,evidence=null,automaticMs=null,cachePublishMs=null,productPeak=null;
   const processSampler=startProcessSampler(samplerExecutable,child,executable,env,row=>{processSamples.push(row);if(row.availability==='available'&&Number.isFinite(row.bytes))processPeak=Math.max(processPeak??0,row.bytes);});
@@ -148,18 +152,38 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       await processSampler.checkpoint('open-start');
       openAttempted=true;
       await cdp.evaluate(`globalThis.__gimBenchmark.open(...${JSON.stringify(args)}).catch(()=>{}); undefined`);
-      let stableSince=null,completed=false;
+      let stableSince=null,completed=false,lastCheckpointAt=0,lastProgressAt=performance.now(),progressKey='';
       while(performance.now()-started<timeoutMs){
         if(signal?.aborted)throw Error('run-cancelled');
         if(child.exitCode!==null){crashed=true;throw Error('native-process-exited');}
         const requestedAt=performance.now();
         try{observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');lastSnapshotAt=performance.now();if(hostGapStart!==null){if(hostSamplingGaps.length<128)hostSamplingGaps.push({startMs:hostGapStart,endMs:performance.now(),clockId:'controller'});hostGapStart=null;}}
         catch{observationGapMs=Math.max(observationGapMs,performance.now()-lastSnapshotAt);if(cdp.closed){crashed=true;throw Error('renderer-process-exited');}hostSamplingFailures++;hostGapStart??=requestedAt;await delay(1000);continue;}
+        const now=performance.now();
+        const nextProgress=JSON.stringify([observation.progress.semanticStatus,observation.progress.workload,
+          observation.measurement?.taskOutcomes,observation.measurement?.counters?.['engineering:host.received']?.messages]);
+        if(nextProgress!==progressKey){progressKey=nextProgress;lastProgressAt=now;}
+        if(now-lastCheckpointAt>=30000){
+          try{writeFileSync(join(out,'progress.private.json'),JSON.stringify({atMs:now-started,progress:observation.progress,
+            activeTaskFamilies:observation.measurement?.activeTasks?.map(task=>task.family),
+            lifecycleIssues:observation.measurement?.lifecycleIssues??[],lastProgressAgoMs:now-lastProgressAt},null,2));}
+          catch{logFailures++;}
+          lastCheckpointAt=now;
+        }
         if(observation.progress.automaticSettled&&automaticMs===null){
           const moments=observation.moments;
           automaticMs=Math.max(...['coreSemanticReady','navigationUiReady','allIfcReady','devBaseRepresentationsSettled','devGeometryReady'].map(key=>moments[key]??0))||observation.openElapsedMs;
         }
         if(observation.openError)throw Error(observation.openErrorCode==='INPUT_CORRUPT'?'input-corrupt':'project-open-failed');
+        if(observation.projectType==='substation'&&observation.progress.backgroundSettled&&!observation.progress.semantic){
+          reason='settled-without-semantic';break;
+        }
+        if(observation.progress.semanticFailure){reason='engineering-semantic-failed';break;}
+        const engineeringActive=observation.measurement?.activeTasks?.some(task=>task.family==='engineering')===true;
+        if(observation.projectType==='substation'&&!observation.progress.semantic&&
+          now-lastProgressAt>=(engineeringActive?300000:120000)){
+          reason='engineering-progress-stalled';break;
+        }
         if(automaticMs!==null&&readyForSettle(observation,{cacheState})){
           cachePublishMs??=cachePublicationMoment(observation);
           stableSince??=performance.now();if(performance.now()-stableSince>=3000){completed=true;settledMs=observation.openElapsedMs;break;}
@@ -167,12 +191,14 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
         if(!observation.opening&&!observation.projectType)throw Error('project-open-unavailable');
         await delay(1000);
       }
-      if(automaticMs===null)reason='automatic-completion-not-observed';
-      else if(!observation.progress.cacheSettled)reason='cache-publication-not-observed';
-      else if(cacheState==='cold'&&observation.projectType==='substation'&&!observation.cachePersistence?.observed)
-        reason='substation-cache-publication-not-observed';
-      else if(!observation.progress.backgroundSettled)reason='background-completion-not-observed';
-      else if(!completed)reason='automatic-settle-timeout';
+      if(!reason){
+        if(automaticMs===null)reason='automatic-completion-not-observed';
+        else if(!observation.progress.cacheSettled)reason='cache-publication-not-observed';
+        else if(cacheState==='cold'&&observation.projectType==='substation'&&!observation.cachePersistence?.observed)
+          reason='substation-cache-publication-not-observed';
+        else if(!observation.progress.backgroundSettled)reason='background-completion-not-observed';
+        else if(!completed)reason='automatic-settle-timeout';
+      }
       if(!reason&&actions.length){
         const targets=await cdp.evaluate('globalThis.__gimBenchmark.targets()');writeFileSync(join(out,'targets.private.json'),JSON.stringify(targets,null,2));
         for(const spec of actions){
@@ -203,10 +229,10 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     if(acknowledgements.size)streamFailures++;
     await sampler.completeDiagnostics();
     observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
+    lateBackgroundTasks=observation.measurement.activeTasks.length>0;
     for(let attempt=0;attempt<30&&observation.measurement.activeTasks.length&&!reason;attempt++){
       await delay(1000);observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
     }
-    if(observation.measurement.activeTasks.length&&!reason)reason='post-settle-task-incomplete';
     // A task that finished during the tail may have emitted new detail batches.
     // Drain those too before checking completeness and closing the binding.
     for(let attempt=0;attempt<50;attempt++){
@@ -217,10 +243,30 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     }
     if(acknowledgements.size)streamFailures++;
     observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
+    lateBackgroundTasks ||= observation.measurement.activeTasks.length>0;
+    for(let window=0;window<2&&observation.measurement.activeTasks.length&&!reason;window++){
+      for(let attempt=0;attempt<120&&observation.measurement.activeTasks.length;attempt++){
+        await delay(1000);observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
+      }
+      if(observation.measurement.activeTasks.length)break;
+      for(let attempt=0;attempt<50;attempt++){
+        await flushAcks();const transport=await cdp.evaluate('globalThis.__gimBenchmark.transport()');
+        if(transport.every(row=>row.pending===0&&row.buffered===0))break;
+        await delay(100);if(attempt===49)streamFailures++;
+      }
+      await delay(3000);
+      observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
+      settledMs=observation.openElapsedMs;
+    }
+    if(observation.measurement.activeTasks.length&&!reason)reason='post-settle-task-incomplete';
     if(!reason&&!doctor&&!exercise){
       evidence=await cdp.evaluate('globalThis.__gimBenchmark.evidence()',undefined,30000);
       observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
-      if(!finalEvidenceAligned(evidence,observation))reason='final-evidence-drift';
+      finalEvidenceFailure=finalEvidenceIssue(evidence,observation);
+      lateBackgroundTasks ||= finalEvidenceFailure==='active-tasks';
+      if(finalEvidenceFailure)reason=finalEvidenceFailure==='active-tasks'?'post-settle-task-incomplete':
+        finalEvidenceFailure==='progress-drift'?'final-evidence-drift':
+          finalEvidenceFailure==='session-mismatch'?'final-evidence-session-mismatch':'final-evidence-unverified';
     }
   }catch(error){reason=reasonCode(error);try{writeFileSync(join(out,'failure.private.log'),String(error?.stack??error));}catch{logFailures++;}}
   finally{clearInterval(ackTimer);sampler?.stop();cdp?.close();const sampling=await processSampler.stop();if(sampling.failures)streamFailures+=sampling.failures;
@@ -241,19 +287,21 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   const mappedIds=new Set(sampler?.snapshot().mappedWorkerIds??[]);
   const {missing:missingWorkers,unavailable:unavailableWorkers,shortLived:shortLivedWorkerMemory}=classifyWorkerHeapEvidence(
     measurement?.workers,new Set(heaps.keys()),heapRecords,mappedIds,sampler?.periodMs??1000);
-  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:'gim-measurement-v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',mode,scenario,cacheState,
+  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:'gim-measurement-v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode,scenario,cacheState,
     sampleId:sample.sampleId,sourceSha256:sample.sourceSha256,profileDigest,routeDigest:digest(actionTargets),viewportDigest:digest(observation?.viewport??null),viewport:observation?.viewport??null,
     workloadDigest:evidence?digest({workload:evidence.progress.workload,semantic:evidence.semanticDigest,placement:evidence.placementDigest}):null};
   const assessment=assessCorrectness(evidence);
   const cacheAssessment=cachePublicationAssessment(evidence,cacheState,observation?.projectType);
   const cacheFailureCode=inputVariant&&evidence&&observation?.projectType&&!cacheAssessment.published?'CACHE_NOT_PERSISTABLE':null;
-  const variantPartialEligible=cacheFailureCode&&assessment.correctness==='passed'&&measurement?.detailComplete===true&&
+  const variantPartialEligible=cacheFailureCode&&assessment.correctness==='passed'&&measurement?.aggregateComplete===true&&
     evidence?.progress?.cachePersistenceStatus!=='failed'&&evidence?.progress?.cache?.writeFailures===0&&evidence?.progress?.cache?.readFailures===0;
-  const correctness=actionResults.some(row=>row.status==='failed')||crashed||reason==='project-open-failed'||reason==='project-open-unavailable'
+  const correctness=actionResults.some(row=>row.status==='failed')||crashed||
+    ['project-open-failed','project-open-unavailable','engineering-semantic-failed','settled-without-semantic'].includes(reason)
     ?'failed':variantPartialEligible?'partial':assessment.correctness;
   const defectAssessment=variantPartialEligible?{kind:'input-variant',status:'cache-not-persistable',sourceSha256:sample.sourceSha256,variant:inputVariant}:assessment.defectAssessment;
   const report={version:'gim-benchmark-v1',runId,kind:doctor?'native-capability-probe':'native-scene',projectType:observation?.projectType??null,conditions,buildFingerprint:build.sourceFingerprint,processInstanceId:runId,
     evidenceAtMs:evidence?.evidenceAtMs??null,finalSnapshotAtMs:observation?.snapshotAtMs??null,
+    finalEvidenceIssue:finalEvidenceFailure,lateBackgroundTasks,
     semanticDigest:evidence?.semanticDigest??null,
     semanticDigestScope:evidence?.semanticDigestScope??null,pendingDigest:evidence?.pendingDigest??null,
     pendingCount:evidence?.pendingCount??null,pendingSourceCount:evidence?.pendingSourceCount??null,
@@ -261,13 +309,15 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     contentEvidence:evidence?.contentEvidence??null,
     correctness,defectAssessment,inputVariant,inputVariantCode:inputVariant?'INPUT_VARIANT':null,
     inputIntegrity:reason==='input-corrupt'?'corrupt':null,cacheFailureCode,cacheAssessment,
-    measurementDetailDropped:measurement?.loss?.detailEvents??null,measurementAggregatedDetail:measurement?.aggregatedDetail??null,
+    measurementDetailDropped:measurement?.loss?.detailEvents??null,
+    measurementDetailStatus:measurement?.detailComplete?'complete':measurement?.aggregateComplete?'aggregate-only':'incomplete',
+    measurementAggregatedDetail:measurement?.aggregatedDetail??null,
     cacheFailureCount:(evidence?.progress?.cache?.writeFailures??0)+(evidence?.progress?.cache?.readFailures??0)+
       (evidence?.progress?.cachePersistenceStatus==='failed'?1:0),
     cacheVerified:cacheAssessment.published,cachePublished:cacheAssessment.published,coverageComplete:cacheAssessment.coverageComplete??null,
     measurementLifecycleComplete:measurement?.lifecycleComplete===true,
     measurementLifecycleIssues:measurement?.lifecycleIssues??[],
-    measurementComplete:!reason&&processMemoryComplete&&streamFailures===0&&cleanupComplete&&!!measurement?.detailComplete&&
+    measurementComplete:!reason&&processMemoryComplete&&streamFailures===0&&cleanupComplete&&measurement?.aggregateComplete===true&&
       measurement?.lifecycleComplete===true&&!measurement.activeTasks.length&&!missingWorkers.length&&!unavailableWorkers.length,
     requiredMetrics:['firstResponseMs','automaticLoadMs','processPrivatePeakBytes'],metrics:{firstResponseMs:observation?.moments.navigationUiReady??observation?.moments.coreSemanticReady??null,firstGeometryMs:observation?.moments.firstGeometryReady??observation?.moments.firstUsableGeometryReady??null,automaticLoadMs:automaticMs,cachePublishMs,
       settledMs,writeDrainMs:automaticMs!==null&&observation?.devArtifactWriteElapsedMs!=null

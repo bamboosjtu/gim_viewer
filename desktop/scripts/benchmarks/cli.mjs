@@ -1,11 +1,12 @@
-import {existsSync,mkdirSync,readFileSync,writeFileSync} from 'node:fs';
+import {existsSync,mkdirSync,readFileSync,writeFileSync,readdirSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {randomBytes} from 'node:crypto';
 import {registerSamples,inventorySamples,selectSamples,workspacePath} from './samples.mjs';
 import {buildAcceptance} from './acceptance-build.mjs';
 import {runNative} from './native-run.mjs';
-import {approveBaseline,baselineApprovalIssue,compareSuites} from './compare.mjs';
+import {approveBaseline,baselineApprovalIssue,compareSuites,createPartialReview} from './compare.mjs';
 import {freezeProfile,verifyProfile} from './profiles.mjs';
 import {runMatrix} from './matrix.mjs';
 import {lifecycleExercise} from './lifecycle.mjs';
@@ -19,6 +20,7 @@ const [command,...args]=process.argv.slice(2);
 const option=name=>{const index=args.findIndex(value=>value===`--${name}`||value===`-${name}`);return index<0?undefined:args[index+1];};
 const read=path=>JSON.parse(readFileSync(workspacePath(root,resolve(path)),'utf8'));
 const write=(name,value)=>{mkdirSync(home,{recursive:true});const path=join(home,name);writeFileSync(path,JSON.stringify(value,null,2));console.log(path);return path;};
+const approvalName=(kind,digest)=>`${kind}-${digest.slice(0,16)}-${Date.now()}-${randomBytes(4).toString('hex')}.json`;
 mkdirSync(home,{recursive:true});for(const name of ['TEMP','TMP','TMPDIR'])process.env[name]=home;
 try{
   if(command==='init'){
@@ -89,17 +91,32 @@ try{
       requireContentEvidence:command==='gate',
     });
     write('comparison.json',result);process.exitCode=['PASS','PARTIAL'].includes(result.outcome)?0:result.outcome==='FAIL'?1:2;
+  }else if(command==='review-partial'){
+    if(!option('candidate')||!option('reviewer')||!option('reason'))throw Error('Explicit --candidate, --reviewer and --reason required');
+    const review=createPartialReview(read(option('candidate')),option('reviewer'),option('reason'));
+    write(approvalName('partial-review',review.candidateDigest),review);
   }else if(command==='approve-baseline'){
     if(!option('candidate')||!option('approver'))throw Error('Explicit --candidate and --approver required');
-    write('baseline.approved.json',approveBaseline(read(option('candidate')),option('approver'),{
-      acceptPartial:args.includes('--accept-partial'),partialReason:option('partial-reason')??'',
-      sourceReviewed:args.includes('--source-reviewed'),
-      previousBaseline:option('previous-baseline')?read(option('previous-baseline')):null}));
+    const candidate=read(option('candidate'));
+    if(candidate.outcome==='PARTIAL'&&args.includes('--first-partial')){
+      const partialSources=new Set(candidate.runs?.filter(run=>run.correctness==='partial').map(run=>run.conditions?.sourceSha256));
+      const knownPrior=readdirSync(home).filter(name=>/^baseline-[a-f0-9]{16}-\d+-[a-f0-9]{8}\.approved\.json$/.test(name)).some(name=>{
+        try{const baseline=read(join(home,name));return !baselineApprovalIssue(baseline)&&
+          baseline.runs?.some(run=>partialSources.has(run.conditions?.sourceSha256));}catch{return false;}
+      });
+      if(knownPrior)throw Error('Existing approved baseline requires --previous-baseline');
+    }
+    const approved=approveBaseline(candidate,option('approver'),{
+      acceptPartial:args.includes('--accept-partial'),
+      partialReview:option('partial-review')?read(option('partial-review')):null,
+      firstPartial:args.includes('--first-partial'),
+      previousBaseline:option('previous-baseline')?read(option('previous-baseline')):null});
+    write(approvalName('baseline',approved.approval.candidateDigest).replace(/\.json$/,'.approved.json'),approved);
   }else if(command==='report'){
     if(!option('input'))throw Error('--input required');
     console.log(await renderReport(workspacePath(root,resolve(option('input'))),join(root,'output','gim-bench',`report-${Date.now()}`)));
   }else{
-    console.log('gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [-repeat <n>] [--timeout-seconds <n>]\ninit | samples | inventory | select | freeze-profile [--name commit-gate] | build | doctor --build <manifest> | run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev] | matrix --build <manifest> --profile <json> | overhead --build <manifest> --profile <json> --sample <id> | lifecycle --build <manifest> --sample <id> [--second-sample <id>] | compare|gate --baseline <json> --candidate <json> | report --input <json> | approve-baseline --candidate <json> --approver <name> [--accept-partial --source-reviewed --partial-reason <reason>] [--previous-baseline <json>]');
+    console.log('gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [-repeat <n>] [--timeout-seconds <n>]\ninit | samples | inventory | select | freeze-profile [--name commit-gate] | build | doctor --build <manifest> | run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev] | matrix --build <manifest> --profile <json> | overhead --build <manifest> --profile <json> --sample <id> | lifecycle --build <manifest> --sample <id> [--second-sample <id>] | compare|gate --baseline <json> --candidate <json> | report --input <json> | review-partial --candidate <json> --reviewer <name> --reason <code> | approve-baseline --candidate <json> --approver <name> [--accept-partial --partial-review <json> (--first-partial | --previous-baseline <json>)]');
     if(command)process.exitCode=1;
   }
 }catch(error){console.error(`[gim-bench] ${error.message}`);process.exitCode=1;}

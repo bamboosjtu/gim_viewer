@@ -28,13 +28,14 @@ export class DevLodArtifactWriter {
   private writeSlots = 0;
 
   private writeWaiters: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+  private readonly maxWrites = 8;
 
   private pendingWrites = new Map<string, Promise<void>>();
 
   private writeAdmissions = new Map<string, Promise<void>>();
 
   private async withWriteSlot<T>(work: () => Promise<T>): Promise<T> {
-    while (this.writeSlots >= 4) {
+    while (this.writeSlots >= this.maxWrites) {
       if (!this.options.current()) throw new DOMException('DEV cache write cancelled', 'AbortError');
       await new Promise<void>((resolve, reject) => this.writeWaiters.push({ resolve, reject }));
     }

@@ -1,18 +1,19 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {compareRuns,approveBaseline,baselineApprovalIssue,runReadiness,digest} from './compare.mjs';
+import {compareRuns,approveBaseline,baselineApprovalIssue,runReadiness,digest,createPartialReview} from './compare.mjs';
 import {selectSamples} from './samples.mjs';
 import {CdpConnection} from './cdp.mjs';
 import {cacheVerified,coldWarmEquivalent,freezeProfile,verifyProfile} from './profiles.mjs';
-import {readyForSettle,cachePublicationMoment,finalEvidenceAligned} from './completion.mjs';
+import {readyForSettle,cachePublicationMoment,finalEvidenceAligned,finalEvidenceIssue} from './completion.mjs';
 import {prepareFixedRuntimeSecurity} from '../fixed-runtime-security.mjs';
 import {warmPreparation} from './warm-preparation.mjs';
 import {bareContainerKind} from './container-magic.mjs';
 import {runMatrix} from './matrix.mjs';
 import {nativeExitCode} from './cli-outcome.mjs';
+import {pairedWebviewProfile} from './cache-roots.mjs';
 import {mkdirSync,mkdtempSync,writeFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
-const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
+const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
 const contentEvidence={scope:'DEV-L0-GLB-artifacts',method:'worker-output-or-validated-cache-sha256',
   availability:'available',coveredOccurrences:1,expectedShownOccurrences:1,missingArtifactSha:0,
   duplicateArtifactIds:0,digest:'a'.repeat(64),placementFingerprint:'b'.repeat(64),complete:true};
@@ -22,6 +23,7 @@ const runs=(prefix,value)=>Array.from({length:3},(_,i)=>({conditions:{...conditi
 test('warm preparation follows cache publication for both batch and matrix',()=>{
   const cold={correctness:'partial',cachePublished:true,cacheFailureCount:0,reason:null,crashed:false};
   assert.equal(warmPreparation(cold).ready,true);
+  assert.equal(warmPreparation({...cold,reason:'final-evidence-drift'}).ready,true);
   assert.equal(warmPreparation({...cold,cachePublished:false,cacheFailureCode:'CACHE_NOT_PERSISTABLE'}).reason,
     'WARM_UNSUPPORTED:CACHE_NOT_PERSISTABLE');
   assert.equal(warmPreparation({...cold,cachePublished:false}).ready,false);
@@ -35,6 +37,10 @@ test('single native run returns success for evidence-backed PARTIAL',()=>{
   assert.equal(nativeExitCode('run','FAIL'),1);
   assert.equal(nativeExitCode('run','INCONCLUSIVE'),2);
   assert.equal(nativeExitCode('doctor','PARTIAL'),2);
+});
+test('cold and warm processes reuse the same WebView2 IndexedDB profile',()=>{
+  const dataRoot=join(resolve('..','tmp','profile-protocol'), 'cache');
+  assert.equal(pairedWebviewProfile(dataRoot),join(resolve('..','tmp','profile-protocol'),'webview-profile'));
 });
 test('matrix never attempts warm for a non-persistable input variant',async()=>{
   const workspace=resolve('..','tmp','matrix-protocol-tests');mkdirSync(workspace,{recursive:true});
@@ -54,7 +60,12 @@ test('final evidence rejects a task that changes progress during tail drain',()=
   const evidence={evidenceAtMs:10,checks:[{name:'session-stable',passed:true}],progress:{workload:{shown:1}}};
   const snapshot={snapshotAtMs:11,measurement:{activeTasks:[]},progress:{workload:{shown:2}}};
   assert.equal(finalEvidenceAligned(evidence,snapshot),false);
+  assert.equal(finalEvidenceIssue(evidence,snapshot),'progress-drift');
+  assert.equal(finalEvidenceIssue(evidence,{...snapshot,measurement:{activeTasks:[{family:'spatial'}]}}),'active-tasks');
+  assert.equal(finalEvidenceIssue({...evidence,checks:[{name:'session-stable',passed:false}]},snapshot),'session-mismatch');
   assert.equal(finalEvidenceAligned({...evidence,progress:snapshot.progress},snapshot),true);
+  assert.equal(finalEvidenceAligned({...evidence,progress:{cache:{b:2,a:1},workload:{shown:2}}},
+    {...snapshot,progress:{workload:{shown:2},cache:{a:1,b:2}}}),true);
   assert.equal(finalEvidenceAligned({...evidence,evidenceAtMs:12,progress:snapshot.progress},snapshot),false);
 });
 test('missing evidence is inconclusive, explicit correctness failure is fail',()=>{
@@ -90,10 +101,10 @@ test('confirmed environment suspend is inconclusive rather than a product crash'
 });
 test('detail truncation is visible even when aggregate counters survive',()=>{
   const b=runs('base',100),c=runs('candidate',100);
-  c[0].measurementComplete=false;c[0].measurementDetailDropped=10888;
+  c[0].measurementDetailDropped=10888;c[0].measurementDetailStatus='aggregate-only';
   const result=compareRuns(b,c);
-  assert.equal(result.outcome,'INCONCLUSIVE');
-  assert.ok(result.reasons.includes('measurement-detail-truncated:10888'));
+  assert.equal(result.outcome,'PASS');
+  assert.equal(c[0].measurementDetailDropped,10888);
 });
 test('different metric sets cannot pass by comparing missing values',()=>{
   const b=runs('base',100),c=runs('candidate',100);for(const run of c){run.requiredMetrics=['otherMs'];run.metrics={otherMs:1};}
@@ -127,15 +138,23 @@ test('single paired process is comparable; partial coverage needs explicit basel
   assert.equal(compareRuns(b.map(partial),c.map(row=>({...partial(row),evidence:{progress:{cache:{writeFailures:1}}}}))).outcome,'FAIL');
   const candidate={version:'gim-benchmark-candidate-v1',outcome:'PARTIAL',selectionFrozen:true,runs:b.map(partial),measurementAcceptance:{outcome:'PASS'}};
   assert.throws(()=>approveBaseline(candidate,'developer'),/explicit approver/);
-  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true}),/source review/);
-  const approved=approveBaseline(candidate,'developer',{acceptPartial:true,sourceReviewed:true,partialReason:'Source evidence checked against archive'});
+  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true}),/partial-review-required/);
+  assert.throws(()=>createPartialReview(candidate,'auditor','free text with a private path'),/controlled source limitation/);
+  const review=createPartialReview(candidate,'auditor','source-geometry');
+  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true,partialReview:{...review,partialReason:'engineering-coverage'},firstPartial:true}),/partial-review-digest-mismatch/);
+  assert.throws(()=>approveBaseline(candidate,'auditor',{acceptPartial:true,partialReview:review,firstPartial:true}),/distinct source reviewer/);
+  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true,partialReview:review}),/first-partial review or a previous approved baseline/);
+  assert.throws(()=>approveBaseline({...candidate,selectionFrozen:false},'developer',{acceptPartial:true,partialReview:review,firstPartial:true}));
+  const approved=approveBaseline(candidate,'developer',{acceptPartial:true,partialReview:review,firstPartial:true});
   assert.equal(approved.approval.partialAccepted,true);
   assert.equal(baselineApprovalIssue(approved),null);
   assert.equal(baselineApprovalIssue({...approved,approval:{...approved.approval,partialReason:'changed'}}),
     'baseline-approval-metadata-mismatch');
   const previous=approveBaseline({outcome:'PASS',selectionFrozen:true,runs:b},'developer');
-  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true,sourceReviewed:true,
-    partialReason:'Source evidence checked against archive',previousBaseline:previous}),/differs from the previous approved baseline/);
+  assert.ok(approveBaseline(candidate,'developer',{acceptPartial:true,partialReview:review,
+    previousBaseline:approved}).approval.previousBaselineDigest);
+  assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true,partialReview:review,
+    previousBaseline:previous}),/differs from the previous approved baseline/);
   assert.equal(baselineApprovalIssue({...approved,approval:{...approved.approval,partialAccepted:false}}),'baseline-approval-metadata-mismatch');
   assert.equal(baselineApprovalIssue({...approved,outcome:'PASS'}),'baseline-approval-digest-mismatch');
 });

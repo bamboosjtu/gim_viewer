@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-const identityKeys=['machineId','runtimeSha256','buildMode','measurementVersion','detailPolicy','lifecyclePolicy','contentPolicy','mode','scenario','cacheState','sourceSha256','sampleId','profileDigest','workloadDigest','routeDigest','viewportDigest'];
+const identityKeys=['machineId','runtimeSha256','buildMode','measurementVersion','detailPolicy','lifecyclePolicy','contentPolicy','webviewProfilePolicy','mode','scenario','cacheState','sourceSha256','sampleId','profileDigest','workloadDigest','routeDigest','viewportDigest'];
 export function digest(value){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 export function median(values){const rows=[...values].sort((a,b)=>a-b);return rows.length%2?rows[(rows.length-1)/2]:(rows[rows.length/2-1]+rows[rows.length/2])/2;}
 const sha=value=>/^[a-f0-9]{64}$/.test(value??'');
@@ -55,8 +55,6 @@ export function runReadiness(run){
   if((run.version==='gim-benchmark-v1'&&run.measurementLifecycleComplete!==true)||
     run.measurementLifecycleComplete===false||run.measurement?.lifecycleComplete===false)
     reasons.push('measurement-lifecycle-incomplete');
-  if((run.measurementDetailDropped??run.measurement?.loss?.detailEvents??0)>0)
-    reasons.push(`measurement-detail-truncated:${run.measurementDetailDropped??run.measurement.loss.detailEvents}`);
   if(run.version==='gim-benchmark-v1'&&run.processSampling?.complete!==true)reasons.push('native-process-memory-incomplete');
   if(run.conditions?.profileDigest==='unfrozen')reasons.push('profile-not-frozen');
   if(run.cacheVerified!==true&&!(run.correctness==='partial'&&run.defectAssessment?.kind==='input-variant'))
@@ -112,19 +110,48 @@ export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidat
   return {outcome:retest.outcome,reasons:retest.reasons,metrics,retest:retest.metrics};
 }
 /** Promotion is an explicit CLI action; run/report/compare never invoke this. */
-export function approveBaseline(candidate,approver,{acceptPartial=false,partialReason='',sourceReviewed=false,previousBaseline=null}={}){
-  if(!approver?.trim()||!['PASS','PARTIAL'].includes(candidate.outcome)||candidate.outcome==='PARTIAL'&&!acceptPartial||candidate.selectionFrozen!==true||!candidate.runs?.length)throw Error('Complete frozen candidate and explicit approver required');
+const partialReasonFor=kinds=>kinds.size===1?({coverage:'engineering-coverage','source-geometry':'source-geometry',combined:'combined-source'})[[...kinds][0]]:'mixed-source';
+const reviewerValid=value=>typeof value==='string'&&value.trim().length>=2&&value.trim().length<=64&&
+  !/[\\/:\r\n]|\.gim\b/i.test(value);
+export function createPartialReview(candidate,sourceReviewer,partialReason){
+  if(candidate?.outcome!=='PARTIAL'||candidate.selectionFrozen!==true||!candidate.runs?.length||
+    !reviewerValid(sourceReviewer))throw Error('Frozen PARTIAL candidate and source reviewer required');
+  const partialRuns=candidate.runs.filter(run=>run.correctness==='partial');
+  if(!partialRuns.length||partialRuns.some(run=>run.defectAssessment?.status!=='evidence-backed'))
+    throw Error('Partial source evidence is incomplete');
+  const kinds=new Set(partialRuns.map(run=>run.defectAssessment?.kind));
+  if(partialReason!==partialReasonFor(kinds))throw Error('Partial reason must match the controlled source limitation');
+  const review={version:'gim-partial-review-v1',candidateDigest:digest(candidate),sourceReviewer:sourceReviewer.trim(),
+    partialReason,reviewedAt:new Date().toISOString()};
+  return {...review,reviewDigest:digest(review)};
+}
+export function partialReviewIssue(review,candidate){
+  if(!review)return 'partial-review-required';
+  const {reviewDigest,...metadata}=review;
+  if(metadata.version!=='gim-partial-review-v1'||reviewDigest!==digest(metadata))return 'partial-review-digest-mismatch';
+  if(metadata.candidateDigest!==digest(candidate))return 'partial-review-candidate-mismatch';
+  if(!reviewerValid(metadata.sourceReviewer))return 'partial-reviewer-invalid';
+  const kinds=new Set(candidate.runs.filter(run=>run.correctness==='partial').map(run=>run.defectAssessment?.kind));
+  if(metadata.partialReason!==partialReasonFor(kinds))return 'partial-review-reason-mismatch';
+  return null;
+}
+export function approveBaseline(candidate,approver,{acceptPartial=false,partialReview=null,firstPartial=false,previousBaseline=null}={}){
+  if(!reviewerValid(approver)||!['PASS','PARTIAL'].includes(candidate.outcome)||candidate.outcome==='PARTIAL'&&!acceptPartial||candidate.selectionFrozen!==true||!candidate.runs?.length)throw Error('Complete frozen candidate and explicit approver required');
   const groups=new Map();for(const run of candidate.runs){const key=digest(run.conditions);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(run);}
   if([...groups.values()].some(runs=>!['PASS','PARTIAL'].includes(checkGroup(runs).outcome)))throw Error('Baseline runs are incomplete');
   if(candidate.outcome==='PARTIAL'&&candidate.runs.some(run=>run.correctness==='partial'&&run.defectAssessment?.status!=='evidence-backed'))
     throw Error('Partial coverage lacks runtime evidence');
   if(candidate.outcome==='PARTIAL'){
-    if(!sourceReviewed||partialReason.trim().length<8)throw Error('Partial baseline requires source review and a reason');
+    const issue=partialReviewIssue(partialReview,candidate);if(issue)throw Error(`Partial baseline ${issue}`);
+    if(partialReview.sourceReviewer.toLowerCase()===approver.trim().toLowerCase())
+      throw Error('Partial baseline requires a distinct source reviewer');
+    if(firstPartial===!!previousBaseline)throw Error('Partial baseline requires either first-partial review or a previous approved baseline');
     if(previousBaseline){
       const issue=baselineApprovalIssue(previousBaseline);if(issue)throw Error(`Previous baseline ${issue}`);
       const prior=new Map(previousBaseline.runs.map(run=>[digest([run.conditions?.sourceSha256,run.conditions?.scenario,run.conditions?.cacheState]),run]));
       for(const run of candidate.runs){
         const old=prior.get(digest([run.conditions?.sourceSha256,run.conditions?.scenario,run.conditions?.cacheState]));
+        if(run.correctness==='partial'&&!old)throw Error('Previous baseline lacks a matching partial scenario');
         if(old&&run.correctness==='partial'&&(old.correctness!=='partial'||partialSignature(old)!==partialSignature(run)))
           throw Error('Partial coverage differs from the previous approved baseline');
       }
@@ -137,7 +164,9 @@ export function approveBaseline(candidate,approver,{acceptPartial=false,partialR
   if((candidate.version==='gim-benchmark-candidate-v1'||candidate.runs.some(run=>run.version==='gim-benchmark-v1'))&&candidate.measurementAcceptance?.outcome!=='PASS')throw Error('Measurement acceptance evidence required before baseline approval');
   const approval={approver:approver.trim(),at:new Date().toISOString(),candidateDigest:digest(candidate),
     partialAccepted:candidate.outcome==='PARTIAL',...(candidate.outcome==='PARTIAL'?{
-      partialReason:partialReason.trim(),sourceReviewed:true,previousBaselineDigest:previousBaseline?digest(previousBaseline):null}: {})};
+      partialReason:partialReview.partialReason,sourceReviewer:partialReview.sourceReviewer,
+      sourceReviewDigest:partialReview.reviewDigest,sourceReviewedAt:partialReview.reviewedAt,firstPartial,
+      previousBaselineDigest:previousBaseline?digest(previousBaseline):null}: {})};
   return {...candidate,approval:{...approval,approvalDigest:digest(approval)}};
 }
 
@@ -148,7 +177,11 @@ export function baselineApprovalIssue(baseline){
   const {approvalDigest,...metadata}=approval;
   if(approvalDigest!==digest(metadata))return 'baseline-approval-metadata-mismatch';
   if((baseline.outcome==='PARTIAL'||(baseline.runs??[]).some(run=>run.correctness==='partial'))&&
-    (approval.partialAccepted!==true||approval.sourceReviewed!==true||!approval.partialReason?.trim()))
+    (approval.partialAccepted!==true||!reviewerValid(approval.sourceReviewer)||
+      approval.sourceReviewer.trim().toLowerCase()===approval.approver?.trim().toLowerCase()||
+      !['engineering-coverage','source-geometry','combined-source','mixed-source'].includes(approval.partialReason)||
+      !/^[a-f0-9]{64}$/.test(approval.sourceReviewDigest??'')||
+      approval.firstPartial===!!approval.previousBaselineDigest))
     return 'partial-baseline-not-accepted';
   return null;
 }

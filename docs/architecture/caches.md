@@ -16,7 +16,7 @@
 
 SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `powerline_*`。读取时按工程 ID、源 SHA 和域版本校验，不能只凭表中有行判定命中。
 
-无 GIMPKG 头的裸 7z/ZIP 先由原生解压层按签名和配额处理，工程类型仍由内容决定；原生清单按源 SHA 绑定，并给独立落盘条目提供缓存路径。若改走 WASM 回退，全部归档条目都要持久化后才能发布完整 SQLite 索引。工程来源图 `partial` 表示来源覆盖不完整，可能不写 Engineering Worker 的来源/实体/导航派生缓存；它不否定已通过校验的 SQLite 变电核心缓存。
+无 GIMPKG 头的裸 7z/ZIP 先由原生解压层按签名和配额处理，工程类型仍由内容决定；原生清单按源 SHA 绑定。裸 7z 与 GIMPKGS 使用同一通用来源 pack 保存非 IFC 条目，独立落盘的 IFC 保留缓存路径；pack 选择不决定工程或设备语义。若改走 WASM 回退，全部归档条目都要持久化后才能发布完整 SQLite 索引。工程来源图 `partial` 表示来源覆盖不完整，可能不写 Engineering Worker 的来源/实体/导航派生缓存；它不否定已通过校验的 SQLite 变电核心缓存。
 
 ## 当前契约
 

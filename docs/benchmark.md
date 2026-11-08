@@ -70,7 +70,8 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | `compare` | 比较基线与候选 | `--baseline <json>`、`--candidate <json>`；可选 `--retest-baseline <json>`、`--retest-candidate <json>` |
 | `gate` | 门禁比较，要求基线带有效批准摘要 | 同 `compare` |
 | `report` | 从已有结果 JSON 重新生成 HTML 报告 | `--input <json>` |
-| `approve-baseline` | 显式批准候选为基线 | `--candidate <json>`、`--approver <名称>`；PARTIAL 还需 `--accept-partial --source-reviewed --partial-reason <原因>`，可用 `--previous-baseline <已批准基线>` 防止签名倒退 |
+| `review-partial` | 独立复核 PARTIAL 来源证据并生成候选摘要绑定的私有记录 | `--candidate <json> --reviewer <复核者> --reason <受控代码>` |
+| `approve-baseline` | 显式批准候选为基线 | `--candidate <json> --approver <批准者>`；PARTIAL 还需 `--accept-partial --partial-review <复核记录>`，首次加 `--first-partial`，后续提供 `--previous-baseline <已批准基线>` |
 | `batch` | 按目录或注册表批量执行冷开、暖开与重复轮次 | `--build <清单>`；`--directory <目录>` 或 `--registry <json>`；可选 `--output <目录>`、`--anonymize`（`true`/`false`）、`--preset`（`survey`/`baseline`）、`-repeat`/`--repeat <n>`、`--timeout-seconds <n>` |
 
 ## 命令与退出码
@@ -84,7 +85,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | 矩阵与开销 | `matrix`、`overhead` | `PASS`/`PARTIAL`→0；其他→2；`FAIL` 也是 2 |
 | 单样本 | `run` | `PASS`/`PARTIAL`→0；`FAIL`→1；其他→2 |
 | 自检 | `doctor`、`lifecycle` | 只有 `PASS`→0；其他→2 |
-| 辅助命令 | `init`、`samples`、`inventory`、`select`、`freeze-profile`、`build`、`report`、`approve-baseline` | 成功→0；参数或执行异常→1 |
+| 辅助命令 | `init`、`samples`、`inventory`、`select`、`freeze-profile`、`build`、`report`、`review-partial`、`approve-baseline` | 成功→0；参数或执行异常→1 |
 
 - 缺少必需参数、未知命令或未捕获异常走统一异常路径，返回 1；上表描述的是命令完成后的结果映射。
 - `batch` 是唯一安装 Ctrl+C / SIGTERM 取消控制并返回 130 的命令；取消还写入 `CANCELLED`。
@@ -174,6 +175,7 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 | `errors.csv` | 需要关注的 `PARTIAL`、失败、不完整、跳过及取消行；重复别名仍保留在全量结果中 |
 | `summary.csv` | 按输入和冷暖状态汇总中位数与状态计数 |
 | `stages.csv` | 每个运行的阶段次数、wall time、最大值和 p50/p95/p99 区间 |
+| `slow-tasks.csv`、`slow-phases.csv` | 每个运行耗时最长的十个 Worker 任务和单次阶段，使用匿名来源 ID；聚合直方图不充作单次阶段 |
 | `workers.csv` | 每个 Worker 的类型、堆采样可用性、样本数、观测峰值和延迟 |
 | `results.json` | 机器读取的结果、运行条件、正确性检查、工作量、比较所需指标与冷暖一致性结果 |
 | `profile.json` | 本批次冻结的来源 SHA、动作、模式、轮数、超时与摘要 |
@@ -182,11 +184,12 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 - 字段名以本次构建生成的 `results.json` 与 `results.csv` 表头为准；本页只维护文件用途与判读边界，不逐列冻结字段名。
 - 汇总分别计数 `PASS` 与 `PARTIAL`；同组轮次的 PARTIAL 签名不同时中位数留空，`coverageGroups` 与 `partialSignatures` 给出分组证据。
 - 覆盖汇总同时给出有效轮次和计划轮次，以及基础设施重试次数。少于计划轮次的中位数可供诊断，但不能冒充完整基线。
-- 测量明细丢失数表示真正的截断或未确认的 Worker 尾批，不包含有意聚合的事件。Worker 批次有连续 ID、确认和任务结束标记，异常截断不能静默通过。
+- `measurementDetailStatus=aggregate-only` 表示详细时间线因容量截断，但阶段聚合、任务闭环和必要采样仍完整；截断条数保留，产品 PASS/PARTIAL 不因此变成 INCONCLUSIVE。未确认的 Worker 尾批、序号缺口或聚合丢失仍使测量不完整。Worker 批次有连续 ID、确认和任务结束标记。
 - `measurementLifecycleComplete` 与 `measurementComplete` 分开：意外 Worker 终止的在途任务、超时、无理由取消和异常迟到事件使生命周期不完整；有受控原因的项目切换/关闭或 AbortError 取消可以正常结算。DEV 精细请求主动终止 Worker 时按任务身份登记取消，不豁免池内其他任务。外来 run 和重复序号使事件传输不完整，不能被静默忽略。
 - `pendingCount`、`pendingSourceCount`、`pendingDigest` 单列；语义摘要已包括待归对象的身份、原因、来源、类别和 disposition。冷暖逐项比较 pending 证据。
 - `geometryStructuralFingerprint` 是结构指纹，不是顶点/索引内容校验。`devContentDigest` 聚合 DEV L0 GLB 的字节 SHA，`devContentCovered` 与 `devContentComplete` 标注实际覆盖；IFC/L2 内容不在该证据范围。
 - `automaticLoadMs` 是自动表示终态；`settledMs` 是任务、缓存、后台及静默窗口全部完成时刻。`writeDrainMs` 只量最后一笔 DEV 产物写晚于自动表示的部分，不代表全部写入时间。样本覆盖 tab 同时列出自动表示、缓存发布和完全结算的中位数。
+- 冷暖配对复用 SQLite 数据根和 WebView2 用户数据目录；IFC LOD 的 IndexedDB 缓存位于后者。旧的独立 WebView profile 运行条件不可与新口径比较。运行中的 `progress.private.json` 每 30 秒保留一次匿名状态快照，只存工作区私有目录。变电语义无进展时，无活动工程任务 120 秒、有活动工程任务 300 秒后以 `engineering-progress-stalled` 结束为 INCONCLUSIVE；明确工程语义失败立即报 FAIL。
 - 关联的 Worker 若在两个堆采样周期内终止且只有一次任务，堆值标为 `short-lived / ended-before-heap-sample`；不填零。其余 Worker 区分 `unavailable`（收到失败原因）与 `missing`（从未收到记录），两者均使测量不完整。
 - 原始端点错误、调试端口、应用 PID/退出状态、进程采样尾部和 WebView2 日志尾部只写入私有运行目录（如 `tmp/gim-bench/runs/<runId>/startup.private.json`），不进入可分享报告。
 
@@ -271,7 +274,7 @@ SQLite 核心缓存发布单独验证；冷开缓存已发布、产品正确性�
 
 ```powershell
 npm run bench -- compare --baseline ../output/benchmark-base/results.json --candidate ../output/benchmark-next/results.json
-npm run bench -- gate --baseline ../tmp/gim-bench/baseline.approved.json --candidate ../output/benchmark-next/results.json
+npm run bench -- gate --baseline ../tmp/gim-bench/<已批准基线>.approved.json --candidate ../output/benchmark-next/results.json
 ```
 
 - 比较按来源、场景、冷暖状态及测量模式分别分组，不把多工程的指标混成一个中位数。
@@ -280,8 +283,24 @@ npm run bench -- gate --baseline ../tmp/gim-bench/baseline.approved.json --candi
 - 普通 `compare` 可读取结构指纹和已有内容证据，但不把缺少内容证明作为普通测量失败。正式 `approve-baseline` 和 `gate` 要求 DEV L0 内容摘要覆盖所有已显示根；字节摘要或放置指纹变化为 INCONCLUSIVE，不能仅凭相同包围盒自动通过。无 DEV 表示的输入标为不适用，不伪造内容 SHA。
 - 超过 10% 要求独立复测，仍超限为 `FAIL`。
 - 摸底批次的 `PASS`/`PARTIAL` 仅表示该次计划执行结果。`baseline` 批次要求冷暖等价、来源缺口摘要及工作量一致；正式认可仍需探针开销、十轮生命周期与测量能力等验收。
-- 完整正确性基线只接受 `PASS`。`PARTIAL` 是显式接受的覆盖基线：认可者必须核对来源证据，提供 `--source-reviewed --partial-reason`；理由不得包含私有工程名或路径。有上一次已批准基线时可指定 `--previous-baseline`，相同来源从 PASS 退到 PARTIAL 或 PARTIAL 签名变化会被拒绝。首次接受仍依赖人工核对，不能由候选报告自证。
+- 完整正确性基线只接受 `PASS`。`PARTIAL` 是显式接受的覆盖基线：来源复核者先运行 `review-partial`，其记录绑定候选摘要、复核身份、时间和受控原因；另一位批准者再引用该记录，不能仅在批准命令中自报已复核。原因只接受与候选证据相符的 `source-geometry`、`engineering-coverage`、`combined-source` 或 `mixed-source`。首次须显式 `--first-partial`；本地已有同来源批准记录时 CLI 拒绝再次声明首次，后续须提供上一份已批准基线，相同来源从 PASS 退到 PARTIAL 或缺口签名变化会被拒绝。复核和批准文件以候选摘要及时间命名，保存在工作区私有 `tmp/`，不覆盖上一份记录，也不存自由文本工程名或路径。工具核对记录与身份不同，仍无法替代实际人工审阅。
 - SDK 迁移不在本轮 Benchmark 范围内。完整指标口径见[测量架构](architecture/measurement.md)。
+
+### v1 到 v2 的基线迁移
+
+`task-phase-timeline-v1` 报告只作历史参考。v2 增加 Worker 批次确认、最终证据核对和生命周期口径；冷暖还需共用 WebView2 profile（`paired-webview-profile-v1`）。比较工具对旧条件返回 `incomparable:detailPolicy` 或缺少 profile 条件，不自动换算指标，也不复制旧批准元数据。
+
+开发者在同一机器、固定运行时和构建方式下重新构建 Benchmark，按冻结注册表执行 L1 变电/线路至少三组独立冷暖配对，并完成 L0 关键样本、探针开销及十轮资源回落检查。核对工作量、语义/几何摘要与缓存域后，显式批准新候选。未完成的 L0 项或冷暖异常保持 INCONCLUSIVE，旧 v1 基线仅供定位变化，不参加 v2 门禁。真实样本与性能矩阵只在开发者本地运行。
+
+```powershell
+cd desktop
+npm run bench -- build
+npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json --registry ../benchmarks/l1/substation01-04.json --preset baseline -repeat 3 --output ../output/l1-substation-v2
+npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json --registry ../benchmarks/l1/line01-06.json --preset baseline -repeat 3 --output ../output/l1-line-v2
+npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json --registry ../benchmarks/l0/common-design-500kv.json --preset baseline -repeat 3 --output ../output/l0-500-v2
+```
+
+实际注册表的文件须由开发者在工作区提供并核对 SHA；命令只说明本地验收路径，不构成已执行结果。
 
 ## 相关文档
 

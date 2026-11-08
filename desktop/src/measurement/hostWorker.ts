@@ -141,8 +141,12 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
   worker.terminate = () => {
     if (stopped) return; stopped = true;
     const active=run.collector.snapshot().activeTasks.some(task=>task.workerId===workerId);
-    if(taskSeen&&!active&&(receivedBatchId!==flushedBatchId||lastBatchSequence!==flushedSequence))
-      run.probe.event(context,{kind:'loss',name:'worker-terminal-tail-unconfirmed',workload:{events:1}});
+    if(taskSeen&&(receivedBatchId!==flushedBatchId||lastBatchSequence!==flushedSequence)){
+      if(active)run.probe.event(context,{kind:'counter',
+        name:run.collector.intentionalTermination(workerId)?'worker.cancelled-unconfirmed-tail':'worker.active-tail-unconfirmed',
+        workload:{workers:1}});
+      else run.probe.event(context,{kind:'loss',name:'worker-terminal-tail-unconfirmed',workload:{events:1}});
+    }
     run.probe.event(context, { kind: 'worker', name: 'terminated', status: 'aborted', workload: { clockReady: Number(clockReady) } });
     sentAt.clear();taskContexts.clear();cancelTaskMeasurement.delete(worker);producedContext=undefined;
     for(const flight of flights.values())flight.release();flights.clear();

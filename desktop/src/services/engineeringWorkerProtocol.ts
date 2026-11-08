@@ -42,6 +42,7 @@ export type EngineeringWorkerCommand =
 export type EngineeringWorkerRequest = EngineeringWorkerCommand & { requestId: number };
 export type EngineeringWorkerReply =
   | { type: 'ready' }
+  | { type: 'progress'; stage: 'extract' }
   | { type: 'graph'; summary: EngineeringExtractSummary; geometryOccurrences: SourceGeometryOccurrenceCatalog }
   | { type: 'model'; result: EngineeringWorkerPayload }
   | { type: 'cache'; result: EngineeringCacheResult }

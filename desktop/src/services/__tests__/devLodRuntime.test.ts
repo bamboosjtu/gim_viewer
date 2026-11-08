@@ -352,10 +352,10 @@ it('releases admitted write-slot waiters on project close without starting addit
   const completions:Array<(value:{ok:boolean})=>void>=[];
   const write=vi.spyOn(cache,'writeDevArtifactDetailed').mockImplementation(()=>new Promise(resolve=>completions.push(resolve)));
   try {
-    await Promise.all(Array.from({length:6},(_,i)=>internal.persistArtifact('catalog',String(i),{bounds:[0,0,0,1,1,1]})));
-    expect(write).toHaveBeenCalledTimes(4);expect(internal.artifactWriter.writeWaiters).toHaveLength(2);
+    await Promise.all(Array.from({length:10},(_,i)=>internal.persistArtifact('catalog',String(i),{bounds:[0,0,0,1,1,1]})));
+    expect(write).toHaveBeenCalledTimes(8);expect(internal.artifactWriter.writeWaiters).toHaveLength(2);
     runtime.release();await vi.waitFor(()=>expect(runtime.diagnostics.cacheWriteCancelled).toBe(2));
-    expect(internal.artifactWriter.writeWaiters).toHaveLength(0);expect(write).toHaveBeenCalledTimes(4);
+    expect(internal.artifactWriter.writeWaiters).toHaveLength(0);expect(write).toHaveBeenCalledTimes(8);
     completions.forEach(resolve=>resolve({ok:true}));await Promise.all([...internal.artifactWriter.pendingWrites.values()]);
     expect(internal.artifactWriter.writeBudget.bytes).toBe(0);expect(internal.artifactWriter.pendingWrites.size).toBe(0);
   } finally {completions.forEach(resolve=>resolve({ok:true}));runtime.release();write.mockRestore();}

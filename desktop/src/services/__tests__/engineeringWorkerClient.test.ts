@@ -37,3 +37,18 @@ it('transfers a shared native batch buffer only once', async () => {
   expect(vi.mocked(worker.postMessage).mock.calls[0][1]).toHaveLength(1);
   client.close();
 });
+
+it('keeps a large extraction alive only while its Worker reports progress', async () => {
+  vi.useFakeTimers();const worker=port(),client=new EngineeringWorkerClient(worker,()=>true);
+  try{
+    const pending=client.extract();
+    const request=vi.mocked(worker.postMessage).mock.calls[0][0];
+    await vi.advanceTimersByTimeAsync(100_000);
+    worker.onmessage!({data:{type:'progress',stage:'extract',requestId:request.requestId}} as MessageEvent);
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    worker.onmessage!({data:{type:'graph',requestId:request.requestId,
+      summary:{ifcPaths:[],sourceRecords:0},geometryOccurrences:null}} as MessageEvent);
+    await pending;
+  }finally{client.close();vi.useRealTimers();}
+});

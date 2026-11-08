@@ -9,6 +9,7 @@ describe('measurement contracts (no engineering samples)',()=>{
     for(let i=0;i<500;i++)probe.record(context,'parse',1);
     expect(batches[0]).toHaveLength(128);expect(collector.snapshot().phases['dev:parse'].count).toBe(500);
     expect(collector.snapshot().loss.detailEvents).toBe(116);
+    expect(collector.snapshot()).toMatchObject({detailComplete:false,aggregateComplete:true});
     credit=2;collector.flushDetails();expect(batches).toHaveLength(3);expect(collector.snapshot().bufferedEvents).toBe(0);
   });
   it('ends a phase once on its own clock and preserves failed/cancelled outcomes',async()=>{
@@ -93,6 +94,16 @@ describe('measurement contracts (no engineering samples)',()=>{
     expect(snapshot.counters['dev:resource.acquire'].buffers).toBe(20000);
     expect(Object.values(snapshot.memory)[0].observedPeakBytes).toBe(19999);
     expect(collector.drain()).toHaveLength(1);
+  });
+  it('keeps a bounded slow phase list even after detail capacity is reached',()=>{
+    const {collector,probe,tick}=setup(2);
+    for(let ms=1;ms<=20;ms++)probe.record(context,'dev.compile',ms);
+    probe.event(context,{kind:'task',name:'started'});tick(33);
+    probe.event(context,{kind:'task',name:'ended',status:'completed'});
+    expect(collector.snapshot().slowestPhases).toHaveLength(10);
+    expect(collector.snapshot().slowestPhases[0].durationMs).toBe(20);
+    expect(collector.snapshot().slowestTasks[0].durationMs).toBe(33);
+    expect(collector.snapshot()).toMatchObject({detailComplete:false,aggregateComplete:true});
   });
   it('deduplicates shared views and conserves unique ownership across transfer/copy/eviction',()=>{
     const buffer=new ArrayBuffer(64);expect(uniqueBufferCapacity([new Uint8Array(buffer),new Float32Array(buffer),buffer])).toBe(64);

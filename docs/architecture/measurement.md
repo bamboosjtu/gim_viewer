@@ -12,7 +12,7 @@
 
 任务有 queued、started、produced、ended 事件。终止会结算尚未开始和正在运行的任务；迟到结束不重复结算。produced 表示 Worker 计算已产出结果，不能代替主线程消费、场景提交、持久化完成。现有业务 RPC、超时、取消、Transferable 和池调度仍由原有实现管理，测量不决定任务是否有效。
 
-`detailComplete` 只描述事件传输/聚合的完整性：明细丢弃、序号间隙、非法事件、聚合组溢出、外来 run 和重复序号都使它为 false。`lifecycleComplete` 单独要求没有活动任务、无授权 Worker 中断、异常终止、超时、无理由取消或异常迟到事件。项目关闭/切换会先用受控原因登记取消，再终止对应的在途任务；明确的 AbortError 任务结束也记录 `abort-error`。已取消任务的受控迟到确认可计数但不重复结算。原生 `measurementComplete` 同时要求这两层完整，不能用 `activeTasks` 已清空替代任务成功闭环。
+`detailComplete` 描述完整时间线：明细容量截断使它为 false。`aggregateComplete` 保留阶段统计和任务总量，仍要求无序号间隙、非法事件、聚合组溢出、外来 run、重复序号或 Worker 批次丢失；只有纯明细容量截断可以降为 `aggregate-only` 而不改变产品 PASS/PARTIAL。`lifecycleComplete` 单独要求没有活动任务、无授权 Worker 中断、异常终止、超时、无理由取消或异常迟到事件。项目关闭/切换会先用受控原因登记取消，再终止对应的在途任务；明确的 AbortError 任务结束也记录 `abort-error`。已取消任务的受控迟到确认可计数但不重复结算。原生 `measurementComplete` 要求聚合、任务生命周期及必要采样完整。
 
 ## 采集面
 
@@ -55,7 +55,7 @@ Windows 固定运行时的文件既需要 AppContainer 读取权限，也不能�
 
 模块 Worker 的业务入口保持规范 URL；身份放在独立 bootstrap 中，通过宿主登记关联 CDP target。不能在入口模块 URL 添加身份 fragment/query：分块动态导入可能再次引用不带标记的同一入口，产生第二个模块实例和消息处理器。bootstrap 在导入期间缓冲消息，安装处理器后按顺序交付；创建失败、初始化完成与终止都会回收其 Blob URL。
 
-高频解析与图元阶段在 Worker 内生成可合并的调用直方图，保留调用数、累计时长和分位区间。Benchmark 的 counter/memory 事件先精确进入 Collector 聚合、资源账本和观测峰值，再按 `task-phase-timeline-v2` 策略省略其逐事件 CDP 明细；Worker 批次带连续 ID、宿主确认和任务结束标记，任务、阶段、Worker 和时钟事件再通过带确认的 CDP binding 传输。报告列出按类型聚合的明细数和真正丢弃的明细数；丢弃导致相应测量 INCONCLUSIVE，不把聚合成功冒充明细完整。`diagnostic` 模式仍传全部可用事件。进程树使用独立原生采样器，即使 WebView 主线程阻塞也继续采样。
+高频解析与图元阶段在 Worker 内生成可合并的调用直方图，保留调用数、累计时长和分位区间。Benchmark 的 counter/memory 事件先精确进入 Collector 聚合、资源账本和观测峰值，再按 `task-phase-timeline-v2` 策略省略其逐事件 CDP 明细；Worker 批次带连续 ID、宿主确认和任务结束标记，任务、阶段、Worker 和时钟事件再通过带确认的 CDP binding 传输。报告列出按类型聚合的明细数、真正截断数和可用的前十个慢阶段；纯容量截断标记 `aggregate-only`，丢失 Worker 批次或必要聚合仍为 INCONCLUSIVE。`diagnostic` 模式仍传全部可用事件。进程树使用独立原生采样器，即使 WebView 主线程阻塞也继续采样。
 
 一次线路 Worker 转移可能包含万级 ArrayBuffer。资源账本仍逐 backing buffer 去重并结算；普通 Benchmark 在超过 8 个缓冲时，把该批的 acquire/transfer/release 各压成一条带 `buffers` 和 `referencedBytes` 的聚合事件。任务/阶段明细缓冲为 32,768 条，真正截断仍明确记录。`diagnostic` 模式保留逐缓冲事件，发生丢弃时仍报告不完整。
 
@@ -75,7 +75,7 @@ Windows 固定运行时的文件既需要 AppContainer 读取权限，也不能�
 
 `bench build` 显式构建并核验 Vite Benchmark 前端，再创建 Cargo `benchmark` feature 的原生产物；发布清单前核验 EXE 确实内嵌探针 chunk。运行器拒绝没有 `frontendProbeVerified` 凭据的旧构建，避免 CDP 已连接普通页面却重复等待 Benchmark API。原生命令只授权私有运行清单指定的匿名样本，并重新核对源 SHA；清单、源、缓存根必须在编译时绑定的工作区，清单/缓存在 `tmp/gim-bench` 下。普通产品构建拒绝 Benchmark 授权，且不导出 Benchmark UI 控制面。
 
-`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选还须显式 `--accept-partial --source-reviewed --partial-reason`，只成为覆盖基线，不能自动升级成完整 PASS。可提供上一份已批准基线阻止相同来源的覆盖倒退。run/report/compare 不调用它。超过 10% 的回退需独立复测，仍超限为 FAIL；运行条件、必要测量或认可基线缺失为 INCONCLUSIVE。协议/值单元测试进入 CI；样本、性能与内存曲线只在本地执行。
+`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选先由另一位复核者通过 `review-partial` 生成绑定候选摘要的私有记录，批准者再以 `--accept-partial --partial-review` 引用，原因使用受控代码。首次须指定 `--first-partial`，后续须提供上一份已批准基线，防止相同来源覆盖倒退；它只成为覆盖基线，不能自动升级成完整 PASS。run/report/compare 不调用它。超过 10% 的回退需独立复测，仍超限为 FAIL；运行条件、必要测量或认可基线缺失为 INCONCLUSIVE。协议/值单元测试进入 CI；样本、性能与内存曲线只在本地执行。
 
 ## SDK 与进程边界
 

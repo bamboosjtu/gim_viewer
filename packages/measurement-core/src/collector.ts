@@ -5,6 +5,8 @@ const validName = /^[a-zA-Z0-9_.:-]{1,96}$/;
 export class Collector implements MetricsSink {
   private sequence = new Map<string, number>();
   private phases = new Map<string, { stats: DurationStats; failed: number; cancelled: number; workload: Record<string, number> }>();
+  private slowestPhases:Array<{family:string;stage:string;workerId:string;sourceId:string|null;durationMs:number}>=[];
+  private slowestTasks:Array<{family:string;workerId:string;sourceId:string|null;status:TaskStatus;durationMs:number}>=[];
   private workers = new Map<string, { family: string; state: string; createdMs: number; endedMs?: number; tasks: number }>();
   private active = new Map<string, MeasurementEvent>();
   private finished = new Map<string,{status:TaskStatus;reasonCode?:LifecycleReasonCode}>();
@@ -17,7 +19,7 @@ export class Collector implements MetricsSink {
   private events: MeasurementEvent[] = [];
   private detailSink?:{ available():boolean; send(events:MeasurementEvent[]):void };
   private clock = new Map<string, NonNullable<MeasurementEvent['clock']>>();
-  private loss = { sequenceGaps: 0, invalid: 0, duplicate: 0, foreignRun: 0, detailEvents: 0, aggregateGroups: 0,
+  private loss = { sequenceGaps: 0, invalid: 0, duplicate: 0, foreignRun: 0, detailEvents: 0, aggregateGroups: 0, transportFailures: 0,
     interruptedTasks: 0, intentionalInterruptedTasks: 0, unexpectedWorkerTerminations: 0, cancelledWithoutReason: 0,
     lateEvents: 0, lateEventsUnexpected: 0, lateCancelledAcks: 0 };
   private aggregatedDetail={memory:0,counter:0};
@@ -78,6 +80,15 @@ export class Collector implements MetricsSink {
         }
         if (!this.active.has(taskKey)) this.loss.invalid++;
         else {
+          const started=this.active.get(taskKey)!;
+          if(started.name==='started'&&started.clockId===event.clockId&&event.atMs>=started.atMs){
+            const row={family:context.family,workerId:context.workerId,sourceId:context.sourceId,
+              status:event.status??'aborted' as TaskStatus,durationMs:event.atMs-started.atMs};
+            if(this.slowestTasks.length<10||row.durationMs>this.slowestTasks[this.slowestTasks.length-1].durationMs){
+              this.slowestTasks.push(row);this.slowestTasks.sort((a,b)=>b.durationMs-a.durationMs);
+              if(this.slowestTasks.length>10)this.slowestTasks.pop();
+            }
+          }
           if(event.status==='cancelled'&&!['abort-error','request-superseded','user-cancelled'].includes(event.reasonCode??''))
             this.loss.cancelledWithoutReason++;
           this.settle(taskKey, event.status ?? 'aborted', event.reasonCode);
@@ -95,6 +106,13 @@ export class Collector implements MetricsSink {
       }
       try{if(event.histogram)phase.stats.merge(event.histogram);else phase.stats.add(event.durationMs);}
       catch{this.loss.invalid++;return;}
+      if(event.timing!=='aggregate'){
+        const row={family:context.family,stage:event.name,workerId:context.workerId,sourceId:context.sourceId,durationMs:event.durationMs};
+        if(this.slowestPhases.length<10||row.durationMs>this.slowestPhases[this.slowestPhases.length-1].durationMs){
+          this.slowestPhases.push(row);this.slowestPhases.sort((a,b)=>b.durationMs-a.durationMs);
+          if(this.slowestPhases.length>10)this.slowestPhases.pop();
+        }
+      }
       if (event.status === 'failed' || event.status === 'timeout') phase.failed++;
       if (event.status === 'cancelled' || event.status === 'aborted') phase.cancelled++;
       for (const [name, count] of Object.entries(event.workload ?? {})) if (validName.test(name) && Number.isFinite(count) && count >= 0) {
@@ -128,7 +146,10 @@ export class Collector implements MetricsSink {
         observedPeakBytes: metric.bytes === null ? old?.observedPeakBytes ?? null : Math.max(old?.observedPeakBytes ?? 0, metric.bytes) });
     } else if (event.kind === 'clock' && event.clock) {
       this.clock.set(event.clock.remoteClockId, { ...event.clock });
-    } else if (event.kind === 'loss') this.loss.detailEvents += Math.max(0, event.workload?.events ?? 0);
+    } else if (event.kind === 'loss') {
+      this.loss.detailEvents += Math.max(0, event.workload?.events ?? 0);
+      this.loss.transportFailures++;
+    }
     if(this.mode==='benchmark'&&(event.kind==='memory'||event.kind==='counter')){
       this.aggregatedDetail[event.kind]++;
       return;
@@ -152,6 +173,10 @@ export class Collector implements MetricsSink {
     this.outcomes[status] = (this.outcomes[status] ?? 0) + 1;
   }
   drain(): MeasurementEvent[] { const result = this.events; this.events = []; return result; }
+  intentionalTermination(workerId:string):boolean {
+    const keys=[...this.active].filter(([,event])=>event.context.workerId===workerId).map(([key])=>key);
+    return keys.length>0&&keys.every(key=>this.intentionalTasks.has(key));
+  }
   snapshot() {
     const lifecycleIssues=[
       this.active.size?'active-tasks':null,
@@ -164,6 +189,8 @@ export class Collector implements MetricsSink {
     ].filter((value):value is string=>!!value);
     return { version: MEASUREMENT_VERSION, identity: { ...this.identity }, mode: this.mode,
       phases: Object.fromEntries([...this.phases].map(([key, value]) => [key, { ...value.stats.snapshot(), failed: value.failed, cancelled: value.cancelled, workload: { ...value.workload } }])),
+      slowestPhases:this.slowestPhases.map(row=>({...row})),
+      slowestTasks:this.slowestTasks.map(row=>({...row})),
       workers: Object.fromEntries([...this.workers].map(([key, value]) => [key, { ...value }])),
       workerOccupancy:Object.fromEntries([...this.occupancy].map(([key,row])=>[key,{...row,idleBetweenTasksMs:Math.max(0,row.lastMs-row.firstMs-row.occupiedMs),scope:'first-task-start-to-last-task-end',includesReadAndBackpressureWait:true,incomplete:row.depth>0}])),
       memory: Object.fromEntries([...this.memory].map(([key, value]) => [key, { ...value, latest: { ...value.latest } }])),
@@ -175,7 +202,9 @@ export class Collector implements MetricsSink {
       lifecycleComplete:lifecycleIssues.length===0,lifecycleIssues,
       lifecycleCancellationReasons:{...this.cancellationReasons},
       detailComplete: this.loss.detailEvents === 0 && this.loss.sequenceGaps === 0 && this.loss.invalid === 0 &&
-        this.loss.aggregateGroups === 0 && this.loss.foreignRun === 0 && this.loss.duplicate === 0,
+        this.loss.aggregateGroups === 0 && this.loss.foreignRun === 0 && this.loss.duplicate === 0 && this.loss.transportFailures===0,
+      aggregateComplete:this.loss.sequenceGaps===0&&this.loss.invalid===0&&this.loss.aggregateGroups===0&&
+        this.loss.foreignRun===0&&this.loss.duplicate===0&&this.loss.transportFailures===0,
       cpuTimeAvailable: false, memoryTotalsAreAdditive: false };
   }
 }

@@ -170,8 +170,8 @@ pub async fn extract_gim_archive(
     // 带 project_id 的生产路径使用磁盘优先实现：只读头部窗口，逐条解压并
     // 原子写入 extracted/{project_id}，IPC 只返回 manifest。无 project_id
     // 的兼容调用保留旧的 inline payload 行为。
-    // 头部决定 GIMPKGT/GIMPKGS 的 pack 类型；裸 7z 只启用快速解码，
-    // 不根据容器签名猜测工程语义，内容类型仍由前端验证。
+    // 头部决定线路 pack；裸 7z 与 GIMPKGS 使用相同的通用来源 pack。
+    // pack 只改变物理存储，工程/设备语义仍由前端内容验证。
     let (line_pack_enabled, substation_sources, bare_sevenz) = if project_id.is_some() {
         let mut magic = [0u8; 7];
         match std::fs::File::open(&authorized_path).and_then(|mut file| {
@@ -215,8 +215,7 @@ pub async fn extract_gim_archive(
             };
             // 变电：CBM/DEV/FAM/PHM/MOD/STL 等源条目写入一个连续 pack，只有
             // IFC 保留独立文件。这样 3.6 万个条目的 open 成本从数十秒降到两次。
-            let mut substation_writer: Option<LineSemanticPackWriter> = if substation_sources
-                && !line_pack_enabled
+            let mut substation_writer: Option<LineSemanticPackWriter> = if should_pack_sources(line_pack_enabled, substation_sources, bare_sevenz)
             {
                 Some(LineSemanticPackWriter::new_substation(&staging_root)?)
             } else {
@@ -430,9 +429,13 @@ fn should_publish_cache_path(line_pack_enabled: bool, packed: bool, path: &str) 
     !packed && (!line_pack_enabled || path.to_ascii_lowercase().ends_with(".ifc"))
 }
 
+fn should_pack_sources(line_pack_enabled: bool, substation_sources: bool, bare_sevenz: bool) -> bool {
+    !line_pack_enabled && (substation_sources || bare_sevenz)
+}
+
 #[cfg(test)]
 mod bare_manifest_tests {
-    use super::should_publish_cache_path;
+    use super::{should_publish_cache_path,should_pack_sources};
 
     #[test]
     fn bare_archives_publish_every_independent_source_path() {
@@ -442,6 +445,13 @@ mod bare_manifest_tests {
         assert!(!should_publish_cache_path(false,true,"DEV/packed.dev"));
         assert!(!should_publish_cache_path(true,false,"MOD/large.mod"));
         assert!(should_publish_cache_path(true,false,"IFC/model.IFC"));
+    }
+
+    #[test]
+    fn bare_sevenz_uses_the_generic_source_pack_without_selecting_a_product_type() {
+        assert!(should_pack_sources(false,false,true));
+        assert!(should_pack_sources(false,true,false));
+        assert!(!should_pack_sources(true,false,true));
     }
 }
 

@@ -26,6 +26,10 @@ export class EngineeringWorkerClient {
     port.onmessage = event => {
       if (!this.isCurrent() || this.signal?.aborted) { this.close(); return; }
       const response = event.data;
+      if(response.type==='progress'){
+        if(response.stage==='extract')this.pending.touch(response.requestId);
+        return;
+      }
       this.pending.settle(response.requestId, response, response.type === 'error' ? new Error(response.message) : undefined);
     };
     port.onerror = event => this.close(new Error(event.message || 'Engineering worker failed'));

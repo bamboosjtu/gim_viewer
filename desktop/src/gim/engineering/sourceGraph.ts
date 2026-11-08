@@ -45,7 +45,7 @@ const normalizePath = (value: string) => value.trim().replace(/\\/g, '/').replac
 const ordered = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 
 /** No use of CbmNode, current UI grain, F-levels or geometry seed predicates. */
-export async function extractEngineeringSourceGraph(files: SourceFileReader, options: { maxOccurrences?: number; maxDepth?: number; signal?: AbortSignal } = {}): Promise<EngineeringSourceGraph> {
+export async function extractEngineeringSourceGraph(files: SourceFileReader, options: { maxOccurrences?: number; maxDepth?: number; signal?: AbortSignal; onProgress?:()=>void } = {}): Promise<EngineeringSourceGraph> {
   const maxOccurrences = options.maxOccurrences ?? 500_000;
   const maxDepth = options.maxDepth ?? 128;
   const result: EngineeringSourceGraph = { documents: [], cbmOccurrences: [], records: [], aliases: [], references: [],
@@ -125,7 +125,10 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     }
     return promise;
   }
+  let lastProgressCount=0;
   function check(depth: number) {
+    const count=result.records.length+result.cbmOccurrences.length;
+    if(count-lastProgressCount>=512){lastProgressCount=count;options.onProgress?.();}
     if (options.signal?.aborted) throw new DOMException('Source extraction cancelled', 'AbortError');
     if (depth > maxDepth || result.records.length + result.cbmOccurrences.length >= maxOccurrences) throw new Error('Engineering source occurrence budget exceeded');
   }

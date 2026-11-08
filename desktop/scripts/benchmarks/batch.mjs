@@ -27,7 +27,9 @@ function recordReport(row,report,state){
     inputVariant:report.inputVariant??null,inputVariantCode:report.inputVariantCode??null,
     inputIntegrity:report.inputIntegrity??null,cacheFailureCode:report.cacheFailureCode??null,
     measurementDetailDropped:report.measurementDetailDropped??null,
+    measurementDetailStatus:report.measurementDetailStatus??null,
     measurementLifecycleComplete:report.measurementLifecycleComplete??null,
+    lateBackgroundTasks:report.lateBackgroundTasks??false,finalEvidenceIssue:report.finalEvidenceIssue??null,
     measurementLifecycleIssues:(report.measurementLifecycleIssues??[]).join(';'),
     environmentSuspend:report.environmentSuspend?.code??null,
     measurementAggregatedDetail:Object.entries(report.measurementAggregatedDetail??{}).map(([kind,count])=>`${kind}:${count}`).join(';'),
@@ -37,6 +39,9 @@ function recordReport(row,report,state){
     partialGeometryReasons:Object.entries(report.evidence?.partialGeometryReasons??{}).map(([reason,count])=>`${reason}:${count}`).join(';'),
     geometryDiagnosticScope:report.evidence?.geometryDiagnosticScope??null,
     sourceReferenceStatuses:Object.entries(report.evidence?.engineeringCoverage?.referenceStatuses??{}).map(([status,count])=>`${status}:${count}`).join(';'),
+    coverageIncompleteReasons:(report.evidence?.engineeringCoverage?.incompleteReasons??[]).join(';'),
+    unresolvedReferenceCount:(report.evidence?.engineeringCoverage?.referenceStatuses?.missing??0)+
+      (report.evidence?.engineeringCoverage?.referenceStatuses?.ambiguous??0),
     partialEvidenceStatus:report.defectAssessment?.status??null,
     partialEvidenceDigest:report.defectAssessment?.coverageDigest??report.defectAssessment?.sourceSetDigest??null,
     partialSignature:report.correctness==='partial'?partialSignature(report):null,
@@ -59,6 +64,8 @@ function recordReport(row,report,state){
   const context={runId:report.runId,sampleId:row.sampleId,sampleLabel:row.sampleLabel,sourceSha256:row.sourceSha256,repetition:row.repetition,cacheState:row.cacheState};
   for(const [stage,stats]of Object.entries(report.measurement?.phases??{}))state.stages.push({...context,stage,count:stats.count,totalMs:stats.totalMs,maxMs:stats.maxMs,
     ...Object.fromEntries(['p50','p95','p99'].flatMap(key=>[[`${key}LowerMs`,stats[key]?.lowerMs],[`${key}UpperMs`,stats[key]?.upperMs]]))});
+  for(const task of report.measurement?.slowestTasks??[])state.slowTasks.push({...context,...task});
+  for(const phase of report.measurement?.slowestPhases??[])state.slowPhases.push({...context,...phase});
   const heaps=new Map((report.workerMemory??[]).map(worker=>[worker.workerId,worker]));
   const unavailable=new Map((report.unavailableWorkerMemory??[]).map(worker=>[worker.workerId,worker]));
   const shortLived=new Map((report.shortLivedWorkerMemory??[]).map(worker=>[worker.workerId,worker]));
@@ -80,11 +87,11 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   const cacheStates=preset==='baseline'?['cold','warm']:['cold'];
   privateOut??=artifactDirectory(root,join(root,'tmp','gim-bench','batches',`batch-${Date.now()}`));
   const build=JSON.parse(readFileSync(workspacePath(root,buildManifest),'utf8'));
-  const body={version:'gim-batch-profile-v1',preset,repetitions,cacheStates,mode:'benchmark',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',timeoutMs,
+  const body={version:'gim-batch-profile-v1',preset,repetitions,cacheStates,mode:'benchmark',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',webviewProfilePolicy:'paired-webview-profile-v1',timeoutMs,
     startupRetryPolicy:'pre-open-infrastructure-v1',maxStartupAttempts:STARTUP_ATTEMPTS,
     cases:inputs.samples.map(({paths,...sample})=>sample)};
   const profileDigest=digest(body),state={version:'gim-batch-results-v1',status:'RUNNING',outcome:'INCONCLUSIVE',preset,repetitions,
-    buildFingerprint:build.sourceFingerprint,profileDigest,anonymize,selectionFrozen:true,baselineEligible:false,rows:[],runs:[],attempts:[],stages:[],workers:[],pairs:[],updatedAt:null};
+    buildFingerprint:build.sourceFingerprint,profileDigest,anonymize,selectionFrozen:true,baselineEligible:false,rows:[],runs:[],attempts:[],stages:[],slowTasks:[],slowPhases:[],workers:[],pairs:[],updatedAt:null};
   const privateRuns=[];
   writeFileSync(join(out,'profile.json'),JSON.stringify({...body,digest:profileDigest},null,2));
   for(const entry of inputs.entries){

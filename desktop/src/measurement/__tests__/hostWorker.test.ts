@@ -1,5 +1,5 @@
 import {afterEach,expect,it,vi} from 'vitest';
-import {createMeasuredWorker} from '../hostWorker.js';
+import {createMeasuredWorker,markMeasuredWorkerTaskCancellation} from '../hostWorker.js';
 import {resetMeasurementRun,measurementSnapshot} from '../runtime.js';
 class Port extends EventTarget {
   messages:unknown[]=[];transfers:unknown[]=[];stops=0;fail=false;
@@ -44,6 +44,26 @@ it('requires the final Worker batch marker before accepting an idle Worker termi
   second.port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'flushed',workerId:next.workerId,batchId:1,lastSequence:2}}));
   second.worker.terminate();
   expect(measurementSnapshot()?.detailComplete).toBe(true);
+});
+it('records an unconfirmed tail separately for an intentionally cancelled active task',()=>{
+  const {port,worker}=start();worker.postMessage({kind:'compile',traceId:'task-cancelled'});
+  const task=(port.messages[1] as any)._gimMeasurement.context;
+  port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:task.workerId,
+    batchId:1,lastSequence:1,events:[{version:'gim-measurement-v1',context:task,producerId:task.workerId,
+      sequence:1,clockId:'worker-clock',atMs:1,kind:'task',name:'started'}]}}));
+  markMeasuredWorkerTaskCancellation(worker,task.taskId,'request-superseded');worker.terminate();
+  expect(measurementSnapshot()).toMatchObject({lifecycleComplete:true,taskOutcomes:{cancelled:1},
+    counters:{'dev:worker.cancelled-unconfirmed-tail':{workers:1}}});
+});
+it('keeps an unexpected active termination incomplete and records its unconfirmed tail',()=>{
+  const {port,worker}=start();worker.postMessage({kind:'compile',traceId:'task-interrupted'});
+  const task=(port.messages[1] as any)._gimMeasurement.context;
+  port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:task.workerId,
+    batchId:1,lastSequence:1,events:[{version:'gim-measurement-v1',context:task,producerId:task.workerId,
+      sequence:1,clockId:'worker-clock',atMs:1,kind:'task',name:'started'}]}}));
+  worker.terminate();
+  expect(measurementSnapshot()).toMatchObject({lifecycleComplete:false,loss:{interruptedTasks:1},
+    counters:{'dev:worker.active-tail-unconfirmed':{workers:1}}});
 });
 it('an explicit suite run ID never overwrites a prior session collector',()=>{
   (globalThis as any).__GIM_MEASUREMENT_CONFIG__={mode:'benchmark',runId:'fixed-suite'};

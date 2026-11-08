@@ -522,7 +522,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
           let localCachePathMap = new Map<string, string>();
           if (!state.isCurrentSession(session)) return;
 
-          if (preExtracted && preExtracted.cachePaths && preExtracted.cachePaths.size > 0) {
+          if (preExtracted && ((preExtracted.cachePaths?.size ?? 0) > 0 || (preExtracted.packedPaths?.size ?? 0) > 0)) {
             // 原生解压已由 Rust 直接落盘全部条目——直接复用路径，
             // 跳过逐文件 IPC 字节回传（writeCacheFile Array.from 路径会
             // 把数百 MB IFC 序列化为 JSON 数组，主线程长时间假死）
@@ -671,6 +671,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
       showMessage,
       '变电 IFC 空间索引',
       gate,
+      startSpatialSemantic,
     );
   };
   const scheduleStdSld = (coordinator: SubstationBackgroundCoordinator): void => {

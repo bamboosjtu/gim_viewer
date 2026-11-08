@@ -16,12 +16,14 @@ export function benchmarkProgress(state:AppState){
     :spatialMoment===null?'pending':spatialMoment.meta?.available===false?'failed':'ready';
   const cachePersistenceStatus=state.currentProjectType!=='substation'?'not-applicable':
     moments.cachePersistenceReady?.meta?.available===false?'failed':moments.cachePersistenceReady?'ready':'not-observed';
-  const backgroundSettled=backgroundStatus!=='pending';
   const semantic=line?!!state.currentGimGraph:state.currentProjectType==='equipment'?!!state.currentCbmTree:state.engineeringStatus==='ready'||state.engineeringStatus==='partial';
+  const semanticFailure=state.currentProjectType==='substation'&&state.engineeringStatus==='error';
+  const backgroundSettled=backgroundStatus!=='pending'&&(state.currentProjectType!=='substation'||semantic);
   const baseSettled=dev?dev.baseRepresentationsSettled===true:!state.ifcBackgroundPending&&state.loadedModels.size===state.currentIfcEntries.length;
-  return {semantic,automaticSettled:semantic&&!state.ifcBackgroundPending&&(line||baseSettled)&&n(dev?.pending)===0&&n(dev?.viewPendingOccurrences)===0,
+  return {semantic,semanticFailure,semanticStatus:state.engineeringStatus,
+    automaticSettled:semantic&&!state.ifcBackgroundPending&&(line||baseSettled)&&n(dev?.pending)===0&&n(dev?.viewPendingOccurrences)===0,
     backgroundSettled,backgroundStatus,cachePersistenceStatus,
-    cacheSettled:(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineeringCacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
+    cacheSettled:(state.currentProjectType!=='substation'||semantic)&&(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineeringCacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
       &&(!line||linePersistence==='saved'||linePersistence==='failed'||linePersistence==='not-applicable'),
     workload:{cbmNodes:state.cbmNodeIndex.size,lineNodes:state.currentGimGraph?.nodesByPath.size??0,
       sources:state.engineeringSnapshot?.memberships.length??0,entities:state.engineeringSnapshot?.entities.length??0,

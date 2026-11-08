@@ -1,4 +1,8 @@
 /** The product can become interactive before cache and post-interactive work settle. */
+import {digest} from './compare.mjs';
+const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'
+  ?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+export const progressDigest=progress=>progress?digest(canonical(progress)):null;
 export function readyForSettle(observation,{cacheState}={}){
   const progress=observation?.progress,measurement=observation?.measurement;
   const coldSubstation=cacheState==='cold'&&observation?.projectType==='substation';
@@ -15,10 +19,15 @@ export function cachePublicationMoment(observation){
       :observation?.openElapsedMs??null;
 }
 /** Final runtime evidence must describe the same settled state as the final snapshot. */
-export function finalEvidenceAligned(evidence,observation){
-  return evidence?.checks?.some(check=>check.name==='session-stable'&&check.passed===true)===true&&
-    Number.isFinite(evidence.evidenceAtMs)&&Number.isFinite(observation?.snapshotAtMs)&&
-    observation.snapshotAtMs>=evidence.evidenceAtMs&&!!evidence.progress&&!!observation.progress&&
-    observation.measurement?.activeTasks?.length===0&&
-    JSON.stringify(evidence.progress)===JSON.stringify(observation.progress);
+export function finalEvidenceIssue(evidence,observation){
+  if(evidence?.checks?.some(check=>check.name==='session-stable'&&check.passed===true)!==true)
+    return 'session-mismatch';
+  if(!Number.isFinite(evidence.evidenceAtMs)||!Number.isFinite(observation?.snapshotAtMs)||
+    observation.snapshotAtMs<evidence.evidenceAtMs)return 'clock-invalid';
+  if(!evidence.progress||!observation.progress)return 'evidence-missing';
+  if(!Array.isArray(observation.measurement?.activeTasks))return 'task-state-missing';
+  if(observation.measurement.activeTasks.length)return 'active-tasks';
+  if(progressDigest(evidence.progress)!==progressDigest(observation.progress))return 'progress-drift';
+  return null;
 }
+export const finalEvidenceAligned=(evidence,observation)=>finalEvidenceIssue(evidence,observation)===null;
