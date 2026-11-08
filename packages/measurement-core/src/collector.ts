@@ -1,4 +1,4 @@
-import { MEASUREMENT_VERSION, type MeasurementEvent, type MeasurementMode, type RunIdentity, type MetricsSink, type MemoryMetric } from './types.js';
+import { MEASUREMENT_VERSION, type MeasurementEvent, type MeasurementMode, type RunIdentity, type MetricsSink, type MemoryMetric, type TaskStatus, type LifecycleReasonCode } from './types.js';
 import { DurationStats } from './stats.js';
 
 const validName = /^[a-zA-Z0-9_.:-]{1,96}$/;
@@ -7,7 +7,9 @@ export class Collector implements MetricsSink {
   private phases = new Map<string, { stats: DurationStats; failed: number; cancelled: number; workload: Record<string, number> }>();
   private workers = new Map<string, { family: string; state: string; createdMs: number; endedMs?: number; tasks: number }>();
   private active = new Map<string, MeasurementEvent>();
-  private finished = new Set<string>();
+  private finished = new Map<string,{status:TaskStatus;reasonCode?:LifecycleReasonCode}>();
+  private intentionalTasks = new Map<string,LifecycleReasonCode>();
+  private cancellationReasons:Record<string,number>={};
   private outcomes: Record<string, number> = {};
   private counters = new Map<string, Record<string, number>>();
   private occupancy = new Map<string,{clockId:string;firstMs:number;lastMs:number;depth:number;startMs:number;occupiedMs:number;peakConcurrentTasks:number}>();
@@ -15,7 +17,9 @@ export class Collector implements MetricsSink {
   private events: MeasurementEvent[] = [];
   private detailSink?:{ available():boolean; send(events:MeasurementEvent[]):void };
   private clock = new Map<string, NonNullable<MeasurementEvent['clock']>>();
-  private loss = { sequenceGaps: 0, invalid: 0, duplicate: 0, foreignRun: 0, detailEvents: 0, aggregateGroups: 0, interruptedTasks: 0, lateEvents: 0 };
+  private loss = { sequenceGaps: 0, invalid: 0, duplicate: 0, foreignRun: 0, detailEvents: 0, aggregateGroups: 0,
+    interruptedTasks: 0, intentionalInterruptedTasks: 0, unexpectedWorkerTerminations: 0, cancelledWithoutReason: 0,
+    lateEvents: 0, lateEventsUnexpected: 0, lateCancelledAcks: 0 };
   private aggregatedDetail={memory:0,counter:0};
   constructor(readonly identity: RunIdentity, readonly mode: MeasurementMode, private readonly detailLimit = mode==='benchmark'?32768:8192) {}
   emit(event: MeasurementEvent): void { this.accept(event); }
@@ -37,8 +41,14 @@ export class Collector implements MetricsSink {
       }
       worker.state = event.name;
       if (event.name === 'terminated' || event.name === 'failed') {
+        if(event.name==='failed'||event.status==='failed'||event.status==='timeout')this.loss.unexpectedWorkerTerminations++;
         worker.endedMs = event.atMs;
-        for (const [key, pending] of this.active) if (pending.context.workerId === context.workerId) { this.settle(key, event.status ?? 'aborted'); this.loss.interruptedTasks++; }
+        for (const [key, pending] of this.active) if (pending.context.workerId === context.workerId) {
+          const reason=this.intentionalTasks.get(key);
+          if(reason&&event.name==='terminated'&&event.status==='aborted'){
+            this.settle(key,'cancelled',reason);this.loss.intentionalInterruptedTasks++;
+          }else{this.settle(key,event.status??'aborted');this.loss.interruptedTasks++;}
+        }
       }
     } else if (event.kind === 'task') {
       if(event.producerId===context.workerId&&(event.name==='started'||event.name==='ended')){
@@ -51,15 +61,27 @@ export class Collector implements MetricsSink {
         }
       }
       if (event.name === 'queued' || event.name === 'started') {
-        if (this.finished.has(taskKey)) { this.loss.lateEvents++; return; }
+        if (this.finished.has(taskKey)) { this.loss.lateEvents++;this.loss.lateEventsUnexpected++; return; }
         const old = this.active.get(taskKey);
         if (old && !(old.name === 'queued' && event.name === 'started')) this.loss.invalid++;
         else if (this.active.size >= 4096) this.loss.aggregateGroups++;
         else { this.active.set(taskKey, event); const worker = this.workers.get(context.workerId); if (worker && event.name === 'started') { worker.tasks++; worker.state = 'running'; } }
       } else if (event.name === 'ended') {
-        if (this.finished.has(taskKey)) { this.loss.lateEvents++; return; }
+        const finished=this.finished.get(taskKey);
+        if (finished) {
+          this.loss.lateEvents++;
+          if(finished.status==='cancelled'&&['cancelled','aborted'].includes(event.status??'')&&
+            (['abort-error','request-superseded','user-cancelled'].includes(event.reasonCode??'')||
+              ['project-closed','project-replaced'].includes(finished.reasonCode??'')))this.loss.lateCancelledAcks++;
+          else this.loss.lateEventsUnexpected++;
+          return;
+        }
         if (!this.active.has(taskKey)) this.loss.invalid++;
-        else this.settle(taskKey, event.status ?? 'aborted');
+        else {
+          if(event.status==='cancelled'&&!['abort-error','request-superseded','user-cancelled'].includes(event.reasonCode??''))
+            this.loss.cancelledWithoutReason++;
+          this.settle(taskKey, event.status ?? 'aborted', event.reasonCode);
+        }
         const worker = this.workers.get(context.workerId);
         if (worker && !worker.endedMs && ![...this.active.values()].some(row => row.context.workerId === context.workerId)) worker.state = 'idle';
       }
@@ -79,6 +101,18 @@ export class Collector implements MetricsSink {
         if (Object.keys(phase.workload).length < 32 || name in phase.workload) phase.workload[name] = (phase.workload[name] ?? 0) + count;
       }
     } else if (event.kind === 'counter') {
+      if(event.name==='lifecycle.cancel-requested'){
+        const projectCancellation=['project-closed','project-replaced'].includes(event.reasonCode??'');
+        const taskCancellation=event.reasonCode==='request-superseded'&&context.workerId!=='host'&&
+          context.taskId!==null&&context.attemptId>0;
+        if(event.producerId!==`${this.identity.runId}:host`||!projectCancellation&&!taskCancellation||
+          projectCancellation&&(context.workerId!=='host'||context.family!=='host'||context.backend!=='host')){
+          this.loss.invalid++;return;
+        }
+        const reason=event.reasonCode!;this.cancellationReasons[reason]=(this.cancellationReasons[reason]??0)+1;
+        if(projectCancellation){for(const key of this.active.keys())this.intentionalTasks.set(key,reason);}
+        else if(this.active.has(taskKey))this.intentionalTasks.set(taskKey,reason);
+      }
       const key = `${context.family}:${event.name}`;
       if (!this.counters.has(key) && this.counters.size >= 512) { this.loss.aggregateGroups++; return; }
       const values = this.counters.get(key) ?? {};
@@ -112,13 +146,22 @@ export class Collector implements MetricsSink {
       try{this.detailSink.send(batch);}catch{this.loss.detailEvents+=batch.length;break;}
     }
   }
-  private settle(key: string, status: string): void {
-    this.active.delete(key); this.finished.add(key);
-    if (this.finished.size > 8192) this.finished.delete(this.finished.values().next().value!);
+  private settle(key: string, status: TaskStatus, reasonCode?:LifecycleReasonCode): void {
+    this.active.delete(key); this.intentionalTasks.delete(key); this.finished.set(key,{status,reasonCode});
+    if (this.finished.size > 8192) this.finished.delete(this.finished.keys().next().value!);
     this.outcomes[status] = (this.outcomes[status] ?? 0) + 1;
   }
   drain(): MeasurementEvent[] { const result = this.events; this.events = []; return result; }
   snapshot() {
+    const lifecycleIssues=[
+      this.active.size?'active-tasks':null,
+      this.loss.interruptedTasks?'worker-interrupted-tasks':null,
+      this.loss.unexpectedWorkerTerminations?'unexpected-worker-termination':null,
+      this.loss.cancelledWithoutReason?'cancellation-reason-missing':null,
+      this.loss.lateEventsUnexpected?'unexpected-late-events':null,
+      (this.outcomes.timeout??0)>0?'task-timeout':null,
+      (this.outcomes.aborted??0)>0?'unexplained-task-abort':null,
+    ].filter((value):value is string=>!!value);
     return { version: MEASUREMENT_VERSION, identity: { ...this.identity }, mode: this.mode,
       phases: Object.fromEntries([...this.phases].map(([key, value]) => [key, { ...value.stats.snapshot(), failed: value.failed, cancelled: value.cancelled, workload: { ...value.workload } }])),
       workers: Object.fromEntries([...this.workers].map(([key, value]) => [key, { ...value }])),
@@ -129,7 +172,10 @@ export class Collector implements MetricsSink {
       bufferedEvents:this.events.length,
       detailPolicy:this.mode==='benchmark'?'task-phase-timeline-v1':'full-detail',aggregatedDetail:{...this.aggregatedDetail},
       clockCalibration: Object.fromEntries(this.clock), loss: { ...this.loss },
-      detailComplete: this.loss.detailEvents === 0 && this.loss.sequenceGaps === 0 && this.loss.invalid === 0 && this.loss.aggregateGroups === 0,
+      lifecycleComplete:lifecycleIssues.length===0,lifecycleIssues,
+      lifecycleCancellationReasons:{...this.cancellationReasons},
+      detailComplete: this.loss.detailEvents === 0 && this.loss.sequenceGaps === 0 && this.loss.invalid === 0 &&
+        this.loss.aggregateGroups === 0 && this.loss.foreignRun === 0 && this.loss.duplicate === 0,
       cpuTimeAvailable: false, memoryTotalsAreAdditive: false };
   }
 }

@@ -1,4 +1,4 @@
-import { calibrateClock, type TraceContext, type WorkerFamily, type MeasurementEvent } from './core.js';
+import { calibrateClock, type TraceContext, type WorkerFamily, type MeasurementEvent, type LifecycleReasonCode } from './core.js';
 import { measurementRun, measurementContext, measurementSourceId,trackHostBuffers } from './runtime.js';
 
 export const MEASUREMENT_CHANNEL = '__gimMeasurement';
@@ -6,6 +6,11 @@ let workerSequence = 0;
 const bootstrapUrls=new Map<string,string>();
 const lastTaskContext=new WeakMap<Worker,TraceContext>();
 export function measurementWorkerTask(worker:Worker):TraceContext|undefined {return lastTaskContext.get(worker);}
+const cancelTaskMeasurement=new WeakMap<Worker,(taskId:string,reason:LifecycleReasonCode)=>void>();
+/** Register an explicit, task-scoped cancellation before its Worker is stopped. */
+export function markMeasuredWorkerTaskCancellation(worker:Worker,taskId:string,reason:LifecycleReasonCode):void {
+  cancelTaskMeasurement.get(worker)?.(taskId,reason);
+}
 const controls = new Set(['read-result', 'connection-consumed', 'consumed', 'cancel']);
 /** Instruments real Workers without changing their application protocol or transfer lists. */
 export function measurementWorkerUrl(url:string,identity:string):string {
@@ -35,6 +40,11 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
   let sequence = 0, stopped = false, clockReady = false;
   let activeContext:TraceContext=context, producedContext:TraceContext|undefined;
   const sentAt=new Map<string,number>();
+  const taskContexts=new Map<string,TraceContext>();
+  cancelTaskMeasurement.set(worker,(taskId,reason)=>{
+    const task=taskContexts.get(taskId);
+    if(task)run.probe.event(task,{kind:'counter',name:'lifecycle.cancel-requested',reasonCode:reason,workload:{requests:1}});
+  });
   let flightSequence=0;
   const flights=new Map<string,{release:(to?:string)=>void;at:number;context:TraceContext}>();
   const transferMessage=(data:Record<string,unknown>,transfer:Transferable[]|StructuredSerializeOptions|undefined,task:TraceContext)=>{
@@ -62,7 +72,10 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
         run.collector.accept(record);
         if(record.kind==='task'&&record.name==='started')activeContext=record.context;
         if(record.kind==='task'&&record.name==='produced')producedContext=record.context;
-        if(record.kind==='task'&&record.name==='ended'&&record.context.taskId!==producedContext?.taskId)sentAt.delete(record.context.taskId!);
+        if(record.kind==='task'&&record.name==='ended'){
+          taskContexts.delete(record.context.taskId!);
+          if(record.context.taskId!==producedContext?.taskId)sentAt.delete(record.context.taskId!);
+        }
       }
     } else if (message?.[MEASUREMENT_CHANNEL] === 'clock') {
       event.stopImmediatePropagation();
@@ -101,6 +114,7 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
       requestId: String(data.requestId ?? data.id ?? sequence), geometryLod: typeof data.lod === 'number' ? data.lod : null };
     const phase = run.probe.phase(task, 'host.send');
     lastTaskContext.set(worker,task);
+    taskContexts.set(task.taskId!,task);
     if(sentAt.size<4096)sentAt.set(task.taskId!,performance.now());
     run.probe.event(task, { kind: 'task', name: 'queued' });
     const prepared=transferMessage({ ...data, _gimMeasurement: { context: task, command: String(data.kind ?? data.type ?? 'convert') } },transfer,task);
@@ -108,12 +122,12 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
       const payload = prepared.data;
       if (Array.isArray(transfer)) send(payload, transfer); else send(payload, transfer);
       phase.end('completed', { transferBuffers: Array.isArray(transfer) ? transfer.length : transfer?.transfer?.length ?? 0 });
-    } catch (error) { if(prepared.flightId){flights.get(prepared.flightId)?.release();flights.delete(prepared.flightId);}sentAt.delete(task.taskId!); phase.end('failed'); run.probe.event(task, { kind: 'task', name: 'ended', status: 'failed' }); throw error; }
+    } catch (error) { if(prepared.flightId){flights.get(prepared.flightId)?.release();flights.delete(prepared.flightId);}sentAt.delete(task.taskId!);taskContexts.delete(task.taskId!); phase.end('failed'); run.probe.event(task, { kind: 'task', name: 'ended', status: 'failed' }); throw error; }
   }) as Worker['postMessage'];
   worker.terminate = () => {
     if (stopped) return; stopped = true;
     run.probe.event(context, { kind: 'worker', name: 'terminated', status: 'aborted', workload: { clockReady: Number(clockReady) } });
-    sentAt.clear();producedContext=undefined;
+    sentAt.clear();taskContexts.clear();cancelTaskMeasurement.delete(worker);producedContext=undefined;
     for(const flight of flights.values())flight.release();flights.clear();
     releaseUrl();
     terminate();

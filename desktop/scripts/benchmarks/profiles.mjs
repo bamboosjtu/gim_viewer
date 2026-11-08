@@ -10,7 +10,7 @@ export function freezeProfile(registry,selection,name='commit-gate'){
       actions:name==='geometry'?[{kind:'dev-fine',selector:'canonical-first-boolean-base-v1'}]:isIndexRegression?[{kind:'dev-fine',selector:'canonical-first-base-v1'},{kind:'ifc-near',selector:'smallest-source-canonical-small-object-v1'},{kind:'ifc-fine',selector:'smallest-source-canonical-small-object-v1'}]:[],
       timeoutMs:sample.inventory.files>=50000?3600000:900000,reason:row.reason??'registered-regression'};
   });
-  const body={version:'gim-benchmark-profile-v2',name,frozen:true,repetitions:3,cacheStates:['cold','warm'],mode:'benchmark',detailPolicy:'task-phase-timeline-v1',samplingPeriodMs:1000,viewProtocol:'near-inspect-and-restore-v1',
+  const body={version:'gim-benchmark-profile-v2',name,frozen:true,repetitions:3,cacheStates:['cold','warm'],mode:'benchmark',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',samplingPeriodMs:1000,viewProtocol:'near-inspect-and-restore-v1',
     completion:'automatic-representations-and-cache-publication',correctness:'source-invariants-and-cold-warm-base-equivalence',
     requiredWorkerFamilies:name==='commit-gate'?['dev','engineering','spatial','line','ifc-conversion','ifc-regional','ifc-fine']:[],cases};
   return {...body,digest:digest(body)};
@@ -23,6 +23,7 @@ export function coldWarmEquivalent(cold,warm){
     if(partialSignature(cold)!==partialSignature(warm))reasons.push('cold-warm:partial-coverage');
   }
   for(const field of ['semanticDigest','placementDigest','baseGeometryDigest','baseArtifactDigest'])if(cold.evidence?.[field]!==warm.evidence?.[field])reasons.push(`cold-warm:${field}`);
+  for(const field of ['pendingCount','pendingSourceCount','pendingDigest'])if(cold.evidence?.[field]!==warm.evidence?.[field])reasons.push(`cold-warm:${field}`);
   if(cold.conditions.sourceSha256!==warm.conditions.sourceSha256)reasons.push('cold-warm:source');
   if(JSON.stringify(cold.evidence?.progress.workload)!==JSON.stringify(warm.evidence?.progress.workload))reasons.push('cold-warm:workload');
   if(JSON.stringify(cold.actionTargetDigests)!==JSON.stringify(warm.actionTargetDigests))reasons.push('cold-warm:action-targets');

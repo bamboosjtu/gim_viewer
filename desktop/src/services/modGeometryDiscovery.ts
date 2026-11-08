@@ -30,6 +30,7 @@ import { parsePhm } from '../gim/geometry/phmParser.js';
 import { PARSER_LIMITS } from '../gim/parserLimits.js';
 import { getFileByPath } from '../gim/fileLookup.js';
 import { getFileEntryResolver } from '../gim/entryResolver.js';
+import { MissingDevDependencyError } from '../gim/geometry/sourceGeometryError.js';
 
 function sourcePath(files: Map<string, File>, reference: string, owner = ''): string {
   return getFileEntryResolver(files)(reference, owner) ?? reference.replace(/\\/g, '/');
@@ -166,7 +167,7 @@ export async function discoverGeometriesFromDevPath(
   const devFile = getFileByPath(files, normalizedDevPath);
   if (!devFile) {
     if (strictDependencies) {
-      throw new Error(`DEV 文件不存在: ${normalizedDevPath}`);
+      throw MissingDevDependencyError.forPath(normalizedDevPath,normalizedDevPath,'DEV');
     }
     console.warn(`[modDiscovery] DEV 文件不存在: ${normalizedDevPath}`);
     return empty;
@@ -206,7 +207,7 @@ export async function discoverGeometriesFromDevPath(
     const phmFile = getFileByPath(files, phmFilePath);
     if (!phmFile) {
       if (strictDependencies) {
-        throw new Error(`PHM 文件不存在: ${phmFilePath}`);
+        throw MissingDevDependencyError.forPath(normalizedDevPath,phmFilePath,'PHM');
       }
       console.warn(`[modDiscovery] PHM 文件不存在: ${phmFilePath}`);
       return;
@@ -232,7 +233,7 @@ export async function discoverGeometriesFromDevPath(
         const modPath = sourcePath(files, modelFileName, phmFilePath);
         if (strictDependencies && !getFileByPath(files, modPath)) {
           const kind = lower.endsWith('.gl') ? 'GL' : 'MOD';
-          throw new Error(`${kind} 文件不存在: ${modPath}`);
+          throw MissingDevDependencyError.forPath(normalizedDevPath,modPath,kind);
         }
         budget.instances++;
         if (budget.instances > PARSER_LIMITS.maxGeometryInstances) {
@@ -253,7 +254,7 @@ export async function discoverGeometriesFromDevPath(
       } else if (lower.endsWith('.stl')) {
         const stlPath = sourcePath(files, modelFileName, phmFilePath);
         if (strictDependencies && !getFileByPath(files, stlPath)) {
-          throw new Error(`STL 文件不存在: ${stlPath}`);
+          throw MissingDevDependencyError.forPath(normalizedDevPath,stlPath,'STL');
         }
         budget.instances++;
         if (budget.instances > PARSER_LIMITS.maxGeometryInstances) {

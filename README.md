@@ -112,6 +112,8 @@ npm run tauri:dev
 
 ## 文档
 
+完整文档地图、阅读路径与写作约定见 [docs/README.md](docs/README.md)。
+
 - [桌面软件规格](docs/software-spec.md)
 - [系统架构](docs/architecture.md)
 - [工程实体模型](docs/engineering/README.md)
@@ -119,8 +121,9 @@ npm run tauri:dev
 - [GIM 格式与匿名样本](docs/schema/README.md)
 - [XML primitive](docs/schema/xml-primitives.md)
 - [正确性验证](docs/validation.md)
-- [性能测量](docs/performance.md)
-- [移动端状态](docs/mobile-spec.md)
+- [性能基线](docs/performance.md) / [性能测试指南](docs/performance-guide.md)
+- [Benchmark CLI](docs/benchmark.md)
+- [移动端规格](docs/mobile-spec.md)
 - [问题与限制](docs/open-issues.md)
 
 ## 许可

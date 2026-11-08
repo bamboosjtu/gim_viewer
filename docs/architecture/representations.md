@@ -2,7 +2,18 @@
 
 本文件描述工程整体、物理 occurrence 与可渲染表示之间的关系。实体分类见[工程实体模型](../engineering/README.md)，DEV/IFC 编译细节分别见[DEV 几何](dev-geometry.md)和[IFC 运行时](ifc-runtime.md)。
 
-## 1. 三层身份
+## 目录
+
+- [三层身份](#三层身份)
+- [物理 occurrence](#物理-occurrence)
+- [表示索引](#表示索引)
+- [绑定规则](#绑定规则)
+- [选择后的表示](#选择后的表示)
+- [状态](#状态)
+- [边界](#边界)
+- [相关文档](#相关文档)
+
+## 三层身份
 
 | 层 | 身份 | 来源 | 不负责 |
 |---|---|---|---|
@@ -12,7 +23,7 @@
 
 三层通过来源 ID 连接，不使用显示名、F 层级、CBM 树路径或空间距离连接。
 
-## 2. 物理 occurrence
+## 物理 occurrence
 
 `SourceGeometryOccurrence` 由完整来源图产生：
 
@@ -32,7 +43,7 @@ matrix          列主序累计矩阵（含 CBM/装配变换，平移按单位�
 
 同一 occurrence 的 DEV LOD、GLB、raw 回退、选择高亮都使用同一身份；LOD 替换不改变选择目标。
 
-## 3. 表示索引
+## 表示索引
 
 `EngineeringRepresentationIndex` 接收：
 
@@ -52,7 +63,7 @@ matrix          列主序累计矩阵（含 CBM/装配变换，平移按单位�
 
 解析结果只有三种：`bound`（唯一整体）、`ambiguous`（跨多个整体）、`unassociated`（没有整体归属）。不自动选择第一个候选。
 
-## 4. 绑定规则
+## 绑定规则
 
 - 整体选择：`sourcesForOwners(ownerIds)` 得到全部来源，再取 DEV/IFC 表示；选择范围可跨多个 DEV 根和 IFC 模型。
 - 分组选择：遍历组成节点下所有实体，按实体 ID 去重；计数不是设备台数。
@@ -63,7 +74,7 @@ matrix          列主序累计矩阵（含 CBM/装配变换，平移按单位�
 
 IFC 的 `globalId` 是否唯一由 `(modelId, globalId)` 计数决定；重复 GUID 不用于单值反向查询。DEV 的 mesh hint 可能带 PHM/MOD 后缀，解析时沿真实装配路径向上回退到最近的 DEV occurrence，不扫描全部兄弟。
 
-## 5. 选择后的表示
+## 选择后的表示
 
 1. 解析整体/分组/来源，生成选择 scope（ownerIds、sourceIds、devRoots、ifc refs）。
 2. 按来源成员取 DEV 根和 IFC 对象；未加载的 DEV 只准备基础表示，不自动进入 L2。
@@ -71,7 +82,7 @@ IFC 的 `globalId` 是否唯一由 `(modelId, globalId)` 计数决定；重复 G
 4. 显式“查看精细模型”才调用 DEV refine/IFC L2；替换表示后原选择身份不变。
 5. 快照更新后按当前成员重新绑定；原整体拆分/合并导致目标不唯一时撤销旧范围，提示候选。
 
-## 6. 状态
+## 状态
 
 `selectionGeometry.status` 区分：
 
@@ -86,9 +97,18 @@ IFC 的 `globalId` 是否唯一由 `(modelId, globalId)` 计数决定；重复 G
 
 这些状态描述“当前选择能否定位/高亮”，不等同于工程实体是否存在。整体和来源仍可在属性/来源视图查看。
 
-## 7. 边界
+## 边界
 
 - 不按包围盒邻近、同名、同模板或 F 层级补造归属。
 - 不把粗模型拆分结果当作精确对象几何；不可分离时明确降级。
 - 不保证所有来源都有表示；空源、unsupported、failed 分别显示。
 - 不证明 GPU 已呈现；高亮集合非空只说明提交完成。
+
+## 相关文档
+
+- [工程实体运行时](engineering-runtime.md)
+- [DEV 几何运行时](dev-geometry.md)
+- [IFC 运行时](ifc-runtime.md)
+- [选择与交互](selection.md)
+- [几何资产与表示索引](geometry-assets.md)
+- [工程实体模型](../engineering/README.md)

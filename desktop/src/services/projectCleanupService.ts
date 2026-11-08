@@ -35,6 +35,7 @@ import { cancelSubstationExtraction } from './substationExtractionJob.js';
 import { cancelIfcConversions } from '../viewer/ifcConversion.js';
 import { cancelSubstationSpatialWorkers } from './substationSpatialWorkerClient.js';
 import { resetStatusRight } from './presentation/shell_statusBar.js';
+import {markMeasurementCancellation} from '../measurement/runtime.js';
 
 /**
  * 在打开新 GIM 项目前 / 清空场景时执行统一清理。
@@ -64,6 +65,7 @@ export async function cleanupBeforeOpenNewProject(
   // （渐进 GLB 管线 / MOD 自动加载），防止旧项目任务把 GLB、版本标记或
   // UI 状态写入新项目。必须在任何 await 之前执行——后续新增逻辑不得移到本行之前。
   state.invalidatePendingLoads();
+  markMeasurementCancellation(expectedGeneration===undefined?'project-closed':'project-replaced');
   const cleanupGeneration = state.projectGeneration;
   cancelSubstationExtraction(state);
   cancelIfcConversions();

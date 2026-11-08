@@ -20,9 +20,53 @@ describe('measurement contracts (no engineering samples)',()=>{
     const {collector,probe}=setup();probe.event(context,{kind:'worker',name:'created'});probe.event(context,{kind:'task',name:'queued'});probe.event(context,{kind:'task',name:'started'});
     probe.event({...context,taskId:'queued-only'},{kind:'task',name:'queued'});
     probe.event(context,{kind:'worker',name:'terminated',status:'timeout'});probe.event(context,{kind:'task',name:'ended',status:'completed'});
-    expect(collector.snapshot()).toMatchObject({activeTasks:[],taskOutcomes:{timeout:2},loss:{interruptedTasks:2,lateEvents:1}});
+    expect(collector.snapshot()).toMatchObject({activeTasks:[],taskOutcomes:{timeout:2},
+      lifecycleComplete:false,loss:{interruptedTasks:2,lateEvents:1,lateEventsUnexpected:1}});
     probe.event({...context,workerId:'worker-2',attemptId:2},{kind:'task',name:'started'});probe.event({...context,workerId:'worker-2',attemptId:2},{kind:'task',name:'ended',status:'completed'});
     expect(collector.snapshot().taskOutcomes).toEqual({timeout:2,completed:1});
+  });
+  it('accepts an explicit business cancellation but rejects unexplained or late task endings',()=>{
+    const {collector,probe}=setup();probe.event(context,{kind:'task',name:'started'});
+    probe.event(context,{kind:'task',name:'ended',status:'cancelled',reasonCode:'request-superseded'});
+    probe.event(context,{kind:'task',name:'ended',status:'cancelled',reasonCode:'request-superseded'});
+    expect(collector.snapshot()).toMatchObject({lifecycleComplete:true,taskOutcomes:{cancelled:1},
+      loss:{lateCancelledAcks:1,lateEventsUnexpected:0}});
+    const next={...context,taskId:'unexplained'};probe.event(next,{kind:'task',name:'started'});
+    probe.event(next,{kind:'task',name:'ended',status:'cancelled'});
+    expect(collector.snapshot()).toMatchObject({lifecycleComplete:false,loss:{cancelledWithoutReason:1}});
+  });
+  it('settles a requested project replacement as intentional cancellation while retaining the reason',()=>{
+    const {collector,probe}=setup();probe.event(context,{kind:'task',name:'started'});
+    const host=new Probe(`${context.runId}:host`,'host-clock','benchmark',()=>0,collector);
+    host.event({...context,workerId:'host',family:'host',backend:'host'},{kind:'counter',name:'lifecycle.cancel-requested',
+      reasonCode:'project-replaced',workload:{requests:1}});
+    probe.event(context,{kind:'worker',name:'terminated',status:'aborted'});
+    expect(collector.snapshot()).toMatchObject({activeTasks:[],lifecycleComplete:true,
+      lifecycleCancellationReasons:{'project-replaced':1},taskOutcomes:{cancelled:1},
+      loss:{interruptedTasks:0,intentionalInterruptedTasks:1}});
+    const unrelated={...context,workerId:'new-worker',taskId:'new-task'};
+    probe.event(unrelated,{kind:'task',name:'started'});
+    probe.event(unrelated,{kind:'worker',name:'terminated',status:'aborted'});
+    expect(collector.snapshot()).toMatchObject({lifecycleComplete:false,loss:{interruptedTasks:1}});
+  });
+  it('allows only the explicitly cancelled task when a worker stops',()=>{
+    const {collector,probe}=setup();
+    probe.event(context,{kind:'task',name:'started'});
+    const host=new Probe(`${context.runId}:host`,'host-clock','benchmark',()=>0,collector);
+    host.event(context,{kind:'counter',name:'lifecycle.cancel-requested',reasonCode:'request-superseded',workload:{requests:1}});
+    probe.event(context,{kind:'worker',name:'terminated',status:'aborted'});
+    expect(collector.snapshot()).toMatchObject({lifecycleComplete:true,taskOutcomes:{cancelled:1},
+      lifecycleCancellationReasons:{'request-superseded':1}});
+    const unrelated={...context,workerId:'worker-2',taskId:'other'};
+    probe.event(unrelated,{kind:'task',name:'started'});
+    probe.event(unrelated,{kind:'worker',name:'terminated',status:'aborted'});
+    expect(collector.snapshot().lifecycleComplete).toBe(false);
+  });
+  it('rejects foreign-run and duplicate events as transport-incomplete',()=>{
+    const {collector,probe}=setup();probe.record(context,'parse',1);
+    const first=collector.drain()[0];collector.accept(first);
+    probe.record({...context,runId:'foreign'},'parse',1);
+    expect(collector.snapshot()).toMatchObject({detailComplete:false,loss:{duplicate:1,foreignRun:1}});
   });
   it('records bounded detail loss without dropping aggregate counts and rejects foreign runs',()=>{
     const {collector,probe}=setup(2);for(let i=0;i<10;i++)probe.record(context,'parse',i);

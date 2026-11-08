@@ -2,7 +2,20 @@
 
 本文件描述变电/独立设备的 DEV/PHM/MOD/STL 编译、放置、LOD、Worker 和缓存。XML primitive 的字段表见[XML primitive](../schema/xml-primitives.md)，容器与 DEV/PHM 格式见[几何模型](../schema/geometry-model.md)。
 
-## 1. 从来源到 occurrence
+## 目录
+
+- [从来源到 occurrence](#从来源到-occurrence)
+- [模板与放置](#模板与放置)
+- [MOD/PHM 与 primitive](#modphm-与-primitive)
+- [STL 与 GL](#stl-与-gl)
+- [LOD 与调度](#lod-与调度)
+- [Worker 与预算](#worker-与预算)
+- [缓存与失效](#缓存与失效)
+- [状态与诊断](#状态与诊断)
+- [性能与边界](#性能与边界)
+- [相关文档](#相关文档)
+
+## 从来源到 occurrence
 
 DEV 几何不接收工程组成或旧展示树节点，只接收来源图产生的 `SourceGeometryOccurrence`：
 
@@ -19,7 +32,7 @@ CBM 物理根
 - `PARTINDEX` 与 `DEV_SUBDEVICE` 是语义投影，不产生第二个几何 seed；身份通过 `OBJECTMODELPOINTER` 在真实子树内关联。
 - 源矩阵无效时保留原文和“位置待确认”诊断，不自动居中或拟合。
 
-## 2. 模板与放置
+## 模板与放置
 
 模板由 Entity、DEV/SUBDEVICE、PHM 逐边 TransformMatrix 和 primitive 组成，尺寸/平移原始单位为 mm。场景统一 `0.001` 缩放到米。
 
@@ -34,7 +47,7 @@ projectSourceToViewer × CBM 累计矩阵（平移转米） × 本地装配矩�
 - 镜像（负行列式）同时修正三角形绕序；不在渲染器重复翻转。
 - 首个 IFC 的真实坐标锚点是场景基准；DEV 编译可早于锚点，场景提交等待锚点。
 
-### 2.1 来源/装配索引、两条流水线与表示绑定
+### 来源/装配索引、两条流水线与表示绑定
 
 工程实体、几何编译和模型树是三个不同粒度，不能强制共用同一个 GLB 身份：
 
@@ -64,24 +77,24 @@ EngineeringEntity   GeometryAsset（来源模板复用）
 - 单 occurrence 与多 occurrence 都走同一条 DEV 模板路径；不再创建实体级 GLB bundle，也不存在 `entity-glb-v1` 持久化域。
 
 
-## 3. MOD/PHM 与 primitive
+## MOD/PHM 与 primitive
 
 - MOD 为 `Device/Entities/Entity` XML；每个 Entity 有可选 TransformMatrix、Color 和首个子 primitive。
 - primitive 的规范化标签、字段、别名、近似和 LOD 见[XML primitive](../schema/xml-primitives.md)。
 - `StretchedBody` 的 Array/Normal 支持方向基矢和完整位移两种解释；范围与网格共用同一解释函数。
 - Boolean 在 L0/L1 采用轮廓近似（Union 组合、Difference/Intersection 保留第一操作数），L2 才执行精确 CSG。
 - 远景/中景 L0/L1 跳过小于阈值的附属构件，只保留主体轮廓；全小构件 DEV 回退一个最大轮廓，不伪装成空设备。跳过只影响当前表示，不删除来源引用，也不写空几何结论。
-- `ChannelSteel`/`Table` 当前只解析、不生成直接几何；弱 schema 三类保留 raw 并用浏览近似。
+- `ChannelSteel`/`Table` 生成外廓盒体浏览近似（无截面型号表，忽略孔洞与栏栅）；弱 schema 三类保留 raw 并用浏览近似。
 - 未识别标签保留 `Unsupported/sourceType`，不能记作 empty。
 - Wire/Cable 使用真实管径的样条管，另叠 1px 中心线保证低档位可见；中心线不参与拾取/测量。
 
-## 4. STL 与 GL
+## STL 与 GL
 
 - STL 仅在标准二进制或 ASCII 布局可校验时给出范围；私有方言保留 unknown，不因范围未知被剔除。
 - 同 UUID `.gl` 是可选辅助来源；不自动加入 SOLIDMODEL 主链。连接端点证据可读取 GL ConnectGuid，但 GL 不参与几何主链。
 - 设备模板校验拒绝动画、实例化网格或非法几何的 GLB；失败回退原始几何或记录 source-invalid。
 
-## 5. LOD 与调度
+## LOD 与调度
 
 | 级别 | 触发 | 表示 |
 |---|---|---|
@@ -95,16 +108,17 @@ EngineeringEntity   GeometryAsset（来源模板复用）
 
 调度顺序：当前选择/当前视图缺少的基础表示 → 可见细节 → 全站其余基础表示。等待任务逐步提升优先级，防止后台基础表示饥饿。用户可暂停自动 L1 细化；显式 L2 仍可进入优先队列。
 
-## 6. Worker 与预算
+## Worker 与预算
 
 - DEV Worker 池按逻辑核数约 60% 取 2–8 个；IFC 未结束前最多同时运行两个 DEV 编译，首个 IFC 完成后释放到池上限。
+- DEV 来源预取与 IFC 几何没有数据依赖；IFC 活跃时立即用 1 MiB 批次预取，避免固定等待并限制读盘竞争。首次几何和 IFC 响应是否改善以同构建原生测量为准。
 - 大 DEV 先只做 DEV/PHM 发现并生成装配子树计划：按真实 `solid:`/`sub:` 边界分组，单个密集 PHM 退化为连续 MOD 任务批次，再平衡到最多 4 部分。各部分在池内并行编译，由一个 Worker 合并为单个 GLB；模板键、缓存键和 occurrence 放置不变，部分不形成第二模板身份。合并失败时回退一次整体编译。普通 DEV 保持模板级单任务；很小的模板由同一队列连续出队，不单独拆键。
 - 模板任务用会话内 taskId 关联队列、Worker、反序列化和提交；诊断 ID 不进入持久化。
 - 每个 Worker 的来源字节、解码文本、XML IR、DEV/PHM IR 缓存分别有界；模板 LRU 按实际顶点/索引缓冲区计量。
 - 未消费 GLB 有结果数/字节预算；场景提交按 16 ms 间隔、单批 4 ms 软预算，单任务不可中断。
 - 内存压力：6 GiB 的 80% 暂停预取和自动 L1，90% 回收未保护模板/空闲 Worker；可见或选中表示受保护。
 
-## 7. 缓存与失效
+## 缓存与失效
 
 L0/L1/L2 的编译和持久化策略：
 
@@ -120,13 +134,13 @@ DEV 模板是共享资产，不是工程实体资产：很小的 DEV 由同一 W
 
 | 缓存 | 键/内容 | 失效 |
 |---|---|---|
-| DEV 模板 | `DEV_GEOMETRY_VERSION|源 SHA|DEV 路径|LOD` | 几何版本、源、模板路径 |
-| DEV 目录 | `DEV_SPATIAL_CATALOG_VERSION|几何版本|源 SHA|DEV 路径` | 目录/几何版本、源 |
+| DEV 模板 | `DEV_GEOMETRY_VERSION` / 源 SHA / DEV 路径 / LOD | 几何版本、源、模板路径 |
+| DEV 目录 | `DEV_SPATIAL_CATALOG_VERSION` / 几何版本 / 源 SHA / DEV 路径 | 目录/几何版本、源 |
 | 浏览器 LOD | IndexedDB `gim-dev-lod-v1` | 源 SHA、DEV 路径、LOD |
 
 模板/目录逐条原子提交，局部命中有效；不写“整工程完整几何”标记。manifest 损坏使几何域失效，不删除有效语义域；单 DEV 坏 GLB 局部回退原始几何。
 
-## 8. 状态与诊断
+## 状态与诊断
 
 | 状态 | 含义 |
 |---|---|
@@ -137,7 +151,7 @@ DEV 模板是共享资产，不是工程实体资产：很小的 DEV 由同一 W
 | `source-invalid` | 确定性源几何异常，零字节且保留诊断；不渲染 |
 | 运行失败 | 读取/编译异常，不是可接受终态 |
 
-常见原因码：`empty-device-xml`、`assembly-node-without-own-geometry`、`dev-no-solidmodel`、`phm-no-solidmodel`、`parser-unsupported`、`missing-dependency`、`source-invalid`、`parse-failed`。失败原因与 `failedVisibleRoots` 一并上报，不把 unsupported 并入 empty。
+常见原因码：`empty-device-xml`、`assembly-node-without-own-geometry`、`dev-no-solidmodel`、`phm-no-solidmodel`、`parser-unsupported`、`missing-dependency`、`source-invalid`、`capacity-exceeded`、`parse-failed`。缺引用携带原始引用证据；容量/预算与未分类解析失败不冒充源损坏。失败原因与 `failedVisibleRoots` 一并上报，不把 unsupported 并入 empty。
 
 产品时刻与统计：
 
@@ -146,9 +160,18 @@ DEV 模板是共享资产，不是工程实体资产：很小的 DEV 由同一 W
 - `devAllStationReady`：全部 occurrence 达到 L2 或合法空终态；不是普通浏览条件。
 - 状态栏按 occurrence 统计已处理/显示/失败，模板任务数另计。
 
-## 9. 性能与边界
+## 性能与边界
 
 - 冷/暖、L0/L1/L2、模板编译/缓存命中分别计量；不能把“语义命中”写成“全站几何就绪”。
 - 实例化批次默认关闭；只有固定路线 draw calls 下降 ≥30% 且帧耗时不回退才考虑默认。
 - L0/L1 不做 CSG；L2 的 CSG/导出仍可能形成不可中断长尾。
 - 真实样本的当前冷/暖结果见[性能基线](../performance.md)，未达标项见[问题与限制](../open-issues.md)。
+
+## 相关文档
+
+- [几何资产与表示索引](geometry-assets.md)
+- [表示与绑定](representations.md)
+- [缓存域](caches.md)
+- [XML primitive](../schema/xml-primitives.md)
+- [几何模型](../schema/geometry-model.md)
+- [IFC 运行时](ifc-runtime.md)

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {compareRuns,approveBaseline,baselineApprovalIssue} from './compare.mjs';
+import {compareRuns,approveBaseline,baselineApprovalIssue,runReadiness} from './compare.mjs';
 import {selectSamples} from './samples.mjs';
 import {CdpConnection} from './cdp.mjs';
 import {cacheVerified,coldWarmEquivalent,freezeProfile,verifyProfile} from './profiles.mjs';
@@ -8,10 +8,43 @@ import {readyForSettle,cachePublicationMoment} from './completion.mjs';
 import {prepareFixedRuntimeSecurity} from '../fixed-runtime-security.mjs';
 import {mkdirSync,mkdtempSync,writeFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
-const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
-const runs=(prefix,value)=>Array.from({length:3},(_,i)=>({conditions:{...conditions},processInstanceId:`${prefix}-${i}`,correctness:'passed',cacheVerified:true,measurementComplete:true,requiredMetrics:['openMs'],metrics:{openMs:value+i}}));
+const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
+const contentEvidence={scope:'DEV-L0-GLB-artifacts',method:'worker-output-or-validated-cache-sha256',
+  availability:'available',coveredOccurrences:1,expectedShownOccurrences:1,missingArtifactSha:0,
+  duplicateArtifactIds:0,digest:'a'.repeat(64),placementFingerprint:'b'.repeat(64),complete:true};
+const runs=(prefix,value)=>Array.from({length:3},(_,i)=>({conditions:{...conditions},processInstanceId:`${prefix}-${i}`,
+  projectType:'substation',contentEvidence:{...contentEvidence},correctness:'passed',cacheVerified:true,
+  measurementComplete:true,requiredMetrics:['openMs'],metrics:{openMs:value+i}}));
 test('missing evidence is inconclusive, explicit correctness failure is fail',()=>{
   const b=runs('base',100),c=runs('candidate',100);c[0].measurementComplete=false;assert.equal(compareRuns(b,c).outcome,'INCONCLUSIVE');c[0].correctness='failed';assert.equal(compareRuns(b,c).outcome,'FAIL');
+});
+test('interrupted lifecycle cannot pass even after active tasks are settled',()=>{
+  const b=runs('base',100),c=runs('candidate',100);
+  c[0].measurementLifecycleComplete=false;
+  c[0].measurement={lifecycleComplete:false,lifecycleIssues:['worker-interrupted-tasks'],activeTasks:[]};
+  c[0].measurementComplete=false;
+  const result=compareRuns(b,c);
+  assert.equal(result.outcome,'INCONCLUSIVE');
+  assert.ok(result.reasons.includes('measurement-lifecycle-incomplete'));
+});
+test('native evidence requires a lifecycle verdict and a pending-aware semantic digest',()=>{
+  const run={...runs('native',100)[0],version:'gim-benchmark-v1',
+    semanticDigestScope:'engineering-with-pending-v2',pendingDigest:'c'.repeat(64),
+    pendingCount:0,pendingSourceCount:0,measurementLifecycleComplete:true,
+    evidence:{semanticDigest:'d'.repeat(64)}};
+  assert.equal(runReadiness(run).reasons.includes('pending-evidence-missing'),false);
+  assert.equal(runReadiness(run).reasons.includes('measurement-lifecycle-incomplete'),false);
+  assert.ok(runReadiness({...run,measurementLifecycleComplete:undefined}).reasons.includes('measurement-lifecycle-incomplete'));
+  assert.ok(runReadiness({...run,semanticDigestScope:'format-projection-v1'}).reasons.includes('pending-evidence-missing'));
+});
+test('confirmed archive corruption is an input error rather than a product invariant failure',()=>{
+  const report={...runs('input',1)[0],inputIntegrity:'corrupt',correctness:'unverified',reason:'input-corrupt'};
+  assert.deepEqual(runReadiness(report),{outcome:'INPUT_ERROR',reasons:['INPUT_CORRUPT']});
+});
+test('confirmed environment suspend is inconclusive rather than a product crash',()=>{
+  const report={...runs('suspended',1)[0],crashed:false,
+    environmentSuspend:{code:'INFRA_SUSPEND',observationGapMs:90000}};
+  assert.deepEqual(runReadiness(report),{outcome:'INCONCLUSIVE',reasons:['INFRA_SUSPEND']});
 });
 test('detail truncation is visible even when aggregate counters survive',()=>{
   const b=runs('base',100),c=runs('candidate',100);
@@ -33,6 +66,15 @@ test('baseline promotion is explicit and refuses incomplete or unfrozen candidat
   const candidate={outcome:'PASS',selectionFrozen:true,runs:runs('base',100)};
   assert.throws(()=>approveBaseline(candidate,''));assert.throws(()=>approveBaseline({...candidate,selectionFrozen:false},'developer'));
   assert.ok(approveBaseline(candidate,'developer').approval.candidateDigest);
+  assert.throws(()=>approveBaseline({...candidate,runs:candidate.runs.map(({contentEvidence,...run})=>run)},'developer'),/dev-content-evidence-incomplete/);
+});
+test('formal content gate detects byte changes hidden by the structural fingerprint',()=>{
+  const baseline=runs('base',100).slice(0,1),candidate=runs('candidate',100).slice(0,1);
+  assert.equal(compareRuns(baseline,candidate,{requireContentEvidence:true}).outcome,'PASS');
+  candidate[0].contentEvidence.digest='c'.repeat(64);
+  const result=compareRuns(baseline,candidate,{requireContentEvidence:true});
+  assert.equal(result.outcome,'INCONCLUSIVE');
+  assert.ok(result.reasons.includes('dev-content-digest-differs'));
 });
 test('single paired process is comparable; partial coverage needs explicit baseline acceptance',()=>{
   const b=runs('base',100).slice(0,1),c=runs('candidate',100).slice(0,1);
@@ -66,6 +108,8 @@ test('warm cache proof is domain-specific and misses cannot masquerade as a warm
   assert.throws(()=>verifyProfile({frozen:true,digest:'edited'}),/digest mismatch/);
   const run={conditions:{sourceSha256:'sha'},evidence:{semanticDigest:'semantic',baseArtifactDigest:'a',progress:{workload:{shown:1}}},actionTargetDigests:[]};
   assert.equal(coldWarmEquivalent(run,{...run,evidence:{...run.evidence,baseArtifactDigest:'b'}}).outcome,'FAIL');
+  const pending={...run,evidence:{...run.evidence,pendingCount:1,pendingSourceCount:2,pendingDigest:'a'}};
+  assert.equal(coldWarmEquivalent(pending,{...pending,evidence:{...pending.evidence,pendingDigest:'b'}}).outcome,'FAIL');
 });
 test('completion waits for background and line publication, then uses the actual finish moment',()=>{
   const observation={projectType:'transmission_line',openElapsedMs:2300,moments:{lineCachePersistenceReady:2100},

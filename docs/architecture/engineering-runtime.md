@@ -2,6 +2,17 @@
 
 本文件描述 v0.2 的工程实体构建、缓存和三视图发布。领域契约、分类规则和目录分别见[工程实体模型](../engineering/README.md)与[目录](../engineering/catalogs/README.md)；本文件不重复分类表。
 
+## 目录
+
+- [目标与边界](#目标与边界)
+- [组成](#组成)
+- [构建流程](#构建流程)
+- [缓存与恢复](#缓存与恢复)
+- [状态](#状态)
+- [验证边界](#验证边界)
+- [几何完成后的组成细化](#几何完成后的组成细化)
+- [相关文档](#相关文档)
+
 ## 目标与边界
 
 工程实体回答“施工、运维识别的一个整体是什么”，不回答“它在当前树里属于哪个 F 层级”或“它由哪个 Mesh 表示”。因此：
@@ -39,7 +50,7 @@
            → 分域写缓存
 ```
 
-### 1. 来源抽取
+### 来源抽取
 
 `extractEngineeringSourceGraph` 从真实文件清单和 `project.cbm` 开始：
 
@@ -51,7 +62,7 @@
 
 来源图有上限（默认 500,000 个 occurrence、深度 128）并响应取消；超限/循环/缺对象模型进入诊断，不用空来源冒充完整。
 
-### 2. 实体归一化
+### 实体归一化
 
 `buildEngineeringSources` 把来源记录和 IFC 外露记录转成 `ObjectEvidence`，调用 `normalizeEngineeringModel`：
 
@@ -63,7 +74,7 @@
 
 详细规则见[实体与来源模型](../engineering/entities.md)。
 
-### 3. 三视图投影
+### 三视图投影
 
 - **工程组成**：`assignEngineeringComposition` 读取声明的系统名、空间建筑/楼层、真实宿主关系，按内置模板分配到建筑工程/安装工程；没有可靠归属的整体进入“未分类”的 DEV/IFC 轨道和类别桶。`projectEngineeringComposition` 生成树、分组计数、待归集合和已声明但无成员的分组。
 - **来源**：`projectEngineeringNavigation` 按 CBM 的 F1/F2/F3/F4 与 DEV 装配生成 DEV 轨道，按每个 IFC 文件及其空间容器/外露记录生成 IFC 轨道；来源行可跳转所属整体。
@@ -73,7 +84,7 @@
 - 视图节点 ID 与实体 ID 分离；分组计数按实体去重，不冒充台套。
 - `compositionProjectionService` 将运行时范围作为显式输入交给 `services/projections/compositionSpatial`，自动细化组成路径并标注推断。此插件不修改快照/来源/表示索引；重复细化从语义视图计算，失效分组撤销选择，旧轮次和旧会话拒绝提交。
 
-### 4. 发布与补建
+### 发布与补建
 
 - 来源不完整时 `engineeringStatus=partial`，仍可浏览已解析部分；不写完整来源凭据。
 - Spatial 尚未就绪时先在内部建立不含建筑楼层的来源和实体；模型树显示加载中；Spatial 到达后 `notifyEngineeringIfcEvidence` 触发重新 assemble，补充空间容器和外露 IFC 对象。这里等待的是 IFC 空间/外露语义，不是 Mesh、LOD 或相机。
@@ -111,3 +122,12 @@
 ## 几何完成后的组成细化
 
 工程来源/实体快照先独立发布。已加载的 IFC RegionalIndex 提供绝对源坐标包围盒，`compositionProjectionService` 在独立 Worker 中细化建筑范围；不读取可见性，不合并实体，不增加几何 seed。楼层名、文件建筑名、系统声明与推断依据继续保留。全部 IFC 范围可用时，最终细化树写入工程导航缓存；缓存契约绑定空间投影策略版本。任一 IFC 跳过或加载失败时发布带范围缺失提示的部分树，来源/实体仍可浏览，导航不写完整缓存。关闭/切换工程终止 Worker，旧投影不能提交；重新绑定分组选择时不自动定位。
+
+## 相关文档
+
+- [工程实体模型](../engineering/README.md)
+- [实体与来源模型](../engineering/entities.md)
+- [表示与绑定](representations.md)
+- [缓存域](caches.md)
+- [DEV 几何运行时](dev-geometry.md)
+- [验证](../validation.md)

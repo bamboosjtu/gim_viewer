@@ -12,6 +12,8 @@
 
 任务有 queued、started、produced、ended 事件。终止会结算尚未开始和正在运行的任务；迟到结束不重复结算。produced 表示 Worker 计算已产出结果，不能代替主线程消费、场景提交、持久化完成。现有业务 RPC、超时、取消、Transferable 和池调度仍由原有实现管理，测量不决定任务是否有效。
 
+`detailComplete` 只描述事件传输/聚合的完整性：明细丢弃、序号间隙、非法事件、聚合组溢出、外来 run 和重复序号都使它为 false。`lifecycleComplete` 单独要求没有活动任务、无授权 Worker 中断、异常终止、超时、无理由取消或异常迟到事件。项目关闭/切换会先用受控原因登记取消，再终止对应的在途任务；明确的 AbortError 任务结束也记录 `abort-error`。已取消任务的受控迟到确认可计数但不重复结算。原生 `measurementComplete` 同时要求这两层完整，不能用 `activeTasks` 已清空替代任务成功闭环。
+
 ## 采集面
 
 | 采集面 | 实现 |
@@ -33,11 +35,15 @@
 
 `off` 关闭可选探针，`summary` 提供汇总，`benchmark` 保留有界详细事件，`diagnostic` 与普通门禁分开。Worker 批量发送事件；Collector 有界保留详细事件、聚合组与任务，溢出/序号间隙明确报告。CLI 每秒采样可用 Worker 堆并排空事件。忙碌、未关联、目标结束或不支持均为 unavailable，并记录原因；不补零。
 
+工程语义摘要包含实体身份/类别及来源、membership 的类别/含义/disposition、关系，以及待归对象的 ID、原因、来源、类别与 disposition。待归 ID 唯一、来源存在、owner 与 membership 双向一致是独立检查；冷暖比较另核对 pending 数量、来源数和摘要。
+
+普通 Benchmark 的 `geometryStructuralFingerprint` 仅覆盖网格数量、包围盒与变换，不能证明顶点或索引相同。DEV 基础表示已有每模板 GLB 字节 SHA；`contentEvidence` 将其按 occurrence 聚合，并核对 SHA 有效、ID 唯一及已显示根覆盖率。正式基线批准和 `gate` 要求该内容证据完整，同源候选的内容摘要或放置指纹变化返回 INCONCLUSIVE 等待复核；普通批量测量仍不遍历全量顶点重新计算 SHA。此证据仅覆盖 DEV L0 GLB，不宣称已校验 IFC 或 L2 顶点内容。
+
 新增采集当前默认 off；原生探针开销验收完成前，不改变普通产品的采集负担。专用 Benchmark/诊断调用显式选择模式。已有 perfTimings 不受该开关影响。
 
-当前 CLI 的原生场景记录只有在正确性、缓存域、必要指标与任务闭环均证实时才允许门禁通过。未证实的字段保持 unverified/false，输出 INCONCLUSIVE；不能手工把汇总状态改成 PASS 代替缺少的证据。来源几何异常只有在全部失败均有明确 `source-invalid` 原始范围证据、没有其他失败时记为 PARTIAL；工程来源覆盖不足只有在缺失/歧义引用等来源证据完整且无 IFC/产品失败时记为 PARTIAL。规则对所有样本相同，匿名缺口摘要由本次证据计算，冷暖及基线比较必须一致。SQLite 核心索引发布与 Engineering Worker 派生来源缓存分开测；来源图 partial 不自动判定 SQLite 缓存失效，也不冒充完整的工程来源缓存命中。`baseline` 默认一冷一暖，`-repeat 3` 可取得三组独立配对；完整迁移门禁还要求固定动作路线、探针开销对照和十轮资源回落验收。
+当前 CLI 的原生场景记录只有在正确性、缓存域、必要指标与任务闭环均证实时才允许门禁通过。未证实的字段保持 unverified/false，输出 INCONCLUSIVE；不能手工把汇总状态改成 PASS 代替缺少的证据。来源几何异常只有在全部失败均有明确 `source-invalid` 原始范围证据或 `missing-dependency` 原始引用证据、没有其他失败时记为 PARTIAL；容量/预算失败仍为产品 FAIL。工程来源覆盖不足只有在不完整原因限于来源图缺口、来源引用缺失/歧义或 IFC manifest 不完整，且对应计数与 IFC runtime/cache 一致性成立、无其他产品失败时记为 PARTIAL。判定细节见[本地批量 Benchmark](../benchmark.md#工程来源-partial)。规则对所有样本相同，匿名缺口摘要由本次证据计算，冷暖及基线比较必须一致。SQLite 核心索引发布与 Engineering Worker 派生来源缓存分开测；来源图 partial 不自动判定 SQLite 缓存失效，也不冒充完整的工程来源缓存命中。`baseline` 默认一冷一暖，`-repeat 3` 可取得三组独立配对；完整迁移门禁还要求固定动作路线、探针开销对照和十轮资源回落验收。
 
-批量 CLI 仅对 `open` 前的基础设施启动故障有限重试，尝试记录与最终测量分开；产品打开、解析、缓存或已开始测量后的故障不自动重试。报告区分计划轮次、有效轮次与实际尝试次数。原生启动诊断留在工作区私有目录，公开报告只含原因码和次数。
+批量 CLI 仅对 `open` 前的基础设施启动故障有限重试，尝试记录与最终测量分开；产品打开、解析、缓存或已开始测量后的故障不自动重试。锁屏和挂起日志同时存在、控制器观察又有长间隙时，渲染进程退出单列 `INFRA_SUSPEND` / INCONCLUSIVE，解锁后由开发者重跑；普通崩溃仍为 FAIL。报告区分计划轮次、有效轮次与实际尝试次数。原生启动诊断留在工作区私有目录，公开报告只含原因码和次数。
 
 CDP 能力以固定运行时实测为准，协议参考 [Runtime](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/) 和 [Target](https://chromedevtools.github.io/devtools-protocol/tot/Target/)。`getHeapUsage` 是 isolate 口径，`performance.memory` 不能替代独立 Worker 堆。重型 CPU profile/heap snapshot 不与普通 Benchmark 数值直接比较。
 
@@ -53,28 +59,15 @@ Windows 固定运行时的文件既需要 AppContainer 读取权限，也不能�
 
 一次线路 Worker 转移可能包含万级 ArrayBuffer。资源账本仍逐 backing buffer 去重并结算；普通 Benchmark 在超过 8 个缓冲时，把该批的 acquire/transfer/release 各压成一条带 `buffers` 和 `referencedBytes` 的聚合事件。任务/阶段明细缓冲为 32,768 条，真正截断仍明确记录。`diagnostic` 模式保留逐缓冲事件，发生丢弃时仍报告不完整。
 
-线路首屏后持久化有 `idle/saving/saved/failed` 会话状态；原生 Benchmark 等待 SQLite finish 提交，失败为明确的失败状态。`cachePublishMs` 取线路完成时刻而非首屏后的静默窗口。冷开变电另等待 `cachePersistenceReady` 的成功或失败终态，再读取 SQLite 证据；工程 Worker 的 `cacheSettled` 只表示该域安静，不代表变电核心索引已发布。`cachePublishMs` 使用实际发布时刻，失败时留空。变电自动表示的时间仍独立记录，原生运行结束另等待 Spatial 终态和三秒静默；尾部出现新任务时继续有界等待，未闭环则保持 INCONCLUSIVE。暖开 IFC 校验依据来源缓存数量、缺失数和 parser 版本；没有请求远景 LOD 的 `open` 场景不要求 `ifcFarHits`。几何失败原因只汇总受控 reason/status 与数量，不输出 DEV 路径和原始诊断文本。
+- **线路持久化。** 首屏后持久化有 `idle/saving/saved/failed` 会话状态；原生 Benchmark 等待 SQLite finish 提交，失败为明确的失败状态。`cachePublishMs` 取线路完成时刻而非首屏后的静默窗口。
+- **变电缓存发布。** 冷开变电等待 `cachePersistenceReady` 的成功或失败终态，再读取 SQLite 证据；工程 Worker 的 `cacheSettled` 只表示该域安静，不代表变电核心索引已发布。`cachePublishMs` 使用实际发布时刻，失败时留空。
+- **时间字段。** `automaticLoadMs` 是自动表示终态；`settledMs` 单列任务/缓存/后台和三秒静默完成，`writeDrainMs` 只记最后 DEV 产物写晚于自动表示的部分。
+- **Worker 堆。** 短于两个采样周期且已关联的 Worker 若首次堆采样前终止，报告堆指标 unavailable 与原因，不填零，也不把整轮误判为产品失败。
+- **冷开不完整。** 缓存已发布但冷开仅因测量证据不足而 INCONCLUSIVE 时，暖开仍运行，正式基线继续保持 INCONCLUSIVE。
+- **暖开校验。** 依据来源缓存数量、缺失数和 parser 版本；没有请求远景 LOD 的 `open` 场景不要求 `ifcFarHits`。
+- **几何失败。** 只汇总受控 reason/status 与数量，不输出 DEV 路径和原始诊断文本。
 
-在 `desktop/` 执行：
-
-```powershell
-npm run bench -- init
-npm run bench -- samples
-npm run bench -- inventory
-npm run bench -- select
-npm run bench -- freeze-profile
-npm run bench -- build
-npm run bench -- doctor --build <构建清单>
-npm run bench -- run --build <构建清单> --sample <匿名ID>
-npm run bench -- matrix --build <构建清单> --profile <冻结Profile>
-npm run bench -- overhead --build <构建清单> --profile <冻结Profile> --sample <匿名ID>
-npm run bench -- lifecycle --build <构建清单> --sample <匿名ID> --second-sample <匿名ID>
-npm run bench -- compare --baseline <基线JSON> --candidate <候选JSON>
-npm run bench -- gate --baseline <认可基线JSON> --candidate <候选JSON>
-npm run bench -- report --input <运行报告JSON>
-```
-
-全部新产物位于工作区 `tmp/gim-bench/`。原始路径映射、运行授权 nonce、日志与 WebView profile 不属于可分享报告。分享报告使用匿名身份、数值与受控状态；不从日志做简单文件名裁剪后当作脱敏。
+子命令、参数、注册表、报告文件与退出码见[本地批量 Benchmark](../benchmark.md)。命令在 `desktop/` 执行，全部新产物位于工作区 `tmp/gim-bench/`。原始路径映射、运行授权 nonce、日志与 WebView profile 不属于可分享报告。分享报告使用匿名身份、数值与受控状态；不从日志做简单文件名裁剪后当作脱敏。
 
 汇总报告写入 `output/gim-bench/`。Profile 按内容摘要命名，不覆盖已有冻结版本；样本与动作选择规则一起冻结。近景检查结束返回原相机位置，避免把未声明的持续近景精化混入后续场景。`doctor` 不需要工程样本，并拒绝任何源文件授权；它只检查原生启动、工作区缓存、模块单实例、读取 RPC、Worker 堆及进程树采样。
 
@@ -89,3 +82,11 @@ npm run bench -- report --input <运行报告JSON>
 产品迁移顺序保持 Engineering Core → Geometry Source → Geometry Compiler；测量系统和明确认可的原生基线是前置门禁。SDK 通过可选 MetricsSink/TraceContext 接入，默认可使用 NOOP_SINK；不导入桌面采样器、全局 AppState 或日志 UI。
 
 接口设计保留 SourceReader、SessionScope、CompilerBackend、CompilerExecutor 与只读 ModelEvidenceProvider。证据接口只提供来源、对象、属性、关系、几何及可用性，不提供 Validate 规则或占位判定。Rust 继续负责 IO/解压/SQLite；独立编译进程需可复现的编译 OOM/崩溃证据，不能从总体内存峰值直接推导出迁移结论。
+
+## 相关文档
+
+- [Benchmark CLI](../benchmark.md)
+- [性能测试指南](../performance-guide.md)
+- [性能基线](../performance.md)
+- [验证](../validation.md)
+- [开发指南](../development.md)

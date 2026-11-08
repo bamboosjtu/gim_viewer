@@ -41,5 +41,13 @@ L0/L1 的“全小构件保留一个真实轮廓”由整个 DEV 决定。Part �
 
 ## 当前限制
 
-- 原生 L0 基础表示已完成 substation01–04 冷/暖采集，结果见[性能基线](../performance.md)；L1/L2 的固定选择和显式精化路线仍待复测。
+- 真实样本的最近一次冷/暖快照见[性能基线](../performance.md)；L1/L2 的固定选择和显式精化路线仍待复测。
 - 实体与几何的表示关联已存在，但属性面板的完整“表示/模板”展示仍可继续完善。
+
+## 相关文档
+
+- [表示与绑定](representations.md)
+- [DEV 几何运行时](dev-geometry.md)
+- [工程实体运行时](engineering-runtime.md)
+- [缓存域](caches.md)
+- [性能基线](../performance.md)

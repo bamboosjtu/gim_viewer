@@ -120,6 +120,7 @@ cacheWriteReservedBytes: this.writeBudget.bytes, cacheWritePeakBytes: this.write
       this.options.diagnostics.errors.push(`缓存写入异常 ${store}:${key}: ${String(error)}`);
       if (this.options.diagnostics.errors.length > 32) this.options.diagnostics.errors.shift();
     }).finally(() => {
+      if (enteredWrite) this.options.diagnostics.lastCacheWriteAtMs = performance.now();
       releasePrepared?.();
       this.pendingWrites.delete(queueKey); this.writeAdmissions.delete(queueKey); this.updateWriteDiagnostics(); this.options.requestReady();
     });

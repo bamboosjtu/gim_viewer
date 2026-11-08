@@ -14,6 +14,7 @@ export function createDevLodDiagnostics() {
         inputBudgetBytes: 0, inputBudgetPeakBytes: 0,
         cacheWriteReservedBytes: 0, cacheWritePeakBytes: 0, cacheWriteWaitingBytes: 0,
         cacheWritePendingCount: 0, cacheWritesSettled: true, cacheWritesReady: true, cacheWriteCancelled: 0,
+        lastCacheWriteAtMs: null as number | null,
         cacheReadBatches: 0, cacheReadEntries: 0, cacheReadDeferred: 0, viewPendingOccurrences: 0,
         cacheHits: 0, cacheMisses: 0, cacheReadErrorCount: 0, cacheInvalidCount: 0,
         lodMisses: [0, 0, 0],

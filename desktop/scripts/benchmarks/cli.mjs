@@ -84,6 +84,7 @@ try{
     const approvalIssue=command==='gate'?baselineApprovalIssue(baseline):null;
     const result=approvalIssue?{outcome:'INCONCLUSIVE',reasons:[approvalIssue]}:compareSuites(baseline.runs??[baseline],candidate.runs??[candidate],{
       retestBaseline:option('retest-baseline')?read(option('retest-baseline')).runs:[],retestCandidate:option('retest-candidate')?read(option('retest-candidate')).runs:[],
+      requireContentEvidence:command==='gate',
     });
     write('comparison.json',result);process.exitCode=['PASS','PARTIAL'].includes(result.outcome)?0:result.outcome==='FAIL'?1:2;
   }else if(command==='approve-baseline'){

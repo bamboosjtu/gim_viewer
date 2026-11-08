@@ -246,7 +246,7 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
         endNative?.('（失败）', { error: nativeMessage });
         if (earlyRequested) throw nativeError;
         // 资源配额是安全边界，不得通过 WASM 回退绕过。
-        if (/超出资源配额|资源配额|压缩比超限|条目数超限|单文件.*超限|总解压量.*超限/i.test(nativeMessage)) {
+        if (/INPUT_CORRUPT:|超出资源配额|资源配额|压缩比超限|条目数超限|单文件.*超限|总解压量.*超限/i.test(nativeMessage)) {
           throw nativeError;
         }
         // The native command may have committed its source cache before a
@@ -384,6 +384,7 @@ async function openTauriGim(
   state: AppState,
   showMessage: (text: string) => void,
   requestedPath?: string,
+  options: {rethrowError?: boolean} = {},
 ): Promise<void> {
   const filePath = requestedPath ?? getDevPerformanceFilePath() ?? await openGimFilePath();
   if (!filePath) return;
@@ -465,6 +466,7 @@ async function openTauriGim(
     console.error(error);
     showLoading(`GIM 解析失败: ${error instanceof Error ? error.message : String(error)}`);
     scheduleHideLoading(ownsOpen, 3000);
+    if(options.rethrowError)throw error;
   } finally {
     if(ownsOpen())btnLoadGim.disabled = false;
   }
@@ -538,5 +540,5 @@ export async function openGimProjectFromId(
 /** Path has already been checked against the private native benchmark manifest. */
 export async function openGimForBenchmark(state:AppState,path:string):Promise<void>{
   if(import.meta.env.VITE_GIM_BENCHMARK !== '1')throw Error('benchmark-build-required');
-  await openTauriGim(state,()=>{},path);
+  await openTauriGim(state,()=>{},path,{rethrowError:true});
 }

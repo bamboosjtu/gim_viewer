@@ -75,3 +75,11 @@ STD gridId、SLD gridId、CBM 字段和 IFCGUID 是独立身份域。
 SVG STD 不提供传统 STD 层级，应显示能力边界，不能按扩展名补造对象。
 
 [schParser](../../desktop/src/gim/schParser.ts)、[stdSldIndex](../../desktop/src/gim/stdSldIndex.ts) 负责格式与关联，打开、恢复、安全和当前产品入口分别见 [架构](../architecture.md) 和 [规格](../software-spec.md)。
+
+## 相关文档
+
+- [语义模型](semantic-model.md)
+- [容器与文件角色](container.md)
+- [样本台账](sample-corpus.md)
+- [系统架构](../architecture.md)
+- [桌面软件规格](../software-spec.md)

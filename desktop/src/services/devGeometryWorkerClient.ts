@@ -1,12 +1,12 @@
 import measuredWorkerAsset from './devGeometryWorker.ts?worker&url';
-import { createMeasuredWorker, measurementWorkerUrl,measurementWorkerTask } from '../measurement/hostWorker.js';
+import { createMeasuredWorker, measurementWorkerUrl,measurementWorkerTask,markMeasuredWorkerTaskCancellation } from '../measurement/hostWorker.js';
 import {OutputResources} from '../measurement/outputResources.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { DEV_GLB_MAX_BYTES, aggregateDevGlbDiagnostics, type DevGeometryCompilePlan, type DevGlbSerializationResult } from './glbCacheService.js';
 import type { DiscoveredGeometries } from './modGeometryDiscovery.js';
 import type { DeviceLod } from '../viewer/xmlModGeometry.js';
 import type { DevSourceBounds } from './devSpatialCatalog.js';
-import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
+import { InvalidDevGeometryError,MissingDevDependencyError } from '../gim/geometry/sourceGeometryError.js';
 import { perfCurrentSession, perfMark, perfRecordTaskPhase, perfMeasureTaskPhase, type PerfTaskIdentity } from '../utils/perfTimings.js';
 import { beginDevGeometryWork, hasCompletedIfcWork, ifcGeometryBusy, onGeometryWorkAvailable, geometryWorkSnapshot } from '../viewer/geometryWorkGate.js';
 import { agedWorkPriority } from '../utils/workPriority.js';
@@ -219,6 +219,7 @@ export class DevGeometryPreprocessor {
         if (owner.task !== task) continue;
         this.active.delete(worker);
         owner.release?.(); owner.release = null;
+        if(reason.name==='AbortError')markMeasuredWorkerTaskCancellation(worker,owner.task.traceId,'request-superseded');
         worker.terminate();
         this.workers = this.workers.filter(value => value !== worker);
         if (this.lastUsedWorker === worker) this.lastUsedWorker = null;
@@ -614,9 +615,11 @@ export class DevGeometryPreprocessor {
     perfRecordTaskPhase(this.taskIdentity(task), 'workerWall', data.wallMs ?? performance.now() - owner!.startedAt,
       this.perf, data.error ? 'failed' : 'completed', data.result?.bytes?.byteLength ?? 0);
     if (data.error) {
-      const error = data.sourceEvidence
-        ? new InvalidDevGeometryError(task.path, data.error, data.sourceEvidence)
-        : new Error(data.error);
+      const error = data.sourceErrorKind==='missing-dependency'&&data.sourceEvidence
+        ?new MissingDevDependencyError(task.path,data.error,data.sourceEvidence)
+        :data.sourceErrorKind==='source-invalid'&&data.sourceEvidence
+          ?new InvalidDevGeometryError(task.path,data.error,data.sourceEvidence)
+          :new Error(data.error);
       this.cancelTaskTree(task, error, false);
       this.pump();
       return;

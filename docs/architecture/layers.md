@@ -91,3 +91,12 @@ bootstrap
 属性抽屉的页签、FAM、IFC 与概览 HTML 位于 `services/inspectorMarkup.ts`；线路地图的导线路径、命中距离和塔位分类位于 `services/lineMapGeometry.ts`，分帧预算位于 `services/lineMapStages.ts`。UI 持有 DOM、Canvas 句柄和取消代次，纯模块只接收值与回调。
 线路地图控制件由 `ui/lineMapControls.ts` 按实例创建；塔位和导线命中计算位于 `services/lineMapHitTesting.ts`，与绘制使用同一条导线屏幕路径。主视图管理 Canvas 绘制、输入事件和分帧任务的归属与释放。
 线路底图按钮和配置状态由 `ui/lineBasemapControls.ts` 渲染；`lineProjectView` 只连接当前地图实例、切换回调和清理代次。
+
+## 相关文档
+
+- [系统架构](../architecture.md)
+- [打开与生命周期](lifecycle.md)
+- [缓存域](caches.md)
+- [运行时与数据库模块](runtime-modules.md)
+- [开发指南](../development.md)
+- [工程实体模型](../engineering/README.md)

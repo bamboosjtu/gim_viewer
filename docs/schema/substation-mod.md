@@ -84,3 +84,11 @@ L2 使用递归精确 CSG；失败后的轮廓回退仍报告 partial。可见�
 - `ChannelSteel`、`Table` 当前生成外廓盒体；早期“无直接几何”的描述已失效，以 [XML primitive](xml-primitives.md) 与源码为准。
 - 颜色/材质共享只影响显示，不推断设备类别、带电状态或工程归属。
 - 几何与颜色契约见[几何模型](geometry-model.md)，运行与缓存见[DEV 几何](../architecture/dev-geometry.md)。
+
+## 相关文档
+
+- [XML primitive](xml-primitives.md)
+- [几何模型](geometry-model.md)
+- [DEV 几何运行时](../architecture/dev-geometry.md)
+- [语义模型](semantic-model.md)
+- [GIM 格式与样本复核](README.md)

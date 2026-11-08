@@ -35,6 +35,11 @@ function createRun(identity: Partial<RunIdentity> = {}) {
 }
 let current = createRun();
 export function measurementRun() { return current; }
+export function markMeasurementCancellation(reasonCode:'project-closed'|'project-replaced'):void {
+  const run=measurementRun();run.probe.event(measurementContext(run.collector),{
+    kind:'counter',name:'lifecycle.cancel-requested',reasonCode,workload:{requests:1},
+  });
+}
 export function resetMeasurementRun(identity: Partial<RunIdentity>): void { current = createRun(identity); }
 export function updateMeasurementIdentity(identity: Partial<RunIdentity>): void {
   const target = current.collector.identity;

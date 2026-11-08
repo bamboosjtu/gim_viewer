@@ -2,7 +2,7 @@
 
 本文件是文档中唯一的缓存契约索引。修改持久化含义时只失效受影响域；实际常量以链接源码为准，不在其他文档复制版本号。
 
-## 1. 存储面
+## 存储面
 
 | 存储 | 内容 | 生命周期 |
 |---|---|---|
@@ -18,7 +18,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 
 无 GIMPKG 头的裸 7z/ZIP 先由原生解压层按签名和配额处理，工程类型仍由内容决定；原生清单按源 SHA 绑定，并给独立落盘条目提供缓存路径。若改走 WASM 回退，全部归档条目都要持久化后才能发布完整 SQLite 索引。工程来源图 `partial` 表示来源覆盖不完整，可能不写 Engineering Worker 的来源/实体/导航派生缓存；它不否定已通过校验的 SQLite 变电核心缓存。
 
-## 2. 当前契约
+## 当前契约
 
 | 域 | 当前契约 | 权威定义 | 失效/校验范围 |
 |---|---|---|---|
@@ -37,9 +37,9 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 | Android HNum | `hnum-xz-v2` | [领域定义](../../packages/powerline-core/src/domain.ts) | 源 SHA、MOD 路径；跨 Body 唯一点号 |
 | 视图状态 | `gim-view-state-v2`（localStorage） | [viewStateStore](../../desktop/src/services/viewStateStore.ts) | 工程 SHA/路径；相机、树展开、选择路径；不参与工程事实 |
 
-## 3. 发布与恢复
+## 发布与恢复
 
-### 3.1 先发布、后写缓存
+### 先发布、后写缓存
 
 工程实体构建完成后先提交 `engineeringSources/snapshot/navigation`，再进入 `finishBuild → saveResult`。缓存编码/写入失败只改变 `engineeringCacheStatus`，不回滚已发布模型；工程切换或取消后，迟到的缓存结果不得提交。
 
@@ -50,29 +50,30 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 - 每域写入后立即释放 `encoded.bytes`，再编码下一域，避免三个域的压缩缓冲同时驻留；
 - 每次 `await` 后检查当前会话/构建身份；旧构建结果不写。
 
-### 3.2 分片与上限
+### 分片与上限
 
 单域 JSON 超过 64 MiB 时按 64 MiB 分片独立 gzip；压缩体上限 384 MiB，解码后总 plain 上限 1 GiB。分片只在编码/恢复时存在，不改变 artifact 身份、来源 SHA 或域版本。读取时校验每片长度、顺序、总 plain 大小和 gzip 边界，任何一片缺失/损坏按整域失败处理。
 
-### 3.3 恢复判定
+### 恢复判定
 
 - `sources`、`entities`、`navigation` 分别尝试；缺失/损坏的域按依赖重建，不删除其他有效域。
 - 只有实体和导航都命中时才标 `hit`；仅来源恢复（实体/导航仍需重建）标 `partial`，并写入明确原因。
 - 导航只持久化具备全部 IFC 范围且投影完成的树；部分 IFC 范围、空间投影未完成或组成覆盖率不足时不写导航缓存。
 - 来源恢复后仍校验来源清单/IFC 清单与域版本；只有来源文件存在不足以证明完整命中。
 
-### 3.4 原子性与暖恢复顺序
+### 原子性与暖恢复顺序
 
 - **原子文件**：每个缓存文件有独立头、源 SHA 和完成凭据；先写临时文件，校验后 rename。工程来源、实体、导航各自独立，不能把部分写当成完整发布。
 - **来源域**：原值/字段形状去重表保留 FAM 原行、重复字段、occurrence 地址和 IFC 空间上下文；缺条目/解析失败时不写完整来源凭据。
 - **实体/导航域**：绑定来源内容摘要；来源有效而实体规则变化时，只重建实体和导航，不重解析 IFC 或重编几何。实体快照未变时导航可独立重建。
 - **DEV 域**：模板和目录分别原子提交；manifest 损坏使几何域失效，但不删除有效语义域。单 DEV 坏 GLB 可局部回退原始几何。大 DEV 的装配子树部分只在 Worker 内存中存在，合并后仍写同一 DEV 模板键；部分不拥有独立持久化身份。L0 生成即持久化；L1 只在选中/显式提升或淘汰后再次请求时写入；L2、空、unsupported 与 source-invalid 终态默认不持久化。
+- **DEV 派生文件耐久性**：模板与目录仍用同目录临时文件和原子 rename 替换，保留源 SHA/版本校验。它们可由原始 GIM 重建，因此不再对每个产物强制 `fsync`；断电后若某条派生文件缺失或校验失败，按该条目失效重编。语义 SQLite 的事务与原子发布契约不变。吞吐收益及断电恢复需要本地验证。
 - **IFC 域**：bim-lod 远景产物、区域模板、按需属性分别缓存；远景 HIT 跳过源读取，近景 HIT 跳过源模型和对象求值；源 SHA 改变拒绝近景。
 - **暖恢复顺序**：语义/来源 → 实体 → 导航 → 几何/IFC。任何一步失败只影响该域，不能回滚已合法提交的其他域。
 
 匿名 B1-3 裸 7z 已完成一轮原生冷暖：SQLite 核心冷发布和暖恢复均通过。B1-4 的完整冷暖、重复运行内存回落与认可基线仍待验收；单组成功和 Node/Worker 候选不能替代完整矩阵，见[问题与限制](../open-issues.md)。
 
-## 4. 失效规则
+## 失效规则
 
 | 变化 | 应失效 | 不应失效 |
 |---|---|---|
@@ -86,10 +87,19 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 
 旧格式直接失效重建，不提供迁移、旧快照读取或历史兼容分支。缓存损坏只删除受影响域；删除工程时再清理该工程全部缓存。
 
-## 5. 诊断
+## 诊断
 
 缓存状态至少区分：`none`、`miss`、`hit`、`partial`、`saving`、`saved`、`error`。诊断需包含域版本、源 SHA、条目/节点计数和失败原因，不能用一个布尔值代表全部恢复。
 
 相关实现：[projectCacheService](../../desktop/src/services/projectCacheService.ts)、[engineeringCacheCodec](../../desktop/src/services/engineeringCacheCodec.ts)、[substationSpatialSemanticCache](../../desktop/src/services/substationSpatialSemanticCache.ts)、[devSpatialCatalog](../../desktop/src/services/devSpatialCatalog.ts)。
 
 工程组成投影只持久化路径、归属引用与推断状态，不包含 `evidence` 投影依据数组。导航 JSON 位于工程导航派生文件，SQLite 提供工程身份授权，没有独立的投影依据列；原始来源证据与实体识别字段保持各自契约。
+
+## 相关文档
+
+- [系统架构](../architecture.md)
+- [打开与生命周期](lifecycle.md)
+- [工程实体运行时](engineering-runtime.md)
+- [DEV 几何运行时](dev-geometry.md)
+- [IFC 运行时](ifc-runtime.md)
+- [验证](../validation.md)

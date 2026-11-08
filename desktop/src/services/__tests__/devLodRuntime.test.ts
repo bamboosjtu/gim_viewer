@@ -5,7 +5,7 @@ import { DEV_GEOMETRY_VERSION } from '../devSpatialCatalog.js';
 import { perfProductMomentSnapshot, perfReset, perfSnapshot } from '../../utils/perfTimings.js';
 import {ByteWorkBudget} from '../../utils/byteWorkBudget.js';
 import {DevGlbTemplate} from '../devGlbTemplateRuntime.js';
-import {InvalidDevGeometryError} from '../../gim/geometry/sourceGeometryError.js';
+import {InvalidDevGeometryError,MissingDevDependencyError} from '../../gim/geometry/sourceGeometryError.js';
 
 const ownedRuntimes = new Set<DevLodRuntime>();
 afterEach(() => {
@@ -405,6 +405,21 @@ it('retains source evidence when isolating a failed DEV template', () => {
   expect(internal.state.geometryDiagnosticsByDevPath.get('dev/8.dev')).toMatchObject({
     status:'failed',reason:'source-invalid',source:'warm',detail:evidence,
   });
+});
+it('isolates a missing geometry reference with its source evidence',()=>{
+  const {internal}=fixture(),row=occurrence(9,true);internal.rows.set('root',row);
+  internal.failed(row,MissingDevDependencyError.forPath(row.entry.devPath,'MOD/absent.mod','MOD'),row.failedKey);
+  expect(internal.state.geometryDiagnosticsByDevPath.get('dev/9.dev')).toMatchObject({
+    status:'failed',reason:'missing-dependency',detail:expect.stringMatching(/^source-reference-missing-v1:/),
+  });
+});
+it('prefetches DEV sources while IFC is pending with bounded reads',async()=>{
+  const {internal}=fixture();internal.session.projectId=7;internal.state.ifcBackgroundPending=true;
+  const files=new Map([['DEV/a.dev',new File(['abc'],'a.dev')]]);
+  const database=await import('@desktop/database.js');
+  const read=vi.spyOn(database,'batchReadCachedFiles').mockResolvedValue(new Map([['DEV/a.dev',new Uint8Array([1,2,3])]]));
+  try{await internal.sources.preloadSources(files);expect(read).toHaveBeenCalledOnce();}
+  finally{read.mockRestore();}
 });
 
 it('ordinary selection stays at L0/L1 and only explicit refinement requests L2', async () => {

@@ -10,7 +10,7 @@ import {scenarioTargets,runScenarioAction,projectResourceState} from './scenario
 
 /** Only loaded by an explicit benchmark build; normal release does not expose this API. */
 export function installBenchmarkHost(state:AppState):void {
-  let opening=false,openError=false,openStarted:number|null=null,openSequence=0;
+  let opening=false,openError=false,openErrorCode:string|null=null,openStarted:number|null=null,openSequence=0;
   let capabilityWorker:Worker|undefined;
   let capabilityResult:unknown=null;
   let stream:ReturnType<typeof installMeasurementStream>|undefined;
@@ -32,7 +32,7 @@ export function installBenchmarkHost(state:AppState):void {
     endCapabilityProbe(){capabilityWorker?.terminate();capabilityWorker=undefined;},
     async open(sampleId:string,nonce:string,config:{runId:string;sourceSha256:string;buildId:string;mode:'off'|'summary'|'benchmark'|'diagnostic'}){
       const sequence=++openSequence;
-      opening=true;openError=false;
+      opening=true;openError=false;openErrorCode=null;
       try{
         const {invoke}=await import('@tauri-apps/api/core');
         const path=await invoke<string>('benchmark_authorize_sample',{sampleId,nonce});
@@ -42,11 +42,16 @@ export function installBenchmarkHost(state:AppState):void {
         if(sequence!==openSequence)return;
         openStarted=performance.now();
         await openGimForBenchmark(state,path);
-      }catch(error){if(sequence===openSequence)openError=true;throw error;}finally{if(sequence===openSequence)opening=false;}
+      }catch(error){if(sequence===openSequence){openError=true;
+        openErrorCode=/INPUT_CORRUPT:/.test(String(error))?'INPUT_CORRUPT':null;}throw error;}finally{if(sequence===openSequence)opening=false;}
     },
-    snapshot(){return {opening,openError,projectType:state.currentProjectType,session:perfCurrentSession(),measurement:measurementSnapshot(),
+    snapshot(){const lastCacheWriteAtMs=state.deviceLodRuntime?.diagnostics.lastCacheWriteAtMs;
+      return {opening,openError,openErrorCode,projectType:state.currentProjectType,session:perfCurrentSession(),measurement:measurementSnapshot(),
       capabilityResult,
-      openElapsedMs:openStarted===null?null:performance.now()-openStarted,visibility:document.visibilityState,viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},
+      openElapsedMs:openStarted===null?null:performance.now()-openStarted,
+      devArtifactWriteElapsedMs:openStarted===null||typeof lastCacheWriteAtMs!=='number'||!Number.isFinite(lastCacheWriteAtMs)?null:
+        Math.max(0,lastCacheWriteAtMs-openStarted),
+      visibility:document.visibilityState,viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},
       progress:benchmarkProgress(state),
       moments:Object.fromEntries(Object.entries(perfProductMomentSnapshot()).map(([key,value])=>[key,value?.atMs??null])),
       cachePersistence:((moment)=>({observed:moment!==null,available:moment?.meta?.available!==false}))

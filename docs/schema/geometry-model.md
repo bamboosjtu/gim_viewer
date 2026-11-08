@@ -4,6 +4,19 @@
 
 CBM 放置及缓存放置矩阵除项数和有限值外，还检查列主序仿射末行与线性基非退化性。非仿射或退化矩阵不交给场景放置，采用单位阵降级；设备入口在状态中提示回退，源矩阵仍保留。行列式判定使用归一化列，合法的小单位缩放与镜像不被误拒绝；不猜测坏矩阵应如何转置或重排。
 
+## 目录
+
+- [DEV 结构](#dev-结构)
+- [PHM 结构](#phm-结构)
+- [模板与 occurrence](#模板与-occurrence)
+- [矩阵约定](#矩阵约定)
+- [单位和轴转换](#单位和轴转换)
+- [颜色](#颜色)
+- [STL](#stl)
+- [GL 辅助来源](#gl-辅助来源)
+- [实现与验证边界](#实现与验证边界)
+- [相关文档](#相关文档)
+
 ## DEV 结构
 
 | 字段 | 含义/当前处理 |
@@ -113,3 +126,11 @@ PHM 可引用 MOD、STL 或混合。没有证据表明它们固定构成某种 L
 
 [devParser](../../desktop/src/gim/geometry/devParser.ts)、[phmParser](../../desktop/src/gim/geometry/phmParser.ts)、[sourceGraph](../../desktop/src/gim/geometry/substationSourceGraph.ts)负责原始结构与来源关系；XML 图元字段见 [XML primitive](xml-primitives.md)，运行时和缓存消费见 [DEV 几何](../architecture/dev-geometry.md)。
 矩阵、alias 和嵌套数量只在 [台账](sample-corpus.md) 维护。
+
+## 相关文档
+
+- [语义模型](semantic-model.md)
+- [样本台账](sample-corpus.md)
+- [变电 XML MOD](substation-mod.md)
+- [DEV 几何运行时](../architecture/dev-geometry.md)
+- [缓存域](../architecture/caches.md)

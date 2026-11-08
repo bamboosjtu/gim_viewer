@@ -23,6 +23,7 @@ export type GeometryDiagnosticReason =
   | 'dev-no-solidmodel'
   | 'parser-unsupported'
   | 'missing-dependency'
+  | 'capacity-exceeded'
   | 'source-invalid'
   | 'parse-failed'
   | 'unknown';
@@ -248,6 +249,7 @@ export function geometryReasonLabel(reason: GeometryDiagnosticReason): string {
     case 'dev-no-solidmodel': return 'DEV 未声明可达 SOLIDMODEL';
     case 'parser-unsupported': return '几何类型暂不支持';
     case 'missing-dependency': return '几何依赖缺失';
+    case 'capacity-exceeded': return '几何编译容量或预算超限';
     case 'source-invalid': return '源几何异常，禁止渲染';
     case 'parse-failed': return '几何解析失败';
     case 'unknown': return '未分类';

@@ -2,6 +2,8 @@ export const MEASUREMENT_VERSION = 'gim-measurement-v1' as const;
 export type MeasurementMode = 'off' | 'summary' | 'benchmark' | 'diagnostic';
 export type WorkerFamily = 'host' | 'measurement-probe' | 'dev' | 'ifc-conversion' | 'ifc-regional' | 'ifc-fine' | 'spatial' | 'engineering' | 'line';
 export type TaskStatus = 'completed' | 'failed' | 'cancelled' | 'timeout' | 'aborted';
+export type LifecycleReasonCode = 'abort-error' | 'worker-exception' | 'request-superseded' | 'user-cancelled'
+  | 'project-closed' | 'project-replaced';
 export type Availability = 'available' | 'unavailable' | 'unsupported' | 'not-applicable';
 export type MemoryQuality = 'measured-capacity' | 'runtime-sampled' | 'estimated' | 'budget';
 
@@ -47,6 +49,8 @@ export interface MeasurementEvent {
   kind: 'worker' | 'task' | 'phase' | 'memory' | 'counter' | 'clock' | 'loss';
   name: string;
   status?: TaskStatus;
+  /** Controlled lifecycle category, never a raw error message or source path. */
+  reasonCode?: LifecycleReasonCode;
   workerUrl?:string;
   resource?:{id:string;action:'acquire'|'copy'|'release'|'transfer';owner:string;to?:string;bytes:number};
   startMs?: number;

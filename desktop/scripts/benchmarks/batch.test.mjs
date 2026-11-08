@@ -15,7 +15,7 @@ function setup(){const parent=artifactDirectory(root,join(root,'tmp','batch-prot
 function inputs(){return {entries:['a','b','c'].map((id,index)=>({inputId:id,sampleId:id,sourceSha256:id,privatePath:'private-name',status:'READY'})),
   samples:['a','b','c'].map(id=>({inputId:id,sampleId:id,sourceSha256:id,paths:[],actions:[]}))};}
 function run(sample,profileDigest){return {out:'private-run',dataRoot:'private-cache',report:{runId:sample.inputId,processInstanceId:sample.inputId,
-  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
+  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
     profileDigest,workloadDigest:'w',routeDigest:'r',viewportDigest:'v'},correctness:'passed',cacheVerified:true,measurementComplete:true,requiredMetrics:['firstResponseMs'],metrics:{firstResponseMs:12},
   evidence:{progress:{workload:{failed:0}}}}};}
 
@@ -26,6 +26,11 @@ test('batch continues after execution exceptions and exports every result and fa
   assert.deepEqual(result.result.rows.map(row=>row.status),['PASS','ERROR','PASS']);
   const json=readFileSync(join(options.out,'results.json'),'utf8');assert.ok(!json.includes('secret'));assert.ok(!json.includes('private-name'));
   for(const name of ['results.csv','errors.csv','summary.csv','stages.csv','workers.csv','report.html'])assert.ok(readFileSync(join(options.out,name),'utf8').length>0);
+  const html=readFileSync(join(options.out,'report.html'),'utf8');
+  assert.match(html,/id="tab-results"[^>]*role="tab"/);
+  assert.match(html,/id="tab-coverage"[^>]*role="tab"/);
+  assert.match(html,/id="panel-coverage"[^>]*hidden/);
+  assert.match(html,/id="panel-results"[^>]*role="tabpanel"/);
 });
 test('frozen batch profile contains sample selection but no sample-specific correctness allowlist',async()=>{
   const options=setup();
@@ -64,12 +69,26 @@ test('evidence-backed engineering coverage remains partial while cold and warm u
     value.report.processInstanceId=value.report.runId;value.report.conditions.cacheState=cacheState;
     value.report.correctness='partial';value.report.cachePublished=true;value.report.coverageComplete=false;
     value.report.defectAssessment={kind:'coverage',status:'evidence-backed',sourceSha256:sample.sourceSha256,
-      coverageDigest:'b'.repeat(64),partialOccurrences:1046};
+      coverageDigest:'b'.repeat(64)};
     value.report.evidence={semanticDigest:'semantic',placementDigest:'placement',baseGeometryDigest:'geometry',baseArtifactDigest:'artifact',
       progress:{workload:{shown:2944,failed:0,partial:1046}}};return value;
   }});
   assert.deepEqual(calls,['cold','warm']);assert.deepEqual(result.result.rows.map(row=>row.status),['PARTIAL','PARTIAL']);
   assert.equal(result.result.pairs[0].outcome,'PARTIAL');
+});
+test('measurement-only gaps do not discard a valid warm-cache opportunity',async()=>{
+  const selected={entries:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),status:'READY'}],
+    samples:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),paths:[],actions:[]}]};
+  const calls=[],result=await executeBatch({...setup(),inputs:selected,preset:'baseline',execute:async({sample,profileDigest,cacheState})=>{
+    calls.push(cacheState);const value=run(sample,profileDigest);
+    value.report.runId=`measurement-${cacheState}`;value.report.processInstanceId=value.report.runId;
+    value.report.conditions.cacheState=cacheState;
+    if(cacheState==='cold')value.report.measurementComplete=false;
+    return value;
+  }});
+  assert.deepEqual(calls,['cold','warm']);
+  assert.deepEqual(result.result.rows.map(row=>row.status),['INCONCLUSIVE','PASS']);
+  assert.equal(result.result.baselineEligible,false);
 });
 test('a readable bare archive without a persistent cache reports its variant and skips unsupported warm',async()=>{
   const selected={entries:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),status:'READY'}],
@@ -84,6 +103,16 @@ test('a readable bare archive without a persistent cache reports its variant and
   assert.equal(calls,1);assert.deepEqual(result.result.rows.map(row=>row.status),['PARTIAL','SKIPPED']);
   assert.equal(result.result.rows[1].error,'WARM_UNSUPPORTED:CACHE_NOT_PERSISTABLE');
   assert.equal(result.result.baselineEligible,false);
+});
+test('a corrupt archive is recorded as input error and cannot prepare a warm run',async()=>{
+  const selected={entries:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),status:'READY'}],
+    samples:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),paths:[],actions:[]}]};
+  const result=await executeBatch({...setup(),inputs:selected,preset:'baseline',execute:async({sample,profileDigest})=>{
+    const value=run(sample,profileDigest);Object.assign(value.report,{inputIntegrity:'corrupt',reason:'input-corrupt',
+      correctness:'unverified',cacheVerified:false,measurementComplete:false});return value;
+  }});
+  assert.deepEqual(result.result.rows.map(row=>row.status),['INPUT_ERROR','SKIPPED']);
+  assert.equal(result.result.rows[1].error,'WARM_UNSUPPORTED:INPUT_CORRUPT');
 });
 test('pre-open infrastructure failure retries with a new run and preserves cold/warm coverage',async()=>{
   const selected={entries:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),status:'READY'}],

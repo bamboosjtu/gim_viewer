@@ -4,6 +4,7 @@ import { BufferLedger } from '../measurement/core.js';
 import { parseWorkerXmlMod } from '../gim/geometry/xmlModWorkerParser.js';
 import { buildDevSourceBounds, type DevSourceBounds } from './devSpatialCatalog.js';
 import { ByteLru } from '../utils/byteLru.js';
+import { geometryFailureKind } from '../gim/geometry/sourceGeometryError.js';
 import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import { parseDev } from '../gim/geometry/devParser.js';
 import { parsePhm } from '../gim/geometry/phmParser.js';
@@ -158,7 +159,8 @@ self.onmessage = createWorkerProbe().wrap(async ({ data }, trace) => {
   } catch (error) {
     trace.fail(error);
     scope.postMessage({ kind: 'result', id: data.id, session: data.session, key: data.key, path: data.path,
-      error: error instanceof Error ? error.message : String(error), sourceEvidence: (error as { sourceEvidence?: string })?.sourceEvidence,
+      error: error instanceof Error ? error.message : String(error),
+      sourceErrorKind:geometryFailureKind(error),sourceEvidence: (error as { sourceEvidence?: string })?.sourceEvidence,
       wallMs: performance.now() - started, stages: { ...stats, ...stages } });
   } finally {
     // Worker owns these resources; GLB bytes have already been exported and transferred.

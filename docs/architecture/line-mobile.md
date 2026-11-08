@@ -2,7 +2,7 @@
 
 本文件描述线路工程的运行时和 Android 边界。线路格式见[线路 MOD](../schema/powerline-mod.md)，用户行为见[桌面软件规格](../software-spec.md)与[移动端规格](../mobile-spec.md)。
 
-## 1. 共享核心
+## 共享核心
 
 `packages/powerline-core/` 提供无平台依赖的线路能力：
 
@@ -12,7 +12,7 @@
 
 桌面通过兼容出口使用它；Android 独立 npm/SQLite，不依赖桌面 Viewer、IFC 或 Three.js。
 
-## 2. 桌面线路运行时
+## 桌面线路运行时
 
 ```text
 GIMPKGT / 裸包
@@ -31,7 +31,7 @@ GIMPKGT / 裸包
 - 默认 OSM 在线底图；OSM 官方瓦片异常时用 CARTO 同源栅格垫底，不整块空白。天地图为可配置能力；都不可达时 Canvas 覆盖层仍可用。
 - 线路弧垂是视觉示意，不能用于净空、张力或施工放样。
 
-## 3. Android
+## Android
 
 - 只面向线路；SAF 导入、私有 SQLite、HNum 预览和领域投影独立。
 - 缓存身份包含源 SHA/大小和 parser 契约；缓存不能覆盖源类型或掩盖源包替换。
@@ -40,9 +40,16 @@ GIMPKGT / 裸包
 - 原包身份不符时明确失败，不覆盖原包；重建完成前不替换正式数据库。
 - 原生存储门禁、SAF/权限/折叠屏/沉浸模式验收见[验证](../validation.md)与[移动端规格](../mobile-spec.md)。
 
-## 4. 边界
+## 边界
 
 - 桌面底部图依赖网络；离线 PMTiles 未实现。
 - 线路三维、杆塔完整几何和设计级弧垂未实现；HNum/MOD 预览只是局部骨架。
 - 桌面与移动端缓存契约独立，不能把桌面 parser 版本写入移动端。
 - 线路选择/属性入口与变电三视图分离；共享底层修改必须回归线路与设备。
+
+## 相关文档
+
+- [线路文本 MOD](../schema/powerline-mod.md)
+- [移动端规格](../mobile-spec.md)
+- [桌面软件规格](../software-spec.md)
+- [语义模型](../schema/semantic-model.md)

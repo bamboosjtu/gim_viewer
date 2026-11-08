@@ -17,33 +17,50 @@ function recordReport(row,report,state){
   Object.assign(row,{status:readiness.outcome,error:[report.reason,...readiness.reasons].filter(Boolean).join(';'),runId:report.runId,
     conditions:report.conditions,checks:report.evidence?.checks??[],workload:report.evidence?.progress?.workload??null,
     projectType:report.projectType??null,correctness:report.correctness,defectAssessment:report.defectAssessment??null,
-    inputVariant:report.inputVariant??null,inputVariantCode:report.inputVariantCode??null,cacheFailureCode:report.cacheFailureCode??null,
+    pendingCount:report.pendingCount??null,pendingSourceCount:report.pendingSourceCount??null,
+    pendingDigest:report.pendingDigest??null,semanticDigestScope:report.semanticDigestScope??null,
+    geometryStructuralFingerprint:report.geometryStructuralFingerprint??null,
+    devContentDigest:report.contentEvidence?.digest??null,
+    devContentCovered:report.contentEvidence?.coveredOccurrences??null,
+    devContentComplete:report.contentEvidence?.complete??null,
+    inputVariant:report.inputVariant??null,inputVariantCode:report.inputVariantCode??null,
+    inputIntegrity:report.inputIntegrity??null,cacheFailureCode:report.cacheFailureCode??null,
     measurementDetailDropped:report.measurementDetailDropped??null,
+    measurementLifecycleComplete:report.measurementLifecycleComplete??null,
+    measurementLifecycleIssues:(report.measurementLifecycleIssues??[]).join(';'),
+    environmentSuspend:report.environmentSuspend?.code??null,
     measurementAggregatedDetail:Object.entries(report.measurementAggregatedDetail??{}).map(([kind,count])=>`${kind}:${count}`).join(';'),
     cachePublished:report.cachePublished??report.cacheVerified,coverageComplete:report.coverageComplete??null,
     engineeringCacheStatus:report.evidence?.progress?.cache?.engineering??null,
-    partialOccurrences:report.evidence?.progress?.workload?.partial??null,
+    devPartialOccurrences:report.evidence?.progress?.workload?.partial??null,
+    partialGeometryReasons:Object.entries(report.evidence?.partialGeometryReasons??{}).map(([reason,count])=>`${reason}:${count}`).join(';'),
+    geometryDiagnosticScope:report.evidence?.geometryDiagnosticScope??null,
     sourceReferenceStatuses:Object.entries(report.evidence?.engineeringCoverage?.referenceStatuses??{}).map(([status,count])=>`${status}:${count}`).join(';'),
     partialEvidenceStatus:report.defectAssessment?.status??null,
     partialEvidenceDigest:report.defectAssessment?.coverageDigest??report.defectAssessment?.sourceSetDigest??null,
     cacheVerified:report.cacheVerified,measurementComplete:report.measurementComplete,
     processSamples:report.processSampling?.samples,processSamplesAvailable:report.processSampling?.available,
-    missingWorkerHeaps:report.missingWorkerMemory?.length,failedGeometry:report.evidence?.progress?.workload?.failed,
+    missingWorkerHeaps:report.missingWorkerMemory?.length,shortLivedWorkerHeaps:report.shortLivedWorkerMemory?.length,
+    failedGeometry:report.evidence?.progress?.workload?.failed,
     pendingTasks:report.measurement?.activeTasks?.length,backgroundSettled:report.evidence?.progress?.backgroundSettled,
-    cachePublication:report.projectType==='substation'?report.evidence?.progress?.cachePersistenceStatus??null:
+    cachePublication:report.projectType==='substation'?
+      row.cacheState==='warm'&&report.cacheVerified&&report.evidence?.progress?.cachePersistenceStatus==='not-observed'
+        ?'reused':report.evidence?.progress?.cachePersistenceStatus??null:
       report.evidence?.progress?.cache?.linePersistence??null,
     linePackAssessment:report.evidence?.cache?.linePackAssessment??null,
     failedGeometryReasons:Object.entries(report.evidence?.geometryDefects?.failedReasons??{}).map(([reason,count])=>`${reason}:${count}`).join(';'),
     geometryStatuses:Object.entries(report.evidence?.geometryStatuses??{}).map(([status,count])=>`${status}:${count}`).join(';'),
     failedSourceSetDigest:report.evidence?.geometryDefects?.failedSourceSetDigest??null,
     failedSourceCount:report.evidence?.geometryDefects?.failedSourceCount??0});
-  for(const key of ['firstResponseMs','firstGeometryMs','automaticLoadMs','cachePublishMs','processPrivatePeakBytes'])row[key]=report.metrics?.[key]??null;
+  for(const key of ['firstResponseMs','firstGeometryMs','automaticLoadMs','cachePublishMs','settledMs','writeDrainMs','processPrivatePeakBytes'])row[key]=report.metrics?.[key]??null;
   const context={runId:report.runId,sampleId:row.sampleId,sampleLabel:row.sampleLabel,sourceSha256:row.sourceSha256,repetition:row.repetition,cacheState:row.cacheState};
   for(const [stage,stats]of Object.entries(report.measurement?.phases??{}))state.stages.push({...context,stage,count:stats.count,totalMs:stats.totalMs,maxMs:stats.maxMs,
     ...Object.fromEntries(['p50','p95','p99'].flatMap(key=>[[`${key}LowerMs`,stats[key]?.lowerMs],[`${key}UpperMs`,stats[key]?.upperMs]]))});
   const heaps=new Map((report.workerMemory??[]).map(worker=>[worker.workerId,worker]));
+  const shortLived=new Map((report.shortLivedWorkerMemory??[]).map(worker=>[worker.workerId,worker]));
   for(const [workerId,worker]of Object.entries(report.measurement?.workers??{})){
     const heap=heaps.get(workerId);state.workers.push({...context,workerId,family:worker.family,heapAvailability:heap?'available':'unavailable',heapSamples:heap?.samples??0,
+      heapReason:shortLived.get(workerId)?.reason??(heap?null:'required-heap-unavailable'),
       observedHeapPeakBytes:heap?.observedPeakBytes??null,maxSampleDelayMs:heap?.maxSampleDelayMs??null});
   }
 }
@@ -56,7 +73,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   const cacheStates=preset==='baseline'?['cold','warm']:['cold'];
   privateOut??=artifactDirectory(root,join(root,'tmp','gim-bench','batches',`batch-${Date.now()}`));
   const build=JSON.parse(readFileSync(workspacePath(root,buildManifest),'utf8'));
-  const body={version:'gim-batch-profile-v1',preset,repetitions,cacheStates,mode:'benchmark',detailPolicy:'task-phase-timeline-v1',timeoutMs,
+  const body={version:'gim-batch-profile-v1',preset,repetitions,cacheStates,mode:'benchmark',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',timeoutMs,
     startupRetryPolicy:'pre-open-infrastructure-v1',maxStartupAttempts:STARTUP_ATTEMPTS,
     cases:inputs.samples.map(({paths,...sample})=>sample)};
   const profileDigest=digest(body),state={version:'gim-batch-results-v1',status:'RUNNING',outcome:'INCONCLUSIVE',preset,repetitions,
@@ -81,11 +98,14 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
       for(const cacheState of cacheStates){
         const row=state.rows.find(row=>row.inputId===sample.inputId&&row.repetition===repetition&&row.cacheState===cacheState);
         if(controller.signal.aborted){row.status='CANCELLED';row.error='batch-cancelled';continue;}
-        if(cacheState==='warm'&&(!cold||!['PASS','PARTIAL'].includes(runReadiness(cold.report).outcome)||!cold.report.cacheVerified||cold.report.reason)){
+        if(cacheState==='warm'&&(!cold||!['passed','partial'].includes(cold.report.correctness)||
+          !cold.report.cacheVerified||cold.report.reason||cold.report.crashed||cold.report.cacheFailureCount>0)){
           const coldRow=state.rows.find(item=>item.inputId===sample.inputId&&item.repetition===repetition&&item.cacheState==='cold');
           row.status='SKIPPED';row.error=cold?.report.cacheFailureCode==='CACHE_NOT_PERSISTABLE'
             ?'WARM_UNSUPPORTED:CACHE_NOT_PERSISTABLE':coldRow?.startupFailures?.length
-              ?`cold-startup-infrastructure-unavailable:${coldRow.startupFailures.at(-1)}`:'warm-preparation-incomplete';save();continue;
+              ?`cold-startup-infrastructure-unavailable:${coldRow.startupFailures.at(-1)}`:
+                cold?.report.inputIntegrity==='corrupt'?'WARM_UNSUPPORTED:INPUT_CORRUPT':
+                  cold?.report.environmentSuspend?.code==='INFRA_SUSPEND'?'cold-infrastructure-suspended':'warm-preparation-incomplete';save();continue;
         }
         row.status='RUNNING';save();onProgress({inputId:row.inputId,sample:row.sampleLabel,sourceSha256:row.sourceSha256,repetition,cacheState,completed:state.rows.filter(row=>terminal.has(row.status)).length,total:state.rows.length});
         try{
@@ -112,7 +132,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
           if(isStartupInfrastructureFailure(result.report)&&row.attempts===STARTUP_ATTEMPTS)
             row.error=`startup-infrastructure-retries-exhausted:${result.report.reason}`;
           const report=result.report;
-          state.runs.push(Object.fromEntries(['version','runId','processInstanceId','conditions','buildFingerprint','correctness','defectAssessment','inputVariant','cacheFailureCode','cacheFailureCount','cacheVerified','cachePublished','coverageComplete','measurementComplete','requiredMetrics','metrics','processSampling','crashed','reason'].map(key=>[key,report[key]])));
+          state.runs.push(Object.fromEntries(['version','runId','processInstanceId','conditions','buildFingerprint','projectType','correctness','defectAssessment','semanticDigestScope','pendingDigest','pendingCount','pendingSourceCount','geometryStructuralFingerprint','contentEvidence','inputIntegrity','environmentSuspend','inputVariant','cacheFailureCode','cacheFailureCount','cacheVerified','cachePublished','coverageComplete','measurementLifecycleComplete','measurementComplete','requiredMetrics','metrics','processSampling','crashed','reason'].map(key=>[key,report[key]])));
           if(controller.signal.aborted){row.status='CANCELLED';row.error='batch-cancelled';}
           else if(cacheState==='cold')cold=result;
           else{const pair={sampleId:sample.sampleId,repetition,...coldWarmEquivalent(cold.report,result.report)};state.pairs.push(pair);

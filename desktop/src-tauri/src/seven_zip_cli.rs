@@ -137,6 +137,7 @@ where
         target.flush().map_err(|e| format!("刷新临时归档失败: {e}"))?;
     }
 
+    let mut stderr_reader = None;
     let result = (|| -> Result<(), String> {
         let mut command = Command::new(&seven_zip);
         command
@@ -145,7 +146,7 @@ where
             .args(["-so", "-bso0", "-bsp0", "-bd", "-y"])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -153,6 +154,9 @@ where
         }
         let mut child = ReapedChild(command.spawn().map_err(|e| format!("启动 7z.exe 失败: {e}"))?);
         let mut stdout = child.0.stdout.take().ok_or_else(|| "7z stdout 不可用".to_string())?;
+        if let Some(stderr) = child.0.stderr.take() {
+            stderr_reader = Some(std::thread::spawn(move || bounded_stderr_tail(stderr)));
+        }
         let mut buffer = vec![0u8; 1 << 20];
         let mut pending: Vec<u8> = Vec::new();
         let mut entry_index = 0usize;
@@ -197,13 +201,53 @@ where
         Ok(())
     })();
 
+    // On an early read/sink error ReapedChild has already killed and waited
+    // for the decoder, so the bounded stderr reader can always be joined.
+    let stderr_tail = stderr_reader.and_then(|reader| reader.join().ok()).unwrap_or_default();
     let _ = fs::remove_file(&temp_archive);
-    result
+    result.map_err(|error| {
+        if !stderr_tail.is_empty() { eprintln!("[GIM private 7z diagnostic] {stderr_tail}"); }
+        match corrupt_stderr_code(&stderr_tail) {
+            Some(code) => format!("INPUT_CORRUPT:{code}; {error}"),
+            None => error,
+        }
+    })
+}
+
+fn bounded_stderr_tail(mut stderr: impl Read) -> String {
+    const LIMIT: usize = 8192;
+    let mut tail = Vec::new();
+    let mut chunk = [0u8; 2048];
+    loop {
+        match stderr.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => {
+                tail.extend_from_slice(&chunk[..read]);
+                if tail.len() > LIMIT { let excess = tail.len() - LIMIT; tail.drain(..excess); }
+            }
+        }
+    }
+    String::from_utf8_lossy(&tail).into_owned()
+}
+
+fn corrupt_stderr_code(stderr: &str) -> Option<&'static str> {
+    let lower = stderr.to_ascii_lowercase();
+    if lower.contains("crc failed") || lower.contains("crc error") { Some("CRC_ERROR") }
+    else if lower.contains("data error") { Some("DATA_ERROR") }
+    else if lower.contains("headers error") { Some("HEADER_ERROR") }
+    else { None }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoder_stderr_distinguishes_corrupt_input_from_other_failures() {
+        assert_eq!(corrupt_stderr_code("ERROR: Data Error : source"), Some("DATA_ERROR"));
+        assert_eq!(corrupt_stderr_code("CRC Failed"), Some("CRC_ERROR"));
+        assert_eq!(corrupt_stderr_code("cannot create output"), None);
+    }
 
     #[test]
     fn embedded_hashes_are_sha256_hex() {

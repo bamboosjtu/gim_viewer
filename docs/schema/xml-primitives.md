@@ -7,6 +7,20 @@
 
 文件 grammar、Entity 字段回退、Boolean 求值规则和状态计数的完整说明见 [substation-mod](substation-mod.md)；矩阵、单位与颜色契约见 [geometry-model](geometry-model.md)。本文只补充 primitive 粒度的字段映射、LOD 与上限。
 
+## 目录
+
+- [公共约定](#公共约定)
+- [Primitive 总表](#primitive-总表)
+- [标签归一与导出器别名](#标签归一与导出器别名)
+- [StretchedBody：Array、Normal 与位移语义](#stretchedbodyarraynormal-与位移语义)
+- [Boolean：引用、轮廓与 CSG](#boolean引用轮廓与-csg)
+- [Wire 与 Cable：点序列与真实管径](#wire-与-cable点序列与真实管径)
+- [弱 schema 与 Unsupported](#弱-schema-与-unsupported)
+- [近似类型与明确忽略的字段](#近似类型与明确忽略的字段)
+- [分段、上限与超限行为](#分段上限与超限行为)
+- [源码入口与验证边界](#源码入口与验证边界)
+- [相关文档](#相关文档)
+
 ## 公共约定
 
 | 主题 | 当前实现 |
@@ -163,3 +177,11 @@ loader 另叠一条 1px 中心线：每 Entity 一条 Line，超过 1000 条时�
 - 新增类型必须同时补字段映射（含别名）、浏览几何与 LOD/近似说明、上限与失败 reason，并同步本文与 [substation-mod](substation-mod.md) 的分工；只加 parser 分支会让文件被记成 unsupported 或 partial。
 - 已知偏差：当前实现已为 ChannelSteel、Table 生成外廓盒体（早期文字说明曾记为“无直接几何”）；以本文与源码为准，其它文档与源码不一致时应同步。
 - 颜色、可见性与材质共享只影响显示，不能据此推断设备类别、带电状态或工程归属。
+
+## 相关文档
+
+- [变电 XML MOD](substation-mod.md)
+- [几何模型](geometry-model.md)
+- [DEV 几何运行时](../architecture/dev-geometry.md)
+- [GIM 格式与样本复核](README.md)
+- [样本台账](sample-corpus.md)

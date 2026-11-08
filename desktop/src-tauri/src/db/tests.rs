@@ -25,10 +25,13 @@ use std::os::windows::fs::MetadataExt;
         std::fs::write(&file, b"previous").unwrap();
         super::atomic_write(&file, b"next", "test").unwrap();
         assert_eq!(std::fs::read(&file).unwrap(), b"next");
+        super::atomic_write_derived(&file, b"derived", "test").unwrap();
+        assert_eq!(std::fs::read(&file).unwrap(), b"derived");
         let directory = root.join("must-remain");
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(directory.join("record"), b"valid").unwrap();
         assert!(super::atomic_write(&directory, b"invalid", "test").is_err());
+        assert!(super::atomic_write_derived(&directory, b"invalid", "test").is_err());
         assert_eq!(std::fs::read(directory.join("record")).unwrap(), b"valid");
         std::fs::remove_dir_all(root).unwrap();
     }

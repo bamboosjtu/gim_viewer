@@ -4,7 +4,7 @@
 
 建筑名称和空间容器本身如何解析见[建筑推断](building-inference.md)；工程组成模板见[工程组成与三视图](composition.md)。
 
-## 1. 输入与坐标
+## 输入与坐标
 
 | 输入 | 来源 | 用途 |
 |---|---|---|
@@ -23,7 +23,7 @@ IFC 的 web-ifc/RegionalIndex 范围是绝对 Y-up 米制；进入投影前统�
 
 推断只消费**源坐标的实体范围**，不消费场景可见性、Mesh 身份或 F 层级。
 
-## 2. 阈值
+## 阈值
 
 `SPATIAL_PROJECTION_POLICY` 集中定义，版本变化必须同时失效导航缓存：
 
@@ -43,7 +43,7 @@ IFC 的 web-ifc/RegionalIndex 范围是绝对 Y-up 米制；进入投影前统�
 | `areaDistance` | 12 m | 设备/基础到区域锚点最大距离 |
 | `areaSeparation` | 2 m | 两个区域候选的最小差距 |
 
-## 3. 建筑轮廓
+## 建筑轮廓
 
 1. **种子**：类别为 `C-A1`–`C-A6`，有有效范围，来源提示命中 `建筑|配电.*楼|辅助用房|主控.*楼|警卫|门卫`，且顶面高度 `> minTop`。
 2. **合并**：按 8 m 网格做空间哈希，种子包围盒在 XY 上相距不超过 `joinMargin` 时并查集合并。只比较同格及相邻格，避免大结构文件的全对全扫描。
@@ -59,9 +59,9 @@ IFC 的 web-ifc/RegionalIndex 范围是绝对 Y-up 米制；进入投影前统�
 
 匿名轮廓若同时满足“至少两个不同主变系统设备锚点”和“没有屋面/大面积高位楼板覆盖”，作为**主变室外区域**，不生成建筑。屋面判据为存在 `C-A6`，或 `C-A2` 面积 ≥轮廓面积 20% 且顶面 `> minTop`。
 
-## 4. 构件与房间归属
+## 构件与房间归属
 
-### 4.1 建筑构件
+### 建筑构件
 
 对 `C-A*`/`C-B*` 构件，若中心点落在唯一非歧义轮廓内，且水平范围完整落在轮廓外扩 `containmentMargin` 内：
 
@@ -70,11 +70,11 @@ IFC 的 web-ifc/RegionalIndex 范围是绝对 Y-up 米制；进入投影前统�
 - 投影只保存路径及推断状态；不生成、展示或持久化命名/范围拼接的投影依据列表；
 - 轮廓属于主变室外区域时，改为归入该区域，证据写 `spatial-equipment-area`。
 
-### 4.2 房间/机电交付
+### 房间/机电交付
 
 仅暴露房间名的房间/机电文件，若没有“非房间建筑”的语义路径，且其范围完整落在唯一非室外、非歧义轮廓内，归入该建筑，并把房间作为楼层节点。证据写 `spatial-room-footprint`；该路径由空间证据驱动，但当前不额外标 `inferred`。
 
-### 4.3 户外设备区域
+### 户外设备区域
 
 未归类的 `C-B*`、`C-A1/C-A3/C-A4/C-A5`，按水平距离寻找主变/配电装置系统锚点：
 
@@ -84,7 +84,7 @@ IFC 的 web-ifc/RegionalIndex 范围是绝对 Y-up 米制；进入投影前统�
 - 归入 `<系统>区域`，并按类别/名称分为构架、支架、基础或防火墙；
 - 证据写 `spatial-equipment-area`。
 
-### 4.4 防火墙墙片
+### 防火墙墙片
 
 混合“主变基础/防火墙”交付文件中的墙片，只有同时满足以下条件才合成防火墙：
 
@@ -96,7 +96,7 @@ IFC 的 web-ifc/RegionalIndex 范围是绝对 Y-up 米制；进入投影前统�
 
 满足后，该组只替换已经位于“主变区域”的墙片路径；不把整份文件的所有构件都判成防火墙。
 
-## 5. 结果与失败
+## 结果与失败
 
 - 建筑轮廓/设备区域路径带 `inferred=true`，证据包含策略版本；房间归属写 `spatial-room-footprint`，当前不额外标 `inferred`。树和属性面板对带推断证据的路径标注“空间推断”。
 - 任何不满足唯一性/包含性的对象保持原语义路径或未分类，不按“第一个候选”、排序或邻近强行归属。
@@ -104,7 +104,7 @@ IFC 的 web-ifc/RegionalIndex 范围是绝对 Y-up 米制；进入投影前统�
 - 诊断输出 `footprints`（范围、成员数、候选名、投票、最终名）和 `firewallStacks`（范围、成员、证据）。
 - 导航缓存契约绑定 `SPATIAL_PROJECTION_POLICY.version`；策略变化只重建导航，不重编几何。
 
-## 6. 验证
+## 验证
 
 - `desktop/src/services/__tests__/compositionSpatial.test.ts`：Y-up→Z-up 转换、建筑轮廓、主变室外区域、房间/区域、防火墙、未分类保持、快照不变；
 - `compositionProjection.test.ts`：静态/运行时投影一致性；
@@ -112,3 +112,11 @@ IFC 的 web-ifc/RegionalIndex 范围是绝对 Y-up 米制；进入投影前统�
 - 本地工程回归入口：`npm run test:local -- --build <原生构建清单>`，样本由开发者在私有注册表中登记。
 
 当前不证明：建筑轮廓的完整 Site→Building→Storey→Space 语义图谱、同 GUID 多文件 footprint 拆分/合并、真实桌面空间推断性能；这些仍是[问题与限制](../open-issues.md)中的未关闭项。
+
+## 相关文档
+
+- [建筑推断](building-inference.md)
+- [工程组成与三视图](composition.md)
+- [实体与来源模型](entities.md)
+- [工程实体运行时](../architecture/engineering-runtime.md)
+- [缓存域](../architecture/caches.md)

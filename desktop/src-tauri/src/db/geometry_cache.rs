@@ -274,7 +274,7 @@ fn write_device_lod_artifact_blocking(app_handle: tauri::AppHandle, meta: Binary
     if bytes.len() > 128 * 1024 * 1024 { return Err("设备派生缓存超过单条配额".into()); }
     let source = meta.source_gim_sha256.as_deref().ok_or("设备缓存缺少源 SHA")?;
     let path = device_lod_artifact_path(&app_handle, meta.project_id, &meta.entry_path, source)?;
-    atomic_write(&path, &bytes, "设备派生缓存")
+    super::cache_paths::atomic_write_derived(&path, &bytes, "设备派生缓存")
 }
 
 #[tauri::command]

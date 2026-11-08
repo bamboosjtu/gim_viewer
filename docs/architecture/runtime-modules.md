@@ -85,3 +85,11 @@ flowchart TD
 - `cargo test --lib --manifest-path src-tauri/Cargo.toml`：原生路径安全、语义包、缓存协议及事务测试；临时文件应使用可写的隔离目录。
 - `npm run check:engineering-boundaries`：层间依赖、运行时组件反向依赖入口与模块内循环检查。
 - `npm run build` 与 `cargo check --manifest-path src-tauri/Cargo.toml`：前端生产分包、类型检查和 Tauri 命令注册兼容性。
+
+## 相关文档
+
+- [分层与依赖](layers.md)
+- [缓存域](caches.md)
+- [打开与生命周期](lifecycle.md)
+- [DEV 几何运行时](dev-geometry.md)
+- [平台、安全与发布](platform.md)

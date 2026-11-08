@@ -53,3 +53,11 @@
 ## 验证
 
 分类矩阵覆盖属性优先、目录编码、子类与冲突；模板测试覆盖同名多实例、内部件不计整体、仅来源守恒、独立搜索、替换组成路径不影响清册/来源。真实四包入口为 `npm run test:engineering:classification`，输出位于 `output/v020-stage2`，不覆盖阶段 1 资产；缺样本即失败。该检查不替代完整九工程实体金标准、原生操作或性能验收。
+
+## 相关文档
+
+- [目录总则](catalogs/README.md)
+- [设备目录](catalogs/equipment.md)
+- [装置性材料](catalogs/materials.md)
+- [构件目录](catalogs/components.md)
+- [工程组成与三视图](composition.md)

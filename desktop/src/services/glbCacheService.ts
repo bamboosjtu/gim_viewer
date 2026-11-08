@@ -274,7 +274,7 @@ export async function analyzeDevCompilation(
   const normalizedDevPath = devPath.replace(/\\/g, '/');
   const canonicalDevPath = getFileEntryResolver(files)(normalizedDevPath) ?? normalizedDevPath;
   if (!getFileByPath(files, canonicalDevPath)) {
-    throw new Error(`DEV 文件不存在，无法生成 GLB: ${canonicalDevPath}`);
+    throw MissingDevDependencyError.forPath(canonicalDevPath,canonicalDevPath,'DEV');
   }
   const discovered = await discoverGeometriesFromDevPath(
     canonicalDevPath, files, IDENTITY_MATRIX.slice(), new Set<string>(), 0, { instances: 0 },
@@ -285,6 +285,7 @@ export async function analyzeDevCompilation(
 
 export { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
 import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
+import { MissingDevDependencyError } from '../gim/geometry/sourceGeometryError.js';
 
 /** 单例 GLTFLoader（内部无状态，可安全复用） */
 let _gltfLoader: GLTFLoader | null = null;
@@ -335,7 +336,7 @@ export async function serializeDevToGlbDetailed(
   const canonicalDevPath = options.canonicalDevPath
     ?? getFileEntryResolver(files)(normalizedDevPath) ?? normalizedDevPath;
   if (!getFileByPath(files, canonicalDevPath)) {
-    throw new Error(`DEV 文件不存在，无法生成 GLB: ${canonicalDevPath}`);
+    throw MissingDevDependencyError.forPath(canonicalDevPath,canonicalDevPath,'DEV');
   }
 
   // 1. 发现 DEV 内部所有 MOD/STL 几何（parentTransform = IDENTITY，不含 CBM）
@@ -428,6 +429,8 @@ export async function serializeDevToGlbDetailed(
   // 加载 MOD
   for (const geo of discovered.mods) {
     try {
+      if(!getFileByPath(files,geo.modPath))
+        throw MissingDevDependencyError.forPath(canonicalDevPath,geo.modPath,geo.modPath.toLowerCase().endsWith('.gl')?'GL':'MOD');
       const group = await loadXmlModFromFiles(
         geo.modPath,
         files,
@@ -477,6 +480,7 @@ export async function serializeDevToGlbDetailed(
       diagnostics.renderableModCount++;
       if (xmlDiagnostics?.status === 'partial') diagnostics.partialSourceCount++;
     } catch (err) {
+      if(err instanceof MissingDevDependencyError)throw err;
       const strictError = new Error(`DEV ${canonicalDevPath} 内 MOD 加载失败: ${geo.modPath}`);
       (strictError as Error & { cause?: unknown }).cause = err;
       throw strictError;
@@ -487,7 +491,7 @@ export async function serializeDevToGlbDetailed(
   for (const geo of discovered.stls) {
     try {
       const file = getFileByPath(files, geo.stlPath);
-      if (!file) throw new Error(`STL 文件不存在: ${geo.stlPath}`);
+      if (!file) throw MissingDevDependencyError.forPath(canonicalDevPath,geo.stlPath,'STL');
       const buffer = await file.arrayBuffer();
       const group = parseStlBinary(buffer, geo.stlPath);
       if (!group) throw new Error(`STL 解析失败: ${geo.stlPath}`);
@@ -506,6 +510,7 @@ export async function serializeDevToGlbDetailed(
       stlLoaded++;
       diagnostics.renderableStlCount++;
     } catch (err) {
+      if (err instanceof MissingDevDependencyError) throw err;
       const strictError = new Error(`DEV ${canonicalDevPath} 内 STL 加载失败: ${geo.stlPath}`);
       (strictError as Error & { cause?: unknown }).cause = err;
       throw strictError;

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { isDevInstanceBatchesEnabled } from '../config/features.js';
 import { diagnosticForFailure, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
-import { InvalidDevGeometryError } from '../gim/geometry/sourceGeometryError.js';
+import { InvalidDevGeometryError,MissingDevDependencyError,geometryFailureKind } from '../gim/geometry/sourceGeometryError.js';
 import { RevisionSet } from '../utils/byteLru.js';
 import { perfCurrentSession, perfMark, perfMarkProductMoment, perfMeasureTaskPhase, perfRecordTaskPhase, type PerfTaskIdentity } from '../utils/perfTimings.js';
 import { BoxViewIndex } from '../viewer/boxViewIndex.js';
@@ -91,8 +91,16 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
   private submit(priority: number, run: () => void, root?: string, deferWhileMoving = true): Promise<void> {
     return new Promise((resolve, reject) => {
       const commit = { priority, root, queuedAt: performance.now(), deferWhileMoving, run: () => { try { run(); resolve(); } catch (e) { reject(e); } }, reject };
-      const position = this.commits.findIndex(row => row.priority > priority);
-      if (position < 0) this.commits.push(commit); else this.commits.splice(position, 0, commit);
+      // Most station occurrences have the same priority. A linear search for
+      // each insertion turns a full-station warm queue into quadratic work.
+      // Insert after equal-priority rows to preserve their FIFO order.
+      let low = 0, high = this.commits.length;
+      while (low < high) {
+        const mid = (low + high) >>> 1;
+        if (this.commits[mid].priority <= priority) low = mid + 1;
+        else high = mid;
+      }
+      if (low === this.commits.length) this.commits.push(commit); else this.commits.splice(low, 0, commit);
       this.drainCommits();
     });
   }
@@ -148,7 +156,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     this.sourceIdentity = session.sourceSha256 ?? '';
     this.artifactWriter = new DevLodArtifactWriter({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), requestReady: () => this.requestReady(), taskIdentity: (...args) => this.taskIdentity(...args), recordCacheDecision: (...args) => this.recordCacheDecision(...args) });
     this.templateStore = new DevLodTemplateStore({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), worker: () => this.worker, key: (...args) => this.key(...args), pinned: () => this.pinned(), isWanted: key => this.wanted.has(key), taskIdentity: (...args) => this.taskIdentity(...args), catalogHint: dev => this.catalogHint(dev), markEmptyDev: dev => this.markEmptyDev(dev), recoverMissingSources: (...args) => this.recoverMissingSources(...args), prepareMissingTemplateSources: dev => this.prepareMissingTemplateSources(dev), recordCacheDecision: (...args) => this.recordCacheDecision(...args), persistsTemplate: (...args) => this.persistsTemplate(...args), persistArtifact: (...args) => this.persistArtifact(...args), reportDiagnostic: diagnostic => setGeometryDiagnostic(this.state, diagnostic) });
-    this.sources = new DevLodSourceWorkset({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), memoryPressure: () => this.memoryPressure, hasMemorySources: () => this.state.currentFiles != null, ifcPending: () => this.state.ifcBackgroundPending, waitForIfc: () => this.state.waitForIfcBackgroundLoading(), worker: () => this.worker });
+    this.sources = new DevLodSourceWorkset({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), memoryPressure: () => this.memoryPressure, hasMemorySources: () => this.state.currentFiles != null, ifcPending: () => this.state.ifcBackgroundPending, worker: () => this.worker });
     this.readiness = new DevLodReadiness(() => this.rows, (dev, lod) => this.key(dev, lod), message => { this.diagnostics.errors.push(message); if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift(); });
     this.catalogDone = new Promise(resolve => { this.finishCatalog = resolve; });
     this.anchorDone = new Promise(resolve => { this.finishAnchor = resolve; });
@@ -635,9 +643,10 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     this.diagnostics.errors.push(`${row.entry.devPath}: ${String(error)}`);
     if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift();
     setGeometryDiagnostic(this.state, diagnosticForFailure(row.entry.devPath,
-      error instanceof InvalidDevGeometryError && error.sourceEvidence ? 'source-invalid' : 'parse-failed',
+      geometryFailureKind(error),
       error instanceof InvalidDevGeometryError ? error.source : 'cold',
-      error instanceof InvalidDevGeometryError && error.sourceEvidence ? error.sourceEvidence : String(error)));
+      error instanceof InvalidDevGeometryError || error instanceof MissingDevDependencyError
+        ? error.sourceEvidence ?? String(error) : String(error)));
     this.requestReady();
   }
   private ready(): void {

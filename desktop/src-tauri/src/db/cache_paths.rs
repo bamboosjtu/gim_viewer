@@ -132,6 +132,17 @@ pub(super) fn ensure_cache_parent(
 
 /// 原子替换缓存文件，避免进程中断留下半写文件被后续校验误认为可用。
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8], label: &str) -> Result<(), String> {
+    atomic_write_with_durability(path, bytes, label, true)
+}
+
+/// Rebuildable derived artifacts retain atomic replacement but do not force
+/// one disk flush per file. A power loss can discard an artifact; readers
+/// validate its header/content and rebuild that domain on the next open.
+pub(crate) fn atomic_write_derived(path: &Path, bytes: &[u8], label: &str) -> Result<(), String> {
+    atomic_write_with_durability(path, bytes, label, false)
+}
+
+fn atomic_write_with_durability(path: &Path, bytes: &[u8], label: &str, durable: bool) -> Result<(), String> {
     reject_link(path, label)?;
     let parent = path
         .parent()
@@ -153,8 +164,10 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], label: &str) -> Result<(),
             .map_err(|e| format!("创建缓存{}临时文件失败: {}", label, e))?;
         file.write_all(bytes)
             .map_err(|e| format!("写入缓存{}临时文件失败: {}", label, e))?;
-        file.sync_all()
-            .map_err(|e| format!("同步缓存{}临时文件失败: {}", label, e))?;
+        if durable {
+            file.sync_all()
+                .map_err(|e| format!("同步缓存{}临时文件失败: {}", label, e))?;
+        }
     }
     reject_link(path, label)?;
     // std::fs::rename replaces regular files (MoveFileExW with

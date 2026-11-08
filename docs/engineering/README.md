@@ -32,3 +32,12 @@
 - 来源、实体、导航缓存分别版本化；当前契约与失效范围只在[缓存域](../architecture/caches.md)维护。
 - 九工程来源/实体/三视图投影已有自动与浏览器证据；原生完整操作、三次冷暖性能、逐台套人工真值仍未关闭，见[问题与限制](../open-issues.md) O-11、L-12。
 - 本目录只描述当前规则，不把研究候选当成产品能力；新增类别先改目录和领域测试，再接 UI。
+
+## 相关文档
+
+- [实体与来源模型](entities.md)
+- [工程组成与三视图](composition.md)
+- [目录总则](catalogs/README.md)
+- [设备材料清册模型树模板](inventory-template.md)
+- [工程实体运行时](../architecture/engineering-runtime.md)
+- [缓存域](../architecture/caches.md)

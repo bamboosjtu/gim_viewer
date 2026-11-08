@@ -10,8 +10,8 @@ function assessGeometry(evidence,failures){
     return {correctness:'failed',defectAssessment:{status:'product-invariant-failed'}};
   const observed=evidence.geometryDefects;
   if(!observed||observed.failedVisibleRoots!==0||!observed.failedReasons||
-    Object.keys(observed.failedReasons).some(reason=>reason!=='source-invalid')||
-    observed.failedReasons['source-invalid']!==observed.failedSourceCount)
+    Object.keys(observed.failedReasons).some(reason=>!['source-invalid','missing-dependency'].includes(reason))||
+    Object.values(observed.failedReasons).reduce((total,count)=>total+count,0)!==observed.failedSourceCount)
     return {correctness:'failed',defectAssessment:{status:'product-geometry-failed'}};
   if(!observed.sourceEvidenceComplete||!sha(observed.failedSourceSetDigest)||
     !Number.isSafeInteger(observed.failedSourceCount)||observed.failedSourceCount<1||
@@ -49,16 +49,16 @@ function assessCoverage(evidence){
     return {correctness:'failed',defectAssessment:{status:'ifc-runtime-incomplete'}};
   if(!sha(evidence.semanticDigest)||!sha(evidence.sourceSha256)||
     !(evidence.placementDigest===null||sha(evidence.placementDigest))||
-    ![row.graphDiagnostics,row.sourceCount,row.entityCount,row.partialOccurrences,
+    ![row.graphDiagnostics,row.sourceCount,row.entityCount,row.pendingEntityCount,
       evidence.progress?.workload?.ifcSources,missing,ambiguous].every(value=>Number.isSafeInteger(value)&&value>=0)||
     row.sourceCount<1||missing+ambiguous+row.graphDiagnostics+(ifcIncomplete?manifest.missing+manifest.extra+manifest.duplicate:0)<1||
     statuses.some(([status,count])=>!['resolved','missing','ambiguous'].includes(status)||!Number.isSafeInteger(count)||count<0))
     return {correctness:'unverified',defectAssessment:{status:'coverage-evidence-incomplete'}};
   const coverageDigest=digest(['engineering-coverage-v1',evidence.semanticDigest,evidence.placementDigest,
-    row.sourceCount,row.entityCount,row.partialOccurrences,evidence.progress.workload.ifcSources,
+    row.sourceCount,row.entityCount,row.pendingEntityCount,evidence.progress.workload.ifcSources,
     [...row.incompleteReasons].sort(),statuses,row.graphDiagnostics,ifcIncomplete?manifest:null]);
   return {correctness:'partial',defectAssessment:{kind:'coverage',status:'evidence-backed',
-    sourceSha256:evidence.sourceSha256,coverageDigest,partialOccurrences:row.partialOccurrences}};
+    sourceSha256:evidence.sourceSha256,coverageDigest}};
 }
 
 /** Generic evidence rules: no sample SHA or hand-maintained expected list controls correctness. */
@@ -74,7 +74,7 @@ export function assessCorrectness(evidence){
     const a=geometry.defectAssessment,b=coverage.defectAssessment;
     return {correctness:'partial',defectAssessment:{kind:'combined',status:'evidence-backed',
       sourceSha256:evidence.sourceSha256,sourceSetDigest:a.sourceSetDigest,failedOccurrences:a.failedOccurrences,
-      coverageDigest:b.coverageDigest,partialOccurrences:b.partialOccurrences}};
+      coverageDigest:b.coverageDigest}};
   }
   return geometry??coverage??{correctness:'passed',defectAssessment:null};
 }

@@ -26,7 +26,8 @@ export function lifecycleExercise({sample,secondSample,cycles=10,timeoutMs=90000
     for(let i=0;i<cycles;i++){
       if(i){await open(sample,`cycle-${i+1}`);await waitFor(cdp,s=>!s.opening&&s.progress.automaticSettled&&s.progress.cacheSettled&&s.progress.backgroundSettled&&!s.measurement.activeTasks.length,timeoutMs);}
       const actual=await cdp.evaluate('globalThis.__gimBenchmark.evidence()',undefined,30000);
-      const equivalent=actual.passed&&['semanticDigest','placementDigest','baseGeometryDigest','baseArtifactDigest'].every(key=>actual[key]===expected[key]);
+      const equivalent=actual.passed&&['semanticDigest','pendingDigest','pendingCount','pendingSourceCount',
+        'placementDigest','baseGeometryDigest','baseArtifactDigest'].every(key=>actual[key]===expected[key]);
       rows.push({cycle:i+1,equivalent,...await closeAndCheck(cdp,processSampler)});
       writeFileSync(join(out,'lifecycle-progress.json'),JSON.stringify(rows,null,2));
     }

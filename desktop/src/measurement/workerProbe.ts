@@ -1,4 +1,4 @@
-import { Probe, DurationStats, NOOP_SINK, type TraceContext, type MeasurementEvent, type MeasurementMode, type Workload, type TaskStatus, type MemoryMetric } from './core.js';
+import { Probe, DurationStats, NOOP_SINK, type TraceContext, type MeasurementEvent, type MeasurementMode, type Workload, type TaskStatus, type MemoryMetric, type LifecycleReasonCode } from './core.js';
 
 const CHANNEL = '__gimMeasurement';
 interface Envelope { context: TraceContext; command: string; receivedMs?: number; }
@@ -8,6 +8,7 @@ const offContext: TraceContext = { runId: 'off', sampleId: null, sourceSha256: n
 const offProbe = new Probe('off', 'off', 'off', () => 0, NOOP_SINK);
 export class WorkerTaskProbe {
   status: TaskStatus = 'completed';
+  reasonCode:LifecycleReasonCode|undefined;
   private stages=new Map<string,{stats:DurationStats;workload:Workload}>();
   constructor(readonly context: TraceContext, private probe: Probe, private finish: () => void = () => {}) {}
   get enabled():boolean { return this.probe.mode !== 'off'; }
@@ -28,7 +29,8 @@ export class WorkerTaskProbe {
   }
   flushStages(){for(const [name,row]of this.stages)this.probe.event(this.context,{kind:'phase',name,durationMs:row.stats.totalMs,timing:'aggregate',histogram:row.stats.histogram(),workload:row.workload});this.stages.clear();}
   memory(metric: MemoryMetric) { this.probe.memory(this.context, metric); }
-  fail(error: unknown) { this.status = (error as { name?: string })?.name === 'AbortError' ? 'cancelled' : 'failed'; this.finish(); }
+  fail(error: unknown) { const cancelled=(error as { name?: string })?.name === 'AbortError';
+    this.status = cancelled ? 'cancelled' : 'failed';this.reasonCode=cancelled?'abort-error':'worker-exception';this.finish(); }
   produced(workload?: Workload) { this.probe.event(this.context, { kind: 'task', name: 'produced', workload }); this.finish(); }
 }
 export const NOOP_TASK = new WorkerTaskProbe(offContext, offProbe);
@@ -73,7 +75,8 @@ export function createWorkerProbe() {
       if (finished) return; finished = true;
       task.flushStages();
       execution.end(task.status);
-      capturedProbe.event(captured, { kind: 'task', name: 'ended', status: task.status });
+      capturedProbe.event(captured, { kind: 'task', name: 'ended', status: task.status,
+        ...(task.reasonCode?{reasonCode:task.reasonCode}:{}) });
       flush();
     };
     const task = new WorkerTaskProbe(captured, capturedProbe, finish);

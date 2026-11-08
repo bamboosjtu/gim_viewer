@@ -110,3 +110,11 @@ KVALUE、导线材料与局部矩阵的完整工程含义尚未形成可验收�
 
 当前地图行为见 [软件规格](../software-spec.md)，原 F2 长度见
 [台账](sample-corpus.md)；公式、词法与预览的未覆盖范围以本文件的能力边界说明为准。
+
+## 相关文档
+
+- [语义模型](semantic-model.md)
+- [线路与移动端](../architecture/line-mobile.md)
+- [几何模型](geometry-model.md)
+- [样本台账](sample-corpus.md)
+- [桌面软件规格](../software-spec.md)

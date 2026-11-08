@@ -19,7 +19,6 @@ export interface DevLodSourceWorksetOptions {
   memoryPressure: () => MemoryPressure;
   hasMemorySources: () => boolean;
   ifcPending: () => boolean;
-  waitForIfc: () => Promise<void>;
   worker: () => DevGeometryPreprocessor;
 }
 export class DevLodSourceWorkset {
@@ -54,24 +53,10 @@ export class DevLodSourceWorkset {
     const projectId = this.options.session.projectId;
     const pressured = (): boolean => this.options.memoryPressure() === 'high' || this.options.memoryPressure() === 'critical';
     if (projectId == null || !this.options.current() || pressured()) return files;
-    // 剩余 IFC 仍在后台加载时最多等 8 秒再预取，避免大批次 IPC 长时间挤占
-    // 剩余 IFC 的读取/转换；超时后让预取与 IFC 并行，靠批次让出主线程。
-    if (this.options.ifcPending()) {
-      const started = performance.now();
-      const deadline = started + 8000;
-      while (this.options.ifcPending() && this.options.current() && !pressured() && performance.now() < deadline) {
-        await Promise.race([
-          this.options.waitForIfc(),
-          new Promise((resolve) => setTimeout(resolve, 500)),
-        ]);
-      }
-      perfMark('DEV 几何源预取等待 IFC', { waitedMs: Math.round(performance.now() - started) },
-        this.options.perf);
-      if (!this.options.current() || pressured()) return files;
-    }
+    // DEV sources are independent of IFC. Start bounded prefetch immediately;
+    // use smaller batches while IFC is active to limit disk and IPC contention.
     const MAX_FILE_BYTES = 8 * 1024 * 1024;
     const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
-    const MAX_BATCH_BYTES = 4 * 1024 * 1024;
     const BATCH_FILES = 4096;
     const rank = (path: string): number => {
       const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
@@ -89,10 +74,11 @@ export class DevLodSourceWorkset {
       if (!this.options.current() || pressured() || performance.now() >= deadline) break;
       const chunk: string[] = [];
       let batchBytes = 0;
+      const maxBatchBytes = this.options.ifcPending() ? 1 * 1024 * 1024 : 4 * 1024 * 1024;
       while (next < candidates.length && chunk.length < BATCH_FILES) {
         const path = candidates[next], size = files.get(path)!.size;
         if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_FILE_BYTES || admitted + size > MAX_TOTAL_BYTES) { next++; continue; }
-        if (chunk.length && batchBytes + size > MAX_BATCH_BYTES) break;
+        if (chunk.length && batchBytes + size > maxBatchBytes) break;
         next++; admitted += size; batchBytes += size; chunk.push(path);
       }
       if (!chunk.length) continue;
