@@ -7,6 +7,7 @@ import { fromIfcYUpBounds } from './projections/compositionSpatial.js';
 import type { EngineeringNavigationData } from '../gim/engineering/navigation.js';
 import type { ProjectionInput, ProjectionOutput } from './compositionProjectionWorker.js';
 import { categoryLabel } from '../engineering/catalogLabels.js';
+import {perfMarkProductMoment} from '../utils/perfTimings.js';
 
 /** Reconcile view targets without changing the entity snapshot or loading L2. */
 export async function reconcileProjectionSelection(state: AppState): Promise<void> {
@@ -58,7 +59,15 @@ export function installCompositionProjection(state: AppState, onReady?: (complet
     const sources=state.engineeringSources;
     if(sources?.incompleteReasons.includes('ifc-manifest-incomplete')&&!state.engineeringIfcGeometryFinished)return;
     const models=sources?.models??[];
-    if(!models.length)return;
+    if(!models.length){
+      if(state.engineeringBuildPending)return;
+      if(state.engineeringTreeStatus==='ready'&&view.compositionCoverage==='partial')return;
+      state.engineeringTreeStatus='ready';
+      state.engineeringNavigation={...view,compositionCoverage:'partial'};
+      perfMarkProductMoment('engineeringTreeReady',{available:true,source:'partial-projection',coverage:'partial'});
+      state.notifyEngineeringChanged();onReady?.(false);
+      return;
+    }
     const missing=models.filter(model=>!state.ifcRegionalRuntimes.has(model.modelId));
     if(missing.length&&!state.engineeringIfcGeometryFinished)return;
     const complete=missing.length===0;
@@ -94,6 +103,7 @@ export function installCompositionProjection(state: AppState, onReady?: (complet
       }) };
       state.engineeringNavigation = publishedView;
       state.engineeringTreeStatus='ready';
+      perfMarkProductMoment('engineeringTreeReady',{available:true,source:'composition-projection',coverage:publishedView.compositionCoverage});
       for (const key of state.engineeringExpandedRows.composition) if (!composition.nodes.has(key)) state.engineeringExpandedRows.composition.delete(key);
       state.notifyEngineeringChanged();
       onReady?.(publishedView.compositionCoverage==='full');

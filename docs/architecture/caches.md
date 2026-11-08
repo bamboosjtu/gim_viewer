@@ -26,6 +26,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 | 变电语义 | `gim-substation-parser-v28` | [db.rs](../../desktop/src-tauri/src/db.rs) | 原始属性、CBM/DEV/IFC 引用、索引 receipt |
 | DEV 几何 | `geometry-cache-v18-dev-wide-outline` | [db.rs](../../desktop/src-tauri/src/db.rs)、[DEV 目录](../../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest、GLB 完整性 |
 | DEV LOD 派生 | 几何版本组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../../desktop/bridge/devLodCache.ts) | 源 SHA、DEV 路径、几何版本与 LOD；L0 持久化、仅热点 L1 选择性持久化、L2 默认内存；模板/目录逐条原子提交 |
+
 | 变电 Spatial | `substation-spatial-semantic-v6` | [Spatial 快照](../../desktop/src/services/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
 | IFC Spatial parser | `gim-substation-parser-v25` | [Spatial 快照](../../desktop/src/services/substationSpatialSemanticCache.ts) | 独立于变电语义域 |
 | 工程来源 | `engineering-source-v12` | [来源契约](../../desktop/src/gim/engineering/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；独立原子文件 |
@@ -36,6 +37,8 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 | Android 线路语义 | `mobile-powerline-v3` | [移动存储](../../app/src-tauri/src/storage.rs)、[领域投影](../../packages/powerline-core/src/domain.ts) | 私有源 SHA/大小、对象与属性范围、FAM 分类 |
 | Android HNum | `hnum-xz-v2` | [领域定义](../../packages/powerline-core/src/domain.ts) | 源 SHA、MOD 路径；跨 Body 唯一点号 |
 | 视图状态 | `gim-view-state-v2`（localStorage） | [viewStateStore](../../desktop/src/services/viewStateStore.ts) | 工程 SHA/路径；相机、树展开、选择路径；不参与工程事实 |
+
+暖开 catalog 命中率只要求可成功表示的来源；有原始范围或引用证据的失败来源未产出目录缓存时，报告单列其未命中集合并与全部 DEV 来源数核对。其他 miss、读取错误和无证据失败不能被样本级白名单掩盖。
 
 ## 发布与恢复
 

@@ -8,4 +8,5 @@ export type DeviceRuntime = { select(rootOccurrence: string): Promise<THREE.Grou
     resourceCounts?(): { templateCount: number; templateParseCount: number; sharedGeometryCount: number; sharedMaterialCount: number; sharedTextureCount: number };
     forEachLoadedRoot?(visit:(occurrence:string,root:THREE.Group,lod:number)=>void):void;
     baseRepresentationEvidence?():readonly DevBaseEvidence[];
+    catalogMissSources?():readonly string[];
     diagnostics: Record<string, unknown> };

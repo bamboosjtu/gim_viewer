@@ -10,7 +10,7 @@ export function freezeProfile(registry,selection,name='commit-gate'){
       actions:name==='geometry'?[{kind:'dev-fine',selector:'canonical-first-boolean-base-v1'}]:isIndexRegression?[{kind:'dev-fine',selector:'canonical-first-base-v1'},{kind:'ifc-near',selector:'smallest-source-canonical-small-object-v1'},{kind:'ifc-fine',selector:'smallest-source-canonical-small-object-v1'}]:[],
       timeoutMs:sample.inventory.files>=50000?3600000:900000,reason:row.reason??'registered-regression'};
   });
-  const body={version:'gim-benchmark-profile-v2',name,frozen:true,repetitions:3,cacheStates:['cold','warm'],mode:'benchmark',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',webviewProfilePolicy:'paired-webview-profile-v1',samplingPeriodMs:1000,viewProtocol:'near-inspect-and-restore-v1',
+  const body={version:'gim-benchmark-profile-v2',name,frozen:true,repetitions:3,cacheStates:['cold','warm'],mode:'benchmark',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',samplingPeriodMs:1000,viewProtocol:'near-inspect-and-restore-v1',
     completion:'automatic-representations-and-cache-publication',correctness:'source-invariants-and-cold-warm-base-equivalence',
     requiredWorkerFamilies:name==='commit-gate'?['dev','engineering','spatial','line','ifc-conversion','ifc-regional','ifc-fine']:[],cases};
   return {...body,digest:digest(body)};
@@ -28,6 +28,16 @@ export function coldWarmEquivalent(cold,warm){
   if(JSON.stringify(cold.evidence?.progress.workload)!==JSON.stringify(warm.evidence?.progress.workload))reasons.push('cold-warm:workload');
   if(JSON.stringify(cold.actionTargetDigests)!==JSON.stringify(warm.actionTargetDigests))reasons.push('cold-warm:action-targets');
   return {outcome:reasons.length?'FAIL':cold.correctness==='partial'?'PARTIAL':'PASS',reasons};
+}
+export function warmCatalogCoverage(evidence){
+  const progress=evidence?.progress,required=progress?.workload?.devSources??0,hits=progress?.cache?.devCatalogHits??0;
+  if(!required||hits>=required)return {valid:true,sourceFailureMisses:0};
+  const proof=evidence?.catalogCacheEvidence,defects=evidence?.geometryDefects;
+  const sourceBacked=defects?.sourceEvidenceComplete===true&&/^[a-f0-9]{64}$/.test(defects.failedSourceSetDigest??'')&&
+    Object.keys(defects.failedReasons??{}).every(reason=>['source-invalid','missing-dependency'].includes(reason));
+  const valid=proof?.available===true&&proof.accounted===true&&proof.unexplainedMissCount===0&&
+    proof.sourceFailureMissCount===proof.missCount&&sourceBacked;
+  return {valid,sourceFailureMisses:valid?proof.missCount:0};
 }
 export function cachePublicationAssessment(evidence,cacheState,projectType){
   const progress=evidence?.progress,cache=evidence?.cache;
@@ -47,11 +57,13 @@ export function cachePublicationAssessment(evidence,cacheState,projectType){
       return {published:false,reason:'engineering-cache-state-invalid'};
     if(cacheState==='warm'&&coverageComplete&&engineering!=='hit')
       return {published:false,reason:'engineering-derived-cache-miss'};
-    if(cacheState==='warm'&&progress.workload.devSources&&progress.cache.devCatalogHits<progress.workload.devSources)
+    const catalog=cacheState==='warm'?warmCatalogCoverage(evidence):{valid:true,sourceFailureMisses:0};
+    if(!catalog.valid)
       return {published:false,reason:'dev-catalog-warm-miss'};
-    return {published:true,coverageComplete,derivedCacheStatus:engineering};
+    return {published:true,coverageComplete,derivedCacheStatus:engineering,
+      catalogSourceFailureMisses:catalog.sourceFailureMisses};
   }
-  if(cacheState==='warm'&&progress.workload.devSources&&progress.cache.devCatalogHits<progress.workload.devSources)
+  if(cacheState==='warm'&&!warmCatalogCoverage(evidence).valid)
     return {published:false,reason:'dev-catalog-warm-miss'};
   return {published:true,coverageComplete:true,derivedCacheStatus:'not-applicable'};
 }

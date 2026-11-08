@@ -99,6 +99,8 @@ cacheWriteReservedBytes: this.writeBudget.bytes, cacheWritePeakBytes: this.write
           try { detail = await writeDevArtifactDetailed(store, key, value, this.options.session, prepared,observe); }
           catch (error) { perfRecordTaskPhase(identity, 'cacheWrite', performance.now() - writeAt, this.options.perf, 'failed'); throw error; }
           perfRecordTaskPhase(identity, 'cacheWrite', performance.now() - writeAt, this.options.perf, detail.ok ? 'completed' : 'failed');
+          if(detail.nativeResolveMs!=null)perfRecordTaskPhase(identity,'cacheNativeResolve',detail.nativeResolveMs,this.options.perf);
+          if(detail.nativeWriteMs!=null)perfRecordTaskPhase(identity,'cacheNativeWrite',detail.nativeWriteMs,this.options.perf);
           if (!detail.ok) {
             if (store === 'catalog') this.options.diagnostics.catalogWriteFailures++;
             else if (lod != null) {

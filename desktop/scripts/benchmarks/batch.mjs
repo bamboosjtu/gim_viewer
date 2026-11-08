@@ -1,4 +1,4 @@
-import {existsSync,readFileSync,writeFileSync} from 'node:fs';
+import {existsSync,readFileSync,writeFileSync,readdirSync} from 'node:fs';
 import {basename,join,relative} from 'node:path';
 import {digest,runReadiness,compareRuns,partialSignature} from './compare.mjs';
 import {coldWarmEquivalent} from './profiles.mjs';
@@ -31,10 +31,15 @@ function recordReport(row,report,state){
     measurementLifecycleComplete:report.measurementLifecycleComplete??null,
     lateBackgroundTasks:report.lateBackgroundTasks??false,finalEvidenceIssue:report.finalEvidenceIssue??null,
     measurementLifecycleIssues:(report.measurementLifecycleIssues??[]).join(';'),
+    cancelledBeforeStart:report.measurement?.loss?.cancelledBeforeStart??0,
     environmentSuspend:report.environmentSuspend?.code??null,
     measurementAggregatedDetail:Object.entries(report.measurementAggregatedDetail??{}).map(([kind,count])=>`${kind}:${count}`).join(';'),
     cachePublished:report.cachePublished??report.cacheVerified,coverageComplete:report.coverageComplete??null,
     engineeringCacheStatus:report.evidence?.progress?.cache?.engineering??null,
+    devCatalogMisses:report.evidence?.catalogCacheEvidence?.missCount??null,
+    sourceFailureCatalogMisses:report.evidence?.catalogCacheEvidence?.sourceFailureMissCount??null,
+    unexplainedCatalogMisses:report.evidence?.catalogCacheEvidence?.unexplainedMissCount??null,
+    catalogProofComplete:report.evidence?.catalogCacheEvidence?.accounted??null,
     devPartialOccurrences:report.evidence?.progress?.workload?.partial??null,
     partialGeometryReasons:Object.entries(report.evidence?.partialGeometryReasons??{}).map(([reason,count])=>`${reason}:${count}`).join(';'),
     geometryDiagnosticScope:report.evidence?.geometryDiagnosticScope??null,
@@ -60,7 +65,7 @@ function recordReport(row,report,state){
     geometryStatuses:Object.entries(report.evidence?.geometryStatuses??{}).map(([status,count])=>`${status}:${count}`).join(';'),
     failedSourceSetDigest:report.evidence?.geometryDefects?.failedSourceSetDigest??null,
     failedSourceCount:report.evidence?.geometryDefects?.failedSourceCount??0});
-  for(const key of ['firstResponseMs','firstGeometryMs','automaticLoadMs','cachePublishMs','settledMs','writeDrainMs','processPrivatePeakBytes'])row[key]=report.metrics?.[key]??null;
+  for(const key of ['firstResponseMs','modelTreeReadyMs','firstGeometryMs','allGeometryReadyMs','automaticLoadMs','cachePublishMs','settledMs','writeDrainMs','processPrivatePeakBytes'])row[key]=report.metrics?.[key]??null;
   const context={runId:report.runId,sampleId:row.sampleId,sampleLabel:row.sampleLabel,sourceSha256:row.sourceSha256,repetition:row.repetition,cacheState:row.cacheState};
   for(const [stage,stats]of Object.entries(report.measurement?.phases??{}))state.stages.push({...context,stage,count:stats.count,totalMs:stats.totalMs,maxMs:stats.maxMs,
     ...Object.fromEntries(['p50','p95','p99'].flatMap(key=>[[`${key}LowerMs`,stats[key]?.lowerMs],[`${key}UpperMs`,stats[key]?.upperMs]]))});
@@ -87,7 +92,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   const cacheStates=preset==='baseline'?['cold','warm']:['cold'];
   privateOut??=artifactDirectory(root,join(root,'tmp','gim-bench','batches',`batch-${Date.now()}`));
   const build=JSON.parse(readFileSync(workspacePath(root,buildManifest),'utf8'));
-  const body={version:'gim-batch-profile-v1',preset,repetitions,cacheStates,mode:'benchmark',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',webviewProfilePolicy:'paired-webview-profile-v1',timeoutMs,
+  const body={version:'gim-batch-profile-v1',preset,repetitions,cacheStates,mode:'benchmark',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',timeoutMs,
     startupRetryPolicy:'pre-open-infrastructure-v1',maxStartupAttempts:STARTUP_ATTEMPTS,
     cases:inputs.samples.map(({paths,...sample})=>sample)};
   const profileDigest=digest(body),state={version:'gim-batch-results-v1',status:'RUNNING',outcome:'INCONCLUSIVE',preset,repetitions,
@@ -125,13 +130,17 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
           for(let attempt=1;attempt<=STARTUP_ATTEMPTS;attempt++){
             if(controller.signal.aborted)break;
             result=await execute({root,buildManifest,sample,profileDigest,mode:'benchmark',scenario:sample.actions.length?'open-and-fidelity':'open',
-              actions:sample.actions,timeoutMs,cacheState,...(cold?{dataRoot:cold.dataRoot}:{}),signal:controller.signal});
+              actions:sample.actions,timeoutMs,cacheState,...(cold?{dataRoot:cold.dataRoot}:{}),signal:controller.signal,
+              onStarted:started=>{row.runId=started.runId;
+                privateRuns.push({inputId:sample.inputId,repetition,cacheState,attempt,runId:started.runId,out:started.out,dataRoot:started.dataRoot});
+                writeFileSync(join(privateOut,'runs.private.json'),JSON.stringify(privateRuns,null,2));save();}});
             row.attempts=attempt;
             const infrastructureFailure=isStartupInfrastructureFailure(result.report);
             state.attempts.push({inputId:sample.inputId,sampleId:sample.sampleId,repetition,cacheState,attempt,
               runId:result.report.runId,reason:result.report.reason??null,outcome:runReadiness(result.report).outcome,
               startupInfrastructureFailure:infrastructureFailure});
-            privateRuns.push({inputId:sample.inputId,repetition,cacheState,attempt,out:result.out,dataRoot:result.dataRoot});
+            if(!privateRuns.some(run=>run.runId===result.report.runId))
+              privateRuns.push({inputId:sample.inputId,repetition,cacheState,attempt,runId:result.report.runId,out:result.out,dataRoot:result.dataRoot});
             if(!infrastructureFailure)break;
             row.startupFailures.push(result.report.reason);
             if(attempt===STARTUP_ATTEMPTS||controller.signal.aborted)break;
@@ -179,4 +188,53 @@ export async function runBatch(options){
   writeFileSync(join(privateOut,'inputs.private.json'),JSON.stringify(inputs,null,2));
   writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out}));
   return executeBatch({...options,out,privateOut,inputs});
+}
+
+/** Finalize a controller that has already exited; never fabricate elapsed metrics. */
+function findUnreportedRunId(root,row){
+  const runsRoot=join(root,'tmp','gim-bench','runs');if(!existsSync(runsRoot))return null;
+  const matches=[];
+  for(const entry of readdirSync(runsRoot,{withFileTypes:true})){
+    if(!entry.isDirectory()||!/^run-[a-z0-9-]{8,80}$/.test(entry.name))continue;
+    const folder=join(runsRoot,entry.name),manifest=join(folder,'run.private.json');
+    if(!existsSync(manifest)||existsSync(join(folder,'report.json')))continue;
+    try{const data=JSON.parse(readFileSync(workspacePath(root,manifest),'utf8'));
+      if(data.sampleId===row.sampleId&&data.sourceSha256===row.sourceSha256)matches.push(entry.name);
+    }catch{/* Incomplete private manifest is not a match. */}
+    if(matches.length>1)return null;
+  }
+  return matches[0]??null;
+}
+export function recoverInterruptedBatch(root,outputDirectory){
+  const out=workspacePath(root,outputDirectory),file=join(out,'results.json');
+  const state=JSON.parse(readFileSync(file,'utf8'));
+  if(state.status!=='RUNNING'&&!state.rows?.some(row=>['RUNNING','PENDING'].includes(row.status)))
+    return {out,result:state,recovered:0};
+  let recovered=0;
+  for(const row of state.rows??[]){
+    if(!['RUNNING','PENDING'].includes(row.status))continue;
+    const wasRunning=row.status==='RUNNING';
+    row.status='CANCELLED';row.error=wasRunning?'controller-interrupted':'batch-not-executed';recovered++;
+    row.settledMs=null;row.measurementComplete=false;
+    if(wasRunning&&!row.runId)row.runId=findUnreportedRunId(root,row);
+    if(!wasRunning||typeof row.runId!=='string'||!/^run-[a-z0-9-]{8,80}$/.test(row.runId))continue;
+    const candidate=join(root,'tmp','gim-bench','runs',row.runId);
+    if(!existsSync(candidate))continue;
+    const runDir=workspacePath(root,candidate);
+    const progressFile=join(runDir,'progress.private.json');
+    let snapshot=null;
+    try{if(existsSync(progressFile))snapshot=JSON.parse(readFileSync(progressFile,'utf8'));}catch{/* Snapshot is optional. */}
+    row.interruptedAtMs=snapshot?.atMs??null;
+    row.interruptedWritePending=snapshot?.progress?.cache?.writePending??null;
+    row.interruptedCacheSettled=snapshot?.progress?.cacheSettled??false;
+    if(existsSync(runDir)&&!existsSync(join(runDir,'report.json'))){
+      writeFileSync(join(runDir,'report.json'),JSON.stringify({version:'gim-benchmark-v1',runId:row.runId,
+        outcome:'INCONCLUSIVE',reason:'controller-interrupted',correctness:'unverified',
+        measurementComplete:false,cacheVerified:false,cachePublished:false,
+        metrics:{settledMs:null},progressSnapshot:snapshot},null,2));
+    }
+  }
+  state.status='CANCELLED';state.outcome='INCONCLUSIVE';state.baselineEligible=false;
+  state.updatedAt=new Date().toISOString();writeBatchReports(out,state);
+  return {out,result:state,recovered};
 }

@@ -3,6 +3,12 @@ import {digest} from './compare.mjs';
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'
   ?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 export const progressDigest=progress=>progress?digest(canonical(progress)):null;
+export function semanticStallReason(observation,idleMs){
+  if(observation?.projectType!=='substation'||
+    observation.progress?.semantic!==false&&observation.progress?.engineeringBuildPending!==true)return null;
+  const active=observation.measurement?.activeTasks?.some(task=>task.family==='engineering')===true;
+  return idleMs>=(active?60_000:120_000)?active?'product-stalled':'engineering-progress-stalled':null;
+}
 export function readyForSettle(observation,{cacheState}={}){
   const progress=observation?.progress,measurement=observation?.measurement;
   const coldSubstation=cacheState==='cold'&&observation?.projectType==='substation';

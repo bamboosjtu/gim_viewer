@@ -26,7 +26,8 @@ export function createEngineeringWorkerHandler(){
     latest={result,identity,digest,plan:[...plan]};
     return {type:'model',result:encodeEngineeringWorkerResult(result)};
   }
-  return async(request:EngineeringWorkerCommand, trace:WorkerTaskProbe=NOOP_TASK, reportProgress:()=>void=()=>{}):Promise<EngineeringWorkerReply>=>{
+  return async(request:EngineeringWorkerCommand, trace:WorkerTaskProbe=NOOP_TASK,
+    reportProgress:(stage:'source-index'|'source-traverse'|'source-sort',completed:number)=>void=()=>{}):Promise<EngineeringWorkerReply>=>{
     const started=performance.now();
     if(request.type==='init'){scope=request.scope;paths=request.paths;files.clear();graph=null;latest=undefined;return {type:'ready'};}
     if(request.type==='files'){
@@ -34,12 +35,15 @@ export function createEngineeringWorkerHandler(){
       return {type:'ready'};
     }
     if(request.type==='extract'){
-      let lastProgress=performance.now();
-      const progress=()=>{const now=performance.now();if(now-lastProgress>=1000){lastProgress=now;reportProgress();}};
+      let lastProgress=0,lastStage='',completed=0;
+      const progress=(stage:'source-index'|'source-traverse'|'source-sort')=>{
+        const now=performance.now();completed++;
+        if(stage!==lastStage||now-lastProgress>=1000){lastProgress=now;lastStage=stage;reportProgress(stage,completed);}
+      };
       graph=await trace.measure('engineering.extract', () => extractEngineeringSourceGraph({paths,readText:async path=>{
         const source=files.get(path);if(!source)throw Error(`Engineering source unavailable: ${path}`);
         const bytes=source instanceof Uint8Array?source:await trace.measureObserved('engineering.source-read', () => source.arrayBuffer());
-        const text=trace.syncObserved('engineering.decode', () => decodeGimText(bytes).text);progress();return text;
+        const text=trace.syncObserved('engineering.decode', () => decodeGimText(bytes).text);progress('source-traverse');return text;
       }},{onProgress:progress}));files.clear();
       return {type:'graph',summary:{ifcPaths:graph.ifcPaths,sourceRecords:graph.records.length},geometryOccurrences:collectSourceGeometryOccurrences(graph)};
     }
@@ -97,7 +101,7 @@ if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMes
   self.onmessage=(event:MessageEvent<EngineeringWorkerRequest>)=>{
     if(probe.control(event))return;
     chain=chain.then(async()=>{await probe.run(event, async trace=>{const request=event.data;try{
-      const reply=await handle(request, trace,()=>send({type:'progress',stage:'extract',requestId:request.requestId})),response={...reply,requestId:request.requestId} as EngineeringWorkerResponse;
+      const reply=await handle(request, trace,(stage,completed)=>send({type:'progress',stage,completed,requestId:request.requestId})),response={...reply,requestId:request.requestId} as EngineeringWorkerResponse;
       const transfers=response.type==='model'?engineeringWorkerResultTransfers(response.result):response.type==='cache'&&response.result.bytes?[response.result.bytes.buffer as ArrayBuffer]:[];
       trace.produced({ transferBuffers: transfers.length });
       send(response,transfers);

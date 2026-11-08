@@ -3,17 +3,17 @@ import assert from 'node:assert/strict';
 import {compareRuns,approveBaseline,baselineApprovalIssue,runReadiness,digest,createPartialReview} from './compare.mjs';
 import {selectSamples} from './samples.mjs';
 import {CdpConnection} from './cdp.mjs';
-import {cacheVerified,coldWarmEquivalent,freezeProfile,verifyProfile} from './profiles.mjs';
-import {readyForSettle,cachePublicationMoment,finalEvidenceAligned,finalEvidenceIssue} from './completion.mjs';
+import {cacheVerified,coldWarmEquivalent,freezeProfile,verifyProfile,warmCatalogCoverage} from './profiles.mjs';
+import {readyForSettle,cachePublicationMoment,finalEvidenceAligned,finalEvidenceIssue,semanticStallReason} from './completion.mjs';
 import {prepareFixedRuntimeSecurity} from '../fixed-runtime-security.mjs';
 import {warmPreparation} from './warm-preparation.mjs';
 import {bareContainerKind} from './container-magic.mjs';
 import {runMatrix} from './matrix.mjs';
 import {nativeExitCode} from './cli-outcome.mjs';
-import {pairedWebviewProfile} from './cache-roots.mjs';
+import {pairedWebviewProfile,checkedWebviewProfile} from './cache-roots.mjs';
 import {mkdirSync,mkdtempSync,writeFileSync} from 'node:fs';
 import {resolve,join} from 'node:path';
-const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
+const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
 const contentEvidence={scope:'DEV-L0-GLB-artifacts',method:'worker-output-or-validated-cache-sha256',
   availability:'available',coveredOccurrences:1,expectedShownOccurrences:1,missingArtifactSha:0,
   duplicateArtifactIds:0,digest:'a'.repeat(64),placementFingerprint:'b'.repeat(64),complete:true};
@@ -42,6 +42,14 @@ test('cold and warm processes reuse the same WebView2 IndexedDB profile',()=>{
   const dataRoot=join(resolve('..','tmp','profile-protocol'), 'cache');
   assert.equal(pairedWebviewProfile(dataRoot),join(resolve('..','tmp','profile-protocol'),'webview-profile'));
 });
+test('cold rejects an existing WebView2 profile even when SQLite root is empty',()=>{
+  const parent=resolve('..','tmp','profile-protocol-tests');mkdirSync(parent,{recursive:true});
+  const root=mkdtempSync(join(parent,'case-')),dataRoot=join(root,'cache');mkdirSync(dataRoot);
+  const profile=checkedWebviewProfile(root,dataRoot,'cold');mkdirSync(profile);
+  writeFileSync(join(profile,'IndexedDB-marker'),'cached');
+  assert.throws(()=>checkedWebviewProfile(root,dataRoot,'cold'),/Cold WebView2 profile/);
+  assert.equal(checkedWebviewProfile(root,dataRoot,'warm'),profile);
+});
 test('matrix never attempts warm for a non-persistable input variant',async()=>{
   const workspace=resolve('..','tmp','matrix-protocol-tests');mkdirSync(workspace,{recursive:true});
   const root=mkdtempSync(join(workspace,'case-'));
@@ -67,6 +75,15 @@ test('final evidence rejects a task that changes progress during tail drain',()=
   assert.equal(finalEvidenceAligned({...evidence,progress:{cache:{b:2,a:1},workload:{shown:2}}},
     {...snapshot,progress:{workload:{shown:2},cache:{a:1,b:2}}}),true);
   assert.equal(finalEvidenceAligned({...evidence,evidenceAtMs:12,progress:snapshot.progress},snapshot),false);
+});
+test('semantic stall distinguishes an active engineering task from an idle missing result',()=>{
+  const active={projectType:'substation',progress:{semantic:false},measurement:{activeTasks:[{family:'engineering'}]}};
+  assert.equal(semanticStallReason(active,59_999),null);
+  assert.equal(semanticStallReason(active,60_000),'product-stalled');
+  assert.equal(semanticStallReason({...active,measurement:{activeTasks:[]}},60_000),null);
+  assert.equal(semanticStallReason({...active,measurement:{activeTasks:[]}},120_000),'engineering-progress-stalled');
+  assert.equal(semanticStallReason({...active,progress:{semantic:true,engineeringBuildPending:true},
+    measurement:{activeTasks:[]}},120_000),'engineering-progress-stalled');
 });
 test('missing evidence is inconclusive, explicit correctness failure is fail',()=>{
   const b=runs('base',100),c=runs('candidate',100);c[0].measurementComplete=false;assert.equal(compareRuns(b,c).outcome,'INCONCLUSIVE');c[0].correctness='failed';assert.equal(compareRuns(b,c).outcome,'FAIL');
@@ -177,6 +194,14 @@ test('warm cache proof is domain-specific and misses cannot masquerade as a warm
   assert.equal(coldWarmEquivalent(run,{...run,evidence:{...run.evidence,baseArtifactDigest:'b'}}).outcome,'FAIL');
   const pending={...run,evidence:{...run.evidence,pendingCount:1,pendingSourceCount:2,pendingDigest:'a'}};
   assert.equal(coldWarmEquivalent(pending,{...pending,evidence:{...pending.evidence,pendingDigest:'b'}}).outcome,'FAIL');
+});
+test('warm catalog excludes only proven failed sources and rejects other misses',()=>{
+  const evidence={progress:{workload:{devSources:3},cache:{devCatalogHits:2}},
+    catalogCacheEvidence:{available:true,accounted:true,missCount:1,sourceFailureMissCount:1,unexplainedMissCount:0},
+    geometryDefects:{sourceEvidenceComplete:true,failedSourceSetDigest:'a'.repeat(64),failedReasons:{'missing-dependency':1}}};
+  assert.deepEqual(warmCatalogCoverage(evidence),{valid:true,sourceFailureMisses:1});
+  evidence.catalogCacheEvidence.unexplainedMissCount=1;
+  assert.equal(warmCatalogCoverage(evidence).valid,false);
 });
 test('completion waits for background and line publication, then uses the actual finish moment',()=>{
   const observation={projectType:'transmission_line',openElapsedMs:2300,moments:{lineCachePersistenceReady:2100},

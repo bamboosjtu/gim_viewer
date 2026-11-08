@@ -262,19 +262,27 @@ pub async fn read_device_lod_artifacts(app_handle: tauri::AppHandle, project_id:
     }).await.map_err(|e|format!("设备缓存批量读取失败: {}",e))?
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceLodWriteTiming { resolve_ms: f64, write_ms: f64 }
+
 #[tauri::command]
-pub async fn write_device_lod_artifact(app_handle: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+pub async fn write_device_lod_artifact(app_handle: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<DeviceLodWriteTiming, String> {
     let (meta, bytes) = decode_binary_cache_write_request(&request)?;
     drop(request);
     tauri::async_runtime::spawn_blocking(move || write_device_lod_artifact_blocking(app_handle, meta, bytes))
         .await.map_err(|e| format!("设备缓存后台写入失败: {}", e))?
 }
 
-fn write_device_lod_artifact_blocking(app_handle: tauri::AppHandle, meta: BinaryCacheWriteMeta, bytes: Vec<u8>) -> Result<(), String> {
+fn write_device_lod_artifact_blocking(app_handle: tauri::AppHandle, meta: BinaryCacheWriteMeta, bytes: Vec<u8>) -> Result<DeviceLodWriteTiming, String> {
     if bytes.len() > 128 * 1024 * 1024 { return Err("设备派生缓存超过单条配额".into()); }
     let source = meta.source_gim_sha256.as_deref().ok_or("设备缓存缺少源 SHA")?;
+    let resolve_started=Instant::now();
     let path = device_lod_artifact_path(&app_handle, meta.project_id, &meta.entry_path, source)?;
-    super::cache_paths::atomic_write_derived(&path, &bytes, "设备派生缓存")
+    let resolve_ms=resolve_started.elapsed().as_secs_f64()*1000.0;
+    let write_started=Instant::now();
+    super::cache_paths::atomic_write_derived(&path, &bytes, "设备派生缓存")?;
+    Ok(DeviceLodWriteTiming{resolve_ms,write_ms:write_started.elapsed().as_secs_f64()*1000.0})
 }
 
 #[tauri::command]

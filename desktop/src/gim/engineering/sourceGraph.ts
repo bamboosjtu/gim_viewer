@@ -45,14 +45,17 @@ const normalizePath = (value: string) => value.trim().replace(/\\/g, '/').replac
 const ordered = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 
 /** No use of CbmNode, current UI grain, F-levels or geometry seed predicates. */
-export async function extractEngineeringSourceGraph(files: SourceFileReader, options: { maxOccurrences?: number; maxDepth?: number; signal?: AbortSignal; onProgress?:()=>void } = {}): Promise<EngineeringSourceGraph> {
+export async function extractEngineeringSourceGraph(files: SourceFileReader, options: { maxOccurrences?: number; maxDepth?: number; signal?: AbortSignal; onProgress?:(stage:'source-index'|'source-traverse'|'source-sort')=>void } = {}): Promise<EngineeringSourceGraph> {
   const maxOccurrences = options.maxOccurrences ?? 500_000;
   const maxDepth = options.maxDepth ?? 128;
   const result: EngineeringSourceGraph = { documents: [], cbmOccurrences: [], records: [], aliases: [], references: [],
     ifcPaths: files.paths.filter(p => /\.ifc$/i.test(p)).sort(ordered), diagnostics: [] };
   const exact = new Map<string, string[]>();
   const basename = new Map<string, string[]>();
+  options.onProgress?.('source-index');
+  let indexed=0;
   for (const path of [...files.paths].sort(ordered)) {
+    if(++indexed%1024===0)options.onProgress?.('source-index');
     for (const [map, key] of [[exact, normalizePath(path)], [basename, normalizePath(path).split('/').pop()!]] as const) {
       const hits = map.get(key) ?? []; hits.push(path); map.set(key, hits);
     }
@@ -128,7 +131,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   let lastProgressCount=0;
   function check(depth: number) {
     const count=result.records.length+result.cbmOccurrences.length;
-    if(count-lastProgressCount>=512){lastProgressCount=count;options.onProgress?.();}
+    if(count-lastProgressCount>=512){lastProgressCount=count;options.onProgress?.('source-traverse');}
     if (options.signal?.aborted) throw new DOMException('Source extraction cancelled', 'AbortError');
     if (depth > maxDepth || result.records.length + result.cbmOccurrences.length >= maxOccurrences) throw new Error('Engineering source occurrence budget exceeded');
   }
@@ -149,9 +152,11 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     result.records.push(row);
     const subtree = [row];
     const next = new Set(ancestry); next.add(path);
+    const keyCounts=new Map<string,number>();
+    for(const field of doc.fields){const key=field.keys[0].toUpperCase();keyCounts.set(key,(keyCounts.get(key)??0)+1);}
     for (const field of doc.fields.filter(p => /^SUBDEVICE\d+$/i.test(p.keys[0]) && /\.dev$/i.test(p.value))) {
       const target = resolve(path, field.keys[0], field.value);
-      const duplicateKey = doc.fields.filter(p => p.keys[0].toUpperCase() === field.keys[0].toUpperCase()).length > 1;
+      const duplicateKey = (keyCounts.get(field.keys[0].toUpperCase())??0)>1;
       const edgeId = `${field.keys[0].toUpperCase()}${duplicateKey ? `@line:${field.line}` : ''}`;
       const step = `sub:${Number(field.keys[0].match(/\d+$/)![0])}`;
       if (target) subtree.push(...await expandDev(target, `${id}/${edgeId}:${target}`, id, cbm, next, depth + 1,
@@ -159,7 +164,16 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     }
     return subtree;
   }
-  interface PhysicalScope { records: SourceRecord[]; rootIds: Set<string> }
+  interface PhysicalScope { records: SourceRecord[]; rootIds: Set<string>; bySource?: Map<string,SourceRecord[]> }
+  const childScopes=new WeakMap<PhysicalScope,Map<string,PhysicalScope>>();
+  function scopeCandidates(scope:PhysicalScope|undefined,path:string):SourceRecord[] {
+    if(!scope)return [];
+    if(!scope.bySource){
+      scope.bySource=new Map();
+      for(const row of scope.records){const rows=scope.bySource.get(row.source)??[];rows.push(row);scope.bySource.set(row.source,rows);}
+    }
+    return scope.bySource.get(path)??[];
+  }
   async function visitCbm(path: string, id: string, parentId: string | null, viaField: string, ancestors: Set<string>, physicalScopes: PhysicalScope[], depth: number): Promise<void> {
     check(depth);
     if (ancestors.has(path)) { result.diagnostics.push({ kind: 'cycle', source: id }); return; }
@@ -176,8 +190,8 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
         // excluding the root itself, even if the same template is referenced twice.
         let candidates: SourceRecord[] = [];
         const nearest = physicalScopes[physicalScopes.length - 1];
-        candidates = nearest?.records.filter(row => !nearest.rootIds.has(row.id) && row.source === target) ?? [];
-        if (candidates.length) {
+        candidates = nearest?scopeCandidates(nearest,target).filter(row=>!nearest.rootIds.has(row.id)):[];
+        if (candidates.length && nearest) {
           result.aliases.push({ sourceId: id, status: candidates.length === 1 ? 'confirmed' : 'ambiguous', candidates: candidates.map(row => row.id) });
           if (candidates.length === 1) {
             const row = candidates[0];
@@ -185,9 +199,16 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
             updateNames(row);
           }
           // Limit subsequent aliases to this real part subtree, not sibling instances.
-          const ids = new Set(candidates.map(row => row.id));
-          const subtree = nearest.records.filter(row => ids.has(row.id) || candidates.some(c => row.id.startsWith(`${c.id}/`)));
-          scopes = [...physicalScopes, { records: subtree, rootIds: ids }];
+          let children=childScopes.get(nearest);
+          if(!children){children=new Map();childScopes.set(nearest,children);}
+          let child=children.get(target);
+          if(!child){
+            const ids = new Set(candidates.map(row => row.id));
+            const prefixes=candidates.map(row=>`${row.id}/`);
+            const subtree = nearest.records.filter(row => ids.has(row.id) || prefixes.some(prefix=>row.id.startsWith(prefix)));
+            child={records:subtree,rootIds:ids};children.set(target,child);
+          }
+          scopes = [...physicalScopes, child];
         } else {
           const subtree = await expandDev(target, `dev:${id}:${target}`, '', node, new Set(), 0);
           scopes = [...physicalScopes, { records: subtree, rootIds: new Set(subtree.slice(0, 1).map(row => row.id)) }];
@@ -197,17 +218,21 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     for (const field of doc.fields.filter(p => /^(?:IFCFILE|IFC\d+)$/i.test(p.keys[0]) && p.value)) resolve(path, field.keys[0], field.value);
     const next = new Set(ancestors); next.add(path);
     const edges = doc.fields.filter(p => /^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i.test(p.keys[0]) && /\.cbm$/i.test(p.value));
+    const edgeCounts=new Map<string,number>();
+    for(const field of edges){const key=field.keys[0].toUpperCase();edgeCounts.set(key,(edgeCounts.get(key)??0)+1);}
     for (const field of edges) {
       const child = resolve(path, field.keys[0], field.value);
-      const duplicateKey = edges.filter(p => p.keys[0].toUpperCase() === field.keys[0].toUpperCase()).length > 1;
+      const duplicateKey = (edgeCounts.get(field.keys[0].toUpperCase())??0)>1;
       const edgeId = `${field.keys[0].toUpperCase()}${duplicateKey ? `@line:${field.line}` : ''}`;
       if (child) await visitCbm(child, `${id}/${edgeId}:${child}`, id, field.keys[0], next, scopes, depth + 1);
     }
   }
   const root = resolve('', 'project-entry', 'project.cbm');
   if (!root) throw new Error('Engineering source graph requires a unique project.cbm');
+  options.onProgress?.('source-traverse');
   await visitCbm(root, `cbm:${root}`, null, '', new Set(), [], 0);
   if (options.signal?.aborted) throw new DOMException('Source extraction cancelled', 'AbortError');
+  options.onProgress?.('source-sort');
   result.documents.sort((a, b) => ordered(a.path, b.path));
   return result;
 }

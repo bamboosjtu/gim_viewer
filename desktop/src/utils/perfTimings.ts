@@ -85,6 +85,7 @@ export interface PerfLongTaskStats {
 export type PerfProductMoment =
   | 'coreSemanticReady'
   | 'navigationUiReady'
+  | 'engineeringTreeReady'
   | 'semanticReady'
   | 'firstIfcLoadStart'
   | 'stdSldStart'
@@ -591,6 +592,7 @@ export function perfProductMomentSnapshot(): Record<PerfProductMoment, PerfProdu
   return {
     coreSemanticReady: productMoments.get('coreSemanticReady') ?? null,
     navigationUiReady: productMoments.get('navigationUiReady') ?? null,
+    engineeringTreeReady: productMoments.get('engineeringTreeReady') ?? null,
     semanticReady: productMoments.get('semanticReady') ?? null,
     firstIfcLoadStart: productMoments.get('firstIfcLoadStart') ?? null,
     stdSldStart: productMoments.get('stdSldStart') ?? null,

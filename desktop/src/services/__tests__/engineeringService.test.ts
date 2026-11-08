@@ -168,12 +168,14 @@ describe('session-owned production engineering build', () => {
     const app = state(), port = new LoopbackPort();
     await beginEngineeringBuild(app, sourceFiles('主变压器', true), { createWorker: portFactory(port) });
     expect(app.engineeringStatus).toBe('partial');expect(app.engineeringTreeStatus).toBe('loading');
+    expect(app.engineeringBuildPending).toBe(true);
     expect(store.size).toBe(0);
     expect(port.terminated).toBe(false);
     app.substationSpatialIndex = buildSubstationSpatialIndexFromTexts([{ entry: { modelId: 'm', path: 'delivery.ifc', name: 'delivery' },
       text: "ISO-10303-21;HEADER;ENDSEC;DATA;#1=IFCWALL('wall',$,'墙',$,$,$,$,$);ENDSEC;END-ISO-10303-21;" }], null);
     notifyEngineeringIfcEvidence(app);
     await expect.poll(() => app.engineeringCacheStatus).toBe('saved');
+    expect(app.engineeringBuildPending).toBe(false);
     expect(app.engineeringStatus).toBe('ready');
     expect(app.engineeringSnapshot?.entities).toHaveLength(3);
     expect(port.terminated).toBe(true);

@@ -89,6 +89,8 @@ export interface DevGlbSerializationResult {
 export interface DevGeometryPart {
   key: string;
   referencePaths: string[];
+  /** One large MOD can be divided by its visible root ordinals. */
+  rootSlice?: {index:number;total:number};
   modCount: number;
   stlCount: number;
   estimatedBytes: number;
@@ -207,9 +209,17 @@ export function buildDevCompilePlan(
   canonicalDevPath = '',
 ): DevGeometryCompilePlan | null {
   const edges: GeometryEdge[] = [...discovered.mods, ...discovered.stls];
-  if (edges.length < DEV_SPLIT_MIN_EDGES) return null;
   const estimatedBytes = estimateEdgeBytes(edges, files);
   const estimatedInstanceWork = estimateInstanceWork(edges, files);
+  if(edges.length===1&&discovered.mods.length===1&&estimatedBytes>=32*1024*1024){
+    const total=Math.min(Math.max(2,Math.floor(maxParts)),Math.max(2,Math.ceil(estimatedBytes/(24*1024*1024))));
+    const parts=Array.from({length:total},(_,index)=>({
+      ...partFromEdges(`visible-roots:${index}`,edges,files),rootSlice:{index,total},
+      estimatedBytes:Math.ceil(estimatedBytes/total),estimatedInstanceWork:Math.ceil(estimatedInstanceWork/total),
+    }));
+    return {canonicalDevPath,parts,modCount:1,stlCount:0,estimatedBytes,estimatedInstanceWork};
+  }
+  if (edges.length < DEV_SPLIT_MIN_EDGES) return null;
   // Split only when parsing or repeated occurrence/export work can amortize
   // the per-part GLB export and final merge cost.
   if (estimatedBytes < DEV_SPLIT_MIN_BYTES && estimatedInstanceWork < DEV_SPLIT_MIN_BYTES) return null;
@@ -325,7 +335,7 @@ export async function serializeDevToGlbDetailed(
     canonicalDevPath?: string;
     discovered?: DiscoveredGeometries;
     /** Compile one assembly-subtree part; exact occurrence reference paths. */
-    partition?: { referencePaths: readonly string[]; allowSmallFallback?: boolean };
+    partition?: { referencePaths: readonly string[]; allowSmallFallback?: boolean; rootSlice?:{index:number;total:number} };
   } = {},
 ): Promise<DevGlbSerializationResult> {
   // A missing DEV is a cache failure, not a deterministic empty result. The
@@ -437,7 +447,8 @@ export async function serializeDevToGlbDetailed(
         geo.phmColor,
         geo.phmColorMaxA,
         { strict: true, parseXml: options.parseXml, lod: options.lod, timings: options.timings, onStage:options.onStage,
-          outline: { placementMatrix: geo.placementTransformMatrix, deferSmallPartFallback: true } },
+          outline: { placementMatrix: geo.placementTransformMatrix, deferSmallPartFallback: true,
+            rootSlice:options.partition?.rootSlice } },
       );
       if (!group) continue;
       const xmlDiagnostics = readXmlDiagnostics(group);

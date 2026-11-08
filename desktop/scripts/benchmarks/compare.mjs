@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-const identityKeys=['machineId','runtimeSha256','buildMode','measurementVersion','detailPolicy','lifecyclePolicy','contentPolicy','webviewProfilePolicy','mode','scenario','cacheState','sourceSha256','sampleId','profileDigest','workloadDigest','routeDigest','viewportDigest'];
+const identityKeys=['machineId','runtimeSha256','buildMode','measurementVersion','detailPolicy','lifecyclePolicy','contentPolicy','cacheProofPolicy','webviewProfilePolicy','mode','scenario','cacheState','sourceSha256','sampleId','profileDigest','workloadDigest','routeDigest','viewportDigest'];
 export function digest(value){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 export function median(values){const rows=[...values].sort((a,b)=>a-b);return rows.length%2?rows[(rows.length-1)/2]:(rows[rows.length/2-1]+rows[rows.length/2])/2;}
 const sha=value=>/^[a-f0-9]{64}$/.test(value??'');

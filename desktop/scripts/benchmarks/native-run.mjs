@@ -7,12 +7,12 @@ import {dirname,join,resolve} from 'node:path';
 import {fileSha256,directoryFingerprint} from './acceptance-build.mjs';
 import {CdpConnection,WorkerHeapSampler} from './cdp.mjs';
 import {bareContainerKind} from './container-magic.mjs';
-import {pairedWebviewProfile} from './cache-roots.mjs';
+import {checkedWebviewProfile} from './cache-roots.mjs';
 import {digest,runReadiness} from './compare.mjs';
 import {workspacePath,sha256} from './samples.mjs';
 import {startProcessSampler} from './process-sampler.mjs';
 import {cachePublicationAssessment} from './profiles.mjs';
-import {readyForSettle,cachePublicationMoment,finalEvidenceIssue} from './completion.mjs';
+import {readyForSettle,cachePublicationMoment,finalEvidenceIssue,semanticStallReason} from './completion.mjs';
 import {assessCorrectness} from './correctness.mjs';
 import {assertBenchmarkExecutable} from './benchmark-build-attestation.mjs';
 import {classifyWorkerHeapEvidence} from './worker-memory-completeness.mjs';
@@ -30,7 +30,7 @@ async function port(){const server=createServer();await new Promise((resolve,rej
 async function stop(child){if(!child?.pid||child.exitCode!==null||child.signalCode!==null)return;spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});await Promise.race([new Promise(resolve=>child.once('exit',resolve)),delay(5000)]);if(child.exitCode===null&&child.signalCode===null)throw Error('Owned application cleanup failed');}
 
 /** Each call owns one native process and raw report; cold/warm share cache and WebView profile. */
-export async function runNative({root,buildManifest,sample,profileDigest='unfrozen',mode='benchmark',scenario='open',cacheState='cold',dataRoot,timeoutMs=300000,doctor=false,actions=[],diagnostic,additionalSamples=[],exercise,signal}){
+export async function runNative({root,buildManifest,sample,profileDigest='unfrozen',mode='benchmark',scenario='open',cacheState='cold',dataRoot,timeoutMs=300000,doctor=false,actions=[],diagnostic,additionalSamples=[],exercise,signal,onStarted=()=>{}}){
   if(process.platform!=='win32')throw Error('Native benchmark requires Windows');
   if(doctor)sample={sampleId:'capability-probe',sourceSha256:null,paths:[]};
   else if(!/^gim-[a-f0-9]{16}$/.test(sample.sampleId)||!/^[a-f0-9]{64}$/.test(sample.sourceSha256))throw Error('Invalid registered sample identity');
@@ -57,7 +57,8 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   if(cacheState==='cold'&&readdirSync(dataRoot).length)throw Error('Cold cache root must be new/empty');
   // The product's IFC LOD cache lives in WebView2 IndexedDB. A warm process
   // must reuse the cold process's profile as well as its SQLite data root.
-  const profile=pairedWebviewProfile(dataRoot);mkdirSync(profile,{recursive:true});
+  const profile=checkedWebviewProfile(root,dataRoot,cacheState);mkdirSync(profile,{recursive:true});
+  writeFileSync(join(out,'profile.private.json'),JSON.stringify({profile,dataRoot,cacheState,policy:'paired-webview-profile-v1'}));
   const manifest={nonce:randomBytes(32).toString('hex'),sampleId:sample.sampleId,sourcePath:source,sourceSha256:sample.sourceSha256??'',dataRoot,probeOnly:doctor};
   manifest.samples=[];
   for(const extra of additionalSamples){
@@ -69,6 +70,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     manifest.samples.push({sampleId:extra.sampleId,sourcePath:snapshot,sourceSha256:extra.sourceSha256});
   }
   const manifestPath=join(out,'run.private.json');writeFileSync(manifestPath,JSON.stringify(manifest));
+  onStarted({runId,out,dataRoot});
   const debugPort=await port(),env={...process.env,TEMP:out,TMP:out,TMPDIR:out,LOCALAPPDATA:out,APPDATA:out,
     GIM_BENCHMARK_MANIFEST:manifestPath,WEBVIEW2_USER_DATA_FOLDER:profile,WEBVIEW2_BROWSER_EXECUTABLE_FOLDER:runtime,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${debugPort} --remote-debugging-address=127.0.0.1 --enable-logging --log-file="${join(out,'webview.private.log')}" --v=1`};
@@ -160,7 +162,8 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
         try{observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');lastSnapshotAt=performance.now();if(hostGapStart!==null){if(hostSamplingGaps.length<128)hostSamplingGaps.push({startMs:hostGapStart,endMs:performance.now(),clockId:'controller'});hostGapStart=null;}}
         catch{observationGapMs=Math.max(observationGapMs,performance.now()-lastSnapshotAt);if(cdp.closed){crashed=true;throw Error('renderer-process-exited');}hostSamplingFailures++;hostGapStart??=requestedAt;await delay(1000);continue;}
         const now=performance.now();
-        const nextProgress=JSON.stringify([observation.progress.semanticStatus,observation.progress.workload,
+        const nextProgress=JSON.stringify([observation.progress.semanticStatus,observation.progress.engineeringProgress,
+          observation.progress.workload,
           observation.measurement?.taskOutcomes,observation.measurement?.counters?.['engineering:host.received']?.messages]);
         if(nextProgress!==progressKey){progressKey=nextProgress;lastProgressAt=now;}
         if(now-lastCheckpointAt>=30000){
@@ -178,12 +181,10 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
         if(observation.projectType==='substation'&&observation.progress.backgroundSettled&&!observation.progress.semantic){
           reason='settled-without-semantic';break;
         }
-        if(observation.progress.semanticFailure){reason='engineering-semantic-failed';break;}
-        const engineeringActive=observation.measurement?.activeTasks?.some(task=>task.family==='engineering')===true;
-        if(observation.projectType==='substation'&&!observation.progress.semantic&&
-          now-lastProgressAt>=(engineeringActive?300000:120000)){
-          reason='engineering-progress-stalled';break;
-        }
+        if(observation.progress.semanticFailure){reason=observation.progress.engineeringFailureCode==='engineering-progress-stalled'
+          ?'product-stalled':'engineering-semantic-failed';break;}
+        const stalled=semanticStallReason(observation,now-lastProgressAt);
+        if(stalled){reason=stalled;break;}
         if(automaticMs!==null&&readyForSettle(observation,{cacheState})){
           cachePublishMs??=cachePublicationMoment(observation);
           stableSince??=performance.now();if(performance.now()-stableSince>=3000){completed=true;settledMs=observation.openElapsedMs;break;}
@@ -287,7 +288,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   const mappedIds=new Set(sampler?.snapshot().mappedWorkerIds??[]);
   const {missing:missingWorkers,unavailable:unavailableWorkers,shortLived:shortLivedWorkerMemory}=classifyWorkerHeapEvidence(
     measurement?.workers,new Set(heaps.keys()),heapRecords,mappedIds,sampler?.periodMs??1000);
-  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:'gim-measurement-v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode,scenario,cacheState,
+  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:'gim-measurement-v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode,scenario,cacheState,
     sampleId:sample.sampleId,sourceSha256:sample.sourceSha256,profileDigest,routeDigest:digest(actionTargets),viewportDigest:digest(observation?.viewport??null),viewport:observation?.viewport??null,
     workloadDigest:evidence?digest({workload:evidence.progress.workload,semantic:evidence.semanticDigest,placement:evidence.placementDigest}):null};
   const assessment=assessCorrectness(evidence);
@@ -296,7 +297,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   const variantPartialEligible=cacheFailureCode&&assessment.correctness==='passed'&&measurement?.aggregateComplete===true&&
     evidence?.progress?.cachePersistenceStatus!=='failed'&&evidence?.progress?.cache?.writeFailures===0&&evidence?.progress?.cache?.readFailures===0;
   const correctness=actionResults.some(row=>row.status==='failed')||crashed||
-    ['project-open-failed','project-open-unavailable','engineering-semantic-failed','settled-without-semantic'].includes(reason)
+    ['project-open-failed','project-open-unavailable','engineering-semantic-failed','settled-without-semantic','product-stalled'].includes(reason)
     ?'failed':variantPartialEligible?'partial':assessment.correctness;
   const defectAssessment=variantPartialEligible?{kind:'input-variant',status:'cache-not-persistable',sourceSha256:sample.sourceSha256,variant:inputVariant}:assessment.defectAssessment;
   const report={version:'gim-benchmark-v1',runId,kind:doctor?'native-capability-probe':'native-scene',projectType:observation?.projectType??null,conditions,buildFingerprint:build.sourceFingerprint,processInstanceId:runId,
@@ -319,7 +320,13 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     measurementLifecycleIssues:measurement?.lifecycleIssues??[],
     measurementComplete:!reason&&processMemoryComplete&&streamFailures===0&&cleanupComplete&&measurement?.aggregateComplete===true&&
       measurement?.lifecycleComplete===true&&!measurement.activeTasks.length&&!missingWorkers.length&&!unavailableWorkers.length,
-    requiredMetrics:['firstResponseMs','automaticLoadMs','processPrivatePeakBytes'],metrics:{firstResponseMs:observation?.moments.navigationUiReady??observation?.moments.coreSemanticReady??null,firstGeometryMs:observation?.moments.firstGeometryReady??observation?.moments.firstUsableGeometryReady??null,automaticLoadMs:automaticMs,cachePublishMs,
+    requiredMetrics:['firstResponseMs','automaticLoadMs','processPrivatePeakBytes'],metrics:{
+      firstResponseMs:observation?.moments.navigationUiReady??observation?.moments.coreSemanticReady??null,
+      modelTreeReadyMs:observation?.projectType==='substation'?observation?.moments.engineeringTreeReady??null:
+        observation?.moments.navigationUiReady??null,
+      firstGeometryMs:observation?.moments.firstGeometryReady??observation?.moments.firstUsableGeometryReady??null,
+      allGeometryReadyMs:Math.max(observation?.moments.allIfcReady??0,observation?.moments.devBaseRepresentationsSettled??0)||null,
+      automaticLoadMs:automaticMs,cachePublishMs,
       settledMs,writeDrainMs:automaticMs!==null&&observation?.devArtifactWriteElapsedMs!=null
         ?Math.max(0,observation.devArtifactWriteElapsedMs-automaticMs):null,
       processPrivatePeakBytes:productPeak??processPeak,wholeRunPrivatePeakBytes:processPeak},
@@ -327,7 +334,8 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     actionResults,actionTargetDigests:actionTargets,diagnostic:sampler?.diagnosticResult??null,logFailures,
     exercise:exerciseResult,
     processSampling:{complete:processMemoryComplete,samples:processSamples.length,available:processSamples.filter(row=>row.availability==='available').length},
-    crashed,reason,environmentSuspend:suspended?{code:'INFRA_SUSPEND',observationGapMs}:null,
+    crashed,reason,stalledStage:reason==='product-stalled'?observation?.progress?.engineeringProgress?.stage??'unknown':null,
+    environmentSuspend:suspended?{code:'INFRA_SUSPEND',observationGapMs}:null,
     openAttempted,cleanupComplete,measurement,workerMemory,missingWorkerMemory:missingWorkers,
     unavailableWorkerMemory:unavailableWorkers,
     shortLivedWorkerMemory,sampling:sampler?.snapshot()??null,heapRows,events,hostSamplingFailures,hostSamplingGaps,

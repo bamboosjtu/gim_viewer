@@ -59,6 +59,8 @@ export interface DevArtifactRead<T> {
 export interface DevArtifactWriteResult {
   ok: boolean;
   error?: string;
+  nativeResolveMs?: number;
+  nativeWriteMs?: number;
 }
 
 function decode<T>(key: string, bytes: Uint8Array | null | undefined): DevArtifactRead<T> {
@@ -245,8 +247,11 @@ export async function writeDevArtifactDetailed(
       const packet=(()=>{const data=prepared?packPreparedDevArtifact(prepared):packDevArtifact(key,value);const release=observe?.('artifact-pack-copy',[data]);
         try{return packBinaryCacheWrite(args.projectId,args.entryPath,data,args.sourceGimSha256);}finally{release?.();}})();
       const releasePacket=observe?.('ipc-wire-copy',[packet]);
-      try{await invokeTimed('write_device_lod_artifact',packet);}finally{releasePacket?.();}
-      return { ok: true };
+      let timing:{resolveMs?:number;writeMs?:number}|undefined;
+      try{timing=await invokeTimed('write_device_lod_artifact',packet);}finally{releasePacket?.();}
+      return { ok: true,
+        ...(Number.isFinite(timing?.resolveMs)?{nativeResolveMs:timing!.resolveMs}:{}),
+        ...(Number.isFinite(timing?.writeMs)?{nativeWriteMs:timing!.writeMs}:{}) };
     } catch (error) {
       return { ok: false, error: String(error) };
     }

@@ -5,7 +5,7 @@ import type { EngineeringBuildResult } from './engineeringWorkerProtocol.js';
 import { EngineeringWorkerClient } from './engineeringWorkerClient.js';
 import { SUBSTATION_PARSER_DOMAIN_VERSION, SUBSTATION_SPATIAL_SEMANTIC_VERSION } from './substationSpatialSemanticCache.js';
 import { isTauri } from '@desktop/runtime.js';
-import { perfMark } from '../utils/perfTimings.js';
+import { perfMark,perfMarkProductMoment } from '../utils/perfTimings.js';
 import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
 import { installCompositionProjection } from './compositionProjectionService.js';
 
@@ -32,7 +32,7 @@ export const ENGINEERING_PARSER_CONTRACT = `${SUBSTATION_PARSER_DOMAIN_VERSION}|
 export interface EngineeringBuildOptions {
   onUpdate?: () => void;
   /** Dependency injection for lifecycle/integration tests; production uses a real Worker. */
-  createWorker?: (isCurrent: () => boolean, signal: AbortSignal) => EngineeringWorkerClient;
+  createWorker?: (isCurrent: () => boolean, signal: AbortSignal, onProgress:(stage:string,completed:number)=>void) => EngineeringWorkerClient;
   /** Native early-open sources are not a published cache until extraction commits. */
   beforeCacheWrite?: Promise<unknown>;
   /** Starts shared IFC semantics on demand; has no geometry readiness gate. */
@@ -71,7 +71,12 @@ async function saveResult(state: AppState, job: EngineeringJob, result: Engineer
 
 async function finishBuild(state:AppState,job:EngineeringJob,result:EngineeringBuildResult):Promise<void>{
   job.finished=true;
-  try{await saveResult(state,job,result);}finally{job.client.close();}
+  try{await saveResult(state,job,result);}finally{
+    job.client.close();
+    if(state.isCurrentSession(job.session)){state.engineeringBuildPending=false;job.update();
+      if(!state.engineeringSources?.models.length&&state.engineeringTreeStatus==='loading')
+        state.engineeringGeometryEvidenceChanged?.();}
+  }
 }
 
 function publish(state: AppState, job: EngineeringJob, result: EngineeringBuildResult): void {
@@ -83,12 +88,14 @@ function publish(state: AppState, job: EngineeringJob, result: EngineeringBuildR
   const noIfc=result.sources.graph.ifcPaths.length===0;
   const finalNavigation=result.navigationCacheHit===true&&result.navigation.compositionComplete===true&&result.navigation.compositionCoverage==='full' || noIfc;
   state.engineeringTreeStatus=finalNavigation?'ready':'loading';
-  if(finalNavigation){result.navigation.compositionComplete=true;result.navigation.compositionCoverage='full';job.resolveProjection(true);}
+  if(finalNavigation){result.navigation.compositionComplete=true;result.navigation.compositionCoverage='full';job.resolveProjection(true);
+    perfMarkProductMoment('engineeringTreeReady',{available:true,source:'engineering-publish'});}
   state.engineeringPipelineMetrics=result.metrics?{...result.metrics,caches:[]}:null;
   state.engineeringGeometryCatalog = result.geometryOccurrences; job.resolveGeometry(result.geometryOccurrences);
   state.engineeringRepresentationChanged?.();
   state.engineeringStatus = result.sources.complete ? 'ready' : 'partial';
   state.engineeringError = '';
+  state.engineeringFailureCode=null;
   if (!result.sources.complete) state.engineeringCacheStatus = 'partial';
   if (result.cacheError) { state.engineeringCacheStatus = 'error'; state.engineeringCacheError = result.cacheError; }
   if (result.cacheDisabled) { state.engineeringCacheStatus = 'disabled'; state.engineeringCacheError = result.cacheDisabled; }
@@ -131,10 +138,12 @@ export function notifyEngineeringIfcFailure(state: AppState, reason: string): vo
   job.ready.then(() => {
     if (!current(state, job) || job.finished) return;
     job.finished = true; job.client.close();
+    state.engineeringBuildPending=false;
     job.resolveProjection(false);
     state.engineeringTreeStatus=state.engineeringNavigation?'ready':'error';
     if(state.engineeringNavigation)state.engineeringNavigation={...state.engineeringNavigation,compositionCoverage:'partial'};
     state.engineeringError = reason;
+    state.engineeringFailureCode='ifc-semantic-failed';
     state.engineeringStatus = state.engineeringSnapshot ? 'partial' : 'error';
     state.engineeringCacheStatus = 'partial'; job.update();
   }).catch(error => fail(state, job, error));
@@ -146,10 +155,12 @@ function fail(state: AppState, job: EngineeringJob, error: unknown): void {
   job.resolveGeometry(null);
   console.warn('[工程来源] 构建失败', error instanceof Error ? error.stack : String(error));
   job.finished = true;
+  state.engineeringBuildPending=false;
   job.resolveProjection(false);
   state.engineeringTreeStatus=state.engineeringNavigation?'ready':'error';
   if(state.engineeringNavigation)state.engineeringNavigation={...state.engineeringNavigation,compositionCoverage:'partial'};
   state.engineeringError = String(error);
+  state.engineeringFailureCode=/Worker 请求超时/.test(String(error))?'engineering-progress-stalled':'engineering-build-failed';
   state.engineeringStatus = state.engineeringSnapshot ? 'partial' : 'error';
   job.update();
 }
@@ -159,12 +170,16 @@ function fail(state: AppState, job: EngineeringJob, error: unknown): void {
  */
 export function beginEngineeringBuild(state: AppState, files: Map<string, File>, options: EngineeringBuildOptions = {}): Promise<void> {
   state.engineeringCleanup?.();
+  state.engineeringBuildPending=true;
+  state.engineeringProgress=null;
+  state.engineeringFailureCode=null;
   let resolveGeometry!: EngineeringJob['resolveGeometry'];
   let resolveProjection!: EngineeringJob['resolveProjection'];
   const projectionReady=new Promise<boolean>(resolve=>{resolveProjection=resolve;});
   state.engineeringGeometryReady = new Promise(resolve => { resolveGeometry = resolve; }); state.engineeringGeometryCatalog = null;
   const session = state.captureProjectSession(), controller = new AbortController();
   if (typeof Worker === 'undefined' && !options.createWorker) {
+    state.engineeringBuildPending=false;
     resolveGeometry(null);
     state.engineeringSources = null; state.engineeringSnapshot = null; state.engineeringNavigation = null; state.engineeringNavigationCacheHit = false;
     state.engineeringTreeStatus='error';state.engineeringStatus = 'error'; state.engineeringError = '当前环境无法启动工程实体构建 Worker';
@@ -173,13 +188,15 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
   }
   const update = () => { if (state.isCurrentSession(session) && !controller.signal.aborted) { state.notifyEngineeringChanged(); options.onUpdate?.(); } };
   let job: EngineeringJob;
-  const client = (options.createWorker ?? EngineeringWorkerClient.create)(() => !!job && current(state, job), controller.signal);
+  const client = (options.createWorker ?? EngineeringWorkerClient.create)(() => !!job && current(state, job), controller.signal,
+    (stage,completed)=>{if(job&&current(state,job))state.engineeringProgress={stage,completed};});
   const persistent = isTauri() && session.projectId != null && /^[a-f\d]{64}$/i.test(session.sourceSha256 ?? '');
   job = { session, controller, client, resolveGeometry, projectionReady, resolveProjection, ready: Promise.resolve(), lastSpatial: null, finished: false, enriching: false, update, beforeCacheWrite: options.beforeCacheWrite,
     identity: persistent ? { sourceSha256: session.sourceSha256!, parserVersion: ENGINEERING_PARSER_CONTRACT, entries: [...files.keys()] } : undefined };
   jobs.set(state, job);
   const disposeProjection=installCompositionProjection(state,complete=>job.resolveProjection(complete));
-  state.engineeringCleanup = () => { disposeProjection();resolveGeometry(null);resolveProjection(false); controller.abort(); client.close(); if (jobs.get(state) === job) jobs.delete(state); };
+  state.engineeringCleanup = () => { disposeProjection();resolveGeometry(null);resolveProjection(false); controller.abort(); client.close();
+    if (jobs.get(state) === job) {state.engineeringBuildPending=false;jobs.delete(state);} };
   state.engineeringSources = null; state.engineeringSnapshot = null; state.engineeringNavigation = null; state.engineeringNavigationCacheHit = false;
   state.engineeringStatus = 'loading'; state.engineeringError = ''; state.engineeringCacheStatus = 'none'; state.engineeringCacheError = ''; update();
   state.engineeringTreeStatus = 'loading';

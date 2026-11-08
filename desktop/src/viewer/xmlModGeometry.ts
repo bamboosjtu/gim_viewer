@@ -625,6 +625,8 @@ export interface OutlineGeometryOptions {
   placementMatrix?: number[];
   /** Serialization defers the fallback until the whole DEV has been considered. */
   deferSmallPartFallback?: boolean;
+  /** Deterministic subset of visible roots for an oversized single MOD. */
+  rootSlice?:{index:number;total:number};
 }
 export function collectBakedGeometriesByMaterial(
   doc: XmlModDocument, lod: DeviceLod = 2, timings?: Record<string, number>, options?: OutlineGeometryOptions, onStage?:StageObserver,
@@ -788,8 +790,10 @@ function* bakeGeometrySteps(
   };
 
   try {
+    let visibleOrdinal=0;
     for (const entity of doc.entities) {
       if (!entity.visible) continue;
+      if(options?.rootSlice&&visibleOrdinal++%options.rootSlice.total!==options.rootSlice.index)continue;
       let pieces = lod < 2 ? yield* surface(entity.id) : null;
       const base = lod < 2 ? null : yield* evaluate(entity.id);
       const reachable = new Set<number>();

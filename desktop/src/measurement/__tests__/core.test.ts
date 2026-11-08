@@ -26,6 +26,13 @@ describe('measurement contracts (no engineering samples)',()=>{
     probe.event({...context,workerId:'worker-2',attemptId:2},{kind:'task',name:'started'});probe.event({...context,workerId:'worker-2',attemptId:2},{kind:'task',name:'ended',status:'completed'});
     expect(collector.snapshot().taskOutcomes).toEqual({timeout:2,completed:1});
   });
+  it('records queued work that never started without inventing an interrupted execution',()=>{
+    const {collector,probe}=setup();probe.event(context,{kind:'worker',name:'created'});
+    probe.event(context,{kind:'task',name:'queued'});
+    probe.event(context,{kind:'worker',name:'terminated',status:'aborted'});
+    expect(collector.snapshot()).toMatchObject({activeTasks:[],lifecycleComplete:true,
+      taskOutcomes:{cancelled:1},loss:{cancelledBeforeStart:1,interruptedTasks:0}});
+  });
   it('accepts an explicit business cancellation but rejects unexplained or late task endings',()=>{
     const {collector,probe}=setup();probe.event(context,{kind:'task',name:'started'});
     probe.event(context,{kind:'task',name:'ended',status:'cancelled',reasonCode:'request-superseded'});
@@ -97,11 +104,15 @@ describe('measurement contracts (no engineering samples)',()=>{
   });
   it('keeps a bounded slow phase list even after detail capacity is reached',()=>{
     const {collector,probe,tick}=setup(2);
-    for(let ms=1;ms<=20;ms++)probe.record(context,'dev.compile',ms);
-    probe.event(context,{kind:'task',name:'started'});tick(33);
+    for(let ms=1;ms<=20;ms++){
+      tick(0);const phase=probe.phase(context,'dev.compile');tick(ms);phase.end();
+    }
+    probe.record(context,'aggregate-only',999);
+    tick(0);probe.event(context,{kind:'task',name:'started'});tick(33);
     probe.event(context,{kind:'task',name:'ended',status:'completed'});
     expect(collector.snapshot().slowestPhases).toHaveLength(10);
     expect(collector.snapshot().slowestPhases[0].durationMs).toBe(20);
+    expect(collector.snapshot().slowestPhases.some(row=>row.stage==='aggregate-only')).toBe(false);
     expect(collector.snapshot().slowestTasks[0].durationMs).toBe(33);
     expect(collector.snapshot()).toMatchObject({detailComplete:false,aggregateComplete:true});
   });

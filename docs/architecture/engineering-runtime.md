@@ -88,7 +88,9 @@
 
 - 来源不完整时 `engineeringStatus=partial`，仍可浏览已解析部分；不写完整来源凭据。
 - Spatial 尚未就绪时先在内部建立不含建筑楼层的来源和实体；模型树显示加载中；Spatial 到达后 `notifyEngineeringIfcEvidence` 触发重新 assemble，补充空间容器和外露 IFC 对象。这里等待的是 IFC 空间/外露语义，不是 Mesh、LOD 或相机。
+- `engineeringBuildPending` 从来源构建开始持续到最终 enrichment 解码、发布和缓存任务结束；初次无 Spatial 的 partial 投影不能冒充最终语义。工程 Worker 的 index/traverse/sort 进度只在实际推进时续期，长时间无进展以明确错误结束。相同物理 scope 的来源记录与别名子树复用索引，避免大型工程按节点重复扫描。
 - IFC 语义失败只影响 IFC 来源部分，不把已有 DEV 实体回滚。
+- 工程来源 Worker 或传输本身失败时可以保留已发布的部分导航供查看，但 `engineeringFailureCode` 为终端故障，Benchmark 不把它归为样本来源缺口的 PARTIAL。
 - `engineeringGeometryReady` 在来源图返回 occurrence 目录时解析；DEV 编译可早于实体完成。
 - 工程切换/关闭取消 Worker、请求和缓存写槽；迟到结果按会话守卫拒绝。
 

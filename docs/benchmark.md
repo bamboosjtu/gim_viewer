@@ -73,6 +73,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | `review-partial` | 独立复核 PARTIAL 来源证据并生成候选摘要绑定的私有记录 | `--candidate <json> --reviewer <复核者> --reason <受控代码>` |
 | `approve-baseline` | 显式批准候选为基线 | `--candidate <json> --approver <批准者>`；PARTIAL 还需 `--accept-partial --partial-review <复核记录>`，首次加 `--first-partial`，后续提供 `--previous-baseline <已批准基线>` |
 | `batch` | 按目录或注册表批量执行冷开、暖开与重复轮次 | `--build <清单>`；`--directory <目录>` 或 `--registry <json>`；可选 `--output <目录>`、`--anonymize`（`true`/`false`）、`--preset`（`survey`/`baseline`）、`-repeat`/`--repeat <n>`、`--timeout-seconds <n>` |
+| `recover-batch` | 控制器被外部结束后，结算遗留 RUNNING/PENDING 行 | `--output <已停止的批次目录>`；只从工作区私有进度快照恢复状态，不补造耗时 |
 
 ## 命令与退出码
 
@@ -85,7 +86,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | 矩阵与开销 | `matrix`、`overhead` | `PASS`/`PARTIAL`→0；其他→2；`FAIL` 也是 2 |
 | 单样本 | `run` | `PASS`/`PARTIAL`→0；`FAIL`→1；其他→2 |
 | 自检 | `doctor`、`lifecycle` | 只有 `PASS`→0；其他→2 |
-| 辅助命令 | `init`、`samples`、`inventory`、`select`、`freeze-profile`、`build`、`report`、`review-partial`、`approve-baseline` | 成功→0；参数或执行异常→1 |
+| 辅助命令 | `init`、`samples`、`inventory`、`select`、`freeze-profile`、`build`、`report`、`recover-batch`、`review-partial`、`approve-baseline` | 成功→0；参数或执行异常→1 |
 
 - 缺少必需参数、未知命令或未捕获异常走统一异常路径，返回 1；上表描述的是命令完成后的结果映射。
 - `batch` 是唯一安装 Ctrl+C / SIGTERM 取消控制并返回 130 的命令；取消还写入 `CANCELLED`。
@@ -111,6 +112,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 - **去重。** 相同 SHA 与相同动作路线只执行一次，其余输入标为 `DUPLICATE` 并关联首个输入；不同动作路线仍分别执行。不会根据文件大小、历史耗时或失败记录跳过某个唯一来源。目录符号链接不跟随，报告会列出拒绝访问项。
 - **队列。** 批次的所有计划行在执行前写入结果。单次失败、超时、输入缺失或 SHA 不符都记录后继续；只有用户取消或报告无法安全写入才停止队列。冷开未准备好有效缓存时，对应暖开标为 `SKIPPED`，下一来源继续执行。除上述打开前基础设施故障外，失败项不自动重试；性能回退的正式独立复测由比较流程处理。
 - **取消。** 运行中可按 Ctrl+C，或在该报告目录新建空的 `stop.request`。控制器取消当前任务、回收本次拥有的应用进程树，余项标为 `CANCELLED`。结果随每次状态变化落盘，浏览器刷新 HTML 即可看到进度；不覆盖已有批次目录。强制结束控制器或机器断电可能留下 `RUNNING`/`PENDING`，它们不属于成功结果。
+- **外部中止恢复。** 确认原控制器与应用进程均已停止后，运行 `npm run bench -- recover-batch --output ../output/<批次>`。恢复将遗留行标为 `CANCELLED`，从私有 `progress.private.json` 带回最后观测的写入待办和缓存状态；旧批次若没有 runId，只在私有清单能唯一匹配样本时关联快照。缺失的 `settledMs` 保持空值，最小私有报告明确 `measurementComplete=false`。它不继续运行样本，也不把已中止轮次当作 PASS。
 
 ## JSON 注册表
 
@@ -185,11 +187,13 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 - 汇总分别计数 `PASS` 与 `PARTIAL`；同组轮次的 PARTIAL 签名不同时中位数留空，`coverageGroups` 与 `partialSignatures` 给出分组证据。
 - 覆盖汇总同时给出有效轮次和计划轮次，以及基础设施重试次数。少于计划轮次的中位数可供诊断，但不能冒充完整基线。
 - `measurementDetailStatus=aggregate-only` 表示详细时间线因容量截断，但阶段聚合、任务闭环和必要采样仍完整；截断条数保留，产品 PASS/PARTIAL 不因此变成 INCONCLUSIVE。未确认的 Worker 尾批、序号缺口或聚合丢失仍使测量不完整。Worker 批次有连续 ID、确认和任务结束标记。
+- `aggregate-only` 的 PASS/PARTIAL **没有完整事件时间线**。基线审批要求 `aggregateComplete`、生命周期、必要内存和内容证据，不要求 `detailComplete`；`slow-tasks.csv`、`slow-phases.csv` 仅供诊断，不作为基线必需证据。聚合阶段不进入单次慢阶段榜。
 - `measurementLifecycleComplete` 与 `measurementComplete` 分开：意外 Worker 终止的在途任务、超时、无理由取消和异常迟到事件使生命周期不完整；有受控原因的项目切换/关闭或 AbortError 取消可以正常结算。DEV 精细请求主动终止 Worker 时按任务身份登记取消，不豁免池内其他任务。外来 run 和重复序号使事件传输不完整，不能被静默忽略。
 - `pendingCount`、`pendingSourceCount`、`pendingDigest` 单列；语义摘要已包括待归对象的身份、原因、来源、类别和 disposition。冷暖逐项比较 pending 证据。
 - `geometryStructuralFingerprint` 是结构指纹，不是顶点/索引内容校验。`devContentDigest` 聚合 DEV L0 GLB 的字节 SHA，`devContentCovered` 与 `devContentComplete` 标注实际覆盖；IFC/L2 内容不在该证据范围。
 - `automaticLoadMs` 是自动表示终态；`settledMs` 是任务、缓存、后台及静默窗口全部完成时刻。`writeDrainMs` 只量最后一笔 DEV 产物写晚于自动表示的部分，不代表全部写入时间。样本覆盖 tab 同时列出自动表示、缓存发布和完全结算的中位数。
-- 冷暖配对复用 SQLite 数据根和 WebView2 用户数据目录；IFC LOD 的 IndexedDB 缓存位于后者。旧的独立 WebView profile 运行条件不可与新口径比较。运行中的 `progress.private.json` 每 30 秒保留一次匿名状态快照，只存工作区私有目录。变电语义无进展时，无活动工程任务 120 秒、有活动工程任务 300 秒后以 `engineering-progress-stalled` 结束为 INCONCLUSIVE；明确工程语义失败立即报 FAIL。
+- `modelTreeReadyMs` 是工程组成投影首次可用（线路/设备取导航可用时刻）；`firstGeometryMs` 是首个几何可见；`allGeometryReadyMs` 是自动基础 DEV/IFC 表示均齐备的时刻。三者与 `cachePublishMs`、`settledMs` 分列；几何齐备是 wall time，可能含来源读取、调度和缓存写入背压，不冒充纯三角化耗时。不同样本的 `automaticLoadMs` 与写入重叠程度可不同，跨样本比较应同时阅读几何与缓存两条时间线。
+- 冷暖配对复用 SQLite 数据根和 WebView2 用户数据目录；IFC LOD 的 IndexedDB 缓存位于后者。旧的独立 WebView profile 运行条件不可与新口径比较。运行中的 `progress.private.json` 每 30 秒保留一次匿名状态快照，只存工作区私有目录。工程提取按实际来源进展续期；活动工程任务 60 秒没有进展时以 `product-stalled` 终结，且保存最后观测阶段。无活动工程任务而语义仍未就绪时，120 秒后标为 `engineering-progress-stalled` / INCONCLUSIVE。
 - 关联的 Worker 若在两个堆采样周期内终止且只有一次任务，堆值标为 `short-lived / ended-before-heap-sample`；不填零。其余 Worker 区分 `unavailable`（收到失败原因）与 `missing`（从未收到记录），两者均使测量不完整。
 - 原始端点错误、调试端口、应用 PID/退出状态、进程采样尾部和 WebView2 日志尾部只写入私有运行目录（如 `tmp/gim-bench/runs/<runId>/startup.private.json`），不进入可分享报告。
 
@@ -260,6 +264,9 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 通过后按语义摘要、放置摘要、来源与实体计数、排序后的不完整原因、引用状态和图诊断计算覆盖摘要；含 IFC 时摘要还绑定 manifest。来源几何与工程覆盖同时成立时合并为 `combined` `PARTIAL`，保留两个缺口摘要。
 
 SQLite 核心缓存发布单独验证；冷开缓存已发布、产品正确性为 `passed`/`partial` 时继续暖开。若冷开仅因测量证据不完整而 INCONCLUSIVE，暖开仍执行，整批门禁保持 INCONCLUSIVE；暖开以及后续基线比较必须保持同一缺口摘要、语义/几何结果和工作量。
+
+暖开 DEV catalog 校验按本次运行的唯一来源集合核对：命中数与未命中来源数必须覆盖全部 DEV；未命中只能对应有原始引用/范围证据的 `source-invalid` 或 `missing-dependency` 来源。L1 按热点策略不持久化，L1 miss 不参与 catalog 命中要求。冷暖还必须保持同一匿名失败来源摘要；不在注册表登记样本专属缺陷白名单。
+该规则以 `cacheProofPolicy=source-failure-catalog-v1` 冻结进运行条件；旧口径结果不能与其直接比较。
 
 ## 匿名化与私有产物
 

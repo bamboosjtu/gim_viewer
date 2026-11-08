@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdirSync,mkdtempSync,readFileSync,readdirSync,writeFileSync} from 'node:fs';
 import {resolve,join,dirname,relative} from 'node:path';
 import {artifactDirectory,loadBatchInputs} from './batch-input.mjs';
-import {executeBatch} from './batch.mjs';
+import {executeBatch,recoverInterruptedBatch} from './batch.mjs';
 import {csv,summarize} from './batch-report.mjs';
 import {compareSuites} from './compare.mjs';
 import {spawnSync} from 'node:child_process';
@@ -15,7 +15,7 @@ function setup(){const parent=artifactDirectory(root,join(root,'tmp','batch-prot
 function inputs(){return {entries:['a','b','c'].map((id,index)=>({inputId:id,sampleId:id,sourceSha256:id,privatePath:'private-name',status:'READY'})),
   samples:['a','b','c'].map(id=>({inputId:id,sampleId:id,sourceSha256:id,paths:[],actions:[]}))};}
 function run(sample,profileDigest){return {out:'private-run',dataRoot:'private-cache',report:{runId:sample.inputId,processInstanceId:sample.inputId,
-  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
+  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
     profileDigest,workloadDigest:'w',routeDigest:'r',viewportDigest:'v'},correctness:'passed',cacheVerified:true,cachePublished:true,measurementComplete:true,requiredMetrics:['firstResponseMs'],metrics:{firstResponseMs:12},
   evidence:{progress:{workload:{failed:0}}}}};}
 
@@ -227,6 +227,25 @@ test('CSV handles delimiters/newlines/formula injection and summaries exclude fa
   assert.equal(csv([{value:'=1,"x"\nnext'}],['value']),'\uFEFF"value"\r\n"\'=1,""x""\nnext"\r\n');
   const result=summarize([{inputId:'a',cacheState:'cold',status:'PASS',firstResponseMs:10},{inputId:'a',cacheState:'cold',status:'FAIL',firstResponseMs:1}]);
   assert.equal(result[0].firstResponseMsMedian,10);assert.equal(result[0].failed,1);
+});
+test('recovers a stopped batch without inventing settled time or cache success',()=>{
+  const {root,out}=setup(),runId=`run-recover-${Date.now()}`,sampleId=`sample-${Date.now()}`,sourceSha256='a'.repeat(64);
+  const runDir=join(root,'tmp','gim-bench','runs',runId);mkdirSync(runDir,{recursive:true});
+  writeFileSync(join(runDir,'run.private.json'),JSON.stringify({sampleId,sourceSha256}));
+  writeFileSync(join(runDir,'progress.private.json'),JSON.stringify({atMs:338600,
+    progress:{cacheSettled:false,cache:{writePending:199}}}));
+  writeFileSync(join(out,'results.json'),JSON.stringify({version:'gim-batch-results-v1',status:'RUNNING',
+    outcome:'INCONCLUSIVE',anonymize:true,rows:[{inputId:'a',sampleId,sourceSha256,sampleLabel:'hash',cacheState:'cold',
+      repetition:1,status:'RUNNING'},{inputId:'a',sampleId,sourceSha256,sampleLabel:'hash',cacheState:'warm',
+      repetition:1,status:'PENDING'}],runs:[],stages:[],workers:[],slowTasks:[],slowPhases:[],pairs:[]}));
+  const recovered=recoverInterruptedBatch(root,out);
+  assert.equal(recovered.recovered,2);
+  assert.deepEqual(recovered.result.rows.map(row=>row.status),['CANCELLED','CANCELLED']);
+  assert.equal(recovered.result.rows[0].settledMs,null);
+  assert.equal(recovered.result.rows[0].runId,runId);
+  assert.equal(recovered.result.rows[0].interruptedWritePending,199);
+  assert.equal(recovered.result.rows[0].interruptedCacheSettled,false);
+  assert.equal(JSON.parse(readFileSync(join(runDir,'report.json'),'utf8')).measurementComplete,false);
 });
 test('summary never combines distinct PARTIAL source signatures',()=>{
   const rows=[{inputId:'a',cacheState:'cold',status:'PARTIAL',partialSignature:'coverage:a',firstResponseMs:10},

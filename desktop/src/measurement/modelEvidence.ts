@@ -17,13 +17,18 @@ export function benchmarkProgress(state:AppState){
   const cachePersistenceStatus=state.currentProjectType!=='substation'?'not-applicable':
     moments.cachePersistenceReady?.meta?.available===false?'failed':moments.cachePersistenceReady?'ready':'not-observed';
   const semantic=line?!!state.currentGimGraph:state.currentProjectType==='equipment'?!!state.currentCbmTree:state.engineeringStatus==='ready'||state.engineeringStatus==='partial';
-  const semanticFailure=state.currentProjectType==='substation'&&state.engineeringStatus==='error';
+  const semanticFailure=state.currentProjectType==='substation'&&
+    (state.engineeringStatus==='error'||['engineering-build-failed','engineering-progress-stalled'].includes(state.engineeringFailureCode??''));
   const backgroundSettled=backgroundStatus!=='pending'&&(state.currentProjectType!=='substation'||semantic);
+  const engineeringTreeSettled=state.currentProjectType!=='substation'||['ready','error'].includes(state.engineeringTreeStatus);
   const baseSettled=dev?dev.baseRepresentationsSettled===true:!state.ifcBackgroundPending&&state.loadedModels.size===state.currentIfcEntries.length;
-  return {semantic,semanticFailure,semanticStatus:state.engineeringStatus,
-    automaticSettled:semantic&&!state.ifcBackgroundPending&&(line||baseSettled)&&n(dev?.pending)===0&&n(dev?.viewPendingOccurrences)===0,
-    backgroundSettled,backgroundStatus,cachePersistenceStatus,
-    cacheSettled:(state.currentProjectType!=='substation'||semantic)&&(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineeringCacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
+  const engineeringBuildPending=state.currentProjectType==='substation'&&state.engineeringBuildPending;
+  return {semantic,semanticFailure,semanticStatus:state.engineeringStatus,engineeringBuildPending,
+    engineeringTreeSettled,
+    engineeringProgress:state.engineeringProgress,engineeringFailureCode:state.engineeringFailureCode,
+    automaticSettled:semantic&&!engineeringBuildPending&&!state.ifcBackgroundPending&&(line||baseSettled)&&n(dev?.pending)===0&&n(dev?.viewPendingOccurrences)===0,
+    backgroundSettled:backgroundSettled&&!engineeringBuildPending&&engineeringTreeSettled,backgroundStatus,cachePersistenceStatus,
+    cacheSettled:(state.currentProjectType!=='substation'||semantic)&&!engineeringBuildPending&&(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineeringCacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
       &&(!line||linePersistence==='saved'||linePersistence==='failed'||linePersistence==='not-applicable'),
     workload:{cbmNodes:state.cbmNodeIndex.size,lineNodes:state.currentGimGraph?.nodesByPath.size??0,
       sources:state.engineeringSnapshot?.memberships.length??0,entities:state.engineeringSnapshot?.entities.length??0,
@@ -111,6 +116,15 @@ export async function benchmarkEvidence(state:AppState){
   }
   const geometryDefects={failedSourceCount:failedSourcePaths.length,failedSourceSetDigest:failedSourcePaths.length?await hash(failedSourcePaths.sort()):null,
     failedOccurrences:progress.workload.failed,failedVisibleRoots,failedReasons:failedGeometryReasons,sourceEvidenceComplete};
+  const catalogMissPaths=state.deviceLodRuntime?.catalogMissSources?.();
+  const failedSourceSet=new Set(failedSourcePaths);
+  const uniqueCatalogMisses=catalogMissPaths?new Set(catalogMissPaths.map(path=>path.replace(/\\/g,'/').toLowerCase())):null;
+  const sourceFailureMissCount=uniqueCatalogMisses?[...uniqueCatalogMisses].filter(path=>failedSourceSet.has(path)).length:0;
+  const catalogCacheEvidence={available:uniqueCatalogMisses!==null,
+    missCount:uniqueCatalogMisses?.size??null,sourceFailureMissCount,
+    unexplainedMissCount:uniqueCatalogMisses?uniqueCatalogMisses.size-sourceFailureMissCount:null,
+    accounted:uniqueCatalogMisses?progress.cache.devCatalogHits+uniqueCatalogMisses.size===progress.workload.devSources:false,
+    missSetDigest:uniqueCatalogMisses?.size?await hash([...uniqueCatalogMisses].sort()):null};
   const checks:{name:string;passed:boolean}[]=[{name:'source-identity',passed:!!session.sourceSha256},{name:'automatic-settled',passed:progress.automaticSettled},{name:'ifc-source-count',passed:progress.workload.loadedIfcSources===progress.workload.ifcSources},
     {name:'no-failed-geometry-occurrences',passed:progress.workload.failed===0},
     {name:'line-cache-persistence',passed:state.currentProjectType!=='transmission_line'||state.lineCachePersistence!=='failed'},
@@ -162,7 +176,7 @@ export async function benchmarkEvidence(state:AppState){
   return {version:'gim-runtime-evidence-v1',scope:'runtime-regression-invariants-not-standard-compliance',projectType:state.currentProjectType,
     engineeringCoverage,checks,semanticDigest,semanticDigestScope:snapshot?'engineering-with-pending-v2':'format-projection-v1',
     pendingDigest,pendingCount,pendingSourceCount,placementDigest,
-    progress,cache,geometry,geometryDiagnostics,geometryStatuses:geometryDiagnostics.statuses,
+    progress,cache,catalogCacheEvidence,geometry,geometryDiagnostics,geometryStatuses:geometryDiagnostics.statuses,
     failedGeometryReasons,partialGeometryReasons,geometryDiagnosticScope:'requested-templates-only',geometryDefects,
     geometryStructuralFingerprint:geometry.structuralFingerprint,contentEvidence,
     baseGeometryDigest,baseArtifactDigest,baseEvidenceCount:baseRows.length,sourceSha256:session.sourceSha256,passed:checks.every(c=>c.passed)};

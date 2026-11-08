@@ -3,7 +3,7 @@ export type MeasurementMode = 'off' | 'summary' | 'benchmark' | 'diagnostic';
 export type WorkerFamily = 'host' | 'measurement-probe' | 'dev' | 'ifc-conversion' | 'ifc-regional' | 'ifc-fine' | 'spatial' | 'engineering' | 'line';
 export type TaskStatus = 'completed' | 'failed' | 'cancelled' | 'timeout' | 'aborted';
 export type LifecycleReasonCode = 'abort-error' | 'worker-exception' | 'request-superseded' | 'user-cancelled'
-  | 'project-closed' | 'project-replaced';
+  | 'project-closed' | 'project-replaced' | 'cancelled-before-start';
 export type Availability = 'available' | 'unavailable' | 'unsupported' | 'not-applicable';
 export type MemoryQuality = 'measured-capacity' | 'runtime-sampled' | 'estimated' | 'budget';
 

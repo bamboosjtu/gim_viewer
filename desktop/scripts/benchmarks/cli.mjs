@@ -12,7 +12,7 @@ import {runMatrix} from './matrix.mjs';
 import {lifecycleExercise} from './lifecycle.mjs';
 import {measureProbeOverhead} from './overhead.mjs';
 import {renderReport} from './reporter.mjs';
-import {runBatch} from './batch.mjs';
+import {runBatch,recoverInterruptedBatch} from './batch.mjs';
 import {nativeExitCode} from './cli-outcome.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..'),home=join(root,'tmp','gim-bench'),corpus=join(home,'corpus');
@@ -54,6 +54,11 @@ try{
       console.log(JSON.stringify({outcome:result.result.outcome,status:result.result.status,html:join(result.out,'report.html'),csv:join(result.out,'results.csv')}));
       process.exitCode=result.result.status==='CANCELLED'?130:['PASS','PARTIAL'].includes(result.result.outcome)?0:result.result.outcome==='FAIL'?1:2;
     }finally{process.removeListener('SIGINT',cancel);process.removeListener('SIGTERM',cancel);}
+  }else if(command==='recover-batch'){
+    if(!option('output'))throw Error('--output required');
+    const recovered=recoverInterruptedBatch(root,resolve(option('output')));
+    console.log(JSON.stringify({outcome:recovered.result.outcome,status:recovered.result.status,recovered:recovered.recovered,
+      report:join(recovered.out,'report.html')}));
   }else if(command==='matrix'){
     if(!option('build')||!option('profile'))throw Error('--build and --profile required');
     const profile=verifyProfile(read(option('profile')));
@@ -116,7 +121,7 @@ try{
     if(!option('input'))throw Error('--input required');
     console.log(await renderReport(workspacePath(root,resolve(option('input'))),join(root,'output','gim-bench',`report-${Date.now()}`)));
   }else{
-    console.log('gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [-repeat <n>] [--timeout-seconds <n>]\ninit | samples | inventory | select | freeze-profile [--name commit-gate] | build | doctor --build <manifest> | run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev] | matrix --build <manifest> --profile <json> | overhead --build <manifest> --profile <json> --sample <id> | lifecycle --build <manifest> --sample <id> [--second-sample <id>] | compare|gate --baseline <json> --candidate <json> | report --input <json> | review-partial --candidate <json> --reviewer <name> --reason <code> | approve-baseline --candidate <json> --approver <name> [--accept-partial --partial-review <json> (--first-partial | --previous-baseline <json>)]');
+    console.log('gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [-repeat <n>] [--timeout-seconds <n>]\nrecover-batch --output <folder> | init | samples | inventory | select | freeze-profile [--name commit-gate] | build | doctor --build <manifest> | run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev] | matrix --build <manifest> --profile <json> | overhead --build <manifest> --profile <json> --sample <id> | lifecycle --build <manifest> --sample <id> [--second-sample <id>] | compare|gate --baseline <json> --candidate <json> | report --input <json> | review-partial --candidate <json> --reviewer <name> --reason <code> | approve-baseline --candidate <json> --approver <name> [--accept-partial --partial-review <json> (--first-partial | --previous-baseline <json>)]');
     if(command)process.exitCode=1;
   }
 }catch(error){console.error(`[gim-bench] ${error.message}`);process.exitCode=1;}

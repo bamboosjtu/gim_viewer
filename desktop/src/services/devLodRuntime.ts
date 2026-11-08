@@ -48,6 +48,8 @@ export class DevLodRuntime {
   private updateReadiness(row: Occurrence): void { this.readiness.updateReadiness(row); }
 
   readonly diagnostics = createDevLodDiagnostics();
+  private readonly catalogMissPaths=new Set<string>();
+  catalogMissSources():readonly string[]{return [...this.catalogMissPaths];}
   private readonly artifactWriter: DevLodArtifactWriter;
   private readonly templateStore: DevLodTemplateStore;
   private readonly sources: DevLodSourceWorkset;
@@ -325,9 +327,11 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         && (!bounds.sourceBounds || bounds.sourceBounds.length === 6 && bounds.sourceBounds.every(Number.isFinite)
           && bounds.sourceBounds.slice(0, 3).every((v, i) => v <= bounds!.sourceBounds![i + 3]));
       if (validBounds) {
+        this.catalogMissPaths.delete(dev);
         this.diagnostics.catalogHits++;
         this.diagnostics.cacheHits++;
       } else {
+        this.catalogMissPaths.add(dev);
         if (catalogRead.status === 'invalid') {
           this.diagnostics.cacheInvalidCount++;
           this.diagnostics.errors.push(`目录缓存无效 ${dev}: ${catalogRead.error ?? ''}`);
@@ -748,13 +752,15 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         ? ready ? (nextBaseSettled ? '当前视图已完成 · 工程可浏览 · 基础表示已完成' : '当前视图已完成 · 工程可浏览') : '当前视图已完成，部分实例失败 · 工程可浏览'
         : `当前视图准备中${viewPending ? ` ${viewPending}` : ''}`;
     const background = this.diagnostics.currentViewSettled && !this.diagnostics.baseRepresentationsSettled ? ' · 后台补充基础表示' : '';
+    const cacheTail=this.diagnostics.baseRepresentationsSettled&&this.diagnostics.cacheWritePendingCount>0
+      ?` · 几何已显示，缓存写入中 ${this.diagnostics.cacheWritePendingCount}`:'';
     const cold = this.diagnostics.compiled, warm = this.diagnostics.lodHits;
     const failedCount = this.diagnostics.failedOccurrences;
     const cacheProblems = this.diagnostics.lodReadErrors.reduce((a, b) => a + b, 0)
       + this.diagnostics.lodInvalid.reduce((a, b) => a + b, 0)
       + this.diagnostics.artifactWriteFailures;
     this.status(
-      `几何实例已处理 ${finished}/${total} · 已显示 ${this.diagnostics.readyOccurrences} · 冷编译 L0 ${cold[0]}/L1 ${cold[1]}/L2 ${cold[2]} · 缓存命中 L0 ${warm[0]}/L1 ${warm[1]}/L2 ${warm[2]}${failedCount ? ` · 失败 ${failedCount}` : ''} · ${phase}${background}${this.diagnostics.sourcePlacementWarnings ? ` · 来源位置待确认 ${this.diagnostics.sourcePlacementWarnings}` : ''}`,
+      `几何实例已处理 ${finished}/${total} · 已显示 ${this.diagnostics.readyOccurrences} · 冷编译 L0 ${cold[0]}/L1 ${cold[1]}/L2 ${cold[2]} · 缓存命中 L0 ${warm[0]}/L1 ${warm[1]}/L2 ${warm[2]}${failedCount ? ` · 失败 ${failedCount}` : ''} · ${phase}${background}${cacheTail}${this.diagnostics.sourcePlacementWarnings ? ` · 来源位置待确认 ${this.diagnostics.sourcePlacementWarnings}` : ''}`,
       `LOD缓存 miss ${this.diagnostics.cacheMisses} · read-error ${this.diagnostics.cacheReadErrorCount} · invalid ${this.diagnostics.cacheInvalidCount} · 写入失败 ${this.diagnostics.artifactWriteFailures}`
       + ` · 目录 ${this.diagnostics.directoryCompleted}/${total}${this.diagnostics.catalogReady ? '（就绪）' : '（进行中）'}`
       + ` · 批读 ${this.diagnostics.cacheReadBatches} 批/${this.diagnostics.cacheReadEntries} 条（defer ${this.diagnostics.cacheReadDeferred}）`

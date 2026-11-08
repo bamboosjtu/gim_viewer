@@ -155,6 +155,9 @@ export class AppState {
   engineeringGeometryCatalog: import('../gim/engineering/geometryOccurrences.js').SourceGeometryOccurrenceCatalog | null = null;
   engineeringGeometryReady: Promise<import('../gim/engineering/geometryOccurrences.js').SourceGeometryOccurrenceCatalog | null> | null = null;
   engineeringStatus: 'none' | 'loading' | 'partial' | 'ready' | 'error' = 'none';
+  engineeringBuildPending = false;
+  engineeringProgress: {stage:string;completed:number}|null = null;
+  engineeringFailureCode: string|null = null;
   engineeringError = '';
   engineeringCacheStatus: 'none' | 'hit' | 'miss' | 'saving' | 'saved' | 'partial' | 'disabled' | 'error' = 'none';
   engineeringPipelineMetrics: (NonNullable<import('../services/engineeringWorkerProtocol.js').EngineeringBuildResult['metrics']> & {caches:Array<{domain:string;encodeMs:number;plainBytes:number;encodedBytes:number}>}) | null = null;
@@ -447,6 +450,9 @@ export class AppState {
     this.engineeringGeometryCatalog = null; this.engineeringGeometryReady = null;
     this.engineeringTreeStatus = 'none'; this.engineeringIfcGeometryFinished = false;
     this.engineeringStatus = 'none'; this.engineeringError = '';
+    this.engineeringBuildPending = false;
+    this.engineeringProgress = null;
+    this.engineeringFailureCode = null;
     this.engineeringCacheStatus = 'none'; this.engineeringCacheError = '';
     this.engineeringPipelineMetrics=null;
     this.engineeringListeners.clear();

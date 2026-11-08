@@ -1,137 +1,162 @@
-# 测量框架整改复核
+# 测量框架与项目架构复核
 
-> 本轮代码复核（2026-11-08）：下文保留对 `505b10c` 原生批次的历史判断。当前源码已将最终取证失败拆为 `active-tasks`、`progress-drift`、`session-mismatch` 等原因；尾部活动任务可继续有界等待，冷路径重复 spatial 启动已在前轮修复。PARTIAL 首次认可改为候选摘要绑定的独立来源复核记录，批准者身份必须不同；后续认可要求上一份已批准基线，原因使用受控代码。受控取消的 Worker 未确认尾批单独计数。v1→v2 迁移步骤已写入 `docs/benchmark.md`。真实 L1 三次冷暖与 L0 矩阵尚待开发者本地重跑，不能据此宣布原生 P1 验收完成。本轮未运行样本或性能测试。
+> 本轮复核状态（2026-11-08）：P1 的慢阶段测试已改为真实 interval，并断言 aggregate 阶段不进入单次慢榜；P2 的 cold WebView profile 非空校验已补，profile 路径仅记录在工作区私有报告；aggregate-only 的基线和慢榜边界已写明。P3 的 active 尾批此前已有受控取消/意外终止测试，本轮源码复核确认计数与 lifecycle 分开。下文 826d876 运行结果仍是历史测量；本轮新产品/框架修改尚未执行样本或性能复测，不能据此宣称 L0 闭环。
 
-> 复核提交：`505b10c`（2026-11-08）
+> 复核提交：`826d876`（2026-11-08）
 > 复核日期：2026-11-08
-> 结论：上轮 P1/P2/P3 的代码修复已复核；**P0 未发现**。当前保留 **1 个 P1、2 个 P2、1 个 P3**。其中 P1 是新跑出的原生闭环问题：L1 变电 s03 冷开在最终取证时仍有活跃 spatial 任务，被归为 `final-evidence-drift` 并 INCONCLUSIVE，暖开被跳过。
+> 结论：**P0 未发现**；当前 **P1 1 项、P2 2 项、P3 1 项**。P1 是 CI 红灯：`core.test.ts` 用聚合 `probe.record` 断言 `slowestPhases`，而 Collector 只收录 interval 阶段，测试与契约冲突。其余为冷/暖 WebView profile 的冷态校验、aggregate-only 证据边界和活跃任务尾批诊断。
 
 ---
 
-## 1. 复核范围与证据
+## 1. CI 红灯（P1）
 
-已执行：
+### 证据
 
-| 命令/证据 | 结果 |
-|---|---|
-| `npm run test:measurement-tools` | 49/49 通过 |
-| `npx vitest run src/measurement` | 24/24 通过 |
-| `npm test` | 179 个文件、1473 通过、3 跳过 |
-| `npm run test:acceptance-tools` | 4/4 通过 |
-| `npx tsc --noEmit` | 通过 |
-| `npm run check:engineering-boundaries` | 通过 |
-| `output/line-survey-505b10c` | 6 个线路样本冷暖全部 PASS |
-| `output/substation-survey-505b10c` | s01/s04 冷暖 PASS；s02 冷暖 PARTIAL；**s03 冷开 INCONCLUSIVE、暖开 SKIPPED** |
-| `output/l0-500-survey` | A3-1 冷暖 PARTIAL；其余 L0 项未形成完整矩阵 |
+CI 与本地均可复现：
 
-上轮 P1/P2/P3 的实现项（覆盖域隔离、最终 evidence 重取、Worker 批次 id/ack/flushed、matrix 暖开资格、PARTIAL 批准元数据、summary PARTIAL 分组、`run` 退出码、Worker 堆分类、`workloadProfile`、`expectedRole`、裸 ZIP 识别、默认发现）已复核通过；本轮不再复述历史细节。
-
----
-
-## 2. P0：样本依赖
-
-仍为**未发现 P0**：
-
-- `correctness.mjs` 只读取 evidence 的 checks、geometryDefects、engineeringCoverage、digest/count，不按样本 ID/SHA/名称分支；
-- expected-defect/expected-coverage 注册表及 CLI 选项不存在；`correctness.test.mjs` 使用合成 evidence；
-- `samples.mjs` 默认发现只按目录扫描，`workloadProfile` 只选择场景/动作；
-- 样本选择、路径/SHA 登记和 workload 配置属于输入身份/工作负载，不是判定例外。
-
----
-
-## 3. 当前问题
-
-### P1-1 L1 变电 s03 冷开被 late spatial task 判为 `final-evidence-drift`
-
-**证据**
-
-`output/substation-survey-505b10c/errors.csv`：
-
-- s03 冷开：`status=INCONCLUSIVE`，`error=final-evidence-drift;measurement-incomplete;measurement-lifecycle-incomplete`；
-- `measurementLifecycleComplete=false`，`measurementLifecycleIssues=active-tasks`，`pendingTasks=1`；
-- 最终 `activeTasks` 是 `family=spatial` 的任务；该任务在约 `135,847 ms` 才入队，evidence 在 `136,000 ms` 取，最终 snapshot 在 `136,042 ms`；
-- `settledMs≈131,300 ms`，即任务在“完全结算/静默窗口”之后才出现；
-- s03 暖开因 cold 非 PASS/PARTIAL 被 SKIPPED。
-
-**判定**
-
-- `finalEvidenceAligned` 要求最终 activeTasks 为空；这里实际上是因为**尾部新 spatial 任务**失败，不是 evidence progress 与 snapshot 的字段漂移。
-- `native-run.mjs:223` 把 `finalEvidenceAligned` 的所有失败统一写成 `final-evidence-drift`，错误码掩盖了真实原因。
-- 这是一次**原生闭环失败**：正常 s03 冷开无法作为有效轮次，暖开也丢失。不能仅因为 `final-evidence-drift` 看起来像“证据对齐”就忽略活跃任务。
-
-**建议**
-
-1. `finalEvidenceAligned` 返回类型化原因：`active-tasks` / `progress-drift` / `session-mismatch`；`native-run` 分别映射 `post-settle-task-incomplete`、`final-evidence-drift` 等。
-2. 完成条件在静默窗口后检测到新任务时，重置/延长等待（有界），或明确标 `late-background-task`；不能只等一次 30 秒。
-3. 定位该 spatial 任务为何在 `settledMs` 之后才入队：如果产品确实会晚调度，应把它纳入 `backgroundSettled` 的定义；如果是测量/队列残留，应取消并结算。
-4. 增加一个“settle 后新任务”的原生回归；当前只有 synthetic `finalEvidenceAligned` 单测。
-
-**严重度**：P1（正常样本闭环失败）。
-
----
-
-### P2-1 首次 PARTIAL 基线仍依赖不可验证的人工声明
-
-**位置**：`desktop/scripts/benchmarks/compare.mjs:115-151`。
-
-`approveBaseline` 已要求 `sourceReviewed`、`partialReason`，并可选 `previousBaseline` 阻止签名倒退；但：
-
-- `sourceReviewed` 只是布尔 flag，`partialReason` 只是自由文本，程序无法证明认可者真的核对了来源；
-- `previousBaseline` 是可选参数，首次 PARTIAL 仍可由单次命令批准；
-- 批准元数据会写入 `tmp/gim-bench/baseline.approved.json`，自由文本可能包含私有工程名/路径。
-
-**建议**：首次 PARTIAL 要求可审计的双人/独立复核记录；后续 PARTIAL 强制提供上一份已批准基线；将原因限制为受控枚举或只存私有批准文件。完整正确性基线仍只接受 PASS。
-
-**严重度**：P2（流程性风险，不是样本依赖）。
-
----
-
-### P2-2 v2 协议的原生矩阵与旧基线迁移仍未闭合
-
-**证据**：
-
-- 线路 `line-survey-505b10c` 全部 PASS，说明 Worker 批次协议在轻量线路上可用；
-- 变电 `substation-survey-505b10c` 只有 s03 冷开失败，s01/s04 PASS、s02 PARTIAL；失败点就是 P1-1 的 late spatial task；
-- `l0-500-survey` 仅 A3-1 冷暖 PARTIAL，未形成完整 L0 矩阵；
-- `task-phase-timeline-v2` 已是身份条件，旧 v1 基线与新候选比较会得到 `incomparable:detailPolicy`，但公开文档没有迁移说明。
-
-**建议**：补齐 L1 变电三次重复和 L0 关键样本；重新生成/认可 v2 基线；在 `docs/benchmark.md` 增加 v1→v2 基线迁移说明，明确旧基线只作历史参考。
-
-**严重度**：P2（集成验证/迁移）。
-
----
-
-### P3-1 活跃任务终止时，Worker 尾批检查被跳过
-
-**位置**：`desktop/src/measurement/hostWorker.ts:143-145`。
-
-```ts
-const active = run.collector.snapshot().activeTasks.some(task => task.workerId === workerId);
-if (taskSeen && !active && (receivedBatchId !== flushedBatchId || lastBatchSequence !== flushedSequence))
-  // worker-terminal-tail-unconfirmed
+```
+FAIL src/measurement/__tests__/core.test.ts
+> keeps a bounded slow phase list even after detail capacity is reached
+AssertionError: expected [] to have a length of 10 but got +0
+  at core.test.ts:103
 ```
 
-只有 Worker 空闲时才检查未确认尾批。若终止时还有 active task，尾批检查被跳过；普通异常终止会由 collector 的 `interruptedTasks` 使生命周期不完整，但**受控取消/有意终止**可能正常结算，尾批丢失不会单独记录。当前没有 active task + terminate 的测试。
+- `npm run test:measurement-tools`：50/50 通过；
+- 完整 `npm test`：1 个失败（就是这一项），其余通过；
+- 失败测试使用 `probe.record(context,'dev.compile',ms)`（`Probe.record` 产生 `timing:'aggregate'`），见 `desktop/src/measurement/__tests__/core.test.ts:100-106`；
+- `Collector.accept` 的 slow-phase 逻辑要求 `event.timing !== 'aggregate'`，见 `packages/measurement-core/src/collector.ts:109-113`；
+- 文档 `docs/benchmark.md` 将 `slow-phases.csv` 定义为“单次阶段”，并明确聚合直方图不充作单次阶段。
 
-**建议**：未确认尾批检查不依赖 `active`；若 active 任务被有意取消，单独记录“取消且尾批未确认”，并增加对应测试。
+### 判定
+
+这是**测试契约错误**，不是产品/Collector 缺陷：`probe.record` 是聚合 duration，不能作为单次 phase；slowestPhases 为空是正确行为。CI 红灯会阻塞合并，必须修测试或重新定义契约。
+
+**建议修复**：测试改用 `probe.phase` 生成 20 个 interval 阶段，并在任务计时前重置 tick：
+
+```ts
+for (let ms=1; ms<=20; ms++) { const p=probe.phase(context,'dev.compile'); tick(ms); p.end(); }
+tick(0);
+probe.event(context,{kind:'task',name:'started'}); tick(33);
+probe.event(context,{kind:'task',name:'ended',status:'completed'});
+```
+
+若确实希望把聚合阶段纳入 slowestPhases，则需修改契约、文档和 `Collector`，不能让测试与实现各自解释“慢阶段”。
+
+---
+
+## 2. P2：冷/暖 WebView profile 的冷态未完整校验
+
+`desktop/scripts/benchmarks/cache-roots.mjs` 让冷/暖共用 `paired-webview-profile-v1`：
+
+```ts
+pairedWebviewProfile = dataRoot => join(dirname(dataRoot), 'webview-profile')
+```
+
+`native-run.mjs:56-60` 对 cold 只检查 `dataRoot` 目录为空，没有检查紧邻的 `webview-profile`。IFC LOD 缓存在 WebView2 IndexedDB 中；如果手工复用了一个空的 `dataRoot`（或旧运行留下的空目录），其 sibling profile 仍有 IndexedDB 数据，cold 实际会读暖缓存，违反 cold 语义。批处理默认每次生成新 out 时不会触发，但 `runNative` API、重试/恢复和手工 `dataRoot` 可以触发。
+
+**建议**：cold 同时要求 paired profile 不存在/为空，或显式分配新的 profile 目录；报告记录 profile 路径/策略；增加 cold-with-existing-profile 的测试。warm 继续复用同一 profile。
+
+**严重度**：P2（冷态测量语义）。
+
+---
+
+## 3. P2：aggregate-only 允许通过，但详细时间线/慢阶段证据变为可选
+
+`native-run.mjs` 现在用 `measurement.aggregateComplete` 作为 `measurementComplete` 的必要条件；纯明细容量截断时：
+
+- `measurementDetailStatus='aggregate-only'`；
+- `detailComplete=false`，`aggregateComplete=true`；
+- `runReadiness` 不再因为 `measurementDetailDropped` 判 INCONCLUSIVE；
+- `slowestPhases`/`slowestTasks` 只保留截断前的前十项。
+
+`docs/architecture/measurement.md` 已说明“纯容量截断可降为 aggregate-only，不改变产品 PASS/PARTIAL”。这是合理的产品/诊断分层，但需要明确：
+
+- aggregate-only 的 PASS/PARTIAL 不能声称有完整阶段时间线；
+- 基线审批不要求 `measurementDetailStatus=complete`，只要求 aggregate/lifecycle/内容证据；
+- slow-phases/slow-tasks 是**诊断视图**，不是基线必要证据。
+
+当前文档已给出边界，但 CI 测试违反了这一边界（见 P1）。建议把“聚合阶段不能进入 slowestPhases”固化为测试，而不是仅在文档中说明。
+
+**严重度**：P2（证据能力边界，不是代码错误）。
+
+---
+
+## 4. 已复核：826d876 的 L1 原生结果
+
+`output/substation-survey-826d876` 为 6 PASS/2 PARTIAL，s03 冷/暖均通过；`output/line-survey-826d876` 为 12/12 PASS。上一轮 s03 的 late spatial task 未再出现，说明 `finalEvidenceIssue`/尾部等待/进度快照路径在当前批次有效。该验证缺口关闭；正式基线仍缺三次重复，见 `research/plan-status.md`。
+
+---
+
+## 5. P3：活跃任务终止尾批目前只是计数器
+
+`hostWorker.ts:143-151` 对 active task 的未确认尾批改为：
+
+```ts
+if (active) run.probe.event(context,{kind:'counter',
+  name: run.collector.intentionalTermination(workerId)
+    ? 'worker.cancelled-unconfirmed-tail'
+    : 'worker.active-tail-unconfirmed'});
+else run.probe.event(context,{kind:'loss',name:'worker-terminal-tail-unconfirmed'});
+```
+
+这比之前“直接跳过”好，能留下诊断；但 active 尾批仍**不计入 `loss.detailEvents`**，而是 counter。受控取消可以正常结算，普通异常由 `interruptedTasks` 使生命周期不完整；有意终止时尾批丢失不一定使测量失败。当前没有 active task + terminate 的测试。
+
+**建议**：区分“有意取消且尾批未确认”和“异常 active 尾批”，至少让报告/review 能解释后者；增加测试。
 
 **严重度**：P3（诊断/边界）。
 
 ---
 
-## 4. 验证与限制
+## 6. 项目架构评估
 
-- 单元/契约测试全部通过；线路原生样本全部通过；变电原生样本暴露 P1-1。
-- L0 没有形成完整矩阵（`l0-500-survey` 仅 A3-1 完成冷暖），不能据此评价全部 L0 样本。
-- 未运行探针开销、十轮生命周期和完整性能矩阵。
-- `finalEvidenceAligned` 的完整 progress 相等比较是保守策略；P1-1 的失败不是 progress 字段漂移，而是 active task，因此错误码需要拆分，不能简单放宽 gate。
+### 分层与边界
+
+- `check:engineering-boundaries` 通过（306 modules、414 type edges、210 dynamic edges）；
+- `packages/measurement-core` 仍为纯测量核心，无 DOM/Tauri/Three 依赖；
+- `desktop/src/measurement` 负责 Worker/CDP/证据适配；
+- 826d876 的产品修改都在既有层内：`gim/engineering/sourceGraph` 增加进度回调、`services/engineeringWorker*` 增加进度/超时续期、`devLodArtifactWriter` 写槽从 4 提到 8、`gim_extract_command` 裸 7z 通用 pack、`substationRuntime` 的语义/DEV 解耦；没有看到跨层反向依赖。
+
+### 测量架构
+
+- 事件/任务/Clock/Collector 的层次完整；新增 `slowestPhases`/`slowestTasks` 是有界前十诊断；
+- `aggregateComplete` 与 `detailComplete` 分离，允许纯明细容量截断保留产品判定；
+- Worker 批次有连续 ID/ack/flushed；最终 evidence 有类型化失败原因；比上一轮更可诊断；
+- `paired-webview-profile-v1` 把 WebView IndexedDB 纳入 cold/warm 身份，v1→v2 迁移文档已写入 `docs/benchmark.md`；
+- `review-partial` 增加了独立复核记录、受控原因、候选摘要绑定、首次/上一基线约束，解决了上一轮“任意布尔自报”的主要问题；但复核身份仍是字符串，不是密码学身份，属于流程边界。
+
+### 产品修复
+
+- B1-3 裸 7z 现在使用通用 source pack，不再依赖线路 pack 语义；
+- DEV 写槽 8 个、进度/超时续期、B1-4 语义未发布导致 DEV 卡死的修复都在对应服务层，架构方向合理；
+- 但这些是产品行为修复，本轮没有完整 L0 原生矩阵，不能仅凭单元测试宣称性能/正确性闭环。
+
+### 架构结论
+
+整体分层和测量核心仍健康。当前主要风险不是边界破坏，而是**契约测试与实现口径不一致（CI）**和**cold profile 冷态校验缺口**；L1 已有 826d876 原生结果，L0 矩阵仍不完整。
 
 ---
 
-## 5. 相关位置
+## 7. 验证
 
-- `desktop/scripts/benchmarks/completion.mjs:18-24`：`finalEvidenceAligned`。
-- `desktop/scripts/benchmarks/native-run.mjs:206-223`：尾部任务等待与 `final-evidence-drift`。
-- `desktop/scripts/benchmarks/compare.mjs:115-151`：PARTIAL 批准与 previous baseline。
-- `desktop/src/measurement/hostWorker.ts:143-145`：终止尾批检查。
-- `docs/benchmark.md`：v2 基线迁移尚未说明。
+| 命令 | 结果 |
+|---|---|
+| `npm run test:measurement-tools` | 50/50 通过 |
+| `npx vitest run src/measurement/__tests__/core.test.ts` | **1 failed / 13 passed** |
+| `npm test`（CI 同口径） | **1 failed / 1476 passed / 3 skipped** |
+| `npx tsc --noEmit` | 通过 |
+| `npm run check:engineering-boundaries` | 通过 |
+| `output/substation-survey-826d876` | 6 PASS / 2 PARTIAL，s03 通过 |
+| `output/line-survey-826d876` | 12/12 PASS |
+
+L0 仍未形成完整矩阵（`l0-500-survey-505b10c` 为 5 PASS/2 PARTIAL/1 INCONCLUSIVE/1 FAIL/1 SKIPPED，`35kV-survey-826d876` 仍 RUNNING）；aggregate-only 和 L0 的真实表现仍待开发者本地复跑。
+
+---
+
+## 8. 相关位置
+
+- `desktop/src/measurement/__tests__/core.test.ts:100-106`：CI 失败测试。
+- `packages/measurement-core/src/collector.ts:109-113`：slow phase 只收 interval。
+- `desktop/scripts/benchmarks/cache-roots.mjs`、`native-run.mjs:56-60`：paired profile 与 cold 校验。
+- `desktop/scripts/benchmarks/completion.mjs`、`native-run.mjs:230-270`：final evidence/late task。
+- `desktop/src/measurement/hostWorker.ts:143-151`：active 尾批诊断。
+- `docs/benchmark.md`、`docs/architecture/measurement.md`：v2/aggregate-only 契约。

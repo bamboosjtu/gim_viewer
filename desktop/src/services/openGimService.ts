@@ -312,22 +312,26 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
       extracted.projectType = detectedType;
       if (detectedType === 'equipment') context.projectTypeName = '设备模型';
       endDetect(undefined, { type: projectTypeResult.type });
-      debugLog(DEBUG_RUNTIME_LOGS, '[GIM Runtime Detect]', {
-        sourceMagic: source.magic,
-        extractedMagic: extracted.magic,
-        sourceType: describeType(source.runtimeType),
-        detectedType: projectTypeResult.type,
-        details: projectTypeResult.details,
-        samplePaths: Array.from(extracted.files.keys()).slice(0, 80),
-      });
-      if (projectTypeResult.type !== 'transmission_line') {
-        const cbmSamples = Array.from(extracted.files.entries())
-          .filter(([path]) => /\.cbm$/i.test(path))
-          .slice(0, 5);
-        for (const [path, file] of cbmSamples) {
-          debugLog(DEBUG_RUNTIME_LOGS, '[GIM Runtime Detect] cbm sample', path, (await file.text()).slice(0, 500));
+      const endPostDetect=perfBegin('工程类型校验后调度',undefined,perfSession);
+      if (DEBUG_RUNTIME_LOGS) {
+        debugLog(true, '[GIM Runtime Detect]', {
+          sourceMagic: source.magic,
+          extractedMagic: extracted.magic,
+          sourceType: describeType(source.runtimeType),
+          detectedType: projectTypeResult.type,
+          details: projectTypeResult.details,
+          samplePaths: Array.from(extracted.files.keys()).slice(0, 80),
+        });
+        if (projectTypeResult.type !== 'transmission_line') {
+          let sampled = 0;
+          for (const [path, file] of extracted.files) {
+            if (!/\.cbm$/i.test(path)) continue;
+            debugLog(true, '[GIM Runtime Detect] cbm sample', path, (await file.text()).slice(0, 500));
+            if (++sampled === 5) break;
+          }
         }
       }
+      endPostDetect(undefined,{diagnosticReads:DEBUG_RUNTIME_LOGS});
     } catch (error) {
       endDetect('（失败）', { error: error instanceof Error ? error.message : String(error) });
       console.warn('[GIM] 解压内容工程类型校验失败:', error);

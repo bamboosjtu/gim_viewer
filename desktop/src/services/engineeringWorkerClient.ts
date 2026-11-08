@@ -22,12 +22,14 @@ export class EngineeringWorkerClient {
   private closed = false;
   private pending = new WorkerRequests<EngineeringWorkerResponse>(120_000, error => this.close(error));
   private abort = () => this.close();
-  constructor(private readonly port: EngineeringWorkerPort, private readonly isCurrent: () => boolean, private readonly signal?: AbortSignal) {
+  constructor(private readonly port: EngineeringWorkerPort, private readonly isCurrent: () => boolean,
+    private readonly signal?: AbortSignal, private readonly onProgress?:(stage:string,completed:number)=>void) {
     port.onmessage = event => {
       if (!this.isCurrent() || this.signal?.aborted) { this.close(); return; }
       const response = event.data;
       if(response.type==='progress'){
-        if(response.stage==='extract')this.pending.touch(response.requestId);
+        if(Number.isSafeInteger(response.completed)&&response.completed>0&&this.pending.touch(response.requestId))
+          this.onProgress?.(response.stage,response.completed);
         return;
       }
       this.pending.settle(response.requestId, response, response.type === 'error' ? new Error(response.message) : undefined);
@@ -37,8 +39,8 @@ export class EngineeringWorkerClient {
     signal?.addEventListener('abort', this.abort, { once: true });
     if (signal?.aborted) this.close();
   }
-  static create(isCurrent: () => boolean, signal?: AbortSignal) {
-    return new EngineeringWorkerClient(createMeasuredWorker('engineering', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})})), isCurrent, signal);
+  static create(isCurrent: () => boolean, signal?: AbortSignal, onProgress?:(stage:string,completed:number)=>void) {
+    return new EngineeringWorkerClient(createMeasuredWorker('engineering', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})})), isCurrent, signal,onProgress);
   }
   close(error: Error = new DOMException('Engineering build cancelled', 'AbortError')): void {
     if (this.closed) return;
@@ -49,7 +51,8 @@ export class EngineeringWorkerClient {
   private request(command: EngineeringWorkerCommand, transfer: Transferable[] = []): Promise<EngineeringWorkerResponse> {
     if (this.closed || !this.isCurrent() || this.signal?.aborted) { this.close(); return Promise.reject(new DOMException('Engineering build cancelled', 'AbortError')); }
     const requestId = ++this.sequence;
-    return this.pending.request(requestId, () => this.port.postMessage({ ...command, requestId }, transfer));
+    return this.pending.request(requestId, () => this.port.postMessage({ ...command, requestId }, transfer),
+      command.type==='extract'?60_000:120_000);
   }
   async init(scope: string, paths: string[]): Promise<void> { await this.request({ type: 'init', scope, paths }); }
   async addFiles(files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }>): Promise<void> {

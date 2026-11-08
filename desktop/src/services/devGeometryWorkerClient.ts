@@ -29,7 +29,7 @@ interface Slot { id: number; traceId: string; key: string; path: string; kind: '
   promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void;
   /** Assembly-subtree child of a split template. */
   parent?: string;
-  partition?: { referencePaths: readonly string[]; canonicalDevPath: string; discovered: DiscoveredGeometries; maxBytes: number; allowSmallFallback?: boolean };
+  partition?: { referencePaths: readonly string[]; canonicalDevPath: string; discovered: DiscoveredGeometries; maxBytes: number; allowSmallFallback?: boolean; rootSlice?:{index:number;total:number} };
   /** A merge fallback must use the monolithic compiler, never split again. */
   noSplit?: boolean;
   /** Parent-only state while real subtree parts are in flight. */
@@ -275,6 +275,7 @@ export class DevGeometryPreprocessor {
           canonicalDevPath: split.plan.canonicalDevPath,
           discovered: { mods: part.mods, stls: part.stls },
           maxBytes: Math.floor(split.inputBudget/split.plan.parts.length),
+          ...(part.rootSlice?{rootSlice:part.rootSlice}:{}),
         },
       });
       this.diagnostics.splitParts++;
@@ -301,6 +302,18 @@ export class DevGeometryPreprocessor {
       &&row.diagnostics.unsupportedSourceCount===0&&row.diagnostics.partialSourceCount===0
       ? {...row,status:'complete' as const,diagnostics:{...row.diagnostics,status:'complete' as const}}:row);
     const diagnostics = aggregateDevGlbDiagnostics(combinedParts);
+    diagnostics.discoveredModCount=split.plan.modCount;
+    diagnostics.discoveredStlCount=split.plan.stlCount;
+    if(split.plan.parts.some(part=>part.rootSlice)){
+      const represented=results.some(row=>!!row.bytes);
+      const partial=results.some(row=>row.status==='partial');
+      const unsupported=results.some(row=>row.status==='unsupported');
+      diagnostics.renderableModCount=represented?1:0;
+      diagnostics.emptySourceCount=represented?0:results.every(row=>row.status==='empty')?1:0;
+      diagnostics.unsupportedSourceCount=unsupported?1:0;
+      diagnostics.partialSourceCount=partial?1:0;
+      diagnostics.status=unsupported&&!represented?'unsupported':partial||unsupported?'partial':represented?'complete':'empty';
+    }
     const parts = results.flatMap(row => row.bytes ? [row.bytes] : []);
     const totalBytes = parts.reduce((total, bytes) => total + bytes.byteLength, 0);
     if (!parts.length) {
@@ -619,7 +632,7 @@ export class DevGeometryPreprocessor {
         ?new MissingDevDependencyError(task.path,data.error,data.sourceEvidence)
         :data.sourceErrorKind==='source-invalid'&&data.sourceEvidence
           ?new InvalidDevGeometryError(task.path,data.error,data.sourceEvidence)
-          :new Error(data.error);
+          :Object.assign(new Error(data.error),{geometryKind:data.sourceErrorKind});
       this.cancelTaskTree(task, error, false);
       this.pump();
       return;

@@ -20,7 +20,7 @@ export class Collector implements MetricsSink {
   private detailSink?:{ available():boolean; send(events:MeasurementEvent[]):void };
   private clock = new Map<string, NonNullable<MeasurementEvent['clock']>>();
   private loss = { sequenceGaps: 0, invalid: 0, duplicate: 0, foreignRun: 0, detailEvents: 0, aggregateGroups: 0, transportFailures: 0,
-    interruptedTasks: 0, intentionalInterruptedTasks: 0, unexpectedWorkerTerminations: 0, cancelledWithoutReason: 0,
+    interruptedTasks: 0, intentionalInterruptedTasks: 0, cancelledBeforeStart: 0, unexpectedWorkerTerminations: 0, cancelledWithoutReason: 0,
     lateEvents: 0, lateEventsUnexpected: 0, lateCancelledAcks: 0 };
   private aggregatedDetail={memory:0,counter:0};
   constructor(readonly identity: RunIdentity, readonly mode: MeasurementMode, private readonly detailLimit = mode==='benchmark'?32768:8192) {}
@@ -49,6 +49,8 @@ export class Collector implements MetricsSink {
           const reason=this.intentionalTasks.get(key);
           if(reason&&event.name==='terminated'&&event.status==='aborted'){
             this.settle(key,'cancelled',reason);this.loss.intentionalInterruptedTasks++;
+          }else if(pending.name==='queued'&&event.name==='terminated'&&event.status==='aborted'){
+            this.settle(key,'cancelled','cancelled-before-start');this.loss.cancelledBeforeStart++;
           }else{this.settle(key,event.status??'aborted');this.loss.interruptedTasks++;}
         }
       }

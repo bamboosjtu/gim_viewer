@@ -12,7 +12,7 @@
 
 任务有 queued、started、produced、ended 事件。终止会结算尚未开始和正在运行的任务；迟到结束不重复结算。produced 表示 Worker 计算已产出结果，不能代替主线程消费、场景提交、持久化完成。现有业务 RPC、超时、取消、Transferable 和池调度仍由原有实现管理，测量不决定任务是否有效。
 
-`detailComplete` 描述完整时间线：明细容量截断使它为 false。`aggregateComplete` 保留阶段统计和任务总量，仍要求无序号间隙、非法事件、聚合组溢出、外来 run、重复序号或 Worker 批次丢失；只有纯明细容量截断可以降为 `aggregate-only` 而不改变产品 PASS/PARTIAL。`lifecycleComplete` 单独要求没有活动任务、无授权 Worker 中断、异常终止、超时、无理由取消或异常迟到事件。项目关闭/切换会先用受控原因登记取消，再终止对应的在途任务；明确的 AbortError 任务结束也记录 `abort-error`。已取消任务的受控迟到确认可计数但不重复结算。原生 `measurementComplete` 要求聚合、任务生命周期及必要采样完整。
+`detailComplete` 描述完整时间线：明细容量截断使它为 false。`aggregateComplete` 保留阶段统计和任务总量，仍要求无序号间隙、非法事件、聚合组溢出、外来 run、重复序号或 Worker 批次丢失；只有纯明细容量截断可以降为 `aggregate-only` 而不改变产品 PASS/PARTIAL。此时慢任务/慢阶段榜仅供诊断，不是完整时间线或基线必需证据。`lifecycleComplete` 单独要求没有活动任务、无授权 Worker 中断、异常终止、超时、无理由取消或异常迟到事件。仅 queued、从未 started 的请求随正常 Worker 终止记为 `cancelled-before-start`，不伪造执行中断；已 started 的任务仍须有受控取消或完整结束。项目关闭/切换会先用受控原因登记取消，再终止对应的在途任务；明确的 AbortError 任务结束也记录 `abort-error`。已取消任务的受控迟到确认可计数但不重复结算。原生 `measurementComplete` 要求聚合、任务生命周期及必要采样完整。
 
 ## 采集面
 
@@ -61,7 +61,7 @@ Windows 固定运行时的文件既需要 AppContainer 读取权限，也不能�
 
 - **线路持久化。** 首屏后持久化有 `idle/saving/saved/failed` 会话状态；原生 Benchmark 等待 SQLite finish 提交，失败为明确的失败状态。`cachePublishMs` 取线路完成时刻而非首屏后的静默窗口。
 - **变电缓存发布。** 冷开变电等待 `cachePersistenceReady` 的成功或失败终态，再读取 SQLite 证据；工程 Worker 的 `cacheSettled` 只表示该域安静，不代表变电核心索引已发布。`cachePublishMs` 使用实际发布时刻，失败时留空。
-- **时间字段。** `automaticLoadMs` 是自动表示终态；`settledMs` 单列任务/缓存/后台和三秒静默完成，`writeDrainMs` 只记最后 DEV 产物写晚于自动表示的部分。
+- **时间字段。** `modelTreeReadyMs`、`firstGeometryMs` 与 `allGeometryReadyMs` 分列工程树、首几何和基础表示齐备；`automaticLoadMs` 是自动表示终态，`settledMs` 单列任务/缓存/后台和三秒静默完成，`writeDrainMs` 只记最后 DEV 产物写晚于自动表示的部分。DEV 写入另分原生路径解析与磁盘原子写阶段，避免把 IPC、文件系统和场景提交混为一项。
 - **Worker 堆。** 短于两个采样周期且已关联的 Worker 若首次堆采样前终止，报告堆指标 unavailable 与原因，不填零，也不把整轮误判为产品失败。
 - **冷开不完整。** 缓存已发布但冷开仅因测量证据不足而 INCONCLUSIVE 时，暖开仍运行，正式基线继续保持 INCONCLUSIVE。
 - **暖开校验。** 依据来源缓存数量、缺失数和 parser 版本；没有请求远景 LOD 的 `open` 场景不要求 `ifcFarHits`。

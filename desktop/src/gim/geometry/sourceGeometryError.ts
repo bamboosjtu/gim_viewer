@@ -20,8 +20,13 @@ export class MissingDevDependencyError extends Error {
 export function geometryFailureKind(error:unknown):'source-invalid'|'missing-dependency'|'capacity-exceeded'|'parse-failed'{
   if(error instanceof MissingDevDependencyError)return 'missing-dependency';
   if(error instanceof InvalidDevGeometryError&&error.sourceEvidence)return 'source-invalid';
-  const message=String(error);
-  if(/DEV split.*(?:budget|reservation|exceeds)|reserved output budget|out of memory|allocation failed/i.test(message))
+  if((error as {geometryKind?:unknown})?.geometryKind==='capacity-exceeded')return 'capacity-exceeded';
+  let message='',current=error;
+  for(let depth=0;depth<4&&current;depth++){
+    message+=` ${String(current)}`;
+    current=(current as {cause?:unknown}).cause;
+  }
+  if(/DEV split.*(?:budget|reservation|exceeds)|reserved output budget|compiled result exceeds|GLB.*(?:quota|limit)|out of memory|allocation failed/i.test(message))
     return 'capacity-exceeded';
   return 'parse-failed';
 }

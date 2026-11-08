@@ -305,6 +305,29 @@ it('subdivides a dominant PHM and counts repeated MOD occurrences separately fro
   expect(Math.max(...shared!.parts.map(part=>part.modCount))).toBeLessThan(600);
 });
 
+it('partitions one oversized MOD by visible roots while preserving its L0 world bounds',async()=>{
+  const mod='<Device><Entities><Entity ID="1" Visible="TRUE"><Cuboid L="100" W="100" H="100"/></Entity>'+
+    '<Entity ID="2" Visible="TRUE"><Cuboid L="200" W="100" H="100"/>'+
+    '<TransformMatrix Value="1,0,0,0,0,1,0,0,0,0,1,0,500,0,0,1"/></Entity></Entities></Device>';
+  const oversized={size:71*1024*1024,text:async()=>mod,arrayBuffer:async()=>new TextEncoder().encode(mod).buffer} as unknown as File;
+  const files=new Map([['DEV/root.dev',file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=large.mod','root.dev')],
+    ['MOD/large.mod',oversized]]);
+  const discovered:DiscoveredGeometries={mods:[{modPath:'MOD/large.mod',referencePath:'solid:0',instanceKey:'one'} as DiscoveredModGeometry],stls:[]};
+  const plan=buildDevCompilePlan(discovered,files)!;
+  expect(plan.parts.length).toBeGreaterThanOrEqual(2);
+  expect(plan.parts.every(part=>part.rootSlice)).toBe(true);
+  const mono=await serializeDevToGlbDetailed('DEV/root.dev',files,{canonicalDevPath:'DEV/root.dev',discovered,lod:0});
+  const pieces=await Promise.all(plan.parts.map(part=>serializeDevToGlbDetailed('DEV/root.dev',files,{
+    canonicalDevPath:'DEV/root.dev',discovered:{mods:part.mods,stls:part.stls},lod:0,
+    partition:{referencePaths:part.referencePaths,rootSlice:part.rootSlice}})));
+  const merged=await mergeDevGlbParts('DEV/root.dev',pieces.flatMap(part=>part.bytes?[part.bytes]:[]));
+  const a=await parseDevGlbAsset('DEV/root.dev',mono.bytes!),b=await parseDevGlbAsset('DEV/root.dev',merged);
+  expect(a).not.toBeNull();expect(b).not.toBeNull();
+  const before=new THREE.Box3().setFromObject(a!.scene),after=new THREE.Box3().setFromObject(b!.scene);
+  for(let i=0;i<6;i++)expect([...after.min.toArray(),...after.max.toArray()][i])
+    .toBeCloseTo([...before.min.toArray(),...before.max.toArray()][i],5);
+});
+
 const DEV_SPLIT_MIN_BYTES_FOR_TEST=6*1024*1024;
 
 it('matches monolithic and split+merge world geometry across nested PHM, repeated MOD, STL, empty and unsupported leaves',async()=>{
