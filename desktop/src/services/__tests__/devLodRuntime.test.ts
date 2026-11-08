@@ -262,7 +262,7 @@ it('correlates cold/warm GLB decoding, placement and cache writes without changi
       internal.submit=async(_priority:number,run:()=>void)=>run();
       internal.templateStore.cacheReader.read=async()=>({status:mode==='cold'?'miss':'hit',value:mode==='cold'?undefined:stored,release:()=>{}});
       internal.catalogHint=async()=>({status:'miss'});
-      internal.worker={cancel:vi.fn(),workerCount:1,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn()};
+      internal.worker={cancel:vi.fn(),workerCount:1,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn(),takeWorkerQueueStats:vi.fn(()=>({waitMs:0,dispatches:1}))};
       let releaseWriter: (()=>void)|undefined=mode==='cold'?await internal.artifactWriter.writeBudget.acquire(internal.artifactWriter.writeBudget.limit):undefined;
       const row={...occurrence(1),entry:{devPath:'DEV/a.dev',rootOccurrence:'root',instanceKey:'root-instance',
         placementMatrix:new THREE.Matrix4().toArray(),templateStatus:'unrequested'},group:undefined,key:undefined};
@@ -612,7 +612,7 @@ it('persists a non-selected L1 after eviction, a second cache miss and recompila
  internal.templateStore.cacheReader.read=vi.fn(async()=>({status:'miss',release:()=>{}}));
  internal.catalogHint=vi.fn(async()=>({status:'miss'}));
  internal.prepareMissingTemplateSources=vi.fn(async()=>{});
- internal.worker={cancel:vi.fn(),workerCount:1,cacheConcurrency:8,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn()};
+ internal.worker={cancel:vi.fn(),workerCount:1,cacheConcurrency:8,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn(),takeWorkerQueueStats:vi.fn(()=>({waitMs:0,dispatches:1}))};
  const persist=vi.spyOn(internal,'persistArtifact').mockResolvedValue(undefined);
  try{
   internal.wanted.add(key);

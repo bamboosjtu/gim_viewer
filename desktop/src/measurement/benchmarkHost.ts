@@ -1,6 +1,6 @@
 import measuredWorkerAsset from './capabilityWorker.ts?worker&url';
 import type { AppState } from '../app/state.js';
-import { measurementSnapshot, drainMeasurementEvents } from './runtime.js';
+import { measurementSnapshot, drainMeasurementEvents, measurementPrivateSources, measurementRun } from './runtime.js';
 import { perfProductMomentSnapshot, perfCurrentSession } from '../utils/perfTimings.js';
 import { createMeasuredWorker, measurementWorkerUrl } from './hostWorker.js';
 import { resetMeasurementRun } from './runtime.js';
@@ -58,6 +58,8 @@ export function installBenchmarkHost(state:AppState):void {
         (perfProductMomentSnapshot().cachePersistenceReady),
       engineering:{status:state.engineeringStatus,cacheStatus:state.engineeringCacheStatus,complete:state.engineeringSources?.complete??false}};},
     async evidence(){const evidence=await benchmarkEvidence(state);return {...evidence,evidenceAtMs:performance.now()};},
+    templateDiagnostics(){return (state.deviceLodRuntime as {templateDiagnostics?:()=>unknown[]}|null)?.templateDiagnostics?.()??[];},
+    privateSources(){return measurementPrivateSources(measurementRun().collector.identity.runId);},
     targets(){return scenarioTargets(state);},
     action(action:Parameters<typeof runScenarioAction>[1]){return runScenarioAction(state,action);},
     resources(){return projectResourceState(state);},

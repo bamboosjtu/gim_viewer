@@ -95,12 +95,20 @@ cacheWriteReservedBytes: this.writeBudget.bytes, cacheWritePeakBytes: this.write
           perfRecordTaskPhase(identity, 'cacheWriteQueue', performance.now() - queuedAt, this.options.perf);
           this.options.diagnostics.artifactWriteAttempts++;
           const writeAt = performance.now();
+          const writeStage=store==='catalog'?'cacheWrite.catalog':`cacheWrite.templates.L${lod??0}`;
+          const recordWrite=(status:'completed'|'failed')=>{
+            const elapsed=performance.now()-writeAt;
+            perfRecordTaskPhase(identity,'cacheWrite',elapsed,this.options.perf,status,prepared.retainedBytes);
+            perfRecordTaskPhase(identity,writeStage,elapsed,this.options.perf,status,prepared.retainedBytes);
+          };
           let detail: Awaited<ReturnType<typeof writeDevArtifactDetailed>>;
           try { detail = await writeDevArtifactDetailed(store, key, value, this.options.session, prepared,observe); }
-          catch (error) { perfRecordTaskPhase(identity, 'cacheWrite', performance.now() - writeAt, this.options.perf, 'failed'); throw error; }
-          perfRecordTaskPhase(identity, 'cacheWrite', performance.now() - writeAt, this.options.perf, detail.ok ? 'completed' : 'failed');
-          if(detail.nativeResolveMs!=null)perfRecordTaskPhase(identity,'cacheNativeResolve',detail.nativeResolveMs,this.options.perf);
-          if(detail.nativeWriteMs!=null)perfRecordTaskPhase(identity,'cacheNativeWrite',detail.nativeWriteMs,this.options.perf);
+          catch (error) { recordWrite('failed'); throw error; }
+          recordWrite(detail.ok?'completed':'failed');
+          if(detail.packMs!=null)perfRecordTaskPhase(identity,'cachePack',detail.packMs,this.options.perf,'completed',prepared.retainedBytes);
+          if(detail.invokeWallMs!=null)perfRecordTaskPhase(identity,'cacheInvokeWall',detail.invokeWallMs,this.options.perf,detail.ok?'completed':'failed',prepared.retainedBytes);
+          if(detail.nativeResolveMs!=null)perfRecordTaskPhase(identity,'cacheNativeResolve',detail.nativeResolveMs,this.options.perf,'completed',prepared.retainedBytes);
+          if(detail.nativeWriteMs!=null)perfRecordTaskPhase(identity,'cacheNativeWrite',detail.nativeWriteMs,this.options.perf,'completed',prepared.retainedBytes);
           if (!detail.ok) {
             if (store === 'catalog') this.options.diagnostics.catalogWriteFailures++;
             else if (lod != null) {

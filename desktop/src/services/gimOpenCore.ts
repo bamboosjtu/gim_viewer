@@ -27,6 +27,8 @@ export interface ExtractedGimSource {
   extractionProfile?: NativeExtractionProfile;
   semanticPackPath?: string;
   parseCopy?: import('@desktop/substationParseCopy.js').ParseCopyReceipt;
+  /** Small semantic inputs were hydrated before content-type detection. */
+  preHydrated?: boolean;
   entryTrace?: import('@desktop/gimExtract.js').NativeExtractionEntryTiming[];
 }
 

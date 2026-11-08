@@ -2,7 +2,7 @@ import {expect,it,vi} from 'vitest';
 const mock=vi.hoisted(()=>({invoke:vi.fn(),parse:vi.fn()}));
 vi.mock('../runtime.js',()=>({isTauri:()=>true}));
 vi.mock('../invokeTimed.js',()=>({invokeTimed:mock.invoke}));
-vi.mock('../database.js',()=>({parseBatchCachePayload:mock.parse,packBinaryCacheWrite:vi.fn()}));
+vi.mock('../database.js',()=>({parseBatchCachePayload:mock.parse,packBinaryCacheWriteParts:vi.fn()}));
 import {readDevArtifactBatch,readDevArtifactResult,packDevArtifact} from '../devLodCache.js';
 it('passes the byte ceiling and keeps deferred entries distinct from missing or corrupt artifacts',async()=>{
   mock.invoke.mockResolvedValue(new ArrayBuffer(0));mock.parse.mockReturnValue({items:[

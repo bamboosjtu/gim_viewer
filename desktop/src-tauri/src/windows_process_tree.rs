@@ -87,6 +87,7 @@ extern "system" {
 pub(super) struct Snapshot {
     pub(super) rss_bytes: Option<u64>,
     pub(super) private_bytes: Option<u64>,
+    pub(super) root_private_bytes: Option<u64>,
     pub(super) process_count: Option<u32>,
     pub(super) available: bool,
     pub(super) source: String,
@@ -97,6 +98,7 @@ fn unavailable(reason: impl Into<String>) -> Snapshot {
     Snapshot {
         rss_bytes: None,
         private_bytes: None,
+        root_private_bytes: None,
         process_count: None,
         available: false,
         source: "windows-process-tree-unavailable".to_string(),
@@ -127,6 +129,13 @@ fn query_rss(handle: *mut c_void) -> Option<(u64, u64)> {
             None
         }
     }
+}
+
+fn unavailable_with_root(root_pid:u32,reason:String)->Snapshot{
+    let root_private_bytes=opened(root_pid).ok().flatten()
+        .and_then(|(handle,_)|query_rss(handle.0).map(|(_,private)|private));
+    Snapshot{rss_bytes:None,private_bytes:None,root_private_bytes,process_count:None,
+        available:false,source:"root-process-private-fallback".into(),reason:Some(reason)}
 }
 
 pub(super) fn snapshot(root_pid: u32) -> Snapshot {
@@ -173,7 +182,7 @@ pub(super) fn snapshot(root_pid: u32) -> Snapshot {
 
     // Holding every accepted handle also prevents PID reuse between discovery
     // and accounting. Toolhelp parent IDs alone can refer to a dead old parent.
-    let process_ids=match owned_descendants(root_pid,&children,opened){Ok(value)=>value,Err(reason)=>return unavailable(reason)};
+    let process_ids=match owned_descendants(root_pid,&children,opened){Ok(value)=>value,Err(reason)=>return unavailable_with_root(root_pid,reason)};
 
     let mut total_rss = 0u64;
     let mut total_private = 0u64;
@@ -184,7 +193,7 @@ pub(super) fn snapshot(root_pid: u32) -> Snapshot {
         let rss = query_rss(handle.0);
         let Some((rss, private)) = rss else {
             if unsafe{GetExitCodeProcess(handle.0,&mut code)}!=0&&code!=259{continue;}
-            return unavailable("GetProcessMemoryInfo-failed");
+            return unavailable_with_root(root_pid,"GetProcessMemoryInfo-failed".into());
         };
         live_count+=1;
         let Some(next_total) = total_rss.checked_add(rss) else {
@@ -200,6 +209,7 @@ pub(super) fn snapshot(root_pid: u32) -> Snapshot {
     Snapshot {
         rss_bytes: Some(total_rss),
         private_bytes: Some(total_private),
+        root_private_bytes: None,
         process_count: Some(live_count),
         available: true,
         source: "windows-process-tree-working-set".to_string(),

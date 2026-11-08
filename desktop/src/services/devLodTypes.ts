@@ -37,6 +37,8 @@ export type MemoryPressure = 'unknown' | 'normal' | 'high' | 'critical';
 
 export interface Occurrence {
   baseEvidence?:import('../shared/deviceRuntime.js').DevBaseEvidence;
+  /** Catalog bounds were resolved, including an explicit unknown result. */
+  catalogResolved?: boolean;
   entry: DevSpatialOccurrence;
   inView: boolean;
   box: THREE.Box3 | null;

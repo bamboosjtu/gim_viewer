@@ -8,5 +8,7 @@ export function checkedWebviewProfile(root,dataRoot,cacheState){
   const profile=workspacePath(root,proposed,existsSync(proposed));
   if(cacheState==='cold'&&existsSync(profile)&&readdirSync(profile).length)
     throw Error('Cold WebView2 profile must be new/empty');
+  if(cacheState==='warm'&&(!existsSync(profile)||!readdirSync(profile).length))
+    throw Error('warm-webview-profile-unavailable');
   return profile;
 }

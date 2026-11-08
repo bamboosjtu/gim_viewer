@@ -8,7 +8,7 @@ import { reportBackgroundError } from '../src/utils/backgroundErrors.js';
  * `read-error`/`invalid` must remain visible in diagnostics. */
 import { isTauri } from './runtime.js';
 import { invokeTimed } from './invokeTimed.js';
-import { packBinaryCacheWrite, parseBatchCachePayload } from './database.js';
+import { packBinaryCacheWriteParts, parseBatchCachePayload } from './database.js';
 interface CacheContext { projectId: number | null; sourceSha256: string | null }
 function nativeArgs(store: string, key: string, context?: CacheContext) {
   if (context?.projectId == null || !context.sourceSha256) return null;
@@ -59,6 +59,8 @@ export interface DevArtifactRead<T> {
 export interface DevArtifactWriteResult {
   ok: boolean;
   error?: string;
+  packMs?: number;
+  invokeWallMs?: number;
   nativeResolveMs?: number;
   nativeWriteMs?: number;
 }
@@ -244,12 +246,18 @@ export async function writeDevArtifactDetailed(
     const args = nativeArgs(store, key, context);
     if (!args) return { ok: false, error: 'missing-cache-context' };
     try {
-      const packet=(()=>{const data=prepared?packPreparedDevArtifact(prepared):packDevArtifact(key,value);const release=observe?.('artifact-pack-copy',[data]);
-        try{return packBinaryCacheWrite(args.projectId,args.entryPath,data,args.sourceGimSha256);}finally{release?.();}})();
+      const packStarted=performance.now();
+      const artifact=prepared??prepareDevArtifact(key,value);
+      const artifactHeader=new Uint8Array(4);
+      new DataView(artifactHeader.buffer).setUint32(0,artifact.metadata.byteLength,true);
+      const packet=packBinaryCacheWriteParts(args.projectId,args.entryPath,
+        artifact.data?[artifactHeader,artifact.metadata,artifact.data]:[artifactHeader,artifact.metadata],args.sourceGimSha256);
+      const packMs=performance.now()-packStarted;
       const releasePacket=observe?.('ipc-wire-copy',[packet]);
       let timing:{resolveMs?:number;writeMs?:number}|undefined;
+      const invokeStarted=performance.now();
       try{timing=await invokeTimed('write_device_lod_artifact',packet);}finally{releasePacket?.();}
-      return { ok: true,
+      return { ok: true,packMs,invokeWallMs:performance.now()-invokeStarted,
         ...(Number.isFinite(timing?.resolveMs)?{nativeResolveMs:timing!.resolveMs}:{}),
         ...(Number.isFinite(timing?.writeMs)?{nativeWriteMs:timing!.writeMs}:{}) };
     } catch (error) {

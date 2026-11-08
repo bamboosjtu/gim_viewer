@@ -1,162 +1,151 @@
 # 测量框架与项目架构复核
 
-> 本轮复核状态（2026-11-08）：P1 的慢阶段测试已改为真实 interval，并断言 aggregate 阶段不进入单次慢榜；P2 的 cold WebView profile 非空校验已补，profile 路径仅记录在工作区私有报告；aggregate-only 的基线和慢榜边界已写明。P3 的 active 尾批此前已有受控取消/意外终止测试，本轮源码复核确认计数与 lifecycle 分开。下文 826d876 运行结果仍是历史测量；本轮新产品/框架修改尚未执行样本或性能复测，不能据此宣称 L0 闭环。
-
-> 复核提交：`826d876`（2026-11-08）
+> 复核对象：工作区（基于 `93df24f`，含 2026-11-08 的本轮修复）
 > 复核日期：2026-11-08
-> 结论：**P0 未发现**；当前 **P1 1 项、P2 2 项、P3 1 项**。P1 是 CI 红灯：`core.test.ts` 用聚合 `probe.record` 断言 `slowestPhases`，而 Collector 只收录 interval 阶段，测试与契约冲突。其余为冷/暖 WebView profile 的冷态校验、aggregate-only 证据边界和活跃任务尾批诊断。
+> 结论：**P0 未发现，上一轮 P1/P2/P3 均已关闭，完整测试全绿。** 当前没有已确认的代码缺陷；剩余是 **L0/L1 原生验收和产品改动的实验证据**，不是新的 P1/P2。
 
 ---
 
-## 1. CI 红灯（P1）
+## 1. 上轮问题复核
 
-### 证据
+### 1.1 CI：已关闭
 
-CI 与本地均可复现：
-
-```
-FAIL src/measurement/__tests__/core.test.ts
-> keeps a bounded slow phase list even after detail capacity is reached
-AssertionError: expected [] to have a length of 10 but got +0
-  at core.test.ts:103
-```
-
-- `npm run test:measurement-tools`：50/50 通过；
-- 完整 `npm test`：1 个失败（就是这一项），其余通过；
-- 失败测试使用 `probe.record(context,'dev.compile',ms)`（`Probe.record` 产生 `timing:'aggregate'`），见 `desktop/src/measurement/__tests__/core.test.ts:100-106`；
-- `Collector.accept` 的 slow-phase 逻辑要求 `event.timing !== 'aggregate'`，见 `packages/measurement-core/src/collector.ts:109-113`；
-- 文档 `docs/benchmark.md` 将 `slow-phases.csv` 定义为“单次阶段”，并明确聚合直方图不充作单次阶段。
-
-### 判定
-
-这是**测试契约错误**，不是产品/Collector 缺陷：`probe.record` 是聚合 duration，不能作为单次 phase；slowestPhases 为空是正确行为。CI 红灯会阻塞合并，必须修测试或重新定义契约。
-
-**建议修复**：测试改用 `probe.phase` 生成 20 个 interval 阶段，并在任务计时前重置 tick：
+上轮失败是 `hostWorker.test.ts` 仍期待 queued-never-started 任务在终止时记为 `aborted`。本轮已按新契约改为：
 
 ```ts
-for (let ms=1; ms<=20; ms++) { const p=probe.phase(context,'dev.compile'); tick(ms); p.end(); }
-tick(0);
-probe.event(context,{kind:'task',name:'started'}); tick(33);
-probe.event(context,{kind:'task',name:'ended',status:'completed'});
+taskOutcomes: { failed: 1, cancelled: 1 }
+loss: { cancelledBeforeStart: 1, interruptedTasks: 0 }
 ```
 
-若确实希望把聚合阶段纳入 slowestPhases，则需修改契约、文档和 `Collector`，不能让测试与实现各自解释“慢阶段”。
+本地完整测试：
+
+- `npm test`：179 个文件全部通过，**1480 通过、3 跳过**，exit 0；
+- `test:measurement-tools`：57/57；
+- `test:acceptance-tools`：4/4；
+- `tsc --noEmit`：通过；
+- `check:engineering-boundaries`：通过（306 modules、414 type edges、210 dynamic edges）。
+
+### 1.2 L1 catalog 豁免：申诉成立，已撤回
+
+上一轮把**样本集合 L1** 与**几何 LOD1 模板**混为一谈，判断错误，撤回该项。
+
+正确口径已写入 `docs/benchmark.md` 并在测试中固定：
+
+- catalog 按**唯一 DEV 来源**核对，命中与未命中覆盖全部 DEV；
+- 选择性持久化的 **几何 LOD1 模板** miss（`devLodMisses[1]`）不进入 catalog 分母；
+- 样本集合 `L1` 只是开发回归资料层级，不改变缓存规则。
+
+`warmCatalogCoverage` 继续使用统一的来源集合规则；契约测试补充了 LOD1 misses 不参与 catalog 的用例。该项不是代码缺陷。
+
+### 1.3 warm profile：已关闭
+
+`checkedWebviewProfile` 现在：
+
+- cold：SQLite 根与 WebView2 profile 都必须为空；
+- warm：paired profile 必须存在且非空，否则 `warm-webview-profile-unavailable` / INCONCLUSIVE，不启动伪暖开。
+
+测试覆盖 missing/empty profile。`profile.private.json` 只保存在私有运行目录。
+
+### 1.4 recover-batch：已关闭
+
+外部中止恢复现在：
+
+- 写入 controller PID/启动记录；恢复前若 controller 仍存活，拒绝并抛 `batch-controller-still-running`；
+- 恢复批次/运行带 `recovery` 标记；
+- `runReadiness` 将 recovery 判 INCONCLUSIVE；
+- `approveBaseline` 拒绝 recovery，CLI compare/gate 也拒绝；
+- 缺失耗时保持空值，最小报告 `measurementComplete=false`。
+
+测试覆盖 PID 存活拒绝、恢复标记和基线拒绝。
 
 ---
 
-## 2. P2：冷/暖 WebView profile 的冷态未完整校验
+## 2. P0：样本依赖
 
-`desktop/scripts/benchmarks/cache-roots.mjs` 让冷/暖共用 `paired-webview-profile-v1`：
+仍为**未发现 P0**：
 
-```ts
-pairedWebviewProfile = dataRoot => join(dirname(dataRoot), 'webview-profile')
-```
-
-`native-run.mjs:56-60` 对 cold 只检查 `dataRoot` 目录为空，没有检查紧邻的 `webview-profile`。IFC LOD 缓存在 WebView2 IndexedDB 中；如果手工复用了一个空的 `dataRoot`（或旧运行留下的空目录），其 sibling profile 仍有 IndexedDB 数据，cold 实际会读暖缓存，违反 cold 语义。批处理默认每次生成新 out 时不会触发，但 `runNative` API、重试/恢复和手工 `dataRoot` 可以触发。
-
-**建议**：cold 同时要求 paired profile 不存在/为空，或显式分配新的 profile 目录；报告记录 profile 路径/策略；增加 cold-with-existing-profile 的测试。warm 继续复用同一 profile。
-
-**严重度**：P2（冷态测量语义）。
+- correctness 只读取本次 evidence 的 checks、geometryDefects、engineeringCoverage、digest/count；
+- expected-defect/coverage 注册表不存在；
+- 默认样本发现只按目录扫描；
+- L1/LOD1 是不同维度，当前 catalog/cache 证明按唯一 DEV 来源和实际模板 miss 分离，没有样本专属豁免。
 
 ---
 
-## 3. P2：aggregate-only 允许通过，但详细时间线/慢阶段证据变为可选
+## 3. 当前未关闭的验收项（非代码缺陷）
 
-`native-run.mjs` 现在用 `measurement.aggregateComplete` 作为 `measurementComplete` 的必要条件；纯明细容量截断时：
+### P2：产品改动缺少 93df24f 之后的原生证据
 
-- `measurementDetailStatus='aggregate-only'`；
-- `detailComplete=false`，`aggregateComplete=true`；
-- `runReadiness` 不再因为 `measurementDetailDropped` 判 INCONCLUSIVE；
-- `slowestPhases`/`slowestTasks` 只保留截断前的前十项。
+本轮产品修复包括：
 
-`docs/architecture/measurement.md` 已说明“纯容量截断可降为 aggregate-only，不改变产品 PASS/PARTIAL”。这是合理的产品/诊断分层，但需要明确：
+- 工程构建待办/tree 终态阻止提前结算；
+- 无 Spatial 模型时发布部分树；
+- `product-stalled` 60 秒无进展终结；
+- 单个超大 MOD 按可见根 rootSlice 分部编译；
+- 容量错误沿 cause 传递；
+- `sourceGraph`/engineering Worker 进度续期。
 
-- aggregate-only 的 PASS/PARTIAL 不能声称有完整阶段时间线；
-- 基线审批不要求 `measurementDetailStatus=complete`，只要求 aggregate/lifecycle/内容证据；
-- slow-phases/slow-tasks 是**诊断视图**，不是基线必要证据。
+这些改动有单元测试，但当前 `substation-survey-826d876`/`line-survey-826d876` 都是 **93df24f 之前**的批次。`docs/open-issues.md` O-17 仍明确 rootSlice 需原生复核；`product-stalled` 的 60 秒阈值也可能误伤合法长任务。不能仅凭 `npm test` 宣称产品闭环。
 
-当前文档已给出边界，但 CI 测试违反了这一边界（见 P1）。建议把“聚合阶段不能进入 slowestPhases”固化为测试，而不是仅在文档中说明。
+**下一步**：同构建、同 SHA 至少重跑 L1 变电/线路，再抽 L0 500/35kV；核对 rootSlice 几何完整、失败子码、tree 终态和 60 秒阈值。
 
-**严重度**：P2（证据能力边界，不是代码错误）。
+### P3：L0/L1 测量矩阵仍未完成
 
----
+- L1 826 批次只有 **1 组冷暖**，正式基线需三次独立重复；
+- L0 500 仍有 1 FAIL（B1-4 renderer crash）和 1 INCONCLUSIVE（B1-3 明细截断，后续 aggregate-only 修复需重跑）；
+- 35kV 仍 RUNNING；
+- 无 v2 认可基线；旧 v1 基线不可直接比较；
+- 探针开销 A/B、十轮 lifecycle 尚未执行。
 
-## 4. 已复核：826d876 的 L1 原生结果
-
-`output/substation-survey-826d876` 为 6 PASS/2 PARTIAL，s03 冷/暖均通过；`output/line-survey-826d876` 为 12/12 PASS。上一轮 s03 的 late spatial task 未再出现，说明 `finalEvidenceIssue`/尾部等待/进度快照路径在当前批次有效。该验证缺口关闭；正式基线仍缺三次重复，见 `research/plan-status.md`。
-
----
-
-## 5. P3：活跃任务终止尾批目前只是计数器
-
-`hostWorker.ts:143-151` 对 active task 的未确认尾批改为：
-
-```ts
-if (active) run.probe.event(context,{kind:'counter',
-  name: run.collector.intentionalTermination(workerId)
-    ? 'worker.cancelled-unconfirmed-tail'
-    : 'worker.active-tail-unconfirmed'});
-else run.probe.event(context,{kind:'loss',name:'worker-terminal-tail-unconfirmed'});
-```
-
-这比之前“直接跳过”好，能留下诊断；但 active 尾批仍**不计入 `loss.detailEvents`**，而是 counter。受控取消可以正常结算，普通异常由 `interruptedTasks` 使生命周期不完整；有意终止时尾批丢失不一定使测量失败。当前没有 active task + terminate 的测试。
-
-**建议**：区分“有意取消且尾批未确认”和“异常 active 尾批”，至少让报告/review 能解释后者；增加测试。
-
-**严重度**：P3（诊断/边界）。
+这些属于 `research/plan-status.md` 的 C 阶段验收，不是测量框架新增缺陷。
 
 ---
 
-## 6. 项目架构评估
+## 4. 项目架构评估
 
 ### 分层与边界
 
-- `check:engineering-boundaries` 通过（306 modules、414 type edges、210 dynamic edges）；
-- `packages/measurement-core` 仍为纯测量核心，无 DOM/Tauri/Three 依赖；
-- `desktop/src/measurement` 负责 Worker/CDP/证据适配；
-- 826d876 的产品修改都在既有层内：`gim/engineering/sourceGraph` 增加进度回调、`services/engineeringWorker*` 增加进度/超时续期、`devLodArtifactWriter` 写槽从 4 提到 8、`gim_extract_command` 裸 7z 通用 pack、`substationRuntime` 的语义/DEV 解耦；没有看到跨层反向依赖。
+- `check:engineering-boundaries` 通过：306 modules、414 type edges、210 dynamic edges。
+- `packages/measurement-core` 仍为纯测量核心，无 DOM/Tauri/Three 依赖。
+- 产品改动均在既有层内：
+  - `sourceGraph`/`engineeringWorker` 负责来源进度；
+  - `engineeringService`/`compositionProjectionService` 负责构建待办、tree 终态和部分树发布；
+  - `glbCacheService`/`devGeometryWorker*` 负责 MOD 分部和 rootSlice；
+  - `geometry_cache.rs`/`devLodCache.ts` 负责原生写入分段；
+  - 未发现新的跨层反向依赖。
 
 ### 测量架构
 
-- 事件/任务/Clock/Collector 的层次完整；新增 `slowestPhases`/`slowestTasks` 是有界前十诊断；
-- `aggregateComplete` 与 `detailComplete` 分离，允许纯明细容量截断保留产品判定；
-- Worker 批次有连续 ID/ack/flushed；最终 evidence 有类型化失败原因；比上一轮更可诊断；
-- `paired-webview-profile-v1` 把 WebView IndexedDB 纳入 cold/warm 身份，v1→v2 迁移文档已写入 `docs/benchmark.md`；
-- `review-partial` 增加了独立复核记录、受控原因、候选摘要绑定、首次/上一基线约束，解决了上一轮“任意布尔自报”的主要问题；但复核身份仍是字符串，不是密码学身份，属于流程边界。
-
-### 产品修复
-
-- B1-3 裸 7z 现在使用通用 source pack，不再依赖线路 pack 语义；
-- DEV 写槽 8 个、进度/超时续期、B1-4 语义未发布导致 DEV 卡死的修复都在对应服务层，架构方向合理；
-- 但这些是产品行为修复，本轮没有完整 L0 原生矩阵，不能仅凭单元测试宣称性能/正确性闭环。
+- `aggregateComplete` 与 `detailComplete` 分离；纯容量截断进入 aggregate-only，slow 榜仅诊断，文档与测试一致。
+- `finalEvidenceIssue` 区分 active-tasks/progress-drift/session-mismatch；late task 有界等待和进度快照。
+- `cacheProofPolicy=source-failure-catalog-v1` 和 `paired-webview-profile-v1` 已进入身份；旧基线不可直接比较。
+- `recover-batch` 增加了 controller ownership、recovery 标记和 gate 拒绝，状态机比上一轮完整。
+- `review-partial` 的双人复核、受控原因、候选摘要绑定和 previous-baseline 约束保持完整；复核者身份仍是字符串，属于流程边界。
 
 ### 架构结论
 
-整体分层和测量核心仍健康。当前主要风险不是边界破坏，而是**契约测试与实现口径不一致（CI）**和**cold profile 冷态校验缺口**；L1 已有 826d876 原生结果，L0 矩阵仍不完整。
+分层、测量核心和报告边界健康；上一轮指出的代码问题均已关闭。当前主要风险是**产品大改动的原生证据**和**L0/L1 矩阵/基线验收**，不是测量框架的新代码缺陷。
 
 ---
 
-## 7. 验证
+## 5. 验证
 
-| 命令 | 结果 |
+| 命令/证据 | 结果 |
 |---|---|
-| `npm run test:measurement-tools` | 50/50 通过 |
-| `npx vitest run src/measurement/__tests__/core.test.ts` | **1 failed / 13 passed** |
-| `npm test`（CI 同口径） | **1 failed / 1476 passed / 3 skipped** |
+| `npm test` | 179 files / 1480 passed / 3 skipped，exit 0 |
+| `npm run test:measurement-tools` | 57/57 |
+| `npm run test:acceptance-tools` | 4/4 |
 | `npx tsc --noEmit` | 通过 |
 | `npm run check:engineering-boundaries` | 通过 |
-| `output/substation-survey-826d876` | 6 PASS / 2 PARTIAL，s03 通过 |
-| `output/line-survey-826d876` | 12/12 PASS |
-
-L0 仍未形成完整矩阵（`l0-500-survey-505b10c` 为 5 PASS/2 PARTIAL/1 INCONCLUSIVE/1 FAIL/1 SKIPPED，`35kV-survey-826d876` 仍 RUNNING）；aggregate-only 和 L0 的真实表现仍待开发者本地复跑。
+| `substation-survey-826d876` | 6 PASS/2 PARTIAL，s03 通过（93df24f 之前） |
+| `line-survey-826d876` | 12/12 PASS（93df24f 之前） |
 
 ---
 
-## 8. 相关位置
+## 6. 相关位置
 
-- `desktop/src/measurement/__tests__/core.test.ts:100-106`：CI 失败测试。
-- `packages/measurement-core/src/collector.ts:109-113`：slow phase 只收 interval。
-- `desktop/scripts/benchmarks/cache-roots.mjs`、`native-run.mjs:56-60`：paired profile 与 cold 校验。
-- `desktop/scripts/benchmarks/completion.mjs`、`native-run.mjs:230-270`：final evidence/late task。
-- `desktop/src/measurement/hostWorker.ts:143-151`：active 尾批诊断。
-- `docs/benchmark.md`、`docs/architecture/measurement.md`：v2/aggregate-only 契约。
+- `desktop/src/measurement/__tests__/hostWorker.test.ts`：queued-never-started 断言。
+- `desktop/scripts/benchmarks/cache-roots.mjs`：cold/warm paired profile 校验。
+- `desktop/scripts/benchmarks/profiles.mjs`、`docs/benchmark.md`：catalog 与 LOD1 维度分离。
+- `desktop/scripts/benchmarks/batch.mjs`、`compare.mjs`、`cli.mjs`：recover-batch ownership/recovery gate。
+- `docs/open-issues.md` O-17：rootSlice 原生复核。
+- `research/plan-status.md`：L0/L1 矩阵与基线验收。

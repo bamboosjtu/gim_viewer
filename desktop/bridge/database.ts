@@ -174,6 +174,30 @@ export function packBinaryCacheWrite(
   return output;
 }
 
+/** Assemble a raw cache request from separate payload slices in one copy. */
+export function packBinaryCacheWriteParts(
+  projectId: number,
+  entryPath: string,
+  parts: readonly Uint8Array[],
+  sourceGimSha256?: string,
+): Uint8Array {
+  const metadata = new TextEncoder().encode(JSON.stringify({
+    project_id: projectId,
+    entry_path: entryPath,
+    ...(sourceGimSha256 ? { source_gim_sha256: sourceGimSha256 } : {}),
+  }));
+  if (metadata.byteLength > 16 * 1024) throw new Error('缓存写入 metadata 过大');
+  const payloadBytes = parts.reduce((total, part) => total + part.byteLength, 0);
+  if (!Number.isSafeInteger(payloadBytes)) throw new Error('缓存写入长度无效');
+  const output = new Uint8Array(9 + metadata.byteLength + payloadBytes);
+  output.set([0x47, 0x49, 0x4d, 0x42, 1], 0);
+  new DataView(output.buffer).setUint32(5, metadata.byteLength, true);
+  output.set(metadata, 9);
+  let offset = 9 + metadata.byteLength;
+  for (const part of parts) { output.set(part, offset); offset += part.byteLength; }
+  return output;
+}
+
 function toUint8Array(value: ArrayBuffer | Uint8Array): Uint8Array {
   return value instanceof Uint8Array
     ? value

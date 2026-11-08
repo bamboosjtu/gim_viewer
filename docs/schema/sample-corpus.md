@@ -129,7 +129,7 @@ substation04 的 STD 实际为 SVG，不能据扩展名补造 STD 电气层级�
 | substation-b1-3 | `500-B1-3 三维设计.gim` | 20,348,466 | `f9f36723e80635daafcc7046f50ba3dc1d912c1b0bc0bf2610dc5f188688b8dc` | 裸 7z | 0 | 30 |
 | substation-b1-4 | `500-B1-4 三维设计.gim` | 31,003,932 | `98cb2ff5902022dd4b4d225e57ac755b34f376de44cd5d2b067f37819b951d7a` | GIMPKGS | 776 | 16 |
 
-五包均已按同一验收 identifier 打开；B1-3 的 30 个 IFC 和 7,067 个 occurrence 在冷启动中全部加载成功，但空间索引未在测量窗口内就绪，不能记为完整暖缓存样本。B1-4 的冷结果见性能基线，暖缓存未形成。
+本表记录源文件特征；打开结果与冷暖缓存状态以相同 SHA 的开发者本地 `output/` Benchmark 报告为准。
 
 ## 六线路语义规模与原属性
 

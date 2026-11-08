@@ -28,10 +28,12 @@ fn main() {
     let origin=Instant::now();let mut checkpoint="start".to_string();
     loop {
         if unsafe{WaitForSingleObject(handle,0)}!=258{break}
-        let started=Instant::now();let sample=windows_process_tree::snapshot(pid);
+        let started=Instant::now();let mut sample=windows_process_tree::snapshot(pid);
+        for _ in 0..2 {if sample.available{break}std::thread::sleep(Duration::from_millis(50));sample=windows_process_tree::snapshot(pid);}
         let row=serde_json::json!({"scope":"process-tree","method":"native-independent-private-bytes","quality":"runtime-sampled",
             "availability":if sample.available{"available"}else{"unavailable"},"bytes":sample.private_bytes,"workingSetBytes":sample.rss_bytes,
-            "processCount":sample.process_count,"reason":sample.reason,"source":sample.source,"atMs":origin.elapsed().as_secs_f64()*1000.0,
+            "processCount":sample.process_count,"rootPrivateBytes":sample.root_private_bytes,
+            "reason":sample.reason,"source":sample.source,"atMs":origin.elapsed().as_secs_f64()*1000.0,
             "sampleDelayMs":started.elapsed().as_secs_f64()*1000.0,"clockId":"native-sampler","checkpoint":checkpoint});
         if writeln!(io::stdout(),"{}",row).is_err(){break}let _=io::stdout().flush();
         match receive.recv_timeout(Duration::from_secs(1)){

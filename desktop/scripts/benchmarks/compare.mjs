@@ -24,6 +24,7 @@ export function partialSignature(run){const row=run.defectAssessment??{};
       `source-geometry:${row.sourceSetDigest}:${row.failedOccurrences}`;
 }
 export function runReadiness(run){
+  if(run.recovery)return {outcome:'INCONCLUSIVE',reasons:['recovered-interruption']};
   if(run.environmentSuspend?.code==='INFRA_SUSPEND')return {outcome:'INCONCLUSIVE',reasons:['INFRA_SUSPEND']};
   if(run.inputIntegrity==='corrupt')return {outcome:'INPUT_ERROR',reasons:['INPUT_CORRUPT']};
   if(run.crashed)return {outcome:'FAIL',reasons:['native-process-crashed']};
@@ -51,16 +52,17 @@ export function runReadiness(run){
       !/^[a-f0-9]{64}$/.test(run.semanticDigest??run.evidence?.semanticDigest??'')||
       !/^[a-f0-9]{64}$/.test(run.pendingDigest??'')||!Number.isSafeInteger(run.pendingCount)||run.pendingCount<0||
       !Number.isSafeInteger(run.pendingSourceCount)||run.pendingSourceCount<0))reasons.push('pending-evidence-missing');
-  if(run.measurementComplete!==true)reasons.push('measurement-incomplete');
+  if(run.measurementComplete!==true){reasons.push('measurement-incomplete');
+    for(const item of run.measurementIncompleteItems??[])reasons.push(`measurement:${item}`);}
   if((run.version==='gim-benchmark-v1'&&run.measurementLifecycleComplete!==true)||
     run.measurementLifecycleComplete===false||run.measurement?.lifecycleComplete===false)
     reasons.push('measurement-lifecycle-incomplete');
-  if(run.version==='gim-benchmark-v1'&&run.processSampling?.complete!==true)reasons.push('native-process-memory-incomplete');
   if(run.conditions?.profileDigest==='unfrozen')reasons.push('profile-not-frozen');
   if(run.cacheVerified!==true&&!(run.correctness==='partial'&&run.defectAssessment?.kind==='input-variant'))
     reasons.push(run.cacheFailureCode??'cache-state-unverified');
   if(!run.processInstanceId)reasons.push('process-identity-missing');
-  for(const name of run.requiredMetrics??[])if(!Number.isFinite(run.metrics?.[name])||run.metrics[name]<0)reasons.push(`missing-metric:${name}`);
+  for(const name of run.requiredMetrics??[])if(name!=='processPrivatePeakBytes'&&
+    (!Number.isFinite(run.metrics?.[name])||run.metrics[name]<0))reasons.push(`missing-metric:${name}`);
   if(!run.requiredMetrics?.length)reasons.push('required-metrics-missing');
   return {outcome:reasons.length?'INCONCLUSIVE':run.correctness==='partial'?'PARTIAL':'PASS',reasons};
 }
@@ -75,12 +77,46 @@ function checkGroup(runs){
     const reference=partialSignature(runs[0]);
     if(runs.some(run=>partialSignature(run)!==reference))reasons.push('mixed-partial-coverage');
   }
+  const calibration=runs[0]?.conditions?.environmentCalibration;
+  if(calibration&&runs.some(run=>{
+    const row=run.conditions?.environmentCalibration;
+    return row?.version!==calibration.version||row.availability==='unavailable'||
+      !Number.isFinite(row.cpuMs)||!Number.isFinite(calibration.cpuMs)||
+      row.cpuMs/calibration.cpuMs<0.85||row.cpuMs/calibration.cpuMs>1.15;
+  }))reasons.push('mixed-environment-calibration');
   return {outcome:reasons.length?'INCONCLUSIVE':checks[0]?.outcome??'INCONCLUSIVE',reasons:[...new Set(reasons)]};
+}
+function memoryComparisonIssue(run){
+  if(!(run.requiredMetrics??[]).includes('processPrivatePeakBytes'))return null;
+  return run.memoryEvidenceComplete===false||run.processSampling?.complete===false||
+    !Number.isFinite(run.metrics?.processPrivatePeakBytes)
+    ?'memory-evidence-incomplete':null;
+}
+function calibrationComparison(baseline,candidate){
+  const left=baseline[0]?.conditions?.environmentCalibration;
+  const right=candidate[0]?.conditions?.environmentCalibration;
+  if(!left&&!right)return {ratios:null,issue:null};
+  if(left?.version!=='gim-batch-calibration-v1'||right?.version!=='gim-batch-calibration-v1'||
+    left.method!==right.method||left.checksum!==right.checksum||
+    left.availability==='unavailable'||right.availability==='unavailable')
+    return {ratios:null,issue:'environment-calibration-unavailable'};
+  const ratios={};
+  for(const key of ['cpuMs','writeSyncMs','readWarmMs']){
+    if(!(left[key]>0&&right[key]>0))return {ratios:null,issue:'environment-calibration-unavailable'};
+    ratios[key]=right[key]/left[key];
+  }
+  const issue=Object.entries(ratios).some(([key,ratio])=>
+    key==='cpuMs'?(ratio<0.85||ratio>1.15):(ratio<0.7||ratio>1.3))
+    ?'environment-calibration-drift':null;
+  return {ratios,issue};
 }
 export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidate=[],requireContentEvidence=false}={}){
   const b=checkGroup(baseline),c=checkGroup(candidate),reasons=[...b.reasons,...c.reasons];
   if(b.outcome==='FAIL'||c.outcome==='FAIL')return {outcome:'FAIL',reasons};
   if(baseline.length!==candidate.length)reasons.push('repetition-count-differs');
+  for(const run of [...baseline,...candidate]){const issue=memoryComparisonIssue(run);if(issue)reasons.push(issue);}
+  const calibration=calibrationComparison(baseline,candidate);
+  if(calibration.issue)reasons.push(calibration.issue);
   if(b.outcome!==c.outcome)reasons.push('coverage-status-differs');
   if(b.outcome==='PARTIAL'&&c.outcome==='PARTIAL'&&partialSignature(baseline[0])!==partialSignature(candidate[0]))
     reasons.push('partial-coverage-differs');
@@ -94,14 +130,14 @@ export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidat
       else if(contentSignature(baseline[0])!==contentSignature(candidate[0]))reasons.push('dev-content-digest-differs');
     }
   }
-  if(reasons.length)return {outcome:'INCONCLUSIVE',reasons:[...new Set(reasons)],metrics:[]};
+  if(reasons.length)return {outcome:'INCONCLUSIVE',reasons:[...new Set(reasons)],calibrationRatio:calibration.ratios,metrics:[]};
   const metrics=baseline[0].requiredMetrics.map(name=>{
     const base=median(baseline.map(r=>r.metrics[name])),next=median(candidate.map(r=>r.metrics[name]));
     return {name,baseline:base,candidate:next,regression:base===0?(next===0?0:null):next/base-1,threshold:0.10};
   });
   const regressions=metrics.filter(m=>m.regression===null||m.regression>0.10);
-  if(!regressions.length)return {outcome:b.outcome,reasons:[],metrics};
-  if(!retestBaseline.length||!retestCandidate.length)return {outcome:'INCONCLUSIVE',requiresRetest:true,reasons:['regression-retest-required'],metrics};
+  if(!regressions.length)return {outcome:b.outcome,reasons:[],calibrationRatio:calibration.ratios,metrics};
+  if(!retestBaseline.length||!retestCandidate.length)return {outcome:'INCONCLUSIVE',requiresRetest:true,reasons:['regression-retest-required'],calibrationRatio:calibration.ratios,metrics};
   if(identityKeys.some(key=>retestBaseline[0]?.conditions?.[key]!==baseline[0]?.conditions?.[key]||retestCandidate[0]?.conditions?.[key]!==candidate[0]?.conditions?.[key])
     ||new Set([...baseline,...candidate,...retestBaseline,...retestCandidate].map(r=>r.processInstanceId)).size!==baseline.length+candidate.length+retestBaseline.length+retestCandidate.length)
     return {outcome:'INCONCLUSIVE',reasons:['retest-conditions-or-processes-differ'],metrics};
@@ -136,9 +172,15 @@ export function partialReviewIssue(review,candidate){
   return null;
 }
 export function approveBaseline(candidate,approver,{acceptPartial=false,partialReview=null,firstPartial=false,previousBaseline=null}={}){
+  if(candidate.recovery||candidate.runs?.some(run=>run.recovery))throw Error('Recovered interruption cannot become a baseline');
   if(!reviewerValid(approver)||!['PASS','PARTIAL'].includes(candidate.outcome)||candidate.outcome==='PARTIAL'&&!acceptPartial||candidate.selectionFrozen!==true||!candidate.runs?.length)throw Error('Complete frozen candidate and explicit approver required');
   const groups=new Map();for(const run of candidate.runs){const key=digest(run.conditions);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(run);}
   if([...groups.values()].some(runs=>!['PASS','PARTIAL'].includes(checkGroup(runs).outcome)))throw Error('Baseline runs are incomplete');
+  if(candidate.runs.some(run=>memoryComparisonIssue(run)))throw Error('Baseline memory evidence is incomplete');
+  if(candidate.runs.some(run=>run.conditions?.measurementVersion==='gim-measurement-v2'&&
+    (run.conditions?.environmentCalibration?.version!=='gim-batch-calibration-v1'||
+      run.conditions.environmentCalibration.availability==='unavailable')))
+    throw Error('Baseline environment calibration is incomplete');
   if(candidate.outcome==='PARTIAL'&&candidate.runs.some(run=>run.correctness==='partial'&&run.defectAssessment?.status!=='evidence-backed'))
     throw Error('Partial coverage lacks runtime evidence');
   if(candidate.outcome==='PARTIAL'){

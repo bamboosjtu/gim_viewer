@@ -91,7 +91,8 @@ try{
     if(!option('baseline')||!option('candidate'))throw Error('--baseline and --candidate are required');
     const baseline=read(option('baseline')),candidate=read(option('candidate'));
     const approvalIssue=command==='gate'?baselineApprovalIssue(baseline):null;
-    const result=approvalIssue?{outcome:'INCONCLUSIVE',reasons:[approvalIssue]}:compareSuites(baseline.runs??[baseline],candidate.runs??[candidate],{
+    const recoveryIssue=baseline.recovery||candidate.recovery?'recovered-interruption':null;
+    const result=approvalIssue||recoveryIssue?{outcome:'INCONCLUSIVE',reasons:[approvalIssue??recoveryIssue]}:compareSuites(baseline.runs??[baseline],candidate.runs??[candidate],{
       retestBaseline:option('retest-baseline')?read(option('retest-baseline')).runs:[],retestCandidate:option('retest-candidate')?read(option('retest-candidate')).runs:[],
       requireContentEvidence:command==='gate',
     });

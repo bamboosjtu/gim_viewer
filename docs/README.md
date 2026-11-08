@@ -1,6 +1,6 @@
 # GIM Viewer 文档
 
-本目录是 GIM Viewer 的长期文档：只描述**当前实现**、**当前契约**和**当前验收状态**，不保存研究过程、历史方案或未复核推断。桌面版本 `0.2.0`，Android 线路版 `0.1.6 Preview`；版本以 `desktop/package.json` 与 `app/package.json` 为准。
+本目录是 GIM Viewer 的长期文档：只描述**当前实现**、**当前契约**和**当前验收状态**，不保存研究过程、历史方案或未复核推断。桌面版本 `0.2.1`，Android 线路版 `0.1.6 Preview`；版本以 `desktop/package.json` 与 `app/package.json` 为准。
 
 文档以源码、测试和实际运行证据为准。研究材料在 `research/`，未关闭缺陷在[问题与限制](open-issues.md)；工程样本放在 `demo/`（不随仓库分发），性能输入登记在 [`benchmarks/`](../benchmarks/README.md)。
 
@@ -16,7 +16,7 @@
 | 改 IFC / Spatial | [IFC 运行时](architecture/ifc-runtime.md) | [语义模型](schema/semantic-model.md) → [缓存域](architecture/caches.md) |
 | 改线路地图或 Android 线路语义 | [线路与移动端](architecture/line-mobile.md) | [线路 MOD](schema/powerline-mod.md) → [移动端规格](mobile-spec.md) |
 | 改选择、高亮、属性面板 | [选择与交互](architecture/selection.md) | [表示与绑定](architecture/representations.md) |
-| 跑性能测试或本地 Benchmark | [性能测试指南](performance-guide.md) | [Benchmark CLI](benchmark.md) → [性能基线](performance.md) |
+| 跑性能测试或本地 Benchmark | [性能测试指南](performance-guide.md) | [Benchmark CLI](benchmark.md)；结果在本地 `output/` |
 | 核对验证门禁与证据边界 | [验证](validation.md) | [开发指南](development.md) |
 | 复核 GIM 格式与样本 | [Schema](schema/README.md) | [样本台账](schema/sample-corpus.md) |
 | 查术语 | [术语表](glossary.md) | — |
@@ -85,7 +85,6 @@
 | [验证](validation.md) | 证据分层、必须成立的不变量、自动门禁、真实复核与覆盖率 |
 | [性能测试指南](performance-guide.md) | 怎么测：SLO 定义、冷/暖步骤、手工与 CLI 路线 |
 | [Benchmark CLI](benchmark.md) | 批量 CLI、子命令、注册表、报告与状态/退出码 |
-| [性能基线](performance.md) | 最近一次快照的结论、未达标项与验收边界；不维护历史矩阵 |
 | [测量与 Benchmark](architecture/measurement.md) | 测量协议、采集面、完整性口径 |
 
 ## 仓库内其他文档
@@ -112,7 +111,7 @@
 | 缓存域版本与失效范围 | [缓存域](architecture/caches.md) |
 | 样本身份、SHA 与统计 | [样本台账](schema/sample-corpus.md) |
 | 未关闭缺陷与已接受限制 | [问题与限制](open-issues.md) |
-| 最近一次性能快照的结论 | [性能基线](performance.md) |
+| 各轮性能测量结果 | 开发者本地 `output/` 报告（不随仓库分发） |
 | 命令与工作区约定 | [开发指南](development.md) |
 | 验证证据规则 | [验证](validation.md) |
 | 目录编码与生成表 | `desktop/src/engineering/catalog.json` 与[机器目录索引](engineering/catalogs/catalog-index.md) |
@@ -136,9 +135,9 @@
 - 修改 XML primitive：更新[XML primitive](schema/xml-primitives.md)与[XML MOD](schema/substation-mod.md)，保留“解析成功≠可渲染”的边界。
 - 修改持久化含义：只 bump 受影响域，更新[缓存域](architecture/caches.md)，不复制旧版本。
 - 修改用户可见行为：更新[桌面软件规格](software-spec.md)或[移动端规格](mobile-spec.md)，并同步[问题与限制](open-issues.md)。
-- 修改样本或性能口径：更新[样本台账](schema/sample-corpus.md)/[性能测试指南](performance-guide.md)，结果只写[性能基线](performance.md)。
+- 修改样本或性能口径：更新[样本台账](schema/sample-corpus.md)/[性能测试指南](performance-guide.md)；实测结果由开发者本地 `output/` 报告保存。
 
-提交前在 `desktop/` 执行：
+需要排查文档链接或目录索引时，可在 `desktop/` 手动执行；这些检查不是 CI 门禁：
 
 ```powershell
 npm run check:engineering-docs   # 链接/锚点、术语、目录计数、缺陷 ID、首页覆盖、标题/表格/目录结构

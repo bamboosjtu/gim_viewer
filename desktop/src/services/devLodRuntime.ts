@@ -114,6 +114,10 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
       return;
     }
     if (this.commitTimer) return;
+    const firstViewBasePending = (this.commits[0]?.priority ?? Infinity) <= 1;
+    // During first-view L0 admission, do not impose a fixed 16 ms gap on
+    // every small placement. Bound each turn to 8 ms and yield to the event
+    // loop; background commits use the less aggressive cadence.
     this.commitTimer = setTimeout(() => {
       this.commitTimer = null;
       const started = performance.now();
@@ -127,10 +131,10 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
           !commit.deferWhileMoving || commit.priority === 0 || now - commit.queuedAt >= 1000);
         if (index < 0) break;
         this.commits.splice(index, 1)[0].run();
-        if (performance.now() - started >= 4) break;
+        if (performance.now() - started >= (firstViewBasePending ? 8 : 6)) break;
       }
       if (this.commits.length) this.drainCommits();
-    }, 16);
+    }, firstViewBasePending ? 0 : 8);
   }
   private wanted = new Set<string>();
   private displayedPins = new Map<string, number>();
@@ -157,7 +161,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
   constructor(private state: AppState, private ctx: ViewerContext, private session: ProjectLoadSession, private status: (text: string, detail?: string) => void) {
     this.sourceIdentity = session.sourceSha256 ?? '';
     this.artifactWriter = new DevLodArtifactWriter({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), requestReady: () => this.requestReady(), taskIdentity: (...args) => this.taskIdentity(...args), recordCacheDecision: (...args) => this.recordCacheDecision(...args) });
-    this.templateStore = new DevLodTemplateStore({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), worker: () => this.worker, key: (...args) => this.key(...args), pinned: () => this.pinned(), isWanted: key => this.wanted.has(key), taskIdentity: (...args) => this.taskIdentity(...args), catalogHint: dev => this.catalogHint(dev), markEmptyDev: dev => this.markEmptyDev(dev), recoverMissingSources: (...args) => this.recoverMissingSources(...args), prepareMissingTemplateSources: dev => this.prepareMissingTemplateSources(dev), recordCacheDecision: (...args) => this.recordCacheDecision(...args), persistsTemplate: (...args) => this.persistsTemplate(...args), persistArtifact: (...args) => this.persistArtifact(...args), reportDiagnostic: diagnostic => setGeometryDiagnostic(this.state, diagnostic) });
+    this.templateStore = new DevLodTemplateStore({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), memoryPressure: () => this.memoryPressure, worker: () => this.worker, key: (...args) => this.key(...args), pinned: () => this.pinned(), isWanted: key => this.wanted.has(key), taskIdentity: (...args) => this.taskIdentity(...args), catalogHint: dev => this.catalogHint(dev), markEmptyDev: dev => this.markEmptyDev(dev), recoverMissingSources: (...args) => this.recoverMissingSources(...args), prepareMissingTemplateSources: dev => this.prepareMissingTemplateSources(dev), recordCacheDecision: (...args) => this.recordCacheDecision(...args), persistsTemplate: (...args) => this.persistsTemplate(...args), persistArtifact: (...args) => this.persistArtifact(...args), reportDiagnostic: diagnostic => setGeometryDiagnostic(this.state, diagnostic) });
     this.sources = new DevLodSourceWorkset({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), memoryPressure: () => this.memoryPressure, hasMemorySources: () => this.state.currentFiles != null, ifcPending: () => this.state.ifcBackgroundPending, worker: () => this.worker });
     this.readiness = new DevLodReadiness(() => this.rows, (dev, lod) => this.key(dev, lod), message => { this.diagnostics.errors.push(message); if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift(); });
     this.catalogDone = new Promise(resolve => { this.finishCatalog = resolve; });
@@ -165,6 +169,8 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     window.addEventListener('gim-toggle-background-detail', this.pauseEvent);
   }
   private current = () => !this.released && this.state.isCurrentSession(this.session);
+  /** Benchmark-only caller keeps the raw DEV path in its private run folder. */
+  templateDiagnostics() { return this.templateStore.templateDiagnostics(); }
   /** Apply the strongest available browser/process-tree pressure signal. */
   private applyMemoryPressure(): void {
     this.memoryPressure = maxMemoryPressure(this.jsMemoryPressure, this.externalMemoryPressure);
@@ -297,7 +303,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
           devPath: dev, sourceBounds: null, boundsQuality: 'unknown', primitiveCounts: {}, unsupportedTypes: [],
           instanceKey: `dev:${dev}#${seed.id}`, rootOccurrence: seed.id, placementMatrix: seed.placementMatrix, templateStatus: 'unrequested'
         },
-        inView: true, box: null, desired: 0, browseDesired: 0, displayed: 0
+        inView: true, box: null, desired: 0, browseDesired: 0, displayed: 0, catalogResolved: false
       };
       this.rows.set(seed.id, row);
       this.updateReadiness(row);
@@ -366,7 +372,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         const box = bounds.sourceBounds ? boxTuple(bounds.sourceBounds).applyMatrix4(
           (this.anchor?.clone() ?? new THREE.Matrix4()).multiply(createSourcePlacementMatrix(matrix))) : null;
         const row = this.rows.get(seed.id)!;
-        row.entry = { ...entry, templateStatus: emptySource ? 'empty' : row.entry.templateStatus }; row.box = box;
+        row.entry = { ...entry, templateStatus: emptySource ? 'empty' : row.entry.templateStatus }; row.box = box; row.catalogResolved = true;
         this.viewIndex.set(seed.id, box);
         this.updateReadiness(row);
         if (emptySource) this.diagnostics.emptyOccurrences++;
@@ -504,6 +510,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     this.diagnostics.viewIndex = { ...this.viewIndex.diagnostics };
     const wanted = new Set<string>();
     this.wanted = wanted;
+    const requests: Array<Array<{row: Occurrence; lod: DeviceLod; priority: number}>> = [[], [], [], []];
     for (const row of this.rows.values()) {
       const selected = row.entry.rootOccurrence === this.selected;
       const terminal = row.entry.templateStatus === 'empty' || row.entry.templateStatus === 'unsupported';
@@ -527,11 +534,21 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
       const lod = this.fineRequested.has(row.entry.rootOccurrence) ? 2 : browseLod;
       row.desired = lod;
       this.updateReadiness(row);
+      // A seed with no catalog result has no reliable visibility. Starting
+      // thousands of unknown L0 requests here fills the template queue before
+      // the first actual in-view bounds arrive. Direct selection remains live.
+      if (row.catalogResolved === false && !selected) continue;
       const key = this.key(row.entry.devPath, lod); wanted.add(key);
       // Visible L0 outranks offscreen L0; offscreen still remains wanted and
       // is reached later (aged priority prevents permanent starvation).
       const priority = selected ? 0 : lod === 0 ? (row.inView ? 1 : 3) : 2;
-      if (row.key !== key && row.failedKey !== key) void this.render(row, lod, priority).catch(e => this.failed(row, e, key));
+      if (row.key !== key && row.failedKey !== key) requests[priority].push({row,lod,priority});
+    }
+    // Admit visible base work before offscreen templates can occupy the host
+    // slots. Preserve source order inside each priority bucket.
+    for (const bucket of requests) for (const {row,lod,priority} of bucket) {
+      const key = this.key(row.entry.devPath,lod);
+      void this.render(row,lod,priority).catch(e => this.failed(row,e,key));
     }
     this.worker?.cancelQueued(wanted); this.templateStore.templates.trim(this.pinned());
     for (const [key, waiter] of this.templateStore.templateWaiters) if (!wanted.has(key)) {

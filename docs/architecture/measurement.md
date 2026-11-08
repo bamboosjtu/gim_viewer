@@ -1,6 +1,6 @@
 # 测量与本地 Benchmark
 
-测量协议为 `gim-measurement-v1`。纯 TypeScript 核心位于 `packages/measurement-core`，不依赖 DOM、Tauri、Three 或应用状态。桌面适配器位于 `desktop/src/measurement`；原有 `perfTimings` 继续提供产品阶段与诊断，其任务阶段和原生进程内存检查点接入同一 Collector。
+测量协议为 `gim-measurement-v2`。纯 TypeScript 核心位于 `packages/measurement-core`，不依赖 DOM、Tauri、Three 或应用状态。桌面适配器位于 `desktop/src/measurement`；原有 `perfTimings` 继续提供产品阶段与诊断，其任务阶段和原生进程内存检查点接入同一 Collector。
 
 当前工作区采用**源码内联**：桌面端只通过 `desktop/src/measurement/core.ts` 引用测量核心源码。`check:engineering-boundaries` 禁止其他桌面模块深层引用该包，并禁止核心向桌面、DOM、Tauri、Three 或外部包导入。`package.json` 的 `exports`/`dist` 尚不是产品实际消费的安装契约；SDK 阶段会单独验证打包、声明文件和独立安装后再改为包名消费。
 
@@ -12,7 +12,7 @@
 
 任务有 queued、started、produced、ended 事件。终止会结算尚未开始和正在运行的任务；迟到结束不重复结算。produced 表示 Worker 计算已产出结果，不能代替主线程消费、场景提交、持久化完成。现有业务 RPC、超时、取消、Transferable 和池调度仍由原有实现管理，测量不决定任务是否有效。
 
-`detailComplete` 描述完整时间线：明细容量截断使它为 false。`aggregateComplete` 保留阶段统计和任务总量，仍要求无序号间隙、非法事件、聚合组溢出、外来 run、重复序号或 Worker 批次丢失；只有纯明细容量截断可以降为 `aggregate-only` 而不改变产品 PASS/PARTIAL。此时慢任务/慢阶段榜仅供诊断，不是完整时间线或基线必需证据。`lifecycleComplete` 单独要求没有活动任务、无授权 Worker 中断、异常终止、超时、无理由取消或异常迟到事件。仅 queued、从未 started 的请求随正常 Worker 终止记为 `cancelled-before-start`，不伪造执行中断；已 started 的任务仍须有受控取消或完整结束。项目关闭/切换会先用受控原因登记取消，再终止对应的在途任务；明确的 AbortError 任务结束也记录 `abort-error`。已取消任务的受控迟到确认可计数但不重复结算。原生 `measurementComplete` 要求聚合、任务生命周期及必要采样完整。
+`detailComplete` 描述完整时间线：明细容量截断使它为 false。`aggregateComplete` 保留阶段统计和任务总量，仍要求无序号间隙、非法事件、聚合组溢出、外来 run、重复序号或 Worker 批次丢失；只有纯明细容量截断可以降为 `aggregate-only` 而不改变产品 PASS/PARTIAL。此时慢任务/慢阶段榜仅供诊断，不是完整时间线或基线必需证据。`lifecycleComplete` 单独要求没有活动任务、无授权 Worker 中断、异常终止、超时、无理由取消或异常迟到事件。仅 queued、从未 started 的请求随正常 Worker 终止记为 `cancelled-before-start`，不伪造执行中断；已 started 的任务仍须有受控取消或完整结束。项目关闭/切换会先用受控原因登记取消，再终止对应的在途任务；明确的 AbortError 任务结束也记录 `abort-error`。已取消任务的受控迟到确认可计数但不重复结算。原生 `measurementComplete` 要求聚合与任务生命周期完整；进程树和 Worker 堆采样单独形成 `memoryEvidenceComplete`。产品打开结论不因内存探针缺口降为 INCONCLUSIVE，正式内存比较与基线认可仍要求该证据完整。
 
 ## 采集面
 
@@ -57,6 +57,8 @@ Windows 固定运行时的文件既需要 AppContainer 读取权限，也不能�
 
 高频解析与图元阶段在 Worker 内生成可合并的调用直方图，保留调用数、累计时长和分位区间。Benchmark 的 counter/memory 事件先精确进入 Collector 聚合、资源账本和观测峰值，再按 `task-phase-timeline-v2` 策略省略其逐事件 CDP 明细；Worker 批次带连续 ID、宿主确认和任务结束标记，任务、阶段、Worker 和时钟事件再通过带确认的 CDP binding 传输。报告列出按类型聚合的明细数、真正截断数和可用的前十个慢阶段；纯容量截断标记 `aggregate-only`，丢失 Worker 批次或必要聚合仍为 INCONCLUSIVE。`diagnostic` 模式仍传全部可用事件。进程树使用独立原生采样器，即使 WebView 主线程阻塞也继续采样。
 
+DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位占用者，并记录排队优先级、入队/获槽容量与深度、缓存读取、Worker 请求与派发排队、输入预算和 GLB 字节。`templateQueue`、`templateSlotOccupancy`、`sceneCommitQueue` 与 `placementCommit` 分列。DEV 路径只留在工作区私有诊断文件；可分享报告以 `sourceId` 关联，不把并发累计耗时当作端到端时间。
+
 一次线路 Worker 转移可能包含万级 ArrayBuffer。资源账本仍逐 backing buffer 去重并结算；普通 Benchmark 在超过 8 个缓冲时，把该批的 acquire/transfer/release 各压成一条带 `buffers` 和 `referencedBytes` 的聚合事件。任务/阶段明细缓冲为 32,768 条，真正截断仍明确记录。`diagnostic` 模式保留逐缓冲事件，发生丢弃时仍报告不完整。
 
 - **线路持久化。** 首屏后持久化有 `idle/saving/saved/failed` 会话状态；原生 Benchmark 等待 SQLite finish 提交，失败为明确的失败状态。`cachePublishMs` 取线路完成时刻而非首屏后的静默窗口。
@@ -87,6 +89,6 @@ Windows 固定运行时的文件既需要 AppContainer 读取权限，也不能�
 
 - [Benchmark CLI](../benchmark.md)
 - [性能测试指南](../performance-guide.md)
-- [性能基线](../performance.md)
+- [Benchmark CLI](../benchmark.md)
 - [验证](../validation.md)
 - [开发指南](../development.md)

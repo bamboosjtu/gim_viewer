@@ -94,7 +94,7 @@ Python 工具位于 `tools/`，各自维护 `.venv` 与打包配置；构建、�
 - 不读取、写入或清理系统目录作为测试数据；Node 测试入口通过 `scripts/with-workspace-temp.mjs` 设置临时目录。
 - `demo/` 是开发者自备模型目录，不进入 Git；基础功能样本使用 [`desktop/local-tests/mini-samples.example.json`](../desktop/local-tests/mini-samples.example.json)，缺样本明确跳过。
 - 性能样本按形成目的登记在 [`benchmarks/l0/`、`l1/`、`l2/`](../benchmarks/README.md)，GIM 文件不随仓库分发。
-- 样本缺失导致的 skip 不是通过；`performance.md` 只代表作者注明环境下的结果。
+- 样本缺失导致的 skip 不是通过；本地 Benchmark 报告只代表所记录的构建、样本和运行环境。
 
 ## 持久化与运行时资产
 
@@ -111,7 +111,7 @@ Python 工具位于 `tools/`，各自维护 `.venv` 与打包配置；构建、�
 - 写作约定、文档地图与单一权威表见[文档首页](README.md)；
 - 研究材料在 `research/`，复核后把稳定结论并入 `docs/`，不把研究候选写成产品事实。
 
-提交文档前在 `desktop/` 执行：
+需要排查链接或生成目录索引时，可在 `desktop/` 手动执行（CI 不以文档检查阻断构建）：
 
 ```powershell
 npm run check:engineering-docs

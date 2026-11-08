@@ -447,7 +447,7 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
     return;
   }
   let extracted = extractedSource.files;
-  if (extractedSource.cacheProjectId != null) {
+  if (extractedSource.cacheProjectId != null && !extractedSource.preHydrated) {
     const endHydrate = perfBegin('变电小文件批量物化', undefined, perfSession);
     const hydrated = await hydrateNativeSmallFiles(
       extracted,

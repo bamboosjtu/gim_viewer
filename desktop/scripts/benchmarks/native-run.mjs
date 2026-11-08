@@ -17,6 +17,7 @@ import {assessCorrectness} from './correctness.mjs';
 import {assertBenchmarkExecutable} from './benchmark-build-attestation.mjs';
 import {classifyWorkerHeapEvidence} from './worker-memory-completeness.mjs';
 import {confirmedEnvironmentSuspend} from './environment.mjs';
+import {calibrateBatch} from './batch-calibration.mjs';
 
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const reasonCode=error=>/^[a-z][a-z0-9-]{0,80}$/.test(error?.message??'')?error.message:/^CDP /.test(error?.message??'')?'cdp-request-failed':'native-run-failed';
@@ -30,8 +31,12 @@ async function port(){const server=createServer();await new Promise((resolve,rej
 async function stop(child){if(!child?.pid||child.exitCode!==null||child.signalCode!==null)return;spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});await Promise.race([new Promise(resolve=>child.once('exit',resolve)),delay(5000)]);if(child.exitCode===null&&child.signalCode===null)throw Error('Owned application cleanup failed');}
 
 /** Each call owns one native process and raw report; cold/warm share cache and WebView profile. */
-export async function runNative({root,buildManifest,sample,profileDigest='unfrozen',mode='benchmark',scenario='open',cacheState='cold',dataRoot,timeoutMs=300000,doctor=false,actions=[],diagnostic,additionalSamples=[],exercise,signal,onStarted=()=>{}}){
+export async function runNative({root,buildManifest,sample,profileDigest='unfrozen',mode='benchmark',scenario='open',cacheState='cold',dataRoot,timeoutMs=300000,doctor=false,actions=[],diagnostic,additionalSamples=[],exercise,signal,onStarted=()=>{},environmentCalibration=null}){
   if(process.platform!=='win32')throw Error('Native benchmark requires Windows');
+  if(!environmentCalibration&&!doctor){
+    try{environmentCalibration=calibrateBatch(root);}
+    catch{environmentCalibration={version:'gim-batch-calibration-v1',availability:'unavailable',reason:'workspace-calibration-failed'};}
+  }
   if(doctor)sample={sampleId:'capability-probe',sourceSha256:null,paths:[]};
   else if(!/^gim-[a-f0-9]{16}$/.test(sample.sampleId)||!/^[a-f0-9]{64}$/.test(sample.sourceSha256))throw Error('Invalid registered sample identity');
   const build=JSON.parse(readFileSync(workspacePath(root,buildManifest),'utf8'));
@@ -82,6 +87,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   let cdp,sampler,observation=null,cleanupComplete=false,reason=null,finalEvidenceFailure=null,lateBackgroundTasks=false,crashed=false,heapRows=0,processPeak=null,settledMs=null;
   let openAttempted=false,endpointError=null,exitBeforeCleanup=null;
   const heaps=new Map(),heapRecords=new Map(),processSamples=[];let events=0,hostSamplingFailures=0,streamFailures=0,evidence=null,automaticMs=null,cachePublishMs=null,productPeak=null;
+  let templateDiagnostics=[],templateDiagnosticsStatus='not-applicable';
   const processSampler=startProcessSampler(samplerExecutable,child,executable,env,row=>{processSamples.push(row);if(row.availability==='available'&&Number.isFinite(row.bytes))processPeak=Math.max(processPeak??0,row.bytes);});
   const acknowledgements=new Map();let ackRunning=false,ackTimer,hostGapStart=null;const hostSamplingGaps=[];
   const flushAcks=async()=>{
@@ -270,7 +276,19 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
           finalEvidenceFailure==='session-mismatch'?'final-evidence-session-mismatch':'final-evidence-unverified';
     }
   }catch(error){reason=reasonCode(error);try{writeFileSync(join(out,'failure.private.log'),String(error?.stack??error));}catch{logFailures++;}}
-  finally{clearInterval(ackTimer);sampler?.stop();cdp?.close();const sampling=await processSampler.stop();if(sampling.failures)streamFailures+=sampling.failures;
+  finally{
+    if(!doctor&&!exercise){
+      try{
+        if(!cdp||cdp.closed)throw Error('cdp-unavailable');
+        const raw=await cdp.evaluate('globalThis.__gimBenchmark.templateDiagnostics()',undefined,5000);
+        const sources=await cdp.evaluate('globalThis.__gimBenchmark.privateSources()',undefined,5000);
+        if(!Array.isArray(raw)||!sources||typeof sources!=='object')throw Error('template-diagnostics-invalid');
+        writeFileSync(join(out,'template-diagnostics.private.json'),JSON.stringify(raw,null,2));
+        templateDiagnostics=raw.map(({key,devPath,...row})=>({...row,sourceId:sources[devPath]??null}));
+        templateDiagnosticsStatus='available';
+      }catch{templateDiagnosticsStatus='unavailable';}
+    }
+    clearInterval(ackTimer);sampler?.stop();cdp?.close();const sampling=await processSampler.stop();if(sampling.failures)streamFailures+=sampling.failures;
     exitBeforeCleanup={code:child.exitCode,signal:child.signalCode};
     try{await stop(child);cleanupComplete=true;}catch{reason='owned-process-cleanup-failed';}}
   const suspended=reason==='renderer-process-exited'&&confirmedEnvironmentSuspend(
@@ -285,10 +303,32 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   writeFileSync(join(out,'process-memory.json'),JSON.stringify(processSamples,null,2));
   const workerMemory=[...heaps.values()],measurement=observation?.measurement??null;
   const processMemoryComplete=processSamples.length>=2&&processSamples.every(row=>row.availability==='available');
-  const mappedIds=new Set(sampler?.snapshot().mappedWorkerIds??[]);
-  const {missing:missingWorkers,unavailable:unavailableWorkers,shortLived:shortLivedWorkerMemory}=classifyWorkerHeapEvidence(
-    measurement?.workers,new Set(heaps.keys()),heapRecords,mappedIds,sampler?.periodMs??1000);
-  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:'gim-measurement-v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode,scenario,cacheState,
+  const {missing:missingWorkers,unavailable:unavailableWorkers,shortLived:shortLivedWorkerMemory,
+    notApplicable:notApplicableWorkerMemory}=classifyWorkerHeapEvidence(
+    measurement?.workers,new Set(heaps.keys()),heapRecords,sampler?.periodMs??1000);
+  const memoryIncompleteItems=[];
+  if(!processMemoryComplete){
+    if(processSamples.length<2)memoryIncompleteItems.push('process-tree:insufficient-samples');
+    const reasons=new Map();for(const row of processSamples)if(row.availability!=='available'){
+      const key=row.reason??'unavailable';reasons.set(key,(reasons.get(key)??0)+1);
+    }
+    for(const [key,count]of reasons)memoryIncompleteItems.push(`process-tree:${key}:${count}`);
+  }
+  for(const workerId of missingWorkers)memoryIncompleteItems.push(`worker-heap:missing:${workerId}`);
+  for(const row of unavailableWorkers)memoryIncompleteItems.push(`worker-heap:${row.reason??'unavailable'}:${row.workerId}`);
+  const memoryEvidenceComplete=processMemoryComplete&&!missingWorkers.length&&!unavailableWorkers.length;
+  const measurementIncompleteItems=[
+    ...(reason?[`run:${reason}`]:[]),...(streamFailures?[`stream-failures:${streamFailures}`]:[]),
+    ...(!cleanupComplete?['owned-process-cleanup']:[]),
+    ...(measurement?.aggregateComplete===true?[]:['measurement-aggregate']),
+    ...(measurement?.lifecycleComplete===true||measurement?.lifecycleIssues?.length?[]:['lifecycle:unverified']),
+    ...(measurement?.lifecycleIssues??[]).map(item=>`lifecycle:${item}`),
+    ...Object.entries(measurement?.loss??{}).filter(([key,value])=>
+      !['detailEvents','intentionalInterruptedTasks','cancelledBeforeStart','lateCancelledAcks'].includes(key)&&value>0)
+      .map(([key,value])=>`collector:${key}:${value}`),
+    ...((measurement?.activeTasks?.length??0)>0?[`active-tasks:${measurement.activeTasks.length}`]:[]),
+  ];
+  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:'gim-measurement-v2',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode,scenario,cacheState,environmentCalibration,
     sampleId:sample.sampleId,sourceSha256:sample.sourceSha256,profileDigest,routeDigest:digest(actionTargets),viewportDigest:digest(observation?.viewport??null),viewport:observation?.viewport??null,
     workloadDigest:evidence?digest({workload:evidence.progress.workload,semantic:evidence.semanticDigest,placement:evidence.placementDigest}):null};
   const assessment=assessCorrectness(evidence);
@@ -318,8 +358,9 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     cacheVerified:cacheAssessment.published,cachePublished:cacheAssessment.published,coverageComplete:cacheAssessment.coverageComplete??null,
     measurementLifecycleComplete:measurement?.lifecycleComplete===true,
     measurementLifecycleIssues:measurement?.lifecycleIssues??[],
-    measurementComplete:!reason&&processMemoryComplete&&streamFailures===0&&cleanupComplete&&measurement?.aggregateComplete===true&&
-      measurement?.lifecycleComplete===true&&!measurement.activeTasks.length&&!missingWorkers.length&&!unavailableWorkers.length,
+    measurementComplete:!reason&&streamFailures===0&&cleanupComplete&&measurement?.aggregateComplete===true&&
+      measurement?.lifecycleComplete===true&&!measurement.activeTasks.length,
+    measurementIncompleteItems,memoryEvidenceComplete,memoryIncompleteItems,
     requiredMetrics:['firstResponseMs','automaticLoadMs','processPrivatePeakBytes'],metrics:{
       firstResponseMs:observation?.moments.navigationUiReady??observation?.moments.coreSemanticReady??null,
       modelTreeReadyMs:observation?.projectType==='substation'?observation?.moments.engineeringTreeReady??null:
@@ -329,16 +370,20 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       automaticLoadMs:automaticMs,cachePublishMs,
       settledMs,writeDrainMs:automaticMs!==null&&observation?.devArtifactWriteElapsedMs!=null
         ?Math.max(0,observation.devArtifactWriteElapsedMs-automaticMs):null,
-      processPrivatePeakBytes:productPeak??processPeak,wholeRunPrivatePeakBytes:processPeak},
+      processPrivatePeakBytes:processMemoryComplete?productPeak??processPeak:null,
+      wholeRunPrivatePeakBytes:processMemoryComplete?processPeak:null},
     completionDefinition:'automatic-representations-then-cache-and-spatial-terminal-with-quiet-window-not-all-L2',evidence,eventFormat:'context-table-v1',streamFailures,
     actionResults,actionTargetDigests:actionTargets,diagnostic:sampler?.diagnosticResult??null,logFailures,
     exercise:exerciseResult,
-    processSampling:{complete:processMemoryComplete,samples:processSamples.length,available:processSamples.filter(row=>row.availability==='available').length},
+    processSampling:{complete:processMemoryComplete,samples:processSamples.length,
+      available:processSamples.filter(row=>row.availability==='available').length,
+      rootOnlyObservedPeakBytes:Math.max(0,...processSamples.map(row=>Number.isFinite(row.rootPrivateBytes)?row.rootPrivateBytes:0))||null},
     crashed,reason,stalledStage:reason==='product-stalled'?observation?.progress?.engineeringProgress?.stage??'unknown':null,
     environmentSuspend:suspended?{code:'INFRA_SUSPEND',observationGapMs}:null,
     openAttempted,cleanupComplete,measurement,workerMemory,missingWorkerMemory:missingWorkers,
     unavailableWorkerMemory:unavailableWorkers,
-    shortLivedWorkerMemory,sampling:sampler?.snapshot()??null,heapRows,events,hostSamplingFailures,hostSamplingGaps,
+    shortLivedWorkerMemory,notApplicableWorkerMemory,sampling:sampler?.snapshot()??null,heapRows,events,hostSamplingFailures,hostSamplingGaps,
+    templateDiagnostics,templateDiagnosticsStatus,
     capabilityResult:observation?.capabilityResult??null,
     capabilityOutcome:doctor&&processMemoryComplete&&workerMemory.some(w=>w.family==='measurement-probe')&&
       measurement?.detailComplete&&measurement?.lifecycleComplete&&!measurement.activeTasks.length

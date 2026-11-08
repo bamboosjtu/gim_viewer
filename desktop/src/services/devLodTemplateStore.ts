@@ -20,12 +20,21 @@ import { DevTemplateCacheReader } from './devTemplateCacheReader.js';
 import { parseDevGlbAsset } from './glbCacheService.js';
 
 const hash = async (bytes: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes)))].map(v => v.toString(16).padStart(2, '0')).join('');
+export interface TemplateLifecycle {
+  kind?: 'queue'|'occupancy';
+  key:string;devPath:string;taskId?:string;lod?:DeviceLod;priority:number;admittedPriority:number;
+  slotCapacityAtEnqueue:number;slotCapacity:number;slotsBusyAtEnqueue:number;queueDepthAtEnqueue:number;slotsBusyAtAdmit:number;
+  queueWaitMs:number;slotOccupancyMs:number;cacheReadMs:number;workerAwaitMs:number;
+  workerQueueWaitTotalMs:number|null;workerDispatches:number|null;inputBudgetWaitMs:number;
+  outputBytes:number;cacheStatus:string;memoryPressure:string;status:string;
+}
 export interface DevLodTemplateStoreOptions {
   session: ProjectLoadSession;
   perf: ReturnType<typeof perfCurrentSession>;
   diagnostics: DevLodDiagnostics;
   worker: () => DevGeometryPreprocessor;
   current: () => boolean;
+  memoryPressure?: () => string;
   key: (dev: string, lod: DeviceLod) => string;
   pinned: () => Set<string>;
   isWanted: (key: string) => boolean;
@@ -56,28 +65,49 @@ export class DevLodTemplateStore {
 
   templateSlots = 0;
 
+  private readonly slotOwners = new Map<string,{devPath:string;startedAt:number;priority:number}>();
+  private readonly slowQueue: TemplateLifecycle[] = [];
+  private readonly slowOccupancy: TemplateLifecycle[] = [];
+  private recordSlow(rows:TemplateLifecycle[],row:TemplateLifecycle,field:'queueWaitMs'|'slotOccupancyMs'):void{
+    rows.push(row);rows.sort((a,b)=>b[field]-a[field]);if(rows.length>20)rows.length=20;
+  }
+  /** Private paths are removed by the benchmark controller before publication. */
+  templateDiagnostics():TemplateLifecycle[]{
+    const now=performance.now();
+    const active=[...this.slotOwners.entries()].map(([key,owner])=>({kind:'occupancy' as const,
+      key,devPath:owner.devPath,priority:owner.priority,admittedPriority:owner.priority,
+      slotCapacityAtEnqueue:this.worker.cacheConcurrency,slotCapacity:this.worker.cacheConcurrency,slotsBusyAtEnqueue:0,queueDepthAtEnqueue:0,slotsBusyAtAdmit:this.templateSlots,
+      queueWaitMs:0,slotOccupancyMs:now-owner.startedAt,cacheReadMs:0,workerAwaitMs:0,
+      workerQueueWaitTotalMs:null,workerDispatches:null,inputBudgetWaitMs:0,outputBytes:0,cacheStatus:'in-progress',memoryPressure:this.options.memoryPressure?.()??'unknown',
+      status:'running'}));
+    return [...this.slowQueue.map(row=>({...row,kind:'queue' as const})),
+      ...[...this.slowOccupancy,...active].sort((a,b)=>b.slotOccupancyMs-a.slotOccupancyMs)
+        .slice(0,20).map(row=>({...row,kind:'occupancy' as const}))];
+  }
+
   inputBudget = new ByteWorkBudget(128 * 1024 * 1024);
 
   cacheReader: DevTemplateCacheReader<CachedTemplate>;
 
-  templateWaiters = new Map<string, { queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
+  templateWaiters = new Map<string, { queuedAt: number; devPath:string; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
 
-  templateQueue = new WorkQueue<{ queuedAt: number; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
+  templateQueue = new WorkQueue<{ queuedAt: number; devPath:string; resolve: (release: () => void) => void; reject: (error: Error) => void }>();
 
   sourceFailures = new Map<string, InvalidDevGeometryError>();
 
   templates = new ByteLru<TemplateRow>(128 * 1024 * 1024, row => { row.template.dispose(); if (!this.released) this.options.diagnostics.templateEvictions++; });
 
-  acquireTemplateSlot(key: string): Promise<() => void> {
-    return new Promise((resolve, reject) => { const waiter = { queuedAt: performance.now(), resolve, reject }; this.templateWaiters.set(key, waiter); this.templateQueue.set(key, waiter, this.priorities.get(key) ?? 4, waiter.queuedAt); this.drainTemplates(); });
+  acquireTemplateSlot(key: string,devPath=key): Promise<() => void> {
+    return new Promise((resolve, reject) => { const waiter = { queuedAt: performance.now(), devPath, resolve, reject }; this.templateWaiters.set(key, waiter); this.templateQueue.set(key, waiter, this.priorities.get(key) ?? 4, waiter.queuedAt); this.drainTemplates(); });
   }
 
   private drainTemplates(): void {
     while (this.options.current() && this.templateSlots < (this.worker.cacheConcurrency ?? Math.max(8, this.worker.workerCount * 8)) && this.templateWaiters.size) {
       const [key, waiter] = this.templateQueue.take()!;
       this.templateWaiters.delete(key); this.templateSlots++;
+      this.slotOwners.set(key,{devPath:waiter.devPath,startedAt:performance.now(),priority:this.priorities.get(key)??4});
       let released = false;
-      waiter.resolve(() => { if (released) return; released = true; this.templateSlots--; this.drainTemplates(); });
+      waiter.resolve(() => { if (released) return; released = true; this.slotOwners.delete(key); this.templateSlots--; this.drainTemplates(); });
     }
   }
 
@@ -94,12 +124,23 @@ export class DevLodTemplateStore {
     const waiter = this.templateWaiters.get(key); if (waiter) this.templateQueue.set(key, waiter, this.priorities.get(key)!, waiter.queuedAt);
     const old = this.pending.get(key); if (old) { this.worker.promote(key, priority); return old; }
     const identity = this.options.taskIdentity(dev, 'template', lod, priority), taskStarted = performance.now();
+    const slotCapacityAtEnqueue=this.worker.cacheConcurrency,
+      slotsBusyAtEnqueue=this.templateSlots,queueDepthAtEnqueue=this.templateWaiters.size;
+    let admittedAt=0,admittedPriority=priority,cacheReadMs=0,workerAwaitMs=0,
+      workerQueueWaitTotalMs:number|null=null,workerDispatches:number|null=null,inputBudgetWaitMs=0,
+      outputBytes=0,observedCacheStatus='not-read',memoryPressure='unknown',slotOccupancyMs=0,
+      slotCapacity=0,slotsBusyAtAdmit=0;
     const promise = (async () => {
-      const releaseSlot = await perfMeasureTaskPhase(identity, 'templateQueue', () => this.acquireTemplateSlot(key), this.options.perf);
+      const releaseSlot = await perfMeasureTaskPhase(identity, 'templateQueue', () => this.acquireTemplateSlot(key,dev), this.options.perf);
+      admittedAt=performance.now();admittedPriority=this.priorities.get(key)??priority;
+      memoryPressure=this.options.memoryPressure?.()??'unknown';
+      slotCapacity=this.worker.cacheConcurrency;slotsBusyAtAdmit=this.templateSlots;
       let releaseInput: (() => void) | undefined;
       try {
         // Concurrent requests share one bounded native batch reservation.
-        const lease = await perfMeasureTaskPhase(identity, 'cacheRead', () => this.cacheReader.read(key), this.options.perf); releaseInput = lease.release;
+        const cacheReadAt=performance.now();
+        const lease = await perfMeasureTaskPhase(identity, 'cacheRead', () => this.cacheReader.read(key), this.options.perf);
+        cacheReadMs=performance.now()-cacheReadAt;observedCacheStatus=lease.status;releaseInput = lease.release;
         identity.priority = this.priorities.get(key) ?? priority;
         identity.cacheSource = lease.status === 'hit' ? 'disk' : 'compiled';
         if (!this.options.current()) return null;
@@ -203,16 +244,22 @@ export class DevLodTemplateStore {
           if (!this.options.current()) return null;
           if (!this.options.isWanted(key)) throw new DOMException('DEV request left the view', 'AbortError');
           identity.cacheSource = 'compiled';
-          const result = await this.worker.compile(dev, lod, key, this.priorities.get(key) ?? priority, identity.taskId).catch(async error => {
+          const workerAt=performance.now();
+          let result:Awaited<ReturnType<DevGeometryPreprocessor['compile']>>;
+          try {result = await this.worker.compile(dev, lod, key, this.priorities.get(key) ?? priority, identity.taskId).catch(async error => {
             if (error instanceof InvalidDevGeometryError && error.sourceEvidence && this.options.current()) {
               this.sourceFailures.set(dev, error);
               if (this.options.session.sourceSha256 && lod === 0) await this.options.persistArtifact('templates', key,
                 { sourceInvalid: { message: error.reason, evidence: error.sourceEvidence } }, lod, dev, identity);
             }
             throw error;
-          });
+          });}finally{workerAwaitMs=performance.now()-workerAt;
+            const workerQueue=this.worker.takeWorkerQueueStats?.(key);
+            workerQueueWaitTotalMs=workerQueue?.waitMs??null;workerDispatches=workerQueue?.dispatches??null;}
           if (!this.options.current()) return null;
-          releaseInput = await perfMeasureTaskPhase(identity, 'inputBudgetQueue', () => this.inputBudget.acquire(result.bytes?.byteLength ?? 0), this.options.perf);
+          const budgetAt=performance.now();
+          try{releaseInput = await perfMeasureTaskPhase(identity, 'inputBudgetQueue', () => this.inputBudget.acquire(result.bytes?.byteLength ?? 0), this.options.perf);}
+          finally{inputBudgetWaitMs=performance.now()-budgetAt;}
           if (!this.options.current()) return null;
           this.options.diagnostics.compiled[lod]++;
           this.options.diagnostics.lodCompiled[lod]++;
@@ -223,6 +270,7 @@ export class DevLodTemplateStore {
           }
         }
         if (!this.options.current()) return null;
+        outputBytes=artifact.result.bytes?.byteLength??0;
         this.options.reportDiagnostic(diagnosticFromSerialization(dev, artifact.result.diagnostics, generated ? 'cold' : 'warm'));
         if (!artifact.result.bytes) {
           if (artifact.result.status === 'empty' || artifact.result.status === 'unsupported') {
@@ -266,7 +314,7 @@ export class DevLodTemplateStore {
         this.templates.set(key, row, bytes, pinned); this.options.diagnostics.templateResidentBytes = this.templates.bytes;
         perfRecordTaskPhase(identity, 'templateBuild', performance.now() - templateStarted, this.options.perf, 'completed', bytes);
         return row;
-      } finally { releaseInput?.(); releaseSlot(); }
+      } finally { releaseInput?.(); slotOccupancyMs=performance.now()-admittedAt; releaseSlot(); }
     })();
     this.pending.set(key, promise); this.options.diagnostics.pending = this.pending.size;
     let outcome: 'completed' | 'failed' | 'cancelled' = 'completed';
@@ -274,11 +322,20 @@ export class DevLodTemplateStore {
     catch (error) { outcome = (error as Error)?.name === 'AbortError' ? 'cancelled' : 'failed'; throw error; }
     finally {
       perfRecordTaskPhase(identity, 'templateWall', performance.now() - taskStarted, this.options.perf, outcome);
+      if(admittedAt)perfRecordTaskPhase(identity,'templateSlotOccupancy',slotOccupancyMs,this.options.perf,outcome);
+      const row:TemplateLifecycle={key,devPath:dev,taskId:identity.taskId,lod,priority,admittedPriority,
+        slotCapacityAtEnqueue,slotCapacity,slotsBusyAtEnqueue,queueDepthAtEnqueue,slotsBusyAtAdmit,
+        queueWaitMs:Math.max(0,(admittedAt||performance.now())-taskStarted),slotOccupancyMs,
+        cacheReadMs,workerAwaitMs,workerQueueWaitTotalMs,workerDispatches,
+        inputBudgetWaitMs,outputBytes,cacheStatus:observedCacheStatus,memoryPressure,status:outcome};
+      this.recordSlow(this.slowQueue,row,'queueWaitMs');
+      if(admittedAt)this.recordSlow(this.slowOccupancy,row,'slotOccupancyMs');
       if (this.pending.get(key) === promise) { this.pending.delete(key); this.priorities.delete(key); } this.options.diagnostics.pending = this.pending.size; this.worker.acknowledge(key);
     }
   }
   cancel(): void {
     this.released = true; this.inputBudget.close(); this.cacheReader.close();
+    this.slotOwners.clear();
     for (const waiter of this.templateWaiters.values()) waiter.reject(new DOMException('DEV session expired', 'AbortError'));
     this.templateWaiters.clear(); this.templateQueue.clear();
   }

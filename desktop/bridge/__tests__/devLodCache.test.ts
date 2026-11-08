@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { packDevArtifact, prepareDevArtifact, writeDevArtifactDetailed, readDevArtifactBatch, unpackDevArtifact } from '../devLodCache.js';
+import {packBinaryCacheWrite,packBinaryCacheWriteParts} from '../database.js';
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@desktop/invokeTimed.js', () => ({ invokeTimed: invoke }));
@@ -89,11 +90,21 @@ it('prepares metadata once, retains the original binary buffer and refuses a dif
   expect(JSON.parse(new TextDecoder().decode(prepared.metadata))).toMatchObject({key:'key',value:{label:'source',result:{bytes:null}}});
   (window as any).__TAURI_INTERNALS__={};invoke.mockReset();invoke.mockResolvedValue(undefined);
   try {
-    expect(await writeDevArtifactDetailed('templates','key',value,{projectId:1,sourceSha256:'a'.repeat(64)},prepared)).toEqual({ok:true});
+    expect(await writeDevArtifactDetailed('templates','key',value,{projectId:1,sourceSha256:'a'.repeat(64)},prepared)).toMatchObject({ok:true});
     expect(reads).toBe(1);expect(invoke).toHaveBeenCalledOnce();
     expect(await writeDevArtifactDetailed('templates','other',value,undefined,prepared)).toMatchObject({ok:false});
     expect(invoke).toHaveBeenCalledOnce();
   } finally {delete (window as any).__TAURI_INTERNALS__;}
+});
+
+it('fused DEV wire packet preserves the raw IPC envelope without a second GLB copy',()=>{
+  const data=new Uint8Array([4,5,6]),key='same';
+  const prepared=prepareDevArtifact(key,{result:{status:'complete',bytes:data}});
+  const header=new Uint8Array(4);
+  new DataView(header.buffer).setUint32(0,prepared.metadata.byteLength,true);
+  const parts=packBinaryCacheWriteParts(7,`templates/${key}`,[header,prepared.metadata,data],'a'.repeat(64));
+  const original=packBinaryCacheWrite(7,`templates/${key}`,packDevArtifact(key,{result:{status:'complete',bytes:data}}),'a'.repeat(64));
+  expect(parts).toEqual(original);
 });
 
 it('rejects oversized metadata before it can enter the writer queue', () => {

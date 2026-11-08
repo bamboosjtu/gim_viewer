@@ -12,7 +12,9 @@ it('preserves transfer identity, seals queued failures and terminates once',()=>
   const {port,worker}=start(),buffer=new ArrayBuffer(8),transfer=[buffer];worker.postMessage({kind:'compile',id:1,bytes:buffer},transfer);
   expect(port.transfers[1]).toBe(transfer);expect((port.messages[1] as any).bytes).toBe(buffer);
   port.fail=true;expect(()=>worker.postMessage({kind:'compile',id:2})).toThrow('clone-failed');
-  worker.terminate();worker.terminate();expect(port.stops).toBe(1);expect(measurementSnapshot()).toMatchObject({activeTasks:[],taskOutcomes:{failed:1,aborted:1}});
+  worker.terminate();worker.terminate();expect(port.stops).toBe(1);expect(measurementSnapshot()).toMatchObject({
+    activeTasks:[],taskOutcomes:{failed:1,cancelled:1},loss:{cancelledBeforeStart:1,interruptedTasks:0},
+  });
 });
 it('late messages stay with the captured run; replacement instances never reuse IDs',()=>{
   const {port,worker}=start();const before=(port.messages[0] as any).context;

@@ -5,7 +5,7 @@ import {resolve,join,dirname,relative} from 'node:path';
 import {artifactDirectory,loadBatchInputs} from './batch-input.mjs';
 import {executeBatch,recoverInterruptedBatch} from './batch.mjs';
 import {csv,summarize} from './batch-report.mjs';
-import {compareSuites} from './compare.mjs';
+import {compareSuites,approveBaseline} from './compare.mjs';
 import {spawnSync} from 'node:child_process';
 import {isStartupInfrastructureFailure} from './startup-retry.mjs';
 
@@ -93,6 +93,15 @@ test('measurement-only gaps do not discard a valid warm-cache opportunity',async
   assert.deepEqual(calls,['cold','warm']);
   assert.deepEqual(result.result.rows.map(row=>row.status),['INCONCLUSIVE','PASS']);
   assert.equal(result.result.baselineEligible,false);
+});
+test('missing paired warm profile is an inconclusive measurement, not product failure',async()=>{
+  const selected={entries:[inputs().entries[0]],samples:[inputs().samples[0]]};
+  const result=await executeBatch({...setup(),inputs:selected,preset:'baseline',execute:async({sample,profileDigest,cacheState})=>{
+    if(cacheState==='warm')throw Error('warm-webview-profile-unavailable');
+    return run(sample,profileDigest);
+  }});
+  assert.deepEqual(result.result.rows.map(row=>row.status),['PASS','INCONCLUSIVE']);
+  assert.equal(result.result.outcome,'INCONCLUSIVE');
 });
 test('a readable bare archive without a persistent cache reports its variant and skips unsupported warm',async()=>{
   const selected={entries:[{inputId:'s',sampleId:'s',sourceSha256:'a'.repeat(64),status:'READY'}],
@@ -245,7 +254,19 @@ test('recovers a stopped batch without inventing settled time or cache success',
   assert.equal(recovered.result.rows[0].runId,runId);
   assert.equal(recovered.result.rows[0].interruptedWritePending,199);
   assert.equal(recovered.result.rows[0].interruptedCacheSettled,false);
-  assert.equal(JSON.parse(readFileSync(join(runDir,'report.json'),'utf8')).measurementComplete,false);
+  const report=JSON.parse(readFileSync(join(runDir,'report.json'),'utf8'));
+  assert.equal(report.measurementComplete,false);
+  assert.equal(report.recovery.kind,'controller-interruption-v1');
+  assert.throws(()=>approveBaseline(recovered.result,'developer'),/Recovered interruption/);
+});
+test('recovery refuses to rewrite a batch whose controller PID is still alive',()=>{
+  const {root,out}=setup(),privateOut=join(root,'tmp','gim-bench','batches',`batch-live-${Date.now()}`);
+  mkdirSync(privateOut,{recursive:true});
+  writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out}));
+  writeFileSync(join(privateOut,'controller.private.json'),JSON.stringify({pid:process.pid}));
+  writeFileSync(join(out,'results.json'),JSON.stringify({status:'RUNNING',rows:[{status:'PENDING'}]}));
+  assert.throws(()=>recoverInterruptedBatch(root,out),/batch-controller-still-running/);
+  assert.equal(JSON.parse(readFileSync(join(out,'results.json'),'utf8')).rows[0].status,'PENDING');
 });
 test('summary never combines distinct PARTIAL source signatures',()=>{
   const rows=[{inputId:'a',cacheState:'cold',status:'PARTIAL',partialSignature:'coverage:a',firstResponseMs:10},

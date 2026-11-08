@@ -1,6 +1,6 @@
 # 性能测试指南
 
-本页只定义**怎么测**：手工 Release + CDP 路线下的 SLO 定义、冷/暖步骤、证据导出和错误清单，面向单机验收与诊断。当前实测结果、构建身份、未达标项和实现性能事实只在[性能基线](performance.md)维护；本页不复制结果数字。
+本页只定义**怎么测**：手工 Release + CDP 路线下的 SLO 定义、冷/暖步骤、证据导出和错误清单，面向单机验收与诊断。当前实测结果、构建身份及未达标项由开发者本地 `output/` 报告记录；本页不复制结果数字。
 
 读者包括按步骤验收的用户/验收人员，以及用固定构建、样本、缓存状态和结构化 JSON 复现的 Agent/开发者。
 
@@ -498,7 +498,7 @@ commit：<sha>
 5. 只有冷启动基础表示 settled 且对应缓存写入完成的样本才做完整暖启动；重启进程但不删缓存。
 6. 完整矩阵为每样本 3 次冷/3 次暖；最低矩阵为 1 次冷/3 次暖，并显式写明缺口。记录中位数和最大值。
 7. 把 JSON 与汇总表放在同一目录，表中引用 JSON 文件名。
-8. 更新 [performance.md](performance.md) 时只写最近一次快照的结论与未达标项，不复制历史数字，也不把它维护成可分发基线。
+8. 将本轮结果、错误及阶段报告保存在工作区 `output/`，保留构建与样本 SHA；分享前按 [Benchmark 报告规则](benchmark.md#报告文件与判读边界)匿名化。
 9. 若改变缓存版本、Worker 数量、LOD 策略或 IFC 队列顺序，重新跑完整矩阵，不能只跑受影响样本后宣称全局回归通过。
 
 ## 相关命令速查
@@ -531,7 +531,7 @@ Invoke-RestMethod 'http://127.0.0.1:9222/json' | Select-Object title, url, webSo
 
 ## 相关文档
 
-- [performance.md](performance.md)：最近一次快照（2026-11-08 L1 变电）、未达标项与验收边界；不维护历史矩阵；
+- 本地 `output/`：各轮 Benchmark 的 HTML、CSV 与 JSON 报告，不随仓库分发；
 - [benchmark.md](benchmark.md)：批量 `npm run bench -- batch/matrix` 路线、注册表、报告字段、状态与退出码；
 - [architecture/measurement.md](architecture/measurement.md)：测量协议、采集面、完整性口径与原生门禁；
 - [validation.md](validation.md)：验证证据边界和验收规则；

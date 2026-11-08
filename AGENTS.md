@@ -5,7 +5,7 @@
 ## 工作区和证据
 
 - 测试与验证只使用工作区 `tmp/` 和 `output/`。不得读取、写入或清理系统目录作为测试数据；子进程 `TEMP/TMP/TMPDIR` 也必须指向工作区。命令与本地样本规则见[开发指南](docs/development.md)及[验证](docs/validation.md)。
-- 工程样本和对照基线由开发者自行构建。远程 CI 不运行真实或合成工程样本及性能矩阵；缺样本的跳过不是通过。`docs/performance.md` 只代表作者所述环境的结果。
+- 工程样本和对照基线由开发者自行构建。远程 CI 不运行真实或合成工程样本及性能矩阵；缺样本的跳过不是通过。性能结论以开发者本地 Benchmark 报告为准，并核对构建、样本 SHA 与运行环境。
 - `demo/`、`tmp/`、`output/` 不随仓库分发。L0/L1/L2 注册表位于 `benchmarks/`，CLI 和报告契约见[Benchmark](docs/benchmark.md)。报告默认匿名；不要将真实工程名、地理归属或原始 profile 写入可分享文档。
 
 ## 代码边界

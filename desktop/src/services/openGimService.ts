@@ -296,6 +296,21 @@ async function openInspectedSource(input: OpenSourceInput): Promise<void> {
     if (extracted.files.size === 0) throw new Error('GIM 归档为空');
 
     assertGimSourceMagicStable(source.magic, extracted.magic);
+    // Type detection reads CBM/DEV/FAM text. On a native manifest-only cold
+    // open, doing so one File at a time can spend tens of seconds on IPC,
+    // while the substation runtime would batch-hydrate the same inputs later.
+    // Early semantic extraction may still be materializing: preserve its
+    // independent fast path and hydrate only completed native sources here.
+    if (nativeFilePath && extracted.cacheProjectId != null && !extracted.earlySemantic) {
+      const endHydrate = perfBegin('工程类型判定前小文件批量物化', undefined, perfSession);
+      const { hydrateNativeSmallFiles } = await import('./nativeSmallFileHydration.js');
+      const hydrated = await hydrateNativeSmallFiles(extracted.files, extracted.cacheProjectId,
+        { isCurrent: () => state.isCurrentSession(session), parseCopy: extracted.parseCopy });
+      if (hydrated.cancelled || !state.isCurrentSession(session)) return { status: 'cancelled' };
+      extracted = { ...extracted, files: hydrated.files, preHydrated: hydrated.requested === hydrated.hydrated };
+      endHydrate(undefined, { requested: hydrated.requested, hydrated: hydrated.hydrated,
+        bytes: hydrated.bytes, batches: hydrated.batches, misses: hydrated.misses });
+    }
     context.projectName = resolveProjectName(
       extracted.projectName || source.projectName,
       extracted.projectId || source.projectId,

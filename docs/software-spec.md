@@ -1,6 +1,6 @@
 # 桌面软件规格
 
-GIM Viewer 是面向电网工程模型的本地浏览器，当前运行于 Tauri 2 桌面应用，桌面版本 0.2.0。本页描述桌面端用户可见的行为与能力边界，不覆盖 Android 线路应用；Android 的当前实现与验收边界见[移动端规格](mobile-spec.md)。
+GIM Viewer 是面向电网工程模型的本地浏览器，当前运行于 Tauri 2 桌面应用，桌面版本 0.2.1。本页描述桌面端用户可见的行为与能力边界，不覆盖 Android 线路应用；Android 的当前实现与验收边界见[移动端规格](mobile-spec.md)。
 
 本页覆盖：
 
@@ -347,7 +347,7 @@ GIM Viewer 是面向电网工程模型的本地浏览器，当前运行于 Tauri
 | [移动端规格](mobile-spec.md) | Android 线路应用的当前实现与验收边界 |
 | [问题与限制](open-issues.md) | 未关闭缺陷与已接受限制 |
 | [验证](validation.md) | 正确性证据范围、不变量与复核口径 |
-| [性能基线](performance.md) | 最近一次快照的结论与验收边界 |
+| [性能测试指南](performance-guide.md) | 性能 SLO、测量步骤与本地报告说明 |
 | [工程实体模型](engineering/README.md) | 工程整体、来源与三视图的领域原则 |
 | [工程组成与三视图](engineering/composition.md) | 组成模板、分配规则与来源树 |
 | [表示与绑定](architecture/representations.md) | 来源 occurrence、工程整体与表示的三层身份 |

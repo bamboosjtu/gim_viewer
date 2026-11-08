@@ -435,6 +435,10 @@ export class DevGeometryPreprocessor {
     sourceAffinityHits: 0, sourceAffinityDeferrals: 0,
     stages: {} as Record<string, { count: number; totalMs: number; maxMs: number }>,
   };
+  private readonly queueByTemplate = new Map<string,{waitMs:number;dispatches:number}>();
+  takeWorkerQueueStats(key:string):{waitMs:number;dispatches:number}|null{
+    const row=this.queueByTemplate.get(key)??null;this.queueByTemplate.delete(key);return row;
+  }
   get resultPressure() { return { bytes: this.exportedBytes+this.splitHeldBytes+this.mergeReservedBytes,
     peakBytes: this.exportedPeakBytes, count: this.exported.size,
     splitOwner: this.splitOwner?.key ?? null,
@@ -559,9 +563,14 @@ export class DevGeometryPreprocessor {
       if (affinity === worker) this.diagnostics.sourceAffinityHits++;
       this.sourceAffinity.set(task.path.toLowerCase(), worker);
       this.lastProgressAt = performance.now();
-      this.diagnostics.queueWaitMs += Math.max(0, performance.now() - task.queuedAt);
+      const queueWaitMs=Math.max(0,performance.now()-task.queuedAt);
+      this.diagnostics.queueWaitMs += queueWaitMs;
       if (task.kind === 'bounds') this.diagnostics.boundsTasks++; else this.diagnostics.compileTasks++;
-      perfRecordTaskPhase(this.taskIdentity(task), 'workerQueue', Math.max(0, performance.now() - task.queuedAt), this.perf);
+      perfRecordTaskPhase(this.taskIdentity(task), 'workerQueue', queueWaitMs, this.perf);
+      if(task.kind!=='bounds'){
+        const templateKey=task.parent??task.key,stats=this.queueByTemplate.get(templateKey)??{waitMs:0,dispatches:0};
+        stats.waitMs+=queueWaitMs;stats.dispatches++;this.queueByTemplate.set(templateKey,stats);
+      }
       try {
         const payload: Record<string, unknown> = { kind: task.kind, id: task.id, traceId: task.traceId, key: task.key, path: task.path, lod: task.lod, session: this.session };
         if(task.parent)payload.parentTaskId=this.slots.get(task.parent)?.traceId;
@@ -736,6 +745,7 @@ export class DevGeometryPreprocessor {
     } this.slots.clear(); this.files = new Map();
     this.exported.clear(); this.exportedBytes = 0; this.splitHeldBytes=0;this.mergeReservedBytes=0;this.sourceAffinity.clear();
     this.outputResources.clear();
+    this.queueByTemplate.clear();
     this.splitOwner = null;
     this.lastUsedWorker = null;
     this.idleSince = null;

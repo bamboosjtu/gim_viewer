@@ -6,7 +6,7 @@
 
 - 当前实现见[系统架构](architecture.md)及各主题文档；
 - 工程实体、三视图和目录见[工程实体模型](engineering/README.md)；
-- 性能 SLO 与实测见[性能基线](performance.md)；
+- 性能 SLO 见[性能测试指南](performance-guide.md)，实测见开发者本地 `output/` 报告；
 - 样本身份与格式统计见[样本台账](schema/sample-corpus.md)；
 - 未关闭缺陷与已接受限制见[问题与限制](open-issues.md)。
 
@@ -37,7 +37,7 @@
 
 测试临时输入、输出、子进程 `TEMP/TMP/TMPDIR` 统一使用工作区根目录 `tmp/`，报告位于 `output/`；禁止访问系统目录作为测试数据或清理目标。Node 测试入口通过工作区临时目录启动器运行，Rust 测试从编译期工作区路径取得临时目录。
 
-测试集和对照基线由开发者自行构建。[性能基线](performance.md)只描述作者的本地结果，不能将缺样本跳过或单元测试通过表述为复杂工程验收通过。
+测试集和对照基线由开发者自行构建。`output/` 中的 Benchmark 报告只描述所记录环境下的本地结果，不能将缺样本跳过或单元测试通过表述为复杂工程验收通过。
 
 ## 必须成立的不变量
 
@@ -248,7 +248,7 @@ CI 显式按文件名执行，不能改成不加过滤的 discover：原有 `tes
 - [开发指南](development.md)：环境、命令语法、工作区与临时目录。
 - [系统架构](architecture.md)：当前实现机制与跨主题不变量。
 - [工程实体模型](engineering/README.md)：工程实体、三视图与目录。
-- [性能基线](performance.md)：最近一次快照的结论与验收边界。
+- [性能测试指南](performance-guide.md)：SLO、冷暖步骤及报告判读边界。
 - [样本台账](schema/sample-corpus.md)：样本身份、SHA 与统计。
 - [问题与限制](open-issues.md)：未关闭缺陷与已接受限制。
 - [平台、安全与发布](architecture/platform.md)：安全边界与页面策略。

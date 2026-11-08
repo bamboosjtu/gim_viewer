@@ -50,6 +50,15 @@ test('cold rejects an existing WebView2 profile even when SQLite root is empty',
   assert.throws(()=>checkedWebviewProfile(root,dataRoot,'cold'),/Cold WebView2 profile/);
   assert.equal(checkedWebviewProfile(root,dataRoot,'warm'),profile);
 });
+test('warm refuses a missing or empty paired WebView2 profile',()=>{
+  const parent=resolve('..','tmp','profile-protocol-tests');mkdirSync(parent,{recursive:true});
+  const root=mkdtempSync(join(parent,'warm-')),dataRoot=join(root,'cache');mkdirSync(dataRoot);
+  assert.throws(()=>checkedWebviewProfile(root,dataRoot,'warm'),/warm-webview-profile-unavailable/);
+  const profile=pairedWebviewProfile(dataRoot);mkdirSync(profile);
+  assert.throws(()=>checkedWebviewProfile(root,dataRoot,'warm'),/warm-webview-profile-unavailable/);
+  writeFileSync(join(profile,'state'),'cached');
+  assert.equal(checkedWebviewProfile(root,dataRoot,'warm'),profile);
+});
 test('matrix never attempts warm for a non-persistable input variant',async()=>{
   const workspace=resolve('..','tmp','matrix-protocol-tests');mkdirSync(workspace,{recursive:true});
   const root=mkdtempSync(join(workspace,'case-'));
@@ -87,6 +96,15 @@ test('semantic stall distinguishes an active engineering task from an idle missi
 });
 test('missing evidence is inconclusive, explicit correctness failure is fail',()=>{
   const b=runs('base',100),c=runs('candidate',100);c[0].measurementComplete=false;assert.equal(compareRuns(b,c).outcome,'INCONCLUSIVE');c[0].correctness='failed';assert.equal(compareRuns(b,c).outcome,'FAIL');
+});
+test('product pass remains visible when memory is unavailable, but comparison and approval reject it',()=>{
+  const run={...runs('memory',100)[0],version:'gim-benchmark-v1',projectType:'transmission_line',
+    requiredMetrics:['openMs','processPrivatePeakBytes'],metrics:{openMs:100,processPrivatePeakBytes:null},
+    processSampling:{complete:false},memoryEvidenceComplete:false,memoryIncompleteItems:['process-tree:process-query-failed:5:20']};
+  assert.equal(runReadiness(run).outcome,'PASS');
+  const other={...run,processInstanceId:'other'};
+  assert.equal(compareRuns([run],[other]).outcome,'INCONCLUSIVE');
+  assert.throws(()=>approveBaseline({outcome:'PASS',selectionFrozen:true,runs:[run]},'developer'),/memory evidence is incomplete/);
 });
 test('interrupted lifecycle cannot pass even after active tasks are settled',()=>{
   const b=runs('base',100),c=runs('candidate',100);
@@ -178,7 +196,7 @@ test('single paired process is comparable; partial coverage needs explicit basel
 test('warm cache proof is domain-specific and misses cannot masquerade as a warm run',()=>{
   const evidence={cache:{sourceMatches:true,semanticValid:true,entries:10,ifcFarHits:2,cachedIfc:2,missingIfc:0,parserMatches:true,
     linePack:'valid',linePackAssessment:'valid',linePersistence:'saved',projectTypeCommitted:true},progress:{cacheSettled:true,
-    workload:{devSources:3,ifcSources:2},cache:{engineering:'hit',devCatalogHits:3,writeFailures:0,readFailures:0}}};
+    workload:{devSources:3,ifcSources:2},cache:{engineering:'hit',devCatalogHits:3,devLodMisses:[0,280,0],writeFailures:0,readFailures:0}}};
   assert.equal(cacheVerified(evidence,'warm','substation'),true);evidence.cache.ifcFarHits=0;assert.equal(cacheVerified(evidence,'warm','substation'),true);
   evidence.cache.cachedIfc=1;assert.equal(cacheVerified(evidence,'warm','substation'),false);evidence.cache.cachedIfc=2;
   evidence.progress.workload.ifcSources=0;evidence.progress.cache.engineering='none';assert.equal(cacheVerified(evidence,'warm','equipment'),true);

@@ -12,16 +12,16 @@
 
 ## 下载与安装
 
-GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览工具，提供 Windows 桌面版和 Android 移动版。当前桌面源码版本为 **v0.2.0**；下载页面以实际发布附件为准。Android 移动版仍为预览版（Preview），本轮桌面版本不改变 Android 版本。
+GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览工具，提供 Windows 桌面版和 Android 移动版。当前桌面源码版本为 **v0.2.1**；下载页面以实际发布附件为准。Android 移动版仍为预览版（Preview），本轮桌面版本不改变 Android 版本。
 
 | 平台          | 当前版本       | 下载                                                         | 主要功能                                                 |
 | ------------- | -------------- | ------------------------------------------------------------ | -------------------------------------------------------- |
-| Windows x64   | v0.2.0（源码） | [已发布 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站和设备三维模型、设备材料清册/工程组成/来源三视图、输电线路地图与属性浏览 |
+| Windows x64   | v0.2.1（源码） | [最新发布版 Portable ZIP](https://github.com/bamboosjtu/gim_viewer/releases/latest) | 变电站和设备三维模型、设备材料清册/工程组成/来源三视图、输电线路地图与属性浏览 |
 | Android ARM64 | v0.1.6 Preview | [下载 APK](https://github.com/bamboosjtu/gim_viewer/releases/download/android-v0.1.6-preview/gim-viewer-android-ae7df06cc83ebde26fc2cb17faf003d7b2fd8a2f.zip) | 输电线路地图、工程树、杆塔与导线属性、来源查看和现场定位 |
 
 历史版本及发布说明：[GitHub Releases](https://github.com/bamboosjtu/gim_viewer/releases)
 
-### v0.2.0 桌面能力
+### 桌面能力
 
 变电工程默认展示“设备材料清册”，可切换“工程组成”和“来源”。工程整体由来源 occurrence、工程标识、对象角色和真实组成证据识别，不由 CBM 层级、设计拆分深度或几何表达决定；因此实体规则变化只重建成员绑定和三视图，不强制重新三角化。工程组成按建筑工程/安装工程组织：建筑物及楼层、构支架和独立基础、电缆沟、站区性建筑、照明、暖通、给排水、消防，与主变、电压配电装置及间隔、无功补偿、站用电、二次及直流、电缆、接地系统分别展开。来源保留 CBM 引用、DEV 实际装配、IFC 文件/空间容器和外露对象。清册按类别、子类、名称模板列出整体及其实际组成来源，三页均支持 JSON 导出和复制。
 
@@ -31,7 +31,7 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 
 支持以独立 Device CBM 为入口的设备 GIM，包括带 GIMPKGS 头和裸 7z 容器；无需 project.cbm 或 IFC。设备层级、中文属性、搜索、三维选择和几何缓存复用现有浏览能力，无 IFC 的工程层级包也可自动显示 DEV 几何。拉伸体兼容单位方向和 304.8 mm 方向基矢，几何与范围计算采用同一解释。
 
-DEV 实例化仍为默认关闭的试点。v0.2 的工程实体/三视图链路尚未重跑同口径原生冷暖和持续交互矩阵，0.1.x 性能基线不能作为通过证据。本版不宣称全站性能已达标，也不提供编辑、碰撞或工程校核功能。实现、测量和限制分别见[架构](docs/architecture.md)、[性能基线](docs/performance.md)及[问题清单](docs/open-issues.md)。
+DEV 实例化仍为默认关闭的试点。v0.2 的工程实体/三视图链路尚未重跑同口径原生冷暖和持续交互矩阵，0.1.x 性能基线不能作为通过证据。本版不宣称全站性能已达标，也不提供编辑、碰撞或工程校核功能。实现、测量和限制分别见[架构](docs/architecture.md)、[Benchmark CLI](docs/benchmark.md)及[问题清单](docs/open-issues.md)；实测结果由开发者本地报告保存。
 
 ### Windows 桌面版
 
@@ -128,7 +128,7 @@ npm run tauri:dev
 - [GIM 格式与匿名样本](docs/schema/README.md)
 - [XML primitive](docs/schema/xml-primitives.md)
 - [正确性验证](docs/validation.md)
-- [性能基线](docs/performance.md) / [性能测试指南](docs/performance-guide.md)
+- [性能测试指南](docs/performance-guide.md) / [Benchmark CLI](docs/benchmark.md)
 - [Benchmark CLI](docs/benchmark.md)
 - [移动端规格](docs/mobile-spec.md)
 - [问题与限制](docs/open-issues.md)

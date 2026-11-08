@@ -1,6 +1,6 @@
 # 本地批量 Benchmark
 
-本页说明本地批量 Benchmark 的命令、输入注册、报告文件、状态判定和基线流程。覆盖 `npm run bench -- ...` 的批量与单样本命令、L0/L1/L2 输入登记、报告与匿名化规则；不覆盖测量指标定义、当前实测结果和手工测试步骤，这些分别见[测量与 Benchmark](architecture/measurement.md)、[性能基线](performance.md)和[性能测试指南](performance-guide.md)。
+本页说明本地批量 Benchmark 的命令、输入注册、报告文件、状态判定和基线流程。覆盖 `npm run bench -- ...` 的批量与单样本命令、L0/L1/L2 输入登记、报告与匿名化规则；测量指标定义见[测量与 Benchmark](architecture/measurement.md)，手工步骤见[性能测试指南](performance-guide.md)。实测结果保存在开发者本地 `output/` 报告中。
 
 Benchmark 使用固定 WebView2 的原生 Release 应用，每次运行启动独立进程，顺序执行注册的工程；不以 Node 微基准代替产品加载。目录或 JSON 注册表可以直接作为输入，不需要逐个手动调用。
 
@@ -112,7 +112,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 - **去重。** 相同 SHA 与相同动作路线只执行一次，其余输入标为 `DUPLICATE` 并关联首个输入；不同动作路线仍分别执行。不会根据文件大小、历史耗时或失败记录跳过某个唯一来源。目录符号链接不跟随，报告会列出拒绝访问项。
 - **队列。** 批次的所有计划行在执行前写入结果。单次失败、超时、输入缺失或 SHA 不符都记录后继续；只有用户取消或报告无法安全写入才停止队列。冷开未准备好有效缓存时，对应暖开标为 `SKIPPED`，下一来源继续执行。除上述打开前基础设施故障外，失败项不自动重试；性能回退的正式独立复测由比较流程处理。
 - **取消。** 运行中可按 Ctrl+C，或在该报告目录新建空的 `stop.request`。控制器取消当前任务、回收本次拥有的应用进程树，余项标为 `CANCELLED`。结果随每次状态变化落盘，浏览器刷新 HTML 即可看到进度；不覆盖已有批次目录。强制结束控制器或机器断电可能留下 `RUNNING`/`PENDING`，它们不属于成功结果。
-- **外部中止恢复。** 确认原控制器与应用进程均已停止后，运行 `npm run bench -- recover-batch --output ../output/<批次>`。恢复将遗留行标为 `CANCELLED`，从私有 `progress.private.json` 带回最后观测的写入待办和缓存状态；旧批次若没有 runId，只在私有清单能唯一匹配样本时关联快照。缺失的 `settledMs` 保持空值，最小私有报告明确 `measurementComplete=false`。它不继续运行样本，也不把已中止轮次当作 PASS。
+- **外部中止恢复。** 确认原控制器与应用进程均已停止后，运行 `npm run bench -- recover-batch --output ../output/<批次>`。控制器存活时恢复被拒绝。恢复将遗留行标为 `CANCELLED`，从私有 `progress.private.json` 带回最后观测的写入待办和缓存状态；旧批次若没有 runId，只在私有清单能唯一匹配样本时关联快照。缺失的 `settledMs` 保持空值，最小私有报告带 `recovery` 标记且 `measurementComplete=false`；恢复批次不得进入基线批准或 gate。
 
 ## JSON 注册表
 
@@ -176,8 +176,9 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 | `results.csv` | 每个输入、轮次和冷暖状态的明细结果；失败和跳过行保留 |
 | `errors.csv` | 需要关注的 `PARTIAL`、失败、不完整、跳过及取消行；重复别名仍保留在全量结果中 |
 | `summary.csv` | 按输入和冷暖状态汇总中位数与状态计数 |
-| `stages.csv` | 每个运行的阶段次数、wall time、最大值和 p50/p95/p99 区间 |
+| `stages.csv` | 每个运行的阶段次数、wall time、最大值、可追踪字节工作量、ms/MiB 和 p50/p95/p99 区间 |
 | `slow-tasks.csv`、`slow-phases.csv` | 每个运行耗时最长的十个 Worker 任务和单次阶段，使用匿名来源 ID；聚合直方图不充作单次阶段 |
+| `slow-templates.csv` | 每轮最慢 20 个 DEV 模板槽位等待及最久 20 个槽位占用者；含优先级、缓存读取、Worker 请求/排队、输入预算、输出字节及内存压力，公开列只用匿名来源 ID |
 | `workers.csv` | 每个 Worker 的类型、堆采样可用性、样本数、观测峰值和延迟 |
 | `results.json` | 机器读取的结果、运行条件、正确性检查、工作量、比较所需指标与冷暖一致性结果 |
 | `profile.json` | 本批次冻结的来源 SHA、动作、模式、轮数、超时与摘要 |
@@ -186,15 +187,18 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 - 字段名以本次构建生成的 `results.json` 与 `results.csv` 表头为准；本页只维护文件用途与判读边界，不逐列冻结字段名。
 - 汇总分别计数 `PASS` 与 `PARTIAL`；同组轮次的 PARTIAL 签名不同时中位数留空，`coverageGroups` 与 `partialSignatures` 给出分组证据。
 - 覆盖汇总同时给出有效轮次和计划轮次，以及基础设施重试次数。少于计划轮次的中位数可供诊断，但不能冒充完整基线。
-- `measurementDetailStatus=aggregate-only` 表示详细时间线因容量截断，但阶段聚合、任务闭环和必要采样仍完整；截断条数保留，产品 PASS/PARTIAL 不因此变成 INCONCLUSIVE。未确认的 Worker 尾批、序号缺口或聚合丢失仍使测量不完整。Worker 批次有连续 ID、确认和任务结束标记。
+- `measurementDetailStatus=aggregate-only` 表示详细时间线因容量截断，但阶段聚合与任务闭环仍完整；内存采样另见 `memoryEvidenceComplete`。截断条数保留，产品 PASS/PARTIAL 不因此变成 INCONCLUSIVE。未确认的 Worker 尾批、序号缺口或聚合丢失仍使测量不完整。Worker 批次有连续 ID、确认和任务结束标记。
 - `aggregate-only` 的 PASS/PARTIAL **没有完整事件时间线**。基线审批要求 `aggregateComplete`、生命周期、必要内存和内容证据，不要求 `detailComplete`；`slow-tasks.csv`、`slow-phases.csv` 仅供诊断，不作为基线必需证据。聚合阶段不进入单次慢阶段榜。
 - `measurementLifecycleComplete` 与 `measurementComplete` 分开：意外 Worker 终止的在途任务、超时、无理由取消和异常迟到事件使生命周期不完整；有受控原因的项目切换/关闭或 AbortError 取消可以正常结算。DEV 精细请求主动终止 Worker 时按任务身份登记取消，不豁免池内其他任务。外来 run 和重复序号使事件传输不完整，不能被静默忽略。
 - `pendingCount`、`pendingSourceCount`、`pendingDigest` 单列；语义摘要已包括待归对象的身份、原因、来源、类别和 disposition。冷暖逐项比较 pending 证据。
 - `geometryStructuralFingerprint` 是结构指纹，不是顶点/索引内容校验。`devContentDigest` 聚合 DEV L0 GLB 的字节 SHA，`devContentCovered` 与 `devContentComplete` 标注实际覆盖；IFC/L2 内容不在该证据范围。
-- `automaticLoadMs` 是自动表示终态；`settledMs` 是任务、缓存、后台及静默窗口全部完成时刻。`writeDrainMs` 只量最后一笔 DEV 产物写晚于自动表示的部分，不代表全部写入时间。样本覆盖 tab 同时列出自动表示、缓存发布和完全结算的中位数。
+- `automaticLoadMs` 是工程语义、导航和自动基础几何均已就绪的最晚产品事件时刻；缓存写入与几何编译并行，写入若在该时刻前完成，`writeDrainMs` 为零，但不意味着写入没有占用主线程。`settledMs` 是任务、缓存、后台及静默窗口全部完成时刻。样本覆盖 tab 同时列出自动表示、缓存发布和完全结算的中位数。
 - `modelTreeReadyMs` 是工程组成投影首次可用（线路/设备取导航可用时刻）；`firstGeometryMs` 是首个几何可见；`allGeometryReadyMs` 是自动基础 DEV/IFC 表示均齐备的时刻。三者与 `cachePublishMs`、`settledMs` 分列；几何齐备是 wall time，可能含来源读取、调度和缓存写入背压，不冒充纯三角化耗时。不同样本的 `automaticLoadMs` 与写入重叠程度可不同，跨样本比较应同时阅读几何与缓存两条时间线。
-- 冷暖配对复用 SQLite 数据根和 WebView2 用户数据目录；IFC LOD 的 IndexedDB 缓存位于后者。旧的独立 WebView profile 运行条件不可与新口径比较。运行中的 `progress.private.json` 每 30 秒保留一次匿名状态快照，只存工作区私有目录。工程提取按实际来源进展续期；活动工程任务 60 秒没有进展时以 `product-stalled` 终结，且保存最后观测阶段。无活动工程任务而语义仍未就绪时，120 秒后标为 `engineering-progress-stalled` / INCONCLUSIVE。
-- 关联的 Worker 若在两个堆采样周期内终止且只有一次任务，堆值标为 `short-lived / ended-before-heap-sample`；不填零。其余 Worker 区分 `unavailable`（收到失败原因）与 `missing`（从未收到记录），两者均使测量不完整。
+- 冷暖配对复用 SQLite 数据根和 WebView2 用户数据目录；IFC LOD 的 IndexedDB 缓存位于后者。cold 要求两者为空，warm 要求配对 profile 已存在且非空；缺失时报 `warm-webview-profile-unavailable` / INCONCLUSIVE，不启动伪暖开。旧的独立 WebView profile 运行条件不可与新口径比较。运行中的 `progress.private.json` 每 30 秒保留一次匿名状态快照，只存工作区私有目录。工程提取按实际来源进展续期；活动工程任务 60 秒没有进展时以 `product-stalled` 终结，且保存最后观测阶段。无活动工程任务而语义仍未就绪时，120 秒后标为 `engineering-progress-stalled` / INCONCLUSIVE。
+- 从未执行任务的 Worker 标为 `not-applicable / never-executed`；没有独立 JS isolate 的宿主或外部进程也标为 `not-applicable`。短命 Worker 标为 `short-lived / ended-before-heap-sample`；不填零。实际执行任务的 Worker 若仍缺堆证据则列出 `unavailable` 或 `missing`。进程树采样失败会重试，并单列根进程 Private Bytes 作为下界，不冒充完整进程树峰值。`memoryIncompleteItems` 指明缺口；产品 PASS/PARTIAL 保留，正式内存比较和基线认可返回 INCONCLUSIVE。
+- `cacheWriteBytes` 是 DEV 产物实际提交尝试的元数据与 GLB 字节之和，`cacheWriteMsPerMiB` 是服务端到端 wall time 除以该字节量，包含打包、IPC 等待和原生写入，不是磁盘吞吐。`cachePack`、`cacheInvokeWall`、`cacheNativeResolve`、`cacheNativeWrite` 的阶段均记录字节量，嵌套阶段不能相加。缓存写入与模型树、几何阶段重叠，比较时间线时须看各自就绪事件。
+- `templateQueue` 是等待模板处理槽位的 wall time；`templateSlotOccupancy` 是获槽到释放的 wall time。两者可并行重叠，不把各任务累计值当成应用启动耗时。`slow-templates.csv` 的 `workerAwaitMs` 含 Worker 排队、读取及执行；`workerQueueWaitTotalMs` 是该模板直接或分部 Worker 派发等待的累计值，分部任务并行时也不可直接当作端到端时间。原始 DEV 路径仅留在 `tmp/gim-bench/runs/<runId>/template-diagnostics.private.json`，可分享 CSV/JSON 只保存 `sourceId`。
+- 批量测量在工作区 `tmp/` 运行固定控制器 CPU 与写入/暖读校准，批次报告记录机器 CPU、内存、工作区可用空间；比较结果给出 `calibrationRatio`。该校准不能等价代表 WebView Worker、源盘或显卡速度，所以产品 wall time 不乘系数归一化。跨轮默认同机、同运行时、同 SHA 与同工作量；CPU 校准偏差超过 15% 或工作区 I/O 校准偏差超过 30% 时，正式比较返回 INCONCLUSIVE。电源模式无法可靠读取时明确记 `unavailable`。不同批次缺少相同 L0/L1/L2 登记输入时属于覆盖缺口，报告不会凭样本名自动补齐，也不改变单样本判定。
 - 原始端点错误、调试端口、应用 PID/退出状态、进程采样尾部和 WebView2 日志尾部只写入私有运行目录（如 `tmp/gim-bench/runs/<runId>/startup.private.json`），不进入可分享报告。
 
 | 对象 | 判读 |
@@ -265,7 +269,7 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 
 SQLite 核心缓存发布单独验证；冷开缓存已发布、产品正确性为 `passed`/`partial` 时继续暖开。若冷开仅因测量证据不完整而 INCONCLUSIVE，暖开仍执行，整批门禁保持 INCONCLUSIVE；暖开以及后续基线比较必须保持同一缺口摘要、语义/几何结果和工作量。
 
-暖开 DEV catalog 校验按本次运行的唯一来源集合核对：命中数与未命中来源数必须覆盖全部 DEV；未命中只能对应有原始引用/范围证据的 `source-invalid` 或 `missing-dependency` 来源。L1 按热点策略不持久化，L1 miss 不参与 catalog 命中要求。冷暖还必须保持同一匿名失败来源摘要；不在注册表登记样本专属缺陷白名单。
+暖开 DEV catalog 校验按本次运行的唯一来源集合核对：命中数与未命中来源数必须覆盖全部 DEV；未命中只能对应有原始引用/范围证据的 `source-invalid` 或 `missing-dependency` 来源。这里的 catalog 是来源范围缓存，与几何 LOD1 模板不同；**几何 LOD1** 按热点策略不持久化，其 `devLodMisses[1]` 不参与 catalog 命中要求。样本集合的 `L1` 仅表示开发回归资料，不改变缓存规则。冷暖还必须保持同一匿名失败来源摘要；不在注册表登记样本专属缺陷白名单。
 该规则以 `cacheProofPolicy=source-failure-catalog-v1` 冻结进运行条件；旧口径结果不能与其直接比较。
 
 ## 匿名化与私有产物
@@ -313,7 +317,7 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
 
 - [性能测试指南](performance-guide.md)：SLO、冷/暖步骤与手工测试路线。
 - [测量与 Benchmark](architecture/measurement.md)：采集面、完整性口径与 SDK 前置门禁。
-- [性能基线](performance.md)：最近一次快照的结论与验收边界。
+- 本地 `output/` 报告：各批次的结果、错误、阶段和 Worker 证据；不随仓库分发。
 - [性能样本登记](../benchmarks/README.md)：L0/L1/L2 目录、SHA 与运行示例。
 - [本地功能测试](../desktop/local-tests/README.md)：`test:local` 基础功能样本。
 - [开发指南](development.md)：环境、命令、工作区与临时目录。
