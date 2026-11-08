@@ -1,4 +1,6 @@
 import {existsSync,readFileSync,writeFileSync,readdirSync,unlinkSync} from 'node:fs';
+import {randomBytes} from 'node:crypto';
+import {spawnSync} from 'node:child_process';
 import {basename,join,relative,resolve} from 'node:path';
 import {digest,runReadiness,compareRuns,partialSignature} from './compare.mjs';
 import {coldWarmEquivalent} from './profiles.mjs';
@@ -111,9 +113,10 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   const profileDigest=digest(body),state={version:'gim-batch-results-v1',status:'RUNNING',outcome:'INCONCLUSIVE',preset,repetitions,
     buildFingerprint:build.sourceFingerprint,profileDigest,anonymize,environmentCalibration,selectionFrozen:true,baselineEligible:false,rows:[],runs:[],attempts:[],stages:[],slowTasks:[],slowPhases:[],templateDiagnostics:[],workers:[],pairs:[],updatedAt:null};
   const privateRuns=[];
-  const controllerFile=join(privateOut,'controller.private.json');
-  writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out}));
-  writeFileSync(controllerFile,JSON.stringify({pid:process.pid,startedAt:new Date().toISOString()}));
+  const controllerFile=join(privateOut,'controller.private.json'),nonce=randomBytes(24).toString('hex');
+  writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out,nonce}));
+  writeFileSync(controllerFile,JSON.stringify({pid:process.pid,nonce,
+    processStartedAt:new Date(Date.now()-process.uptime()*1000).toISOString(),startedAt:new Date().toISOString()}));
   writeFileSync(join(out,'profile.json'),JSON.stringify({...body,digest:profileDigest},null,2));
   for(const entry of inputs.entries){
     const {privatePath,actions,...publicEntry}=entry;
@@ -216,6 +219,7 @@ export async function runBatch(options){
 /** Finalize a controller that has already exited; never fabricate elapsed metrics. */
 function controllerRecord(root,out){
   const base=join(root,'tmp','gim-bench','batches');if(!existsSync(base))return null;
+  const matches=[];
   for(const entry of readdirSync(base,{withFileTypes:true})){
     if(!entry.isDirectory())continue;
     const dir=join(base,entry.name),outputFile=join(dir,'output.private.json');
@@ -223,16 +227,24 @@ function controllerRecord(root,out){
     try{const value=JSON.parse(readFileSync(workspacePath(root,outputFile),'utf8'));
       if(resolve(value.out)!==out)continue;
       const file=join(dir,'controller.private.json');
-      if(!existsSync(file))return null;
+      if(!existsSync(file))continue;
       const safeFile=workspacePath(root,file);
-      return {file:safeFile,value:JSON.parse(readFileSync(safeFile,'utf8'))};
+      matches.push({file:safeFile,value:JSON.parse(readFileSync(safeFile,'utf8')),mappedNonce:value.nonce});
     }catch{/* Unreadable private record cannot establish ownership. */}
   }
-  return null;
+  return matches.length===1?matches[0]:null;
 }
 function controllerAlive(pid){
   if(!Number.isSafeInteger(pid)||pid<=0)return false;
   try{process.kill(pid,0);return true;}catch(error){return error?.code==='EPERM';}
+}
+function processStartedAt(pid){
+  if(process.platform!=='win32'||!Number.isSafeInteger(pid)||pid<=0)return null;
+  const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',
+    `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`],
+    {encoding:'utf8',windowsHide:true,timeout:5000});
+  if(result.status!==0)return null;
+  const value=Date.parse(result.stdout.trim());return Number.isFinite(value)?value:null;
 }
 function findUnreportedRunId(root,row){
   const runsRoot=join(root,'tmp','gim-bench','runs');if(!existsSync(runsRoot))return null;
@@ -248,13 +260,22 @@ function findUnreportedRunId(root,row){
   }
   return matches[0]??null;
 }
-export function recoverInterruptedBatch(root,outputDirectory){
+export function recoverInterruptedBatch(root,outputDirectory,{force=false,getProcessStartAt=processStartedAt}={}){
   const out=workspacePath(root,outputDirectory),file=join(out,'results.json');
   const state=JSON.parse(readFileSync(file,'utf8'));
   if(state.status!=='RUNNING'&&!state.rows?.some(row=>['RUNNING','PENDING'].includes(row.status)))
     return {out,result:state,recovered:0};
   const owner=controllerRecord(root,out);
-  if(owner&&controllerAlive(owner.value.pid))throw Error('batch-controller-still-running');
+  const identityValid=owner&&Number.isSafeInteger(owner.value.pid)&&owner.value.pid>0&&
+    /^[a-f0-9]{48}$/.test(owner.value.nonce??'')&&
+    owner.value.nonce===owner.mappedNonce&&Number.isFinite(Date.parse(owner.value.processStartedAt));
+  if(!identityValid&&!force)throw Error('batch-controller-ownership-unverified: use --force after confirming the controller stopped');
+  if(owner&&controllerAlive(owner.value.pid)){
+    const actual=getProcessStartAt(owner.value.pid),expected=Date.parse(owner.value.processStartedAt);
+    if(actual!==null&&Number.isFinite(expected)&&Math.abs(actual-expected)<=2000)
+      throw Error('batch-controller-still-running');
+    if(actual===null&&!force)throw Error('batch-controller-identity-unverified: use --force after confirming the controller stopped');
+  }
   let recovered=0;
   for(const row of state.rows??[]){
     if(!['RUNNING','PENDING'].includes(row.status))continue;

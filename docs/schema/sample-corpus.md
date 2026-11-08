@@ -174,12 +174,12 @@ line03 的两个 LINELENGTH 都有原值，不能当作长度缺省样本。
 | 四变电文件组织 | 本台账统计与源包复核 | 研究描述需要对照源包，不按导出器分支 |
 | 六线路组成 | 本台账统计与源包复核 | 结构、对象统计与原属性口径需区分 |
 | 六线路跨样本语义 | 本台账统计与[语义模型](semantic-model.md) | 共有规律仅覆盖六包 |
-| 变电检查材料 | [样本检查脚本](../../desktop/scripts/gim_survey/) | 独立检查来源，不代替当前运行验收 |
+| 变电检查材料 | [样本验证技能](../../.agents/skills/gim-sample-verification/SKILL.md) | 独立检查来源，不代替当前运行验收 |
 | 当前实现 | `desktop/src/` 与 `desktop/src-tauri/src/` | 以 parser、引用、版本和实际消费分支为准 |
 
 统计只依据本台账的源包复核；历史研究 HTML 已移除，不再作为当前证据。
 
-原包复核可使用 [Python 脚本目录](../../desktop/scripts/gim_survey/) 与[验证技能](../../.agents/skills/gim-sample-verification/SKILL.md)。
+原包复核可使用[样本验证技能](../../.agents/skills/gim-sample-verification/SKILL.md)。
 完整统计应记录脚本参数、包 SHA、目录映射和算法，核心身份/数量只在本台账维护。
 源码契约与运行证据的区别见 [验证](../validation.md)。
 

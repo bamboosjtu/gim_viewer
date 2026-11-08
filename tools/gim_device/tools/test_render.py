@@ -14,16 +14,19 @@ from playwright.sync_api import sync_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))       # gim_device/tools
 ROOT = os.path.dirname(HERE)                            # gim_device
+WORKSPACE = os.path.dirname(os.path.dirname(ROOT))
 sys.path.insert(0, ROOT)
 import gim_core as gc
 
 SHELL = os.path.join(ROOT, 'viewer_shell.html')
-OUTDIR = os.path.join(ROOT, '_screenshots')   # 回归截图统一落这里
+OUTDIR = os.path.join(WORKSPACE, 'output', 'gim-device')
+TEMPDIR = os.path.join(WORKSPACE, 'tmp', 'gim-device')
 
 
 def make_page(gim_path):
     """生成自包含测试页面，返回 (临时html路径, 解析统计)"""
-    work = tempfile.mkdtemp(prefix='gimtest_')
+    os.makedirs(TEMPDIR, exist_ok=True)
+    work = tempfile.mkdtemp(prefix='gimtest_', dir=TEMPDIR)
     data = gc.load(gim_path, work)
     shutil.rmtree(work, ignore_errors=True)
 

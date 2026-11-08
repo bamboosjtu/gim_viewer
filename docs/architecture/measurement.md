@@ -1,6 +1,6 @@
 # 测量与本地 Benchmark
 
-测量协议为 `gim-measurement-v2`。纯 TypeScript 核心位于 `packages/measurement-core`，不依赖 DOM、Tauri、Three 或应用状态。桌面适配器位于 `desktop/src/measurement`；原有 `perfTimings` 继续提供产品阶段与诊断，其任务阶段和原生进程内存检查点接入同一 Collector。
+测量协议为 `gim-measurement-v1`。纯 TypeScript 核心位于 `packages/measurement-core`，不依赖 DOM、Tauri、Three 或应用状态。桌面适配器位于 `desktop/src/measurement`；原有 `perfTimings` 继续提供产品阶段与诊断，其任务阶段和原生进程内存检查点接入同一 Collector。
 
 当前工作区采用**源码内联**：桌面端只通过 `desktop/src/measurement/core.ts` 引用测量核心源码。`check:engineering-boundaries` 禁止其他桌面模块深层引用该包，并禁止核心向桌面、DOM、Tauri、Three 或外部包导入。`package.json` 的 `exports`/`dist` 尚不是产品实际消费的安装契约；SDK 阶段会单独验证打包、声明文件和独立安装后再改为包名消费。
 
@@ -89,6 +89,5 @@ DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位�
 
 - [Benchmark CLI](../benchmark.md)
 - [性能测试指南](../performance-guide.md)
-- [Benchmark CLI](../benchmark.md)
 - [验证](../validation.md)
 - [开发指南](../development.md)

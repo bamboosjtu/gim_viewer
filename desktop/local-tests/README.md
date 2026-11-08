@@ -17,4 +17,4 @@ npm run test:local -- --build ../tmp/gim-bench/builds/<本次构建>/acceptance-
 
 项目的普通 CI 只验证注册表协议、纯逻辑、SQLite 与构建，不运行本地 GIM。旧九工程的固定路径、payload offset 与缺失黄金文件入口已退役。复杂工程的额外回归由开发者在私有注册表追加来源，并显式保存人工审阅后的期望结果，不从当前软件输出自动生成真值。
 
-`test:sample`、`test:substation:strict` 与分类/分区专项仍是特定历史输入的可选诊断，可能要求多于三份模型，不属于最低三类型门禁；它们的 skip 不算通过。通用的本地验收应使用 `test:local`，普通 CI 不调用任何这些工程样本入口。
+本地真实工程验收统一使用 `test:local` 或 Benchmark 注册表；普通 CI 不运行工程样本，缺样本的 skip 不计通过。

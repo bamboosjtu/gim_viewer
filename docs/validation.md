@@ -103,13 +103,9 @@
 | 原生批读/GIMR 协议 | `bridge/__tests__/devLodCache.test.ts`、`bridge/__tests__/devLodNativeBatch.test.ts`、`bridge/__tests__/database.test.ts` |
 | DEV 几何/缓存/选择 | `devGeometryWorkerClient`、`devLodRuntime`、`devGlbTemplateRuntime`、`xmlModGeometry` 对应测试 |
 | 真实几何门禁 | `GIM_VERIFY_SUBSTATION01=1` 后运行 `devGeometryGate.test.ts --maxWorkers=1 --minWorkers=1` |
-| 严格变电样本 | `GIM_REQUIRE_SUBSTATION04=1 npm run test:substation:strict`；缺样本必须失败，不能 skip 通过 |
+| 本地真实工程 | `npm run test:local` 或 `npm run bench -- batch`；缺样本与跳过须单列，不计通过 |
 
-样本只读检查前置：
-
-```powershell
-python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation substation02 substation03 substation04 --extract-only
-```
+样本只读检查可使用[样本验证技能](../.agents/skills/gim-sample-verification/SKILL.md)，在工作区 `output/` 保存结果。
 
 研究阶段的九工程归一化记录保存在 `research/data/engineering-wholes/`，不作为当前产品的验收输入或人工真值。当前本地门禁由开发者私有注册表与原生运行报告确定。
 
@@ -144,8 +140,7 @@ python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation
 
 ### 当前已覆盖
 
-- `npm run test:engineering:separation` 直接读取四个在册变电包及具有匹配 SHA 标记的解包目录，验证来源分区、三视图覆盖、组织声明变更和输入顺序不影响实体、几何 occurrence 不变，并对 s04 执行来源/实体/导航三域往返。
-- 该门禁缺样本直接失败；结果写入 `output/v020-stage1/sample-separation.json`，不证明实体人工金标准或原生渲染。
+- 本地真实工程由开发者注册到 `local-tests/` 或 `benchmarks/`，结果写入工作区 `output/`；来源、实体、几何和缓存证据分别判读。
 - 九工程入口的研究台账守恒、固定案例与来源扫描对照属于不同验收项；旧输出与当前 parser/规则指纹不一致时不能作为本版通过证据。
 - 完整实体/成员/投影金标准尚待建立。
 - 生产构建的真实浏览器操作覆盖工程组成/来源、搜索、显隐、精化和工程切换。
@@ -169,7 +164,7 @@ python desktop/scripts/gim_survey/extract_inventory.py --samples demo-substation
 
 ### 分类与清册
 
-- `npm run test:engineering:classification`：四包直接走当前来源适配和实体归一化，核对目录编码、子类、来源分区、三模板版本及缓存往返；输出独立写入 `output/v020-stage2`。
+- `npm run test:local`：对开发者登记的一变、一线、一设备运行原生打开与证据检查；缺样本不计通过。
 - `npm run check:engineering-catalog -- --python`：检查共享目录与参考工具标签一致，不能证明两者归并策略一致。
 - 模板测试：单独检查组成路径变化不影响清册/来源、清册使用自己的搜索索引、同名实例不合并。
 - 完整九工程人工实体边界真值仍未建立。
@@ -239,7 +234,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml six_native_imports -- --igno
 
 CI 显式按文件名执行，不能改成不加过滤的 discover：原有 `test_core.py` 与指针/UI 测试含模型目录或归档构造，应由开发者在工作区本地运行。
 
-其他静态检查（`npm run lint`、`npm run check:version`、`npm run check:engineering-boundaries`、`npm run check:caches`）的命令语法与用途见[开发指南](development.md)，本页不重复。
+其他静态检查（`npm run lint`、`npm run check:version`、`npm run check:engineering-boundaries`）的命令语法与用途见[开发指南](development.md)，本页不重复。
 
 页面 CSP、内联样式和 `unsafe-inline` 的约束不属于本页验证规则，见[平台、安全与发布](architecture/platform.md#安全边界)。
 

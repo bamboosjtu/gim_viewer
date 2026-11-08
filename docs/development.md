@@ -39,8 +39,6 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run check:version` | npm/Cargo 版本一致性；构建前自动执行 |
 | `npm run check:engineering-boundaries` | 纯领域、来源与 Viewer 边界检查 |
 | `npm run check:engineering-catalog` | 共享目录与生成索引一致；加 `--python` 同时核对参考工具 |
-| `npm run check:engineering-docs` | 文档链接、过期术语与目录计数 |
-| `npm run check:caches` | 缓存版本与契约常量检查 |
 
 应用版本以 `desktop/package.json` 为准；Tauri 配置引用该文件。portable 组包还会读取 EXE 的 ProductVersion，拒绝把旧程序标成新版本。发布与资产细节见[平台、安全与发布](architecture/platform.md)。
 
@@ -55,9 +53,6 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run test:local -- --build <原生构建清单>` | 打开开发者登记的一变、一线、一设备；skip 不计通过 |
 | `npm run test:coverage` | `engineering/` 与 `gim/` 覆盖率下限 |
 | `npm run test:ifc-critical` | IFC 转换、会话竞态、缓存与开洞策略 |
-| `npm run test:engineering:separation` | 四包来源分区、三视图覆盖与缓存往返 |
-| `npm run test:engineering:classification` | 目录编码、子类与清册模板 |
-| `npm run test:substation:strict` | 严格变电样本（`GIM_REQUIRE_SUBSTATION04=1`，缺样本必须失败） |
 | `npm run test:acceptance-tools` | 验收构建、清单与探针协议 |
 | `npm run test:measurement-tools` | 测量 CLI 与正确性规则（无样本） |
 | `npm run test:local-contract` | 本地注册表协议 |
@@ -111,14 +106,13 @@ Python 工具位于 `tools/`，各自维护 `.venv` 与打包配置；构建、�
 - 写作约定、文档地图与单一权威表见[文档首页](README.md)；
 - 研究材料在 `research/`，复核后把稳定结论并入 `docs/`，不把研究候选写成产品事实。
 
-需要排查链接或生成目录索引时，可在 `desktop/` 手动执行（CI 不以文档检查阻断构建）：
+需要重新生成或核对机器目录索引时，可在 `desktop/` 手动执行：
 
 ```powershell
-npm run check:engineering-docs
 npm run check:engineering-catalog
 ```
 
-`check:engineering-docs` 只验证可机械检查的部分：相对链接与锚点、过期术语、目录计数、缺陷 ID 唯一性、文档首页覆盖，以及标题锚点、表格列数和目录结构。事实正确性仍需对照源码和运行证据。
+Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码和运行证据。
 
 ## 相关文档
 

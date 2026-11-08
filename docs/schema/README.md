@@ -41,7 +41,7 @@
 
 [样本验证技能](../../.agents/skills/gim-sample-verification/SKILL.md) 提供工作入口，
 [脚本说明](../../.agents/skills/gim-sample-verification/scripts/README.md) 列出参数和输出。
-[Python 调研脚本](../../desktop/scripts/gim_survey/) 支持批量分析。
+批量静态检查由[样本验证技能](../../.agents/skills/gim-sample-verification/SKILL.md)提供；性能与打开结果使用[Benchmark CLI](../benchmark.md)。
 
 脚本的分类、固定字段假设、阈值与默认样本列表需要核对，不是权威格式定义。
 脚本不修改源样本，但会写统计文件；使用独立输出目录，避免覆盖已保存资产。

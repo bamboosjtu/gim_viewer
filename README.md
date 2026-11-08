@@ -129,7 +129,6 @@ npm run tauri:dev
 - [XML primitive](docs/schema/xml-primitives.md)
 - [正确性验证](docs/validation.md)
 - [性能测试指南](docs/performance-guide.md) / [Benchmark CLI](docs/benchmark.md)
-- [Benchmark CLI](docs/benchmark.md)
 - [移动端规格](docs/mobile-spec.md)
 - [问题与限制](docs/open-issues.md)
 

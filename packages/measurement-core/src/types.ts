@@ -71,9 +71,3 @@ export interface MetricsSink {
   emit(event: MeasurementEvent): void;
 }
 export const NOOP_SINK: MetricsSink = { emit() {} };
-export interface MeasurementCapabilities {
-  workerHeap: Availability;
-  wasmCapacity: Availability;
-  processPrivateBytes: Availability;
-  clockCalibration: Availability;
-}

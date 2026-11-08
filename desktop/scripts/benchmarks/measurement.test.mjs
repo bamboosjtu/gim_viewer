@@ -100,7 +100,8 @@ test('missing evidence is inconclusive, explicit correctness failure is fail',()
 test('product pass remains visible when memory is unavailable, but comparison and approval reject it',()=>{
   const run={...runs('memory',100)[0],version:'gim-benchmark-v1',projectType:'transmission_line',
     requiredMetrics:['openMs','processPrivatePeakBytes'],metrics:{openMs:100,processPrivatePeakBytes:null},
-    processSampling:{complete:false},memoryEvidenceComplete:false,memoryIncompleteItems:['process-tree:process-query-failed:5:20']};
+    measurementLifecycleComplete:true,processSampling:{complete:false},memoryEvidenceComplete:false,
+    memoryIncompleteItems:['process-tree:process-query-failed:5:20']};
   assert.equal(runReadiness(run).outcome,'PASS');
   const other={...run,processInstanceId:'other'};
   assert.equal(compareRuns([run],[other]).outcome,'INCONCLUSIVE');

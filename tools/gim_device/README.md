@@ -19,12 +19,10 @@ gim_device/
 ├── dist/
 │   └── GIM设备查看器.exe    打包产物（约 190 MB，可单独拷走）
 ├── tools/
-│   ├── test_render.py      无头浏览器回归测试（不开 GUI 快速验证任意 gim）
-│   └── survey_prim.py      图元普查：抽样统计规范库的 primitive 类型分布
-└── _probe_bbox.py          装配调试：按 z 分层统计网格数，定位「某段没有几何」
+│   └── test_render.py      无头浏览器回归测试（不开 GUI 快速验证任意 gim）
 ```
 
-`_screenshots/` 是回归测试的临时输出目录（`tools/test_render.py` 用），**随时可整个删掉**，脚本用的时候 `os.makedirs(exist_ok=True)` 自动重建。
+`tools/test_render.py` 的截图写入工作区 `output/gim-device/`，临时页面写入 `tmp/gim-device/`。
 
 ---
 
@@ -115,16 +113,16 @@ CBM.TRANSFORMMATRIX × DEV.SUBDEVICEn 矩阵 × DEV.SOLIDMODELn 矩阵 × PHM.TR
 5. **CBM 的 TRANSFORMMATRIX 布局不同**（实测写成 `1,0,0,1,0,0,0,1,...`，不是列主序仿射阵）。这类矩阵必须按单位阵回退，否则整棵装配树会被算飞（表现为几何 NaN / 尺寸荒谬）。`parse_matrix()` 做两道校验：仿射形式 + 线性部分非奇异。
 6. 单位是 mm、Z 轴朝上，顶点已经是绝对量纲，不再做缩放。
 
-验证方法：`_probe_bbox.py` 会按 z 分层统计网格数，能直接看出「某段高度没有几何」这类装配缺口。
+验证方法：使用无头浏览器渲染回归并检查场景范围与构件可见性。
 
 ## 六、回归测试
 
 ```bash
 python tools/test_render.py some.gim --out tag --views iso,front
-# 截图落在 gim_device/_screenshots/_r_<tag>_<view>.png
+# 截图落在工作区 output/gim-device/_r_<tag>_<view>.png
 ```
 
-不开 GUI，用 Playwright 走系统 Chrome（`channel='chrome'`）验证渲染，适合批量回归。`_probe_bbox.py` 可导出每个网格的世界包围盒用于定位装配问题。
+不开 GUI，用 Playwright 走系统 Chrome（`channel='chrome'`）验证渲染，适合批量回归。
 
 ---
 

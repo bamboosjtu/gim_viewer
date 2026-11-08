@@ -492,7 +492,7 @@ commit：<sha>
 ## Agent 执行清单
 
 1. 确认工作区干净或记录未提交变更；`git rev-parse HEAD`。
-2. `cd desktop && npm ci && npm test && npm run test:sqlite`；样本相关改动再跑 `npm run test:sample`（可选诊断）。
+2. `cd desktop && npm ci && npm test && npm run test:sqlite`；本地工程样本在原生构建后通过 `test:local` 或 Benchmark 运行。
 3. `npm run tauri:build`；记录 exe/portable 的 SHA-256 和时间戳。
 4. 对每个样本：核实并清理独立验收目录 → 启动 → 打开 → 计时 → 导出 `Ctrl+Shift+B` JSON → 关闭。
 5. 只有冷启动基础表示 settled 且对应缓存写入完成的样本才做完整暖启动；重启进程但不删缓存。
@@ -513,7 +513,6 @@ cd desktop
 npm ci
 npm test
 npm run test:sqlite
-npm run test:sample
 npm run tauri:build
 
 # 冷启动：先按“核实独立验收缓存目录”核实实际路径并关闭所属进程。

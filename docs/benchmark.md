@@ -73,7 +73,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | `review-partial` | 独立复核 PARTIAL 来源证据并生成候选摘要绑定的私有记录 | `--candidate <json> --reviewer <复核者> --reason <受控代码>` |
 | `approve-baseline` | 显式批准候选为基线 | `--candidate <json> --approver <批准者>`；PARTIAL 还需 `--accept-partial --partial-review <复核记录>`，首次加 `--first-partial`，后续提供 `--previous-baseline <已批准基线>` |
 | `batch` | 按目录或注册表批量执行冷开、暖开与重复轮次 | `--build <清单>`；`--directory <目录>` 或 `--registry <json>`；可选 `--output <目录>`、`--anonymize`（`true`/`false`）、`--preset`（`survey`/`baseline`）、`-repeat`/`--repeat <n>`、`--timeout-seconds <n>` |
-| `recover-batch` | 控制器被外部结束后，结算遗留 RUNNING/PENDING 行 | `--output <已停止的批次目录>`；只从工作区私有进度快照恢复状态，不补造耗时 |
+| `recover-batch` | 控制器被外部结束后，结算遗留 RUNNING/PENDING 行 | `--output <已停止的批次目录>`；旧批次缺所有权凭据时需显式 `--force`；只从工作区私有进度快照恢复状态，不补造耗时 |
 
 ## 命令与退出码
 
@@ -112,7 +112,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 - **去重。** 相同 SHA 与相同动作路线只执行一次，其余输入标为 `DUPLICATE` 并关联首个输入；不同动作路线仍分别执行。不会根据文件大小、历史耗时或失败记录跳过某个唯一来源。目录符号链接不跟随，报告会列出拒绝访问项。
 - **队列。** 批次的所有计划行在执行前写入结果。单次失败、超时、输入缺失或 SHA 不符都记录后继续；只有用户取消或报告无法安全写入才停止队列。冷开未准备好有效缓存时，对应暖开标为 `SKIPPED`，下一来源继续执行。除上述打开前基础设施故障外，失败项不自动重试；性能回退的正式独立复测由比较流程处理。
 - **取消。** 运行中可按 Ctrl+C，或在该报告目录新建空的 `stop.request`。控制器取消当前任务、回收本次拥有的应用进程树，余项标为 `CANCELLED`。结果随每次状态变化落盘，浏览器刷新 HTML 即可看到进度；不覆盖已有批次目录。强制结束控制器或机器断电可能留下 `RUNNING`/`PENDING`，它们不属于成功结果。
-- **外部中止恢复。** 确认原控制器与应用进程均已停止后，运行 `npm run bench -- recover-batch --output ../output/<批次>`。控制器存活时恢复被拒绝。恢复将遗留行标为 `CANCELLED`，从私有 `progress.private.json` 带回最后观测的写入待办和缓存状态；旧批次若没有 runId，只在私有清单能唯一匹配样本时关联快照。缺失的 `settledMs` 保持空值，最小私有报告带 `recovery` 标记且 `measurementComplete=false`；恢复批次不得进入基线批准或 gate。
+- **外部中止恢复。** 确认原控制器与应用进程均已停止后，运行 `npm run bench -- recover-batch --output ../output/<批次>`。控制器的私有输出映射与运行记录共用随机 nonce，并记录 PID 与进程启动时间；相同进程仍存活时拒绝恢复，PID 被复用不会误认为原控制器。旧批次缺少凭据、或系统不能确认进程身份时，核实进程已停止后显式加 `--force`。恢复将遗留行标为 `CANCELLED`，从私有 `progress.private.json` 带回最后观测的写入待办和缓存状态；旧批次若没有 runId，只在私有清单能唯一匹配样本时关联快照。缺失的 `settledMs` 保持空值，最小私有报告带 `recovery` 标记且 `measurementComplete=false`；恢复批次不得进入基线批准或 gate。
 
 ## JSON 注册表
 

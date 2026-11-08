@@ -247,7 +247,8 @@ test('recovers a stopped batch without inventing settled time or cache success',
     outcome:'INCONCLUSIVE',anonymize:true,rows:[{inputId:'a',sampleId,sourceSha256,sampleLabel:'hash',cacheState:'cold',
       repetition:1,status:'RUNNING'},{inputId:'a',sampleId,sourceSha256,sampleLabel:'hash',cacheState:'warm',
       repetition:1,status:'PENDING'}],runs:[],stages:[],workers:[],slowTasks:[],slowPhases:[],pairs:[]}));
-  const recovered=recoverInterruptedBatch(root,out);
+  assert.throws(()=>recoverInterruptedBatch(root,out),/batch-controller-ownership-unverified/);
+  const recovered=recoverInterruptedBatch(root,out,{force:true});
   assert.equal(recovered.recovered,2);
   assert.deepEqual(recovered.result.rows.map(row=>row.status),['CANCELLED','CANCELLED']);
   assert.equal(recovered.result.rows[0].settledMs,null);
@@ -262,11 +263,26 @@ test('recovers a stopped batch without inventing settled time or cache success',
 test('recovery refuses to rewrite a batch whose controller PID is still alive',()=>{
   const {root,out}=setup(),privateOut=join(root,'tmp','gim-bench','batches',`batch-live-${Date.now()}`);
   mkdirSync(privateOut,{recursive:true});
-  writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out}));
-  writeFileSync(join(privateOut,'controller.private.json'),JSON.stringify({pid:process.pid}));
+  const nonce='a'.repeat(48);
+  writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out,nonce}));
+  const processStartedAt=new Date(Date.now()-process.uptime()*1000).toISOString();
+  writeFileSync(join(privateOut,'controller.private.json'),JSON.stringify({pid:process.pid,nonce,processStartedAt}));
   writeFileSync(join(out,'results.json'),JSON.stringify({status:'RUNNING',rows:[{status:'PENDING'}]}));
-  assert.throws(()=>recoverInterruptedBatch(root,out),/batch-controller-still-running/);
+  assert.throws(()=>recoverInterruptedBatch(root,out,{getProcessStartAt:()=>Date.parse(processStartedAt)}),/batch-controller-still-running/);
   assert.equal(JSON.parse(readFileSync(join(out,'results.json'),'utf8')).rows[0].status,'PENDING');
+});
+test('recovery accepts a reused PID with a different process start time',()=>{
+  const {root,out}=setup(),privateOut=join(root,'tmp','gim-bench','batches',`batch-reused-${Date.now()}`);
+  mkdirSync(privateOut,{recursive:true});
+  const nonce='b'.repeat(48);
+  writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out,nonce}));
+  writeFileSync(join(privateOut,'controller.private.json'),JSON.stringify({pid:process.pid,nonce,
+    processStartedAt:'2000-01-01T00:00:00.000Z'}));
+  writeFileSync(join(out,'results.json'),JSON.stringify({version:'gim-batch-results-v1',status:'RUNNING',
+    rows:[{inputId:'a',sampleLabel:'hash',cacheState:'cold',status:'PENDING'}],runs:[],stages:[],workers:[],pairs:[]}));
+  const recovered=recoverInterruptedBatch(root,out,{getProcessStartAt:()=>Date.now()});
+  assert.equal(recovered.recovered,1);
+  assert.equal(recovered.result.rows[0].status,'CANCELLED');
 });
 test('summary never combines distinct PARTIAL source signatures',()=>{
   const rows=[{inputId:'a',cacheState:'cold',status:'PARTIAL',partialSignature:'coverage:a',firstResponseMs:10},

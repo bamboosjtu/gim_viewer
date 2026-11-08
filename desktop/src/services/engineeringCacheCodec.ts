@@ -23,7 +23,6 @@ export interface EngineeringCacheIdentity {
   entries: readonly string[];
 }
 export interface EngineeringSourceArtifact { sources: EngineeringSources; digest: string }
-export interface EngineeringEntityArtifact { snapshot: EngineeringSnapshot; sourceDigest: string }
 type Kind = 'sources' | 'entities' | 'navigation';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });

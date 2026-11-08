@@ -137,11 +137,10 @@
 - 修改用户可见行为：更新[桌面软件规格](software-spec.md)或[移动端规格](mobile-spec.md)，并同步[问题与限制](open-issues.md)。
 - 修改样本或性能口径：更新[样本台账](schema/sample-corpus.md)/[性能测试指南](performance-guide.md)；实测结果由开发者本地 `output/` 报告保存。
 
-需要排查文档链接或目录索引时，可在 `desktop/` 手动执行；这些检查不是 CI 门禁：
+需要重新生成或核对机器目录索引时，可在 `desktop/` 手动执行：
 
 ```powershell
-npm run check:engineering-docs   # 链接/锚点、术语、目录计数、缺陷 ID、首页覆盖、标题/表格/目录结构
 npm run check:engineering-catalog
 ```
 
-文档检查只覆盖可机械验证的部分（链接与锚点、过期术语、目录计数、缺陷 ID、首页覆盖、标题/表格/目录结构）；事实正确性仍需对照源码与运行证据。
+Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码与运行证据。

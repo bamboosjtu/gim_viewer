@@ -1,5 +1,4 @@
 import * as OBC from '@thatopen/components';
-import * as OBCF from '@thatopen/fragments';
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
 import type { ViewerState as AppState } from '../shared/viewerState.js';
@@ -14,14 +13,6 @@ import { resolveIfcModelId } from '../gim/modelIdentity.js';
 import { setDevInstanceHighlight } from './devInstanceBatches.js';
 import { perfBegin } from '../utils/perfTimings.js';
 import { addSelectionOutline, removeSelectionOutline, clearMeshOutlines, clearFragmentOutlines, outlineFragmentItems, SELECTION_AMBER } from './selectionOutline.js';
-
-/** 高亮样式 */
-export const HIGHLIGHT_STYLE: OBCF.MaterialDefinition = {
-  color: new THREE.Color(SELECTION_AMBER),
-  renderedFaces: OBCF.RenderedFaces.TWO,
-  opacity: 0.08,
-  transparent: true,
-};
 
 /** MOD/STL 高亮颜色（与 IFC 高亮保持一致） */
 const HIGHLIGHT_MOD_COLOR = new THREE.Color(SELECTION_AMBER);

@@ -56,8 +56,7 @@ primitive 存在、解析和渲染三种状态。
 PowerShell 清单/几何脚本通常接受 `-SampleId`、`-SampleRoot`、`-OutDir`，
 容器脚本使用 `-GimPath`。显式传独立 OutDir，避免写入技能内现有 CSV。
 
-批量 Python 调研位于 [desktop/scripts/gim_survey](../../../desktop/scripts/gim_survey/)。
-先检查实际样本集合、默认输出和算法；固定头布局与部分扫描分类不等于现行 parser。
+批量复核按脚本清单选择实际检查面；固定头布局与部分扫描分类不等于现行 parser。
 脚本覆盖差异记录为诊断，不通过修改源或猜测身份把结果变为通过。
 
 ## 输出和文档维护

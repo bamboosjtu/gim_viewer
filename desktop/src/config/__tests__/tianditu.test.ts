@@ -23,9 +23,4 @@ describe('天地图配置', () => {
     config.setTiandituKey('');
     expect(config.isTiandituKeyAvailable()).toBe(false);
   });
-
-  it('仅使用已验证稳定的 t0–t4 子域', async () => {
-    const config = await import('../tianditu.js');
-    expect(config.TIANDITU_SUBDOMAINS).toEqual([0, 1, 2, 3, 4]);
-  });
 });

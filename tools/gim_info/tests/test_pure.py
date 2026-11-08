@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 _ROOT=Path(__file__).resolve().parents[3]
-_TEMP=_ROOT/'.tmp/tests/python-pure'
+_TEMP=_ROOT/'tmp/tests/python-pure'
 _TEMP.mkdir(parents=True,exist_ok=True)
 os.environ.update(TEMP=str(_TEMP),TMP=str(_TEMP),TMPDIR=str(_TEMP),GIM_READER_LOG_PATH=str(_TEMP/'gim-reader.log'))
 tempfile.tempdir=str(_TEMP)
