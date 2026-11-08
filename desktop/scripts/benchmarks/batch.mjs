@@ -92,10 +92,11 @@ function recordReport(row,report,state){
   for(const [workerId,worker]of Object.entries(report.measurement?.workers??{})){
     const heap=heaps.get(workerId),unavailableRow=unavailable.get(workerId);
     state.workers.push({...context,workerId,family:worker.family,
-      heapAvailability:heap?'available':unavailableRow?'unavailable':shortLived.has(workerId)?'short-lived':notApplicable.has(workerId)?'not-applicable':'missing',
-      heapSamples:heap?.samples??unavailableRow?.samples??0,
+      heapAvailability:unavailableRow?'unavailable':heap?'available':shortLived.has(workerId)?'short-lived':notApplicable.has(workerId)?'not-applicable':'missing',
+      heapSamples:heap?.samples??unavailableRow?.successfulSamples??0,failedHeapSamples:unavailableRow?.failedSamples??heap?.failedSamples??0,
       heapReason:unavailableRow?.reason??shortLived.get(workerId)?.reason??notApplicable.get(workerId)?.reason??(heap?null:'worker-target-not-observed'),
-      observedHeapPeakBytes:heap?.observedPeakBytes??null,maxSampleDelayMs:heap?.maxSampleDelayMs??null});
+      observedHeapPeakBytes:heap?.observedPeakBytes??null,maxSampleDelayMs:unavailableRow?.maxSampleDelayMs??heap?.maxSampleDelayMs??null,
+      maxSampleGapMs:unavailableRow?.maxSampleGapMs??heap?.maxSampleGapMs??null});
   }
 }
 

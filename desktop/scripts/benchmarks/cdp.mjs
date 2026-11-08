@@ -121,5 +121,8 @@ export class WorkerHeapSampler {
   }
   async checkpoint(workerId,name){const row=[...this.#targets.values()].find(row=>row.identity?.workerId===workerId);if(row)await this.#sample(row,name);}
   snapshot(){return {mappedWorkerIds:[...this.#mapped],externalTargets:this.#external,samples:this.#samples,missing:this.#missing,scope:'isolate',osWorkerMemoryAvailable:false};}
-  stop(){this.#closed=true;clearInterval(this.#timer);this.#stopListener?.();for(const row of this.#targets.values())row.ended=true;this.#targets.clear();}
+  stop(){this.#closed=true;clearInterval(this.#timer);this.#stopListener?.();for(const row of this.#targets.values()){
+    row.ended=true;this.emit({kind:'heap-sampling-stopped',workerId:row.identity?.workerId??null,atMs:performance.now()});
+  }
+    this.#targets.clear();}
 }

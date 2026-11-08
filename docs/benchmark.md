@@ -67,7 +67,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | `matrix` | 按冻结 Profile 运行重复矩阵并产出候选 | `--build <清单>`、`--profile <json>`；可选 `--repetitions <n>`、`--mode <模式>` |
 | `overhead` | 测量探针自身开销，样本必须属于冻结 Profile | `--build <清单>`、`--profile <json>`、`--sample <id>` |
 | `lifecycle` | 十轮开闭与资源回落自检 | `--build <清单>`、`--sample <id>`；可选 `--second-sample <id>` |
-| `compare` | 比较基线与候选 | `--baseline <json>`、`--candidate <json>`；可选 `--retest-baseline <json>`、`--retest-candidate <json>` |
+| `compare` | 比较基线与候选 | `--baseline <json>`、`--candidate <json>`；可选 `--retest-baseline <json>`、`--retest-candidate <json>`、`--output <工作区 JSON>` |
 | `gate` | 门禁比较，要求基线带有效批准摘要 | 同 `compare` |
 | `report` | 从已有结果 JSON 重新生成 HTML 报告 | `--input <json>` |
 | `review-partial` | 独立复核 PARTIAL 来源证据并生成候选摘要绑定的私有记录 | `--candidate <json> --reviewer <复核者> --reason <受控代码>` |
@@ -179,7 +179,7 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 | `stages.csv` | 每个运行的阶段次数、wall time、最大值、可追踪字节工作量、ms/MiB 和 p50/p95/p99 区间 |
 | `slow-tasks.csv`、`slow-phases.csv` | 每个运行耗时最长的十个 Worker 任务和单次阶段，使用匿名来源 ID；聚合直方图不充作单次阶段 |
 | `slow-templates.csv` | 每轮最慢 20 个 DEV 模板槽位等待及最久 20 个槽位占用者；含优先级、缓存读取、Worker 请求/排队、输入预算、输出字节及内存压力，公开列只用匿名来源 ID |
-| `workers.csv` | 每个 Worker 的类型、堆采样可用性、样本数、观测峰值和延迟 |
+| `workers.csv` | 每个 Worker 的类型、堆采样可用性、成功/失败次数、观测峰值、最大采样延迟和间隔 |
 | `results.json` | 机器读取的结果、运行条件、正确性检查、工作量、比较所需指标与冷暖一致性结果 |
 | `profile.json` | 本批次冻结的来源 SHA、动作、模式、轮数、超时与摘要 |
 
@@ -195,7 +195,7 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 - `automaticLoadMs` 是工程语义、导航和自动基础几何均已就绪的最晚产品事件时刻；缓存写入与几何编译并行，写入若在该时刻前完成，`writeDrainMs` 为零，但不意味着写入没有占用主线程。`settledMs` 是任务、缓存、后台及静默窗口全部完成时刻。样本覆盖 tab 同时列出自动表示、缓存发布和完全结算的中位数。
 - `modelTreeReadyMs` 是工程组成投影首次可用（线路/设备取导航可用时刻）；`firstGeometryMs` 是首个几何可见；`allGeometryReadyMs` 是自动基础 DEV/IFC 表示均齐备的时刻。三者与 `cachePublishMs`、`settledMs` 分列；几何齐备是 wall time，可能含来源读取、调度和缓存写入背压，不冒充纯三角化耗时。不同样本的 `automaticLoadMs` 与写入重叠程度可不同，跨样本比较应同时阅读几何与缓存两条时间线。
 - 冷暖配对复用 SQLite 数据根和 WebView2 用户数据目录；IFC LOD 的 IndexedDB 缓存位于后者。cold 要求两者为空，warm 要求配对 profile 已存在且非空；缺失时报 `warm-webview-profile-unavailable` / INCONCLUSIVE，不启动伪暖开。旧的独立 WebView profile 运行条件不可与新口径比较。运行中的 `progress.private.json` 每 30 秒保留一次匿名状态快照，只存工作区私有目录。工程提取按实际来源进展续期；活动工程任务 60 秒没有进展时以 `product-stalled` 终结，且保存最后观测阶段。无活动工程任务而语义仍未就绪时，120 秒后标为 `engineering-progress-stalled` / INCONCLUSIVE。
-- 从未执行任务的 Worker 标为 `not-applicable / never-executed`；没有独立 JS isolate 的宿主或外部进程也标为 `not-applicable`。短命 Worker 标为 `short-lived / ended-before-heap-sample`；不填零。实际执行任务的 Worker 若仍缺堆证据则列出 `unavailable` 或 `missing`。进程树采样失败会重试，并单列根进程 Private Bytes 作为下界，不冒充完整进程树峰值。`memoryIncompleteItems` 指明缺口；产品 PASS/PARTIAL 保留，正式内存比较和基线认可返回 INCONCLUSIVE。
+- 从未执行任务的 Worker 标为 `not-applicable / never-executed`；没有独立 JS isolate 的宿主或外部进程也标为 `not-applicable`。短命 Worker 标为 `short-lived / ended-before-heap-sample`；不填零。实际执行任务的 Worker 若仍缺堆证据则列出 `unavailable` 或 `missing`。一次成功采样不掩盖后续失败；失败次数、最大采样间隔或延迟超过两个周期时，该 Worker 的内存证据不完整。进程树采样失败会重试，并单列根进程 Private Bytes 作为下界，不冒充完整进程树峰值。`memoryIncompleteItems` 指明缺口；产品 PASS/PARTIAL 保留，正式内存比较和基线认可返回 INCONCLUSIVE。
 - `cacheWriteBytes` 是 DEV 产物实际提交尝试的元数据与 GLB 字节之和，`cacheWriteMsPerMiB` 是服务端到端 wall time 除以该字节量，包含打包、IPC 等待和原生写入，不是磁盘吞吐。`cachePack`、`cacheInvokeWall`、`cacheNativeResolve`、`cacheNativeWrite` 的阶段均记录字节量，嵌套阶段不能相加。缓存写入与模型树、几何阶段重叠，比较时间线时须看各自就绪事件。
 - `templateQueue` 是等待模板处理槽位的 wall time；`templateSlotOccupancy` 是获槽到释放的 wall time。两者可并行重叠，不把各任务累计值当成应用启动耗时。`slow-templates.csv` 的 `workerAwaitMs` 含 Worker 排队、读取及执行；`workerQueueWaitTotalMs` 是该模板直接或分部 Worker 派发等待的累计值，分部任务并行时也不可直接当作端到端时间。原始 DEV 路径仅留在 `tmp/gim-bench/runs/<runId>/template-diagnostics.private.json`，可分享 CSV/JSON 只保存 `sourceId`。
 - 批量测量在工作区 `tmp/` 运行固定控制器 CPU 与写入/暖读校准，批次报告记录机器 CPU、内存、工作区可用空间；比较结果给出 `calibrationRatio`。该校准不能等价代表 WebView Worker、源盘或显卡速度，所以产品 wall time 不乘系数归一化。跨轮默认同机、同运行时、同 SHA 与同工作量；CPU 校准偏差超过 15% 或工作区 I/O 校准偏差超过 30% 时，正式比较返回 INCONCLUSIVE。电源模式无法可靠读取时明确记 `unavailable`。不同批次缺少相同 L0/L1/L2 登记输入时属于覆盖缺口，报告不会凭样本名自动补齐，也不改变单样本判定。
@@ -289,6 +289,7 @@ npm run bench -- gate --baseline ../tmp/gim-bench/<已批准基线>.approved.jso
 ```
 
 - 比较按来源、场景、冷暖状态及测量模式分别分组，不把多工程的指标混成一个中位数。
+- 矩阵候选先检查整体结果、必需 Worker 家族、计划运行数和逐来源冷暖配对；缺口为 `INCONCLUSIVE`，不能只凭已有逐轮数据通过 `compare` 或 `gate`。
 - 每组至少一次独立进程；基线与候选须有相同重复次数、机器、运行时、Profile、动作、工作量和视口。
 - `PARTIAL` 只与同 SHA、同来源缺口摘要的 `PARTIAL` 比较；`PARTIAL` 与 `PASS` 的覆盖不同，结果为 `INCONCLUSIVE`。
 - 普通 `compare` 可读取结构指纹和已有内容证据，但不把缺少内容证明作为普通测量失败。正式 `approve-baseline` 和 `gate` 要求 DEV L0 内容摘要覆盖所有已显示根；字节摘要或放置指纹变化为 INCONCLUSIVE，不能仅凭相同包围盒自动通过。无 DEV 表示的输入标为不适用，不伪造内容 SHA。

@@ -131,7 +131,19 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       if(row.kind==='heap-sample'&&row.workerId){const previous=heapRecords.get(row.workerId);
         heapRecords.set(row.workerId,{workerId:row.workerId,family:row.family??previous?.family??null,
           availability:row.availability,reason:row.availability==='available'?null:row.reason??'unknown',
-          samples:(previous?.samples??0)+1});}
+          lastFailureReason:row.availability==='available'?previous?.lastFailureReason??null:row.reason??'unknown',
+          samples:(previous?.samples??0)+1,successfulSamples:(previous?.successfulSamples??0)+(row.availability==='available'?1:0),
+          failedSamples:(previous?.failedSamples??0)+(row.availability==='available'?0:1),
+          maxSampleGapMs:Math.max(previous?.maxSampleGapMs??0,
+            Number.isFinite(previous?.lastSampleAtMs)&&Number.isFinite(row.atMs)
+              ?Math.max(0,row.atMs-previous.lastSampleAtMs):0),
+          maxSampleDelayMs:Math.max(previous?.maxSampleDelayMs??0,row.sampleDelayMs??0),lastSampleAtMs:row.atMs});}
+      if(['worker-target-ended','heap-sampling-stopped'].includes(row.kind)&&row.workerId){
+        const previous=heapRecords.get(row.workerId);
+        if(previous&&Number.isFinite(previous.lastSampleAtMs)&&Number.isFinite(row.atMs))
+          heapRecords.set(row.workerId,{...previous,maxSampleGapMs:Math.max(previous.maxSampleGapMs??0,
+            Math.max(0,row.atMs-previous.lastSampleAtMs))});
+      }
       if(row.availability==='available'){const old=heaps.get(row.workerId);heaps.set(row.workerId,{workerId:row.workerId,family:row.family,isolateId:row.isolateId,samples:(old?.samples??0)+1,observedPeakBytes:Math.max(old?.observedPeakBytes??0,row.bytes),maxSampleDelayMs:Math.max(old?.maxSampleDelayMs??0,row.sampleDelayMs)});}
     });
     if(diagnostic){sampler.configureDiagnostic({...diagnostic,mode,
@@ -301,7 +313,10 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       webviewLogTail:fileTail(log)},null,2));
   }
   writeFileSync(join(out,'process-memory.json'),JSON.stringify(processSamples,null,2));
-  const workerMemory=[...heaps.values()],measurement=observation?.measurement??null;
+  const workerMemory=[...heaps.values()].map(row=>({...row,
+    failedSamples:heapRecords.get(row.workerId)?.failedSamples??0,
+    maxSampleGapMs:heapRecords.get(row.workerId)?.maxSampleGapMs??0,
+    maxSampleDelayMs:heapRecords.get(row.workerId)?.maxSampleDelayMs??row.maxSampleDelayMs})),measurement=observation?.measurement??null;
   const processMemoryComplete=processSamples.length>=2&&processSamples.every(row=>row.availability==='available');
   const {missing:missingWorkers,unavailable:unavailableWorkers,shortLived:shortLivedWorkerMemory,
     notApplicable:notApplicableWorkerMemory}=classifyWorkerHeapEvidence(

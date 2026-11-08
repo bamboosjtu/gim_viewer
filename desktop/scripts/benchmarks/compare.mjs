@@ -66,6 +66,38 @@ export function runReadiness(run){
   if(!run.requiredMetrics?.length)reasons.push('required-metrics-missing');
   return {outcome:reasons.length?'INCONCLUSIVE':run.correctness==='partial'?'PARTIAL':'PASS',reasons};
 }
+/** Suite evidence must be complete before per-run timing comparisons. */
+export function suiteCompletenessIssues(suite){
+  if(suite?.version==='gim-batch-results-v1'){
+    const issues=[];
+    if(suite.status!=='COMPLETE')issues.push('batch-not-complete');
+    if(suite.baselineEligible!==true)issues.push('batch-baseline-ineligible');
+    return issues;
+  }
+  if(suite?.version!=='gim-benchmark-candidate-v1')return [];
+  const issues=[];
+  if(!['PASS','PARTIAL'].includes(suite.outcome))issues.push(`matrix-outcome:${suite.outcome??'missing'}`);
+  if(suite.selectionFrozen!==true)issues.push('matrix-selection-unfrozen');
+  if(!Array.isArray(suite.missingFamilies)||suite.missingFamilies.length)
+    issues.push(`matrix-worker-families-missing:${(suite.missingFamilies??[]).join(',')||'unverified'}`);
+  const runs=suite.runs,pairs=suite.pairs;
+  if(!Number.isSafeInteger(suite.requiredRuns)||suite.requiredRuns<2||suite.requiredRuns%2||
+    !Array.isArray(runs)||runs.length!==suite.requiredRuns)issues.push('matrix-run-count-incomplete');
+  if(!Array.isArray(pairs)||pairs.length!==suite.requiredRuns/2||
+    pairs.some(pair=>!['PASS','PARTIAL'].includes(pair.outcome)))issues.push('matrix-cold-warm-pairs-incomplete');
+  if(Array.isArray(runs)&&Array.isArray(pairs)){
+    const counts=new Map();
+    for(const run of runs){const key=JSON.stringify([run.conditions?.sampleId,run.repetition,run.conditions?.cacheState]);
+      counts.set(key,(counts.get(key)??0)+1);}
+    const expected=new Map();
+    for(const pair of pairs)for(const cacheState of ['cold','warm']){
+      const key=JSON.stringify([pair.sampleId,pair.repetition,cacheState]);expected.set(key,(expected.get(key)??0)+1);
+    }
+    if([...new Set([...counts.keys(),...expected.keys()])].some(key=>counts.get(key)!==expected.get(key)))
+      issues.push('matrix-cold-warm-identity-incomplete');
+  }
+  return issues;
+}
 function checkGroup(runs){
   const checks=runs.map(runReadiness);if(checks.some(r=>r.outcome==='FAIL'))return {outcome:'FAIL',reasons:checks.flatMap(r=>r.reasons)};
   const reasons=checks.flatMap(r=>r.reasons);
@@ -173,6 +205,7 @@ export function partialReviewIssue(review,candidate){
 }
 export function approveBaseline(candidate,approver,{acceptPartial=false,partialReview=null,firstPartial=false,previousBaseline=null}={}){
   if(candidate.recovery||candidate.runs?.some(run=>run.recovery))throw Error('Recovered interruption cannot become a baseline');
+  const suiteIssues=suiteCompletenessIssues(candidate);if(suiteIssues.length)throw Error(`Baseline ${suiteIssues.join(';')}`);
   if(!reviewerValid(approver)||!['PASS','PARTIAL'].includes(candidate.outcome)||candidate.outcome==='PARTIAL'&&!acceptPartial||candidate.selectionFrozen!==true||!candidate.runs?.length)throw Error('Complete frozen candidate and explicit approver required');
   const groups=new Map();for(const run of candidate.runs){const key=digest(run.conditions);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(run);}
   if([...groups.values()].some(runs=>!['PASS','PARTIAL'].includes(checkGroup(runs).outcome)))throw Error('Baseline runs are incomplete');
@@ -213,6 +246,7 @@ export function approveBaseline(candidate,approver,{acceptPartial=false,partialR
 }
 
 export function baselineApprovalIssue(baseline){
+  const suiteIssues=suiteCompletenessIssues(baseline);if(suiteIssues.length)return suiteIssues[0];
   if(!baseline.approval)return 'baseline-not-approved';
   const {approval,...candidate}=baseline;
   if(approval.candidateDigest!==digest(candidate))return 'baseline-approval-digest-mismatch';

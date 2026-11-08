@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {compareRuns,approveBaseline,baselineApprovalIssue,runReadiness,digest,createPartialReview} from './compare.mjs';
+import {compareRuns,compareSuites,approveBaseline,baselineApprovalIssue,runReadiness,digest,createPartialReview} from './compare.mjs';
 import {selectSamples} from './samples.mjs';
 import {CdpConnection} from './cdp.mjs';
 import {cacheVerified,coldWarmEquivalent,freezeProfile,verifyProfile,warmCatalogCoverage} from './profiles.mjs';
@@ -11,8 +11,9 @@ import {bareContainerKind} from './container-magic.mjs';
 import {runMatrix} from './matrix.mjs';
 import {nativeExitCode} from './cli-outcome.mjs';
 import {pairedWebviewProfile,checkedWebviewProfile} from './cache-roots.mjs';
-import {mkdirSync,mkdtempSync,writeFileSync} from 'node:fs';
-import {resolve,join} from 'node:path';
+import {mkdirSync,mkdtempSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {resolve,join,dirname} from 'node:path';
 const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
 const contentEvidence={scope:'DEV-L0-GLB-artifacts',method:'worker-output-or-validated-cache-sha256',
   availability:'available',coveredOccurrences:1,expectedShownOccurrences:1,missingArtifactSha:0,
@@ -107,6 +108,37 @@ test('product pass remains visible when memory is unavailable, but comparison an
   assert.equal(compareRuns([run],[other]).outcome,'INCONCLUSIVE');
   assert.throws(()=>approveBaseline({outcome:'PASS',selectionFrozen:true,runs:[run]},'developer'),/memory evidence is incomplete/);
 });
+test('CLI gate rejects a matrix missing a required Worker family before comparing matching runs',()=>{
+  const parent=resolve('..','tmp','benchmark-gate-tests');mkdirSync(parent,{recursive:true});
+  const root=mkdtempSync(join(parent,'case-'));
+  try{
+    const cold={...runs('baseline',100)[0],projectType:'transmission_line',repetition:0};
+    const warm={...cold,processInstanceId:'baseline-warm',conditions:{...cold.conditions,cacheState:'warm'}};
+    const baseline=approveBaseline({outcome:'PASS',selectionFrozen:true,runs:[cold,warm]},'developer');
+    const candidate={version:'gim-benchmark-candidate-v1',outcome:'INCONCLUSIVE',selectionFrozen:true,
+      profileDigest:'profile',requiredRuns:2,missingFamilies:['line'],
+      pairs:[{sampleId:'sample',repetition:0,outcome:'PASS'}],
+      runs:[{...cold,processInstanceId:'candidate-cold'},
+        {...warm,processInstanceId:'candidate-warm'}]};
+    assert.equal(compareSuites(baseline.runs,candidate.runs,{requireContentEvidence:true}).outcome,'PASS');
+    const baselinePath=join(root,'baseline.json'),candidatePath=join(root,'candidate.json'),out=join(root,'comparison.json');
+    writeFileSync(baselinePath,JSON.stringify(baseline));writeFileSync(candidatePath,JSON.stringify(candidate));
+    const child=spawnSync(process.execPath,['scripts/benchmarks/cli.mjs','gate','--baseline',baselinePath,
+      '--candidate',candidatePath,'--output',out],{cwd:resolve('.'),encoding:'utf8',timeout:10000,
+      env:{...process.env,TEMP:root,TMP:root,TMPDIR:root}});
+    assert.equal(child.status,2,child.stderr);
+    const result=JSON.parse(readFileSync(out,'utf8'));
+    assert.equal(result.outcome,'INCONCLUSIVE');
+    assert.ok(result.reasons.some(reason=>reason.startsWith('matrix-worker-families-missing:')));
+    candidate.outcome='PASS';candidate.missingFamilies=[];candidate.pairs=[];
+    writeFileSync(candidatePath,JSON.stringify(candidate));
+    const missingPair=spawnSync(process.execPath,['scripts/benchmarks/cli.mjs','gate','--baseline',baselinePath,
+      '--candidate',candidatePath,'--output',out],{cwd:resolve('.'),encoding:'utf8',timeout:10000,
+      env:{...process.env,TEMP:root,TMP:root,TMPDIR:root}});
+    assert.equal(missingPair.status,2,missingPair.stderr);
+    assert.ok(JSON.parse(readFileSync(out,'utf8')).reasons.includes('matrix-cold-warm-pairs-incomplete'));
+  }finally{assert.equal(dirname(root),parent);rmSync(root,{recursive:true,force:true});}
+});
 test('interrupted lifecycle cannot pass even after active tasks are settled',()=>{
   const b=runs('base',100),c=runs('candidate',100);
   c[0].measurementLifecycleComplete=false;
@@ -172,7 +204,7 @@ test('single paired process is comparable; partial coverage needs explicit basel
   assert.equal(compareRuns(b.map(partial),c.map(partial)).outcome,'PARTIAL');
   assert.equal(compareRuns(b,c.map(partial)).outcome,'INCONCLUSIVE');
   assert.equal(compareRuns(b.map(partial),c.map(row=>({...partial(row),evidence:{progress:{cache:{writeFailures:1}}}}))).outcome,'FAIL');
-  const candidate={version:'gim-benchmark-candidate-v1',outcome:'PARTIAL',selectionFrozen:true,runs:b.map(partial),measurementAcceptance:{outcome:'PASS'}};
+  const candidate={outcome:'PARTIAL',selectionFrozen:true,runs:b.map(partial)};
   assert.throws(()=>approveBaseline(candidate,'developer'),/explicit approver/);
   assert.throws(()=>approveBaseline(candidate,'developer',{acceptPartial:true}),/partial-review-required/);
   assert.throws(()=>createPartialReview(candidate,'auditor','free text with a private path'),/controlled source limitation/);

@@ -22,3 +22,19 @@ test('never executed Worker instances do not require a heap sample',()=>{
   assert.deepEqual(result.missing,[]);
   assert.deepEqual(result.notApplicable,[{workerId:'idle',reason:'never-executed'}]);
 });
+test('a successful early heap sample does not hide later Worker sampling failures',()=>{
+  const workers={dev:{family:'dev',state:'running',createdMs:0,tasks:1}};
+  const records=new Map([['dev',{workerId:'dev',availability:'available',successfulSamples:1,failedSamples:3,
+    lastFailureReason:'previous-sample-pending',maxSampleGapMs:4500,maxSampleDelayMs:2200}]]);
+  const result=classifyWorkerHeapEvidence(workers,new Set(['dev']),records,1000);
+  assert.deepEqual(result.missing,[]);
+  assert.equal(result.unavailable[0].reason,'previous-sample-pending');
+  assert.equal(result.unavailable[0].failedSamples,3);
+});
+test('a long sampling gap remains incomplete even when every received sample succeeded',()=>{
+  const workers={dev:{family:'dev',state:'running',createdMs:0,tasks:1}};
+  const records=new Map([['dev',{workerId:'dev',availability:'available',successfulSamples:2,failedSamples:0,
+    maxSampleGapMs:3500,maxSampleDelayMs:50}]]);
+  const result=classifyWorkerHeapEvidence(workers,new Set(['dev']),records,1000);
+  assert.equal(result.unavailable[0].reason,'worker-heap-sampling-gap');
+});

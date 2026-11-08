@@ -6,7 +6,7 @@ import {randomBytes} from 'node:crypto';
 import {registerSamples,inventorySamples,selectSamples,workspacePath} from './samples.mjs';
 import {buildAcceptance} from './acceptance-build.mjs';
 import {runNative} from './native-run.mjs';
-import {approveBaseline,baselineApprovalIssue,compareSuites,createPartialReview} from './compare.mjs';
+import {approveBaseline,baselineApprovalIssue,compareSuites,createPartialReview,suiteCompletenessIssues} from './compare.mjs';
 import {freezeProfile,verifyProfile} from './profiles.mjs';
 import {runMatrix} from './matrix.mjs';
 import {lifecycleExercise} from './lifecycle.mjs';
@@ -20,6 +20,8 @@ const [command,...args]=process.argv.slice(2);
 const option=name=>{const index=args.findIndex(value=>value===`--${name}`||value===`-${name}`);return index<0?undefined:args[index+1];};
 const read=path=>JSON.parse(readFileSync(workspacePath(root,resolve(path)),'utf8'));
 const write=(name,value)=>{mkdirSync(home,{recursive:true});const path=join(home,name);writeFileSync(path,JSON.stringify(value,null,2));console.log(path);return path;};
+const writeComparison=value=>{const path=option('output')?workspacePath(root,resolve(option('output'))):join(home,'comparison.json');
+  mkdirSync(dirname(path),{recursive:true});writeFileSync(path,JSON.stringify(value,null,2));console.log(path);return path;};
 const approvalName=(kind,digest)=>`${kind}-${digest.slice(0,16)}-${Date.now()}-${randomBytes(4).toString('hex')}.json`;
 mkdirSync(home,{recursive:true});for(const name of ['TEMP','TMP','TMPDIR'])process.env[name]=home;
 try{
@@ -92,11 +94,15 @@ try{
     const baseline=read(option('baseline')),candidate=read(option('candidate'));
     const approvalIssue=command==='gate'?baselineApprovalIssue(baseline):null;
     const recoveryIssue=baseline.recovery||candidate.recovery?'recovered-interruption':null;
-    const result=approvalIssue||recoveryIssue?{outcome:'INCONCLUSIVE',reasons:[approvalIssue??recoveryIssue]}:compareSuites(baseline.runs??[baseline],candidate.runs??[candidate],{
+    const suiteIssues=[...suiteCompletenessIssues(baseline),...suiteCompletenessIssues(candidate)];
+    const issues=[approvalIssue,recoveryIssue,...suiteIssues].filter(Boolean);
+    const failedSuite=[baseline,candidate].some(suite=>
+      ['gim-benchmark-candidate-v1','gim-batch-results-v1'].includes(suite.version)&&suite.outcome==='FAIL');
+    const result=issues.length?{outcome:!approvalIssue&&!recoveryIssue&&failedSuite?'FAIL':'INCONCLUSIVE',reasons:[...new Set(issues)]}:compareSuites(baseline.runs??[baseline],candidate.runs??[candidate],{
       retestBaseline:option('retest-baseline')?read(option('retest-baseline')).runs:[],retestCandidate:option('retest-candidate')?read(option('retest-candidate')).runs:[],
       requireContentEvidence:command==='gate',
     });
-    write('comparison.json',result);process.exitCode=['PASS','PARTIAL'].includes(result.outcome)?0:result.outcome==='FAIL'?1:2;
+    writeComparison(result);process.exitCode=['PASS','PARTIAL'].includes(result.outcome)?0:result.outcome==='FAIL'?1:2;
   }else if(command==='review-partial'){
     if(!option('candidate')||!option('reviewer')||!option('reason'))throw Error('Explicit --candidate, --reviewer and --reason required');
     const review=createPartialReview(read(option('candidate')),option('reviewer'),option('reason'));
