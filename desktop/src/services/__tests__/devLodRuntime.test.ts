@@ -6,6 +6,7 @@ import { perfProductMomentSnapshot, perfReset, perfSnapshot } from '../../utils/
 import {ByteWorkBudget} from '../../utils/byteWorkBudget.js';
 import {DevGlbTemplate} from '../devGlbTemplateRuntime.js';
 import {InvalidDevGeometryError,MissingDevDependencyError} from '../../gim/geometry/sourceGeometryError.js';
+import {createDevWorkerMock} from './helpers/devWorker.js';
 
 const ownedRuntimes = new Set<DevLodRuntime>();
 afterEach(() => {
@@ -60,7 +61,7 @@ it('commits base geometry during camera motion and bounds refinement deferral', 
 });
 
 it('keeps warm cache consumption capacity independent of compacted computation workers', async () => {
-  const {internal}=fixture();internal.worker={cancel:vi.fn(),workerCount:1,cacheConcurrency:32};
+  const {internal}=fixture();internal.worker=createDevWorkerMock({cacheConcurrency:32});
   const releases:Array<()=>void>=[];
   const requests=Array.from({length:40},(_,i)=>internal.templateStore.acquireTemplateSlot(`cache-${i}`).then((release:()=>void)=>{releases.push(release);}));
   await Promise.resolve();expect(releases).toHaveLength(32);
@@ -150,7 +151,7 @@ it('batches only reachable sources for a warm template miss and shares repeated 
     ['PHM/a.phm','SOLIDS.NUM=1\nSOLIDS0=a.mod'],['MOD/a.mod','<Device><Entities/></Device>']]);
   internal.sources.sourceFiles=new Map([...texts].map(([path,text])=>[path,{size:new TextEncoder().encode(text).length}]));
   internal.sources.sourceFiles.set('MOD/unrelated.mod',{size:10});
-  internal.worker={cancel:vi.fn(),installSources:vi.fn()};
+  internal.worker=createDevWorkerMock();
   const database=await import('@desktop/database.js');
   const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(async(_id,paths)=>
     new Map(paths.map(path=>[path,new TextEncoder().encode(texts.get(path)!)])));
@@ -205,7 +206,7 @@ it('upgrades partial L0 cache recovery once after enough real RPC demand, never 
   const {internal}=fixture();internal.diagnostics.uniqueDevSources=100;
   const source={size:3,name:'a.mod'} as File;
   internal.sources.sourceFiles=new Map([['MOD/a.mod',source]]);
-  internal.worker={cancel:vi.fn(),diagnostics:{rpcReads:0},installSources:vi.fn()};
+  internal.worker=createDevWorkerMock();
   const prefetch=vi.spyOn(internal.sources,'preloadSources').mockResolvedValue(new Map([['MOD/a.mod',new File(['abc'],'a.mod')]]));
   for(let i=0;i<40;i++)internal.recoverMissingSources(String(i),1);
   expect(prefetch).not.toHaveBeenCalled();
@@ -262,7 +263,7 @@ it('correlates cold/warm GLB decoding, placement and cache writes without changi
       internal.submit=async(_priority:number,run:()=>void)=>run();
       internal.templateStore.cacheReader.read=async()=>({status:mode==='cold'?'miss':'hit',value:mode==='cold'?undefined:stored,release:()=>{}});
       internal.catalogHint=async()=>({status:'miss'});
-      internal.worker={cancel:vi.fn(),workerCount:1,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn(),takeWorkerQueueStats:vi.fn(()=>({waitMs:0,dispatches:1}))};
+      internal.worker=createDevWorkerMock({compile:vi.fn(async()=>result),takeWorkerQueueStats:vi.fn(()=>({waitMs:0,dispatches:1}))});
       let releaseWriter: (()=>void)|undefined=mode==='cold'?await internal.artifactWriter.writeBudget.acquire(internal.artifactWriter.writeBudget.limit):undefined;
       const row={...occurrence(1),entry:{devPath:'DEV/a.dev',rootOccurrence:'root',instanceKey:'root-instance',
         placementMatrix:new THREE.Matrix4().toArray(),templateStatus:'unrequested'},group:undefined,key:undefined};
@@ -612,7 +613,7 @@ it('persists a non-selected L1 after eviction, a second cache miss and recompila
  internal.templateStore.cacheReader.read=vi.fn(async()=>({status:'miss',release:()=>{}}));
  internal.catalogHint=vi.fn(async()=>({status:'miss'}));
  internal.prepareMissingTemplateSources=vi.fn(async()=>{});
- internal.worker={cancel:vi.fn(),workerCount:1,cacheConcurrency:8,compile:vi.fn(async()=>result),promote:vi.fn(),acknowledge:vi.fn(),takeWorkerQueueStats:vi.fn(()=>({waitMs:0,dispatches:1}))};
+ internal.worker=createDevWorkerMock({compile:vi.fn(async()=>result),takeWorkerQueueStats:vi.fn(()=>({waitMs:0,dispatches:1}))});
  const persist=vi.spyOn(internal,'persistArtifact').mockResolvedValue(undefined);
  try{
   internal.wanted.add(key);

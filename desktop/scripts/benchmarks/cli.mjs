@@ -10,21 +10,27 @@ import {approveBaseline,baselineApprovalIssue,compareSuites,createPartialReview,
 import {freezeProfile,verifyProfile} from './profiles.mjs';
 import {runMatrix} from './matrix.mjs';
 import {lifecycleExercise} from './lifecycle.mjs';
-import {measureProbeOverhead} from './overhead.mjs';
+import {measureProbeOverhead,resolveOverheadPlan} from './overhead.mjs';
 import {renderReport} from './reporter.mjs';
 import {runBatch,recoverInterruptedBatch} from './batch.mjs';
 import {nativeExitCode} from './cli-outcome.mjs';
+import {artifactDirectory,artifactFile,loadBatchInputs} from './batch-input.mjs';
+import {bindMeasurementAcceptance} from './measurement-acceptance.mjs';
+import {createGeometryReview,geometryReviewIssue} from './geometry-review.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..'),home=join(root,'tmp','gim-bench'),corpus=join(home,'corpus');
 const [command,...args]=process.argv.slice(2);
 const option=name=>{const index=args.findIndex(value=>value===`--${name}`||value===`-${name}`);return index<0?undefined:args[index+1];};
 const read=path=>JSON.parse(readFileSync(workspacePath(root,resolve(path)),'utf8'));
-const write=(name,value)=>{mkdirSync(home,{recursive:true});const path=join(home,name);writeFileSync(path,JSON.stringify(value,null,2));console.log(path);return path;};
-const writeComparison=value=>{const path=option('output')?workspacePath(root,resolve(option('output'))):join(home,'comparison.json');
+const write=(name,value)=>{const path=artifactFile(root,join(home,name));writeFileSync(path,JSON.stringify(value,null,2));console.log(path);return path;};
+const writeComparison=value=>{const path=artifactFile(root,option('output')?resolve(option('output')):join(home,'comparison.json'));
   mkdirSync(dirname(path),{recursive:true});writeFileSync(path,JSON.stringify(value,null,2));console.log(path);return path;};
 const approvalName=(kind,digest)=>`${kind}-${digest.slice(0,16)}-${Date.now()}-${randomBytes(4).toString('hex')}.json`;
-mkdirSync(home,{recursive:true});for(const name of ['TEMP','TMP','TMPDIR'])process.env[name]=home;
+const registeredSamples=async()=>option('directory')||option('registry')
+  ?(await loadBatchInputs(root,{directory:option('directory'),registry:option('registry')})).samples
+  :read(join(corpus,'registry.private.json')).samples;
 try{
+  artifactDirectory(root,home);for(const name of ['TEMP','TMP','TMPDIR'])process.env[name]=home;
   if(command==='init'){
     if(!existsSync(join(home,'config.json')))write('config.json',{version:'gim-benchmark-config-v1',sampleLocation:'workspace',sampleDistribution:false,sampleTiers:['L0','L1','L2'],samplingPeriodMs:1000,repetitions:3,regressionThreshold:0.1,baseline:null});
     else console.log(join(home,'config.json'));
@@ -68,21 +74,23 @@ try{
       repetitions:Number(option('repetitions')??profile.repetitions),mode:option('mode')??profile.mode});
     console.log(JSON.stringify({outcome:result.result.outcome,candidate:join(result.out,'candidate.json')}));process.exitCode=['PASS','PARTIAL'].includes(result.result.outcome)?0:2;
   }else if(command==='overhead'){
-    if(!option('build')||!option('profile')||!option('sample'))throw Error('--build, --profile and --sample required');
-    const profile=verifyProfile(read(option('profile'))),caseSpec=profile.cases.find(row=>row.sampleId===option('sample'));
-    const sample=read(join(corpus,'registry.private.json')).samples.find(row=>row.sampleId===option('sample'));
-    if(!sample||!caseSpec)throw Error('Sample must belong to the frozen profile');
+    if(!option('build')||!option('sample')||!option('profile')&&!option('candidate'))
+      throw Error('--build, --sample and --profile or --candidate required');
+    const candidate=option('candidate')?read(option('candidate')):null;
+    const sample=(await registeredSamples()).find(row=>row.sampleId===option('sample'));
+    const {profile,caseSpec}=resolveOverheadPlan({candidate,profile:option('profile')?read(option('profile')):null,sample});
     const result=await measureProbeOverhead({root,buildManifest:workspacePath(root,resolve(option('build'))),sample,profile,caseSpec});
     console.log(JSON.stringify({outcome:result.result.outcome,report:join(result.out,'overhead.json')}));process.exitCode=['PASS','PARTIAL'].includes(result.result.outcome)?0:2;
   }else if(command==='build'){
     console.log(await buildAcceptance(root,{benchmark:true}));
   }else if(command==='doctor'||command==='run'||command==='lifecycle'){
     if(!option('build'))throw Error('--build requires an explicit benchmark build manifest');
-    const sample=command==='doctor'?undefined:read(join(corpus,'registry.private.json')).samples.find(s=>s.sampleId===option('sample'));
+    const samples=command==='doctor'?[]:await registeredSamples();
+    const sample=samples.find(s=>s.sampleId===option('sample'));
     if(command!=='doctor'&&!sample)throw Error('--sample must identify a registered sample');
     const mode=option('mode')??'benchmark';if(!['off','summary','benchmark','diagnostic'].includes(mode))throw Error('Invalid measurement mode');
-    const registry=command==='lifecycle'?read(join(corpus,'registry.private.json')):null;
-    const secondSample=option('second-sample')?registry?.samples.find(s=>s.sampleId===option('second-sample')):undefined;
+    const secondSample=option('second-sample')?samples.find(s=>s.sampleId===option('second-sample')):undefined;
+    if(option('second-sample')&&!secondSample)throw Error('--second-sample must identify a registered sample');
     const result=await runNative({root,buildManifest:workspacePath(root,resolve(option('build'))),sample,mode,doctor:command==='doctor',
       ...(command==='lifecycle'?{scenario:'lifecycle-ten-open-close',additionalSamples:secondSample?[secondSample]:[],exercise:lifecycleExercise({sample,secondSample})}:{}),
       ...(option('capture')?{diagnostic:{kind:option('capture'),family:option('worker-family')??'dev'}}:{})});
@@ -92,17 +100,34 @@ try{
   }else if(command==='compare'||command==='gate'){
     if(!option('baseline')||!option('candidate'))throw Error('--baseline and --candidate are required');
     const baseline=read(option('baseline')),candidate=read(option('candidate'));
+    const geometryReview=option('geometry-review')?read(option('geometry-review')):null;
+    const geometryIssue=geometryReview?geometryReviewIssue(geometryReview,baseline,candidate):null;
     const approvalIssue=command==='gate'?baselineApprovalIssue(baseline):null;
     const recoveryIssue=baseline.recovery||candidate.recovery?'recovered-interruption':null;
     const suiteIssues=[...suiteCompletenessIssues(baseline),...suiteCompletenessIssues(candidate)];
-    const issues=[approvalIssue,recoveryIssue,...suiteIssues].filter(Boolean);
+    const issues=[approvalIssue,recoveryIssue,geometryIssue,...suiteIssues].filter(Boolean);
     const failedSuite=[baseline,candidate].some(suite=>
       ['gim-benchmark-candidate-v1','gim-batch-results-v1'].includes(suite.version)&&suite.outcome==='FAIL');
     const result=issues.length?{outcome:!approvalIssue&&!recoveryIssue&&failedSuite?'FAIL':'INCONCLUSIVE',reasons:[...new Set(issues)]}:compareSuites(baseline.runs??[baseline],candidate.runs??[candidate],{
       retestBaseline:option('retest-baseline')?read(option('retest-baseline')).runs:[],retestCandidate:option('retest-candidate')?read(option('retest-candidate')).runs:[],
       requireContentEvidence:command==='gate',
+      geometryChanges:geometryReview?.changes??[],
     });
     writeComparison(result);process.exitCode=['PASS','PARTIAL'].includes(result.outcome)?0:result.outcome==='FAIL'?1:2;
+  }else if(command==='approve-geometry-change'){
+    if(!option('baseline')||!option('candidate')||!option('verification')||!option('approver'))
+      throw Error('--baseline, --candidate, --verification and --approver are required');
+    const baseline=read(option('baseline')),candidate=read(option('candidate'));
+    const issues=[baselineApprovalIssue(baseline),...suiteCompletenessIssues(candidate)].filter(Boolean);
+    if(issues.length)throw Error(issues.join(';'));
+    const review=createGeometryReview(baseline,candidate,read(option('verification')),option('approver'));
+    write(approvalName('geometry-review',review.candidateDigest),review);
+  }else if(command==='accept-measurement'){
+    if(!option('candidate')||!option('doctor')||!option('overhead')||!option('lifecycle'))
+      throw Error('--candidate, --doctor, --overhead and --lifecycle are required');
+    const accepted=bindMeasurementAcceptance(read(option('candidate')),{
+      doctor:read(option('doctor')),overhead:read(option('overhead')),lifecycle:read(option('lifecycle'))});
+    write(approvalName('accepted-candidate',accepted.measurementAcceptance.candidateDigest),accepted);
   }else if(command==='review-partial'){
     if(!option('candidate')||!option('reviewer')||!option('reason'))throw Error('Explicit --candidate, --reviewer and --reason required');
     const review=createPartialReview(read(option('candidate')),option('reviewer'),option('reason'));
@@ -128,7 +153,20 @@ try{
     if(!option('input'))throw Error('--input required');
     console.log(await renderReport(workspacePath(root,resolve(option('input'))),join(root,'output','gim-bench',`report-${Date.now()}`)));
   }else{
-    console.log('gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [-repeat <n>] [--timeout-seconds <n>]\nrecover-batch --output <folder> [--force] | init | samples | inventory | select | freeze-profile [--name commit-gate] | build | doctor --build <manifest> | run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev] | matrix --build <manifest> --profile <json> | overhead --build <manifest> --profile <json> --sample <id> | lifecycle --build <manifest> --sample <id> [--second-sample <id>] | compare|gate --baseline <json> --candidate <json> | report --input <json> | review-partial --candidate <json> --reviewer <name> --reason <code> | approve-baseline --candidate <json> --approver <name> [--accept-partial --partial-review <json> (--first-partial | --previous-baseline <json>)]');
+    console.log([
+      'gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [-repeat <n>] [--timeout-seconds <n>]',
+      'recover-batch --output <folder> [--force] | init | samples | inventory | select | freeze-profile [--name commit-gate] | build',
+      'doctor --build <manifest>',
+      'run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev]',
+      'matrix --build <manifest> --profile <json>',
+      'overhead --build <manifest> (--profile <json> [--candidate <json>] | --candidate <batch JSON>) --sample <id> [--registry <json> | --directory <folder>]',
+      'lifecycle --build <manifest> --sample <id> [--second-sample <id>] [--registry <json> | --directory <folder>]',
+      'accept-measurement --candidate <json> --doctor <report.json> --overhead <overhead.json> --lifecycle <report.json>',
+      'compare|gate --baseline <json> --candidate <json> [--output <tmp/output JSON>] [--retest-baseline <json> --retest-candidate <json>] [--geometry-review <json>]',
+      'approve-geometry-change --baseline <approved JSON> --candidate <json> --verification <json> --approver <name>',
+      'report --input <json> | review-partial --candidate <json> --reviewer <name> --reason <code>',
+      'approve-baseline --candidate <json> --approver <name> [--accept-partial --partial-review <json> (--first-partial | --previous-baseline <json>)]',
+    ].join('\n'));
     if(command)process.exitCode=1;
   }
 }catch(error){console.error(`[gim-bench] ${error.message}`);process.exitCode=1;}

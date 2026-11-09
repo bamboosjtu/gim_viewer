@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
+import {createDeviceRuntimeMock} from './helpers/deviceRuntime.js';
 import {
   collectSubstationRuntimeResourceSnapshot,
   sampleSubstationRuntimeResources,
@@ -147,11 +148,13 @@ function perfResetForState(state: AppState, sourceSha256: string) {
 it('private commit alone drives pressure; old IPC cannot alter a new project and monitor does not overlap reads', async()=>{
   vi.useFakeTimers();native.enabled=true;
   const state=new AppState();perfResetForState(state,'sha');
-  const dev=vi.fn(),ifc=vi.fn();state.deviceLodRuntime={setExternalMemoryPressure:dev} as any;
-  state.ifcRegionalRuntimes.set('ifc',{setMemoryPressure:ifc,release:vi.fn()} as any);
+  const dev=vi.fn(),ifc=vi.fn(),releaseDev=vi.fn(),releaseIfc=vi.fn();
+  state.deviceLodRuntime=createDeviceRuntimeMock({setExternalMemoryPressure:dev,release:releaseDev});
+  state.ifcRegionalRuntimes.set('ifc',{setMemoryPressure:ifc,release:releaseIfc} as any);
   let reply!:(value:any)=>void;
   native.read.mockImplementationOnce(()=>new Promise(resolve=>{reply=resolve;}));
   const monitor=startSubstationResourceMonitor(state,{} as any);
+  const releaseMonitor=vi.spyOn(monitor,'release');
   await vi.advanceTimersByTimeAsync(15000);expect(native.read).toHaveBeenCalledTimes(1);
   reply({processTreeAvailable:true,processTreeRssBytes:1024,processTreePrivateBytes:6*1024**3*0.9});
   await vi.advanceTimersByTimeAsync(0);expect(dev).toHaveBeenLastCalledWith('critical');expect(ifc).toHaveBeenLastCalledWith('critical');
@@ -160,7 +163,12 @@ it('private commit alone drives pressure; old IPC cannot alter a new project and
   await vi.advanceTimersByTimeAsync(5000);expect(dev).toHaveBeenLastCalledWith('unknown');
   native.read.mockImplementationOnce(()=>new Promise(resolve=>{reply=resolve;}));
   await vi.advanceTimersByTimeAsync(5000);const calls=dev.mock.calls.length;
+  const reads=native.read.mock.calls.length;
   state.activateProject(2,'new');reply({processTreeAvailable:true,processTreePrivateBytes:7*1024**3});
+  expect(releaseDev).toHaveBeenCalledOnce();expect(releaseIfc).toHaveBeenCalledOnce();expect(releaseMonitor).toHaveBeenCalledOnce();
+  expect(state.deviceLodRuntime).toBeNull();expect(state.ifcRegionalRuntimes.size).toBe(0);
   await vi.advanceTimersByTimeAsync(20000);expect(dev.mock.calls.length).toBe(calls);
+  expect(native.read).toHaveBeenCalledTimes(reads);expect(vi.getTimerCount()).toBe(0);
   expect(state.substationResourceMonitor).toBeNull();monitor.release();
+  expect(releaseDev).toHaveBeenCalledOnce();expect(releaseIfc).toHaveBeenCalledOnce();
 });

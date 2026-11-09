@@ -11,6 +11,7 @@ import { autoLoadModAndStlGeometry } from '../modAutoLoadService.js';
 import { runProgressiveDevGlbPipeline } from '../progressiveGeometryService.js';
 import type { ViewerContext } from '../../viewer/viewerEngine.js';
 import { nestedPartFixture } from './nestedPartIndexFixture.js';
+import {createDeviceRuntimeMock} from './helpers/deviceRuntime.js';
 
 const mock = vi.hoisted(() => ({ ctx: null as any, frame: vi.fn(), bytes: null as Uint8Array | null }));
 vi.mock('@desktop/database.js', () => ({ readGlbFile: async () => mock.bytes }));
@@ -46,12 +47,13 @@ it('scoped runtime selection visits only its current occurrence subtree and pres
   const a=branch('sub:0'),b=branch('sub:1');
   const otherTraversal=vi.spyOn(other,'traverse');
   state.loadedXmlModGroups.set('root',root);state.loadedStlGroups.set('other',other);
-  state.deviceLodRuntime={getLoadedRoot:vi.fn(()=>root)} as any;
+  const release=vi.fn();state.deviceLodRuntime=createDeviceRuntimeMock({getLoadedRoot:vi.fn(()=>root),release});
   expect(collectDeviceGroups(state,'part.dev',{rootOccurrence:'root',assemblyPaths:['sub:1']})).toEqual([b]);
   expect(otherTraversal).not.toHaveBeenCalled();
   expect(collectDeviceGroups(state,'part.dev',{rootOccurrence:'root'})).toEqual([root]);
   expect(a.parent).toBe(root);
   state.deviceLodRuntime=null;
+  expect(release).toHaveBeenCalledOnce();
   expect(collectDeviceGroups(state,'part.dev',{rootOccurrence:'root',assemblyPaths:['sub:1']})).toEqual([b]);
   expect(otherTraversal).toHaveBeenCalled();
 });

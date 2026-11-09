@@ -1,6 +1,9 @@
-import {createHash} from 'node:crypto';
+import {digest,reviewerValid} from './evidence.mjs';
+import {measurementAcceptanceIssue} from './measurement-acceptance.mjs';
+import {geometryChangeAllowed} from './geometry-review.mjs';
+import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
+export {digest} from './evidence.mjs';
 const identityKeys=['machineId','runtimeSha256','buildMode','measurementVersion','detailPolicy','lifecyclePolicy','contentPolicy','cacheProofPolicy','webviewProfilePolicy','mode','scenario','cacheState','sourceSha256','sampleId','profileDigest','workloadDigest','routeDigest','viewportDigest'];
-export function digest(value){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 export function median(values){const rows=[...values].sort((a,b)=>a-b);return rows.length%2?rows[(rows.length-1)/2]:(rows[rows.length/2-1]+rows[rows.length/2])/2;}
 const sha=value=>/^[a-f0-9]{64}$/.test(value??'');
 export function contentEvidenceIssue(run){
@@ -33,6 +36,8 @@ export function runReadiness(run){
     return {outcome:'FAIL',reasons:['cache-io-failed']};
   const reasons=[];
   for(const key of identityKeys)if(run.conditions?.[key]==null)reasons.push(`missing-condition:${key}`);
+  if(run.conditions?.measurementVersion!=null&&run.conditions.measurementVersion!==MEASUREMENT_VERSION)
+    reasons.push('unsupported-measurement-version');
   if(run.conditions?.mode!=='benchmark')reasons.push('not-benchmark-mode');
   if(!['passed','partial'].includes(run.correctness))reasons.push('correctness-unverified');
   if(run.correctness==='partial'){
@@ -142,7 +147,7 @@ function calibrationComparison(baseline,candidate){
     ?'environment-calibration-drift':null;
   return {ratios,issue};
 }
-export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidate=[],requireContentEvidence=false}={}){
+export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidate=[],requireContentEvidence=false,geometryChanges=[]}={}){
   const b=checkGroup(baseline),c=checkGroup(candidate),reasons=[...b.reasons,...c.reasons];
   if(b.outcome==='FAIL'||c.outcome==='FAIL')return {outcome:'FAIL',reasons};
   if(baseline.length!==candidate.length)reasons.push('repetition-count-differs');
@@ -159,7 +164,8 @@ export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidat
     if(!reasons.length){
       if(new Set(baseline.map(contentSignature)).size!==1||new Set(candidate.map(contentSignature)).size!==1)
         reasons.push('dev-content-varies-within-repetitions');
-      else if(contentSignature(baseline[0])!==contentSignature(candidate[0]))reasons.push('dev-content-digest-differs');
+      else if(contentSignature(baseline[0])!==contentSignature(candidate[0])&&
+        !geometryChangeAllowed(baseline[0],candidate[0],geometryChanges))reasons.push('dev-content-digest-differs');
     }
   }
   if(reasons.length)return {outcome:'INCONCLUSIVE',reasons:[...new Set(reasons)],calibrationRatio:calibration.ratios,metrics:[]};
@@ -173,15 +179,14 @@ export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidat
   if(identityKeys.some(key=>retestBaseline[0]?.conditions?.[key]!==baseline[0]?.conditions?.[key]||retestCandidate[0]?.conditions?.[key]!==candidate[0]?.conditions?.[key])
     ||new Set([...baseline,...candidate,...retestBaseline,...retestCandidate].map(r=>r.processInstanceId)).size!==baseline.length+candidate.length+retestBaseline.length+retestCandidate.length)
     return {outcome:'INCONCLUSIVE',reasons:['retest-conditions-or-processes-differ'],metrics};
-  const retest=compareRuns(retestBaseline,retestCandidate,{requireContentEvidence});
+  const retest=compareRuns(retestBaseline,retestCandidate,{requireContentEvidence,geometryChanges});
   if(retest.requiresRetest)return {outcome:'FAIL',reasons:['confirmed-regression'],metrics,retest:retest.metrics};
   return {outcome:retest.outcome,reasons:retest.reasons,metrics,retest:retest.metrics};
 }
 /** Promotion is an explicit CLI action; run/report/compare never invoke this. */
 const partialReasonFor=kinds=>kinds.size===1?({coverage:'engineering-coverage','source-geometry':'source-geometry',combined:'combined-source'})[[...kinds][0]]:'mixed-source';
-const reviewerValid=value=>typeof value==='string'&&value.trim().length>=2&&value.trim().length<=64&&
-  !/[\\/:\r\n]|\.gim\b/i.test(value);
-export function createPartialReview(candidate,sourceReviewer,partialReason){
+export function createPartialReview(input,sourceReviewer,partialReason){
+  const {approval,...candidate}=input;
   if(candidate?.outcome!=='PARTIAL'||candidate.selectionFrozen!==true||!candidate.runs?.length||
     !reviewerValid(sourceReviewer))throw Error('Frozen PARTIAL candidate and source reviewer required');
   const partialRuns=candidate.runs.filter(run=>run.correctness==='partial');
@@ -193,7 +198,8 @@ export function createPartialReview(candidate,sourceReviewer,partialReason){
     partialReason,reviewedAt:new Date().toISOString()};
   return {...review,reviewDigest:digest(review)};
 }
-export function partialReviewIssue(review,candidate){
+export function partialReviewIssue(review,input){
+  const {approval,...candidate}=input;
   if(!review)return 'partial-review-required';
   const {reviewDigest,...metadata}=review;
   if(metadata.version!=='gim-partial-review-v1'||reviewDigest!==digest(metadata))return 'partial-review-digest-mismatch';
@@ -203,14 +209,16 @@ export function partialReviewIssue(review,candidate){
   if(metadata.partialReason!==partialReasonFor(kinds))return 'partial-review-reason-mismatch';
   return null;
 }
-export function approveBaseline(candidate,approver,{acceptPartial=false,partialReview=null,firstPartial=false,previousBaseline=null}={}){
+export function approveBaseline(input,approver,{acceptPartial=false,partialReview=null,firstPartial=false,previousBaseline=null}={}){
+  const {approval:priorApproval,...candidate}=input;
+  if(priorApproval)throw Error('Candidate is already approved');
   if(candidate.recovery||candidate.runs?.some(run=>run.recovery))throw Error('Recovered interruption cannot become a baseline');
   const suiteIssues=suiteCompletenessIssues(candidate);if(suiteIssues.length)throw Error(`Baseline ${suiteIssues.join(';')}`);
   if(!reviewerValid(approver)||!['PASS','PARTIAL'].includes(candidate.outcome)||candidate.outcome==='PARTIAL'&&!acceptPartial||candidate.selectionFrozen!==true||!candidate.runs?.length)throw Error('Complete frozen candidate and explicit approver required');
   const groups=new Map();for(const run of candidate.runs){const key=digest(run.conditions);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(run);}
   if([...groups.values()].some(runs=>!['PASS','PARTIAL'].includes(checkGroup(runs).outcome)))throw Error('Baseline runs are incomplete');
   if(candidate.runs.some(run=>memoryComparisonIssue(run)))throw Error('Baseline memory evidence is incomplete');
-  if(candidate.runs.some(run=>run.conditions?.measurementVersion==='gim-measurement-v2'&&
+  if(candidate.runs.some(run=>run.version==='gim-benchmark-v1'&&
     (run.conditions?.environmentCalibration?.version!=='gim-batch-calibration-v1'||
       run.conditions.environmentCalibration.availability==='unavailable')))
     throw Error('Baseline environment calibration is incomplete');
@@ -236,7 +244,9 @@ export function approveBaseline(candidate,approver,{acceptPartial=false,partialR
   for(const run of candidate.runs){const issue=contentEvidenceIssue(run);if(issue)throw Error(`Baseline ${issue}`);}
   if([...groups.values()].some(runs=>new Set(runs.map(contentSignature)).size>1))throw Error('Baseline DEV content differs between repetitions');
   if(candidate.version==='gim-batch-results-v1'&&!candidate.baselineEligible)throw Error('Complete baseline batch required');
-  if((candidate.version==='gim-benchmark-candidate-v1'||candidate.runs.some(run=>run.version==='gim-benchmark-v1'))&&candidate.measurementAcceptance?.outcome!=='PASS')throw Error('Measurement acceptance evidence required before baseline approval');
+  if(candidate.version==='gim-benchmark-candidate-v1'||candidate.runs.some(run=>run.version==='gim-benchmark-v1')){
+    const issue=measurementAcceptanceIssue(candidate);if(issue)throw Error(`Measurement acceptance evidence required before baseline approval: ${issue}`);
+  }
   const approval={approver:approver.trim(),at:new Date().toISOString(),candidateDigest:digest(candidate),
     partialAccepted:candidate.outcome==='PARTIAL',...(candidate.outcome==='PARTIAL'?{
       partialReason:partialReview.partialReason,sourceReviewer:partialReview.sourceReviewer,
@@ -252,6 +262,9 @@ export function baselineApprovalIssue(baseline){
   if(approval.candidateDigest!==digest(candidate))return 'baseline-approval-digest-mismatch';
   const {approvalDigest,...metadata}=approval;
   if(approvalDigest!==digest(metadata))return 'baseline-approval-metadata-mismatch';
+  if(baseline.version==='gim-benchmark-candidate-v1'||baseline.runs?.some(run=>run.version==='gim-benchmark-v1')){
+    const issue=measurementAcceptanceIssue(baseline);if(issue)return issue;
+  }
   if((baseline.outcome==='PARTIAL'||(baseline.runs??[]).some(run=>run.correctness==='partial'))&&
     (approval.partialAccepted!==true||!reviewerValid(approval.sourceReviewer)||
       approval.sourceReviewer.trim().toLowerCase()===approval.approver?.trim().toLowerCase()||
@@ -272,7 +285,7 @@ export function compareSuites(baseline,candidate,options={}){
     comparisons.push({sampleId:conditions?.sampleId,sourceSha256:conditions?.sourceSha256,scenario:conditions?.scenario,cacheState:conditions?.cacheState,
       ...(!b.has(key)||!c.has(key)?{outcome:'INCONCLUSIVE',reasons:['scenario-missing']}:
         compareRuns(b.get(key),c.get(key),{retestBaseline:rb.get(key)??[],retestCandidate:rc.get(key)??[],
-          requireContentEvidence:options.requireContentEvidence===true}))});
+          requireContentEvidence:options.requireContentEvidence===true,geometryChanges:options.geometryChanges??[]}))});
   }
   return {outcome:comparisons.some(row=>row.outcome==='FAIL')?'FAIL':comparisons.length&&comparisons.every(row=>row.outcome==='PASS')?'PASS':
     comparisons.length&&comparisons.every(row=>['PASS','PARTIAL'].includes(row.outcome))?'PARTIAL':'INCONCLUSIVE',

@@ -14,13 +14,12 @@ import {pairedWebviewProfile,checkedWebviewProfile} from './cache-roots.mjs';
 import {mkdirSync,mkdtempSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {resolve,join,dirname} from 'node:path';
-const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:'v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
-const contentEvidence={scope:'DEV-L0-GLB-artifacts',method:'worker-output-or-validated-cache-sha256',
-  availability:'available',coveredOccurrences:1,expectedShownOccurrences:1,missingArtifactSha:0,
-  duplicateArtifactIds:0,digest:'a'.repeat(64),placementFingerprint:'b'.repeat(64),complete:true};
-const runs=(prefix,value)=>Array.from({length:3},(_,i)=>({conditions:{...conditions},processInstanceId:`${prefix}-${i}`,
-  projectType:'substation',contentEvidence:{...contentEvidence},correctness:'passed',cacheVerified:true,
-  measurementComplete:true,requiredMetrics:['openMs'],metrics:{openMs:value+i}}));
+import {benchmarkRun} from './test-fixtures.mjs';
+import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
+const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:MEASUREMENT_VERSION,detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
+// These value-level tests also exercise historical reports without native version tags.
+const runs=(prefix,value)=>Array.from({length:3},(_,i)=>benchmarkRun(`${prefix}-${i}`,{
+  version:undefined,conditions,requiredMetrics:['openMs'],metrics:{openMs:value+i}}));
 test('warm preparation follows cache publication for both batch and matrix',()=>{
   const cold={correctness:'partial',cachePublished:true,cacheFailureCount:0,reason:null,crashed:false};
   assert.equal(warmPreparation(cold).ready,true);

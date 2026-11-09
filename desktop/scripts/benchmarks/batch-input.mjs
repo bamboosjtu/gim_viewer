@@ -12,6 +12,17 @@ export function artifactDirectory(root,target){
   return parent;
 }
 
+/** Outputs may be new files; validate every existing parent and the leaf separately. */
+export function artifactFile(root,target){
+  const path=resolve(target);
+  artifactDirectory(root,dirname(path));
+  try{
+    const entry=lstatSync(path);
+    if(entry.isSymbolicLink()||!entry.isFile())throw Error('Artifact file cannot be a link or directory');
+  }catch(error){if(error.code!=='ENOENT')throw error;}
+  return path;
+}
+
 function actions(value=[]){
   if(!Array.isArray(value))throw Error('invalid-actions');
   const selectors={'dev-fine':['canonical-first-base-v1','canonical-first-boolean-base-v1'],

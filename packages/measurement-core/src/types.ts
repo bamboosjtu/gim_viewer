@@ -1,4 +1,5 @@
-export const MEASUREMENT_VERSION = 'gim-measurement-v1' as const;
+import {MEASUREMENT_VERSION} from './version.mjs';
+export {MEASUREMENT_VERSION} from './version.mjs';
 export type MeasurementMode = 'off' | 'summary' | 'benchmark' | 'diagnostic';
 export type WorkerFamily = 'host' | 'measurement-probe' | 'dev' | 'ifc-conversion' | 'ifc-regional' | 'ifc-fine' | 'spatial' | 'engineering' | 'line';
 export type TaskStatus = 'completed' | 'failed' | 'cancelled' | 'timeout' | 'aborted';

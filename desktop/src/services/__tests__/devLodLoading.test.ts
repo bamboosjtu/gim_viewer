@@ -6,8 +6,11 @@ const mock=vi.hoisted(()=>({read:vi.fn(),parse:vi.fn(),compile:vi.fn(),cancel:vi
 vi.mock('@desktop/devLodCache.js',async(importActual)=>({...await importActual<any>(),readDevArtifactResult:mock.catalog,
   readDevArtifactBatch:mock.read,writeDevArtifactDetailed:async()=>({ok:true}),deleteDevArtifact:vi.fn()}));
 vi.mock('../glbCacheService.js',()=>({parseDevGlbAsset:mock.parse}));
-vi.mock('../devGeometryWorkerClient.js',()=>({createDevGeometryPreprocessor:()=>({workerCount:mock.workerCount,activePaths:[],compile:mock.compile,cancel:mock.cancel,bounds:mock.bounds,
-  acknowledge:vi.fn(),promote:vi.fn(),cancelQueued:vi.fn()})}));
+vi.mock('../devGeometryWorkerClient.js',async()=>{
+  const {createDevWorkerMock}=await import('./helpers/devWorker.js');
+  return {createDevGeometryPreprocessor:()=>createDevWorkerMock({workerCount:mock.workerCount,
+    compile:mock.compile,cancel:mock.cancel,bounds:mock.bounds})};
+});
 vi.mock('../sourceGeometryService.js',()=>({getSourceGeometryOccurrences:async()=>['a','b'].map(name=>({
   id:`root/${name}`,sourceId:`root/${name}`,sourceContextId:`root/${name}`,devPath:'DEV/shared.dev',name,placementMatrix:new THREE.Matrix4().toArray()}))}));
 

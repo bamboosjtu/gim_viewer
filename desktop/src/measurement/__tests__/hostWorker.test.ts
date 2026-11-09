@@ -1,6 +1,7 @@
 import {afterEach,expect,it,vi} from 'vitest';
 import {createMeasuredWorker,markMeasuredWorkerTaskCancellation} from '../hostWorker.js';
 import {resetMeasurementRun,measurementSnapshot} from '../runtime.js';
+import {MEASUREMENT_VERSION} from '../core.js';
 class Port extends EventTarget {
   messages:unknown[]=[];transfers:unknown[]=[];stops=0;fail=false;
   postMessage(data:unknown,transfer?:unknown){if(this.fail)throw Error('clone-failed');this.messages.push(data);this.transfers.push(transfer);}
@@ -31,7 +32,7 @@ it('control telemetry is consumed before application message listeners',()=>{
 it('requires the final Worker batch marker before accepting an idle Worker termination',()=>{
   const {port,worker}=start();worker.postMessage({kind:'compile',traceId:'task-one'});
   const task=(port.messages[1] as any)._gimMeasurement.context;
-  const event=(sequence:number,name:string)=>({version:'gim-measurement-v1',context:task,producerId:task.workerId,
+  const event=(sequence:number,name:string)=>({version:MEASUREMENT_VERSION,context:task,producerId:task.workerId,
     sequence,clockId:'worker-clock',atMs:sequence,kind:'task',name,
     ...(name==='ended'?{status:'completed'}:{})});
   port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:task.workerId,
@@ -51,7 +52,7 @@ it('records an unconfirmed tail separately for an intentionally cancelled active
   const {port,worker}=start();worker.postMessage({kind:'compile',traceId:'task-cancelled'});
   const task=(port.messages[1] as any)._gimMeasurement.context;
   port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:task.workerId,
-    batchId:1,lastSequence:1,events:[{version:'gim-measurement-v1',context:task,producerId:task.workerId,
+    batchId:1,lastSequence:1,events:[{version:MEASUREMENT_VERSION,context:task,producerId:task.workerId,
       sequence:1,clockId:'worker-clock',atMs:1,kind:'task',name:'started'}]}}));
   markMeasuredWorkerTaskCancellation(worker,task.taskId,'request-superseded');worker.terminate();
   expect(measurementSnapshot()).toMatchObject({lifecycleComplete:true,taskOutcomes:{cancelled:1},
@@ -61,7 +62,7 @@ it('keeps an unexpected active termination incomplete and records its unconfirme
   const {port,worker}=start();worker.postMessage({kind:'compile',traceId:'task-interrupted'});
   const task=(port.messages[1] as any)._gimMeasurement.context;
   port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:task.workerId,
-    batchId:1,lastSequence:1,events:[{version:'gim-measurement-v1',context:task,producerId:task.workerId,
+    batchId:1,lastSequence:1,events:[{version:MEASUREMENT_VERSION,context:task,producerId:task.workerId,
       sequence:1,clockId:'worker-clock',atMs:1,kind:'task',name:'started'}]}}));
   worker.terminate();
   expect(measurementSnapshot()).toMatchObject({lifecycleComplete:false,loss:{interruptedTasks:1},

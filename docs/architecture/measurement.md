@@ -1,6 +1,6 @@
 # 测量与本地 Benchmark
 
-测量协议为 `gim-measurement-v1`。纯 TypeScript 核心位于 `packages/measurement-core`，不依赖 DOM、Tauri、Three 或应用状态。桌面适配器位于 `desktop/src/measurement`；原有 `perfTimings` 继续提供产品阶段与诊断，其任务阶段和原生进程内存检查点接入同一 Collector。
+测量协议统一为 `gim-measurement-v1`，唯一版本常量 `MEASUREMENT_VERSION` 位于 `packages/measurement-core/src/version.mjs`，由 Collector、原生 Benchmark 报告的 `conditions.measurementVersion` 和正向测试 fixture 共用；比较与测量验收拒绝未知版本。测量核心位于 `packages/measurement-core`，不依赖 DOM、Tauri、Three 或应用状态。桌面适配器位于 `desktop/src/measurement`；原有 `perfTimings` 继续提供产品阶段与诊断，其任务阶段和原生进程内存检查点接入同一 Collector。
 
 当前工作区采用**源码内联**：桌面端只通过 `desktop/src/measurement/core.ts` 引用测量核心源码。`check:engineering-boundaries` 禁止其他桌面模块深层引用该包，并禁止核心向桌面、DOM、Tauri、Three 或外部包导入。`package.json` 的 `exports`/`dist` 尚不是产品实际消费的安装契约；SDK 阶段会单独验证打包、声明文件和独立安装后再改为包名消费。
 
@@ -77,7 +77,7 @@ DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位�
 
 `bench build` 显式构建并核验 Vite Benchmark 前端，再创建 Cargo `benchmark` feature 的原生产物；发布清单前核验 EXE 确实内嵌探针 chunk。运行器拒绝没有 `frontendProbeVerified` 凭据的旧构建，避免 CDP 已连接普通页面却重复等待 Benchmark API。原生命令只授权私有运行清单指定的匿名样本，并重新核对源 SHA；清单、源、缓存根必须在编译时绑定的工作区，清单/缓存在 `tmp/gim-bench` 下。普通产品构建拒绝 Benchmark 授权，且不导出 Benchmark UI 控制面。
 
-`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选先由另一位复核者通过 `review-partial` 生成绑定候选摘要的私有记录，批准者再以 `--accept-partial --partial-review` 引用，原因使用受控代码。首次须指定 `--first-partial`，后续须提供上一份已批准基线，防止相同来源覆盖倒退；它只成为覆盖基线，不能自动升级成完整 PASS。run/report/compare 不调用它。超过 10% 的回退需独立复测，仍超限为 FAIL；运行条件、必要测量或认可基线缺失为 INCONCLUSIVE。协议/值单元测试进入 CI；样本、性能与内存曲线只在本地执行。
+正式原生候选先由 `accept-measurement` 校验并绑定同构建、同机器和同运行时的 doctor、探针开销及十轮生命周期证据，输出新的候选文件；绑定包含候选摘要和可复核的精简证据，不依赖手工编辑 JSON。`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选针对绑定后的文件，由另一位复核者通过 `review-partial` 生成候选摘要绑定的私有记录，批准者再以 `--accept-partial --partial-review` 引用，原因使用受控代码。首次须指定 `--first-partial`，后续须提供上一份已批准基线，防止相同来源覆盖倒退；它只成为覆盖基线，不能自动升级成完整 PASS。run/report/compare 不调用批准命令。GLB 字节变化默认 INCONCLUSIVE，仅允许导入独立网格等价性证据后显式批准对应内容变更，放置与覆盖仍须一致；CLI 不实现网格等价算法。命令和证据契约见 [Benchmark CLI](../benchmark.md#比较与基线)。超过 10% 的回退需独立复测，仍超限为 FAIL；运行条件、必要测量或认可基线缺失为 INCONCLUSIVE。10% 提交门槛由开发者本地人工控制，协议/值单元测试进入 CI；样本、性能与内存曲线只在本地执行。
 
 ## SDK 与进程边界
 

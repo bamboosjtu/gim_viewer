@@ -65,6 +65,26 @@ jobs:
       - name: Check desktop release versions
         run: npm run test:version
 
+      # Cheap, sample-free contracts fail before native compilation and coverage.
+      # Real-sample validation and the 10% regression decision remain manual/local.
+      - name: Check measurement value and protocol contracts (no model samples)
+        run: npm run test:measurement-tools
+
+      - name: Check native acceptance tooling
+        run: npm run test:acceptance-tools
+
+      - name: Check local registry protocol (no model samples)
+        run: npm run test:local-contract
+
+      - name: Check engineering layer boundaries
+        run: npm run check:engineering-boundaries
+
+      - name: Check frontend types
+        run: npm run check:types
+
+      - name: Run frontend lint
+        run: npm run lint
+
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -72,29 +92,14 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Run frontend lint
-        run: |
-          npm run lint
-
       - name: Run native library tests
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --manifest-path ../crates/gim-native-core/Cargo.toml --locked
 
       - name: Run frontend unit tests with pure-layer coverage gates
         run: npm run test:coverage
-
-      - name: Check engineering layer boundaries
-        run: npm run check:engineering-boundaries
-
-      - name: Check native acceptance tooling
-        run: npm run test:acceptance-tools
-
-      - name: Check measurement value and protocol contracts (no model samples)
-        run: npm run test:measurement-tools
-
-      - name: Check local registry protocol (no model samples)
-        run: npm run test:local-contract
 
       - name: Run SQLite integration tests
         run: npm run test:sqlite

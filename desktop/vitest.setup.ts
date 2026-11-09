@@ -60,5 +60,20 @@ if (typeof Blob !== 'undefined') {
   }
 }
 
-import { beforeEach } from 'vitest';
+import { beforeEach,afterEach,expect } from 'vitest';
+
+let checkCleanupErrors=()=>{};
+beforeEach(()=>{
+  const previous=console.error,errors:unknown[][]=[];
+  console.error=(...args:unknown[])=>{
+    if(args[0]==='[Runtime] release failed'||args[0]==='[Session] 资源释放失败')errors.push(args);
+    previous(...args);
+  };
+  checkCleanupErrors=()=>{
+    console.error=previous;
+    expect(errors,'Unexpected runtime/session cleanup errors').toEqual([]);
+  };
+});
+afterEach(()=>checkCleanupErrors());
+
 beforeEach(async () => { if(typeof document==='undefined')return; (await import('./src/app/presentationBindings.js')).configurePresentation(); });

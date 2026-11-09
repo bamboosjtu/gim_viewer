@@ -37,6 +37,7 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run tauri:build` | Release EXE、NSIS 与 portable ZIP |
 | `npm run lint` | ESLint（`src`、`bridge`） |
 | `npm run check:version` | npm/Cargo 版本一致性；构建前自动执行 |
+| `npm run check:types` | TypeScript 检查（含测试替身的接口完整性） |
 | `npm run check:engineering-boundaries` | 纯领域、来源与 Viewer 边界检查 |
 | `npm run check:engineering-catalog` | 共享目录与生成索引一致；加 `--python` 同时核对参考工具 |
 
@@ -56,6 +57,8 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run test:acceptance-tools` | 验收构建、清单与探针协议 |
 | `npm run test:measurement-tools` | 测量 CLI 与正确性规则（无样本） |
 | `npm run test:local-contract` | 本地注册表协议 |
+
+Windows CI 保持一个串行任务：版本、测量协议、验收工具、本地注册表、分层、类型和 lint 检查在 Rust 编译及覆盖率之前执行；随后运行 Rust 单元测试、前端覆盖率、SQLite 集成、前端构建和 Rust 编译边界。`workflow_dispatch` 才构建、校验和上传便携 Benchmark 发布包。以上步骤均不执行工程性能样本；10% 回退的提交门槛由开发者在本地人工控制。
 
 完整命令清单与逐项门禁条件见[验证](validation.md)。远程 CI 只运行无工程样本的单元测试、静态检查和构建；真实与合成工程样本、性能矩阵只在开发者本地运行。
 

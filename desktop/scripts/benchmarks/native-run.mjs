@@ -18,6 +18,7 @@ import {assertBenchmarkExecutable} from './benchmark-build-attestation.mjs';
 import {classifyWorkerHeapEvidence} from './worker-memory-completeness.mjs';
 import {confirmedEnvironmentSuspend} from './environment.mjs';
 import {calibrateBatch} from './batch-calibration.mjs';
+import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
 
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const reasonCode=error=>/^[a-z][a-z0-9-]{0,80}$/.test(error?.message??'')?error.message:/^CDP /.test(error?.message??'')?'cdp-request-failed':'native-run-failed';
@@ -343,7 +344,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       .map(([key,value])=>`collector:${key}:${value}`),
     ...((measurement?.activeTasks?.length??0)>0?[`active-tasks:${measurement.activeTasks.length}`]:[]),
   ];
-  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:'gim-measurement-v2',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode,scenario,cacheState,environmentCalibration,
+  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:MEASUREMENT_VERSION,detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode,scenario,cacheState,environmentCalibration,
     sampleId:sample.sampleId,sourceSha256:sample.sourceSha256,profileDigest,routeDigest:digest(actionTargets),viewportDigest:digest(observation?.viewport??null),viewport:observation?.viewport??null,
     workloadDigest:evidence?digest({workload:evidence.progress.workload,semantic:evidence.semanticDigest,placement:evidence.placementDigest}):null};
   const assessment=assessCorrectness(evidence);

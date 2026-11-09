@@ -1,8 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { Collector, Probe, MemoryLedger, BufferLedger, uniqueBufferCapacity, calibrateClock, DurationStats, type TraceContext } from '../core.js';
+import { Collector, Probe, MemoryLedger, BufferLedger, uniqueBufferCapacity, calibrateClock, DurationStats, MEASUREMENT_VERSION, type MeasurementEvent, type TraceContext } from '../core.js';
+import {benchmarkRun} from '../../../scripts/benchmarks/test-fixtures.mjs';
 const context:TraceContext={runId:'run-1',sampleId:'sample-1',sourceSha256:null,buildId:'build-1',generation:1,geometryToken:2,requestId:'request-1',workerId:'worker-1',family:'dev',backend:'web-worker',taskId:'task-1',attemptId:1,parentTaskId:null,sourceId:null,geometryLod:0};
 function setup(limit=100){let now=0;const collector=new Collector({...context},'benchmark',limit),probe=new Probe('worker-1','clock-1','benchmark',()=>now,collector);return {collector,probe,tick:(value:number)=>{now=value;}};}
 describe('measurement contracts (no engineering samples)',()=>{
+  it('uses the same V1 protocol in the Collector and Benchmark fixture, and rejects unknown events',()=>{
+    const {collector,probe}=setup();probe.record(context,'parse',1);
+    expect(MEASUREMENT_VERSION).toBe('gim-measurement-v1');
+    expect(benchmarkRun('fixture').conditions.measurementVersion).toBe(collector.snapshot().version);
+    expect(benchmarkRun('fixture').measurement.version).toBe(collector.snapshot().version);
+    collector.accept({version:'unknown-measurement-version',context,producerId:'unknown',sequence:1,clockId:'clock',
+      atMs:1,kind:'phase',name:'unknown',durationMs:1} as unknown as MeasurementEvent);
+    expect(collector.snapshot()).toMatchObject({loss:{invalid:1},aggregateComplete:false});
+  });
   it('streams bounded batches, waits for credit and retains aggregate truth when the consumer stalls',()=>{
     const {collector,probe}=setup(256);let credit=1;const batches:unknown[][]=[];
     collector.setDetailSink({available:()=>credit>0,send:events=>{credit--;batches.push(events);}});

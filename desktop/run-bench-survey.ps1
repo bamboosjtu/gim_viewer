@@ -1,4 +1,4 @@
-param(
+﻿param(
     # Optional: override the current HEAD short hash, e.g. -Commit 104924c
     [string]$Commit
 )
@@ -36,9 +36,24 @@ try {
 
     # Build once and capture the acceptance manifest path from the build output.
     Write-Host "`n>>> npm run bench -- build" -ForegroundColor Cyan
-    $buildOutput = & npm run bench -- build 2>&1
-    $buildExitCode = $LASTEXITCODE
+    # Windows PowerShell turns redirected native stderr into ErrorRecords.
+    # Keep warnings in the captured log and judge native success by its exit code.
+    $buildErrorPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $buildOutput = @(& npm run bench -- build 2>&1)
+        $buildExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $buildErrorPreference
+    }
     $buildOutput | ForEach-Object { Write-Host $_ }
+
+    $scriptErrors = @($buildOutput | Where-Object {
+        $_ -is [System.Management.Automation.ErrorRecord] -and
+        $_.FullyQualifiedErrorId -notlike 'NativeCommandError*'
+    })
+    if ($scriptErrors.Count -gt 0) { throw $scriptErrors[0] }
 
     if ($buildExitCode -ne 0) {
         throw "Benchmark build failed with exit code $buildExitCode. Batch runs were not started."
@@ -95,7 +110,7 @@ try {
         'batch',
         '--build', $manifestPath,
         '--registry', '..\benchmarks\l1\line01-06.json',
-        '--output', "../output/substation-survey-$Commit",
+        '--output', "../output/line-survey-$Commit",
         '--preset', 'baseline',
         '--anonymize', 'false'
     )
@@ -111,7 +126,8 @@ try {
     )
 
     Write-Host "`n=== All benchmark batches completed ===" -ForegroundColor Green
-    Write-Host "L1 output: ../output/substation-survey-$Commit"
+    Write-Host "L1 substation output: ../output/substation-survey-$Commit"
+    Write-Host "L1 line output: ../output/line-survey-$Commit"
     Write-Host "L0 output: ../output/l0-survey-$Commit"
 }
 finally {

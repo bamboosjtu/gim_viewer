@@ -50,6 +50,8 @@ npm run bench -- doctor --build ../tmp/gim-bench/builds/<构建>/acceptance-buil
 
 L0/L1 的逐文件 SHA 注册表与 L2 目录清单见[性能样本登记](../benchmarks/README.md)。
 
+Windows 也可在 `desktop/` 手动执行 `powershell -ExecutionPolicy Bypass -File .\run-bench-survey.ps1`：构建一次后依次运行变电、线路和通用设计批次，分别保存输出。构建警告会保留在日志中，原生进程退出码非零时停止后续批次；此脚本不进入远程 CI。脚本使用带 BOM 的 UTF-8，兼容 Windows PowerShell 5.1 的中文目录解析，修改时须保留该编码。
+
 ## 子命令一览
 
 CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run bench` 的用法输出为准。
@@ -65,13 +67,15 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | `doctor` | 测量能力自检；不需要工程样本，源文件授权请求会被拒绝 | `--build <清单>` |
 | `run` | 对单个已登记样本执行原生测量 | `--build <清单>`、`--sample <id>`；可选 `--mode`（`off`、`summary`、`benchmark`、`diagnostic`）、`--capture`（`cpu`、`allocations`、`heap`）与 `--worker-family dev` |
 | `matrix` | 按冻结 Profile 运行重复矩阵并产出候选 | `--build <清单>`、`--profile <json>`；可选 `--repetitions <n>`、`--mode <模式>` |
-| `overhead` | 测量探针自身开销，样本必须属于冻结 Profile | `--build <清单>`、`--profile <json>`、`--sample <id>` |
-| `lifecycle` | 十轮开闭与资源回落自检 | `--build <清单>`、`--sample <id>`；可选 `--second-sample <id>` |
-| `compare` | 比较基线与候选 | `--baseline <json>`、`--candidate <json>`；可选 `--retest-baseline <json>`、`--retest-candidate <json>`、`--output <工作区 JSON>` |
+| `overhead` | 测量探针自身开销，样本须属于冻结 Profile 或候选 | `--build <清单>`、`--sample <id>`，以及 `--profile <json>` 或 `--candidate <批次json>`；矩阵候选须同时提供匹配的 `--profile`；批次样本可加 `--registry <json>` / `--directory <目录>` |
+| `lifecycle` | 十轮开闭与资源回落自检 | `--build <清单>`、`--sample <id>`；可选 `--second-sample <id>`、`--registry <json>` / `--directory <目录>` |
+| `compare` | 比较基线与候选 | `--baseline <json>`、`--candidate <json>`；可选 `--retest-baseline <json>`、`--retest-candidate <json>`、`--output <tmp/output 下的 JSON>`、`--geometry-review <批准记录>` |
 | `gate` | 门禁比较，要求基线带有效批准摘要 | 同 `compare` |
 | `report` | 从已有结果 JSON 重新生成 HTML 报告 | `--input <json>` |
 | `review-partial` | 独立复核 PARTIAL 来源证据并生成候选摘要绑定的私有记录 | `--candidate <json> --reviewer <复核者> --reason <受控代码>` |
+| `accept-measurement` | 校验测量验收报告，输出携带验收凭据的新候选文件 | `--candidate <json> --doctor <report.json> --overhead <overhead.json> --lifecycle <report.json>` |
 | `approve-baseline` | 显式批准候选为基线 | `--candidate <json> --approver <批准者>`；PARTIAL 还需 `--accept-partial --partial-review <复核记录>`，首次加 `--first-partial`，后续提供 `--previous-baseline <已批准基线>` |
+| `approve-geometry-change` | 导入独立网格验证结果，生成几何内容变更批准记录 | `--baseline <已批准基线> --candidate <json> --verification <验证结果> --approver <批准者>` |
 | `batch` | 按目录或注册表批量执行冷开、暖开与重复轮次 | `--build <清单>`；`--directory <目录>` 或 `--registry <json>`；可选 `--output <目录>`、`--anonymize`（`true`/`false`）、`--preset`（`survey`/`baseline`）、`-repeat`/`--repeat <n>`、`--timeout-seconds <n>` |
 | `recover-batch` | 控制器被外部结束后，结算遗留 RUNNING/PENDING 行 | `--output <已停止的批次目录>`；旧批次缺所有权凭据时需显式 `--force`；只从工作区私有进度快照恢复状态，不补造耗时 |
 
@@ -86,7 +90,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | 矩阵与开销 | `matrix`、`overhead` | `PASS`/`PARTIAL`→0；其他→2；`FAIL` 也是 2 |
 | 单样本 | `run` | `PASS`/`PARTIAL`→0；`FAIL`→1；其他→2 |
 | 自检 | `doctor`、`lifecycle` | 只有 `PASS`→0；其他→2 |
-| 辅助命令 | `init`、`samples`、`inventory`、`select`、`freeze-profile`、`build`、`report`、`recover-batch`、`review-partial`、`approve-baseline` | 成功→0；参数或执行异常→1 |
+| 辅助命令 | `init`、`samples`、`inventory`、`select`、`freeze-profile`、`build`、`report`、`recover-batch`、`review-partial`、`accept-measurement`、`approve-baseline`、`approve-geometry-change` | 成功→0；参数或执行异常→1 |
 
 - 缺少必需参数、未知命令或未捕获异常走统一异常路径，返回 1；上表描述的是命令完成后的结果映射。
 - `batch` 是唯一安装 Ctrl+C / SIGTERM 取消控制并返回 130 的命令；取消还写入 `CANCELLED`。
@@ -292,15 +296,54 @@ npm run bench -- gate --baseline ../tmp/gim-bench/<已批准基线>.approved.jso
 - 矩阵候选先检查整体结果、必需 Worker 家族、计划运行数和逐来源冷暖配对；缺口为 `INCONCLUSIVE`，不能只凭已有逐轮数据通过 `compare` 或 `gate`。
 - 每组至少一次独立进程；基线与候选须有相同重复次数、机器、运行时、Profile、动作、工作量和视口。
 - `PARTIAL` 只与同 SHA、同来源缺口摘要的 `PARTIAL` 比较；`PARTIAL` 与 `PASS` 的覆盖不同，结果为 `INCONCLUSIVE`。
-- 普通 `compare` 可读取结构指纹和已有内容证据，但不把缺少内容证明作为普通测量失败。正式 `approve-baseline` 和 `gate` 要求 DEV L0 内容摘要覆盖所有已显示根；字节摘要或放置指纹变化为 INCONCLUSIVE，不能仅凭相同包围盒自动通过。无 DEV 表示的输入标为不适用，不伪造内容 SHA。
-- 超过 10% 要求独立复测，仍超限为 `FAIL`。
+- 普通 `compare` 可读取结构指纹和已有内容证据，但不把缺少内容证明作为普通测量失败。正式 `approve-baseline` 和 `gate` 要求 DEV L0 内容摘要覆盖所有已显示根；字节摘要变化默认 INCONCLUSIVE，只有下述独立网格验证与显式审批流程可以接受这项变化。放置指纹或覆盖变化保持 INCONCLUSIVE，不能仅凭相同包围盒自动通过。无 DEV 表示的输入标为不适用，不伪造内容 SHA。
+- 超过 10% 要求独立复测，仍超限为 `FAIL`。性能优化须明确提示开发者复核；消缺和新功能的 10% 回退提交门槛由开发者人工控制，不要求每轮完整测量，不接入远程 CI。
 - 摸底批次的 `PASS`/`PARTIAL` 仅表示该次计划执行结果。`baseline` 批次要求冷暖等价、来源缺口摘要及工作量一致；正式认可仍需探针开销、十轮生命周期与测量能力等验收。
 - 完整正确性基线只接受 `PASS`。`PARTIAL` 是显式接受的覆盖基线：来源复核者先运行 `review-partial`，其记录绑定候选摘要、复核身份、时间和受控原因；另一位批准者再引用该记录，不能仅在批准命令中自报已复核。原因只接受与候选证据相符的 `source-geometry`、`engineering-coverage`、`combined-source` 或 `mixed-source`。首次须显式 `--first-partial`；本地已有同来源批准记录时 CLI 拒绝再次声明首次，后续须提供上一份已批准基线，相同来源从 PASS 退到 PARTIAL 或缺口签名变化会被拒绝。复核和批准文件以候选摘要及时间命名，保存在工作区私有 `tmp/`，不覆盖上一份记录，也不存自由文本工程名或路径。工具核对记录与身份不同，仍无法替代实际人工审阅。
 - SDK 迁移不在本轮 Benchmark 范围内。完整指标口径见[测量架构](architecture/measurement.md)。
 
-### v1 到 v2 的基线迁移
+### 测量验收与正式批准
+
+`matrix` 的 `candidate.json` 和 `batch --preset baseline` 的 `results.json` 都是未批准候选。正式原生候选须先绑定同构建、同机器、同固定运行时和同测量协议的验收报告。能力报告须通过 Worker/CDP 自检；开销报告须属于候选的 Profile、来源、场景与工作量，包含至少三组交替运行的独立 off/benchmark 进程；生命周期报告须覆盖候选中的来源，并通过十轮开闭、取消与资源归零检查。生命周期 PASS 表示上述检查通过，不会把来源 PARTIAL 升级成产品 PASS：来源几何或工程覆盖缺口须有充分证据、与候选一致且十轮保持相同的缺口摘要；新增产品失败、缺口变化或证据缺失仍拒绝。新报告保留初始正确性参考与每轮正确性结果，PARTIAL 验收必须携带这些记录。开销和生命周期的 10% 判断会从明细重新计算，不能仅填一个 `outcome: PASS`。
+
+```powershell
+# 先执行 matrix 或 batch，保留其候选 JSON 和本轮构建清单。
+npm run bench -- doctor --build <本轮构建清单>
+# batch 的样本可以直接引用同一份注册表，不需要重新运行 samples/inventory。
+npm run bench -- overhead --build <本轮构建清单> --candidate <候选JSON> --sample <匿名样本ID> --registry <本轮注册表>
+npm run bench -- lifecycle --build <本轮构建清单> --sample <匿名样本ID> --registry <本轮注册表>
+npm run bench -- accept-measurement --candidate <候选JSON> --doctor <能力report.json> --overhead <overhead.json> --lifecycle <生命周期report.json>
+# 上一步输出新的 accepted-candidate 文件；原候选保持不变。
+npm run bench -- approve-baseline --candidate <accepted-candidate文件> --approver <批准者>
+npm run bench -- gate --baseline <approved基线文件> --candidate <下一版候选JSON> --output ../tmp/gim-bench/new-comparison.json
+```
+
+冻结矩阵使用 `overhead --profile <冻结Profile>`，也可同时指定 `--candidate <矩阵候选JSON>`，此时必须匹配 Profile 摘要。矩阵的场景、精化动作和超时均从冻结 case 读取，不使用样本注册表推断动作；单独使用 `--candidate` 只支持批次候选。省略 `--registry` / `--directory` 时，`overhead` 与 `lifecycle` 使用 `samples` 登记的私有语料。开销复测保留第二组完整运行记录。验收绑定不覆盖候选、不批准基线，也不自动运行工程样本；记录只保存验收所需字段，绑定候选摘要，候选修改后须重新绑定。PARTIAL 的 `review-partial` 须针对绑定后的新候选执行。`approve-baseline` 和后续 `gate` 都复核验收记录，不能用另一构建的能力报告替代。
+
+`--output` 可以指定新文件及尚未创建的子目录，但只能位于工作区 `tmp/` 或 `output/`。逐层拒绝目录链接、文件链接和目录型文件目标；输入文件仍须已存在。
+
+### 几何内容变更审批
+
+几何编译器使 GLB 字节发生变化时，开发者先用独立网格验证器比较对应构建、来源和场景中的全部变更 occurrence，再由另一位批准者导入验证结果。Benchmark CLI 提供验证结果导入和审批，不实现网格等价算法，也不从包围盒、计数或提速推断等价。没有独立验证报告时保持 INCONCLUSIVE。
+
+验证器输出 `gim-geometry-equivalence-v1` JSON：`outcome: PASS`、`method: independent-mesh-equivalence-v1`、`verifier`、`baselineDigest`、`candidateDigest` 和 `checks`。两个摘要使用 [evidence.mjs](../desktop/scripts/benchmarks/evidence.mjs) 的 `digest` 对完整输入 JSON 计算。每组变更场景的检查包含：
+
+- `transitionDigest`：对 [geometry-review.mjs](../desktop/scripts/benchmarks/geometry-review.mjs) 的 `geometryTransition(基线run, 候选run)` 计算摘要，绑定双方构建、内容 SHA、来源、场景、冷暖状态、Profile、工作量与放置指纹。
+- `coveredOccurrences`：必须等于报告中全部已显示 occurrence 数；`evidenceSha256` 指向验证器明细证据的 SHA，明细由开发者私有保存并人工核验。
+- `positions`、`topology`、`normals`、`materials`、`transforms`、`sourceBindings`：每项均须通过。单纯相同包围盒不满足此契约。
+
+```powershell
+npm run bench -- approve-geometry-change --baseline <approved基线文件> --candidate <新候选JSON> --verification <独立网格验证报告> --approver <批准者>
+npm run bench -- gate --baseline <approved基线文件> --candidate <新候选JSON> --geometry-review <上一步批准记录>
+```
+
+批准记录只允许对应 GLB 内容 SHA 的变化；缺失内容证据、覆盖或放置变化、运行条件、内存证据与 10% 回退检查仍按原规则判断。复测仍需相同的双方构建和已验证内容。候选或基线改变后，审批记录失效；该记录不会批准或替换性能基线，也不改变 PARTIAL 的独立来源复核要求。
+
+### 时间线策略 v1 到 v2 的基线迁移
 
 `task-phase-timeline-v1` 报告只作历史参考。v2 增加 Worker 批次确认、最终证据核对和生命周期口径；冷暖还需共用 WebView2 profile（`paired-webview-profile-v1`）。比较工具对旧条件返回 `incomparable:detailPolicy` 或缺少 profile 条件，不自动换算指标，也不复制旧批准元数据。
+
+测量协议本身统一使用共享常量 `MEASUREMENT_VERSION`（当前为 `gim-measurement-v1`），不按时间线策略另设协议版本。旧报告若在 `conditions.measurementVersion` 写入其他值，只作历史参考，不能通过相互一致绕过版本检查；工具不自动改写报告或批准记录。
 
 开发者在同一机器、固定运行时和构建方式下重新构建 Benchmark，按冻结注册表执行 L1 变电/线路至少三组独立冷暖配对，并完成 L0 关键样本、探针开销及十轮资源回落检查。核对工作量、语义/几何摘要与缓存域后，显式批准新候选。未完成的 L0 项或冷暖异常保持 INCONCLUSIVE，旧 v1 基线仅供定位变化，不参加 v2 门禁。真实样本与性能矩阵只在开发者本地运行。
 

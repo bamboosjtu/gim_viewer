@@ -2,6 +2,24 @@ import {mkdirSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {runNative} from './native-run.mjs';
 import {median,partialSignature} from './compare.mjs';
+import {verifyProfile} from './profiles.mjs';
+
+/** A matrix's actions belong to its frozen Profile, never the sample registry. */
+export function resolveOverheadPlan({candidate,profile,sample}){
+  if(!candidate&&!profile)throw Error('--profile or --candidate required');
+  if(profile){
+    verifyProfile(profile);
+    if(candidate&&candidate.profileDigest!==profile.digest)throw Error('Frozen profile does not match candidate');
+  }else if(candidate.version!=='gim-batch-results-v1'){
+    throw Error('--profile is required with a matrix candidate to preserve its frozen actions');
+  }
+  const run=candidate?.runs?.find(row=>row.conditions?.sampleId===sample?.sampleId&&row.conditions?.sourceSha256===sample?.sourceSha256);
+  const caseSpec=profile?profile.cases.find(row=>row.sampleId===sample?.sampleId&&row.sourceSha256===sample?.sourceSha256)
+    :run?{scenario:run.conditions.scenario,actions:sample.actions??[],timeoutMs:3600000}:null;
+  if(!sample||!caseSpec||candidate&&(!run||run.conditions.scenario!==caseSpec.scenario))
+    throw Error('Sample and scenario must belong to the frozen profile or candidate');
+  return {profile:profile??{digest:candidate.profileDigest},caseSpec};
+}
 
 export async function measureProbeOverhead({root,buildManifest,sample,profile,caseSpec,repetitions=3,retest=false}){
   const runs=[];const out=join(root,'output','gim-bench',`overhead-${Date.now()}`);mkdirSync(out,{recursive:true});
@@ -21,7 +39,7 @@ export async function measureProbeOverhead({root,buildManifest,sample,profile,ca
   const result={kind:'same-build-probe-overhead',outcome,profileDigest:profile.digest,metrics,runs,independentProcesses:true,alternatingOrder:true};
   if(outcome==='FAIL'&&!retest){
     const second=await measureProbeOverhead({root,buildManifest,sample,profile,caseSpec,repetitions,retest:true});
-    result.retest={outcome:second.result.outcome,metrics:second.result.metrics};result.outcome=second.result.outcome;
+    result.retest=second.result;result.outcome=second.result.outcome;
     result.regressionConfirmed=second.result.outcome==='FAIL';
   }
   writeFileSync(join(out,'overhead.json'),JSON.stringify(result,null,2));return {out,result};
