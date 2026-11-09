@@ -80,23 +80,38 @@ try {
     }
 
     Write-Host "`nUsing build manifest: $manifestPath" -ForegroundColor Green
+    $summaryArgs = [System.Collections.Generic.List[string]]::new()
 
     function Invoke-BenchBatch {
         param(
+            [Parameter(Mandatory = $true)]
+            [string]$SummaryGroup,
             [Parameter(Mandatory = $true)]
             [string[]]$BenchArgs
         )
 
         Write-Host "`n>>> npm run bench -- $($BenchArgs -join ' ')" -ForegroundColor Cyan
-        & npm run bench -- @BenchArgs
-        $exitCode = $LASTEXITCODE
-        if ($exitCode -ne 0) {
-            throw "Benchmark batch failed with exit code $exitCode. Remaining batches were not started."
+        $completion = $null
+        & npm run bench -- @BenchArgs | ForEach-Object {
+            Write-Host $_
+            if ([string]$_ -like '{*') {
+                try { $message = [string]$_ | ConvertFrom-Json -ErrorAction Stop }
+                catch { return }
+                if ($message.status -and $message.outcome -and $message.csv) { $completion = $message }
+            }
         }
+        $exitCode = $LASTEXITCODE
+        $expectedExit = switch ($completion.outcome) { 'PASS' { 0 } 'PARTIAL' { 0 } 'FAIL' { 1 } 'INCONCLUSIVE' { 2 } default { -1 } }
+        if ($completion.status -ne 'COMPLETE' -or $expectedExit -lt 0 -or $exitCode -ne $expectedExit) {
+            throw "Benchmark batch did not complete normally (exit code $exitCode). No completed result was accepted."
+        }
+        $summaryArgs.Add($SummaryGroup)
+        $summaryArgs.Add((Join-Path (Split-Path -Parent $completion.csv) 'results.json'))
+        Write-Host "Batch completed; recorded outcome: $($completion.outcome)" -ForegroundColor Cyan
     }
 
     # L1: substation registry
-    Invoke-BenchBatch -BenchArgs @(
+    Invoke-BenchBatch -SummaryGroup '--substation' -BenchArgs @(
         'batch',
         '--build', $manifestPath,
         '--registry', '..\benchmarks\l1\substation01-04.json',
@@ -106,7 +121,7 @@ try {
     )
 
     # L1: line registry
-    Invoke-BenchBatch -BenchArgs @(
+    Invoke-BenchBatch -SummaryGroup '--line' -BenchArgs @(
         'batch',
         '--build', $manifestPath,
         '--registry', '..\benchmarks\l1\line01-06.json',
@@ -116,7 +131,7 @@ try {
     )
 
     # L0: local substation demo directory
-    Invoke-BenchBatch -BenchArgs @(
+    Invoke-BenchBatch -SummaryGroup '--substation' -BenchArgs @(
         'batch',
         '--build', $manifestPath,
         '--directory', '..\demo\变电站通用设计模型\',
@@ -125,10 +140,13 @@ try {
         '--anonymize', 'false'
     )
 
-    Write-Host "`n=== All benchmark batches completed ===" -ForegroundColor Green
+    Write-Host "`n=== Benchmark survey completed; summary follows ===" -ForegroundColor Cyan
     Write-Host "L1 substation output: ../output/substation-survey-$Commit"
     Write-Host "L1 line output: ../output/line-survey-$Commit"
     Write-Host "L0 output: ../output/l0-survey-$Commit"
+    & node (Join-Path $PSScriptRoot 'scripts/with-workspace-temp.mjs') (Join-Path $PSScriptRoot 'scripts/benchmarks/survey-summary.mjs') @summaryArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to summarize the completed benchmark reports.' }
+    exit 0
 }
 finally {
     Pop-Location

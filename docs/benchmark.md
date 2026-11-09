@@ -50,7 +50,11 @@ npm run bench -- doctor --build ../tmp/gim-bench/builds/<构建>/acceptance-buil
 
 L0/L1 的逐文件 SHA 注册表与 L2 目录清单见[性能样本登记](../benchmarks/README.md)。
 
-Windows 也可在 `desktop/` 手动执行 `powershell -ExecutionPolicy Bypass -File .\run-bench-survey.ps1`：构建一次后依次运行变电、线路和通用设计批次，分别保存输出。构建警告会保留在日志中，原生进程退出码非零时停止后续批次；此脚本不进入远程 CI。脚本使用带 BOM 的 UTF-8，兼容 Windows PowerShell 5.1 的中文目录解析，修改时须保留该编码。
+Windows 也可在 `desktop/` 手动执行 `powershell -ExecutionPolicy Bypass -File .\run-bench-survey.ps1`：构建一次后依次运行变电、线路和通用设计批次，分别保存输出。已完成批次中的 FAIL、PARTIAL、INPUT_ERROR 或 INCONCLUSIVE 保留在报告中，不中断后续批次；构建失败、未正常完成或缺少完成凭据才报执行异常。全部执行后输出总体状态数量，以及按工程类型、变电电压等级和冷暖状态分组的时间最短/最长值。包装脚本退出 0 表示执行及汇总完成，不表示全部样本通过；直接调用 `bench batch` 的退出码契约保持下表定义。此脚本不进入远程 CI。脚本使用带 BOM 的 UTF-8，兼容 Windows PowerShell 5.1 的中文目录解析，修改时须保留该编码。
+
+末尾时间范围分别使用首次响应 `firstResponseMs`、首次几何 `firstGeometryMs`、基础几何齐备 `allGeometryReadyMs` 和完全结算 `settledMs`，单位为秒。终端输出使用定宽文本表格，按中文显示宽度补齐、数字右对齐；变电和线路分表，表头统一注明“最短 - 最长”。只统计 PASS/PARTIAL 项已有的有限非负观测；失败、跳过和缺失值不填零，缺失项显示 `-`。变电电压优先使用报告中的 `voltageKv`，否则识别文件名电压前缀，无法识别的单列“未标注”。该范围只是本轮样本描述，不作为自动性能回退判断。
+
+已有报告无需重跑工程，可在 `desktop/` 执行 `node scripts/with-workspace-temp.mjs scripts/benchmarks/survey-summary.mjs --substation <变电results.json> --line <线路results.json> --substation <通用设计results.json>` 生成同样的终端汇总；各报告须为同一构建已完成的批次。
 
 ## 子命令一览
 
