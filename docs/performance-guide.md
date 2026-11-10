@@ -1,10 +1,10 @@
 # 性能测试指南
 
-本页只定义**怎么测**：手工 Release + CDP 路线下的 SLO 定义、冷/暖步骤、证据导出和错误清单，面向单机验收与诊断。当前实测结果、构建身份及未达标项由开发者本地 `output/` 报告记录；本页不复制结果数字。
+本页只定义**怎么测**：手工 Release + CDP 路线下的 SLO 定义、冷/暖步骤、证据导出和错误清单，面向单机验收与诊断。权威实测结果以开发者本地 CLI 打印的 `privateResults` 和 `tmp/gim-bench/` 私有报告为准；`output/` 只是匿名派生视图。本页不复制结果数字。
 
 读者包括按步骤验收的用户/验收人员，以及用固定构建、样本、缓存状态和结构化 JSON 复现的 Agent/开发者。
 
-两条路线的分工见下节；测量协议、采集面和完整性口径见[测量与本地 Benchmark](architecture/measurement.md)。
+三条路线的分工见下节；测量协议、采集面和完整性口径见[测量与本地 Benchmark](architecture/measurement.md)。
 
 ## 目录
 
@@ -26,11 +26,13 @@
 | 路线 | 入口 | 适用场景 | 产出 |
 |---|---|---|---|
 | 手工 Release + CDP | 本页 | 单机验收、逐轮人工确认、定位单样本问题 | 状态栏与人工记录、`Ctrl+Shift+B` JSON、诊断导出 |
-| 批量注册表 | `npm run bench -- batch` / `matrix`，见 [Benchmark CLI](benchmark.md) | 注册表批次、冷暖配对、比较与汇总报告 | `results.json`、CSV/HTML 报告、Profile |
+| 批量注册表 | `npm run bench -- batch` / `matrix`，见 [Benchmark CLI](benchmark.md) | 注册表批次、冷暖配对、比较与汇总报告 | 私有 `privateResults`、CSV/HTML 报告、Profile |
+| 详细 Trace / Profile | `npm run bench -- run --mode diagnostic --diagnostics <配置>`，再 `analyze` / `export-trace`，见 [Benchmark CLI](benchmark.md#详细-trace-与-profile) | 单样本深挖、等待/阻塞链、CPU/Allocation/Heap、GPU 与系统级诊断 | 私有 Trace/Profile、`analysis.private.json`、Perfetto 时间线 |
 
 - 手工路线在本页展开，适合需要观察界面、状态栏、DevTools 或对单个样本做诊断的场景；它不替代批量报告。
-- 批量路线由 [Benchmark CLI](benchmark.md) 定义命令、注册表、报告字段、状态和退出码；本页不复制这些参数。
-- 两条路线都使用固定 WebView2 的原生 Release、独立进程和同一套冷暖语义。构建、运行时、Profile 或 viewport 不同的结果不能直接合并。
+- 批量路线由 [Benchmark CLI](benchmark.md) 定义命令、注册表、报告字段、状态和退出码；本页不复制这些参数。权威结果在 `tmp/`，`output/` 为匿名派生视图。
+- 详细 Trace/Profile 只服务诊断，不参加普通性能比较或基线批准；缺少 Trace 证据时分析明确输出部分覆盖。
+- 三条路线都使用固定 WebView2 的原生 Release、独立进程和同一套冷暖语义。构建、运行时、Profile 或 viewport 不同的结果不能直接合并。
 
 ## 先明确测什么
 
@@ -309,7 +311,7 @@ catalogReady === true
 
 | 快捷键 | 内容 | 用途 |
 |---|---|---|
-| `Ctrl+Shift+B` | 稳定 benchmark JSON | **性能验收主数据** |
+| `Ctrl+Shift+B` | 稳定 benchmark JSON | 手工验收记录；正式比较、`gate` 与基线批准使用 CLI 私有报告 |
 | `Ctrl+Shift+D` | 数据库/诊断 JSON + timings | 排障，不替代 benchmark |
 
 `Ctrl+Shift+B` 的 JSON 包含：
@@ -320,6 +322,8 @@ catalogReady === true
 - `longTasks`、`memorySamples`、`ifcProfiles`、`devGeometryProfile`；
 - `fragmentsCacheProfile`、`cleanupProfile`。
 
+手工 JSON 只到产品时刻与诊断快照；`modelTreeReadyMs`、`firstGeometryMs`、`allGeometryReadyMs`、`automaticLoadMs`、`cachePublishMs`、`settledMs` 和 `writeDrainMs` 由 [Benchmark CLI](benchmark.md#报告文件与判读边界) 的私有报告生成。`automaticLoadMs` 取核心语义、导航、全部 IFC、DEV 基础表示与 DEV 几何的最晚时刻，不能当作“基础表示”单项；后者用 `devBaseRepresentationsSettled`。
+
 `taskPhases` 提供有界的任务阶段聚合及慢样本，DEV 的 taskId 关联模板、Worker 与实例提交；sourcePath、LOD、优先级、cacheSource、Worker 会话/序号用于区分来源和调度。
 
 - 默认不逐任务写 console 日志。
@@ -327,7 +331,7 @@ catalogReady === true
 - `taskPhases.spanWindow` 报告窗口上限与淘汰数，存在淘汰时不能把保留窗口当作完整轨迹。
 - 阶段可能嵌套或并行，不将 totalMs 相加；`cpuTimeAvailable: false` 表示未测得 CPU 时间。
 
-`productMoments.devCurrentViewSettled` 记录当前视图真正 settled 的首次时刻，包括已结束但有失败的情况，其 meta 保留失败数；`devCurrentViewReady` 继续表示没有失败的 ready 时刻。两者不能互相替代。启动成绩优先用 benchmark 导出，并在记录中标注额外诊断的触发区间。
+`productMoments.devCurrentViewSettled` 记录当前视图真正 settled 的首次时刻，包括已结束但有失败的情况，其 meta 保留失败数；`devCurrentViewReady` 继续表示没有失败的 ready 时刻。两者不能互相替代。手工验收优先用 `Ctrl+Shift+B` 记录，并在记录中标注额外诊断的触发区间；正式比较与基线使用 CLI 私有报告。
 
 关于 `Ctrl+Shift+D`：
 
@@ -498,7 +502,7 @@ commit：<sha>
 5. 只有冷启动基础表示 settled 且对应缓存写入完成的样本才做完整暖启动；重启进程但不删缓存。
 6. 完整矩阵为每样本 3 次冷/3 次暖；最低矩阵为 1 次冷/3 次暖，并显式写明缺口。记录中位数和最大值。
 7. 把 JSON 与汇总表放在同一目录，表中引用 JSON 文件名。
-8. 将本轮结果、错误及阶段报告保存在工作区 `output/`，保留构建与样本 SHA；分享前按 [Benchmark 报告规则](benchmark.md#报告文件与判读边界)匿名化。
+8. 权威结果由 Benchmark 私有报告保存；手工 `Ctrl+Shift+B` JSON 只作验收记录。分享前按 [Benchmark 报告规则](benchmark.md#报告文件与判读边界)使用匿名派生视图。
 9. 若改变缓存版本、Worker 数量、LOD 策略或 IFC 队列顺序，重新跑完整矩阵，不能只跑受影响样本后宣称全局回归通过。
 
 ## 相关命令速查
@@ -530,8 +534,9 @@ Invoke-RestMethod 'http://127.0.0.1:9222/json' | Select-Object title, url, webSo
 
 ## 相关文档
 
-- 本地 `output/`：各轮 Benchmark 的 HTML、CSV 与 JSON 报告，不随仓库分发；
+- 本地 `tmp/gim-bench/`：权威私有报告与 Trace/Profile；`output/`：匿名派生视图，均不随仓库分发；
 - [benchmark.md](benchmark.md)：批量 `npm run bench -- batch/matrix` 路线、注册表、报告字段、状态与退出码；
+- [详细 Trace 与 Profile](benchmark.md#详细-trace-与-profile)：单样本深挖、CPU/Allocation/Heap 与系统诊断；
 - [architecture/measurement.md](architecture/measurement.md)：测量协议、采集面、完整性口径与原生门禁；
 - [validation.md](validation.md)：验证证据边界和验收规则；
 - [open-issues.md](open-issues.md)：未关闭缺陷与已知限制；

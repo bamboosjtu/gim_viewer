@@ -31,7 +31,7 @@ GIM Viewer 是一款面向电网工程信息模型（GIM）的开源本地浏览
 
 支持以独立 Device CBM 为入口的设备 GIM，包括带 GIMPKGS 头和裸 7z 容器；无需 project.cbm 或 IFC。设备层级、中文属性、搜索、三维选择和几何缓存复用现有浏览能力，无 IFC 的工程层级包也可自动显示 DEV 几何。拉伸体兼容单位方向和 304.8 mm 方向基矢，几何与范围计算采用同一解释。
 
-DEV 实例化仍为默认关闭的试点。v0.2 的工程实体/三视图链路尚未重跑同口径原生冷暖和持续交互矩阵，0.1.x 性能基线不能作为通过证据。本版不宣称全站性能已达标，也不提供编辑、碰撞或工程校核功能。实现、测量和限制分别见[架构](docs/architecture.md)、[Benchmark CLI](docs/benchmark.md)及[问题清单](docs/open-issues.md)；实测结果由开发者本地报告保存。
+DEV 实例化仍为默认关闭的试点。v0.2 的工程实体/三视图链路尚未重跑同口径原生冷暖和持续交互矩阵，0.1.x 性能基线不能作为通过证据。本版不宣称全站性能已达标，也不提供编辑、碰撞或工程校核功能。实现、测量和限制分别见[架构](docs/architecture.md)、[Benchmark CLI](docs/benchmark.md)及[问题清单](docs/open-issues.md)；权威测量结果由开发者本地 `tmp/gim-bench/` 报告保存，`output/` 只是匿名派生视图。
 
 ### Windows 桌面版
 
@@ -96,7 +96,7 @@ DEV 实例化仍为默认关闭的试点。v0.2 的工程实体/三视图链路�
 | [tools](tools/README.md) | 独立 Python 辅助工具及其界面，不属于桌面或 Android 应用前端 |
 | [contracts](contracts/) | 跨语言资源限制等共享契约 |
 
-`tmp/` 保存忽略的测试暂存与私有诊断，`output/` 保存本地报告；其中大量 HTML 是 Benchmark 生成的报告，不是产品页面。源码目录职责见[架构目录表](docs/architecture.md#项目目录与模块归属)，测试与样本约定见[开发指南](docs/development.md)。
+`tmp/` 保存忽略的测试暂存、私有诊断与权威 Benchmark 报告；`output/` 保存匿名派生报告，其中大量 HTML 是 Benchmark 生成的视图，不是产品页面。源码目录职责见[架构目录表](docs/architecture.md#项目目录与模块归属)，测试与样本约定见[开发指南](docs/development.md)。
 
 ## 桌面开发
 

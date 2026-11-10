@@ -1,4 +1,4 @@
-import {it,expect} from 'vitest';
+import {it,expect,vi} from 'vitest';
 import {Collector,Probe,BufferLedger,type TraceContext} from '../core.js';
 import {GpuTimer} from '../../viewer/gpuTimer.js';
 import {normalizeTrace} from '../../../scripts/benchmarks/trace-analysis.mjs';
@@ -34,6 +34,25 @@ it('GPU timers handle deferred results, disjoint and cleanup without a synchrono
   available=true;timer.poll();expect(rows[0]).toMatchObject({durationMs:5,availability:'available'});
   timer.begin('p2');timer.end();disjoint=true;timer.poll();expect(rows[1]).toMatchObject({durationMs:null,reason:'disjoint'});
   timer.dispose();expect(deleted).toBe(2);
+});
+
+it('GPU results complete while rendering is idle and disposal cancels pending polling',()=>{
+  vi.useFakeTimers();
+  try{
+    let available=false;
+    const deleted=vi.fn(),rows:unknown[]=[];
+    const gl={getExtension:()=>({TIME_ELAPSED_EXT:1,GPU_DISJOINT_EXT:2}),createQuery:()=>({}),beginQuery(){},endQuery(){},
+      getParameter:()=>false,isContextLost:()=>false,QUERY_RESULT_AVAILABLE:3,QUERY_RESULT:4,
+      getQueryParameter:(_:unknown,p:number)=>p===3?available:7000000,deleteQuery:deleted};
+    const timer=new GpuTimer(gl as unknown as WebGL2RenderingContext,row=>rows.push(row));
+    timer.begin('last-frame');timer.end();vi.advanceTimersByTime(100);expect(rows).toHaveLength(0);
+    available=true;vi.advanceTimersByTime(100);
+    expect(rows).toEqual([{passId:'last-frame',availability:'available',durationMs:7}]);
+    expect(vi.getTimerCount()).toBe(0);
+    available=false;timer.begin('closing-frame');timer.end();timer.dispose();vi.advanceTimersByTime(1000);
+    expect(rows).toHaveLength(2);expect(rows[1]).toMatchObject({reason:'capture-stopped'});
+    expect(deleted).toHaveBeenCalledTimes(2);expect(vi.getTimerCount()).toBe(0);
+  }finally{vi.useRealTimers();}
 });
 
 it('re-registering a known backing buffer records reuse without inventing another allocation',()=>{

@@ -38,13 +38,17 @@
 
 完整配置代码在[features.ts](../../desktop/src/config/features.ts)；设置面板/底图选择另有持久化规则。
 
+桌面 Three 场景使用 `SimpleRenderer` 的公开 MANUAL 模式：静止场景不重复提交，树节点增删和 IFC 分块更新使画面失效；原地修改材质、显隐或矩阵通过 `viewer/demandRendering.ts` 请求刷新。Fragments 完成事件只检查该模型公开 tile 的几何、属性版本、组、材质和矩阵变化，忽略没有视觉变化的周期性完成通知，不扫描场景或顶点数组。连续加载时合并场景刷新，冷却间隔为上次提交耗时的三倍，最小 80 ms、最大 750 ms；相机更新、选择和窗口变化立即请求下一帧。相机与 Fragments 的更新循环继续运行，线路 MapLibre 保持自身刷新机制。DEV 实例化仍默认关闭。
+
 ## 诊断
 
 | 入口 | 内容 |
 |---|---|
 | `Ctrl+Shift+D` | 数据库/诊断 JSON 与 timings；只读当前会话已采集状态 |
-| `Ctrl+Shift+B` | 稳定 benchmark JSON（路径已净化），用于性能验收 |
+| `Ctrl+Shift+B` | 稳定 benchmark JSON（路径已净化）；手工验收记录，不替代 CLI 私有报告 |
 | `Ctrl+Shift+C` | 线路悬链线参数审计 JSON（仅线路工程有数据） |
+| `bench run --mode diagnostic --diagnostics <配置>` | 主线程/Worker 的 CPU、Allocation、Heap、Trace 与可选 GPU 采集 |
+| `bench analyze` / `export-trace` | 私有报告的生命周期、阻塞链、未归因区间与 Perfetto 时间线 |
 | `utils/perfTimings.ts` | 打开、IFC/DEV、工程实体、选择和缓存阶段 |
 
 - 工程实体诊断包含来源/实体/导航缓存命中、来源完整性、整体/待归数量、Worker 传输与失败原因。
@@ -53,7 +57,7 @@
 - 资源诊断包含进程树 private、RSS、JS heap、GPU 资源计数和可选 WebView2 内存；采样窗口有限，不代表瞬时峰值。
 - 选择诊断区分导航、属性摘要/参数、几何收集、高亮提交、下一帧；外层跨度包含调用方恢复间隙。
 
-导出字段与判定口径见[性能测试指南](../performance-guide.md)。
+导出字段与判定口径见[性能测试指南](../performance-guide.md)；Trace/Profile、WPR/PMC/WPA 与 GPU 采集的配置和边界见 [Benchmark CLI](../benchmark.md#详细-trace-与-profile)。
 
 ## 发布边界
 

@@ -1,6 +1,6 @@
 # 本地批量 Benchmark
 
-本页说明本地批量 Benchmark 的命令、输入注册、报告文件、状态判定和基线流程。覆盖 `npm run bench -- ...` 的批量与单样本命令、L0/L1/L2 输入登记、报告与匿名化规则；测量指标定义见[测量与 Benchmark](architecture/measurement.md)，手工步骤见[性能测试指南](performance-guide.md)。实测结果保存在开发者本地 `output/` 报告中。
+本页说明本地批量 Benchmark 的命令、输入注册、报告文件、状态判定和基线流程。覆盖 `npm run bench -- ...` 的批量与单样本命令、L0/L1/L2 输入登记、报告与匿名化规则；测量指标定义见[测量与 Benchmark](architecture/measurement.md)，手工步骤见[性能测试指南](performance-guide.md)。权威结果以 CLI 打印的 `privateResults` 和 `tmp/gim-bench/` 私有报告为准；`output/` 只是匿名派生视图。
 
 Benchmark 使用固定 WebView2 的原生 Release 应用，每次运行启动独立进程，顺序执行注册的工程；不以 Node 微基准代替产品加载。目录或 JSON 注册表可以直接作为输入，不需要逐个手动调用。
 
@@ -17,11 +17,13 @@ Benchmark 使用固定 WebView2 的原生 Release 应用，每次运行启动独
 - [状态与判定](#状态与判定)
 - [匿名化与私有产物](#匿名化与私有产物)
 - [比较与基线](#比较与基线)
+- [详细 Trace 与 Profile](#详细-trace-与-profile)
 - [相关文档](#相关文档)
 
 ## 范围与证据边界
 
 - 实际工程、性能与内存测试只在开发者本地运行；远程 CI 不运行真实或合成工程样本。
+- 性能结论必须同时记录构建（源码指纹/EXE/运行时）、样本 SHA 和运行环境；缺任一项不能作为复核依据，也不把不同条件的结果合并。
 - 开发者基础功能集合由 [`test:local`](../desktop/local-tests/README.md) 验证：仓库跟踪 [mini-samples.example.json](../desktop/local-tests/mini-samples.example.json)，开发者可直接修改为自己的变电、线路、设备 GIM 路径及 SHA。缺失样本显式跳过，已有来源的 SHA 或运行时工程类型不符则失败；跳过不构成通过。
 - `test:local` 不是 L0/L1/L2 性能样本登记；性能样本沿用[性能样本登记](../benchmarks/README.md)的独立登记。
 - 所有输入必须位于工作区内；产物只能写入工作区根目录的 `tmp/`、`output/`。样本目录仅被读取，系统 TEMP/TMP 不作为测试目录。
@@ -176,6 +178,7 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 仓库登记是精确路径集合，L2 使用目录示例。`npm run bench -- samples` 扫描开发者本地 `demo/` 的约定目录，包括 `substations/` 与 `lines/` 下全部 GIM，并报告实际发现数；它不内置期望数量。两套来源的数量可以不同。
 
 登记项的 `workloadProfile` 仅选择冻结的场景和动作，例如全包索引回归；不修改 `PASS`/`PARTIAL`/`FAIL` 的统一判定规则。
+
 - 批次样本只由 `--directory` 或 `--registry` 取。在册登记只选择输入，不提供判定例外；`PASS`/`PARTIAL`/`FAIL` 由统一运行证据规则判定。
 
 ## 报告文件与判读边界
@@ -185,7 +188,7 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 | `report.html` | “测量结果 / 样本覆盖”两个 tab，含结果表、覆盖汇总、筛选、排序与 CSV 链接 |
 | `results.csv` | 每个输入、轮次和冷暖状态的明细结果；失败和跳过行保留 |
 | `errors.csv` | 需要关注的 `PARTIAL`、失败、不完整、跳过及取消行；重复别名仍保留在全量结果中 |
-| `summary.csv` | 按输入和冷暖状态汇总中位数与状态计数 |
+| `summary.csv` | 按输入和冷暖状态汇总中位数、P95、观测数/缺失数与状态计数 |
 | `stages.csv` | 每个运行的阶段次数、wall time、最大值、可追踪字节工作量、ms/MiB 和 p50/p95/p99 区间 |
 | `slow-tasks.csv`、`slow-phases.csv` | 每个运行耗时最长的十个 Worker 任务和单次阶段，使用匿名来源 ID；聚合直方图不充作单次阶段 |
 | `slow-templates.csv` | 每轮最慢 20 个 DEV 模板槽位等待及最久 20 个槽位占用者；含优先级、缓存读取、Worker 请求/排队、输入预算、输出字节及内存压力，公开列只用匿名来源 ID |
@@ -196,13 +199,15 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 - CSV 使用 UTF-8 BOM、标准引号转义；时间字段后缀 `Ms`、内存字段后缀 `Bytes`。HTML 显示秒与 GiB。不可用字段留空，不填零。
 - 字段名以本次构建生成的 `results.json` 与 `results.csv` 表头为准；本页只维护文件用途与判读边界，不逐列冻结字段名。
 - 汇总分别计数 `PASS` 与 `PARTIAL`；同组轮次的 PARTIAL 签名不同时中位数留空，`coverageGroups` 与 `partialSignatures` 给出分组证据。
+- `summary.csv` 的每个时间指标同时给出 Median、P95、Count 和 Missing；P95 是该组重复轮次的经验最近秩，必须结合观测数量和覆盖状态判读。
+- 单次运行的 `report` 生成流水线概览、内存曲线与覆盖/阻塞证据；具体视图取决于输入是否包含 Trace 事件。批次 `report.html` 提供“测量结果 / 样本覆盖”两个 tab。
 - 覆盖汇总同时给出有效轮次和计划轮次，以及基础设施重试次数。少于计划轮次的中位数可供诊断，但不能冒充完整基线。
 - `measurementDetailStatus=aggregate-only` 表示详细时间线因容量截断，但阶段聚合与任务闭环仍完整；内存采样另见 `memoryEvidenceComplete`。截断条数保留，产品 PASS/PARTIAL 不因此变成 INCONCLUSIVE。未确认的 Worker 尾批、序号缺口或聚合丢失仍使测量不完整。Worker 批次有连续 ID、确认和任务结束标记。
 - `aggregate-only` 的 PASS/PARTIAL **没有完整事件时间线**。基线审批要求 `aggregateComplete`、生命周期、必要内存和内容证据，不要求 `detailComplete`；`slow-tasks.csv`、`slow-phases.csv` 仅供诊断，不作为基线必需证据。聚合阶段不进入单次慢阶段榜。
 - `measurementLifecycleComplete` 与 `measurementComplete` 分开：意外 Worker 终止的在途任务、超时、无理由取消和异常迟到事件使生命周期不完整；有受控原因的项目切换/关闭或 AbortError 取消可以正常结算。DEV 精细请求主动终止 Worker 时按任务身份登记取消，不豁免池内其他任务。外来 run 和重复序号使事件传输不完整，不能被静默忽略。
 - `pendingCount`、`pendingSourceCount`、`pendingDigest` 单列；语义摘要已包括待归对象的身份、原因、来源、类别和 disposition。冷暖逐项比较 pending 证据。
 - `geometryStructuralFingerprint` 是结构指纹，不是顶点/索引内容校验。`devContentDigest` 聚合 DEV L0 GLB 的字节 SHA，`devContentCovered` 与 `devContentComplete` 标注实际覆盖；IFC/L2 内容不在该证据范围。
-- `automaticLoadMs` 是工程语义、导航和自动基础几何均已就绪的最晚产品事件时刻；缓存写入与几何编译并行，写入若在该时刻前完成，`writeDrainMs` 为零，但不意味着写入没有占用主线程。`settledMs` 是任务、缓存、后台及静默窗口全部完成时刻。样本覆盖 tab 同时列出自动表示、缓存发布和完全结算的中位数。
+- `automaticLoadMs` 是工程语义、导航、全部 IFC 与自动基础几何均已就绪的最晚产品事件时刻；缓存写入与几何编译并行，写入若在该时刻前完成，`writeDrainMs` 为零，但不意味着写入没有占用主线程。`settledMs` 是任务、缓存、后台及静默窗口全部完成时刻。样本覆盖 tab 同时列出自动表示、缓存发布和完全结算的中位数。
 - `modelTreeReadyMs` 是工程组成投影首次可用（线路/设备取导航可用时刻）；`firstGeometryMs` 是首个几何可见；`allGeometryReadyMs` 是自动基础 DEV/IFC 表示均齐备的时刻。三者与 `cachePublishMs`、`settledMs` 分列；几何齐备是 wall time，可能含来源读取、调度和缓存写入背压，不冒充纯三角化耗时。不同样本的 `automaticLoadMs` 与写入重叠程度可不同，跨样本比较应同时阅读几何与缓存两条时间线。
 - 冷暖配对复用 SQLite 数据根和 WebView2 用户数据目录；IFC LOD 的 IndexedDB 缓存位于后者。cold 要求两者为空，warm 要求配对 profile 已存在且非空；缺失时报 `warm-webview-profile-unavailable` / INCONCLUSIVE，不启动伪暖开。旧的独立 WebView profile 运行条件不可与新口径比较。运行中的 `progress.private.json` 每 30 秒保留一次匿名状态快照，只存工作区私有目录。工程提取按实际来源进展续期；活动工程任务 60 秒没有进展时以 `product-stalled` 终结，且保存最后观测阶段。无活动工程任务而语义仍未就绪时，120 秒后标为 `engineering-progress-stalled` / INCONCLUSIVE。
 - 从未执行任务的 Worker 标为 `not-applicable / never-executed`；没有独立 JS isolate 的宿主或外部进程也标为 `not-applicable`。短命 Worker 标为 `short-lived / ended-before-heap-sample`；不填零。实际执行任务的 Worker 若仍缺堆证据则列出 `unavailable` 或 `missing`。一次成功采样不掩盖后续失败；失败次数、最大采样间隔或延迟超过两个周期时，该 Worker 的内存证据不完整。进程树采样失败会重试，并单列根进程 Private Bytes 作为下界，不冒充完整进程树峰值。`memoryIncompleteItems` 指明缺口；产品 PASS/PARTIAL 保留，正式内存比较和基线认可返回 INCONCLUSIVE。
@@ -285,6 +290,7 @@ SQLite 核心缓存发布单独验证；冷开缓存已发布、产品正确性�
 ## 匿名化与私有产物
 
 - `output/` 中的报告默认使用本次导出别名，不导出源 SHA、文件名、路径或稳定私有摘要。
+- `results.json`、`profile.json` 在 `output/` 下标注 `artifactRole=public-derived`；`gate`、`compare`、`accept-measurement` 和基线批准只接受 `tmp/` 私有权威文件，公开派生视图不能作为权威输入。
 - `--anonymize false` 只影响 tmp 内部报告；output 始终生成白名单派生视图。
 - 该开关只影响报告展示，不改变 Profile、动作或测量口径。
 - 源路径映射、原始错误堆栈、授权 nonce、日志与 WebView profile 保存在 `tmp/gim-bench/`，不混入可分享的 `output/` 报告。
@@ -301,6 +307,7 @@ npm run bench -- gate --baseline ../tmp/gim-bench/<已批准基线>.approved.jso
 - 比较按来源、场景、冷暖状态及测量模式分别分组，不把多工程的指标混成一个中位数。
 - 矩阵候选先检查整体结果、必需 Worker 家族、计划运行数和逐来源冷暖配对；缺口为 `INCONCLUSIVE`，不能只凭已有逐轮数据通过 `compare` 或 `gate`。
 - 每组至少一次独立进程；基线与候选须有相同重复次数、机器、运行时、Profile、动作、工作量和视口。
+- 比较身份还包含 `measurementVersion`、`detailPolicy=task-phase-timeline-v2`、`lifecyclePolicy=worker-terminal-v2`、`contentPolicy=dev-l0-glb-sha256-v1`、`cacheProofPolicy=source-failure-catalog-v1` 和 `webviewProfilePolicy=paired-webview-profile-v1`；缺任一条件按不可比处理，不自动换算。
 - `PARTIAL` 只与同 SHA、同来源缺口摘要的 `PARTIAL` 比较；`PARTIAL` 与 `PASS` 的覆盖不同，结果为 `INCONCLUSIVE`。
 - 普通 `compare` 可读取结构指纹和已有内容证据，但不把缺少内容证明作为普通测量失败。正式 `approve-baseline` 和 `gate` 要求 DEV L0 内容摘要覆盖所有已显示根；字节摘要变化默认 INCONCLUSIVE，只有下述独立网格验证与显式审批流程可以接受这项变化。放置指纹或覆盖变化保持 INCONCLUSIVE，不能仅凭相同包围盒自动通过。无 DEV 表示的输入标为不适用，不伪造内容 SHA。
 - 超过 10% 要求独立复测，仍超限为 `FAIL`。性能优化须明确提示开发者复核；消缺和新功能的 10% 回退提交门槛由开发者人工控制，不要求每轮完整测量，不接入远程 CI。
@@ -363,16 +370,6 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
 
 实际注册表的文件须由开发者在工作区提供并核对 SHA；命令只说明本地验收路径，不构成已执行结果。
 
-## 相关文档
-
-- [性能测试指南](performance-guide.md)：SLO、冷/暖步骤与手工测试路线。
-- [测量与 Benchmark](architecture/measurement.md)：采集面、完整性口径与 SDK 前置门禁。
-- 本地 `output/` 报告：各批次的结果、错误、阶段和 Worker 证据；不随仓库分发。
-- [性能样本登记](../benchmarks/README.md)：L0/L1/L2 目录、SHA 与运行示例。
-- [本地功能测试](../desktop/local-tests/README.md)：`test:local` 基础功能样本。
-- [开发指南](development.md)：环境、命令、工作区与临时目录。
-- [验证](validation.md)：证据分层、自动门禁与真实复核。
-
 ## 详细 Trace 与 Profile
 
 以下命令在 desktop 执行，输入输出均位于工作区：
@@ -384,8 +381,19 @@ npm run bench -- export-trace --input ../tmp/gim-bench/runs/<本轮runId>/report
 npm run bench -- report --input ../tmp/gim-bench/runs/<本轮runId>/report.json
 ```
 
-诊断配置的 captures 支持 kind=cpu/allocations/heap、target=main/worker、family/executorId/taskId/spanId/operationTraceId、受控 stage 阶段名、trigger=operation-start/external/slow-span。external 由控制器按 delayMs 触发；slow-span 必须提供 thresholdMs。默认 CPU 窗口 5 秒，上限 30 秒，单产物容量上限 256 MiB；不能捕获已结束 Span 的历史栈。可使用 captures=[] 仅采详细 Trace，gpu=true 请求可用的 GPU Query。
+诊断配置的 captures 支持 kind=cpu/allocations/heap、target=main/worker、family/executorId/taskId/spanId/operationTraceId、受控 stage 阶段名、trigger=operation-start/external/slow-span。external 由控制器按 delayMs 触发；slow-span 必须提供 thresholdMs。单次诊断最多 8 个 capture，默认 CPU 窗口 5 秒、上限 30 秒，单产物容量上限 256 MiB；不能捕获已结束 Span 的历史栈。可使用 captures=[] 仅采详细 Trace，gpu=true 请求可用的 GPU Query。示例见 [`benchmarks/diagnostics/`](../benchmarks/diagnostics/)：`cpu-main.json`、`cpu-worker-slow.json`、`trace-gpu-system.json`。
+
+`analyze` 将分析写入输入报告同目录的 `analysis.private.json`，终端只打印覆盖摘要；`export-trace` 写入同目录的 `trace.private.json`（Chrome Trace Event JSON，Perfetto 可读）。生命周期归并、冲突、阻塞链和未归因区间的判定见[测量架构](architecture/measurement.md#operation-trace-与定点诊断)。
 
 system 为显式 WPR 配置，需 durationMs、bufferMiB，pmc 仅允许本机可用计数器，gpu=true 追加系统 GPU 活动。WPA 摘要另需 exporter（可省略并从 PATH 查找）、wpaProfile、profileSha256 以及 tables 列/单位契约。表契约 columns 指定 pid/created/start/end/value，可选 tid，并单独指定时间列的 timeUnit（ns/us/ms/s）和数值列的 unit；创建时间必须与独立采样器的 windows-filetime-100ns 身份一致，不能用进程名称或 PID 猜配。缺少 WPA Profile 时保留原始 ETL，摘要标 unavailable。
 
 诊断运行不能参与普通性能基线。原始 .cpuprofile、.heapprofile、.heapsnapshot、.etl、analysis.private.json 和 trace.private.json 留 tmp；可分享报告由白名单生成，缺口不补零。P95 是给定重复轮次的经验最近秩，结合 Count/Missing 和覆盖状态判读，不宣称少量重复证明尾部性能。
+
+## 相关文档
+
+- [性能测试指南](performance-guide.md)：SLO、冷/暖步骤与手工测试路线。
+- [测量与 Benchmark](architecture/measurement.md)：采集面、完整性口径、Trace/Profile 与 SDK 前置门禁。
+- [性能样本登记](../benchmarks/README.md)：L0/L1/L2 目录、SHA 与运行示例。
+- [本地功能测试](../desktop/local-tests/README.md)：`test:local` 基础功能样本。
+- [开发指南](development.md)：环境、命令、工作区与临时目录。
+- [验证](validation.md)：证据分层、自动门禁与真实复核。

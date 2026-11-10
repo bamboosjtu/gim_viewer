@@ -4,6 +4,31 @@
 
 当前工作区采用**源码内联**：桌面端只通过 `desktop/src/measurement/core.ts` 引用测量核心源码。`check:engineering-boundaries` 禁止其他桌面模块深层引用该包，并禁止核心向桌面、DOM、Tauri、Three 或外部包导入。`package.json` 的 `exports`/`dist` 尚不是产品实际消费的安装契约；SDK 阶段会单独验证打包、声明文件和独立安装后再改为包名消费。
 
+## 目录
+
+- [分层与职责](#分层与职责)
+- [身份与时钟](#身份与时钟)
+- [采集面](#采集面)
+- [模式与完整性](#模式与完整性)
+- [CLI 与数据隔离](#cli-与数据隔离)
+- [Operation Trace 与定点诊断](#operation-trace-与定点诊断)
+- [Windows 系统诊断适配](#windows-系统诊断适配)
+- [权威记录和可分享视图](#权威记录和可分享视图)
+- [SDK 与进程边界](#sdk-与进程边界)
+- [相关文档](#相关文档)
+
+## 分层与职责
+
+| 层 | 位置 | 职责 |
+|---|---|---|
+| 测量核心 | `packages/measurement-core/` | 事件协议、Collector、Probe、Trace 上下文、内存账本和统计；不依赖 DOM、Tauri、Three 或应用状态 |
+| 桌面适配 | `desktop/src/measurement/` | 宿主/Worker 探针、任务与阶段、Trace 归属、Profile 采集、GPU/渲染观测 |
+| 本地 CLI 与报告 | `desktop/scripts/benchmarks/` | 构建、批量/矩阵、比较与基线、Trace 分析与导出、系统诊断和报告 |
+| 权威产物 | 工作区 `tmp/gim-bench/` | 含来源身份的候选、冻结 Profile、私有 Trace/Profile、批准记录；不随仓库分发 |
+| 可分享视图 | 工作区 `output/` | 白名单派生报告；`artifactRole=public-derived`，不能用于 gate、批准或正式比较 |
+
+先行约定：**测量只观察，不决定业务任务是否有效**；产品时刻仍取 `perfTimings`，Trace 不重算原有产品时刻或聚合指标。
+
 ## 身份与时钟
 
 事件保留 run、匿名 sample、源 SHA、构建、工程代次、几何批次、请求、Worker 实例、任务、attempt、父任务及来源匿名 ID。来源路径映射单独保存在私有侧；事件不带工程名、设备名、对象名称或文件路径。没有取得的身份是 `null`，不能推断为已经关联。Worker ID 不随池槽位复用；宿主探针捕获创建时的 Collector，旧 Worker 的迟到事件留在原 run。
@@ -26,6 +51,10 @@
 | WASM | 已安装 web-ifc 的 HEAPU8 backing buffer 容量；不可访问时 unavailable |
 | Worker 堆 | 专用本地 CLI 通过 target → 应用 Worker ID → isolate ID 关联，再请求 CDP Runtime.getHeapUsage |
 | 进程树 | 原生 Private Bytes 检查点/周期采样；不平均分给 Worker |
+| Trace | Operation/Span/scope/dependency/wait/resource/message/milestone/health/render；Collector 有界保留，见后文 |
+| CPU/Allocation/Heap Profile | 仅 `diagnostic`；主线程或指定 Worker 的有界 CDP 采样，产物留私有目录 |
+| GPU/渲染 | Three 异步 Timer Query（每 Pass，最多 8 个在途、5 秒超时）；线路记录 MapLibre render 帧间隔 |
+| Windows 系统诊断 | 显式 WPR/PMC 采集与 WPA 摘要；需要本机工具、提权和冻结 Profile |
 
 `MemoryLedger` 提供共享所有权、复制、转移、释放及唯一容量核算；它是可追踪资源账本，不等于 JS 堆或 OS 内存。多个 TypedArray 的同一 backing buffer 只计一次。字符串/IR 权重、预算、WASM 容量、进程 Private Bytes 不相加作为“总 Worker 内存”。图形资源计数也不代表精确 GPU 显存。
 
@@ -79,32 +108,19 @@ DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位�
 
 正式原生候选先由 `accept-measurement` 校验并绑定同构建、同机器和同运行时的 doctor、探针开销及十轮生命周期证据，输出新的候选文件；绑定包含候选摘要和可复核的精简证据，不依赖手工编辑 JSON。`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选针对绑定后的文件，由另一位复核者通过 `review-partial` 生成候选摘要绑定的私有记录，批准者再以 `--accept-partial --partial-review` 引用，原因使用受控代码。首次须指定 `--first-partial`，后续须提供上一份已批准基线，防止相同来源覆盖倒退；它只成为覆盖基线，不能自动升级成完整 PASS。run/report/compare 不调用批准命令。GLB 字节变化默认 INCONCLUSIVE，仅允许导入独立网格等价性证据后显式批准对应内容变更，放置与覆盖仍须一致；CLI 不实现网格等价算法。命令和证据契约见 [Benchmark CLI](../benchmark.md#比较与基线)。超过 10% 的回退需独立复测，仍超限为 FAIL；运行条件、必要测量或认可基线缺失为 INCONCLUSIVE。10% 提交门槛由开发者本地人工控制，协议/值单元测试进入 CI；样本、性能与内存曲线只在本地执行。
 
-## SDK 与进程边界
-
-产品迁移顺序保持 Engineering Core → Geometry Source → Geometry Compiler；测量系统和明确认可的原生基线是前置门禁。SDK 通过可选 MetricsSink/TraceContext 接入，默认可使用 NOOP_SINK；不导入桌面采样器、全局 AppState 或日志 UI。
-
-接口设计保留 SourceReader、SessionScope、CompilerBackend、CompilerExecutor 与只读 ModelEvidenceProvider。证据接口只提供来源、对象、属性、关系、几何及可用性，不提供 Validate 规则或占位判定。Rust 继续负责 IO/解压/SQLite；独立编译进程需可复现的编译 OOM/崩溃证据，不能从总体内存峰值直接推导出迁移结论。
-
-## 相关文档
-
-- [Benchmark CLI](../benchmark.md)
-- [性能测试指南](../performance-guide.md)
-- [验证](../validation.md)
-- [开发指南](../development.md)
-
 ## Operation Trace 与定点诊断
 
-详细采集使用 `diagnostic`，仍共享 `MEASUREMENT_VERSION`。新增 `kind=trace` 携带 Operation、Span 开始/结束、作用域、时钟段、消息、等待和资源观察点；Producer 使用独立序号，Collector 的 Trace 缓冲及损失与原有聚合完整性分开。`Probe.phase()` 捕获不可变上下文并返回子上下文；`measure/measureSync` 把子上下文传给回调。原有 phase 区间仍只聚合一次。普通 Benchmark 不启用这些详细记录。
+详细采集使用 `diagnostic`，仍共享 `MEASUREMENT_VERSION`。新增 `kind=trace` 携带 `operation`、`span`、`scope`、`dependency`、`wait`、`resource`、`message`、`milestone`、`health`、`render` 记录；Producer 使用独立序号，Collector 的 Trace 缓冲及损失与原有聚合完整性分开。Collector 最多保留 8192 条 Trace（关键记录优先，普通记录上限 8064 条）、4096 个活动 Span，每批最多 128 条；溢出计入 `traceHealth`，不补配。`Probe.phase()` 捕获不可变上下文并返回子上下文；`measure/measureSync` 把子上下文传给回调。原有 phase 区间仍只聚合一次。普通 Benchmark 不启用这些详细记录。
 
-工程打开在 reset 后建立 Operation；现有精化/近景动作各建 Operation。产品时刻继续取原有 perfTimings，原始四个指标不因 Trace 分析重算。宿主响应优先核对结果 Envelope 的运行、任务和 attempt；没有 Envelope 时仅接受唯一请求 ID 匹配，不使用 Worker 当前任务推断。归属记录最多保留 4096 项，Collector 档案最多 16 个；超出保留范围的证据不得补配新操作。
+工程打开在 reset 后建立 Operation；现有精化/近景动作各建 Operation。产品时刻继续取原有 perfTimings，原有指标不因 Trace 分析重算。宿主响应优先核对结果 Envelope 的运行、任务和 attempt；没有 Envelope 时仅接受唯一请求 ID 匹配，不使用 Worker 当前任务推断。归属记录最多保留 4096 项，Collector 档案最多 16 个；超出保留范围的证据不得补配新操作。
 
 主线程和 Worker 提供有效能力窗口；Worker 初始化及每 30 秒输出分段校准，映射有效期 30 秒。同域 duration 不重算，旧的单 offset 只作历史信息，不据此证明新的跨域顺序。缺少窗口关闭、生命周期、校准或尾批时，分析输出部分覆盖。
 
-`analyze` 离线读取最多 100000 条事件，归并生命周期和兼容区间、隔离冲突，并对明确依赖及有实例身份的槽位约束分析指定里程碑。父 inclusive 不再计权；没有明确前置的里程碑、未解释时隙或缺少执行边界时输出 Partial Blocking Path。等长前置保留候选。等待入口/解除单列，资源约束不冒充数据依赖。该分析是观测解释，不预测优化收益。
+`analyze` 离线读取最多 100000 条事件，归并生命周期和兼容区间、隔离冲突，并对明确依赖及有实例身份的槽位约束分析指定里程碑；每个里程碑最多保留 64 个候选路径。父 inclusive 不再计权；没有明确前置的里程碑、未解释时隙或缺少执行边界时输出 Partial Blocking Path。等长前置保留候选。等待入口/解除单列，资源约束不冒充数据依赖。结果写入报告同目录的 `analysis.private.json`，终端只打印覆盖摘要。该分析是观测解释，不预测优化收益。
 
-`export-trace` 写入私有 Chrome Trace Event JSON，时间戳为微秒，elapsed 跨 await 使用异步轨道。只导出有映射的区间；元数据保留未映射、冲突和未闭合。GPU Query 只有 duration，挂到对应 Pass，不伪造 GPU 绝对时间。
+`export-trace` 写入报告同目录的私有 `trace.private.json`（Chrome Trace Event JSON，Perfetto 可读），时间戳为微秒，elapsed 跨 await 使用异步轨道。只导出有映射的区间；元数据保留未映射、冲突和未闭合。GPU Query 只有 duration，挂到对应 Pass，不伪造 GPU 绝对时间。
 
-CPU Profile 由控制器启动，支持预置、控制器定时和活动慢 Span 触发。主线程定时器被阻塞不能回溯采样。每份产物保存请求参数、实际控制器窗口、CDP 原始窗口及观测到的上下文；窗口关联仍可能包含同 isolate 的其他工作，不能作为操作独占 CPU 证据。采样热点按 timeDeltas 估算，`cpuTimeAvailable=false`。
+CPU Profile 由控制器启动，单次诊断最多 8 个 capture，默认窗口 5 秒、上限 30 秒、单产物上限 256 MiB；支持预置、控制器定时和活动慢 Span 触发，也可用 `captures=[]` 仅采 Trace。主线程定时器被阻塞不能回溯采样。每份产物保存请求参数、实际控制器窗口、CDP 原始窗口及观测到的上下文；窗口关联仍可能包含同 isolate 的其他工作，不能作为操作独占 CPU 证据。采样热点按 timeDeltas 估算，`cpuTimeAvailable=false`。
 
 Three 通过公开 renderer 事件采集提交区间、帧/Pass 计数并恢复 info.autoReset。GPU 使用可选异步 Timer Query，最多 8 个在途查询、5 秒超时，无效/停止时释放。线路只通过 MapLibre 公开 render 事件记录帧间隔，不声称取得线路 GPU Pass 边界。内存账本增加登记范围的累计分配、复制、转移和按 retain 请求定义的复用计数；主线程/Worker isolate 采样与进程 Private Bytes 分开。
 
@@ -121,3 +137,16 @@ WPA 自动摘要要求本地安装 WPAExporter，并显式指定由对应 WPT �
 批次 CLI 打印 `privateResults`，用于 compare、overhead、accept-measurement 和批准；新矩阵与开销报告也写入 tmp。output 内 JSON 标注 `artifactRole=public-derived`，只保留白名单统计和本次导出别名，不包含源 SHA、私有摘要、原始 Profile 或批准记录。CLI 和比较入口拒绝将公开派生视图作为权威输入。旧报告仍按原契约读取，不自动改写。内部输出到 tmp 的既有文件名保持兼容。
 
 DEV 分部结果到 Merge 的前置引用由实际 child 任务完成及 Merge 入队事件记录。分析可以独立查看该任务终点的已观测阻塞链；产品里程碑没有明确前置时仅给未归因区间，不用同一操作中耗时最长的任务补配。主线程 task phase 同时输出仅生命周期的 Trace，原有聚合计数不重复累加。预置主线程 CPU 采集等待 Profiler.start 确认后再发起工程打开；请求参数、实际时钟边界及采样方法分别保留。
+
+## SDK 与进程边界
+
+产品迁移顺序保持 Engineering Core → Geometry Source → Geometry Compiler；测量系统和明确认可的原生基线是前置门禁。SDK 通过可选 MetricsSink/TraceContext 接入，默认可使用 NOOP_SINK；不导入桌面采样器、全局 AppState 或日志 UI。
+
+接口设计保留 SourceReader、SessionScope、CompilerBackend、CompilerExecutor 与只读 ModelEvidenceProvider。证据接口只提供来源、对象、属性、关系、几何及可用性，不提供 Validate 规则或占位判定。Rust 继续负责 IO/解压/SQLite；独立编译进程需可复现的编译 OOM/崩溃证据，不能从总体内存峰值直接推导出迁移结论。
+
+## 相关文档
+
+- [Benchmark CLI](../benchmark.md)：命令、报告、Trace/Profile 用法与批准流程。
+- [性能测试指南](../performance-guide.md)：SLO、冷暖步骤与手工验收路线。
+- [验证](../validation.md)：证据边界、门禁与本地性能复核规则。
+- [开发指南](../development.md)：构建、测试与工作区约定。

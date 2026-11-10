@@ -1,3 +1,4 @@
+import {setRenderVisibility,requestObjectRender} from '../viewer/demandRendering.js';
 import { loadPresentation } from './presentationPort.js';
 import { readCachedEntry } from '@desktop/database.js';
 import { deleteDevArtifact, readDevArtifactBatch, readDevArtifactResult, type DevArtifactRead } from '@desktop/devLodCache.js';
@@ -467,6 +468,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     }
     this.instances?.sync();
     this.schedule();
+    requestObjectRender(this.state.modRootGroup);
   }
   private pinned(): Set<string> { return this.pinKeys; }
   private demoteFine(rootOccurrence: string): void {
@@ -482,7 +484,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
   private applyOnlySelected(): void {
     for (const [key, row] of this.rows) {
       if (row.group) {
-        row.group.visible = !this.onlySelected || (this.state.representationSelection?.devRoots.has(row.entry.rootOccurrence ?? key) ?? (row.entry.rootOccurrence ?? key) === this.selected);
+        setRenderVisibility(row.group,!this.onlySelected || (this.state.representationSelection?.devRoots.has(row.entry.rootOccurrence ?? key) ?? (row.entry.rootOccurrence ?? key) === this.selected));
         this.state.engineeringGeometryFilter?.(row.group);
       }
     }

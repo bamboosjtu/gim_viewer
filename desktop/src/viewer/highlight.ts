@@ -1,3 +1,4 @@
+import {requestObjectRender,requestViewerRender} from './demandRendering.js';
 import * as OBC from '@thatopen/components';
 import * as THREE from 'three';
 import type { ViewerContext } from './viewerEngine.js';
@@ -38,7 +39,7 @@ export function resetModHighlight(state: AppState): void {
         (current as THREE.Material).dispose();
       }
     }
-    mesh.material = originalMat;
+    mesh.material = originalMat;requestObjectRender(mesh);
     setDevInstanceHighlight(mesh, false);
   }
   state.highlightedModState = null;
@@ -54,7 +55,7 @@ export function removeModHighlightGroup(state: AppState, group: THREE.Object3D):
     removeSelectionOutline(state, mesh);
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     if (mesh.material !== original) materials.forEach(material => material.dispose());
-    mesh.material = original; setDevInstanceHighlight(mesh, false);
+    mesh.material = original;requestObjectRender(mesh); setDevInstanceHighlight(mesh, false);
     owned.originalMaterials.delete(mesh);
   });
   owned.groups = owned.groups.filter(value => value !== group);
@@ -107,7 +108,7 @@ export function addModHighlightGroup(state: AppState, group: THREE.Object3D): vo
       cloned.needsUpdate = true;
       return cloned;
     });
-    mesh.material = highlighted.length === 1 ? highlighted[0] : highlighted;
+    mesh.material = highlighted.length === 1 ? highlighted[0] : highlighted;requestObjectRender(mesh);
   });
   owned.groups.push(group);
   state.highlightedModState = owned;
@@ -151,7 +152,7 @@ export async function commitSelectionHighlight(
       await state.selectionVisibility?.sync(guard);
     }
   }); } finally {
-    end(undefined,{...meta,current:guard.isCurrent()});
+    requestViewerRender(ctx);end(undefined,{...meta,current:guard.isCurrent()});
   }
 }
 

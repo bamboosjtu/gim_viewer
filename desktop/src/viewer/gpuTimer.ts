@@ -5,6 +5,7 @@ export class GpuTimer {
   private extension:TimerExtension|null;
   private pending:Array<{query:WebGLQuery;passId:string;atMs:number}>=[];
   private active:{query:WebGLQuery;passId:string;atMs:number}|null=null;
+  private timer:ReturnType<typeof setTimeout>|undefined;
   constructor(private gl:WebGL2RenderingContext,private emit:(sample:GpuSample)=>void,
     private now=()=>performance.now(),private limit=8,private timeoutMs=5000){
     this.extension=gl.getExtension('EXT_disjoint_timer_query_webgl2');
@@ -17,7 +18,12 @@ export class GpuTimer {
     const query=this.gl.createQuery();if(!query){this.emit({passId,availability:'unavailable',durationMs:null,reason:'query-allocation-failed'});return;}
     this.active={query,passId,atMs:this.now()};this.gl.beginQuery(this.extension.TIME_ELAPSED_EXT,query);
   }
-  end(){if(this.active&&this.extension){this.gl.endQuery(this.extension.TIME_ELAPSED_EXT);this.pending.push(this.active);this.active=null;}}
+  end(){if(this.active&&this.extension){this.gl.endQuery(this.extension.TIME_ELAPSED_EXT);this.pending.push(this.active);this.active=null;this.schedulePoll();}}
+  private schedulePoll(){
+    if(this.timer!==undefined||!this.pending.length)return;
+    // Demand rendering can be idle after a pass. Read the query without drawing another frame.
+    this.timer=setTimeout(()=>{this.timer=undefined;this.poll();this.schedulePoll();},100);
+  }
   poll(){
     const gl=this.gl,ext=this.extension;if(!ext)return;
     const lost=gl.isContextLost(),disjoint=!lost&&gl.getParameter(ext.GPU_DISJOINT_EXT);
@@ -35,6 +41,7 @@ export class GpuTimer {
   }
   dispose(){
     if(this.active){this.end();}
+    if(this.timer!==undefined)clearTimeout(this.timer);this.timer=undefined;
     for(const row of this.pending){this.gl.deleteQuery(row.query);this.emit({passId:row.passId,availability:'unavailable',durationMs:null,reason:'capture-stopped'});}
     this.pending=[];
   }

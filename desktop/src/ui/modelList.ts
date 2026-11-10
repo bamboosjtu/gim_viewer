@@ -2,6 +2,7 @@ import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { modelListEl } from './dom.js';
 import type { AppState } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
+import {setSourceLayerVisibility} from '../services/selectionVisibility.js';
 
 /** 添加模型到 UI 列表 */
 export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: string, runtimeModelId: string): void {
@@ -15,9 +16,7 @@ export function addModelToUI(ctx: ViewerContext, state: AppState, modelId: strin
   checkbox.addEventListener('change', () => {
     const model = ctx.fragments.list.get(runtimeModelId);
     if (model) {
-      if (state.selectionVisibility) state.selectionVisibility.setModelVisible(modelId, checkbox.checked);
-      else model.object.visible = checkbox.checked;
-      const e = state.loadedModels.get(modelId); if (e) e.visible = checkbox.checked;
+      setSourceLayerVisibility(state,modelId,model,checkbox.checked);
     }
   });
 

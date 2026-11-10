@@ -1,3 +1,4 @@
+import {setRenderVisibility} from './demandRendering.js';
 /** Compose source-layer visibility, browsing isolation and L1/L2 replacement.
  * All item writes use the public Fragments API and share one queue. */
 export interface IfcSelectionScope { localIds: Set<number>; globalIds: Set<string>; expressIds: Set<number> }
@@ -46,8 +47,8 @@ export class IfcModelVisibility {
   }
   setLayerVisible(visible: boolean): void {
     this.layer = visible;
-    this.model.object.visible = visible && this.committedRevision === this.revision
-      && (this.scope === null || this.scope.size > 0) && !this.released;
+    setRenderVisibility(this.model.object,visible && this.committedRevision === this.revision
+      && (this.scope === null || this.scope.size > 0) && !this.released);
   }
   setScope(scope: ReadonlySet<number> | null): Promise<void> {
     if (this.committedRevision === this.revision && (scope === null && this.scope === null
@@ -57,7 +58,7 @@ export class IfcModelVisibility {
     const revision = ++this.revision;
     // Hide synchronously until the selected item mask is committed. An empty
     // scope hides a whole unrelated source without enumerating its items.
-    this.model.object.visible = false;
+    setRenderVisibility(this.model.object,false);
     return this.enqueue(async () => {
       if (revision !== this.revision) return;
       const selected = this.scope;
@@ -75,7 +76,7 @@ export class IfcModelVisibility {
       }
       if (!this.released && revision === this.revision) {
         this.committedRevision = revision;
-        this.model.object.visible = this.layer && (selected === null || selected.size > 0);
+        setRenderVisibility(this.model.object,this.layer && (selected === null || selected.size > 0));
       }
     });
   }

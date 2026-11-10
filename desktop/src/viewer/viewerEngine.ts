@@ -2,6 +2,7 @@ import * as OBC from '@thatopen/components';
 import * as THREE from 'three';
 import { freezeContainerLocalMatrix } from './staticContainer.js';
 import {observeRenderer} from './renderMeasurement.js';
+import {installDemandRendering} from './demandRendering.js';
 
 /** 3D 引擎上下文，统一导出供其他模块使用 */
 export interface ViewerContext {
@@ -22,8 +23,9 @@ export function createViewerEngine(container: HTMLElement): ViewerContext {
   // each frame otherwise forces all static DEV world matrices to be multiplied.
   freezeContainerLocalMatrix(world.scene.three);
   ((world as any).scene as any).three.background = new THREE.Color(0xeeeeee);
-  world.renderer = new OBC.SimpleRenderer(components, container);
-  observeRenderer(world.renderer as OBC.SimpleRenderer);
+  const renderer=new OBC.SimpleRenderer(components, container);
+  world.renderer = renderer;
+  observeRenderer(renderer);
   // WebView2 keeps the previous line-map compositor layer behind a transparent
   // WebGL canvas. OBC's renderer defaults to alpha:true/clearAlpha:0, so after
   // switching from a line project to a substation project the old map can show
@@ -41,6 +43,8 @@ export function createViewerEngine(container: HTMLElement): ViewerContext {
 
   const ifcLoader = components.get(OBC.IfcLoader);
   const fragments = components.get(OBC.FragmentsManager);
+  renderer.mode=OBC.RendererMode.MANUAL;
+  installDemandRendering({components,world,ifcLoader,fragments},renderer);
 
   // 诊断钩子：控制台/Playwright 可读取场景与 Fragments 所有权，
   // 不参与产品流程，也不暴露到任何外部网络接口。

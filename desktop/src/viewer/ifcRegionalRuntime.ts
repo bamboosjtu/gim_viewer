@@ -1,3 +1,4 @@
+import {setRenderVisibility} from './demandRendering.js';
 import measuredWorkerAsset from './ifcRegionalWorker.ts?worker&url';
 import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
@@ -422,7 +423,7 @@ export class IfcRegionalRuntime {
           group.userData.approximate = true;
           this.root.add(group);
           this.groups.set(object.expressId, group);
-          group.visible = !this.onlySelected || this.isIsolatedMember(object.expressId);
+          setRenderVisibility(group,!this.onlySelected || this.isIsolatedMember(object.expressId));
           if (candidates.length === 1) {
             await this.setFarVisible(candidates, false);
             if(this.released){await this.setFarVisible(candidates,true);return;}
@@ -491,7 +492,7 @@ export class IfcRegionalRuntime {
   private applyOnlySelected(): void {
     this.refreshVisibility();
     for (const [expressId, group] of this.groups) {
-      group.visible = !this.onlySelected || this.isIsolatedMember(expressId);
+      setRenderVisibility(group,!this.onlySelected || this.isIsolatedMember(expressId));
     }
     this.instances.setFilter(this.onlySelected ? this.isolationIds ?? new Set(this.selectedExpressId === null ? [] : [this.selectedExpressId]) : null, this.transform);
   }
@@ -500,7 +501,7 @@ export class IfcRegionalRuntime {
   }
   refreshVisibility(): void {
     const layer = this.options.visibility?.layerVisible ?? this.options.model.object.visible;
-    this.root.visible = layer && (!this.onlySelected || (this.isolationIds ? this.isolationIds.size > 0 : this.selectedExpressId !== null));
+    setRenderVisibility(this.root,layer && (!this.onlySelected || (this.isolationIds ? this.isolationIds.size > 0 : this.selectedExpressId !== null)));
   }
   setSelectionScope(only: boolean, ids: ReadonlySet<number>): void {
     const changed = this.onlySelected !== only || this.isolationIds === null || ids.size !== this.isolationIds.size
@@ -608,7 +609,7 @@ export class IfcRegionalRuntime {
     );
     group.userData.lod = 2;
     group.userData.approximate = false;
-    group.visible = !this.onlySelected || this.isIsolatedMember(object.expressId);
+    setRenderVisibility(group,!this.onlySelected || this.isIsolatedMember(object.expressId));
     // Keep the old highlighted representation until every asynchronous commit
     // prerequisite succeeds. An obsolete request must not delete a newer group.
     try {

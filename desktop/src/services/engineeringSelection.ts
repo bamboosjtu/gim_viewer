@@ -1,3 +1,4 @@
+import {setRenderVisibility} from '../viewer/demandRendering.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { loadPresentation } from './presentationPort.js';
 import type { AppState, EngineeringSelectionScope, SelectionRequest } from '../app/state.js';
@@ -32,8 +33,8 @@ function context(state: AppState): Context {
   contexts.set(state, value);
   const owned = value;
   state.engineeringSelectionCleanup = () => {
-    for (const [mesh, baseline] of owned.meshBaseline) mesh.visible = baseline;
-    for (const [root, baseline] of owned.rootBaseline) root.visible = baseline;
+    for (const [mesh, baseline] of owned.meshBaseline) setRenderVisibility(mesh,baseline);
+    for (const [root, baseline] of owned.rootBaseline) setRenderVisibility(root,baseline);
     owned.meshBaseline.clear(); owned.rootBaseline.clear();
     if (contexts.get(state) === owned) { contexts.delete(state); state.engineeringGeometryFilter = null; state.engineeringRepresentationChanged = null; state.engineeringSelectionCleanup = null; }
   };
@@ -61,8 +62,8 @@ export function applyGeometryFilter(state: AppState, onlyRoot?: THREE.Object3D):
   const selection = state.engineeringSelection;
   const representation = getEngineeringRepresentations(state);
   if (!state.onlySelected) {
-    for (const [mesh, baseline] of owned.meshBaseline) mesh.visible = baseline;
-    for (const [root, baseline] of owned.rootBaseline) root.visible = baseline;
+    for (const [mesh, baseline] of owned.meshBaseline) setRenderVisibility(mesh,baseline);
+    for (const [root, baseline] of owned.rootBaseline) setRenderVisibility(root,baseline);
     owned.meshBaseline.clear(); owned.rootBaseline.clear(); return;
   }
   const current = selection?.snapshot === state.engineeringSnapshot && !!representation;
@@ -70,12 +71,12 @@ export function applyGeometryFilter(state: AppState, onlyRoot?: THREE.Object3D):
     const occurrence = root.userData.rootOccurrence;
     if (!state.deviceLodRuntime) {
       if (!owned.rootBaseline.has(root)) owned.rootBaseline.set(root, root.visible);
-      root.visible = owned.rootBaseline.get(root)! && !!(current && selection?.devRoots.has(occurrence));
+      setRenderVisibility(root,owned.rootBaseline.get(root)! && !!(current && selection?.devRoots.has(occurrence)),!onlyRoot);
     }
     root.traverse(object => {
       const mesh = object as THREE.Mesh; if (!mesh.isMesh) return;
       if (!owned.meshBaseline.has(mesh)) owned.meshBaseline.set(mesh, mesh.visible);
-      mesh.visible = owned.meshBaseline.get(mesh)! && !!(current && selection && representation?.index.includesDev(occurrence, devRepresentationHint(mesh, root), selection.sourceIds));
+      setRenderVisibility(mesh,owned.meshBaseline.get(mesh)! && !!(current && selection && representation?.index.includesDev(occurrence, devRepresentationHint(mesh, root), selection.sourceIds)),!onlyRoot);
     });
   }
 }

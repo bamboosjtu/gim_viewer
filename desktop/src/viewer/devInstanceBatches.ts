@@ -1,3 +1,4 @@
+import {requestObjectRender} from './demandRendering.js';
 import * as THREE from 'three';
 import { devRepresentationHint } from './devRepresentationIdentity.js';
 
@@ -116,6 +117,7 @@ export class DevInstanceBatches {
     this.root.updateWorldMatrix(true, false); this.inverse.copy(this.root.matrixWorld).invert();
     for (const group of this.groups.keys()) group.updateWorldMatrix(true, true);
     for (const bucket of this.buckets.values()) this.refresh(bucket);
+    requestObjectRender(this.root);
   }
   private clearMesh(bucket: Bucket): void {
     if (bucket.mesh) { renderBatches.delete(bucket.mesh); bucket.mesh.removeFromParent(); bucket.mesh.dispose(); }
@@ -131,6 +133,7 @@ export class DevInstanceBatches {
       for (const binding of bucket.bindings) binding.mesh.layers.mask = binding.layers;
       this.failures++; this.lastFailure = String(error).slice(0, 256);
     }
+    requestObjectRender(this.root,false);
   }
   private rebuild(bucket: Bucket): void {
     const eligible = bucket.bindings.filter(binding => supportedMatrix(this.matrix(binding.mesh)));
@@ -166,6 +169,7 @@ export class DevInstanceBatches {
   highlight(binding: Binding, highlighted: boolean): void {
     if (this.released || binding.highlighted === highlighted) return;
     binding.highlighted = highlighted; this.refresh(binding.bucket);
+    requestObjectRender(this.root);
   }
   pick(ray: THREE.Raycaster): {rootOccurrence: string; instanceKey: string; distance: number; hint: import('../engineering/representations.js').DevRepresentationHint} | null {
     if (this.released || !visible(this.root)) return null;

@@ -1,3 +1,4 @@
+import {setRenderVisibility,requestObjectRender} from './demandRendering.js';
 import * as THREE from 'three';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
 import type { ViewerContext } from './viewerEngine.js';
@@ -156,9 +157,9 @@ export class IfcConnectionPreviewRuntime {
     // Source meshes are already Y-up metres. Cancel only the project's Z-up
     // conversion; keep its actual anchor translation and user offset once.
     this.root.matrix.copy(projectSourceToViewer).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-    this.root.updateMatrixWorld(true); this.root.visible = true;
+    this.root.updateMatrixWorld(true); this.root.visible = true;requestObjectRender(this.root);
   }
-  setVisible(visible: boolean): void { this.root.visible = visible; }
+  setVisible(visible: boolean): void { setRenderVisibility(this.root,visible); }
   private inSelection(modelId: string, expressId: number, globalId: string): boolean {
     if (!this.onlySelected) return true;
     const scope = this.selectionScopes.get(modelId);
@@ -169,7 +170,7 @@ export class IfcConnectionPreviewRuntime {
     this.root.traverse(object => {
       const data = object.userData;
       if (data.provider === 'ifc-connection-preview' && data.modelId)
-        object.visible = this.inSelection(data.modelId, data.expressId, data.globalId);
+        setRenderVisibility(object,this.inSelection(data.modelId, data.expressId, data.globalId));
     });
   }
   release(): void {

@@ -27,6 +27,7 @@ import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { readIfcCoordinateAnchor } from '../viewer/ifcCoordinateAnchor.js';
+import {requestObjectRender} from '../viewer/demandRendering.js';
 
 export interface ProjectCoordinateAlignment {
   sourceToViewer: THREE.Matrix4;
@@ -89,6 +90,7 @@ function nextAnimationFrame(): Promise<void> {
 export function applyProjectSourceToViewer(group: THREE.Group, matrix: THREE.Matrix4 | null): void {
   if (!matrix) return;
   group.applyMatrix4(matrix);
+  requestObjectRender(group);
 }
 
 /**

@@ -1,6 +1,12 @@
+import {setRenderVisibility} from '../viewer/demandRendering.js';
 import type { AppState, SelectionCommitGuard } from '../app/state.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { IfcModelVisibility, type IfcVisibilityModel, type IfcSelectionScope } from '../viewer/ifcModelVisibility.js';
+export function setSourceLayerVisibility(state:AppState,id:string,model:IfcVisibilityModel,visible:boolean):void{
+  if(state.selectionVisibility)state.selectionVisibility.setModelVisible(id,visible);
+  else setRenderVisibility(model.object,visible);
+  const entry=state.loadedModels.get(id);if(entry)entry.visible=visible;
+}
 
 /** The service owns one selection scope across all IFC representations.
  * Membership comes only from picked identity or direct GUID references. */
@@ -80,11 +86,11 @@ export function createSelectionVisibility(state: AppState, ctx: ViewerContext) {
         for (const group of [...state.loadedXmlModGroups.values(), ...state.loadedStlGroups.values()]) {
           if (state.onlySelected) {
             if (!devBaseline.has(group)) devBaseline.set(group, group.visible);
-            group.visible = devBaseline.get(group)! && selected.some(item => {
+            setRenderVisibility(group,devBaseline.get(group)! && selected.some(item => {
               for (let parent: import('three').Object3D | null = item; parent; parent = parent.parent) if (parent === group) return true;
               return false;
-            });
-          } else if (devBaseline.has(group)) { group.visible = devBaseline.get(group)!; devBaseline.delete(group); }
+            }));
+          } else if (devBaseline.has(group)) { setRenderVisibility(group,devBaseline.get(group)!); devBaseline.delete(group); }
         }
       }
       // Apply empty scopes synchronously before any identity lookup. This also

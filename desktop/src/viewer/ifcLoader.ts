@@ -1,3 +1,4 @@
+import {observeFragmentVisualChanges} from './demandRendering.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import fragmentsWorkerUrl from '@thatopen/fragments/worker?url';
 import type { ViewerContext } from './viewerEngine.js';
@@ -203,6 +204,7 @@ export function registerModelEvents(
     // 即使 update 报错（如 "Malformed tile"），模型生命周期状态也要可见，便于后续清理
     // 不让 state 与 ctx.fragments.list 继续不同步
     try {
+      if(model.onViewUpdated&&model.tiles)observeFragmentVisualChanges(model);
       model.useCamera((ctx.world.camera as any).three);
       (ctx.world.scene as any).three.add(model.object);
 
