@@ -55,7 +55,7 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run test:coverage` | `engineering/` 与 `gim/` 覆盖率下限 |
 | `npm run test:ifc-critical` | IFC 转换、会话竞态、缓存与开洞策略 |
 | `npm run test:acceptance-tools` | 验收构建、清单与探针协议 |
-| `npm run test:measurement-tools` | 测量 CLI 与正确性规则（无样本） |
+| `npm run test:measurement-tools` | 测量 CLI、Trace/CPU/WPA 协议与正确性规则（无工程样本） |
 | `npm run test:local-contract` | 本地注册表协议 |
 
 Windows CI 保持一个串行任务：版本、测量协议、验收工具、本地注册表、分层、类型和 lint 检查在 Rust 编译及覆盖率之前执行；随后运行 Rust 单元测试、前端覆盖率、SQLite 集成、前端构建和 Rust 编译边界。`workflow_dispatch` 才构建、校验和上传便携 Benchmark 发布包。以上步骤均不执行工程性能样本；10% 回退的提交门槛由开发者在本地人工控制。

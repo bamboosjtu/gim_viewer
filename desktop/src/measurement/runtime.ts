@@ -1,4 +1,5 @@
 import { Collector, Probe, BufferLedger, type MeasurementMode, type RunIdentity, type TraceContext, type MemoryMetric } from './core.js';
+import {operationTraceId,captureContext} from './core.js';
 
 interface MeasurementConfig { mode?: MeasurementMode; runId?: string; sampleId?: string; sourceSha256?: string; buildId?: string; }
 const globals = globalThis as typeof globalThis & { __GIM_MEASUREMENT_CONFIG__?: MeasurementConfig };
@@ -8,6 +9,9 @@ export function observeMeasurementCollectors(observer:(collector:Collector)=>voi
 const archives = new Map<string, Collector>();
 const privateSourceIds = new WeakMap<Collector, Map<string, string>>();
 const hostBuffers=new WeakMap<Collector,BufferLedger>();
+const probes=new WeakMap<Collector,Probe>();
+const runtimes=new WeakMap<Collector,{collector:Collector;probe:Probe;buffers:BufferLedger;newOwner:(role:string)=>string}>();
+const hostClockId='host-clock-'+performance.timeOrigin;
 let readSession:(()=>{generation:number;geometryToken:number;sourceSha256:string|null})|undefined;
 export function bindMeasurementSession(reader:typeof readSession):void { readSession=reader; }
 function configuration(): MeasurementConfig {
@@ -28,19 +32,51 @@ function createRun(identity: Partial<RunIdentity> = {}) {
   const collector = new Collector(run, mode);
   const buffers=new BufferLedger();hostBuffers.set(collector,buffers);let ownerSequence=0;
   onCollector?.(collector);
-  const probe = new Probe(`${run.runId}:host`, `${run.runId}:host-clock`, mode, () => performance.now(), collector);
+  const probe = new Probe(`${run.runId}:host`, hostClockId, mode, () => performance.now(), collector,'host');
+  probes.set(collector,probe);
   archives.set(run.runId, collector);
-  while (archives.size > 4) archives.delete(archives.keys().next().value!);
-  return { collector, probe,buffers,newOwner:(role:string)=>`${role}-${++ownerSequence}` };
+  while (archives.size > 16) archives.delete(archives.keys().next().value!);
+  const runtime={ collector, probe,buffers,newOwner:(role:string)=>`${role}-${++ownerSequence}` };runtimes.set(collector,runtime);return runtime;
 }
 let current = createRun();
 export function measurementRun() { return current; }
+export function measurementRuntime(runId:string){const collector=archives.get(runId);return collector?runtimes.get(collector):undefined;}
+export function measurementCollector(runId:string){return archives.get(runId);}
+export function measurementProbe(runId:string){const collector=archives.get(runId);return collector?probes.get(collector):undefined;}
+let operationSequence=0;
+const operations=new WeakMap<Collector,TraceContext>();
+const operationEnded=new Set<()=>void>();
+export function observeMeasurementOperationEnd(listener:()=>void){operationEnded.add(listener);return ()=>operationEnded.delete(listener);}
+export function beginMeasurementOperation(name:string,run=current){
+  const context=captureContext({...measurementContext(run.collector),
+    operationTraceId:operationTraceId(run.collector.identity.runId+':operation-'+ ++operationSequence),
+    executorId:'host',scopeId:run.collector.identity.runId+':scope-'+operationSequence});
+  operations.set(run.collector,context);
+  const started=performance.now();
+  run.probe.trace(context,{type:'operation',action:'started',id:context.operationTraceId!,name});
+  const capabilities=['operation-context','span-lifecycle','dependency-edges','wait-intervals','clock-segments'] as const;
+  for(const declaration of ['requested','effective'] as const)run.probe.trace(context,{type:'scope',action:'declared',scope:{
+    scopeId:context.scopeId!,scopeType:declaration==='requested'?'operation':'executor',declaration,
+    operationTraceId:context.operationTraceId,executorId:'host',capabilities,
+    window:{clockId:run.probe.clockId,startMs:started,endMs:null}}});
+  let ended=false;
+  return {context,end(){if(ended)return;ended=true;run.probe.trace(context,{type:'operation',action:'ended',id:context.operationTraceId!,name});
+    run.probe.trace(context,{type:'scope',action:'closed',id:context.scopeId,endMs:performance.now()});
+    for(const listener of operationEnded)try{listener();}catch{/* Diagnostics never decide business completion. */}
+    if(operations.get(run.collector)===context)operations.delete(run.collector);}};
+}
 export function markMeasurementCancellation(reasonCode:'project-closed'|'project-replaced'):void {
   const run=measurementRun();run.probe.event(measurementContext(run.collector),{
     kind:'counter',name:'lifecycle.cancel-requested',reasonCode,workload:{requests:1},
   });
 }
-export function resetMeasurementRun(identity: Partial<RunIdentity>): void { current = createRun(identity); }
+let openOperation:ReturnType<typeof beginMeasurementOperation>|undefined;
+export function openMeasurementContext(){return openOperation?.context;}
+export function finishMeasurementOperation(){openOperation?.end();openOperation=undefined;}
+export function resetMeasurementRun(identity: Partial<RunIdentity>): void {
+  finishMeasurementOperation();current = createRun(identity);
+  if(current.collector.mode==='diagnostic')openOperation=beginMeasurementOperation('project.open');
+}
 export function updateMeasurementIdentity(identity: Partial<RunIdentity>): void {
   const target = current.collector.identity;
   if (identity.sourceSha256 && target.sourceSha256 && identity.sourceSha256 !== target.sourceSha256) throw Error('measurement-source-identity-changed');
@@ -49,7 +85,8 @@ export function updateMeasurementIdentity(identity: Partial<RunIdentity>): void 
 export function measurementContext(collector = current.collector): TraceContext {
   const session=readSession?.();
   const scope=session&&session.generation===collector.identity.generation?session:{};
-  return { ...collector.identity, ...scope, workerId: 'host', family: 'host', backend: 'host', taskId: null,
+  const operation=operations.get(collector);
+  return { ...collector.identity, ...scope,...(operation?{operationTraceId:operation.operationTraceId,scopeId:operation.scopeId}:{}), workerId: 'host', family: 'host', backend: 'host',executorId:'host', taskId: null,
     attemptId: 0, parentTaskId: null, sourceId: null, geometryLod: null };
 }
 export function measurementSourceId(path: string | undefined, collector = current.collector): string | null {
@@ -77,7 +114,10 @@ export function trackHostBuffers(role:string,values:Iterable<ArrayBufferLike|Arr
   if(batched)run.probe.event(context,{kind:'counter',name:'resource.acquire',resource:{id:batchId,action:role.endsWith('copy')?'copy':'acquire',owner,bytes:referencedBytes},workload:{buffers:rows.length,referencedBytes}});
   else for(const row of rows)run.probe.event(context,{kind:'counter',name:'resource.acquire',resource:{id:`${context.runId}:host:${row.id}`,action:role.endsWith('copy')?'copy':'acquire',owner,bytes:row.bytes},workload:{buffers:1,referencedBytes:row.bytes}});
   sampleHostBuffers(run);let released=false;
-  return (to?:string)=>{if(released)return;released=true;for(const row of rows)run.buffers.releaseId(row.id,owner);
+  return (to?:string)=>{if(released)return;released=true;for(const row of rows){
+    if(to){run.buffers.transferId(row.id,owner,to);run.buffers.releaseId(row.id,to);}
+    else run.buffers.releaseId(row.id,owner);
+  }
     if(batched)run.probe.event(context,{kind:'counter',name:to?'resource.transfer':'resource.release',resource:{id:batchId,action:to?'transfer':'release',owner,bytes:referencedBytes,...(to?{to}:{})},workload:{buffers:rows.length,referencedBytes}});
     else for(const row of rows)run.probe.event(context,{kind:'counter',name:to?'resource.transfer':'resource.release',resource:{id:`${context.runId}:host:${row.id}`,action:to?'transfer':'release',owner,bytes:row.bytes,...(to?{to}:{})},workload:{buffers:1,referencedBytes:row.bytes}});
     sampleHostBuffers(run);};

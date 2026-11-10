@@ -5,8 +5,8 @@ import {resolve,join} from 'node:path';
 
 const edge=process.argv[2]??'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const port=Number(process.argv[3]??14357),origin=`http://127.0.0.1:${port}`;
-const out=resolve('../output/engineering-worker'),stamp=new Date().toISOString().replaceAll(/[:.]/g,'-'),profile=join(out,`profile-${stamp}`);
-mkdirSync(profile,{recursive:true});
+const out=resolve('../output/engineering-worker'),stamp=new Date().toISOString().replaceAll(/[:.]/g,'-'),profile=resolve('../tmp/engineering-worker',`profile-${stamp}`);
+mkdirSync(profile,{recursive:true});mkdirSync(out,{recursive:true});
 const vite=spawn(process.execPath,['node_modules/vite/bin/vite.js','--host','127.0.0.1','--port',String(port),'--strictPort'],{windowsHide:true,stdio:'ignore'});
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let browser,socket;const pending=new Map();

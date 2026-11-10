@@ -1,3 +1,4 @@
+import {analyzeRun,exportRunTrace} from './observability.mjs';
 import {existsSync,mkdirSync,readFileSync,writeFileSync,readdirSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -21,7 +22,7 @@ import {createGeometryReview,geometryReviewIssue} from './geometry-review.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..'),home=join(root,'tmp','gim-bench'),corpus=join(home,'corpus');
 const [command,...args]=process.argv.slice(2);
 const option=name=>{const index=args.findIndex(value=>value===`--${name}`||value===`-${name}`);return index<0?undefined:args[index+1];};
-const read=path=>JSON.parse(readFileSync(workspacePath(root,resolve(path)),'utf8'));
+const read=path=>{const value=JSON.parse(readFileSync(workspacePath(root,resolve(path)),'utf8'));if(value.artifactRole==='public-derived')throw Error('public-derived-is-not-authoritative');return value;};
 const write=(name,value)=>{const path=artifactFile(root,join(home,name));writeFileSync(path,JSON.stringify(value,null,2));console.log(path);return path;};
 const writeComparison=value=>{const path=artifactFile(root,option('output')?resolve(option('output')):join(home,'comparison.json'));
   mkdirSync(dirname(path),{recursive:true});writeFileSync(path,JSON.stringify(value,null,2));console.log(path);return path;};
@@ -31,7 +32,11 @@ const registeredSamples=async()=>option('directory')||option('registry')
   :read(join(corpus,'registry.private.json')).samples;
 try{
   artifactDirectory(root,home);for(const name of ['TEMP','TMP','TMPDIR'])process.env[name]=home;
-  if(command==='init'){
+  if(command==='analyze'||command==='export-trace'){
+    if(!option('input'))throw Error('--input required');
+    const input=workspacePath(root,resolve(option('input')));
+    console.log(command==='export-trace'?await exportRunTrace(root,input):JSON.stringify((await analyzeRun(root,input)).coverage));
+  }else if(command==='init'){
     if(!existsSync(join(home,'config.json')))write('config.json',{version:'gim-benchmark-config-v1',sampleLocation:'workspace',sampleDistribution:false,sampleTiers:['L0','L1','L2'],samplingPeriodMs:1000,repetitions:3,regressionThreshold:0.1,baseline:null});
     else console.log(join(home,'config.json'));
   }else if(command==='samples'){
@@ -59,7 +64,7 @@ try{
         ...(option('repeat')??option('repetitions')?{repetitions:Number(option('repeat')??option('repetitions'))}:{}),
         ...(option('timeout-seconds')?{timeoutMs:Number(option('timeout-seconds'))*1000}:{}),signal:controller.signal,
         onProgress:row=>console.log(JSON.stringify(row))});
-      console.log(JSON.stringify({outcome:result.result.outcome,status:result.result.status,html:join(result.out,'report.html'),csv:join(result.out,'results.csv')}));
+      console.log(JSON.stringify({outcome:result.result.outcome,status:result.result.status,html:join(result.out,'report.html'),csv:join(result.out,'results.csv'),privateResults:result.privateResults}));
       process.exitCode=result.result.status==='CANCELLED'?130:['PASS','PARTIAL'].includes(result.result.outcome)?0:result.result.outcome==='FAIL'?1:2;
     }finally{process.removeListener('SIGINT',cancel);process.removeListener('SIGTERM',cancel);}
   }else if(command==='recover-batch'){
@@ -93,6 +98,7 @@ try{
     if(option('second-sample')&&!secondSample)throw Error('--second-sample must identify a registered sample');
     const result=await runNative({root,buildManifest:workspacePath(root,resolve(option('build'))),sample,mode,doctor:command==='doctor',
       ...(command==='lifecycle'?{scenario:'lifecycle-ten-open-close',additionalSamples:secondSample?[secondSample]:[],exercise:lifecycleExercise({sample,secondSample})}:{}),
+      ...(option('diagnostics')?{diagnostic:read(option('diagnostics'))}:{}),
       ...(option('capture')?{diagnostic:{kind:option('capture'),family:option('worker-family')??'dev'}}:{})});
     const outcome=command==='doctor'?result.report.capabilityOutcome:command==='lifecycle'?result.report.exercise?.outcome:result.report.outcome;
     console.log(JSON.stringify({report:join(result.out,'report.json'),outcome,reason:result.report.reason}));
@@ -151,11 +157,13 @@ try{
     write(approvalName('baseline',approved.approval.candidateDigest).replace(/\.json$/,'.approved.json'),approved);
   }else if(command==='report'){
     if(!option('input'))throw Error('--input required');
-    console.log(await renderReport(workspacePath(root,resolve(option('input'))),join(root,'output','gim-bench',`report-${Date.now()}`)));
+    console.log(await renderReport(workspacePath(root,resolve(option('input'))),artifactDirectory(root,join(root,'output','gim-bench',`report-${Date.now()}`))));
   }else{
     console.log([
       'gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [-repeat <n>] [--timeout-seconds <n>]',
       'recover-batch --output <folder> [--force] | init | samples | inventory | select | freeze-profile [--name commit-gate] | build',
+      'analyze|export-trace --input <private report.json>',
+      'run --mode diagnostic --diagnostics <config.json> --build <manifest> --sample <id>',
       'doctor --build <manifest>',
       'run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev]',
       'matrix --build <manifest> --profile <json>',

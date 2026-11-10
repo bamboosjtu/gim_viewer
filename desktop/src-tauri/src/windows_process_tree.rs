@@ -89,6 +89,7 @@ pub(super) struct Snapshot {
     pub(super) private_bytes: Option<u64>,
     pub(super) root_private_bytes: Option<u64>,
     pub(super) process_count: Option<u32>,
+    pub(super) process_instances: Vec<(u32,String)>,
     pub(super) available: bool,
     pub(super) source: String,
     pub(super) reason: Option<String>,
@@ -100,6 +101,7 @@ fn unavailable(reason: impl Into<String>) -> Snapshot {
         private_bytes: None,
         root_private_bytes: None,
         process_count: None,
+        process_instances: Vec::new(),
         available: false,
         source: "windows-process-tree-unavailable".to_string(),
         reason: Some(reason.into()),
@@ -134,7 +136,7 @@ fn query_rss(handle: *mut c_void) -> Option<(u64, u64)> {
 fn unavailable_with_root(root_pid:u32,reason:String)->Snapshot{
     let root_private_bytes=opened(root_pid).ok().flatten()
         .and_then(|(handle,_)|query_rss(handle.0).map(|(_,private)|private));
-    Snapshot{rss_bytes:None,private_bytes:None,root_private_bytes,process_count:None,
+    Snapshot{rss_bytes:None,private_bytes:None,root_private_bytes,process_count:None,process_instances:Vec::new(),
         available:false,source:"root-process-private-fallback".into(),reason:Some(reason)}
 }
 
@@ -187,7 +189,8 @@ pub(super) fn snapshot(root_pid: u32) -> Snapshot {
     let mut total_rss = 0u64;
     let mut total_private = 0u64;
     let mut live_count=0;
-    for (_,handle,_) in &process_ids {
+    let mut process_instances=Vec::new();
+    for (pid,handle,created) in &process_ids {
         let mut code=0;
         if unsafe{GetExitCodeProcess(handle.0,&mut code)}!=0&&code!=259{continue;}
         let rss = query_rss(handle.0);
@@ -195,7 +198,7 @@ pub(super) fn snapshot(root_pid: u32) -> Snapshot {
             if unsafe{GetExitCodeProcess(handle.0,&mut code)}!=0&&code!=259{continue;}
             return unavailable_with_root(root_pid,"GetProcessMemoryInfo-failed".into());
         };
-        live_count+=1;
+        live_count+=1;process_instances.push((*pid,created.to_string()));
         let Some(next_total) = total_rss.checked_add(rss) else {
             return unavailable("process-tree-rss-overflow");
         };
@@ -211,6 +214,7 @@ pub(super) fn snapshot(root_pid: u32) -> Snapshot {
         private_bytes: Some(total_private),
         root_private_bytes: None,
         process_count: Some(live_count),
+        process_instances,
         available: true,
         source: "windows-process-tree-working-set".to_string(),
         reason: None,

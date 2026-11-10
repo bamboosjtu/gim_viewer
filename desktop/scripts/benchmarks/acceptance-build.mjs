@@ -115,6 +115,7 @@ export async function buildAcceptance(root, {benchmark = false} = {}) {
   cpSync(join(release, 'gim-viewer.exe'), join(output, 'GIM-Reader.exe'));
   if(benchmark)assertBenchmarkExecutable(join(output,'GIM-Reader.exe'),benchmarkChunk);
   if(benchmark)cpSync(join(release,'examples','measurement_sampler.exe'),join(output,'measurement_sampler.exe'));
+  if(benchmark)cpSync(join(desktop,'scripts','benchmarks','system-collector.ps1'),join(output,'system-collector.ps1'));
   cpSync(join(desktop, 'src-tauri', 'webview2-fixed-runtime'), join(output, 'webview2-fixed-runtime'), {recursive: true});
   const runtimeSecurity=prepareFixedRuntimeSecurity(root,join(output,'webview2-fixed-runtime'));
   const manifest = {schemaVersion: 1, profile: benchmark?'native-release-benchmark':'native-release-acceptance', identifier: ACCEPTANCE_IDENTIFIER,
@@ -122,7 +123,7 @@ export async function buildAcceptance(root, {benchmark = false} = {}) {
     executable: 'GIM-Reader.exe', executableSha256: await fileSha256(join(output, 'GIM-Reader.exe')),
     runtime: await directoryFingerprint(join(output, 'webview2-fixed-runtime')),
     runtimeSecurity,
-    ...(benchmark?{samplerSha256:await fileSha256(join(output,'measurement_sampler.exe')),
+    ...(benchmark?{systemCollectorSha256:await fileSha256(join(output,'system-collector.ps1')),samplerSha256:await fileSha256(join(output,'measurement_sampler.exe')),
       frontendProbeVerified:true,benchmarkChunk}:{}),
     expectedDataRoot: dataRoot, nativeCachePathVerified: false,
     expectedLocalDataRoot: dataRoot,

@@ -8,7 +8,7 @@ import {warmPreparation} from './warm-preparation.mjs';
 /** No sample substitution or promotion. Every frozen case retains its outcome. */
 export async function runMatrix({root,buildManifest,registry,profile,repetitions=profile.repetitions,mode=profile.mode,execute=runNative}){
   verifyProfile(profile);if(!Number.isInteger(repetitions)||repetitions<1)throw Error('Invalid repetitions');
-  const out=join(root,'output','gim-bench',`matrix-${Date.now()}`);mkdirSync(out,{recursive:true});
+  const out=join(root,'tmp','gim-bench',`matrix-${Date.now()}`);mkdirSync(out,{recursive:true});
   const runs=[],pairs=[],required=profile.cases.length*repetitions*2;
   const save=(active=null)=>writeFileSync(join(out,'progress.json'),JSON.stringify({profileDigest:profile.digest,completed:runs.length,required,active,pairs},null,2));
   for(let repetition=0;repetition<repetitions;repetition++)for(const row of profile.cases){
@@ -34,8 +34,11 @@ export async function runMatrix({root,buildManifest,registry,profile,repetitions
   const outcome=failed?'FAIL':complete?(checks.some(check=>check.outcome==='PARTIAL')||pairs.some(pair=>pair.outcome==='PARTIAL')?'PARTIAL':'PASS'):'INCONCLUSIVE';
   const summaries=[];for(const row of profile.cases)for(const cacheState of ['cold','warm']){
     const samples=runs.filter(run=>run.conditions.sampleId===row.sampleId&&run.conditions.cacheState===cacheState);
-    const metrics={};for(const key of ['firstResponseMs','firstGeometryMs','automaticLoadMs','processPrivatePeakBytes']){
-      const values=samples.map(run=>run.metrics[key]).filter(Number.isFinite);metrics[key]=values.length===samples.length&&values.length?median(values):null;
+    const sameCoverage=new Set(samples.map(run=>run.correctness==='partial'?partialSignature(run):run.correctness)).size===1;
+    const metrics={};for(const key of ['firstResponseMs','firstGeometryMs','allGeometryReadyMs','settledMs','automaticLoadMs','processPrivatePeakBytes']){
+      const values=samples.map(run=>run.metrics[key]).filter(Number.isFinite);metrics[key]=sameCoverage&&values.length===samples.length&&values.length?median(values):null;
+      metrics[key+'Count']=values.length;metrics[key+'Missing']=samples.length-values.length;
+      metrics[key+'P95']=sameCoverage&&values.length===samples.length&&values.length?[...values].sort((a,b)=>a-b)[Math.ceil(values.length*.95)-1]:null;
     }summaries.push({sampleId:row.sampleId,cacheState,runs:samples.length,metrics});
   }
   const result={version:'gim-benchmark-candidate-v1',outcome,selectionFrozen:true,profileDigest:profile.digest,requiredRuns:required,missingFamilies,pairs,summaries,runs,

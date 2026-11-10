@@ -15,6 +15,9 @@ export function installMeasurementStream(send:(json:string)=>void){
       send(JSON.stringify({runId,batchId,contexts,events:compact}));
     }});
     for(const [id,old]of runs)if(runs.size>4&&!old.pending.size&&old.collector.snapshot().activeTasks.length===0){old.collector.setDetailSink(undefined);runs.delete(id);}
+    while(runs.size>16){const [id,old]=runs.entries().next().value!;
+      old.collector.noteTraceLoss(old.pending.size+old.collector.snapshot().bufferedEvents);
+      old.collector.setDetailSink(undefined);runs.delete(id);}
   });
   const timer=setInterval(()=>{for(const row of runs.values())row.collector.flushDetails();},100);
   return {

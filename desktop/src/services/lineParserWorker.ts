@@ -93,7 +93,7 @@ workerScope.onmessage = createWorkerProbe().wrap((event: MessageEvent<LineParser
     trace.record('line.attributes', attributesMs, { cacheEntries: cache.size });
     trace.memory({ name: 'input-buffer-capacity', scope: 'worker', method: 'unique-backing-buffers', quality: 'measured-capacity', availability: 'available', bytes: uniqueBufferCapacity(request.files.map(file => file.bytes)), sampleDelayMs: 0 });
     trace.produced();
-    workerScope.postMessage({
+    workerScope.postMessage(trace.result({
       type: 'result',
       requestId: request.requestId,
       session: request.session,
@@ -108,7 +108,8 @@ workerScope.onmessage = createWorkerProbe().wrap((event: MessageEvent<LineParser
         bytes,
         cacheEntries: cache.size,
       },
-    });
+    } satisfies LineParserWorkerResponse));
+    trace.sentResult();
   } catch (error) {
     trace.fail(error);
     const message = error instanceof Error ? error.message : String(error);

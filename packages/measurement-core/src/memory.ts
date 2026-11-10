@@ -2,6 +2,8 @@ export type MemoryKind = 'buffer-capacity' | 'logical-source' | 'estimated-ir' |
 interface Allocation { bytes: number; kind: MemoryKind; owners: Set<string>; }
 /** Explicit resource accounting, never a substitute for runtime/process memory. */
 export class MemoryLedger {
+  private movements={allocatedBytes:0,copiedBytes:0,transferredBytes:0,reusedBuffers:0,bufferRequests:0};
+  reuse(reused:boolean){this.movements.bufferRequests++;if(reused)this.movements.reusedBuffers++;}
   private allocations = new Map<string, Allocation>();
   private peak = new Map<MemoryKind, number>();
   private totals = new Map<MemoryKind, number>();
@@ -10,13 +12,14 @@ export class MemoryLedger {
     const row=this.owners.get(owner)??{allocations:0,bytes:{}};row.allocations+=sign;row.bytes[kind]=(row.bytes[kind]??0)+bytes*sign;
     if(row.allocations)this.owners.set(owner,row);else this.owners.delete(owner);
   }
-  acquire(id: string, owner: string, bytes: number, kind: MemoryKind): void {
+  acquire(id: string, owner: string, bytes: number, kind: MemoryKind, newAllocation=true): void {
     if (!Number.isSafeInteger(bytes) || bytes < 0) throw Error('invalid-memory-capacity');
     const old = this.allocations.get(id);
     if (old) {
       if (old.bytes !== bytes || old.kind !== kind) throw Error('allocation-identity-conflict');
       if(!old.owners.has(owner)){old.owners.add(owner);this.reference(owner,kind,bytes,1);}return;
     }
+    if(newAllocation)this.movements.allocatedBytes+=bytes;
     this.allocations.set(id, { bytes, kind, owners: new Set([owner]) });
     this.reference(owner,kind,bytes,1);
     const total = (this.totals.get(kind) ?? 0) + bytes; this.totals.set(kind, total);
@@ -31,10 +34,12 @@ export class MemoryLedger {
     const row = this.allocations.get(id); if (!row?.owners.has(from)) throw Error('transfer-without-owner');
     if (from === to) return;
     if(!row.owners.has(to)){row.owners.add(to);this.reference(to,row.kind,row.bytes,1);}
+    this.movements.transferredBytes+=row.bytes;
     row.owners.delete(from);this.reference(from,row.kind,row.bytes,-1);
   }
   copy(id: string, newId: string, owner: string): void {
     const row = this.allocations.get(id); if (!row || id === newId || this.allocations.has(newId)) throw Error('invalid-copy');
+    this.movements.copiedBytes+=row.bytes;
     this.acquire(newId, owner, row.bytes, row.kind);
   }
   releaseOwner(owner: string): void { for (const id of this.allocations.keys()) this.release(id, owner); }
@@ -43,7 +48,7 @@ export class MemoryLedger {
     const owners: Record<string, Partial<Record<MemoryKind, number>>> = Object.create(null);
     const limit=Number.isFinite(ownerLimit)?Math.max(0,Math.min(4096,Math.floor(ownerLimit))):128;let count=0;
     for(const [owner,row]of this.owners){if(count>=limit)break;owners[owner]={...row.bytes};count++;}
-    return { uniqueAllocations: this.allocations.size, uniqueBytesByKind: Object.fromEntries(this.totals),
+    return {movements:{...this.movements,scope:'tracked-resources-only',reuseDenominator:'buffer-retain-requests'}, uniqueAllocations: this.allocations.size, uniqueBytesByKind: Object.fromEntries(this.totals),
       peakUniqueBytesByKind: Object.fromEntries(this.peak), referencedBytesByOwner: owners,
       activeOwners:this.owners.size,omittedOwners:this.owners.size-count,
       scope: 'tracked-resources-only', ownerTotalsAreAdditive: false };
@@ -58,9 +63,10 @@ export class BufferLedger {
   private sequence=0;
   retain(value:ArrayBufferLike|ArrayBufferView,owner:string):string {
     const buffer=ArrayBuffer.isView(value)?value.buffer:value;
+    const known=this.identities.has(buffer);this.ledger.reuse(known);
     let id=this.identities.get(buffer);if(!id){id=`buffer-${++this.sequence}`;this.identities.set(buffer,id);}
     const references=this.references.get(id)??new Map<string,number>();references.set(owner,(references.get(owner)??0)+1);this.references.set(id,references);
-    this.ledger.acquire(id,owner,buffer.byteLength,'buffer-capacity');return id;
+    this.ledger.acquire(id,owner,buffer.byteLength,'buffer-capacity',!known);return id;
   }
   release(value:ArrayBufferLike|ArrayBufferView,owner:string):void {
     const id=this.identities.get(ArrayBuffer.isView(value)?value.buffer:value);if(!id)return;
@@ -73,6 +79,9 @@ export class BufferLedger {
   }
   transfer(value:ArrayBufferLike|ArrayBufferView,from:string,to:string):void {
     const id=this.identities.get(ArrayBuffer.isView(value)?value.buffer:value);if(!id)throw Error('transfer-without-allocation');
+    this.transferId(id,from,to);
+  }
+  transferId(id:string,from:string,to:string):void {
     if(from===to)return;
     const references=this.references.get(id);if(!references?.has(from))throw Error('transfer-without-owner');
     this.ledger.transfer(id,from,to);references.set(to,(references.get(to)??0)+references.get(from)!);references.delete(from);

@@ -106,7 +106,7 @@ try {
             throw "Benchmark batch did not complete normally (exit code $exitCode). No completed result was accepted."
         }
         $summaryArgs.Add($SummaryGroup)
-        $summaryArgs.Add((Join-Path (Split-Path -Parent $completion.csv) 'results.json'))
+        if ($completion.privateResults) { $summaryArgs.Add($completion.privateResults) } else { $summaryArgs.Add((Join-Path (Split-Path -Parent $completion.csv) 'results.json')) }
         Write-Host "Batch completed; recorded outcome: $($completion.outcome)" -ForegroundColor Cyan
     }
 

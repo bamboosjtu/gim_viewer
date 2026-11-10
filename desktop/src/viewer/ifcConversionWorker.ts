@@ -209,7 +209,7 @@ self.onmessage = createWorkerProbe().wrap(async (event: MessageEvent<IfcConversi
     const bytes = new Uint8Array(converted);
     for(const [stage,ms] of Object.entries(coldPipeline))if(stage.endsWith('Ms'))trace.record(`ifc.${stage}`,ms);
     trace.produced({ outputBytes: bytes.byteLength, inputBytes: input.bytes.byteLength });
-    self.postMessage(
+    trace.reply(
       {
         type: 'complete',
         bytes,

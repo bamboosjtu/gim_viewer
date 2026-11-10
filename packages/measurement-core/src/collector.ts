@@ -17,6 +17,9 @@ export class Collector implements MetricsSink {
   private occupancy = new Map<string,{clockId:string;firstMs:number;lastMs:number;depth:number;startMs:number;occupiedMs:number;peakConcurrentTasks:number}>();
   private memory = new Map<string, { latest: MemoryMetric; atMs: number; observedPeakBytes: number | null; samples: number }>();
   private events: MeasurementEvent[] = [];
+  private traceEvents:MeasurementEvent[]=[];
+  private traceActive=new Map<string,MeasurementEvent>();
+  private traceHealth={produced:0,dropped:0,queuePeak:0,activeOverflow:0,droppedByType:{} as Record<string,number>};
   private detailSink?:{ available():boolean; send(events:MeasurementEvent[]):void };
   private clock = new Map<string, NonNullable<MeasurementEvent['clock']>>();
   private loss = { sequenceGaps: 0, invalid: 0, duplicate: 0, foreignRun: 0, detailEvents: 0, aggregateGroups: 0, transportFailures: 0,
@@ -25,8 +28,28 @@ export class Collector implements MetricsSink {
   private aggregatedDetail={memory:0,counter:0};
   constructor(readonly identity: RunIdentity, readonly mode: MeasurementMode, private readonly detailLimit = mode==='benchmark'?32768:8192) {}
   emit(event: MeasurementEvent): void { this.accept(event); }
+  noteTraceLoss(count=1):void {this.traceHealth.dropped+=count;}
   accept(event: MeasurementEvent): void {
     if (this.mode === 'off') return;
+    if(event?.kind==='trace'){
+      this.traceHealth.produced++;
+      if(event.version!==MEASUREMENT_VERSION||event.context?.runId!==this.identity.runId||!event.trace
+        ||!Number.isFinite(event.atMs)||!Number.isSafeInteger(event.sequence)){
+        this.traceHealth.dropped++;return;
+      }
+      const key=event.context.runId+'\0'+event.trace.id;
+      if(event.trace.type==='span'&&event.trace.action==='started'){
+        if(this.traceActive.size<4096)this.traceActive.set(key,event);else this.traceHealth.activeOverflow++;
+      }else if(event.trace.type==='span'&&event.trace.action==='ended')this.traceActive.delete(key);
+      const critical=['operation','scope','health'].includes(event.trace.type)||event.trace.type==='span'&&event.trace.action==='ended';
+      // Preserve order; reserve credit for terminal/control records rather than dropping Ended first.
+      if(this.traceEvents.length<(critical?8192:8064))this.traceEvents.push(event);
+      else {this.traceHealth.dropped++;const category=event.trace.type;
+        this.traceHealth.droppedByType[category]=(this.traceHealth.droppedByType[category]??0)+1;}
+      this.traceHealth.queuePeak=Math.max(this.traceHealth.queuePeak,this.traceEvents.length);
+      if(this.traceEvents.length>=128||event.trace.type==='span'&&event.trace.action==='started')this.flushDetails();
+      return;
+    }
     if (!event || event.version !== MEASUREMENT_VERSION || !event.context || !validName.test(event.name)
       || !Number.isFinite(event.atMs) || !Number.isSafeInteger(event.sequence) || event.sequence < 1) { this.loss.invalid++; return; }
     if (event.context.runId !== this.identity.runId) { this.loss.foreignRun++; return; }
@@ -39,7 +62,7 @@ export class Collector implements MetricsSink {
       let worker = this.workers.get(context.workerId);
       if (!worker) {
         if (this.workers.size >= 1024) { this.loss.aggregateGroups++; return; }
-        worker = { family: context.family, state: event.name, createdMs: event.atMs, tasks: 0 }; this.workers.set(context.workerId, worker);
+        worker = { family: context.family, state: event.name, createdMs: event.startMs??event.atMs, tasks: 0 }; this.workers.set(context.workerId, worker);
       }
       worker.state = event.name;
       if (event.name === 'terminated' || event.name === 'failed') {
@@ -168,13 +191,17 @@ export class Collector implements MetricsSink {
       const batch=this.events.splice(0,128);
       try{this.detailSink.send(batch);}catch{this.loss.detailEvents+=batch.length;break;}
     }
+    while(this.traceEvents.length&&this.detailSink?.available()){
+      const batch=this.traceEvents.splice(0,128);
+      try{this.detailSink.send(batch);}catch{this.traceHealth.dropped+=batch.length;break;}
+    }
   }
   private settle(key: string, status: TaskStatus, reasonCode?:LifecycleReasonCode): void {
     this.active.delete(key); this.intentionalTasks.delete(key); this.finished.set(key,{status,reasonCode});
     if (this.finished.size > 8192) this.finished.delete(this.finished.keys().next().value!);
     this.outcomes[status] = (this.outcomes[status] ?? 0) + 1;
   }
-  drain(): MeasurementEvent[] { const result = this.events; this.events = []; return result; }
+  drain(): MeasurementEvent[] { const result = [...this.events,...this.traceEvents]; this.events = [];this.traceEvents=[]; return result; }
   intentionalTermination(workerId:string):boolean {
     const keys=[...this.active].filter(([,event])=>event.context.workerId===workerId).map(([key])=>key);
     return keys.length>0&&keys.every(key=>this.intentionalTasks.has(key));
@@ -190,6 +217,7 @@ export class Collector implements MetricsSink {
       (this.outcomes.aborted??0)>0?'unexplained-task-abort':null,
     ].filter((value):value is string=>!!value);
     return { version: MEASUREMENT_VERSION, identity: { ...this.identity }, mode: this.mode,
+      traceHealth:{...this.traceHealth,buffered:this.traceEvents.length,activeSpans:[...this.traceActive.values()]},
       phases: Object.fromEntries([...this.phases].map(([key, value]) => [key, { ...value.stats.snapshot(), failed: value.failed, cancelled: value.cancelled, workload: { ...value.workload } }])),
       slowestPhases:this.slowestPhases.map(row=>({...row})),
       slowestTasks:this.slowestTasks.map(row=>({...row})),

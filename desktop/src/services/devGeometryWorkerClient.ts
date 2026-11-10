@@ -1,5 +1,7 @@
+import {measurementRun} from '../measurement/runtime.js';
+import {measureQueuedTask} from '../measurement/taskScope.js';
 import measuredWorkerAsset from './devGeometryWorker.ts?worker&url';
-import { createMeasuredWorker, measurementWorkerUrl,measurementWorkerTask,markMeasuredWorkerTaskCancellation } from '../measurement/hostWorker.js';
+import { createMeasuredWorker, measurementWorkerUrl,measurementWorkerIdentity,measurementWorkerTask,markMeasuredWorkerTaskCancellation } from '../measurement/hostWorker.js';
 import {OutputResources} from '../measurement/outputResources.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { DEV_GLB_MAX_BYTES, aggregateDevGlbDiagnostics, type DevGeometryCompilePlan, type DevGlbSerializationResult } from './glbCacheService.js';
@@ -13,6 +15,7 @@ import { agedWorkPriority } from '../utils/workPriority.js';
 import type { MemoryPressure } from '../utils/memoryPressure.js';
 interface SplitState {
   measuredOwners?:string[];
+  observedParts?:ReturnType<typeof measureQueuedTask>[];
   plan: DevGeometryCompilePlan;
   results: Array<DevGlbSerializationResult | undefined>;
   completed: number;
@@ -23,7 +26,7 @@ interface SplitState {
   inputBudget: number;
   reservation: number;
 }
-interface Slot { id: number; traceId: string; key: string; path: string; kind: 'compile' | 'bounds' | 'merge'; lod: DeviceLod; priority: number; queuedAt: number;
+interface Slot { observation?:ReturnType<typeof measureQueuedTask>; id: number; traceId: string; key: string; path: string; kind: 'compile' | 'bounds' | 'merge'; lod: DeviceLod; priority: number; queuedAt: number;
   measuredInputs?:string[];
   measuredContext?:import('../measurement/core.js').TraceContext;
   promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void;
@@ -196,9 +199,12 @@ export class DevGeometryPreprocessor {
     const task: Slot = { id, traceId: traceId ?? `${this.perf.id}:dev-worker:${this.session}:${id}`, key, path, kind, lod, priority,
       queuedAt: performance.now(), promise, resolve, reject };
     Object.assign(task, extra);
+    if(this.measurementEnabled())task.observation=measureQueuedTask(task.traceId,'dev-pool:'+this.perf.id+':'+this.session);
     this.slots.set(key, task);
     return { task, promise };
   }
+  private measurementEnabled(){return this.measurementMode()==='diagnostic';}
+  private measurementMode(){return measurementRun().collector.mode;}
   private childrenOf(key: string): Slot[] {
     return [...this.slots.values()].filter(task => task.parent === key);
   }
@@ -207,6 +213,7 @@ export class DevGeometryPreprocessor {
    * that already has a definite result. */
   private cancelTaskTree(task: Slot, reason: Error, terminateActive: boolean): void {
     if (task.settled) return;
+    task.observation?.end(reason.name==='AbortError'?'cancelled':'failed');
     task.settled = true;
     this.slots.delete(task.key);
     if(task.split)this.releaseSplitBuffers(task.split);
@@ -280,14 +287,15 @@ export class DevGeometryPreprocessor {
       });
       this.diagnostics.splitParts++;
       child.promise.then(
-        result => this.partFinished(parent, index, result),
+        result => this.partFinished(parent, index, result,child.task.observation),
         error => this.partFailed(parent, error),
       );
     });
   }
-  private partFinished(parent: Slot, index: number, result: DevGlbSerializationResult): void {
+  private partFinished(parent: Slot, index: number, result: DevGlbSerializationResult,observation?:ReturnType<typeof measureQueuedTask>): void {
     const split = parent.split;
     if (!split || parent.settled || split.results[index]) return;
+    if(observation?.terminalRef)(split.observedParts??=[]).push(observation);
     const bytes=result.bytes?.byteLength??0;
     if(result.bytes){const owner=`part:${parent.traceId}:${index}`;this.outputResources.hold(owner,result.bytes,{...this.taskIdentity(parent),context:parent.measuredContext},'part');(split.measuredOwners??=[]).push(owner);}
     split.heldBytes+=bytes;this.splitHeldBytes+=bytes;this.updatePeak();
@@ -351,6 +359,7 @@ export class DevGeometryPreprocessor {
     split.mergeReservation=totalBytes*3;this.mergeReservedBytes+=split.mergeReservation;this.updatePeak();
     const merge = this.createSlot('merge', parent.path, parent.lod, `${parent.key}::merge`, parent.priority, undefined,
       { parent: parent.key, mergeParts: parts,measuredInputs:split.measuredOwners });
+    for(const part of split.observedParts??[])if(part.terminalRef)merge.task.observation?.dependency(part.spanId,[part.terminalRef]);
     split.measuredOwners=[];
     this.diagnostics.splitMerges++;
     merge.promise.then(
@@ -558,6 +567,7 @@ export class DevGeometryPreprocessor {
         if (!boundsTask) break;
         task = boundsTask;
       }
+      task.observation?.grant(measurementWorkerIdentity(worker)??'unknown-worker',this.workers.length);
       this.active.set(worker, { task, release, finished: false, startedAt: performance.now() });
       const affinity = this.sourceAffinity.get(task.path.toLowerCase());
       if (affinity === worker) this.diagnostics.sourceAffinityHits++;
@@ -573,6 +583,7 @@ export class DevGeometryPreprocessor {
       }
       try {
         const payload: Record<string, unknown> = { kind: task.kind, id: task.id, traceId: task.traceId, key: task.key, path: task.path, lod: task.lod, session: this.session };
+        if(task.observation)payload._gimMeasurementContext=task.observation.context;
         if(task.parent)payload.parentTaskId=this.slots.get(task.parent)?.traceId;
         if (task.partition) payload.partition = task.partition;
         if (task.noSplit || this.memoryPressure==='high' || this.memoryPressure==='critical') payload.noSplit = true;
@@ -608,6 +619,7 @@ export class DevGeometryPreprocessor {
     }
     const owner = this.active.get(worker), task = owner?.task;
     if (data.kind !== 'result' || !task || data.id !== task.id || data.session !== this.session || data.key !== task.key) return;
+    task.observation?.end(data.error?'failed':'completed');
     owner!.finished = true;
     this.active.delete(worker);
     this.lastProgressAt = performance.now();

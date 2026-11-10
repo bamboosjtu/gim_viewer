@@ -1,0 +1,3 @@
+{
+  "captures": [{"kind": "cpu", "target": "worker", "family": "dev", "trigger": "slow-span", "stage": "worker.execution", "thresholdMs": 500, "durationMs": 5000}]
+}

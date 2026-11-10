@@ -10,5 +10,5 @@ self.onmessage=createWorkerProbe().wrap((event:MessageEvent<ProjectionInput>,tra
   const assignments=trace.sync('engineering.spatial-projection', () => projectSpatialComposition(snapshot,facts,bounds,undefined,declarations));
   const composition=trace.sync('engineering.composition-projection', () => finalizeEngineeringComposition(projectEngineeringComposition(snapshot,assignments,'工程组成',declarations)));
   trace.produced();
-  self.postMessage({composition,contexts:assignments.map(a=>[a.entityId,a.paths.map(p=>p.map(g=>g.title).join(' / ')).join('；')])});
+  trace.reply({composition,contexts:assignments.map(a=>[a.entityId,a.paths.map(p=>p.map(g=>g.title).join(' / ')).join('；')])});
 }catch(error){trace.fail(error);self.postMessage({error:String(error)});}});

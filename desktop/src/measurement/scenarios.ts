@@ -1,5 +1,5 @@
 import type {AppState} from '../app/state.js';
-import {measurementRun,measurementContext,measurementSnapshot} from './runtime.js';
+import {measurementRun,measurementSnapshot,beginMeasurementOperation} from './runtime.js';
 
 export function scenarioTargets(state:AppState){
   const bases=[...(state.deviceLodRuntime?.baseRepresentationEvidence?.()??[])].sort((a,b)=>a.id.localeCompare(b.id));
@@ -18,7 +18,7 @@ export function scenarioTargets(state:AppState){
   return {dev,devBoolean,ifc};
 }
 export async function runScenarioAction(state:AppState,action:{kind:'dev-fine'|'ifc-fine'|'ifc-near';id?:string;source?:string;expressId?:number;globalId?:string}){
-  const run=measurementRun(),context=measurementContext(run.collector),session=state.captureProjectSession();
+  const run=measurementRun(),operation=beginMeasurementOperation('action.'+action.kind,run),context=operation.context,session=state.captureProjectSession();
   return run.probe.measure(context,`host.action.${action.kind}`,async()=>{
     if(action.kind==='dev-fine'){
       if(!action.id||!state.deviceLodRuntime?.refine)throw Error('dev-action-target-unavailable');
@@ -47,7 +47,7 @@ export async function runScenarioAction(state:AppState,action:{kind:'dev-fine'|'
       }
       throw Error('ifc-near-action-timeout');
     }finally{if(state.isCurrentSession(session))await controls.setLookAt(position.x,position.y,position.z,target.x,target.y,target.z,false);}
-  });
+  }).finally(()=>operation.end());
 }
 export async function projectResourceState(state:AppState){
   const measurement=measurementSnapshot();

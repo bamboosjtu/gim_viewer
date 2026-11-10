@@ -11,6 +11,8 @@ fn main() {
         fn OpenProcess(access:u32,inherit:i32,pid:u32)->*mut c_void;
         fn WaitForSingleObject(handle:*mut c_void,ms:u32)->u32;
         fn CloseHandle(handle:*mut c_void)->i32;
+        fn QueryPerformanceCounter(value:*mut i64)->i32;
+        fn QueryPerformanceFrequency(value:*mut i64)->i32;
         fn QueryFullProcessImageNameW(handle:*mut c_void,flags:u32,name:*mut u16,size:*mut u32)->i32;
     }
     let args:Vec<String>=std::env::args().collect();
@@ -30,9 +32,11 @@ fn main() {
         if unsafe{WaitForSingleObject(handle,0)}!=258{break}
         let started=Instant::now();let mut sample=windows_process_tree::snapshot(pid);
         for _ in 0..2 {if sample.available{break}std::thread::sleep(Duration::from_millis(50));sample=windows_process_tree::snapshot(pid);}
+        let(mut qpc,mut frequency)=(0i64,0i64);unsafe{QueryPerformanceCounter(&mut qpc);QueryPerformanceFrequency(&mut frequency);}
         let row=serde_json::json!({"scope":"process-tree","method":"native-independent-private-bytes","quality":"runtime-sampled",
             "availability":if sample.available{"available"}else{"unavailable"},"bytes":sample.private_bytes,"workingSetBytes":sample.rss_bytes,
-            "processCount":sample.process_count,"rootPrivateBytes":sample.root_private_bytes,
+            "processCount":sample.process_count,"processInstances":sample.process_instances,
+            "creationTimeUnit":"windows-filetime-100ns","qpc":qpc,"qpcFrequency":frequency,"rootPrivateBytes":sample.root_private_bytes,
             "reason":sample.reason,"source":sample.source,"atMs":origin.elapsed().as_secs_f64()*1000.0,
             "sampleDelayMs":started.elapsed().as_secs_f64()*1000.0,"clockId":"native-sampler","checkpoint":checkpoint});
         if writeln!(io::stdout(),"{}",row).is_err(){break}let _=io::stdout().flush();

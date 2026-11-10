@@ -22,7 +22,7 @@ export function resolveOverheadPlan({candidate,profile,sample}){
 }
 
 export async function measureProbeOverhead({root,buildManifest,sample,profile,caseSpec,repetitions=3,retest=false}){
-  const runs=[];const out=join(root,'output','gim-bench',`overhead-${Date.now()}`);mkdirSync(out,{recursive:true});
+  const runs=[];const out=join(root,'tmp','gim-bench',`overhead-${Date.now()}`);mkdirSync(out,{recursive:true});
   for(let round=0;round<repetitions;round++)for(const mode of round%2?['benchmark','off']:['off','benchmark']){
     writeFileSync(join(out,'progress.json'),JSON.stringify({round,mode,completed:runs.length},null,2));
     const result=await runNative({root,buildManifest,sample,profileDigest:profile.digest,scenario:caseSpec.scenario,actions:caseSpec.actions,timeoutMs:caseSpec.timeoutMs,mode});runs.push(result.report);

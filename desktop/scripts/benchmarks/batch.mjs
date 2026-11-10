@@ -1,7 +1,8 @@
+import {publicView} from './observability.mjs';
 import {existsSync,readFileSync,writeFileSync,readdirSync,unlinkSync} from 'node:fs';
 import {randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
-import {basename,join,relative,resolve} from 'node:path';
+import {basename,dirname,join,relative,resolve} from 'node:path';
 import {digest,runReadiness,compareRuns,partialSignature} from './compare.mjs';
 import {coldWarmEquivalent} from './profiles.mjs';
 import {runNative} from './native-run.mjs';
@@ -106,7 +107,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   if(!['survey','baseline'].includes(preset))throw Error('Invalid preset');
   if(!Number.isInteger(repetitions)||repetitions<1||repetitions>100||!Number.isFinite(timeoutMs)||timeoutMs<1000)throw Error('Invalid repetitions/timeout');
   const cacheStates=preset==='baseline'?['cold','warm']:['cold'];
-  privateOut??=artifactDirectory(root,join(root,'tmp','gim-bench','batches',`batch-${Date.now()}`));
+  privateOut??=artifactDirectory(root,join(root,'tmp','gim-bench','batches',`batch-${Date.now()}-${randomBytes(4).toString('hex')}`));
   const build=JSON.parse(readFileSync(workspacePath(root,buildManifest),'utf8'));
   const body={version:'gim-batch-profile-v1',preset,repetitions,cacheStates,mode:'benchmark',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',timeoutMs,
     startupRetryPolicy:'pre-open-infrastructure-v1',maxStartupAttempts:STARTUP_ATTEMPTS,
@@ -118,7 +119,8 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out,nonce}));
   writeFileSync(controllerFile,JSON.stringify({pid:process.pid,nonce,
     processStartedAt:new Date(Date.now()-process.uptime()*1000).toISOString(),startedAt:new Date().toISOString()}));
-  writeFileSync(join(out,'profile.json'),JSON.stringify({...body,digest:profileDigest},null,2));
+  writeFileSync(join(privateOut,'profile.json'),JSON.stringify({...body,digest:profileDigest},null,2));
+  writeFileSync(join(out,'profile.json'),JSON.stringify(/[\\/]output[\\/]/i.test(out)?publicView(body):{...body,digest:profileDigest},null,2));
   for(const entry of inputs.entries){
     const {privatePath,actions,...publicEntry}=entry;
     publicEntry.sampleLabel=anonymize?entry.sourceSha256??entry.inputId:privatePath?basename(privatePath):entry.inputId;
@@ -127,7 +129,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
     else for(let repetition=1;repetition<=repetitions;repetition++)for(const cacheState of cacheStates)
       state.rows.push({...publicEntry,repetition,cacheState,status:'PENDING'});
   }
-  const save=()=>{state.updatedAt=new Date().toISOString();writeBatchReports(out,state);};
+  const save=()=>{state.updatedAt=new Date().toISOString();writeBatchReports(privateOut,state);writeBatchReports(out,state);};
   save();
   const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   const stopTimer=setInterval(()=>{if(existsSync(join(out,'stop.request')))abort();},500);
@@ -193,14 +195,14 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
     &&state.pairs.every(pair=>['PASS','PARTIAL'].includes(pair.outcome))
     &&[...groups.values()].every(runs=>['PASS','PARTIAL'].includes(compareRuns(runs,runs).outcome));
   save();try{unlinkSync(controllerFile);}catch{/* Completed report is authoritative. */}
-  return {out,result:state};
+  return {out,privateResults:join(privateOut,'results.json'),result:state};
 }
 
 export async function runBatch(options){
   const {root,directory,registry}=options;
-  const out=artifactDirectory(root,options.out??join(root,'output','gim-bench',`batch-${Date.now()}`));
+  const out=artifactDirectory(root,options.out??join(root,'output','gim-bench',`batch-${Date.now()}-${randomBytes(4).toString('hex')}`));
   if(existsSync(join(out,'results.json')))throw Error('Output already contains a batch; choose a new output directory');
-  const privateOut=artifactDirectory(root,join(root,'tmp','gim-bench','batches',`batch-${Date.now()}`));
+  const privateOut=artifactDirectory(root,join(root,'tmp','gim-bench','batches',`batch-${Date.now()}-${randomBytes(4).toString('hex')}`));
   const inputs=await loadBatchInputs(root,{directory,registry});
   if(inputs.samples.length&&!options.execute){
     const build=JSON.parse(readFileSync(workspacePath(root,options.buildManifest),'utf8'));
@@ -263,7 +265,9 @@ function findUnreportedRunId(root,row){
 }
 export function recoverInterruptedBatch(root,outputDirectory,{force=false,getProcessStartAt=processStartedAt}={}){
   const out=workspacePath(root,outputDirectory),file=join(out,'results.json');
-  const state=JSON.parse(readFileSync(file,'utf8'));
+  const record=controllerRecord(root,out);
+  const privateFile=record?join(dirname(record.file),'results.json'):null;
+  const state=JSON.parse(readFileSync(privateFile&&existsSync(privateFile)?privateFile:file,'utf8'));
   if(state.status!=='RUNNING'&&!state.rows?.some(row=>['RUNNING','PENDING'].includes(row.status)))
     return {out,result:state,recovered:0};
   const owner=controllerRecord(root,out);

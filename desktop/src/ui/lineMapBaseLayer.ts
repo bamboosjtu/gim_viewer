@@ -1,3 +1,4 @@
+import {observeMap} from '../measurement/mapMeasurement.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /**
  * MapLibre 底图层模块。
@@ -208,6 +209,7 @@ export async function createMapLibreProbe(
     // empty 模式不发起瓦片请求；在线 raster 模式请求对应瓦片服务
     hash: false,
   });
+  observeMap(map);
 
   // 地图容器可能在隐藏/零尺寸状态下创建；MapLibre 只在 window resize 时
   // 自动更新尺寸，容器自身变化会留下空白/只画一部分瓦片。观察容器并显式

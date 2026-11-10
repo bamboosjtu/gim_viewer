@@ -12,9 +12,17 @@ export class WorkerTaskProbe {
   private stages=new Map<string,{stats:DurationStats;workload:Workload}>();
   constructor(readonly context: TraceContext, private probe: Probe, private finish: () => void = () => {}) {}
   get enabled():boolean { return this.probe.mode !== 'off'; }
+  result<T extends object>(message:T):T {
+    return this.enabled?{...message,_gimMeasurementResult:{...this.context}}:message;
+  }
+  sentResult(){this.probe.trace(this.context,{type:'message',action:'sent',id:this.context.taskId+':result'});}
+  reply(message:object,transfer?:Transferable[]|StructuredSerializeOptions){
+    self.postMessage(this.result(message),transfer as StructuredSerializeOptions);
+    this.sentResult();
+  }
   phase(name: string) { return this.probe.phase(this.context, name); }
-  measure<T>(name: string, work: () => Promise<T>) { return this.probe.mode === 'off' ? work() : this.probe.measure(this.context, name, work); }
-  sync<T>(name: string, work: () => T) { return this.probe.measureSync(this.context, name, work); }
+  measure<T>(name: string, work: (context:Readonly<TraceContext>) => Promise<T>) { return this.probe.mode === 'off' ? work(this.context) : this.probe.measure(this.context, name, work); }
+  sync<T>(name: string, work: (context:Readonly<TraceContext>) => T) { return this.probe.measureSync(this.context, name, work); }
   record(name: string, ms: number, workload?: Workload) { this.probe.record(this.context, name, ms, workload); }
   observe(name:string,ms:number,workload:Workload={}){
     if(!this.enabled)return;
@@ -39,6 +47,9 @@ export const NOOP_TASK = new WorkerTaskProbe(offContext, offProbe);
 export function createWorkerProbe() {
   let probe = offProbe, context = offContext, mode: MeasurementMode = 'off';
   let events: MeasurementEvent[] = [];
+  const runProbes=new Map<string,Probe>();
+  const emit=(record:MeasurementEvent)=>{events.push(record);
+    if(events.length>=128||record.trace?.type==='span'&&record.trace.action==='started')flush();};
   let batchId=0,lastSequence=0;
   const pendingAcks=new Set<number>();
   const target = typeof self === 'undefined' ? undefined : self;
@@ -52,6 +63,7 @@ export function createWorkerProbe() {
   };
   const control = (event: MessageEvent): boolean => {
     const data = event.data;
+    if(data?.[CHANNEL]==='calibrate'){const receivedMs=performance.now();post?.({[CHANNEL]:'clock',workerId:context.workerId,clockId:probe.clockId,receivedMs,sentMs:performance.now()});return true;}
     if(data?.[CHANNEL]==='ack'){
       if(data.workerId===context.workerId&&Number.isSafeInteger(data.batchId))pendingAcks.delete(data.batchId);
       return true;
@@ -67,7 +79,8 @@ export function createWorkerProbe() {
     }
     const receivedMs = performance.now(); context = data.context; mode = data.mode;
     const clockId = `${context.workerId}:clock`;
-    probe = new Probe(context.workerId, clockId, mode, () => performance.now(), { emit(record) { events.push(record); if (events.length >= 128) flush(); } });
+    probe = new Probe(context.workerId, clockId, mode, () => performance.now(), {emit},context.workerId);
+    runProbes.set(context.runId,probe);
     (globalThis as { __gimMeasurementIdentity?: unknown }).__gimMeasurementIdentity = { workerId: context.workerId, runId: context.runId, family: context.family, clockId };
     post?.({ [CHANNEL]: 'clock', workerId: context.workerId, clockId, receivedMs, sentMs: performance.now() });
     return true;
@@ -77,19 +90,32 @@ export function createWorkerProbe() {
     if (control(event)) return;
     const envelope = event.data?._gimMeasurement as Envelope | undefined;
     if (!envelope || mode === 'off') return work(NOOP_TASK);
-    const captured = { ...envelope.context }, capturedProbe = probe;
+    const scopeId=envelope.context.operationTraceId+':'+context.workerId+':'+envelope.context.taskId+':'+envelope.context.attemptId;
+    const parentScopeId=envelope.context.scopeId;
+    const captured = Object.freeze({ ...envelope.context,executorId:context.workerId,scopeId });
+    let capturedProbe=runProbes.get(captured.runId);
+    if(!capturedProbe){capturedProbe=new Probe(context.workerId,probe.clockId,mode,()=>performance.now(),{emit},context.workerId);runProbes.set(captured.runId,capturedProbe);
+      while(runProbes.size>16)runProbes.delete(runProbes.keys().next().value!);}
+    const scopedProbe=capturedProbe;
+    const scopeStart=performance.now();
+    const scope={scopeId,parentScopeId,scopeType:'executor' as const,declaration:'effective' as const,
+      operationTraceId:captured.operationTraceId,executorId:context.workerId,
+      capabilities:['operation-context','span-lifecycle','dependency-edges','wait-intervals','clock-segments'] as const,
+      window:{clockId:scopedProbe.clockId,startMs:scopeStart,endMs:null}};
+    scopedProbe.trace(captured,{type:'scope',action:'declared',scope});
     let finished = false;
     const finish = () => {
       if (finished) return; finished = true;
       task.flushStages();
       execution.end(task.status);
-      capturedProbe.event(captured, { kind: 'task', name: 'ended', status: task.status,
+      scopedProbe.event(captured, { kind: 'task', name: 'ended', status: task.status,
         ...(task.reasonCode?{reasonCode:task.reasonCode}:{}) });
       flush();
       post?.({[CHANNEL]:'flushed',workerId:captured.workerId,batchId,lastSequence});
     };
-    const task = new WorkerTaskProbe(captured, capturedProbe, finish);
-    probe.event(captured, { kind: 'task', name: 'started' });
+    const task = new WorkerTaskProbe(captured, scopedProbe, finish);
+    scopedProbe.trace(captured,{type:'message',action:'received',id:captured.taskId!});
+    scopedProbe.event(captured, { kind: 'task', name: 'started' });
     task.record('worker.queue', Math.max(0, performance.now() - (envelope.receivedMs ?? performance.now())));
     const execution = task.phase('worker.execution');
     flush();
@@ -97,6 +123,8 @@ export function createWorkerProbe() {
     catch (error) { task.fail(error); throw error; }
     finally {
       finish();
+      scopedProbe.trace(captured,{type:'scope',action:'closed',id:scopeId,endMs:performance.now()});
+      flush();post?.({[CHANNEL]:'flushed',workerId:captured.workerId,batchId,lastSequence});
     }
   }
   return { control, run, flush,

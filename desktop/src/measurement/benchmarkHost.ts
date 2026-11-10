@@ -1,6 +1,6 @@
 import measuredWorkerAsset from './capabilityWorker.ts?worker&url';
 import type { AppState } from '../app/state.js';
-import { measurementSnapshot, drainMeasurementEvents, measurementPrivateSources, measurementRun } from './runtime.js';
+import { measurementSnapshot, drainMeasurementEvents, measurementPrivateSources, measurementRun,finishMeasurementOperation,measurementContext,openMeasurementContext } from './runtime.js';
 import { perfProductMomentSnapshot, perfCurrentSession } from '../utils/perfTimings.js';
 import { createMeasuredWorker, measurementWorkerUrl } from './hostWorker.js';
 import { resetMeasurementRun } from './runtime.js';
@@ -57,6 +57,7 @@ export function installBenchmarkHost(state:AppState):void {
       cachePersistence:((moment)=>({observed:moment!==null,available:moment?.meta?.available!==false}))
         (perfProductMomentSnapshot().cachePersistenceReady),
       engineering:{status:state.engineeringStatus,cacheStatus:state.engineeringCacheStatus,complete:state.engineeringSources?.complete??false}};},
+    finishOperation(settledAtMs:number|null){const run=measurementRun();if(settledAtMs!==null)run.probe.trace(openMeasurementContext()??measurementContext(),{type:'milestone',action:'observed',name:'settledMs'},settledAtMs);finishMeasurementOperation();},
     async evidence(){const evidence=await benchmarkEvidence(state);return {...evidence,evidenceAtMs:performance.now()};},
     templateDiagnostics(){return (state.deviceLodRuntime as {templateDiagnostics?:()=>unknown[]}|null)?.templateDiagnostics?.()??[];},
     privateSources(){return measurementPrivateSources(measurementRun().collector.identity.runId);},

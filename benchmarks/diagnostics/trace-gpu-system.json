@@ -1,0 +1,5 @@
+{
+  "captures": [],
+  "gpu": true,
+  "system": {"durationMs": 10000, "bufferMiB": 64, "pmc": [], "gpu": true}
+}

@@ -96,7 +96,7 @@ self.onmessage = createWorkerProbe().wrap(async ({ data }, trace) => {
     return;
   }
   if (!['compile', 'bounds', 'merge'].includes(data.kind) || running) {
-    scope.postMessage({kind:'result',id:data.id,session:data.session,key:data.key,path:data.path,
+    trace.reply({kind:'result',id:data.id,session:data.session,key:data.key,path:data.path,
       error:running?'DEV worker already running':`Unsupported DEV worker task: ${String(data.kind)}`});return;
   }
   running = true; const started = performance.now();
@@ -155,11 +155,11 @@ self.onmessage = createWorkerProbe().wrap(async ({ data }, trace) => {
     trace.memory({ name: 'parsed-cache-weight', scope: 'worker', method: 'byte-lru-weight', quality: 'estimated', availability: 'available', bytes: texts.bytes + documents.bytes + assemblies.bytes, sampleDelayMs: 0 });
     trace.produced({ outputBytes: bytes?.byteLength ?? 0, reads: stats.reads, cacheHits: stats.sourceHits,uniqueFiles:referencedFiles.size,fileRequests,referencedFileBytes,
       modOccurrences:'diagnostics'in result?result.diagnostics.discoveredModCount:0,stlOccurrences:'diagnostics'in result?result.diagnostics.discoveredStlCount:0,simplifiedBooleans:stages.simplifiedBooleans??0 });
-    scope.postMessage({ kind: 'result', id: data.id, session: data.session, key: data.key, path: data.path,
+    trace.reply({ kind: 'result', id: data.id, session: data.session, key: data.key, path: data.path,
       result, wallMs: performance.now() - started, stages: { ...stats, ...stages } }, bytes ? [bytes.buffer as ArrayBuffer] : []);
   } catch (error) {
     trace.fail(error);
-    scope.postMessage({ kind: 'result', id: data.id, session: data.session, key: data.key, path: data.path,
+    trace.reply({ kind: 'result', id: data.id, session: data.session, key: data.key, path: data.path,
       error: error instanceof Error ? error.message : String(error),
       sourceErrorKind:geometryFailureKind(error),sourceEvidence: (error as { sourceEvidence?: string })?.sourceEvidence,
       wallMs: performance.now() - started, stages: { ...stats, ...stages } });

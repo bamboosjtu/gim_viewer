@@ -69,12 +69,14 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | `freeze-profile` | 将候选选择冻结为不可变 Profile | `[--name <名称>]`，默认 `commit-gate` |
 | `build` | 构建带 Benchmark 探针的原生 Release，输出 `acceptance-build.json` | — |
 | `doctor` | 测量能力自检；不需要工程样本，源文件授权请求会被拒绝 | `--build <清单>` |
-| `run` | 对单个已登记样本执行原生测量 | `--build <清单>`、`--sample <id>`；可选 `--mode`（`off`、`summary`、`benchmark`、`diagnostic`）、`--capture`（`cpu`、`allocations`、`heap`）与 `--worker-family dev` |
+| `run` | 对单个已登记样本执行原生测量 | `--build <清单>`、`--sample <id>`；可选 `--mode`（`off`、`summary`、`benchmark`、`diagnostic`）、`--diagnostics <配置>`；兼容 `--capture`（`cpu`、`allocations`、`heap`）与 `--worker-family dev` |
 | `matrix` | 按冻结 Profile 运行重复矩阵并产出候选 | `--build <清单>`、`--profile <json>`；可选 `--repetitions <n>`、`--mode <模式>` |
 | `overhead` | 测量探针自身开销，样本须属于冻结 Profile 或候选 | `--build <清单>`、`--sample <id>`，以及 `--profile <json>` 或 `--candidate <批次json>`；矩阵候选须同时提供匹配的 `--profile`；批次样本可加 `--registry <json>` / `--directory <目录>` |
 | `lifecycle` | 十轮开闭与资源回落自检 | `--build <清单>`、`--sample <id>`；可选 `--second-sample <id>`、`--registry <json>` / `--directory <目录>` |
 | `compare` | 比较基线与候选 | `--baseline <json>`、`--candidate <json>`；可选 `--retest-baseline <json>`、`--retest-candidate <json>`、`--output <tmp/output 下的 JSON>`、`--geometry-review <批准记录>` |
 | `gate` | 门禁比较，要求基线带有效批准摘要 | 同 `compare` |
+| `analyze` | 从私有运行报告生成覆盖、Span、等待和阻塞分析 | `--input <tmp 下的 report.json>` |
+| `export-trace` | 导出私有 Perfetto 兼容 Chrome JSON | `--input <tmp 下的 report.json>` |
 | `report` | 从已有结果 JSON 重新生成 HTML 报告 | `--input <json>` |
 | `review-partial` | 独立复核 PARTIAL 来源证据并生成候选摘要绑定的私有记录 | `--candidate <json> --reviewer <复核者> --reason <受控代码>` |
 | `accept-measurement` | 校验测量验收报告，输出携带验收凭据的新候选文件 | `--candidate <json> --doctor <report.json> --overhead <overhead.json> --lifecycle <report.json>` |
@@ -188,8 +190,8 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 | `slow-tasks.csv`、`slow-phases.csv` | 每个运行耗时最长的十个 Worker 任务和单次阶段，使用匿名来源 ID；聚合直方图不充作单次阶段 |
 | `slow-templates.csv` | 每轮最慢 20 个 DEV 模板槽位等待及最久 20 个槽位占用者；含优先级、缓存读取、Worker 请求/排队、输入预算、输出字节及内存压力，公开列只用匿名来源 ID |
 | `workers.csv` | 每个 Worker 的类型、堆采样可用性、成功/失败次数、观测峰值、最大采样延迟和间隔 |
-| `results.json` | 机器读取的结果、运行条件、正确性检查、工作量、比较所需指标与冷暖一致性结果 |
-| `profile.json` | 本批次冻结的来源 SHA、动作、模式、轮数、超时与摘要 |
+| `results.json` | output 下是匿名派生视图；CLI 打印的 tmp/privateResults 才保留比较与批准所需权威证据 |
+| `profile.json` | 权威冻结版本在 tmp 私有批次目录；output 仅有派生信息 |
 
 - CSV 使用 UTF-8 BOM、标准引号转义；时间字段后缀 `Ms`、内存字段后缀 `Bytes`。HTML 显示秒与 GiB。不可用字段留空，不填零。
 - 字段名以本次构建生成的 `results.json` 与 `results.csv` 表头为准；本页只维护文件用途与判读边界，不逐列冻结字段名。
@@ -282,8 +284,8 @@ SQLite 核心缓存发布单独验证；冷开缓存已发布、产品正确性�
 
 ## 匿名化与私有产物
 
-- `--anonymize true`（默认）以完整文件 SHA256 展示样本，不显示源文件名和路径。
-- `--anonymize false` 显示文件名与工作区相对路径，同时保留完整 SHA256。
+- `output/` 中的报告默认使用本次导出别名，不导出源 SHA、文件名、路径或稳定私有摘要。
+- `--anonymize false` 只影响 tmp 内部报告；output 始终生成白名单派生视图。
 - 该开关只影响报告展示，不改变 Profile、动作或测量口径。
 - 源路径映射、原始错误堆栈、授权 nonce、日志与 WebView profile 保存在 `tmp/gim-bench/`，不混入可分享的 `output/` 报告。
 - 分享包含真实工程名的实名报告前，应切换匿名模式或仅分享匿名产物。
@@ -292,8 +294,8 @@ SQLite 核心缓存发布单独验证；冷开缓存已发布、产品正确性�
 ## 比较与基线
 
 ```powershell
-npm run bench -- compare --baseline ../output/benchmark-base/results.json --candidate ../output/benchmark-next/results.json
-npm run bench -- gate --baseline ../tmp/gim-bench/<已批准基线>.approved.json --candidate ../output/benchmark-next/results.json
+npm run bench -- compare --baseline <私有基线JSON> --candidate <CLI打印的privateResults>
+npm run bench -- gate --baseline ../tmp/gim-bench/<已批准基线>.approved.json --candidate <CLI打印的privateResults>
 ```
 
 - 比较按来源、场景、冷暖状态及测量模式分别分组，不把多工程的指标混成一个中位数。
@@ -370,3 +372,20 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
 - [本地功能测试](../desktop/local-tests/README.md)：`test:local` 基础功能样本。
 - [开发指南](development.md)：环境、命令、工作区与临时目录。
 - [验证](validation.md)：证据分层、自动门禁与真实复核。
+
+## 详细 Trace 与 Profile
+
+以下命令在 desktop 执行，输入输出均位于工作区：
+
+```powershell
+npm run bench -- run --build <本轮构建清单> --sample <匿名样本ID> --mode diagnostic --diagnostics ../benchmarks/diagnostics/cpu-main.json
+npm run bench -- analyze --input ../tmp/gim-bench/runs/<本轮runId>/report.json
+npm run bench -- export-trace --input ../tmp/gim-bench/runs/<本轮runId>/report.json
+npm run bench -- report --input ../tmp/gim-bench/runs/<本轮runId>/report.json
+```
+
+诊断配置的 captures 支持 kind=cpu/allocations/heap、target=main/worker、family/executorId/taskId/spanId/operationTraceId、受控 stage 阶段名、trigger=operation-start/external/slow-span。external 由控制器按 delayMs 触发；slow-span 必须提供 thresholdMs。默认 CPU 窗口 5 秒，上限 30 秒，单产物容量上限 256 MiB；不能捕获已结束 Span 的历史栈。可使用 captures=[] 仅采详细 Trace，gpu=true 请求可用的 GPU Query。
+
+system 为显式 WPR 配置，需 durationMs、bufferMiB，pmc 仅允许本机可用计数器，gpu=true 追加系统 GPU 活动。WPA 摘要另需 exporter（可省略并从 PATH 查找）、wpaProfile、profileSha256 以及 tables 列/单位契约。表契约 columns 指定 pid/created/start/end/value，可选 tid，并单独指定时间列的 timeUnit（ns/us/ms/s）和数值列的 unit；创建时间必须与独立采样器的 windows-filetime-100ns 身份一致，不能用进程名称或 PID 猜配。缺少 WPA Profile 时保留原始 ETL，摘要标 unavailable。
+
+诊断运行不能参与普通性能基线。原始 .cpuprofile、.heapprofile、.heapsnapshot、.etl、analysis.private.json 和 trace.private.json 留 tmp；可分享报告由白名单生成，缺口不补零。P95 是给定重复轮次的经验最近秩，结合 Count/Missing 和覆盖状态判读，不宣称少量重复证明尾部性能。

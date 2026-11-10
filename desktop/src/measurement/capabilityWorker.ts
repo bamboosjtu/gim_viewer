@@ -11,5 +11,5 @@ self.onmessage=createWorkerProbe().wrap(async(event,trace)=>{
   const reply=await new Promise<ArrayBuffer>(resolve=>{pending.set(1,resolve);self.postMessage({kind:'probe-read',id:1});});
   buffer=new Uint8Array(4*1024*1024);buffer.fill(1);
   trace.memory({name:'probe-buffer',scope:'worker',method:'array-buffer-capacity',quality:'measured-capacity',availability:'available',bytes:buffer.byteLength,sampleDelayMs:0});
-  trace.produced();self.postMessage({ready:true,moduleExecutions:state.__gimCapabilityModuleExecutions,roundTripValue:[...new Uint8Array(reply)].reduce((a,b)=>a+b,0)});
+  trace.produced();trace.reply({ready:true,moduleExecutions:state.__gimCapabilityModuleExecutions,roundTripValue:[...new Uint8Array(reply)].reduce((a,b)=>a+b,0)});
 });

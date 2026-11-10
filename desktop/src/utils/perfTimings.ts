@@ -1,4 +1,5 @@
 import { resetMeasurementRun, updateMeasurementIdentity, recordLegacyPhase, recordHostMemory } from '../measurement/runtime.js';
+import {measurementRun,measurementContext} from '../measurement/runtime.js';
 /**
  * 性能埋点体系（acc-plan.md P0-1）。
  *
@@ -490,9 +491,12 @@ export function perfRecordTaskPhase(identity: PerfTaskIdentity, phase: string, d
 export async function perfMeasureTaskPhase<T>(identity: PerfTaskIdentity, phase: string, operation: () => Promise<T>,
   session: PerfSession = currentSession): Promise<T> {
   const started = performance.now(); let status: TaskPhaseStatus = 'completed';
+  const run=measurementRun();
+  const span=run.collector.mode==='diagnostic'&&perfIsCurrentSession(session)
+    ?run.probe.phase(measurementContext(run.collector),'host.'+phase,null,{summary:false}):null;
   try { return await operation(); }
   catch (error) { status = (error as Error)?.name === 'AbortError' ? 'cancelled' : 'failed'; throw error; }
-  finally { perfRecordTaskPhase(identity, phase, performance.now() - started, session, status); }
+  finally { span?.end(status);perfRecordTaskPhase(identity, phase, performance.now() - started, session, status); }
 }
 
 export function perfTaskPhaseSnapshot() {
@@ -508,8 +512,12 @@ export function perfBegin(
   session: PerfSession = currentSession,
 ): (labelSuffix?: string, endMeta?: Record<string, unknown>) => void {
   const t0 = performance.now();
+  const measured=measurementRun();
+  // Raw labels can contain source names; Trace uses a controlled stage.
+  const phase=measured.collector.mode==='diagnostic'?measured.probe.phase(measurementContext(measured.collector),'host.product-stage'):null;
   activeSpanLabels.push(label);
   return (labelSuffix?: string, endMeta?: Record<string, unknown>) => {
+    phase?.end();
     const activeIndex = activeSpanLabels.lastIndexOf(label);
     if (activeIndex >= 0) activeSpanLabels.splice(activeIndex, 1);
     if (!perfIsCurrentSession(session)) return;
@@ -578,6 +586,8 @@ export function perfMarkProductMoment(
   if (!perfIsCurrentSession(session) || productMoments.has(moment)) return;
   const atMs = performance.now() - sessionStartMs;
   productMoments.set(moment, { atMs, meta, sessionId: session.id });
+  const measured=measurementRun();
+  measured.probe.trace(measurementContext(measured.collector),{type:'milestone',action:'observed',name:moment});
   perfMark(moment, meta, session);
   // 开发期采集器可轮询该只读快照，不影响生产构建行为。
   if (import.meta.env?.DEV) {

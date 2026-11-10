@@ -47,31 +47,10 @@ export class CdpConnection {
 export class WorkerHeapSampler {
   #targets=new Map(); #stopListener; #timer; #closed=false; #mapped=new Set(); #samples=0; #missing=0; #external=0; #identities=new Map();
   constructor(cdp,emit,periodMs=1000){this.cdp=cdp;this.emit=emit;this.periodMs=periodMs;}
-  diagnosticSpec=null;diagnosticTask=null;diagnosticResult=null;
-  configureDiagnostic(spec){if(spec.mode!=='diagnostic'||!['cpu','allocations','heap'].includes(spec.kind))throw Error('Explicit diagnostic mode/capture required');this.diagnosticSpec=spec;}
-  #maybeDiagnose(row){
-    const spec=this.diagnosticSpec;if(!spec||this.diagnosticTask||row.identity?.family!==spec.family)return;
-    this.diagnosticTask=this.#capture(row,spec).then(result=>{this.diagnosticResult=result;},()=>{this.diagnosticResult={status:'unavailable',reason:'target-ended-or-profiling-unsupported',workerId:row.identity?.workerId,kind:spec.kind};});
-  }
-  async #capture(row,spec){
-    const session=row.sessionId,duration=Math.min(30000,Math.max(1000,spec.durationMs??5000)),started=performance.now();
-    if(spec.kind==='heap'){
-      let bytes=0,overflow=false;
-      const unsubscribe=this.cdp.onEvent(message=>{if(message.sessionId===session&&message.method==='HeapProfiler.addHeapSnapshotChunk'){
-        bytes+=Buffer.byteLength(message.params.chunk);if(bytes<=256*1024*1024)spec.chunk(message.params.chunk);else overflow=true;
-      }});
-      try{await this.cdp.send('HeapProfiler.enable',{},session);await this.cdp.send('HeapProfiler.takeHeapSnapshot',{reportProgress:false},session,120000);}
-      finally{unsubscribe();}
-      return {status:overflow?'incomplete':'available',kind:'heap',bytes,workerId:row.identity.workerId,durationMs:performance.now()-started,privateArtifact:true};
-    }
-    const domain=spec.kind==='cpu'?'Profiler':'HeapProfiler';await this.cdp.send(`${domain}.enable`,{},session);
-    await this.cdp.send(spec.kind==='cpu'?'Profiler.start':'HeapProfiler.startSampling',spec.kind==='cpu'?{}:{samplingInterval:32768,includeObjectsCollectedByMajorGC:true,includeObjectsCollectedByMinorGC:true},session);
-    await new Promise(resolve=>setTimeout(resolve,duration));
-    const result=await this.cdp.send(spec.kind==='cpu'?'Profiler.stop':'HeapProfiler.stopSampling',{},session,30000);spec.write(result.profile);
-    return {status:'available',kind:spec.kind,workerId:row.identity.workerId,durationMs:performance.now()-started,privateArtifact:true};
-  }
-  async completeDiagnostics(){if(this.diagnosticTask)await this.diagnosticTask;return this.diagnosticResult??(this.diagnosticSpec?{status:'unavailable',reason:'requested-worker-family-not-created'}:null);}
+  onDiagnosticTarget=null;
   async start(){
+    const main={sessionId:undefined,targetId:'owned-main-page',identity:{workerId:'host',runId:null,family:'host'},isolateId:null,pending:false,ended:false,created:performance.now()};
+    this.#targets.set('main',main);this.#sample(main,'attached').catch(()=>{});
     this.#stopListener=this.cdp.onEvent(message=>{
       if(message.method==='Target.attachedToTarget'&&message.params.targetInfo.type==='worker'){
         if(this.#targets.size>=1024){this.#missing++;this.emit({kind:'target-loss',reason:'target-limit',atMs:performance.now()});return;}
@@ -106,7 +85,7 @@ export class WorkerHeapSampler {
         if(typeof row.isolateId!=='string'||!row.isolateId)throw Error('isolate-identity-unavailable');
         this.#mapped.add(row.identity.workerId);
       }
-      this.#maybeDiagnose(row);
+      this.onDiagnosticTarget?.(row.identity,row.sessionId);
       const heap=await this.cdp.send('Runtime.getHeapUsage',{},row.sessionId,2000);
       if(!Number.isFinite(heap.usedSize)||!Number.isFinite(heap.totalSize))throw Error('heap-fields-unavailable');
       this.#samples++;

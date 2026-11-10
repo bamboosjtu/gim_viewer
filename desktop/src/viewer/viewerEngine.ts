@@ -1,6 +1,7 @@
 import * as OBC from '@thatopen/components';
 import * as THREE from 'three';
 import { freezeContainerLocalMatrix } from './staticContainer.js';
+import {observeRenderer} from './renderMeasurement.js';
 
 /** 3D 引擎上下文，统一导出供其他模块使用 */
 export interface ViewerContext {
@@ -22,6 +23,7 @@ export function createViewerEngine(container: HTMLElement): ViewerContext {
   freezeContainerLocalMatrix(world.scene.three);
   ((world as any).scene as any).three.background = new THREE.Color(0xeeeeee);
   world.renderer = new OBC.SimpleRenderer(components, container);
+  observeRenderer(world.renderer as OBC.SimpleRenderer);
   // WebView2 keeps the previous line-map compositor layer behind a transparent
   // WebGL canvas. OBC's renderer defaults to alpha:true/clearAlpha:0, so after
   // switching from a line project to a substation project the old map can show

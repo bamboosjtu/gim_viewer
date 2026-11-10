@@ -60,7 +60,7 @@ self.onmessage = createWorkerProbe().wrap(async ({ data }, trace) => {
       model = trace.sync('ifc.open-model', () => api.OpenModel(bytes, { COORDINATE_TO_ORIGIN: false }));
       self.postMessage({stage:'source-open-complete',elapsedMs:performance.now()-openStarted});
       sampleWasmCapacity(trace,api);trace.produced({ inputBytes: bytes.byteLength });
-      self.postMessage({ id: data.id, data: { opened: true } });
+      trace.reply({ id: data.id, data: { opened: true } });
     } else if (data.type === 'prepare-region') {
       if (model === null) throw Error('Regional source unavailable');
       const hosts = new Set<number>(
@@ -89,7 +89,7 @@ self.onmessage = createWorkerProbe().wrap(async ({ data }, trace) => {
       }
       if(!subsetReady)useFullSource();
       sampleWasmCapacity(trace,api);trace.produced({ objects: products.length });
-      self.postMessage({
+      trace.reply({
         id: data.id,
         data: { ...result, classifiedHosts: hosts.size },
       });
@@ -153,7 +153,7 @@ self.onmessage = createWorkerProbe().wrap(async ({ data }, trace) => {
             part.indices = copy.indices;
           }
       sampleWasmCapacity(trace,api);trace.produced({ objects: results.length });
-      self.postMessage(
+      trace.reply(
         { id: data.id, data: results },
         {
           transfer: [
@@ -192,7 +192,7 @@ self.onmessage = createWorkerProbe().wrap(async ({ data }, trace) => {
         true
       );
       trace.produced();
-      self.postMessage({
+      trace.reply({
         id: data.id,
         data: JSON.parse(
           JSON.stringify(
@@ -207,6 +207,6 @@ self.onmessage = createWorkerProbe().wrap(async ({ data }, trace) => {
     }
   } catch (error) {
     trace.fail(error);
-    self.postMessage({ id: data.id, error: String(error) });
+    trace.reply({ id: data.id, error: String(error) });
   }
 });

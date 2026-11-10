@@ -74,3 +74,24 @@ it('an explicit suite run ID never overwrites a prior session collector',()=>{
   resetMeasurementRun({generation:2});expect(measurementSnapshot()!.identity.runId).not.toBe(first);expect(measurementSnapshot(first)?.identity.generation).toBe(1);
   const ids=new Set([first,measurementSnapshot()!.identity.runId]);for(let i=3;i<15;i++){resetMeasurementRun({generation:i});ids.add(measurementSnapshot()!.identity.runId);}expect(ids.size).toBe(14);
 });
+it('routes a reused Worker late A result and tail to A after B starts',()=>{
+  const {port,worker}=start();worker.postMessage({kind:'compile',id:1,traceId:'shared'});
+  const a=(port.messages[1] as any)._gimMeasurement.context;
+  const event=(context:any,sequence:number,name:string,status?:string)=>({version:MEASUREMENT_VERSION,context,
+    producerId:context.workerId,sequence,clockId:'worker-clock',atMs:sequence,kind:'task',name,...(status?{status,reasonCode:'request-superseded'}:{})});
+  port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:a.workerId,batchId:1,lastSequence:1,events:[event(a,1,'started')]}}));
+  markMeasuredWorkerTaskCancellation(worker,'shared','request-superseded');
+  resetMeasurementRun({});worker.postMessage({kind:'compile',id:2,traceId:'shared'});
+  const b=(port.messages[port.messages.length-1] as any)._gimMeasurement.context;
+  port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:a.workerId,batchId:2,lastSequence:1,events:[event(b,1,'started')]}}));
+  port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:a.workerId,batchId:3,lastSequence:2,events:[event(a,2,'ended','cancelled')]}}));
+  port.dispatchEvent(new MessageEvent('message',{data:{id:1,_gimMeasurementResult:a}}));
+  expect(measurementSnapshot(a.runId)?.taskOutcomes).toEqual({cancelled:1});
+  expect(measurementSnapshot(b.runId)?.taskOutcomes).toEqual({});
+  expect(measurementSnapshot(b.runId)?.activeTasks[0].taskId).toBe('shared');
+  expect(measurementSnapshot(b.runId)?.loss.foreignRun).toBe(0);
+  expect(measurementSnapshot(a.runId)?.counters['dev:host.received'].messages).toBe(1);
+  port.dispatchEvent(new MessageEvent('message',{data:{id:2,_gimMeasurementResult:b}}));
+  expect(measurementSnapshot(b.runId)?.phases['dev:host.result-roundtrip'].count).toBe(1);
+  expect(measurementSnapshot(b.runId)?.workers[b.workerId].tasks).toBe(1);
+});

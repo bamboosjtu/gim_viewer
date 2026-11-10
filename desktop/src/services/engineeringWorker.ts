@@ -104,7 +104,7 @@ if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMes
       const reply=await handle(request, trace,(stage,completed)=>send({type:'progress',stage,completed,requestId:request.requestId})),response={...reply,requestId:request.requestId} as EngineeringWorkerResponse;
       const transfers=response.type==='model'?engineeringWorkerResultTransfers(response.result):response.type==='cache'&&response.result.bytes?[response.result.bytes.buffer as ArrayBuffer]:[];
       trace.produced({ transferBuffers: transfers.length });
-      send(response,transfers);
+      send(trace.result(response),transfers);trace.sentResult();
     }catch(error){trace.fail(error);send({type:'error',requestId:request.requestId,message:String(error)});}});});
   };
 }

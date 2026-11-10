@@ -35,11 +35,11 @@ self.onmessage=createWorkerProbe().wrap(async (event:MessageEvent<SpatialWorkerR
     } else {
       const index = trace.sync('spatial.finalize', () => builder.finalize());
       trace.produced();
-      self.postMessage({type:'complete',index} satisfies SpatialWorkerResponse);
+      trace.reply({type:'complete',index} satisfies SpatialWorkerResponse);
       return;
     }
     trace.produced();
-    self.postMessage({type:'ready'} satisfies SpatialWorkerResponse);
+    trace.reply({type:'ready'} satisfies SpatialWorkerResponse);
   } catch(error) {
     trace.fail(error);
     self.postMessage({type:'error',message:error instanceof Error?error.message:String(error)} satisfies SpatialWorkerResponse);

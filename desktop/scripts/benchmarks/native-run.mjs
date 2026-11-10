@@ -1,3 +1,6 @@
+import {CaptureController,diagnosticPlan} from './diagnostics.mjs';
+import {SystemCapture,systemCapabilities,exportSystemTables} from './system-diagnostics.mjs';
+import {analyzeRun,exportRunTrace} from './observability.mjs';
 import {spawn,spawnSync} from 'node:child_process';
 import {createServer} from 'node:net';
 import {hostname,cpus,totalmem,release,arch} from 'node:os';
@@ -33,6 +36,8 @@ async function stop(child){if(!child?.pid||child.exitCode!==null||child.signalCo
 
 /** Each call owns one native process and raw report; cold/warm share cache and WebView profile. */
 export async function runNative({root,buildManifest,sample,profileDigest='unfrozen',mode='benchmark',scenario='open',cacheState='cold',dataRoot,timeoutMs=300000,doctor=false,actions=[],diagnostic,additionalSamples=[],exercise,signal,onStarted=()=>{},environmentCalibration=null}){
+  const plan=diagnosticPlan(diagnostic?.captures?diagnostic:null,diagnostic?.kind?diagnostic:null);
+  if(plan&&mode!=='diagnostic')throw Error('diagnostic-mode-required');
   if(process.platform!=='win32')throw Error('Native benchmark requires Windows');
   if(!environmentCalibration&&!doctor){
     try{environmentCalibration=calibrateBatch(root);}
@@ -80,11 +85,17 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   const debugPort=await port(),env={...process.env,TEMP:out,TMP:out,TMPDIR:out,LOCALAPPDATA:out,APPDATA:out,
     GIM_BENCHMARK_MANIFEST:manifestPath,WEBVIEW2_USER_DATA_FOLDER:profile,WEBVIEW2_BROWSER_EXECUTABLE_FOLDER:runtime,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${debugPort} --remote-debugging-address=127.0.0.1 --enable-logging --log-file="${join(out,'webview.private.log')}" --v=1`};
+  let systemCapture;
+  if(plan?.system){systemCapture=new SystemCapture(root,out,plan.system,{...build,manifestPath:buildManifest});await systemCapture.start();}
+  const applicationStartedAtMs=performance.now();
   const child=spawn(executable,[],{cwd:folder,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
   let spawnFailed=false;child.on('error',()=>{spawnFailed=true;});
   // Raw output is private. Cap bytes; logs are never copied into report.json.
   let logFailures=0;
   for(const name of ['stdout','stderr']){let bytes=0;child[name].on('data',data=>{try{if(bytes<4*1024*1024)appendFileSync(join(out,`${name}.private.log`),data);}catch{logFailures++;}bytes+=data.length;});}
+  const gpuEvidence={requested:plan?.gpu===true,samples:0,available:0,unavailable:0,unsupported:0};
+  let traceOutputBytes=0,traceOutputTruncated=false;
+  let captures,captureResults=null,systemResult=null,diagnosticCapabilities=null;
   let cdp,sampler,observation=null,cleanupComplete=false,reason=null,finalEvidenceFailure=null,lateBackgroundTasks=false,crashed=false,heapRows=0,processPeak=null,settledMs=null;
   let openAttempted=false,endpointError=null,exitBeforeCleanup=null;
   const heaps=new Map(),heapRecords=new Map(),processSamples=[];let events=0,hostSamplingFailures=0,streamFailures=0,evidence=null,automaticMs=null,cachePublishMs=null,productPeak=null;
@@ -98,6 +109,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       for(const [key]of batch)acknowledgements.delete(key);
     }catch{/* A delayed page response is retried; ack is idempotent. */}finally{ackRunning=false;}
   };
+  let applicationReadyMs=null,settledObservedAtMs=null;
   const actionResults=[];const actionTargets=[];
   let exerciseResult=null;
   const started=performance.now();let lastSnapshotAt=started,observationGapMs=0;
@@ -125,6 +137,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       throw Error(gpuFailure?'webview-gpu-process-launch-failed':'native-cdp-unavailable');
     }
     while(await cdp.evaluate('typeof globalThis.__gimBenchmark')!=='object'){if(performance.now()-started>45000)throw Error('benchmark-api-unavailable');await delay(250);}
+    applicationReadyMs=performance.now()-applicationStartedAtMs;
     const database=await cdp.evaluate("globalThis.__TAURI_INTERNALS__.invoke('get_db_path')");
     if(resolve(database).toLowerCase()!==join(dataRoot,'gim_cache_schema_v1.db').toLowerCase())throw Error('native-cache-root-mismatch');
     sampler=new WorkerHeapSampler(cdp,row=>{
@@ -147,9 +160,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       }
       if(row.availability==='available'){const old=heaps.get(row.workerId);heaps.set(row.workerId,{workerId:row.workerId,family:row.family,isolateId:row.isolateId,samples:(old?.samples??0)+1,observedPeakBytes:Math.max(old?.observedPeakBytes??0,row.bytes),maxSampleDelayMs:Math.max(old?.maxSampleDelayMs??0,row.sampleDelayMs)});}
     });
-    if(diagnostic){sampler.configureDiagnostic({...diagnostic,mode,
-      write:profile=>writeFileSync(join(out,diagnostic.kind==='cpu'?'diagnostic.private.cpuprofile':'diagnostic.private.heapprofile'),JSON.stringify(profile)),
-      chunk:chunk=>appendFileSync(join(out,'diagnostic.private.heapsnapshot'),chunk)});}
+    if(plan){captures=new CaptureController(cdp,out,plan);sampler.onDiagnosticTarget=(identity,sessionId)=>captures.target(identity,sessionId);}
     if(mode==='benchmark'||mode==='diagnostic')await sampler.start();
     cdp.onEvent(message=>{
       if(message.method!=='Runtime.bindingCalled'||message.params.name!=='__gimMeasurementEmit')return;
@@ -157,7 +168,11 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
         const frame=JSON.parse(message.params.payload);
         if(typeof frame.runId!=='string'||!Number.isSafeInteger(frame.batchId)||!Array.isArray(frame.events)||frame.events.length>128)throw Error('invalid-frame');
         for(const event of frame.events)if(event.kind==='worker'&&event.name==='created'&&event.workerUrl)sampler.associate(event.workerUrl,frame.contexts[event.contextIndex]);
-        appendFileSync(join(out,'events.jsonl'),JSON.stringify(frame)+'\n');events+=frame.events.length;
+        for(const record of frame.events)if(record.trace?.name==='gpu.elapsed'){gpuEvidence.samples++;if(record.trace.action in gpuEvidence&&typeof gpuEvidence[record.trace.action]==='number')gpuEvidence[record.trace.action]++;}
+        for(const record of frame.events)captures?.event({...record,context:frame.contexts[record.contextIndex],controllerReceivedMs:performance.now()});
+        const raw=JSON.stringify(frame)+'\n',size=Buffer.byteLength(raw);
+        if(!plan||traceOutputBytes+size<=plan.maxTraceBytes){appendFileSync(join(out,'events.jsonl'),raw);traceOutputBytes+=size;}else traceOutputTruncated=true;
+        events+=frame.events.length;
         if(acknowledgements.size>=128)throw Error('ack-window-overflow');
         acknowledgements.set(`${frame.runId}:${frame.batchId}`,[frame.runId,frame.batchId]);
       }catch{streamFailures++;}
@@ -165,12 +180,18 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     await cdp.send('Runtime.addBinding',{name:'__gimMeasurementEmit'});await cdp.evaluate('globalThis.__gimBenchmark.stream()');
     ackTimer=setInterval(()=>{flushAcks().catch(()=>{streamFailures++;});},50);
     if(doctor){
+      const supported={};for(const domain of ['Profiler','HeapProfiler']){try{await cdp.send(domain+'.enable');await cdp.send(domain+'.disable');supported[domain]='available';}catch{supported[domain]='unavailable';}}
+      const gpu=await cdp.evaluate("(()=>{const canvas=document.createElement('canvas');const gl=canvas.getContext('webgl2');if(!gl)return {availability:'unsupported',reason:'webgl2-missing'};const available=!!gl.getExtension('EXT_disjoint_timer_query_webgl2');gl.getExtension('WEBGL_lose_context')?.loseContext();return {availability:available?'available':'unsupported',actualCaptureVerified:false};})()");
+      diagnosticCapabilities={cdp:supported,gpu};
       await cdp.evaluate('globalThis.__gimBenchmark.capabilityProbe()');await delay(3500);
       observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');await cdp.evaluate('globalThis.__gimBenchmark.endCapabilityProbe()');
     }else{
       // Start without blocking the sampling loop on the open Promise.
       const args=[sample.sampleId,manifest.nonce,{runId,sourceSha256:sample.sourceSha256,buildId:build.sourceFingerprint,mode}];
       await processSampler.checkpoint('open-start');
+      if(plan?.gpu)await cdp.evaluate('globalThis.__GIM_GPU_DIAGNOSTICS__=true');
+      await captures?.start();
+      if(signal?.aborted)throw Error('run-cancelled');
       openAttempted=true;
       await cdp.evaluate(`globalThis.__gimBenchmark.open(...${JSON.stringify(args)}).catch(()=>{}); undefined`);
       let stableSince=null,completed=false,lastCheckpointAt=0,lastProgressAt=performance.now(),progressKey='';
@@ -206,7 +227,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
         if(stalled){reason=stalled;break;}
         if(automaticMs!==null&&readyForSettle(observation,{cacheState})){
           cachePublishMs??=cachePublicationMoment(observation);
-          stableSince??=performance.now();if(performance.now()-stableSince>=3000){completed=true;settledMs=observation.openElapsedMs;break;}
+          stableSince??=performance.now();if(performance.now()-stableSince>=3000){completed=true;settledObservedAtMs=observation.snapshotAtMs;settledMs=observation.openElapsedMs;break;}
         }else stableSince=null;
         if(!observation.opening&&!observation.projectType)throw Error('project-open-unavailable');
         await delay(1000);
@@ -232,7 +253,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
         stableSince=null;
         for(let i=0;i<120&&!reason;i++){
           observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
-          if(readyForSettle(observation,{cacheState})){stableSince??=performance.now();if(performance.now()-stableSince>=3000){settledMs=observation.openElapsedMs;break;}}else stableSince=null;
+          if(readyForSettle(observation,{cacheState})){stableSince??=performance.now();if(performance.now()-stableSince>=3000){settledObservedAtMs=observation.snapshotAtMs;settledMs=observation.openElapsedMs;break;}}else stableSince=null;
           await delay(1000);if(i===119)reason='scenario-settle-timeout';
         }
       }
@@ -247,7 +268,6 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       await delay(100);if(attempt===49)streamFailures++;
     }
     if(acknowledgements.size)streamFailures++;
-    await sampler.completeDiagnostics();
     observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
     lateBackgroundTasks=observation.measurement.activeTasks.length>0;
     for(let attempt=0;attempt<30&&observation.measurement.activeTasks.length&&!reason;attempt++){
@@ -276,7 +296,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       }
       await delay(3000);
       observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
-      settledMs=observation.openElapsedMs;
+      settledObservedAtMs=observation.snapshotAtMs;settledMs=observation.openElapsedMs;
     }
     if(observation.measurement.activeTasks.length&&!reason)reason='post-settle-task-incomplete';
     if(!reason&&!doctor&&!exercise){
@@ -301,6 +321,11 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
         templateDiagnosticsStatus='available';
       }catch{templateDiagnosticsStatus='unavailable';}
     }
+    if(mode==='diagnostic'&&cdp&&!cdp.closed){await cdp.evaluate('globalThis.__gimBenchmark.finishOperation('+JSON.stringify(settledObservedAtMs)+')').catch(()=>{});
+      await delay(150);await flushAcks();await delay(100);}
+    if(captures)captureResults=await captures.stop();
+    if(systemCapture){systemResult=await systemCapture.stop();
+      if(systemResult.status==='available')systemResult.export=await exportSystemTables(root,join(out,'system'),join(out,'system','system.private.etl'),{...plan.system,ownedProcesses:[...new Map(processSamples.flatMap(row=>(row.processInstances??[]).map(([pid,created])=>[pid+':'+created,{pid,created}]))).values()]}).catch(()=>({availability:'unavailable',reason:'system-export-failed'}));}
     clearInterval(ackTimer);sampler?.stop();cdp?.close();const sampling=await processSampler.stop();if(sampling.failures)streamFailures+=sampling.failures;
     exitBeforeCleanup={code:child.exitCode,signal:child.signalCode};
     try{await stop(child);cleanupComplete=true;}catch{reason='owned-process-cleanup-failed';}}
@@ -389,7 +414,11 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       processPrivatePeakBytes:processMemoryComplete?productPeak??processPeak:null,
       wholeRunPrivatePeakBytes:processMemoryComplete?processPeak:null},
     completionDefinition:'automatic-representations-then-cache-and-spatial-terminal-with-quiet-window-not-all-L2',evidence,eventFormat:'context-table-v1',streamFailures,
-    actionResults,actionTargetDigests:actionTargets,diagnostic:sampler?.diagnosticResult??null,logFailures,
+    actionResults,actionTargetDigests:actionTargets,diagnostic:captureResults?.[0]??null,
+    traceOutput:{bytes:traceOutputBytes,truncated:traceOutputTruncated,limit:plan?.maxTraceBytes??null},
+    diagnostics:{configuration:plan,captures:captureResults,system:systemResult,gpu:{...gpuEvidence,method:'elapsed-query-command-range',availability:!gpuEvidence.requested?'not-requested':gpuEvidence.available?'available':gpuEvidence.unsupported?'unsupported':'unavailable'}},
+    applicationStartup:{method:'controller-spawn-to-first-owned-benchmark-api-observation',elapsedMs:applicationReadyMs,startedAtMs:applicationStartedAtMs},
+    diagnosticCapabilities,systemCapabilities:doctor?systemCapabilities():null,logFailures,
     exercise:exerciseResult,
     processSampling:{complete:processMemoryComplete,samples:processSamples.length,
       available:processSamples.filter(row=>row.availability==='available').length,
@@ -405,5 +434,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       measurement?.detailComplete&&measurement?.lifecycleComplete&&!measurement.activeTasks.length
       &&observation?.capabilityResult?.moduleExecutions===1&&observation?.capabilityResult?.roundTripValue===18?'PASS':'INCONCLUSIVE'};
   Object.assign(report,runReadiness(report));
-  writeFileSync(join(out,'report.json'),JSON.stringify(report,null,2));return {out,report,dataRoot};
+  writeFileSync(join(out,'report.json'),JSON.stringify(report,null,2));
+  if(plan){await analyzeRun(root,join(out,'report.json'));await exportRunTrace(root,join(out,'report.json'));}
+  return {out,report,dataRoot};
 }

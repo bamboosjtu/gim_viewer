@@ -27,6 +27,7 @@ export function partialSignature(run){const row=run.defectAssessment??{};
       `source-geometry:${row.sourceSetDigest}:${row.failedOccurrences}`;
 }
 export function runReadiness(run){
+  if(run.artifactRole==='public-derived')return {outcome:'INCONCLUSIVE',reasons:['public-derived-is-not-authoritative']};
   if(run.recovery)return {outcome:'INCONCLUSIVE',reasons:['recovered-interruption']};
   if(run.environmentSuspend?.code==='INFRA_SUSPEND')return {outcome:'INCONCLUSIVE',reasons:['INFRA_SUSPEND']};
   if(run.inputIntegrity==='corrupt')return {outcome:'INPUT_ERROR',reasons:['INPUT_CORRUPT']};
@@ -73,6 +74,7 @@ export function runReadiness(run){
 }
 /** Suite evidence must be complete before per-run timing comparisons. */
 export function suiteCompletenessIssues(suite){
+  if(suite.artifactRole==='public-derived')return ['public-derived-is-not-authoritative'];
   if(suite?.version==='gim-batch-results-v1'){
     const issues=[];
     if(suite.status!=='COMPLETE')issues.push('batch-not-complete');
