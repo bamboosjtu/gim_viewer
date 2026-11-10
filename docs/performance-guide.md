@@ -1,6 +1,6 @@
 # 性能测试指南
 
-本页只定义**怎么测**：手工 Release + CDP 路线下的 SLO 定义、冷/暖步骤、证据导出和错误清单，面向单机验收与诊断。权威实测结果以开发者本地 CLI 打印的 `privateResults` 和 `tmp/gim-bench/` 私有报告为准；`output/` 只是匿名派生视图。本页不复制结果数字。
+本页只定义**怎么测**：手工 Release + CDP 路线下的 SLO 定义、冷/暖步骤、证据导出和错误清单，面向单机验收与诊断。权威实测结果以开发者本地 CLI 打印的 `privateResults` 和 `tmp/gim-bench/` 私有报告为准；`output/` 为默认匿名派生视图，显式非匿名 survey 例外。本页不复制结果数字。
 
 读者包括按步骤验收的用户/验收人员，以及用固定构建、样本、缓存状态和结构化 JSON 复现的 Agent/开发者。
 
@@ -27,10 +27,10 @@
 |---|---|---|---|
 | 手工 Release + CDP | 本页 | 单机验收、逐轮人工确认、定位单样本问题 | 状态栏与人工记录、`Ctrl+Shift+B` JSON、诊断导出 |
 | 批量注册表 | `npm run bench -- batch` / `matrix`，见 [Benchmark CLI](benchmark.md) | 注册表批次、冷暖配对、比较与汇总报告 | 私有 `privateResults`、CSV/HTML 报告、Profile |
-| 详细 Trace / Profile | `npm run bench -- run --mode diagnostic --diagnostics <配置>`，再 `analyze` / `export-trace`，见 [Benchmark CLI](benchmark.md#详细-trace-与-profile) | 单样本深挖、等待/阻塞链、CPU/Allocation/Heap、GPU 与系统级诊断 | 私有 Trace/Profile、`analysis.private.json`、Perfetto 时间线 |
+| 详细 Trace / Profile | `npm run bench -- run --mode diagnostic --diagnostics <配置>`，再 `analyze` / `export-trace`，见 [Benchmark CLI](benchmark.md#详细-trace-与-profile) | 单样本深挖、等待/阻塞链、CPU/Allocation/Heap、GPU；WPR/PMC 入口关闭，已采集 ETL 的 WPA 摘要可用 | 私有 Trace/Profile、`analysis.private.json`、Perfetto 时间线 |
 
 - 手工路线在本页展开，适合需要观察界面、状态栏、DevTools 或对单个样本做诊断的场景；它不替代批量报告。
-- 批量路线由 [Benchmark CLI](benchmark.md) 定义命令、注册表、报告字段、状态和退出码；本页不复制这些参数。权威结果在 `tmp/`，`output/` 为匿名派生视图。
+- 批量路线由 [Benchmark CLI](benchmark.md) 定义命令、注册表、报告字段、状态和退出码；本页不复制这些参数。权威结果在 `tmp/`，`output/` 为默认匿名派生视图。
 - 详细 Trace/Profile 只服务诊断，不参加普通性能比较或基线批准；缺少 Trace 证据时分析明确输出部分覆盖。
 - 三条路线都使用固定 WebView2 的原生 Release、独立进程和同一套冷暖语义。构建、运行时、Profile 或 viewport 不同的结果不能直接合并。
 
@@ -376,6 +376,7 @@ globalThis.__GIM_BENCHMARK_COLD_WARM__ = 'cold';
 
 - DEV `devGeometryProfile` 中的 `viewIndex` 提供 entries/rebuilds/visitedNodes/testedBoxes/candidates，表示空间筛选规模，不等于帧耗时改善。
 - 使用同一固定路线比较实际帧间隔和长任务；当前调度仍逐 occurrence 检查基础任务。
+- 桌面三维采用按需绘制：静止场景不重复提交，相机、选择、显隐、窗口或渐进几何变化才刷新。比较帧间隔和长任务时须区分主动交互、渐进加载与空闲；空闲无新帧不等于渲染冻结或帧率下降。
 
 **实例化 A/B**：
 
@@ -502,7 +503,7 @@ commit：<sha>
 5. 只有冷启动基础表示 settled 且对应缓存写入完成的样本才做完整暖启动；重启进程但不删缓存。
 6. 完整矩阵为每样本 3 次冷/3 次暖；最低矩阵为 1 次冷/3 次暖，并显式写明缺口。记录中位数和最大值。
 7. 把 JSON 与汇总表放在同一目录，表中引用 JSON 文件名。
-8. 权威结果由 Benchmark 私有报告保存；手工 `Ctrl+Shift+B` JSON 只作验收记录。分享前按 [Benchmark 报告规则](benchmark.md#报告文件与判读边界)使用匿名派生视图。
+8. 权威结果由 Benchmark 私有报告保存；手工 `Ctrl+Shift+B` JSON 只作验收记录。分享前按 [Benchmark 报告规则](benchmark.md#报告文件与判读边界)使用默认匿名派生视图（显式非匿名 survey 例外）。
 9. 若改变缓存版本、Worker 数量、LOD 策略或 IFC 队列顺序，重新跑完整矩阵，不能只跑受影响样本后宣称全局回归通过。
 
 ## 相关命令速查
@@ -534,9 +535,9 @@ Invoke-RestMethod 'http://127.0.0.1:9222/json' | Select-Object title, url, webSo
 
 ## 相关文档
 
-- 本地 `tmp/gim-bench/`：权威私有报告与 Trace/Profile；`output/`：匿名派生视图，均不随仓库分发；
+- 本地 `tmp/gim-bench/`：权威私有报告与 Trace/Profile；`output/`：默认匿名派生视图（显式非匿名 survey 例外），均不随仓库分发；
 - [benchmark.md](benchmark.md)：批量 `npm run bench -- batch/matrix` 路线、注册表、报告字段、状态与退出码；
-- [详细 Trace 与 Profile](benchmark.md#详细-trace-与-profile)：单样本深挖、CPU/Allocation/Heap 与系统诊断；
+- [详细 Trace 与 Profile](benchmark.md#详细-trace-与-profile)：单样本深挖、CPU/Allocation/Heap、GPU 与离线 WPA 摘要；WPR/PMC 录制入口当前关闭；
 - [architecture/measurement.md](architecture/measurement.md)：测量协议、采集面、完整性口径与原生门禁；
 - [validation.md](validation.md)：验证证据边界和验收规则；
 - [open-issues.md](open-issues.md)：未关闭缺陷与已知限制；

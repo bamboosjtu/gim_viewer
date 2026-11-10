@@ -14,7 +14,7 @@ it('preserves transfer identity, seals queued failures and terminates once',()=>
   expect(port.transfers[1]).toBe(transfer);expect((port.messages[1] as any).bytes).toBe(buffer);
   port.fail=true;expect(()=>worker.postMessage({kind:'compile',id:2})).toThrow('clone-failed');
   worker.terminate();worker.terminate();expect(port.stops).toBe(1);expect(measurementSnapshot()).toMatchObject({
-    activeTasks:[],taskOutcomes:{failed:1,cancelled:1},loss:{cancelledBeforeStart:1,interruptedTasks:0},
+    activeTasks:[],taskOutcomes:{failed:1,aborted:1},loss:{cancelledBeforeStart:0,interruptedTasks:1,unexpectedWorkerTerminations:1},
   });
 });
 it('late messages stay with the captured run; replacement instances never reuse IDs',()=>{
@@ -22,6 +22,13 @@ it('late messages stay with the captured run; replacement instances never reuse 
   resetMeasurementRun({});worker.terminate();expect(measurementSnapshot()?.taskOutcomes).toEqual({});
   expect(measurementSnapshot(before.runId)?.workers[before.workerId].state).toBe('terminated');
   const next=new Port();createMeasuredWorker('dev',()=>next as unknown as Worker);expect((next.messages[0] as any).context.workerId).not.toBe(before.workerId);
+});
+it('dispatches the current run mode when an existing Worker crosses run boundaries',()=>{
+  const {port,worker}=start();
+  (globalThis as any).__GIM_MEASUREMENT_CONFIG__={mode:'diagnostic'};resetMeasurementRun({});
+  worker.postMessage({kind:'compile',id:1});
+  expect((port.messages[port.messages.length-1] as any)._gimMeasurement).toMatchObject({mode:'diagnostic',context:{runId:measurementSnapshot()!.identity.runId}});
+  worker.terminate();
 });
 it('control telemetry is consumed before application message listeners',()=>{
   const {port}=start(),callback=vi.fn();port.addEventListener('message',callback);

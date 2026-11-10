@@ -25,7 +25,7 @@
 | 桌面适配 | `desktop/src/measurement/` | 宿主/Worker 探针、任务与阶段、Trace 归属、Profile 采集、GPU/渲染观测 |
 | 本地 CLI 与报告 | `desktop/scripts/benchmarks/` | 构建、批量/矩阵、比较与基线、Trace 分析与导出、系统诊断和报告 |
 | 权威产物 | 工作区 `tmp/gim-bench/` | 含来源身份的候选、冻结 Profile、私有 Trace/Profile、批准记录；不随仓库分发 |
-| 可分享视图 | 工作区 `output/` | 白名单派生报告；`artifactRole=public-derived`，不能用于 gate、批准或正式比较 |
+| 可分享视图 | 工作区 `output/` | 白名单派生报告，默认匿名；显式非匿名 survey 只额外展示样本文件名。`artifactRole=public-derived`，不能用于 gate、批准或正式比较 |
 
 先行约定：**测量只观察，不决定业务任务是否有效**；产品时刻仍取 `perfTimings`，Trace 不重算原有产品时刻或聚合指标。
 
@@ -54,7 +54,7 @@
 | Trace | Operation/Span/scope/dependency/wait/resource/message/milestone/health/render；Collector 有界保留，见后文 |
 | CPU/Allocation/Heap Profile | 仅 `diagnostic`；主线程或指定 Worker 的有界 CDP 采样，产物留私有目录 |
 | GPU/渲染 | Three 异步 Timer Query（每 Pass，最多 8 个在途、5 秒超时）；线路记录 MapLibre render 帧间隔 |
-| Windows 系统诊断 | 显式 WPR/PMC 采集与 WPA 摘要；需要本机工具、提权和冻结 Profile |
+| Windows 系统诊断 | WPR/PMC 录制入口关闭（`authenticated-system-helper-required`）；离线 WPA 摘要与能力探测仍可用 |
 
 `MemoryLedger` 提供共享所有权、复制、转移、释放及唯一容量核算；它是可追踪资源账本，不等于 JS 堆或 OS 内存。多个 TypedArray 的同一 backing buffer 只计一次。字符串/IR 权重、预算、WASM 容量、进程 Private Bytes 不相加作为“总 Worker 内存”。图形资源计数也不代表精确 GPU 显存。
 
@@ -98,7 +98,7 @@ DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位�
 - **暖开校验。** 依据来源缓存数量、缺失数和 parser 版本；没有请求远景 LOD 的 `open` 场景不要求 `ifcFarHits`。
 - **几何失败。** 只汇总受控 reason/status 与数量，不输出 DEV 路径和原始诊断文本。
 
-子命令、参数、注册表、报告文件与退出码见[本地批量 Benchmark](../benchmark.md)。命令在 `desktop/` 执行，全部新产物位于工作区 `tmp/gim-bench/`。原始路径映射、运行授权 nonce、日志与 WebView profile 不属于可分享报告。分享报告使用匿名身份、数值与受控状态；不从日志做简单文件名裁剪后当作脱敏。
+子命令、参数、注册表、报告文件与退出码见[本地批量 Benchmark](../benchmark.md)。命令在 `desktop/` 执行，全部新产物位于工作区 `tmp/gim-bench/`。原始路径映射、运行授权 nonce、日志与 WebView profile 不属于可分享报告。分享报告默认使用匿名身份、数值与受控状态；显式 `--anonymize false` 的 survey 只允许保留标准方案号或已匿名验证样本的 `.gim` 文件名，不放开源 SHA、路径、原始 Profile 或批准记录。不从日志做简单文件名裁剪后当作脱敏。
 
 可分享派生汇总写入 `output/gim-bench/`；含来源身份的候选、冻结 Profile 和验收记录保存在 `tmp/gim-bench/`。Profile 按内容摘要命名，不覆盖已有冻结版本；样本与动作选择规则一起冻结。近景检查结束返回原相机位置，避免把未声明的持续近景精化混入后续场景。`doctor` 不需要工程样本，并拒绝任何源文件授权；它只检查原生启动、工作区缓存、模块单实例、读取 RPC、Worker 堆及进程树采样。
 
@@ -110,31 +110,29 @@ DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位�
 
 ## Operation Trace 与定点诊断
 
-详细采集使用 `diagnostic`，仍共享 `MEASUREMENT_VERSION`。新增 `kind=trace` 携带 `operation`、`span`、`scope`、`dependency`、`wait`、`resource`、`message`、`milestone`、`health`、`render` 记录；Producer 使用独立序号，Collector 的 Trace 缓冲及损失与原有聚合完整性分开。Collector 最多保留 8192 条 Trace（关键记录优先，普通记录上限 8064 条）、4096 个活动 Span，每批最多 128 条；溢出计入 `traceHealth`，不补配。`Probe.phase()` 捕获不可变上下文并返回子上下文；`measure/measureSync` 把子上下文传给回调。原有 phase 区间仍只聚合一次。普通 Benchmark 不启用这些详细记录。
+详细采集使用 `diagnostic`，仍共享 `MEASUREMENT_VERSION`。新增 `kind=trace` 携带 `operation`、`span`、`scope`、`dependency`、`wait`、`resource`、`message`、`milestone`、`health`、`render` 记录。Collector 在缓冲前核对 Trace producer/owner、执行器与时钟绑定，并按 producer 独立检查序号高水位；重复、缺口和非法归属同时进入接收损失与 `traceHealth`，使接收完整性不可通过。纯容量丢弃只使详细/Trace 证据不完整，不改变已收聚合值。Collector 最多保留 8192 条 Trace（关键记录优先，普通记录上限 8064 条）、4096 个活动 Span，每批最多 128 条；快照只保留活动数量及最多 64 个 ID，不复制事件。`Probe.phase()` 捕获不可变上下文并返回子上下文；`measure/measureSync` 把子上下文传给回调。原有 phase 区间仍只聚合一次。普通 Benchmark 不启用这些详细记录。
 
-工程打开在 reset 后建立 Operation；现有精化/近景动作各建 Operation。产品时刻继续取原有 perfTimings，原有指标不因 Trace 分析重算。宿主响应优先核对结果 Envelope 的运行、任务和 attempt；没有 Envelope 时仅接受唯一请求 ID 匹配，不使用 Worker 当前任务推断。归属记录最多保留 4096 项，Collector 档案最多 16 个；超出保留范围的证据不得补配新操作。
+工程打开在 reset 后建立根 Operation；精化/近景等重叠动作使用同根子 Span 和独立能力 scope。默认主线程上下文始终属于根操作，异步动作须显式传递入口捕获的子上下文，不能用“最后活动的动作”推断归属。产品时刻继续取原有 perfTimings，原有指标不因 Trace 分析重算。宿主响应优先核对结果 Envelope 的运行、任务和 attempt；没有 Envelope 时仅接受唯一请求 ID 匹配，不使用 Worker 当前任务推断。归属记录最多保留 4096 项，Collector 档案最多 16 个；超出保留范围的证据不得补配新操作。
 
-主线程和 Worker 提供有效能力窗口；Worker 初始化及每 30 秒输出分段校准，映射有效期 30 秒。同域 duration 不重算，旧的单 offset 只作历史信息，不据此证明新的跨域顺序。缺少窗口关闭、生命周期、校准或尾批时，分析输出部分覆盖。
+主线程和 Worker 提供有效能力窗口；Worker 初始化及每 30 秒输出分段校准，映射有效期 30 秒。新 Probe 使用独立 producer epoch；跨 run 复用时由宿主派发对应模式，首次出现的新 run 不报告保留过期。真正淘汰的旧 run 重建只记录 `worker-probe-retention-expired`，不复用已消费序号；runId 在 reset 后不可改写。任务终态仅保留状态/原因，在该 Collector 的整个 run 生命周期内有效，不按 8192 条插入序驱逐。Worker 终止区分显式项目取消、任务取消和空闲回收；未声明原因的终止计入 unexpected，不能把排队任务自动记为干净取消。同域 duration 不重算，旧的单 offset 只作历史信息，不据此证明新的跨域顺序。缺少窗口关闭、生命周期、校准或尾批时，分析输出部分覆盖。
 
-`analyze` 离线读取最多 100000 条事件，归并生命周期和兼容区间、隔离冲突，并对明确依赖及有实例身份的槽位约束分析指定里程碑；每个里程碑最多保留 64 个候选路径。父 inclusive 不再计权；没有明确前置的里程碑、未解释时隙或缺少执行边界时输出 Partial Blocking Path。等长前置保留候选。等待入口/解除单列，资源约束不冒充数据依赖。结果写入报告同目录的 `analysis.private.json`，终端只打印覆盖摘要。该分析是观测解释，不预测优化收益。
+`analyze` 离线读取最多 100000 条事件，归并生命周期和兼容区间、隔离冲突，并对明确依赖及有实例身份的槽位约束分析指定里程碑；逐任务终点只分析 duration 最大的前 16 项，记录候选总数和省略数，不为每个终点重复扫图。每个里程碑最多保留 64 条最大累计权重的等长候选，不以结束时间晚替代路径权重。父 inclusive 不再计权；没有明确前置的里程碑、未解释时隙或缺少执行边界时输出 Partial Blocking Path。等待入口/解除单列，资源约束不冒充数据依赖。`analysis.private.json` 只存归并摘要、边和 `eventRefs`，原始事件仍在 `events.jsonl`；HTML 只内嵌有界概览，内部报告链接 `trace.private.json`。Pipeline 数值显式标为可重叠 span duration 之和，不是墙钟时长。终端只打印覆盖摘要，该分析是观测解释，不预测优化收益。
 
 `export-trace` 写入报告同目录的私有 `trace.private.json`（Chrome Trace Event JSON，Perfetto 可读），时间戳为微秒，elapsed 跨 await 使用异步轨道。只导出有映射的区间；元数据保留未映射、冲突和未闭合。GPU Query 只有 duration，挂到对应 Pass，不伪造 GPU 绝对时间。
 
-CPU Profile 由控制器启动，单次诊断最多 8 个 capture，默认窗口 5 秒、上限 30 秒、单产物上限 256 MiB；支持预置、控制器定时和活动慢 Span 触发，也可用 `captures=[]` 仅采 Trace。主线程定时器被阻塞不能回溯采样。每份产物保存请求参数、实际控制器窗口、CDP 原始窗口及观测到的上下文；窗口关联仍可能包含同 isolate 的其他工作，不能作为操作独占 CPU 证据。采样热点按 timeDeltas 估算，`cpuTimeAvailable=false`。
+CPU Profile 由控制器启动，单次诊断最多 8 个 capture，默认窗口 5 秒、上限 30 秒、单产物上限 256 MiB；支持预置、控制器定时和活动慢 Span 触发，也可用 `captures=[]` 仅采 Trace。slow-span 使用独立有界活动索引，溢出时标记 `slow-span-index-overflow`；活动索引溢出与历史关联截断分别报告。主线程定时器被阻塞不能回溯采样。每份产物保存请求参数、实际控制器窗口、CDP 原始窗口及观测到的上下文；窗口关联仍可能包含同 isolate 的其他工作，不能作为操作独占 CPU 证据。CDP Profile 与控制器时钟的跨域映射尚未验收，`clockMapping` 保持 unavailable，仅保留私有 `commandBracketCandidate`，不能据此归因精确 Span CPU。采样热点按 timeDeltas 估算，`cpuTimeAvailable=false`。
 
-Three 通过公开 renderer 事件采集提交区间、帧/Pass 计数并恢复 info.autoReset。GPU 使用可选异步 Timer Query，最多 8 个在途查询、5 秒超时，无效/停止时释放。线路只通过 MapLibre 公开 render 事件记录帧间隔，不声称取得线路 GPU Pass 边界。内存账本增加登记范围的累计分配、复制、转移和按 retain 请求定义的复用计数；主线程/Worker isolate 采样与进程 Private Bytes 分开。
+Three 通过公开 renderer 事件采集提交区间、帧/Pass 计数，不修改 `info.autoReset` 或重置产品计数；原先关闭自动重置时按前后差值记录。公开 `update` 边界的 `finally` 负责在绘制或监听器异常时结算失败阶段。GPU 使用可选异步 Timer Query，最多 8 个在途查询、5 秒超时，按 Pass ID 结束；重叠开始会丢弃并释放旧 query，旧 Pass 的迟到结束不能关闭新 query，无效/停止时释放。线路只通过 MapLibre 公开 render 事件记录帧间隔，不声称取得线路 GPU Pass 边界。内存账本增加登记范围的累计分配、复制、转移和按 retain 请求定义的复用计数；主线程/Worker isolate 采样与进程 Private Bytes 分开。
 
 ## Windows 系统诊断适配
 
-显式诊断配置可启动随 Benchmark 构建复制并绑定 SHA 的短生命周期 PowerShell 提权辅助进程。产品保持普通权限。辅助进程核对工作区路径、重解析点、构建清单/EXE/辅助脚本哈希和控制器创建时间；使用随机 WPR 实例名，仅停止该实例。系统临时文件、符号路径和 ETL 留在工作区 tmp；不启用 boottrace、注册表堆追踪或自动符号下载。
+WPR/PMC 系统录制入口当前关闭：显式诊断配置在窗口/缓冲校验后返回 `unavailable` / `authenticated-system-helper-required`，不启动提权、不读取计划控制的路径，也不生成 WPRP/ETL。旧的可写计划 helper 不能作为认证通道；恢复需要受保护 helper、可信根和经认证的控制器通道，见[问题与限制](../open-issues.md) O-20。`systemCapabilities` 仍探测本机 WPR、WPAExporter 与 PMC，但 `elevatedCaptureAvailable=false`。
 
-WPR 配置由受控关键词生成，要求显式 durationMs（上限 30 秒）和 bufferMiB（8–256 MiB）；PMC 从本机枚举结果中选最多三项。GPU 系统活动可选。缺少提权、工具或实际采集失败均保留独立状态，不改变产品正确性。
-
-WPA 自动摘要要求本地安装 WPAExporter，并显式指定由对应 WPT 保存的 `.wpaProfile`、内容 SHA 和列/单位契约。CLI 不猜列位置和时间单位。PID 必须同时匹配进程创建时间；原生独立采样器提供进程实例及 QPC 元数据。无匹配身份或列变化时摘要不可用，不输出伪零值。ETL 原件及 WPR 状态日志保留；系统丢失证据未核实时明确 unverified。固定 WebView2 GPU、WPRP 与本机 WPA Profile 的实际兼容和开销仍需开发者人工验收，代码单元测试不证明该项通过。
+离线 WPA 摘要仍可用于受控流程已采集的 ETL：要求本地 WPAExporter、显式 `.wpaProfile` 与内容 SHA，以及列/单位契约；PID 必须同时匹配进程创建时间。没有匹配的 owned process 实例、PID/创建时间不符或列变化时摘要标 unavailable（如 `owned-process-instance-not-matched`），不输出伪零值。ETL 原件与状态日志保留在 tmp。固定 WebView2、WPRP 与本机 WPA Profile 的实际兼容和开销仍需人工验收。
 
 ## 权威记录和可分享视图
 
-批次 CLI 打印 `privateResults`，用于 compare、overhead、accept-measurement 和批准；新矩阵与开销报告也写入 tmp。output 内 JSON 标注 `artifactRole=public-derived`，只保留白名单统计和本次导出别名，不包含源 SHA、私有摘要、原始 Profile 或批准记录。CLI 和比较入口拒绝将公开派生视图作为权威输入。旧报告仍按原契约读取，不自动改写。内部输出到 tmp 的既有文件名保持兼容。
+批次 CLI 打印 `privateResults`，用于 compare、overhead、accept-measurement 和批准；新矩阵与开销报告也写入 tmp。output 内 JSON 标注 `artifactRole=public-derived`，只保留白名单统计和本次导出别名，或在显式非匿名 survey 中保留允许的 `.gim` 样本文件名，不包含源 SHA、私有摘要、原始 Profile 或批准记录。CLI 和比较入口拒绝将公开派生视图作为权威输入。旧报告仍按原契约读取，不自动改写。内部输出到 tmp 的既有文件名保持兼容。
 
 DEV 分部结果到 Merge 的前置引用由实际 child 任务完成及 Merge 入队事件记录。分析可以独立查看该任务终点的已观测阻塞链；产品里程碑没有明确前置时仅给未归因区间，不用同一操作中耗时最长的任务补配。主线程 task phase 同时输出仅生命周期的 Trace，原有聚合计数不重复累加。预置主线程 CPU 采集等待 Profiler.start 确认后再发起工程打开；请求参数、实际时钟边界及采样方法分别保留。
 

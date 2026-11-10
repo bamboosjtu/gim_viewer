@@ -54,7 +54,7 @@ L0/L1 的逐文件 SHA 注册表与 L2 目录清单见[性能样本登记](../be
 
 Windows 也可在 `desktop/` 手动执行 `powershell -ExecutionPolicy Bypass -File .\run-bench-survey.ps1`：构建一次后依次运行变电、线路和通用设计批次，分别保存输出。已完成批次中的 FAIL、PARTIAL、INPUT_ERROR 或 INCONCLUSIVE 保留在报告中，不中断后续批次；构建失败、未正常完成或缺少完成凭据才报执行异常。全部执行后输出总体状态数量，以及按工程类型、变电电压等级和冷暖状态分组的时间最短/最长值。包装脚本退出 0 表示执行及汇总完成，不表示全部样本通过；直接调用 `bench batch` 的退出码契约保持下表定义。此脚本不进入远程 CI。脚本使用带 BOM 的 UTF-8，兼容 Windows PowerShell 5.1 的中文目录解析，修改时须保留该编码。
 
-该脚本三组批次显式使用 `--anonymize false`，公开通用设计标准方案文件名及已匿名的 `substation01–04`、`line01–06` 验证样本名，便于跨轮识别基准；工程 `.gim` 文件不随仓库发布。非匿名派生报告只保留文件名，源 SHA、源路径、原始 Profile 与批准记录仍留在私有目录。直接调用 CLI 的默认报告继续匿名。一次批次导出的 Profile、JSON 和 CSV 共用一组临时别名，阶段标签、Worker 堆采样状态和数值统计按受控契约保留，未知原因用省略代码表示，不能把公开派生结果用于 gate 或批准。
+该脚本三组批次显式使用 `--anonymize false`，公开通用设计标准方案号/文件名及已匿名的 `substation01–04`、`line01–06` 验证样本名，便于跨轮识别基准；工程 `.gim` 文件不随仓库发布。非匿名派生报告只保留文件名，源 SHA、源路径、原始 Profile 与批准记录仍留在私有目录。直接调用 CLI 的默认报告继续匿名。一次批次导出的 Profile、JSON 和 CSV 共用一组临时别名，阶段标签、Worker 堆采样状态和数值统计按受控契约保留，未知原因用省略代码表示，不能把公开派生结果用于 gate 或批准。
 
 每批次的 `exportId` 只用于把公开输出映射回本地私有结果，不是样本身份或授权凭据。复用同一输出路径时优先查当前 controller；完成后的重复恢复按 exportId 查询该批次，历史结果不覆盖当前结果。PARTIAL 的原因类别和计数单独导出，缺陷集合签名继续用别名保留分组差异；不能仅凭相同计数合并覆盖不同的样本。
 
@@ -120,6 +120,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 | `--timeout-seconds N` | 3600 | 单次打开的等待上限；不是整条命令的总时间上限，动作和进程清理另有有限超时 |
 
 - **并发。** 不要并行运行多个性能批次，也不要在采样时编译或执行其他负载。
+- **写出。** 运行中只更新私有 `results.json` 检查点；完整 CSV/HTML 与公开结果在正常结束或受控取消后统一生成，公开侧不逐轮投影全量阶段。公开目录中的冻结 `profile.json` 提供当前 `exportId` 绑定；中断恢复按该绑定查找私有权威结果，历史批次不能抢占当前输出。
 - **构建校验。** `bench build` 会核对 Benchmark 前端探针已进入原生 EXE；旧版、普通前端或源码指纹与当前工作区不一致的构建清单会在批量打开样本前被拒绝。修改桌面源码或测量契约后重新构建，不复用旧清单。构建失败不会发布可测量的清单。
 - **打开前重试。** 批量批次中，仅当样本尚未进入 `open`，且原因为 CDP、原生启动、WebView2 GPU 或 Benchmark API 基础设施故障时重试；每个计划轮次最多尝试 3 次（首次加两次重启）。
 - **重试隔离。** 每次重试拥有新的原生进程、WebView profile 和调试端口；冷开还拥有新的空缓存。已进入 `open`、解析失败、缓存失败及产品正确性失败不重试。
@@ -128,7 +129,7 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 - **去重。** 相同 SHA 与相同动作路线只执行一次，其余输入标为 `DUPLICATE` 并关联首个输入；不同动作路线仍分别执行。不会根据文件大小、历史耗时或失败记录跳过某个唯一来源。目录符号链接不跟随，报告会列出拒绝访问项。
 - **队列。** 批次的所有计划行在执行前写入结果。单次失败、超时、输入缺失或 SHA 不符都记录后继续；只有用户取消或报告无法安全写入才停止队列。冷开未准备好有效缓存时，对应暖开标为 `SKIPPED`，下一来源继续执行。除上述打开前基础设施故障外，失败项不自动重试；性能回退的正式独立复测由比较流程处理。
 - **取消。** 运行中可按 Ctrl+C，或在该报告目录新建空的 `stop.request`。控制器取消当前任务、回收本次拥有的应用进程树，余项标为 `CANCELLED`。结果随每次状态变化落盘，浏览器刷新 HTML 即可看到进度；不覆盖已有批次目录。强制结束控制器或机器断电可能留下 `RUNNING`/`PENDING`，它们不属于成功结果。
-- **外部中止恢复。** 确认原控制器与应用进程均已停止后，运行 `npm run bench -- recover-batch --output ../output/<批次>`。控制器的私有输出映射与运行记录共用随机 nonce，并记录 PID 与进程启动时间；相同进程仍存活时拒绝恢复，PID 被复用不会误认为原控制器。旧批次缺少凭据、或系统不能确认进程身份时，核实进程已停止后显式加 `--force`。恢复将遗留行标为 `CANCELLED`，从私有 `progress.private.json` 带回最后观测的写入待办和缓存状态；旧批次若没有 runId，只在私有清单能唯一匹配样本时关联快照。缺失的 `settledMs` 保持空值，最小私有报告带 `recovery` 标记且 `measurementComplete=false`；恢复批次不得进入基线批准或 gate。
+- **外部中止恢复。** 确认原控制器与应用进程均已停止后，运行 `npm run bench -- recover-batch --output ../output/<批次>`。控制器的私有输出映射与运行记录共用随机 nonce，并记录 PID 与进程启动时间；相同进程仍存活时拒绝恢复，PID 被复用不会误认为原控制器。旧批次缺少凭据、或系统不能确认进程身份时，核实进程已停止后显式加 `--force`。恢复将遗留行标为 `CANCELLED`，从私有 `progress.private.json` 带回最后观测的写入待办和缓存状态；旧批次若没有 runId，只在私有清单能唯一匹配样本时关联快照。缺失的 `settledMs` 保持空值，最小私有报告带 `recovery` 标记且 `measurementComplete=false`；恢复批次不得进入基线批准或 gate。恢复先写回私有权威报告，再生成 output 派生；`exportId` 只用于复用输出路径时的批次绑定，完成后的重复恢复按 exportId 查询该批次，历史结果不覆盖当前结果。公开派生报告不能直接作为恢复输入。
 
 ## JSON 注册表
 
@@ -197,12 +198,13 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 | `slow-tasks.csv`、`slow-phases.csv` | 每个运行耗时最长的十个 Worker 任务和单次阶段，使用匿名来源 ID；聚合直方图不充作单次阶段 |
 | `slow-templates.csv` | 每轮最慢 20 个 DEV 模板槽位等待及最久 20 个槽位占用者；含优先级、缓存读取、Worker 请求/排队、输入预算、输出字节及内存压力，公开列只用匿名来源 ID |
 | `workers.csv` | 每个 Worker 的类型、堆采样可用性、成功/失败次数、观测峰值、最大采样延迟和间隔 |
-| `results.json` | output 下是匿名派生视图；CLI 打印的 tmp/privateResults 才保留比较与批准所需权威证据 |
+| `results.json` | output 下默认是匿名派生视图；显式非匿名 survey 可含允许的样本文件名；CLI 打印的 tmp/privateResults 才保留比较与批准所需权威证据 |
 | `profile.json` | 权威冻结版本在 tmp 私有批次目录；output 仅有派生信息 |
 
 - CSV 使用 UTF-8 BOM、标准引号转义；时间字段后缀 `Ms`、内存字段后缀 `Bytes`。HTML 显示秒与 GiB。不可用字段留空，不填零。
 - 字段名以本次构建生成的 `results.json` 与 `results.csv` 表头为准；本页只维护文件用途与判读边界，不逐列冻结字段名。
 - 汇总分别计数 `PASS` 与 `PARTIAL`；同组轮次的 PARTIAL 签名不同时中位数留空，`coverageGroups` 与 `partialSignatures` 给出分组证据。
+- 公开投影保留受控阶段名、状态、原因码、PARTIAL 计数和本次 `exportId`；无法识别的自由文本替换为 `unverified-reason-omitted`，不把路径或业务名称带入派生视图。
 - `summary.csv` 的每个时间指标同时给出 Median、P95、Count 和 Missing；P95 是该组重复轮次的经验最近秩，必须结合观测数量和覆盖状态判读。
 - 单次运行的 `report` 生成流水线概览、内存曲线与覆盖/阻塞证据；具体视图取决于输入是否包含 Trace 事件。批次 `report.html` 提供“测量结果 / 样本覆盖”两个 tab。
 - 覆盖汇总同时给出有效轮次和计划轮次，以及基础设施重试次数。少于计划轮次的中位数可供诊断，但不能冒充完整基线。
@@ -293,12 +295,13 @@ SQLite 核心缓存发布单独验证；冷开缓存已发布、产品正确性�
 
 ## 匿名化与私有产物
 
-- `output/` 中的报告默认使用本次导出别名，不导出源 SHA、文件名、路径或稳定私有摘要。
+- `output/` 中的报告默认使用本次导出别名，不导出源 SHA、路径或稳定私有摘要。显式 `--anonymize false` 的 survey 可在派生视图中保留通用设计标准方案号或已匿名 `substation01–04`、`line01–06` 的 `.gim` 文件名，仍不导出源 SHA、源路径、原始 Profile 或批准记录。
 - `results.json`、`profile.json` 在 `output/` 下标注 `artifactRole=public-derived`；`gate`、`compare`、`accept-measurement` 和基线批准只接受 `tmp/` 私有权威文件，公开派生视图不能作为权威输入。
-- `--anonymize false` 只影响 tmp 内部报告；output 始终生成白名单派生视图。
-- 该开关只影响报告展示，不改变 Profile、动作或测量口径。
+- `--anonymize false` 同时影响 tmp 报告和 output 派生视图；tmp 始终保留权威私有内容，output 仍只生成白名单视图。直接调用 CLI 默认匿名。
+- 只有工作区根 `output/` 被分类为公开派生目录；其他位置不按公开视图处理。该开关只影响报告展示，不改变 Profile、动作或测量口径。
 - 源路径映射、原始错误堆栈、授权 nonce、日志与 WebView profile 保存在 `tmp/gim-bench/`，不混入可分享的 `output/` 报告。
-- 分享包含真实工程名的实名报告前，应切换匿名模式或仅分享匿名产物。
+- 公开投影保留受控阶段名、状态、原因码和 PARTIAL 计数；无法识别的自由文本替换为 `unverified-reason-omitted`，未知路径或业务名称不进入派生视图。
+- 非匿名 survey 也不能作为 gate 或批准输入；分享前仍应检查样本名是否属于允许公开的标准方案或已匿名验证样本。
 - 堆采样与 Private Bytes 不是同一口径；阶段 wall time 不等于 CPU time。
 
 ## 比较与基线
@@ -376,7 +379,7 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
 
 ## 详细 Trace 与 Profile
 
-当前系统录制入口拒绝未认证的可写计划，返回 `authenticated-system-helper-required`，不触发提权或 WPR 录制；WPR/PMC 录制待受保护认证 helper 接入后恢复，已采集 ETL 的离线 WPA 摘要仍可用。CPU Profile 自身窗口与热点分析可用；未经真实时钟域验收的跨域映射标不可用，请求/响应括号仅保留为私有候选，不能用它归因精确 Span CPU。slow-span 使用独立有界活动索引；上下文历史超过 32k 不再阻止新活动 Span 触发。
+当前系统录制入口直接返回 `authenticated-system-helper-required`，不读取可写计划、不触发提权或 WPR 录制；WPR/PMC 录制待受保护认证 helper 接入后恢复，已采集 ETL 的离线 WPA 摘要仍可用。CPU Profile 自身窗口与热点分析可用；未经真实时钟域验收的跨域映射标不可用，请求/响应括号仅保留为私有候选，不能用它归因精确 Span CPU。slow-span 使用独立有界活动索引；上下文历史超过 32k 不再阻止新活动 Span 触发。
 
 诊断中的 `project.open` 保持根 operation；重叠动作使用同根子 Span 和独立能力 scope。默认主线程上下文始终属于根操作，异步动作须显式传递入口捕获的子上下文，不能用“最后活动的动作”推断归属。Worker 新 Probe 使用独立 producer epoch；超过保留范围的旧 run 重建探针时显式记录 retention loss，不复用已消费的序号。活动索引溢出与历史关联截断分别报告，采集取得 Profile 不代表触发搜索、上下文关联或整个操作覆盖完整。
 
@@ -393,9 +396,9 @@ npm run bench -- report --input ../tmp/gim-bench/runs/<本轮runId>/report.json
 
 诊断配置的 captures 支持 kind=cpu/allocations/heap、target=main/worker、family/executorId/taskId/spanId/operationTraceId、受控 stage 阶段名、trigger=operation-start/external/slow-span。external 由控制器按 delayMs 触发；slow-span 必须提供 thresholdMs。单次诊断最多 8 个 capture，默认 CPU 窗口 5 秒、上限 30 秒，单产物容量上限 256 MiB；不能捕获已结束 Span 的历史栈。可使用 captures=[] 仅采详细 Trace，gpu=true 请求可用的 GPU Query。示例见 [`benchmarks/diagnostics/`](../benchmarks/diagnostics/)：`cpu-main.json`、`cpu-worker-slow.json`、`trace-gpu-system.json`。
 
-`analyze` 将分析写入输入报告同目录的 `analysis.private.json`，终端只打印覆盖摘要；`export-trace` 写入同目录的 `trace.private.json`（Chrome Trace Event JSON，Perfetto 可读）。生命周期归并、冲突、阻塞链和未归因区间的判定见[测量架构](architecture/measurement.md#operation-trace-与定点诊断)。
+`analyze` 将摘要写入输入报告同目录的 `analysis.private.json`，原始事件留在 `events.jsonl`，终端只打印覆盖摘要；逐任务阻塞链只分析 duration 最大的前 16 个依赖终点，省略数量见 `taskPathSelection`。Pipeline 是可重叠 span duration 之和，不等于墙钟。内部 HTML 只内嵌有界概览；`export-trace` 写入同目录的 `trace.private.json`（Chrome Trace Event JSON，Perfetto 可读）。生命周期归并、冲突、阻塞链和未归因区间的判定见[测量架构](architecture/measurement.md#operation-trace-与定点诊断)。
 
-system 为显式 WPR 配置，需 durationMs、bufferMiB，pmc 仅允许本机可用计数器，gpu=true 追加系统 GPU 活动。WPA 摘要另需 exporter（可省略并从 PATH 查找）、wpaProfile、profileSha256 以及 tables 列/单位契约。表契约 columns 指定 pid/created/start/end/value，可选 tid，并单独指定时间列的 timeUnit（ns/us/ms/s）和数值列的 unit；创建时间必须与独立采样器的 windows-filetime-100ns 身份一致，不能用进程名称或 PID 猜配。缺少 WPA Profile 时保留原始 ETL，摘要标 unavailable。
+system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，返回 `authenticated-system-helper-required`，不启动提权或 WPR；WPR/PMC 待受保护认证 helper 接入后恢复。已采集 ETL 的离线 WPA 摘要仍可用：需 exporter（可省略并从 PATH 查找）、wpaProfile、profileSha256 以及 tables 列/单位契约。表契约 columns 指定 pid/created/start/end/value，可选 tid，并单独指定时间列的 timeUnit（ns/us/ms/s）和数值列的 unit；创建时间必须与独立采样器的 windows-filetime-100ns 身份一致，没有匹配的 owned process 实例时返回 `owned-process-instance-not-matched` 并标 unavailable，不能用进程名称或 PID 猜配。缺少 WPA Profile 时保留原始 ETL，摘要标 unavailable。
 
 诊断运行不能参与普通性能基线。原始 .cpuprofile、.heapprofile、.heapsnapshot、.etl、analysis.private.json 和 trace.private.json 留 tmp；可分享报告由白名单生成，缺口不补零。P95 是给定重复轮次的经验最近秩，结合 Count/Missing 和覆盖状态判读，不宣称少量重复证明尾部性能。
 

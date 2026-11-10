@@ -2,7 +2,7 @@ import { Probe, DurationStats, NOOP_SINK, type TraceContext, type MeasurementEve
 
 const CHANNEL = '__gimMeasurement';
 let producerEpoch=0;
-interface Envelope { context: TraceContext; command: string; receivedMs?: number; }
+interface Envelope { context: TraceContext; command: string; mode?:MeasurementMode; receivedMs?: number; }
 const offContext: TraceContext = { runId: 'off', sampleId: null, sourceSha256: null, buildId: null, generation: null,
   geometryToken: null, requestId: null, workerId: 'off', family: 'host', backend: 'web-worker', taskId: null,
   attemptId: 0, parentTaskId: null, sourceId: null, geometryLod: null };
@@ -49,6 +49,7 @@ export function createWorkerProbe() {
   let probe = offProbe, context = offContext, mode: MeasurementMode = 'off';
   let events: MeasurementEvent[] = [];
   const runProbes=new Map<string,Probe>();
+  const seenRuns=new Set<string>();
   const key=(value:TraceContext)=>value.runId+'\0'+value.workerId;
   const makeProbe=(value:TraceContext,selectedMode:MeasurementMode)=>new Probe(value.workerId+':producer-'+ ++producerEpoch,
     value.workerId+':clock',selectedMode,()=>performance.now(),{emit},value.workerId);
@@ -87,6 +88,7 @@ export function createWorkerProbe() {
     const clockId = `${context.workerId}:clock`;
     probe = makeProbe(context,mode);
     runProbes.set(key(context),probe);
+    seenRuns.add(key(context));
     while(runProbes.size>16)runProbes.delete(runProbes.keys().next().value!);
     (globalThis as { __gimMeasurementIdentity?: unknown }).__gimMeasurementIdentity = { workerId: context.workerId, runId: context.runId, family: context.family, clockId };
     post?.({ [CHANNEL]: 'clock', workerId: context.workerId, clockId, receivedMs, sentMs: performance.now() });
@@ -102,11 +104,14 @@ export function createWorkerProbe() {
     const captured = Object.freeze({ ...envelope.context,executorId:envelope.context.workerId,scopeId });
     let capturedProbe=runProbes.get(key(captured));
     if(!capturedProbe){
-      // The initialization/capability window expired. Keep the original task
-      // identity and a fresh producer; never restart an old producer's cursor.
-      // Only bounded lifecycle evidence is collected, with the gap explicit.
-      capturedProbe=makeProbe(captured,'benchmark');runProbes.set(key(captured),capturedProbe);
-      capturedProbe.event(captured,{kind:'loss',name:'worker-probe-retention-expired',workload:{events:1}});
+      // New runs use the dispatch mode without requiring another Worker init.
+      // Truly evicted runs keep their identity and a fresh producer cursor,
+      // with bounded lifecycle evidence and an explicit retention gap.
+      const expired=seenRuns.has(key(captured));
+      const selectedMode=envelope.mode??mode;
+      capturedProbe=makeProbe(captured,expired?'benchmark':selectedMode);runProbes.set(key(captured),capturedProbe);
+      seenRuns.add(key(captured));
+      if(expired)capturedProbe.event(captured,{kind:'loss',name:'worker-probe-retention-expired',workload:{events:1}});
       while(runProbes.size>16)runProbes.delete(runProbes.keys().next().value!);}
     if(capturedProbe.mode==='off')return work(NOOP_TASK);
     const scopedProbe=capturedProbe;

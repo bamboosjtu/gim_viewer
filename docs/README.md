@@ -16,7 +16,7 @@
 | 改 IFC / Spatial | [IFC 运行时](architecture/ifc-runtime.md) | [语义模型](schema/semantic-model.md) → [缓存域](architecture/caches.md) |
 | 改线路地图或 Android 线路语义 | [线路与移动端](architecture/line-mobile.md) | [线路 MOD](schema/powerline-mod.md) → [移动端规格](mobile-spec.md) |
 | 改选择、高亮、属性面板 | [选择与交互](architecture/selection.md) | [表示与绑定](architecture/representations.md) |
-| 跑性能测试或本地 Benchmark | [性能测试指南](performance-guide.md) | [Benchmark CLI](benchmark.md)；权威结果在本地 `tmp/`，`output/` 为匿名派生视图 |
+| 跑性能测试或本地 Benchmark | [性能测试指南](performance-guide.md) | [Benchmark CLI](benchmark.md)；权威结果在本地 `tmp/`，`output/` 为默认匿名派生视图（显式非匿名 survey 例外） |
 | 核对验证门禁与证据边界 | [验证](validation.md) | [开发指南](development.md) |
 | 复核 GIM 格式与样本 | [Schema](schema/README.md) | [样本台账](schema/sample-corpus.md) |
 | 查术语 | [术语表](glossary.md) | — |
@@ -111,7 +111,7 @@
 | 缓存域版本与失效范围 | [缓存域](architecture/caches.md) |
 | 样本身份、SHA 与统计 | [样本台账](schema/sample-corpus.md) |
 | 未关闭缺陷与已接受限制 | [问题与限制](open-issues.md) |
-| 各轮性能测量结果 | 开发者本地 `tmp/gim-bench/` 私有报告（权威）；`output/` 为匿名派生视图，均不随仓库分发 |
+| 各轮性能测量结果 | 开发者本地 `tmp/gim-bench/` 私有报告（权威）；`output/` 默认匿名派生（显式非匿名 survey 仅展示允许的样本文件名），均不随仓库分发 |
 | 命令与工作区约定 | [开发指南](development.md) |
 | 验证证据规则 | [验证](validation.md) |
 | 目录编码与生成表 | `desktop/src/engineering/catalog.json` 与[机器目录索引](engineering/catalogs/catalog-index.md) |
@@ -125,7 +125,7 @@
 4. **一段只说一件事。** 枚举、对比、状态和字段优先用表格或列表；避免把多条规则塞进同一段。
 5. **区分事实与边界。** “当前行为”“证据范围”“未实现/未验收”分别表述；不把研究候选、计划或历史方案写成当前能力。
 6. **数字与版本只写一处。** 阈值、版本、样本数在权威文档维护；其他文档写链接，不复制会漂移的常量。
-7. **匿名化。** `docs/schema/` 只使用匿名样本 ID；其他目录同样不写真实工程名、地理归属、建设单位或内部工程标识。
+7. **匿名化。** `docs/schema/` 只使用匿名样本 ID；其他目录同样不写真实工程名、地理归属、建设单位或内部工程标识。Benchmark 显式非匿名 survey 的公开派生报告是唯一例外，只允许标准方案号和已匿名验证样本名，仍不写路径、SHA 或原始 Profile。
 8. **链接用相对路径。** 仓库内链接相对当前文件；外部资料用完整 URL 并注明用途。
 
 ## 维护
@@ -135,7 +135,7 @@
 - 修改 XML primitive：更新[XML primitive](schema/xml-primitives.md)与[XML MOD](schema/substation-mod.md)，保留“解析成功≠可渲染”的边界。
 - 修改持久化含义：只 bump 受影响域，更新[缓存域](architecture/caches.md)，不复制旧版本。
 - 修改用户可见行为：更新[桌面软件规格](software-spec.md)或[移动端规格](mobile-spec.md)，并同步[问题与限制](open-issues.md)。
-- 修改样本或性能口径：更新[样本台账](schema/sample-corpus.md)/[性能测试指南](performance-guide.md)；权威实测结果由开发者本地 `tmp/gim-bench/` 报告保存，`output/` 只放匿名派生视图。
+- 修改样本或性能口径：更新[样本台账](schema/sample-corpus.md)/[性能测试指南](performance-guide.md)；权威实测结果由开发者本地 `tmp/gim-bench/` 报告保存，`output/` 默认只放匿名派生视图（显式非匿名 survey 例外）。
 
 需要重新生成或核对机器目录索引时，可在 `desktop/` 手动执行：
 

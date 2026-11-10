@@ -14,11 +14,22 @@ export class GpuTimer {
   begin(passId:string){
     this.poll();
     if(!this.extension){this.emit({passId,availability:'unsupported',durationMs:null,reason:'timer-extension-missing'});return;}
-    if(this.active||this.pending.length>=this.limit){this.emit({passId,availability:'unavailable',durationMs:null,reason:'query-capacity'});return;}
+    if(this.active)this.cancel(this.active.passId,'pass-overlapped');
+    if(this.pending.length>=this.limit){this.emit({passId,availability:'unavailable',durationMs:null,reason:'query-capacity'});return;}
     const query=this.gl.createQuery();if(!query){this.emit({passId,availability:'unavailable',durationMs:null,reason:'query-allocation-failed'});return;}
     this.active={query,passId,atMs:this.now()};this.gl.beginQuery(this.extension.TIME_ELAPSED_EXT,query);
   }
-  end(){if(this.active&&this.extension){this.gl.endQuery(this.extension.TIME_ELAPSED_EXT);this.pending.push(this.active);this.active=null;this.schedulePoll();}}
+  end(passId=this.active?.passId){if(this.active&&this.extension&&this.active.passId===passId){
+    const active=this.active;this.active=null;
+    try{this.gl.endQuery(this.extension.TIME_ELAPSED_EXT);this.pending.push(active);this.schedulePoll();}
+    catch(error){this.gl.deleteQuery(active.query);throw error;}
+  }}
+  cancel(passId:string,reason='capture-stopped'){
+    if(!this.active||!this.extension||this.active.passId!==passId)return;
+    const active=this.active;this.active=null;
+    try{this.gl.endQuery(this.extension.TIME_ELAPSED_EXT);}
+    finally{this.gl.deleteQuery(active.query);this.emit({passId,availability:'unavailable',durationMs:null,reason});}
+  }
   private schedulePoll(){
     if(this.timer!==undefined||!this.pending.length)return;
     // Demand rendering can be idle after a pass. Read the query without drawing another frame.
@@ -40,7 +51,7 @@ export class GpuTimer {
     });
   }
   dispose(){
-    if(this.active){this.end();}
+    if(this.active)this.cancel(this.active.passId);
     if(this.timer!==undefined)clearTimeout(this.timer);this.timer=undefined;
     for(const row of this.pending){this.gl.deleteQuery(row.query);this.emit({passId:row.passId,availability:'unavailable',durationMs:null,reason:'capture-stopped'});}
     this.pending=[];

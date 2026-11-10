@@ -30,7 +30,7 @@
 | `desktop/bridge/` | Tauri IPC DTO/命令封装 | `@tauri-apps/api` | UI、Viewer |
 | `desktop/src-tauri/src/` | SQLite、SHA、解压、文件校验 | Rust crates | 前端状态 |
 
-Benchmark 注册表位于根目录 `benchmarks/l0|l1|l2/`，CLI、Trace/Profile 与无样本协议测试位于 `desktop/scripts/benchmarks/`，本地功能夹具位于 `desktop/tests/`；权威报告在 `tmp/`，`output/` 只保存匿名派生视图。这些目录不承担应用运行时业务逻辑。
+Benchmark 注册表位于根目录 `benchmarks/l0|l1|l2/`，CLI、Trace/Profile 与无样本协议测试位于 `desktop/scripts/benchmarks/`，本地功能夹具位于 `desktop/tests/`；权威报告在 `tmp/`，`output/` 默认只保存匿名派生视图（非匿名 survey 例外）。这些目录不承担应用运行时业务逻辑。
 
 ## 依赖规则
 

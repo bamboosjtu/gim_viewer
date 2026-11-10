@@ -337,7 +337,7 @@ test('recovery durably updates private authority, preserves mapping, and refuses
   const privateOut=dirname(result.privateResults),state=JSON.parse(readFileSync(result.privateResults,'utf8'));
   state.status='RUNNING';state.rows[0].status='RUNNING';state.rows[1].status='PENDING';
   writeFileSync(result.privateResults,JSON.stringify(state));
-  const nonce='a'.repeat(48);writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out,nonce}));
+  const nonce='a'.repeat(48);writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out,nonce,exportId:state.exportId}));
   writeFileSync(join(privateOut,'controller.private.json'),JSON.stringify({pid:process.pid,nonce,processStartedAt:'2000-01-01T00:00:00Z'}));
   const recovered=recoverInterruptedBatch(fixtureRoot,out,{getProcessStartAt:()=>Date.now()});
   const authority=JSON.parse(readFileSync(result.privateResults,'utf8'));
@@ -369,4 +369,46 @@ test('a reused output selects its interrupted controller ahead of historical com
   assert.equal(JSON.parse(readFileSync(current.privateResults,'utf8')).status,'CANCELLED');
   assert.equal(recoverInterruptedBatch(fixtureRoot,out).privateResults,current.privateResults);
   assert.equal(recoverInterruptedBatch(fixtureRoot,out,{force:true}).recovered,0);
+});
+
+test('a completed current export cannot be overwritten by an older interrupted controller',async()=>{
+  const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
+  const execute=async({sample,profileDigest})=>run(sample,profileDigest);
+  const old=await executeBatch({...options,root:fixtureRoot,out,inputs:inputs(),execute});
+  const oldDir=dirname(old.privateResults),oldState=JSON.parse(readFileSync(old.privateResults,'utf8'));
+  oldState.status='RUNNING';oldState.rows[0].status='RUNNING';writeFileSync(old.privateResults,JSON.stringify(oldState));
+  const mapping=JSON.parse(readFileSync(join(oldDir,'output.private.json'),'utf8'));
+  writeFileSync(join(oldDir,'controller.private.json'),JSON.stringify({pid:process.pid,nonce:mapping.nonce,processStartedAt:'2000-01-01T00:00:00Z'}));
+  const current=await executeBatch({...options,root:fixtureRoot,out,inputs:inputs(),execute});
+  const publicBytes=readFileSync(join(out,'results.json'),'utf8'),oldBytes=readFileSync(old.privateResults,'utf8');
+  const recovered=recoverInterruptedBatch(fixtureRoot,out,{getProcessStartAt:()=>Date.now()});
+  assert.equal(recovered.recovered,0);assert.equal(recovered.privateResults,current.privateResults);
+  assert.equal(readFileSync(join(out,'results.json'),'utf8'),publicBytes);assert.equal(readFileSync(old.privateResults,'utf8'),oldBytes);
+});
+
+test('running batches checkpoint private authority and generate derived tables only at termination',async()=>{
+  const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
+  let checked=0;
+  const result=await executeBatch({...options,root:fixtureRoot,out,inputs:inputs(),execute:async({sample,profileDigest})=>{
+    const batches=join(fixtureRoot,'tmp','gim-bench','batches'),privateDir=join(batches,readdirSync(batches)[0]);
+    const checkpoint=JSON.parse(readFileSync(join(privateDir,'results.json'),'utf8'));
+    assert.equal(checkpoint.status,'RUNNING');assert.equal(checkpoint.rows.find(row=>row.inputId===sample.inputId).status,'RUNNING');
+    for(const dir of [out,privateDir])for(const file of ['results.csv','stages.csv','report.html'])assert.equal(existsSync(join(dir,file)),false);
+    assert.equal(existsSync(join(out,'results.json')),false);checked++;
+    return run(sample,profileDigest);
+  }});
+  assert.equal(checked,3);assert.equal(JSON.parse(readFileSync(result.privateResults,'utf8')).status,'COMPLETE');
+  for(const dir of [out,dirname(result.privateResults)])for(const file of ['results.csv','stages.csv','report.html'])assert.equal(existsSync(join(dir,file)),true);
+});
+
+test('an interrupted batch recovers from its frozen profile before any public result exists',async()=>{
+  const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
+  await assert.rejects(executeBatch({...options,root:fixtureRoot,out,inputs:inputs(),onProgress(){throw Error('controller-stopped');}}),/controller-stopped/);
+  assert.equal(existsSync(join(out,'results.json')),false);
+  const batches=join(fixtureRoot,'tmp','gim-bench','batches'),privateDir=join(batches,readdirSync(batches)[0]);
+  const controllerFile=join(privateDir,'controller.private.json'),owner=JSON.parse(readFileSync(controllerFile,'utf8'));
+  owner.processStartedAt='2000-01-01T00:00:00Z';writeFileSync(controllerFile,JSON.stringify(owner));
+  const recovered=recoverInterruptedBatch(fixtureRoot,out,{getProcessStartAt:()=>Date.now()});
+  assert.equal(recovered.recovered,3);assert.equal(recovered.privateResults,join(privateDir,'results.json'));
+  assert.equal(JSON.parse(readFileSync(join(out,'results.json'),'utf8')).artifactRole,'public-derived');
 });

@@ -18,8 +18,9 @@ export class Collector implements MetricsSink {
   private memory = new Map<string, { latest: MemoryMetric; atMs: number; observedPeakBytes: number | null; samples: number }>();
   private events: MeasurementEvent[] = [];
   private traceEvents:MeasurementEvent[]=[];
-  private traceActive=new Map<string,MeasurementEvent>();
-  private traceHealth={produced:0,dropped:0,queuePeak:0,activeOverflow:0,droppedByType:{} as Record<string,number>};
+  private traceActive=new Set<string>();
+  private traceProducers=new Map<string,string>();
+  private traceHealth={produced:0,dropped:0,queuePeak:0,activeOverflow:0,duplicate:0,sequenceGaps:0,invalid:0,foreignRun:0,droppedByType:{} as Record<string,number>};
   private detailSink?:{ available():boolean; send(events:MeasurementEvent[]):void };
   private clock = new Map<string, NonNullable<MeasurementEvent['clock']>>();
   private loss = { sequenceGaps: 0, invalid: 0, duplicate: 0, foreignRun: 0, detailEvents: 0, aggregateGroups: 0, transportFailures: 0,
@@ -34,12 +35,31 @@ export class Collector implements MetricsSink {
     if(event?.kind==='trace'){
       this.traceHealth.produced++;
       if(event.version!==MEASUREMENT_VERSION||event.context?.runId!==this.identity.runId||!event.trace
-        ||!Number.isFinite(event.atMs)||!Number.isSafeInteger(event.sequence)){
-        this.traceHealth.dropped++;return;
+        ||!Number.isFinite(event.atMs)||!Number.isSafeInteger(event.sequence)||event.sequence<1){
+        this.traceHealth.dropped++;
+        if(event.context?.runId&&event.context.runId!==this.identity.runId){this.traceHealth.foreignRun++;this.loss.foreignRun++;}
+        else {this.traceHealth.invalid++;this.loss.invalid++;}
+        return;
       }
+      const owner=event.ownerProducerId,worker=event.context.workerId;
+      const prefix=worker+':producer-';
+      const hostOwner=owner===`${this.identity.runId}:host`||worker==='host'&&owner==='host';
+      const workerOwner=owner===worker||typeof owner==='string'&&owner.startsWith(prefix)&&/^\d+$/.test(owner.slice(prefix.length));
+      const binding=JSON.stringify([owner,event.clockId,event.context.executorId??worker]);
+      if(!owner||event.producerId!==owner+':trace'||!hostOwner&&!workerOwner||
+        this.traceProducers.has(event.producerId)&&this.traceProducers.get(event.producerId)!==binding||
+        event.trace.type==='span'&&(typeof event.trace.id!=='string'||!event.trace.id)){
+        this.traceHealth.invalid++;this.traceHealth.dropped++;this.loss.invalid++;return;
+      }
+      this.traceProducers.set(event.producerId,binding);
+      const previous=this.sequence.get(event.producerId)??0;
+      if(event.sequence<=previous){this.traceHealth.duplicate++;this.traceHealth.dropped++;this.loss.duplicate++;return;}
+      const gap=event.sequence-previous-1;
+      this.traceHealth.sequenceGaps+=gap;this.loss.sequenceGaps+=gap;
+      this.sequence.set(event.producerId,event.sequence);
       const key=event.context.runId+'\0'+event.trace.id;
       if(event.trace.type==='span'&&event.trace.action==='started'){
-        if(this.traceActive.size<4096)this.traceActive.set(key,event);else this.traceHealth.activeOverflow++;
+        if(this.traceActive.size<4096)this.traceActive.add(key);else this.traceHealth.activeOverflow++;
       }else if(event.trace.type==='span'&&event.trace.action==='ended')this.traceActive.delete(key);
       const critical=['operation','scope','health'].includes(event.trace.type)||event.trace.type==='span'&&event.trace.action==='ended';
       // Preserve order; reserve credit for terminal/control records rather than dropping Ended first.
@@ -66,14 +86,18 @@ export class Collector implements MetricsSink {
       }
       worker.state = event.name;
       if (event.name === 'terminated' || event.name === 'failed') {
-        if(event.name==='failed'||event.status==='failed'||event.status==='timeout')this.loss.unexpectedWorkerTerminations++;
+        const pendingTasks=[...this.active].filter(([,pending])=>pending.context.workerId===context.workerId);
+        const controlled=event.name==='terminated'&&event.status==='aborted'&&
+          (['project-closed','project-replaced'].includes(event.reasonCode??'')||
+            event.reasonCode==='worker-idle'&&pendingTasks.length===0||
+            pendingTasks.length>0&&pendingTasks.every(([key])=>this.intentionalTasks.has(key)));
+        if(!controlled)this.loss.unexpectedWorkerTerminations++;
         worker.endedMs = event.atMs;
-        for (const [key, pending] of this.active) if (pending.context.workerId === context.workerId) {
-          const reason=this.intentionalTasks.get(key);
+        for (const [key, pending] of pendingTasks) {
+          const reason=this.intentionalTasks.get(key)??(controlled?event.reasonCode:undefined);
           if(reason&&event.name==='terminated'&&event.status==='aborted'){
-            this.settle(key,'cancelled',reason);this.loss.intentionalInterruptedTasks++;
-          }else if(pending.name==='queued'&&event.name==='terminated'&&event.status==='aborted'){
-            this.settle(key,'cancelled','cancelled-before-start');this.loss.cancelledBeforeStart++;
+            this.settle(key,'cancelled',reason);
+            if(pending.name==='queued')this.loss.cancelledBeforeStart++;else this.loss.intentionalInterruptedTasks++;
           }else{this.settle(key,event.status??'aborted');this.loss.interruptedTasks++;}
         }
       }
@@ -200,13 +224,19 @@ export class Collector implements MetricsSink {
   }
   private settle(key: string, status: TaskStatus, reasonCode?:LifecycleReasonCode): void {
     this.active.delete(key); this.intentionalTasks.delete(key); this.finished.set(key,{status,reasonCode});
-    if (this.finished.size > 8192) this.finished.delete(this.finished.keys().next().value!);
+    // A Collector belongs to one run. Retain compact terminal tombstones for
+    // that lifetime so late acknowledgements cannot become new task outcomes.
     this.outcomes[status] = (this.outcomes[status] ?? 0) + 1;
   }
   drain(): MeasurementEvent[] { const result = [...this.events,...this.traceEvents]; this.events = [];this.traceEvents=[]; return result; }
   intentionalTermination(workerId:string):boolean {
     const keys=[...this.active].filter(([,event])=>event.context.workerId===workerId).map(([key])=>key);
     return keys.length>0&&keys.every(key=>this.intentionalTasks.has(key));
+  }
+  terminationReason(workerId:string):LifecycleReasonCode|undefined {
+    const keys=[...this.active].filter(([,event])=>event.context.workerId===workerId).map(([key])=>key);
+    if(!keys.length)return 'worker-idle';
+    return keys.every(key=>this.intentionalTasks.has(key))?this.intentionalTasks.get(keys[0]):undefined;
   }
   snapshot() {
     const lifecycleIssues=[
@@ -219,7 +249,9 @@ export class Collector implements MetricsSink {
       (this.outcomes.aborted??0)>0?'unexplained-task-abort':null,
     ].filter((value):value is string=>!!value);
     return { version: MEASUREMENT_VERSION, identity: { ...this.identity }, mode: this.mode,
-      traceHealth:{...this.traceHealth,buffered:this.traceEvents.length,activeSpans:[...this.traceActive.values()]},
+      traceHealth:{...this.traceHealth,droppedByType:{...this.traceHealth.droppedByType},buffered:this.traceEvents.length,
+        activeSpanCount:this.traceActive.size,activeSpans:[...this.traceActive].slice(0,64)},
+      traceComplete:this.traceHealth.dropped===0&&this.traceHealth.activeOverflow===0&&this.traceHealth.sequenceGaps===0&&this.traceHealth.duplicate===0&&this.traceHealth.invalid===0&&this.traceHealth.foreignRun===0&&this.traceActive.size===0,
       phases: Object.fromEntries([...this.phases].map(([key, value]) => [key, { ...value.stats.snapshot(), failed: value.failed, cancelled: value.cancelled, workload: { ...value.workload } }])),
       slowestPhases:this.slowestPhases.map(row=>({...row})),
       slowestTasks:this.slowestTasks.map(row=>({...row})),
@@ -234,7 +266,8 @@ export class Collector implements MetricsSink {
       lifecycleComplete:lifecycleIssues.length===0,lifecycleIssues,
       lifecycleCancellationReasons:{...this.cancellationReasons},
       detailComplete: this.loss.detailEvents === 0 && this.loss.sequenceGaps === 0 && this.loss.invalid === 0 &&
-        this.loss.aggregateGroups === 0 && this.loss.foreignRun === 0 && this.loss.duplicate === 0 && this.loss.transportFailures===0,
+        this.loss.aggregateGroups === 0 && this.loss.foreignRun === 0 && this.loss.duplicate === 0 && this.loss.transportFailures===0 &&
+        this.traceHealth.dropped===0&&this.traceHealth.activeOverflow===0,
       aggregateComplete:this.loss.sequenceGaps===0&&this.loss.invalid===0&&this.loss.aggregateGroups===0&&
         this.loss.foreignRun===0&&this.loss.duplicate===0&&this.loss.transportFailures===0,
       cpuTimeAvailable: false, memoryTotalsAreAdditive: false };

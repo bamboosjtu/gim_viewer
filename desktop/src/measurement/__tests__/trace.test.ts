@@ -6,7 +6,7 @@ const context:TraceContext={runId:'r',sampleId:null,sourceSha256:null,buildId:nu
   workerId:'host',family:'host',backend:'host',taskId:null,attemptId:1,parentTaskId:null,sourceId:null,geometryLod:null};
 it('captures the start context and propagates immutable child contexts without duplicate aggregation',async()=>{
   let time=10;const collector=new Collector(context,'diagnostic'),probe=new Probe('host','c','diagnostic',()=>time,collector);
-  const phase=probe.phase(context,'compile');context.generation=2;time=20;phase.end();phase.end();
+  const live={...context},phase=probe.phase(live,'compile');live.generation=2;time=20;phase.end();phase.end();
   const events=collector.drain();expect(events.filter(e=>e.kind==='trace')).toHaveLength(2);
   expect(events.every(e=>e.context.generation===1)).toBe(true);
   expect(phase.context.activeSpanId).toBe(phase.id);expect(Object.isFrozen(phase.context)).toBe(true);
@@ -19,10 +19,44 @@ it('trace overload is visible and cannot change legacy aggregation completeness'
   expect(collector.snapshot().aggregateComplete).toBe(true);
 });
 it('uses exactly the same boundary readings for lifecycle and interval on a real advancing clock',()=>{
-  let now=100.25;const collector=new Collector(context,'diagnostic'),probe=new Probe('clock-reader','c','diagnostic',()=>now+=0.125,collector);
+  let now=100.25;const collector=new Collector(context,'diagnostic'),probe=new Probe('host','c','diagnostic',()=>now+=0.125,collector);
   const phase=probe.phase(context,'compile');phase.end();
   const trace=normalizeTrace(collector.drain());
   expect(trace.spans[0]).toMatchObject({state:'closed',durationMs:0.125,issues:[]});
+});
+it('validates trace producer ownership and independent high-water cursors before buffering',()=>{
+  const collector=new Collector(context,'diagnostic'),records:Parameters<Collector['accept']>[0][]=[];
+  const probe=new Probe('host','c','diagnostic',()=>1,{emit:event=>records.push(event)});
+  probe.trace(context,{type:'message',action:'sent',id:'one'});
+  probe.trace(context,{type:'message',action:'sent',id:'two'});
+  probe.trace(context,{type:'message',action:'sent',id:'three'});
+  collector.accept(records[0]);collector.accept(records[0]);collector.accept(records[2]);
+  collector.accept({...records[1],producerId:'another:trace'});
+  collector.accept({...records[1],sequence:0});
+  collector.accept({...records[1],context:{...context,runId:'foreign'}});
+  expect(collector.drain()).toHaveLength(2);
+  expect(collector.snapshot()).toMatchObject({detailComplete:false,aggregateComplete:false,traceComplete:false,
+    traceHealth:{duplicate:1,sequenceGaps:1,invalid:2,foreignRun:1}});
+});
+it('snapshots only a bounded sample of active span IDs, never full events',()=>{
+  const collector=new Collector(context,'diagnostic'),probe=new Probe('host','c','diagnostic',()=>1,collector);
+  for(let i=0;i<100;i++)probe.phase(context,'stage');
+  const health=collector.snapshot().traceHealth;
+  expect(health.activeSpanCount).toBe(100);expect(health.activeSpans).toHaveLength(64);
+  expect(health.activeSpans.every(id=>typeof id==='string')).toBe(true);
+});
+it('overlapping GPU passes discard the old query and reject a stale pass end',()=>{
+  const end=vi.fn(),deleted=vi.fn(),rows:unknown[]=[];
+  const gl={getExtension:()=>({TIME_ELAPSED_EXT:1,GPU_DISJOINT_EXT:2}),createQuery:()=>({}),beginQuery:vi.fn(),endQuery:end,
+    getParameter:()=>false,isContextLost:()=>false,QUERY_RESULT_AVAILABLE:3,QUERY_RESULT:4,
+    getQueryParameter:(_:unknown,p:number)=>p===3?true:2000000,deleteQuery:deleted};
+  const timer=new GpuTimer(gl as unknown as WebGL2RenderingContext,row=>rows.push(row));
+  timer.begin('old');timer.begin('new');timer.end('old');
+  expect(end).toHaveBeenCalledTimes(1);expect(deleted).toHaveBeenCalledTimes(1);
+  timer.end('new');timer.poll();timer.dispose();
+  expect(rows).toEqual([{passId:'old',availability:'unavailable',durationMs:null,reason:'pass-overlapped'},
+    {passId:'new',availability:'available',durationMs:2}]);
+  expect(deleted).toHaveBeenCalledTimes(2);
 });
 it('GPU timers handle deferred results, disjoint and cleanup without a synchronous finish',()=>{
   let available=false,disjoint=false,deleted=0;

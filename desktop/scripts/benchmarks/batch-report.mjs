@@ -17,6 +17,8 @@ const put=(out,name,value)=>{
   for(let attempt=0;;attempt++)try{renameSync(temporary,join(out,name));return;}
   catch(error){if(!['EPERM','EBUSY','EACCES'].includes(error.code)||attempt===9)throw error;Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,25);}
 };
+/** Small recoverable checkpoint; derived tables are generated at termination. */
+export function writeBatchCheckpoint(out,state){put(out,'results.json',JSON.stringify(state));}
 const metrics=['firstResponseMs','modelTreeReadyMs','firstGeometryMs','allGeometryReadyMs','automaticLoadMs','cachePublishMs','settledMs','writeDrainMs','processPrivatePeakBytes'];
 export function summarize(rows){
   const groups=new Map();

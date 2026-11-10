@@ -26,7 +26,11 @@ const phaseNames=new Set(('assemblyParseMs blobReadMs bounds decode decodeMs dis
 const reasonWords=new Set(('input-corrupt INPUT_CORRUPT product-geometry-failed warm-preparation-incomplete WARM_UNSUPPORTED batch-execution-failed controller-interrupted batch-not-executed run-cancelled automatic-completion-not-observed correctness-unverified pending-evidence-missing measurement-incomplete measurement-lifecycle-incomplete cache-state-unverified missing-condition missing-metric measurement run lifecycle collector active-tasks worker-interrupted-tasks unexplained-task-abort interruptedTasks workloadDigest automaticLoadMs firstResponseMs firstGeometryMs allGeometryReadyMs settledMs previous-sample-pending worker-target-not-observed target-ended previous-sample-failed not-applicable target-not-observed unavailable sample-timeout').split(' '));
 for(const code of ['native-run-error','worker-target-ended','previous-sample-pending','private-tree-sampler-unavailable','heap-samples-missing','heap-samples-unavailable','worker-memory-unavailable','active-tasks','not-requested','unverified-reason-omitted'])reasonWords.add(code);
 for(const code of ['missing-dependency','source-reference-unresolved','capacity-exceeded','parse-failed','ifc-manifest-incomplete','geometry-failed','source-invalid'])reasonWords.add(code);
-for(const code of ['authenticated-system-helper-required','profile-clock-domain-unverified','slow-span-index-overflow','worker-probe-retention-expired'])reasonWords.add(code);
+for(const code of ['authenticated-system-helper-required','profile-clock-domain-unverified','slow-span-index-overflow','worker-probe-retention-expired',
+  'cold-warm','correctness','partial-coverage','semanticDigest','workload'])reasonWords.add(code);
+enums.add('overlapping-span-duration-sum');
+enums.add('top-duration-dependency-targets');
+for(const key of ['taskPathSelection','limit','eligible','omitted','unclassified'])publicKeys.add(key);
 function controlledReason(value){return String(value).split(';').map(token=>token.split(':').every(word=>reasonWords.has(word)||/^\d+$/.test(word))?token:'unverified-reason-omitted').join(';');}
 function controlledStage(value){const segments=value.split(':');
   if(segments.length>2||segments.length===2&&!['host','dev','engineering','line','spatial','ifc-conversion','ifc-regional','ifc-fine'].includes(segments[0]))return false;
@@ -60,7 +64,7 @@ export function createPublicProjector({anonymize=true}={}){
   return input=>({...project(input),artifactRole:'public-derived',omissions:['source-identities','paths','raw-profiles','business-strings','unverified-symbols'],authority:false});
 }
 export function publicView(input,options){return createPublicProjector(options)(input);}
-export async function analyzeRun(root,input){
+async function readRunTrace(root,input,{summarize=true}={}){
   const location=relative(join(root,'tmp'),input);
   if(location.startsWith('..')||isAbsolute(location))throw Error('private-run-must-be-in-workspace-tmp');
   const report=JSON.parse(readFileSync(input,'utf8'));
@@ -70,7 +74,9 @@ export async function analyzeRun(root,input){
   let truncated=false;
   if(existsSync(file))for await(const line of createInterface({input:createReadStream(file),crlfDelay:Infinity})){
     if(events.length>=100000){truncated=true;break;}
-    events.push(...expandFrames([JSON.parse(line)]));
+    const records=expandFrames([JSON.parse(line)]),remaining=100000-events.length;
+    if(records.length>remaining){events.push(...records.slice(0,remaining));truncated=true;break;}
+    events.push(...records);
   }
   const trace=normalizeTrace(events,{health:report.measurement?.traceHealth});
   if(truncated)trace.issues.push('analysis-event-limit');
@@ -84,17 +90,25 @@ export async function analyzeRun(root,input){
     for(const [name,event]of [['firstResponseMs',first('navigationUiReady')??first('coreSemanticReady')],['firstGeometryMs',first('firstGeometryReady')??first('firstUsableGeometryReady')],['allGeometryReadyMs',base]])
       if(event)trace.milestones.push({...event,trace:{...event.trace,name,action:'derived-from-product-event',eventRefs:[{runId:event.context.runId,producerId:event.producerId,sequence:event.sequence}]}});
   }
+  if(!summarize)return {trace};
   const coverage=operations.map(id=>traceCoverage(trace,id)),paths=operations.flatMap(operationTraceId=>
     ['firstResponseMs','firstGeometryMs','allGeometryReadyMs','settledMs'].map(milestone=>blockingPath(trace,{operationTraceId,milestone})));
-  const taskPaths=[];
-  for(const id of new Set(trace.dependencies.map(e=>e.trace.toSpanId))){
-    const span=trace.spans.find(s=>s.id===id&&s.state==='closed');if(!span)continue;
+  const taskPaths=[],targets=new Set(trace.dependencies.map(e=>e.trace.toSpanId)),taskTargets=[];
+  let eligibleTaskPaths=0;
+  // Bounded top-N selection: never rebuild the graph for every task in a run.
+  for(const span of trace.spans)if(targets.has(span.id)&&span.state==='closed'){
+    eligibleTaskPaths++;
+    taskTargets.push(span);taskTargets.sort((a,b)=>b.durationMs-a.durationMs||a.key.localeCompare(b.key));
+    if(taskTargets.length>16)taskTargets.pop();
+  }
+  for(const span of taskTargets){
+    const id=span.id;
     const name='task-end:'+id;
     trace.milestones.push({context:span.context,clockId:span.clockId,atMs:span.endMs,
       trace:{type:'milestone',name,action:'derived-from-span-end',fromSpanId:id,eventRefs:span.eventRefs}});
     taskPaths.push(blockingPath(trace,{operationTraceId:span.context.operationTraceId,milestone:name}));
   }
-  const pipeline=['I/O & cache','Parse & semantic','Geometry','Submission','GPU'].map(name=>({name,totalMs:0,count:0}));
+  const pipeline=['I/O & cache','Parse & semantic','Geometry','Submission','GPU'].map(name=>({name,totalMs:0,count:0,unit:'ms',method:'overlapping-span-duration-sum'}));
   const unclassified={totalMs:0,count:0};
   for(const span of trace.spans){if(span.durationMs===null)continue;
     const name=(span.name??'').toLowerCase(),index=/gpu/.test(name)?4:/render|commit|submit/.test(name)?3:/geometry|discovery|mesh|glb|csg|compile|merge|primitive|boolean/.test(name)?2:
@@ -111,13 +125,24 @@ export async function analyzeRun(root,input){
   const memoryFile=join(directory,'process-memory.json');
   const memory=existsSync(memoryFile)?JSON.parse(readFileSync(memoryFile,'utf8')).map(row=>({
     atMs:row.atMs,bytes:row.bytes,availability:row.availability,sampleDelayMs:row.sampleDelayMs})): [];
-  const analysis={memory,unclassified,measurementVersion:trace.measurementVersion,coverage,paths,taskPaths,pipeline,issues:trace.issues,
+  const analysis={memory,unclassified,measurementVersion:trace.measurementVersion,coverage,paths,taskPaths,
+    taskPathSelection:{method:'top-duration-dependency-targets',limit:16,eligible:eligibleTaskPaths,omitted:Math.max(0,eligibleTaskPaths-taskPaths.length)},pipeline,issues:trace.issues,
     metrics:report.metrics,diagnostics:{captures:profiles,system:report.diagnostics?.system??null,gpu:report.diagnostics?.gpu??null},trace};
+  return analysis;
+}
+export async function analyzeRun(root,input){
+  const analysis=await readRunTrace(root,input),summary={...analysis.trace};delete summary.events;
+  // Raw records remain in events.jsonl; summaries retain eventRefs for lookup.
+  analysis.trace={...summary,eventSource:'events.jsonl'};
+  for(const key of ['operations','milestones','dependencies','waits','resources'])
+    analysis.trace[key]=summary[key].map(event=>({context:event.context,clockId:event.clockId,atMs:event.atMs,trace:event.trace,
+      eventRef:{runId:event.context.runId,producerId:event.producerId,sequence:event.sequence}}));
+  const directory=dirname(input);
   writeFileSync(artifactFile(root,join(directory,'analysis.private.json')),JSON.stringify(analysis,null,2));
   return analysis;
 }
 export async function exportRunTrace(root,input){
-  const analysis=await analyzeRun(root,input),file=artifactFile(root,join(dirname(input),'trace.private.json'));
+  const analysis=await readRunTrace(root,input,{summarize:false}),file=artifactFile(root,join(dirname(input),'trace.private.json'));
   writeFileSync(file,JSON.stringify(exportChromeTrace(analysis.trace)));return file;
 }
 const htmlEscape=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
@@ -127,10 +152,21 @@ export function writeObservabilityReport(out,analysis,{internal=false}={}){
   const pipeline=analysis.pipeline??[];
   const cards=pipeline.map(p=>'<div class="stage"><b>'+htmlEscape(p.name)+'</b><p>'+
     (p.count?p.totalMs.toFixed(1)+' ms · '+p.count+' spans':'未采集/无区间')+'</p></div>').join('');
-  const payload=JSON.stringify(view).replaceAll('<','\\u003c');
+  // The HTML needs a bounded overview, never the complete span/edge inventory.
+  const compactPath=path=>({...path,coverage:undefined,waits:undefined,resourceConstraints:undefined,
+    omittedCandidates:Math.max(0,(path.paths?.length??0)-8),
+    paths:(path.paths??[]).slice(0,8).map(p=>({...p,ids:p.ids.slice(0,128),omittedSpanIds:Math.max(0,p.ids.length-128),
+      unattributed:p.unattributed?.slice(0,32),omittedIntervals:Math.max(0,(p.unattributed?.length??0)-32)}))});
+  const overview={artifactRole:view.artifactRole,authority:view.authority,metrics:view.metrics,pipeline:view.pipeline,
+    unclassified:view.unclassified,issues:view.issues,taskPathSelection:view.taskPathSelection,
+    coverage:(view.coverage??[]).map(row=>({...row,domains:row.domains?.map(domain=>({...domain,windows:undefined}))})),
+    paths:(view.paths??[]).slice(0,16).map(compactPath),taskPaths:(view.taskPaths??[]).slice(0,16).map(compactPath),
+    memory:(view.memory??[]).slice(0,2048),memoryPreview:{total:view.memory?.length??0,omitted:Math.max(0,(view.memory?.length??0)-2048)}};
+  const payload=JSON.stringify(overview).replaceAll('<','\\u003c');
   const html='<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GIM 测量</title>'+
     '<style>body{font:15px system-ui;margin:32px;background:#101923;color:#e3edf7}section{display:flex;gap:12px;flex-wrap:wrap}.stage{background:#203347;padding:16px;flex:1;min-width:150px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:#80bdff}</style>'+
     '<h1>GIM Benchmark / Trace / Profile</h1><p>阶段累计 elapsed 可重叠，不能相加为打开时长。CPU 采样权重、GPU elapsed 与进程观测峰值各有独立口径。</p>'+
+    '<p>页面展示有界概览，省略数保留；内存图最多显示前 2048 个样本。完整摘要见 <a href="'+(internal?'report.private.json':'report.json')+'">JSON 报告</a>。</p>'+
     '<section>'+cards+'</section><p>未分类阶段：'+(analysis.unclassified?.count??0)+' 个；不推断为 I/O、CPU 或 GPU。</p><h2>四个产品里程碑</h2><pre>'+htmlEscape(JSON.stringify(view.metrics??{},null,2))+'</pre>'+
     ((view.memory?.length??0)>0?'<h2>进程树 Private Bytes 采样</h2><p>横轴为独立原生采样器毫秒；观测峰值是窗口下界，单点仅为快照。缺失不填零，不与 JS Heap / Buffer 相加。</p><canvas id="memory" width="1200" height="220" style="max-width:100%"></canvas>':'')+
     (internal?'<p><a href="trace.private.json">Perfetto 时间线</a></p>':'<p>匿名派生视图；不能用于基线批准。完整事件和原始诊断保存在本机私有目录。</p>')+

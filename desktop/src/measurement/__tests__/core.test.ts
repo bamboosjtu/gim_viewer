@@ -36,12 +36,29 @@ describe('measurement contracts (no engineering samples)',()=>{
     probe.event({...context,workerId:'worker-2',attemptId:2},{kind:'task',name:'started'});probe.event({...context,workerId:'worker-2',attemptId:2},{kind:'task',name:'ended',status:'completed'});
     expect(collector.snapshot().taskOutcomes).toEqual({timeout:2,completed:1});
   });
-  it('records queued work that never started without inventing an interrupted execution',()=>{
+  it('treats unexplained termination of queued work as unexpected, not clean cancellation',()=>{
     const {collector,probe}=setup();probe.event(context,{kind:'worker',name:'created'});
     probe.event(context,{kind:'task',name:'queued'});
     probe.event(context,{kind:'worker',name:'terminated',status:'aborted'});
-    expect(collector.snapshot()).toMatchObject({activeTasks:[],lifecycleComplete:true,
-      taskOutcomes:{cancelled:1},loss:{cancelledBeforeStart:1,interruptedTasks:0}});
+    expect(collector.snapshot()).toMatchObject({activeTasks:[],lifecycleComplete:false,
+      taskOutcomes:{aborted:1},loss:{cancelledBeforeStart:0,interruptedTasks:1,unexpectedWorkerTerminations:1}});
+  });
+  it('retains terminal task identities beyond 8192 outcomes for late cancellation acknowledgements',()=>{
+    const {collector,probe}=setup();
+    for(let i=0;i<9000;i++){
+      const task={...context,taskId:'task-'+i};probe.event(task,{kind:'task',name:'started'});
+      probe.event(task,{kind:'task',name:'ended',status:'cancelled',reasonCode:'request-superseded'});
+    }
+    probe.event({...context,taskId:'task-0'},{kind:'task',name:'ended',status:'cancelled',reasonCode:'request-superseded'});
+    expect(collector.snapshot()).toMatchObject({lifecycleComplete:true,taskOutcomes:{cancelled:9000},loss:{invalid:0,lateCancelledAcks:1}});
+  });
+  it('requires a declared reason even for idle retirement, and preserves controlled queued cancellation',()=>{
+    const {collector,probe}=setup();
+    probe.event(context,{kind:'worker',name:'terminated',status:'aborted'});
+    expect(collector.snapshot().loss.unexpectedWorkerTerminations).toBe(1);
+    const controlled=setup();controlled.probe.event(context,{kind:'task',name:'queued'});
+    controlled.probe.event(context,{kind:'worker',name:'terminated',status:'aborted',reasonCode:'project-closed'});
+    expect(controlled.collector.snapshot()).toMatchObject({lifecycleComplete:true,taskOutcomes:{cancelled:1},loss:{cancelledBeforeStart:1,unexpectedWorkerTerminations:0}});
   });
   it('accepts an explicit business cancellation but rejects unexplained or late task endings',()=>{
     const {collector,probe}=setup();probe.event(context,{kind:'task',name:'started'});

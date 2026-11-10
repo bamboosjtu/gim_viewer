@@ -62,7 +62,7 @@ Windows CI 保持一个串行任务：版本、测量协议、验收工具、本
 
 完整命令清单与逐项门禁条件见[验证](validation.md)。远程 CI 只运行无工程样本的单元测试、静态检查和构建；真实与合成工程样本、性能矩阵只在开发者本地运行。
 
-批量冷暖、比较与报告使用 `npm run bench -- ...`，命令、注册表与报告约定见 [Benchmark CLI](benchmark.md)；单机验收步骤见[性能测试指南](performance-guide.md)。详细 Trace、CPU/Allocation/Heap Profile 和 Windows 系统诊断需要显式 `--diagnostics` 配置；WPA 摘要另需本地 WPAExporter 与冻结 `.wpaProfile`，Perfetto 只用于查看导出的私有 Trace。
+批量冷暖、比较与报告使用 `npm run bench -- ...`，命令、注册表与报告约定见 [Benchmark CLI](benchmark.md)；单机验收步骤见[性能测试指南](performance-guide.md)。详细 Trace、CPU/Allocation/Heap Profile 和 GPU Query 需要显式 `--diagnostics` 配置；WPR/PMC 系统录制入口当前关闭（`authenticated-system-helper-required`），离线 WPA 摘要另需本地 WPAExporter 与冻结 `.wpaProfile`，Perfetto 只用于查看导出的私有 Trace。
 
 原生侧：
 
@@ -88,7 +88,7 @@ Python 工具位于 `tools/`，各自维护 `.venv` 与打包配置；构建、�
 
 ## 工作区与临时目录
 
-- 测试与验证的临时输入、缓存、子进程 `TEMP/TMP/TMPDIR` 必须位于工作区 `tmp/`；权威 Benchmark 结果和 Trace/Profile 也保存在 `tmp/gim-bench/`，可分享的匿名派生视图写入 `output/`。
+- 测试与验证的临时输入、缓存、子进程 `TEMP/TMP/TMPDIR` 必须位于工作区 `tmp/`；权威 Benchmark 结果和 Trace/Profile 也保存在 `tmp/gim-bench/`，`output/` 默认写入匿名派生视图（显式非匿名 survey 例外）。
 - 不读取、写入或清理系统目录作为测试数据；Node 测试入口通过 `scripts/with-workspace-temp.mjs` 设置临时目录。
 - `demo/` 是开发者自备模型目录，不进入 Git；基础功能样本使用 [`desktop/local-tests/mini-samples.example.json`](../desktop/local-tests/mini-samples.example.json)，缺样本明确跳过。
 - 性能样本按形成目的登记在 [`benchmarks/l0/`、`l1/`、`l2/`](../benchmarks/README.md)，GIM 文件不随仓库分发。

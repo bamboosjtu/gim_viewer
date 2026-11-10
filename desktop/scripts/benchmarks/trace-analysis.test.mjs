@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {normalizeTrace,blockingPath,exportChromeTrace,mapTime,waitIntervals,resourceConstraints,resolveScopes} from './trace-analysis.mjs';
-import {publicView,createPublicProjector} from './observability.mjs';
+import {publicView,createPublicProjector,writeObservabilityReport} from './observability.mjs';
 import {parseCsv,summarizeSystemRows,SystemCapture} from './system-diagnostics.mjs';
 import {diagnosticPlan,CaptureController} from './diagnostics.mjs';
 import {analyzeRun,exportRunTrace} from './observability.mjs';
@@ -47,6 +47,13 @@ test('unknown milestone predecessors do not turn unrelated work into a blocking 
 test('equal predecessors preserve both candidates',()=>{
   const path=blockingPath(normalizeTrace(fixture(true).events),query);
   assert.equal(path.kind,'Critical Path Candidates');assert.deepEqual(path.paths.map(p=>p.ids),[['A','merge'],['B','merge']]);
+});
+test('an earlier-ending heavier predecessor is not pruned by a later lighter chain',()=>{
+  const {events}=fixture();
+  for(const event of events)if(event.trace.type==='span'&&event.trace.id==='B'&&event.trace.action==='started')event.atMs=490;
+  const path=blockingPath(normalizeTrace(events),query);
+  assert.deepEqual(path.paths[0].ids,['D','merge']);assert.equal(path.paths[0].weight,400);
+  assert.equal(path.kind,'Partial Blocking Path');
 });
 test('a referenced task roundtrip counts once while its nested worker interval remains visible',()=>{
   const {events}=fixture();
@@ -132,6 +139,11 @@ test('public diagnostics keep controlled failure codes, write sub-stages and pro
   assert.ok(view.stages.every(row=>row.stage.startsWith('host:host.cacheWrite.')));
   assert.ok(!JSON.stringify(view).includes('private-digest'));
 });
+test('public cold/warm failure dimensions remain readable while arbitrary reasons stay hidden',()=>{
+  const reason='correctness-unverified;cold-warm:correctness;cold-warm:partial-coverage;cold-warm:semanticDigest;cold-warm:workload';
+  assert.equal(publicView({reason}).reason,reason);
+  assert.equal(publicView({reason:reason+';cold-warm:private-project-name'}).reason,reason+';unverified-reason-omitted');
+});
 test('diagnostics validate mode-independent windows and do not trigger on an ended span',async()=>{
   assert.throws(()=>diagnosticPlan({captures:[{kind:'cpu',durationMs:30001}]}));
   assert.throws(()=>diagnosticPlan({captures:[{id:'../escape',kind:'cpu'}]}));
@@ -179,6 +191,8 @@ test('private run -> analysis -> Perfetto -> executable public report preserves 
     sourceSha256:'f'.repeat(64),diagnostics:{captures:[]}}));
   writeFileSync(join(folder,'events.jsonl'),fixture().events.map(e=>JSON.stringify(e)).join('\n'));
   const analysis=await analyzeRun(root,input);assert.equal(analysis.coverage[0].traceComplete,true);
+  assert.equal(analysis.trace.events,undefined);assert.equal(analysis.trace.eventSource,'events.jsonl');
+  assert.equal(JSON.parse(readFileSync(join(folder,'analysis.private.json'),'utf8')).trace.events,undefined);
   const trace=JSON.parse(readFileSync(await exportRunTrace(root,input),'utf8'));
   assert.ok(trace.traceEvents.some(e=>e.ph==='b'));assert.equal(trace.metadata.timestampUnit,'us');
   const publicParent=join(fixtureRoot,'output');mkdirSync(publicParent,{recursive:true});
@@ -188,6 +202,28 @@ test('private run -> analysis -> Perfetto -> executable public report preserves 
   assert.ok(!html.includes('f'.repeat(64)));
   assert.equal(JSON.parse(readFileSync(join(out,'report.json'),'utf8')).authority,false);
   dom.window.close();
+  const internal=join(folder,'internal');writeObservabilityReport(internal,analysis,{internal:true});
+  const internalHtml=readFileSync(join(internal,'report.html'),'utf8'),internalDom=new JSDOM(internalHtml,{runScripts:'dangerously'});
+  const overview=JSON.parse(internalDom.window.document.querySelector('#evidence').textContent);
+  assert.equal(overview.trace,undefined);assert.match(internalHtml,/trace\.private\.json/);internalDom.window.close();
+});
+test('large traces cap task-path queries and persist summary evidence instead of raw events',async()=>{
+  const parent=resolve('..','tmp','trace-summary-contract');mkdirSync(parent,{recursive:true});
+  const folder=mkdtempSync(join(parent,'run-')),input=join(folder,'report.json'),{events,emit}=fixture();
+  for(let i=0;i<200;i++){
+    const id='task-'+i,start=emit(100,{type:'span',action:'started',id,name:'geometry.compile'});
+    emit(500,{type:'span',action:'ended',id,endMs:500});
+    emit(500,{type:'dependency',action:'required',fromSpanId:'A',toSpanId:id,eventRefs:[start]});
+  }
+  writeFileSync(input,JSON.stringify({conditions:{measurementVersion:MEASUREMENT_VERSION}}));
+  writeFileSync(join(folder,'events.jsonl'),events.map(e=>JSON.stringify(e)).join('\n'));
+  const analysis=await analyzeRun(resolve('..'),input);
+  assert.equal(analysis.taskPaths.length,16);assert.equal(analysis.taskPathSelection.eligible,201);
+  assert.equal(analysis.taskPathSelection.omitted,185);assert.equal(analysis.trace.events,undefined);
+  assert.ok(analysis.trace.spans.every(span=>Array.isArray(span.eventRefs)));
+  const geometry=analysis.pipeline.find(stage=>stage.name==='Geometry');
+  assert.equal(geometry.method,'overlapping-span-duration-sum');assert.equal(geometry.unit,'ms');
+  assert.ok(geometry.totalMs>600);
 });
 test('preset CPU capture acknowledges start before releasing the operation barrier',async()=>{
   const root=resolve('..'),parent=join(root,'tmp','capture-arm-contract');mkdirSync(parent,{recursive:true});

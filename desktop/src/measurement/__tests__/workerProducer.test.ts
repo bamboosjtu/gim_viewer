@@ -2,6 +2,18 @@ import{it,expect,vi}from'vitest';
 import{createWorkerProbe}from'../workerProbe.js';
 import{Collector,type TraceContext,type MeasurementEvent}from'../core.js';
 const base:TraceContext={runId:'run-a',workerId:'worker-a',executorId:'worker-a',family:'dev',backend:'web-worker',sampleId:null,sourceSha256:null,buildId:null,generation:1,geometryToken:1,requestId:null,taskId:null,attemptId:1,parentTaskId:null,sourceId:null,geometryLod:null};
+it('keeps diagnostic traces when a worker is reused for a new run without another init',async()=>{
+  const records:MeasurementEvent[]=[];vi.stubGlobal('self',{addEventListener(){},postMessage:(message:{events?:MeasurementEvent[]})=>records.push(...message.events??[])});
+  try{
+    const worker=createWorkerProbe();worker.control({data:{__gimMeasurement:'init',context:base,mode:'benchmark'}}as MessageEvent);
+    const context={...base,runId:'run-b',taskId:'b'};
+    await worker.run({data:{_gimMeasurement:{context,command:'compile',mode:'diagnostic'}}}as MessageEvent,async()=>{});
+    expect(records.some(e=>e.kind==='loss')).toBe(false);
+    expect(records.filter(e=>e.kind==='trace').length).toBeGreaterThan(0);
+    const collector=new Collector(context,'diagnostic');records.forEach(e=>collector.accept(e));
+    expect(collector.snapshot()).toMatchObject({aggregateComplete:true,traceComplete:true,taskOutcomes:{completed:1}});
+  }finally{vi.unstubAllGlobals();}
+});
 it('reinitializing the same run creates independent producer cursors without collector duplicates',async()=>{
   const records:MeasurementEvent[]=[];vi.stubGlobal('self',{addEventListener(){},postMessage:(message:{events?:MeasurementEvent[]})=>records.push(...message.events??[])});
   try{

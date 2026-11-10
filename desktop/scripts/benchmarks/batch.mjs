@@ -8,7 +8,7 @@ import {coldWarmEquivalent} from './profiles.mjs';
 import {runNative} from './native-run.mjs';
 import {sourceFingerprint} from './acceptance-build.mjs';
 import {artifactDirectory,loadBatchInputs,isPublicArtifact} from './batch-input.mjs';
-import {writeBatchReports} from './batch-report.mjs';
+import {writeBatchReports,writeBatchCheckpoint} from './batch-report.mjs';
 import {workspacePath} from './samples.mjs';
 import {isStartupInfrastructureFailure,STARTUP_ATTEMPTS,startupRetryDelayMs} from './startup-retry.mjs';
 import {warmPreparation} from './warm-preparation.mjs';
@@ -137,7 +137,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   const labels=new Map(state.rows.map(row=>[row.inputId,row.sampleLabel]));
   const publicProfile={...body,exportId,profileDigest,cases:body.cases.map(row=>({...row,sampleLabel:labels.get(row.inputId)}))};
   writeFileSync(join(out,'profile.json'),JSON.stringify(isPublicArtifact(root,out)?project(publicProfile):{...body,digest:profileDigest},null,2));
-  const save=()=>{state.updatedAt=new Date().toISOString();writeBatchReports(privateOut,state,{root});writeBatchReports(out,state,{root,project});};
+  const save=()=>{state.updatedAt=new Date().toISOString();writeBatchCheckpoint(privateOut,state);};
   save();
   const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   const stopTimer=setInterval(()=>{if(existsSync(join(out,'stop.request')))abort();},500);
@@ -202,7 +202,9 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   state.baselineEligible=preset==='baseline'&&['PASS','PARTIAL'].includes(state.outcome)&&state.pairs.length===inputs.samples.length*repetitions
     &&state.pairs.every(pair=>['PASS','PARTIAL'].includes(pair.outcome))
     &&[...groups.values()].every(runs=>['PASS','PARTIAL'].includes(compareRuns(runs,runs).outcome));
-  save();try{unlinkSync(controllerFile);}catch{/* Completed report is authoritative. */}
+  save();writeBatchReports(privateOut,state,{root});
+  if(resolve(out)!==resolve(privateOut))writeBatchReports(out,state,{root,project});
+  try{unlinkSync(controllerFile);}catch{/* Completed report is authoritative. */}
   return {out,privateResults:join(privateOut,'results.json'),result:state};
 }
 
@@ -251,12 +253,16 @@ function controllerRecord(root,out,{includeCompleted=false}={}){
       controllers.push({file:safeFile,value:JSON.parse(readFileSync(safeFile,'utf8')),mappedNonce:value.nonce,exportId:value.exportId});
     }catch{/* Unreadable private record cannot establish ownership. */}
   }
-  // A reused public path may retain many completed private runs. Their mappings
-  // must never hide a current controller (even a dead/interrupted controller).
-  if(controllers.length)return controllers.length===1?controllers[0]:null;
-  if(!includeCompleted)return null;
   let exportId;
-  try{exportId=JSON.parse(readFileSync(workspacePath(root,join(out,'results.json')),'utf8')).exportId;}catch{/* Legacy output may have no binding. */}
+  for(const name of ['profile.json','results.json']){
+    try{exportId=JSON.parse(readFileSync(workspacePath(root,join(out,name)),'utf8')).exportId;}catch{/* Legacy output may have no binding. */}
+    if(exportId)break;
+  }
+  // Both active and completed mappings must obey the current export binding.
+  // A stale controller at the same output path cannot claim a newer batch.
+  const active=exportId?controllers.filter(record=>record.exportId===exportId):controllers;
+  if(active.length)return active.length===1?active[0]:null;
+  if(!includeCompleted)return null;
   const matches=exportId?completed.filter(record=>record.exportId===exportId):completed;
   return matches.length===1?matches[0]:null;
 }

@@ -64,7 +64,7 @@ export function normalizeTrace(events,{limit=100000,health=null}={}){
     groups.get(key).push(event);
   }
   if(events.length>limit)issues.push('analysis-event-limit');
-  if(health?.dropped||health?.activeOverflow)issues.push('trace-collection-loss');
+  if(health?.dropped||health?.activeOverflow||health?.duplicate||health?.sequenceGaps||health?.invalid||health?.foreignRun)issues.push('trace-collection-loss');
   const spans=[];
   for(const [key,rows]of groups){
     const signatures=new Set(rows.map(identity)),starts=rows.filter(e=>e.trace?.action==='started'),ends=rows.filter(e=>e.trace?.action==='ended');
@@ -89,9 +89,13 @@ export function normalizeTrace(events,{limit=100000,health=null}={}){
       lifecycleObserved:starts.length>0,state:problems.length?'conflict':end===null?'open':starts.length?'closed':'interval-only',
       issues:[...problems,...anomalies],eventRefs:rows.map(e=>({runId:e.context.runId,producerId:e.producerId,sequence:e.sequence}))});
   }
+  const scopeClosures=new Map();
+  for(const e of scopeRecords)if(e.trace.action==='closed'){
+    const key=e.context.runId+'\0'+e.trace.id,rows=scopeClosures.get(key)??[];rows.push(e);scopeClosures.set(key,rows);
+  }
   const scopes=scopeRecords.filter(e=>e.trace.scope).map(e=>{
     const scope={...e.trace.scope,window:{...e.trace.scope.window}};
-    const closed=scopeRecords.filter(r=>r.context.runId===e.context.runId&&r.trace.action==='closed'&&r.trace.id===scope.scopeId);
+    const closed=scopeClosures.get(e.context.runId+'\0'+scope.scopeId)??[];
     if(closed.length===1)scope.window.endMs=closed[0].trace.endMs;
     if(closed.length>1)issues.push('scope-close-conflict');
     return scope;
@@ -144,6 +148,12 @@ export function waitIntervals(trace){
 export function resourceConstraints(trace,operationTraceId){
   const rows=trace.resources.filter(e=>e.context.operationTraceId===operationTraceId),slots=new Map(),constraints=[],issues=[];
   const waits=waitIntervals(trace);
+  const waitKey=(context,resourceId,clockId)=>JSON.stringify([context.runId,context.taskId,context.attemptId,resourceId,clockId]);
+  const waitsByTask=new Map();
+  for(const wait of waits)if(wait.state==='closed'){
+    const key=waitKey(wait.context,wait.resourceId,wait.ownerClockId),list=waitsByTask.get(key)??[];
+    list.push(wait);waitsByTask.set(key,list);
+  }
   for(const e of rows){
     const t=e.trace;if(!t.slotId)continue;
     const key=e.context.runId+'\0'+t.resourceId+'\0'+t.slotId,previous=slots.get(key);
@@ -152,9 +162,7 @@ export function resourceConstraints(trace,operationTraceId){
     if(previous?.grant){issues.push('slot-double-granted');continue;}
     if(previous?.release){
       const release=previous.release;
-      const wait=waits.find(w=>w.state==='closed'&&w.context.runId===e.context.runId&&w.context.taskId===e.context.taskId&&
-        w.context.attemptId===e.context.attemptId&&w.resourceId===t.resourceId&&w.ownerClockId===e.clockId&&
-        w.startMs<=release.atMs&&w.endMs>=e.atMs);
+      const wait=waitsByTask.get(waitKey(e.context,t.resourceId,e.clockId))?.find(w=>w.startMs<=release.atMs&&w.endMs>=e.atMs);
       if(!wait){slots.set(key,{grant:e});continue;}
       if(release.clockId!==e.clockId||release.atMs>e.atMs)issues.push('resource-clock-or-order-conflict');
       else constraints.push({fromTaskId:release.context.taskId,fromAttemptId:release.context.attemptId,toTaskId:e.context.taskId,toAttemptId:e.context.attemptId,resourceId:t.resourceId,slotId:t.slotId,
@@ -222,12 +230,13 @@ export function blockingPath(trace,{operationTraceId,milestone,maxCandidates=64}
     if(visiting.has(id)){issues.push('constraint-cycle');return [];}
     if(memo.has(id))return memo.get(id);
     visiting.add(id);
-    const n=nodes.get(id),pre=[];let latestLower=-Infinity;
+    const n=nodes.get(id),pre=[];let bestWeight=-Infinity;
     for(const previous of incoming.get(id)??[])for(const p of solve(previous,depth+1)){
       if(p.end>n.start.ms){issues.push('clock-order-uncertain');continue;}
-      latestLower=Math.max(latestLower,p.end-(p.uncertaintyMs??0));
-      for(let i=pre.length-1;i>=0;i--)if(pre[i].end+(pre[i].uncertaintyMs??0)<latestLower)pre.splice(i,1);
-      if(p.end+(p.uncertaintyMs??0)<latestLower)continue;
+      // All paths leaving this node share its end time. A later predecessor
+      // does not dominate an earlier, heavier chain; retain maximum weight.
+      if(p.weight>bestWeight){bestWeight=p.weight;pre.length=0;}
+      if(p.weight<bestWeight)continue;
       if(pre.length<maxCandidates)pre.push(p);else issues.push('candidate-limit');
     }
     let paths=pre.length?pre.map(p=>({ids:[...p.ids,id],weight:p.weight+n.durationMs,end:n.end.ms,uncertaintyMs:n.end.uncertaintyMs})):

@@ -38,7 +38,7 @@
 
 完整配置代码在[features.ts](../../desktop/src/config/features.ts)；设置面板/底图选择另有持久化规则。
 
-桌面 Three 场景使用 `SimpleRenderer` 的公开 MANUAL 模式：静止场景不重复提交，树节点增删和 IFC 分块更新使画面失效；原地修改材质、显隐或矩阵通过 `viewer/demandRendering.ts` 请求刷新。Fragments 完成事件只检查该模型公开 tile 的几何、属性版本、组、材质和矩阵变化，忽略没有视觉变化的周期性完成通知，不扫描场景或顶点数组。连续加载时合并场景刷新，冷却间隔为上次提交耗时的三倍，最小 80 ms、最大 750 ms；相机更新、选择和窗口变化立即请求下一帧。相机与 Fragments 的更新循环继续运行，线路 MapLibre 保持自身刷新机制。DEV 实例化仍默认关闭。
+桌面 Three 场景使用 `SimpleRenderer` 的公开 MANUAL 模式：静止场景不重复提交，树节点增删和 IFC 分块更新使画面失效；原地修改材质、显隐或矩阵通过 `viewer/demandRendering.ts` 请求刷新。Fragments 完成事件只检查该模型公开 tile 的几何、属性版本、组、材质（含颜色、透明度、面/深度状态）和矩阵变化，忽略没有视觉变化的周期性完成通知，不扫描场景或顶点数组。连续加载时合并场景刷新，冷却间隔为上次提交耗时的三倍，最小 80 ms、最大 750 ms；相机更新、选择和窗口变化立即请求下一帧。相机与 Fragments 的更新循环继续运行，线路 MapLibre 保持自身刷新机制。DEV 实例化仍默认关闭。
 
 ## 诊断
 
@@ -56,6 +56,7 @@
 - IFC 诊断包含读取/转换/源模型、远景/区域/属性、连接批次和缓存命中；阶段可重叠，不能相加为整源耗时。
 - 资源诊断包含进程树 private、RSS、JS heap、GPU 资源计数和可选 WebView2 内存；采样窗口有限，不代表瞬时峰值。
 - 选择诊断区分导航、属性摘要/参数、几何收集、高亮提交、下一帧；外层跨度包含调用方恢复间隙。
+- WPR/PMC 系统录制入口当前关闭并返回 `authenticated-system-helper-required`；CPU/GPU Trace 与已采集 ETL 的离线 WPA 摘要仍可用，边界见 [Benchmark CLI](../benchmark.md#详细-trace-与-profile)。
 
 导出字段与判定口径见[性能测试指南](../performance-guide.md)；Trace/Profile、WPR/PMC/WPA 与 GPU 采集的配置和边界见 [Benchmark CLI](../benchmark.md#详细-trace-与-profile)。
 

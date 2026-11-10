@@ -168,7 +168,7 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
     if(sentAt.size<4096)sentAt.set(taskKey(task),performance.now());
     dispatch.probe.event(task, { kind: 'task', name: 'queued' });
     dispatch.probe.trace(task,{type:'message',action:'sent',id:task.taskId!});
-    const prepared=transferMessage({ ...data, _gimMeasurement: { context: task, command: String(data.kind ?? data.type ?? 'convert') } },transfer,task);
+    const prepared=transferMessage({ ...data, _gimMeasurement: { context: task, mode:measurementCollector(scope.runId)!.mode, command: String(data.kind ?? data.type ?? 'convert') } },transfer,task);
     try {
       const payload = prepared.data;
       if (Array.isArray(transfer)) send(payload, transfer); else send(payload, transfer);
@@ -188,11 +188,11 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
         else owner.probe.event(scope,{kind:'loss',name:'worker-terminal-tail-unconfirmed',workload:{events:1}});
       }
     }
-    run.probe.event(context, { kind: 'worker', name: 'terminated', status: 'aborted', workload: { clockReady: Number(clockReady) } });
+    run.probe.event(context, { kind: 'worker', name: 'terminated', status: 'aborted', reasonCode:run.collector.terminationReason(workerId),workload: { clockReady: Number(clockReady) } });
     const terminatedRuns=new Set([context.runId]);
     for(const task of taskContexts.values())if(!terminatedRuns.has(task.runId)){
       terminatedRuns.add(task.runId);
-      measurementProbe(task.runId)?.event(task,{kind:'worker',name:'terminated',status:'aborted'});
+      measurementProbe(task.runId)?.event(task,{kind:'worker',name:'terminated',status:'aborted',reasonCode:measurementCollector(task.runId)?.terminationReason(workerId)});
     }
     sentAt.clear();taskContexts.clear();cancelTaskMeasurement.delete(worker);
     for(const flight of flights.values())flight.release();flights.clear();

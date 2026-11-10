@@ -166,7 +166,7 @@ DEV 模板是共享资产，不是工程实体资产：很小的 DEV 由同一 W
 - 冷/暖、L0/L1/L2、模板编译/缓存命中分别计量；不能把“语义命中”写成“全站几何就绪”。
 - 实例化批次默认关闭；只有固定路线 draw calls 下降 ≥30% 且帧耗时不回退才考虑默认。
 - L0/L1 不做 CSG；L2 的 CSG/导出仍可能形成不可中断长尾。
-- 真实样本的冷/暖结果以开发者本地 `tmp/gim-bench/` 私有报告为准，`output/` 仅保存匿名派生视图；测量方法见[Benchmark CLI](../benchmark.md)，未达标项见[问题与限制](../open-issues.md)。
+- 真实样本的冷/暖结果以开发者本地 `tmp/gim-bench/` 私有报告为准，`output/` 默认保存匿名派生视图（非匿名 survey 例外）；测量方法见[Benchmark CLI](../benchmark.md)，未达标项见[问题与限制](../open-issues.md)。
 
 ## 相关文档
 

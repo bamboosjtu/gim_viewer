@@ -6,7 +6,7 @@
 
 - 当前实现见[系统架构](architecture.md)及各主题文档；
 - 工程实体、三视图和目录见[工程实体模型](engineering/README.md)；
-- 性能 SLO 见[性能测试指南](performance-guide.md)；权威实测与验收证据在开发者本地 `tmp/gim-bench/`，`output/` 只是匿名派生视图；
+- 性能 SLO 见[性能测试指南](performance-guide.md)；权威实测与验收证据在开发者本地 `tmp/gim-bench/`，`output/` 为默认匿名派生视图（显式非匿名 survey 例外）；
 - 样本身份与格式统计见[样本台账](schema/sample-corpus.md)；
 - 未关闭缺陷与已接受限制见[问题与限制](open-issues.md)。
 
@@ -38,7 +38,7 @@
 
 测试临时输入、输出、子进程 `TEMP/TMP/TMPDIR` 统一使用工作区根目录 `tmp/`，可分享报告写入 `output/`；Benchmark 的权威私有报告仍在 `tmp/`。禁止访问系统目录作为测试数据或清理目标。Node 测试入口通过工作区临时目录启动器运行，Rust 测试从编译期工作区路径取得临时目录。
 
-测试集和对照基线由开发者自行构建。Benchmark 的权威结果保存在工作区 `tmp/` 私有报告，`output/` 只提供匿名派生视图；两者都只描述所记录的构建、样本和运行环境，不能将缺样本跳过或单元测试通过表述为复杂工程验收通过。
+测试集和对照基线由开发者自行构建。Benchmark 的权威结果保存在工作区 `tmp/` 私有报告，`output/` 默认只提供匿名派生视图；显式非匿名 survey 仅允许展示标准方案号和已匿名验证样本名，仍不能作为 gate 或批准输入。两者都只描述所记录的构建、样本和运行环境，不能将缺样本跳过或单元测试通过表述为复杂工程验收通过。
 
 ## 必须成立的不变量
 
@@ -104,6 +104,7 @@
 | 视角历史 | `src/viewer/__tests__/viewHistory.test.ts`、`src/ui/__tests__/viewHistoryFeedback.test.ts` |
 | 原生批读/GIMR 协议 | `bridge/__tests__/devLodCache.test.ts`、`bridge/__tests__/devLodNativeBatch.test.ts`、`bridge/__tests__/database.test.ts` |
 | DEV 几何/缓存/选择 | `devGeometryWorkerClient`、`devLodRuntime`、`devGlbTemplateRuntime`、`xmlModGeometry` 对应测试 |
+| 按需绘制/相机取景 | `src/viewer/__tests__/demandRendering.test.ts`、`src/viewer/__tests__/cameraFraming.test.ts` |
 | 真实几何门禁 | `GIM_VERIFY_SUBSTATION01=1` 后运行 `devGeometryGate.test.ts --maxWorkers=1 --minWorkers=1` |
 | 本地真实工程 | `npm run test:local` 或 `npm run bench -- batch`；缺样本与跳过须单列，不计通过 |
 | 测量协议/Trace/诊断 | `npm run test:measurement-tools`；不运行工程样本，不证明真实 Trace 覆盖或系统级诊断可用 |
@@ -146,7 +147,7 @@
 
 ### 当前已覆盖
 
-- 本地真实工程由开发者注册到 `local-tests/` 或 `benchmarks/`；权威结果写入工作区 `tmp/gim-bench/`，`output/` 为匿名派生视图；来源、实体、几何和缓存证据分别判读。
+- 本地真实工程由开发者注册到 `local-tests/` 或 `benchmarks/`；权威结果写入工作区 `tmp/gim-bench/`，`output/` 为默认匿名派生视图；来源、实体、几何和缓存证据分别判读。
 - 九工程入口的研究台账守恒、固定案例与来源扫描对照属于不同验收项；旧输出与当前 parser/规则指纹不一致时不能作为本版通过证据。
 - 完整实体/成员/投影金标准尚待建立。
 - 生产构建的真实浏览器操作覆盖工程组成/来源、搜索、显隐、精化和工程切换。
