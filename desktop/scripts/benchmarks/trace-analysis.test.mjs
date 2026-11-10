@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {normalizeTrace,blockingPath,exportChromeTrace,mapTime,waitIntervals,resourceConstraints,resolveScopes} from './trace-analysis.mjs';
-import {publicView} from './observability.mjs';
+import {publicView,createPublicProjector} from './observability.mjs';
 import {parseCsv,summarizeSystemRows} from './system-diagnostics.mjs';
 import {diagnosticPlan,CaptureController} from './diagnostics.mjs';
 import {analyzeRun,exportRunTrace} from './observability.mjs';
@@ -100,6 +100,25 @@ test('WPA column mapping rejects schema changes and PID reuse, keeps explicit un
   assert.deepEqual(parseCsv('A,B\n"a,b","x""y"\n'),[{A:'a,b',B:'x"y'}]);
   assert.deepEqual(parseCsv(Buffer.concat([Buffer.from([255,254]),Buffer.from('A,B\r\n1,2\r\n','utf16le')])),[{A:'1',B:'2'}]);
   assert.equal(summarizeSystemRows([{PID:'5',Born:'new',Start:'',End:'2',Weight:'1'}],contract,[{pid:5,created:'new'}]).availability,'unavailable');
+  const reused=summarizeSystemRows([{PID:'5',Born:'old',Start:'0',End:'2',Weight:'1'}],contract,[{pid:5,created:'new'}]);
+  assert.equal(reused.availability,'unavailable');assert.deepEqual(reused.issues,['owned-process-instance-not-matched']);
+  assert.equal(summarizeSystemRows([],contract,[{pid:5,created:'new'}]).availability,'unavailable');
+});
+
+test('public projections preserve controlled diagnostic fields and share export-scoped aliases',()=>{
+  const project=createPublicProjector({anonymize:false});
+  const profile=project({cases:[{sampleId:'gim-private',inputId:'input-1',sampleLabel:'standard-A1.gim'}]});
+  const state=project({rows:[{sampleId:'gim-private',inputId:'input-1',sampleLabel:'standard-A1.gim',sourcePath:'C:/private',error:'input-corrupt;customer-private'}],
+    stages:[{stage:'host:host.cacheRead',count:2,totalMs:10,p95UpperMs:8},{stage:'customer-private',count:1}],
+    workers:[{workerId:'private-worker',heapAvailability:'available',heapSamples:3,failedHeapSamples:1}],
+    templateDiagnostics:[{taskId:'private-task',kind:'queue',queueWaitMs:12,outputBytes:16}]});
+  assert.equal(state.rows[0].sampleId,profile.cases[0].sampleId);assert.equal(state.rows[0].inputId,profile.cases[0].inputId);
+  assert.equal(state.rows[0].sampleLabel,'standard-A1.gim');assert.equal(state.rows[0].sourcePath,undefined);
+  assert.equal(state.rows[0].error,'input-corrupt;unverified-reason-omitted');
+  assert.equal(state.stages[0].stage,'host:host.cacheRead');assert.equal(state.stages[0].p95UpperMs,8);
+  assert.equal(state.workers[0].heapAvailability,'available');assert.equal(state.workers[0].heapSamples,3);
+  assert.equal(state.templateDiagnostics[0].queueWaitMs,12);assert.ok(!JSON.stringify(state).includes('customer-private'));
+  assert.equal(publicView({rows:[{sampleLabel:'standard-A1.gim'}]}).rows[0].sampleLabel,undefined);
 });
 test('diagnostics validate mode-independent windows and do not trigger on an ended span',async()=>{
   assert.throws(()=>diagnosticPlan({captures:[{kind:'cpu',durationMs:30001}]}));
@@ -141,7 +160,8 @@ test('scope inheritance preserves explicit off and detects expansion instead of 
 });
 test('private run -> analysis -> Perfetto -> executable public report preserves evidence isolation',async()=>{
   const root=resolve('..'),parent=join(root,'tmp','observability-contract');mkdirSync(parent,{recursive:true});
-  const folder=mkdtempSync(join(parent,'run-')),input=join(folder,'report.json');
+  const fixtureRoot=mkdtempSync(join(parent,'run-')),folder=join(fixtureRoot,'tmp','run'),input=join(folder,'report.json');
+  mkdirSync(folder,{recursive:true});
   writeFileSync(input,JSON.stringify({conditions:{measurementVersion:MEASUREMENT_VERSION},
     metrics:{firstResponseMs:600,firstGeometryMs:null,allGeometryReadyMs:null,settledMs:600},
     sourceSha256:'f'.repeat(64),diagnostics:{captures:[]}}));
@@ -149,8 +169,8 @@ test('private run -> analysis -> Perfetto -> executable public report preserves 
   const analysis=await analyzeRun(root,input);assert.equal(analysis.coverage[0].traceComplete,true);
   const trace=JSON.parse(readFileSync(await exportRunTrace(root,input),'utf8'));
   assert.ok(trace.traceEvents.some(e=>e.ph==='b'));assert.equal(trace.metadata.timestampUnit,'us');
-  const publicParent=join(root,'output','observability-contract');mkdirSync(publicParent,{recursive:true});
-  const out=mkdtempSync(join(publicParent,'report-'));await renderReport(input,out);
+  const publicParent=join(fixtureRoot,'output');mkdirSync(publicParent,{recursive:true});
+  const out=mkdtempSync(join(publicParent,'report-'));await renderReport(input,out,{root:fixtureRoot});
   const html=readFileSync(join(out,'report.html'),'utf8'),dom=new JSDOM(html,{runScripts:'dangerously'});
   assert.ok(dom.window.document.querySelector('#evidence').textContent.includes('public-derived'));
   assert.ok(!html.includes('f'.repeat(64)));
@@ -170,4 +190,21 @@ test('preset CPU capture acknowledges start before releasing the operation barri
   assert.equal(armed,false);releaseStart();await starting;assert.equal(armed,true);
   const rows=await controller.stop();assert.equal(rows[0].status,'available');
   assert.equal(rows[0].samplingParameters.intervalUs,1000);
+});
+
+test('CPU profile command brackets calibrate distinct origins and preserve microsecond units',async()=>{
+  const parent=resolve('..','tmp','profile-clock-contract');mkdirSync(parent,{recursive:true});
+  const out=mkdtempSync(join(parent,'capture-')),offset=1000000;let start,end;
+  const cdp={onEvent(){return()=>{};},async send(method){
+    if(method==='Profiler.start')start=(performance.now()+offset)*1000;
+    if(method==='Profiler.stop'){end=(performance.now()+offset)*1000;return{profile:{startTime:start,endTime:end,nodes:[],samples:[],timeDeltas:[]}};}
+    return{};
+  }};
+  const controller=new CaptureController(cdp,out,diagnosticPlan({captures:[{kind:'cpu',durationMs:1}]}));
+  await controller.start();const [capture]=await controller.stop();
+  assert.equal(capture.status,'available');assert.equal(capture.clockMapping.availability,'available');
+  assert.equal(capture.clockMapping.sourceUnit,'us');assert.ok(Math.abs(capture.clockMapping.offsetMs+offset)<5);
+  const {offsetMs,uncertaintyMs}=capture.clockMapping;
+  assert.ok(start/1000+offsetMs>=capture.startRequestMs-uncertaintyMs);
+  assert.ok(end/1000+offsetMs<=capture.endedAtMs+uncertaintyMs);
 });

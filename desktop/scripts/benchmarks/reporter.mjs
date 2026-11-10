@@ -5,16 +5,16 @@ import {dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 import {writeBatchReports} from './batch-report.mjs';
+import {isPublicArtifact} from './batch-input.mjs';
 const safe=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 const fixed=(value,scale=1)=>Number.isFinite(value)?(value/scale).toFixed(2):'不可用';
 
-export async function renderReport(input,out){
+export async function renderReport(input,out,{root:reportRoot=resolve(dirname(fileURLToPath(import.meta.url)),'../../..')}={}){
   let report=JSON.parse(readFileSync(input,'utf8'));mkdirSync(out,{recursive:true});
-  if(report.version==='gim-batch-results-v1'){writeBatchReports(out,report);return out;}
-  const reportRoot=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
+  if(report.version==='gim-batch-results-v1'){writeBatchReports(out,report,{root:reportRoot});return out;}
   if(existsSync(join(dirname(input),'events.jsonl'))){const analysis=await analyzeRun(reportRoot,input);await exportRunTrace(reportRoot,input);
-    return writeObservabilityReport(out,analysis,{internal:!/[\\/]output[\\/]/i.test(out)});}
-  if(/[\\/]output[\\/]/i.test(out))return writeObservabilityReport(out,{metrics:publicView(report).metrics,pipeline:[],coverage:[],paths:[],issues:['legacy-trace-unavailable']});
+    return writeObservabilityReport(out,analysis,{internal:!isPublicArtifact(reportRoot,out)});}
+  if(isPublicArtifact(reportRoot,out))return writeObservabilityReport(out,{metrics:publicView(report).metrics,pipeline:[],coverage:[],paths:[],issues:['legacy-trace-unavailable']});
   const phases=Object.entries(report.measurement?.phases??{}).sort((a,b)=>b[1].totalMs-a[1].totalMs);
   const slow=[];const timeline=[];let intervals=0;
   const events=join(dirname(input),'events.jsonl');

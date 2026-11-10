@@ -19,6 +19,7 @@ import { autoLoadModStlPostIfc } from './substationDevRuntime.js';
 
 import { renderSubstationCoreUi, showLoadingBeforeInteractive } from './substationPresentation.js';
 import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
+import {stationViewPolicy} from './stationViewPolicy.js';
 
 /**
  * 获取 IFC 文件内容。
@@ -235,7 +236,7 @@ export async function loadAllIfcFiles(
     if (!state.isCurrentSession(session) || state.currentProjectType === 'transmission_line') return;
     state.cameraNavigationVersion++;
     void Promise.resolve(import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
-      if (state.isCurrentSession(session)) fitCameraToStationOverview(ctx, state, { force: true, distanceFactor: 1.7 });
+      if (state.isCurrentSession(session)) fitCameraToStationOverview(ctx, state, { force: true,...stationViewPolicy(state) });
     })).catch(reportBackgroundError);
   };
   endEngine();
@@ -312,7 +313,7 @@ export async function loadAllIfcFiles(
         if (!isCurrent() || state.viewerUserInteracted || state.selectionRequest?.target) return;
         void Promise.resolve(import('../viewer/camera.js').then(({ fitCameraToStationOverview }) => {
           if (!isCurrent() || state.viewerUserInteracted || state.selectionRequest?.target) return;
-          fitCameraToStationOverview(ctx, state, { force: true, distanceFactor: 1.7 });
+          fitCameraToStationOverview(ctx, state, { force: true,...stationViewPolicy(state) });
         })).catch(reportBackgroundError);
       }, delay);
     }
@@ -337,7 +338,7 @@ export async function loadAllIfcFiles(
     if (!isCurrent()) return;
     if (!state.selectionRequest?.target && !state.viewerUserInteracted) {
       trackCameraInteraction();
-      fitCameraToStationOverview(ctx, state, { distanceFactor: 1.6 });
+      fitCameraToStationOverview(ctx, state, stationViewPolicy(state));
       scheduleStationOverviewRefit();
     }
     interactiveInitialized = true;

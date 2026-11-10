@@ -5,6 +5,31 @@ import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import type { SelectionCommitGuard } from '../shared/selectionContracts.js';
 import {isDevRenderBatch} from './devInstanceBatches.js';
+import {requestViewerRender} from './demandRendering.js';
+
+/** A fitted overview can be farther away than OBC's default 1000 m far plane.
+ * Bound the required depth by the fitted position and box sphere, rather than
+ * using a global huge far plane. Update both public projection cameras so a
+ * later projection switch cannot restore a stale clipping range. */
+function ensureFittedClipping(ctx:ViewerContext,box:THREE.Box3,position:THREE.Vector3,farPreset?:number):void {
+  const sphere=box.getBoundingSphere(new THREE.Sphere());
+  const distance=position.distanceTo(sphere.center),radius=sphere.radius;
+  if(!Number.isFinite(distance)||!Number.isFinite(radius)||radius<0)return;
+  const far=Math.max(10,(distance+radius)*1.2);
+  const near=Math.max(.01,(distance-radius)*.05);
+  const rig=ctx.world.camera as typeof ctx.world.camera & {threePersp?:THREE.PerspectiveCamera;threeOrtho?:THREE.OrthographicCamera};
+  let changed=false;
+  for(const camera of new Set([rig.three,rig.threePersp,rig.threeOrtho])){
+    if(!camera||!('near'in camera)||!('far'in camera)||!('updateProjectionMatrix'in camera))continue;
+    const projection=camera as THREE.PerspectiveCamera|THREE.OrthographicCamera;
+    const configured=farPreset!==undefined&&Number.isFinite(farPreset)&&farPreset>0?farPreset:projection.far;
+    const nextFar=Math.max(Number.isFinite(configured)?configured:0,far);
+    const nextNear=Math.min(Number.isFinite(projection.near)&&projection.near>=0?projection.near:.1,near);
+    if(projection.far===nextFar&&projection.near===nextNear)continue;
+    projection.far=nextFar;projection.near=nextNear;projection.updateProjectionMatrix();changed=true;
+  }
+  if(changed)requestViewerRender(ctx);
+}
 
 /** 将相机定位到场景包围盒 */
 export function fitCameraToScene(
@@ -33,6 +58,7 @@ export function fitCameraToScene(
     return false;
   }
   const distance = maxDim * 1.2;
+  ensureFittedClipping(ctx,box,new THREE.Vector3(center.x+distance,center.y+distance*.8,center.z+distance));
   void Promise.resolve(ctx.world.camera.controls?.setLookAt(center.x + distance, center.y + distance * 0.8, center.z + distance, center.x, center.y, center.z)).catch(reportBackgroundError);
   state.hasFittedCamera = true;
   debugLog(DEBUG_IFC_LOAD, '[Camera] fitCameraToScene done: camera set to', { center, distance });
@@ -52,7 +78,7 @@ function sceneMeshBounds(ctx: ViewerContext): THREE.Box3 {
   if (!scene) return box;
   scene.updateMatrixWorld(true);
   const boxes: Array<{ box: THREE.Box3; size: number }> = [];
-  scene.traverse((object: THREE.Object3D) => {
+  scene.traverseVisible((object: THREE.Object3D) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh || !mesh.geometry || mesh.userData.interactionDecoration || isDevRenderBatch(mesh)) return;
     const geometry = mesh.geometry as THREE.BufferGeometry;
@@ -74,13 +100,13 @@ function sceneMeshBounds(ctx: ViewerContext): THREE.Box3 {
 /**
  * 变电默认视角：整站远景全景。
  *
- * 取全部已加载模型（IFC + DEV）的网格包围盒，按最大边长的 2.2 倍距离、
- * 约 40° 俯角放置相机；不包含网格/坐标轴，避免“全景”被辅助对象撑爆。
+ * 按视口宽高、视场角和可见模型的投影边界定位，保留约 20% 总留白。
+ * 不包含隐藏图层及交互辅助对象，电压等级远裁剪预设由 services 注入。
  */
 export function fitCameraToStationOverview(
   ctx: ViewerContext,
   state: { hasFittedCamera: boolean },
-  options?: { force?: boolean; distanceFactor?: number },
+  options?: { force?: boolean; farPlane?:number; fillFraction?:number },
 ): boolean {
   if (state.hasFittedCamera && !options?.force) {
     debugLog(DEBUG_IFC_LOAD, '[Camera] station overview skipped: hasFittedCamera=true');
@@ -95,16 +121,37 @@ export function fitCameraToStationOverview(
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
   if (!(maxDim > 0) || !Number.isFinite(maxDim)) return false;
-  const factor = options?.distanceFactor ?? 2.2;
-  const distance = maxDim * factor;
+  const direction=new THREE.Vector3(.9,.75,.9).normalize();
+  const right=new THREE.Vector3(0,1,0).cross(direction).normalize(),up=direction.clone().cross(right).normalize();
+  const rig=ctx.world.camera as typeof ctx.world.camera & {threePersp?:THREE.PerspectiveCamera};
+  const camera=(rig.threePersp??rig.three) as THREE.PerspectiveCamera;
+  const fov=camera&&Number.isFinite(camera.fov)&&camera.fov>0&&camera.fov<180?camera.fov:50;
+  const canvas=(ctx.world.renderer as {three?:{domElement?:HTMLCanvasElement}}|undefined)?.three?.domElement;
+  const aspect=canvas&&canvas.clientWidth>0&&canvas.clientHeight>0?canvas.clientWidth/canvas.clientHeight:
+    camera&&Number.isFinite(camera.aspect)&&camera.aspect>0?camera.aspect:1;
+  const fill=options?.fillFraction!==undefined&&Number.isFinite(options.fillFraction)?Math.max(.5,Math.min(.9,options.fillFraction)):.8;
+  const vertical=Math.tan(fov*Math.PI/360)*fill,horizontal=vertical*aspect;
+  let distance=1,projectedWidth=0,projectedHeight=0;
+  for(const x of [box.min.x,box.max.x])for(const y of [box.min.y,box.max.y])for(const z of [box.min.z,box.max.z]){
+    const offset=new THREE.Vector3(x,y,z).sub(center),depth=offset.dot(direction),width=Math.abs(offset.dot(right)),height=Math.abs(offset.dot(up));
+    distance=Math.max(distance,depth+width/horizontal,depth+height/vertical);
+    projectedWidth=Math.max(projectedWidth,width*2);projectedHeight=Math.max(projectedHeight,height*2);
+  }
+  const position=center.clone().addScaledVector(direction,distance);
+  ensureFittedClipping(ctx,box,position,options?.farPlane);
   void Promise.resolve(ctx.world.camera.controls?.setLookAt(
-    center.x + distance * 0.9,
-    center.y + distance * 0.75,
-    center.z + distance * 0.9,
+    position.x,
+    position.y,
+    position.z,
     center.x,
     center.y,
     center.z,
   )).catch(reportBackgroundError);
+  const active=rig.three as THREE.OrthographicCamera;
+  if(active?.isOrthographicCamera&&ctx.world.camera.controls?.zoomTo){
+    const height=Math.max(projectedHeight,projectedWidth/aspect,.01)/fill;
+    void Promise.resolve(ctx.world.camera.controls.zoomTo((active.top-active.bottom)/height,false)).catch(reportBackgroundError);
+  }
   state.hasFittedCamera = true;
   debugLog(DEBUG_IFC_LOAD, '[Camera] station overview applied', { center, distance, maxDim });
   return true;
@@ -144,6 +191,7 @@ export async function frameBox(ctx: ViewerContext, box: THREE.Box3, guard?: Sele
   guard?.signal?.addEventListener('abort',cancel,{once:true});
   try {
     if (guard && !guard.isCurrent()) return;
+    ensureFittedClipping(ctx,box,position);
     const movement=controls.setLookAt(position.x,position.y,position.z,center.x,center.y,center.z,false);
     if ((camera as any)?.isOrthographicCamera) {
       const orthographic = camera as unknown as THREE.OrthographicCamera;

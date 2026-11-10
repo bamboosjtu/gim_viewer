@@ -1,6 +1,13 @@
 import {lstatSync,mkdirSync,readFileSync,readdirSync,statSync} from 'node:fs';
-import {dirname,join,relative,resolve,sep} from 'node:path';
+import {dirname,join,relative,resolve,sep,isAbsolute} from 'node:path';
 import {workspacePath,sha256} from './samples.mjs';
+
+/** Classify the workspace artifact domain, including output itself. */
+export function isPublicArtifact(root,target){
+  const rel=relative(resolve(root),resolve(target));
+  if(isAbsolute(rel)||rel.split(sep).some(part=>part==='..'))throw Error('artifact-outside-workspace');
+  return rel.split(sep)[0].toLowerCase()==='output';
+}
 
 /** Create artifacts only below workspace tmp/output, without traversing links. */
 export function artifactDirectory(root,target){

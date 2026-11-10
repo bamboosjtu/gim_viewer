@@ -3,10 +3,17 @@ import assert from 'node:assert/strict';
 import {mkdirSync,mkdtempSync,writeFileSync,symlinkSync,readFileSync,existsSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {artifactFile} from './batch-input.mjs';
+import {artifactFile,isPublicArtifact} from './batch-input.mjs';
 
 function setup(){const parent=resolve('..','tmp','benchmark-path-tests');mkdirSync(parent,{recursive:true});
   const root=mkdtempSync(join(parent,'case-'));mkdirSync(join(root,'tmp'));return root;}
+
+test('artifact visibility follows the workspace domain and includes output root',()=>{
+  const root=setup();
+  for(const path of [join(root,'output'),join(root,'output','report')])assert.equal(isPublicArtifact(root,path),true);
+  assert.equal(isPublicArtifact(root,join(root,'tmp','output','private')),false);
+  assert.throws(()=>isPublicArtifact(root,join(root,'..','output')),/outside/);
+});
 test('output validation creates missing parents, accepts regular files and rejects workspace/source paths',()=>{
   const root=setup(),path=join(root,'output','new','comparison.json');
   assert.equal(artifactFile(root,path),path);assert.equal(existsSync(path),false);

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdirSync,mkdtempSync,readFileSync,readdirSync,writeFileSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync,readdirSync,writeFileSync,existsSync} from 'node:fs';
 import {resolve,join,dirname,relative} from 'node:path';
 import {artifactDirectory,loadBatchInputs} from './batch-input.mjs';
 import {executeBatch,recoverInterruptedBatch} from './batch.mjs';
@@ -310,4 +310,42 @@ test('anonymity is a report option: full source hash or filename, with stable me
   assert.equal(anonymous.result.rows[0].sampleLabel,'a'.repeat(64));assert.equal(anonymous.result.rows[0].sourcePath,undefined);
   assert.equal(named.result.rows[0].sampleLabel,'private-model.gim');assert.equal(named.result.rows[0].sourcePath,'demo/private-model.gim');
   assert.equal(anonymous.result.profileDigest,named.result.profileDigest);
+});
+
+test('named public output root keeps filenames and diagnostic CSV rows but never becomes authority',async()=>{
+  const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
+  const data=inputs();data.entries[0].privatePath=join(fixtureRoot,'demo','standard-A1.gim');
+  const result=await executeBatch({...options,root:fixtureRoot,out,inputs:data,anonymize:false,execute:async({sample,profileDigest})=>{
+    const value=run(sample,profileDigest);
+    value.report.measurement={phases:{'host:host.cacheRead':{count:1,totalMs:12,maxMs:12}},workers:{worker:{family:'dev'}}};
+    value.report.workerMemory=[{workerId:'worker',samples:3,observedPeakBytes:1024}];
+    value.report.templateDiagnostics=[{kind:'queue',sourceId:'source-1',queueWaitMs:10,outputBytes:64}];return value;
+  }});
+  const json=JSON.parse(readFileSync(join(out,'results.json'),'utf8')),profile=JSON.parse(readFileSync(join(out,'profile.json'),'utf8'));
+  assert.equal(json.artifactRole,'public-derived');assert.equal(json.authority,false);assert.equal(json.anonymize,false);
+  assert.equal(json.rows[0].sampleLabel,'standard-A1.gim');assert.equal(json.rows[0].sourcePath,undefined);assert.equal(json.rows[0].sourceSha256,undefined);
+  assert.equal(json.rows[0].sampleId,profile.cases[0].sampleId);assert.equal(json.profileDigest,profile.profileDigest);
+  assert.match(readFileSync(join(out,'stages.csv'),'utf8'),/host:host.cacheRead/);
+  assert.match(readFileSync(join(out,'workers.csv'),'utf8'),/available/);
+  assert.ok(readFileSync(join(out,'slow-templates.csv'),'utf8').split('\r\n').length>2);
+  assert.equal(JSON.parse(readFileSync(result.privateResults,'utf8')).artifactRole,undefined);
+});
+
+test('recovery durably updates private authority, preserves mapping, and refuses a public-only recovery',async()=>{
+  const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
+  const result=await executeBatch({...options,root:fixtureRoot,out,inputs:inputs(),execute:async({sample,profileDigest})=>run(sample,profileDigest)});
+  const privateOut=dirname(result.privateResults),state=JSON.parse(readFileSync(result.privateResults,'utf8'));
+  state.status='RUNNING';state.rows[0].status='RUNNING';state.rows[1].status='PENDING';
+  writeFileSync(result.privateResults,JSON.stringify(state));
+  const nonce='a'.repeat(48);writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out,nonce}));
+  writeFileSync(join(privateOut,'controller.private.json'),JSON.stringify({pid:process.pid,nonce,processStartedAt:'2000-01-01T00:00:00Z'}));
+  const recovered=recoverInterruptedBatch(fixtureRoot,out,{getProcessStartAt:()=>Date.now()});
+  const authority=JSON.parse(readFileSync(result.privateResults,'utf8'));
+  assert.equal(authority.status,'CANCELLED');assert.equal(authority.recovery.recoveredRows,2);
+  assert.deepEqual(authority.rows.slice(0,2).map(row=>row.status),['CANCELLED','CANCELLED']);
+  assert.equal(recovered.privateResults,result.privateResults);assert.equal(existsSync(join(privateOut,'controller.private.json')),false);
+  assert.equal(recoverInterruptedBatch(fixtureRoot,out).recovered,0);
+  const isolated=artifactDirectory(fixtureRoot,join(fixtureRoot,'output','public-only'));
+  writeFileSync(join(isolated,'results.json'),readFileSync(join(out,'results.json')));
+  assert.throws(()=>recoverInterruptedBatch(fixtureRoot,isolated,{force:true}),/public-derived-is-not-authoritative/);
 });

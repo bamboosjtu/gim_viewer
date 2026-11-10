@@ -6,7 +6,7 @@ import {dirname,join,relative,isAbsolute} from 'node:path';
 import {normalizeTrace,expandFrames,blockingPath,traceCoverage,exportChromeTrace} from './trace-analysis.mjs';
 import {artifactFile} from './batch-input.mjs';
 const identities=new Set(['inputId','sampleId','runId','workerId','taskId','sourceId','operationTraceId','executorId','scopeId','spanId','id','partialSignature','buildFingerprint','profileDigest']);
-const arrays=new Set(['rows','runs','summaries','stages','slowTasks','slowPhases','workers','domains','paths','taskPaths','ids','unattributed','issues','captures','diagnostics','system','gpu','hotspots','pipeline','metrics','counts','coverage','processSampling','memory']);
+const arrays=new Set(['rows','runs','summaries','stages','slowTasks','slowPhases','templateDiagnostics','workers','domains','paths','taskPaths','ids','unattributed','issues','captures','diagnostics','system','gpu','hotspots','pipeline','metrics','counts','coverage','processSampling','memory','cases','actions','cacheStates']);
 const enums=new Set(['PASS','PARTIAL','FAIL','INCONCLUSIVE','INPUT_ERROR','ERROR','SKIPPED','CANCELLED','DUPLICATE','RUNNING','PENDING','COMPLETE',
   'cold','warm','none','substation','equipment','transmission_line','benchmark','diagnostic','available','unavailable','unsupported','not-triggered',
   'not-requested','CDP-sample-delta-estimate','elapsed-query-command-range','ms','us','bytes','calls','truncated','complete','partial','unknown','closed','open','conflict','interval-only','Critical Path','Critical Path Candidates','Partial Blocking Path','scope-unclosed','effective-scope-missing','capability-disabled','clock-mapping-unavailable','span-evidence-partial','host','dev','engineering','line','spatial','ifc-conversion','ifc-regional','ifc-fine']);
@@ -15,16 +15,31 @@ const publicKeys=new Set(['status','outcome','correctness','cacheState','project
   'firstResponseMs','firstGeometryMs','allGeometryReadyMs','settledMs','automaticLoadMs','modelTreeReadyMs','cachePublishMs','writeDrainMs','processPrivatePeakBytes',
   'measurementComplete','memoryEvidenceComplete','measurementDetailDropped','measurementLifecycleComplete','traceComplete','cacheVerified','baselineEligible',
   'wallClockMs','requested','available','unavailable','unsupported','method','unit','startMs','endMs','durationMs','estimatedMs','value','samples','maxSampleGapMs','maxSampleDelayMs','observedPeakBytes','observedHeapPeakBytes','attempts','updatedAt','atMs','bytes','sampleDelayMs']);
+for(const key of ['stage','heapAvailability','heapReason','heapSamples','failedHeapSamples','sampleLabel','sampleTier','group','error','reason','reasonCode','preset','version',
+  'workloadBytes','msPerMiB','p50LowerMs','p50UpperMs','p95LowerMs','p95UpperMs','p99LowerMs','p99UpperMs','lod','priority','admittedPriority','slotCapacityAtEnqueue','slotCapacity','slotsBusyAtEnqueue','queueDepthAtEnqueue','slotsBusyAtAdmit','queueWaitMs','slotOccupancyMs','cacheReadMs','workerAwaitMs','workerQueueWaitTotalMs','workerDispatches','inputBudgetWaitMs','outputBytes','cacheStatus','memoryPressure','selector','anonymize'])publicKeys.add(key);
+for(const value of ['not-applicable','short-lived','idle','ready','miss','hit','high','critical','normal','completed','failed','cancelled','queue','placement','survey','baseline','L0','L1','L2','gim-batch-profile-v1','gim-batch-results-v1','dev-fine','ifc-near','ifc-fine','canonical-first-base-v1','canonical-first-boolean-base-v1','smallest-source-canonical-small-object-v1'])enums.add(value);
+for(const key of ['name','cacheWriteBytes','cacheWriteMsPerMiB','pendingCount','pendingSourceCount','devContentCovered','devContentComplete','cachePublished','coverageComplete','devCatalogMisses','sourceFailureCatalogMisses','unexplainedCatalogMisses','catalogProofComplete','devPartialOccurrences','unresolvedReferenceCount','processSamples','processSamplesAvailable','missingWorkerHeaps','unavailableWorkerHeaps','shortLivedWorkerHeaps','notApplicableWorkerHeaps','failedGeometry','failedSourceCount','pendingTasks','cancelledBeforeStart','lateBackgroundTasks','interruptedAtMs','interruptedWritePending','interruptedCacheSettled','backgroundSettled','startupFailures','measurementIncompleteItems','memoryIncompleteItems','measurementLifecycleIssues','cacheFailureCode','finalEvidenceIssue'])publicKeys.add(key);
+const reasonFields=new Set(['error','reason','reasonCode','heapReason','cacheFailureCode','finalEvidenceIssue','startupFailures','measurementIncompleteItems','memoryIncompleteItems','measurementLifecycleIssues','issues']);
+const phaseNames=new Set(('assemblyParseMs blobReadMs bounds decode decodeMs discovery exportWallMs mergeMs parse-dev parse-mod parse-phm parseMs part-merge primitive primitiveMs readRpcMs source-blob-wait source-rpc-wait validateMs validateParseMs cache-encode composition-projection extract normalize projection source-read spatial-projection delivery-and-worker-queue output-retention result-roundtrip send execution queue anchorQueue cacheHash cacheInvokeWall cacheNativeResolve cacheNativeWrite cachePack cachePrepare cacheRead cacheWrite cacheWriteQueue catalogCacheRead deserialize inputBudgetQueue memoryTemplate placementCommit requestWall sceneCommitQueue sceneSubmitWall sourceRpc templateBuild templateQueue templateSlotOccupancy templateWall vertexValidation workerQueue workerWall connectionEvidenceMs connectionGeometryMs earlyPreparationMs importWithBoundsMs openModelMs output-backpressure preparationMs remainingIndexMs semanticsMs sourceHashMs wasm-init wasmInitMs mesh-extraction open-model relationships finalize scan-and-model submission scheduled-task').split(' '));
+const reasonWords=new Set(('input-corrupt INPUT_CORRUPT product-geometry-failed warm-preparation-incomplete WARM_UNSUPPORTED batch-execution-failed controller-interrupted batch-not-executed run-cancelled automatic-completion-not-observed correctness-unverified pending-evidence-missing measurement-incomplete measurement-lifecycle-incomplete cache-state-unverified missing-condition missing-metric measurement run lifecycle collector active-tasks worker-interrupted-tasks unexplained-task-abort interruptedTasks workloadDigest automaticLoadMs firstResponseMs firstGeometryMs allGeometryReadyMs settledMs previous-sample-pending worker-target-not-observed target-ended previous-sample-failed not-applicable target-not-observed unavailable sample-timeout').split(' '));
+for(const code of ['native-run-error','worker-target-ended','previous-sample-pending','private-tree-sampler-unavailable','heap-samples-missing','heap-samples-unavailable','worker-memory-unavailable','active-tasks','not-requested','unverified-reason-omitted'])reasonWords.add(code);
+function controlledReason(value){return String(value).split(';').map(token=>token.split(':').every(word=>reasonWords.has(word)||/^\d+$/.test(word))?token:'unverified-reason-omitted').join(';');}
+function controlledStage(value){const name=value.split(':').at(-1),parts=name.split('.');return ['host','dev','worker','engineering','ifc','spatial','line','render'].includes(parts[0])&&phaseNames.has(parts.at(-1))&&parts.slice(1,-1).every(p=>['worker','catalog','templates','L0','L1','L2'].includes(p));}
 /** This is a new view, never a redacted copy of authority. Aliases live only in this export. */
-export function publicView(input){
+export function createPublicProjector({anonymize=true}={}){
   const aliases=new Map();let serial=0;
+  const alias=value=>{if(!aliases.has(value))aliases.set(value,'alias-'+ ++serial);return aliases.get(value);};
   function project(value,key=''){
     if(value===null)return null;
-    if(identities.has(key)&&typeof value==='string'){const id=key+'\0'+value;if(!aliases.has(id))aliases.set(id,'alias-'+ ++serial);return aliases.get(id);}
+    if(identities.has(key)&&typeof value==='string')return alias(value);
+    if(key==='sampleLabel'&&typeof value==='string')return !anonymize&&value.length<=180&&!/[\\/\x00-\x1f]/.test(value)&&/\.gim$/i.test(value)?value:undefined;
+    if(key==='stage'&&typeof value==='string')return controlledStage(value)?value:alias('stage:'+value);
+    if(reasonFields.has(key)&&typeof value==='string')return value?controlledReason(value):'';
+    if(key==='name'&&typeof value==='string')return ['I/O & cache','Parse & semantic','Geometry','Submission','GPU'].includes(value)||controlledStage(value)?value:undefined;
     if(typeof value==='number')return Number.isFinite(value)?value:null;
     if(typeof value==='boolean')return value;
     if(typeof value==='string')return enums.has(value)?value:null;
-    if(Array.isArray(value))return value.map(v=>project(v,key==='ids'?'spanId':'')).filter(v=>v!==undefined);
+    if(Array.isArray(value))return value.map(v=>project(v,key==='ids'?'spanId':reasonFields.has(key)?'reason':'')).filter(v=>v!==undefined);
     if(value&&typeof value==='object'){
       const result={};for(const [k,v]of Object.entries(value)){
         if(publicKeys.has(k)||identities.has(k)||arrays.has(k)||/^(firstResponseMs|firstGeometryMs|allGeometryReadyMs|settledMs|automaticLoadMs|processPrivatePeakBytes)(Median|P95|Count|Missing)$/.test(k)){
@@ -33,9 +48,9 @@ export function publicView(input){
       }return result;
     }
   }
-  return {...project(input),artifactRole:'public-derived',omissions:['source-identities','paths','raw-profiles','business-strings','unverified-symbols'],
-    authority:false};
+  return input=>({...project(input),artifactRole:'public-derived',omissions:['source-identities','paths','raw-profiles','business-strings','unverified-symbols'],authority:false});
 }
+export function publicView(input,options){return createPublicProjector(options)(input);}
 export async function analyzeRun(root,input){
   const location=relative(join(root,'tmp'),input);
   if(location.startsWith('..')||isAbsolute(location))throw Error('private-run-must-be-in-workspace-tmp');

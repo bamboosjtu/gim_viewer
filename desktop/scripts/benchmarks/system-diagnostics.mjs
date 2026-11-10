@@ -33,6 +33,7 @@ export function summarizeSystemRows(rows,contract,ownedProcesses){
       clockId:'etl',association:'verified-process-instance-and-window'});
   }
   if(!ownedProcesses.length)issues.push('process-identities-unverified');
+  else if(!summary.length)issues.push('owned-process-instance-not-matched');
   return {availability:issues.length?'unavailable':'available',rows:summary,issues:[...new Set(issues)]};
 }
 export function parseCsv(text){

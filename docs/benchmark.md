@@ -1,6 +1,6 @@
 # 本地批量 Benchmark
 
-本页说明本地批量 Benchmark 的命令、输入注册、报告文件、状态判定和基线流程。覆盖 `npm run bench -- ...` 的批量与单样本命令、L0/L1/L2 输入登记、报告与匿名化规则；测量指标定义见[测量与 Benchmark](architecture/measurement.md)，手工步骤见[性能测试指南](performance-guide.md)。权威结果以 CLI 打印的 `privateResults` 和 `tmp/gim-bench/` 私有报告为准；`output/` 只是匿名派生视图。
+本页说明本地批量 Benchmark 的命令、输入注册、报告文件、状态判定和基线流程。覆盖 `npm run bench -- ...` 的批量与单样本命令、L0/L1/L2 输入登记、报告与匿名化规则；测量指标定义见[测量与 Benchmark](architecture/measurement.md)，手工步骤见[性能测试指南](performance-guide.md)。权威结果以 CLI 打印的 `privateResults` 和 `tmp/gim-bench/` 私有报告为准；`output/` 是派生视图，可按配置展示样本别名或文件名。
 
 Benchmark 使用固定 WebView2 的原生 Release 应用，每次运行启动独立进程，顺序执行注册的工程；不以 Node 微基准代替产品加载。目录或 JSON 注册表可以直接作为输入，不需要逐个手动调用。
 
@@ -53,6 +53,8 @@ npm run bench -- doctor --build ../tmp/gim-bench/builds/<构建>/acceptance-buil
 L0/L1 的逐文件 SHA 注册表与 L2 目录清单见[性能样本登记](../benchmarks/README.md)。
 
 Windows 也可在 `desktop/` 手动执行 `powershell -ExecutionPolicy Bypass -File .\run-bench-survey.ps1`：构建一次后依次运行变电、线路和通用设计批次，分别保存输出。已完成批次中的 FAIL、PARTIAL、INPUT_ERROR 或 INCONCLUSIVE 保留在报告中，不中断后续批次；构建失败、未正常完成或缺少完成凭据才报执行异常。全部执行后输出总体状态数量，以及按工程类型、变电电压等级和冷暖状态分组的时间最短/最长值。包装脚本退出 0 表示执行及汇总完成，不表示全部样本通过；直接调用 `bench batch` 的退出码契约保持下表定义。此脚本不进入远程 CI。脚本使用带 BOM 的 UTF-8，兼容 Windows PowerShell 5.1 的中文目录解析，修改时须保留该编码。
+
+该脚本三组批次显式使用 `--anonymize false`，公开通用设计标准方案文件名及已匿名的 `substation01–04`、`line01–06` 验证样本名，便于跨轮识别基准；工程 `.gim` 文件不随仓库发布。非匿名派生报告只保留文件名，源 SHA、源路径、原始 Profile 与批准记录仍留在私有目录。直接调用 CLI 的默认报告继续匿名。一次批次导出的 Profile、JSON 和 CSV 共用一组临时别名，阶段标签、Worker 堆采样状态和数值统计按受控契约保留，未知原因用省略代码表示，不能把公开派生结果用于 gate 或批准。
 
 末尾时间范围分别使用首次响应 `firstResponseMs`、首次几何 `firstGeometryMs`、基础几何齐备 `allGeometryReadyMs` 和完全结算 `settledMs`，单位为秒。终端输出使用定宽文本表格，按中文显示宽度补齐、数字右对齐；变电和线路分表，表头统一注明“最短 - 最长”。只统计 PASS/PARTIAL 项已有的有限非负观测；失败、跳过和缺失值不填零，缺失项显示 `-`。变电电压优先使用报告中的 `voltageKv`，否则识别文件名电压前缀，无法识别的单列“未标注”。该范围只是本轮样本描述，不作为自动性能回退判断。
 
@@ -371,6 +373,8 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
 实际注册表的文件须由开发者在工作区提供并核对 SHA；命令只说明本地验收路径，不构成已执行结果。
 
 ## 详细 Trace 与 Profile
+
+私有 `events.jsonl` 是按批次写入的 NDJSON。每行的 `contexts` 保存本批次上下文去重表，`events` 中的 `contextIndex` 指向该行的上下文；索引仅在本行有效，不是 Run、Task 或 Span 身份。事件仍使用 `gim-measurement-v1` Envelope，保留 producer、sequence、clock 与原始时间；这是存储编码，不是新的事件协议版本。离线读取器同时支持该批次编码与携带完整 `context` 的旧记录，分析前展开上下文，再按原始 Event Ref 去重和归并。
 
 以下命令在 desktop 执行，输入输出均位于工作区：
 

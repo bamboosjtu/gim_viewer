@@ -1,4 +1,4 @@
-import {publicView} from './observability.mjs';
+import {createPublicProjector} from './observability.mjs';
 import {existsSync,readFileSync,writeFileSync,readdirSync,unlinkSync} from 'node:fs';
 import {randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
@@ -7,7 +7,7 @@ import {digest,runReadiness,compareRuns,partialSignature} from './compare.mjs';
 import {coldWarmEquivalent} from './profiles.mjs';
 import {runNative} from './native-run.mjs';
 import {sourceFingerprint} from './acceptance-build.mjs';
-import {artifactDirectory,loadBatchInputs} from './batch-input.mjs';
+import {artifactDirectory,loadBatchInputs,isPublicArtifact} from './batch-input.mjs';
 import {writeBatchReports} from './batch-report.mjs';
 import {workspacePath} from './samples.mjs';
 import {isStartupInfrastructureFailure,STARTUP_ATTEMPTS,startupRetryDelayMs} from './startup-retry.mjs';
@@ -120,7 +120,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   writeFileSync(controllerFile,JSON.stringify({pid:process.pid,nonce,
     processStartedAt:new Date(Date.now()-process.uptime()*1000).toISOString(),startedAt:new Date().toISOString()}));
   writeFileSync(join(privateOut,'profile.json'),JSON.stringify({...body,digest:profileDigest},null,2));
-  writeFileSync(join(out,'profile.json'),JSON.stringify(/[\\/]output[\\/]/i.test(out)?publicView(body):{...body,digest:profileDigest},null,2));
+  const project=createPublicProjector({anonymize});
   for(const entry of inputs.entries){
     const {privatePath,actions,...publicEntry}=entry;
     publicEntry.sampleLabel=anonymize?entry.sourceSha256??entry.inputId:privatePath?basename(privatePath):entry.inputId;
@@ -129,7 +129,10 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
     else for(let repetition=1;repetition<=repetitions;repetition++)for(const cacheState of cacheStates)
       state.rows.push({...publicEntry,repetition,cacheState,status:'PENDING'});
   }
-  const save=()=>{state.updatedAt=new Date().toISOString();writeBatchReports(privateOut,state);writeBatchReports(out,state);};
+  const labels=new Map(state.rows.map(row=>[row.inputId,row.sampleLabel]));
+  const publicProfile={...body,profileDigest,cases:body.cases.map(row=>({...row,sampleLabel:labels.get(row.inputId)}))};
+  writeFileSync(join(out,'profile.json'),JSON.stringify(isPublicArtifact(root,out)?project(publicProfile):{...body,digest:profileDigest},null,2));
+  const save=()=>{state.updatedAt=new Date().toISOString();writeBatchReports(privateOut,state,{root});writeBatchReports(out,state,{root,project});};
   save();
   const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   const stopTimer=setInterval(()=>{if(existsSync(join(out,'stop.request')))abort();},500);
@@ -220,7 +223,7 @@ export async function runBatch(options){
 }
 
 /** Finalize a controller that has already exited; never fabricate elapsed metrics. */
-function controllerRecord(root,out){
+function controllerRecord(root,out,{includeCompleted=false}={}){
   const base=join(root,'tmp','gim-bench','batches');if(!existsSync(base))return null;
   const matches=[];
   for(const entry of readdirSync(base,{withFileTypes:true})){
@@ -230,7 +233,10 @@ function controllerRecord(root,out){
     try{const value=JSON.parse(readFileSync(workspacePath(root,outputFile),'utf8'));
       if(resolve(value.out)!==out)continue;
       const file=join(dir,'controller.private.json');
-      if(!existsSync(file))continue;
+      if(!existsSync(file)){
+        if(includeCompleted)matches.push({file:workspacePath(root,file,false),value:null,mappedNonce:value.nonce});
+        continue;
+      }
       const safeFile=workspacePath(root,file);
       matches.push({file:safeFile,value:JSON.parse(readFileSync(safeFile,'utf8')),mappedNonce:value.nonce});
     }catch{/* Unreadable private record cannot establish ownership. */}
@@ -265,11 +271,12 @@ function findUnreportedRunId(root,row){
 }
 export function recoverInterruptedBatch(root,outputDirectory,{force=false,getProcessStartAt=processStartedAt}={}){
   const out=workspacePath(root,outputDirectory),file=join(out,'results.json');
-  const record=controllerRecord(root,out);
+  const record=controllerRecord(root,out,{includeCompleted:true});
   const privateFile=record?join(dirname(record.file),'results.json'):null;
   const state=JSON.parse(readFileSync(privateFile&&existsSync(privateFile)?privateFile:file,'utf8'));
+  if(state.artifactRole==='public-derived')throw Error('public-derived-is-not-authoritative');
   if(state.status!=='RUNNING'&&!state.rows?.some(row=>['RUNNING','PENDING'].includes(row.status)))
-    return {out,result:state,recovered:0};
+    return {out,result:state,recovered:0,privateResults:privateFile??file};
   const owner=controllerRecord(root,out);
   const identityValid=owner&&Number.isSafeInteger(owner.value.pid)&&owner.value.pid>0&&
     /^[a-f0-9]{48}$/.test(owner.value.nonce??'')&&
@@ -308,7 +315,17 @@ export function recoverInterruptedBatch(root,outputDirectory,{force=false,getPro
   }
   state.status='CANCELLED';state.outcome='INCONCLUSIVE';state.baselineEligible=false;
   state.recovery={kind:'controller-interruption-v1',recoveredRows:recovered};
-  state.updatedAt=new Date().toISOString();writeBatchReports(out,state);
+  state.updatedAt=new Date().toISOString();
+  // Authority must be durable before replacing its view and releasing ownership.
+  if(privateFile)writeBatchReports(dirname(privateFile),state,{root});
+  const project=createPublicProjector({anonymize:state.anonymize!==false});
+  const profile=privateFile?join(dirname(privateFile),'profile.json'):null;
+  if(profile&&existsSync(profile)&&isPublicArtifact(root,out)){
+    const body=JSON.parse(readFileSync(profile,'utf8')),labels=new Map(state.rows.map(row=>[row.inputId,row.sampleLabel]));
+    writeFileSync(join(out,'profile.json'),JSON.stringify(project({...body,profileDigest:state.profileDigest,
+      cases:(body.cases??[]).map(row=>({...row,sampleLabel:labels.get(row.inputId)}))}),null,2));
+  }
+  writeBatchReports(out,state,{root,project});
   if(owner)try{unlinkSync(owner.file);}catch{/* Recovered report remains conclusive. */}
-  return {out,result:state,recovered};
+  return {out,result:state,recovered,privateResults:privateFile??file};
 }

@@ -1,6 +1,8 @@
 import {publicView} from './observability.mjs';
+import {isPublicArtifact} from './batch-input.mjs';
 import {writeFileSync,renameSync} from 'node:fs';
-import {join} from 'node:path';
+import {join,resolve,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {median} from './compare.mjs';
 
 const escapeHtml=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
@@ -40,9 +42,9 @@ export function summarize(rows){
   });
 }
 
-export function writeBatchReports(out,state){
-  if(/[\\/]output[\\/]/i.test(out)){state={...publicView(state),version:state.version,anonymize:true,baselineEligible:false};
-    for(const row of state.rows??[])row.sampleLabel=row.sampleId??row.inputId;
+export function writeBatchReports(out,state,{root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..'),project}={}){
+  if(isPublicArtifact(root,out)&&state.artifactRole!=='public-derived'){state={...(project??(value=>publicView(value,{anonymize:state.anonymize!==false})))(state),version:state.version,anonymize:state.anonymize!==false,baselineEligible:false};
+    for(const row of state.rows??[])row.sampleLabel??=row.sampleId??row.inputId;
   }
   const summaries=summarize(state.rows),counts={};for(const row of state.rows)counts[row.status]=(counts[row.status]??0)+1;
   const publicState={...state,counts,summaries};

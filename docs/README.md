@@ -1,6 +1,6 @@
 # GIM Viewer 文档
 
-本目录是 GIM Viewer 的长期文档：只描述**当前实现**、**当前契约**和**当前验收状态**，不保存研究过程、历史方案或未复核推断。桌面版本 `0.2.1`，Android 线路版 `0.1.6 Preview`；版本以 `desktop/package.json` 与 `app/package.json` 为准。
+本目录是 GIM Viewer 的长期文档：只描述**当前实现**、**当前契约**和**当前验收状态**，不保存研究过程、历史方案或未复核推断。桌面版本 `0.2.2`，Android 线路版 `0.1.6 Preview`；版本以 `desktop/package.json` 与 `app/package.json` 为准。
 
 文档以源码、测试和实际运行证据为准。研究材料在 `research/`，未关闭缺陷在[问题与限制](open-issues.md)；工程样本放在 `demo/`（不随仓库分发），性能输入登记在 [`benchmarks/`](../benchmarks/README.md)。
 

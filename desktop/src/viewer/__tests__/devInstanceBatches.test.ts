@@ -33,10 +33,10 @@ it('reduces repeated draws while retaining the exact original occurrence/assembl
 it('keeps the station overview camera identical when GPU draw batches are added',()=>{
   const f=fixture(),setLookAt=vi.fn();
   const ctx={world:{scene:{three:f.scene},camera:{controls:{setLookAt}}}} as any;
-  expect(fitCameraToStationOverview(ctx,{hasFittedCamera:false},{distanceFactor:1.7})).toBe(true);
+  expect(fitCameraToStationOverview(ctx,{hasFittedCamera:false},{fillFraction:.8})).toBe(true);
   const expected=setLookAt.mock.calls[0];
   f.add();
-  expect(fitCameraToStationOverview(ctx,{hasFittedCamera:false},{distanceFactor:1.7})).toBe(true);
+  expect(fitCameraToStationOverview(ctx,{hasFittedCamera:false},{fillFraction:.8})).toBe(true);
   expect(setLookAt.mock.calls[1]).toEqual(expected);
   f.adapter.release();f.template.dispose();
 });
