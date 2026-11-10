@@ -349,3 +349,24 @@ test('recovery durably updates private authority, preserves mapping, and refuses
   writeFileSync(join(isolated,'results.json'),readFileSync(join(out,'results.json')));
   assert.throws(()=>recoverInterruptedBatch(fixtureRoot,isolated,{force:true}),/public-derived-is-not-authoritative/);
 });
+
+test('a reused output selects its interrupted controller ahead of historical completed mappings',async()=>{
+  const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
+  const execute=async({sample,profileDigest})=>run(sample,profileDigest);
+  const old=await executeBatch({...options,root:fixtureRoot,out,inputs:inputs(),execute});
+  const oldBytes=readFileSync(old.privateResults,'utf8');
+  const oldMapping=JSON.parse(readFileSync(join(dirname(old.privateResults),'output.private.json'),'utf8'));
+  writeFileSync(join(dirname(old.privateResults),'controller.private.json'),JSON.stringify({pid:process.pid,nonce:oldMapping.nonce,processStartedAt:'2000-01-01T00:00:00Z'}));
+  const current=await executeBatch({...options,root:fixtureRoot,out,inputs:inputs(),execute});
+  const dir=dirname(current.privateResults),state=JSON.parse(readFileSync(current.privateResults,'utf8'));
+  state.status='RUNNING';state.rows[0].status='RUNNING';state.rows[1].status='PENDING';
+  writeFileSync(current.privateResults,JSON.stringify(state));
+  const mapping=JSON.parse(readFileSync(join(dir,'output.private.json'),'utf8'));
+  writeFileSync(join(dir,'controller.private.json'),JSON.stringify({pid:process.pid,nonce:mapping.nonce,processStartedAt:'2000-01-01T00:00:00Z'}));
+  const result=recoverInterruptedBatch(fixtureRoot,out,{getProcessStartAt:()=>Date.now()});
+  assert.equal(result.privateResults,current.privateResults);assert.equal(result.recovered,2);
+  assert.equal(readFileSync(old.privateResults,'utf8'),oldBytes);
+  assert.equal(JSON.parse(readFileSync(current.privateResults,'utf8')).status,'CANCELLED');
+  assert.equal(recoverInterruptedBatch(fixtureRoot,out).privateResults,current.privateResults);
+  assert.equal(recoverInterruptedBatch(fixtureRoot,out,{force:true}).recovered,0);
+});

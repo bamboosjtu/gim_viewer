@@ -12,6 +12,7 @@ import { GIM_LIMITS } from '../shared/gimLimits.js';
 import { readSubstationParseCopy, type ParseCopyReceipt } from '@desktop/substationParseCopy.js';
 import { batchReadCachedFiles } from '@desktop/database.js';
 import { isDiskBackedFile, isSemanticPackBackedFile } from '@desktop/gimExtract.js';
+import {createByteFile} from '@desktop/byteFile.js';
 
 /** 单个条目的上限；substation 的 CBM/DEV/FAM/PHM/小 MOD 均远低于该值。 */
 export const NATIVE_SMALL_FILE_MAX_BYTES = GIM_LIMITS.smallTextBytes;
@@ -53,9 +54,11 @@ function extensionOf(path: string): string {
 }
 
 function toFile(bytes: Uint8Array, path: string, original: File): File {
-  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   const name = path.split(/[\\/]/).pop() || path;
-  return new File([buffer], name, {
+  // Keep bounded IPC views instead of registering thousands of tiny browser
+  // Blobs and routing each semantic read through Blob.arrayBuffer.
+  const owned=bytes.buffer instanceof ArrayBuffer?bytes as Uint8Array<ArrayBuffer>:bytes.slice()as Uint8Array<ArrayBuffer>;
+  return createByteFile(owned, name, {
     type: original.type || 'application/octet-stream',
     lastModified: original.lastModified || 0,
   });
@@ -89,7 +92,7 @@ function findBytes(
 }
 
 /**
- * 将 native DiskBackedFile 的小型非 IFC 条目按批次物化为普通 File。
+ * 将 native DiskBackedFile 的小型非 IFC 条目按批次物化为字节后备 File facade。
  * 任何 batch 失败都保留原始 lazy File，调用方可继续工作；不会把一次
  * 性能优化失败变成工程加载失败。工程已切换时返回 cancelled，调用方
  * 必须丢弃 returned map。

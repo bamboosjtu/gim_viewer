@@ -108,6 +108,10 @@ export function observeFragmentVisualChanges(model:FragmentVisualModel,
       check(null);
       for(const material of Array.isArray(mesh.material)?mesh.material:[mesh.material]){
         check(material);check(material.version);check(material.visible);check(material.opacity);
+        const colored=material as THREE.Material&{color?:THREE.Color;emissive?:THREE.Color};
+        check(colored.color?.r);check(colored.color?.g);check(colored.color?.b);
+        check(colored.emissive?.r);check(colored.emissive?.g);check(colored.emissive?.b);
+        check(material.side);check(material.transparent);check(material.depthTest);check(material.depthWrite);
       }
       if(previous.length!==index){previous.length=index;changed=true;}
     }

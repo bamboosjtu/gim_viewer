@@ -1,6 +1,7 @@
 import { Probe, DurationStats, NOOP_SINK, type TraceContext, type MeasurementEvent, type MeasurementMode, type Workload, type TaskStatus, type MemoryMetric, type LifecycleReasonCode } from './core.js';
 
 const CHANNEL = '__gimMeasurement';
+let producerEpoch=0;
 interface Envelope { context: TraceContext; command: string; receivedMs?: number; }
 const offContext: TraceContext = { runId: 'off', sampleId: null, sourceSha256: null, buildId: null, generation: null,
   geometryToken: null, requestId: null, workerId: 'off', family: 'host', backend: 'web-worker', taskId: null,
@@ -48,6 +49,9 @@ export function createWorkerProbe() {
   let probe = offProbe, context = offContext, mode: MeasurementMode = 'off';
   let events: MeasurementEvent[] = [];
   const runProbes=new Map<string,Probe>();
+  const key=(value:TraceContext)=>value.runId+'\0'+value.workerId;
+  const makeProbe=(value:TraceContext,selectedMode:MeasurementMode)=>new Probe(value.workerId+':producer-'+ ++producerEpoch,
+    value.workerId+':clock',selectedMode,()=>performance.now(),{emit},value.workerId);
   const emit=(record:MeasurementEvent)=>{events.push(record);
     if(events.length>=128||record.trace?.type==='span'&&record.trace.action==='started')flush();};
   let batchId=0,lastSequence=0;
@@ -77,10 +81,13 @@ export function createWorkerProbe() {
       if (envelope && envelope.receivedMs === undefined) envelope.receivedMs = performance.now();
       return false;
     }
-    const receivedMs = performance.now(); context = data.context; mode = data.mode;
+    const receivedMs = performance.now();
+    if(context!==offContext&&data.context.workerId!==context.workerId)throw Error('worker-execution-identity-changed');
+    context = data.context; mode = data.mode;
     const clockId = `${context.workerId}:clock`;
-    probe = new Probe(context.workerId, clockId, mode, () => performance.now(), {emit},context.workerId);
-    runProbes.set(context.runId,probe);
+    probe = makeProbe(context,mode);
+    runProbes.set(key(context),probe);
+    while(runProbes.size>16)runProbes.delete(runProbes.keys().next().value!);
     (globalThis as { __gimMeasurementIdentity?: unknown }).__gimMeasurementIdentity = { workerId: context.workerId, runId: context.runId, family: context.family, clockId };
     post?.({ [CHANNEL]: 'clock', workerId: context.workerId, clockId, receivedMs, sentMs: performance.now() });
     return true;
@@ -89,17 +96,23 @@ export function createWorkerProbe() {
   async function run<T>(event: MessageEvent, work: (task: WorkerTaskProbe) => T | Promise<T>): Promise<T | undefined> {
     if (control(event)) return;
     const envelope = event.data?._gimMeasurement as Envelope | undefined;
-    if (!envelope || mode === 'off') return work(NOOP_TASK);
-    const scopeId=envelope.context.operationTraceId+':'+context.workerId+':'+envelope.context.taskId+':'+envelope.context.attemptId;
+    if (!envelope) return work(NOOP_TASK);
+    const scopeId=envelope.context.operationTraceId+':'+envelope.context.workerId+':'+envelope.context.taskId+':'+envelope.context.attemptId;
     const parentScopeId=envelope.context.scopeId;
-    const captured = Object.freeze({ ...envelope.context,executorId:context.workerId,scopeId });
-    let capturedProbe=runProbes.get(captured.runId);
-    if(!capturedProbe){capturedProbe=new Probe(context.workerId,probe.clockId,mode,()=>performance.now(),{emit},context.workerId);runProbes.set(captured.runId,capturedProbe);
+    const captured = Object.freeze({ ...envelope.context,executorId:envelope.context.workerId,scopeId });
+    let capturedProbe=runProbes.get(key(captured));
+    if(!capturedProbe){
+      // The initialization/capability window expired. Keep the original task
+      // identity and a fresh producer; never restart an old producer's cursor.
+      // Only bounded lifecycle evidence is collected, with the gap explicit.
+      capturedProbe=makeProbe(captured,'benchmark');runProbes.set(key(captured),capturedProbe);
+      capturedProbe.event(captured,{kind:'loss',name:'worker-probe-retention-expired',workload:{events:1}});
       while(runProbes.size>16)runProbes.delete(runProbes.keys().next().value!);}
+    if(capturedProbe.mode==='off')return work(NOOP_TASK);
     const scopedProbe=capturedProbe;
     const scopeStart=performance.now();
     const scope={scopeId,parentScopeId,scopeType:'executor' as const,declaration:'effective' as const,
-      operationTraceId:captured.operationTraceId,executorId:context.workerId,
+      operationTraceId:captured.operationTraceId,executorId:captured.workerId,
       capabilities:['operation-context','span-lifecycle','dependency-edges','wait-intervals','clock-segments'] as const,
       window:{clockId:scopedProbe.clockId,startMs:scopeStart,endMs:null}};
     scopedProbe.trace(captured,{type:'scope',action:'declared',scope});

@@ -44,26 +44,38 @@ export function measurementRuntime(runId:string){const collector=archives.get(ru
 export function measurementCollector(runId:string){return archives.get(runId);}
 export function measurementProbe(runId:string){const collector=archives.get(runId);return collector?probes.get(collector):undefined;}
 let operationSequence=0;
-const operations=new WeakMap<Collector,TraceContext>();
+interface OperationState {root:TraceContext;ended:boolean;children:Set<TraceContext>}
+const operations=new WeakMap<Collector,OperationState>();
 const operationEnded=new Set<()=>void>();
 export function observeMeasurementOperationEnd(listener:()=>void){operationEnded.add(listener);return ()=>operationEnded.delete(listener);}
 export function beginMeasurementOperation(name:string,run=current){
+  const existing=operations.get(run.collector);
+  const parent=existing&&!existing.ended?existing.root:undefined;
+  const sequence=++operationSequence;
   const context=captureContext({...measurementContext(run.collector),
-    operationTraceId:operationTraceId(run.collector.identity.runId+':operation-'+ ++operationSequence),
-    executorId:'host',scopeId:run.collector.identity.runId+':scope-'+operationSequence});
-  operations.set(run.collector,context);
+    operationTraceId:parent?.operationTraceId??operationTraceId(run.collector.identity.runId+':operation-'+sequence),
+    executorId:'host',scopeId:run.collector.identity.runId+':scope-'+sequence});
+  // Default host work stays owned by the root. Concurrent actions have explicit
+  // captured child scopes; an implicit "last active" child cannot steal it.
+  const child=parent?run.probe.phase(context,'operation.'+name):undefined;
+  const captured=child?.context??context;
+  const state=parent?existing!:{root:captured,ended:false,children:new Set<TraceContext>()};
+  if(parent)state.children.add(captured);else operations.set(run.collector,state);
   const started=performance.now();
-  run.probe.trace(context,{type:'operation',action:'started',id:context.operationTraceId!,name});
+  if(!parent)run.probe.trace(captured,{type:'operation',action:'started',id:captured.operationTraceId!,name});
   const capabilities=['operation-context','span-lifecycle','dependency-edges','wait-intervals','clock-segments'] as const;
-  for(const declaration of ['requested','effective'] as const)run.probe.trace(context,{type:'scope',action:'declared',scope:{
-    scopeId:context.scopeId!,scopeType:declaration==='requested'?'operation':'executor',declaration,
-    operationTraceId:context.operationTraceId,executorId:'host',capabilities,
+  for(const declaration of ['requested','effective'] as const)run.probe.trace(captured,{type:'scope',action:'declared',scope:{
+    scopeId:captured.scopeId!,...(parent?{parentScopeId:parent.scopeId}:{}),scopeType:declaration==='requested'?'operation':'executor',declaration,
+    operationTraceId:captured.operationTraceId,executorId:'host',capabilities,
     window:{clockId:run.probe.clockId,startMs:started,endMs:null}}});
   let ended=false;
-  return {context,end(){if(ended)return;ended=true;run.probe.trace(context,{type:'operation',action:'ended',id:context.operationTraceId!,name});
-    run.probe.trace(context,{type:'scope',action:'closed',id:context.scopeId,endMs:performance.now()});
-    for(const listener of operationEnded)try{listener();}catch{/* Diagnostics never decide business completion. */}
-    if(operations.get(run.collector)===context)operations.delete(run.collector);}};
+  return {context:captured,end(){if(ended)return;ended=true;
+    if(child){child.end();state.children.delete(captured);}
+    else{state.ended=true;run.probe.trace(captured,{type:'operation',action:'ended',id:captured.operationTraceId!,name});
+      if(state.children.size)run.probe.trace(captured,{type:'health',action:'operation-ended-with-open-children',value:state.children.size});
+      for(const listener of operationEnded)try{listener();}catch{/* Diagnostics never decide business completion. */}}
+    run.probe.trace(captured,{type:'scope',action:'closed',id:captured.scopeId,endMs:performance.now()});
+    if(state.ended&&!state.children.size&&operations.get(run.collector)===state)operations.delete(run.collector);}};
 }
 export function markMeasurementCancellation(reasonCode:'project-closed'|'project-replaced'):void {
   const run=measurementRun();run.probe.event(measurementContext(run.collector),{
@@ -79,13 +91,14 @@ export function resetMeasurementRun(identity: Partial<RunIdentity>): void {
 }
 export function updateMeasurementIdentity(identity: Partial<RunIdentity>): void {
   const target = current.collector.identity;
+  if('runId'in identity&&identity.runId!==target.runId)throw Error('measurement-run-identity-changed');
   if (identity.sourceSha256 && target.sourceSha256 && identity.sourceSha256 !== target.sourceSha256) throw Error('measurement-source-identity-changed');
   Object.assign(target, identity);
 }
 export function measurementContext(collector = current.collector): TraceContext {
   const session=readSession?.();
   const scope=session&&session.generation===collector.identity.generation?session:{};
-  const operation=operations.get(collector);
+  const state=operations.get(collector),operation=state&&!state.ended?state.root:undefined;
   return { ...collector.identity, ...scope,...(operation?{operationTraceId:operation.operationTraceId,scopeId:operation.scopeId}:{}), workerId: 'host', family: 'host', backend: 'host',executorId:'host', taskId: null,
     attemptId: 0, parentTaskId: null, sourceId: null, geometryLod: null };
 }

@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {normalizeTrace,blockingPath,exportChromeTrace,mapTime,waitIntervals,resourceConstraints,resolveScopes} from './trace-analysis.mjs';
 import {publicView,createPublicProjector} from './observability.mjs';
-import {parseCsv,summarizeSystemRows} from './system-diagnostics.mjs';
+import {parseCsv,summarizeSystemRows,SystemCapture} from './system-diagnostics.mjs';
 import {diagnosticPlan,CaptureController} from './diagnostics.mjs';
 import {analyzeRun,exportRunTrace} from './observability.mjs';
 import {renderReport} from './reporter.mjs';
@@ -109,7 +109,7 @@ test('public projections preserve controlled diagnostic fields and share export-
   const project=createPublicProjector({anonymize:false});
   const profile=project({cases:[{sampleId:'gim-private',inputId:'input-1',sampleLabel:'standard-A1.gim'}]});
   const state=project({rows:[{sampleId:'gim-private',inputId:'input-1',sampleLabel:'standard-A1.gim',sourcePath:'C:/private',error:'input-corrupt;customer-private'}],
-    stages:[{stage:'host:host.cacheRead',count:2,totalMs:10,p95UpperMs:8},{stage:'customer-private',count:1}],
+    stages:[{stage:'host:host.cacheRead',count:2,totalMs:10,p95UpperMs:8},{stage:'customer-private:host.cacheRead',count:1}],
     workers:[{workerId:'private-worker',heapAvailability:'available',heapSamples:3,failedHeapSamples:1}],
     templateDiagnostics:[{taskId:'private-task',kind:'queue',queueWaitMs:12,outputBytes:16}]});
   assert.equal(state.rows[0].sampleId,profile.cases[0].sampleId);assert.equal(state.rows[0].inputId,profile.cases[0].inputId);
@@ -119,6 +119,18 @@ test('public projections preserve controlled diagnostic fields and share export-
   assert.equal(state.workers[0].heapAvailability,'available');assert.equal(state.workers[0].heapSamples,3);
   assert.equal(state.templateDiagnostics[0].queueWaitMs,12);assert.ok(!JSON.stringify(state).includes('customer-private'));
   assert.equal(publicView({rows:[{sampleLabel:'standard-A1.gim'}]}).rows[0].sampleLabel,undefined);
+});
+
+test('public diagnostics keep controlled failure codes, write sub-stages and profile conditions',()=>{
+  const view=publicView({timeoutMs:60000,detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',
+    rows:[{partialSignature:'source-geometry:private-digest-a',partialKind:'source-geometry',partialCounts:{failedOccurrences:3,failedSourceCount:1},error:'missing-dependency:3;source-reference-unresolved;capacity-exceeded:1;parse-failed:1;ifc-manifest-incomplete'},
+      {partialSignature:'source-geometry:private-digest-b',partialKind:'source-geometry',partialCounts:{failedOccurrences:3}}],
+    stages:['host:host.cacheWrite.catalog','host:host.cacheWrite.templates.L0','host:host.cacheWrite.templates.L1','host:host.cacheWrite.templates.L2'].map(stage=>({stage,count:1}))});
+  assert.equal(view.timeoutMs,60000);assert.equal(view.detailPolicy,'task-phase-timeline-v2');
+  assert.equal(view.rows[0].error,'missing-dependency:3;source-reference-unresolved;capacity-exceeded:1;parse-failed:1;ifc-manifest-incomplete');
+  assert.equal(view.rows[0].partialCounts.failedOccurrences,3);assert.notEqual(view.rows[0].partialSignature,view.rows[1].partialSignature);
+  assert.ok(view.stages.every(row=>row.stage.startsWith('host:host.cacheWrite.')));
+  assert.ok(!JSON.stringify(view).includes('private-digest'));
 });
 test('diagnostics validate mode-independent windows and do not trigger on an ended span',async()=>{
   assert.throws(()=>diagnosticPlan({captures:[{kind:'cpu',durationMs:30001}]}));
@@ -192,7 +204,7 @@ test('preset CPU capture acknowledges start before releasing the operation barri
   assert.equal(rows[0].samplingParameters.intervalUs,1000);
 });
 
-test('CPU profile command brackets calibrate distinct origins and preserve microsecond units',async()=>{
+test('CPU profile brackets retain a candidate while an unverified clock domain stays unavailable',async()=>{
   const parent=resolve('..','tmp','profile-clock-contract');mkdirSync(parent,{recursive:true});
   const out=mkdtempSync(join(parent,'capture-')),offset=1000000;let start,end;
   const cdp={onEvent(){return()=>{};},async send(method){
@@ -202,9 +214,30 @@ test('CPU profile command brackets calibrate distinct origins and preserve micro
   }};
   const controller=new CaptureController(cdp,out,diagnosticPlan({captures:[{kind:'cpu',durationMs:1}]}));
   await controller.start();const [capture]=await controller.stop();
-  assert.equal(capture.status,'available');assert.equal(capture.clockMapping.availability,'available');
-  assert.equal(capture.clockMapping.sourceUnit,'us');assert.ok(Math.abs(capture.clockMapping.offsetMs+offset)<5);
-  const {offsetMs,uncertaintyMs}=capture.clockMapping;
+  assert.equal(capture.status,'available');assert.equal(capture.clockMapping.availability,'unavailable');
+  assert.equal(capture.clockMapping.reason,'profile-clock-domain-unverified');
+  assert.equal(capture.clockMapping.sourceUnit,'us');assert.ok(Math.abs(capture.commandBracketCandidate.offsetMs+offset)<5);
+  const {offsetMs,uncertaintyMs}=capture.commandBracketCandidate;
   assert.ok(start/1000+offsetMs>=capture.startRequestMs-uncertaintyMs);
   assert.ok(end/1000+offsetMs<=capture.endedAtMs+uncertaintyMs);
+});
+
+test('system capture rejects the unauthenticated plan launcher without creating files or elevation',async()=>{
+  const parent=resolve('..','tmp','system-auth-contract');mkdirSync(parent,{recursive:true});
+  const folder=mkdtempSync(join(parent,'run-')),capture=new SystemCapture(folder,folder,{durationMs:1000,bufferMiB:8},{});
+  await capture.start();const status=await capture.stop();
+  assert.equal(status.status,'unavailable');assert.equal(status.reason,'authenticated-system-helper-required');
+  assert.equal(status.actualCaptureVerified,false);
+});
+
+test('slow span trigger sees new activity after the context history exceeds 32k events',async()=>{
+  const parent=resolve('..','tmp','slow-span-index-contract');mkdirSync(parent,{recursive:true});const out=mkdtempSync(join(parent,'run-'));
+  const cdp={onEvent:()=>()=>{},send:async method=>method==='Profiler.stop'?{profile:{startTime:0,endTime:1000,nodes:[],samples:[],timeDeltas:[]}}:{}};
+  const controller=new CaptureController(cdp,out,diagnosticPlan({captures:[{kind:'cpu',target:'main',trigger:'slow-span',stage:'late',thresholdMs:1,durationMs:1}]}));
+  const context={runId:'r',executorId:'host',workerId:'host'};
+  for(let i=0;i<33000;i++)controller.event({context,trace:{type:'health'},controllerReceivedMs:0});
+  controller.event({context,producerId:'host:trace',sequence:1,controllerReceivedMs:performance.now()-100,trace:{type:'span',action:'started',id:'late-span',name:'late'}});
+  controller.startEligible('slow-span');const [capture]=await controller.stop();
+  assert.equal(capture.status,'available');assert.equal(capture.targetSpanId,'late-span');
+  assert.equal(capture.associationTruncated,true);assert.equal(capture.triggerEvidenceComplete,true);
 });

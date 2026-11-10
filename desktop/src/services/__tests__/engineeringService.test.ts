@@ -10,6 +10,7 @@ import { EngineeringWorkerClient, type EngineeringWorkerPort } from '../engineer
 import { createEngineeringWorkerHandler } from '../engineeringWorker.js';
 import type { EngineeringWorkerRequest, EngineeringWorkerResponse } from '../engineeringWorkerProtocol.js';
 import { readCachedEntry, writeCacheFile, batchReadCachedFiles } from '@desktop/database.js';
+import {createByteFile} from '@desktop/byteFile.js';
 
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => true }));
 vi.mock('@desktop/database.js', () => ({ readCachedEntry: vi.fn(), writeCacheFile: vi.fn(), batchReadCachedFiles: vi.fn() }));
@@ -64,6 +65,19 @@ beforeEach(() => {
 });
 
 describe('session-owned production engineering build', () => {
+  it('materializes cloneable sources only at the Worker boundary without rereading native storage',async()=>{
+    const files=sourceFiles(),reference=state();
+    await beginEngineeringBuild(reference,files,{createWorker:portFactory(new LoopbackPort())});
+    store.clear();vi.mocked(batchReadCachedFiles).mockClear();
+    const prepared=new Map(await Promise.all([...files].map(async([path,file])=>[path,createByteFile(new Uint8Array(await file.arrayBuffer()),file.name)]as const)));
+    const app=state(),port=new LoopbackPort();
+    await beginEngineeringBuild(app,prepared,{createWorker:portFactory(port)});
+    expect(port.commands).toContain('extract');expect(app.engineeringStatus).toBe('ready');
+    expect(app.engineeringSnapshot).toEqual(reference.engineeringSnapshot);
+    expect(app.engineeringGeometryCatalog).toEqual(reference.engineeringGeometryCatalog);
+    expect(batchReadCachedFiles).not.toHaveBeenCalled();
+    expect(await prepared.get('project.cbm')?.text()).toBe(await files.get('project.cbm')?.text());
+  });
   it('builds without a Viewer and restores valid source/entity artifacts without source parsing', async () => {
     const app = state(), first = new LoopbackPort(), files = sourceFiles();
     await beginEngineeringBuild(app, files, { createWorker: portFactory(first) });

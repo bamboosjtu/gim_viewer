@@ -64,6 +64,7 @@ globalThis.runEngineeringWorkerCheck = async () => {
   check(state.engineeringStatus==='ready'&&state.engineeringSnapshot.entities.length===1,'production service with actual Worker');
   const fixture=document.createElement('section');fixture.innerHTML='<div id="cbm-tree-panel" class="tab-panel"></div><aside id="props-drawer"><div id="props-drawer-body"></div></aside><button id="btn-close-props"></button><button id="btn-export-props"></button>';
   document.body.append(fixture);state.currentProjectType='substation';state.engineeringNavMode='composition';
+  const {configurePresentation}=await import('../../src/app/presentationBindings.ts');configurePresentation();
   const {renderEngineeringTree}=await import('../../src/ui/engineeringTreeView.ts');renderEngineeringTree(state);
   check([...fixture.querySelectorAll('.substation-nav-mode-btn')].map(b=>b.textContent).join(',')==='清册,工程,来源','actual browser three views');
   check(state.engineeringNavigation.inventory.rowsBySource.size===3,'inventory includes actual component sources');

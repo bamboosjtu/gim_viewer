@@ -1,4 +1,5 @@
 import type { AppState, ProjectLoadSession } from '../app/state.js';
+import {isByteFile,copyByteFileBytes} from '@desktop/byteFile.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
 import { engineeringCacheEntry, engineeringSourceCacheMatchesFiles, type EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import type { EngineeringBuildResult } from './engineeringWorkerProtocol.js';
@@ -242,7 +243,7 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
       while (offset < entries.length && chunk.length < 256 && (bytes < 8 * 1024 * 1024 || chunk.length === 0)) {
         const entry = entries[offset++]; chunk.push(entry); bytes += entry[1].size || 0;
       }
-      const lazy = chunk.filter(([, file]) => !(file instanceof Blob));
+      const lazy = chunk.filter(([, file]) => !(file instanceof Blob)&&!isByteFile(file));
       let batch: Map<string, Uint8Array | null> | undefined;
       if (lazy.length && job.identity) {
         const { batchReadCachedFiles } = await import('@desktop/database.js');
@@ -250,7 +251,12 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
       }
       const input: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }> = [];
       for (const [path, file] of chunk) {
-        if (file instanceof Blob) input.push({ path, blob: file });
+        // Keep fast byte-backed reads on the main semantic path. At the Worker
+        // boundary use the existing cloneable Blob storage: transferring all
+        // metadata as individually retained ArrayBuffers can push large source
+        // graphs over V8's per-isolate allocation limits even below the OS budget.
+        if(isByteFile(file))input.push({path,blob:new Blob([copyByteFileBytes(file)!])});
+        else if (file instanceof Blob) input.push({ path, blob: file });
         else {
           const lazyFile = file as unknown as { arrayBuffer?: () => Promise<ArrayBuffer>; text(): Promise<string> };
           const value = batch?.get(path);

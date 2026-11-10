@@ -56,6 +56,8 @@ Windows 也可在 `desktop/` 手动执行 `powershell -ExecutionPolicy Bypass -F
 
 该脚本三组批次显式使用 `--anonymize false`，公开通用设计标准方案文件名及已匿名的 `substation01–04`、`line01–06` 验证样本名，便于跨轮识别基准；工程 `.gim` 文件不随仓库发布。非匿名派生报告只保留文件名，源 SHA、源路径、原始 Profile 与批准记录仍留在私有目录。直接调用 CLI 的默认报告继续匿名。一次批次导出的 Profile、JSON 和 CSV 共用一组临时别名，阶段标签、Worker 堆采样状态和数值统计按受控契约保留，未知原因用省略代码表示，不能把公开派生结果用于 gate 或批准。
 
+每批次的 `exportId` 只用于把公开输出映射回本地私有结果，不是样本身份或授权凭据。复用同一输出路径时优先查当前 controller；完成后的重复恢复按 exportId 查询该批次，历史结果不覆盖当前结果。PARTIAL 的原因类别和计数单独导出，缺陷集合签名继续用别名保留分组差异；不能仅凭相同计数合并覆盖不同的样本。
+
 末尾时间范围分别使用首次响应 `firstResponseMs`、首次几何 `firstGeometryMs`、基础几何齐备 `allGeometryReadyMs` 和完全结算 `settledMs`，单位为秒。终端输出使用定宽文本表格，按中文显示宽度补齐、数字右对齐；变电和线路分表，表头统一注明“最短 - 最长”。只统计 PASS/PARTIAL 项已有的有限非负观测；失败、跳过和缺失值不填零，缺失项显示 `-`。变电电压优先使用报告中的 `voltageKv`，否则识别文件名电压前缀，无法识别的单列“未标注”。该范围只是本轮样本描述，不作为自动性能回退判断。
 
 已有报告无需重跑工程，可在 `desktop/` 执行 `node scripts/with-workspace-temp.mjs scripts/benchmarks/survey-summary.mjs --substation <变电results.json> --line <线路results.json> --substation <通用设计results.json>` 生成同样的终端汇总；各报告须为同一构建已完成的批次。
@@ -373,6 +375,10 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
 实际注册表的文件须由开发者在工作区提供并核对 SHA；命令只说明本地验收路径，不构成已执行结果。
 
 ## 详细 Trace 与 Profile
+
+当前系统录制入口拒绝未认证的可写计划，返回 `authenticated-system-helper-required`，不触发提权或 WPR 录制；WPR/PMC 录制待受保护认证 helper 接入后恢复，已采集 ETL 的离线 WPA 摘要仍可用。CPU Profile 自身窗口与热点分析可用；未经真实时钟域验收的跨域映射标不可用，请求/响应括号仅保留为私有候选，不能用它归因精确 Span CPU。slow-span 使用独立有界活动索引；上下文历史超过 32k 不再阻止新活动 Span 触发。
+
+诊断中的 `project.open` 保持根 operation；重叠动作使用同根子 Span 和独立能力 scope。默认主线程上下文始终属于根操作，异步动作须显式传递入口捕获的子上下文，不能用“最后活动的动作”推断归属。Worker 新 Probe 使用独立 producer epoch；超过保留范围的旧 run 重建探针时显式记录 retention loss，不复用已消费的序号。活动索引溢出与历史关联截断分别报告，采集取得 Profile 不代表触发搜索、上下文关联或整个操作覆盖完整。
 
 私有 `events.jsonl` 是按批次写入的 NDJSON。每行的 `contexts` 保存本批次上下文去重表，`events` 中的 `contextIndex` 指向该行的上下文；索引仅在本行有效，不是 Run、Task 或 Span 身份。事件仍使用 `gim-measurement-v1` Envelope，保留 producer、sequence、clock 与原始时间；这是存储编码，不是新的事件协议版本。离线读取器同时支持该批次编码与携带完整 `context` 的旧记录，分析前展开上下文，再按原始 Event Ref 去重和归并。
 

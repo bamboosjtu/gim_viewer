@@ -78,7 +78,9 @@ export class Collector implements MetricsSink {
         }
       }
     } else if (event.kind === 'task') {
-      if(event.producerId===context.workerId&&(event.name==='started'||event.name==='ended')){
+      const prefix=context.workerId+':producer-';
+      const workerProducer=event.producerId===context.workerId||event.producerId.startsWith(prefix)&&/^\d+$/.test(event.producerId.slice(prefix.length));
+      if(workerProducer&&(event.name==='started'||event.name==='ended')){
         let row=this.occupancy.get(context.workerId);
         if(!row&&this.occupancy.size<1024){row={clockId:event.clockId,firstMs:event.atMs,lastMs:event.atMs,depth:0,startMs:event.atMs,occupiedMs:0,peakConcurrentTasks:0};this.occupancy.set(context.workerId,row);}
         if(row&&row.clockId===event.clockId&&!this.finished.has(taskKey)){

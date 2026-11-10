@@ -54,6 +54,7 @@ describe('static viewer redraw policy',()=>{
     changed(()=>{mesh.geometry.groups[0].count--;});
     changed(()=>{mesh.position.x=2;mesh.updateMatrix();});
     changed(()=>{mesh.material=new THREE.MeshBasicMaterial();});
+    changed(()=>{mesh.material.color.setHex(0xff0000);});
     changed(()=>{mesh.visible=false;});
     const buffer=new THREE.InstancedInterleavedBuffer(new Float32Array(8),4);
     changed(()=>{mesh.geometry.setAttribute('itemFilter',new THREE.InterleavedBufferAttribute(buffer,2,0));});

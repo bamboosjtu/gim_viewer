@@ -36,14 +36,24 @@ export function createEngineeringWorkerHandler(){
     }
     if(request.type==='extract'){
       let lastProgress=0,lastStage='',completed=0;
+      let byteReads=0,lastYield=performance.now();
       const progress=(stage:'source-index'|'source-traverse'|'source-sort')=>{
         const now=performance.now();completed++;
         if(stage!==lastStage||now-lastProgress>=1000){lastProgress=now;lastStage=stage;reportProgress(stage,completed);}
       };
       graph=await trace.measure('engineering.extract', () => extractEngineeringSourceGraph({paths,readText:async path=>{
         const source=files.get(path);if(!source)throw Error(`Engineering source unavailable: ${path}`);
+        if(source instanceof Uint8Array&&(++byteReads%128===0||performance.now()-lastYield>=8)){
+          // Blob reads naturally yield. Binary sources must also let the Worker
+          // retire completed async frames and GC between bounded decode slices.
+          await new Promise<void>(resolve=>setTimeout(resolve,0));lastYield=performance.now();
+        }
         const bytes=source instanceof Uint8Array?source:await trace.measureObserved('engineering.source-read', () => source.arrayBuffer());
-        const text=trace.syncObserved('engineering.decode', () => decodeGimText(bytes).text);progress('source-traverse');return text;
+        const text=trace.syncObserved('engineering.decode', () => decodeGimText(bytes).text);
+        // SourceGraph caches each decoded document by canonical path. Keeping
+        // its transferred raw input until the entire graph is sorted doubles
+        // residency unnecessarily, especially for large PHM/FAM sources.
+        files.delete(path);progress('source-traverse');return text;
       }},{onProgress:progress}));files.clear();
       return {type:'graph',summary:{ifcPaths:graph.ifcPaths,sourceRecords:graph.records.length},geometryOccurrences:collectSourceGeometryOccurrences(graph)};
     }

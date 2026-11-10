@@ -188,6 +188,11 @@ export async function onGimExtracted(
 /** Semantic publication keeps original FAM rows available to source tools;
  * it does not launch or invalidate the retired business-tree projection. */
 function publishFamSourceRows(state: AppState, rows: readonly FamPropertyPayload[]): void {
+  // Cold inspectors read the immutable currentFiles source first. Expanding
+  // every persisted FAM JSON row into a second main-isolate object graph is
+  // unused on that path and can overlap the engineering Worker/geometry peak.
+  // Warm repair still needs the restored property cache when no source map exists.
+  if(state.currentFiles){state.cachedFamSourceProperties.clear();return;}
   const families = new Map<string, import('../gim/famParser.js').FamSourceProperty[]>();
   for (const row of rows) if (row.raw_property_json) {
     try { const list = families.get(row.source_path) ?? []; list.push(JSON.parse(row.raw_property_json)); families.set(row.source_path, list); }

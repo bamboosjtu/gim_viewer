@@ -58,6 +58,10 @@ function recordReport(row,report,state){
     partialEvidenceStatus:report.defectAssessment?.status??null,
     partialEvidenceDigest:report.defectAssessment?.coverageDigest??report.defectAssessment?.sourceSetDigest??null,
     partialSignature:report.correctness==='partial'?partialSignature(report):null,
+    partialKind:report.defectAssessment?.kind??null,
+    partialCounts:report.correctness==='partial'?{failedOccurrences:report.evidence?.progress?.workload?.failed??0,
+      failedSourceCount:report.evidence?.geometryDefects?.failedSourceCount??0,
+      unresolvedReferences:(report.evidence?.engineeringCoverage?.referenceStatuses?.missing??0)+(report.evidence?.engineeringCoverage?.referenceStatuses?.ambiguous??0)}:null,
     cacheVerified:report.cacheVerified,measurementComplete:report.measurementComplete,
     processSamples:report.processSampling?.samples,processSamplesAvailable:report.processSampling?.available,
     missingWorkerHeaps:report.missingWorkerMemory?.length,unavailableWorkerHeaps:report.unavailableWorkerMemory?.length,
@@ -112,11 +116,12 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   const body={version:'gim-batch-profile-v1',preset,repetitions,cacheStates,mode:'benchmark',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',timeoutMs,
     startupRetryPolicy:'pre-open-infrastructure-v1',maxStartupAttempts:STARTUP_ATTEMPTS,
     cases:inputs.samples.map(({paths,...sample})=>sample)};
-  const profileDigest=digest(body),state={version:'gim-batch-results-v1',status:'RUNNING',outcome:'INCONCLUSIVE',preset,repetitions,
+  const exportId='export-'+randomBytes(12).toString('hex');
+  const profileDigest=digest(body),state={version:'gim-batch-results-v1',exportId,status:'RUNNING',outcome:'INCONCLUSIVE',preset,repetitions,
     buildFingerprint:build.sourceFingerprint,profileDigest,anonymize,environmentCalibration,selectionFrozen:true,baselineEligible:false,rows:[],runs:[],attempts:[],stages:[],slowTasks:[],slowPhases:[],templateDiagnostics:[],workers:[],pairs:[],updatedAt:null};
   const privateRuns=[];
   const controllerFile=join(privateOut,'controller.private.json'),nonce=randomBytes(24).toString('hex');
-  writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out,nonce}));
+  writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out,nonce,exportId}));
   writeFileSync(controllerFile,JSON.stringify({pid:process.pid,nonce,
     processStartedAt:new Date(Date.now()-process.uptime()*1000).toISOString(),startedAt:new Date().toISOString()}));
   writeFileSync(join(privateOut,'profile.json'),JSON.stringify({...body,digest:profileDigest},null,2));
@@ -130,7 +135,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
       state.rows.push({...publicEntry,repetition,cacheState,status:'PENDING'});
   }
   const labels=new Map(state.rows.map(row=>[row.inputId,row.sampleLabel]));
-  const publicProfile={...body,profileDigest,cases:body.cases.map(row=>({...row,sampleLabel:labels.get(row.inputId)}))};
+  const publicProfile={...body,exportId,profileDigest,cases:body.cases.map(row=>({...row,sampleLabel:labels.get(row.inputId)}))};
   writeFileSync(join(out,'profile.json'),JSON.stringify(isPublicArtifact(root,out)?project(publicProfile):{...body,digest:profileDigest},null,2));
   const save=()=>{state.updatedAt=new Date().toISOString();writeBatchReports(privateOut,state,{root});writeBatchReports(out,state,{root,project});};
   save();
@@ -225,7 +230,7 @@ export async function runBatch(options){
 /** Finalize a controller that has already exited; never fabricate elapsed metrics. */
 function controllerRecord(root,out,{includeCompleted=false}={}){
   const base=join(root,'tmp','gim-bench','batches');if(!existsSync(base))return null;
-  const matches=[];
+  const controllers=[],completed=[];
   for(const entry of readdirSync(base,{withFileTypes:true})){
     if(!entry.isDirectory())continue;
     const dir=join(base,entry.name),outputFile=join(dir,'output.private.json');
@@ -233,14 +238,26 @@ function controllerRecord(root,out,{includeCompleted=false}={}){
     try{const value=JSON.parse(readFileSync(workspacePath(root,outputFile),'utf8'));
       if(resolve(value.out)!==out)continue;
       const file=join(dir,'controller.private.json');
+      let terminal=false;
+      try{const state=JSON.parse(readFileSync(workspacePath(root,join(dir,'results.json')),'utf8'));
+        terminal=['COMPLETE','CANCELLED'].includes(state.status)&&!state.rows?.some(row=>['RUNNING','PENDING'].includes(row.status));
+      }catch{/* An unreadable state cannot prove that its controller completed. */}
+      if(terminal){if(includeCompleted)completed.push({file:workspacePath(root,file,false),value:null,mappedNonce:value.nonce,exportId:value.exportId});continue;}
       if(!existsSync(file)){
-        if(includeCompleted)matches.push({file:workspacePath(root,file,false),value:null,mappedNonce:value.nonce});
+        if(includeCompleted)completed.push({file:workspacePath(root,file,false),value:null,mappedNonce:value.nonce,exportId:value.exportId});
         continue;
       }
       const safeFile=workspacePath(root,file);
-      matches.push({file:safeFile,value:JSON.parse(readFileSync(safeFile,'utf8')),mappedNonce:value.nonce});
+      controllers.push({file:safeFile,value:JSON.parse(readFileSync(safeFile,'utf8')),mappedNonce:value.nonce,exportId:value.exportId});
     }catch{/* Unreadable private record cannot establish ownership. */}
   }
+  // A reused public path may retain many completed private runs. Their mappings
+  // must never hide a current controller (even a dead/interrupted controller).
+  if(controllers.length)return controllers.length===1?controllers[0]:null;
+  if(!includeCompleted)return null;
+  let exportId;
+  try{exportId=JSON.parse(readFileSync(workspacePath(root,join(out,'results.json')),'utf8')).exportId;}catch{/* Legacy output may have no binding. */}
+  const matches=exportId?completed.filter(record=>record.exportId===exportId):completed;
   return matches.length===1?matches[0]:null;
 }
 function controllerAlive(pid){
@@ -316,13 +333,16 @@ export function recoverInterruptedBatch(root,outputDirectory,{force=false,getPro
   state.status='CANCELLED';state.outcome='INCONCLUSIVE';state.baselineEligible=false;
   state.recovery={kind:'controller-interruption-v1',recoveredRows:recovered};
   state.updatedAt=new Date().toISOString();
+  state.exportId??='export-'+randomBytes(12).toString('hex');
+  if(record){const mapping=join(dirname(record.file),'output.private.json');
+    writeFileSync(mapping,JSON.stringify({...JSON.parse(readFileSync(mapping,'utf8')),exportId:state.exportId}));}
   // Authority must be durable before replacing its view and releasing ownership.
   if(privateFile)writeBatchReports(dirname(privateFile),state,{root});
   const project=createPublicProjector({anonymize:state.anonymize!==false});
   const profile=privateFile?join(dirname(privateFile),'profile.json'):null;
   if(profile&&existsSync(profile)&&isPublicArtifact(root,out)){
     const body=JSON.parse(readFileSync(profile,'utf8')),labels=new Map(state.rows.map(row=>[row.inputId,row.sampleLabel]));
-    writeFileSync(join(out,'profile.json'),JSON.stringify(project({...body,profileDigest:state.profileDigest,
+    writeFileSync(join(out,'profile.json'),JSON.stringify(project({...body,exportId:state.exportId,profileDigest:state.profileDigest,
       cases:(body.cases??[]).map(row=>({...row,sampleLabel:labels.get(row.inputId)}))}),null,2));
   }
   writeBatchReports(out,state,{root,project});

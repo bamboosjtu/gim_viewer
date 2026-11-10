@@ -20,9 +20,27 @@ export function diagnosticPlan(input,legacy){
 /** Independent from the page's event loop. Every stop/exit is bounded. */
 export class CaptureController {
   constructor(cdp,out,plan){this.cdp=cdp;this.out=out;this.plan=plan;this.targets=new Map([['main',{executorId:'host',sessionId:undefined}]]);
-    this.rows=plan.captures.map(spec=>({spec,status:'not-triggered'}));this.tasks=[];this.closed=false;this.events=[];}
+    this.rows=plan.captures.map(spec=>({spec,status:'not-triggered'}));this.tasks=[];this.closed=false;this.events=[];
+    this.activeSpans=new Map();this.endedSpans=new Map();this.producerSequences=new Map();}
   target(identity,sessionId){this.targets.set(identity.workerId,{...identity,executorId:identity.workerId,sessionId});if(this.started)this.startEligible('operation-start');}
-  event(event){if(this.events.length<32768)this.events.push(event);else this.eventTruncated=true;}
+  event(event){
+    if(this.events.length<32768)this.events.push(event);else this.eventTruncated=true;
+    if(event.trace?.type!=='span'||!event.context?.runId||typeof event.trace.id!=='string'||!event.trace.id)return;
+    if(event.producerId&&Number.isSafeInteger(event.sequence)){
+      const producer=event.context.runId+'\0'+event.producerId,previous=this.producerSequences.get(producer)??0;
+      if(event.sequence<=previous)return;
+      if(!this.producerSequences.has(producer)&&this.producerSequences.size>=4096){this.activeIndexTruncated=true;return;}
+      this.producerSequences.set(producer,event.sequence);
+    }
+    const key=event.context.runId+'\0'+event.trace.id;
+    if(event.trace.action==='ended'){
+      this.activeSpans.delete(key);this.endedSpans.set(key,event);
+      while(this.endedSpans.size>8192)this.endedSpans.delete(this.endedSpans.keys().next().value);
+    }else if(event.trace.action==='started'&&!this.endedSpans.has(key)){
+      if(this.activeSpans.size<4096||this.activeSpans.has(key))this.activeSpans.set(key,event);
+      else this.activeIndexTruncated=true;
+    }
+  }
   async start(){this.started=true;this.startEligible('operation-start');this.origin=performance.now();
     this.timer=setInterval(()=>{this.startEligible('slow-span');this.startEligible('external');},100);
     await Promise.all(this.rows.filter(row=>row.status==='collecting').map(row=>row.armed));}
@@ -33,11 +51,11 @@ export class CaptureController {
       const spec=row.spec;if(row.status!=='not-triggered'||spec.trigger!==trigger||id&&spec.id!==id)continue;
       if(trigger==='external'&&performance.now()-this.origin<(spec.delayMs??0))continue;
       if(trigger==='slow-span'){
-        const starts=this.events.filter(e=>e.trace?.type==='span'&&e.trace.action==='started'&&(!spec.spanId||e.trace.id===spec.spanId)&&(!spec.stage||e.trace.name===spec.stage)&&
+        const starts=[...this.activeSpans.values()].filter(e=>(!spec.spanId||e.trace.id===spec.spanId)&&(!spec.stage||e.trace.name===spec.stage)&&
           (spec.target==='main'?(e.context.executorId??e.context.workerId)==='host':
             (e.context.executorId??e.context.workerId)!=='host'&&(!spec.family||e.context.family===spec.family)&&
             (!spec.executorId||(e.context.executorId??e.context.workerId)===spec.executorId)));
-        const active=starts.find(e=>performance.now()-e.controllerReceivedMs>=spec.thresholdMs&&!this.events.some(end=>end.context.runId===e.context.runId&&end.trace?.id===e.trace.id&&end.trace.action==='ended'));
+        const active=starts.find(e=>performance.now()-e.controllerReceivedMs>=spec.thresholdMs);
         if(!active)continue;
         row.triggerContext=active.context;row.targetSpanId=active.trace.id;
         row.triggerEventRef={runId:active.context.runId,producerId:active.producerId,sequence:active.sequence};
@@ -48,11 +66,14 @@ export class CaptureController {
       if(!target)continue;
       if(row.triggerContext&&(row.triggerContext.executorId??row.triggerContext.workerId)!==target.executorId)continue;
       if(spec.operationTraceId||spec.taskId||spec.spanId){
-        const matching=this.events.filter(e=>(e.context.executorId??e.context.workerId)===target.executorId&&
+        const matching=[...this.activeSpans.values()].filter(e=>(e.context.executorId??e.context.workerId)===target.executorId&&
           (!spec.operationTraceId||e.context.operationTraceId===spec.operationTraceId)&&
           (!spec.taskId||e.context.taskId===spec.taskId)&&(!spec.spanId||e.trace?.id===spec.spanId));
-        if(!matching.some(e=>e.trace?.action==='started'))continue;
-        if(spec.spanId&&matching.some(e=>e.trace?.action==='ended')){row.status='target-ended';continue;}
+        if(!matching.length){
+          if(spec.spanId&&[...this.endedSpans.values()].some(e=>e.trace.id===spec.spanId&&
+            (e.context.executorId??e.context.workerId)===target.executorId))row.status='target-ended';
+          continue;
+        }
       }
       if(this.rows.some(r=>r.status==='collecting'&&r.executorId===target.executorId))continue;
       row.status='collecting';row.executorId=target.executorId;row.requestedAtMs=performance.now();row.triggerSource=trigger;
@@ -92,10 +113,14 @@ export class CaptureController {
           row.profileWindow={clockId:'cdp-profile',unit:'us',start:result.profile.startTime,end:result.profile.endTime};
           const lower=Math.max(row.startRequestMs-result.profile.startTime/1000,row.stopRequestMs-result.profile.endTime/1000);
           const upper=Math.min(row.startedAtMs-result.profile.startTime/1000,row.endedAtMs-result.profile.endTime/1000);
-          row.clockMapping=Number.isFinite(lower)&&upper>=lower
+          row.commandBracketCandidate=Number.isFinite(lower)&&upper>=lower
             ?{availability:'available',clockId:'cdp-profile',referenceClockId:'controller',offsetMs:(lower+upper)/2,uncertaintyMs:(upper-lower)/2,
-              method:'start-stop-command-brackets',validFrom:result.profile.startTime,validTo:result.profile.endTime,sourceUnit:'us'}
+              method:'unverified-start-stop-command-brackets',validFrom:result.profile.startTime,validTo:result.profile.endTime,sourceUnit:'us'}
             :{availability:'unavailable',reason:'profile-command-clock-brackets-inconsistent'};
+          // A bracket intersection is a candidate offset, not proof of the
+          // browser's profiler clock contract. Hotspot analysis needs only the
+          // native profile window; do not publish an unverified cross-domain map.
+          row.clockMapping={availability:'unavailable',reason:'profile-clock-domain-unverified',clockId:'cdp-profile',sourceUnit:'us'};
         }
       }
       row.bytes=bytes;row.status=row.truncated?'truncated':'available';
@@ -104,7 +129,9 @@ export class CaptureController {
   async stop(){
     this.closed=true;clearInterval(this.timer);for(const row of this.rows)row.release?.();
     await Promise.allSettled(this.tasks);
-    return this.rows.map(({release,timeout,arm,armed,spec,...row})=>({...row,requested:spec,
+    return this.rows.map(({release,timeout,arm,armed,spec,...row})=>({...row,
+      ...(row.status==='not-triggered'&&spec.trigger==='slow-span'&&this.activeIndexTruncated?{status:'unavailable',reason:'slow-span-index-overflow'}:{}),
+      requested:spec,triggerEvidenceComplete:!this.activeIndexTruncated,
       observedContexts:[...new Map(this.events.filter(e=>(e.context.executorId??e.context.workerId)===row.executorId&&
         e.controllerReceivedMs>=row.startedAtMs&&e.controllerReceivedMs<=row.endedAtMs)
         .map(e=>[JSON.stringify(e.context),e.context])).values()],
