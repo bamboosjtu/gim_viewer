@@ -5,7 +5,7 @@ import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
 import { buildSubstationSpatialIndexFromFiles, type SubstationSpatialIndex,
   type SubstationSpatialIndexObserver } from '../gim/ifcSpatialParser.js';
 import type { SpatialWorkerRequest, SpatialWorkerResponse } from './substationSpatialWorker.js';
-import type {SubstationSpatialSnapshotMetadata,EncodedSpatialCache} from './substationSpatialSemanticCache.js';
+import type {SubstationSpatialSnapshotMetadata,EncodedSpatialCache} from './substationSpatialCodec.js';
 
 const active=new Set<()=>void>();
 export function cancelSubstationSpatialWorkers():void {
@@ -25,6 +25,7 @@ export async function buildSubstationSpatialIndexInWorker(
   const requests=new WorkerRequests<SubstationSpatialIndex|undefined>(120_000,()=>cancel());
   let terminated=false;
   const cancel=()=>{
+    if(terminated)return;
     terminated=true;worker.terminate();active.delete(cancel);
     requests.rejectAll(new DOMException('Spatial parse belongs to an obsolete project','AbortError'));
   };
@@ -37,7 +38,10 @@ export async function buildSubstationSpatialIndexInWorker(
       const callback=observer[response.event] as ((profile:unknown)=>void)|undefined;
       callback?.(response.profile);return;
     }
-    if(response.type==='complete'&&response.cache)cacheOptions?.onEncoded(response.cache);
+    if(response.type==='complete'&&response.cache){
+      try{cacheOptions?.onEncoded(response.cache);}
+      catch(error){requests.settle(sequence,undefined,error instanceof Error?error:Error(String(error)));return;}
+    }
     requests.settle(sequence,response.type==='complete'?response.index:undefined,response.type==='error'?new Error(response.message):undefined);
   };
   worker.onerror=event=>{requests.rejectAll(new Error(event.message||'Spatial worker failed'));cancel();};

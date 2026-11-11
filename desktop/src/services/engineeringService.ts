@@ -5,7 +5,7 @@ import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
 import { engineeringCacheEntry, engineeringSourceCacheMatchesFiles, type EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import type { EngineeringBuildResult } from './engineeringWorkerProtocol.js';
 import { EngineeringWorkerClient } from './engineeringWorkerClient.js';
-import { SUBSTATION_PARSER_DOMAIN_VERSION, SUBSTATION_SPATIAL_SEMANTIC_VERSION } from './substationSpatialSemanticCache.js';
+import { SUBSTATION_PARSER_DOMAIN_VERSION, SUBSTATION_SPATIAL_SEMANTIC_VERSION } from './substationSpatialCodec.js';
 import { isTauri } from '@desktop/runtime.js';
 import { perfMark,perfMarkProductMoment } from '../utils/perfTimings.js';
 import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
@@ -268,11 +268,12 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
       }
       if (!current(state, job)) return;
       const blob=new Blob(parts);
-      // Oversized individual documents retain the existing one-file path;
-      // batching never increases their supported size or claims a bounded pack.
+      // Unknown/underreported sizes retain the existing per-file path.
       if(blob.size>ENGINEERING_SOURCE_BATCH_BYTES){
-        if(ranges.length!==1)throw Error('Engineering source sizes changed during batching');
-        await client.addFiles([{path:ranges[0].path,blob}]);
+        for(const entry of ranges){
+          if(!current(state,job))return;
+          await client.addFiles([{path:entry.path,blob:blob.slice(entry.offset,entry.offset+entry.length)}]);
+        }
       }else await client.addPackedFiles({blob,entries:ranges});
     }
     const graph = await client.extract();

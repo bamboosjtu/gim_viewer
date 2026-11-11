@@ -145,12 +145,15 @@ it('stops source prefetch at high pressure, including a reply already in flight'
   } finally { read.mockRestore(); }
 });
 
-it('batches only reachable sources for a warm template miss and shares repeated preparation', async () => {
+it.each([false, true])('batches reachable lazy sources for a cache miss (cold=%s) and shares dependencies and path scans', async (cold) => {
   const {internal}=fixture();internal.session.projectId=7;
+  if(cold)internal.state.currentFiles=new Map();
   const texts=new Map([['DEV/a.dev','SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.phm'],
+    ['DEV/b.dev','SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.phm'],
     ['PHM/a.phm','SOLIDS.NUM=1\nSOLIDS0=a.mod'],['MOD/a.mod','<Device><Entities/></Device>']]);
   internal.sources.sourceFiles=new Map([...texts].map(([path,text])=>[path,{size:new TextEncoder().encode(text).length}]));
   internal.sources.sourceFiles.set('MOD/unrelated.mod',{size:10});
+  const scans=vi.spyOn(internal.sources.sourceFiles,'keys');
   internal.worker=createDevWorkerMock();
   const database=await import('@desktop/database.js');
   const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(async(_id,paths)=>
@@ -160,10 +163,13 @@ it('batches only reachable sources for a warm template miss and shares repeated 
     await internal.prepareMissingTemplateSources('DEV/a.dev');
     expect(read.mock.calls.map(args=>args[1])).toEqual([['DEV/a.dev'],['PHM/a.phm'],['MOD/a.mod']]);
     expect(internal.worker.installSources).toHaveBeenCalledOnce();
-    expect([...internal.worker.installSources.mock.calls[0][0].keys()]).toEqual([...texts.keys()]);
-    internal.memoryPressure='high';
+    expect([...internal.worker.installSources.mock.calls[0][0].keys()]).toEqual(['DEV/a.dev','PHM/a.phm','MOD/a.mod']);
     await internal.prepareMissingTemplateSources('DEV/b.dev');
-    expect(read).toHaveBeenCalledTimes(3);
+    expect(read.mock.calls.map(args=>args[1])).toEqual([['DEV/a.dev'],['PHM/a.phm'],['MOD/a.mod'],['DEV/b.dev']]);
+    expect(scans).toHaveBeenCalledOnce();
+    internal.memoryPressure='high';
+    await internal.prepareMissingTemplateSources('DEV/c.dev');
+    expect(read).toHaveBeenCalledTimes(4);
   } finally {read.mockRestore();}
 });
 

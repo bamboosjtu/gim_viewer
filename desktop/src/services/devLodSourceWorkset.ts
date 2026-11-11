@@ -3,6 +3,7 @@ import { batchReadCachedFiles } from '@desktop/database.js';
 import { type DevArtifactRead } from '@desktop/devLodCache.js';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { findFileByPath } from '../gim/fileLookup.js';
+import { getFileEntryResolver } from '../gim/entryResolver.js';
 import { hydrateSubstationGeometryGraph } from '../gim/geometry/substationSourceGraph.js';
 import { perfCurrentSession, perfMark } from '../utils/perfTimings.js';
 import { type DeviceLod } from '../viewer/devLodPolicy.js';
@@ -131,11 +132,11 @@ export class DevLodSourceWorkset {
     }).catch(error => { if (this.options.current()) console.warn('[DEV source upgrade]', error); });
   }
 
-  /** A partial warm cache needs only the missing DEV's reachable sources.
+  /** A cache miss needs only the missing DEV's reachable sources.
      * Batch those reads before compiling, instead of serial Worker→UI RPC for
      * each small file. Healthy hits perform no reads; admission is session-wide. */
   prepareMissingTemplateSources(dev: string): Promise<void> {
-    if (this.options.hasMemorySources() || !this.sourceFiles || this.options.session.projectId == null) return Promise.resolve();
+    if (!this.sourceFiles || this.options.session.projectId == null) return Promise.resolve();
     try { if (localStorage.getItem('gim-dev-preload') === '0') return Promise.resolve(); } catch { /* storage unavailable */ }
     const key = dev.toLowerCase(), old = this.missedSourcePreparations.get(key);
     if (old) return old;
@@ -180,8 +181,11 @@ export class DevLodSourceWorkset {
         }
         if (this.options.current() && !pressured()) await flush();
         return loaded;
-      }, this.sourceFiles!.keys());
+      }, getFileEntryResolver(this.sourceFiles!));
       if (!this.options.current() || pressured()) return;
+      // Keep the immutable values for shared dependencies. The path set stays
+      // unchanged, so later templates reuse the same package path index.
+      for (const [path, file] of prepared) this.sourceFiles!.set(path, file);
       this.worker.installSources(prepared);
       perfMark('DEV missing-template source workset', {
 dev, entries: prepared.size, admittedBytes: this.missedSourceBytes - before,

@@ -156,7 +156,7 @@ it('private commit alone drives pressure; old IPC cannot alter a new project and
   const monitor=startSubstationResourceMonitor(state,{} as any);
   const releaseMonitor=vi.spyOn(monitor,'release');
   await vi.advanceTimersByTimeAsync(15000);expect(native.read).toHaveBeenCalledTimes(1);
-  reply({processTreeAvailable:true,processTreeRssBytes:1024,processTreePrivateBytes:6*1024**3*0.9});
+  reply({processTreeAvailable:true,processTreeRssBytes:1024,processTreePrivateBytes:8*1024**3});
   await vi.advanceTimersByTimeAsync(0);expect(dev).toHaveBeenLastCalledWith('critical');expect(ifc).toHaveBeenLastCalledWith('critical');
   expect(perfRuntimeResourceSnapshot()).toHaveLength(0); // no periodic full-scene walk
   native.read.mockResolvedValue({processTreeAvailable:true,processTreeRssBytes:10*1024**3,processTreePrivateBytes:null});

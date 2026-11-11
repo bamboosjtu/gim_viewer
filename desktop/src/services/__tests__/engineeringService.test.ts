@@ -11,6 +11,7 @@ import { createEngineeringWorkerHandler } from '../engineeringWorker.js';
 import type { EngineeringWorkerRequest, EngineeringWorkerResponse } from '../engineeringWorkerProtocol.js';
 import { readCachedEntry, writeCacheFile, batchReadCachedFiles } from '@desktop/database.js';
 import {createByteFile} from '@desktop/byteFile.js';
+import{createSpatialSemanticStarter}from'../spatialSemanticStarter.js';
 
 vi.mock('@desktop/runtime.js', () => ({ isTauri: () => true }));
 vi.mock('@desktop/database.js', () => ({ readCachedEntry: vi.fn(), writeCacheFile: vi.fn(), batchReadCachedFiles: vi.fn() }));
@@ -65,6 +66,23 @@ beforeEach(() => {
 });
 
 describe('session-owned production engineering build', () => {
+  it('assembles a live Spatial index before its persistence tail completes',async()=>{
+    const app=state(),port=new LoopbackPort();let release!:()=>void;
+    const persist=new Promise<void>(r=>{release=r;});const starter=createSpatialSemanticStarter(async ready=>{
+      app.substationSpatialIndex=buildSubstationSpatialIndexFromTexts([{entry:{modelId:'m',path:'delivery.ifc',name:'delivery'},text:"#1=IFCWALL('w',$,'墙',$,$,$,$,$);"}],null);
+      ready(true);await persist;return true;
+    });
+    let persisted=false;const tail=starter.complete().then(()=>{persisted=true;});
+    await beginEngineeringBuild(app,sourceFiles('设备',true),{createWorker:portFactory(port),ensureIfcSemantics:starter.ready});
+    expect(app.engineeringSnapshot).not.toBeNull();expect(port.commands.filter(c=>c==='assemble')).toHaveLength(1);expect(persisted).toBe(false);
+    release();await tail;
+  });
+  it('falls back to per-file input when declared sizes underestimate a multi-file batch',async()=>{
+    const app=state(),port=new LoopbackPort(),files=sourceFiles();
+    const large=new Uint8Array(5*1024*1024);large.fill(32);
+    for(const name of ['unused-a.fam','unused-b.fam'])files.set(name,{size:0,arrayBuffer:async()=>large.buffer}as File);
+    await beginEngineeringBuild(app,files,{createWorker:portFactory(port)});expect(app.engineeringStatus).toBe('ready');expect(port.commands).toContain('files');
+  });
   it('publishes the geometry catalog before joining IFC source semantics and assembles the full model once',async()=>{
     const app=state(),port=new LoopbackPort();let release!:()=>void;
     const gate=new Promise<void>(r=>{release=r;});

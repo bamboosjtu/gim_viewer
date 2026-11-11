@@ -2,7 +2,7 @@ import { parseDev } from './devParser.js';
 import { parsePhm } from './phmParser.js';
 import { PARSER_LIMITS } from '../parserLimits.js';
 import { getFileByPath } from '../fileLookup.js';
-import { createEntryResolver } from '../entryResolver.js';
+import { createEntryResolver, type EntryResolver } from '../entryResolver.js';
 
 /** Source hydration only. Placement/colour remain on parser edges and are consumed by discovery.
  * Batch breadth traversal supports both automatic and click-time cache fallback.
@@ -10,11 +10,11 @@ import { createEntryResolver } from '../entryResolver.js';
 export async function hydrateSubstationGeometryGraph(
   devPaths: readonly string[],
   readFiles: (paths: string[]) => Promise<ReadonlyMap<string, File>>,
-  inventory: Iterable<string>,
+  inventory: Iterable<string> | EntryResolver,
 ): Promise<Map<string, File>> {
   const files = new Map<string, File>();
   const seen = new Set<string>();
-  const resolve = createEntryResolver(inventory);
+  const resolve = typeof inventory === 'function' ? inventory : createEntryResolver(inventory);
   let pending = devPaths.map((path) => ({ path: resolve(path) ?? path, depth: 0 }));
   while (pending.length > 0) {
     const batch = pending.filter(({ path }) => {

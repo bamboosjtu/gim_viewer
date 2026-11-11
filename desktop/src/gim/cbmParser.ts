@@ -14,7 +14,7 @@ import {
   resolveBaseFamilyReferences,
 } from './gimValueSemantics.js';
 import { parseFamSections } from './famParser.js';
-import { parseKeyValue } from './kvParser.js';
+import {readCbmDocument}from'./cbmDocument.js';
 
 export { parseKeyValue } from './kvParser.js';
 
@@ -169,8 +169,6 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     return path ?? '';
   };
   const visited = new Set<string>();
-  const fileByLowerPath = new Map<string, File>();
-  for (const [path, file] of files) fileByLowerPath.set(path.replace(/\\/g, '/').toLowerCase(), file);
   const nodeBudget = { count: 0 };
   // A DEV source may occur under many CBMs/assemblies. Share the in-flight
   // read/parse as well as the completed document for this tree build only.
@@ -197,13 +195,13 @@ export async function buildCbmTree(files: Map<string, File>, projectTypeName?: s
     const visitKey = normalizedPath.toLowerCase();
     if (visited.has(visitKey)) return null;
     visited.add(visitKey);
-    const f = getFileByPath(files, p) ?? fileByLowerPath.get(visitKey);
+    const f = getFileByPath(files, p);
     if (!f) return null;
     nodeBudget.count++;
     if (nodeBudget.count > PARSER_LIMITS.maxCbmNodes) {
       throw new Error(`CBM 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
     }
-    const kv = parseKeyValue(await readGimText(f));
+    const kv = await readCbmDocument(f,true);
     const devEntry = p === equipmentEntry && /\.dev$/i.test(p);
     const en = devEntry ? 'Device' : normalizeEntityName(getFirstNonEmptyKv(kv, ['ENTITYNAME']));
     let { name, systemNames } = extractDisplayName(kv, p);

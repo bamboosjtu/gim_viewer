@@ -180,11 +180,15 @@ impl LineSemanticPackWriter {
         drop(self.data_file);
 
         let index_path = self.index_path.clone();
-        let mut index_file = stdfs::OpenOptions::new()
+        let index_file = stdfs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&index_path)
             .map_err(|e| format!("创建{} pack 索引失败: {}", self.label, e))?;
+        // One entry previously performed five tiny Win32 writes. Keep the
+        // identical wire format and explicit error-checked flush, but coalesce
+        // those writes into bounded blocks before committing the staging dir.
+        let mut index_file=std::io::BufWriter::with_capacity(64*1024,index_file);
         index_file
             .write_all(LINE_SEMANTIC_INDEX_MAGIC)
             .map_err(|e| format!("写入{} pack 索引失败: {}", self.label, e))?;

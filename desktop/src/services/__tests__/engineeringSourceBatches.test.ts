@@ -12,6 +12,14 @@ it('reads a carrier once, preserves byte boundaries and decodes each encoding in
  expect(await sources.read('b.fam')).toBe('中文');expect(await sources.read('a.dev')).toContain('NAME=匿名设备');expect(await sources.read('empty.cbm')).toBe('');
  expect(read).toHaveBeenCalledTimes(1);expect(sources.has('a.dev')).toBe(false);await expect(sources.read('a.dev')).rejects.toThrow('unavailable');
 });
+it('does not decode an unreferenced invalid file or let it poison a valid entry',async()=>{
+ const valid=new TextEncoder().encode('OBJECTMODELPOINTER=unit.dev'),unit=new TextEncoder().encode('SYMBOLNAME=设备'),bad=new Uint8Array([0x81]);
+ const handle=createEngineeringWorkerHandler();await handle({type:'init',scope:'fixture',paths:['project.cbm','unit.dev','unreferenced.fam']});
+ await handle({type:'packed-files',batch:{blob:new Blob([valid,bad,unit]),entries:[{path:'project.cbm',offset:0,length:valid.length},{path:'unreferenced.fam',offset:valid.length,length:bad.length},{path:'unit.dev',offset:valid.length+bad.length,length:unit.length}]}});
+ expect(await handle({type:'extract'})).toMatchObject({type:'graph',summary:{sourceRecords:1}});
+ const sources=new EngineeringSourceBatches();sources.add({blob:new Blob([bad,unit]),entries:[{path:'bad',offset:0,length:1},{path:'unit',offset:1,length:unit.length}]});
+ await expect(sources.read('bad')).rejects.toThrow();expect(await sources.read('unit')).toBe('SYMBOLNAME=设备');
+});
 it('rejects gaps, overlap, duplicate paths and oversized carriers before accepting any path',()=>{
  const blob=new Blob(['abc']),sources=new EngineeringSourceBatches();
  for(const entries of [[{path:'a',offset:1,length:2}],[{path:'a',offset:0,length:1},{path:'a',offset:1,length:2}],[{path:'a',offset:0,length:4}],[{path:'a',offset:0,length:2}]]){

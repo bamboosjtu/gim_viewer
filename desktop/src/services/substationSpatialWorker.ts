@@ -2,7 +2,7 @@ import { SubstationSpatialIndexBuilder, type SubstationSpatialIndex,
   type SubstationSpatialIndexObserver, type IfcSpatialReadProfile } from '../gim/ifcSpatialParser.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
 import { createWorkerProbe } from '../measurement/workerProbe.js';
-import {encodeSubstationSpatialCache,SUBSTATION_SPATIAL_SEMANTIC_VERSION,SUBSTATION_PARSER_DOMAIN_VERSION,type SubstationSpatialSnapshotMetadata,type EncodedSpatialCache} from './substationSpatialSemanticCache.js';
+import {encodeSubstationSpatialCache,SUBSTATION_SPATIAL_SEMANTIC_VERSION,SUBSTATION_PARSER_DOMAIN_VERSION,type SubstationSpatialSnapshotMetadata,type EncodedSpatialCache} from './substationSpatialCodec.js';
 
 export type SpatialWorkerRequest =
   | { type:'init'; tree:CbmNode|null; relations:FileDevEntry[] }

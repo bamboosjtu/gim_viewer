@@ -1,15 +1,17 @@
+import {SUBSTATION_PARSER_DOMAIN_VERSION,type SubstationSpatialCacheHit,type EncodedSpatialCache} from './substationSpatialCodec.js';
 /** Spatial semantic restore, rebuild, persistence and background scheduling. */
 import type { IfcEntry, CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { parseFileDevRelation } from '../gim/fileDevParser.js';
 import { notifyEngineeringIfcEvidence, notifyEngineeringIfcFailure } from './engineeringService.js';
 import { buildSubstationSpatialIndexInWorker } from './substationSpatialWorkerClient.js';
-import { readSubstationSpatialSemanticCache, writeSubstationSpatialSemanticCache, SUBSTATION_PARSER_DOMAIN_VERSION, type SubstationSpatialCacheHit } from './substationSpatialSemanticCache.js';
-import type {EncodedSpatialCache} from './substationSpatialSemanticCache.js';
+import { readSubstationSpatialSemanticCache, writeSubstationSpatialSemanticCache } from './substationSpatialSemanticCache.js';
+
 import { SubstationBackgroundCoordinator, type SubstationBackgroundGate } from './substationBackgroundRuntime.js';
 import { perfBegin, perfMarkProductMoment, type PerfSession } from '../utils/perfTimings.js';
 import { createSubstationSpatialObserver, sampleSubstationMemory } from './substationRuntimeTelemetry.js';
 import { renderSubstationCoreUi } from './substationPresentation.js';
+
 
 export async function buildAndCommitSubstationSpatialSemantic(
   state: AppState,
@@ -26,6 +28,7 @@ export async function buildAndCommitSubstationSpatialSemantic(
     beforeCacheWrite?: Promise<unknown>;
     sourceSha256?: string | null;
     cacheMissReason?: string;
+    onIndexReady?:(available:boolean)=>void;
   } = {},
 ): Promise<boolean> {
   if (!state.isCurrentSession(session)) return false;
@@ -61,6 +64,7 @@ export async function buildAndCommitSubstationSpatialSemantic(
     });
     state.substationSpatialIndex = spatialIndex;
     notifyEngineeringIfcEvidence(state);
+    options.onIndexReady?.(true);
     const rebuildMs = Math.max(0, performance.now() - rebuildStarted);
     let writeMs = 0;
     let snapshotBytes = 0;
@@ -109,6 +113,7 @@ export async function buildAndCommitSubstationSpatialSemantic(
     await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（空间语义）');
     return true;
   } catch (err) {
+    options.onIndexReady?.(false);
     if (!state.isCurrentSession(session)) return false;
     state.substationSpatialIndex = null;
     notifyEngineeringIfcFailure(state, String(err));
@@ -130,6 +135,7 @@ export async function commitCachedSubstationSpatialSemantic(
   session: ProjectLoadSession,
   perfSession: PerfSession,
   showMessage: (text: string) => void,
+  onIndexReady?:(available:boolean)=>void,
 ): Promise<boolean> {
   if (!state.isCurrentSession(session)) return false;
   const endRestore = perfBegin('变电空间语义缓存恢复', undefined, perfSession);
@@ -147,6 +153,7 @@ export async function commitCachedSubstationSpatialSemantic(
   }, perfSession);
   state.substationSpatialIndex = result.index;
   notifyEngineeringIfcEvidence(state);
+  onIndexReady?.(true);
   if (!state.isCurrentSession(session)) return false;
   await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（空间语义缓存）');
   if (!state.isCurrentSession(session)) return false;

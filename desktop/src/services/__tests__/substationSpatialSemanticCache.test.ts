@@ -3,13 +3,12 @@ import type { SubstationSpatialIndex } from '../../gim/ifcSpatialParser.js';
 import {
   hydrateSubstationSpatialIndex,
   encodeSubstationSpatialCache,
-  readSubstationSpatialSemanticCache,
   serializeSubstationSpatialIndex,
   SUBSTATION_PARSER_DOMAIN_VERSION,
   SUBSTATION_SPATIAL_SEMANTIC_VERSION,
   validateSubstationSpatialSnapshot,
-  writeSubstationSpatialSemanticCache,
-} from '../substationSpatialSemanticCache.js';
+} from '../substationSpatialCodec.js';
+import {readSubstationSpatialSemanticCache,writeSubstationSpatialSemanticCache} from '../substationSpatialSemanticCache.js';
 import { readCachedEntry, writeCacheFile } from '@desktop/database.js';
 
 vi.mock('@desktop/database.js', () => ({
@@ -129,12 +128,13 @@ describe('substation spatial semantic snapshot', () => {
   it('persists Worker-encoded bytes without cloning the main index again and rejects foreign identities',async()=>{
     const index=createIndex(),prepared=encodeSubstationSpatialCache(index,{sourceSha256:'sha-a'});
     expect(JSON.parse(new TextDecoder().decode(prepared.bytes))).toEqual(serializeSubstationSpatialIndex(index,{sourceSha256:'sha-a'}));
-    const untouched=new Proxy(index,{get(){throw Error('main snapshot must not be serialized');}});
+    const untouched=new Proxy(index,{get(target,key){const v=Reflect.get(target,key);return Array.isArray(v)?new Proxy(v,{get(a,k){if(k==='length')return a.length;throw Error('main snapshot must not be serialized');}}):v;}});
     await writeSubstationSpatialSemanticCache(7,'sha-a',untouched,SUBSTATION_PARSER_DOMAIN_VERSION,prepared);
     expect(writeCacheFileMock.mock.calls[0][2]).toBe(prepared.bytes);
     writeCacheFileMock.mockClear();
     await expect(writeSubstationSpatialSemanticCache(7,'sha-b',index,SUBSTATION_PARSER_DOMAIN_VERSION,prepared)).rejects.toThrow('身份不匹配');
     expect(writeCacheFileMock).not.toHaveBeenCalled();
+    await expect(writeSubstationSpatialSemanticCache(7,'sha-a',{...index,objects:[]},SUBSTATION_PARSER_DOMAIN_VERSION,prepared)).rejects.toThrow('结构不匹配');
   });
   beforeEach(() => {
     vi.clearAllMocks();

@@ -14,6 +14,7 @@ globalThis.runEngineeringWorkerCheck = async () => {
     ['main.dev',new File(['SYMBOLNAME=主变压器\nSUBDEVICE0=terminal.dev\nSUBDEVICE1=radiator.dev'],'main.dev')],
     ['terminal.dev',new File(['SYMBOLNAME=本体端子箱'],'terminal.dev')],
     ['radiator.dev',new File(['SYMBOLNAME=散热器'],'radiator.dev')],
+    ['unreferenced.fam',new File([new Uint8Array([0x81])],'unreferenced.fam')],
   ]);
   const scope='a'.repeat(64),identity={sourceSha256:scope,parserVersion:'browser-worker-check',entries:[...files.keys()]};
   const client=EngineeringWorkerClient.create(()=>true);

@@ -5,7 +5,7 @@ import type { CbmNode } from '../../gim/types.js';
 import { buildSubstationSpatialIndexInWorker, cancelSubstationSpatialWorkers } from '../substationSpatialWorkerClient.js';
 import type { SpatialWorkerRequest, SpatialWorkerResponse } from '../substationSpatialWorker.js';
 import { isTauri } from '@desktop/runtime.js';
-import{encodeSubstationSpatialCache}from'../substationSpatialSemanticCache.js';
+import{encodeSubstationSpatialCache}from'../substationSpatialCodec.js';
 vi.mock('@desktop/runtime.js',()=>({isTauri:vi.fn(()=>false)}));
 vi.mock('@desktop/database.js',()=>({readCachedEntry:vi.fn(),writeCacheFile:vi.fn()}));
 
@@ -66,7 +66,7 @@ it('project cleanup rejects a pending STEP task and terminates its worker',async
   const pending=buildSubstationSpatialIndexInWorker(new Map(),[],null,[],{},()=>true);
   const rejected=expect(pending).rejects.toThrow('obsolete project');
   cancelSubstationSpatialWorkers();await rejected;
-  expect(SpatialWorker.instances[0].terminate).toHaveBeenCalledTimes(2);
+  expect(SpatialWorker.instances[0].terminate).toHaveBeenCalledOnce();
 });
 it('returns source-bound encoded cache bytes with the same index in the final Worker response',async()=>{
  const encoded=vi.fn(),index=await buildSubstationSpatialIndexInWorker(new Map([['CBM/model.ifc',new File([text],'model.ifc')]]),[entry],tree,[],{},()=>true,
@@ -76,6 +76,11 @@ it('returns source-bound encoded cache bytes with the same index in the final Wo
  expect(JSON.parse(new TextDecoder().decode(cache.bytes)).objects).toEqual(index.objects);
  const requests=SpatialWorker.instances[0].requests;
  expect(requests[requests.length-1]).toMatchObject({type:'finish',cacheMetadata:{sourceSha256:'source-a'}});
+});
+it('rejects an encoded-cache observer error immediately and releases the Worker',async()=>{
+ const pending=buildSubstationSpatialIndexInWorker(new Map([['CBM/model.ifc',new File([text],'model.ifc')]]),[entry],tree,[],{},()=>true,
+  {metadata:{sourceSha256:'source-a'},onEncoded:()=>{throw Error('observer failed');}});
+ await expect(pending).rejects.toThrow('observer failed');expect(SpatialWorker.instances[0].terminate).toHaveBeenCalled();
 });
 
 it('unsupported hosts retain the existing parser contract without changing line behavior',async()=>{

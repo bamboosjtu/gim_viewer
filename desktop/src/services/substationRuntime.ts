@@ -1,3 +1,4 @@
+import {SUBSTATION_PARSER_DOMAIN_VERSION} from './substationSpatialCodec.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 /** Substation cold/warm project orchestration and core semantic publication. */
 import type { IfcEntry } from '../gim/types.js';
@@ -13,13 +14,14 @@ import { setProjectIdentity, refreshNavigatorTitle } from './presentation/shell_
 import type { GimRuntimeOpenContext } from './gimOpenCore.js';
 import { validateGimCache, type FamPropertyPayload } from '@desktop/database.js';
 import { hydrateNativeSmallFiles } from './nativeSmallFileHydration.js';
-import { readSubstationSpatialSemanticCache, SUBSTATION_PARSER_DOMAIN_VERSION } from './substationSpatialSemanticCache.js';
+import { readSubstationSpatialSemanticCache } from './substationSpatialSemanticCache.js';
 import { SubstationBackgroundCoordinator, type SubstationBackgroundGate } from './substationBackgroundRuntime.js';
 import { perfCurrentSession, perfBegin, perfMark, perfMarkProductMoment } from '../utils/perfTimings.js';
 import { showLoading, hideLoading } from './gimOpenCore.js';
 import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
 import { collectCbmNodeCount, markSubstationCoreSemanticReady, renderSubstationCoreUi, showLoadingBeforeInteractive } from './substationPresentation.js';
 import { buildAndCommitSubstationSpatialSemantic, commitCachedSubstationSpatialSemantic, scheduleSubstationSpatialSemantic } from './substationSpatialRuntime.js';
+import {createSpatialSemanticStarter}from'./spatialSemanticStarter.js';
 import { buildAndCommitSubstationStdSld } from './substationDocumentRuntime.js';
 import { loadAllIfcFiles } from './substationIfcRuntime.js';
 export { createNodeClickHandler, setupSldGridIdInteraction } from './substationPresentation.js';
@@ -66,7 +68,7 @@ export async function onGimExtracted(
   if (!state.isCurrentSession(session)) return [];
   if (ifcEntries.length === 0) ifcEntries = scanIfcFiles(files);
   endIfcDiscovery(undefined, { count: ifcEntries.length });
-  await sampleSubstationMemory(state, 'IFC discovery 后', perfSession, { ifcCount: ifcEntries.length });
+  void sampleSubstationMemory(state, 'IFC discovery 后', perfSession, { ifcCount: ifcEntries.length }).catch(reportBackgroundError);
   state.currentIfcEntries = ifcEntries;
 
   // 构建 CBM 层级树（F1System 根节点名称由 projectTypeName 设置，F2System 保留原始分类码并使用可读来源名称）
@@ -107,10 +109,10 @@ export async function onGimExtracted(
     deviceIfcLinks: state.deviceToIfcFile.size,
   });
   // 诊断采样不能阻塞首屏：冷路径上 await/同步采样曾引入约 30 s 隐性等待。
-  await sampleSubstationMemory(state, 'CBM/FAM/DEV/FileDevRelation 后', perfSession, {
+  void sampleSubstationMemory(state, 'CBM/FAM/DEV/FileDevRelation 后', perfSession, {
     cbmNodes: collectCbmNodeCount(cbmTree),
     fileDevRelations: fileDevRelations.length,
-  });
+  }).catch(reportBackgroundError);
   markSubstationCoreSemanticReady(state, perfSession); await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 navigation/UI（core semantic）');
   void Promise.resolve(sampleSubstationMemory(state, 'coreSemanticReady', perfSession, {
     source: 'cold',
@@ -119,10 +121,7 @@ export async function onGimExtracted(
     fileDevRelations: fileDevRelations.length,
   })).catch(reportBackgroundError);
 
-  let spatialSemanticPromise: Promise<boolean> | null = null;
-  const startSpatialSemantic = (): Promise<boolean> => {
-    if (!spatialSemanticPromise) {
-      spatialSemanticPromise = buildAndCommitSubstationSpatialSemantic(
+  const spatialSemantic=createSpatialSemanticStarter(onIndexReady=>buildAndCommitSubstationSpatialSemantic(
         state,
         files,
         ifcEntries,
@@ -132,12 +131,10 @@ export async function onGimExtracted(
         perfSession,
         showMessage,
         '变电 IFC 空间索引',
-        {projectId:isTauri()?session.projectId:undefined,sourceSha256:session.sourceSha256,beforeCacheWrite:options.sourcePublication},
-      );
-    }
-    return spatialSemanticPromise;
-  };
-  void Promise.resolve(beginEngineeringBuild(state, files, { beforeCacheWrite: options.sourcePublication, ensureIfcSemantics: startSpatialSemantic })).catch(reportBackgroundError);
+        {projectId:isTauri()?session.projectId:undefined,sourceSha256:session.sourceSha256,beforeCacheWrite:options.sourcePublication,onIndexReady},
+      ));
+  const startSpatialSemantic=spatialSemantic.complete;
+  void Promise.resolve(beginEngineeringBuild(state, files, { beforeCacheWrite: options.sourcePublication, ensureIfcSemantics: spatialSemantic.ready })).catch(reportBackgroundError);
   if (options.deferSpatialSemantic) {
     // The entity build and the legacy scene path share this idempotent starter.
     // Source normalization can request semantics before geometry readiness;
@@ -324,18 +321,18 @@ export async function openSubstationProject(context: GimRuntimeOpenContext): Pro
         );
       }
 
-      let sourceSpatialPromise: Promise<boolean> | undefined;
-      const startSourceSpatial = (): Promise<boolean> => sourceSpatialPromise ??= (async () => {
+      const sourceSpatial=createSpatialSemanticStarter(async onIndexReady=>{
         if (!state.isCurrentSession(session)) return false;
         if (state.substationSpatialIndex) return true;
         const cached = await readSubstationSpatialSemanticCache(session.projectId, session.sourceSha256, SUBSTATION_PARSER_DOMAIN_VERSION);
         if (!state.isCurrentSession(session)) return false;
-        if (cached.hit) return commitCachedSubstationSpatialSemantic(state, cached, session, perfSession, showMessage);
+        if (cached.hit) return commitCachedSubstationSpatialSemantic(state, cached, session, perfSession, showMessage,onIndexReady);
         return buildAndCommitSubstationSpatialSemantic(state, cachedIfcFiles, cachedIfcEntries, cbmTree, fileDevRelations,
           session, perfSession, showMessage, '变电 IFC 来源语义（缓存重建）',
-          { projectId: session.projectId, sourceSha256: session.sourceSha256, cacheMissReason: cached.reason });
-      })();
-      void Promise.resolve(beginEngineeringBuild(state, engineeringFiles, { ensureIfcSemantics: startSourceSpatial })).catch(reportBackgroundError);
+          { projectId: session.projectId, sourceSha256: session.sourceSha256, cacheMissReason: cached.reason,onIndexReady });
+      });
+      const startSourceSpatial=sourceSpatial.complete;
+      void Promise.resolve(beginEngineeringBuild(state, engineeringFiles, { ensureIfcSemantics: sourceSpatial.ready })).catch(reportBackgroundError);
 
       const cachedStdSldEntryPaths = index.entries.map((entry) => entry.entry_path);
       // STD/SLD restore is a feature-local background task.  A missing or

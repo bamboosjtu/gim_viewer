@@ -1,5 +1,5 @@
 import type { IfcEntry, CbmNode } from './types.js';
-import { parseKeyValue } from './cbmParser.js';
+import {readCbmDocument}from'./cbmDocument.js';
 import { PARSER_LIMITS, parseBoundedCount } from './parserLimits.js';
 import { getFileByPath, hasFileByPath } from './fileLookup.js';
 import {
@@ -66,8 +66,6 @@ export function scanIfcFiles(files: Map<string, File>): IfcEntry[] {
 export async function discoverIfcFromCBM(files: Map<string, File>): Promise<IfcEntry[]> {
   const visited = new Set<string>();
   const ifcSet = new Map<string, IfcEntry>();
-  const fileByLowerPath = new Map<string, File>();
-  for (const [path, file] of files) fileByLowerPath.set(path.replace(/\\/g, '/').toLowerCase(), file);
   let visitedCount = 0;
   async function walk(p: string, depth = 0) {
     if (depth > PARSER_LIMITS.maxRecursionDepth) throw new Error(`CBM IFC 引用递归深度超过 ${PARSER_LIMITS.maxRecursionDepth}`);
@@ -76,8 +74,8 @@ export async function discoverIfcFromCBM(files: Map<string, File>): Promise<IfcE
     if (visited.has(visitKey)) return; visited.add(visitKey);
     visitedCount++;
     if (visitedCount > PARSER_LIMITS.maxCbmNodes) throw new Error(`CBM IFC 节点数超过安全上限 ${PARSER_LIMITS.maxCbmNodes}`);
-    const f = getFileByPath(files, p) ?? fileByLowerPath.get(visitKey); if (!f) return;
-    const kv = parseKeyValue(await f.text());
+    const f = getFileByPath(files, p); if (!f) return;
+    const kv = await readCbmDocument(f);
     const n = parseBoundedCount(getFirstNonEmptyKv(kv, ['IFC.NUM']), 'IFC.NUM');
     for (let i = 0; i < n; i++) {
       const r = getFirstNonEmptyKv(kv, [`IFC${i}`]);
