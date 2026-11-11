@@ -5,6 +5,7 @@ import { parseFileDevRelation } from '../gim/fileDevParser.js';
 import { notifyEngineeringIfcEvidence, notifyEngineeringIfcFailure } from './engineeringService.js';
 import { buildSubstationSpatialIndexInWorker } from './substationSpatialWorkerClient.js';
 import { readSubstationSpatialSemanticCache, writeSubstationSpatialSemanticCache, SUBSTATION_PARSER_DOMAIN_VERSION, type SubstationSpatialCacheHit } from './substationSpatialSemanticCache.js';
+import type {EncodedSpatialCache} from './substationSpatialSemanticCache.js';
 import { SubstationBackgroundCoordinator, type SubstationBackgroundGate } from './substationBackgroundRuntime.js';
 import { perfBegin, perfMarkProductMoment, type PerfSession } from '../utils/perfTimings.js';
 import { createSubstationSpatialObserver, sampleSubstationMemory } from './substationRuntimeTelemetry.js';
@@ -22,6 +23,7 @@ export async function buildAndCommitSubstationSpatialSemantic(
   label: string,
   options: {
     projectId?: number | null;
+    beforeCacheWrite?: Promise<unknown>;
     sourceSha256?: string | null;
     cacheMissReason?: string;
   } = {},
@@ -38,6 +40,7 @@ export async function buildAndCommitSubstationSpatialSemantic(
       models: ifcEntries.length,
     }, perfSession);
     const endSpatial = perfBegin(label, undefined, perfSession);
+    let preparedCache:EncodedSpatialCache|undefined;
     const spatialIndex = await buildSubstationSpatialIndexInWorker(
       files,
       ifcEntries,
@@ -45,6 +48,7 @@ export async function buildAndCommitSubstationSpatialSemantic(
       fileDevRelations,
       createSubstationSpatialObserver(state, perfSession),
       () => state.isCurrentSession(session),
+      options.projectId!=null&&options.sourceSha256?{metadata:{sourceSha256:options.sourceSha256,parserVersion:SUBSTATION_PARSER_DOMAIN_VERSION},onEncoded:cache=>{preparedCache=cache;}}:undefined,
     );
     if (!state.isCurrentSession(session)) return false;
     endSpatial(undefined, {
@@ -62,11 +66,14 @@ export async function buildAndCommitSubstationSpatialSemantic(
     let snapshotBytes = 0;
     if (options.projectId != null && options.sourceSha256 && state.isCurrentSession(session)) {
       try {
+        await options.beforeCacheWrite;
+        if(!state.isCurrentSession(session))return false;
         const cacheWrite = await writeSubstationSpatialSemanticCache(
           options.projectId,
           options.sourceSha256,
           spatialIndex,
           SUBSTATION_PARSER_DOMAIN_VERSION,
+          preparedCache,
         );
         writeMs = cacheWrite.writeMs;
         snapshotBytes = cacheWrite.snapshotBytes;
@@ -76,6 +83,7 @@ export async function buildAndCommitSubstationSpatialSemantic(
         // rebuild it again.
         console.warn('[GIM] 空间语义缓存写入失败，本次运行继续:', writeError);
       }
+      preparedCache=undefined;
     }
     perfMarkProductMoment('spatialSemanticReady', {
       available: true,

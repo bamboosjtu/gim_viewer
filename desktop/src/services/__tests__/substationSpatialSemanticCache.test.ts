@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SubstationSpatialIndex } from '../../gim/ifcSpatialParser.js';
 import {
   hydrateSubstationSpatialIndex,
+  encodeSubstationSpatialCache,
   readSubstationSpatialSemanticCache,
   serializeSubstationSpatialIndex,
   SUBSTATION_PARSER_DOMAIN_VERSION,
@@ -125,6 +126,16 @@ function encode(value: unknown): Uint8Array {
 }
 
 describe('substation spatial semantic snapshot', () => {
+  it('persists Worker-encoded bytes without cloning the main index again and rejects foreign identities',async()=>{
+    const index=createIndex(),prepared=encodeSubstationSpatialCache(index,{sourceSha256:'sha-a'});
+    expect(JSON.parse(new TextDecoder().decode(prepared.bytes))).toEqual(serializeSubstationSpatialIndex(index,{sourceSha256:'sha-a'}));
+    const untouched=new Proxy(index,{get(){throw Error('main snapshot must not be serialized');}});
+    await writeSubstationSpatialSemanticCache(7,'sha-a',untouched,SUBSTATION_PARSER_DOMAIN_VERSION,prepared);
+    expect(writeCacheFileMock.mock.calls[0][2]).toBe(prepared.bytes);
+    writeCacheFileMock.mockClear();
+    await expect(writeSubstationSpatialSemanticCache(7,'sha-b',index,SUBSTATION_PARSER_DOMAIN_VERSION,prepared)).rejects.toThrow('身份不匹配');
+    expect(writeCacheFileMock).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });

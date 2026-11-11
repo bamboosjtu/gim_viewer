@@ -78,9 +78,16 @@ globalThis.runEngineeringWorkerCheck = async () => {
   check(fixture.querySelector('.tree-row.selected')?.textContent.includes('散热器'),'source reveal in virtual outline');
   fixture.querySelector('#engineering-owner').click();
   await until(()=>state.engineeringNavMode==='composition'&&fixture.querySelector('.props-header')?.textContent==='主变压器','owner return');
+  const {buildSubstationSpatialIndexInWorker}=await import('../../src/services/substationSpatialWorkerClient.ts');
+  let spatialCache;
+  const spatial=await buildSubstationSpatialIndexInWorker(new Map([['model.ifc',new File(["#1=IFCPROJECT('p',$,'工程',$,$,$,$,$,$);\n#2=IFCWALL('w',$,'墙',$,$,$,$,$);"],'model.ifc')]]),
+    [{path:'model.ifc',name:'model',modelId:'model'}],null,[],{},()=>true,{metadata:{sourceSha256:scope},onEncoded:value=>{spatialCache=value;}});
+  check(!spatialCache?.error&&spatialCache?.bytes?.byteLength>0,'Spatial Worker cache encoding');
+  const spatialSnapshot=JSON.parse(new TextDecoder().decode(spatialCache.bytes));
+  check(spatialSnapshot.sourceSha256===scope&&JSON.stringify(spatialSnapshot.objects)===JSON.stringify(spatial.objects),'Spatial cache source identity and index equivalence');
   state.invalidatePendingLoads();
   fixture.remove();
   return {passed:true,scope:'functional fixture; excludes native IPC, real samples, geometry and performance acceptance',userAgent:navigator.userAgent,
-    checks:['source graph','physical occurrence contract','whole boundary','source conservation','cache transport','warm restore','navigation projection/cache','entity-only repair','shared binary buffer','Worker abort','production service','browser whole search/source round trip']};
+    checks:['source graph','physical occurrence contract','whole boundary','source conservation','cache transport','warm restore','navigation projection/cache','entity-only repair','shared binary buffer','Worker abort','production service','browser whole search/source round trip','Spatial cache Worker encoding']};
 };
 </script>

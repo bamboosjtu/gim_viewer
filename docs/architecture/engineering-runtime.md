@@ -62,6 +62,10 @@
 
 来源图有上限（默认 500,000 个 occurrence、深度 128）并响应取消；超限/循环/缺对象模型进入诊断，不用空来源冒充完整。
 
+桌面来源输入按文件数和字节数打包为有界 Blob，Worker 一次读取整包，再按文件范围独立解码；它不改变来源图的引用解析、文档缓存或 occurrence 身份。临时文本随文档消费释放，读取阶段的调用数按实际批次统计，不能与旧单文件读取的阶段分位数混合比较。
+
+来源几何目录在抽取结束后立即发布。生产入口提供 IFC 来源语义 starter 时，实体装配复用其 Promise 后再生成完整结果，避免先传输一份很快被 IFC 补全结果替换的大型 DEV-only 模型；它不等待 Viewer/LOD。starter 失败仍发布可用 DEV 部分并记录原因，等待期间切换工程则拒绝旧模型提交。未提供 starter 的独立调用保留原来的增量装配路径。
+
 ### 实体归一化
 
 `buildEngineeringSources` 把来源记录和 IFC 外露记录转成 `ObjectEvidence`，调用 `normalizeEngineeringModel`：

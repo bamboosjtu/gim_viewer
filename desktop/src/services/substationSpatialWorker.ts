@@ -2,14 +2,15 @@ import { SubstationSpatialIndexBuilder, type SubstationSpatialIndex,
   type SubstationSpatialIndexObserver, type IfcSpatialReadProfile } from '../gim/ifcSpatialParser.js';
 import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
 import { createWorkerProbe } from '../measurement/workerProbe.js';
+import {encodeSubstationSpatialCache,SUBSTATION_SPATIAL_SEMANTIC_VERSION,SUBSTATION_PARSER_DOMAIN_VERSION,type SubstationSpatialSnapshotMetadata,type EncodedSpatialCache} from './substationSpatialSemanticCache.js';
 
 export type SpatialWorkerRequest =
   | { type:'init'; tree:CbmNode|null; relations:FileDevEntry[] }
   | { type:'model'; entry:IfcEntry; bytes:ArrayBuffer|null; text:string|null; blob?:Blob; read:IfcSpatialReadProfile }
-  | { type:'finish' };
+  | { type:'finish'; cacheMetadata?:SubstationSpatialSnapshotMetadata };
 export type SpatialWorkerResponse =
   | { type:'ready' }
-  | { type:'complete'; index:SubstationSpatialIndex }
+  | { type:'complete'; index:SubstationSpatialIndex; cache?:EncodedSpatialCache }
   | { type:'error'; message:string }
   | { type:'diagnostic'; event:keyof SubstationSpatialIndexObserver; profile:unknown };
 
@@ -34,8 +35,14 @@ self.onmessage=createWorkerProbe().wrap(async (event:MessageEvent<SpatialWorkerR
       trace.sync('spatial.scan-and-model', () => builder.addIfcModel(request.entry,text,sourceBytes));
     } else {
       const index = trace.sync('spatial.finalize', () => builder.finalize());
+      let cache:EncodedSpatialCache|undefined;
+      if(request.cacheMetadata){
+        try{cache=trace.sync('spatial.cache-encode',()=>encodeSubstationSpatialCache(index,request.cacheMetadata!));}
+        catch(error){cache={sourceSha256:request.cacheMetadata.sourceSha256.trim(),parserVersion:request.cacheMetadata.parserVersion??SUBSTATION_PARSER_DOMAIN_VERSION,
+          cacheVersion:SUBSTATION_SPATIAL_SEMANTIC_VERSION,error:String(error)};}
+      }
       trace.produced();
-      trace.reply({type:'complete',index} satisfies SpatialWorkerResponse);
+      trace.reply({type:'complete',index,...(cache?{cache}:{})} satisfies SpatialWorkerResponse,cache?.bytes?[cache.bytes.buffer]:undefined);
       return;
     }
     trace.produced();

@@ -50,6 +50,21 @@ export interface SubstationSpatialSnapshotMetadata {
   sourceSha256: string;
   parserVersion?: string;
 }
+export interface EncodedSpatialCache {
+  sourceSha256:string;
+  parserVersion:string;
+  cacheVersion:string;
+  bytes?:Uint8Array<ArrayBuffer>;
+  error?:string;
+}
+/** Run beside the Spatial builder to keep snapshot clones and JSON strings out
+ * of the main isolate while it is also hydrating the engineering graph. */
+export function encodeSubstationSpatialCache(index:SubstationSpatialIndex,metadata:SubstationSpatialSnapshotMetadata):EncodedSpatialCache {
+  const snapshot=serializeSubstationSpatialIndex(index,metadata);
+  const bytes=new TextEncoder().encode(JSON.stringify(snapshot));
+  if(bytes.byteLength>MAX_SUBSTATION_SPATIAL_SNAPSHOT_BYTES)throw Error(`空间语义缓存过大: ${bytes.byteLength}`);
+  return{sourceSha256:snapshot.sourceSha256,parserVersion:snapshot.parserVersion,cacheVersion:snapshot.cacheVersion,bytes};
+}
 
 export interface SubstationSpatialCacheHit {
   hit: true;
@@ -705,11 +720,14 @@ export async function writeSubstationSpatialSemanticCache(
   sourceSha256: string | null | undefined,
   index: SubstationSpatialIndex,
   parserVersion = SUBSTATION_PARSER_DOMAIN_VERSION,
+  prepared?:EncodedSpatialCache,
 ): Promise<{ writeMs: number; snapshotBytes: number }> {
   if (projectId == null) throw new Error('空间语义缓存写入缺少 projectId');
   if (!sourceSha256?.trim()) throw new Error('空间语义缓存写入缺少 source SHA-256');
-  const snapshot = serializeSubstationSpatialIndex(index, { sourceSha256, parserVersion });
-  const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
+  if(prepared&&(prepared.sourceSha256!==sourceSha256.trim()||prepared.parserVersion!==parserVersion||prepared.cacheVersion!==SUBSTATION_SPATIAL_SEMANTIC_VERSION))throw Error('空间语义缓存编码身份不匹配');
+  if(prepared?.error)throw Error(prepared.error);
+  const encoded=prepared??encodeSubstationSpatialCache(index,{sourceSha256,parserVersion}),bytes=encoded.bytes;
+  if(!bytes?.byteLength)throw Error('空间语义缓存编码为空');
   if (bytes.byteLength > MAX_SUBSTATION_SPATIAL_SNAPSHOT_BYTES) {
     throw new Error(`空间语义缓存过大: ${bytes.byteLength}`);
   }

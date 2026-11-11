@@ -1,4 +1,5 @@
 import { decodeGimText } from '../shared/textDecode.js';
+import {EngineeringSourceBatches} from './engineeringSourceBatches.js';
 import { createWorkerProbe, NOOP_TASK, type WorkerTaskProbe } from '../measurement/workerProbe.js';
 import { extractEngineeringSourceGraph, type EngineeringSourceGraph } from '../gim/engineering/sourceGraph.js';
 import { buildEngineeringSources, normalizeEngineeringSources } from '../gim/engineering/buildSources.js';
@@ -21,6 +22,7 @@ export function createEngineeringWorkerHandler(){
   let scope='',paths:string[]=[],graph:EngineeringSourceGraph|null=null,sequence=0;
   let latest:{result:EngineeringBuildResult;identity?:EngineeringCacheIdentity;digest?:string;plan:EngineeringCacheDomain[]}|undefined;
   const files=new Map<string,Blob|Uint8Array>();
+  const batches=new EngineeringSourceBatches();
   function publish(result:EngineeringBuildResult,started:number,identity?:EngineeringCacheIdentity,digest?:string,plan:EngineeringCacheDomain[]=[]):EngineeringWorkerReply{
     result.buildId=++sequence;result.cachePlan=plan;result.metrics={buildMs:performance.now()-started,transportEncodeMs:0,transportBytes:0};
     latest={result,identity,digest,plan:[...plan]};
@@ -29,7 +31,8 @@ export function createEngineeringWorkerHandler(){
   return async(request:EngineeringWorkerCommand, trace:WorkerTaskProbe=NOOP_TASK,
     reportProgress:(stage:'source-index'|'source-traverse'|'source-sort',completed:number)=>void=()=>{}):Promise<EngineeringWorkerReply>=>{
     const started=performance.now();
-    if(request.type==='init'){scope=request.scope;paths=request.paths;files.clear();graph=null;latest=undefined;return {type:'ready'};}
+    if(request.type==='init'){scope=request.scope;paths=request.paths;files.clear();batches.clear();graph=null;latest=undefined;return {type:'ready'};}
+    if(request.type==='packed-files'){batches.add(request.batch);return {type:'ready'};}
     if(request.type==='files'){
       for(const source of request.files){if(!source.blob&&!source.bytes)throw Error(`Engineering source bytes missing: ${source.path}`);files.set(source.path,source.blob??source.bytes!);}
       return {type:'ready'};
@@ -42,6 +45,10 @@ export function createEngineeringWorkerHandler(){
         if(stage!==lastStage||now-lastProgress>=1000){lastProgress=now;lastStage=stage;reportProgress(stage,completed);}
       };
       graph=await trace.measure('engineering.extract', () => extractEngineeringSourceGraph({paths,readText:async path=>{
+        if(batches.has(path)){
+          if(++byteReads%128===0||performance.now()-lastYield>=8){await new Promise<void>(resolve=>setTimeout(resolve,0));lastYield=performance.now();}
+          const text=await batches.read(path,trace);progress('source-traverse');return text;
+        }
         const source=files.get(path);if(!source)throw Error(`Engineering source unavailable: ${path}`);
         if(source instanceof Uint8Array&&(++byteReads%128===0||performance.now()-lastYield>=8)){
           // Blob reads naturally yield. Binary sources must also let the Worker
@@ -54,7 +61,7 @@ export function createEngineeringWorkerHandler(){
         // its transferred raw input until the entire graph is sorted doubles
         // residency unnecessarily, especially for large PHM/FAM sources.
         files.delete(path);progress('source-traverse');return text;
-      }},{onProgress:progress}));files.clear();
+      }},{onProgress:progress}));files.clear();batches.clear();
       return {type:'graph',summary:{ifcPaths:graph.ifcPaths,sourceRecords:graph.records.length},geometryOccurrences:collectSourceGeometryOccurrences(graph)};
     }
     if(request.type==='encode-cache'){

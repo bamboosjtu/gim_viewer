@@ -65,6 +65,31 @@ beforeEach(() => {
 });
 
 describe('session-owned production engineering build', () => {
+  it('publishes the geometry catalog before joining IFC source semantics and assembles the full model once',async()=>{
+    const app=state(),port=new LoopbackPort();let release!:()=>void;
+    const gate=new Promise<void>(r=>{release=r;});
+    const ensure=vi.fn(async()=>{await gate;app.substationSpatialIndex=buildSubstationSpatialIndexFromTexts([{entry:{modelId:'m',path:'delivery.ifc',name:'delivery'},text:"#1=IFCWALL('w',$,'墙',$,$,$,$,$);"}],null);notifyEngineeringIfcEvidence(app);return true;});
+    const pending=beginEngineeringBuild(app,sourceFiles('设备',true),{createWorker:portFactory(port),ensureIfcSemantics:ensure});
+    const catalog=await app.engineeringGeometryReady;expect(catalog?.occurrences).toHaveLength(1);
+    await expect.poll(()=>ensure.mock.calls.length).toBe(1);expect(port.commands).not.toContain('assemble');
+    release();await pending;expect(port.commands.filter(c=>c==='assemble')).toHaveLength(1);
+    expect(app.engineeringStatus).toBe('ready');expect(app.engineeringSnapshot?.entities.map(e=>e.name)).toContain('墙');
+  });
+  it('publishes partial DEV evidence when the joined IFC starter fails',async()=>{
+    const app=state(),port=new LoopbackPort();
+    await beginEngineeringBuild(app,sourceFiles('设备',true),{createWorker:portFactory(port),ensureIfcSemantics:async()=>{throw Error('source semantics failed');}});
+    await expect.poll(()=>app.engineeringFailureCode).toBe('ifc-semantic-failed');
+    expect(app.engineeringSnapshot).not.toBeNull();expect(app.engineeringStatus).toBe('partial');
+    expect(port.commands.filter(c=>c==='assemble')).toHaveLength(1);expect(port.terminated).toBe(true);
+  });
+  it('rejects an obsolete model after switching projects while IFC source preparation is pending',async()=>{
+    const app=state(),old=new LoopbackPort();let release!:()=>void;
+    const gate=new Promise<void>(r=>{release=r;});const ensure=vi.fn(()=>gate);
+    const pending=beginEngineeringBuild(app,sourceFiles('旧设备',true),{createWorker:portFactory(old),ensureIfcSemantics:ensure});
+    await expect.poll(()=>ensure.mock.calls.length).toBe(1);app.activateProject(8,'b'.repeat(64));
+    await beginEngineeringBuild(app,sourceFiles('新设备'),{createWorker:portFactory(new LoopbackPort())});const newest=app.engineeringSnapshot;
+    release();await pending;expect(app.engineeringSnapshot).toBe(newest);expect(old.commands).not.toContain('assemble');expect(old.terminated).toBe(true);
+  });
   it('materializes cloneable sources only at the Worker boundary without rereading native storage',async()=>{
     const files=sourceFiles(),reference=state();
     await beginEngineeringBuild(reference,files,{createWorker:portFactory(new LoopbackPort())});
@@ -72,7 +97,7 @@ describe('session-owned production engineering build', () => {
     const prepared=new Map(await Promise.all([...files].map(async([path,file])=>[path,createByteFile(new Uint8Array(await file.arrayBuffer()),file.name)]as const)));
     const app=state(),port=new LoopbackPort();
     await beginEngineeringBuild(app,prepared,{createWorker:portFactory(port)});
-    expect(port.commands).toContain('extract');expect(app.engineeringStatus).toBe('ready');
+    expect(port.commands).toContain('extract');expect(port.commands).toContain('packed-files');expect(port.commands).not.toContain('files');expect(app.engineeringStatus).toBe('ready');
     expect(app.engineeringSnapshot).toEqual(reference.engineeringSnapshot);
     expect(app.engineeringGeometryCatalog).toEqual(reference.engineeringGeometryCatalog);
     expect(batchReadCachedFiles).not.toHaveBeenCalled();

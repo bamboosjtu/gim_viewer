@@ -126,7 +126,7 @@ Three 通过公开 renderer 事件采集提交区间、帧/Pass 计数，不修�
 
 ## Windows 系统诊断适配
 
-WPR/PMC 系统录制入口当前关闭：显式诊断配置在窗口/缓冲校验后返回 `unavailable` / `authenticated-system-helper-required`，不启动提权、不读取计划控制的路径，也不生成 WPRP/ETL。旧的可写计划 helper 不能作为认证通道；恢复需要受保护 helper、可信根和经认证的控制器通道，见[问题与限制](../open-issues.md) O-20。`systemCapabilities` 仍探测本机 WPR、WPAExporter 与 PMC，但 `elevatedCaptureAvailable=false`。
+WPR/PMC 系统录制入口当前关闭：显式诊断配置在窗口/缓冲校验后返回 `unavailable` / `authenticated-system-helper-required`，不启动提权、不读取计划控制的路径，也不生成 WPRP/ETL。旧的可写计划 helper 不能作为认证通道；恢复需要受保护 helper、可信根和经认证的控制器通道，见[问题与限制](../open-issues.md) L-14。`systemCapabilities` 仍探测本机 WPR、WPAExporter 与 PMC，但 `elevatedCaptureAvailable=false`。
 
 离线 WPA 摘要仍可用于受控流程已采集的 ETL：要求本地 WPAExporter、显式 `.wpaProfile` 与内容 SHA，以及列/单位契约；PID 必须同时匹配进程创建时间。没有匹配的 owned process 实例、PID/创建时间不符或列变化时摘要标 unavailable（如 `owned-process-instance-not-matched`），不输出伪零值。ETL 原件与状态日志保留在 tmp。固定 WebView2、WPRP 与本机 WPA Profile 的实际兼容和开销仍需人工验收。
 

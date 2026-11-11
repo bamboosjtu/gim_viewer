@@ -132,6 +132,7 @@ export async function onGimExtracted(
         perfSession,
         showMessage,
         '变电 IFC 空间索引',
+        {projectId:isTauri()?session.projectId:undefined,sourceSha256:session.sourceSha256,beforeCacheWrite:options.sourcePublication},
       );
     }
     return spatialSemanticPromise;

@@ -5,6 +5,7 @@ import type { CbmNode, FileDevEntry, IfcEntry } from '../gim/types.js';
 import { buildSubstationSpatialIndexFromFiles, type SubstationSpatialIndex,
   type SubstationSpatialIndexObserver } from '../gim/ifcSpatialParser.js';
 import type { SpatialWorkerRequest, SpatialWorkerResponse } from './substationSpatialWorker.js';
+import type {SubstationSpatialSnapshotMetadata,EncodedSpatialCache} from './substationSpatialSemanticCache.js';
 
 const active=new Set<()=>void>();
 export function cancelSubstationSpatialWorkers():void {
@@ -16,6 +17,7 @@ export function cancelSubstationSpatialWorkers():void {
 export async function buildSubstationSpatialIndexInWorker(
   files:Map<string,File>,entries:IfcEntry[],tree:CbmNode|null,relations:FileDevEntry[],
   observer:SubstationSpatialIndexObserver,isCurrent:()=>boolean,
+  cacheOptions?:{metadata:SubstationSpatialSnapshotMetadata;onEncoded:(cache:EncodedSpatialCache)=>void},
 ):Promise<SubstationSpatialIndex> {
   if(typeof Worker==='undefined') return buildSubstationSpatialIndexFromFiles(files,entries,tree,relations,observer);
   const worker=createMeasuredWorker('spatial', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})}));
@@ -35,6 +37,7 @@ export async function buildSubstationSpatialIndexInWorker(
       const callback=observer[response.event] as ((profile:unknown)=>void)|undefined;
       callback?.(response.profile);return;
     }
+    if(response.type==='complete'&&response.cache)cacheOptions?.onEncoded(response.cache);
     requests.settle(sequence,response.type==='complete'?response.index:undefined,response.type==='error'?new Error(response.message):undefined);
   };
   worker.onerror=event=>{requests.rejectAll(new Error(event.message||'Spatial worker failed'));cancel();};
@@ -65,6 +68,6 @@ export async function buildSubstationSpatialIndexInWorker(
         decodeMs:0,found:file!=null,...(error?{error}:{})};
       await send({type:'model',entry,bytes,text,read,...(blob?{blob}:{})},bytes?[bytes]:[]);
     }
-    return (await send({type:'finish'}))!;
+    return (await send({type:'finish',...(cacheOptions?{cacheMetadata:cacheOptions.metadata}:{})}))!;
   } finally {cancel();worker.onmessage=null;worker.onerror=null;worker.onmessageerror=null;}
 }

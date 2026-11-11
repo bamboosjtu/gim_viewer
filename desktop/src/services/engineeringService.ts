@@ -1,5 +1,6 @@
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import {isByteFile,copyByteFileBytes} from '@desktop/byteFile.js';
+import {ENGINEERING_SOURCE_BATCH_BYTES,ENGINEERING_SOURCE_BATCH_FILES} from './engineeringWorkerProtocol.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
 import { engineeringCacheEntry, engineeringSourceCacheMatchesFiles, type EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import type { EngineeringBuildResult } from './engineeringWorkerProtocol.js';
@@ -240,8 +241,10 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
     for (let offset = 0; offset < entries.length;) {
       if (!current(state, job)) return;
       const chunk: Array<[string, File]> = []; let bytes = 0;
-      while (offset < entries.length && chunk.length < 256 && (bytes < 8 * 1024 * 1024 || chunk.length === 0)) {
-        const entry = entries[offset++]; chunk.push(entry); bytes += entry[1].size || 0;
+      while (offset < entries.length && chunk.length < ENGINEERING_SOURCE_BATCH_FILES) {
+        const entry=entries[offset],size=entry[1].size||0;
+        if(chunk.length&&bytes+size>ENGINEERING_SOURCE_BATCH_BYTES)break;
+        offset++;chunk.push(entry);bytes+=size;
       }
       const lazy = chunk.filter(([, file]) => !(file instanceof Blob)&&!isByteFile(file));
       let batch: Map<string, Uint8Array | null> | undefined;
@@ -249,27 +252,42 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
         const { batchReadCachedFiles } = await import('@desktop/database.js');
         batch = await batchReadCachedFiles(session.projectId!, lazy.map(([path]) => path));
       }
-      const input: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }> = [];
+      const parts:BlobPart[]=[],ranges:Array<{path:string;offset:number;length:number}>=[];let packedBytes=0;
       for (const [path, file] of chunk) {
-        // Keep fast byte-backed reads on the main semantic path. At the Worker
-        // boundary use the existing cloneable Blob storage: transferring all
-        // metadata as individually retained ArrayBuffers can push large source
-        // graphs over V8's per-isolate allocation limits even below the OS budget.
-        if(isByteFile(file))input.push({path,blob:new Blob([copyByteFileBytes(file)!])});
-        else if (file instanceof Blob) input.push({ path, blob: file });
+        let part:Blob|Uint8Array<ArrayBuffer>;
+        if(isByteFile(file))part=copyByteFileBytes(file)!;
+        else if (file instanceof Blob) part=file;
         else {
           const lazyFile = file as unknown as { arrayBuffer?: () => Promise<ArrayBuffer>; text(): Promise<string> };
           const value = batch?.get(path);
-          if (value) input.push({ path, bytes: value });
-          else input.push({ path, bytes: typeof lazyFile.arrayBuffer === 'function' ? new Uint8Array(await lazyFile.arrayBuffer()) : new TextEncoder().encode(await lazyFile.text()) });
+          part=value?(value.buffer instanceof ArrayBuffer?value as Uint8Array<ArrayBuffer>:value.slice()as Uint8Array<ArrayBuffer>):
+            typeof lazyFile.arrayBuffer==='function'?new Uint8Array(await lazyFile.arrayBuffer()):new TextEncoder().encode(await lazyFile.text());
         }
+        const length=part instanceof Blob?part.size:part.byteLength;
+        ranges.push({path,offset:packedBytes,length});parts.push(part);packedBytes+=length;
       }
       if (!current(state, job)) return;
-      await client.addFiles(input);
+      const blob=new Blob(parts);
+      // Oversized individual documents retain the existing one-file path;
+      // batching never increases their supported size or claims a bounded pack.
+      if(blob.size>ENGINEERING_SOURCE_BATCH_BYTES){
+        if(ranges.length!==1)throw Error('Engineering source sizes changed during batching');
+        await client.addFiles([{path:ranges[0].path,blob}]);
+      }else await client.addPackedFiles({blob,entries:ranges});
     }
     const graph = await client.extract();
     if (!current(state, job)) return;
     if (client.geometryOccurrences) { state.engineeringGeometryCatalog = client.geometryOccurrences; resolveGeometry(client.geometryOccurrences); update(); }
+    // The geometry catalog is already usable. When a source-semantic starter
+    // exists, join it before encoding a full DEV-only model that would be
+    // immediately superseded by the same graph plus IFC records. This does
+    // not wait for Viewer/LOD readiness and keeps the original failure path.
+    const ifcPreparation=graph.ifcPaths.length&&!state.substationSpatialIndex&&options.ensureIfcSemantics
+      ?Promise.resolve().then(options.ensureIfcSemantics):undefined;
+    if(ifcPreparation){
+      try{await ifcPreparation;}catch{/* Publish available DEV evidence below; the terminal handler retains the failure. */}
+      if(!current(state,job))return;
+    }
     const spatial = state.substationSpatialIndex;
     job.lastSpatial = spatial;
     const result = await client.assemble(spatial?.objects ?? [], spatial?.models ?? [], job.identity, spatial?.nodes ?? []);
@@ -280,7 +298,7 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
       // Also catch a spatial publication which arrived during the initial
       // assembly, before a notification could register against job.ready.
       void job.ready.then(() => enrich(state, job)).catch(error => fail(state, job, error));
-      if (options.ensureIfcSemantics) void Promise.resolve().then(options.ensureIfcSemantics).then(ready => {
+      if (options.ensureIfcSemantics) void (ifcPreparation??Promise.resolve().then(options.ensureIfcSemantics)).then(ready => {
         if (!current(state, job)) return;
         if (ready === false) notifyEngineeringIfcFailure(state, 'IFC 来源语义未能完成');
         // A warm cache hit or a deferred IFC semantic build can publish the

@@ -5,6 +5,7 @@ import type { CbmNode } from '../../gim/types.js';
 import { buildSubstationSpatialIndexInWorker, cancelSubstationSpatialWorkers } from '../substationSpatialWorkerClient.js';
 import type { SpatialWorkerRequest, SpatialWorkerResponse } from '../substationSpatialWorker.js';
 import { isTauri } from '@desktop/runtime.js';
+import{encodeSubstationSpatialCache}from'../substationSpatialSemanticCache.js';
 vi.mock('@desktop/runtime.js',()=>({isTauri:vi.fn(()=>false)}));
 vi.mock('@desktop/database.js',()=>({readCachedEntry:vi.fn(),writeCacheFile:vi.fn()}));
 
@@ -31,7 +32,8 @@ class SpatialWorker {
         send({type:'diagnostic',event:'onModelRead',profile:request.read});
         const bytes=request.blob ? await request.blob.arrayBuffer() : request.bytes;
         this.builder.addIfcModel(request.entry,request.text??(bytes?new TextDecoder().decode(bytes):null),request.read.bytes);
-      } else {send({type:'complete',index:structuredClone(this.builder.finalize())});return;}
+      } else {const index=this.builder.finalize(),cache=request.cacheMetadata?encodeSubstationSpatialCache(index,request.cacheMetadata):undefined;
+        send(structuredClone({type:'complete',index,...(cache?{cache}:{})},{transfer:cache?.bytes?[cache.bytes.buffer]:[]}));return;}
       send({type:'ready'});
     });
   }
@@ -65,6 +67,15 @@ it('project cleanup rejects a pending STEP task and terminates its worker',async
   const rejected=expect(pending).rejects.toThrow('obsolete project');
   cancelSubstationSpatialWorkers();await rejected;
   expect(SpatialWorker.instances[0].terminate).toHaveBeenCalledTimes(2);
+});
+it('returns source-bound encoded cache bytes with the same index in the final Worker response',async()=>{
+ const encoded=vi.fn(),index=await buildSubstationSpatialIndexInWorker(new Map([['CBM/model.ifc',new File([text],'model.ifc')]]),[entry],tree,[],{},()=>true,
+  {metadata:{sourceSha256:'source-a'},onEncoded:encoded});
+ expect(encoded).toHaveBeenCalledOnce();const cache=encoded.mock.calls[0][0];
+ expect(JSON.parse(new TextDecoder().decode(cache.bytes)).sourceSha256).toBe('source-a');
+ expect(JSON.parse(new TextDecoder().decode(cache.bytes)).objects).toEqual(index.objects);
+ const requests=SpatialWorker.instances[0].requests;
+ expect(requests[requests.length-1]).toMatchObject({type:'finish',cacheMetadata:{sourceSha256:'source-a'}});
 });
 
 it('unsupported hosts retain the existing parser contract without changing line behavior',async()=>{

@@ -1,6 +1,7 @@
 import measuredWorkerAsset from './engineeringWorker.ts?worker&url';
 import { createMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import { WorkerRequests } from './workerRequests.js';
+import type {EngineeringSourceBatch} from './engineeringWorkerProtocol.js';
 import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../gim/ifcSpatialParser.js';
 import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import type { EngineeringBuildResult, EngineeringCacheDomain, EngineeringCacheResult, EngineeringExtractSummary, EngineeringWorkerCommand, EngineeringWorkerRequest, EngineeringWorkerResponse } from './engineeringWorkerProtocol.js';
@@ -58,6 +59,7 @@ export class EngineeringWorkerClient {
   async addFiles(files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }>): Promise<void> {
     await this.request({ type: 'files', files }, [...new Set(files.flatMap(f => f.bytes ? [f.bytes.buffer as ArrayBuffer] : []))]);
   }
+  async addPackedFiles(batch:EngineeringSourceBatch):Promise<void> {await this.request({type:'packed-files',batch});}
   async extract(): Promise<EngineeringExtractSummary> {
     const response = await this.request({ type: 'extract' });
     if (response.type !== 'graph') throw Error('Engineering graph response expected');
