@@ -8,7 +8,7 @@ import {coldWarmEquivalent} from './profiles.mjs';
 import {runNative} from './native-run.mjs';
 import {sourceFingerprint} from './acceptance-build.mjs';
 import {artifactDirectory,loadBatchInputs,isPublicArtifact} from './batch-input.mjs';
-import {writeBatchReports,writeBatchCheckpoint} from './batch-report.mjs';
+import {writeBatchReports,writeBatchCheckpoint,writeBatchProgress} from './batch-report.mjs';
 import {workspacePath} from './samples.mjs';
 import {isStartupInfrastructureFailure,STARTUP_ATTEMPTS,startupRetryDelayMs} from './startup-retry.mjs';
 import {warmPreparation} from './warm-preparation.mjs';
@@ -137,10 +137,18 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   const labels=new Map(state.rows.map(row=>[row.inputId,row.sampleLabel]));
   const publicProfile={...body,exportId,profileDigest,cases:body.cases.map(row=>({...row,sampleLabel:labels.get(row.inputId)}))};
   writeFileSync(join(out,'profile.json'),JSON.stringify(isPublicArtifact(root,out)?project(publicProfile):{...body,digest:profileDigest},null,2));
-  const save=()=>{state.updatedAt=new Date().toISOString();writeBatchCheckpoint(privateOut,state);};
+  const save=()=>{state.updatedAt=new Date().toISOString();writeBatchCheckpoint(privateOut,state);
+    if(resolve(out)!==resolve(privateOut))try{writeBatchProgress(out,state);}
+    catch(error){try{writeFileSync(join(privateOut,'progress-export-error.private.json'),JSON.stringify({
+      at:state.updatedAt,message:String(error?.message??error)},null,2));}catch{/* Private authority was already saved. */}}
+  };
   save();
   const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   const stopTimer=setInterval(()=>{if(existsSync(join(out,'stop.request')))abort();},500);
+  const logControllerError=(error,origin)=>{try{writeFileSync(join(privateOut,'controller-error.private.json'),JSON.stringify({
+    origin,at:new Date().toISOString(),message:String(error?.message??error),stack:String(error?.stack??error)},null,2));}catch{/* Preserve the original failure. */}};
+  process.on('uncaughtExceptionMonitor',logControllerError);
+  let controllerFailure;
   try{
     for(let repetition=1;repetition<=repetitions;repetition++)for(const sample of inputs.samples){
       let cold=null;
@@ -153,7 +161,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
           row.status='SKIPPED';row.error=coldRow?.startupFailures?.length&&warm.reason==='warm-preparation-incomplete'
             ?`cold-startup-infrastructure-unavailable:${coldRow.startupFailures.at(-1)}`:warm.reason;save();continue;
         }
-        row.status='RUNNING';save();onProgress({inputId:row.inputId,sample:row.sampleLabel,sourceSha256:row.sourceSha256,repetition,cacheState,completed:state.rows.filter(row=>terminal.has(row.status)).length,total:state.rows.length});
+        row.status='RUNNING';save();onProgress({inputId:row.inputId,sample:row.sampleLabel,sourceSha256:row.sourceSha256,repetition,cacheState,completed:state.rows.filter(row=>terminal.has(row.status)).length,total:state.rows.length,privateResults:join(privateOut,'results.json')});
         try{
           let result;
           row.startupFailures=[];
@@ -193,9 +201,16 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
         writeFileSync(join(privateOut,'runs.private.json'),JSON.stringify(privateRuns,null,2));save();
       }
     }
-  }finally{clearInterval(stopTimer);signal?.removeEventListener('abort',abort);}
+  }catch(error){controllerFailure=error;abort();logControllerError(error,'batch-controller');
+    let recoveredRows=0;
+    for(const row of state.rows)if(['RUNNING','PENDING'].includes(row.status)){
+      row.error=row.status==='RUNNING'?'controller-interrupted':'batch-not-executed';row.status='CANCELLED';
+      row.settledMs=null;row.measurementComplete=false;recoveredRows++;
+    }
+    state.recovery={kind:'controller-interruption-v1',cause:'controller-exception',recoveredRows};
+  }finally{clearInterval(stopTimer);signal?.removeEventListener('abort',abort);process.removeListener('uncaughtExceptionMonitor',logControllerError);}
   state.status=controller.signal.aborted?'CANCELLED':'COMPLETE';
-  state.outcome=state.rows.some(row=>['FAIL','ERROR','INPUT_ERROR'].includes(row.status))?'FAIL':
+  state.outcome=controllerFailure?'INCONCLUSIVE':state.rows.some(row=>['FAIL','ERROR','INPUT_ERROR'].includes(row.status))?'FAIL':
     state.rows.every(row=>['PASS','DUPLICATE'].includes(row.status))?'PASS':
     state.rows.every(row=>['PASS','PARTIAL','DUPLICATE'].includes(row.status))?'PARTIAL':'INCONCLUSIVE';
   const groups=new Map();for(const run of state.runs){const key=digest([run.conditions.sampleId,run.conditions.scenario,run.conditions.cacheState,run.conditions.routeDigest]);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(run);}
@@ -204,7 +219,9 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
     &&[...groups.values()].every(runs=>['PASS','PARTIAL'].includes(compareRuns(runs,runs).outcome));
   save();writeBatchReports(privateOut,state,{root});
   if(resolve(out)!==resolve(privateOut))writeBatchReports(out,state,{root,project});
+  writeBatchProgress(out,state,{ready:true});
   try{unlinkSync(controllerFile);}catch{/* Completed report is authoritative. */}
+  if(controllerFailure)throw controllerFailure;
   return {out,privateResults:join(privateOut,'results.json'),result:state};
 }
 
@@ -244,7 +261,8 @@ function controllerRecord(root,out,{includeCompleted=false}={}){
       try{const state=JSON.parse(readFileSync(workspacePath(root,join(dir,'results.json')),'utf8'));
         terminal=['COMPLETE','CANCELLED'].includes(state.status)&&!state.rows?.some(row=>['RUNNING','PENDING'].includes(row.status));
       }catch{/* An unreadable state cannot prove that its controller completed. */}
-      if(terminal){if(includeCompleted)completed.push({file:workspacePath(root,file,false),value:null,mappedNonce:value.nonce,exportId:value.exportId});continue;}
+      if(terminal){if(includeCompleted)completed.push({file:workspacePath(root,file,false),
+        value:existsSync(file)?JSON.parse(readFileSync(workspacePath(root,file),'utf8')):null,mappedNonce:value.nonce,exportId:value.exportId});continue;}
       if(!existsSync(file)){
         if(includeCompleted)completed.push({file:workspacePath(root,file,false),value:null,mappedNonce:value.nonce,exportId:value.exportId});
         continue;
@@ -292,25 +310,49 @@ function findUnreportedRunId(root,row){
   }
   return matches[0]??null;
 }
+function assertControllerStopped(owner,{force,getProcessStartAt}){
+  const identityValid=owner?.value&&Number.isSafeInteger(owner.value.pid)&&owner.value.pid>0&&
+    /^[a-f0-9]{48}$/.test(owner.value.nonce??'')&&
+    owner.value.nonce===owner.mappedNonce&&Number.isFinite(Date.parse(owner.value.processStartedAt));
+  if(!identityValid&&!force)throw Error('batch-controller-ownership-unverified: use --force after confirming the controller stopped');
+  if(owner?.value&&controllerAlive(owner.value.pid)){
+    const actual=getProcessStartAt(owner.value.pid),expected=Date.parse(owner.value.processStartedAt);
+    if(actual!==null&&Number.isFinite(expected)&&Math.abs(actual-expected)<=2000)
+      throw Error('batch-controller-still-running');
+    if(actual===null&&!force)throw Error('batch-controller-identity-unverified: use --force after confirming the controller stopped');
+  }
+}
+function writeRecoveredView(root,out,state,privateFile){
+  const project=createPublicProjector({anonymize:state.anonymize!==false});
+  const profile=privateFile?join(dirname(privateFile),'profile.json'):null;
+  if(profile&&existsSync(profile)&&isPublicArtifact(root,out)){
+    const body=JSON.parse(readFileSync(profile,'utf8')),labels=new Map(state.rows.map(row=>[row.inputId,row.sampleLabel]));
+    writeFileSync(join(out,'profile.json'),JSON.stringify(project({...body,exportId:state.exportId,profileDigest:state.profileDigest,
+      cases:(body.cases??[]).map(row=>({...row,sampleLabel:labels.get(row.inputId)}))}),null,2));
+  }
+  writeBatchReports(out,state,{root,project});
+  writeBatchProgress(out,state,{ready:true});
+}
 export function recoverInterruptedBatch(root,outputDirectory,{force=false,getProcessStartAt=processStartedAt}={}){
   const out=workspacePath(root,outputDirectory),file=join(out,'results.json');
   const record=controllerRecord(root,out,{includeCompleted:true});
   const privateFile=record?join(dirname(record.file),'results.json'):null;
   const state=JSON.parse(readFileSync(privateFile&&existsSync(privateFile)?privateFile:file,'utf8'));
   if(state.artifactRole==='public-derived')throw Error('public-derived-is-not-authoritative');
-  if(state.status!=='RUNNING'&&!state.rows?.some(row=>['RUNNING','PENDING'].includes(row.status)))
-    return {out,result:state,recovered:0,privateResults:privateFile??file};
-  const owner=controllerRecord(root,out);
-  const identityValid=owner&&Number.isSafeInteger(owner.value.pid)&&owner.value.pid>0&&
-    /^[a-f0-9]{48}$/.test(owner.value.nonce??'')&&
-    owner.value.nonce===owner.mappedNonce&&Number.isFinite(Date.parse(owner.value.processStartedAt));
-  if(!identityValid&&!force)throw Error('batch-controller-ownership-unverified: use --force after confirming the controller stopped');
-  if(owner&&controllerAlive(owner.value.pid)){
-    const actual=getProcessStartAt(owner.value.pid),expected=Date.parse(owner.value.processStartedAt);
-    if(actual!==null&&Number.isFinite(expected)&&Math.abs(actual-expected)<=2000)
-      throw Error('batch-controller-still-running');
-    if(actual===null&&!force)throw Error('batch-controller-identity-unverified: use --force after confirming the controller stopped');
+  if(state.status!=='RUNNING'&&!state.rows?.some(row=>['RUNNING','PENDING'].includes(row.status))){
+    let pendingExport=false;
+    const statusFile=join(out,'status.json');
+    if(existsSync(statusFile))try{pendingExport=JSON.parse(readFileSync(statusFile,'utf8')).reportReady!==true;}catch{pendingExport=true;}
+    const reportsRegenerated=pendingExport||['results.json','results.csv','errors.csv','summary.csv','stages.csv','slow-tasks.csv','slow-phases.csv','slow-templates.csv','workers.csv','report.html'].some(name=>!existsSync(join(out,name)));
+    if(reportsRegenerated){
+      if(record?.value)assertControllerStopped(record,{force,getProcessStartAt});
+      writeRecoveredView(root,out,state,privateFile);
+      if(record?.value)try{unlinkSync(record.file);}catch{/* The authoritative completion remains unchanged. */}
+    }
+    return {out,result:state,recovered:0,privateResults:privateFile??file,reportsRegenerated};
   }
+  const owner=controllerRecord(root,out);
+  assertControllerStopped(owner,{force,getProcessStartAt});
   let recovered=0;
   for(const row of state.rows??[]){
     if(!['RUNNING','PENDING'].includes(row.status))continue;
@@ -344,14 +386,7 @@ export function recoverInterruptedBatch(root,outputDirectory,{force=false,getPro
     writeFileSync(mapping,JSON.stringify({...JSON.parse(readFileSync(mapping,'utf8')),exportId:state.exportId}));}
   // Authority must be durable before replacing its view and releasing ownership.
   if(privateFile)writeBatchReports(dirname(privateFile),state,{root});
-  const project=createPublicProjector({anonymize:state.anonymize!==false});
-  const profile=privateFile?join(dirname(privateFile),'profile.json'):null;
-  if(profile&&existsSync(profile)&&isPublicArtifact(root,out)){
-    const body=JSON.parse(readFileSync(profile,'utf8')),labels=new Map(state.rows.map(row=>[row.inputId,row.sampleLabel]));
-    writeFileSync(join(out,'profile.json'),JSON.stringify(project({...body,exportId:state.exportId,profileDigest:state.profileDigest,
-      cases:(body.cases??[]).map(row=>({...row,sampleLabel:labels.get(row.inputId)}))}),null,2));
-  }
-  writeBatchReports(out,state,{root,project});
+  writeRecoveredView(root,out,state,privateFile);
   if(owner)try{unlinkSync(owner.file);}catch{/* Recovered report remains conclusive. */}
-  return {out,result:state,recovered,privateResults:privateFile??file};
+  return {out,result:state,recovered,privateResults:privateFile??file,reportsRegenerated:true};
 }

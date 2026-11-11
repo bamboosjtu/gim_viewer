@@ -42,6 +42,14 @@ const belongsTo = (object: THREE.Object3D, root?: THREE.Object3D) => {
   for (let parent: THREE.Object3D | null = object;parent;parent = parent.parent) if (parent === root) return true;
   return false;
 };
+interface ViewEvaluation {
+  revision: number; selected: boolean; fine: boolean;
+  entry: Occurrence['entry']; status: Occurrence['entry']['templateStatus'];
+  box: THREE.Box3 | null; bounds: number[]; group: Occurrence['group'];
+  displayed: DeviceLod; desired: DeviceLod | null; browseDesired: DeviceLod | null;
+  key?: string; failedKey?: string; geometryStatus: Occurrence['geometryStatus'];
+  inView: boolean; catalogResolved: Occurrence['catalogResolved'];
+}
 
 /** Session owner for catalog, templates and camera-driven occurrence representations. */
 export class DevLodRuntime {
@@ -64,6 +72,25 @@ export class DevLodRuntime {
   private readonly batchEnabled = isDevInstanceBatchesEnabled();
   private instances?: DevInstanceBatches;
   private readonly viewIndex = new BoxViewIndex();
+  private viewRevision = 0;
+  private viewSignature: number[] = [];
+  private evaluatedRows = new WeakMap<Occurrence, ViewEvaluation>();
+  private rememberView(row:Occurrence, selected:boolean, fine:boolean):void {
+    this.evaluatedRows.set(row, { revision:this.viewRevision, selected, fine, entry:row.entry, status:row.entry.templateStatus,
+      box:row.box, bounds:row.box?[...row.box.min.toArray(),...row.box.max.toArray()]:[],group:row.group,
+      displayed:row.displayed,desired:row.desired,browseDesired:row.browseDesired,key:row.key,failedKey:row.failedKey,
+      geometryStatus:row.geometryStatus,inView:row.inView,catalogResolved:row.catalogResolved });
+  }
+  private viewUnchanged(row:Occurrence,selected:boolean,fine:boolean):boolean {
+    const old=this.evaluatedRows.get(row),box=row.box;
+    return !!old && old.revision===this.viewRevision && old.selected===selected && old.fine===fine
+      && old.entry===row.entry && old.status===row.entry.templateStatus && old.box===box && old.group===row.group
+      && old.displayed===row.displayed && old.desired===row.desired && old.browseDesired===row.browseDesired
+      && old.key===row.key && old.failedKey===row.failedKey && old.geometryStatus===row.geometryStatus
+      && old.inView===row.inView && old.catalogResolved===row.catalogResolved
+      && (!box || old.bounds[0]===box.min.x && old.bounds[1]===box.min.y && old.bounds[2]===box.min.z
+        && old.bounds[3]===box.max.x && old.bounds[4]===box.max.y && old.bounds[5]===box.max.z);
+  }
   private readonly perf = perfCurrentSession();
   private taskSequence = 0;
   private taskIdentity(sourcePath: string, kind: string, lod?: DeviceLod, priority?: number): PerfTaskIdentity {
@@ -508,6 +535,8 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     const canvas = (this.ctx.world.renderer as any)?.three?.domElement as HTMLCanvasElement | undefined;
     const rect = canvas?.getBoundingClientRect();
     const view = createDeviceViewContext(camera, rect?.width || 1000, rect?.height || 800);
+    const signature=[...view.clip.elements,...view.eye.toArray(),view.width,view.height,this.anchor?1:0,this.diagnostics.autoLodSuppressed?1:0];
+    if(signature.some((value,i)=>value!==this.viewSignature[i])) { this.viewRevision++; this.viewSignature=signature; }
     const candidates = this.viewIndex.query(view.frustum);
     this.diagnostics.viewIndex = { ...this.viewIndex.diagnostics };
     const wanted = new Set<string>();
@@ -516,30 +545,39 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     for (const row of this.rows.values()) {
       const selected = row.entry.rootOccurrence === this.selected;
       const terminal = row.entry.templateStatus === 'empty' || row.entry.templateStatus === 'unsupported';
-      const metrics = this.anchor && row.box && candidates.has(row.entry.rootOccurrence)
-        ? deviceViewMetrics(row.box, camera, rect?.width || 1000, rect?.height || 800, view) : null;
-      // Unknown bounds are not evidence of visibility. They still receive an
-      // automatic LOD0 in the background; only catalogued boxes decide whether
-      // the current view is blocked on this occurrence.
-      row.inView = selected || (row.box && metrics ? metrics.visible : false);
-      if (terminal) { row.desired = 0; this.updateReadiness(row); continue; }
-      // Unknown ranges compile actual supported geometry automatically. No
-      // invented box, false culling or tree-selection prerequisite is used.
-      // Selection only raises scheduling priority.  L2 is an explicit user
-      // action (refine()); camera proximity and an ordinary click must stay in
-      // the inexpensive browser representation.  This is the key boundary
-      // between browsing and the fine-model workflow.
-      const browseLod: DeviceLod = !row.group ? 0 : this.diagnostics.autoLodSuppressed
-        ? row.inView ? Math.min(1, row.displayed) as DeviceLod : 0
-        : metrics ? chooseDeviceLod(row.displayed, metrics.visible, metrics.pixels) : 0;
-      row.browseDesired = browseLod;
-      const lod = this.fineRequested.has(row.entry.rootOccurrence) ? 2 : browseLod;
-      row.desired = lod;
-      this.updateReadiness(row);
+      const fine = this.fineRequested.has(row.entry.rootOccurrence);
+      // Most startup updates concern a few newly catalogued/placed rows. Keep
+      // their policy and readiness current without re-projecting every static
+      // occurrence. Admission below still runs for every wanted request.
+      if (!this.viewUnchanged(row,selected,fine)) {
+        const metrics = this.anchor && row.box && candidates.has(row.entry.rootOccurrence)
+          ? deviceViewMetrics(row.box, camera, rect?.width || 1000, rect?.height || 800, view) : null;
+        // Unknown bounds are not evidence of visibility. They still receive an
+        // automatic LOD0 in the background; only catalogued boxes decide whether
+        // the current view is blocked on this occurrence.
+        row.inView = selected || (row.box && metrics ? metrics.visible : false);
+        if (terminal) { row.desired = 0; this.updateReadiness(row); this.rememberView(row,selected,fine); continue; }
+        // Unknown ranges compile actual supported geometry automatically. No
+        // invented box, false culling or tree-selection prerequisite is used.
+        // Selection only raises scheduling priority.  L2 is an explicit user
+        // action (refine()); camera proximity and an ordinary click must stay in
+        // the inexpensive browser representation.  This is the key boundary
+        // between browsing and the fine-model workflow.
+        const browseLod: DeviceLod = !row.group ? 0 : this.diagnostics.autoLodSuppressed
+          ? row.inView ? Math.min(1, row.displayed) as DeviceLod : 0
+          : metrics ? chooseDeviceLod(row.displayed, metrics.visible, metrics.pixels) : 0;
+        row.browseDesired = browseLod;
+        const lod = fine ? 2 : browseLod;
+        row.desired = lod;
+        this.updateReadiness(row);
+        this.rememberView(row,selected,fine);
+      }
+      if (terminal) continue;
       // A seed with no catalog result has no reliable visibility. Starting
       // thousands of unknown L0 requests here fills the template queue before
       // the first actual in-view bounds arrive. Direct selection remains live.
       if (row.catalogResolved === false && !selected) continue;
+      const lod = row.desired!;
       const key = this.key(row.entry.devPath, lod); wanted.add(key);
       // Visible L0 outranks offscreen L0; offscreen still remains wanted and
       // is reached later (aged priority prevents permanent starvation).

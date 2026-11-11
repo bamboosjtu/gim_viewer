@@ -7,9 +7,17 @@ $ErrorActionPreference = 'Stop'
 
 # Run all relative paths from the directory containing this script.
 Push-Location -LiteralPath $PSScriptRoot
+$surveyLogDir = Join-Path (Split-Path -Parent $PSScriptRoot) ("tmp/gim-bench/surveys/" + [Guid]::NewGuid().ToString('N'))
+$savedTempEnvironment = @{}
 try {
+    New-Item -ItemType Directory -Force -Path $surveyLogDir | Out-Null
+    foreach ($name in @('TEMP', 'TMP', 'TMPDIR')) {
+        $savedTempEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+        [Environment]::SetEnvironmentVariable($name, $surveyLogDir, 'Process')
+    }
     Write-Host "=== GIM Viewer benchmark survey ===" -ForegroundColor Cyan
     Write-Host "Working directory: $((Get-Location).Path)"
+    Write-Host "Private survey logs: $surveyLogDir"
 
     # Resolve the commit used in output directory names.
     if ([string]::IsNullOrWhiteSpace($Commit)) {
@@ -48,6 +56,7 @@ try {
         $ErrorActionPreference = $buildErrorPreference
     }
     $buildOutput | ForEach-Object { Write-Host $_ }
+    $buildOutput | ForEach-Object { [string]$_ } | Set-Content -LiteralPath (Join-Path $surveyLogDir 'build.private.log') -Encoding UTF8
 
     $scriptErrors = @($buildOutput | Where-Object {
         $_ -is [System.Management.Automation.ErrorRecord] -and
@@ -92,18 +101,53 @@ try {
 
         Write-Host "`n>>> npm run bench -- $($BenchArgs -join ' ')" -ForegroundColor Cyan
         $completion = $null
-        & npm run bench -- @BenchArgs | ForEach-Object {
-            Write-Host $_
-            if ([string]$_ -like '{*') {
-                try { $message = [string]$_ | ConvertFrom-Json -ErrorAction Stop }
-                catch { return }
-                if ($message.status -and $message.outcome -and $message.csv) { $completion = $message }
+        $batchLog = Join-Path $surveyLogDir ("batch-" + [Guid]::NewGuid().ToString('N') + '.private.log')
+        $batchErrorPreference = $ErrorActionPreference
+        $exitCode = -1
+        try {
+            $ErrorActionPreference = 'Continue'
+            & npm run bench -- @BenchArgs 2>&1 | ForEach-Object {
+                Write-Host $_
+                [string]$_ | Add-Content -LiteralPath $batchLog -Encoding UTF8 -ErrorAction Continue
+                if ([string]$_ -like '{*') {
+                    try { $message = [string]$_ | ConvertFrom-Json -ErrorAction Stop }
+                    catch { return }
+                    if ($message.status -and $message.outcome -and $message.csv) { $completion = $message }
+                }
             }
+            $exitCode = $LASTEXITCODE
         }
-        $exitCode = $LASTEXITCODE
+        finally {
+            $ErrorActionPreference = $batchErrorPreference
+        }
         $expectedExit = switch ($completion.outcome) { 'PASS' { 0 } 'PARTIAL' { 0 } 'FAIL' { 1 } 'INCONCLUSIVE' { 2 } default { -1 } }
         if ($completion.status -ne 'COMPLETE' -or $expectedExit -lt 0 -or $exitCode -ne $expectedExit) {
-            throw "Benchmark batch did not complete normally (exit code $exitCode). No completed result was accepted."
+            $outputIndex = [Array]::IndexOf($BenchArgs, '--output')
+            if ($outputIndex -ge 0 -and $outputIndex + 1 -lt $BenchArgs.Length) {
+                $requestedOutput = $BenchArgs[$outputIndex + 1]
+                if (-not [IO.Path]::IsPathRooted($requestedOutput)) { $requestedOutput = Join-Path (Get-Location).Path $requestedOutput }
+                $outputPath = [IO.Path]::GetFullPath($requestedOutput)
+                $needsRecovery = -not (Test-Path -LiteralPath (Join-Path $outputPath 'results.csv')) -or -not (Test-Path -LiteralPath (Join-Path $outputPath 'report.html'))
+                $statusPath = Join-Path $outputPath 'status.json'
+                if (Test-Path -LiteralPath $statusPath) {
+                    try { if ((Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json -ErrorAction Stop).reportReady -ne $true) { $needsRecovery = $true } }
+                    catch { $needsRecovery = $true }
+                }
+                if ((Test-Path -LiteralPath (Join-Path $outputPath 'profile.json')) -and $needsRecovery) {
+                    Write-Warning 'The controller exited before exporting reports. Recovering its durable checkpoint.'
+                    $recoveryPreference = $ErrorActionPreference
+                    try {
+                        $ErrorActionPreference = 'Continue'
+                        & node (Join-Path $PSScriptRoot 'scripts/with-workspace-temp.mjs') (Join-Path $PSScriptRoot 'scripts/benchmarks/cli.mjs') recover-batch --output $outputPath 2>&1 | ForEach-Object {
+                            Write-Host $_
+                            [string]$_ | Add-Content -LiteralPath $batchLog -Encoding UTF8 -ErrorAction Continue
+                        }
+                        if ($LASTEXITCODE -ne 0) { Write-Warning 'Automatic recovery failed; no controller was forcibly stopped. Use recover-batch after verifying ownership.' }
+                    }
+                    finally { $ErrorActionPreference = $recoveryPreference }
+                }
+            }
+            throw "Benchmark batch did not complete normally (exit code $exitCode). No completed result was accepted. Private log: $batchLog"
         }
         $summaryArgs.Add($SummaryGroup)
         if ($completion.privateResults) { $summaryArgs.Add($completion.privateResults) } else { $summaryArgs.Add((Join-Path (Split-Path -Parent $completion.csv) 'results.json')) }
@@ -149,5 +193,6 @@ try {
     exit 0
 }
 finally {
+    foreach ($name in $savedTempEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $savedTempEnvironment[$name], 'Process') }
     Pop-Location
 }

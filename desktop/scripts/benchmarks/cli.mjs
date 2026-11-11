@@ -71,7 +71,7 @@ try{
     if(!option('output'))throw Error('--output required');
     const recovered=recoverInterruptedBatch(root,resolve(option('output')),{force:args.includes('--force')});
     console.log(JSON.stringify({outcome:recovered.result.outcome,status:recovered.result.status,recovered:recovered.recovered,
-      report:join(recovered.out,'report.html'),privateResults:recovered.privateResults}));
+      report:join(recovered.out,'report.html'),privateResults:recovered.privateResults,reportsRegenerated:recovered.reportsRegenerated??false}));
   }else if(command==='matrix'){
     if(!option('build')||!option('profile'))throw Error('--build and --profile required');
     const profile=verifyProfile(read(option('profile')));

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdirSync,mkdtempSync,writeFileSync,readFileSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,writeFileSync,readFileSync,copyFileSync,existsSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {summarizeSurvey,formatSurveySummary} from './survey-summary.mjs';
@@ -98,6 +98,47 @@ $env:PATH = ${quote(root)} + [IO.Path]::PathSeparator + $env:PATH
   assert.deepEqual(rows[0].filter(arg=>arg!=='--'),['run','bench','build']);assert.equal(rows.length,scenario.batches+1);
   for(const row of rows.slice(1))assert.equal(row[row.indexOf('--build')+1],manifest);
   if(scenario.batches===3)assert.equal(rows[3][rows[3].indexOf('--directory')+1],'..\\demo\\变电站通用设计模型\\');
+});
+
+for(const partialExport of [false,true])test(`survey recovers interrupted L0 (${partialExport?'partial export':'profile only'}) and keeps the failure visible`,{skip:process.platform!=='win32'},()=>{
+  const parent=resolve('..','tmp','survey-tests');mkdirSync(parent,{recursive:true});
+  const root=mkdtempSync(join(parent,'interrupted-')),desktop=join(root,'desktop'),scripts=join(desktop,'scripts');
+  mkdirSync(join(scripts,'benchmarks'),{recursive:true});
+  copyFileSync(resolve('run-bench-survey.ps1'),join(desktop,'run-bench-survey.ps1'));
+  copyFileSync(resolve('scripts/with-workspace-temp.mjs'),join(scripts,'with-workspace-temp.mjs'));
+  copyFileSync(resolve('scripts/test-workspace.mjs'),join(scripts,'test-workspace.mjs'));
+  const manifest=join(root,'acceptance-build.json'),record=join(root,'recovery.json');writeFileSync(manifest,'{}');
+  writeFileSync(join(scripts,'benchmarks/cli.mjs'),`import{writeFileSync}from'node:fs';import{join}from'node:path';
+const args=process.argv.slice(2),out=args[args.indexOf('--output')+1];
+writeFileSync(${JSON.stringify(record)},JSON.stringify({args,temp:process.env.TEMP,out}));
+writeFileSync(join(out,'results.csv'),'status\\nCANCELLED\\n');writeFileSync(join(out,'report.html'),'CANCELLED');
+console.log(JSON.stringify({outcome:'INCONCLUSIVE',status:'CANCELLED',recovered:1}));
+`);
+  const wrapper=join(root,'wrapper.ps1');writeFileSync(wrapper,`\uFEFF$global:batchCount=0
+function npm {
+ $global:LASTEXITCODE=0
+ if($args[-1] -eq 'build'){Write-Output ${quote(`Build manifest: ${manifest}`)};return}
+ $global:batchCount++
+ $out=[IO.Path]::GetFullPath((Join-Path (Get-Location).Path $args[[Array]::IndexOf($args,'--output')+1]))
+ if($global:batchCount -lt 3){[pscustomobject]@{status='COMPLETE';outcome='PASS';csv=(Join-Path $out 'results.csv')}|ConvertTo-Json -Compress;return}
+ New-Item -ItemType Directory -Force -Path $out|Out-Null
+ '{}'|Set-Content -LiteralPath (Join-Path $out 'profile.json')
+ ${partialExport?`'partial'|Set-Content -LiteralPath (Join-Path $out 'results.csv')
+ 'RUNNING'|Set-Content -LiteralPath (Join-Path $out 'report.html')
+ '{"reportReady":false}'|Set-Content -LiteralPath (Join-Path $out 'status.json')`:''}
+ $global:LASTEXITCODE=9
+}
+& ${quote(join(desktop,'run-bench-survey.ps1'))} -Commit 'abcdef0'
+`);
+  const child=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',wrapper],{encoding:'utf8',windowsHide:true});
+  assert.notEqual(child.status,0);assert.match(child.stderr,/did not complete normally/);
+  assert.ok(existsSync(record),child.stdout+'\n'+child.stderr);
+  const recovery=JSON.parse(readFileSync(record,'utf8'));
+  assert.equal(recovery.args[0],'recover-batch');assert.ok(!recovery.args.includes('--force'));
+  assert.equal(recovery.out,join(root,'output','l0-survey-abcdef0'));
+  assert.ok(recovery.temp.startsWith(join(root,'tmp')));
+  assert.match(readFileSync(join(recovery.out,'results.csv'),'utf8'),/CANCELLED/);
+  assert.match(child.stdout,/Recovering its durable checkpoint/);
 });
 
 test('survey ranges separate project type, voltage and cold/warm, excluding failures and missing times',()=>{

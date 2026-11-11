@@ -19,6 +19,24 @@ const put=(out,name,value)=>{
 };
 /** Small recoverable checkpoint; derived tables are generated at termination. */
 export function writeBatchCheckpoint(out,state){put(out,'results.json',JSON.stringify(state));}
+/** Cheap public progress, without repeatedly serializing diagnostic tables. */
+export function writeBatchProgress(out,state,{ready=false}={}){
+  const counts={};for(const row of state.rows??[])counts[row.status]=(counts[row.status]??0)+1;
+  const total=state.rows?.length??0,pending=counts.PENDING??0,running=counts.RUNNING??0;
+  const progress={version:state.version,artifactRole:'public-derived',artifactKind:'batch-progress',baselineEligible:false,
+    exportId:state.exportId,status:state.status,outcome:state.outcome,updatedAt:state.updatedAt,total,
+    completed:total-pending-running,pending,running,counts,reportReady:ready};
+  put(out,'status.json',JSON.stringify(progress,null,2));
+  if(ready)return;
+  put(out,'report.html',`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GIM Benchmark 批次进度</title>
+<style>body{max-width:850px;margin:40px auto;padding:0 20px;font:16px/1.7 system-ui,sans-serif;color:#193348}table{border-collapse:collapse}td,th{padding:8px 20px;border-bottom:1px solid #cbd7e0}a{color:#086184}</style>
+<h1>GIM Benchmark · ${escapeHtml(state.status)}</h1><p>已结束 ${progress.completed} / ${total} 项，运行中 ${running} 项，待执行 ${pending} 项。</p>
+<p>最后检查点：${escapeHtml(state.updatedAt)}。刷新本页查看最近保存的进度；这不是控制器仍存活的证明。</p>
+<table><tr><th>状态</th><th>数量</th></tr>${Object.entries(counts).map(([status,count])=>`<tr><td>${escapeHtml(status)}</td><td>${count}</td></tr>`).join('')}</table>
+<p>测量结果已保存在工作区 tmp/ 私有检查点。完整 CSV、诊断表和最终 HTML 在批次结束后一次性生成；运行期间不重复导出大表。</p>
+<p>如果控制器已退出而本页仍未完成，在 desktop/ 中执行 <code>npm run bench -- recover-batch --output &lt;本报告目录&gt;</code>。恢复会保留已完成结果，并将未完成项明确标记，不能将其计为通过。</p>
+<p><a href="status.json">进度 JSON</a> · <a href="profile.json">冻结计划</a></p></html>`);
+}
 const metrics=['firstResponseMs','modelTreeReadyMs','firstGeometryMs','allGeometryReadyMs','automaticLoadMs','cachePublishMs','settledMs','writeDrainMs','processPrivatePeakBytes'];
 export function summarize(rows){
   const groups=new Map();
@@ -85,7 +103,7 @@ export function writeBatchReports(out,state,{root=resolve(dirname(fileURLToPath(
 <p><a href="results.csv">全部结果 CSV</a> · <a href="errors.csv">错误 CSV</a> · <a href="summary.csv">汇总 CSV</a> · <a href="stages.csv">阶段 CSV</a> · <a href="slow-tasks.csv">慢任务 CSV</a> · <a href="slow-phases.csv">慢阶段 CSV</a> · <a href="slow-templates.csv">慢模板 CSV</a> · <a href="workers.csv">Worker CSV</a> · <a href="results.json">JSON</a></p>
 <label>筛选 <input id="search" placeholder="文件名 / SHA256 / 错误码"></label><label>状态 <select id="status"><option value="">全部</option>${statusOptions}</select></label><span id="visible"></span>
 <div class="scroll"><table id="results"><thead><tr>${['输入',state.anonymize?'样本别名':'文件名','层级','组','轮次','缓存','结果','尝试','首次响应 s','模型树就绪 s','首次几何 s','基础几何齐备 s','自动表示 s','缓存发布 s','完全结算 s','DEV 写排水 s','Private 峰值 GiB','DEV 写入 MiB','DEV 写服务 ms/MiB','内存证据','实际类型','输入变体','缓存发布','来源覆盖','DEV 内容覆盖','明细丢失','任务生命周期','发布状态','pack 状态','错误 / 不完整原因'].map(v=>`<th scope="col">${v}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div></section>
-<footer class="note">${state.baselineEligible?'冷暖证据已齐备；PARTIAL 仅在显式接受来源缺陷后才能成为部分基线。':'此报告尚不是认可基线；一轮摸底、未执行项、失败或不完整测量不能作为基线通过。'}<br>${state.anonymize?'此报告已隐藏源路径与文件名。':'此报告包含源文件名及工作区相对路径，分享前请确认资料权属。'}原始日志、授权清单、profile 和堆快照仅保存在工作区私有运行目录。运行期间刷新本页可查看已落盘结果。</footer>
+<footer class="note">${state.baselineEligible?'冷暖证据已齐备；PARTIAL 仅在显式接受来源缺陷后才能成为部分基线。':'此报告尚不是认可基线；一轮摸底、未执行项、失败或不完整测量不能作为基线通过。'}<br>${state.anonymize?'此报告已隐藏源路径与文件名。':'此报告包含源文件名及工作区相对路径，分享前请确认资料权属。'}原始日志、授权清单、profile 和堆快照仅保存在工作区私有运行目录。运行期间的进度页仅显示检查点计数；完整表在结束或恢复后生成。</footer>
 <script>const tabs=[...document.querySelectorAll('[role="tab"]')];function selectTab(tab){for(const item of tabs){const active=item===tab;item.setAttribute('aria-selected',String(active));item.tabIndex=active?0:-1;document.getElementById(item.getAttribute('aria-controls')).hidden=!active}}for(const tab of tabs){tab.onclick=()=>selectTab(tab);tab.onkeydown=event=>{if(event.key!=='ArrowLeft'&&event.key!=='ArrowRight')return;event.preventDefault();const next=tabs[(tabs.indexOf(tab)+(event.key==='ArrowRight'?1:tabs.length-1))%tabs.length];selectTab(next);next.focus()}}const table=document.querySelector('#results'),body=table.tBodies[0],search=document.querySelector('#search'),status=document.querySelector('#status');function filter(){let n=0;for(const row of body.rows){const show=(!status.value||row.dataset.status===status.value)&&row.textContent.toLowerCase().includes(search.value.toLowerCase());row.hidden=!show;if(show)n++}document.querySelector('#visible').textContent=n+' 行'}search.oninput=status.onchange=filter;table.querySelectorAll('th').forEach((th,index)=>{let ascending=true;th.onclick=()=>{const rows=[...body.rows];rows.sort((a,b)=>{const x=a.cells[index].textContent,y=b.cells[index].textContent;return (ascending?1:-1)*(x!==''&&y!==''&&Number.isFinite(+x)&&Number.isFinite(+y)?+x-+y:x.localeCompare(y))});rows.forEach(row=>body.append(row));ascending=!ascending}});filter();</script></html>`;
   put(out,'report.html',html);
 }

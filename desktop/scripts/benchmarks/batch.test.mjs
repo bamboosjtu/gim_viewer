@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdirSync,mkdtempSync,readFileSync,readdirSync,writeFileSync,existsSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,readFileSync,readdirSync,writeFileSync,existsSync,unlinkSync,rmdirSync} from 'node:fs';
+import {pathToFileURL} from 'node:url';
 import {resolve,join,dirname,relative} from 'node:path';
 import {artifactDirectory,loadBatchInputs} from './batch-input.mjs';
 import {executeBatch,recoverInterruptedBatch} from './batch.mjs';
@@ -393,22 +394,92 @@ test('running batches checkpoint private authority and generate derived tables o
     const batches=join(fixtureRoot,'tmp','gim-bench','batches'),privateDir=join(batches,readdirSync(batches)[0]);
     const checkpoint=JSON.parse(readFileSync(join(privateDir,'results.json'),'utf8'));
     assert.equal(checkpoint.status,'RUNNING');assert.equal(checkpoint.rows.find(row=>row.inputId===sample.inputId).status,'RUNNING');
-    for(const dir of [out,privateDir])for(const file of ['results.csv','stages.csv','report.html'])assert.equal(existsSync(join(dir,file)),false);
+    for(const dir of [out,privateDir])for(const file of ['results.csv','stages.csv'])assert.equal(existsSync(join(dir,file)),false);
+    assert.equal(existsSync(join(privateDir,'report.html')),false);
+    const progress=JSON.parse(readFileSync(join(out,'status.json'),'utf8'));
+    assert.equal(progress.artifactRole,'public-derived');assert.equal(progress.reportReady,false);
+    assert.equal(progress.completed,checked);assert.equal(progress.running,1);
+    assert.match(readFileSync(join(out,'report.html'),'utf8'),/recover-batch/);
+    assert.doesNotMatch(readFileSync(join(out,'status.json'),'utf8'),/sourceSha256|private-name|sourcePath|protocol-test/);
     assert.equal(existsSync(join(out,'results.json')),false);checked++;
     return run(sample,profileDigest);
   }});
   assert.equal(checked,3);assert.equal(JSON.parse(readFileSync(result.privateResults,'utf8')).status,'COMPLETE');
   for(const dir of [out,dirname(result.privateResults)])for(const file of ['results.csv','stages.csv','report.html'])assert.equal(existsSync(join(dir,file)),true);
+  assert.equal(JSON.parse(readFileSync(join(out,'status.json'),'utf8')).reportReady,true);
 });
 
-test('an interrupted batch recovers from its frozen profile before any public result exists',async()=>{
+test('a controller callback exception exports saved results before propagating the failure',async()=>{
   const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
   await assert.rejects(executeBatch({...options,root:fixtureRoot,out,inputs:inputs(),onProgress(){throw Error('controller-stopped');}}),/controller-stopped/);
-  assert.equal(existsSync(join(out,'results.json')),false);
+  const result=JSON.parse(readFileSync(join(out,'results.json'),'utf8'));
+  assert.equal(result.status,'CANCELLED');assert.equal(result.outcome,'INCONCLUSIVE');
+  assert.deepEqual(result.rows.map(row=>row.status),['CANCELLED','CANCELLED','CANCELLED']);
   const batches=join(fixtureRoot,'tmp','gim-bench','batches'),privateDir=join(batches,readdirSync(batches)[0]);
-  const controllerFile=join(privateDir,'controller.private.json'),owner=JSON.parse(readFileSync(controllerFile,'utf8'));
-  owner.processStartedAt='2000-01-01T00:00:00Z';writeFileSync(controllerFile,JSON.stringify(owner));
-  const recovered=recoverInterruptedBatch(fixtureRoot,out,{getProcessStartAt:()=>Date.now()});
-  assert.equal(recovered.recovered,3);assert.equal(recovered.privateResults,join(privateDir,'results.json'));
+  assert.equal(existsSync(join(privateDir,'controller.private.json')),false);
+  assert.equal(JSON.parse(readFileSync(join(privateDir,'controller-error.private.json'),'utf8')).message,'controller-stopped');
+  assert.equal(recoverInterruptedBatch(fixtureRoot,out).recovered,0);
+});
+
+test('a failed public progress write cannot stop private checkpointing or sample execution',async()=>{
+  const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
+  const obstruction=join(out,'status.json.next');mkdirSync(obstruction);
+  let calls=0;
+  const result=await executeBatch({...options,root:fixtureRoot,out,inputs:inputs(),execute:async({sample,profileDigest})=>{
+    if(calls++===0){
+      const batches=join(fixtureRoot,'tmp/gim-bench/batches'),dir=join(batches,readdirSync(batches)[0]);
+      assert.equal(JSON.parse(readFileSync(join(dir,'results.json'),'utf8')).status,'RUNNING');
+      assert.ok(existsSync(join(dir,'progress-export-error.private.json')));
+      rmdirSync(obstruction);
+    }
+    return run(sample,profileDigest);
+  }});
+  assert.equal(calls,3);assert.equal(result.result.status,'COMPLETE');
+  assert.equal(JSON.parse(readFileSync(join(out,'status.json'),'utf8')).reportReady,true);
+});
+
+test('a fatal asynchronous controller error preserves its checkpoint and can recover before public results exist',()=>{
+  const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
+  const privateOut=artifactDirectory(fixtureRoot,join(fixtureRoot,'tmp/gim-bench/batches/fatal'));
+  const script=join(fixtureRoot,'fatal-controller.mjs');
+  writeFileSync(script,`import{executeBatch}from${JSON.stringify(pathToFileURL(resolve('scripts/benchmarks/batch.mjs')).href)};
+await executeBatch({...${JSON.stringify({...options,root:fixtureRoot,out,privateOut,inputs:inputs()})},
+ execute:async()=>new Promise(()=>{}),onProgress:()=>setTimeout(()=>{throw Error('anonymous-controller-crash')},1)});
+`);
+  const child=spawnSync(process.execPath,[script],{encoding:'utf8',windowsHide:true,timeout:10000});
+  assert.notEqual(child.status,0);assert.match(child.stderr,/anonymous-controller-crash/);
+  assert.equal(existsSync(join(out,'results.json')),false);
+  assert.equal(JSON.parse(readFileSync(join(out,'status.json'),'utf8')).reportReady,false);
+  assert.equal(JSON.parse(readFileSync(join(privateOut,'controller-error.private.json'),'utf8')).origin,'uncaughtException');
+  const recovered=recoverInterruptedBatch(fixtureRoot,out);
+  assert.equal(recovered.recovered,3);assert.equal(recovered.privateResults,join(privateOut,'results.json'));
   assert.equal(JSON.parse(readFileSync(join(out,'results.json'),'utf8')).artifactRole,'public-derived');
+  assert.equal(JSON.parse(readFileSync(join(out,'status.json'),'utf8')).reportReady,true);
+  for(const name of ['results.csv','stages.csv','workers.csv','slow-templates.csv','report.html'])assert.ok(existsSync(join(out,name)));
+});
+
+test('recovery regenerates missing completed exports without changing private authority',async()=>{
+  const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
+  const result=await executeBatch({...options,root:fixtureRoot,out,inputs:inputs(),execute:async({sample,profileDigest})=>run(sample,profileDigest)});
+  const authority=readFileSync(result.privateResults,'utf8'),profile=readFileSync(join(out,'profile.json'),'utf8');
+  unlinkSync(join(out,'results.csv'));unlinkSync(join(out,'report.html'));
+  const recovered=recoverInterruptedBatch(fixtureRoot,out);
+  assert.equal(recovered.recovered,0);assert.equal(recovered.reportsRegenerated,true);
+  assert.equal(readFileSync(result.privateResults,'utf8'),authority);
+  assert.equal(readFileSync(join(out,'profile.json'),'utf8'),profile);
+  assert.ok(existsSync(join(out,'results.csv'))&&existsSync(join(out,'report.html')));
+  writeFileSync(join(out,'status.json'),JSON.stringify({reportReady:false}));
+  assert.equal(recoverInterruptedBatch(fixtureRoot,out).reportsRegenerated,true);
+  assert.equal(JSON.parse(readFileSync(join(out,'status.json'),'utf8')).reportReady,true);
+  assert.equal(recoverInterruptedBatch(fixtureRoot,out).reportsRegenerated,false);
+});
+
+test('completed export repair refuses to race its still-running finalizer',async()=>{
+  const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
+  const result=await executeBatch({...options,root:fixtureRoot,out,inputs:inputs(),execute:async({sample,profileDigest})=>run(sample,profileDigest)});
+  const privateOut=dirname(result.privateResults),mapping=JSON.parse(readFileSync(join(privateOut,'output.private.json'),'utf8'));
+  const processStartedAt=new Date().toISOString();
+  writeFileSync(join(privateOut,'controller.private.json'),JSON.stringify({pid:process.pid,nonce:mapping.nonce,processStartedAt}));
+  unlinkSync(join(out,'report.html'));
+  assert.throws(()=>recoverInterruptedBatch(fixtureRoot,out,{getProcessStartAt:()=>Date.parse(processStartedAt)}),/still-running/);
 });

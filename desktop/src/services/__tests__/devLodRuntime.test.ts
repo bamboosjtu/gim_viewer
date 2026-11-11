@@ -128,6 +128,26 @@ it('indexed view candidates preserve visible and selected detail under pressure 
   expect(runtime.diagnostics.viewIndex?.candidates).toBe(1);
 });
 
+it('re-evaluates only changed view rows while camera, selection, bounds and explicit detail still invalidate policy', () => {
+  const {internal}=fixture(),camera=new THREE.PerspectiveCamera(60,1,.1,100);
+  camera.updateMatrixWorld(true);
+  internal.ctx={world:{camera:{three:camera}}};internal.anchor=new THREE.Matrix4();
+  internal.notifyCoordinateAnchor=vi.fn();internal.schedule=vi.fn();internal.requestReady=vi.fn();
+  internal.render=vi.fn(async()=>{});internal.worker=createDevWorkerMock();
+  const rows=[0,1].map(i=>({...occurrence(i),box:new THREE.Box3(new THREE.Vector3(-1,-1,-5),new THREE.Vector3(1,1,-4)),
+    entry:{...occurrence(i).entry,rootOccurrence:String(i)}}));
+  rows.forEach((row,i)=>{internal.rows.set(String(i),row);internal.viewIndex.set(String(i),row.box);});
+  const update=vi.spyOn(internal.readiness,'updateReadiness');
+  internal.update();expect(update).toHaveBeenCalledTimes(2);expect(rows.map(r=>r.desired)).toEqual([1,1]);
+  update.mockClear();internal.update();expect(update).not.toHaveBeenCalled();
+  rows[0].box.translate(new THREE.Vector3(100,0,0));internal.viewIndex.set('0',rows[0].box);
+  internal.update();expect(update).toHaveBeenCalledOnce();expect(rows[0].inView).toBe(false);expect(rows[0].desired).toBe(0);
+  update.mockClear();internal.selected='0';internal.update();expect(update).toHaveBeenCalledOnce();expect(rows[0].inView).toBe(true);
+  update.mockClear();internal.fineRequested.add('1');internal.update();expect(update).toHaveBeenCalledOnce();expect(rows[1].desired).toBe(2);
+  update.mockClear();camera.position.x=100;camera.updateMatrixWorld(true);internal.update();expect(update).toHaveBeenCalledTimes(2);
+  update.mockClear();camera.aspect=2;camera.updateProjectionMatrix();internal.update();expect(update).toHaveBeenCalledTimes(2);
+});
+
 it('stops source prefetch at high pressure, including a reply already in flight', async () => {
   const {internal} = fixture(); internal.session.projectId = 7;
   const files = new Map([['MOD/a.mod', new File(['abc'], 'a.mod')]]);
