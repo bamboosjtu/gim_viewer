@@ -45,39 +45,46 @@ export class CdpConnection {
 
 /** Heap values are isolate-wide sampled values. Targets are never apportioned OS memory. */
 export class WorkerHeapSampler {
-  #targets=new Map(); #stopListener; #timer; #closed=false; #mapped=new Set(); #samples=0; #missing=0; #external=0; #identities=new Map();
-  constructor(cdp,emit,periodMs=1000){this.cdp=cdp;this.emit=emit;this.periodMs=periodMs;}
+  #targets=new Map(); #stopListener; #closed=false; #mapped=new Set(); #samples=0; #missing=0; #external=0; #identities=new Map(); #coalesced=0;
+  constructor(cdp,emit,periodMs=1000,now=()=>performance.now()){this.cdp=cdp;this.emit=emit;this.periodMs=periodMs;this.now=now;}
   onDiagnosticTarget=null;
   async start(){
-    const main={sessionId:undefined,targetId:'owned-main-page',identity:{workerId:'host',runId:null,family:'host'},isolateId:null,pending:false,ended:false,created:performance.now()};
+    const main={sessionId:undefined,targetId:'owned-main-page',identity:{workerId:'host',runId:null,family:'host'},isolateId:null,pending:false,ended:false,created:this.now()};
     this.#targets.set('main',main);this.#sample(main,'attached').catch(()=>{});
     this.#stopListener=this.cdp.onEvent(message=>{
       if(message.method==='Target.attachedToTarget'&&message.params.targetInfo.type==='worker'){
         if(this.#targets.size>=1024){this.#missing++;this.emit({kind:'target-loss',reason:'target-limit',atMs:performance.now()});return;}
         const {sessionId,targetInfo}=message.params;
         const identity=this.#identities.get(targetInfo.url)??null;
-        const row={sessionId,targetId:targetInfo.targetId,url:targetInfo.url,identity,isolateId:null,pending:false,ended:false,created:performance.now()};this.#targets.set(sessionId,row);
+        const row={sessionId,targetId:targetInfo.targetId,url:targetInfo.url,identity,isolateId:null,pending:false,ended:false,created:this.now()};this.#targets.set(sessionId,row);
         this.#sample(row,'attached').catch(()=>{}); // #sample emits its own unavailable record.
       }else if(message.method==='Target.detachedFromTarget'){
-        const row=this.#targets.get(message.params.sessionId);if(row){row.ended=true;this.#targets.delete(row.sessionId);this.#identities.delete(row.url);this.emit({kind:'worker-target-ended',workerId:row.identity?.workerId??null,targetId:row.targetId,atMs:performance.now()});}
+        const row=this.#targets.get(message.params.sessionId);if(row){row.ended=true;clearTimeout(row.timer);this.#targets.delete(row.sessionId);this.#identities.delete(row.url);this.emit({kind:'worker-target-ended',workerId:row.identity?.workerId??null,targetId:row.targetId,atMs:this.now()});}
       }
     });
     await this.cdp.send('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:false,flatten:true});
-    this.#timer=setInterval(()=>{for(const row of this.#targets.values())this.#sample(row,'periodic').catch(()=>{});},this.periodMs);
   }
   associate(url,context){
     const identity={workerId:context.workerId,runId:context.runId,family:context.family};this.#identities.set(url,identity);
     for(const row of this.#targets.values())if(row.url===url){row.identity=identity;if(row.isolateId)this.#mapped.add(identity.workerId);}
   }
-  async #sample(row,checkpoint){
+  #sample(row,checkpoint){
     if(this.#closed||row.ended)return;
-    if(row.pending){this.#missing++;this.emit({kind:'heap-sample',workerId:row.identity?.workerId??null,availability:'unavailable',bytes:null,reason:'previous-sample-pending',atMs:performance.now(),checkpoint});return;}
-    row.pending=true;const requestedMs=performance.now();
+    if(row.pending){this.#coalesced++;return row.pending;}
+    clearTimeout(row.timer);
+    const requestedMs=this.now();
+    row.pending=this.#collect(row,checkpoint,requestedMs).finally(()=>{
+      row.pending=null;
+      if(!this.#closed&&!row.ended)row.timer=setTimeout(()=>{this.#sample(row,'periodic')?.catch(()=>{});},Math.max(0,requestedMs+this.periodMs-this.now()));
+    });
+    return row.pending;
+  }
+  async #collect(row,checkpoint,requestedMs){
     try{
       if(!row.identity){
         const identity=await this.cdp.evaluate('globalThis.__gimMeasurementIdentity ?? null',row.sessionId,2000);
         if(identity?.workerId&&identity?.runId)row.identity=identity;
-        else if(performance.now()-row.created>500)row.identity={workerId:`external-worker-${++this.#external}`,runId:null,family:'external',association:'owned-page-target-only'};
+        else if(this.now()-row.created>500)row.identity={workerId:`external-worker-${++this.#external}`,runId:null,family:'external',association:'owned-page-target-only'};
         else throw Error('worker-identity-unavailable');
       }
       if(!row.isolateId){
@@ -88,20 +95,26 @@ export class WorkerHeapSampler {
       this.onDiagnosticTarget?.(row.identity,row.sessionId);
       const heap=await this.cdp.send('Runtime.getHeapUsage',{},row.sessionId,2000);
       if(!Number.isFinite(heap.usedSize)||!Number.isFinite(heap.totalSize))throw Error('heap-fields-unavailable');
+      if(this.#closed||row.ended)return;
       this.#samples++;
       this.emit({kind:'heap-sample',workerId:row.identity.workerId,runId:row.identity.runId,family:row.identity.family,targetId:row.targetId,isolateId:row.isolateId,
         scope:'isolate',method:'CDP.Runtime.getHeapUsage',quality:'runtime-sampled',availability:'available',bytes:heap.usedSize,capacityBytes:heap.totalSize,
         backingStorageBytes:Number.isFinite(heap.backingStorageSize)?heap.backingStorageSize:null,
-        atMs:performance.now(),sampleDelayMs:performance.now()-requestedMs,checkpoint,peakMeaning:'observed-only'});
+        atMs:this.now(),sampleDelayMs:this.now()-requestedMs,checkpoint,peakMeaning:'observed-only'});
     }catch{
+      // A normal target/recording boundary cancels its outstanding request.
+      // The terminal timestamp still extends coverage to the last valid sample;
+      // genuine timeouts and excessive live/tail gaps remain incomplete.
+      if(this.#closed||row.ended){this.emit({kind:'heap-sample-cancelled',workerId:row.identity?.workerId??null,
+        reason:this.#closed?'sampling-stopped':'target-ended',atMs:this.now(),checkpoint});return;}
       this.#missing++;this.emit({kind:'heap-sample',workerId:row.identity?.workerId??null,targetId:row.targetId,scope:'isolate',method:'CDP.Runtime.getHeapUsage',quality:'runtime-sampled',availability:'unavailable',bytes:null,
-        reason:row.ended?'target-ended':row.identity?'runtime-timeout-or-unsupported':'worker-identity-unavailable',atMs:performance.now(),sampleDelayMs:performance.now()-requestedMs,checkpoint});
-    }finally{row.pending=false;}
+        reason:row.identity?'runtime-timeout-or-unsupported':'worker-identity-unavailable',atMs:this.now(),sampleDelayMs:this.now()-requestedMs,checkpoint});
+    }
   }
   async checkpoint(workerId,name){const row=[...this.#targets.values()].find(row=>row.identity?.workerId===workerId);if(row)await this.#sample(row,name);}
-  snapshot(){return {mappedWorkerIds:[...this.#mapped],externalTargets:this.#external,samples:this.#samples,missing:this.#missing,scope:'isolate',osWorkerMemoryAvailable:false};}
-  stop(){this.#closed=true;clearInterval(this.#timer);this.#stopListener?.();for(const row of this.#targets.values()){
-    row.ended=true;this.emit({kind:'heap-sampling-stopped',workerId:row.identity?.workerId??null,atMs:performance.now()});
+  snapshot(){return {mappedWorkerIds:[...this.#mapped],externalTargets:this.#external,samples:this.#samples,missing:this.#missing,coalesced:this.#coalesced,scope:'isolate',osWorkerMemoryAvailable:false};}
+  stop(){this.#closed=true;this.#stopListener?.();for(const row of this.#targets.values()){
+    row.ended=true;clearTimeout(row.timer);this.emit({kind:'heap-sampling-stopped',workerId:row.identity?.workerId??null,atMs:this.now()});
   }
     this.#targets.clear();}
 }

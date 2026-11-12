@@ -14,6 +14,12 @@ import {benchmarkRun} from './test-fixtures.mjs';
 import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
 
 const root=resolve('..');
+test('batch reports retain recovered final-evidence drift counts',async()=>{
+  const result=await executeBatch({...setup(),inputs:inputs(),execute:async({sample,profileDigest})=>{
+    const value=run(sample,profileDigest);value.report.finalEvidenceStability={attempts:2,driftCount:1,recovered:true};return value;
+  }});
+  assert.equal(result.result.rows[0].finalEvidenceAttempts,2);assert.equal(result.result.rows[0].finalEvidenceDrifts,1);
+});
 function setup(){const parent=artifactDirectory(root,join(root,'tmp','batch-protocol-tests')),out=mkdtempSync(join(parent,'run-'));
   const buildManifest=join(out,'build.json');writeFileSync(buildManifest,JSON.stringify({sourceFingerprint:'protocol-test'}));return {root,out,buildManifest};}
 function inputs(){return {entries:['a','b','c'].map((id,index)=>({inputId:id,sampleId:id,sourceSha256:id,privatePath:'private-name',status:'READY'})),

@@ -2,6 +2,13 @@ import {expect,it} from 'vitest';
 import {AppState} from '../../app/state.js';
 import {perfMarkProductMoment,perfReset} from '../../utils/perfTimings.js';
 import {benchmarkEvidence,benchmarkProgress} from '../modelEvidence.js';
+it('progress freezes mutable LOD counters across asynchronous evidence collection',()=>{
+  const state=new AppState(),hits=[1,0,0],misses=[0,2,0];
+  state.deviceLodRuntime={diagnostics:{lodHits:hits,lodMisses:misses},release(){}} as never;
+  const progress=benchmarkProgress(state);hits[1]=3;misses[1]=4;
+  expect(progress.cache.devLodHits).toEqual([1,0,0]);expect(progress.cache.devLodMisses).toEqual([0,2,0]);
+  state.deviceLodRuntime=null;
+});
 
 it('waits for line persistence and substation spatial work without changing automatic response timing',async()=>{
   perfReset();const state=new AppState();state.currentProjectType='transmission_line';

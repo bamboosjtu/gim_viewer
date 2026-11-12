@@ -1,0 +1,4 @@
+{
+  "captures": [{"kind": "allocations", "target": "main", "trigger": "operation-start", "durationMs": 5000}],
+  "gpu": false
+}

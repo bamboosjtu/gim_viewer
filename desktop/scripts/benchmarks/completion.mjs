@@ -37,3 +37,49 @@ export function finalEvidenceIssue(evidence,observation){
   return null;
 }
 export const finalEvidenceAligned=(evidence,observation)=>finalEvidenceIssue(evidence,observation)===null;
+
+const sessionKey=snapshot=>JSON.stringify([snapshot?.measurement?.identity?.runId??null,snapshot?.session??null]);
+/** The quiet window covers the same progress payload as the final guard. */
+export function createSettleWindow({cacheState,quietMs=3000,now=()=>performance.now()}={}){
+  let since=null,key=null;
+  return {observe(snapshot){
+    if(!readyForSettle(snapshot,{cacheState})){since=null;key=null;return false;}
+    const next=sessionKey(snapshot)+'\0'+progressDigest(snapshot.progress),at=now();
+    if(next!==key){key=next;since=at;}
+    return at-since>=quietMs;
+  }};
+}
+export function progressChanges(before,after,limit=64){
+  const changes=[];let omitted=0;
+  function visit(a,b,path){
+    if(JSON.stringify(canonical(a))===JSON.stringify(canonical(b)))return;
+    if(a&&b&&typeof a==='object'&&typeof b==='object'){
+      for(const key of new Set([...Object.keys(a),...Object.keys(b)]))visit(a[key],b[key],path?path+'.'+key:key);
+    }else if(changes.length<limit)changes.push({path,before:a??null,after:b??null});else omitted++;
+  }
+  visit(before,after,'');return {changes,omitted};
+}
+/** Retry only inside the captured session, with a fresh quiet window each time.
+ * Every rejected evidence pair remains in the private diagnostic record. */
+export async function collectFinalEvidence({readEvidence,readSnapshot,initialSnapshot,cacheState,
+  wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),now=()=>performance.now(),maxAttempts=3,timeoutMs=15000}){
+  const expected=sessionKey(initialSnapshot),deadline=now()+timeoutMs,drifts=[];
+  let evidence,observation=initialSnapshot,issue=null,attempts=0;
+  for(;attempts<maxAttempts;){
+    evidence=await readEvidence();observation=await readSnapshot();attempts++;
+    issue=sessionKey(observation)!==expected?'session-mismatch':finalEvidenceIssue(evidence,observation);
+    if(!issue)break;
+    drifts.push({attempt:attempts,issue,evidenceAtMs:evidence?.evidenceAtMs,snapshotAtMs:observation?.snapshotAtMs,
+      ...progressChanges(evidence?.progress,observation?.progress)});
+    if(!['progress-drift','active-tasks'].includes(issue)||attempts>=maxAttempts)break;
+    const stable=createSettleWindow({cacheState,now});let ready=false;
+    while(now()<deadline){
+      observation=await readSnapshot();
+      if(sessionKey(observation)!==expected){issue='session-mismatch';break;}
+      if(stable.observe(observation)){ready=true;break;}
+      await wait(250);
+    }
+    if(!ready)break;
+  }
+  return {evidence,observation,issue,attempts,drifts};
+}

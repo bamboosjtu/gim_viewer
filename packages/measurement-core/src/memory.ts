@@ -44,6 +44,7 @@ export class MemoryLedger {
   }
   releaseOwner(owner: string): void { for (const id of this.allocations.keys()) this.release(id, owner); }
   bytes(kind:MemoryKind):number { return this.totals.get(kind)??0; }
+  get allocationCount():number{return this.allocations.size;}
   snapshot(ownerLimit=128) {
     const owners: Record<string, Partial<Record<MemoryKind, number>>> = Object.create(null);
     const limit=Number.isFinite(ownerLimit)?Math.max(0,Math.min(4096,Math.floor(ownerLimit))):128;let count=0;

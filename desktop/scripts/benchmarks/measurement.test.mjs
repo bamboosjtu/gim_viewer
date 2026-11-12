@@ -16,6 +16,33 @@ import {spawnSync} from 'node:child_process';
 import {resolve,join,dirname} from 'node:path';
 import {benchmarkRun} from './test-fixtures.mjs';
 import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
+import {createSettleWindow,collectFinalEvidence,progressChanges} from './completion.mjs';
+test('quiet window resets when progress counters change despite settled flags',()=>{
+  let now=0;const stable=createSettleWindow({now:()=>now});
+  const snapshot=value=>({session:{generation:1},progress:{automaticSettled:true,cacheSettled:true,backgroundSettled:true,cache:{hits:value}},measurement:{activeTasks:[]}});
+  assert.equal(stable.observe(snapshot(1)),false);now=2999;assert.equal(stable.observe(snapshot(1)),false);
+  now=3000;assert.equal(stable.observe(snapshot(2)),false);now=6000;assert.equal(stable.observe(snapshot(2)),true);
+});
+test('final evidence retries within one session and retains the rejected field differences',async()=>{
+  let now=0,reads=0;
+  const progress={automaticSettled:true,cacheSettled:true,backgroundSettled:true,cache:{hits:2}};
+  const snapshot=()=>({session:{generation:1},snapshotAtMs:now+1,progress,measurement:{activeTasks:[]}});
+  const result=await collectFinalEvidence({initialSnapshot:snapshot(),now:()=>now,wait:async ms=>{now+=ms;},readSnapshot:async()=>snapshot(),
+    readEvidence:async()=>({evidenceAtMs:now,checks:[{name:'session-stable',passed:true}],progress:++reads===1?{...progress,cache:{hits:1}}:progress})});
+  assert.equal(result.issue,null);assert.equal(result.attempts,2);
+  assert.deepEqual(result.drifts[0].changes,[{path:'cache.hits',before:1,after:2}]);
+});
+test('persistent drift is bounded and a changed session cannot be retried into success',async()=>{
+  let now=0;
+  const progress={automaticSettled:true,cacheSettled:true,backgroundSettled:true,cache:{hits:2}};
+  const snapshot={session:{generation:1},snapshotAtMs:10000,progress,measurement:{activeTasks:[]}};
+  const readEvidence=async()=>({evidenceAtMs:0,checks:[{name:'session-stable',passed:true}],progress:{...progress,cache:{hits:1}}});
+  const options={initialSnapshot:snapshot,now:()=>now,wait:async ms=>{now+=ms;},readSnapshot:async()=>snapshot,readEvidence};
+  const permanent=await collectFinalEvidence(options);assert.equal(permanent.issue,'progress-drift');assert.equal(permanent.attempts,3);
+  const changed=await collectFinalEvidence({...options,readSnapshot:async()=>({...snapshot,session:{generation:2}})});
+  assert.equal(changed.issue,'session-mismatch');assert.equal(changed.attempts,1);
+  assert.equal(progressChanges({a:1,b:2},{a:2,b:3},1).omitted,1);
+});
 const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:MEASUREMENT_VERSION,detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
 // These value-level tests also exercise historical reports without native version tags.
 const runs=(prefix,value)=>Array.from({length:3},(_,i)=>benchmarkRun(`${prefix}-${i}`,{

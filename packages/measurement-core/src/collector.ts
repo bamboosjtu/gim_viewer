@@ -238,6 +238,10 @@ export class Collector implements MetricsSink {
     if(!keys.length)return 'worker-idle';
     return keys.every(key=>this.intentionalTasks.has(key))?this.intentionalTasks.get(keys[0]):undefined;
   }
+  resourceState(){
+    return {pendingTasks:this.active.size,activeWorkerIds:[...this.workers].filter(([,worker])=>
+      worker.state!=='terminated'&&worker.state!=='failed').map(([id])=>id)};
+  }
   snapshot() {
     const lifecycleIssues=[
       this.active.size?'active-tasks':null,

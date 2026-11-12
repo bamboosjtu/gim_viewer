@@ -1,7 +1,20 @@
 import {afterEach,expect,it} from 'vitest';
 import {OutputResources} from '../outputResources.js';
-import {measurementRun,measurementSnapshot,resetMeasurementRun,trackHostBuffers} from '../runtime.js';
+import {measurementRun,measurementSnapshot,resetMeasurementRun,trackHostBuffers,captureMeasurementResourceCheck,measurementContext} from '../runtime.js';
 afterEach(()=>{delete (globalThis as any).__GIM_MEASUREMENT_CONFIG__;resetMeasurementRun({});});
+it('closing-resource checks pin the old run through reset and archive eviction',()=>{
+  (globalThis as any).__GIM_MEASUREMENT_CONFIG__={mode:'benchmark'};resetMeasurementRun({});
+  const run=measurementRun(),context={...measurementContext(),workerId:'closing-worker',family:'line' as const,backend:'web-worker' as const,taskId:'closing-task',attemptId:1};
+  const check=captureMeasurementResourceCheck(),before=check();
+  run.probe.event(context,{kind:'worker',name:'created'});run.probe.event(context,{kind:'task',name:'started'});
+  const release=trackHostBuffers('closing',[new ArrayBuffer(8)],run);
+  for(let i=0;i<20;i++)resetMeasurementRun({});
+  expect(measurementSnapshot()?.workers).toEqual({});
+  expect(check()).toEqual({activeWorkers:before.activeWorkers+1,pendingTasks:before.pendingTasks+1,trackedHostBuffers:before.trackedHostBuffers+1});
+  run.probe.event(context,{kind:'task',name:'ended',status:'completed'});
+  run.probe.event(context,{kind:'worker',name:'terminated',status:'aborted',reasonCode:'worker-idle'});release();
+  expect(check()).toEqual(before);
+});
 it('shared output/cache ownership is counted once, copy is distinct and late release stays in its run',()=>{
   (globalThis as any).__GIM_MEASUREMENT_CONFIG__={mode:'benchmark'};resetMeasurementRun({generation:1});
   const run=measurementRun(),outputs=new OutputResources(),bytes=new Uint8Array(128);

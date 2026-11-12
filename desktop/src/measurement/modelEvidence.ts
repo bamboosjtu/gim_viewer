@@ -25,7 +25,7 @@ export function benchmarkProgress(state:AppState){
   const engineeringBuildPending=state.currentProjectType==='substation'&&state.engineeringBuildPending;
   return {semantic,semanticFailure,semanticStatus:state.engineeringStatus,engineeringBuildPending,
     engineeringTreeSettled,
-    engineeringProgress:state.engineeringProgress,engineeringFailureCode:state.engineeringFailureCode,
+    engineeringProgress:state.engineeringProgress?{...state.engineeringProgress}:null,engineeringFailureCode:state.engineeringFailureCode,
     automaticSettled:semantic&&!engineeringBuildPending&&!state.ifcBackgroundPending&&(line||baseSettled)&&n(dev?.pending)===0&&n(dev?.viewPendingOccurrences)===0,
     backgroundSettled:backgroundSettled&&!engineeringBuildPending&&engineeringTreeSettled,backgroundStatus,cachePersistenceStatus,
     cacheSettled:(state.currentProjectType!=='substation'||semantic)&&!engineeringBuildPending&&(!dev||dev.cacheWritesSettled===true)&&!['loading','saving'].includes(state.engineeringCacheStatus)&&ifcPublication.settled>=state.currentIfcEntries.length
@@ -36,7 +36,7 @@ export function benchmarkProgress(state:AppState){
       connectionObjects:n(state.substationConnectionPreview?.diagnostics?.objects),
       occurrences:n(dev?.occurrences),devSources:n(dev?.uniqueDevSources),shown:n(dev?.shown),failed:n(dev?.failedOccurrences),empty:n(dev?.emptyOccurrences),partial:n(dev?.partialOccurrences),unsupported:n(dev?.unsupportedOccurrences),
       pending:n(dev?.pending),sourcePlacementWarnings:n(dev?.sourcePlacementWarnings)},
-    cache:{engineering:state.engineeringCacheStatus,linePersistence,devCatalogHits:n(dev?.catalogHits),devLodHits:dev?.lodHits??[],devLodMisses:dev?.lodMisses??[],
+    cache:{engineering:state.engineeringCacheStatus,linePersistence,devCatalogHits:n(dev?.catalogHits),devLodHits:Array.isArray(dev?.lodHits)?[...dev.lodHits]:[],devLodMisses:Array.isArray(dev?.lodMisses)?[...dev.lodMisses]:[],
       writePending:n(dev?.cacheWritePendingCount),writeFailures:n(dev?.artifactWriteFailures)+n(dev?.catalogWriteFailures)+ifcPublication.failed+(linePersistence==='failed'?1:0),readFailures:n(dev?.cacheReadErrorCount)},
   };
 }

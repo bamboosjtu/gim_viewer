@@ -11,6 +11,19 @@ import {join,resolve} from 'node:path';
 import {JSDOM} from 'jsdom';
 import {cpuHotspots} from './profile-summary.mjs';
 import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
+import {writeArtifactInventory} from './artifacts.mjs';
+test('private artifact inventory distinguishes existing events, missing captures and GPU support',()=>{
+  const parent=resolve('..','tmp','artifact-inventory-contract');mkdirSync(parent,{recursive:true});const out=mkdtempSync(join(parent,'run-'));
+  writeFileSync(join(out,'events.jsonl'),'{}\n');
+  let inventory=writeArtifactInventory(out,{runId:'r',conditions:{mode:'benchmark'}});
+  assert.equal(inventory.events.status,'available');assert.equal(inventory.analysis.status,'not-requested');
+  assert.equal(inventory.captures.find(c=>c.kind==='heap').status,'not-requested');
+  writeFileSync(join(out,'gpu.private.json'),'{}');
+  inventory=writeArtifactInventory(out,{runId:'r',conditions:{mode:'diagnostic'},projectType:'transmission_line',
+    diagnostics:{gpu:{requested:true,availability:'unavailable',available:0},captures:[{status:'unavailable',reason:'capture-failed',requested:{kind:'cpu'}}]}});
+  assert.equal(inventory.trace.status,'unavailable');assert.equal(inventory.captures[0].status,'unavailable');
+  assert.equal(inventory.gpu.availableSamples,0);assert.equal(inventory.gpu.reason,'line-gpu-timer-not-instrumented');
+});
 
 function fixture(equal=false){
   const events=[],context={runId:'run',operationTraceId:'op',executorId:'host',workerId:'host',taskId:null,attemptId:1};

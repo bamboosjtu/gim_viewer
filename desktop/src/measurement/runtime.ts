@@ -112,6 +112,20 @@ export function measurementSourceId(path: string | undefined, collector = curren
 /** Private mapping is separate from shareable measurement snapshots. */
 export function measurementPrivateSources(runId: string) { const run = archives.get(runId); return run ? Object.fromEntries(privateSourceIds.get(run) ?? []) : {}; }
 export function measurementSnapshot(runId = current.collector.identity.runId) { const collector=archives.get(runId);return collector?{...collector.snapshot(),hostResources:hostBuffers.get(collector)?.ledger.snapshot()}:null; }
+/** Pin the closing runs before cleanup resets/evicts them. Count physical Worker
+ * IDs once, and also observe any resources created by late cleanup callbacks. */
+export function captureMeasurementResourceCheck(){
+  const captured=new Set(archives.values());
+  return ()=>{
+    const collectors=new Set([...captured,...archives.values(),current.collector]);
+    const workers=new Set<string>();let pendingTasks=0,trackedHostBuffers=0;
+    for(const collector of collectors){const resources=collector.resourceState();
+      pendingTasks+=resources.pendingTasks;trackedHostBuffers+=hostBuffers.get(collector)?.ledger.allocationCount??0;
+      for(const id of resources.activeWorkerIds)workers.add(id);
+    }
+    return {pendingTasks,trackedHostBuffers,activeWorkers:workers.size};
+  };
+}
 export function drainMeasurementEvents(runId = current.collector.identity.runId) { return archives.get(runId)?.drain() ?? []; }
 export function recordHostMemory(metric: MemoryMetric): void { if(current.collector.mode!=='off')current.probe.memory(measurementContext(), metric); }
 export function sampleHostBuffers(run=measurementRun()):void {run.probe.memory(measurementContext(run.collector),{name:'tracked-host-buffer-capacity',scope:'host',method:'unique-backing-buffer-ledger',quality:'measured-capacity',availability:'available',bytes:run.buffers.bytes,sampleDelayMs:0});}

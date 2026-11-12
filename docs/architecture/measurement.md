@@ -41,6 +41,12 @@
 
 ## 采集面
 
+Worker 堆采样按 target 独立调度：附着立即采样，上一请求完成后按该 target 的起始时刻安排下次采样。重叠 checkpoint 合并为同一个在途请求，`coalesced` 单列，不虚构失败样本；真正的 CDP 超时、字段缺失及超过两个采样周期的有效样本间隔仍使证据不完整。正常 target detach/采样停止取消在途请求，终止时间仍参与尾部间隔检查。
+
+生命周期关闭前固定相关 Collector 的资源检查引用，关闭后聚合旧 run 与当前 run 的任务、缓冲账本和物理 Worker ID；不因 `perfReset` 或档案驱逐而把旧资源计为零。重复 Worker ID 只计一次，不改变十轮 Private Bytes 增长 10% 的验收门槛。
+
+结算静默窗与最终证据使用同一 progress 内容摘要，包含 run/session 身份；进度计数变化会重新开始三秒窗口。最终采证仅在同一会话内最多尝试三次，重试前重新静默等待，等待预算 15 秒；持久漂移或会话变化仍失败。所有被拒绝的证据对、字段差异和恢复次数写入私有 `final-evidence.private.json`，报告保留摘要；LOD 计数在采证入口复制，避免 await 期间改变既有证据。
+
 | 采集面 | 实现 |
 |---|---|
 | Worker 生命周期 | DEV 池、IFC 转换/区域/单对象、Spatial、Engineering/组成投影、Line Parser |

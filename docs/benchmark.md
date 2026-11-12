@@ -380,6 +380,23 @@ npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build
 
 ## 详细 Trace 与 Profile
 
+基线批次的原始事件保存在私有 `tmp/gim-bench/runs/<runId>/events.jsonl`，不复制到公开 `output/`。批次的 `runs.private.json` 提供 runId 与私有目录映射。普通 `benchmark` 只有任务/阶段区间，不能离线补造 diagnostic 的完整 Operation/Span、CPU、Heap 或 GPU 记录。
+
+终态采证会在同会话内有界重新等待并采集，漂移对及字段差异保存在 `final-evidence.private.json`。批次 JSON/CSV 的 `finalEvidenceAttempts`、`finalEvidenceDrifts` 展示尝试数与漂移次数；重新采证后通过的 run 仍保留这些计数。会话变化、持续漂移及缺少完整证据继续按失败/不可判定处理，不能使用旧报告绕过新构建验收。
+
+每次原生运行写出 `artifacts.private.json`，逐项说明文件名、字节数与 available / not-requested / unavailable / unsupported 状态。`--mode diagnostic` 即使省略配置也采详细 Trace，并自动生成 `analysis.private.json`、`trace.private.json`；CPU/Heap/Allocation 仍须显式配置。GPU 请求另外写入有界的 `gpu.private.json`，保存实际 Query 样本和省略数；线路 MapLibre 没有接入 GPU Pass Query 时明确标 unsupported，不将帧间隔冒充 GPU 耗时。
+
+以下配置分别在独立诊断运行中使用，不混入普通基线或同时争用同一 HeapProfiler：
+
+| 配置 | 产物/用途 |
+|---|---|
+| `benchmarks/diagnostics/cpu-main.json` | 主线程 CPU `.cpuprofile` |
+| `benchmarks/diagnostics/allocations-main.json` | 主线程分配采样 `.heapprofile` |
+| `benchmarks/diagnostics/heap-main.json` | 延迟 500 ms 请求主线程 `.heapsnapshot`；记录实际采集窗口，短运行可能尚未触发 |
+| `benchmarks/diagnostics/trace-gpu.json` | 详细 Trace 与支持时的 GPU Timer Query，不请求系统提权采集 |
+
+在 `desktop/` 中，先为修改后的源码执行 `npm run bench -- build`，再用 `npm run bench -- run --build <新构建清单> --sample <匿名样本ID> --mode diagnostic --diagnostics ../benchmarks/diagnostics/<配置>.json`。文件截断、目标退出或未触发均读取产物清单中的实际状态；历史未采集的 Profile 无法回补。
+
 当前系统录制入口直接返回 `authenticated-system-helper-required`，不读取可写计划、不触发提权或 WPR 录制；WPR/PMC 录制待受保护认证 helper 接入后恢复，已采集 ETL 的离线 WPA 摘要仍可用。CPU Profile 自身窗口与热点分析可用；未经真实时钟域验收的跨域映射标不可用，请求/响应括号仅保留为私有候选，不能用它归因精确 Span CPU。slow-span 使用独立有界活动索引；上下文历史超过 32k 不再阻止新活动 Span 触发。
 
 诊断中的 `project.open` 保持根 operation；重叠动作使用同根子 Span 和独立能力 scope。默认主线程上下文始终属于根操作，异步动作须显式传递入口捕获的子上下文，不能用“最后活动的动作”推断归属。Worker 新 Probe 使用独立 producer epoch；超过保留范围的旧 run 重建探针时显式记录 retention loss，不复用已消费的序号。活动索引溢出与历史关联截断分别报告，采集取得 Profile 不代表触发搜索、上下文关联或整个操作覆盖完整。

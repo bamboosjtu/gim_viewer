@@ -38,6 +38,7 @@ function recordReport(row,report,state){
     memoryIncompleteItems:(report.memoryIncompleteItems??[]).join(';'),
     templateDiagnosticsStatus:report.templateDiagnosticsStatus??null,
     lateBackgroundTasks:report.lateBackgroundTasks??false,finalEvidenceIssue:report.finalEvidenceIssue??null,
+    finalEvidenceAttempts:report.finalEvidenceStability?.attempts??null,finalEvidenceDrifts:report.finalEvidenceStability?.driftCount??null,
     measurementLifecycleIssues:(report.measurementLifecycleIssues??[]).join(';'),
     cancelledBeforeStart:report.measurement?.loss?.cancelledBeforeStart??0,
     environmentSuspend:report.environmentSuspend?.code??null,

@@ -15,13 +15,14 @@ import {digest,runReadiness} from './compare.mjs';
 import {workspacePath,sha256} from './samples.mjs';
 import {startProcessSampler} from './process-sampler.mjs';
 import {cachePublicationAssessment} from './profiles.mjs';
-import {readyForSettle,cachePublicationMoment,finalEvidenceIssue,semanticStallReason} from './completion.mjs';
+import {createSettleWindow,collectFinalEvidence,cachePublicationMoment,semanticStallReason} from './completion.mjs';
 import {assessCorrectness} from './correctness.mjs';
 import {assertBenchmarkExecutable} from './benchmark-build-attestation.mjs';
 import {classifyWorkerHeapEvidence} from './worker-memory-completeness.mjs';
 import {confirmedEnvironmentSuspend} from './environment.mjs';
 import {calibrateBatch} from './batch-calibration.mjs';
 import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
+import {writeArtifactInventory} from './artifacts.mjs';
 
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const reasonCode=error=>/^[a-z][a-z0-9-]{0,80}$/.test(error?.message??'')?error.message:/^CDP /.test(error?.message??'')?'cdp-request-failed':'native-run-failed';
@@ -36,7 +37,7 @@ async function stop(child){if(!child?.pid||child.exitCode!==null||child.signalCo
 
 /** Each call owns one native process and raw report; cold/warm share cache and WebView profile. */
 export async function runNative({root,buildManifest,sample,profileDigest='unfrozen',mode='benchmark',scenario='open',cacheState='cold',dataRoot,timeoutMs=300000,doctor=false,actions=[],diagnostic,additionalSamples=[],exercise,signal,onStarted=()=>{},environmentCalibration=null}){
-  const plan=diagnosticPlan(diagnostic?.captures?diagnostic:null,diagnostic?.kind?diagnostic:null);
+  const plan=diagnosticPlan(diagnostic?.kind?null:diagnostic??(mode==='diagnostic'?{captures:[]}:null),diagnostic?.kind?diagnostic:null);
   if(plan&&mode!=='diagnostic')throw Error('diagnostic-mode-required');
   if(process.platform!=='win32')throw Error('Native benchmark requires Windows');
   if(!environmentCalibration&&!doctor){
@@ -64,6 +65,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     }finally{closeSync(descriptor);}}
   const runId=`run-${Date.now().toString(36)}-${randomBytes(5).toString('hex')}`,out=join(root,'tmp','gim-bench','runs',runId);
   mkdirSync(out,{recursive:true});
+  if(mode==='benchmark'||mode==='diagnostic')writeFileSync(join(out,'events.jsonl'),'');
   dataRoot=dataRoot?workspacePath(root,dataRoot):join(out,'cache');mkdirSync(dataRoot,{recursive:true});
   if(cacheState==='cold'&&readdirSync(dataRoot).length)throw Error('Cold cache root must be new/empty');
   // The product's IFC LOD cache lives in WebView2 IndexedDB. A warm process
@@ -112,6 +114,8 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   let applicationReadyMs=null,settledObservedAtMs=null;
   const actionResults=[];const actionTargets=[];
   let exerciseResult=null;
+  let finalEvidenceStability=null;
+  const gpuSamples=[];let gpuSamplesOmitted=0;
   const started=performance.now();let lastSnapshotAt=started,observationGapMs=0;
   try{
     while(performance.now()-started<30000){
@@ -168,7 +172,10 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
         const frame=JSON.parse(message.params.payload);
         if(typeof frame.runId!=='string'||!Number.isSafeInteger(frame.batchId)||!Array.isArray(frame.events)||frame.events.length>128)throw Error('invalid-frame');
         for(const event of frame.events)if(event.kind==='worker'&&event.name==='created'&&event.workerUrl)sampler.associate(event.workerUrl,frame.contexts[event.contextIndex]);
-        for(const record of frame.events)if(record.trace?.name==='gpu.elapsed'){gpuEvidence.samples++;if(record.trace.action in gpuEvidence&&typeof gpuEvidence[record.trace.action]==='number')gpuEvidence[record.trace.action]++;}
+        for(const record of frame.events)if(record.trace?.name==='gpu.elapsed'){
+          gpuEvidence.samples++;if(record.trace.action in gpuEvidence&&typeof gpuEvidence[record.trace.action]==='number')gpuEvidence[record.trace.action]++;
+          if(gpuSamples.length<8192)gpuSamples.push({...record,context:frame.contexts[record.contextIndex]});else gpuSamplesOmitted++;
+        }
         for(const record of frame.events)captures?.event({...record,context:frame.contexts[record.contextIndex],controllerReceivedMs:performance.now()});
         const raw=JSON.stringify(frame)+'\n',size=Buffer.byteLength(raw);
         if(!plan||traceOutputBytes+size<=plan.maxTraceBytes){appendFileSync(join(out,'events.jsonl'),raw);traceOutputBytes+=size;}else traceOutputTruncated=true;
@@ -194,7 +201,8 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       if(signal?.aborted)throw Error('run-cancelled');
       openAttempted=true;
       await cdp.evaluate(`globalThis.__gimBenchmark.open(...${JSON.stringify(args)}).catch(()=>{}); undefined`);
-      let stableSince=null,completed=false,lastCheckpointAt=0,lastProgressAt=performance.now(),progressKey='';
+      const settleWindow=createSettleWindow({cacheState});
+      let completed=false,lastCheckpointAt=0,lastProgressAt=performance.now(),progressKey='';
       while(performance.now()-started<timeoutMs){
         if(signal?.aborted)throw Error('run-cancelled');
         if(child.exitCode!==null){crashed=true;throw Error('native-process-exited');}
@@ -225,10 +233,10 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
           ?'product-stalled':'engineering-semantic-failed';break;}
         const stalled=semanticStallReason(observation,now-lastProgressAt);
         if(stalled){reason=stalled;break;}
-        if(automaticMs!==null&&readyForSettle(observation,{cacheState})){
+        if(automaticMs!==null&&settleWindow.observe(observation)){
           cachePublishMs??=cachePublicationMoment(observation);
-          stableSince??=performance.now();if(performance.now()-stableSince>=3000){completed=true;settledObservedAtMs=observation.snapshotAtMs;settledMs=observation.openElapsedMs;break;}
-        }else stableSince=null;
+          completed=true;settledObservedAtMs=observation.snapshotAtMs;settledMs=observation.openElapsedMs;break;
+        }
         if(!observation.opening&&!observation.projectType)throw Error('project-open-unavailable');
         await delay(1000);
       }
@@ -250,10 +258,10 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
           try{const result=await cdp.evaluate(`globalThis.__gimBenchmark.action(${JSON.stringify(action)})`,undefined,130000);actionResults.push({...result,status:'completed',durationMs:performance.now()-start});}
           catch{actionResults.push({kind:spec.kind,status:'failed',durationMs:performance.now()-start});reason='scenario-action-failed';break;}
         }
-        stableSince=null;
+        const actionWindow=createSettleWindow({cacheState});
         for(let i=0;i<120&&!reason;i++){
           observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
-          if(readyForSettle(observation,{cacheState})){stableSince??=performance.now();if(performance.now()-stableSince>=3000){settledObservedAtMs=observation.snapshotAtMs;settledMs=observation.openElapsedMs;break;}}else stableSince=null;
+          if(actionWindow.observe(observation)){settledObservedAtMs=observation.snapshotAtMs;settledMs=observation.openElapsedMs;break;}
           await delay(1000);if(i===119)reason='scenario-settle-timeout';
         }
       }
@@ -300,9 +308,14 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     }
     if(observation.measurement.activeTasks.length&&!reason)reason='post-settle-task-incomplete';
     if(!reason&&!doctor&&!exercise){
-      evidence=await cdp.evaluate('globalThis.__gimBenchmark.evidence()',undefined,30000);
-      observation=await cdp.evaluate('globalThis.__gimBenchmark.snapshot()');
-      finalEvidenceFailure=finalEvidenceIssue(evidence,observation);
+      const final=await collectFinalEvidence({initialSnapshot:observation,cacheState,
+        readEvidence:()=>cdp.evaluate('globalThis.__gimBenchmark.evidence()',undefined,30000),
+        readSnapshot:()=>cdp.evaluate('globalThis.__gimBenchmark.snapshot()')});
+      evidence=final.evidence;observation=final.observation;finalEvidenceFailure=final.issue;
+      finalEvidenceStability={attempts:final.attempts,driftCount:final.drifts.length,recovered:!final.issue&&final.drifts.length>0};
+      writeFileSync(join(out,'final-evidence.private.json'),JSON.stringify({runId,...finalEvidenceStability,issue:final.issue,drifts:final.drifts},null,2));
+      if(finalEvidenceStability.recovered){settledObservedAtMs=observation.snapshotAtMs;settledMs=observation.openElapsedMs;
+        await processSampler.checkpoint('final-evidence-settled');productPeak=processPeak;}
       lateBackgroundTasks ||= finalEvidenceFailure==='active-tasks';
       if(finalEvidenceFailure)reason=finalEvidenceFailure==='active-tasks'?'post-settle-task-incomplete':
         finalEvidenceFailure==='progress-drift'?'final-evidence-drift':
@@ -383,7 +396,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   const defectAssessment=variantPartialEligible?{kind:'input-variant',status:'cache-not-persistable',sourceSha256:sample.sourceSha256,variant:inputVariant}:assessment.defectAssessment;
   const report={version:'gim-benchmark-v1',runId,kind:doctor?'native-capability-probe':'native-scene',projectType:observation?.projectType??null,conditions,buildFingerprint:build.sourceFingerprint,processInstanceId:runId,
     evidenceAtMs:evidence?.evidenceAtMs??null,finalSnapshotAtMs:observation?.snapshotAtMs??null,
-    finalEvidenceIssue:finalEvidenceFailure,lateBackgroundTasks,
+    finalEvidenceIssue:finalEvidenceFailure,finalEvidenceStability,lateBackgroundTasks,
     semanticDigest:evidence?.semanticDigest??null,
     semanticDigestScope:evidence?.semanticDigestScope??null,pendingDigest:evidence?.pendingDigest??null,
     pendingCount:evidence?.pendingCount??null,pendingSourceCount:evidence?.pendingSourceCount??null,
@@ -416,7 +429,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     completionDefinition:'automatic-representations-then-cache-and-spatial-terminal-with-quiet-window-not-all-L2',evidence,eventFormat:'context-table-v1',streamFailures,
     actionResults,actionTargetDigests:actionTargets,diagnostic:captureResults?.[0]??null,
     traceOutput:{bytes:traceOutputBytes,truncated:traceOutputTruncated,limit:plan?.maxTraceBytes??null},
-    diagnostics:{configuration:plan,captures:captureResults,system:systemResult,gpu:{...gpuEvidence,method:'elapsed-query-command-range',availability:!gpuEvidence.requested?'not-requested':gpuEvidence.available?'available':gpuEvidence.unsupported?'unsupported':'unavailable'}},
+    diagnostics:{configuration:plan,captures:captureResults,system:systemResult,gpu:{...gpuEvidence,method:'elapsed-query-command-range',availability:!gpuEvidence.requested?'not-requested':gpuEvidence.available?'available':gpuEvidence.unsupported||observation?.projectType==='transmission_line'?'unsupported':'unavailable'}},
     applicationStartup:{method:'controller-spawn-to-first-owned-benchmark-api-observation',elapsedMs:applicationReadyMs,startedAtMs:applicationStartedAtMs},
     diagnosticCapabilities,systemCapabilities:doctor?systemCapabilities():null,logFailures,
     exercise:exerciseResult,
@@ -435,6 +448,9 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       &&observation?.capabilityResult?.moduleExecutions===1&&observation?.capabilityResult?.roundTripValue===18?'PASS':'INCONCLUSIVE'};
   Object.assign(report,runReadiness(report));
   writeFileSync(join(out,'report.json'),JSON.stringify(report,null,2));
-  if(plan){await analyzeRun(root,join(out,'report.json'));await exportRunTrace(root,join(out,'report.json'));}
+  if(plan?.gpu)writeFileSync(join(out,'gpu.private.json'),JSON.stringify({method:'elapsed-query-command-range',unit:'ms',
+    samples:gpuSamples,omitted:gpuSamplesOmitted,availability:report.diagnostics.gpu.availability},null,2));
+  try{if(plan){await analyzeRun(root,join(out,'report.json'));await exportRunTrace(root,join(out,'report.json'));}}
+  finally{writeArtifactInventory(out,report);}
   return {out,report,dataRoot};
 }

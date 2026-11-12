@@ -3,7 +3,7 @@ import type { AppState } from '../app/state.js';
 import { measurementSnapshot, drainMeasurementEvents, measurementPrivateSources, measurementRun,finishMeasurementOperation,measurementContext,openMeasurementContext } from './runtime.js';
 import { perfProductMomentSnapshot, perfCurrentSession } from '../utils/perfTimings.js';
 import { createMeasuredWorker, measurementWorkerUrl } from './hostWorker.js';
-import { resetMeasurementRun } from './runtime.js';
+import { resetMeasurementRun,captureMeasurementResourceCheck } from './runtime.js';
 import {installMeasurementStream} from './stream.js';
 import {benchmarkEvidence,benchmarkProgress} from './modelEvidence.js';
 import {scenarioTargets,runScenarioAction,projectResourceState} from './scenarios.js';
@@ -14,6 +14,7 @@ export function installBenchmarkHost(state:AppState):void {
   let capabilityWorker:Worker|undefined;
   let capabilityResult:unknown=null;
   let stream:ReturnType<typeof installMeasurementStream>|undefined;
+  let closedResources:ReturnType<typeof captureMeasurementResourceCheck>|undefined;
   const host={
     stream(){if(stream)return;const binding=(globalThis as {__gimMeasurementEmit?:(value:string)=>void}).__gimMeasurementEmit;if(!binding)throw Error('measurement-binding-unavailable');stream=installMeasurementStream(binding);},
     ack(runId:string,batchId:number){stream?.acknowledge(runId,batchId);},
@@ -63,9 +64,10 @@ export function installBenchmarkHost(state:AppState):void {
     privateSources(){return measurementPrivateSources(measurementRun().collector.identity.runId);},
     targets(){return scenarioTargets(state);},
     action(action:Parameters<typeof runScenarioAction>[1]){return runScenarioAction(state,action);},
-    resources(){return projectResourceState(state);},
+    resources(){return projectResourceState(state,closedResources);},
     drain:drainMeasurementEvents,
-    async close(){openSequence++;opening=false;const {cleanupBeforeOpenNewProject}=await import('../services/projectCleanupService.js');await cleanupBeforeOpenNewProject(state);},
+    async close(){openSequence++;opening=false;closedResources=captureMeasurementResourceCheck();
+      const {cleanupBeforeOpenNewProject}=await import('../services/projectCleanupService.js');await cleanupBeforeOpenNewProject(state);},
     async memory(){const {getProcessMemory}=await import('@desktop/database.js');return getProcessMemory();},
   };
   (globalThis as {__gimBenchmark?:unknown}).__gimBenchmark=host;

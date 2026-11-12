@@ -49,13 +49,13 @@ export async function runScenarioAction(state:AppState,action:{kind:'dev-fine'|'
     }finally{if(state.isCurrentSession(session))await controls.setLookAt(position.x,position.y,position.z,target.x,target.y,target.z,false);}
   }).finally(()=>operation.end());
 }
-export async function projectResourceState(state:AppState){
-  const measurement=measurementSnapshot();
+export async function projectResourceState(state:AppState,measurementResources?:()=>{pendingTasks:number;trackedHostBuffers:number;activeWorkers:number}){
+  const measurement=measurementResources?.(),snapshot=measurement?null:measurementSnapshot();
   const {peekViewerRuntime}=await import('../viewer/viewerRuntime.js');const viewer=await peekViewerRuntime();
   return {sourceFiles:state.currentFiles?.size??0,cbmNodes:state.cbmNodeIndex.size,lineNodes:state.currentGimGraph?.nodesByPath.size??0,
     fragmentModels:viewer?.ctx.fragments.list.size??0,
     ifcModels:state.loadedModels.size,ifcRuntimes:state.ifcRegionalRuntimes.size,devRuntime:Number(!!state.deviceLodRuntime),
     modGroups:state.loadedXmlModGroups.size,stlGroups:state.loadedStlGroups.size,engineeringSources:state.engineeringSnapshot?.memberships.length??0,
-    pendingTasks:measurement?.activeTasks.length??0,trackedHostBuffers:measurement?.hostResources?.uniqueAllocations??0,
-    activeWorkers:Object.values(measurement?.workers??{}).filter(worker=>worker.state!=='terminated'&&worker.state!=='failed').length};
+    pendingTasks:measurement?.pendingTasks??snapshot?.activeTasks.length??0,trackedHostBuffers:measurement?.trackedHostBuffers??snapshot?.hostResources?.uniqueAllocations??0,
+    activeWorkers:measurement?.activeWorkers??Object.values(snapshot?.workers??{}).filter(worker=>worker.state!=='terminated'&&worker.state!=='failed').length};
 }

@@ -1,0 +1,4 @@
+{
+  "captures": [{"kind": "heap", "target": "main", "trigger": "external", "delayMs": 500, "durationMs": 30000}],
+  "gpu": false
+}
