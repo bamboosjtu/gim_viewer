@@ -5,7 +5,8 @@ import {pathToFileURL} from 'node:url';
 import {resolve,join,dirname,relative} from 'node:path';
 import {artifactDirectory,loadBatchInputs} from './batch-input.mjs';
 import {executeBatch,recoverInterruptedBatch} from './batch.mjs';
-import {csv,summarize} from './batch-report.mjs';
+import {csv,summarize,writeBatchProgress} from './batch-report.mjs';
+import {createPublicProjector} from './observability.mjs';
 import {compareSuites,approveBaseline} from './compare.mjs';
 import {spawnSync} from 'node:child_process';
 import {isStartupInfrastructureFailure} from './startup-retry.mjs';
@@ -399,7 +400,11 @@ test('running batches checkpoint private authority and generate derived tables o
     const progress=JSON.parse(readFileSync(join(out,'status.json'),'utf8'));
     assert.equal(progress.artifactRole,'public-derived');assert.equal(progress.reportReady,false);
     assert.equal(progress.completed,checked);assert.equal(progress.running,1);
-    assert.match(readFileSync(join(out,'report.html'),'utf8'),/recover-batch/);
+    const html=readFileSync(join(out,'report.html'),'utf8');
+    assert.match(html,/recover-batch/);assert.match(html,/id="results"/);assert.match(html,/id="tab-coverage"/);
+    assert.match(html,/id="search"/);assert.match(html,/data-status="RUNNING"/);
+    assert.doesNotMatch(html,/private-name|protocol-test|sourceSha256|href="results.csv"/);
+    if(checked)assert.match(html,/data-status="PASS"[\s\S]*?<td>0\.012<\/td>/);
     assert.doesNotMatch(readFileSync(join(out,'status.json'),'utf8'),/sourceSha256|private-name|sourcePath|protocol-test/);
     assert.equal(existsSync(join(out,'results.json')),false);checked++;
     return run(sample,profileDigest);
@@ -407,6 +412,29 @@ test('running batches checkpoint private authority and generate derived tables o
   assert.equal(checked,3);assert.equal(JSON.parse(readFileSync(result.privateResults,'utf8')).status,'COMPLETE');
   for(const dir of [out,dirname(result.privateResults)])for(const file of ['results.csv','stages.csv','report.html'])assert.equal(existsSync(join(dir,file)),true);
   assert.equal(JSON.parse(readFileSync(join(out,'status.json'),'utf8')).reportReady,true);
+});
+
+test('live HTML uses export aliases or explicit sample labels without traversing diagnostic tables',()=>{
+  for(const anonymize of [true,false]){
+    const options=setup(),fixtureRoot=options.out,out=artifactDirectory(fixtureRoot,join(fixtureRoot,'output'));
+    const project=createPublicProjector({anonymize});
+    const row={inputId:'private-input',sampleId:'private-sample',sourceSha256:'private-sha',sourcePath:'C:/private',
+      sampleLabel:'standard-A1.gim',repetition:1,cacheState:'cold',status:'PARTIAL',error:'source-reference-unresolved;private-reason',
+      firstResponseMs:1234,firstGeometryMs:2345,allGeometryReadyMs:3456,settledMs:4567};
+    const profile=project({cases:[row]}),state={version:'gim-batch-results-v1',anonymize,status:'RUNNING',outcome:'INCONCLUSIVE',updatedAt:'2026-11-12T01:00:00.000Z',rows:[row]};
+    for(const key of ['stages','workers','slowTasks','slowPhases','templateDiagnostics','runs'])
+      Object.defineProperty(state,key,{enumerable:true,get(){throw Error('diagnostic table visited: '+key);}});
+    writeBatchProgress(out,state,{root:fixtureRoot,project});
+    const html=readFileSync(join(out,'report.html'),'utf8');
+    assert.ok(html.includes(`<td>${profile.cases[0].inputId}</td>`));
+    if(anonymize)assert.ok(html.includes(`<td>${profile.cases[0].sampleId}</td>`));
+    for(const value of ['1.234','2.345','3.456','4.567'])assert.ok(html.includes(`<td>${value}</td>`));
+    assert.match(html,/source-reference-unresolved;unverified-reason-omitted/);
+    assert.doesNotMatch(html,/private-input|private-sample|private-sha|C:\/private|private-reason/);
+    assert.equal(html.includes('standard-A1.gim'),!anonymize);
+    assert.match(html,/2026-11-12T01:00:00\.000Z/);
+    assert.equal(existsSync(join(out,'results.csv')),false);
+  }
 });
 
 test('a controller callback exception exports saved results before propagating the failure',async()=>{

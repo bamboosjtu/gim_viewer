@@ -1,5 +1,5 @@
 import {measurementRun,measurementContext} from './runtime.js';
-import type {TraceContext,TaskStatus,EventRef} from './core.js';
+import type {TaskStatus,EventRef} from './core.js';
 /** Observes existing scheduler decisions; never grants a slot or submits a result. */
 export function measureQueuedTask(id:string,resourceId:string){
   const run=measurementRun(),context={...measurementContext(run.collector),taskId:id,attemptId:1};
@@ -17,7 +17,4 @@ export function measureQueuedTask(id:string,resourceId:string){
       terminalRef=run.probe.trace(phase.context,{type:'resource',action:'released',id:waitId,resourceId,slotId:slot});phase.end(status);},
     dependency(fromSpanId:string,eventRefs:EventRef[]){run.probe.trace(phase.context,{type:'dependency',action:'required',
       fromSpanId,toSpanId:phase.id,eventRefs:[...eventRefs,...(phase.startedEventRef?[phase.startedEventRef]:[])]});}};
-}
-export function measureConsumption(context:TraceContext,name:string,work:()=>Promise<void>){
-  const run=measurementRun();return run.probe.measure(context,name,work);
 }

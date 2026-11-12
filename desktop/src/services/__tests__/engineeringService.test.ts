@@ -153,6 +153,24 @@ describe('session-owned production engineering build', () => {
     expect(port.commands.filter(command => command === 'encode-cache')).toHaveLength(2);
   });
 
+  it('keeps saved source/entity domains and the published view when a copied source tree prevents navigation projection',async()=>{
+    const app=state(),files=sourceFiles(),port=new LoopbackPort();let copied=false;
+    await beginEngineeringBuild(app,files,{createWorker:portFactory(port),onUpdate:()=>{
+      if(!copied&&app.engineeringNavigation){copied=true;app.engineeringNavigation={...app.engineeringNavigation,
+        sourceNodes:new Map(app.engineeringNavigation.sourceNodes)};}
+    }});
+    expect(copied).toBe(true);expect(app.engineeringStatus).toBe('ready');
+    expect(app.engineeringSnapshot?.entities).toHaveLength(2);expect(app.engineeringNavigation?.sourceNodes.size).toBeGreaterThan(0);
+    expect(app.engineeringCacheStatus).toBe('partial');expect(app.engineeringCacheError).toBe('navigation-projection-unavailable');
+    expect(app.engineeringBuildPending).toBe(false);expect(port.terminated).toBe(true);
+    expect([...store.keys()].some(path=>path.includes('engineering-source'))).toBe(true);
+    expect([...store.keys()].some(path=>path.includes('engineering-entity'))).toBe(true);
+    expect([...store.keys()].some(path=>path.includes('engineering-navigation'))).toBe(false);
+    const next=new LoopbackPort();await beginEngineeringBuild(app,files,{createWorker:portFactory(next)});
+    expect(next.commands).toEqual(['restore','encode-cache']);expect(app.engineeringCacheStatus).toBe('saved');
+    expect(app.engineeringCacheError).toBe('');
+  });
+
   it('rebuilds a corrupt navigation artifact without reextracting or renormalizing valid sources and entities', async () => {
     const app = state(), files = sourceFiles();
     await beginEngineeringBuild(app, files, { createWorker: portFactory(new LoopbackPort()) });

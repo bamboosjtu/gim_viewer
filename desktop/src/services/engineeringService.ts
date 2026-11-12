@@ -58,8 +58,18 @@ async function saveResult(state: AppState, job: EngineeringJob, result: Engineer
         if(current(state,job)){state.engineeringCacheStatus='partial';job.update();}return;
       }
       if(!current(state,job))return;
-      const projection=domain==='navigation'&&state.engineeringNavigation
-        ?createNavigationCacheProjection(result.navigation,state.engineeringNavigation):undefined;
+      let projection:ReturnType<typeof createNavigationCacheProjection>|undefined;
+      if(domain==='navigation'&&state.engineeringNavigation){
+        try{projection=createNavigationCacheProjection(result.navigation,state.engineeringNavigation);}
+        catch{
+          // The Worker base may not contain the final composition. Never fall
+          // back to persisting it as a complete view, or invalidate domains
+          // already saved because an optional projection cannot be constructed.
+          if(current(state,job)){state.engineeringCacheStatus='partial';
+            state.engineeringCacheError='navigation-projection-unavailable';job.update();}
+          return;
+        }
+      }
       const encoded=await job.client.encodeCache(result.buildId,domain,projection);
       if(!current(state,job))return;
       perfMark('工程缓存域编码',{domain,...encoded.metrics});

@@ -1,6 +1,5 @@
 /** Scene placement, geometry bounds checks and layer ownership. */
 import * as THREE from 'three';
-import { isUsableAffineMatrix } from '../gim/geometry/affineMatrix.js';
 import { freezeContainerLocalMatrix } from '../viewer/staticContainer.js';
 import { GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
 import type { AppState } from '../app/state.js';
@@ -180,16 +179,7 @@ export function prepareStlGroupForScene(
   return diagnoseGroupBBox(group, sourcePath);
 }
 
-export const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-
-export function parseCbmTransformMatrix(raw: string | undefined): number[] {
-  if (!raw) return IDENTITY_MATRIX.slice();
-  const values = raw.split(',').map((part) => Number(part.trim()));
-  if (raw.split(',').some(part => !part.trim()) || !isUsableAffineMatrix(values)) {
-    return IDENTITY_MATRIX.slice();
-  }
-  return values;
-}
+const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 export function multiplyTransformMatrices(a: number[], b: number[]): number[] {
   const am = new THREE.Matrix4().fromArray(a.length === 16 ? a : IDENTITY_MATRIX);

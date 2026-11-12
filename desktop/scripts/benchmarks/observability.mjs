@@ -44,6 +44,7 @@ export function createPublicProjector({anonymize=true}={}){
   function project(value,key=''){
     if(value===null)return null;
     if(key==='exportId')return typeof value==='string'&&/^export-[a-f0-9]{24}$/.test(value)?value:undefined;
+    if(key==='updatedAt')return typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)&&Number.isFinite(Date.parse(value))?value:undefined;
     if(identities.has(key)&&typeof value==='string')return alias(value);
     if(key==='sampleLabel'&&typeof value==='string')return !anonymize&&value.length<=180&&!/[\\/\x00-\x1f]/.test(value)&&/\.gim$/i.test(value)?value:undefined;
     if(key==='stage'&&typeof value==='string')return controlledStage(value)?value:alias('stage:'+value);

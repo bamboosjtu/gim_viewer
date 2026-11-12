@@ -38,13 +38,14 @@ export function createEngineeringWorkerHandler(){
       return {type:'ready'};
     }
     if(request.type==='extract'){
+      graph=null;latest=undefined;
       let lastProgress=0,lastStage='',completed=0;
       let byteReads=0,lastYield=performance.now();
       const progress=(stage:'source-index'|'source-traverse'|'source-sort')=>{
         const now=performance.now();completed++;
         if(stage!==lastStage||now-lastProgress>=1000){lastProgress=now;lastStage=stage;reportProgress(stage,completed);}
       };
-      graph=await trace.measure('engineering.extract', () => extractEngineeringSourceGraph({paths,readText:async path=>{
+      try{graph=await trace.measure('engineering.extract', () => extractEngineeringSourceGraph({paths,readText:async path=>{
         if(batches.has(path)){
           if(++byteReads%128===0||performance.now()-lastYield>=8){await new Promise<void>(resolve=>setTimeout(resolve,0));lastYield=performance.now();}
           const text=await batches.read(path,trace);progress('source-traverse');return text;
@@ -61,7 +62,7 @@ export function createEngineeringWorkerHandler(){
         // its transferred raw input until the entire graph is sorted doubles
         // residency unnecessarily, especially for large PHM/FAM sources.
         files.delete(path);progress('source-traverse');return text;
-      }},{onProgress:progress}));files.clear();batches.clear();
+      }},{onProgress:progress}));}finally{files.clear();batches.clear();}
       return {type:'graph',summary:{ifcPaths:graph.ifcPaths,sourceRecords:graph.records.length},geometryOccurrences:collectSourceGeometryOccurrences(graph)};
     }
     if(request.type==='encode-cache'){

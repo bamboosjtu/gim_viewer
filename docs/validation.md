@@ -99,7 +99,7 @@
 
 | 改动范围 | 门禁（`desktop/` 下） |
 |---|---|
-| IFC 加载/转换 | `npm run test:ifc-critical` |
+| IFC 加载/转换 | `npm run test:ifc-critical`；连接几何真实指针和固定 WebView2 验证还须执行下述本地门禁，单测不代替 |
 | 静态容器矩阵 | `src/viewer/__tests__/staticContainer.test.ts` |
 | 视角历史 | `src/viewer/__tests__/viewHistory.test.ts`、`src/ui/__tests__/viewHistoryFeedback.test.ts` |
 | 原生批读/GIMR 协议 | `bridge/__tests__/devLodCache.test.ts`、`bridge/__tests__/devLodNativeBatch.test.ts`、`bridge/__tests__/database.test.ts` |
@@ -117,6 +117,15 @@
 ## 真实桌面复核
 
 复核时固定提交、源 SHA、EXE/资产哈希、WebView 环境和缓存初始状态；通过生产入口操作，不暂停解析/编译。
+
+### IFC 连接几何本地门禁
+
+`test:ifc-critical` 的连接分块测试使用模拟 API，验证协议、索引边界、分块及堆替换；没有真实 IFC 输入，不证明 web-ifc 指针或固定 WebView2 的实际行为。真实连接几何只由开发者本地 native gate 覆盖，不向远程 CI 添加真实或合成工程样本。缺少以下证据时保留“未验收”，不能因单测或构建成功判定通过：
+
+- 固定本轮构建、`web-ifc` / WASM 哈希、WebView2 版本与源 SHA；选择确有连接构件和多块网格的来源，冷开、暖开各保留完整性与错误证据。
+- 在本地诊断中，以同一模型、同一 ExpressId/geometryExpressID 和同一变换，对照完整 `GetIndexArray` / `GetVertexArray` 扫描与分块读取。确认 `GetVertexDataSize()` 为 Float32 元素数、指针偏移以字节为单位；逐块比较索引展开后的 position/normal 六分量、三角形数量、变换矩阵与包围盒。
+- 覆盖重复/非顺序索引、多块、空几何、消费等待及 WASM 堆增长；读取前后检查数据指针有效性，记录失败对象，不将缺失对象补零。异常索引、非有限值的拒绝规则仍由无样本单测守护。
+- 函数、原始 IFC、ExpressId 对照和诊断数据只存 `tmp/`；公开报告仅保留筛选后的计数、误差、可用性及省略说明。性能收益另需同构建身份可核对的固定冷暖样本对照。
 
 ### 变电至少覆盖
 

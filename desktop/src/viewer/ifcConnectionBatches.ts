@@ -90,8 +90,8 @@ export async function streamConnectionGeometry(api: IfcAPI, model: number, norma
         const geometry = api.GetGeometry(model, placed.geometryExpressID);
         try {
           // Public web-ifc accessors copy from byte pointers. Read this chunk's
-          // indices and referenced vertex range, never the whole mesh for each
-          // chunk. Owned copies remain safe across consumption waits/WASM growth.
+          // indices and referenced vertex range. Non-local indices may still
+          // span the whole mesh. Owned copies survive consumption waits/growth.
           const count = geometry.GetIndexDataSize();
           const trianglesPerChunk = 3072;
           for (let start = 0, chunk = 0; start < count; start += trianglesPerChunk * 3, chunk++) {

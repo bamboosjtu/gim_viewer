@@ -138,7 +138,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   const publicProfile={...body,exportId,profileDigest,cases:body.cases.map(row=>({...row,sampleLabel:labels.get(row.inputId)}))};
   writeFileSync(join(out,'profile.json'),JSON.stringify(isPublicArtifact(root,out)?project(publicProfile):{...body,digest:profileDigest},null,2));
   const save=()=>{state.updatedAt=new Date().toISOString();writeBatchCheckpoint(privateOut,state);
-    if(resolve(out)!==resolve(privateOut))try{writeBatchProgress(out,state);}
+    if(resolve(out)!==resolve(privateOut))try{writeBatchProgress(out,state,{root,project});}
     catch(error){try{writeFileSync(join(privateOut,'progress-export-error.private.json'),JSON.stringify({
       at:state.updatedAt,message:String(error?.message??error)},null,2));}catch{/* Private authority was already saved. */}}
   };

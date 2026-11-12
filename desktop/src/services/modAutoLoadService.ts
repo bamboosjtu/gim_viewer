@@ -17,7 +17,7 @@ import { recoverFailedDevGlbCaches } from './devGlbCacheRecovery.js';
 import { ensureGeometryLayers, prepareModGroupForScene, prepareStlGroupForScene } from './modGeometryScene.js';
 export { isGeometryTokenValid } from './modGeometryContracts.js';
 export type { GeometryAutoLoadOptions, AutoLoadProgress } from './modGeometryContracts.js';
-export { ensureGeometryLayers, diagnoseGroupBBox, parseCbmTransformMatrix } from './modGeometryScene.js';
+export { ensureGeometryLayers, diagnoseGroupBBox } from './modGeometryScene.js';
 export { emptyFastPathProfile, tryDevGlbFastPath } from './devGlbCacheFastPath.js';
 export type { DevGlbFastPathProfile, DevGlbFailureType, DevGlbFastPathResult } from './devGlbCacheFastPath.js';
 export { recoverFailedDevGlbCaches } from './devGlbCacheRecovery.js';

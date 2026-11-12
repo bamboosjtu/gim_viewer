@@ -33,6 +33,21 @@ it('does not reread failed carriers and releases registered sources on clear',as
  await expect(sources.read('a')).rejects.toThrow('read failed');await expect(sources.read('a')).rejects.toThrow('read failed');expect(read).toHaveBeenCalledOnce();
  sources.clear();expect(sources.has('a')).toBe(false);
 });
+it('releases packed and individual sources on failed extraction and refuses to reuse a stale graph',async()=>{
+ const handle=createEngineeringWorkerHandler(),good=new Blob(['OBJECTMODELPOINTER=unit.dev']);
+ await handle({type:'init',scope:'fixture',paths:['project.cbm','unit.dev']});
+ await handle({type:'files',files:[{path:'project.cbm',blob:good},{path:'unit.dev',blob:new Blob(['SYMBOLNAME=设备'])}]});
+ await handle({type:'extract'});
+ const bad=new Blob([new Uint8Array([0x81])]),unused=new Blob(['unused']),read=vi.spyOn(unused,'arrayBuffer');
+ const batch={blob:bad,entries:[{path:'project.cbm',offset:0,length:1}]};
+ await handle({type:'packed-files',batch});await handle({type:'files',files:[{path:'unit.dev',blob:unused}]});
+ await expect(handle({type:'extract'})).rejects.toThrow();expect(read).not.toHaveBeenCalled();
+ await expect(handle({type:'assemble',objects:[],models:[]})).rejects.toThrow('graph is not ready');
+ // The same path can be registered again without init: the failed carrier
+ // was released, rather than left registered until Worker termination.
+ await expect(handle({type:'packed-files',batch:{blob:good,entries:[{path:'project.cbm',offset:0,length:good.size}]}})).resolves.toMatchObject({type:'ready'});
+ await expect(handle({type:'extract'})).rejects.toThrow('source unavailable: unit.dev');expect(read).not.toHaveBeenCalled();
+});
 it('keeps packed extraction identical across shared references and discards prior-run packs on init',async()=>{
  const source=[['project.cbm','OBJECTMODELPOINTER=unit.dev'],['unit.dev','SYMBOLNAME=设备\nSUBDEVICE0=part.dev\nSUBDEVICE1=part.dev'],['part.dev','SYMBOLNAME=附件']];
  const parts=source.map(([,text])=>new TextEncoder().encode(text)),entries=source.map(([path],i)=>({path,offset:parts.slice(0,i).reduce((n,p)=>n+p.length,0),length:parts[i].length}));

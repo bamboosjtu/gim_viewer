@@ -7,7 +7,7 @@ import { collectEquipmentGeometryOccurrences } from '../../gim/equipmentGeometry
 import { buildCbmTree } from '../../gim/cbmParser.js';
 import { buildGimIndexPayload } from '../gimIndexPersistenceService.js';
 import { restoreGimIndexToState } from '../gimIndexRestoreService.js';
-import { parseCbmTransformMatrix } from '../modAutoLoadService.js';
+import { isUsableAffineMatrix } from '../../gim/geometry/affineMatrix.js';
 import { createSourcePlacementMatrix } from '../devGlbTemplateRuntime.js';
 import { discoverGeometriesFromDevPath } from '../modGeometryDiscovery.js';
 import { parseWorkerXmlMod } from '../../gim/geometry/xmlModWorkerParser.js';
@@ -21,11 +21,14 @@ import { primitiveBounds } from '../devSpatialCatalog.js';
 
 it('rejects non-affine/collapsed CBM placements without rejecting reflections or small unit scales', () => {
   const identity = new THREE.Matrix4().toArray();
-  expect(parseCbmTransformMatrix('1,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1')).toEqual(identity);
-  expect(parseCbmTransformMatrix(new THREE.Matrix4().makeScale(1,0,1).toArray().join(','))).toEqual(identity);
+  expect(isUsableAffineMatrix(identity)).toBe(true);
+  expect(isUsableAffineMatrix(new THREE.Matrix4().makeScale(1, 0, 1).toArray())).toBe(false);
+  const projective = identity.slice();
+  projective[3] = 0.1;
+  expect(isUsableAffineMatrix(projective)).toBe(false);
   for (const scale of [-1, 1e-6]) {
     const matrix = new THREE.Matrix4().makeScale(scale, scale, scale).toArray();
-    expect(parseCbmTransformMatrix(matrix.join(','))).toEqual(matrix);
+    expect(isUsableAffineMatrix(matrix)).toBe(true);
   }
 });
 

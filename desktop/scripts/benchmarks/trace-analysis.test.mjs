@@ -98,6 +98,22 @@ test('public output drops raw identity, URLs, paths, business strings and approv
   const json=JSON.stringify(a);for(const token of ['gim-private','private-run','secret','customer-name','aaaaa','approval'])assert.ok(!json.includes(token));
   assert.equal(a.authority,false);
 });
+
+test('public projections omit process instances and root memory while retaining approved memory aggregates',()=>{
+  const instance={pid:929292,tid:939393,created:'2026-11-12T01:02:03.456Z',processStartedAt:'2026-11-12T01:02:03.456Z'};
+  const sample={processInstances:[instance],rootPrivateBytes:987654321,processPrivatePeakBytes:2345678901,
+    processSampling:{samples:4,maxSampleGapMs:20},system:{processInstances:[instance],rows:[{...instance,value:12,unit:'ms'}]}};
+  const raw={...sample,runs:[sample],startup:{...sample},system:{...sample}},before=JSON.stringify(raw);
+  for(const anonymize of [true,false]){
+    const view=publicView(raw,{anonymize}),json=JSON.stringify(view);
+    for(const token of ['processInstances','rootPrivateBytes','pid','tid','created','processStartedAt','929292','939393','987654321','2026-11-12'])
+      assert.ok(!json.includes(token),token);
+    assert.equal(view.processPrivatePeakBytes,2345678901);assert.equal(view.runs[0].processSampling.samples,4);
+    assert.equal(view.system.system.rows[0].value,12);
+  }
+  assert.equal(JSON.stringify(raw),before);
+  assert.equal(publicView({updatedAt:'private arbitrary timestamp text'}).updatedAt,undefined);
+});
 test('WPA column mapping rejects schema changes and PID reuse, keeps explicit units',()=>{
   const contract={columns:{pid:'PID',created:'Born',start:'Start',end:'End',value:'Weight'},timeUnit:'ms',unit:'ms',method:'CSwitch'};
   const rows=parseCsv('PID,Born,Start,End,Weight\r\n5,old,0,2,1\r\n5,new,0,2,2\r\n');
