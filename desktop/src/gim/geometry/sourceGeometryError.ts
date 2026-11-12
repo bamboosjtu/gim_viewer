@@ -20,6 +20,9 @@ export class MissingDevDependencyError extends Error {
 export function geometryFailureKind(error:unknown):'source-invalid'|'missing-dependency'|'capacity-exceeded'|'parse-failed'{
   if(error instanceof MissingDevDependencyError)return 'missing-dependency';
   if(error instanceof InvalidDevGeometryError&&error.sourceEvidence)return 'source-invalid';
+  // The station-scale guard is a representation limit. Without independent
+  // source evidence it does not establish malformed input or a parser defect.
+  if(error instanceof InvalidDevGeometryError&&/^extent-exceeds-/.test(error.reason))return 'capacity-exceeded';
   if((error as {geometryKind?:unknown})?.geometryKind==='capacity-exceeded')return 'capacity-exceeded';
   let message='',current=error;
   for(let depth=0;depth<4&&current;depth++){

@@ -54,11 +54,12 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run test:local -- --build <原生构建清单>` | 打开开发者登记的一变、一线、一设备；skip 不计通过 |
 | `npm run test:coverage` | `engineering/` 与 `gim/` 覆盖率下限 |
 | `npm run test:ifc-critical` | IFC 转换、会话竞态、缓存与开洞策略 |
+| `npm run test:ifc-connections-local` | 仅本地：真实 web-ifc/WASM 分块/完整扫描对照和实际堆增长；默认 Node，追加 `-- --build <隔离构建清单>` 在固定 WebView2 执行同一案例；证据写入 `tmp/local-tests/`，不加入 CI |
 | `npm run test:acceptance-tools` | 验收构建、清单与探针协议 |
 | `npm run test:measurement-tools` | 测量 CLI、Trace/CPU/WPA 协议与正确性规则（无工程样本） |
 | `npm run test:local-contract` | 本地注册表协议 |
 
-Windows CI 保持一个串行任务：版本、测量协议、验收工具、本地注册表、分层、类型和 lint 检查在 Rust 编译及覆盖率之前执行；随后运行 Rust 单元测试、前端覆盖率、SQLite 集成、前端构建和 Rust 编译边界。`workflow_dispatch` 才构建、校验和上传便携 Benchmark 发布包。以上步骤均不执行工程性能样本；10% 回退的提交门槛由开发者在本地人工控制。
+Windows CI 保持一个串行任务：版本、测量协议、验收工具、本地注册表、分层、类型和 lint 检查在 Rust 编译及覆盖率之前执行；随后运行 Rust 单元测试、前端覆盖率、SQLite 集成、前端构建和 Rust 编译边界。`workflow_dispatch` 才构建、校验和上传便携 Benchmark 发布包。以上步骤均不执行工程性能样本；内存与速度权衡遵循 Benchmark 的 50% 内存增长及绝对目标原则，最终批准由开发者在本地人工决定。
 
 完整命令清单与逐项门禁条件见[验证](validation.md)。远程 CI 只运行无工程样本的单元测试、静态检查和构建；真实与合成工程样本、性能矩阵只在开发者本地运行。
 

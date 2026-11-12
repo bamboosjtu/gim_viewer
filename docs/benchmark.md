@@ -110,6 +110,20 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 - `doctor` 读取能力自检结论，`lifecycle` 读取开闭自检结论；两者都只有 `PASS` 返回 0。
 - 报告始终保留原状态；退出码只供脚本消费。
 
+## 性能决策原则
+
+当前策略为 `gim-performance-policy-v2`，集中定义于 `performance-policy.mjs`。内存上限的 6G 按十进制 **6 GB = 6,000,000,000 字节**计算；运行时预算中的 6 GiB 是另一项配置，不混用。
+
+当前进一步性能优化暂缓；已有工具用于读取、诊断和保留证据，不因此自动启动新一轮矩阵或复测。恢复优化或批准基线须有开发者的显式决定。
+
+- 跨版本峰值内存增长上限 50%；增加内存须换取同等级别速度收益。“同等级别”保留人工判断，不设置未经确认的加权分数。分别列出首次可交互、完全结算的时间降低比例、速度倍数变化、节省秒数、基准/候选绝对值及内存增加字节。
+- 每个实测重复都满足峰值内存 ≤6 GB、冷开 `firstResponseMs <10000`、`settledMs <30000`，且测量证据完整，才标记性能完全达标；不以中位数掩盖超限轮次。达标后不计算额外收益，但原始差值仍可见。warm 组不能单独证明冷开达标。相对内存增长超过 50% 仍单列风险。
+- 首响应采用已有 `firstResponseMs` 代理，不把 DOM 时刻称为已验证输入延迟。完全结算使用 `settledMs`，不能用 `automaticLoadMs` 替代。同一批次还列出各 run 完全结算之和；此和不是含启动/清理的批次墙钟，缺少墙钟起止须明确写缺失。
+- 轮内保留增长（第 2–4 轮与最后三轮关闭后中位数）与跨版本打开峰值增长分别报告。生命周期 PASS 仅表示资源/正确性与保留上限，不证明速度收益值得接受。
+- 正确性、PARTIAL、采样缺口、构建/样本/环境不匹配独立报告。不可比时仍展示观察差值，但不据此确认优化收益。`compare/gate` 对需权衡的性能标记人工评估；反复出现同样差值也不会自动替人批准或否决。
+- `accept-measurement` 绑定技术证据，附带待人工判断的性能分析；`approve-baseline` 仍是人类显式决定后才执行的独立步骤。Agent 不因任何 PASS 自动调用它。现有真实性、来源复核与完整性校验继续生效；未解决的缺口必须提交给人类决定后续处理。
+- 新原则不覆写历史报告。`npm run bench -- reevaluate --baseline <私有参考> --candidate <私有候选> [--lifecycle <私有生命周期报告>] [--verification <私有执行记录>]` 写入新的私有 JSON/CSV 派生评估，保留历史结论、输入 SHA-256、当前策略和 `approval=PENDING`。执行记录须匹配候选路径及构建，才报告其批次墙钟；没有历史墙钟时不虚构总体墙钟收益。
+
 ## 运行行为
 
 | 选项 | 默认 | 行为 |
@@ -318,14 +332,14 @@ npm run bench -- gate --baseline ../tmp/gim-bench/<已批准基线>.approved.jso
 - 比较身份还包含 `measurementVersion`、`detailPolicy=task-phase-timeline-v2`、`lifecyclePolicy=worker-terminal-v2`、`contentPolicy=dev-l0-glb-sha256-v1`、`cacheProofPolicy=source-failure-catalog-v1` 和 `webviewProfilePolicy=paired-webview-profile-v1`；缺任一条件按不可比处理，不自动换算。
 - `PARTIAL` 只与同 SHA、同来源缺口摘要的 `PARTIAL` 比较；`PARTIAL` 与 `PASS` 的覆盖不同，结果为 `INCONCLUSIVE`。
 - 普通 `compare` 可读取结构指纹和已有内容证据，但不把缺少内容证明作为普通测量失败。正式 `approve-baseline` 和 `gate` 要求 DEV L0 内容摘要覆盖所有已显示根；字节摘要变化默认 INCONCLUSIVE，只有下述独立网格验证与显式审批流程可以接受这项变化。放置指纹或覆盖变化保持 INCONCLUSIVE，不能仅凭相同包围盒自动通过。无 DEV 表示的输入标为不适用，不伪造内容 SHA。
-- 超过 10% 要求独立复测，仍超限为 `FAIL`。性能优化须明确提示开发者复核；消缺和新功能的 10% 回退提交门槛由开发者人工控制，不要求每轮完整测量，不接入远程 CI。
+- 不再以统一 10% 回退线自动裁决性能。比较输出绝对耗时、百分比、节省秒数和内存字节代价；需权衡或超过 50% 内存增长时标记人工评估，独立复测也不替代最终人工批准。详见[性能决策原则](#性能决策原则)。
 - 摸底批次的 `PASS`/`PARTIAL` 仅表示该次计划执行结果。`baseline` 批次要求冷暖等价、来源缺口摘要及工作量一致；正式认可仍需探针开销、十轮生命周期与测量能力等验收。
 - 完整正确性基线只接受 `PASS`。`PARTIAL` 是显式接受的覆盖基线：来源复核者先运行 `review-partial`，其记录绑定候选摘要、复核身份、时间和受控原因；另一位批准者再引用该记录，不能仅在批准命令中自报已复核。原因只接受与候选证据相符的 `source-geometry`、`engineering-coverage`、`combined-source` 或 `mixed-source`。首次须显式 `--first-partial`；本地已有同来源批准记录时 CLI 拒绝再次声明首次，后续须提供上一份已批准基线，相同来源从 PASS 退到 PARTIAL 或缺口签名变化会被拒绝。复核和批准文件以候选摘要及时间命名，保存在工作区私有 `tmp/`，不覆盖上一份记录，也不存自由文本工程名或路径。工具核对记录与身份不同，仍无法替代实际人工审阅。
 - SDK 迁移不在本轮 Benchmark 范围内。完整指标口径见[测量架构](architecture/measurement.md)。
 
 ### 测量验收与正式批准
 
-`matrix` 的 `candidate.json` 和 `batch --preset baseline` 的 `results.json` 都是未批准候选。正式原生候选须先绑定同构建、同机器、同固定运行时和同测量协议的验收报告。能力报告须通过 Worker/CDP 自检；开销报告须属于候选的 Profile、来源、场景与工作量，包含至少三组交替运行的独立 off/benchmark 进程；生命周期报告须覆盖候选中的来源，并通过十轮开闭、取消与资源归零检查。生命周期 PASS 表示上述检查通过，不会把来源 PARTIAL 升级成产品 PASS：来源几何或工程覆盖缺口须有充分证据、与候选一致且十轮保持相同的缺口摘要；新增产品失败、缺口变化或证据缺失仍拒绝。新报告保留初始正确性参考与每轮正确性结果，PARTIAL 验收必须携带这些记录。开销和生命周期的 10% 判断会从明细重新计算，不能仅填一个 `outcome: PASS`。
+`matrix` 的 `candidate.json` 和 `batch --preset baseline` 的 `results.json` 都是未批准候选。正式原生候选须先绑定同构建、同机器、同固定运行时和同测量协议的验收报告。能力报告须通过 Worker/CDP 自检；开销报告须属于候选的 Profile、来源、场景与工作量，包含至少三组交替运行的独立 off/benchmark 进程；生命周期报告须覆盖候选中的来源，并通过十轮开闭、取消与资源归零检查。生命周期 PASS 表示上述检查通过，不会把来源 PARTIAL 升级成产品 PASS：来源几何或工程覆盖缺口须有充分证据、与候选一致且十轮保持相同的缺口摘要；新增产品失败、缺口变化或证据缺失仍拒绝。新报告保留初始正确性参考与每轮正确性结果，PARTIAL 验收必须携带这些记录。开销与生命周期均从明细重新计算：开销保留待人工判断的时间/内存代价，生命周期保留增长上限为 50%。历史 `outcome` 不代替当前策略重评或人工批准；原始报告不改写。
 
 ```powershell
 # 先执行 matrix 或 batch，保留其候选 JSON 和本轮构建清单。
@@ -339,7 +353,7 @@ npm run bench -- approve-baseline --candidate <accepted-candidate文件> --appro
 npm run bench -- gate --baseline <approved基线文件> --candidate <下一版候选JSON> --output ../tmp/gim-bench/new-comparison.json
 ```
 
-冻结矩阵使用 `overhead --profile <冻结Profile>`，也可同时指定 `--candidate <矩阵候选JSON>`，此时必须匹配 Profile 摘要。矩阵的场景、精化动作和超时均从冻结 case 读取，不使用样本注册表推断动作；单独使用 `--candidate` 只支持批次候选。省略 `--registry` / `--directory` 时，`overhead` 与 `lifecycle` 使用 `samples` 登记的私有语料。开销复测保留第二组完整运行记录。验收绑定不覆盖候选、不批准基线，也不自动运行工程样本；记录只保存验收所需字段，绑定候选摘要，候选修改后须重新绑定。PARTIAL 的 `review-partial` 须针对绑定后的新候选执行。`approve-baseline` 和后续 `gate` 都复核验收记录，不能用另一构建的能力报告替代。
+冻结矩阵使用 `overhead --profile <冻结Profile>`，也可同时指定 `--candidate <矩阵候选JSON>`，此时必须匹配 Profile 摘要。矩阵的场景、精化动作和超时均从冻结 case 读取，不使用样本注册表推断动作；单独使用 `--candidate` 只支持批次候选。省略 `--registry` / `--directory` 时，`overhead` 与 `lifecycle` 使用 `samples` 登记的私有语料。当前开销入口每次只执行一组配置的交替轮次，不自动追加复测；历史报告中的独立复测证据仍校验完整性和进程隔离。验收绑定不覆盖候选、不批准基线，也不自动运行工程样本；记录只保存验收所需字段，绑定候选摘要，候选修改后须重新绑定。PARTIAL 的 `review-partial` 须针对绑定后的新候选执行。`approve-baseline` 和后续 `gate` 都复核验收记录，不能用另一构建的能力报告替代。
 
 `--output` 可以指定新文件及尚未创建的子目录，但只能位于工作区 `tmp/` 或 `output/`。逐层拒绝目录链接、文件链接和目录型文件目标；输入文件仍须已存在。
 
@@ -358,7 +372,7 @@ npm run bench -- approve-geometry-change --baseline <approved基线文件> --can
 npm run bench -- gate --baseline <approved基线文件> --candidate <新候选JSON> --geometry-review <上一步批准记录>
 ```
 
-批准记录只允许对应 GLB 内容 SHA 的变化；缺失内容证据、覆盖或放置变化、运行条件、内存证据与 10% 回退检查仍按原规则判断。复测仍需相同的双方构建和已验证内容。候选或基线改变后，审批记录失效；该记录不会批准或替换性能基线，也不改变 PARTIAL 的独立来源复核要求。
+批准记录只允许对应 GLB 内容 SHA 的变化；缺失内容证据、覆盖或放置变化、运行条件、内存证据仍按真实性与完整性规则判断，性能按当前内存/速度权衡原则提交人工决定。复测仍需相同的双方构建和已验证内容。候选或基线改变后，审批记录失效；该记录不会批准或替换性能基线，也不改变 PARTIAL 的独立来源复核要求。
 
 ### 时间线策略 v1 到 v2 的基线迁移
 
@@ -416,7 +430,7 @@ npm run bench -- report --input ../tmp/gim-bench/runs/<本轮runId>/report.json
 
 `analyze` 将摘要写入输入报告同目录的 `analysis.private.json`，原始事件留在 `events.jsonl`，终端只打印覆盖摘要；逐任务阻塞链只分析 duration 最大的前 16 个依赖终点，省略数量见 `taskPathSelection`。Pipeline 是可重叠 span duration 之和，不等于墙钟。内部 HTML 只内嵌有界概览；`export-trace` 写入同目录的 `trace.private.json`（Chrome Trace Event JSON，Perfetto 可读）。生命周期归并、冲突、阻塞链和未归因区间的判定见[测量架构](architecture/measurement.md#operation-trace-与定点诊断)。
 
-system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，返回 `authenticated-system-helper-required`，不启动提权或 WPR；WPR/PMC 待受保护认证 helper 接入后恢复。已采集 ETL 的离线 WPA 摘要仍可用：需 exporter（可省略并从 PATH 查找）、wpaProfile、profileSha256 以及 tables 列/单位契约。表契约 columns 指定 pid/created/start/end/value，可选 tid，并单独指定时间列的 timeUnit（ns/us/ms/s）和数值列的 unit；创建时间必须与独立采样器的 windows-filetime-100ns 身份一致，没有匹配的 owned process 实例时返回 `owned-process-instance-not-matched` 并标 unavailable，不能用进程名称或 PID 猜配。缺少 WPA Profile 时保留原始 ETL，摘要标 unavailable。
+system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，返回 `authenticated-system-helper-required`，不启动提权或 WPR；WPR/PMC 待受保护认证 helper 接入后恢复。已有 ETL 可由本地受控脚本调用 `system-diagnostics.mjs` 的 `exportSystemTables` 做离线 WPA 摘要，原生 `run` 不自动导出：需 exporter（可省略并从 PATH 查找）、wpaProfile、profileSha256 以及 tables 列/单位契约。表契约 columns 指定 pid/created/start/end/value，可选 tid，并单独指定时间列的 timeUnit（ns/us/ms/s）和数值列的 unit；创建时间必须与独立采样器的 windows-filetime-100ns 身份一致，没有匹配的 owned process 实例时返回 `owned-process-instance-not-matched` 并标 unavailable，不能用进程名称或 PID 猜配。缺少 WPA Profile 时保留原始 ETL，摘要标 unavailable。
 
 诊断运行不能参与普通性能基线。原始 .cpuprofile、.heapprofile、.heapsnapshot、.etl、analysis.private.json 和 trace.private.json 留 tmp；可分享报告由白名单生成，缺口不补零。P95 是给定重复轮次的经验最近秩，结合 Count/Missing 和覆盖状态判读，不宣称少量重复证明尾部性能。
 

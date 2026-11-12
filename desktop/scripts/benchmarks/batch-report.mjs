@@ -3,7 +3,7 @@ import {isPublicArtifact} from './batch-input.mjs';
 import {writeFileSync,renameSync} from 'node:fs';
 import {join,resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {median} from './compare.mjs';
+import {median} from './statistics.mjs';
 
 const escapeHtml=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 const repoRoot=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');

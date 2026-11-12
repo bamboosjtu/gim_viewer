@@ -14,12 +14,6 @@ import {benchmarkRun} from './test-fixtures.mjs';
 import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
 
 const root=resolve('..');
-test('batch reports retain recovered final-evidence drift counts',async()=>{
-  const result=await executeBatch({...setup(),inputs:inputs(),execute:async({sample,profileDigest})=>{
-    const value=run(sample,profileDigest);value.report.finalEvidenceStability={attempts:2,driftCount:1,recovered:true};return value;
-  }});
-  assert.equal(result.result.rows[0].finalEvidenceAttempts,2);assert.equal(result.result.rows[0].finalEvidenceDrifts,1);
-});
 function setup(){const parent=artifactDirectory(root,join(root,'tmp','batch-protocol-tests')),out=mkdtempSync(join(parent,'run-'));
   const buildManifest=join(out,'build.json');writeFileSync(buildManifest,JSON.stringify({sourceFingerprint:'protocol-test'}));return {root,out,buildManifest};}
 function inputs(){return {entries:['a','b','c'].map((id,index)=>({inputId:id,sampleId:id,sourceSha256:id,privatePath:'private-name',status:'READY'})),
@@ -31,9 +25,13 @@ function run(sample,profileDigest){return {out:'private-run',dataRoot:'private-c
 
 test('batch continues after execution exceptions and exports every result and failure',async()=>{
   const options=setup(),called=[];
-  const result=await executeBatch({...options,inputs:inputs(),execute:async({sample,profileDigest})=>{called.push(sample.inputId);if(sample.inputId==='b')throw Error('secret project name / user path');return run(sample,profileDigest);}});
+  const result=await executeBatch({...options,inputs:inputs(),execute:async({sample,profileDigest})=>{
+    called.push(sample.inputId);if(sample.inputId==='b')throw Error('secret project name / user path');
+    const value=run(sample,profileDigest);value.report.finalEvidenceStability={attempts:2,driftCount:1,recovered:true};return value;
+  }});
   assert.deepEqual(called,['a','b','c']);assert.equal(result.result.outcome,'FAIL');
   assert.deepEqual(result.result.rows.map(row=>row.status),['PASS','ERROR','PASS']);
+  assert.equal(result.result.rows[0].finalEvidenceAttempts,2);assert.equal(result.result.rows[0].finalEvidenceDrifts,1);
   const json=readFileSync(join(options.out,'results.json'),'utf8');assert.ok(!json.includes('secret'));assert.ok(!json.includes('private-name'));
   for(const name of ['results.csv','errors.csv','summary.csv','stages.csv','slow-tasks.csv','slow-phases.csv','workers.csv','report.html'])assert.ok(readFileSync(join(options.out,name),'utf8').length>0);
   const html=readFileSync(join(options.out,'report.html'),'utf8');

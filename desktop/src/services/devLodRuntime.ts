@@ -1,6 +1,7 @@
 import {setRenderVisibility,requestObjectRender} from '../viewer/demandRendering.js';
+import { verifyDevGlbSourceEnvelope } from './devGlbSourceEvidence.js';
+import { createLazyGeometrySourceFiles } from './modGeometrySourceFiles.js';
 import { loadPresentation } from './presentationPort.js';
-import { readCachedEntry } from '@desktop/database.js';
 import { deleteDevArtifact, readDevArtifactBatch, readDevArtifactResult, type DevArtifactRead } from '@desktop/devLodCache.js';
 import * as THREE from 'three';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
@@ -13,7 +14,7 @@ import { BoxViewIndex } from '../viewer/boxViewIndex.js';
 import { DevInstanceBatches } from '../viewer/devInstanceBatches.js';
 import { chooseDeviceLod, createDeviceViewContext, deviceViewMetrics, type DeviceLod } from '../viewer/devLodPolicy.js';
 import { pickVisibleDevRoot } from '../viewer/devViewportPick.js';
-import { GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
+import { invalidGeometryBounds, stlSourceEnvelope } from '../viewer/geometryBounds.js';
 import { addModHighlightGroup, removeModHighlightGroup, resetModHighlight } from '../viewer/highlight.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { createDevGeometryPreprocessor, type DevGeometryPreprocessor } from './devGeometryWorkerClient.js';
@@ -189,7 +190,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
   constructor(private state: AppState, private ctx: ViewerContext, private session: ProjectLoadSession, private status: (text: string, detail?: string) => void) {
     this.sourceIdentity = session.sourceSha256 ?? '';
     this.artifactWriter = new DevLodArtifactWriter({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), requestReady: () => this.requestReady(), taskIdentity: (...args) => this.taskIdentity(...args), recordCacheDecision: (...args) => this.recordCacheDecision(...args) });
-    this.templateStore = new DevLodTemplateStore({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), memoryPressure: () => this.memoryPressure, worker: () => this.worker, key: (...args) => this.key(...args), pinned: () => this.pinned(), isWanted: key => this.wanted.has(key), taskIdentity: (...args) => this.taskIdentity(...args), catalogHint: dev => this.catalogHint(dev), markEmptyDev: dev => this.markEmptyDev(dev), recoverMissingSources: (...args) => this.recoverMissingSources(...args), prepareMissingTemplateSources: dev => this.prepareMissingTemplateSources(dev), recordCacheDecision: (...args) => this.recordCacheDecision(...args), persistsTemplate: (...args) => this.persistsTemplate(...args), persistArtifact: (...args) => this.persistArtifact(...args), reportDiagnostic: diagnostic => setGeometryDiagnostic(this.state, diagnostic) });
+    this.templateStore = new DevLodTemplateStore({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), memoryPressure: () => this.memoryPressure, worker: () => this.worker, key: (...args) => this.key(...args), pinned: () => this.pinned(), isWanted: key => this.wanted.has(key), taskIdentity: (...args) => this.taskIdentity(...args), catalogHint: dev => this.catalogHint(dev), markEmptyDev: dev => this.markEmptyDev(dev), recoverMissingSources: (...args) => this.recoverMissingSources(...args), prepareMissingTemplateSources: dev => this.prepareMissingTemplateSources(dev), recordCacheDecision: (...args) => this.recordCacheDecision(...args), persistsTemplate: (...args) => this.persistsTemplate(...args), persistArtifact: (...args) => this.persistArtifact(...args), reportDiagnostic: diagnostic => setGeometryDiagnostic(this.state, diagnostic), verifySourceEnvelope: (dev,scene) => verifyDevGlbSourceEnvelope(scene,dev,this.sources.sourceFiles,this.current) });
     this.sources = new DevLodSourceWorkset({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), memoryPressure: () => this.memoryPressure, hasMemorySources: () => this.state.currentFiles != null, ifcPending: () => this.state.ifcBackgroundPending, worker: () => this.worker });
     this.readiness = new DevLodReadiness(() => this.rows, (dev, lod) => this.key(dev, lod), message => { this.diagnostics.errors.push(message); if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift(); });
     this.catalogDone = new Promise(resolve => { this.finishCatalog = resolve; });
@@ -291,18 +292,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     }
     let files = this.state.currentFiles;
     if (!files) {
-      files = new Map();
-      for (const path of this.state.substationEntryPaths) if (/\.(dev|phm|mod|stl|gl)$/i.test(path)) {
-        const projectId = this.session.projectId;
-        files.set(path, {
-          name: path.split('/').pop()!, size: this.state.substationEntrySizes.get(path) ?? 0,
-          arrayBuffer: async () => {
-            if (projectId == null || !this.current()) throw Error('Device source unavailable');
-            const bytes = await readCachedEntry(projectId, path);
-            return new Uint8Array(bytes).buffer;
-          }
-        } as File);
-      }
+      files=createLazyGeometrySourceFiles(this.session.projectId,this.state.substationEntryPaths,this.state.substationEntrySizes,this.current);
     }
     // Healthy warm catalogs do not preload sources. Missing derived catalogs
     // use the same bounded immutable File workset as freshly extracted sources.
@@ -632,7 +622,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
           instanceKey: row.entry.instanceKey, placementMatrix: row.entry.placementMatrix, projectSourceToViewerMatrix: this.anchor
         });
         const worldBounds = template.bounds.clone().applyMatrix4(group.matrix);
-        const invalidPlacement = ![...worldBounds.min.toArray(), ...worldBounds.max.toArray()].every(Number.isFinite) ? 'non-finite-placement' : Math.max(...worldBounds.getSize(new THREE.Vector3()).toArray()) > GEOMETRY_MAX_EXTENT_M ? 'oversized-placement' : null;
+        const invalidPlacement = invalidGeometryBounds(worldBounds, stlSourceEnvelope(template.template.scene)?.applyMatrix4(group.matrix));
         if (invalidPlacement) { group.clear(); throw Error(`DEV placement rejected: ${row.entry.rootOccurrence}: ${invalidPlacement}`); }
         group.userData.deviceLod = lod;
         group.name = row.entry.instanceKey;

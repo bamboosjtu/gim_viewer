@@ -9,6 +9,30 @@ import {InvalidDevGeometryError,MissingDevDependencyError} from '../../gim/geome
 import {createDevWorkerMock} from './helpers/devWorker.js';
 
 const ownedRuntimes = new Set<DevLodRuntime>();
+
+it('releases parsed geometry on source verification failure without deleting a valid cache on cancellation',async()=>{
+  const {webcrypto}=await import('node:crypto');vi.stubGlobal('crypto',webcrypto);
+  const {serializeDevToGlbDetailed}=await import('../glbCacheService.js'),cache=await import('@desktop/devLodCache.js');
+  const files=new Map(Object.entries({
+    'DEV/a.dev':'SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.phm','PHM/a.phm':'SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.mod',
+    'MOD/a.mod':'<Device><Entities><Entity ID="1"><Cuboid L="1000" W="1000" H="1000"/></Entity></Entities></Device>',
+  }).map(([path,text])=>[path,new File([text],path)]));
+  const result=await serializeDevToGlbDetailed('DEV/a.dev',files),sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',result.bytes!.slice().buffer as ArrayBuffer))).map(n=>n.toString(16).padStart(2,'0')).join('');
+  const remove=vi.spyOn(cache,'deleteDevArtifact').mockResolvedValue(undefined);
+  try{for(const warm of [false,true]){
+    const {internal}=fixture(),key=internal.key('DEV/a.dev',0),release=vi.fn();
+    internal.worker=createDevWorkerMock({compile:vi.fn(async()=>result)});
+    internal.wanted.add(key);internal.catalogHint=async()=>({status:'miss'});internal.prepareMissingTemplateSources=async()=>{};
+    internal.templateStore.cacheReader.read=async()=>({status:warm?'hit':'miss',value:warm?{result,sha}:undefined,release});
+    internal.templateStore.options.verifySourceEnvelope=async()=>{await Promise.resolve();if(warm){internal.state.isCurrentSession=()=>false;throw new DOMException('expired','AbortError');}throw Error('source mismatch');};
+    const disposed=vi.spyOn(THREE.BufferGeometry.prototype,'dispose');
+    try{
+      await expect(internal.template('DEV/a.dev',0,0)).rejects.toThrow(warm?'expired':'source mismatch');
+      expect(disposed).toHaveBeenCalledOnce();expect(release).toHaveBeenCalledOnce();expect(remove).not.toHaveBeenCalled();
+      expect(internal.templateStore.inputBudget.bytes).toBe(0);expect(internal.templateStore.pending.size).toBe(0);
+    }finally{disposed.mockRestore();}
+  }}finally{remove.mockRestore();vi.unstubAllGlobals();}
+});
 afterEach(() => {
   for (const runtime of ownedRuntimes) runtime.release();
   ownedRuntimes.clear();

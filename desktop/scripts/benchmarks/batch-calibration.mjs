@@ -3,6 +3,7 @@ import {cpus,freemem,totalmem,platform,release,arch} from 'node:os';
 import {mkdirSync,openSync,writeSync,fsyncSync,closeSync,readFileSync,unlinkSync,statfsSync} from 'node:fs';
 import {join} from 'node:path';
 import {performance} from 'node:perf_hooks';
+import {median} from './statistics.mjs';
 
 /** Controller diagnostics only; not a multiplier for product wall times. */
 export function calibrateBatch(root){
@@ -28,7 +29,6 @@ export function calibrateBatch(root){
       if(!read.equals(bytes))throw Error('Calibration readback mismatch');
     }finally{try{unlinkSync(file);}catch{/* Keep failure evidence private. */}}
   }
-  const median=values=>[...values].sort((a,b)=>a-b)[1];
   const writeSyncMs=median(writes),readWarmMs=median(reads);
   const cpu=cpus()[0];
   let diskAvailableBytes=null;

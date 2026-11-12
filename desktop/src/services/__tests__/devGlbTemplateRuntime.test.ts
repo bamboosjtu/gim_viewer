@@ -49,6 +49,14 @@ function makeNestedTemplate(): THREE.Group {
   return root;
 }
 
+it('rejects a template if its session expires during source verification',async()=>{
+  let current=true;const scene=makeNestedTemplate();
+  const pool=new DevGlbTemplatePool({parse:async()=>({scene,animations:[]}),isCurrent:()=>current,
+    verifySourceEnvelope:async()=>{await Promise.resolve();current=false;}});
+  expect(await pool.prepare('DEV/a.dev',new Uint8Array([1]))).toBeNull();
+  expect(pool.metrics().templateShareableCount).toBe(0);
+});
+
 it('rejects a GLB with finite astronomical extent before creating any occurrence', async () => {
   const group = new THREE.Group();
   group.add(new THREE.Mesh(new THREE.BoxGeometry(7.57e11,1,1),new THREE.MeshStandardMaterial()));

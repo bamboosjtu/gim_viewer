@@ -1,8 +1,9 @@
 import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {median} from './compare.mjs';
+import {retainedMemory} from './statistics.mjs';
 import {assessCorrectness} from './correctness.mjs';
 import {digest,sha} from './evidence.mjs';
+import {lifecycleRetention} from './performance-policy.mjs';
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function waitFor(cdp,predicate,timeout=900000,wait=delay){
   const deadline=performance.now()+timeout;
@@ -53,10 +54,10 @@ export function lifecycleExercise({sample,secondSample,cycles=10,timeoutMs=90000
       const assessment=assessCorrectness(result),evidencePassed=accepted(assessment);
       replacement={sourceMatches:result.sourceSha256===secondSample.sourceSha256,evidencePassed,...assessment,...closed,passed:evidencePassed&&closed.passed};
     }
-    const before=rows.slice(1,4).map(r=>r.memory.bytes).filter(Number.isFinite),after=rows.slice(-3).map(r=>r.memory.bytes).filter(Number.isFinite);
-    const retainedGrowth=before.length===3&&after.length===3?median(after)/median(before)-1:null;
+    const {growth:retainedGrowth}=retainedMemory(rows),performanceAssessment=lifecycleRetention(retainedGrowth);
     return {kind:'same-process-ten-open-close',reference,cycles:rows,cancellation,replacement,retainedGrowth,
-      outcome:rows.length===10&&rows.every(row=>row.passed&&row.equivalent)&&cancellation.passed&&(!replacement||replacement.passed&&replacement.sourceMatches)&&retainedGrowth!==null&&retainedGrowth<=0.1?'PASS':'FAIL',
+      performanceAssessment,outcomeMeaning:'resource-integrity-and-retention-cap-only; not baseline approval',
+      outcome:rows.length===10&&rows.every(row=>row.passed&&row.equivalent)&&cancellation.passed&&(!replacement||replacement.passed&&replacement.sourceMatches)&&performanceAssessment.withinLimit?'PASS':'FAIL',
       forcedGc:false,comparison:'median-post-close-cycles-2-to-4-vs-last-3'};
   };
 }

@@ -9,7 +9,7 @@
  */
 
 import * as THREE from 'three';
-import { invalidGeometryExtent } from '../viewer/geometryBounds.js';
+import { invalidGeometryExtent, copyVerifiedStlSourceEnvelope } from '../viewer/geometryBounds.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 
 export interface DevGlbParsedAsset {
@@ -296,7 +296,9 @@ export class DevGlbTemplate {
 
   createPlacement(options: DevGlbPlacementOptions = {}): THREE.Group {
     if (this.disposed) throw new Error(`DEV template 已释放: ${this.devPath}`);
-    const placed = placeSourceGeometry(this.scene.clone(true) as THREE.Group, options);
+    const clone=this.scene.clone(true) as THREE.Group;
+    copyVerifiedStlSourceEnvelope(this.scene,clone);
+    const placed = placeSourceGeometry(clone, options);
     placed.userData.devPath = this.devPath;
     return placed;
   }
@@ -311,6 +313,7 @@ export class DevGlbTemplate {
 }
 
 export interface DevGlbTemplatePoolOptions {
+  verifySourceEnvelope?: (devPath:string,scene:THREE.Group)=>Promise<void>;
   session?: ProjectLoadSession;
   isCurrent?: () => boolean;
   parse: (devPath: string, bytes: Uint8Array) => Promise<DevGlbParsedAsset | null>;
@@ -367,6 +370,9 @@ export class DevGlbTemplatePool {
         disposeObjectResources(asset.scene);
         return null;
       }
+      try{await this.options.verifySourceEnvelope?.(devPath,asset.scene);}
+      catch{disposeObjectResources(asset.scene);return null;}
+      if(this.disposed||!this.isCurrent()){disposeObjectResources(asset.scene);return null;}
       const validation = validateDevGlbTemplate(asset);
       if (!validation.shareable) {
         disposeObjectResources(asset.scene);

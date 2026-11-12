@@ -2,7 +2,8 @@ import {mkdirSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {runNative} from './native-run.mjs';
 import {verifyProfile,coldWarmEquivalent} from './profiles.mjs';
-import {median,runReadiness,partialSignature} from './compare.mjs';
+import {runReadiness,partialSignature} from './compare.mjs';
+import {median} from './statistics.mjs';
 import {warmPreparation} from './warm-preparation.mjs';
 
 /** No sample substitution or promotion. Every frozen case retains its outcome. */

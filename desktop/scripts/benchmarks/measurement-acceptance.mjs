@@ -1,5 +1,7 @@
 import {candidateDigest,digest,sha} from './evidence.mjs';
 import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
+import {performanceComparison,lifecycleRetention,PERFORMANCE_POLICY} from './performance-policy.mjs';
+import {retainedMemory} from './statistics.mjs';
 
 const identityKeys=['machineId','runtimeSha256','buildMode','measurementVersion','detailPolicy','lifecyclePolicy',
   'contentPolicy','cacheProofPolicy','webviewProfilePolicy'];
@@ -7,7 +9,6 @@ const pick=(value,keys)=>Object.fromEntries(keys.filter(key=>value?.[key]!==unde
 const identity=run=>({...pick(run.conditions,identityKeys),buildFingerprint:run.buildFingerprint});
 const same=(a,b)=>digest(a)===digest(b);
 const check=(value,message)=>{if(!value)throw Error(message);};
-const median=values=>{const rows=[...values].sort((a,b)=>a-b),n=rows.length;return n%2?rows[(n-1)/2]:(rows[n/2-1]+rows[n/2])/2;};
 
 // Keep the approval portable and anonymous: no raw events, paths, profiles or logs.
 function compactRun(run){
@@ -26,7 +27,7 @@ function commonRun(run,expected){
     'Acceptance run is incomplete');
 }
 function checkOverhead(report,candidate,expected,allowRetest=true){
-  check(report?.kind==='same-build-probe-overhead'&&['PASS','PARTIAL'].includes(report.outcome)&&
+  check(report?.kind==='same-build-probe-overhead'&&['PASS','PARTIAL','INCONCLUSIVE','FAIL'].includes(report.outcome)&&
     report.independentProcesses===true&&report.alternatingOrder===true&&report.profileDigest===candidate.profileDigest,
   'Probe overhead evidence is incomplete or belongs to another profile');
   const runs=report.runs??[],off=runs.filter(run=>run.conditions?.mode==='off'),on=runs.filter(run=>run.conditions?.mode==='benchmark');
@@ -50,15 +51,15 @@ function checkOverhead(report,candidate,expected,allowRetest=true){
   const metrics=['firstResponseMs','automaticLoadMs','processPrivatePeakBytes'];
   check(runs.every(run=>metrics.every(key=>Number.isFinite(run.metrics?.[key])&&run.metrics[key]>0)),
     'Probe overhead metrics are missing');
-  const regressed=metrics.some(key=>median(on.map(run=>run.metrics[key]))/median(off.map(run=>run.metrics[key]))-1>0.1);
-  if(regressed||report.retest){
-    check(allowRetest&&report.retest,'Probe overhead exceeds 10% without a passing independent retest');
+  if(report.retest){
+    check(allowRetest,'Nested probe overhead retests are not allowed');
     checkOverhead(report.retest,candidate,expected,false);
     check(['sourceSha256','sampleId','scenario','cacheState','profileDigest','workloadDigest','routeDigest','viewportDigest']
       .every(key=>report.retest.runs[0].conditions[key]===first.conditions[key]),'Probe overhead retest changed the sample or workload');
     check(new Set([...runs,...report.retest.runs].map(run=>run.processInstanceId)).size===runs.length+report.retest.runs.length,
       'Probe overhead retest reused a process');
   }
+  return performanceComparison(off,on);
 }
 function closed(row){
   return row?.passed===true&&row.memory?.availability==='available'&&Number.isFinite(row.memory.bytes)&&row.memory.bytes>0&&
@@ -82,7 +83,7 @@ function validate(candidate,evidence){
     doctor.measurement?.lifecycleComplete===true&&doctor.measurement?.activeTasks?.length===0&&
     doctor.workerMemory?.some(worker=>worker.family==='measurement-probe'&&worker.samples>0),
   'Doctor capability evidence did not pass');
-  checkOverhead(overhead,candidate,expected);
+  const probePerformance=checkOverhead(overhead,candidate,expected);
   commonRun(lifecycle,expected);
   const exercise=lifecycle.exercise,cycles=exercise?.cycles??[];
   check(candidate.runs.some(run=>run.conditions.sourceSha256===lifecycle.conditions?.sourceSha256),
@@ -97,23 +98,24 @@ function validate(candidate,evidence){
     'Lifecycle correctness or partial coverage differs from candidate');
   }
   check(lifecycle.kind==='native-scene'&&lifecycle.conditions.mode==='benchmark'&&
-    exercise?.kind==='same-process-ten-open-close'&&exercise.outcome==='PASS'&&cycles.length===10&&
+    exercise?.kind==='same-process-ten-open-close'&&cycles.length===10&&
     cycles.every((row,index)=>row.cycle===index+1&&row.equivalent===true&&closed(row))&&closed(exercise.cancellation)&&
     (!exercise.replacement||closed(exercise.replacement)&&exercise.replacement.sourceMatches===true&&exercise.replacement.evidencePassed===true),
   'Lifecycle evidence did not pass all ten cycles and cancellation');
-  const growth=median(cycles.slice(-3).map(row=>row.memory.bytes))/median(cycles.slice(1,4).map(row=>row.memory.bytes))-1;
-  check(Number.isFinite(growth)&&growth<=0.1&&Math.abs(growth-exercise.retainedGrowth)<1e-9,
-    'Lifecycle retained memory exceeds 10% or disagrees with evidence');
+  const {growth}=retainedMemory(cycles);
+  check(lifecycleRetention(growth).withinLimit&&Math.abs(growth-exercise.retainedGrowth)<1e-9,
+    'Lifecycle retained memory exceeds 50% or disagrees with evidence');
   const processes=[...candidate.runs,doctor,...overhead.runs,...(overhead.retest?.runs??[]),lifecycle].map(run=>run.processInstanceId);
   check(processes.every(Boolean)&&new Set(processes).size===processes.length,'Acceptance evidence reused a candidate or acceptance process');
+  return {policyVersion:PERFORMANCE_POLICY.version,probe:probePerformance,retention:lifecycleRetention(growth),approval:'PENDING'};
 }
 
 export function bindMeasurementAcceptance(candidate,{doctor,overhead,lifecycle}){
   check(!candidate.approval&&!candidate.recovery,'Approved or recovered candidates cannot bind acceptance evidence');
   const evidence={doctor:compactRun(doctor),overhead:compactOverhead(overhead),lifecycle:compactRun(lifecycle)};
-  validate(candidate,evidence);
+  const performanceAssessment=validate(candidate,evidence);
   const acceptance={version:'gim-measurement-acceptance-v1',outcome:'PASS',candidateDigest:candidateDigest(candidate),
-    acceptedAt:new Date().toISOString(),evidence};
+    acceptedAt:new Date().toISOString(),scope:'measurement-evidence-only',performanceAssessment,evidence};
   const {approval,measurementAcceptance,...body}=candidate;
   return {...body,measurementAcceptance:{...acceptance,evidenceDigest:digest(acceptance)}};
 }

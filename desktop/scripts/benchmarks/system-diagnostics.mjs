@@ -50,7 +50,7 @@ export function parseCsv(text){
   return records.map(values=>Object.fromEntries(header.map((key,i)=>[key,values[i]])));
 }
 export class SystemCapture {
-  constructor(root,out,config,build){this.root=root;this.out=out;this.config=config;this.build=build;}
+  constructor(config){this.config=config;}
   async start(){
     const c=this.config;
     if(!Number.isFinite(c.durationMs)||c.durationMs<1||c.durationMs>30000||

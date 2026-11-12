@@ -43,7 +43,7 @@
 
 Worker 堆采样按 target 独立调度：附着立即采样，上一请求完成后按该 target 的起始时刻安排下次采样。重叠 checkpoint 合并为同一个在途请求，`coalesced` 单列，不虚构失败样本；真正的 CDP 超时、字段缺失及超过两个采样周期的有效样本间隔仍使证据不完整。正常 target detach/采样停止取消在途请求，终止时间仍参与尾部间隔检查。
 
-生命周期关闭前固定相关 Collector 的资源检查引用，关闭后聚合旧 run 与当前 run 的任务、缓冲账本和物理 Worker ID；不因 `perfReset` 或档案驱逐而把旧资源计为零。重复 Worker ID 只计一次，不改变十轮 Private Bytes 增长 10% 的验收门槛。
+生命周期关闭前固定相关 Collector 的资源检查引用，关闭后聚合旧 run 与当前 run 的任务、缓冲账本和物理 Worker ID；不因 `perfReset` 或档案驱逐而把旧资源计为零。重复 Worker ID 只计一次。十轮 Private Bytes 保留增长上限为 50%，但轮内资源测试不证明跨版本速度收益；收益权衡与最终基线批准由人类决定。
 
 结算静默窗与最终证据使用同一 progress 内容摘要，包含 run/session 身份；进度计数变化会重新开始三秒窗口。最终采证仅在同一会话内最多尝试三次，重试前重新静默等待，等待预算 15 秒；持久漂移或会话变化仍失败。所有被拒绝的证据对、字段差异和恢复次数写入私有 `final-evidence.private.json`，报告保留摘要；LOD 计数在采证入口复制，避免 await 期间改变既有证据。
 
@@ -74,7 +74,7 @@ Worker 堆采样按 target 独立调度：附着立即采样，上一请求完�
 
 普通 Benchmark 的 `geometryStructuralFingerprint` 仅覆盖网格数量、包围盒与变换，不能证明顶点或索引相同。DEV 基础表示已有每模板 GLB 字节 SHA；`contentEvidence` 将其按 occurrence 聚合，并核对 SHA 有效、ID 唯一及已显示根覆盖率。正式基线批准和 `gate` 要求该内容证据完整，同源候选的内容摘要或放置指纹变化返回 INCONCLUSIVE 等待复核；普通批量测量仍不遍历全量顶点重新计算 SHA。此证据仅覆盖 DEV L0 GLB，不宣称已校验 IFC 或 L2 顶点内容。
 
-新增采集当前默认 off；原生探针开销验收完成前，不改变普通产品的采集负担。专用 Benchmark/诊断调用显式选择模式。已有 perfTimings 不受该开关影响。测量核心、桌面适配、CLI/Trace/Profile 与报告已落地；当前剩余的是本地探针开销 A/B、十轮 lifecycle 和认可基线，不是实现缺口。
+新增采集当前默认 off；专用 Benchmark/诊断调用显式选择模式。已有 perfTimings 不受该开关影响。测量核心、桌面适配、CLI/Trace/Profile 与报告已落地；本地已取得十轮 lifecycle、三组冷暖与 CPU/Heap/Allocation/GPU 产物，仍有采样间隔和诊断普通明细容量缺口。进一步性能优化暂缓；开销复核及基线批准由开发者决定，数据以私有报告和重评记录为准。
 
 当前 CLI 的原生场景记录只有在正确性、缓存域、必要指标与任务闭环均证实时才允许门禁通过。未证实的字段保持 unverified/false，输出 INCONCLUSIVE；不能手工把汇总状态改成 PASS 代替缺少的证据。来源几何异常只有在全部失败均有明确 `source-invalid` 原始范围证据或 `missing-dependency` 原始引用证据、没有其他失败时记为 PARTIAL；容量/预算失败仍为产品 FAIL。工程来源覆盖不足只有在不完整原因限于来源图缺口、来源引用缺失/歧义或 IFC manifest 不完整，且对应计数与 IFC runtime/cache 一致性成立、无其他产品失败时记为 PARTIAL。判定细节见[本地批量 Benchmark](../benchmark.md#工程来源-partial)。规则对所有样本相同，匿名缺口摘要由本次证据计算，冷暖及基线比较必须一致。SQLite 核心索引发布与 Engineering Worker 派生来源缓存分开测；来源图 partial 不自动判定 SQLite 缓存失效，也不冒充完整的工程来源缓存命中。`baseline` 默认一冷一暖，`-repeat 3` 可取得三组独立配对；完整迁移门禁还要求固定动作路线、探针开销对照和十轮资源回落验收。
 
@@ -112,7 +112,7 @@ DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位�
 
 `bench build` 显式构建并核验 Vite Benchmark 前端，再创建 Cargo `benchmark` feature 的原生产物；发布清单前核验 EXE 确实内嵌探针 chunk。运行器拒绝没有 `frontendProbeVerified` 凭据的旧构建，避免 CDP 已连接普通页面却重复等待 Benchmark API。原生命令只授权私有运行清单指定的匿名样本，并重新核对源 SHA；清单、源、缓存根必须在编译时绑定的工作区，清单/缓存在 `tmp/gim-bench` 下。普通产品构建拒绝 Benchmark 授权，且不导出 Benchmark UI 控制面。
 
-正式原生候选先由 `accept-measurement` 校验并绑定同构建、同机器和同运行时的 doctor、探针开销及十轮生命周期证据，输出新的候选文件；绑定包含候选摘要和可复核的精简证据，不依赖手工编辑 JSON。`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选针对绑定后的文件，由另一位复核者通过 `review-partial` 生成候选摘要绑定的私有记录，批准者再以 `--accept-partial --partial-review` 引用，原因使用受控代码。首次须指定 `--first-partial`，后续须提供上一份已批准基线，防止相同来源覆盖倒退；它只成为覆盖基线，不能自动升级成完整 PASS。run/report/compare 不调用批准命令。GLB 字节变化默认 INCONCLUSIVE，仅允许导入独立网格等价性证据后显式批准对应内容变更，放置与覆盖仍须一致；CLI 不实现网格等价算法。命令和证据契约见 [Benchmark CLI](../benchmark.md#比较与基线)。超过 10% 的回退需独立复测，仍超限为 FAIL；运行条件、必要测量或认可基线缺失为 INCONCLUSIVE。10% 提交门槛由开发者本地人工控制，协议/值单元测试进入 CI；样本、性能与内存曲线只在本地执行。
+正式原生候选先由 `accept-measurement` 校验并绑定同构建、同机器和同运行时的 doctor、探针开销及十轮生命周期证据，输出新的候选文件；绑定包含候选摘要和可复核的精简证据，不依赖手工编辑 JSON。`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选针对绑定后的文件，由另一位复核者通过 `review-partial` 生成候选摘要绑定的私有记录，批准者再以 `--accept-partial --partial-review` 引用，原因使用受控代码。首次须指定 `--first-partial`，后续须提供上一份已批准基线，防止相同来源覆盖倒退；它只成为覆盖基线，不能自动升级成完整 PASS。run/report/compare 不调用批准命令。GLB 字节变化默认 INCONCLUSIVE，仅允许导入独立网格等价性证据后显式批准对应内容变更，放置与覆盖仍须一致；CLI 不实现网格等价算法。命令和证据契约见 [Benchmark CLI](../benchmark.md#比较与基线)。性能建议按 50% 内存增长上限、绝对目标及时间/内存权衡生成，不再以 10% 单指标回退自动裁决；相同机器/样本/场景的重复仍须完整，缺少可比证据保持 INCONCLUSIVE。开销技术证据与性能建议分开，基线最终批准由开发者显式决定。协议/值单元测试进入 CI，样本、性能与内存曲线仅在本地执行。
 
 ## Operation Trace 与定点诊断
 
@@ -134,7 +134,7 @@ Three 通过公开 renderer 事件采集提交区间、帧/Pass 计数，不修�
 
 WPR/PMC 系统录制入口当前关闭：显式诊断配置在窗口/缓冲校验后返回 `unavailable` / `authenticated-system-helper-required`，不启动提权、不读取计划控制的路径，也不生成 WPRP/ETL。旧的可写计划 helper 不能作为认证通道；恢复需要受保护 helper、可信根和经认证的控制器通道，见[问题与限制](../open-issues.md) L-14。`systemCapabilities` 仍探测本机 WPR、WPAExporter 与 PMC，但 `elevatedCaptureAvailable=false`。
 
-离线 WPA 摘要仍可用于受控流程已采集的 ETL：要求本地 WPAExporter、显式 `.wpaProfile` 与内容 SHA，以及列/单位契约；PID 必须同时匹配进程创建时间。没有匹配的 owned process 实例、PID/创建时间不符或列变化时摘要标 unavailable（如 `owned-process-instance-not-matched`），不输出伪零值。ETL 原件与状态日志保留在 tmp。固定 WebView2、WPRP 与本机 WPA Profile 的实际兼容和开销仍需人工验收。
+离线 WPA 摘要通过 `system-diagnostics.mjs` 的 `exportSystemTables` 供本地受控脚本调用，不从已关闭的原生录制分支自动触发。输入须为已有 ETL、本地 WPAExporter、显式 `.wpaProfile` 与内容 SHA，以及列/单位契约；PID 必须同时匹配进程创建时间。没有匹配的 owned process 实例、PID/创建时间不符或列变化时摘要标 unavailable（如 `owned-process-instance-not-matched`），不输出伪零值。ETL 原件与状态日志保留在 tmp。固定 WebView2、WPRP 与本机 WPA Profile 的实际兼容和开销仍需人工验收。
 
 ## 权威记录和可分享视图
 

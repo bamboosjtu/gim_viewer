@@ -11,8 +11,9 @@ import { attachDevGlbTemplatePool, disposeDevGlbTemplatePool, getDevGlbTemplateP
 import { diagnosticForFailure, diagnosticFromManifest, setGeometryDiagnostic } from '../gim/geometry/geometryDiagnostics.js';
 import { isGeometryContextValid } from './modGeometryContracts.js';
 import type { AutoLoadProgress } from './modGeometryContracts.js';
-import { normalizeDevEntryPath } from './modGeometrySourceFiles.js';
+import { normalizeDevEntryPath, createLazyGeometrySourceFiles } from './modGeometrySourceFiles.js';
 import { ensureGeometryLayers, diagnoseGroupBBox } from './modGeometryScene.js';
+import { stlSourceEnvelopeProof } from '../viewer/geometryBounds.js';
 
 /**
  * 主入口：自动发现并加载变电工程中所有非 IFC 的 MOD/STL 几何。
@@ -530,10 +531,18 @@ export async function tryDevGlbFastPath(
       }
       : glbCache!.parseDevGlbAsset);
   const { modRoot } = ensureGeometryLayers(state, scene);
+  let proofSourceFiles=state.currentFiles;
+  const verifySourceEnvelope=async(devPath:string,asset:THREE.Group)=>{
+    if(!stlSourceEnvelopeProof(asset))return;
+    const {verifyDevGlbSourceEnvelope}=await import('./devGlbSourceEvidence.js');
+    proofSourceFiles??=createLazyGeometrySourceFiles(capturedProjectId,state.substationEntryPaths,state.substationEntrySizes,isCurrent);
+    await verifyDevGlbSourceEnvelope(asset,devPath,proofSourceFiles,isCurrent);
+  };
   const templatePool = getDevGlbTemplatePool(modRoot, session) ?? new DevGlbTemplatePool({
     session,
     isCurrent,
     parse: parseDevGlbAsset,
+    verifySourceEnvelope,
   });
   attachDevGlbTemplatePool(modRoot, templatePool);
   const syncTemplateMetrics = (): void => {
@@ -694,6 +703,7 @@ export async function tryDevGlbFastPath(
             return;
           }
           const transformStarted = performance.now();
+          await verifySourceEnvelope(devPath,loadedGroup);
           loadedGroup = placeSourceGeometry(loadedGroup, {
             rootOccurrence: seed.id, instanceKey,
             placementMatrix: cbmTransform, projectSourceToViewerMatrix: state.projectSourceToViewerMatrix

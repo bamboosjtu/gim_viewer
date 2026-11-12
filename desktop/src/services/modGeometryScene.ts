@@ -1,7 +1,7 @@
 /** Scene placement, geometry bounds checks and layer ownership. */
 import * as THREE from 'three';
 import { freezeContainerLocalMatrix } from '../viewer/staticContainer.js';
-import { GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
+import { GEOMETRY_MAX_EXTENT_M, invalidGeometryExtent } from '../viewer/geometryBounds.js';
 import type { AppState } from '../app/state.js';
 import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
@@ -73,7 +73,7 @@ export function diagnoseGroupBBox(
   const bad =
     !empty &&
     (!Number.isFinite(maxDim) ||
-      maxDim > BBOX_MAX_DIM_M ||
+      !!invalidGeometryExtent(group) ||
       !Number.isFinite(centerDist) ||
       centerDist > BBOX_MAX_CENTER_M);
 

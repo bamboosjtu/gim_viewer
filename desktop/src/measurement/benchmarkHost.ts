@@ -16,6 +16,7 @@ export function installBenchmarkHost(state:AppState):void {
   let stream:ReturnType<typeof installMeasurementStream>|undefined;
   let closedResources:ReturnType<typeof captureMeasurementResourceCheck>|undefined;
   const host={
+    async ifcConnectionProbe(){return (await import('./ifcConnectionVerification.js')).verifyNativeIfcConnections();},
     stream(){if(stream)return;const binding=(globalThis as {__gimMeasurementEmit?:(value:string)=>void}).__gimMeasurementEmit;if(!binding)throw Error('measurement-binding-unavailable');stream=installMeasurementStream(binding);},
     ack(runId:string,batchId:number){stream?.acknowledge(runId,batchId);},
     transport(){return stream?.status()??[];},

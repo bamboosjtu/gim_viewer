@@ -30,34 +30,6 @@ export function fromIfcYUpBounds(bounds: readonly number[]): number[] | undefine
   return [minX, -maxZ, minY, maxX, -minZ, maxY];
 }
 
-export interface CompositionParityMismatch {
-  entityId: string;
-  sourceIds: string[];
-  expectedPaths: string[];
-  actualPaths: string[];
-}
-
-/** Aligns independent static/runtime projections by engineering entity and
- * reports path-level differences, retaining source IDs for offline evidence. */
-export function compareCompositionAssignments(
-  expected: readonly CompositionAssignment[],
-  actual: readonly CompositionAssignment[],
-  sourceIdsByEntity: ReadonlyMap<string, readonly string[]> = new Map(),
-): { missing: string[]; extra: string[]; mismatches: CompositionParityMismatch[] } {
-  const key = (rows: readonly CompositionAssignment[]) => new Map(rows.map(row => [row.entityId, row]));
-  const left = key(expected), right = key(actual), missing: string[] = [], extra: string[] = [], mismatches: CompositionParityMismatch[] = [];
-  for (const [entityId, row] of left) {
-    const other = right.get(entityId);
-    if (!other) { missing.push(entityId); continue; }
-    const paths = (value: CompositionAssignment) => value.paths.map(path => path.map(group => `${group.kind}:${group.key}`).join('/')).sort();
-    const expectedPaths = paths(row), actualPaths = paths(other);
-    if (JSON.stringify(expectedPaths) !== JSON.stringify(actualPaths)) mismatches.push({
-      entityId, sourceIds: [...(sourceIdsByEntity.get(entityId) ?? [])], expectedPaths, actualPaths,
-    });
-  }
-  for (const entityId of right.keys()) if (!left.has(entityId)) extra.push(entityId);
-  return { missing, extra, mismatches };
-}
 const center=(b:Box)=>[(b[0]+b[3])/2,(b[1]+b[4])/2,(b[2]+b[5])/2];
 const contains=(b:Box,p:number[],margin=0)=>p[0]>=b[0]-margin&&p[0]<=b[3]+margin&&p[1]>=b[1]-margin&&p[1]<=b[4]+margin;
 const area=(b:Box)=>(b[3]-b[0])*(b[4]-b[1]);

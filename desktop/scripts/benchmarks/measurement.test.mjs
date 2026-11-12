@@ -204,9 +204,9 @@ test('different metric sets cannot pass by comparing missing values',()=>{
   const b=runs('base',100),c=runs('candidate',100);for(const run of c){run.requiredMetrics=['otherMs'];run.metrics={otherMs:1};}
   assert.equal(compareRuns(b,c).outcome,'INCONCLUSIVE');
 });
-test('regression requires independent retest and cannot be hidden by a mode or workload change',()=>{
+test('adverse tradeoffs remain for human review after independent retest and cannot hide a mode change',()=>{
   const b=runs('b',100),c=runs('c',120);assert.equal(compareRuns(b,c).requiresRetest,true);
-  assert.equal(compareRuns(b,c,{retestBaseline:runs('br',100),retestCandidate:runs('cr',120)}).outcome,'FAIL');
+  assert.equal(compareRuns(b,c,{retestBaseline:runs('br',100),retestCandidate:runs('cr',120)}).outcome,'INCONCLUSIVE');
   c[0].conditions.mode='diagnostic';assert.equal(compareRuns(b,c).outcome,'INCONCLUSIVE');
 });
 test('baseline promotion is explicit and refuses incomplete or unfrozen candidates',()=>{

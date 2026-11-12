@@ -10,7 +10,7 @@
  *   理由：DEV 粒度大幅减少加载次数（5982 → 数百）
  * - 超大型 DEV 可按装配子树并行编译，但合并后仍是一个 DEV 模板；拆分部分
  *   没有独立缓存身份
- * - 序列化时烘焙 DEV 内部所有 transform（DEV × PHM × SUBDEVICE × Entity + mm→m）
+ * - MOD 烘焙内部 transform；重复 STL 保留矩阵节点并共享来源缓冲
  * - CBM 累积矩阵运行时应用（同一 DEV 可被多 CBM 引用）
  * - 数学等价性：两次 applyPlacementTransformToSceneUnits（各 ×0.001）
  *   等价于一次完整应用（CBM × DEV × PHM，×0.001）
@@ -29,7 +29,8 @@ import { getFileEntryResolver } from '../gim/entryResolver.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { getFileByPath } from '../gim/fileLookup.js';
-import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
+import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M, STL_SOURCE_ENVELOPE_KEY, acceptVerifiedStlSourceEnvelope, type StlSourceEnvelope } from '../viewer/geometryBounds.js';
+import { stlBounds } from './devSpatialCatalog.js';
 import {
   disposeXmlModGroup,
   XML_MOD_GEOMETRY_DIAGNOSTICS_KEY,
@@ -42,6 +43,7 @@ const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 /** One compiled DEV result is never larger than this. Split parts are bounded
  * by the same ceiling before the merged template is accepted. */
 export const DEV_GLB_MAX_BYTES = 128 * 1024 * 1024;
+export const DEV_SPLIT_MAX_INPUT_BYTES = 64 * 1024 * 1024;
 /** Assembly-subtree split gate. Normal DEV templates stay one compile task. */
 export const DEV_SPLIT_MIN_EDGES = 12;
 export const DEV_SPLIT_MIN_BYTES = 6 * 1024 * 1024;
@@ -211,6 +213,14 @@ export function buildDevCompilePlan(
   const edges: GeometryEdge[] = [...discovered.mods, ...discovered.stls];
   const estimatedBytes = estimateEdgeBytes(edges, files);
   const estimatedInstanceWork = estimateInstanceWork(edges, files);
+  const stlPaths = new Set(discovered.stls.map(edge => edge.stlPath));
+  const expandedStlBytes = discovered.stls.reduce((total, edge) => total
+    + Math.max(0, (getFileByPath(files, edge.stlPath)?.size ?? 0) - 84) * 72 / 50, 0);
+  // Subtree GLBs cannot share accessors across parts. When their expanded STL
+  // data already exceeds merge admission, compile the source-sharing layout
+  // directly instead of spawning parts that must be cancelled for fallback.
+  // The final result still obeys the same 128 MiB ceiling.
+  if (stlPaths.size < discovered.stls.length && expandedStlBytes > DEV_SPLIT_MAX_INPUT_BYTES) return null;
   if(edges.length===1&&discovered.mods.length===1&&estimatedBytes>=32*1024*1024){
     const total=Math.min(Math.max(2,Math.floor(maxParts)),Math.max(2,Math.ceil(estimatedBytes/(24*1024*1024))));
     const parts=Array.from({length:total},(_,index)=>({
@@ -394,6 +404,14 @@ export async function serializeDevToGlbDetailed(
   const devGroup = new THREE.Group();
   devGroup.name = `glb-dev:${canonicalDevPath}`;
   devGroup.userData.devPath = canonicalDevPath;
+  const ownedSourceGroups = new Set<THREE.Group>();
+  const stlSources = new Map<string, THREE.Group>();
+  const zeroStlNormals = new Map<THREE.BufferGeometry, number[]>();
+  const stlNormalVariants = new Map<THREE.BufferGeometry, Map<string, THREE.BufferGeometry>>();
+  const stlCounts = new Map<string, number>();
+  for (const edge of discovered.stls) stlCounts.set(edge.stlPath, (stlCounts.get(edge.stlPath) ?? 0) + 1);
+  const disposedStlGeometries = new Set<THREE.BufferGeometry>();
+  const disposedStlMaterials = new Set<THREE.Material>();
 
   let modLoaded = 0;
   let stlLoaded = 0;
@@ -421,191 +439,256 @@ export async function serializeDevToGlbDetailed(
   const disposeStlGroup = (group: THREE.Group): void => {
     group.traverse((object) => {
       const mesh = object as THREE.Mesh;
-      mesh.geometry?.dispose?.();
+      if (mesh.geometry && !disposedStlGeometries.has(mesh.geometry)) {
+        disposedStlGeometries.add(mesh.geometry); mesh.geometry.dispose();
+      }
       const materials = Array.isArray(mesh.material)
         ? mesh.material
         : mesh.material ? [mesh.material] : [];
-      for (const material of materials) material?.dispose?.();
+      for (const material of materials) if (!disposedStlMaterials.has(material)) {
+        disposedStlMaterials.add(material); material.dispose();
+      }
     });
   };
   const disposeSourceGroup = (group: THREE.Group): void => {
+    ownedSourceGroups.delete(group);
+    group.removeFromParent();
     // XML MOD/GL groups use the process-wide primitive/material caches. Only
     // their merged geometry and instance-owned materials may be released.
     if (readXmlDiagnostics(group)) disposeXmlModGroup(group);
     else disposeStlGroup(group);
   };
 
-  let smallFallback: { geo: typeof discovered.mods[number]; extent: number } | undefined;
-  // 加载 MOD
-  for (const geo of discovered.mods) {
-    try {
-      if(!getFileByPath(files,geo.modPath))
-        throw MissingDevDependencyError.forPath(canonicalDevPath,geo.modPath,geo.modPath.toLowerCase().endsWith('.gl')?'GL':'MOD');
-      const group = await loadXmlModFromFiles(
-        geo.modPath,
-        files,
-        geo.phmColor,
-        geo.phmColorMaxA,
-        { strict: true, parseXml: options.parseXml, lod: options.lod, timings: options.timings, onStage:options.onStage,
-          outline: { placementMatrix: geo.placementTransformMatrix, deferSmallPartFallback: true,
-            rootSlice:options.partition?.rootSlice } },
-      );
-      if (!group) continue;
-      const xmlDiagnostics = readXmlDiagnostics(group);
-      if (xmlDiagnostics) {
-        if (xmlDiagnostics.status === 'empty' && !xmlDiagnostics.omittedSmallParts) sawEmptyDeviceXml = true;
-        addUnsupportedCounts(xmlDiagnostics.unsupportedPrimitiveTypeCounts);
-        diagnostics.failedVisibleRootCount = (diagnostics.failedVisibleRootCount ?? 0) + (xmlDiagnostics.failedVisibleRoots?.length ?? 0);
-        diagnostics.failedVisibleRoots ??= [];
-        for (const failure of xmlDiagnostics.failedVisibleRoots ?? []) if (diagnostics.failedVisibleRoots.length < 64)
-          diagnostics.failedVisibleRoots.push({ modPath: geo.modPath, ...failure });
-        diagnostics.representationPolicy = xmlDiagnostics.representationPolicy;
-        diagnostics.approximatedBooleans ??= { Union: 0, Difference: 0, Intersection: 0 };
-        for (const op of ['Union', 'Difference', 'Intersection'] as const)
-          diagnostics.approximatedBooleans[op] += xmlDiagnostics.approximatedBooleans?.[op] ?? 0;
-        diagnostics.omittedSmallParts = (diagnostics.omittedSmallParts ?? 0) + (xmlDiagnostics.omittedSmallParts ?? 0);
-        const extent = xmlDiagnostics.omittedMaxExtentMm ?? 0;
-        if (xmlDiagnostics.omittedSmallParts && (!smallFallback || extent > smallFallback.extent
-          || extent === smallFallback.extent && edgeReference(geo) < edgeReference(smallFallback.geo))) smallFallback = { geo, extent };
-        diagnostics.omittedMaxExtentMm = Math.max(diagnostics.omittedMaxExtentMm ?? 0, extent);
-        diagnostics.simplifiedBooleans = (diagnostics.simplifiedBooleans ?? 0) + (xmlDiagnostics.simplifiedBooleans ?? 0);
-      }
-      // EMPTY_DEVICE_XML and MODs whose parsed entities have no supported
-      // renderable primitive are deterministic empty geometry. Do not add an
-      // empty Group to the exported scene: an otherwise-empty DEV must become
-      // the explicit `empty` manifest state, while mixed DEV content keeps its
-      // real meshes only.
-      if (!hasRenderableGeometry(group)) {
-        if (!xmlDiagnostics || xmlDiagnostics.status === 'empty' && !xmlDiagnostics.omittedSmallParts) diagnostics.emptySourceCount++;
-        if (xmlDiagnostics && xmlDiagnostics.status !== 'empty') diagnostics.unsupportedSourceCount++;
-        disposeSourceGroup(group);
-        continue;
-      }
-      // 烘焙 DEV × PHM placement 到顶点（含 mm→m）
-      applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
-      group.userData.devPath = geo.devPath;
-      group.userData.assemblyPath = geo.assemblyPath;
-      group.userData.referencePath = geo.referencePath;
-      devGroup.add(group);
-      modLoaded++;
-      diagnostics.renderableModCount++;
-      if (xmlDiagnostics?.status === 'partial') diagnostics.partialSourceCount++;
-    } catch (err) {
-      if(err instanceof MissingDevDependencyError)throw err;
-      const strictError = new Error(`DEV ${canonicalDevPath} 内 MOD 加载失败: ${geo.modPath}`);
-      (strictError as Error & { cause?: unknown }).cause = err;
-      throw strictError;
-    }
-  }
-
-  // 加载 STL
-  for (const geo of discovered.stls) {
-    try {
-      const file = getFileByPath(files, geo.stlPath);
-      if (!file) throw MissingDevDependencyError.forPath(canonicalDevPath,geo.stlPath,'STL');
-      const buffer = await file.arrayBuffer();
-      const group = parseStlBinary(buffer, geo.stlPath);
-      if (!group) throw new Error(`STL 解析失败: ${geo.stlPath}`);
-      if (!hasRenderableGeometry(group)) {
-        diagnostics.emptySourceCount++;
-        disposeSourceGroup(group);
-        continue;
-      }
-      applyPhmColorOverride(group, geo.phmColor, geo.phmColorMaxA);
-      // 烘焙 DEV × PHM placement 到顶点（含 mm→m）
-      applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
-      group.userData.devPath = geo.devPath;
-      group.userData.assemblyPath = geo.assemblyPath;
-      group.userData.referencePath = geo.referencePath;
-      devGroup.add(group);
-      stlLoaded++;
-      diagnostics.renderableStlCount++;
-    } catch (err) {
-      if (err instanceof MissingDevDependencyError) throw err;
-      const strictError = new Error(`DEV ${canonicalDevPath} 内 STL 加载失败: ${geo.stlPath}`);
-      (strictError as Error & { cause?: unknown }).cause = err;
-      throw strictError;
-    }
-  }
-
-  // All-small geometry is not a source-empty DEV. Retry only the largest
-  // omitted source, keeping one real silhouette instead of hiding the device.
-  if (devGroup.children.length === 0 && smallFallback && (!options.partition || options.partition.allowSmallFallback)) {
-    const geo = smallFallback.geo;
-    const group = await loadXmlModFromFiles(geo.modPath, files, geo.phmColor, geo.phmColorMaxA,
-      { strict: true, parseXml: options.parseXml, lod: options.lod,
-        outline: { placementMatrix: geo.placementTransformMatrix } });
-    if (group && hasRenderableGeometry(group)) {
-      applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
-      group.userData.devPath = geo.devPath; group.userData.assemblyPath = geo.assemblyPath; group.userData.referencePath = geo.referencePath;
-      devGroup.add(group); modLoaded++; diagnostics.renderableModCount++;
-      if (readXmlDiagnostics(group)?.status === 'partial') diagnostics.partialSourceCount++;
-    } else if (group) disposeSourceGroup(group);
-  }
-  if (devGroup.children.length === 0) {
-    // All referenced files were present and parsed, but none contained a
-    // renderable primitive (for example EMPTY_DEVICE_XML or an intentionally
-    // empty placeholder MOD).  This is a deterministic empty DEV, not a
-    // dependency/parse failure; persist it as the manifest `empty` tombstone.
-    diagnostics.status = diagnostics.unsupportedSourceCount > 0 ? 'unsupported' : 'empty';
-    diagnostics.reason = diagnostics.unsupportedSourceCount > 0
-      ? 'parser-unsupported'
-      : sawEmptyDeviceXml ? 'empty-device-xml' : (discovered.reason ?? 'assembly-node-without-own-geometry');
-    return { status: diagnostics.status, bytes: null, diagnostics,
-      ...(smallFallback ? {smallFallback:{referencePath:edgeReference(smallFallback.geo),extent:smallFallback.extent}} : {}) };
-  }
-
-  diagnostics.status = diagnostics.unsupportedSourceCount > 0
-    || diagnostics.partialSourceCount > 0
-    || diagnostics.emptySourceCount > 0
-    ? 'partial'
-    : 'complete';
-
-  debugLog(DEBUG_GIM_CACHE, `[glbCache] DEV ${canonicalDevPath}: ${modLoaded} MOD + ${stlLoaded} STL 合并完成`);
-
-  // Finite source coordinates can still be corrupt. Reject before exporting
-  // and publishing a normal GLB, using the existing scene extent budget.
-  // Do not clamp source values or remove entities and label the DEV complete.
-  const invalidExtent = invalidGeometryExtent(devGroup);
-  if (invalidExtent) {
-    for (const child of [...devGroup.children]) {
-      devGroup.remove(child);
-      disposeSourceGroup(child as THREE.Group);
-    }
-    // Verify source placements independently of primitive mesh construction.
-    // An arbitrary renderer/serializer failure is never a source tombstone.
-    const { parseXmlMod } = await import('../gim/geometry/xmlModParser.js');
-    const origins = new THREE.Box3();
-    const sources: string[] = [];
-    for (const edge of discovered.mods) {
-      const file=getFileByPath(files,edge.modPath);
-      if (!file) throw new Error(`Source evidence missing: ${edge.modPath}`);
-      const doc=(options.parseXml ?? parseXmlMod)(await file.text(),edge.modPath);
-      for (const entity of doc.entities) {
-        if (!entity.visible) continue;
-        const point=new THREE.Vector3().applyMatrix4(new THREE.Matrix4().fromArray(entity.transformMatrix))
-          .applyMatrix4(new THREE.Matrix4().fromArray(edge.placementTransformMatrix)).multiplyScalar(0.001);
-        origins.expandByPoint(point);
-        if (sources.length<8 && point.length()>GEOMETRY_MAX_EXTENT_M) sources.push(`${edge.modPath} Entity ${entity.id}: ${entity.transformMatrix.join(',')}`);
-      }
-    }
-    const span=origins.getSize(new THREE.Vector3());
-    const sourceEvidence=Number.isFinite(span.length()) && Math.max(span.x,span.y,span.z)>GEOMETRY_MAX_EXTENT_M
-      ? `source-origin-span-v1: ${span.toArray().join(',')}; ${sources.join('; ')}` : undefined;
-    throw new InvalidDevGeometryError(canonicalDevPath, `${invalidExtent}; sources: ${[...discovered.mods.map(r=>r.modPath),...discovered.stls.map(r=>r.stlPath)].join(", ")}`, sourceEvidence);
-  }
-
-  // 3. 序列化 devGroup → GLB
-  const exportStarted = performance.now();
   try {
+    let smallFallback: { geo: typeof discovered.mods[number]; extent: number } | undefined;
+    // 加载 MOD
+    for (const geo of discovered.mods) {
+      try {
+        if(!getFileByPath(files,geo.modPath))
+          throw MissingDevDependencyError.forPath(canonicalDevPath,geo.modPath,geo.modPath.toLowerCase().endsWith('.gl')?'GL':'MOD');
+        const group = await loadXmlModFromFiles(
+          geo.modPath,
+          files,
+          geo.phmColor,
+          geo.phmColorMaxA,
+          { strict: true, parseXml: options.parseXml, lod: options.lod, timings: options.timings, onStage:options.onStage,
+            outline: { placementMatrix: geo.placementTransformMatrix, deferSmallPartFallback: true,
+              rootSlice:options.partition?.rootSlice } },
+        );
+        if (!group) continue;
+        ownedSourceGroups.add(group);
+        const xmlDiagnostics = readXmlDiagnostics(group);
+        if (xmlDiagnostics) {
+          if (xmlDiagnostics.status === 'empty' && !xmlDiagnostics.omittedSmallParts) sawEmptyDeviceXml = true;
+          addUnsupportedCounts(xmlDiagnostics.unsupportedPrimitiveTypeCounts);
+          diagnostics.failedVisibleRootCount = (diagnostics.failedVisibleRootCount ?? 0) + (xmlDiagnostics.failedVisibleRoots?.length ?? 0);
+          diagnostics.failedVisibleRoots ??= [];
+          for (const failure of xmlDiagnostics.failedVisibleRoots ?? []) if (diagnostics.failedVisibleRoots.length < 64)
+            diagnostics.failedVisibleRoots.push({ modPath: geo.modPath, ...failure });
+          diagnostics.representationPolicy = xmlDiagnostics.representationPolicy;
+          diagnostics.approximatedBooleans ??= { Union: 0, Difference: 0, Intersection: 0 };
+          for (const op of ['Union', 'Difference', 'Intersection'] as const)
+            diagnostics.approximatedBooleans[op] += xmlDiagnostics.approximatedBooleans?.[op] ?? 0;
+          diagnostics.omittedSmallParts = (diagnostics.omittedSmallParts ?? 0) + (xmlDiagnostics.omittedSmallParts ?? 0);
+          const extent = xmlDiagnostics.omittedMaxExtentMm ?? 0;
+          if (xmlDiagnostics.omittedSmallParts && (!smallFallback || extent > smallFallback.extent
+            || extent === smallFallback.extent && edgeReference(geo) < edgeReference(smallFallback.geo))) smallFallback = { geo, extent };
+          diagnostics.omittedMaxExtentMm = Math.max(diagnostics.omittedMaxExtentMm ?? 0, extent);
+          diagnostics.simplifiedBooleans = (diagnostics.simplifiedBooleans ?? 0) + (xmlDiagnostics.simplifiedBooleans ?? 0);
+        }
+        // EMPTY_DEVICE_XML and MODs whose parsed entities have no supported
+        // renderable primitive are deterministic empty geometry. Do not add an
+        // empty Group to the exported scene: an otherwise-empty DEV must become
+        // the explicit `empty` manifest state, while mixed DEV content keeps its
+        // real meshes only.
+        if (!hasRenderableGeometry(group)) {
+          if (!xmlDiagnostics || xmlDiagnostics.status === 'empty' && !xmlDiagnostics.omittedSmallParts) diagnostics.emptySourceCount++;
+          if (xmlDiagnostics && xmlDiagnostics.status !== 'empty') diagnostics.unsupportedSourceCount++;
+          disposeSourceGroup(group);
+          continue;
+        }
+        // 烘焙 DEV × PHM placement 到顶点（含 mm→m）
+        applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+        group.userData.devPath = geo.devPath;
+        group.userData.assemblyPath = geo.assemblyPath;
+        group.userData.referencePath = geo.referencePath;
+        devGroup.add(group);
+        modLoaded++;
+        diagnostics.renderableModCount++;
+        if (xmlDiagnostics?.status === 'partial') diagnostics.partialSourceCount++;
+      } catch (err) {
+        if(err instanceof MissingDevDependencyError)throw err;
+        const strictError = new Error(`DEV ${canonicalDevPath} 内 MOD 加载失败: ${geo.modPath}`);
+        (strictError as Error & { cause?: unknown }).cause = err;
+        throw strictError;
+      }
+    }
+
+    // 加载 STL
+    for (const geo of discovered.stls) {
+      try {
+        const file = getFileByPath(files, geo.stlPath);
+        if (!file) throw MissingDevDependencyError.forPath(canonicalDevPath,geo.stlPath,'STL');
+        const shared = (stlCounts.get(geo.stlPath) ?? 0) > 1;
+        let sourceBytes: ArrayBuffer | undefined;
+        let source = stlSources.get(geo.stlPath);
+        if (!source) {
+          sourceBytes = await file.arrayBuffer();
+          source = parseStlBinary(sourceBytes, geo.stlPath) ?? undefined;
+          if (source && shared) { stlSources.set(geo.stlPath, source); ownedSourceGroups.add(source); }
+        }
+        // The source ID owns one vertex/normal buffer. Occurrence nodes keep
+        // their full affine matrix and color; no triangles or occurrences go
+        // missing merely to fit one DEV into its unchanged byte ceiling.
+        const group = shared ? source?.clone(true) : source;
+        if (!group) throw new Error(`STL 解析失败: ${geo.stlPath}`);
+        ownedSourceGroups.add(group);
+        if (!hasRenderableGeometry(group)) {
+          diagnostics.emptySourceCount++;
+          disposeSourceGroup(group);
+          continue;
+        }
+        applyPhmColorOverride(group, geo.phmColor, geo.phmColorMaxA);
+        if (shared) {
+          const placement = new THREE.Matrix4().fromArray(geo.placementTransformMatrix);
+          if (placement.determinant() === 0) {
+            // Singular matrices cannot transform a normal back to local space.
+            // Keep the established baked representation for that occurrence.
+            group.traverse(node => { const mesh=node as THREE.Mesh; if(mesh.geometry)mesh.geometry=mesh.geometry.clone(); });
+            applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+          } else {
+            // GLTFExporter substitutes X for a zero normal after baking. For
+            // matrix nodes preserve that same world fallback, sharing position
+            // buffers and only varying normals when a source actually needs it.
+            const fallback = new THREE.Vector3(1,0,0).applyMatrix3(new THREE.Matrix3().getNormalMatrix(placement).invert()).normalize();
+            group.traverse(node => {
+              const mesh=node as THREE.Mesh, geometry=mesh.geometry;
+              const normal=geometry?.getAttribute('normal'); if(!normal)return;
+              let zeros=zeroStlNormals.get(geometry);
+              if(!zeros){zeros=[];for(let i=0;i<normal.count;i++)if(normal.getX(i)===0&&normal.getY(i)===0&&normal.getZ(i)===0)zeros.push(i);zeroStlNormals.set(geometry,zeros);}
+              if(!zeros.length||fallback.equals(new THREE.Vector3(1,0,0)))return;
+              let variants=stlNormalVariants.get(geometry);if(!variants){variants=new Map();stlNormalVariants.set(geometry,variants);}
+              const key=fallback.toArray().join(',');let variant=variants.get(key);
+              if(!variant){
+                variant=new THREE.BufferGeometry();
+                for(const [name,attribute] of Object.entries(geometry.attributes))variant.setAttribute(name,name==='normal'?attribute.clone():attribute);
+                for(const index of zeros)variant.getAttribute('normal').setXYZ(index,fallback.x,fallback.y,fallback.z);
+                variants.set(key,variant);
+              }
+              mesh.geometry=variant;
+            });
+            group.matrixAutoUpdate = false;
+            group.matrix.copy(placement);
+            group.matrix.elements[12] *= 0.001;
+            group.matrix.elements[13] *= 0.001;
+            group.matrix.elements[14] *= 0.001;
+          }
+        } else applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+        group.userData.devPath = geo.devPath;
+        group.userData.assemblyPath = geo.assemblyPath;
+        group.userData.referencePath = geo.referencePath;
+        devGroup.add(group);
+        // One binary STL can legitimately describe an entire site. Verify its
+        // raw vertex envelope independently; do not grant XML, mixed sources,
+        // unmatched geometry or imprecise coordinates a larger blanket limit.
+        if (sourceBytes && discovered.mods.length === 0 && discovered.stls.length === 1 && sourceBytes.byteLength >= 84) {
+          const triangles = new DataView(sourceBytes).getUint32(80, true);
+          const bounds = triangles <= 5_000_000 && 84 + triangles * 50 === sourceBytes.byteLength ? stlBounds(sourceBytes) : null;
+          if (bounds) {
+            const placement = new THREE.Matrix4().fromArray(geo.placementTransformMatrix);
+            bounds.applyMatrix4(placement); bounds.min.multiplyScalar(0.001); bounds.max.multiplyScalar(0.001);
+            const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', sourceBytes))].map(n => n.toString(16).padStart(2,'0')).join('');
+            if(Math.max(...bounds.getSize(new THREE.Vector3()).toArray())>GEOMETRY_MAX_EXTENT_M){
+              devGroup.userData[STL_SOURCE_ENVELOPE_KEY] = {kind:'binary-stl-source-v1',path:geo.stlPath,sha256,triangles,
+                bounds:[...bounds.min.toArray(),...bounds.max.toArray()]} satisfies StlSourceEnvelope;
+              acceptVerifiedStlSourceEnvelope(devGroup);
+            }
+          }
+        }
+        stlLoaded++;
+        diagnostics.renderableStlCount++;
+      } catch (err) {
+        if (err instanceof MissingDevDependencyError) throw err;
+        const strictError = new Error(`DEV ${canonicalDevPath} 内 STL 加载失败: ${geo.stlPath}`);
+        (strictError as Error & { cause?: unknown }).cause = err;
+        throw strictError;
+      }
+    }
+
+    // All-small geometry is not a source-empty DEV. Retry only the largest
+    // omitted source, keeping one real silhouette instead of hiding the device.
+    if (devGroup.children.length === 0 && smallFallback && (!options.partition || options.partition.allowSmallFallback)) {
+      const geo = smallFallback.geo;
+      const group = await loadXmlModFromFiles(geo.modPath, files, geo.phmColor, geo.phmColorMaxA,
+        { strict: true, parseXml: options.parseXml, lod: options.lod,
+          outline: { placementMatrix: geo.placementTransformMatrix } });
+      if (group) ownedSourceGroups.add(group);
+      if (group && hasRenderableGeometry(group)) {
+        applyPlacementTransformToSceneUnits(group, geo.placementTransformMatrix);
+        group.userData.devPath = geo.devPath; group.userData.assemblyPath = geo.assemblyPath; group.userData.referencePath = geo.referencePath;
+        devGroup.add(group); modLoaded++; diagnostics.renderableModCount++;
+        if (readXmlDiagnostics(group)?.status === 'partial') diagnostics.partialSourceCount++;
+      } else if (group) disposeSourceGroup(group);
+    }
+    if (devGroup.children.length === 0) {
+      // All referenced files were present and parsed, but none contained a
+      // renderable primitive (for example EMPTY_DEVICE_XML or an intentionally
+      // empty placeholder MOD).  This is a deterministic empty DEV, not a
+      // dependency/parse failure; persist it as the manifest `empty` tombstone.
+      diagnostics.status = diagnostics.unsupportedSourceCount > 0 ? 'unsupported' : 'empty';
+      diagnostics.reason = diagnostics.unsupportedSourceCount > 0
+        ? 'parser-unsupported'
+        : sawEmptyDeviceXml ? 'empty-device-xml' : (discovered.reason ?? 'assembly-node-without-own-geometry');
+      return { status: diagnostics.status, bytes: null, diagnostics,
+        ...(smallFallback ? {smallFallback:{referencePath:edgeReference(smallFallback.geo),extent:smallFallback.extent}} : {}) };
+    }
+
+    diagnostics.status = diagnostics.unsupportedSourceCount > 0
+      || diagnostics.partialSourceCount > 0
+      || diagnostics.emptySourceCount > 0
+      ? 'partial'
+      : 'complete';
+
+    debugLog(DEBUG_GIM_CACHE, `[glbCache] DEV ${canonicalDevPath}: ${modLoaded} MOD + ${stlLoaded} STL 合并完成`);
+
+    // Finite source coordinates can still be corrupt. Reject before exporting
+    // and publishing a normal GLB, using the existing scene extent budget.
+    // Do not clamp source values or remove entities and label the DEV complete.
+    const invalidExtent = invalidGeometryExtent(devGroup);
+    if (invalidExtent) {
+      for (const group of ownedSourceGroups) disposeSourceGroup(group);
+      // Verify source placements independently of primitive mesh construction.
+      // An arbitrary renderer/serializer failure is never a source tombstone.
+      const { parseXmlMod } = await import('../gim/geometry/xmlModParser.js');
+      const origins = new THREE.Box3();
+      const sources: string[] = [];
+      for (const edge of discovered.mods) {
+        const file=getFileByPath(files,edge.modPath);
+        if (!file) throw new Error(`Source evidence missing: ${edge.modPath}`);
+        const doc=(options.parseXml ?? parseXmlMod)(await file.text(),edge.modPath);
+        for (const entity of doc.entities) {
+          if (!entity.visible) continue;
+          const point=new THREE.Vector3().applyMatrix4(new THREE.Matrix4().fromArray(entity.transformMatrix))
+            .applyMatrix4(new THREE.Matrix4().fromArray(edge.placementTransformMatrix)).multiplyScalar(0.001);
+          origins.expandByPoint(point);
+          if (sources.length<8 && point.length()>GEOMETRY_MAX_EXTENT_M) sources.push(`${edge.modPath} Entity ${entity.id}: ${entity.transformMatrix.join(',')}`);
+        }
+      }
+      const span=origins.getSize(new THREE.Vector3());
+      const sourceEvidence=Number.isFinite(span.length()) && Math.max(span.x,span.y,span.z)>GEOMETRY_MAX_EXTENT_M
+        ? `source-origin-span-v1: ${span.toArray().join(',')}; ${sources.join('; ')}` : undefined;
+      throw new InvalidDevGeometryError(canonicalDevPath, `${invalidExtent}; sources: ${[...discovered.mods.map(r=>r.modPath),...discovered.stls.map(r=>r.stlPath)].join(", ")}`, sourceEvidence);
+    }
+
+    // 3. 序列化 devGroup → GLB
+    const exportStarted = performance.now();
     const bytes = await exportGroupToGlb(devGroup, canonicalDevPath);
     if (options.timings) options.timings.exportWallMs = (options.timings.exportWallMs ?? 0) + performance.now() - exportStarted;
     return { status: diagnostics.status, bytes, diagnostics };
   } finally {
-    for (const child of [...devGroup.children]) {
-      devGroup.remove(child);
-      disposeSourceGroup(child as THREE.Group);
-    }
+    // Includes dependency/placement failures before export and groups not yet
+    // attached to devGroup. Cache-owned MOD resources keep their own lifetime.
+    for (const group of ownedSourceGroups) disposeSourceGroup(group);
   }
 }
 
@@ -766,6 +849,13 @@ export function parseDevGlbAsset(
       '',
       (gltf) => {
         const group = gltf.scene as THREE.Group;
+        // GLTFLoader decomposes matrix nodes into TRS. Restore the source
+        // matrix before any world update so shear/reflection is never lost.
+        group.traverse(object => {
+          const index = gltf.parser.associations.get(object)?.nodes;
+          const matrix = index === undefined ? undefined : gltf.parser.json.nodes[index]?.matrix;
+          if (matrix) { object.matrix.fromArray(matrix); object.matrixAutoUpdate = false; }
+        });
         group.name = `glb-dev:${devPath}`;
         group.userData.devPath = devPath;
         resolve({ scene: group, animations: gltf.animations ?? [] });

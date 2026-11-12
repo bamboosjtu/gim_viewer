@@ -1,5 +1,5 @@
 import {CaptureController,diagnosticPlan} from './diagnostics.mjs';
-import {SystemCapture,systemCapabilities,exportSystemTables} from './system-diagnostics.mjs';
+import {SystemCapture,systemCapabilities} from './system-diagnostics.mjs';
 import {analyzeRun,exportRunTrace} from './observability.mjs';
 import {spawn,spawnSync} from 'node:child_process';
 import {createServer} from 'node:net';
@@ -36,7 +36,7 @@ async function port(){const server=createServer();await new Promise((resolve,rej
 async function stop(child){if(!child?.pid||child.exitCode!==null||child.signalCode!==null)return;spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});await Promise.race([new Promise(resolve=>child.once('exit',resolve)),delay(5000)]);if(child.exitCode===null&&child.signalCode===null)throw Error('Owned application cleanup failed');}
 
 /** Each call owns one native process and raw report; cold/warm share cache and WebView profile. */
-export async function runNative({root,buildManifest,sample,profileDigest='unfrozen',mode='benchmark',scenario='open',cacheState='cold',dataRoot,timeoutMs=300000,doctor=false,actions=[],diagnostic,additionalSamples=[],exercise,signal,onStarted=()=>{},environmentCalibration=null}){
+export async function runNative({root,buildManifest,sample,profileDigest='unfrozen',mode='benchmark',scenario='open',cacheState='cold',dataRoot,timeoutMs=300000,doctor=false,actions=[],diagnostic,additionalSamples=[],exercise,signal,onStarted=()=>{},onReady=async()=>{},environmentCalibration=null}){
   const plan=diagnosticPlan(diagnostic?.kind?null:diagnostic??(mode==='diagnostic'?{captures:[]}:null),diagnostic?.kind?diagnostic:null);
   if(plan&&mode!=='diagnostic')throw Error('diagnostic-mode-required');
   if(process.platform!=='win32')throw Error('Native benchmark requires Windows');
@@ -88,7 +88,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     GIM_BENCHMARK_MANIFEST:manifestPath,WEBVIEW2_USER_DATA_FOLDER:profile,WEBVIEW2_BROWSER_EXECUTABLE_FOLDER:runtime,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${debugPort} --remote-debugging-address=127.0.0.1 --enable-logging --log-file="${join(out,'webview.private.log')}" --v=1`};
   let systemCapture;
-  if(plan?.system){systemCapture=new SystemCapture(root,out,plan.system,{...build,manifestPath:buildManifest});await systemCapture.start();}
+  if(plan?.system){systemCapture=new SystemCapture(plan.system);await systemCapture.start();}
   const applicationStartedAtMs=performance.now();
   const child=spawn(executable,[],{cwd:folder,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
   let spawnFailed=false;child.on('error',()=>{spawnFailed=true;});
@@ -144,6 +144,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     applicationReadyMs=performance.now()-applicationStartedAtMs;
     const database=await cdp.evaluate("globalThis.__TAURI_INTERNALS__.invoke('get_db_path')");
     if(resolve(database).toLowerCase()!==join(dataRoot,'gim_cache_schema_v1.db').toLowerCase())throw Error('native-cache-root-mismatch');
+    await onReady(cdp,{runId,out,build});
     sampler=new WorkerHeapSampler(cdp,row=>{
       appendFileSync(join(out,'heap.jsonl'),JSON.stringify(row)+'\n');heapRows++;
       if(row.kind==='heap-sample'&&row.workerId){const previous=heapRecords.get(row.workerId);
@@ -337,8 +338,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     if(mode==='diagnostic'&&cdp&&!cdp.closed){await cdp.evaluate('globalThis.__gimBenchmark.finishOperation('+JSON.stringify(settledObservedAtMs)+')').catch(()=>{});
       await delay(150);await flushAcks();await delay(100);}
     if(captures)captureResults=await captures.stop();
-    if(systemCapture){systemResult=await systemCapture.stop();
-      if(systemResult.status==='available')systemResult.export=await exportSystemTables(root,join(out,'system'),join(out,'system','system.private.etl'),{...plan.system,ownedProcesses:[...new Map(processSamples.flatMap(row=>(row.processInstances??[]).map(([pid,created])=>[pid+':'+created,{pid,created}]))).values()]}).catch(()=>({availability:'unavailable',reason:'system-export-failed'}));}
+    if(systemCapture)systemResult=await systemCapture.stop();
     clearInterval(ackTimer);sampler?.stop();cdp?.close();const sampling=await processSampler.stop();if(sampling.failures)streamFailures+=sampling.failures;
     exitBeforeCleanup={code:child.exitCode,signal:child.signalCode};
     try{await stop(child);cleanupComplete=true;}catch{reason='owned-process-cleanup-failed';}}

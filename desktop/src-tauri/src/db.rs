@@ -67,7 +67,7 @@ pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v28";
 /// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
 ///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v18-dev-wide-outline";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v20-source-bound-stl";
 
 /// 应用级数据库连接
 pub struct DbState(pub Mutex<Connection>);

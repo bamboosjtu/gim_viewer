@@ -288,8 +288,7 @@ test('CPU profile brackets retain a candidate while an unverified clock domain s
 });
 
 test('system capture rejects the unauthenticated plan launcher without creating files or elevation',async()=>{
-  const parent=resolve('..','tmp','system-auth-contract');mkdirSync(parent,{recursive:true});
-  const folder=mkdtempSync(join(parent,'run-')),capture=new SystemCapture(folder,folder,{durationMs:1000,bufferMiB:8},{});
+  const capture=new SystemCapture({durationMs:1000,bufferMiB:8});
   await capture.start();const status=await capture.stop();
   assert.equal(status.status,'unavailable');assert.equal(status.reason,'authenticated-system-helper-required');
   assert.equal(status.actualCaptureVerified,false);

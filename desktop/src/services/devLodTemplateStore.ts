@@ -29,6 +29,7 @@ export interface TemplateLifecycle {
   outputBytes:number;cacheStatus:string;memoryPressure:string;status:string;
 }
 export interface DevLodTemplateStoreOptions {
+  verifySourceEnvelope?: (devPath:string,scene:THREE.Group)=>Promise<void>;
   session: ProjectLoadSession;
   perf: ReturnType<typeof perfCurrentSession>;
   diagnostics: DevLodDiagnostics;
@@ -147,10 +148,12 @@ export class DevLodTemplateStore {
         let artifact: CachedTemplate | undefined = lease.value;
         let parsed: Awaited<ReturnType<typeof parseDevGlbAsset>> = null;
         let validated:Awaited<ReturnType<typeof parseDevGlbAsset>>=null;
-        const validate=()=>{
+        const validate=async()=>{
           if(!parsed)return false;
           if(validated===parsed)return true;
           const started=performance.now();
+          await this.options.verifySourceEnvelope?.(dev,parsed.scene);
+          if(!this.options.current())throw new DOMException('DEV source verification expired','AbortError');
           const valid=validateDevGlbTemplate(parsed).shareable && !invalidGeometryExtent(parsed.scene);
           perfRecordTaskPhase(identity,'vertexValidation',performance.now()-started,this.options.perf,valid?'completed':'failed');
           if(valid)validated=parsed;
@@ -203,7 +206,7 @@ export class DevLodTemplateStore {
             if (artifact.result.bytes.byteLength > this.inputBudget.limit) throw Error('DEV cached input exceeds quota');
             if (await perfMeasureTaskPhase(identity, 'cacheHash', () => hash(artifact!.result.bytes!), this.options.perf) !== artifact.sha) throw Error('DEV template SHA mismatch');
             parsed = await perfMeasureTaskPhase(identity, 'deserialize', () => parseDevGlbAsset(dev, artifact!.result.bytes!), this.options.perf);
-            if (!parsed || !validate()) throw Error('Invalid DEV cached template');
+            if (!parsed || !await validate()) throw Error('Invalid DEV cached template');
             this.options.diagnostics.lodHits[lod]++;
             this.options.diagnostics.templateHits++;
             this.options.diagnostics.cacheHits++;
@@ -211,6 +214,7 @@ export class DevLodTemplateStore {
           } catch (error) {
             if (parsed) new DevGlbTemplate(dev, parsed.scene, this.options.session).dispose();
             parsed = null;
+            if((error as Error)?.name==='AbortError'||!this.options.current())throw error;
             this.options.diagnostics.lodInvalid[lod]++;
             this.options.diagnostics.cacheInvalidCount++;
             this.options.recordCacheDecision(dev, lod, 'invalid', String(error));
@@ -285,7 +289,13 @@ export class DevLodTemplateStore {
           return null;
         }
         parsed ??= await perfMeasureTaskPhase(identity, 'deserialize', () => parseDevGlbAsset(dev, artifact!.result.bytes!), this.options.perf);
-        if (!parsed || !validate()) {
+        let valid=false;
+        try{valid=!!parsed&&await validate();}
+        catch(error){
+          if(parsed)new DevGlbTemplate(dev,parsed.scene,this.options.session).dispose();
+          parsed=null;throw error;
+        }
+        if (!parsed || !valid) {
           if (parsed) new DevGlbTemplate(dev, parsed.scene, this.options.session).dispose();
           throw Error(`DEV GLB invalid: ${dev}`);
         }

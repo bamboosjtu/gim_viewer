@@ -4,7 +4,7 @@ import measuredWorkerAsset from './devGeometryWorker.ts?worker&url';
 import { createMeasuredWorker, measurementWorkerUrl,measurementWorkerIdentity,measurementWorkerTask,markMeasuredWorkerTaskCancellation } from '../measurement/hostWorker.js';
 import {OutputResources} from '../measurement/outputResources.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
-import { DEV_GLB_MAX_BYTES, aggregateDevGlbDiagnostics, type DevGeometryCompilePlan, type DevGlbSerializationResult } from './glbCacheService.js';
+import { DEV_GLB_MAX_BYTES, DEV_SPLIT_MAX_INPUT_BYTES, aggregateDevGlbDiagnostics, type DevGeometryCompilePlan, type DevGlbSerializationResult } from './glbCacheService.js';
 import type { DiscoveredGeometries } from './modGeometryDiscovery.js';
 import type { DeviceLod } from '../viewer/xmlModGeometry.js';
 import type { DevSourceBounds } from './devSpatialCatalog.js';
@@ -44,7 +44,7 @@ interface Slot { observation?:ReturnType<typeof measureQueuedTask>; id: number; 
 const clients = new WeakMap<AppState, DevGeometryPreprocessor>();
 let serial = 0;
 const IDLE_POOL_TIMEOUT_MS = 30_000;
-const SPLIT_MERGE_INPUT_BUDGET = 64 * 1024 * 1024;
+const SPLIT_MERGE_INPUT_BUDGET = DEV_SPLIT_MAX_INPUT_BYTES;
 const SPLIT_POOL_RESERVATION_BUDGET = 3 * SPLIT_MERGE_INPUT_BUDGET;
 /** Computation slots and unacknowledged results have separate lifetimes.
  * Ordinary results use 64 MiB backpressure. One admitted split parent reserves

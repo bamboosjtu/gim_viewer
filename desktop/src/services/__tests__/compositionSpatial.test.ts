@@ -1,7 +1,29 @@
 import {expect,it} from 'vitest';
 import {normalizeEngineeringModel} from '../../engineering/normalize.js';
-import {type CompositionSpatialDiagnostics,compareCompositionAssignments,fromIfcYUpBounds,projectSpatialComposition} from '../projections/compositionSpatial.js';
+import {type CompositionSpatialDiagnostics,fromIfcYUpBounds,projectSpatialComposition} from '../projections/compositionSpatial.js';
+import type {CompositionAssignment} from '../../engineering/composition.js';
 import type {ObjectEvidence} from '../../engineering/types.js';
+
+interface CompositionParityMismatch {entityId:string;sourceIds:string[];expectedPaths:string[];actualPaths:string[];}
+function compareCompositionAssignments(
+  expected: readonly CompositionAssignment[],
+  actual: readonly CompositionAssignment[],
+  sourceIdsByEntity: ReadonlyMap<string, readonly string[]> = new Map(),
+): { missing: string[]; extra: string[]; mismatches: CompositionParityMismatch[] } {
+  const key = (rows: readonly CompositionAssignment[]) => new Map(rows.map(row => [row.entityId, row]));
+  const left = key(expected), right = key(actual), missing: string[] = [], extra: string[] = [], mismatches: CompositionParityMismatch[] = [];
+  for (const [entityId, row] of left) {
+    const other = right.get(entityId);
+    if (!other) { missing.push(entityId); continue; }
+    const paths = (value: CompositionAssignment) => value.paths.map(path => path.map(group => `${group.kind}:${group.key}`).join('/')).sort();
+    const expectedPaths = paths(row), actualPaths = paths(other);
+    if (JSON.stringify(expectedPaths) !== JSON.stringify(actualPaths)) mismatches.push({
+      entityId, sourceIds: [...(sourceIdsByEntity.get(entityId) ?? [])], expectedPaths, actualPaths,
+    });
+  }
+  for (const entityId of right.keys()) if (!left.has(entityId)) extra.push(entityId);
+  return { missing, extra, mismatches };
+}
 const object=(sourceId:string,name:string):ObjectEvidence=>({sourceId,name,traits:{},designations:[],identityCodes:[],identityNames:[],phases:[]});
 it('uses named storeys in a placeholder building and projects other architectural files into its footprint without merging wholes',()=>{
  const snapshot=normalizeEngineeringModel('p',[object('a','墙'),object('b','板'),object('c','柱'),object('d','梁')]),before=JSON.stringify(snapshot);

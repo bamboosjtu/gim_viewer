@@ -1,8 +1,10 @@
 import {mkdirSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {runNative} from './native-run.mjs';
-import {median,partialSignature} from './compare.mjs';
+import {partialSignature} from './compare.mjs';
+import {median} from './statistics.mjs';
 import {verifyProfile} from './profiles.mjs';
+import {performanceComparison} from './performance-policy.mjs';
 
 /** A matrix's actions belong to its frozen Profile, never the sample registry. */
 export function resolveOverheadPlan({candidate,profile,sample}){
@@ -21,7 +23,7 @@ export function resolveOverheadPlan({candidate,profile,sample}){
   return {profile:profile??{digest:candidate.profileDigest},caseSpec};
 }
 
-export async function measureProbeOverhead({root,buildManifest,sample,profile,caseSpec,repetitions=3,retest=false}){
+export async function measureProbeOverhead({root,buildManifest,sample,profile,caseSpec,repetitions=3}){
   const runs=[];const out=join(root,'tmp','gim-bench',`overhead-${Date.now()}`);mkdirSync(out,{recursive:true});
   for(let round=0;round<repetitions;round++)for(const mode of round%2?['benchmark','off']:['off','benchmark']){
     writeFileSync(join(out,'progress.json'),JSON.stringify({round,mode,completed:runs.length},null,2));
@@ -35,12 +37,9 @@ export async function measureProbeOverhead({root,buildManifest,sample,profile,ca
   const metrics=['firstResponseMs','automaticLoadMs','processPrivatePeakBytes'].map(name=>{
     const base=median(off.map(r=>r.metrics[name])),value=median(on.map(r=>r.metrics[name]));return {name,off:base,benchmark:value,regression:base>0?value/base-1:null};
   });
-  const outcome=!complete||!consistentCoverage?'INCONCLUSIVE':metrics.some(row=>row.regression===null||row.regression>0.1)?'FAIL':runs[0].correctness==='partial'?'PARTIAL':'PASS';
-  const result={kind:'same-build-probe-overhead',outcome,profileDigest:profile.digest,metrics,runs,independentProcesses:true,alternatingOrder:true};
-  if(outcome==='FAIL'&&!retest){
-    const second=await measureProbeOverhead({root,buildManifest,sample,profile,caseSpec,repetitions,retest:true});
-    result.retest=second.result;result.outcome=second.result.outcome;
-    result.regressionConfirmed=second.result.outcome==='FAIL';
-  }
+  const performanceAssessment=performanceComparison(off,on,{comparable:complete&&consistentCoverage});
+  const outcome=!complete||!consistentCoverage||performanceAssessment.requiresHumanReview?'INCONCLUSIVE':runs[0].correctness==='partial'?'PARTIAL':'PASS';
+  const result={kind:'same-build-probe-overhead',outcome,profileDigest:profile.digest,metrics,runs,performanceAssessment,
+    independentProcesses:true,alternatingOrder:true,baselineApprovalStatus:'PENDING'};
   writeFileSync(join(out,'overhead.json'),JSON.stringify(result,null,2));return {out,result};
 }
