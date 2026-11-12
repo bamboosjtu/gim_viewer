@@ -89,22 +89,35 @@ export async function streamConnectionGeometry(api: IfcAPI, model: number, norma
         const placed = flat.geometries.get(part);
         const geometry = api.GetGeometry(model, placed.geometryExpressID);
         try {
-          // Copy one bounded chunk before yielding: WASM views may detach on
-          // a later allocation, and transferred arrays must not alias its heap.
+          // Public web-ifc accessors copy from byte pointers. Read this chunk's
+          // indices and referenced vertex range, never the whole mesh for each
+          // chunk. Owned copies remain safe across consumption waits/WASM growth.
           const count = geometry.GetIndexDataSize();
           const trianglesPerChunk = 3072;
           for (let start = 0, chunk = 0; start < count; start += trianglesPerChunk * 3, chunk++) {
-            const source = api.GetVertexArray(geometry.GetVertexData(), geometry.GetVertexDataSize());
-            const indices = api.GetIndexArray(geometry.GetIndexData(), count);
             const end = Math.min(count, start + trianglesPerChunk * 3);
             if ((end - start) % 3) throw Error(`Invalid connection triangles: ${id}`);
+            const indices = api.GetIndexArray(geometry.GetIndexData() + start * Uint32Array.BYTES_PER_ELEMENT, end - start);
+            if (indices.length !== end - start) throw Error(`Invalid connection indices: ${id}`);
+            let first = Infinity, last = -Infinity;
+            for (const index of indices) { first = Math.min(first, index); last = Math.max(last, index); }
+            if (last * 6 + 6 > geometry.GetVertexDataSize()) throw Error(`Invalid connection index: ${id}`);
+            const floats = (last - first + 1) * 6;
+            const source = api.GetVertexArray(geometry.GetVertexData() + first * 6 * Float32Array.BYTES_PER_ELEMENT, floats);
+            if (source.length !== floats) throw Error(`Invalid connection vertices: ${id}`);
             const vertices = new Float32Array((end - start) * 6);
-            for (let index = start; index < end; index++) {
-              const offset = indices[index] * 6;
-              if (offset + 6 > source.length) throw Error(`Invalid connection index: ${id}`);
-              vertices.set(source.subarray(offset, offset + 6), (index - start) * 6);
+            for (let index = 0; index < indices.length; index++) {
+              const offset = (indices[index] - first) * 6;
+              const target = index * 6;
+              const x=source[offset],y=source[offset+1],z=source[offset+2];
+              const nx=source[offset+3],ny=source[offset+4],nz=source[offset+5];
+              // Six finite Float32 values cannot overflow a Number sum. Check
+              // referenced vertices only, without per-corner subarray objects
+              // or a second callback pass over the expanded triangle buffer.
+              if (!Number.isFinite(x+y+z+nx+ny+nz)) throw Error(`Non-finite connection geometry: ${id}`);
+              vertices[target]=x;vertices[target+1]=y;vertices[target+2]=z;
+              vertices[target+3]=nx;vertices[target+4]=ny;vertices[target+5]=nz;
             }
-            if (!vertices.every(Number.isFinite)) throw Error(`Non-finite connection geometry: ${id}`);
             const matrix = inverse.clone().multiply(new THREE.Matrix4().fromArray(placed.flatTransformation)).toArray();
             const color = [placed.color.x, placed.color.y, placed.color.z, placed.color.w];
             const payload: ConnectionMeshChunk = { object, part, chunk, vertices, matrix, color,

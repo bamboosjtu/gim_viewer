@@ -5,6 +5,7 @@ import type { EngineeringNavigationData } from '../gim/engineering/navigation.js
 import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
 import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import type { EngineeringWorkerPayload } from './engineeringWorkerTransport.js';
+import type { EngineeringNavigationCacheProjection } from './engineeringNavigationCache.js';
 
 export interface EngineeringExtractSummary { ifcPaths: string[]; sourceRecords: number }
 export const ENGINEERING_SOURCE_BATCH_BYTES=8*1024*1024;
@@ -44,7 +45,7 @@ export type EngineeringWorkerCommand =
   | { type: 'files'; files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }> }
   | { type: 'packed-files'; batch: EngineeringSourceBatch }
   | { type: 'extract' }
-  | { type: 'encode-cache'; buildId: number; domain: EngineeringCacheDomain; navigation?: EngineeringNavigationData }
+  | { type: 'encode-cache'; buildId: number; domain: EngineeringCacheDomain; projection?: EngineeringNavigationCacheProjection }
   | { type: 'assemble'; objects: IfcSpatialObject[]; models: SpatialModelSummary[]; nodes?: IfcSpatialNode[]; identity?: EngineeringCacheIdentity }
   | { type: 'restore'; sourceBytes: Uint8Array; entityBytes?: Uint8Array; navigationBytes?: Uint8Array; identity: EngineeringCacheIdentity };
 export type EngineeringWorkerRequest = EngineeringWorkerCommand & { requestId: number };

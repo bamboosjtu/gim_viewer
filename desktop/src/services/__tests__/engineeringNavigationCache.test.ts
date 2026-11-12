@@ -4,7 +4,7 @@ import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph
 import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
 import { projectEngineeringNavigation } from '../../gim/engineering/navigation.js';
 import { decodeEngineeringSources, encodeEngineeringSources } from '../engineeringCacheCodec.js';
-import { decodeEngineeringNavigation, encodeEngineeringNavigation } from '../engineeringNavigationCache.js';
+import { applyNavigationCacheProjection, createNavigationCacheProjection, decodeEngineeringNavigation, encodeEngineeringNavigation } from '../engineeringNavigationCache.js';
 
 async function fixture() {
   const raw: Record<string, string> = { 'project.cbm': 'OBJECTMODELPOINTER=unit.dev', 'unit.dev': 'SYMBOLNAME=主变压器\nSUBDEVICE0=terminal.dev', 'terminal.dev': 'SYMBOLNAME=端子箱' };
@@ -15,6 +15,36 @@ async function fixture() {
   return { ...built, view, id, source };
 }
 describe('independent navigation cache', () => {
+  it('returns only composition and search suffixes while preserving identical cache bytes and explicit search identities',async()=>{
+    const f=await fixture(),base=f.view;
+    const largeText='immutable inventory search '.repeat(500);
+    base.inventorySearch![0].searchText=largeText;
+    const refined={...base,compositionComplete:true,compositionCoverage:'full' as const,
+      composition:structuredClone(base.composition),compositionSearch:[...base.compositionSearch].reverse().map(row=>({...row,subtitle:'空间上下文',searchText:row.searchText+'\n空间上下文'}))};
+    const patch=createNavigationCacheProjection(base,refined);
+    expect(Object.keys(patch).sort()).toEqual(['composition','compositionComplete','compositionCoverage','search']);
+    expect(JSON.stringify(patch)).not.toContain(largeText);
+    const workerBase=structuredClone(base),merged=applyNavigationCacheProjection(workerBase,structuredClone(patch));
+    expect(merged).toEqual(refined);expect(merged.inventory).toBe(workerBase.inventory);expect(merged.sourceNodes).toBe(workerBase.sourceNodes);
+    expect(merged.compositionSearch.map(row=>row.key)).toEqual(refined.compositionSearch.map(row=>row.key));
+    const original=await encodeEngineeringNavigation(refined,f.sources,f.snapshot,f.source.digest,f.id);
+    expect(await encodeEngineeringNavigation(merged,f.sources,f.snapshot,f.source.digest,f.id)).toEqual(original);
+    expect(await decodeEngineeringNavigation(original,f.sources,f.snapshot,f.source.digest,f.id)).toEqual(refined);
+  });
+  it('rejects foreign/duplicate search identities and changes outside composition instead of dropping data',async()=>{
+    const {view:base}=await fixture();
+    base.compositionSearch.push({...base.compositionSearch[0],key:'second-transport-identity'});
+    const patch=createNavigationCacheProjection(base,base),reordered=structuredClone(patch);reordered.search.reverse();
+    expect(applyNavigationCacheProjection(base,reordered).compositionSearch.map(row=>row.key)).toEqual(reordered.search.map(row=>row.key));
+    for(const key of ['absent',patch.search[0].key]){
+      const bad=structuredClone(patch);bad.search[1].key=key;
+      expect(()=>applyNavigationCacheProjection(base,bad)).toThrow('projection search identity');
+    }
+    expect(()=>applyNavigationCacheProjection(base,{...patch,search:[]})).toThrow('projection search coverage');
+    expect(()=>createNavigationCacheProjection(base,{...base,sourceNodes:new Map(base.sourceNodes)})).toThrow('projection base changed');
+    const changed=structuredClone(base.compositionSearch);changed[0].searchText='replacement without original text';
+    expect(()=>createNavigationCacheProjection(base,{...base,compositionSearch:changed})).toThrow('projection search identity / prefix');
+  });
   it('round trips both projections and source/entity references', async () => {
     const f = await fixture(), bytes = await encodeEngineeringNavigation(f.view, f.sources, f.snapshot, f.source.digest, f.id);
     expect(await decodeEngineeringNavigation(bytes, f.sources, f.snapshot, f.source.digest, f.id)).toEqual(f.view);

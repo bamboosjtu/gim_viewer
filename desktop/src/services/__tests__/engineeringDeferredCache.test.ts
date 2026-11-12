@@ -2,6 +2,8 @@
 import { afterEach,expect,it,vi } from 'vitest';
 import { createEngineeringWorkerHandler } from '../engineeringWorker.js';
 import { decodeEngineeringWorkerResult } from '../engineeringWorkerTransport.js';
+import { createNavigationCacheProjection, decodeEngineeringNavigation, encodeEngineeringNavigation } from '../engineeringNavigationCache.js';
+import { decodeEngineeringSources } from '../engineeringCacheCodec.js';
 
 async function fixture(){
   const handle=createEngineeringWorkerHandler(),identity={sourceSha256:'a'.repeat(64),parserVersion:'test',entries:['project.cbm','main.dev']};
@@ -32,6 +34,23 @@ it('binds deferred cache requests to the latest build and requires source-first 
     expect(reply.result.error).toBeUndefined();expect(reply.result.metrics.plainBytes).toBeGreaterThan(0);
     const original=reply.result.bytes!;structuredClone(original,{transfer:[original.buffer]});expect(original.byteLength).toBe(0);
   }
+});
+
+it('applies a cloned composition-only request to the retained build and keeps the persisted navigation unchanged',async()=>{
+  const {handle,identity}=await fixture(),reply=await handle({type:'assemble',objects:[],models:[],identity});
+  if(reply.type!=='model')throw Error('model expected');
+  const result=await decodeEngineeringWorkerResult(reply.result,()=>true);
+  const refined={...result.navigation,compositionComplete:true,compositionCoverage:'full' as const,
+    compositionSearch:result.navigation.compositionSearch.map(row=>({...row,subtitle:'投影结果',searchText:row.searchText+'\n投影结果'}))};
+  const source=await handle({type:'encode-cache',buildId:result.buildId!,domain:'sources'});
+  if(source.type!=='cache'||!source.result.bytes)throw Error('sources expected');
+  const artifact=await decodeEngineeringSources(source.result.bytes,identity);
+  await handle({type:'encode-cache',buildId:result.buildId!,domain:'entities'});
+  const nav=await handle(structuredClone({type:'encode-cache',buildId:result.buildId!,domain:'navigation',projection:createNavigationCacheProjection(result.navigation,refined)}));
+  if(nav.type!=='cache')throw Error('navigation expected');
+  expect(nav.result.error).toBeUndefined();
+  expect(nav.result.bytes).toEqual(await encodeEngineeringNavigation(refined,result.sources,result.snapshot,artifact.digest,identity));
+  expect(await decodeEngineeringNavigation(nav.result.bytes!,result.sources,result.snapshot,artifact.digest,identity)).toEqual(refined);
 });
 
 it('decodes a GBK DeviceName-only family before classification without rewriting source bytes',async()=>{

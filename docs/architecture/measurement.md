@@ -50,7 +50,7 @@
 | 解析缓存 | Byte LRU 的文本/IR 权重，标为 estimated |
 | WASM | 已安装 web-ifc 的 HEAPU8 backing buffer 容量；不可访问时 unavailable |
 | Worker 堆 | 专用本地 CLI 通过 target → 应用 Worker ID → isolate ID 关联，再请求 CDP Runtime.getHeapUsage |
-| 进程树 | 原生 Private Bytes 检查点/周期采样；不平均分给 Worker |
+| 进程树 | 原生 Private Bytes 检查点/周期采样；诊断返回根进程 Private Bytes 和 PID/创建时间实例身份，不平均分给 Worker；实例身份仅留私有证据 |
 | Trace | Operation/Span/scope/dependency/wait/resource/message/milestone/health/render；Collector 有界保留，见后文 |
 | CPU/Allocation/Heap Profile | 仅 `diagnostic`；主线程或指定 Worker 的有界 CDP 采样，产物留私有目录 |
 | GPU/渲染 | Three 异步 Timer Query（每 Pass，最多 8 个在途、5 秒超时）；线路记录 MapLibre render 帧间隔 |

@@ -7,6 +7,7 @@ import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import type { EngineeringBuildResult, EngineeringCacheDomain, EngineeringCacheResult, EngineeringExtractSummary, EngineeringWorkerCommand, EngineeringWorkerRequest, EngineeringWorkerResponse } from './engineeringWorkerProtocol.js';
 import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
 import { decodeEngineeringWorkerResult } from './engineeringWorkerTransport.js';
+import type { EngineeringNavigationCacheProjection } from './engineeringNavigationCache.js';
 
 export interface EngineeringWorkerPort {
   postMessage(message: EngineeringWorkerRequest, transfer?: Transferable[]): void;
@@ -66,8 +67,8 @@ export class EngineeringWorkerClient {
     this.geometryOccurrences = response.geometryOccurrences;
     return response.summary;
   }
-  async encodeCache(buildId:number,domain:EngineeringCacheDomain,navigation?:import('../gim/engineering/navigation.js').EngineeringNavigationData):Promise<EngineeringCacheResult>{
-    const response=await this.request({type:'encode-cache',buildId,domain,navigation});
+  async encodeCache(buildId:number,domain:EngineeringCacheDomain,projection?:EngineeringNavigationCacheProjection):Promise<EngineeringCacheResult>{
+    const response=await this.request({type:'encode-cache',buildId,domain,projection});
     if(response.type!=='cache'||response.result.buildId!==buildId||response.result.domain!==domain)throw Error('Engineering cache response identity mismatch');
     return response.result;
   }

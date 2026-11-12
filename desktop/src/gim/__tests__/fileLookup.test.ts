@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { findFileByPath, getFileByPath, hasFileByPath } from '../fileLookup.js';
 
 describe('GIM 文件路径查找', () => {
@@ -21,6 +21,17 @@ describe('GIM 文件路径查找', () => {
       ['MOD/A.MOD', second],
     ]);
     expect(getFileByPath(files, 'MOD/a.mod')).toBe(first);
+  });
+
+  it('reuses the path index while value replacement returns the current file',()=>{
+    const old=new File(['old'],'a.dev'),next=new File(['next'],'a.dev');
+    const files=new Map([['CBM\\A.DEV',old]]),scan=vi.spyOn(files,'keys');
+    expect(getFileByPath(files,'cbm/a.dev')).toBe(old);
+    files.set('CBM\\A.DEV',next);
+    expect(getFileByPath(files,'./cbm/a.dev')).toBe(next);
+    expect(findFileByPath(files,'cbm/A.DEV')).toEqual({path:'CBM\\A.DEV',file:next});
+    expect(hasFileByPath(files,'CBM/A.DEV')).toBe(true);
+    expect(scan).toHaveBeenCalledOnce();
   });
 });
 

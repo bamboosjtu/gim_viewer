@@ -10,6 +10,47 @@ import {packEngineeringSource} from './engineeringSourceCodec.js';
 const valid = (condition: unknown, reason: string): void => { if (!condition) throw Error(`工程视图缓存无效：${reason}`); };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(item => typeof item === 'string');
+
+/** Only composition refinement returns to the Worker that owns the immutable
+ * navigation base. Search rows carry their explicit entity identity and new
+ * suffix, rather than cloning unchanged source trees, inventory and text. */
+export interface EngineeringNavigationCacheProjection {
+  composition: EngineeringNavigationData['composition'];
+  compositionComplete?: boolean;
+  compositionCoverage?: EngineeringNavigationData['compositionCoverage'];
+  search: Array<{key:string;subtitle:string;append:string}>;
+}
+export function createNavigationCacheProjection(base:EngineeringNavigationData,view:EngineeringNavigationData):EngineeringNavigationCacheProjection {
+  const changed=new Set(['composition','compositionComplete','compositionCoverage','compositionSearch']);
+  for(const key of new Set([...Object.keys(base),...Object.keys(view)]))if(!changed.has(key))
+    valid(Reflect.get(base,key)===Reflect.get(view,key),'projection base changed');
+  const rows=new Map(base.compositionSearch.map(row=>[row.key,row]));
+  valid(rows.size===base.compositionSearch.length&&view.compositionSearch.length===rows.size,'projection search coverage');
+  const seen=new Set<string>();
+  const search=view.compositionSearch.map(row=>{
+    const original=rows.get(row.key);
+    valid(original&&!seen.has(row.key)&&row.title===original.title&&typeof row.subtitle==='string'
+      &&typeof row.searchText==='string'&&row.searchText.startsWith(original.searchText),'projection search identity / prefix');
+    seen.add(row.key);
+    return {key:row.key,subtitle:row.subtitle,append:row.searchText.slice(original!.searchText.length)};
+  });
+  return {composition:view.composition,compositionComplete:view.compositionComplete,compositionCoverage:view.compositionCoverage,search};
+}
+export function applyNavigationCacheProjection(base:EngineeringNavigationData,projection:EngineeringNavigationCacheProjection):EngineeringNavigationData {
+  valid(object(projection)&&object(projection.composition)
+    &&(projection.compositionComplete===undefined||typeof projection.compositionComplete==='boolean')
+    &&(projection.compositionCoverage===undefined||['full','partial'].includes(projection.compositionCoverage)),'projection shape');
+  const rows=new Map(base.compositionSearch.map(row=>[row.key,row]));
+  valid(rows.size===base.compositionSearch.length&&Array.isArray(projection.search)&&projection.search.length===rows.size,'projection search coverage');
+  const seen=new Set<string>();
+  const compositionSearch=projection.search.map(row=>{
+    valid(object(row)&&typeof row.key==='string'&&typeof row.subtitle==='string'&&typeof row.append==='string','projection search row');
+    const original=rows.get(row.key);valid(original&&!seen.has(row.key),'projection search identity');seen.add(row.key);
+    return {...original!,subtitle:row.subtitle,searchText:original!.searchText+row.append};
+  });
+  return {...base,compositionComplete:projection.compositionComplete,compositionCoverage:projection.compositionCoverage,
+    composition:projection.composition,compositionSearch};
+}
 async function dependency(snapshot: EngineeringSnapshot, sourceDigest: string): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify([sourceDigest,packEngineeringSource(snapshot)]));
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(v => v.toString(16).padStart(2, '0')).join('');

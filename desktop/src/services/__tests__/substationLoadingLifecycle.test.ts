@@ -19,7 +19,10 @@ const mocks = vi.hoisted(() => ({
   renderFileDevPanel: vi.fn(),
   showLoading: vi.fn(),
   hideLoading: vi.fn(),
+  setIfcStatus: vi.fn(),
 }));
+
+vi.mock('../presentation/shell_statusBar.js',async importOriginal=>({...(await importOriginal<typeof import('../presentation/shell_statusBar.js')>()),setIfcStatus:mocks.setIfcStatus,setConnectionStatus:vi.fn()}));
 
 vi.mock('../../viewer/ifcLoader.js', () => ({ ensureEngineReady: mocks.ensureEngineReady }));
 vi.mock('../../viewer/ifcEntryLoader.js', () => ({ loadIfcEntry: mocks.loadIfcEntry }));
@@ -196,5 +199,35 @@ describe('Substation Loading readiness lifecycle', () => {
       .toBeLessThanOrEqual(perfProductMomentSnapshot().allIfcReady!.atMs);
     await loading;
     spatialGate.resolve();
+    await vi.waitFor(()=>expect(mocks.setIfcStatus).toHaveBeenLastCalledWith(expect.stringContaining('IFC 已结束')));
+  });
+
+  it('keeps the cold IFC terminal status after late cache/progress callbacks without losing cache failures',async()=>{
+    vi.clearAllMocks();
+    const state=new AppState(),session=state.activateProject(7,'anonymous-b1');
+    const entry:IfcEntry={name:'model.ifc',path:'CBM/model.ifc',modelId:'model'};
+    state.currentCbmTree=makeTree();state.currentFiles=new Map();state.currentIfcEntries=[entry];
+    perfReset({generation:session.generation,projectId:session.projectId,sourceSha256:session.sourceSha256});
+    const ctx={fragments:{list:new Map(),core:{disposeModel:vi.fn()}},world:{scene:{three:new THREE.Scene()}}} as any;
+    mocks.getViewerRuntimeWithUI.mockResolvedValue({ctx,modelCallbacks:{}});mocks.ensureEngineReady.mockResolvedValue(undefined);
+    const nameIndexGate=deferred<void>();
+    mocks.buildIfcNameIndex.mockReturnValue(nameIndexGate.promise);mocks.autoLoadModAndStlGeometry.mockResolvedValue({modCount:0,stlCount:0});
+    mocks.syncProjectSourceToViewerFromFragments.mockImplementation(async()=>{state.projectSourceToViewerMatrix=new THREE.Matrix4();});
+    let progress!:(p:number)=>void,callbacks!:{onStage:(stage:string)=>void;onLoadSource:(source:'ifc'|'lod-cache')=>void};
+    mocks.loadIfcEntry.mockImplementation(async(_ctx:any,_state:AppState,item:IfcEntry,_read:unknown,onProgress:(p:number)=>void,options:typeof callbacks)=>{
+      progress=onProgress;callbacks=options;const runtimeModelId=state.getRuntimeModelId(item.modelId,session);
+      state.loadedModels.set(item.modelId,{modelId:item.modelId,runtimeModelId,visible:true});ctx.fragments.list.set(runtimeModelId,{object:{children:[]}});options.onLoadSource('ifc');
+    });
+    await loadAllIfcFiles(state,[entry],vi.fn(),{session,ifcSourceSizes:new Map([[entry.path,8]])});
+    await vi.waitFor(()=>expect(mocks.setIfcStatus).toHaveBeenLastCalledWith(expect.stringContaining('IFC 已结束')));
+    expect(perfProductMomentSnapshot().allIfcReady).not.toBeNull();
+    const terminal=mocks.setIfcStatus.mock.calls[mocks.setIfcStatus.mock.calls.length-1][0];
+    callbacks.onStage('cache-written');callbacks.onStage('cold-convert');progress(.4);callbacks.onLoadSource('lod-cache');
+    expect(mocks.setIfcStatus).toHaveBeenLastCalledWith(terminal);
+    callbacks.onStage('cache-write-failed');
+    expect(mocks.setIfcStatus).toHaveBeenLastCalledWith(expect.stringMatching(/IFC 已结束.*缓存写入失败 1/));
+    callbacks.onStage('cache-written');expect(mocks.setIfcStatus).toHaveBeenLastCalledWith(terminal);
+    state.activateProject(8,'next');nameIndexGate.resolve();const count=mocks.setIfcStatus.mock.calls.length;
+    callbacks.onStage('cache-write-failed');progress(.5);expect(mocks.setIfcStatus).toHaveBeenCalledTimes(count);
   });
 });

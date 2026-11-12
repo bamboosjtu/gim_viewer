@@ -15,7 +15,7 @@ export interface FilePathEntry {
 
 interface FilePathIndex {
   size: number;
-  byLowerPath: Map<string, FilePathEntry>;
+  byLowerPath: Map<string, string>;
 }
 
 /** Map 通常在一次打开流程内保持不变；按 Map 身份缓存索引，避免递归查找反复 O(n) 扫描。 */
@@ -28,17 +28,17 @@ export function normalizeFilePath(path: string): string {
   return normalized;
 }
 
-function getIndex(files: Map<string, File>): Map<string, FilePathEntry> {
+function getIndex(files: Map<string, File>): Map<string, string> {
   const cached = indexCache.get(files);
   if (cached && cached.size === files.size) return cached.byLowerPath;
 
-  const byLowerPath = new Map<string, FilePathEntry>();
-  for (const [path, file] of files) {
+  const byLowerPath = new Map<string, string>();
+  for (const path of files.keys()) {
     const normalized = normalizeFilePath(path);
     const key = normalized.toLowerCase();
     // 重名时保留归档中的第一项；精确键命中仍优先，行为确定且不因大小写
     // 变体顺序改变已经建立的引用。
-    if (!byLowerPath.has(key)) byLowerPath.set(key, { path, file });
+    if (!byLowerPath.has(key)) byLowerPath.set(key, path);
   }
   indexCache.set(files, { size: files.size, byLowerPath });
   return byLowerPath;
@@ -48,7 +48,8 @@ function getIndex(files: Map<string, File>): Map<string, FilePathEntry> {
 export function getFileByPath(files: Map<string, File>, path: string): File | undefined {
   const exact = files.get(path) ?? files.get(normalizeFilePath(path));
   if (exact) return exact;
-  return getIndex(files).get(normalizeFilePath(path).toLowerCase())?.file;
+  const actualPath = getIndex(files).get(normalizeFilePath(path).toLowerCase());
+  return actualPath === undefined ? undefined : files.get(actualPath);
 }
 
 /** 按路径读取文件及其实际 Map 键。 */
@@ -58,7 +59,9 @@ export function findFileByPath(files: Map<string, File>, path: string): FilePath
   const normalized = normalizeFilePath(path);
   const normalizedExact = files.get(normalized);
   if (normalizedExact) return { path: normalized, file: normalizedExact };
-  return getIndex(files).get(normalized.toLowerCase());
+  const actualPath = getIndex(files).get(normalized.toLowerCase());
+  const file = actualPath === undefined ? undefined : files.get(actualPath);
+  return file && actualPath !== undefined ? { path: actualPath, file } : undefined;
 }
 
 /** 判断路径是否存在，路径分隔符和大小写均不敏感。 */

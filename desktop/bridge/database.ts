@@ -250,6 +250,10 @@ export interface ProcessMemorySnapshot {
   processTreeRssBytes: number | null;
   /** Windows PROCESS_MEMORY_COUNTERS_EX.PrivateUsage summed over descendants. */
   processTreePrivateBytes?: number | null;
+  /** Root Tauri process commit, separate from the complete process tree. */
+  rootPrivateBytes?: number | null;
+  /** PID and creation FILETIME (100 ns), retained for private diagnostics. */
+  processInstances?: Array<[number, string]>;
   processCount: number | null;
   processTreeAvailable: boolean;
   processTreeSource?: string;

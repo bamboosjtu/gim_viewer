@@ -2,7 +2,7 @@ import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { loadPresentation } from './presentationPort.js';
 import { setSubstationViewerInteractive } from './substationLoadingState.js';
 /** Sequential IFC loading, early geometry, cache profiles and background gates. */
-import { setConnectionStatus, setIfcStatus } from './presentation/shell_statusBar.js';
+import { setConnectionStatus, setIfcStatus as publishIfcStatus } from './presentation/shell_statusBar.js';
 import type { IfcEntry, CbmNode } from '../gim/types.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import { getFileByPath } from '../gim/fileLookup.js';
@@ -434,6 +434,9 @@ export async function loadAllIfcFiles(
   const ifcSources = new Map<string, string>();
   const ifcStages = new Map<string, string>();
   let activeIfcPath = '';
+  let ifcLifecycleSettled = false;
+  const cacheWriteFailures = new Set<string>();
+  const setIfcStatus = (text:string) => { if(isCurrent()&&!ifcLifecycleSettled)publishIfcStatus(text); };
   const ifcCacheProgress = () => {
     const cold = [...ifcSources.values()].filter(source => source === 'ifc').length;
     const lod = [...ifcSources.values()].filter(source => source === 'lod-cache').length;
@@ -444,6 +447,9 @@ export async function loadAllIfcFiles(
     return `IFC ${index + 1}/${total} · ${entry.name} · ${ifcStages.get(entry.path) ?? '待检查'}${extra ? ` · ${extra}` : ''} · ${ifcCacheProgress()}${skipped ? ` · 已跳过 ${skipped} 个超大 IFC` : ''}`;
   };
   const ifcStageLabels: Record<string, string> = { 'checking-cache': '查询LOD缓存', 'lod-cache-hit': 'LOD缓存命中', 'cold-convert': '冷转换中', 'far-ready': '远景就绪', 'cache-write-start': '缓存写入中', 'cache-written': '缓存已写', 'cache-write-failed': '远景就绪(缓存写入失败)' };
+  const publishTerminalStatus = () => {
+    if(isCurrent())publishIfcStatus(`IFC 已结束 · 已加载 ${state.loadedModels.size}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ''}${state.ifcSkippedLargeIfc.length ? ` · 已跳过 ${state.ifcSkippedLargeIfc.length} 个超大 IFC` : ''}${cacheWriteFailures.size ? ` · 缓存写入失败 ${cacheWriteFailures.size}` : ''}`);
+  };
   const lifecycleTask = (async (): Promise<void> => {
     try {
       const { ensureEngineReady } = await import('../viewer/ifcLoader.js');
@@ -523,12 +529,18 @@ expressId: 0, globalId: node.ifcGuid,
         const loadSource: { value: 'lod-cache' | 'ifc' | 'unknown' } = { value: 'unknown' };
         const setIfcStage = (stage: string, meta?: Record<string, unknown>) => {
           if (!isCurrent()) return;
+          if(stage==='cache-write-failed')cacheWriteFailures.add(entry.path);
+          if(stage==='cache-written')cacheWriteFailures.delete(entry.path);
+          if(ifcLifecycleSettled){
+            if(stage==='cache-write-failed'||stage==='cache-written')publishTerminalStatus();
+            return;
+          }
           ifcStages.set(entry.path, (ifcStageLabels[stage] ?? stage) + (meta?.phase ? ` · ${String(meta.phase)}` : ''));
           if (activeIfcPath === entry.path) setIfcStatus(ifcStatus(entry, queueIndex, queue.length, meta?.ms != null ? `${String(meta.ms)}ms` : ''));
         };
         const statusStarted = performance.now();
         const statusTimer = setInterval(() => {
-          if (isCurrent() && activeIfcPath === entry.path) setIfcStatus(ifcStatus(entry, queueIndex, queue.length,
+          if (isCurrent() && !ifcLifecycleSettled && activeIfcPath === entry.path) setIfcStatus(ifcStatus(entry, queueIndex, queue.length,
             `${Math.round((sizes.get(entry.path.toLowerCase()) ?? 0) / 1048576)} MiB · ${Math.floor((performance.now() - statusStarted) / 1000)}秒`));
         }, 1000);
         const endRead = perfBegin(`变电 IFC read · ${entry.path}`, undefined, perfSession);
@@ -555,9 +567,9 @@ expressId: 0, globalId: node.ifcGuid,
           const loadFine = (): Promise<void> => {
             if (finePromise) return finePromise;
             const task = loadIfcEntry(ctx, state, entry, readBytes,
-              (p) => { if (isCurrent()) { setIfcStatus(ifcStatus(entry, queueIndex, queue.length, `${Math.round(p * 100)}%`)); if (!interactiveInitialized) showLoading(`${entry.name}: ${Math.round(p * 100)}%`); } },
+              (p) => { if (isCurrent()&&!ifcLifecycleSettled) { setIfcStatus(ifcStatus(entry, queueIndex, queue.length, `${Math.round(p * 100)}%`)); if (!interactiveInitialized) showLoading(`${entry.name}: ${Math.round(p * 100)}%`); } },
               {
-session, perfSessionId: perfSession.id, onLoadSource: (source) => { setSubstationViewerInteractive(true); loadSource.value = source; ifcSources.set(entry.path, source); ifcStages.set(entry.path, source === 'ifc' ? '冷转换完成' : source === 'lod-cache' ? 'LOD缓存恢复完成' : '完整缓存恢复完成'); },
+session, perfSessionId: perfSession.id, onLoadSource: (source) => { if(!isCurrent()||ifcLifecycleSettled)return;setSubstationViewerInteractive(true); loadSource.value = source; ifcSources.set(entry.path, source); ifcStages.set(entry.path, source === 'ifc' ? '冷转换完成' : source === 'lod-cache' ? 'LOD缓存恢复完成' : '完整缓存恢复完成'); },
                 onStage: (stage, meta) => setIfcStage(stage, meta),
                 onProfile: (profile) => { if (isCurrent()) perfRecordIfcLoadProfile(profile, perfSession); },
                 onRegionalBatch: (batch) => {
@@ -688,7 +700,8 @@ session, perfSessionId: perfSession.id, onLoadSource: (source) => { setSubstatio
         if (!isCurrent()) return;
       }
 
-      setIfcStatus(`IFC ${queue.length}/${queue.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ' · 已就绪'}${skippedLargeIfc.length ? ` · 已跳过 ${skippedLargeIfc.length} 个超大 IFC` : ''}`);
+      ifcLifecycleSettled = true;
+      publishTerminalStatus();
       background.completeRemainingIfc();
       state.endIfcBackgroundLoading();
       enqueueDevGeometry();
@@ -755,7 +768,8 @@ total: entries.length, loaded: state.loadedModels.size,
   // sequential IFC tail and post-IFC geometry continue under the same
   // session/token guards after this promise resolves.
   void lifecycleTask.finally(() => {
-    if (isCurrent()) setIfcStatus(`IFC 已结束 · 已加载 ${state.loadedModels.size}/${entries.length} · ${ifcCacheProgress()}${failed.length ? ` · 失败 ${failed.length}` : ''}${state.ifcSkippedLargeIfc.length ? ` · 已跳过 ${state.ifcSkippedLargeIfc.length} 个超大 IFC` : ''}`);
+    ifcLifecycleSettled = true; activeIfcPath = '';
+    publishTerminalStatus();
     // If every IFC failed (or the session became stale) there is no usable
     // geometry event to signal. Release the caller rather than leaving an
     // unresolved readiness promise behind.

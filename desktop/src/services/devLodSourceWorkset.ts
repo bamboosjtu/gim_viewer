@@ -95,7 +95,11 @@ export class DevLodSourceWorkset {
       if (!result) continue;
       for (const path of chunk) {
         const bytes = result.get(path);
-        if (!bytes || bytes.byteLength === 0 || bytes.byteLength > files.get(path)!.size) continue;
+        if (!bytes || bytes.byteLength === 0) continue;
+        if (bytes.byteLength !== files.get(path)!.size) {
+          perfMark('DEV source preparation fallback', { phase:'source-length',reason:'source-length-mismatch',expectedBytes:files.get(path)!.size,actualBytes:bytes.byteLength }, this.options.perf);
+          continue;
+        }
         loaded += bytes.byteLength;
         if (loaded > MAX_TOTAL_BYTES) break;
         output.set(path, new File([bytes as Uint8Array<ArrayBuffer>], path.split('/').pop() || path));
@@ -153,7 +157,7 @@ export class DevLodSourceWorkset {
           if (!this.options.current() || pressured()) return;
           for (const [path, data] of result) if (data?.byteLength) {
             const expected = findFileByPath(this.sourceFiles!, path)?.file.size;
-            if (expected != null && data.byteLength <= expected) {
+            if (expected != null && data.byteLength === expected) {
               const file = new File([data as Uint8Array<ArrayBuffer>], path.split('/').pop()!);
               // Graph traversal needs these already-read bytes as text. Avoid
               // another asynchronous Blob read per edge on a busy renderer.
@@ -163,7 +167,7 @@ export class DevLodSourceWorkset {
                 Object.defineProperty(file, 'text', { value: () => Promise.resolve(text) });
               }
               loaded.set(path, file);
-            }
+            } else perfMark('DEV source preparation fallback', { phase:'source-length',reason:'source-length-mismatch',expectedBytes:expected??null,actualBytes:data.byteLength }, this.options.perf);
           }
           batch = []; bytes = 0;
         };

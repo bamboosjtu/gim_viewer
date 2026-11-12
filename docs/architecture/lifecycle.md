@@ -92,9 +92,11 @@
 1. 语义级先校验 parser/domain 版本、索引 receipt、IFC 清单和必需路径。
 2. 通过后进入逐 entry fast path，不在打开关键路径逐个 stat/open 全部 CBM/FAM/DEV/PHM/MOD/STL 源文件；大工程可达数万条。
 3. 只有版本、receipt、IFC 清单或 count 不一致时才执行完整源文件扫描。
-4. GLB manifest 结构、几何域版本只决定几何 domain 能否复用，不阻塞语义 HIT；缺失/截断的单个源文件由 DEV 批量读取按 entry 隔离。
+4. GLB manifest 结构、几何域版本只决定几何 domain 能否复用，不阻塞语义 HIT；缺失/截断的单个源文件由 DEV 批量读取按 entry 隔离。DEV 工作集预取和缺失模板恢复只接纳与来源清单长度完全相等的字节；短/超长缓存保留原懒读入口，并记录长度不符，不把前缀安装为完整来源。
 5. 源文件路径校验使用单次调用的 `CacheValidationContext`：只规范化可信工程 root，逐 entry 检查相对路径、工程身份、两种 root、symlink/reparse 和实际大小；不把数据库 candidate 规范化后证明归属。
 6. 缓存损坏、版本不匹配或路径不安全时拒绝该域，不用部分结果冒充完整；其他域仍可独立使用。
+
+来源 Map 的路径键集合固定时可以替换已物化的 File 值。大小写/分隔符索引只保存原路径，命中后读取 Map 的当前值；路径键集合改变必须使用新 Map，不能靠重扫整包适配每个来源请求。
 
 ## 关闭与切换
 

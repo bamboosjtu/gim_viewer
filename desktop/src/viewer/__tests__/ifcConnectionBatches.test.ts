@@ -17,9 +17,10 @@ function source(triangles = 1) {
       flatTransformation:new THREE.Matrix4().makeTranslation(12,0,0).toArray(),color:{x:0.2,y:0.3,z:0.4,w:1}})},delete:release})),
     GetCoordinationMatrix: () => new THREE.Matrix4().makeTranslation(10,0,0).toArray(),
     GetGeometry: () => ({GetVertexData:()=>1,GetVertexDataSize:()=>vertices.length,GetIndexData:()=>2,GetIndexDataSize:()=>indices.length,delete:release}),
-    GetVertexArray: () => vertices, GetIndexArray: () => indices,
+    GetVertexArray: (ptr:number,size:number) => vertices.slice((ptr-1)/4,(ptr-1)/4+size),
+    GetIndexArray: (ptr:number,size:number) => indices.slice((ptr-2)/4,(ptr-2)/4+size),
   };
-  return {api,vertices,stream,release};
+  return {api,vertices,indices,stream,release};
 }
 it('streams only evidence-backed connections, copies source triangles and restores the normalized placement once', async () => {
   const {api,vertices,stream}=source();const batches:ConnectionGeometryBatch[]=[];
@@ -49,6 +50,52 @@ it('splits one large source object and waits for consumption before sending more
   expect(validConnectionArtifact({version:CONNECTION_GEOMETRY_VERSION,batches,complete})).toBe(true);
   const corrupt=structuredClone(batches);corrupt[0].bytes--;
   expect(validConnectionArtifact({version:CONNECTION_GEOMETRY_VERSION,batches:corrupt,complete})).toBe(false);
+});
+it('copies only each chunk\'s referenced range across transfer and WASM heap replacement',async()=>{
+  const {api,vertices,indices}=source(10000),expected=Array.from(vertices);
+  let sourceMemory=new Float32Array(100000),indexMemory=indices.slice();sourceMemory.set(vertices);
+  api.GetGeometry=()=>({GetVertexData:()=>1,GetVertexDataSize:()=>100000,GetIndexData:()=>2,GetIndexDataSize:()=>30000,delete:vi.fn()});
+  api.GetVertexArray=vi.fn((ptr:number,size:number)=>sourceMemory.slice((ptr-1)/4,(ptr-1)/4+size));
+  api.GetIndexArray=vi.fn((ptr:number,size:number)=>indexMemory.slice((ptr-2)/4,(ptr-2)/4+size));
+  const batches:ConnectionGeometryBatch[]=[];
+  const complete=await streamConnectionGeometry(api,0,false,async batch=>{
+    batches.push(structuredClone(batch,{transfer:(batch.chunks??[]).map(c=>c.vertices.buffer)}));
+    if(batches.length===1){
+      const old=[sourceMemory.buffer,indexMemory.buffer];
+      sourceMemory=sourceMemory.slice();indexMemory=indexMemory.slice();
+      structuredClone(old,{transfer:old});
+    }
+  });
+  expect(api.GetVertexArray).toHaveBeenCalledTimes(4);expect(api.GetIndexArray).toHaveBeenCalledTimes(4);
+  expect(api.GetVertexArray.mock.calls.map((call:number[])=>call[1])).toEqual([18,18,18,18]);
+  expect(api.GetIndexArray.mock.calls.reduce((sum:number,call:number[])=>sum+call[1],0)).toBe(30000);
+  const chunks=batches.flatMap(b=>b.chunks??[]).filter(c=>c.vertices.length);
+  expect(chunks).toHaveLength(4);
+  expect(chunks.reduce((n,c)=>n+c.vertices.length,0)).toBe(10000*18);
+  for(const chunk of chunks)expect(chunk.vertices).toEqual(Float32Array.from({length:chunk.vertices.length},(_v,i)=>expected[i%18]));
+  expect(validConnectionArtifact({version:CONNECTION_GEOMETRY_VERSION,batches,complete})).toBe(true);
+});
+it.each([Infinity,-Infinity,NaN,Math.fround(3.4e38),-0])('preserves referenced Float32 validation and values (%s)',async value=>{
+  const {api,vertices}=source();vertices[0]=value;
+  const batches:ConnectionGeometryBatch[]=[];
+  const complete=await streamConnectionGeometry(api,0,false,async b=>{batches.push(b);});
+  if(Number.isFinite(value)){
+    expect(complete.failedObjects).toEqual([]);
+    expect(Object.is(batches[0].chunks![0].vertices[0],value)).toBe(true);
+  }else{
+    expect(complete.failedObjects).toEqual([7]);expect(batches.flatMap(b=>b.chunks??[])).toHaveLength(0);
+  }
+});
+it('offsets byte pointers for unordered high vertex indices without inspecting unused invalid data',async()=>{
+  const {api,vertices,indices}=source();indices.set([7,5,6]);
+  const memory=new Float32Array(48).fill(NaN);memory.set(vertices,30);
+  const geometry=api.GetGeometry();api.GetGeometry=()=>({...geometry,GetVertexDataSize:()=>memory.length});
+  api.GetVertexArray=vi.fn((ptr:number,size:number)=>memory.slice((ptr-1)/4,(ptr-1)/4+size));
+  const batches:ConnectionGeometryBatch[]=[];
+  const complete=await streamConnectionGeometry(api,0,false,async b=>{batches.push(b);});
+  expect(api.GetVertexArray).toHaveBeenCalledWith(121,18);
+  expect(batches[0].chunks![0].vertices).toEqual(new Float32Array([...vertices.slice(12),...vertices.slice(0,12)]));
+  expect(complete.failedObjects).toEqual([]);
 });
 it('coalesces many source objects while preserving object and byte ceilings and source identity',async()=>{
   const {api}=source();

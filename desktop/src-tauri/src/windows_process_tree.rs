@@ -188,6 +188,7 @@ pub(super) fn snapshot(root_pid: u32) -> Snapshot {
 
     let mut total_rss = 0u64;
     let mut total_private = 0u64;
+    let mut root_private = None;
     let mut live_count=0;
     let mut process_instances=Vec::new();
     for (pid,handle,created) in &process_ids {
@@ -199,6 +200,7 @@ pub(super) fn snapshot(root_pid: u32) -> Snapshot {
             return unavailable_with_root(root_pid,"GetProcessMemoryInfo-failed".into());
         };
         live_count+=1;process_instances.push((*pid,created.to_string()));
+        if *pid == root_pid { root_private = Some(private); }
         let Some(next_total) = total_rss.checked_add(rss) else {
             return unavailable("process-tree-rss-overflow");
         };
@@ -212,7 +214,7 @@ pub(super) fn snapshot(root_pid: u32) -> Snapshot {
     Snapshot {
         rss_bytes: Some(total_rss),
         private_bytes: Some(total_private),
-        root_private_bytes: None,
+        root_private_bytes: root_private,
         process_count: Some(live_count),
         process_instances,
         available: true,

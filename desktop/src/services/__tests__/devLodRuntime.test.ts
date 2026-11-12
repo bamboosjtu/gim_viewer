@@ -165,6 +165,22 @@ it('stops source prefetch at high pressure, including a reply already in flight'
   } finally { read.mockRestore(); }
 });
 
+it.each([2,3,4])('materializes only exact source lengths in prefetch and recovery (returned bytes=%s)',async length=>{
+  const {internal}=fixture();internal.session.projectId=7;internal.worker=createDevWorkerMock();
+  const original={size:3,name:'a.dev',text:vi.fn().mockResolvedValue('SOLIDMODELS.NUM=0')} as unknown as File;
+  const files=new Map([['DEV/a.dev',original]]);internal.sources.sourceFiles=files;
+  const database=await import('@desktop/database.js');
+  const read=vi.spyOn(database,'batchReadCachedFiles').mockResolvedValue(new Map([['DEV/a.dev',new Uint8Array(length).fill(32)]]));
+  try{
+    const prefetched=await internal.sources.preloadSources(files);
+    expect(prefetched.get('DEV/a.dev')===original).toBe(length!==3);
+    await internal.prepareMissingTemplateSources('DEV/a.dev');
+    const installed=internal.worker.installSources.mock.calls[0][0] as Map<string,File>;
+    expect(installed.has('DEV/a.dev')).toBe(length===3);
+    expect(files.get('DEV/a.dev')===original).toBe(length!==3);
+  }finally{read.mockRestore();}
+});
+
 it.each([false, true])('batches reachable lazy sources for a cache miss (cold=%s) and shares dependencies and path scans', async (cold) => {
   const {internal}=fixture();internal.session.projectId=7;
   if(cold)internal.state.currentFiles=new Map();
@@ -220,7 +236,7 @@ it('bounds source prefetch by indexed bytes, keeps oversized and unknown sources
   const {internal}=fixture(); internal.session.projectId=7;
   const database=await import('@desktop/database.js');
   const sources=new Map(['DEV/a.dev','MOD/a.mod','MOD/b.mod','MOD/large.mod','MOD/unknown.mod'].map((path,i)=>[path,{size:[3,3*1024*1024,3*1024*1024,9*1024*1024,0][i],name:path} as File]));
-  const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(async(_project,paths)=>new Map(paths.map(path=>[path,path==='MOD/a.mod'?null:new Uint8Array(path==='DEV/a.dev'?3:5)])));
+  const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(async(_project,paths)=>new Map(paths.map(path=>[path,path==='MOD/a.mod'?null:new Uint8Array(path==='DEV/a.dev'?3:3*1024*1024)])));
   try {
     const prepared=await internal.sources.preloadSources(sources);
     expect(read.mock.calls.map(call=>call[1])).toEqual([['DEV/a.dev','MOD/a.mod'],['MOD/b.mod']]);

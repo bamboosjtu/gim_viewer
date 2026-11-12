@@ -10,6 +10,7 @@ import { isTauri } from '@desktop/runtime.js';
 import { perfMark,perfMarkProductMoment } from '../utils/perfTimings.js';
 import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometryOccurrences.js';
 import { installCompositionProjection } from './compositionProjectionService.js';
+import { createNavigationCacheProjection } from './engineeringNavigationCache.js';
 
 interface EngineeringJob {
   session: ProjectLoadSession;
@@ -57,7 +58,9 @@ async function saveResult(state: AppState, job: EngineeringJob, result: Engineer
         if(current(state,job)){state.engineeringCacheStatus='partial';job.update();}return;
       }
       if(!current(state,job))return;
-      const encoded=await job.client.encodeCache(result.buildId,domain,domain==='navigation'?state.engineeringNavigation??undefined:undefined);
+      const projection=domain==='navigation'&&state.engineeringNavigation
+        ?createNavigationCacheProjection(result.navigation,state.engineeringNavigation):undefined;
+      const encoded=await job.client.encodeCache(result.buildId,domain,projection);
       if(!current(state,job))return;
       perfMark('工程缓存域编码',{domain,...encoded.metrics});
       state.engineeringPipelineMetrics?.caches.push({domain,...encoded.metrics});

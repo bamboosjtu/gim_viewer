@@ -312,6 +312,8 @@ struct ProcessMemorySnapshot {
     rss_source: String,
     process_tree_rss_bytes: Option<u64>,
     process_tree_private_bytes: Option<u64>,
+    root_private_bytes: Option<u64>,
+    process_instances: Vec<(u32, String)>,
     process_count: Option<u32>,
     process_tree_available: bool,
     process_tree_source: String,
@@ -334,6 +336,8 @@ mod windows_process_tree;
 struct ProcessTreeSnapshot {
     rss_bytes: Option<u64>,
     private_bytes: Option<u64>,
+    root_private_bytes: Option<u64>,
+    process_instances: Vec<(u32, String)>,
     process_count: Option<u32>,
     available: bool,
     source: String,
@@ -346,6 +350,8 @@ fn process_tree_snapshot(pid: u32) -> ProcessTreeSnapshot {
     ProcessTreeSnapshot {
         rss_bytes: snapshot.rss_bytes,
         private_bytes: snapshot.private_bytes,
+        root_private_bytes: snapshot.root_private_bytes,
+        process_instances: snapshot.process_instances,
         process_count: snapshot.process_count,
         available: snapshot.available,
         source: snapshot.source,
@@ -358,6 +364,8 @@ fn process_tree_snapshot(_pid: u32) -> ProcessTreeSnapshot {
     ProcessTreeSnapshot {
         rss_bytes: None,
         private_bytes: None,
+        root_private_bytes: None,
+        process_instances: Vec::new(),
         process_count: None,
         available: false,
         source: "unavailable-non-windows".to_string(),
@@ -376,6 +384,8 @@ mod memory_private_tests {
         assert!(snapshot.available, "{:?}", snapshot.reason);
         assert!(snapshot.rss_bytes.unwrap() > 0);
         assert!(snapshot.private_bytes.unwrap() >= committed.len() as u64);
+        assert!(snapshot.root_private_bytes.unwrap() >= committed.len() as u64);
+        assert!(snapshot.process_instances.iter().any(|(pid,_)|*pid==super::current_process_id()));
         assert_eq!(snapshot.source, "windows-process-tree-working-set");
     }
 }
@@ -473,6 +483,8 @@ fn get_process_memory() -> ProcessMemorySnapshot {
         source,
         process_tree_rss_bytes: tree.rss_bytes,
         process_tree_private_bytes: tree.private_bytes,
+        root_private_bytes: tree.root_private_bytes,
+        process_instances: tree.process_instances,
         process_count: tree.process_count,
         process_tree_available: tree.available,
         process_tree_source: tree.source,
