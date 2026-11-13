@@ -4,7 +4,7 @@ import { collectSourceGeometryOccurrences } from '../gim/engineering/geometryOcc
 import type { EngineeringSourceGraph } from '../gim/engineering/sourceGraph.js';
 import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../gim/ifcSpatialParser.js';
 import type { EngineeringSnapshot } from '../engineering/types.js';
-import { ENGINEERING_RULES_VERSION } from '../engineering/classify.js';
+import { ENGINEERING_RECOGNITION_VERSION as ENGINEERING_RULES_VERSION } from '../gim/engineering/sourceEvidence.js';
 
 /** Source and physical publication survives recognition and projection failures. */
 export function assembleEngineeringView(scope:string,graph:EngineeringSourceGraph,objects:readonly IfcSpatialObject[],models:readonly SpatialModelSummary[],nodes:readonly IfcSpatialNode[]=[],normalize:(scope:string,sources:EngineeringSources)=>EngineeringSnapshot=normalizeEngineeringSources){

@@ -21,11 +21,12 @@ export function ifcSourceRecords(objects: readonly IfcSpatialObject[]): SourceRe
       throw new Error(`IFC internal definition is not an outward source: ${object.ifcType}`);
     }
     const properties: SourceProperty[] = (object.propertySets ?? []).flatMap(group => group.values.map(property => ({
-      path: object.sourcePath, source: `${object.sourcePath}#${group.id}`, section: group.name,
-      keys: [property.name], value: property.value,
+      path: object.sourcePath, source: `${object.sourcePath}#${group.id}`, containerId:`${object.sourcePath}#${group.id}`,
+      rawContainerName:group.name,applicability:group.applicability??'instance',sourceId:id,
+      keys: [property.name], value: property.value,rawUnit:property.unit,rawValueType:property.dataType,
     })));
     for (const [field, value] of [['Name', object.sourceName], ['Description', object.description], ['ObjectType', object.objectType], ['Tag', object.tag]] as const) {
-      if (value !== undefined) properties.push({ path: object.sourcePath, source: `${object.sourcePath}#${object.expressId}:${field}`, keys: [`IFC.${field}`], value });
+      if (value !== undefined) properties.push({ path: object.sourcePath, source: `${object.sourcePath}#${object.expressId}:${field}`,sourceId:id,applicability:'instance', keys: [`IFC.${field}`], value });
     }
     const hostId = byKey.get(object.hostObjectKey ?? '');
     return {

@@ -2,7 +2,7 @@
 export interface EvidenceValue {
   value: string;
   evidenceId: string;
-  context?:{section?:string;container?:string};
+  context?:{section?:string;container?:string;rawContainerName?:string;applicability?:'instance'|'type'|'unknown'};
 }
 
 /** Names belonging to this occurrence, with their original evidence address. */
@@ -11,6 +11,7 @@ export interface ObjectNameEvidence extends EvidenceValue {
 }
 
 export interface ObjectEvidence {
+  vocabularyObservations?:readonly VocabularyObservation[];
   equipmentType?: EvidenceValue;
   componentType?: EvidenceValue;
   equipmentTypeCandidates?:readonly EvidenceValue[];
@@ -48,6 +49,7 @@ export interface ObjectEvidence {
 export type SourceMeaning = 'object' | 'part' | 'fragment' | 'neutral_set' | 'container' | 'detail' | 'source_only';
 export type SourceComponentRole = 'cover' | 'sidewall' | 'base';
 export interface ObjectInterpretation {
+  vocabularyObservations?:readonly VocabularyObservation[];
   categoryStatus?: 'confirmed' | 'candidate' | 'unresolved';
   equipmentType?: TermInterpretation;
   componentType?: TermInterpretation;
@@ -70,6 +72,9 @@ export interface ObjectInterpretation {
 }
 
 export interface TermInterpretation {id?:string;status:'confirmed'|'candidate'|'unresolved';evidence:readonly string[]}
+export interface VocabularyObservation {
+  field:string;rawValue:string;status:'mapped'|'unresolved';evidenceId:string;dictionaryVersion:string;dictionaryEvidence?:string;
+}
 
 export interface EngineeringEntity {
   id: string;

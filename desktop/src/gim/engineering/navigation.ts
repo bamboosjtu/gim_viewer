@@ -62,10 +62,12 @@ export function projectEngineeringNavigation(sources: EngineeringSources, snapsh
       searchText: [title, subtitle, pending.id, ...pending.sourceIds.map(id => records.get(id)?.name ?? '')].join('\n').toLowerCase() });
   }
   let inventory:EngineeringInventory|undefined,inventorySearch:ReturnType<typeof projectInventorySearch>=[];
-  try {inventory=projectEngineeringInventory(snapshot,[...records.values()]);inventorySearch=projectInventorySearch(inventory,snapshot,[...records.values()]);} catch(error){projectionErrors.inventory=String(error);}
+  try {inventory=projectEngineeringInventory(snapshot,[...records.values()]);inventorySearch=projectInventorySearch(inventory,snapshot,[...records.values()]);} catch(error){inventory=undefined;inventorySearch=[];projectionErrors.inventory=String(error);}
   return { version: ENGINEERING_NAVIGATION_VERSION,
     projectionVersions:{composition:ENGINEERING_COMPOSITION_VERSION,source:SOURCE_TREE_TEMPLATE_VERSION,inventory:INVENTORY_TEMPLATE_VERSION},
-    projectionErrors:Object.keys(projectionErrors).length?projectionErrors:undefined,inventorySearch, composition, sourceNodes, sourceRoot, sourceRows, compositionSearch, sourceSearch,
+    projectionErrors:Object.keys(projectionErrors).length?projectionErrors:undefined,
+    ...(projectionErrors.composition?{compositionComplete:false,compositionCoverage:'partial' as const}:{}),
+    inventorySearch, composition, sourceNodes, sourceRoot, sourceRows, compositionSearch, sourceSearch,
     compositionInput:{facts,declarations},
     inventory,metadata:{scope:snapshot.scope,rulesVersion:snapshot.rulesVersion,sourceComplete:sources.complete,sourceVersion:sources.version} };
 }

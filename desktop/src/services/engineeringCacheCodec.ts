@@ -1,5 +1,5 @@
 import { ENGINEERING_SOURCE_VERSION, type EngineeringSources } from '../gim/engineering/buildSources.js';
-import { ENGINEERING_RULES_VERSION } from '../engineering/classify.js';
+import { ENGINEERING_RECOGNITION_VERSION as ENGINEERING_RULES_VERSION } from '../gim/engineering/sourceEvidence.js';
 import { assertEngineeringPartition } from '../engineering/validate.js';
 import type { EngineeringSnapshot } from '../engineering/types.js';
 import { ENGINEERING_NAVIGATION_VERSION } from '../gim/engineering/navigation.js';
@@ -10,7 +10,7 @@ import { SOURCE_TREE_TEMPLATE_VERSION } from '../gim/engineering/sourceProjectio
 import { ENGINEERING_CATALOG_VERSION } from '../engineering/catalogLabels.js';
 import { packEngineeringSource, unpackEngineeringSource } from './engineeringSourceCodec.js';
 
-export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v5';
+export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v6';
 export const MAX_ENGINEERING_CACHE_BYTES = 384 * 1024 * 1024;
 /** JSON bodies above this size are split into independently compressed parts.
  * The compressed artifact still respects MAX_ENGINEERING_CACHE_BYTES. */
@@ -30,7 +30,7 @@ const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v ===
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(s => typeof s === 'string');
 const requireValid = (ok: unknown, reason: string): void => { if (!ok) throw Error(`工程缓存无效：${reason}`); };
 const sha = async (bytes: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource))].map(v => v.toString(16).padStart(2, '0')).join('');
-const contract = (kind: Kind) => kind === 'sources' ? ENGINEERING_SOURCE_VERSION : kind === 'entities' ? `${ENGINEERING_ENTITY_SCHEMA}|${ENGINEERING_RULES_VERSION}|${ENGINEERING_CATALOG_VERSION}` : `${ENGINEERING_NAVIGATION_VERSION}|${ENGINEERING_COMPOSITION_VERSION}|${INVENTORY_TEMPLATE_VERSION}|${SOURCE_TREE_TEMPLATE_VERSION}|${ENGINEERING_CATALOG_VERSION}|${SPATIAL_PROJECTION_POLICY.version}`;
+const contract = (kind: Kind) => kind === 'sources' ? ENGINEERING_SOURCE_VERSION : kind === 'entities' ? `${ENGINEERING_ENTITY_SCHEMA}|${ENGINEERING_RULES_VERSION}|${ENGINEERING_CATALOG_VERSION}` : `${ENGINEERING_NAVIGATION_VERSION}|${ENGINEERING_RULES_VERSION}|${ENGINEERING_COMPOSITION_VERSION}|${INVENTORY_TEMPLATE_VERSION}|${SOURCE_TREE_TEMPLATE_VERSION}|${ENGINEERING_CATALOG_VERSION}|${SPATIAL_PROJECTION_POLICY.version}`;
 const manifestDigest = (id: EngineeringCacheIdentity) => sha(encoder.encode(JSON.stringify([...id.entries].sort())));
 
 export function engineeringCacheEntry(id: EngineeringCacheIdentity, kind: Kind): string {

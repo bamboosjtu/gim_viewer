@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractEngineeringSourceGraph } from '../engineering/sourceGraph.js';
+import { extractEngineeringSourceGraph, materializeEngineeringFamilies } from '../engineering/sourceGraph.js';
 import { toObjectEvidence } from '../engineering/sourceEvidence.js';
 import { normalizeEngineeringModel } from '../../engineering/normalize.js';
 
@@ -8,6 +8,21 @@ function files(entries: Record<string, string>) {
 }
 
 describe('independent engineering source graph', () => {
+  it('keeps lazy family ownership identical to eager expansion without inheriting root CBM attributes',async()=>{
+    const input=files({'project.cbm':'OBJECTMODELPOINTER=root.dev\nBASEFAMILY=root.fam\nSUBDEVICE0=part.cbm',
+      'root.dev':'TYPE=GIS\nSUBDEVICE0=part.dev','part.dev':'TYPE=ACPorcelainCircuitBreaker',
+      'root.fam':'[设计]\n设备类型=EQUIPMENTTYPE=GIS\n设备编码=GRIDIDENTIFICATIONSYSTEMCODE=root-code',
+      'part.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=part.dev\nBASEFAMILY=part.fam','part.fam':'[设计]\n设备名称=DEVICENAME=child-name'});
+    const eager=await extractEngineeringSourceGraph(input),lazy=await extractEngineeringSourceGraph(input,{deferFamilies:true});
+    await materializeEngineeringFamilies(lazy,input.readText);
+    for(const child of lazy.records.filter(row=>row.parent)){
+      expect(child.properties.some(p=>p.path==='root.fam')).toBe(false);
+      expect(child.properties.some(p=>p.path==='part.fam')).toBe(true);
+    }
+    const observations=(graph:typeof eager)=>graph.records.map(row=>({id:row.id,properties:[...row.properties].sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))}));
+    expect(observations(lazy)).toEqual(observations(eager));
+    expect(normalizeEngineeringModel('case',lazy.records.map(toObjectEvidence)).memberships.find(m=>m.sourceId===lazy.records[1].id)?.interpretation).toMatchObject({category:'E06',categoryStatus:'confirmed'});
+  });
   it('preserves same-template parent/child occurrences without actual assembly evidence', async () => {
     const graph = await extractEngineeringSourceGraph(files({
       'CBM/project.cbm': 'SUBSYSTEM=p.cbm',

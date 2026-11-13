@@ -34,6 +34,7 @@ export interface IfcPropertyGroup {
   id: number;
   name: string;
   kind: 'property' | 'quantity';
+  applicability?: 'instance' | 'type' | 'unknown';
   values: IfcPropertyValue[];
   truncated?: boolean;
 }

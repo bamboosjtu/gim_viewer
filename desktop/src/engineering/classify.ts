@@ -136,6 +136,7 @@ function interpretClassification(object:ObjectEvidence,hasChildren=false):Object
 /** Category, vocabulary type and engineering purpose have independent evidence. */
 export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectInterpretation {
   const result=interpretClassification(object,hasChildren);
+  if(object.vocabularyObservations?.length)result.vocabularyObservations=object.vocabularyObservations;
   if(result.basis.includes('name')||result.basis==='family_identity_candidate'||result.basis==='type+object_identity')result.classificationStatus=result.category==='U-OBJECT'?'unresolved':'candidate';
   const purposes=[...new Set(object.purposes?.map(p=>p.value)??[])];
   result.purpose=purposes.length===1?{id:purposes[0],status:'confirmed',evidence:object.purposes!.map(p=>p.evidenceId)}
@@ -149,6 +150,10 @@ export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectI
   if(object.equipmentType)result.equipmentType={id:object.equipmentType.value,status:'confirmed',evidence:[object.equipmentType.evidenceId]};
   if(object.componentType)result.componentType={id:object.componentType.value,status:'confirmed',evidence:[object.componentType.evidenceId]};
   const equipmentCandidates=object.equipmentTypeCandidates??[],componentCandidates=object.componentTypeCandidates??[];
+  if(new Set(equipmentCandidates.map(p=>p.value)).size===1)
+    result.equipmentType={id:equipmentCandidates[0].value,status:'confirmed',evidence:[...new Set(equipmentCandidates.map(p=>p.evidenceId))]};
+  if(new Set(componentCandidates.map(p=>p.value)).size===1)
+    result.componentType={id:componentCandidates[0].value,status:'confirmed',evidence:[...new Set(componentCandidates.map(p=>p.evidenceId))]};
   if(new Set(equipmentCandidates.map(p=>p.value)).size>1){
     result.equipmentType={status:'unresolved',evidence:equipmentCandidates.map(p=>p.evidenceId)};
     const contexts=new Set(equipmentCandidates.map(p=>JSON.stringify(p.context??{})));

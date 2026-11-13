@@ -1,4 +1,5 @@
 {
+  "version": "source-type-aliases-1",
   "dev": {
     "oilimmersedtransformer": "E01",
     "drytypetransformer": "E01",

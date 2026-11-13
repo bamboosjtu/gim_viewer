@@ -52,6 +52,63 @@ it('keeps missing, ambiguous and dual-use PARTINDEX relationships without creati
   expect(graph.records.filter(r=>r.source==='orphan.dev')).toHaveLength(1);
 });
 
+it.each([1,2,0])('retains PARTINDEX assignment candidates for %i real matches without promoting attribute-only references',async count=>{
+  const raw:Record<string,string>={'project.cbm':'OBJECTMODELPOINTER=root.dev\nSUBDEVICE0=part.cbm\nSUBSYSTEM0=physical.cbm',
+    'root.dev':'TYPE=GIS\n'+Array.from({length:count},(_,i)=>`SUBDEVICE${i}=part.dev`).join('\n'),
+    'part.dev':'TYPE=Radiator','part.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=part.dev\nBASEFAMILY=part.fam',
+    'part.fam':'[设计]\n额定电压=RATEDVOLTAGE=1 kV','physical.cbm':'OBJECTMODELPOINTER=part.dev'};
+  const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]},{deferFamilies:true});
+  const provider=new ModelEvidenceProvider('scope',Object.keys(raw),async p=>raw[p]);provider.attachGraph(graph);
+  const range={entryIds:['part.fam'],kinds:['assignments'] as const};
+  const snapshot=await provider.ensureEvidence(range),page=provider.queryEvidence({range,revision:snapshot.revision,limit:20});
+  const alias=graph.aliases[0],assignment=page.assignments[0];
+  expect(assignment.status).toBe(count===1?'confirmed':count===2?'ambiguous':'unresolved');
+  expect([...assignment.candidateSourceIds].sort()).toEqual([...alias.candidates].sort());
+  expect(assignment.sourceId).toBe(count===1?alias.candidates[0]:undefined);
+  expect(graph.records.filter(r=>!r.parent)).toHaveLength(count===0?2:1);
+  if(count===0)expect(page.assignments.every(a=>!a.candidateSourceIds.includes(graph.records[graph.records.length-1].id))).toBe(true);
+});
+
+it('keeps a shared FAM confirmed use separate from an ambiguous PARTINDEX use',async()=>{
+  const raw:Record<string,string>={'project.cbm':'OBJECTMODELPOINTER=root.dev\nBASEFAMILY=shared.fam\nSUBDEVICE0=part.cbm',
+    'root.dev':'TYPE=GIS\nSUBDEVICE0=part.dev\nSUBDEVICE1=part.dev','part.dev':'TYPE=Radiator',
+    'part.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=part.dev\nBASEFAMILY=shared.fam','shared.fam':'[设计]\n设备名称=DEVICENAME=shared'};
+  const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]},{deferFamilies:true});
+  const provider=new ModelEvidenceProvider('scope',Object.keys(raw),async p=>raw[p]);provider.attachGraph(graph);
+  const range={entryIds:['shared.fam'],kinds:['assignments'] as const},inventory=await provider.ensureEvidence(range);
+  const assignments=provider.queryEvidence({range,revision:inventory.revision,limit:20}).assignments;
+  expect(assignments).toHaveLength(2);
+  expect(assignments[0]).toMatchObject({status:'confirmed',sourceId:graph.records[0].id,candidateSourceIds:[graph.records[0].id]});
+  expect(assignments[1]).toMatchObject({status:'ambiguous',occurrenceId:graph.aliases[0].sourceId,candidateSourceIds:graph.aliases[0].candidates});
+  await materializeEngineeringFamilies(graph,async p=>raw[p]);
+  expect(graph.records.slice(1).every(r=>!r.properties.some(p=>p.path==='shared.fam'))).toBe(true);
+});
+
+it('indexes family references once per document even when a PARTINDEX document has many occurrences',async()=>{
+  const raw:Record<string,string>={'project.cbm':'OBJECTMODELPOINTER=root.dev\n'+Array.from({length:40},(_,i)=>`SUBDEVICE${i}=part.cbm`).join('\n'),
+    'root.dev':'TYPE=GIS\nSUBDEVICE0=part.dev\nSUBDEVICE1=part.dev','part.dev':'TYPE=Radiator',
+    'part.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=part.dev\nBASEFAMILY=part.fam','part.fam':'[设计]\n设备名称=DEVICENAME=part'};
+  const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]},{deferFamilies:true});
+  expect(graph.aliases).toHaveLength(40);
+  let reads=0;
+  for(const ref of graph.references){const target=ref.target;Object.defineProperty(ref,'target',{get:()=>{reads++;return target;}});}
+  const provider=new ModelEvidenceProvider('scope',Object.keys(raw),async p=>raw[p]);provider.attachGraph(graph);
+  expect(reads).toBeLessThanOrEqual(graph.references.length*2);
+  const range={entryIds:['part.fam'],kinds:['assignments'] as const},inventory=await provider.ensureEvidence(range);
+  expect(provider.queryEvidence({range,revision:inventory.revision,limit:100}).assignments).toHaveLength(40);
+});
+
+it('indexes ambiguous assignment identity without copying or serializing candidate vectors',async()=>{
+  const raw:Record<string,string>={'project.cbm':'OBJECTMODELPOINTER=root.dev\nSUBDEVICE0=part.cbm',
+    'root.dev':'TYPE=GIS\nSUBDEVICE0=part.dev\nSUBDEVICE1=part.dev','part.dev':'TYPE=Radiator',
+    'part.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=part.dev\nBASEFAMILY=part.fam','part.fam':'[设计]\n设备名称=DEVICENAME=part'};
+  const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]},{deferFamilies:true});
+  let candidateReads=0;
+  graph.aliases[0].candidates=new Proxy([...graph.aliases[0].candidates],{get(target,key,receiver){if(/^\d+$/.test(String(key)))candidateReads++;return Reflect.get(target,key,receiver);}});
+  const provider=new ModelEvidenceProvider('scope',Object.keys(raw),async p=>raw[p]);provider.attachGraph(graph);
+  expect(candidateReads).toBe(0);
+});
+
 it('isolates a broken child while preserving other physical branches',async()=>{
   const raw:Record<string,string>={'project.cbm':'SUBSYSTEM0=bad.cbm\nSUBSYSTEM1=ok.cbm','ok.cbm':'OBJECTMODELPOINTER=ok.dev','ok.dev':'TYPE=GIS'};
   const graph=await extractEngineeringSourceGraph({paths:[...Object.keys(raw),'bad.cbm'],readText:async p=>{if(p==='bad.cbm')throw Error('read failure');return raw[p];}});

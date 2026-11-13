@@ -2,7 +2,8 @@ import {expect,it} from 'vitest';
 import {toObjectEvidence,type SourceRecord} from '../../gim/engineering/sourceEvidence.js';
 import {interpretObject} from '../classify.js';
 import {normalizeEngineeringModel} from '../normalize.js';
-import {attributeFromProperty} from '../../gim/engineering/attributeEvidence.js';
+import {attributeFromProperty,annotateAttributeConflicts} from '../../gim/engineering/attributeEvidence.js';
+import {extractEngineeringSourceGraph} from '../../gim/engineering/sourceGraph.js';
 const record=(id:string,type:string,extra:Partial<SourceRecord>={}):SourceRecord=>({id,track:'dev',source:id+'.dev',source_type:type,name:'unknown',parent:'',properties:[],sources:[],context:[],guid:'',...extra});
 it('confirms transformer type while keeping purpose/category and boundary independent',()=>{
   const evidence=toObjectEvidence(record('t','OilImmersedTransformer'));
@@ -34,4 +35,42 @@ it('retains category observations from different lifecycle sections without repo
 it('does not select the first of incompatible specific TYPE declarations sharing a coarse category',()=>{
   const evidence=toObjectEvidence(record('g','GIS',{properties:[{keys:['TYPE'],value:'GIS'},{keys:['TYPE'],value:'HGIS'}]}));
   expect(interpretObject(evidence)).toMatchObject({category:'U-OBJECT',categoryStatus:'unresolved',basis:'attribute_conflict',equipmentType:{status:'unresolved'},conflict:'equipment_type_conflict'});
+});
+
+it.each(['EQUIPMENTTYPE','MATERIALTYPE'])('uses the sole FAM %s candidate and retains its evidence',key=>{
+  const result=interpretObject(toObjectEvidence(record('t','OTHERS',{properties:[{path:'a.fam',line:2,keys:[key],value:'OilImmersedTransformer'}]})));
+  expect(result.equipmentType).toMatchObject({id:'oil_immersed_transformer',status:'confirmed'});
+  expect(result.equipmentType?.evidence[0]).toContain('a.fam');expect(result.category).toBe('E-T');expect(result.purpose?.status).toBe('unresolved');
+  const component=interpretObject(toObjectEvidence(record('c','OTHERS',{properties:[{path:'a.fam',line:3,keys:[key],value:'Body'}]})));
+  expect(component.componentType).toMatchObject({id:'body',status:'confirmed'});expect(component.componentType?.evidence[0]).toContain('a.fam');
+});
+
+it.each(['SYSCLASSIFYNAME','PARTNAME'])('R09 maps only verified exact %s terms, retains unknown codes and ignores field order',async field=>{
+  const lines=[`${field}=GIS`,'OBJECTMODELPOINTER=a.dev'];
+  for(const ordered of [lines,[...lines].reverse()]){
+    const raw:Record<string,string>={'project.cbm':ordered.join('\n'),'a.dev':'TYPE=OTHERS'};
+    const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]});
+    const result=interpretObject(toObjectEvidence(graph.records[0]));
+    expect(result).toMatchObject({category:'E05',categoryStatus:'confirmed',equipmentType:{id:'gis',status:'confirmed'}});
+    expect(result.vocabularyObservations?.[0]).toMatchObject({field,rawValue:'GIS',status:'mapped',dictionaryVersion:'source-keywords-1'});
+    expect(result.vocabularyObservations?.[0].dictionaryEvidence).toContain('C17');
+    expect(result.classificationEvidence?.some(id=>id.includes('project.cbm'))).toBe(true);
+  }
+  for(const value of ['0AFD*002','GIS-unknown','&GN']){
+    const result=interpretObject(toObjectEvidence(record('x','OTHERS',{properties:[{keys:[field],value,path:'project.cbm',line:1}]})));
+    expect(result).toMatchObject({category:'U-OBJECT',categoryStatus:'unresolved',vocabularyObservations:[{field,rawValue:value,status:'unresolved'}]});
+    expect(result.equipmentType).toBeUndefined();
+  }
+  expect(interpretObject(toObjectEvidence(record('x','OTHERS'))).vocabularyObservations).toBeUndefined();
+});
+
+it('compares observed attributes only within the same object, stage, Pset and applicability',()=>{
+  const base={path:'a.ifc',sourceId:'a',containerId:'a.ifc#10',rawContainerName:'Pset_Design',applicability:'instance' as const,section:'设计',keys:['额定电压'],value:'1 kV'};
+  for(const variation of [{rawContainerName:'Pset_Product'},{applicability:'type' as const},{sourceId:'b'},{section:'产品'},{path:'b.ifc'}]){
+    const attributes=annotateAttributeConflicts([attributeFromProperty(base,0),attributeFromProperty({...base,...variation,value:'2 kV'},1)]);
+    expect(attributes.every(a=>!a.conflict)).toBe(true);expect(new Set(attributes.map(a=>a.id)).size).toBe(2);
+  }
+  const conflict=annotateAttributeConflicts([attributeFromProperty(base,0),attributeFromProperty({...base,value:'2 kV'},1)]);
+  expect(conflict.every(a=>a.conflict)).toBe(true);
+  expect(conflict[0]).toMatchObject({rawContainerName:'Pset_Design',applicability:'instance',containerId:'a.ifc#10',sourceId:'a',rawSection:'设计',evidence:[{path:'a.ifc',sourceId:'a',containerId:'a.ifc#10'}]});
 });

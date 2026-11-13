@@ -57,7 +57,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       classificationState: category === 'U-OBJECT' ? 'unknown' : 'identified', sourceIds: [], classificationConflicts: 0,
       classificationStatus:meaning.get(sourceIds.find(id=>meaning.get(id)?.category===category)??'')?.classificationStatus??(category==='U-OBJECT'?'unresolved':'confirmed'),
       boundaryStatus:proof==='outward_object_boundary_unconfirmed'||kind!=='whole'
-        ||sourceIds.some(id=>raw.get(id)?.equipmentType||raw.get(id)?.componentType||meaning.get(id)?.classificationStatus!=='confirmed')&&!sourceIds.some(id=>raw.get(id)?.identityCodes.length||raw.get(id)?.designations.length||explicitIndependent(raw.get(id)!))
+        ||sourceIds.some(id=>meaning.get(id)?.equipmentType||meaning.get(id)?.componentType||meaning.get(id)?.classificationStatus!=='confirmed')&&!sourceIds.some(id=>raw.get(id)?.identityCodes.length||raw.get(id)?.designations.length||explicitIndependent(raw.get(id)!))
         ||['E04','E10'].includes(category)&&!/(?:成套|装置|组)/.test(name)&&!sourceIds.some(id=>raw.get(id)?.identityCodes.length)?'candidate':'confirmed',
       grain:categoryDefinition(category)?.grain as 'item'|'segment'|undefined,
       ...classificationDetails(category,name),

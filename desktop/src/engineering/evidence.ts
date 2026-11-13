@@ -6,11 +6,14 @@ export type AttributeValue = {kind:'scalar';value:string|number|boolean|null} | 
 export interface SourceAttribute {
   conflict?:{group:string;reason:'incompatible_observations'};
   id:string;rawKey:string;rawValue:string;rawUnit?:string;rawValueType?:string;rawSection?:string;containerId?:string;
+  sourceId?:string;
+  applicability?:'instance'|'type'|'unknown';
+  rawContainerName?:string;
   evidence:readonly EvidenceRef[];
   parsedValue?:{status:'parsed'|'unsupported'|'failed';value?:AttributeValue;method:string;version:string};
   semanticValue?:{propertyId:string;value:AttributeValue;unit?:{symbol:string;quantityKind?:string;dimensionId?:string};method:string;version:string};
 }
-export interface SourceAttributeAssignment {attributeId:string;sourceId?:string;candidateSourceIds:readonly string[];status:'confirmed'|'ambiguous'|'unresolved'}
+export interface SourceAttributeAssignment {attributeId:string;sourceId?:string;occurrenceId?:string;candidateSourceIds:readonly string[];status:'confirmed'|'ambiguous'|'unresolved'}
 export interface EvidenceRange {entryIds:readonly string[];kinds:readonly ('documents'|'attributes'|'references'|'occurrences'|'assignments')[]}
 export interface EvidenceQuery {range:EvidenceRange;revision:number;offset?:number;limit:number}
 export interface EvidenceInventory {

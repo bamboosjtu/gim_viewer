@@ -1,13 +1,13 @@
 import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../ifcSpatialParser.js';
 import { collectEngineeringSourceModel, type IfcSourceMatch } from './engineeringModel.js';
-import type { SourceRecord } from './sourceEvidence.js';
+import { ENGINEERING_RECOGNITION_VERSION, type SourceRecord } from './sourceEvidence.js';
 import type { EngineeringSourceGraph } from './sourceGraph.js';
 import { normalizeEngineeringModel } from '../../engineering/normalize.js';
 import { engineeringObjectEvidence } from './objectEvidence.js';
 import type { EngineeringSnapshot } from '../../engineering/types.js';
 import { collectSourceGeometryOccurrences } from './geometryOccurrences.js';
 
-export const ENGINEERING_SOURCE_VERSION = 'engineering-source-v13';
+export const ENGINEERING_SOURCE_VERSION = 'engineering-source-v14';
 export type EngineeringSpatialContext = Pick<IfcSpatialNode, 'key' | 'modelId' | 'expressId' | 'ifcType' | 'kind' | 'globalId' | 'name' | 'sourcePath' | 'parentKey' | 'longName'> & { elevationMetres?: number };
 export interface EngineeringSources {
   version: string;
@@ -52,5 +52,5 @@ export function buildEngineeringSources(scope:string,graph:EngineeringSourceGrap
 
 /** Rules can change without reparsing source formats or touching geometry. */
 export function normalizeEngineeringSources(scope: string, sources: EngineeringSources): EngineeringSnapshot {
-  return normalizeEngineeringModel(scope, engineeringObjectEvidence(sources.graph,[...sources.graph.records, ...sources.ifcRecords]), sources.graph.aliases);
+  return {...normalizeEngineeringModel(scope, engineeringObjectEvidence(sources.graph,[...sources.graph.records, ...sources.ifcRecords]), sources.graph.aliases),rulesVersion:ENGINEERING_RECOGNITION_VERSION};
 }

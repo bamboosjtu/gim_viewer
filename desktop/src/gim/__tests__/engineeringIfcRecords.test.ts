@@ -13,6 +13,15 @@ const object = (expressId: number, ifcType: string, name: string, extra: Partial
   hostObjectKey: null, spatialKey: null, spatialKeys: [], spatialContainment: null, sourcePath: 'elsewhere/model.ifc', ...extra,
 });
 
+it('keeps Pset identity, raw spelling, applicability, units and object identity on source properties',()=>{
+  const record=ifcSourceRecords([object(1,'IFCBUILDINGELEMENTPROXY','unknown',{propertySets:[
+    {id:10,name:'Pset_Raw_Instance',kind:'property',values:[{name:'RATEDVOLTAGE',value:'1',unit:'kV',dataType:'IfcElectricVoltageMeasure'}]},
+    {id:11,name:'Pset_Raw_Type',kind:'property',applicability:'type',values:[{name:'RATEDVOLTAGE',value:'2',unit:'kV'}]},
+  ]})])[0];
+  expect(record.properties[0]).toMatchObject({rawContainerName:'Pset_Raw_Instance',applicability:'instance',containerId:'elsewhere/model.ifc#10',sourceId:record.id,rawUnit:'kV',rawValueType:'IfcElectricVoltageMeasure'});
+  expect(record.properties[1]).toMatchObject({rawContainerName:'Pset_Raw_Type',applicability:'type'});
+});
+
 it('preserves duplicate GUID instances and materialless/unrepresented outward objects', () => {
   const records = ifcSourceRecords([object(1, 'IFCBEAM', '梁'), object(2, 'IFCBEAM', '梁')]);
   expect(new Set(records.map(row => row.id)).size).toBe(2);

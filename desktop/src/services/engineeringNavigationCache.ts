@@ -58,9 +58,13 @@ async function dependency(snapshot: EngineeringSnapshot, sourceDigest: string): 
 
 /** Cache structure validation checks real source/entity references and complete
  * reachability. A malformed projection is rebuilt independently of facts. */
-export function assertEngineeringNavigation(view: EngineeringNavigationData, sources: EngineeringSources, snapshot: EngineeringSnapshot): void {
+export function assertEngineeringNavigation(view: EngineeringNavigationData, sources: EngineeringSources, snapshot: EngineeringSnapshot, allowPartial=false): void {
   valid(object(view) && view.version === ENGINEERING_NAVIGATION_VERSION && object(view.composition) && view.composition.version === ENGINEERING_COMPOSITION_VERSION, 'version');
-  valid(view.projectionVersions?.composition===ENGINEERING_COMPOSITION_VERSION&&view.projectionVersions?.inventory===INVENTORY_TEMPLATE_VERSION&&view.projectionVersions?.source===SOURCE_TREE_TEMPLATE_VERSION&&view.inventory?.version===INVENTORY_TEMPLATE_VERSION,'projection versions');
+  const errors=view.projectionErrors;
+  valid(errors===undefined||object(errors)&&Object.entries(errors).every(([key,value])=>['composition','source','inventory'].includes(key)&&typeof value==='string'&&value.length>0),'projection errors');
+  valid(allowPartial||!Object.keys(errors??{}).length,'partial projection');
+  const failed=(key:string)=>allowPartial&&!!errors?.[key];
+  valid(view.projectionVersions?.composition===ENGINEERING_COMPOSITION_VERSION&&view.projectionVersions?.inventory===INVENTORY_TEMPLATE_VERSION&&view.projectionVersions?.source===SOURCE_TREE_TEMPLATE_VERSION&&(failed('inventory')&&!view.inventory||view.inventory?.version===INVENTORY_TEMPLATE_VERSION),'projection versions');
   const entities = new Set([...snapshot.entities, ...snapshot.pending].map(e => e.id));
   const sourceIds = new Set([...sources.graph.records, ...sources.ifcRecords].map(r => r.id));
   const contexts = new Set(sources.graph.cbmOccurrences.map(node=>node.id));
@@ -82,14 +86,15 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
     valid(visited.size === nodes.size, 'unreachable rows');
   }
   tree(view.composition.nodes, view.composition.rootKey, true); tree(view.sourceNodes, view.sourceRoot, false);
-  valid(view.composition.rowsByEntity instanceof Map && view.composition.rowsByEntity.size === entities.size, 'entity coverage');
+  valid(view.composition.rowsByEntity instanceof Map && (failed('composition')||view.composition.rowsByEntity.size === entities.size), 'entity coverage');
   for (const [id, rows] of view.composition.rowsByEntity) valid(entities.has(id) && strings(rows) && rows.length && rows.every(key => view.composition.nodes.get(key)?.targetId === id), 'entity rows');
-  valid(view.sourceRows instanceof Map && view.sourceRows.size === sourceIds.size, 'source coverage');
+  valid(view.sourceRows instanceof Map && (failed('source')||view.sourceRows.size === sourceIds.size), 'source coverage');
   for (const [id, row] of view.sourceRows) valid(sourceIds.has(id) && typeof row === 'string' && view.sourceNodes.get(row)?.sourceId === id, 'source rows');
   for (const [items, ids] of [[view.compositionSearch, entities], [view.sourceSearch, new Set(view.sourceNodes.keys())]] as const) {
     valid(Array.isArray(items) && items.every(item => object(item) && typeof item.key === 'string' && ids.has(item.key) && typeof item.title === 'string' && typeof item.subtitle === 'string'), 'search');
   }
   valid(view.compositionSearch.every(item => typeof item.searchText === 'string'), 'engineering search text');
+  if(!failed('inventory')||view.inventory){
   valid(view.inventory?.nodes instanceof Map && view.inventory.rowsByEntity instanceof Map && view.inventory.rowsBySource instanceof Map,'inventory');
   valid(view.inventory!.rowsByEntity.size===entities.size&&[...entities].every(id=>view.inventory!.rowsByEntity.has(id)),'inventory entity coverage');
   const inventory=view.inventory!;tree(inventory.nodes,inventory.rootKey,true,true);
@@ -102,7 +107,8 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
   valid(inventory.rowsBySource.size===sourceIds.size,'inventory source coverage');
   for(const member of snapshot.memberships){const row=inventory.nodes.get(inventory.rowsBySource.get(member.sourceId)??'');valid(row?.sourceId===member.sourceId,'inventory source row');}
   valid(Array.isArray(view.inventorySearch)&&view.inventorySearch.length===entities.size&&new Set(view.inventorySearch.map(r=>r.key)).size===entities.size&&view.inventorySearch.every(r=>entities.has(r.key)&&typeof r.title==='string'&&typeof r.subtitle==='string'&&typeof r.searchText==='string'),'inventory search');
-  const input=view.compositionInput;valid(input&&Array.isArray(input.facts)&&input.facts.length===snapshot.entities.length&&new Set(input.facts.map(f=>f.entityId)).size===snapshot.entities.length&&input.facts.every(f=>entities.has(f.entityId)&&Array.isArray(f.spaces)&&Array.isArray(f.declarations)&&strings(f.hostEntityIds)
+  }else valid(Array.isArray(view.inventorySearch)&&view.inventorySearch.length===0,'failed inventory search');
+  const input=view.compositionInput;valid(input&&Array.isArray(input.facts)&&(failed('composition')||input.facts.length===snapshot.entities.length)&&new Set(input.facts.map(f=>f.entityId)).size===input.facts.length&&input.facts.every(f=>entities.has(f.entityId)&&Array.isArray(f.spaces)&&Array.isArray(f.declarations)&&strings(f.hostEntityIds)
     && (f.sourceHints===undefined||strings(f.sourceHints))
     && (f.deliveryBuildingNames===undefined||Array.isArray(f.deliveryBuildingNames)&&f.deliveryBuildingNames.every(n=>object(n)&&typeof n.value==='string'&&typeof n.evidenceId==='string'))
     && (f.positions===undefined||Array.isArray(f.positions)&&f.positions.every(p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite))))&&Array.isArray(input.declarations),'composition input');
@@ -118,12 +124,12 @@ export async function encodeEngineeringNavigation(view: EngineeringNavigationDat
   assertEngineeringNavigation(view, sources, snapshot);
   return (await encodeEngineeringArtifact('navigation', engineeringNavigationToWire(view), id, await dependency(snapshot, sourceDigest))).bytes;
 }
-export function engineeringNavigationFromWire(payload: unknown, sources: EngineeringSources, snapshot: EngineeringSnapshot): EngineeringNavigationData {
+export function engineeringNavigationFromWire(payload: unknown, sources: EngineeringSources, snapshot: EngineeringSnapshot, allowPartial=false): EngineeringNavigationData {
   valid(object(payload) && object(payload.composition), 'payload');
   const raw = payload as ReturnType<typeof engineeringNavigationToWire>;
   const view = { ...raw, composition: { ...raw.composition, nodes: map(raw.composition.nodes), rowsByEntity: map(raw.composition.rowsByEntity) }, sourceNodes: map(raw.sourceNodes), sourceRows: map(raw.sourceRows),
     inventory:raw.inventory?{...raw.inventory,nodes:map(raw.inventory.nodes),rowsByEntity:map(raw.inventory.rowsByEntity),rowsBySource:map(raw.inventory.rowsBySource)}:undefined } as EngineeringNavigationData;
-  assertEngineeringNavigation(view, sources, snapshot); return view;
+  assertEngineeringNavigation(view, sources, snapshot, allowPartial); return view;
 }
 export async function decodeEngineeringNavigation(bytes: Uint8Array, sources: EngineeringSources, snapshot: EngineeringSnapshot, sourceDigest: string, id: EngineeringCacheIdentity): Promise<EngineeringNavigationData> {
   const { payload } = await decodeEngineeringArtifact('navigation', bytes, id, await dependency(snapshot, sourceDigest));

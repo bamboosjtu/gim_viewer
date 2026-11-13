@@ -45,7 +45,7 @@ export async function decodeEngineeringWorkerResult(payload: EngineeringWorkerPa
     if(frame.reference){if(!cache?.graph||cache.scope!==frame.scope||cache.revision!==frame.revision)throw Error('Engineering graph reference unavailable');data.sources={...data.sources,graph:cache.graph};}
     else{if((data.sources.graph?.revision??0)!==frame.revision)throw Error('Engineering graph revision mismatch');if(cache){cache.scope=frame.scope;cache.revision=frame.revision;cache.graph=data.sources.graph;}}
   }
-  const navigation = engineeringNavigationFromWire(data.navigation, data.sources, data.snapshot);
+  const navigation = engineeringNavigationFromWire(data.navigation, data.sources, data.snapshot, true);
   if (!isCurrent()) throw new DOMException('Engineering hydration cancelled', 'AbortError');
   return { ...data, navigation, metrics:payload.metrics?{...payload.metrics,hydrateMs:performance.now()-started}:undefined };
 }

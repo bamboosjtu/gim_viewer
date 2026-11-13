@@ -14,7 +14,7 @@ export class ModelEvidenceProvider {
   private attributes=new Map<string,SourceAttribute[]>();
   private reads=new Map<string,Promise<string>>();
   private entryIds:Set<string>;
-  private assignmentIndex=new Map<string,Set<string>>();
+  private assignmentIndex=new Map<string,Array<Omit<SourceAttributeAssignment,'attributeId'>>>();
   private directAssignments=new Map<string,Set<string>>();
   private propertyViews=new Map<string,readonly SourceProperty[]>();
   private extraByPath=new Map<string,SourceRecord[]>();
@@ -47,10 +47,34 @@ export class ModelEvidenceProvider {
     for(const doc of graph.documents)this.observe(doc.path,doc.rawLines);
     for(const diagnostic of graph.diagnostics)if(diagnostic.kind==='read-failed')this.setStatus(diagnostic.source,'failed');
     this.refsByPath.clear();this.rowsByPath.clear();
-    for(const ref of graph.references){const rows=this.refsByPath.get(ref.owner)??[];rows.push(ref);this.refsByPath.set(ref.owner,rows);}
+    const familiesByOwner=new Map<string,Set<string>>();
+    for(const ref of graph.references){
+      const rows=this.refsByPath.get(ref.owner)??[];rows.push(ref);this.refsByPath.set(ref.owner,rows);
+      const target=ref.target;
+      if(target&&/\.fam$/i.test(target)){const paths=familiesByOwner.get(ref.owner)??new Set<string>();paths.add(target);familiesByOwner.set(ref.owner,paths);}
+    }
     for(const row of [...graph.records,...extra]){const rows=this.rowsByPath.get(row.source)??[];rows.push({id:row.id,path:row.source});this.rowsByPath.set(row.source,rows);}
     for(const node of graph.cbmOccurrences){const rows=this.rowsByPath.get(node.documentPath)??[];rows.push({id:node.id,path:node.documentPath});this.rowsByPath.set(node.documentPath,rows);}
-    this.assignmentIndex.clear();for(const a of graph.familyAssignments??[]){const ids=this.assignmentIndex.get(a.path)??new Set<string>();ids.add(a.sourceId);this.assignmentIndex.set(a.path,ids);}
+    this.assignmentIndex.clear();
+    const assignmentKeys=new Map<string,Set<string>>();
+    const indexAssignment=(path:string,assignment:Omit<SourceAttributeAssignment,'attributeId'>)=>{
+      // Assignment identity is its owning occurrence, not a serialization of
+      // all candidates. Large repeated PARTINDEX vectors make huge Set keys
+      // with common prefixes and retain a second copy of every source ID.
+      const rows=this.assignmentIndex.get(path)??[],keys=assignmentKeys.get(path)??new Set<string>();
+      const key=assignment.occurrenceId?'alias:'+assignment.occurrenceId:'source:'+assignment.sourceId;
+      if(!keys.has(key)){keys.add(key);rows.push(assignment);}
+      assignmentKeys.set(path,keys);
+      this.assignmentIndex.set(path,rows);
+    };
+    for(const a of graph.familyAssignments??[])indexAssignment(a.path,{sourceId:a.sourceId,candidateSourceIds:[a.sourceId],status:'confirmed'});
+    const cbmPaths=new Map(graph.cbmOccurrences.map(node=>[node.id,node.documentPath]));
+    for(const alias of graph.aliases){
+      if(alias.status==='confirmed')continue; // Already indexed at the actual assignment site.
+      const owner=cbmPaths.get(alias.sourceId);if(!owner)continue;
+      for(const path of familiesByOwner.get(owner)??[])
+        indexAssignment(path,{occurrenceId:alias.sourceId,candidateSourceIds:alias.candidates,status:alias.status});
+    }
     // Keep references to existing parsed facts; typed attribute views are generated on demand.
     for(const doc of graph.documents){
       this.documents.set(doc.path,{path:doc.path,rawLines:doc.rawLines});
@@ -100,7 +124,7 @@ export class ModelEvidenceProvider {
         const unique=new Map<string,SourceAttribute>();
         for(const row of records){const ordinals=new Map<string,number>();for(const property of row.properties){
           const key=JSON.stringify([property.source,property.keys]),ordinal=ordinals.get(key)??0;ordinals.set(key,ordinal+1);
-          const attr=attributeFromProperty(property,ordinal);unique.set(attr.id,attr);
+          const attr=attributeFromProperty({...property,sourceId:row.id},ordinal);unique.set(attr.id,attr);
           const ids=this.directAssignments.get(attr.id)??new Set<string>();ids.add(row.id);this.directAssignments.set(attr.id,ids);
         }}attributes=[...unique.values()];
       }else continue;
@@ -147,10 +171,10 @@ export class ModelEvidenceProvider {
     outer:for(const id of query.range.entryIds)for(const kind of query.range.kinds){
       if(kind==='attributes')for(const attr of this.attributes.get(id)??[])if(!add(kind,attr))break outer;
       if(kind==='assignments')for(const attr of this.attributes.get(id)??[]){
-        const sources=this.directAssignments.get(attr.id)??this.assignmentIndex.get(id)??[];
-        let assigned=false;
-        for(const sourceId of sources){assigned=true;const row:SourceAttributeAssignment={attributeId:attr.id,sourceId,candidateSourceIds:[sourceId],status:'confirmed'};if(!add(kind,row))break outer;}
-        if(!assigned&&!add(kind,{attributeId:attr.id,candidateSourceIds:[],status:'unresolved'}))break outer;
+        const direct=this.directAssignments.get(attr.id);
+        const assignments=direct?[...direct].map(sourceId=>({sourceId,candidateSourceIds:[sourceId],status:'confirmed' as const})):this.assignmentIndex.get(id)??[];
+        for(const assignment of assignments)if(!add(kind,{attributeId:attr.id,...assignment}))break outer;
+        if(!assignments.length&&!add(kind,{attributeId:attr.id,candidateSourceIds:[],status:'unresolved'}))break outer;
       }
       if(kind==='documents')for(const line of this.documents.get(id)?.rawLines??[])if(!add(kind,{path:id,rawLines:[line]}))break outer;
       if(kind==='references')for(const row of this.refsByPath.get(id)??[])if(!add(kind,row))break outer;

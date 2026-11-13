@@ -10,8 +10,9 @@ export function attributeFromProperty(p:SourceProperty,index:number):SourceAttri
   const match=p.value.trim().match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*([A-Za-z]+)?$/);
   const rawUnit=p.rawUnit??match?.[2],number=match?Number(match[1]):NaN;
   const value=Number.isFinite(number)?number:p.value;
-  const evidence=[{documentId:path,path,line:p.line,containerId:p.source}];
-  const attr:SourceAttribute={id:JSON.stringify([path,p.source??p.section??'',p.line??index,rawKey]),rawKey,rawValue:p.value,rawUnit,rawValueType:p.rawValueType,rawSection:p.section,containerId:p.source,evidence,
+  const containerId=p.containerId??p.source,applicability=p.applicability??'unknown';
+  const evidence=[{documentId:path,path,line:p.line,containerId,sourceId:p.sourceId}];
+  const attr:SourceAttribute={id:JSON.stringify([p.sourceId,path,containerId,p.rawContainerName,p.section,applicability,p.line??index,rawKey]),rawKey,rawValue:p.value,rawUnit,rawValueType:p.rawValueType,rawSection:p.section,containerId,rawContainerName:p.rawContainerName,applicability,sourceId:p.sourceId,evidence,
     parsedValue:{status:'parsed',value:{kind:'scalar',value},method:'observed-scalar',version:'1'}};
   const propertyId=p.keys?.map(k=>keys[k]??keys[k.toUpperCase()]).find(Boolean),unit=rawUnit?units[rawUnit]:undefined;
   const quantity=propertyId==='rated_voltage'?'voltage':propertyId==='capacity'?'apparent_power':propertyId==='rated_frequency'?'frequency':undefined;
@@ -24,7 +25,7 @@ export function attributeFromProperty(p:SourceProperty,index:number):SourceAttri
 export function annotateAttributeConflicts(attributes:SourceAttribute[]):SourceAttribute[]{
   const groups=new Map<string,{ids:string[];values:Set<string>}>();
   for(const attr of attributes){if(!attr.semanticValue)continue;
-    const key=JSON.stringify([attr.semanticValue.propertyId,attr.rawSection,attr.containerId]);
+    const key=JSON.stringify([attr.sourceId,attr.evidence.map(ref=>ref.path),attr.semanticValue.propertyId,attr.rawSection,attr.containerId,attr.rawContainerName,attr.applicability]);
     const group=groups.get(key)??{ids:[],values:new Set<string>()};group.ids.push(attr.id);group.values.add(JSON.stringify(attr.semanticValue.value));groups.set(key,group);
   }
   const conflicts=new Map<string,string>();for(const [key,group] of groups)if(group.values.size>1)for(const id of group.ids)conflicts.set(id,key);

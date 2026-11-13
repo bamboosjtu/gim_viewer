@@ -246,15 +246,6 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
       if (!guard.isCurrent()) return;
       state.engineeringNavMode = state.engineeringNavMode==='inventory'?'inventory':'composition'; tree.renderEngineeringTree(state);
       void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering', key: representations.index.ownerBySource.get(single.id)! })).catch(reportBackgroundError);
-    } : single ? async()=>{
-      if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
-      const [{ensureEngineeringEvidence,queryEngineeringEvidence},{requirementContext}]=await Promise.all([import('./engineeringService.js'),import('../standards/requirements.js')]);
-      const entryIds=[...new Set(single.properties.map(p=>p.path).filter((p):p is string=>!!p&&/\.fam$/i.test(p)))];
-      const range={entryIds,kinds:['attributes'] as const},inventory=await ensureEngineeringEvidence(state,range);
-      const page=await queryEngineeringEvidence(state,{range,revision:inventory.revision,limit:200});
-      if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
-      const model=single.properties.find(p=>p.keys?.some(k=>['模型类型','MODELTYPE'].includes(k.toUpperCase())))?.value;
-      return {来源覆盖:page.coverage,原始及解析属性:page.attributes,后续页:page.nextOffset,标准要求上下文:requirementContext({standardVersion:'Q/GDW 11810.1—2023',equipmentType:interpretation?.equipmentType?.id,modelType:model==='通用模型'?'generic':model==='产品模型'?'product':undefined})};
     } : undefined,
     onDocument: path => {
       if (!guard.isCurrent()) return;
@@ -275,6 +266,17 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
       const properties = await runtime.properties(ref.expressId);
       if (!guard.isCurrent()) throw new DOMException('选择已变化', 'AbortError');
       return { 原始属性: properties.attributes, 属性集: properties.propertySets, 类型属性: properties.typeProperties, 材料: properties.materials };
+    } : single?.track==='dev' ? async()=>{
+      if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
+      const [{ensureEngineeringEvidence,queryEngineeringEvidence},{requirementContext}]=await Promise.all([import('./engineeringService.js'),import('../standards/requirements.js')]);
+      if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
+      const entryIds=[...new Set(single.properties.map(p=>p.path).filter((p):p is string=>!!p&&/\.fam$/i.test(p)))];
+      const range={entryIds,kinds:['attributes','assignments'] as const},inventory=await ensureEngineeringEvidence(state,range);
+      if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
+      const page=await queryEngineeringEvidence(state,{range,revision:inventory.revision,limit:200});
+      if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
+      const model=single.properties.find(p=>p.keys?.some(k=>['模型类型','MODELTYPE'].includes(k.toUpperCase())))?.value;
+      return {来源覆盖:page.coverage,原始及解析属性:page.attributes,属性归属:page.assignments,后续页:page.nextOffset,标准要求上下文:requirementContext({standardVersion:'Q/GDW 11810.1—2023',equipmentType:interpretation?.equipmentType?.id,modelType:model==='通用模型'?'generic':model==='产品模型'?'product':undefined})};
     } : undefined,
   });
   if (!state.initialized) return true;

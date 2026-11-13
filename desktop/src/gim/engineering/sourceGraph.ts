@@ -52,7 +52,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   const maxOccurrences = options.maxOccurrences ?? 500_000;
   const maxDepth = options.maxDepth ?? 128;
   const result: EngineeringSourceGraph = { documents: [], cbmOccurrences: [], records: [], aliases: [], references: [],
-    ifcPaths: files.paths.filter(p => /\.ifc$/i.test(p)).sort(ordered), diagnostics: [] };
+    ifcPaths: files.paths.filter(p => /\.ifc$/i.test(p)).sort(ordered), diagnostics: [], familyAssignments: [] };
   const exact = new Map<string, string[]>();
   const basename = new Map<string, string[]>();
   options.onProgress?.('source-index');
@@ -94,9 +94,9 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     return promise;
   }
   const scalar = (doc: SourceDocument, key: string) => doc.fields.find(p => p.keys[0].toUpperCase() === key)?.value ?? '';
-  // Object fields are attached only to their actual OMP occurrence. SYSTEMNAME
-  // and PARTNAME remain organizational context in the source documents.
-  const objectFields = (doc: SourceDocument) => doc.fields.filter(p => /^(?:TYPE|SYMBOLNAME|NAME|OBJECTNAME|PROJECTNAME|设备名称|工程中名称|设备编码|电网工程标识系统编码|GRIDIDENTIFICATIONSYSTEMCODE|材料子类|设备子类|MATERIALSUBTYPE|EQUIPMENTSUBTYPE|相数|相别|PHASE|PHASECOUNT|PHASELABEL|设备类型|设备类别|材料类型|构件类型|用途|设备用途|EQUIPMENTTYPE|MATERIALTYPE|PURPOSE|型号|MODEL|MODELSPEC|对象角色|组件角色|OBJECTROLE|COMPONENTROLE)$/i.test(p.keys[0]));
+  // Object fields are attached only to their actual OMP occurrence. Ancestor
+  // organization labels never become evidence on every descendant.
+  const objectFields = (doc: SourceDocument) => doc.fields.filter(p => /^(?:TYPE|SYSCLASSIFYNAME|PARTNAME|SYMBOLNAME|NAME|OBJECTNAME|PROJECTNAME|设备名称|工程中名称|设备编码|电网工程标识系统编码|GRIDIDENTIFICATIONSYSTEMCODE|材料子类|设备子类|MATERIALSUBTYPE|EQUIPMENTSUBTYPE|相数|相别|PHASE|PHASECOUNT|PHASELABEL|设备类型|设备类别|材料类型|构件类型|用途|设备用途|EQUIPMENTTYPE|MATERIALTYPE|PURPOSE|型号|MODEL|MODELSPEC|对象角色|组件角色|OBJECTROLE|COMPONENTROLE)$/i.test(p.keys[0]));
   function updateNames(row: SourceRecord): void {
     const names: ObjectNameEvidence[] = [];
     for (const [kind, labels] of [
@@ -112,6 +112,13 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   }
   const familyCache = new Map<string, Promise<SourceProperty[]>>();
   const familyPaths=new Map<string,string[]>();
+  const assignedFamilies=new Set<string>();
+  function assignFamilies(doc:SourceDocument,sourceId:string):void {
+    for(const path of referencedFamilies(doc)) {
+      const key=JSON.stringify([sourceId,path]);
+      if(!assignedFamilies.has(key)){assignedFamilies.add(key);result.familyAssignments!.push({sourceId,path});}
+    }
+  }
   function referencedFamilies(doc:SourceDocument):string[]{
     const cached=familyPaths.get(doc.path);if(cached)return cached;
     const paths:string[]=[];
@@ -155,6 +162,8 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     let doc:SourceDocument;
     try{doc=await document(path);}catch(error){if(options.signal?.aborted||/Engineering source unavailable/.test(String(error)))throw error;result.diagnostics.push({kind:'read-failed',source:path});return [];}
     const cbmDoc = await document(cbm.documentPath);
+    assignFamilies(doc,id);
+    if(!parent)assignFamilies(cbmDoc,id);
     const props = [...(!parent ? await family(cbmDoc) : []), ...await family(doc), ...objectFields(doc), ...(!parent ? objectFields(cbmDoc) : [])];
     const row: SourceRecord = {
       id, track: 'dev', source: path, name: '',
@@ -211,6 +220,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
           result.aliases.push({ sourceId: id, status: candidates.length === 1 ? 'confirmed' : 'ambiguous', candidates: candidates.map(row => row.id) });
           if (candidates.length === 1) {
             const row = candidates[0];
+            assignFamilies(doc,row.id);
             row.sources = [...row.sources, path]; row.properties = [...row.properties, ...await family(doc), ...objectFields(doc)];
             updateNames(row);
           }
@@ -251,7 +261,6 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   if (!root) throw new Error('Engineering source graph requires a unique project.cbm');
   options.onProgress?.('source-traverse');
   await visitCbm(root, `cbm:${root}`, null, '', new Set(), [], 0);
-  result.familyAssignments=result.records.flatMap(row=>row.sources.flatMap(path=>(familyPaths.get(path)??[]).map(fam=>({sourceId:row.id,path:fam}))));
   if (options.signal?.aborted) throw new DOMException('Source extraction cancelled', 'AbortError');
   options.onProgress?.('source-sort');
   result.documents.sort((a, b) => ordered(a.path, b.path));

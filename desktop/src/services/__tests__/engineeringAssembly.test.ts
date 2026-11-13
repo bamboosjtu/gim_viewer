@@ -4,11 +4,33 @@ import {assembleEngineeringView,assembleStoredEngineeringView} from '../engineer
 import {extractEngineeringSourceGraph} from '../../gim/engineering/sourceGraph.js';
 import {collectSourceGeometryOccurrences} from '../../gim/engineering/geometryOccurrences.js';
 import * as composition from '../../engineering/composition.js';
+import * as sourceProjection from '../../gim/engineering/sourceProjection.js';
+import * as inventory from '../../gim/engineering/inventory.js';
+import {assertEngineeringNavigation} from '../engineeringNavigationCache.js';
 import {normalizeEngineeringSources} from '../../gim/engineering/buildSources.js';
 import {assertEngineeringPartition} from '../../engineering/validate.js';
 import {createEngineeringWorkerHandler} from '../engineeringWorker.js';
 import {decodeEngineeringWorkerResult,encodeEngineeringWorkerResult,type TransportGraphCache} from '../engineeringWorkerTransport.js';
 afterEach(()=>{vi.restoreAllMocks();});
+it.each(['composition','source','inventory','inventory-search'] as const)('transfers an explicitly failed %s projection while rejecting it as a complete cache',async failure=>{
+  const stage=failure==='inventory-search'?'inventory':failure;
+  const g=await graph();
+  const fail=()=>{throw Error('projection failure');};
+  if(stage==='composition')vi.spyOn(composition,'projectEngineeringComposition').mockImplementationOnce(fail);
+  else if(stage==='source')vi.spyOn(sourceProjection,'projectEngineeringSource').mockImplementationOnce(fail);
+  else if(failure==='inventory-search')vi.spyOn(inventory,'projectInventorySearch').mockImplementationOnce(fail);
+  else vi.spyOn(inventory,'projectEngineeringInventory').mockImplementationOnce(fail);
+  const result=assembleEngineeringView('scope',g,[],[]);
+  const restored=await decodeEngineeringWorkerResult(encodeEngineeringWorkerResult(result),()=>true);
+  expect(restored.stageErrors?.[stage]).toContain('projection failure');
+  expect(restored.snapshot.entities).toEqual(result.snapshot.entities);
+  expect(restored.geometryOccurrences).toEqual(collectSourceGeometryOccurrences(g));
+  expect(()=>assertEngineeringNavigation(restored.navigation,restored.sources,restored.snapshot)).toThrow('partial projection');
+  if(stage!=='source')expect(restored.navigation.sourceRows.size).toBe(1);
+  if(stage!=='inventory')expect(restored.navigation.inventory?.rowsBySource.size).toBe(1);
+  restored.navigation.sourceNodes.get(restored.navigation.sourceRoot)!.children.push('foreign-row');
+  await expect(decodeEngineeringWorkerResult(encodeEngineeringWorkerResult(restored),()=>true)).rejects.toThrow('child edge');
+});
 async function graph(){const files:Record<string,string>={'project.cbm':'OBJECTMODELPOINTER=a.dev','a.dev':'TYPE=GIS'};return extractEngineeringSourceGraph({paths:Object.keys(files),readText:async p=>files[p]});}
 it('publishes source tree and physical catalog after recognition fails, including source-cache restoration',async()=>{
   const g=await graph(),fail=()=>{throw Error('recognition failure');};

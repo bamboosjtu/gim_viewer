@@ -1,14 +1,19 @@
 import aliases from './sourceTypeAliases.json';
 import type { EvidenceValue, ObjectEvidence, ObjectNameEvidence } from '../../engineering/types.js';
-import { categoryFromName } from '../../engineering/classify.js';
+import { categoryFromName, ENGINEERING_RULES_VERSION } from '../../engineering/classify.js';
 import { ENGINEERING_CATEGORY_LABELS } from '../../engineering/catalogLabels.js';
 import proxyCategories from './proxyCategories.json';
 import sourceVocabulary from './sourceVocabulary.json';
 const vocabulary:Record<string,string>={...sourceVocabulary.equipment,...sourceVocabulary.equipmentAliases};
 const components:Record<string,string>=sourceVocabulary.components;
+export const ENGINEERING_RECOGNITION_VERSION=[ENGINEERING_RULES_VERSION,sourceVocabulary.version,sourceVocabulary.keywordDictionary.version,aliases.version,proxyCategories.version].join('|');
 
 /** Raw source records stay in the source domain, separate from engineering identity. */
 export interface SourceProperty {
+  sourceId?:string;
+  applicability?:'instance'|'type'|'unknown';
+  rawContainerName?:string;
+  containerId?:string;
   rawUnit?:string;
   rawValueType?:string;
   keys?: readonly string[];
@@ -46,7 +51,7 @@ export const isIfcFeatureSourceType = (type: string): boolean => /^(?:IFCDISTRIB
 const empty = new Set(['', '-', '/', '-100', '软件自动生成']);
 function values(record: SourceRecord, labels: readonly string[]): EvidenceValue[] {
   return record.properties.flatMap((p, index) => p.keys?.some(key => labels.some(label=>label.toUpperCase()===key.toUpperCase())) && !empty.has(p.value.trim())
-    ? [{ value: p.value, evidenceId: JSON.stringify([record.id, p.path ?? p.source, p.line ?? index, p.keys]),context:{section:p.section,container:p.source} }] : []);
+    ? [{ value: p.value, evidenceId: JSON.stringify([record.id, p.path ?? p.source, p.line ?? index, p.keys]),context:{section:p.section,container:p.containerId??p.source,rawContainerName:p.rawContainerName,applicability:p.applicability} }] : []);
 }
 
 /** Format labels and type enums end here; the engineering core does not read them. */
@@ -66,8 +71,15 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     return allowName?categoryFromName(value):'U-OBJECT';
   };
   const typeProperties=values(record,['TYPE','设备类型','设备类别','材料类型','构件类型','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE']);
+  const dictionary=sourceVocabulary.keywordDictionary;
+  const keywordEntries=dictionary.entries as Record<string,{equipmentType?:string;componentType?:string;evidence:{sheet:string;cell:string;workbookSha256:string}}>;
+  const keywords=dictionary.fields.flatMap(field=>values(record,[field]).map(p=>({field,property:p,entry:keywordEntries[p.value.trim().toLowerCase()]})));
+  const keywordTypes=keywords.filter(p=>p.entry).map(({property})=>property);
+  const vocabularyObservations=keywords.map(({field,property,entry})=>({field,rawValue:property.value,status:entry?'mapped' as const:'unresolved' as const,evidenceId:property.evidenceId,dictionaryVersion:dictionary.version,
+    ...(entry?{dictionaryEvidence:JSON.stringify([entry.evidence.workbookSha256,entry.evidence.sheet,entry.evidence.cell])}:{})}));
   const modelProperties=values(record,['型号','MODEL','MODELSPEC']);
   const propertyCategories=[
+    ...keywordTypes.flatMap(p=>{const category=categoryValue(p.value,false);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
     ...typeProperties.flatMap(p=>{const category=categoryValue(p.value,true);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
     ...modelProperties.flatMap(p=>{const category=categoryValue(p.value,false);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
   ];
@@ -81,7 +93,8 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   const proxyName = type === 'IFCBUILDINGELEMENTPROXY' && /^(?:代理构件|IfcBuildingElementProxy)$/i.test(record.name)
     && proxyCategory.size === 1 && !['E19','C-D6'].includes([...proxyCategory][0])
     ? ENGINEERING_CATEGORY_LABELS[[...proxyCategory][0]] : undefined;
-  const typed=devCategory??ifcTypes[type];
+  const observedCategories=[...new Set(propertyCategories.map(p=>p.value))];
+  const typed=devCategory??ifcTypes[type]??(observedCategories.length===1?observedCategories[0]:undefined);
   for(const p of values(record,['用途','设备用途','PURPOSE'])){
     const category=/^(?:站用|station_service_transformer)$/i.test(p.value.trim())?'E03':/^(?:主变|main_transformer)$/i.test(p.value.trim())?'E01':categoryValue(p.value,true);
     // A service target such as “主变控制” is not this cabinet's identity.
@@ -89,8 +102,9 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
       ||['IFCPUMP','IFCVALVE'].includes(type)&&/^(?:给排水设施|排水设施)$/.test(p.value))propertyCategories.push({...p,value:['IFCPUMP','IFCVALVE'].includes(type)?'C-D5':category});
   }
   return {
-    equipmentTypeCandidates:[...(vocabulary[type.toLowerCase()]?[{value:vocabulary[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>vocabulary[p.value.toLowerCase()]?[{...p,value:vocabulary[p.value.toLowerCase()]}]:[])],
-    componentTypeCandidates:[...(components[type.toLowerCase()]?[{value:components[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>components[p.value.toLowerCase()]?[{...p,value:components[p.value.toLowerCase()]}]:[])],
+    vocabularyObservations,
+    equipmentTypeCandidates:[...(vocabulary[type.toLowerCase()]?[{value:vocabulary[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>vocabulary[p.value.trim().toLowerCase()]?[{...p,value:vocabulary[p.value.trim().toLowerCase()]}]:[]),...keywords.flatMap(({property:p,entry})=>entry?.equipmentType?[{...p,value:entry.equipmentType}]:[])],
+    componentTypeCandidates:[...(components[type.toLowerCase()]?[{value:components[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>components[p.value.trim().toLowerCase()]?[{...p,value:components[p.value.trim().toLowerCase()]}]:[]),...keywords.flatMap(({property:p,entry})=>entry?.componentType?[{...p,value:entry.componentType}]:[])],
     ...(vocabulary[type.toLowerCase()]?{equipmentType:{value:vocabulary[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}}:{}),
     ...(components[type.toLowerCase()]?{componentType:{value:components[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}}:{}),
     purposes:/^stationtransformer$/i.test(type)?[{value:'station_service_transformer',evidenceId:`${record.id}:source_type:${type}`}]:['E01','E-T','E03'].includes(typed)?values(record,['用途','设备用途','PURPOSE']).flatMap(p=>/^(?:主变|主变压器|main_transformer)$/i.test(p.value.trim())?[{...p,value:'main_transformer'}]:/^(?:站用|站用变压器|station_service_transformer)$/i.test(p.value.trim())?[{...p,value:'station_service_transformer'}]:[]):[],
@@ -101,7 +115,8 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     propertyCategories,
     typeRefinements:['IFCPUMP','IFCVALVE'].includes(type)?['C-D5']:[],
     subtypeNames:[...values(record,['材料子类','设备子类','MATERIALSUBTYPE','EQUIPMENTSUBTYPE']),...(subtypeTypes[type.toLowerCase()]?[{value:subtypeTypes[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[])],
-    objectRoles:[...values(record,['对象角色','组件角色','OBJECTROLE','COMPONENTROLE']).flatMap(p=>/内部|组成|部件|component|part/i.test(p.value)?[{...p,value:'part'}]:/独立|independent/i.test(p.value)?[{...p,value:'independent'}]:[]),...(type==='IFCPILE'?[{value:'part',evidenceId:`${record.id}:pile_foundation_component`}]:[])],
+    objectRoles:[...values(record,['对象角色','组件角色','OBJECTROLE','COMPONENTROLE']).flatMap(p=>/内部|组成|部件|component|part/i.test(p.value)?[{...p,value:'part'}]:/独立|independent/i.test(p.value)?[{...p,value:'independent'}]:[]),
+      ...keywordTypes.flatMap(p=>devTypes[p.value.trim().toLowerCase()]==='part'?[{...p,value:'part'}]:[]),...(type==='IFCPILE'?[{value:'part',evidenceId:`${record.id}:pile_foundation_component`}]:[])],
     traits: {
       fastener: ['IFCMECHANICALFASTENER', 'IFCFASTENER'].includes(type),
       assemblyContainer: ['IFCELEMENTASSEMBLY', 'IFCBUILDINGELEMENTPROXY'].includes(type),
