@@ -5,6 +5,7 @@ import {createInterface} from 'node:readline';
 import {dirname,join,relative,isAbsolute} from 'node:path';
 import {normalizeTrace,expandFrames,blockingPath,traceCoverage,exportChromeTrace} from './trace-analysis.mjs';
 import {artifactFile} from './batch-input.mjs';
+import {controlledDiagnosticReason,HEAP_REASON_CODES} from './report-diagnostics.mjs';
 const identities=new Set(['inputId','sampleId','runId','workerId','taskId','sourceId','operationTraceId','executorId','scopeId','spanId','id','partialSignature','buildFingerprint','profileDigest']);
 const arrays=new Set(['rows','runs','summaries','stages','slowTasks','slowPhases','templateDiagnostics','workers','domains','paths','taskPaths','ids','unattributed','issues','captures','diagnostics','system','gpu','hotspots','pipeline','metrics','counts','coverage','processSampling','memory','cases','actions','cacheStates']);
 const enums=new Set(['PASS','PARTIAL','FAIL','INCONCLUSIVE','INPUT_ERROR','ERROR','SKIPPED','CANCELLED','DUPLICATE','RUNNING','PENDING','COMPLETE',
@@ -29,10 +30,21 @@ for(const code of ['native-run-error','worker-target-ended','previous-sample-pen
 for(const code of ['missing-dependency','source-reference-unresolved','capacity-exceeded','parse-failed','ifc-manifest-incomplete','geometry-failed','source-invalid'])reasonWords.add(code);
 for(const code of ['authenticated-system-helper-required','profile-clock-domain-unverified','slow-span-index-overflow','worker-probe-retention-expired',
   'cold-warm','correctness','partial-coverage','semanticDigest','workload'])reasonWords.add(code);
+for(const code of ['worker-heap','process-tree','insufficient-samples','worker-identity-unavailable','isolate-identity-unavailable',
+  'unexpected-worker-termination','stream-failures','owned-process-cleanup','measurement-aggregate','unverified',
+  'sequenceGaps','invalid','duplicate','foreignRun','transportFailures','unexpectedWorkerTerminations','cancelledWithoutReason',
+  'lateEvents','lateEventsUnexpected',...HEAP_REASON_CODES])reasonWords.add(code);
 enums.add('overlapping-span-duration-sum');
 enums.add('top-duration-dependency-targets');
 for(const key of ['taskPathSelection','limit','eligible','omitted','unclassified'])publicKeys.add(key);
-function controlledReason(value){return String(value).split(';').map(token=>token.split(':').every(word=>reasonWords.has(word)||/^\d+$/.test(word))?token:'unverified-reason-omitted').join(';');}
+for(const key of ['buildInfo','commit','dirty','sourceFingerprint','executableSha256','runtimeSha256'])publicKeys.add(key);
+publicKeys.add('heapFailureMethod');
+for(const method of ['worker-registry','Runtime.getIsolateId','Runtime.getHeapUsage'])enums.add(method);
+for(const key of ['environmentCalibration','cpuMs','writeSyncMs','readWarmMs','machine','reportedCpuMHz','logicalCores','totalMemoryBytes','freeMemoryBytes','diskAvailableBytes','powerMode'])publicKeys.add(key);
+for(const value of ['gim-batch-calibration-v1','controller-sha256-256MiB-and-workspace-8MiB-sync-write-warm-read-median3','missing'])enums.add(value);
+for(const code of ['source-graph-incomplete','engineering-reference-coverage-incomplete','INFRA_SUSPEND','CACHE_NOT_PERSISTABLE','CACHE_NOT_PREPARED',
+  'renderer-process-exited','project-open-failed','native-cdp-unavailable','cdp-request-failed','native-run-failed','post-settle-task-incomplete',
+  'final-evidence-drift','final-evidence-unverified','final-evidence-session-mismatch','warm-webview-profile-unavailable'])reasonWords.add(code);
 function controlledStage(value){const segments=value.split(':');
   if(segments.length>2||segments.length===2&&!['host','dev','engineering','line','spatial','ifc-conversion','ifc-regional','ifc-fine'].includes(segments[0]))return false;
   const name=segments.at(-1),parts=name.split('.');
@@ -46,10 +58,13 @@ export function createPublicProjector({anonymize=true}={}){
     if(value===null)return null;
     if(key==='exportId')return typeof value==='string'&&/^export-[a-f0-9]{24}$/.test(value)?value:undefined;
     if(key==='updatedAt')return typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)&&Number.isFinite(Date.parse(value))?value:undefined;
+    if(['buildFingerprint','sourceFingerprint','executableSha256','runtimeSha256'].includes(key)&&typeof value==='string')
+      return /^[a-f0-9]{64}$/.test(value)?value:alias(value);
+    if(key==='commit')return typeof value==='string'&&/^[a-f0-9]{40}$/.test(value)?value:undefined;
     if(identities.has(key)&&typeof value==='string')return alias(value);
     if(key==='sampleLabel'&&typeof value==='string')return !anonymize&&value.length<=180&&!/[\\/\x00-\x1f]/.test(value)&&/\.gim$/i.test(value)?value:undefined;
     if(key==='stage'&&typeof value==='string')return controlledStage(value)?value:alias('stage:'+value);
-    if(reasonFields.has(key)&&typeof value==='string')return value?controlledReason(value):'';
+    if(reasonFields.has(key)&&typeof value==='string')return value?controlledDiagnosticReason(value,alias,reasonWords):'';
     if(key==='name'&&typeof value==='string')return ['I/O & cache','Parse & semantic','Geometry','Submission','GPU'].includes(value)||controlledStage(value)?value:undefined;
     if(typeof value==='number')return Number.isFinite(value)?value:null;
     if(typeof value==='boolean')return value;

@@ -220,6 +220,7 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 - 字段名以本次构建生成的 `results.json` 与 `results.csv` 表头为准；本页只维护文件用途与判读边界，不逐列冻结字段名。
 - 汇总分别计数 `PASS` 与 `PARTIAL`；同组轮次的 PARTIAL 签名不同时中位数留空，`coverageGroups` 与 `partialSignatures` 给出分组证据。
 - 公开投影保留受控阶段名、状态、原因码、PARTIAL 计数和本次 `exportId`；无法识别的自由文本替换为 `unverified-reason-omitted`，不把路径或业务名称带入派生视图。
+- 报告保留可验证的构建提交、源码/可执行文件/固定运行时指纹；它们是技术构建身份，不按工程来源别名隐藏。结果表同时显示所属构建和运行别名。已验证的堆失败码保留原因、同导出 Worker 别名、工作域、最大采样间隔/延迟与失败 RPC，未知自由文本仍隐藏并去重。原始私有报告不因重新生成展示层而改写。
 - `summary.csv` 的每个时间指标同时给出 Median、P95、Count 和 Missing；P95 是该组重复轮次的经验最近秩，必须结合观测数量和覆盖状态判读。
 - 单次运行的 `report` 生成流水线概览、内存曲线与覆盖/阻塞证据；具体视图取决于输入是否包含 Trace 事件。批次 `report.html` 提供“测量结果 / 样本覆盖”两个 tab。
 - 覆盖汇总同时给出有效轮次和计划轮次，以及基础设施重试次数。少于计划轮次的中位数可供诊断，但不能冒充完整基线。
@@ -232,6 +233,7 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 - `modelTreeReadyMs` 是工程组成投影首次可用（线路/设备取导航可用时刻）；`firstGeometryMs` 是首个几何可见；`allGeometryReadyMs` 是自动基础 DEV/IFC 表示均齐备的时刻。三者与 `cachePublishMs`、`settledMs` 分列；几何齐备是 wall time，可能含来源读取、调度和缓存写入背压，不冒充纯三角化耗时。不同样本的 `automaticLoadMs` 与写入重叠程度可不同，跨样本比较应同时阅读几何与缓存两条时间线。
 - 冷暖配对复用 SQLite 数据根和 WebView2 用户数据目录；IFC LOD 的 IndexedDB 缓存位于后者。cold 要求两者为空，warm 要求配对 profile 已存在且非空；缺失时报 `warm-webview-profile-unavailable` / INCONCLUSIVE，不启动伪暖开。旧的独立 WebView profile 运行条件不可与新口径比较。运行中的 `progress.private.json` 每 30 秒保留一次匿名状态快照，只存工作区私有目录。工程提取按实际来源进展续期；活动工程任务 60 秒没有进展时以 `product-stalled` 终结，且保存最后观测阶段。无活动工程任务而语义仍未就绪时，120 秒后标为 `engineering-progress-stalled` / INCONCLUSIVE。
 - 从未执行任务的 Worker 标为 `not-applicable / never-executed`；没有独立 JS isolate 的宿主或外部进程也标为 `not-applicable`。短命 Worker 标为 `short-lived / ended-before-heap-sample`；不填零。实际执行任务的 Worker 若仍缺堆证据则列出 `unavailable` 或 `missing`。一次成功采样不掩盖后续失败；失败次数、最大采样间隔或延迟超过两个周期时，该 Worker 的内存证据不完整。进程树采样失败会重试，并单列根进程 Private Bytes 作为下界，不冒充完整进程树峰值。`memoryIncompleteItems` 指明缺口；产品 PASS/PARTIAL 保留，正式内存比较和基线认可返回 INCONCLUSIVE。
+- Worker 启动身份优先由拥有该 Worker 的主线程注册事件关联，不向忙碌 Worker 注入 JS 求值来取身份，也不暂停解析/编译。首个真实样本前的可观测目标存活间隔纳入覆盖检查；关联延迟不产生补造的堆样本。CDP 超时、命令拒绝和未完成请求分别记录失败阶段，原采样周期和质量门槛不变。
 - `cacheWriteBytes` 是 DEV 产物实际提交尝试的元数据与 GLB 字节之和，`cacheWriteMsPerMiB` 是服务端到端 wall time 除以该字节量，包含打包、IPC 等待和原生写入，不是磁盘吞吐。`cachePack`、`cacheInvokeWall`、`cacheNativeResolve`、`cacheNativeWrite` 的阶段均记录字节量，嵌套阶段不能相加。缓存写入与模型树、几何阶段重叠，比较时间线时须看各自就绪事件。
 - `templateQueue` 是等待模板处理槽位的 wall time；`templateSlotOccupancy` 是获槽到释放的 wall time。两者可并行重叠，不把各任务累计值当成应用启动耗时。`slow-templates.csv` 的 `workerAwaitMs` 含 Worker 排队、读取及执行；`workerQueueWaitTotalMs` 是该模板直接或分部 Worker 派发等待的累计值，分部任务并行时也不可直接当作端到端时间。原始 DEV 路径仅留在 `tmp/gim-bench/runs/<runId>/template-diagnostics.private.json`，可分享 CSV/JSON 只保存 `sourceId`。
 - 批量测量在工作区 `tmp/` 运行固定控制器 CPU 与写入/暖读校准，批次报告记录机器 CPU、内存、工作区可用空间；比较结果给出 `calibrationRatio`。该校准不能等价代表 WebView Worker、源盘或显卡速度，所以产品 wall time 不乘系数归一化。跨轮默认同机、同运行时、同 SHA 与同工作量；CPU 校准偏差超过 15% 或工作区 I/O 校准偏差超过 30% 时，正式比较返回 INCONCLUSIVE。电源模式无法可靠读取时明确记 `unavailable`。不同批次缺少相同 L0/L1/L2 登记输入时属于覆盖缺口，报告不会凭样本名自动补齐，也不改变单样本判定。

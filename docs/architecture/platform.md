@@ -22,6 +22,7 @@
 - 固定 WebView2 与 WASM 资产由构建脚本准备；`desktop/public/worker-bundle.js`、`libarchive.wasm`、`wasm/web-ifc*.wasm` 是随项目维护的运行时资产。
 - 缓存数据库为 `gim_cache_schema_v1.db`，直接创建当前完整表结构；不接受旧库迁移或历史版本放行。
 - 发布前需核对 EXE、固定运行时、源码指纹和验收 manifest；测量构建不能混用日常缓存。
+- 修改 IFC 读取器、web-ifc/WASM 或固定运行时后，发布验收清单须保留 `test:ifc-connections-local -- --build <隔离构建清单>` 的本地报告，核对 `PASS`、`nativeWebView2Verified=true`、浏览器版本与 WASM/读取器/运行时指纹。普通 CI 的单测和构建不能代替该门禁；不将真实工程或浏览器验收加入远程 CI。
 - 桌面应用版本以 `desktop/package.json` 为准；Tauri 的 `version` 引用 `../package.json`，NSIS 和 portable manifest 使用同一版本。`npm run check:version` 校验 npm 锁文件与 Cargo 清单/锁文件的一致性；前端构建、桌面构建和 portable 组包均先检查，版本不一致时停止。Windows portable 组包还读取真实 EXE 的 ProductVersion，拒绝把旧程序标为新版本。升级版本时同步 npm 与 Cargo 的根包版本，不修改依赖包或 Android 版本。
 
 ## 配置与状态

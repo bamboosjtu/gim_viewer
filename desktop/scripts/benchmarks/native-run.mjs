@@ -18,7 +18,7 @@ import {cachePublicationAssessment} from './profiles.mjs';
 import {createSettleWindow,collectFinalEvidence,cachePublicationMoment,semanticStallReason} from './completion.mjs';
 import {assessCorrectness} from './correctness.mjs';
 import {assertBenchmarkExecutable} from './benchmark-build-attestation.mjs';
-import {classifyWorkerHeapEvidence} from './worker-memory-completeness.mjs';
+import {classifyWorkerHeapEvidence,recordWorkerHeapSample} from './worker-memory-completeness.mjs';
 import {confirmedEnvironmentSuspend} from './environment.mjs';
 import {calibrateBatch} from './batch-calibration.mjs';
 import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
@@ -148,15 +148,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     sampler=new WorkerHeapSampler(cdp,row=>{
       appendFileSync(join(out,'heap.jsonl'),JSON.stringify(row)+'\n');heapRows++;
       if(row.kind==='heap-sample'&&row.workerId){const previous=heapRecords.get(row.workerId);
-        heapRecords.set(row.workerId,{workerId:row.workerId,family:row.family??previous?.family??null,
-          availability:row.availability,reason:row.availability==='available'?null:row.reason??'unknown',
-          lastFailureReason:row.availability==='available'?previous?.lastFailureReason??null:row.reason??'unknown',
-          samples:(previous?.samples??0)+1,successfulSamples:(previous?.successfulSamples??0)+(row.availability==='available'?1:0),
-          failedSamples:(previous?.failedSamples??0)+(row.availability==='available'?0:1),
-          maxSampleGapMs:Math.max(previous?.maxSampleGapMs??0,
-            Number.isFinite(previous?.lastSampleAtMs)&&Number.isFinite(row.atMs)
-              ?Math.max(0,row.atMs-previous.lastSampleAtMs):0),
-          maxSampleDelayMs:Math.max(previous?.maxSampleDelayMs??0,row.sampleDelayMs??0),lastSampleAtMs:row.atMs});}
+        heapRecords.set(row.workerId,recordWorkerHeapSample(previous,row));}
       if(['worker-target-ended','heap-sampling-stopped'].includes(row.kind)&&row.workerId){
         const previous=heapRecords.get(row.workerId);
         if(previous&&Number.isFinite(previous.lastSampleAtMs)&&Number.isFinite(row.atMs))

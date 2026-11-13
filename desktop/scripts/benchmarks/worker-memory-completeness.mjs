@@ -1,4 +1,15 @@
 /** A target that ended before two sampling periods has an explicit gap, not a zero-byte heap. */
+export function recordWorkerHeapSample(previous,row){
+  const previousAt=previous?.lastSampleAtMs??row.targetCreatedAtMs;
+  return {workerId:row.workerId,family:row.family??previous?.family??null,
+    availability:row.availability,reason:row.availability==='available'?null:row.reason??'unknown',
+    lastFailureReason:row.availability==='available'?previous?.lastFailureReason??null:row.reason??'unknown',
+    lastFailureMethod:row.availability==='available'?previous?.lastFailureMethod??null:row.failureMethod??null,
+    samples:(previous?.samples??0)+1,successfulSamples:(previous?.successfulSamples??0)+(row.availability==='available'?1:0),
+    failedSamples:(previous?.failedSamples??0)+(row.availability==='available'?0:1),
+    maxSampleGapMs:Math.max(previous?.maxSampleGapMs??0,Number.isFinite(previousAt)&&Number.isFinite(row.atMs)?Math.max(0,row.atMs-previousAt):0),
+    maxSampleDelayMs:Math.max(previous?.maxSampleDelayMs??0,row.sampleDelayMs??0),lastSampleAtMs:row.atMs};
+}
 export function classifyWorkerHeapCoverage(workers,observedIds,periodMs=1000){
   const required=[],shortLived=[],notApplicable=[];
   for(const [workerId,worker] of Object.entries(workers??{})){

@@ -40,3 +40,17 @@ test('live target timeouts remain failures and recording stop does not add failu
   const request=f.sampler.checkpoint('worker','end');await flush();f.sampler.stop();f.fail();await request;
   assert.equal(f.rows.filter(row=>row.workerId==='worker'&&row.kind==='heap-sample'&&row.availability==='unavailable').length,1);
 });
+
+test('late registry association samples a busy Worker without evaluating its JavaScript',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});let listener,now=0;const rows=[],calls=[];
+ const cdp={onEvent(fn){listener=fn;return()=>{};},evaluate(){throw Error('must not evaluate busy Worker');},
+  async send(method,_params,session){calls.push([method,session]);if(method==='Runtime.getIsolateId')return{id:session??'main'};
+   if(method==='Runtime.getHeapUsage')return{usedSize:12,totalSize:24};return{};}};
+ const sampler=new WorkerHeapSampler(cdp,row=>rows.push(row),1000,()=>now);t.after(()=>sampler.stop());
+ await sampler.start();listener({method:'Target.attachedToTarget',params:{sessionId:'w',targetInfo:{type:'worker',targetId:'target',url:'blob:owned'}}});
+ await flush();assert.equal(calls.some(([method,session])=>method==='Runtime.getHeapUsage'&&session==='w'),false);
+ now=40;sampler.associate('blob:owned',{workerId:'owned',runId:'run',family:'ifc-conversion'});await flush();
+ const sample=rows.find(row=>row.workerId==='owned'&&row.kind==='heap-sample');
+ assert.equal(sample.availability,'available');assert.equal(sample.atMs,40);assert.equal(sample.targetCreatedAtMs,0);
+ assert.equal(rows.some(row=>row.availability==='unavailable'),false);
+});

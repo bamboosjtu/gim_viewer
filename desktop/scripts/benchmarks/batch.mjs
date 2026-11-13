@@ -101,6 +101,7 @@ function recordReport(row,report,state){
       heapAvailability:unavailableRow?'unavailable':heap?'available':shortLived.has(workerId)?'short-lived':notApplicable.has(workerId)?'not-applicable':'missing',
       heapSamples:heap?.samples??unavailableRow?.successfulSamples??0,failedHeapSamples:unavailableRow?.failedSamples??heap?.failedSamples??0,
       heapReason:unavailableRow?.reason??shortLived.get(workerId)?.reason??notApplicable.get(workerId)?.reason??(heap?null:'worker-target-not-observed'),
+      heapFailureMethod:unavailableRow?.lastFailureMethod??null,
       observedHeapPeakBytes:heap?.observedPeakBytes??null,maxSampleDelayMs:unavailableRow?.maxSampleDelayMs??heap?.maxSampleDelayMs??null,
       maxSampleGapMs:unavailableRow?.maxSampleGapMs??heap?.maxSampleGapMs??null});
   }
@@ -119,7 +120,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
     cases:inputs.samples.map(({paths,...sample})=>sample)};
   const exportId='export-'+randomBytes(12).toString('hex');
   const profileDigest=digest(body),state={version:'gim-batch-results-v1',exportId,status:'RUNNING',outcome:'INCONCLUSIVE',preset,repetitions,
-    buildFingerprint:build.sourceFingerprint,profileDigest,anonymize,environmentCalibration,selectionFrozen:true,baselineEligible:false,rows:[],runs:[],attempts:[],stages:[],slowTasks:[],slowPhases:[],templateDiagnostics:[],workers:[],pairs:[],updatedAt:null};
+    buildFingerprint:build.sourceFingerprint,buildInfo:{commit:build.commit,dirty:build.dirty,sourceFingerprint:build.sourceFingerprint,executableSha256:build.executableSha256,runtimeSha256:build.runtime?.sha256},profileDigest,anonymize,environmentCalibration,selectionFrozen:true,baselineEligible:false,rows:[],runs:[],attempts:[],stages:[],slowTasks:[],slowPhases:[],templateDiagnostics:[],workers:[],pairs:[],updatedAt:null};
   const privateRuns=[];
   const controllerFile=join(privateOut,'controller.private.json'),nonce=randomBytes(24).toString('hex');
   writeFileSync(join(privateOut,'output.private.json'),JSON.stringify({out,nonce,exportId}));

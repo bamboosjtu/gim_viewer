@@ -5,8 +5,8 @@ import {pathToFileURL} from 'node:url';
 import {resolve,join,dirname,relative} from 'node:path';
 import {artifactDirectory,loadBatchInputs} from './batch-input.mjs';
 import {executeBatch,recoverInterruptedBatch} from './batch.mjs';
-import {csv,summarize,writeBatchProgress} from './batch-report.mjs';
-import {createPublicProjector} from './observability.mjs';
+import {csv,summarize,writeBatchProgress,writeBatchReports} from './batch-report.mjs';
+import {createPublicProjector,publicView} from './observability.mjs';
 import {compareSuites,approveBaseline} from './compare.mjs';
 import {spawnSync} from 'node:child_process';
 import {isStartupInfrastructureFailure} from './startup-retry.mjs';
@@ -18,6 +18,20 @@ function setup(){const parent=artifactDirectory(root,join(root,'tmp','batch-prot
   const buildManifest=join(out,'build.json');writeFileSync(buildManifest,JSON.stringify({sourceFingerprint:'protocol-test'}));return {root,out,buildManifest};}
 function inputs(){return {entries:['a','b','c'].map((id,index)=>({inputId:id,sampleId:id,sourceSha256:id,privatePath:'private-name',status:'READY'})),
   samples:['a','b','c'].map(id=>({inputId:id,sampleId:id,sourceSha256:id,paths:[],actions:[]}))};}
+
+test('HTML locates an incomplete heap by build, run, worker and observed delay without leaking private strings',()=>{
+  const options=setup(),out=artifactDirectory(options.root,join(options.out,'output'));
+  const state=publicView({version:'gim-batch-results-v1',anonymize:true,status:'COMPLETE',outcome:'PASS',preset:'baseline',repetitions:1,
+    buildFingerprint:'a'.repeat(64),buildInfo:{commit:'c'.repeat(40),sourceFingerprint:'a'.repeat(64),dirty:false},
+    rows:[{inputId:'input-1',sampleId:'sample-1',runId:'private-run',status:'PASS',cacheState:'cold',memoryEvidenceComplete:false,
+      memoryIncompleteItems:'worker-heap:worker-heap-sampling-gap:private-worker'}],
+    stages:[],workers:[{runId:'private-run',workerId:'private-worker',family:'dev',heapAvailability:'unavailable',maxSampleGapMs:2158.7,maxSampleDelayMs:1076.2,failedHeapSamples:0}]});
+  writeBatchReports(out,state,{root:options.root});
+  const html=readFileSync(join(out,'report.html'),'utf8');
+  assert.match(html,/cccccccc/);assert.match(html,/aaaaaaaaaaaa/);assert.match(html,/堆采样覆盖间隔超限/);
+  assert.match(html,/2158.7 ms/);assert.match(html,/1076.2 ms/);assert.match(html,/运行标识/);
+  assert.doesNotMatch(html,/unverified-reason-omitted|private-worker|private-run/);
+});
 function run(sample,profileDigest){return {out:'private-run',dataRoot:'private-cache',report:benchmarkRun(sample.inputId,{version:undefined,
   conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:MEASUREMENT_VERSION,detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
     profileDigest,workloadDigest:'w',routeDigest:'r',viewportDigest:'v'},correctness:'passed',cacheVerified:true,cachePublished:true,measurementComplete:true,requiredMetrics:['firstResponseMs'],metrics:{firstResponseMs:12},
@@ -433,7 +447,7 @@ test('live HTML uses export aliases or explicit sample labels without traversing
     assert.ok(html.includes(`<td>${profile.cases[0].inputId}</td>`));
     if(anonymize)assert.ok(html.includes(`<td>${profile.cases[0].sampleId}</td>`));
     for(const value of ['1.234','2.345','3.456','4.567'])assert.ok(html.includes(`<td>${value}</td>`));
-    assert.match(html,/source-reference-unresolved;unverified-reason-omitted/);
+    assert.match(html,/来源引用未解析/);assert.match(html,/其他未验证文本已隐藏/);
     assert.doesNotMatch(html,/private-input|private-sample|private-sha|C:\/private|private-reason/);
     assert.equal(html.includes('standard-A1.gim'),!anonymize);
     assert.match(html,/2026-11-12T01:00:00\.000Z/);

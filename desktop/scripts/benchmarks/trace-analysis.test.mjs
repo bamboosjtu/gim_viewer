@@ -173,6 +173,26 @@ test('public cold/warm failure dimensions remain readable while arbitrary reason
   assert.equal(publicView({reason}).reason,reason);
   assert.equal(publicView({reason:reason+';cold-warm:private-project-name'}).reason,reason+';unverified-reason-omitted');
 });
+
+test('public heap failures retain technical cause, worker correlation and verifiable build identity',()=>{
+  const view=publicView({buildFingerprint:'a'.repeat(64),buildInfo:{commit:'c'.repeat(40),dirty:true,sourceFingerprint:'a'.repeat(64),
+    executableSha256:'d'.repeat(64),runtimeSha256:'e'.repeat(64),privatePath:'C:/private'},
+    rows:[{runId:'private-run',memoryEvidenceComplete:false,memoryIncompleteItems:'worker-heap:worker-heap-sampling-gap:private-worker;worker-heap:runtime-timeout-or-unsupported:private-worker;private-business;private-business'}],
+    workers:[{runId:'private-run',workerId:'private-worker',family:'dev',heapAvailability:'unavailable',maxSampleGapMs:2158.7,maxSampleDelayMs:1076.2,failedHeapSamples:0}]});
+  assert.equal(view.buildFingerprint,'a'.repeat(64));assert.equal(view.buildInfo.commit,'c'.repeat(40));
+  assert.match(view.rows[0].memoryIncompleteItems,new RegExp('worker-heap:worker-heap-sampling-gap:'+view.workers[0].workerId));
+  assert.match(view.rows[0].memoryIncompleteItems,/runtime-timeout-or-unsupported/);
+  assert.equal(view.rows[0].memoryIncompleteItems.match(/unverified-reason-omitted/g).length,1);
+  assert.ok(!JSON.stringify(view).includes('private-worker'));assert.ok(!JSON.stringify(view).includes('private-business'));
+  assert.equal(view.buildInfo.privatePath,undefined);
+});
+
+test('public batch calibration retains comparison evidence while machine names and paths stay private',()=>{
+  const view=publicView({environmentCalibration:{version:'gim-batch-calibration-v1',cpuMs:500,writeSyncMs:12,readWarmMs:8,
+    machine:{cpuModel:'private-machine-name',reportedCpuMHz:3200,freeMemoryBytes:1000,diskAvailableBytes:2000,hostname:'private-host',path:'C:/private'}}});
+  assert.equal(view.environmentCalibration.cpuMs,500);assert.equal(view.environmentCalibration.machine.reportedCpuMHz,3200);
+  assert.ok(!JSON.stringify(view).includes('private'));
+});
 test('diagnostics validate mode-independent windows and do not trigger on an ended span',async()=>{
   assert.throws(()=>diagnosticPlan({captures:[{kind:'cpu',durationMs:30001}]}));
   assert.throws(()=>diagnosticPlan({captures:[{id:'../escape',kind:'cpu'}]}));

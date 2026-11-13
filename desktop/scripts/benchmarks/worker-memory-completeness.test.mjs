@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {classifyWorkerHeapCoverage,classifyWorkerHeapEvidence} from './worker-memory-completeness.mjs';
+import {classifyWorkerHeapCoverage,classifyWorkerHeapEvidence,recordWorkerHeapSample} from './worker-memory-completeness.mjs';
 
 test('short Worker targets are explicit gaps without invalidating long-lived heap coverage',()=>{
   const workers={short:{state:'terminated',createdMs:100,endedMs:800,tasks:1},
@@ -36,5 +36,12 @@ test('a long sampling gap remains incomplete even when every received sample suc
   const records=new Map([['dev',{workerId:'dev',availability:'available',successfulSamples:2,failedSamples:0,
     maxSampleGapMs:3500,maxSampleDelayMs:50}]]);
   const result=classifyWorkerHeapEvidence(workers,new Set(['dev']),records,1000);
+  assert.equal(result.unavailable[0].reason,'worker-heap-sampling-gap');
+});
+
+test('a delayed first real sample cannot hide the unsampled target startup interval',()=>{
+  const row=recordWorkerHeapSample(undefined,{workerId:'dev',family:'dev',availability:'available',targetCreatedAtMs:100,atMs:2600,sampleDelayMs:20});
+  assert.equal(row.successfulSamples,1);assert.equal(row.failedSamples,0);assert.equal(row.maxSampleGapMs,2500);
+  const result=classifyWorkerHeapEvidence({dev:{family:'dev',state:'running',createdMs:0,tasks:1}},new Set(['dev']),new Map([['dev',row]]));
   assert.equal(result.unavailable[0].reason,'worker-heap-sampling-gap');
 });
