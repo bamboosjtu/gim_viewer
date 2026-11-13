@@ -20,6 +20,7 @@
 |---|---|---|---|
 | `desktop/src/app/` | 启动、`AppState`、工程/选择会话、模块接线 | services、ui 入口 | 具体 parser 内部 |
 | `desktop/src/engineering/` | 工程整体、成员、关系、组成模板与目录；纯领域 | 仅类型和纯函数 | GIM parser、UI、Viewer、DB、平台 IO |
+| `desktop/src/standards/` | 首批标准要求/属性定义、字段级原文证据与只读上下文查询 | 本地数据资源、纯函数 | 工程识别算法、Viewer、DB、模型校核执行 |
 | `desktop/src/gim/engineering/` | 把 CBM/DEV/FAM/IFC 来源适配成中立证据和来源图 | gim 纯 parser、engineering 契约 | Viewer、UI、DB |
 | `desktop/src/gim/` | 容器、CBM/DEV/PHM/MOD/IFC 纯解析、索引和地图数据 | 共享纯库 | services、viewer、ui |
 | `desktop/src/viewer/` | Three.js、Fragments、web-ifc、MOD/STL 编译与渲染 | three、geometry 纯函数、类型 | services、ui、DB |

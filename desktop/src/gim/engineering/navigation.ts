@@ -12,6 +12,7 @@ import type { EngineeringSourceNode } from './sourceProjection.js';
 import { projectEngineeringSource, SOURCE_TREE_TEMPLATE_VERSION } from './sourceProjection.js';
 export interface EngineeringNavigationData {
   version: string;
+  projectionErrors?: Record<string,string>;
   compositionComplete?: boolean;
   /** Full geometry-backed projection or an explicitly partial semantic/range view. */
   compositionCoverage?: 'full' | 'partial';
@@ -27,16 +28,20 @@ export interface EngineeringNavigationData {
   metadata?: {scope:string;rulesVersion:string;sourceComplete:boolean;sourceVersion:string};
   compositionInput?:{facts:SourceCompositionEvidence[];declarations:CompositionDeclaration[]};
 }
-export const ENGINEERING_NAVIGATION_VERSION = 'engineering-navigation-v9';
+export const ENGINEERING_NAVIGATION_VERSION = 'engineering-navigation-v10';
 /** Independent engineering and provenance projections share only source/entity
  * references. No business-tree object, physical seed or render group is input.
  */
 export function projectEngineeringNavigation(sources: EngineeringSources, snapshot: EngineeringSnapshot): EngineeringNavigationData {
   const spatialNodes = new Map(sources.spatialNodes.map(node => [node.key, node]));
-  const facts=collectCompositionEvidence(sources,snapshot,spatialNodes),declarations=collectDeclaredCompositionContexts(sources);
-  const assignments = assignEngineeringComposition(snapshot,facts);
-  const composition = projectEngineeringComposition(snapshot, assignments, '工程组成', declarations);
-  const {sourceNodes,sourceRoot,sourceRows,sourceSearch}=projectEngineeringSource(sources);
+  const projectionErrors:Record<string,string>={};
+  let facts:SourceCompositionEvidence[]=[],declarations:CompositionDeclaration[]=[],assignments:ReturnType<typeof assignEngineeringComposition>=[];
+  let composition:EngineeringComposition={version:ENGINEERING_COMPOSITION_VERSION,rootKey:'engineering:project',nodes:new Map([['engineering:project',{key:'engineering:project',title:'工程组成（投影不可用）',kind:'project',children:[],entityCount:0}]]),rowsByEntity:new Map()};
+  try { facts=collectCompositionEvidence(sources,snapshot,spatialNodes);declarations=collectDeclaredCompositionContexts(sources);assignments=assignEngineeringComposition(snapshot,facts);composition=projectEngineeringComposition(snapshot,assignments,'工程组成',declarations); }
+  catch(error){projectionErrors.composition=String(error);}
+  let sourceView:ReturnType<typeof projectEngineeringSource>={version:SOURCE_TREE_TEMPLATE_VERSION,sourceNodes:new Map([['source:project',{key:'source:project',title:'来源（投影不可用）',kind:'group',children:[]}]]),sourceRoot:'source:project',sourceRows:new Map(),sourceSearch:[]};
+  try {sourceView=projectEngineeringSource(sources);} catch(error){projectionErrors.source=String(error);}
+  const {sourceNodes,sourceRoot,sourceRows,sourceSearch}=sourceView;
   const records=new Map([...sources.graph.records,...sources.ifcRecords].map(record=>[record.id,record]));
   const pathsByEntity = new Map(assignments.map(assignment => [assignment.entityId, assignment.paths]));
   const compositionSearch = snapshot.entities.map(entity => {
@@ -56,10 +61,11 @@ export function projectEngineeringNavigation(sources: EngineeringSources, snapsh
     compositionSearch.push({ key: pending.id, title, subtitle,
       searchText: [title, subtitle, pending.id, ...pending.sourceIds.map(id => records.get(id)?.name ?? '')].join('\n').toLowerCase() });
   }
-  const inventory=projectEngineeringInventory(snapshot,[...records.values()]);
+  let inventory:EngineeringInventory|undefined,inventorySearch:ReturnType<typeof projectInventorySearch>=[];
+  try {inventory=projectEngineeringInventory(snapshot,[...records.values()]);inventorySearch=projectInventorySearch(inventory,snapshot,[...records.values()]);} catch(error){projectionErrors.inventory=String(error);}
   return { version: ENGINEERING_NAVIGATION_VERSION,
     projectionVersions:{composition:ENGINEERING_COMPOSITION_VERSION,source:SOURCE_TREE_TEMPLATE_VERSION,inventory:INVENTORY_TEMPLATE_VERSION},
-    inventorySearch:projectInventorySearch(inventory,snapshot,[...records.values()]), composition, sourceNodes, sourceRoot, sourceRows, compositionSearch, sourceSearch,
+    projectionErrors:Object.keys(projectionErrors).length?projectionErrors:undefined,inventorySearch, composition, sourceNodes, sourceRoot, sourceRows, compositionSearch, sourceSearch,
     compositionInput:{facts,declarations},
     inventory,metadata:{scope:snapshot.scope,rulesVersion:snapshot.rulesVersion,sourceComplete:sources.complete,sourceVersion:sources.version} };
 }

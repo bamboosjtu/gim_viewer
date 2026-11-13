@@ -54,7 +54,7 @@ const refinements:Record<string,string[]>={
 };
 const compatible=(coarse:string,fine:string)=>coarse===fine||!!refinements[coarse]?.includes(fine);
 
-export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectInterpretation {
+function interpretClassification(object:ObjectEvidence,hasChildren=false):ObjectInterpretation {
   const name=object.name.trim(),prefix=name.match(/^(.+?模型\d+)[_－](.+)$/),assemblyCategory=prefix?categoryFromName(prefix[1]):'';
   const fragment=!!prefix&&assemblyCategory.startsWith('E'),ownName=fragment?prefix![2]:name;
   const typed=object.typeCategory;
@@ -66,8 +66,15 @@ export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectI
   });
   if(object.traits.nonphysical)return result('source_only','nonphysical_or_interface');
   if(object.traits.fastener)return result('detail','internal_fastener');
-  if(typed==='part'||declaredRoles.has('part'))return result('part','object_component_attribute');
+  if(declaredRoles.has('part')&&declaredRoles.has('independent'))return {...result('object','attribute_conflict','U-OBJECT'),conflict:'part!=independent'};
+  if(typed==='part'&&declaredRoles.has('independent'))return {...result('object','independent_component_role','U-OBJECT'),independent:true};
+  if(typed==='part'||declaredRoles.has('part'))return {...result('part','object_component_attribute',typed&&typed!=='part'?typed:''),classificationStatus:typed&&typed!=='part'?'confirmed':'unresolved'};
   const properties=[...new Set(object.propertyCategories?.map(p=>p.value)??[])];
+  const contexts=new Set(object.propertyCategories?.map(p=>JSON.stringify(p.context??{}))??[]);
+  if(contexts.size>1&&properties.length>1){
+    const category=typed&&typed!=='neutral_set'?typed:'U-OBJECT';
+    return {...result('object','contextual_category_candidates',category),classificationStatus:category==='U-OBJECT'?'unresolved':'candidate',classificationEvidence:object.propertyCategories?.map(p=>p.evidenceId)??[]};
+  }
   const validTyped=typed&&typed!=='neutral_set'?typed:undefined;
   const canRefine=(coarse:string,fine:string)=>compatible(coarse,fine)||coarse===validTyped&&!!object.typeRefinements?.includes(fine);
   const hasIdentity=!!typed||properties.length>0;
@@ -124,4 +131,33 @@ export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectI
     ...(category==='M07'&&!object.assemblyParentId&&/主变|变压器|中性点|断路器/.test(name)?{unknownReason:'equipment_bushing_host_unresolved'}:{}),
     assemblyCategory:fragment?assemblyCategory:'',assemblySignature:fragment?prefix![1]:'',
   };
+}
+
+/** Category, vocabulary type and engineering purpose have independent evidence. */
+export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectInterpretation {
+  const result=interpretClassification(object,hasChildren);
+  if(result.basis.includes('name')||result.basis==='family_identity_candidate'||result.basis==='type+object_identity')result.classificationStatus=result.category==='U-OBJECT'?'unresolved':'candidate';
+  const purposes=[...new Set(object.purposes?.map(p=>p.value)??[])];
+  result.purpose=purposes.length===1?{id:purposes[0],status:'confirmed',evidence:object.purposes!.map(p=>p.evidenceId)}
+    :['E01','E-T','E03'].includes(result.category)&&explicitMain(object)?{id:'main_transformer',status:'confirmed',evidence:object.designations.map(p=>p.evidenceId)}:{status:'unresolved',evidence:[]};
+  if(result.purpose.status==='confirmed'&&['E01','E03'].includes(result.category)&&!result.conflict)result.classificationStatus='confirmed';
+  if(purposes.length>1){
+    const contexts=new Set(object.purposes?.map(p=>JSON.stringify(p.context??{})));
+    if(contexts.size>1){result.category=object.typeCategory??'U-OBJECT';result.basis='contextual_purpose_candidates';result.classificationStatus=result.category==='U-OBJECT'?'unresolved':'candidate';result.purpose={status:'unresolved',evidence:object.purposes!.map(p=>p.evidenceId)};}
+    else{result.category='U-OBJECT';result.basis='attribute_conflict';result.conflict='engineering_purpose_conflict';result.classificationStatus='unresolved';}
+  }
+  if(object.equipmentType)result.equipmentType={id:object.equipmentType.value,status:'confirmed',evidence:[object.equipmentType.evidenceId]};
+  if(object.componentType)result.componentType={id:object.componentType.value,status:'confirmed',evidence:[object.componentType.evidenceId]};
+  const equipmentCandidates=object.equipmentTypeCandidates??[],componentCandidates=object.componentTypeCandidates??[];
+  if(new Set(equipmentCandidates.map(p=>p.value)).size>1){
+    result.equipmentType={status:'unresolved',evidence:equipmentCandidates.map(p=>p.evidenceId)};
+    const contexts=new Set(equipmentCandidates.map(p=>JSON.stringify(p.context??{})));
+    result.category=contexts.size>1?object.typeCategory??'U-OBJECT':'U-OBJECT';result.classificationStatus=result.category==='U-OBJECT'?'unresolved':'candidate';
+    result.basis=contexts.size>1?'contextual_type_candidates':'attribute_conflict';result.conflict=contexts.size>1?'':'equipment_type_conflict';
+  }
+  if(new Set(componentCandidates.map(p=>p.value)).size>1){result.componentType={status:'unresolved',evidence:componentCandidates.map(p=>p.evidenceId)};result.conflict='component_type_conflict';result.classificationStatus=result.category&&result.category!=='U-OBJECT'?'candidate':'unresolved';}
+  result.categoryStatus=result.classificationStatus??'unresolved';
+  const roleEvidence=object.objectRoles?.map(p=>p.evidenceId)??[];
+  result.objectRole={id:result.meaning,status:result.basis==='attribute_conflict'?'unresolved':roleEvidence.length||object.traits.nonphysical||object.traits.fastener||object.typeCategory==='part'?'confirmed':'candidate',evidence:roleEvidence};
+  return result;
 }

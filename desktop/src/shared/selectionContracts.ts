@@ -25,6 +25,7 @@ export interface SelectionCommitGuard {
 }
 
 export interface SelectionGeometryState {
+  evidence?:import('../engineering/representations.js').RepresentationEvidenceState;
   status: 'not-loaded' | 'unknown' | 'available' | 'renderable' | 'empty' | 'unsupported' | 'partial' | 'failed' | 'unlinked' | 'ambiguous' | 'file-only' | 'unassociated';
   detail: string;
 }

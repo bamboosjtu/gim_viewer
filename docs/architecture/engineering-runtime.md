@@ -42,15 +42,27 @@
       │    ├─ 实体有效：restore（不重分类）
       │    └─ 实体无效：normalize（不重读 IFC）
       └─ 来源缺失：Worker 接收来源文件
-           → extractEngineeringSourceGraph（完整来源图）
+           → extractEngineeringSourceGraph（物理来源图，延迟 FAM）
            → 返回 IFC 路径 + SourceGeometryOccurrence 目录
-           → assemble（Spatial 可用时一并传入）
+           → 请求识别所需 FAM，再 assemble（Spatial 可用时一并传入）
            → normalize + projectEngineeringNavigation
            → 发布 sources/snapshot/navigation
            → 分域写缓存
 ```
 
 ### 来源抽取
+
+0.2.3 在缓存恢复/抽取前初始化证据端口，Inventory 不等待识别。冷建先传入 CBM/DEV；`extract` 延迟 FAM，返回物理目录及识别需要的 familyPaths，随后才物化这些 FAM。未参与识别的 FAM 在显式属性查询时读取。Worker 的 snapshot/query/ensure/read 命令分别承担元数据、已物化分页、显式解析和原文字节读取；详情页同时受记录数与字节预算限制。缓存版本、源身份和修订与查询结果一起校验。
+
+来源事实由 `collectEngineeringSources` 独立汇总。`assembleEngineeringView` 捕获识别错误，保留来源和物理目录，工程快照标记未处理；来源、组成和清册投影分别隔离错误。投影错误不撤销已发布语义或几何，不写完整导航缓存。来源和有效实体域仍可独立保存。
+
+构建/缓存结束释放完整结果载荷，工程会话内保留证据 Worker，切换/关闭时终止。已解析文档、属性和索引复用；补齐与识别相关的失败 FAM 时显式重新识别，更新绑定/投影而不重新编译物理模板。该生命周期变化的真实内存/速度代价需要开发者本地复核，单元或浏览器功能测试不代表性能通过。
+
+原始 FAM 属性解析与带类型/单位的详情物化分开：初始识别不构造全包 `SourceAttribute` 详情。显式详情物化复用原始记录，单视图上限 20,000 条/16 MiB、详情缓存合计 32 MiB，页上限 1,000 条/512 KiB；超预算明确提示原文访问。未挂入工程图的详情淘汰后可重新读取，解析历史与当前物化状态分别报告。原文字节读取受 16 MiB 预算，文本物化另限 200,000 行；这些配额不是性能通过条件。
+
+完整 Inventory 仅在显式清单请求时返回；逐属性/文档请求按 entryRange 查已有 Map，返回范围元数据和全局计数，不重新枚举整个包。读取状态、属性解析状态和详情物化状态独立；范围响应的 inventoryComplete 表示底层清单枚举已完成，entries 仍只覆盖显式 entryRange。32 MiB 仅是详情缓存预算，不代表整个工程图/会话内存上限。
+
+生产 Worker 协商使用来源图引用帧：同 scope、同 graph revision 的后续模型结果复用主线程已有来源图，不再发送未变化的整包原文/DEV 属性；图修订变化发送完整图。客户端顺序解码，服务按 buildId 拒绝旧发布/缓存结果，释放旧构建载荷不能清除新构建。证据查询只发送有界页面，运行时 evidenceRevision 与持久化来源内容摘要分别承担会话修订和冷暖身份绑定。
 
 `extractEngineeringSourceGraph` 从真实文件清单和 `project.cbm` 开始：
 

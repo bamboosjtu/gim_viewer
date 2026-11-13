@@ -6,8 +6,9 @@ import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometr
 import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import type { EngineeringWorkerPayload } from './engineeringWorkerTransport.js';
 import type { EngineeringNavigationCacheProjection } from './engineeringNavigationCache.js';
+import type { EvidenceInventory, EvidencePage, EvidenceQuery, EvidenceRange } from '../engineering/evidence.js';
 
-export interface EngineeringExtractSummary { ifcPaths: string[]; sourceRecords: number }
+export interface EngineeringExtractSummary { ifcPaths: string[]; sourceRecords: number; familyPaths?:string[] }
 export const ENGINEERING_SOURCE_BATCH_BYTES=8*1024*1024;
 export const ENGINEERING_SOURCE_BATCH_FILES=256;
 /** A bounded immutable carrier; offsets describe original file bytes, not text characters. */
@@ -26,6 +27,8 @@ export interface EngineeringCacheResult {
 }
 
 export interface EngineeringBuildResult {
+  evidenceRevision?:number;
+  stageErrors?:Record<string,string>;
   sources: EngineeringSources;
   snapshot: EngineeringSnapshot;
   navigation: EngineeringNavigationData;
@@ -41,15 +44,22 @@ export interface EngineeringBuildResult {
   cacheDisabled?: string;
 }
 export type EngineeringWorkerCommand =
-  | { type: 'init'; scope: string; paths: string[] }
+  | { type: 'init'; scope: string; paths: string[];graphReferences?:boolean }
   | { type: 'files'; files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }> }
   | { type: 'packed-files'; batch: EngineeringSourceBatch }
   | { type: 'extract' }
+  | { type:'evidence-snapshot';entryIds?:readonly string[] }
+  | { type:'evidence-query';query:EvidenceQuery }
+  | { type:'evidence-ensure';range:EvidenceRange }
+  | { type:'evidence-read';path:string }
+  | { type:'release-model';buildId?:number }
+  | { type:'recognize-evidence';identity?:EngineeringCacheIdentity }
   | { type: 'encode-cache'; buildId: number; domain: EngineeringCacheDomain; projection?: EngineeringNavigationCacheProjection }
   | { type: 'assemble'; objects: IfcSpatialObject[]; models: SpatialModelSummary[]; nodes?: IfcSpatialNode[]; identity?: EngineeringCacheIdentity }
   | { type: 'restore'; sourceBytes: Uint8Array; entityBytes?: Uint8Array; navigationBytes?: Uint8Array; identity: EngineeringCacheIdentity };
 export type EngineeringWorkerRequest = EngineeringWorkerCommand & { requestId: number };
 export type EngineeringWorkerReply =
+  | {type:'evidence';snapshot?:EvidenceInventory;page?:EvidencePage;bytes?:Uint8Array}
   | { type: 'ready' }
   | { type: 'progress'; stage: 'source-index'|'source-traverse'|'source-sort'; completed: number }
   | { type: 'graph'; summary: EngineeringExtractSummary; geometryOccurrences: SourceGeometryOccurrenceCatalog }

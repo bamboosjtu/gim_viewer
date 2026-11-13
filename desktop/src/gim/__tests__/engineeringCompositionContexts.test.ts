@@ -44,7 +44,7 @@ it('preserves declared buildings with unconfirmed members instead of replacing t
 });
 
 it('uses the declared unit 36S as a bay without requiring 间隔 or any fixed F/SYSTEMNAME level', async () => {
-  for (const [level, field] of [['F2System', 'SYSTEMNAME3'], ['PARTINDEX', 'SYSTEMNAME7']]) {
+  for (const [level, field] of [['F2System', 'SYSTEMNAME3'], ['F3System', 'SYSTEMNAME7']]) {
     const f = await fixture({ 'project.cbm': 'SUBSYSTEM0=left.cbm\nSUBSYSTEM1=right.cbm',
       'left.cbm': `ENTITYNAME=${level}\nSYSTEMNAME1=交流电气系统\nSYSTEMNAME2=10kV系统\n${field}=36S\nOBJECTMODELPOINTER=shared.dev`,
       'right.cbm': 'ENTITYNAME=F4System\nSYSTEMNAME1=交流电气系统\nSYSTEMNAME2=10千伏配电装置\nSYSTEMNAME3=24S\nOBJECTMODELPOINTER=shared.dev',

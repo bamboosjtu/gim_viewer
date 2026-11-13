@@ -31,9 +31,9 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 
 | 变电 Spatial | `substation-spatial-semantic-v6` | [Spatial codec](../../desktop/src/services/substationSpatialCodec.ts)、[缓存 I/O](../../desktop/src/services/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
 | IFC Spatial parser | `gim-substation-parser-v25` | [Spatial codec](../../desktop/src/services/substationSpatialCodec.ts) | 独立于变电语义域 |
-| 工程来源 | `engineering-source-v12` | [来源契约](../../desktop/src/gim/engineering/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；独立原子文件 |
-| 工程实体 | `engineering-entity-v4` + `engineering-wholes-10` + `engineering-catalog-v2` | [实体编码](../../desktop/src/services/engineeringCacheCodec.ts)、[目录规则](../../desktop/src/engineering/catalogRules.json)、[目录契约](../../desktop/src/engineering/catalog.json) | 绑定来源内容摘要、实体 schema、规则版本；只重建实体 |
-| 工程导航 | `engineering-navigation-v9` + `engineering-composition-v11` + `engineering-source-tree-v1` + `engineering-inventory-v5` + 目录版本 | [三视图投影](../../desktop/src/gim/engineering/navigation.ts)、[组成](../../desktop/src/engineering/composition.ts)、[来源树](../../desktop/src/gim/engineering/sourceProjection.ts)、[清册](../../desktop/src/engineering/inventoryTemplate.ts)、[导航缓存](../../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹和空间投影策略版本；校验节点可达性、完整投影标记与覆盖率；部分范围不写导航缓存 |
+| 工程来源 | `engineering-source-v13` | [来源契约](../../desktop/src/gim/engineering/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；独立原子文件 |
+| 工程实体 | `engineering-entity-v5` + `engineering-wholes-11` + `engineering-catalog-v2` | [实体编码](../../desktop/src/services/engineeringCacheCodec.ts)、[目录规则](../../desktop/src/engineering/catalogRules.json)、[目录契约](../../desktop/src/engineering/catalog.json) | 绑定来源内容摘要、实体 schema、规则版本；只重建实体 |
+| 工程导航 | `engineering-navigation-v10` + `engineering-composition-v11` + `engineering-source-tree-v1` + `engineering-inventory-v5` + 目录版本 | [三视图投影](../../desktop/src/gim/engineering/navigation.ts)、[组成](../../desktop/src/engineering/composition.ts)、[来源树](../../desktop/src/gim/engineering/sourceProjection.ts)、[清册](../../desktop/src/engineering/inventoryTemplate.ts)、[导航缓存](../../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹和空间投影策略版本；校验节点可达性、完整投影标记与覆盖率；部分范围不写导航缓存 |
 | IFC 浏览 LOD | `bim-lod-v8` 组合 | [features](../../desktop/src/config/features.ts)、[LOD 缓存](../../desktop/bridge/ifcLodCache.ts) | 源 SHA、条目、LOD 策略、单次解析、依赖版本；分远景/近景/属性独立失效 |
 | IFC 区域模板 | `near-templates-v1`，附加于浏览 LOD 键 | [features](../../desktop/src/config/features.ts) | 模板几何与逐对象放置；不重建有效远景 |
 | Android 线路语义 | `mobile-powerline-v3` | [移动存储](../../app/src-tauri/src/storage.rs)、[领域投影](../../packages/powerline-core/src/domain.ts) | 私有源 SHA/大小、对象与属性范围、FAM 分类 |
@@ -43,6 +43,10 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 暖开 catalog 命中率只要求可成功表示的来源；有原始范围或引用证据的失败来源未产出目录缓存时，报告单列其未命中集合并与全部 DEV 来源数核对。其他 miss、读取错误和无证据失败不能被样本级白名单掩盖。
 
 ## 发布与恢复
+
+0.2.3 的来源完成凭据限定为已遍历的结构与识别所需来源，不代表全包所有属性均已解析。证据端口分别报告 Inventory 与条目属性覆盖，工程快照另外记录输入/已处理范围。元数据/详情请求不重传完整构建；运行时构建传输为 `engineering-worker-table-v3`。FAM 记录及上下文随来源域恢复，属性详情在 Worker 内复用已有解析结果。
+
+识别失败可保存有效来源域；投影失败可保存有效来源/实体域，不写完整导航。PARTINDEX 伪根不再进入新的来源域和物理目录，未引用的旧模板文件不形成新的物理 occurrence；真实引用的有效模板继续复用。构建结果载荷释放后证据 Worker 仍由工程会话持有，关闭/切换释放。
 
 ### 先发布、后写缓存
 
@@ -56,7 +60,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 - 每次 `await` 后检查当前会话/构建身份；旧构建结果不写。
 - 最终导航通过组成增量返回 Worker；若主线程复制或修改了应保持不变的来源树、清册或搜索结构，投影校验失败时跳过导航域，标记 `partial` / `navigation-projection-unavailable`。保留已发布视图与已写来源、实体域；不把未完成的 Worker base 当成完整导航回退写入。实际编码或写盘失败仍标 `error`。
 
-Engineering 输入载体限制为每批 8 MiB / 256 文件，批次数不是会话总内存上限。载体只读取一次，按请求解码条目；同批尚有未消费或失败条目时，已读取的 ArrayBuffer 仍可能驻留。抽取成功或失败均清空批次和逐文件输入；取消由所属 Worker 终止释放。该边界不证明大站峰值已受控，仍需原生进程树与 Worker 堆的本地采样。
+Engineering 输入载体限制为每批 8 MiB / 256 文件，批次数不是会话总内存上限。载体只读取一次，按请求解码条目；同批尚有未消费或失败条目时，已读取的 ArrayBuffer 仍可能驻留。物理抽取后仅保留识别所需 FAM 载体，物化后清空批次和逐文件输入，抽取失败则立即清空；取消由所属 Worker 终止释放。该边界不证明大站峰值已受控，仍需原生进程树与 Worker 堆的本地采样。
 
 ### 分片与上限
 

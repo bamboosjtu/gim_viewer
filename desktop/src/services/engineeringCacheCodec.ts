@@ -10,7 +10,7 @@ import { SOURCE_TREE_TEMPLATE_VERSION } from '../gim/engineering/sourceProjectio
 import { ENGINEERING_CATALOG_VERSION } from '../engineering/catalogLabels.js';
 import { packEngineeringSource, unpackEngineeringSource } from './engineeringSourceCodec.js';
 
-export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v4';
+export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v5';
 export const MAX_ENGINEERING_CACHE_BYTES = 384 * 1024 * 1024;
 /** JSON bodies above this size are split into independently compressed parts.
  * The compressed artifact still respects MAX_ENGINEERING_CACHE_BYTES. */

@@ -11,6 +11,7 @@ interface Source {batch:Batch;offset:number;length:number;error?:unknown}
 export class EngineeringSourceBatches {
   private sources=new Map<string,Source>();
   clear():void {this.sources.clear();}
+  retain(paths:ReadonlySet<string>):void{for(const path of this.sources.keys())if(!paths.has(path))this.sources.delete(path);}
   add(input:EngineeringSourceBatch):void {
     if(!input.entries.length||input.entries.length>ENGINEERING_SOURCE_BATCH_FILES||input.blob.size>ENGINEERING_SOURCE_BATCH_BYTES)
       throw Error('Engineering source batch exceeds bounds');

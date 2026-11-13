@@ -55,6 +55,18 @@
 
 ## 对象证据
 
+0.2.3 将来源清单、已解析证据与工程快照分开。`ModelEvidenceProvider` 的元数据快照和有界详情查询不触发 IO；宿主通过显式物化请求取得 FAM 属性，识别只消费所需的已解析来源。物理目录在 FAM 物化和实体归一化之前可用。清单完整、属性解析完成和工程输入处理完成是不同范围，不用当前属性条数推断全包属性总数。
+
+属性记录由原始键值、分段/容器地址、Parsed Value 和可选 Semantic Value 组成；未知单位不推定，只有物理量和明确单位相容时才执行有版本的转换。重复原始行独立保留，共享 FAM 的记录与 occurrence 赋值分开。IFC 外露属性仍是部分投影，原文可独立读取。
+
+`categoryStatus` 表达工程目录类别状态，`equipmentType`、`componentType`、`purpose`、`objectRole` 各有独立状态和证据；既有 `meaning` 保留对象角色，既有 `role` 保留盖板/侧壁等组成子角色。油浸式 TYPE 可确认 `oil_immersed_transformer`，没有明确用途时类别保持 E-T/candidate、purpose unresolved；标准断路器 TYPE 支持 `ACPorcelainCircuitBreaker`。仅名称推断或名称细分保持候选。分类已确认不自动确认整体边界。
+
+PARTINDEX 只赋予属性：在当前父装配子树内唯一匹配才赋值，多候选保留歧义，无匹配保留来源和未决别名，不回退创建物理根。同一 DEV 的其他真实物理引用正常保留；PARTINDEX 标记是引用用途事实，不是工程层级推断。
+
+标准词汇映射由带版本的 `sourceVocabulary.json` 保存，首批设备类型和表2部件词汇与索引工作簿、PDF 原文对照；未知 NB/T 编码不按前缀猜测。多个具体 TYPE 声明不相容时保留未决结果；跨 FAM 分段/Pset 的不同类别或用途保留上下文候选，不伪装成同一属性冲突。已知量种及明确单位下，同一文档/上下文的不相容数值观察以 conflict 标记保留。
+
+`standards/` 提供首批 B.1/B.27/B.31 的 63 项几何要求元数据和 B.2/B.28/B.32 中 21 项已选属性定义；每个字段有原文页码、摘要和复核状态。带脚注依赖的未放行字段继续未验证，已核对字段可单独查询；缺模型类型不默认通用/产品模型。requirementContext 是只读数据查询，不比较实际模型、不驱动实体身份或编译器，也不代表完整覆盖标准。
+
 适配层把 `SourceRecord` 转成 `ObjectEvidence`：
 
 | 字段 | 用途 |

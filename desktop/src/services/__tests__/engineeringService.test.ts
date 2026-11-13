@@ -5,7 +5,7 @@ import { projectEngineeringComposition, finalizeEngineeringComposition } from '.
 import type { ProjectionInput } from '../compositionProjectionWorker.js';
 import { AppState } from '../../app/state.js';
 import { buildSubstationSpatialIndexFromTexts } from '../../gim/ifcSpatialParser.js';
-import { beginEngineeringBuild, notifyEngineeringIfcEvidence } from '../engineeringService.js';
+import { beginEngineeringBuild, notifyEngineeringIfcEvidence,getEngineeringEvidenceSnapshot,queryEngineeringEvidence,ensureEngineeringEvidence } from '../engineeringService.js';
 import { EngineeringWorkerClient, type EngineeringWorkerPort } from '../engineeringWorkerClient.js';
 import { createEngineeringWorkerHandler } from '../engineeringWorker.js';
 import type { EngineeringWorkerRequest, EngineeringWorkerResponse } from '../engineeringWorkerProtocol.js';
@@ -80,7 +80,7 @@ describe('session-owned production engineering build', () => {
   it('falls back to per-file input when declared sizes underestimate a multi-file batch',async()=>{
     const app=state(),port=new LoopbackPort(),files=sourceFiles();
     const large=new Uint8Array(5*1024*1024);large.fill(32);
-    for(const name of ['unused-a.fam','unused-b.fam'])files.set(name,{size:0,arrayBuffer:async()=>large.buffer}as File);
+    for(const name of ['unused-a.dev','unused-b.dev'])files.set(name,{size:0,arrayBuffer:async()=>large.buffer}as File);
     await beginEngineeringBuild(app,files,{createWorker:portFactory(port)});expect(app.engineeringStatus).toBe('ready');expect(port.commands).toContain('files');
   });
   it('publishes the geometry catalog before joining IFC source semantics and assembles the full model once',async()=>{
@@ -99,6 +99,23 @@ describe('session-owned production engineering build', () => {
     await expect.poll(()=>app.engineeringFailureCode).toBe('ifc-semantic-failed');
     expect(app.engineeringSnapshot).not.toBeNull();expect(app.engineeringStatus).toBe('partial');
     expect(port.commands.filter(c=>c==='assemble')).toHaveLength(1);expect(port.terminated).toBe(true);
+  });
+  it('exposes inventory while IFC preparation waits and reads unused family attributes only on explicit demand',async()=>{
+    const app=state(),port=new LoopbackPort(),files=sourceFiles('设备',true);
+    const unused=new File(['[设计]\n额定电压=RATEDVOLTAGE=220 kV'],'unused.fam'),read=vi.spyOn(unused,'arrayBuffer');files.set('unused.fam',unused);app.currentFiles=files;
+    let release!:(value:boolean)=>void;const gate=new Promise<boolean>(resolve=>{release=resolve;});
+    const build=beginEngineeringBuild(app,files,{createWorker:portFactory(port),ensureIfcSemantics:()=>gate});
+    await app.engineeringGeometryReady;
+    const inventory=await getEngineeringEvidenceSnapshot(app);
+    expect(inventory.entries.find(e=>e.id==='unused.fam')?.status).toBe('not_requested');expect(read).not.toHaveBeenCalled();
+    const range={entryIds:['unused.fam'],kinds:['attributes'] as const};
+    expect((await queryEngineeringEvidence(app,{range,revision:inventory.revision,limit:10})).attributes).toEqual([]);
+    app.substationSpatialIndex=buildSubstationSpatialIndexFromTexts([{entry:{modelId:'m',path:'delivery.ifc',name:'delivery'},text:"#1=IFCWALL('w',$,'墙',$,$,$,$,$);"}],null);
+    release(true);await build;
+    const loaded=await ensureEngineeringEvidence(app,range);
+    expect((await queryEngineeringEvidence(app,{range,revision:loaded.revision,limit:10})).attributes[0].rawValue).toBe('220 kV');
+    expect(read).toHaveBeenCalledTimes(1);expect(port.terminated).toBe(false);
+    app.engineeringCleanup?.();expect(port.terminated).toBe(true);
   });
   it('rejects an obsolete model after switching projects while IFC source preparation is pending',async()=>{
     const app=state(),old=new LoopbackPort();let release!:()=>void;
@@ -129,13 +146,13 @@ describe('session-owned production engineering build', () => {
     expect((await app.engineeringGeometryReady)?.occurrences).toHaveLength(1);
     expect(app.engineeringCacheStatus).toBe('saved');
     expect(first.commands).toContain('extract');
-    expect(first.terminated).toBe(true);
+    expect(first.terminated).toBe(false);
     const cold = app.engineeringSnapshot;
     const next = new LoopbackPort();
     await beginEngineeringBuild(app, files, { createWorker: portFactory(next) });
     expect(app.engineeringSnapshot).toEqual(cold);
     expect(app.engineeringCacheStatus).toBe('hit');
-    expect(next.commands).toEqual(['restore']);
+    expect(next.commands).toEqual(['init','restore','release-model']);
     expect(app.engineeringNavigationCacheHit).toBe(true);
     expect(app.engineeringGeometryCatalog?.occurrences).toHaveLength(1);
   });
@@ -162,12 +179,12 @@ describe('session-owned production engineering build', () => {
     expect(copied).toBe(true);expect(app.engineeringStatus).toBe('ready');
     expect(app.engineeringSnapshot?.entities).toHaveLength(2);expect(app.engineeringNavigation?.sourceNodes.size).toBeGreaterThan(0);
     expect(app.engineeringCacheStatus).toBe('partial');expect(app.engineeringCacheError).toBe('navigation-projection-unavailable');
-    expect(app.engineeringBuildPending).toBe(false);expect(port.terminated).toBe(true);
+    expect(app.engineeringBuildPending).toBe(false);expect(port.terminated).toBe(false);
     expect([...store.keys()].some(path=>path.includes('engineering-source'))).toBe(true);
     expect([...store.keys()].some(path=>path.includes('engineering-entity'))).toBe(true);
     expect([...store.keys()].some(path=>path.includes('engineering-navigation'))).toBe(false);
     const next=new LoopbackPort();await beginEngineeringBuild(app,files,{createWorker:portFactory(next)});
-    expect(next.commands).toEqual(['restore','encode-cache']);expect(app.engineeringCacheStatus).toBe('saved');
+    expect(next.commands).toEqual(['init','restore','encode-cache','release-model']);expect(app.engineeringCacheStatus).toBe('saved');
     expect(app.engineeringCacheError).toBe('');
   });
 
@@ -179,7 +196,7 @@ describe('session-owned production engineering build', () => {
     store.set(entry, new Uint8Array([1, 2, 3]));
     const port = new LoopbackPort();
     await beginEngineeringBuild(app, files, { createWorker: portFactory(port) });
-    expect(port.commands).toEqual(['restore','encode-cache']);
+    expect(port.commands).toEqual(['init','restore','encode-cache','release-model']);
     expect(app.engineeringSnapshot).toEqual(cold); expect(app.engineeringNavigation).toEqual(view);
     expect(app.engineeringNavigationCacheHit).toBe(false); expect(app.engineeringCacheStatus).toBe('saved');
     const next = new LoopbackPort(); await beginEngineeringBuild(app, files, { createWorker: portFactory(next) });
@@ -198,7 +215,7 @@ describe('session-owned production engineering build', () => {
     app.substationSpatialIndex = null;app.ifcRegionalRuntimes.clear();
     const port = new LoopbackPort(), start = vi.fn();
     await beginEngineeringBuild(app, files, { createWorker: portFactory(port), ensureIfcSemantics: start });
-    expect(port.commands).toEqual(['restore']); expect(start).not.toHaveBeenCalled();
+    expect(port.commands).toEqual(['init','restore','release-model']); expect(start).not.toHaveBeenCalled();
     expect(app.engineeringNavigation).toEqual(cold); expect(app.engineeringNavigationCacheHit).toBe(true);
     expect([...app.engineeringNavigation!.composition.nodes.values()].map(n => n.title)).toContain('主控楼');
     expect([...app.engineeringNavigation!.sourceNodes.values()].map(n => n.title)).toContain('一层');
@@ -213,7 +230,7 @@ describe('session-owned production engineering build', () => {
     const port = new LoopbackPort();
     await beginEngineeringBuild(app, files, { createWorker: portFactory(port) });
     expect(app.engineeringSnapshot).toEqual(cold);
-    expect(port.commands).toEqual(['restore','encode-cache']);
+    expect(port.commands).toEqual(['init','restore','encode-cache','release-model']);
     expect(app.engineeringCacheStatus).toBe('saved');
   });
 
@@ -253,7 +270,7 @@ describe('session-owned production engineering build', () => {
     expect(app.engineeringBuildPending).toBe(false);
     expect(app.engineeringStatus).toBe('ready');
     expect(app.engineeringSnapshot?.entities).toHaveLength(3);
-    expect(port.terminated).toBe(true);
+    expect(port.terminated).toBe(false);
     expect(app.deviceLodRuntime).toBeNull();
   });
 
@@ -287,7 +304,7 @@ describe('session-owned production engineering build', () => {
     expect(app.engineeringSnapshot?.entities.map(entity => entity.name)).toContain('最新墙');
     expect(publications.flat()).not.toContain('先前墙');
     expect(port.commands.filter(command => command === 'assemble')).toHaveLength(3);
-    expect(port.terminated).toBe(true);
+    expect(port.terminated).toBe(false);
   });
 
   it('enriches IFC which becomes available during initial assembly instead of closing the Worker early', async () => {
@@ -302,7 +319,7 @@ describe('session-owned production engineering build', () => {
     expect(app.engineeringSources?.complete).toBe(true);
     expect(app.engineeringSnapshot?.entities.map(entity => entity.name)).toContain('新墙');
     expect(port.commands.filter(command => command === 'assemble')).toHaveLength(2);
-    expect(port.terminated).toBe(true);
+    expect(port.terminated).toBe(false);
   });
 
   it('cancels an old project while extracting and rejects its late result', async () => {

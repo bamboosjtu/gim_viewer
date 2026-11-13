@@ -17,6 +17,7 @@ export interface SourceReference {
   status: 'resolved' | 'missing' | 'ambiguous';
 }
 export interface SourceDocument {
+  attributeStatus?:'complete'|'partial';
   path: string;
   /** Physical source lines, including sections, placeholders and malformed rows. */
   rawLines: string[];
@@ -31,6 +32,8 @@ export interface CbmOccurrence {
   entityName?: string;
 }
 export interface EngineeringSourceGraph {
+  revision?:number;
+  familyAssignments?: Array<{sourceId:string;path:string}>;
   documents: SourceDocument[];
   cbmOccurrences: CbmOccurrence[];
   records: SourceRecord[];
@@ -38,14 +41,14 @@ export interface EngineeringSourceGraph {
   references: SourceReference[];
   /** File discovery is independent of IFCGUID joins. */
   ifcPaths: string[];
-  diagnostics: Array<{ kind: 'cycle' | 'missing-object-model'; source: string }>;
+  diagnostics: Array<{ kind: 'cycle' | 'missing-object-model' | 'read-failed'; source: string }>;
 }
 
 const normalizePath = (value: string) => value.trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').toLowerCase();
 const ordered = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 
 /** No use of CbmNode, current UI grain, F-levels or geometry seed predicates. */
-export async function extractEngineeringSourceGraph(files: SourceFileReader, options: { maxOccurrences?: number; maxDepth?: number; signal?: AbortSignal; onProgress?:(stage:'source-index'|'source-traverse'|'source-sort')=>void } = {}): Promise<EngineeringSourceGraph> {
+export async function extractEngineeringSourceGraph(files: SourceFileReader, options: { deferFamilies?:boolean; maxOccurrences?: number; maxDepth?: number; signal?: AbortSignal; onProgress?:(stage:'source-index'|'source-traverse'|'source-sort')=>void } = {}): Promise<EngineeringSourceGraph> {
   const maxOccurrences = options.maxOccurrences ?? 500_000;
   const maxDepth = options.maxDepth ?? 128;
   const result: EngineeringSourceGraph = { documents: [], cbmOccurrences: [], records: [], aliases: [], references: [],
@@ -93,7 +96,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   const scalar = (doc: SourceDocument, key: string) => doc.fields.find(p => p.keys[0].toUpperCase() === key)?.value ?? '';
   // Object fields are attached only to their actual OMP occurrence. SYSTEMNAME
   // and PARTNAME remain organizational context in the source documents.
-  const objectFields = (doc: SourceDocument) => doc.fields.filter(p => /^(?:SYMBOLNAME|NAME|OBJECTNAME|PROJECTNAME|设备名称|工程中名称|设备编码|电网工程标识系统编码|GRIDIDENTIFICATIONSYSTEMCODE|材料子类|设备子类|MATERIALSUBTYPE|EQUIPMENTSUBTYPE|相数|相别|PHASE|PHASECOUNT|PHASELABEL|设备类型|设备类别|材料类型|构件类型|用途|设备用途|EQUIPMENTTYPE|MATERIALTYPE|PURPOSE|型号|MODEL|MODELSPEC|对象角色|组件角色|OBJECTROLE|COMPONENTROLE)$/i.test(p.keys[0]));
+  const objectFields = (doc: SourceDocument) => doc.fields.filter(p => /^(?:TYPE|SYMBOLNAME|NAME|OBJECTNAME|PROJECTNAME|设备名称|工程中名称|设备编码|电网工程标识系统编码|GRIDIDENTIFICATIONSYSTEMCODE|材料子类|设备子类|MATERIALSUBTYPE|EQUIPMENTSUBTYPE|相数|相别|PHASE|PHASECOUNT|PHASELABEL|设备类型|设备类别|材料类型|构件类型|用途|设备用途|EQUIPMENTTYPE|MATERIALTYPE|PURPOSE|型号|MODEL|MODELSPEC|对象角色|组件角色|OBJECTROLE|COMPONENTROLE)$/i.test(p.keys[0]));
   function updateNames(row: SourceRecord): void {
     const names: ObjectNameEvidence[] = [];
     for (const [kind, labels] of [
@@ -108,19 +111,29 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     row.name = names[0]?.value ?? '';
   }
   const familyCache = new Map<string, Promise<SourceProperty[]>>();
+  const familyPaths=new Map<string,string[]>();
+  function referencedFamilies(doc:SourceDocument):string[]{
+    const cached=familyPaths.get(doc.path);if(cached)return cached;
+    const paths:string[]=[];
+    for(const field of doc.fields)for(const edge of resolveBaseFamilyReferences({[field.keys[0]]:field.value})){
+      const path=resolve(doc.path,edge.key,edge.path);if(path&&!paths.includes(path))paths.push(path);
+    }
+    familyPaths.set(doc.path,paths);return paths;
+  }
   async function family(doc: SourceDocument): Promise<SourceProperty[]> {
     let promise = familyCache.get(doc.path);
     if (!promise) {
       promise = (async () => {
         const properties: SourceProperty[] = [];
-        const kv = Object.fromEntries(doc.fields.map(p => [p.keys[0], p.value]));
-        for (const edge of resolveBaseFamilyReferences(kv)) {
-          const path = resolve(doc.path, edge.key, edge.path);
-          if (!path) continue;
+        for (const path of referencedFamilies(doc)) {
+          if(options.deferFamilies)continue;
           const text = (await document(path)).rawLines.join('\n');
-          properties.push(...parseFamSectionsWithDiagnostics(text, path).properties.map(p => ({
+          const parsed=parseFamSectionsWithDiagnostics(text,path);
+          (await document(path)).attributeStatus=parsed.diagnostics.malformedLineCount?'partial':'complete';
+          const fields=parsed.properties.map(p => ({
             path, line: p.sourceLine, keys: [...new Set([p.label, p.rawKey])], value: p.rawValue, rawLine: p.rawLine, section: p.section,
-          })));
+          }));
+          (await document(path)).fields=fields;properties.push(...fields);
         }
         return properties;
       })();
@@ -139,7 +152,8 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     rootSourceId = id, assemblyPath = ''): Promise<SourceRecord[]> {
     check(depth);
     if (ancestry.has(path)) { result.diagnostics.push({ kind: 'cycle', source: id }); return []; }
-    const doc = await document(path);
+    let doc:SourceDocument;
+    try{doc=await document(path);}catch(error){if(options.signal?.aborted||/Engineering source unavailable/.test(String(error)))throw error;result.diagnostics.push({kind:'read-failed',source:path});return [];}
     const cbmDoc = await document(cbm.documentPath);
     const props = [...(!parent ? await family(cbmDoc) : []), ...await family(doc), ...objectFields(doc), ...(!parent ? objectFields(cbmDoc) : [])];
     const row: SourceRecord = {
@@ -177,8 +191,10 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   async function visitCbm(path: string, id: string, parentId: string | null, viaField: string, ancestors: Set<string>, physicalScopes: PhysicalScope[], depth: number): Promise<void> {
     check(depth);
     if (ancestors.has(path)) { result.diagnostics.push({ kind: 'cycle', source: id }); return; }
-    const doc = await document(path);
+    let doc:SourceDocument;
+    try{doc=await document(path);}catch(error){if(parentId===null||options.signal?.aborted||/Engineering source unavailable/.test(String(error)))throw error;result.diagnostics.push({kind:'read-failed',source:path});return;}
     const entityName = scalar(doc, 'ENTITYNAME')?.trim() || undefined;
+    referencedFamilies(doc);
     const node = { id, documentPath: path, parentId, viaField, ...(entityName ? { entityName } : {}) };
     result.cbmOccurrences.push(node);
     let scopes = physicalScopes;
@@ -209,6 +225,10 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
             child={records:subtree,rootIds:ids};children.set(target,child);
           }
           scopes = [...physicalScopes, child];
+        } else if(entityName?.toUpperCase()==='PARTINDEX') {
+          // Attribute-only occurrence: preserve evidence without creating a physical root.
+          result.aliases.push({sourceId:id,status:'unresolved',candidates:[]});
+          await family(doc);
         } else {
           const subtree = await expandDev(target, `dev:${id}:${target}`, '', node, new Set(), 0);
           scopes = [...physicalScopes, { records: subtree, rootIds: new Set(subtree.slice(0, 1).map(row => row.id)) }];
@@ -231,8 +251,41 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   if (!root) throw new Error('Engineering source graph requires a unique project.cbm');
   options.onProgress?.('source-traverse');
   await visitCbm(root, `cbm:${root}`, null, '', new Set(), [], 0);
+  result.familyAssignments=result.records.flatMap(row=>row.sources.flatMap(path=>(familyPaths.get(path)??[]).map(fam=>({sourceId:row.id,path:fam}))));
   if (options.signal?.aborted) throw new DOMException('Source extraction cancelled', 'AbortError');
   options.onProgress?.('source-sort');
   result.documents.sort((a, b) => ordered(a.path, b.path));
+  result.revision=1;
   return result;
+}
+
+/** Explicit recognition demand, after the physical catalog has been published. */
+export async function materializeEngineeringFamilies(graph:EngineeringSourceGraph,readText:(path:string)=>Promise<string>,parsedDocument?:(path:string)=>SourceDocument|undefined):Promise<void>{
+  let changed=false;
+  const docs=new Map(graph.documents.map(d=>[d.path,d]));
+  const properties=new Map<string,SourceProperty[]>();
+  for(const {path} of graph.familyAssignments??[]){
+    if(properties.has(path))continue;
+    let doc=docs.get(path);
+    if(!doc){doc=parsedDocument?.(path);if(doc){docs.set(path,doc);graph.documents.push(doc);changed=true;}}
+    if(!doc){try{const rawLines=(await readText(path)).split(/\r?\n/);doc={path,rawLines,fields:[]};docs.set(path,doc);graph.documents.push(doc);changed=true;}catch{if(!graph.diagnostics.some(d=>d.kind==='read-failed'&&d.source===path)){graph.diagnostics.push({kind:'read-failed',source:path});changed=true;}properties.set(path,[]);continue;}}
+    const diagnostics=graph.diagnostics.filter(d=>!(d.kind==='read-failed'&&d.source===path));if(diagnostics.length!==graph.diagnostics.length){graph.diagnostics=diagnostics;changed=true;}
+    if(doc.attributeStatus){properties.set(path,doc.fields);continue;}
+    const parsed=parseFamSectionsWithDiagnostics(doc.rawLines.join('\n'),path);doc.attributeStatus=parsed.diagnostics.malformedLineCount?'partial':'complete';
+    changed=true;
+    properties.set(path,parsed.properties.map(p=>({path,line:p.sourceLine,keys:[...new Set([p.label,p.rawKey])],value:p.rawValue,rawLine:p.rawLine,section:p.section})));
+    if(!doc.fields.length)doc.fields=properties.get(path)!.map(p=>({...p,path,keys:p.keys??[]}));
+  }
+  const records=new Map(graph.records.map(r=>[r.id,r]));
+  for(const {sourceId,path} of graph.familyAssignments??[]){
+    const row=records.get(sourceId);if(!row||row.properties.some(p=>p.path===path))continue;
+    row.properties=[...row.properties,...properties.get(path)??[]];
+    const names:ObjectNameEvidence[]=[];
+    for(const [kind,labels] of [['object',['SYMBOLNAME']],['engineering',['工程中名称','PROJECTNAME']],['family',['设备名称','DEVICENAME']],['source',['NAME','OBJECTNAME']]] as const){
+      for(const p of row.properties)if(p.keys?.some(k=>(labels as readonly string[]).includes(k.toUpperCase()))&&p.value.trim()&&!['-','/','-100','软件自动生成'].includes(p.value.trim()))
+        names.push({kind,value:p.value,evidenceId:JSON.stringify([row.id,p.path,p.line,p.keys])});
+    }
+    row.nameEvidence=names;row.name=names[0]?.value??'';
+  }
+  if(changed)graph.revision=(graph.revision??0)+1;
 }

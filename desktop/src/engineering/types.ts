@@ -2,6 +2,7 @@
 export interface EvidenceValue {
   value: string;
   evidenceId: string;
+  context?:{section?:string;container?:string};
 }
 
 /** Names belonging to this occurrence, with their original evidence address. */
@@ -10,6 +11,11 @@ export interface ObjectNameEvidence extends EvidenceValue {
 }
 
 export interface ObjectEvidence {
+  equipmentType?: EvidenceValue;
+  componentType?: EvidenceValue;
+  equipmentTypeCandidates?:readonly EvidenceValue[];
+  componentTypeCandidates?:readonly EvidenceValue[];
+  purposes?: readonly EvidenceValue[];
   /** Package-local occurrence identity, never a template or display-name identity. */
   sourceId: string;
   name: string;
@@ -42,6 +48,11 @@ export interface ObjectEvidence {
 export type SourceMeaning = 'object' | 'part' | 'fragment' | 'neutral_set' | 'container' | 'detail' | 'source_only';
 export type SourceComponentRole = 'cover' | 'sidewall' | 'base';
 export interface ObjectInterpretation {
+  categoryStatus?: 'confirmed' | 'candidate' | 'unresolved';
+  equipmentType?: TermInterpretation;
+  componentType?: TermInterpretation;
+  purpose?: TermInterpretation;
+  objectRole?: TermInterpretation;
   category: string;
   meaning: SourceMeaning;
   basis: string;
@@ -57,6 +68,8 @@ export interface ObjectInterpretation {
   assemblyCategory: string;
   assemblySignature: string;
 }
+
+export interface TermInterpretation {id?:string;status:'confirmed'|'candidate'|'unresolved';evidence:readonly string[]}
 
 export interface EngineeringEntity {
   id: string;
@@ -112,6 +125,7 @@ export interface WholeAlias {
 }
 
 export interface EngineeringSnapshot {
+  recognitionCoverage?: {inputSourceIds:readonly string[];processed:number;confirmed:number;complete:boolean};
   scope: string;
   rulesVersion: string;
   entities: EngineeringEntity[];

@@ -5,6 +5,7 @@ import type { SourceRecord } from '../gim/engineering/sourceEvidence.js';
 import { categoryLabel,classificationReasonLabel } from '../engineering/catalogLabels.js';
 
 export interface EngineeringInspectorInput {
+  evidenceSummary?:readonly [string,string][];
   title: string;
   entity?: EngineeringEntity;
   pending?: PendingWhole;
@@ -35,6 +36,7 @@ export function renderEngineeringInspector(input: EngineeringInspectorInput): vo
   const single = !entity && !pending && !input.group && sources.length === 1 ? sources[0] : undefined;
   const unassignedDeclaration = !!input.group?.declarations?.length && input.group.entityCount === 0 && input.group.pendingCount === 0;
   const rows: [string, string][] = [
+    ...input.evidenceSummary??[],
     ['浏览对象', entity ? '工程整体' : pending ? '待归整体集合' : input.group ? '工程分组范围' : '来源范围'],
     ...(input.group ? [['整体候选', String(input.group.entityCount)], ['待归集合', String(input.group.pendingCount)]] as [string, string][] : []),
     ...(input.group?.confirmedCount!==undefined?[['分类与边界均确认',String(input.group.confirmedCount)]] as [string,string][]:[]),

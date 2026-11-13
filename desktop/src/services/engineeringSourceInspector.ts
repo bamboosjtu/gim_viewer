@@ -4,13 +4,14 @@ import type { AppState, SelectionRequest } from '../app/state.js';
 import { engineeringSourceRecord } from './engineeringViewService.js';
 import { selectEngineeringTarget } from './engineeringSelection.js';
 import { escHtml } from '../shared/html.js';
+import {getEngineeringEvidenceSnapshot} from './engineeringService.js';
 
 /** Reads a source document on explicit request; never opens an IFC STEP
  * definition tree or promotes a document to an engineering entity.
  */
 export async function inspectEngineeringDocument(state: AppState, path: string, cbmOccurrenceId?: string, existing?: SelectionRequest): Promise<void> {
-  const sources = state.engineeringSources, snapshot = state.engineeringSnapshot;
-  if (!sources || !snapshot) return;
+  const sources = state.engineeringSources;
+  if (!sources) return;
   const inventory = new Set([...state.substationEntryPaths, ...sources.graph.documents.map(doc => doc.path), ...sources.graph.ifcPaths]);
   if (!inventory.has(path)) return;
   const request = existing ?? state.beginSelection({ kind: 'engineering-source', key: cbmOccurrenceId ?? `document:${path}` }), guard = state.selectionGuard(request);
@@ -61,7 +62,12 @@ export async function inspectEngineeringDocument(state: AppState, path: string, 
   }
   const references = sources.graph.references.filter(reference => reference.owner === path);
   const ifcModel = sources.models.find(model => model.path === path);
+  let inventoryNote='尚未取得',parsedNote='尚未取得';
+  try{const evidence=await getEngineeringEvidenceSnapshot(state,[path]);inventoryNote=`${evidence.inventoryTotals?.entries??evidence.entries.length} 个条目`;parsedNote=`${evidence.inventoryTotals?.parsedComplete??0} 个条目属性已解析，其他范围按需读取`;}catch{/* Source documents remain inspectable without an active evidence port. */}
+  if(!guard.isCurrent())return;
+  const recognition=state.engineeringSnapshot?.recognitionCoverage;
   const rows: [string, string][] = [['文件', path], ['浏览对象', isIfc ? 'IFC 交付文件' : '来源文档'],
+    ['来源清单',inventoryNote],['属性解析范围',parsedNote],['识别处理范围',recognition?`${recognition.processed} / ${recognition.inputSourceIds.length} 个输入来源`:'尚未完成'],
     ...(doc ? [['原始行数', String(doc.rawLines.length)]] as [string, string][] : []),
     ...(isIfc ? [['外露对象与特征', String(sources.ifcRecords.filter(row => row.sources.includes(path)).length)], ['读取状态', ifcModel?.error ?? (ifcModel ? '已解析外露接口' : '尚未完成')]] as [string, string][] : [])];
   const render = (page = 0, active = 'overview') => {

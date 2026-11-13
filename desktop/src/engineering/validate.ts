@@ -33,6 +33,9 @@ export function assertEngineeringPartition(snapshot: EngineeringSnapshot, source
   for (const member of snapshot.memberships) {
     requireShape(object(member) && typeof member.sourceId === 'string' && (member.ownerId === null || typeof member.ownerId === 'string') && object(member.interpretation), 'membership');
     const interpretation = member.interpretation;
+    requireShape(interpretation.categoryStatus===undefined||['confirmed','candidate','unresolved'].includes(interpretation.categoryStatus),'category status');
+    for(const term of [interpretation.equipmentType,interpretation.componentType,interpretation.purpose,interpretation.objectRole])if(term!==undefined)
+      requireShape(object(term)&&(term.id===undefined||typeof term.id==='string')&&['confirmed','candidate','unresolved'].includes(term.status)&&strings(term.evidence),'term interpretation');
     requireShape((interpretation.classificationStatus===undefined||['confirmed','candidate','unresolved'].includes(interpretation.classificationStatus))
       &&(interpretation.classificationEvidence===undefined||strings(interpretation.classificationEvidence))
       &&['subtype','subtypeLabel','unknownReason'].every(key=>interpretation[key as keyof typeof interpretation]===undefined||typeof interpretation[key as keyof typeof interpretation]==='string'),'classification evidence');

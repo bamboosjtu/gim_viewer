@@ -57,6 +57,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       classificationState: category === 'U-OBJECT' ? 'unknown' : 'identified', sourceIds: [], classificationConflicts: 0,
       classificationStatus:meaning.get(sourceIds.find(id=>meaning.get(id)?.category===category)??'')?.classificationStatus??(category==='U-OBJECT'?'unresolved':'confirmed'),
       boundaryStatus:proof==='outward_object_boundary_unconfirmed'||kind!=='whole'
+        ||sourceIds.some(id=>raw.get(id)?.equipmentType||raw.get(id)?.componentType||meaning.get(id)?.classificationStatus!=='confirmed')&&!sourceIds.some(id=>raw.get(id)?.identityCodes.length||raw.get(id)?.designations.length||explicitIndependent(raw.get(id)!))
         ||['E04','E10'].includes(category)&&!/(?:成套|装置|组)/.test(name)&&!sourceIds.some(id=>raw.get(id)?.identityCodes.length)?'candidate':'confirmed',
       grain:categoryDefinition(category)?.grain as 'item'|'segment'|undefined,
       ...classificationDetails(category,name),
@@ -101,6 +102,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     if (members.length < 2) continue;
     const parents=new Set(members.map(row=>row.assemblyParentId).filter(id=>id&&meaning.get(id)?.meaning!=='container'));
     if (signatures.get(JSON.stringify([group.category, group.code, group.name]))!.size !== 1 || parents.size>1
+      ||new Set(members.map(row=>meaning.get(row.sourceId)?.equipmentType?.id).filter(Boolean)).size>1
       || members.some(row=>new Set(row.identityCodes.map(p=>p.value)).size>1||new Set(row.designations.map(p=>p.value)).size>1)) {
       diagnostics.push({ kind: 'whole_identity_conflict', identity: group.code, name: group.name });
       for(const row of members)if(!owners.has(row.sourceId))bundle(`conflict:${row.sourceId}`,'assembly_identity_conflict',[row.sourceId]);
@@ -167,6 +169,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       // explicit independent role does not detach it, and the host being a
       // main transformer, GIS or capacitor bank does not change the boundary.
       m.meaning='part';m.independent=false;m.basis=transformer(aboveCategory)||pending.get(above)?.reason==='neutral_set_main_unresolved'?'transformer_terminal_composition':'equipment_terminal_composition';
+      if(explicitIndependent(row)){m.conflict='assembly_role_conflict';m.classificationStatus='candidate';m.categoryStatus='candidate';if(m.objectRole)m.objectRole={...m.objectRole,status:'unresolved'};}
       owners.set(sourceId,above);
     } else if (m.category==='E17'&&m.subtype==='机构箱'&&above&&aboveCategory?.startsWith('E')&&aboveCategory!=='E18'
       &&!row.objectRoles?.some(p=>p.value==='independent')) {
@@ -235,6 +238,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
   const memberships = ordered.map(row => {
     const ownerId = owners.get(row.sourceId) ?? null;
     const interpretation = meaning.get(row.sourceId)!;
+    if(interpretation.objectRole)interpretation.objectRole={...interpretation.objectRole,id:interpretation.meaning};
     const entity = ownerId ? entities.get(ownerId) : undefined;
     if (entity) {
       entity.sourceIds.push(row.sourceId);
@@ -255,6 +259,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       componentCandidates: [...alias.candidates] };
   });
   const snapshot: EngineeringSnapshot = {
+    recognitionCoverage:{inputSourceIds:ordered.map(r=>r.sourceId),processed:ordered.length,confirmed:memberships.filter(m=>m.interpretation.categoryStatus==='confirmed').length,complete:true},
     scope, rulesVersion: ENGINEERING_RULES_VERSION,
     entities: [...entities.values()].sort((a, b) => compare(a.id, b.id)),
     memberships, pending: [...pending.values()].sort((a, b) => compare(a.id, b.id)),

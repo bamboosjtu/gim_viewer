@@ -1,0 +1,2210 @@
+{
+  "version": "substation-attribute-definitions-1",
+  "records": [
+    {
+      "id": "B.2:22:1",
+      "equipmentType": "oil_immersed_transformer",
+      "table": "B.2",
+      "fields": {
+        "propertyName": {
+          "value": "设备名称",
+          "rawText": "设备名称",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "propertyName",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "valueType",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "unit",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "油浸式变压器",
+          "rawText": "油浸式变压器",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "example",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "genericModel",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "productModel",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "designFrozen",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.2:22:2",
+      "equipmentType": "oil_immersed_transformer",
+      "table": "B.2",
+      "fields": {
+        "propertyName": {
+          "value": "设备形式",
+          "rawText": "设备形式",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "propertyName",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "valueType",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "unit",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "单相、自耦、三绕组",
+          "rawText": "单相、自耦、三绕组",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "example",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "genericModel",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "productModel",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "designFrozen",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.2:22:3",
+      "equipmentType": "oil_immersed_transformer",
+      "table": "B.2",
+      "fields": {
+        "propertyName": {
+          "value": "设备型号",
+          "rawText": "设备型号",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "propertyName",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "valueType",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "unit",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "example",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "genericModel",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "productModel",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "designFrozen",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.2:22:4",
+      "equipmentType": "oil_immersed_transformer",
+      "table": "B.2",
+      "fields": {
+        "propertyName": {
+          "value": "生产厂家",
+          "rawText": "生产厂家",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "propertyName",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "valueType",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "unit",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "example",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "genericModel",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "productModel",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "designFrozen",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.2:22:5",
+      "equipmentType": "oil_immersed_transformer",
+      "table": "B.2",
+      "fields": {
+        "propertyName": {
+          "value": "单位",
+          "rawText": "单位",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "propertyName",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "valueType",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "unit",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "台",
+          "rawText": "台",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "example",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "genericModel",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "productModel",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "designFrozen",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.2:22:10",
+      "equipmentType": "oil_immersed_transformer",
+      "table": "B.2",
+      "fields": {
+        "propertyName": {
+          "value": "容量",
+          "rawText": "容量",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "propertyName",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "浮点型",
+          "rawText": "浮点型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "valueType",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "MVA",
+          "rawText": "MVA",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "unit",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "334",
+          "rawText": "334",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "example",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "genericModel",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "productModel",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "designFrozen",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.2:22:11",
+      "equipmentType": "oil_immersed_transformer",
+      "table": "B.2",
+      "fields": {
+        "propertyName": {
+          "value": "额定频率",
+          "rawText": "额定频率",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "propertyName",
+            "row": 11,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "浮点型",
+          "rawText": "浮点型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "valueType",
+            "row": 11,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "Hz",
+          "rawText": "Hz",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "unit",
+            "row": 11,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "50",
+          "rawText": "50",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "example",
+            "row": 11,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "genericModel",
+            "row": 11,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "productModel",
+            "row": 11,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.2",
+            "pdfPage": 22,
+            "printedPage": 18,
+            "field": "designFrozen",
+            "row": 11,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.28:42:1",
+      "equipmentType": "gis",
+      "table": "B.28",
+      "fields": {
+        "propertyName": {
+          "value": "设备名称",
+          "rawText": "设备名称",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "propertyName",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "valueType",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "unit",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "组合电器GIS",
+          "rawText": "组合电器GIS",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "example",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "genericModel",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "productModel",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "designFrozen",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.28:42:2",
+      "equipmentType": "gis",
+      "table": "B.28",
+      "fields": {
+        "propertyName": {
+          "value": "设备形式",
+          "rawText": "设备形式",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "propertyName",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "valueType",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "unit",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "三相分箱",
+          "rawText": "三相分箱",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "example",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "genericModel",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "productModel",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "designFrozen",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.28:42:3",
+      "equipmentType": "gis",
+      "table": "B.28",
+      "fields": {
+        "propertyName": {
+          "value": "设备型号",
+          "rawText": "设备型号",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "propertyName",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "valueType",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "unit",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "example",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "genericModel",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "productModel",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "designFrozen",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.28:42:4",
+      "equipmentType": "gis",
+      "table": "B.28",
+      "fields": {
+        "propertyName": {
+          "value": "生产厂家",
+          "rawText": "生产厂家",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "propertyName",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "valueType",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "unit",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "example",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "genericModel",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "productModel",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "designFrozen",
+            "row": 4,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.28:42:5",
+      "equipmentType": "gis",
+      "table": "B.28",
+      "fields": {
+        "propertyName": {
+          "value": "单位",
+          "rawText": "单位",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "propertyName",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "valueType",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "unit",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "台",
+          "rawText": "台",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "example",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "genericModel",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "productModel",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "designFrozen",
+            "row": 5,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.28:42:10",
+      "equipmentType": "gis",
+      "table": "B.28",
+      "fields": {
+        "propertyName": {
+          "value": "额定电压",
+          "rawText": "额定电压",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "propertyName",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "浮点型",
+          "rawText": "浮点型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "valueType",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "kV",
+          "rawText": "kV",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "unit",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "800",
+          "rawText": "800",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "example",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "genericModel",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "productModel",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.28",
+            "pdfPage": 42,
+            "printedPage": 38,
+            "field": "designFrozen",
+            "row": 10,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.32:48:1",
+      "equipmentType": "ac_porcelain_circuit_breaker",
+      "table": "B.32",
+      "fields": {
+        "propertyName": {
+          "value": "设备名称",
+          "rawText": "设备名称",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "propertyName",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "valueType",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "unit",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "瓷柱式断路器",
+          "rawText": "瓷柱式断路器",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "example",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "genericModel",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "productModel",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "designFrozen",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.32:48:2",
+      "equipmentType": "ac_porcelain_circuit_breaker",
+      "table": "B.32",
+      "fields": {
+        "propertyName": {
+          "value": "设备形式",
+          "rawText": "设备形式",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "propertyName",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "valueType",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "unit",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "SF6 瓷柱式",
+          "rawText": "SF6 瓷柱式",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "example",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "genericModel",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "productModel",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "designFrozen",
+            "row": 2,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.32:48:3",
+      "equipmentType": "ac_porcelain_circuit_breaker",
+      "table": "B.32",
+      "fields": {
+        "propertyName": {
+          "value": "设备型号",
+          "rawText": "设备型号",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "propertyName",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "valueType",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "unit",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "example",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "genericModel",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "productModel",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 48,
+            "printedPage": 44,
+            "field": "designFrozen",
+            "row": 3,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.32:49:0",
+      "equipmentType": "ac_porcelain_circuit_breaker",
+      "table": "B.32",
+      "fields": {
+        "propertyName": {
+          "value": "生产厂家",
+          "rawText": "生产厂家",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "propertyName",
+            "row": 0,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "valueType",
+            "row": 0,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "unit",
+            "row": 0,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "example",
+            "row": 0,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "genericModel",
+            "row": 0,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "productModel",
+            "row": 0,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "designFrozen",
+            "row": 0,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.32:49:1",
+      "equipmentType": "ac_porcelain_circuit_breaker",
+      "table": "B.32",
+      "fields": {
+        "propertyName": {
+          "value": "单位",
+          "rawText": "单位",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "propertyName",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "字符型",
+          "rawText": "字符型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "valueType",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "—",
+          "rawText": "—",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "unit",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "台",
+          "rawText": "台",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "example",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "genericModel",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "productModel",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "designFrozen",
+            "row": 1,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.32:49:6",
+      "equipmentType": "ac_porcelain_circuit_breaker",
+      "table": "B.32",
+      "fields": {
+        "propertyName": {
+          "value": "额定电压",
+          "rawText": "额定电压",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "propertyName",
+            "row": 6,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "浮点型",
+          "rawText": "浮点型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "valueType",
+            "row": 6,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "kV",
+          "rawText": "kV",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "unit",
+            "row": 6,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "550",
+          "rawText": "550",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "example",
+            "row": 6,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "genericModel",
+            "row": 6,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "productModel",
+            "row": 6,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "designFrozen",
+            "row": 6,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.32:49:7",
+      "equipmentType": "ac_porcelain_circuit_breaker",
+      "table": "B.32",
+      "fields": {
+        "propertyName": {
+          "value": "额定频率",
+          "rawText": "额定频率",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "propertyName",
+            "row": 7,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "浮点型",
+          "rawText": "浮点型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "valueType",
+            "row": 7,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "Hz",
+          "rawText": "Hz",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "unit",
+            "row": 7,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "50",
+          "rawText": "50",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "example",
+            "row": 7,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "genericModel",
+            "row": 7,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "productModel",
+            "row": 7,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "designFrozen",
+            "row": 7,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    },
+    {
+      "id": "B.32:49:8",
+      "equipmentType": "ac_porcelain_circuit_breaker",
+      "table": "B.32",
+      "fields": {
+        "propertyName": {
+          "value": "额定电流",
+          "rawText": "额定电流",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "propertyName",
+            "row": 8,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "valueType": {
+          "value": "浮点型",
+          "rawText": "浮点型",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "valueType",
+            "row": 8,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "unit": {
+          "value": "A",
+          "rawText": "A",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "unit",
+            "row": 8,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "example": {
+          "value": "4000",
+          "rawText": "4000",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "example",
+            "row": 8,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "genericModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "genericModel",
+            "row": 8,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "productModel": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "productModel",
+            "row": 8,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        },
+        "designFrozen": {
+          "value": "√",
+          "rawText": "√",
+          "evidence": {
+            "standardRef": "Q/GDW 11810.1—2023 表B.32",
+            "pdfPage": 49,
+            "printedPage": 45,
+            "field": "designFrozen",
+            "row": 8,
+            "documentDigest": "3bd3e0717f3e1cef6aca75466d3cf1a419ae675b7a5003f9978bd4128186390a",
+            "verification": "verified",
+            "reviewRecordId": "entity-023-pdf-visual-20261113"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import { getEngineeringRepresentations } from './engineeringRepresentationServic
 import { devRepresentationHint } from '../viewer/devRepresentationIdentity.js';
 import type { SourceRecord } from '../gim/engineering/sourceEvidence.js';
 import { engineeringSourceRecord } from './engineeringViewService.js';
+import { representationEvidenceState } from '../engineering/representations.js';
 
 interface Context {
   generation: number;
@@ -155,6 +156,7 @@ export async function updateEngineeringHighlight(state: AppState, request: Selec
     detail: ambiguousMeshes ? '部分粗表示包含多个整体，范围尚未分离。' : missingBindings ? '部分来源尚未映射到可选表示。' : available ? '按工程整体的来源成员选择可用表示。' : '当前来源尚无可用表示；来源与整体仍可查看。' };
   if(rangeOutlined&&!available)state.selectionGeometry.detail='已标出所选来源的空间范围，构件表示尚在恢复。';
   const note = document.querySelector<HTMLElement>('[data-engineering-geometry-note]'); if (note) note.textContent = state.selectionGeometry.detail;
+  state.selectionGeometry.evidence=representationEvidenceState(scope.devRoots.size||scope.ifc.length?'physical':'unknown',state.selectionGeometry.status==='available'?'available':state.selectionGeometry.status==='partial'?'partial':'not_requested',representations.index.resolveSources([...scope.sourceIds]));
   if (fit && (!automatic || state.canAutoLocate(request))) {
     const box = new graphics.Box3();
     for (const object of selected) if (visible(object)) box.expandByObject(object);
@@ -222,7 +224,9 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   const declaredContexts = groupNode && 'declaredContextIds' in groupNode ? groupNode.declaredContextIds : undefined;
   const { renderEngineeringInspector } = await loadPresentation('engineeringInspector');
   if (!guard.isCurrent()) return true;
-  renderEngineeringInspector({ title: groupNode?.title ?? entity?.name ?? single?.name ?? '待归整体集合', entity, pending, sources: selectedSources,
+  const interpretation=single?snapshot.memberships.find(m=>m.sourceId===single.id)?.interpretation:undefined;
+  renderEngineeringInspector({ title: groupNode?.title || entity?.name || single?.name || '未命名工程对象', entity, pending, sources: selectedSources,
+    evidenceSummary:interpretation?[['设备类型',interpretation.equipmentType?.id??'未确认'],['部件类型',interpretation.componentType?.id??'未确认'],['工程用途',interpretation.purpose?.id??'未确认']]:undefined,
     projectionInferred: groupNode && 'inferred' in groupNode ? groupNode.inferred : entity
       ? state.engineeringNavigation?.composition.rowsByEntity.get(entity.id)?.some(key => state.engineeringNavigation?.composition.nodes.get(key)?.inferred) : false,
     group: groupNode ? { entityCount: groupNode.entityCount, pendingCount: ownerIds.size - groupNode.entityCount,
@@ -242,6 +246,15 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
       if (!guard.isCurrent()) return;
       state.engineeringNavMode = state.engineeringNavMode==='inventory'?'inventory':'composition'; tree.renderEngineeringTree(state);
       void Promise.resolve(selectEngineeringTarget(state, { kind: 'engineering', key: representations.index.ownerBySource.get(single.id)! })).catch(reportBackgroundError);
+    } : single ? async()=>{
+      if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
+      const [{ensureEngineeringEvidence,queryEngineeringEvidence},{requirementContext}]=await Promise.all([import('./engineeringService.js'),import('../standards/requirements.js')]);
+      const entryIds=[...new Set(single.properties.map(p=>p.path).filter((p):p is string=>!!p&&/\.fam$/i.test(p)))];
+      const range={entryIds,kinds:['attributes'] as const},inventory=await ensureEngineeringEvidence(state,range);
+      const page=await queryEngineeringEvidence(state,{range,revision:inventory.revision,limit:200});
+      if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
+      const model=single.properties.find(p=>p.keys?.some(k=>['模型类型','MODELTYPE'].includes(k.toUpperCase())))?.value;
+      return {来源覆盖:page.coverage,原始及解析属性:page.attributes,后续页:page.nextOffset,标准要求上下文:requirementContext({standardVersion:'Q/GDW 11810.1—2023',equipmentType:interpretation?.equipmentType?.id,modelType:model==='通用模型'?'generic':model==='产品模型'?'product':undefined})};
     } : undefined,
     onDocument: path => {
       if (!guard.isCurrent()) return;

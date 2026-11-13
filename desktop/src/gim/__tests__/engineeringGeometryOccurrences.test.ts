@@ -18,13 +18,15 @@ describe('physical occurrence placement independent of tree grain', () => {
     expect(catalog.occurrences.map(o => o.devPath)).toEqual(['models/device.dev', 'models/device.dev']);
     expect(catalog.occurrences.map(o => o.placementMatrix.slice(12, 15))).toEqual([[1100, 2400, 0], [1300, 2400, 0]]);
   });
-  it('deduplicates only actual DEV aliases and retains an independent PARTINDEX root with no physical inclusion evidence', async () => {
+  it('keeps unmatched PARTINDEX evidence without inventing a physical root', async () => {
     const g = await graph({ 'project.cbm': 'OBJECTMODELPOINTER=root.dev\nSUBSYSTEM0=alias.cbm\nSUBSYSTEM1=independent.cbm',
       'root.dev': 'SYMBOLNAME=主变压器\nSUBDEVICE0=box.dev', 'box.dev': 'SYMBOLNAME=端子箱',
       'alias.cbm': 'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=box.dev',
       'independent.cbm': 'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=other.dev', 'other.dev': 'SYMBOLNAME=控制柜' });
-    expect(g.aliases).toHaveLength(1);
-    expect(collectSourceGeometryOccurrences(g).occurrences.map(o => o.devPath)).toEqual(['root.dev', 'other.dev']);
+    expect(g.aliases).toHaveLength(2);
+    expect(g.aliases.find(a=>a.status==='unresolved')?.candidates).toEqual([]);
+    expect(g.cbmOccurrences.some(n=>n.documentPath==='independent.cbm')).toBe(true);
+    expect(collectSourceGeometryOccurrences(g).occurrences.map(o => o.devPath)).toEqual(['root.dev']);
   });
   it('multiplies a rotated ancestor and translated child in source column-major order', async () => {
     const rotation = new THREE.Matrix4().makeRotationZ(Math.PI / 2).toArray().join(',');

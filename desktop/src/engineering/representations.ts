@@ -8,6 +8,17 @@ export interface RepresentationResolution {
   sourceIds: string[];
   ownerIds: string[];
 }
+
+export interface RepresentationEvidenceState {
+  sourceUsage:'physical'|'attributes_only'|'unknown';
+  availability:'not_requested'|'available'|'partial'|'empty'|'unsupported'|'failed';
+  bindingStatus:RepresentationResolution['status'];
+}
+
+/** Observation axes are independent. No standard requirements affect this result. */
+export function representationEvidenceState(sourceUsage:RepresentationEvidenceState['sourceUsage'],availability:RepresentationEvidenceState['availability'],binding:RepresentationResolution):RepresentationEvidenceState{
+  return {sourceUsage,availability,bindingStatus:binding.status};
+}
 export interface DevRepresentationHint { assemblyPath?: string; devPath?: string }
 const canonical = (value: string) => value.replace(/\\/g, '/').toLowerCase();
 function append(map: Map<string, string[]>, key: string, sourceId: string): void {

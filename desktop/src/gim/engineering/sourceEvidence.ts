@@ -3,9 +3,14 @@ import type { EvidenceValue, ObjectEvidence, ObjectNameEvidence } from '../../en
 import { categoryFromName } from '../../engineering/classify.js';
 import { ENGINEERING_CATEGORY_LABELS } from '../../engineering/catalogLabels.js';
 import proxyCategories from './proxyCategories.json';
+import sourceVocabulary from './sourceVocabulary.json';
+const vocabulary:Record<string,string>={...sourceVocabulary.equipment,...sourceVocabulary.equipmentAliases};
+const components:Record<string,string>=sourceVocabulary.components;
 
 /** Raw source records stay in the source domain, separate from engineering identity. */
 export interface SourceProperty {
+  rawUnit?:string;
+  rawValueType?:string;
   keys?: readonly string[];
   value: string;
   path?: string;
@@ -41,7 +46,7 @@ export const isIfcFeatureSourceType = (type: string): boolean => /^(?:IFCDISTRIB
 const empty = new Set(['', '-', '/', '-100', '软件自动生成']);
 function values(record: SourceRecord, labels: readonly string[]): EvidenceValue[] {
   return record.properties.flatMap((p, index) => p.keys?.some(key => labels.some(label=>label.toUpperCase()===key.toUpperCase())) && !empty.has(p.value.trim())
-    ? [{ value: p.value, evidenceId: JSON.stringify([record.id, p.path ?? p.source, p.line ?? index, p.keys]) }] : []);
+    ? [{ value: p.value, evidenceId: JSON.stringify([record.id, p.path ?? p.source, p.line ?? index, p.keys]),context:{section:p.section,container:p.source} }] : []);
 }
 
 /** Format labels and type enums end here; the engineering core does not read them. */
@@ -60,7 +65,7 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     // category fact. Only explicit category/type fields may fall back to a name.
     return allowName?categoryFromName(value):'U-OBJECT';
   };
-  const typeProperties=values(record,['设备类型','设备类别','材料类型','构件类型','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE']);
+  const typeProperties=values(record,['TYPE','设备类型','设备类别','材料类型','构件类型','DEVICETYPE','EQUIPMENTTYPE','MATERIALTYPE']);
   const modelProperties=values(record,['型号','MODEL','MODELSPEC']);
   const propertyCategories=[
     ...typeProperties.flatMap(p=>{const category=categoryValue(p.value,true);return category!=='U-OBJECT'&&category!=='part'?[{...p,value:category}]:[];}),
@@ -78,12 +83,17 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     ? ENGINEERING_CATEGORY_LABELS[[...proxyCategory][0]] : undefined;
   const typed=devCategory??ifcTypes[type];
   for(const p of values(record,['用途','设备用途','PURPOSE'])){
-    const category=categoryValue(p.value,true);
+    const category=/^(?:站用|station_service_transformer)$/i.test(p.value.trim())?'E03':/^(?:主变|main_transformer)$/i.test(p.value.trim())?'E01':categoryValue(p.value,true);
     // A service target such as “主变控制” is not this cabinet's identity.
     if((typed==='E01'||typed==='E-T')&&['E01','E03'].includes(category)||typed==='C-B4'&&['C-B2','C-B3'].includes(category)
       ||['IFCPUMP','IFCVALVE'].includes(type)&&/^(?:给排水设施|排水设施)$/.test(p.value))propertyCategories.push({...p,value:['IFCPUMP','IFCVALVE'].includes(type)?'C-D5':category});
   }
   return {
+    equipmentTypeCandidates:[...(vocabulary[type.toLowerCase()]?[{value:vocabulary[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>vocabulary[p.value.toLowerCase()]?[{...p,value:vocabulary[p.value.toLowerCase()]}]:[])],
+    componentTypeCandidates:[...(components[type.toLowerCase()]?[{value:components[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>components[p.value.toLowerCase()]?[{...p,value:components[p.value.toLowerCase()]}]:[])],
+    ...(vocabulary[type.toLowerCase()]?{equipmentType:{value:vocabulary[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}}:{}),
+    ...(components[type.toLowerCase()]?{componentType:{value:components[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}}:{}),
+    purposes:/^stationtransformer$/i.test(type)?[{value:'station_service_transformer',evidenceId:`${record.id}:source_type:${type}`}]:['E01','E-T','E03'].includes(typed)?values(record,['用途','设备用途','PURPOSE']).flatMap(p=>/^(?:主变|主变压器|main_transformer)$/i.test(p.value.trim())?[{...p,value:'main_transformer'}]:/^(?:站用|站用变压器|station_service_transformer)$/i.test(p.value.trim())?[{...p,value:'station_service_transformer'}]:[]):[],
     sourceId: record.id, name: proxyName || record.name, assemblyParentId: record.parent || undefined,
     names: record.nameEvidence,
     typeCategory: /neutralpointequipment/i.test(type) ? 'neutral_set' : devCategory==='E01'&&type!=='E01'?'E-T':devCategory ?? ifcTypes[type.toUpperCase()],
