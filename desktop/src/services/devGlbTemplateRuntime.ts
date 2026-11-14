@@ -9,7 +9,7 @@
  */
 
 import * as THREE from 'three';
-import { invalidGeometryExtent, copyVerifiedStlSourceEnvelope } from '../viewer/geometryBounds.js';
+import {invalidGeometryBounds} from '../viewer/geometryBounds.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 
 export interface DevGlbParsedAsset {
@@ -95,16 +95,6 @@ function finiteMatrix(matrix: THREE.Matrix4): boolean {
   return matrix.elements.every((value) => Number.isFinite(value));
 }
 
-function finiteAttribute(attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined): boolean {
-  if (!attribute) return true;
-  for (let i = 0; i < attribute.count; i++) {
-    for (let component = 0; component < attribute.itemSize; component++) {
-      if (!Number.isFinite(attribute.getComponent(i, component))) return false;
-    }
-  }
-  return true;
-}
-
 function collectMaterials(root: THREE.Object3D): Set<THREE.Material> {
   const materials = new Set<THREE.Material>();
   root.traverse((object) => {
@@ -160,78 +150,46 @@ function isDefaultObjectHook(hook: unknown, defaultHook: unknown): boolean {
  * Returning a reason instead of throwing lets the caller isolate one DEV and
  * use the existing legacy per-placement loader for that DEV only.
  */
-export function validateDevGlbTemplate(
-  asset: DevGlbParsedAsset,
-): { shareable: true } | { shareable: false; reason: string } {
-  if (!asset.scene) return { shareable: false, reason: 'missing-scene' };
-  if (asset.animations && asset.animations.length > 0) {
-    return { shareable: false, reason: 'animation-dependency' };
-  }
-
-  const checkedPositions=new Set<THREE.BufferAttribute|THREE.InterleavedBufferAttribute>();
-  let renderable = false;
-  let reason: string | null = null;
-  asset.scene.updateMatrixWorld(true);
-  asset.scene.traverse((object) => {
-    if (reason) return;
-    if (!finiteMatrix(object.matrix) || !finiteMatrix(object.matrixWorld)) {
-      reason = 'non-finite-matrix';
-      return;
-    }
-    if (!isDefaultObjectHook(object.onBeforeRender, THREE.Object3D.prototype.onBeforeRender)
-      || !isDefaultObjectHook(object.onAfterRender, THREE.Object3D.prototype.onAfterRender)) {
-      reason = 'mutable-render-hook';
-      return;
-    }
-    const mesh = object as THREE.Mesh & {
-      isSkinnedMesh?: boolean;
-      isInstancedMesh?: boolean;
-    };
-    if (!mesh.isMesh) return;
-    if (mesh.isSkinnedMesh || mesh.isInstancedMesh) {
-      reason = mesh.isSkinnedMesh ? 'skinned-mesh' : 'instanced-mesh';
-      return;
-    }
-    if (mesh.morphTargetInfluences || mesh.morphTargetDictionary) {
-      reason = 'morph-target';
-      return;
-    }
-    const geometry = mesh.geometry;
-    if (!geometry) {
-      reason = 'missing-geometry';
-      return;
-    }
-    if (Object.keys(geometry.morphAttributes).length > 0) {
-      reason = 'morph-geometry';
-      return;
-    }
-    if ((geometry.userData as Record<string, unknown> | undefined)?.__gimMutable === true) {
-      reason = 'mutable-geometry-state';
-      return;
-    }
-    const materialValue = mesh.material;
-    const materials = Array.isArray(materialValue) ? materialValue : materialValue ? [materialValue] : [];
-    for (const material of materials) {
-      if ((material.userData as Record<string, unknown> | undefined)?.__gimMutable === true
-        || material.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile
-        || material.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey) {
-        reason = 'mutable-material-state';
-        return;
-      }
-    }
-    const position = geometry.getAttribute('position');
-    if (!position || position.count === 0) return;
-    if (!checkedPositions.has(position) && !finiteAttribute(position)) {
-      reason = 'non-finite-geometry';
-      return;
-    }
-    checkedPositions.add(position);
-    renderable = true;
+interface TemplateInspection {
+  bounds:THREE.Box3;geometries:Set<THREE.BufferGeometry>;materials:Set<THREE.Material>;textures:Set<THREE.Texture>;
+}
+const preparedInspections=new WeakMap<THREE.Group,TemplateInspection>();
+/** Sharing eligibility and display bounds use one node traversal. Position
+ * buffers are not rescanned to audit already decoded/cached GLB content. */
+export function validateDevGlbTemplate(asset:DevGlbParsedAsset):{shareable:true}|{shareable:false;reason:string}{
+  if(!asset.scene)return {shareable:false,reason:'missing-scene'};
+  const inspection:TemplateInspection={bounds:new THREE.Box3(),geometries:new Set(),materials:new Set(),textures:new Set()};
+  let reason=asset.animations?.length?'animation-dependency':'',renderable=false;
+  const box=new THREE.Box3();asset.scene.updateMatrixWorld(true);
+  asset.scene.traverse(object=>{
+    object.matrixAutoUpdate=false;
+    const mesh=object as THREE.Mesh;
+    if(mesh.geometry)inspection.geometries.add(mesh.geometry);
+    const materials=Array.isArray(mesh.material)?mesh.material:mesh.material?[mesh.material]:[];
+    materials.forEach(material=>inspection.materials.add(material));
+    if(reason)return;
+    if(!finiteMatrix(object.matrix)||!finiteMatrix(object.matrixWorld)){reason='non-finite-matrix';return;}
+    if(!isDefaultObjectHook(object.onBeforeRender,THREE.Object3D.prototype.onBeforeRender)||!isDefaultObjectHook(object.onAfterRender,THREE.Object3D.prototype.onAfterRender)){reason='mutable-render-hook';return;}
+    if(!mesh.isMesh)return;
+    if((mesh as THREE.SkinnedMesh).isSkinnedMesh||(mesh as THREE.InstancedMesh).isInstancedMesh){reason=(mesh as THREE.SkinnedMesh).isSkinnedMesh?'skinned-mesh':'instanced-mesh';return;}
+    if(mesh.morphTargetInfluences||mesh.morphTargetDictionary){reason='morph-target';return;}
+    const geometry=mesh.geometry;if(!geometry){reason='missing-geometry';return;}
+    if(Object.keys(geometry.morphAttributes).length){reason='morph-geometry';return;}
+    if(geometry.userData?.__gimMutable===true){reason='mutable-geometry-state';return;}
+    for(const material of materials)if(material.userData?.__gimMutable===true||material.onBeforeCompile!==THREE.Material.prototype.onBeforeCompile||material.customProgramCacheKey!==THREE.Material.prototype.customProgramCacheKey){reason='mutable-material-state';return;}
+    const position=geometry.getAttribute('position');if(!position?.count)return;
+    // GLTFLoader normally supplies accessor bounds. Compute them only when absent.
+    geometry.boundingBox??=new THREE.Box3();
+    if(geometry.boundingBox.isEmpty())geometry.computeBoundingBox();
+    box.copy(geometry.boundingBox!).applyMatrix4(mesh.matrixWorld);
+    if(![...box.min.toArray(),...box.max.toArray()].every(Number.isFinite)){reason='non-finite-bounds';return;}
+    inspection.bounds.union(box);renderable=true;
   });
-
-  if (reason) return { shareable: false, reason };
-  if (!renderable) return { shareable: false, reason: 'empty-scene' };
-  return { shareable: true };
+  inspection.textures=collectTextures(inspection.materials);preparedInspections.set(asset.scene,inspection);
+  if(reason)return{shareable:false,reason};
+  if(!renderable)return{shareable:false,reason:'empty-scene'};
+  if(invalidGeometryBounds(inspection.bounds))return{shareable:false,reason:'invalid-bounds'};
+  return{shareable:true};
 }
 
 /** Convert only the placement translation from source millimetres to metres.
@@ -265,39 +223,27 @@ export function placeSourceGeometry(source: THREE.Group, options: DevGlbPlacemen
   return wrapper;
 }
 
-function freezeHierarchy(root: THREE.Object3D): void {
-  root.traverse((object) => {
-    object.matrixAutoUpdate = false;
-  });
-}
-
 export class DevGlbTemplate {
   private disposed = false;
   readonly geometryRefs: ReadonlySet<THREE.BufferGeometry>;
   readonly materialRefs: ReadonlySet<THREE.Material>;
   readonly textureRefs: ReadonlySet<THREE.Texture>;
+  readonly bounds:THREE.Box3;
 
   constructor(
     readonly devPath: string,
     readonly scene: THREE.Group,
     readonly session?: ProjectLoadSession,
   ) {
-    scene.updateMatrixWorld(true);
-    freezeHierarchy(scene);
-    const geometries = new Set<THREE.BufferGeometry>();
-    scene.traverse((object) => {
-      const mesh = object as THREE.Mesh;
-      if (mesh.geometry) geometries.add(mesh.geometry);
-    });
-    this.geometryRefs = geometries;
-    this.materialRefs = collectMaterials(scene);
-    this.textureRefs = collectTextures(this.materialRefs);
+    if(!preparedInspections.has(scene))validateDevGlbTemplate({scene});
+    const inspection=preparedInspections.get(scene)!;preparedInspections.delete(scene);
+    this.geometryRefs=inspection.geometries;this.materialRefs=inspection.materials;this.textureRefs=inspection.textures;this.bounds=inspection.bounds;
+
   }
 
   createPlacement(options: DevGlbPlacementOptions = {}): THREE.Group {
     if (this.disposed) throw new Error(`DEV template 已释放: ${this.devPath}`);
     const clone=this.scene.clone(true) as THREE.Group;
-    copyVerifiedStlSourceEnvelope(this.scene,clone);
     const placed = placeSourceGeometry(clone, options);
     placed.userData.devPath = this.devPath;
     return placed;
@@ -313,7 +259,6 @@ export class DevGlbTemplate {
 }
 
 export interface DevGlbTemplatePoolOptions {
-  verifySourceEnvelope?: (devPath:string,scene:THREE.Group)=>Promise<void>;
   session?: ProjectLoadSession;
   isCurrent?: () => boolean;
   parse: (devPath: string, bytes: Uint8Array) => Promise<DevGlbParsedAsset | null>;
@@ -370,12 +315,10 @@ export class DevGlbTemplatePool {
         disposeObjectResources(asset.scene);
         return null;
       }
-      try{await this.options.verifySourceEnvelope?.(devPath,asset.scene);}
-      catch{disposeObjectResources(asset.scene);return null;}
-      if(this.disposed||!this.isCurrent()){disposeObjectResources(asset.scene);return null;}
       const validation = validateDevGlbTemplate(asset);
       if (!validation.shareable) {
         disposeObjectResources(asset.scene);
+        if(validation.reason==='invalid-bounds')return null;
         const exclusive: DevGlbTemplatePreparation = {
           kind: 'exclusive',
           fallbackReason: validation.reason,
@@ -385,13 +328,6 @@ export class DevGlbTemplatePool {
         this.metricsState.fallbackDevPaths.push(normalizeDevPath(devPath));
         this.metricsState.fallbackReasons[normalizeDevPath(devPath)] = validation.reason;
         return exclusive;
-      }
-      // Older caches may contain finite but astronomically large vertices.
-      // They must use the existing failed-template/raw-repair path, rather
-      // than a legacy placement of a known invalid asset.
-      if (invalidGeometryExtent(asset.scene)) {
-        disposeObjectResources(asset.scene);
-        return null;
       }
       const template = new DevGlbTemplate(normalizeDevPath(devPath), asset.scene, this.options.session);
       const shared: DevGlbTemplatePreparation = { kind: 'shared', template };

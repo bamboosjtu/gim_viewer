@@ -1,7 +1,6 @@
 import {engineeringSourceRecords} from '../gim/engineering/sourceGraph.js';
 import { collectEngineeringSources, normalizeEngineeringSources, type EngineeringSources } from '../gim/engineering/buildSources.js';
 import { projectEngineeringNavigation } from '../gim/engineering/navigation.js';
-import { collectSourceGeometryOccurrences } from '../gim/engineering/geometryOccurrences.js';
 import type { EngineeringSourceGraph } from '../gim/engineering/sourceGraph.js';
 import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../gim/ifcSpatialParser.js';
 import type { EngineeringSnapshot } from '../engineering/types.js';
@@ -23,5 +22,5 @@ export function assembleStoredEngineeringView(scope:string,sources:EngineeringSo
   }
   const navigation=projectEngineeringNavigation(sources,snapshot);
   Object.assign(stageErrors,navigation.projectionErrors);
-  return {sources,snapshot,navigation,geometryOccurrences:collectSourceGeometryOccurrences(graph),stageErrors};
+  return {sources,snapshot,navigation,stageErrors};
 }

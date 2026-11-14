@@ -11,6 +11,7 @@
     "check:version": "node scripts/check-desktop-version.mjs",
     "check:types": "node scripts/with-workspace-temp.mjs node_modules/typescript/bin/tsc",
     "check:engineering-boundaries": "node scripts/check-engineering-boundaries.mjs",
+    "generate:engineering-catalog": "python scripts/generate-engineering-catalog.py && node scripts/check-engineering-catalog.mjs --write",
     "check:engineering-catalog": "node scripts/check-engineering-catalog.mjs",
     "test:version": "node scripts/with-workspace-temp.mjs --test scripts/check-desktop-version.test.mjs",
     "prebuild": "node scripts/check-desktop-version.mjs && node scripts/copy-web-ifc-wasm.mjs",

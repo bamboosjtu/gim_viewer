@@ -23,6 +23,16 @@ const tokens=value=>(Array.isArray(value)?value:[value]).filter(Boolean).flatMap
 const number=value=>Number.isFinite(value)?value.toFixed(1):null;
 export function diagnosticLines(row,workers=[]){
   const lines=[],seen=new Set(),add=text=>{if(!seen.has(text)){seen.add(text);lines.push(text);}};
+  const failed=row.failedGeometry??row.partialCounts?.failedOccurrences;
+  const failedSources=row.failedSourceCount??row.partialCounts?.failedSourceCount;
+  if(failed>0)add(`几何失败 ${failed} 个实例`+(failedSources>0?`，涉及 ${failedSources} 个来源`:''));
+  else if(failedSources>0)add(`几何失败来源 ${failedSources} 个；失败实例数未记录`);
+  if(row.devContentComplete===false)add('DEV L0 内容校验覆盖不完整');
+  if(row.coverageComplete===false)add('来源处理覆盖不完整');
+  if(row.measurementDetailDropped>0)add(`测量事件容量丢弃 ${row.measurementDetailDropped} 条，详细时间线不完整`);
+  else if(row.measurementDetailStatus==='aggregate-only')add('测量只保留完整聚合，详细事件时间线不完整');
+  else if(row.measurementDetailStatus==='incomplete')add('测量明细不完整');
+  if(row.attempts>1)add(`启动重试 ${row.attempts-1} 次`);
   const matching=workers.filter(worker=>worker.runId===row.runId),byId=new Map(matching.map(worker=>[worker.workerId,worker]));
   for(const token of new Set(['error','cacheFailureCode','startupFailures','failedGeometryReasons','memoryIncompleteItems',
     'measurementIncompleteItems','measurementLifecycleIssues','coverageIncompleteReasons','finalEvidenceIssue'].flatMap(key=>tokens(row[key])))){

@@ -4,9 +4,8 @@ import { serializeDevToGlb, serializeDevToGlbDetailed, parseDevGlbAsset, analyze
 import type { DiscoveredGeometries, DiscoveredModGeometry } from '../modGeometryDiscovery.js';
 import { collectDeviceGroups } from '../nodeInteractionService.js';
 import { AppState } from '../../app/state.js';
-import { invalidGeometryExtent, invalidGeometryBounds, stlSourceEnvelope, STL_SOURCE_ENVELOPE_KEY } from '../../viewer/geometryBounds.js';
+import { invalidGeometryExtent, invalidGeometryBounds } from '../../viewer/geometryBounds.js';
 import { DevGlbTemplate } from '../devGlbTemplateRuntime.js';
-import { verifyDevGlbSourceEnvelope } from '../devGlbSourceEvidence.js';
 
 function file(text: string, name: string): File {
   return new File([text], name, { type: 'text/plain' });
@@ -58,49 +57,22 @@ it('shares repeated STL buffers while retaining occurrence identity, colors and 
   new DevGlbTemplate('DEV/device.dev',asset!.scene).dispose();
 });
 
-it('admits a source-verified wide binary STL across GLB restore and placement, while rejecting altered or imprecise bounds', async () => {
-  const files = new Map([
+it('loads a valid wide STL template without generating or rereading source-byte proofs',async()=>{
+  const source=new File([triangleStl([[-100000,0,0],[600000,0,0],[-100000,400000,0]])],'site.stl');
+  const read=vi.spyOn(source,'arrayBuffer');
+  const files=new Map([
     ['DEV/device.dev',file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=body.phm','device.dev')],
-    ['PHM/body.phm',file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=site.stl','body.phm')],
-    ['MOD/site.stl',new File([triangleStl([[-100000,0,0],[600000,0,0],[-100000,400000,0]])],'site.stl')],
+    ['PHM/body.phm',file('SOLIDMODELS.NUM=1\nSOLIDMODEL0=site.stl','body.phm')],['MOD/site.stl',source],
   ]);
-  const result=await serializeDevToGlbDetailed('DEV/device.dev',files);
-  expect(result.status).toBe('complete');
-  const asset=await parseDevGlbAsset('DEV/device.dev',result.bytes!);
-  expect(invalidGeometryExtent(asset!.scene)).toMatch(/extent-exceeds/);
-  const sourceRead=vi.spyOn(files.get('MOD/site.stl')!,'arrayBuffer'),sourceKeys=vi.spyOn(files,'keys');
-  await verifyDevGlbSourceEnvelope(asset!.scene,'DEV/device.dev',files);
-  expect(sourceRead).toHaveBeenCalledOnce();const keyScans=sourceKeys.mock.calls.length;
-  expect(invalidGeometryExtent(asset!.scene)).toBeNull();
-  const envelope=stlSourceEnvelope(asset!.scene)!;
-  expect(envelope.getSize(new THREE.Vector3()).x).toBe(700);
+  const result=await serializeDevToGlbDetailed('DEV/device.dev',files);expect(result.status).toBe('complete');expect(read).toHaveBeenCalledOnce();
+  read.mockRejectedValue(Error('source unavailable after compile'));
+  const asset=await parseDevGlbAsset('DEV/device.dev',result.bytes!);expect(invalidGeometryExtent(asset!.scene)).toBeNull();
   const template=new DevGlbTemplate('DEV/device.dev',asset!.scene);
   const placed=template.createPlacement({placementMatrix:new THREE.Matrix4().makeTranslation(1000,2000,0).toArray()});
-  const worldBounds=new THREE.Box3().setFromObject(placed);
-  expect(invalidGeometryExtent(placed)).toBeNull();
-  expect(invalidGeometryBounds(worldBounds,envelope.clone().applyMatrix4(placed.matrix))).toBeNull();
-  const enormous=new THREE.Matrix4().makeScale(1e9,1e9,1e9);
-  expect(invalidGeometryBounds(worldBounds.clone().applyMatrix4(enormous),envelope.clone().applyMatrix4(enormous))).toMatch(/extent-exceeds/);
-  let owner=asset!.scene; while (!owner.userData[STL_SOURCE_ENVELOPE_KEY]) owner=owner.children[0] as THREE.Group;
-  const proof=owner.userData[STL_SOURCE_ENVELOPE_KEY];
-  proof.bounds[3]+=1; expect(invalidGeometryExtent(asset!.scene)).toMatch(/extent-exceeds/);
-  proof.bounds[3]-=1; proof.triangles++; expect(invalidGeometryExtent(asset!.scene)).toMatch(/extent-exceeds/);
-  delete owner.userData[STL_SOURCE_ENVELOPE_KEY]; expect(invalidGeometryExtent(asset!.scene)).toMatch(/extent-exceeds/);
+  const worldBounds=new THREE.Box3().setFromObject(placed);expect(worldBounds.getSize(new THREE.Vector3()).x).toBe(700);
+  expect(invalidGeometryBounds(worldBounds)).toBeNull();expect(read).toHaveBeenCalledOnce();
+  expect(invalidGeometryBounds(worldBounds.clone().applyMatrix4(new THREE.Matrix4().makeScale(1e9,1e9,1e9)))).toMatch(/precision/);
   template.dispose();
-  const altered=await parseDevGlbAsset('DEV/device.dev',result.bytes!);
-  let mesh:THREE.Mesh|undefined;altered!.scene.traverse(node=>{if((node as THREE.Mesh).isMesh)mesh=node as THREE.Mesh;});
-  const before=new THREE.Box3().setFromObject(altered!.scene);
-  mesh!.geometry.getAttribute('position').setX(0,-90);mesh!.geometry.computeBoundingBox();
-  expect(new THREE.Box3().setFromObject(altered!.scene).equals(before)).toBe(true);
-  await expect(verifyDevGlbSourceEnvelope(altered!.scene,'DEV/device.dev',files)).rejects.toThrow('source evidence mismatch');
-  expect(invalidGeometryExtent(altered!.scene)).toMatch(/extent-exceeds/);
-  const wrongSha=await parseDevGlbAsset('DEV/device.dev',result.bytes!);
-  let proofOwner=wrongSha!.scene;while(!proofOwner.userData[STL_SOURCE_ENVELOPE_KEY])proofOwner=proofOwner.children[0] as THREE.Group;
-  proofOwner.userData[STL_SOURCE_ENVELOPE_KEY].sha256='0'.repeat(64);
-  await expect(verifyDevGlbSourceEnvelope(wrongSha!.scene,'DEV/device.dev',files)).rejects.toThrow('source evidence mismatch');
-  const cancelled=await parseDevGlbAsset('DEV/device.dev',result.bytes!);
-  await expect(verifyDevGlbSourceEnvelope(cancelled!.scene,'DEV/device.dev',files,()=>false)).rejects.toMatchObject({name:'AbortError'});
-  expect(sourceKeys).toHaveBeenCalledTimes(keyScans);
   files.set('MOD/site.stl',new File([triangleStl([[0,0,0],[1e15,0,0],[0,1e15,0]])],'site.stl'));
   await expect(serializeDevToGlbDetailed('DEV/device.dev',files)).rejects.toBeInstanceOf(InvalidDevGeometryError);
 });

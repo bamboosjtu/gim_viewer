@@ -393,7 +393,7 @@ globalThis.__GIM_BENCHMARK_COLD_WARM__ = 'cold';
 ```text
 First usable  = productMoments.interactive.atMs
 Current view  = 严格口径用 deviceLod.currentViewSettled（状态栏“当前视图已完成”）；
-                productMoments.devCurrentViewReady 只表示视觉 ready，不能替代严格 SLO
+                productMoments.devCurrentViewReady 只表示视觉 ready，不能替代严格测量口径
 基础表示 = productMoments.devBaseRepresentationsSettled.atMs
            同时核对 deviceLod.baseRepresentationsSettled 与各终态数量
            IFC、连接线和用户主动精化分别记录，devAllStationReady 不作启动完成条件
@@ -426,7 +426,7 @@ Current view  = 严格口径用 deviceLod.currentViewSettled（状态栏“当�
 线路样本同样执行冷/暖。因为没有 DEV L0/L1/L2：
 
 - First usable、Current view、基础表示完成 通常重合；
-- 地图瓦片加载不属于启动 SLO，不要用“底图 tiles 加载完”作为 基础表示完成；
+- 地图瓦片加载不属于启动完成口径，不要用“底图 tiles 加载完”作为 基础表示完成；
 - 若 OSM/CARTO/Esri 不可达，记录底图状态，但不要把底图失败算作工程启动失败；
 - 地图数据、塔位、导线段、跨越物是否出现，属于线路功能验收，不是本指南的三个测量里程碑。
 
@@ -479,7 +479,7 @@ commit：<sha>
 - `catalogReady` 和 `pending` 是否为 0；
 - 是否达到有效暖启动前提；
 - 特殊样本：`substation03` 的 452 MB IFC、`substation02` 的 1265 unique DEV/3326 实例；
-- 底图/网络异常只在线路工程备注，不影响工程 SLO。
+- 底图/网络异常只在线路工程备注，不影响工程完成口径。
 
 不要只给一张“平均启动时间”汇总表；那会隐藏长尾和失败。
 
@@ -494,7 +494,7 @@ commit：<sha>
 7. **并行跑构建/测试/其他基准**：CPU、磁盘和 WebView2 争用会污染结果。
 8. **只测一次**：单次结果不能代表稳定性能，尤其 IFC 转换和磁盘缓存。
 9. **忽略 GPU/WebView2 差异**：同一 exe 在不同机器/运行时上的结果不能直接合并。
-10. **把底图失败算工程失败**：线路地图瓦片是外部网络；工程启动 SLO 不依赖它。
+10. **把底图失败算工程失败**：线路地图瓦片是外部网络；工程启动完成口径不依赖它。
 
 ## Agent 执行清单
 

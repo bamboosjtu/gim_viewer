@@ -72,7 +72,7 @@ function makeDeps(opts: { serializeNullFor?: string[] } = {}, rec?: DepsRecorder
 function makeState(opts: { projectId?: number } = {}): AppState {
   const state = new AppState();
   state.currentFiles = new Map();
-  state.engineeringGeometryCatalog = makeCatalog();
+  state.sourceGeometryCatalog = makeCatalog();
   state.currentProjectId = opts.projectId ?? null;
   state.currentSourceSha256 = 'sha-test';
   state.geometryLoadToken = 1; // 与测试传入的 token 对齐（真实流程由调用方 ++ 后传入）
@@ -85,7 +85,7 @@ describe('runProgressiveDevGlbPipeline', () => {
     const allPaths=['normal','empty','unsupported','invalid','transient'];
     for (const failWrite of [true,false]) {
       const state=makeState({projectId:7});
-      state.engineeringGeometryCatalog!.occurrences=allPaths.map((p,i)=>makeSeed(`physical:${p}`,`${p}.dev`,i*1000));
+      state.sourceGeometryCatalog!.occurrences=allPaths.map((p,i)=>makeSeed(`physical:${p}`,`${p}.dev`,i*1000));
       const rec:DepsRecorder={serializeCalls:[],writeCalls:[],versionWrites:0,loadCalls:[],manifestEntries:[]};
       const deps=makeDeps({},rec);
       deps.serializeDevToGlbDetailed=async path=>{
@@ -424,7 +424,7 @@ describe('runProgressiveDevGlbPipeline', () => {
     const catalog = makeCatalog();
     catalog.occurrences[0].devPath = 'dev/A.DEV';
     catalog.occurrences[1].devPath = 'DEV/a.dev';
-    state.engineeringGeometryCatalog = catalog;
+    state.sourceGeometryCatalog = catalog;
     const result = await runProgressiveDevGlbPipeline(state, new THREE.Scene(), vi.fn(), { token: 1 }, makeDeps({}, rec));
 
     expect(result.failedDevs).toEqual([]);

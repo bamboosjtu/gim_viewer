@@ -1,23 +1,20 @@
-import {readFileSync,writeFileSync} from 'node:fs';
+import {readFileSync,writeFileSync,existsSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
-const catalog=JSON.parse(readFileSync(resolve(repo,'desktop/src/engineering/catalog.json'),'utf8'));
-const labels=Object.fromEntries(catalog.categories.map(c=>[c.code,c.label]));
-if(Object.keys(labels).length!==catalog.categories.length||catalog.categories.some(c=>!c.label||!['equipment','materials','components','unknown'].includes(c.group)))throw Error('Catalog code/label/group mismatch');
-const standard=JSON.parse(readFileSync(resolve(repo,'desktop/src/engineering/standardCatalog.json'),'utf8'));
-if(new Set(standard.items.map(i=>i.id)).size!==standard.items.length||standard.items.some(i=>!labels[i.category]||i.evidence.verification!=='verified'))throw Error('Standard catalog mapping/evidence mismatch');
-const sections=[['设备','equipment'],['装置性材料','materials'],['构件','components']];
-const doc='# 机器目录索引\n\n本文件由 `desktop/scripts/check-engineering-catalog.mjs --write` 从共享目录生成。编码为项目映射，版次出处与实例身份分开。\n\n'+sections.map(([title,group])=>`## ${title}\n\n| 编码 | 名称 | 默认粒度 |\n|---|---|---|\n`+catalog.categories.filter(c=>c.group===group).map(c=>`| ${c.code} | ${c.label} | ${c.grain} |`).join('\n')).join('\n\n')+'\n';
-const docPath=resolve(repo,'docs/engineering/catalogs/catalog-index.md');
-if(process.argv.includes('--write'))writeFileSync(docPath,doc);
-else if(readFileSync(docPath,'utf8').replace(/\r\n/g,'\n')!==doc)throw Error('Catalog documentation is stale; run check:engineering-catalog -- --write');
-if(process.argv.includes('--python')){
- const py=spawnSync('python',['-c',"import json,sys;sys.path.insert(0,'tools/gim_element');import entity_std as e;print(json.dumps([*e.DEV_CODE.values(),*e.MAT_CODE.values(),*e.CON_CODE.values()],ensure_ascii=True))"],{cwd:repo,encoding:'utf8',windowsHide:true});
- if(py.status!==0)throw Error(py.stderr||String(py.error));
- const pairs=JSON.parse(py.stdout).filter(([code])=>code!=='U-OBJECT');
- for(const [code,label]of pairs)if(labels[code]!==label)throw Error(`Python catalog mismatch: ${code}`);
- for(const entry of catalog.categories.filter(c=>!c.code.includes('.')&&c.code!=='U-OBJECT'))if(!pairs.some(([code])=>code===entry.code))throw Error(`Python catalog lacks ${entry.code}`);
-}
-console.log('Catalog codes, labels and generated documentation agree.');
+const load=path=>JSON.parse(readFileSync(resolve(repo,path),'utf8'));
+const catalog=load('desktop/src/engineering/catalog.json'),standard=load('desktop/src/engineering/standardCatalog.json');
+const codes=new Set(catalog.semanticCodes.map(c=>c.code));
+if(codes.size!==catalog.semanticCodes.length||new Set(standard.items.map(i=>i.id)).size!==standard.items.length||standard.items.some(i=>!codes.has(i.category)))throw Error('Catalog IDs / semantic code mapping mismatch');
+for(const file of ['catalog.json','standardCatalog.json'])if(JSON.stringify(load('desktop/src/engineering/'+file))!==JSON.stringify(load('tools/gim_element/'+file)))throw Error('Standalone catalog copy differs: '+file);
+if(JSON.stringify(load('desktop/src/gim/engineering/sourceVocabulary.json'))!==JSON.stringify(load('tools/gim_element/sourceVocabulary.json')))throw Error('Standalone vocabulary copy differs');
+const source=resolve(repo,catalog.source.path);
+if(existsSync(source)&&createHash('sha256').update(readFileSync(source)).digest('hex')!==catalog.source.sha256)throw Error('XLSX changed; run generate:engineering-catalog');
+const path='docs/engineering/catalogs/catalog-index.md';
+const doc='# 工作簿目录索引\n\n唯一维护源：[`变电三维设计建模规范_索引表类.xlsx`](../../../'+catalog.source.path+')。本文件和运行时数据由生成命令导出，不单独维护目录。新增项在工作簿标黄。内部识别/用途码不作为目录层级。\n\n'+['equipment','material','construction'].map(kind=>{
+ const title={equipment:'设备',material:'材料',construction:'构件'}[kind];
+ return '## '+title+'\n\n| 类别 | 名称 | 英文名称 | 单元格 | 补充项 |\n|---|---|---|---|---|\n'+standard.items.filter(i=>i.kind===kind).map(i=>`| ${i.catalogCategory} | ${i.label} | ${i.term} | ${i.evidence.sheet}!${i.evidence.cellRange} | ${i.supplemental?'是':''} |`).join('\n');
+}).join('\n\n')+'\n\n## 设备部件\n\n| 名称 | 英文名称 | 单元格 |\n|---|---|---|\n'+catalog.components.map(i=>`| ${i.label} | ${i.term} | ${i.evidence.sheet}!${i.evidence.cellRange} |`).join('\n')+'\n';
+if(process.argv.includes('--write'))writeFileSync(resolve(repo,path),doc);else if(readFileSync(resolve(repo,path),'utf8').replace(/\r\n/g,'\n')!==doc)throw Error('Generated catalog documentation is stale');
+console.log('Generated catalogs, semantic mappings, standalone copies and documentation agree.'+(existsSync(source)?' Workbook SHA checked.':' Workbook absent: source freshness was not checked.'));

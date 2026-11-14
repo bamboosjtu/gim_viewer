@@ -262,7 +262,7 @@
     }
   },
   {
-    "name": "unverified_keyword_is_candidate",
+    "name": "verified_keyword_is_confirmed",
     "records": [
       {
         "id": "a",

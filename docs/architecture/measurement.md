@@ -161,6 +161,6 @@ DEV 分部结果到 Merge 的前置引用由实际 child 任务完成及 Merge �
 ## 相关文档
 
 - [Benchmark CLI](../benchmark.md)：命令、报告、Trace/Profile 用法与批准流程。
-- [性能测试指南](../performance-guide.md)：SLO、冷暖步骤与手工验收路线。
+- [性能测试指南](../performance-guide.md)：性能口径、冷暖步骤与手工验收路线。
 - [验证](../validation.md)：证据边界、门禁与本地性能复核规则。
 - [开发指南](../development.md)：构建、测试与工作区约定。

@@ -1,7 +1,7 @@
 import {engineeringSourceRecords} from '../gim/engineering/sourceGraph.js';
 import { ENGINEERING_NAVIGATION_VERSION, type EngineeringNavigationData } from '../gim/engineering/navigation.js';
 import { ENGINEERING_COMPOSITION_VERSION } from '../engineering/composition.js';
-import { INVENTORY_TEMPLATE_VERSION } from '../engineering/inventoryTemplate.js';
+import { INVENTORY_TEMPLATE_VERSION,INVENTORY_TEMPLATE } from '../engineering/inventoryTemplate.js';
 import { SOURCE_TREE_TEMPLATE_VERSION } from '../gim/engineering/sourceProjection.js';
 import type { EngineeringSnapshot } from '../engineering/types.js';
 import type { EngineeringSources } from '../gim/engineering/buildSources.js';
@@ -101,7 +101,7 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
   valid(view.inventory?.nodes instanceof Map && view.inventory.rowsByEntity instanceof Map && view.inventory.rowsBySource instanceof Map,'inventory');
   valid(view.inventory!.rowsByEntity.size===entities.size&&[...entities].every(id=>view.inventory!.rowsByEntity.has(id)),'inventory entity coverage');
   const inventory=view.inventory!;tree(inventory.nodes,inventory.rootKey,true,true);
-  valid(inventory.nodes.get(inventory.rootKey)!.children.map(key=>inventory.nodes.get(key)?.title).join('|')==='设备|装置性材料|构件|其他','inventory root groups');
+  valid(inventory.nodes.get(inventory.rootKey)!.children.map(key=>inventory.nodes.get(key)?.title).join('|')===INVENTORY_TEMPLATE.groups.join('|'),'inventory root groups');
   for(const node of inventory.nodes.values())if(node.attachmentCount!==undefined)valid(Number.isSafeInteger(node.attachmentCount)&&node.attachmentCount>=0,'inventory attachment count');
   for(const [id,rows]of inventory.rowsByEntity)valid(entities.has(id)&&strings(rows)&&rows.length===1&&rows.every(key=>inventory.nodes.get(key)?.targetId===id),'inventory entity rows');
   for(const entity of snapshot.entities){const node=inventory.nodes.get(inventory.rowsByEntity.get(entity.id)![0])!;

@@ -10,7 +10,6 @@ import { ByteWorkBudget } from '../utils/byteWorkBudget.js';
 import { perfCurrentSession, perfMeasureTaskPhase, perfRecordTaskPhase, type PerfTaskIdentity } from '../utils/perfTimings.js';
 import { WorkQueue } from '../utils/workQueue.js';
 import { type DeviceLod } from '../viewer/devLodPolicy.js';
-import { invalidGeometryExtent } from '../viewer/geometryBounds.js';
 import { type DevGeometryPreprocessor } from './devGeometryWorkerClient.js';
 import { DevGlbTemplate, validateDevGlbTemplate } from './devGlbTemplateRuntime.js';
 import type { DevLodDiagnostics } from './devLodDiagnostics.js';
@@ -29,7 +28,6 @@ export interface TemplateLifecycle {
   outputBytes:number;cacheStatus:string;memoryPressure:string;status:string;
 }
 export interface DevLodTemplateStoreOptions {
-  verifySourceEnvelope?: (devPath:string,scene:THREE.Group)=>Promise<void>;
   session: ProjectLoadSession;
   perf: ReturnType<typeof perfCurrentSession>;
   diagnostics: DevLodDiagnostics;
@@ -42,7 +40,6 @@ export interface DevLodTemplateStoreOptions {
   taskIdentity: (source: string, kind: string, lod?: DeviceLod, priority?: number) => PerfTaskIdentity;
   catalogHint: (dev: string) => Promise<DevArtifactRead<DevSourceBounds>>;
   markEmptyDev: (dev: string) => void;
-  recoverMissingSources: (key: string, lod: DeviceLod) => void;
   prepareMissingTemplateSources: (dev: string) => Promise<void>;
   recordCacheDecision: (dev: string, lod: DeviceLod, status: DevArtifactReadStatus | 'compiled', reason?: string) => void;
   persistsTemplate: (lod: DeviceLod, generated: boolean, priority: number, demand: number) => boolean;
@@ -152,9 +149,8 @@ export class DevLodTemplateStore {
           if(!parsed)return false;
           if(validated===parsed)return true;
           const started=performance.now();
-          await this.options.verifySourceEnvelope?.(dev,parsed.scene);
-          if(!this.options.current())throw new DOMException('DEV source verification expired','AbortError');
-          const valid=validateDevGlbTemplate(parsed).shareable && !invalidGeometryExtent(parsed.scene);
+          if(!this.options.current())throw new DOMException('DEV template session expired','AbortError');
+          const valid=validateDevGlbTemplate(parsed).shareable;
           perfRecordTaskPhase(identity,'vertexValidation',performance.now()-started,this.options.perf,valid?'completed':'failed');
           if(valid)validated=parsed;
           return valid;
@@ -181,7 +177,6 @@ export class DevLodTemplateStore {
           this.options.diagnostics.lodMisses[lod]++;
           this.options.diagnostics.cacheMisses++;
           this.options.recordCacheDecision(dev, lod, 'miss');
-          this.options.recoverMissingSources(key, lod);
           artifact = undefined;
         } else artifact = lease.value;
         if (artifact?.sourceInvalid?.evidence) {
@@ -204,7 +199,6 @@ export class DevLodTemplateStore {
         if (artifact?.result.bytes) {
           try {
             if (artifact.result.bytes.byteLength > this.inputBudget.limit) throw Error('DEV cached input exceeds quota');
-            if (await perfMeasureTaskPhase(identity, 'cacheHash', () => hash(artifact!.result.bytes!), this.options.perf) !== artifact.sha) throw Error('DEV template SHA mismatch');
             parsed = await perfMeasureTaskPhase(identity, 'deserialize', () => parseDevGlbAsset(dev, artifact!.result.bytes!), this.options.perf);
             if (!parsed || !await validate()) throw Error('Invalid DEV cached template');
             this.options.diagnostics.lodHits[lod]++;
@@ -307,19 +301,18 @@ export class DevLodTemplateStore {
           void Promise.resolve(this.options.persistArtifact('templates', key, artifact, lod, dev, identity, inputOwner)).catch(reportBackgroundError);
         }
         const templateStarted = performance.now();
-        const row = { bounds: new THREE.Box3().setFromObject(parsed.scene), template: new DevGlbTemplate(dev, parsed.scene, this.options.session), sha: artifact.sha, status: artifact.result.status, diagnostics: artifact.result.diagnostics, task: identity };
+        const template=new DevGlbTemplate(dev,parsed.scene,this.options.session);
+        const row = { bounds:template.bounds, template, sha: artifact.sha, status: artifact.result.status, diagnostics: artifact.result.diagnostics, task: identity };
         this.options.diagnostics.templateParses++;
         if (!this.options.current()) { row.template.dispose(); return null; }
         const pinned = this.options.pinned(); pinned.add(key); // caller commits or releases before next trim
         const buffers = new Set<ArrayBufferLike>();
-        parsed.scene.traverse(object => {
-          const geometry = (object as THREE.Mesh).geometry;
-          if (!geometry) return;
+        for(const geometry of row.template.geometryRefs){
           for (const attribute of [...Object.values(geometry.attributes), geometry.index].filter(Boolean)) {
             const data = attribute as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
             buffers.add(('data' in data ? data.data.array : data.array).buffer);
           }
-        });
+        }
         const bytes = [...buffers].reduce((total, buffer) => total + buffer.byteLength, 0);
         this.templates.set(key, row, bytes, pinned); this.options.diagnostics.templateResidentBytes = this.templates.bytes;
         perfRecordTaskPhase(identity, 'templateBuild', performance.now() - templateStarted, this.options.perf, 'completed', bytes);

@@ -37,24 +37,24 @@
 
 ```text
 打开工程
-  → 读取 source/entity/navigation 缓存
-      ├─ 来源有效：restore
-      │    ├─ 实体有效：restore（不重分类）
-      │    └─ 实体无效：normalize（不重读 IFC）
-      └─ 来源缺失：Worker 接收来源文件
-           → extractEngineeringSourceGraph（物理来源图，延迟 FAM）
-           → 返回 IFC 路径 + SourceGeometryOccurrence 目录
-           → 请求识别所需 FAM，再 assemble（Spatial 可用时一并传入）
-           → normalize + projectEngineeringNavigation
-           → 发布 sources/snapshot/navigation
-           → 分域写缓存
+  → 独立物理目录 source-geometry-v1
+      ├─ 缓存有效：按源 SHA、载荷长度及路径清单恢复
+      └─ 缓存缺失：extract-geometry（CBM 矩阵/OMP 与 DEV 子装配引用）
+  → 立即发布 SourceGeometryOccurrence，几何消费可开始
+  → 异步读取来源/实体/导航缓存，或 extract 完整语义来源图
+  → 物化识别所需 FAM，assemble / normalize / 三视图投影
+  → 独立发布 sources / snapshot / navigation，按域保存
 ```
+
+`getSourceGeometryOccurrences` 等待的 `sourceGeometryReady` 只由独立物理目录阶段兑现，不等待完整来源图、FAM、实体或导航。暖开物理缓存命中时也不等待工程 Worker 初始化及 source/entity/navigation 恢复。`publish` 不再修改物理目录，语义 Worker 的 model DTO 不携带物理目录；分类/投影失败不撤销几何，物理目录失败也不阻断语义来源构建。
+
+物理遍历只选择真实引用，保留重复 occurrence、逐边矩阵和分支防环；PARTINDEX 未匹配不制造物理根，同一 DEV 的其他真实引用继续有效。CBM/DEV 原始文档和包路径索引在 Worker 内解析/建立一次，两阶段复用；物理阶段不生成 SourceRecord、FAM 赋值、标准分类或三视图。物理目录缓存写入不阻塞目录发布，但计入构建结算。语义计算仍与几何共享机器 CPU/内存资源，异步解耦不等于资源竞争消失；收益需本地测量。
 
 ### 来源抽取
 
-0.2.3 在缓存恢复/抽取前初始化证据端口，Inventory 不等待识别。冷建先传入 CBM/DEV；`extract` 延迟 FAM，返回物理目录及识别需要的 familyPaths，随后才物化这些 FAM。未参与识别的 FAM 在显式属性查询时读取。Worker 的 snapshot/query/ensure/read 命令分别承担元数据、已物化分页、显式解析和原文字节读取；详情页同时受记录数与字节预算限制。缓存版本、源身份和修订与查询结果一起校验。
+0.2.3 在缓存恢复/抽取前初始化证据端口，Inventory 不等待识别。冷建先传入 CBM/DEV；`extract-geometry` 独立发布物理目录；随后 `extract` 延迟 FAM，仅返回识别需要的 familyPaths 和 IFC 路径，再物化这些 FAM。未参与识别的 FAM 在显式属性查询时读取。Worker 的 snapshot/query/ensure/read 命令分别承担元数据、已物化分页、显式解析和原文字节读取；详情页同时受记录数与字节预算限制。缓存版本、源身份和修订与查询结果一起校验。
 
-来源事实由 `collectEngineeringSources` 独立汇总。`assembleEngineeringView` 捕获识别错误，保留来源和物理目录，工程快照标记未处理；来源、组成和清册投影分别隔离错误。投影错误不撤销已发布语义或几何，不写完整导航缓存。来源和有效实体域仍可独立保存。
+来源事实由 `collectEngineeringSources` 独立汇总。`assembleEngineeringView` 捕获识别错误，保留来源，已发布物理目录不受影响，工程快照标记未处理；来源、组成和清册投影分别隔离错误。投影错误不撤销已发布语义或几何，不写完整导航缓存。来源和有效实体域仍可独立保存。
 
 Worker 运行时解码只对带明确 projectionErrors 的失败投影允许覆盖不完整，仍校验保留节点的引用、边和可达性；完整投影与持久化导航继续执行严格覆盖校验。DEV 的 FAM/标准上下文查询通过来源详情入口执行，与“查看所属整体”独立；详情查询在每次异步操作后核对当前选择。
 
@@ -119,7 +119,7 @@ Worker 运行时解码只对带明确 projectionErrors 的失败投影允许覆�
 - `engineeringBuildPending` 从来源构建开始持续到最终 enrichment 解码、发布和缓存任务结束；初次无 Spatial 的 partial 投影不能冒充最终语义。工程 Worker 的 index/traverse/sort 进度只在实际推进时续期，长时间无进展以明确错误结束。相同物理 scope 的来源记录与别名子树复用索引，避免大型工程按节点重复扫描。
 - IFC 语义失败只影响 IFC 来源部分，不把已有 DEV 实体回滚。
 - 工程来源 Worker 或传输本身失败时可以保留已发布的部分导航供查看，但 `engineeringFailureCode` 为终端故障，Benchmark 不把它归为样本来源缺口的 PARTIAL。
-- `engineeringGeometryReady` 在来源图返回 occurrence 目录时解析；DEV 编译可早于实体完成。
+- `sourceGeometryReady` 在独立物理目录恢复/提取完成时解析；完整语义图提取、实体和导航恢复都在其后。
 - 工程切换/关闭取消 Worker、请求和缓存写槽；迟到结果按会话守卫拒绝。
 
 ## 缓存与恢复

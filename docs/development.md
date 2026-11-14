@@ -126,3 +126,5 @@ Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码和�
 - [Benchmark CLI](benchmark.md)：批量冷暖、比较与报告。
 - [性能测试指南](performance-guide.md)：单机验收的 测量口径与步骤。
 - [文档首页](README.md)：文档地图、写作约定与单一权威表。
+
+维护实体目录时只编辑 `research/实体识别/变电三维设计建模规范_索引表类.xlsx`；新增/修改名称的单元格标黄，再在 desktop/ 运行 `npm run generate:engineering-catalog`。该命令从工作簿生成主程序和独立工具的数据及目录文档，不读取 PDF、不启动工程样本或性能矩阵。

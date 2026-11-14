@@ -33,6 +33,7 @@ it.each(decisions)('$rule preserves independent classification, type, purpose, r
     expect(result.equipmentType?.id).toBe(decision.equipment);expect(result.componentType?.id).toBe(decision.component);
     expect(result.purpose?.id).toBe(decision.purpose);expect(result.purpose?.status).toBe(decision.purpose?'confirmed':'unresolved');
     if(decision.equipment)expect(result.equipmentType?.evidence.length).toBeGreaterThan(0);
+    if(decision.rule==='R09')expect(result.equipmentType?.status).toBe('confirmed');
     if(decision.component)expect(result.componentType?.evidence.length).toBeGreaterThan(0);
     if(decision.part)expect(result.objectRole?.id).toBe('part');
     if(decision.independent)expect(result.objectRole).toMatchObject({id:'object',status:'confirmed'});

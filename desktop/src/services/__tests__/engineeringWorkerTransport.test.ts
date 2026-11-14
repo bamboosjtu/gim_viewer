@@ -3,7 +3,6 @@ import { expect, it } from 'vitest';
 import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
 import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
 import { projectEngineeringNavigation } from '../../gim/engineering/navigation.js';
-import { collectSourceGeometryOccurrences } from '../../gim/engineering/geometryOccurrences.js';
 import { encodeEngineeringWorkerResultAsync, decodeEngineeringWorkerResult, engineeringWorkerResultTransfers } from '../engineeringWorkerTransport.js';
 
 async function fixture() {
@@ -12,7 +11,7 @@ async function fixture() {
     'terminal.dev': 'SYMBOLNAME=本体端子箱', 'radiator.dev': 'SYMBOLNAME=散热器' };
   const graph = await extractEngineeringSourceGraph({ paths: Object.keys(raw), readText: async path => raw[path] });
   const built = buildEngineeringSources('sample', graph, [], []);
-  return { ...built, navigation: projectEngineeringNavigation(built.sources, built.snapshot), geometryOccurrences: collectSourceGeometryOccurrences(graph) };
+  return { ...built, navigation: projectEngineeringNavigation(built.sources, built.snapshot) };
 }
 
 it('transfers owned buffers once and restores source facts, whole membership, maps and placement matrices', async () => {
@@ -24,7 +23,7 @@ it('transfers owned buffers once and restores source facts, whole membership, ma
   const restored = await decodeEngineeringWorkerResult(received, () => true);
   expect(restored.sources).toEqual(result.sources); expect(restored.snapshot).toEqual(result.snapshot);
   expect(restored.navigation).toEqual(result.navigation); expect(restored.navigation.sourceNodes).toBeInstanceOf(Map);
-  expect(restored.geometryOccurrences).toEqual(result.geometryOccurrences);
+  expect('geometryOccurrences' in restored).toBe(false);
   expect(restored.cachePlan).toEqual(['sources','entities','navigation']);expect(restored.entityCacheHit).toBe(true);expect(restored.metrics?.transportBytes).toBeGreaterThan(0);
 });
 

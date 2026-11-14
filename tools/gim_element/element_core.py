@@ -2,7 +2,7 @@
 """Standalone standard recognition: container input, orchestration and reports."""
 import os,json,shutil,tempfile,time
 import entity_std as S
-G_DEV,G_MAT,G_STR,G_OTH='设备','装置性材料','构件','其他'
+G_DEV,G_MAT,G_STR,G_OTH='设备','材料','构件','其他'
 T_DEV,T_IFC='dev','ifc'
 TRACK_NAME={T_DEV:'dev 轨道',T_IFC:'ifc 轨道'}
 
@@ -135,7 +135,7 @@ def build_html(result):
                   format(tt[G_DEV].get('候选', 0), ','),
                   format(tt[G_DEV].get('附件并入', 0), ','),
                   format(tt[G_DEV].get('部件上卷', 0), ',')))
-    for g, unit in ((G_MAT, '装置性材料（件）'), (G_STR, '构件（件）'), (G_OTH, '其他（条）')):
+    for g, unit in ((G_MAT, '材料（件）'), (G_STR, '构件（件）'), (G_OTH, '其他（条）')):
         n = tt[g]['dev'] + tt[g]['ifc']
         out.append('<div><b>%s</b><span>%s · 已确认 %s / 候选 %s / 未确认 %s</span></div>'
                    % (format(n, ','), unit, format(tt[g].get('已确认', 0), ','),
@@ -152,12 +152,9 @@ def build_html(result):
         sub = [r for r in rows if r['group'] == g and (r['dev'] or r['ifc'])]
         if not sub:
             continue
-        # 报告与界面同口径：按目录编码排序（E01→E19→E-T；M01→M09；C-A1→C-D6），
-        # 设备内 E16 细分按标准顺序，其余同编码内按数量降序。
-        sub.sort(key=lambda r: (S.order_key(r.get('code', '')),
-                                S.E16_SEQ.get(r.get('std_sub') or '', 99) if g == G_DEV else 99,
-                                r['cat'], -r['total']))
-        out.append('<h2>%s</h2><table><tr><th>编码</th><th>类别</th><th>子类</th>'
+        # 按维护工作簿中的类别/名称顺序展示，识别码仅供诊断。
+        sub.sort(key=lambda r:(r.get('catalogOrder',999),r.get('modelOrder',999),r['template']))
+        out.append('<h2>%s</h2><table><tr><th>内部识别码</th><th>类别</th><th>子类</th>'
                    '<th>名称模板</th><th class="n">dev 轨道</th><th class="n">ifc 轨道</th>'
                    '<th class="n">合计</th><th>状态</th></tr>' % g)
         for r in sub:
@@ -191,7 +188,7 @@ def build_html(result):
 # ---------------------------------------------------------------------------
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description='GIM 实体盘点（设备/装置性材料/构件/其他）')
+    ap = argparse.ArgumentParser(description='GIM 实体盘点（设备/材料/构件/其他）')
     ap.add_argument('path', help='.gim 文件或解包目录')
     ap.add_argument('--json', dest='json_out', help='输出 JSON 路径')
     ap.add_argument('--html', dest='html_out', help='输出 HTML 报告路径')

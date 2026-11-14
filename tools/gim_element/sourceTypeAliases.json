@@ -75,7 +75,12 @@
     "cable": "M05",
     "button": "part",
     "radiator": "part",
-    "cabinetbody": "part"
+    "cabinetbody": "part",
+    "steelbeam": "C-A4.steel",
+    "steelcolumn": "C-A3.steel",
+    "steelstructure": "C-A14",
+    "structuralmember": "C-A15",
+    "protectiondevice": "E16.protection"
   },
   "ifcPredefined": {
     "IFCPROTECTIVEDEVICE.CIRCUITBREAKER": "E06",
@@ -99,9 +104,9 @@
     "IFCWINDOW": "C-A8",
     "IFCSTAIR": "C-A9",
     "IFCSTAIRFLIGHT": "C-A9",
-    "IFCRAILING": "C-A9",
+    "IFCRAILING": "C-A9.railing",
     "IFCCOVERING": "C-A10",
-    "IFCMEMBER": "C-B5",
+    "IFCMEMBER": "C-A15",
     "IFCFOOTING": "C-B4",
     "IFCPILE": "C-B3",
     "IFCPIPESEGMENT": "C-D5",
@@ -144,6 +149,10 @@
     "IFCREINFORCINGMESH": "C-B5",
     "IFCTENDON": "C-B5",
     "IFCTENDONANCHOR": "C-B5",
-    "IFCDISTRIBUTIONCHAMBERELEMENT": "C-C3"
+    "IFCDISTRIBUTIONCHAMBERELEMENT": "C-C3",
+    "IFCBEAMSTANDARDCASE": "C-A4",
+    "IFCCOLUMNSTANDARDCASE": "C-A3",
+    "IFCMEMBERSTANDARDCASE": "C-A15",
+    "IFCPROTECTIVEDEVICE": "E16.protection"
   }
 }

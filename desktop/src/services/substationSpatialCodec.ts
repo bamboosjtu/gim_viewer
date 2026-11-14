@@ -566,8 +566,9 @@ export function serializeSubstationSpatialIndex(
 /** Rebuild all runtime Maps from a validated persistence snapshot. */
 export function hydrateSubstationSpatialIndex(
   snapshot: SubstationSpatialSemanticSnapshot,
+  validated=false,
 ): SubstationSpatialIndex {
-  const validation = validateSubstationSpatialSnapshot(snapshot);
+  const validation=validated?{valid:true}:validateSubstationSpatialSnapshot(snapshot);
   if (!validation.valid) throw new Error(`空间语义缓存 hydrate 失败: ${validation.reason}`);
   const nodes = snapshot.nodes.slice();
   const objects = snapshot.objects.slice();

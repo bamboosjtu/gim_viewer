@@ -11,7 +11,7 @@ export async function getSourceGeometryOccurrences(state: AppState, session: Pro
     const resolve = (state.currentFiles ? getFileEntryResolver(state.currentFiles) : createEntryResolver(state.substationEntryPaths));
     return collectEquipmentGeometryOccurrences(state.currentCbmTree).map(row => ({ ...row, devPath: resolve(row.devPath, row.sourceContextId) ?? row.devPath }));
   }
-  const catalog = state.engineeringGeometryCatalog ?? await state.engineeringGeometryReady;
+  const catalog = state.sourceGeometryCatalog ?? await state.sourceGeometryReady;
   if (!state.isCurrentSession(session)) return [];
   if (!catalog) throw Error('来源物理实例尚不可用，请查看来源解析诊断');
   return catalog.occurrences;

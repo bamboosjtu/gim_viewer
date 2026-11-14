@@ -4,12 +4,12 @@ export const STANDARD_CATALOG=catalog.items;
 const normalize=(value:string)=>value.normalize('NFKC').replace(/\s+/g,'').toLowerCase();
 type Item=typeof STANDARD_CATALOG[number];
 const terms=new Map<string,Item[]>();
-for(const item of STANDARD_CATALOG)for(const name of [item.label,item.term,...item.term.split('/'),...(['C.24','B.41'].includes(item.annex)?item.label.split('/'):[]),...(item.annex==='D.14'?['防火墙']:[])]){
+for(const item of STANDARD_CATALOG)for(const name of [item.label,item.term,...item.term.split('/'),...item.aliases]){
   const key=normalize(name),rows=terms.get(key)??[];if(!rows.some(row=>row.id===item.id))rows.push(item);terms.set(key,rows);
 }
 /** Exact aliases can be ambiguous (e.g. two distinct shielding devices). */
 export function standardTerms(value:string):readonly Item[]{return terms.get(normalize(value))??[];}
-const chinese=STANDARD_CATALOG.filter(row=>/[\u3400-\u9fff]/.test(row.label)&&row.label.length>=3);
+const chinese=STANDARD_CATALOG.filter(row=>/[\u3400-\u9fff]/.test(row.label)&&row.label.length>=2);
 const byLength=[...chinese].sort((a,b)=>b.label.length-a.label.length||a.id.localeCompare(b.id));
 const expression=new RegExp(byLength.map(row=>row.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'g');
 /** Names provide candidates only. Structured source declarations stay authoritative. */

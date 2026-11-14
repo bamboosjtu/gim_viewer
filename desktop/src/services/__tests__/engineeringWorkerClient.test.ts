@@ -49,7 +49,7 @@ it('keeps a large extraction alive only while its Worker reports progress', asyn
     expect(worker.terminate).not.toHaveBeenCalled();
     expect(progress).toHaveBeenCalledWith('source-traverse',1);
     worker.onmessage!({data:{type:'graph',requestId:request.requestId,
-      summary:{ifcPaths:[],sourceRecords:0},geometryOccurrences:null}} as MessageEvent);
+      summary:{ifcPaths:[],sourceRecords:0}}} as MessageEvent);
     await pending;
   }finally{client.close();vi.useRealTimers();}
 });

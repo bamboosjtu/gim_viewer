@@ -14,7 +14,7 @@ it('retains an unmatched attribute component without inventing a physical root, 
   const built=assembleEngineeringView(identity.sourceSha256,graph,[],[]);
   expect(built.snapshot.entities).toHaveLength(1);expect(built.snapshot.entities[0].sourceIds).toContain(part.id);expect(built.navigation.sourceRows.has(part.id)).toBe(true);
   const encoded=await encodeEngineeringSources(built.sources,identity),restored=await decodeEngineeringSources(encoded.bytes,identity);
-  const warm=assembleStoredEngineeringView(identity.sourceSha256,restored.sources);expect(warm.snapshot).toEqual(built.snapshot);expect(warm.geometryOccurrences).toEqual(physical);
+  const warm=assembleStoredEngineeringView(identity.sourceSha256,restored.sources);expect(warm.snapshot).toEqual(built.snapshot);expect('geometryOccurrences' in warm).toBe(false);
   const provider=new ModelEvidenceProvider(identity.sourceSha256,identity.entries,async p=>raw[p]);provider.attachGraph(graph);
   const meta=await provider.ensureEvidence({entryIds:['body.fam'],kinds:['attributes','assignments']});
   const page=provider.queryEvidence({revision:meta.revision,range:{entryIds:['body.fam'],kinds:['assignments']},limit:20});
@@ -22,6 +22,6 @@ it('retains an unmatched attribute component without inventing a physical root, 
 });
 it('isolates a failed attribute header read and still publishes the real physical catalog and known source facts',async()=>{
   const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>{if(p==='body.dev')throw Error('attribute read denied');return raw[p];}});
-  const result=assembleEngineeringView('scope',graph,[],[]);expect(result.geometryOccurrences.occurrences).toHaveLength(1);
+  const result=assembleEngineeringView('scope',graph,[],[]);expect(collectSourceGeometryOccurrences(graph).occurrences).toHaveLength(1);
   expect(result.sources.complete).toBe(false);expect(graph.diagnostics).toContainEqual({kind:'read-failed',source:'body.dev'});expect(graph.attributeRecords).toHaveLength(1);
 });

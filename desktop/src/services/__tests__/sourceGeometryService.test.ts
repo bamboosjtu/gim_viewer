@@ -25,7 +25,7 @@ it('renders repeated actual source instances without a CBM display tree or entit
   const files = new Map(Object.entries(raw).map(([path, text]) => [path, new File([text], path)]));
   const graph = await extractEngineeringSourceGraph({ paths: [...files.keys()], readText: p => files.get(p)!.text() });
   const state = new AppState(), session = state.activateProject(1, 'sha'); state.currentProjectType = 'substation';
-  state.currentFiles = files; state.engineeringGeometryCatalog = collectSourceGeometryOccurrences(graph);
+  state.currentFiles = files; state.sourceGeometryCatalog = collectSourceGeometryOccurrences(graph);
   expect(state.currentCbmTree).toBeNull(); expect(state.engineeringSnapshot).toBeNull();
   const roots = await getSourceGeometryOccurrences(state, session);
   expect(roots.map(r => r.placementMatrix[12])).toEqual([1000, 5000]);
@@ -64,8 +64,8 @@ it('renders repeated actual source instances without a CBM display tree or entit
 it('waits for physical source readiness only and discards an old-session occurrence result', async () => {
   const state = new AppState(), session = state.activateProject(1, 'old'); state.currentProjectType = 'substation';
   let publish!: (value: { occurrences: []; diagnostics: [] }) => void;
-  state.engineeringGeometryReady = new Promise(resolve => { publish = resolve; });
+  state.sourceGeometryReady = new Promise(resolve => { publish = resolve; });
   const result = getSourceGeometryOccurrences(state, session);
   state.activateProject(2, 'new'); publish({ occurrences: [], diagnostics: [] });
-  expect(await result).toEqual([]); expect(state.engineeringGeometryCatalog).toBeNull();
+  expect(await result).toEqual([]); expect(state.sourceGeometryCatalog).toBeNull();
 });

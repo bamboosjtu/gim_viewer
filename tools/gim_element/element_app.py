@@ -3,7 +3,7 @@
 element_app.py —— GIM 实体盘点器（桌面版）
 
 把一个 GIM 工程（.gim 或解包目录）里的全部实体盘成四本账：
-设备 / 装置性材料 / 构件 / 其他。解析在 element_core，外壳只负责
+设备 / 材料 / 构件 / 其他。解析在 element_core，外壳只负责
 选文件、跑后台线程、展示台账与导出报告。
 
 线程约定：解析在后台 QThread 里跑，结果写入共享容器，主线程用
@@ -115,20 +115,20 @@ class MainWindow(QMainWindow):
         # ---- 右侧：台账树 + 明细 ----
         vs = QSplitter(Qt.Vertical)
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(4)
-        self.tree.setHeaderLabels(['分类 / 名称模板', 'dev 轨道', 'ifc 轨道', '合计'])
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(['分类 / 名称', '数量'])
         self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
-        for c in (1, 2, 3):
+        for c in (1,):
             self.tree.header().setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.tree.setAlternatingRowColors(True)
         self.tree.itemSelectionChanged.connect(self._on_tree_sel)
         vs.addWidget(self.tree)
 
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(['名称实例', '轨道', '状态', 'IFC 类型', '来源文件'])
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(['名称', '状态', '来源文件'])
         self.table.horizontalHeader().setMinimumSectionSize(58)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        for c in (1, 2, 3, 4):
+        for c in (1, 2):
             self.table.horizontalHeader().setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -330,14 +330,15 @@ class MainWindow(QMainWindow):
         self._fill_group_summary()
 
     def _fill_tree(self, rows):
+        self._entities_by_id={e['id']:e for e in self.result.get('entityTree',[])}
         self.tree.clear()
         flt = self.search.text().strip().lower()
         for g in GROUP_ORDER:
-            grows = [r for r in rows if r['group'] == g and (r['dev'] or r['ifc'])]
+            grows = [r for r in rows if r['group'] == g and (r['dev'] or r['ifc'] or r.get('samples'))]
             if not grows:
                 continue
             gd, gi = sum(r['dev'] for r in grows), sum(r['ifc'] for r in grows)
-            root = QTreeWidgetItem([g, fmt(gd), fmt(gi), fmt(gd + gi)])
+            root = QTreeWidgetItem([g,fmt(gd+gi)])
             root.setIcon(0, self.style().standardIcon(QStyle.SP_DirIcon))
             f = QFont(); f.setBold(True)
             root.setFont(0, f)
@@ -351,8 +352,8 @@ class MainWindow(QMainWindow):
                 cd, ci = sum(r['dev'] for r in crows), sum(r['ifc'] for r in crows)
                 code = crows[0].get('code', '')
                 stdcat = crows[0].get('stdcat', '') or cat
-                label = ('%s  %s' % (code, stdcat)) if code and code != 'U-OBJECT' else cat
-                cit = QTreeWidgetItem([label, fmt(cd), fmt(ci), fmt(cd + ci)])
+                label = cat
+                cit = QTreeWidgetItem([label,fmt(cd+ci)])
                 cit.setToolTip(0, '目录口径：%s' % cat)
                 root.addChild(cit)
                 # 子类 → 模板（设备侧用标准细分：E16 的 terminal_box / panel_cabinet…）
@@ -366,13 +367,7 @@ class MainWindow(QMainWindow):
                         sd, si = sum(r['dev'] for r in srows), sum(r['ifc'] for r in srows)
                         scode = srows[0].get('code', '')
                         slabel = sub or '（本体）'
-                        if g == E.G_DEV and sub:
-                            slabel = E.S.dev_sub_label(sub) or slabel
-                        elif g == E.G_STR and scode and scode != 'U-OBJECT':
-                            slabel = '%s  %s' % (scode, slabel)
-                        elif scode and scode != code:
-                            slabel = '%s  %s' % (scode, slabel)
-                        sit = QTreeWidgetItem([slabel, fmt(sd), fmt(si), fmt(sd + si)])
+                        sit = QTreeWidgetItem([slabel,fmt(sd+si)])
                         cit.addChild(sit)
                         self._add_templates(sit, srows, flt)
                     if flt:
@@ -382,34 +377,41 @@ class MainWindow(QMainWindow):
         if flt:
             self.tree.expandAll()
 
-    def _cat_key(self, g, cat, crows):
-        """类别行顺序：设备/材料/其他按目录编码；构件按标准 4 大类次序。
+    def _cat_key(self,g,cat,crows):
+        return (crows[0].get('catalogOrder',999),cat)
 
-        构件编码在子类层（C-A1…），不能拿首行的子类编码当大类键——否则
-        「建筑本体构件」会显示成「C-A3 柱」、大类顺序也会随桶插入顺序漂。
-        """
-        return E.S.order_key(crows[0].get('code', '')) + (0,)
-
-    def _sub_key(self, g, catcode, sub, srows):
-        """子类顺序：E16 固定细分顺序 → 有独立子类编码的按编码 → 其余按数量。"""
-        if g == E.G_DEV and sub in E.S.E16_SEQ:
-            return (0, E.S.E16_SEQ[sub], 0, 0)
-        scode = srows[0].get('code', '')
-        if g == E.G_STR and scode and scode != 'U-OBJECT':
-            return (1,) + E.S.order_key(scode)
-        if scode and scode != catcode:
-            return (1,) + E.S.order_key(scode)
-        return (2, 0, 0, -sum(x['total'] for x in srows))
+    def _sub_key(self,g,catcode,sub,srows):
+        return (srows[0].get('modelOrder',999),sub)
 
     def _add_templates(self, parent_item, rows, flt):
         rows = sorted(rows, key=lambda r: -r['total'])
         for r in rows:
             if flt and flt not in r['template'].lower():
                 continue
-            it = QTreeWidgetItem([r['template'] or '—', fmt(r['dev']), fmt(r['ifc']),
-                                  fmt(r['total'])])
-            it.setData(0, Qt.UserRole, r)
-            parent_item.addChild(it)
+            same=r['template'] in (r['cat'],r['sub'])
+            if same:it=parent_item
+            else:
+                it=QTreeWidgetItem([r['template'] or '—',fmt(r['total'])])
+                it.setData(0,Qt.UserRole,r);parent_item.addChild(it)
+            entities=self._entities_by_id
+            for entity_id in r.get('entityIds',[]):
+                entity=entities.get(entity_id)
+                if not entity:continue
+                sample=next((s for s in r['samples'] if len(s)>5 and s[5]==entity_id),None)
+                instance=QTreeWidgetItem([entity['name'],'' if entity['pending'] else '1'])
+                instance.setData(0,Qt.UserRole,{**r,'samples':[sample] if sample else [],'entityId':entity_id,'total':int(not entity['pending']),'dev':int(bool(sample) and sample[0]=='dev' and not entity['pending']),'ifc':int(bool(sample) and sample[0]=='ifc' and not entity['pending'])});it.addChild(instance)
+                groups={}
+                for part in sorted(entity['parts'],key=lambda p:(p.get('componentOrder',999),p['componentLabel'],p['sourceId'])):
+                    meaning=part['interpretation']
+                    if meaning['meaning'] not in ('part','neutral_set','detail'):continue
+                    label='细节来源' if meaning['meaning']=='detail' else part['componentLabel'];group=groups.get(label)
+                    if group is None:group=QTreeWidgetItem([label,'']);groups[label]=group;instance.addChild(group)
+                    child=QTreeWidgetItem([part['name'] or part['componentLabel'],''])
+                    child.setToolTip(0,part['componentLabel'])
+                    if sample:
+                        part_sample=list(sample);part_sample[1]=part['name'];part_sample[2]=part['source'];part_sample[3]=part['type']
+                        child.setData(0,Qt.UserRole,{**r,'cat':label,'sub':'','samples':[part_sample],'selectedSourceId':part['sourceId'],'total':0})
+                    group.addChild(child)
 
     def _fill_group_summary(self):
         """默认选中第一个组，展示组内 top 模板。"""
@@ -446,36 +448,29 @@ class MainWindow(QMainWindow):
             p = p.parent()
         return d
 
-    def _collect_templates(self, it, out):
-        if it.childCount() == 0:
-            r = it.data(0, Qt.UserRole)
-            if r and (r['dev'] or r['ifc']):
-                out.append((r['total'], r))
-            return
-        for i in range(it.childCount()):
-            self._collect_templates(it.child(i), out)
+    def _collect_templates(self,it,out):
+        row=it.data(0,Qt.UserRole)
+        if row:
+            out.append((row['total'],row));return
+        for i in range(it.childCount()):self._collect_templates(it.child(i),out)
 
     def _fill_table(self, pairs):
         """pairs = [(sample, row), …]；row 供属性面板显示所属模板与统计。"""
         self._table_pairs = pairs
         self.table.setRowCount(len(pairs))
-        track_name = {'dev': 'dev 轨道', 'ifc': 'ifc 轨道'}
         for i, (s, _r) in enumerate(pairs):
             track, name, src = s[0], s[1], s[2]
-            ifctype = s[3] if len(s) > 3 else ''
             stt = s[4] if len(s) > 4 else ''
             self.table.setItem(i, 0, QTableWidgetItem(name))
-            self.table.setItem(i, 1, QTableWidgetItem(track_name.get(track, track)))
-            it = QTableWidgetItem(stt)
+            it = QTableWidgetItem({'已确认':'已识别','候选':'待确认','未确认':'未识别'}.get(stt,stt))
             if stt == E.S.ST_OK:
                 it.setForeground(QColor('#1f7a3d'))
             elif stt == E.S.ST_CAND:
                 it.setForeground(QColor('#a06800'))
             elif stt == E.S.ST_UNC:
                 it.setForeground(QColor('#9aa3ad'))
-            self.table.setItem(i, 2, it)
-            self.table.setItem(i, 3, QTableWidgetItem(ifctype))
-            self.table.setItem(i, 4, QTableWidgetItem(src))
+            self.table.setItem(i, 1, it)
+            self.table.setItem(i, 2, QTableWidgetItem(src))
         if pairs:
             self.table.selectRow(0)
         else:
@@ -487,48 +482,17 @@ class MainWindow(QMainWindow):
             self._fill_tree(self.result['rows'])
 
     # ---------- 状态栏：四组盘点数（原左栏总览） ----------
-    def _kpi_html(self, r):
-        tt, st, m = r['totals'], r['stats'], r['meta']
-        bits = [
-            ('#1a5fb4', '设备', tt[E.G_DEV]['台数'], '台'),
-            ('#613583', '材料', tt[E.G_MAT]['dev'] + tt[E.G_MAT]['ifc'], '件'),
-            ('#26734d', '构件', tt[E.G_STR]['dev'] + tt[E.G_STR]['ifc'], '件'),
-            ('#8a6d3b', '其他', tt[E.G_OTH]['dev'] + tt[E.G_OTH]['ifc'], '条'),
-        ]
-        head = '&nbsp;·&nbsp;'.join(
-            '<span style="color:%s">%s</span>&nbsp;<b style="color:#1c1c1e">%s</b>&nbsp;%s'
-            % (c, lab, fmt(n), unit) for c, lab, n, unit in bits)
-        tail = ('&nbsp;&nbsp;│&nbsp;&nbsp;<span style="color:#8a94a6">%s · dev 位 %s · ifc 暴露 %s · %.1f s</span>'
-                % (escape(os.path.basename(m['source'])), fmt(st.get('dev位', 0)),
-                   fmt(st.get('ifc暴露层', 0)), m['elapsed']))
-        return '<span style="font-size:11px">%s%s</span>' % (head, tail)
+    def _kpi_html(self,r):
+        totals=r['totals']
+        return ' · '.join(f'{label} <b>{fmt(totals[group]["台数"] if group==E.G_DEV else totals[group]["dev"]+totals[group]["ifc"])}</b> {unit}'
+            for group,label,unit in [(E.G_DEV,'设备','台'),(E.G_MAT,'材料','件'),(E.G_STR,'构件','件'),(E.G_OTH,'其他','项')])
 
-    def _kpi_tip(self, r):
-        tt, st, m = r['totals'], r['stats'], r['meta']
-        return ('%s（%s%s）\n'
-                '设备 %s 台 · 材料 %s 件 · 构件 %s 件 · 其他 %s 条\n\n'
-                'dev 轨道：dev 位 %s（PI 部件 %s）· cbm %s · fam %s · dev %s\n'
-                'ifc 轨道：文件 %s · 实体行 %s · 暴露层 %s · 封装内部 %s\n'
-                '用时 %.1f 秒'
-                % (os.path.basename(m['source']), m['kind'],
-                   '（%s）' % m['container'] if m.get('container') else '',
-                   fmt(tt[E.G_DEV]['台数']), fmt(tt[E.G_MAT]['dev'] + tt[E.G_MAT]['ifc']),
-                   fmt(tt[E.G_STR]['dev'] + tt[E.G_STR]['ifc']),
-                   fmt(tt[E.G_OTH]['dev'] + tt[E.G_OTH]['ifc']),
-                   fmt(st.get('dev位', 0)), fmt(st.get('PI部件dev', 0)),
-                   fmt(st.get('cbm文件', 0)), fmt(st.get('fam文件', 0)),
-                   fmt(st.get('dev文件', 0)), fmt(st.get('ifc文件', 0)),
-                   fmt(st.get('ifc实体行', 0)), fmt(st.get('ifc暴露层', 0)),
-                   fmt(st.get('ifc封装内部', 0)), m['elapsed']))
+    def _kpi_tip(self,r):
+        return '对象数量按设备、材料、构件和其他分类汇总；部件不重复计为设备。'
 
     # ---------- 左侧属性面板 ----------
     def _prop_placeholder(self):
-        return ('<div style="padding:12px 14px;font-size:12px;color:#5b6472;line-height:1.9">'
-                '<b style="font-size:13px;color:#1c1c1e">属性</b><br><br>'
-                '在右下「名称实例」中选中一行，这里显示该实例的全部属性：<br>'
-                '名称 · 轨道 · 状态 · IFC 类型 · 来源文件，<br>'
-                '以及所属分组 / 目录编码 / 类别与子类 / 名称模板与模板统计。<br><br>'
-                '<span style="color:#8a94a6">未选中实例时本面板为空。</span></div>')
+        return '<div style="padding:12px 14px;color:#5b6472">选择一个对象，查看名称、分类、来源文件和设备部件。</div>'
 
     def _prop_block(self, title, rows):
         h = ['<div style="margin:0 0 10px 0">'
@@ -544,63 +508,25 @@ class MainWindow(QMainWindow):
         h.append('</table></div>')
         return ''.join(h)
 
-    def _prop_html(self, s, r):
-        track, name, src = s[0], s[1], s[2]
-        ifctype = s[3] if len(s) > 3 else ''
-        stt = s[4] if len(s) > 4 else ''
-        sc = {E.S.ST_OK: '#1f7a3d', E.S.ST_CAND: '#a06800'}.get(stt, '#8a94a6')
-        tname = {'dev': 'dev 轨道', 'ifc': 'ifc 轨道'}.get(track, track or '—')
-        sub = r.get('sub') or ''
-        if r['group'] == E.G_DEV:
-            sub = E.S.dev_sub_label(r.get('std_sub') or '') or sub
-        dist = ' · '.join('%s %s' % (k, fmt(v)) for k, v in
-                          sorted((r.get('st') or {}).items(), key=lambda kv: -kv[1])) or '—'
-        files = '<br>'.join('%s <span style="color:#8a94a6">(%s)</span>'
-                            % (escape(str(fn)), fmt(n))
-                            for fn, n in (r.get('files') or [])[:3]) or '—'
-        h = ['<div style="padding:10px 12px;font-size:12px">']
-        bits = []
-        for x in (r.get('code'), r.get('cat'), sub):
-            x = (x or '').strip()
-            if x and x not in bits:
-                bits.append(x)
-        h.append('<b style="font-size:13px;color:#1c1c1e">实例属性</b>'
-                 '<div style="color:#8a94a6;font-size:11px;margin:2px 0 9px 0">%s</div>'
-                 % escape(' · '.join(bits)))
-        h.append(self._prop_block('实例', [
-            ('名称', escape(name or '—')),
-            ('轨道', escape(tname)),
-            ('状态', ('<span style="color:%s">%s</span>' % (sc, escape(stt))) if stt else '—'),
-            ('IFC 类型', escape(ifctype or '—')),
-            ('来源文件', escape(src or '—')),
-        ]))
-        h.append(self._prop_block('归属', [
-            ('分组', escape(r.get('group', '') or '—')),
-            ('目录编码', escape(r.get('code', '') or '—')),
-            ('标准类别', escape(r.get('stdcat', '') or '—')),
-            ('类别', escape(r.get('cat', '') or '—')),
-            ('子类', escape(sub or '—')),
-            ('名称模板', escape(r.get('template', '') or '—')),
-        ]))
-        if len(s) > 5 and self.result:
-            entity = next((item for item in self.result.get('entityTree', []) if item['id'] == s[5]), None)
-            if entity:
-                h.append(self._prop_block('实体身份', [('entityId', escape(entity['id'])), ('规则版本', escape(self.result['meta'].get('engineRulesVersion', '')))]))
-                parts = []
-                for part in entity['parts']:
-                    meaning = part['interpretation']
-                    term = (meaning.get('componentType') or {}).get('id', meaning.get('meaning', ''))
-                    proof = '；'.join(meaning.get('membershipEvidence') or meaning.get('classificationEvidence') or [])
-                    parts.append((part['name'] or part['sourceId'], escape('%s · %s · %s · 来源父级 %s · %s' % (term, meaning.get('membershipStatus', ''), part['sourceId'], part['rawParent'] or '无', proof))))
-                h.append(self._prop_block('设备/材料/构件 → 部件与组成来源', parts))
-        h.append(self._prop_block('模板统计', [
-            ('dev / ifc', '%s / %s' % (fmt(r.get('dev', 0)), fmt(r.get('ifc', 0)))),
-            ('合计', '<b>%s</b>' % fmt(r.get('total', 0))),
-            ('状态分布', escape(dist)),
-            ('主要来源', files),
-        ]))
-        h.append('</div>')
-        return ''.join(h)
+    def _prop_html(self,s,r):
+        name,source=s[1],s[2];entity=self._entities_by_id.get(s[5]) if len(s)>5 else None
+        selected=next((p for p in entity['parts'] if p['sourceId']==r.get('selectedSourceId')),None) if entity else None
+        h=['<div style="padding:10px 12px;font-size:12px"><b>对象属性</b>']
+        rows=[('名称',escape(name or '未命名'))]
+        if selected:
+            rows.extend([('部件名称',escape(selected['componentLabel'])),('所属设备',escape(entity['name']))])
+        else:
+            rows.append(('分类',escape(' / '.join(dict.fromkeys(v for v in [r.get('group'),r.get('cat'),r.get('sub')] if v)))))
+        status=s[4] if len(s)>4 else ''
+        if status and status!='已确认':rows.append(('状态','待确认'))
+        if source:rows.append(('来源文件',escape(source)))
+        h.append(self._prop_block('基本信息',rows))
+        if entity and not selected:
+            names=list(dict.fromkeys(p['componentLabel'] if p['componentLabel']!='未识别部件' else p['name'] or '未命名部件'
+                for p in entity['parts'] if p['interpretation']['meaning'] in ('part','neutral_set')))
+            h.append('<div style="color:#7b8899;margin-top:12px">部件</div>')
+            h.append('<ul>'+''.join('<li>'+escape(n)+'</li>' for n in names)+'</ul>' if names else '<p>未提供部件信息</p>')
+        h.append('</div>');return ''.join(h)
 
     def _on_sample_sel(self):
         rows = self.table.selectionModel().selectedRows()
@@ -682,60 +608,18 @@ class MainWindow(QMainWindow):
 
     # ---------- 对话框 ----------
     def about(self):
-        QMessageBox.about(self, '关于', """
-        <h3>%s</h3><p style="color:#5c6b7f">版本 %s</p>
-        <p>解析 GIM 工程，把全部实体盘成四本账：
-        <b>设备</b>（E01–E19／E-T，DEV 本体定粒度）、
-        <b>装置性材料</b>（M01–M09，dev+ifc 两轨）、
-        <b>构件</b>（C-A1…C-D6，4 大类 28 子类）、
-        <b>其他</b>（U-*：词域外/空间骨架/无名称/内部来源）。</p>
-        <p style="font-size:12px;color:#7b8899">
-        粒度按「施工运维可整体识别」定，与 F2/F3/F4、CBM/DEV 拆件无关；<br>
-        每条记录带证据状态：已确认 / 候选（仅型号或用途待定）/ 未确认；<br>
-        dev 轨道：CBM→OBJECTMODELPOINTER→DEV，变压器本体与中性点成套装置并为一台，
-        主变保护柜/测控柜/智能柜/电能表柜归二次设备，
-        PI 部件计材料实例与箱柜类设备，构件部件（灯端子板等）并入父件；<br>
-        ifc 轨道：只识别暴露层（空间骨架/产品实体），
-        几何与属性等内部表达对内封装，无名称实体单列并保留 IFC 类型。</p>
-        """ % (APP_NAME, APP_VER))
+        QMessageBox.about(self,'关于',f'<h3>{APP_NAME}</h3><p>版本 {APP_VER}</p><p>按维护的 xlsx 索引组织设备、材料、构件及实际部件。内部识别码不作为清册目录。独立运行，不依赖 GIM Viewer。</p>')
 
     def help_dialog(self):
-        QMessageBox.information(self, '使用说明', """
-操作
-  Ctrl+O 打开 .gim 文件或已解包的工程目录（也可拖入）
-  右上分类树双击展开，右下显示该分类下的名称实例
-  选中右下任意实例，左下属性面板显示它的全部属性
-  底部状态栏显示四组盘点数，鼠标悬停可看来源与轨道统计
-  顶部搜索框按名称模板过滤
-
-口径（标准见同目录 01/02/03 三份 .md）
-  粒度   以「施工运维可整体识别」的工程实体为单位，与 F2/F3/F4、CBM/DEV 拆件无关；
-         整体内部组成（单相本体/散热器/柜体/端子排/螺栓）只作来源成员；
-         有独立子装配身份的（主变 DEV 内嵌但有自己 .dev 的端子箱）不吞入本体。
-  编码   设备 E01–E19（变压器用途不明为 E-T）、材料 M01–M09、构件 C-A1…C-D6、
-         其他 U-*（空间骨架/型号模板/无名产品/内部来源）；目录出处另存。
-         二次设备细分为 terminal_box / panel_cabinet / control_cabinet / battery_set，
-         动力辅助与水工暖通保留具体设备类型（检修箱/机构箱/电缆终端/风机…）。
-  状态   已确认 / 候选 / 未确认 —— 只有型号或用途待定记候选，词域外与无名称记未确认。
-  设备   按《通用设备目录》2018/2025 并集 19 类；
-         变压器 = 本体+散热器+中性点成套装置（附件并入，不单独计台）；
-         主变保护柜/测控柜/智能柜/电能表柜属二次设备；
-         「设备_部件」命名上卷到父设备；PI 层计材料实例与箱柜类设备
-         （端子箱/汇控柜/机构箱等），其余装配内部部件对内封装。
-  装置性材料 造价口径 9 大类（导线/母线/金具/绝缘子/电缆/接地材料/套管/槽盒/其他材料），
-         dev（F4+PI）与 ifc 两轨分别计数、互补不合并。
-  构件   4 大类 28 子类：建筑本体（墙/楼板/柱/梁/板/屋面/门/窗/楼梯/面层）、
-         结构构架与基础（设备支架/基础/型钢/檩条/构架）、
-         水工与总图（电缆沟/排水沟/检查井/围墙/道路）、
-         附属设施（照明/消防/安防/暖通/给排水/其他）。
-         部件（灯端子板/接线盒/支架立柱）并入父件，不单独计量；
-         挂载层（几何/属性/材料/样式）与关系层对内封装，只计总数。
-  其他   词域外（无法识别/尺寸占位/几何壳名/分组容器/间隔名）、空间骨架、
-         型号模板、端口与系统、紧固件内部来源，以及 ifc 无名称产品实体。
-
-导出
-  Ctrl+E 导出 HTML 盘点报告；另支持 CSV / JSON。
-        """)
+        QMessageBox.information(self,'使用说明',"""
+Ctrl+O 打开 .gim 或解包目录，也可拖入窗口。
+目录：设备/材料/构件 → 索引类别 → 索引名称 → 名称模板/实例 → 部件 → 来源。
+名称相同的目录/模板层会合并。选择设备或分类时不把部件重复计为设备台数。
+部件按设备模型部件名称对照表归组，未知或歧义归属继续保留。
+来源层级与工程身份、用途及目录投影分别表达；不因目录改变几何。
+目录维护源：变电三维设计建模规范_索引表类.xlsx。新增名称在工作簿标黄。
+Ctrl+E 导出 HTML，另支持 CSV / JSON。工具运行和打包只使用自身数据。
+""")
 
 
 def main():

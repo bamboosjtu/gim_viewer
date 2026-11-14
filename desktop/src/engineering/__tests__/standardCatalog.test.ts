@@ -10,12 +10,12 @@ const source=(id:string,type:string,patch:Partial<SourceRecord>={}):SourceRecord
 const host=(id='host',name='1号主变',code='unit-1')=>source(id,'OilImmersedTransformer',{name,properties:[field('PROJECTNAME',name),field('GRIDIDENTIFICATIONSYSTEMCODE',code)]});
 const build=(rows:SourceRecord[])=>normalizeEngineeringModel('scope',rows.map(toObjectEvidence));
 
-it('covers every verified index row, excluding the repeated material header and joining split English cells',()=>{
-  expect(STANDARD_CATALOG.filter(i=>i.kind==='equipment')).toHaveLength(52);
+it('covers every verified index row, using the maintained workbook hierarchy and highlighted additions',()=>{
+  expect(STANDARD_CATALOG.filter(i=>i.kind==='equipment')).toHaveLength(53);
   expect(STANDARD_CATALOG.filter(i=>i.kind==='material')).toHaveLength(39);
-  expect(STANDARD_CATALOG.filter(i=>i.kind==='construction')).toHaveLength(30);
-  expect(standardTerms('MetalFence')[0].evidence.termCells).toEqual(['D41','E41']);
-  expect(standardTerms('Airduct')[0].evidence.pdfPage).toBe(13);
+  expect(STANDARD_CATALOG.filter(i=>i.kind==='construction')).toHaveLength(40);
+  expect(standardTerms('MetalFence')[0].evidence.termCells).toEqual(['C37']);
+  expect(standardTerms('Airduct')[0].evidence.sheet).toBe('材料模型索引表');
   expect(standardTerms('均压屏蔽装置')).toHaveLength(2);
 });
 it.each(STANDARD_CATALOG.flatMap(item=>[item.term,item.label].map(name=>({item,name}))))('recognizes $name from structured source declarations',({item,name})=>{
@@ -40,7 +40,7 @@ it('recovers a part under the declared equipment despite an incorrect source par
   const view=projectEngineeringComposition(result,[],'project'),entity=view.nodes.get(view.rowsByEntity.get(owner.id)![0])!;
   expect(entity.children.map(key=>view.nodes.get(key)?.sourceId)).toContain('radiator');expect(entity.entityCount).toBe(1);
   const inventory=projectInventoryTemplate(result,rows.map(r=>({id:r.id,parent:r.parent,title:r.name,documentPath:r.source,sourceType:r.source_type})));
-  expect(inventory.nodes.get(inventory.rowsBySource.get('radiator')!)?.parent).toBe(inventory.rowsByEntity.get(owner.id)![0]);
+  const partGroup=inventory.nodes.get(inventory.nodes.get(inventory.rowsBySource.get('radiator')!)!.parent!);expect(partGroup?.title).toBe('散热器');expect(partGroup?.parent).toBe(inventory.rowsByEntity.get(owner.id)![0]);
   expect(build([...rows].reverse())).toEqual(result);
 });
 it('supports numbered name fallback with a confirmed component term, while retaining host ambiguity',()=>{
@@ -57,5 +57,5 @@ it('keeps unlabelled components pending and creates only declared numbered candi
 });
 it('does not absorb an explicitly independent controller or silently choose a conflicting host declaration',()=>{
   const result=build([host(),host('other','2号主变','unit-2'),source('control','ControlCabinet',{name:'控制柜',properties:[field('OBJECTROLE','independent'),field('HOSTEQUIPMENTCODE','unit-1')]}),source('body','Body',{properties:[field('HOSTEQUIPMENTCODE','unit-1'),field('HOSTEQUIPMENTNAME','2号主变')]})]);
-  expect(result.entities.some(e=>e.sourceIds.length===1&&e.sourceIds[0]==='control')).toBe(true);expect(result.pending[0].reason).toBe('component_host_ambiguous');
+  expect(result.entities.some(e=>e.sourceIds.length===1&&e.sourceIds[0]==='control')).toBe(true);expect(result.pending[0].reason).toBe('component_host_conflict');
 });

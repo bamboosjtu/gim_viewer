@@ -2,7 +2,6 @@
 import {afterEach,expect,it,vi} from 'vitest';
 import {assembleEngineeringView,assembleStoredEngineeringView} from '../engineeringAssembly.js';
 import {extractEngineeringSourceGraph} from '../../gim/engineering/sourceGraph.js';
-import {collectSourceGeometryOccurrences} from '../../gim/engineering/geometryOccurrences.js';
 import * as composition from '../../engineering/composition.js';
 import * as sourceProjection from '../../gim/engineering/sourceProjection.js';
 import * as inventory from '../../gim/engineering/inventory.js';
@@ -25,7 +24,7 @@ it.each(['composition','source','inventory','inventory-search'] as const)('trans
   const restored=await decodeEngineeringWorkerResult(await encodeEngineeringWorkerResultAsync(result),()=>true);
   expect(restored.stageErrors?.[stage]).toContain('projection failure');
   expect(restored.snapshot.entities).toEqual(result.snapshot.entities);
-  expect(restored.geometryOccurrences).toEqual(collectSourceGeometryOccurrences(g));
+  expect('geometryOccurrences' in restored).toBe(false);
   expect(()=>assertEngineeringNavigation(restored.navigation,restored.sources,restored.snapshot)).toThrow('partial projection');
   if(stage!=='source')expect(restored.navigation.sourceRows.size).toBe(1);
   if(stage!=='inventory')expect(restored.navigation.inventory?.rowsBySource.size).toBe(1);
@@ -33,20 +32,20 @@ it.each(['composition','source','inventory','inventory-search'] as const)('trans
   await expect(decodeEngineeringWorkerResult(await encodeEngineeringWorkerResultAsync(restored),()=>true)).rejects.toThrow('child edge');
 });
 async function graph(){const files:Record<string,string>={'project.cbm':'OBJECTMODELPOINTER=a.dev','a.dev':'TYPE=GIS'};return extractEngineeringSourceGraph({paths:Object.keys(files),readText:async p=>files[p]});}
-it('publishes source tree and physical catalog after recognition fails, including source-cache restoration',async()=>{
+it('publishes the independent source tree after recognition fails, including source-cache restoration',async()=>{
   const g=await graph(),fail=()=>{throw Error('recognition failure');};
   const first=assembleEngineeringView('scope',g,[],[],[],fail);
   expect(first.stageErrors.recognition).toContain('recognition failure');expect(first.snapshot.recognitionCoverage?.processed).toBe(0);
   assertEngineeringPartition(first.snapshot,g.records.map(r=>r.id));
-  expect(first.navigation.sourceRows.size).toBe(1);expect(first.geometryOccurrences).toEqual(collectSourceGeometryOccurrences(g));
-  expect(assembleStoredEngineeringView('scope',first.sources,fail).geometryOccurrences).toEqual(first.geometryOccurrences);
+  expect(first.navigation.sourceRows.size).toBe(1);
+  expect(assembleStoredEngineeringView('scope',first.sources,fail).navigation.sourceRows.size).toBe(1);
 });
 it('isolates composition failure without altering semantics, source view or physical placement',async()=>{
   const g=await graph();vi.spyOn(composition,'projectEngineeringComposition').mockImplementationOnce(()=>{throw Error('projection failure');});
   const first=assembleEngineeringView('scope',g,[],[]);
   expect(first.stageErrors.composition).toContain('projection failure');expect(first.snapshot.entities).toHaveLength(1);expect(first.navigation.sourceRows.size).toBe(1);
   const other=assembleEngineeringView('scope',g,[],[],[],(scope,sources)=>{const s=normalizeEngineeringSources(scope,sources);s.entities[0].category='E06';return s;});
-  expect(other.geometryOccurrences).toEqual(first.geometryOccurrences);expect(g.records[0].source_type).toBe('GIS');
+  expect('geometryOccurrences' in other).toBe(false);expect(g.records[0].source_type).toBe('GIS');
 });
 it('revises identification from explicitly recovered family evidence without rebuilding physical occurrences',async()=>{
   const handle=createEngineeringWorkerHandler();await handle({type:'init',scope:'scope',paths:['project.cbm','a.dev','a.fam']});
@@ -61,7 +60,7 @@ it('revises identification from explicitly recovered family evidence without reb
   const recovered=await handle({type:'recognize-evidence'});if(recovered.type!=='model')throw Error('model expected');
   const result=await decodeEngineeringWorkerResult(recovered.result,()=>true);
   expect(result.sources.complete).toBe(true);expect(result.snapshot.entities[0].category).toBe('E06');
-  if(initial.type==='graph')expect(result.geometryOccurrences.occurrences.map(o=>o.id)).toEqual(initial.geometryOccurrences.occurrences.map(o=>o.id));
+  expect('geometryOccurrences' in result).toBe(false);
 });
 it('keeps evidence indexing off first geometry and parks reconstructible source facts after cache publication',async()=>{
   const attach=vi.spyOn(ModelEvidenceProvider.prototype,'attachGraph'),handle=createEngineeringWorkerHandler();

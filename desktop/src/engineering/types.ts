@@ -82,7 +82,7 @@ export interface ObjectInterpretation {
 
 export interface TermInterpretation {id?:string;status:'confirmed'|'candidate'|'unresolved';evidence:readonly string[]}
 export interface VocabularyObservation {
-  verification?:'verified'|'unverified'|'ambiguous';standardRef?:string;originalLocation?:string;
+  verification?:'verified'|'unverified'|'ambiguous';sourceLocation?:string;
   field:string;rawValue:string;status:'mapped'|'unresolved';evidenceId:string;dictionaryVersion:string;dictionaryEvidence?:string;
 }
 
@@ -107,7 +107,7 @@ export interface EngineeringEntity {
 }
 
 export interface StandardClassEvidence extends EvidenceValue {
-  id:string;kind:'equipment'|'material'|'construction';label:string;term:string;category:string;
+  id:string;kind:'equipment'|'material'|'construction';label:string;term:string;category:string;catalogCategory?:string;catalogGroup?:string;
 }
 
 export interface PendingWhole {

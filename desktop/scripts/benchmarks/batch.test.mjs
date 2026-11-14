@@ -29,7 +29,8 @@ test('HTML locates an incomplete heap by build, run, worker and observed delay w
   writeBatchReports(out,state,{root:options.root});
   const html=readFileSync(join(out,'report.html'),'utf8');
   assert.match(html,/cccccccc/);assert.match(html,/aaaaaaaaaaaa/);assert.match(html,/堆采样覆盖间隔超限/);
-  assert.match(html,/2158.7 ms/);assert.match(html,/1076.2 ms/);assert.match(html,/运行标识/);
+  assert.match(html,/2158.7 ms/);assert.match(html,/1076.2 ms/);
+  assert.doesNotMatch(html,/<th[^>]*>(输入|构建 \/ 源码|运行标识|层级|几何提交 s|缓存发布|来源覆盖|明细丢失|发布状态)<\/th>/);
   assert.doesNotMatch(html,/unverified-reason-omitted|private-worker|private-run/);
 });
 function run(sample,profileDigest){return {out:'private-run',dataRoot:'private-cache',report:benchmarkRun(sample.inputId,{version:undefined,
@@ -422,7 +423,7 @@ test('running batches checkpoint private authority and generate derived tables o
     assert.match(html,/recover-batch/);assert.match(html,/id="results"/);assert.match(html,/id="tab-coverage"/);
     assert.match(html,/id="search"/);assert.match(html,/data-status="RUNNING"/);
     assert.doesNotMatch(html,/private-name|protocol-test|sourceSha256|href="results.csv"/);
-    if(checked)assert.match(html,/data-status="PASS"[\s\S]*?<td>0\.012<\/td>/);
+    if(checked)assert.match(html,/data-status="PASS"[\s\S]*?<td class="number">0\.012<\/td>/);
     assert.doesNotMatch(readFileSync(join(out,'status.json'),'utf8'),/sourceSha256|private-name|sourcePath|protocol-test/);
     assert.equal(existsSync(join(out,'results.json')),false);checked++;
     return run(sample,profileDigest);

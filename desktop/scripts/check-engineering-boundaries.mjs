@@ -46,7 +46,7 @@ const viewerBridgeImports = new Set([
 ]);
 // Views may use explicit presentation selectors/formatters, never parsers or business classifiers.
 const uiPresentationValues = new Map([
-  ['engineering/catalogLabels.ts',new Set(['categoryLabel','classificationReasonLabel'])],
+  ['engineering/catalogLabels.ts',new Set(['categoryLabel','classificationReasonLabel','catalogPathLabel'])],
   ['gim/modelIdentity.ts',new Set(['resolveIfcModelId','findIfcEntryByModelId','normalizeEntryPath','normalizedIfcBasename'])],
   ['gim/linePathNormalize.ts',new Set(['getFileNameLower','normalizeGimPath'])],
   ['gim/gimValueSemantics.ts',new Set(['isGimEmptyValue'])],
@@ -57,7 +57,7 @@ for (const layer of ['engineering','gim','viewer','ui','services','app']) for (c
   const ast = ts.createSourceFile(path, readFileSync(path,'utf8'), ts.ScriptTarget.Latest, true);
   const localPath = relative(root, path).replaceAll('\\', '/');
   const pureLineProjection = ['services/lineInspectorProjection.ts','services/lineMapGeometry.ts','services/lineMapHitTesting.ts','services/lineMapStages.ts','services/inspectorMarkup.ts','services/propertyPresentation.ts'].includes(localPath);
-  const resolverFactories = new Set(['createEntryResolver']);
+  const resolverFactories = new Set(['createEntryResolver','createEntryIndex']);
   for (const statement of ast.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)
       || !statement.moduleSpecifier.text.endsWith('/entryResolver.js')) continue;

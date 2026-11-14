@@ -223,12 +223,14 @@ L2 可使用 `gim-batch-directories-v1`：`sampleTier` 固定为 `L2`，`directo
 - `summary.csv` 的每个时间指标同时给出 Median、P95、Count 和 Missing；P95 是该组重复轮次的经验最近秩，必须结合观测数量和覆盖状态判读。
 - 单次运行的 `report` 生成流水线概览、内存曲线与覆盖/阻塞证据；具体视图取决于输入是否包含 Trace 事件。批次 `report.html` 提供“测量结果 / 样本覆盖”两个 tab。
 - 覆盖汇总同时给出有效轮次和计划轮次，以及基础设施重试次数。少于计划轮次的中位数可供诊断，但不能冒充完整基线。
+- HTML 页头单列 GPU 采集范围，行内详情保留 GPU Pass Query 状态/有效样本数及表示探针的显存状态；完整字段另存 CSV / JSON。普通 Benchmark 默认不启用 GPU Timer Query，GPU 耗时未采集时不能写成零。当前表示探针的 `gpuBytes` 为 null / unsupported，进程 Private Bytes 和 CPU 几何缓冲都不是显存；已有批次没有记录显卡型号和驱动，报告明确标为“本批未记录”，不能以当前机器查询结果回填历史运行环境。GPU Query 有效样本数也不等同于 GPU 耗时。
+- HTML 不逐行重复输入标识、构建/源码、运行标识与层级，也不展开缓存发布、发布状态、来源覆盖等诊断列。构建与环境元数据在折叠区中保留，完整字段仍在 CSV / JSON；单轮不显示轮次列。问题列直接显示几何失败 occurrence 数、涉及来源数、未解析引用和测量缺口。`measurementDetailDropped=0` 仅表示未记录到测量事件容量丢失，不能据此判断模型无缺陷或详细时间线完整；详细状态以 `measurementDetailStatus` 为准。公开导出保留受控的 complete / aggregate-only / incomplete 状态与几何失败原因码。
 - `measurementDetailStatus=aggregate-only` 表示详细时间线因容量截断，但阶段聚合与任务闭环仍完整；内存采样另见 `memoryEvidenceComplete`。截断条数保留，产品 PASS/PARTIAL 不因此变成 INCONCLUSIVE。未确认的 Worker 尾批、序号缺口或聚合丢失仍使测量不完整。Worker 批次有连续 ID、确认和任务结束标记。
 - `aggregate-only` 的 PASS/PARTIAL **没有完整事件时间线**。基线审批要求 `aggregateComplete`、生命周期、必要内存和内容证据，不要求 `detailComplete`；`slow-tasks.csv`、`slow-phases.csv` 仅供诊断，不作为基线必需证据。聚合阶段不进入单次慢阶段榜。
 - `measurementLifecycleComplete` 与 `measurementComplete` 分开：意外 Worker 终止的在途任务、超时、无理由取消和异常迟到事件使生命周期不完整；有受控原因的项目切换/关闭或 AbortError 取消可以正常结算。DEV 精细请求主动终止 Worker 时按任务身份登记取消，不豁免池内其他任务。外来 run 和重复序号使事件传输不完整，不能被静默忽略。
 - `pendingCount`、`pendingSourceCount`、`pendingDigest` 单列；语义摘要已包括待归对象的身份、原因、来源、类别和 disposition。冷暖逐项比较 pending 证据。
 - `geometryStructuralFingerprint` 是结构指纹，不是顶点/索引内容校验。`devContentDigest` 聚合 DEV L0 GLB 的字节 SHA，`devContentCovered` 与 `devContentComplete` 标注实际覆盖；IFC/L2 内容不在该证据范围。
-- `automaticLoadMs` 是工程语义、导航、全部 IFC 与自动基础几何均已就绪的最晚产品事件时刻；缓存写入与几何编译并行，写入若在该时刻前完成，`writeDrainMs` 为零，但不意味着写入没有占用主线程。`settledMs` 是任务、缓存、后台及静默窗口全部完成时刻。样本覆盖 tab 同时列出自动表示、缓存发布和完全结算的中位数。
+- `automaticLoadMs` 是工程语义、导航、全部 IFC 与自动基础几何均已就绪的最晚产品事件时刻；缓存写入与几何编译并行，写入若在该时刻前完成，`writeDrainMs` 为零，但不意味着写入没有占用主线程。`settledMs` 是任务、缓存、后台及静默窗口全部完成时刻。HTML 主表保留导航、模型树、首次几何、自动表示、完全结算和进程峰值；基础几何、写入服务及测量证据放入行内详情，缓存发布时刻继续保存在 CSV / JSON。样本覆盖 tab 合并结果分布，汇总同覆盖轮次的核心指标。
 - `modelTreeReadyMs` 是工程组成投影首次可用（线路/设备取导航可用时刻）；`firstGeometryMs` 是首个几何可见；`allGeometryReadyMs` 是自动基础 DEV/IFC 表示均齐备的时刻。三者与 `cachePublishMs`、`settledMs` 分列；几何齐备是 wall time，可能含来源读取、调度和缓存写入背压，不冒充纯三角化耗时。不同样本的 `automaticLoadMs` 与写入重叠程度可不同，跨样本比较应同时阅读几何与缓存两条时间线。
 - 冷暖配对复用 SQLite 数据根和 WebView2 用户数据目录；IFC LOD 的 IndexedDB 缓存位于后者。cold 要求两者为空，warm 要求配对 profile 已存在且非空；缺失时报 `warm-webview-profile-unavailable` / INCONCLUSIVE，不启动伪暖开。旧的独立 WebView profile 运行条件不可与新口径比较。运行中的 `progress.private.json` 每 30 秒保留一次匿名状态快照，只存工作区私有目录。工程提取按实际来源进展续期；活动工程任务 60 秒没有进展时以 `product-stalled` 终结，且保存最后观测阶段。无活动工程任务而语义仍未就绪时，120 秒后标为 `engineering-progress-stalled` / INCONCLUSIVE。
 - 从未执行任务的 Worker 标为 `not-applicable / never-executed`；没有独立 JS isolate 的宿主或外部进程也标为 `not-applicable`。短命 Worker 标为 `short-lived / ended-before-heap-sample`；不填零。实际执行任务的 Worker 若仍缺堆证据则列出 `unavailable` 或 `missing`。一次成功采样不掩盖后续失败；失败次数、最大采样间隔或延迟超过两个周期时，该 Worker 的内存证据不完整。进程树采样失败会重试，并单列根进程 Private Bytes 作为下界，不冒充完整进程树峰值。`memoryIncompleteItems` 指明缺口；产品 PASS/PARTIAL 保留，正式内存比较和基线认可返回 INCONCLUSIVE。
@@ -433,7 +435,7 @@ system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，
 
 ## 相关文档
 
-- [性能测试指南](performance-guide.md)：SLO、冷/暖步骤与手工测试路线。
+- [性能测试指南](performance-guide.md)：性能口径、冷/暖步骤与手工测试路线。
 - [测量与 Benchmark](architecture/measurement.md)：采集面、完整性口径、Trace/Profile 与 SDK 前置门禁。
 - [性能样本登记](../benchmarks/README.md)：L0/L1/L2 目录、SHA 与运行示例。
 - [本地功能测试](../desktop/local-tests/README.md)：`test:local` 基础功能样本。
@@ -441,3 +443,5 @@ system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，
 - [验证](validation.md)：证据分层、自动门禁与真实复核。
 
 项目自有开发契约固定 v1。当前比较器不把缺失的可见几何时点换算为旧的模型提交时点；旧开发报告、策略格式和派生缓存不作兼容迁移。历史原始日志保留供人工核对，当前基线需重新构建并显式批准。
+
+来源物理目录提取阶段单独记录为 `engineering.physical-index`，包含首次所需的共享路径索引与 CBM/DEV 物理引用处理；完整语义图仍记录 `engineering.extract`。两者分别归因，不将分类归一化计作物理目录的必要工作。普通加载不生成或复核 STL 源字节证明；性能比较仍以开发者本地同口径实测为准。

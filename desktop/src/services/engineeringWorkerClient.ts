@@ -21,7 +21,6 @@ export interface EngineeringWorkerPort {
 
 /** Session-scoped RPC; close rejects all pending requests and releases the Worker. */
 export class EngineeringWorkerClient {
-  geometryOccurrences: SourceGeometryOccurrenceCatalog | null = null;
   private sequence = 0;
   private closed = false;
   private graphCache:TransportGraphCache={};
@@ -78,7 +77,7 @@ export class EngineeringWorkerClient {
   private send(command:EngineeringWorkerCommand,transfer:Transferable[]=[]):Promise<EngineeringWorkerResponse>{
     this.assertCurrent();const port=this.port;if(!port)return Promise.reject(Error('Engineering worker unavailable'));
     const requestId=++this.sequence;
-    return this.pending.request(requestId,()=>port.postMessage({...command,requestId},transfer),command.type==='extract'?60_000:120_000);
+    return this.pending.request(requestId,()=>port.postMessage({...command,requestId},transfer),['extract','extract-geometry'].includes(command.type)?60_000:120_000);
   }
   private request(command: EngineeringWorkerCommand, transfer: Transferable[] = []): Promise<EngineeringWorkerResponse> {
     if (this.closed || !this.isCurrent() || this.signal?.aborted) { this.close(); return Promise.reject(new DOMException('Engineering build cancelled', 'AbortError')); }
@@ -152,10 +151,13 @@ export class EngineeringWorkerClient {
     await this.request({ type: 'files', files }, [...new Set(files.flatMap(f => f.bytes ? [f.bytes.buffer as ArrayBuffer] : []))]);
   }
   async addPackedFiles(batch:EngineeringSourceBatch):Promise<void> {await this.request({type:'packed-files',batch});}
+  async extractGeometry():Promise<SourceGeometryOccurrenceCatalog>{
+    const response=await this.request({type:'extract-geometry'});
+    if(response.type!=='geometry')throw Error('Physical geometry catalog expected');return response.catalog;
+  }
   async extract(): Promise<EngineeringExtractSummary> {
     const response = await this.request({ type: 'extract' });
     if (response.type !== 'graph') throw Error('Engineering graph response expected');
-    this.geometryOccurrences = response.geometryOccurrences;
     return response.summary;
   }
   async encodeCache(buildId:number,domain:EngineeringCacheDomain,projection?:EngineeringNavigationCacheProjection):Promise<EngineeringCacheResult>{

@@ -1,3 +1,4 @@
+import {sourceGeometryCacheEntry,encodeSourceGeometryCache,decodeSourceGeometryCache} from './sourceGeometryCache.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
 import {isByteFile,copyByteFileBytes} from '@desktop/byteFile.js';
 import {ENGINEERING_SOURCE_BATCH_BYTES,ENGINEERING_SOURCE_BATCH_FILES} from './engineeringWorkerProtocol.js';
@@ -28,6 +29,7 @@ interface EngineeringJob {
   identity?: EngineeringCacheIdentity;
   update: () => void;
   beforeCacheWrite?: Promise<unknown>;
+  physicalCacheWrite?:Promise<void>;
   resolveGeometry(catalog: SourceGeometryOccurrenceCatalog | null): void;
   projectionReady: Promise<boolean>;
   resolveProjection(complete: boolean): void;
@@ -62,7 +64,6 @@ export async function ensureEngineeringEvidence(state:AppState,range:EvidenceRan
   }
   return result;
 }
-export async function readEngineeringEvidenceEntry(state:AppState,path:string){const job=evidenceJob(state);await job.ready;const inventory=await job.client.getEvidenceSnapshot([path]);if(!inventory.entries.some(e=>e.id===path))throw Error('Unknown evidence entry');await prepareEvidenceEntry(state,job,path);const bytes=await job.client.readEvidenceEntry(path);if(!current(state,job))throw Error('Stale evidence session');return bytes;}
 const semanticPath = (path: string) => /\.(?:cbm|dev|fam)$/i.test(path);
 export const ENGINEERING_PARSER_CONTRACT = `${SUBSTATION_PARSER_DOMAIN_VERSION}|${SUBSTATION_SPATIAL_SEMANTIC_VERSION}`;
 
@@ -121,7 +122,7 @@ async function saveResult(state: AppState, job: EngineeringJob, result: Engineer
 async function finishBuild(state:AppState,job:EngineeringJob,result:EngineeringBuildResult):Promise<void>{
   if(!currentBuild(state,job,result))return;
   job.finished=true;
-  try{await saveResult(state,job,result);}finally{
+  try{await saveResult(state,job,result);await job.physicalCacheWrite;}finally{
     // Retain metadata/checkpoint; an idle reconstructible Worker can terminate.
     await job.client.releaseModel?.(result.buildId);
     if(currentBuild(state,job,result)){state.engineeringBuildPending=false;job.update();
@@ -145,7 +146,6 @@ function publish(state: AppState, job: EngineeringJob, result: EngineeringBuildR
   if(finalNavigation){result.navigation.compositionComplete=true;result.navigation.compositionCoverage='full';job.resolveProjection(true);
     perfMarkProductMoment('engineeringTreeReady',{available:true,source:'engineering-publish'});}
   state.engineeringPipelineMetrics=result.metrics?{...result.metrics,caches:[]}:null;
-  state.engineeringGeometryCatalog = result.geometryOccurrences; job.resolveGeometry(result.geometryOccurrences);
   state.engineeringRepresentationChanged?.();
   state.engineeringStatus = result.sources.complete&&!Object.keys(result.stageErrors??{}).length ? 'ready' : 'partial';
   state.engineeringError = Object.entries(result.stageErrors??{}).map(([stage,error])=>`${stage}: ${error}`).join('\n');
@@ -233,7 +233,7 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
   let resolveEvidence!:EngineeringJob['resolveEvidence'];
   const evidenceReady=new Promise<void>(resolve=>{resolveEvidence=resolve;});
   const projectionReady=new Promise<boolean>(resolve=>{resolveProjection=resolve;});
-  state.engineeringGeometryReady = new Promise(resolve => { resolveGeometry = resolve; }); state.engineeringGeometryCatalog = null;
+  state.sourceGeometryReady = new Promise(resolve => { resolveGeometry = resolve; }); state.sourceGeometryCatalog = null;
   const session = state.captureProjectSession(), controller = new AbortController();
   if (typeof Worker === 'undefined' && !options.createWorker) {
     state.engineeringBuildPending=false;
@@ -259,37 +259,8 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
   state.engineeringTreeStatus = 'loading';
   state.engineeringPipelineMetrics=null;
   const run = async () => {
-    await client.init(session.sourceSha256 || `session:${session.generation}`, [...files.keys()]);job.resolveEvidence();
-    if (job.identity) {
-      const { readCachedEntry } = await import('@desktop/database.js');
-      const reads = await Promise.allSettled([
-        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'sources')),
-        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'entities')),
-        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'navigation')),
-      ]);
-      if (!current(state, job)) return;
-      if (reads[0].status === 'fulfilled') {
-        try {
-          const result = await client.restore(reads[0].value, reads[1].status === 'fulfilled' ? reads[1].value : undefined, job.identity, reads[2].status === 'fulfilled' ? reads[2].value : undefined);
-          if (!current(state, job)) return;
-          if (!result.sources.complete || !engineeringSourceCacheMatchesFiles(result.sources, files.keys())) {
-            // Never turn a decoded-but-IFC-less body into a partial "hit".
-            // Fall through to a controlled rebuild from the actual inventory.
-            state.engineeringCacheStatus = 'partial';
-            state.engineeringCacheError = '缓存来源未覆盖当前 IFC 清单，已从来源重建';
-          } else {
-            // A source-only restore is not a full warm hit: entity/navigation
-            // were rebuilt from the source body and still need re-encoding.
-            const completeHit = result.entityCacheHit === true && result.navigationCacheHit === true;
-            state.engineeringCacheStatus = completeHit ? 'hit' : 'partial';
-            if (!completeHit) state.engineeringCacheError = '部分缓存命中：实体/导航缓存已从来源重建';
-            publish(state, job, result);
-            await finishBuild(state,job,result); return;
-          }
-        } catch (error) { if (!current(state, job)) return; state.engineeringCacheError = String(error); }
-      }
-      state.engineeringCacheStatus = 'miss'; update();
-    }
+    const initialized=client.init(session.sourceSha256 || `session:${session.generation}`, [...files.keys()]).then(()=>job.resolveEvidence());
+    void initialized.catch(()=>{});
     const prepareEntries = async(entries:Array<[string,File]>) => {
     // Bounded source batches; native lazy reads use the existing binary batch IPC.
     for (let offset = 0; offset < entries.length;) {
@@ -331,10 +302,76 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
       }else await client.addPackedFiles({blob,entries:ranges});
     }
     };
-    await prepareEntries([...files].filter(([path])=>semanticPath(path)&&! /\.fam$/i.test(path)));
+    let physical:SourceGeometryOccurrenceCatalog|undefined;
+    if(job.identity){
+      try{const {readCachedEntry}=await import('@desktop/database.js');
+        physical=await decodeSourceGeometryCache(await readCachedEntry(session.projectId!,sourceGeometryCacheEntry(job.identity.sourceSha256)),job.identity.sourceSha256,files);
+      }catch{/* Rebuild only the small physical directory; semantic caches are independent. */}
+    }
+    if(!current(state,job))return;
+    let prepared=false;
+    if(!physical){
+      await initialized;
+      await prepareEntries([...files].filter(([path])=>/\.(?:cbm|dev)$/i.test(path)));prepared=true;
+      if(!current(state,job))return;
+      try{physical=await client.extractGeometry();}catch(error){
+        if(!current(state,job))return;
+        resolveGeometry(null);perfMark('来源物理目录失败',{reason:String(error)});
+      }
+    }
+    if(!current(state,job))return;
+    if(physical){
+      state.sourceGeometryCatalog=physical;resolveGeometry(physical);update();
+      perfMark('来源物理目录就绪',{occurrences:physical.occurrences.length,diagnostics:physical.diagnostics.length});
+      if(job.identity&&prepared&&!physical.diagnostics.some(d=>d.reason==='source-read-failed')){
+        // Cache persistence is a background publication, never a render prerequisite.
+        const catalog=physical;
+        job.physicalCacheWrite=Promise.resolve(job.beforeCacheWrite).then(async()=>{
+          await new Promise<void>(resolve=>setTimeout(resolve,0));
+          if(!current(state,job))return;
+          const bytes=await encodeSourceGeometryCache(job.identity!.sourceSha256,catalog);if(!bytes)return;
+          const {writeCacheFile}=await import('@desktop/database.js');
+          if(current(state,job))await writeCacheFile(session.projectId!,sourceGeometryCacheEntry(job.identity!.sourceSha256),bytes,job.identity!.sourceSha256);
+        }).catch(error=>{if(current(state,job))perfMark('来源物理目录缓存未写入',{reason:String(error)});});
+      }
+    }
+    // Allow the independently resolved geometry consumer to dispatch work first.
+    await new Promise<void>(resolve=>setTimeout(resolve,0));
+    await initialized;
+    if (job.identity) {
+      const { readCachedEntry } = await import('@desktop/database.js');
+      const reads = await Promise.allSettled([
+        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'sources')),
+        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'entities')),
+        readCachedEntry(session.projectId!, engineeringCacheEntry(job.identity, 'navigation')),
+      ]);
+      if (!current(state, job)) return;
+      if (reads[0].status === 'fulfilled') {
+        try {
+          prepared=false;
+          const result = await client.restore(reads[0].value, reads[1].status === 'fulfilled' ? reads[1].value : undefined, job.identity, reads[2].status === 'fulfilled' ? reads[2].value : undefined);
+          if (!current(state, job)) return;
+          if (!result.sources.complete || !engineeringSourceCacheMatchesFiles(result.sources, files.keys())) {
+            // Never turn a decoded-but-IFC-less body into a partial "hit".
+            // Fall through to a controlled rebuild from the actual inventory.
+            state.engineeringCacheStatus = 'partial';
+            state.engineeringCacheError = '缓存来源未覆盖当前 IFC 清单，已从来源重建';
+          } else {
+            // A source-only restore is not a full warm hit: entity/navigation
+            // were rebuilt from the source body and still need re-encoding.
+            const completeHit = result.entityCacheHit === true && result.navigationCacheHit === true;
+            state.engineeringCacheStatus = completeHit ? 'hit' : 'partial';
+            if (!completeHit) state.engineeringCacheError = '部分缓存命中：实体/导航缓存已从来源重建';
+            publish(state, job, result);
+            await finishBuild(state,job,result); return;
+          }
+        } catch (error) { if (!current(state, job)) return; state.engineeringCacheError = String(error); }
+      }
+      state.engineeringCacheStatus = 'miss'; update();
+    }
+    if(!prepared)await prepareEntries([...files].filter(([path])=>semanticPath(path)&&! /\.fam$/i.test(path)));
     const graph = await client.extract();
     if (!current(state, job)) return;
-    if (client.geometryOccurrences) { state.engineeringGeometryCatalog = client.geometryOccurrences; resolveGeometry(client.geometryOccurrences); update(); }
     const familyPaths=new Set(graph.familyPaths??[...files.keys()].filter(path=>/\.fam$/i.test(path)));
     await prepareEntries([...files].filter(([path])=>familyPaths.has(path)));
     if (!current(state, job)) return;

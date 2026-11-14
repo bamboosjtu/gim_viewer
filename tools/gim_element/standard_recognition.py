@@ -10,17 +10,15 @@ from standard_sources import Reader,identity
 HOME=Path(sys._MEIPASS) if getattr(sys,'frozen',False) else Path(__file__).resolve().parent
 def asset(name):return json.loads((HOME/(name+'.json')).read_text(encoding='utf-8'))
 CATALOG=asset('catalog');STANDARD=asset('standardCatalog');RULES=asset('catalogRules');VOCAB=asset('sourceVocabulary');ALIASES=asset('sourceTypeAliases');PROXIES=asset('proxyCategories')
-LABELS={c['code']:c['label'] for c in CATALOG['categories']};TERMS=collections.defaultdict(list)
+LABELS={c['code']:c['label'] for c in CATALOG['semanticCodes']};TERMS=collections.defaultdict(list)
 def norm(value):return re.sub(r'\s+','',unicodedata.normalize('NFKC',value)).casefold()
 for item in STANDARD['items']:
-    names=[item['term'],item['label'],*item['term'].split('/')]
-    if item['annex'] in ('C.24','B.41'):names+=item['label'].split('/')
-    if item['annex']=='D.14':names+=['防火墙']
+    names=[item['term'],item['label'],*item['term'].split('/'),*item['aliases']]
     for name in names:
         key=norm(name)
         if item not in TERMS[key]:TERMS[key].append(item)
 NAME_RULES=[(cat,re.compile(pattern,re.I)) for cat,pattern in RULES['nameRules']]
-REFINEMENTS={'E-T':['E01','E03'],'E-R':['E02','E11'],'E16':['E16.terminal_box','E16.panel_cabinet','E16.control_cabinet','E16.battery_set','E16.protection'],'C-B4':['C-B2','C-B3','C-B9'],'C-B5':['C-B6','C-B7'],'C-A1':['C-C1','C-C4'],'C-A2':['C-C1','C-C5','C-B3'],'C-A5':['C-C1','M08']}
+REFINEMENTS={'E-T':['E01','E03'],'E-R':['E02','E11'],'E16':['E16.terminal_box','E16.panel_cabinet','E16.control_cabinet','E16.battery_set','E16.protection'],'C-B4':['C-B2','C-B3','C-B9'],'C-B5':['C-B6','C-B7'],'C-A1':['C-C1','C-C4'],'C-A2':['C-C1','C-C5','C-B3'],'C-A5':['C-C1','M08'],'C-A4':['C-A4.steel'],'C-A3':['C-A3.steel']}
 def compatible(coarse,fine):return coarse==fine or fine in REFINEMENTS.get(coarse,[])
 COMPONENTS={**VOCAB['components'],**{k:v['componentType'] for k,v in VOCAB['keywordDictionary']['entries'].items() if 'componentType' in v}}
 def values(row,*keys):
@@ -48,7 +46,7 @@ def name_category(name,standard_fallback=True):
     category=groups[-1][2] if groups else 'U-OBJECT'
     matches=TERMS.get(norm(text),[])
     if not matches:
-        matches=[item for item in STANDARD['items'] if len(item['label'])>=3 and item['label'] in text]
+        matches=[item for item in STANDARD['items'] if len(item['label'])>=2 and item['label'] in text]
         if matches:
             longest=max(len(i['label']) for i in matches);matches=[i for i in matches if len(i['label'])==longest]
     if standard_fallback and len({i['id'] for i in matches})==1:
@@ -68,7 +66,7 @@ def category_value(value,allow_name=False):
     return ('E-T' if alias=='E01' else alias) if alias else name_category(value) if allow_name else 'U-OBJECT'
 def interpret(row,has_children=False):
     type=row['source_type'];props=values(row,'TYPE','DEVICETYPE','EQUIPMENTTYPE','设备类型','设备类别','材料类型','构件类型','MATERIALTYPE','SYSCLASSIFYNAME','PARTNAME')
-    props=[dict(p,confidence='candidate') if any(k.upper() in ('SYSCLASSIFYNAME','PARTNAME') for k in p['keys']) and not (VOCAB['keywordDictionary']['entries'].get(p['value'].strip().casefold(),{}).get('evidence',{}).get('verification')=='verified' and VOCAB['keywordDictionary']['entries'].get(p['value'].strip().casefold(),{}).get('evidence',{}).get('originalLocation')) else p for p in props]
+    props=[dict(p,confidence='candidate') if any(k.upper() in ('SYSCLASSIFYNAME','PARTNAME') for k in p['keys']) and not (VOCAB['keywordDictionary']['entries'].get(p['value'].strip().casefold(),{}).get('evidence',{}).get('verification')=='verified' and VOCAB['keywordDictionary']['entries'].get(p['value'].strip().casefold(),{}).get('evidence',{}).get('sourceLocation')) else p for p in props]
     declarations=[{'keys':['source_type'],'value':type,'path':row['source'],'line':0},*props]
     standard=[(item,p) for p in declarations for item in TERMS.get(norm(p['value']),[])];unique={i['id']:i for i,p in standard}
     component=[(COMPONENTS[p['value'].strip().casefold()],p) for p in declarations if p['value'].strip().casefold() in COMPONENTS]
@@ -128,7 +126,7 @@ def interpret(row,has_children=False):
     if status=='confirmed' and typed=='U-OBJECT' and structured and all(p.get('confidence')=='candidate' for c,p in structured):status='candidate'
     result={'category':category,'meaning':meaning,'basis':basis,'conflict':'object_attributes_conflict' if basis=='attribute_conflict' else '', 'classificationStatus':status,'categoryStatus':status,'classificationEvidence':list(dict.fromkeys(evidence)), 'sourceName':row['name']}
     if len(unique)==1:
-        item=next(iter(unique.values()));result['standardClass']={**{k:item[k] for k in ['id','kind','term','label','category']},'status':'candidate' if all(p.get('confidence')=='candidate' for i,p in standard) else 'confirmed','evidence':[proof(row,p) for i,p in standard]}
+        item=next(iter(unique.values()));result['standardClass']={**{k:item[k] for k in ['id','kind','term','label','category','catalogCategory','catalogGroup']},'status':'candidate' if all(p.get('confidence')=='candidate' for i,p in standard) else 'confirmed','evidence':[proof(row,p) for i,p in standard]}
     if len({c for c,p in component})==1:result['componentType']={'id':component[0][0],'status':'candidate' if all(p.get('confidence')=='candidate' for c,p in component) else 'confirmed','evidence':[proof(row,p) for c,p in component]}
     return result
 
@@ -244,18 +242,48 @@ def scan_standard(root,scope=None):
     reasons=(['source-cycle'] if reader.diagnostics else [])+(['source-reference-unresolved'] if any(r['status'] not in ('resolved','entry-fallback') for r in reader.references) else [])
     return {'schema':'gim-element-standard-v1','scope':scope,'engine':{'implementation':'independent-python','rulesVersion':snapshot['rulesVersion'],'standardCatalogVersion':STANDARD['version']},'snapshot':snapshot,'sources':[{k:r.get(k,'') for k in ['id','track','name','source','parent','source_type','attributeOnly','attributeContextId']} for r in records],'sourceAliases':reader.aliases,'sourceReferences':reader.references,'sourceDiagnostics':reader.diagnostics,'complete':not reasons,'incompleteReasons':reasons,'inventory':{**{ext:sum(p.lower().endswith('.'+ext) for p in reader.files) for ext in ['cbm','dev','fam','ifc']},'physicalDevRoots':sum(r['track']=='dev' and not r['parent'] and not r.get('attributeOnly') for r in records),'attributeSources':sum(bool(r.get('attributeOnly')) for r in records),'entries':len(reader.files)}}
 
+INDEX_BY_ID={row['id']:row for row in STANDARD['items']}
+SEMANTIC_BY_CODE={row['code']:row for row in CATALOG['semanticCodes']}
+PART_BY_ID={row['id']:row for row in CATALOG['components']}
+PART_BY_TERM={row['term'].lower():row for row in CATALOG['components']}
+def catalog_location(entity):
+    code=entity.get('category','U-PENDING');definition=SEMANTIC_BY_CODE.get(code,{})
+    item=INDEX_BY_ID.get((entity.get('standardClass') or {}).get('id'))
+    if item and not (item['category']==code or item['category'].startswith(code+'.') or code.startswith(item['category']+'.') or item['category']=='E-T' and code in ('E01','E03') or item['category']=='E-R' and code in ('E02','E11')):item=None
+    if code.startswith('U'):item=None
+    if not item:item=INDEX_BY_ID.get(definition.get('catalogId'))
+    matches=[row for row in STANDARD['items'] if row['category']==code]
+    if not item and len(matches)==1:item=matches[0]
+    if item:return {'kind':item['kind'],'group':item['catalogGroup'],'category':item['catalogCategory'],'label':item['label'],'id':item['id'],'order':item['order']}
+    family=definition.get('catalogFamily')
+    if matches and len({(row['kind'],row['catalogCategory']) for row in matches})==1:family={'kind':matches[0]['kind'],'label':matches[0]['catalogCategory']}
+    if family:return {'kind':family['kind'],'group':{'equipment':'设备','material':'材料','construction':'构件'}[family['kind']],'category':family['label'],'label':'类型待确认','id':code,'order':999}
+    kind={'equipment':'equipment','materials':'material','components':'construction'}.get(definition.get('group'),'unknown')
+    return {'kind':kind,'group':{'equipment':'设备','material':'材料','construction':'构件','unknown':'其他'}[kind],'category':'类别待确认','label':'类型待确认','id':code,'order':999}
+
 def ledger_from_standard(data):
-    groups=('设备','装置性材料','构件','其他');snapshot=data['snapshot'];sources={s['id']:s for s in data['sources']};members={m['sourceId']:m for m in snapshot['memberships']};rows=[];totals={g:{'dev':0,'ifc':0,'已确认':0,'候选':0,'未确认':0} for g in groups};tree=[]
+    groups=('设备','材料','构件','其他');snapshot=data['snapshot'];sources={s['id']:s for s in data['sources']};members={m['sourceId']:m for m in snapshot['memberships']};rows=[];totals={g:{'dev':0,'ifc':0,'已确认':0,'候选':0,'未确认':0} for g in groups};tree=[]
     for e in [*snapshot['entities'],*snapshot['pending']]:
-        code=e.get('category','U-PENDING');group=groups[0] if code.startswith('E') else groups[1] if code.startswith('M') else groups[2] if code.startswith('C') else groups[3];ids=e['sourceIds'];track='dev' if any(sources[i]['track']=='dev' for i in ids) else 'ifc';status='未确认' if code.startswith('U') else '已确认' if e.get('classificationStatus')=='confirmed' and e.get('boundaryStatus')=='confirmed' else '候选';name=e.get('name','待归整体集合');label=LABELS.get(code,'待归整体');standard=e.get('standardClass') or {}
-        rows.append({'group':group,'cat':label,'sub':standard.get('label',''),'template':name,'code':code,'stdcat':label,'std_sub':'','dev':int(track=='dev'),'ifc':int(track=='ifc'),'total':1,'st':{status:1},'samples':[[track,name,'; '.join(sorted({sources[i]['source'] for i in ids})),sources[ids[0]]['source_type'] if ids else '',status,e['id']]],'files':[[sources[i]['source'],1] for i in ids],'entityId':e['id'],'standardClass':standard})
-        totals[group][track]+=1;totals[group][status]+=1;tree.append({'id':e['id'],'name':name,'category':code,'pending':'category' not in e,'parts':[{'sourceId':i,'name':sources[i]['name'],'type':sources[i]['source_type'],'source':sources[i]['source'],'rawParent':sources[i]['parent'],'interpretation':members[i]['interpretation']} for i in ids]})
-    totals['设备'].update({'台数':sum(e['category'].startswith('E') for e in snapshot['entities']),'附件并入':sum(m['interpretation']['meaning']=='neutral_set' and m['disposition']=='whole_member' for m in snapshot['memberships']),'部件上卷':sum(m['interpretation']['meaning']=='part' and m['disposition']=='whole_member' for m in snapshot['memberships'])})
+        pending='category' not in e;code=e.get('category','U-PENDING');ids=e['sourceIds'];track='dev' if any(sources[i]['track']=='dev' for i in ids) else 'ifc';name=e.get('name','待归整体集合')
+        classification=e
+        if pending:
+            known=next((members[i]['interpretation'].get('standardClass') for i in ids if members[i]['interpretation'].get('standardClass')),None)
+            if known:classification={'category':known['category'],'standardClass':known}
+        catalog=catalog_location(classification);group=catalog['group'];label=catalog['category'];sub='' if catalog['label']==label else catalog['label']
+        status='未确认' if pending or code.startswith('U') else '已确认' if e.get('classificationStatus')=='confirmed' and e.get('boundaryStatus')=='confirmed' and (e.get('standardClass') or {}).get('status')!='candidate' else '候选'
+        counted=int(not pending)
+        parts=[]
+        for i in ids:
+            meaning=members[i]['interpretation'];component=(meaning.get('componentType') or {}).get('id') or PART_BY_TERM.get((meaning.get('standardClass') or {}).get('term','').lower(),{}).get('id');part_label=PART_BY_ID.get(component,{}).get('label') or (meaning.get('standardClass') or {}).get('label') or '未识别部件'
+            parts.append({'sourceId':i,'name':sources[i]['name'],'type':sources[i]['source_type'],'source':sources[i]['source'],'rawParent':sources[i]['parent'],'interpretation':meaning,'componentLabel':part_label,'componentOrder':PART_BY_ID.get(component,{}).get('order',999)})
+        rows.append({'group':group,'cat':label,'sub':sub,'template':name,'code':code,'stdcat':label,'std_sub':'','catalogId':catalog['id'],'catalogOrder':next((c['order'] for c in CATALOG['categories'] if c['kind']==catalog['kind'] and c['label']==label),999),'modelOrder':catalog['order'],'dev':int(track=='dev')*counted,'ifc':int(track=='ifc')*counted,'total':counted,'st':{status:1},'samples':[[track,name,'; '.join(sorted({sources[i]['source'] for i in ids})),sources[ids[0]]['source_type'] if ids else '',status,e['id']]],'files':[[sources[i]['source'],1] for i in ids],'entityId':e['id'],'standardClass':e.get('standardClass') or {}})
+        totals[group][track]+=counted;totals[group][status]+=1;tree.append({'id':e['id'],'name':name,'category':code,'catalog':catalog,'pending':pending,'parts':parts})
+    totals['设备'].update({'台数':sum(catalog_location(e)['kind']=='equipment' for e in snapshot['entities']),'附件并入':sum(m['interpretation']['meaning']=='neutral_set' and m['disposition']=='whole_member' for m in snapshot['memberships']),'部件上卷':sum(m['interpretation']['meaning']=='part' and m['disposition']=='whole_member' for m in snapshot['memberships'])})
     buckets={}
     for row in rows:
         template=unicodedata.normalize('NFKC',row['template']);template=re.sub(r'\d+(?:\.\d+)?\s*(?:kv|千伏|mm|cm|毫米)|\d+(?:\.\d+)?(?:[x×*]\d+(?:\.\d+)?)+|\d+','',template,flags=re.I);template=re.sub(r'[_\-—.。、,，:：/\\()（）\s]+','',template).strip('#号第') or row['template']
-        key=(row['group'],row['code'],row['sub'],template)
+        key=(row['group'],row['cat'],row['sub'],template)
         if key not in buckets:row['template']=template;row['entityIds']=[row['entityId']];buckets[key]=row;continue
-        old=buckets[key];old['dev']+=row['dev'];old['ifc']+=row['ifc'];old['total']+=1;old['samples']+=row['samples'];old['files']+=row['files'];old['entityIds'].append(row['entityId'])
+        old=buckets[key];old['dev']+=row['dev'];old['ifc']+=row['ifc'];old['total']+=row['total'];old['samples']+=row['samples'];old['files']+=row['files'];old['entityIds'].append(row['entityId'])
         for status,count in row['st'].items():old['st'][status]=old['st'].get(status,0)+count
     return {'rows':list(buckets.values()),'totals':totals,'entityTree':tree,'recognition':data,'stats':{'cbm文件':data['inventory']['cbm'],'dev文件':data['inventory']['dev'],'fam文件':data['inventory']['fam'],'ifc文件':data['inventory']['ifc'],'来源对象':len(sources),'整体':len(snapshot['entities']),'待归整体':len(snapshot['pending']),'仅来源':sum(m['disposition']=='source_only' for m in snapshot['memberships'])}}

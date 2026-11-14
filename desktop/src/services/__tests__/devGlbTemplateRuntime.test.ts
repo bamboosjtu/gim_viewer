@@ -49,10 +49,9 @@ function makeNestedTemplate(): THREE.Group {
   return root;
 }
 
-it('rejects a template if its session expires during source verification',async()=>{
+it('rejects a template if its session expires during parsing',async()=>{
   let current=true;const scene=makeNestedTemplate();
-  const pool=new DevGlbTemplatePool({parse:async()=>({scene,animations:[]}),isCurrent:()=>current,
-    verifySourceEnvelope:async()=>{await Promise.resolve();current=false;}});
+  const pool=new DevGlbTemplatePool({parse:async()=>{await Promise.resolve();current=false;return{scene,animations:[]};},isCurrent:()=>current});
   expect(await pool.prepare('DEV/a.dev',new Uint8Array([1]))).toBeNull();
   expect(pool.metrics().templateShareableCount).toBe(0);
 });

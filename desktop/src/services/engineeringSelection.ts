@@ -1,3 +1,4 @@
+import {componentDefinition} from '../engineering/catalogLabels.js';
 import {setRenderVisibility} from '../viewer/demandRendering.js';
 import { reportBackgroundError } from '../utils/backgroundErrors.js';
 import { loadPresentation } from './presentationPort.js';
@@ -8,6 +9,28 @@ import { devRepresentationHint } from '../viewer/devRepresentationIdentity.js';
 import type { SourceRecord } from '../gim/engineering/sourceEvidence.js';
 import { engineeringSourceRecord } from './engineeringViewService.js';
 import { representationEvidenceState } from '../engineering/representations.js';
+
+function propertyText(value:unknown):string {
+  if(value==null)return '—';
+  if(Array.isArray(value))return value.map(propertyText).join('；');
+  if(typeof value==='object'){
+    const item=value as Record<string,unknown>;
+    if('value' in item)return propertyText(item.value);
+    return Object.entries(item).filter(([key])=>!['expressID','type','GlobalId'].includes(key)).map(([key,v])=>`${key}：${propertyText(v)}`).join('；');
+  }
+  return String(value);
+}
+function propertyRows(value:unknown):[string,string][]{
+  if(Array.isArray(value))return value.flatMap(item=>propertyRows(item));
+  if(value&&typeof value==='object'){
+    const item=value as Record<string,unknown>;
+    if(item.HasProperties)return propertyRows(item.HasProperties);
+    if(item.Name&&'NominalValue' in item)return [[propertyText(item.Name),propertyText(item.NominalValue)]];
+    if(item.name&&'value' in item)return [[propertyText(item.name),propertyText(item.value)]];
+    return Object.entries(item).filter(([key])=>!['expressID','type','GlobalId','OwnerHistory'].includes(key)).map(([key,v])=>[key,propertyText(v)]);
+  }
+  return value==null?[]:[['值',propertyText(value)]];
+}
 
 interface Context {
   generation: number;
@@ -224,18 +247,13 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
   const declaredContexts = groupNode && 'declaredContextIds' in groupNode ? groupNode.declaredContextIds : undefined;
   const { renderEngineeringInspector } = await loadPresentation('engineeringInspector');
   if (!guard.isCurrent()) return true;
-  const interpretation=single?snapshot.memberships.find(m=>m.sourceId===single.id)?.interpretation:undefined;
-  renderEngineeringInspector({ title: groupNode?.title || entity?.name || single?.name || '未命名工程对象', entity, pending, sources: selectedSources,
-    evidenceSummary:interpretation?[['设备类型',interpretation.equipmentType?.id??'未确认'],['部件类型',interpretation.componentType?.id??'未确认'],['工程用途',interpretation.purpose?.id??'未确认']]:undefined,
-    projectionInferred: groupNode && 'inferred' in groupNode ? groupNode.inferred : entity
-      ? state.engineeringNavigation?.composition.rowsByEntity.get(entity.id)?.some(key => state.engineeringNavigation?.composition.nodes.get(key)?.inferred) : false,
+  renderEngineeringInspector({ title: groupNode?.title || entity?.name || single?.name || (pending?'待归属对象':'未命名对象'), entity, pending, sources: selectedSources,
+    parts:entity?[...new Set(snapshot.memberships.filter(m=>m.ownerId===entity.id&&['part','neutral_set'].includes(m.interpretation.meaning)).map(m=>componentDefinition(m.interpretation)?.label??m.interpretation.standardClass?.label??(selectedSources.find(s=>s.id===m.sourceId)?.name||'未命名部件')))]:undefined,
     group: groupNode ? { entityCount: groupNode.entityCount, pendingCount: ownerIds.size - groupNode.entityCount,
-      confirmedCount:'confirmedCount' in groupNode?groupNode.confirmedCount:undefined,
-      attachmentCount:'attachmentCount' in groupNode?groupNode.attachmentCount:undefined,
       declarations: [...new Set((declaredContexts ?? []).flatMap((id:string) => {
         const document = representations.contextDocuments.get(id); return document ? [document] : [];
       }))].map(document => ({ title: groupNode.title, document })) } : undefined,
-    partial: !sources.complete, geometryNote: '按来源成员解析表示；缺失或不可分离的范围保留状态。',
+    partial: !sources.complete, geometryNote: '可定位或单独显示当前对象。',
     relationships: snapshot.relationships.filter(r => ownerIds.has(r.from) || ownerIds.has(r.to)),
     relatedNames: new Map(snapshot.entities.map(entity => [entity.id, entity.name])),
     onFit: () => { if (guard.isCurrent()) void Promise.resolve(updateEngineeringHighlight(state, request, true, true)).catch(reportBackgroundError); },
@@ -265,19 +283,18 @@ export async function selectEngineeringTarget(state: AppState, target: { kind: '
       if (!runtime) throw Error('该来源的模型尚未准备好，请在加载后重试');
       const properties = await runtime.properties(ref.expressId);
       if (!guard.isCurrent()) throw new DOMException('选择已变化', 'AbortError');
-      return {values:{ 原始属性: properties.attributes, 属性集: properties.propertySets, 类型属性: properties.typeProperties, 材料: properties.materials }};
+      return {sections:[{title:'基本属性',rows:propertyRows(properties.attributes)},{title:'属性集',rows:propertyRows(properties.propertySets)},{title:'类型属性',rows:propertyRows(properties.typeProperties)},{title:'材料',rows:propertyRows(properties.materials)}]};
     } : single?.track==='dev' ? async(cursor)=>{
       if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
-      const [{ensureEngineeringEvidence,queryEngineeringEvidence},{requirementContext}]=await Promise.all([import('./engineeringService.js'),import('../standards/requirements.js')]);
+      const {ensureEngineeringEvidence,queryEngineeringEvidence}=await import('./engineeringService.js');
       if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
       const entryIds=[...new Set(single.properties.map(p=>p.path).filter((p):p is string=>!!p&&/\.fam$/i.test(p)))];
-      const range={entryIds,kinds:['attributes','assignments'] as const};
+      const range={entryIds,kinds:['attributes'] as const};
       const revision=cursor?.revision??(await ensureEngineeringEvidence(state,range)).revision;
       if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
       const page=await queryEngineeringEvidence(state,{range,revision,offset:cursor?.offset,limit:200});
       if(!guard.isCurrent())throw new DOMException('选择已变化','AbortError');
-      const model=single.properties.find(p=>p.keys?.some(k=>['模型类型','MODELTYPE'].includes(k.toUpperCase())))?.value;
-      return {incomplete:page.coverage.some(row=>row.materialization!=='materialized'||row.status!=='complete'),next:page.nextOffset===undefined?undefined:{revision:page.revision,offset:page.nextOffset},values:{来源覆盖:page.coverage,原始及解析属性:page.attributes,属性归属:page.assignments,标准要求上下文:requirementContext({standardVersion:'Q/GDW 11810.1—2023',equipmentType:interpretation?.equipmentType?.id,modelType:model==='通用模型'?'generic':model==='产品模型'?'product':undefined})}};
+      return {incomplete:page.coverage.some(row=>row.materialization!=='materialized'||row.status!=='complete'),next:page.nextOffset===undefined?undefined:{revision:page.revision,offset:page.nextOffset},sections:[{title:'详细属性',rows:page.attributes.map(attribute=>[attribute.rawKey,attribute.rawValue] as [string,string])}]};
     } : undefined,
   });
   if (!state.initialized) return true;

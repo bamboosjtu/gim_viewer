@@ -57,7 +57,7 @@ it('keeps packed extraction identical across shared references and discards prio
  expect(await packed({type:'extract'})).toEqual(await legacy({type:'extract'}));
  const results=await Promise.all([packed,legacy].map(async handler=>{
   const reply=await handler({type:'assemble',objects:[],models:[]});if(reply.type!=='model')throw Error('model expected');
-  const result=await decodeEngineeringWorkerResult(reply.result,()=>true);return{sources:result.sources,snapshot:result.snapshot,navigation:result.navigation,geometryOccurrences:result.geometryOccurrences};
+  const result=await decodeEngineeringWorkerResult(reply.result,()=>true);return{sources:result.sources,snapshot:result.snapshot,navigation:result.navigation};
  }));expect(results[0]).toEqual(results[1]);
  await packed({type:'init',scope:'new',paths:['project.cbm']});await expect(packed({type:'extract'})).rejects.toThrow('unavailable');
 });

@@ -11,29 +11,6 @@ import {createDevWorkerMock} from './helpers/devWorker.js';
 const ownedRuntimes = new Set<DevLodRuntime>();
 vi.mock('../geometryPresentationService.js',()=>({observeFirstGeometry:vi.fn(async()=>{})}));
 
-it('releases parsed geometry on source verification failure without deleting a valid cache on cancellation',async()=>{
-  const {webcrypto}=await import('node:crypto');vi.stubGlobal('crypto',webcrypto);
-  const {serializeDevToGlbDetailed}=await import('../glbCacheService.js'),cache=await import('@desktop/devLodCache.js');
-  const files=new Map(Object.entries({
-    'DEV/a.dev':'SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.phm','PHM/a.phm':'SOLIDMODELS.NUM=1\nSOLIDMODEL0=a.mod',
-    'MOD/a.mod':'<Device><Entities><Entity ID="1"><Cuboid L="1000" W="1000" H="1000"/></Entity></Entities></Device>',
-  }).map(([path,text])=>[path,new File([text],path)]));
-  const result=await serializeDevToGlbDetailed('DEV/a.dev',files),sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',result.bytes!.slice().buffer as ArrayBuffer))).map(n=>n.toString(16).padStart(2,'0')).join('');
-  const remove=vi.spyOn(cache,'deleteDevArtifact').mockResolvedValue(undefined);
-  try{for(const warm of [false,true]){
-    const {internal}=fixture(),key=internal.key('DEV/a.dev',0),release=vi.fn();
-    internal.worker=createDevWorkerMock({compile:vi.fn(async()=>result)});
-    internal.wanted.add(key);internal.catalogHint=async()=>({status:'miss'});internal.prepareMissingTemplateSources=async()=>{};
-    internal.templateStore.cacheReader.read=async()=>({status:warm?'hit':'miss',value:warm?{result,sha}:undefined,release});
-    internal.templateStore.options.verifySourceEnvelope=async()=>{await Promise.resolve();if(warm){internal.state.isCurrentSession=()=>false;throw new DOMException('expired','AbortError');}throw Error('source mismatch');};
-    const disposed=vi.spyOn(THREE.BufferGeometry.prototype,'dispose');
-    try{
-      await expect(internal.template('DEV/a.dev',0,0)).rejects.toThrow(warm?'expired':'source mismatch');
-      expect(disposed).toHaveBeenCalledOnce();expect(release).toHaveBeenCalledOnce();expect(remove).not.toHaveBeenCalled();
-      expect(internal.templateStore.inputBudget.bytes).toBe(0);expect(internal.templateStore.pending.size).toBe(0);
-    }finally{disposed.mockRestore();}
-  }}finally{remove.mockRestore();vi.unstubAllGlobals();}
-});
 afterEach(() => {
   for (const runtime of ownedRuntimes) runtime.release();
   ownedRuntimes.clear();
@@ -187,32 +164,13 @@ it('protects the first real model frame, then overlaps automatic L1 with remaini
   internal.firstModelPresented=false;internal.fineRequested.add('one');internal.update();expect(row.desired).toBe(2);
 });
 
-it('stops source prefetch at high pressure, including a reply already in flight', async () => {
-  const {internal} = fixture(); internal.session.projectId = 7;
-  const files = new Map([['MOD/a.mod', new File(['abc'], 'a.mod')]]);
-  const database = await import('@desktop/database.js');
-  const read = vi.spyOn(database, 'batchReadCachedFiles').mockImplementation(async () => {
-    internal.memoryPressure = 'critical';
-    return new Map([['MOD/a.mod', new Uint8Array([1,2,3])]]);
-  });
-  try {
-    internal.memoryPressure = 'high';
-    expect(await internal.sources.preloadSources(files)).toBe(files); expect(read).not.toHaveBeenCalled();
-    internal.memoryPressure = 'normal';
-    const output = await internal.sources.preloadSources(files);
-    expect(read).toHaveBeenCalledOnce(); expect(output.get('MOD/a.mod')).toBe(files.get('MOD/a.mod'));
-  } finally { read.mockRestore(); }
-});
-
-it.each([2,3,4])('materializes only exact source lengths in prefetch and recovery (returned bytes=%s)',async length=>{
+it.each([2,3,4])('materializes only exact source lengths in targeted recovery (returned bytes=%s)',async length=>{
   const {internal}=fixture();internal.session.projectId=7;internal.worker=createDevWorkerMock();
   const original={size:3,name:'a.dev',text:vi.fn().mockResolvedValue('SOLIDMODELS.NUM=0')} as unknown as File;
   const files=new Map([['DEV/a.dev',original]]);internal.sources.sourceFiles=files;
   const database=await import('@desktop/database.js');
   const read=vi.spyOn(database,'batchReadCachedFiles').mockResolvedValue(new Map([['DEV/a.dev',new Uint8Array(length).fill(32)]]));
   try{
-    const prefetched=await internal.sources.preloadSources(files);
-    expect(prefetched.get('DEV/a.dev')===original).toBe(length!==3);
     await internal.prepareMissingTemplateSources('DEV/a.dev');
     const installed=internal.worker.installSources.mock.calls[0][0] as Map<string,File>;
     expect(installed.has('DEV/a.dev')).toBe(length===3);
@@ -246,77 +204,6 @@ it.each([false, true])('batches reachable lazy sources for a cache miss (cold=%s
     await internal.prepareMissingTemplateSources('DEV/c.dev');
     expect(read).toHaveBeenCalledTimes(4);
   } finally {read.mockRestore();}
-});
-
-it('prepares immutable sources only for a confirmed missing derived catalog, retaining authoritative failures and healthy warm reads', async () => {
-  const {internal} = fixture(); internal.session.projectId=7;
-  const cache=await import('@desktop/devLodCache.js'), database=await import('@desktop/database.js');
-  const file={size:3,name:'a.dev',arrayBuffer:vi.fn()} as unknown as File;
-  const files=new Map([['DEV/a.dev',file]]);
-  const catalog=vi.spyOn(cache,'readDevArtifactBatch');
-  const read=vi.spyOn(database,'batchReadCachedFiles').mockResolvedValue(new Map([['DEV/a.dev',new Uint8Array([1,2,3])]]));
-  try {
-    for (const status of ['hit','read-error','invalid','deferred'] as const) {
-      expect(await internal.prepareSources(files,[{status,value:status==='hit'?{}:undefined}])).toBe(files);
-    }
-    expect(read).not.toHaveBeenCalled();
-    const prepared=await internal.prepareSources(files,[{status:'miss'}]);
-    expect(prepared.get('DEV/a.dev')).toBeInstanceOf(File);
-    expect(new Uint8Array(await prepared.get('DEV/a.dev').arrayBuffer())).toEqual(new Uint8Array([1,2,3]));
-    expect(read).toHaveBeenCalledOnce(); expect(file.arrayBuffer).not.toHaveBeenCalled();
-    expect(catalog).not.toHaveBeenCalled();
-    internal.state.isCurrentSession=()=>false;
-    expect(await internal.prepareSources(files,[{status:'miss'}])).toBe(files);
-    expect(read).toHaveBeenCalledOnce();
-  } finally {catalog.mockRestore();read.mockRestore();}
-});
-
-it('bounds source prefetch by indexed bytes, keeps oversized and unknown sources lazy and tolerates individual missing replies', async () => {
-  const {internal}=fixture(); internal.session.projectId=7;
-  const database=await import('@desktop/database.js');
-  const sources=new Map(['DEV/a.dev','MOD/a.mod','MOD/b.mod','MOD/large.mod','MOD/unknown.mod'].map((path,i)=>[path,{size:[3,3*1024*1024,3*1024*1024,9*1024*1024,0][i],name:path} as File]));
-  const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(async(_project,paths)=>new Map(paths.map(path=>[path,path==='MOD/a.mod'?null:new Uint8Array(path==='DEV/a.dev'?3:3*1024*1024)])));
-  try {
-    const prepared=await internal.sources.preloadSources(sources);
-    expect(read.mock.calls.map(call=>call[1])).toEqual([['DEV/a.dev','MOD/a.mod'],['MOD/b.mod']]);
-    expect(prepared.get('DEV/a.dev')).toBeInstanceOf(File);expect(prepared.get('MOD/b.mod')).toBeInstanceOf(File);
-    for(const path of ['MOD/a.mod','MOD/large.mod','MOD/unknown.mod'])expect(prepared.get(path)).toBe(sources.get(path));
-  } finally {read.mockRestore();}
-});
-it('upgrades partial L0 cache recovery once after enough real RPC demand, never for L1 or a large workset', async () => {
-  const {internal}=fixture();internal.diagnostics.uniqueDevSources=100;
-  const source={size:3,name:'a.mod'} as File;
-  internal.sources.sourceFiles=new Map([['MOD/a.mod',source]]);
-  internal.worker=createDevWorkerMock();
-  const prefetch=vi.spyOn(internal.sources,'preloadSources').mockResolvedValue(new Map([['MOD/a.mod',new File(['abc'],'a.mod')]]));
-  for(let i=0;i<40;i++)internal.recoverMissingSources(String(i),1);
-  expect(prefetch).not.toHaveBeenCalled();
-  for(let i=0;i<32;i++)internal.recoverMissingSources(String(i),0);
-  expect(prefetch).not.toHaveBeenCalled();
-  internal.worker.diagnostics.rpcReads=40;internal.recoverMissingSources('33',0);await Promise.resolve();
-  expect(prefetch).toHaveBeenCalledOnce();expect(internal.worker.installSources).toHaveBeenCalledOnce();
-  internal.recoverMissingSources('34',0);expect(prefetch).toHaveBeenCalledOnce();
-  internal.sources.sourceRecoveryAttempted=false;
-  internal.sources.sourceFiles=new Map(Array.from({length:5},(_,i)=>[`MOD/${i}.mod`,{size:8*1024*1024} as File]));
-  internal.recoverMissingSources('35',0);expect(prefetch).toHaveBeenCalledOnce();
-  internal.sources.sourceRecoveryAttempted=false;internal.sources.sourceFiles=new Map([['MOD/a.mod',source]]);
-  let finish!:(files:Map<string,File>)=>void;prefetch.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
-  internal.recoverMissingSources('36',0);internal.state.isCurrentSession=()=>false;
-  finish(new Map([['MOD/a.mod',new File(['abc'],'a.mod')]]));await Promise.resolve();
-  expect(internal.worker.installSources).toHaveBeenCalledOnce();
-});
-it('a stalled optional source batch cannot become a startup gate, and late replies do not install sources', async () => {
-  vi.useFakeTimers();const {internal}=fixture();internal.session.projectId=7;
-  const database=await import('@desktop/database.js');
-  const files=new Map([['DEV/a.dev',{size:3,name:'a.dev'} as File]]);
-  let finishRead!:(value:any)=>void;
-  const read=vi.spyOn(database,'batchReadCachedFiles').mockImplementation(()=>new Promise(resolve=>{finishRead=resolve;}));
-  try {
-    const preparing=internal.sources.preloadSources(files);await vi.advanceTimersByTimeAsync(10_000);
-    const result=await preparing;expect(result.get('DEV/a.dev')).toBe(files.get('DEV/a.dev'));
-    finishRead(new Map([['DEV/a.dev',new Uint8Array([1,2,3])]]));await Promise.resolve();
-    expect(result.get('DEV/a.dev')).toBe(files.get('DEV/a.dev'));expect(vi.getTimerCount()).toBe(0);
-  } finally {read.mockRestore();vi.clearAllTimers();vi.useRealTimers();}
 });
 
 it('correlates cold/warm GLB decoding, placement and cache writes without changing geometry identity', async () => {
@@ -494,14 +381,6 @@ it('isolates a missing geometry reference with its source evidence',()=>{
   expect(internal.state.geometryDiagnosticsByDevPath.get('dev/9.dev')).toMatchObject({
     status:'failed',reason:'missing-dependency',detail:expect.stringMatching(/^source-reference-missing-v1:/),
   });
-});
-it('prefetches DEV sources while IFC is pending with bounded reads',async()=>{
-  const {internal}=fixture();internal.session.projectId=7;internal.state.ifcBackgroundPending=true;
-  const files=new Map([['DEV/a.dev',new File(['abc'],'a.dev')]]);
-  const database=await import('@desktop/database.js');
-  const read=vi.spyOn(database,'batchReadCachedFiles').mockResolvedValue(new Map([['DEV/a.dev',new Uint8Array([1,2,3])]]));
-  try{await internal.sources.preloadSources(files);expect(read).toHaveBeenCalledOnce();}
-  finally{read.mockRestore();}
 });
 
 it('ordinary selection stays at L0/L1 and only explicit refinement requests L2', async () => {

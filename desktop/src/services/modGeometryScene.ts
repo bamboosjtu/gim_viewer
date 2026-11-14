@@ -7,13 +7,7 @@ import { DEBUG_IFC_LOAD } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { applyProjectSourceToViewer } from './coordinateAlignmentService.js';
 
-/**
- * 异常 bbox 尺寸阈值（米）。
- *
- * DEV 粒度合并几何可合法包含全站系统（电缆沟/消防管网等，跨度 100m+），
- * 阈值需覆盖站点尺度（500m 覆盖特大型变电站）；
- * 单位错误类损坏（mm/m 混淆）通常为 km 级，仍可拦截。
- */
+/** 超过此尺寸时检查数值精度；尺寸本身不判定源模型错误。 */
 export const BBOX_MAX_DIM_M = GEOMETRY_MAX_EXTENT_M;
 
 /**

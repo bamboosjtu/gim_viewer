@@ -1,3 +1,6 @@
+import {parseSourceDocument,type SourceDocument} from './sourceDocuments.js';
+import {createEntryIndex,type EntryIndex} from '../entryResolver.js';
+export type {SourceDocument} from './sourceDocuments.js';
 import { parseFamSectionsWithDiagnostics } from '../famParser.js';
 import { resolveBaseFamilyReferences } from '../gimValueSemantics.js';
 import type { ObjectNameEvidence, SourceAlias } from '../../engineering/types.js';
@@ -6,6 +9,8 @@ import type { SourceProperty, SourceRecord } from './sourceEvidence.js';
 export interface SourceFileReader {
   /** Actual archive paths, including files not reached by CBM GUID references. */
   paths: readonly string[];
+  entryIndex?:EntryIndex;
+  readDocument?(path:string):Promise<SourceDocument>;
   readText(path: string): Promise<string>;
 }
 export interface SourceReference {
@@ -15,13 +20,6 @@ export interface SourceReference {
   target: string | null;
   candidates: string[];
   status: 'resolved' | 'missing' | 'ambiguous';
-}
-export interface SourceDocument {
-  attributeStatus?:'complete'|'partial';
-  path: string;
-  /** Physical source lines, including sections, placeholders and malformed rows. */
-  rawLines: string[];
-  fields: Array<SourceProperty & { keys: readonly string[]; path: string }>;
 }
 export interface CbmOccurrence {
   id: string;
@@ -45,7 +43,6 @@ export interface EngineeringSourceGraph {
   diagnostics: Array<{ kind: 'cycle' | 'missing-object-model' | 'read-failed'; source: string }>;
 }
 
-const normalizePath = (value: string) => value.trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').toLowerCase();
 const ordered = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 /** Logical attribute sources and physical sources have independent addresses. */
 export function engineeringSourceRecords(graph:EngineeringSourceGraph,extra:readonly SourceRecord[]=[]):SourceRecord[]{return [...graph.records,...graph.attributeRecords??[],...extra];}
@@ -56,25 +53,10 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   const maxDepth = options.maxDepth ?? 128;
   const result: EngineeringSourceGraph = { documents: [], cbmOccurrences: [], records: [], aliases: [], references: [],
     ifcPaths: files.paths.filter(p => /\.ifc$/i.test(p)).sort(ordered), diagnostics: [], familyAssignments: [] };
-  const exact = new Map<string, string[]>();
-  const basename = new Map<string, string[]>();
   options.onProgress?.('source-index');
-  let indexed=0;
-  for (const path of [...files.paths].sort(ordered)) {
-    if(++indexed%1024===0)options.onProgress?.('source-index');
-    for (const [map, key] of [[exact, normalizePath(path)], [basename, normalizePath(path).split('/').pop()!]] as const) {
-      const hits = map.get(key) ?? []; hits.push(path); map.set(key, hits);
-    }
-  }
+  const entryIndex=files.entryIndex??createEntryIndex([...files.paths].sort(ordered));
   function resolve(owner: string, field: string, value: string): string | null {
-    const parent = owner.includes('/') ? owner.slice(0, owner.lastIndexOf('/')) : '';
-    const ref = value.replace(/\.ifc\$$/i, '.ifc');
-    let candidates: string[] = [];
-    for (const key of [normalizePath(parent ? `${parent}/${ref}` : ref), normalizePath(ref)]) {
-      candidates = exact.get(key) ?? [];
-      if (candidates.length) break;
-    }
-    if (!candidates.length) candidates = basename.get(normalizePath(ref).split('/').pop()!) ?? [];
+    const candidates=entryIndex.candidates(value.replace(/\.ifc\$$/i,'.ifc'),owner);
     const target = candidates.length === 1 ? candidates[0] : null;
     result.references.push({ owner, field, value, target, candidates: [...candidates], status: target ? 'resolved' : candidates.length ? 'ambiguous' : 'missing' });
     return target;
@@ -83,15 +65,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   function document(path: string): Promise<SourceDocument> {
     let promise = cache.get(path);
     if (!promise) {
-      promise = files.readText(path).then(text => {
-        const rawLines = text.split(/\r?\n/);
-        const fields = rawLines.flatMap((rawLine, index) => {
-          const line = rawLine.replace(/^\uFEFF/, '').trim();
-          const at = line.indexOf('=');
-          return at > 0 ? [{ path, line: index + 1, keys: [line.slice(0, at).trim()], value: line.slice(at + 1).trim(), rawLine }] : [];
-        });
-        const doc = { path, rawLines, fields }; result.documents.push(doc); return doc;
-      });
+      promise=(files.readDocument?files.readDocument(path):files.readText(path).then(text=>parseSourceDocument(path,text))).then(doc=>{result.documents.push(doc);return doc;});
       cache.set(path, promise);
     }
     return promise;

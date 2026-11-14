@@ -35,7 +35,6 @@ export interface EngineeringBuildResult {
   sources: EngineeringSources;
   snapshot: EngineeringSnapshot;
   navigation: EngineeringNavigationData;
-  geometryOccurrences: SourceGeometryOccurrenceCatalog;
   navigationCacheHit?: boolean;
   entityCacheHit?: boolean;
   buildId?: number;
@@ -50,6 +49,7 @@ export type EngineeringWorkerCommand =
   | { type: 'init'; scope: string; paths: string[];graphReferences?:boolean }
   | { type: 'files'; files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }> }
   | { type: 'packed-files'; batch: EngineeringSourceBatch }
+  | { type: 'extract-geometry' }
   | { type: 'extract' }
   | { type:'evidence-snapshot';entryIds?:readonly string[] }
   | { type:'evidence-query';query:EvidenceQuery }
@@ -68,7 +68,8 @@ export type EngineeringWorkerReply =
   | {type:'evidence';snapshot?:EvidenceInventory;page?:EvidencePage;bytes?:Uint8Array}
   | { type: 'ready' }
   | { type: 'progress'; stage: 'source-index'|'source-traverse'|'source-sort'; completed: number }
-  | { type: 'graph'; summary: EngineeringExtractSummary; geometryOccurrences: SourceGeometryOccurrenceCatalog }
+  | { type:'geometry';catalog:SourceGeometryOccurrenceCatalog }
+  | { type: 'graph'; summary: EngineeringExtractSummary }
   | { type: 'model'; result: EngineeringWorkerPayload }
   | { type: 'cache'; result: EngineeringCacheResult }
   | { type: 'error'; message: string };

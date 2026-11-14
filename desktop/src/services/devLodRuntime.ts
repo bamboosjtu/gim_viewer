@@ -1,5 +1,4 @@
 import {setRenderVisibility,requestObjectRender} from '../viewer/demandRendering.js';
-import { verifyDevGlbSourceEnvelope } from './devGlbSourceEvidence.js';
 import { createLazyGeometrySourceFiles } from './modGeometrySourceFiles.js';
 import { loadPresentation } from './presentationPort.js';
 import { deleteDevArtifact, readDevArtifactBatch, readDevArtifactResult, type DevArtifactRead } from '@desktop/devLodCache.js';
@@ -14,7 +13,7 @@ import { BoxViewIndex } from '../viewer/boxViewIndex.js';
 import { DevInstanceBatches } from '../viewer/devInstanceBatches.js';
 import { chooseDeviceLod, createDeviceViewContext, deviceViewMetrics, type DeviceLod } from '../viewer/devLodPolicy.js';
 import { pickVisibleDevRoot } from '../viewer/devViewportPick.js';
-import { invalidGeometryBounds, stlSourceEnvelope } from '../viewer/geometryBounds.js';
+import { invalidGeometryBounds } from '../viewer/geometryBounds.js';
 import { addModHighlightGroup, removeModHighlightGroup, resetModHighlight } from '../viewer/highlight.js';
 import type { ViewerContext } from '../viewer/viewerEngine.js';
 import { createDevGeometryPreprocessor, type DevGeometryPreprocessor } from './devGeometryWorkerClient.js';
@@ -72,8 +71,6 @@ export class DevLodRuntime {
   private updateWriteDiagnostics(...args: Parameters<DevLodArtifactWriter['updateWriteDiagnostics']>): ReturnType<DevLodArtifactWriter['updateWriteDiagnostics']> { return this.artifactWriter.updateWriteDiagnostics(...args); }
   private persistArtifact(...args: Parameters<DevLodArtifactWriter['persistArtifact']>): ReturnType<DevLodArtifactWriter['persistArtifact']> { return this.artifactWriter.persistArtifact(...args); }
   private template(...args: Parameters<DevLodTemplateStore['template']>): ReturnType<DevLodTemplateStore['template']> { return this.templateStore.template(...args); }
-  private prepareSources(...args: Parameters<DevLodSourceWorkset['prepareSources']>): ReturnType<DevLodSourceWorkset['prepareSources']> { return this.sources.prepareSources(...args); }
-  private recoverMissingSources(...args: Parameters<DevLodSourceWorkset['recoverMissingSources']>): ReturnType<DevLodSourceWorkset['recoverMissingSources']> { return this.sources.recoverMissingSources(...args); }
   private prepareMissingTemplateSources(...args: Parameters<DevLodSourceWorkset['prepareMissingTemplateSources']>): ReturnType<DevLodSourceWorkset['prepareMissingTemplateSources']> { return this.sources.prepareMissingTemplateSources(...args); }
 
   private readonly batchEnabled = isDevInstanceBatchesEnabled();
@@ -196,8 +193,8 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
   constructor(private state: AppState, private ctx: ViewerContext, private session: ProjectLoadSession, private status: (text: string, detail?: string) => void) {
     this.sourceIdentity = session.sourceSha256 ?? '';
     this.artifactWriter = new DevLodArtifactWriter({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), requestReady: () => this.requestReady(), taskIdentity: (...args) => this.taskIdentity(...args), recordCacheDecision: (...args) => this.recordCacheDecision(...args) });
-    this.templateStore = new DevLodTemplateStore({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), memoryPressure: () => this.memoryPressure, worker: () => this.worker, key: (...args) => this.key(...args), pinned: () => this.pinned(), isWanted: key => this.wanted.has(key), taskIdentity: (...args) => this.taskIdentity(...args), catalogHint: dev => this.catalogHint(dev), markEmptyDev: dev => this.markEmptyDev(dev), recoverMissingSources: (...args) => this.recoverMissingSources(...args), prepareMissingTemplateSources: dev => this.prepareMissingTemplateSources(dev), recordCacheDecision: (...args) => this.recordCacheDecision(...args), persistsTemplate: (...args) => this.persistsTemplate(...args), persistArtifact: (...args) => this.persistArtifact(...args), reportDiagnostic: diagnostic => setGeometryDiagnostic(this.state, diagnostic), verifySourceEnvelope: (dev,scene) => verifyDevGlbSourceEnvelope(scene,dev,this.sources.sourceFiles,this.current) });
-    this.sources = new DevLodSourceWorkset({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), memoryPressure: () => this.memoryPressure, hasMemorySources: () => this.state.currentFiles != null, ifcPending: () => this.state.ifcBackgroundPending, worker: () => this.worker });
+    this.templateStore = new DevLodTemplateStore({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), memoryPressure: () => this.memoryPressure, worker: () => this.worker, key: (...args) => this.key(...args), pinned: () => this.pinned(), isWanted: key => this.wanted.has(key), taskIdentity: (...args) => this.taskIdentity(...args), catalogHint: dev => this.catalogHint(dev), markEmptyDev: dev => this.markEmptyDev(dev), prepareMissingTemplateSources: dev => this.prepareMissingTemplateSources(dev), recordCacheDecision: (...args) => this.recordCacheDecision(...args), persistsTemplate: (...args) => this.persistsTemplate(...args), persistArtifact: (...args) => this.persistArtifact(...args), reportDiagnostic: diagnostic => setGeometryDiagnostic(this.state, diagnostic) });
+    this.sources = new DevLodSourceWorkset({ session, perf: this.perf, diagnostics: this.diagnostics, current: () => this.current(), memoryPressure: () => this.memoryPressure, worker: () => this.worker });
     this.readiness = new DevLodReadiness(() => this.rows, (dev, lod) => this.key(dev, lod), message => { this.diagnostics.errors.push(message); if (this.diagnostics.errors.length > 32) this.diagnostics.errors.shift(); });
     this.catalogDone = new Promise(resolve => { this.finishCatalog = resolve; });
     this.anchorDone = new Promise(resolve => { this.finishAnchor = resolve; });
@@ -304,12 +301,8 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     // use the same bounded immutable File workset as freshly extracted sources.
     const seeds = await getSourceGeometryOccurrences(this.state, this.session);
     if (!this.current()) return;
-    this.diagnostics.sourcePlacementWarnings = this.state.engineeringGeometryCatalog?.diagnostics.length ?? 0;
-    const preparingSources = this.state.currentFiles ? this.prepareSources(files) : null;
+    this.diagnostics.sourcePlacementWarnings = this.state.sourceGeometryCatalog?.diagnostics.length ?? 0;
     this.sources.sourceFiles = files;
-    // Preparation is optional and overlaps worker initialization/base work.
-    // Suppress a second recovery while this bounded preparation is in flight.
-    this.sources.sourceRecoveryAttempted = true;
     this.worker = createDevGeometryPreprocessor(
       this.state,
       this.session,
@@ -335,12 +328,6 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     this.diagnostics.occurrences = seeds.length;
     this.diagnostics.uniqueDevSources = byDev.size;
     this.notifyCoordinateAnchor(); this.update(); // Compilation can begin before any IFC is ready.
-    if (preparingSources) {
-      const prepared = await preparingSources;
-      if (!this.current()) return;
-      if (prepared !== files) this.worker.installSources(prepared);
-    }
-    this.sources.sourceRecoveryAttempted = [...files.values()].every(file => file instanceof File);
     const catalogEntries = [...byDev];
     // Main transformers / GIS / arresters are the visual anchors of a station;
     // their catalog bounds must not be left behind hundreds of small rows.
@@ -423,14 +410,6 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         if (!devs.length) continue;
         const reads = await readDevArtifactBatch<DevSourceBounds>('catalog', devs.map(dev => this.catalogKey(dev)), this.session, 4 * 1024 * 1024);
         if (!(reads instanceof Map)) throw new Error('catalog prefetch returned no map');
-        if (start === 0 && !this.state.currentFiles && devs.every(dev => reads.get(this.catalogKey(dev))?.status === 'miss')) {
-          this.sources.sourceRecoveryAttempted = true;
-          // Optional preparation overlaps remaining catalog reads and workers;
-          // failed or late source reads never gate directory consumption.
-          void this.prepareSources(files, devs.map(dev => reads.get(this.catalogKey(dev))!)).then(prepared => {
-            if (this.current()) this.worker.installSources(prepared);
-          }).catch(error => { if (this.current()) console.warn('[DEV source preparation]', error); });
-        }
         devs.forEach(dev => {
           const key = this.catalogKey(dev);
           const read = reads.get(key);
@@ -627,7 +606,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
           instanceKey: row.entry.instanceKey, placementMatrix: row.entry.placementMatrix, projectSourceToViewerMatrix: this.anchor
         });
         const worldBounds = template.bounds.clone().applyMatrix4(group.matrix);
-        const invalidPlacement = invalidGeometryBounds(worldBounds, stlSourceEnvelope(template.template.scene)?.applyMatrix4(group.matrix));
+        const invalidPlacement = invalidGeometryBounds(worldBounds);
         if (invalidPlacement) { group.clear(); throw Error(`DEV placement rejected: ${row.entry.rootOccurrence}: ${invalidPlacement}`); }
         group.userData.deviceLod = lod;
         group.name = row.entry.instanceKey;

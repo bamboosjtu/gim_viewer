@@ -10,7 +10,9 @@ import type { EngineeringBuildResult, EngineeringCacheDomain, EngineeringCacheRe
 import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import { projectEngineeringNavigation } from '../gim/engineering/navigation.js';
 import { applyNavigationCacheProjection, decodeEngineeringNavigation, encodeEngineeringNavigation } from './engineeringNavigationCache.js';
-import { collectSourceGeometryOccurrences } from '../gim/engineering/geometryOccurrences.js';
+import {extractPhysicalOccurrences} from '../gim/engineering/physicalOccurrences.js';
+import {SourceDocuments} from '../gim/engineering/sourceDocuments.js';
+import {createEntryIndex,type EntryIndex} from '../gim/entryResolver.js';
 import { encodeEngineeringWorkerResultAsync, engineeringWorkerResultTransfers,type TransportGraphCache } from './engineeringWorkerTransport.js';
 import type {EvidenceStatus,EvidenceInventory} from '../engineering/evidence.js';
 
@@ -26,6 +28,13 @@ export function createEngineeringWorkerHandler(){
   let latest:{result:EngineeringBuildResult;identity?:EngineeringCacheIdentity;digest?:string;plan:EngineeringCacheDomain[]}|undefined;
   const files=new Map<string,Blob|Uint8Array>();
   const batches=new EngineeringSourceBatches();
+  let entryIndex:EntryIndex|undefined;
+  let sourceTrace:WorkerTaskProbe=NOOP_TASK;
+  let lastSourceYield=0;
+  const documents=new SourceDocuments(async path=>{
+    if(performance.now()-lastSourceYield>=8){await new Promise<void>(resolve=>setTimeout(resolve,0));lastSourceYield=performance.now();}
+    return readFamily(path,sourceTrace);
+  });
   let evidence:ModelEvidenceProvider|undefined;
   let lastSources:EngineeringSources|undefined;
   let graphReferences=false,wireGraph:TransportGraphCache={};
@@ -103,7 +112,7 @@ export function createEngineeringWorkerHandler(){
       provider().restoreMetadata(checkpoint.snapshot);return {type:'ready'};
     }
     if(request.type==='release-model'){if(request.buildId===undefined||latest?.result.buildId===request.buildId){latest=undefined;compact();}return {type:'ready'};}
-    if(request.type==='init'){scope=request.scope;paths=request.paths;files.clear();batches.clear();graph=null;latest=undefined;lastSources=undefined;
+    if(request.type==='init'){scope=request.scope;paths=request.paths;entryIndex=undefined;documents.clear();files.clear();batches.clear();graph=null;latest=undefined;lastSources=undefined;
       graphReferences=request.graphReferences===true;wireGraph={};
       if(parkTimer)clearTimeout(parkTimer);parked=undefined;parkedCoverage=[];parkedEntries.clear();evidence=undefined;indexedGraph=undefined;indexedRevision=-1;
       return {type:'ready'};}
@@ -126,37 +135,32 @@ export function createEngineeringWorkerHandler(){
       for(const source of request.files){if(!source.blob&&!source.bytes)throw Error(`Engineering source bytes missing: ${source.path}`);files.set(source.path,source.blob??source.bytes!);}
       return {type:'ready'};
     }
+    if(request.type==='extract-geometry'){
+      sourceTrace=trace;
+      const catalog=await trace.measure('engineering.physical-index',()=>{
+        entryIndex??=createEntryIndex([...paths].sort());
+        return extractPhysicalOccurrences({entryIndex,readDocument:path=>documents.read(path)},
+          {onProgress:count=>reportProgress('source-traverse',count)});
+      });
+      return {type:'geometry',catalog};
+    }
     if(request.type==='extract'){
       graph=null;latest=undefined;lastSources=undefined;evidence?.resetObservations();wireGraph={};parked=undefined;parkedCoverage=[];parkedEntries.clear();indexedGraph=undefined;indexedRevision=-1;
+      sourceTrace=trace;
       let lastProgress=0,lastStage='',completed=0;
-      let byteReads=0,lastYield=performance.now();
       const progress=(stage:'source-index'|'source-traverse'|'source-sort')=>{
         const now=performance.now();completed++;
         if(stage!==lastStage||now-lastProgress>=1000){lastProgress=now;lastStage=stage;reportProgress(stage,completed);}
       };
-      try{graph=await trace.measure('engineering.extract', () => extractEngineeringSourceGraph({paths,readText:async path=>{try{
-        if(batches.has(path)){
-          if(++byteReads%128===0||performance.now()-lastYield>=8){await new Promise<void>(resolve=>setTimeout(resolve,0));lastYield=performance.now();}
-          const text=await batches.read(path,trace);progress('source-traverse');return text;
-        }
-        const source=files.get(path);if(!source)throw Error(`Engineering source unavailable: ${path}`);
-        if(source instanceof Uint8Array&&(++byteReads%128===0||performance.now()-lastYield>=8)){
-          // Blob reads naturally yield. Binary sources must also let the Worker
-          // retire completed async frames and GC between bounded decode slices.
-          await new Promise<void>(resolve=>setTimeout(resolve,0));lastYield=performance.now();
-        }
-        const bytes=source instanceof Uint8Array?source:await trace.measureObserved('engineering.source-read', () => source.arrayBuffer());
-        const text=trace.syncObserved('engineering.decode', () => decodeGimText(bytes).text);
-        // SourceGraph caches each decoded document by canonical path. Keeping
-        // its transferred raw input until the entire graph is sorted doubles
-        // residency unnecessarily, especially for large PHM/FAM sources.
-        files.delete(path);progress('source-traverse');return text;
-      }catch(error){evidence?.recordFailure(path);throw error;}}},{deferFamilies:true,onProgress:progress}));}finally{
+      try{graph=await trace.measure('engineering.extract',()=>{entryIndex??=createEntryIndex([...paths].sort());return extractEngineeringSourceGraph({paths,entryIndex,
+        readText:path=>readFamily(path,trace),readDocument:async path=>{const doc=await documents.read(path);progress('source-traverse');return doc;}},
+        {deferFamilies:true,onProgress:progress});});}finally{
+        documents.clear();entryIndex=undefined;
         const needed=new Set(graph?.familyAssignments?.map(a=>a.path)??[]);
         for(const path of files.keys())if(!needed.has(path))files.delete(path);
         batches.retain(needed);
       }
-      return {type:'graph',summary:{ifcPaths:graph.ifcPaths,sourceRecords:graph.records.length,familyPaths:[...new Set(graph.familyAssignments?.map(a=>a.path)??[])]},geometryOccurrences:collectSourceGeometryOccurrences(graph)};
+      return {type:'graph',summary:{ifcPaths:graph.ifcPaths,sourceRecords:graph.records.length,familyPaths:[...new Set(graph.familyAssignments?.map(a=>a.path)??[])]}};
     }
     if(request.type==='encode-cache'){
       const current=latest;
@@ -181,7 +185,7 @@ export function createEngineeringWorkerHandler(){
       return {type:'cache',result:response};
     }
     if(request.type==='restore'){
-      latest=undefined;
+      latest=undefined;documents.clear();entryIndex=undefined;files.clear();batches.clear();
       const artifact=await decodeEngineeringSources(request.sourceBytes,request.identity);graph=artifact.sources.graph;scope=request.identity.sourceSha256;
       lastSources=artifact.sources;parked={bytes:request.sourceBytes,identity:request.identity,revision:graph.revision??0};
       let snapshot,entityCacheHit=false,stageErrors:Record<string,string>={};
@@ -196,7 +200,7 @@ export function createEngineeringWorkerHandler(){
       // Drop incoming cache buffers before constructing the display transport.
       request.sourceBytes=new Uint8Array();delete request.entityBytes;delete request.navigationBytes;
       const plan:EngineeringCacheDomain[]=[];if(!stageErrors.recognition&&!entityCacheHit)plan.push('entities');if(!Object.keys(stageErrors).length&&!navigationCacheHit)plan.push('navigation');
-      return publish({sources:artifact.sources,snapshot,navigation,geometryOccurrences:collectSourceGeometryOccurrences(graph),entityCacheHit,navigationCacheHit,stageErrors},started,request.identity,artifact.digest,plan);
+      return publish({sources:artifact.sources,snapshot,navigation,entityCacheHit,navigationCacheHit,stageErrors},started,request.identity,artifact.digest,plan);
     }
     if(!graph||!scope)throw Error('Engineering source graph is not ready');
     latest=undefined;

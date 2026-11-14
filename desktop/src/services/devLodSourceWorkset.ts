@@ -1,16 +1,13 @@
-/** Owns bounded immutable source prefetch and partial-cache source recovery for one session. */
+/** Materialize only a missing template's reachable sources for one session. */
 import { batchReadCachedFiles } from '@desktop/database.js';
-import { type DevArtifactRead } from '@desktop/devLodCache.js';
 import type { ProjectLoadSession } from '../shared/projectSession.js';
 import { findFileByPath } from '../gim/fileLookup.js';
 import { getFileEntryResolver } from '../gim/entryResolver.js';
 import { hydrateSubstationGeometryGraph } from '../gim/geometry/substationSourceGraph.js';
 import { perfCurrentSession, perfMark } from '../utils/perfTimings.js';
-import { type DeviceLod } from '../viewer/devLodPolicy.js';
 import { type DevGeometryPreprocessor } from './devGeometryWorkerClient.js';
 import type { DevLodDiagnostics } from './devLodDiagnostics.js';
 import type { MemoryPressure } from './devLodTypes.js';
-import { type DevSourceBounds } from './devSpatialCatalog.js';
 
 export interface DevLodSourceWorksetOptions {
   session: ProjectLoadSession;
@@ -18,18 +15,12 @@ export interface DevLodSourceWorksetOptions {
   diagnostics: DevLodDiagnostics;
   current: () => boolean;
   memoryPressure: () => MemoryPressure;
-  hasMemorySources: () => boolean;
-  ifcPending: () => boolean;
   worker: () => DevGeometryPreprocessor;
 }
 export class DevLodSourceWorkset {
   private get worker() { return this.options.worker(); }
   constructor(private readonly options: DevLodSourceWorksetOptions) { }
   sourceFiles?: Map<string, File>;
-
-  recoveryMisses = new Set<string>();
-
-  sourceRecoveryAttempted = false;
 
   missedSourcePreparations = new Map<string, Promise<void>>();
 
@@ -45,95 +36,6 @@ export class DevLodSourceWorkset {
         timer = setTimeout(() => reject(new DOMException('DEV source preparation timed out', 'TimeoutError')), Math.max(1, timeoutMs));
       })]);
     } finally { if (timer) clearTimeout(timer); }
-  }
-
-  /** Share a bounded immutable source workset without holding computation slots.
-     * Unknown/oversized sources and failed reads retain their authorized lazy path. */
-  async preloadSources(files: Map<string, File>): Promise<Map<string, File>> {
-    try { if (localStorage.getItem('gim-dev-preload') === '0') return files; } catch { /* storage unavailable */ }
-    const projectId = this.options.session.projectId;
-    const pressured = (): boolean => this.options.memoryPressure() === 'high' || this.options.memoryPressure() === 'critical';
-    if (projectId == null || !this.options.current() || pressured()) return files;
-    // DEV sources are independent of IFC. Start bounded prefetch immediately;
-    // use smaller batches while IFC is active to limit disk and IPC contention.
-    const MAX_FILE_BYTES = 8 * 1024 * 1024;
-    const MAX_TOTAL_BYTES = 128 * 1024 * 1024;
-    const BATCH_FILES = 4096;
-    const rank = (path: string): number => {
-      const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
-      return ext === 'dev' ? 0 : ext === 'phm' ? 1 : ext === 'stl' ? 2 : ext === 'gl' ? 3 : 4;
-    };
-    const candidates = [...files.keys()]
-      .filter((path) => /\.(dev|phm|mod|stl|gl)$/i.test(path))
-      .sort((a, b) => rank(a) - rank(b));
-    if (candidates.length === 0) return files;
-    const output = new Map(files);
-    const deadline = performance.now() + 10_000;
-    let loaded = 0;
-    let next = 0, admitted = 0;
-    while (next < candidates.length && admitted < MAX_TOTAL_BYTES) {
-      if (!this.options.current() || pressured() || performance.now() >= deadline) break;
-      const chunk: string[] = [];
-      let batchBytes = 0;
-      const maxBatchBytes = this.options.ifcPending() ? 1 * 1024 * 1024 : 4 * 1024 * 1024;
-      while (next < candidates.length && chunk.length < BATCH_FILES) {
-        const path = candidates[next], size = files.get(path)!.size;
-        if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_FILE_BYTES || admitted + size > MAX_TOTAL_BYTES) { next++; continue; }
-        if (chunk.length && batchBytes + size > maxBatchBytes) break;
-        next++; admitted += size; batchBytes += size; chunk.push(path);
-      }
-      if (!chunk.length) continue;
-      let result: Map<string, Uint8Array | null> | null = null;
-      try {
-        result = await this.preparationWait(batchReadCachedFiles(projectId, chunk), deadline - performance.now());
-      } catch (error) {
-        perfMark('DEV source preparation fallback', { phase: 'source-batch', reason: String(error) }, this.options.perf);
-        if ((error as Error)?.name === 'TimeoutError') break;
-        result = null;
-      }
-      if (!this.options.current() || pressured()) break;
-      if (!result) continue;
-      for (const path of chunk) {
-        const bytes = result.get(path);
-        if (!bytes || bytes.byteLength === 0) continue;
-        if (bytes.byteLength !== files.get(path)!.size) {
-          perfMark('DEV source preparation fallback', { phase:'source-length',reason:'source-length-mismatch',expectedBytes:files.get(path)!.size,actualBytes:bytes.byteLength }, this.options.perf);
-          continue;
-        }
-        loaded += bytes.byteLength;
-        if (loaded > MAX_TOTAL_BYTES) break;
-        output.set(path, new File([bytes as Uint8Array<ArrayBuffer>], path.split('/').pop() || path));
-      }
-    }
-    perfMark('DEV source workset ready', { entries: [...output].filter(([path, file]) => file !== files.get(path)).length, bytes: loaded, admittedBytes: admitted }, this.options.perf);
-    return output;
-  }
-
-  async prepareSources(files: Map<string, File>, catalogReads: DevArtifactRead<DevSourceBounds>[] = []): Promise<Map<string, File>> {
-    // Reuse the normal catalog batch. Healthy warm startup issues no extra probe.
-    const derivedMissing = catalogReads.length > 0 && catalogReads.every(read => read.status === 'miss');
-    return this.options.hasMemorySources() || derivedMissing ? this.preloadSources(files) : files;
-  }
-
-  recoverMissingSources(key: string, lod: DeviceLod): void {
-    if (lod !== 0 || this.sourceRecoveryAttempted || !this.sourceFiles || !this.options.current()) return;
-    if (this.recoveryMisses.size < 32) this.recoveryMisses.add(key);
-    if (this.recoveryMisses.size < Math.min(32, this.options.diagnostics.uniqueDevSources) || this.worker.diagnostics.rpcReads < 32) return;
-    this.sourceRecoveryAttempted = true;
-    // Sparse warm misses do not justify reading a large station. Only upgrade
-    // an entire, small, known-size source workset after real RPC work is seen.
-    const files = this.sourceFiles;
-    let bytes = 0;
-    for (const file of files.values()) {
-      if (!Number.isSafeInteger(file.size) || file.size <= 0 || file.size > 8 * 1024 * 1024) return;
-      bytes += file.size;
-      if (bytes > 32 * 1024 * 1024) return;
-    }
-    void this.preloadSources(files).then(prepared => {
-      if (!this.options.current()) return;
-      this.worker.installSources(prepared);
-      perfMark('DEV partial-cache source upgrade', { misses: this.recoveryMisses.size, indexedBytes: bytes }, this.options.perf);
-    }).catch(error => { if (this.options.current()) console.warn('[DEV source upgrade]', error); });
   }
 
   /** A cache miss needs only the missing DEV's reachable sources.
@@ -199,5 +101,5 @@ dev, entries: prepared.size, admittedBytes: this.missedSourceBytes - before,
     this.missedSourcePreparations.set(key, task); this.missedSourceTail = task;
     return task;
   }
-  close(): void { this.sourceFiles = undefined; this.recoveryMisses.clear(); }
+  close(): void { this.sourceFiles = undefined;  }
 }

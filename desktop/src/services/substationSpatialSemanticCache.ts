@@ -76,7 +76,7 @@ export async function readSubstationSpatialSemanticCache(
   }
   const hydrateStarted = performance.now();
   try {
-    const index = hydrateSubstationSpatialIndex(parsed as SubstationSpatialSemanticSnapshot);
+    const index = hydrateSubstationSpatialIndex(parsed as SubstationSpatialSemanticSnapshot,true);
     const hydrateMs = Math.max(0, performance.now() - hydrateStarted);
     return {
       hit: true,

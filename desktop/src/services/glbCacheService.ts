@@ -29,8 +29,7 @@ import { getFileEntryResolver } from '../gim/entryResolver.js';
 import { DEBUG_GIM_CACHE } from '../config/debug.js';
 import { debugLog } from '../utils/logger.js';
 import { getFileByPath } from '../gim/fileLookup.js';
-import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M, STL_SOURCE_ENVELOPE_KEY, acceptVerifiedStlSourceEnvelope, type StlSourceEnvelope } from '../viewer/geometryBounds.js';
-import { stlBounds } from './devSpatialCatalog.js';
+import { invalidGeometryExtent, GEOMETRY_MAX_EXTENT_M } from '../viewer/geometryBounds.js';
 import {
   disposeXmlModGroup,
   XML_MOD_GEOMETRY_DIAGNOSTICS_KEY,
@@ -530,11 +529,9 @@ export async function serializeDevToGlbDetailed(
         const file = getFileByPath(files, geo.stlPath);
         if (!file) throw MissingDevDependencyError.forPath(canonicalDevPath,geo.stlPath,'STL');
         const shared = (stlCounts.get(geo.stlPath) ?? 0) > 1;
-        let sourceBytes: ArrayBuffer | undefined;
         let source = stlSources.get(geo.stlPath);
         if (!source) {
-          sourceBytes = await file.arrayBuffer();
-          source = parseStlBinary(sourceBytes, geo.stlPath) ?? undefined;
+          source = parseStlBinary(await file.arrayBuffer(), geo.stlPath) ?? undefined;
           if (source && shared) { stlSources.set(geo.stlPath, source); ownedSourceGroups.add(source); }
         }
         // The source ID owns one vertex/normal buffer. Occurrence nodes keep
@@ -588,23 +585,6 @@ export async function serializeDevToGlbDetailed(
         group.userData.assemblyPath = geo.assemblyPath;
         group.userData.referencePath = geo.referencePath;
         devGroup.add(group);
-        // One binary STL can legitimately describe an entire site. Verify its
-        // raw vertex envelope independently; do not grant XML, mixed sources,
-        // unmatched geometry or imprecise coordinates a larger blanket limit.
-        if (sourceBytes && discovered.mods.length === 0 && discovered.stls.length === 1 && sourceBytes.byteLength >= 84) {
-          const triangles = new DataView(sourceBytes).getUint32(80, true);
-          const bounds = triangles <= 5_000_000 && 84 + triangles * 50 === sourceBytes.byteLength ? stlBounds(sourceBytes) : null;
-          if (bounds) {
-            const placement = new THREE.Matrix4().fromArray(geo.placementTransformMatrix);
-            bounds.applyMatrix4(placement); bounds.min.multiplyScalar(0.001); bounds.max.multiplyScalar(0.001);
-            const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', sourceBytes))].map(n => n.toString(16).padStart(2,'0')).join('');
-            if(Math.max(...bounds.getSize(new THREE.Vector3()).toArray())>GEOMETRY_MAX_EXTENT_M){
-              devGroup.userData[STL_SOURCE_ENVELOPE_KEY] = {kind:'binary-stl-source-v1',path:geo.stlPath,sha256,triangles,
-                bounds:[...bounds.min.toArray(),...bounds.max.toArray()]} satisfies StlSourceEnvelope;
-              acceptVerifiedStlSourceEnvelope(devGroup);
-            }
-          }
-        }
         stlLoaded++;
         diagnostics.renderableStlCount++;
       } catch (err) {

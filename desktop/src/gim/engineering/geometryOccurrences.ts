@@ -14,7 +14,7 @@ export interface SourceGeometryOccurrence {
 }
 export interface SourceGeometryOccurrenceCatalog {
   occurrences: SourceGeometryOccurrence[];
-  diagnostics: Array<{ sourceContextId: string; documentPath: string; reason: 'invalid-source-matrix' | 'invalid-cumulative-matrix' }>;
+  diagnostics: Array<{ sourceContextId: string; documentPath: string; reason: 'invalid-source-matrix' | 'invalid-cumulative-matrix' | 'source-read-failed' | 'source-cycle' | 'missing-source-reference' | 'ambiguous-source-reference' }>;
 }
 const identity = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 function multiply(a: readonly number[], b: readonly number[]): number[] {

@@ -143,7 +143,7 @@ export async function benchmarkEvidence(state:AppState){
     semanticDigest=await hash(engineering.semanticRows);
   }else if(state.currentGimGraph){semanticDigest=await hash([...state.currentGimGraph.nodesByPath].map(([id,node])=>[id,node.entityName,node.children]).sort());}
   else if(state.currentCbmTree){semanticDigest=await hash([...state.cbmNodeIndex].map(([id,node])=>[id,node.entityName,node.children.map(child=>child.path)]).sort());}
-  const placementDigest=state.engineeringGeometryCatalog?await hash(state.engineeringGeometryCatalog.occurrences.map(row=>[row.id,row.devPath,row.placementMatrix]).sort()):null;
+  const placementDigest=state.sourceGeometryCatalog?await hash(state.sourceGeometryCatalog.occurrences.map(row=>[row.id,row.devPath,row.placementMatrix]).sort()):null;
   const geometry=await geometryEvidence(state);
   const baseRows=state.deviceLodRuntime?.baseRepresentationEvidence?.()??[];
   const quantize=(values:number[])=>values.map(v=>Math.round(v*1e6)/1e6);
