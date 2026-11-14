@@ -15,7 +15,7 @@
 3. 跳过去之后，怎么回来？
 4. 谁指向了当前文件？（打开目录即自动建立反向索引）
 
-双击 `dist/GIM信息阅读器.exe`（**单文件、无控制台、不依赖 `_internal`**），或 `python gim_reader.py <解包目录>`。
+双击 `dist/GIM信息阅读器/GIM信息阅读器.exe`（无控制台，与 `_internal` 一起分发），或 `python gim_reader.py <解包目录>`。
 
 ## 两种视图
 
@@ -128,7 +128,6 @@
 python gim_reader.py <解包目录>            # 打开浏览器
 python gim_reader.py --smoke <目录>        # 无 Qt：文件表 / 指针体检 / 主链
 python gim_reader.py --guitest <目录>      # 界面自检：跳转/返回/自动索引/文本与 XML 显示，截图 _chain_view.png、_browse.png、_xml_view.png
-python gim_reader.py --legacy <目录>       # 旧界面（实体四本账 / 融合树），仅源码运行
 ```
 
 自动化入口显式将 stdout/stderr 设为 UTF-8，兼容英文 Windows 及冻结解释器忽略 `PYTHONUTF8` 的情况。`--smoke`、`--guitest`、`--self-check` 的异常返回非零状态并记录日志，避免弹出冻结版错误对话框而阻塞 CI。CI 将本轮运行日志写入证据目录的 `info-runtime.log`；普通运行仍使用 `%TEMP%/gim_reader.log`。
@@ -160,14 +159,13 @@ python gim_reader.py --legacy <目录>       # 旧界面（实体四本账 / 融
 | `指针类型谱系.md` | 分类依据与方言差异、三样本实测对照 |
 | `gimbrowse.py` | 文件表、`content()` 内容识别（KV / **XML 元素树** / 文本 / 二进制）、指针解析、类型标注、反向索引、**全指针引用链** `edges()`、链清单 `chain_files` |
 | `browse_gui.py` | PySide6 界面：引用链/按目录双视图、KV / XML / 文本 / 二进制四种内容视图、按类型着色与筛选、类型谱系对话框、自动索引、历史导航、导出 |
-| `cli.py` | 入口：默认浏览器；`--smoke` / `--guitest` / `--legacy` |
+| `cli.py` | 入口：默认浏览器；`--smoke` / `--guitest` |
 | `diag.py` | 诊断日志（`%TEMP%\gim_reader.log`） |
-| `build.ps1` / `requirements-build.txt` / `reader.spec` | 单文件打包发布脚本、直接依赖版本、onefile spec |
-| `gim_gui.py` / `btv_*.py` / `dev_inst.py` / `fusion.py` / `ifc_*.py` / `bay_infer.py` / `gim_core.py` | **旧版（实体识别与融合树）**，保留但默认入口不再引用；`--legacy` 可打开旧界面 |
+| `build.ps1` / `requirements-build.txt` / `reader.spec` | 目录打包发布脚本、直接依赖版本、onedir spec |
 
 ## 打包与发布
 
-**产物只有一个 `dist/GIM信息阅读器.exe`**，不需要同目录的 `_internal/` 或任何 DLL，拷贝单个文件即可分发。
+**产物为 `dist/GIM信息阅读器/` 目录**，exe 与 `_internal/` 必须一同分发。
 用 `build.ps1`（PowerShell，前台执行 PyInstaller）：
 
 ```powershell
@@ -187,15 +185,14 @@ python gim_reader.py --legacy <目录>       # 旧界面（实体四本账 / 融
 | `-NoVenv` | 不建 `.venv`，直接用 `-Python` 指定的解释器，需已装 PyInstaller + PySide6 |
 | `-SkipInstall` | venv 已存在时跳过 pip install（与 `-NoVenv` 无冲突） |
 | `-SmokeDir` | 打包后对指定解包目录跑一次冻结版 `--smoke`，失败即报错 |
-| `-Publish` | 额外生成 `dist/GIM信息阅读器.zip`，**压缩包内只有 exe** |
+| `-Publish` | 额外生成 `dist/GIM信息阅读器.zip`，**压缩包内包含 exe 与 _internal** |
 
-脚本通过 `../build-common.ps1` 暂存旧产物，再按工具根目录的 `reader.spec` 打 onefile，
-校验 exe 存在、大小正常、没有 `_internal`，并实际运行 `--self-check`。全部成功后删除旧产物，失败时保留备份。直接依赖版本固定在 `requirements-build.txt`（PyInstaller 6.22.3 / PySide6-Essentials 6.12.0）。
+脚本通过 `../build-common.ps1` 暂存旧产物，再按工具根目录的 `reader.spec` 打 onedir，
+校验 exe 和 `_internal` 均存在，并实际运行 `--self-check`。全部成功后删除旧产物，失败时保留备份。直接依赖版本固定在 `requirements-build.txt`（PyInstaller 6.22.3 / PySide6-Essentials 6.12.0）。
 
-onefile 的运行时机制：首次启动会把内嵌的 Python 与 Qt 插件解压到 `%TEMP%\_MEIxxxxxx`，退出时自动删除，
-所以**启动比 onedir 略慢**，且 exe 所在目录无需写权限以外的大量空间；这是正常的临时解压，不是发布依赖。
+目录包直接加载 `_internal`，无需 `_MEI` 自解包；运行时临时文件创建在 exe 旁的 `tmp/`。
 
-浏览器只依赖 `gimbrowse.py` + `ptr_kinds.py` + `browse_gui.py`，不再需要 `--paths ../gim_element`；旧的 btv/dev_inst 模块不会被打进包。
+浏览器只依赖 `gimbrowse.py` + `ptr_kinds.py` + `browse_gui.py`，不再需要 `--paths ../gim_element`；已删除停用的实体/融合树及其私有依赖。
 
 ## 已知边界
 

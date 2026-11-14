@@ -82,6 +82,7 @@ export interface ObjectInterpretation {
 
 export interface TermInterpretation {id?:string;status:'confirmed'|'candidate'|'unresolved';evidence:readonly string[]}
 export interface VocabularyObservation {
+  verification?:'verified'|'unverified'|'ambiguous';standardRef?:string;originalLocation?:string;
   field:string;rawValue:string;status:'mapped'|'unresolved';evidenceId:string;dictionaryVersion:string;dictionaryEvidence?:string;
 }
 
@@ -144,6 +145,8 @@ export interface WholeAlias {
 }
 
 export interface EngineeringSnapshot {
+  /** Source-fact revision, separate from query pagination/residency cursors. */
+  evidenceBinding:{scope:string;sourceRevision:number};
   recognitionCoverage?: {inputSourceIds:readonly string[];processed:number;confirmed:number;complete:boolean};
   scope: string;
   rulesVersion: string;

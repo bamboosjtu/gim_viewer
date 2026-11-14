@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Onefile package for the GIM file and reference browser."""
+"""Directory package for the GIM file and reference browser."""
 from pathlib import Path
 
 try:
@@ -15,11 +15,8 @@ a = Analysis(
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
-    excludes=[
-        'gim_gui', 'gim_core', 'btv_class', 'btv_dev', 'btv_file', 'btv_ifc',
-        'btv_split', 'dev_inst', 'fusion', 'ifc_lookup', 'ifc_probe', 'bay_infer',
-    ],
+    runtime_hooks=[str(Path(SPECPATH) / 'packaging_runtime.py')],
+    excludes=[],
     noarchive=False,
     optimize=0,
 )
@@ -32,16 +29,14 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='GIM信息阅读器',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -49,3 +44,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+app = COLLECT(exe,a.binaries,a.datas,strip=False,upx=False,name='GIM信息阅读器')

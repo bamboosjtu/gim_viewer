@@ -47,8 +47,6 @@ export function normalizeTrace(events,{limit=100000,health=null}={}){
     if(event.sequence!==previous+1)issues.push('sequence-gap:'+producer);
     sequences.set(producer,event.sequence);
     const t=event.trace;
-    if(event.kind==='clock'&&event.clock)clocks.push({clockId:event.clock.remoteClockId,referenceClockId:event.clockId,
-      offsetMs:event.clock.offsetMs,uncertaintyMs:event.clock.uncertaintyMs,validFromLocalMs:0,validToLocalMs:null,legacy:true});
     if(t?.calibration)clocks.push({...t.calibration});
     if(t?.type==='scope')scopeRecords.push(event);
     if(t?.type==='operation')operations.push(event);
@@ -107,7 +105,7 @@ export function normalizeTrace(events,{limit=100000,health=null}={}){
 export function mapTime(clockId,atMs,clocks,referenceClockId){
   if(!Number.isFinite(atMs))return null;
   if(clockId===referenceClockId)return {ms:atMs,uncertaintyMs:0};
-  const candidates=clocks.filter(c=>!c.legacy&&c.clockId===clockId&&c.referenceClockId===referenceClockId
+  const candidates=clocks.filter(c=>c.clockId===clockId&&c.referenceClockId===referenceClockId
     &&atMs>=c.validFromLocalMs&&(c.validToLocalMs===null||atMs<=c.validToLocalMs));
   if(candidates.length!==1)return null;
   const c=candidates[0];

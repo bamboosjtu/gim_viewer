@@ -8,7 +8,7 @@ vi.mock('@desktop/invokeTimed.js', () => ({ invokeTimed: invoke }));
 function envelope(items: { path: string; bytes: Uint8Array | null }[]): ArrayBuffer {
   const encoder = new TextEncoder();
   const chunks: Uint8Array[] = [];
-  const header = new Uint8Array(9);
+  const header = new Uint8Array(57);
   header.set(encoder.encode('GIMR'), 0); header[4] = 1;
   new DataView(header.buffer).setUint32(5, items.length, true);
   chunks.push(header);

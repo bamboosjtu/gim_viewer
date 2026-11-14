@@ -68,7 +68,7 @@ pub struct BatchCacheFileResult {
     pub bytes: Option<Vec<u8>>,
 }
 
-/// 将批量读取结果编码为 GIMR v2 envelope。线路 semantic pack 与普通批量
+/// 将批量读取结果编码为 GIMR v1 envelope。线路 semantic pack 与普通批量
 /// 文件读取共享此编码器，确保 WebView 端只需维护一套 transferable 解析器。
 pub(super) fn encode_batch_cache_response(
     results: Vec<BatchCacheFileResult>,
@@ -78,12 +78,12 @@ pub(super) fn encode_batch_cache_response(
     resolve_ms: f64,
     total_started: Instant,
 ) -> Result<Vec<u8>, String> {
-    const HEADER_SIZE_V2: usize = 57;
+    const HEADER_SIZE: usize = 57;
     let encode_started = Instant::now();
     let mut out = Vec::new();
-    out.reserve(HEADER_SIZE_V2);
+    out.reserve(HEADER_SIZE);
     out.extend_from_slice(b"GIMR");
-    out.push(2);
+    out.push(1);
     let count = u32::try_from(results.len()).map_err(|_| "批量读取结果条目数溢出".to_string())?;
     out.extend_from_slice(&count.to_le_bytes());
     out.extend_from_slice(&read_ms.to_le_bytes());

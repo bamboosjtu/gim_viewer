@@ -11,7 +11,7 @@ import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import { projectEngineeringNavigation } from '../gim/engineering/navigation.js';
 import { applyNavigationCacheProjection, decodeEngineeringNavigation, encodeEngineeringNavigation } from './engineeringNavigationCache.js';
 import { collectSourceGeometryOccurrences } from '../gim/engineering/geometryOccurrences.js';
-import { encodeEngineeringWorkerResult, engineeringWorkerResultTransfers,type TransportGraphCache } from './engineeringWorkerTransport.js';
+import { encodeEngineeringWorkerResultAsync, engineeringWorkerResultTransfers,type TransportGraphCache } from './engineeringWorkerTransport.js';
 import type {EvidenceStatus,EvidenceInventory} from '../engineering/evidence.js';
 
 export function markCacheFailure(result:Pick<EngineeringBuildResult,'cacheError'|'cacheDisabled'>,error:unknown):void{
@@ -80,11 +80,11 @@ export function createEngineeringWorkerHandler(){
     const file=files.get(path);if(!file)throw Error('Raw source unavailable: '+path);
     const bytes=file instanceof Uint8Array?file.slice():new Uint8Array(await file.arrayBuffer());files.delete(path);return bytes;
   }
-  function publish(result:EngineeringBuildResult,started:number,identity?:EngineeringCacheIdentity,digest?:string,plan:EngineeringCacheDomain[]=[]):EngineeringWorkerReply{
+  async function publish(result:EngineeringBuildResult,started:number,identity?:EngineeringCacheIdentity,digest?:string,plan:EngineeringCacheDomain[]=[]):Promise<EngineeringWorkerReply>{
     result.evidenceRevision=evidence?.getRevision();
     result.buildId=++sequence;result.cachePlan=plan;result.metrics={buildMs:performance.now()-started,transportEncodeMs:0,transportBytes:0};
     latest={result,identity,digest,plan:[...plan]};
-    return {type:'model',result:encodeEngineeringWorkerResult(result,graphReferences?wireGraph:undefined)};
+    return {type:'model',result:await encodeEngineeringWorkerResultAsync(result,graphReferences?wireGraph:undefined)};
   }
   return async(request:EngineeringWorkerCommand, trace:WorkerTaskProbe=NOOP_TASK,
     reportProgress:(stage:'source-index'|'source-traverse'|'source-sort',completed:number)=>void=()=>{}):Promise<EngineeringWorkerReply>=>{

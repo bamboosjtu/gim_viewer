@@ -103,8 +103,8 @@ function validate(candidate,evidence){
     (!exercise.replacement||closed(exercise.replacement)&&exercise.replacement.sourceMatches===true&&exercise.replacement.evidencePassed===true),
   'Lifecycle evidence did not pass all ten cycles and cancellation');
   const {growth}=retainedMemory(cycles);
-  check(lifecycleRetention(growth).withinLimit&&Math.abs(growth-exercise.retainedGrowth)<1e-9,
-    'Lifecycle retained memory exceeds 50% or disagrees with evidence');
+  check(lifecycleRetention(growth).evidenceComplete&&Math.abs(growth-exercise.retainedGrowth)<1e-9,
+    'Lifecycle retained memory is unavailable or disagrees with evidence');
   const processes=[...candidate.runs,doctor,...overhead.runs,...(overhead.retest?.runs??[]),lifecycle].map(run=>run.processInstanceId);
   check(processes.every(Boolean)&&new Set(processes).size===processes.length,'Acceptance evidence reused a candidate or acceptance process');
   return {policyVersion:PERFORMANCE_POLICY.version,probe:probePerformance,retention:lifecycleRetention(growth),approval:'PENDING'};

@@ -5,7 +5,8 @@ import {projectEngineeringNavigation} from '../../gim/engineering/navigation.js'
 import {encodeEngineeringNavigation} from '../engineeringNavigationCache.js';
 import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph.js';
 import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
-import { decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheEntry, engineeringSourceCacheMatchesFiles } from '../engineeringCacheCodec.js';
+import { decodeEngineeringArtifact,encodeEngineeringArtifact,decodeEngineeringEntities, decodeEngineeringSources, encodeEngineeringEntities, encodeEngineeringSources, engineeringCacheEntry, engineeringSourceCacheMatchesFiles } from '../engineeringCacheCodec.js';
+import {packEngineeringSource} from '../engineeringSourceCodec.js';
 import { markCacheFailure } from '../engineeringWorker.js';
 import type { EngineeringBuildResult } from '../engineeringWorkerProtocol.js';
 
@@ -18,6 +19,25 @@ async function fixture(extra: Record<string, string> = {}) {
 }
 
 describe('independent source and entity cache contracts', () => {
+  it('keeps gzip bytes compatible when canonical JSON is supplied as a stream',async()=>{
+    const payload=Array.from({length:10000},(_,i)=>({i,text:'原始字段'+i}));
+    const plain=new TextEncoder().encode(JSON.stringify(packEngineeringSource(payload)));
+    const stream=new ReadableStream<BufferSource>({start(controller){controller.enqueue(plain as BufferSource);controller.close();}});
+    const legacy=new Uint8Array(await new Response(stream.pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+    const {bytes}=await encodeEngineeringArtifact('entities',payload,id,'source'),length=new DataView(bytes.buffer).getUint32(0,true);
+    expect(bytes.subarray(4+length)).toEqual(legacy);
+    expect((await decodeEngineeringArtifact('entities',bytes,id,'source')).payload).toEqual(payload);
+  });
+  it('preserves the 64 MiB part boundary and rejects corruption without a full plain encoding buffer',async()=>{
+    const payload={text:'x'.repeat(64*1024*1024+4096)};
+    const {bytes}=await encodeEngineeringArtifact('entities',payload,id,'source'),length=new DataView(bytes.buffer).getUint32(0,true);
+    const header=JSON.parse(new TextDecoder().decode(bytes.subarray(4,4+length)));
+    expect(header.parts).toHaveLength(2);
+    expect(header.parts.reduce((sum:number,size:number)=>sum+size,0)).toBe(bytes.length-4-length);
+    expect((await decodeEngineeringArtifact('entities',bytes,id,'source')).payload).toEqual(payload);
+    const broken=bytes.slice();broken[broken.length-1]^=1;
+    await expect(decodeEngineeringArtifact('entities',broken,id,'source')).rejects.toThrow('checksum');
+  },30000);
   it('invalidates entities and navigation on vocabulary changes while retaining the source artifact',async()=>{
     const model=await fixture(),encoded=await encodeEngineeringSources(model.sources,id);
     const sources=await decodeEngineeringSources(encoded.bytes,id),entities=await encodeEngineeringEntities(model.snapshot,sources,id);

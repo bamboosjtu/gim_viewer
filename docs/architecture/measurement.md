@@ -41,9 +41,17 @@
 
 ## 采集面
 
-Worker 堆采样按 target 独立调度：附着立即采样，上一请求完成后按该 target 的起始时刻安排下次采样。重叠 checkpoint 合并为同一个在途请求，`coalesced` 单列，不虚构失败样本；真正的 CDP 超时、字段缺失及超过两个采样周期的有效样本间隔仍使证据不完整。正常 target detach/采样停止取消在途请求，终止时间仍参与尾部间隔检查。
+Worker 堆采样按 target 独立调度，使用自有页面的独立 CDP 连接。`isolated-cdp-gc-heap-v1` 的请求间隔为 250 ms，覆盖周期仍为 1000 ms，RPC 超时仍为 2000 ms；重叠 checkpoint 合并，`coalesced` 单列。可用样本保留请求与响应时间窗，失败请求不能重置最后成功样本时刻、缩短原始空窗。身份来自自有 bootstrap 的精确字段与宿主 URL 登记；已结束 target 保留有界身份记录，迟到关联按 target/URL 对账，不按名称或出现顺序补配。
 
-生命周期关闭前固定相关 Collector 的资源检查引用，关闭后聚合旧 run 与当前 run 的任务、缓冲账本和物理 Worker ID；不因 `perfReset` 或档案驱逐而把旧资源计为零。重复 Worker ID 只计一次。十轮 Private Bytes 保留增长上限为 50%，但轮内资源测试不证明跨版本速度收益；收益权衡与最终基线批准由人类决定。
+自然 `MajorGC`/`MinorGC` 的回收前后堆值作为另一种运行时直接观测。nonce 标记在指定 CDP target 中执行，将其 isolate 绑定到原生 trace 的进程/线程；首尾及周期时钟标记提供有误差上界的时钟映射。原始 trace、丢失标志、身份对应和时钟凭据分别保存。该机制使用 [V8 直接记录的 GC 堆计数](https://chromium.googlesource.com/v8/v8/+/8166a0b0f0816cdff2b18ab409a940559daa7e20/src/heap/heap.cc)，不触发 GC 或暂停调试器。
+
+GC 录制显式排除 Chromium 默认类别，仅保留 `v8` 与 `blink.user_timing`。单独设置包含类别仍会录制默认的 GPU、合成器和任务流量；这些无关事件不应成为普通堆观测的额外负担。采集器指纹区分过滤修正前后的记录，不把两者混作同一测量条件。
+
+报告同时保留原始 RPC 失败、墙钟空窗、GC 边界观测，以及扣除**完整且可验证的 GC 暂停**后仍未观测的区间。只有带真实前后堆值、正确 target 对应及可靠时钟的暂停可以解释区间；未知 JSON/原生操作空窗不会被豁免。未解释区间超过 2000 ms、trace 丢失、时钟或身份不可靠时，仍标记内存证据不完整。进程树峰值独立覆盖 GC 复制、提交容量和其他原生分配，不与 isolate 堆相加。采样策略和采集器指纹进入比较条件，旧结果不按新方法改写。
+
+产品测量窗口在最终诊断导出前关闭，随后停止和接收原生 trace。导出等待上限为 30 秒，仅约束测量窗口外的证据交付；它不扩大 2000 ms 的未知采样空窗预算。导出超时或未取得完整 trace 时仍保留失败原因，不能将已有 RPC 成功样本直接升级为完整 GC 证据。
+
+生命周期关闭前固定相关 Collector 的资源检查引用，关闭后聚合旧 run 与当前 run 的任务、缓冲账本和物理 Worker ID；不因 `perfReset` 或档案驱逐而把旧资源计为零。重复 Worker ID 只计一次。关闭后 Private Bytes 的保留增长单列观察，不设置比例自动验收线；轮内资源检查不证明跨版本优化成功，是否接受由开发者决定。
 
 结算静默窗与最终证据使用同一 progress 内容摘要，包含 run/session 身份；进度计数变化会重新开始三秒窗口。最终采证仅在同一会话内最多尝试三次，重试前重新静默等待，等待预算 15 秒；持久漂移或会话变化仍失败。所有被拒绝的证据对、字段差异和恢复次数写入私有 `final-evidence.private.json`，报告保留摘要；LOD 计数在采证入口复制，避免 await 期间改变既有证据。
 
@@ -90,7 +98,7 @@ Windows 固定运行时的文件既需要 AppContainer 读取权限，也不能�
 
 模块 Worker 的业务入口保持规范 URL；身份放在独立 bootstrap 中，通过宿主登记关联 CDP target。不能在入口模块 URL 添加身份 fragment/query：分块动态导入可能再次引用不带标记的同一入口，产生第二个模块实例和消息处理器。bootstrap 在导入期间缓冲消息，安装处理器后按顺序交付；创建失败、初始化完成与终止都会回收其 Blob URL。
 
-高频解析与图元阶段在 Worker 内生成可合并的调用直方图，保留调用数、累计时长和分位区间。Benchmark 的 counter/memory 事件先精确进入 Collector 聚合、资源账本和观测峰值，再按 `task-phase-timeline-v2` 策略省略其逐事件 CDP 明细；Worker 批次带连续 ID、宿主确认和任务结束标记，任务、阶段、Worker 和时钟事件再通过带确认的 CDP binding 传输。报告列出按类型聚合的明细数、真正截断数和可用的前十个慢阶段；纯容量截断标记 `aggregate-only`，丢失 Worker 批次或必要聚合仍为 INCONCLUSIVE。`diagnostic` 模式仍传全部可用事件。进程树使用独立原生采样器，即使 WebView 主线程阻塞也继续采样。
+高频解析与图元阶段在 Worker 内生成可合并的调用直方图，保留调用数、累计时长和分位区间。Benchmark 的 counter/memory 事件先精确进入 Collector 聚合、资源账本和观测峰值，再按 `task-phase-timeline-v1` 策略省略其逐事件 CDP 明细；Worker 批次带连续 ID、宿主确认和任务结束标记，任务、阶段、Worker 和时钟事件再通过带确认的 CDP binding 传输。报告列出按类型聚合的明细数、真正截断数和可用的前十个慢阶段；纯容量截断标记 `aggregate-only`，丢失 Worker 批次或必要聚合仍为 INCONCLUSIVE。`diagnostic` 模式仍传全部可用事件。进程树使用独立原生采样器，即使 WebView 主线程阻塞也继续采样。
 
 可重建来源的空闲 Worker 在检查点转移后，通过独立控制 barrier 确认事件循环已越过当前请求，并核对最后批次与 flush 序号，再终止以释放 isolate 堆容量。barrier 只同步消息交付，业务任务仍按真实 produced/ended 和 scope close 记录；尾批缺失、drain 超时及中途终止继续留下失败证据。未启用测量时不增加控制往返。
 
@@ -114,7 +122,7 @@ DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位�
 
 `bench build` 显式构建并核验 Vite Benchmark 前端，再创建 Cargo `benchmark` feature 的原生产物；发布清单前核验 EXE 确实内嵌探针 chunk。运行器拒绝没有 `frontendProbeVerified` 凭据的旧构建，避免 CDP 已连接普通页面却重复等待 Benchmark API。原生命令只授权私有运行清单指定的匿名样本，并重新核对源 SHA；清单、源、缓存根必须在编译时绑定的工作区，清单/缓存在 `tmp/gim-bench` 下。普通产品构建拒绝 Benchmark 授权，且不导出 Benchmark UI 控制面。
 
-正式原生候选先由 `accept-measurement` 校验并绑定同构建、同机器和同运行时的 doctor、探针开销及十轮生命周期证据，输出新的候选文件；绑定包含候选摘要和可复核的精简证据，不依赖手工编辑 JSON。`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选针对绑定后的文件，由另一位复核者通过 `review-partial` 生成候选摘要绑定的私有记录，批准者再以 `--accept-partial --partial-review` 引用，原因使用受控代码。首次须指定 `--first-partial`，后续须提供上一份已批准基线，防止相同来源覆盖倒退；它只成为覆盖基线，不能自动升级成完整 PASS。run/report/compare 不调用批准命令。GLB 字节变化默认 INCONCLUSIVE，仅允许导入独立网格等价性证据后显式批准对应内容变更，放置与覆盖仍须一致；CLI 不实现网格等价算法。命令和证据契约见 [Benchmark CLI](../benchmark.md#比较与基线)。性能建议按 50% 内存增长上限、绝对目标及时间/内存权衡生成，不再以 10% 单指标回退自动裁决；相同机器/样本/场景的重复仍须完整，缺少可比证据保持 INCONCLUSIVE。开销技术证据与性能建议分开，基线最终批准由开发者显式决定。协议/值单元测试进入 CI，样本、性能与内存曲线仅在本地执行。
+正式原生候选先由 `accept-measurement` 校验并绑定同构建、同机器和同运行时的 doctor、探针开销及十轮生命周期证据，输出新的候选文件；绑定包含候选摘要和可复核的精简证据，不依赖手工编辑 JSON。`approve-baseline` 要求明确的候选文件、认可者和完整冷暖配对；PARTIAL 候选针对绑定后的文件，由另一位复核者通过 `review-partial` 生成候选摘要绑定的私有记录，批准者再以 `--accept-partial --partial-review` 引用，原因使用受控代码。首次须指定 `--first-partial`，后续须提供上一份已批准基线，防止相同来源覆盖倒退；它只成为覆盖基线，不能自动升级成完整 PASS。run/report/compare 不调用批准命令。GLB 字节变化默认 INCONCLUSIVE，仅允许导入独立网格等价性证据后显式批准对应内容变更，放置与覆盖仍须一致；CLI 不实现网格等价算法。命令和证据契约见 [Benchmark CLI](../benchmark.md#比较与基线)。性能分析列出明显收益候选、回退和具体成本，不设置统一耗时、内存或增长比例验收线；相同机器/样本/场景的重复仍须完整，缺少可比证据保持 INCONCLUSIVE。开销技术证据与性能决定分开，是否接受及是否追加复测由开发者显式决定。协议/值单元测试进入 CI，样本、性能与内存曲线仅在本地执行。
 
 ## Operation Trace 与定点诊断
 

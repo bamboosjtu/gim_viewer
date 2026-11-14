@@ -8,7 +8,7 @@ import type { AppState } from '../app/state.js';
  * 层级树展开状态；不再恢复上次相机和选中对象，避免“上次放大到某台设备”
  * 把默认全景覆盖掉。选中对象仍可按需查看属性。
  */
-const STORAGE_PREFIX = 'gim-view-state-v2';
+const STORAGE_PREFIX = 'gim-view-state-v1';
 
 interface StoredViewState {
   expandedPaths: string[];

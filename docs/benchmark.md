@@ -112,17 +112,16 @@ CLI 支持以下子命令。参数只列关键项；完整格式以 `npm run ben
 
 ## 性能决策原则
 
-当前策略为 `gim-performance-policy-v3`，集中定义于 `performance-policy.mjs`。目标是相对历史版本不回退；正确性修复引起的成本单列证据与代价，不能自动豁免。内存中的 **6 GB = 6,000,000,000 字节**与运行时 6 GiB 预算分开。
+当前策略为 `gim-performance-policy-v1`，集中定义于 `performance-policy.mjs`。性能优化开发须在至少一方面取得可测的明显提升，否则不算优化成功；功能开发和正确性修正应避免过大回退，单列依据与成本。是否接受由开发者决定。
 
-绝对阈值仅描述样本现状，不能遮盖相对回退。样本/路线范围由开发者决定，Agent 不自动批准基线。
+不设置统一的耗时、内存消耗总目标或增长比例自动验收线。运行时资源预算用于调度保护，不是性能验收标准。样本、路线与复核范围由开发者决定，Agent 不自动批准基线。
 
-- 跨版本峰值内存增长上限 50%；增加内存须换取同等级别速度收益。“同等级别”保留人工判断，不设置未经确认的加权分数。分别列出首次可交互、完全结算的时间降低比例、速度倍数变化、节省秒数、基准/候选绝对值及内存增加字节。
-- ≤6 GB、冷开 <10 s、结算 <30 s 保留为描述指标，不是本轮目标或回退豁免。每个重复的绝对数与中位数并列，不用中位数隐藏长尾。时间回退需人工核对正确性成本；即使达到绝对阈值仍标记相对回退。内存相对增长超过 50% 继续单列风险。
-- `firstResponseMs` 是导航 DOM 就绪代理，不等于实体可见或已验证输入延迟。新版 `firstGeometryMs` 确认有效视口中的模型绘制提交，不等待 GPU 完成；`geometryCommitMs` 单列来源表示提交。条件中的 `geometryTimingPolicy` 区分旧版提交与新版可见语义，禁止直接比较不同口径；历史提交值可映射到 `geometryCommitMs` 对照。完全结算使用 `settledMs`，同批次列各 run 耗时总和；它不冒充含启动/清理的批次墙钟。
-- 轮内保留增长（第 2–4 轮与最后三轮关闭后中位数）与跨版本打开峰值增长分别报告。生命周期 PASS 仅表示资源/正确性与保留上限，不证明速度收益值得接受。
-- 正确性、PARTIAL、采样缺口、构建/样本/环境不匹配独立报告。不可比时仍展示观察差值，但不据此确认优化收益。`compare/gate` 对需权衡的性能标记人工评估；反复出现同样差值也不会自动替人批准或否决。
+- 分别列出导航、可见实体、完全结算的时间变化比例、速度倍数变化、节省秒数、基准/候选绝对值及内存变化字节。不使用未经确认的加权分数，也不把微小正变化自动认定为明显提升。
+- 逐次结果、范围与中位数并列，不隐藏长尾；回退保持可见。正确性理由不等于自动豁免，增加内存是否值得、功能成本是否过大都由开发者判断。
+- `firstResponseMs` 是导航 DOM 就绪代理，不等于实体可见或已验证输入延迟。新版 `firstGeometryMs` 确认有效视口中的模型绘制提交，不等待 GPU 完成；`geometryCommitMs` 单列来源表示提交。条件中的 `geometryTimingPolicy` 区分旧版提交与新版可见语义，禁止直接比较不同口径；旧报告缺失时点保持缺失，不自动映射。完全结算使用 `settledMs`，同批次列各 run 耗时总和；它不冒充含启动/清理的批次墙钟。
+- 轮内保留增长（第 2–4 轮与最后三轮关闭后中位数）与跨版本打开峰值增长分别报告。生命周期 PASS 只表示资源、正确性与测量完整性检查通过，不表示内存保留或速度权衡已被接受。
+- 正确性、PARTIAL、采样缺口、构建/样本/环境不匹配独立报告。不可比时只展示观察差值；`compare/gate` 的技术检查不代表优化成功或性能已获接受。复测由开发者选择，工具不因有权衡就要求重复矩阵；已有证据仍适用时优先复用，仅补新变更或未解决缺口。
 - `accept-measurement` 绑定技术证据，附带待人工判断的性能分析；`approve-baseline` 仍是人类显式决定后才执行的独立步骤。Agent 不因任何 PASS 自动调用它。现有真实性、来源复核与完整性校验继续生效；未解决的缺口必须提交给人类决定后续处理。
-- 新原则不覆写历史报告。`npm run bench -- reevaluate --baseline <私有参考> --candidate <私有候选> [--lifecycle <私有生命周期报告>] [--verification <私有执行记录>]` 写入新的私有 JSON/CSV 派生评估，保留历史结论、输入 SHA-256、当前策略和 `approval=PENDING`。执行记录须匹配候选路径及构建，才报告其批次墙钟；没有历史墙钟时不虚构总体墙钟收益。
 
 ## 运行行为
 
@@ -331,17 +330,17 @@ npm run bench -- gate --baseline ../tmp/gim-bench/<已批准基线>.approved.jso
 - 比较按来源、场景、冷暖状态及测量模式分别分组，不把多工程的指标混成一个中位数。
 - 矩阵候选先检查整体结果、必需 Worker 家族、计划运行数和逐来源冷暖配对；缺口为 `INCONCLUSIVE`，不能只凭已有逐轮数据通过 `compare` 或 `gate`。
 - 每组至少一次独立进程；基线与候选须有相同重复次数、机器、运行时、Profile、动作、工作量和视口。
-- 比较身份还包含 `measurementVersion`、`detailPolicy=task-phase-timeline-v2`、`lifecyclePolicy=worker-terminal-v2`、`contentPolicy=dev-l0-glb-sha256-v1`、`cacheProofPolicy=source-failure-catalog-v1` 和 `webviewProfilePolicy=paired-webview-profile-v1`；缺任一条件按不可比处理，不自动换算。
+- 比较身份还包含 `measurementVersion`、`detailPolicy=task-phase-timeline-v1`、`lifecyclePolicy=worker-terminal-v1`、`contentPolicy=dev-l0-glb-sha256-v1`、`cacheProofPolicy=source-failure-catalog-v1` 和 `webviewProfilePolicy=paired-webview-profile-v1`；缺任一条件按不可比处理，不自动换算。
 - `PARTIAL` 只与同 SHA、同来源缺口摘要的 `PARTIAL` 比较；`PARTIAL` 与 `PASS` 的覆盖不同，结果为 `INCONCLUSIVE`。
 - 普通 `compare` 可读取结构指纹和已有内容证据，但不把缺少内容证明作为普通测量失败。正式 `approve-baseline` 和 `gate` 要求 DEV L0 内容摘要覆盖所有已显示根；字节摘要变化默认 INCONCLUSIVE，只有下述独立网格验证与显式审批流程可以接受这项变化。放置指纹或覆盖变化保持 INCONCLUSIVE，不能仅凭相同包围盒自动通过。无 DEV 表示的输入标为不适用，不伪造内容 SHA。
-- 不再以统一 10% 回退线自动裁决性能。比较输出绝对耗时、百分比、节省秒数和内存字节代价；需权衡或超过 50% 内存增长时标记人工评估，独立复测也不替代最终人工批准。详见[性能决策原则](#性能决策原则)。
+- 比较输出绝对耗时、百分比、节省秒数和内存字节代价，不以统一耗时、内存或增长比例自动裁决。是否明显提升、功能成本是否过大及是否需要复测由开发者决定。详见[性能决策原则](#性能决策原则)。
 - 摸底批次的 `PASS`/`PARTIAL` 仅表示该次计划执行结果。`baseline` 批次要求冷暖等价、来源缺口摘要及工作量一致；正式认可仍需探针开销、十轮生命周期与测量能力等验收。
 - 完整正确性基线只接受 `PASS`。`PARTIAL` 是显式接受的覆盖基线：来源复核者先运行 `review-partial`，其记录绑定候选摘要、复核身份、时间和受控原因；另一位批准者再引用该记录，不能仅在批准命令中自报已复核。原因只接受与候选证据相符的 `source-geometry`、`engineering-coverage`、`combined-source` 或 `mixed-source`。首次须显式 `--first-partial`；本地已有同来源批准记录时 CLI 拒绝再次声明首次，后续须提供上一份已批准基线，相同来源从 PASS 退到 PARTIAL 或缺口签名变化会被拒绝。复核和批准文件以候选摘要及时间命名，保存在工作区私有 `tmp/`，不覆盖上一份记录，也不存自由文本工程名或路径。工具核对记录与身份不同，仍无法替代实际人工审阅。
 - SDK 迁移不在本轮 Benchmark 范围内。完整指标口径见[测量架构](architecture/measurement.md)。
 
 ### 测量验收与正式批准
 
-`matrix` 的 `candidate.json` 和 `batch --preset baseline` 的 `results.json` 都是未批准候选。正式原生候选须先绑定同构建、同机器、同固定运行时和同测量协议的验收报告。能力报告须通过 Worker/CDP 自检；开销报告须属于候选的 Profile、来源、场景与工作量，包含至少三组交替运行的独立 off/benchmark 进程；生命周期报告须覆盖候选中的来源，并通过十轮开闭、取消与资源归零检查。生命周期 PASS 表示上述检查通过，不会把来源 PARTIAL 升级成产品 PASS：来源几何或工程覆盖缺口须有充分证据、与候选一致且十轮保持相同的缺口摘要；新增产品失败、缺口变化或证据缺失仍拒绝。新报告保留初始正确性参考与每轮正确性结果，PARTIAL 验收必须携带这些记录。开销与生命周期均从明细重新计算：开销保留待人工判断的时间/内存代价，生命周期保留增长上限为 50%。历史 `outcome` 不代替当前策略重评或人工批准；原始报告不改写。
+`matrix` 的 `candidate.json` 和 `batch --preset baseline` 的 `results.json` 都是未批准候选。正式原生候选须先绑定同构建、同机器、同固定运行时和同测量协议的验收报告。能力报告须通过 Worker/CDP 自检；开销报告须属于候选的 Profile、来源、场景与工作量，包含至少三组交替运行的独立 off/benchmark 进程；生命周期报告须覆盖候选中的来源，并通过十轮开闭、取消与资源归零检查。生命周期 PASS 表示上述检查通过，不会把来源 PARTIAL 升级成产品 PASS：来源几何或工程覆盖缺口须有充分证据、与候选一致且十轮保持相同的缺口摘要；新增产品失败、缺口变化或证据缺失仍拒绝。新报告保留初始正确性参考与每轮正确性结果，PARTIAL 验收必须携带这些记录。开销与生命周期均从明细重新计算：开销保留待人工判断的时间/内存代价，生命周期保留增长单列观察，接受与否由开发者决定。历史 `outcome` 不代替当前策略重评或人工批准；原始报告不改写。
 
 ```powershell
 # 先执行 matrix 或 batch，保留其候选 JSON 和本轮构建清单。
@@ -376,20 +375,16 @@ npm run bench -- gate --baseline <approved基线文件> --candidate <新候选JS
 
 批准记录只允许对应 GLB 内容 SHA 的变化；缺失内容证据、覆盖或放置变化、运行条件、内存证据仍按真实性与完整性规则判断，性能按当前内存/速度权衡原则提交人工决定。复测仍需相同的双方构建和已验证内容。候选或基线改变后，审批记录失效；该记录不会批准或替换性能基线，也不改变 PARTIAL 的独立来源复核要求。
 
-### 时间线策略 v1 到 v2 的基线迁移
+### 开发契约与本地基线
 
-`task-phase-timeline-v1` 报告只作历史参考。v2 增加 Worker 批次确认、最终证据核对和生命周期口径；冷暖还需共用 WebView2 profile（`paired-webview-profile-v1`）。比较工具对旧条件返回 `incomparable:detailPolicy` 或缺少 profile 条件，不自动换算指标，也不复制旧批准元数据。
-
-测量协议本身统一使用共享常量 `MEASUREMENT_VERSION`（当前为 `gim-measurement-v1`），不按时间线策略另设协议版本。旧报告若在 `conditions.measurementVersion` 写入其他值，只作历史参考，不能通过相互一致绕过版本检查；工具不自动改写报告或批准记录。
-
-开发者在同一机器、固定运行时和构建方式下重新构建 Benchmark，按冻结注册表执行 L1 变电/线路至少三组独立冷暖配对，并完成 L0 关键样本、探针开销及十轮资源回落检查。核对工作量、语义/几何摘要与缓存域后，显式批准新候选。未完成的 L0 项或冷暖异常保持 INCONCLUSIVE，旧 v1 基线仅供定位变化，不参加 v2 门禁。真实样本与性能矩阵只在开发者本地运行。
+时间线、Worker 生命周期和测量协议均固定 v1，当前内容以运行时代码为准，不维护旧开发格式兼容或迁移。旧报告只保留作人工历史参考，不转换原始指标或批准记录。开发者自行选择本地复核范围，核对构建、环境、样本 SHA、覆盖及测量完整性后显式批准新候选；缺口保持独立报告，不自动要求每轮完整矩阵。
 
 ```powershell
 cd desktop
 npm run bench -- build
-npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json --registry ../benchmarks/l1/substation01-04.json --preset baseline -repeat 3 --output ../output/l1-substation-v2
-npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json --registry ../benchmarks/l1/line01-06.json --preset baseline -repeat 3 --output ../output/l1-line-v2
-npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json --registry ../benchmarks/l0/common-design-500kv.json --preset baseline -repeat 3 --output ../output/l0-500-v2
+npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json --registry ../benchmarks/l1/substation01-04.json --preset baseline -repeat 3 --output ../output/l1-substation-v1
+npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json --registry ../benchmarks/l1/line01-06.json --preset baseline -repeat 3 --output ../output/l1-line-v1
+npm run bench -- batch --build ../tmp/gim-bench/builds/<构建>/acceptance-build.json --registry ../benchmarks/l0/common-design-500kv.json --preset baseline -repeat 3 --output ../output/l0-500-v1
 ```
 
 实际注册表的文件须由开发者在工作区提供并核对 SHA；命令只说明本地验收路径，不构成已执行结果。
@@ -444,3 +439,5 @@ system 配置仍校验 durationMs 与 bufferMiB，但当前录制入口关闭，
 - [本地功能测试](../desktop/local-tests/README.md)：`test:local` 基础功能样本。
 - [开发指南](development.md)：环境、命令、工作区与临时目录。
 - [验证](validation.md)：证据分层、自动门禁与真实复核。
+
+项目自有开发契约固定 v1。当前比较器不把缺失的可见几何时点换算为旧的模型提交时点；旧开发报告、策略格式和派生缓存不作兼容迁移。历史原始日志保留供人工核对，当前基线需重新构建并显式批准。

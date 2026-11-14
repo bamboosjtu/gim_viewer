@@ -1,6 +1,6 @@
 # gim_device —— 设备 GIM 简易查看器
 
-把设备 `.gim` 解析成三维模型并交互浏览，可打包为单文件 exe。
+把设备 `.gim` 解析成三维模型并交互浏览，可打包为目录包。
 统一构建参数、产物约定、安全边界及 Windows 排查见 [tools 总览](../README.md)。
 
 ---
@@ -12,7 +12,7 @@ gim_device/
 ├── viewer_app.py           桌面外壳（PySide6 + QtWebEngine）：选文件/拖放/解析线程/菜单
 ├── viewer_shell.html       渲染层（Three.js r128）：primitive 工厂 + 交互 + 侧栏
 ├── gim_core.py             解析核心（无 UI 依赖）：解包 → 链条 → XML → JSON
-├── viewer.spec             PyInstaller 打包配置（单文件 exe）
+├── viewer.spec             PyInstaller 打包配置（目录包）
 ├── app.ico                 图标（build 时内嵌）
 ├── three.min.js            渲染库（本地副本，断网可用）
 ├── OrbitControls.js        相机控制（本地副本）
@@ -30,10 +30,10 @@ gim_device/
 
 线框源码的棱边阈值为 1°：保留圆柱/圆台侧面的纵向棱线，同时排除共面三角剖分对角线；细线和屏幕空间粗线使用同一阈值。不能用 24° 的锐边阈值代替完整分段线框，否则圆柱侧面会被滤掉，只剩端部圆环。修改源码后需重新打包，已有 dist 中的 exe 不会自动更新。
 
-双击 `dist/GIM设备查看器.exe`，把 `.gim` 拖进窗口，或 `Ctrl+O` 选择文件。
-首次启动约 5–10 秒（单文件 exe 需先解压到临时目录），之后秒开。
+双击 `dist/GIM设备查看器/GIM设备查看器.exe`，把 `.gim` 拖进窗口，或 `Ctrl+O` 选择文件。
+首次启动约 5–10 秒（目录包 需先解压到临时目录），之后秒开。
 
-构建只保留 `dist/` 下的单文件产物，不再向工具根目录复制第二份 EXE。可直接拷走该文件。
+分发时复制 `dist/GIM设备查看器/` 完整目录或对应 ZIP。
 
 菜单里可导出三维视图 PNG（`Ctrl+S`，按画布 2 倍分辨率，不含界面）。
 
@@ -72,7 +72,7 @@ GIM_SMOKE_MODE=edge python viewer_app.py --smoke a.gim out.png   # 自检线框�
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
 .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --workpath .\_build --distpath .\dist viewer.spec
-# 产物：dist/GIM设备查看器.exe
+# 产物：dist/GIM设备查看器/GIM设备查看器.exe
 ```
 
 `viewer.spec` 里的资源路径基于 `SPECPATH`，所以从任意工作目录调用都能正确收集

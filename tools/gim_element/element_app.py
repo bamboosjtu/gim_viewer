@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QFileDialog, QMessageB
 import element_core as E
 
 APP_NAME = 'GIM 实体盘点器'
-APP_VER = '1.0'
+APP_VER = '0.2.3'
 HERE = os.path.dirname(os.path.abspath(__file__))
 SMOKE = '--smoke' in sys.argv          # smoke 模式禁用模态框，避免自动测试阻塞
 
@@ -351,13 +351,7 @@ class MainWindow(QMainWindow):
                 cd, ci = sum(r['dev'] for r in crows), sum(r['ifc'] for r in crows)
                 code = crows[0].get('code', '')
                 stdcat = crows[0].get('stdcat', '') or cat
-                if g == E.G_STR:
-                    # 构件编码在子类层（C-A1…），大类本身没有条目号——用 C-A/C-B/C-C/C-D
-                    # 标出这一层的归属，避免「C-A3 柱」当类别名、把 C-A1/C-A2 看成它的下级。
-                    i = E.C.CON_L1.index(cat) if cat in E.C.CON_L1 else -1
-                    label = ('C-%s  %s' % (chr(ord('A') + i), cat)) if i >= 0 else cat
-                else:
-                    label = ('%s  %s' % (code, stdcat)) if code and code != 'U-OBJECT' else cat
+                label = ('%s  %s' % (code, stdcat)) if code and code != 'U-OBJECT' else cat
                 cit = QTreeWidgetItem([label, fmt(cd), fmt(ci), fmt(cd + ci)])
                 cit.setToolTip(0, '目录口径：%s' % cat)
                 root.addChild(cit)
@@ -394,9 +388,6 @@ class MainWindow(QMainWindow):
         构件编码在子类层（C-A1…），不能拿首行的子类编码当大类键——否则
         「建筑本体构件」会显示成「C-A3 柱」、大类顺序也会随桶插入顺序漂。
         """
-        if g == E.G_STR:
-            i = E.C.CON_L1.index(cat) if cat in E.C.CON_L1 else 99
-            return (0, i, 0, 0, 0)
         return E.S.order_key(crows[0].get('code', '')) + (0,)
 
     def _sub_key(self, g, catcode, sub, srows):

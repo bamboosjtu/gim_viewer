@@ -4,7 +4,7 @@ import { projectEngineeringComposition } from '../composition.js';
 import type { EngineeringEntity, EngineeringSnapshot } from '../types.js';
 
 const entity = (id: string, category: string, name = id): EngineeringEntity => ({ id, name, category, sourceIds: [id], kind: 'whole', boundaryEvidence: 'declared', classificationState: 'identified', classificationConflicts: 0 });
-const snapshot = (entities: EngineeringEntity[]): EngineeringSnapshot => ({ scope: 'test', rulesVersion: 'test', entities, memberships: [], pending: [], aliases: [], relationships: [], diagnostics: [] });
+const snapshot = (entities: EngineeringEntity[]): EngineeringSnapshot => ({ evidenceBinding:{scope:'test',sourceRevision:0},scope: 'test', rulesVersion: 'test', entities, memberships: [], pending: [], aliases: [], relationships: [], diagnostics: [] });
 const fact = (entityId: string, values: string[] = []): CompositionContextEvidence => ({ entityId, declarations: [{ names: values.map((value, i) => ({ value, evidenceId: `${entityId}:${i}` })) }], spaces: [], hostEntityIds: [] });
 
 it('separates buildings and storeys, site works and civil facilities from primary installation systems', () => {

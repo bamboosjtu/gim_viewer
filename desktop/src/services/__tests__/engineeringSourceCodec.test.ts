@@ -15,11 +15,29 @@ describe('lossless source table encoding', () => {
     const data = { text: '0', zero: 0, no: false, yes: true, missing: null, rows: [['', 17, true, null]] };
     expect(unpackEngineeringSource(packEngineeringSource(data))).toEqual(data);
   });
+  it('preserves own prototype-like field names in small and wide records without changing decoded prototypes',()=>{
+    for(const fields of [0,40]){
+    const input=JSON.parse('{"__proto__":{"source":"raw"},"constructor":"field","prototype":true,"rows":[1,2,3]}');
+    for(let index=0;index<fields;index++)input['field'+index]=index;
+    const result=unpackEngineeringSource(packEngineeringSource(input)) as Record<string,unknown>;
+    expect(result).toEqual(input);expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+    expect(Object.prototype.hasOwnProperty.call(result,'__proto__')).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(result,'__proto__')).toMatchObject({enumerable:true,writable:true,configurable:true});
+    expect(({} as Record<string,unknown>).source).toBeUndefined();
+    }
+  });
   it('rejects cyclic input and forward or malformed table references', () => {
     const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic;
     expect(() => packEngineeringSource(cyclic)).toThrow('Cyclic');
     expect(() => unpackEngineeringSource({ encoding: 'engineering-source-table-v1', shapes: [], nodes: [[4, 0]], root: 0 })).toThrow('编码无效');
     expect(() => unpackEngineeringSource({ encoding: 'engineering-source-table-v1', shapes: [['key']], nodes: [[5, 0]], root: 0 })).toThrow('编码无效');
+  });
+  it('keeps records independent when a shape workspace is reused across object and scalar rows',()=>{
+    const rows=Array.from({length:300},(_,i)=>Object.fromEntries(Array.from({length:32},(_,field)=>['field'+field,{value:i*100+field}])));
+    const result=unpackEngineeringSource(packEngineeringSource(rows)) as typeof rows;
+    expect(result).toEqual(rows);expect(result[0]).not.toBe(result[1]);
+    expect(result[0].field0).not.toBe(result[1].field0);
+    result[1].field0.value=-1;expect(result[0].field0.value).toBe(0);
   });
   it('hydrates shared facts in bounded batches and cancels before returning an obsolete graph', async () => {
     const facts = Array.from({ length: 10000 }, (_, i) => ({ id: `occurrence:${i}`, values: ['共享原始字段', i] }));

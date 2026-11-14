@@ -68,6 +68,7 @@ def category_value(value,allow_name=False):
     return ('E-T' if alias=='E01' else alias) if alias else name_category(value) if allow_name else 'U-OBJECT'
 def interpret(row,has_children=False):
     type=row['source_type'];props=values(row,'TYPE','DEVICETYPE','EQUIPMENTTYPE','设备类型','设备类别','材料类型','构件类型','MATERIALTYPE','SYSCLASSIFYNAME','PARTNAME')
+    props=[dict(p,confidence='candidate') if any(k.upper() in ('SYSCLASSIFYNAME','PARTNAME') for k in p['keys']) and not (VOCAB['keywordDictionary']['entries'].get(p['value'].strip().casefold(),{}).get('evidence',{}).get('verification')=='verified' and VOCAB['keywordDictionary']['entries'].get(p['value'].strip().casefold(),{}).get('evidence',{}).get('originalLocation')) else p for p in props]
     declarations=[{'keys':['source_type'],'value':type,'path':row['source'],'line':0},*props]
     standard=[(item,p) for p in declarations for item in TERMS.get(norm(p['value']),[])];unique={i['id']:i for i,p in standard}
     component=[(COMPONENTS[p['value'].strip().casefold()],p) for p in declarations if p['value'].strip().casefold() in COMPONENTS]
@@ -119,14 +120,15 @@ def interpret(row,has_children=False):
     if re.search('neutralpointequipment',type,re.I) or re.search(r'中性点(?:成套|装置|设备)',row['name']):meaning='neutral_set';category='E01'
     if basis in ('type','object_attribute'):status='candidate' if category in ('E-T','E-R','C-B4') else 'confirmed'
     if category=='E01' and number:status='confirmed'
-    if basis=='attribute_conflict':status='unresolved'
+    if basis=='attribute_conflict' or not category:status='unresolved'
     equipment_ids={item['id'] for item,p in standard if item['kind']=='equipment'}
     if len(equipment_ids)>1:
         contexts={(p.get('section'),p.get('containerId'),p.get('applicability')) for item,p in standard if item['kind']=='equipment'}
         category=typed if len(contexts)>1 and typed!='U-OBJECT' else 'U-OBJECT';basis='contextual_type_candidates' if len(contexts)>1 else 'attribute_conflict';status='candidate' if category!='U-OBJECT' else 'unresolved'
+    if status=='confirmed' and typed=='U-OBJECT' and structured and all(p.get('confidence')=='candidate' for c,p in structured):status='candidate'
     result={'category':category,'meaning':meaning,'basis':basis,'conflict':'object_attributes_conflict' if basis=='attribute_conflict' else '', 'classificationStatus':status,'categoryStatus':status,'classificationEvidence':list(dict.fromkeys(evidence)), 'sourceName':row['name']}
     if len(unique)==1:
-        item=next(iter(unique.values()));result['standardClass']={**{k:item[k] for k in ['id','kind','term','label','category']},'status':'confirmed','evidence':[proof(row,p) for i,p in standard]}
+        item=next(iter(unique.values()));result['standardClass']={**{k:item[k] for k in ['id','kind','term','label','category']},'status':'candidate' if all(p.get('confidence')=='candidate' for i,p in standard) else 'confirmed','evidence':[proof(row,p) for i,p in standard]}
     if len({c for c,p in component})==1:result['componentType']={'id':component[0][0],'status':'candidate' if all(p.get('confidence')=='candidate' for c,p in component) else 'confirmed','evidence':[proof(row,p) for c,p in component]}
     return result
 
@@ -142,8 +144,8 @@ def normalize(rows,scope):
         entities[id]={'id':id,'category':category,'name':name,'kind':'whole','boundaryEvidence':proof,'boundaryStatus':'candidate' if m['classificationStatus']!='confirmed' or m.get('standardClass') and not values(raw[sources[0]],'PROJECTNAME','工程中名称','GRIDIDENTIFICATIONSYSTEMCODE','设备编码','电网工程标识系统编码') else 'confirmed','classificationState':'unknown' if category=='U-OBJECT' else 'identified','classificationStatus':m['classificationStatus'],'sourceIds':[],'classificationConflicts':0,'standardClass':m.get('standardClass')}
         for s in sources:owners[s]=id
         return id
-    def bundle(source,reason):
-        id='pending:'+identity([scope,source]);pending.setdefault(id,{'id':id,'reason':reason,'sourceIds':[]});owners[source]=id;return id
+    def bundle(source,reason,seed=None):
+        id='pending:'+identity([scope,source if seed is None else seed]);pending.setdefault(id,{'id':id,'reason':reason,'sourceIds':[]});owners[source]=id;return id
     # Explicit single-phase designations, never common names or directories.
     banks=collections.defaultdict(list)
     for r in rows:
@@ -194,36 +196,41 @@ def normalize(rows,scope):
         inferred_name=False
         if m['meaning']=='neutral_set':
             proposed=explicit_names or [p for p in values(r,'PROJECTNAME','工程中名称') if main_number(p['value'])]
-        elif m['meaning']=='part' or m.get('componentType'):
+        elif m['meaning']=='part' or m.get('componentType',{}).get('status')=='confirmed':
             proposed=explicit_names if explicit else [p for p in values(r,'PROJECTNAME','工程中名称') if numbered(p['value'])]
             prefix=re.split(r'[_－:：]',r['name'])[0]
             if not proposed and not explicit and numbered(prefix):proposed=[{'value':prefix,'keys':['Name'],'path':r['source'],'line':0}];inferred_name=True
         else:continue
-        direct=[] if explicit else [owners.get(s) for s in r.get('declaredHosts',[])]
+        direct=[owners.get(s) for s in r.get('declaredHosts',[])]
         constraints=[{owner} if owner in entities and entities[owner]['category'].startswith(('E','M')) else set() for owner in direct]+[codes[host_key(p['value'])] for p in explicit_codes]+[names[host_key(p['value'])] for p in proposed]
         if not constraints:continue
-        candidates=set.intersection(*(set(v) for v in constraints));evidence=[proof(r,p) for p in explicit_codes+proposed]
+        candidates=set.intersection(*(set(v) for v in constraints));evidence=[r.get('declaredHostEvidence',{}).get(s,'PARTINDEX:'+str(s)) for s in r.get('declaredHosts',[])]+[proof(r,p) for p in explicit_codes+proposed]
+        resolved=[v for v in constraints if v];conflicting=len(resolved)>1 and not set.intersection(*(set(v) for v in resolved))
         if len(candidates)==1:
             target=next(iter(candidates))
             if not explicit and m['meaning']=='object' and target==owners.get(id):continue
-            previous=owners.get(id);owners[id]=target;m['membershipEvidence']=evidence+['PARTINDEX:'+str(s) for s in r.get('declaredHosts',[])];m['membershipStatus']='confirmed' if explicit else 'candidate'
-            if m['meaning']!='neutral_set':m['meaning']='part'
+            previous=owners.get(id);owners[id]=target;m['membershipEvidence']=evidence;m['membershipStatus']='confirmed' if explicit else 'candidate'
+            if m['meaning']!='neutral_set':m['meaning']='part';m['basis']='declared_component_host'
             queue=list(children[id])
             while queue:
                 child=queue.pop()
                 if owners.get(child['id'])==previous and meanings[child['id']]['meaning'] in ('part','detail','container','source_only'):
-                    owners[child['id']]=target;queue.extend(children[child['id']])
-        elif not inferred_name and not any(constraints) and len(proposed)==1 and numbered(proposed[0]['value']) and name_category(proposed[0]['value']).startswith('E') and m['meaning']=='part':
+                    owners[child['id']]=target;meanings[child['id']]['membershipEvidence']=evidence;meanings[child['id']]['membershipStatus']=m['membershipStatus'];queue.extend(children[child['id']])
+        elif not direct and not inferred_name and not any(constraints) and len(proposed)==1 and numbered(proposed[0]['value']) and name_category(proposed[0]['value']).startswith('E') and m['meaning']=='part':
             name=proposed[0]['value'];code=explicit_codes[0]['value'] if explicit_codes else '';seed='declared-host:'+identity([code,host_key(name)]);target=entity(seed,name_category(name),name,'declared_component_host_boundary',[id]);entities[target]['boundaryStatus']='candidate';entities[target]['classificationStatus']='candidate';names[host_key(name)].add(target)
             if code:codes[host_key(code)].add(target)
             m['membershipEvidence']=evidence;m['membershipStatus']='candidate'
-        elif explicit or any(constraints):bundle(id,'component_host_ambiguous' if any(constraints) else 'component_host_not_found');m['membershipStatus']='unresolved';m['membershipEvidence']=evidence
+        elif explicit or direct or any(constraints):
+            reason='component_host_conflict' if conflicting else 'component_host_ambiguous' if any(constraints) else 'component_host_not_found'
+            bundle(id,reason,'component-host:'+id);m['membershipStatus']='unresolved';m['membershipEvidence']=evidence
+            if conflicting:m['conflict']=reason
+            diagnostics.append({'kind':reason,'identity':id,'name':r['name']})
     used=set(owners.values());entities={k:v for k,v in entities.items() if k in used};pending={k:v for k,v in pending.items() if k in used};members=[]
     for r in rows:
         id=r['id'];owner=owners.get(id);m=meanings[id];target=entities.get(owner) or pending.get(owner)
         if target:target['sourceIds'].append(id)
         members.append({'sourceId':id,'ownerId':owner,'interpretation':m,'disposition':'whole_member' if owner in entities else 'pending_whole_member' if owner in pending else 'source_only'})
-    return {'scope':scope,'rulesVersion':'gim-element-standard-recognition-1|'+STANDARD['version']+'|'+ALIASES['version'],'entities':sorted(entities.values(),key=lambda e:e['id']),'pending':sorted(pending.values(),key=lambda e:e['id']),'memberships':members,'relationships':[],'aliases':[],'diagnostics':diagnostics}
+    return {'scope':scope,'evidenceBinding':{'scope':scope,'sourceRevision':0},'rulesVersion':'gim-element-standard-recognition-1|'+STANDARD['version']+'|'+ALIASES['version'],'entities':sorted(entities.values(),key=lambda e:e['id']),'pending':sorted(pending.values(),key=lambda e:e['id']),'memberships':members,'relationships':[],'aliases':[],'diagnostics':diagnostics}
 
 def scan_standard(root,scope=None):
     reader=Reader(root);records=reader.scan()

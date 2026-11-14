@@ -38,7 +38,7 @@ export interface EngineeringComposition {
   nodes: Map<string, CompositionNode>;
   rowsByEntity: Map<string, string[]>;
 }
-export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v12';
+export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v1';
 function groupOrder(part:CompositionGroup):number|undefined {
   if(part.kind==='area')return part.key==='area:main'?20:21-(Number(part.title.match(/\d+/)?.[0])||0)/10000;
   if(part.kind==='building'){

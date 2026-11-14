@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'desktop/**'
+      - 'tools/gim_element/**'
       - 'packages/**'
       - 'crates/**'
       - 'contracts/**'
@@ -13,6 +14,7 @@ on:
   pull_request:
     paths:
       - 'desktop/**'
+      - 'tools/gim_element/**'
       - 'packages/**'
       - 'crates/**'
       - 'contracts/**'

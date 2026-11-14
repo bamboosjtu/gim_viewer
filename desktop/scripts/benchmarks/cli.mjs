@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {randomBytes,createHash} from 'node:crypto';
 import {registerSamples,inventorySamples,selectSamples,workspacePath} from './samples.mjs';
-import {buildAcceptance,fileSha256} from './acceptance-build.mjs';
+import {buildAcceptance} from './acceptance-build.mjs';
 import {runNative} from './native-run.mjs';
 import {approveBaseline,baselineApprovalIssue,compareSuites,createPartialReview,suiteCompletenessIssues} from './compare.mjs';
 import {freezeProfile,verifyProfile} from './profiles.mjs';
@@ -19,8 +19,6 @@ import {artifactDirectory,artifactFile,loadBatchInputs} from './batch-input.mjs'
 import {bindMeasurementAcceptance} from './measurement-acceptance.mjs';
 import {createGeometryReview,geometryReviewIssue} from './geometry-review.mjs';
 import {PERFORMANCE_POLICY} from './performance-policy.mjs';
-import {reevaluatePolicy,reevaluationRows} from './policy-reevaluation.mjs';
-import {csv} from './batch-report.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..'),home=join(root,'tmp','gim-bench'),corpus=join(home,'corpus');
 const [command,...args]=process.argv.slice(2);
@@ -102,41 +100,10 @@ try{
     const result=await runNative({root,buildManifest:workspacePath(root,resolve(option('build'))),sample,mode,doctor:command==='doctor',
       ...(command==='lifecycle'?{scenario:'lifecycle-ten-open-close',additionalSamples:secondSample?[secondSample]:[],exercise:lifecycleExercise({sample,secondSample})}:{}),
       ...(option('diagnostics')?{diagnostic:read(option('diagnostics'))}:{}),
-      ...(option('capture')?{diagnostic:{kind:option('capture'),family:option('worker-family')??'dev'}}:{})});
+      ...(option('capture')?{diagnostic:{captures:[{kind:option('capture'),target:'worker',family:option('worker-family')??'dev'}]}}:{})});
     const outcome=command==='doctor'?result.report.capabilityOutcome:command==='lifecycle'?result.report.exercise?.outcome:result.report.outcome;
     console.log(JSON.stringify({report:join(result.out,'report.json'),outcome,reason:result.report.reason}));
     process.exitCode=nativeExitCode(command,outcome);
-  }else if(command==='reevaluate'){
-    if(!option('baseline')||!option('candidate'))throw Error('--baseline and --candidate required');
-    const inputs={},sources=[];
-    for(const role of ['baseline','candidate','lifecycle','verification'])if(option(role)){
-      const path=workspacePath(root,resolve(option(role))),bytes=readFileSync(path),value=JSON.parse(bytes);
-      if(value.artifactRole==='public-derived')throw Error('public-derived-is-not-authoritative');
-      inputs[role]=value;sources.push({role,path,sha256:createHash('sha256').update(bytes).digest('hex')});
-    }
-    const result=reevaluatePolicy(inputs.baseline,inputs.candidate,{lifecycle:inputs.lifecycle});
-    if(inputs.verification){
-      const step=inputs.verification.steps?.find(row=>row.privateResults&&resolve(row.privateResults)===resolve(option('candidate')));
-      const duration=Date.parse(step?.endedAt)-Date.parse(step?.startedAt);
-      const matches=inputs.verification.build?.sourceFingerprint===inputs.candidate.buildFingerprint;
-      result.batchWallClock={candidateMs:matches&&Number.isFinite(duration)&&duration>=0?duration:null,baselineMs:null,
-        comparable:false,reason:'reference-wall-clock-not-recorded; per-run settled sums are separate'};
-      const artifactPath=inputs.verification.validation?.artifactValidation;
-      if(matches&&artifactPath){
-        const path=workspacePath(root,resolve(artifactPath)),bytes=readFileSync(path),artifacts=JSON.parse(bytes);
-        if(artifacts.build?.sourceFingerprint===inputs.candidate.buildFingerprint){
-          result.diagnostics=artifacts.diagnostics;
-          sources.push({role:'artifact-validation',path,sha256:createHash('sha256').update(bytes).digest('hex')});
-          for(const diagnostic of artifacts.diagnostics??[]){
-            if(diagnostic.detailDropped>0)result.remainingIssues.push(`diagnostic-detail-capacity-loss:${diagnostic.name}:${diagnostic.detailDropped}`);
-            if(diagnostic.memoryEvidenceComplete===false)result.remainingIssues.push(`diagnostic-memory-evidence-incomplete:${diagnostic.name}`);
-          }
-        }
-      }
-    }
-    result.sources=sources;result.originalReportsPreserved=(await Promise.all(sources.map(async row=>await fileSha256(row.path)===row.sha256))).every(Boolean);
-    const file=write(`policy-reevaluation-${Date.now()}-${randomBytes(4).toString('hex')}.private.json`,result),rows=reevaluationRows(result);
-    const csvFile=file.replace(/\.json$/,'.csv');writeFileSync(csvFile,csv(rows,Object.keys(rows[0]??{})));console.log(csvFile);
   }else if(command==='compare'||command==='gate'){
     if(!option('baseline')||!option('candidate'))throw Error('--baseline and --candidate are required');
     const baseline=read(option('baseline')),candidate=read(option('candidate'));
@@ -197,7 +164,6 @@ try{
       'gim-bench batch --build <manifest> (--directory <folder> | --registry <json>) [--output <folder>] [--anonymize true|false] [--preset survey|baseline] [-repeat <n>] [--timeout-seconds <n>]',
       'recover-batch --output <folder> [--force] | init | samples | inventory | select | freeze-profile [--name commit-gate] | build',
       'analyze|export-trace --input <private report.json>',
-      'reevaluate --baseline <private reference> --candidate <private candidate> [--lifecycle <private report>] [--verification <private execution record>]',
       'run --mode diagnostic --diagnostics <config.json> --build <manifest> --sample <id>',
       'doctor --build <manifest>',
       'run --build <manifest> --sample <id> [--mode off|summary|benchmark|diagnostic] [--capture cpu|allocations|heap --worker-family dev]',

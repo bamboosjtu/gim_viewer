@@ -17,6 +17,9 @@ export function writeArtifactInventory(out,report){
   const inventory={version:'gim-private-artifacts-v1',runId:report.runId,mode:report.conditions?.mode,
     traceDetail:detailed?'diagnostic-lifecycle':'benchmark-intervals-only',
     events:file('events.jsonl',['benchmark','diagnostic'].includes(report.conditions?.mode)),
+    nativeGcHeap:{...file('native-gc-heap.private.json',report.conditions?.workerHeapPolicy==='isolated-cdp-gc-heap-v1'),
+      traceComplete:report.sampling?.nativeGc?.traceComplete??false,clockVerified:report.sampling?.nativeGc?.clockVerified??false,
+      proofDigest:report.sampling?.nativeGc?.proofDigest??null},
     trace:file('trace.private.json',detailed),analysis:file('analysis.private.json',detailed),
     captures,gpu:{...file('gpu.private.json',gpu.requested),status:!gpu.requested?'not-requested':gpu.available?'available':report.projectType==='transmission_line'?'unsupported':gpu.availability??'unavailable',availability:gpu.availability,availableSamples:gpu.available??0,
       reason:!gpu.requested?'gpu-not-requested':report.projectType==='transmission_line'?'line-gpu-timer-not-instrumented':

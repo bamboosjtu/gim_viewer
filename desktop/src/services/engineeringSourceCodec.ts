@@ -41,28 +41,41 @@ export function packEngineeringSource(value: unknown): PackedEngineeringSource {
   const root = visit(value); return { encoding: 'engineering-source-table-v1', shapes, nodes, root };
 }
 
-function* unpackSourceNodes(value: unknown): Generator<void, unknown> {
+function* unpackSourceNodes(value: unknown,consume=false): Generator<void, unknown> {
   const fail = (): never => { throw Error('工程来源表编码无效'); };
   if (!value || typeof value !== 'object') return fail();
   const packed = value as PackedEngineeringSource;
   if (packed.encoding !== 'engineering-source-table-v1' || !Array.isArray(packed.shapes) || !Array.isArray(packed.nodes) || !Number.isSafeInteger(packed.root) || packed.root < 0 || packed.root >= packed.nodes.length) return fail();
   for (const keys of packed.shapes) if (!Array.isArray(keys) || keys.some(key => typeof key !== 'string') || new Set(keys).size !== keys.length) return fail();
   const values: unknown[] = [];
-  for (let i = 0; i < packed.nodes.length; i++) {
+  const objectEntries:Array<Array<[string,unknown]>|undefined>=new Array(packed.shapes.length);
+  let i=0;
+  const reference = (id: number | string): unknown => { if (typeof id !== 'number' || !Number.isSafeInteger(id) || id < 0 || id >= i) return fail(); return values[id]; };
+  for (; i < packed.nodes.length; i++) {
     const row = packed.nodes[i]; if (!Array.isArray(row) || !row.length) return fail();
-    const reference = (id: number | string): unknown => { if (typeof id !== 'number' || !Number.isSafeInteger(id) || id < 0 || id >= i) return fail(); return values[id]; };
     switch (row[0]) {
       case 0: if (row.length !== 1) return fail(); values.push(null); break;
       case 1: if (row.length !== 2 || typeof row[1] !== 'string') return fail(); values.push(row[1]); break;
       case 2: if (row.length !== 2 || typeof row[1] !== 'number' || !Number.isFinite(row[1])) return fail(); values.push(row[1]); break;
       case 3: if (row.length !== 2 || row[1] !== 0 && row[1] !== 1) return fail(); values.push(row[1] === 1); break;
-      case 4: values.push(row.slice(1).map(reference)); break;
+      case 4: {
+        const result=new Array<unknown>(row.length-1);
+        for(let index=1;index<row.length;index++)result[index-1]=reference(row[index]);
+        values.push(result);break;
+      }
       case 5: {
         const shape = row[1]; if (typeof shape !== 'number' || !Number.isSafeInteger(shape) || !packed.shapes[shape] || row.length !== packed.shapes[shape].length + 2) return fail();
-        values.push(Object.fromEntries(packed.shapes[shape].map((key, index) => [key, reference(row[index + 2])]))); break;
+        const keys=packed.shapes[shape];
+        // Reuse the synchronous constructor's input, never its output. Native
+        // construction keeps wide records compact and treats __proto__ as
+        // data; per-shape pairs avoid per-record tuple arrays and closures.
+        const entries=objectEntries[shape]??=keys.map((key):[string,unknown]=>[key,undefined]);
+        for(let index=0;index<keys.length;index++)entries[index][1]=reference(row[index+2]);
+        values.push(Object.fromEntries(entries)); break;
       }
       default: return fail();
     }
+    if(consume)(packed.nodes as unknown[])[i]=null;
     if (i > 0 && i % 8192 === 0) yield;
   }
   return values[packed.root];
@@ -76,8 +89,8 @@ export function unpackEngineeringSource(value: unknown): unknown {
 /** Hydration shares interned family facts and yields between bounded node
  * batches. A switched project never receives a partially decoded result. */
 export async function unpackEngineeringSourceAsync(value: unknown, isCurrent: () => boolean,
-  yieldToMain: () => Promise<void> = () => new Promise(resolve => setTimeout(resolve, 0))): Promise<unknown> {
-  const nodes = unpackSourceNodes(value);
+  yieldToMain: () => Promise<void> = () => new Promise(resolve => setTimeout(resolve, 0)),consume=false): Promise<unknown> {
+  const nodes = unpackSourceNodes(value,consume);
   for (;;) {
     if (!isCurrent()) throw new DOMException('Engineering hydration cancelled', 'AbortError');
     const next = nodes.next(); if (next.done) return next.value;

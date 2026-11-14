@@ -1,4 +1,4 @@
-"""Exercise each actual onefile EXE using generated inputs, never demo/ data."""
+"""Exercise each actual directory package using generated inputs, never demo/ data."""
 import argparse
 import hashlib
 import json
@@ -50,22 +50,22 @@ def run_owned(command, out, env, timeout=120):
 def verify_package(tool, exe):
     archive = CArchiveReader(str(exe))
     forbidden = {'icuuc.dll', 'icuin.dll', 'icudt.dll', 'icu.dll'}
-    names = {name.replace('\\', '/').rsplit('/', 1)[-1].lower() for name in archive.toc}
+    names = {name.replace('\\', '/').rsplit('/', 1)[-1].lower() for name in [*archive.toc,*[str(p) for p in (exe.parent/'_internal').rglob('*')]]}
     if names & forbidden:
         raise AssertionError(f'Unexpected ICU DLLs: {names & forbidden}')
     if tool == 'gim_device':
         for name in ['viewer_shell.html', 'three.min.js', 'OrbitControls.js']:
-            assert archive.extract(name), f'Embedded renderer asset missing: {name}'
+            assert (exe.parent/'_internal'/name).read_bytes(), f'Embedded renderer asset missing: {name}'
         assert 'qtwebengineprocess.exe' in names, 'QtWebEngine child executable missing'
     if tool == 'gim_element':
-        assert hashlib.sha256(archive.extract('catalog.json')).hexdigest() == hashlib.sha256(
+        assert hashlib.sha256((exe.parent/'_internal/catalog.json').read_bytes()).hexdigest() == hashlib.sha256(
             (ROOT / 'tools/gim_element/catalog.json').read_bytes()).hexdigest()
     with exe.open('rb') as stream:
         sha = digest(stream)
-    bundle = exe.with_suffix('.zip')
+    bundle = exe.parent.with_suffix('.zip')
     with zipfile.ZipFile(bundle) as zipped:
-        assert zipped.namelist() == [exe.name], 'ZIP must contain exactly the onefile EXE'
-        with zipped.open(exe.name) as stream:
+        assert any('/_internal/' in n for n in zipped.namelist()), 'ZIP dependencies missing'
+        with zipped.open(exe.parent.name+'/'+exe.name) as stream:
             assert digest(stream) == sha, 'ZIP executable differs from the tested EXE'
     return {'exeSha256': sha, 'exeBytes': exe.stat().st_size, 'zipBytes': bundle.stat().st_size}
 
@@ -82,7 +82,7 @@ def main():
         (out / name).unlink(missing_ok=True)
     (out / 'ci-receipt.json').write_text(json.dumps({'passed': False, 'tool': args.tool}), encoding='utf-8')
     (out / 'process.log').write_text('', encoding='utf-8')
-    exe = ROOT / 'tools' / args.tool / 'dist' / EXES[args.tool]
+    exe = ROOT / 'tools' / args.tool / 'dist' / Path(EXES[args.tool]).stem / EXES[args.tool]
     package = verify_package(args.tool, exe)
     env = {**os.environ, 'PYTHONUTF8': '1', 'QT_QPA_PLATFORM': 'offscreen',
            'QTWEBENGINE_CHROMIUM_FLAGS': '--ignore-gpu-blocklist --enable-unsafe-swiftshader '

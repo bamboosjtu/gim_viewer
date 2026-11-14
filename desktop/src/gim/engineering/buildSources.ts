@@ -7,7 +7,7 @@ import { engineeringObjectEvidence } from './objectEvidence.js';
 import type { EngineeringSnapshot } from '../../engineering/types.js';
 import { collectSourceGeometryOccurrences } from './geometryOccurrences.js';
 
-export const ENGINEERING_SOURCE_VERSION = 'engineering-source-v16';
+export const ENGINEERING_SOURCE_VERSION = 'engineering-source-v1';
 export type EngineeringSpatialContext = Pick<IfcSpatialNode, 'key' | 'modelId' | 'expressId' | 'ifcType' | 'kind' | 'globalId' | 'name' | 'sourcePath' | 'parentKey' | 'longName'> & { elevationMetres?: number };
 export interface EngineeringSources {
   version: string;
@@ -52,5 +52,5 @@ export function buildEngineeringSources(scope:string,graph:EngineeringSourceGrap
 
 /** Rules can change without reparsing source formats or touching geometry. */
 export function normalizeEngineeringSources(scope: string, sources: EngineeringSources): EngineeringSnapshot {
-  return {...normalizeEngineeringModel(scope, engineeringObjectEvidence(sources.graph,engineeringSourceRecords(sources.graph,sources.ifcRecords)), sources.graph.aliases),rulesVersion:ENGINEERING_RECOGNITION_VERSION};
+  return {...normalizeEngineeringModel(scope, engineeringObjectEvidence(sources.graph,engineeringSourceRecords(sources.graph,sources.ifcRecords)), sources.graph.aliases),rulesVersion:ENGINEERING_RECOGNITION_VERSION,evidenceBinding:{scope,sourceRevision:sources.graph.revision??0}};
 }

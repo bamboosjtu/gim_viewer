@@ -45,6 +45,10 @@ function Invoke-GimToolBuild {
         [string]$VerifyScript = ''
     )
     $ErrorActionPreference = 'Stop'
+    $workspace = Split-Path -Parent (Split-Path -Parent $ToolRoot)
+    $buildTemp = Join-Path $workspace 'tmp/tool-build'
+    New-Item -ItemType Directory -Path $buildTemp -Force | Out-Null
+    $env:TEMP=$buildTemp; $env:TMP=$buildTemp; $env:TMPDIR=$buildTemp
     $toolRoot = (Get-Item -LiteralPath $ToolRoot).FullName
     $spec = Join-Path $toolRoot $SpecName
     $requirements = Join-Path $toolRoot 'requirements-build.txt'
@@ -98,12 +102,12 @@ function Invoke-GimToolBuild {
     if ($LASTEXITCODE -ne 0) { throw 'Packaging dependencies missing; install requirements-build.txt first' }
 
     New-Item -ItemType Directory -Path $work, $dist -Force | Out-Null
-    $exe = Join-Path $dist $ExeName
     $bundle = Join-Path $dist ([IO.Path]::GetFileNameWithoutExtension($ExeName))
-    $zip = [IO.Path]::ChangeExtension($exe, '.zip')
+    $exe = Join-Path $bundle $ExeName
+    $zip = Join-Path $dist ([IO.Path]::ChangeExtension($ExeName, '.zip'))
     $previous = Join-Path $work ('previous-' + [Guid]::NewGuid().ToString('N'))
     Assert-GimBuildChild -Path $previous -Parent $work
-    $oldOutputs = @($exe, $bundle, $zip, (Join-Path $dist '_internal'))
+    $oldOutputs = @($bundle, $zip)
     foreach ($path in $oldOutputs) {
         Assert-GimBuildChild -Path $path -Parent $dist
         if (Test-Path -LiteralPath $path) { Assert-GimBuildTree -Path $path }
@@ -124,12 +128,8 @@ function Invoke-GimToolBuild {
             $buildExitCode = $LASTEXITCODE
         } finally { $env:PYINSTALLER_CONFIG_DIR = $oldConfigDir }
         if ($buildExitCode -ne 0) { throw 'PyInstaller build failed' }
-        $exes = @(Get-ChildItem -LiteralPath $dist -Filter '*.exe' -File -Force)
-        if ($exes.Count -ne 1 -or $exes[0].Name -ne $ExeName -or $exes[0].Length -lt 10MB) {
-            throw "Expected one complete single-file executable: $exe"
-        }
-        foreach ($path in @($bundle, (Join-Path $dist '_internal'))) {
-            if (Test-Path -LiteralPath $path) { throw "Unexpected onedir output: $path" }
+        if (-not (Test-Path -LiteralPath $exe -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $bundle '_internal') -PathType Container)) {
+            throw "Expected complete directory package: $bundle"
         }
         if ($VerifyScript -ne '') {
             & $buildPython $VerifyScript $exe
@@ -141,7 +141,7 @@ function Invoke-GimToolBuild {
         try {
             if (-not $process.WaitForExit(60000)) {
                 $process.Kill()
-                throw 'Packaged startup check timed out; check TEMP permissions and Windows integrity labels'
+                throw 'Packaged startup check timed out; check executable directory permissions'
             }
             if ($process.ExitCode -ne 0) {
                 throw "Packaged startup check failed (exit $($process.ExitCode)); see tools/README.md"
@@ -152,7 +152,7 @@ function Invoke-GimToolBuild {
             if ($LASTEXITCODE -ne 0) { throw "Frozen --smoke failed: $SmokeDir" }
         }
         if ($Publish) {
-            Compress-Archive -LiteralPath $exe -DestinationPath $zip -CompressionLevel Optimal -Force
+            Compress-Archive -LiteralPath $bundle -DestinationPath $zip -CompressionLevel Optimal -Force
             Write-Output "Published: $zip"
         }
     } catch {

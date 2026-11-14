@@ -5,8 +5,8 @@ vi.mock('../invokeTimed.js',()=>({invokeTimed:mocks.invoke}));
 import {packDevArtifact,readDevArtifact} from '../devLodCache.js';
 function envelope(paths:string[],corrupt=false):ArrayBuffer {
   const chunks=paths.map(entry=>({path:new TextEncoder().encode(entry),bytes:packDevArtifact(corrupt && entry.endsWith('broken') ? 'wrong' : entry.slice(entry.indexOf('/')+1),{value:entry})}));
-  const out=new Uint8Array(9+chunks.reduce((sum,row)=>sum+4+row.path.length+1+8+row.bytes.length,0));
-  out.set(new TextEncoder().encode('GIMR'));out[4]=1;const view=new DataView(out.buffer);view.setUint32(5,chunks.length,true);let offset=9;
+  const out=new Uint8Array(57+chunks.reduce((sum,row)=>sum+4+row.path.length+1+8+row.bytes.length,0));
+  out.set(new TextEncoder().encode('GIMR'));out[4]=1;const view=new DataView(out.buffer);view.setUint32(5,chunks.length,true);let offset=57;
   for(const row of chunks){view.setUint32(offset,row.path.length,true);offset+=4;out.set(row.path,offset);offset+=row.path.length;out[offset++]=1;view.setBigUint64(offset,BigInt(row.bytes.length),true);offset+=8;out.set(row.bytes,offset);offset+=row.bytes.length;}
   return out.buffer;
 }

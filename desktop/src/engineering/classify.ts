@@ -151,7 +151,7 @@ export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectI
   result.sourceName=object.name;
   const classes=object.standardClasses??[],unique=new Map(classes.map(c=>[c.id,c]));
   if(unique.size===1){
-    const item=[...unique.values()][0];result.standardClass={...item,status:'confirmed',evidence:[...new Set(classes.map(c=>c.evidenceId))]};
+    const item=[...unique.values()][0];result.standardClass={...item,status:classes.every(c=>c.confidence==='candidate')?'candidate':'confirmed',evidence:[...new Set(classes.map(c=>c.evidenceId))]};
     if(item.kind!=='equipment'&&item.label!==categoryLabel(result.category)&&(!result.subtype||result.subtype==='unresolved'||result.subtype==='body')){
       result.subtype=`standard:${item.id}`;result.subtypeLabel=item.label;
       if(['material_subtype_evidence_insufficient','equipment_subtype_evidence_insufficient'].includes(result.unknownReason??''))delete result.unknownReason;
@@ -182,7 +182,7 @@ export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectI
   if(object.componentType)result.componentType={id:object.componentType.value,status:'confirmed',evidence:[object.componentType.evidenceId]};
   const equipmentCandidates=object.equipmentTypeCandidates??[],componentCandidates=object.componentTypeCandidates??[];
   if(new Set(equipmentCandidates.map(p=>p.value)).size===1)
-    result.equipmentType={id:equipmentCandidates[0].value,status:'confirmed',evidence:[...new Set(equipmentCandidates.map(p=>p.evidenceId))]};
+    result.equipmentType={id:equipmentCandidates[0].value,status:equipmentCandidates.every(p=>p.confidence==='candidate')?'candidate':'confirmed',evidence:[...new Set(equipmentCandidates.map(p=>p.evidenceId))]};
   if(new Set(componentCandidates.map(p=>p.value)).size===1)
     result.componentType={id:componentCandidates[0].value,status:componentCandidates.every(p=>p.confidence==='candidate')?'candidate':'confirmed',evidence:[...new Set(componentCandidates.map(p=>p.evidenceId))]};
   if(new Set(equipmentCandidates.map(p=>p.value)).size>1){
@@ -192,6 +192,8 @@ export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectI
     result.basis=contexts.size>1?'contextual_type_candidates':'attribute_conflict';result.conflict=contexts.size>1?'':'equipment_type_conflict';
   }
   if(new Set(componentCandidates.map(p=>p.value)).size>1){result.componentType={status:'unresolved',evidence:componentCandidates.map(p=>p.evidenceId)};result.conflict='component_type_conflict';result.classificationStatus=result.category&&result.category!=='U-OBJECT'?'candidate':'unresolved';}
+  // A vocabulary lookup is not proof that its mapping was checked against the standard.
+  if(result.classificationStatus==='confirmed'&&!object.typeCategory&&object.propertyCategories?.length&&object.propertyCategories.every(p=>p.confidence==='candidate'))result.classificationStatus='candidate';
   result.categoryStatus=result.classificationStatus??'unresolved';
   const roleEvidence=object.objectRoles?.map(p=>p.evidenceId)??[];
   result.objectRole={id:result.meaning,status:result.basis==='attribute_conflict'?'unresolved':roleEvidence.length||object.traits.nonphysical||object.traits.fastener||object.typeCategory==='part'?'confirmed':'candidate',evidence:roleEvidence};

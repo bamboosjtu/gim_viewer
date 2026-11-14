@@ -8,14 +8,15 @@ import {randomBytes} from 'node:crypto';
 import {existsSync,mkdirSync,readFileSync,writeFileSync,appendFileSync,cpSync,readdirSync,openSync,readSync,fstatSync,closeSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import {fileSha256,directoryFingerprint} from './acceptance-build.mjs';
-import {CdpConnection,WorkerHeapSampler} from './cdp.mjs';
+import {CdpConnection,WorkerHeapSampler,WORKER_HEAP_POLICY,captureCdpConnection} from './cdp.mjs';
+import {NativeGcHeapTrace} from './native-gc-heap.mjs';
 import {bareContainerKind} from './container-magic.mjs';
 import {checkedWebviewProfile} from './cache-roots.mjs';
 import {digest,runReadiness} from './compare.mjs';
 import {workspacePath,sha256} from './samples.mjs';
 import {startProcessSampler} from './process-sampler.mjs';
 import {cachePublicationAssessment} from './profiles.mjs';
-import {createSettleWindow,collectFinalEvidence,cachePublicationMoment,semanticStallReason} from './completion.mjs';
+import {createSettleWindow,collectFinalEvidence,cachePublicationMoment,semanticStallReason,readyForSettle} from './completion.mjs';
 import {assessCorrectness} from './correctness.mjs';
 import {assertBenchmarkExecutable} from './benchmark-build-attestation.mjs';
 import {classifyWorkerHeapEvidence,recordWorkerHeapSample} from './worker-memory-completeness.mjs';
@@ -25,6 +26,8 @@ import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/versio
 import {writeArtifactInventory} from './artifacts.mjs';
 
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+let collectorHash;
+const heapCollectorFingerprint=()=>collectorHash??=Promise.all(['native-run.mjs','cdp.mjs','native-gc-heap.mjs','heap-observation-coverage.mjs','worker-memory-completeness.mjs'].map(name=>fileSha256(new URL(name,import.meta.url)))).then(rows=>digest(rows));
 const reasonCode=error=>/^[a-z][a-z0-9-]{0,80}$/.test(error?.message??'')?error.message:/^CDP /.test(error?.message??'')?'cdp-request-failed':'native-run-failed';
 function fileTail(path,maxBytes=8192){
   if(!existsSync(path))return null;
@@ -37,7 +40,8 @@ async function stop(child){if(!child?.pid||child.exitCode!==null||child.signalCo
 
 /** Each call owns one native process and raw report; cold/warm share cache and WebView profile. */
 export async function runNative({root,buildManifest,sample,profileDigest='unfrozen',mode='benchmark',scenario='open',cacheState='cold',dataRoot,timeoutMs=300000,doctor=false,actions=[],diagnostic,additionalSamples=[],exercise,signal,onStarted=()=>{},onReady=async()=>{},environmentCalibration=null}){
-  const plan=diagnosticPlan(diagnostic?.kind?null:diagnostic??(mode==='diagnostic'?{captures:[]}:null),diagnostic?.kind?diagnostic:null);
+  const workerHeapCollector=await heapCollectorFingerprint();
+  const plan=diagnosticPlan(diagnostic??(mode==='diagnostic'?{captures:[]}:null));
   if(plan&&mode!=='diagnostic')throw Error('diagnostic-mode-required');
   if(process.platform!=='win32')throw Error('Native benchmark requires Windows');
   if(!environmentCalibration&&!doctor){
@@ -98,9 +102,21 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   const gpuEvidence={requested:plan?.gpu===true,samples:0,available:0,unavailable:0,unsupported:0};
   let traceOutputBytes=0,traceOutputTruncated=false;
   let captures,captureResults=null,systemResult=null,diagnosticCapabilities=null;
-  let cdp,sampler,observation=null,cleanupComplete=false,reason=null,finalEvidenceFailure=null,lateBackgroundTasks=false,crashed=false,heapRows=0,processPeak=null,settledMs=null;
+  let cdp,heapCdp,gcCdp,nativeGc,nativeGcProof,heapStopMs,ownedPageUrl,sampler,observation=null,cleanupComplete=false,reason=null,finalEvidenceFailure=null,lateBackgroundTasks=false,crashed=false,heapRows=0,processPeak=null,settledMs=null;
   let openAttempted=false,endpointError=null,exitBeforeCleanup=null;
-  const heaps=new Map(),heapRecords=new Map(),processSamples=[];let events=0,hostSamplingFailures=0,streamFailures=0,evidence=null,automaticMs=null,cachePublishMs=null,productPeak=null;
+  const heaps=new Map(),heapRecords=new Map(),heapSeries=new Map(),heapEnds=new Map(),processSamples=[],settlementSamples=[];let events=0,hostSamplingFailures=0,streamFailures=0,evidence=null,automaticMs=null,cachePublishMs=null,productPeak=null;
+  const reassignHeap=row=>{
+    const from=row.previousWorkerId,to=row.workerId;if(!from||from===to)return;
+    const old=heaps.get(from),existing=heaps.get(to);
+    if(old){heaps.set(to,{...old,...existing,workerId:to,family:row.family,isolateId:row.isolateId??old.isolateId,
+      samples:(old.samples??0)+(existing?.samples??0),observedPeakBytes:Math.max(old.observedPeakBytes??0,existing?.observedPeakBytes??0)});heaps.delete(from);}
+    const a=heapRecords.get(from),b=heapRecords.get(to);
+    if(a){const latest=(b?.lastSampleAtMs??-Infinity)>a.lastSampleAtMs?b:a;heapRecords.set(to,{...a,...b,...latest,workerId:to,family:row.family,
+      targetCreatedAtMs:row.createdAtMs,samples:(a.samples??0)+(b?.samples??0),successfulSamples:(a.successfulSamples??0)+(b?.successfulSamples??0),failedSamples:(a.failedSamples??0)+(b?.failedSamples??0),
+      maxSampleGapMs:Math.max(a.maxSampleGapMs??0,b?.maxSampleGapMs??0),maxSampleDelayMs:Math.max(a.maxSampleDelayMs??0,b?.maxSampleDelayMs??0)});heapRecords.delete(from);}
+    if(heapSeries.has(from)){heapSeries.set(to,[...heapSeries.get(from),...heapSeries.get(to)??[]]);heapSeries.delete(from);}
+    if(heapEnds.has(from)){heapEnds.set(to,heapEnds.get(from));heapEnds.delete(from);}
+  };
   let templateDiagnostics=[],templateDiagnosticsStatus='not-applicable';
   const processSampler=startProcessSampler(samplerExecutable,child,executable,env,row=>{processSamples.push(row);if(row.availability==='available'&&Number.isFinite(row.bytes))processPeak=Math.max(processPeak??0,row.bytes);});
   const acknowledgements=new Map();let ackRunning=false,ackTimer,hostGapStart=null;const hostSamplingGaps=[];
@@ -125,7 +141,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
         const targets=await(await fetch(`http://127.0.0.1:${debugPort}/json/list`,{signal:AbortSignal.timeout(1000)})).json();
         const pages=targets.filter(t=>t.type==='page'&&(/^(?:https?:\/\/tauri\.localhost|tauri:\/\/localhost)/.test(t.url)));
         writeFileSync(join(out,'endpoint.private.json'),JSON.stringify({targets},null,2));
-        if(pages.length===1){cdp=await CdpConnection.connect(pages[0].webSocketDebuggerUrl,debugPort);break;}
+        if(pages.length===1){ownedPageUrl=pages[0].webSocketDebuggerUrl;cdp=await CdpConnection.connect(ownedPageUrl,debugPort);break;}
       }catch(error){endpointError={message:String(error?.message??error),cause:String(error?.cause??''),stack:String(error?.stack??'')};
         writeFileSync(join(out,'endpoint.private.json'),JSON.stringify({error:endpointError}));}
       if(performance.now()-started>=16000){
@@ -145,19 +161,32 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     const database=await cdp.evaluate("globalThis.__TAURI_INTERNALS__.invoke('get_db_path')");
     if(resolve(database).toLowerCase()!==join(dataRoot,'gim_cache_schema_v1.db').toLowerCase())throw Error('native-cache-root-mismatch');
     await onReady(cdp,{runId,out,build});
-    sampler=new WorkerHeapSampler(cdp,row=>{
+    // Heap replies must not queue behind the page's large evidence/trace
+    // frames. This second connection belongs to the same attested page.
+    heapCdp=await CdpConnection.connect(ownedPageUrl,debugPort);
+    if(mode==='benchmark'||mode==='diagnostic'){
+      const version=await(await fetch(`http://127.0.0.1:${debugPort}/json/version`,{signal:AbortSignal.timeout(2000)})).json();
+      gcCdp=await CdpConnection.connect(version.webSocketDebuggerUrl,debugPort);nativeGc=new NativeGcHeapTrace(gcCdp,cdp,heapCdp);await nativeGc.start();
+    }
+    sampler=new WorkerHeapSampler(heapCdp,row=>{
       appendFileSync(join(out,'heap.jsonl'),JSON.stringify(row)+'\n');heapRows++;
+      if(row.kind==='heap-target-associated')reassignHeap(row);
       if(row.kind==='heap-sample'&&row.workerId){const previous=heapRecords.get(row.workerId);
         heapRecords.set(row.workerId,recordWorkerHeapSample(previous,row));}
       if(['worker-target-ended','heap-sampling-stopped'].includes(row.kind)&&row.workerId){
+        nativeGc?.ended(row.workerId,row.atMs);
+        heapEnds.set(row.workerId,row.atMs);
         const previous=heapRecords.get(row.workerId);
-        if(previous&&Number.isFinite(previous.lastSampleAtMs)&&Number.isFinite(row.atMs))
+        const lastSuccessful=previous?.lastSuccessfulSampleAtMs??previous?.targetCreatedAtMs;
+        if(previous&&Number.isFinite(lastSuccessful)&&Number.isFinite(row.atMs))
           heapRecords.set(row.workerId,{...previous,maxSampleGapMs:Math.max(previous.maxSampleGapMs??0,
-            Math.max(0,row.atMs-previous.lastSampleAtMs))});
+            Math.max(0,row.atMs-lastSuccessful))});
       }
-      if(row.availability==='available'){const old=heaps.get(row.workerId);heaps.set(row.workerId,{workerId:row.workerId,family:row.family,isolateId:row.isolateId,samples:(old?.samples??0)+1,observedPeakBytes:Math.max(old?.observedPeakBytes??0,row.bytes),maxSampleDelayMs:Math.max(old?.maxSampleDelayMs??0,row.sampleDelayMs)});}
+      if(row.availability==='available'){const old=heaps.get(row.workerId);heaps.set(row.workerId,{workerId:row.workerId,family:row.family,isolateId:row.isolateId,samples:(old?.samples??0)+1,observedPeakBytes:Math.max(old?.observedPeakBytes??0,row.bytes),maxSampleDelayMs:Math.max(old?.maxSampleDelayMs??0,row.sampleDelayMs)});
+        const points=heapSeries.get(row.workerId)??[];points.push({atMs:row.atMs,bytes:row.bytes,earliestAtMs:row.heapRequestedAtMs??row.atMs-row.sampleDelayMs,latestAtMs:row.atMs,method:row.method});heapSeries.set(row.workerId,points);}
     });
-    if(plan){captures=new CaptureController(cdp,out,plan);sampler.onDiagnosticTarget=(identity,sessionId)=>captures.target(identity,sessionId);}
+    if(plan)captures=new CaptureController(captureCdpConnection(cdp,heapCdp),out,plan);
+    sampler.onDiagnosticTarget=(identity,sessionId,target)=>{nativeGc?.associate(identity,sessionId,target);captures?.target(identity,sessionId);};
     if(mode==='benchmark'||mode==='diagnostic')await sampler.start();
     cdp.onEvent(message=>{
       if(message.method!=='Runtime.bindingCalled'||message.params.name!=='__gimMeasurementEmit')return;
@@ -226,7 +255,11 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
           ?'product-stalled':'engineering-semantic-failed';break;}
         const stalled=semanticStallReason(observation,now-lastProgressAt);
         if(stalled){reason=stalled;break;}
-        if(automaticMs!==null&&settleWindow.observe(observation)){
+        const quietComplete=automaticMs!==null&&settleWindow.observe(observation);
+        if(automaticMs!==null&&settlementSamples.length<128)settlementSamples.push({controllerAtMs:now,snapshotRpcMs:now-requestedAt,
+          snapshotAtMs:observation.snapshotAtMs,openElapsedMs:observation.openElapsedMs,ready:readyForSettle(observation,{cacheState}),quietComplete,
+          activeTasks:observation.measurement?.activeTasks?.map(t=>({family:t.family,taskId:t.taskId})),progress:observation.progress});
+        if(quietComplete){
           cachePublishMs??=cachePublicationMoment(observation);
           completed=true;settledObservedAtMs=observation.snapshotAtMs;settledMs=observation.openElapsedMs;break;
         }
@@ -316,6 +349,9 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     }
   }catch(error){reason=reasonCode(error);try{writeFileSync(join(out,'failure.private.log'),String(error?.stack??error));}catch{logFailures++;}}
   finally{
+    // End the product observation window before diagnostic export/trace drain.
+    // Transport latency after settlement is not a live Worker sampling hole.
+    sampler?.stop();heapStopMs=performance.now();
     if(!doctor&&!exercise){
       try{
         if(!cdp||cdp.closed)throw Error('cdp-unavailable');
@@ -331,7 +367,9 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       await delay(150);await flushAcks();await delay(100);}
     if(captures)captureResults=await captures.stop();
     if(systemCapture)systemResult=await systemCapture.stop();
-    clearInterval(ackTimer);sampler?.stop();cdp?.close();const sampling=await processSampler.stop();if(sampling.failures)streamFailures+=sampling.failures;
+    clearInterval(ackTimer);if(nativeGc)nativeGcProof=await nativeGc.stop();
+    if(nativeGcProof)writeFileSync(join(out,'native-gc-heap.private.json'),JSON.stringify(nativeGcProof));
+    gcCdp?.close();heapCdp?.close();cdp?.close();const sampling=await processSampler.stop();if(sampling.failures)streamFailures+=sampling.failures;
     exitBeforeCleanup={code:child.exitCode,signal:child.signalCode};
     try{await stop(child);cleanupComplete=true;}catch{reason='owned-process-cleanup-failed';}}
   const suspended=reason==='renderer-process-exited'&&confirmedEnvironmentSuspend(
@@ -344,15 +382,30 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       webviewLogTail:fileTail(log)},null,2));
   }
   writeFileSync(join(out,'process-memory.json'),JSON.stringify(processSamples,null,2));
+  writeFileSync(join(out,'settlement-window.private.json'),JSON.stringify({quietMs:3000,pollingMs:1000,samples:settlementSamples},null,2));
+  for(const [workerId,record] of heapRecords){
+    const points=heapSeries.get(workerId)??[],end=heapEnds.get(workerId)??heapStopMs;let previous=record.targetCreatedAtMs,gap=0;
+    for(const point of [...points].sort((a,b)=>a.atMs-b.atMs)){if(Number.isFinite(previous))gap=Math.max(gap,point.atMs-previous);previous=point.atMs;}
+    if(Number.isFinite(previous)&&Number.isFinite(end))gap=Math.max(gap,end-previous);
+    record.maxSampleGapMs=gap;
+  }
+  const nativeHeap=nativeGc?.coverage(heapSeries,heapStopMs);
+  if(nativeHeap&&nativeGcProof)nativeHeap.summary.proofDigest=digest(nativeGcProof);
+  if(nativeHeap)for(const [workerId,points] of nativeHeap.observations){
+    if(!points.length)continue;const old=heaps.get(workerId),identity=points[0];let peak=old?.observedPeakBytes??0;for(const point of points)peak=Math.max(peak,point.bytes);
+    heaps.set(workerId,{...old,workerId,family:identity.family,isolateId:identity.isolateId,samples:old?.samples??0,gcSamples:points.length,observedPeakBytes:peak});
+  }
   const workerMemory=[...heaps.values()].map(row=>({...row,
     failedSamples:heapRecords.get(row.workerId)?.failedSamples??0,
     maxSampleGapMs:heapRecords.get(row.workerId)?.maxSampleGapMs??0,
-    maxSampleDelayMs:heapRecords.get(row.workerId)?.maxSampleDelayMs??row.maxSampleDelayMs})),measurement=observation?.measurement??null;
+    maxSampleDelayMs:heapRecords.get(row.workerId)?.maxSampleDelayMs??row.maxSampleDelayMs,
+    observationCoverage:nativeHeap?.coverage.get(row.workerId)})),measurement=observation?.measurement??null;
   const processMemoryComplete=processSamples.length>=2&&processSamples.every(row=>row.availability==='available');
   const {missing:missingWorkers,unavailable:unavailableWorkers,shortLived:shortLivedWorkerMemory,
     notApplicable:notApplicableWorkerMemory}=classifyWorkerHeapEvidence(
-    measurement?.workers,new Set(heaps.keys()),heapRecords,sampler?.periodMs??1000);
+    measurement?.workers,new Set(heaps.keys()),heapRecords,sampler?.periodMs??1000,nativeHeap?.coverage);
   const memoryIncompleteItems=[];
+  if(sampler?.snapshot().identityConflicts)memoryIncompleteItems.push('worker-heap:identity-conflict');
   if(!processMemoryComplete){
     if(processSamples.length<2)memoryIncompleteItems.push('process-tree:insufficient-samples');
     const reasons=new Map();for(const row of processSamples)if(row.availability!=='available'){
@@ -362,7 +415,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
   }
   for(const workerId of missingWorkers)memoryIncompleteItems.push(`worker-heap:missing:${workerId}`);
   for(const row of unavailableWorkers)memoryIncompleteItems.push(`worker-heap:${row.reason??'unavailable'}:${row.workerId}`);
-  const memoryEvidenceComplete=processMemoryComplete&&!missingWorkers.length&&!unavailableWorkers.length;
+  const memoryEvidenceComplete=processMemoryComplete&&!missingWorkers.length&&!unavailableWorkers.length&&!sampler?.snapshot().identityConflicts;
   const measurementIncompleteItems=[
     ...(reason?[`run:${reason}`]:[]),...(streamFailures?[`stream-failures:${streamFailures}`]:[]),
     ...(!cleanupComplete?['owned-process-cleanup']:[]),
@@ -374,8 +427,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       .map(([key,value])=>`collector:${key}:${value}`),
     ...((measurement?.activeTasks?.length??0)>0?[`active-tasks:${measurement.activeTasks.length}`]:[]),
   ];
-  const visibleGeometryPolicy=Object.hasOwn(observation?.moments??{},'firstVisibleGeometryReady');
-  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:MEASUREMENT_VERSION,geometryTimingPolicy:visibleGeometryPolicy?'in-viewport-model-draw-submitted-v2':'legacy-model-commit-v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode,scenario,cacheState,environmentCalibration,
+  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:MEASUREMENT_VERSION,workerHeapPolicy:WORKER_HEAP_POLICY.version,workerHeapCollector,geometryTimingPolicy:'in-viewport-model-draw-submitted-v1',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v1',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode,scenario,cacheState,environmentCalibration,
     sampleId:sample.sampleId,sourceSha256:sample.sourceSha256,profileDigest,routeDigest:digest(actionTargets),viewportDigest:digest(observation?.viewport??null),viewport:observation?.viewport??null,
     workloadDigest:evidence?digest({workload:evidence.progress.workload,semantic:evidence.semanticDigest,placement:evidence.placementDigest}):null};
   const assessment=assessCorrectness(evidence);
@@ -408,12 +460,12 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     measurementComplete:!reason&&streamFailures===0&&cleanupComplete&&measurement?.aggregateComplete===true&&
       measurement?.lifecycleComplete===true&&!measurement.activeTasks.length,
     measurementIncompleteItems,memoryEvidenceComplete,memoryIncompleteItems,
-    requiredMetrics:['firstResponseMs','automaticLoadMs','processPrivatePeakBytes',...(visibleGeometryPolicy&&(evidence?.contentEvidence?.expectedShownOccurrences??0)>0?['firstGeometryMs']:[])],metrics:{
+    requiredMetrics:['firstResponseMs','automaticLoadMs','processPrivatePeakBytes',...((evidence?.contentEvidence?.expectedShownOccurrences??0)>0?['firstGeometryMs']:[])],metrics:{
       firstResponseMs:observation?.moments.navigationUiReady??observation?.moments.coreSemanticReady??null,
       modelTreeReadyMs:observation?.projectType==='substation'?observation?.moments.engineeringTreeReady??null:
         observation?.moments.navigationUiReady??null,
       geometryCommitMs:observation?.moments.firstUsableGeometryReady??observation?.moments.firstGeometryReady??null,
-      firstGeometryMs:visibleGeometryPolicy?observation?.moments.firstVisibleGeometryReady??null:observation?.moments.firstGeometryReady??observation?.moments.firstUsableGeometryReady??null,
+      firstGeometryMs:observation?.moments.firstVisibleGeometryReady??null,
       allGeometryReadyMs:Math.max(observation?.moments.allIfcReady??0,observation?.moments.devBaseRepresentationsSettled??0)||null,
       automaticLoadMs:automaticMs,cachePublishMs,
       settledMs,writeDrainMs:automaticMs!==null&&observation?.devArtifactWriteElapsedMs!=null
@@ -434,7 +486,7 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     environmentSuspend:suspended?{code:'INFRA_SUSPEND',observationGapMs}:null,
     openAttempted,cleanupComplete,measurement,workerMemory,missingWorkerMemory:missingWorkers,
     unavailableWorkerMemory:unavailableWorkers,
-    shortLivedWorkerMemory,notApplicableWorkerMemory,sampling:sampler?.snapshot()??null,heapRows,events,hostSamplingFailures,hostSamplingGaps,
+    shortLivedWorkerMemory,notApplicableWorkerMemory,sampling:sampler?{...sampler.snapshot(),nativeGc:nativeHeap?.summary??null}:null,heapRows,events,hostSamplingFailures,hostSamplingGaps,
     templateDiagnostics,templateDiagnosticsStatus,
     capabilityResult:observation?.capabilityResult??null,
     capabilityOutcome:doctor&&processMemoryComplete&&workerMemory.some(w=>w.family==='measurement-probe')&&

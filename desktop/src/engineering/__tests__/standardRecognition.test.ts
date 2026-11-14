@@ -45,14 +45,14 @@ it.each(['EQUIPMENTTYPE','MATERIALTYPE'])('uses the sole FAM %s candidate and re
   expect(component.componentType).toMatchObject({id:'body',status:'confirmed'});expect(component.componentType?.evidence[0]).toContain('a.fam');
 });
 
-it.each(['SYSCLASSIFYNAME','PARTNAME'])('R09 maps only verified exact %s terms, retains unknown codes and ignores field order',async field=>{
+it.each(['SYSCLASSIFYNAME','PARTNAME'])('R09 keeps unverified exact %s mappings candidate, retains unknown codes and ignores field order',async field=>{
   const lines=[`${field}=GIS`,'OBJECTMODELPOINTER=a.dev'];
   for(const ordered of [lines,[...lines].reverse()]){
     const raw:Record<string,string>={'project.cbm':ordered.join('\n'),'a.dev':'TYPE=OTHERS'};
     const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]});
     const result=interpretObject(toObjectEvidence(graph.records[0]));
-    expect(result).toMatchObject({category:'E05',categoryStatus:'confirmed',equipmentType:{id:'gis',status:'confirmed'}});
-    expect(result.vocabularyObservations?.[0]).toMatchObject({field,rawValue:'GIS',status:'mapped',dictionaryVersion:'source-keywords-2'});
+    expect(result).toMatchObject({category:'E05',categoryStatus:'candidate',equipmentType:{id:'gis',status:'candidate'}});
+    expect(result.vocabularyObservations?.[0]).toMatchObject({field,rawValue:'GIS',status:'mapped',dictionaryVersion:'source-keywords-1'});
     expect(result.vocabularyObservations?.[0].dictionaryEvidence).toContain('C17');
     expect(result.classificationEvidence?.some(id=>id.includes('project.cbm'))).toBe(true);
   }
@@ -66,8 +66,8 @@ it.each(['SYSCLASSIFYNAME','PARTNAME'])('R09 maps only verified exact %s terms, 
 
 it.each([['本体','body','A5'],['散热器','radiator','A13'],['Body','body','B5']])('maps exact PARTNAME=%s with field-level dictionary evidence',(value,id,cell)=>{
   const result=interpretObject(toObjectEvidence(record('x','OTHERS',{properties:[{keys:['PARTNAME'],value,path:'a.cbm',line:1}]})));
-  expect(result.componentType).toMatchObject({id,status:'confirmed'});
-  expect(result.vocabularyObservations?.[0]).toMatchObject({rawValue:value,status:'mapped',dictionaryVersion:'source-keywords-2'});
+  expect(result.componentType).toMatchObject({id,status:'candidate'});
+  expect(result.vocabularyObservations?.[0]).toMatchObject({rawValue:value,status:'mapped',dictionaryVersion:'source-keywords-1'});
   expect(result.vocabularyObservations?.[0].dictionaryEvidence).toContain(cell);
 });
 it('maps the reviewed Chinese equipment name without guessing unknown code prefixes',()=>{

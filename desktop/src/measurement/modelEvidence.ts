@@ -174,7 +174,7 @@ export async function benchmarkEvidence(state:AppState){
   }
   checks.push({name:'session-stable',passed:state.isCurrentSession(session)},{name:'cache-source-matches',passed:cache?.sourceMatches===true});
   return {version:'gim-runtime-evidence-v1',scope:'runtime-regression-invariants-not-standard-compliance',projectType:state.currentProjectType,
-    engineeringCoverage,checks,semanticDigest,semanticDigestScope:snapshot?'engineering-with-pending-v2':'format-projection-v1',
+    engineeringCoverage,checks,semanticDigest,semanticDigestScope:snapshot?'engineering-with-pending-v1':'format-projection-v1',
     pendingDigest,pendingCount,pendingSourceCount,placementDigest,
     progress,cache,catalogCacheEvidence,geometry,geometryDiagnostics,geometryStatuses:geometryDiagnostics.statuses,
     failedGeometryReasons,partialGeometryReasons,geometryDiagnosticScope:'requested-templates-only',geometryDefects,

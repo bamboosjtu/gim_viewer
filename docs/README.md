@@ -83,7 +83,7 @@
 |---|---|
 | [开发指南](development.md) | 环境、命令、工作区与临时目录、运行时资产、文档维护 |
 | [验证](validation.md) | 证据分层、必须成立的不变量、自动门禁、真实复核与覆盖率 |
-| [性能测试指南](performance-guide.md) | 怎么测：SLO 定义、冷/暖步骤、手工与 CLI 路线 |
+| [性能测试指南](performance-guide.md) | 怎么测：测量定义、冷/暖步骤、手工与 CLI 路线 |
 | [Benchmark CLI](benchmark.md) | 批量 CLI、子命令、注册表、报告、Trace/Profile 与状态/退出码 |
 | [测量与 Benchmark](architecture/measurement.md) | 测量协议、采集面、Trace/Profile、完整性口径与权威产物 |
 

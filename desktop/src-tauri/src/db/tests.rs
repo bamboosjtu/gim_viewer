@@ -338,12 +338,12 @@ use std::os::windows::fs::MetadataExt;
         #[test]
         fn cache_miss_reason_is_diagnosable_and_stable() {
             let reason = super::super::cache_miss_reason(vec![
-                "LINE_PARSER_VERSION_MISMATCH:gim-parser-v21 -> gim-line-parser-v1".into(),
+                "LINE_PARSER_VERSION_MISMATCH:gim-parser-v1 -> gim-line-parser-v1".into(),
                 "LINE_SEMANTIC_PACK_INVALID".into(),
             ]);
             assert_eq!(
                 reason.as_deref(),
-                Some("LINE_PARSER_VERSION_MISMATCH:gim-parser-v21 -> gim-line-parser-v1; LINE_SEMANTIC_PACK_INVALID")
+                Some("LINE_PARSER_VERSION_MISMATCH:gim-parser-v1 -> gim-line-parser-v1; LINE_SEMANTIC_PACK_INVALID")
             );
             assert_eq!(super::super::cache_miss_reason(Vec::new()), None);
         }
@@ -469,7 +469,7 @@ use std::os::windows::fs::MetadataExt;
     }
 
     #[test]
-    fn line_semantic_pack_v2_keeps_metadata_only_entries() {
+    fn line_semantic_pack_keeps_metadata_only_entries() {
         let root = crate::workspace_test_temp().join(format!(
             "gim-viewer-semantic-pack-meta-{}-{}",
             std::process::id(),
@@ -532,7 +532,7 @@ use std::os::windows::fs::MetadataExt;
         std::fs::write(&pack_path, b"abc").unwrap();
 
         let mut corrupted = index_backup.clone();
-        // v2 record: header(9) + path_len(4) + path(9) => offset at 22.
+        // v1 record: header(9) + path_len(4) + path(9) => offset at 22.
         let offset_start = 9 + 4 + "Cbm/a.cbm".len();
         corrupted[offset_start..offset_start + 8].copy_from_slice(&u64::MAX.to_le_bytes());
         std::fs::write(&index_path, corrupted).unwrap();

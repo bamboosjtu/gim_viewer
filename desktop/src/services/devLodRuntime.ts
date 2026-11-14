@@ -55,6 +55,11 @@ interface ViewEvaluation {
 
 /** Session owner for catalog, templates and camera-driven occurrence representations. */
 export class DevLodRuntime {
+  private firstModelPresented=false;
+  private readonly onModelPresented=()=>{
+    if(!this.current()||this.firstModelPresented)return;
+    this.firstModelPresented=true;this.schedule(false);
+  };
   private readonly readiness: DevLodReadiness;
   private updateReadiness(row: Occurrence): void { this.readiness.updateReadiness(row); }
 
@@ -525,7 +530,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     const canvas = (this.ctx.world.renderer as any)?.three?.domElement as HTMLCanvasElement | undefined;
     const rect = canvas?.getBoundingClientRect();
     const view = createDeviceViewContext(camera, rect?.width || 1000, rect?.height || 800);
-    const signature=[...view.clip.elements,...view.eye.toArray(),view.width,view.height,this.anchor?1:0,this.diagnostics.autoLodSuppressed?1:0,this.diagnostics.baseRepresentationsSettled?1:0];
+    const signature=[...view.clip.elements,...view.eye.toArray(),view.width,view.height,this.anchor?1:0,this.diagnostics.autoLodSuppressed?1:0,this.firstModelPresented?1:0];
     if(signature.some((value,i)=>value!==this.viewSignature[i])) { this.viewRevision++; this.viewSignature=signature; }
     const candidates = this.viewIndex.query(view.frustum);
     this.diagnostics.viewIndex = { ...this.viewIndex.diagnostics };
@@ -553,7 +558,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         // action (refine()); camera proximity and an ordinary click must stay in
         // the inexpensive browser representation.  This is the key boundary
         // between browsing and the fine-model workflow.
-        const browseLod: DeviceLod = !row.group||!this.diagnostics.baseRepresentationsSettled ? 0 : this.diagnostics.autoLodSuppressed
+        const browseLod: DeviceLod = !row.group||!this.firstModelPresented ? 0 : this.diagnostics.autoLodSuppressed
           ? row.inView ? Math.min(1, row.displayed) as DeviceLod : 0
           : metrics ? chooseDeviceLod(row.displayed, metrics.visible, metrics.pixels) : 0;
         row.browseDesired = browseLod;
@@ -632,7 +637,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         if (row.group) this.instances?.remove(row.group);
         this.state.modRootGroup!.add(group); row.group?.removeFromParent();
         perfMarkProductMoment('firstUsableGeometryReady',{kind:'dev',scope:'geometry-commit'},this.perf);
-        void observeFirstGeometry(this.state,this.ctx,group,this.session,undefined,this.perf).catch(error=>{if(this.current())console.warn('[Geometry presentation]',error);});
+        void observeFirstGeometry(this.state,this.ctx,this.state.modRootGroup!,this.session,this.onModelPresented,this.perf).catch(error=>{if(this.current())console.warn('[Geometry presentation]',error);});
         if (row.key) { const count = (this.displayedPins.get(row.key) ?? 1) - 1; if (count) this.displayedPins.set(row.key, count); else { this.displayedPins.delete(row.key); if (!this.placementUsers.has(row.key)) this.pinKeys.delete(row.key); } }
         this.displayedPins.set(key, (this.displayedPins.get(key) ?? 0) + 1);
         row.group = group; row.pickLocalBounds = template.bounds; row.pickBounds = worldBounds;

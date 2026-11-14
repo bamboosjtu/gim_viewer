@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller 打包配置 —— 单文件 exe（与 gim_device/viewer.spec 同一形态）"""
+"""PyInstaller 打包配置 —— 免自解包目录包"""
 from pathlib import Path
 
 try:                                    # PyInstaller 注入 SPECPATH；直接 python 打开时回退
@@ -39,20 +39,18 @@ if _left:
 
 pyz = PYZ(a.pure)
 
-# 单文件：a.binaries / a.datas 直接进 EXE，不再生成 COLLECT 目录。
+# 依赖在 _internal 中，启动前不向系统 TEMP 自解包。
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='GIM实体盘点器',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -60,3 +58,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+app = COLLECT(exe,a.binaries,a.datas,strip=False,upx=False,name='GIM实体盘点器')

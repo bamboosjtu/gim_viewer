@@ -14,12 +14,12 @@ export function assembleEngineeringView(scope:string,graph:EngineeringSourceGrap
 export function assembleStoredEngineeringView(scope:string,sources:EngineeringSources,normalize:(scope:string,sources:EngineeringSources)=>EngineeringSnapshot=normalizeEngineeringSources){
   const graph=sources.graph,stageErrors:Record<string,string>={};
   let snapshot:EngineeringSnapshot;
-  try{snapshot=normalize(scope,sources);}catch(error){
+  try{snapshot=normalize(scope,sources);if(snapshot.evidenceBinding.scope!==scope||snapshot.evidenceBinding.sourceRevision!==(graph.revision??0))throw Error('Engineering evidence revision mismatch');}catch(error){
     stageErrors.recognition=String(error);
     const ids=engineeringSourceRecords(graph,sources.ifcRecords).map(r=>r.id);
     snapshot={scope,rulesVersion:ENGINEERING_RULES_VERSION,entities:[],pending:[],relationships:[],aliases:[],
       memberships:ids.map(sourceId=>({sourceId,ownerId:null,disposition:'source_only',interpretation:{category:'U-OBJECT',meaning:'source_only',basis:'recognition_unavailable',conflict:'',independent:false,classificationStatus:'unresolved',categoryStatus:'unresolved',assemblyCategory:'',assemblySignature:''}})),
-      diagnostics:[{kind:'recognition-failed',identity:scope,name:String(error)}],recognitionCoverage:{inputSourceIds:ids,processed:0,confirmed:0,complete:false}};
+      evidenceBinding:{scope,sourceRevision:graph.revision??0},diagnostics:[{kind:'recognition-failed',identity:scope,name:String(error)}],recognitionCoverage:{inputSourceIds:ids,processed:0,confirmed:0,complete:false}};
   }
   const navigation=projectEngineeringNavigation(sources,snapshot);
   Object.assign(stageErrors,navigation.projectionErrors);

@@ -12,6 +12,7 @@ import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometr
 import { installCompositionProjection } from './compositionProjectionService.js';
 import { createNavigationCacheProjection } from './engineeringNavigationCache.js';
 import type {EvidenceQuery,EvidenceRange} from '../engineering/evidence.js';
+import {checkEvidenceRange} from '../gim/engineering/evidenceProvider.js';
 
 interface EngineeringJob {
   publishedBuildId:number;
@@ -39,15 +40,16 @@ function evidenceJob(state:AppState):EngineeringJob{const job=jobs.get(state);if
 export async function getEngineeringEvidenceSnapshot(state:AppState,entryIds?:readonly string[]){const job=evidenceJob(state);await job.evidenceReady;if(!current(state,job))throw Error('Stale evidence session');const snapshot=await job.client.getEvidenceSnapshot(entryIds);if(!current(state,job))throw Error('Stale evidence session');return snapshot;}
 export async function queryEngineeringEvidence(state:AppState,query:EvidenceQuery){const job=evidenceJob(state);await job.evidenceReady;if(!current(state,job))throw Error('Stale evidence session');const page=await job.client.queryEvidence(query);if(!current(state,job))throw Error('Stale evidence session');return page;}
 async function prepareEvidenceEntry(state:AppState,job:EngineeringJob,path:string):Promise<void>{
-  if((state.substationEntrySizes.get(path)??0)>16*1024*1024)throw Error('Evidence entry exceeds read budget');
+  if((state.substationEntrySizes.get(path)??0)>16*1024*1024)throw Error('来源文件超过 16 MiB 整文件读取上限；当前尚未提供分块读取接口');
   const file=state.currentFiles?.get(path);
   let bytes:Uint8Array;
-  if(file){if(file.size>16*1024*1024)throw Error('Evidence entry exceeds read budget');bytes=new Uint8Array(await file.arrayBuffer());}
+  if(file){if(file.size>16*1024*1024)throw Error('来源文件超过 16 MiB 整文件读取上限；当前尚未提供分块读取接口');bytes=new Uint8Array(await file.arrayBuffer());}
   else{if(state.currentProjectId==null)throw Error('Evidence entry unavailable');const {readCachedEntry}=await import('@desktop/database.js');bytes=await readCachedEntry(state.currentProjectId,path);}
-  if(bytes.byteLength>16*1024*1024)throw Error('Evidence entry exceeds read budget');
+  if(bytes.byteLength>16*1024*1024)throw Error('来源文件超过 16 MiB 整文件读取上限；当前尚未提供分块读取接口');
   if(!current(state,job))throw Error('Stale evidence session');await job.client.addFiles([{path,bytes}]);
 }
 export async function ensureEngineeringEvidence(state:AppState,range:EvidenceRange){
+  checkEvidenceRange(range);
   const job=evidenceJob(state);await job.ready;
   const inventory=await job.client.getEvidenceSnapshot(range.entryIds),entries=new Map(inventory.entries.map(e=>[e.id,e])),coverage=new Map(inventory.coverage.map(e=>[e.entryId,e]));
   for(const path of range.entryIds){const entry=entries.get(path);if(!entry)throw Error('Unknown evidence entry');if(!coverage.get(path)?.restorable&&(entry.status==='not_requested'||entry.status==='failed'||coverage.get(path)?.rawAvailable===false))await prepareEvidenceEntry(state,job,path);}

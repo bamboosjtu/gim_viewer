@@ -6,8 +6,8 @@ import type { XmlModDocument } from '../gim/geometry/xmlModParser.js';
 import { discoverGeometriesFromDevPath } from './modGeometryDiscovery.js';
 import { getFileByPath } from '../gim/fileLookup.js';
 
-export const DEV_SPATIAL_CATALOG_VERSION = 'dev-spatial-catalog-v2';
-export const DEV_GEOMETRY_VERSION = 'geometry-cache-v20-source-bound-stl';
+export const DEV_SPATIAL_CATALOG_VERSION = 'dev-spatial-catalog-v1';
+export const DEV_GEOMETRY_VERSION = 'geometry-cache-v1-source-bound-stl';
 export type BoundsTuple = [number, number, number, number, number, number];
 export interface DevSourceBounds {
   devPath: string;

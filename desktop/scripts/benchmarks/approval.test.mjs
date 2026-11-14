@@ -32,7 +32,7 @@ async function candidateFor(root,kind,evidence){
     report:benchmarkRun(`native-${++sequence}`,{conditions:{profileDigest,cacheState,sourceSha256:sample.sourceSha256},
       ...(evidence?{...assessCorrectness(evidence),evidence}:{})})});
   if(kind==='matrix'){
-    const body={version:'gim-benchmark-profile-v2',frozen:true,repetitions:3,mode:'benchmark',requiredWorkerFamilies:[],
+    const body={version:'gim-benchmark-profile-v1',frozen:true,repetitions:3,mode:'benchmark',requiredWorkerFamilies:[],
       cases:[{sampleId:sample.sampleId,sourceSha256:sample.sourceSha256,scenario:'open',actions:[],timeoutMs:1000}]};
     return (await runMatrix({root,buildManifest:'unused',registry:{samples:[sample]},profile:{...body,digest:digest(body)},execute})).result;
   }
@@ -62,7 +62,7 @@ for(const kind of ['matrix','batch'])test(`${kind} native format completes accep
   const gate=(candidate,extra=[],status=0)=>{cli(['gate','--baseline',baselineFile,'--candidate',save('next.json',candidate),'--output',output,...extra],status);
     return JSON.parse(readFileSync(output,'utf8'));};
   assert.equal(gate(nextSuite(candidate,'next',105),[],2).outcome,'INCONCLUSIVE');
-  assert.equal(gate(nextSuite(candidate,'slow',120),[],2).requiresRetest,true);
+  assert.equal(gate(nextSuite(candidate,'slow',120),[],2).retestDecision,'developer');
   const retestArgs=['--retest-baseline',save('baseline-retest.json',nextSuite(candidate,'base-retest',100)),
     '--retest-candidate',save('candidate-retest.json',nextSuite(candidate,'next-retest',120))];
   assert.equal(gate(nextSuite(candidate,'slow',120),retestArgs,2).outcome,'INCONCLUSIVE');
@@ -273,7 +273,7 @@ test('content changes require independent geometry evidence and explicit CLI app
   assert.equal(geometryReviewIssue(different,baseline,next),'geometry-review-digest-mismatch');
   // The waiver covers bytes only; workload, memory and timing checks still run.
   const slower=nextSuite(next,'slow-geometry',120);
-  assert.equal(compareSuites(baseline.runs,slower.runs,{requireContentEvidence:true,geometryChanges:review.changes}).requiresRetest,true);
+  assert.equal(compareSuites(baseline.runs,slower.runs,{requireContentEvidence:true,geometryChanges:review.changes}).retestDecision,'developer');
   assert.equal(compareSuites(baseline.runs,slower.runs,{requireContentEvidence:true,geometryChanges:review.changes,
     retestBaseline:nextSuite(candidate,'geometry-base-retest',100).runs,retestCandidate:nextSuite(next,'geometry-retest',120).runs}).outcome,'INCONCLUSIVE');
 });
@@ -286,7 +286,7 @@ test('technical acceptance re-evaluates retention under the new cap but leaves b
   evidence.overhead.outcome='FAIL';
   evidence.overhead.runs.filter(r=>r.conditions.mode==='benchmark').forEach(r=>r.metrics.automaticLoadMs=200);
   const accepted=bindMeasurementAcceptance(candidate,evidence);
-  assert.equal(accepted.measurementAcceptance.performanceAssessment.retention.withinLimit,true);
+  assert.equal(accepted.measurementAcceptance.performanceAssessment.retention.evidenceComplete,true);
   assert.equal(accepted.measurementAcceptance.performanceAssessment.probe.requiresHumanReview,true);
   assert.equal(accepted.measurementAcceptance.performanceAssessment.approval,'PENDING');
   assert.equal(accepted.approval,undefined);assert.equal(evidence.lifecycle.exercise.outcome,'FAIL');

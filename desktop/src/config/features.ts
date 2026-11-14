@@ -125,5 +125,5 @@ export const IFC_DETAIL_MODE_KEY='gim-ifc-detail-mode';
 export const IFC_NEAR_DETAIL_RADIUS_M = 30;
 export const IFC_NEAR_SMALL_HOLE_MM = 50;
 export function isIfcNearDetailEnabled():boolean {try{return localStorage.getItem(IFC_DETAIL_MODE_KEY)!=='far';}catch{return true;}}
-export const IFC_LOD_CACHE_VERSION=`bim-lod-v8|single-parse-source-properties|near30m-small50mm|fragments@${__FRAGMENTS_PKG_VERSION__}|web-ifc@${__WEB_IFC_PKG_VERSION__}`;
+export const IFC_LOD_CACHE_VERSION=`bim-lod-v1|single-parse-source-properties|near30m-small50mm|fragments@${__FRAGMENTS_PKG_VERSION__}|web-ifc@${__WEB_IFC_PKG_VERSION__}`;
 export const IFC_NEAR_TEMPLATE_CACHE_VERSION='near-templates-v1';

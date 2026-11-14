@@ -44,6 +44,7 @@ function fixture() {
   const status = vi.fn();
   const state = { isCurrentSession: () => true, loadedXmlModGroups: new Map(), geometryDiagnostics: new Map(), deviceUnknownBounds: new Set() } as any;
   const runtime = new DevLodRuntime(state, {} as any, { sourceSha256: 'sha', generation: 1 } as any, status);
+  (runtime as any).firstModelPresented=true;
   ownedRuntimes.add(runtime);
   Object.assign(runtime.diagnostics, { anchorReady: true, catalogReady: true,baseRepresentationsSettled:true });
   return { runtime, internal: runtime as any, status };
@@ -173,15 +174,17 @@ it('re-evaluates only changed view rows while camera, selection, bounds and expl
   update.mockClear();camera.aspect=2;camera.updateProjectionMatrix();internal.update();expect(update).toHaveBeenCalledTimes(2);
 });
 
-it('defers automatic L1 until base representations settle and re-evaluates without a camera change',()=>{
+it('protects the first real model frame, then overlaps automatic L1 with remaining base work without a camera change',()=>{
   const {runtime,internal}=fixture(),camera=new THREE.PerspectiveCamera(60,1,.1,100);camera.updateMatrixWorld(true);
   internal.ctx={world:{camera:{three:camera}}};internal.anchor=new THREE.Matrix4();internal.notifyCoordinateAnchor=vi.fn();
   internal.requestReady=vi.fn();internal.schedule=vi.fn();internal.render=vi.fn(async()=>{});internal.worker=createDevWorkerMock();
   const row={...occurrence(1),box:new THREE.Box3(new THREE.Vector3(-1,-1,-5),new THREE.Vector3(1,1,-4)),entry:{...occurrence(1).entry,rootOccurrence:'one'}};
-  internal.rows.set('one',row);internal.viewIndex.set('one',row.box);runtime.diagnostics.baseRepresentationsSettled=false;
+  internal.rows.set('one',row);internal.viewIndex.set('one',row.box);runtime.diagnostics.baseRepresentationsSettled=false;internal.firstModelPresented=false;
   internal.update();expect(row.desired).toBe(0);expect(internal.render).not.toHaveBeenCalled();
-  runtime.diagnostics.baseRepresentationsSettled=true;internal.update();expect(row.desired).toBe(1);expect(internal.render).toHaveBeenCalledWith(row,1,2);
-  runtime.diagnostics.baseRepresentationsSettled=false;internal.fineRequested.add('one');internal.update();expect(row.desired).toBe(2);
+  internal.onModelPresented();expect(internal.schedule).toHaveBeenCalledWith(false);
+  internal.update();expect(row.desired).toBe(1);expect(internal.render).toHaveBeenCalledWith(row,1,2);
+  expect(runtime.diagnostics.baseRepresentationsSettled).toBe(false);
+  internal.firstModelPresented=false;internal.fineRequested.add('one');internal.update();expect(row.desired).toBe(2);
 });
 
 it('stops source prefetch at high pressure, including a reply already in flight', async () => {

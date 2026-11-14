@@ -2,7 +2,7 @@ import {engineeringSourceRecords} from './sourceGraph.js';
 import type { EngineeringSources } from './buildSources.js';
 import { sourceDocumentTitle, sourceRecordTitle } from './sourceTitles.js';
 
-export const SOURCE_TREE_TEMPLATE_VERSION = 'engineering-source-tree-v2';
+export const SOURCE_TREE_TEMPLATE_VERSION = 'engineering-source-tree-v1';
 export interface EngineeringSourceNode {
   key: string;
   title: string;

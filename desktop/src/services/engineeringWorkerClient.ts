@@ -9,6 +9,7 @@ import type { SourceGeometryOccurrenceCatalog } from '../gim/engineering/geometr
 import { decodeEngineeringWorkerResult,type TransportGraphCache,type EngineeringWorkerPayload } from './engineeringWorkerTransport.js';
 import type { EngineeringNavigationCacheProjection } from './engineeringNavigationCache.js';
 import type { EvidenceInventory,EvidencePage,EvidenceQuery,EvidenceRange } from '../engineering/evidence.js';
+import {checkEvidenceRange} from '../gim/engineering/evidenceProvider.js';
 
 export interface EngineeringWorkerPort {
   postMessage(message: EngineeringWorkerRequest, transfer?: Transferable[]): void;
@@ -129,11 +130,12 @@ export class EngineeringWorkerClient {
   }
   async init(scope: string, paths: string[]): Promise<void> {this.graphCache={};await this.request({ type: 'init', scope, paths,graphReferences:true }); }
   private decodeModel(payload:EngineeringWorkerPayload):Promise<EngineeringBuildResult>{
-    const next=this.decodeQueue.then(()=>decodeEngineeringWorkerResult(payload,()=>!this.closed&&this.isCurrent()&&!this.signal?.aborted,this.graphCache));
+    const next=this.decodeQueue.then(()=>decodeEngineeringWorkerResult(payload,()=>!this.closed&&this.isCurrent()&&!this.signal?.aborted,this.graphCache,true));
     this.decodeQueue=next.then(()=>{},()=>{});return next;
   }
-  async getEvidenceSnapshot(entryIds?:readonly string[]):Promise<EvidenceInventory>{const parked=await this.parkedSnapshot(entryIds);if(parked)return parked;const r=await this.request({type:'evidence-snapshot',entryIds});if(r.type!=='evidence'||!r.snapshot)throw Error('Evidence snapshot expected');return r.snapshot;}
+  async getEvidenceSnapshot(entryIds?:readonly string[]):Promise<EvidenceInventory>{if(entryIds)checkEvidenceRange({entryIds,kinds:[]});const parked=await this.parkedSnapshot(entryIds);if(parked)return parked;const r=await this.request({type:'evidence-snapshot',entryIds});if(r.type!=='evidence'||!r.snapshot)throw Error('Evidence snapshot expected');return r.snapshot;}
   async queryEvidence(query:EvidenceQuery):Promise<EvidencePage>{
+    checkEvidenceRange(query.range);
     const parked=await this.parkedSnapshot(query.range.entryIds);
     if(parked){
       if(query.revision!==parked.revision)throw Error('EVIDENCE_REVISION_EXPIRED');
@@ -142,7 +144,7 @@ export class EngineeringWorkerClient {
     }
     const r=await this.request({type:'evidence-query',query});if(r.type!=='evidence'||!r.page)throw Error('Evidence page expected');return r.page;
   }
-  async ensureEvidence(range:EvidenceRange):Promise<EvidenceInventory>{const r=await this.request({type:'evidence-ensure',range});if(r.type!=='evidence'||!r.snapshot)throw Error('Evidence snapshot expected');return r.snapshot;}
+  async ensureEvidence(range:EvidenceRange):Promise<EvidenceInventory>{checkEvidenceRange(range);const r=await this.request({type:'evidence-ensure',range});if(r.type!=='evidence'||!r.snapshot)throw Error('Evidence snapshot expected');return r.snapshot;}
   async readEvidenceEntry(path:string):Promise<Uint8Array>{const r=await this.request({type:'evidence-read',path});if(r.type!=='evidence'||!r.bytes)throw Error('Evidence bytes expected');return r.bytes;}
   async releaseModel(buildId?:number):Promise<void>{await this.request({type:'release-model',buildId});await this.park();}
   async recognizeEvidence(identity?:EngineeringCacheIdentity):Promise<EngineeringBuildResult>{const r=await this.request({type:'recognize-evidence',identity});if(r.type!=='model')throw Error('Engineering model expected');return this.decodeModel(r.result);}

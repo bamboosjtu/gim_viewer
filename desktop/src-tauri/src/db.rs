@@ -57,7 +57,7 @@ pub const PARSER_VERSION: &str = "gim-cache-schema-v1";
 
 pub const LINE_PARSER_VERSION: &str = "gim-line-parser-v1";
 
-pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v28";
+pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v1";
 
 
 /// GLB 几何缓存版本（方案 C：MOD/STL → glTF 序列化格式版本）
@@ -67,7 +67,7 @@ pub const SUBSTATION_PARSER_VERSION: &str = "gim-substation-parser-v28";
 /// - GEOMETRY_CACHE_VERSION 变 → 仅 geometry domain 失效，由前端复用
 ///   substation source/index、重新构建 DEV GLB；不删除整个项目缓存
 /// 版本文件：{app_data_dir}/glbcache/{project_id}/_version.txt
-pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v20-source-bound-stl";
+pub const GEOMETRY_CACHE_VERSION: &str = "geometry-cache-v1-source-bound-stl";
 
 /// 应用级数据库连接
 pub struct DbState(pub Mutex<Connection>);

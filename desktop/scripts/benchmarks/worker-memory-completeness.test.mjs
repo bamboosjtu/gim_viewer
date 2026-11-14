@@ -45,3 +45,11 @@ test('a delayed first real sample cannot hide the unsampled target startup inter
   const result=classifyWorkerHeapEvidence({dev:{family:'dev',state:'running',createdMs:0,tasks:1}},new Set(['dev']),new Map([['dev',row]]));
   assert.equal(result.unavailable[0].reason,'worker-heap-sampling-gap');
 });
+test('failed attempts never split or shorten a gap between real successful samples',()=>{
+ const base={workerId:'worker',family:'engineering',targetCreatedAtMs:0,sampleDelayMs:0};
+ let row=recordWorkerHeapSample(undefined,{...base,atMs:100,availability:'available'});
+ row=recordWorkerHeapSample(row,{...base,atMs:2100,availability:'unavailable',reason:'runtime-timeout'});
+ row=recordWorkerHeapSample(row,{...base,atMs:2350,availability:'unavailable',reason:'runtime-request-outstanding'});
+ row=recordWorkerHeapSample(row,{...base,atMs:4100,availability:'available'});
+ assert.equal(row.maxSampleGapMs,4000);assert.equal(row.lastSuccessfulSampleAtMs,4100);assert.equal(row.failedSamples,2);
+});

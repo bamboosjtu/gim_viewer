@@ -7,7 +7,6 @@ from pathlib import Path
 import subprocess
 
 import py7zr
-from PyInstaller.archive.readers import CArchiveReader
 
 
 def main():
@@ -38,7 +37,7 @@ def main():
             archive.write(source / name, name)
     gim = out / 'fixture.gim'
     gim.write_bytes(b'GIMPKGS' + b'\0' * 9 + payload.read_bytes())
-    exe = tool / 'dist/GIM实体盘点器.exe'
+    exe = tool / 'dist/GIM实体盘点器/GIM实体盘点器.exe'
     png = out / 'packaged.png'
     receipt = Path(str(png) + '.json')
     if receipt.exists():
@@ -56,7 +55,7 @@ def main():
     assert evidence['totals']['设备']['附件并入'] == 0, evidence
     assert evidence['totals']['设备']['台数'] == 1, evidence
     expected = tool / 'catalog.json'
-    actual = CArchiveReader(str(exe)).extract('catalog.json')
+    actual = (exe.parent/'_internal/catalog.json').read_bytes()
     assert hashlib.sha256(actual).digest() == hashlib.sha256(expected.read_bytes()).digest()
     print(json.dumps({'passed': True, 'exe': str(exe), 'screenshot': str(png), **evidence}, ensure_ascii=False, indent=2))
 

@@ -19,6 +19,8 @@ export interface EvidenceQuery {range:EvidenceRange;revision:number;offset?:numb
 export interface EvidenceInventory {
   entryRange?:readonly string[];
   inventoryTotals?:{entries:number;parsedComplete:number};
+  /** Source facts used by Core; revision below also tracks parsing/residency. */
+  sourceRevision:number;
   scope:string;revision:number;inventoryComplete:boolean;
   entries:readonly {id:string;path:string;formatHint:string;readStatus:'not_requested'|'available'|'failed';status:EvidenceStatus}[];
   coverage:readonly {entryId:string;status:EvidenceStatus;capability?:EvidenceRange['kinds'][number];materialization?:'materialized'|'not_materialized';rawAvailable?:boolean;restorable?:boolean}[];

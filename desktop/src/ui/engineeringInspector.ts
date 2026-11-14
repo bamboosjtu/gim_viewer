@@ -4,6 +4,9 @@ import type { EngineeringEntity, PendingWhole, EntityRelationship } from '../eng
 import type { SourceRecord } from '../gim/engineering/sourceEvidence.js';
 import { categoryLabel,classificationReasonLabel } from '../engineering/catalogLabels.js';
 
+export interface EngineeringDetailsCursor {revision:number;offset:number}
+export interface EngineeringDetailsPage {values:Record<string,unknown>;next?:EngineeringDetailsCursor;incomplete?:boolean}
+
 export interface EngineeringInspectorInput {
   evidenceSummary?:readonly [string,string][];
   title: string;
@@ -24,7 +27,7 @@ export interface EngineeringInspectorInput {
   onDocument?: (path: string) => void;
   onRefine?: (progress: (message: string) => void) => Promise<void>;
   onReleaseFine?: () => void;
-  onDetails?: () => Promise<Record<string, unknown>>;
+  onDetails?: (cursor?:EngineeringDetailsCursor) => Promise<EngineeringDetailsPage>;
 }
 
 /** Whole summaries do not flatten component parameters or replace the entity
@@ -52,7 +55,7 @@ export function renderEngineeringInspector(input: EngineeringInspectorInput): vo
         'explicit_main_designation+single_phase_bodies': '明确主变编号及多个单相本体', outward_object_boundary_unconfirmed: '外露对象，整体边界尚待确认',
         object_identity_parent_boundary_unknown: '对象可识别，上级整体边界未知' } as Record<string, string>)[entity.boundaryEvidence] ?? '按来源对象和组成证据识别'],
       ['组成状态', entity.compositionState ? '按交付声明归组，实物组成完整性尚未核对' : '按现有交付表达']] as [string, string][] : []),
-    ...(pending ? [['待确认原因', ({ neutral_set_main_unresolved: '尚不能确定中性点装置对应的主变', component_whole_unresolved: '内部组成尚无明确整体宿主',
+    ...(pending ? [['待确认原因', ({ component_host_conflict:'原始来源宿主与属性宿主声明冲突',component_host_ambiguous:'宿主声明存在多个候选或部分尚未解析',component_host_not_found:'尚未找到声明的宿主',neutral_set_main_unresolved: '尚不能确定中性点装置对应的主变', component_whole_unresolved: '内部组成尚无明确整体宿主',
       unnumbered_set_identity_requires_confirmation: '缺少明确编号，不能确认属于同一套装置', peer_fragment_engineering_identity_insufficient: '分散组成缺少足够的整体身份依据',
       object_attributes_conflict:'当前对象的有效类别属性相互矛盾',assembly_identity_conflict:'成套工程身份或装配证据发生冲突',transformer_bank_identity_conflict:'主变编号、相别或本体数证据存在冲突' } as Record<string, string>)[pending.reason] ?? '整体身份或归属依据不足']] as [string, string][] : []),
     ['来源记录', String(sources.length)], ['来源状态', input.partial ? '部分来源尚未完成' : '当前来源已就绪'],
@@ -94,14 +97,23 @@ export function renderEngineeringInspector(input: EngineeringInspectorInput): vo
     action++; input.onReleaseFine?.(); if (refine) refine.disabled = false; if (status) status.textContent = '已返回浏览表示';
   });
   const details = document.getElementById('engineering-details') as HTMLButtonElement | null, detailHost = document.getElementById('engineering-details-result');
+  let cursor:EngineeringDetailsCursor|undefined;
   details?.addEventListener('click', async () => {
-    details.disabled = true; if (detailHost) detailHost.textContent = '正在读取来源属性…';
+    details.disabled = true;
+    if (detailHost && !cursor) detailHost.textContent = '正在读取来源属性…';
     try {
-      const values = await input.onDetails?.();
-      if (detailHost && values) detailHost.innerHTML = Object.entries(values).map(([name, value]) => sectionHtml(name, value && typeof value === 'object' && !Array.isArray(value)
-        ? Object.entries(value).map(([key, item]) => [key, typeof item === 'object' ? JSON.stringify(item) : String(item)]) : [['原始值', JSON.stringify(value) ?? '']], true)).join('');
-    } catch (error) { if (detailHost) detailHost.textContent = `来源属性未能读取：${String(error)}`; }
-    finally { details.disabled = false; }
+      const page = await input.onDetails?.(cursor);
+      if (!detailHost?.isConnected || !page) return;
+      if (!cursor) detailHost.replaceChildren();
+      detailHost.insertAdjacentHTML('beforeend',Object.entries(page.values).map(([name, value]) => sectionHtml(name, value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.entries(value).map(([key, item]) => [key, typeof item === 'object' ? JSON.stringify(item) : String(item)]) : [['原始值', JSON.stringify(value) ?? '']], true)).join(''));
+      cursor=page.next;
+      details.textContent=cursor?'尚未完整显示，继续加载（每页最多 200 条属性/赋值记录）':page.incomplete?'当前已物化记录已显示；来源覆盖仍有未完成项':'详细来源属性已全部显示';
+      details.disabled=!cursor;
+    } catch (error) {
+      if(detailHost?.isConnected)detailHost.insertAdjacentHTML('beforeend',`<p class="props-note">${escHtml(`来源属性未能读取：${String(error)}；可重新读取。`)}</p>`);
+      cursor=undefined;details.textContent='重新读取详细来源属性';details.disabled=false;
+    }
   });
   document.querySelectorAll<HTMLElement>('[data-engineering-source-index]').forEach(button => button.addEventListener('click', () => {
     const source = sources[Number(button.dataset.engineeringSourceIndex)]; if (source) input.onSource(source.id);

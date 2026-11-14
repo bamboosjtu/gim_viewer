@@ -56,8 +56,8 @@ export function lifecycleExercise({sample,secondSample,cycles=10,timeoutMs=90000
     }
     const {growth:retainedGrowth}=retainedMemory(rows),performanceAssessment=lifecycleRetention(retainedGrowth);
     return {kind:'same-process-ten-open-close',reference,cycles:rows,cancellation,replacement,retainedGrowth,
-      performanceAssessment,outcomeMeaning:'resource-integrity-and-retention-cap-only; not baseline approval',
-      outcome:rows.length===10&&rows.every(row=>row.passed&&row.equivalent)&&cancellation.passed&&(!replacement||replacement.passed&&replacement.sourceMatches)&&performanceAssessment.withinLimit?'PASS':'FAIL',
+      performanceAssessment,outcomeMeaning:'resource-and-measurement-integrity-only; retention acceptance is a developer decision',
+      outcome:rows.length===10&&rows.every(row=>row.passed&&row.equivalent)&&cancellation.passed&&(!replacement||replacement.passed&&replacement.sourceMatches)&&performanceAssessment.evidenceComplete?'PASS':'FAIL',
       forcedGc:false,comparison:'median-post-close-cycles-2-to-4-vs-last-3'};
   };
 }

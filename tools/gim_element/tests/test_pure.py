@@ -11,17 +11,17 @@ os.environ.update(TEMP=str(_TEMP),TMP=str(_TEMP),TMPDIR=str(_TEMP),GIM_READER_LO
 tempfile.tempdir=str(_TEMP)
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 
-import element_core as core
+from standard_sources import ifc_string,split_args
 
 class IfcTextContracts(unittest.TestCase):
     def test_adjacent_unicode_segments_remain_adjacent(self):
         slash=chr(92)
         field=(slash+'X2'+slash+'4E3B'+slash+'X0'+slash+slash+'X2'+slash+'53D8'+slash+'X0'+slash).encode('ascii')
-        self.assertEqual(core._decode_x2_field(field), '主变')
+        self.assertEqual(ifc_string(field.decode('ascii')), '主变')
 
     def test_name_is_not_concatenated_with_description(self):
         line=b"#1=IFCBUILDINGELEMENTPROXY('0000000000000000000001',$,'Main O''Brien','Description',$,$,$,$,$);"
-        self.assertEqual(core.line_name(line), "Main O'Brien")
+        self.assertEqual(ifc_string(split_args(line.decode('ascii').split('(',1)[1].rsplit(')',1)[0])[2]), "Main O'Brien")
 
     def test_empty_name_is_not_invented(self):
-        self.assertEqual(core.line_name(b''),'')
+        self.assertEqual(ifc_string('$'),'')

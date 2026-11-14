@@ -158,11 +158,11 @@ test('public projections preserve controlled diagnostic fields and share export-
 });
 
 test('public diagnostics keep controlled failure codes, write sub-stages and profile conditions',()=>{
-  const view=publicView({timeoutMs:60000,detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',
+  const view=publicView({timeoutMs:60000,detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v1',contentPolicy:'dev-l0-glb-sha256-v1',
     rows:[{partialSignature:'source-geometry:private-digest-a',partialKind:'source-geometry',partialCounts:{failedOccurrences:3,failedSourceCount:1},error:'missing-dependency:3;source-reference-unresolved;capacity-exceeded:1;parse-failed:1;ifc-manifest-incomplete'},
       {partialSignature:'source-geometry:private-digest-b',partialKind:'source-geometry',partialCounts:{failedOccurrences:3}}],
     stages:['host:host.cacheWrite.catalog','host:host.cacheWrite.templates.L0','host:host.cacheWrite.templates.L1','host:host.cacheWrite.templates.L2'].map(stage=>({stage,count:1}))});
-  assert.equal(view.timeoutMs,60000);assert.equal(view.detailPolicy,'task-phase-timeline-v2');
+  assert.equal(view.timeoutMs,60000);assert.equal(view.detailPolicy,'task-phase-timeline-v1');
   assert.equal(view.rows[0].error,'missing-dependency:3;source-reference-unresolved;capacity-exceeded:1;parse-failed:1;ifc-manifest-incomplete');
   assert.equal(view.rows[0].partialCounts.failedOccurrences,3);assert.notEqual(view.rows[0].partialSignature,view.rows[1].partialSignature);
   assert.ok(view.stages.every(row=>row.stage.startsWith('host:host.cacheWrite.')));

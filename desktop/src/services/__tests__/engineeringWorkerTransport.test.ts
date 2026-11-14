@@ -4,7 +4,7 @@ import { extractEngineeringSourceGraph } from '../../gim/engineering/sourceGraph
 import { buildEngineeringSources } from '../../gim/engineering/buildSources.js';
 import { projectEngineeringNavigation } from '../../gim/engineering/navigation.js';
 import { collectSourceGeometryOccurrences } from '../../gim/engineering/geometryOccurrences.js';
-import { encodeEngineeringWorkerResult, decodeEngineeringWorkerResult, engineeringWorkerResultTransfers } from '../engineeringWorkerTransport.js';
+import { encodeEngineeringWorkerResultAsync, decodeEngineeringWorkerResult, engineeringWorkerResultTransfers } from '../engineeringWorkerTransport.js';
 
 async function fixture() {
   const raw: Record<string,string> = { 'project.cbm': 'OBJECTMODELPOINTER=main.dev',
@@ -17,7 +17,7 @@ async function fixture() {
 
 it('transfers owned buffers once and restores source facts, whole membership, maps and placement matrices', async () => {
   const result = await fixture();
-  const wire = encodeEngineeringWorkerResult({ ...result, buildId:1,cachePlan:['sources','entities','navigation'],entityCacheHit:true });
+  const wire = await encodeEngineeringWorkerResultAsync({ ...result, buildId:1,cachePlan:['sources','entities','navigation'],entityCacheHit:true });
   const buffers = engineeringWorkerResultTransfers(wire); expect(buffers).toHaveLength(1);
   const received = structuredClone(wire, { transfer: buffers });
   expect(wire.body.byteLength).toBe(0);expect('sourceBytes' in wire).toBe(false);
@@ -31,7 +31,7 @@ it('transfers owned buffers once and restores source facts, whole membership, ma
 it('interns repeated family lines instead of expanding each occurrence across the Worker boundary', async () => {
   const result = await fixture(), original = '材质=Material=钢材、镀锌；原始说明'.repeat(100);
   for (const record of result.sources.graph.records) record.properties = Array.from({ length: 500 }, () => ({ path: 'family.fam', line: 17, keys: ['材质', 'Material'], value: '钢材', rawLine: original }));
-  const wire = encodeEngineeringWorkerResult(result);
+  const wire = await encodeEngineeringWorkerResultAsync(result);
   expect(wire.body.byteLength).toBeLessThan(new TextEncoder().encode(JSON.stringify(result.sources)).byteLength / 10);
   const restored = await decodeEngineeringWorkerResult(wire, () => true);
   expect(restored.sources).toEqual(result.sources);
@@ -40,7 +40,7 @@ it('interns repeated family lines instead of expanding each occurrence across th
 });
 
 it('rejects invalid transport and cancels a decoded result before publication when the project changes', async () => {
-  const wire = encodeEngineeringWorkerResult(await fixture());
+  const wire = await encodeEngineeringWorkerResultAsync(await fixture());
   await expect(decodeEngineeringWorkerResult({ ...wire, encoding: 'invalid' as any }, () => true)).rejects.toThrow('传输无效');
   let current = true; const pending = decodeEngineeringWorkerResult(wire, () => current); current = false;
   await expect(pending).rejects.toMatchObject({ name: 'AbortError' });

@@ -1,8 +1,7 @@
 import {writeFileSync,appendFileSync} from 'node:fs';
 import {join} from 'node:path';
-export function diagnosticPlan(input,legacy){
-  if(!input&&!legacy)return null;
-  const plan=input??{captures:[{kind:legacy.kind,target:'worker',family:legacy.family??'dev'}]};
+export function diagnosticPlan(plan){
+  if(!plan)return null;
   if(!Array.isArray(plan.captures)||plan.captures.length>8)throw Error('invalid-diagnostic-captures');
   const maxTraceBytes=plan.maxTraceBytes??256*1024*1024;
   if(!Number.isSafeInteger(maxTraceBytes)||maxTraceBytes<1024||maxTraceBytes>256*1024*1024)throw Error('invalid-trace-output-budget');

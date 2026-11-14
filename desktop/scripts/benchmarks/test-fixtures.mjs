@@ -2,7 +2,7 @@
 import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/version.mjs';
 export function benchmarkRun(id,overrides={}){
   const conditions={machineId:'test-machine',runtimeSha256:'1'.repeat(64),buildMode:'release',
-    measurementVersion:MEASUREMENT_VERSION,detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',
+    measurementVersion:MEASUREMENT_VERSION,geometryTimingPolicy:'in-viewport-model-draw-submitted-v1',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v1',
     contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',
     mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'2'.repeat(64),sampleId:'test-sample',
     profileDigest:'3'.repeat(64),workloadDigest:'4'.repeat(64),routeDigest:'5'.repeat(64),viewportDigest:'6'.repeat(64),
@@ -14,7 +14,7 @@ export function benchmarkRun(id,overrides={}){
     pendingDigest:'0'.repeat(64),pendingCount:0,pendingSourceCount:0,progress:{workload:{shown:1,failed:0}}};
   return structuredClone({version:'gim-benchmark-v1',kind:'native-scene',runId:id,processInstanceId:id,buildFingerprint:'7'.repeat(64),
     projectType:'substation',correctness:'passed',cacheVerified:true,cachePublished:true,measurementComplete:true,
-    measurementLifecycleComplete:true,memoryEvidenceComplete:true,semanticDigestScope:'engineering-with-pending-v2',
+    measurementLifecycleComplete:true,memoryEvidenceComplete:true,semanticDigestScope:'engineering-with-pending-v1',
     semanticDigest:evidence.semanticDigest,pendingDigest:evidence.pendingDigest,pendingCount:0,pendingSourceCount:0,
     processSampling:{complete:true,samples:3,available:3},cleanupComplete:true,reason:null,crashed:false,
     measurement:{version:MEASUREMENT_VERSION,detailComplete:true,aggregateComplete:true,lifecycleComplete:true,activeTasks:[],workers:{}},

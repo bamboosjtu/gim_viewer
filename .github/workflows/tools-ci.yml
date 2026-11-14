@@ -44,7 +44,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Shared build safety tests failed' }
 
   tool:
-    name: ${{ matrix.tool }} / onefile + startup
+    name: ${{ matrix.tool }} / folder + startup
     needs: build-safety
     runs-on: windows-latest
     timeout-minutes: 30
@@ -69,10 +69,10 @@ jobs:
           architecture: x64
       - name: Prepare workspace temporary directory
         run: |
-          New-Item -ItemType Directory -Path .tmp/ci/tools -Force | Out-Null
-          "TEMP=$((Resolve-Path .tmp/ci/tools).Path)" >> $env:GITHUB_ENV
-          "TMP=$((Resolve-Path .tmp/ci/tools).Path)" >> $env:GITHUB_ENV
-          "TMPDIR=$((Resolve-Path .tmp/ci/tools).Path)" >> $env:GITHUB_ENV
+          New-Item -ItemType Directory -Path tmp/ci/tools -Force | Out-Null
+          "TEMP=$((Resolve-Path tmp/ci/tools).Path)" >> $env:GITHUB_ENV
+          "TMP=$((Resolve-Path tmp/ci/tools).Path)" >> $env:GITHUB_ENV
+          "TMPDIR=$((Resolve-Path tmp/ci/tools).Path)" >> $env:GITHUB_ENV
       # Engineering sample tests and frozen sample smoke are developer-local.
       - name: Install the tool's pinned build dependencies
         run: |
@@ -82,14 +82,17 @@ jobs:
         run: |
           python -m unittest discover -s "tools/$env:TOOL/tests" -p test_pure.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Pure Python contracts failed' }
-      - name: Build and startup-check the actual onefile EXE
+          if ($env:TOOL -eq 'gim_element') {
+            python -m unittest discover -s tools/gim_element/tests -p test_standard.py -v
+            if ($LASTEXITCODE -ne 0) { throw 'Standard recognition contracts failed' }
+          }
+      - name: Build and startup-check the actual folder EXE
         run: |
           & "./tools/$env:TOOL/build.ps1" -Python (Get-Command python).Source -NoVenv -Publish
-      - name: Upload tested onefile EXE
+      - name: Upload tested folder EXE
         uses: actions/upload-artifact@v7
         with:
-          path: tools/${{ matrix.tool }}/dist/*.exe
-          archive: false
+          path: tools/${{ matrix.tool }}/dist/*.zip
           overwrite: true
           retention-days: 7
           if-no-files-found: error

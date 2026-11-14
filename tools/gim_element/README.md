@@ -1,6 +1,6 @@
 # GIM 实体盘点器
 
-独立读取 GIM 文件或解包目录，输出设备、装置性材料、构件和其他对象的清册，以及整体—部件关系、待归对象和来源证据。源码与单文件 EXE 均不依赖 GIM Viewer、Node.js 或 `desktop/` 目录。
+独立读取 GIM 文件或解包目录，输出设备、装置性材料、构件和其他对象的清册，以及整体—部件关系、待归对象和来源证据。源码与目录包 均不依赖 GIM Viewer、Node.js 或 `desktop/` 目录。
 
 ## 使用
 
@@ -10,7 +10,7 @@
 python element_core.py <工程.gim或解包目录> --json 台账.json --html 报告.html --csv 清册.csv
 ```
 
-默认 `--engine standard` 使用工具内的 Python 标准算法；`--engine legacy` 保留旧名称优先盘点口径，仅供历史对照。GUI 默认使用标准算法。JSON 包含完整 `recognition.snapshot`、`entityTree`、属性引用别名和来源引用状态；HTML 可展开整体查看部件及原始父级。
+CLI 与 GUI 统一使用工具内的独立 Python 标准算法；已移除旧名称优先引擎及切换参数。JSON 包含完整 `recognition.snapshot`、`entityTree`、属性引用别名和来源引用状态；HTML 可展开整体查看部件及原始父级。
 
 ## 标准与分类
 
@@ -40,4 +40,6 @@ python -m unittest discover -s tests
 .\build.ps1 -SkipInstall
 ```
 
-使用固定 PySide6 / PyInstaller / py7zr 环境。`element.spec` 将独立模块及六份词典打进单文件 `GIM实体盘点器.exe`，不包含 Node 或主程序引擎。`verify_package.py` 检查资产及 ICU 依赖，`--self-check` 检查实际导入，`--smoke <输入> <截图>` 用于本地 GUI 检查。统一构建约定见 [tools 总览](../README.md)。
+使用固定 PySide6 / PyInstaller / py7zr 环境。`element.spec` 将独立模块及六份词典放入目录包 `dist/GIM实体盘点器/`，不包含 Node 或主程序引擎。`verify_package.py` 检查资产及 ICU 依赖，`--self-check` 检查实际导入，`--smoke <输入> <截图>` 用于本地 GUI 检查。统一构建约定见 [tools 总览](../README.md)。
+
+宿主原始关系、编码和名称共同参与冲突检测；自身 PROJECTNAME 和名称前缀兜底保持候选。46 项关键词提取映射的 verification 当前为 unverified，保留标准号和工作簿位置，原文定位待补；映射命中不单独确认类别或部件类型。TypeScript 纯 DTO 门禁实际调用本工具的独立 runner 并逐来源比较归属、状态、待归原因和诊断。

@@ -59,7 +59,11 @@
 
 0.2.3 将来源清单、已解析证据与工程快照分开。`ModelEvidenceProvider` 的元数据快照和有界详情查询不触发 IO；宿主通过显式物化请求取得 FAM 属性，识别只消费所需的已解析来源。物理目录在 FAM 物化和实体归一化之前可用。清单完整、属性解析完成和工程输入处理完成是不同范围，不用当前属性条数推断全包属性总数。
 
-属性记录由原始键值、分段/容器地址、Parsed Value 和可选 Semantic Value 组成；`sourceId`、`rawSection`、`containerId`、`rawContainerName` 和 `applicability` 保留对象、阶段、原始 Pset 名及实例/类型范围，未知范围显式为 unknown。冲突只比较同一对象、文档、规范属性、阶段、容器和适用范围。未知单位不推定，只有物理量和明确单位相容时才执行有版本的转换。重复原始行独立保留，共享 FAM 的记录与 occurrence 赋值分开。IFC 外露属性仍是部分投影，原文可独立读取。
+`getSnapshot()` 不触发解析；指定范围的 `getSnapshot`、`ensureEvidence`、`queryEvidence` 最多 256 个 Entry、请求范围最多 64 KiB。详情页最多 1000 条、512 KiB（UTF-8，包含 coverage），Viewer 每页请求 200 条属性/赋值记录并提供继续加载。页游标绑定 Provider revision；修订过期重新读取，不能拼接不同修订。全包 Inventory 枚举不受详情范围上限影响。
+
+`EngineeringSnapshot.evidenceBinding` 必须包含 scope 和 sourceRevision，与本轮识别消费的来源图修订一致；缓存和 Worker 接收均核对。它绑定来源事实修订，可与 `EvidenceInventory.sourceRevision` 对照；与 Provider 的解析/驻留状态页游标 revision 分开。
+
+属性记录由原始键值、分段/容器地址、Parsed Value 和可选 Semantic Value 组成；`sourceId`、`rawSection`、`containerId`、`rawContainerName` 和 `applicability` 保留对象、阶段、原始 Pset 名及实例/类型范围，未知范围显式为 unknown。冲突只比较同一对象、文档、规范属性、阶段、容器和适用范围。未知单位不推定，只有物理量和明确单位相容时才执行有版本的转换。重复原始行独立保留，共享 FAM 的记录与 occurrence 赋值分开。IFC 外露属性仍是部分投影。当前 `readEntry()` 是上限 16 MiB 的整条目读取，尚未提供大文件分块访问；超过上限的 IFC 不能通过此接口完整读取。未来 `readEntryRange()` 属于接口预留，不代表已实现 Validator 来源访问。
 
 `categoryStatus` 表达工程目录类别状态，`equipmentType`、`componentType`、`purpose`、`objectRole` 各有独立状态和证据；既有 `meaning` 保留对象角色，既有 `role` 保留盖板/侧壁等组成子角色。油浸式 TYPE 可确认 `oil_immersed_transformer`，没有明确用途时类别保持 E-T/candidate、purpose unresolved；标准断路器 TYPE 支持 `ACPorcelainCircuitBreaker`。仅名称推断或名称细分保持候选。分类已确认不自动确认整体边界。
 
@@ -203,3 +207,9 @@ EntityRelationship { from, to, kind: 'associated_with', evidence }
 - [工程实体运行时](../architecture/engineering-runtime.md)
 - [表示与绑定](../architecture/representations.md)
 - [建筑推断](building-inference.md)
+
+宿主恢复同时保留原始来源宿主关系、明确宿主编码和明确宿主名称。全部声明须共同支持唯一宿主；指向不同宿主时记录 `component_host_conflict` 并进入待归；未解析的声明不能被另一条唯一匹配覆盖。唯一且无冲突的明确宿主字段可确认；原始关系兜底、对象自身 PROJECTNAME 和名称前缀匹配保持 candidate。此步骤不改物理父级和几何根。
+
+`sourceVocabulary.keywordDictionary` 每项保存工作簿位置、标准号、原文定位（可待补）和 verification。当前未逐条核对的 46 项标记为 unverified，SYSCLASSIFYNAME/PARTNAME 查到映射仍可显示 mapped，但仅凭此映射获得的类别、设备/部件类型和标准目录身份保持候选。只有 verified 且具备原文定位的映射可作为确认依据；明确 TYPE 与独立设备证据仍按各自规则解释。
+
+TypeScript 的纯 DTO 一致性用例实际启动独立 Python runner，比较逐来源 ownerId、类别及状态、成员状态、待归原因和诊断；工具 CI 执行 `test_standard.py`。实际工程和合成来源文件装配检查仍留在开发者本地，不作为远程工程验收。

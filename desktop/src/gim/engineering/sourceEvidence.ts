@@ -98,17 +98,18 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
   const predefinedCategories=values(['IFC.PredefinedType']).flatMap(p=>{
     const value=(aliases.ifcPredefined as Record<string,string>)[`${type}.${p.value.trim().toUpperCase()}`];return value?[{...p,value}]:[];
   });
-  const standardDeclarations=[{value:type,evidenceId:`${record.id}:source_type:${type}`},...typeProperties,...values(['SYSCLASSIFYNAME','PARTNAME'])];
-  const standardClasses=standardDeclarations.flatMap(p=>standardTerms(p.value).map(item=>({...p,id:item.id,kind:item.kind as 'equipment'|'material'|'construction',label:item.label,term:item.term,category:item.category})));
   const dictionary=sourceVocabulary.keywordDictionary;
-  const keywordEntries=dictionary.entries as Record<string,{equipmentType?:string;componentType?:string;evidence:{sheet:string;cell:string;workbookSha256:string}}>;
+  const keywordEntries=dictionary.entries as Record<string,{equipmentType?:string;componentType?:string;evidence:{sheet:string;cell:string;workbookSha256:string;verification:string;standardRef:string;originalLocation?:string}}>;
+  const confidence=(entry:typeof keywordEntries[string])=>entry.evidence.verification==='verified'&&entry.evidence.originalLocation?'confirmed' as const:'candidate' as const;
+  const standardDeclarations=[{value:type,evidenceId:`${record.id}:source_type:${type}`},...typeProperties,...values(['SYSCLASSIFYNAME','PARTNAME']).map(p=>({...p,confidence:keywordEntries[p.value.trim().toLowerCase()]?confidence(keywordEntries[p.value.trim().toLowerCase()]):'candidate' as const}))];
+  const standardClasses=standardDeclarations.flatMap(p=>standardTerms(p.value).map(item=>({...p,id:item.id,kind:item.kind as 'equipment'|'material'|'construction',label:item.label,term:item.term,category:item.category})));
   const keywords=dictionary.fields.flatMap(field=>values([field]).map(p=>({field,property:p,entry:keywordEntries[p.value.trim().toLowerCase()]})));
   const keywordCategory:Record<string,string>={oil_immersed_transformer:'E-T',gis:'E05',hgis:'E05',ac_porcelain_circuit_breaker:'E06'};
-  const keywordTypes=keywords.flatMap(({property,entry})=>entry?.equipmentType&&keywordCategory[entry.equipmentType]?[{...property,value:keywordCategory[entry.equipmentType]}]:[]);
+  const keywordTypes=keywords.flatMap(({property,entry})=>entry?.equipmentType&&keywordCategory[entry.equipmentType]?[{...property,value:keywordCategory[entry.equipmentType],confidence:confidence(entry)}]:[]);
   const vocabularyObservations=keywords.map(({field,property,entry})=>{
     const terms=standardTerms(property.value),item=terms.length===1?terms[0]:undefined;
     return {field,rawValue:property.value,status:entry||item?'mapped' as const:'unresolved' as const,evidenceId:property.evidenceId,dictionaryVersion:entry?dictionary.version:STANDARD_CATALOG_VERSION,
-      ...(entry?{dictionaryEvidence:JSON.stringify([entry.evidence.workbookSha256,entry.evidence.sheet,entry.evidence.cell])}:item?{dictionaryEvidence:JSON.stringify([item.evidence.workbookSha256,item.evidence.sheet,item.evidence.nameCell,...item.evidence.termCells])}:{})};
+      ...(entry?{verification:entry.evidence.verification as 'verified'|'unverified'|'ambiguous',standardRef:entry.evidence.standardRef,originalLocation:entry.evidence.originalLocation,dictionaryEvidence:JSON.stringify([entry.evidence.workbookSha256,entry.evidence.sheet,entry.evidence.cell,entry.evidence.verification,entry.evidence.standardRef,entry.evidence.originalLocation])}:item?{dictionaryEvidence:JSON.stringify([item.evidence.workbookSha256,item.evidence.sheet,item.evidence.nameCell,...item.evidence.termCells])}:{})};
   });
   const modelProperties=values(['型号','MODEL','MODELSPEC']);
   const nameTerm=keywordEntries[record.name.trim().toLowerCase()]??keywordEntries[(record.name.split(/[_－:：]/).pop()??'').trim().toLowerCase()];
@@ -144,8 +145,8 @@ export function toObjectEvidence(record: SourceRecord): ObjectEvidence {
     hostCodes:values(['所属设备编码','宿主设备编码','HOSTEQUIPMENTID','HOSTEQUIPMENTCODE','PARENTEQUIPMENTID']),
     hostDesignations:values(['所属设备名称','所属设备工程中名称','宿主设备名称','HOSTEQUIPMENTNAME','PARENTEQUIPMENTNAME']),
     vocabularyObservations,
-    equipmentTypeCandidates:[...standardDeclarations.flatMap(p=>standardTerms(p.value).filter(item=>item.kind==='equipment').map(item=>({...p,value:standardEquipmentId(item)}))),...(vocabulary[type.toLowerCase()]?[{value:vocabulary[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>vocabulary[p.value.trim().toLowerCase()]?[{...p,value:vocabulary[p.value.trim().toLowerCase()]}]:[]),...keywords.flatMap(({property:p,entry})=>entry?.equipmentType?[{...p,value:entry.equipmentType}]:[])],
-    componentTypeCandidates:[...componentNameCandidate,...(components[type.toLowerCase()]?[{value:components[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>components[p.value.trim().toLowerCase()]?[{...p,value:components[p.value.trim().toLowerCase()]}]:[]),...keywords.flatMap(({property:p,entry})=>entry?.componentType?[{...p,value:entry.componentType}]:[])],
+    equipmentTypeCandidates:[...standardDeclarations.flatMap(p=>standardTerms(p.value).filter(item=>item.kind==='equipment').map(item=>({...p,value:standardEquipmentId(item)}))),...(vocabulary[type.toLowerCase()]?[{value:vocabulary[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>vocabulary[p.value.trim().toLowerCase()]?[{...p,value:vocabulary[p.value.trim().toLowerCase()]}]:[]),...keywords.flatMap(({property:p,entry})=>entry?.equipmentType?[{...p,value:entry.equipmentType,confidence:confidence(entry)}]:[])],
+    componentTypeCandidates:[...componentNameCandidate,...(components[type.toLowerCase()]?[{value:components[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}]:[]),...typeProperties.flatMap(p=>components[p.value.trim().toLowerCase()]?[{...p,value:components[p.value.trim().toLowerCase()]}]:[]),...keywords.flatMap(({property:p,entry})=>entry?.componentType?[{...p,value:entry.componentType,confidence:confidence(entry)}]:[])],
     ...(vocabulary[type.toLowerCase()]?{equipmentType:{value:vocabulary[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}}:{}),
     ...(components[type.toLowerCase()]?{componentType:{value:components[type.toLowerCase()],evidenceId:`${record.id}:source_type:${type}`}}:{}),
     purposes:/^stationtransformer$/i.test(type)?[{value:'station_service_transformer',evidenceId:`${record.id}:source_type:${type}`}]:['E01','E-T','E03'].includes(typed)?values(['用途','设备用途','PURPOSE']).flatMap(p=>/^(?:主变|主变压器|main_transformer)$/i.test(p.value.trim())?[{...p,value:'main_transformer'}]:/^(?:站用|站用变压器|station_service_transformer)$/i.test(p.value.trim())?[{...p,value:'station_service_transformer'}]:[]):[],

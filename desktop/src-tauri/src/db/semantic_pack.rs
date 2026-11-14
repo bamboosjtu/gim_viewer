@@ -29,7 +29,7 @@ pub(crate) const LINE_SEMANTIC_INDEX_FILE: &str = ".gim-line-semantic.index";
 
 const LINE_SEMANTIC_INDEX_MAGIC: &[u8; 4] = b"GLSI";
 
-pub(super) const LINE_SEMANTIC_INDEX_VERSION: u8 = 2;
+pub(super) const LINE_SEMANTIC_INDEX_VERSION: u8 = 1;
 
 const LINE_SEMANTIC_INDEX_HEADER: usize = 9; // magic + version + count
 
@@ -384,7 +384,7 @@ fn validate_line_semantic_pack_ranges(
     Ok(())
 }
 
-/// v2 index 还保存 metadata-only entry；full-read/validate 时校验这些
+/// v1 index 还保存 metadata-only entry；full-read/validate 时校验这些
 /// 独立文件仍存在且大小未变，避免构造不完整的线路 Runtime。
 fn validate_line_semantic_metadata_files(
     root: &Path,
@@ -442,7 +442,7 @@ pub(super) fn read_line_semantic_pack_files(
     // accepting it would let the warm path build an empty/partial Runtime and
     // silently fall back to neither the pack nor the complete source.  Every
     // valid line pack must contain at least the project CBM (case-insensitive;
-    // v2 may additionally contain metadata-only geometry entries).
+    // The index may additionally contain metadata-only geometry entries).
     let has_packed_cbm = index.values().any(|entry| {
         entry.packed
             && entry.size > 0
@@ -631,7 +631,7 @@ pub(super) fn substation_pack_contains(root: &Path, entry_path: &str, size: u64)
 ///
 /// 原生冷启动只为线路 parser 保留一个连续 pack，避免 batch_read_cached_files
 /// 对两万多个 CBM/FAM/DEV 文件逐个 open。索引先在 Rust 侧解析，数据文件只
-/// 打开/读取一次；返回格式仍是 GIMR v2，因此 WebView 的 bytes/阶段埋点可复用。
+/// 打开/读取一次；返回格式仍是 GIMR v1，因此 WebView 的 bytes/阶段埋点可复用。
 #[tauri::command]
 pub fn read_line_semantic_pack(
     app_handle: tauri::AppHandle,

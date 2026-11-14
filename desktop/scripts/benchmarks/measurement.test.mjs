@@ -43,7 +43,7 @@ test('persistent drift is bounded and a changed session cannot be retried into s
   assert.equal(changed.issue,'session-mismatch');assert.equal(changed.attempts,1);
   assert.equal(progressChanges({a:1,b:2},{a:2,b:3},1).omitted,1);
 });
-const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:MEASUREMENT_VERSION,detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
+const conditions={machineId:'machine',runtimeSha256:'runtime',buildMode:'release',measurementVersion:MEASUREMENT_VERSION,detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v1',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:'source',sampleId:'sample',profileDigest:'profile',workloadDigest:'workload',routeDigest:'route',viewportDigest:'viewport'};
 // These value-level tests also exercise historical reports without native version tags.
 const runs=(prefix,value)=>Array.from({length:3},(_,i)=>benchmarkRun(`${prefix}-${i}`,{
   version:undefined,conditions,requiredMetrics:['openMs'],metrics:{openMs:value+i}}));
@@ -124,6 +124,14 @@ test('semantic stall distinguishes an active engineering task from an idle missi
 test('missing evidence is inconclusive, explicit correctness failure is fail',()=>{
   const b=runs('base',100),c=runs('candidate',100);c[0].measurementComplete=false;assert.equal(compareRuns(b,c).outcome,'INCONCLUSIVE');c[0].correctness='failed';assert.equal(compareRuns(b,c).outcome,'FAIL');
 });
+test('changed Worker heap acquisition policies cannot be mixed into a comparable suite',()=>{
+ const before=runs('before-policy',100),after=runs('after-policy',100);
+ for(const row of after)row.conditions.workerHeapPolicy='isolated-cdp-heap-v1';
+ const comparison=compareRuns(before,after);
+ assert.equal(comparison.outcome,'INCONCLUSIVE');assert.ok(comparison.reasons.includes('incomparable:workerHeapPolicy'));
+ for(const row of before)row.conditions.workerHeapPolicy='isolated-cdp-heap-v1';
+ assert.equal(compareRuns(before,after).outcome,'PASS');
+});
 test('product pass remains visible when memory is unavailable, but comparison and approval reject it',()=>{
   const run={...runs('memory',100)[0],version:'gim-benchmark-v1',projectType:'transmission_line',
     requiredMetrics:['openMs','processPrivatePeakBytes'],metrics:{openMs:100,processPrivatePeakBytes:null},
@@ -176,7 +184,7 @@ test('interrupted lifecycle cannot pass even after active tasks are settled',()=
 });
 test('native evidence requires a lifecycle verdict and a pending-aware semantic digest',()=>{
   const run={...runs('native',100)[0],version:'gim-benchmark-v1',
-    semanticDigestScope:'engineering-with-pending-v2',pendingDigest:'c'.repeat(64),
+    semanticDigestScope:'engineering-with-pending-v1',pendingDigest:'c'.repeat(64),
     pendingCount:0,pendingSourceCount:0,measurementLifecycleComplete:true,
     evidence:{semanticDigest:'d'.repeat(64)}};
   assert.equal(runReadiness(run).reasons.includes('pending-evidence-missing'),false);
@@ -205,7 +213,7 @@ test('different metric sets cannot pass by comparing missing values',()=>{
   assert.equal(compareRuns(b,c).outcome,'INCONCLUSIVE');
 });
 test('adverse tradeoffs remain for human review after independent retest and cannot hide a mode change',()=>{
-  const b=runs('b',100),c=runs('c',120);assert.equal(compareRuns(b,c).requiresRetest,true);
+  const b=runs('b',100),c=runs('c',120);assert.equal(compareRuns(b,c).retestDecision,'developer');assert.equal(compareRuns(b,c).requiresRetest,undefined);
   assert.equal(compareRuns(b,c,{retestBaseline:runs('br',100),retestCandidate:runs('cr',120)}).outcome,'INCONCLUSIVE');
   c[0].conditions.mode='diagnostic';assert.equal(compareRuns(b,c).outcome,'INCONCLUSIVE');
 });

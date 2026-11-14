@@ -4,10 +4,16 @@ import { parseFamSectionsWithDiagnostics } from '../famParser.js';
 import type { EngineeringSourceGraph,SourceDocument } from './sourceGraph.js';
 import { attributeFromProperty,annotateAttributeConflicts } from './attributeEvidence.js';
 import type {SourceRecord,SourceProperty} from './sourceEvidence.js';
+export const MAX_EVIDENCE_RANGE_ENTRIES=256;
+export function checkEvidenceRange(range:EvidenceRange):void{
+  if(range.kinds.length>5||new Set(range.kinds).size!==range.kinds.length)throw Error('Evidence kinds must be unique');
+  if(range.entryIds.length>MAX_EVIDENCE_RANGE_ENTRIES||new TextEncoder().encode(JSON.stringify(range)).byteLength>64*1024)throw Error('Evidence range exceeds 256 entries / 64 KiB; split the request');
+}
 
 /** Session-owned provider. Metadata/query operations never initiate IO. */
 export class ModelEvidenceProvider {
   private revision=0;
+  private sourceRevision=0;
   private parsedComplete=0;
   private snapshot?:EvidenceInventory;
   private entries=new Map<string,EvidenceInventory['entries'][number]>();
@@ -35,22 +41,23 @@ export class ModelEvidenceProvider {
   }
   private setStatus(path:string,status:EvidenceInventory['entries'][number]['status']):void{const entry=this.entries.get(path);if(entry){this.parsedComplete+=(status==='complete'?1:0)-(entry.status==='complete'?1:0);this.entries.set(path,{...entry,status});}}
   recordFailure(path:string):void{this.setStatus(path,'failed');const entry=this.entries.get(path);if(entry)this.entries.set(path,{...entry,readStatus:'failed'});this.revision++;}
-  resetObservations():void{this.documents.clear();this.attributes.clear();this.reads.clear();this.assignmentIndex.clear();this.directAssignments.clear();this.propertyViews.clear();this.extraByPath.clear();this.attributeBytes.clear();this.graphDocuments.clear();this.cachedBytes=0;this.parsedComplete=0;this.refsByPath.clear();this.rowsByPath.clear();for(const path of this.entryIds)this.entries.set(path,{...this.entries.get(path)!,status:'not_requested',readStatus:'not_requested'});this.revision++;}
+  resetObservations():void{this.sourceRevision=0;this.documents.clear();this.attributes.clear();this.reads.clear();this.assignmentIndex.clear();this.directAssignments.clear();this.propertyViews.clear();this.extraByPath.clear();this.attributeBytes.clear();this.graphDocuments.clear();this.cachedBytes=0;this.parsedComplete=0;this.refsByPath.clear();this.rowsByPath.clear();for(const path of this.entryIds)this.entries.set(path,{...this.entries.get(path)!,status:'not_requested',readStatus:'not_requested'});this.revision++;}
   getRevision():number{return this.revision;}
   restoreMetadata(snapshot:EvidenceInventory):void{
-    if(snapshot.scope!==this.scope||snapshot.entries.length!==this.entries.size||new Set(snapshot.entries.map(e=>e.id)).size!==this.entries.size||snapshot.entries.some(e=>!this.entryIds.has(e.id))||!Number.isSafeInteger(snapshot.revision)||snapshot.revision<0)throw Error('Invalid evidence checkpoint metadata');
-    this.detachRaw();this.entries=new Map(snapshot.entries.map(e=>[e.id,{...e}]));this.parsedComplete=snapshot.entries.filter(e=>e.status==='complete').length;this.revision=Math.max(this.revision,snapshot.revision);this.snapshot=undefined;
+    if(snapshot.scope!==this.scope||!Number.isSafeInteger(snapshot.sourceRevision)||snapshot.sourceRevision<0||snapshot.entries.length!==this.entries.size||new Set(snapshot.entries.map(e=>e.id)).size!==this.entries.size||snapshot.entries.some(e=>!this.entryIds.has(e.id))||!Number.isSafeInteger(snapshot.revision)||snapshot.revision<0)throw Error('Invalid evidence checkpoint metadata');
+    this.sourceRevision=snapshot.sourceRevision;this.detachRaw();this.entries=new Map(snapshot.entries.map(e=>[e.id,{...e}]));this.parsedComplete=snapshot.entries.filter(e=>e.status==='complete').length;this.revision=Math.max(this.revision,snapshot.revision);this.snapshot=undefined;
   }
   seedCoverage(coverage:readonly {path:string;status:EvidenceStatus}[]):void{let changed=false;for(const row of coverage)if(this.entries.get(row.path)?.status!==row.status){this.setStatus(row.path,row.status);changed=true;}if(changed)this.revision++;}
   /** Drop reconstructible details while retaining the truthful metadata history. */
   detachRaw():void{this.documents.clear();this.attributes.clear();this.reads.clear();this.assignmentIndex.clear();this.directAssignments.clear();this.propertyViews.clear();this.extraByPath.clear();this.attributeBytes.clear();this.graphDocuments.clear();this.refsByPath.clear();this.rowsByPath.clear();this.cachedBytes=0;this.revision++;}
   getSnapshot(entryIds?:readonly string[]):EvidenceInventory{
-    if(entryIds){this.checkRange({entryIds,kinds:[]});return {scope:this.scope,revision:this.revision,inventoryComplete:true,entryRange:[...entryIds],inventoryTotals:{entries:this.entries.size,parsedComplete:this.parsedComplete},entries:entryIds.map(id=>({...this.entries.get(id)!})),coverage:entryIds.map(id=>({entryId:id,status:this.entries.get(id)!.status,capability:'attributes',materialization:this.attributes.has(id)?'materialized':'not_materialized',rawAvailable:this.documents.has(id)||this.propertyViews.has(id)||this.extraByPath.has(id)}))};}
+    if(entryIds){this.checkRange({entryIds,kinds:[]});return {scope:this.scope,sourceRevision:this.sourceRevision,revision:this.revision,inventoryComplete:true,entryRange:[...entryIds],inventoryTotals:{entries:this.entries.size,parsedComplete:this.parsedComplete},entries:entryIds.map(id=>({...this.entries.get(id)!})),coverage:entryIds.map(id=>({entryId:id,status:this.entries.get(id)!.status,capability:'attributes',materialization:this.attributes.has(id)?'materialized':'not_materialized',rawAvailable:this.documents.has(id)||this.propertyViews.has(id)||this.extraByPath.has(id)}))};}
     if(this.snapshot?.revision===this.revision)return this.snapshot;
-    return this.snapshot=Object.freeze({scope:this.scope,revision:this.revision,inventoryComplete:true,inventoryTotals:{entries:this.entries.size,parsedComplete:this.parsedComplete},entries:Object.freeze([...this.entries.values()].map(e=>Object.freeze({...e}))),
+    return this.snapshot=Object.freeze({scope:this.scope,sourceRevision:this.sourceRevision,revision:this.revision,inventoryComplete:true,inventoryTotals:{entries:this.entries.size,parsedComplete:this.parsedComplete},entries:Object.freeze([...this.entries.values()].map(e=>Object.freeze({...e}))),
       coverage:Object.freeze([...this.entries.values()].map(e=>Object.freeze({entryId:e.id,status:e.status,capability:'attributes' as const,materialization:this.attributes.has(e.id)?'materialized' as const:'not_materialized' as const,rawAvailable:this.documents.has(e.id)||this.propertyViews.has(e.id)||this.extraByPath.has(e.id)})))});
   }
   attachGraph(graph:EngineeringSourceGraph,extra:readonly SourceRecord[]=[]):void{
+    this.sourceRevision=graph.revision??0;
     this.graphDocuments=new Set(graph.documents.map(d=>d.path));
     for(const doc of graph.documents)this.observe(doc.path,doc.rawLines);
     for(const diagnostic of graph.diagnostics)if(diagnostic.kind==='read-failed')this.setStatus(diagnostic.source,'failed');
@@ -153,6 +160,7 @@ export class ModelEvidenceProvider {
     this.attributes.set(path,attributes);this.attributeBytes.set(path,bytes);this.cachedBytes+=bytes;
   }
   private checkRange(range:EvidenceRange):void{
+    checkEvidenceRange(range);
     if(range.entryIds.some(id=>!this.entryIds.has(id)))throw Error('Unknown evidence entry');
   }
   familyDocument(path:string):SourceDocument|undefined{
@@ -166,11 +174,21 @@ export class ModelEvidenceProvider {
     const offset=query.offset??0;
     if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(query.limit)||query.limit<1||query.limit>1000)throw Error('Invalid evidence page');
     const page:EvidencePage={revision:this.revision,attributes:[],assignments:[],documents:[],references:[],occurrences:[],coverage:[]};
-    let index=0,count=0,bytes=0;
+    page.coverage=query.range.entryIds.flatMap(id=>query.range.kinds.map(capability=>{
+      const rawAvailable=this.documents.has(id)||this.propertyViews.has(id)||this.extraByPath.has(id);
+      const typed=capability==='attributes'||capability==='assignments';
+      const materialized=typed?this.attributes.has(id):capability==='documents'?this.documents.has(id):this.graphDocuments.has(id)||this.rowsByPath.has(id);
+      const status=this.entries.get(id)!.status==='failed'?'failed':capability==='documents'?this.documents.has(id)?'complete':'not_requested':typed?this.propertyViews.has(id)||this.extraByPath.has(id)?capability==='assignments'?'partial':this.entries.get(id)!.status:/\.fam$/i.test(id)?'not_requested':'unsupported':materialized?'partial':'not_requested';
+      return {entryId:id,capability,status,materialization:materialized?'materialized' as const:'not_materialized' as const,rawAvailable};
+    }));
+    const encoder=new TextEncoder(),byteSize=(value:unknown)=>encoder.encode(JSON.stringify(value)).byteLength;
+    const headerBytes=byteSize(page)+64;
+    let index=0,count=0,bytes=headerBytes;
+    if(bytes>512*1024)throw Error('Evidence coverage exceeds page budget; split the range');
     const add=(kind:EvidenceRange['kinds'][number],value:unknown):boolean=>{
       if(index++<offset)return true;
-      const size=JSON.stringify(value).length*2;
-      if(size>512*1024)throw Error('Evidence record exceeds page budget; read original entry');
+      const size=byteSize(value)+1;
+      if(size+headerBytes>512*1024)throw Error('Evidence record exceeds page budget; read original entry');
       if(count===query.limit||bytes+size>512*1024){page.nextOffset=index-1;return false;}
       bytes+=size;count++;
       const key=kind==='assignments'?'assignments':kind;
@@ -188,13 +206,6 @@ export class ModelEvidenceProvider {
       if(kind==='references')for(const row of this.refsByPath.get(id)??[])if(!add(kind,row))break outer;
       if(kind==='occurrences')for(const row of this.rowsByPath.get(id)??[])if(!add(kind,row))break outer;
     }
-    page.coverage=query.range.entryIds.flatMap(id=>query.range.kinds.map(capability=>{
-      const rawAvailable=this.documents.has(id)||this.propertyViews.has(id)||this.extraByPath.has(id);
-      const typed=capability==='attributes'||capability==='assignments';
-      const materialized=typed?this.attributes.has(id):capability==='documents'?this.documents.has(id):this.graphDocuments.has(id)||this.rowsByPath.has(id);
-      const status=this.entries.get(id)!.status==='failed'?'failed':capability==='documents'?this.documents.has(id)?'complete':'not_requested':typed?this.propertyViews.has(id)||this.extraByPath.has(id)?capability==='assignments'?'partial':this.entries.get(id)!.status:/\.fam$/i.test(id)?'not_requested':'unsupported':materialized?'partial':'not_requested';
-      return {entryId:id,capability,status,materialization:materialized?'materialized' as const:'not_materialized' as const,rawAvailable};
-    }));
     return structuredClone(page);
   }
 }

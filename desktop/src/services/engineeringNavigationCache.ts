@@ -7,6 +7,8 @@ import type { EngineeringSnapshot } from '../engineering/types.js';
 import type { EngineeringSources } from '../gim/engineering/buildSources.js';
 import { decodeEngineeringArtifact, encodeEngineeringArtifact, type EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import {packEngineeringSource} from './engineeringSourceCodec.js';
+import {stringifyEngineeringTable} from './engineeringTableJson.js';
+import {MAX_ENGINEERING_CACHE_PLAIN_BYTES} from './engineeringCacheCodec.js';
 
 const valid = (condition: unknown, reason: string): void => { if (!condition) throw Error(`工程视图缓存无效：${reason}`); };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -53,8 +55,8 @@ export function applyNavigationCacheProjection(base:EngineeringNavigationData,pr
     composition:projection.composition,compositionSearch};
 }
 async function dependency(snapshot: EngineeringSnapshot, sourceDigest: string): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify([sourceDigest,packEngineeringSource(snapshot)]));
-  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(v => v.toString(16).padStart(2, '0')).join('');
+  const bytes = await stringifyEngineeringTable(packEngineeringSource(snapshot),MAX_ENGINEERING_CACHE_PLAIN_BYTES,undefined,undefined,{prefix:'['+JSON.stringify(sourceDigest)+',',suffix:']'},true);
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource))].map(v => v.toString(16).padStart(2, '0')).join('');
 }
 
 /** Cache structure validation checks real source/entity references and complete

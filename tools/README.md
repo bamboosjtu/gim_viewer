@@ -2,13 +2,13 @@
 
 三个独立的 Windows 桌面小工具，用于快速查看设备、识别工程实体和浏览 GIM 文件信息。它们使用 Python + PySide6，分别维护自己的运行环境和打包配置。
 
-| 工具 | 定位 | 输入 | 主要能力 | 单文件产物 |
+| 工具 | 定位 | 输入 | 主要能力 | 目录包产物 |
 |---|---|---|---|---|
-| [gim_device](gim_device/README.md) | 设备 GIM 简易查看器 | 设备 `.gim` 包 | 递归装配、MOD/STL 三维预览、属性、视图截图 | `gim_device/dist/GIM设备查看器.exe` |
-| [gim_element](gim_element/README.md) | 简易实体识别工具 | 变电 `.gim` 包或解包目录 | 识别设备、装置性材料、构件；未归类对象单列“其他”；导出 HTML / CSV / JSON | `gim_element/dist/GIM实体盘点器.exe` |
-| [gim_info](gim_info/README.md) | 简易 GIM 文件信息浏览器 | 已解包的 GIM 目录 | 浏览键值、XML、文本及二进制预览；指针跳转、反向引用、搜索和链清单导出 | `gim_info/dist/GIM信息阅读器.exe` |
+| [gim_device](gim_device/README.md) | 设备 GIM 简易查看器 | 设备 `.gim` 包 | 递归装配、MOD/STL 三维预览、属性、视图截图 | `gim_device/dist/GIM设备查看器/GIM设备查看器.exe` |
+| [gim_element](gim_element/README.md) | 简易实体识别工具 | 变电 `.gim` 包或解包目录 | 识别设备、装置性材料、构件；未归类对象单列“其他”；导出 HTML / CSV / JSON | `gim_element/dist/GIM实体盘点器/GIM实体盘点器.exe` |
+| [gim_info](gim_info/README.md) | 简易 GIM 文件信息浏览器 | 已解包的 GIM 目录 | 浏览键值、XML、文本及二进制预览；指针跳转、反向引用、搜索和链清单导出 | `gim_info/dist/GIM信息阅读器/GIM信息阅读器.exe` |
 
-所有工具都持有自己的实现与资源，运行和打包不导入、不调用、不读取 GIM Viewer 主程序。`gim_element` 自带标准索引、分类词典和 Python 识别算法，通过数据版本、共同的纯数据用例及开发者本地结果对照验证一致性。它的输出可辅助审查主程序，不能替代工程实例的人工真值。`gim_info` 默认浏览文件与指针，不建立三维模型；旧版实体界面只保留在源码的 `--legacy` 入口。
+所有工具都持有自己的实现与资源，运行和打包不导入、不调用、不读取 GIM Viewer 主程序。`gim_element` 自带标准索引、分类词典和 Python 识别算法，通过数据版本、共同的纯数据用例及开发者本地结果对照验证一致性。它的输出可辅助审查主程序，不能替代工程实例的人工真值。`gim_info` 默认浏览文件与指针，不建立三维模型。
 
 ## 运行与构建
 
@@ -25,7 +25,7 @@
 # 环境已准备好：跳过安装
 .\tools\gim_element\build.ps1 -SkipInstall
 
-# 生成 ZIP，压缩包中只包含该工具的单文件 EXE
+# 生成 ZIP，包含 exe 和 _internal；解压整个目录后运行
 .\tools\gim_element\build.ps1 -SkipInstall -Publish
 
 # 源码运行，使用各工具自己的解释器
@@ -49,7 +49,7 @@
 ## 打包约定
 
 - 打包配置作为源码保存在各工具根目录：`viewer.spec`、`element.spec`、`reader.spec`。`_build/` 只存中间产物，删除后仍能重建。
-- 统一输出单文件 EXE；运行时由 PyInstaller 在用户临时目录解压依赖，退出后清理。不需要随附 `_internal/`，也不向工具根目录复制第二份 EXE。
+- 统一输出 onedir 目录包，exe 与 `_internal/` 一同分发；不再由引导器向系统 TEMP 自解包。冻结程序在 exe 旁创建 `tmp/` 作为 TEMP/TMP/TMPDIR，安装位置需可写。构建中间临时文件使用工作区 `tmp/tool-build/`。
 - 三份 spec 都排除从 PATH 中误收集的无版本 ICU DLL，让 Qt 使用 Windows 原生 ICU，避免 Poppler/Conda 的同名 DLL 导致 `QtCore`“找不到指定的程序”。
 - 构建先校验路径，拒绝输出目录或待处理产物中的符号链接、目录联接等 reparse point。旧产物暂存到本工具的 `_build/previous-*`；新 EXE 通过归档检查（适用时）、实际启动自检及可选冒烟后删除旧产物。构建失败会保留备份，并在错误中给出位置。
 - `--self-check` 只检查启动和依赖加载，不打开正式窗口、不修改用户偏好。`gim_element` 还校验归档内嵌目录数据及 ICU 排除情况；完整功能验证使用下面的冒烟入口。
@@ -59,9 +59,9 @@
 
 三个工具独立交付，保留各自的 Python 实现。它们的分类和解析结果限于各自规则，不作为 Viewer、未来 SDK 或 Validator 的权威真值；跨实现一致性仍需开发者本地真实来源复核。工具不依赖主程序或未来的 SDK 抽取，Benchmark 继续由独立的测量契约执行。
 
-CI 只运行 `tests/test_pure.py` 中的纯函数契约，以及构建路径安全、实际 onefile 构建和启动检查。纯函数检查不构造 GIM 包、不生成工程目录、不读取真实或合成工程样本。矩阵、IFC 文本和编码等普通值测试使用工作区临时目录作为所有子进程 TEMP/TMP/TMPDIR；错误退出即失败。
+CI 运行 `test_pure.py`，实体工具增加 `test_standard.py` 的纯 DTO 标准识别契约，以及构建路径安全、目录包构建和启动检查。纯函数检查不构造 GIM 包、不生成工程目录、不读取真实或合成工程样本。矩阵、IFC 文本和编码等普通值测试使用工作区临时目录作为所有子进程 TEMP/TMP/TMPDIR；错误退出即失败。
 
-现有 `test_core.py`、指针目录测试及冻结版工程 smoke 属于开发者本地任务，不加入远程 CI。它们仍可用下面命令显式运行。构建成功的单文件 EXE 以原文件名上传；CI 不声称工程正确性或性能验收通过。
+现有 `test_core.py`、指针目录测试及冻结版工程 smoke 属于开发者本地任务，不加入远程 CI。它们仍可用下面命令显式运行。构建成功的完整目录 ZIP 上传；CI 不声称工程正确性或性能验收通过。
 
 ## 验证
 

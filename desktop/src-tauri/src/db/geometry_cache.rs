@@ -161,7 +161,7 @@ fn validate_device_lod_entry<'a>(entry: &'a str, source_sha: &str) -> Result<(&'
     let parts: Vec<&str> = key.split('|').collect();
     let bound_sha = match store {
         "templates" if parts.len() == 4 && parts[0] == GEOMETRY_CACHE_VERSION => parts[1],
-        "catalog" if parts.len() == 4 && parts[0] == "dev-spatial-catalog-v2" && parts[1] == GEOMETRY_CACHE_VERSION => parts[2],
+        "catalog" if parts.len() == 4 && parts[0] == "dev-spatial-catalog-v1" && parts[1] == GEOMETRY_CACHE_VERSION => parts[2],
         _ => return Err("设备缓存域或版本无效".into()),
     };
     if source_sha.len() != 64 || !source_sha.bytes().all(|c| c.is_ascii_hexdigit()) || bound_sha != source_sha {
@@ -177,12 +177,12 @@ mod device_lod_key_tests {
     fn source_bound_keys_accept_only_their_domain_version_and_sha() {
         let sha="a".repeat(64);
         let template=format!("templates/{}|{}|DEV/x.dev|lod0",GEOMETRY_CACHE_VERSION,sha);
-        let catalog=format!("catalog/dev-spatial-catalog-v2|{}|{}|DEV/x.dev",GEOMETRY_CACHE_VERSION,sha);
+        let catalog=format!("catalog/dev-spatial-catalog-v1|{}|{}|DEV/x.dev",GEOMETRY_CACHE_VERSION,sha);
         assert!(validate_device_lod_entry(&template,&sha).is_ok());
         assert!(validate_device_lod_entry(&catalog,&sha).is_ok());
         assert!(validate_device_lod_entry(&template,&"b".repeat(64)).is_err());
         assert!(validate_device_lod_entry(&template.replace("templates/","../"),&sha).is_err());
-        assert!(validate_device_lod_entry(&catalog.replace("dev-spatial-catalog-v2","old"),&sha).is_err());
+        assert!(validate_device_lod_entry(&catalog.replace("dev-spatial-catalog-v1","old"),&sha).is_err());
     }
 }
 

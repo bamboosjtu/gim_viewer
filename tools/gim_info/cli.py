@@ -4,7 +4,6 @@
   python gim_reader.py <解包目录>          打开浏览器（默认）
   python gim_reader.py --smoke <目录>      冒烟：文件表 / 指针体检 / 主链（无 Qt）
   python gim_reader.py --guitest <目录>    界面自检：跳一次指针、退回来、截图
-  python gim_reader.py --legacy <目录>     旧的实体/融合树界面（仅源码运行，exe 不含）
 """
 import sys
 import time
@@ -68,10 +67,6 @@ def _dispatch():
         from PySide6 import QtWidgets
         return
     args = [a for a in sys.argv[1:] if not a.startswith('-')]
-    if '--legacy' in sys.argv:                 # 旧界面：实体四本账 / 融合树
-        from gim_gui import run_gui
-        run_gui(args[0] if args else None, selftest='--guitest' in sys.argv)
-        return
     if '--smoke' in sys.argv:
         smoke(args[0] if args else '.')
         return

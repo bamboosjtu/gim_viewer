@@ -5,6 +5,7 @@ import {MEASUREMENT_VERSION} from '../../../packages/measurement-core/src/versio
 import {performanceComparison,PERFORMANCE_POLICY} from './performance-policy.mjs';
 export {digest} from './evidence.mjs';
 const identityKeys=['machineId','runtimeSha256','buildMode','measurementVersion','detailPolicy','lifecyclePolicy','contentPolicy','cacheProofPolicy','webviewProfilePolicy','mode','scenario','cacheState','sourceSha256','sampleId','profileDigest','workloadDigest','routeDigest','viewportDigest'];
+const comparisonKeys=[...identityKeys,'workerHeapPolicy','workerHeapCollector'];
 const sha=value=>/^[a-f0-9]{64}$/.test(value??'');
 export function contentEvidenceIssue(run){
   if(run.projectType==='transmission_line')return null;
@@ -54,7 +55,7 @@ export function runReadiness(run){
     if(!valid)reasons.push('partial-defect-unverified');
   }
   if(run.version==='gim-benchmark-v1'&&run.projectType==='substation'&&
-    (run.semanticDigestScope!=='engineering-with-pending-v2'||
+    (run.semanticDigestScope!=='engineering-with-pending-v1'||
       !/^[a-f0-9]{64}$/.test(run.semanticDigest??run.evidence?.semanticDigest??'')||
       !/^[a-f0-9]{64}$/.test(run.pendingDigest??'')||!Number.isSafeInteger(run.pendingCount)||run.pendingCount<0||
       !Number.isSafeInteger(run.pendingSourceCount)||run.pendingSourceCount<0))reasons.push('pending-evidence-missing');
@@ -109,7 +110,7 @@ function checkGroup(runs){
   const checks=runs.map(runReadiness);if(checks.some(r=>r.outcome==='FAIL'))return {outcome:'FAIL',reasons:checks.flatMap(r=>r.reasons)};
   const reasons=checks.flatMap(r=>r.reasons);
   if(!runs.length||new Set(runs.map(r=>r.processInstanceId)).size!==runs.length)reasons.push('independent-processes-required');
-  for(const key of identityKeys)if(runs.some(r=>r.conditions?.[key]!==runs[0]?.conditions?.[key]))reasons.push(`mixed-condition:${key}`);
+  for(const key of comparisonKeys)if(runs.some(r=>r.conditions?.[key]!==runs[0]?.conditions?.[key]))reasons.push(`mixed-condition:${key}`);
   if(runs.some(r=>JSON.stringify(r.requiredMetrics)!==JSON.stringify(runs[0]?.requiredMetrics)))reasons.push('mixed-required-metrics');
   if(new Set(checks.map(row=>row.outcome)).size>1)reasons.push('mixed-completeness');
   if(checks[0]?.outcome==='PARTIAL'){
@@ -149,7 +150,7 @@ function calibrationComparison(baseline,candidate){
     ?'environment-calibration-drift':null;
   return {ratios,issue};
 }
-export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidate=[],requireContentEvidence=false,geometryChanges=[],absoluteRuns=candidate}={}){
+export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidate=[],requireContentEvidence=false,geometryChanges=[],measurementRuns=candidate}={}){
   const b=checkGroup(baseline),c=checkGroup(candidate),reasons=[...b.reasons,...c.reasons];
   if(b.outcome==='FAIL'||c.outcome==='FAIL')return {outcome:'FAIL',reasons};
   if(baseline.length!==candidate.length)reasons.push('repetition-count-differs');
@@ -159,7 +160,7 @@ export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidat
   if(b.outcome!==c.outcome)reasons.push('coverage-status-differs');
   if(b.outcome==='PARTIAL'&&c.outcome==='PARTIAL'&&partialSignature(baseline[0])!==partialSignature(candidate[0]))
     reasons.push('partial-coverage-differs');
-  for(const key of identityKeys)if(baseline[0]?.conditions?.[key]!==candidate[0]?.conditions?.[key])reasons.push(`incomparable:${key}`);
+  for(const key of comparisonKeys)if(baseline[0]?.conditions?.[key]!==candidate[0]?.conditions?.[key])reasons.push(`incomparable:${key}`);
   if(JSON.stringify(baseline[0]?.requiredMetrics)!==JSON.stringify(candidate[0]?.requiredMetrics))reasons.push('incomparable:required-metrics');
   if(requireContentEvidence){
     for(const run of [...baseline,...candidate]){const issue=contentEvidenceIssue(run);if(issue)reasons.push(issue);}
@@ -170,13 +171,13 @@ export function compareRuns(baseline,candidate,{retestBaseline=[],retestCandidat
         !geometryChangeAllowed(baseline[0],candidate[0],geometryChanges))reasons.push('dev-content-digest-differs');
     }
   }
-  const performanceAssessment=performanceComparison(baseline,candidate,{comparable:reasons.length===0,comparisonIssues:[...new Set(reasons)],absoluteRuns});
+  const performanceAssessment=performanceComparison(baseline,candidate,{comparable:reasons.length===0,comparisonIssues:[...new Set(reasons)],measurementRuns});
   if(reasons.length)return {outcome:'INCONCLUSIVE',reasons:[...new Set(reasons)],calibrationRatio:calibration.ratios,metrics:[],performanceAssessment};
   const metrics=performanceAssessment.metrics;
-  if(!performanceAssessment.requiresHumanReview)return {outcome:b.outcome,reasons:[],calibrationRatio:calibration.ratios,metrics,performanceAssessment};
-  const reviewReasons=['human-performance-review-required',...(performanceAssessment.memoryOverLimit?['memory-growth-over-50-percent']:[])];
-  if(!retestBaseline.length||!retestCandidate.length)return {outcome:'INCONCLUSIVE',requiresRetest:true,reasons:reviewReasons,calibrationRatio:calibration.ratios,metrics,performanceAssessment};
-  if(identityKeys.some(key=>retestBaseline[0]?.conditions?.[key]!==baseline[0]?.conditions?.[key]||retestCandidate[0]?.conditions?.[key]!==candidate[0]?.conditions?.[key])
+  if(!performanceAssessment.hasTradeoff)return {outcome:b.outcome,reasons:[],calibrationRatio:calibration.ratios,metrics,performanceAssessment};
+  const reviewReasons=['human-performance-review-required'];
+  if(!retestBaseline.length||!retestCandidate.length)return {outcome:'INCONCLUSIVE',requiresHumanReview:true,retestDecision:'developer',reasons:reviewReasons,calibrationRatio:calibration.ratios,metrics,performanceAssessment};
+  if(comparisonKeys.some(key=>retestBaseline[0]?.conditions?.[key]!==baseline[0]?.conditions?.[key]||retestCandidate[0]?.conditions?.[key]!==candidate[0]?.conditions?.[key])
     ||new Set([...baseline,...candidate,...retestBaseline,...retestCandidate].map(r=>r.processInstanceId)).size!==baseline.length+candidate.length+retestBaseline.length+retestCandidate.length)
     return {outcome:'INCONCLUSIVE',reasons:['retest-conditions-or-processes-differ'],metrics};
   const retest=compareRuns(retestBaseline,retestCandidate,{requireContentEvidence,geometryChanges});
@@ -286,10 +287,10 @@ export function compareSuites(baseline,candidate,options={}){
       ...(!b.has(key)||!c.has(key)?{outcome:'INCONCLUSIVE',reasons:['scenario-missing']}:
         compareRuns(b.get(key),c.get(key),{retestBaseline:rb.get(key)??[],retestCandidate:rc.get(key)??[],
           requireContentEvidence:options.requireContentEvidence===true,geometryChanges:options.geometryChanges??[],
-          absoluteRuns:candidate.filter(run=>run.conditions?.sampleId===conditions?.sampleId&&run.conditions?.sourceSha256===conditions?.sourceSha256&&
+          measurementRuns:candidate.filter(run=>run.conditions?.sampleId===conditions?.sampleId&&run.conditions?.sourceSha256===conditions?.sourceSha256&&
             run.conditions?.scenario===conditions?.scenario&&run.conditions?.mode===conditions?.mode)}))});
   }
   return {outcome:comparisons.some(row=>row.outcome==='FAIL')?'FAIL':comparisons.length&&comparisons.every(row=>row.outcome==='PASS')?'PASS':
     comparisons.length&&comparisons.every(row=>['PASS','PARTIAL'].includes(row.outcome))?'PARTIAL':'INCONCLUSIVE',
-    requiresRetest:comparisons.some(row=>row.requiresRetest),comparisons};
+    requiresHumanReview:comparisons.some(row=>row.performanceAssessment?.requiresHumanReview),retestDecision:'developer',comparisons};
 }

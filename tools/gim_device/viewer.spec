@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller 打包配置 —— 单文件 exe，内嵌 QtWebEngine 与 three.js 渲染层"""
+"""PyInstaller 打包配置 —— 免自解包目录包，内嵌 QtWebEngine 与 three.js 渲染层"""
 from PyInstaller.utils.hooks import collect_all
 import os
 from pathlib import Path
@@ -41,7 +41,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[str(Path(SPECPATH) / 'packaging_runtime.py')],
     excludes=[
         'tkinter', 'matplotlib', 'numpy', 'PIL', 'scipy', 'pandas',
         'PySide6.QtQml', 'PySide6.QtQuick', 'PySide6.Qt3D',
@@ -63,16 +63,14 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='GIM设备查看器',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -81,3 +79,5 @@ exe = EXE(
     entitlements_file=None,
     icon=os.path.join(HERE, 'app.ico'),
 )
+
+app = COLLECT(exe,a.binaries,a.datas,strip=False,upx=False,name='GIM设备查看器')

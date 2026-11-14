@@ -59,7 +59,7 @@ npm run tauri:dev     # Tauri 开发窗口
 | `npm run test:measurement-tools` | 测量 CLI、Trace/CPU/WPA 协议与正确性规则（无工程样本） |
 | `npm run test:local-contract` | 本地注册表协议 |
 
-Windows CI 保持一个串行任务：版本、测量协议、验收工具、本地注册表、分层、类型和 lint 检查在 Rust 编译及覆盖率之前执行；随后运行 Rust 单元测试、前端覆盖率、SQLite 集成、前端构建和 Rust 编译边界。`workflow_dispatch` 才构建、校验和上传便携 Benchmark 发布包。以上步骤均不执行工程性能样本；性能以相对历史版本不回退为目标，正确性修复成本、50% 内存增长上限和速度收益分别按 Benchmark 原则报告，最终批准由开发者在本地人工决定。
+Windows CI 保持一个串行任务：版本、测量协议、验收工具、本地注册表、分层、类型和 lint 检查在 Rust 编译及覆盖率之前执行；随后运行 Rust 单元测试、前端覆盖率、SQLite 集成、前端构建和 Rust 编译边界。`workflow_dispatch` 才构建、校验和上传便携 Benchmark 发布包。以上步骤均不执行工程性能样本；性能优化须取得可测的明显提升，功能和正确性修正应避免过大回退；实测收益、具体成本与未决项分别报告，没有统一时间、内存或增长比例验收线，是否接受及复核范围由开发者决定。
 
 完整命令清单与逐项门禁条件见[验证](validation.md)。远程 CI 只运行无工程样本的单元测试、静态检查和构建；真实与合成工程样本、性能矩阵只在开发者本地运行。
 
@@ -124,5 +124,5 @@ Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码和�
 - [分层与依赖](architecture/layers.md)：目录所有权与依赖规则。
 - [验证](validation.md)：证据边界、不变量与门禁选择。
 - [Benchmark CLI](benchmark.md)：批量冷暖、比较与报告。
-- [性能测试指南](performance-guide.md)：单机验收的 SLO 与步骤。
+- [性能测试指南](performance-guide.md)：单机验收的 测量口径与步骤。
 - [文档首页](README.md)：文档地图、写作约定与单一权威表。

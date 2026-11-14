@@ -22,7 +22,8 @@ function recordReport(row,report,state){
   Object.assign(row,{status:readiness.outcome,error:[report.reason,...readiness.reasons].filter(Boolean).join(';'),runId:report.runId,
     conditions:report.conditions,checks:report.evidence?.checks??[],workload:report.evidence?.progress?.workload??null,
     projectType:report.projectType??null,correctness:report.correctness,defectAssessment:report.defectAssessment??null,
-    geometryTimingPolicy:report.conditions?.geometryTimingPolicy??'legacy-model-commit-v1',
+    geometryTimingPolicy:report.conditions?.geometryTimingPolicy,
+    workerHeapPolicy:report.conditions?.workerHeapPolicy??'shared-cdp-heap-v1',
     pendingCount:report.pendingCount??null,pendingSourceCount:report.pendingSourceCount??null,
     pendingDigest:report.pendingDigest??null,semanticDigestScope:report.semanticDigestScope??null,
     geometryStructuralFingerprint:report.geometryStructuralFingerprint??null,
@@ -116,7 +117,7 @@ export async function executeBatch({root,buildManifest,inputs,out,privateOut,pre
   const cacheStates=preset==='baseline'?['cold','warm']:['cold'];
   privateOut??=artifactDirectory(root,join(root,'tmp','gim-bench','batches',`batch-${Date.now()}-${randomBytes(4).toString('hex')}`));
   const build=JSON.parse(readFileSync(workspacePath(root,buildManifest),'utf8'));
-  const body={version:'gim-batch-profile-v1',preset,repetitions,cacheStates,mode:'benchmark',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',timeoutMs,
+  const body={version:'gim-batch-profile-v1',preset,repetitions,cacheStates,mode:'benchmark',detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v1',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',timeoutMs,
     startupRetryPolicy:'pre-open-infrastructure-v1',maxStartupAttempts:STARTUP_ATTEMPTS,
     cases:inputs.samples.map(({paths,...sample})=>sample)};
   const exportId='export-'+randomBytes(12).toString('hex');

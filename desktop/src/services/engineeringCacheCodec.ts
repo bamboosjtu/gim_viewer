@@ -9,9 +9,10 @@ import { ENGINEERING_COMPOSITION_VERSION } from '../engineering/composition.js';
 import { INVENTORY_TEMPLATE_VERSION } from '../engineering/inventoryTemplate.js';
 import { SOURCE_TREE_TEMPLATE_VERSION } from '../gim/engineering/sourceProjection.js';
 import { ENGINEERING_CATALOG_VERSION } from '../engineering/catalogLabels.js';
-import { packEngineeringSource, unpackEngineeringSource } from './engineeringSourceCodec.js';
+import { packEngineeringSource, unpackEngineeringSourceAsync } from './engineeringSourceCodec.js';
+import {engineeringTableChunks,parseEngineeringTable,releaseEngineeringBytes,yieldEngineeringCodec} from './engineeringTableJson.js';
 
-export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v7';
+export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v1';
 export const MAX_ENGINEERING_CACHE_BYTES = 384 * 1024 * 1024;
 /** JSON bodies above this size are split into independently compressed parts.
  * The compressed artifact still respects MAX_ENGINEERING_CACHE_BYTES. */
@@ -39,9 +40,8 @@ export function engineeringCacheEntry(id: EngineeringCacheIdentity, kind: Kind):
   return `__derived__/${kind === 'sources' ? ENGINEERING_SOURCE_VERSION : kind === 'entities' ? ENGINEERING_ENTITY_SCHEMA : ENGINEERING_NAVIGATION_VERSION}/${id.sourceSha256.toLowerCase()}.bin`;
 }
 
-async function gzip(bytes: Uint8Array, decompress = false, limit = MAX_ENGINEERING_CACHE_BYTES): Promise<Uint8Array> {
-  const input = new ReadableStream<BufferSource>({ start(controller) { controller.enqueue(bytes as BufferSource); controller.close(); } });
-  const reader = input.pipeThrough(decompress ? new DecompressionStream('gzip') : new CompressionStream('gzip')).getReader();
+async function gzipStream(input:ReadableStream<BufferSource>,limit=MAX_ENGINEERING_CACHE_BYTES):Promise<Uint8Array>{
+  const reader = input.pipeThrough(new CompressionStream('gzip')).getReader();
   const chunks: Uint8Array[] = []; let length = 0;
   try {
     for (;;) {
@@ -56,28 +56,49 @@ async function gzip(bytes: Uint8Array, decompress = false, limit = MAX_ENGINEERI
   return result;
 }
 
+/** Restore into the validated final allocation. Retaining every expanded
+ * part and then concatenating them doubles the largest warm input. */
+async function expandInto(bytes:Uint8Array,target:Uint8Array,offset:number):Promise<number>{
+  const input=new ReadableStream<BufferSource>({start(controller){controller.enqueue(bytes as BufferSource);controller.close();}});
+  const reader=input.pipeThrough(new DecompressionStream('gzip')).getReader();
+  try{
+    for(;;){
+      const next=await reader.read();if(next.done)return offset;
+      if(next.value.length>target.length-offset)throw Error('工程缓存无效：expanded size');
+      target.set(next.value,offset);offset+=next.value.length;
+    }
+  }catch(error){await reader.cancel().catch(()=>{});throw error;}
+}
+
 async function encode(kind: Kind, payload: unknown, id: EngineeringCacheIdentity, sourceDigest?: string): Promise<{ bytes: Uint8Array; digest: string }> {
   engineeringCacheEntry(id, kind);
   requireValid(id.parserVersion.length > 0, 'parser contract');
-  const plain = encoder.encode(JSON.stringify(packEngineeringSource(payload)));
-  requireValid(plain.length <= MAX_ENGINEERING_CACHE_PLAIN_BYTES, 'plain size');
-  let body: Uint8Array, partSizes: number[] | undefined;
-  if (plain.length <= CACHE_PART_BYTES) body = await gzip(plain);
-  else {
-    const parts: Uint8Array[] = [];
-    for (let offset = 0; offset < plain.length; offset += CACHE_PART_BYTES)
-      parts.push(await gzip(plain.subarray(offset, Math.min(plain.length, offset + CACHE_PART_BYTES))));
-    const bodyLength = parts.reduce((sum, part) => sum + part.length, 0);
-    requireValid(bodyLength <= MAX_ENGINEERING_CACHE_BYTES, 'encoded size');
-    body = new Uint8Array(bodyLength);
-    let bodyOffset = 0;
-    for (const part of parts) { body.set(part, bodyOffset); bodyOffset += part.length; }
-    partSizes = parts.map(part => part.length);
+  // Compression consumes canonical chunks directly. Only one 64 MiB logical
+  // part is active; there is no model-sized plain buffer or final plain copy.
+  const chunks=engineeringTableChunks(packEngineeringSource(payload),MAX_ENGINEERING_CACHE_PLAIN_BYTES,undefined,undefined,undefined,true);
+  let next=await chunks.next(),plainBytes=0,bodyLength=0;
+  const parts:Uint8Array[]=[];
+  while(!next.done){
+    let remaining=CACHE_PART_BYTES;
+    const input=new ReadableStream<BufferSource>({async pull(controller){
+      try{
+        if(next.done||remaining===0){controller.close();return;}
+        const length=Math.min(remaining,next.value.length),piece=next.value.subarray(0,length);
+        controller.enqueue(piece as BufferSource);plainBytes+=length;remaining-=length;
+        if(length===next.value.length)next=await chunks.next();
+        else next={done:false,value:next.value.subarray(length)};
+      }catch(error){controller.error(error);}
+    }});
+    const part=await gzipStream(input);parts.push(part);bodyLength+=part.length;
+    requireValid(bodyLength<=MAX_ENGINEERING_CACHE_BYTES,'encoded size');
   }
+  const body=parts.length===1?parts[0]:new Uint8Array(bodyLength);
+  if(parts.length>1){let offset=0;for(const part of parts){body.set(part,offset);offset+=part.length;}}
+  const partSizes=parts.length>1?parts.map(part=>part.length):undefined;
   requireValid(body.length <= MAX_ENGINEERING_CACHE_BYTES, 'encoded size');
   const digest = await sha(body);
   const header = encoder.encode(JSON.stringify({ kind, contract: contract(kind), source: id.sourceSha256.toLowerCase(), parser: id.parserVersion,
-    manifest: await manifestDigest(id), complete: true, encoding: kind==='sources'?'gzip':'gzip-table-v1', plainBytes: plain.length, bytes: body.length,
+    manifest: await manifestDigest(id), complete: true, encoding: kind==='sources'?'gzip':'gzip-table-v1', plainBytes, bytes: body.length,
     ...(partSizes && partSizes.length > 1 ? { parts: partSizes } : {}), digest, sourceDigest }));
   const bytes = new Uint8Array(4 + header.length + body.length);
   new DataView(bytes.buffer).setUint32(0, header.length, true); bytes.set(header, 4); bytes.set(body, 4 + header.length);
@@ -97,27 +118,25 @@ async function decode(kind: Kind, bytes: Uint8Array, id: EngineeringCacheIdentit
   requireValid(meta.bytes === body.length && Number.isSafeInteger(meta.plainBytes) && (meta.plainBytes as number) > 0 && (meta.plainBytes as number) <= MAX_ENGINEERING_CACHE_PLAIN_BYTES, 'body length');
   requireValid(meta.digest === await sha(body), 'checksum');
   const partSizes = meta.parts as number[] | undefined;
-  let plain: Uint8Array;
-  if (partSizes === undefined) plain = await gzip(body, true, meta.plainBytes as number);
-  else {
+  if(partSizes!==undefined){
     requireValid(Array.isArray(partSizes) && partSizes.length > 1 && partSizes.length <= 128
       && partSizes.every(size => Number.isSafeInteger(size) && size > 0 && size <= MAX_ENGINEERING_CACHE_BYTES)
       && partSizes.reduce((sum, size) => sum + (size as number), 0) === body.length, 'parts');
-    const decoded: Uint8Array[] = [];
-    let offset = 0, total = 0;
-    for (const size of partSizes) {
-      const part = await gzip(body.subarray(offset, offset + (size as number)), true, MAX_ENGINEERING_CACHE_PLAIN_BYTES);
-      offset += size as number; total += part.length;
-      requireValid(total <= MAX_ENGINEERING_CACHE_PLAIN_BYTES, 'expanded size');
-      decoded.push(part);
-    }
-    plain = new Uint8Array(total);
-    let plainOffset = 0;
-    for (const part of decoded) { plain.set(part, plainOffset); plainOffset += part.length; }
   }
-  requireValid(plain.length === meta.plainBytes, 'expanded length');
-  const parsed: unknown = JSON.parse(decoder.decode(plain));
-  return { payload: unpackEngineeringSource(parsed), digest: meta.digest as string };
+  let plain=new Uint8Array(meta.plainBytes as number),expanded=0;
+  if (partSizes === undefined) expanded=await expandInto(body,plain,0);
+  else {
+    let offset = 0;
+    for (const size of partSizes) {
+      expanded=await expandInto(body.subarray(offset,offset+(size as number)),plain,expanded);
+      offset+=size as number;
+    }
+  }
+  requireValid(expanded === meta.plainBytes, 'expanded length');
+  const parsed=await parseEngineeringTable(plain);
+  releaseEngineeringBytes(plain);
+  plain=new Uint8Array();
+  return { payload: await unpackEngineeringSourceAsync(parsed,()=>true,yieldEngineeringCodec,true), digest: meta.digest as string };
 }
 
 /** Sizes of a newly encoded artifact, without decoding its model again. */
@@ -200,6 +219,7 @@ export async function decodeEngineeringSources(bytes: Uint8Array, id: Engineerin
   return { sources: result.payload, digest: result.digest };
 }
 export async function encodeEngineeringEntities(snapshot: EngineeringSnapshot, sources: EngineeringSourceArtifact, id: EngineeringCacheIdentity): Promise<Uint8Array> {
+  requireValid(snapshot.evidenceBinding?.scope===id.sourceSha256&&snapshot.evidenceBinding.sourceRevision===(sources.sources.graph.revision??0),'entity evidence revision');
   requireValid(snapshot.scope === id.sourceSha256 && snapshot.rulesVersion === ENGINEERING_RULES_VERSION, 'entity scope / rules');
   assertEngineeringPartition(snapshot, engineeringSourceRecords(sources.sources.graph,sources.sources.ifcRecords).map(r => r.id));
   return (await encode('entities', snapshot, id, sources.digest)).bytes;
@@ -209,6 +229,7 @@ export async function decodeEngineeringEntities(bytes: Uint8Array, sources: Engi
   const value = result.payload;
   requireValid(record(value) && value.scope === id.sourceSha256 && value.rulesVersion === ENGINEERING_RULES_VERSION && Array.isArray(value.entities) && Array.isArray(value.memberships) && Array.isArray(value.pending) && Array.isArray(value.relationships) && Array.isArray(value.aliases), 'entity snapshot');
   const snapshot = value as EngineeringSnapshot;
+  requireValid(snapshot.evidenceBinding?.scope===id.sourceSha256&&snapshot.evidenceBinding.sourceRevision===(sources.sources.graph.revision??0),'entity evidence revision');
   assertEngineeringPartition(snapshot, engineeringSourceRecords(sources.sources.graph,sources.sources.ifcRecords).map(r => r.id));
   return snapshot;
 }

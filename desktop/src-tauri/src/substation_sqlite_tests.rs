@@ -156,5 +156,4 @@ fn source_invalid_manifest_requires_diagnostic_and_zero_bytes() {
     assert!(validate_geometry_manifest_entry_shape(&e,&mut HashSet::new()).is_ok());
     e.diagnostic=None;assert!(validate_geometry_manifest_entry_shape(&e,&mut HashSet::new()).is_err());
     e.diagnostic=Some("typed source diagnostic".into());e.size=12;assert!(validate_geometry_manifest_entry_shape(&e,&mut HashSet::new()).is_err());
-    assert_ne!(GEOMETRY_CACHE_VERSION,"geometry-cache-v8-occurrence");
 }

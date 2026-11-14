@@ -271,7 +271,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
   });
   const snapshot: EngineeringSnapshot = {
     recognitionCoverage:{inputSourceIds:ordered.map(r=>r.sourceId),processed:ordered.length,confirmed:memberships.filter(m=>m.interpretation.categoryStatus==='confirmed').length,complete:true},
-    scope, rulesVersion: ENGINEERING_RULES_VERSION,
+    scope, evidenceBinding:{scope,sourceRevision:0},rulesVersion: ENGINEERING_RULES_VERSION,
     entities: [...entities.values()].sort((a, b) => compare(a.id, b.id)),
     memberships, pending: [...pending.values()].sort((a, b) => compare(a.id, b.id)),
     relationships: relationships.sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b))), aliases: wholeAliases, diagnostics,

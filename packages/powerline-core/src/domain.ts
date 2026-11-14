@@ -6,8 +6,8 @@ import { parsePointLine, classifyLineMod } from './geometry/lineModParser.js';
 import type { GimGraphNode } from './gimGraphTypes.js';
 import { classifyCrossing, type CrossingClassification } from './crossingClassification.js';
 
-export const MOBILE_PARSER_VERSION = 'mobile-powerline-v3';
-export const PREVIEW_VERSION = 'hnum-xz-v2';
+export const MOBILE_PARSER_VERSION = 'mobile-powerline-v1';
+export const PREVIEW_VERSION = 'hnum-xz-v1';
 export type Coordinate = [number, number, number?]; // longitude, latitude, elevation
 export type ObjectKind = 'project' | 'line' | 'strain' | 'tower' | 'span' | 'cross';
 export interface Finding { severity: 'INFO' | 'WARNING' | 'ERROR'; code: string; message: string; objectId?: string; source?: string }

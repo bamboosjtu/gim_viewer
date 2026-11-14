@@ -1,28 +1,282 @@
 [
-  {"name":"declared_host_overrides_wrong_source_parent","records":[
-    {"id":"host","type":"OilImmersedTransformer","name":"1号主变","props":{"PROJECTNAME":"1号主变","GRIDIDENTIFICATIONSYSTEMCODE":"unit-1"}},
-    {"id":"wrong","type":"GIS","name":"2号组合电器","props":{"PROJECTNAME":"2号组合电器","GRIDIDENTIFICATIONSYSTEMCODE":"unit-2"}},
-    {"id":"part","type":"Radiator","name":"散热器","parent":"wrong","props":{"HOSTEQUIPMENTCODE":"unit-1"}}
-  ],"groups":[["host","part"],["wrong"]],"pending":0},
-  {"name":"numbered_name_and_component_type","records":[
-    {"id":"host","type":"OilImmersedTransformer","name":"1号主变","props":{"PROJECTNAME":"1号主变"}},
-    {"id":"part","type":"Body","name":"1号主变_本体"}
-  ],"groups":[["host","part"]],"pending":0},
-  {"name":"duplicate_hosts_stay_ambiguous","records":[
-    {"id":"host1","type":"OilImmersedTransformer","name":"1号主变","props":{"PROJECTNAME":"1号主变"}},
-    {"id":"host2","type":"OilImmersedTransformer","name":"1号主变","props":{"PROJECTNAME":"1号主变"}},
-    {"id":"part","type":"Body","name":"1号主变_本体"}
-  ],"groups":[["host1"],["host2"]],"pending":1},
-  {"name":"declared_host_from_components","records":[
-    {"id":"body","type":"Body","name":"本体","props":{"HOSTEQUIPMENTNAME":"3号主变"}},
-    {"id":"radiator","type":"Radiator","name":"散热器","props":{"HOSTEQUIPMENTNAME":"3号主变"}}
-  ],"groups":[["body","radiator"]],"pending":0},
-  {"name":"unlabelled_component_not_assigned_by_proximity_or_name","records":[
-    {"id":"host","type":"GIS","name":"组合电器"},
-    {"id":"part","type":"Body","name":"本体"}
-  ],"groups":[["host"]],"pending":1},
-  {"name":"independent_controller_preserved","records":[
-    {"id":"host","type":"OilImmersedTransformer","name":"1号主变","props":{"PROJECTNAME":"1号主变"}},
-    {"id":"control","type":"ControlCabinet","name":"控制柜","parent":"host","props":{"OBJECTROLE":"independent","HOSTEQUIPMENTNAME":"1号主变"}}
-  ],"groups":[["control"],["host"]],"pending":0}
+  {
+    "name": "declared_host_overrides_wrong_source_parent",
+    "records": [
+      {
+        "id": "host",
+        "type": "OilImmersedTransformer",
+        "name": "1号主变",
+        "props": {
+          "PROJECTNAME": "1号主变",
+          "GRIDIDENTIFICATIONSYSTEMCODE": "unit-1"
+        }
+      },
+      {
+        "id": "wrong",
+        "type": "GIS",
+        "name": "2号组合电器",
+        "props": {
+          "PROJECTNAME": "2号组合电器",
+          "GRIDIDENTIFICATIONSYSTEMCODE": "unit-2"
+        }
+      },
+      {
+        "id": "part",
+        "type": "Radiator",
+        "name": "散热器",
+        "parent": "wrong",
+        "props": {
+          "HOSTEQUIPMENTCODE": "unit-1"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "host",
+        "part"
+      ],
+      [
+        "wrong"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "numbered_name_and_component_type",
+    "records": [
+      {
+        "id": "host",
+        "type": "OilImmersedTransformer",
+        "name": "1号主变",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      },
+      {
+        "id": "part",
+        "type": "Body",
+        "name": "1号主变_本体"
+      }
+    ],
+    "groups": [
+      [
+        "host",
+        "part"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "duplicate_hosts_stay_ambiguous",
+    "records": [
+      {
+        "id": "host1",
+        "type": "OilImmersedTransformer",
+        "name": "1号主变",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      },
+      {
+        "id": "host2",
+        "type": "OilImmersedTransformer",
+        "name": "1号主变",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      },
+      {
+        "id": "part",
+        "type": "Body",
+        "name": "1号主变_本体"
+      }
+    ],
+    "groups": [
+      [
+        "host1"
+      ],
+      [
+        "host2"
+      ]
+    ],
+    "pending": 1
+  },
+  {
+    "name": "declared_host_from_components",
+    "records": [
+      {
+        "id": "body",
+        "type": "Body",
+        "name": "本体",
+        "props": {
+          "HOSTEQUIPMENTNAME": "3号主变"
+        }
+      },
+      {
+        "id": "radiator",
+        "type": "Radiator",
+        "name": "散热器",
+        "props": {
+          "HOSTEQUIPMENTNAME": "3号主变"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "body",
+        "radiator"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "unlabelled_component_not_assigned_by_proximity_or_name",
+    "records": [
+      {
+        "id": "host",
+        "type": "GIS",
+        "name": "组合电器"
+      },
+      {
+        "id": "part",
+        "type": "Body",
+        "name": "本体"
+      }
+    ],
+    "groups": [
+      [
+        "host"
+      ]
+    ],
+    "pending": 1
+  },
+  {
+    "name": "independent_controller_preserved",
+    "records": [
+      {
+        "id": "host",
+        "type": "OilImmersedTransformer",
+        "name": "1号主变",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      },
+      {
+        "id": "control",
+        "type": "ControlCabinet",
+        "name": "控制柜",
+        "parent": "host",
+        "props": {
+          "OBJECTROLE": "independent",
+          "HOSTEQUIPMENTNAME": "1号主变"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "control"
+      ],
+      [
+        "host"
+      ]
+    ],
+    "pending": 0
+  },
+  {
+    "name": "source_host_conflicts_with_attribute_host",
+    "records": [
+      {
+        "id": "a",
+        "type": "GIS",
+        "props": {
+          "GRIDIDENTIFICATIONSYSTEMCODE": "A"
+        }
+      },
+      {
+        "id": "b",
+        "type": "GIS",
+        "props": {
+          "GRIDIDENTIFICATIONSYSTEMCODE": "B"
+        }
+      },
+      {
+        "id": "p",
+        "type": "Radiator",
+        "attributeOnly": true,
+        "relations": [
+          {
+            "kind": "host",
+            "targetSourceId": "a",
+            "evidence": "partindex:a"
+          }
+        ],
+        "props": {
+          "HOSTEQUIPMENTCODE": "B"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "a"
+      ],
+      [
+        "b"
+      ]
+    ],
+    "pending": 1,
+    "expectedMember": {
+      "sourceId": "p",
+      "membershipStatus": "unresolved",
+      "pendingReason": "component_host_conflict"
+    }
+  },
+  {
+    "name": "own_projectname_is_candidate_membership",
+    "records": [
+      {
+        "id": "a",
+        "type": "OilImmersedTransformer",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      },
+      {
+        "id": "p",
+        "type": "Radiator",
+        "props": {
+          "PROJECTNAME": "1号主变"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "a",
+        "p"
+      ]
+    ],
+    "pending": 0,
+    "expectedMember": {
+      "sourceId": "p",
+      "membershipStatus": "candidate",
+      "pendingReason": null
+    }
+  },
+  {
+    "name": "unverified_keyword_is_candidate",
+    "records": [
+      {
+        "id": "a",
+        "type": "Unknown",
+        "props": {
+          "SYSCLASSIFYNAME": "GIS"
+        }
+      }
+    ],
+    "groups": [
+      [
+        "a"
+      ]
+    ],
+    "pending": 0
+  }
 ]

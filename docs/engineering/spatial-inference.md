@@ -1,6 +1,6 @@
 # 空间推断
 
-空间推断是**工程组成投影插件**，只补充建筑、房间和区域归属。它不改变工程整体身份、来源成员、目录类别或几何模板，不建立电气连接，也不读取当前显示/隔离状态。算法实现见 [`compositionSpatial.ts`](../../desktop/src/services/projections/compositionSpatial.ts)，策略版本为 `composition-spatial-v4`。
+空间推断是**工程组成投影插件**，只补充建筑、房间和区域归属。它不改变工程整体身份、来源成员、目录类别或几何模板，不建立电气连接，也不读取当前显示/隔离状态。算法实现见 [`compositionSpatial.ts`](../../desktop/src/services/projections/compositionSpatial.ts)，策略版本为 `composition-spatial-v1`。
 
 建筑名称和空间容器本身如何解析见[建筑推断](building-inference.md)；工程组成模板见[工程组成与三视图](composition.md)。
 

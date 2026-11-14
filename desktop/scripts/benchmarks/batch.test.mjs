@@ -33,7 +33,7 @@ test('HTML locates an incomplete heap by build, run, worker and observed delay w
   assert.doesNotMatch(html,/unverified-reason-omitted|private-worker|private-run/);
 });
 function run(sample,profileDigest){return {out:'private-run',dataRoot:'private-cache',report:benchmarkRun(sample.inputId,{version:undefined,
-  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:MEASUREMENT_VERSION,detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
+  conditions:{machineId:'m',runtimeSha256:'r',buildMode:'release',measurementVersion:MEASUREMENT_VERSION,detailPolicy:'task-phase-timeline-v1',lifecyclePolicy:'worker-terminal-v1',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode:'benchmark',scenario:'open',cacheState:'cold',sourceSha256:sample.sourceSha256,sampleId:sample.sampleId,
     profileDigest,workloadDigest:'w',routeDigest:'r',viewportDigest:'v'},correctness:'passed',cacheVerified:true,cachePublished:true,measurementComplete:true,requiredMetrics:['firstResponseMs'],metrics:{firstResponseMs:12},
   evidence:{progress:{workload:{failed:0}}}})};}
 

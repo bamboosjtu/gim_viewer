@@ -2,7 +2,7 @@ import type { EngineeringSnapshot } from './types.js';
 import { categoryDefinition, categoryLabel, ENGINEERING_CATEGORIES } from './catalogLabels.js';
 const compareTitles=new Intl.Collator('zh-CN',{numeric:true}).compare;
 
-export const INVENTORY_TEMPLATE_VERSION='engineering-inventory-v6';
+export const INVENTORY_TEMPLATE_VERSION='engineering-inventory-v1';
 export const INVENTORY_TEMPLATE=Object.freeze({version:INVENTORY_TEMPLATE_VERSION,groups:Object.freeze(['设备','装置性材料','构件','其他']),levels:Object.freeze(['group','category','subtype','template','entity','source'])});
 export interface InventorySource {id:string;parent:string;title:string;documentPath:string;sourceType:string}
 export interface InventoryNode {

@@ -1,5 +1,5 @@
 {
-  "version": "substation-vocabulary-3",
+  "version": "substation-vocabulary-1",
   "standardRef": "Q/GDW 11810.1—2023 表1/表2",
   "pdfPages": [
     7,
@@ -64,7 +64,7 @@
     "devices": "devices"
   },
   "keywordDictionary": {
-    "version": "source-keywords-2",
+    "version": "source-keywords-1",
     "fields": [
       "SYSCLASSIFYNAME",
       "PARTNAME"
@@ -77,7 +77,9 @@
         "evidence": {
           "sheet": "表1_电气设备模型索引表",
           "cell": "C5",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "gis": {
@@ -85,7 +87,9 @@
         "evidence": {
           "sheet": "表1_电气设备模型索引表",
           "cell": "C17",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "hgis": {
@@ -93,7 +97,9 @@
         "evidence": {
           "sheet": "表1_电气设备模型索引表",
           "cell": "C18",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "acporcelaincircuitbreaker": {
@@ -101,7 +107,9 @@
         "evidence": {
           "sheet": "表1_电气设备模型索引表",
           "cell": "C19",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "groundresistance": {
@@ -109,7 +117,9 @@
         "evidence": {
           "sheet": "表1_电气设备模型索引表",
           "cell": "C30",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "body": {
@@ -117,7 +127,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B5",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "densityrelay": {
@@ -125,7 +137,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D5",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "expansiontank": {
@@ -133,7 +147,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B6",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "oillevelmeter": {
@@ -141,7 +157,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D6",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "tapchanger": {
@@ -149,7 +167,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B7",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "operatingmechanismbox": {
@@ -157,7 +177,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D7",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "hvbushing": {
@@ -165,7 +187,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B8",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "controlcabinet": {
@@ -173,7 +197,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D8",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "mvbushing": {
@@ -181,7 +207,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B9",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "centralcontrolbox": {
@@ -189,7 +217,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D9",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "lvbushing": {
@@ -197,7 +227,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B10",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "onoffindicator": {
@@ -205,7 +237,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D10",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "neutralbushing": {
@@ -213,7 +247,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B11",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "parallelresistance": {
@@ -221,7 +257,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D11",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "terminalboards": {
@@ -229,7 +267,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B12",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "cabinet": {
@@ -237,7 +277,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D12",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "radiator": {
@@ -245,7 +287,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B13",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "groundingterminal": {
@@ -253,7 +297,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B14",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "gridding": {
@@ -261,7 +307,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D14",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "terminalbox": {
@@ -269,7 +317,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B15",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "devicesincubicle": {
@@ -277,7 +327,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D15",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "ladder": {
@@ -285,7 +337,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B16",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "counter/onlinemonitor": {
@@ -293,7 +347,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D16",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "respirator": {
@@ -301,7 +357,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B17",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "capacitorunit": {
@@ -309,7 +367,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D17",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "meter": {
@@ -317,7 +377,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B18",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "dampedreactor": {
@@ -325,7 +387,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D18",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "relay": {
@@ -333,7 +397,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B19",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "imbalancedta": {
@@ -341,7 +407,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D19",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "onlinemonitoring": {
@@ -349,7 +417,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B20",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "valvegroup": {
@@ -357,7 +427,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D20",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "pressurereliefdevice": {
@@ -365,7 +437,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B21",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "gridsidebushing": {
@@ -373,7 +447,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D21",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "oillevelthermostat": {
@@ -381,7 +457,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B22",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "valvesidebushing": {
@@ -389,7 +467,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D22",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "moistureabsorber": {
@@ -397,7 +477,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B23",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "sparkgap": {
@@ -405,7 +487,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D23",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "civilinterface": {
@@ -413,7 +497,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B24",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "tcrgd": {
@@ -421,7 +507,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D24",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "junctionbox": {
@@ -429,7 +517,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "B25",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "devices": {
@@ -437,7 +527,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "D25",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "油浸式变压器": {
@@ -445,7 +537,9 @@
         "evidence": {
           "sheet": "表1_电气设备模型索引表",
           "cell": "B5",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "组合电器 GIS": {
@@ -453,7 +547,9 @@
         "evidence": {
           "sheet": "表1_电气设备模型索引表",
           "cell": "B17",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "组合电器 HGIS": {
@@ -461,7 +557,9 @@
         "evidence": {
           "sheet": "表1_电气设备模型索引表",
           "cell": "B18",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "交流瓷柱式断路器": {
@@ -469,7 +567,9 @@
         "evidence": {
           "sheet": "表1_电气设备模型索引表",
           "cell": "B19",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "接地电阻成套装置": {
@@ -477,7 +577,9 @@
         "evidence": {
           "sheet": "表1_电气设备模型索引表",
           "cell": "B30",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "本体": {
@@ -485,7 +587,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A5",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "密度继电器": {
@@ -493,7 +597,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C5",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "储油柜": {
@@ -501,7 +607,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A6",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "油位计": {
@@ -509,7 +617,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C6",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "分接开关": {
@@ -517,7 +627,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A7",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "操作机构箱": {
@@ -525,7 +637,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C7",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "高压套管": {
@@ -533,7 +647,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A8",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "汇控柜": {
@@ -541,7 +657,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C8",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "中压套管": {
@@ -549,7 +667,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A9",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "中控箱": {
@@ -557,7 +677,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C9",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "低压套管": {
@@ -565,7 +687,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A10",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "示意分合指示器": {
@@ -573,7 +697,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C10",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "中性点套管": {
@@ -581,7 +707,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A11",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "并联电阻": {
@@ -589,7 +717,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C11",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "接线端子板": {
@@ -597,7 +727,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A12",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "箱体": {
@@ -605,7 +737,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C12",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "散热器": {
@@ -613,7 +747,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A13",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "接地电阻": {
@@ -621,7 +757,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C13",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "接地端子": {
@@ -629,7 +767,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A14",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "网栏": {
@@ -637,7 +777,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C14",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "本体端子箱": {
@@ -645,7 +787,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A15",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "装置": {
@@ -653,7 +797,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C15",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "爬梯": {
@@ -661,7 +807,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A16",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "计数器/在线检测仪": {
@@ -669,7 +817,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C16",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "呼吸器": {
@@ -677,7 +827,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A17",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "电容器单元": {
@@ -685,7 +837,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C17",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "表计": {
@@ -693,7 +847,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A18",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "阻尼电抗器": {
@@ -701,7 +857,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C18",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "继电器": {
@@ -709,7 +867,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A19",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "不平衡电流互感器": {
@@ -717,7 +877,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C19",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "在线监测": {
@@ -725,7 +887,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A20",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "阀组": {
@@ -733,7 +897,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C20",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "压力释放装置": {
@@ -741,7 +907,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A21",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "网侧套管": {
@@ -749,7 +917,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C21",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "油面温控器": {
@@ -757,7 +927,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A22",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "阀侧套管": {
@@ -765,7 +937,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C22",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "吸湿器": {
@@ -773,7 +947,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A23",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "放电间隙": {
@@ -781,7 +957,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C23",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "土建接口": {
@@ -789,7 +967,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A24",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "相控电抗器": {
@@ -797,7 +977,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C24",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "接线盒": {
@@ -805,7 +987,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "A25",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       },
       "二次屏柜柜内装置": {
@@ -813,7 +997,9 @@
         "evidence": {
           "sheet": "表2_设备模型部件名称中英文字段对照表",
           "cell": "C25",
-          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+          "verification": "unverified",
+          "standardRef": "Q/GDW 11810.1—2023 表1/表2"
         }
       }
     }

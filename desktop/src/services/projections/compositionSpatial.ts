@@ -6,7 +6,7 @@ import type { SourceCompositionEvidence } from '../../gim/engineering/compositio
 /** Projection heuristics, not engineering identity rules. Distances are metres.
  * The projection never changes engineering whole/source identity. */
 export const SPATIAL_PROJECTION_POLICY = Object.freeze({
-  version: 'composition-spatial-v4', maxExtent: 500, gridSize: 8,
+  version: 'composition-spatial-v1', maxExtent: 500, gridSize: 8,
   joinMargin: 0.6, voteMargin: 0.5, containmentMargin: 1,
   minMembers: 3, minArea: 12, minWidth: 2, minTop: 2,
   minVotes: 2, highVoltageKv: 66,

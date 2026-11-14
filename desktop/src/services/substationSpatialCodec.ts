@@ -16,12 +16,12 @@ import type {
  * DEV GLB output must not invalidate this derived semantic projection.
  */
 // Outward product occurrences exclude internal resource/type definitions.
-export const SUBSTATION_SPATIAL_SEMANTIC_VERSION = 'substation-spatial-semantic-v7';
+export const SUBSTATION_SPATIAL_SEMANTIC_VERSION = 'substation-spatial-semantic-v1';
 export const SUBSTATION_SPATIAL_SEMANTIC_CACHE_ENTRY =
-  '__derived__/substation-spatial-semantic-v6.json';
+  '__derived__/substation-spatial-semantic-v1.json';
 
 /** Spatial parser contract; intentionally independent of CBM/FAM domain upgrades. */
-export const SUBSTATION_PARSER_DOMAIN_VERSION = 'gim-substation-parser-v25';
+export const SUBSTATION_PARSER_DOMAIN_VERSION = 'gim-substation-parser-v1';
 
 /** Refuse to parse an unbounded/corrupt derived payload in the WebView. */
 export const MAX_SUBSTATION_SPATIAL_SNAPSHOT_BYTES = 128 * 1024 * 1024;

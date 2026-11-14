@@ -517,7 +517,7 @@ export function parseLineSemanticPackFullPayload(value: ArrayBuffer | Uint8Array
   };
 }
 
-/** Parse GIMR v1/v2. By default each entry owns its bytes. Synchronous decoders
+/** Parse GIMR v1 with the Rust timing header. By default each entry owns its bytes. Synchronous decoders
  * may borrow views only while consuming this payload, then retain independent
  * output; transferring a borrowed entry would detach the entire batch. */
 export function parseBatchCachePayload(value: ArrayBuffer | Uint8Array, options: { copyBytes?: boolean } = {}): {
@@ -525,39 +525,36 @@ export function parseBatchCachePayload(value: ArrayBuffer | Uint8Array, options:
   profile?: BatchReadRustProfile;
 } {
   const bytes = toUint8Array(value);
-  if (bytes.byteLength < 9 || new TextDecoder().decode(bytes.slice(0, 4)) !== 'GIMR' || ![1, 2].includes(bytes[4])) {
+  if (bytes.byteLength < 9 || new TextDecoder().decode(bytes.slice(0, 4)) !== 'GIMR' || bytes[4] !== 1) {
     throw new Error('批量缓存读取响应 envelope 无效');
   }
-  const version = bytes[4];
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const count = view.getUint32(5, true);
   if (count > 200_000) throw new Error('批量缓存读取条目数超限');
   const results: BatchCacheFileItem[] = [];
   let offset = 9;
   let profile: BatchReadRustProfile | undefined;
-  if (version === 2) {
-    // readMs/resolveMs/encodeMs/totalMs (4 f64) + bytes (u64) +
-    // hitCount/missCount (2 u32) = 48 bytes。
-    if (bytes.byteLength < offset + 48) throw new Error('批量缓存读取 profile 越界');
-    const readMs = view.getFloat64(offset, true); offset += 8;
-    const resolveMs = view.getFloat64(offset, true); offset += 8;
-    const encodeMs = view.getFloat64(offset, true); offset += 8;
-    const totalMs = view.getFloat64(offset, true); offset += 8;
-    const totalBytes = view.getBigUint64(offset, true); offset += 8;
-    if (totalBytes > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('批量缓存读取 profile 字节数过大');
-    const hitCount = view.getUint32(offset, true); offset += 4;
-    // missCount 保留在 envelope 中用于未来完整性检查；业务 Map 不需要读取。
-    offset += 4;
-    profile = {
-      readMs,
-      resolveMs,
-      encodeMs,
-      totalMs,
-      bytes: Number(totalBytes),
-      entryCount: count,
-      hitCount,
-    };
-  }
+  // readMs/resolveMs/encodeMs/totalMs (4 f64) + bytes (u64) +
+  // hitCount/missCount (2 u32) = 48 bytes。
+  if (bytes.byteLength < offset + 48) throw new Error('批量缓存读取 profile 越界');
+  const readMs = view.getFloat64(offset, true); offset += 8;
+  const resolveMs = view.getFloat64(offset, true); offset += 8;
+  const encodeMs = view.getFloat64(offset, true); offset += 8;
+  const totalMs = view.getFloat64(offset, true); offset += 8;
+  const totalBytes = view.getBigUint64(offset, true); offset += 8;
+  if (totalBytes > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('批量缓存读取 profile 字节数过大');
+  const hitCount = view.getUint32(offset, true); offset += 4;
+  // missCount 保留在 envelope 中用于未来完整性检查；业务 Map 不需要读取。
+  offset += 4;
+  profile = {
+    readMs,
+    resolveMs,
+    encodeMs,
+    totalMs,
+    bytes: Number(totalBytes),
+    entryCount: count,
+    hitCount,
+  };
   for (let i = 0; i < count; i++) {
     if (offset + 4 > bytes.byteLength) throw new Error('批量缓存读取路径长度越界');
     const pathLen = view.getUint32(offset, true); offset += 4;

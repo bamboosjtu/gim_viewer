@@ -9,6 +9,7 @@ export function assertEngineeringPartition(snapshot: EngineeringSnapshot, source
   requireShape(object(snapshot) && typeof snapshot.scope === 'string' && typeof snapshot.rulesVersion === 'string' &&
     Array.isArray(snapshot.entities) && Array.isArray(snapshot.pending) && Array.isArray(snapshot.memberships) &&
     Array.isArray(snapshot.relationships) && Array.isArray(snapshot.aliases), 'root');
+  requireShape(snapshot.evidenceBinding?.scope===snapshot.scope&&Number.isSafeInteger(snapshot.evidenceBinding.sourceRevision)&&snapshot.evidenceBinding.sourceRevision>=0,'evidence binding');
   for (const entity of snapshot.entities) {
     requireShape(object(entity) && typeof entity.id === 'string' && entity.id && typeof entity.name === 'string' && typeof entity.category === 'string' &&
       typeof entity.boundaryEvidence === 'string' && strings(entity.sourceIds) && ['whole', 'set', 'transformer_bank'].includes(entity.kind) &&

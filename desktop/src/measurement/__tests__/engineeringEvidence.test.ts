@@ -3,7 +3,7 @@ import type {EngineeringSnapshot} from '../../engineering/types.js';
 import {engineeringSemanticEvidence} from '../engineeringEvidence.js';
 
 function snapshot():EngineeringSnapshot{
-  return {scope:'scope',rulesVersion:'rules',entities:[],pending:[{id:'pending-1',reason:'owner-unknown',sourceIds:['source-1']}],
+  return {evidenceBinding:{scope:'scope',sourceRevision:0},scope:'scope',rulesVersion:'rules',entities:[],pending:[{id:'pending-1',reason:'owner-unknown',sourceIds:['source-1']}],
     memberships:[{sourceId:'source-1',ownerId:'pending-1',disposition:'pending_whole_member',
       interpretation:{category:'U-OBJECT',meaning:'neutral_set',basis:'source',conflict:'',independent:false,
         assemblyCategory:'U-OBJECT',assemblySignature:''}}],
