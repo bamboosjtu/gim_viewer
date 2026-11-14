@@ -92,13 +92,15 @@ Windows 固定运行时的文件既需要 AppContainer 读取权限，也不能�
 
 高频解析与图元阶段在 Worker 内生成可合并的调用直方图，保留调用数、累计时长和分位区间。Benchmark 的 counter/memory 事件先精确进入 Collector 聚合、资源账本和观测峰值，再按 `task-phase-timeline-v2` 策略省略其逐事件 CDP 明细；Worker 批次带连续 ID、宿主确认和任务结束标记，任务、阶段、Worker 和时钟事件再通过带确认的 CDP binding 传输。报告列出按类型聚合的明细数、真正截断数和可用的前十个慢阶段；纯容量截断标记 `aggregate-only`，丢失 Worker 批次或必要聚合仍为 INCONCLUSIVE。`diagnostic` 模式仍传全部可用事件。进程树使用独立原生采样器，即使 WebView 主线程阻塞也继续采样。
 
+可重建来源的空闲 Worker 在检查点转移后，通过独立控制 barrier 确认事件循环已越过当前请求，并核对最后批次与 flush 序号，再终止以释放 isolate 堆容量。barrier 只同步消息交付，业务任务仍按真实 produced/ended 和 scope close 记录；尾批缺失、drain 超时及中途终止继续留下失败证据。未启用测量时不增加控制往返。
+
 DEV 模板额外保留每轮最慢 20 个槽位等待者和最久 20 个槽位占用者，并记录排队优先级、入队/获槽容量与深度、缓存读取、Worker 请求与派发排队、输入预算和 GLB 字节。`templateQueue`、`templateSlotOccupancy`、`sceneCommitQueue` 与 `placementCommit` 分列。DEV 路径只留在工作区私有诊断文件；可分享报告以 `sourceId` 关联，不把并发累计耗时当作端到端时间。
 
 一次线路 Worker 转移可能包含万级 ArrayBuffer。资源账本仍逐 backing buffer 去重并结算；普通 Benchmark 在超过 8 个缓冲时，把该批的 acquire/transfer/release 各压成一条带 `buffers` 和 `referencedBytes` 的聚合事件。任务/阶段明细缓冲为 32,768 条，真正截断仍明确记录。`diagnostic` 模式保留逐缓冲事件，发生丢弃时仍报告不完整。
 
 - **线路持久化。** 首屏后持久化有 `idle/saving/saved/failed` 会话状态；原生 Benchmark 等待 SQLite finish 提交，失败为明确的失败状态。`cachePublishMs` 取线路完成时刻而非首屏后的静默窗口。
 - **变电缓存发布。** 冷开变电等待 `cachePersistenceReady` 的成功或失败终态，再读取 SQLite 证据；工程 Worker 的 `cacheSettled` 只表示该域安静，不代表变电核心索引已发布。`cachePublishMs` 使用实际发布时刻，失败时留空。
-- **时间字段。** `modelTreeReadyMs`、`firstGeometryMs` 与 `allGeometryReadyMs` 分列工程树、首几何和基础表示齐备；`automaticLoadMs` 是自动表示终态，`settledMs` 单列任务/缓存/后台和三秒静默完成，`writeDrainMs` 只记最后 DEV 产物写晚于自动表示的部分。DEV 写入另分原生路径解析与磁盘原子写阶段，避免把 IPC、文件系统和场景提交混为一项。
+- **时间字段。** `firstResponseMs` 为导航就绪代理，`modelTreeReadyMs` 为工程树就绪。`geometryCommitMs` 记录首个几何提交；0.2.3 的 `firstGeometryMs` 记录有效视口内模型绘制已提交，排除仅网格、空模型和隐藏对象，不等待 GPU 完成。报告用 `geometryTimingPolicy` 区分新可见口径与旧提交口径，跨口径仅比较兼容的 `geometryCommitMs`。`allGeometryReadyMs` 为基础表示齐备，`automaticLoadMs` 是自动表示终态，`settledMs` 单列任务/缓存/后台和三秒静默完成，`writeDrainMs` 只记最后 DEV 产物写晚于自动表示的部分。DEV 写入另分原生路径解析与磁盘原子写阶段，避免把 IPC、文件系统和场景提交混为一项。
 - **Worker 堆。** 短于两个采样周期且已关联的 Worker 若首次堆采样前终止，报告堆指标 unavailable 与原因，不填零，也不把整轮误判为产品失败。
 - **冷开不完整。** 缓存已发布但冷开仅因测量证据不足而 INCONCLUSIVE 时，暖开仍运行，正式基线继续保持 INCONCLUSIVE。
 - **暖开校验。** 依据来源缓存数量、缺失数和 parser 版本；没有请求远景 LOD 的 `open` 场景不要求 `ifcFarHits`。

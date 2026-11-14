@@ -1,0 +1,821 @@
+{
+  "version": "substation-vocabulary-3",
+  "standardRef": "Q/GDW 11810.1—2023 表1/表2",
+  "pdfPages": [
+    7,
+    8,
+    9,
+    10
+  ],
+  "workbook": "变电三维设计建模规范_索引表类.xlsx",
+  "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+  "equipment": {
+    "oilimmersedtransformer": "oil_immersed_transformer",
+    "gis": "gis",
+    "hgis": "hgis",
+    "acporcelaincircuitbreaker": "ac_porcelain_circuit_breaker"
+  },
+  "equipmentAliases": {
+    "oilfilledtransformer": "oil_immersed_transformer",
+    "porcelainpillarcircuitbreaker": "ac_porcelain_circuit_breaker"
+  },
+  "components": {
+    "body": "body",
+    "densityrelay": "density_relay",
+    "expansiontank": "expansion_tank",
+    "oillevelmeter": "oil_level_meter",
+    "tapchanger": "tap_changer",
+    "operatingmechanismbox": "operating_mechanism_box",
+    "hvbushing": "hv_bushing",
+    "controlcabinet": "control_cabinet",
+    "mvbushing": "mv_bushing",
+    "centralcontrolbox": "central_control_box",
+    "lvbushing": "lv_bushing",
+    "onoffindicator": "on_off_indicator",
+    "neutralbushing": "neutral_bushing",
+    "parallelresistance": "parallel_resistance",
+    "terminalboards": "terminal_boards",
+    "cabinet": "cabinet",
+    "radiator": "radiator",
+    "groundresistance": "ground_resistance",
+    "groundingterminal": "grounding_terminal",
+    "gridding": "gridding",
+    "terminalbox": "terminal_box",
+    "devicesincubicle": "devices_in_cubicle",
+    "ladder": "ladder",
+    "counter/onlinemonitor": "counter_online_monitor",
+    "respirator": "respirator",
+    "capacitorunit": "capacitor_unit",
+    "meter": "meter",
+    "dampedreactor": "damped_reactor",
+    "relay": "relay",
+    "imbalancedta": "imbalance_dta",
+    "onlinemonitoring": "online_monitoring",
+    "valvegroup": "valve_group",
+    "pressurereliefdevice": "pressure_relief_device",
+    "gridsidebushing": "grid_side_bushing",
+    "oillevelthermostat": "oil_level_thermostat",
+    "valvesidebushing": "valve_side_bushing",
+    "moistureabsorber": "moisture_absorber",
+    "sparkgap": "spark_gap",
+    "civilinterface": "civil_interface",
+    "tcrgd": "tcrgd",
+    "junctionbox": "junction_box",
+    "devices": "devices"
+  },
+  "keywordDictionary": {
+    "version": "source-keywords-2",
+    "fields": [
+      "SYSCLASSIFYNAME",
+      "PARTNAME"
+    ],
+    "match": "exact-standard-Chinese-or-case-insensitive-standard-English-term",
+    "coverage": "first-batch-equipment-and-table2-components-no-encoded-identifiers",
+    "entries": {
+      "oilimmersedtransformer": {
+        "equipmentType": "oil_immersed_transformer",
+        "evidence": {
+          "sheet": "表1_电气设备模型索引表",
+          "cell": "C5",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "gis": {
+        "equipmentType": "gis",
+        "evidence": {
+          "sheet": "表1_电气设备模型索引表",
+          "cell": "C17",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "hgis": {
+        "equipmentType": "hgis",
+        "evidence": {
+          "sheet": "表1_电气设备模型索引表",
+          "cell": "C18",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "acporcelaincircuitbreaker": {
+        "equipmentType": "ac_porcelain_circuit_breaker",
+        "evidence": {
+          "sheet": "表1_电气设备模型索引表",
+          "cell": "C19",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "groundresistance": {
+        "componentType": "ground_resistance",
+        "evidence": {
+          "sheet": "表1_电气设备模型索引表",
+          "cell": "C30",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "body": {
+        "componentType": "body",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B5",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "densityrelay": {
+        "componentType": "density_relay",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D5",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "expansiontank": {
+        "componentType": "expansion_tank",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B6",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "oillevelmeter": {
+        "componentType": "oil_level_meter",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D6",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "tapchanger": {
+        "componentType": "tap_changer",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B7",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "operatingmechanismbox": {
+        "componentType": "operating_mechanism_box",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D7",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "hvbushing": {
+        "componentType": "hv_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B8",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "controlcabinet": {
+        "componentType": "control_cabinet",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D8",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "mvbushing": {
+        "componentType": "mv_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B9",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "centralcontrolbox": {
+        "componentType": "central_control_box",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D9",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "lvbushing": {
+        "componentType": "lv_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B10",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "onoffindicator": {
+        "componentType": "on_off_indicator",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D10",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "neutralbushing": {
+        "componentType": "neutral_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B11",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "parallelresistance": {
+        "componentType": "parallel_resistance",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D11",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "terminalboards": {
+        "componentType": "terminal_boards",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B12",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "cabinet": {
+        "componentType": "cabinet",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D12",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "radiator": {
+        "componentType": "radiator",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B13",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "groundingterminal": {
+        "componentType": "grounding_terminal",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B14",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "gridding": {
+        "componentType": "gridding",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D14",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "terminalbox": {
+        "componentType": "terminal_box",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B15",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "devicesincubicle": {
+        "componentType": "devices_in_cubicle",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D15",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "ladder": {
+        "componentType": "ladder",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B16",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "counter/onlinemonitor": {
+        "componentType": "counter_online_monitor",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D16",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "respirator": {
+        "componentType": "respirator",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B17",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "capacitorunit": {
+        "componentType": "capacitor_unit",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D17",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "meter": {
+        "componentType": "meter",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B18",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "dampedreactor": {
+        "componentType": "damped_reactor",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D18",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "relay": {
+        "componentType": "relay",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B19",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "imbalancedta": {
+        "componentType": "imbalance_dta",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D19",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "onlinemonitoring": {
+        "componentType": "online_monitoring",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B20",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "valvegroup": {
+        "componentType": "valve_group",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D20",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "pressurereliefdevice": {
+        "componentType": "pressure_relief_device",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B21",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "gridsidebushing": {
+        "componentType": "grid_side_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D21",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "oillevelthermostat": {
+        "componentType": "oil_level_thermostat",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B22",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "valvesidebushing": {
+        "componentType": "valve_side_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D22",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "moistureabsorber": {
+        "componentType": "moisture_absorber",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B23",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "sparkgap": {
+        "componentType": "spark_gap",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D23",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "civilinterface": {
+        "componentType": "civil_interface",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B24",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "tcrgd": {
+        "componentType": "tcrgd",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D24",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "junctionbox": {
+        "componentType": "junction_box",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "B25",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "devices": {
+        "componentType": "devices",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "D25",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "油浸式变压器": {
+        "equipmentType": "oil_immersed_transformer",
+        "evidence": {
+          "sheet": "表1_电气设备模型索引表",
+          "cell": "B5",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "组合电器 GIS": {
+        "equipmentType": "gis",
+        "evidence": {
+          "sheet": "表1_电气设备模型索引表",
+          "cell": "B17",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "组合电器 HGIS": {
+        "equipmentType": "hgis",
+        "evidence": {
+          "sheet": "表1_电气设备模型索引表",
+          "cell": "B18",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "交流瓷柱式断路器": {
+        "equipmentType": "ac_porcelain_circuit_breaker",
+        "evidence": {
+          "sheet": "表1_电气设备模型索引表",
+          "cell": "B19",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "接地电阻成套装置": {
+        "componentType": "ground_resistance",
+        "evidence": {
+          "sheet": "表1_电气设备模型索引表",
+          "cell": "B30",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "本体": {
+        "componentType": "body",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A5",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "密度继电器": {
+        "componentType": "density_relay",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C5",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "储油柜": {
+        "componentType": "expansion_tank",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A6",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "油位计": {
+        "componentType": "oil_level_meter",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C6",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "分接开关": {
+        "componentType": "tap_changer",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A7",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "操作机构箱": {
+        "componentType": "operating_mechanism_box",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C7",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "高压套管": {
+        "componentType": "hv_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A8",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "汇控柜": {
+        "componentType": "control_cabinet",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C8",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "中压套管": {
+        "componentType": "mv_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A9",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "中控箱": {
+        "componentType": "central_control_box",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C9",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "低压套管": {
+        "componentType": "lv_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A10",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "示意分合指示器": {
+        "componentType": "on_off_indicator",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C10",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "中性点套管": {
+        "componentType": "neutral_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A11",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "并联电阻": {
+        "componentType": "parallel_resistance",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C11",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "接线端子板": {
+        "componentType": "terminal_boards",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A12",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "箱体": {
+        "componentType": "cabinet",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C12",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "散热器": {
+        "componentType": "radiator",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A13",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "接地电阻": {
+        "componentType": "ground_resistance",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C13",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "接地端子": {
+        "componentType": "grounding_terminal",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A14",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "网栏": {
+        "componentType": "gridding",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C14",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "本体端子箱": {
+        "componentType": "terminal_box",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A15",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "装置": {
+        "componentType": "devices_in_cubicle",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C15",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "爬梯": {
+        "componentType": "ladder",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A16",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "计数器/在线检测仪": {
+        "componentType": "counter_online_monitor",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C16",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "呼吸器": {
+        "componentType": "respirator",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A17",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "电容器单元": {
+        "componentType": "capacitor_unit",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C17",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "表计": {
+        "componentType": "meter",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A18",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "阻尼电抗器": {
+        "componentType": "damped_reactor",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C18",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "继电器": {
+        "componentType": "relay",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A19",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "不平衡电流互感器": {
+        "componentType": "imbalance_dta",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C19",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "在线监测": {
+        "componentType": "online_monitoring",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A20",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "阀组": {
+        "componentType": "valve_group",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C20",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "压力释放装置": {
+        "componentType": "pressure_relief_device",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A21",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "网侧套管": {
+        "componentType": "grid_side_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C21",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "油面温控器": {
+        "componentType": "oil_level_thermostat",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A22",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "阀侧套管": {
+        "componentType": "valve_side_bushing",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C22",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "吸湿器": {
+        "componentType": "moisture_absorber",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A23",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "放电间隙": {
+        "componentType": "spark_gap",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C23",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "土建接口": {
+        "componentType": "civil_interface",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A24",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "相控电抗器": {
+        "componentType": "tcrgd",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C24",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "接线盒": {
+        "componentType": "junction_box",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "A25",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      },
+      "二次屏柜柜内装置": {
+        "componentType": "devices",
+        "evidence": {
+          "sheet": "表2_设备模型部件名称中英文字段对照表",
+          "cell": "C25",
+          "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c"
+        }
+      }
+    }
+  }
+}

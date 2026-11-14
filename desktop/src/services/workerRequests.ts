@@ -1,5 +1,6 @@
 /** One settlement path for worker requests, regardless of transport/protocol. */
 export class WorkerRequests<T> {
+  get size():number{return this.pending.size;}
   private pending = new Map<number, { resolve(value:T):void; reject(error:Error):void; timer:ReturnType<typeof setTimeout>; timeoutMs:number }>();
   constructor(private timeoutMs = 120_000, private onTimeout: (error:Error)=>void = () => {}) {}
   private expire(id:number):void {

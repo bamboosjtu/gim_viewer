@@ -97,6 +97,7 @@ export type PerfProductMoment =
   | 'spatialSemanticStart'
   | 'spatialSemanticReady'
   | 'firstUsableGeometryReady'
+  | 'firstVisibleGeometryReady'
   | 'devCurrentViewReady'
   | 'devCurrentViewSettled'
   | 'devBaseRepresentationsSettled'
@@ -613,6 +614,7 @@ export function perfProductMomentSnapshot(): Record<PerfProductMoment, PerfProdu
     spatialSemanticStart: productMoments.get('spatialSemanticStart') ?? null,
     spatialSemanticReady: productMoments.get('spatialSemanticReady') ?? null,
     firstUsableGeometryReady: productMoments.get('firstUsableGeometryReady') ?? null,
+    firstVisibleGeometryReady: productMoments.get('firstVisibleGeometryReady') ?? null,
     devCurrentViewReady: productMoments.get('devCurrentViewReady') ?? null,
     devCurrentViewSettled: productMoments.get('devCurrentViewSettled') ?? null,
     devBaseRepresentationsSettled: productMoments.get('devBaseRepresentationsSettled') ?? null,

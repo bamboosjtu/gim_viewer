@@ -47,7 +47,7 @@ describe('source-to-physical representation adapter and filters', () => {
       'actuator.dev':'SYMBOLNAME=操动机构箱','terminal.dev':'SYMBOLNAME=端子箱','free.cbm':'OBJECTMODELPOINTER=free.dev','free.dev':'SYMBOLNAME=端子箱模型01:Null:2754317'};
     const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),built=buildEngineeringSources('p',graph,[],[]),state=new AppState();
     state.activateProject(1,'p');state.engineeringSources=built.sources;state.engineeringSnapshot=built.snapshot;state.engineeringNavigation=projectEngineeringNavigation(built.sources,built.snapshot);
-    const gis=built.snapshot.entities.find(e=>e.category==='E05')!,free=built.snapshot.entities.find(e=>e.category==='E16.terminal_box')!;
+    const gis=built.snapshot.entities.find(e=>e.category==='E05')!,free=built.snapshot.entities.find(e=>e.category==='M10')!;
     const mesh=(root:THREE.Group,assemblyPath:string)=>{const wrapper=new THREE.Group();wrapper.userData.assemblyPath=assemblyPath;const value=new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshBasicMaterial());wrapper.add(value);root.add(wrapper);return value;};
     const gisRoot=new THREE.Group();gisRoot.userData.rootOccurrence=graph.records.find(r=>r.source==='gis.dev')!.id;
     const body=mesh(gisRoot,''),actuator=mesh(gisRoot,'sub:0'),terminal=mesh(gisRoot,'sub:1');

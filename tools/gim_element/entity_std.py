@@ -92,12 +92,21 @@ CON_CODE = {
 
 # Category labels are the shared project catalog; occurrence/ledger policies
 # intentionally remain independent between this reference tool and desktop.
-_catalog_path = (Path(sys._MEIPASS) / 'catalog.json') if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[2] / 'desktop/src/engineering/catalog.json'
+_catalog_path = (Path(sys._MEIPASS) / 'catalog.json') if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent / 'catalog.json'
 _catalog = json.loads(_catalog_path.read_text(encoding='utf-8'))
 _labels = {entry['code']: entry['label'] for entry in _catalog['categories']}
 DEV_CODE = {key: (code, _labels[code]) for key, (code, _) in DEV_CODE.items()}
 MAT_CODE = {key: (code, _labels[code]) for key, (code, _) in MAT_CODE.items()}
 CON_CODE = {key: (code, _labels[code] if code != 'U-OBJECT' else label) for key, (code, label) in CON_CODE.items()}
+for _entry in _catalog['categories']:
+    if '.' in _entry['code'] or _entry['code'] == 'U-OBJECT':
+        continue
+    if _entry['group'] == 'equipment':
+        DEV_CODE.setdefault(_entry['label'], (_entry['code'], _entry['label']))
+    elif _entry['group'] == 'materials':
+        MAT_CODE.setdefault(_entry['label'], (_entry['code'], _entry['label']))
+    elif _entry['group'] == 'components':
+        CON_CODE.setdefault(('标准索引构件', _entry['label']), (_entry['code'], _entry['label']))
 
 # 其他组的性质编码（01 §2 分层：来源 / 组织包装 / 未识别）
 OTH_CODE = {

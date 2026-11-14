@@ -10,6 +10,7 @@ import {assertEngineeringNavigation} from '../engineeringNavigationCache.js';
 import {normalizeEngineeringSources} from '../../gim/engineering/buildSources.js';
 import {assertEngineeringPartition} from '../../engineering/validate.js';
 import {createEngineeringWorkerHandler} from '../engineeringWorker.js';
+import {ModelEvidenceProvider} from '../../gim/engineering/evidenceProvider.js';
 import {decodeEngineeringWorkerResult,encodeEngineeringWorkerResult,type TransportGraphCache} from '../engineeringWorkerTransport.js';
 afterEach(()=>{vi.restoreAllMocks();});
 it.each(['composition','source','inventory','inventory-search'] as const)('transfers an explicitly failed %s projection while rejecting it as a complete cache',async failure=>{
@@ -53,6 +54,8 @@ it('revises identification from explicitly recovered family evidence without reb
   const initial=await handle({type:'extract'});expect(initial.type).toBe('graph');
   const partial=await handle({type:'assemble',objects:[],models:[]});if(partial.type!=='model')throw Error('model expected');
   expect((await decodeEngineeringWorkerResult(partial.result,()=>true)).sources.complete).toBe(false);
+  const failed=await handle({type:'evidence-snapshot',entryIds:['a.fam']});
+  expect(failed.type==='evidence'&&failed.snapshot?.coverage[0].status).toBe('failed');
   await handle({type:'files',files:[{path:'a.fam',blob:new Blob(['[设计]\n设备类型=EQUIPMENTTYPE=CircuitBreaker'])}]});
   await handle({type:'evidence-ensure',range:{entryIds:['a.fam'],kinds:['attributes']}});
   const recovered=await handle({type:'recognize-evidence'});if(recovered.type!=='model')throw Error('model expected');
@@ -60,6 +63,32 @@ it('revises identification from explicitly recovered family evidence without reb
   expect(result.sources.complete).toBe(true);expect(result.snapshot.entities[0].category).toBe('E06');
   if(initial.type==='graph')expect(result.geometryOccurrences.occurrences.map(o=>o.id)).toEqual(initial.geometryOccurrences.occurrences.map(o=>o.id));
 });
+it('keeps evidence indexing off first geometry and parks reconstructible source facts after cache publication',async()=>{
+  const attach=vi.spyOn(ModelEvidenceProvider.prototype,'attachGraph'),handle=createEngineeringWorkerHandler();
+  const paths=['project.cbm','a.dev','a.fam'],identity={sourceSha256:'a'.repeat(64),parserVersion:'fixture',entries:paths};
+  await handle({type:'init',scope:identity.sourceSha256,paths});
+  await handle({type:'files',files:[{path:paths[0],blob:new Blob(['OBJECTMODELPOINTER=a.dev'])},{path:paths[1],blob:new Blob(['TYPE=GIS\nBASEFAMILY=a.fam'])},{path:paths[2],blob:new Blob(['[设计]\n额定电压=RATEDVOLTAGE=220 kV'])}]});
+  await handle({type:'extract'});const reply=await handle({type:'assemble',objects:[],models:[],identity});if(reply.type!=='model')throw Error('model expected');
+  const model=await decodeEngineeringWorkerResult(reply.result,()=>true);expect(attach).not.toHaveBeenCalled();
+  await handle({type:'encode-cache',buildId:model.buildId!,domain:'sources'});await handle({type:'release-model',buildId:model.buildId});
+  const meta=await handle({type:'evidence-snapshot',entryIds:['a.fam']});if(meta.type!=='evidence'||!meta.snapshot)throw Error('evidence expected');
+  expect(meta.snapshot.coverage[0]).toMatchObject({status:'complete',rawAvailable:false,restorable:true});expect(attach).not.toHaveBeenCalled();
+  vi.useFakeTimers();
+  try{
+    const loaded=await handle({type:'evidence-ensure',range:{entryIds:['a.fam'],kinds:['attributes']}});if(loaded.type!=='evidence'||!loaded.snapshot)throw Error('evidence expected');
+    const query={range:{entryIds:['a.fam'],kinds:['attributes' as const]},revision:loaded.snapshot.revision,limit:10};
+    const page=await handle({type:'evidence-query',query});
+    expect(page.type==='evidence'&&page.page?.attributes[0].rawValue).toBe('220 kV');expect(attach).toHaveBeenCalledTimes(1);
+    const again=await handle({type:'evidence-ensure',range:query.range});
+    expect(again.type==='evidence'&&again.snapshot?.revision).toBe(loaded.snapshot.revision);expect(attach).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1501);
+    await expect(handle({type:'evidence-query',query})).rejects.toThrow('EVIDENCE_REVISION_EXPIRED');
+    const resumed=await handle({type:'evidence-ensure',range:query.range});if(resumed.type!=='evidence'||!resumed.snapshot)throw Error('evidence expected');
+    const recovered=await handle({type:'evidence-query',query:{...query,revision:resumed.snapshot.revision}});
+    expect(recovered.type==='evidence'&&recovered.page?.attributes).toEqual(page.type==='evidence'&&page.page?.attributes);expect(attach).toHaveBeenCalledTimes(2);
+  }finally{vi.useRealTimers();}
+});
+
 it('reuses unchanged source facts across model frames and refuses foreign or missing graph references',async()=>{
   const g=await graph(),result=assembleEngineeringView('scope',g,[],[]),sender:TransportGraphCache={},receiver:TransportGraphCache={};
   const full=encodeEngineeringWorkerResult(result,sender);await decodeEngineeringWorkerResult(full,()=>true,receiver);

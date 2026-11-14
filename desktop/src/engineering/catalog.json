@@ -1,5 +1,5 @@
 {
-  "version": "engineering-catalog-v2",
+  "version": "engineering-catalog-v3",
   "categories": [
     {
       "code": "E01",
@@ -440,6 +440,216 @@
       "label": "待识别对象",
       "group": "unknown",
       "grain": "item"
+    },
+    {
+      "code": "E-R",
+      "label": "电抗器（用途待确认）",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E20",
+      "label": "支柱绝缘子",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E21",
+      "label": "穿墙套管",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E22",
+      "label": "耦合电容器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E23",
+      "label": "直流电压测量装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E24",
+      "label": "直流旁路与转换开关",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E25",
+      "label": "换流阀",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E26",
+      "label": "隔直装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E27",
+      "label": "串联补偿装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E28",
+      "label": "电阻器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E29",
+      "label": "熔断器",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E30",
+      "label": "线路故障测量装置",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E31",
+      "label": "安防设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "E32",
+      "label": "火灾报警设备",
+      "group": "equipment",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "M10",
+      "label": "端子箱",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "M11",
+      "label": "灯具材料",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "M12",
+      "label": "动力、照明与检修箱",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "M13",
+      "label": "开关与插座材料",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "M14",
+      "label": "安装钢材",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "M15",
+      "label": "水暖材料",
+      "group": "materials",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "C-A11",
+      "label": "建筑主要构件",
+      "group": "components",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "C-A12",
+      "label": "建筑辅助构件",
+      "group": "components",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "C-A13",
+      "label": "地下室",
+      "group": "components",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "C-B8",
+      "label": "连接节点",
+      "group": "components",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "C-C6",
+      "label": "场地",
+      "group": "components",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "C-C7",
+      "label": "支挡结构",
+      "group": "components",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "C-C8",
+      "label": "沟道与隧道",
+      "group": "components",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "C-C9",
+      "label": "变压器搬运轨道",
+      "group": "components",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "C-D7",
+      "label": "建筑设备（专业待确认）",
+      "group": "components",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表1/8/10；standardCatalog.json 字段证据"
+    },
+    {
+      "code": "C-B9",
+      "label": "构架与支架基础",
+      "group": "components",
+      "grain": "item",
+      "reference": "Q/GDW 11810.1—2023 表10 D.10/D.11"
     }
   ]
 }

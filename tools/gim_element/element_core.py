@@ -818,7 +818,7 @@ def scan_ifc_track(root, ledger, progress=None):
 # ---------------------------------------------------------------------------
 # 主入口
 # ---------------------------------------------------------------------------
-def scan(path, progress=None, work_dir=None, cleanup=True):
+def scan(path, progress=None, work_dir=None, cleanup=True, engine='standard'):
     """解析一个 GIM 工程或单体设备包。
 
     path: .gim 文件或已解包目录
@@ -836,6 +836,28 @@ def scan(path, progress=None, work_dir=None, cleanup=True):
             root = tmp
         else:
             root = path
+
+        if engine == 'standard':
+            from standard_recognition import scan_standard, ledger_from_standard
+            import hashlib
+            scope = None
+            if os.path.isfile(path):
+                digest = hashlib.sha256()
+                with open(path, 'rb') as source:
+                    for block in iter(lambda: source.read(1024 * 1024), b''):
+                        digest.update(block)
+                scope = digest.hexdigest()
+            prog('运行工具内置标准实体识别算法…')
+            data = scan_standard(root, scope)
+            result = ledger_from_standard(data)
+            result['meta'] = {'source': os.path.abspath(path), 'kind': 'gim文件' if os.path.isfile(path) else '解包目录',
+                              'container': container, 'containerNote': note, 'elapsed': round(time.time() - t0, 1),
+                              'engine': 'independent-python', 'engineRulesVersion': data['engine']['rulesVersion'],
+                              'complete': data['complete'], 'incompleteReasons': data['incompleteReasons']}
+            prog('标准实体识别完成；整体 %s，待归 %s' % (result['stats']['整体'], result['stats']['待归整体']))
+            return result
+        if engine != 'legacy':
+            raise ValueError('Unknown recognition engine: ' + engine)
         ledger = Ledger()
         stats = collections.Counter()
         prog('扫描 dev 轨道…')
@@ -967,6 +989,14 @@ def build_html(result):
                           format(r['dev'], ','), format(r['ifc'], ','),
                           format(r['total'], ','), text(stxt or '—')))
         out.append('</table>')
+    if result.get('entityTree'):
+        out.append('<h2>整体—部件与来源关系</h2><p class="small">属性引用不生成物理根；归属候选与未决结果保留，原始父级不会被改写。</p>')
+        for entity in result['entityTree']:
+            out.append('<details><summary>%s · %s</summary><table><tr><th>来源名称</th><th>类型/角色</th><th>归属状态</th><th>原始父级</th><th>sourceId</th></tr>' % (text(entity['name']),text(entity['category'])))
+            for part in entity['parts']:
+                interpretation=part['interpretation']
+                out.append('<tr><td>%s</td><td>%s · %s</td><td>%s</td><td>%s</td><td>%s</td></tr>' % (text(part['name']),text(part['type']),text(interpretation['meaning']),text(interpretation.get('membershipStatus','')),text(part['rawParent']),text(part['sourceId'])))
+            out.append('</table></details>')
     out.append('</body></html>')
     return '\n'.join(out)
 
@@ -981,6 +1011,7 @@ def main():
     ap.add_argument('--json', dest='json_out', help='输出 JSON 路径')
     ap.add_argument('--html', dest='html_out', help='输出 HTML 报告路径')
     ap.add_argument('--csv', dest='csv_out', help='输出 CSV 路径')
+    ap.add_argument('--engine', choices=['standard', 'legacy'], default='standard', help='默认运行工具内置标准算法；legacy 用于历史盘点口径对照')
     args = ap.parse_args()
 
     last = ['']
@@ -988,7 +1019,7 @@ def main():
         last[0] = msg
         print(msg, flush=True)
 
-    result = scan(args.path, prog)
+    result = scan(args.path, prog, engine=args.engine)
     tt = result['totals']
     print('\n===== 盘点结果 =====')
     print('设备        : %s 台（已确认 %s · 候选 %s；dev %s + ifc %s；附件 %s 并入本体、部件 %s 上卷）'

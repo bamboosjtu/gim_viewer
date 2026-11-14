@@ -25,7 +25,7 @@ export function ifcSourceRecords(objects: readonly IfcSpatialObject[]): SourceRe
       rawContainerName:group.name,applicability:group.applicability??'instance',sourceId:id,
       keys: [property.name], value: property.value,rawUnit:property.unit,rawValueType:property.dataType,
     })));
-    for (const [field, value] of [['Name', object.sourceName], ['Description', object.description], ['ObjectType', object.objectType], ['Tag', object.tag]] as const) {
+    for (const [field, value] of [['Name', object.sourceName], ['Description', object.description], ['ObjectType', object.objectType], ['Tag', object.tag],['PredefinedType',object.predefinedType]] as const) {
       if (value !== undefined) properties.push({ path: object.sourcePath, source: `${object.sourcePath}#${object.expressId}:${field}`,sourceId:id,applicability:'instance', keys: [`IFC.${field}`], value });
     }
     const hostId = byKey.get(object.hostObjectKey ?? '');

@@ -4,7 +4,7 @@ import type { IfcSpatialObject } from '../ifcSpatialParser.js';
 import { ifcSourceRecords } from './ifcSourceRecords.js';
 import { engineeringObjectEvidence } from './objectEvidence.js';
 import type { SourceRecord } from './sourceEvidence.js';
-import type { EngineeringSourceGraph } from './sourceGraph.js';
+import {engineeringSourceRecords,type EngineeringSourceGraph} from './sourceGraph.js';
 
 export interface IfcSourceMatch {
   cbmOccurrenceId: string;
@@ -29,7 +29,7 @@ const canonical = (value: string) => value.replace(/\\/g, '/').toLowerCase();
  */
 export function collectEngineeringSourceModel(graph: EngineeringSourceGraph, objects: readonly IfcSpatialObject[]): Omit<EngineeringSourceModel,'snapshot'> {
   const ifc = ifcSourceRecords(objects);
-  const sources = [...graph.records, ...ifc];
+  const sources = engineeringSourceRecords(graph,ifc);
   const byModelGuid = new Map<string, string[]>();
   for (let i = 0; i < objects.length; i++) {
     const object = objects[i];

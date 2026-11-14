@@ -414,6 +414,7 @@ export class SubstationSpatialIndexBuilder {
     private readonly cbmTree: CbmNode | null,
     private readonly fileDevRelations: FileDevEntry[] = [],
     private readonly observer?: SubstationSpatialIndexObserver,
+    private readonly eagerPropertyNames:readonly string[]=[],
   ) {}
 
   addIfcModel(entry: IfcEntry, text: string | null, sourceBytes?: number): void {
@@ -451,7 +452,7 @@ export class SubstationSpatialIndexBuilder {
     }
     const parseStarted = performance.now();
     try {
-      const parsed = parseIfcModel(entry, text, sourceBytes, this.observer);
+      const parsed = parseIfcModel(entry, text, sourceBytes, this.observer,this.eagerPropertyNames);
       this.models.push(parsed.summary);
       this.observer?.onModelParsed?.(parsed.profile);
       // 不使用 push(...largeArray)：BIMBase/Bentley IFC 中单文件实体可超过
@@ -744,8 +745,9 @@ export function buildSubstationSpatialIndexFromTexts(
   cbmTree: CbmNode | null,
   fileDevRelations: FileDevEntry[] = [],
   observer?: SubstationSpatialIndexObserver,
+  eagerPropertyNames:readonly string[]=[],
 ): SubstationSpatialIndex {
-  const builder = new SubstationSpatialIndexBuilder(cbmTree, fileDevRelations, observer);
+  const builder = new SubstationSpatialIndexBuilder(cbmTree, fileDevRelations, observer,eagerPropertyNames);
   for (const source of sources) builder.addIfcModel(source.entry, source.text);
   return builder.finalize();
 }
@@ -757,10 +759,11 @@ export async function buildSubstationSpatialIndexFromFiles(
   cbmTree: CbmNode | null,
   fileDevRelations: FileDevEntry[] = [],
   observer?: SubstationSpatialIndexObserver,
+  eagerPropertyNames:readonly string[]=[],
 ): Promise<SubstationSpatialIndex> {
   const byLowerPath = new Map<string, File>();
   for (const [path, file] of files) byLowerPath.set(normalizePath(path).toLowerCase(), file);
-  const builder = new SubstationSpatialIndexBuilder(cbmTree, fileDevRelations, observer);
+  const builder = new SubstationSpatialIndexBuilder(cbmTree, fileDevRelations, observer,eagerPropertyNames);
   for (const entry of entries) {
     const file = byLowerPath.get(normalizePath(entry.path).toLowerCase());
     // 逐条读取/解析，不让多个 IFC 原始文本同时驻留；addIfcModel 不保存 text。
@@ -816,6 +819,7 @@ function parseIfcModel(
   text: string,
   sourceBytes?: number,
   observer?: SubstationSpatialIndexObserver,
+  eagerPropertyNames:readonly string[]=[],
 ): ParsedIfcModel {
   const parseStarted = performance.now();
   const stepStarted = performance.now();
@@ -858,7 +862,7 @@ function parseIfcModel(
   const spatialById = new Map<number, IfcSpatialNode>();
   const objects: IfcSpatialObject[] = [];
   const identityStarted = performance.now();
-  const identityProperties = collectProxyIdentityProperties(text, selectedRecords, relationships);
+  const identityProperties = collectProxyIdentityProperties(text, selectedRecords, relationships,eagerPropertyNames);
   // 代理对象只提前读取分类必需的类别字段；其余面板详情仍按需读取。
   const propertyMs = performance.now() - identityStarted;
   const propertyEntityCount = scan.propertyEntityCount;
@@ -1687,14 +1691,32 @@ function parseRef(value: string | undefined): number | null {
 
 /** Only object-linked proxy classification fields are eager. Full property
  * sets remain deferred; neither file names nor unrelated Psets imply identity. */
-function collectProxyIdentityProperties(text: string, products: RawIfcEntity[], relationships: RawIfcEntity[]): Map<number, IfcPropertyGroup[]> {
-  const proxies = new Set(products.filter(p => p.ifcType === 'IFCBUILDINGELEMENTPROXY').map(p => p.expressId));
-  const links = new Map<number, number[]>();
+function collectProxyIdentityProperties(text: string, products: RawIfcEntity[], relationships: RawIfcEntity[],propertyNames:readonly string[]=[]): Map<number, IfcPropertyGroup[]> {
+  const targets = new Set(products.filter(p => propertyNames.length>0||p.ifcType === 'IFCBUILDINGELEMENTPROXY').map(p => p.expressId));
+  const keys=new Set([...propertyNames.map(name=>name.toUpperCase()),'CATEGORY','类别','类别(CATEGORY)']);
+  type Link={product:number;applicability:'instance'|'type'};
+  const links = new Map<number, Link[]>(),typeLinks=new Map<number,number[]>();
+  const link=(pset:number,ids:number[],applicability:Link['applicability'])=>links.set(pset,[...(links.get(pset)??[]),...ids.map(product=>({product,applicability}))]);
   for (const rel of relationships) if (rel.ifcType === 'IFCRELDEFINESBYPROPERTIES') {
-    const ids = parseRefs(rel.args[4]).filter(id => proxies.has(id)), pset = parseRef(rel.args[5]);
-    if (ids.length && pset != null) links.set(pset, [...(links.get(pset) ?? []), ...ids]);
+    const ids = parseRefs(rel.args[4]).filter(id => targets.has(id)), pset = parseRef(rel.args[5]);
+    if (ids.length && pset != null) link(pset,ids,'instance');
+  }else if(propertyNames.length&&rel.ifcType==='IFCRELDEFINESBYTYPE'){
+    const ids=parseRefs(rel.args[4]).filter(id=>targets.has(id)),type=parseRef(rel.args[5]);
+    if(ids.length&&type!=null)typeLinks.set(type,[...(typeLinks.get(type)??[]),...ids]);
   }
   const result = new Map<number, IfcPropertyGroup[]>();
+  const typeRecords=new Map(products.filter(record=>typeLinks.has(record.expressId)).map(record=>[record.expressId,record]));
+  if(typeRecords.size<typeLinks.size)scanIfcEntityBoundaries(text,(expressId,ifcType,bodyStart,bodyEnd)=>{
+    if(typeLinks.has(expressId)&&!typeRecords.has(expressId))typeRecords.set(expressId,materializeIfcEntity(text,{expressId,ifcType,bodyStart,bodyEnd}));
+  });
+  for(const [id,type] of typeRecords){
+    const ids=typeLinks.get(id)!;
+    parseRefs(type.args[5]).forEach(pset=>link(pset,ids,'type'));
+    const predefined=type.args[type.args.length-1]?.match(/^\.([A-Z_]+)\.$/i)?.[1];
+    if(predefined&&!['NOTDEFINED','USERDEFINED'].includes(predefined))for(const product of ids){
+      const groups=result.get(product)??[];groups.push({id,name:parseString(type.args[2])||type.ifcType,kind:'property',applicability:'type',truncated:true,values:[{name:'IFC.PredefinedType',value:predefined,dataType:'enum'}]});result.set(product,groups);
+    }
+  }
   if (!links.size) return result;
   const sets = new Map<number, RawIfcEntity>(), wanted = new Set<number>();
   scanIfcEntityBoundaries(text, (expressId, ifcType, bodyStart, bodyEnd) => {
@@ -1707,17 +1729,18 @@ function collectProxyIdentityProperties(text: string, products: RawIfcEntity[], 
     if (ifcType !== 'IFCPROPERTYSINGLEVALUE' || !wanted.has(expressId)) return;
     const record = materializeIfcEntity(text, {expressId, ifcType, bodyStart, bodyEnd});
     const name = parseString(record.args[0]);
-    if (!/^(?:类别(?:\(Category\))?|Category)$/i.test(name)) return;
+    if (!keys.has(name.toUpperCase())) return;
     const nominal = record.args[2]?.match(/^(IFC\w+)\((.*)\)$/i);
-    const value = parseString(nominal?.[2] ?? record.args[2]);
+    const raw=nominal?.[2]??record.args[2]??'';
+    const value = parseString(raw)||(/^[+-]?\d+(?:\.\d*)?$/.test(raw)?raw:/^\.[A-Z_]+\.$/i.test(raw)?raw.slice(1,-1):'');
     if (value) values.set(expressId, {name, value, ...(nominal ? {dataType:nominal[1]} : {})});
   });
   for (const [id, record] of sets) {
     const selected = parseRefs(record.args[4]).flatMap(key => values.has(key) ? [values.get(key)!] : []);
     if (!selected.length) continue;
-    for (const product of links.get(id)!) {
+    for (const {product,applicability} of links.get(id)!) {
       const groups = result.get(product) ?? [];
-      groups.push({id, name:parseString(record.args[2]), kind:'property', values:selected, truncated:true}); result.set(product, groups);
+      groups.push({id, name:parseString(record.args[2]), kind:'property',applicability, values:selected, truncated:true}); result.set(product, groups);
     }
   }
   return result;
@@ -2046,6 +2069,7 @@ const IFC_PRODUCT_PREFIXES = [
   'IFCDAMPER', 'IFCSPACEHEATER', 'IFCHEATEXCHANGER', 'IFCEVAPORATOR',
   'IFCCOIL', 'IFCENGINE', 'IFCTUBEBUNDLE', 'IFCREINFORCING', 'IFCTENDON',
   'IFCGEOGRAPHIC', 'IFCTRANSPORT', 'IFCANNOTATION',
+  'IFCPROTECTIVE', 'IFCTRANSFORMER', 'IFCUNITARY', 'IFCCOMMUNICATION', 'IFCWASTE',
 ];
 
 function isIfcNavigationObjectType(ifcType: string): boolean {

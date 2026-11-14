@@ -61,7 +61,8 @@ it.each([1,2,0])('retains PARTINDEX assignment candidates for %i real matches wi
   const provider=new ModelEvidenceProvider('scope',Object.keys(raw),async p=>raw[p]);provider.attachGraph(graph);
   const range={entryIds:['part.fam'],kinds:['assignments'] as const};
   const snapshot=await provider.ensureEvidence(range),page=provider.queryEvidence({range,revision:snapshot.revision,limit:20});
-  const alias=graph.aliases[0],assignment=page.assignments[0];
+  const alias=graph.aliases[0],assignment=count===0?page.assignments.find(a=>a.occurrenceId===alias.sourceId)!:page.assignments[0];
+  if(count===0)expect(page.assignments.some(a=>a.sourceId===graph.attributeRecords?.[0].id&&a.status==='confirmed')).toBe(true);
   expect(assignment.status).toBe(count===1?'confirmed':count===2?'ambiguous':'unresolved');
   expect([...assignment.candidateSourceIds].sort()).toEqual([...alias.candidates].sort());
   expect(assignment.sourceId).toBe(count===1?alias.candidates[0]:undefined);
@@ -120,4 +121,15 @@ it('marks comparable same-context value conflicts and rejects pre-reset cursors'
   const page=provider.queryEvidence({range,revision:snapshot.revision,limit:10});
   expect(page.attributes).toHaveLength(2);expect(page.attributes.every(a=>a.conflict?.reason==='incompatible_observations')).toBe(true);
   provider.resetObservations();expect(()=>provider.queryEvidence({range,revision:snapshot.revision,limit:10})).toThrow('EVIDENCE_REVISION_EXPIRED');
+});
+it('restores only checkpoint metadata, with zero reads and without treating parsed history as resident attributes',async()=>{
+  const range={entryIds:['a.fam'],kinds:['attributes'] as const};
+  const original=new ModelEvidenceProvider('sha',['a.fam','unread.fam'],async()=>'[设计]\nA=KEY=1');
+  await original.ensureEvidence(range);original.detachRaw();const metadata=original.getSnapshot();
+  const read=vi.fn(async()=>''),restored=new ModelEvidenceProvider('sha',['a.fam','unread.fam'],read);
+  restored.restoreMetadata(metadata);
+  expect(restored.getSnapshot()).toEqual(metadata);expect(read).not.toHaveBeenCalled();
+  expect(restored.getSnapshot().coverage[0]).toMatchObject({status:'complete',materialization:'not_materialized',rawAvailable:false});
+  expect(()=>restored.restoreMetadata({...metadata,scope:'foreign'})).toThrow('checkpoint metadata');
+  expect(()=>restored.restoreMetadata({...metadata,entries:metadata.entries.slice(1)})).toThrow('checkpoint metadata');
 });

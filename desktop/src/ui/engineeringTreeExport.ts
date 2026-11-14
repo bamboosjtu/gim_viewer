@@ -49,6 +49,7 @@ function exportComposition(data: EngineeringNavigationData, project: string): Ex
       kind: node.kind,
       ...(node.parent ? { parent: node.parent } : {}),
       ...(node.targetId ? { targetId: node.targetId } : {}),
+      ...(node.sourceId ? { sourceId: node.sourceId } : {}),
       entityCount: node.entityCount,
       ...(node.inferred ? { inferred: true } : {}),
       ...(node.declaredContextIds?.length ? { declaredContextIds: [...node.declaredContextIds] } : {}),

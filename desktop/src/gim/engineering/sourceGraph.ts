@@ -37,6 +37,7 @@ export interface EngineeringSourceGraph {
   documents: SourceDocument[];
   cbmOccurrences: CbmOccurrence[];
   records: SourceRecord[];
+  attributeRecords?:SourceRecord[];
   aliases: SourceAlias[];
   references: SourceReference[];
   /** File discovery is independent of IFCGUID joins. */
@@ -46,6 +47,8 @@ export interface EngineeringSourceGraph {
 
 const normalizePath = (value: string) => value.trim().replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').toLowerCase();
 const ordered = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
+/** Logical attribute sources and physical sources have independent addresses. */
+export function engineeringSourceRecords(graph:EngineeringSourceGraph,extra:readonly SourceRecord[]=[]):SourceRecord[]{return [...graph.records,...graph.attributeRecords??[],...extra];}
 
 /** No use of CbmNode, current UI grain, F-levels or geometry seed predicates. */
 export async function extractEngineeringSourceGraph(files: SourceFileReader, options: { deferFamilies?:boolean; maxOccurrences?: number; maxDepth?: number; signal?: AbortSignal; onProgress?:(stage:'source-index'|'source-traverse'|'source-sort')=>void } = {}): Promise<EngineeringSourceGraph> {
@@ -96,12 +99,12 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
   const scalar = (doc: SourceDocument, key: string) => doc.fields.find(p => p.keys[0].toUpperCase() === key)?.value ?? '';
   // Object fields are attached only to their actual OMP occurrence. Ancestor
   // organization labels never become evidence on every descendant.
-  const objectFields = (doc: SourceDocument) => doc.fields.filter(p => /^(?:TYPE|SYSCLASSIFYNAME|PARTNAME|SYMBOLNAME|NAME|OBJECTNAME|PROJECTNAME|设备名称|工程中名称|设备编码|电网工程标识系统编码|GRIDIDENTIFICATIONSYSTEMCODE|材料子类|设备子类|MATERIALSUBTYPE|EQUIPMENTSUBTYPE|相数|相别|PHASE|PHASECOUNT|PHASELABEL|设备类型|设备类别|材料类型|构件类型|用途|设备用途|EQUIPMENTTYPE|MATERIALTYPE|PURPOSE|型号|MODEL|MODELSPEC|对象角色|组件角色|OBJECTROLE|COMPONENTROLE)$/i.test(p.keys[0]));
+  const objectFields = (doc: SourceDocument) => doc.fields.filter(p => /^(?:TYPE|SYSCLASSIFYNAME|PARTNAME|SYMBOLNAME|NAME|OBJECTNAME|PROJECTNAME|设备名称|工程中名称|设备编码|电网工程标识系统编码|GRIDIDENTIFICATIONSYSTEMCODE|材料子类|设备子类|MATERIALSUBTYPE|EQUIPMENTSUBTYPE|相数|相别|PHASE|PHASECOUNT|PHASELABEL|设备类型|设备类别|材料类型|构件类型|用途|设备用途|EQUIPMENTTYPE|MATERIALTYPE|PURPOSE|型号|MODEL|MODELSPEC|对象角色|组件角色|OBJECTROLE|COMPONENTROLE|所属设备编码|宿主设备编码|HOSTEQUIPMENTID|HOSTEQUIPMENTCODE|PARENTEQUIPMENTID|所属设备名称|所属设备工程中名称|宿主设备名称|HOSTEQUIPMENTNAME|PARENTEQUIPMENTNAME)$/i.test(p.keys[0]));
   function updateNames(row: SourceRecord): void {
     const names: ObjectNameEvidence[] = [];
     for (const [kind, labels] of [
       ['object', ['SYMBOLNAME']], ['engineering', ['工程中名称', 'PROJECTNAME']],
-      ['family', ['设备名称','DEVICENAME']], ['source', ['NAME', 'OBJECTNAME']],
+      ['family', ['设备名称','DEVICENAME']], ['source', ['NAME', 'OBJECTNAME','PARTNAME']],
     ] as const) {
       for (const p of row.properties) if (p.keys?.some(k => (labels as readonly string[]).includes(k.toUpperCase())) && p.value.trim() && !['-', '/', '-100', '软件自动生成'].includes(p.value.trim())) {
         names.push({ kind, value: p.value, evidenceId: JSON.stringify([row.id, p.path, p.line, p.keys]) });
@@ -153,7 +156,7 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
     const count=result.records.length+result.cbmOccurrences.length;
     if(count-lastProgressCount>=512){lastProgressCount=count;options.onProgress?.('source-traverse');}
     if (options.signal?.aborted) throw new DOMException('Source extraction cancelled', 'AbortError');
-    if (depth > maxDepth || result.records.length + result.cbmOccurrences.length >= maxOccurrences) throw new Error('Engineering source occurrence budget exceeded');
+    if (depth > maxDepth || result.records.length + result.cbmOccurrences.length+(result.attributeRecords?.length??0) >= maxOccurrences) throw new Error('Engineering source occurrence budget exceeded');
   }
   async function expandDev(path: string, id: string, parent: string, cbm: CbmOccurrence, ancestry: Set<string>, depth: number,
     rootSourceId = id, assemblyPath = ''): Promise<SourceRecord[]> {
@@ -238,7 +241,13 @@ export async function extractEngineeringSourceGraph(files: SourceFileReader, opt
         } else if(entityName?.toUpperCase()==='PARTINDEX') {
           // Attribute-only occurrence: preserve evidence without creating a physical root.
           result.aliases.push({sourceId:id,status:'unresolved',candidates:[]});
-          await family(doc);
+          const attributeId=`attribute:${id}:${target}`;
+          let targetDoc:SourceDocument;
+          try{targetDoc=await document(target);}catch(error){if(options.signal?.aborted)throw error;result.diagnostics.push({kind:'read-failed',source:target});targetDoc={path:target,rawLines:[],fields:[]};}
+          const row:SourceRecord={id:attributeId,track:'dev',source:target,source_type:scalar(targetDoc,'TYPE')||scalar(targetDoc,'DEVICETYPE'),name:'',parent:'',
+            properties:[...await family(doc),...await family(targetDoc),...objectFields(targetDoc),...objectFields(doc)],sources:[path,target],context:[id],guid:'',attributeOnly:true,attributeContextId:id,
+            relations:nearest?[...nearest.rootIds].map(targetSourceId=>({kind:'host' as const,targetSourceId,evidence:JSON.stringify([path,'ENTITYNAME','PARTINDEX',targetSourceId])})):[]};
+          updateNames(row);(result.attributeRecords??=[]).push(row);assignFamilies(doc,attributeId);assignFamilies(targetDoc,attributeId);
         } else {
           const subtree = await expandDev(target, `dev:${id}:${target}`, '', node, new Set(), 0);
           scopes = [...physicalScopes, { records: subtree, rootIds: new Set(subtree.slice(0, 1).map(row => row.id)) }];
@@ -285,12 +294,12 @@ export async function materializeEngineeringFamilies(graph:EngineeringSourceGrap
     properties.set(path,parsed.properties.map(p=>({path,line:p.sourceLine,keys:[...new Set([p.label,p.rawKey])],value:p.rawValue,rawLine:p.rawLine,section:p.section})));
     if(!doc.fields.length)doc.fields=properties.get(path)!.map(p=>({...p,path,keys:p.keys??[]}));
   }
-  const records=new Map(graph.records.map(r=>[r.id,r]));
+  const records=new Map(engineeringSourceRecords(graph).map(r=>[r.id,r]));
   for(const {sourceId,path} of graph.familyAssignments??[]){
     const row=records.get(sourceId);if(!row||row.properties.some(p=>p.path===path))continue;
     row.properties=[...row.properties,...properties.get(path)??[]];
     const names:ObjectNameEvidence[]=[];
-    for(const [kind,labels] of [['object',['SYMBOLNAME']],['engineering',['工程中名称','PROJECTNAME']],['family',['设备名称','DEVICENAME']],['source',['NAME','OBJECTNAME']]] as const){
+    for(const [kind,labels] of [['object',['SYMBOLNAME']],['engineering',['工程中名称','PROJECTNAME']],['family',['设备名称','DEVICENAME']],['source',['NAME','OBJECTNAME','PARTNAME']]] as const){
       for(const p of row.properties)if(p.keys?.some(k=>(labels as readonly string[]).includes(k.toUpperCase()))&&p.value.trim()&&!['-','/','-100','软件自动生成'].includes(p.value.trim()))
         names.push({kind,value:p.value,evidenceId:JSON.stringify([row.id,p.path,p.line,p.keys])});
     }

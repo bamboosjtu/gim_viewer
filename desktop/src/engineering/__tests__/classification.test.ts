@@ -11,7 +11,7 @@ const row=(name:string,extra:Partial<ObjectEvidence>={}):ObjectEvidence=>({sourc
 it.each([
  ['CircuitBreaker','隔离开关','E06'],['SecondaryCabinet','主变压器测控柜','E16.control_cabinet'],
  ['OilFilledTransformer','站用变压器','E03'],['OilFilledTransformer','变压器','E-T'],
- ['CircuitBreaker','柜体','E06'],['PostInsulator','主变压器','M04'],
+ ['CircuitBreaker','柜体','E06'],['PostInsulator','主变压器','E20'],
  ['E17','端子箱','E17'],['E01','站用变压器','E01'],
 ])('uses object type %s before conflicting name %s', (source_type,name,category)=>{
  const object=toObjectEvidence({id:'x',track:'dev',source:'x.dev',name,source_type,parent:'',properties:[],sources:['x.dev'],context:[],guid:''});
@@ -60,13 +60,13 @@ it('keeps real walls and specific type evidence intact when removing form-factor
 
 it('retains readable material details, grain, unknown reasons and stable independent identities',()=>{
  const source=toObjectEvidence({id:'a',track:'dev',source:'a.dev',name:'未知',source_type:'PostInsulator',parent:'',properties:[],sources:['a.dev'],context:[],guid:''});
- expect(interpretObject(source)).toMatchObject({category:'M04',subtype:'post',subtypeLabel:'支柱绝缘子'});
+ expect(interpretObject(source)).toMatchObject({category:'E20'});
  const model=normalizeEngineeringModel('p',[row('电缆桥架',{sourceId:'tray'}),row('未知物料',{sourceId:'unknown',traits:{materialType:true}})]);
  expect(model.entities.find(e=>e.category==='M08')).toMatchObject({grain:'segment',subtypeLabel:'电缆桥架'});
  expect(model.entities.find(e=>e.category==='M09')).toMatchObject({subtypeLabel:'未细分材料',unknownReason:'material_subtype_evidence_insufficient'});
  expect(interpretObject(row('主变引线套管'))).toMatchObject({category:'M07',unknownReason:'equipment_bushing_host_unresolved'});
- expect(ENGINEERING_CATEGORIES.filter(c=>/^M\d+$/.test(c.code))).toHaveLength(9);
- expect(ENGINEERING_CATEGORIES.filter(c=>/^C-/.test(c.code))).toHaveLength(28);
+ expect(ENGINEERING_CATEGORIES.filter(c=>/^M\d+$/.test(c.code))).toHaveLength(15);
+ expect(ENGINEERING_CATEGORIES.filter(c=>/^C-/.test(c.code))).toHaveLength(38);
  expect(new Set(ENGINEERING_CATEGORIES.map(c=>c.code)).size).toBe(ENGINEERING_CATEGORIES.length);
  expect(ENGINEERING_CATEGORY_LABELS['C-B3']).toBe('建筑物基础');
 });
@@ -84,7 +84,7 @@ it('does not merge four single-phase bodies or repeated phase labels, and retain
  expect(model.entities).toHaveLength(0);expect(model.pending).toHaveLength(4);expect(model.diagnostics[0].kind).toBe('whole_identity_conflict');
  expect(normalizeEngineeringModel('p',bodies.slice(0,2).map(b=>({...b,phaseLabels:[value('A')]}))).pending).toHaveLength(2);
  const terminal=normalizeEngineeringModel('p',[row('主变端子箱',{sourceId:'box'})]);
- expect(terminal.entities[0].category).toBe('E16.terminal_box');
+ expect(terminal.entities[0].category).toBe('M10');
 });
 
 it('keeps free-text model strings out of category evidence',()=>{

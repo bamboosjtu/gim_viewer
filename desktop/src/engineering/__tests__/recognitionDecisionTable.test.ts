@@ -23,10 +23,10 @@ it.each(decisions)('$rule preserves independent classification, type, purpose, r
       'host.dev':'TYPE=GIS'+(context==='assembly'?'\nSUBDEVICE0=target.dev':''),'target.dev':decision.lines,
       'attributes.cbm':'ENTITYNAME=PARTINDEX\nOBJECTMODELPOINTER=target.dev\nBASEFAMILY=attributes.fam','attributes.fam':'[设计]\n额定电压=RATEDVOLTAGE=1 kV'};
     const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]}),built=buildEngineeringSources('scope',graph,[],[]);
-    const target=graph.records.find(r=>r.source==='target.dev');
+    const target=context==='attributes'?graph.attributeRecords?.find(r=>r.source==='target.dev'):graph.records.find(r=>r.source==='target.dev');
     if(context==='attributes'){
-      expect(target).toBeUndefined();expect(graph.aliases[0]).toMatchObject({status:'unresolved',candidates:[]});
-      expect(built.snapshot.entities).toHaveLength(1);continue;
+      expect(graph.records.some(r=>r.source==='target.dev')).toBe(false);expect(target?.attributeOnly).toBe(true);expect(target?.devOccurrence).toBeUndefined();
+      expect(graph.aliases[0]).toMatchObject({status:'unresolved',candidates:[]});
     }
     const member=built.snapshot.memberships.find(m=>m.sourceId===target!.id)!,result=member.interpretation;
     expect(result.category,decision.rule).toBe(decision.category);expect(result.categoryStatus).toBe(decision.status);

@@ -591,6 +591,17 @@ class MainWindow(QMainWindow):
             ('子类', escape(sub or '—')),
             ('名称模板', escape(r.get('template', '') or '—')),
         ]))
+        if len(s) > 5 and self.result:
+            entity = next((item for item in self.result.get('entityTree', []) if item['id'] == s[5]), None)
+            if entity:
+                h.append(self._prop_block('实体身份', [('entityId', escape(entity['id'])), ('规则版本', escape(self.result['meta'].get('engineRulesVersion', '')))]))
+                parts = []
+                for part in entity['parts']:
+                    meaning = part['interpretation']
+                    term = (meaning.get('componentType') or {}).get('id', meaning.get('meaning', ''))
+                    proof = '；'.join(meaning.get('membershipEvidence') or meaning.get('classificationEvidence') or [])
+                    parts.append((part['name'] or part['sourceId'], escape('%s · %s · %s · 来源父级 %s · %s' % (term, meaning.get('membershipStatus', ''), part['sourceId'], part['rawParent'] or '无', proof))))
+                h.append(self._prop_block('设备/材料/构件 → 部件与组成来源', parts))
         h.append(self._prop_block('模板统计', [
             ('dev / ifc', '%s / %s' % (fmt(r.get('dev', 0)), fmt(r.get('ifc', 0)))),
             ('合计', '<b>%s</b>' % fmt(r.get('total', 0))),

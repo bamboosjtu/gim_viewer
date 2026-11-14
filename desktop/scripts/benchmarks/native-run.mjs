@@ -374,7 +374,8 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
       .map(([key,value])=>`collector:${key}:${value}`),
     ...((measurement?.activeTasks?.length??0)>0?[`active-tasks:${measurement.activeTasks.length}`]:[]),
   ];
-  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:MEASUREMENT_VERSION,detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode,scenario,cacheState,environmentCalibration,
+  const visibleGeometryPolicy=Object.hasOwn(observation?.moments??{},'firstVisibleGeometryReady');
+  const conditions={machineId:digest({hostname:hostname(),cpu:cpus()[0]?.model,cores:cpus().length,memory:totalmem(),os:release(),arch:arch()}),runtimeSha256:build.runtime.sha256,buildMode:'release',measurementVersion:MEASUREMENT_VERSION,geometryTimingPolicy:visibleGeometryPolicy?'in-viewport-model-draw-submitted-v2':'legacy-model-commit-v1',detailPolicy:'task-phase-timeline-v2',lifecyclePolicy:'worker-terminal-v2',contentPolicy:'dev-l0-glb-sha256-v1',cacheProofPolicy:'source-failure-catalog-v1',webviewProfilePolicy:'paired-webview-profile-v1',mode,scenario,cacheState,environmentCalibration,
     sampleId:sample.sampleId,sourceSha256:sample.sourceSha256,profileDigest,routeDigest:digest(actionTargets),viewportDigest:digest(observation?.viewport??null),viewport:observation?.viewport??null,
     workloadDigest:evidence?digest({workload:evidence.progress.workload,semantic:evidence.semanticDigest,placement:evidence.placementDigest}):null};
   const assessment=assessCorrectness(evidence);
@@ -407,11 +408,12 @@ export async function runNative({root,buildManifest,sample,profileDigest='unfroz
     measurementComplete:!reason&&streamFailures===0&&cleanupComplete&&measurement?.aggregateComplete===true&&
       measurement?.lifecycleComplete===true&&!measurement.activeTasks.length,
     measurementIncompleteItems,memoryEvidenceComplete,memoryIncompleteItems,
-    requiredMetrics:['firstResponseMs','automaticLoadMs','processPrivatePeakBytes'],metrics:{
+    requiredMetrics:['firstResponseMs','automaticLoadMs','processPrivatePeakBytes',...(visibleGeometryPolicy&&(evidence?.contentEvidence?.expectedShownOccurrences??0)>0?['firstGeometryMs']:[])],metrics:{
       firstResponseMs:observation?.moments.navigationUiReady??observation?.moments.coreSemanticReady??null,
       modelTreeReadyMs:observation?.projectType==='substation'?observation?.moments.engineeringTreeReady??null:
         observation?.moments.navigationUiReady??null,
-      firstGeometryMs:observation?.moments.firstGeometryReady??observation?.moments.firstUsableGeometryReady??null,
+      geometryCommitMs:observation?.moments.firstUsableGeometryReady??observation?.moments.firstGeometryReady??null,
+      firstGeometryMs:visibleGeometryPolicy?observation?.moments.firstVisibleGeometryReady??null:observation?.moments.firstGeometryReady??observation?.moments.firstUsableGeometryReady??null,
       allGeometryReadyMs:Math.max(observation?.moments.allIfcReady??0,observation?.moments.devBaseRepresentationsSettled??0)||null,
       automaticLoadMs:automaticMs,cachePublishMs,
       settledMs,writeDrainMs:automaticMs!==null&&observation?.devArtifactWriteElapsedMs!=null

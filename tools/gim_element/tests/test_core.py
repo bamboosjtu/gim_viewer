@@ -18,7 +18,8 @@ class ElementCoreTests(unittest.TestCase):
     def check_entities(self, result):
         self.assertEqual(list(result['totals']), ['设备', '装置性材料', '构件', '其他'])
         self.assertEqual(result['totals']['设备']['台数'], 1)
-        self.assertEqual(result['totals']['设备']['附件并入'], 1)
+        self.assertEqual(result['totals']['设备']['附件并入'], 0)
+        self.assertEqual(len(result['recognition']['snapshot']['pending']), 1)
         self.assertEqual(result['totals']['构件']['ifc'], 1)
 
     def test_folder_classification_preserves_transformer_and_internal_accessory(self):

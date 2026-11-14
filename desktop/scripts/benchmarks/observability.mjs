@@ -104,7 +104,7 @@ async function readRunTrace(root,input,{summarize=true}={}){
     const moments=trace.milestones.filter(e=>e.context.operationTraceId===operationTraceId);
     const first=name=>moments.find(e=>e.trace.name===name);
     const base=[first('allIfcReady'),first('devBaseRepresentationsSettled')].filter(Boolean).sort((a,b)=>b.atMs-a.atMs)[0];
-    for(const [name,event]of [['firstResponseMs',first('navigationUiReady')??first('coreSemanticReady')],['firstGeometryMs',first('firstGeometryReady')??first('firstUsableGeometryReady')],['allGeometryReadyMs',base]])
+    for(const [name,event]of [['firstResponseMs',first('navigationUiReady')??first('coreSemanticReady')],['geometryCommitMs',first('firstUsableGeometryReady')],['firstGeometryMs',first('firstVisibleGeometryReady')??first('firstGeometryReady')],['allGeometryReadyMs',base]])
       if(event)trace.milestones.push({...event,trace:{...event.trace,name,action:'derived-from-product-event',eventRefs:[{runId:event.context.runId,producerId:event.producerId,sequence:event.sequence}]}});
   }
   if(!summarize)return {trace};

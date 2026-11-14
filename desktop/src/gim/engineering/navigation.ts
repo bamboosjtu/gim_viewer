@@ -1,3 +1,4 @@
+import {engineeringSourceRecords} from './sourceGraph.js';
 import type { EngineeringSources } from './buildSources.js';
 import type { EngineeringSnapshot } from '../../engineering/types.js';
 import { collectCompositionEvidence, collectDeclaredCompositionContexts, type SourceCompositionEvidence } from './compositionContexts.js';
@@ -28,7 +29,7 @@ export interface EngineeringNavigationData {
   metadata?: {scope:string;rulesVersion:string;sourceComplete:boolean;sourceVersion:string};
   compositionInput?:{facts:SourceCompositionEvidence[];declarations:CompositionDeclaration[]};
 }
-export const ENGINEERING_NAVIGATION_VERSION = 'engineering-navigation-v10';
+export const ENGINEERING_NAVIGATION_VERSION = 'engineering-navigation-v11';
 /** Independent engineering and provenance projections share only source/entity
  * references. No business-tree object, physical seed or render group is input.
  */
@@ -42,7 +43,7 @@ export function projectEngineeringNavigation(sources: EngineeringSources, snapsh
   let sourceView:ReturnType<typeof projectEngineeringSource>={version:SOURCE_TREE_TEMPLATE_VERSION,sourceNodes:new Map([['source:project',{key:'source:project',title:'来源（投影不可用）',kind:'group',children:[]}]]),sourceRoot:'source:project',sourceRows:new Map(),sourceSearch:[]};
   try {sourceView=projectEngineeringSource(sources);} catch(error){projectionErrors.source=String(error);}
   const {sourceNodes,sourceRoot,sourceRows,sourceSearch}=sourceView;
-  const records=new Map([...sources.graph.records,...sources.ifcRecords].map(record=>[record.id,record]));
+  const records=new Map(engineeringSourceRecords(sources.graph,sources.ifcRecords).map(record=>[record.id,record]));
   const pathsByEntity = new Map(assignments.map(assignment => [assignment.entityId, assignment.paths]));
   const compositionSearch = snapshot.entities.map(entity => {
     const names = new Set<string>();

@@ -16,7 +16,7 @@ import type {
  * DEV GLB output must not invalidate this derived semantic projection.
  */
 // Outward product occurrences exclude internal resource/type definitions.
-export const SUBSTATION_SPATIAL_SEMANTIC_VERSION = 'substation-spatial-semantic-v6';
+export const SUBSTATION_SPATIAL_SEMANTIC_VERSION = 'substation-spatial-semantic-v7';
 export const SUBSTATION_SPATIAL_SEMANTIC_CACHE_ENTRY =
   '__derived__/substation-spatial-semantic-v6.json';
 

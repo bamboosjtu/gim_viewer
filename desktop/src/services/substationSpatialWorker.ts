@@ -5,7 +5,7 @@ import { createWorkerProbe } from '../measurement/workerProbe.js';
 import {encodeSubstationSpatialCache,SUBSTATION_SPATIAL_SEMANTIC_VERSION,SUBSTATION_PARSER_DOMAIN_VERSION,type SubstationSpatialSnapshotMetadata,type EncodedSpatialCache} from './substationSpatialCodec.js';
 
 export type SpatialWorkerRequest =
-  | { type:'init'; tree:CbmNode|null; relations:FileDevEntry[] }
+  | { type:'init'; tree:CbmNode|null; relations:FileDevEntry[];propertyNames?:readonly string[] }
   | { type:'model'; entry:IfcEntry; bytes:ArrayBuffer|null; text:string|null; blob?:Blob; read:IfcSpatialReadProfile }
   | { type:'finish'; cacheMetadata?:SubstationSpatialSnapshotMetadata };
 export type SpatialWorkerResponse =
@@ -23,7 +23,7 @@ const observer:SubstationSpatialIndexObserver={
 self.onmessage=createWorkerProbe().wrap(async (event:MessageEvent<SpatialWorkerRequest>, trace)=>{
   try {
     const request=event.data;
-    if(request.type==='init') builder=new SubstationSpatialIndexBuilder(request.tree,request.relations,observer);
+    if(request.type==='init') builder=new SubstationSpatialIndexBuilder(request.tree,request.relations,observer,request.propertyNames);
     else if(request.type==='model') {
       let bytes=request.bytes,readMs=request.read.readMs,error=request.read.error;
       if(request.blob){const started=performance.now();try{bytes=await request.blob.arrayBuffer();}catch(cause){error=String(cause);}readMs+=performance.now()-started;}

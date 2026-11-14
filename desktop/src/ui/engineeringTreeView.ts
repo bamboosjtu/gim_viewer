@@ -30,6 +30,7 @@ function rowKey(state: AppState, data: EngineeringNavigationData): string {
   }
   if (state.engineeringNavMode === 'composition') {
     if (target.kind === 'engineering-group') return data.composition.nodes.has(target.key) ? target.key : '';
+    if(target.kind==='engineering-source')for(const node of data.composition.nodes.values())if(node.sourceId===target.key)return node.key;
     const owner = target.kind === 'engineering' ? target.key
       : state.engineeringSnapshot?.memberships.find(m => m.sourceId === target.key)?.ownerId;
     return owner ? data.composition.rowsByEntity.get(owner)?.[0] ?? '' : '';

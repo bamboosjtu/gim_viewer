@@ -1,3 +1,4 @@
+import {engineeringSourceRecords} from '../gim/engineering/sourceGraph.js';
 import { ENGINEERING_SOURCE_VERSION, type EngineeringSources } from '../gim/engineering/buildSources.js';
 import { ENGINEERING_RECOGNITION_VERSION as ENGINEERING_RULES_VERSION } from '../gim/engineering/sourceEvidence.js';
 import { assertEngineeringPartition } from '../engineering/validate.js';
@@ -10,7 +11,7 @@ import { SOURCE_TREE_TEMPLATE_VERSION } from '../gim/engineering/sourceProjectio
 import { ENGINEERING_CATALOG_VERSION } from '../engineering/catalogLabels.js';
 import { packEngineeringSource, unpackEngineeringSource } from './engineeringSourceCodec.js';
 
-export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v6';
+export const ENGINEERING_ENTITY_SCHEMA = 'engineering-entity-v7';
 export const MAX_ENGINEERING_CACHE_BYTES = 384 * 1024 * 1024;
 /** JSON bodies above this size are split into independently compressed parts.
  * The compressed artifact still respects MAX_ENGINEERING_CACHE_BYTES. */
@@ -129,9 +130,10 @@ export function engineeringCacheSizes(bytes:Uint8Array):{plainBytes:number;encod
 export function assertEngineeringSources(value: unknown): asserts value is EngineeringSources {
   requireValid(record(value) && value.version === ENGINEERING_SOURCE_VERSION && value.complete === true && Array.isArray(value.incompleteReasons) && value.incompleteReasons.length === 0, 'incomplete sources');
   const data = value as EngineeringSources;
+  requireValid(record(data.graph)&&(data.graph.attributeRecords===undefined||Array.isArray(data.graph.attributeRecords)&&data.graph.attributeRecords.every(r=>r.attributeOnly===true&&r.track==='dev'&&!r.devOccurrence&&typeof r.attributeContextId==='string')),'attribute source addresses');
   requireValid(record(data.graph) && Array.isArray(data.graph.records) && Array.isArray(data.graph.documents) && Array.isArray(data.graph.cbmOccurrences) && Array.isArray(data.graph.aliases) && Array.isArray(data.graph.references) && strings(data.graph.ifcPaths) && Array.isArray(data.graph.diagnostics) && Array.isArray(data.ifcRecords) && Array.isArray(data.ifcMatches) && Array.isArray(data.models) && Array.isArray(data.spatialNodes), 'source graph');
   const ids = new Set<string>();
-  for (const source of [...data.graph.records, ...data.ifcRecords]) {
+  for (const source of engineeringSourceRecords(data.graph,data.ifcRecords)) {
     requireValid(record(source) && typeof source.id === 'string' && source.id && !ids.has(source.id) && typeof source.name === 'string' && typeof source.source === 'string' && typeof source.source_type === 'string' && typeof source.parent === 'string' && Array.isArray(source.properties) && strings(source.sources) && strings(source.context), 'source record');
     requireValid(source.properties.every(p => record(p) && typeof p.value === 'string' && (p.keys === undefined || strings(p.keys))), 'source properties');
     requireValid(source.nameEvidence === undefined || Array.isArray(source.nameEvidence) && source.nameEvidence.every(n => record(n)
@@ -144,9 +146,12 @@ export function assertEngineeringSources(value: unknown): asserts value is Engin
     requireValid(record(node) && typeof node.key === 'string' && !spatialIds.has(node.key) && typeof node.name === 'string' && typeof node.ifcType === 'string' && typeof node.kind === 'string' && typeof node.globalId === 'string' && typeof node.sourcePath === 'string' && (node.parentKey === null || typeof node.parentKey === 'string') && modelIds.has(node.modelId) && Number.isSafeInteger(node.expressId), 'spatial context');
     spatialIds.add(node.key);
   }
-  for (const source of [...data.graph.records, ...data.ifcRecords]) {
+  for (const source of engineeringSourceRecords(data.graph,data.ifcRecords)) {
     requireValid(!source.parent || ids.has(source.parent), 'source parent');
-    if (source.track === 'dev') {
+    if(source.attributeOnly){
+      requireValid(source.track==='dev'&&!source.devOccurrence&&cbm.has(source.attributeContextId!),'attribute-only occurrence');
+      requireValid(source.relations?.every(r=>r.kind==='host'&&ids.has(r.targetSourceId))??true,'attribute host reference');
+    }else if (source.track === 'dev') {
       const address = source.devOccurrence;
       requireValid(record(address) && ids.has(address.rootSourceId) && cbm.has(address.cbmOccurrenceId) && typeof address.assemblyPath === 'string', 'DEV occurrence address');
     } else {
@@ -154,7 +159,7 @@ export function assertEngineeringSources(value: unknown): asserts value is Engin
       requireValid(record(address) && modelIds.has(address.modelId) && Number.isSafeInteger(address.expressId) && address.expressId > 0 && typeof address.globalId === 'string' && source.context.every(key => spatialIds.has(key)), 'IFC occurrence address');
     }
   }
-  requireValid(data.graph.records.every(r => r.track === 'dev') && data.ifcRecords.every(r => r.track === 'ifc'), 'source tracks');
+  requireValid(data.graph.records.every(r => r.track === 'dev'&&!r.attributeOnly) && data.ifcRecords.every(r => r.track === 'ifc'&&!r.attributeOnly), 'source tracks');
   requireValid(data.models.every(m => record(m) && typeof m.modelId === 'string' && typeof m.path === 'string'), 'model identities');
   const expected = new Set(data.graph.ifcPaths.map(p => p.replace(/\\/g, '/').toLowerCase()));
   const actual = new Set(data.models.map(m => m.path.replace(/\\/g, '/').toLowerCase()));
@@ -166,7 +171,7 @@ function assertSourceInventory(sources: EngineeringSources, id: EngineeringCache
   requireValid(strings(id.entries) && id.entries.length === new Set(id.entries).size, 'inventory identities');
   const paths = new Set(id.entries);
   requireValid(sources.graph.documents.every(doc => typeof doc.path === 'string' && paths.has(doc.path) && strings(doc.rawLines) && Array.isArray(doc.fields)), 'source documents');
-  requireValid([...sources.graph.records, ...sources.ifcRecords].every(r => r.sources.every(path => paths.has(path))), 'source file references');
+  requireValid(engineeringSourceRecords(sources.graph,sources.ifcRecords).every(r => r.sources.every(path => paths.has(path))), 'source file references');
   requireValid(sources.spatialNodes.every(node => paths.has(node.sourcePath)), 'spatial source files');
   const ifc = id.entries.filter(path => /\.ifc$/i.test(path));
   requireValid(ifc.length === sources.graph.ifcPaths.length && sources.graph.ifcPaths.every(path => paths.has(path)), 'delivered IFC inventory');
@@ -196,7 +201,7 @@ export async function decodeEngineeringSources(bytes: Uint8Array, id: Engineerin
 }
 export async function encodeEngineeringEntities(snapshot: EngineeringSnapshot, sources: EngineeringSourceArtifact, id: EngineeringCacheIdentity): Promise<Uint8Array> {
   requireValid(snapshot.scope === id.sourceSha256 && snapshot.rulesVersion === ENGINEERING_RULES_VERSION, 'entity scope / rules');
-  assertEngineeringPartition(snapshot, [...sources.sources.graph.records, ...sources.sources.ifcRecords].map(r => r.id));
+  assertEngineeringPartition(snapshot, engineeringSourceRecords(sources.sources.graph,sources.sources.ifcRecords).map(r => r.id));
   return (await encode('entities', snapshot, id, sources.digest)).bytes;
 }
 export async function decodeEngineeringEntities(bytes: Uint8Array, sources: EngineeringSourceArtifact, id: EngineeringCacheIdentity): Promise<EngineeringSnapshot> {
@@ -204,7 +209,7 @@ export async function decodeEngineeringEntities(bytes: Uint8Array, sources: Engi
   const value = result.payload;
   requireValid(record(value) && value.scope === id.sourceSha256 && value.rulesVersion === ENGINEERING_RULES_VERSION && Array.isArray(value.entities) && Array.isArray(value.memberships) && Array.isArray(value.pending) && Array.isArray(value.relationships) && Array.isArray(value.aliases), 'entity snapshot');
   const snapshot = value as EngineeringSnapshot;
-  assertEngineeringPartition(snapshot, [...sources.sources.graph.records, ...sources.sources.ifcRecords].map(r => r.id));
+  assertEngineeringPartition(snapshot, engineeringSourceRecords(sources.sources.graph,sources.sources.ifcRecords).map(r => r.id));
   return snapshot;
 }
 export { encode as encodeEngineeringArtifact, decode as decodeEngineeringArtifact };

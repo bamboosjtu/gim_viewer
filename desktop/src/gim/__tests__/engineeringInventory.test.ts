@@ -12,7 +12,7 @@ it('lists one transformer with embedded sources, a separate secondary cabinet, a
  expect(inventory.nodes.get(inventory.rootKey)?.entityCount).toBe(2);
  expect(inventory.rowsBySource.size).toBe(3);
  const terminal=graph.records.find(r=>r.name==='端子箱')!,row=inventory.nodes.get(inventory.rowsBySource.get(terminal.id)!)!;
- expect(row.title).toBe('端子箱 [DEV轨道]');expect(row.parent).toBe(inventory.rowsBySource.get(terminal.parent));
+ expect(row.title).toBe('端子箱 [DEV轨道]');expect(row.parent).toBe(inventory.rowsByEntity.get(main.id)![0]);
  const source=[...view.sourceNodes.values()].find(n=>n.kind==='cbm'&&n.documentPath==='unit.cbm')!;
  expect(source).toMatchObject({title:'F4 1号主变本体系统',fLevel:'F4',parent:'source:cbm:cbm:project.cbm'});
 });

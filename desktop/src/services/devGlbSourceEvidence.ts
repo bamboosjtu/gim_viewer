@@ -32,8 +32,12 @@ export async function verifyDevGlbSourceEnvelope(scene: THREE.Group, devPath: st
   const placement=new THREE.Matrix4().fromArray(edge.placementTransformMatrix);for(const i of [12,13,14])placement.elements[i]*=.001;
   const normalMatrix=new THREE.Matrix3().getNormalMatrix(placement),p=new THREE.Vector3(),n=new THREE.Vector3(),actual=new THREE.Vector3();
   const swap=placement.determinant()<0,index=mesh.geometry.getIndex();
+  let yieldedAt=performance.now();
   for(let triangle=0;triangle<triangles;triangle++){
-    if(triangle%2048===0){await new Promise<void>(resolve=>setTimeout(resolve,0));check();}
+    if(triangle%2048===0){
+      check();
+      if(performance.now()-yieldedAt>=8){await new Promise<void>(resolve=>setTimeout(resolve,0));check();yieldedAt=performance.now();}
+    }
     const offset=84+triangle*50;
     n.set(view.getFloat32(offset,true),view.getFloat32(offset+4,true),view.getFloat32(offset+8,true)).applyMatrix3(normalMatrix).normalize();
     if(n.lengthSq()===0)n.set(1,0,0);

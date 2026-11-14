@@ -16,6 +16,7 @@ export async function selectEngineeringCbmSource(state: AppState, path: string, 
   if (occurrences.length === 1) {
     const occurrence = occurrences[0], candidates = new Set<string>();
     for (const record of sources.graph.records) if (record.devOccurrence?.cbmOccurrenceId === occurrence.id && record.devOccurrence.rootSourceId === record.id) candidates.add(record.id);
+    for(const record of sources.graph.attributeRecords??[])if(record.attributeContextId===occurrence.id)candidates.add(record.id);
     for (const alias of sources.graph.aliases) if (alias.sourceId === occurrence.id) for (const id of alias.candidates) candidates.add(id);
     for (const match of sources.ifcMatches) if (match.cbmOccurrenceId === occurrence.id) for (const id of match.ifcSourceIds) candidates.add(id);
     const members = new Map(state.engineeringSnapshot.memberships.map(member => [member.sourceId, member.ownerId]));

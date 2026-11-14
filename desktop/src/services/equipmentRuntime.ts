@@ -8,6 +8,7 @@ import { emptyTipEl } from './presentation/dom.js';
 import { buildAndRenderCbmTree } from './presentation/cbmTreeView.js';
 import { perfMarkProductMoment } from '../utils/perfTimings.js';
 import { isUsableAffineMatrix } from '../gim/geometry/affineMatrix.js';
+import {observeFirstGeometry} from './geometryPresentationService.js';
 
 /** Standalone equipment uses the existing DEV browser/cache/selection owner.
  * It has no IFC coordinate barrier or station semantic-cache completion flag. */
@@ -72,14 +73,13 @@ export async function startGeometryOnlyView(context: GimRuntimeOpenContext): Pro
     if (Number(d?.shown) > 0 && !interactive) {
       interactive = true;
       perfMarkProductMoment('firstUsableGeometryReady', { kind: state.currentProjectType });
-      perfMarkProductMoment('interactive', { kind: state.currentProjectType });
-      hideLoading();
+      if(!state.selectionRequest?.target&&!state.viewerUserInteracted)fitCameraToScene(ctx,state,{force:true});
+      if(state.modRootGroup)void observeFirstGeometry(state,ctx,state.modRootGroup,session,hideLoading).catch(error=>{if(current())console.warn('[Geometry presentation]',error);});
     }
     if (d?.baseRepresentationsSettled && !fitted) {
       fitted = true;
       if (!state.selectionRequest?.target && !state.viewerUserInteracted) fitCameraToScene(ctx, state, { force: true });
-      hideLoading();
-      if (!interactive) showMessage('设备模型没有可显示几何，请查看几何诊断。');
+      if (!interactive) {hideLoading();showMessage('设备模型没有可显示几何，请查看几何诊断。');}
     }
   });
 }

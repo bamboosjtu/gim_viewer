@@ -9,6 +9,9 @@ import type { EngineeringNavigationCacheProjection } from './engineeringNavigati
 import type { EvidenceInventory, EvidencePage, EvidenceQuery, EvidenceRange } from '../engineering/evidence.js';
 
 export interface EngineeringExtractSummary { ifcPaths: string[]; sourceRecords: number; familyPaths?:string[] }
+export interface EngineeringEvidenceCheckpoint {
+  bytes:Uint8Array;identity:EngineeringCacheIdentity;sourceRevision:number;buildSequence:number;snapshot:EvidenceInventory;
+}
 export const ENGINEERING_SOURCE_BATCH_BYTES=8*1024*1024;
 export const ENGINEERING_SOURCE_BATCH_FILES=256;
 /** A bounded immutable carrier; offsets describe original file bytes, not text characters. */
@@ -53,12 +56,15 @@ export type EngineeringWorkerCommand =
   | { type:'evidence-ensure';range:EvidenceRange }
   | { type:'evidence-read';path:string }
   | { type:'release-model';buildId?:number }
+  | { type:'checkpoint-evidence' }
+  | { type:'restore-evidence-checkpoint';checkpoint:EngineeringEvidenceCheckpoint }
   | { type:'recognize-evidence';identity?:EngineeringCacheIdentity }
   | { type: 'encode-cache'; buildId: number; domain: EngineeringCacheDomain; projection?: EngineeringNavigationCacheProjection }
   | { type: 'assemble'; objects: IfcSpatialObject[]; models: SpatialModelSummary[]; nodes?: IfcSpatialNode[]; identity?: EngineeringCacheIdentity }
   | { type: 'restore'; sourceBytes: Uint8Array; entityBytes?: Uint8Array; navigationBytes?: Uint8Array; identity: EngineeringCacheIdentity };
 export type EngineeringWorkerRequest = EngineeringWorkerCommand & { requestId: number };
 export type EngineeringWorkerReply =
+  | {type:'evidence-checkpoint';checkpoint?:EngineeringEvidenceCheckpoint}
   | {type:'evidence';snapshot?:EvidenceInventory;page?:EvidencePage;bytes?:Uint8Array}
   | { type: 'ready' }
   | { type: 'progress'; stage: 'source-index'|'source-traverse'|'source-sort'; completed: number }

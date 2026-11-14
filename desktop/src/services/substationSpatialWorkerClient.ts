@@ -6,6 +6,7 @@ import { buildSubstationSpatialIndexFromFiles, type SubstationSpatialIndex,
   type SubstationSpatialIndexObserver } from '../gim/ifcSpatialParser.js';
 import type { SpatialWorkerRequest, SpatialWorkerResponse } from './substationSpatialWorker.js';
 import type {SubstationSpatialSnapshotMetadata,EncodedSpatialCache} from './substationSpatialCodec.js';
+import recognitionFields from '../gim/engineering/recognitionFields.json';
 
 const active=new Set<()=>void>();
 export function cancelSubstationSpatialWorkers():void {
@@ -19,7 +20,7 @@ export async function buildSubstationSpatialIndexInWorker(
   observer:SubstationSpatialIndexObserver,isCurrent:()=>boolean,
   cacheOptions?:{metadata:SubstationSpatialSnapshotMetadata;onEncoded:(cache:EncodedSpatialCache)=>void},
 ):Promise<SubstationSpatialIndex> {
-  if(typeof Worker==='undefined') return buildSubstationSpatialIndexFromFiles(files,entries,tree,relations,observer);
+  if(typeof Worker==='undefined') return buildSubstationSpatialIndexFromFiles(files,entries,tree,relations,observer,recognitionFields);
   const worker=createMeasuredWorker('spatial', identity => new Worker(measurementWorkerUrl(measuredWorkerAsset,identity), {type:'module',...(identity?{name:identity}:{})}));
   let sequence=0;
   const requests=new WorkerRequests<SubstationSpatialIndex|undefined>(120_000,()=>cancel());
@@ -51,7 +52,7 @@ export async function buildSubstationSpatialIndexInWorker(
     return requests.request(++sequence,()=>worker.postMessage(request,transfer));
   };
   try {
-    await send({type:'init',tree,relations});
+    await send({type:'init',tree,relations,propertyNames:recognitionFields});
     const canonical=(path:string)=>path.replace(/\\/g,'/').toLowerCase();
     const sources=new Map([...files].map(([path,file])=>[canonical(path),file]));
     for(const entry of entries) {

@@ -59,7 +59,7 @@ def verify_package(tool, exe):
         assert 'qtwebengineprocess.exe' in names, 'QtWebEngine child executable missing'
     if tool == 'gim_element':
         assert hashlib.sha256(archive.extract('catalog.json')).hexdigest() == hashlib.sha256(
-            (ROOT / 'desktop/src/engineering/catalog.json').read_bytes()).hexdigest()
+            (ROOT / 'tools/gim_element/catalog.json').read_bytes()).hexdigest()
     with exe.open('rb') as stream:
         sha = digest(stream)
     bundle = exe.with_suffix('.zip')

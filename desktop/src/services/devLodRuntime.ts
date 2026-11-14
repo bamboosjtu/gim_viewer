@@ -29,6 +29,7 @@ import { DEV_GEOMETRY_VERSION, DEV_SPATIAL_CATALOG_VERSION, boxTuple, tupleBox, 
 import { ensureGeometryLayers } from './modGeometryScene.js';
 import { getSourceGeometryOccurrences } from './sourceGeometryService.js';
 import { startSubstationResourceMonitor } from './substationResourceTelemetry.js';
+import {observeFirstGeometry} from './geometryPresentationService.js';
 
 const READINESS_AUDIT_STORAGE_KEY = 'GIM_READINESS_AUDIT';
 
@@ -507,10 +508,9 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     }
     this.instances?.sync();
   }
-  private schedule = () => {
+  private schedule = (invalidate=true) => {
     if (!this.current()) return;
-    this.diagnostics.currentViewReady = false;
-    this.diagnostics.currentViewSettled = false;
+    if(invalidate){this.diagnostics.currentViewReady = false;this.diagnostics.currentViewSettled = false;}
     if (this.timer) return;
     this.timer = setTimeout(() => { this.timer = null; this.update(); }, 200);
   };
@@ -525,7 +525,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     const canvas = (this.ctx.world.renderer as any)?.three?.domElement as HTMLCanvasElement | undefined;
     const rect = canvas?.getBoundingClientRect();
     const view = createDeviceViewContext(camera, rect?.width || 1000, rect?.height || 800);
-    const signature=[...view.clip.elements,...view.eye.toArray(),view.width,view.height,this.anchor?1:0,this.diagnostics.autoLodSuppressed?1:0];
+    const signature=[...view.clip.elements,...view.eye.toArray(),view.width,view.height,this.anchor?1:0,this.diagnostics.autoLodSuppressed?1:0,this.diagnostics.baseRepresentationsSettled?1:0];
     if(signature.some((value,i)=>value!==this.viewSignature[i])) { this.viewRevision++; this.viewSignature=signature; }
     const candidates = this.viewIndex.query(view.frustum);
     this.diagnostics.viewIndex = { ...this.viewIndex.diagnostics };
@@ -553,7 +553,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         // action (refine()); camera proximity and an ordinary click must stay in
         // the inexpensive browser representation.  This is the key boundary
         // between browsing and the fine-model workflow.
-        const browseLod: DeviceLod = !row.group ? 0 : this.diagnostics.autoLodSuppressed
+        const browseLod: DeviceLod = !row.group||!this.diagnostics.baseRepresentationsSettled ? 0 : this.diagnostics.autoLodSuppressed
           ? row.inView ? Math.min(1, row.displayed) as DeviceLod : 0
           : metrics ? chooseDeviceLod(row.displayed, metrics.visible, metrics.pixels) : 0;
         row.browseDesired = browseLod;
@@ -631,6 +631,8 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
         for (const object of highlighted) removeModHighlightGroup(this.state, object);
         if (row.group) this.instances?.remove(row.group);
         this.state.modRootGroup!.add(group); row.group?.removeFromParent();
+        perfMarkProductMoment('firstUsableGeometryReady',{kind:'dev',scope:'geometry-commit'},this.perf);
+        void observeFirstGeometry(this.state,this.ctx,group,this.session,undefined,this.perf).catch(error=>{if(this.current())console.warn('[Geometry presentation]',error);});
         if (row.key) { const count = (this.displayedPins.get(row.key) ?? 1) - 1; if (count) this.displayedPins.set(row.key, count); else { this.displayedPins.delete(row.key); if (!this.placementUsers.has(row.key)) this.pinKeys.delete(row.key); } }
         this.displayedPins.set(key, (this.displayedPins.get(key) ?? 0) + 1);
         row.group = group; row.pickLocalBounds = template.bounds; row.pickBounds = worldBounds;
@@ -746,6 +748,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
       }, this.perf);
     }
     const nextBaseSettled = this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseSettled;
+    const startAutomaticDetail=nextBaseSettled&&!this.diagnostics.baseRepresentationsSettled;
     const nextAllReady = this.diagnostics.anchorReady && this.diagnostics.catalogReady && baseReady && allReady;
     if (nextBaseSettled && !this.diagnostics.baseRepresentationsSettled) {
       perfMarkProductMoment('devBaseRepresentationsSettled', {
@@ -769,6 +772,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
       readinessBlockers: blockers, viewPendingSamples: samples,
       cacheReadBatches: this.templateStore.cacheReader.diagnostics.batches, cacheReadEntries: this.templateStore.cacheReader.diagnostics.entries, cacheReadDeferred: this.templateStore.cacheReader.diagnostics.deferred
     });
+    if(startAutomaticDetail)this.schedule(false);
     const browseState = !this.diagnostics.catalogReady || !this.diagnostics.currentViewSettled
       ? 'loading'
       : failed > 0 ? 'partial'

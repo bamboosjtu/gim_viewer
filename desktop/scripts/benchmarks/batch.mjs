@@ -22,6 +22,7 @@ function recordReport(row,report,state){
   Object.assign(row,{status:readiness.outcome,error:[report.reason,...readiness.reasons].filter(Boolean).join(';'),runId:report.runId,
     conditions:report.conditions,checks:report.evidence?.checks??[],workload:report.evidence?.progress?.workload??null,
     projectType:report.projectType??null,correctness:report.correctness,defectAssessment:report.defectAssessment??null,
+    geometryTimingPolicy:report.conditions?.geometryTimingPolicy??'legacy-model-commit-v1',
     pendingCount:report.pendingCount??null,pendingSourceCount:report.pendingSourceCount??null,
     pendingDigest:report.pendingDigest??null,semanticDigestScope:report.semanticDigestScope??null,
     geometryStructuralFingerprint:report.geometryStructuralFingerprint??null,
@@ -79,7 +80,7 @@ function recordReport(row,report,state){
     geometryStatuses:Object.entries(report.evidence?.geometryStatuses??{}).map(([status,count])=>`${status}:${count}`).join(';'),
     failedSourceSetDigest:report.evidence?.geometryDefects?.failedSourceSetDigest??null,
     failedSourceCount:report.evidence?.geometryDefects?.failedSourceCount??0});
-  for(const key of ['firstResponseMs','modelTreeReadyMs','firstGeometryMs','allGeometryReadyMs','automaticLoadMs','cachePublishMs','settledMs','writeDrainMs','processPrivatePeakBytes'])row[key]=report.metrics?.[key]??null;
+  for(const key of ['firstResponseMs','modelTreeReadyMs','geometryCommitMs','firstGeometryMs','allGeometryReadyMs','automaticLoadMs','cachePublishMs','settledMs','writeDrainMs','processPrivatePeakBytes'])row[key]=report.metrics?.[key]??null;
   const writeStats=report.measurement?.phases?.['host:host.cacheWrite'];
   const writeBytes=writeStats?.workload?.bytes;
   row.cacheWriteBytes=Number.isFinite(writeBytes)?writeBytes:null;

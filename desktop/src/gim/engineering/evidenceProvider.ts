@@ -1,4 +1,5 @@
-import type { EvidenceInventory, EvidencePage, EvidenceQuery, EvidenceRange, SourceAttribute, SourceAttributeAssignment } from '../../engineering/evidence.js';
+import {engineeringSourceRecords} from './sourceGraph.js';
+import type { EvidenceInventory, EvidencePage, EvidenceQuery, EvidenceRange, SourceAttribute, SourceAttributeAssignment,EvidenceStatus } from '../../engineering/evidence.js';
 import { parseFamSectionsWithDiagnostics } from '../famParser.js';
 import type { EngineeringSourceGraph,SourceDocument } from './sourceGraph.js';
 import { attributeFromProperty,annotateAttributeConflicts } from './attributeEvidence.js';
@@ -36,6 +37,13 @@ export class ModelEvidenceProvider {
   recordFailure(path:string):void{this.setStatus(path,'failed');const entry=this.entries.get(path);if(entry)this.entries.set(path,{...entry,readStatus:'failed'});this.revision++;}
   resetObservations():void{this.documents.clear();this.attributes.clear();this.reads.clear();this.assignmentIndex.clear();this.directAssignments.clear();this.propertyViews.clear();this.extraByPath.clear();this.attributeBytes.clear();this.graphDocuments.clear();this.cachedBytes=0;this.parsedComplete=0;this.refsByPath.clear();this.rowsByPath.clear();for(const path of this.entryIds)this.entries.set(path,{...this.entries.get(path)!,status:'not_requested',readStatus:'not_requested'});this.revision++;}
   getRevision():number{return this.revision;}
+  restoreMetadata(snapshot:EvidenceInventory):void{
+    if(snapshot.scope!==this.scope||snapshot.entries.length!==this.entries.size||new Set(snapshot.entries.map(e=>e.id)).size!==this.entries.size||snapshot.entries.some(e=>!this.entryIds.has(e.id))||!Number.isSafeInteger(snapshot.revision)||snapshot.revision<0)throw Error('Invalid evidence checkpoint metadata');
+    this.detachRaw();this.entries=new Map(snapshot.entries.map(e=>[e.id,{...e}]));this.parsedComplete=snapshot.entries.filter(e=>e.status==='complete').length;this.revision=Math.max(this.revision,snapshot.revision);this.snapshot=undefined;
+  }
+  seedCoverage(coverage:readonly {path:string;status:EvidenceStatus}[]):void{let changed=false;for(const row of coverage)if(this.entries.get(row.path)?.status!==row.status){this.setStatus(row.path,row.status);changed=true;}if(changed)this.revision++;}
+  /** Drop reconstructible details while retaining the truthful metadata history. */
+  detachRaw():void{this.documents.clear();this.attributes.clear();this.reads.clear();this.assignmentIndex.clear();this.directAssignments.clear();this.propertyViews.clear();this.extraByPath.clear();this.attributeBytes.clear();this.graphDocuments.clear();this.refsByPath.clear();this.rowsByPath.clear();this.cachedBytes=0;this.revision++;}
   getSnapshot(entryIds?:readonly string[]):EvidenceInventory{
     if(entryIds){this.checkRange({entryIds,kinds:[]});return {scope:this.scope,revision:this.revision,inventoryComplete:true,entryRange:[...entryIds],inventoryTotals:{entries:this.entries.size,parsedComplete:this.parsedComplete},entries:entryIds.map(id=>({...this.entries.get(id)!})),coverage:entryIds.map(id=>({entryId:id,status:this.entries.get(id)!.status,capability:'attributes',materialization:this.attributes.has(id)?'materialized':'not_materialized',rawAvailable:this.documents.has(id)||this.propertyViews.has(id)||this.extraByPath.has(id)}))};}
     if(this.snapshot?.revision===this.revision)return this.snapshot;
@@ -53,7 +61,7 @@ export class ModelEvidenceProvider {
       const target=ref.target;
       if(target&&/\.fam$/i.test(target)){const paths=familiesByOwner.get(ref.owner)??new Set<string>();paths.add(target);familiesByOwner.set(ref.owner,paths);}
     }
-    for(const row of [...graph.records,...extra]){const rows=this.rowsByPath.get(row.source)??[];rows.push({id:row.id,path:row.source});this.rowsByPath.set(row.source,rows);}
+    for(const row of engineeringSourceRecords(graph,extra)){const rows=this.rowsByPath.get(row.source)??[];rows.push({id:row.id,path:row.source});this.rowsByPath.set(row.source,rows);}
     for(const node of graph.cbmOccurrences){const rows=this.rowsByPath.get(node.documentPath)??[];rows.push({id:node.id,path:node.documentPath});this.rowsByPath.set(node.documentPath,rows);}
     this.assignmentIndex.clear();
     const assignmentKeys=new Map<string,Set<string>>();

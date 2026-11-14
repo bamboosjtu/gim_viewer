@@ -39,7 +39,7 @@ describe('construction and operation engineering wholes', () => {
     expect(fine.entities.map(e => [e.id, e.category])).toEqual(coarse.entities.map(e => [e.id, e.category]));
     expect(fine.entities.find(e => e.category === 'E01')?.sourceIds).toEqual(['main', 'radiator', 'terminal', 'wrapper']);
     expect(fine.entities).toHaveLength(1);
-    expect(build([source('box','独立端子箱')]).entities[0].category).toBe('E16.terminal_box');
+    expect(build([source('box','独立端子箱')]).entities[0].category).toBe('M10');
   });
 
   it('keeps operating boxes and terminal boxes in actual equipment assemblies while preserving standalone boxes',()=>{
@@ -51,11 +51,11 @@ describe('construction and operation engineering wholes', () => {
       source('attached','端子箱',{assemblyParentId:'wrapper'}),
       source('standalone','端子箱模型01:Null:2754317'),
     ]);
-    expect(model.entities.map(e=>e.category).sort()).toEqual(['E05','E10','E16.terminal_box']);
+    expect(model.entities.map(e=>e.category).sort()).toEqual(['E05','E10','M10']);
     const bySource=new Map(model.memberships.map(m=>[m.sourceId,m]));
     expect(bySource.get('actuator')).toMatchObject({ownerId:bySource.get('gis')!.ownerId,interpretation:{meaning:'part',basis:'equipment_actuator_composition',independent:false}});
     expect(bySource.get('attached')).toMatchObject({ownerId:bySource.get('capacitor')!.ownerId,interpretation:{meaning:'part',basis:'equipment_terminal_composition',independent:false}});
-    expect(model.entities.find(e=>e.category==='E16.terminal_box')!.sourceIds).toEqual(['standalone']);
+    expect(model.entities.find(e=>e.category==='M10')!.sourceIds).toEqual(['standalone']);
     expect(build([source('free','独立机构箱')]).entities[0].category).toBe('E17');
     // The host category must not decide the boundary. A real assembly edge makes
     // a terminal box a host component even when a source declares it independent.
@@ -146,7 +146,7 @@ describe('construction and operation engineering wholes', () => {
 
   it('creates distinct E16 wholes for terminal box, panel, control cabinet and battery set', () => {
     const model = build([source('term', '独立端子箱'), source('panel', '二次屏柜'), source('control', 'HGIS智能控制柜'), source('battery', '蓄电池组')]);
-    expect(model.entities.map(entity => entity.category).sort()).toEqual(['E16.battery_set', 'E16.control_cabinet', 'E16.panel_cabinet', 'E16.terminal_box']);
+    expect(model.entities.map(entity => entity.category).sort()).toEqual(['E16.battery_set', 'E16.control_cabinet', 'E16.panel_cabinet', 'M10']);
   });
 
   it('uses M09 only for explicit or material-typed other materials', () => {

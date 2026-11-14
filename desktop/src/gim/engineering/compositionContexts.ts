@@ -1,3 +1,4 @@
+import {engineeringSourceRecords} from './sourceGraph.js';
 import type { EngineeringSnapshot, EvidenceValue } from '../../engineering/types.js';
 import type { CompositionDeclaration } from '../../engineering/composition.js';
 import { canonicalBuildingName, declaredEngineeringComposition, type CompositionContextEvidence } from '../../engineering/compositionTemplate.js';
@@ -14,7 +15,7 @@ export interface SourceCompositionEvidence extends CompositionContextEvidence {
  * Domain mapping receives no F labels, file hierarchy depth, viewer or bounds. */
 export function collectCompositionEvidence(sources: EngineeringSources, snapshot: EngineeringSnapshot,
   spatial: ReadonlyMap<string, EngineeringSpatialContext>): SourceCompositionEvidence[] {
-  const records = new Map([...sources.graph.records, ...sources.ifcRecords].map(record => [record.id, record]));
+  const records = new Map(engineeringSourceRecords(sources.graph,sources.ifcRecords).map(record => [record.id, record]));
   const cbm = new Map(sources.graph.cbmOccurrences.map(node => [node.id, node]));
   const docs = new Map(sources.graph.documents.map(doc => [doc.path, doc]));
   type Declaration = CompositionContextEvidence['declarations'][number];
@@ -33,7 +34,7 @@ export function collectCompositionEvidence(sources: EngineeringSources, snapshot
   }
   const cbmBySource = new Map<string, Set<string>>();
   function link(sourceId:string, occurrence:string):void {const keys=cbmBySource.get(sourceId)??new Set();keys.add(occurrence);cbmBySource.set(sourceId,keys);}
-  for (const record of sources.graph.records) for (const key of record.context) if (cbm.has(key)) link(record.id,key);
+  for (const record of engineeringSourceRecords(sources.graph)) for (const key of record.context) if (cbm.has(key)) link(record.id,key);
   for (const alias of sources.graph.aliases) if (alias.status==='confirmed') for (const source of alias.candidates) link(source,alias.sourceId);
   for (const match of sources.ifcMatches) if (match.status==='confirmed') for (const source of match.ifcSourceIds) link(source,match.cbmOccurrenceId);
   const sourceContexts = new Map<string, Declaration[]>();

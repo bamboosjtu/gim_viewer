@@ -21,7 +21,7 @@ export interface EvidenceInventory {
   inventoryTotals?:{entries:number;parsedComplete:number};
   scope:string;revision:number;inventoryComplete:boolean;
   entries:readonly {id:string;path:string;formatHint:string;readStatus:'not_requested'|'available'|'failed';status:EvidenceStatus}[];
-  coverage:readonly {entryId:string;status:EvidenceStatus;capability?:EvidenceRange['kinds'][number];materialization?:'materialized'|'not_materialized';rawAvailable?:boolean}[];
+  coverage:readonly {entryId:string;status:EvidenceStatus;capability?:EvidenceRange['kinds'][number];materialization?:'materialized'|'not_materialized';rawAvailable?:boolean;restorable?:boolean}[];
 }
 export interface EvidencePage {
   revision:number;attributes:readonly SourceAttribute[];assignments:readonly SourceAttributeAssignment[];

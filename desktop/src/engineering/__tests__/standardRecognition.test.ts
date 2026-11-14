@@ -52,7 +52,7 @@ it.each(['SYSCLASSIFYNAME','PARTNAME'])('R09 maps only verified exact %s terms, 
     const graph=await extractEngineeringSourceGraph({paths:Object.keys(raw),readText:async p=>raw[p]});
     const result=interpretObject(toObjectEvidence(graph.records[0]));
     expect(result).toMatchObject({category:'E05',categoryStatus:'confirmed',equipmentType:{id:'gis',status:'confirmed'}});
-    expect(result.vocabularyObservations?.[0]).toMatchObject({field,rawValue:'GIS',status:'mapped',dictionaryVersion:'source-keywords-1'});
+    expect(result.vocabularyObservations?.[0]).toMatchObject({field,rawValue:'GIS',status:'mapped',dictionaryVersion:'source-keywords-2'});
     expect(result.vocabularyObservations?.[0].dictionaryEvidence).toContain('C17');
     expect(result.classificationEvidence?.some(id=>id.includes('project.cbm'))).toBe(true);
   }
@@ -62,6 +62,18 @@ it.each(['SYSCLASSIFYNAME','PARTNAME'])('R09 maps only verified exact %s terms, 
     expect(result.equipmentType).toBeUndefined();
   }
   expect(interpretObject(toObjectEvidence(record('x','OTHERS'))).vocabularyObservations).toBeUndefined();
+});
+
+it.each([['本体','body','A5'],['散热器','radiator','A13'],['Body','body','B5']])('maps exact PARTNAME=%s with field-level dictionary evidence',(value,id,cell)=>{
+  const result=interpretObject(toObjectEvidence(record('x','OTHERS',{properties:[{keys:['PARTNAME'],value,path:'a.cbm',line:1}]})));
+  expect(result.componentType).toMatchObject({id,status:'confirmed'});
+  expect(result.vocabularyObservations?.[0]).toMatchObject({rawValue:value,status:'mapped',dictionaryVersion:'source-keywords-2'});
+  expect(result.vocabularyObservations?.[0].dictionaryEvidence).toContain(cell);
+});
+it('maps the reviewed Chinese equipment name without guessing unknown code prefixes',()=>{
+  const result=interpretObject(toObjectEvidence(record('x','OTHERS',{properties:[{keys:['SYSCLASSIFYNAME'],value:'油浸式变压器',path:'a.cbm'}]})));
+  expect(result).toMatchObject({category:'E-T',equipmentType:{id:'oil_immersed_transformer'}});
+  for(const value of ['本体一号','散热器-未知','GYAA011-unknown'])expect(interpretObject(toObjectEvidence(record('x','OTHERS',{properties:[{keys:['PARTNAME'],value}]}))).vocabularyObservations?.[0].status).toBe('unresolved');
 });
 
 it('compares observed attributes only within the same object, stage, Pset and applicability',()=>{

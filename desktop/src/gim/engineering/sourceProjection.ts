@@ -1,7 +1,8 @@
+import {engineeringSourceRecords} from './sourceGraph.js';
 import type { EngineeringSources } from './buildSources.js';
 import { sourceDocumentTitle, sourceRecordTitle } from './sourceTitles.js';
 
-export const SOURCE_TREE_TEMPLATE_VERSION = 'engineering-source-tree-v1';
+export const SOURCE_TREE_TEMPLATE_VERSION = 'engineering-source-tree-v2';
 export interface EngineeringSourceNode {
   key: string;
   title: string;
@@ -22,7 +23,7 @@ const spatialKey = (key: string) => `source:spatial:${key}`;
 /** Faithful source organization; independent of business composition and inventory. */
 export function projectEngineeringSource(sources:EngineeringSources) {
   const spatialNodes=new Map(sources.spatialNodes.map(n=>[n.key,n]));
-  const records = new Map([...sources.graph.records, ...sources.ifcRecords].map(record => [record.id, record]));
+  const records = new Map(engineeringSourceRecords(sources.graph,sources.ifcRecords).map(record => [record.id, record]));
   const sourceNodes = new Map<string, EngineeringSourceNode>(), sourceRoot = 'source:project', sourceRows = new Map<string, string>();
   function add(node: EngineeringSourceNode) { sourceNodes.set(node.key, node); }
   add({ key: sourceRoot, title: 'GIM 来源（DEV / IFC）', kind: 'group', children: [] });
@@ -50,9 +51,9 @@ export function projectEngineeringSource(sources:EngineeringSources) {
     const key = recordKey(source.id);
     const containers = source.context.filter(key => spatial?.nodeByKey.has(key));
     const parent = source.parent && records.has(source.parent) ? recordKey(source.parent)
-      : source.track === 'dev' && source.devOccurrence ? cbmKey(source.devOccurrence.cbmOccurrenceId)
+      : source.attributeOnly&&source.attributeContextId?cbmKey(source.attributeContextId):source.track === 'dev' && source.devOccurrence ? cbmKey(source.devOccurrence.cbmOccurrenceId)
         : source.track === 'ifc' ? containers.length ? spatialKey(containers[0]) : ifcKey(source.sources[0]) : 'source:cbm';
-    add({ key, title: sourceRecordTitle(source), kind: 'record', sourceId: source.id, documentPath: source.source, parent, children: [] });
+    add({ key, title: sourceRecordTitle(source)+(source.attributeOnly?'（仅属性引用）':''), kind: 'record', sourceId: source.id, documentPath: source.source, parent, children: [] });
     sourceRows.set(source.id, key);
     if (!source.parent) for (const container of containers.slice(1)) add({ key: `${key}:spatial:${container}`, title: source.name || source.source_type,
       kind: 'record', sourceId: source.id, documentPath: source.source, parent: spatialKey(container), children: [] });

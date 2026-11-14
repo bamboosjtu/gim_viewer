@@ -60,6 +60,6 @@ it('decodes a GBK DeviceName-only family before classification without rewriting
   await handle({type:'files',files:[{path:paths[0],bytes:new TextEncoder().encode('OBJECTMODELPOINTER=main.dev')},{path:paths[1],bytes:new TextEncoder().encode('TYPE=OTHERS\nBASEFAMILY=family.fam')},{path:paths[2],bytes:family}]});
   await handle({type:'extract'});const reply=await handle({type:'assemble',objects:[],models:[]});if(reply.type!=='model')throw Error('Model expected');
   const result=await decodeEngineeringWorkerResult(reply.result,()=>true);
-  expect(result.sources.graph.records[0].name).toBe('端子箱');expect(result.snapshot.entities[0].category).toBe('E16.terminal_box');
+  expect(result.sources.graph.records[0].name).toBe('端子箱');expect(result.snapshot.entities[0].category).toBe('M10');
   expect(family).toEqual(original);
 });

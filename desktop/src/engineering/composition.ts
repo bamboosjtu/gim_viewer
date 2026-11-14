@@ -1,5 +1,7 @@
 import type { EngineeringSnapshot } from './types.js';
 import { categoryLabel } from './catalogLabels.js';
+// Reuse ICU setup across large projections; preserve the existing collation.
+const compareTitles=new Intl.Collator('zh-CN',{numeric:true}).compare;
 
 export interface CompositionGroup {
   key: string;
@@ -19,7 +21,8 @@ export interface CompositionDeclaration {
 export interface CompositionNode {
   key: string;
   title: string;
-  kind: 'project' | 'group' | 'entity' | 'pending';
+  kind: 'project' | 'group' | 'entity' | 'pending' | 'record';
+  sourceId?:string;
   targetId?: string;
   children: string[];
   parent?: string;
@@ -35,7 +38,7 @@ export interface EngineeringComposition {
   nodes: Map<string, CompositionNode>;
   rowsByEntity: Map<string, string[]>;
 }
-export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v11';
+export const ENGINEERING_COMPOSITION_VERSION = 'engineering-composition-v12';
 function groupOrder(part:CompositionGroup):number|undefined {
   if(part.kind==='area')return part.key==='area:main'?20:21-(Number(part.title.match(/\d+/)?.[0])||0)/10000;
   if(part.kind==='building'){
@@ -57,6 +60,10 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
   const orders = new Map<string, number>();
   nodes.set(rootKey, { key: rootKey, title: title || '工程组成', kind: 'project', children: [], entityCount: 0 });
   const byEntity = new Map(assignments.map(a => [a.entityId, a]));
+  const parts=new Map<string,EngineeringSnapshot['memberships']>();
+  for(const member of snapshot.memberships)if(member.ownerId&&member.interpretation.meaning==='part'){
+    const rows=parts.get(member.ownerId)??[];rows.push(member);parts.set(member.ownerId,rows);
+  }
   function group(parent: string, kind: string, value: string, name: string, inferred = false): string {
     const key = childKey(parent, kind, value);
     if (!nodes.has(key)) {
@@ -86,6 +93,11 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
       const key = childKey(parent, 'entity', entity.id);
       nodes.set(key, { key, title: entity.name || categoryLabel(entity.category), kind: 'entity', targetId: entity.id, parent, children: [], entityCount: 1, ...(assignment?.inferred ? {inferred:true} : {}) });
       nodes.get(parent)!.children.push(key);
+      for(const member of parts.get(entity.id)??[]){
+        const partKey=childKey(key,'part',member.sourceId);
+        nodes.set(partKey,{key:partKey,parent:key,title:(member.interpretation.sourceName||member.interpretation.componentType?.id||'部件')+(member.interpretation.membershipStatus==='candidate'?' · 归属候选':''),kind:'record',sourceId:member.sourceId,children:[],entityCount:0});
+        nodes.get(key)!.children.push(partKey);
+      }
       const rows = rowsByEntity.get(entity.id) ?? []; rows.push(key); rowsByEntity.set(entity.id, rows);
       for (let cursor: string | undefined = parent; cursor; cursor = nodes.get(cursor)?.parent) {
         const ids = members.get(cursor) ?? new Set<string>(); ids.add(entity.id); members.set(cursor, ids);
@@ -106,7 +118,7 @@ export function projectEngineeringComposition(snapshot: EngineeringSnapshot, ass
   for (const [key, node] of nodes) {
     if (node.kind === 'group' || node.kind === 'project') node.entityCount = members.get(key)?.size ?? 0;
     if (node.kind === 'group' && node.declaredContextIds?.length && node.entityCount === 0) node.unbound = true;
-    node.children.sort((a, b) => (orders.get(a) ?? 100) - (orders.get(b) ?? 100) || nodes.get(a)!.title.localeCompare(nodes.get(b)!.title, 'zh-CN', { numeric: true }) || a.localeCompare(b));
+    node.children.sort((a, b) => (orders.get(a) ?? 100) - (orders.get(b) ?? 100) || compareTitles(nodes.get(a)!.title,nodes.get(b)!.title) || a.localeCompare(b));
   }
   return { version: ENGINEERING_COMPOSITION_VERSION, rootKey, nodes, rowsByEntity };
 }

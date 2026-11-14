@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach,describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { AppState } from '../../app/state.js';
 import type { CbmNode, IfcEntry } from '../../gim/types.js';
@@ -6,6 +6,7 @@ import { loadAllIfcFiles } from '../openGimService.js';
 import { perfMarkProductMoment, perfProductMomentSnapshot, perfReset } from '../../utils/perfTimings.js';
 
 const mocks = vi.hoisted(() => ({
+  frames:[] as Array<()=>void>,
   ensureEngineReady: vi.fn(),
   loadIfcEntry: vi.fn(),
   getViewerRuntimeWithUI: vi.fn(),
@@ -21,6 +22,9 @@ const mocks = vi.hoisted(() => ({
   hideLoading: vi.fn(),
   setIfcStatus: vi.fn(),
 }));
+vi.mock('../geometryPresentationService.js',()=>({observeFirstGeometry:vi.fn(async(_state,_ctx,_root,_session,onPresented,perf)=>{
+  mocks.frames.push(()=>{perfMarkProductMoment('firstVisibleGeometryReady',{test:true},perf);perfMarkProductMoment('firstGeometryReady',{test:true},perf);perfMarkProductMoment('interactive',{test:true},perf);onPresented?.();});
+})}));
 
 vi.mock('../presentation/shell_statusBar.js',async importOriginal=>({...(await importOriginal<typeof import('../presentation/shell_statusBar.js')>()),setIfcStatus:mocks.setIfcStatus,setConnectionStatus:vi.fn()}));
 
@@ -81,12 +85,18 @@ function makeTree(): CbmNode {
 }
 
 describe('Substation Loading readiness lifecycle', () => {
+  afterEach(()=>{vi.restoreAllMocks();});
   it('returns at first usable IFC, isolates spatial failure, and keeps the IFC tail sequential', async () => {
     vi.clearAllMocks();
+    mocks.frames.length=0;
+    const paintCallbacks:FrameRequestCallback[]=[];
+    vi.spyOn(globalThis,'requestAnimationFrame').mockImplementation(callback=>{paintCallbacks.push(callback);return paintCallbacks.length;});
+    const backgroundStarted=deferred<void>();
     const secondIfcGate = deferred<void>();
     const secondIfcStarted = deferred<void>();
     const spatialGate = deferred<void>();
     const spatialStart = vi.fn(() => {
+      backgroundStarted.resolve();
       // A real spatial starter owns its promise and is intentionally not
       // awaited by loadAllIfcFiles.  Keep this one pending to prove that the
       // interactive caller is independent from it.
@@ -167,6 +177,16 @@ describe('Substation Loading readiness lifecycle', () => {
     // waitFor's one-second polling deadline.
     await loading;
     await secondIfcStarted.promise;
+
+    expect(perfProductMomentSnapshot().interactive).toBeNull();
+    expect(spatialStart).not.toHaveBeenCalled();expect(cachePersistenceStart).not.toHaveBeenCalled();
+    expect(mocks.hideLoading).not.toHaveBeenCalled();
+    mocks.frames[0]();
+    expect(spatialStart).not.toHaveBeenCalled();
+    expect(paintCallbacks.length).toBeGreaterThan(0);
+    for(const callback of paintCallbacks.splice(0))callback(0);
+    await backgroundStarted.promise;
+    expect(spatialStart).toHaveBeenCalledOnce();
 
     expect(mocks.fitCameraToStationOverview).toHaveBeenCalledTimes(1);
     expect(callerSettled).toBe(true);

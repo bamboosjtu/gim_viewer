@@ -10,6 +10,7 @@ import { scheduleSubstationResourceCheckpoint } from './substationResourceTeleme
 import { hideLoading } from './gimOpenCore.js';
 import { showLoadingBeforeInteractive } from './substationPresentation.js';
 import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
+import {observeFirstGeometry} from './geometryPresentationService.js';
 
 /**
  * MOD/STL 自动加载（IFC 加载后置步骤，同时用于无 IFC 的纯 MOD 工程）。
@@ -78,7 +79,7 @@ export async function autoLoadModStlPostIfc(
       });
       if (!state.isCurrentSession(session)) return;
       finishModStl(undefined, { path: 'device-lod-directory', onDemand: true });
-      hideLoading();
+      if(state.modRootGroup)void observeFirstGeometry(state,resourceCtx,state.modRootGroup,session,hideLoading,perfSession).catch(reportBackgroundError);
       return; // Current-view readiness is recorded by the LOD owner, not a whole-station completion.
     }
 
@@ -256,11 +257,12 @@ export async function autoLoadModStlPostIfc(
     if (!state.isCurrentSession(session)) return;
     if (!perfProductMomentSnapshot().firstGeometryReady
       && (result.modCount > 0 || result.stlCount > 0)) {
-      perfMarkProductMoment('firstGeometryReady', {
+      perfMarkProductMoment('firstUsableGeometryReady', {
         kind: 'mod-stl',
         modCount: result.modCount,
         stlCount: result.stlCount,
       }, perfSession);
+      if(resourceCtx&&state.modRootGroup)void observeFirstGeometry(state,resourceCtx,state.modRootGroup,session,hideLoading,perfSession).catch(reportBackgroundError);
       void Promise.resolve(sampleSubstationMemory(state, '第一个几何模型后', perfSession, {
         kind: 'mod-stl',
         modCount: result.modCount,

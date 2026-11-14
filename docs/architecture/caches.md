@@ -29,11 +29,11 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 | DEV 几何 | `geometry-cache-v20-source-bound-stl` | [db.rs](../../desktop/src-tauri/src/db.rs)、[DEV 目录](../../desktop/src/services/devSpatialCatalog.ts) | occurrence 引用、manifest、GLB 完整性、STL 共享矩阵和经过源字节复核的单来源范围证据 |
 | DEV LOD 派生 | 几何版本组合 `dev-spatial-catalog-v2`；有源 SHA 的浏览器上下文使用 IndexedDB `gim-dev-lod-v1` | [DEV 目录](../../desktop/src/services/devSpatialCatalog.ts)、[LOD 缓存](../../desktop/bridge/devLodCache.ts) | 源 SHA、DEV 路径、几何版本与 LOD；L0 持久化、仅热点 L1 选择性持久化、L2 默认内存；模板/目录逐条原子提交 |
 
-| 变电 Spatial | `substation-spatial-semantic-v6` | [Spatial codec](../../desktop/src/services/substationSpatialCodec.ts)、[缓存 I/O](../../desktop/src/services/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
+| 变电 Spatial | `substation-spatial-semantic-v7` | [Spatial codec](../../desktop/src/services/substationSpatialCodec.ts)、[缓存 I/O](../../desktop/src/services/substationSpatialSemanticCache.ts) | 精确大小写身份、宿主链、原始 IFC Name；缺失/损坏重建 |
 | IFC Spatial parser | `gim-substation-parser-v25` | [Spatial codec](../../desktop/src/services/substationSpatialCodec.ts) | 独立于变电语义域 |
-| 工程来源 | `engineering-source-v14` | [来源契约](../../desktop/src/gim/engineering/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；保留实际 FAM 归属、属性对象/Pset/实例类型范围；独立原子文件 |
-| 工程实体 | `engineering-entity-v6` + `engineering-wholes-12` + `substation-vocabulary-2` / `source-keywords-1` + 来源类型/Proxy 映射版本 + `engineering-catalog-v2` | [实体编码](../../desktop/src/services/engineeringCacheCodec.ts)、[识别版本](../../desktop/src/gim/engineering/sourceEvidence.ts)、[目录契约](../../desktop/src/engineering/catalog.json) | 绑定来源内容摘要、实体 schema 和复合识别版本；单独修改识别词汇只重建实体、导航 |
-| 工程导航 | `engineering-navigation-v10` + `engineering-composition-v11` + `engineering-source-tree-v1` + `engineering-inventory-v5` + 目录版本 | [三视图投影](../../desktop/src/gim/engineering/navigation.ts)、[组成](../../desktop/src/engineering/composition.ts)、[来源树](../../desktop/src/gim/engineering/sourceProjection.ts)、[清册](../../desktop/src/engineering/inventoryTemplate.ts)、[导航缓存](../../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹和空间投影策略版本；校验节点可达性、完整投影标记与覆盖率；部分范围不写导航缓存 |
+| 工程来源 | `engineering-source-v16` | [来源契约](../../desktop/src/gim/engineering/buildSources.ts)、[编码](../../desktop/src/services/engineeringCacheCodec.ts)、[来源表](../../desktop/src/services/engineeringSourceCodec.ts) | 源 SHA、条目清单、来源/IFC parser 契约、完整性；保留实际 FAM 归属、属性对象/Pset/实例类型范围；独立原子文件 |
+| 工程实体 | `engineering-entity-v7` + `engineering-wholes-12` + `substation-vocabulary-3` / `source-keywords-2` + substation-standard-index-1 / membership-recovery-1 / 来源类型与 Proxy 映射版本 + `engineering-catalog-v3` | [实体编码](../../desktop/src/services/engineeringCacheCodec.ts)、[识别版本](../../desktop/src/gim/engineering/sourceEvidence.ts)、[目录契约](../../desktop/src/engineering/catalog.json) | 绑定来源内容摘要、实体 schema 和复合识别版本；单独修改识别词汇只重建实体、导航 |
+| 工程导航 | `engineering-navigation-v11` + `engineering-composition-v12` + `engineering-source-tree-v2` + `engineering-inventory-v6` + 目录版本 | [三视图投影](../../desktop/src/gim/engineering/navigation.ts)、[组成](../../desktop/src/engineering/composition.ts)、[来源树](../../desktop/src/gim/engineering/sourceProjection.ts)、[清册](../../desktop/src/engineering/inventoryTemplate.ts)、[导航缓存](../../desktop/src/services/engineeringNavigationCache.ts) | 绑定来源摘要、实体快照指纹和空间投影策略版本；校验节点可达性、完整投影标记与覆盖率；部分范围不写导航缓存 |
 | IFC 浏览 LOD | `bim-lod-v8` 组合 | [features](../../desktop/src/config/features.ts)、[LOD 缓存](../../desktop/bridge/ifcLodCache.ts) | 源 SHA、条目、LOD 策略、单次解析、依赖版本；分远景/近景/属性独立失效 |
 | IFC 区域模板 | `near-templates-v1`，附加于浏览 LOD 键 | [features](../../desktop/src/config/features.ts) | 模板几何与逐对象放置；不重建有效远景 |
 | Android 线路语义 | `mobile-powerline-v3` | [移动存储](../../app/src-tauri/src/storage.rs)、[领域投影](../../packages/powerline-core/src/domain.ts) | 私有源 SHA/大小、对象与属性范围、FAM 分类 |
@@ -46,7 +46,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 
 0.2.3 的来源完成凭据限定为已遍历的结构与识别所需来源，不代表全包所有属性均已解析。证据端口分别报告 Inventory 与条目属性覆盖，工程快照另外记录输入/已处理范围。元数据/详情请求不重传完整构建；运行时构建传输为 `engineering-worker-table-v3`。FAM 记录及上下文随来源域恢复，属性详情在 Worker 内复用已有解析结果。
 
-识别失败可保存有效来源域；投影失败可保存有效来源/实体域，不写完整导航。PARTINDEX 伪根不再进入新的来源域和物理目录，未引用的旧模板文件不形成新的物理 occurrence；真实引用的有效模板继续复用。构建结果载荷释放后证据 Worker 仍由工程会话持有，关闭/切换释放。
+识别失败可保存有效来源域；投影失败可保存有效来源/实体域，不写完整导航。PARTINDEX 伪根不再进入新的来源域和物理目录，未引用的旧模板文件不形成新的物理 occurrence；真实引用的有效模板继续复用。完整来源压缩体可按源身份与修订恢复时，将压缩检查点和覆盖摘要转移给会话客户端，收齐测量尾消息后终止空闲证据 Worker，释放其堆容量。元数据和未驻留详情查询不重启 Worker、不解码；显式物化才恢复，同一修订的连续请求复用索引。不能重建的局部证据继续保留，解析覆盖不因释放详情而变成未解析。
 
 ### 先发布、后写缓存
 
@@ -56,7 +56,7 @@ SQLite 共享 `gim_project`；变电表使用 `substation_*`，线路表使用 `
 
 - Worker 的 `encode-cache` 绑定 `buildId`，并要求请求域等于当前 `plan[0]`；
 - 编码成功才 `plan.shift()`，失败清空 plan；
-- 每域写入后立即释放 `encoded.bytes`，再编码下一域，避免三个域的压缩缓冲同时驻留；
+- 每域写入后立即释放传输用 `encoded.bytes`，再编码下一域，避免三个传输缓冲同时驻留；会话为按需来源恢复保留一份有效来源压缩体（空闲时由客户端持有），不保留实体或导航压缩副本；
 - 每次 `await` 后检查当前会话/构建身份；旧构建结果不写。
 - 最终导航通过组成增量返回 Worker；若主线程复制或修改了应保持不变的来源树、清册或搜索结构，投影校验失败时跳过导航域，标记 `partial` / `navigation-projection-unavailable`。保留已发布视图与已写来源、实体域；不把未完成的 Worker base 当成完整导航回退写入。实际编码或写盘失败仍标 `error`。
 

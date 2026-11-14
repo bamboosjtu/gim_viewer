@@ -24,7 +24,7 @@ it('groups catalog subtypes while preserving distinct instances, internal member
  expect(inventory.nodes.get(inventory.rootKey)!.children.map(key=>inventory.nodes.get(key)!.title)).toEqual(['设备','装置性材料','构件','其他']);
  expect([...inventory.nodes.values()].some(n=>n.title==='仅来源（不计整体）')).toBe(true);
  expect(view.compositionSearch.every(r=>r.subtitle.includes('36S'))).toBe(true);
- expect(view.inventorySearch!.every(r=>!r.subtitle.includes('36S')&&r.subtitle.includes('二次设备 / 端子箱'))).toBe(true);
+ expect(view.inventorySearch!.every(r=>!r.subtitle.includes('36S')&&r.subtitle.includes('装置性材料 / 端子箱'))).toBe(true);
  view.composition=projectEngineeringComposition(built.snapshot,built.snapshot.entities.map(e=>({entityId:e.id,paths:[[{key:'custom',title:'另一业务路径',kind:'system'}]],evidence:[]})),'另一个工程模板');
  expect(projectEngineeringInventory(built.snapshot,graph.records)).toEqual(inventory);
  const source=projectEngineeringSource(built.sources);expect(source.sourceNodes).toEqual(view.sourceNodes);

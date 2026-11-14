@@ -1,7 +1,8 @@
 import type { EngineeringSnapshot } from './types.js';
 import { categoryDefinition, categoryLabel, ENGINEERING_CATEGORIES } from './catalogLabels.js';
+const compareTitles=new Intl.Collator('zh-CN',{numeric:true}).compare;
 
-export const INVENTORY_TEMPLATE_VERSION='engineering-inventory-v5';
+export const INVENTORY_TEMPLATE_VERSION='engineering-inventory-v6';
 export const INVENTORY_TEMPLATE=Object.freeze({version:INVENTORY_TEMPLATE_VERSION,groups:Object.freeze(['设备','装置性材料','构件','其他']),levels:Object.freeze(['group','category','subtype','template','entity','source'])});
 export interface InventorySource {id:string;parent:string;title:string;documentPath:string;sourceType:string}
 export interface InventoryNode {
@@ -70,9 +71,9 @@ export function projectInventoryTemplate(snapshot:EngineeringSnapshot,records:re
   const memberKeys=new Map(records.map(r=>[r.id,`inventory:source:${r.id}`]));
   for(const [id,key]of memberKeys){
     const source=bySource.get(id)!,owner=owners.get(id);
-    const parent=source.parent&&owners.get(source.parent)===owner&&memberKeys.has(source.parent)?memberKeys.get(source.parent)!
-      :owner?`inventory:entity:${owner}`:group(`${rootKey}/其他`,'source-only','仅来源（不计整体）');
     const interpretation=interpretations.get(id),neutral=interpretation?.meaning==='neutral_set';
+    const parent=interpretation?.meaning!=='part'&&source.parent&&owners.get(source.parent)===owner&&memberKeys.has(source.parent)?memberKeys.get(source.parent)!
+      :owner?`inventory:entity:${owner}`:group(`${rootKey}/其他`,'source-only','仅来源（不计整体）');
     nodes.set(key,{key,parent,title:neutral?`${source.title} · 中性点成套装置（主变附件）`:source.title,kind:'record',sourceId:id,documentPath:source.documentPath,sourceType:source.sourceType,entityCount:0,evidence:interpretation?.classificationEvidence??[],children:[],
       ...(neutral?{subtype:'neutral_set',subtypeLabel:'中性点成套装置',classificationStatus:interpretation.classificationStatus}:{})});rowsBySource.set(id,key);
   }
@@ -83,7 +84,7 @@ export function projectInventoryTemplate(snapshot:EngineeringSnapshot,records:re
   for(const node of nodes.values())if(node.key!==rootKey&&node.kind==='group')node.children.sort((a,b)=>{
     const left=nodes.get(a)!,right=nodes.get(b)!;
     if(left.kind==='group'&&right.kind==='group'&&left.category&&right.category)return (categoryOrder.get(left.category)??999)-(categoryOrder.get(right.category)??999);
-    return left.title.localeCompare(right.title,'zh-CN',{numeric:true})||a.localeCompare(b);
+    return compareTitles(left.title,right.title)||a.localeCompare(b);
   });
   return {version:INVENTORY_TEMPLATE_VERSION,rootKey,nodes,rowsByEntity,rowsBySource};
 }

@@ -1,3 +1,4 @@
+import {engineeringSourceRecords} from '../gim/engineering/sourceGraph.js';
 import type { AppState } from '../app/state.js';
 import { EngineeringRepresentationIndex, type SourceRepresentation } from '../engineering/representations.js';
 import { isIfcFeatureSourceType } from '../gim/engineering/sourceEvidence.js';
@@ -17,11 +18,12 @@ export function getEngineeringRepresentations(state: AppState): EngineeringRepre
   if (!sources || !snapshot) return null;
   const previous = cached.get(state);
   if (previous?.sources === sources && previous.snapshot === snapshot) return previous.value;
-  const records = [...sources.graph.records, ...sources.ifcRecords];
+  const records = engineeringSourceRecords(sources.graph,sources.ifcRecords);
   const bindings: SourceRepresentation[] = [], issues: EngineeringRepresentationState['issues'] = [];
   const ifcGuidCounts = new Map<string, number>();
   const roots = new Set(sources.graph.records.filter(row => row.devOccurrence?.rootSourceId === row.id).map(row => row.id));
   for (const row of records) {
+    if(row.attributeOnly){issues.push({sourceId:row.id,reason:'attribute-only-no-physical-representation'});continue;}
     if (row.ifcOccurrence) {
       bindings.push({ kind: 'ifc', sourceId: row.id, ...row.ifcOccurrence, nonphysical: isIfcFeatureSourceType(row.source_type) });
       if (row.ifcOccurrence.globalId) { const key = JSON.stringify([row.ifcOccurrence.modelId, row.ifcOccurrence.globalId]); ifcGuidCounts.set(key, (ifcGuidCounts.get(key) ?? 0) + 1); }

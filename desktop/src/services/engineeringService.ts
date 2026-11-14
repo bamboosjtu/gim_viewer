@@ -50,7 +50,7 @@ async function prepareEvidenceEntry(state:AppState,job:EngineeringJob,path:strin
 export async function ensureEngineeringEvidence(state:AppState,range:EvidenceRange){
   const job=evidenceJob(state);await job.ready;
   const inventory=await job.client.getEvidenceSnapshot(range.entryIds),entries=new Map(inventory.entries.map(e=>[e.id,e])),coverage=new Map(inventory.coverage.map(e=>[e.entryId,e]));
-  for(const path of range.entryIds){const entry=entries.get(path);if(!entry)throw Error('Unknown evidence entry');if(entry.status==='not_requested'||entry.status==='failed'||coverage.get(path)?.rawAvailable===false)await prepareEvidenceEntry(state,job,path);}
+  for(const path of range.entryIds){const entry=entries.get(path);if(!entry)throw Error('Unknown evidence entry');if(!coverage.get(path)?.restorable&&(entry.status==='not_requested'||entry.status==='failed'||coverage.get(path)?.rawAvailable===false))await prepareEvidenceEntry(state,job,path);}
   const result=await job.client.ensureEvidence(range);if(!current(state,job))throw Error('Stale evidence session');
   const requested=new Set(range.entryIds),affectsRecognition=state.engineeringSources?.graph.familyAssignments?.some(a=>requested.has(a.path));
   if(affectsRecognition&&range.entryIds.some(id=>entries.get(id)?.status==='failed'||entries.get(id)?.status==='not_requested')&&result.revision!==inventory.revision){
@@ -120,7 +120,7 @@ async function finishBuild(state:AppState,job:EngineeringJob,result:EngineeringB
   if(!currentBuild(state,job,result))return;
   job.finished=true;
   try{await saveResult(state,job,result);}finally{
-    // Keep the session evidence port, release the heavyweight build/cache payload.
+    // Retain metadata/checkpoint; an idle reconstructible Worker can terminate.
     await job.client.releaseModel?.(result.buildId);
     if(currentBuild(state,job,result)){state.engineeringBuildPending=false;job.update();
       if(!state.engineeringSources?.models.length&&state.engineeringTreeStatus==='loading')

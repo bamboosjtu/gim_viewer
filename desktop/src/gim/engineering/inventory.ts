@@ -7,7 +7,7 @@ export type { EngineeringInventory,InventoryNode } from '../../engineering/inven
 
 /** Source adapter for the catalog projection; no composition paths or F levels. */
 export function projectEngineeringInventory(snapshot:EngineeringSnapshot,records:readonly SourceRecord[]):EngineeringInventory {
-  return projectInventoryTemplate(snapshot,records.map(r=>({id:r.id,parent:r.parent,title:`${sourceRecordTitle(r)} [${r.track==='dev'?'DEV':'IFC'}轨道]`,documentPath:r.track==='ifc'?r.sources[0]:r.source,sourceType:r.source_type})));
+  return projectInventoryTemplate(snapshot,records.map(r=>({id:r.id,parent:r.parent,title:`${sourceRecordTitle(r)} [${r.attributeOnly?'仅属性来源':r.track==='dev'?'DEV':'IFC'}轨道]`,documentPath:r.track==='ifc'?r.sources[0]:r.source,sourceType:r.source_type})));
 }
 export function projectInventorySearch(view:EngineeringInventory,snapshot:EngineeringSnapshot,records:readonly SourceRecord[]) {
   const bySource=new Map(records.map(r=>[r.id,r]));

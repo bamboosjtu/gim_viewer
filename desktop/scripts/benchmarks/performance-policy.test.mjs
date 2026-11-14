@@ -12,15 +12,15 @@ test('full targets use decimal bytes, strict time bounds, and every repetition',
   assert.equal(absolutePerformance(outlier).fullyMet,false);assert.equal(absolutePerformance(outlier).numericTargetsMet,true);
   assert.equal(absolutePerformance(runs().map(r=>({...r,conditions:{...r.conditions,cacheState:'warm'}}))).fullyMet,false);
 });
-test('meeting all targets caps extra benefit while keeping raw seconds visible',()=>{
+test('absolute targets remain informational while relative changes and raw seconds stay visible',()=>{
   const result=performanceComparison(runs({processPrivatePeakBytes:4e9}),runs({firstResponseMs:1000,settledMs:2000}));
-  assert.equal(result.absolute.fullyMet,true);assert.equal(result.additionalBenefitCounted,false);
+  assert.equal(result.absolute.fullyMet,true);assert.equal(result.additionalBenefitCounted,true);
   assert.equal(result.metrics.find(m=>m.name==='settledMs').savedMs,27000);
   assert.equal(result.metrics.find(m=>m.name==='settledMs').baselineTotalMs,87000);
   assert.equal(result.memoryGrowthFraction,0.5);assert.equal(result.memoryOverLimit,false);assert.equal(result.approval,'PENDING');
   const warm=runs({firstResponseMs:1000,settledMs:2000}).map(r=>({...r,conditions:{...r.conditions,cacheState:'warm'}}));
   const warmView=performanceComparison(warm,warm,{absoluteRuns:[...runs(),...warm]});
-  assert.equal(warmView.absolute.fullyMet,true);assert.equal(warmView.additionalBenefitCounted,false);
+  assert.equal(warmView.absolute.fullyMet,true);assert.equal(warmView.additionalBenefitCounted,true);
 });
 test('relative memory cap and unweighted speed tradeoffs require human review',()=>{
   const base=runs({firstResponseMs:15000,settledMs:60000,processPrivatePeakBytes:1e9});
@@ -43,4 +43,14 @@ test('new assessment leaves historical FAIL and raw measurements unchanged',()=>
   const missing=structuredClone(life);delete missing.exercise.cycles[2].memory.bytes;
   const incomplete=reevaluatePolicy(baseline,candidate,{lifecycle:missing});
   assert.equal(incomplete.lifecycle.retention.growth,null);assert.equal(incomplete.lifecycle.retention.withinLimit,false);
+});
+test('absolute target attainment never conceals a relative timing regression',()=>{
+  const result=performanceComparison(runs({firstResponseMs:1000,settledMs:2000}),runs({firstResponseMs:1100,settledMs:2100}),{correctnessChanges:[{reason:'required source verification',evidence:['proof-report']}]});
+  assert.equal(result.absolute.fullyMet,true);assert.equal(result.requiresHumanReview,true);
+  assert.equal(result.recommendation,'REGRESSION_REQUIRES_CORRECTNESS_REVIEW');assert.equal(result.approval,'PENDING');assert.equal(result.correctnessChanges.length,1);
+});
+test('geometry commit and visible geometry timing policies are not silently compared as the same metric',()=>{
+  const b=runs({firstGeometryMs:2000}),a=runs({firstGeometryMs:2100,geometryCommitMs:1900}).map(r=>({...r,conditions:{...r.conditions,geometryTimingPolicy:'in-viewport-model-draw-submitted-v2'}}));
+  assert.equal(performanceComparison(b,a).geometryComparable,false);
+  assert.equal(performanceComparison(b,a).metrics.find(m=>m.name==='firstGeometryMs').comparable,false);
 });

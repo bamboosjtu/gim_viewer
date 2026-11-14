@@ -7,15 +7,18 @@ try:                                    # PyInstaller 注入 SPECPATH；直接 p
 except NameError:                       # noqa: F821
     TOOL_ROOT = Path(__file__).resolve().parent
 
-CATALOG = TOOL_ROOT.parents[1] / 'desktop' / 'src' / 'engineering' / 'catalog.json'
+CATALOG = TOOL_ROOT / 'catalog.json'
 if not CATALOG.is_file():
-    raise SystemExit(f'Shared engineering catalog missing: {CATALOG}')
+    raise SystemExit(f'Standalone engineering catalog missing: {CATALOG}')
+ASSETS = ['catalog.json','standardCatalog.json','sourceVocabulary.json','sourceTypeAliases.json','catalogRules.json','proxyCategories.json']
+if any(not (TOOL_ROOT / name).is_file() for name in ASSETS):
+    raise SystemExit('Standalone recognition vocabulary is incomplete')
 
 a = Analysis(
     [str(TOOL_ROOT / 'element_app.py')],
     pathex=[str(TOOL_ROOT)],
     binaries=[],
-    datas=[(str(CATALOG), '.')],
+    datas=[(str(TOOL_ROOT / name), '.') for name in ASSETS],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

@@ -20,6 +20,7 @@ import { autoLoadModStlPostIfc } from './substationDevRuntime.js';
 import { renderSubstationCoreUi, showLoadingBeforeInteractive } from './substationPresentation.js';
 import { sampleSubstationMemory } from './substationRuntimeTelemetry.js';
 import {stationViewPolicy} from './stationViewPolicy.js';
+import {observeFirstGeometry} from './geometryPresentationService.js';
 
 /**
  * 获取 IFC 文件内容。
@@ -342,7 +343,6 @@ export async function loadAllIfcFiles(
       scheduleStationOverviewRefit();
     }
     interactiveInitialized = true;
-    setSubstationViewerInteractive(true);
     perfMark('首个 IFC 就绪', {
       name: entry.name,
       source: loadSource,
@@ -357,23 +357,8 @@ export async function loadAllIfcFiles(
       loadedModels: state.loadedModels.size,
     };
     perfMarkProductMoment('firstUsableGeometryReady', firstMeta, perfSession);
-    // Compatibility alias retained for existing baseline reports/scripts.
-    perfMarkProductMoment('firstGeometryReady', { ...firstMeta, compatibilityAlias: 'firstUsableGeometryReady' }, perfSession);
-    perfMarkProductMoment('interactive', firstMeta, perfSession);
-    perfMark('变电工程可交互（首个 IFC 就绪）', firstMeta, perfSession);
-    void Promise.resolve(sampleSubstationMemory(state, 'interactive', perfSession, firstMeta, ctx)).catch(reportBackgroundError);
-    hideLoading();
-    signalInteractive();
-    // CBM/DEV names already support browsing. IFC name enrichment runs after
-    // the interactive commit and shares completed model work with finalization.
-    void import('../viewer/ifcNameIndex.js').then(async ({ buildIfcNameIndex }) => {
-      if (!isCurrent()) return;
-      const end = perfBegin('变电 IFC name index（后台）', undefined, perfSession);
-      try {
-        await buildIfcNameIndex(ctx, state, { session });
-        if (isCurrent()) await renderSubstationCoreUi(state, showMessage, session, perfSession, '变电 IFC 名称补全');
-      } finally { end(); }
-    }).catch(err => console.warn('[GIM] IFC name enrichment failed', err));
+    const runtimeId=state.ifcRuntimeModelIds.get(entry.modelId)??entry.modelId;
+    const object=ctx.fragments.list.get(runtimeId)?.object;
     const startPostInteractiveTask = (
       label: string,
       starter?: () => void | Promise<unknown>,
@@ -391,11 +376,28 @@ export async function loadAllIfcFiles(
         console.warn(`[GIM] 启动${label}失败，继续 IFC 后台加载:`, err);
       }
     };
+    if(object)void observeFirstGeometry(state,ctx,object,session,()=>{
+      if(!isCurrent())return;setSubstationViewerInteractive(true);hideLoading();
+      perfMark('变电工程首次实体画面已提交',firstMeta,perfSession);
+      void Promise.resolve(sampleSubstationMemory(state,'interactive',perfSession,firstMeta,ctx)).catch(reportBackgroundError);
+      // Give the submitted model frame a paint opportunity before optional
+      // synchronous work. No GPU completion fence or readback is used.
+      const start=()=>{
+        if(!isCurrent())return;background.markInteractive();
+        startPostInteractiveTask('IFC 空间语义',options.startSpatialSemantic,options.scheduleSpatialSemantic);
+        startPostInteractiveTask('STD/SLD',options.startStdSld,options.scheduleStdSld);
+        startPostInteractiveTask('缓存持久化',options.startCachePersistence,options.scheduleCachePersistence);
+        void import('../viewer/ifcNameIndex.js').then(async({buildIfcNameIndex})=>{
+          if(!isCurrent())return;await buildIfcNameIndex(ctx,state,{session});
+          if(isCurrent())await renderSubstationCoreUi(state,showMessage,session,perfSession,'变电 IFC 名称补全');
+        }).catch(reportBackgroundError);
+      };
+      if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>setTimeout(start,0));else setTimeout(start,0);
+    },perfSession).catch(reportBackgroundError);
+    signalInteractive();
+    // Keep the IFC tail and DEV anchor live even if the first IFC is empty.
+    // Optional CPU/serialization work starts only after a model draw.
     background.startRemainingIfc();
-    background.markInteractive();
-    startPostInteractiveTask('IFC 空间语义', options.startSpatialSemantic, options.scheduleSpatialSemantic);
-    startPostInteractiveTask('STD/SLD', options.startStdSld, options.scheduleStdSld);
-    startPostInteractiveTask('缓存持久化', options.startCachePersistence, options.scheduleCachePersistence);
     if (state.projectSourceToViewerMatrix) {
       background.markCoordinateAnchorReady();
       state.deviceLodRuntime?.notifyCoordinateAnchor?.();

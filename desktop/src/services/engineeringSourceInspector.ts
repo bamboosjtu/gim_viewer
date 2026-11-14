@@ -56,6 +56,7 @@ export async function inspectEngineeringDocument(state: AppState, path: string, 
   const candidateIds = new Set<string>();
   const occurrenceIds = new Set(cbmOccurrenceId ? [cbmOccurrenceId] : sources.graph.cbmOccurrences.filter(node => node.documentPath === path).map(node => node.id));
   if (occurrenceIds.size) {
+    for(const row of sources.graph.attributeRecords??[])if(row.attributeContextId&&occurrenceIds.has(row.attributeContextId))candidateIds.add(row.id);
     for (const row of sources.graph.records) if (row.devOccurrence && occurrenceIds.has(row.devOccurrence.cbmOccurrenceId) && row.devOccurrence.rootSourceId === row.id) candidateIds.add(row.id);
     sources.graph.aliases.filter(alias => occurrenceIds.has(alias.sourceId)).forEach(alias => alias.candidates.forEach(id => candidateIds.add(id)));
     sources.ifcMatches.filter(match => occurrenceIds.has(match.cbmOccurrenceId)).forEach(match => match.ifcSourceIds.forEach(id => candidateIds.add(id)));

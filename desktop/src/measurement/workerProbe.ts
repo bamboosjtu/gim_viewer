@@ -68,6 +68,13 @@ export function createWorkerProbe() {
   };
   const control = (event: MessageEvent): boolean => {
     const data = event.data;
+    if(data?.[CHANNEL]==='barrier'){
+      if(data.workerId===context.workerId){
+        flush();post?.({[CHANNEL]:'flushed',workerId:context.workerId,batchId,lastSequence});
+        post?.({[CHANNEL]:'barrier',workerId:context.workerId,token:data.token,batchId,lastSequence});
+      }
+      return true;
+    }
     if(data?.[CHANNEL]==='calibrate'){const receivedMs=performance.now();post?.({[CHANNEL]:'clock',workerId:context.workerId,clockId:probe.clockId,receivedMs,sentMs:performance.now()});return true;}
     if(data?.[CHANNEL]==='ack'){
       if(data.workerId===context.workerId&&Number.isSafeInteger(data.batchId))pendingAcks.delete(data.batchId);

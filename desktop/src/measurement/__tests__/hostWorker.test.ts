@@ -1,5 +1,5 @@
 import {afterEach,expect,it,vi} from 'vitest';
-import {createMeasuredWorker,markMeasuredWorkerTaskCancellation} from '../hostWorker.js';
+import {createMeasuredWorker,drainMeasuredWorker,markMeasuredWorkerTaskCancellation} from '../hostWorker.js';
 import {resetMeasurementRun,measurementSnapshot} from '../runtime.js';
 import {MEASUREMENT_VERSION} from '../core.js';
 class Port extends EventTarget {
@@ -35,6 +35,23 @@ it('control telemetry is consumed before application message listeners',()=>{
   const context=(port.messages[0] as any).context;
   port.dispatchEvent(new MessageEvent('message',{data:{__gimMeasurement:'batch',workerId:context.workerId,events:[]}}));expect(callback).not.toHaveBeenCalled();
   port.dispatchEvent(new MessageEvent('message',{data:{kind:'result',id:1}}));expect(callback).toHaveBeenCalledOnce();
+});
+it('drains the final telemetry before terminating an idle Worker without creating another task',async()=>{
+  const {port,worker}=start(),callback=vi.fn();port.addEventListener('message',callback);
+  const context=(port.messages[0] as any).context,pending=drainMeasuredWorker(worker);
+  const barrier=port.messages[port.messages.length-1] as any;
+  expect(barrier).toMatchObject({__gimMeasurement:'barrier',workerId:context.workerId});
+  expect(barrier._gimMeasurement).toBeUndefined();
+  port.dispatchEvent(new MessageEvent('message',{data:{...barrier,batchId:0,lastSequence:0}}));
+  await pending;worker.terminate();expect(callback).not.toHaveBeenCalled();
+  expect(measurementSnapshot()).toMatchObject({detailComplete:true,lifecycleComplete:true,activeTasks:[]});
+});
+it('rejects a drain with an unconfirmed tail or a stopped Worker',async()=>{
+  const {port,worker}=start(),context=(port.messages[0] as any).context;
+  const invalid=expect(drainMeasuredWorker(worker)).rejects.toThrow('unconfirmed');
+  port.dispatchEvent(new MessageEvent('message',{data:{...(port.messages[port.messages.length-1] as any),workerId:context.workerId,batchId:1,lastSequence:3}}));
+  await invalid;
+  const interrupted=expect(drainMeasuredWorker(worker)).rejects.toThrow('terminated before drain');worker.terminate();await interrupted;
 });
 it('requires the final Worker batch marker before accepting an idle Worker termination',()=>{
   const {port,worker}=start();worker.postMessage({kind:'compile',traceId:'task-one'});

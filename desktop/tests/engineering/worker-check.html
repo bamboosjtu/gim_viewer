@@ -32,6 +32,16 @@ globalThis.runEngineeringWorkerCheck = async () => {
     const caches={};
     for(const domain of result.cachePlan){const artifact=await client.encodeCache(result.buildId,domain);check(artifact.bytes?.length&&!artifact.error,'deferred '+domain+' cache');caches[domain]=artifact.bytes;}
     sourceBytes=caches.sources;entityBytes=caches.entities;navigationBytes=caches.navigation;expected=result.snapshot;expectedNavigation=result.navigation;
+    await client.releaseModel(result.buildId);
+    const inventory=await client.getEvidenceSnapshot(['main.dev']);
+    check(inventory.coverage[0].rawAvailable===false&&inventory.coverage[0].restorable===true,'idle checkpoint metadata');
+    const range={entryIds:['main.dev'],kinds:['documents']};
+    const unloaded=await client.queryEvidence({range,revision:inventory.revision,limit:10});
+    check(unloaded.documents.length===0&&unloaded.coverage[0].materialization==='not_materialized','checkpoint queries do not restore raw sources');
+    const loaded=await client.ensureEvidence(range),page=await client.queryEvidence({range,revision:loaded.revision,limit:10});
+    check(page.documents.some(d=>d.rawLines.some(line=>line.includes('主变压器'))),'on-demand checkpoint restoration');
+    const revised=await client.recognizeEvidence(identity);
+    check(revised.buildId>result.buildId&&JSON.stringify(revised.snapshot)===JSON.stringify(expected),'checkpoint preserves build generation and semantics');
   } finally {client.close();}
   const warm=EngineeringWorkerClient.create(()=>true);
   try {
@@ -89,6 +99,6 @@ globalThis.runEngineeringWorkerCheck = async () => {
   state.invalidatePendingLoads();
   fixture.remove();
   return {passed:true,scope:'functional fixture; excludes native IPC, real samples, geometry and performance acceptance',userAgent:navigator.userAgent,
-    checks:['source graph','physical occurrence contract','whole boundary','source conservation','cache transport','warm restore','navigation projection/cache','entity-only repair','shared binary buffer','Worker abort','production service','browser whole search/source round trip','Spatial cache Worker encoding']};
+    checks:['source graph','physical occurrence contract','whole boundary','source conservation','cache transport','idle evidence checkpoint/query/restore','warm restore','navigation projection/cache','entity-only repair','shared binary buffer','Worker abort','production service','browser whole search/source round trip','Spatial cache Worker encoding']};
 };
 </script>

@@ -1,5 +1,6 @@
 /** Format-neutral contracts. Source parsing and rendering are separate consumers. */
 export interface EvidenceValue {
+  confidence?:'confirmed'|'candidate';
   value: string;
   evidenceId: string;
   context?:{section?:string;container?:string;rawContainerName?:string;applicability?:'instance'|'type'|'unknown'};
@@ -11,6 +12,10 @@ export interface ObjectNameEvidence extends EvidenceValue {
 }
 
 export interface ObjectEvidence {
+  standardClasses?:readonly StandardClassEvidence[];
+  hostCodes?:readonly EvidenceValue[];
+  hostDesignations?:readonly EvidenceValue[];
+  declaredHostSourceIds?:readonly EvidenceValue[];
   vocabularyObservations?:readonly VocabularyObservation[];
   equipmentType?: EvidenceValue;
   componentType?: EvidenceValue;
@@ -49,6 +54,10 @@ export interface ObjectEvidence {
 export type SourceMeaning = 'object' | 'part' | 'fragment' | 'neutral_set' | 'container' | 'detail' | 'source_only';
 export type SourceComponentRole = 'cover' | 'sidewall' | 'base';
 export interface ObjectInterpretation {
+  sourceName?:string;
+  standardClass?:StandardClassEvidence & {status:'confirmed'|'candidate'|'unresolved';evidence:readonly string[]};
+  membershipEvidence?:readonly string[];
+  membershipStatus?:'confirmed'|'candidate'|'unresolved';
   vocabularyObservations?:readonly VocabularyObservation[];
   categoryStatus?: 'confirmed' | 'candidate' | 'unresolved';
   equipmentType?: TermInterpretation;
@@ -77,6 +86,7 @@ export interface VocabularyObservation {
 }
 
 export interface EngineeringEntity {
+  standardClass?:ObjectInterpretation['standardClass'];
   id: string;
   category: string;
   name: string;
@@ -93,6 +103,10 @@ export interface EngineeringEntity {
   grain?: 'item' | 'segment';
   phaseBodyCount?: number;
   compositionState?: 'declared_identity_physical_completeness_unverified' | 'phase_completeness_unverified';
+}
+
+export interface StandardClassEvidence extends EvidenceValue {
+  id:string;kind:'equipment'|'material'|'construction';label:string;term:string;category:string;
 }
 
 export interface PendingWhole {

@@ -1,6 +1,6 @@
 import {median} from './statistics.mjs';
 /** Developer-local decision support. Recommendations are never approval. */
-export const PERFORMANCE_POLICY=Object.freeze({version:'gim-performance-policy-v2',memoryGrowthLimit:0.5,
+export const PERFORMANCE_POLICY=Object.freeze({version:'gim-performance-policy-v3',goal:'no-regression-relative-to-history-unless-evidence-backed-correctness-change',memoryGrowthLimit:0.5,
   memoryLimitBytes:6_000_000_000,coldInteractiveLimitMs:10_000,settledLimitMs:30_000,memoryUnit:'decimal-GB',approval:'human-only',
   interactiveMetric:'firstResponseMs navigation-ready proxy; excludes executable launch; input latency not proven'});
 const values=(runs,key)=>runs.map(r=>r.metrics?.[key]).filter(v=>Number.isFinite(v)&&v>=0);
@@ -27,17 +27,20 @@ export function lifecycleRetention(growth){
     speedBenefitEstablished:false,requiresHumanReview:true,approval:'PENDING',
     interpretation:'within-run post-close retention; not cross-build peak-memory cost or proof of speed benefit'};
 }
-export function performanceComparison(baseline,candidate,{comparable=true,comparisonIssues=[],absoluteRuns=candidate}={}){
-  const names=new Set(['firstResponseMs','settledMs','automaticLoadMs','processPrivatePeakBytes',
+export function performanceComparison(baseline,candidate,{comparable=true,comparisonIssues=[],absoluteRuns=candidate,correctnessChanges=[]}={}){
+  const geometryPolicy=run=>run.conditions?.geometryTimingPolicy??'legacy-model-commit-v1';
+  const geometryComparable=new Set([...baseline,...candidate].map(geometryPolicy)).size<=1;
+  const metricValues=(runs,name)=>name==='geometryCommitMs'?runs.map(r=>r.metrics?.geometryCommitMs??(geometryPolicy(r)==='legacy-model-commit-v1'?r.metrics?.firstGeometryMs:null)).filter(v=>Number.isFinite(v)&&v>=0):values(runs,name);
+  const names=new Set(['firstResponseMs','firstGeometryMs','geometryCommitMs','settledMs','automaticLoadMs','processPrivatePeakBytes',
     ...(baseline[0]?.requiredMetrics??[]),...(candidate[0]?.requiredMetrics??[])]);
   const metrics=[...names].map(name=>{
-    const b=values(baseline,name),c=values(candidate,name),before=b.length===baseline.length?median(b):null,after=c.length===candidate.length?median(c):null;
-    const time=name.endsWith('Ms');
-    return {name,baseline:before,candidate:after,delta:before!==null&&after!==null?after-before:null,
-      regression:before>0&&after!==null?after/before-1:before===0&&after===0?0:null,
-      ...(time?{savedMs:before!==null&&after!==null?before-after:null,
-        reductionFraction:before>0&&after!==null?1-after/before:null,
-        speedupFraction:after>0&&before!==null?before/after-1:null,
+    const b=metricValues(baseline,name),c=metricValues(candidate,name),before=b.length===baseline.length?median(b):null,after=c.length===candidate.length?median(c):null;
+    const time=name.endsWith('Ms'),compatible=name!=='firstGeometryMs'||geometryComparable;
+    return {name,baseline:before,candidate:after,comparable:compatible,delta:compatible&&before!==null&&after!==null?after-before:null,
+      regression:compatible&&before>0&&after!==null?after/before-1:compatible&&before===0&&after===0?0:null,
+      ...(time?{savedMs:compatible&&before!==null&&after!==null?before-after:null,
+        reductionFraction:compatible&&before>0&&after!==null?1-after/before:null,
+        speedupFraction:compatible&&after>0&&before!==null?before/after-1:null,
         baselineTotalMs:b.length===baseline.length?b.reduce((s,v)=>s+v,0):null,
         candidateTotalMs:c.length===candidate.length?c.reduce((s,v)=>s+v,0):null}:{}),
     };
@@ -53,12 +56,14 @@ export function performanceComparison(baseline,candidate,{comparable=true,compar
   const timeRegressed=changed.some(m=>m.name.endsWith('Ms')&&m.delta>0);
   const keyTimes=metrics.filter(m=>['firstResponseMs','settledMs'].includes(m.name));
   const matchingSpeedEvidence=keyTimes.every(m=>m.baseline!==null&&m.candidate!==null);
-  const requiresHumanReview=!comparable||memoryOverLimit||(!absolute.fullyMet&&(memoryIncreased||timeRegressed));
+  const firstGeometry=metrics.find(m=>m.name==='firstGeometryMs');if(firstGeometry&&!geometryComparable)Object.assign(firstGeometry,{comparable:false,comparisonIssue:'geometry-timing-policy-changed; compare geometryCommitMs separately'});
+  const requiresHumanReview=!comparable||memoryOverLimit||memoryIncreased||timeRegressed||!geometryComparable;
   const recommendation=!comparable?'EVIDENCE_INCOMPLETE':memoryOverLimit?'MEMORY_LIMIT_EXCEEDED':
-    absolute.fullyMet?'FULLY_MET':requiresHumanReview?'REVIEW_TRADEOFF':'NO_ADVERSE_TRADEOFF';
+    timeRegressed?'REGRESSION_REQUIRES_CORRECTNESS_REVIEW':requiresHumanReview?'REVIEW_TRADEOFF':'NO_ADVERSE_TRADEOFF';
   return {policy:PERFORMANCE_POLICY,approval:'PENDING',comparable,comparisonIssues,absolute,metrics,
     memoryGrowthFraction:memory?.regression??null,maximumMemoryGrowthFraction,memoryOverLimit,matchingSpeedEvidence,
+    correctnessChanges,geometryComparable,
     sameLevelBenefit:'human-assessment-required; no weighted score',requiresHumanReview,recommendation,
-    additionalBenefitCounted:comparable&&absolute.evidenceComplete&&!absolute.fullyMet,
-    interpretation:'raw deltas remain visible; targets require every measured repetition; fully-met targets earn no extra benefit'};
+    additionalBenefitCounted:comparable&&absolute.evidenceComplete,
+    interpretation:'relative regressions require evidence-backed correctness rationale and human review; absolute targets are informational and never waive regressions'};
 }

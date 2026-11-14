@@ -31,6 +31,20 @@
 | E16.control_cabinet | 控制柜 | item |
 | E16.battery_set | 蓄电池组 | item |
 | E16.protection | 保护设备 | item |
+| E-R | 电抗器（用途待确认） | item |
+| E20 | 支柱绝缘子 | item |
+| E21 | 穿墙套管 | item |
+| E22 | 耦合电容器 | item |
+| E23 | 直流电压测量装置 | item |
+| E24 | 直流旁路与转换开关 | item |
+| E25 | 换流阀 | item |
+| E26 | 隔直装置 | item |
+| E27 | 串联补偿装置 | item |
+| E28 | 电阻器 | item |
+| E29 | 熔断器 | item |
+| E30 | 线路故障测量装置 | item |
+| E31 | 安防设备 | item |
+| E32 | 火灾报警设备 | item |
 
 ## 装置性材料
 
@@ -45,6 +59,12 @@
 | M07 | 套管 | item |
 | M08 | 槽盒 | segment |
 | M09 | 其他材料 | item |
+| M10 | 端子箱 | item |
+| M11 | 灯具材料 | item |
+| M12 | 动力、照明与检修箱 | item |
+| M13 | 开关与插座材料 | item |
+| M14 | 安装钢材 | item |
+| M15 | 水暖材料 | item |
 
 ## 构件
 
@@ -78,3 +98,13 @@
 | C-D4 | 暖通设施 | item |
 | C-D5 | 给排水设施 | item |
 | C-D6 | 其他附属设施 | item |
+| C-A11 | 建筑主要构件 | item |
+| C-A12 | 建筑辅助构件 | item |
+| C-A13 | 地下室 | item |
+| C-B8 | 连接节点 | item |
+| C-C6 | 场地 | item |
+| C-C7 | 支挡结构 | item |
+| C-C8 | 沟道与隧道 | item |
+| C-C9 | 变压器搬运轨道 | item |
+| C-D7 | 建筑设备（专业待确认） | item |
+| C-B9 | 构架与支架基础 | item |

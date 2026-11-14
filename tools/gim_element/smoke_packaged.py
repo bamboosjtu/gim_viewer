@@ -53,9 +53,9 @@ def main():
     evidence = json.loads(receipt.read_text(encoding='utf-8'))
     assert evidence['frozen'] is True
     assert evidence['groups'] == ['设备', '装置性材料', '构件', '其他'], evidence
-    assert evidence['totals']['设备']['附件并入'] == 1, evidence
+    assert evidence['totals']['设备']['附件并入'] == 0, evidence
     assert evidence['totals']['设备']['台数'] == 1, evidence
-    expected = tool.parents[1] / 'desktop/src/engineering/catalog.json'
+    expected = tool / 'catalog.json'
     actual = CArchiveReader(str(exe)).extract('catalog.json')
     assert hashlib.sha256(actual).digest() == hashlib.sha256(expected.read_bytes()).digest()
     print(json.dumps({'passed': True, 'exe': str(exe), 'screenshot': str(png), **evidence}, ensure_ascii=False, indent=2))

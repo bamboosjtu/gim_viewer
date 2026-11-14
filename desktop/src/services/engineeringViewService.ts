@@ -1,3 +1,4 @@
+import {engineeringSourceRecords} from '../gim/engineering/sourceGraph.js';
 import type { AppState } from '../app/state.js';
 import type { SourceRecord } from '../gim/engineering/sourceEvidence.js';
 import type { EngineeringNavigationData } from '../gim/engineering/navigation.js';
@@ -12,6 +13,6 @@ const records = new WeakMap<object, Map<string, SourceRecord>>();
 export function engineeringSourceRecord(state: AppState, id: string): SourceRecord | undefined {
   const sources = state.engineeringSources; if (!sources) return undefined;
   let index = records.get(sources);
-  if (!index) { index = new Map([...sources.graph.records, ...sources.ifcRecords].map(record => [record.id, record])); records.set(sources, index); }
+  if (!index) { index = new Map(engineeringSourceRecords(sources.graph,sources.ifcRecords).map(record => [record.id, record])); records.set(sources, index); }
   return index.get(id);
 }

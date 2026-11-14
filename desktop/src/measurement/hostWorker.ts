@@ -6,6 +6,9 @@ let workerSequence = 0;
 const bootstrapUrls=new Map<string,string>();
 const bootstrapMetadata=new Map<string,{workerId:string;runId:string;family:WorkerFamily}>();
 const workerIdentities=new WeakMap<Worker,string>();
+const workerDrains=new WeakMap<object,()=>Promise<void>>();
+/** Wait for the Worker event-loop boundary and its final telemetry flush. */
+export function drainMeasuredWorker(worker:object):Promise<void>{return workerDrains.get(worker)?.()??Promise.resolve();}
 export function measurementWorkerIdentity(worker:Worker){return workerIdentities.get(worker);}
 const lastTaskContext=new WeakMap<Worker,TraceContext>();
 export function measurementWorkerTask(worker:Worker):TraceContext|undefined {return lastTaskContext.get(worker);}
@@ -43,6 +46,15 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
   const context: TraceContext = { ...measurementContext(run.collector), workerId, family, backend: 'web-worker', sourceId:measurementSourceId(sourcePath,run.collector) };
   const send = worker.postMessage.bind(worker), terminate = worker.terminate.bind(worker);
   let sequence = 0, stopped = false, clockReady = false;
+  let barrierSequence=0;
+  const barriers=new Map<number,{resolve:()=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
+  workerDrains.set(worker,()=>new Promise<void>((resolve,reject)=>{
+    if(stopped){reject(Error('Worker already terminated'));return;}
+    const token=++barrierSequence,timer=setTimeout(()=>{barriers.delete(token);reject(Error('Worker drain timeout'));},10_000);
+    barriers.set(token,{resolve,reject,timer});
+    try{send({[MEASUREMENT_CHANNEL]:'barrier',workerId,token});}
+    catch(error){barriers.delete(token);clearTimeout(timer);reject(error instanceof Error?error:Error(String(error)));}
+  }));
   const sentAt=new Map<string,number>();
   const taskKey=(task:TraceContext)=>[task.runId,task.workerId,task.taskId,task.attemptId].join('\0');
   const seenRuns=new Set([context.runId]);
@@ -71,7 +83,14 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
   run.collector.flushDetails();
   worker.addEventListener('message', event => {
     const message = event.data;
-    if(message?.[MEASUREMENT_CHANNEL]==='transfer-received'){
+    if(message?.[MEASUREMENT_CHANNEL]==='barrier'){
+      event.stopImmediatePropagation();
+      if(message.workerId!==workerId)return;
+      const barrier=barriers.get(message.token);if(!barrier)return;
+      barriers.delete(message.token);clearTimeout(barrier.timer);
+      if(message.batchId!==receivedBatchId||message.lastSequence!==lastBatchSequence||receivedBatchId!==flushedBatchId||lastBatchSequence!==flushedSequence)barrier.reject(Error('Worker drain unconfirmed'));
+      else barrier.resolve();
+    }else if(message?.[MEASUREMENT_CHANNEL]==='transfer-received'){
       event.stopImmediatePropagation();
       if(message.workerId!==workerId)return;
       const flight=flights.get(message.flightId);if(flight){flights.delete(message.flightId);flight.release(workerId);measurementProbe(flight.context.runId)?.record(flight.context,'host.delivery-and-worker-queue',performance.now()-flight.at);}
@@ -177,6 +196,8 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
   }) as Worker['postMessage'];
   worker.terminate = () => {
     if (stopped) return; stopped = true;clearInterval(clockTimer);
+    workerDrains.delete(worker);
+    for(const barrier of barriers.values()){clearTimeout(barrier.timer);barrier.reject(Error('Worker terminated before drain'));}barriers.clear();
     if(taskSeen&&(receivedBatchId!==flushedBatchId||lastBatchSequence!==flushedSequence)){
       for(const id of unconfirmedRuns.size?unconfirmedRuns:[context.runId]){
         const owner=measurementRuntime(id);if(!owner)continue;

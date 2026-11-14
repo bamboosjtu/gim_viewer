@@ -8,7 +8,7 @@
 | [gim_element](gim_element/README.md) | 简易实体识别工具 | 变电 `.gim` 包或解包目录 | 识别设备、装置性材料、构件；未归类对象单列“其他”；导出 HTML / CSV / JSON | `gim_element/dist/GIM实体盘点器.exe` |
 | [gim_info](gim_info/README.md) | 简易 GIM 文件信息浏览器 | 已解包的 GIM 目录 | 浏览键值、XML、文本及二进制预览；指针跳转、反向引用、搜索和链清单导出 | `gim_info/dist/GIM信息阅读器.exe` |
 
-这些工具的解析、识别与渲染是简化实现。`gim_element` 共享主应用的工程目录 `desktop/src/engineering/catalog.json`，其名称归类与聚合结果不能用作主应用工程实体数量的验收基准。`gim_info` 默认浏览文件与指针，不建立三维模型；旧版实体界面只保留在源码的 `--legacy` 入口。
+所有工具都持有自己的实现与资源，运行和打包不导入、不调用、不读取 GIM Viewer 主程序。`gim_element` 自带标准索引、分类词典和 Python 识别算法，通过数据版本、共同的纯数据用例及开发者本地结果对照验证一致性。它的输出可辅助审查主程序，不能替代工程实例的人工真值。`gim_info` 默认浏览文件与指针，不建立三维模型；旧版实体界面只保留在源码的 `--legacy` 入口。
 
 ## 运行与构建
 
@@ -57,7 +57,7 @@
 
 ## 定位与 CI
 
-三个工具当前是独立交付的诊断/浏览工具，保留各自的 Python 实现。它们的分类和解析结果限于各自规则，不作为 Viewer、未来 SDK 或 Validate 的权威真值；跨实现一致性仍需开发者本地真实来源复核。后续共享核心迁移随 SDK 边界推进，不另写一套 Benchmark parser。
+三个工具独立交付，保留各自的 Python 实现。它们的分类和解析结果限于各自规则，不作为 Viewer、未来 SDK 或 Validator 的权威真值；跨实现一致性仍需开发者本地真实来源复核。工具不依赖主程序或未来的 SDK 抽取，Benchmark 继续由独立的测量契约执行。
 
 CI 只运行 `tests/test_pure.py` 中的纯函数契约，以及构建路径安全、实际 onefile 构建和启动检查。纯函数检查不构造 GIM 包、不生成工程目录、不读取真实或合成工程样本。矩阵、IFC 文本和编码等普通值测试使用工作区临时目录作为所有子进程 TEMP/TMP/TMPDIR；错误退出即失败。
 

@@ -1,3 +1,4 @@
+import {engineeringSourceRecords} from '../gim/engineering/sourceGraph.js';
 import { collectEngineeringSources, normalizeEngineeringSources, type EngineeringSources } from '../gim/engineering/buildSources.js';
 import { projectEngineeringNavigation } from '../gim/engineering/navigation.js';
 import { collectSourceGeometryOccurrences } from '../gim/engineering/geometryOccurrences.js';
@@ -15,7 +16,7 @@ export function assembleStoredEngineeringView(scope:string,sources:EngineeringSo
   let snapshot:EngineeringSnapshot;
   try{snapshot=normalize(scope,sources);}catch(error){
     stageErrors.recognition=String(error);
-    const ids=[...graph.records,...sources.ifcRecords].map(r=>r.id);
+    const ids=engineeringSourceRecords(graph,sources.ifcRecords).map(r=>r.id);
     snapshot={scope,rulesVersion:ENGINEERING_RULES_VERSION,entities:[],pending:[],relationships:[],aliases:[],
       memberships:ids.map(sourceId=>({sourceId,ownerId:null,disposition:'source_only',interpretation:{category:'U-OBJECT',meaning:'source_only',basis:'recognition_unavailable',conflict:'',independent:false,classificationStatus:'unresolved',categoryStatus:'unresolved',assemblyCategory:'',assemblySignature:''}})),
       diagnostics:[{kind:'recognition-failed',identity:scope,name:String(error)}],recognitionCoverage:{inputSourceIds:ids,processed:0,confirmed:0,complete:false}};

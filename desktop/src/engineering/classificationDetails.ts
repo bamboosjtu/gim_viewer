@@ -12,6 +12,7 @@ export function classificationDetails(category:string,name:string):{subtype?:str
   if(['E04','E16','E17','E19'].includes(category))return {subtype:'unresolved',subtypeLabel:'具体类型待确认',unknownReason:'equipment_subtype_evidence_insufficient'};
   if(category==='C-B4')return {unknownReason:'foundation_purpose_unresolved'};
   if(category==='E-T')return {unknownReason:'transformer_purpose_unresolved'};
+  if(category==='E-R')return {unknownReason:'reactor_purpose_unresolved'};
   if(category==='U-OBJECT')return {unknownReason:'object_category_unresolved'};
   return {};
 }

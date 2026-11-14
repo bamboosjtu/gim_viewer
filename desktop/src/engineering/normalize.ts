@@ -2,6 +2,7 @@ import { ENGINEERING_RULES_VERSION, explicitMain, interpretObject, isNumberedDes
 import { assertEngineeringPartition } from './validate.js';
 import { categoryDefinition } from './catalogLabels.js';
 import { classificationDetails } from './classificationDetails.js';
+import {recoverComponentMembership} from './recoverMembership.js';
 import type { EngineeringEntity, EngineeringSnapshot, ObjectEvidence, PendingWhole, SourceAlias } from './types.js';
 
 /** Lossless package-local identity. No class version, tree parent or traversal counter. */
@@ -63,7 +64,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       ...classificationDetails(category,name),
     });
     const interpreted=sourceIds.map(id=>meaning.get(id)!).find(m=>m.category===category);
-    if(interpreted)Object.assign(entities.get(id)!,{subtype:interpreted.subtype,subtypeLabel:interpreted.subtypeLabel,unknownReason:interpreted.unknownReason});
+    if(interpreted)Object.assign(entities.get(id)!,{standardClass:interpreted.standardClass,subtype:interpreted.subtype,subtypeLabel:interpreted.subtypeLabel,unknownReason:interpreted.unknownReason});
     sourceIds.forEach(sourceId => owners.set(sourceId, id));
     return entities.get(id)!;
   }
@@ -162,7 +163,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       // Resolve external attachments after all bodies and their identities exist.
       if (transformer(aboveCategory)) owners.set(sourceId, above);
       else bundle(sourceId, 'neutral_set_main_unresolved', [sourceId]);
-    } else if (m.category==='E16.terminal_box' && above && (
+    } else if (['E16.terminal_box','M10'].includes(m.category) && above && (
       transformer(aboveCategory)||pending.get(above)?.reason==='neutral_set_main_unresolved'
       ||embeddedEquipmentHost(aboveCategory))) {
       // A genuinely embedded terminal box is part of its host assembly. An
@@ -175,6 +176,8 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
       &&!row.objectRoles?.some(p=>p.value==='independent')) {
       m.meaning='part';m.independent=false;m.basis='equipment_actuator_composition';
       owners.set(sourceId,above);
+    } else if (above && embeddedEquipmentHost(aboveCategory)&&m.componentType?.status==='confirmed'&&!explicitIndependent(row)) {
+      m.meaning='part';m.independent=false;m.basis='standard_component_in_equipment_assembly';owners.set(sourceId,above);
     } else if (above && aboveCategory?.startsWith('E') && aboveCategory!=='E18'
       && !explicitIndependent(row) && embeddedAccessory.test(row.name)) {
       // Terminal boxes, operating mechanisms, radiators and other assembled
@@ -197,7 +200,7 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
     } else if (aboveCategory === 'U-OBJECT' && m.category !== 'U-OBJECT') {
       associate('object_identity_parent_boundary_unknown', 'unknown_parent_does_not_define_whole_boundary');
     } else if (aboveCategory) {
-      const separateInstallation = ['C-B1','C-B2','C-B3','C-B4'].includes(m.category) && aboveCategory.startsWith('E');
+      const separateInstallation = ['C-B1','C-B2','C-B3','C-B4','C-B9'].includes(m.category) && aboveCategory.startsWith('E');
       const cabinetInCabin = m.category === 'E09' && aboveCategory === 'E18';
       const distinctCivil=aboveCategory.startsWith('C')&&(m.category.startsWith('C')&&m.category!==aboveCategory||m.category.startsWith('E'));
       if (separateInstallation || cabinetInCabin || distinctCivil) associate('independent_installation_object', 'source_assembly_only');
@@ -234,6 +237,14 @@ export function normalizeEngineeringModel(scope: string, input: readonly ObjectE
   }
   for (const [sourceId, owner] of owners) if (owner && redirects.has(owner)) owners.set(sourceId, redirects.get(owner)!);
   for (const relation of relationships) relation.to = redirects.get(relation.to) ?? relation.to;
+
+  recoverComponentMembership(ordered,meaning,owners,entities,
+    (source,reason)=>{bundle(`component-host:${source}`,reason,[source]);},
+    (seed,category,name,source)=>addEntity(seed,category,name,'declared_component_host_boundary',[source]),diagnostics);
+  const usedOwners=new Set(owners.values());
+  for(const id of entities.keys())if(!usedOwners.has(id))entities.delete(id);
+  for(const id of pending.keys())if(!usedOwners.has(id))pending.delete(id);
+  for(let i=relationships.length-1;i>=0;i--)if(!entities.has(relationships[i].from)||!entities.has(relationships[i].to))relationships.splice(i,1);
 
   const memberships = ordered.map(row => {
     const ownerId = owners.get(row.sourceId) ?? null;

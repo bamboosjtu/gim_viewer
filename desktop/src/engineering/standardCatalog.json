@@ -1,0 +1,2434 @@
+{
+  "version": "substation-standard-index-1",
+  "coverage": {
+    "equipment": 52,
+    "material": 39,
+    "construction": 30,
+    "note": "表8第40行为续表表头，不计为材料；D/E列分裂英文已核对PDF页13"
+  },
+  "items": [
+    {
+      "id": "表1:oilimmersedtransformer",
+      "kind": "equipment",
+      "label": "油浸式变压器",
+      "term": "OilImmersedTransformer",
+      "category": "E-T",
+      "annex": "B.1",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 7,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B5",
+        "termCells": [
+          "C5"
+        ],
+        "annexCell": "D5",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:drytypetransformer",
+      "kind": "equipment",
+      "label": "干式变压器",
+      "term": "DryTypeTransformer",
+      "category": "E-T",
+      "annex": "B.2",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 7,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B6",
+        "termCells": [
+          "C6"
+        ],
+        "annexCell": "D6",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:convertertransformer",
+      "kind": "equipment",
+      "label": "换流变压器",
+      "term": "ConverterTransformer",
+      "category": "E-T",
+      "annex": "B.3",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 7,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B7",
+        "termCells": [
+          "C7"
+        ],
+        "annexCell": "D7",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:oilimmersedreactor",
+      "kind": "equipment",
+      "label": "油浸式电抗器",
+      "term": "OilImmersedReactor",
+      "category": "E-R",
+      "annex": "B.4",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 7,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B8",
+        "termCells": [
+          "C8"
+        ],
+        "annexCell": "D8",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:drytypereactor",
+      "kind": "equipment",
+      "label": "干式电抗器",
+      "term": "DryTypeReactor",
+      "category": "E-R",
+      "annex": "B.5",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 7,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B9",
+        "termCells": [
+          "C9"
+        ],
+        "annexCell": "D9",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:electromagneticta",
+      "kind": "equipment",
+      "label": "电磁式电流互感器",
+      "term": "ElectromagneticTa",
+      "category": "E13",
+      "annex": "B.6",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 7,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B10",
+        "termCells": [
+          "C10"
+        ],
+        "annexCell": "D10",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:electronicta",
+      "kind": "equipment",
+      "label": "电子式电流互感器",
+      "term": "ElectronicTa",
+      "category": "E13",
+      "annex": "B.7",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 7,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B11",
+        "termCells": [
+          "C11"
+        ],
+        "annexCell": "D11",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:electromagnetictv",
+      "kind": "equipment",
+      "label": "电磁式电压互感器",
+      "term": "ElectromagneticTv",
+      "category": "E14",
+      "annex": "B.8",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 7,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B12",
+        "termCells": [
+          "C12"
+        ],
+        "annexCell": "D12",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:capacitivetv",
+      "kind": "equipment",
+      "label": "电容式电压互感器",
+      "term": "CapacitiveTv",
+      "category": "E14",
+      "annex": "B.9",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 7,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B13",
+        "termCells": [
+          "C13"
+        ],
+        "annexCell": "D13",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:electronictv",
+      "kind": "equipment",
+      "label": "电子式电压互感器",
+      "term": "ElectronicTv",
+      "category": "E14",
+      "annex": "B.10",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 7,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B14",
+        "termCells": [
+          "C14"
+        ],
+        "annexCell": "D14",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:couplingcapacitor",
+      "kind": "equipment",
+      "label": "耦合电容器",
+      "term": "CouplingCapacitor",
+      "category": "E22",
+      "annex": "B.11",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 7,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B15",
+        "termCells": [
+          "C15"
+        ],
+        "annexCell": "D15",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:voltagemeasuringdevice",
+      "kind": "equipment",
+      "label": "直流电压测量装置",
+      "term": "VoltageMeasuringDevice",
+      "category": "E23",
+      "annex": "B.12",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B16",
+        "termCells": [
+          "C16"
+        ],
+        "annexCell": "D16",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:gis",
+      "kind": "equipment",
+      "label": "组合电器 GIS",
+      "term": "GIS",
+      "category": "E05",
+      "annex": "B.13",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B17",
+        "termCells": [
+          "C17"
+        ],
+        "annexCell": "D17",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:hgis",
+      "kind": "equipment",
+      "label": "组合电器 HGIS",
+      "term": "HGIS",
+      "category": "E05",
+      "annex": "B.14",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B18",
+        "termCells": [
+          "C18"
+        ],
+        "annexCell": "D18",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:acporcelaincircuitbreaker",
+      "kind": "equipment",
+      "label": "交流瓷柱式断路器",
+      "term": "ACPorcelainCircuitBreaker",
+      "category": "E06",
+      "annex": "B.15",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B19",
+        "termCells": [
+          "C19"
+        ],
+        "annexCell": "D19",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:actankbreaker",
+      "kind": "equipment",
+      "label": "交流罐式断路器",
+      "term": "ACTankBreaker",
+      "category": "E06",
+      "annex": "B.16",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B20",
+        "termCells": [
+          "C20"
+        ],
+        "annexCell": "D20",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:dcbypassswitch",
+      "kind": "equipment",
+      "label": "直流旁路开关",
+      "term": "DCBypassSwitch",
+      "category": "E24",
+      "annex": "B.17",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B21",
+        "termCells": [
+          "C21"
+        ],
+        "annexCell": "D21",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:dcconversionswitch",
+      "kind": "equipment",
+      "label": "直流转换开关",
+      "term": "DCConversionSwitch",
+      "category": "E24",
+      "annex": "B.18",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B22",
+        "termCells": [
+          "C22"
+        ],
+        "annexCell": "D22",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:acisolatingswitch",
+      "kind": "equipment",
+      "label": "交流隔离开关",
+      "term": "ACIsolatingSwitch",
+      "category": "E07",
+      "annex": "B.19",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B23",
+        "termCells": [
+          "C23"
+        ],
+        "annexCell": "D23",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:acgroundswitch",
+      "kind": "equipment",
+      "label": "交流接地开关",
+      "term": "ACGroundSwitch",
+      "category": "E08",
+      "annex": "B.20",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B24",
+        "termCells": [
+          "C24"
+        ],
+        "annexCell": "D24",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:dcisolatingswitch",
+      "kind": "equipment",
+      "label": "直流隔离开关",
+      "term": "DCIsolatingSwitch",
+      "category": "E07",
+      "annex": "B.21",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B25",
+        "termCells": [
+          "C25"
+        ],
+        "annexCell": "D25",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:dcgroundswitch",
+      "kind": "equipment",
+      "label": "直流接地开关",
+      "term": "DCGroundSwitch",
+      "category": "E08",
+      "annex": "B.22",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B26",
+        "termCells": [
+          "C26"
+        ],
+        "annexCell": "D26",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:convertervalve",
+      "kind": "equipment",
+      "label": "换流阀",
+      "term": "ConverTervalve",
+      "category": "E25",
+      "annex": "B.23",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B27",
+        "termCells": [
+          "C27"
+        ],
+        "annexCell": "D27",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:insulatedgatebipolartransistor",
+      "kind": "equipment",
+      "label": "IGBT 阀",
+      "term": "InsulatedGateBipolarTransistor",
+      "category": "E25",
+      "annex": "B.23",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B28",
+        "termCells": [
+          "C28"
+        ],
+        "annexCell": "D28",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:groundtransformer/arcextinguishingcoil",
+      "kind": "equipment",
+      "label": "消弧线圈/接地变压器成套装置",
+      "term": "GroundTransformer/ArcExtinguishingCoil",
+      "category": "E04",
+      "annex": "B.24",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B29",
+        "termCells": [
+          "C29"
+        ],
+        "annexCell": "D29",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:groundresistance",
+      "kind": "equipment",
+      "label": "接地电阻成套装置",
+      "term": "GroundResistance",
+      "category": "E04",
+      "annex": "B.25",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B30",
+        "termCells": [
+          "C30"
+        ],
+        "annexCell": "D30",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:opengroundingequipment/neutralpointequipment",
+      "kind": "equipment",
+      "label": "中性点成套设备",
+      "term": "OpenGroundingEquipment/NeutralPointEquipment",
+      "category": "E04",
+      "annex": "B.26",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B31",
+        "termCells": [
+          "C31"
+        ],
+        "annexCell": "D31",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:dcblockingdevice",
+      "kind": "equipment",
+      "label": "隔直装置",
+      "term": "DCBlockingDevice",
+      "category": "E26",
+      "annex": "B.27",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B32",
+        "termCells": [
+          "C32"
+        ],
+        "annexCell": "D32",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:framecapacitor",
+      "kind": "equipment",
+      "label": "框架式电容器组",
+      "term": "FrameCapacitor",
+      "category": "E10",
+      "annex": "B.28",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B33",
+        "termCells": [
+          "C33"
+        ],
+        "annexCell": "D33",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:collectivecapacitor",
+      "kind": "equipment",
+      "label": "集合式电容器组",
+      "term": "CollectiveCapacitor",
+      "category": "E10",
+      "annex": "B.29",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B34",
+        "termCells": [
+          "C34"
+        ],
+        "annexCell": "D34",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:seriescompensation",
+      "kind": "equipment",
+      "label": "串补电容器成套装置",
+      "term": "SeriesCompensation",
+      "category": "E27",
+      "annex": "B.30",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B35",
+        "termCells": [
+          "C35"
+        ],
+        "annexCell": "D35",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:bucksvg",
+      "kind": "equipment",
+      "label": "降压式 SVG",
+      "term": "BuckSVG",
+      "category": "E12",
+      "annex": "B.31",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B36",
+        "termCells": [
+          "C36"
+        ],
+        "annexCell": "D36",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:straighthangingsvg",
+      "kind": "equipment",
+      "label": "直挂式 SVG",
+      "term": "StraightHangingSVG",
+      "category": "E12",
+      "annex": "B.32",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B37",
+        "termCells": [
+          "C37"
+        ],
+        "annexCell": "D37",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:svc",
+      "kind": "equipment",
+      "label": "SVC",
+      "term": "SVC",
+      "category": "E12",
+      "annex": "B.33",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B38",
+        "termCells": [
+          "C38"
+        ],
+        "annexCell": "D38",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:filtercapacitor",
+      "kind": "equipment",
+      "label": "滤波器电容器",
+      "term": "FilterCapacitor",
+      "category": "E10",
+      "annex": "B.34",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B39",
+        "termCells": [
+          "C39"
+        ],
+        "annexCell": "D39",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:dccouplingcapacitor",
+      "kind": "equipment",
+      "label": "直流耦合电容器",
+      "term": "DCCouplingCapacitor",
+      "category": "E22",
+      "annex": "B.35",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B40",
+        "termCells": [
+          "C40"
+        ],
+        "annexCell": "D40",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:resistor",
+      "kind": "equipment",
+      "label": "电阻器",
+      "term": "Resistor",
+      "category": "E28",
+      "annex": "B.36",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B41",
+        "termCells": [
+          "C41"
+        ],
+        "annexCell": "D41",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:hvswitchcabinet",
+      "kind": "equipment",
+      "label": "高压开关柜",
+      "term": "HVSwitchCabinet",
+      "category": "E09",
+      "annex": "B.37",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B42",
+        "termCells": [
+          "C42"
+        ],
+        "annexCell": "D42",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:lvswitchcabinet",
+      "kind": "equipment",
+      "label": "低压开关柜",
+      "term": "LVSwitchCabinet",
+      "category": "E09",
+      "annex": "B.38",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B43",
+        "termCells": [
+          "C43"
+        ],
+        "annexCell": "D43",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:fuse",
+      "kind": "equipment",
+      "label": "熔断器",
+      "term": "Fuse",
+      "category": "E29",
+      "annex": "B.39",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 8,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B44",
+        "termCells": [
+          "C44"
+        ],
+        "annexCell": "D44",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:lightningarrester",
+      "kind": "equipment",
+      "label": "交流避雷器",
+      "term": "LightningArrester",
+      "category": "E15",
+      "annex": "B.40",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B45",
+        "termCells": [
+          "C45"
+        ],
+        "annexCell": "D45",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:dcarrester/filterarrester",
+      "kind": "equipment",
+      "label": "直流避雷器/ 直流滤波避雷器",
+      "term": "DCArrester/FilterArrester",
+      "category": "E15",
+      "annex": "B.41",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B46",
+        "termCells": [
+          "C46"
+        ],
+        "annexCell": "D46",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:acpillarinsulator",
+      "kind": "equipment",
+      "label": "交流支柱绝缘子",
+      "term": "ACPillarInsulator",
+      "category": "E20",
+      "annex": "B.42",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B47",
+        "termCells": [
+          "C47"
+        ],
+        "annexCell": "D47",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:dcpillarinsulator",
+      "kind": "equipment",
+      "label": "直流支柱绝缘子",
+      "term": "DCPillarInsulator",
+      "category": "E20",
+      "annex": "B.43",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B48",
+        "termCells": [
+          "C48"
+        ],
+        "annexCell": "D48",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:acwallbushing",
+      "kind": "equipment",
+      "label": "交流穿墙套管",
+      "term": "ACWallBushing",
+      "category": "E21",
+      "annex": "B.44",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B49",
+        "termCells": [
+          "C49"
+        ],
+        "annexCell": "D49",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:dcwallbushing",
+      "kind": "equipment",
+      "label": "直流穿墙套管",
+      "term": "DCWallBushing",
+      "category": "E21",
+      "annex": "B.45",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B50",
+        "termCells": [
+          "C50"
+        ],
+        "annexCell": "D50",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:secondarycabinet",
+      "kind": "equipment",
+      "label": "二次屏柜",
+      "term": "SecondaryCabinet",
+      "category": "E16",
+      "annex": "B.47",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B51",
+        "termCells": [
+          "C51"
+        ],
+        "annexCell": "D51",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:linewarningmeasuringdevice",
+      "kind": "equipment",
+      "label": "线路故障测量装置",
+      "term": "LineWarningMeasuringDevice",
+      "category": "E30",
+      "annex": "B.46",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B52",
+        "termCells": [
+          "C52"
+        ],
+        "annexCell": "D52",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:groupbattery",
+      "kind": "equipment",
+      "label": "蓄电池组",
+      "term": "GroupBattery",
+      "category": "E16.battery_set",
+      "annex": "B.48",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B53",
+        "termCells": [
+          "C53"
+        ],
+        "annexCell": "D53",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:prefabricatedcabin",
+      "kind": "equipment",
+      "label": "预制舱体",
+      "term": "PrefabricatedCabin",
+      "category": "E18",
+      "annex": "B.49",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B54",
+        "termCells": [
+          "C54"
+        ],
+        "annexCell": "D54",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:securitysystem",
+      "kind": "equipment",
+      "label": "安防设备",
+      "term": "SecuritySystem",
+      "category": "E31",
+      "annex": "B.50",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B55",
+        "termCells": [
+          "C55"
+        ],
+        "annexCell": "D55",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表1:firealarmsystem",
+      "kind": "equipment",
+      "label": "火灾报警设备",
+      "term": "FireAlarmSystem",
+      "category": "E32",
+      "annex": "B.51",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 9,
+        "sheet": "表1_电气设备模型索引表",
+        "nameCell": "B56",
+        "termCells": [
+          "C56"
+        ],
+        "annexCell": "D56",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:flexiblecircuitconductor",
+      "kind": "material",
+      "label": "软导线",
+      "term": "FlexibleCircuitConductor",
+      "category": "M01",
+      "annex": "C.1",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B5",
+        "termCells": [
+          "C5"
+        ],
+        "annexCell": "D5",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:tubularbus",
+      "kind": "material",
+      "label": "管形母线",
+      "term": "TubularBus",
+      "category": "M02",
+      "annex": "C.2",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B6",
+        "termCells": [
+          "C6"
+        ],
+        "annexCell": "D6",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:rectangularbus",
+      "kind": "material",
+      "label": "矩形母线",
+      "term": "RectangularBus",
+      "category": "M02",
+      "annex": "C.3",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B7",
+        "termCells": [
+          "C7"
+        ],
+        "annexCell": "D7",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:enclosedbus",
+      "kind": "material",
+      "label": "封闭母线",
+      "term": "EnclosedBus",
+      "category": "M02",
+      "annex": "C.4",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B8",
+        "termCells": [
+          "C8"
+        ],
+        "annexCell": "D8",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:insulatorssring",
+      "kind": "material",
+      "label": "绝缘子串",
+      "term": "InsulatorsSring",
+      "category": "M04",
+      "annex": "C.5",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B9",
+        "termCells": [
+          "C9"
+        ],
+        "annexCell": "D9",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:equilibriumloadsshieldingdevice",
+      "kind": "material",
+      "label": "均压屏蔽装置",
+      "term": "EquilibriumLoadsShieldingDevice",
+      "category": "M03",
+      "annex": "C.6",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B10",
+        "termCells": [
+          "C10"
+        ],
+        "annexCell": "D10",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:supporttubebus",
+      "kind": "material",
+      "label": "支持式管形母线",
+      "term": "SupportTubeBus",
+      "category": "M03",
+      "annex": "C.7",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B11",
+        "termCells": [
+          "C11"
+        ],
+        "annexCell": "D11",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:suspendedtubebus",
+      "kind": "material",
+      "label": "悬挂式管形母线",
+      "term": "SuspendedTubeBus",
+      "category": "M03",
+      "annex": "C.8",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B12",
+        "termCells": [
+          "C12"
+        ],
+        "annexCell": "D12",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:roadcrossinghardware",
+      "kind": "material",
+      "label": "跨道路金具",
+      "term": "RoadCrossingHardware",
+      "category": "M03",
+      "annex": "C.9",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B13",
+        "termCells": [
+          "C13"
+        ],
+        "annexCell": "D13",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:bussupportfixed",
+      "kind": "material",
+      "label": "母线支撑固定",
+      "term": "BusSupportFixed",
+      "category": "M03",
+      "annex": "C.10",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B14",
+        "termCells": [
+          "C14"
+        ],
+        "annexCell": "D14",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:busplugginghardware",
+      "kind": "material",
+      "label": "母线封堵金具",
+      "term": "BusPluggingHardware",
+      "category": "M03",
+      "annex": "C.11",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B15",
+        "termCells": [
+          "C15"
+        ],
+        "annexCell": "D15",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:busbarconnectionleadsdownhardware",
+      "kind": "material",
+      "label": "母线连接引下金具",
+      "term": "BusbarConnectionLeadsDownHardware",
+      "category": "M03",
+      "annex": "C.12",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B16",
+        "termCells": [
+          "C16"
+        ],
+        "annexCell": "D16",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:suspendedwireclamp",
+      "kind": "material",
+      "label": "悬垂线夹",
+      "term": "SuspendedWireClamp",
+      "category": "M03",
+      "annex": "C.13",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B17",
+        "termCells": [
+          "C17"
+        ],
+        "annexCell": "D17",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:tensionclamp",
+      "kind": "material",
+      "label": "耐张线夹",
+      "term": "TensionClamp",
+      "category": "M03",
+      "annex": "C.14",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B18",
+        "termCells": [
+          "C18"
+        ],
+        "annexCell": "D18",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:equipmentcableclamp",
+      "kind": "material",
+      "label": "设备线夹",
+      "term": "EquipmentCableClamp",
+      "category": "M03",
+      "annex": "C.15",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B19",
+        "termCells": [
+          "C19"
+        ],
+        "annexCell": "D19",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:tconnectionfittings",
+      "kind": "material",
+      "label": "T接金具",
+      "term": "TConnectionFittings",
+      "category": "M03",
+      "annex": "C.16",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B20",
+        "termCells": [
+          "C20"
+        ],
+        "annexCell": "D20",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:spacer",
+      "kind": "material",
+      "label": "间隔棒",
+      "term": "Spacer",
+      "category": "M03",
+      "annex": "C.17",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B21",
+        "termCells": [
+          "C21"
+        ],
+        "annexCell": "D21",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:expansionjoint",
+      "kind": "material",
+      "label": "伸缩节",
+      "term": "ExpansionJoint",
+      "category": "M03",
+      "annex": "C.18",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B22",
+        "termCells": [
+          "C22"
+        ],
+        "annexCell": "D22",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:voltageequalizationshieldingdevice",
+      "kind": "material",
+      "label": "均压屏蔽装置",
+      "term": "VoltageEqualizationShieldingDevice",
+      "category": "M03",
+      "annex": "C.19",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B23",
+        "termCells": [
+          "C23"
+        ],
+        "annexCell": "D23",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:cableclamp",
+      "kind": "material",
+      "label": "电缆卡具",
+      "term": "CableClamp",
+      "category": "M03",
+      "annex": "C.20",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B24",
+        "termCells": [
+          "C24"
+        ],
+        "annexCell": "D24",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:anchoringdevice",
+      "kind": "material",
+      "label": "锚固装置",
+      "term": "AnchoringDevice",
+      "category": "M03",
+      "annex": "C.21",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B25",
+        "termCells": [
+          "C25"
+        ],
+        "annexCell": "D25",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:terminalbox",
+      "kind": "material",
+      "label": "端子箱",
+      "term": "TerminalBox",
+      "category": "M10",
+      "annex": "C.22",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B26",
+        "termCells": [
+          "C26"
+        ],
+        "annexCell": "D26",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:lamps",
+      "kind": "material",
+      "label": "灯具",
+      "term": "Lamps",
+      "category": "M11",
+      "annex": "C.23",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B27",
+        "termCells": [
+          "C27"
+        ],
+        "annexCell": "D27",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:powerbox/lightingbox/maintenancebox",
+      "kind": "material",
+      "label": "动力箱/照明箱/检修箱",
+      "term": "PowerBox/LightingBox/MaintenanceBox",
+      "category": "M12",
+      "annex": "C.24",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B28",
+        "termCells": [
+          "C28"
+        ],
+        "annexCell": "D28",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:switch",
+      "kind": "material",
+      "label": "开关",
+      "term": "Switch",
+      "category": "M13",
+      "annex": "C.25",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B29",
+        "termCells": [
+          "C29"
+        ],
+        "annexCell": "D29",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:plug",
+      "kind": "material",
+      "label": "插座",
+      "term": "Plug",
+      "category": "M13",
+      "annex": "C.26",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B30",
+        "termCells": [
+          "C30"
+        ],
+        "annexCell": "D30",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:groundingmaterial",
+      "kind": "material",
+      "label": "接地材料",
+      "term": "GroundingMaterial",
+      "category": "M06",
+      "annex": "C.27",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B31",
+        "termCells": [
+          "C31"
+        ],
+        "annexCell": "D31",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:cable",
+      "kind": "material",
+      "label": "电缆",
+      "term": "Cable",
+      "category": "M05",
+      "annex": "C.28",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B32",
+        "termCells": [
+          "C32"
+        ],
+        "annexCell": "D32",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:cabletermination",
+      "kind": "material",
+      "label": "电缆终端",
+      "term": "CableTermination",
+      "category": "M05",
+      "annex": "C.29",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B33",
+        "termCells": [
+          "C33"
+        ],
+        "annexCell": "D33",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:cableauxiliaryfacilities",
+      "kind": "material",
+      "label": "电缆辅助设施",
+      "term": "CableAuxiliaryFacilities",
+      "category": "M08",
+      "annex": "C.30",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B34",
+        "termCells": [
+          "C34"
+        ],
+        "annexCell": "D34",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:cableditchfirewall",
+      "kind": "material",
+      "label": "电缆沟防火墙",
+      "term": "CableDitchFireWall",
+      "category": "M09",
+      "annex": "C.31",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B35",
+        "termCells": [
+          "C35"
+        ],
+        "annexCell": "D35",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:usteel",
+      "kind": "material",
+      "label": "槽钢",
+      "term": "USteel",
+      "category": "M14",
+      "annex": "C.32",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B36",
+        "termCells": [
+          "C36"
+        ],
+        "annexCell": "D36",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:anglesteel",
+      "kind": "material",
+      "label": "角钢",
+      "term": "AngleSteel",
+      "category": "M14",
+      "annex": "C.33",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B37",
+        "termCells": [
+          "C37"
+        ],
+        "annexCell": "D37",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:ibeam",
+      "kind": "material",
+      "label": "工字钢",
+      "term": "IBeam",
+      "category": "M14",
+      "annex": "C.34",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B38",
+        "termCells": [
+          "C38"
+        ],
+        "annexCell": "D38",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:steelsheet",
+      "kind": "material",
+      "label": "钢板",
+      "term": "SteelSheet",
+      "category": "M14",
+      "annex": "C.35",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 12,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B39",
+        "termCells": [
+          "C39"
+        ],
+        "annexCell": "D39",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:metalfence",
+      "kind": "material",
+      "label": "金属围栏",
+      "term": "MetalFence",
+      "category": "M09",
+      "annex": "C.36",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B41",
+        "termCells": [
+          "D41",
+          "E41"
+        ],
+        "annexCell": "G41",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:electricburiedpipe",
+      "kind": "material",
+      "label": "电气埋管",
+      "term": "ElectricBuriedPipe",
+      "category": "M09",
+      "annex": "C.37",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B42",
+        "termCells": [
+          "D42"
+        ],
+        "annexCell": "G42",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:airduct",
+      "kind": "material",
+      "label": "风管",
+      "term": "Airduct",
+      "category": "M15",
+      "annex": "C.38",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B43",
+        "termCells": [
+          "D43",
+          "E43"
+        ],
+        "annexCell": "G43",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表8:plumbing",
+      "kind": "material",
+      "label": "水管",
+      "term": "Plumbing",
+      "category": "M15",
+      "annex": "C.39",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表8_材料模型索引表",
+        "nameCell": "B44",
+        "termCells": [
+          "D44",
+          "E44"
+        ],
+        "annexCell": "G44",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:site",
+      "kind": "construction",
+      "label": "场地",
+      "term": "Site",
+      "category": "C-C6",
+      "annex": "D.1",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B5",
+        "termCells": [
+          "C5"
+        ],
+        "annexCell": "D5",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:stationoutroadways",
+      "kind": "construction",
+      "label": "进站道路",
+      "term": "StationOutRoadWays",
+      "category": "C-C5",
+      "annex": "D.2",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B6",
+        "termCells": [
+          "C6"
+        ],
+        "annexCell": "D6",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:stationinroadways",
+      "kind": "construction",
+      "label": "站内道路",
+      "term": "StationInRoadWays",
+      "category": "C-C5",
+      "annex": "D.3",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B7",
+        "termCells": [
+          "C7"
+        ],
+        "annexCell": "D7",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:fences",
+      "kind": "construction",
+      "label": "围墙",
+      "term": "Fences",
+      "category": "C-C4",
+      "annex": "D.4",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B8",
+        "termCells": [
+          "C8"
+        ],
+        "annexCell": "D8",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:gate",
+      "kind": "construction",
+      "label": "大门",
+      "term": "Gate",
+      "category": "C-C4",
+      "annex": "D.5",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B9",
+        "termCells": [
+          "C9"
+        ],
+        "annexCell": "D9",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:retainingwall",
+      "kind": "construction",
+      "label": "支挡结构",
+      "term": "RetainingWall",
+      "category": "C-C7",
+      "annex": "D.6",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B10",
+        "termCells": [
+          "C10"
+        ],
+        "annexCell": "D10",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:trench",
+      "kind": "construction",
+      "label": "沟道",
+      "term": "Trench",
+      "category": "C-C8",
+      "annex": "D.7",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B11",
+        "termCells": [
+          "C11"
+        ],
+        "annexCell": "D11",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:tunnel",
+      "kind": "construction",
+      "label": "隧道",
+      "term": "Tunnel",
+      "category": "C-C8",
+      "annex": "D.7",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B12",
+        "termCells": [
+          "C12"
+        ],
+        "annexCell": "D12",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:transporttrackfoundation",
+      "kind": "construction",
+      "label": "变压器搬运轨道",
+      "term": "TransportTrackFoundation",
+      "category": "C-C9",
+      "annex": "D.8",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B13",
+        "termCells": [
+          "C13"
+        ],
+        "annexCell": "D13",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:primarycomponents",
+      "kind": "construction",
+      "label": "主要构件",
+      "term": "PrimaryComponents",
+      "category": "C-A11",
+      "annex": "D.9",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B14",
+        "termCells": [
+          "C14"
+        ],
+        "annexCell": "D14",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:flooring",
+      "kind": "construction",
+      "label": "板",
+      "term": "Flooring",
+      "category": "C-A5",
+      "annex": "D.9",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B15",
+        "termCells": [
+          "C15"
+        ],
+        "annexCell": "D15",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:wall",
+      "kind": "construction",
+      "label": "围护结构",
+      "term": "Wall",
+      "category": "C-A1",
+      "annex": "D.9",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 13,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B16",
+        "termCells": [
+          "C16"
+        ],
+        "annexCell": "D16",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:stairs",
+      "kind": "construction",
+      "label": "楼梯",
+      "term": "Stairs",
+      "category": "C-A9",
+      "annex": "D.9",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B17",
+        "termCells": [
+          "C17"
+        ],
+        "annexCell": "D17",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:walkway",
+      "kind": "construction",
+      "label": "巡视走道",
+      "term": "WalkWay",
+      "category": "C-A9",
+      "annex": "D.9",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B18",
+        "termCells": [
+          "C18"
+        ],
+        "annexCell": "D18",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:supplementarycomponents",
+      "kind": "construction",
+      "label": "辅助构件",
+      "term": "SupplementaryComponents",
+      "category": "C-A12",
+      "annex": "D.9",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B19",
+        "termCells": [
+          "C19"
+        ],
+        "annexCell": "D19",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:foundation",
+      "kind": "construction",
+      "label": "基础",
+      "term": "Foundation",
+      "category": "C-B3",
+      "annex": "D.9",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B20",
+        "termCells": [
+          "C20"
+        ],
+        "annexCell": "D20",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:basement",
+      "kind": "construction",
+      "label": "地下室",
+      "term": "Basement",
+      "category": "C-A13",
+      "annex": "D.9",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B21",
+        "termCells": [
+          "C21"
+        ],
+        "annexCell": "D21",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:equipment",
+      "kind": "construction",
+      "label": "建筑设备",
+      "term": "Equipment",
+      "category": "C-D7",
+      "annex": "D.9",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B22",
+        "termCells": [
+          "C22"
+        ],
+        "annexCell": "D22",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:gantriescomponents",
+      "kind": "construction",
+      "label": "构架构件",
+      "term": "GantriesComponents",
+      "category": "C-B7",
+      "annex": "D.10",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B23",
+        "termCells": [
+          "C23"
+        ],
+        "annexCell": "D23",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:joints",
+      "kind": "construction",
+      "label": "连接节点",
+      "term": "Joints",
+      "category": "C-B8",
+      "annex": "D.10",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B24",
+        "termCells": [
+          "C24"
+        ],
+        "annexCell": "D24",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:gantriesfoundation",
+      "kind": "construction",
+      "label": "构架基础",
+      "term": "GantriesFoundation",
+      "category": "C-B9",
+      "annex": "D.10",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B25",
+        "termCells": [
+          "C25"
+        ],
+        "annexCell": "D25",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:trussescomponents",
+      "kind": "construction",
+      "label": "支架构件",
+      "term": "TrussesComponents",
+      "category": "C-B1",
+      "annex": "D.11",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B26",
+        "termCells": [
+          "C26"
+        ],
+        "annexCell": "D26",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:trussesfoundation",
+      "kind": "construction",
+      "label": "支架基础",
+      "term": "TrussesFoundation",
+      "category": "C-B9",
+      "annex": "D.11",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B27",
+        "termCells": [
+          "C27"
+        ],
+        "annexCell": "D27",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:equipmentfoundation",
+      "kind": "construction",
+      "label": "设备基础",
+      "term": "EquipmentFoundation",
+      "category": "C-B2",
+      "annex": "D.12",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B28",
+        "termCells": [
+          "C28"
+        ],
+        "annexCell": "D28",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:lightingrod",
+      "kind": "construction",
+      "label": "避雷针",
+      "term": "LightingRod",
+      "category": "C-B7",
+      "annex": "D.13",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B29",
+        "termCells": [
+          "C29"
+        ],
+        "annexCell": "D29",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:lightingwiretower",
+      "kind": "construction",
+      "label": "避雷线塔",
+      "term": "LightingWireTower",
+      "category": "C-B7",
+      "annex": "D.13",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B30",
+        "termCells": [
+          "C30"
+        ],
+        "annexCell": "D30",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:firewall",
+      "kind": "construction",
+      "label": "防火墙（含基础）",
+      "term": "FireWall",
+      "category": "C-A1",
+      "annex": "D.14",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B31",
+        "termCells": [
+          "C31"
+        ],
+        "annexCell": "D31",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:oilpool",
+      "kind": "construction",
+      "label": "油池",
+      "term": "OilPool",
+      "category": "C-C3",
+      "annex": "D.15",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B32",
+        "termCells": [
+          "C32"
+        ],
+        "annexCell": "D32",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:pool",
+      "kind": "construction",
+      "label": "水池",
+      "term": "Pool",
+      "category": "C-C3",
+      "annex": "D.15",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B33",
+        "termCells": [
+          "C33"
+        ],
+        "annexCell": "D33",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    },
+    {
+      "id": "表10:hydraulicandhvacequipmentfoundation",
+      "kind": "construction",
+      "label": "水暖设备基础",
+      "term": "HydraulicAndHVACEquipmentFoundation",
+      "category": "C-B2",
+      "annex": "D.12",
+      "evidence": {
+        "standardRef": "Q/GDW 11810.1—2023",
+        "pdfPage": 14,
+        "sheet": "表10_建(构)筑物及其他设施索引表",
+        "nameCell": "B34",
+        "termCells": [
+          "C34"
+        ],
+        "annexCell": "D34",
+        "workbookSha256": "454f1cd247d331876be656477c42829b83c16013ec4941898505306ae292104c",
+        "verification": "verified"
+      }
+    }
+  ]
+}

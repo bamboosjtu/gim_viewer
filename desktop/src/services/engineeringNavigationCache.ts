@@ -1,3 +1,4 @@
+import {engineeringSourceRecords} from '../gim/engineering/sourceGraph.js';
 import { ENGINEERING_NAVIGATION_VERSION, type EngineeringNavigationData } from '../gim/engineering/navigation.js';
 import { ENGINEERING_COMPOSITION_VERSION } from '../engineering/composition.js';
 import { INVENTORY_TEMPLATE_VERSION } from '../engineering/inventoryTemplate.js';
@@ -66,19 +67,19 @@ export function assertEngineeringNavigation(view: EngineeringNavigationData, sou
   const failed=(key:string)=>allowPartial&&!!errors?.[key];
   valid(view.projectionVersions?.composition===ENGINEERING_COMPOSITION_VERSION&&view.projectionVersions?.inventory===INVENTORY_TEMPLATE_VERSION&&view.projectionVersions?.source===SOURCE_TREE_TEMPLATE_VERSION&&(failed('inventory')&&!view.inventory||view.inventory?.version===INVENTORY_TEMPLATE_VERSION),'projection versions');
   const entities = new Set([...snapshot.entities, ...snapshot.pending].map(e => e.id));
-  const sourceIds = new Set([...sources.graph.records, ...sources.ifcRecords].map(r => r.id));
+  const sourceIds = new Set(engineeringSourceRecords(sources.graph,sources.ifcRecords).map(r => r.id));
   const contexts = new Set(sources.graph.cbmOccurrences.map(node=>node.id));
   function tree(nodes: Map<string, any>, root: string, composition: boolean, inventory=false) {
     valid(nodes instanceof Map && typeof root === 'string' && nodes.has(root), 'root');
     for (const [key, node] of nodes) {
       valid(typeof key === 'string' && object(node) && node.key === key && typeof node.title === 'string' && strings(node.children) && new Set(node.children).size === node.children.length, 'node');
-      valid((inventory ? ['project','group','template','entity','pending','record']:composition ? ['project', 'group', 'entity', 'pending'] : ['group', 'cbm', 'record', 'ifc-file', 'spatial']).includes(node.kind), 'node kind');
+      valid((inventory ? ['project','group','template','entity','pending','record']:composition ? ['project', 'group', 'entity', 'pending','record'] : ['group', 'cbm', 'record', 'ifc-file', 'spatial']).includes(node.kind), 'node kind');
       valid(key === root ? node.parent === undefined : typeof node.parent === 'string' && nodes.has(node.parent), 'parent');
       for (const child of node.children) valid(nodes.get(child)?.parent === key, 'child edge');
       if (composition) valid(Number.isSafeInteger(node.entityCount) && node.entityCount >= 0 && (node.targetId === undefined || entities.has(node.targetId)), 'entity reference');
       if(inventory&&node.kind==='template')valid(typeof node.template==='string'&&node.template.length>0,'inventory template');
       if(inventory&&node.confirmedCount!==undefined)valid(Number.isSafeInteger(node.confirmedCount)&&node.confirmedCount>=0&&node.confirmedCount<=node.entityCount,'inventory confirmed count');
-      if(!composition||inventory) valid(node.sourceId === undefined || sourceIds.has(node.sourceId), 'source reference');
+      valid(node.sourceId === undefined || sourceIds.has(node.sourceId), 'source reference');
       if (composition && node.declaredContextIds !== undefined) valid(strings(node.declaredContextIds) && new Set(node.declaredContextIds).size === node.declaredContextIds.length && node.declaredContextIds.every((id:string)=>contexts.has(id)), 'declared context');
     }
     const visited = new Set<string>(), stack = [root];

@@ -1,8 +1,10 @@
 import rules from './catalogRules.json';
 import { classificationDetails } from './classificationDetails.js';
 import type { ObjectEvidence, ObjectInterpretation, SourceComponentRole } from './types.js';
+import {standardTermsFromName,standardEquipmentId,STANDARD_CATALOG_VERSION} from './standardCatalog.js';
+import {categoryLabel} from './catalogLabels.js';
 
-export const ENGINEERING_RULES_VERSION = rules.version;
+export const ENGINEERING_RULES_VERSION = `${rules.version}|${STANDARD_CATALOG_VERSION}|membership-recovery-1`;
 const nameRules=rules.nameRules.map(([category,pattern])=>({category,regex:new RegExp(pattern,'gi')}));
 const part=new RegExp(rules.part),independent=new RegExp(rules.independent),group=new RegExp(rules.group,'i'),sourceOnly=new RegExp(rules.sourceOnly);
 const c1Roles=rules.c1Roles.map(([role,pattern])=>({role:role as SourceComponentRole,regex:new RegExp(pattern)}));
@@ -16,6 +18,15 @@ export function normalizedObjectName(name:string):string {
 /** Longest overlapping phrase, then rightmost independent head. Used only as
  * fallback or compatible refinement; a name never overrides a specific type. */
 export function categoryFromName(name:string):string {
+  const cached=nameCategories.get(name);if(cached!==undefined)return cached;
+  const category=classifyName(name);
+  // The rule input is only the name. Bound retained text independently from
+  // project size, and leave unusually long source values uncached.
+  if(name.length<=128){if(nameCategories.size>=4096)nameCategories.delete(nameCategories.keys().next().value!);nameCategories.set(name,category);}
+  return category;
+}
+const nameCategories=new Map<string,string>();
+function classifyName(name:string):string {
   const text=normalizedObjectName(name),hits:Array<{start:number;end:number;category:string}>=[];
   for(const rule of nameRules){rule.regex.lastIndex=0;for(const match of text.matchAll(rule.regex)){
     const end=match.index!+match[0].length,tail=text.slice(end);
@@ -48,8 +59,8 @@ export function isNumberedDesignation(value:string):boolean {
   return /#\s*\d+|\d+\s*(?:号|#)|(?:主变|组合电器|避雷器|互感器|电抗器组|电容器组|开关柜|屏柜|设备|装置|支架|基础)\s*\d+(?![\p{L}\p{N}_])|[ⅠⅡⅢⅣⅤ]/u.test(text);
 }
 const refinements:Record<string,string[]>={
-  'E-T':['E01','E03'],E16:['E16.terminal_box','E16.panel_cabinet','E16.control_cabinet','E16.battery_set','E16.protection'],
-  'C-B4':['C-B2','C-B3'],'C-B5':['C-B6','C-B7'],
+  'E-T':['E01','E03'],'E-R':['E02','E11'],E16:['E16.terminal_box','E16.panel_cabinet','E16.control_cabinet','E16.battery_set','E16.protection'],
+  'C-B4':['C-B2','C-B3','C-B9'],'C-B5':['C-B6','C-B7'],
   'C-A1':['C-C1','C-C4'],'C-A2':['C-C1','C-C5','C-B3'],'C-A5':['C-C1','M08'],
 };
 const compatible=(coarse:string,fine:string)=>coarse===fine||!!refinements[coarse]?.includes(fine);
@@ -57,7 +68,8 @@ const compatible=(coarse:string,fine:string)=>coarse===fine||!!refinements[coars
 function interpretClassification(object:ObjectEvidence,hasChildren=false):ObjectInterpretation {
   const name=object.name.trim(),prefix=name.match(/^(.+?模型\d+)[_－](.+)$/),assemblyCategory=prefix?categoryFromName(prefix[1]):'';
   const fragment=!!prefix&&assemblyCategory.startsWith('E'),ownName=fragment?prefix![2]:name;
-  const typed=object.typeCategory;
+  const componentTerms=new Set(object.componentTypeCandidates?.map(p=>p.value));
+  const typed=object.typeCategory??(componentTerms.size===1&&!object.standardClasses?.length?'part':undefined);
   const declaredRoles=new Set(object.objectRoles?.map(p=>p.value));
   const result=(meaning:ObjectInterpretation['meaning'],basis:string,category=''):ObjectInterpretation=>({category,meaning,basis,conflict:'',independent:false,assemblyCategory:'',assemblySignature:'',classificationStatus:'unresolved',classificationEvidence:[]});
   const neutral=(basis:string,evidence:string[],confirmed=false):ObjectInterpretation=>({
@@ -123,7 +135,7 @@ function interpretClassification(object:ObjectEvidence,hasChildren=false):Object
   const details=classificationDetails(category,object.subtypeNames?.length?object.subtypeNames.map(p=>p.value).join(' '):ownName);
   if(basis.includes('name')||basis==='family_identity_candidate')evidence.push(...(object.names?.filter(n=>n.value===name).map(n=>n.evidenceId)??[`name:${object.sourceId}`]),...identities.filter(p=>p.category===category).map(p=>p.evidence));
   if(details.subtype)evidence.push(...object.subtypeNames?.map(p=>p.evidenceId)??[]);
-  return {...result(fragment&&!isIndependent&&!['C-B1','C-B2','C-B3','C-B4'].includes(category)?'fragment':'object',basis,category),
+  return {...result(fragment&&!isIndependent&&!['C-B1','C-B2','C-B3','C-B4','C-B9'].includes(category)?'fragment':'object',basis,category),
     ...details,...(role?{role,subtype:role,subtypeLabel:role==='cover'?'盖板':role==='sidewall'?'侧壁':'底板'}:{}),
     independent:basis==='attribute_conflict'?false:isIndependent,conflict,classificationEvidence:[...new Set(evidence)],
     classificationStatus:category==='U-OBJECT'?'unresolved':category==='E-T'||category==='C-B4'||basis==='family_identity_candidate'||basis==='material_type_fallback'||conflict||/^(?:LW|ZW|GW|JW)\d|^(?:CT|PT)[-_\d]*$/i.test(name)?'candidate':'confirmed',
@@ -136,6 +148,25 @@ function interpretClassification(object:ObjectEvidence,hasChildren=false):Object
 /** Category, vocabulary type and engineering purpose have independent evidence. */
 export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectInterpretation {
   const result=interpretClassification(object,hasChildren);
+  result.sourceName=object.name;
+  const classes=object.standardClasses??[],unique=new Map(classes.map(c=>[c.id,c]));
+  if(unique.size===1){
+    const item=[...unique.values()][0];result.standardClass={...item,status:'confirmed',evidence:[...new Set(classes.map(c=>c.evidenceId))]};
+    if(item.kind!=='equipment'&&item.label!==categoryLabel(result.category)&&(!result.subtype||result.subtype==='unresolved'||result.subtype==='body')){
+      result.subtype=`standard:${item.id}`;result.subtypeLabel=item.label;
+      if(['material_subtype_evidence_insufficient','equipment_subtype_evidence_insufficient'].includes(result.unknownReason??''))delete result.unknownReason;
+    }
+  }else if(!classes.length&&result.meaning==='object'&&result.basis!=='attribute_conflict'){
+    const names=standardTermsFromName(object.name);
+    if(names.length===1){const item=names[0],evidenceId=object.names?.find(n=>n.value===object.name)?.evidenceId??`name:${object.sourceId}`;
+      result.standardClass={...item,kind:item.kind as 'equipment'|'material'|'construction',value:item.term,evidenceId,status:'candidate',evidence:[evidenceId]};
+      if(!object.typeCategory&&!object.propertyCategories?.length){
+        if(!result.category.startsWith(`${item.category}.`))result.category=item.category;
+        result.classificationStatus='candidate';result.basis='standard_name_candidate';
+      }
+      if(item.kind==='equipment'&&!object.equipmentType&&!object.equipmentTypeCandidates?.length)result.equipmentType={id:standardEquipmentId(item),status:'candidate',evidence:[evidenceId]};
+    }
+  }
   if(object.vocabularyObservations?.length)result.vocabularyObservations=object.vocabularyObservations;
   if(result.basis.includes('name')||result.basis==='family_identity_candidate'||result.basis==='type+object_identity')result.classificationStatus=result.category==='U-OBJECT'?'unresolved':'candidate';
   const purposes=[...new Set(object.purposes?.map(p=>p.value)??[])];
@@ -153,7 +184,7 @@ export function interpretObject(object:ObjectEvidence,hasChildren=false):ObjectI
   if(new Set(equipmentCandidates.map(p=>p.value)).size===1)
     result.equipmentType={id:equipmentCandidates[0].value,status:'confirmed',evidence:[...new Set(equipmentCandidates.map(p=>p.evidenceId))]};
   if(new Set(componentCandidates.map(p=>p.value)).size===1)
-    result.componentType={id:componentCandidates[0].value,status:'confirmed',evidence:[...new Set(componentCandidates.map(p=>p.evidenceId))]};
+    result.componentType={id:componentCandidates[0].value,status:componentCandidates.every(p=>p.confidence==='candidate')?'candidate':'confirmed',evidence:[...new Set(componentCandidates.map(p=>p.evidenceId))]};
   if(new Set(equipmentCandidates.map(p=>p.value)).size>1){
     result.equipmentType={status:'unresolved',evidence:equipmentCandidates.map(p=>p.evidenceId)};
     const contexts=new Set(equipmentCandidates.map(p=>JSON.stringify(p.context??{})));
