@@ -379,6 +379,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
       return bounds ?? { devPath: dev, sourceBounds: null, boundsQuality: 'unknown', primitiveCounts: {}, unsupportedTypes: [], diagnostic: 'missing-catalog-bounds' };
     };
     const applyCatalog = (dev: string, instances: typeof seeds, bounds: DevSourceBounds): void => {
+      this.catalogLookupReady=true;
       this.diagnostics.absoluteConeCount += bounds.absoluteConeCount ?? 0;
       const emptySource = !bounds.diagnostic && bounds.boundsQuality === 'empty';
       for (const seed of instances) {
@@ -410,34 +411,35 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
     // Warm start: one bounded native batch per 64 DEV instead of one IPC per
     // DEV. This removes the 285-round-trip catalog startup from the critical
     // path; cold start benefits from the same batched lookup (misses cheap).
-    try {
-      for (let start = 0;start < catalogEntries.length;start += 64) {
-        if (!this.current()) return;
-        const devs = catalogEntries.slice(start, start + 64).map(([dev]) => dev).filter(dev => !this.catalogHints.has(dev));
-        if (!devs.length) continue;
-        const reads = await readDevArtifactBatch<DevSourceBounds>('catalog', devs.map(dev => this.catalogKey(dev)), this.session, 4 * 1024 * 1024);
-        if (!(reads instanceof Map)) throw new Error('catalog prefetch returned no map');
-        devs.forEach(dev => {
-          const key = this.catalogKey(dev);
-          const read = reads.get(key);
-          // Reuse terminal statuses too: resolveCatalog retains normal invalid
-          // handling without issuing a second read for every confirmed miss.
-          if (read && read.status !== 'deferred') this.catalogHints.set(dev, Promise.resolve(read));
-        });
-        if(start===0&&devs.every(dev=>reads.get(this.catalogKey(dev))?.status==='miss')){
-          // Cold geometry can start immediately. Warm hits first establish
-          // their cached bounds, avoiding an all-visible speculative queue.
-          this.catalogLookupReady=true;this.update();
-        }
-      }
-    } catch (error) {
-      // A failed prefetch falls back to per-DEV reads in resolveCatalog.
-      console.warn('[DEV catalog prefetch]', error);
+    let catalogReadTail=Promise.resolve();
+    for(let start=0;start<catalogEntries.length;start+=64){
+      const devs=catalogEntries.slice(start,start+64).map(([dev])=>dev).filter(dev=>!this.catalogHints.has(dev));
+      if(!devs.length)continue;
+      const first=start===0;
+      const batch=catalogReadTail.then(async()=>{
+        if(!this.current())return new Map<string,DevArtifactRead<DevSourceBounds>>();
+        try{
+          const reads=await readDevArtifactBatch<DevSourceBounds>('catalog',devs.map(dev=>this.catalogKey(dev)),this.session,4*1024*1024);
+          if(!(reads instanceof Map))throw Error('catalog prefetch returned no map');
+          if(first&&devs.every(dev=>reads.get(this.catalogKey(dev))?.status==='miss')){
+            this.catalogLookupReady=true;this.update();
+          }
+          return reads;
+        }finally{if(first)this.catalogLookupReady=true;}
+      });
+      catalogReadTail=batch.then(()=>{},()=>{});
+      for(const dev of devs){
+        const fallback=()=>this.current()?readDevArtifactResult<DevSourceBounds>('catalog',this.catalogKey(dev),this.session)
+          .catch(error=>({status:'read-error' as const,error:String(error)})):Promise.resolve({status:'read-error' as const,error:'session expired'});
+        this.catalogHints.set(dev,batch.then(reads=>{
+        const read=reads.get(this.catalogKey(dev));
+        if(read&&read.status!=='deferred')return read;
+        return fallback();
+      },fallback));}
     }
     // Stream catalog bounds: a single slow DEV must not block the next batch.
     // This was the substation02 1395/3326 stall: Promise.all(batch of 8) waited
     // for one pathological bounds task while the other workers had no new rows.
-    this.catalogLookupReady=true;
     let nextCatalog = 0;
     const consumeCatalog = async (): Promise<void> => {
       while (this.current()) {
@@ -458,7 +460,7 @@ taskId: `${this.perf.id}:dev-${kind}:${++this.taskSequence}`, domain: 'dev', kin
       () => consumeCatalog(),
     ));
     if (!this.current()) return;
-    this.diagnostics.catalogReady = true; this.finishCatalog();
+    this.catalogLookupReady=true;this.diagnostics.catalogReady = true; this.finishCatalog();
     const { refreshDeviceBoundsMarkers } = await loadPresentation('deviceBoundsMarker');
     if (!this.current()) return;
     refreshDeviceBoundsMarkers(this.state);

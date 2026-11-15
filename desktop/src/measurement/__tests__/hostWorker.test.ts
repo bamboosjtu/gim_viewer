@@ -8,6 +8,15 @@ class Port extends EventTarget {
   terminate(){this.stops++;}
 }
 function start(){(globalThis as any).__GIM_MEASUREMENT_CONFIG__={mode:'benchmark'};resetMeasurementRun({});const port=new Port();const worker=createMeasuredWorker('dev',()=>port as unknown as Worker);return {port,worker};}
+
+it('source input replies remain control messages rather than uncompleted tasks',()=>{
+  const {port,worker}=start(),callback=vi.fn();port.addEventListener('message',callback);
+  worker.postMessage({type:'source-files',requestId:0,readId:1,input:{batches:[],files:[],errors:[]}});
+  expect((port.messages[port.messages.length-1] as any)._gimMeasurement).toBeUndefined();
+  port.dispatchEvent(new MessageEvent('message',{data:{type:'read-sources',readId:1,requestId:2,paths:['project.cbm']}}));
+  expect(callback).toHaveBeenCalledOnce();expect(measurementSnapshot()?.activeTasks).toEqual([]);
+  worker.terminate();
+});
 afterEach(()=>{delete (globalThis as any).__GIM_MEASUREMENT_CONFIG__;resetMeasurementRun({});vi.restoreAllMocks();});
 it('preserves transfer identity, seals queued failures and terminates once',()=>{
   const {port,worker}=start(),buffer=new ArrayBuffer(8),transfer=[buffer];worker.postMessage({kind:'compile',id:1,bytes:buffer},transfer);

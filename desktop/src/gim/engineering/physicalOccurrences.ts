@@ -10,9 +10,14 @@ interface Scope {roots:DevTree[];matches:Map<string,DevTree[]>;indexed?:boolean}
 /** Physical references only. Does not create SourceRecords, aliases, attributes,
  * identities or tree projections. Parsed documents/index are shared with the
  * later semantic consumer, so a second pass does not read/parse them again. */
-export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;readDocument(path:string):Promise<SourceDocument>},
+export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;readDocument(path:string):Promise<SourceDocument>;prefetchDocuments?:(paths:readonly string[])=>void},
   options:{signal?:AbortSignal;onProgress?:(count:number)=>void;maxOccurrences?:number;maxDepth?:number}={}):Promise<SourceGeometryOccurrenceCatalog>{
   const catalog:SourceGeometryOccurrenceCatalog={occurrences:[],diagnostics:[]};
+  const prefetch=(owner:string,fields:SourceDocument['fields'],offset=0)=>{
+    input.prefetchDocuments?.(fields.slice(offset,offset+256).flatMap(field=>{
+      const target=input.entryIndex.resolve(field.value,owner);return target?[target]:[];
+    }));
+  };
   const scalarFields=new WeakMap<SourceDocument,Map<string,string>>();
   const scalar=(doc:SourceDocument,key:string)=>{
     let fields=scalarFields.get(doc);
@@ -43,9 +48,12 @@ export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;re
     if(check(depth))await new Promise<void>(resolve=>setTimeout(resolve,0));
     if(ancestors.has(path)){catalog.diagnostics.push({sourceContextId:path,documentPath:path,reason:'source-cycle'});return null;}
     const doc=await read(path,path);if(!doc)return null;
+    const edges=doc.fields.filter(p=>/^SUBDEVICE\d+$/i.test(p.keys[0])&&/\.dev$/i.test(p.value));
     const next=new Set(ancestors);next.add(path);
     const node:DevTree={path,children:[]};
-    for(const field of doc.fields)if(/^SUBDEVICE\d+$/i.test(field.keys[0])&&/\.dev$/i.test(field.value)){
+    for(let i=0;i<edges.length;i++){
+      if(i%128===0)prefetch(path,edges,i);
+      const field=edges[i];
       const target=resolve(path,field.value,path);if(!target)continue;
       const child=await tree(target,next,depth+1);if(child)node.children.push(child);
     }
@@ -80,6 +88,8 @@ export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;re
     if(check(depth))await new Promise<void>(resolve=>setTimeout(resolve,0));
     if(ancestors.has(path)){catalog.diagnostics.push({sourceContextId:id,documentPath:path,reason:'source-cycle'});return;}
     const doc=await read(path,id);if(!doc){if(depth===0)throw Error('Physical project source unavailable');return;}
+    const edges=doc.fields.filter(p=>/^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i.test(p.keys[0])&&/\.cbm$/i.test(p.value));
+    prefetch(path,edges);
     let matrix:number[]|undefined;
     const placed=()=>matrix??=placement(doc,parent,id);
     const omp=scalar(doc,'OBJECTMODELPOINTER');let childScopes=scopes;
@@ -97,10 +107,11 @@ export async function extractPhysicalOccurrences(input:{entryIndex:EntryIndex;re
         }
       }
     }
-    const edges=doc.fields.filter(p=>/^(?:SUBSYSTEM\d*|SUBDEVICE\d+)$/i.test(p.keys[0])&&/\.cbm$/i.test(p.value));
     const counts=new Map<string,number>();for(const field of edges){const key=field.keys[0].toUpperCase();counts.set(key,(counts.get(key)??0)+1);}
     const next=new Set(ancestors);next.add(path);
-    for(const field of edges){const target=resolve(path,field.value,id);if(!target)continue;
+    for(let i=0;i<edges.length;i++){
+      if(i>0&&i%128===0)prefetch(path,edges,i);
+      const field=edges[i],target=resolve(path,field.value,id);if(!target)continue;
       const key=field.keys[0].toUpperCase(),edge=key+((counts.get(key)??0)>1?`@line:${field.line}`:'');
       await visit(target,`${id}/${edge}:${target}`,next,childScopes,placed(),depth+1);
     }

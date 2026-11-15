@@ -176,3 +176,11 @@ test('survey ranges separate project type, voltage and cold/warm, excluding fail
   }
   assert.throws(()=>summarizeSurvey([{projectType:'substation',report:{...report,status:'RUNNING'}}]),/completed/);
 });
+
+test('survey aligns both range endpoints when digit widths differ across rows',()=>{
+  const rows=['cold','warm'].map((cacheState,i)=>({projectType:'substation',sampleLabel:'110-test.gim',cacheState,status:'PASS',firstResponseMs:i?1000000:1000,firstGeometryMs:i?1000:1000000,allGeometryReadyMs:i?1250:1300000,settledMs:i?1100000:9000}));
+  const output=formatSurveySummary(summarizeSurvey([{projectType:'substation',report:{version:'gim-batch-results-v1',status:'COMPLETE',rows}}]));
+  const lines=output.split('\n').filter(line=>line.startsWith('|')&&/冷启动|暖启动/.test(line));
+  const positions=lines.map(line=>line.split('|').slice(1,-1).slice(3).map(cell=>cell.indexOf(' - ')));
+  assert.equal(positions.length,2);assert.deepEqual(positions[0],positions[1]);
+});

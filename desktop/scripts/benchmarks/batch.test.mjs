@@ -448,6 +448,9 @@ test('live HTML uses export aliases or explicit sample labels without traversing
     const label=profile.cases[0].sampleLabel??profile.cases[0].sampleId??profile.cases[0].inputId;
     assert.ok(html.includes(`<td class="">${label}</td>`));
     assert.doesNotMatch(html,/<th[^>]*>输入(?: ID)?<\/th>/);
+    assert.ok(html.includes('<th scope="col" class="number">自动表示 s</th>'));
+    assert.ok(html.includes('<th scope="col" class="number">进程峰值中位 GiB</th>'));
+    assert.match(html,/th\.number,td\.number\{[^}]*text-align:right/);
     for(const value of ['1.234','2.345','3.456','4.567'])assert.ok(html.includes(`<td class="number">${value}</td>`));
     assert.match(html,/来源引用未解析/);assert.match(html,/其他未验证文本已隐藏/);
     assert.doesNotMatch(html,/private-input|private-sample|private-sha|C:\/private|private-reason/);

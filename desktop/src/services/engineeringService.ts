@@ -1,6 +1,6 @@
 import {sourceGeometryCacheEntry,decodeSourceGeometryCache} from './sourceGeometryCache.js';
 import type { AppState, ProjectLoadSession } from '../app/state.js';
-import {isByteFile,copyByteFileBytes} from '@desktop/byteFile.js';
+import {readEngineeringSourceInput} from './engineeringSourceInput.js';
 import {ENGINEERING_SOURCE_BATCH_BYTES,ENGINEERING_SOURCE_BATCH_FILES} from './engineeringWorkerProtocol.js';
 import type { SubstationSpatialIndex } from '../gim/ifcSpatialParser.js';
 import { engineeringCacheEntry, engineeringSourceCacheMatchesFiles, type EngineeringCacheIdentity } from './engineeringCacheCodec.js';
@@ -63,7 +63,6 @@ export async function ensureEngineeringEvidence(state:AppState,range:EvidenceRan
   }
   return result;
 }
-const semanticPath = (path: string) => /\.(?:cbm|dev|fam)$/i.test(path);
 export const ENGINEERING_PARSER_CONTRACT = `${SUBSTATION_PARSER_DOMAIN_VERSION}|${SUBSTATION_SPATIAL_SEMANTIC_VERSION}`;
 
 export interface EngineeringBuildOptions {
@@ -266,46 +265,25 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
   const run = async () => {
     const initialized=client.init(session.sourceSha256 || `session:${session.generation}`, [...files.keys()]).then(()=>job.resolveEvidence());
     void initialized.catch(()=>{});
-    const prepareEntries = async(entries:Array<[string,File]>) => {
-    // Bounded source batches; native lazy reads use the existing binary batch IPC.
-    for (let offset = 0; offset < entries.length;) {
-      if (!current(state, job)) return;
-      const chunk: Array<[string, File]> = []; let bytes = 0;
-      while (offset < entries.length && chunk.length < ENGINEERING_SOURCE_BATCH_FILES) {
-        const entry=entries[offset],size=entry[1].size||0;
-        if(chunk.length&&bytes+size>ENGINEERING_SOURCE_BATCH_BYTES)break;
-        offset++;chunk.push(entry);bytes+=size;
-      }
-      const lazy = chunk.filter(([, file]) => !(file instanceof Blob)&&!isByteFile(file));
-      let batch: Map<string, Uint8Array | null> | undefined;
-      if (lazy.length && job.identity) {
-        const { batchReadCachedFiles } = await import('@desktop/database.js');
-        batch = await batchReadCachedFiles(session.projectId!, lazy.map(([path]) => path));
-      }
-      const parts:BlobPart[]=[],ranges:Array<{path:string;offset:number;length:number}>=[];let packedBytes=0;
-      for (const [path, file] of chunk) {
-        let part:Blob|Uint8Array<ArrayBuffer>;
-        if(isByteFile(file))part=copyByteFileBytes(file)!;
-        else if (file instanceof Blob) part=file;
-        else {
-          const lazyFile = file as unknown as { arrayBuffer?: () => Promise<ArrayBuffer>; text(): Promise<string> };
-          const value = batch?.get(path);
-          part=value?(value.buffer instanceof ArrayBuffer?value as Uint8Array<ArrayBuffer>:value.slice()as Uint8Array<ArrayBuffer>):
-            typeof lazyFile.arrayBuffer==='function'?new Uint8Array(await lazyFile.arrayBuffer()):new TextEncoder().encode(await lazyFile.text());
+    const preparedPaths=new Set<string>();
+    const readInputs=async(paths:readonly string[])=>{
+      const wanted=paths.filter(path=>!preparedPaths.has(path));
+      const input=await readEngineeringSourceInput(files,wanted,session.projectId,()=>current(state,job));
+      for(const path of wanted)preparedPaths.add(path);
+      return input;
+    };
+    client.setSourceReader(readInputs);
+    const prepareEntries=async(entries:Array<[string,File]>)=>{
+      for(let offset=0;offset<entries.length;){
+        const paths:string[]=[];let bytes=0;
+        while(offset<entries.length&&paths.length<ENGINEERING_SOURCE_BATCH_FILES){
+          const [path,file]=entries[offset];if(paths.length&&bytes+file.size>ENGINEERING_SOURCE_BATCH_BYTES)break;
+          offset++;paths.push(path);bytes+=file.size;
         }
-        const length=part instanceof Blob?part.size:part.byteLength;
-        ranges.push({path,offset:packedBytes,length});parts.push(part);packedBytes+=length;
+        const input=await readInputs(paths);
+        for(const batch of input.batches){if(!current(state,job))return;await client.addPackedFiles(batch);}
+        if(input.files.length||input.errors.length){if(!current(state,job))return;await client.addFiles(input.files,input.errors);}
       }
-      if (!current(state, job)) return;
-      const blob=new Blob(parts);
-      // Unknown/underreported sizes retain the existing per-file path.
-      if(blob.size>ENGINEERING_SOURCE_BATCH_BYTES){
-        for(const entry of ranges){
-          if(!current(state,job))return;
-          await client.addFiles([{path:entry.path,blob:blob.slice(entry.offset,entry.offset+entry.length)}]);
-        }
-      }else await client.addPackedFiles({blob,entries:ranges});
-    }
     };
     let physical:SourceGeometryOccurrenceCatalog|undefined;
     if(job.identity){
@@ -314,10 +292,10 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
       }catch{/* Rebuild only the small physical directory; semantic caches are independent. */}
     }
     if(!current(state,job))return;
-    let prepared=false;
+    let physicalRebuilt=false;
     if(!physical){
       await initialized;
-      await prepareEntries([...files].filter(([path])=>/\.(?:cbm|dev)$/i.test(path)));prepared=true;
+      physicalRebuilt=true;
       if(!current(state,job))return;
       try{physical=await client.extractGeometry(!!job.identity);}catch(error){
         if(!current(state,job))return;
@@ -328,7 +306,7 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
     if(physical){
       state.sourceGeometryCatalog=physical;resolveGeometry(physical);update();
       perfMark('来源物理目录就绪',{occurrences:physical.occurrences.length,diagnostics:physical.diagnostics.length});
-      if(job.identity&&prepared&&!physical.diagnostics.some(d=>d.reason==='source-read-failed')){
+      if(job.identity&&physicalRebuilt&&!physical.diagnostics.some(d=>d.reason==='source-read-failed')){
         // Cache persistence is a background publication, never a render prerequisite.
         state.sourceGeometryCachePending=true;
         void (async()=>{
@@ -358,7 +336,6 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
       if (!current(state, job)) return;
       if (reads[0].status === 'fulfilled') {
         try {
-          prepared=false;
           const result = await client.restore(reads[0].value, reads[1].status === 'fulfilled' ? reads[1].value : undefined, job.identity, reads[2].status === 'fulfilled' ? reads[2].value : undefined);
           if (!current(state, job)) return;
           if (!result.sources.complete || !engineeringSourceCacheMatchesFiles(result.sources, files.keys())) {
@@ -379,9 +356,11 @@ export function beginEngineeringBuild(state: AppState, files: Map<string, File>,
       }
       state.engineeringCacheStatus = 'miss'; update();
     }
-    if(!prepared)await prepareEntries([...files].filter(([path])=>semanticPath(path)&&! /\.fam$/i.test(path)));
     const graph = await client.extract();
     if (!current(state, job)) return;
+    // Raw CBM/DEV demand is finished. Do not retain the initial source map
+    // through an otherwise idle checkpoint client for the entire session.
+    client.setSourceReader();
     const familyPaths=new Set(graph.familyPaths??[...files.keys()].filter(path=>/\.fam$/i.test(path)));
     await prepareEntries([...files].filter(([path])=>familyPaths.has(path)));
     if (!current(state, job)) return;

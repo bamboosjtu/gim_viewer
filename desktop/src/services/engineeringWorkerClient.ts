@@ -2,6 +2,7 @@ import measuredWorkerAsset from './engineeringWorker.ts?worker&url';
 import { createMeasuredWorker, drainMeasuredWorker, measurementWorkerUrl } from '../measurement/hostWorker.js';
 import { WorkerRequests } from './workerRequests.js';
 import type {EngineeringSourceBatch} from './engineeringWorkerProtocol.js';
+import type {EngineeringSourceInput} from './engineeringWorkerProtocol.js';
 import type { IfcSpatialObject, IfcSpatialNode, SpatialModelSummary } from '../gim/ifcSpatialParser.js';
 import type { EngineeringCacheIdentity } from './engineeringCacheCodec.js';
 import type { EngineeringBuildResult, EngineeringCacheDomain, EngineeringCacheResult, EngineeringEvidenceCheckpoint, EngineeringExtractSummary, EngineeringWorkerCommand, EngineeringWorkerRequest, EngineeringWorkerResponse } from './engineeringWorkerProtocol.js';
@@ -34,6 +35,8 @@ export class EngineeringWorkerClient {
   private parking?:Promise<void>;
   private resuming?:Promise<void>;
   private idleTimer?:ReturnType<typeof setTimeout>;
+  private sourceReader?: (paths:readonly string[])=>Promise<EngineeringSourceInput>;
+  setSourceReader(read?: (paths:readonly string[])=>Promise<EngineeringSourceInput>):void{this.sourceReader=read;}
   constructor(port: EngineeringWorkerPort, private readonly isCurrent: () => boolean,
     private readonly signal?: AbortSignal, private readonly onProgress?:(stage:string,completed:number)=>void,
     private readonly restart?:()=>EngineeringWorkerPort) {
@@ -47,6 +50,17 @@ export class EngineeringWorkerClient {
       if(this.port!==port)return;
       if (!this.isCurrent() || this.signal?.aborted) { this.close(); return; }
       const response = event.data;
+      if(response.type==='read-sources'){
+        this.pending.touch(response.requestId);
+        const reply=async()=>{
+          try{
+            if(!this.sourceReader)throw Error('Source input reader unavailable');
+            const input=await this.sourceReader(response.paths);
+            if(this.port===port&&this.isCurrent()&&!this.closed)port.postMessage({type:'source-files',requestId:0,readId:response.readId,input});
+          }catch(error){if(this.port===port&&!this.closed)port.postMessage({type:'source-files',requestId:0,readId:response.readId,error:String(error)});}
+        };
+        void reply().catch(error=>this.close(error instanceof Error?error:Error(String(error))));return;
+      }
       if(response.type==='progress'){
         if(Number.isSafeInteger(response.completed)&&response.completed>0&&this.pending.touch(response.requestId))
           this.onProgress?.(response.stage,response.completed);
@@ -68,6 +82,7 @@ export class EngineeringWorkerClient {
   close(error: Error = new DOMException('Engineering build cancelled', 'AbortError')): void {
     if (this.closed) return;
     this.closed = true; this.signal?.removeEventListener('abort', this.abort);
+    this.sourceReader=undefined;
     clearTimeout(this.idleTimer);this.checkpoint=undefined;this.metadataEntries.clear();this.metadataCoverage.clear();this.stopPort();
     this.pending.rejectAll(error);
   }
@@ -145,10 +160,10 @@ export class EngineeringWorkerClient {
   }
   async ensureEvidence(range:EvidenceRange):Promise<EvidenceInventory>{checkEvidenceRange(range);const r=await this.request({type:'evidence-ensure',range});if(r.type!=='evidence'||!r.snapshot)throw Error('Evidence snapshot expected');return r.snapshot;}
   async readEvidenceEntry(path:string):Promise<Uint8Array>{const r=await this.request({type:'evidence-read',path});if(r.type!=='evidence'||!r.bytes)throw Error('Evidence bytes expected');return r.bytes;}
-  async releaseModel(buildId?:number):Promise<void>{await this.request({type:'release-model',buildId});await this.park();}
+  async releaseModel(buildId?:number):Promise<void>{await this.request({type:'release-model',buildId});this.sourceReader=undefined;await this.park();}
   async recognizeEvidence(identity?:EngineeringCacheIdentity):Promise<EngineeringBuildResult>{const r=await this.request({type:'recognize-evidence',identity});if(r.type!=='model')throw Error('Engineering model expected');return this.decodeModel(r.result);}
-  async addFiles(files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }>): Promise<void> {
-    await this.request({ type: 'files', files }, [...new Set(files.flatMap(f => f.bytes ? [f.bytes.buffer as ArrayBuffer] : []))]);
+  async addFiles(files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }>,errors?:Array<{path:string;message:string}>): Promise<void> {
+    await this.request({ type: 'files', files, errors }, [...new Set(files.flatMap(f => f.bytes ? [f.bytes.buffer as ArrayBuffer] : []))]);
   }
   async addPackedFiles(batch:EngineeringSourceBatch):Promise<void> {await this.request({type:'packed-files',batch});}
   async extractGeometry(retainForCache=false):Promise<SourceGeometryOccurrenceCatalog>{

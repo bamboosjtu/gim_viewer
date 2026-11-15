@@ -17,6 +17,9 @@ import { encodeEngineeringWorkerResultAsync, engineeringWorkerResultTransfers,ty
 import type {EvidenceStatus,EvidenceInventory} from '../engineering/evidence.js';
 import type {SourceGeometryOccurrenceCatalog} from '../gim/engineering/geometryOccurrences.js';
 import {encodeSourceGeometryCache} from './sourceGeometryCache.js';
+import {WorkerRequests} from './workerRequests.js';
+import type {EngineeringSourceInput} from './engineeringWorkerProtocol.js';
+import {ENGINEERING_SOURCE_BATCH_FILES} from './engineeringWorkerProtocol.js';
 
 export function markCacheFailure(result:Pick<EngineeringBuildResult,'cacheError'|'cacheDisabled'>,error:unknown):void{
   result.cacheError=String(error);
@@ -25,12 +28,39 @@ export function markCacheFailure(result:Pick<EngineeringBuildResult,'cacheError'
 
 /** Display and persistence have separate requests. Only the latest immutable
  * build is retained; one cache buffer is encoded and transferred at a time. */
-export function createEngineeringWorkerHandler(){
+export function createEngineeringWorkerHandler(loadSources?:(paths:string[])=>Promise<EngineeringSourceInput>){
   let scope='',paths:string[]=[],graph:EngineeringSourceGraph|null=null,sequence=0;
   let physicalCache:SourceGeometryOccurrenceCatalog|undefined;
   let latest:{result:EngineeringBuildResult;identity?:EngineeringCacheIdentity;digest?:string;plan:EngineeringCacheDomain[]}|undefined;
   const files=new Map<string,Blob|Uint8Array>();
   const batches=new EngineeringSourceBatches();
+  const sourceErrors=new Map<string,string>();
+  const pendingSources=new Map<string,{promise:Promise<void>;resolve:()=>void}>();
+  const sourceQueue:string[]=[];let sourceReads=0,sourceScheduled=false;
+  const installSources=(input:EngineeringSourceInput)=>{
+    for(const batch of input.batches){batches.add(batch);for(const entry of batch.entries)sourceErrors.delete(entry.path);}
+    for(const file of input.files){files.set(file.path,file.blob);sourceErrors.delete(file.path);}
+    for(const error of input.errors)sourceErrors.set(error.path,error.message);
+  };
+  const drainSources=()=>{
+    while(loadSources&&sourceReads<2&&sourceQueue.length){
+      const wanted=sourceQueue.splice(0,ENGINEERING_SOURCE_BATCH_FILES);sourceReads++;
+      void loadSources(wanted).then(installSources).catch(error=>{for(const path of wanted)sourceErrors.set(path,String(error));})
+        .finally(()=>{for(const path of wanted){pendingSources.get(path)?.resolve();pendingSources.delete(path);}sourceReads--;drainSources();});
+    }
+  };
+  const ensureSources=async(wanted:readonly string[],foreground=false)=>{
+    const waiting:Promise<void>[]=[];
+    for(const path of wanted){
+      if(files.has(path)||batches.has(path)||sourceErrors.has(path))continue;
+      let pending=pendingSources.get(path);
+      if(!pending){let resolve!:()=>void;const promise=new Promise<void>(r=>{resolve=r;});pending={promise,resolve};pendingSources.set(path,pending);if(foreground)sourceQueue.unshift(path);else sourceQueue.push(path);}
+      else if(foreground){const at=sourceQueue.indexOf(path);if(at>0){sourceQueue.splice(at,1);sourceQueue.unshift(path);}}
+      waiting.push(pending.promise);
+    }
+    if(!sourceScheduled){sourceScheduled=true;queueMicrotask(()=>{sourceScheduled=false;drainSources();});}
+    await Promise.all(waiting);
+  };
   let entryIndex:EntryIndex|undefined;
   let sourceTrace:WorkerTaskProbe=NOOP_TASK;
   let lastSourceYield=0;
@@ -47,6 +77,9 @@ export function createEngineeringWorkerHandler(){
   let indexedGraph:EngineeringSourceGraph|undefined,indexedRevision=-1;
   let parkTimer:ReturnType<typeof setTimeout>|undefined,activeEvidence=0;
   async function readFamily(path:string,trace:WorkerTaskProbe=NOOP_TASK):Promise<string>{
+    if(loadSources&&!batches.has(path)&&!files.has(path)&&/\.(cbm|dev)$/i.test(path))
+      await trace.measureObserved('engineering.source-request',()=>ensureSources([path],true));
+    if(sourceErrors.has(path))throw Error(sourceErrors.get(path));
     if(batches.has(path))return batches.read(path,trace);
     const source=files.get(path);if(!source)throw Error('Raw source unavailable: '+path);
     const bytes=source instanceof Uint8Array?source:await trace.measureObserved('engineering.source-read',()=>source.arrayBuffer());files.delete(path);
@@ -115,10 +148,11 @@ export function createEngineeringWorkerHandler(){
       provider().restoreMetadata(checkpoint.snapshot);return {type:'ready'};
     }
     if(request.type==='release-model'){if(request.buildId===undefined||latest?.result.buildId===request.buildId){latest=undefined;compact();}return {type:'ready'};}
-    if(request.type==='init'){scope=request.scope;paths=request.paths;physicalCache=undefined;entryIndex=undefined;documents.clear();files.clear();batches.clear();graph=null;latest=undefined;lastSources=undefined;
+    if(request.type==='init'){scope=request.scope;paths=request.paths;physicalCache=undefined;entryIndex=undefined;documents.clear();files.clear();batches.clear();sourceErrors.clear();graph=null;latest=undefined;lastSources=undefined;
       graphReferences=request.graphReferences===true;wireGraph={};
       if(parkTimer)clearTimeout(parkTimer);parked=undefined;parkedCoverage=[];parkedEntries.clear();evidence=undefined;indexedGraph=undefined;indexedRevision=-1;
       return {type:'ready'};}
+    if(request.type==='source-files')throw Error('Source replies must bypass the task queue');
     if(request.type==='evidence-snapshot')return {type:'evidence',snapshot:metadata(request.entryIds)};
     if(request.type==='evidence-query')return detail(()=>({type:'evidence' as const,page:provider().queryEvidence(request.query)}));
     if(request.type==='evidence-ensure')return detail(async()=>{const p=await resume();return {type:'evidence' as const,snapshot:await p.ensureEvidence(request.range)};});
@@ -133,16 +167,18 @@ export function createEngineeringWorkerHandler(){
       indexedGraph=lastSources.graph;indexedRevision=indexedGraph.revision??0;
       return publish(result,started,request.identity,undefined,request.identity&&lastSources.complete?result.stageErrors.recognition?['sources']:Object.keys(result.stageErrors).length?['sources','entities']:['sources','entities','navigation']:[]);
     });
-    if(request.type==='packed-files'){batches.add(request.batch);return {type:'ready'};}
+    if(request.type==='packed-files'){batches.add(request.batch);for(const entry of request.batch.entries)sourceErrors.delete(entry.path);return {type:'ready'};}
     if(request.type==='files'){
-      for(const source of request.files){if(!source.blob&&!source.bytes)throw Error(`Engineering source bytes missing: ${source.path}`);files.set(source.path,source.blob??source.bytes!);}
+      for(const source of request.files){if(!source.blob&&!source.bytes)throw Error(`Engineering source bytes missing: ${source.path}`);files.set(source.path,source.blob??source.bytes!);sourceErrors.delete(source.path);}
+      for(const error of request.errors??[])sourceErrors.set(error.path,error.message);
       return {type:'ready'};
     }
     if(request.type==='extract-geometry'){
       sourceTrace=trace;
       const catalog=await trace.measure('engineering.physical-index',()=>{
         entryIndex??=createEntryIndex([...paths].sort());
-        return extractPhysicalOccurrences({entryIndex,readDocument:path=>documents.read(path)},
+        return extractPhysicalOccurrences({entryIndex,readDocument:path=>documents.read(path),
+          prefetchDocuments:loadSources?paths=>{if(sourceQueue.length<ENGINEERING_SOURCE_BATCH_FILES*2)void ensureSources(paths.filter(path=>!documents.has(path))).catch(()=>{/* Demand reads report per-entry failures. */});}:undefined},
           {onProgress:count=>reportProgress('source-traverse',count)});
       });
       physicalCache=request.retainForCache&&!catalog.diagnostics.some(d=>d.reason==='source-read-failed')?catalog:undefined;
@@ -222,12 +258,17 @@ export function createEngineeringWorkerHandler(){
 }
 
 if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMessage==='function'){
-  const handle=createEngineeringWorkerHandler(),send=self.postMessage.bind(self) as (response:EngineeringWorkerResponse,transfer?:Transferable[])=>void;
+  const send=self.postMessage.bind(self) as (response:EngineeringWorkerResponse,transfer?:Transferable[])=>void;
+  const sourceRequests=new WorkerRequests<EngineeringSourceInput>();let sourceId=0,activeRequest=0;
+  const handle=createEngineeringWorkerHandler(paths=>{const readId=++sourceId;return sourceRequests.request(readId,()=>send({type:'read-sources',paths,readId,requestId:activeRequest}));});
   let chain=Promise.resolve();
   const probe=createWorkerProbe();
   self.onmessage=(event:MessageEvent<EngineeringWorkerRequest>)=>{
     if(probe.control(event))return;
-    chain=chain.then(async()=>{await probe.run(event, async trace=>{const request=event.data;try{
+    if(event.data.type==='source-files'){
+      sourceRequests.settle(event.data.readId,event.data.input,event.data.error?Error(event.data.error):undefined);return;
+    }
+    chain=chain.then(async()=>{await probe.run(event, async trace=>{const request=event.data;activeRequest=request.requestId;try{
       const reply=await handle(request, trace,(stage,completed)=>send({type:'progress',stage,completed,requestId:request.requestId})),response={...reply,requestId:request.requestId} as EngineeringWorkerResponse;
       const transfers=response.type==='model'?engineeringWorkerResultTransfers(response.result):response.type==='evidence-checkpoint'&&response.checkpoint?[response.checkpoint.bytes.buffer as ArrayBuffer]:response.type==='geometry-cache'&&response.bytes?[response.bytes.buffer as ArrayBuffer]:response.type==='cache'&&response.result.bytes?[response.result.bytes.buffer as ArrayBuffer]:[];
       trace.produced({ transferBuffers: transfers.length });

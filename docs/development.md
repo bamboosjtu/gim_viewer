@@ -128,3 +128,5 @@ Markdown 文档不作为 CI 测试输入；事实正确性仍需对照源码和�
 - [文档首页](README.md)：文档地图、写作约定与单一权威表。
 
 维护实体目录时只编辑 `research/实体识别/变电三维设计建模规范_索引表类.xlsx`；新增/修改名称的单元格标黄，再在 desktop/ 运行 `npm run generate:engineering-catalog`。该命令从工作簿生成主程序和独立工具的数据及目录文档，不读取 PDF、不启动工程样本或性能矩阵。
+
+仅核对来源按需输入的真实 Worker 协议时，可在 desktop/ 执行 `node scripts/with-workspace-temp.mjs scripts/engineering/check-worker-browser.mjs "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" 14358 source-input`。使用自有无头浏览器及内存 DTO，检查批量输入、物理/语义复用及测量控制消息，不读取工程样本或执行性能验收；结果在 output/log/source-input-browser.json。

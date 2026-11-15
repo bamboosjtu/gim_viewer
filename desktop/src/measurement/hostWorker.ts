@@ -17,7 +17,7 @@ const cancelTaskMeasurement=new WeakMap<Worker,(taskId:string,reason:LifecycleRe
 export function markMeasuredWorkerTaskCancellation(worker:Worker,taskId:string,reason:LifecycleReasonCode):void {
   cancelTaskMeasurement.get(worker)?.(taskId,reason);
 }
-const controls = new Set(['read-result', 'connection-consumed', 'consumed', 'cancel']);
+const controls = new Set(['read-result', 'source-files', 'connection-consumed', 'consumed', 'cancel']);
 /** Instruments real Workers without changing their application protocol or transfer lists. */
 export function measurementWorkerUrl(url:string,identity:string):string {
   if(!identity)return url;
@@ -132,6 +132,10 @@ export function createMeasuredWorker(family: WorkerFamily, construct: (identity:
       run.probe.trace(context,{type:'health',action:'clock-calibrated',calibration:{calibrationId:workerId+':cal-'+ ++calibrationSequence,
         clockId:message.clockId,referenceClockId:run.probe.clockId,...calibration,validFromLocalMs:message.receivedMs,validToLocalMs:message.sentMs+30000}});
       run.probe.event(context, { kind: 'worker', name: 'ready' });
+    } else if(message?.type==='read-sources'){
+      // Input demand belongs to the still-running extraction task, not a
+      // terminal result. The application reader handles this side channel.
+      return;
     } else {
       // Arrival is not scene consumption or cache publication.
       const declared=message?._gimMeasurementResult as TraceContext|undefined;

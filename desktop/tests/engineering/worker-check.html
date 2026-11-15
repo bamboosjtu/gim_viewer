@@ -22,9 +22,10 @@ globalThis.runEngineeringWorkerCheck = async () => {
   try {
     await client.init(scope,[...files.keys()]);
     await client.addFiles([...files].map(([path,blob])=>({path,blob})));
+    const physical=await client.extractGeometry();
     const graph=await client.extract();check(graph.sourceRecords===3,'actual Worker source extraction summary');
     check(!('records' in graph),'extraction does not clone the full graph into the Window');
-    check(client.geometryOccurrences?.occurrences.length===1,'independent physical occurrence contract');
+    check(physical.occurrences.length===1,'independent physical occurrence contract');
     const result=await client.assemble([],[],identity);
     check(result.sources.complete&&result.snapshot.entities.length===1,'transformer includes its embedded terminal box');
     check(result.snapshot.memberships.length===3,'source conservation');
@@ -100,5 +101,34 @@ globalThis.runEngineeringWorkerCheck = async () => {
   fixture.remove();
   return {passed:true,scope:'functional fixture; excludes native IPC, real samples, geometry and performance acceptance',userAgent:navigator.userAgent,
     checks:['source graph','physical occurrence contract','whole boundary','source conservation','cache transport','idle evidence checkpoint/query/restore','warm restore','navigation projection/cache','entity-only repair','shared binary buffer','Worker abort','production service','browser whole search/source round trip','Spatial cache Worker encoding']};
+};
+
+globalThis.runEngineeringSourceInputCheck=async()=>{
+  const {readEngineeringSourceInput}=await import('../../src/services/engineeringSourceInput.ts');
+  const {resetMeasurementRun,measurementSnapshot}=await import('../../src/measurement/runtime.ts');
+  const {drainMeasuredWorker}=await import('../../src/measurement/hostWorker.ts');
+  globalThis.__GIM_MEASUREMENT_CONFIG__={mode:'benchmark'};resetMeasurementRun({});
+  const files=new Map([
+    ['project.cbm',new File(['OBJECTMODELPOINTER=main.dev\nSUBSYSTEM0=empty.cbm'],'project.cbm')],
+    ['empty.cbm',new File(['ENTITYNAME=Drawing'],'empty.cbm')],
+    ['main.dev',new File(['TYPE=GIS\nSUBDEVICE0=part.dev'],'main.dev')],
+    ['part.dev',new File(['TYPE=Body'],'part.dev')],
+    ['unrelated.dev',new File(['TYPE=Unknown'],'unrelated.dev')],
+  ]);
+  const calls=[],client=EngineeringWorkerClient.create(()=>true);
+  client.setSourceReader(async paths=>{calls.push(...paths);return readEngineeringSourceInput(files,paths,null,()=>true);});
+  try{
+    await client.init('browser-source-input',[...files.keys()]);
+    const physical=await client.extractGeometry(true);
+    if(physical.occurrences.length!==1)throw Error('physical directory did not publish');
+    if(!(await client.encodeGeometryCache())?.length)throw Error('physical cache encoding failed');
+    await client.extract();const model=await client.assemble([],[]);
+    if(model.snapshot.entities.length!==1||model.snapshot.memberships.length!==2)throw Error('semantic identity changed');
+    if(calls.includes('unrelated.dev')||new Set(calls).size!==calls.length)throw Error('unrelated or duplicate source input');
+    await drainMeasuredWorker(client.port);
+    const measurement=measurementSnapshot();
+    if(measurement.activeTasks.length||!measurement.lifecycleComplete)throw Error('source side channel left an incomplete task');
+    return {passed:true,checks:['actual Worker source-demand/reply','Blob batch transport','physical publication before semantics','physical cache transfer','source conservation','no duplicate/unrelated entry reads','measured source replies are control messages'],entries:calls,scope:'Source DTO contract only; no project samples or performance run'};
+  }finally{client.close();delete globalThis.__GIM_MEASUREMENT_CONFIG__;resetMeasurementRun({});}
 };
 </script>

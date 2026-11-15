@@ -11,6 +11,7 @@ export async function hydrateSubstationGeometryGraph(
   devPaths: readonly string[],
   readFiles: (paths: string[]) => Promise<ReadonlyMap<string, File>>,
   inventory: Iterable<string> | EntryResolver,
+  references?: Map<string,Promise<readonly string[]>>,
 ): Promise<Map<string, File>> {
   const files = new Map<string, File>();
   const seen = new Set<string>();
@@ -35,14 +36,20 @@ export async function hydrateSubstationGeometryGraph(
     for (const { path, depth } of batch) {
       const file = getFileByPath(loaded, path);
       if (!file) continue;
+      if(!/\.(dev|phm)$/i.test(path))continue;
       try {
-        let targets: string[] = [];
-        if (/\.dev$/i.test(path)) {
-          const doc = parseDev(await file.text(), path);
-          targets = [...doc.solidModels.map((s) => s.solidModelPath), ...doc.subDevices.map((s) => s.devPath)];
-        } else if (/\.phm$/i.test(path)) {
-          targets = parsePhm(await file.text(), path).solidModels.map((s) => s.solidModelPath);
+        let pendingTargets=references?.get(path);
+        if(!pendingTargets){
+          pendingTargets=(async()=>{
+            if(/\.dev$/i.test(path)){
+              const doc=parseDev(await file.text(),path);
+              return [...doc.solidModels.map(s=>s.solidModelPath),...doc.subDevices.map(s=>s.devPath)];
+            }
+            return /\.phm$/i.test(path)?parsePhm(await file.text(),path).solidModels.map(s=>s.solidModelPath):[];
+          })();
+          if(/\.(dev|phm)$/i.test(path))references?.set(path,pendingTargets);
         }
+        const targets=await pendingTargets;
         for (const target of targets) {
           if (/\.(dev|phm|mod|stl|gl)$/i.test(target)) pending.push({ path: resolve(target, path) ?? target, depth: depth + 1 });
         }

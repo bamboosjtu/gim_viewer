@@ -74,6 +74,14 @@ export function formatSurveySummary(summary){
   for(const [type,table] of tables){
     const headers=[...(table.substation?['电压等级']:[]),'启动','有效/总数',...metrics.map(([,label])=>label)];
     const firstNumberColumn=table.substation?2:1;
+    // Align the minimum and maximum independently; padding the whole range
+    // makes the separator drift when one maximum has more integer digits.
+    for(let column=firstNumberColumn+1;column<headers.length;column++){
+      const pairs=table.rows.map(row=>row[column].split(' - '));
+      const left=Math.max(...pairs.map(pair=>pair.length===2?pair[0].length:0));
+      const right=Math.max(...pairs.map(pair=>pair.length===2?pair[1].length:0));
+      table.rows.forEach((row,index)=>{const pair=pairs[index];if(pair.length===2)row[column]=pair[0].padStart(left)+' - '+pair[1].padStart(right);});
+    }
     lines.push('',type,'',terminalTable(headers,table.rows,headers.map((_,index)=>index).filter(index=>index>=firstNumberColumn)));
   }
   lines.push('','时间范围仅使用 PASS/PARTIAL 项的已有观测；缺失值显示 -，不填零。',

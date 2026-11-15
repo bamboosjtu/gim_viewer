@@ -28,6 +28,28 @@ function fixture() {
   return { runtime, internal: runtime as any, status };
 }
 
+it('streams cached catalog rows before later prefetch batches complete',async()=>{
+  const {internal,runtime}=fixture();
+  const scene=new THREE.Scene(),entries=Array.from({length:130},(_,i)=>({id:'root-'+i,sourceId:'root-'+i,sourceContextId:'scope',devPath:`p${i}.dev`,name:'object',placementMatrix:new THREE.Matrix4().toArray()}));
+  internal.state.currentFiles=new Map(entries.map(row=>[row.devPath,new File(['TYPE=Unknown'],row.devPath)]));
+  internal.state.sourceGeometryCatalog={occurrences:entries,diagnostics:[]};
+  internal.ctx.world={scene:{three:scene},camera:{three:new THREE.PerspectiveCamera(),controls:{addEventListener:vi.fn(),removeEventListener:vi.fn()}}};
+  internal.update=vi.fn();internal.schedule=vi.fn();internal.requestReady=vi.fn();internal.notifyCoordinateAnchor=vi.fn();
+  const worker=await import('../devGeometryWorkerClient.js'),cache=await import('@desktop/devLodCache.js'),presentation=await import('../presentationPort.js');
+  const create=vi.spyOn(worker,'createDevGeometryPreprocessor').mockReturnValue(createDevWorkerMock() as never);
+  const show=vi.spyOn(presentation,'loadPresentation').mockResolvedValue({refreshDeviceBoundsMarkers:()=>{}} as never);
+  let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let batch=0;
+  const read=vi.spyOn(cache,'readDevArtifactBatch').mockImplementation(async(_domain,keys)=>{
+    if(++batch===2)await held;
+    return new Map(keys.map(key=>[key,{status:'hit' as const,value:{devPath:key.split('|').pop()!,sourceBounds:[0,0,0,1,1,1],boundsQuality:'conservative',primitiveCounts:{},unsupportedTypes:[]} as never}]));
+  });
+  let done=false;const started=runtime.start().then(()=>{done=true;});
+  try{
+    await expect.poll(()=>internal.rows.get('root-0')?.catalogResolved).toBe(true);
+    expect(done).toBe(false);expect(internal.rows.get('root-65')?.catalogResolved).toBe(false);
+  }finally{release();await started;create.mockRestore();read.mockRestore();show.mockRestore();}
+});
+
 it('isolates all engineering member roots and restores ordinary equipment selection',()=>{
   const {runtime,internal}=fixture();const a=new THREE.Group(),b=new THREE.Group(),c=new THREE.Group();
   internal.rows=new Map([['a',{entry:{rootOccurrence:'a'},group:a}],['b',{entry:{rootOccurrence:'b'},group:b}],['c',{entry:{rootOccurrence:'c'},group:c}]]);
@@ -196,8 +218,8 @@ it.each([false, true])('batches reachable lazy sources for a cache miss (cold=%s
     await internal.prepareMissingTemplateSources('DEV/a.dev');
     await internal.prepareMissingTemplateSources('DEV/a.dev');
     expect(read.mock.calls.map(args=>args[1])).toEqual([['DEV/a.dev'],['PHM/a.phm'],['MOD/a.mod']]);
-    expect(internal.worker.installSources).toHaveBeenCalledOnce();
-    expect([...internal.worker.installSources.mock.calls[0][0].keys()]).toEqual(['DEV/a.dev','PHM/a.phm','MOD/a.mod']);
+    expect(internal.worker.installSources).toHaveBeenCalledTimes(3);
+    expect(internal.worker.installSources.mock.calls.flatMap(([files]:[Map<string,File>])=>[...files.keys()])).toEqual(['DEV/a.dev','PHM/a.phm','MOD/a.mod']);
     await internal.prepareMissingTemplateSources('DEV/b.dev');
     expect(read.mock.calls.map(args=>args[1])).toEqual([['DEV/a.dev'],['PHM/a.phm'],['MOD/a.mod'],['DEV/b.dev']]);
     expect(scans).toHaveBeenCalledOnce();

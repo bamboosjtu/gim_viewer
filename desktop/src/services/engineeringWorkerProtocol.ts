@@ -19,6 +19,11 @@ export interface EngineeringSourceBatch {
   blob: Blob;
   entries: Array<{path:string;offset:number;length:number}>;
 }
+export interface EngineeringSourceInput {
+  batches:EngineeringSourceBatch[];
+  files:Array<{path:string;blob:Blob}>;
+  errors:Array<{path:string;message:string}>;
+}
 export type EngineeringCacheDomain = 'sources' | 'entities' | 'navigation';
 export interface EngineeringCacheResult {
   buildId: number;
@@ -47,8 +52,9 @@ export interface EngineeringBuildResult {
 }
 export type EngineeringWorkerCommand =
   | { type: 'init'; scope: string; paths: string[];graphReferences?:boolean }
-  | { type: 'files'; files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }> }
+  | { type: 'files'; files: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }>;errors?:Array<{path:string;message:string}> }
   | { type: 'packed-files'; batch: EngineeringSourceBatch }
+  | { type:'source-files';readId:number;input?:EngineeringSourceInput;error?:string }
   | { type: 'extract-geometry'; retainForCache?:boolean }
   | { type: 'encode-geometry-cache' }
   | { type: 'extract' }
@@ -69,6 +75,7 @@ export type EngineeringWorkerReply =
   | {type:'evidence';snapshot?:EvidenceInventory;page?:EvidencePage;bytes?:Uint8Array}
   | { type: 'ready' }
   | { type: 'progress'; stage: 'source-index'|'source-traverse'|'source-sort'; completed: number }
+  | { type:'read-sources';readId:number;paths:string[] }
   | { type:'geometry';catalog:SourceGeometryOccurrenceCatalog }
   | { type:'geometry-cache';bytes?:Uint8Array }
   | { type: 'graph'; summary: EngineeringExtractSummary }

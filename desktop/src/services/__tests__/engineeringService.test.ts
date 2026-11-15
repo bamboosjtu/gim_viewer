@@ -8,7 +8,8 @@ import { buildSubstationSpatialIndexFromTexts } from '../../gim/ifcSpatialParser
 import { beginEngineeringBuild, notifyEngineeringIfcEvidence,getEngineeringEvidenceSnapshot,queryEngineeringEvidence,ensureEngineeringEvidence } from '../engineeringService.js';
 import { EngineeringWorkerClient, type EngineeringWorkerPort } from '../engineeringWorkerClient.js';
 import { createEngineeringWorkerHandler } from '../engineeringWorker.js';
-import type { EngineeringWorkerRequest, EngineeringWorkerResponse } from '../engineeringWorkerProtocol.js';
+import type { EngineeringWorkerRequest, EngineeringWorkerResponse,EngineeringSourceInput } from '../engineeringWorkerProtocol.js';
+import {WorkerRequests} from '../workerRequests.js';
 import { readCachedEntry, writeCacheFile, batchReadCachedFiles } from '@desktop/database.js';
 import {createByteFile} from '@desktop/byteFile.js';
 import{createSpatialSemanticStarter}from'../spatialSemanticStarter.js';
@@ -31,9 +32,21 @@ class LoopbackPort implements EngineeringWorkerPort {
   holdCache = false;
   resumeCache: (()=>void)|null=null;
   resumeAssembly: (() => void) | null = null;
-  private handle = createEngineeringWorkerHandler();
+  private sourceSequence=0;
+  private activeRequest=0;
+  private sourceRequests=new WorkerRequests<EngineeringSourceInput>();
+  sourceInputs:EngineeringSourceInput[]=[];
+  private handle = createEngineeringWorkerHandler(paths=>{
+    const readId=++this.sourceSequence;
+    return this.sourceRequests.request(readId,()=>this.onmessage?.({data:{type:'read-sources',requestId:this.activeRequest,readId,paths}} as MessageEvent<EngineeringWorkerResponse>));
+  });
   postMessage(request: EngineeringWorkerRequest): void {
     this.commands.push(request.type);
+    if(request.type==='source-files'){
+      if(request.input)this.sourceInputs.push(request.input);
+      this.sourceRequests.settle(request.readId,request.input,request.error?Error(request.error):undefined);return;
+    }
+    this.activeRequest=request.requestId;
     void (async () => {
       if (this.holdExtract && request.type === 'extract') await new Promise<void>(resolve => { this.resume = resolve; });
       if (this.holdAssemble && request.type === 'assemble') await new Promise<void>(resolve => { this.resumeAssembly = resolve; });
@@ -70,6 +83,19 @@ beforeEach(() => {
 });
 
 describe('session-owned production engineering build', () => {
+  it('reads only reachable physical documents once before and after semantic extraction',async()=>{
+    const app=state(),port=new LoopbackPort(),files=sourceFiles();port.holdExtract=true;
+    for(const name of ['unrelated.cbm','unrelated.dev'])files.set(name,new File(['UNUSED=1'],name));
+    const sent=()=>port.sourceInputs.flatMap(input=>input.batches.flatMap(batch=>batch.entries.map(e=>e.path)));
+    const build=beginEngineeringBuild(app,files,{createWorker:portFactory(port)});
+    try{
+      await app.sourceGeometryReady;
+      expect(sent()).not.toContain('unrelated.cbm');expect(sent()).not.toContain('unrelated.dev');
+      await expect.poll(()=>port.resume!==null).toBe(true);
+    }finally{port.resume?.();}
+    await build;
+    expect(sent().sort()).toEqual(['project.cbm','terminal.dev','unit.dev']);
+  });
   it('keeps physical cache persistence outside automatic geometry settlement',async()=>{
     const app=state(),port=new LoopbackPort();app.currentProjectType='substation';
     app.deviceLodRuntime={diagnostics:{baseRepresentationsSettled:true,cacheWritesSettled:true,pending:0,viewPendingOccurrences:0}} as never;
@@ -118,8 +144,9 @@ describe('session-owned production engineering build', () => {
   it('falls back to per-file input when declared sizes underestimate a multi-file batch',async()=>{
     const app=state(),port=new LoopbackPort(),files=sourceFiles();
     const large=new Uint8Array(5*1024*1024);large.fill(32);
+    files.set('unit.dev',new File(['SUBDEVICE0=unused-a.dev\nSUBDEVICE1=unused-b.dev'],'unit.dev'));
     for(const name of ['unused-a.dev','unused-b.dev'])files.set(name,{size:0,arrayBuffer:async()=>large.buffer}as File);
-    await beginEngineeringBuild(app,files,{createWorker:portFactory(port)});expect(app.engineeringStatus).toBe('ready');expect(port.commands).toContain('files');
+    await beginEngineeringBuild(app,files,{createWorker:portFactory(port)});expect(app.engineeringStatus).toBe('ready');expect(port.sourceInputs.some(input=>input.files.length===2)).toBe(true);
   });
   it('publishes the geometry catalog before joining IFC source semantics and assembles the full model once',async()=>{
     const app=state(),port=new LoopbackPort();let release!:()=>void;
@@ -170,7 +197,7 @@ describe('session-owned production engineering build', () => {
     const prepared=new Map(await Promise.all([...files].map(async([path,file])=>[path,createByteFile(new Uint8Array(await file.arrayBuffer()),file.name)]as const)));
     const app=state(),port=new LoopbackPort();
     await beginEngineeringBuild(app,prepared,{createWorker:portFactory(port)});
-    expect(port.commands).toContain('extract');expect(port.commands).toContain('packed-files');expect(port.commands).not.toContain('files');expect(app.engineeringStatus).toBe('ready');
+    expect(port.commands).toContain('extract');expect(port.commands).toContain('source-files');expect(port.commands).not.toContain('files');expect(app.engineeringStatus).toBe('ready');
     expect(app.engineeringSnapshot).toEqual(reference.engineeringSnapshot);
     expect(app.sourceGeometryCatalog).toEqual(reference.sourceGeometryCatalog);
     expect(batchReadCachedFiles).not.toHaveBeenCalled();
